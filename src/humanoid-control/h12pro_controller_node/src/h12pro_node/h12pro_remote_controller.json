@@ -129,6 +129,65 @@
       "walk":["E_MIDDLE", "F_MIDDLE", "A_PRESS"],
       "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
       "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
+      "toggle_head_control":["E_MIDDLE", "F_RIGHT", "B_PRESS"],
+      "arm_pose1":["E_RIGHT", "F_LEFT", "A_PRESS"],
+      "arm_pose2":["E_RIGHT", "F_LEFT", "B_PRESS"],
+      "arm_pose3":["E_RIGHT", "F_LEFT", "C_PRESS"],
+      "arm_pose4":["E_RIGHT", "F_LEFT", "D_PRESS"],
+      "customize_action_RR_A":["E_RIGHT", "F_RIGHT", "A_PRESS"],
+      "customize_action_RR_B":["E_RIGHT", "F_RIGHT", "B_PRESS"],
+      "customize_action_RR_C":["E_RIGHT", "F_RIGHT", "C_PRESS"],
+      "customize_action_RR_D":["E_RIGHT", "F_RIGHT", "D_PRESS"],
+      "customize_action_LL_A":["E_LEFT", "F_LEFT", "A_PRESS"],
+      "customize_action_LL_B":["E_LEFT", "F_LEFT", "B_PRESS"],
+      "customize_action_LL_C":["E_LEFT", "F_LEFT", "C_PRESS"],
+      "customize_action_LL_D":["E_LEFT", "F_LEFT", "D_PRESS"],
+      "start_vr_remote_control":["A_LONG_PRESS"],
+      "start_stair_detect":["C_LONG_PRESS"],
+      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
+    },
+    "walk":{
+      "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
+      "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
+      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
+    },
+    "trot":{
+      "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
+      "walk":["E_MIDDLE", "F_MIDDLE", "A_PRESS"],
+      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
+    },
+    "vr_remote_control":{
+      "stop_vr_remote_control":["B_LONG_PRESS"],
+      "record_vr_rosbag":["C_PRESS"],
+      "stop_record_vr_rosbag":["D_PRESS"],
+      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
+    },
+    "climb_stair":{
+      "stair_climb":["A_PRESS"],
+      "stop_stair_detect":["B_PRESS"],
+      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
+    }
+  },
+  "rl_robot_state_transition_keycombination":{
+    "initial":{
+      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"],
+      "calibrate":["E_LEFT","F_RIGHT","D_PRESS"]
+    },
+    "calibrate":{
+      "cali_to_ready_stance":["E_LEFT","F_RIGHT","C_PRESS"],
+      "stop": ["C_LONG_PRESS", "D_LONG_PRESS"]
+    },
+    "ready_stance":{
+      "ready_stance":["E_LEFT","F_RIGHT","C_PRESS"],
+      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
+    },
+    "rl_control":{
+      "rl_control":["E_MIDDLE", "F_MIDDLE", "C_PRESS"],
+      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
+    },
+    "stance":{
+      "walk":["E_MIDDLE", "F_MIDDLE", "A_PRESS"],
+      "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
       "arm_pose1":["E_RIGHT", "F_LEFT", "A_PRESS"],
       "arm_pose2":["E_RIGHT", "F_LEFT", "B_PRESS"],
       "arm_pose3":["E_RIGHT", "F_LEFT", "C_PRESS"],
@@ -146,12 +205,6 @@
     },
     "walk":{
       "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
-      "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
-      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
-    },
-    "trot":{
-      "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
-      "walk":["E_MIDDLE", "F_MIDDLE", "A_PRESS"],
       "stop":["C_LONG_PRESS","D_LONG_PRESS"]
     },
     "vr_remote_control":{

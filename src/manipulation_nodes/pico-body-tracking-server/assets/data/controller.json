@@ -1,0 +1,30 @@
+{
+  "dataType": "controller",
+  "controllers": {
+    "left": {
+      "primaryButton": false,
+      "secondaryButton": false,
+      "gripButton": false,
+      "triggerButton": false,
+      "gripValue": 0.0,
+      "triggerValue": 0.0,
+      "thumbstick": [
+        0.0,
+        0.0
+      ]
+    },
+    "right": {
+      "primaryButton": false,
+      "secondaryButton": false,
+      "gripButton": false,
+      "triggerButton": false,
+      "gripValue": 0.0,
+      "triggerValue": 0.0,
+      "thumbstick": [
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "timestamp": 71.63542
+}

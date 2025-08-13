@@ -1,6 +1,6 @@
 #ifndef _DEXHAND_TOUCH_CONTROLLER_H_
 #define _DEXHAND_TOUCH_CONTROLLER_H_
-#include "touch_dexhand.h"
+#include "dexhand_base.h"
 #include "dexhand_def.h"
 
 #include <memory>
@@ -19,24 +19,19 @@ using UnsignedDualHandsArray = std::array<UnsignedFingerArray, 2>;
 using FingerStatusPtrArray = std::array<FingerStatusPtr, 2>;
 using FingerTouchStatusPtrArray = std::array<FingerTouchStatusPtr, 2>;
 
-// open dual hand positions
-const UnsignedDualHandsArray kDualHandOpenPositions = {kOpenFingerPositions, kOpenFingerPositions};
-// close dual hand positions
-const UnsignedDualHandsArray kDualHandClosePositions = {kCloseFingerPositions, kCloseFingerPositions};     
-
 /**
  * @brief 触觉灵巧手控制器
  * 
  */
-class TouchDexhandContrller;
-using TouchDexhandContrllerPtr = std::unique_ptr<TouchDexhandContrller>;
-class TouchDexhandContrller {
+class DexhandController;
+using TouchDexhandControllerPtr = std::unique_ptr<DexhandController>;
+class DexhandController {
 public:    
-    static TouchDexhandContrllerPtr Create(const std::string &action_sequences_path) {
-        return std::unique_ptr<TouchDexhandContrller>(new TouchDexhandContrller(action_sequences_path));
+    static TouchDexhandControllerPtr Create(const std::string &action_sequences_path, bool is_touch_dexhand) {
+        return std::unique_ptr<DexhandController>(new DexhandController(action_sequences_path, is_touch_dexhand));
     }
 
-    ~TouchDexhandContrller();
+    ~DexhandController();
 
     /**
      * @brief Initialize the controller
@@ -177,14 +172,31 @@ public:
      * @return true if a gesture is currently executing, false otherwise
      */
     bool is_gesture_executing();
-private:
-    TouchDexhandContrller(const std::string &action_sequences_path);
-    TouchDexhandContrller(TouchDexhandContrller&&) = delete;
-    TouchDexhandContrller(const TouchDexhandContrller&) = delete;
 
-    void control_loop();
-    void work_loop();
+private:
+    DexhandController(const std::string &action_sequences_path, bool is_touch_dexhand);
+    DexhandController(DexhandController&&) = delete;
+    DexhandController(const DexhandController&) = delete;
+
+    bool init_touch_dexhand();
+    bool init_normal_dexhand();
+
+    /**
+     * @brief 解析手势配置文件
+     * 
+     * @param gesture_file_path 手势配置文件路径
+     * @param gesture_infos 输出的手势信息列表
+     * @return true 解析成功
+     * @return false 解析失败
+     */
+    bool ParseActionSequenceFile(const std::string & gesture_file_path, std::vector<GestureInfoPtr> &gesture_infos);
+
+    void control_thread_func();
+    void gesture_thread_func();
+    bool sleep_for_100ms(int ms_count);
+
     /* data */
+    bool is_touch_dexhand_{false};
     std::atomic<bool> l_position_updated_{false};
     std::atomic<bool> r_position_updated_{false};
     UnsignedFingerArray right_position_;
@@ -198,8 +210,8 @@ private:
     FingerStatusPtrArray finger_status_;
     FingerTouchStatusPtrArray finger_touch_status_;
 
-    std::unique_ptr<dexhand::TouchDexhand> left_dexhand_ = nullptr;
-    std::unique_ptr<dexhand::TouchDexhand> right_dexhand_ = nullptr;
+    std::unique_ptr<dexhand::DexHandBase> left_dexhand_ = nullptr;
+    std::unique_ptr<dexhand::DexHandBase> right_dexhand_ = nullptr;
 
     std::thread control_thread_;
     std::atomic<bool> running_{false};
@@ -217,8 +229,9 @@ private:
     std::optional<TaskFunc> current_task_;
     std::mutex task_mutex_;
     std::condition_variable task_cv_;
-    std::atomic_bool gesture_executing_ = false;
-    std::thread work_thread_;
+    std::atomic<bool> gesture_executing_{false};
+    std::atomic_bool abort_running_task_flag_ = false;  /* abort task execute! */
+    std::thread gesture_thread_;
 
     static constexpr int control_frequency_ = 200; // Hz
 };

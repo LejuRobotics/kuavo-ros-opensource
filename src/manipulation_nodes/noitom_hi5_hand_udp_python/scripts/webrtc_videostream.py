@@ -81,7 +81,7 @@ class WebRTCServerAndVideoStreamClient:
         webrtc_signaling_url = ":8765"
         ports = [10030, 10031, 10032, 10033, 10034, 10035, 10036, 10037, 10038, 10039, 10040]
         print(f"Webrtc signaling prot: {webrtc_signaling_url}")
-        sender = UdpSenderForInfoToQuest3("255.255.255.255", ports, webrtc_signaling_url, width, height)
+        sender = UdpSenderForInfoToQuest3(ports, webrtc_signaling_url, width, height)
         sender.start()
         return sender
 

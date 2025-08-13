@@ -5,4 +5,4 @@ Description: Description of hardware_node
 Version: 0.0.0
 Cflags: -I${prefix}/include
 Libs: -L${prefix}/lib -lhardware_node
-Requires: roscpp kuavo_common kuavo_assets
+Requires: roscpp kuavo_common kuavo_assets std_msgs message_runtime rospy

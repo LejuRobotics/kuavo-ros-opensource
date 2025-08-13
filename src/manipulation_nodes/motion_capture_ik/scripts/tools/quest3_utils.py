@@ -16,7 +16,7 @@ import time
 import tf
 from std_msgs.msg import Float32MultiArray
 from tf.transformations import quaternion_from_matrix, quaternion_matrix
-from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import TransformStamped, Twist
 from tf2_msgs.msg import TFMessage
 from constanst import gesture_corresponding_hand_position
 # to dev
@@ -148,9 +148,8 @@ class Quest3ArmInfoTransformer:
         self.joint_state_puber = rospy.Publisher('/joint_states', JointState, queue_size=10)
         self.shoulder_angle_puber = rospy.Publisher('/quest3_debug/shoulder_angle', Float32MultiArray, queue_size=10)
         self.chest_axis_puber = rospy.Publisher('/quest3_debug/chest_axis', Float32MultiArray, queue_size=10)
-        self.head_body_pose_puber = rospy.Publisher('/kuavo_head_body_orientation_data', headBodyPose, queue_size=10)
-        self.head_body_pose_control_puber = rospy.Publisher('/kuavo_head_body_orientation', headBodyPose, queue_size=10)
-        
+        self.head_body_pose_puber = rospy.Publisher('/cmd_pose', Twist, queue_size=10)    
+
         self.left_joystick = None
         self.right_joystick = None
         if eef_visual_stl_files is not None:
@@ -1019,18 +1018,17 @@ class Quest3ArmInfoTransformer:
         # deal right hand thumb
         msg.position[vj_n + 24 + 1] *= -1
         self.joint_state_puber.publish(msg)
-       
-    def pub_head_body_pose_msg(self, head_body_pose: HeadBodyPose):
-        msg = headBodyPose()
-        msg.head_pitch = head_body_pose.head_pitch
-        msg.head_yaw = head_body_pose.head_yaw
-        msg.body_yaw = head_body_pose.body_yaw
-        pitch_ratio = 0.8
-        msg.body_pitch = max(3*np.pi/180.0, min(pitch_ratio*head_body_pose.body_pitch, 40*np.pi/180.0))
 
-        msg.body_x = 0.0
-        msg.body_y = 0.0
-        msg.body_height = max(-0.4, min(head_body_pose.body_height + 0.3, 0.2))
-        self.head_body_pose_puber.publish(msg)
+    def pub_head_body_pose_msg(self, head_body_pose: HeadBodyPose):
+        """Publish head body pose message."""
+        msg = Twist()
+        msg.angular.y = head_body_pose.body_pitch
+        msg.angular.x = 0.0 
+        msg.angular.z = 0.0
+        pitch_ratio = 0.8
+        msg.angular.y = max(3*np.pi/180.0, min(pitch_ratio*head_body_pose.body_pitch, 40*np.pi/180.0))
+        msg.linear.x = 0.0
+        msg.linear.y = 0.0
+        msg.linear.z = max(-0.4, min(head_body_pose.body_height + 0.3, 0.2))
         if self.control_torso:
-            self.head_body_pose_control_puber.publish(msg)
+            self.head_body_pose_puber.publish(msg)

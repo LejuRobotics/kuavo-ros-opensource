@@ -20,6 +20,7 @@ find_package(catkin REQUIRED COMPONENTS
     ocs2_robotic_tools
     kuavo_msgs
     sensor_msgs
+    motion_capture_ik
     humanoid_interface
     humanoid_interface_ros
     apriltag_ros
@@ -66,7 +67,15 @@ target_include_directories(${PROJECT_NAME}_demo PUBLIC
 )
 
 add_executable(tag_tracker_node src/tagTracker.cpp src/poseTransformer.cpp)
-target_link_libraries(tag_tracker_node ${catkin_LIBRARIES})
+target_link_libraries(tag_tracker_node ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+  ${GrabBoxLib}
+  yaml-cpp
+  drake::drake
+  )
+target_include_directories(tag_tracker_node PUBLIC
+  ${PROJECT_BINARY_DIR}/include
+)
 
 # example
 add_executable(btcpp_sample test/test1.cpp)

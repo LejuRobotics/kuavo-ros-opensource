@@ -17,6 +17,8 @@
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>kuavo_msgs</exec_depend>
+  <exec_depend>python-numpy</exec_depend>
+  <exec_depend>rospy</exec_depend>
   <depend>nodelet</depend>
   <depend>gazebo_dev</depend>
   <depend>gazebo_ros_control</depend>

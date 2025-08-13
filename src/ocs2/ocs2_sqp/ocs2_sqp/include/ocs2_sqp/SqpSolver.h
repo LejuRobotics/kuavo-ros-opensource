@@ -63,6 +63,8 @@ class SqpSolver : public SolverBase {
 
   void reset() override;
 
+  void preRun(scalar_t initTime, const vector_t& initState, scalar_t finalTime);
+
   scalar_t getFinalTime() const override { return primalSolution_.timeTrajectory_.back(); };
 
   void getPrimalSolution(scalar_t finalTime, PrimalSolution* primalSolutionPtr) const override { *primalSolutionPtr = primalSolution_; }

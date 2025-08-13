@@ -3,6 +3,7 @@ from kuavo_humanoid_sdk import KuavoSDK, KuavoRobot
 from kuavo_humanoid_sdk import KuavoRobotState
 from kuavo_humanoid_sdk import KuavoRobotTools
 from kuavo_humanoid_sdk import KuavoRobotVision
+from kuavo_humanoid_sdk.interfaces.data_types import KuavoPose
 
 class KuavoRobotStrategyBase(ABC):
     """Kuavo机器人策略基础类，提供策略执行的抽象接口"""
@@ -35,7 +36,7 @@ class KuavoRobotStrategyBase(ABC):
         pass
     
     @abstractmethod
-    def walk_approach_target(self, target_info, target_distance=0.5, **kwargs):
+    def walk_approach_target(self, target_id, target_distance=0.5, **kwargs):
         """走/接近特定的目标到指定距离
         
         Args:
@@ -49,12 +50,13 @@ class KuavoRobotStrategyBase(ABC):
         pass
     
     @abstractmethod
-    def walk_to_pose(self, target_info, target_distance=0.5, **kwargs):
+    def walk_to_pose(self, target_pose:KuavoPose, target_distance=0.5, timeout=10.0, **kwargs):
         """走到指定距离的目标位置
         
         Args:
-            target_info: 目标信息，包含位置、姿态等
+            target_pose: 目标位姿
             target_distance: 与目标的期望距离(米)
+            timeout: 超时时间(秒)
             **kwargs: 其他参数
             
         Returns:

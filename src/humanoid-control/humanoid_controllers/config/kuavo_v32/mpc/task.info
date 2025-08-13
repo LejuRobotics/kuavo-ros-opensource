@@ -25,6 +25,7 @@ model_settings
   modelDof                     12 ; total dof of the model, including the arms and legs
   mpcArmsDof                   0 ; mpc dof of the arms, you can simplify the model by reducing this value(will automatically reduce the QR size)
   mpcLegsDof                   12 ; mpc dof of the legs
+  mpcWaistDof                  0 ; mpc dof of the waist 
 
   jointNames
   {
@@ -101,7 +102,8 @@ swing_trajectory_config
 
   toeSwingHeight                0.03
   heelSwingHeight               0.04
-  enable_slope_planner                                 true
+  enable_slope_planner                    true
+  slope_planning_threshold                     3.0        
   enable_interrupt_with_est_mode              false
 
   deadBandVelocity             0.1
@@ -109,6 +111,7 @@ swing_trajectory_config
 
   swing_shoulder_center         0.15
   swing_shoulder_scale          0.3
+  swing_elbow_center            0.0
   swing_elbow_scale             0.8
 }
 

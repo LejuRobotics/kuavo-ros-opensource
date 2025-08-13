@@ -1,6 +1,12 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
-script_dir=$(cd "$(dirname "$0")" && pwd)
+if [[ -n "${BASH_SOURCE[0]}" ]]; then
+  script_path="${BASH_SOURCE[0]}"
+else
+  script_path="$0"
+fi
+
+script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$script_dir/lib
 export PATH=$PATH:$script_dir/bin

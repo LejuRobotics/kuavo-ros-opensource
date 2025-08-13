@@ -509,7 +509,7 @@ def touch_dexhand():
     if choice == "1":
         handTouch_usb()
     elif choice == "2":
-        command = "bash "+ folder_path +"/touch_dexhand_test.sh --test" 
+        command = "bash "+ folder_path +"/dexhand_test.sh --touch --test" 
         # 使用 subprocess.run() 运行命令
         subprocess.run(command, shell=True)
     else:

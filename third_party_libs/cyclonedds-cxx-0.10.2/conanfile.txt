@@ -1,0 +1,9 @@
+[requires]
+gtest/1.10.0
+boost/1.78.0
+
+[generators]
+cmake
+
+[options]
+gtest:shared=True

@@ -79,6 +79,7 @@ class SimulatedJoystick:
             self.joy_msg.buttons[BUTTON_Y] = 1  # 发送walk
         elif key == 'c':
             self.joy_msg.buttons[BUTTON_A] = 1  # 发送stance
+            self.joy_msg.axes = [0.0] * 8  # Reset all axes to zero
         elif key == 't':
             self.joy_msg.buttons[BUTTON_B] = 1  # 发送trot
         elif key == 'b':  # ESC键

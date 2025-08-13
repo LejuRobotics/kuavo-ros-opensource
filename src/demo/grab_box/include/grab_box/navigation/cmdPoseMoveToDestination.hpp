@@ -83,7 +83,7 @@ namespace GrabBox
     //     return BT::NodeStatus::FAILURE;
     //   }
       getInput<Eigen::Vector4d>("target_pose", target_pose_);
-      std::cout << "target_pose: " << target_pose_.transpose() << std::endl;
+      // std::cout << "target_pose: " << target_pose_.transpose() << std::endl;
       target_pose_(3) *= M_PI / 180.0; // 转化为弧度制
       if(!getInput<int>("move_type", move_type_))
       {

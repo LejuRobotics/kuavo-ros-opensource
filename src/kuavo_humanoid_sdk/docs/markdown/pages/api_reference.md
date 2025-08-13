@@ -185,6 +185,21 @@ Bases: `RobotBase`
 #### NOTE
 此命令会将机器人状态改变为’command_pose_world’。
 
+#### control_hand_wrench(left_wrench: list, right_wrench: list) → bool
+
+控制机器人末端力/力矩
+
+* **Parameters:**
+  * **left_wrench** (*list*) – 左手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+  * **right_wrench** (*list*) – 右手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+    单位:
+    Fx,Fy,Fz: 牛顿(N)
+    Tx,Ty,Tz: 牛·米(N·m)
+* **Returns:**
+  控制成功返回True, 否则返回False
+* **Return type:**
+  bool
+
 #### control_head(yaw: float, pitch: float) → bool
 
 控制机器人的头部。
@@ -213,6 +228,16 @@ Bases: `RobotBase`
 #### disable_head_tracking() → bool
 
 禁用头部跟踪。
+
+#### enable_base_pitch_limit(enable: bool) → Tuple[bool, str]
+
+开启/关闭机器人 basePitch 限制
+
+#### NOTE
+该接口用于关闭或开启机器人 basePitch 保护功能，关闭状态下可以进行比较大幅度的前后倾动作而不会触发保护导致摔倒。
+
+* **Parameters:**
+  **enable** (*bool*) – 开启/关闭
 
 #### enable_head_tracking(target_id: int) → bool
 
@@ -661,6 +686,15 @@ Bases: `object`
 * **Return type:**
   [KuavoOdometry](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoOdometry)
 
+#### pitch_limit_enabled() → bool
+
+获取机器人 basePitch 限制状态, 如果开启则返回True，否则返回False。
+
+* **Returns:**
+  如果机器人 basePitch 限制开启返回True，否则返回False。
+* **Return type:**
+  bool
+
 #### robot_orientation() → Tuple[float, float, float, float]
 
 返回 Kuavo 机器人在世界坐标系中的方向。
@@ -812,6 +846,21 @@ Kuavo机器人手臂控制类。
   * **RuntimeError** – 如果在控制手臂时机器人不在站立状态
 * **Returns:**
   控制成功返回True,否则返回False
+* **Return type:**
+  bool
+
+#### control_hand_wrench(left_wrench: list, right_wrench: list) → bool
+
+控制机器人末端力/力矩
+
+* **Parameters:**
+  * **left_wrench** (*list*) – 左手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+  * **right_wrench** (*list*) – 右手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+    单位:
+    Fx,Fy,Fz: 牛顿(N)
+    Tx,Ty,Tz: 牛·米(N·m)
+* **Returns:**
+  控制成功返回True, 否则返回False
 * **Return type:**
   bool
 
@@ -1066,6 +1115,18 @@ Bases: `object`
   变换数据或None
 * **Return type:**
   Union[[PoseQuaternion](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.PoseQuaternion), [HomogeneousMatrix](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.HomogeneousMatrix), None]
+
+#### get_link_pose(link_name: str, reference_frame: str = 'base_link')
+
+获取指定机械臂关节链接的位置
+
+* **Parameters:**
+  * **link_name** (*str*) – 关节链接名称，如”zarm_l1_link”
+  * **reference_frame** (*str*) – 参考坐标系，默认为base_link
+* **Returns:**
+  三维位置坐标(x,y,z)，失败返回None
+* **Return type:**
+  Tuple[float, float, float] | None
 
 #### get_link_position(link_name: str, reference_frame: str = 'base_link') → Tuple[float, float, float] | None
 

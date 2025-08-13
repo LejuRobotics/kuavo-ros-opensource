@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="3"
+      main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <SetBlackboard value="-0.3,0,0"
+                     output_key="pre_grab_box_offset"/>
+          <ArmMoveToReadyPose action_name="ready_joints" move_speed='1.0'/>
+
+      <ReactiveSequence>
+        <RetryUntilSuccessful num_attempts="10">
+          <CheckStatusOK/>
+        </RetryUntilSuccessful>
+
+        <Sequence>
+          <Echo echo_input="grasp"/>
+          <GraspBox box_pos="0.342905,0.0,1.0"
+                    box_quat="0.0,0,0,1"
+                    box_size="0.35,0.4,0.3"
+                    grasp_type="0"
+                    box_offset="-0.12,0.0,0.16"/>
+        </Sequence>
+      </ReactiveSequence>
+      <MoveToDestination planed_trajectory="0,0,0,0" move_type="2"/>
+      <!-- <ArmMoveToReadyPose action_name="ready_joints" 
+              move_speed='1.8'/> -->
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- Description of Node Models (used by Groot) -->
+  <TreeNodesModel>
+    <Action ID="MoveToDestination"
+            editable="true"/>
+    <Condition ID="CheckStatusOK"
+               editable="true"/>
+    <Action ID="Echo"
+            editable="true">
+      <input_port name="echo_input"/>
+    </Action>
+    <Action ID="GraspBox"
+            editable="true">
+      <input_port name="box_pos"/>
+      <input_port name="box_quat">xyzw</input_port>
+      <input_port name="box_size"/>
+      <input_port name="grasp_type">0:grasp, 1:put</input_port>
+      <input_port name="box_offset"/>
+    </Action>
+  </TreeNodesModel>
+
+</root>

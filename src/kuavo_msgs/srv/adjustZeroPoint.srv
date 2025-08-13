@@ -1,0 +1,9 @@
+# 电机索引
+int32 motor_index
+# 腿部零点数据
+float64 offset
+---
+# 是否成功
+bool success
+# 消息
+string message 

@@ -1,0 +1,15 @@
+# This service returns the zero points of all motors.
+# It is used to get the current zero point values of all motors in the system.
+#
+# Request:
+# (No request fields for this service)
+#
+# Response:
+# bool success         # Indicates whether the request was successful.
+# string message       # A message providing additional information (e.g., error details if the request failed).
+# float64[] zero_points # An array containing the zero point values for all motors.
+
+---
+bool success
+string message
+float64[] zero_points 

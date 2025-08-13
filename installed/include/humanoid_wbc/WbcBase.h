@@ -96,6 +96,10 @@ namespace ocs2
       {
         arm_nums_ = arm_nums;
       }
+      void setWaistNums(int waist_nums)
+      {
+        waist_nums_ = waist_nums;
+      }
 
       inline Eigen::Vector3d getR() const { return r; }
       inline Eigen::Vector3d getRd() const { return rd; }
@@ -125,6 +129,10 @@ namespace ocs2
       inline void setHalfBodyMode(bool half_body_mode)
       {
         half_body_mode_ = half_body_mode;
+      }
+      inline void setRobanMode(bool roban_mode)
+      {
+        roban_mode_ = roban_mode;
       }
     protected:
       TopicLogger* topic_logger_;
@@ -160,6 +168,7 @@ namespace ocs2
       Task formulateContactForceTask(const vector_t &inputDesired) const;
       Task formulateArmJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
       Task formulateStandUpJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
+      Task formulateJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
 
       void compensateFriction(vector_t &x);
 
@@ -189,7 +198,7 @@ namespace ocs2
       scalar_t baseHeightKp_{}, baseHeightKd_{};
       scalar_t baseAngularKp_{}, baseAngularKd_{};
       vector_t armJointKp_, armJointKd_;
-      scalar_t standUp_legKp_{}, standUp_legKd_{}, standUp_armKp_{}, standUp_armKd_{};
+      scalar_t standUp_legKp_{}, standUp_legKd_{}, standUp_armKp_{}, standUp_armKd_{}, standUp_waistKp_{}, standUp_waistKd_{}, jointAcc_Kp_{}, jointAcc_Kd_{};
       vector3_t baseAngular3dKp_, baseAngular3dKd_;
 
       vector_t cmd_body_pos_;
@@ -216,9 +225,11 @@ namespace ocs2
       matrix_t j_des_, dj_des_;
 
       size_t arm_nums_{};
+      size_t waist_nums_{};
       matrix3_t rotationYawBaseMeasuredToWorld_;
       bool half_body_mode_ = false;
       bool pull_up_state_ = false;
+      bool roban_mode_ = false;
     };
 
   } // namespace humanoid

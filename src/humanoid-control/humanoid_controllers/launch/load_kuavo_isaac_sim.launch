@@ -137,10 +137,13 @@
     </group>
 
     <group if="$(arg with_mm_ik)">
+      <group if="$(eval arg('robot_version') >= 30)">
       <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
         <arg name="sqp_mpc" value="1"/>
-        <arg name="rviz"    value="false"/>
-        <arg name="visualize_mm"   value="false"/>
-      </include>
+          <arg name="rviz"    value="false"/>
+          <arg name="visualize_mm"   value="false"/>
+          <arg name="coredump" value="$(arg coredump)"/>
+        </include>
+      </group>
     </group>
 </launch>

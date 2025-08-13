@@ -1,0 +1,2 @@
+string link1_name
+string link2_name

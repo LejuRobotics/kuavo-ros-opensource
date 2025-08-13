@@ -203,11 +203,9 @@ namespace GrabBox
       Eigen::VectorXd destination_pose_box(7);
       destination_pose_box << target_box_offset(0), target_box_offset(1), target_box_offset(2), 0.0, 0.0, 0.0, 1.0;
 
-    // 获得方向正确的BOX姿态
-      Eigen::VectorXd box_pose_world_correct = correctBoxPose(box_pose_world, delta_roll, delta_pitch, delta_yaw);
     
     //根据设定的相对位置和BOX生成目标位置
-      Eigen::VectorXd destination_pose_ = getDestination(destination_pose_box, box_pose_world_correct);
+      Eigen::VectorXd destination_pose_ = getDestination(destination_pose_box, box_pose_world);
 
       std::cout << "destination_pose_:  " << destination_pose_ << std::endl;
 
@@ -361,15 +359,6 @@ namespace GrabBox
       return false;
     }
 
-    Eigen::VectorXd correctBoxPose(const Eigen::VectorXd& box_pose, double delta_roll, double delta_pitch, double delta_yaw)
-    {
-    //   autoHeadChase::PoseTransformer transformer;
-      Eigen::Matrix4d box_matrix = PoseTransformer::poseToTransform(box_pose);
-      Eigen::Matrix4d delta_matrix = PoseTransformer::eulerToTransformationMatrix(delta_roll, delta_pitch, delta_yaw);
-      Eigen::Matrix4d box_matrix_correct = box_matrix * delta_matrix;
-      return PoseTransformer::transformToPose(box_matrix_correct);
-    }
-
    Eigen::VectorXd getDestination(const Eigen::VectorXd& destination_pose_box, const Eigen::VectorXd& box_pose)
     {
       return PoseTransformer::transformPoseToWorld(destination_pose_box, box_pose);
@@ -403,7 +392,7 @@ namespace GrabBox
     double msg_update_angle_tolerance = 10.0;
     string current_gait_= "stance";
     bool is_cmd_pub_ = false;
-    double delta_roll = -M_PI/2, delta_pitch = M_PI/2, delta_yaw = -M_PI/2;
+    double delta_roll = 0.0, delta_pitch = M_PI/2, delta_yaw = M_PI/2;
 
     ros::Time start_time_;
   };

@@ -147,7 +147,7 @@
         </camera>
         <always_on>1</always_on>
         <update_rate>15</update_rate>
-        <visualize>1</visualize>
+        <visualize>0</visualize>
       </sensor>
       <sensor name="${sensor_name}_ired1" type="camera">
         <camera name="${sensor_name}">
@@ -346,7 +346,7 @@
               </camera>
               <always_on>1</always_on>
               <update_rate>${rate}</update_rate>
-              <visualize>1</visualize>
+              <visualize>0</visualize>
           </sensor>
           <sensor name="${sensor_name}_ired1" type="camera">
               <pose frame="">0 -0.06 0.004 0 0 0</pose>

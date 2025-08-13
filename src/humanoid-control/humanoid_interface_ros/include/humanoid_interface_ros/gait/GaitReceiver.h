@@ -29,6 +29,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
+#include "humanoid_interface/foot_planner/SwingTrajectoryPlanner.h"
+
 #include <mutex>
 
 #include <ros/ros.h>
@@ -45,7 +47,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <humanoid_interface/gait/GaitSchedule.h>
 #include <humanoid_interface/gait/ModeSequenceTemplate.h>
 #include <humanoid_interface/gait/MotionPhaseDefinition.h>
-#include "humanoid_interface/foot_planner/SwingTrajectoryPlanner.h"
 #include <ocs2_msgs/mpc_target_trajectories.h>
 #include "ocs2_ros_interfaces/common/RosMsgConversions.h"
 #include "humanoid_interface/reference_manager/SwitchedModelReferenceManager.h"

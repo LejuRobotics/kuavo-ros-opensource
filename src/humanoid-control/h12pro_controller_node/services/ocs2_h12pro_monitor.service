@@ -7,10 +7,13 @@ Type=simple
 ExecStop=/bin/kill -SIGINT $MAINPID
 Environment=ROS_MASTER_URI=http://127.0.0.1:11311
 Environment=ROS_IP=127.0.0.1
+Environment=KUAVO_CONTROL_SCHEME=ocs2
 Environment=KUAVO_ROS_CONTROL_WS_PATH=/root/kuavo_ws
+Environment=KUAVO_RL_WS_PATH=/home/lab/kuavo-RL/kuavo-robot-deploy
 Environment=ROBOT_VERSION=40
 Environment=NODE_SCRIPT=/root/kuavo_ws/src/humanoid-control/h12pro_controller_node/scripts/start_ocs2_h12pro_node.sh
 Environment=ROS_HOSTNAME=
+Environment=STAIR_DETECTION_CAMERA=orbbec
 ExecStart=/bin/bash /root/kuavo_ws/src/humanoid-control/h12pro_controller_node/scripts/monitor_ocs2_h12pro.sh
 Restart=always
 RestartSec=5s

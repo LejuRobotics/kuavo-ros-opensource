@@ -79,6 +79,27 @@ check_and_format_version() {
     __version_ref="$version1"
 }
 
+get_version_from_git() {
+    local -n __version_ref="$1"
+    # Check if git is available
+    if ! command -v git &> /dev/null; then
+        echo -e "\033[31mError: git is not installed or not in PATH\033[0m"
+        exit 1
+    fi
+    
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir &> /dev/null; then
+        echo -e "\033[31mError: Not in a git repository\033[0m"
+        exit 1
+    fi
+
+    tag=$(git describe --tags --match="*" --abbrev=0 --candidates=1 master)
+    tag_commit=$(git rev-list -n 1 $tag)
+    number=$(git rev-list --count $tag_commit)
+    commit_hash=$(git rev-parse --short HEAD)
+    __version_ref="${tag}-${number}-g${commit_hash}"
+}
+
 clean_cache() {
     # Clean up message directories
     echo "Cleaning message directories..."
@@ -109,6 +130,12 @@ exit_with_failure() {
 }
 
 # SCRIPT BEGIN
+# Check if VERSION follows the expected format (e.g., 0.0.1)
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+    echo -e "\033[33mWarning: VERSION format is invalid, attempting to get version from git...\033[0m"
+    get_version_from_git VERSION
+fi
+
 check_and_format_version "$BRANCH" VERSION
 echo -e "\033[32mVersion: $VERSION\033[0m"
 echo -e "\033[32mBranch: $BRANCH\033[0m"

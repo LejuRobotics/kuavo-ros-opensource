@@ -47,6 +47,10 @@
 #include "dexhand_mujoco_node.h"
 #include "dexhand/json.hpp"
 
+#ifdef USE_DDS
+#include "mujoco_dds.h"
+#endif
+
 //  ************************* lcm ****************************
 
 #include "lcm_interface/LcmInterface.h"
@@ -81,6 +85,10 @@ namespace
   ros::Publisher sensorsPub;
   ros::Publisher pubOdom;
   ros::Publisher pubTimeDiff;
+
+#ifdef USE_DDS
+  std::unique_ptr<MujocoDdsClient> dds_client;
+#endif
   std::queue<std::vector<double>> controlCommands;
   std::vector<double> joint_tau_cmd;
   bool cmd_updated = false;
@@ -90,7 +98,8 @@ namespace
 
   std::mutex queueMutex;
   ros::NodeHandle *g_nh_ptr;
-  size_t numJoints = 12;      /* LLeg+RLeg+LArm+RArm+Head (without the dexhand joints) */
+  size_t numJoints = 12;  // 默认值，将从配置文件中读取
+  size_t waistNum = 0;
   double is_spin_thread = true;
   ros::Time sim_time;
   // model and data
@@ -101,6 +110,10 @@ namespace
   // ******
   low_cmd_t recvCmd;
   // ******
+
+  // 全局手臂末端关节名称变量
+  std::string left_arm_end_joint = "zarm_l7_joint";   // 默认值
+  std::string right_arm_end_joint = "zarm_r7_joint";  // 默认值
 
   // control noise variables
   // mjtNum* ctrlnoise = nullptr;
@@ -316,8 +329,10 @@ namespace
       /* Init Joint Address 初始化关节组的数据地址 */
       init_joint_address(mnew, LLegJointsAddr, "leg_l1_joint", "leg_l6_joint");
       init_joint_address(mnew, RLegJointsAddr, "leg_r1_joint", "leg_r6_joint");
-      init_joint_address(mnew, LArmJointsAddr, "zarm_l1_joint", "zarm_l7_joint");
-      init_joint_address(mnew, RArmJointsAddr, "zarm_r1_joint", "zarm_r7_joint");
+      std::cout << "left_arm_end_joint: " << left_arm_end_joint << std::endl;
+      std::cout << "right_arm_end_joint: " << right_arm_end_joint << std::endl;
+      init_joint_address(mnew, LArmJointsAddr, "zarm_l1_joint", left_arm_end_joint.c_str());
+      init_joint_address(mnew, RArmJointsAddr, "zarm_r1_joint", right_arm_end_joint.c_str());
       init_joint_address(mnew, HeadJointsAddr, "zhead_1_joint", "zhead_2_joint");
 
       /* dexhand joint address */
@@ -437,7 +452,13 @@ namespace
             joint_data.joint_torque.push_back(d->qfrc_actuator[*iter]);
         }
     };
-
+    for (size_t i = 0; i < waistNum; i++)
+    {
+      joint_data.joint_q.push_back(d->qpos[7 + i]);
+      joint_data.joint_v.push_back(d->qvel[6 + i]);
+      joint_data.joint_vd.push_back(d->qacc[6 + i]);
+      joint_data.joint_torque.push_back(d->qfrc_actuator[6 + i]);
+    }
     // Joint Data: LLeg, RLeg, LArm, RArm, Head
     updateJointData(LLegJointsAddr);
     updateJointData(RLegJointsAddr);
@@ -495,7 +516,24 @@ namespace
 
     sensors_data.joint_data = joint_data;
     sensors_data.imu_data = imu_data;
+
+#ifdef USE_DDS
+    // Publish DDS LowState via DDS (instead of ROS when DDS is enabled)
+    if (dds_client) {
+      unitree_hg::msg::dds_::LowState_ dds_state;
+      Eigen::Vector3d angVel_eigen(angVel[0], angVel[1], angVel[2]);
+      Eigen::Vector4d ori_eigen(ori[0], ori[1], ori[2], ori[3]);
+      dds_client->convertMujocoToDdsState(joint_data.joint_q, joint_data.joint_v, joint_data.joint_vd, joint_data.joint_torque, acc_eigen, angVel_eigen, free_acc, ori_eigen, dds_state);
+      dds_client->publishLowState(dds_state);
+    }
+    else
+    {
+      std::cout << "NOT PUB" << std::endl;
+    }
+#else
+    // Publish ROS sensor data only when DDS is disabled
     sensorsPub.publish(sensors_data);
+#endif
 
     // bodyOdom = Odometry();
     bodyOdom.header.stamp = sim_time;
@@ -681,7 +719,12 @@ namespace
                       d->ctrl[*iter] = tau_cmd[i++];
                   }
               };
-              int i = 0;
+              for (size_t i = 0; i < waistNum; i++)
+              {
+                d->ctrl[i] = tau_cmd[i];
+                // std::cout << "tau_cmd[" << i << "]: " << tau_cmd[i] << std::endl;
+              } 
+              int i = waistNum;
               updateControl(LLegJointsAddr, i);
               updateControl(RLegJointsAddr, i);
               updateControl(LArmJointsAddr, i);
@@ -812,6 +855,26 @@ bool handleSimStart(std_srvs::SetBool::Request &req,
   sim->run = req.data;
   return true;
 }
+#ifdef USE_DDS
+void ddsLowCmdCallback(const unitree_hg::msg::dds_::LowCmd_& cmd)
+{
+  // Convert DDS LowCmd to MuJoCo joint commands
+  std::vector<double> tau(numJoints, 0.0);
+  
+  // Map motor commands to joint torques (first 28 motors)
+  size_t joint_count = std::min((size_t)numJoints, KUAVO_JOINT_COUNT);
+  for (size_t i = 0; i < joint_count && i < cmd.motor_cmd().size(); ++i) {
+    const auto& motor_cmd = cmd.motor_cmd()[i];
+    tau[i] = static_cast<double>(motor_cmd.tau());
+  }
+  
+  std::lock_guard<std::mutex> lock(queueMutex);
+  joint_tau_cmd = tau;
+  cmd_updated = true;
+  
+}
+#endif
+
 void jointCmdCallback(const kuavo_msgs::jointCmd::ConstPtr &msg)
 {
    auto is_match_size = [&](size_t size)
@@ -891,20 +954,16 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
       d = mj_makeData(m);
     m->opt.timestep = 1 / frequency;
     
-    // Init numJoints
-    numJoints = 0;
+    // 显示关节组信息
     std::cout << "LLeg joints size: " << LLegJointsAddr.qdofadr().size() << std::endl;
     std::cout << "RLeg joints size: " << RLegJointsAddr.qdofadr().size() << std::endl;
     std::cout << "LArm joints size: " << LArmJointsAddr.qdofadr().size() << std::endl;
     std::cout << "RArm joints size: " << RArmJointsAddr.qdofadr().size() << std::endl;
     std::cout << "Head joints size: " << HeadJointsAddr.qdofadr().size() << std::endl;
-    numJoints += LLegJointsAddr.qdofadr().size();
-    numJoints += RLegJointsAddr.qdofadr().size();
-    numJoints += LArmJointsAddr.qdofadr().size();
-    numJoints += RArmJointsAddr.qdofadr().size();
-    numJoints += HeadJointsAddr.qdofadr().size();
-    std::cout << "\033[32mnumJoints: " << (m->nq - 7) << "\033[0m" << std::endl;
+    std::cout << "\033[32mnumJoints from config: " << numJoints << "\033[0m" << std::endl;
     std::cout << "\033[32mnumJoints(without dexhand): " << numJoints << "\033[0m" << std::endl;
+    std::cout << "\033[32mtotal qpos (m->nq): " << m->nq << "\033[0m" << std::endl;
+
 
     if (d)
     {
@@ -936,8 +995,19 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
   ros::ServiceServer service = g_nh_ptr->advertiseService("sim_start", handleSimStart);
 
   // // 创建订阅器
+#ifndef USE_DDS
   ros::Subscriber jointCmdSub = g_nh_ptr->subscribe("/joint_cmd", 10, jointCmdCallback);
+#endif
   ros::Subscriber extWrenchSub = g_nh_ptr->subscribe("/external_wrench", 10, extWrenchCallback);
+
+#ifdef USE_DDS
+      // 初始化DDS通信
+    std::cout << "[MuJoCo DDS] Initializing DDS communication..." << std::endl;
+    dds_client = std::make_unique<MujocoDdsClient>();
+    dds_client->setLowCmdCallback(ddsLowCmdCallback);
+    dds_client->start();
+    std::cout << "[MuJoCo DDS] DDS communication started" << std::endl;
+#endif
 
   // 初始化灵巧手ROS
   if(!RHandJointsAddr.ctrladr().invalid()) {
@@ -963,6 +1033,18 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
       if (g_nh_ptr->getParam("robot_init_state_param", qpos_init_temp))
       {
         ROS_INFO("Get init qpos ");
+        // insert waist qpos
+        int waist_num = 0;
+        g_nh_ptr->getParam("waistRealDof", waist_num);
+        std::cout << "Mujoco waist_num: " << waist_num << std::endl;
+        if (waist_num > 0)
+        {
+          for (int i = 0; i < waist_num; i++)
+          {
+            qpos_init_temp.insert(qpos_init_temp.begin() + 7, 0.0);
+          }
+        }
+        waistNum = waist_num;
 
         for (int i = 0; i < qpos_init_temp.size(); i++)
         {
@@ -1064,6 +1146,27 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
               ROS_INFO("\033[32mEnd effector type: %s\033[0m", end_effector_type.c_str());
             }
           }
+          
+          // 解析手臂末端关节名称
+          if (config_json.contains("arm_end_joints") && config_json["arm_end_joints"].is_array()) {
+            auto arm_end_joints = config_json["arm_end_joints"];
+            if (arm_end_joints.size() >= 2) {
+              left_arm_end_joint = arm_end_joints[0].get<std::string>();
+              right_arm_end_joint = arm_end_joints[1].get<std::string>();
+              
+              ROS_INFO("\033[32mLeft arm end joint: %s\033[0m", left_arm_end_joint.c_str());
+              ROS_INFO("\033[32mRight arm end joint: %s\033[0m", right_arm_end_joint.c_str());
+            }
+          }
+          
+          // 读取NUM_JOINT参数
+          if (config_json.contains("NUM_JOINT") && config_json["NUM_JOINT"].is_number()) {
+            numJoints = config_json["NUM_JOINT"].get<size_t>();
+            ROS_INFO("\033[32mNUM_JOINT from config: %zu\033[0m", numJoints);
+          } else {
+            ROS_WARN("NUM_JOINT not found in config, using default value: %zu", numJoints);
+          }
+
       } catch (const std::exception& e) {
         ROS_ERROR("Error parsing configuration file: %s", e.what());
       }

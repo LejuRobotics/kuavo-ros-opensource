@@ -33,10 +33,10 @@ namespace GrabBox
       ros::NodeHandle nh;
       pubArmTraj_ = nh.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 10);
       joint_sub_ = nh.subscribe<kuavo_msgs::jointCmd>("/joint_cmd", 10, &ArmMoveToReadyPose::jointCmdCallback, this);
-      while (!nh.hasParam("/legRealDof") || !nh.hasParam("/armRealDof"))
-      {
-        sleep(1);
-      }
+      // while (!nh.hasParam("/legRealDof") || !nh.hasParam("/armRealDof"))
+      // {
+      //   sleep(1);
+      // }
       ros::param::get("/armRealDof", num_arm_joints_);
       ros::param::get("/legRealDof", num_leg_joints_);
 
@@ -77,47 +77,65 @@ namespace GrabBox
       ready_joints_ = getParamsFromBlackboard<std::vector<double>>(config(), action_name);
 
       // Get move speed from the input port (use default if not provided)
-      double move_speed;
-      if (!getInput<double>("move_speed", move_speed)) {
+      if (!getInput<double>("move_speed", move_speed_)) {
         ROS_WARN("No move_speed provided, using default: 0.5");
-        move_speed = 0.5; // Default move speed
+        move_speed_ = 0.5; // Default move speed
       }
-      while (!update_command_joints_)
-      {
-        ros::spinOnce();
-        ros::Duration(0.01).sleep();
-      }
-      
       changeArmCtrlModeSrv(2);//using external controller
-
       is_running_ = true;
-      // Get current joint positions from the blackboard
-      Eigen::VectorXd command_joint_positions;
-      if (!config().blackboard->get("command_joint_positions", command_joint_positions)) {
-        ROS_ERROR("Cannot get command_joint_positions from blackboard");
-        return BT::NodeStatus::FAILURE;
-      }
-      auto arms_joints_command = command_joint_positions.segment(num_leg_joints_, num_arm_joints_);
-
-      // Convert Eigen::VectorXd to std::vector<double>
-      std::vector<double> start_joints(arms_joints_command.data(), arms_joints_command.data() + arms_joints_command.size());
-
-      // Generate interpolated trajectory
-      const double dt = 0.01; // Time step for interpolation
-      std::vector<std::vector<double>> trajectory = generateInterpolatedTrajectory(start_joints, ready_joints_, move_speed, dt);
-
-      // Publish interpolated trajectory
-      for (const auto& joints : trajectory) {
-        pubArmTraj_.publish(getJointStatesMsg(joints));
-        ros::Duration(dt).sleep();
-      }
-
-      return BT::NodeStatus::SUCCESS;
+      start_time_ = ros::Time::now().toSec();
+      return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-      return BT::NodeStatus::SUCCESS;
+
+      if(!update_command_joints_)
+      {
+        start_time_ = ros::Time::now().toSec();
+        ros::spinOnce();
+        return BT::NodeStatus::RUNNING;
+      }
+      if (!is_generated_)
+      {
+        // Get current joint positions from the blackboard
+        Eigen::VectorXd command_joint_positions;
+        if (!config().blackboard->get("command_joint_positions", command_joint_positions)) {
+          ROS_ERROR("Cannot get command_joint_positions from blackboard");
+          return BT::NodeStatus::FAILURE;
+        }
+        auto arms_joints_command = command_joint_positions.segment(num_leg_joints_, num_arm_joints_);
+
+        // Convert Eigen::VectorXd to std::vector<double>
+        std::vector<double> start_joints(arms_joints_command.data(), arms_joints_command.data() + arms_joints_command.size());
+
+        // Generate interpolated trajectory
+        trajectory_ = generateInterpolatedTrajectory(start_joints, ready_joints_, move_speed_, dt);
+        is_generated_ = true;
+      }
+      else
+      {
+        current_time_ = ros::Time::now().toSec() - start_time_;
+        // std::cout << "[ArmMoveToReadyPose] current_time_: " << current_time_ << std::endl;
+        // std::cout << "[ArmMoveToReadyPose] trajectory_.size(): " << trajectory_.size() << std::endl;
+        // std::cout << "[ArmMoveToReadyPose] start_time_: " << start_time_ << std::endl;
+        // std::cout << "[ArmMoveToReadyPose] dt: " << dt << std::endl;
+        // std::cout << "[ArmMoveToReadyPose] trajectory_.size() * dt: " << trajectory_.size() * dt << std::endl;
+        if (current_time_ > trajectory_.size() * dt) {
+          is_generated_ = false;
+          is_running_ = false;
+          return BT::NodeStatus::SUCCESS;
+        }
+        // Publish interpolated trajectory
+        int current_step = static_cast<int>(current_time_ / dt);
+        // std::cout << "[ArmMoveToReadyPose] current_step: " << current_step << std::endl;
+        // std::cout << "[ArmMoveToReadyPose] current_time_: " << current_time_ << std::endl;
+
+        auto joints = trajectory_[current_step];
+        pubArmTraj_.publish(getJointStatesMsg(joints));
+      }
+
+      return BT::NodeStatus::RUNNING;
     }
 
     void onHalted() override
@@ -169,7 +187,13 @@ namespace GrabBox
     ros::Subscriber joint_sub_;
     bool is_running_ = false;
     bool update_command_joints_ = false;
+    bool is_generated_ = false;
     std::vector<double> ready_joints_;
     int num_arm_joints_, num_leg_joints_;
+    std::vector<std::vector<double>> trajectory_;
+    const double dt = 0.01; // Time step for interpolation
+    double current_time_ = 0.0; // Current time in the interpolation process
+    double start_time_ = 0.0; // Start time of the interpolation process
+      double move_speed_;
   };
 } // namespace GrabBox

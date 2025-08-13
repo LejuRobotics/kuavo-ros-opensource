@@ -1,0 +1,4 @@
+float64[] q # 广义关节角度，如果是虚拟关节ik，则前4维度为躯干虚拟关节的角度，后14维度为手臂关节的角度
+---
+bool success
+twoArmHandPoseFree  hand_poses

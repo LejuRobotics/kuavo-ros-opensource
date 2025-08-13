@@ -18,13 +18,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 echo "步骤2: 准备启动下位机launch文件..."
 cd $REPO_ROOT
 catkin clean -y
+if [[ "$REPO_ROOT" == *"kuavo-ros-opensource"* ]]; then
+    source installed/setup.bash
+fi
 catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release
 catkin build humanoid_controllers motion_capture_ik mobile_manipulator_controllers
 source devel/setup.bash
 
 # 检查是否已有roscore在运行
 # 先关闭roscore
-sudo killall -9 roslaunch roscore rosmaster
+sudo killall -9 ros roslaunch roscore rosmaster
 
 
 

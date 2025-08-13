@@ -46,6 +46,8 @@ private:
     PyObject *pSaveZerosMethod{nullptr};
     PyObject *pSetZeroMethod{nullptr};
     PyObject *pChangEncoderMethod{nullptr};
+    PyObject *pAdjustZeroMethod{nullptr};
+    PyObject *pGetZeroPointsMethod{nullptr};
     PyObject *pSetTeachPendantModeMethod{nullptr};
     PyObject *pJoint_online_list;
     std::string pymodule_path;
@@ -72,9 +74,10 @@ public:
     void saveZeroPosition();
     void saveAsZeroPosition();
     void changeEncoderZeroRound(int index, double direction);
+    void adjustZeroPosition(int index, double offset);
+    std::vector<double> getMotorZeroPoints();
     void set_teach_pendant_mode(int mode_);
     bool check_motor_list_state();
-
     std::vector<double> get_positions();
     std::vector<double> get_torque();
     std::vector<double> get_velocity();

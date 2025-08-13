@@ -25,6 +25,7 @@ def main():
     while (time.time() - start_time < duration):
         robot.walk(linear_x=speed, linear_y=0.0, angular_z=0.0)
         time.sleep(0.1)
-
+    
+    robot.stance()
 if __name__ == "__main__":
     main()

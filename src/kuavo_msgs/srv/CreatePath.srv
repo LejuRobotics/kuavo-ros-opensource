@@ -1,0 +1,24 @@
+# Request
+string path_type          # line, circle, square, triangle, scurve
+float64 v_max_linear      # 最大线速度 (m/s)
+
+# Path-specific parameters
+# For line, square, triangle: yaw_offset in radians
+float64 yaw_offset        # 相对于当前朝向的偏转角度 (rad)
+
+# For line: length in meters
+float64 length            # 直线长度 (m)
+
+# For circle: radius in meters  
+float64 radius            # 圆形半径 (m)
+
+# For scurve: length and amplitude in meters
+float64 amplitude         # S形曲线振幅 (m)
+
+# For half-scurve: length and amplitude in meters
+bool half_scurve       # 是否只生成半个S曲线
+---
+# Response
+bool success
+string message
+nav_msgs/Path path       # 生成的路径 

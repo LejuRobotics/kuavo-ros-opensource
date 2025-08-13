@@ -1,0 +1,70 @@
+<launch>
+  <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+  <param name="robot_version"    value="$(arg robot_version)"/>
+  <arg name="use_xacro" value="$(eval int(arg('robot_version')) >= 40)"/>
+
+  <!-- Start Gazebo -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find gazebo_sim)/worlds/grab_box.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="false"/>
+  </include>
+
+  <!-- Load URDF or XACRO file based on robot version -->
+  <group if="$(arg use_xacro)">
+    <!-- For versions 40, 41, 42, 43, 45 -->
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version)_gazebo.xacro"/>
+    <!-- static tf transform -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="camera_to_robot_frame" args="0 0 0 0 0 0 camera_base camera_base_link" />
+    <!-- camera meta data And Gobal tf transform -->
+    <include file="$(find realsense_sim_metadata)/launch/metadata_start.launch">
+      <arg name="camera_name" value="camera"/>
+      <arg name="use_nvblox" value="false"/>
+      <arg name="use_tf" value="true"/>
+    </include>
+  </group>
+
+  <group unless="$(arg use_xacro)">
+    <!-- For versions 30, 31 32 -->
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version)_gazebo.urdf"/>
+  </group>
+
+  <!-- Spawn URDF model into Gazebo -->
+  <node name="spawn_robot" pkg="gazebo_ros" type="spawn_model" 
+        args="-urdf -model biped_s42 -param robot_description -x 0 -y 0 -z 1.0"/>
+
+    <param name="table_apriltag_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/grab_box_ci.xacro"/>
+
+    <!-- 生成table_apriltag模型 -->
+    <node name="spawn_table_apriltag" pkg="gazebo_ros" type="spawn_model" 
+          args="-urdf -model table_apriltag -param table_apriltag_description -x 0.0 -y 0.0 -z 0.0"/>
+
+    <!-- 加载block -->
+    <param name="block_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/block.urdf.xacro"/>
+    <!-- 生成block模型，使用floating joint -->
+    <!-- <node name="spawn_block" pkg="gazebo_ros" type="spawn_model" 
+          args="-urdf -model block -param block_description -x 0.0 -y -1.75 -z 1.2 -R 0 -P 0 -Y 0"
+          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/> -->
+          
+  <!-- Optionally, start robot state publisher to publish TF -->
+  <!-- <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" /> -->
+
+  <!-- Load controller configuration -->
+  <rosparam file="$(find kuavo_assets)/models/biped_s42/config/controllers.yaml"/>
+
+  <!-- Start controller manager -->
+  <!-- <node name="controller_manager" pkg="controller_manager" type="controller_manager" /> -->
+  <!-- <node pkg="nodelet" type="nodelet" name="controller_manager"
+      args="load controller_manager/ControllerManager nodelet_manager" output="screen"/> -->
+  <!-- <rosparam file="$(find gazebo_sim)/launch/defaultQ.yaml" command="load" /> -->
+
+  <!-- Load and start your controller -->
+  <!-- <node name="limbs_effort_controller" pkg="controller_manager" type="spawner" args="limbs_effort_controller"/> -->
+  <!-- <node name="joint_state_controller" pkg="controller_manager" type="spawner" args="joint_state_controller"/> -->
+  <!-- <node name="joint_position_controller" pkg="controller_manager" type="spawner" args="joint_position_controller"/> -->
+
+  <!-- Start the sensor_data_publisher node to sync IMU and joint states -->
+  <!-- <node name="sensor_data_publisher" pkg="gazebo_sim" type="sensor_data_publisher" output="screen"/>
+
+  <node name="joint_cmd_publisher" pkg="gazebo_sim" type="joint_cmd_publisher" output="screen"/> -->
+</launch>

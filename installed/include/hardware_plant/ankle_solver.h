@@ -6,7 +6,9 @@
 enum AnkleSolverType {
     ANKLE_SOLVER_TYPE_4GEN = 0,
     ANKLE_SOLVER_TYPE_4GEN_PRO = 1,
-    ANKLE_SOLVER_TYPE_5GEN = 2
+    ANKLE_SOLVER_TYPE_5GEN = 2,
+    ANKLE_SOLVER_TYPE_S1GEN = 3, 
+    ANKLE_SOLVER_TYPE_S2GEN = 4
 };
 class AnkleSolver
 {
@@ -31,6 +33,13 @@ public:
     Eigen::VectorXd motor_to_joint_position_pro_(const Eigen::VectorXd& p);
     Eigen::VectorXd motor_to_joint_velocity_pro_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& v);
     Eigen::VectorXd motor_to_joint_torque_pro_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& c);
+
+    Eigen::VectorXd joint_to_motor_position_s2_(const Eigen::VectorXd& q);
+    Eigen::VectorXd joint_to_motor_velocity_s2_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& dp);
+    Eigen::VectorXd joint_to_motor_current_s2_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& t);
+    Eigen::VectorXd motor_to_joint_position_s2_(const Eigen::VectorXd& p);
+    Eigen::VectorXd motor_to_joint_velocity_s2_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& v);
+    Eigen::VectorXd motor_to_joint_torque_s2_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& c);
     void getconfig(const int ankle_solver_type);
     AnkleSolverType getAnkleSolverType(){
         return  static_cast<AnkleSolverType>(ankle_solver_type_);

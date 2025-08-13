@@ -66,6 +66,7 @@ namespace HighlyDynamic
         model_settings.NUM_JOINT = robot_config.getValue<uint8_t>("NUM_JOINT");
         model_settings.NUM_ARM_JOINT = robot_config.getValue<uint8_t>("NUM_ARM_JOINT");
         model_settings.NUM_HEAD_JOINT = robot_config.getValue<uint8_t>("NUM_HEAD_JOINT");
+        model_settings.NUM_WAIST_JOINT = robot_config.getValue<uint8_t>("NUM_WAIST_JOINT");
         model_settings.is_parallel_arm = robot_config.getValue<bool>("isParallelArm");
 
         model_settings.end_frames_name = robot_config.getValue<std::vector<std::string>>("end_frames_name");
@@ -104,13 +105,20 @@ namespace HighlyDynamic
 
         if (!file.is_open()) {
             std::cerr << "\033[33mwarning: " << filePath << " 文件不存在, 未指定EcMasterType, 使用默认值 'elmo' 驱动器类型\033[0m" << std::endl;
+            
+            // For Roban robots (version 1X), use "leju" as default
+            if (rb_version.major() > 1 && rb_version.major() < 2) {
+                std::cerr << "\033[33mRoban robot detected (version " << std::to_string(rb_version.major()) << "), using 'leju' as default driver type\033[0m" << std::endl;
+                return "youda1";
+            }
+
             return "elmo";  
         }
 
         getline(file, ecMasterType);
         file.close();
 
-        if (ecMasterType != "elmo" && ecMasterType != "youda") {
+        if (ecMasterType != "elmo" && ecMasterType != "youda1" && ecMasterType != "youda3" && ecMasterType != "youda" && ecMasterType != "leju") {
             std::cerr << "\033[33mwarning: ecmaster_type :" << ecMasterType 
                   << " error, 使用默认值 'elmo' 驱动器类型\033[0m" << std::endl;
             return "elmo"; 
@@ -156,24 +164,35 @@ namespace HighlyDynamic
                 {"ruiwoPA60", {BIT_17_36, CK_MC, PA60_C2T, RUIWO}},
                 {"ruiwoPA43", {BIT_17_10, CK_MC, PA43_C2T, RUIWO}},
                 {"PA100_18", {BIT_17_18, PA100_MC, PA100_18_C2T, EC_MASTER}},
-                {"PA100_20", {BIT_17_20, PA100_MC, PA100_20_C2T, EC_MASTER}}};
+                {"PA100_20", {BIT_17_20, PA100_MC, PA100_20_C2T, EC_MASTER}},
+                {"PA4310_25", {BIT_17_25, PA4310_25_MC, PA4310_25_C2T, EC_MASTER}},
+                {"PA60", {BIT_17_36, PA100_MC, PA60_C2T, EC_MASTER}},
+                {"PA72_36", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
+                {"PA72_36_L", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
+                {"PA72_36_R", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
+                {"PA76_25", {BIT_17_25, PA76_25_MC, PA76_25_C2T, EC_MASTER}},
+                };
         hardware_settings.num_joints = robot_config.getValue<uint8_t>("NUM_JOINT");
         hardware_settings.num_arm_joints = robot_config.getValue<uint8_t>("NUM_ARM_JOINT");
         hardware_settings.num_head_joints = robot_config.getValue<uint8_t>("NUM_HEAD_JOINT");
+        hardware_settings.num_waist_joints = robot_config.getValue<uint8_t>("NUM_WAIST_JOINT");
         hardware_settings.imu_invert = robot_config.getValue<bool>("imu_invert");
         hardware_settings.imu_in_torso = robot_config.getValue<Eigen::VectorXd>("imu_in_torso");
-
         hardware_settings.peak_timeWin = robot_config.getValue<double>("peak_protection");
         hardware_settings.speed_timeWin = robot_config.getValue<double>("speed_protection");
         hardware_settings.lock_rotor_timeWin = robot_config.getValue<double>("locked_rotor_protection");
 
+        hardware_settings.robot_module = robot_config.getValue<std::string>("ROBOT_MODULE");
+
         hardware_settings.resizeMotor(hardware_settings.num_joints);
+        motor_c2t_settings.resizeMotor(hardware_settings.num_joints);
         std::vector<std::string> MOTORS_TYPE = robot_config.getValue<std::vector<std::string>>("MOTORS_TYPE");
         std::vector<double> min_limits = robot_config.getValue<std::vector<double>>("min_joint_position_limits");
         std::vector<double> max_limits = robot_config.getValue<std::vector<double>>("max_joint_position_limits");
         std::vector<double> vel_limits = robot_config.getValue<std::vector<double>>("joint_velocity_limits");
+        std::vector<double> peak_vel_limits = robot_config.getValue<std::vector<double>>("joint_peak_velocity_limits");
         std::vector<double> lock_rotor_limits = robot_config.getValue<std::vector<double>>("joint_torque_limits");
-        std::vector<double> peak_limits = robot_config.getValue<std::vector<double>>("joint_peak_torque_limits");
+        std::vector<double> peak_torque_limits = robot_config.getValue<std::vector<double>>("joint_peak_torque_limits");
 
 
         auto endsWith = [](std::string& s, const std::string& suffix) -> bool {
@@ -212,17 +231,22 @@ namespace HighlyDynamic
             }
 
             motor_config motor = motor_name_map[motor_type_name];
+            motor_c2t_settings.c2t_cul[i] = robot_config.getNestedStdVector("MOTOR_C2T", motor_type_name, "c2t_cul");
+            motor_c2t_settings.c2t_coeff[i] = robot_config.getNestedStdVector("MOTOR_C2T", motor_type_name, "c2t_coeff");
             hardware_settings.joint_ids[i] = i + 1;
             hardware_settings.motors_type[i] = motor_type_name;
             hardware_settings.driver[i] = motor.driver;
             hardware_settings.encoder_range[i] = motor.encoder_range;
             hardware_settings.max_current[i] = motor.max_current;
-            hardware_settings.c2t_coeff[i] = motor.c2t_coeff;
+            hardware_settings.c2t_coeff_default[i] = motor.c2t_coeff;
+            hardware_settings.c2t_coeff[i] = motor_c2t_settings.c2t_coeff[i];
+            hardware_settings.c2t_cul[i] = motor_c2t_settings.c2t_cul[i];
             hardware_settings.min_joint_position_limits[i] = min_limits[i];
             hardware_settings.max_joint_position_limits[i] = max_limits[i];
             hardware_settings.joint_velocity_limits[i] = vel_limits[i];
+            hardware_settings.joint_peak_velocity_limits[i] = peak_vel_limits[i];
             hardware_settings.joint_lock_rotor_limits[i] = lock_rotor_limits[i];
-             hardware_settings.joint_peak_limits[i] = peak_limits[i];
+             hardware_settings.joint_peak_limits[i] = peak_torque_limits[i];
         }
 
         std::vector<std::string> end_effector_type = robot_config.getValue<std::vector<std::string>>("EndEffectorType");
@@ -230,7 +254,8 @@ namespace HighlyDynamic
                                                                         {"jodell", EndEffectorType::jodell},
                                                                         {"qiangnao", EndEffectorType::qiangnao},
                                                                         {"lejuclaw", EndEffectorType::lejuclaw},
-                                                                        {"qiangnao_touch", EndEffectorType::qiangnao_touch}};
+                                                                        {"qiangnao_touch", EndEffectorType::qiangnao_touch},
+                                                                        {"revo2", EndEffectorType::revo2}};
         for (auto &name : end_effector_type)
         {
             // std::cout << "EndEffectorType: " << name << std::endl;

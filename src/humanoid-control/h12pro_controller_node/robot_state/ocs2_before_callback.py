@@ -636,3 +636,118 @@ def stop_record_vr_rosbag_callback(event):
     trigger = event.kwargs.get("trigger")
     print_state_transition(trigger, source, "vr_remote_control")
     kill_record_vr_rosbag()
+
+def stair_climb_callback(event):
+    """执行楼梯攀爬脚本的回调函数"""
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+    print_state_transition(trigger, source, "stance")
+    
+    command = f"bash -c 'source {kuavo_ros_control_ws_path}/devel/setup.bash && rosrun humanoid_controllers stairClimbPlanner-vision.py'"
+    rospy.loginfo(f"Executing stair climbing command: {command}")
+    
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            text=True,
+            check=False
+        )
+        if result.returncode == 0:
+            rospy.loginfo("Stair climbing script executed successfully.")
+        else:
+            rospy.logerr(f"Stair climbing script failed with return code: {result.returncode}")
+    except Exception as e:
+        rospy.logerr(f"Failed to execute stair climbing script: {e}")
+
+def start_stair_detect_callback(event):
+    """启动楼梯检测的回调函数 - 使用ROS服务"""
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+    print_state_transition(trigger, source, "stance")
+    
+    try:
+        # 根据环境变量确定相机类型和服务名称
+        camera_type = os.environ.get('STAIR_DETECTION_CAMERA', 'orbbec')
+        rospy.loginfo(f"Using camera type from environment: {camera_type}")
+        
+        if camera_type == 'orbbec':
+            start_service_name = '/kuavo/start_stair_detection_orbbec'
+        else:  # d435 or any other value
+            start_service_name = '/kuavo/start_stair_detection'
+        
+        # 停止服务统一使用这个名称，不区分相机类型
+        stop_service_name = '/kuavo/stop_stair_detection'
+        
+        rospy.loginfo(f"Using services: start={start_service_name}, stop={stop_service_name}")
+        
+        # 首先停止楼梯检测
+        try:
+            rospy.loginfo("Stopping stair detection before starting...")
+            rospy.wait_for_service(stop_service_name, timeout=3.0)
+            stop_stair_detection_client = rospy.ServiceProxy(stop_service_name, Trigger)
+            stop_req = TriggerRequest()
+            stop_response = stop_stair_detection_client(stop_req)
+            
+            if stop_response.success:
+                rospy.loginfo(f"Stair detection stopped successfully: {stop_response.message}")
+            else:
+                rospy.logwarn(f"Failed to stop stair detection (proceeding anyway): {stop_response.message}")
+                
+        except rospy.ROSException as e:
+            rospy.logwarn(f"Stop service not available (proceeding anyway): {e}")
+        except rospy.ServiceException as e:
+            rospy.logwarn(f"Stop service call failed (proceeding anyway): {e}")
+        
+        # 等待2秒
+        rospy.loginfo("Waiting 2 seconds before starting stair detection...")
+        time.sleep(2)
+        
+        # 启动楼梯检测
+        rospy.loginfo("Starting stair detection...")
+        rospy.wait_for_service(start_service_name, timeout=3.0)
+        start_stair_detection_client = rospy.ServiceProxy(start_service_name, Trigger)
+        
+        req = TriggerRequest()
+        response = start_stair_detection_client(req)
+        
+        if response.success:
+            rospy.loginfo(f"Stair detection started successfully: {response.message}")
+        else:
+            rospy.logerr(f"Failed to start stair detection: {response.message}")
+            
+    except rospy.ROSException as e:
+        rospy.logerr(f"Service not available: {e}")
+    except rospy.ServiceException as e:
+        rospy.logerr(f"Service call failed: {e}")
+    except Exception as e:
+        rospy.logerr(f"Unexpected error in start_stair_detect_callback: {e}")
+
+def stop_stair_detect_callback(event):
+    """停止楼梯检测的回调函数 - 使用ROS服务"""
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+    print_state_transition(trigger, source, "stance")
+    
+    try:
+        # 停止服务统一使用这个名称，不区分相机类型
+        service_name = '/kuavo/stop_stair_detection'
+        rospy.loginfo(f"Using stop service: {service_name}")
+        rospy.wait_for_service(service_name, timeout=3.0)
+        stop_stair_detection_client = rospy.ServiceProxy(service_name, Trigger)
+        
+        req = TriggerRequest()
+        response = stop_stair_detection_client(req)
+        
+        if response.success:
+            rospy.loginfo(f"Stair detection stopped successfully: {response.message}")
+        else:
+            rospy.logerr(f"Failed to stop stair detection: {response.message}")
+            
+    except rospy.ROSException as e:
+        rospy.logerr(f"Service not available: {e}")
+    except rospy.ServiceException as e:
+        rospy.logerr(f"Service call failed: {e}")
+    except Exception as e:
+        rospy.logerr(f"Unexpected error in stop_stair_detect_callback: {e}")
+

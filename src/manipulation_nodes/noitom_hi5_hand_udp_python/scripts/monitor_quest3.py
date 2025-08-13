@@ -13,7 +13,8 @@ import math
 import netifaces
 from pprint import pprint
 from kuavo_ros_interfaces.msg import robotHeadMotionData
-from noitom_hi5_hand_udp_python.msg import PoseInfoList, PoseInfo, JoySticks
+from noitom_hi5_hand_udp_python.msg import PoseInfoList, PoseInfo
+from kuavo_msgs.msg import JoySticks
 from geometry_msgs.msg import Point, Quaternion
 import threading
 from visualization_msgs.msg import Marker
@@ -58,12 +59,15 @@ class Quest3BoneFramePublisher:
         self.rate = rospy.Rate(100.0)
         
         self.br = tf.TransformBroadcaster()
-        self.pose_pub = rospy.Publisher('/leju_quest_bone_poses', PoseInfoList, queue_size=10)
+        self.pose_pub = rospy.Publisher('/leju_quest_bone_poses', PoseInfoList, queue_size=2)
         self.head_data_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
-        self.joysticks_pub = rospy.Publisher('quest_joystick_data', JoySticks, queue_size=10)
+        self.joysticks_pub = rospy.Publisher('quest_joystick_data', JoySticks, queue_size=2)
         
         self.listener = tf.TransformListener()
         self.hand_finger_tf_pub = rospy.Publisher('/quest_hand_finger_tf', TFMessage, queue_size=10)
+
+        self.enable_head_control = rospy.get_param("~enable_head_control", True)
+        rospy.loginfo(f"enable_head_control: {self.enable_head_control}")
         signal.signal(signal.SIGINT, self.signal_handler)
         self.broadcast_ips = []
         self.robot_info_sent_initial_broadcast = False
@@ -207,20 +211,25 @@ class Quest3BoneFramePublisher:
         return degree
 
     def pub_head_motion_data(self, cur_quat):
-        if self.calibrated_head_quat_matrix_inv is None:
-            calibrated_head_quat_matrix = tf.transformations.quaternion_matrix(cur_quat)
-            self.calibrated_head_quat_matrix_inv = tf.transformations.inverse_matrix(calibrated_head_quat_matrix)
-        else:
-            current_quat_matrix = tf.transformations.quaternion_matrix(cur_quat)
-            relative_quat_matrix = tf.transformations.concatenate_matrices(self.calibrated_head_quat_matrix_inv, current_quat_matrix)
-            relative_quat = tf.transformations.quaternion_from_matrix(relative_quat_matrix)
-            rpy = tf.transformations.euler_from_quaternion(relative_quat)
+        try:
+            # Get the transform from Chest to Head using TF listener
+            (trans, rot) = self.listener.lookupTransform("Chest", "Head", rospy.Time(0))
+            
+            # Convert quaternion to euler angles (roll, pitch, yaw)
+            rpy = tf.transformations.euler_from_quaternion(rot)
             rpy_deg = [r * 180 / math.pi for r in rpy]
+            
+            # Extract pitch (around X-axis) and yaw (around Y-axis)
             pitch = max(min(self.normalize_degree_in_180(round(rpy_deg[0], 2)), self.head_motion_range["pitch"][1]), self.head_motion_range["pitch"][0])
             yaw = max(min(self.normalize_degree_in_180(round(rpy_deg[1], 2)), self.head_motion_range["yaw"][1]), self.head_motion_range["yaw"][0])
+            
             msg = robotHeadMotionData()
-            msg.joint_data = [yaw , pitch]
+            msg.joint_data = [yaw, pitch]
             self.head_data_pub.publish(msg)
+            
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+            rospy.logerr(f"TF lookup failed for Chest->Head transform: {e}")
+            return
 
     def run(self):
         loop_count = 0
@@ -299,8 +308,8 @@ class Quest3BoneFramePublisher:
             self.updateAFrame(bone_name, right_hand_position, right_hand_quat, time_now)
 
 
-            # if bone_name == "Head":
-            #     self.pub_head_motion_data(right_hand_quat)
+            if bone_name == "Head" and self.enable_head_control:
+                self.pub_head_motion_data(right_hand_quat)
 
     def restart_socket(self):
         print("Restarting socket connection...")

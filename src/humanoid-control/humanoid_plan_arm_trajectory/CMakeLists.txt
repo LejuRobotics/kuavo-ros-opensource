@@ -21,6 +21,7 @@ find_package(catkin REQUIRED COMPONENTS
   trajectory_msgs
   urdf
   kuavo_msgs
+  nav_msgs
 )
 
 find_package(drake REQUIRED)
@@ -91,6 +92,7 @@ generate_messages(
   trajectory_msgs
   humanoid_plan_arm_trajectory
   kuavo_msgs
+  nav_msgs
 )
 
 ################################################
@@ -125,7 +127,7 @@ generate_messages(
 catkin_package(
   INCLUDE_DIRS include  ${drake_INCLUDE_DIRS}
   LIBRARIES humanoid_plan_arm_trajectory
-  CATKIN_DEPENDS geometry_msgs nodelet pluginlib roscpp std_msgs message_runtime message_generation trajectory_msgs
+  CATKIN_DEPENDS geometry_msgs nodelet pluginlib roscpp std_msgs message_runtime message_generation trajectory_msgs nav_msgs
   DEPENDS drake::drake
 )
 

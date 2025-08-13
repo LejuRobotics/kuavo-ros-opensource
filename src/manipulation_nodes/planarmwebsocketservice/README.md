@@ -72,6 +72,22 @@
     }
 }
 ```
+robot_info 字段说明如下：
+
+| 字段名                    | 类型   | 说明                                   |
+|-------------------------|------|--------------------------------------|
+| robot_name              | str  | 机器人名称                              |
+| robot_ip                | str  | 机器人当前IP地址                         |
+| robot_connect_wifi      | str  | 机器人当前连接的WiFi名称                  |
+| robot_ws_address        | str  | 机器人WebSocket服务地址                   |
+| robot_ws_logger_address | str  | 机器人WebSocket日志服务地址                |
+| robot_upload_folder     | str  | 机器人执行文件上传目录（同目录下的upload_files文件夹）   |
+| robot_username          | str  | 机器人系统用户名                          |
+| robot_mac_address       | str  | 机器人MAC地址                             |
+| robot_action_file_folder| str  | 机器人动作文件存储目录（通常为~/.config/lejuconfig/action_files） |
+
+这些字段用于客户端自动发现机器人、获取机器人网络与动作文件相关信息，便于后续动作文件的上传、执行与管理。
+
 
 ### 获取机器人信息
 
@@ -353,6 +369,285 @@ response:
 - 需要确保环境变量 `KUAVO_REMOTE_PASSWORD` 已正确设置（base64 编码的远程登录密码）
 - 需要确保网络连接正常，能够访问下载地址
 - 上位机需要有足够的磁盘空间存储下载的文件
+#### 获取零点
+
+从文件中获取所有电机的零点值
+
+request:
+
+```json
+{
+    "cmd": "get_zero_point"
+}
+```
+
+response:
+
+```json
+{
+    "cmd": "get_zero_point",
+    "data": {
+        "code": 0,
+        "zero_pos": list,
+        "message": "Zero point retrieved successfully"
+    }
+}
+```
+
+| 名称        | 类型     | 描述        |
+| --------- | ------ | --------- |
+| code      | int    | 错误码 0: 成功 |
+| zero_pos | list   | 零点位置列表单位degree|
+| message   | string | 结果描述      |
+
+zero_pos列表关节顺序和sensors_data_raw话题一致：
+
+对于ROBOT_VERSION >= 40
+
+- 其中关节数据的数组长度为28, 对应的数据顺序为:
+  - 前 12 个数据为下肢电机数据, 
+    - 0~5 为左下肢数据, 从髋部到脚踝,
+    - 6 ~ 11 为右边下肢数据, 从髋部到脚踝,
+  - 接着 14 个数据为手臂电机数据, 
+    - 12 ~ 18 左臂电机数据, 从肩部到手腕,
+    - 19 ~ 25 为右臂电机数据, 从肩部到手腕
+  - 最后 2 个为头部电机数据, 分别为 head_yaw 和 head_pitch
+
+对于roban ROBOT_VERSION >= 11 ROBOT_VERSION < 20
+
+- 其中关节数据的数组长度为 21, 对应的数据顺序为:
+  - 第 0 个数据为腰部电机数据
+  - 1 ~ 12 个数据为下肢电机数据, 
+    - 1 ~ 6 为左下肢数据, 从髋部到脚踝,
+    - 7 ~ 12 为右边下肢数据, 从髋部到脚踝,
+  - 接着 8 个数据为手臂电机数据, 
+    - 13 ~ 16 左臂电机数据, 从肩部到手腕,
+    - 17 ~ 20 为右臂电机数据, 从肩部到手腕
+
+
+#### 调整零点
+
+设置调整单个电机零点值
+
+request:
+
+```json
+{
+    "cmd": "adjust_zero_point",
+    "data": {
+        "motor_index": int,
+        "adjust_pos": float
+    }
+}
+```
+
+| 名称         | 类型   | 描述        |
+| ---------- | ---- | --------- |
+| motor_index | int  | 电机索引，顺序和 get_zero_point 中的zero_pos一致     |
+| adjust_pos  | float | 零点调整值（degree） |
+
+response:
+
+```json
+{
+    "cmd": "adjust_zero_point",
+    "data": {
+        "code": int,
+        "message": str
+    }
+}
+```
+
+| 名称   | 类型  | 描述        |
+| ---- | --- | --------- |
+| code | int | 错误码 0: 成功 |
+
+#### 设置零点
+
+将接收的零点值写入零点文件
+
+request:
+
+```json
+{
+    "cmd": "set_zero_point",
+    "data": {
+        "zero_pos": list
+    }
+}
+```
+
+| 名称      | 类型   | 描述        |
+| ------- | ---- | --------- |
+| zero_pos | list | 零点值（degree），顺序和 get_zero_point 中的zero_pos一致 |
+
+response:
+
+```json
+{
+    "cmd": "set_zero_point",
+    "data": {
+        "code": 0,
+        "message": "Zero point set successfully"
+    }
+}
+```
+
+| 名称   | 类型  | 描述        |
+| ---- | --- | --------- |
+| code | int | 错误码 0: 成功 |
+
+
+
+### 执行或停止指定上传的脚本
+该接口用于通过 websocket 启动或停止指定上传的 Python 脚本。  
+- 当 `action_data` 为 `"start_action"` 时，服务器会在后台启动 `scripts_name` 指定的脚本文件，并返回执行结果。  
+- 当 `action_data` 为 `"stop_action"` 时，服务器会查找并终止与 `scripts_name` 匹配的脚本进程，并返回操作结果。  
+- `scripts_name` 可以带绝对路径，也可以单纯为文件名；如果仅包含文件名，则会默认脚本文件位于上传目录（**"ROBOT_UPLOAD_FOLDER"**）的路径，需确保文件存在且有执行权限。  
+- 返回的 `code` 字段表示操作结果，`message` 字段为详细信息。  
+
+request:
+
+```json
+{
+    "cmd": "execute_python_script",
+    "data": {
+        "action_data": "start/stop_action",
+        "scripts_name":"**/test.py"
+    }
+}
+```
+
+| 名称   | 类型     | 描述                      |
+| ---- | ------ | ----------------------- |
+| action_data | string | 启动或停止脚本 |
+| scripts_name | string | 脚本名字或路径 |
+response:
+
+```json
+{
+    "cmd": "execute_python_script",
+    "data": {
+        "code": 0,
+        "message": "message"
+    }
+}
+```
+| 名称   | 类型     | 描述                 |
+| ---- | ------ | ------------------ |
+| code | int    | 错误码 0: 成功 1:参数错误  2：文件不存在 3：脚本执行失败 4：接口内部异常|
+| message  | string | 信息                 |
+
+### 执行预置演示程序
+
+request:
+
+```json
+{
+    "cmd": "execute_demo",
+    "data": {
+        "demo_name": "demo_name",
+        "parameters": {}
+    }
+}
+```
+
+| 名称   | 类型     | 描述                      |
+| ---- | ------ | ----------------------- |
+| demo_name | string | 演示程序名称，人脸追踪：face_track, S 型曲线行走：trace_path |
+| parameters | map | 演示程序参数（可选），参数名和参数值的映射 |
+
+
+response:
+
+```json
+{
+    "cmd": "execute_demo",
+    "data": {
+        "code": 0,
+        "msg": "Demo execution started"
+    }
+}
+```
+
+| 名称   | 类型     | 描述                 |
+| ---- | ------ | ------------------ |
+| code | int    | 错误码 0: 成功 1: 演示程序不存在 |
+| msg  | string | 执行状态信息             |
+
+
+
+#### S 型曲线行走
+
+
+S 型曲线行走
+
+![S 型曲线行走](./imgs/scurve.png)
+
+弧形曲线行走
+
+![弧形曲线行走](./imgs/half-scurve.png)
+
+
+可配置参数：
+
+| 名称   | 类型     | 描述                 |
+| ---- | ------ | ------------------ |
+| --length | float | 曲线长度(可选),  默认值为 4.0 m |
+| --amplitude | float | 曲线幅度(可选), 默认值为 2.0 m |
+| --half_scurve | bool | 是否为弧形曲线(可选), 默认值为 false |
+
+例如：
+
+```json
+{
+    "cmd": "execute_demo",
+    "data": {
+        "demo_name": "trace_path",
+        "parameters": {
+            "--length": 4.0,
+            "--amplitude": 2.0,
+            "--half_scurve": true
+        }
+    }
+}
+
+```
+
+**注意：**
+
+- 弧形曲线是半个 S 型曲线的意思
+- length 参数表示 S 型曲线的长度
+- 如果类型为弧形曲线, 则实际的曲线 length 为 length / 2
+
+
+
+### 停止演示程序
+
+request:
+
+```json
+{
+    "cmd": "stop_execute_demo"
+}
+```
+
+response:
+
+```json
+{
+    "cmd": "stop_execute_demo",
+    "data": {
+        "code": 0,
+        "msg": "Demo execution stopped"
+    }
+}
+```
+
+| 名称   | 类型     | 描述                 |
+| ---- | ------ | ------------------ |
+| code | int    | 错误码 0: 成功 1: 停止失败 |
+| msg  | string | 停止状态信息             |
 
 ### logger 日志 websocket
 
@@ -409,6 +704,164 @@ ws://{robot_ws_logger_address}
     "function": "start_robot"
 }
 ```
+
+### 11. 获取音乐列表 (get_music_list)
+
+**描述**: 获取可用的音乐文件列表。判断音频设备是否下位机，如果在下位机本地音乐文件列表，否则获取上位机的音乐文件列表
+
+**请求**:
+```json
+{
+  "cmd": "get_music_list",
+  "data": {}
+}
+```
+
+**响应**:
+```json
+{
+  "cmd": "get_music_list",
+  "data": {
+    "code": 0,
+    "music_list": [
+      "/home/robot/.config/lejuconfig/music/music.mp3",
+      "/home/robot/.config/lejuconfig/music/music.wav"
+    ]
+  }
+}
+
+```
+
+## 导航功能
+
+### 加载地图
+request:
+
+```json
+{
+    "cmd": "load_map",
+    "data":{
+        "map_name":"target_map_name"
+    }
+}
+```
+
+response:
+
+```json
+{
+    "cmd": "load_map",
+    "data": {
+        "code": 0,
+        "map_path":"/home/lab/.config/lejuconfig/maps/target_map_name.pgm",
+        "msg": "Map loaded successfully"
+    }
+}
+```
+
+| 名称            | 类型     | 描述             |
+| ------------- | ------ | -------------- |
+| code          | int    | 错误码 0: 成功,1:地图加载成功,但地图下载失败, 2:地图加载失败,且地图下载也失败      |
+| map_path | string | 目标地图的图片路径         |
+| msg | string | 接口结果的描述         |
+
+
+### 获取所有的地图
+request:
+
+```json
+{
+    "cmd": "get_all_maps"
+}
+```
+
+response:
+
+```json
+{
+    "cmd": "get_all_maps",
+    "data": {
+        "code": 0,
+        "maps":["map1_name","map2_name"],
+        "msg": "Init successfully"
+    }
+}
+```
+
+| 名称            | 类型     | 描述             |
+| ------------- | ------ | -------------- |
+| code          | int    | 错误码 0: 获取成功,1:获取失败      |
+| maps           | list | 地图名字列表        |
+| msg           | string | 接口结果的描述         |
+
+
+
+### 通过目标位姿进行初始化
+request:
+
+```json
+{
+    "cmd": "init_localization_by_pose",
+    "data":{
+        "x":0.0,
+        "y":0.0,
+        "z":0.0,
+        "roll":0.0,
+        "pitch":0.0,
+        "yaw":0.0
+    }
+}
+```
+
+response:
+
+```json
+{
+    "cmd": "init_localization_by_pose",
+    "data": {
+        "code": 0,
+        "msg": "Init successfully"
+    }
+}
+```
+
+| 名称            | 类型     | 描述             |
+| ------------- | ------ | -------------- |
+| code          | int    | 错误码 0: 初始化成功,1:初始化失败      |
+| msg           | string | 接口结果的描述         |
+
+
+### 获取当前机器人的位置
+request:
+
+```json
+{
+    "cmd": "get_robot_position"
+}
+```
+
+response:
+
+```json
+{
+    "cmd": "get_robot_position",
+    "data": {
+        "code": 0,
+        "position":{"png_x":249,
+        "png_y":476,
+        "origin_grid_x":249,
+        "origin_grid_y":202},
+        "msg": "Get robot position successfully"
+    }
+}
+```
+
+| 名称            | 类型     | 描述             |
+| ------------- | ------ | -------------- |
+| code          | int    | 错误码 0: 获取成功,1:获取失败      |
+| position           | list | 点位列表，包含当前机器人位置(png_x,png_y),和地图原点位置(origin_grid_x,origin_grid_y)        |
+| msg           | string | 接口结果的描述         |
+
 
 ## YOLO目标检测
 

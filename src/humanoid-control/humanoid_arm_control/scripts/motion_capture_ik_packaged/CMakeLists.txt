@@ -31,6 +31,8 @@ add_message_files(
   ikSolveParam.msg
   twoArmHandPoseCmd.msg
   robotHandPosition.msg
+  twoArmHandPoseFree.msg
+  twoArmHandPoseCmdFree.msg
 )
 add_service_files(
   DIRECTORY srv

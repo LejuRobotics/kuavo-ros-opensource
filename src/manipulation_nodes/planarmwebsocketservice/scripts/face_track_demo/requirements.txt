@@ -1,0 +1,6 @@
+# requirements.txt
+opencv-python>=4.5.0
+ultralytics>=8.1.0
+
+# NOTE: cv_bridge must be installed via ROS, e.g.:
+# sudo apt install ros-noetic-cv-bridge

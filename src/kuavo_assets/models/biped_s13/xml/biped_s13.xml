@@ -1,0 +1,246 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="biped_s13">
+  <compiler angle="radian" meshdir="../meshes/" />
+  <size njmax="500" nconmax="100" />
+  <asset>
+    <mesh name="torso" file="torso.STL" />
+    <mesh name="waist" file="waist.STL" />
+    <mesh name="l_leg_pitch" file="l_leg_pitch.STL" />
+    <mesh name="l_leg_roll" file="l_leg_roll.STL" />
+    <mesh name="l_leg_yaw" file="l_leg_yaw.STL" />
+    <mesh name="l_knee" file="l_knee.STL" />
+    <mesh name="l_foot_pitch" file="l_foot_pitch.STL" />
+    <mesh name="l_foot_roll" file="l_foot_roll_big.STL" />
+    <mesh name="r_leg_pitch" file="r_leg_pitch.STL" />
+    <mesh name="r_leg_roll" file="r_leg_roll.STL" />
+    <mesh name="r_leg_yaw" file="r_leg_yaw.STL" />
+    <mesh name="r_knee" file="r_knee.STL" />
+    <mesh name="r_foot_pitch" file="r_foot_pitch.STL" />
+    <mesh name="r_foot_roll" file="r_foot_roll_big.STL" />
+    <mesh name="l_arm_pitch" file="l_arm_pitch.STL" />
+    <mesh name="l_arm_roll" file="l_arm_roll.STL" />
+    <mesh name="l_arm_yaw" file="l_arm_yaw.STL" />
+    <mesh name="l_forearm_hand" file="l_forearm_hand.STL" />
+    <mesh name="r_arm_pitch" file="r_arm_pitch.STL" />
+    <mesh name="r_arm_roll" file="r_arm_roll.STL" />
+    <mesh name="r_arm_yaw" file="r_arm_yaw.STL" />
+    <mesh name="r_forearm_hand" file="r_forearm_hand.STL" />
+    <mesh name="head_yaw" file="head_yaw.STL" />
+    <mesh name="head_pitch" file="head_pitch.STL" />
+  </asset>
+  <worldbody>
+    <body name="base_link" pos="0 0 0.82">
+      <freejoint />
+      <site name="imu" pos="0 0 0" />
+      <inertial pos="0.00227055 0 0.116357" mass="4.0873" diaginertia="0.0635602 0.0531495 0.0343499"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso" />
+      <body name="waist" pos="0.0 0.0 -0.0">
+        <inertial pos="0.0016929 0.0 -0.11846153" mass="5.17438719" diaginertia="0.02255553 0.016671 0.0153296"/>
+        <joint name="waist_joint" pos="0 0 0" axis="0 0 1" range="-2.0944 2.0944" actuatorfrcrange="-50 50" damping="0.5" frictionloss="0.3"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist"/>
+        <body name="leg_l1_link" pos="0 0.114335 -0.216735">
+          <inertial pos="-0.0128162 -0.0241187 0.0242652" quat="0.252727 0.659724 0.296498 0.642637" mass="0.411798" diaginertia="0.00101542 0.000890533 0.000532762"/>
+          <joint name="leg_l1_joint" pos="0 0 0" axis="0 0.707107 -0.707107" range="-1.65806 1.5708" actuatorfrcrange="-180 180" damping="0.2" frictionloss="0.0"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_leg_pitch"/>
+          <body name="leg_l2_link">
+            <inertial pos="-0.00113407 0.00022674 -0.055039" mass="2.60733" diaginertia="0.00748166 0.00726718 0.00283326"/>
+            <joint name="leg_l2_joint" pos="0 0 0" axis="1 0 0" range="-1.0472 0.847008" actuatorfrcrange="-100 100" damping="0.2" frictionloss="0.0"/>
+            <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_leg_roll"/>
+            <body name="leg_l3_link">
+              <inertial pos="-0.0148641 -0.00438159 -0.175626" quat="0.707107 0 0 0.707107" mass="1.03799" diaginertia="0.00143771 0.00130665 0.00092289"/>
+              <joint name="leg_l3_joint" pos="0 0 0" axis="0 0 1" range="-1.91986 0.878424" actuatorfrcrange="-100 100" damping="0.2" frictionloss="0.0"/>
+              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_leg_yaw"/>
+              <body name="leg_l4_link" pos="-0.021 0 -0.182">
+                <inertial pos="0.0227641 0.00634133 -0.0971725" quat="0.707107 0 0 0.707107" mass="1.78407" diaginertia="0.00820174 0.00775509 0.00156093"/>
+                <joint name="leg_l4_joint" pos="0 0 0" axis="0 1 0" range="0 2.61799" actuatorfrcrange="-180 180" damping="0.2" frictionloss="0.0"/>
+                <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_knee"/>
+                <body name="leg_l5_link" pos="0.021 0 -0.235">
+                  <inertial pos="0 0 0" mass="0.0692377" diaginertia="6.7e-05 6.7e-05 1.172e-05"/>
+                  <joint name="leg_l5_joint" pos="0 0 0" axis="0 1 0" range="-0.872665 0.523599" actuatorfrcrange="-36 36" damping="0.2" frictionloss="0.0"/>
+                  <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_foot_pitch"/>
+                  <body name="leg_l6_link">
+                    <inertial pos="-0.000611525 2.7744e-05 -0.0235405" quat="-2.68642e-06 0.707507 -5.19934e-06 0.706706" mass="0.388796" diaginertia="0.00134159 0.00118448 0.000275798"/>
+                    <joint name="leg_l6_joint" pos="0 0 0" axis="1 0 0" range="-0.261799 0.261799" actuatorfrcrange="-36 36" damping="0.2" frictionloss="0.0"/>
+                    <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_foot_roll"/>
+                    <geom size="0.005" pos="0.126 0.05 -0.0435"/>
+                    <geom size="0.005" pos="-0.089 0.05 -0.0435"/>
+                    <geom size="0.005" pos="0.126 -0.05 -0.0435"/>
+                    <geom size="0.005" pos="-0.089 -0.05 -0.0435"/>
+                    <geom size="0.005" pos="0.126 0 -0.0435"/>
+                    <geom size="0.005" pos="-0.089 0 -0.0435"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+        <body name="leg_r1_link" pos="0 -0.114335 -0.216735">
+          <inertial pos="-0.0128124 0.0241183 0.0242647" quat="0.642642 0.296575 0.65972 0.252634" mass="0.411907" diaginertia="0.00101558 0.000890648 0.000532861"/>
+          <joint name="leg_r1_joint" pos="0 0 0" axis="0 -0.707107 -0.707107" range="-1.65806 1.5708" actuatorfrcrange="-180 180" damping="0.2" frictionloss="0.0"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_leg_pitch"/>
+          <body name="leg_r2_link">
+            <inertial pos="-0.00091249 -5.402e-05 -0.0552687" mass="2.60771" diaginertia="0.00748166 0.00726718 0.00283326"/>
+            <joint name="leg_r2_joint" pos="0 0 0" axis="1 0 0" range="-1.0472 0.847008" actuatorfrcrange="-100 100" damping="0.2" frictionloss="0.0"/>
+            <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_leg_roll"/>
+            <body name="leg_r3_link">
+              <inertial pos="-0.0150602 0.00499577 -0.174547" quat="0.707107 0 0 0.707107" mass="1.03798" diaginertia="0.00143771 0.00130665 0.00092289"/>
+              <joint name="leg_r3_joint" pos="0 0 0" axis="0 0 1" range="-1.91986 0.878424" actuatorfrcrange="-100 100" damping="0.2" frictionloss="0.0"/>
+              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_leg_yaw"/>
+              <body name="leg_r4_link" pos="-0.021 0 -0.182">
+                <inertial pos="0.0227199 -0.0079271 -0.0980879" quat="0.707107 0 0 0.707107" mass="1.78444" diaginertia="0.00820174 0.00775509 0.00156093"/>
+                <joint name="leg_r4_joint" pos="0 0 0" axis="0 1 0" range="0 2.61799" actuatorfrcrange="-180 180" damping="0.2" frictionloss="0.0"/>
+                <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_knee"/>
+                <body name="leg_r5_link" pos="0.021 0 -0.235">
+                  <inertial pos="0 0 0" mass="0.0692377" diaginertia="6.7e-05 6.7e-05 1.172e-05"/>
+                  <joint name="leg_r5_joint" pos="0 0 0" axis="0 1 0" range="-0.872665 0.523599" actuatorfrcrange="-36 36" damping="0.2" frictionloss="0.0"/>
+                  <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_foot_pitch"/>
+                  <body name="leg_r6_link">
+                    <inertial pos="-0.000599244 -2.64345e-05 -0.0235552" quat="3.74973e-06 0.707507 3.75398e-06 0.706706" mass="0.388521" diaginertia="0.00134159 0.00118447 0.000275796"/>
+                    <joint name="leg_r6_joint" pos="0 0 0" axis="1 0 0" range="-0.261799 0.261799" actuatorfrcrange="-36 36" damping="0.2" frictionloss="0.0"/>
+                    <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_foot_roll"/>
+                    <geom size="0.005" pos="0.126 0.05 -0.0435"/>
+                    <geom size="0.005" pos="-0.089 0.05 -0.0435"/>
+                    <geom size="0.005" pos="0.126 -0.05 -0.0435"/>
+                    <geom size="0.005" pos="-0.089 -0.05 -0.0435"/>
+                    <geom size="0.005" pos="0.126 0 -0.0435"/>
+                    <geom size="0.005" pos="-0.089 0 -0.0435"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="zarm_l1_link" pos="0.00734742 0.162504 0.202427">
+        <inertial pos="0.00335591 -0.00249177 1.895e-05" quat="0.730041 0.438009 -0.175214 0.494458" mass="0.444918" diaginertia="0.000360065 0.00026323 0.000192115" />
+        <joint name="zarm_l1_joint" pos="0 0 0" axis="0 1 0" range="-3.14159 2.0944" actuatorfrcrange="-12 12" damping="0.2" frictionloss="0.0" />
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_arm_pitch" />
+        <body name="zarm_l2_link">
+          <inertial pos="0.00025941 0 -0.0368458" quat="0.660165 0.253342 0.253342 0.660165" mass="0.259844" diaginertia="0.00043526 0.000377904 0.000253216" />
+          <joint name="zarm_l2_joint" pos="0 0 0" axis="1 0 0" range="-0.349066 3.49066" actuatorfrcrange="-12 12" damping="0.2" frictionloss="0.0" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_arm_roll" />
+          <body name="zarm_l3_link">
+            <inertial pos="-0.0001383 -0.00323921 -0.143148" quat="0.961534 -0.0369404 -0.000118226 -0.272192" mass="0.774066" diaginertia="0.0020332 0.00197983 0.000420206" />
+            <joint name="zarm_l3_joint" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-12 12" damping="0.2" frictionloss="0.0" />
+            <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_arm_yaw" />
+            <body name="zarm_l4_link" pos="0 0 -0.188">
+              <inertial pos="0.00775528 -0.00671391 -0.180389" quat="0.707139 -1.0418e-05 -1.31646e-06 0.707074" mass="0.483726" diaginertia="0.00338102 0.00308564 0.00054063"/>
+              <joint name="zarm_l4_joint" pos="0 0 0" axis="0 1 0" range="-2.26893 0" actuatorfrcrange="-12 12" damping="0.2" frictionloss="0.0"/>
+              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_forearm_hand"/>
+              <geom size="0.005" pos="0 0 -0.17" />
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="zarm_r1_link" pos="0.00734742 -0.162504 0.202427">
+        <inertial pos="0.00335581 0.00249177 1.809e-05" quat="0.462957 0.728208 -0.478888 0.161401" mass="0.444917" diaginertia="0.000353059 0.000261187 0.000201144" />
+        <joint name="zarm_r1_joint" pos="0 0 0" axis="0 1 0" range="-3.14159 2.0944" actuatorfrcrange="-12 12" damping="0.2" frictionloss="0.0" />
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_pitch" />
+        <body name="zarm_r2_link">
+          <inertial pos="0.0002594 0 -0.0368456" quat="0.660165 0.253342 0.253342 0.660165" mass="0.259835" diaginertia="0.00043526 0.000377894 0.000253206" />
+          <joint name="zarm_r2_joint" pos="0 0 0" axis="1 0 0" range="-3.49066 0.349066" actuatorfrcrange="-12 12" damping="0.2" frictionloss="0.0" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_roll" />
+          <body name="zarm_r3_link">
+            <inertial pos="-0.00013784 0.00323927 -0.143149" quat="0.961558 0.0369378 -0.000114261 0.272107" mass="0.774042" diaginertia="0.00203317 0.0019798 0.000420188" />
+            <joint name="zarm_r3_joint" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-12 12" damping="0.2" frictionloss="0.0" />
+            <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_yaw" />
+            <body name="zarm_r4_link" pos="0 0 -0.188">
+              <inertial pos="0.00775528 0.00671391 -0.180389" quat="0.707074 -1.31646e-06 -1.0418e-05 0.707139" mass="0.483726" diaginertia="0.00338102 0.00308564 0.00054063"/>
+              <joint name="zarm_r4_joint" pos="0 0 0" axis="0 1 0" range="-2.26893 0" actuatorfrcrange="-12 12" damping="0.2" frictionloss="0.0"/>
+              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_forearm_hand"/>
+              <geom size="0.005" pos="0 0 -0.17" />
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="zhead_1_link" pos="0 0 0.331282">
+        <inertial pos="-2.17e-06 0 0" mass="0.860017" diaginertia="0.00182827 0.00158462 0.00060882"/>
+        <joint name="zhead_1_joint" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-50 50" damping="0.2" frictionloss="0.0" />
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="head_yaw" />
+        <body name="zhead_2_link">
+          <inertial pos="0.0148398 -0.0004003 0.0312702" quat="0 0.707107 0 0.707107" mass="0.3542" diaginertia="0.00114126 0.00095408 0.00092946" />
+          <joint name="zhead_2_joint" pos="0 0 0" axis="0 1 0" range="0 0.523599" actuatorfrcrange="-50 50" damping="0.2" frictionloss="0.0" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="head_pitch" />
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor gear="1" joint="waist_joint" name="waist_joint_motor" ctrllimited="true" ctrlrange="-50 50" />
+    <motor gear="1" joint="leg_l1_joint" name="leg_l1_joint_motor" ctrllimited="true" ctrlrange="-180 180" />
+    <motor gear="1" joint="leg_l2_joint" name="leg_l2_joint_motor" ctrllimited="true" ctrlrange="-100 100" />
+    <motor gear="1" joint="leg_l3_joint" name="leg_l3_joint_motor" ctrllimited="true" ctrlrange="-100 100" />
+    <motor gear="1" joint="leg_l4_joint" name="leg_l4_joint_motor" ctrllimited="true" ctrlrange="-180 180" />
+    <motor gear="1" joint="leg_l5_joint" name="leg_l5_joint_motor" ctrllimited="true" ctrlrange="-36 36" />
+    <motor gear="1" joint="leg_l6_joint" name="leg_l6_joint_motor" ctrllimited="true" ctrlrange="-36 36" />
+    <motor gear="1" joint="leg_r1_joint" name="leg_r1_joint_motor" ctrllimited="true" ctrlrange="-180 180" />
+    <motor gear="1" joint="leg_r2_joint" name="leg_r2_joint_motor" ctrllimited="true" ctrlrange="-100 100" />
+    <motor gear="1" joint="leg_r3_joint" name="leg_r3_joint_motor" ctrllimited="true" ctrlrange="-100 100" />
+    <motor gear="1" joint="leg_r4_joint" name="leg_r4_joint_motor" ctrllimited="true" ctrlrange="-180 180" />
+    <motor gear="1" joint="leg_r5_joint" name="leg_r5_joint_motor" ctrllimited="true" ctrlrange="-36 36" />
+    <motor gear="1" joint="leg_r6_joint" name="leg_r6_joint_motor" ctrllimited="true" ctrlrange="-36 36" />
+    <motor gear="1" joint="zarm_l1_joint" name="zarm_l1_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
+    <motor gear="1" joint="zarm_l2_joint" name="zarm_l2_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
+    <motor gear="1" joint="zarm_l3_joint" name="zarm_l3_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
+    <motor gear="1" joint="zarm_l4_joint" name="zarm_l4_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
+    <motor gear="1" joint="zarm_r1_joint" name="zarm_r1_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
+    <motor gear="1" joint="zarm_r2_joint" name="zarm_r2_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
+    <motor gear="1" joint="zarm_r3_joint" name="zarm_r3_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
+    <motor gear="1" joint="zarm_r4_joint" name="zarm_r4_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
+    <motor gear="1" joint="zhead_1_joint" name="zhead_1_joint_motor" ctrllimited="true" ctrlrange="-50 50" />
+    <motor gear="1" joint="zhead_2_joint" name="zhead_2_joint_motor" ctrllimited="true" ctrlrange="-50 50" />
+  </actuator>
+  <sensor>
+    <accelerometer name="BodyAcc" site="imu" />
+    <velocimeter name="BodyVel" site="imu" />
+    <gyro name="BodyGyro" site="imu" />
+    <framepos name="BodyPos" objtype="site" objname="imu" />
+    <framequat name="BodyQuat" objtype="site" objname="imu" />
+    <jointpos name="waist_joint_pos" joint="waist_joint" />
+    <jointpos name="leg_l1_joint_pos" joint="leg_l1_joint" />
+    <jointpos name="leg_l2_joint_pos" joint="leg_l2_joint" />
+    <jointpos name="leg_l3_joint_pos" joint="leg_l3_joint" />
+    <jointpos name="leg_l4_joint_pos" joint="leg_l4_joint" />
+    <jointpos name="leg_l5_joint_pos" joint="leg_l5_joint" />
+    <jointpos name="leg_l6_joint_pos" joint="leg_l6_joint" />
+    <jointpos name="leg_r1_joint_pos" joint="leg_r1_joint" />
+    <jointpos name="leg_r2_joint_pos" joint="leg_r2_joint" />
+    <jointpos name="leg_r3_joint_pos" joint="leg_r3_joint" />
+    <jointpos name="leg_r4_joint_pos" joint="leg_r4_joint" />
+    <jointpos name="leg_r5_joint_pos" joint="leg_r5_joint" />
+    <jointpos name="leg_r6_joint_pos" joint="leg_r6_joint" />
+    <jointpos name="zarm_l1_joint_pos" joint="zarm_l1_joint" />
+    <jointpos name="zarm_l2_joint_pos" joint="zarm_l2_joint" />
+    <jointpos name="zarm_l3_joint_pos" joint="zarm_l3_joint" />
+    <jointpos name="zarm_l4_joint_pos" joint="zarm_l4_joint" />
+    <jointpos name="zarm_r1_joint_pos" joint="zarm_r1_joint" />
+    <jointpos name="zarm_r2_joint_pos" joint="zarm_r2_joint" />
+    <jointpos name="zarm_r3_joint_pos" joint="zarm_r3_joint" />
+    <jointpos name="zarm_r4_joint_pos" joint="zarm_r4_joint" />
+    <jointpos name="zhead_1_joint_pos" joint="zhead_1_joint" />
+    <jointpos name="zhead_2_joint_pos" joint="zhead_2_joint" />
+    <jointvel name="waist_joint_vel" joint="waist_joint" />
+    <jointvel name="leg_l1_joint_vel" joint="leg_l1_joint" />
+    <jointvel name="leg_l2_joint_vel" joint="leg_l2_joint" />
+    <jointvel name="leg_l3_joint_vel" joint="leg_l3_joint" />
+    <jointvel name="leg_l4_joint_vel" joint="leg_l4_joint" />
+    <jointvel name="leg_l5_joint_vel" joint="leg_l5_joint" />
+    <jointvel name="leg_l6_joint_vel" joint="leg_l6_joint" />
+    <jointvel name="leg_r1_joint_vel" joint="leg_r1_joint" />
+    <jointvel name="leg_r2_joint_vel" joint="leg_r2_joint" />
+    <jointvel name="leg_r3_joint_vel" joint="leg_r3_joint" />
+    <jointvel name="leg_r4_joint_vel" joint="leg_r4_joint" />
+    <jointvel name="leg_r5_joint_vel" joint="leg_r5_joint" />
+    <jointvel name="leg_r6_joint_vel" joint="leg_r6_joint" />
+    <jointvel name="zarm_l1_joint_vel" joint="zarm_l1_joint" />
+    <jointvel name="zarm_l2_joint_vel" joint="zarm_l2_joint" />
+    <jointvel name="zarm_l3_joint_vel" joint="zarm_l3_joint" />
+    <jointvel name="zarm_l4_joint_vel" joint="zarm_l4_joint" />
+    <jointvel name="zarm_r1_joint_vel" joint="zarm_r1_joint" />
+    <jointvel name="zarm_r2_joint_vel" joint="zarm_r2_joint" />
+    <jointvel name="zarm_r3_joint_vel" joint="zarm_r3_joint" />
+    <jointvel name="zarm_r4_joint_vel" joint="zarm_r4_joint" />
+    <jointvel name="zhead_1_joint_vel" joint="zhead_1_joint" />
+    <jointvel name="zhead_2_joint_vel" joint="zhead_2_joint" />
+  </sensor>
+</mujoco>

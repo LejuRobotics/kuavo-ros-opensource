@@ -20,6 +20,8 @@
 #include <cassert>
 #include <mutex>
 /*-DEFINES-------------------------------------------------------------------*/
+#include "ObjectDiction.h"
+
 #define DCM_ENABLE_LOGFILE
 
 #define ELMO_VENDOR_ID 0x0000009A
@@ -28,12 +30,16 @@
 #define YD_VENDOR_ID 0x0000005A
 #define YD_PRODUCT_CODE 0x00000003
 
+#define SELFD_VENDOR_ID 0x0000000A
+#define SELFD_PRODUCT_CODE 0x26483062
+
 #define PERF_myAppWorkpd 0
 #define PERF_DCM_Logfile 1
 #define MAX_JOB_NUM 2
 
 #define NUM_SLAVE_MAX 30
 #define NUM_SLAVE_ELMO_MAX 14
+#define NUM_SLAVE_SELFD_MAX 13
 #define NUM_SLAVE_YD_MAX (NUM_SLAVE_MAX - NUM_SLAVE_ELMO_MAX)
 
 #define BIT_17 (1 << 17)
@@ -42,6 +48,7 @@
 #define BIT_17_10 (BIT_17 * 10)
 #define BIT_17_18 (BIT_17 * 18)
 #define BIT_17_36 (BIT_17 * 36)
+#define BIT_17_25 (BIT_17 * 25)
 #define MAX_TORQUE (31.2)
 #define TO_DEGREE (180.0 / M_PI)
 #define TO_RADIAN (M_PI / 180.0)
@@ -131,6 +138,48 @@ typedef struct
   double kd = 0.0;
 } TorqueFeedbackTarget_t;
 
+
+
+// 新增变量，用于表示当前的机器人模型，并且可以被赋值
+RobotModel Robot_module = KUAVO; // 默认为KUAVO，可根据需要赋值为ROBAN2
+
+// 机器人关节映射，Joint->Motor
+static uint8_t physical2logical_[ROBOT_MODEL_NUM][NUM_SLAVE_MAX] = {
+  // KUAVO
+  {0, 1, 2, 3, 4, 5,                  //左腿
+   6, 7, 8, 9, 10, 11,                //右腿
+   12, 13, 14, 15, 16, 17, 18,        //左臂
+   19, 20, 21, 22, 23, 24, 25,        //右臂      
+   26, 27,                            //头
+   28, 29},                           //冗余
+  // ROBAN2
+  {0,                                 //腰
+   1, 2, 3, 4, 5, 6,                  //左腿
+   12, 11, 10, 9, 8, 7,               //右腿
+   13, 14, 15, 16,                    //左臂
+   17, 18, 19, 20,                    //右臂  
+   21, 22,                            //头  
+   23, 24, 25, 26, 27, 28, 29}        //冗余  
+};
+
+/**
+ * @brief 给定 physical2logical_[model][x] 的值 value，查找 x 的下标
+ * @param model 机器人模型（KUAVO/ROBAN2）
+ * @param value 要查找的值
+ * @return 如果找到，返回下标x；否则返回-1
+ */
+int find_physical_index_by_logical( uint8_t value)
+{
+    for (uint32_t x = 0; x < NUM_SLAVE_MAX; ++x)
+    {
+        if (physical2logical_[Robot_module][x] == value)
+        {
+            return x;
+        }
+    }
+    return -1;
+}
+
 static YD_SlaveRead_t *yd_slave_input[NUM_SLAVE_YD_MAX];
 static YD_SlaveWrite_t *yd_slave_output[NUM_SLAVE_YD_MAX];
 static uint32_t num_yd_slave = 0;
@@ -138,6 +187,10 @@ static uint32_t num_yd_slave = 0;
 static ELMO_SlaveRead_t *elmo_slave_input[NUM_SLAVE_ELMO_MAX];
 static ELMO_SlaveWrite_t *elmo_slave_output[NUM_SLAVE_ELMO_MAX];
 static uint32_t num_elmo_slave = 0;
+
+static SELFD_SlaveRead_t *selfd_slave_input[NUM_SLAVE_SELFD_MAX];
+static SELFD_SlaveWrite_t *selfd_slave_output[NUM_SLAVE_SELFD_MAX];
+static uint32_t num_selfd_slave = 0;
 
 // 创建两个缓冲区实例
 static SlaveBuffersIn buffersAIn;
@@ -172,6 +225,8 @@ static std::atomic<TorqueFeedbackTarget_t*> currentTorqueFeedback;
 static uint8_t motorStatusMapA[NUM_SLAVE_MAX] = {0};
 static uint8_t motorStatusMapB[NUM_SLAVE_MAX] = {0};
 static std::atomic<uint8_t*> currentMotorStatusMap;
+// 状态更改请求标志数组 - 用于 myAppDiagnosis 请求状态更改
+static std::atomic<bool> motorStatusChangeRequest[NUM_SLAVE_MAX] = {false};
 
 static std::mutex mtx_io;
 static uint32_t num_slave = 0;
@@ -295,16 +350,12 @@ static char *floatToChar(double value)
 
 //////////////////////////////////////////////////////////////////////////////
 // 打印 `EcMasterType` 的字符串表示
-const char *getEcMasterTypeString(EcMasterType type)
-{
-  switch (type)
-  {
-  case ELMO:
-    return "ELMO";
-  case YD:
-    return "YD";
-  default:
-    return "UNKNOWN";
+const char* getEcMasterTypeString(EcMasterType type) {
+  switch(type) {
+      case ELMO: return "ELMO";
+      case YD:    return "YD";
+      case LEJU:    return "LEJU";
+      default:    return "UNKNOWN";
   }
 }
 
@@ -740,6 +791,46 @@ uint8_t motorStatus(const uint16_t id)
 #define INDEX_POSITION_ACTUAL_VALUE 0x6064
 #define INDEX_MOTOR_RATED_CURRENT 0x6075
 
+void physicalToLogical(uint8_t& id_physical ,uint8_t index)
+{
+  id_physical = physical2logical_[Robot_module][index];
+}
+
+/// @brief 单次sdo读取
+/// @param SlaveId 驱动器id
+/// @param ObIndex 对象索引
+/// @param SubIndex 子索引
+/// @param out_data 数据指针
+/// @return 
+bool readSingleSdo(const uint8_t SlaveId,const uint16_t ObIndex,const uint16_t SubIndex,int32_t* read_data) 
+{
+    EC_T_DWORD dwRes = EC_E_NOERROR;
+    uint8_t buf[4];
+    int32_t value;
+    uint32_t outdata_len;
+     
+    dwRes = emCoeSdoUpload(0, SlaveId, ObIndex, SubIndex, buf, 4, &outdata_len, 100, 0);
+    if (EC_E_NOERROR != dwRes)
+    {
+      // EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed ot emCoeSdoUpload, Slave %d, Err (0x%lx)\n", SlaveId, dwRes));
+      return false;
+    }
+    if (outdata_len == 2) 
+    {
+    // 读取的是16位数据
+      *read_data = (buf[1] << 8) | buf[0];
+    }
+    else if (outdata_len == 4) 
+    {
+      *read_data = (buf[3] << 24) | (buf[2] << 16) | (buf[1] << 8) | buf[0];//对读出来的值进行转换拼接
+    }
+  return true;
+}
+
+/// @brief 单次sdo写入
+/// @param SlaveId 驱动器id
+/// @param ObIndex 对象索引
+/// @param SubIndex 子索引
 static bool motorGetConfig(T_EC_DEMO_APP_CONTEXT *pAppContext)
 {
   EC_T_DWORD dwRes = EC_E_NOERROR;
@@ -748,85 +839,117 @@ static bool motorGetConfig(T_EC_DEMO_APP_CONTEXT *pAppContext)
   int32_t value;
   uint8_t buf[4];
   uint32_t outdata_len;
-  
+  int32_t read_data;
+  // 腰部 76 ，72, 43, 1800,1600,1400
+  // int32_t write_data[13]={ 1800,1800,1600,1800,1600,1400,1400,
+  //                               1800,1600,1800,1600,1400,1400
+  // };
+
+  //转向
+  int32_t write_data[13]= {
+    1,1,1,0,0,1,0,
+    1,1,0,1,0,1
+  };
+
+  //清零数组
+  // int32_t write_data[13]= {
+  //   2,2,2,2,2,2,2,
+  //   2,2,2,2,2,2
+  // };
+
+  // //位置增益
+  // int32_t write_data[13]= { 250,250,250,250,250,200,200,
+  //                               250,250,250,250,200,200};
+
+  //速度增益
+  // int32_t write_data[13]= { 5000,5000,5000,5000,5000,10000,10000,
+  //   5000,5000,5000,5000,10000,10000,};
+
   for (uint32_t i = 0; i < num_slave; i++)
   {
+    uint8_t id_physical = i ;
+    physicalToLogical(id_physical,i);
     dwRes = emCoeSdoUpload(0, i, INDEX_POSITION_ACTUAL_VALUE, 0, buf, 4, &outdata_len, 100, 0);
     if (EC_E_NOERROR != dwRes)
     {
-      EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed ot emCoeSdoUpload, Slave %d, Err (0x%lx)\n", i, dwRes));
+      EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed ot emCoeSdoUpload, Slave %d, Err (0x%lx)\n", id_physical + 1, dwRes));
       return false;
     }
     value = (buf[3] << 24) | (buf[2] << 16) | (buf[1] << 8) | buf[0];
 
-    char *tempfloat = floatToChar(value * 360.0 / encoder_range[i]);
+    char *tempfloat = floatToChar(value * 360.0 / encoder_range[id_physical]);
     char *tempEncoder = floatToChar(value);
-    EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Slave %d actual position %s,Encoder %s\n", i + 1, tempfloat, tempEncoder));
+    EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Slave %d actual position %s,Encoder %s\n", id_physical + 1, tempfloat, tempEncoder));
     free(tempfloat);
     free(tempEncoder);
 
     dwRes = emCoeSdoUpload(0, i, INDEX_MOTOR_RATED_CURRENT, 0, buf, 4, &outdata_len, 100, 0);
     if (EC_E_NOERROR != dwRes)
     {
-      EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed ot emCoeSdoUpload, Slave %d, Err (0x%lx)\n", i, dwRes));
+      EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed ot emCoeSdoUpload, Slave %d, Err (0x%lx)\n", id_physical + 1, dwRes));
       return false;
     }
     value = (buf[3] << 24) | (buf[2] << 16) | (buf[1] << 8) | buf[0];
-    rated_current[i] = value;
+    rated_current[id_physical] = value;
 
     char *tempfloat1 = floatToChar(value / 1000.0);
     EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Rated current %s\n", tempfloat1));
     free(tempfloat1);
 
-    if (driver_type[i] == YD)
+
+    // writeSingleSdo(id_physical,0x3104,0,&write_data[i],true);
+
+    readSingleSdo(id_physical,0x3828,0,&read_data);
+    EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "slave %d 转向= %d\n", id_physical+1,read_data));
+    if (driver_type[id_physical] == YD)
     {
-      int32_t joint_kd = joint_kd_write_vec[i];
-      int32_t joint_kp = joint_kp_write_vec[i];
+      int32_t joint_kd = joint_kd_write_vec[id_physical];
+      int32_t joint_kp = joint_kp_write_vec[id_physical];
 
       int32_t init_kd, init_kp, act_kp, act_kd;
-      auto kp_read_status = ReadSingleSdo(i, JOINT_CSP_KP, 0, init_kp);
+      auto kp_read_status = ReadSingleSdo(id_physical, JOINT_CSP_KP, 0, init_kp);
       if (!kp_read_status)
       {
-        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read init kp, Slave %d\n", i));
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read init kp, Slave %d\n", id_physical));
         return false;
       }
 
-      auto kd_read_status = ReadSingleSdo(i, JOINT_CSV_KP, 0, init_kd);
+      auto kd_read_status = ReadSingleSdo(id_physical, JOINT_CSV_KP, 0, init_kd);
       if (!kd_read_status)
       {
-        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read init kd, Slave %d\n", i + 1));
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read init kd, Slave %d\n", id_physical + 1));
         return false;
       }
 
-      kd_write_status = writeSingleSdo(i, JOINT_CSV_KP, 0, &joint_kd, false);
+      kd_write_status = writeSingleSdo(id_physical, JOINT_CSV_KP, 0, &joint_kd, false);
       if (!kd_write_status)
       {
-        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to change joint kd, Slave %d\n", i));
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to change joint kd, Slave %d\n", id_physical));
         return false;
       }
-      kp_write_status = writeSingleSdo(i, JOINT_CSP_KP, 0, &joint_kp, false);
+      kp_write_status = writeSingleSdo(id_physical, JOINT_CSP_KP, 0, &joint_kp, false);
       if (!kp_write_status)
       {
-        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to change joint kp, Slave %d\n", i));
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to change joint kp, Slave %d\n", id_physical));
         return false;
       }
 
-      kp_read_status = ReadSingleSdo(i, JOINT_CSP_KP, 0, act_kp);
+      kp_read_status = ReadSingleSdo(id_physical, JOINT_CSP_KP, 0, act_kp);
       if (!kp_read_status)
       {
-        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read kp after write, Slave %d\n", i));
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read kp after write, Slave %d\n", id_physical));
         return false;
       }
 
-      kd_read_status = ReadSingleSdo(i, JOINT_CSV_KP, 0, act_kd);
+      kd_read_status = ReadSingleSdo(id_physical, JOINT_CSV_KP, 0, act_kd);
       if (!kd_read_status)
       {
-        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read kd after write, Slave %d\n", i + 1));
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read kd after write, Slave %d\n", id_physical + 1));
         return false;
       }
 
-      EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Read Slave %d init kp value %d, and set kp value %d successfully\n", i + 1, init_kp, act_kp));
-      EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Read Slave %d init kd value %d, and set kd value %d successfully\n", i + 1, init_kd, act_kd));
+      EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Read Slave %d init kp value %d, and set kp value %d successfully\n", id_physical + 1, init_kp, act_kp));
+      EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Read Slave %d init kd value %d, and set kd value %d successfully\n", id_physical + 1, init_kd, act_kd));
 
       // //判断是否开启拟人步态，如果是的话在本次运行阶段将膝关节速度P增益调小，否则写为原来的值,这里的写入没有开启断电保存
       // if(use_anthropomorphic_gait == true && (i == 3||i == 9))
@@ -989,7 +1112,9 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
   }
   uint16_t sw;
   uint16_t index = id - 1;
-  static uint8_t elmo_Number = 0, yd_Number = 0;
+  uint8_t id_physical;
+  physicalToLogical(id_physical,index);
+  static uint8_t elmo_Number = 0, yd_Number = 0 ,selfd_Number = 0;
   
   SlaveBuffersIn *currentIn = currentBuffersIn.load(std::memory_order_acquire);
   //SlaveBuffersIn *nextIn = (currentIn == &buffersAIn) ? &buffersBIn : &buffersAIn;
@@ -998,11 +1123,24 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
 
   if(driver[index] == ELMO)
   {
-    sw = currentIn->elmo_slave_input[elmo_Number].status_word & 0x6f;
+    if(Robot_module == ROBAN2)
+    sw = currentIn->elmo_slave_input[id_physical].status_word & 0x6f;
+    else
+    sw = sw = currentIn->elmo_slave_input[elmo_Number].status_word & 0x6f;
   }
   else if(driver[index] == YD)
   {
+    if(Robot_module == ROBAN2)
+    sw = currentIn->yd_slave_input[id_physical].status_word & 0x6f;
+    else
     sw = currentIn->yd_slave_input[yd_Number].status_word & 0x6f;
+  }
+  else if(driver[index] == LEJU)
+  {
+    if(Robot_module == ROBAN2)
+    sw = currentIn->selfd_slave_input[id_physical].status_word & 0x6f;
+    else
+    sw = currentIn->selfd_slave_input[selfd_Number].status_word & 0x6f;
   }
   //mtx_io.unlock();
   if (sw == 0x27)
@@ -1011,6 +1149,10 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
     {
       case ELMO: {
         elmo_Number++;
+      }
+      break;
+      case LEJU: {
+        selfd_Number++;
       }
       break;
 
@@ -1027,7 +1169,27 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
   //mtx_io.lock();
   if(driver[index] == ELMO)
   {
+    if (Robot_module == ROBAN2){
     if(!IS_MOTOR_DISABLED(id)) {
+      nextOut->elmo_slave_output[id_physical].target_position = currentIn->elmo_slave_input[id_physical].position_actual_value;
+      nextOut->elmo_slave_output[id_physical].position_offset = 0;
+      nextOut->elmo_slave_output[id_physical].velocit_offset = 0;
+      nextOut->elmo_slave_output[id_physical].torque_offset  = 0;
+      nextOut->elmo_slave_output[id_physical].max_torque  = 1000;
+      nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CSP;
+      nextOut->elmo_slave_output[id_physical].control_word = sw2cw(sw);
+      torque_feedback_targetA[index].target_position = currentIn->elmo_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+      torque_feedback_targetB[index].target_position = currentIn->elmo_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+    } else {
+      nextOut->elmo_slave_output[id_physical].target_torque = 0;
+      nextOut->elmo_slave_output[id_physical].torque_offset = 0;
+      nextOut->elmo_slave_output[id_physical].max_torque = 10; // safety
+      nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
+      nextOut->elmo_slave_output[id_physical].control_word = sw2cw(sw);
+    }
+    }
+    else{
+       if(!IS_MOTOR_DISABLED(id)) {
       nextOut->elmo_slave_output[elmo_Number].target_position = currentIn->elmo_slave_input[elmo_Number].position_actual_value;
       nextOut->elmo_slave_output[elmo_Number].position_offset = 0;
       nextOut->elmo_slave_output[elmo_Number].velocit_offset = 0;
@@ -1044,22 +1206,78 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
       nextOut->elmo_slave_output[elmo_Number].mode_of_opration = MODE_CST;
       nextOut->elmo_slave_output[elmo_Number].control_word = sw2cw(sw);
     }
+    }
   }
   else if(driver[index] == YD)
   { 
-    if(!IS_MOTOR_DISABLED(id)) {
-      nextOut->yd_slave_output[yd_Number].target_position = currentIn->yd_slave_input[yd_Number].position_actual_value;
-      nextOut->yd_slave_output[yd_Number].velocity_offset = 0;
-      nextOut->yd_slave_output[yd_Number].torque_offset = 0;
-      nextOut->yd_slave_output[yd_Number].mode_of_opration = MODE_CSP;
-      nextOut->yd_slave_output[yd_Number].control_word    = sw2cw(sw);
-      torque_feedback_targetA[index].target_position = currentIn->yd_slave_input[yd_Number].position_actual_value * (360.0 / encoder_range[index]);
-      torque_feedback_targetB[index].target_position = currentIn->yd_slave_input[yd_Number].position_actual_value * (360.0 / encoder_range[index]);
+    if(Robot_module == ROBAN2)
+    {
+      if(!IS_MOTOR_DISABLED(id)) {
+        nextOut->yd_slave_output[id_physical].target_position = currentIn->yd_slave_input[id_physical].position_actual_value;
+        nextOut->yd_slave_output[id_physical].velocity_offset = 0;
+        nextOut->yd_slave_output[id_physical].torque_offset = 0;
+        nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CSP;
+        nextOut->yd_slave_output[id_physical].control_word    = sw2cw(sw);
+        torque_feedback_targetA[index].target_position = currentIn->yd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+        torque_feedback_targetB[index].target_position = currentIn->yd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+    } else {
+      nextOut->yd_slave_output[id_physical].target_torque = 0;
+      nextOut->yd_slave_output[id_physical].torque_offset = 0;
+      nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
+      nextOut->yd_slave_output[id_physical].control_word = sw2cw(sw);
+    }
+    }
+    else{
+      if(!IS_MOTOR_DISABLED(id)) {
+        nextOut->yd_slave_output[yd_Number].target_position = currentIn->yd_slave_input[yd_Number].position_actual_value;
+        nextOut->yd_slave_output[yd_Number].velocity_offset = 0;
+        nextOut->yd_slave_output[yd_Number].torque_offset = 0;
+        nextOut->yd_slave_output[yd_Number].mode_of_opration = MODE_CSP;
+        nextOut->yd_slave_output[yd_Number].control_word    = sw2cw(sw);
+        torque_feedback_targetA[index].target_position = currentIn->yd_slave_input[yd_Number].position_actual_value * (360.0 / encoder_range[index]);
+        torque_feedback_targetB[index].target_position = currentIn->yd_slave_input[yd_Number].position_actual_value * (360.0 / encoder_range[index]);
     } else {
       nextOut->yd_slave_output[yd_Number].target_torque = 0;
       nextOut->yd_slave_output[yd_Number].torque_offset = 0;
       nextOut->yd_slave_output[yd_Number].mode_of_opration = MODE_CST;
       nextOut->yd_slave_output[yd_Number].control_word = sw2cw(sw);
+    }
+    }
+  }
+  else if(driver[index] == LEJU)
+  { 
+    if(Robot_module == ROBAN2)
+    {
+      if(!IS_MOTOR_DISABLED(id)) {
+        nextOut->selfd_slave_output[id_physical].target_position = currentIn->selfd_slave_input[id_physical].position_actual_value;
+        nextOut->selfd_slave_output[id_physical].velocity_offset = 0;
+        nextOut->selfd_slave_output[id_physical].torque_offset = 0;
+        nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CSP;
+        nextOut->selfd_slave_output[id_physical].control_word    = sw2cw(sw);
+        torque_feedback_targetA[index].target_position = currentIn->selfd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+        torque_feedback_targetB[index].target_position = currentIn->selfd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+    } else {
+      nextOut->selfd_slave_output[id_physical].target_torque = 0;
+      nextOut->selfd_slave_output[id_physical].torque_offset = 0;
+      nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
+      nextOut->selfd_slave_output[id_physical].control_word = sw2cw(sw);
+    }
+    }
+    else{
+      if(!IS_MOTOR_DISABLED(id)) {
+        nextOut->selfd_slave_output[selfd_Number].target_position = currentIn->selfd_slave_input[selfd_Number].position_actual_value;
+        nextOut->selfd_slave_output[selfd_Number].velocity_offset = 0;
+        nextOut->selfd_slave_output[selfd_Number].torque_offset = 0;
+        nextOut->selfd_slave_output[selfd_Number].mode_of_opration = MODE_CSP;
+        nextOut->selfd_slave_output[selfd_Number].control_word    = sw2cw(sw);
+        torque_feedback_targetA[index].target_position = currentIn->selfd_slave_input[selfd_Number].position_actual_value * (360.0 / encoder_range[index]);
+        torque_feedback_targetB[index].target_position = currentIn->selfd_slave_input[selfd_Number].position_actual_value * (360.0 / encoder_range[index]);
+    } else {
+      nextOut->selfd_slave_output[selfd_Number].target_torque = 0;
+      nextOut->selfd_slave_output[selfd_Number].torque_offset = 0;
+      nextOut->selfd_slave_output[selfd_Number].mode_of_opration = MODE_CST;
+      nextOut->selfd_slave_output[selfd_Number].control_word = sw2cw(sw);
+    }
     }
   }
   
@@ -1081,7 +1299,7 @@ void motorGetData(const uint16_t *ids, const EcMasterType* driver, uint32_t num,
                   MotorParam_t *data)
 {
   uint16_t index = 0;
-  uint8_t elmo_Number = 0, yd_Number = 0;
+  uint8_t elmo_Number = 0, yd_Number = 0, selfd_Number = 0;
 
   static uint8_t get_change_mode_old = 0;
   SlaveBuffersIn *currentIn = currentBuffersIn.load(std::memory_order_acquire);
@@ -1092,33 +1310,56 @@ void motorGetData(const uint16_t *ids, const EcMasterType* driver, uint32_t num,
   for (uint32_t i = 0; i < num; i++)
   {
     index = ids[i] - 1;
-   if(driver[i] == ELMO)
+    uint8_t id_physical;
+    physicalToLogical(id_physical,index);
+    //  模型id = 7，对应物理id = 12
+    //  模型id = 8，对应物理id = 11
+    //  模型id = 9，对应物理id = 10 
+    //  模型id = 10，对应物理id = 9
+    //  模型id = 11，对应物理id = 8
+    //  模型id = 12，对应物理id = 7
+
+   if(driver[id_physical] == ELMO)
     {  
-      data[i].position = (currentIn->elmo_slave_input[elmo_Number].position_actual_value * (360.0 / encoder_range[index])  - pos_offset[index]) ;
-      data[i].velocity = currentIn->elmo_slave_input[elmo_Number].velocity_actual_value * (360.0 / encoder_range[index]);
-      data[i].torque = currentIn->elmo_slave_input[elmo_Number].torque_actual_value * (rated_current[index] / 1000.0) / 1000.0 ;
-      data[i].acceleration = motorAcceleration[elmo_Number] * (360.0 / encoder_range[index]);
-      data[i].status = currentMotorStatus[i];
+      data[id_physical].position = (currentIn->elmo_slave_input[elmo_Number].position_actual_value * (360.0 / encoder_range[id_physical])  - pos_offset[id_physical]) ;
+      data[id_physical].velocity = currentIn->elmo_slave_input[elmo_Number].velocity_actual_value * (360.0 / encoder_range[id_physical]);
+      data[id_physical].torque = currentIn->elmo_slave_input[elmo_Number].torque_actual_value * (rated_current[id_physical] / 1000.0) / 1000.0 ;
+      data[id_physical].acceleration = motorAcceleration[elmo_Number] * (360.0 / encoder_range[id_physical]);
+      data[id_physical].status = currentMotorStatus[id_physical];
 
       // 驱动器控制环路底层数据
-      data[i].error_code = currentIn->elmo_slave_input[elmo_Number].error_code;
-      data[i].status_word = currentIn->elmo_slave_input[elmo_Number].status_word;
-      data[i].torque_demand_trans = currentIn->elmo_slave_input[elmo_Number].torque_demand_raw * (rated_current[index] / 1000.0) / 1000.0;
+      data[id_physical].error_code = currentIn->elmo_slave_input[elmo_Number].error_code;
+      data[id_physical].status_word = currentIn->elmo_slave_input[elmo_Number].status_word;
+      data[id_physical].torque_demand_trans = currentIn->elmo_slave_input[elmo_Number].torque_demand_raw * (rated_current[id_physical] / 1000.0) / 1000.0;
       elmo_Number++;
     }
-    else if(driver[i] == YD)
+    else if(driver[id_physical] == YD)
     { 
-      data[i].position = (currentIn->yd_slave_input[yd_Number].position_actual_value * (360.0 / encoder_range[index]) - pos_offset[index]);
-      data[i].velocity = currentIn->yd_slave_input[yd_Number].velocity_actual_value * (360.0 / encoder_range[index]) ;
-      data[i].torque = currentIn->yd_slave_input[yd_Number].torque_actual_value * (rated_current[index] / 1000.0) / 1000.0 * 1.414;
-      data[i].acceleration = motorAcceleration[yd_Number] * (360.0 / encoder_range[index]);
-      data[i].status = currentMotorStatus[i];
+      data[id_physical].position = (currentIn->yd_slave_input[yd_Number].position_actual_value * (360.0 / encoder_range[id_physical]) - pos_offset[id_physical]);
+      data[id_physical].velocity = currentIn->yd_slave_input[yd_Number].velocity_actual_value * (360.0 / encoder_range[id_physical]) ;
+      data[id_physical].torque = currentIn->yd_slave_input[yd_Number].torque_actual_value * (rated_current[id_physical] / 1000.0) / 1000.0 * 1.414;
+      data[id_physical].acceleration = motorAcceleration[yd_Number] * (360.0 / encoder_range[id_physical]);
+      data[id_physical].status = currentMotorStatus[id_physical];
       
       // 驱动器控制环路底层数据
-      data[i].error_code = currentIn->yd_slave_input[yd_Number].error_code;
-      data[i].status_word = currentIn->yd_slave_input[yd_Number].status_word;
-      data[i].torque_demand_trans = currentIn->yd_slave_input[yd_Number].torque_demand_raw * (rated_current[index] / 1000.0) / 1000.0 * 1.414;
+      data[id_physical].error_code = currentIn->yd_slave_input[yd_Number].error_code;
+      data[id_physical].status_word = currentIn->yd_slave_input[yd_Number].status_word;
+      data[id_physical].torque_demand_trans = currentIn->yd_slave_input[yd_Number].torque_demand_raw * (rated_current[id_physical] / 1000.0) / 1000.0 * 1.414;
       yd_Number++;
+    }
+    else if(driver[id_physical] == LEJU)
+    { 
+      data[id_physical].position = (currentIn->selfd_slave_input[selfd_Number].position_actual_value * (360.0 / encoder_range[id_physical]) - pos_offset[id_physical]);
+      data[id_physical].velocity = currentIn->selfd_slave_input[selfd_Number].velocity_actual_value * (360.0 / encoder_range[id_physical]) ;
+      data[id_physical].torque = currentIn->selfd_slave_input[selfd_Number].torque_actual_value * (rated_current[id_physical] / 1000.0) / 1000.0 * 1.414;
+      data[id_physical].acceleration = motorAcceleration[selfd_Number] * (360.0 / encoder_range[id_physical]);
+      data[id_physical].status = currentMotorStatus[id_physical];
+      
+      // 驱动器控制环路底层数据
+      data[id_physical].error_code = currentIn->selfd_slave_input[selfd_Number].error_code;
+      data[id_physical].status_word = currentIn->selfd_slave_input[selfd_Number].status_word;
+      data[id_physical].torque_demand_trans = currentIn->selfd_slave_input[selfd_Number].torque_demand_raw * (rated_current[id_physical] / 1000.0) / 1000.0 * 1.414;
+      selfd_Number++;
     }
   }
 }
@@ -1128,22 +1369,31 @@ static void motorGetStatus(const uint16_t *ids, EcMasterType* driver, uint32_t n
   // 从原子指针获取当前生效的缓冲区
   SlaveBuffersIn *currentIn = currentBuffersIn.load(std::memory_order_acquire);
   uint16_t index = 0;
-  uint8_t elmo_Number = 0, yd_Number = 0;
+  uint8_t elmo_Number = 0, yd_Number = 0,  selfd_Number = 0;
   //mtx_io.lock();
   for (u_int16_t i = 0; i < num; i++)
   {
     index = ids[i] - 1;
-    if(driver[index] == ELMO)
+    uint8_t id_physical;
+    physicalToLogical(id_physical,index);
+
+    if(driver[id_physical] == ELMO)
     {
-      status_word[i] = currentIn->elmo_slave_input[elmo_Number].status_word;
-      error_code[i] =  currentIn->elmo_slave_input[elmo_Number].error_code;
+      status_word[id_physical] = currentIn->elmo_slave_input[elmo_Number].status_word;
+      error_code[id_physical] =  currentIn->elmo_slave_input[elmo_Number].error_code;
       elmo_Number++;
     }
     else if(driver[index] == YD)
     {
-      status_word[i] = currentIn->yd_slave_input[yd_Number].status_word;
-      error_code[i] = currentIn->yd_slave_input[yd_Number].error_code;
+      status_word[id_physical] = currentIn->yd_slave_input[yd_Number].status_word;
+      error_code[id_physical] = currentIn->yd_slave_input[yd_Number].error_code;
       yd_Number++;
+    }
+    else if(driver[index] == LEJU)
+    {
+      status_word[id_physical] = currentIn->selfd_slave_input[selfd_Number].status_word;
+      error_code[id_physical] = currentIn->selfd_slave_input[selfd_Number].error_code;
+      selfd_Number++;
     }
   }
   //mtx_io.unlock();
@@ -1168,6 +1418,40 @@ void getMotorPositionOffset(std::vector<double>& output)
     }
 }
 
+// 根据Robot_module的属性，来改变传参
+void setRobotMoudle(const int robot_module)
+{
+  switch (robot_module){
+    case KUAVO:
+    {
+      std::cout << "********************************************************" << std::endl;
+      std::cout << "||              Get Robot Module is Kuavo             ||" << std::endl;
+      std::cout << "********************************************************" << std::endl;
+      Robot_module = KUAVO;
+      std::cout << "Robot_module: " << Robot_module << std::endl;
+      break;
+    }
+    case ROBAN2:
+    {
+      std::cout << "********************************************************" << std::endl;
+      std::cout << "||              Get Robot Module is Roban2            ||" << std::endl;
+      std::cout << "********************************************************" << std::endl;
+      Robot_module = ROBAN2;
+      std::cout << "Robot_module: " << Robot_module << std::endl;
+      break;
+    }
+    default:
+    {
+      std::cout << "********************************************************" << std::endl;
+      std::cout << "||              Get Robot Module is Unknown            ||" << std::endl;
+      std::cout << "||              Set Robot Module is Kuavo              ||" << std::endl;
+      std::cout << "********************************************************" << std::endl;
+      Robot_module = KUAVO;
+      std::cout << "Robot_module: " << Robot_module << std::endl;
+    }
+  }
+}
+
 void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t num, MotorParam_t *params)
 {
   uint16_t index = 0;
@@ -1185,43 +1469,66 @@ void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t 
     if (currentMotorStatus[index])
       continue;
 
+    uint8_t id_physical;
+    physicalToLogical(id_physical,index);
       
     if(driver[index] == ELMO)
     {
       if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
-        nextOut->elmo_slave_output[index].target_position = (params[i].position + pos_offset[index]) * (encoder_range[index] / 360.0) ;
-        nextOut->elmo_slave_output[index].position_offset = params[i].positionOffset * (encoder_range[index] / 360.0)  ;
-        nextOut->elmo_slave_output[index].velocit_offset = params[i].velocityOffset * (encoder_range[index] / 360.0)  ;
-        nextOut->elmo_slave_output[index].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000  ;
-        nextOut->elmo_slave_output[index].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
-        nextOut->elmo_slave_output[index].mode_of_opration = MODE_CSP;
-        nextOut->elmo_slave_output[index].control_word = sw2cw(currentIn->elmo_slave_input[index].status_word & 0x6f);
+        nextOut->elmo_slave_output[id_physical].target_position = (params[i].position + pos_offset[index]) * (encoder_range[index] / 360.0) ;
+        nextOut->elmo_slave_output[id_physical].position_offset = params[i].positionOffset * (encoder_range[index] / 360.0)  ;
+        nextOut->elmo_slave_output[id_physical].velocit_offset = params[i].velocityOffset * (encoder_range[index] / 360.0)  ;
+        nextOut->elmo_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000  ;
+        nextOut->elmo_slave_output[id_physical].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
+        nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CSP;
+        nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
       }
       else {
         // Ignore this Id, skip it.
-        nextOut->elmo_slave_output[index].target_torque = 0;
-        nextOut->elmo_slave_output[index].torque_offset = 0;
-        nextOut->elmo_slave_output[index].max_torque = 10;
-        nextOut->elmo_slave_output[index].mode_of_opration = MODE_CST;
-        nextOut->elmo_slave_output[index].control_word = sw2cw(currentIn->elmo_slave_input[index].status_word & 0x6f);
+        nextOut->elmo_slave_output[id_physical].target_torque = 0;
+        nextOut->elmo_slave_output[id_physical].torque_offset = 0;
+        nextOut->elmo_slave_output[id_physical].max_torque = 10;
+        nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
+        nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
       }
     } 
     else if(driver[index] == YD)
     {
       if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
-        nextOut->yd_slave_output[index].target_position = (params[i].position+ pos_offset[index]) * (encoder_range[index] / 360.0);
-        nextOut->yd_slave_output[index].velocity_offset = params[i].velocityOffset * (encoder_range[index] / 360.0)  ;
-        nextOut->yd_slave_output[index].torque_offset = (params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000.0 )  / 1.414;
-        nextOut->yd_slave_output[index].mode_of_opration = MODE_CSP;
-        nextOut->yd_slave_output[index].control_word = sw2cw(currentIn->yd_slave_input[index].status_word & 0x6f);
+        nextOut->yd_slave_output[id_physical].target_position = (params[i].position+ pos_offset[index]) * (encoder_range[index] / 360.0);
+        nextOut->yd_slave_output[id_physical].velocity_offset = params[i].velocityOffset * (encoder_range[index] / 360.0)  ;
+        nextOut->yd_slave_output[id_physical].torque_offset = (params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000.0 )  / 1.414;
+        nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CSP;
+        nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
       }
       else {
-        nextOut->yd_slave_output[index].target_torque = 0;
-        nextOut->yd_slave_output[index].torque_offset = 0;
-        nextOut->yd_slave_output[index].mode_of_opration = MODE_CST;
-        nextOut->yd_slave_output[index].control_word = sw2cw(currentIn->yd_slave_input[index].status_word & 0x6f);
+        nextOut->yd_slave_output[id_physical].target_torque = 0;
+        nextOut->yd_slave_output[id_physical].torque_offset = 0;
+        nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
+        nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
       }
-        
+    }
+    else if (driver[id_physical] == LEJU)
+    {
+      if (!IS_MOTOR_DISABLED(ids[i]))
+      { // NOTES: This motor is not disabled, configure from kuavo.json.
+        nextOut->selfd_slave_output[id_physical].target_position = (params[i].position + pos_offset[index]) * (encoder_range[index] / 360.0);
+        nextOut->selfd_slave_output[id_physical].position_offset = params[i].positionOffset * (encoder_range[index] / 360.0);
+        nextOut->selfd_slave_output[id_physical].velocity_offset = params[i].velocityOffset * (encoder_range[index] / 360.0);
+        nextOut->selfd_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000;
+        nextOut->selfd_slave_output[id_physical].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
+        nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CSP;
+        nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+      }
+      else
+      {
+        // Ignore this Id, skip it.
+        nextOut->selfd_slave_output[id_physical].target_torque = 0;
+        nextOut->selfd_slave_output[id_physical].torque_offset = 0;
+        nextOut->selfd_slave_output[id_physical].max_torque = 10;
+        nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
+        nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+      }
     }
   }
   currentPositionBuffersOut.store(nextOut, std::memory_order_release);
@@ -1244,39 +1551,62 @@ void motorSetVelocity(const uint16_t *ids, const EcMasterType* driver, uint32_t 
     index = ids[i] - 1;
     if (currentMotorStatus[index])
       continue;
-    if(driver[index] == ELMO)
+
+    uint8_t id_physical;
+    physicalToLogical(id_physical,index);
+
+    if(driver[id_physical] == ELMO)
     {
       if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
-        nextOut->elmo_slave_output[index].target_velocity = params[i].velocity * (encoder_range[index] / 360.0);
-        nextOut->elmo_slave_output[index].velocit_offset = params[i].velocityOffset * (encoder_range[index] / 360.0);
-        nextOut->elmo_slave_output[index].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000;
-        nextOut->elmo_slave_output[index].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
-        nextOut->elmo_slave_output[index].mode_of_opration = MODE_CSV;
-        nextOut->elmo_slave_output[index].control_word = sw2cw(currentIn->elmo_slave_input[index].status_word & 0x6f);
+        nextOut->elmo_slave_output[id_physical].target_velocity = params[i].velocity * (encoder_range[index] / 360.0);
+        nextOut->elmo_slave_output[id_physical].velocit_offset = params[i].velocityOffset * (encoder_range[index] / 360.0);
+        nextOut->elmo_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000;
+        nextOut->elmo_slave_output[id_physical].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
+        nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CSV;
+        nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
       }
       else {
         // Ignore this Id, skip it.
-        nextOut->elmo_slave_output[index].target_torque = 0;
-        nextOut->elmo_slave_output[index].torque_offset = 0;
-        nextOut->elmo_slave_output[index].max_torque = 10;
-        nextOut->elmo_slave_output[index].mode_of_opration = MODE_CST;
-        nextOut->elmo_slave_output[index].control_word = sw2cw(currentIn->elmo_slave_input[index].status_word & 0x6f);
+        nextOut->elmo_slave_output[id_physical].target_torque = 0;
+        nextOut->elmo_slave_output[id_physical].torque_offset = 0;
+        nextOut->elmo_slave_output[id_physical].max_torque = 10;
+        nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
+        nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
       }
     }
-    else if(driver[index] == YD)
+    else if(driver[id_physical] == YD)
     {
       if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
-        nextOut->yd_slave_output[index].target_velocity = params[i].velocity * (encoder_range[index] / 360.0);
-        nextOut->yd_slave_output[index].velocity_offset = params[i].velocityOffset * (encoder_range[index] / 360.0);
-        nextOut->yd_slave_output[index].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000 / 1.414;
-        nextOut->yd_slave_output[index].mode_of_opration = MODE_CSV;
-        nextOut->yd_slave_output[index].control_word = sw2cw(currentIn->yd_slave_input[index].status_word & 0x6f);
+        nextOut->yd_slave_output[id_physical].target_velocity = params[i].velocity * (encoder_range[index] / 360.0);
+        nextOut->yd_slave_output[id_physical].velocity_offset = params[i].velocityOffset * (encoder_range[index] / 360.0);
+        nextOut->yd_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000 / 1.414;
+        nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CSV;
+        nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
       }
       else {
-        nextOut->yd_slave_output[index].target_torque = 0;
-        nextOut->yd_slave_output[index].torque_offset = 0;
-        nextOut->yd_slave_output[index].mode_of_opration = MODE_CST;
-        nextOut->yd_slave_output[index].control_word = sw2cw(currentIn->yd_slave_input[index].status_word & 0x6f);
+        nextOut->yd_slave_output[id_physical].target_torque = 0;
+        nextOut->yd_slave_output[id_physical].torque_offset = 0;
+        nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
+        nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
+      }
+    }
+    else if(driver[id_physical] == LEJU)
+    {
+      if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
+        nextOut->selfd_slave_output[id_physical].target_velocity = params[i].velocity * (encoder_range[index] / 360.0);
+        nextOut->selfd_slave_output[id_physical].velocity_offset = params[i].velocityOffset * (encoder_range[index] / 360.0);
+        nextOut->selfd_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000;
+        nextOut->selfd_slave_output[id_physical].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
+        nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CSV;
+        nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+      }
+      else {
+        // Ignore this Id, skip it.
+        nextOut->selfd_slave_output[id_physical].target_torque = 0;
+        nextOut->selfd_slave_output[id_physical].torque_offset = 0;
+        nextOut->selfd_slave_output[id_physical].max_torque = 10;
+        nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
+        nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
       }
     }
   }
@@ -1305,7 +1635,9 @@ void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver,
   error_vec.resize(num_slave);
   for (auto i = 0; i < num_slave; i++)
   {
-    error_vec[i] = currentMotorStatus[i];
+    uint8_t id_physical;
+    physicalToLogical(id_physical,i);
+    error_vec[id_physical] = currentMotorStatus[i];
   }
   log_vector("/sensor_data/joint_data/error_vec", error_vec);
 
@@ -1316,6 +1648,10 @@ void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver,
     index = ids[i] - 1;
     if (currentMotorStatus[index])
       continue;
+
+    uint8_t id_physical;
+    physicalToLogical(id_physical,index);
+
     // for feedback
     auto &target = nextTorqueFeedbackPtr[index];
     if(!IS_MOTOR_DISABLED(ids[i])) {
@@ -1338,13 +1674,18 @@ void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver,
     double current_position,current_velocity;
     if(driver[index] == ELMO)
     {
-      current_position = currentIn->elmo_slave_input[index].position_actual_value * (360.0 / encoder_range[index]);
-      current_velocity = currentIn->elmo_slave_input[index].velocity_actual_value * (360.0 / encoder_range[index]);
+      current_position = currentIn->elmo_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+      current_velocity = currentIn->elmo_slave_input[id_physical].velocity_actual_value * (360.0 / encoder_range[index]);
     }
     else if(driver[index] == YD)
     {
-      current_position = currentIn->yd_slave_input[index].position_actual_value * (360.0 / encoder_range[index]);
-      current_velocity = currentIn->yd_slave_input[index].velocity_actual_value* (360.0 / encoder_range[index]);
+      current_position = currentIn->yd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+      current_velocity = currentIn->yd_slave_input[id_physical].velocity_actual_value* (360.0 / encoder_range[index]);
+    }
+    else if(driver[index] == LEJU)
+    {
+      current_position = currentIn->selfd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+      current_velocity = currentIn->selfd_slave_input[id_physical].velocity_actual_value* (360.0 / encoder_range[index]);
     }
     //
     uint16_t max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
@@ -1363,34 +1704,52 @@ void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver,
     {
       // FIX-QA: https://www.lejuhub.com/highlydynamic/kuavodevlab/-/issues/825
         if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
-          nextOut->elmo_slave_output[index].target_torque = target_tau;
-          nextOut->elmo_slave_output[index].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000;
-          nextOut->elmo_slave_output[index].max_torque = max_torque;
-          nextOut->elmo_slave_output[index].mode_of_opration = MODE_CST;
-          nextOut->elmo_slave_output[index].control_word = sw2cw(currentIn->elmo_slave_input[index].status_word & 0x6f);
+          nextOut->elmo_slave_output[id_physical].target_torque = target_tau;
+          nextOut->elmo_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000;
+          nextOut->elmo_slave_output[id_physical].max_torque = max_torque;
+          nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
+          nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
         }
         else { // Motor Disabled.
-          nextOut->elmo_slave_output[index].target_torque = 0;
-          nextOut->elmo_slave_output[index].torque_offset = 0;
-          nextOut->elmo_slave_output[index].max_torque = 10;
-          nextOut->elmo_slave_output[index].mode_of_opration = MODE_CST;
-          nextOut->elmo_slave_output[index].control_word = sw2cw(currentIn->elmo_slave_input[index].status_word & 0x6f);
+          nextOut->elmo_slave_output[id_physical].target_torque = 0;
+          nextOut->elmo_slave_output[id_physical].torque_offset = 0;
+          nextOut->elmo_slave_output[id_physical].max_torque = 10;
+          nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
+          nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
         }
     }
     else if(driver[index] == YD)
     {
         if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
-          nextOut->yd_slave_output[index].target_torque = target_tau / 1.414;
-          nextOut->yd_slave_output[index].torque_offset = (params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000) / 1.414;
-          nextOut->yd_slave_output[index].mode_of_opration = MODE_CST;
-          nextOut->yd_slave_output[index].control_word = sw2cw(currentIn->yd_slave_input[index].status_word & 0x6f);
-          target_tau_vec[index] = currentOut->yd_slave_output[index].target_torque;
+          nextOut->yd_slave_output[id_physical].target_torque = target_tau / 1.414;
+          nextOut->yd_slave_output[id_physical].torque_offset = (params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000) / 1.414;
+          nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
+          nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
+          target_tau_vec[index] = currentOut->yd_slave_output[id_physical].target_torque;
         }
         else {
-          nextOut->yd_slave_output[index].target_torque = 0;
-          nextOut->yd_slave_output[index].torque_offset = 0;
-          nextOut->yd_slave_output[index].mode_of_opration = MODE_CST;
-          nextOut->yd_slave_output[index].control_word = sw2cw(currentIn->yd_slave_input[index].status_word & 0x6f);
+          nextOut->yd_slave_output[id_physical].target_torque = 0;
+          nextOut->yd_slave_output[id_physical].torque_offset = 0;
+          nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
+          nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
+        }
+    }
+    else if(driver[index] == LEJU)
+    {
+      // FIX-QA: https://www.lejuhub.com/highlydynamic/kuavodevlab/-/issues/825
+        if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
+          nextOut->selfd_slave_output[id_physical].target_torque = target_tau;
+          nextOut->selfd_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000;
+          nextOut->selfd_slave_output[id_physical].max_torque = max_torque;
+          nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
+          nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+        }
+        else { // Motor Disabled.
+          nextOut->selfd_slave_output[id_physical].target_torque = 0;
+          nextOut->selfd_slave_output[id_physical].torque_offset = 0;
+          nextOut->selfd_slave_output[id_physical].max_torque = 10;
+          nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
+          nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
         }
     }
   }
@@ -1415,8 +1774,10 @@ void motorSetTorque(const uint16_t *ids, const EcMasterType* driver, uint32_t nu
   //mtx_io.lock();
   for (uint32_t i = 0; i < num; i++)
   {
-    
+    // uint8_t id_physical = physical2logical[index];///按照物理连接顺序，将逻辑id转换为物理id
     index = ids[i] - 1;
+    uint8_t id_physical;
+    physicalToLogical(id_physical,index);
     if (currentMotorStatus[index])
       continue;
     if (driver[index] == ELMO)
@@ -1439,15 +1800,32 @@ void motorSetTorque(const uint16_t *ids, const EcMasterType* driver, uint32_t nu
     else if(driver[index] == YD)
     {
         if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
-          nextOut->yd_slave_output[index].target_torque = params[i].torque * (1000.0 / rated_current[index]) * 1000 / 1.414;
-          nextOut->yd_slave_output[index].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000 / 1.414;
-          nextOut->yd_slave_output[index].mode_of_opration = MODE_CST;
-          // nextOut->yd_slave_output[index].control_word = sw2cw(currentIn->yd_slave_input[index].status_word & 0x6f);
+          nextOut->yd_slave_output[id_physical].target_torque = params[i].torque * (1000.0 / rated_current[index]) * 1000 / 1.414;
+          nextOut->yd_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000 / 1.414;
+          nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
+          nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
         }
         else {
-          nextOut->yd_slave_output[index].target_torque = 0;
-          nextOut->yd_slave_output[index].torque_offset = 0;
-          nextOut->yd_slave_output[index].mode_of_opration = MODE_CST;
+          nextOut->yd_slave_output[id_physical].target_torque = 0;
+          nextOut->yd_slave_output[id_physical].torque_offset = 0;
+          nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
+        }
+    }
+    else if (driver[index] == LEJU)
+    {
+        if(!IS_MOTOR_DISABLED(ids[i])) { // NOTES: This motor is not disabled, configure from kuavo.json.
+          nextOut->selfd_slave_output[index].target_torque = params[i].torque * (1000.0 / rated_current[index]) * 1000;
+          nextOut->selfd_slave_output[index].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000;
+          nextOut->selfd_slave_output[index].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
+          nextOut->selfd_slave_output[index].mode_of_opration = MODE_CST;
+          nextOut->selfd_slave_output[index].control_word = sw2cw(currentIn->selfd_slave_input[index].status_word & 0x6f);
+        }
+        else { // Motor Disabled.
+          nextOut->selfd_slave_output[index].target_torque = 0;
+          nextOut->selfd_slave_output[index].torque_offset = 0;
+          nextOut->selfd_slave_output[index].max_torque = 10;
+          nextOut->selfd_slave_output[index].mode_of_opration = MODE_CST;
+          nextOut->selfd_slave_output[index].control_word = sw2cw(currentIn->selfd_slave_input[index].status_word & 0x6f);
         }
     }
   }
@@ -2303,7 +2681,7 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
   {
     bRun = EC_TRUE;
     uint32_t i = 0, count = 0;
-    uint32_t enalbe_elmo_number = 0,enalbe_yd_number = 0;
+    uint32_t enalbe_elmo_number = 0,enalbe_yd_number = 0,enalbe_selfd_number = 0;
    
     EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Wait for %d motors to enable\n", num_slave));
     OsSleep(10);
@@ -2321,6 +2699,10 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
         {
           enalbe_yd_number++;
         }
+        else if(driver_type[i] == LEJU)
+        {
+          enalbe_selfd_number++;
+        }
         if (i >= num_slave)
         {
           break;
@@ -2331,18 +2713,23 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
       count++;
       if (count >= 5000)
       {
+        SlaveBuffersIn *currentIn = currentBuffersIn.load(std::memory_order_acquire);
         EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to enable motor %d\n", i + 1));
         if(driver_type[i] == ELMO)
         {
-            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "elmo_Status word 0x%x\n", elmo_slave_input[enalbe_elmo_number]->status_word));
-            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "elmo_Error code 0x%x\n", elmo_slave_input[enalbe_elmo_number]->error_code));
+            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "elmo_Status word 0x%x\n", currentIn->elmo_slave_input[enalbe_elmo_number].status_word));
+            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "elmo_Error code 0x%x\n", currentIn->elmo_slave_input[enalbe_elmo_number].error_code));
         }
         else if (driver_type[i] == YD)
         {
-            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "yd_Status word 0x%x\n", yd_slave_input[enalbe_yd_number]->status_word));
-            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "yd_Error code 0x%x\n", yd_slave_input[enalbe_yd_number]->error_code));
+            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "yd_Status word 0x%x\n", currentIn->yd_slave_input[enalbe_yd_number].status_word));
+            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "yd_Error code 0x%x\n", currentIn->yd_slave_input[enalbe_yd_number].error_code));
         }
-        printf("tuichukle\n");
+        else if (driver_type[i] == LEJU)
+        {
+            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "selfd_Status word 0x%x\n", currentIn->selfd_slave_input[enalbe_selfd_number].status_word));
+            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "selfd_Error code 0x%x\n",currentIn-> selfd_slave_input[enalbe_selfd_number].error_code));
+        }
         goto Exit;
       }
     }
@@ -2714,6 +3101,10 @@ static EC_T_VOID EcMasterJobTask(EC_T_VOID *pvAppContext)
 
       uint32_t yd_rl = sizeof(YD_SlaveRead_t);
       uint32_t yd_wl = sizeof(YD_SlaveWrite_t);
+
+      uint32_t selfd_rl = sizeof(SELFD_SlaveRead_t);
+      uint32_t selfd_wl = sizeof(SELFD_SlaveWrite_t);
+
         // 拷贝数据到 IN 缓冲区中
       for (uint32_t i = 0; i < num_elmo_slave; i++)
       {
@@ -2722,6 +3113,10 @@ static EC_T_VOID EcMasterJobTask(EC_T_VOID *pvAppContext)
       for (uint32_t i = 0; i < num_yd_slave; i++)
       {
         memcpy(&nextIn->yd_slave_input[i], pbyPdIn + elmo_l * num_elmo_slave + yd_rl * i, sizeof(YD_SlaveRead_t));
+      }
+      for (uint32_t i = 0; i < num_selfd_slave; i++)
+      {
+        memcpy(&nextIn->selfd_slave_input[i], pbyPdIn + elmo_l * num_elmo_slave + yd_rl * num_yd_slave + selfd_rl * i, sizeof(SELFD_SlaveRead_t));
       }
       currentBuffersIn.store(nextIn, std::memory_order_release);
       
@@ -2750,6 +3145,9 @@ static EC_T_VOID EcMasterJobTask(EC_T_VOID *pvAppContext)
 
     yd_rl = sizeof(YD_SlaveRead_t);
     yd_wl = sizeof(YD_SlaveWrite_t);
+    selfd_rl = sizeof(SELFD_SlaveRead_t);
+    selfd_wl = sizeof(SELFD_SlaveWrite_t);
+
     // 拷贝数据到 OUT 缓冲区中
     for (uint32_t i = 0; i < num_elmo_slave; i++)
     {
@@ -2759,7 +3157,10 @@ static EC_T_VOID EcMasterJobTask(EC_T_VOID *pvAppContext)
     {
       memcpy(pbyPdOut + elmo_l * num_elmo_slave + yd_wl * i, &currentOut->yd_slave_output[i], sizeof(YD_SlaveWrite_t));
     }
-    
+    for (uint32_t i = 0; i < num_selfd_slave; i++)
+    {
+      memcpy(pbyPdOut + elmo_l * num_elmo_slave + yd_wl * num_yd_slave + selfd_wl * i, &currentOut->selfd_slave_output[i], sizeof(SELFD_SlaveWrite_t));
+    }
     dwRes = ecatExecJob(eUsrJob_SendAllCycFrames, &oJobParms);
     //mtx_io.unlock();
     if (EC_E_NOERROR != dwRes && EC_E_INVALIDSTATE != dwRes && EC_E_LINK_DISCONNECTED != dwRes)
@@ -3040,6 +3441,7 @@ static EC_T_DWORD myAppPrepare(T_EC_DEMO_APP_CONTEXT *pAppContext)
   //初始化从站计数器
   num_elmo_slave = 0;
   num_yd_slave = 0; 
+  num_selfd_slave = 0;
 
   //识别从站并将个数统计到各自的num_slave
   for(dwSlaveIdx = 0; dwSlaveIdx < dwNumConfiguredSlaves; dwSlaveIdx++)
@@ -3063,9 +3465,16 @@ static EC_T_DWORD myAppPrepare(T_EC_DEMO_APP_CONTEXT *pAppContext)
       num_elmo_slave++;
       // printf("num_elmo_slave = %d\n",num_elmo_slave);
     }
+    else if(oCfgSlaveInfo.dwVendorId == SELFD_VENDOR_ID)
+    {      
+      num_selfd_slave++;
+      // printf("num_selfd_slave = %d\n",num_selfd_slave);
+    }
+
   }
   std::cout << "[ECmaster]: num_elmo_slave = " << num_elmo_slave << std::endl;
   std::cout << "[ECmaster]: num_yd_slave = " << num_yd_slave << std::endl;
+  std::cout << "[ECmaster]: num_selfd_slave = " << num_selfd_slave << std::endl;
 
   // 获取 收发 image
   EC_T_BYTE *pbyPdIn = ecatGetProcessImageInputPtr();
@@ -3078,51 +3487,74 @@ static EC_T_DWORD myAppPrepare(T_EC_DEMO_APP_CONTEXT *pAppContext)
   uint32_t yd_rl = sizeof(YD_SlaveRead_t);
   uint32_t yd_wl = sizeof(YD_SlaveWrite_t);
 
+  uint32_t selfd_rl = sizeof(SELFD_SlaveRead_t);
+  uint32_t selfd_wl = sizeof(SELFD_SlaveWrite_t);
+
   // 分配内存给buffersA和buffersB
   buffersAIn.elmo_slave_input = (ELMO_SlaveRead_t *)malloc(num_elmo_slave * sizeof(ELMO_SlaveRead_t));
   buffersAIn.yd_slave_input = (YD_SlaveRead_t *)malloc(num_yd_slave * sizeof(YD_SlaveRead_t));
+  buffersAIn.selfd_slave_input = (SELFD_SlaveRead_t *)malloc(num_selfd_slave * sizeof(SELFD_SlaveRead_t));
   buffersBIn.elmo_slave_input = (ELMO_SlaveRead_t *)malloc(num_elmo_slave * sizeof(ELMO_SlaveRead_t));
   buffersBIn.yd_slave_input = (YD_SlaveRead_t *)malloc(num_yd_slave * sizeof(YD_SlaveRead_t));
+  buffersBIn.selfd_slave_input = (SELFD_SlaveRead_t *)malloc(num_selfd_slave * sizeof(SELFD_SlaveRead_t));
   
 
   buffersAOut.elmo_slave_output = (ELMO_SlaveWrite_t *)malloc(num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   buffersAOut.yd_slave_output = (YD_SlaveWrite_t *)malloc(num_yd_slave * sizeof(YD_SlaveWrite_t));
+  buffersAOut.selfd_slave_output = (SELFD_SlaveWrite_t *)malloc(num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
   buffersBOut.elmo_slave_output = (ELMO_SlaveWrite_t *)malloc(num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   buffersBOut.yd_slave_output = (YD_SlaveWrite_t *)malloc(num_yd_slave * sizeof(YD_SlaveWrite_t));
+  buffersBOut.selfd_slave_output = (SELFD_SlaveWrite_t *)malloc(num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
 
   buffersCOut.elmo_slave_output = (ELMO_SlaveWrite_t *)malloc(num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   buffersCOut.yd_slave_output = (YD_SlaveWrite_t *)malloc(num_yd_slave * sizeof(YD_SlaveWrite_t));
+  buffersCOut.selfd_slave_output = (SELFD_SlaveWrite_t *)malloc(num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
+
   buffersDOut.elmo_slave_output = (ELMO_SlaveWrite_t *)malloc(num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   buffersDOut.yd_slave_output = (YD_SlaveWrite_t *)malloc(num_yd_slave * sizeof(YD_SlaveWrite_t));
+  buffersDOut.selfd_slave_output = (SELFD_SlaveWrite_t *)malloc(num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
+
 
   buffersEOut.elmo_slave_output = (ELMO_SlaveWrite_t *)malloc(num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   buffersEOut.yd_slave_output = (YD_SlaveWrite_t *)malloc(num_yd_slave * sizeof(YD_SlaveWrite_t));
+  buffersEOut.selfd_slave_output = (SELFD_SlaveWrite_t *)malloc(num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
+
   buffersFOut.elmo_slave_output = (ELMO_SlaveWrite_t *)malloc(num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   buffersFOut.yd_slave_output = (YD_SlaveWrite_t *)malloc(num_yd_slave * sizeof(YD_SlaveWrite_t));
+  buffersFOut.selfd_slave_output = (SELFD_SlaveWrite_t *)malloc(num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
+
 
 
   // 清空初始数据
   memset(buffersAIn.elmo_slave_input, 0, num_elmo_slave * sizeof(ELMO_SlaveRead_t));
   memset(buffersAIn.yd_slave_input, 0, num_yd_slave * sizeof(YD_SlaveRead_t));
+  memset(buffersAIn.selfd_slave_input, 0, num_selfd_slave * sizeof(SELFD_SlaveRead_t));
   memset(buffersBIn.elmo_slave_input, 0, num_elmo_slave * sizeof(ELMO_SlaveRead_t));
   memset(buffersBIn.yd_slave_input, 0, num_yd_slave * sizeof(YD_SlaveRead_t));
+  memset(buffersBIn.selfd_slave_input, 0, num_selfd_slave * sizeof(SELFD_SlaveRead_t));
 
   memset(buffersAOut.elmo_slave_output, 0, num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   memset(buffersAOut.yd_slave_output, 0, num_yd_slave * sizeof(YD_SlaveWrite_t));
+  memset(buffersAOut.selfd_slave_output, 0, num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
   memset(buffersBOut.elmo_slave_output, 0, num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   memset(buffersBOut.yd_slave_output, 0, num_yd_slave * sizeof(YD_SlaveWrite_t));
+  memset(buffersBOut.selfd_slave_output, 0, num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
 
   // Clear initial data
   memset(buffersCOut.elmo_slave_output, 0, num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   memset(buffersCOut.yd_slave_output, 0, num_yd_slave * sizeof(YD_SlaveWrite_t));
+  memset(buffersCOut.selfd_slave_output, 0, num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
   memset(buffersDOut.elmo_slave_output, 0, num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   memset(buffersDOut.yd_slave_output, 0, num_yd_slave * sizeof(YD_SlaveWrite_t));
+  memset(buffersDOut.selfd_slave_output, 0, num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
 
     // Clear initial data
   memset(buffersEOut.elmo_slave_output, 0, num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   memset(buffersEOut.yd_slave_output, 0, num_yd_slave * sizeof(YD_SlaveWrite_t));
+  memset(buffersEOut.selfd_slave_output, 0, num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
   memset(buffersFOut.elmo_slave_output, 0, num_elmo_slave * sizeof(ELMO_SlaveWrite_t));
   memset(buffersFOut.yd_slave_output, 0, num_yd_slave * sizeof(YD_SlaveWrite_t));
+  memset(buffersFOut.selfd_slave_output, 0, num_selfd_slave * sizeof(SELFD_SlaveWrite_t));
 
   // 拷贝数据到 IN 缓冲区中
   for (uint32_t i = 0; i < num_elmo_slave; i++)
@@ -3137,6 +3569,11 @@ static EC_T_DWORD myAppPrepare(T_EC_DEMO_APP_CONTEXT *pAppContext)
     memcpy(&buffersBIn.yd_slave_input[i], pbyPdIn + elmo_l * num_elmo_slave + yd_rl * i, sizeof(YD_SlaveRead_t));
   }
 
+  for (uint32_t i = 0; i < num_selfd_slave; i++)
+  {
+    memcpy(&buffersAIn.selfd_slave_input[i], pbyPdIn + elmo_l * num_elmo_slave + yd_rl * num_yd_slave + selfd_rl * i, sizeof(SELFD_SlaveRead_t));
+    memcpy(&buffersBIn.selfd_slave_input[i], pbyPdIn + elmo_l * num_elmo_slave + yd_rl * num_yd_slave + selfd_rl * i, sizeof(SELFD_SlaveRead_t));
+  }
   // 初始化原子指针指向buffersA或buffersB中的一个，假设指向A作为初始可读数据
   currentBuffersIn.store(&buffersAIn, std::memory_order_release);
   currentBuffersOut.store(&buffersAOut, std::memory_order_release);
@@ -3147,6 +3584,11 @@ static EC_T_DWORD myAppPrepare(T_EC_DEMO_APP_CONTEXT *pAppContext)
   memset(motorStatusMapA, 0, sizeof(motorStatusMapA));
   memset(motorStatusMapB, 0, sizeof(motorStatusMapB));
   currentMotorStatusMap.store(motorStatusMapA, std::memory_order_release);
+  // 初始化状态更改请求标志数组
+  for (int i = 0; i < NUM_SLAVE_MAX; i++)
+  {
+    motorStatusChangeRequest[i].store(false, std::memory_order_release);
+  }
 
   // 初始化 torque_feedback_target 双缓冲区
   memset(torque_feedback_targetA, 0, sizeof(torque_feedback_targetA));
@@ -3250,7 +3692,7 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
 
   MotorParam_t motorData[NUM_SLAVE_MAX];
   // ****************** add pos vel feedback to torque ************************
-  uint8_t elmo_number = 0, yd_number = 0;
+  uint8_t elmo_number = 0, yd_number = 0, selfd_number = 0;
   std::vector<double> real_tau;
   // std::vector<double> real_mode;
   real_tau.resize(num_slave);
@@ -3263,6 +3705,10 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
     for (uint32_t i = 0; i < num_slave; i++)
     {
       // real_mode[i] =yd_slave_output[yd_number]->mode_of_opration;
+      uint8_t id_physical;
+      physicalToLogical(id_physical,i);
+      // uint8_t id_physical = physical2logical[i];
+
       if (driver_type[i] == ELMO)
       {
         if (currentTorqueOut->elmo_slave_output[elmo_number].mode_of_opration == MODE_CST)
@@ -3308,32 +3754,74 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
       else if (driver_type[i] == YD)
       {
         
-        if (currentTorqueOut->yd_slave_output[yd_number].mode_of_opration == MODE_CST)
+        if (currentTorqueOut->yd_slave_output[id_physical].mode_of_opration == MODE_CST)
         {
-          currentOut->yd_slave_output[yd_number].target_torque = currentTorqueOut->yd_slave_output[yd_number].target_torque;
-          currentOut->yd_slave_output[yd_number].torque_offset = currentTorqueOut->yd_slave_output[yd_number].torque_offset;
-          currentOut->yd_slave_output[yd_number].mode_of_opration = currentTorqueOut->yd_slave_output[yd_number].mode_of_opration;
-          currentOut->yd_slave_output[yd_number].control_word = currentTorqueOut->yd_slave_output[yd_number].control_word;
+          currentOut->yd_slave_output[id_physical].target_torque = currentTorqueOut->yd_slave_output[id_physical].target_torque;
+          currentOut->yd_slave_output[id_physical].torque_offset = currentTorqueOut->yd_slave_output[id_physical].torque_offset;
+          currentOut->yd_slave_output[id_physical].mode_of_opration = currentTorqueOut->yd_slave_output[id_physical].mode_of_opration;
+          currentOut->yd_slave_output[id_physical].control_word = currentTorqueOut->yd_slave_output[id_physical].control_word;
           /////////////////////////////////////////////////////////////////////////////////////////////////
-          double current_position = currentIn->yd_slave_input[yd_number].position_actual_value * (360.0 / encoder_range[i]);
-          double current_velocity = currentIn->yd_slave_input[yd_number].velocity_actual_value * (360.0 / encoder_range[i]);
+          double current_position = currentIn->yd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[i]);
+          double current_velocity = currentIn->yd_slave_input[id_physical].velocity_actual_value * (360.0 / encoder_range[i]);
           TorqueFeedbackTarget_t &target = currentTorqueFeedbackPtr[i];
 
           int16_t target_tau = (target.target_torque + (target.target_position - current_position) * TO_RADIAN * target.kp + (target.target_velocity - current_velocity) * TO_RADIAN * target.kd) * (1000.0 / rated_current[i]) * 1000;
 
-          currentOut->yd_slave_output[yd_number].target_torque = target_tau / 1.414;
+          currentOut->yd_slave_output[id_physical].target_torque = target_tau / 1.414;
         }
-        else if (currentPositionOut->yd_slave_output[yd_number].mode_of_opration == MODE_CSP)
+        else if (currentPositionOut->yd_slave_output[id_physical].mode_of_opration == MODE_CSP)
         {
-          currentOut->yd_slave_output[yd_number].target_position = currentPositionOut->yd_slave_output[yd_number].target_position;
-          currentOut->yd_slave_output[yd_number].velocity_offset = currentPositionOut->yd_slave_output[yd_number].velocity_offset;
-          currentOut->yd_slave_output[yd_number].torque_offset = currentPositionOut->yd_slave_output[yd_number].torque_offset;
-          currentOut->yd_slave_output[yd_number].mode_of_opration = currentPositionOut->yd_slave_output[yd_number].mode_of_opration;
-          currentOut->yd_slave_output[yd_number].control_word = currentPositionOut->yd_slave_output[yd_number].control_word;
+          currentOut->yd_slave_output[id_physical].target_position = currentPositionOut->yd_slave_output[id_physical].target_position;
+          currentOut->yd_slave_output[id_physical].velocity_offset = currentPositionOut->yd_slave_output[id_physical].velocity_offset;
+          currentOut->yd_slave_output[id_physical].torque_offset = currentPositionOut->yd_slave_output[id_physical].torque_offset;
+          currentOut->yd_slave_output[id_physical].mode_of_opration = currentPositionOut->yd_slave_output[id_physical].mode_of_opration;
+          currentOut->yd_slave_output[id_physical].control_word = currentPositionOut->yd_slave_output[id_physical].control_word;
         }
 
-        real_tau[i] = currentOut->yd_slave_output[yd_number].target_torque;
-        yd_number++;
+        real_tau[i] = currentOut->yd_slave_output[id_physical].target_torque;
+        // yd_number++;
+      }
+      else if (driver_type[i] == LEJU)
+      {
+        if (currentTorqueOut->selfd_slave_output[selfd_number].mode_of_opration == MODE_CST)
+        {
+          currentOut->selfd_slave_output[selfd_number].target_torque = currentTorqueOut->selfd_slave_output[selfd_number].target_torque;
+          currentOut->selfd_slave_output[selfd_number].torque_offset = currentTorqueOut->selfd_slave_output[selfd_number].torque_offset;
+          currentOut->selfd_slave_output[selfd_number].max_torque = currentTorqueOut->selfd_slave_output[selfd_number].max_torque;
+          currentOut->selfd_slave_output[selfd_number].mode_of_opration = currentTorqueOut->selfd_slave_output[selfd_number].mode_of_opration;
+          currentOut->selfd_slave_output[selfd_number].control_word = currentTorqueOut->selfd_slave_output[selfd_number].control_word;
+          ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+          double current_position = currentIn->selfd_slave_input[selfd_number].position_actual_value * (360.0 / encoder_range[i]);
+          double current_velocity = currentIn->selfd_slave_input[selfd_number].velocity_actual_value * (360.0 / encoder_range[i]);
+          TorqueFeedbackTarget_t &target = currentTorqueFeedbackPtr[i];
+
+          uint16_t max_torque = currentOut->selfd_slave_output[selfd_number].max_torque;
+          int16_t target_tau = (target.target_torque + (target.target_position - current_position) * TO_RADIAN * target.kp + (target.target_velocity - current_velocity) * TO_RADIAN * target.kd) * (1000.0 / rated_current[i]) * 1000;
+          int32_t max_torque_32 = static_cast<int32_t>(max_torque);
+          int32_t target_tau_32 = static_cast<int32_t>(target_tau);
+          if (target_tau_32 > max_torque_32)
+          {
+            target_tau = static_cast<int16_t>(max_torque);
+          }
+          else if (target_tau_32 < -max_torque_32)
+          {
+            target_tau = static_cast<int16_t>(-max_torque);
+          }
+          currentOut->selfd_slave_output[selfd_number].target_torque = target_tau;
+        }
+        else if (currentPositionOut->selfd_slave_output[selfd_number].mode_of_opration == MODE_CSP)
+        {
+          currentOut->selfd_slave_output[selfd_number].target_position = currentPositionOut->selfd_slave_output[selfd_number].target_position;
+          currentOut->selfd_slave_output[selfd_number].position_offset = currentPositionOut->selfd_slave_output[selfd_number].position_offset;
+          currentOut->selfd_slave_output[selfd_number].velocity_offset = currentPositionOut->selfd_slave_output[selfd_number].velocity_offset;
+          currentOut->selfd_slave_output[selfd_number].torque_offset = currentPositionOut->selfd_slave_output[selfd_number].torque_offset;
+          currentOut->selfd_slave_output[selfd_number].max_torque = currentPositionOut->selfd_slave_output[selfd_number].max_torque;
+          currentOut->selfd_slave_output[selfd_number].mode_of_opration = currentPositionOut->selfd_slave_output[selfd_number].mode_of_opration;
+          currentOut->selfd_slave_output[selfd_number].control_word = currentPositionOut->selfd_slave_output[selfd_number].control_word;
+        }
+
+        real_tau[i] = currentOut->selfd_slave_output[selfd_number].target_torque;
+        selfd_number++;
       }
       else
       {
@@ -3352,33 +3840,59 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
         uint8_t *currentMotorStatus = currentMotorStatusMap.load(std::memory_order_acquire);
         // 确定下一个motorStatusMap缓冲区
         uint8_t *nextMotorStatus = (currentMotorStatus == motorStatusMapA) ? motorStatusMapB : motorStatusMapA;
-        uint8_t yd_number_status = 0, elmo_number_status = 0;
+        uint8_t yd_number_status = 0, elmo_number_status = 0, selfd_number_status = 0;
         for (uint8_t i = 0; i < num_slave; i++)
         {
           // if motor status_word is fault
           // mtx_io.lock();
+          // uint8_t id_physical = physical2logical[i];
+          uint8_t id_physical;
+          physicalToLogical(id_physical,i);
+
           bool isFault;
           if (driver_type[i] == ELMO)
           {
-            isFault = currentIn->elmo_slave_input[elmo_number_status].status_word & 1 << 3;
+            isFault = currentIn->elmo_slave_input[id_physical].status_word & 1 << 3;
             elmo_number_status++;
           }
           else if (driver_type[i] == YD)
           {
-            isFault = currentIn->yd_slave_input[yd_number_status].status_word & 1 << 3;
+            isFault = currentIn->yd_slave_input[id_physical].status_word & 1 << 3;
             yd_number_status++;
           }
+          else if (driver_type[i] == LEJU)
+          {
+            isFault = currentIn->selfd_slave_input[id_physical].status_word & 1 << 3;
+            selfd_number_status++;
+          }
           // mtx_io.unlock();
+
+          // 处理来自 myAppDiagnosis状态更改请求
+          if (motorStatusChangeRequest[i].load(std::memory_order_acquire))
+          {
+            if (currentMotorStatus[i] == MOTOR_STATUS_ERROR)
+            {
+              nextMotorStatus[i] = MOTOR_STATUS_REINIT;
+              motorStatusChangeRequest[i].store(false, std::memory_order_release);
+            }
+          }
+          
+          // 硬件故障检测和状态转换
           if (isFault && currentMotorStatus[i] == MOTOR_STATUS_NO_ERROR)
           {
-            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d is fault!\n", ids[i]));
+            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d （Joint %d）is fault!\n", id_physical + 1,find_physical_index_by_logical(id_physical)));
             restartMotorFlag = true;
             nextMotorStatus[i] = MOTOR_STATUS_ERROR;
           }
           else if (!isFault && currentMotorStatus[i] != MOTOR_STATUS_NO_ERROR)
           {
-            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d has been fixed!\n", ids[i]));
+            EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d has been fixed!\n", id_physical + 1));
             nextMotorStatus[i] = MOTOR_STATUS_NO_ERROR;
+          }
+          else
+          {
+            // 保持当前状态
+            nextMotorStatus[i] = currentMotorStatus[i];
           }
         }
         // 在这里切换 currentMotorStatusMap 指针，让 nextMotorStatus 成为新生效的数据
@@ -3445,14 +3959,21 @@ static EC_T_DWORD myAppDiagnosis(T_EC_DEMO_APP_CONTEXT *pAppContext)
     {
       if (currentMotorStatus[i] == MOTOR_STATUS_ERROR)
       {
+        // uint8_t id_physical = physical2logical[i];
+        uint8_t id_physical;
+        physicalToLogical(id_physical,i);
         has_error = true;
         if(driver_type[i] == ELMO)
         {
-          motorErrorCodeMap[i] = currentIn->elmo_slave_input[i].error_code;
+          motorErrorCodeMap[i] = currentIn->elmo_slave_input[id_physical].error_code;
         }
         else if(driver_type[i] == YD)
         {
-          motorErrorCodeMap[i] = currentIn->yd_slave_input[i].error_code;
+          motorErrorCodeMap[i] = currentIn->yd_slave_input[id_physical].error_code;
+        }
+        else if(driver_type[i] == LEJU)
+        {
+          motorErrorCodeMap[i] = currentIn->selfd_slave_input[id_physical].error_code;
         }
         // 错误的同时不一定会读到错误码
         if (motorErrorCodeMap[i])
@@ -3462,7 +3983,9 @@ static EC_T_DWORD myAppDiagnosis(T_EC_DEMO_APP_CONTEXT *pAppContext)
             continue;
           }
           last_restart_time[i] = std::clock();
-          currentMotorStatus[i] = MOTOR_STATUS_REINIT;
+          // currentMotorStatus[i] = MOTOR_STATUS_REINIT;
+          // 请求状态更改到 REINIT (不直接修改缓冲区)
+          motorStatusChangeRequest[i].store(true, std::memory_order_release);
 // #ifdef ERROR_FIX // 是否需要修复错误
 //           std::thread restartThread(fixEmergencyRequest, ids[i], motorErrorCodeMap[i]);
 //           restartThread.detach();
@@ -3474,23 +3997,23 @@ static EC_T_DWORD myAppDiagnosis(T_EC_DEMO_APP_CONTEXT *pAppContext)
           {
             if (errorCode == SENSOR_FEEDBACK_ERROR)
             {
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 传感器错误\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 传感器错误\n", id_physical + 1, motorErrorCodeMap[i]));
             }
             else if (errorCode == FAILED_TO_START_MOTOR)
             {
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 传感器错误\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 传感器错误\n", id_physical + 1, motorErrorCodeMap[i]));
             }
             else if (errorCode == FEEDBACK_ERROR || errorCode == POSITION_TRACKING_ERROR)
             {
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置跟踪错误\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置跟踪错误\n", id_physical + 1, motorErrorCodeMap[i]));
             }
             else if (errorCode == SPEED_TRACKING_ERROR)
             {
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 速度跟踪错误\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 速度跟踪错误\n", id_physical + 1, motorErrorCodeMap[i]));
             }
             else
             {
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! \n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! \n", id_physical + 1, motorErrorCodeMap[i]));
             }
           }
           else if(driver_type[i] == YD)
@@ -3498,100 +4021,153 @@ static EC_T_DWORD myAppDiagnosis(T_EC_DEMO_APP_CONTEXT *pAppContext)
             switch (errorCode)
             {
             case 0x001:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 检测到功率器件的短路保护\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 检测到功率器件的短路保护\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x004:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! EPROM存储异常\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! EPROM存储异常\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x006:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! AD 采样故障\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! AD 采样故障\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x007:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 编码器断线\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 编码器断线\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x008:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 编码器CRC校验错误\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 编码器CRC校验错误\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x009:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 编码器内部计数错误\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 编码器内部计数错误\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x00A:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 供电电压过低,低于15V\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 供电电压过低,低于15V\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x00B:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 供电电压过高,超过72V\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 供电电压过高,超过72V\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x00C:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机三相线异常\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机三相线异常\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x00D:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机长时间过载\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机长时间过载\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x00E:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 驱动器长时间过载\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 驱动器长时间过载\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x010:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 驱动器过热停机\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 驱动器过热停机\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x012:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机转速超过驱动器速度上限\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机转速超过驱动器速度上限\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x013:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置跟踪误差过大\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置跟踪误差过大\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x019:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 多圈编码器电池电压过低\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 多圈编码器电池电压过低\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x01A:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 多圈编码器电池断联,请按Pr8.01 = 2复位\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 多圈编码器电池断联,请按Pr8.01 = 2复位\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x025:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x!  PDO 通信设置同步时间超范围\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x!  PDO 通信设置同步时间超范围\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x026:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x!  PDO 通信数据超范围\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x!  PDO 通信数据超范围\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x027:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x!  长时间未接收到 PDO 通信\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x!  长时间未接收到 PDO 通信\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x028:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 看门狗周期寄存器时间为零\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 看门狗周期寄存器时间为零\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0x029:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置指令对应得速度指令超过额定转速 2倍\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置指令对应得速度指令超过额定转速 2倍\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0xE01:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机过热警告\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机过热警告\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0xE02:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 驱动器温度过高警告\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 驱动器温度过高警告\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0xE03:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机过载警告\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机过载警告\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0xE04:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 驱动器过载警告\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 驱动器过载警告\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0xE05:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置偏差过大警告\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置偏差过大警告\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0xE06:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 制动过载警告\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 制动过载警告\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0xE07:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 正向超程警告\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 正向超程警告\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             case 0xE08:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 反向超程警告\n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 反向超程警告\n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             default:
-              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! \n", ids[i], motorErrorCodeMap[i]));
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! \n", id_physical + 1, motorErrorCodeMap[i]));
               break;
             }
           }
-          // motorStatusMap[i] = MOTOR_STATUS_NO_ERROR;
-// #endif
-        }
+          else if (driver_type[i] == LEJU)
+          {
+            switch (errorCode)
+            {
+            case 0x3220:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 母线欠压\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x3210:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 母线过压\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x4210:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 设备过温\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x5530:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! EEPROM存储异常\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x7200:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! ADC采样异常\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x7305:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 编码器通信异常\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x7300:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 编码器自检状态异常\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x6320:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 校准失败\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x2310:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 输出过流\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x2350:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 负载输出状态故障\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x8400:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 电机超速\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x8611:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置、速度跟踪异常\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x7320:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 位置超限\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x7500:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 初始化异常\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            case 0x8C00:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! DC同步超时\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            default:
+              EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d err %x! 未知错误\n", id_physical + 1, motorErrorCodeMap[i]));
+              break;
+            }
+            // motorStatusMap[i] = MOTOR_STATUS_NO_ERROR;
+            // #endif
+          }
         error_code_vec.push_back(static_cast<double>(motorErrorCodeMap[i]));
       }else
       {
@@ -3605,6 +4181,7 @@ static EC_T_DWORD myAppDiagnosis(T_EC_DEMO_APP_CONTEXT *pAppContext)
   }
 
   return EC_E_NOERROR;
+  }
 }
 
 /********************************************************************************/

@@ -158,6 +158,7 @@ namespace ocs2
       int build_cppad_status_ {0};
 
       size_t joint_Num_ = 12;
+      size_t waist_Num_ = 1;
       RobotVersion rb_version_ = RobotVersion(3, 4); //default to 34
     };
 

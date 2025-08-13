@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 Environment=ROBOT_VERSION=40
 Environment=KUAVO_REMOTE_PASSWORD=bGVqdV9rdWF2bw==
+Environment=ROBOT_NAME=KUAVO
 ExecStart=/bin/bash /home/lab/kuavo-ros-opensource/src/manipulation_nodes/planarmwebsocketservice/service/websocket_start_script.sh
 Restart=always
 RestartSec=5s

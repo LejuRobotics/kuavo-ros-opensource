@@ -6,7 +6,7 @@
     <arg name="rviz"               default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="use_joystick"       default="true"/>
-    <arg name="joystick_type"      default="bt2"/>
+    <arg name="joystick_type"      default="sim"/>
 
     <!-- The file defining gait definition -->
     <arg name="gaitCommandFile"   default="$(find humanoid_interface)/config/command/gait.info"/>
@@ -44,7 +44,12 @@
       <group if="$(eval arg('joystick_type') == 'h12')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch"/>
       </group>
-      <group unless="$(eval arg('joystick_type') == 'h12')">
+      <group if="$(eval arg('joystick_type') == 'sim')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
+          <arg name="joystick_type" value="$(arg joystick_type)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
         </include>

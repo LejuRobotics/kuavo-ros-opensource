@@ -88,8 +88,8 @@ CentroidalModelInfo createCentroidalModelInfo(const PinocchioInterface& interfac
   const auto& model = interface.getModel();
   auto data = interface.getData();
 
-  if (model.nq != nominalJointAngles.size() + 6) {
-    const int expaectedNumJoints = model.nq - 6;
+  if (model.nq != nominalJointAngles.size()) {
+    const int expaectedNumJoints = model.nq;
     throw std::runtime_error("[CentroidalModelInfo] nominalJointAngles.size() should be " + std::to_string(expaectedNumJoints));
   }
 
@@ -113,7 +113,7 @@ CentroidalModelInfo createCentroidalModelInfo(const PinocchioInterface& interfac
 
   // make sure the nominal base frame is aligned with the world frame
   info.qPinocchioNominal.resize(model.nq);
-  info.qPinocchioNominal << vector_t::Zero(6), nominalJointAngles;
+  info.qPinocchioNominal << /* vector_t::Zero(6),  */nominalJointAngles;
   info.centroidalInertiaNominal.setZero();
   info.comToBasePositionNominal.setZero();
   if (info.centroidalModelType == CentroidalModelType::SingleRigidBodyDynamics) {

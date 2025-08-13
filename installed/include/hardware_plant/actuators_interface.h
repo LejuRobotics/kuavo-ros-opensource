@@ -9,10 +9,15 @@
 #include "EcDemoApp.h"
 
 using JointParam_t = MotorParam_t;
+typedef struct {
+  int num_actuators;
+  std::string ec_type;
+  std::string robot_module;
 
+} EcActuatorParams;
 typedef struct
 {
-  int (*init)(uint32_t num_actuators, std::string& ecmaster_driver_type);
+  int (*init)(EcActuatorParams params);
   void (*deInit)(void);
   void (*setJointOffset)(double_t *offset, uint16_t len);
   void (*setJointPosition)(const uint16_t *ids,const EcMasterType* driver, uint32_t num, MotorParam_t *params);
@@ -22,7 +27,7 @@ typedef struct
 
   void (*getJointData)(const uint16_t *ids,const EcMasterType* driver, uint32_t num, MotorParam_t *data);
   void (*addIgnore)(const uint16_t *ids, uint32_t num);
-
+  void (*setRobotMoudle)(const int robot_module);
   void (*setJointKp)(const std::vector<int32_t>& joint_kp);
   void (*setJointKd)(const std::vector<int32_t>& joint_kd);
   
@@ -50,7 +55,7 @@ typedef struct
 
 } ActuatorsInterface_t;
 
-int ECMaster_init(uint32_t num_actuators, std::string& driver_type);
+int ECMaster_init(EcActuatorParams params);
 int8_t actuatorsInterfaceSetup(const char *type, ActuatorsInterface_t *interfacePtr);
 
 #endif

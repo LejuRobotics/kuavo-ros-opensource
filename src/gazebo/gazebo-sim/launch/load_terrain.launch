@@ -1,0 +1,18 @@
+<launch>
+  <!-- 不平地面参数 -->
+  <arg name="use_terrain" default="true" doc="是否添加不平地面到场景中"/>
+  <arg name="terrain_model_path" default="$(find gazebo_sim)/models/terrain/terrain_generated.sdf" doc="不平地面模型SDF文件路径"/>
+  <arg name="terrain_x" default="-5.0" doc="不平地面位置X坐标"/>
+  <arg name="terrain_y" default="11.0" doc="不平地面位置Y坐标"/>
+  <arg name="terrain_z" default="0.0" doc="不平地面位置Z坐标"/>
+  <arg name="terrain_roll" default="0.0" doc="不平地面绕X轴旋转角度（弧度）"/>
+  <arg name="terrain_pitch" default="0.0" doc="不平地面绕Y轴旋转角度（弧度）"/>
+  <arg name="terrain_yaw" default="0.0" doc="不平地面绕Z轴旋转角度（弧度）"/>
+  
+  <!-- 加载不平地面模型 -->
+  <group if="$(arg use_terrain)">
+    <node name="spawn_terrain" pkg="gazebo_ros" type="spawn_model" 
+          args="-sdf -model uneven_terrain -file $(arg terrain_model_path) -x $(arg terrain_x) -y $(arg terrain_y) -z $(arg terrain_z) -R $(arg terrain_roll) -P $(arg terrain_pitch) -Y $(arg terrain_yaw)" 
+          respawn="false" output="screen"/>
+  </group>
+</launch> 

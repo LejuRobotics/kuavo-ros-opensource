@@ -27,11 +27,12 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ******************************************************************************/
 
+#include <humanoid_interface/HumanoidInterface.h>
+
 #include <ros/init.h>
 #include <ros/package.h>
 
 #include <ocs2_centroidal_model/CentroidalModelPinocchioMapping.h>
-#include <humanoid_interface/HumanoidInterface.h>
 #include <ocs2_pinocchio_interface/PinocchioEndEffectorKinematics.h>
 #include <ocs2_ros_interfaces/mrt/MRT_ROS_Dummy_Loop.h>
 #include <ocs2_ros_interfaces/mrt/MRT_ROS_Interface.h>

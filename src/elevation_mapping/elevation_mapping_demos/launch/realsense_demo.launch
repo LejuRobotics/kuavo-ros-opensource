@@ -1,0 +1,24 @@
+<launch>
+
+  <!-- Elevation mapping node -->
+  <node pkg="elevation_mapping" type="elevation_mapping" name="elevation_mapping" output="screen">
+    <rosparam command="load" file="$(find elevation_mapping_demos)/config/robots/simple_demo_robot.yaml" />
+    <rosparam command="load" file="$(find elevation_mapping_demos)/config/elevation_maps/simple_demo_map.yaml" />
+    <!-- <rosparam command="load" file="$(find elevation_mapping_demos)/config/elevation_maps/remove_object.yaml" /> -->
+    <!-- <rosparam command="load" file="$(find elevation_mapping)/config/sensor_processors/realsense_ZR300.yaml" /> -->
+    <rosparam command="load" file="$(find elevation_mapping)/config/sensor_processors/realsense_d435.yaml" />
+    <rosparam command="load" file="$(find elevation_mapping_demos)/config/postprocessing/postprocessor_pipeline.yaml" />
+  </node>
+
+ <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="map_to_odom" args="0 0 0 0 0 0 map odom" /> -->
+ <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="map_to_dummy_link" args="0 0 0 0 0 0 map dummy_link" /> -->
+
+  <!-- Launch visualizations for the resulting elevation map -->
+  <include file="$(find elevation_mapping_demos)/launch/visualization.launch" />
+
+ 
+
+  <!-- Launch RViz with the demo configuration -->
+  <!-- <node name="rviz2" pkg="rviz" type="rviz" args="-d $(find elevation_mapping_demos)/rviz/elevation_map_visualization_pointcloud.rviz" /> -->
+<node name="rviz2" pkg="rviz" type="rviz" args="-d $(find elevation_mapping_demos)/rviz/elevation_map_visualization.rviz" />
+</launch>

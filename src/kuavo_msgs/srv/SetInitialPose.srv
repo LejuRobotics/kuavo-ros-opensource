@@ -1,0 +1,4 @@
+geometry_msgs/PoseWithCovarianceStamped initial_pose
+---
+bool success
+string message 

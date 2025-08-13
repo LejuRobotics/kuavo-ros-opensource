@@ -18,3 +18,5 @@ new-docs
 **/build
 .aider*
 src/manipulation_nodes/planarmwebsocketservice/models/*.pt
+
+src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs/**

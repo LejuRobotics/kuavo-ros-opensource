@@ -1,0 +1,80 @@
+# bt_xml_file: "grab_box_test1.xml"
+# bt_xml_file: "grab_box_in_local.xml"
+# bt_xml_file: "grab_box_in_local_and_sgl_step.xml"
+# bt_xml_file: "grab_put_box_in_local.xml"
+# bt_xml_file: "grab_box_in_shelves.xml"
+# bt_xml_file: "grab_put_box_in_shelves.xml"
+# bt_xml_file: "grab_multi_boxes_test.xml"
+# bt_xml_file: "grab_put_box_in_shelves_with_force.xml"
+# bt_xml_file: "test/cmd_pose_world.xml"
+# bt_xml_file: "grab_put_box_in_shelves_with_force2.xml"
+# bt_xml_file: "multi_grab_put_box_in_shelves_with_force.xml"
+# bt_xml_file: "repeat_grab_put_box_in_shelves_with_force.xml"
+# bt_xml_file: "repeat_grab_put_box_in_shelves_with_force_grpc.xml"
+bt_xml_file: "repeat_multi_grab_put_box_in_shelves_with_force.xml"
+# bt_xml_file: "repeat_multi_grab_put_box_in_shelves_with_force_grpc.xml"
+
+
+bt_xml_file_reset: "../reset.xml"
+
+tick_rate: 100
+normal_torso_pitch: 3 # deg
+arm_move_time:    0.6 # s
+safe_space: [2.0, -4.0, 1.2, -1.2] # [x_+, x_-, y_+, y_-]
+grasp_box:
+  ik_to_wbc:      true
+  max_hand_dis:   0.02
+  hand_move_spd:  0.2
+  box_holdon_move_spd:  0.4
+  torso_move_spd: [0.1, 30] # m/s, deg/s
+  pre_x:          0.1
+  pre_y:          0.15
+  bias_y:         0.00
+  grab_up_height: 0.1
+  # grasp_force:    15.0
+  grasp_zyx_agl:  [0, 0, 0] # deg: y+: -> 
+  grab_traj:      [0.00, 0.15, 0.00, 0.0, 0.00, 0.000,  # pre-grasp2
+                   0.00, 0.00, 0.00, 0.0, 15.0, -5.00,  # grasp
+                   0.00, 0.00, 0.15, 0.0, 15.0, -5.00,  # lift-up
+                   0.00, 0.00, 0.18, 0.0, 15.0, -5.00,] # take back
+  put_traj:       [0.00, 0.00, 0.00, 0.0, 15.0, -5.00,  # put
+                   0.00, 0.08, 0.10, 0.0, 0.00, 0.000,] # loose
+  box_holdon_pose: [0.4, 0.0, 0.15, 0.0, 15.0, -5.00] # x, y, z, force_x, force_y, force_z 
+
+singleStepToDestination:
+  step_dt:              0.4 # s
+  pub_wait_time:        0.1 # the time to wait after publishing a new step cmd
+  torso_spd_threashold: 0.02 # m/s
+  max_delta_pose:       [0.15, 0.1, 0.1, 60]
+  foot_bias:            0.15 # m
+moveToDestination:
+  torso_displacement_vel: [0.4, 0.15, 0.1, 0.52, 0.1, 0.1, 0.2] # xyz, ypr, nagetive x
+  gait_duration:          0.8 # s
+PlanAndMoveToDestination:
+  torso_displacement_vel: [0.4, 0.15, 0.1, 0.52, 0.52, 0.1, 0.2] # xyz, ypr, nagetive x
+  gait_duration:          0.8 # s
+  stance_pos_threshold:  0.15 # m
+  stance_yaw_threshold:   8 # deg
+  stance_feet_diff_threshold: 0.06 # m
+# ready pose
+ready_joints: [0.8, -0.05, +0.35, -2.4, 0, -0.0, 0,
+               0.8, +0.05, -0.35, -2.4, 0, -0.0, 0]
+pose1_joints: [0.0, +0.01, +0.0, -1.0, 0, -0.0, 0,
+               0.0, -0.01, -0.0, -1.0, 0, -0.0, 0]
+home_joints: [0.1, +0.0, +0.0, -0.2, 0, -0.0, 0,
+               0.1, -0.0, -0.0, -0.2, 0, -0.0, 0]  
+cmdPoseMoveToDestination:
+  msg_update_distance_tolerance: 0.12 # m
+  msg_update_angle_tolerance:    8 # deg
+box_tag_ok:
+  timeout: 0.5 # if the time-diff is larger than this, the box tag is considered not ok
+cmdPoseWorldMoveToDestination:
+  xy_threshold:  0.2 # m
+  yaw_threshold: 20  # deg
+
+headMove:
+  head_move_err: 2.5 # deg
+  head_move_timeout: 2 # s
+  head_traj : [0.0, 30.0,
+               0.0, -30.0,
+               0.0, 0.0,] # yaw, pitch deg

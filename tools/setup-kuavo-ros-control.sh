@@ -84,6 +84,17 @@ clone_repos() {
     print_success "代码仓库克隆/更新完成"
 }
 
+check_samplerate(){
+    print_info "正在安装 samplerate..."
+    sudo bash ~/kuavo-ros-opensource/tools/user_groups_tools/samplerate_install.sh
+    if [ $? -eq 0 ]; then
+        print_success "samplerate 安装完成"
+    else
+        print_error "samplerate 安装失败，请检查日志"
+        exit 1
+    fi
+}
+
 # Configure robot version
 setup_robot_version() {
     print_info "设置机器人版本..."
@@ -143,6 +154,26 @@ setup_drive_board() {
     
     print_success "驱动板类型设置为 $board_type"
 }
+
+# 检查音频设备并修改配置文件中的音频格式
+check_and_update_audio_config() {
+    print_info "检查音频设备..."
+    # 检查是否存在音频设备（如card0）
+    if sudo aplay -l | grep -i Audio ; then
+        print_success "检测到音频设备，正在修改音频配置文件中的 .mp3 为 .wav ..."
+        config_file=~/kuavo-ros-opensource/src/humanoid-control/h12pro_controller_node/config/customize_config.json
+        if [ -f "$config_file" ]; then
+            sed -i 's/\.mp3/\.wav/g' "$config_file"
+            print_success "已将 $config_file 中的 .mp3 替换为 .wav"
+        else
+            print_error "未找到配置文件 $config_file，无法修改音频格式"
+        fi
+    else
+        print_info "未检测到音频设备，无需修改音频配置文件"
+    fi
+}
+
+# 在合适位置调用该函数
 
 # Configure arm motor config
 setup_arm_motor() {
@@ -417,6 +448,8 @@ main() {
     check_system_time
     setup_pip
     clone_repos
+    check_samplerate
+    check_and_update_audio_config
     setup_robot_version
     setup_robot_weight
     setup_drive_board

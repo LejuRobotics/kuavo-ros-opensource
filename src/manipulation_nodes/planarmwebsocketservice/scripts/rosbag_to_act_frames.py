@@ -69,6 +69,8 @@ class CurveCalculator:
 def parse_args():
     parser = argparse.ArgumentParser(description="Process rosbag and generate JSON for robot control")
     parser.add_argument("--input_bag", "-i", required=True, type=str, help="Input bag file")
+    parser.add_argument("--robot_type", "-r", type=str, choices=["kuavo", "roban"], default="kuavo", 
+                       help="Robot type: kuavo (arm+hand+head) or roban (arm only)")
     return parser.parse_args()
 
 def radians_to_degrees(radians):
@@ -95,7 +97,15 @@ def read_rosbag(input_bag, topics):
                 hand_data = list(msg.position)
                 message_data[topic].append(round_to_one_decimal(hand_data))
     
-    return timestamps, message_counts, message_data, {topic: np.mean(np.diff(timestamps[topic])) for topic in topics}
+    # 如果是 kuavo 型号但没有 dexhand/state 数据，创建与 sensors_data_raw 对齐的零数据
+    if "/dexhand/state" in topics and ("/dexhand/state" not in message_data or len(message_data["/dexhand/state"]) == 0):
+        if "/sensors_data_raw" in message_data and len(message_data["/sensors_data_raw"]) > 0:
+            # 创建与 sensors_data_raw 时间戳对齐的零数据
+            timestamps["/dexhand/state"] = timestamps["/sensors_data_raw"].copy()
+            message_data["/dexhand/state"] = [[0.0] * 12 for _ in range(len(message_data["/sensors_data_raw"]))]
+            message_counts["/dexhand/state"] = len(message_data["/sensors_data_raw"])
+    
+    return timestamps, message_counts, message_data, {topic: np.mean(np.diff(timestamps[topic])) if len(timestamps[topic]) > 1 else 0.1 for topic in topics}
 
 def check_timestamp_alignment(timestamps, topics, tolerance=0.01):
     def find_start_indices(timestamps, topics, tolerance):
@@ -123,31 +133,59 @@ def check_timestamp_alignment(timestamps, topics, tolerance=0.01):
 
     return (aligned_count / total_count) * 100
 
-def reorganize_timestamps(timestamps, topics, message_data, interval_ms):
+def reorganize_timestamps(timestamps, topics, message_data, interval_ms, robot_type):
     interval_sec = interval_ms / 1000.0
 
-    aligned_start_time = max(timestamps[topic][0] for topic in topics)
-    aligned_end_time = min(timestamps[topic][-1] for topic in topics)
+    if robot_type == "roban":
+        # roban 型号：只有一个话题
+        topic = topics[0]  # 只有 /sensors_data_raw
+        aligned_start_time = timestamps[topic][0]
+        aligned_end_time = timestamps[topic][-1]
 
-    new_timestamps = np.arange(aligned_start_time, aligned_end_time + interval_sec, interval_sec)
+        new_timestamps = np.arange(aligned_start_time, aligned_end_time + interval_sec, interval_sec)
 
-    new_data_dict = {topic: [] for topic in topics}
-    for topic in topics:
+        new_data_dict = {topic: []}
         for new_time in new_timestamps:
             closest_time = bisect.bisect_left(timestamps[topic], new_time)
             if closest_time < len(timestamps[topic]) and abs(timestamps[topic][closest_time] - new_time) <= interval_sec / 2:
                 new_data_dict[topic].append(message_data[topic][closest_time])
             else:
-                new_data_dict[topic].append([0.0] * len(message_data[topic][0]))
+                # 使用最近的数据点或默认值
+                if closest_time > 0:
+                    new_data_dict[topic].append(message_data[topic][closest_time-1])
+                else:
+                    new_data_dict[topic].append([0.0] * len(message_data[topic][0]))
 
-    organized_data = {}
-    for i, timestamp in enumerate(new_timestamps):
-        arm_data = new_data_dict["/sensors_data_raw"][i][12:26]
-        hand_data = new_data_dict["/dexhand/state"][i][:12]
-        head_data = new_data_dict["/sensors_data_raw"][i][-2:]
-        organized_data[round(timestamp, 3)] = arm_data + hand_data + head_data
+        organized_data = {}
+        for i, timestamp in enumerate(new_timestamps):
+            arm_data = new_data_dict["/sensors_data_raw"][i][13:21]  # roban 使用索引 13:21
+            organized_data[round(timestamp, 3)] = arm_data
 
-    return organized_data, check_timestamp_alignment({topic: new_timestamps for topic in topics}, topics)
+        return organized_data, 100.0  # 单话题时对齐百分比始终为100%
+    
+    else:  # kuavo 型号
+        aligned_start_time = max(timestamps[topic][0] for topic in topics)
+        aligned_end_time = min(timestamps[topic][-1] for topic in topics)
+
+        new_timestamps = np.arange(aligned_start_time, aligned_end_time + interval_sec, interval_sec)
+
+        new_data_dict = {topic: [] for topic in topics}
+        for topic in topics:
+            for new_time in new_timestamps:
+                closest_time = bisect.bisect_left(timestamps[topic], new_time)
+                if closest_time < len(timestamps[topic]) and abs(timestamps[topic][closest_time] - new_time) <= interval_sec / 2:
+                    new_data_dict[topic].append(message_data[topic][closest_time])
+                else:
+                    new_data_dict[topic].append([0.0] * len(message_data[topic][0]))
+
+        organized_data = {}
+        for i, timestamp in enumerate(new_timestamps):
+            arm_data = new_data_dict["/sensors_data_raw"][i][12:26]
+            hand_data = new_data_dict["/dexhand/state"][i][:12]
+            head_data = new_data_dict["/sensors_data_raw"][i][-2:]
+            organized_data[round(timestamp, 3)] = arm_data + hand_data + head_data
+
+        return organized_data, check_timestamp_alignment({topic: new_timestamps for topic in topics}, topics)
 
 def create_json_from_organized_data(organized_data, interval_ms, threshold=1.0):
     frames = []
@@ -197,7 +235,8 @@ def create_json_from_organized_data(organized_data, interval_ms, threshold=1.0):
         "musics": [],
         "finish": int((len(frames) - 1) * interval_ms),
         "first": 0,
-        "version": "9a3101e_beta"
+        "version": "bagTOtact",
+        "robotType": os.getenv('ROBOT_VERSION', 'unknown')
     }
 
 console = rich.console.Console()
@@ -260,7 +299,7 @@ class RecordRosbagMenu(Menu):
 
     def handle_option(self, option):
         if option:
-            topics = ['/sensors_data_raw', '/dexhand/state']
+            topics = ['/sensors_data_raw']
             #topics = ["/robot_arm_q_v_tau", "/robot_head_motor_position", "/robot_hand_position"]
             topics_str = " ".join(topics)
             command = f"rosbag record -O {option}.bag {topics_str}"
@@ -308,8 +347,26 @@ class ConvertRosbagMenu(Menu):
             Menu.set_current_menu(self.back())
             return
 
+        # 添加机器人型号选择
+        robot_type = questionary.select(
+            "请选择机器人型号：",
+            choices=[
+                "kuavo - 使用手臂+手指+头部数据",
+                "roban - 仅使用手臂数据",
+                Separator(),
+                "返回上级菜单"
+            ]
+        ).ask()
+
+        if robot_type == "返回上级菜单" or robot_type is None:
+            Menu.set_current_menu(self.back())
+            return
+
+        # 提取型号名称
+        robot_model = robot_type.split(' - ')[0]
+
         try:
-            args = argparse.Namespace(input_bag=option)
+            args = argparse.Namespace(input_bag=option, robot_type=robot_model)
             main(args)
             console.print(f"[bold green]转换完成！tact文件已生成。[/bold green]")
         except Exception as e:
@@ -321,42 +378,52 @@ def main(args=None):
     if args is None:
         args = parse_args()
     
-    topics = ['/sensors_data_raw', '/dexhand/state']
-    # topics = ["/robot_arm_q_v_tau", "/robot_head_motor_position", "/robot_hand_position"]
+    # 根据机器人型号选择不同的话题
+    if args.robot_type == "roban":
+        topics = ['/sensors_data_raw']
+        console.print(f"[blue]选择机器人型号: {args.robot_type} (仅使用手臂数据)[/blue]")
+    else:  # kuavo
+        topics = ['/sensors_data_raw', '/dexhand/state']
+        console.print(f"[blue]选择机器人型号: {args.robot_type} (使用手臂+手指+头部数据)[/blue]")
 
     timestamps, message_counts, message_data, topic_hz = read_rosbag(args.input_bag, topics)
     
     console.print("原始消息数量和频率：")
     for topic, count in message_counts.items():
-        console.print(f"  {topic}: {count} 条消息, {1/topic_hz[topic]:.2f} Hz")
+        hz_value = 1/topic_hz[topic] if topic_hz[topic] > 0 else 0
+        console.print(f"  {topic}: {count} 条消息, {hz_value:.2f} Hz")
 
     alignment_percentage = check_timestamp_alignment(timestamps, topics, 0.05)
     console.print(f"\n原始对齐百分比: {alignment_percentage:.2f}%")
 
-    if alignment_percentage == 100.00:
-        max_hz = math.ceil(max(1/hz for hz in topic_hz.values()))
-        min_allowed_interval = math.ceil(1000 / max_hz)
-        console.print(f"\n原始数据中的最大频率: {max_hz} Hz")
-        console.print(f"最小允许间隔: {min_allowed_interval} 毫秒")
-        
-        while True:
-            try:
-                interval_ms = float(questionary.text(f"请输入所需的时间间隔（毫秒，必须 >= {min_allowed_interval:.2f}）: ").ask())
-                if interval_ms >= min_allowed_interval:
-                    break
-                console.print(f"错误：间隔必须至少为 {min_allowed_interval:.2f} 毫秒。")
-            except ValueError:
-                console.print("错误：请输入有效的数字。")
-        
-        organized_data, new_alignment_percentage = reorganize_timestamps(timestamps, topics, message_data, interval_ms)
+    # 检查是否有必要的数据来生成文件
+    if "/sensors_data_raw" not in message_data or len(message_data["/sensors_data_raw"]) == 0:
+        console.print("[red]错误：没有找到 /sensors_data_raw 数据，无法生成 tact 文件[/red]")
+        return
 
-        json_data = create_json_from_organized_data(organized_data, interval_ms)
+    # 计算合适的时间间隔
+    max_hz = math.ceil(max(1/hz for hz in topic_hz.values()))
+    min_allowed_interval = math.ceil(1000 / max_hz)
+    console.print(f"\n建议的最小时间间隔: {min_allowed_interval} 毫秒")
+    
+    while True:
+        try:
+            interval_ms = float(questionary.text(f"请输入所需的时间间隔（毫秒，建议 >= {min_allowed_interval}）: ").ask())
+            if interval_ms >= min_allowed_interval:
+                break
+            console.print(f"错误：间隔必须大于等于 {min_allowed_interval} 毫秒。")
+        except ValueError:
+            console.print("错误：请输入有效的数字。")
+    
+    organized_data, new_alignment_percentage = reorganize_timestamps(timestamps, topics, message_data, interval_ms, args.robot_type)
 
-        output_file = args.input_bag.rsplit('.', 1)[0] + '_output.tact'
-        with open(output_file, 'w') as f:
-            json.dump(json_data, f, indent=4)
+    json_data = create_json_from_organized_data(organized_data, interval_ms)
 
-        console.print(f"\nJSON数据已保存到 {output_file}")
+    output_file = args.input_bag.rsplit('.', 1)[0] + f'_{args.robot_type}_output.tact'
+    with open(output_file, 'w') as f:
+        json.dump(json_data, f, indent=4)
+
+    console.print(f"\nJSON数据已保存到 {output_file}")
 
 
 if __name__ == "__main__":

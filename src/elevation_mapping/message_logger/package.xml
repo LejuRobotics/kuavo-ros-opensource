@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package format="3">
+
+  <name>message_logger</name>
+  <version>0.2.24</version>
+  <description>The message logger package</description>
+
+  <author email="cgehring@anybotics.com">Christian Gehring</author>
+  <maintainer email="pleemann@anybotics.com">Philipp Leemann</maintainer>
+  <maintainer email="rdiethelm@anybotics.com">Remo Diethelm</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend condition="$ROS_VERSION == 1">catkin</buildtool_depend>
+  <buildtool_depend condition="$ROS_VERSION == 2">ament_cmake</buildtool_depend>
+
+<!--   <build_depend>cmake_clang_tools</build_depend> -->
+
+<!--   <depend condition="$ROS_VERSION == 1">anymal_sentry_native</depend> -->
+<!--   <depend condition="$ROS_VERSION == 1">sentry_native</depend> -->
+  <depend condition="$ROS_VERSION == 1">roscpp</depend>
+  <depend condition="$ROS_VERSION == 2">rclcpp</depend>
+
+<!--   <test_depend condition="$ROS_VERSION == 1">cmake_code_coverage</test_depend> -->
+  <test_depend>gtest</test_depend>
+  <export>
+    <build_type condition="$ROS_VERSION == 2">ament_cmake</build_type>
+  </export>
+</package>

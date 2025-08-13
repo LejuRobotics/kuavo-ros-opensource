@@ -1,0 +1,8 @@
+<?xml version="1.0" ?>
+<launch>
+  <include file="$(find elevation_mapping_demos)/launch/kuavo_realsense.launch">
+  </include>
+
+  <node pkg="humanoid_controllers" type="stair_detector.py" name="stair_detector" output="screen"/>
+
+</launch>   

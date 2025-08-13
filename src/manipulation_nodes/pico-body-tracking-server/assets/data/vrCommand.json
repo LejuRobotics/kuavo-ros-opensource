@@ -1,0 +1,10 @@
+{
+    "dataType": "vrCommand",
+    "itemMassForce": {
+        "itemMass": 1.5,
+        "lforceX": 0.0,
+        "lforceY": 15.0,
+        "lforceZ": 5.0
+    },
+    "timestamp": 71.63542
+  }

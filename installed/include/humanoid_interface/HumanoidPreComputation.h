@@ -62,6 +62,7 @@ class HumanoidPreComputation : public PreComputation {
 
   PinocchioInterface& getPinocchioInterface() { return pinocchioInterface_; }
   const PinocchioInterface& getPinocchioInterface() const { return pinocchioInterface_; }
+  vector_t getArmWrench() const { return armWrench_; }
 
   // const vector_t getArm1JointPosTarget() const { return armJointPos_; }
   // const vector_t getArm1JointVelTarget() const { return armJointVel_; }
@@ -84,6 +85,7 @@ class HumanoidPreComputation : public PreComputation {
   vector_t armJointPos_;
   vector_t armJointVel_;
   std::vector<EndEffectorLinearConstraint::Config> eeXYRefConConfigs_;
+  vector_t armWrench_ = vector_t::Zero(12);
 };
 
 }  // namespace humanoid

@@ -1,0 +1,8 @@
+.DS_Store
+*.swp
+/build*/
+
+# Ignore VCI cmake files to avoid compilation errors
+VCICommon.cmake
+VCIOutput.cmake
+VCIQt.cmake

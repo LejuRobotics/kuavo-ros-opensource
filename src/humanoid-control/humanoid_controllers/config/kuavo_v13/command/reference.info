@@ -1,0 +1,329 @@
+targetDisplacementVelocity          0.5;
+targetRotationVelocity              0.3;
+cmdvelLinearXLimit                  0.30;
+cmdvelAngularYAWLimit               0.4;
+armMode                             true; 
+
+targetArmDisplacementVelocity       1.2;
+
+comHeight                           0.78
+
+targetTorsoDispalcementVelocity
+{
+   (0,0)    105.5          ; torso_x
+   (1,0)    105.5          ; torso_y
+   (2,0)    0.5          ; torso_z
+   (3,0)    100.5          ; torso_yaw
+   (4,0)    15.5          ; torso_pitch
+   (5,0)    100.5          ; torso_roll
+}
+
+jointStateLimit ; 26x2 matrix, for 4.0 version.
+{
+   ;;;;; Lower joint limits
+   (0,0)    -0.78       ; leg_l1_joint
+   (1,0)    -1.57       ; leg_l2_joint
+   (2,0)    -2.35       ; leg_l3_joint
+   (3,0)    0.170       ; leg_l4_joint ;~10deg
+   (4,0)    -1.57       ; leg_l5_joint
+   (5,0)    -1.39       ; leg_l6_joint
+
+   (6,0)    -1.57       ; leg_r1_joint
+   (7,0)    -1.57       ; leg_r2_joint
+   (8,0)    -2.35       ; leg_r3_joint
+   (9,0)    0.170       ; leg_r4_joint ;~10deg
+   (10,0)   -1.57       ; leg_r5_joint
+   (11,0)   -1.39       ; leg_r6_joint
+
+   (12,0)   -3.14       ; zarm_l1_joint
+   (13,0)   -0.70       ; zarm_l2_joint
+   (14,0)   -1.57       ; zarm_l3_joint
+   (15,0)   -1.57       ; zarm_l4_joint
+
+   (19,0)   -3.14       ; zarm_r1_joint
+   (20,0)   -2.09       ; zarm_r2_joint
+   (21,0)   -1.57       ; zarm_r3_joint
+   (22,0)   -1.57       ; zarm_r4_joint
+
+
+   ;;;;; Upper joint limits
+   (0,1)    1.57        ; leg_l1_joint
+   (1,1)    1.57        ; leg_l2_joint
+   (2,1)    0.78        ; leg_l3_joint
+   (3,1)    2.61        ; leg_l4_joint
+   (4,1)    1.57        ; leg_l5_joint
+   (5,1)    0.78        ; leg_l6_joint
+
+   (6,1)    0.78        ; leg_r1_joint
+   (7,1)    1.57        ; leg_r2_joint
+   (8,1)    0.78        ; leg_r3_joint
+   (9,1)    2.61        ; leg_r4_joint
+   (10,1)   1.57        ; leg_r5_joint
+   (11,1)   0.78        ; leg_r6_joint
+
+   (12,1)   0.520       ; zarm_l1_joint
+   (13,1)   2.09        ; zarm_l2_joint
+   (14,1)   1.570       ; zarm_l3_joint
+   (15,1)   0.000       ; zarm_l4_joint
+
+   (16,1)   0.7         ; zarm_r1_joint
+   (17,1)   1.000       ; zarm_r2_joint
+   (18,1)   1.570       ; zarm_r3_joint
+   (19,1)   0.000       ; zarm_r4_joint
+};
+
+; defaultCotrolMode of motors, 2: position control, 1: velocity control, 0: torque control
+defaultCotrolMode
+{
+   (0,0)    0    ; waist_z
+
+   (1,0)    0    ; leg_l1_joint
+   (2,0)    0    ; leg_l2_joint
+   (3,0)    0    ; leg_l3_joint
+   (4,0)    0    ; leg_l4_joint
+   (5,0)    0    ; leg_l5_joint
+   (6,0)    0    ; leg_l6_joint
+
+   (7,0)    0     ; leg_r1_joint
+   (8,0)    0     ; leg_r2_joint
+   (9,0)    0     ; leg_r3_joint
+   (10,0)    0     ; leg_r4_joint
+   (11,0)   0     ; leg_r5_joint
+   (12,0)   0     ; leg_r6_joint
+
+   (13,0)   2    ; zarm_l1_joint
+   (14,0)   2    ; zarm_l2_joint
+   (15,0)   2    ; zarm_l3_joint
+   (16,0)   2    ; zarm_l4_joint
+
+   (17,0)   2    ; zarm_r1_joint
+   (18,0)   2    ; zarm_r2_joint
+   (19,0)   2    ; zarm_r3_joint
+   (20,0)   2    ; zarm_r4_joint
+  
+};
+
+joint_kp_
+{
+   (0,0)   4.3      ; waist_z
+
+   (1,0)   6.9507   ; leg_l1_joint
+   (2,0)   4.3   ; leg_l2_joint
+   (3,0)   4.3   ; leg_l3_joint
+   (4,0)   4.9507   ; leg_l4_joint
+   (5,0)   4.71   ; leg_l5_joint 10.71
+   (6,0)   4.71   ; leg_l6_joint 2.43
+   (7,0)   6.9507   ; leg_r1_joint
+   (8,0)   4.3   ; leg_r2_joint
+   (9,0)   4.3   ; leg_r3_joint
+   (10,0)  4.9507   ; leg_r4_joint
+   (11,0)  4.71   ; leg_r5_joint
+   (12,0)  4.71   ; leg_r6_joint
+
+   (13,0)  0.0   ; zarm_l1_joint
+   (14,0)  0.0   ; zarm_l2_joint
+   (15,0)  0.0   ; zarm_l3_joint
+   (16,0)  0.0   ; zarm_l4_joint
+   (17,0)  0.0   ; zarm_r1_joint
+   (18,0)  0.0   ; zarm_r2_joint
+   (19,0)  0.0   ; zarm_r3_joint
+   (20,0)  0.0   ; zarm_r4_joint
+    
+};350.0, 350.0, 300.0, 400.0, 1.0, 10.0, 350.0, 350.0, 300.0, 400.0, 1.0, 10.0
+
+joint_kd_
+{
+   (0,0)   3.0   ; waist_z
+
+   (1,0)   1.0   ; leg_l1_joint
+   (2,0)   2.0   ; leg_l2_joint
+   (3,0)   2.0   ; leg_l3_joint
+   (4,0)   3.0   ; leg_l4_joint
+   (5,0)   2.0   ; leg_l5_joint
+   (6,0)   2.0   ; leg_l6_joint
+   (7,0)   1.0   ; leg_r1_joint
+   (8,0)   2.0   ; leg_r2_joint
+   (9,0)   2.0   ; leg_r3_joint
+   (10,0)  3.0   ; leg_r4_joint
+   (11,0)  2.0    ; leg_r5_joint
+   (12,0)  2.0    ; leg_r6_joint
+
+   (13,0)  0.0   ; zarm_l1_joint
+   (14,0)  0.0   ; zarm_l2_joint
+   (15,0)  0.0   ; zarm_l3_joint
+   (16,0)  0.0   ; zarm_l4_joint
+   (17,0)  0.0   ; zarm_r1_joint
+   (18,0)  0.0   ; zarm_r2_joint
+   (19,0)  0.0   ; zarm_r3_joint
+   (20,0)  0.0   ; zarm_r4_joint
+    
+};10.0, 10.0, 10.0, 10.0, 0.1, 1, 10.0, 10.0, 10.0, 10.0, 0.1, 1
+
+head_kp_
+{
+   (0,0)   10.0   ; head_yaw_joint
+   (1,0)   10.0   ; head_pitch_joint
+};
+
+head_kd_
+{
+   (0,0)   1.0   ; head_yaw_joint
+   (1,0)   1.0   ; head_pitch_joint
+};
+
+waist_kp_
+{
+   (0,0)   20.0 ;
+}
+
+waist_kd_
+{
+   (0,0)   12.0 ;
+}
+
+joint_kp_walking_
+{
+   (0,0)   4.3      ; waist_z
+
+   (1,0)   6.9507   ; leg_l1_joint
+   (2,0)   4.3   ; leg_l2_joint
+   (3,0)   4.3   ; leg_l3_joint
+   (4,0)   4.9507   ; leg_l4_joint
+   (5,0)   4.71   ; leg_l5_joint 10.71
+   (6,0)   4.71   ; leg_l6_joint 2.43
+   (7,0)   6.9507   ; leg_r1_joint
+   (8,0)   4.3   ; leg_r2_joint
+   (9,0)   4.3   ; leg_r3_joint
+   (10,0)  4.9507   ; leg_r4_joint
+   (11,0)  4.71   ; leg_r5_joint
+   (12,0)  4.71   ; leg_r6_joint
+
+   (12,0)  0.0   ; zarm_l1_joint
+   (13,0)  0.0   ; zarm_l2_joint
+   (14,0)  0.0   ; zarm_l3_joint
+   (15,0)  0.0   ; zarm_l4_joint
+   (16,0)  0.0   ; zarm_r1_joint
+   (17,0)  0.0   ; zarm_r2_joint
+   (18,0)  0.0   ; zarm_r3_joint
+   (19,0)  0.0   ; zarm_r4_joint
+    
+};{120.0, 120.0, 120.0, 120.0, 1.5, 1.5, 120.0, 120.0, 120.0, 120.0, 1.5, 1.5};
+
+joint_kd_walking_
+{
+   (0,0)   3.0   ;  waist_z
+
+   (1,0)   1.0   ; leg_l1_joint
+   (2,0)   2.0   ; leg_l2_joint
+   (3,0)   2.0   ; leg_l3_joint
+   (4,0)   3.0   ; leg_l4_joint
+   (5,0)   2.0   ; leg_l5_joint
+   (6,0)   2.0   ; leg_l6_joint
+   (7,0)   1.0   ; leg_r1_joint
+   (8,0)   2.0   ; leg_r2_joint
+   (9,0)   2.0   ; leg_r3_joint
+   (10,0)  3.0   ; leg_r4_joint
+   (11,0)  2.0    ; leg_r5_joint
+   (12,0)  2.0    ; leg_r6_joint
+
+   (13,0)  0.2   ; zarm_l1_joint
+   (14,0)  0.2   ; zarm_l2_joint
+   (15,0)  0.2   ; zarm_l3_joint
+   (16,0)  0.2   ; zarm_l4_joint
+   (17,0)  0.2   ; zarm_r1_joint
+   (18,0)  0.2   ; zarm_r2_joint
+   (19,0)  0.2   ; zarm_r3_joint
+   (20,0)  0.2   ; zarm_r4_joint
+    
+};{4.0, 4.0, 4.0, 4.0, 0.1, 0.1, 4.0, 4.0, 4.0, 4.0, 0.1, 0.1};
+
+standBaseState
+{
+  (0,0)  0.0     ; p_base_x
+  (1,0)  0.0     ; p_base_y
+  (2,0)  0.78    ; p_base_z
+  (3,0)  0.0     ; theta_base_z
+  (4,0)  0.0     ; theta_base_y
+  (5,0)  0.0     ; theta_base_x
+}
+
+standJointState
+{
+   ;; Arm Joint Positions:  ;;
+   (0,0)   -0.29374    ; zarm_l1_joint
+   (1,0)   0.0089      ; zarm_l2_joint
+   (2,0)   -0.0008     ; zarm_l3_joint
+   (3,0)   -0.1157     ; zarm_l4_joint
+
+   (4,0)   -0.29376    ; zarm_r1_joint
+   (5,0)    0.0389     ; zarm_r2_joint
+   (6,0)   -0.0027     ; zarm_r3_joint
+   (7,0)  -0.1156     ; zarm_r4_joint
+}
+
+squatBaseState
+{
+  (0,0)  0.0     ; p_base_x
+  (1,0)  0.0     ; p_base_y
+  (2,0)  0.68    ; p_base_z
+  (3,0)  0.0     ; theta_base_z
+  (4,0)  0.3     ; theta_base_y
+  (5,0)  0.0     ; theta_base_x
+}
+
+squatJointState
+{
+   ;; Arm Joint Positions:  ;;
+   (0,0)  -1.99952      ; zarm_l1_joint
+   (1,0)   0.0085      ; zarm_l2_joint
+   (2,0)  -0.0012      ; zarm_l3_joint
+   (3,0)  -0.1095      ; zarm_l4_joint
+
+   (4,0)  -1.99951     ; zarm_r1_joint
+   (5,0)   0.0353      ; zarm_r2_joint
+   (6,0)  -0.0009      ; zarm_r3_joint
+   (7,0) -0.1099      ; zarm_r4_joint
+}
+
+acc_filter_cutoff_freq
+{
+   (0,0)   30.0   ; x
+   (1,0)   30.0   ; y
+   (2,0)   30.0   ; z
+}
+
+gyro_filter_cutoff_freq
+{
+   (0,0)   60.0   ; x
+   (1,0)   60.0   ; y
+   (2,0)   60.0   ; z
+}
+
+arm_joint_pos_filter_cutoff_freq       100 ;
+arm_joint_vel_filter_cutoff_freq       100 ;
+mrt_joint_vel_filter_cutoff_freq       40 ;
+initialModeSchedule
+{
+  modeSequence
+  {
+    [0]  SS
+    [1]  SS
+  }
+  eventTimes
+  {
+    [0]  0.5
+  }
+}
+
+default_stance_duration_              0.2;
+defaultModeSequenceTemplate
+{
+  modeSequence
+  {
+    [0]  SS
+  }
+  switchingTimes
+  {
+    [0]  0.5
+  }
+}

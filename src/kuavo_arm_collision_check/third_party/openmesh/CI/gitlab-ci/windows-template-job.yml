@@ -1,0 +1,47 @@
+#-------------  Job Informations:
+# Type:         Build+Test: Release
+# OS:           Windows
+# Architecture: {{ARCHITECTURE}}
+# Shared:       {{SHARED}}
+# VS Version:   {{VSVERSION}}
+# Apps:         {{APPS}}
+
+build-{{VSVERSION}}-{{ARCHITECTURE}}-shared-{{SHARED}}-apps:
+  stage: build
+  variables:
+    BUILD_PLATFORM: "{{VSVERSION}}"
+    ARCHITECTURE:   "{{ARCHITECTURE}}"
+    SHARED:         "{{SHARED}}"
+    APPS:           "ON"
+  script: "CI\\Windows.bat"
+  tags:
+    - {{VSVERSION}}
+    - {{QTTAG}}
+  artifacts:
+    paths:
+      - build-release/*.exe
+    reports:
+      junit:
+        - build-release/unittests/report.xml
+        - build-release/unittests/report-customvec.xml
+        - build-release/unittests/report-doublevec.xml
+
+build-{{VSVERSION}}-{{ARCHITECTURE}}-shared-{{SHARED}}-no-apps:
+  stage: build
+  variables:
+    BUILD_PLATFORM: "{{VSVERSION}}"
+    ARCHITECTURE:   "{{ARCHITECTURE}}"
+    SHARED:         "{{SHARED}}"
+    APPS:           "OFF"
+  script: "CI\\Windows.bat"
+  tags:
+    - {{VSVERSION}}
+  artifacts:
+    paths:
+      - build-release/*.exe
+    reports:
+      junit:
+        - build-release/unittests/report.xml
+        - build-release/unittests/report-customvec.xml
+        - build-release/unittests/report-doublevec.xml
+

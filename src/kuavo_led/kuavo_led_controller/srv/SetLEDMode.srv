@@ -1,0 +1,15 @@
+# 请求部分
+uint8 mode     
+uint8[3] color1 
+uint8[3] color2 
+uint8[3] color3 
+uint8[3] color4 
+uint8[3] color5 
+uint8[3] color6 
+uint8[3] color7 
+uint8[3] color8 
+uint8[3] color9 
+uint8[3] color10 
+---
+# 响应部分
+bool success   

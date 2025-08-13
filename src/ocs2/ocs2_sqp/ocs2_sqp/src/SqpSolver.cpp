@@ -109,6 +109,33 @@ SqpSolver::~SqpSolver() {
   }
 }
 
+void SqpSolver::preRun(scalar_t initTime, const vector_t& initState, scalar_t finalTime)
+{
+  referenceManagerPtr_->preSolverRun(initTime, finalTime, initState);
+
+  
+  if(referenceManagerPtr_->getChangeQTime() < initTime 
+    && referenceManagerPtr_->getUpdatedQ())
+  {
+    for (auto& ocp : ocpDefinitions_) {
+      ocp.costPtr->get("baseTrackingCost").setMatrixQ(referenceManagerPtr_->getMatrixQ());
+    }
+    referenceManagerPtr_->setUpdatedQ(false);
+  }
+  if(referenceManagerPtr_->getChangeRTime() < initTime 
+      && referenceManagerPtr_->getUpdatedR())
+  {
+    for (auto& ocp : ocpDefinitions_) {
+       ocp.costPtr->get("baseTrackingCost").setMatrixR(referenceManagerPtr_->getMatrixR());
+    }
+    referenceManagerPtr_->setUpdatedR(false);
+  }
+
+  for (auto& module : synchronizedModules_) {
+    module->preSolverRun(initTime, finalTime, initState, *referenceManagerPtr_);
+  }
+}
+
 void SqpSolver::reset() {
   // Clear solution
   primalSolution_ = PrimalSolution();
@@ -307,17 +334,17 @@ void SqpSolver::runImpl(scalar_t initTime, const vector_t& initState, scalar_t f
   for (auto& ocpDefinition : ocpDefinitions_) {
     const auto& targetTrajectories = this->getReferenceManager().getTargetTrajectories();
     ocpDefinition.targetTrajectoriesPtr = &targetTrajectories;
-    if(this->getReferenceManager().getChangeQTime() < initTime 
-    && this->getReferenceManager().getUpdatedQ()){
-      std::cout << "Change Q matrices" << std::endl;
-      ocpDefinition.costPtr->get("baseTrackingCost").setMatrixQ(this->getReferenceManager().getMatrixQ());
-      this->getReferenceManager().setUpdatedQ(false);
-    }
-    if(this->getReferenceManager().getChangeRTime() < initTime 
-    && this->getReferenceManager().getUpdatedR()){
-      ocpDefinition.costPtr->get("baseTrackingCost").setMatrixR(this->getReferenceManager().getMatrixR());
-      this->getReferenceManager().setUpdatedR(false);
-    }
+    // if(this->getReferenceManager().getChangeQTime() < initTime 
+    // && this->getReferenceManager().getUpdatedQ()){
+    //   std::cout << "Change Q matrices" << std::endl;
+    //   ocpDefinition.costPtr->get("baseTrackingCost").setMatrixQ(this->getReferenceManager().getMatrixQ());
+    //   this->getReferenceManager().setUpdatedQ(false);
+    // }
+    // if(this->getReferenceManager().getChangeRTime() < initTime 
+    // && this->getReferenceManager().getUpdatedR()){
+    //   ocpDefinition.costPtr->get("baseTrackingCost").setMatrixR(this->getReferenceManager().getMatrixR());
+    //   this->getReferenceManager().setUpdatedR(false);
+    // }
   }
 
   // Trajectory spread of primalSolution_

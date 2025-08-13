@@ -322,6 +322,17 @@ class RuiWoActuator():
                     pass
 
         self.interpolate_move(current_positions, target_positions,max_speed,dt)
+    
+    def go_to_target(self, target_positions):
+        print("[RUIWO motor]:Start moving to target....")
+        state = self.get_joint_state()
+        current_positions = [0]*len(self.joint_address_list)
+        for i, address in enumerate(self.joint_address_list):
+            if self.joint_online_list[i] == True:
+                motor = state[i]
+                current_positions[i] = motor[1]
+
+        self.interpolate_move(current_positions, target_positions,max_speed,dt)
         
     def interpolate_move(self,start_positions, target_positions, speed, dt):
         interpolation_list = self.interpolate_positions_with_speed(start_positions, target_positions, speed, dt)
@@ -418,7 +429,8 @@ class RuiWoActuator():
                 velocity[i] = velocity_factor * velocity[i]
             if self.joint_address_list[i] == self.Head_joint_address[1]:
                 target_torque[i] = self.head_high_torque
-                
+            # print("current dev id: ", self.joint_address_list[i])
+            # print("target pos: ", pos[i])
             if self.control_mode == "ptm":
                 if self.teach_pendant_mode == 1:
                     state = self.RUIWOTools.run_ptm_mode(self.joint_address_list[i], 0, 0, 0, 0, 0)
@@ -427,7 +439,6 @@ class RuiWoActuator():
             
             elif self.control_mode == "servo":
                 state = self.RUIWOTools.run_servo_mode(self.joint_address_list[i], pos[i], velocity[i], self.target_pos_kp[i], self.target_pos_kd[i], self.target_vel_kp[i], self.target_vel_kd[i], self.target_vel_ki[i])
-            
             if isinstance(state, list):
                 self.set_joint_state(i,state)
                 if self.joint_address_list[i] == self.Head_joint_address[1]:
@@ -649,6 +660,7 @@ class RuiWoActuator():
         if close_canbus:
             print("[RUIWO motor]:Canbus status:","[ Close ]")
         exit(0)
+    
     def check_state(self):
        motors = [[],[]] # motors[0] => enable motor
                         # motors[1] => disable motor
@@ -696,7 +708,20 @@ class RuiWoActuator():
             self.set_joint_state(index,state)
         self.update_status()
         print(f"[RUIWO motor]:ID: {self.joint_address_list[index]} Change encoder zero position: {self.zero_position[index]}")
-        
+    
+    # 调整零点位置
+    def adjust_zero_position(self, index, offset):
+        self.zero_position[index] = offset
+        state = self.RUIWOTools.enter_motor_state(self.joint_address_list[index])
+        if isinstance(state, list):
+            self.RUIWOTools.run_ptm_mode(self.joint_address_list[index],state[1],0,self.target_pos_kp[index], self.target_pos_kd[index],0)
+            self.set_joint_state(index,state)
+        self.update_status()
+        print(f"[RUIWO motor]:ID: {self.joint_address_list[index]} Adjust encoder zero position: {self.zero_position[index]}")
+    
+    def get_motor_zero_points(self):
+        return self.zero_position
+
     # 保存当前的零点位置到文件中
     def save_zero_position(self):
         config_path = self.get_zero_path()
@@ -711,7 +736,6 @@ class RuiWoActuator():
 if __name__ == '__main__':
     joint_control = RuiWoActuator()
     time.sleep(1)
-
     print("按 'f' 设置当前位置为零位，按 'w' 增加4零位, 按's' 减少4零位, \n'c' 保存零位，按 'e' 使能，按 'd' 禁用，按 't' 发送测试指令， 按 'q' 退出。")
 
     try:

@@ -1,0 +1,13 @@
+int8 ADD=0
+int8 UPDATE=1
+int8 DELETE=2
+int8 GET=3
+
+int8 operation
+kuavo_msgs/TaskPoint task_point
+string name
+bool use_robot_current_pose
+---
+bool success
+string message
+kuavo_msgs/TaskPoint[] task_points  # 用于GET操作返回所有任务点 

@@ -191,30 +191,38 @@ private:
     void set_joint_state(int index, const std::vector<float> &state);
 
     /**
-     * @brief Sends positions to the specified motor indices.
+     * @brief Sends positions to the specified motor indices, with dynamic kp/kd parameters.
      * 
      * @param index The indices of the motors to send positions to.
      * @param pos The positions to send to the motors.
      * @param torque The torques to send to the motors.
      * @param velocity The velocities to send to the motors.
+     * @param current_kp The kp parameters for each motor, if nullptr uses default kp.
+     * @param current_kd The kd parameters for each motor, if nullptr uses default kd.
      */
     void send_positions(const std::vector<int> &index, 
         const std::vector<float> &pos, 
         const std::vector<float> &torque, 
-        const std::vector<float> &velocity);
+        const std::vector<float> &velocity, 
+        const std::vector<float> *current_kp = nullptr, 
+        const std::vector<float> *current_kd = nullptr);
     
     /**
-     * @brief Sends positions to the specified motor indices without waiting for a response.
+     * @brief Sends positions to the specified motor indices without waiting for a response, with dynamic kp/kd parameters.
      * 
      * @param index The indices of the motors to send positions to.
      * @param pos The positions to send to the motors.
      * @param torque The torques to send to the motors.
      * @param velocity The velocities to send to the motors.
+     * @param current_kp The kp parameters for each motor, if nullptr uses default kp.
+     * @param current_kd The kd parameters for each motor, if nullptr uses default kd.
      */
     void send_positions_No_response(const std::vector<int> &index, 
         const std::vector<float> &pos, 
         const std::vector<float> &torque, 
-        const std::vector<float> &velocity);
+        const std::vector<float> &velocity, 
+        const std::vector<float> *current_kp = nullptr, 
+        const std::vector<float> *current_kd = nullptr);
 
 private:
     // 关节ID

@@ -81,6 +81,7 @@ rostopic echo /h12pro_channel
 - `walk`: walk 状态
 - `trot`: trot 状态
 - `vr_remote_control`: VR 遥控器控制状态
+- `climb_stair`: 爬楼梯状态
 
 ### 2.2 状态转换流程图
 
@@ -108,6 +109,7 @@ rostopic echo /h12pro_channel
    - `arm_pose1/2/3/4` -> stance (手臂姿态控制)
    - `stop` -> initial
    - `start_vr_remote_control` -> vr_remote_control
+   - `start_stair_detect` -> climb_stair
 
 4. 从 walk 状态:
    - `stance` -> stance
@@ -124,6 +126,11 @@ rostopic echo /h12pro_channel
    - `stop` -> initial
    - `record_vr_rosbag` -> vr_remote_control
    - `stop_record_vr_rosbag` -> vr_remote_control
+
+7. 从 climb_stair 状态:
+   - `stair_climb` -> stance
+   - `stop_stair_detect` -> stance
+   - `stop` -> initial
 
 ## 3. 遥控器配置
 
@@ -153,6 +160,12 @@ rostopic echo /h12pro_channel
 |---------|---------|---------|
 | initial | C_LONG_PRESS + D_LONG_PRESS | 任意 |
 
+#### RL_control (使用 RL 步态) 状态转换
+
+| 目标状态 | 按键组合 | 开关位置 |
+|---------|---------|---------|
+| stance | C_PRESS | E_MIDDLE + F_MIDDLE |
+
 #### Stance 状态转换
 
 | 目标状态 | 按键组合 | 开关位置 |
@@ -165,6 +178,7 @@ rostopic echo /h12pro_channel
 | arm_pose4 | D_PRESS | E_RIGHT + F_LEFT |
 | start_vr_remote_control | A_LONG_PRESS | 任意 |
 | initial | C_LONG_PRESS + D_LONG_PRESS | 任意 |
+| start_stair_detect | C_LONG_PRESS | 任意 |
 
 #### Walk 状态转换
 
@@ -191,8 +205,22 @@ rostopic echo /h12pro_channel
 | record_vr_rosbag | C_PRESS | 任意 |
 | stop_record_vr_rosbag | D_PRESS | 任意 |
 
+#### Climb_stair 状态转换
+
+| 目标状态 | 按键组合 | 开关位置 |
+|---------|---------|---------|
+| stair_climb | A_PRESS | 任意 |
+| stop_stair_detect | B_PRESS | 任意 |
+| initial | C_LONG_PRESS + D_LONG_PRESS | 任意 |
+
+
 **NOTE**
 
+- 部署时会询问建图的相机类型，目前支持奥比中光和realsense相机，请根据实际情况选择
+- 执行上楼梯前需要手动在上位机部署建图程序, 上楼梯相关文档：[文档](./../humanoid_controllers/scripts/上楼梯案例说明.md)
+- 上楼梯前，你需要手动把 `load_kuavo_real.launch` 中的 `joint_protect_enable` 参数设置为 `false`
+- 使用 RL 步态一键部署开机自启动 [脚本](scripts/deploy_autostart.sh) 。在运行之前，需要修改环境变量 ROBOT_VERSION=46. 由于使用了两个仓库，部署之前需要修改脚本中 `KUAVO_RL_WS_PATH`.
+- 目前需要手动 VNC 连接上位机观察 Rviz 是否建图完毕
 - 遥控器按键组合中，长按(LONG_PRESS)表示按键按下后持续保持按下状态，直到听到遥控器发出 “滴” 的一声
 - 手臂动作存放在 `~/.config/lejuconfig/action_files` 路径下，文件名格式为 `arm_pose1.tact`, `arm_pose2.tact` 等
 - 手臂动作做完后，假设手臂没有回到初始位置，可以通过 E中+F中+D键，将手臂回到初始位置

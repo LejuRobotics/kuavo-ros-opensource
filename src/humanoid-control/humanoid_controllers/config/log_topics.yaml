@@ -38,10 +38,21 @@ topics:
   - /humanoid_eef_poses
   - /mm_base_error
   - /ik.*
+  - /mm/two_arm_hand_pose_cmd
+  - /mm_kuavo_arm_traj
   - /hand_wrench.*
   - /tag_world_pose
   - /leju_quest_bone_poses
+  - /robot_head_motion_data
+  - /robot_waist_motion_data
+  - /tag_data
+  - /test/.*
   - /kinematic_data
   - /odometry/filtered
   - /sensor_data_new/.*
   - /imu_data
+  - /mm/end_effector_trajectory
+  - /mm/.*
+  - /grasp_box/.*
+  - /robot_body_matrices
+  - /action_detector_info

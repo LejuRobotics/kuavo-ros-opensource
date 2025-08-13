@@ -13,6 +13,7 @@ LAUNCH_ID=""
 install_deps_packages() {
     # Check and install ROS debug packages
     packages=(
+        "tree"
         "pv"
         "pigz"
         "curl"
@@ -140,13 +141,28 @@ archive_files() {
 
     # remove unused files
     # Remove coredump files that don't start with core.humanoid or core.nodelet
-    find "$archive_dir/coredumps" -type f -not -name "core.humanoid*" -not -name "core.nodelet*" -exec rm -f {} \;
+    # Define whitelist for coredump files
+    whitelist_patterns=("core.humanoid*" "core.nodelet*" "core.mobile_manipula*")
+    
+    # Build find command with whitelist patterns
+    find_cmd="find \"$archive_dir/coredumps\" -type f"
+    for pattern in "${whitelist_patterns[@]}"; do
+        find_cmd="$find_cmd -not -name \"$pattern\""
+    done
+    find_cmd="$find_cmd -exec rm -f {} \\;"
+    
+    # Execute the find command
+    eval "$find_cmd"
 
     # tar archive
     rm -rf "$zip_file"
+    echo "coredumps:"
+    tree --noreport "$archive_dir/coredumps"
     echo -e "\033[32m📦 正在压缩文件: $zip_file\033[0m"
     if tar -c -C "$(dirname "$archive_dir")" "$(basename "$archive_dir")" | pv | pigz -9 > "$zip_file"; then
         echo "Successfully created archive: $zip_file ($(du -h "$zip_file" | cut -f1))"
+        echo -e "\033[32m📦 压缩成功，压缩文件存放路径: $zip_file\033[0m" 
+        echo -e "\033[32mTips: 如果文件上传失败，您可以考虑手动拷贝该文件给乐聚技术支持人员，谢谢!\033[0m"
     else
         echo "Failed to create archive" >&2
         exit_with_fail "压缩归档文件失败"

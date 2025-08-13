@@ -1,0 +1,147 @@
+Q_base_stance
+{
+  scaling 1e+0
+
+  ;; Normalized Centroidal Momentum: [linear, angular] ;;
+  (0,0)   13.0     ; vcom_x
+  (1,1)   13.0     ; vcom_y
+  (2,2)   13.0     ; vcom_z
+  (3,3)   50.0      ; L_x / robotMass
+  (4,4)   50.0     ; L_y / robotMass
+  (5,5)   13.0     ; L_z / robotMass
+
+  ;; Base Pose: [position, orientation] ;;
+  (6,6)   500.0    ; p_base_x
+  (7,7)   500.0    ; p_base_y
+  (8,8)   2000.0    ; p_base_z
+  (9,9)   700.0    ; theta_base_z
+  (10,10) 1000.0    ; theta_base_y
+  (11,11) 800.0    ; theta_base_x
+
+  ;; Waist Joint ;;
+  (12,12) 100.0    ;waist_z
+
+  ;; Leg Joint Positions: [LF, LH, RF, RH] ;;
+  (13,13) 10.0    ; leg_l1_joint
+  (14,14) 10.0    ; leg_l2_joint
+  (15,15) 10.0    ; leg_l3_joint
+  (16,16) 10.0    ; leg_l4_joint
+  (17,17) 10.0    ; leg_l5_joint
+  (18,18) 10.0    ; leg_l6_joint
+  (19,19) 10.0    ; leg_r1_joint
+  (20,20) 10.0    ; leg_r2_joint
+  (21,21) 10.0    ; leg_r3_joint
+  (22,22) 10.0    ; leg_r4_joint
+  (23,23) 10.0    ; leg_r5_joint
+  (24,24) 10.0    ; leg_r6_joint
+
+  ;; Arm Joint Positions: 
+  (25,25) 200.0      ; zarm_l1_joint
+  (26,26) 200.0      ; zarm_l2_joint
+  (27,27) 200.0      ; zarm_l3_joint
+  (28,28) 200.0      ; zarm_l4_joint
+  (29,29) 200.0      ; zarm_r1_joint
+  (30,30) 200.0      ; zarm_r2_joint
+  (31,31) 200.0      ; zarm_r3_joint
+  (32,32) 200.0      ; zarm_r4_joint
+  
+}
+
+Q_base_walk
+{
+  scaling 1e+0
+
+  ;; Normalized Centroidal Momentum: [linear, angular] ;;
+  (0,0)   13.0     ; vcom_x
+  (1,1)   13.0     ; vcom_y
+  (2,2)   13.0     ; vcom_z
+  (3,3)   13.0      ; L_x / robotMass
+  (4,4)   13.0     ; L_y / robotMass
+  (5,5)   13.0     ; L_z / robotMass
+
+  ;; Base Pose: [position, orientation] ;;
+  (6,6)   500.0    ; p_base_x
+  (7,7)   500.0    ; p_base_y
+  (8,8)   3000.0    ; p_base_z
+  (9,9)   700.0    ; theta_base_z
+  (10,10) 1000.0    ; theta_base_y
+  (11,11) 800.0    ; theta_base_x
+
+  ;; Waist Joint ;;
+  (12,12) 100.0    ;waist_z
+
+  ;; Leg Joint Positions: [LF, LH, RF, RH] ;;
+  (13,13) 25.0    ; leg_l1_joint
+  (14,14) 30.0    ; leg_l2_joint
+  (15,15) 20.0    ; leg_l3_joint
+  (16,16) 5.0    ; leg_l4_joint
+  (17,17) 5.0    ; leg_l5_joint
+  (18,18) 5.0    ; leg_l6_joint
+  (19,19) 25.0    ; leg_r1_joint
+  (20,20) 30.0    ; leg_r2_joint
+  (21,21) 20.0    ; leg_r3_joint
+  (22,22) 5.0    ; leg_r4_joint
+  (23,23) 5.0    ; leg_r5_joint
+  (24,24) 5.0    ; leg_r6_joint
+
+  ;; Arm Joint Positions: 
+  (25,25) 200.0      ; zarm_l1_joint
+  (26,26) 200.0      ; zarm_l2_joint
+  (27,27) 200.0      ; zarm_l3_joint
+  (28,28) 200.0      ; zarm_l4_joint
+  (29,29) 200.0      ; zarm_r1_joint
+  (30,30) 200.0      ; zarm_r2_joint
+  (31,31) 200.0      ; zarm_r3_joint
+  (32,32) 200.0      ; zarm_r4_joint
+  
+}
+
+Q_base_jump
+{
+  scaling 1e+0
+
+  ;; Normalized Centroidal Momentum: [linear, angular] ;;
+  (0,0)   13.0     ; vcom_x
+  (1,1)   13.0     ; vcom_y
+  (2,2)   13.0     ; vcom_z
+  (3,3)   50.0      ; L_x / robotMass
+  (4,4)   50.0     ; L_y / robotMass
+  (5,5)   13.0     ; L_z / robotMass
+
+  ;; Base Pose: [position, orientation] ;;
+  (6,6)   500.0    ; p_base_x
+  (7,7)   500.0    ; p_base_y
+  (8,8)   2000.0    ; p_base_z
+  (9,9)   700.0    ; theta_base_z
+  (10,10) 1000.0    ; theta_base_y
+  (11,11) 800.0    ; theta_base_x
+
+
+  ;; Waist Joint ;;
+  (12,12) 100.0    ;waist_z
+  
+  ;; Leg Joint Positions: [LF, LH, RF, RH] ;;
+  (13,13) 30.0    ; leg_l1_joint
+  (14,14) 60.0    ; leg_l2_joint
+  (15,15) 10.0    ; leg_l3_joint
+  (16,16) 10.0    ; leg_l4_joint
+  (17,17) 10.0    ; leg_l5_joint
+  (18,18) 10.0    ; leg_l6_joint
+  (19,19) 30.0    ; leg_r1_joint
+  (20,20) 60.0    ; leg_r2_joint
+  (21,21) 10.0    ; leg_r3_joint
+  (22,22) 10.0    ; leg_r4_joint
+  (23,23) 10.0    ; leg_r5_joint
+  (24,24) 10.0    ; leg_r6_joint
+
+  ;; Arm Joint Positions: 
+  (25,25) 200.0      ; zarm_l1_joint
+  (26,26) 200.0      ; zarm_l2_joint
+  (27,27) 200.0      ; zarm_l3_joint
+  (28,28) 200.0      ; zarm_l4_joint
+  (29,29) 200.0      ; zarm_r1_joint
+  (30,30) 200.0      ; zarm_r2_joint
+  (31,31) 200.0      ; zarm_r3_joint
+  (32,32) 200.0      ; zarm_r4_joint
+  
+}

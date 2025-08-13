@@ -1,5 +1,7 @@
 #pragma once
 
+#include <humanoid_interface/HumanoidInterface.h>
+
 #include <controller_interface/controller.h>
 #include <hardware_interface/imu_sensor_interface.h>
 #include <humanoid_common/hardware_interface/ContactSensorInterface.h>
@@ -11,7 +13,6 @@
 #include <ocs2_ros_interfaces/mrt/MRT_ROS_Interface.h>
 
 #include <humanoid_estimation/StateEstimateBase.h>
-#include <humanoid_interface/HumanoidInterface.h>
 #include <humanoid_wbc/WbcBase.h>
 
 #include "humanoid_controllers/SafetyChecker.h"
@@ -42,7 +43,11 @@
 #include "kuavo_msgs/robotHeadMotionData.h"
 #include "kuavo_msgs/getCurrentGaitName.h"
 #include "humanoid_controllers/shm_manager.h"
-#include <std_msgs/Int8.h> 
+#include <std_msgs/Int8.h>
+#ifdef USE_DDS
+#include "humanoid_controllers/CommonDDS.h"
+#endif 
+
 #include "kuavo_common/common/common.h"
 
 namespace humanoid_controller
@@ -188,7 +193,9 @@ namespace humanoid_controller
     virtual void setupStateEstimate(const std::string &taskFile, bool verbose);
     void sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr &msg);
     void startMpccallback(const std_msgs::Bool::ConstPtr &msg);
-
+    // void checkArmControlModeAndUpdateArmJoint();
+    bool armJointSynchronizationCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
+    
     void robotlocalizationCallback(const nav_msgs::Odometry::ConstPtr &msg);
     bool enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool enableMmArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
@@ -196,11 +203,15 @@ namespace humanoid_controller
     void real_init_wait();
     void swingArmPlanner(double st, double current_time, double stepDuration, Eigen::VectorXd &desire_arm_q, Eigen::VectorXd &desire_arm_v);
     void headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
+    void waistCmdCallback(const std_msgs::Float64MultiArray::ConstPtr &msg);
     void visualizeWrench(const Eigen::VectorXd &wrench, bool is_left);
     bool getCurrentGaitNameCallback(kuavo_msgs::getCurrentGaitName::Request &req, kuavo_msgs::getCurrentGaitName::Response &res);
     void getEnableMpcFlagCallback(const std_msgs::Bool::ConstPtr &msg);
     void getEnableWbcFlagCallback(const std_msgs::Bool::ConstPtr &msg);
     void checkMpcPullUp(double current_time, vector_t & current_state, const TargetTrajectories& planner_target_trajectories);
+#ifdef USE_DDS
+    void LowStateCallback(const unitree_hg::msg::dds_::LowState_& data);
+#endif
 
     /**
      * Creates MPC Policy message.
@@ -256,6 +267,7 @@ namespace humanoid_controller
     // Whole Body Control
     std::shared_ptr<WbcBase> wbc_;
     std::shared_ptr<SafetyChecker> safetyChecker_;
+    std::shared_ptr<PinocchioEndEffectorSpatialKinematics> eeSpatialKinematicsWBCPtr_;
 
     // Nonlinear MPC
     std::shared_ptr<MPC_BASE> mpc_;
@@ -298,6 +310,8 @@ namespace humanoid_controller
     ros::Publisher kinematicPub_;
     ros::Publisher lHandWrenchPub_;
     ros::Publisher rHandWrenchPub_;
+    ros::Publisher armEefWbcPosePublisher_;
+
     ros::Publisher standUpCompletePub_;
     ros::Subscriber jointPosVelSub_;
     ros::Subscriber sensorsDataSub_;
@@ -308,6 +322,7 @@ namespace humanoid_controller
     ros::Subscriber observation_sub_;
     ros::Subscriber gait_scheduler_sub_;
     ros::Subscriber head_sub_;
+    ros::Subscriber waist_sub_;
     ros::Subscriber head_array_sub_;
     ros::Subscriber arm_joint_traj_sub_;
     ros::Subscriber mm_arm_joint_traj_sub_;
@@ -319,6 +334,8 @@ namespace humanoid_controller
     ros::Publisher mpcPolicyPublisher_;
 
     ros::Subscriber dexhand_state_sub_;
+
+    ros::ServiceServer armJointSynchronizationSrv_;
     ros::Subscriber enable_mpc_sub_;
     ros::Subscriber enable_wbc_sub_;
 
@@ -360,10 +377,12 @@ namespace humanoid_controller
     size_t jointNum_ = 12;
     size_t armNum_ = 0;
     size_t headNum_ = 2;
+    size_t waistNum_ = 1;
     size_t jointNumReal_ = 12;
     size_t armNumReal_ = 0;
     size_t actuatedDofNumReal_ = 12;// 实物的自由度
     ArmControlMode mpcArmControlMode_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
+    ArmControlMode mpcArmControlMode_desired_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
     int armDofMPC_ = 7; // 单手臂的自由度，会从配置文件中重新计算
     int armDofReal_ = 7; // 实际单手臂的自由度
     int armDofDiff_ = 0; // 单手臂的自由度差
@@ -372,8 +391,10 @@ namespace humanoid_controller
     TargetTrajectories currentArmTargetTrajectories_;// 当前手臂的目标轨迹，简化模型的关节target将会从这里读取
     int seq_ = 0;
     SensorData sensor_data_head_;
+    SensorData sensor_data_waist_;
     Eigen::Quaterniond robot_quat_state_update_;
     vector_t desire_head_pos_ = vector_t::Zero(2);
+    vector_t desire_waist_pos_ = vector_t::Zero(1);  // 腰部目标位置
     vector_t desire_arm_q_prev_;
     vector_t jointPos_, jointVel_;
     vector_t jointAcc_;
@@ -385,6 +406,8 @@ namespace humanoid_controller
     vector_t jointCurrentWBC_;
 
     vector_t motor_c2t_;
+    std::vector<std::vector<double>> motor_cul;
+    std::vector<std::vector<double>> motor_coeff;
     bool init_input_ = false;
     Eigen::Quaternion<scalar_t> quat_;
     Eigen::Quaternion<scalar_t> quat_init;
@@ -397,11 +420,11 @@ namespace humanoid_controller
     vector_t defalutJointPos_;
     vector_t initial_status_;
     vector_t intail_input_;
+    vector_t joint_kp_, joint_kd_, joint_kp_walking_, joint_kd_walking_, head_kp_, head_kd_, waist_kp_, waist_kd_;  // 添加腰部PD控制增益
     vector_t pull_up_status_;
     vector_t pull_up_input_;
     vector_t cur_status_;
     vector_t cur_input_;
-    vector_t joint_kp_, joint_kd_, joint_kp_walking_, joint_kd_walking_, head_kp_, head_kd_;
     vector_t output_tau_, output_pos_, output_vel_;
     Eigen::MatrixXd joint_state_limit_; // 26x2, lower and upper limit
     double contact_cst_st_ = 0.1;
@@ -464,6 +487,20 @@ namespace humanoid_controller
     bool enable_pull_up_protect_ = false;
 
     std::vector<std::pair<double, double> > head_joint_limits_ = {{-80, 80}, {-25, 25}};
+    
+    // Unitree DDS hardware interface
+#ifdef USE_DDS
+    std::unique_ptr<HumanoidControllerDDSClient> dds_client_;
+#endif
+    
+    // Latest sensor data for comparison
+    SensorData latest_dds_sensor_data_;
+    SensorData latest_ros_sensor_data_;
+    bool has_dds_data_ = false;
+    bool has_ros_data_ = false;
+    std::vector<std::pair<double, double> > waist_joint_limits_ = {{-120, 120}};  // 添加腰部关节限制
+
+    void publishWbcArmEndEffectorPose();
 
   };
 

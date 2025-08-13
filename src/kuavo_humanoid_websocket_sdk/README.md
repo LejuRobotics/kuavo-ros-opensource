@@ -1,11 +1,11 @@
 # Kuavo Humanoid SDK
-[![Version](https://img.shields.io/pypi/v/kuavo-humanoid-sdk.svg)](https://pypi.org/project/kuavo-humanoid-sdk/)[![License](https://img.shields.io/pypi/l/kuavo-humanoid-sdk.svg)](#)[![Supported Python Versions](https://img.shields.io/pypi/pyversions/kuavo-humanoid-sdk.svg)](https://pypi.python.org/pypi/kuavo-humanoid-sdk)
+[![Version](https://img.shields.io/pypi/v/kuavo-humanoid-sdk-ws.svg)](https://pypi.org/project/kuavo-humanoid-sdk-ws/)[![License](https://img.shields.io/pypi/l/kuavo-humanoid-sdk-ws.svg)](#)[![Supported Python Versions](https://img.shields.io/pypi/pyversions/kuavo-humanoid-sdk-ws.svg)](https://pypi.python.org/pypi/kuavo-humanoid-sdk-ws)
 
 一个全面的 Python SDK，用于控制 Kuavo 人形机器人。该 SDK 提供了机器人状态管理、手臂和头部控制以及末端执行器操作的接口。它设计用于与 ROS（机器人操作系统）环境一起工作。
 
 **警告**：该 SDK 目前仅支持 **ROS1**。不支持 ROS2。
 
-PyPI 项目地址: https://pypi.org/project/kuavo-humanoid-sdk/
+PyPI 项目地址: https://pypi.org/project/kuavo-humanoid-sdk-ws/
 
 ## 安装
 **提示：对于本 SDK 目前存在两个版本，正式发布版与beta内测版, 他们的区别是：**

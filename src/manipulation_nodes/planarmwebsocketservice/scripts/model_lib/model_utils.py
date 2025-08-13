@@ -15,6 +15,9 @@ import numpy
 import threading
 import subprocess
 
+is_yolo_init = False
+yolo_detection = None
+model = None
 
 class YOLO_detection:
     def __init__(self):
@@ -39,6 +42,11 @@ class YOLO_detection:
             }
         }
 
+        self.cv_image_shape = None
+
+        global is_yolo_init
+        is_yolo_init = True
+
     def load_model(self, model_path):
         try:
             model = YOLO(model_path)
@@ -51,6 +59,9 @@ class YOLO_detection:
     def head_cam_callback(self, msg):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            self.cv_image_shape = cv_image.shape
+            # rospy.loginfo(f"Image resolution: {cv_image_shape[1]}x{cv_image_shape[0]}")
+
             with self.cameras['head']['lock']:
                 self.cameras['head']['image'] = cv_image
         except CvBridgeError as e:
@@ -60,6 +71,9 @@ class YOLO_detection:
     def chest_cam_callback(self, msg):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            self.cv_image_shape = cv_image.shape
+            # rospy.loginfo(f"Image resolution: {cv_image_shape[1]}x{cv_image_shape[0]}")
+
             with self.cameras['chest']['lock']:
                 self.cameras['chest']['image'] = cv_image
         except CvBridgeError as e:
@@ -67,7 +81,9 @@ class YOLO_detection:
             return
 
     def init_ros_node(self):
-        rospy.init_node('YOLO_detection', anonymous=True)
+
+        if not rospy.get_node_uri():
+            rospy.init_node('YOLO_detection', anonymous=True)
         
         for camera_name, camera_info in self.cameras.items():
             try:
@@ -96,7 +112,7 @@ class YOLO_detection:
             image = self.cameras[camera]['image']
 
         if image is not None:
-            results = model.predict(image, show=False, verbose=False)
+            results = model.predict(image, conf=0.6, show=False, verbose=False)
             self.publish_results(results, camera)
             return results
         else:
@@ -200,3 +216,4 @@ class YOLO_detection:
                 }
         
         return min_obj if min_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
+

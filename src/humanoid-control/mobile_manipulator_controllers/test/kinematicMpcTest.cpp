@@ -5,8 +5,8 @@
 #include "kuavo_msgs/endEffectorData.h"
 #include <std_msgs/Float64MultiArray.h>
 
-#include <humanoid_interface/gait/ModeSequenceTemplate.h>
-#include "humanoid_interface_ros/gait/ModeSequenceTemplateRos.h"
+// #include <humanoid_interface/gait/ModeSequenceTemplate.h>
+// #include "humanoid_interface_ros/gait/ModeSequenceTemplateRos.h"
 
 using namespace ocs2;
 struct HandPose 
@@ -89,24 +89,26 @@ public:
     std::cout << "[KinematicMpcTest] comHeight: " << comHeight_<<std::endl;
 
     // gait
-    std::string gaitCommandFile;
-    nodeHandle_.getParam("/gaitCommandFile", gaitCommandFile);
+    // std::string gaitCommandFile;
+    // nodeHandle_.getParam("/gaitCommandFile", gaitCommandFile);
     ROS_INFO_STREAM("/KinematicMpcTest node is setting up ...");
-    std::vector<std::string> gaitList;
-    ocs2::loadData::loadStdVector(gaitCommandFile, "list", gaitList, false);
-    gait_map_.clear();
-    for (const auto &gaitName : gaitList)
-    {
-      gait_map_.insert({gaitName, ocs2::humanoid::loadModeSequenceTemplate(gaitCommandFile, gaitName, false)});
-    }
+    // std::vector<std::string> gaitList;
+    // ocs2::loadData::loadStdVector(gaitCommandFile, "list", gaitList, false);
+    // gait_map_.clear();
+    // for (const auto &gaitName : gaitList)
+    // {
+    //   gait_map_.insert({gaitName, ocs2::humanoid::loadModeSequenceTemplate(gaitCommandFile, gaitName, false)});
+    // }
     std::cout << "Initialized observation subscriber" << std::endl;
   }
 
   void run()
   {
+    int count = 0;
     while(!observationReceived_)
     {
-      std::cout << "Waiting for observation" << std::endl;
+      if(count++ % 40 == 0)
+        std::cout << "[KinematicMpcTest] Waiting for observation" << std::endl;
       ros::spinOnce();
       ros::Duration(0.1).sleep();
     }
@@ -123,15 +125,15 @@ public:
     if(isTargetReachable(pose_l.pos, pose_r.pos, latestObservation_, 0.6))
     {
       torso_pose << latestObservation_.state.segment(0, baseDim_);
-      publishGaitTemplate("stance");
+      // publishGaitTemplate("stance");
       pubQMatrix(q_matrix_diagonal_high_);
     }
     else{
       std::cout << "Target not reachable" << std::endl;
-      publishGaitTemplate("walk");
+      // publishGaitTemplate("walk");
       pubQMatrix(q_matrix_diagonal_low_);
       ros::Duration(1.0).sleep();
-      publishGaitTemplate("walk");
+      // publishGaitTemplate("walk");
     }
     bool stoped = false;
     while(ros::ok() && !stoped)
@@ -141,7 +143,7 @@ public:
       loop_rate.sleep();
       if(isEefTargetReached(pose_l.pos, pose_r.pos, 0.05))
       {
-        publishGaitTemplate("stance");
+        // publishGaitTemplate("stance");
         pubQMatrix(q_matrix_diagonal_high_);
         stoped = true;
         std::cout << "Target reached!" << std::endl;
@@ -212,15 +214,15 @@ private:
     return (distance_l < threshold) && (distance_r < threshold);
   }
 
-  void publishGaitTemplate(const std::string &gaitName)
-  {
-    // 发布对应的gait模板
-    ocs2::humanoid::ModeSequenceTemplate modeSequenceTemplate = gait_map_.at(gaitName);
-    modeSequenceTemplatePublisher_.publish(ocs2::humanoid::createModeSequenceTemplateMsg(modeSequenceTemplate));
-  }
+  // void publishGaitTemplate(const std::string &gaitName)
+  // {
+  //   // 发布对应的gait模板
+  //   ocs2::humanoid::ModeSequenceTemplate modeSequenceTemplate = gait_map_.at(gaitName);
+  //   modeSequenceTemplatePublisher_.publish(ocs2::humanoid::createModeSequenceTemplateMsg(modeSequenceTemplate));
+  // }
 
 private:
-  std::map<std::string, ocs2::humanoid::ModeSequenceTemplate> gait_map_;
+  // std::map<std::string, ocs2::humanoid::ModeSequenceTemplate> gait_map_;
   ros::NodeHandle nodeHandle_;
   ros::Subscriber observationSubscriber_;
   ros::Subscriber eePoseSubscriber_;

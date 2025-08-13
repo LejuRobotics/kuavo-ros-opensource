@@ -39,7 +39,7 @@
     <body name="base_link" pos="0 0 0.82">
       <freejoint />
       <site name="imu" pos="0 0 0" />
-      <inertial pos="-0.0185005 0.00031952 0.192957" quat="0.998529 4.54328e-05 0.0542216 0.000512508" mass="22.1226" diaginertia="0.938886 0.825905 0.269012" />
+      <inertial pos="-0.0185005 0.00031952 0.192957" quat="0.998529 4.54328e-05 0.0542216 0.000512508" mass="27.9080" diaginertia="0.938886 0.825905 0.269012" />
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso" />
       <body name="leg_l1_link" pos="-0.0024999 0.087 -0.066">
         <inertial pos="-0.00430148 -2.708e-05 -0.00851195" quat="-0.000746146 0.721814 -0.00298446 0.69208" mass="1.71093" diaginertia="0.00371121 0.00277272 0.00205799" />

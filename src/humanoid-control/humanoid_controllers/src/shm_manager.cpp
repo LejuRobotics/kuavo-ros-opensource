@@ -17,7 +17,10 @@ ShmManager::ShmManager()
     , sensors_sem_(nullptr)
     , cmd_sem_(nullptr)
 {
-    // 创建或打开信号量
+    // 先清理已存在的信号量
+    sem_unlink(SENSORS_SEM_NAME);
+    sem_unlink(CMD_SEM_NAME);
+    // 创建新的信号量
     sensors_sem_ = sem_open(SENSORS_SEM_NAME, O_CREAT, 0666, 1);
     if (sensors_sem_ == SEM_FAILED) {
         std::cerr << "Failed to create/open sensors semaphore: " << strerror(errno) << std::endl;

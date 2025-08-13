@@ -3,7 +3,7 @@ import rospy
 import json
 import numpy as np
 import os
-from kuavo_sdk.msg import footPose, footPoseTargetTrajectories, armTargetPoses
+from kuavo_msgs.msg import footPose, footPoseTargetTrajectories, armTargetPoses
 from kuavo_msgs.msg import gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode
 from ocs2_msgs.msg import mpc_observation

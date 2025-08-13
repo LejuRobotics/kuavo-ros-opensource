@@ -152,13 +152,16 @@ int RuiWoActuator::initialize()
     pSetZeroMethod = PyObject_GetAttrString(ActuatorInstance, "set_as_zero");
     pChangEncoderMethod = PyObject_GetAttrString(ActuatorInstance, "change_encoder_zero_round");
     pSaveZerosMethod = PyObject_GetAttrString(ActuatorInstance, "save_zero_position");
+    pAdjustZeroMethod = PyObject_GetAttrString(ActuatorInstance, "adjust_zero_position");
+    pGetZeroPointsMethod = PyObject_GetAttrString(ActuatorInstance, "get_motor_zero_points");
     pSetTeachPendantModeMethod = PyObject_GetAttrString(ActuatorInstance, "set_teach_pendant_mode");
     pJoint_online_list = PyObject_GetAttrString(ActuatorInstance, "joint_online_list");
 
     // 检查获取方法是否成功
     if (!pEnableMethod || !pCloseMethod || !pDisableMethod || !pSetPositionMethod || !pSetTorqueMethod || !pSetVelocityMethod ||
         !pGetPositionMethod || !pGetTorqueMethod|| !pGetVelocityMethod || !pGetJointStateMethod || !RuiWo_pJoinMethod ||
-        !pCheckStateMethod || !pSetZeroMethod || !pChangEncoderMethod || !pSaveZerosMethod || !pSetTeachPendantModeMethod || !pJoint_online_list)
+        !pCheckStateMethod || !pSetZeroMethod || !pChangEncoderMethod || !pSaveZerosMethod || !pAdjustZeroMethod || !pGetZeroPointsMethod ||
+        !pSetTeachPendantModeMethod || !pJoint_online_list)
     {
         PyErr_Print();
         Py_DECREF(ActuatorInstance); // 释放已获取的对象
@@ -193,6 +196,60 @@ void RuiWoActuator::changeEncoderZeroRound(int index, double direction)
         PyErr_Print();
     }
     PyGILState_Release(gstate);
+}
+
+void RuiWoActuator::adjustZeroPosition(int index, double offset)
+{
+    gstate = PyGILState_Ensure();
+    if (pAdjustZeroMethod)
+    {   
+        PyObject *args = Py_BuildValue("(id)", index, offset);
+        PyObject_CallObject(pAdjustZeroMethod, args);
+        Py_DECREF(args);
+    }
+    else
+    {
+        PyErr_Print();
+    }   
+    PyGILState_Release(gstate);
+}
+
+std::vector<double> RuiWoActuator::getMotorZeroPoints()
+{
+    gstate = PyGILState_Ensure();
+    PyObject *result = PyObject_CallObject(pGetZeroPointsMethod, nullptr);
+    if (!result)
+    {
+        PyErr_Print();
+        PyGILState_Release(gstate);
+        return std::vector<double>();
+    }
+    std::vector<double> zero_points;
+    PyObject *py_zero_points = PyObject_CallObject(pGetZeroPointsMethod, nullptr);
+    if (!py_zero_points)
+    {
+        PyErr_Print();
+        Py_DECREF(py_zero_points);
+        PyGILState_Release(gstate);
+        return std::vector<double>();
+    }
+    
+    for (int i = 0; i < PyList_Size(py_zero_points); i++)
+    {
+        PyObject *py_zero_point = PyList_GetItem(py_zero_points, i);
+        if (py_zero_point)
+        {
+            double zero_point = PyFloat_AsDouble(py_zero_point);
+            zero_points.push_back(zero_point);
+        }
+        else
+        {
+            PyErr_Print();
+        }
+    }
+
+    PyGILState_Release(gstate);
+    return zero_points;
 }
 
 void RuiWoActuator::saveAsZeroPosition()
@@ -296,6 +353,8 @@ void RuiWoActuator::close()
         Py_XDECREF(pSetZeroMethod);
         Py_XDECREF(pChangEncoderMethod);
         Py_XDECREF(pSaveZerosMethod);
+        Py_XDECREF(pAdjustZeroMethod);
+        Py_XDECREF(pGetZeroPointsMethod);
         Py_XDECREF(pSetTeachPendantModeMethod);
         Py_XDECREF(pJoint_online_list);
     }

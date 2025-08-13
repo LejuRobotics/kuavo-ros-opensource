@@ -3,7 +3,8 @@ import rospy
 import json
 import numpy as np
 import os
-from kuavo_msgs.msg import footPose, footPoseTargetTrajectories, armTargetPoses
+from kuavo_msgs.msg import footPose
+from kuavo_msgs.msg import footPoseTargetTrajectories, armTargetPoses
 from kuavo_msgs.msg import gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode
 from ocs2_msgs.msg import mpc_observation
@@ -12,7 +13,7 @@ import math
 from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 import argparse
-import time
+import time;
 from std_msgs.msg import Float64MultiArray
 
 class ActionPlayer:
@@ -327,6 +328,14 @@ class ActionPlayer:
                 prev_right_foot_pos = right_foot_pose
         
         if msg:
+            # 确保时间轨迹是严格递增的
+            if len(msg.timeTrajectory) > 1:
+                # 检查并修复时间轨迹顺序
+                for i in range(1, len(msg.timeTrajectory)):
+                    if msg.timeTrajectory[i] <= msg.timeTrajectory[i-1]:
+                        msg.timeTrajectory[i] = msg.timeTrajectory[i-1] + 0.01  # 添加最小时间间隔
+                        rospy.logwarn(f"修复时间轨迹顺序，索引 {i}: {msg.timeTrajectory[i-1]} -> {msg.timeTrajectory[i]}")
+            
             self.foot_pose_pub.publish(msg)
             rospy.loginfo("已发送足部轨迹")
     
@@ -493,7 +502,9 @@ class ActionPlayer:
         total_arm_time = len(self.step_control) * 0.1  # 每行数据0.01秒
         
         rospy.loginfo(f"等待动作完成，预计耗时: {total_arm_time}秒")
-        rospy.sleep(total_arm_time)
+        start_time = rospy.get_time()
+        while (rospy.get_time() - start_time) < total_arm_time and not rospy.is_shutdown():
+            rospy.sleep(0.1)  # 短间隔睡眠，保证响应中断
         rospy.loginfo("动作序列执行完成")
 
 def main():
@@ -501,7 +512,7 @@ def main():
     # 创建命令行参数解析器
     parser = argparse.ArgumentParser(description='CSV轨迹播放器')
     parser.add_argument('csv_file', type=str, help='CSV文件路径', nargs='?', 
-                       default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "actions", "taiji_step.csv"))
+                       default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "actions", "taiji_step_roban_stable.csv"))
     parser.add_argument('--time-offset', type=float, help='轨迹开始时间的偏移量(秒)。正值表示在当前MPC时间基础上延迟执行，负值或当前时间之前的值将被忽略（使用默认值-1）')
     
     # 解析命令行参数

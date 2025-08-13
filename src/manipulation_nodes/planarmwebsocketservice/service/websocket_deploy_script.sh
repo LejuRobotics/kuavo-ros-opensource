@@ -23,6 +23,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_FILE="$SCRIPT_DIR/websocket_start.service"
 START_SCRIPT_PATH="$SCRIPT_DIR/websocket_start_script.sh"
 
+if [ -z "$ROBOT_NAME" ]; then
+    ROBOT_NAME="KUAVO"
+    echo "ROBOT_NAME is empty, using default: $ROBOT_NAME"
+fi
+ 
+echo "Current ROBOT_NAME: $ROBOT_NAME"
+
+
+sudo sed -i "s|^Environment=ROBOT_NAME=.*|Environment=ROBOT_NAME=$ROBOT_NAME|" $SERVICE_FILE
+
 # 替换 ExecStart 路径
 sed -i "s|^Environment=ROBOT_VERSION=.*|Environment=ROBOT_VERSION=$ROBOT_VERSION|" $SERVICE_FILE
 sudo sed -i "s|^ExecStart=.*|ExecStart=/bin/bash $START_SCRIPT_PATH|" $SERVICE_FILE
@@ -53,6 +63,12 @@ if [ -f "$CONFIG_FILE" ]; then
 else
     echo "$CONFIG_FILE 文件不存在"
 fi
+
+# 安装 yolo 环境
+pip install -r "$REPO_ROOT/src/manipulation_nodes/planarmwebsocketservice/requirements.txt"
+
+# 安装 wesocket_sdk 环境
+sudo bash "$REPO_ROOT/src/kuavo_humanoid_sdk/install.sh"
 
 # 重新执行编译操作
 sudo catkin clean -y

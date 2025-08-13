@@ -7,7 +7,9 @@ from kuavo_msgs.srv import changeTorsoCtrlMode, changeTorsoCtrlModeRequest
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool
 import numpy as np
-
+import os
+import re
+from typing import Tuple, Optional
 
 class Quest3FSMNode:
     def __init__(self):
@@ -54,11 +56,8 @@ class Quest3FSMNode:
         # Create stop robot publisher
         self.stop_pub = rospy.Publisher("/stop_robot", Bool, queue_size=10)
         
-        # Set velocity limitation parameters directly (no longer using ROS parameter server)
-        self.max_linear_x = 1.0   # Forward/backward velocity limit
-        self.max_linear_y = 0.0   # Left/right velocity limit
-        self.max_linear_z = 0.3   # Vertical velocity limit
-        self.max_angular_z = 0.8  # Rotational velocity limit
+        # 从 RL 仓库的配置文件中读取
+        self.max_linear_x, self.max_linear_y, self.max_linear_z, self.max_angular_z = self.set_velocity_limits()
         rospy.loginfo(f"Velocity limits: x={self.max_linear_x}, y={self.max_linear_y}, z={self.max_linear_z}, yaw={self.max_angular_z}")
         
         rospy.loginfo("Quest3 FSM Node for RL initialized")
@@ -76,6 +75,79 @@ class Quest3FSMNode:
         rospy.loginfo("Initializing walkenable service to disabled state...")
         self.call_walkenable_service(False, is_initialization=True)
         
+    def set_velocity_limits(self, default_limits: Tuple[float, float, float, float] = (2.0, 0.7, 0.3, 0.6)) -> Tuple[float, float, float, float]:
+        kuavo_rl_ws_path = os.environ.get('KUAVO_RL_WS_PATH', "/home/lab/kuavo-RL/kuavo-robot-deploy")
+        robot_version = rospy.get_param("/robot_version", 46)
+        if robot_version != 46:
+            rospy.logwarn(f"当前机器人版本{robot_version}不支持设置速度限制，使用默认值")
+            return default_limits
+
+        config_path = os.path.join(
+            kuavo_rl_ws_path,
+            f"src/humanoid-control/humanoid_controllers/config/kuavo_v{str(robot_version)}/rl/skw_rl_param.info"
+        )
+        # 检查文件是否存在
+        if not os.path.exists(config_path):
+            rospy.logwarn(f"配置文件 {config_path} 不存在，使用默认值")
+            return default_limits
+        
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 查找velocityLimits块
+            pattern = r'velocityLimits\s*\{([^}]+)\}'
+            match = re.search(pattern, content, re.DOTALL)
+            
+            if not match:
+                rospy.logwarn(f"在文件 {config_path} 中未找到velocityLimits配置块，使用默认值")
+                return default_limits
+            
+            velocity_block = match.group(1)
+            
+            # 匹配 (i,j) value 格式的参数
+            param_pattern = r'\((\d+),(\d+)\)\s+([0-9.]+)'
+            matches = re.findall(param_pattern, velocity_block)
+            
+            if not matches:
+                rospy.logwarn(f"在velocityLimits块中未找到有效参数，使用默认值")
+                return default_limits
+            
+            # 按索引排序并提取值
+            params = [(int(i), int(j), float(value)) for i, j, value in matches]
+            params.sort(key=lambda x: (x[0], x[1]))  # 按(i,j)排序
+            
+            # 创建结果数组，初始化为默认值
+            result = list(default_limits)
+            
+            # 填充找到的参数
+            for i, j, value in params:
+                if i < len(result):
+                    result[i] = value
+                else:
+                    rospy.logwarn(f"索引 ({i},{j}) 超出范围，忽略该参数")
+            
+            # 检查是否有缺失的参数
+            missing_count = 0
+            for i, (found_val, default_val) in enumerate(zip(result, default_limits)):
+                if found_val == default_val:
+                    # 检查是否真的找到了这个索引的参数
+                    found_in_file = any(idx == i for idx, _, _ in params)
+                    if not found_in_file:
+                        missing_count += 1
+                        param_names = ['cmdVelLineX', 'cmdVelLineY', 'cmdVelLineZ', 'cmdVelAngularZ']
+                        rospy.logwarn(f"参数 {param_names[i]} 缺失，使用默认值 {default_val}")
+            
+            if missing_count > 0:
+                rospy.loginfo(f"共缺失 {missing_count} 个参数，已使用默认值补充")
+            
+            return tuple(result)
+            
+        except Exception as e:
+            rospy.logerr(f"解析配置文件 {config_path} 时发生异常: {e}")
+            rospy.logwarn("使用默认值")
+            return default_limits
+
     def joystick_callback(self, msg):
         """
         Joystick data callback function for real-time input processing

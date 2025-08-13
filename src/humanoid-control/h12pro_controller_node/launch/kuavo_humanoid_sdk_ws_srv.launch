@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<launch>    
+    <!-- for Kuavo Humanoid Websocket SDK: host_srv -->
+    <arg name="debug_mode" default="false" />
+    <arg name="debug_arg" value="" unless="$(arg debug_mode)" />
+    <arg name="debug_arg" value="--debug" if="$(arg debug_mode)" /> 
+    <node pkg="h12pro_controller_node" type="websocket_sdk_start_node.py" name="websocket_sdk_start_node" output="screen" args="$(arg debug_arg)">
+    </node>
+</launch>

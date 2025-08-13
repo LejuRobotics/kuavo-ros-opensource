@@ -1,0 +1,20 @@
+<launch>
+    <!-- 定义命令行参数 -->
+    <arg name="send_srv" default="1"/> <!-- 1: 不需要手动打开手臂控制，0: 需要手动打开手臂控制 -->
+    <arg name="version" default="4" />
+    <arg name="ctrl_arm_idx" default="2" />
+    <arg name="ik_type_idx" default="0" />
+    <arg name="ip_address" default="" />
+    <arg name="control_torso" default="0" /> <!-- 0: do NOT control, 1: control torso  -->
+    <arg name="camera_publisher_name" default="/camera/color" />
+    <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
+
+    <!-- motion_capture_ik -->
+    <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --send_srv=$(arg send_srv) --control_torso=$(arg control_torso) --hand_reference_mode=$(arg hand_reference_mode)" output="screen">
+    </node>
+
+    <!-- noitom_hi5_hand_udp_python -->
+    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen">
+    </node>
+    <node pkg="noitom_hi5_hand_udp_python" type="webrtc_videostream.py" name="webrtc_videostream" args="$(arg camera_publisher_name)" output="screen"/>
+</launch>

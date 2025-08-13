@@ -87,7 +87,6 @@ class HeadCali:
         self.plant = MultibodyPlant(0.0)
         Parser(self.plant).AddModelFromFile(urdf_path)
 
-        self.plant.WeldFrames(self.plant.world_frame(), self.plant.GetFrameByName("dummy_link"))
         self.plant.Finalize()
         self.context = self.plant.CreateDefaultContext()
         print("nq:", self.plant.num_positions())

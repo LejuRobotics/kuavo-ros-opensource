@@ -7,6 +7,8 @@
   <param name="robot_type" value="ocs2"/>  
 
   <env name="PYTHONPATH" value="$(env PYTHONPATH):$(find planarmwebsocketservice)" />
+  <!-- 添加模型库路径 -->
+  <env name="PYTHONPATH" value="$(env PYTHONPATH):$(find planarmwebsocketservice)/scripts/model_lib" />
   <node pkg="planarmwebsocketservice" type="plan_arm_action_websocket_server.py" name="plan_arm_action_websocket_server" output="screen" args="--robot_type=$(arg robot_type)">
   
   </node>

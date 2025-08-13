@@ -7,11 +7,13 @@ Panels:
         - /Global Options1
         - /Status1
         - /RobotModel1
-        - /RobotModel1/Links1
-        - /TF1/Frames1
+        - /TF1
         - /MarkerArray1
         - /Marker1
-        - /Marker6
+        - /MarkerArray2
+        - /MarkerArray5
+        - /MarkerArray6
+        - /MarkerArray6/Namespaces1
       Splitter Ratio: 0.5
     Tree Height: 455
   - Class: rviz/Selection
@@ -57,12 +59,12 @@ Visualization Manager:
       Plane Cell Count: 10
       Reference Frame: <Fixed Frame>
       Value: true
-    - Alpha: 0.20000000298023224
+    - Alpha: 0.5
       Class: rviz/RobotModel
       Collision Enabled: false
       Enabled: true
       Links:
-        All Links Enabled: false
+        All Links Enabled: true
         Expand Joint Details: false
         Expand Link Details: false
         Expand Tree: false
@@ -72,26 +74,36 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        camera_base:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: false
-        dummy_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        head_camera:
+        camera:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
+        camera_base:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        dummy_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
         l_foot_heel:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
         l_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        l_hand_camera:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        l_hand_tripod:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -186,6 +198,21 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        r_hand_camera:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        r_hand_tripod:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        radar:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         rl_foot_heel:
           Alpha: 1
           Show Axes: false
@@ -202,6 +229,16 @@ Visualization Manager:
           Show Trail: false
           Value: true
         rr_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        torso-camera:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        waist_camera:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -290,12 +327,12 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-          Value: false
+          Value: true
         zhead_2_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-          Value: false
+          Value: true
       Name: RobotModel
       Robot Description: humanoid_description
       TF Prefix: ""
@@ -303,185 +340,28 @@ Visualization Manager:
       Value: true
       Visual Enabled: true
     - Class: rviz/TF
-      Enabled: true
+      Enabled: false
       Filter (blacklist): ""
       Filter (whitelist): ""
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        base_link:
-          Value: true
-        camera_base:
-          Value: true
-        dummy_link:
-          Value: false
-        head_camera:
-          Value: true
-        l_foot_heel:
-          Value: false
-        l_foot_toe:
-          Value: false
-        leg_l1_link:
-          Value: false
-        leg_l2_link:
-          Value: false
-        leg_l3_link:
-          Value: false
-        leg_l4_link:
-          Value: false
-        leg_l5_link:
-          Value: false
-        leg_l6_link:
-          Value: false
-        leg_r1_link:
-          Value: false
-        leg_r2_link:
-          Value: false
-        leg_r3_link:
-          Value: false
-        leg_r4_link:
-          Value: false
-        leg_r5_link:
-          Value: false
-        leg_r6_link:
-          Value: false
-        ll_foot_heel:
-          Value: false
-        ll_foot_toe:
-          Value: false
-        lr_foot_heel:
-          Value: false
-        lr_foot_toe:
-          Value: false
-        odom:
-          Value: true
-        r_foot_heel:
-          Value: false
-        r_foot_toe:
-          Value: false
-        rl_foot_heel:
-          Value: false
-        rl_foot_toe:
-          Value: false
-        rr_foot_heel:
-          Value: false
-        rr_foot_toe:
-          Value: false
-        zarm_l1_link:
-          Value: false
-        zarm_l2_link:
-          Value: false
-        zarm_l3_link:
-          Value: false
-        zarm_l4_link:
-          Value: false
-        zarm_l5_link:
-          Value: false
-        zarm_l6_link:
-          Value: false
-        zarm_l7_end_effector:
-          Value: false
-        zarm_l7_link:
-          Value: false
-        zarm_r1_link:
-          Value: false
-        zarm_r2_link:
-          Value: false
-        zarm_r3_link:
-          Value: false
-        zarm_r4_link:
-          Value: false
-        zarm_r5_link:
-          Value: false
-        zarm_r6_link:
-          Value: false
-        zarm_r7_end_effector:
-          Value: false
-        zarm_r7_link:
-          Value: false
-        zhead_2_link:
-          Value: true
       Marker Alpha: 1
-      Marker Scale: 1
+      Marker Scale: 0.30000001192092896
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        dummy_link:
-          {}
-        odom:
-          base_link:
-            leg_l1_link:
-              leg_l2_link:
-                leg_l3_link:
-                  leg_l4_link:
-                    leg_l5_link:
-                      leg_l6_link:
-                        l_foot_heel:
-                          {}
-                        l_foot_toe:
-                          {}
-                        ll_foot_heel:
-                          {}
-                        ll_foot_toe:
-                          {}
-                        lr_foot_heel:
-                          {}
-                        lr_foot_toe:
-                          {}
-            leg_r1_link:
-              leg_r2_link:
-                leg_r3_link:
-                  leg_r4_link:
-                    leg_r5_link:
-                      leg_r6_link:
-                        r_foot_heel:
-                          {}
-                        r_foot_toe:
-                          {}
-                        rl_foot_heel:
-                          {}
-                        rl_foot_toe:
-                          {}
-                        rr_foot_heel:
-                          {}
-                        rr_foot_toe:
-                          {}
-            zarm_l1_link:
-              zarm_l2_link:
-                zarm_l3_link:
-                  zarm_l4_link:
-                    zarm_l5_link:
-                      zarm_l6_link:
-                        zarm_l7_link:
-                          zarm_l7_end_effector:
-                            {}
-            zarm_r1_link:
-              zarm_r2_link:
-                zarm_r3_link:
-                  zarm_r4_link:
-                    zarm_r5_link:
-                      zarm_r6_link:
-                        zarm_r7_link:
-                          zarm_r7_end_effector:
-                            {}
-        zhead_2_link:
-          camera_base:
-            {}
-          head_camera:
-            {}
+        {}
       Update Interval: 0
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /humanoid/optimizedStateTrajectory
+      Marker Topic: /mobile_manipulator/optimizedStateTrajectory
       Name: MarkerArray
       Namespaces:
-        "": true
-        CoM Trajectory: true
-        Feet Trajectories: true
-        Future footholds: true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -494,13 +374,13 @@ Visualization Manager:
       Value: true
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /humanoid/currentState
+      Marker Topic: /humanoid/optimizedStateTrajectory
       Name: MarkerArray
       Namespaces:
-        Center of Pressure: true
-        EE Forces: true
-        EE Positions: true
-        Support Polygon: true
+        "": true
+        CoM Trajectory: true
+        Feet Trajectories: true
+        Future footholds: true
       Queue Size: 100
       Value: true
     - Class: rviz/InteractiveMarkers
@@ -632,6 +512,51 @@ Visualization Manager:
       Torque Color: 204; 204; 51
       Unreliable: false
       Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Class: grid_map_rviz_plugin/GridMap
+      Color: 200; 200; 200
+      Color Layer: elevation
+      Color Transformer: GridMapLayer
+      Enabled: true
+      Height Layer: elevation
+      Height Transformer: GridMapLayer
+      History Length: 1
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 10
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: GridMap
+      Show Grid Lines: true
+      Topic: /elevation_mapping/elevation_map
+      Unreliable: false
+      Use Rainbow: true
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /stair_planes
+      Name: MarkerArray
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /visualization_marker/human_array_left
+      Name: MarkerArray
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /visualization_marker/human_array_right
+      Name: MarkerArray
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 255; 253; 212
@@ -660,7 +585,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 2.666560173034668
+      Distance: 2.449183702468872
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -668,17 +593,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 0.18825635313987732
-        Y: -0.09394228458404541
-        Z: -0.052684277296066284
+        X: 0.19474011659622192
+        Y: 0.0706496611237526
+        Z: -0.18862596154212952
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: -0.11520352214574814
+      Pitch: 0.15979841351509094
       Target Frame: base_link
-      Yaw: 6.223176956176758
+      Yaw: 5.323180675506592
     Saved:
       - Class: rviz/Orbit
         Distance: 5.575319766998291
@@ -716,5 +641,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1386
-  X: 301
-  Y: 52
+  X: 288
+  Y: 27

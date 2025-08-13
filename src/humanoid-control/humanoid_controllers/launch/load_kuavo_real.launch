@@ -28,15 +28,18 @@
     <arg name="start_way"         default="manual"/>
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="only_half_up_body" default="false"/>
+    <arg name="waist_move_spd"     default="0.8"/>
     <arg name="stand_up_protect" default="true"/>
     <arg name="redundant_imu" default="false"/>
+    <arg name="joint_protect_enable" default="true" />
+    <arg name="cmd_truncation_enable" default="true" />
+    <arg name="leg_disable_mode" default="true" doc="If true, when any leg joint fails, all leg joints (1-12) will be disabled" />
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <arg name="arm_move_spd"      default="1.2"/>
 
     <!-- 半身控制手臂模式切换插值相关参数 -->
     <arg name="arm_move_spd_half_up_body" default="0.21"/>
     <arg name="threshold_arm_diff_half_up_body" default="0.28"/>
-
     <!-- The file defining gait definition -->
 
     <!-- Set with_coredump parameter based on coredump value -->
@@ -70,9 +73,14 @@
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
     <param name="start_way"  value="$(arg start_way)"/>
     <param name="use_estimator_contact"  value="$(arg use_estimator_contact)"/>
+    <param name="waist_move_spd"     value="$(arg waist_move_spd)"/>
+
     <param name="stand_up_protect" value="$(arg stand_up_protect)"/>
     <param name="redundant_imu" value="$(arg redundant_imu)"/>
     <param name="ruiwo_cxx_sdk" value="$(arg ruiwo_cxx_sdk)"/>
+    <param name="joint_protect_enable" value="$(arg joint_protect_enable)" />
+    <param name="cmd_truncation_enable" value="$(arg cmd_truncation_enable)" />
+    <param name="leg_disable_mode" value="$(arg leg_disable_mode)" />
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
@@ -91,9 +99,22 @@
     <param name="/mpc/schedule/start_time" value="-1.0"/>
     <param name="/timeout_warning_ms" value="20"/>
 
+    <!-- 自动清理 .ros 文件夹参数 -->
+    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+
     <group if="$(eval arg('teach_pendant') == 1)">
       <param name="stand_up_protect" value="false"/>
       <param name="only_half_up_body" value="true"/>
+    </group>
+
+    <group unless="$(eval arg('robot_version') >= 30)">
+        <param name="enable_pull_up_protect" value="false"/>
+        <param name="stand_up_protect" value="false"/>
+        <param name="joint_protect_enable" value="false" />
+        <param name="cmd_truncation_enable" value="false" />
     </group>
     
     <!-- mpc node -->
@@ -119,16 +140,22 @@
     <arg name="cali" default="false" />
     <arg name="cali_arm" default="false" />
     <arg name="cali_leg" default="false" />
-    <arg name="joint_protect_enable" default="false" />
-    <arg name="cmd_truncation_enable" default="false" />
+
+    <!-- 是否进入到手臂展开的零点校准姿态 -->
+    <arg name="cali_set_zero" default="false" />
 
     <param name="real" value="$(arg real)" />
     <param name="log_lcm" value="$(arg log)" />
     <param name="cali" value="$(arg cali)" />
     <param name="cali_arm" value="$(arg cali_arm)" />
     <param name="cali_leg" value="$(arg cali_leg)" />
-    <param name="joint_protect_enable" value="$(arg joint_protect_enable)" />
-    <param name="cmd_truncation_enable" value="$(arg cmd_truncation_enable)" />
+    <param name="cali_set_zero" value="$(arg cali_set_zero)" />
+
+    <!-- If cali_set_zero is true, force cali to true -->
+    <group if="$(arg cali_set_zero)">
+        <param name="cali" value="true" />
+    </group>
+    
     <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
        output="screen" required="true" clear_params="true"
        launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
@@ -137,6 +164,9 @@
 
     <param name="hardware/is_ready" value="0"/>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" />
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
+      <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
+    </node>    
     <group unless="$(arg ruiwo_cxx_sdk)">
       <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodelet nodelet_manager" respawn="false" output="screen" required="true"  />
     </group>
@@ -144,10 +174,6 @@
       <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodeletCXX nodelet_manager" respawn="false" output="screen" required="true"  />
     </group>
 
-    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
-      <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
-    </node>
-    
     <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
@@ -199,6 +225,11 @@
     <!-- monitor node -->
     <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
 
+    <!-- 启动上位机服务节点 -->
+    <group if="$(eval arg('robot_version') >= 40)">
+      <node pkg="humanoid_controllers" type="upper_computer_service.py" name="upper_computer_service" output="screen" />
+    </group>
+
     <group if="$(arg vr_remote_control)">
       <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
     </group>
@@ -221,10 +252,27 @@
     </group>
 
     <group if="$(arg with_mm_ik)">
+      <group if="$(eval arg('robot_version') >= 30)">
       <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
         <arg name="sqp_mpc" value="1"/>
         <arg name="rviz"    value="false"/>
-        <arg name="visualize_mm"   value="false"/>
+        <arg name="visualize_mm"   value="true"/>
+        <arg name="coredump" value="$(arg coredump)"/>
+      </include>
+      </group>
+    </group>
+
+    <group if="$(arg with_led)">
+      <include file="$(find kuavo_led_controller)/launch/set_led_mode.launch">
+        <arg name="LED" value="enable"/>
       </include>
     </group>
+    <arg name="microphone" default="true" />
+
+    <group if="$(arg microphone)">
+      <!-- 添加音频接收节点 -->
+      <include file="$(find kuavo_audio_receiver)/launch/receive_voice.launch"/>
+
+    </group>
+
 </launch>
