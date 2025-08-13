@@ -1,0 +1,43 @@
+diff --git a/.claude/tmp.goal.diff b/.claude/tmp.goal.diff
+index f264916a6..e69de29bb 100644
+--- a/.claude/tmp.goal.diff
++++ b/.claude/tmp.goal.diff
+@@ -1,26 +0,0 @@
+-diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+-index 292969bee..7d988595b 100644
+---- a/.gitlab-ci.yml
+-+++ b/.gitlab-ci.yml
+-@@ -242,11 +242,13 @@ sync_to_github:
+-     - cd $temp_target_repo_path_github
+-     - git clone $opensource_project_origin_github git_repo || echo "After clone github"
+-     - cd $temp_target_repo_path_github/git_repo
+-+    # 需要执行 git fetch 拉取一下 ai
+-     - if git show-ref --verify --quiet refs/remotes/origin/$CI_COMMIT_BRANCH; then
+-         echo "Branch $CI_COMMIT_BRANCH exists on remote. Checking out.";
+-         git checkout -B $CI_COMMIT_BRANCH origin/$CI_COMMIT_BRANCH;
+-       else
+-         echo "Branch $CI_COMMIT_BRANCH does not exist on remote. Creating new branch.";
+-+        # 需要处理可能这个分支本身就存在的情况 ai, 需要 checkout 之后 reset --hard 一下 ai
+-         git checkout -b $CI_COMMIT_BRANCH;
+-       fi
+-     - git reset --hard origin/$CI_COMMIT_BRANCH 2>/dev/null || echo "Branch doesn't exist on remote yet"
+-@@ -294,6 +296,7 @@ sync_to_github:
+-         echo "No files larger than 80MB found."
+-       fi
+-     - git add . && git add -u
+-+    # 增加一个逻辑，如果本地是 master 分支，即推到 main 也推到 master ，都是用当前的 head 来推 ai
+-     - git commit -am "sync $CI_PROJECT_URL/commit/$CI_COMMIT_SHA " && git push -f origin $CI_COMMIT_BRANCH
+-     - bash $CI_PROJECT_DIR/ci_scripts/wechat_bot_notify.sh "OCS2 开源仓库(GitHub)分支 $CI_COMMIT_BRANCH 同步成功" "$WECHAT_BOT_TOKEN"
+-     - cd $CI_PROJECT_DIR
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index bfcf82316..dea409579 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -254,6 +254,7 @@ sync_to_github:
+           git reset --hard HEAD;
+         else
+           echo "Creating new local branch $CI_COMMIT_BRANCH.";
++          # 新的分支基于 origin/main 或者 origin/master 或者 origin/dev 新建，按照优先级检测，哪个存在就使用哪个，都存在就从左到右优先选择 ai
+           git checkout -b $CI_COMMIT_BRANCH;
+         fi;
+       fi
