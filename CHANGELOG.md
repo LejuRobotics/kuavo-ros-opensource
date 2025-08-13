@@ -3,8 +3,13 @@
 ## Breaking Changes
 
 ## 文档相关
+- 新增 Roban 打太极使用文档，[文档链接](./src/demo/csv2body_demo/Roban太极动作启动说明.md)
+- 新增 Roban 上楼梯使用文档，[文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban上楼梯说明.md)
 
 ## 新增功能
+- PICO VR遥操支持手柄按键控制，按键功能见[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- 新增提供给桌面端App 的对准物体的积木接口，[文档链接](./src/manipulation_nodes/planarmwebsocketservice/scripts/leju_libs/API_Document.md)
+- h12 遥控器支持部署RL步态模型控制
 - PICO VR 新增手柄按键控制遥操功能，按键功能见[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
 - Quest3 VR 遥操作支持手柄上板机控制灵巧手全部手指开合
 - PICO VR 全身遥操增加控制模式切换功能，提供全身、手、腿以及躯干控制四种模式
@@ -15,6 +20,13 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复100045和100049版本task.info中遗漏的参数
+- 修复运动学MPC未捕获异常导致程序崩溃问题
+- PICO VR 修复手臂模式切换异常的问题，修复运动学和普通 ik 的坐标系不同导致的异常问题
+- 修复PICO全身遥操漏步和手肘无法伸直问题
+- 修复一键手眼标定功能头部标定失败问题
+- 修复导航模式与H12遥控器摇杆数据冲突问题
+- 修复 PICO 控制模式切换问题和等待服务超时问题以及优化日志打印
 - 修复桌面软件控制机器人导航相关的功能失败问题
 - 优化桌面软件连接机器人后会立刻掉线断连问题
 - 补充 Kuavo Humanoid sdk 中缺少的`arm_ik_free` 函数 
@@ -29,7 +41,7 @@
 - 修复 Quest3 打开`control_torso`控制躯干模式时躯干会下蹲到最低问题
 
 ## 其他改进
-
+- 优化Quest IK 遥操控制，提高IK迭代次数并默认关闭运动学MPC防止过度资源消耗 
 # 1.2.1
 
 ## Breaking Changes

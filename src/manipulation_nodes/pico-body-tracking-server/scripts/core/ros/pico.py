@@ -537,8 +537,8 @@ class KuavoPicoNode:
         for name, (key_combination, callback) in self.joy_callbacks.items():
             self.joy_button_handler.add_callback(name, key_combination, callback)
         # //////////////////////////// Debug CallBacks ////////////////////////////
-        # Debug: 用于调试的回调函数
-        dev_debug = False
+        # 遥操模式切换
+        dev_debug = True
         if dev_debug:
             def _debug_torso_change_callback(event: ToggleEvent):
                 SDKLogger.info(f"切换躯干模式状态变化: {event.old_state} -> {event.new_state}")
@@ -554,9 +554,9 @@ class KuavoPicoNode:
             self.toggle_torso_change_debug.add_callback(_debug_torso_change_callback)
             self.joy_debug_callbacks = {
                 "torso_on": (set(['RT_PRESSED', 'Y_PRESSED']), self._torso_change_callback),
-                "WholeBody_Mode": (set(['RT_PRESSED', 'X_LONG_PRESSED']), self._whole_body_callback),
-                "UpperBody_Mode": (set(['RT_PRESSED', 'B_LONG_PRESSED']), self._upper_body_callback),
-                "LowerBody_Mode": (set(['RT_PRESSED', 'A_LONG_PRESSED']), self._lower_body_callback)
+                "WholeBody_Mode": (set(['RT_PRESSED', 'X_PRESSED']), self._whole_body_callback),
+                "UpperBody_Mode": (set(['RT_PRESSED', 'B_PRESSED']), self._upper_body_callback),
+                "LowerBody_Mode": (set(['RT_PRESSED', 'A_PRESSED']), self._lower_body_callback)
             }
             for name, (key_combination, callback) in self.joy_debug_callbacks.items():
                 self.joy_button_handler.add_callback(name, key_combination, callback)
@@ -574,6 +574,9 @@ class KuavoPicoNode:
         
         # 全身遥操不处理左右摇杆控制
         if self.pico_info_transformer.control_mode == "UpperBody":
+            if self.toggle_torso_change_debug:
+                # SDKLogger.warning("\033[93m躯干模式开启中，无法切换左右摇杆控制\033[0m")
+                return
             self.handle_joystick_movement(joy)
 
     def _hand_wrench_callback(self, key_combination: Set[str], joy:JoySticks)->None:
@@ -624,7 +627,10 @@ class KuavoPicoNode:
         if not self.pico_info_transformer.control_mode == "UpperBody":
             SDKLogger.warning("\033[93m下半身遥操模式下无法切换到行走模式\033[0m")
             return
-            
+        
+        if self.toggle_torso_change_debug:
+            SDKLogger.warning("\033[93m躯干模式开启中，无法切换到行走模式\033[0m")
+            return
         try:
             banner_echo(f"切换到行走模式", 'green')
             # Create switch gait message
@@ -652,7 +658,7 @@ class KuavoPicoNode:
                     self.pub_switch_gait.publish(gait_msg)
                 # 全身遥操/下半身遥操模式下 先踏步恢复步态然后再站立
                 SDKLogger.info("下半身/全身遥操模式自动踏步调整站立")
-                time.sleep(1.5)
+                time.sleep(2.0) # 放宽踏步的时间尽量让机器人恢复站立
             # Create switch gait message
             gait_msg = switchGaitByName()
             gait_msg.gait_name = "stance"  # Assuming the message has a gait_name field
@@ -749,14 +755,17 @@ class KuavoPicoNode:
     def _whole_body_callback(self, keys: Set[str], joy: JoySticks) -> None:
         self.last_pico_running_state = False
         self.pico_info_transformer.set_control_mode("WholeBody")
+        banner_echo("切换到全身遥操模式", 'green')
 
     def _upper_body_callback(self, keys: Set[str], joy: JoySticks) -> None:
         self.last_pico_running_state = False
         self.pico_info_transformer.set_control_mode("UpperBody")
+        banner_echo("切换到上半身遥操模式", 'green')
 
     def _lower_body_callback(self, keys: Set[str], joy: JoySticks) -> None:
         self.last_pico_running_state = False
         self.pico_info_transformer.set_control_mode("LowerBody")
+        banner_echo("切换到下半身遥操模式", 'green')
     """////////////////////////////////////////////////////////////////////////////////////////////////////"""
 
     def set_robot_model_params(self) -> str:

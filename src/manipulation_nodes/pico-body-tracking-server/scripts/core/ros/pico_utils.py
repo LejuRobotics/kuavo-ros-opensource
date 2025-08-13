@@ -1300,7 +1300,7 @@ class KuavoPicoInfoTransformer():
             #        或者也可以选择和 spine3 同一高度，视你的系统结构而定
             height_in_vr = min(pelvis_matrix[2, 3] + self.pelvis_offset, self.default_pelvis_z)
             # height_in_vr = pelvis_matrix[2, 3]
-            print(f'======================= height in vr {height_in_vr} ==================')
+            # print(f'======================= height in vr {height_in_vr} ==================')
             virtual_position = [self.default_pelvis_x, self.default_pelvis_y, height_in_vr] #使用进入torso control时刻的x, y
             T_base_virtual_trans = translation_matrix(virtual_position)
 
