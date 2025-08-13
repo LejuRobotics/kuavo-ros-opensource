@@ -1,0 +1,26 @@
+# 遥控器预定义命令配置文件
+# 每个命令包含以下字段：
+# - name: 命令名称
+# - type: 命令类型 (目前支持 "shell")
+# - value: 命令值 (对于shell类型，这是要执行的脚本路径或命令)
+
+commands:
+  stairclimb:
+    name: "stairclimb"
+    type: "shell"
+    value: "bash -c 'source devel/setup.bash && rosrun humanoid_controllers stairClimbPlanner-vision.py'"
+    description: "执行楼梯攀爬脚本"
+  
+  start_stair_detect:
+    name: "start_stair_detect"
+    type: "shell"
+    value: "bash -c 'source devel/setup.bash && rosservice call /kuavo/start_stair_detection'"
+    description: "执行楼梯检测脚本"
+    
+  stop_stair_detect:
+    name: "stop_stair_detect"
+    type: "shell"
+    value: "bash -c 'source devel/setup.bash && rosservice call /kuavo/stop_stair_detection'"
+    description: "关闭楼梯检测脚本"
+  
+  

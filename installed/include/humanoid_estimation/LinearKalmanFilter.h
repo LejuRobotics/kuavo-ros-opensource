@@ -38,11 +38,11 @@ public:
   void set_intial_state(const vector_t& state) override;
   
   vector_t update(const ros::Time& time, const ros::Duration& period) override;
-  nav_msgs::Odometry updateKinematics(const ros::Time &time, const Eigen::Quaterniond &imu_quat, const ros::Duration &period) override;
   void setFixFeetHeights(bool isFix) 
   {
     isFixHeight_ = isFix;
   }
+  nav_msgs::Odometry updateKinematics(const ros::Time &time, const Eigen::Quaterniond &imu_quat, const ros::Duration &period) override;
 
   void loadSettings(const std::string& taskFile, bool verbose);
   void reset() override;
@@ -90,6 +90,7 @@ private:
   int last_contact_point_index_;
   // Topic
   ros::Subscriber sub_;
+  ros::Subscriber footContactPointSubscriber_;
   realtime_tools::RealtimeBuffer<nav_msgs::Odometry> buffer_;
   tf2_ros::Buffer tfBuffer_;
   tf2_ros::TransformListener tfListener_;

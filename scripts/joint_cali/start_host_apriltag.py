@@ -5,23 +5,43 @@ import paramiko
 import threading
 import time
 import sys
+import os
+import subprocess
 
 class HostAprilTagLauncher:
     def __init__(self):
+        result = subprocess.run(['systemctl', 'is-active', 'isc-dhcp-server'])
+        if result.returncode == 0:
+            remote_host = "192.168.26.12"
+        else:
+            remote_host = "192.168.26.1"
+
+        robot_version = os.environ.get('ROBOT_VERSION')
+        # 49 为 orbbec 相机
+        if robot_version == "49":
+            launch_name = "orbbec_sensor_robot_enable.launch"
+            launch_file = "src/dynamic_biped/launch/" + launch_name
+            launch_cmd = 'nohup bash -ic "cd ~/kuavo_ros_application && source devel/setup.bash && roslaunch dynamic_biped ' + launch_name + '" > apriltag_launch.log 2>&1 &'
+        else:
+            launch_name = "sensor_apriltag_only_enable.launch"  
+            launch_file = "src/dynamic_biped/launch/" + launch_name
+            launch_cmd = 'nohup bash -ic "cd ~/kuavo_ros_application && source devel/setup.bash && roslaunch dynamic_biped ' + launch_name + '" > apriltag_launch.log 2>&1 &'
+        
+        
         self.config = {
             "name": "apriltag_detection",
-            "host": "192.168.26.1",
+            "host": remote_host,
             "port": 22,
-            "username": "kuavo",
+            "username1": "kuavo",
+            "username2": "leju_kuavo",
             "password": "leju_kuavo",
-            "remote_path": "/home/kuavo/kuavo_ros_application",
-            "launch_file": "src/dynamic_biped/launch/sensor_apriltag_only_enable.launch",
-            "launch_cmd": 'nohup bash -ic "cd ~/kuavo_ros_application && source devel/setup.bash && roslaunch dynamic_biped sensor_apriltag_only_enable.launch" > apriltag_launch.log 2>&1 &',
+            "remote_path": "~/kuavo_ros_application",
+            "launch_name": launch_name,
+            "launch_file": launch_file,
+            "launch_cmd": launch_cmd,
             "nodes_to_check": [
                 "/apriltag_ros_continuous_node",
                 "/ar_control_node", 
-                "/camera/realsense2_camera",
-                "/camera/realsense2_camera_manager",
                 "/camera_to_real_frame"
             ]
         }
@@ -33,24 +53,33 @@ class HostAprilTagLauncher:
             print(f"[{prefix}] {line.strip()}")
 
     def connect_ssh(self):
-        """建立SSH连接"""
-        try:
-            print(f"=== 连接上位机 {self.config['host']} ===")
-            self.ssh = paramiko.SSHClient()
-            self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            self.ssh.connect(
-                hostname=self.config["host"],
-                port=self.config["port"],
-                username=self.config["username"],
-                password=self.config["password"],
-                timeout=10
-            )
-            print("✓ SSH连接成功")
-            return True
-        except Exception as e:
-            print(f"✗ SSH连接失败: {e}")
-            return False
+        """建立SSH连接，尝试两个用户名"""
+        user_attempts = [self.config["username1"], self.config["username2"]] # Assuming your config might have these keys
+
+        for username in user_attempts:
+            if not username: # Skip if the username is None or empty
+                continue
+
+            try:
+                print(f"=== 尝试使用用户名 '{username}' 连接上位机 {self.config['host']} ===")
+                self.ssh = paramiko.SSHClient()
+                self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+                self.ssh.connect(
+                    hostname=self.config["host"],
+                    port=self.config["port"],
+                    username=username, # Use the current username in the loop
+                    password=self.config["password"],
+                    timeout=10
+                )
+                print(f"✓ SSH连接成功，使用用户名: {username}")
+                return True
+            except Exception as e:
+                print(f"✗ SSH连接失败 (用户名: {username}): {e}")
+                # Continue to the next username if this one fails
+
+        print("✗ 所有SSH用户名尝试均失败。")
+        return False
 
     def check_remote_path(self):
         """检查远程路径是否存在"""
@@ -105,7 +134,7 @@ class HostAprilTagLauncher:
             print("步骤3: 清理旧进程...")
             
             # 查找相关进程
-            check_cmd = "pgrep -f 'sensor_apriltag_only_enable.launch' || echo 'no_process'"
+            check_cmd = "pgrep -f '" + self.config["launch_name"] + "' || echo 'no_process'"
             stdin, stdout, stderr = self.ssh.exec_command(check_cmd)
             result = stdout.read().decode().strip()
             
@@ -117,13 +146,13 @@ class HostAprilTagLauncher:
             
             # 使用root权限优雅停止进程
             print("使用root权限停止进程...")
-            kill_cmd = "echo 'leju_kuavo' | sudo -S pkill -15 -f 'sensor_apriltag_only_enable.launch'"
+            kill_cmd = "echo 'leju_kuavo' | sudo -S pkill -15 -f '" + self.config["launch_name"] + "'"
             stdin, stdout, stderr = self.ssh.exec_command(kill_cmd)
             time.sleep(3)
             
             # 使用root权限强制停止残留进程
             print("强制停止残留进程...")
-            force_kill_cmd = "echo 'leju_kuavo' | sudo -S pkill -9 -f 'sensor_apriltag_only_enable.launch'"
+            force_kill_cmd = "echo 'leju_kuavo' | sudo -S pkill -9 -f '" + self.config["launch_name"] + "'"
             stdin, stdout, stderr = self.ssh.exec_command(force_kill_cmd)
             time.sleep(2)
             
@@ -145,7 +174,7 @@ class HostAprilTagLauncher:
             print("步骤4: 启动AprilTag识别系统...")
             
             # 修改启动命令，确保权限正确
-            launch_cmd = 'nohup bash -ic "cd ~/kuavo_ros_application && source devel/setup.bash && roslaunch dynamic_biped sensor_apriltag_only_enable.launch" > apriltag_launch.log 2>&1 &'
+            launch_cmd = self.config["launch_cmd"]
             print(f"执行命令: {launch_cmd}")
             
             stdin, stdout, stderr = self.ssh.exec_command(launch_cmd)
@@ -210,7 +239,7 @@ class HostAprilTagLauncher:
         """验证进程是否在运行"""
         try:
             print("步骤6: 验证进程运行状态...")
-            check_cmd = "pgrep -f 'sensor_apriltag_only_enable.launch'"
+            check_cmd = "pgrep -f '" + self.config["launch_name"] + "'"
             stdin, stdout, stderr = self.ssh.exec_command(check_cmd)
             result = stdout.read().decode().strip()
             

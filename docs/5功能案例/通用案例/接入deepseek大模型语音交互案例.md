@@ -12,7 +12,13 @@
 
   - 作用：导入所需的Python标准库和第三方库并定义录音和音频处理的全局参数。
 
-2. chat 函数
+
+2. RosAudioPublisher类
+  - 作用：初始化ros节点，创建音频数据发布器，向下位机传输数据流，使用外放设备播放音频
+  
+  - publish_pcm_audio_data函数：将pcm文件按照int16格式发布audio_data话题。 
+  
+3. chat 函数
 
   - 作用：实现录音功能，根据音量阈值和静默时间自动开始和结束录音。
 
@@ -26,7 +32,7 @@
 
     - 录音数据保存为PCM文件。
 
-3. deepseek_chat 函数
+4. deepseek_chat 函数
 
   - 作用：调用deepseek_chat的API进行对话，并将回复通过TTS转换为语音播放。
 
@@ -38,7 +44,7 @@
 
     - 调用 tts_xunfei 将回复转换为语音并播放。
 
-4. Client 类
+5. Client 类
 
   - 作用：实现与讯飞实时语音转写（RTASR）服务的WebSocket通信。
 
@@ -50,7 +56,7 @@
 
     - 接收并解析RTASR返回的转写结果。
 
-5. 主程序
+6. 主程序
 
   - 作用：主程序逻辑，循环录音、转写、对话和播放。
 
@@ -82,14 +88,29 @@
        - 将程序`<kuavo_ros_application>/src/kuavo_large_model/kuavo_deepseek_model/rtasr_python3_demo.py`第101行的api-key替换成获取到的即可
 
 ## 执行
+  ⚠️ **注意: 请保证上下位机ROS主从通信正常工作**
 
-  - 启动
-    ```bash
+
+  
+   - 下位机
+  ```bash
+  cd kuavo-ros-opensource #进入下位机工作空间(根据实际部署目录切换)
+  sudo su
+  catkin build kuavo_audio_player
+  source devel/setup.bash
+  roslaunch kuavo_audio_player play_music.launch
+  ```
+  - 效果
+     ![效果下位机](images/效果下位机.png)
+  
+   - 上位机 
+  ```bash
     cd kuavo_ros_application  # 进入上位机工作空间(根据实际部署目录切换)
     source /opt/ros/noetic/setup.bash
     source devel/setup.bash
     python3 src/kuavo_large_model/kuavo_deepseek_model/rtasr_python3_demo.py 
-    ```
+  ```
+
 
   - 效果
     ![效果](images/效果.png)

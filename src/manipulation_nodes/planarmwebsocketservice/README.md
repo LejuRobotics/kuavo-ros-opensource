@@ -410,6 +410,33 @@ ws://{robot_ws_logger_address}
 }
 ```
 
+### 11. 获取音乐列表 (get_music_list)
+
+**描述**: 获取可用的音乐文件列表。判断音频设备是否下位机，如果在下位机本地音乐文件列表，否则获取上位机的音乐文件列表
+
+**请求**:
+```json
+{
+  "cmd": "get_music_list",
+  "data": {}
+}
+```
+
+**响应**:
+```json
+{
+  "cmd": "get_music_list",
+  "data": {
+    "code": 0,
+    "music_list": [
+      "/home/robot/.config/lejuconfig/music/music.mp3",
+      "/home/robot/.config/lejuconfig/music/music.wav"
+    ]
+  }
+}
+
+```
+
 ## YOLO目标检测
 
 `model_utils.py` 中 `YOLO_detection` 为 YOLO目标检测类，用于处理图像检测和结果发布。
@@ -482,6 +509,8 @@ ws://{robot_ws_logger_address}
     'class_name': str  # 目标名称
 }
 ```
+
+
 
 ## Rosbag 到 Tact 文件转换工具
 

@@ -141,7 +141,7 @@ namespace GrabBox
         }
         // currentPose.head(4) = ocs2_state_.segment<4>(6);
         currentPose.head(6) = ocs2_state_.segment<6>(6);
-        std::cout << "MoveToDestination ocs2_state_: " << ocs2_state_.transpose() << "\n";
+        // std::cout << "MoveToDestination ocs2_state_: " << ocs2_state_.transpose() << "\n";
 
         ocs2::TargetTrajectories goalTargetTrajectories = goalTorsoPoseToTargetTrajectories(currentPose, current_time, planed_trajectory);
         const auto mpcTargetTrajectoriesMsg = ocs2::ros_msg_conversions::createTargetTrajectoriesMsg(goalTargetTrajectories);

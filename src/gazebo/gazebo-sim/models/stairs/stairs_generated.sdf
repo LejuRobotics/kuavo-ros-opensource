@@ -1,0 +1,98 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="parametric_stairs">
+    <static>true</static>
+    <link name="step_0">
+      <pose>0.14 0 0.065 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.28 1.0 0.13</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>0.28 1.0 0.13</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Grey</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+    <link name="step_1">
+      <pose>0.42000000000000004 0 0.195 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.28 1.0 0.13</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>0.28 1.0 0.13</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Grey</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+    <link name="step_2">
+      <pose>0.7000000000000001 0 0.325 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.28 1.0 0.13</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>0.28 1.0 0.13</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Grey</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+    <link name="step_3">
+      <pose>0.9800000000000001 0 0.455 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.28 1.0 0.13</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>0.28 1.0 0.13</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Grey</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

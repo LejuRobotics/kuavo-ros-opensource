@@ -129,6 +129,7 @@
       "walk":["E_MIDDLE", "F_MIDDLE", "A_PRESS"],
       "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
       "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
+      "toggle_head_control":["E_MIDDLE", "F_RIGHT", "B_PRESS"],
       "arm_pose1":["E_RIGHT", "F_LEFT", "A_PRESS"],
       "arm_pose2":["E_RIGHT", "F_LEFT", "B_PRESS"],
       "arm_pose3":["E_RIGHT", "F_LEFT", "C_PRESS"],

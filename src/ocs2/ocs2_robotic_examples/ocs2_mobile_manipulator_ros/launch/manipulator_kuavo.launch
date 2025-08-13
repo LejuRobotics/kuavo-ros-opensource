@@ -7,8 +7,10 @@
       <arg name="sqp_mpc"  default="1" />
 
       <!-- The URDF model of the robot -->
-      <!-- <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s42/urdf/biped_s42_l.urdf" /> -->
-      <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s42/urdf/biped_s42.urdf" />
+      <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+      <!-- The URDF model of the robot -->
+      <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+
       <!-- The task file for the mpc. -->
       <arg name="taskFile"    value="$(find ocs2_mobile_manipulator)/config/kuavo/task.info" />
       <!-- The library folder to generate CppAD codegen into -->

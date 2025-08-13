@@ -36,6 +36,12 @@ def capitalize_type(type_name):
     if type_name.lower() in {t.lower() for t in basic_types}:
         return type_name.lower() + array_suffix
     
+    # 特殊处理时间相关类型，直接替换为标准ROS2类型
+    if type_name.lower() == 'time':
+        return 'builtin_interfaces/Time' + array_suffix
+    elif type_name.lower() == 'duration':
+        return 'builtin_interfaces/Duration' + array_suffix
+    
     # 处理可能包含命名空间的类型
     parts = type_name.split('/')
     if len(parts) > 1:
@@ -75,6 +81,9 @@ def convert_fields_to_snake_case(file_path):
         elif re.search(r'\btime\b', line, re.IGNORECASE) and not 'builtin_interfaces/Time' in line and not line.strip().startswith('#'):
             line = re.sub(r'\btime\b', 'builtin_interfaces/Time', line, flags=re.IGNORECASE)
             modified = True
+        elif re.search(r'\bduration\b', line, re.IGNORECASE) and not 'builtin_interfaces/Duration' in line and not line.strip().startswith('#'):
+            line = re.sub(r'\bduration\b', 'builtin_interfaces/Duration', line, flags=re.IGNORECASE)
+            modified = True
         
         # 处理字段定义
         # 使用正则表达式匹配，以处理多个空格的情况
@@ -85,8 +94,18 @@ def convert_fields_to_snake_case(file_path):
             field_name = match.group(3)
             rest = match.group(4)
             
-            # 检查是否是常量定义
-            if '=' in line:
+            # 分离注释部分，检查是否是常量定义
+            # 只有在非注释部分包含 = 时才是常量定义
+            comment_index = rest.find('#')
+            if comment_index != -1:
+                non_comment_part = rest[:comment_index]
+                comment_part = rest[comment_index:]
+            else:
+                non_comment_part = rest
+                comment_part = ''
+            
+            # 检查是否是常量定义（= 在非注释部分）
+            if '=' in non_comment_part:
                 if not field_name.isupper():  # 如果常量名不是全大写
                     new_const = field_name.upper()
                     line = f"{indent}{type_part} {new_const}{rest}"

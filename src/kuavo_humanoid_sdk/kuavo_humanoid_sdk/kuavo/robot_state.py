@@ -167,6 +167,14 @@ class KuavoRobotState:
         """
         return self._rs_core.manipulation_mpc_frame
     
+    def pitch_limit_enabled(self) -> bool:
+        """获取机器人 basePitch 限制状态, 如果开启则返回True，否则返回False。
+
+        Returns:
+            bool: 如果机器人 basePitch 限制开启返回True，否则返回False。
+        """
+        return self._rs_core.pitch_limit_enabled
+
     def head_joint_state(self) -> KuavoJointData:
         """获取机器人头部关节的当前状态。
 

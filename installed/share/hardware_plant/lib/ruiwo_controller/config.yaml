@@ -49,8 +49,8 @@ parameter:
   Right_joint_arm_4: [0, 30, 2, 0, 0, 0, 0]
   Right_joint_arm_5: [0, 30, 2, 0, 0, 0, 0]
   Right_joint_arm_6: [0, 30, 2, 0, 0, 0, 0]
-  Head_joint_low: [0, 4, 3, 0, 0, 0, 0]
-  Head_joint_high: [0, 10, 3, 0, 0, 0, 0]
+  Head_joint_low: [0, 8, 3, 0, 0, 0, 0]
+  Head_joint_high: [0, 14, 3, 0, 0, 0, 0]
   Claw_joint_left: [0, 45, 1, 0, 0, 0, 0]
   Claw_joint_right: [0, 45, 1, 0, 0, 0, 0]
 negtive_address:

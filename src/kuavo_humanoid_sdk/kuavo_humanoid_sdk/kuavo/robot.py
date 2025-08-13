@@ -270,6 +270,21 @@ class KuavoRobot(RobotBase):
         return self._robot_head.disable_head_tracking()
     
     """ Robot Arm Control """
+    def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
+        """控制机器人末端力/力矩
+        
+        Args:
+            left_wrench (list): 左手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+            right_wrench (list): 右手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+                单位:
+                Fx,Fy,Fz: 牛顿(N)
+                Tx,Ty,Tz: 牛·米(N·m)
+        
+        Returns:
+            bool: 控制成功返回True, 否则返回False
+        """
+        return self._robot_arm.control_hand_wrench(left_wrench, right_wrench)
+
     def arm_reset(self)->bool:
         """手臂归位
         
@@ -456,7 +471,41 @@ class KuavoRobot(RobotBase):
             Tuple[bool, list]: 成功标志和 :class:`kuavo_humanoid_sdk.interfaces.data_types.KuavoMotorParam` 对象列表的元组
         """
         return self._kuavo_core.get_motor_param()
+
+    def enable_base_pitch_limit(self, enable: bool) -> Tuple[bool, str]:
+        """开启/关闭机器人 basePitch 限制
         
+        Note:
+             该接口用于关闭或开启机器人 basePitch 保护功能，关闭状态下可以进行比较大幅度的前后倾动作而不会触发保护导致摔倒。
+
+        Args:
+            enable (bool): 开启/关闭
+        """
+        return self._kuavo_core.enable_base_pitch_limit(enable)
+    
+    def is_arm_collision(self)->bool:
+        """判断当前是否发生碰撞
+        
+        Returns:
+            bool: 发生碰撞返回True,否则返回False
+        """
+        return self._robot_arm.is_arm_collision()
+    
+    def wait_arm_collision_complete(self):
+        """等待碰撞完成
+        """
+        self._robot_arm.wait_arm_collision_complete()
+
+    def release_arm_collision_mode(self):
+        """释放碰撞模式
+        """
+        self._robot_arm.release_arm_collision_mode()
+
+    def set_arm_collision_mode(self, enable: bool):
+        """设置碰撞模式
+        """
+        self._robot_arm.set_arm_collision_mode(enable)
+
 if __name__ == "__main__":
     robot = KuavoRobot()
     robot.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.ArmOnly)

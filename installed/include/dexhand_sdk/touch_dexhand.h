@@ -1,143 +1,18 @@
 #ifndef _TOUCH_DEXHAND_H_
 #define _TOUCH_DEXHAND_H_
-#include <memory>
 #include <mutex>
-#include <array>
-#include <iostream>
-#include <vector>
+#include "dexhand_base.h"
+
 struct ModbusHandle;
 namespace dexhand {
-
-enum DexHandType : uint8_t {
-  SKU_TYPE_MEDIUM_RIGHT = 1,
-  SKU_TYPE_MEDIUM_LEFT = 2,
-  SKU_TYPE_SMALL_RIGHT = 3,
-  SKU_TYPE_SMALL_LEFT = 4,
-  SKU_TYPE_NONE = 110,  
-
-};
-
-enum GripForce : uint8_t {
-  FORCE_LEVEL_SMALL = 1,
-  FORCE_LEVEL_NORMAL = 2,
-  FORCE_LEVEL_FULL = 3,
-};
-
-/// 内置手势1~6：张开、握拳、两只捏、三只捏、侧边捏、单指点
-/// 自定义手势6个: 10~15
-enum ActionSequenceId_t : uint8_t {
-  ACTION_SEQUENCE_ID_DEFAULT_GESTURE_OPEN = 1,
-  ACTION_SEQUENCE_ID_DEFAULT_GESTURE_FIST = 2,
-  ACTION_SEQUENCE_ID_DEFAULT_GESTURE_PINCH_TWO = 3,
-  ACTION_SEQUENCE_ID_DEFAULT_GESTURE_PINCH_THREE = 4,
-  ACTION_SEQUENCE_ID_DEFAULT_GESTURE_PINCH_SIDE = 5,
-  ACTION_SEQUENCE_ID_DEFAULT_GESTURE_POINT = 6,
-  ACTION_SEQUENCE_ID_CUSTOM_GESTURE1 = 10,
-  ACTION_SEQUENCE_ID_CUSTOM_GESTURE2 = 11,
-  ACTION_SEQUENCE_ID_CUSTOM_GESTURE3 = 12,
-  ACTION_SEQUENCE_ID_CUSTOM_GESTURE4 = 13,
-  ACTION_SEQUENCE_ID_CUSTOM_GESTURE5 = 14,
-  ACTION_SEQUENCE_ID_CUSTOM_GESTURE6 = 15,
-};
-
-struct TouchSensorStatus_t {
-  uint16_t normal_force1;
-  uint16_t normal_force2;
-  uint16_t normal_force3;
-  uint16_t tangential_force1;
-  uint16_t tangential_force2;
-  uint16_t tangential_force3;
-  uint16_t tangential_direction1;
-  uint16_t tangential_direction2;
-  uint16_t tangential_direction3;
-  uint32_t self_proximity1;
-  uint32_t self_proximity2;
-  uint32_t mutual_proximity;
-  uint16_t status;
-};
-
-struct TurboConfig_t {
-  uint16_t interval;
-  uint16_t duration;
-};
-
-using FingerArray = std::array<int16_t, 6>;
-using UnsignedFingerArray = std::array<uint16_t, 6>;
-using TouchSensorStatusArray = std::array<TouchSensorStatus_t, 5>;
-using FingerTouchStatusPtr = std::shared_ptr<TouchSensorStatusArray>;
-
-struct ActionSeqDataType {
-    uint16_t duration_ms; // ms
-    UnsignedFingerArray positions;
-    UnsignedFingerArray speeds;
-    UnsignedFingerArray forces;
-
-    ActionSeqDataType(): duration_ms(500) {
-        for (int i = 0; i < 6; i++) {
-            positions[i] = 0;
-            speeds[i] = 0;
-            forces[i] = 0;
-        }
-    }
-};
-using ActionSeqDataTypeVec = std::vector<ActionSeqDataType>;
-
-/* open finger positions */
-const UnsignedFingerArray kOpenFingerPositions = {
-    0, 0, 0, 0, 0, 0
-};
-/* close finger positions */
-const UnsignedFingerArray kCloseFingerPositions = {
-    50, 90, 90, 90, 90, 90
-};
-
-struct DeviceInfo_t {
-    DexHandType sku_type;
-    std::string serial_number;
-    std::string firmware_version;
-
-    friend std::ostream& operator<<(std::ostream& os, const DeviceInfo_t& info) {
-        os << "Sku Type: " << static_cast<int>(info.sku_type) << "\nSerial Number: " << info.serial_number << "\nFirmware Version: " << info.firmware_version << "\n";
-        return os;
-    }
-};
-
-struct FingerStatus {
-    UnsignedFingerArray positions;
-    FingerArray speeds;
-    FingerArray currents;
-    UnsignedFingerArray states;
-
-    friend std::ostream& operator<<(std::ostream& os, const FingerStatus& status) {
-        os << "Finger Positions: ";
-        for (const auto& pos : status.positions) {
-            os << pos << " ";
-        }
-        os << "\nFinger Speeds: ";
-        for (const auto& speed : status.speeds) {
-            os << speed << " ";
-        }
-        os << "\nFinger Currents: ";
-        for (const auto& current : status.currents) {
-            os << current << " ";
-        }
-        os << "\nFinger States: ";
-        for (const auto& state : status.states) {
-            os << state << " ";
-        }
-        return os;
-    }
-};
-using FingerStatusPtr = std::shared_ptr<FingerStatus>;
-
 std::ostream& operator<<(std::ostream& os, const TouchSensorStatus_t& status);
 std::ostream& operator<<(std::ostream& os, const FingerStatusPtr& status);
 
-class TouchDexhand {
+class TouchDexhand: public DexHandBase {
 public:
     TouchDexhand(const TouchDexhand&) = delete;
     TouchDexhand& operator=(const TouchDexhand&) = delete;
-    ~TouchDexhand();
+    virtual ~TouchDexhand();
 
     /**
      * @brief   Connect to the device
@@ -153,49 +28,26 @@ public:
         uint32_t baudrate
     );
 
-    /**
-     * @brief Get the Device Info object
-     * 
-     * @return DeviceInfo 
-     */
-    DeviceInfo_t getDeviceInfo();
+    // See DexHandBase::getDexHandFwType for details    
+    DexHandFwType getDexHandFwType() override;
 
-    /**
-     * @brief Set the Finger Positions.
-     * 
-     * @param positions range: 0~100, 0 for open, 100 for close.
-     */
-    void setFingerPositions(const UnsignedFingerArray &positions);
+    // See DexHandBase::getDeviceInfo for details
+    DeviceInfo_t getDeviceInfo() override;
+
+    // See DexHandBase::setFingerPositions for details
+    void setFingerPositions(const UnsignedFingerArray &positions) override;
     
-    /**
-     * @brief Set the Finger Speeds object
-     * 
-     * @param speeds range: -100~100
-     * @note The fingers will move at the set speed values until they stall. 
-     *       The value range is -100 to 100. Positive values indicate flexion, negative values indicate extension.
-     */
-    void setFingerSpeeds(const FingerArray &speeds);
+    // See DexHandBase::setFingerSpeeds for details
+    void setFingerSpeeds(const FingerArray &speeds) override;
 
-    /**
-     * @brief Get the Finger Status object
-     * 
-     * @return FingerStatusPtr 
-     */
-    FingerStatusPtr getFingerStatus();
+    // See DexHandBase::getFingerStatus for details
+    FingerStatusPtr getFingerStatus() override;
 
-    /**
-     * @brief Set the Force Level object
-     * 
-     * @param level {GripForce::NORMAL, GripForce::SMALL, GripForce::FULL}
-     */
-    void setGripForce(GripForce level);
+    // See DexHandBase::setGripForce for details
+    void setGripForce(GripForce level) override;
 
-    /**
-     * @brief Get the Force Level object
-     * 
-     * @return GripForce 
-     */
-    GripForce  getGripForce();
+    // See DexHandBase::getGripForce for details
+    GripForce  getGripForce() override;
 
     /**
      * @brief Get the Touch Status object
@@ -204,22 +56,15 @@ public:
      */
     FingerTouchStatusPtr getTouchStatus();
 
-    /**
-     * @brief Set the Turbo Mode Enabled object
-     * @note 开启之后会持续握紧, 掉电后，Turbo 模式会恢复到默认关闭状态。
-     * @param enabled 
-     */
-    void setTurboModeEnabled(bool enabled);
+    // See DexHandBase::setTurboModeEnabled for details
+    void setTurboModeEnabled(bool enabled) override;
 
-    /**
-     * @brief Check if Turbo Mode is enabled
-     * 
-     * @return true if Turbo Mode is enabled
-     * @return false if Turbo Mode is not enabled
-     */
-    bool isTurboModeEnabled();
+    // See DexHandBase::isTurboModeEnabled for details
+    bool isTurboModeEnabled() override;
 
-    TurboConfig_t getTurboConfig();
+    // See DexHandBase::getTurboConfig for details
+    TurboConfig_t getTurboConfig() override;
+
     /**
      * @brief 重置触觉传感器采集通道
      * @note 在执行该指令时，手指传感器尽量不要受力, 0b00000001 表示重置第一个传感器
@@ -236,22 +81,11 @@ public:
      */
     void enableTouchSensor(uint8_t bits = 0xFF);
 
-    /**
-     * @brief 运行动作序列
-     * 
-     * @param seq_id 
-     */
-    void runActionSequence(ActionSequenceId_t seq_id);
+    // See DexHandBase::runActionSequence for details
+    void runActionSequence(ActionSequenceId_t seq_id) override;
 
-    /**
-     * @brief 设置动作序列
-     * 
-     * @param seq_id 
-     * @param sequences
-     * @return true if success
-     * @return false if failed
-     */
-    bool setActionSequence(ActionSequenceId_t seq_id, const ActionSeqDataTypeVec &sequences);
+    // See DexHandBase::setActionSequence for details
+    bool setActionSequence(ActionSequenceId_t seq_id, const ActionSeqDataTypeVec &sequences) override;
     
 private:
     explicit TouchDexhand(ModbusHandle* handle, uint8_t slave_id_);

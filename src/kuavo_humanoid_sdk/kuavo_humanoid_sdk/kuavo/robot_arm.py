@@ -202,6 +202,44 @@ class KuavoRobotArm:
             return None, None
         return result
 
+    def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
+        """控制机器人末端力/力矩
+        
+        Args:
+            left_wrench (list): 左手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+            right_wrench (list): 右手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+                单位:
+                Fx,Fy,Fz: 牛顿(N)
+                Tx,Ty,Tz: 牛·米(N·m)
+        
+        Returns:
+            bool: 控制成功返回True, 否则返回False
+        """
+        return self._kuavo_core.control_hand_wrench(left_wrench, right_wrench)
+
+    def is_arm_collision(self)->bool:
+        """判断当前是否发生碰撞
+        
+        Returns:
+            bool: 发生碰撞返回True,否则返回False
+        """
+        return self._kuavo_core.is_arm_collision()
+    
+    def release_arm_collision_mode(self):
+        """释放碰撞模式
+        """
+        self._kuavo_core.release_arm_collision_mode()
+
+    def wait_arm_collision_complete(self):
+        """等待碰撞完成
+        """
+        self._kuavo_core.wait_arm_collision_complete()
+
+    def set_arm_collision_mode(self, enable: bool):
+        """设置碰撞模式
+        """
+        self._kuavo_core.set_arm_collision_mode(enable)
+
 # if __name__ == "__main__":
 #     arm = KuavoRobotArm()
 #     arm.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.ArmOnly)

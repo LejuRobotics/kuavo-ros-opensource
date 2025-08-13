@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <unordered_map>
+#include <map>
 #include "kuavo_common/common/robot_state.h"
 #include "kuavo_common/common/sensor_data.h"
 #include "kuavo_common/common/kuavo_settings.h"
@@ -17,12 +18,12 @@
 #include "jodell_claw_driver.h"
 #include "dynamixel_interface.h"
 #include "ankle_solver.h"
-#include "hand_controller.h"
 #include "lejuclaw_controller.h"
 #include "claw_types.h"
 #include "gesture_types.h"
 #include "touch_hand_controller.h"
 #include "hipnuc_imu_receiver.h"
+#include "motor_status_manager.h"
 
 namespace HighlyDynamic
 {
@@ -97,7 +98,7 @@ public:
     int8_t PDInitialize(Eigen::VectorXd &q0);
     void writeCommand(Eigen::VectorXd cmd_r, uint32_t na_r, std::vector<int> control_modes, Eigen::VectorXd &joint_kp, Eigen::VectorXd &joint_kd);
     void endEffectorCommand(std::vector<EndEffectorData> &end_effector_cmd);
-    bool checkJointPos(const std::vector<JointParam_t> &joint_data, std::vector<uint8_t> ids, std::string &msg);
+    bool checkJointSafety(const std::vector<JointParam_t> &joint_data, std::vector<uint8_t> ids, std::string &msg);
     void jointFiltering(std::vector<JointParam_t> &joint_data, double dt);
     void setDefaultJointPos(std::vector<double> default_joint_pos);
 
@@ -117,20 +118,22 @@ public:
     bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
     bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
 
+    // 电机状态管理器接口
+    void setMotorStatusPositionLimits();  // 设置位置限制到电机状态管理器
+    
+    // 电机状态管理器接口 - 仅更新状态记录，不控制硬件
+    void markJointAsDisabled(int joint_id, const std::string& reason = "");
+    bool isJointMarkedAsDisabled(int joint_id) const;
+    std::map<int, MotorStatus> getAllJointsStatus() const;
 
     bool checkLejuClawInitialized();
-    bool checkHandInitialized();
-    bool executeGestures(const std::vector<eef_controller::GestureExecuteInfo>& gesture_tasks, std::string& err_msg);
-    std::vector<eef_controller::GestureInfoMsg> listGestures();
-    bool isGestureExecuting();
     bool controlLejuClaw(eef_controller::ControlClawRequest& req, eef_controller::ControlClawResponse& res);
     bool controlLejuClaw(eef_controller::lejuClawCommand& command);
     eef_controller::ClawState getLejuClawState();
 
     void setHardwareParam(const HardwareParam& param) { hardware_param_ = param; }
     HardwareParam& getHardwareParam() { return hardware_param_; }
-    const std::array<eef_controller::BrainCoController::HandStatus, 2>&  getHandControllerStatus();
-    eef_controller::FingerStatusPtrArray getHandControllerWithTouchStatus();
+    eef_controller::FingerStatusPtrArray getHandControllerStatus();
 
     bool th_running_ = false;
     int hardware_status_ = -1;
@@ -146,13 +149,17 @@ public:
     double lockRotorTimeWin_{0.0};
     double speedTimeWin_{0.0};
     std::vector<double_t> joint_velocity_limits_;
+    std::vector<double_t> joint_peak_velocity_limits_;
     std::vector<double_t> joint_lock_rotor_limits_;
-    std::vector<double_t> joint_peak_limits_;
+    std::vector<double_t> joint_peak_torque_limits_;
     std::vector<double_t> min_joint_position_limits;
     std::vector<double_t> max_joint_position_limits;
 
-    std::unique_ptr<eef_controller::TouchDexhandContrller> dexhand_actuator;
+    std::unique_ptr<eef_controller::DexhandController> dexhand_actuator;
     std::string gesture_filepath_;
+    
+    // 电机状态管理器
+    std::unique_ptr<MotorStatusManager> motor_status_manager_;
 
 private:
 

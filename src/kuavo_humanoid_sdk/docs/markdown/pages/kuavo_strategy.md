@@ -155,6 +155,21 @@ Bases: `RobotBase`
 #### NOTE
 此命令会将机器人状态改变为’command_pose_world’。
 
+#### control_hand_wrench(left_wrench: list, right_wrench: list) → bool
+
+控制机器人末端力/力矩
+
+* **Parameters:**
+  * **left_wrench** (*list*) – 左手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+  * **right_wrench** (*list*) – 右手臂6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+    单位:
+    Fx,Fy,Fz: 牛顿(N)
+    Tx,Ty,Tz: 牛·米(N·m)
+* **Returns:**
+  控制成功返回True, 否则返回False
+* **Return type:**
+  bool
+
 #### control_head(yaw: float, pitch: float) → bool
 
 控制机器人的头部。
@@ -183,6 +198,16 @@ Bases: `RobotBase`
 #### disable_head_tracking() → bool
 
 禁用头部跟踪。
+
+#### enable_base_pitch_limit(enable: bool) → Tuple[bool, str]
+
+开启/关闭机器人 basePitch 限制
+
+#### NOTE
+该接口用于关闭或开启机器人 basePitch 保护功能，关闭状态下可以进行比较大幅度的前后倾动作而不会触发保护导致摔倒。
+
+* **Parameters:**
+  **enable** (*bool*) – 开启/关闭
 
 #### enable_head_tracking(target_id: int) → bool
 
@@ -612,6 +637,15 @@ Bases: `object`
 * **Return type:**
   [KuavoOdometry](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoOdometry)
 
+#### pitch_limit_enabled() → bool
+
+获取机器人 basePitch 限制状态, 如果开启则返回True，否则返回False。
+
+* **Returns:**
+  如果机器人 basePitch 限制开启返回True，否则返回False。
+* **Return type:**
+  bool
+
 #### robot_orientation() → Tuple[float, float, float, float]
 
 返回 Kuavo 机器人在世界坐标系中的方向。
@@ -704,6 +738,18 @@ Bases: `object`
 * **Return type:**
   Union[[PoseQuaternion](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.PoseQuaternion), [HomogeneousMatrix](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.HomogeneousMatrix), None]
 
+#### get_link_pose(link_name: str, reference_frame: str = 'base_link')
+
+获取指定机械臂关节链接的位置
+
+* **Parameters:**
+  * **link_name** (*str*) – 关节链接名称，如”zarm_l1_link”
+  * **reference_frame** (*str*) – 参考坐标系，默认为base_link
+* **Returns:**
+  三维位置坐标(x,y,z)，失败返回None
+* **Return type:**
+  Tuple[float, float, float] | None
+
 #### get_link_position(link_name: str, reference_frame: str = 'base_link') → Tuple[float, float, float] | None
 
 获取指定机械臂关节链接的位置
@@ -794,7 +840,7 @@ Kuavo机器人策略基础类，提供策略执行的抽象接口
 * **Return type:**
   bool
 
-#### *abstract* walk_approach_target(target_info, target_distance=0.5, \*\*kwargs)
+#### *abstract* walk_approach_target(target_id, target_distance=0.5, \*\*kwargs)
 
 走/接近特定的目标到指定距离
 
@@ -807,13 +853,14 @@ Kuavo机器人策略基础类，提供策略执行的抽象接口
 * **Return type:**
   bool
 
-#### *abstract* walk_to_pose(target_info, target_distance=0.5, \*\*kwargs)
+#### *abstract* walk_to_pose(target_pose: [KuavoPose](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoPose), target_distance=0.5, timeout=10.0, \*\*kwargs)
 
 走到指定距离的目标位置
 
 * **Parameters:**
-  * **target_info** – 目标信息，包含位置、姿态等
+  * **target_pose** – 目标位姿
   * **target_distance** – 与目标的期望距离(米)
+  * **timeout** – 超时时间(秒)
   * **\*\*kwargs** – 其他参数
 * **Returns:**
   是否成功接近目标
@@ -824,7 +871,7 @@ Kuavo机器人策略基础类，提供策略执行的抽象接口
 
 ### 箱子信息数据结构
 
-### *class* kuavo_humanoid_sdk.kuavo_strategy.grasp_box.grasp_box_strategy.BoxInfo(pose: [KuavoPose](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoPose), size: Tuple[float, float, float] = (0.3, 0.2, 0.15), mass: float = 1.0)
+### *class* kuavo_humanoid_sdk.kuavo_strategy.grasp_box.grasp_box_strategy.BoxInfo(pose: [KuavoPose](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoPose) | None = None, size: Tuple[float, float, float] = (0.3, 0.4, 0.22), mass: float = 2.0)
 
 Bases: `object`
 
@@ -841,7 +888,7 @@ Bases: `object`
 
 #### size
 
-箱子的尺寸 (长, 宽, 高) 单位: 米
+箱子的尺寸 ( 宽, 长, 高) 单位: 米
 
 * **Type:**
   Tuple[float, float, float]
@@ -853,11 +900,36 @@ Bases: `object`
 * **Type:**
   float
 
-#### mass *: float* *= 1.0*
+#### *classmethod* from_apriltag(tag_info: dict, xyz_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0), size: Tuple[float, float, float] = (0.4, 0.3, 0.22), mass: float = 2.0)
+
+从粘贴在箱子正面的 AprilTag 信息创建 BoxInfo 实例
+
+#### WARNING
+必须正确粘贴 AprilTag，AprilTag 朝向请参考: [https://chev.me/arucogen/](https://chev.me/arucogen/)
+
+错误的粘贴方向会导致箱子位姿错乱。
+
+* **Parameters:**
+  * **tag_info** (*dict*) – 从 `KuavoRobotVision.get_data_by_id_from_odom()` 获取的 AprilTag 信息
+  * **xyz_offset** (*Tuple* *[**float* *,* *float* *,* *float* *]* *,* *optional*) – 
+
+    相对与 AprilTag中心点的偏移量(右手坐标系)
+
+    例如：
+    1. 箱子粘贴在货架上，需要把箱子放下距离货架的高度 -0.5m 则 xyz_offset=(size[1]/2, 0.0, -0.5)
+    2. 箱子粘贴在箱子正面，为了得到箱子中心点，因此偏移量为箱子宽度的一半 则 xyz_offset=(size[1]/2, 0.0, 0.0)
+  * **size** (*Tuple* *[**float* *,* *float* *,* *float* *]* *,* *optional*) – 箱子尺寸(长,宽,高). 默认为 (0.4, 0.3, 0.22)
+  * **mass** (*float* *,* *optional*) – 箱子质量(kg). 默认为 2.0
+* **Returns:**
+  新的 BoxInfo 实例
+* **Return type:**
+  BoxInfo
+
+#### mass *: float* *= 1.5*
 
 #### pose *: [KuavoPose](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoPose)*
 
-#### size *: Tuple[float, float, float]* *= (0.3, 0.2, 0.15)*
+#### size *: Tuple[float, float, float]* *= (0.3, 0.4, 0.22)*
 
 ### 箱子抓取策略类
 
@@ -875,7 +947,7 @@ Bases: [`KuavoRobotStrategyBase`](#kuavo_humanoid_sdk.kuavo_strategy.kuavo_strat
 
 添加安全检查
 
-#### arm_transport_target_up(target_info: BoxInfo, arm_mode='manipulation_mpc')
+#### arm_transport_target_up(target_info: BoxInfo, arm_mode='manipulation_mpc', sim_mode=False)
 
 添加安全检查
 
@@ -898,12 +970,12 @@ logic:
   3. 无论如何都使用头部搜索模式尝试找到目标
   4. 找到apriltag_data_from_odom之后，马上开始头部追踪
 
-#### walk_approach_target(target_info: [AprilTagData](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.AprilTagData), target_distance=0.5, approach_speed=0.15, \*\*kwargs)
+#### walk_approach_target(target_id: int, target_distance=0.5, approach_speed=0.15, \*\*kwargs)
 
-走路接近AprilTag目标
+走路接近 ID 为 target_id 的 AprilTag 目标
 
 * **Parameters:**
-  * **target_info** – AprilTag的信息
+  * **target_id** – 目标 AprilTag ID
   * **target_distance** – 与目标的期望距离(米)
   * **approach_speed** – 接近速度(米/秒)
 * **Returns:**
@@ -911,7 +983,7 @@ logic:
 * **Return type:**
   bool
 
-#### walk_to_pose(target_info: BoxInfo, target_distance=0.5, approach_speed=0.15, \*\*kwargs)
+#### walk_to_pose(target_pose: [KuavoPose](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoPose), target_distance=0.5, approach_speed=0.15, timeout=10.0, \*\*kwargs)
 
 让机器人走到指定的位姿
 
@@ -919,10 +991,13 @@ logic:
   * **target_pose** – 目标位姿
   * **target_distance** – 与目标的期望距离(米)
   * **approach_speed** – 接近速度(米/秒)
+  * **timeout** – 超时时间(秒)
 * **Returns:**
   是否成功到达目标位姿
 * **Return type:**
   bool
+
+---
 
 ## 搬箱子示例
 
@@ -954,9 +1029,21 @@ standalone_tags:
 
 #### 编译
 
-首先需要编译相关功能包:
+上位机需要编译相关功能包:
 
 ```bash
+git clone https://www.lejuhub.com/ros-application-team/kuavo_ros_application.git
+cd kuavo_ros_application
+git checkout dev
+catkin build kuavo_tf2_web_republisher
+```
+
+下位机首先需要编译相关功能包:
+
+```bash
+git clone https://gitee.com/leju-robot/kuavo-ros-opensource.git
+cd kuavo-ros-opensource
+git checkout dev
 catkin build humanoid_controllers kuavo_msgs gazebo_sim ar_control
 ```
 
@@ -965,22 +1052,47 @@ catkin build humanoid_controllers kuavo_msgs gazebo_sim ar_control
 #### WARNING
 在运行之前, 需要确认机器人版本 `ROBOT_VERSION=45` ，否则会机器人末端控制会有问题
 
-启动仿真环境:
+#### WARNING
+在运行之前, 需要修改 `src/demo/grab_box/cfg/kuavo_v45/bt_config.yaml` 中的 `safe_space` 参数:
 
-```bash
-source devel/setup.bash
+```yaml
+safe_space: [2.0, -4.0, 1.2, -1.2] # [x_+, x_-, y_+, y_-]
+```
 
-# 启动gazebo场景
-roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch joystick_type:=bt2pro
+更改为:
 
-# 启动ar_tag转换码操作和virtual操作
-roslaunch ar_control robot_strategies.launch
+```yaml
+safe_space: [20.0, -20.0, 12, -12] # [x_+, x_-, y_+, y_-]
 ```
 
 #### NOTE
-每次启动gazebo场景后需要手动打光, 需要在机器人腰部位置附近给个点光源, 否则会找不到 tag, 如下图所示:
+案例中箱子的 AprilTag ID 为 1, 货架桌子上的 AprilTag ID 为 0, 请根据你的实际场景修改示例代码中的 AprilTag ID
 
-![image](../docs/images/gazebo.jpg)
+上位机仓库 kuavo_ros_application 需要运行相关功能包:
+
+```bash
+source devel/setup.bash
+roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
+```
+
+启动仿真环境:
+
+```bash
+# 终端1: 启动gazebo场景
+source devel/setup.bash
+roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch joystick_type:=bt2pro
+
+# 终端2: 启动ar_tag转换码操作和virtual操作
+source devel/setup.bash
+roslaunch ar_control robot_strategies.launch
+```
+
+运行搬箱子示例:
+
+```bash
+cd src/kuavo_humanoid_sdk/examples/strategies
+python3 grasp_box_example.py --sim
+```
 
 ### 实物运行
 
@@ -1004,22 +1116,38 @@ standalone_tags:
     ]
 ```
 
-#### 编译
+**零点标定** !! 非常重要 !!
 
-首先需要编译相关功能包:
+首先需要插工装标定腿部电机零点，和摆正手臂和头部电机标定零点
+
+然后安装标定打印件到机器人上，执行更加精准的头部和手臂零点标定工具:
 
 ```bash
-catkin build humanoid_controllers grab_box
+sudo su
+./scripts/joint_cali/One_button_start.sh
+```
+
+#### 编译
+
+上位机需要编译相关功能包:
+
+```bash
+git clone https://www.lejuhub.com/ros-application-team/kuavo_ros_application.git
+cd kuavo_ros_application
+git checkout dev
+catkin build apriltag_ros kuavo_camera kuavo_tf2_web_republisher
+```
+
+下位机需要编译相关功能包:
+
+```bash
+git clone https://gitee.com/leju-robot/kuavo-ros-opensource.git
+cd kuavo-ros-opensource
+git checkout dev
+catkin build humanoid_controllers grab_box ar_control
 ```
 
 #### 运行
-
-#### 下位机运行
-
-```bash
-source devel/setup.bash
-roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=bt2pro
-```
 
 #### 上位机运行
 
@@ -1027,6 +1155,45 @@ roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=bt2pro
 cd ~/kuavo_ros_application
 source devel/setup.bash
 roslaunch dynamic_biped apriltag.launch
+roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
+```
+
+#### 下位机运行
+
+#### WARNING
+在运行之前, 需要修改 `src/demo/grab_box/cfg/kuavo_v45/bt_config.yaml` 中的 `safe_space` 参数:
+
+```yaml
+safe_space: [2.0, -4.0, 1.2, -1.2] # [x_+, x_-, y_+, y_-]
+```
+
+更改为:
+
+```yaml
+safe_space: [20.0, -20.0, 12, -12] # [x_+, x_-, y_+, y_-]
+```
+
+#### NOTE
+案例中箱子的 AprilTag ID 为 1, 货架桌子上的 AprilTag ID 为 0, 请根据你的实际场景修改示例代码中的 AprilTag ID
+
+#### NOTE
+如果在搬运过程中单步转身或搬起箱子时机器人前倾或前倾摔倒，则需要在工装标定的零点基础上，修改 `~/.config/lejuconfig/offset.csv` 中3/9号分别减去2度（视倾斜程度而定）
+
+如果在搬运过程中单步转身或搬起箱子时机器人后仰或后仰摔倒，则需要在工装标定的零点基础上，修改 `~/.config/lejuconfig/offset.csv` 中3/9号分别加上一点度数（视倾斜程度而定）
+
+```bash
+source devel/setup.bash
+roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=bt2pro
+
+source devel/setup.bash
+roslaunch ar_control robot_strategies.launch real:=true
+```
+
+运行搬箱子示例:
+
+```bash
+cd src/kuavo_humanoid_sdk/examples/strategies
+python3 grasp_box_example.py
 ```
 
 ### 示例代码
@@ -1034,13 +1201,27 @@ roslaunch dynamic_biped apriltag.launch
 ```python
 #!/usr/bin/env python3
 import time
-import numpy as np
-from kuavo_humanoid_sdk import KuavoRobot, KuavoRobotState, KuavoRobotTools, KuavoRobotVision
-from kuavo_humanoid_sdk.interfaces.data_types import KuavoPose, AprilTagData, PoseQuaternion
+from kuavo_humanoid_sdk import KuavoSDK, KuavoRobot, KuavoRobotState, KuavoRobotTools, KuavoRobotVision
+from kuavo_humanoid_sdk.interfaces.data_types import AprilTagData, PoseQuaternion
 from kuavo_humanoid_sdk.kuavo_strategy.grasp_box.grasp_box_strategy import KuavoGraspBox, BoxInfo
+from kuavo_humanoid_sdk.common.logger import SDKLogger
+"""
+    安全须知:
+    请注意
+    实物机器人当中因为搬箱子需要用到末端力控制, 请把 arm_transport_target_up 当中的sim_mode设置为False
+    仿真机器人当中因为物理性质差异，所以不需要用到末端力控制 请把 arm_transport_target_up 当中的sim_mode设置为True
 
-def main():
-    print("初始化机器人...")
+    长春一汽绿色箱子质量为1.5kg, 请根据实际情况修改箱子质量
+"""
+def main(real: bool = True):
+    start_time = time.time()  # 记录开始时间
+    # Initialize SDK 
+    if not KuavoSDK().Init():
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
+
+    SDKLogger.info("初始化机器人...")
+
     # 初始化机器人及相关组件
     robot = KuavoRobot()
     robot_state = KuavoRobotState()
@@ -1050,148 +1231,207 @@ def main():
     # 初始化箱子抓取策略
     grasp_strategy = KuavoGraspBox(robot, robot_state, robot_tools, robot_vision)
     
-    # 创建AprilTag数据对象
-    target_april_tag = AprilTagData(
-        id=[2],  # AprilTag ID
-        size=[0.088],  # AprilTag 标签尺寸
+    # 粘贴在箱子上的 AprilTag 信息: 需要 ID，尺寸和基于odom坐标系下的大致位姿
+    box_tag = AprilTagData(
+        id=[1],                                 # AprilTag ID
+        size=[0.1],                             # AprilTag 标签尺寸
         pose=[PoseQuaternion(
-            position=(0.0, -1.0, 0.8),  # 位置
-            orientation=(0.0, 0.0, 0.0, 1.0)  # 四元数方向
+            # TODO: 需要根据实际情况调整
+            position=(0.0, -1.5, 0.8),          # 基于odom坐标系下的大致位置, 查找时会对齐到这个方向
+            orientation=(0.0, 0.0, 0.0, 1.0)    # 四元数方向
         )]
     )
     
+    # 粘贴在放置位置的 AprilTag 信息: 需要 ID，尺寸和基于odom坐标系下的大致位姿
+    placement_tag = AprilTagData(
+        id=[0],                                 # AprilTag ID
+        size=[0.1],                             # AprilTag 标签尺寸
+        pose=[PoseQuaternion(
+            # TODO: 需要根据实际情况调整
+            position=(0.0, 1.5, 1.5),           # 基于odom坐标系下的大致位置, 查找时会对齐到这个方向
+            orientation=(0.0, 0.0, 1.0, 0.0)    # 四元数方向 - 旋转180度
+        )]
+    )    
+
     # 创建箱子信息对象
-    box_info = BoxInfo(
-        pose=KuavoPose(
-            position=(0.0, -1.0, 0.9),  # 箱子位置
-            orientation=(0.0, 0.0, -0.7071, 0.7071)  # 箱子朝向
-        ),
-        size=(0.3, 0.2, 0.15),  # 箱子尺寸(长、宽、高)，单位：米
-        mass=1.0  # 箱子重量，单位：千克
-    )
-    
-    # 创建放置位置的箱子信息
-    placement_box_info = BoxInfo(
-        pose=KuavoPose(
-            position=(0.0, 1.0, 0.8),  # 目标放置位置坐标
-            orientation=(0.0, 0.0, 0.7071, 0.7071)  # 目标放置方向（四元数）
-        ),
-        size=(0.3, 0.2, 0.15),  # 使用相同尺寸
-        mass=1.0  # 使用相同质量
-    )
+    box_size = (0.3, 0.4, 0.22) # xyz( 宽, 长, 高)
+    box_mass = 1.5
     
     time.sleep(1)
+    
     # 执行完整抓取策略
     try:
-        print("========== 开始执行箱子抓取策略 ==========")
+        SDKLogger.info("========== 开始执行箱子抓取策略 ==========")
         
+        # !!! Important: 关闭 basePitch 限制, 否则无法进行大幅度的前后倾动作 会导致摔倒
+        SDKLogger.info("⚠️ 重要提示: basePitch 限制需要关闭!!!")
+        SDKLogger.info("⚠️ 重要提示: basePitch 限制需要关闭!!!")
+        SDKLogger.info("⚠️ 重要提示: basePitch 限制需要关闭!!!")
+        grasp_strategy.robot.enable_base_pitch_limit(False)  # 关闭 basePitch 限制
+        # Retry up to 3 times to check pitch limit status
+        for i in range(3):
+            if not robot_state.pitch_limit_enabled():
+                SDKLogger.info("✅ 已关闭 basePitch 限制")
+                break
+            else:
+                if i < 2:  # Don't log on last attempt
+                    SDKLogger.info(f"⚠️ 第{i+1}次检查 basePitch 限制状态...")
+                time.sleep(0.5)  # Brief pause between retries
+        else:  # Loop completed without break
+            SDKLogger.info("❌ 关闭 basePitch 限制失败")
+            return
+        # ----------------------------------------------------------- 
+            
         # 步骤1：使用头部寻找目标
-        print("\n1. 寻找目标箱子...")
+        SDKLogger.info("1. 寻找目标箱子...")
         grasp_strategy.robot.disable_head_tracking()
-        print("✅ 已关闭头部追踪")
+        SDKLogger.info("✅ 已关闭头部追踪")
         
         find_success = grasp_strategy.head_find_target(
-            target_april_tag, 
+            box_tag, 
             max_search_time=15.0,
             search_pattern="rotate_body" #  rotate_head
         )
         
         if not find_success:
-            print("❌ 寻找目标失败，无法继续执行")
+            SDKLogger.info("❌ 寻找目标失败，无法继续执行")
             return
         
-        print("✅ 已找到目标箱子")
+        SDKLogger.info("✅ 已找到目标箱子")
         time.sleep(1)  # 短暂暂停
+        box_tag_data = robot_vision.get_data_by_id_from_odom(box_tag.id[0]) # 拿到箱子tag数据 odom系
+        if not box_tag_data:
+            SDKLogger.info(f"❌ 未识别到 AprilTag ID 为{box_tag.id[0]} 的目标箱子")
+            return
         
+        SDKLogger.info(f"box_tag_data: {box_tag_data}")
+
+        box_info = BoxInfo.from_apriltag(
+            box_tag_data,
+            xyz_offset=(box_size[0]/2, 0.0, -0.00),    # tag 粘贴在箱子正面，为了得到箱子中心点，因此偏移量为箱子宽度的一半
+            size=box_size,                  # 箱子尺寸，单位：米
+            mass=box_mass                   # 箱子重量，单位：千克
+        )
+
+        SDKLogger.info(f"box_info: {box_info}")
+
         # 步骤2：走路接近目标
         # for i in range(1):
-        print("\n2. 走路接近目标...")
+        SDKLogger.info("2. 走路接近目标...")
         approach_success = grasp_strategy.walk_approach_target(
-            target_april_tag,
-            target_distance=0.7,  # 与目标箱子保持0.7米的距离
+            box_tag.id[0],
+            target_distance=0.4,  # 与目标箱子保持0.7米的距离
             approach_speed=0.2    # 接近速度0.2米/秒
         )
         
         if not approach_success:
-            print("❌ 接近目标失败，无法继续执行")
+            SDKLogger.info("❌ 接近目标失败，无法继续执行")
             return
             
-        print("✅ 已成功接近目标")
+        SDKLogger.info("✅ 已成功接近目标")
         time.sleep(1)  # 短暂暂停
         
         # 步骤3：手臂移动到抓取位置
-        print("\n3. 手臂移动到抓取位置...")
+        SDKLogger.info("3. 手臂移动到抓取位置...")
         move_success = grasp_strategy.arm_move_to_target(
             box_info,
             arm_mode="manipulation_mpc"
         )
         
         if not move_success:
-            print("❌ 手臂移动失败，无法继续执行")
+            SDKLogger.info("❌ 手臂移动失败，无法继续执行")
             return
             
-        print("✅ 手臂已到达抓取位置")
+        SDKLogger.info("✅ 手臂已到达抓取位置")
         # grasp_strategy.robot.arm_reset()
         time.sleep(1.0)  # 短暂暂停
         
         
         # 步骤4：提起箱子
-        print("\n4. 提起箱子...")
+        SDKLogger.info("4. 提起箱子...")
         transport_up_success = grasp_strategy.arm_transport_target_up(
             box_info,
-            arm_mode="manipulation_mpc"
+            arm_mode="manipulation_mpc",
+            sim_mode=not real
         )
         
         if not transport_up_success:
-            print("❌ 提起箱子失败")
+            SDKLogger.info("❌ 提起箱子失败")
             return
         time.sleep(1.0)  # 短暂暂停
             
-        print("✅ 成功提起箱子")
+        SDKLogger.info("✅ 成功提起箱子")
         # grasp_strategy.robot.arm_reset()
         time.sleep(1.0)  # 展示一下成功提起的状态
 
-
+        # return # FIXME:测试提起箱子成功   
+        
         # 步骤5：关闭头部追踪
-        print("\n5. 关闭头部追踪...")
+        SDKLogger.info("5. 关闭头部追踪...")
         grasp_strategy.robot.disable_head_tracking()
-        print("✅ 已关闭头部追踪")
+        SDKLogger.info("✅ 已关闭头部追踪")
         time.sleep(1.0)  # 短暂暂停
-
+        if not grasp_strategy.head_find_target(
+            placement_tag, 
+            max_search_time=15.0,
+            search_pattern="rotate_body" #  rotate_head
+        ):
+            SDKLogger.info("❌ 寻找目标失败，无法继续执行")
+            return
+        placement_tag_data = robot_vision.get_data_by_id_from_odom(placement_tag.id[0])
+        if placement_tag_data is None:
+            SDKLogger.info(f"❌ 未识别到 AprilTag ID 为{placement_tag.id[0]} 的目标箱子")
+            return
+        
         # 步骤6：移动到放置位置
-        print("\n6. 移动到放置位置...")
-        move_success = grasp_strategy.walk_to_pose(
-            placement_box_info,
-            target_distance=0.6,
+        SDKLogger.info("6. 移动到放置位置...")
+        move_success = grasp_strategy.walk_approach_target(
+            placement_tag.id[0],
+            target_distance=0.4,
             approach_speed=0.2,
         )
         if not move_success:
-            print("❌ 移动到放置位置失败")
+            SDKLogger.info("❌ 移动到放置位置失败")
             return
         time.sleep(1.0)  # 短暂暂停
 
         # 步骤7：放下箱子
-        print("\n7. 放下箱子...")
+        placement_box_info = BoxInfo.from_apriltag(
+            placement_tag_data,
+            xyz_offset=(box_size[0]/2, 0.0, -0.5), # tag 粘贴在货架上，需要把箱子放下距离货架的高度 -0.5m
+            size=box_size,  # 箱子尺寸(长、宽、高)，单位：米
+            mass=box_mass  # 箱子重量，单位：千克
+        )
+        SDKLogger.info("7. 放下箱子...")
         transport_down_success = grasp_strategy.arm_transport_target_down(
             placement_box_info,
             arm_mode="manipulation_mpc"
         )
         
         if not transport_down_success:
-            print("❌ 放下箱子失败")
+            SDKLogger.info("❌ 放下箱子失败")
             return
             
-        print("✅ 成功放下箱子")
+        SDKLogger.info("✅ 成功放下箱子")
         time.sleep(1.0)  # 短暂暂停        
-        print("\n========== 箱子抓取任务完成 ==========")
-        
+
+        # 步骤8: 回到初始位置
+        SDKLogger.info("8. 回到初始位置...")
+        grasp_strategy.robot.control_command_pose_world(0, 0, 0, 0)
+        time.sleep(10) # 等待10s转身完成
+        total_time = time.time() - start_time  # 计算总时间
+        SDKLogger.info(f"========== 搬箱子任务完成，总耗时: {total_time:.2f}秒 ==========")
     except Exception as e:
-        print(f"执行过程中发生错误: {e}")
+        SDKLogger.info(f"执行过程中发生错误: {e}")
     finally:
         # 确保机器人回到安全状态
-        print("将机器人恢复到安全姿态...")
+        SDKLogger.info("将机器人恢复到安全姿态...")
         # 这里可以添加使机器人回到默认姿态的代码
 
 if __name__ == "__main__":
-    main() 
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--sim', action='store_true', default=False)
+    args, unknown = parser.parse_known_args()
+    main(not args.sim)
 ```

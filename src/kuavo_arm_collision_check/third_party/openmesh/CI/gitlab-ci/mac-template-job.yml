@@ -1,0 +1,20 @@
+#-----------  Job Informations:
+# Type:       Build+Test: {{BUILDTYPE}}
+# OS:         Mac
+# Language:   {{LANGUAGE}}
+
+macos-{{LANGUAGE}}-{{BUILDTYPE}}:
+    stage: build
+    script: "CI/ci-mac-build.sh {{LANGUAGE}} {{BUILDTYPE}} ; CI/ci-mac-test.sh {{LANGUAGE}} {{BUILDTYPE}}"
+    tags:
+      - Apple
+    artifacts:
+      paths:
+        - build-{{BUILDTYPE}}-{{LANGUAGE}}/*.dmg
+        - build-{{BUILDTYPE}}-{{LANGUAGE}}/*.tar.gz
+#      reports:
+#        junit:
+#          - build-{{BUILDTYPE}}-{{LANGUAGE}}/Unittests/report.xml
+#          - build-{{BUILDTYPE}}-{{LANGUAGE}}/Unittests/report-customvec.xml
+#          - build-{{BUILDTYPE}}-{{LANGUAGE}}/Unittests/report-doublevec.xml
+

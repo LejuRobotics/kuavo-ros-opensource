@@ -1,0 +1,39 @@
+<launch>
+  <!-- 第一段楼梯参数（上楼梯） -->
+  <arg name="use_stairs" default="true" doc="是否添加楼梯到场景中"/>
+  <arg name="stairs_model_path" default="$(find gazebo_sim)/models/stairs/stairs_generated.sdf" doc="楼梯模型SDF文件路径"/>
+  <arg name="stairs_x" default="0.16" doc="楼梯位置X坐标"/>
+  <arg name="stairs_y" default="0.0" doc="楼梯位置Y坐标"/>
+  <arg name="stairs_z" default="0.0" doc="楼梯位置Z坐标"/>
+  <arg name="stairs_roll" default="0.0" doc="楼梯绕X轴旋转角度（弧度）"/>
+  <arg name="stairs_pitch" default="0.0" doc="楼梯绕Y轴旋转角度（弧度）"/>
+  <arg name="stairs_yaw" default="0.0" doc="楼梯绕Z轴旋转角度（弧度）"/>
+  
+  <!-- 第二段楼梯参数（下楼梯） -->
+  <arg name="use_stairs2" default="true" doc="是否添加第二段楼梯到场景中"/>
+  <arg name="stairs2_model_path" default="$(find gazebo_sim)/models/stairs/stairs_generated.sdf" doc="第二段楼梯模型SDF文件路径"/>
+  <!-- 以下参数需要根据第一段楼梯的参数自动计算，确保两段楼梯能够完美拼接 -->
+  <arg name="num_steps" default="4" doc="楼梯的台阶数量（用于计算拼接位置）"/>
+  <arg name="step_depth" default="0.28" doc="楼梯台阶深度（用于计算拼接位置）"/>
+  <arg name="step_height" default="0.13" doc="楼梯台阶高度（用于计算拼接位置）"/>
+  <arg name="stairs2_x" default="$(eval arg('stairs_x') + arg('num_steps') * arg('step_depth'))" doc="第二段楼梯位置X坐标"/>
+  <arg name="stairs2_y" default="$(arg stairs_y)" doc="第二段楼梯位置Y坐标"/>
+  <arg name="stairs2_z" default="$(eval arg('stairs_z') + arg('num_steps') * arg('step_height'))" doc="第二段楼梯位置Z坐标"/>
+  <arg name="stairs2_roll" default="0.0" doc="第二段楼梯绕X轴旋转角度（弧度）"/>
+  <arg name="stairs2_pitch" default="$(eval 3.14159)" doc="第二段楼梯绕Y轴旋转角度（弧度），π表示180度旋转"/>
+  <arg name="stairs2_yaw" default="3.14159" doc="第二段楼梯绕Z轴旋转角度（弧度）"/>
+  
+  <!-- 加载第一段楼梯模型（上楼梯） -->
+  <group if="$(arg use_stairs)">
+    <node name="spawn_stairs" pkg="gazebo_ros" type="spawn_model" 
+          args="-sdf -model parametric_stairs -file $(arg stairs_model_path) -x $(arg stairs_x) -y $(arg stairs_y) -z $(arg stairs_z) -R $(arg stairs_roll) -P $(arg stairs_pitch) -Y $(arg stairs_yaw)" 
+          respawn="false" output="screen"/>
+  </group>
+
+  <!-- 加载第二段楼梯模型（下楼梯） -->
+  <group if="$(arg use_stairs2)">
+    <node name="spawn_stairs2" pkg="gazebo_ros" type="spawn_model" 
+          args="-sdf -model parametric_stairs2 -file $(arg stairs2_model_path) -x $(arg stairs2_x) -y $(arg stairs2_y) -z $(arg stairs2_z) -R $(arg stairs2_roll) -P $(arg stairs2_pitch) -Y $(arg stairs2_yaw)" 
+          respawn="false" output="screen"/>
+  </group>
+</launch> 

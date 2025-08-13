@@ -4,3 +4,11 @@ arm_max: [0.520, 2.09, 1.570, 0.000, 1.570, 1.570, 1.570,
           0.520, 0.70, 1.570, 0.000, 1.570, 1.570, 1.570]
 
 base_pose_delta_limit: [1, 1, 1.0, 1, 1.0, 0.1]
+
+detection_thresholds:
+  position_error_max: 0.3           # 位置误差阈值 (米)
+  position_error_avg: 0.15           # 位置误差阈值 (米)
+  orientation_error_max: 0.5        # 角度误差阈值 (弧度) - 约11.5度
+  orientation_error_avg: 0.3        # 角度误差阈值 (弧度) - 约11.5度
+  velocity_error_avg: 5.0      # 平均线速度误差阈值 (rad/s)
+  velocity_error_max: 15.0      # 最大线速度误差阈值 (rad/s)

@@ -1,0 +1,5 @@
+<launch>
+
+    <node pkg="kuavo_audio_receiver" type="micphone_receiver_node.py" name="micphone_receiver_node" output="screen" respawn="true" respawn_delay="5"/>
+
+</launch>

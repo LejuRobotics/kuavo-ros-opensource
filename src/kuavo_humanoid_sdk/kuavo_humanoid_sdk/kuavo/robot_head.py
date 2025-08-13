@@ -25,7 +25,7 @@ class KuavoRobotHead:
         limited_yaw = min(math.pi*4/9, max(-math.pi*4/9, yaw))
 
         # Check pitch limits (-25 to 25 degrees)
-        if pitch < -math.pi/7.2 or pitch > math.pi/7.2:  # -25 to 25 degrees in radians
+        if pitch < -math.pi/7.2 - 0.001 or pitch > math.pi/7.2 + 0.001:  # -25 to 25 degrees in radians
             SDKLogger.warn(f"[Robot] pitch {pitch} exceeds limit [-{math.pi/7.2:.3f}, {math.pi/7.2:.3f}] radians (-25 to 25 degrees), will be limited")
         limited_pitch = min(math.pi/7.2, max(-math.pi/7.2, pitch))
         return self._kuavo_core.control_robot_head(yaw=limited_yaw, pitch=limited_pitch)

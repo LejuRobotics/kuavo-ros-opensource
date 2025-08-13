@@ -1,0 +1,40 @@
+<launch>
+  <arg name="visualize"          default="0"/>
+  <arg name="joystick_type"      default="bt2"/>
+  <arg name="visualize_humanoid" default="false"/>
+  <arg name="visualize_mm"       default="true"/>
+  <arg name="rviz"               default="false"/>
+  <arg name="rviz_mm"            default="true"/>
+  <arg name="sqp_mpc"            default="1"/>
+  <arg name="with_mm_ik"         default="false"/>
+  <arg name="send_srv"           default="1"/>
+  <arg name="ee_type"            default="qiangnao"/>
+  <arg name="control_torso"      default="0" /> <!-- 0: do NOT control, 1: control torso  -->
+  <arg name="incremental_control" default="1" /> <!-- 0: direct control, 1: incremental control -->
+  <arg name="ip_address"         default="192.168.3.17" /> <!-- ip address of quest3 -->
+  <arg name="use_quest3_utils"   default="true"/>
+  <param name="use_quest3_utils" type="bool" value="$(arg use_quest3_utils)"/>
+  <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
+  <!-- sim launch -->
+  <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim.launch">
+    <arg name="joystick_type"      value="$(arg joystick_type)"/>
+    <arg name="rviz"               value="$(arg rviz)"/>
+    <arg name="visualize_humanoid" value="$(arg visualize_humanoid)"/>
+    <arg name="with_mm_ik"         value="$(arg with_mm_ik)"/>
+  </include>
+
+  <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
+    <arg name="sqp_mpc"            value="$(arg sqp_mpc)"/>
+    <arg name="rviz"               value="$(arg rviz_mm)"/>
+    <arg name="visualize_mm"       value="$(arg visualize_mm)"/>
+  </include>
+  
+  <node name="quest3_node" pkg="motion_capture_ik" type="quest3_node_incremental.py" output="screen" args="--ee_type $(arg ee_type) --send_srv $(arg send_srv) --control_torso=$(arg control_torso) --incremental_control=$(arg incremental_control)">
+    <param name="hand_reference_mode" value="$(arg hand_reference_mode)"/>
+  </node>
+  <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen"/>
+
+  <group if="$(arg visualize)">    
+      <node name="visulize_traj_node" pkg="motion_capture_ik" type="visulize_traj.py" output="screen"  args="--ee_type $(arg ee_type)"/>
+  </group>
+</launch>

@@ -77,6 +77,12 @@
     <param name="/mpc/schedule/start_time" value="-1.0"/>
     <param name="/timeout_warning_ms" value="20"/>
 
+    <!-- 自动清理 .ros 文件夹参数 -->
+    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+
     <!-- mpc node -->
     <group if="$(arg use_external_mpc)">
       <node pkg="humanoid_interface_ros" type="humanoid_sqp_mpc" name="humanoid_sqp_mpc" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
@@ -147,7 +153,8 @@
       <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
         <arg name="sqp_mpc" value="1"/>
         <arg name="rviz"    value="false"/>
-        <arg name="visualize_mm"   value="false"/>
+        <arg name="visualize_mm"   value="true"/>
+        <arg name="coredump" value="$(arg coredump)"/>
       </include>
     </group>
 </launch>

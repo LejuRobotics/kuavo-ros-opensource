@@ -4,8 +4,6 @@ import math
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.interfaces.data_types import (AprilTagData)
 from kuavo_humanoid_sdk.kuavo.core.ros.vision import KuavoRobotVisionCore
-from apriltag_ros.msg import AprilTagDetectionArray
-
 
 class KuavoRobotVision:
     """Kuavo机器人视觉系统接口。

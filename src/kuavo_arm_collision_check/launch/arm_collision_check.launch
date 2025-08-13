@@ -1,0 +1,18 @@
+<launch>
+
+    <!-- Launch file arguments -->
+    <arg name="arm_collision_check_freq" default="5.0" doc="Collision detection frequency in Hz"/>
+    <arg name="arm_collision_enable_arm_moving" default="false" doc="Enable arm moving detection"/>
+    <arg name="arm_collision_publish_collision_markers" default="false" doc="Publish collision markers for RViz visualization"/>
+    <arg name="arm_collision_arm_move_diff" default="0.1" doc="Arm movement difference threshold"/>
+
+    <!-- Set global parameters -->
+    <param name="arm_collision/check_freq" type="double" value="$(arg arm_collision_check_freq)" />
+    <param name="arm_collision/enable_arm_moving" type="bool" value="$(arg arm_collision_enable_arm_moving)" />
+    <param name="arm_collision/publish_collision_markers" type="bool" value="$(arg arm_collision_publish_collision_markers)" />
+    <param name="arm_collision/arm_move_diff" type="double" value="$(arg arm_collision_arm_move_diff)" />  
+
+    <!-- Start the arm_collision_checker node -->
+    <node name="arm_collision_checker" pkg="kuavo_arm_collision_check" type="arm_collision_checker" output="screen"/>
+
+</launch> 

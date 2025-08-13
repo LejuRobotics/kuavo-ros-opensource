@@ -141,6 +141,7 @@
         <arg name="sqp_mpc" value="1"/>
         <arg name="rviz"    value="false"/>
         <arg name="visualize_mm"   value="false"/>
+        <arg name="coredump" value="$(arg coredump)"/>
       </include>
     </group>
 </launch>

@@ -6,6 +6,8 @@
     <node pkg="h12pro_controller_node" type="h12pro_channel_publisher" name="h12pro_channel_publisher" output="screen"/>
 
     <node pkg="h12pro_controller_node" type="ocs2_h12pro_node.py" name="joy_node" output="screen"/>
-
+    
+    <!-- for Kuavo Humanoid Websocket SDK: host_srv -->
+    <include file="$(find h12pro_controller_node)/launch/kuavo_humanoid_sdk_ws_srv.launch"/>
     <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
 </launch>

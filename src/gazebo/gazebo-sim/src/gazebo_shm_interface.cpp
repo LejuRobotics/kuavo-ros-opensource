@@ -5,6 +5,8 @@
 #include <chrono>
 #include <ros/ros.h>
 #include <XmlRpcValue.h>
+#include <signal.h>
+#include <thread>
 
 namespace gazebo
 {
@@ -27,19 +29,25 @@ void GazeboShmInterface::stopCallback(const std_msgs::Bool::ConstPtr& msg)
 {
     if (msg->data) {
         std::cout << "Received stop command, shutting down simulation..." << std::endl;
-        
-        // 清理共享内存
-        shm_manager_.reset();
-        
-        // 关闭仿真器
-        if (model_ && model_->GetWorld()) {
-            model_->GetWorld()->SetPaused(true);
-            // 请求关闭Gazebo
-            event::Events::sigInt();
+        // 3. 快速清理共享内存
+        if (shm_manager_) {
+            shm_manager_.reset();
+            std::cout << "✓ Shared memory cleaned up" << std::endl;
         }
+        // 启动一个线程来执行退出，避免阻塞
+        std::thread exit_thread([this]() {
+            cleanupAndExit();
+        });
+        exit_thread.detach();  // 分离线程，让它独立运行
         
-        // 关闭ROS节点
-        ros::shutdown();
+        // 同时立即发送信号
+        std::cout << "Immediately sending shutdown signals..." << std::endl;
+        system("pkill -9 gazebo &");
+        system("pkill -9 gzserver &");
+        system("pkill -9 gzclient &");
+        
+        // 发送SIGTERM
+        std::raise(SIGTERM);
     }
 }
 
@@ -48,6 +56,7 @@ bool GazeboShmInterface::simStartCallback(std_srvs::SetBool::Request& req, std_s
     if (req.data) {
         std::cout << "Starting simulation..." << std::endl;
         if (model_ && model_->GetWorld()) {
+            sim_start_ = true;
             model_->GetWorld()->SetPaused(false);
             res.success = true;
             res.message = "Simulation started successfully";
@@ -58,6 +67,7 @@ bool GazeboShmInterface::simStartCallback(std_srvs::SetBool::Request& req, std_s
     } else {
         std::cout << "Pausing simulation..." << std::endl;
         if (model_ && model_->GetWorld()) {
+            sim_start_ = false;
             model_->GetWorld()->SetPaused(true);
             res.success = true;
             res.message = "Simulation paused successfully";
@@ -93,6 +103,35 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
     stop_sub_ = nh_->subscribe("/stop_robot", 1, &GazeboShmInterface::stopCallback, this);
     sim_start_srv_ = nh_->advertiseService("sim_start", &GazeboShmInterface::simStartCallback, this);
 
+    // 注册信号处理器
+    signal(SIGTERM, [](int sig) {
+        std::cout << "Received SIGTERM, forcing Gazebo shutdown..." << std::endl;
+        // 立即发送pkill命令
+        system("pkill -9 gazebo &");
+        system("pkill -9 gzserver &");
+        system("pkill -9 gzclient &");
+        // 触发Gazebo关闭
+        event::Events::sigInt();
+    });
+    
+    signal(SIGINT, [](int sig) {
+        std::cout << "Received SIGINT, forcing Gazebo shutdown..." << std::endl;
+        // 立即发送pkill命令
+        system("pkill -9 gazebo &");
+        system("pkill -9 gzserver &");
+        system("pkill -9 gzclient &");
+        // 触发Gazebo关闭
+        event::Events::sigInt();
+    });
+    
+    signal(SIGKILL, [](int sig) {
+        std::cout << "Received SIGKILL, immediately killing Gazebo..." << std::endl;
+        // 强制杀死所有Gazebo相关进程
+        system("pkill -9 -f gazebo");
+        system("pkill -9 -f gzserver");
+        system("pkill -9 -f gzclient");
+        exit(1);
+    });
 
     // 从ROS参数服务器读取dt，如果没有设置则使用默认值0.002
     double dt = 0.002;  // 默认值
@@ -396,6 +435,10 @@ void GazeboShmInterface::OnUpdate(const common::UpdateInfo& _info)
             joints_[i]->SetForce(0, effort);
         }
     }
+    while (!sim_start_ && ros::ok()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::cout << "[GazeboShmInterface] Waiting for simulation to start..." << std::endl;
+    }
 }
 
 bool GazeboShmInterface::ParseImu(const sdf::ElementPtr& _sdf)
@@ -464,6 +507,61 @@ bool GazeboShmInterface::ParseContacts(const sdf::ElementPtr& _sdf)
     // 不解析接触传感器，直接返回成功
     std::cout << "Skipping contacts configuration..." << std::endl;
     return true;
+}
+
+void GazeboShmInterface::cleanupAndExit()
+{
+    std::cout << "=== Starting fast cleanup and exit process ===" << std::endl;
+    
+    // 1. 立即暂停仿真
+    if (model_ && model_->GetWorld()) {
+        model_->GetWorld()->SetPaused(true);
+        std::cout << "✓ Simulation paused" << std::endl;
+    }
+    
+    // 2. 立即断开事件连接
+    if (updateConnection_) {
+        updateConnection_.reset();
+        std::cout << "✓ Event connections disconnected" << std::endl;
+    }
+    
+    
+    
+    // 4. 快速关闭ROS节点
+    if (nh_) {
+        stop_sub_.shutdown();
+        sim_start_srv_.shutdown();
+        std::cout << "✓ ROS subscribers and services shutdown" << std::endl;
+    }
+    
+    // 5. 使用多种方法快速关闭Gazebo
+    std::cout << "Forcing Gazebo shutdown..." << std::endl;
+    
+    // 方法1: 直接发送SIGKILL给Gazebo进程
+    std::cout << "Sending SIGKILL to Gazebo..." << std::endl;
+    system("pkill -9 gazebo");
+    system("pkill -9 gzserver");
+    system("pkill -9 gzclient");
+    
+    // 方法2: 使用Gazebo的事件系统
+    try {
+        event::Events::sigInt();
+        std::cout << "✓ Gazebo shutdown event triggered" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: Error triggering Gazebo shutdown event: " << e.what() << std::endl;
+    }
+    
+    // 方法3: 发送SIGTERM信号
+    std::cout << "Sending SIGTERM..." << std::endl;
+    std::raise(SIGTERM);
+    
+    // 方法4: 等待很短时间后强制退出
+    std::cout << "Waiting for quick shutdown..." << std::endl;
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    
+    // 方法5: 强制退出当前进程
+    std::cout << "Force exiting current process..." << std::endl;
+    exit(0);
 }
 
 } 

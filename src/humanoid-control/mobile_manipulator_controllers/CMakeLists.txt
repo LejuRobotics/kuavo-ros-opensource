@@ -2,17 +2,14 @@ cmake_minimum_required(VERSION 3.10)
 project(mobile_manipulator_controllers)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g") # 添加调试信息
 
 ## Find catkin macros and libraries
 find_package(catkin REQUIRED
   COMPONENTS
   roscpp
-  humanoid_common
-  humanoid_interface
-  humanoid_interface_ros
   ocs2_mobile_manipulator
   ocs2_mobile_manipulator_ros
-  motion_capture_ik
   kuavo_msgs
   std_srvs
 )
@@ -28,12 +25,8 @@ catkin_package(
   ${PROJECT_NAME}
   CATKIN_DEPENDS
     roscpp
-    humanoid_common
-    humanoid_interface
-    humanoid_interface_ros
     ocs2_mobile_manipulator
     ocs2_mobile_manipulator_ros
-    motion_capture_ik
     kuavo_msgs
     ${CATKIN_PACKAGE_DEPENDENCIES}
 )
@@ -58,12 +51,37 @@ link_directories(
 )
 
 ## Declare a cpp library
+add_library(${PROJECT_NAME}_base
+  src/mobileManipulatorControllerBase.cpp
+  src/mobileManipulatorVisualization.cpp
+  src/TopicLogger.cpp
+)
+
+target_link_libraries(${PROJECT_NAME}_base
+  ${catkin_LIBRARIES}
+  ${pinocchio_LIBRARIES}
+  yaml-cpp
+)
+
+## Declare a cpp library
 add_library(${PROJECT_NAME}
   src/mobileManipulatorController.cpp
-  src/mobileManipulatorVisualization.cpp
 )
 
 target_link_libraries(${PROJECT_NAME}
+  ${PROJECT_NAME}_base
+  ${catkin_LIBRARIES}
+  ${pinocchio_LIBRARIES}
+  yaml-cpp
+)
+
+## Declare a cpp library
+add_library(${PROJECT_NAME}_general
+  src/mobileManipulatorControllerGeneral.cpp
+)
+
+target_link_libraries(${PROJECT_NAME}_general
+  ${PROJECT_NAME}_base
   ${catkin_LIBRARIES}
   ${pinocchio_LIBRARIES}
   yaml-cpp
@@ -82,6 +100,21 @@ target_link_libraries(${PROJECT_NAME}_node
   ${catkin_LIBRARIES}
   )
 target_compile_options(${PROJECT_NAME}_node PRIVATE ${OCS2_CXX_FLAGS})
+
+# node
+add_executable(${PROJECT_NAME}_node_general
+  src/controllerNodeGeneral.cpp
+  )
+add_dependencies(${PROJECT_NAME}_node_general
+  ${PROJECT_NAME}
+  ${catkin_EXPORTED_TARGETS}
+  )
+target_link_libraries(${PROJECT_NAME}_node_general
+  ${PROJECT_NAME}_general
+  ${catkin_LIBRARIES}
+  )
+target_compile_options(${PROJECT_NAME}_node_general PRIVATE ${OCS2_CXX_FLAGS})
+
 # IK cmd trans node
 add_executable(${PROJECT_NAME}_ik_target
   src/mobileManipulatorIkTarget.cpp

@@ -2,7 +2,7 @@
 #include <std_srvs/Trigger.h>
 #include <string>
 #include <vector>
-#include "kuavo_msgs/questJoySticks.h"
+#include "kuavo_msgs/JoySticks.h"
 #include <string>
 
 #include <ros/init.h>
@@ -20,6 +20,7 @@
 #include <humanoid_interface/gait/ModeSequenceTemplate.h>
 #include "humanoid_interface_ros/gait/ModeSequenceTemplateRos.h"
 #include "std_srvs/Trigger.h"
+#include <std_srvs/SetBool.h>
 #include <std_msgs/Bool.h>
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
@@ -117,6 +118,9 @@ namespace ocs2
             command_add_height_pre_ = 0.0;
 
             arm_mode_pub_ = nodeHandle_.advertise<std_msgs::Int32>("/quest3/triger_arm_mode", 1);
+
+            // 添加arm_collision_control服务
+            arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
         }
 
         void run()
@@ -221,8 +225,20 @@ namespace ocs2
         }
         }
 
+        bool armCollisionControlCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res) {
+            arm_collision_control_ = req.data;
+            res.success = true;
+            if (req.data) {
+                callSetArmModeSrv(0);
+                current_arm_mode_ = 0;
+            }
+            res.message = "Arm collision control set to " + std::string(req.data ? "true" : "false");
+            ROS_INFO("Arm collision control set to %s", req.data ? "true" : "false");
+            return true;
+        }
+
     private:
-        void joystickCallback(const kuavo_msgs::questJoySticks::ConstPtr& msg) 
+        void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
         {
             joystick_data_ = *msg;
             updateState();
@@ -265,7 +281,12 @@ namespace ocs2
                 }
                 else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed) // 启用手臂控制
                 {
-                    current_arm_mode_ = (current_arm_mode_!=1) ? 1 : 2;
+                    // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪 
+                    if (arm_collision_control_) {
+                        current_arm_mode_ = 2;
+                        arm_collision_control_ = false;
+                    }
+                    else current_arm_mode_ = (current_arm_mode_!=1) ? 1 : 2;
                     std::cout << "[QuestControlFSM] change arm mode to :" << current_arm_mode_ << std::endl;
                     if (only_half_up_body_) {
                         callVRSetArmModeSrv(current_arm_mode_);
@@ -365,7 +386,7 @@ namespace ocs2
             vel_control_pub_.publish(cmdVel_);
         }
 
-        void checkGaitSwitchCommand(const kuavo_msgs::questJoySticks &joy_msg)
+        void checkGaitSwitchCommand(const kuavo_msgs::JoySticks &joy_msg)
         {
             // 检查是否有gait切换指令
             if (!joystick_data_prev_.right_first_button_pressed && joy_msg.right_first_button_pressed)
@@ -714,6 +735,7 @@ namespace ocs2
         ros::ServiceClient change_arm_mode_service_client_;
         ros::ServiceClient change_arm_mode_service_VR_client_;
         ros::ServiceClient get_arm_mode_service_client_;
+        ros::ServiceServer arm_collision_control_service_;
 
         int current_arm_mode_{2};
 
@@ -723,8 +745,8 @@ namespace ocs2
 
         ros::Subscriber joystick_sub_;
         std::string state_;
-        kuavo_msgs::questJoySticks joystick_data_;
-        kuavo_msgs::questJoySticks joystick_data_prev_;
+        kuavo_msgs::JoySticks joystick_data_;
+        kuavo_msgs::JoySticks joystick_data_prev_;
         bool mode_changed_;
         ros::Duration update_interval_;
         ros::Time last_update_time_;
@@ -743,6 +765,9 @@ namespace ocs2
 
         bool last_cmd_close_to_zero_{true};
         bool only_half_up_body_{false};
+
+        // 手臂碰撞控制，当前是否处于发生碰撞，手臂回归控制中
+        bool arm_collision_control_{false};
 
         ros::Publisher arm_mode_pub_;
     };

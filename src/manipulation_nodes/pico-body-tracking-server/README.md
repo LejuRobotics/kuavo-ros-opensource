@@ -72,5 +72,12 @@ body_tracker_role = [
 ]
 ```
 
+手柄参考图：
 
+  ![PICO手柄](./assets/imgs/pico-joy.png)
+
+
+## 接口文档
+
+详情见 docs/api_docs.md, [文档链接](./docs/api_docs.md)
 

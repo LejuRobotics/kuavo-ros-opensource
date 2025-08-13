@@ -2,11 +2,8 @@
 <launch>
     <arg name="joystick_type" default="bt2"/>
 
-    <node pkg="joy" type="joy_node" name="joy_node" output="screen" respawn="true">
-        <param name="dev" value="/dev/input/js0"/>
-        <param name="autorepeat_rate" type="double" value="100.0"/>
-        <param name="deadzone" type="double" value="0.18"/>
-    </node>
+    <include file="$(find joy)/launch/joy_node.launch">
+    </include>
 
     <param name="channel_map_path" value="$(find humanoid_controllers)/launch/joy/$(arg joystick_type).json"/>
     <param name="joystick_sensitivity" value="20"/>

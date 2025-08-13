@@ -202,9 +202,9 @@ class IkRos:
 
 
         if self.use_arm_collision:
-            self.pub = rospy.Publisher("/arm_collision/kuavo_arm_traj", JointState, queue_size=2)
+            self.pub = rospy.Publisher("/arm_collision/kuavo_arm_traj", JointState, queue_size=10)
         else:
-            self.pub = rospy.Publisher("/kuavo_arm_traj", JointState, queue_size=2)
+            self.pub = rospy.Publisher("/kuavo_arm_traj", JointState, queue_size=10)
         self.pub_origin_joint = rospy.Publisher("/kuavo_arm_traj_origin", Float32MultiArray, queue_size=10)
         self.pub_filtered_joint = rospy.Publisher("/kuavo_arm_traj_filtered", Float32MultiArray, queue_size=10)
         self.pub_real_arm_hand_pose = rospy.Publisher("/drake_ik/real_arm_hand_pose", twoArmHandPose, queue_size=10)
@@ -1167,5 +1167,6 @@ if __name__ == "__main__":
     # rospy.set_param("/quest3/shoulder_width", float(shoulder_width))
     # print(f"\033[92mLeft Arm Length: {arm_length_left:.3f} m, Right Arm Length:{arm_length_right:.3f} m.\033[0m")
     print("*"*10 + "IK ARM INFO END" + "*"*10 + "\n")
+
 
     ik_ros = IkRos(arm_ik, ctrl_arm_idx=ctrl_arm_idx, q_limit=q_limit, end_effector_type=end_effector_type, send_srv=send_srv, predict_gesture=predict_gesture, hand_reference_mode=hand_reference_mode)

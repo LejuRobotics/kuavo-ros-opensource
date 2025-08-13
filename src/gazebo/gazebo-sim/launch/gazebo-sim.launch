@@ -2,13 +2,45 @@
   <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
   <param name="robot_version"    value="$(arg robot_version)"/>
   <arg name="use_xacro" value="$(eval int(arg('robot_version')) >= 40)"/>
+  <arg name="use_grab_box_scene" default="false"/>
+  <arg name="world_name"  default="$(find gazebo_ros)/worlds/empty.world"/>
 
+  <!-- 楼梯参数（用于传递给load_stairs.launch） -->
+  <!-- 第一段楼梯（上楼梯）参数 -->
+  <arg name="use_stairs" default="false" doc="是否添加楼梯到场景中"/>
+  <arg name="stairs_model_path" default="$(find gazebo_sim)/models/stairs/stairs_generated.sdf" doc="楼梯模型SDF文件路径"/>
+  <arg name="stairs_x" default="1.5" doc="楼梯位置X坐标"/>
+  <arg name="stairs_y" default="0.0" doc="楼梯位置Y坐标"/>
+  <arg name="stairs_z" default="0.0" doc="楼梯位置Z坐标"/>
+  <arg name="stairs_roll" default="0.0" doc="楼梯绕X轴旋转角度（弧度）"/>
+  <arg name="stairs_pitch" default="0.0" doc="楼梯绕Y轴旋转角度（弧度）"/>
+  <arg name="stairs_yaw" default="0.0" doc="楼梯绕Z轴旋转角度（弧度）"/>
+  
+  <!-- 第二段楼梯（下楼梯）参数 -->
+  <arg name="stairs2_model_path" default="$(find gazebo_sim)/models/stairs/wood_stairs.sdf" doc="第二段楼梯模型SDF文件路径，默认使用木质楼梯"/>
+  <arg name="num_steps" default="5" doc="楼梯的台阶数量（用于计算拼接位置）"/>
+  <arg name="step_depth" default="0.3" doc="楼梯台阶深度（用于计算拼接位置）"/>
+  <arg name="step_height" default="0.2" doc="楼梯台阶高度（用于计算拼接位置）"/>
+  
   <!-- Start Gazebo -->
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
-    <arg name="world_name" value="$(find gazebo_ros)/worlds/empty.world"/>
+    <arg name="world_name" value="$(arg world_name)"/>
     <arg name="paused" value="false"/>
     <arg name="use_sim_time" value="false"/>
   </include>
+
+  <group if="$(arg use_stairs)">
+
+    <!-- 加载楼梯模型 -->
+    <include file="$(find gazebo_sim)/launch/load_stairs.launch">
+
+    </include>
+
+    <!-- 加载斜坡模型 -->
+    <include file="$(find gazebo_sim)/launch/load_slope.launch">
+
+    </include>
+  </group>
 
   <!-- Load URDF or XACRO file based on robot version -->
   <group if="$(arg use_xacro)">
@@ -33,20 +65,33 @@
   <node name="spawn_robot" pkg="gazebo_ros" type="spawn_model" 
         args="-urdf -model biped_s42 -param robot_description -x 0 -y 0 -z 1.0"/>
 
-  <!-- 加载独立的 AprilTag Cube -->
-  <param name="apriltag_cube_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/standalone_cube.xacro"/>
-  
-  <!-- 生成 AprilTag Cube 模型 -->
-  <node name="spawn_apriltag_cube" pkg="gazebo_ros" type="spawn_model" 
-        args="-urdf -model apriltag_cube -param apriltag_cube_description"/>
+  <group unless="$(arg use_grab_box_scene)">
+    <!-- 加载独立的 AprilTag Cube -->
+    <param name="apriltag_cube_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/standalone_cube.xacro"/>
+    <!-- 生成 AprilTag Cube 模型 -->
+    <node name="spawn_apriltag_cube" pkg="gazebo_ros" type="spawn_model" 
+          args="-urdf -model apriltag_cube -param apriltag_cube_description"/>
+    <!-- 加载block -->
+    <param name="block_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/block.urdf.xacro"/>
+    <!-- 生成block模型，使用floating joint -->
+    <node name="spawn_block" pkg="gazebo_ros" type="spawn_model" 
+          args="-urdf -model block -param block_description -x 0.0 -y -1.0 -z 1.2 -R 0 -P 0 -Y 0"
+          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>
+  </group>
+  <group if="$(arg use_grab_box_scene)">
+    <param name="table_apriltag_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/grab_box_table.xacro"/>
 
-  <!-- 加载block -->
-  <param name="block_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/block.urdf.xacro"/>
-  
-  <!-- 生成block模型，使用floating joint -->
-  <node name="spawn_block" pkg="gazebo_ros" type="spawn_model" 
-        args="-urdf -model block -param block_description -x 0.0 -y -1.0 -z 1.2 -R 0 -P 0 -Y 0"
-        launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>
+    <!-- 生成table_apriltag模型 -->
+    <node name="spawn_table_apriltag" pkg="gazebo_ros" type="spawn_model" 
+          args="-urdf -model table_apriltag -param table_apriltag_description -x 0.0 -y 0.0 -z 0.0"/>
+
+    <!-- 加载block -->
+    <param name="block_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/block.urdf.xacro"/>
+    <!-- 生成block模型，使用floating joint -->
+    <node name="spawn_block" pkg="gazebo_ros" type="spawn_model" 
+          args="-urdf -model block -param block_description -x 0.0 -y -1.9 -z 1.2 -R 0 -P 0 -Y 0"
+          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>      
+  </group>
 
   <!-- Optionally, start robot state publisher to publish TF -->
   <!-- <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" /> -->

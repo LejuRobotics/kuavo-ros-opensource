@@ -1,0 +1,1 @@
+footPose6D[] data

@@ -36,7 +36,7 @@ namespace GrabBox
         ROS_ERROR_STREAM("com_height parameter is NOT found, waiting for 0.1s.");
         ros::Duration(0.1).sleep();
       }
-      ROS_INFO_STREAM("com_height parameter is founded.");
+      // ROS_INFO_STREAM("com_height parameter is founded.");
       ros::param::get("/com_height", com_height);
       std::cout << "[ComputeBackTurnPoseFromBoxToTarget] comHeight: " << com_height<<std::endl;
 
@@ -64,21 +64,10 @@ namespace GrabBox
       Eigen::VectorXd destination_pose_box(7);
       destination_pose_box << target_box_offset(0), target_box_offset(1), target_box_offset(2), 0.0, 0.0, 0.0, 1.0;
 
-      double delta_roll = -M_PI/2, delta_pitch = M_PI/2, delta_yaw = -M_PI/2;
-
-      // Eigen::VectorXd box_pose_world_correct = box_pose_world;
-
-    // //根据设定的相对位置和BOX生成目标位置
-    //   Eigen::VectorXd destination_pose_world_ = getDestination(destination_pose_box , box_pose_world);
-
-    // // 获得方向正确的BOX姿态
-    //   Eigen::VectorXd destination_pose_ = correctBoxPose(destination_pose_world_, delta_roll, delta_pitch, delta_yaw);
-
-    // 获得方向正确的BOX姿态
-      Eigen::VectorXd box_pose_world_correct = correctBoxPose(box_pose_world, delta_roll, delta_pitch, delta_yaw);
+      double delta_roll = 0.0, delta_pitch = M_PI/2, delta_yaw = M_PI/2;
     
     //根据设定的相对位置和BOX生成目标位置
-      Eigen::VectorXd destination_pose_ = getDestination(destination_pose_box, box_pose_world_correct);
+      Eigen::VectorXd destination_pose_ = getDestination(destination_pose_box, box_pose_world);
 
       // std::cout << "destination_pose_:  " << destination_pose_.transpose() << std::endl;
 
@@ -97,14 +86,6 @@ namespace GrabBox
       return BT::NodeStatus::SUCCESS;
     }
   private:
-    Eigen::VectorXd correctBoxPose(const Eigen::VectorXd& box_pose, double delta_roll, double delta_pitch, double delta_yaw)
-    {
-    //   autoHeadChase::PoseTransformer transformer;
-      Eigen::Matrix4d box_matrix = PoseTransformer::poseToTransform(box_pose);
-      Eigen::Matrix4d delta_matrix = PoseTransformer::eulerToTransformationMatrix(delta_roll, delta_pitch, delta_yaw);
-      Eigen::Matrix4d box_matrix_correct = box_matrix * delta_matrix;
-      return PoseTransformer::transformToPose(box_matrix_correct);
-    }
 
    Eigen::VectorXd getDestination(const Eigen::VectorXd& destination_pose_box, const Eigen::VectorXd& box_pose)
     {

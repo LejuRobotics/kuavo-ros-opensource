@@ -426,26 +426,15 @@ namespace GrabBox
 
       Eigen::VectorXd destination_pose_box(7);
       destination_pose_box << target_box_offset(0), target_box_offset(1), target_box_offset(2), 0.0, 0.0, 0.0, 1.0;
-
-    // 获得方向正确的BOX姿态
-      Eigen::VectorXd box_pose_world_correct = correctBoxPose(box_pose_world, delta_roll, delta_pitch, delta_yaw);
     
     //根据设定的相对位置和BOX生成目标位置
-      Eigen::VectorXd destination_pose_ = getDestination(destination_pose_box, box_pose_world_correct);
+      Eigen::VectorXd destination_pose_ = getDestination(destination_pose_box, box_pose_world);
 
       // std::cout << "destination_pose_:  " << destination_pose_.transpose() << std::endl;
 
       // 创建目标位姿的四维数组（X, Y, Z, YAW）
       target_pose << destination_pose_(0), destination_pose_(1), com_height_, getYawFromQuaternion(destination_pose_.segment<4>(3)) * 180.0 / M_PI;
 
-    }
-    Eigen::VectorXd correctBoxPose(const Eigen::VectorXd& box_pose, double delta_roll, double delta_pitch, double delta_yaw)
-    {
-    //   autoHeadChase::PoseTransformer transformer;
-      Eigen::Matrix4d box_matrix = PoseTransformer::poseToTransform(box_pose);
-      Eigen::Matrix4d delta_matrix = PoseTransformer::eulerToTransformationMatrix(delta_roll, delta_pitch, delta_yaw);
-      Eigen::Matrix4d box_matrix_correct = box_matrix * delta_matrix;
-      return PoseTransformer::transformToPose(box_matrix_correct);
     }
 
    Eigen::VectorXd getDestination(const Eigen::VectorXd& destination_pose_box, const Eigen::VectorXd& box_pose)
@@ -472,7 +461,7 @@ namespace GrabBox
     Eigen::VectorXd ocs2_state_;
     double com_height_;
     std::vector<double> torso_displacement_vel_;
-    double delta_roll = -M_PI/2, delta_pitch = M_PI/2, delta_yaw = -M_PI/2;
+    double delta_roll = 0.0, delta_pitch = M_PI/2, delta_yaw = M_PI/2;
     Eigen::VectorXd box_pose_world_;
     Eigen::Vector3d target_box_offset_;
     Eigen::Vector4d target_pose_;

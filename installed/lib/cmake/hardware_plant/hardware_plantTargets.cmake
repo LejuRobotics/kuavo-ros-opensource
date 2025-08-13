@@ -16,7 +16,7 @@ set(CMAKE_IMPORT_FILE_VERSION 1)
 set(_targetsDefined)
 set(_targetsNotDefined)
 set(_expectedTargets)
-foreach(_expectedTarget hardware_plant::hardware_plant hardware_plant::hardware_plant_cxx hardware_plant::xsens_mti_driver hardware_plant::ec_master_main hardware_plant::ec_app hardware_plant::ruierman_actuatorLib hardware_plant::jodell_claw_driver hardware_plant::dxl_x64_cpp hardware_plant::mathtools_hw hardware_plant::hand_sdkLib hardware_plant::lejuclaw hardware_plant::hipnuc_imu_receiver hardware_plant::dexhand_sdk hardware_plant::ruiwo_actuatorLib hardware_plant::ruiwo_actuatorCXXLib hardware_plant::xsens-lcm-types-lib)
+foreach(_expectedTarget hardware_plant::hardware_plant hardware_plant::hardware_plant_cxx hardware_plant::xsens_mti_driver hardware_plant::ec_master_main hardware_plant::ec_app hardware_plant::ruierman_actuatorLib hardware_plant::jodell_claw_driver hardware_plant::dxl_x64_cpp hardware_plant::mathtools_hw hardware_plant::lejuclaw hardware_plant::hipnuc_imu_receiver hardware_plant::dexhand_sdk hardware_plant::ruiwo_actuatorLib hardware_plant::ruiwo_actuatorCXXLib hardware_plant::xsens-lcm-types-lib)
   list(APPEND _expectedTargets ${_expectedTarget})
   if(NOT TARGET ${_expectedTarget})
     list(APPEND _targetsNotDefined ${_expectedTarget})
@@ -55,7 +55,7 @@ add_library(hardware_plant::hardware_plant STATIC IMPORTED)
 
 set_target_properties(hardware_plant::hardware_plant PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/ruiwo_controller;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::hand_sdkLib;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;stdc++fs;hardware_plant::ruiwo_actuatorLib;/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so"
+  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;stdc++fs;hardware_plant::ruiwo_actuatorLib;/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so"
 )
 
 # Create imported target hardware_plant::hardware_plant_cxx
@@ -63,7 +63,7 @@ add_library(hardware_plant::hardware_plant_cxx STATIC IMPORTED)
 
 set_target_properties(hardware_plant::hardware_plant_cxx PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/ruiwo_controller_cxx;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::hand_sdkLib;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;stdc++fs;hardware_plant::ruiwo_actuatorCXXLib;/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so"
+  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;stdc++fs;hardware_plant::ruiwo_actuatorCXXLib;/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so"
 )
 
 # Create imported target hardware_plant::xsens_mti_driver
@@ -123,14 +123,6 @@ set_target_properties(hardware_plant::mathtools_hw PROPERTIES
   INTERFACE_LINK_LIBRARIES "drake::drake"
 )
 
-# Create imported target hardware_plant::hand_sdkLib
-add_library(hardware_plant::hand_sdkLib SHARED IMPORTED)
-
-set_target_properties(hardware_plant::hand_sdkLib PROPERTIES
-  INTERFACE_INCLUDE_DIRECTORIES "/usr/include/protobuf-c;${_IMPORT_PREFIX}/include/hand_sdk;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "/usr/lib/x86_64-linux-gnu/libprotobuf-c.so;/usr/lib/x86_64-linux-gnu/libprotobuf.so;-lpthread"
-)
-
 # Create imported target hardware_plant::lejuclaw
 add_library(hardware_plant::lejuclaw STATIC IMPORTED)
 
@@ -153,7 +145,7 @@ add_library(hardware_plant::dexhand_sdk STATIC IMPORTED)
 set_target_properties(hardware_plant::dexhand_sdk PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/dexhand_sdk;${_IMPORT_PREFIX}/include"
   INTERFACE_LINK_DIRECTORIES "${_IMPORT_PREFIX}/lib"
-  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;m;pthread;rt;dl"
+  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;stark;serialport;m;pthread;rt;dl"
 )
 
 # Create imported target hardware_plant::ruiwo_actuatorLib

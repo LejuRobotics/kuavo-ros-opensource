@@ -172,8 +172,9 @@ namespace HighlyDynamic
         std::vector<double> min_limits = robot_config.getValue<std::vector<double>>("min_joint_position_limits");
         std::vector<double> max_limits = robot_config.getValue<std::vector<double>>("max_joint_position_limits");
         std::vector<double> vel_limits = robot_config.getValue<std::vector<double>>("joint_velocity_limits");
+        std::vector<double> peak_vel_limits = robot_config.getValue<std::vector<double>>("joint_peak_velocity_limits");
         std::vector<double> lock_rotor_limits = robot_config.getValue<std::vector<double>>("joint_torque_limits");
-        std::vector<double> peak_limits = robot_config.getValue<std::vector<double>>("joint_peak_torque_limits");
+        std::vector<double> peak_torque_limits = robot_config.getValue<std::vector<double>>("joint_peak_torque_limits");
 
 
         auto endsWith = [](std::string& s, const std::string& suffix) -> bool {
@@ -221,8 +222,9 @@ namespace HighlyDynamic
             hardware_settings.min_joint_position_limits[i] = min_limits[i];
             hardware_settings.max_joint_position_limits[i] = max_limits[i];
             hardware_settings.joint_velocity_limits[i] = vel_limits[i];
+            hardware_settings.joint_peak_velocity_limits[i] = peak_vel_limits[i];
             hardware_settings.joint_lock_rotor_limits[i] = lock_rotor_limits[i];
-             hardware_settings.joint_peak_limits[i] = peak_limits[i];
+             hardware_settings.joint_peak_limits[i] = peak_torque_limits[i];
         }
 
         std::vector<std::string> end_effector_type = robot_config.getValue<std::vector<std::string>>("EndEffectorType");

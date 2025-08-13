@@ -12,12 +12,8 @@
 
     <build_depend>cmake_clang_tools</build_depend>
     <depend>roscpp</depend>
-    <depend>humanoid_common</depend>
-    <depend>humanoid_interface</depend>
-    <depend>humanoid_interface_ros</depend>
     <depend>kuavo_msgs</depend>
     <depend>kuavo_assets</depend>
     <depend>ocs2_mobile_manipulator</depend>
     <depend>ocs2_mobile_manipulator_ros</depend>
-    <depend>motion_capture_ik</depend>
 </package>

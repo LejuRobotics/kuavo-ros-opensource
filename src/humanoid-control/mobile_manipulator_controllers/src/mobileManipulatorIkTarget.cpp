@@ -1,13 +1,27 @@
+#include <pinocchio/fwd.hpp>
+
 #include <iostream>
 #include <ros/ros.h>
 #include <ocs2_mpc/SystemObservation.h>
 #include <ocs2_ros_interfaces/command/TargetTrajectoriesRosPublisher.h>
+#include "kuavo_msgs/armHandPose.h"
 #include "kuavo_msgs/twoArmHandPoseCmd.h"
+#include "ros/publisher.h"
 #include "ros/service_server.h"
 #include <std_msgs/Float64MultiArray.h>
 #include <std_srvs/SetBool.h>
 #include <ocs2_robotic_tools/common/RotationTransforms.h>
 #include <kuavo_msgs/setMmCtrlFrame.h>
+#include <kuavo_msgs/armTargetPoses.h>
+#include "ocs2_pinocchio_interface/PinocchioInterface.h"
+#include "std_msgs/Int32.h"
+#include <Eigen/Dense>
+
+#include <pinocchio/algorithm/frames.hpp>
+#include <pinocchio/algorithm/kinematics.hpp>
+#include <ocs2_mobile_manipulator/MobileManipulatorInterface.h>
+#include <ocs2_mobile_manipulator/MobileManipulatorPinocchioMapping.h>
+#include <ocs2_pinocchio_interface/PinocchioEndEffectorSpatialKinematics.h>
 
 namespace mobile_manipulator_controller
 {
@@ -55,6 +69,19 @@ class MobileManipulatorIkTarget {
       ROS_INFO("use_quest3_utils: %d", use_quest3_utils_); 
       if(use_quest3_utils_)
         frameType_ = FrameType::VRFrame;
+      
+      std::string taskFile, libFolder, urdfFile;
+      nodeHandle_.getParam("/mm/taskFile", taskFile);
+      nodeHandle_.getParam("/mm/libFolder", libFolder);
+      nodeHandle_.getParam("/mm/urdfFile", urdfFile);
+
+      mobileManipulatorInterface_ = std::make_shared<ocs2::mobile_manipulator::MobileManipulatorInterface>(taskFile, libFolder, urdfFile);
+      info_ = mobileManipulatorInterface_->getManipulatorModelInfo();
+      pinocchioInterface_ptr_.reset(new PinocchioInterface(mobileManipulatorInterface_->getPinocchioInterface()));
+      pinocchioMappingPtr_ = std::make_unique<ocs2::mobile_manipulator::MobileManipulatorPinocchioMapping>(info_);
+      eeSpatialKinematicsPtr_ = std::make_shared<PinocchioEndEffectorSpatialKinematics>(mobileManipulatorInterface_->getPinocchioInterface(), *pinocchioMappingPtr_.get(),
+                                                                                        info_.eeFrames);
+      eeSpatialKinematicsPtr_->setPinocchioInterface(*pinocchioInterface_ptr_.get());
 
       // observation subscriber
       auto observationCallback = [this](const ocs2_msgs::mpc_observation::ConstPtr& msg) {
@@ -74,11 +101,14 @@ class MobileManipulatorIkTarget {
       humanoidObservationSubscriber_ = nodeHandle_.subscribe<ocs2_msgs::mpc_observation>("humanoid_wbc_observation", 1, humanoidObservationCallback);
       ikCmdSubscriber_ = nodeHandle_.subscribe<kuavo_msgs::twoArmHandPoseCmd>("/mm/two_arm_hand_pose_cmd", 10, &MobileManipulatorIkTarget::ikCmdCallback, this);
       basePoseCmdSubscriber_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(robotName + "/base_pose_cmd", 10, &MobileManipulatorIkTarget::basePoseCmdCallback, this);
-      
+      mmEndEffectorTrajectorySubscriber_ = nodeHandle_.subscribe<kuavo_msgs::armTargetPoses>("/mm/end_effector_trajectory", 10, &MobileManipulatorIkTarget::mmEndEffectorTrajectoryCallback, this);
+      effTrajReceivedPublisher_ = nodeHandle_.advertise<std_msgs::Int32>("/mm/eff_traj_received", 10);
       // Add service server for setting use_quest3_utils
       setQuest3UtilsService_ = nodeHandle_.advertiseService("set_quest3_utils", &MobileManipulatorIkTarget::setQuest3UtilsCallback, this);
       setFrameTypeService_ = nodeHandle_.advertiseService("set_mm_ctrl_frame", &MobileManipulatorIkTarget::setFrameTypeCallback, this);
       getFrameTypeService_ = nodeHandle_.advertiseService("get_mm_ctrl_frame", &MobileManipulatorIkTarget::getFrameTypeCallback, this);
+
+      status_publish_timer_ = nodeHandle_.createTimer(ros::Duration(0.01), &MobileManipulatorIkTarget::publishStatus, this);
     }
 
     void run()
@@ -121,6 +151,13 @@ class MobileManipulatorIkTarget {
       res.message = "Successfully get frameType_ to " + std::to_string(static_cast<int>(frameType_));
       res.currentFrame = static_cast<int>(frameType_);
       return true;
+    }
+
+    void publishStatus(const ros::TimerEvent& event)
+    {
+      std_msgs::Int32 msg;
+      msg.data = effTrajReceived_;
+      effTrajReceivedPublisher_.publish(msg);
     }
 
     void basePoseCmdCallback(const std_msgs::Float64MultiArray::ConstPtr& msg)
@@ -234,6 +271,115 @@ class MobileManipulatorIkTarget {
       targetTrajectoriesPublisherPtr_->publishTargetTrajectories(target);
     }
 
+    void mmEndEffectorTrajectoryCallback(const kuavo_msgs::armTargetPoses::ConstPtr& msg)
+    {
+      std::cout << "mmEndEffectorTrajectoryCallback" << std::endl;
+      effTrajReceived_++;
+
+      if (msg->values.empty() || msg->times.empty() || msg->values.size() != msg->times.size() * dof_target_pose_) {
+        ROS_WARN("[MobileManipulatorIkTarget]: Invalid armTargetPoses data. Empty values or mismatched sizes.");
+        return;
+      }
+      if (!observationReceived_) {
+        ROS_WARN("[MobileManipulatorIkTarget]: Current observation not received yet. Skipping trajectory.");
+        return;
+      }
+      const auto& values = msg->values;
+      const auto& times = msg->times;
+      ocs2::scalar_array_t timeTrajectory;
+      ocs2::vector_array_t stateTrajectory;
+      ocs2::vector_t targetState;
+      targetState.setZero(dof_target_pose_);
+      scalar_t currentTime = latestObservation_.time;
+
+      vector_t currentEefPoses = getMMEefPose(latestObservation_.state);
+      timeTrajectory.push_back(currentTime);
+      stateTrajectory.push_back(currentEefPoses);
+
+      // p_be: position in VR frame, quat_be: orientation in VR frame, observation: humanoid observation
+      auto transPoseFromVRFrameToMmWorld = [](const Eigen::Vector3d& p_be, const Eigen::Quaterniond& quat_be, const SystemObservation& observation)
+      {
+        Eigen::Vector3d p_mw_b = (Eigen::Vector3d() << observation.state.segment<2>(6), 0).finished();
+        Eigen::Vector3d zyx = (Eigen::Vector3d() << observation.state(9), 0, 0).finished();
+        Eigen::Matrix3d R_mw_b = ocs2::getRotationMatrixFromZyxEulerAngles(zyx);
+        Eigen::Vector3d p_mw_e = p_mw_b + R_mw_b * p_be;
+        Eigen::Matrix3d R_mw_e = R_mw_b * quat_be.toRotationMatrix();
+        Eigen::Quaterniond quat_mw_e(R_mw_e);
+        return std::make_pair(p_mw_e, quat_mw_e);
+      };
+      // p_le: position in local frame, quat_le: orientation in local frame, observation: humanoid observation
+      auto transPoseFromLocalFrameToWorld = [this](const Eigen::Vector3d& p_le, const Eigen::Quaterniond& quat_le, const SystemObservation& observation)
+      {
+        Eigen::Vector3d p_mw_l = (Eigen::Vector3d() << observation.state.segment<2>(6), -comHeight_).finished();
+        Eigen::Vector3d zyx = (Eigen::Vector3d() << observation.state(9), 0, 0).finished();
+        Eigen::Matrix3d R_mw_l = ocs2::getRotationMatrixFromZyxEulerAngles(zyx);
+        Eigen::Vector3d p_mw_e = p_mw_l + R_mw_l * p_le;
+        Eigen::Matrix3d R_mw_e = R_mw_l * quat_le.toRotationMatrix();
+        Eigen::Quaterniond quat_mw_e(R_mw_e);
+        return std::make_pair(p_mw_e, quat_mw_e);
+      };
+      // p_we: position in world frame, quat_we: orientation in world frame, observation: humanoid observation
+      auto transPoseFromWorldFrameToMmWorld = [this](const Eigen::Vector3d& p_we, const Eigen::Quaterniond& quat_we, const SystemObservation& observation)
+      {
+        Eigen::Vector3d p_mw_w = (Eigen::Vector3d() << 0.0, 0.0, -comHeight_).finished();
+        // Eigen::Matrix3d R_mw_w;
+        // R_mw_w.setIdentity();
+        Eigen::Vector3d p_mw_e = p_mw_w + p_we;
+        Eigen::Quaterniond quat_mw_e = quat_we;
+        return std::make_pair(p_mw_e, quat_mw_e);
+      };
+
+      if (msg->times[0] == 0 && msg->times.size() > 1) {
+        currentTime += 0.01;
+      }
+      for (size_t i = 0; i < msg->times.size(); ++i) {
+          vector_t current_target_pose(dof_target_pose_);
+          for(int j=0; j<dof_target_pose_; ++j)
+          {
+            current_target_pose(j) = msg->values[i * dof_target_pose_ + j];
+          }
+
+          Eigen::Vector3d pos_l = current_target_pose.head<3>();
+          Eigen::Quaterniond quat_l(current_target_pose(6), current_target_pose(3), current_target_pose(4), current_target_pose(5)); // w, x, y, z
+          
+          Eigen::Vector3d pos_r = current_target_pose.segment<3>(7);
+          Eigen::Quaterniond quat_r(current_target_pose(13), current_target_pose(10), current_target_pose(11), current_target_pose(12)); // w, x, y, z
+          
+          if (humanoidObservationReceived_)
+          {
+            if(frameType_ == FrameType::VRFrame)
+            {
+              std::tie(pos_l, quat_l) = transPoseFromVRFrameToMmWorld(pos_l, quat_l, latestHumanoidObservation_);
+              std::tie(pos_r, quat_r) = transPoseFromVRFrameToMmWorld(pos_r, quat_r, latestHumanoidObservation_);
+            }
+            else if(frameType_ == FrameType::WorldFrame)
+            {
+              std::tie(pos_l, quat_l) = transPoseFromWorldFrameToMmWorld(pos_l, quat_l, latestHumanoidObservation_);
+              std::tie(pos_r, quat_r) = transPoseFromWorldFrameToMmWorld(pos_r, quat_r, latestHumanoidObservation_);
+            }
+            else if(frameType_ == FrameType::LocalFrame)
+            {
+              std::tie(pos_l, quat_l) = transPoseFromLocalFrameToWorld(pos_l, quat_l, latestHumanoidObservation_);
+              std::tie(pos_r, quat_r) = transPoseFromLocalFrameToWorld(pos_r, quat_r, latestHumanoidObservation_);
+            }
+          }
+          
+          vector_t transformed_pose(dof_target_pose_);
+          transformed_pose.head<3>() = pos_l;
+          transformed_pose.segment<4>(3) = quat_l.coeffs();
+          transformed_pose.segment<3>(7) = pos_r;
+          transformed_pose.segment<4>(10) = quat_r.coeffs();
+          
+          // Adjust the time relative to the current observation time
+          scalar_t adjustedTime = currentTime + msg->times[i];
+
+          timeTrajectory.push_back(adjustedTime);
+          stateTrajectory.push_back(transformed_pose);
+      }
+      auto targetTrajectories = generateTwoHandTargetTrajectories(stateTrajectory, timeTrajectory);
+      targetTrajectoriesPublisherPtr_->publishTargetTrajectories(targetTrajectories);
+    }
+
     TargetTrajectories goalPoseToTargetTrajectories(const IkCmd& cmd_l, const IkCmd& cmd_r, const SystemObservation& observation) {
       // time trajectory
       const scalar_array_t timeTrajectory{observation.time};
@@ -258,12 +404,57 @@ class MobileManipulatorIkTarget {
       return {timeTrajectory, stateTrajectory, inputTrajectory};
     }
 
+    ocs2::TargetTrajectories generateTwoHandTargetTrajectories(const ocs2::vector_array_t& poses, const ocs2::scalar_array_t& times) {
+      // time trajectory
+      ocs2::scalar_array_t timeTrajectory;
+      ocs2::vector_array_t stateTrajectory;
+      // input trajectory
+      ocs2::vector_array_t inputTrajectory;
+      
+      for(int i = 0; i < poses.size(); i++)
+      {
+        timeTrajectory.push_back(times[i]);
+        stateTrajectory.push_back(poses[i]);
+        inputTrajectory.push_back(ocs2::vector_t::Zero(20));
+      }
+
+      return {timeTrajectory, stateTrajectory, inputTrajectory};
+    }
+
+    vector_t getMMEefPose(const vector_t& state)
+    {
+      vector_t eefPoses;// pos(x,y,z) + quat(x,y,z,w)
+      const auto& model = pinocchioInterface_ptr_->getModel();
+      auto& data = pinocchioInterface_ptr_->getData();
+      const auto q = pinocchioMappingPtr_->getPinocchioJointPosition(state);
+
+      pinocchio::forwardKinematics(model, data, q);
+      pinocchio::updateFramePlacements(model, data);
+
+      const auto eefPositions = eeSpatialKinematicsPtr_->getPosition(state);
+      const auto eefOrientations = eeSpatialKinematicsPtr_->getOrientation(state);
+
+      if(eefPositions.size() != eefOrientations.size())
+        std::cerr << "[MobileManipulatorIkTarget] eefPositions.size() != eefOrientations.size()" << std::endl;
+      eefPoses.resize(7*eefPositions.size());
+      for(int i = 0; i < eefPositions.size(); i++)
+      {
+        eefPoses.segment<7>(7*i).head(3) = eefPositions[i];
+        eefPoses.segment<7>(7*i).tail(4) = eefOrientations[i].coeffs();
+      }
+      return std::move(eefPoses);
+    }
+
   private:
     ros::NodeHandle& nodeHandle_;
+    ros::Timer status_publish_timer_;
     std::unique_ptr<TargetTrajectoriesRosPublisher> targetTrajectoriesPublisherPtr_;
     ::ros::Subscriber observationSubscriber_;
     ::ros::Subscriber humanoidObservationSubscriber_;
     ::ros::Subscriber ikCmdSubscriber_;
+    ::ros::Subscriber mmEndEffectorTrajectorySubscriber_;
+    ::ros::Publisher effTrajReceivedPublisher_;
+
     ::ros::Subscriber basePoseCmdSubscriber_;
     ::ros::ServiceServer setQuest3UtilsService_;
     ::ros::ServiceServer setFrameTypeService_;
@@ -278,6 +469,14 @@ class MobileManipulatorIkTarget {
     bool use_quest3_utils_ = false;
     FrameType frameType_ = FrameType::MmWorldFrame;
     double comHeight_ = 0.0;
+    int dof_target_pose_ = 14;
+    std::shared_ptr<ocs2::mobile_manipulator::MobileManipulatorInterface> mobileManipulatorInterface_;
+    std::unique_ptr<PinocchioInterface> pinocchioInterface_ptr_;
+    std::unique_ptr<ocs2::mobile_manipulator::MobileManipulatorPinocchioMapping> pinocchioMappingPtr_;
+    std::shared_ptr<PinocchioEndEffectorSpatialKinematics> eeSpatialKinematicsPtr_;
+    ocs2::mobile_manipulator::ManipulatorModelInfo info_;
+    int effTrajReceived_ = 0;
+
 };
 }  // namespace mobile_manipulator_controller
 

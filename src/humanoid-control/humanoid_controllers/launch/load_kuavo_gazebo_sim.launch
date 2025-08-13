@@ -11,6 +11,8 @@
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <!-- 添加楼梯加载参数 -->
+    <arg name="load_stairs"        default="false" doc="是否加载楼梯到场景中"/>
     <!-- load the robot version manager -->
     <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
       <arg name="robot_version" value="$(arg robot_version)"/>
@@ -36,6 +38,12 @@
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
+
+    <!-- 自动清理 .ros 文件夹参数 -->
+    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -91,7 +99,9 @@
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>
     <group unless="$(arg play_back)">
-      <include file="$(find gazebo_sim)/launch/gazebo-sim.launch"/>
+      <include file="$(find gazebo_sim)/launch/gazebo-sim.launch">
+        <arg name="use_stairs" value="$(arg load_stairs)"/>
+      </include>
     </group>
       <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">

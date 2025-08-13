@@ -9,11 +9,15 @@ using TagStatusMap = std::unordered_map<int, int>;
 class ForEachTag : public BT::DecoratorNode {
 public:
     ForEachTag(const std::string& name, const BT::NodeConfiguration& config)
-        : BT::DecoratorNode(name, config), current_index_(0) {}
+        : BT::DecoratorNode(name, config), current_index_(0) 
+        {
+            
+        }
 
     static BT::PortsList providedPorts() {
         return {
             BT::InputPort<TagStatusMap>("tag_status_map"),  // 输入：动态tag状态表
+            BT::InputPort<std::vector<int>>("sorted_tag_ids"),  // 输入：已排序的tag id列表
             BT::OutputPort<int>("current_tag_id")          // 输出：当前处理的tag_id
         };
     }
@@ -25,13 +29,28 @@ public:
                 throw BT::RuntimeError("Missing required input [tag_status_map]");
             }
 
-            // 筛选未操作的tags
+            if (!getInput("sorted_tag_ids", sorted_tag_ids_)) {
+                throw BT::RuntimeError("Missing required input [sorted_tag_ids]");
+            }
+
+            // // 筛选未操作的tags
+            // pending_tags_.clear();
+            // for (const auto& [id, status] : tag_status_map_) {
+            //     if (status == 0) { // 状态为未操作
+            //         pending_tags_.push_back(id);
+            //     }
+            // }
+
+            // 清空pending_tags_并重新填充，确保只处理状态为0的tags
             pending_tags_.clear();
-            for (const auto& [id, status] : tag_status_map_) {
-                if (status == 0) { // 状态为未操作
-                    pending_tags_.push_back(id);
+            for (const auto& tag_id : sorted_tag_ids_) {
+                auto it = tag_status_map_.find(tag_id);
+                if (it != tag_status_map_.end() && it->second == 0) {
+                    pending_tags_.push_back(tag_id);
                 }
             }
+
+
             current_index_ = 0;
         }
 
@@ -75,4 +94,5 @@ private:
     TagStatusMap tag_status_map_;        // 动态tag状态表
     std::vector<int> pending_tags_;     // 未操作的tag id列表
     size_t current_index_;              // 当前处理的索引
+    std::vector<int> sorted_tag_ids_;        // 已排序的tag id列表
 };

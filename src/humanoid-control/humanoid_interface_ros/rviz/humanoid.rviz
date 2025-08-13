@@ -6,14 +6,14 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /RobotModel1
         - /RobotModel1/Links1
         - /TF1/Frames1
-        - /MarkerArray1
         - /Marker1
         - /Marker6
+        - /GridMap1
       Splitter Ratio: 0.5
-    Tree Height: 455
+    Tree Height: 461
+    Tree Height: 461
   - Class: rviz/Selection
     Name: Selection
   - Class: rviz/Tool Properties
@@ -57,12 +57,12 @@ Visualization Manager:
       Plane Cell Count: 10
       Reference Frame: <Fixed Frame>
       Value: true
-    - Alpha: 0.20000000298023224
+    - Alpha: 0.5
       Class: rviz/RobotModel
       Collision Enabled: false
       Enabled: true
       Links:
-        All Links Enabled: false
+        All Links Enabled: true
         Expand Joint Details: false
         Expand Link Details: false
         Expand Tree: false
@@ -72,20 +72,23 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        camera_base:
+        camera:
+        camera:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: false
-        dummy_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        head_camera:
+        camera_base:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
+        dummy_link:
+          Value: true
+        dummy_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
         l_foot_heel:
           Alpha: 1
           Show Axes: false
@@ -186,6 +189,11 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        radar:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: false
         rl_foot_heel:
           Alpha: 1
           Show Axes: false
@@ -206,6 +214,16 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        torso-camera:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: false
+        waist_camera:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: false
         zarm_l1_link:
           Alpha: 1
           Show Axes: false
@@ -309,18 +327,70 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
+        Chest:
+          Value: true
+        Head:
+          Value: true
+        LeftArmLower:
+          Value: true
+        LeftArmUpper:
+          Value: true
+        LeftHandIndexTip:
+          Value: true
+        LeftHandLittleTip:
+          Value: true
+        LeftHandMiddleTip:
+          Value: true
+        LeftHandPalm:
+          Value: true
+        LeftHandRingTip:
+          Value: true
+        LeftHandThumbDistal:
+          Value: true
+        LeftHandThumbMetacarpal:
+          Value: true
+        LeftHandThumbProximal:
+          Value: true
+        LeftHandThumbTip:
+          Value: true
+        Neck:
+          Value: true
+        RightArmLower:
+          Value: true
+        RightArmUpper:
+          Value: true
+        RightHandIndexTip:
+          Value: true
+        RightHandLittleTip:
+          Value: true
+        RightHandMiddleTip:
+          Value: true
+        RightHandPalm:
+          Value: true
+        RightHandRingTip:
+          Value: true
+        RightHandThumbDistal:
+          Value: true
+        RightHandThumbMetacarpal:
+          Value: true
+        RightHandThumbProximal:
+          Value: true
+        RightHandThumbTip:
+          Value: true
+        Root:
+          Value: true
         base_link:
           Value: true
         camera_base:
           Value: true
         dummy_link:
           Value: false
-        head_camera:
-          Value: true
         l_foot_heel:
           Value: false
         l_foot_toe:
           Value: false
+        left_hand_target:
+          Value: true
         leg_l1_link:
           Value: false
         leg_l2_link:
@@ -353,12 +423,18 @@ Visualization Manager:
           Value: false
         lr_foot_toe:
           Value: false
+        mm/world:
+          Value: true
         odom:
           Value: true
         r_foot_heel:
           Value: false
         r_foot_toe:
           Value: false
+        radar:
+          Value: true
+        right_hand_target:
+          Value: true
         rl_foot_heel:
           Value: false
         rl_foot_toe:
@@ -367,6 +443,12 @@ Visualization Manager:
           Value: false
         rr_foot_toe:
           Value: false
+        torso:
+          Value: true
+        torso-camera:
+          Value: true
+        waist_camera:
+          Value: true
         zarm_l1_link:
           Value: false
         zarm_l2_link:
@@ -399,6 +481,8 @@ Visualization Manager:
           Value: false
         zarm_r7_link:
           Value: false
+        zhead_1_link:
+          Value: true
         zhead_2_link:
           Value: true
       Marker Alpha: 1
@@ -408,10 +492,10 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        dummy_link:
-          {}
         odom:
           base_link:
+            dummy_link:
+              {}
             leg_l1_link:
               leg_l2_link:
                 leg_l3_link:
@@ -448,6 +532,10 @@ Visualization Manager:
                           {}
                         rr_foot_toe:
                           {}
+            torso-camera:
+              {}
+            waist_camera:
+              {}
             zarm_l1_link:
               zarm_l2_link:
                 zarm_l3_link:
@@ -466,22 +554,79 @@ Visualization Manager:
                         zarm_r7_link:
                           zarm_r7_end_effector:
                             {}
-        zhead_2_link:
-          camera_base:
+            zhead_1_link:
+              zhead_2_link:
+                camera:
+                  {}
+                camera_base:
+                  {}
+                radar:
+                  {}
+          mm/world:
             {}
-          head_camera:
+        torso:
+          Chest:
+            {}
+          Head:
+            {}
+          LeftArmLower:
+            {}
+          LeftArmUpper:
+            {}
+          LeftHandIndexTip:
+            {}
+          LeftHandLittleTip:
+            {}
+          LeftHandMiddleTip:
+            {}
+          LeftHandPalm:
+            {}
+          LeftHandRingTip:
+            {}
+          LeftHandThumbDistal:
+            {}
+          LeftHandThumbMetacarpal:
+            {}
+          LeftHandThumbProximal:
+            {}
+          LeftHandThumbTip:
+            {}
+          Neck:
+            {}
+          RightArmLower:
+            {}
+          RightArmUpper:
+            {}
+          RightHandIndexTip:
+            {}
+          RightHandLittleTip:
+            {}
+          RightHandMiddleTip:
+            {}
+          RightHandPalm:
+            {}
+          RightHandRingTip:
+            {}
+          RightHandThumbDistal:
+            {}
+          RightHandThumbMetacarpal:
+            {}
+          RightHandThumbProximal:
+            {}
+          RightHandThumbTip:
+            {}
+          Root:
             {}
       Update Interval: 0
       Value: true
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /humanoid/optimizedStateTrajectory
+      Marker Topic: /mobile_manipulator/optimizedStateTrajectory
       Name: MarkerArray
       Namespaces:
         "": true
         CoM Trajectory: true
         Feet Trajectories: true
-        Future footholds: true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -526,7 +671,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -534,7 +679,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker_right
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -542,7 +687,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker/elbow
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -550,7 +695,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker_right/elbow
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -575,7 +720,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker/shoulder
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -583,7 +728,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker_right/shoulder
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -632,6 +777,35 @@ Visualization Manager:
       Torque Color: 204; 204; 51
       Unreliable: false
       Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Class: grid_map_rviz_plugin/GridMap
+      Color: 200; 200; 200
+      Color Layer: elevation
+      Color Transformer: GridMapLayer
+      Enabled: true
+      Height Layer: elevation
+      Height Transformer: GridMapLayer
+      History Length: 1
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 10
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: GridMap
+      Show Grid Lines: true
+      Topic: /elevation_mapping/elevation_map
+      Unreliable: false
+      Use Rainbow: true
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /stair_planes
+      Name: MarkerArray
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 255; 253; 212
@@ -660,7 +834,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 2.666560173034668
+      Distance: 2.8523552417755127
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -668,17 +842,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 0.18825635313987732
-        Y: -0.09394228458404541
-        Z: -0.052684277296066284
+        X: 0.2566279172897339
+        Y: 0.04199481010437012
+        Z: -0.5438191890716553
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: -0.11520352214574814
+      Pitch: 0.4997962415218353
       Target Frame: base_link
-      Yaw: 6.223176956176758
+      Yaw: 6.238187789916992
     Saved:
       - Class: rviz/Orbit
         Distance: 5.575319766998291
@@ -706,7 +880,7 @@ Window Geometry:
   Height: 752
   Hide Left Dock: false
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd0000000400000000000001d700000252fc0200000008fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d00000252000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261000000010000010f00000356fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003f00000356000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e100000197000000030000056a0000003efc0100000002fb0000000800540069006d006501000000000000056a000003bc00fffffffb0000000800540069006d006501000000000000045000000000000000000000038d0000025200000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000400000000000001d700000256fc0200000008fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003b00000256000000c700fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261000000010000010f00000356fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003f00000356000000a000fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e100000197000000030000056a0000003efc0100000002fb0000000800540069006d006501000000000000056a0000030700fffffffb0000000800540069006d006501000000000000045000000000000000000000038d0000025600000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Time:
@@ -716,5 +890,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1386
-  X: 301
-  Y: 52
+  X: 2314
+  Y: 291

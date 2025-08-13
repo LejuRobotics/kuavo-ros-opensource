@@ -45,6 +45,11 @@ setup(
     'kuavo_humanoid_sdk.kuavo.core.ros',
     'kuavo_humanoid_sdk.kuavo_strategy',
     'kuavo_humanoid_sdk.kuavo_strategy.grasp_box',
+    'kuavo_humanoid_sdk.kuavo_strategy_v2',
+    'kuavo_humanoid_sdk.kuavo_strategy_v2.common',
+    'kuavo_humanoid_sdk.kuavo_strategy_v2.common.events',
+    'kuavo_humanoid_sdk.kuavo_strategy_v2.pick_place_box',
+    'kuavo_humanoid_sdk.kuavo_strategy_v2.utils',
     ]+find_msg_subpackages("kuavo_humanoid_sdk/msg"),
     install_requires=[
         "numpy", 

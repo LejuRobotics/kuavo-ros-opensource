@@ -45,6 +45,7 @@ enum class ManipulatorModelType {
   FloatingArmManipulator = 2,               // adds dummy XYZ-RPY joints to the model parsed from URDF
   FullyActuatedFloatingArmManipulator = 3,  // adds actuatable XYZ-RPY joints to the model parsed from URDF
   ActuatedXYZYawPitchManipulator = 4,       // adds actuatable XYZ-Yaw-Pitch joints to the model parsed from URDF
+  ActuatedZPitchManipulator = 5,            // adds actuatable Z-Pitch joints to the model parsed from URDF
 };
 
 /**
@@ -88,6 +89,10 @@ static std::string modelTypeEnumToString(ManipulatorModelType manipulatorModelTy
     }
     case ManipulatorModelType::ActuatedXYZYawPitchManipulator: {
       manipulatorModelTypeString = "actuatedXYZYawPitchManipulator";
+      break;
+    }
+    case ManipulatorModelType::ActuatedZPitchManipulator: {
+      manipulatorModelTypeString = "actuatedZPitchManipulator";
       break;
     }
     default:

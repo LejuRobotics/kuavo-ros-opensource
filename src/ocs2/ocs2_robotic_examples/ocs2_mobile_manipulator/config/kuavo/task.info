@@ -1,6 +1,7 @@
 ; robot model meta-information
 model_information {
-  manipulatorModelType     3      // 0: Default-arm, 1: Wheel-based manipulator, 2: Floating-arm manipulator, 3: Fully actuated floating-arm manipulator 4：ActuatedXYZYawPitch-base manipulator
+  manipulatorModelType     3      // 0: Default-arm, 1: Wheel-based manipulator, 2: Floating-arm manipulator, 3: Fully actuated floating-arm manipulator
+                                  // 4：ActuatedXYZYawPitch-base manipulator, 5：ActuatedZPitch-base manipulator
 
   ; motion joints in the URDF to consider fixed
   removeJoints {
@@ -26,8 +27,8 @@ model_information {
   ; end-effector frame of the robot (from URDF)
   eeFrame
   {
-    [0]   "zarm_l7_end_effector"
-    [1]   "zarm_r7_end_effector"
+    [0]   "zarm_l7_link"
+    [1]   "zarm_r7_link"
   }
 }
 
@@ -167,6 +168,16 @@ initialState
       (3,0)  0.0  ; euler angle z
       (4,0)  0.0  ; euler angle y
     }
+
+    actuatedZPitchManipulator
+    {
+      (0,0)  0.0  ; position x
+      (1,0)  0.0  ; position y
+      (2,0)  0.0  ; position z
+      (3,0)  0.0  ; euler angle z
+      (4,0)  0.0  ; euler angle y
+      (5,0)  0.0  ; euler angle x
+    }
   }
 
   ; initial state for the arm DOFs
@@ -203,6 +214,14 @@ stateCost
 
       floatingArmManipulator
       {
+        scaling 1e1
+
+        (0,0)  5.0  ; position x
+        (1,1)  5.0  ; position y
+        (2,2)  5.0  ; position z
+        (3,3)  5.0  ; euler angle z
+        (4,4)  5.0  ; euler angle y
+        (5,5)  5.0  ; euler angle x
       }
 
       fullyActuatedFloatingArmManipulator
@@ -236,7 +255,40 @@ stateCost
         (3,3)  5.0  ; euler angle z
         (4,4)  5.0  ; euler angle y
       }
+
+      actuatedZPitchManipulator
+      {
+        scaling 1e-2
+
+        (0,0)  5.0  ; position x
+        (1,1)  5.0  ; position y
+        (2,2)  5.0  ; position z
+        (3,3)  5.0  ; euler angle z
+        (4,4)  5.0  ; euler angle y
+        (5,5)  5.0  ; euler angle x
+      }
     }
+  }
+  Q_regularization
+  {
+    scaling 1e-2
+
+    (6,6) 1.0 ; z_arm_l1
+    (7,7) 10.0 ; z_arm_l2
+    (8,8) 1.0 ; z_arm_l3
+    (9,9) 1.0 ; z_arm_l4
+    (10,10) 1.0 ; z_arm_l5
+    (11,11) 1.0 ; z_arm_l6
+    (12,12) 1.0 ; z_arm_l7
+    (13,13) 1.0 ; z_arm_r1
+    (14,14) 10.0 ; z_arm_r2
+    (15,15) 1.0 ; z_arm_r3
+    (16,16) 1.0 ; z_arm_r4
+    (17,17) 1.0 ; z_arm_r5
+    (18,18) 1.0 ; z_arm_r6
+    (19,19) 1.0 ; z_arm_r7
+
+
   }
 }
 
@@ -260,12 +312,12 @@ inputCost
       {
         scaling 1e-2
 
-        (0,0)  5.0  ; position x
-        (1,1)  5.0  ; position y
-        (2,2)  5.0  ; position z
-        (3,3)  5.0  ; euler angle z
-        (4,4)  5.0  ; euler angle y
-        (5,5)  5.0  ; euler angle x
+        (0,0)  5000  ; position x
+        (1,1)  5000  ; position y
+        (2,2)  1.00  ; position z
+        (3,3)  5000  ; euler angle z
+        (4,4)  5.00  ; euler angle y
+        (5,5)  5000  ; euler angle x
       }
 
       wheelBasedMobileManipulator
@@ -285,6 +337,14 @@ inputCost
         (2,2)  5.0  ; position z
         (3,3)  5.0  ; euler angle z
         (4,4)  5.0  ; euler angle y
+      }
+
+      actuatedZPitchManipulator
+      {
+        scaling 1e-2
+
+        (0,0)  1.0  ; position z
+        (1,1)  5.0  ; euler angle y
       }
     }
 
@@ -327,9 +387,47 @@ finalEndEffector
 selfCollision
 { 
   ; activate self-collision constraint
-  activate  false
+  activate  true
 
-  ; TODO: Replace the collision meshes of the arm with primitive shapes.
+  ; Self Collision raw object pairs
+  collisionObjectPairs
+  {
+  }
+
+  ; Self Collision pairs
+  collisionLinkPairs
+  {
+    [0]  "base_link, zarm_l2_link"
+    [1]  "base_link, zarm_r2_link"
+    [2]  "base_link, zarm_l4_link"
+    [3]  "base_link, zarm_r4_link"
+    [4]  "base_link, zarm_l7_link"
+    [5]  "base_link, zarm_l7_link"
+    [6]  "zhead_1_link, zarm_l2_link"
+    [7]  "zhead_1_link, zarm_r2_link"
+    [8]  "zhead_1_link, zarm_l4_link"
+    [9]  "zhead_1_link, zarm_r4_link"
+    [10] "zhead_1_link, zarm_l7_link"
+    [11] "zhead_1_link, zarm_r7_link"
+    [12] "zarm_l2_link, zarm_r2_link"
+    [13] "zarm_l2_link, zarm_r4_link"
+    [14] "zarm_l2_link, zarm_r7_link"
+    [15] "zarm_l4_link, zarm_r2_link"
+    [16] "zarm_l4_link, zarm_r4_link"
+    [17] "zarm_l4_link, zarm_r7_link"
+    [18] "zarm_l7_link, zarm_r2_link"
+    [19] "zarm_l7_link, zarm_r4_link"
+    [20] "zarm_l7_link, zarm_r7_link"
+  }
+
+  ; minimum distance allowed between the pairs
+  minimumDistance  0.01
+
+  ; relaxed log barrier mu
+  mu      1e-3
+
+  ; relaxed log barrier delta
+  delta   1e-3
 }
 
 ; Only applied for arm joints: limits parsed from URDF
@@ -363,6 +461,12 @@ basePositionLimits
 
     floatingArmManipulator
     {
+      (0,0)  -100  ; position x
+      (1,0)  -100  ; position y
+      (2,0)  -100  ; position z
+      (3,0)  -100  ; euler angle position z
+      (4,0)  -2.0  ; euler angle position y
+      (5,0)  -2.0  ; euler angle position x
     }
 
     fullyActuatedFloatingArmManipulator
@@ -390,6 +494,16 @@ basePositionLimits
       (3,0)  -0.0  ; euler angle position z
       (4,0)  -0.1  ; euler angle position y
     }
+
+    actuatedZPitchManipulator
+    {
+      (0,0)  -100  ; position x
+      (1,0)  -100  ; position y
+      (2,0)  -0.4  ; position z
+      (3,0)  -100  ; euler angle position z
+      (4,0)  -0.0  ; euler angle position y
+      (5,0)  -2.0  ; euler angle position x
+    }
   }
   upperBound
   {
@@ -399,6 +513,12 @@ basePositionLimits
 
     floatingArmManipulator
     {
+      (0,0)  100  ; position x
+      (1,0)  100  ; position y
+      (2,0)  100  ; position z
+      (3,0)  100  ; euler angle position z
+      (4,0)  2.0  ; euler angle position y
+      (5,0)  2.0  ; euler angle position x
     }
 
     fullyActuatedFloatingArmManipulator
@@ -425,6 +545,16 @@ basePositionLimits
       (2,0)  0.5  ; position z
       (3,0)  0.0  ; euler angle position z
       (4,0)  0.5  ; euler angle position y
+    }
+
+    actuatedZPitchManipulator
+    {
+      (0,0)  100  ; position x
+      (1,0)  100  ; position y
+      (2,0)  0.0  ; position z
+      (3,0)  100  ; euler angle position z
+      (4,0)  0.5  ; euler angle position y
+      (5,0)  0.1  ; euler angle position x
     }
   }
 }
@@ -454,9 +584,9 @@ jointVelocityLimits
       {
         (0,0)  -0.1  ; linear velocity x
         (1,0)  -0.1  ; linear velocity y
-        (2,0)  -0.1  ; linear velocity z
+        (2,0)  -5.0  ; linear velocity z
         (3,0)  -0.3  ; euler angle velocity z
-        (4,0)  -0.3  ; euler angle velocity y
+        (4,0)  -5.0  ; euler angle velocity y
         (5,0)  -0.3  ; euler angle velocity x
       }
 
@@ -473,6 +603,12 @@ jointVelocityLimits
         (2,0)  -0.1  ; linear velocity z
         (3,0)  -0.3  ; euler angle velocity z
         (4,0)  -0.3  ; euler angle velocity y
+      }
+
+      actuatedZPitchManipulator
+      {
+        (0,0)  -5.0  ; linear velocity z
+        (1,0)  -5.0  ; euler angle velocity y
       }
     }
 
@@ -513,9 +649,9 @@ jointVelocityLimits
       {
         (0,0)  0.1  ; linear velocity x
         (1,0)  0.1  ; linear velocity y
-        (2,0)  0.1  ; linear velocity z
+        (2,0)  5.0  ; linear velocity z
         (3,0)  0.3  ; euler angle velocity z
-        (4,0)  0.3  ; euler angle velocity y
+        (4,0)  5.0  ; euler angle velocity y
         (5,0)  0.3  ; euler angle velocity x
       }
 
@@ -532,6 +668,12 @@ jointVelocityLimits
         (2,0)  0.1  ; linear velocity z
         (3,0)  0.3  ; euler angle velocity z
         (4,0)  0.3  ; euler angle velocity y
+      }
+      
+      actuatedZPitchManipulator
+      {
+        (0,0)  5.0  ; linear velocity z
+        (1,0)  5.0  ; euler angle velocity y
       }
     }
 

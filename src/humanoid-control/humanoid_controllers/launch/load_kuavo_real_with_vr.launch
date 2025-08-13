@@ -5,6 +5,7 @@
     <arg name="ctrl_arm_idx" default="2"/>
     <arg name="predict_gesture" default="false"/>
     <arg name="ee_type" default="qiangnao"/>
+    <arg name="enable_head_control" default="true"/>
     <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch"/>
 
     <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
@@ -12,5 +13,6 @@
       <arg name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)"/>
       <arg name="predict_gesture" value="$(arg predict_gesture)"/>
       <arg name="ee_type" default="$(arg ee_type)"/>
+      <arg name="enable_head_control" value="true"/>
     </include>
 </launch>

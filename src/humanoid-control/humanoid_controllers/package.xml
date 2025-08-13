@@ -27,6 +27,7 @@
     <depend>humanoid_wbc</depend>
     <depend>controller_interface</depend>
     <depend>h12pro_controller_node</depend>
+    <depend>joy</depend>
     <depend>motion_capture_ik</depend>
     <depend>hardware_node</depend>
     <depend>kuavo_assets</depend>
@@ -36,6 +37,7 @@
     <!-- <depend>gazebo_sim</depend> -->
     <!-- <depend>realsense_ros_gazebo</depend> -->
     <depend>realsense_sim_metadata</depend>
+    <depend>kuavo_audio_receiver</depend>
     <depend>kuavo_sdk</depend>
     <!-- <depend>ocs2_biped_robot_ros</depend> -->
 

@@ -410,6 +410,8 @@ class KuavoRobotCore:
         if self.state != 'stance':
             raise RuntimeError(f"[Core] control_robot_arm_joint_positions failed: robot must be in stance state, current state: {self.state}")
         
+        if self._control.is_arm_collision_mode() and self._control.is_arm_collision():
+            raise RuntimeError(f"Arm collision detected, cannot publish arm trajectory")
         # change to external control mode  
         if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
             SDKLogger.debug("[Core] control_robot_arm_joint_positions, current arm mode != ExternalControl, change it.")
@@ -421,6 +423,9 @@ class KuavoRobotCore:
     def control_robot_arm_joint_trajectory(self, times:list, joint_q:list)->bool:
         if self.state != 'stance':
             raise RuntimeError("[Core] control_robot_arm_joint_trajectory failed: robot must be in stance state")
+            
+        if self._control.is_arm_collision_mode() and self._control.is_arm_collision():
+            raise RuntimeError(f"Arm collision detected, cannot publish arm trajectory")
         
         if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
             SDKLogger.debug("[Core] control_robot_arm_joint_trajectory, current arm mode != ExternalControl, change it.")
@@ -445,6 +450,9 @@ class KuavoRobotCore:
         
         return self._control.control_robot_end_effector_pose(left_pose, right_pose, frame)
 
+    def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
+        return self._control.control_hand_wrench(left_wrench, right_wrench)
+    
     def change_manipulation_mpc_frame(self, frame: KuavoManipulationMpcFrame)->bool:
         timeout = 1.0
         count = 0
@@ -506,19 +514,15 @@ class KuavoRobotCore:
         return True
     
     def change_robot_arm_ctrl_mode(self, mode:KuavoArmCtrlMode)->bool:
-        timeout = 1.0
+
+        if self._control.is_arm_collision_mode() and self.is_arm_collision():
+            SDKLogger.warn("[Core] change_robot_arm_ctrl_mode failed, arm collision detected!")
+            return False
+
         count = 0
-        while self._rb_state.arm_control_mode != mode:
+        if self._rb_state.arm_control_mode != mode:
             SDKLogger.debug(f"[Core] Change robot arm control  from {self._rb_state.arm_control_mode} to {mode}, retry: {count}")
             self._control.change_robot_arm_ctrl_mode(mode)
-            if self._rb_state.arm_control_mode == mode:
-                break
-            if timeout <= 0:
-                SDKLogger.warn("[Core] Change robot arm control mode timeout!")
-                return False
-            timeout -= 0.1
-            time.sleep(0.1)
-            count += 1
         
         if not hasattr(self, '_arm_ctrl_mode_lock'):
             self._arm_ctrl_mode_lock = threading.Lock()
@@ -576,6 +580,11 @@ class KuavoRobotCore:
     def arm_fk(self, q: list) -> Tuple[KuavoPose, KuavoPose]:
         return self._control.arm_fk(q)
     
+    """ ------------------------------------------------------------------------"""
+    """ Base Pitch Limit Control """
+    def enable_base_pitch_limit(self, enable: bool) -> Tuple[bool, str]:
+        return self._control.enable_base_pitch_limit(enable)
+    """ ------------------------------------------------------------------------"""
     """ Callbacks """
     def _humanoid_gait_changed(self, current_time: float, gait_name: str):
         if self.state != gait_name:
@@ -586,6 +595,19 @@ class KuavoRobotCore:
                 # Call the transition method if it exists
                 getattr(self, to_method)()
 
+    def is_arm_collision(self)->bool:
+        return self._control.is_arm_collision()
+    
+    def release_arm_collision_mode(self):
+
+        self._control.release_arm_collision_mode()
+        
+
+    def wait_arm_collision_complete(self):
+        self._control.wait_arm_collision_complete()
+
+    def set_arm_collision_mode(self, enable: bool):
+        self._control.set_arm_collision_mode(enable)
 
 if __name__ == "__main__":
     DEBUG_MODE = 0

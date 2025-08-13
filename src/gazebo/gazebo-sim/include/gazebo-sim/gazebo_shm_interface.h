@@ -22,6 +22,9 @@ public:
     ~GazeboShmInterface();
 
     void Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf) override;
+    
+    // 新增退出相关函数 - 移到公有部分以便静态函数访问
+    void cleanupAndExit();
 
 private:
     void stopCallback(const std_msgs::Bool::ConstPtr& msg);
@@ -37,7 +40,7 @@ private:
     void setInitialState();
     void setModelConfiguration(const std::vector<double>& positions);
     void setModelState(const std::vector<double>& pose);
-
+    
     physics::ModelPtr model_;
     event::ConnectionPtr updateConnection_;
     
@@ -69,6 +72,7 @@ private:
     // 新增初始化相关变量
     std::vector<double> robot_init_state_param_;
     bool params_loaded_ = false;
+    bool sim_start_ = false;
     
     // ROS相关
     ros::NodeHandle* nh_;

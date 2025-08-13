@@ -11,9 +11,13 @@
 #include <thread>
 #include <mutex>
 #include <kuavo_msgs/setTagId.h>
-
+#include "kuavo_msgs/tagDataArray.h"
+#include <yaml-cpp/yaml.h>
+#include <vector>
 
 namespace autoHeadChase {
+
+using namespace std;
 
 class TagTracker {
 public:
@@ -29,11 +33,16 @@ private:
     bool oneTimeTrackService(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
     bool continuousTrackService(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
     bool setTargetTagIdService(kuavo_msgs::setTagId::Request& req, kuavo_msgs::setTagId::Response& res);
+    bool delTargetTagIdService(kuavo_msgs::setTagId::Request& req, kuavo_msgs::setTagId::Response& res);
 
     // Internal functions
     void updateTagWorldPose();
     void calculateHeadOrientation();
     void publishHeadOrientationCommand(double pitch, double yaw);
+
+    void publishTagData();
+
+    bool checkSafty(const Eigen::VectorXd&  tag_pose_world, const vector<double>& safe_space);
 
     // Node handles, subscribers, and publishers
     ros::NodeHandle nh_;
@@ -44,6 +53,8 @@ private:
     ros::ServiceServer continuous_track_srv_;
     ros::Publisher tag_world_pose_pub_;
     ros::ServiceServer set_target_tag_id_srv_; 
+    ros::ServiceServer del_target_tag_id_srv_;
+    ros::Publisher tag_data_pub_;
 
     // State variables
     Eigen::VectorXd robot_pose_world_;  // Robot pose in the world frame (7-dim: pos + quat)
@@ -61,6 +72,7 @@ private:
     bool tag_info_received_ = false;
     int target_tag_id_;
     std::mutex data_mutex_;
+    vector<double> safe_space_;
 
 };
 

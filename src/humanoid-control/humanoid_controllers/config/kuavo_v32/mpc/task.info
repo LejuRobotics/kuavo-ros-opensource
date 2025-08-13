@@ -101,7 +101,8 @@ swing_trajectory_config
 
   toeSwingHeight                0.03
   heelSwingHeight               0.04
-  enable_slope_planner                                 true
+  enable_slope_planner                    true
+  slope_planning_threshold                     3.0        
   enable_interrupt_with_est_mode              false
 
   deadBandVelocity             0.1

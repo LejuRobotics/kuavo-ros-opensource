@@ -172,6 +172,8 @@ static std::atomic<TorqueFeedbackTarget_t*> currentTorqueFeedback;
 static uint8_t motorStatusMapA[NUM_SLAVE_MAX] = {0};
 static uint8_t motorStatusMapB[NUM_SLAVE_MAX] = {0};
 static std::atomic<uint8_t*> currentMotorStatusMap;
+// 状态更改请求标志数组 - 用于 myAppDiagnosis 请求状态更改
+static std::atomic<bool> motorStatusChangeRequest[NUM_SLAVE_MAX] = {false};
 
 static std::mutex mtx_io;
 static uint32_t num_slave = 0;
@@ -3147,6 +3149,11 @@ static EC_T_DWORD myAppPrepare(T_EC_DEMO_APP_CONTEXT *pAppContext)
   memset(motorStatusMapA, 0, sizeof(motorStatusMapA));
   memset(motorStatusMapB, 0, sizeof(motorStatusMapB));
   currentMotorStatusMap.store(motorStatusMapA, std::memory_order_release);
+  // 初始化状态更改请求标志数组
+  for (int i = 0; i < NUM_SLAVE_MAX; i++)
+  {
+    motorStatusChangeRequest[i].store(false, std::memory_order_release);
+  }
 
   // 初始化 torque_feedback_target 双缓冲区
   memset(torque_feedback_targetA, 0, sizeof(torque_feedback_targetA));
@@ -3369,6 +3376,18 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
             yd_number_status++;
           }
           // mtx_io.unlock();
+          
+          // 处理来自 myAppDiagnosis状态更改请求
+          if (motorStatusChangeRequest[i].load(std::memory_order_acquire))
+          {
+            if (currentMotorStatus[i] == MOTOR_STATUS_ERROR)
+            {
+              nextMotorStatus[i] = MOTOR_STATUS_REINIT;
+              motorStatusChangeRequest[i].store(false, std::memory_order_release);
+            }
+          }
+          
+          // 硬件故障检测和状态转换
           if (isFault && currentMotorStatus[i] == MOTOR_STATUS_NO_ERROR)
           {
             EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d is fault!\n", ids[i]));
@@ -3379,6 +3398,11 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
           {
             EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Motor %d has been fixed!\n", ids[i]));
             nextMotorStatus[i] = MOTOR_STATUS_NO_ERROR;
+          }
+          else
+          {
+            // 保持当前状态
+            nextMotorStatus[i] = currentMotorStatus[i];
           }
         }
         // 在这里切换 currentMotorStatusMap 指针，让 nextMotorStatus 成为新生效的数据
@@ -3462,7 +3486,8 @@ static EC_T_DWORD myAppDiagnosis(T_EC_DEMO_APP_CONTEXT *pAppContext)
             continue;
           }
           last_restart_time[i] = std::clock();
-          currentMotorStatus[i] = MOTOR_STATUS_REINIT;
+          // 请求状态更改到 REINIT (不直接修改缓冲区)
+          motorStatusChangeRequest[i].store(true, std::memory_order_release);
 // #ifdef ERROR_FIX // 是否需要修复错误
 //           std::thread restartThread(fixEmergencyRequest, ids[i], motorErrorCodeMap[i]);
 //           restartThread.detach();

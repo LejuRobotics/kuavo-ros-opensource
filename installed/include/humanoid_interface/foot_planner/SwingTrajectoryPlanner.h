@@ -64,15 +64,15 @@ class SwingTrajectoryPlanner {
     scalar_t swing_elbow_scale = 3.0;
     bool enable_interrupt_with_est_mode = false; // 是否允许根据实际状态终止规划
     bool enable_slope_planner = false; // 使能斜面规划
+    double slope_planning_threshold = 5.0;
 
   };
 
   SwingTrajectoryPlanner(Config config, size_t numFeet, size_t numHand = 2);
-
+  void setSlopePlanning(bool enable_slope_planning){enable_slope_planning_ = enable_slope_planning;};
   inline void updateConfig(const Config& cfg){config_ = cfg;}
   inline const Config& getConfig() const {return config_;}
   inline const Config& getDefaultConfig() const {return defaultConfig_;}
-  inline bool isWalkingOnSlope() const {return isWalkingOnSlope_;}
   inline std::pair<Eigen::Vector3d, Eigen::Vector3d> getFeetNormalVectors() const {return std::make_pair(lf_normal_vector_, rf_normal_vector_);}
   void update(const ModeSchedule& modeSchedule, scalar_t terrainHeight, const TargetTrajectories& targetTrajectories, const scalar_t& initTime);
 
@@ -84,7 +84,7 @@ class SwingTrajectoryPlanner {
               const feet_array_t<scalar_array_t>& maxHeightSequence, 
               const TargetTrajectories& targetTrajectories, 
               const scalar_t& initTime);
-  std::pair<vector3_t, std::vector<vector3_t>> findFootPosNext(int feet, int current_index, int swingStartIndex, int swingFinalIndex, const ModeSchedule& modeSchedule, const vector3_t &last_stance_position);
+  std::pair<vector3_t, std::vector<vector3_t>> findFootPosNext(int feet, int current_index, int swingStartIndex, int swingFinalIndex, const ModeSchedule& modeSchedule, const vector3_t &last_stance_position, const feet_array_t<std::vector<bool>> &eesContactFlagStocks);
   
   // 存储规划值到 vector 中
   std::vector<scalar_t> saveTrajectoryToVector() const {
@@ -359,6 +359,7 @@ class SwingTrajectoryPlanner {
   BufferedValue<vector_t> body_vel_cmd_buf_;
   vector_t current_state_;
   feet_array_t<vector3_t> latestStanceposition_;
+  feet_array_t<double> latestStancepositionZ_;
   feet_array_t<vector3_t> stancePositionBeforeStepControl_;
   feet_array_t<vector3_t> latestFullyStanceposition_;
   feet_array_t<vector3_t> des_latestStanceposition_;
@@ -367,7 +368,6 @@ class SwingTrajectoryPlanner {
   feet_array_t<vector3_t> last_calc_stance_position_;
   bool has_feet_trajectory_ = false;
   bool interrupt_swing_ = false;
-  bool isWalkingOnSlope_ = false;
   Eigen::Vector3d lf_normal_vector_, rf_normal_vector_;
   bool is_single_step_phase_ = false;
   FootPoseSchedule footPoseSchedule_;
@@ -375,6 +375,7 @@ class SwingTrajectoryPlanner {
   bool final_yaw_single_step_mode_ = false;
   double final_yaw_single_step_time_ = 0.0;
   std::shared_ptr<InverseKinematics> inverseKinematics_;
+  bool enable_slope_planning_ = false;
 };
 
 SwingTrajectoryPlanner::Config loadSwingTrajectorySettings(const std::string& fileName,

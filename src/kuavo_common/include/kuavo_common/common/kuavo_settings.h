@@ -129,6 +129,7 @@ namespace HighlyDynamic
         std::vector<double> min_joint_position_limits;
         std::vector<double> max_joint_position_limits;
         std::vector<double> joint_velocity_limits;
+        std::vector<double> joint_peak_velocity_limits;
         std::vector<double> joint_lock_rotor_limits;
         std::vector<double> joint_peak_limits;
         std::vector<EndEffectorType> end_effector_type;
@@ -146,6 +147,7 @@ namespace HighlyDynamic
             min_joint_position_limits.resize(num_joints);
             max_joint_position_limits.resize(num_joints);
             joint_velocity_limits.resize(num_joints);
+            joint_peak_velocity_limits.resize(num_joints);
             joint_lock_rotor_limits.resize(num_joints);
             joint_peak_limits.resize(num_joints);
             motors_exist.resize(num_joints);

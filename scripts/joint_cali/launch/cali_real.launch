@@ -5,17 +5,10 @@
     <arg name="rviz_mm"            default="true"/>
     <arg name="sqp_mpc"            default="1"/>
 
-  <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
-    <arg name="sqp_mpc"        value="$(arg sqp_mpc)"/>
-    <arg name="rviz"           value="$(arg rviz_mm)"/>
-    <arg name="visualize_mm"   value="$(arg visualize_mm)"/>
-  </include>
-
   <!-- sim launch -->
   <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch">
     <arg name="joystick_type"      value="$(arg joystick_type)"/>
     <arg name="rviz"               value="$(arg rviz)"/>
   </include>
 
-  <node name="quest3_node" pkg="motion_capture_ik" type="quest3_node.py" output="screen" args="--send_srv 0 --control_torso 0"/>
 </launch>
