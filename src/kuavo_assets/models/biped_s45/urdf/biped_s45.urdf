@@ -1156,7 +1156,7 @@
     </collision>
   </link>
   <joint
-    name="l_hand_tripod"
+    name="l_hand_tripod_joint"
     type="fixed">
     <origin
       xyz="0.0 0.0 0.0"
@@ -1210,7 +1210,7 @@
     </collision>
   </link>
   <joint
-    name="l_hand_camera"
+    name="l_hand_camera_joint"
     type="fixed">
     <origin
       xyz="0.11540559159102 -0.0145586110669961 -0.110123491595499"
@@ -1264,7 +1264,7 @@
     </collision>
   </link>
   <joint
-    name="r_hand_tripod"
+    name="r_hand_tripod_joint"
     type="fixed">
     <origin
       xyz="0.0 0.0 0.0"
@@ -1318,7 +1318,7 @@
     </collision>
   </link>
   <joint
-    name="r_hand_camera"
+    name="r_hand_camera_joint"
     type="fixed">
     <origin
       xyz="0.115405591590931 0.0154312352120435 -0.107724128430896"

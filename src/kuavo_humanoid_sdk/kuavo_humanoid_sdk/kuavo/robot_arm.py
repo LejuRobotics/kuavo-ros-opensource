@@ -31,7 +31,36 @@ class KuavoRobotArm:
             bool: 重置成功返回True,否则返回False。
         """
         return self._kuavo_core.robot_manipulation_mpc_reset()
-        
+
+    def control_arm_target_poses(self, times: list, q_frames: list) -> bool:
+        """
+            Control the target poses of the robot arm.
+            Args:
+                times (list): List of time intervals in seconds
+                joint_q (list): List of joint positions in radians
+            Raises:
+                ValueError: If the times list is not of the correct length.
+                ValueError: If the joint position list is not of the correct length.
+                ValueError: If the joint position is outside the range of [-π, π].
+                RuntimeError: If the robot is not in stance state when trying to control the arm.
+            Returns:
+                bool: True if the control was successful, False otherwise.
+        """
+        if len(times) != len(q_frames):
+            raise ValueError("Invalid input. times and joint_q must have thesame length.")
+
+        # Check if joint positions are within ±180 degrees (±π radians)
+        q_degs = []
+        for q in q_frames:
+            if any(abs(pos) > math.pi for pos in q):
+                raise ValueError("Joint positions must be within ±π rad (±180 deg)")
+            if len(q) != self._robot_info.arm_joint_dof:
+                raise ValueError(
+                    "Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(q)))
+            # Convert joint positions from radians to degrees
+            q_degs.append([(p * 180.0 / math.pi) for p in q])
+
+        return self._kuavo_core.control_robot_arm_target_poses(times=times, joint_q=q_degs)
     def control_arm_joint_positions(self, joint_position:list)->bool:
         """控制机器人手臂关节位置。
 
@@ -115,6 +144,15 @@ class KuavoRobotArm:
             bool: 设置成功返回True,否则返回False
         """
         return self._kuavo_core.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.AutoSwing)
+
+    def arm_ik_free(self,
+                    left_pose: KuavoPose,
+                    right_pose: KuavoPose,
+                    left_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    right_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    arm_q0: list = None,
+                    params: KuavoIKParams=None) -> list:
+        return self._kuavo_core.arm_ik_free(left_pose, right_pose, left_elbow_pos_xyz, right_elbow_pos_xyz, arm_q0, params)
     
     def set_external_control_arm_mode(self) -> bool:
         """设置手臂外部控制模式。
@@ -248,6 +286,8 @@ class KuavoRobotArm:
         """设置碰撞模式
         """
         self._kuavo_core.set_arm_collision_mode(enable)
+
+
 
 # if __name__ == "__main__":
 #     arm = KuavoRobotArm()

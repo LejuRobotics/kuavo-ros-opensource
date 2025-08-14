@@ -478,6 +478,23 @@ class KuavoPicoNode:
             Float64MultiArray, 
             queue_size=1)
         
+        # 控制模式切换话题发布者
+        self.pub_arm_ctrl_mode = rospy.Publisher(
+            '/pico/arm_ctrl_mode_change', 
+            Int32, 
+            queue_size=10
+        )
+        self.pub_mobile_ctrl_mode = rospy.Publisher(
+            '/pico/mobile_ctrl_mode_change', 
+            Int32, 
+            queue_size=10
+        )
+        self.pub_mm_wbc_arm_ctrl_mode = rospy.Publisher(
+            '/pico/mm_wbc_arm_ctrl_mode_change', 
+            Int32, 
+            queue_size=10
+        )
+        
         if self.eef_type == "lejuclaw": # 乐聚夹爪
             self.pub_leju_claw_cmd = rospy.Publisher(
                 '/leju_claw_command', 
@@ -811,6 +828,9 @@ class KuavoPicoNode:
             rospy.wait_for_service("/change_arm_ctrl_mode", timeout=3.0)
             changeHandTrackingMode_srv = rospy.ServiceProxy("/change_arm_ctrl_mode", changeArmCtrlMode)
             changeHandTrackingMode_srv(mode)
+            # 服务调用成功后，发布模式切换话题
+            self.pub_arm_ctrl_mode.publish(Int32(data=mode))
+            SDKLogger.info(f"Arm control mode changed to {mode} and published to /pico/arm_ctrl_mode_change")
         except rospy.ROSException as e:
             SDKLogger.error(f"\033[31m服务 /change_arm_ctrl_mode 连接超时或连接失败, 请检查服务是否启动: {e}\033[0m")
         except Exception as e:
@@ -822,6 +842,9 @@ class KuavoPicoNode:
             rospy.wait_for_service("/mobile_manipulator_mpc_control", timeout=3.0)
             changeHandTrackingMode_srv = rospy.ServiceProxy("/mobile_manipulator_mpc_control", changeArmCtrlMode)
             changeHandTrackingMode_srv(mode)
+            # 服务调用成功后，发布模式切换话题
+            self.pub_mobile_ctrl_mode.publish(Int32(data=mode))
+            SDKLogger.info(f"Mobile control mode changed to {mode} and published to /pico/mobile_ctrl_mode_change")
             # print(f"=================================changeHandTrackingMode_srv({mode})=============================================")
         except rospy.ROSException as e:
             SDKLogger.error(f"\033[31m服务 /mobile_manipulator_mpc_control 连接超时或连接失败, 请检查服务是否启动: {e}\033[0m")
@@ -834,6 +857,9 @@ class KuavoPicoNode:
             rospy.wait_for_service("/enable_mm_wbc_arm_trajectory_control", timeout=3.0)
             changeHandTrackingMode_srv = rospy.ServiceProxy("/enable_mm_wbc_arm_trajectory_control", changeArmCtrlMode)
             changeHandTrackingMode_srv(mode)
+            # 服务调用成功后，发布模式切换话题
+            self.pub_mm_wbc_arm_ctrl_mode.publish(Int32(data=mode))
+            SDKLogger.info(f"MM WBC arm control mode changed to {mode} and published to /pico/mm_wbc_arm_ctrl_mode_change")
         except rospy.ROSException as e:
             SDKLogger.error(f"\033[31m服务 /enable_mm_wbc_arm_trajectory_control 连接超时或连接失败, 请检查服务是否启动: {e}\033[0m")
         except Exception as e:

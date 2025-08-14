@@ -354,6 +354,27 @@ class KuavoRobot(RobotBase):
         """
         return self._robot_arm.control_arm_joint_trajectory(times, q_frames)
 
+    def control_arm_target_poses(self, times: list, q_frames: list) -> bool:
+        """Control the target poses of the robot arm.
+
+        Args:
+            times (list): List of time intervals in seconds.
+            q_frames (list): List of joint positions in radians.
+
+        Returns:
+            bool: True if the control was successful, False otherwise.
+
+        Raises:
+            ValueError: If the times list is not of the correct length.
+            ValueError: If the joint position list is not of the correct length.
+            ValueError: If the joint position is outside the range of [-π, π].
+            RuntimeError: If the robot is not in stance state when trying to control the arm.
+
+        Note:
+            This is an asynchronous interface. The function returns immediately after sending the command.
+            Users need to wait for the motion to complete on their own.
+        """
+        return self._robot_arm.control_arm_target_poses(times, q_frames)
     def set_fixed_arm_mode(self) -> bool:
         """固定/冻结机器人手臂。
         

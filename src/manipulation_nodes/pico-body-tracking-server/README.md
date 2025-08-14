@@ -164,7 +164,17 @@ body_tracker_role = [
 使用 `robot_pico_recorder.py` 脚本可以录制机器人控制数据，支持录制以下话题：
 - `/ik/two_arm_hand_pose_cmd` - 双臂手部位姿命令
 - `/mm/two_arm_hand_pose_cmd` - 移动操作手部位姿命令  
-- `/humanoid_mpc_foot_pose_target_trajectories` - 人形机器人足部轨迹
+- `/humanoid_mpc_foot_pose_world_target_trajectories` - 人形机器人足部轨迹
+
+### 录制其他话题
+
+如果需要录制额外的话题，在 `pico-body-tracking-server/config/extra_bag_topics.json` 配置需要额外保存的话题
+
+```json
+[
+  "/sensors_data_raw"
+] 
+```
 
 #### 录制命令
 ```bash

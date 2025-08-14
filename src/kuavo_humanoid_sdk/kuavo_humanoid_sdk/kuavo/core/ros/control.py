@@ -856,22 +856,22 @@ class KuavoRobotArmIKFK:
         eef_pose_msg.hand_poses.right_pose.quat_xyzw = right_pose.orientation
         eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = right_elbow_pos_xyz
 
-        return self._srv_arm_ik(eef_pose_msg)   
-    
-    def arm_ik_free(self, 
-               left_pose: KuavoPose, 
-               right_pose: KuavoPose, 
-               left_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
-               right_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
-               arm_q0: list = None,
-               params: KuavoIKParams=None) -> list:
+        return self._srv_arm_ik(eef_pose_msg)
+
+    def arm_ik_free(self,
+                    left_pose: KuavoPose,
+                    right_pose: KuavoPose,
+                    left_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    right_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    arm_q0: list = None,
+                    params: KuavoIKParams = None) -> list:
         eef_pose_msg = twoArmHandPoseCmdFree()
         if arm_q0 is None:
             eef_pose_msg.joint_angles_as_q0 = False
         else:
             eef_pose_msg.joint_angles_as_q0 = True
             eef_pose_msg.joint_angles = arm_q0
-        
+
         if params is None:
             eef_pose_msg.use_custom_ik_param = False
         else:
@@ -880,21 +880,23 @@ class KuavoRobotArmIKFK:
             eef_pose_msg.ik_param.major_feasibility_tol = params.major_feasibility_tol
             eef_pose_msg.ik_param.minor_feasibility_tol = params.minor_feasibility_tol
             eef_pose_msg.ik_param.major_iterations_limit = params.major_iterations_limit
-            eef_pose_msg.ik_param.oritation_constraint_tol= params.oritation_constraint_tol
-            eef_pose_msg.ik_param.pos_constraint_tol = params.pos_constraint_tol 
+            eef_pose_msg.ik_param.oritation_constraint_tol = params.oritation_constraint_tol
+            eef_pose_msg.ik_param.pos_constraint_tol = params.pos_constraint_tol
             eef_pose_msg.ik_param.pos_cost_weight = params.pos_cost_weight
 
         # left hand
-        eef_pose_msg.hand_poses.left_pose.pos_xyz =  left_pose.position
+        eef_pose_msg.hand_poses.left_pose.pos_xyz = left_pose.position
         eef_pose_msg.hand_poses.left_pose.quat_xyzw = left_pose.orientation
         eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = left_elbow_pos_xyz
 
         # right hand
-        eef_pose_msg.hand_poses.right_pose.pos_xyz =  right_pose.position
+        eef_pose_msg.hand_poses.right_pose.pos_xyz = right_pose.position
         eef_pose_msg.hand_poses.right_pose.quat_xyzw = right_pose.orientation
         eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = right_elbow_pos_xyz
 
-        return self._srv_arm_ik_free(eef_pose_msg) 
+        return self._srv_arm_ik_free(eef_pose_msg)
+
+
 
     def arm_fk(self, q: list) -> Tuple[KuavoPose, KuavoPose]:
         return self._srv_arm_fk(q)
@@ -1000,6 +1002,20 @@ class KuavoRobotControl:
         return connect_success, err_msg
     
     """ End Effector Control"""
+
+    def control_robot_arm_target_poses(self, times: list, joint_q: list) -> bool:
+        """
+            Control robot arm target poses
+            Arguments:
+                - times: list of times (seconds)
+                - joint_q: list of joint data (degrees)
+        """
+        if len(times) != len(joint_q):
+            raise ValueError("Times and joint_q must have the same length.")
+        elif len(times) == 0:
+            raise ValueError("Times and joint_q must not be empty.")
+
+        return self.kuavo_arm_control.pub_arm_target_poses(times=times, joint_q=joint_q)
     def control_robot_dexhand(self, left_position:list, right_position:list)->bool:
         """
             Control robot dexhand

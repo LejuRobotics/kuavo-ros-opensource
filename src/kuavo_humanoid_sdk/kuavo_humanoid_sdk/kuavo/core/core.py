@@ -379,7 +379,18 @@ class KuavoRobotCore:
         # e.g., limit ranges for safety
         self.to_command_pose_world()
         return self._control.control_command_pose_world(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
-    
+
+    def control_robot_arm_target_poses(self, times: list, joint_q: list) -> bool:
+        if self.state != 'stance':
+            raise RuntimeError("[Core] control_robot_arm_target_poses failed: robot must be in stance state")
+
+        if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
+            SDKLogger.debug("[Core] control_robot_arm_target_poses, current arm mode != ExternalControl, change it.")
+            if not self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.ExternalControl):
+                SDKLogger.warn("[Core] control_robot_arm_target_poses failed, change robot arm ctrl mode failed!")
+                return False
+
+        return self._control.control_robot_arm_target_poses(times, joint_q)
     def execute_gesture(self, gestures:list)->bool:
         return self._control.execute_gesture(gestures)
     
