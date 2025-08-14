@@ -40,7 +40,7 @@ find_package(catkin REQUIRED
 find_package(Threads REQUIRED)
 find_library(MUJOCO_LIB mujoco HINTS ${PROJECT_SOURCE_DIR}/lib)
 find_package(glfw3 REQUIRED)
-
+find_package(OpenCV REQUIRED)
 
 
 ## System dependencies are found with CMake's conventions
@@ -160,6 +160,7 @@ include_directories(
         ${catkin_INCLUDE_DIRS}
         ${glfw3_INCLUDE_DIRS}
         ${LCM_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
 )
 
 link_directories(../lib)
@@ -191,7 +192,7 @@ add_library(${PROJECT_NAME} SHARED
         src/joint_address.hpp
         src/dexhand_mujoco_node.cpp
 ${SIMULATE_SRCS} ${LCM_SRCS})
-target_link_libraries(${PROJECT_NAME} PUBLIC ${MUJOCO_LIB} ${catkin_LIBRARIES} Threads::Threads glfw ${glfw3_LIBRARIES} ${LCM_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} PUBLIC ${MUJOCO_LIB} ${catkin_LIBRARIES} Threads::Threads glfw ${glfw3_LIBRARIES} ${LCM_LIBRARIES} ${OpenCV_LIBS})
 
 add_executable(${PROJECT_NAME}_simulate src/main.cc)
 target_link_libraries(${PROJECT_NAME}_simulate ${PROJECT_NAME}) 

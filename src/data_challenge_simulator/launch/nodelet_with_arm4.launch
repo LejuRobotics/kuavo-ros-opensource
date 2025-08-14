@@ -1,0 +1,5 @@
+<launch>
+  <arg name="legged_robot_scene" default="$(find data_challenge_simulator)/models/biped_s$(optenv ROBOT_VERSION 40)/xml/scene4.xml"/>
+  <param name="legged_robot_scene_param" value="$(arg legged_robot_scene)" />
+  <node pkg="nodelet" type="nodelet" name="nodelet_mujoco" args="load MujocoNodelet nodelet_manager" respawn="false" output="screen" />
+</launch>

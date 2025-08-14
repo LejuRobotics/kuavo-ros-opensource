@@ -1,0 +1,303 @@
+<mujoco model="kuavo scene">
+  <include file="biped_s45.xml"/>
+  <!-- <include file="../../assets/Threshold_Bistro_Ceramic_Dinner_Plate_Ruby_Ring/model.xml"/> -->
+  <statistic center="0 0 1" extent="1.8"/>
+  <visual>
+      <headlight diffuse="0.6 0.6 0.6" ambient="0.1 0.1 0.1" specular="0 0 0"/>
+      <rgba haze="0.15 0.25 0.35 1"/>
+      <global azimuth="160" elevation="-20"/>
+  </visual>
+
+  <asset>
+
+      <material name="mat_frame" rgba="0.85 0.85 0.85 1"/>
+      <material name="mat_shelf" rgba="0.95 0.95 0.95 1"/> 
+      <material name="mat_bin"   rgba="0.20 0.55 1.00 1"/> 
+      <material name="mat_item"  rgba="0.10 0.10 0.10 1"/> 
+
+
+      <texture file="../../assets/textures/belt2.png" type="2d" name="wall"/>
+      <material name="walls_mat" reflectance="0.1" shininess="0.1" texture="wall" texuniform="true"/>
+
+      <texture file="../../assets/textures/roof1.png" type="2d" name="roof"/>
+      <material name="roofs_mat" reflectance="0.1" shininess="0.1" texture="roof" texuniform="true" />
+
+      <!-- 地面纹理 -->
+      <texture name="ground_tex"
+            type="2d"
+            file="../../assets/textures/ground2.png"        
+            />
+      <material name="ground_mat"
+                  texture="ground_tex"
+                  texuniform="true"            
+                  reflectance="0"/> 
+
+      <!-- ── Table assets ───────────────────────────────────────────── -->
+      <texture name="tex-ceramic" type="cube" file="../../assets/textures/green.png"/>
+      <material name="table_ceramic"
+                  texture="tex-ceramic"
+                  specular="0.20" shininess="0" reflectance="0"/>
+
+      <texture name="tex-steel-brushed" type="cube" file="../../assets/textures/steel-brushed.png"/>
+      <material name="table_legs_metal"
+                  texture="tex-steel-brushed"
+                  specular="0.0"  shininess="0.8" reflectance="0.8"/>
+      <!-- ───────────────────────────────────────────────────────────── -->
+  </asset>
+
+  <worldbody>
+      <light pos="0 0 3.5" dir="0 0 -1" directional="false"/>
+      <geom name="floor" size="0 0 0.05" type="plane" material="ground_mat"/>
+
+      <geom name="wall_front"
+            type="box"
+            size="10 5 2"
+            pos="0 10 2.5"
+            euler="-1.57079633 0 3.14159265"
+            material="walls_mat"
+            contype="0" conaffinity="0"
+            />
+
+      <geom name="wall_back"
+            type="box"
+            size="10 5 2"
+            pos="0 -10 2.5"
+            euler="-1.57079633 0 0"
+            material="walls_mat"
+            contype="0" conaffinity="0"
+            />
+
+      <geom name="wall_right"
+            type="box"
+            size="10 5 2"
+            pos="10 0 2.5"
+            euler="0 1.57079633 1.57"
+            material="walls_mat"
+            contype="0" conaffinity="0"
+            />
+
+      <geom name="wall_left"
+            type="box"
+            size="10 5 2"
+            pos="-10 0 2.5"
+            euler="0 -1.57079633 1.57"
+            material="walls_mat"
+            contype="0" conaffinity="0"
+            />
+
+      <geom name="roof"
+            type="plane"
+            size="10 10 5"
+            pos="0 0 5"
+            euler="3.14159265 0 0"
+            material="roofs_mat"/>
+
+      <!-- 后marker -->
+      <geom name="marker1_1" type="box" size="0.01 0.5 0.001"
+            rgba="1 1 0 1"
+            pos="-0.45 0 0.001"
+            contype="0" conaffinity="0"/>
+
+      <geom name="marker1_2" type="box" size="0.275 0.01 0.001"
+            rgba="1 1 0 1"
+            pos="-0.725 0.49 0.001"
+            contype="0" conaffinity="0"/>
+
+      <geom name="marker1_3" type="box" size="0.01 0.5 0.001"
+            rgba="1 1 0 1"
+            pos="-1 0 0.001"
+            contype="0" conaffinity="0"/>
+
+      <geom name="marker1_4" type="box" size="0.275 0.01 0.001"
+            rgba="1 1 0 1"
+            pos="-0.725 -0.49 0.001"
+            contype="0" conaffinity="0"/>
+
+      <!-- 前marker -->
+      <geom name="marker2_1" type="box" size="0.01 0.5 0.001"
+            rgba="1 1 0 1"
+            pos="0.45 0 0.001"
+            contype="0" conaffinity="0"/>
+
+      <geom name="marker2_2" type="box" size="0.275 0.01 0.001"
+            rgba="1 1 0 1"
+            pos="0.725 0.49 0.001"
+            contype="0" conaffinity="0"/>
+
+      <geom name="marker2_3" type="box" size="0.01 0.5 0.001"
+            rgba="1 1 0 1"
+            pos="1 0 0.001"
+            contype="0" conaffinity="0"/>
+
+      <geom name="marker2_4" type="box" size="0.275 0.01 0.001"
+            rgba="1 1 0 1"
+            pos="0.725 -0.49 0.001"
+            contype="0" conaffinity="0"/>
+      <!-- ================= 后货架 ================= -->
+      <body name="shelf_left" pos="-1.7 0.0 0.0">
+
+            <!-- 立柱 -->
+            <geom type="box" size="0.02 0.02 0.8" pos=" 0.55  1 0.90" rgba="0.85 0.85 0.85 1" contype="0" conaffinity="0"/>
+            <geom type="box" size="0.02 0.02 0.8" pos="-0.55  1 0.90" rgba="0.85 0.85 0.85 1" contype="0" conaffinity="0"/>
+            <geom type="box" size="0.02 0.02 0.8" pos=" 0.55  -1 0.90" rgba="0.85 0.85 0.85 1" contype="0" conaffinity="0"/>
+            <geom type="box" size="0.02 0.02 0.8" pos="-0.55  -1 0.90" rgba="0.85 0.85 0.85 1" contype="0" conaffinity="0"/>
+
+            <!-- 搁板 -->
+            <geom name="left_shelf_L1" type="box" size="0.55 1 0.01" pos="0 0 0.25"
+                  rgba="0.95 0.95 0.95 1" friction="1.0 0.01 0.0001" solimp="0.95 0.99 0.002" solref="0.008 1"/>
+            <geom name="left_shelf_L2" type="box" size="0.55 1 0.01" pos="0 0 0.75"
+                  rgba="0.95 0.95 0.95 1" friction="1.0 0.01 0.0001" solimp="0.95 0.99 0.002" solref="0.008 1"/>
+            <geom name="left_shelf_L3" type="box" size="0.55 1 0.01" pos="0 0 1.6"
+                  rgba="0.95 0.95 0.95 1" friction="1.0 0.01 0.0001" solimp="0.95 0.99 0.002" solref="0.008 1"/>
+
+
+            <!-- left L1：前(X+) / 后(X-) 沿 -->
+            <geom name="left_shelf_L1_frontlipX" type="box"
+                  size="0.01 1.00 0.02" pos=" 0.54 0 0.28"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+            <geom name="left_shelf_L1_backlipX"  type="box"
+                  size="0.01 1.00 0.02" pos="-0.54 0 0.28"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+
+            <!-- left L2 -->
+            <geom name="left_shelf_L2_frontlipX" type="box"
+                  size="0.01 1.00 0.02" pos=" 0.54 0 0.78"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+            <geom name="left_shelf_L2_backlipX"  type="box"
+                  size="0.01 1.00 0.02" pos="-0.54 0 0.78"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+
+            <!-- left L3 -->
+            <geom name="left_shelf_L3_frontlipX" type="box"
+                  size="0.01 1.00 0.02" pos=" 0.54 0 1.63"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+            <geom name="left_shelf_L3_backlipX"  type="box"
+                  size="0.01 1.00 0.02" pos="-0.54 0 1.63"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+
+
+            <!-- 箱 -->
+            <body name="left_bin_A" pos="0.35 0.3 0.76" euler="0 0 1.57">
+
+            <!-- 底板 -->
+            <geom type="box" size="0.18 0.14 0.005" rgba="0.20 0.55 1.00 1"
+                  friction="1.0 0.01 0.0001" solimp="0.95 0.99 0.002" solref="0.008 1"/>
+            <!-- 侧板 -->
+            <geom type="box" size="0.18 0.005 0.05" pos="0  0.145 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.18 0.005 0.05" pos="0 -0.145 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.005 0.14 0.05" pos=" 0.185 0 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.005 0.14 0.05" pos="-0.185 0 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            </body>
+
+            <body name="left_bin_B" pos="0.35 -0.3 0.76" euler="0 0 1.57">
+
+            <geom type="box" size="0.18 0.14 0.005" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.18 0.005 0.05" pos="0  0.145 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.18 0.005 0.05" pos="0 -0.145 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.005 0.14 0.05" pos=" 0.185 0 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.005 0.14 0.05" pos="-0.185 0 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            </body>
+            </body>
+
+            <!-- ================= 前货架（倾斜） ================= -->
+            <body name="shelf_right" pos="1.7 0.0 0.0">
+
+            <!-- 立柱 -->
+            <geom type="box" size="0.02 0.02 0.8" pos=" 0.55  1 0.90" rgba="0.85 0.85 0.85 1" contype="0" conaffinity="0"/>
+            <geom type="box" size="0.02 0.02 0.8" pos="-0.55  1 0.90" rgba="0.85 0.85 0.85 1" contype="0" conaffinity="0"/>
+            <geom type="box" size="0.02 0.02 0.8" pos=" 0.55  -1 0.90" rgba="0.85 0.85 0.85 1" contype="0" conaffinity="0"/>
+            <geom type="box" size="0.02 0.02 0.8" pos="-0.55  -1 0.90" rgba="0.85 0.85 0.85 1" contype="0" conaffinity="0"/>
+
+            <!-- 搁板 -->
+            <geom name="right_shelf_L1" type="box" size="0.55 1 0.01" pos="0 0 0.25" euler="0 -0.05 0"
+                  rgba="0.95 0.95 0.95 1" friction="1.0 0.01 0.0001" solimp="0.95 0.99 0.002" solref="0.008 1"/>
+            <geom name="right_shelf_L2" type="box" size="0.55 1 0.01" pos="0 0 0.75" euler="0 -0.05 0"
+                  rgba="0.95 0.95 0.95 1" friction="1.0 0.01 0.0001" solimp="0.95 0.99 0.002" solref="0.008 1"/>
+            <geom name="right_shelf_L3" type="box" size="0.55 1 0.01" pos="0 0 1.6" euler="0 -0.05 0"
+                  rgba="0.95 0.95 0.95 1" friction="1.0 0.01 0.0001" solimp="0.95 0.99 0.002" solref="0.008 1"/>
+
+            <!-- right L1 -->
+            <geom name="right_shelf_L1_frontlipX" type="box"
+                  size="0.01 1.00 0.02" pos=" 0.54 0 0.3" euler="0 -0.05 0"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+            <geom name="right_shelf_L1_backlipX"  type="box"
+                  size="0.01 1.00 0.02" pos="-0.54 0 0.24" euler="0 -0.05 0"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+
+            <!-- right L2 -->
+            <geom name="right_shelf_L2_frontlipX" type="box"
+                  size="0.01 1.00 0.02" pos=" 0.54 0 0.8" euler="0 -0.05 0"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+            <geom name="right_shelf_L2_backlipX"  type="box"
+                  size="0.01 1.00 0.02" pos="-0.54 0 0.74" euler="0 -0.05 0"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+
+            <!-- right L3 -->
+            <geom name="right_shelf_L3_frontlipX" type="box"
+                  size="0.01 1.00 0.02" pos=" 0.54 0 1.65" euler="0 -0.05 0"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+            <geom name="right_shelf_L3_backlipX"  type="box"
+                  size="0.01 1.00 0.02" pos="-0.54 0 1.59" euler="0 -0.05 0"
+                  rgba="0.90 0.90 0.90 1" friction="1.0 0.01 0.0001"/>
+
+
+            <!-- 箱（倾斜） -->
+            <body name="right_bin_A" pos="-0.37 0.00 0.75" euler="0 -0.05 1.57">
+
+            <geom type="box" size="0.20 0.14 0.005" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.20 0.005 0.05" pos="0  0.145 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.20 0.005 0.05" pos="0 -0.145 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.005 0.14 0.05" pos=" 0.205 0 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            <geom type="box" size="0.005 0.14 0.05" pos="-0.205 0 0.05" rgba="0.20 0.55 1.00 1" friction="1.0 0.01 0.0001"/>
+            </body>
+      </body>
+      <body name="item1" pos="1.33 0.1 0.9" euler="0 0 -0.4">
+      <freejoint/>
+            <geom type="box" size="0.08 0.03 0.08" rgba="0.1 0.1 0.1 1" mass="1e-3" friction="1.0 0.01 0.0001"/>
+      </body>
+
+      <body name="item2" pos="1.33 -0.1 0.9" euler="0 0 0.4">
+      <freejoint/>
+            <geom type="box" size="0.08 0.03 0.08" rgba="0.1 0.1 0.1 1" mass="1e-3" friction="1.0 0.01 0.0001"/>
+      </body>
+      
+
+      <!-- <body name="belt_plate1" pos="0.6 0 3.8">  
+            <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6"/>
+            <joint name="belt_slide" type="slide" axis="0 1 0" range="-20 20" damping="0.001"/>
+            <geom  name="belt_geom1" type="box"
+                  size="0.4 100 0.01"           
+                  material="roofs_mat"
+                  friction="1.0 0.005 0.0001"/>
+      </body> -->
+  </worldbody>
+
+
+
+<!-- baselink
+      r_leg
+      l_leg
+      r_arm
+      r_gripper
+      l_arm
+      l_gripper
+      head
+       -->
+
+  <!-- <keyframe>
+    <key name="home"
+      qpos="
+    0 0 0 0 0 0 0
+    0 0 0 0 0 0 
+    0 0 0 0 0 0 
+    0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 
+    0 0 0 0 0 0 0 
+    0 0 0 0 0 0 0 0
+    0 0
+    0 0 0 0 0 0 0
+    0 0 0 0 0 0 0
+    0"/>
+  </keyframe> -->
+
+</mujoco>

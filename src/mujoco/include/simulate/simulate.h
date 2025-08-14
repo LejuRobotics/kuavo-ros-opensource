@@ -177,6 +177,12 @@ class Simulate {
   int fullscreen = 0;
   int vsync = 1;
   int busywait = 0;
+  int show_head_camera = 1;
+  int show_top_camera = 0;
+  int show_front_camera = 0;
+  int show_back_camera = 0;
+  int show_left_wrist_camera = 1;
+  int show_right_wrist_camera = 1;
 
   // keyframe index
   int key = 0;

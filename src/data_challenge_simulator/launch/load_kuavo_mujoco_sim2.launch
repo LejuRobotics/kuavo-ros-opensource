@@ -1,0 +1,159 @@
+<?xml version="1.0" ?>
+
+<launch>
+
+    <!-- 输出日志格式 -->
+    <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
+
+    <arg name="output_system_info" default="true"/>
+    <arg name="vr_remote_control" default="false"/>
+    <arg name="robot_type"         default="humanoid"/>
+    <arg name="rviz"                default="true" />
+    <arg name="multiplot"          default="false"/>
+    <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <!-- load the robot version manager -->
+    <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+      <arg name="robot_version" value="$(arg robot_version)"/>
+      <arg name="rviz" value="$(arg rviz)"/>
+    </include>
+
+    <arg name="use_external_mpc"   default="true"/>
+    <arg name="wbc_frequency"      default="500"/>
+    <arg name="sensor_frequency"   default="500"/>
+    <arg name="use_joystick"       default="true"/>
+    <arg name="with_estimation"    default="true"/>
+    <arg name="use_joint_filter"   default="false"/>
+    <arg name="estimator_type"     default="1"/>
+    <arg name="wbc_only"           default="false"/>
+    <arg name="play_back"          default="false"/>  
+    <arg name="joystick_type"      default="sim"/>
+    <arg name="arm_move_spd"      default="1.2"/>
+    <arg name="start_way"          default="manual"/>
+    <arg name="use_estimator_contact"   default="false"/>
+    <arg name="visualize_humanoid" default="true"/>
+    <arg name="only_half_up_body" default="false"/>
+    <!-- Set with_coredump parameter based on coredump value -->
+    <arg name="coredump" default="false"/>
+    <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
+    <arg name="with_coredump" value="" unless="$(arg coredump)"/>
+    <arg name="with_ik" default="true"/>
+    <arg name="with_mm_ik" default="true"/>
+
+    <!-- teach_pendant -->
+    <arg name="teach_pendant" default="0"/>
+
+    <!-- multiplot -->
+    <group if="$(arg multiplot)">
+      <include file="$(find humanoid_interface_ros)/launch/multiplot.launch"/>
+    </group>
+
+    <!-- make the files into global parameters -->
+    <param name="multiplot"         value="$(arg multiplot)"/>
+    <param name="wbc_only"          value="$(arg wbc_only)"/>
+    <param name="use_external_mpc"  value="$(arg use_external_mpc)"/>
+    <param name="wbc_frequency"     value="$(arg wbc_frequency)"/>
+    <param name="sensor_frequency"  value="$(arg sensor_frequency)"/>
+    <param name="with_estimation"   value="$(arg with_estimation)"/>
+    <param name="use_joint_filter"  value="$(arg use_joint_filter)"/>
+    <param name="estimator_type"    value="$(arg estimator_type)"/>
+    <param name="play_back"         value="$(arg play_back)"/>
+    <param name="joystick_type"  value="$(arg joystick_type)"/>
+    <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
+    <param name="start_way"  value="$(arg start_way)"/>
+    <param name="use_estimator_contact"  value="$(arg use_estimator_contact)"/>
+    <param name="only_half_up_body"   value="$(arg only_half_up_body)"/>
+    <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
+    <param name="visualize_humanoid" value="$(arg visualize_humanoid)" />
+    <rosparam param="isolated_cpus">[2, 3]</rosparam>
+    <param name="enable_pull_up_protect" value="true"/>
+    <param name="pull_up_force_threshold" value="0.70"/>
+
+    <!-- Launch script to collect kuavo-launch information -->
+    <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
+    
+    <param name="teach_pendant"  value="$(arg teach_pendant)"/>
+    <!-- MPC调度相关参数 -->
+    <param name="/mpc/schedule/enable" value="false"/>
+    <param name="/mpc/schedule/start_time" value="-1.0"/>
+    <param name="/timeout_warning_ms" value="20"/>
+
+    <!-- 自动清理 .ros 文件夹参数 -->
+    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+
+    <!-- mpc node -->
+    <group if="$(arg use_external_mpc)">
+      <node pkg="humanoid_interface_ros" type="humanoid_sqp_mpc" name="humanoid_sqp_mpc" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    </group>
+    <!-- <group unless="$(arg use_joystick)"> -->
+
+      <node pkg="humanoid_interface_ros" type="humanoid_gait_command" name="humanoid_gait_command"
+            output="screen" launch-prefix="gnome-terminal --disable-factory --"/>
+    <!-- </group> -->
+
+    <node pkg="humanoid_interface_ros" type="humanoid_hand_control" name="humanoid_hand_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_VR_hand_control" name="humanoid_VR_hand_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+    <node pkg="humanoid_interface_ros" type="humanoid_Arm_time_target_control" name="humanoid_Arm_time_target_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_gait_switch_by_name" name="humanoid_gait_switch_by_name" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+
+    <!-- nodelet manager -->
+    <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
+       output="screen" required="true" clear_params="true"
+       launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
+        <param name="num_worker_threads" type="int" value="10" />
+    </node>
+    <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true">
+      </node>
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
+      <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
+    </node>
+    <group unless="$(arg play_back)">
+      <include file="$(find data_challenge_simulator)/launch/nodelet_with_arm2.launch"/>
+    </group>
+      <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+   <group if="$(arg use_joystick)">
+      <group if="$(eval arg('joystick_type') == 'h12')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
+          <arg name="start_way" value="$(arg start_way)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'sim')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
+          <arg name="joystick_type" value="$(arg joystick_type)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+          <arg name="joystick_type" value="$(arg joystick_type)"/>
+        </include>
+      </group>
+    </group>    
+
+    <!--publish system state  -->
+    <group if="$(arg output_system_info)">
+      <node pkg="humanoid_controllers" type="system_info_publisher.py" name="system_info_publisher"/>
+    </group>
+    <!-- monitor node -->
+    <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+    <group if="$(arg vr_remote_control)">
+      <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
+    </group>
+    
+    <group if="$(arg with_ik)">
+        <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
+    </group>
+
+    <group if="$(arg with_mm_ik)">
+      <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
+        <arg name="sqp_mpc" value="1"/>
+        <arg name="rviz"    value="false"/>
+        <arg name="visualize_mm"   value="false"/>
+      </include>
+    </group>
+</launch>

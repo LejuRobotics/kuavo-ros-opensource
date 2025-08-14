@@ -1,0 +1,22 @@
+<launch>
+  <arg
+    name="model" />
+  <param
+    name="robot_description"
+    textfile="$(find kuavo_assets)/models/biped_s45/urdf/biped_s45.urdf" />
+  <node
+    name="joint_state_publisher_gui"
+    pkg="joint_state_publisher_gui"
+    type="joint_state_publisher_gui" />
+  <node
+    name="robot_state_publisher"
+    pkg="robot_state_publisher"
+    type="robot_state_publisher" />
+  <node
+    name="rviz"
+    pkg="rviz"
+    type="rviz"
+    args="-d $(find kuavo_assets)/models/biped_s45/rviz/urdf.rviz" />
+  <node pkg="tf" type="static_transform_publisher" name="world_to_base_link" args="0 0 0.88 0 0 0 world base_link 1000" />
+  
+</launch>

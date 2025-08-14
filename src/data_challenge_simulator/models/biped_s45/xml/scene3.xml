@@ -1,0 +1,171 @@
+<mujoco model="kuavo scene">
+  <include file="biped_s45.xml"/>
+  <include file="../../assets/shampoo/model1.xml"/>
+  <include file="../../assets/shampoo/model2.xml"/>
+  <include file="../../assets/shampoo/model3.xml"/>
+  <include file="../../assets/shampoo/model4.xml"/>
+  <!-- <include file="../../assets/shampoo/model5.xml"/>       -->
+  <statistic center="0 0 1" extent="1.8"/>
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.1 0.1 0.1" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="160" elevation="-20"/>
+  </visual>
+
+  <asset>
+
+    <texture file="../../assets/textures/wall3.png" type="2d" name="wall"/>
+    <material name="walls_mat" reflectance="0.1" shininess="0.1" texture="wall" texuniform="true"/>
+
+    <texture file="../../assets/textures/roof1.png" type="2d" name="roof"/>
+    <material name="roofs_mat" reflectance="0.1" shininess="0.1" texture="roof" texuniform="true" />
+
+    <!-- 地面纹理 -->
+    <texture name="ground_tex"
+           type="2d"
+           file="../../assets/textures/ground2.png"        
+           />
+    <material name="ground_mat"
+            texture="ground_tex"
+            texuniform="true"            
+            reflectance="0"/> 
+
+    <texture name="tex-ceramic" type="cube" file="../../assets/textures/green.png"/>
+    <material name="table_ceramic"
+              texture="tex-ceramic"
+              specular="0.20" shininess="0" reflectance="0"/>
+
+    <texture name="tex-steel-brushed" type="cube" file="../../assets/textures/steel-brushed.png"/>
+    <material name="table_legs_metal"
+              texture="tex-steel-brushed"
+              specular="0.0"  shininess="0.8" reflectance="0.8"/>
+  </asset>
+
+  <worldbody>
+    <light pos="1 0 3.5" dir="-0.2 0 -1" directional="false"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="ground_mat"/>
+
+    <geom name="wall_front"
+          type="box"
+          size="10 5 2"
+          pos="0 10 2.5"
+          euler="-1.57079633 0 3.14159265"
+          material="walls_mat"
+          contype="0" conaffinity="0"
+          />
+
+    <geom name="wall_back"
+          type="box"
+          size="10 5 2"
+          pos="0 -10 2.5"
+          euler="-1.57079633 0 0"
+          material="walls_mat"
+          contype="0" conaffinity="0"
+          />
+
+    <geom name="wall_right"
+          type="box"
+          size="10 5 2"
+          pos="10 0 2.5"
+          euler="0 1.57079633 1.57"
+          material="walls_mat"
+          contype="0" conaffinity="0"
+          />
+
+    <geom name="wall_left"
+          type="box"
+          size="10 5 2"
+          pos="-10 0 2.5"
+          euler="0 -1.57079633 1.57"
+          material="walls_mat"
+          contype="0" conaffinity="0"
+          />
+
+    <geom name="roof"
+          type="plane"
+          size="10 10 5"
+          pos="0 0 5"
+          euler="3.14159265 0 0"
+          material="roofs_mat"/>
+
+
+
+
+    <body name="table" pos="0.5 0 0.68">
+      <!-- ── 桌面 ── -->
+      <geom name="table_top"
+            type="box"
+            size="0.40 0.8 0.02"         
+            material="table_ceramic"      
+            friction="1 0.005 0.0001"/>
+
+      <!-- marker -->
+      <geom name="marker2_1" type="box" size="0.01 0.18 0.001"
+            rgba="1 0 1 1"
+            pos="0 0.4 0.021"
+            contype="0" conaffinity="0"/>
+
+      <geom name="marker2_2" type="box" size="0.18 0.01 0.001"
+            rgba="1 0 1 1"
+            pos="-0.17 0.58 0.021"
+            contype="0" conaffinity="0"/>
+
+      <geom name="marker2_3" type="box" size="0.01 0.18 0.001"
+            rgba="1 0 1 1"
+            pos="-0.34 0.4 0.021"
+            contype="0" conaffinity="0"/>
+
+      <geom name="marker2_4" type="box" size="0.18 0.01 0.001"
+            rgba="1 0 1 1"
+            pos="-0.17 0.21 0.021"
+            contype="0" conaffinity="0"/>
+      <!-- ── 桌腿 ── -->
+      <geom name="leg_fl" type="cylinder"
+            size="0.03 0.4"               
+            pos="0.2  0.6 -0.4"
+            material="table_legs_metal"
+            contype="0" conaffinity="0"/>
+      <geom name="leg_fr" type="cylinder"
+            size="0.03 0.4"
+            pos=" 0.2 -0.6 -0.4"
+            material="table_legs_metal"
+            contype="0" conaffinity="0"/>
+      <geom name="leg_rl" type="cylinder"
+            size="0.03 0.4"
+            pos="-0.2  0.6 -0.4"
+            material="table_legs_metal"
+            contype="0" conaffinity="0"/>
+      <geom name="leg_rr" type="cylinder"
+            size="0.03 0.4"
+            pos="-0.2 -0.6 -0.4"
+            material="table_legs_metal"
+            contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+
+
+<!-- baselink
+      r_leg
+      l_leg
+      r_arm
+      r_gripper
+      l_arm
+      l_gripper
+      head
+       -->
+
+  <!-- <keyframe>
+    <key name="home"
+      qpos="
+    0 0 0 0 0 0 0
+    0 0 0 0 0 0 
+    0 0 0 0 0 0 
+    0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 
+    0 0 0 0 0 0 0 
+    0 0 0 0 0 0 0 0 
+    0 0 
+    0 0 0 0 0 0 0"/>
+  </keyframe> -->
+
+</mujoco>

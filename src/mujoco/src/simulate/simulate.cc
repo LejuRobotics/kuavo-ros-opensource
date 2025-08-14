@@ -35,6 +35,13 @@
 #include "platform_ui_adapter.h"
 #include "array_safety.h"
 #include <iostream>
+#include <opencv2/opencv.hpp>
+
+// ROS includes
+#include <ros/ros.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/CompressedImage.h>
 // When launched via an App Bundle on macOS, the working directory is the path to the App Bundle's
 // resource directory. This causes files to be saved into the bundle, which is not the desired
 // behavior. Instead, we open a save dialog box to ask the user where to put the file.
@@ -543,6 +550,330 @@ void ShowSensor(mj::Simulate* sim, mjrRect rect) {
   mjr_figure(viewport, &sim->figsensor, &sim->platform_ui->mjr_context());
 }
 
+// Base class for camera rendering
+class CameraRenderer {
+  private:
+    ros::Rate* rate_;
+  public:
+      ros::Publisher camera_pub_head = ros::NodeHandle().advertise<sensor_msgs::CompressedImage>("/cam_h/color/image_raw/compressed", 1);
+      ros::Publisher camera_pub_left_wrist = ros::NodeHandle().advertise<sensor_msgs::CompressedImage>("/cam_l/color/image_raw/compressed", 1);
+      ros::Publisher camera_pub_right_wrist = ros::NodeHandle().advertise<sensor_msgs::CompressedImage>("/cam_r/color/image_raw/compressed", 1);
+  
+      ros::Publisher camera_pub_head_depth = ros::NodeHandle().advertise<sensor_msgs::CompressedImage>("/cam_h/depth/image_raw/compressedDepth", 1);
+      ros::Publisher camera_pub_left_wrist_depth = ros::NodeHandle().advertise<sensor_msgs::CompressedImage>("/cam_l/depth/image_rect_raw/compressedDepth", 1);
+      ros::Publisher camera_pub_right_wrist_depth = ros::NodeHandle().advertise<sensor_msgs::CompressedImage>("/cam_r/depth/image_rect_raw/compressedDepth", 1);
+  
+      CameraRenderer(mj::Simulate* sim, double frequency = 30.0) : sim_(sim) {
+          // Initialize context for offscreen rendering
+          mjr_defaultContext(&ctx_);
+          mjr_makeContext(sim_->m_, &ctx_, mjFONTSCALE_150);
+          rate_ = new ros::Rate(frequency);
+      }
+  
+      virtual ~CameraRenderer() {
+          mjr_freeContext(&ctx_);
+          delete rate_;
+      }
+  
+      // Pure virtual function to get camera name pattern
+      virtual const char* GetCameraNamePattern() const = 0;
+  
+      // Pure virtual function to get window name
+      virtual const char* GetWindowName() const = 0;
+  
+      // Main rendering function
+      void Render() {
+          rate_->sleep(); // 控制频率
+          const mjModel* m = sim_->m_;
+          int cam_id = FindCamera(m);
+          
+          if (cam_id >= 0) {
+              RenderCameraView(cam_id);
+          }
+      }
+  
+  protected:
+      mj::Simulate* sim_;
+      mjrContext ctx_;
+  
+      int FindCamera(const mjModel* m) {
+          for (int i = 0; i < m->ncam; i++) {
+              const char* cam_name = m->names + m->name_camadr[i];
+              if (strstr(cam_name, GetCameraNamePattern()) != nullptr) {
+                  return i;
+              }
+          }
+          return -1;
+      }
+  
+      void RenderCameraView(int cam_id) {
+          if (GetWindowName() == "Head Camera View"){
+            sim_->m_->vis.map.znear = 0.0001;
+            sim_->m_->vis.map.zfar = 100;
+          }
+          else{
+            sim_->m_->vis.map.znear = 0.0001;
+            sim_->m_->vis.map.zfar = 100;
+          }
+          // Fixed window size
+          const int width = 640;
+          const int height = 480;
+  
+          // Create scene
+          mjvScene scn;
+          mjv_defaultScene(&scn);
+          mjv_makeScene(sim_->m_, &scn, 1000);
+  
+          // Setup camera
+          mjvCamera cam;
+          mjv_defaultCamera(&cam);
+          cam.type = mjCAMERA_FIXED;
+          cam.fixedcamid = cam_id;
+  
+          // Setup options
+          mjvOption opt;
+          mjv_defaultOption(&opt);
+  
+          // Create viewport
+          mjrRect viewport = {0, 0, width, height};
+  
+          // Update scene
+          mjv_updateScene(sim_->m_, sim_->d_, &opt, nullptr, &cam, mjCAT_ALL, &scn);
+  
+          // Set buffer to offscreen and render
+          mjr_setBuffer(mjFB_OFFSCREEN, &ctx_);
+          mjr_render(viewport, &scn, &ctx_);
+  
+          // Read pixels from offscreen buffer
+          int total = viewport.width * viewport.height;
+          std::unique_ptr<unsigned char[]> rgb(new unsigned char[3 * total]);
+          std::unique_ptr<float[]> depth_buffer(new float[total]);
+          mjr_readPixels(rgb.get(), depth_buffer.get(), viewport, &ctx_);
+  
+  
+          // Convert depth buffer to a 16-bit grayscale image
+          float znear = sim_->m_->vis.map.znear;
+          float zfar = sim_->m_->vis.map.zfar;
+          // std::cout << "window name: " << GetWindowName() << std::endl;
+          // std::cout << "znear: " << znear << ", zfar: " << zfar << std::endl;
+  
+  
+          // // Find the minimum and maximum values in the depth buffer
+          // float min_depth_buffer = *std::min_element(depth_buffer.get(), depth_buffer.get() + total);
+          // float max_depth_buffer = *std::max_element(depth_buffer.get(), depth_buffer.get() + total);
+          // ROS_INFO_STREAM("Depth buffer min: " << min_depth_buffer << ", max: " << max_depth_buffer);
+  
+          // 映射到真实深度
+          std::vector<float> linear_depth(total);
+          for (int i = 0; i < total; ++i) {
+              float z = depth_buffer[i];
+              // Convert to linear depth
+              linear_depth[i] = 1.0f / (z * (1.0f / zfar - 1.0f / znear) + 1.0f / znear);
+          }
+          // // Find the minimum and maximum values in linear_depth
+          // float min_linear_depth = *std::min_element(linear_depth.begin(), linear_depth.end());
+          // float max_linear_depth = *std::max_element(linear_depth.begin(), linear_depth.end());
+          // ROS_INFO_STREAM("Linear depth min: " << min_linear_depth << ", max: " << max_linear_depth);
+          
+          // 可视化（映射到16位图像）
+          std::vector<uint16_t> depth_image_16(total);
+          for (int i = 0; i < total; ++i) {
+              depth_image_16[i] = static_cast<uint16_t>(
+                std::clamp((linear_depth[i] - znear) / (zfar - znear), 0.0f, 1.0f) * 65535
+            );
+          }
+  
+          // float min_depth = *std::min_element(depth_image_16.begin(), depth_image_16.end());
+          // float max_depth = *std::max_element(depth_image_16.begin(), depth_image_16.end());
+          // ROS_INFO_STREAM("Min depth: " << min_depth << ", Max depth: " << max_depth);
+  
+          // Convert depth buffer to a compressed image format (e.g., JPEG)
+          std::vector<uchar> compressed_depth_buffer;
+          cv::Mat depth_mat_16(height, width, CV_16UC1, depth_image_16.data());
+          // cv::imencode(".jpg", depth_mat_16, compressed_depth_buffer);
+          
+          // Flip the depth image vertically
+          cv::Mat depth_mat_flipped;
+          cv::flip(depth_mat_16, depth_mat_flipped, 0);
+          cv::imencode(".png", depth_mat_flipped, compressed_depth_buffer);
+  
+          // Publish the compressed depth image as a ROS CompressedImage message
+          sensor_msgs::CompressedImage compressed_depth_msg;
+          compressed_depth_msg.header.stamp = ros::Time::now();
+          compressed_depth_msg.header.frame_id = GetWindowName();
+          compressed_depth_msg.format = "16UC1; jpeg compressed; znear=" + std::to_string(znear) + "; zfar=" + std::to_string(zfar);
+          // compressed_depth_msg.format = "16UC1; jpeg compressed";
+          compressed_depth_msg.data = compressed_depth_buffer;
+  
+          // Convert to OpenCV format
+          cv::Mat cv_rgb(viewport.height, viewport.width, CV_8UC3, rgb.get());
+          cv::Mat cv_bgr;
+          cv::cvtColor(cv_rgb, cv_bgr, cv::COLOR_RGB2BGR);
+          cv::flip(cv_bgr, cv_bgr, 0);  // Flip vertically
+  
+          // Display in window
+          cv::imshow(GetWindowName(), cv_bgr);
+          
+          // Clean up
+          mjv_freeScene(&scn);
+  
+          // Publish the image as a ROS CompressedImage message
+          sensor_msgs::CompressedImage img_msg;
+          img_msg.header.stamp = ros::Time::now();
+          img_msg.header.frame_id = GetWindowName();
+          img_msg.format = "rgb8";  // CompressedImage uses 'format' instead of 'encoding'
+  
+          // 将图像数据压缩为JPEG或PNG（此处假设rgb为原始图像）
+          // 这里需要你手动进行压缩，否则CompressedImage没有意义
+          // 示例使用 OpenCV 压缩：
+          cv::Mat image(height, width, CV_8UC3, rgb.get());
+          std::vector<uchar> buffer;
+  
+          std::string name = GetCameraNamePattern();
+          // Flip the image vertically if the camera name contains "head"
+          cv::flip(image, image, 0);
+          // Convert RGB to BGR using OpenCV
+          cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
+  
+          cv::imencode(".jpg", image, buffer);  // 或 ".png"
+  
+          img_msg.data = buffer;
+          
+          if (name.find("head") != std::string::npos) {
+            camera_pub_head.publish(img_msg);
+            // Publish the depth image
+            camera_pub_head_depth.publish(compressed_depth_msg);
+          }
+          else if (name.find("left_wrist") != std::string::npos) {
+            camera_pub_left_wrist.publish(img_msg);
+            // Publish the depth image
+            camera_pub_left_wrist_depth.publish(compressed_depth_msg);
+          }
+          else if (name.find("right_wrist") != std::string::npos) {
+            camera_pub_right_wrist.publish(img_msg);
+            // Publish the depth image
+            camera_pub_right_wrist_depth.publish(compressed_depth_msg);
+          }
+          
+          
+      }
+};
+  
+// head camera renderer
+class HeadCameraRenderer : public CameraRenderer {
+public:
+    HeadCameraRenderer(mj::Simulate* sim) : CameraRenderer(sim) {}
+
+    const char* GetCameraNamePattern() const override {
+        return "head_camera";
+    }
+
+    const char* GetWindowName() const override {
+        return "Head Camera View";
+    }
+};
+
+// left wrist camera renderer
+class LeftWristCameraRenderer : public CameraRenderer {
+  public:
+      LeftWristCameraRenderer(mj::Simulate* sim) : CameraRenderer(sim) {}
+  
+      const char* GetCameraNamePattern() const override {
+          return "left_wrist_camera";
+      }
+  
+      const char* GetWindowName() const override {
+          return "Left Wrist Camera View";
+      }
+  };
+
+// right wrist camera renderer
+class RightWristCameraRenderer : public CameraRenderer {
+  public:
+      RightWristCameraRenderer(mj::Simulate* sim) : CameraRenderer(sim) {}
+  
+      const char* GetCameraNamePattern() const override {
+          return "right_wrist_camera";
+      }
+  
+      const char* GetWindowName() const override {
+          return "Right wrist Camera View";
+      }
+  };
+
+// top camera renderer
+class TopCameraRenderer : public CameraRenderer {
+public:
+    TopCameraRenderer(mj::Simulate* sim) : CameraRenderer(sim) {}
+
+    const char* GetCameraNamePattern() const override {
+        return "top_camera";
+    }
+
+    const char* GetWindowName() const override {
+        return "Top Camera View";
+    }
+};
+
+// front camera renderer
+class FrontCameraRenderer : public CameraRenderer {
+public:
+    FrontCameraRenderer(mj::Simulate* sim) : CameraRenderer(sim) {}
+
+    const char* GetCameraNamePattern() const override {
+        return "front_camera";
+    }
+
+    const char* GetWindowName() const override {
+        return "Front Camera View";
+    }
+};
+
+// back camera renderer
+class BackCameraRenderer : public CameraRenderer {
+public: 
+    BackCameraRenderer(mj::Simulate* sim) : CameraRenderer(sim) {}
+
+    const char* GetCameraNamePattern() const override {
+        return "back_camera";
+    }     
+
+    const char* GetWindowName() const override {
+        return "Back Camera View";
+    }
+};
+
+void ShowHeadCamera(mj::Simulate* sim) {
+    static HeadCameraRenderer renderer(sim);
+    renderer.Render();
+}
+
+void ShowLeftWristCamera(mj::Simulate* sim) {
+  static LeftWristCameraRenderer renderer(sim);
+  renderer.Render();
+}
+
+void ShowRightWristCamera(mj::Simulate* sim) {
+  static RightWristCameraRenderer renderer(sim);
+  renderer.Render();
+}
+
+void ShowTopCamera(mj::Simulate* sim) {
+    static TopCameraRenderer renderer(sim);
+    renderer.Render();
+}
+
+void ShowFrontCamera(mj::Simulate* sim) {
+    static FrontCameraRenderer renderer(sim);
+    renderer.Render();
+}
+
+void ShowBackCamera(mj::Simulate* sim) {
+    static BackCameraRenderer renderer(sim);
+    renderer.Render();
+}
+  
+
 // load state from history buffer
 static void LoadScrubState(mj::Simulate* sim) {
   // get index into circular buffer
@@ -878,6 +1209,25 @@ void MakeRenderingSection(mj::Simulate* sim, const mjModel* m, int oldstate) {
     defFlag[0].pdata = sim->scn.flags + i;
     mjui_add(&sim->ui0, defFlag);
   }
+  mju::strcpy_arr(defFlag[0].name, "Head Camera");
+  defFlag[0].pdata = &sim->show_head_camera;
+  mjui_add(&sim->ui0, defFlag);
+  mju::strcpy_arr(defFlag[0].name, "Left Wrist Camera");
+  defFlag[0].pdata = &sim->show_left_wrist_camera;
+  mjui_add(&sim->ui0, defFlag);
+  mju::strcpy_arr(defFlag[0].name, "Right Wrist Camera");
+  defFlag[0].pdata = &sim->show_right_wrist_camera;
+  mjui_add(&sim->ui0, defFlag);
+  
+  mju::strcpy_arr(defFlag[0].name, "Top Camera");
+  defFlag[0].pdata = &sim->show_top_camera;
+  mjui_add(&sim->ui0, defFlag);
+  mju::strcpy_arr(defFlag[0].name, "Front Camera");
+  defFlag[0].pdata = &sim->show_front_camera;
+  mjui_add(&sim->ui0, defFlag);
+  mju::strcpy_arr(defFlag[0].name, "Back Camera");
+  defFlag[0].pdata = &sim->show_back_camera;
+  mjui_add(&sim->ui0, defFlag);
 }
 
 // make visualization section of UI
@@ -1808,6 +2158,16 @@ Simulate::Simulate(std::unique_ptr<PlatformUIAdapter> platform_ui,
       uistate(this->platform_ui->state()) {
   mjv_defaultScene(&scn);
   mjv_defaultSceneState(&scnstate_);
+
+  // Initialize ROS node and publisher
+  int argc = 0;
+  char** argv = nullptr;
+  ros::init(argc, argv, "mujoco_simulator");
+  ros::NodeHandle nh;
+
+  // set default simulation parameters
+  run = false;
+  real_time_index = 0;
 }
 
 // synchronize model and data
@@ -2397,6 +2757,46 @@ void Simulate::Render() {
     return;
   }
 
+  // update scene
+  mjv_updateScene(m_, d_, &opt, &pert, &cam, mjCAT_ALL, &scn);
+
+  // render scene
+  mjr_render(rect, &scn, &platform_ui->mjr_context());
+
+
+  // show realsense
+  if (this->show_head_camera) {
+    ShowHeadCamera(this);
+  }
+
+  if (this->show_left_wrist_camera) {
+    ShowLeftWristCamera(this);
+  }
+
+  if (this->show_right_wrist_camera) {
+    ShowRightWristCamera(this);
+  }
+
+  if (this->show_top_camera) {
+    ShowTopCamera(this);
+  }
+
+  if (this->show_front_camera) {
+    ShowFrontCamera(this);
+  }
+
+  if (this->show_back_camera) { 
+    ShowBackCamera(this);
+  }
+
+  // Handle OpenCV windows
+  int key = cv::waitKey(1);
+  if (key == 27) {  // ESC key
+    exit(0);
+  }
+
+
+
   // update UI sections from last sync
   if (pending_.ui_update_simulation) {
     if (this->ui0_enable && this->ui0.sect[SECT_SIMULATION].state) {
@@ -2593,7 +2993,7 @@ void Simulate::RenderLoop() {
   mjv_defaultOption(&this->opt);
   InitializeProfiler(this);
   InitializeSensor(this);
-  this->opt.flags[mjVIS_CONTACTFORCE] = 1;
+  this->opt.flags[mjVIS_CONTACTFORCE] = 0;
   // make empty scene
   if (!is_passive_) {
     mjv_defaultScene(&this->scn);

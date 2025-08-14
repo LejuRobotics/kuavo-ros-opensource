@@ -99,6 +99,8 @@ add_message_files(
   qv.msg
   fullBodyTargetTrajectories.msg
 
+  Rq2f85ClawCmd.msg
+  Rq2f85ClawState.msg
   # kuavo_tf2_web_republisher
   TFArray.msg
   armHandPoseFree.msg
@@ -147,6 +149,8 @@ add_service_files(
   RepublishTFs.srv
 
   twoArmHandPoseCmdFreeSrv.srv
+  
+  SetObjectPosition.srv
 )
 
 ## Generate actions in the 'action' folder
