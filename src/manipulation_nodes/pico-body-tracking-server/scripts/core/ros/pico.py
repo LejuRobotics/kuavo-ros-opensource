@@ -935,12 +935,15 @@ class KuavoPicoNode:
             
             # joy.left_x 控制 linear.y (左右横移 -0.2~0.2)
             joy_x = apply_deadzone(joy.left_x, CmdVelConstants.LINEAR_DEADZONE)
-            cmd_vel_msg.linear.y = clamp(joy_x * MAX_LINEAR_Y_SPEED, -MAX_LINEAR_Y_SPEED, MAX_LINEAR_Y_SPEED)
+            # PICO的X方向: https://developer-cn.picoxr.com/document/unreal/input-mappings/
+            # cmd_vel 控制左右横移，左是正值，右是负值
+            cmd_vel_msg.linear.y = clamp(-joy_x * MAX_LINEAR_Y_SPEED, -MAX_LINEAR_Y_SPEED, MAX_LINEAR_Y_SPEED)
             
             # 右侧摇杆控制
             # joy.right_x 控制 angular.z (旋转速度 -0.4~0.4)
             joy_right_x = apply_deadzone(joy.right_x, CmdVelConstants.LINEAR_DEADZONE)
-            cmd_vel_msg.angular.z = clamp(joy_right_x * MAX_ANGULAR_Z_SPEED, -MAX_ANGULAR_Z_SPEED, MAX_ANGULAR_Z_SPEED)
+            # PICO的X方向: https://developer-cn.picoxr.com/document/unreal/input-mappings/
+            cmd_vel_msg.angular.z = clamp(-joy_right_x * MAX_ANGULAR_Z_SPEED, -MAX_ANGULAR_Z_SPEED, MAX_ANGULAR_Z_SPEED)
             
             # 发布 cmd_vel 消息
             self.pub_cmd_vel.publish(cmd_vel_msg)
