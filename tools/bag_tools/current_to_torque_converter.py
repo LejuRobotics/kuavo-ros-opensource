@@ -60,7 +60,7 @@ class CurrentToTorqueConverter:
             
             # 13~18 为左臂ruiwo电机数据, 20~25 为右臂ruiwo电机数据
             # 对于这些电机需要先除以2.1转换回原始电流
-            if 13 <= i <= 18 or 20 <= i <= 25:
+            if 13 <= i <= 18 or 20 <= i <= 27:
                 torque = (current / 2.1) * self.c2t_coefficients[i]
             elif i == 1 or i == 2 or i == 7 or i == 8 or i == 12 or i == 19:
                 torque = (current / 1.2) * self.c2t_coefficients[i]
@@ -71,7 +71,48 @@ class CurrentToTorqueConverter:
             torque_data.append(torque)
         
         return np.array(torque_data)
-    
+
+    def torque_to_current(self, torque_data):
+        """
+        将 sensors_data_raw 中的 joint_torque 电流数据转换为扭矩数据
+        
+        Args:
+            current_data: 电流数据数组
+            
+        Returns:
+            扭矩数据数组
+        """
+        if len(torque_data) != len(self.c2t_coefficients):
+            print(f"警告: 电流数据长度({len(current_data)})与C2T系数数量({len(self.c2t_coefficients)})不匹配")
+            # 扩展或截断系数数组
+            return None
+        
+        current_data = []
+        # "MOTORS_TYPE":[
+        # "PA100_18", "PA100", "PA100", "PA100_18", "CK", "CK",
+        # "PA100_18", "PA100", "PA100", "PA100_18", "CK", "CK",
+        # "PA100", "ruiwo", "ruiwo", "ruiwo", "ruiwo", "ruiwo", "ruiwo",
+        # "PA100", "ruiwo", "ruiwo", "ruiwo", "ruiwo", "ruiwo", "ruiwo", "ruiwo", "ruiwo"],
+            
+            
+        for i, torque in enumerate(torque_data):
+            # kuavo-ros-control/src/kuavo_common/include/kuavo_common/common/kuavo_settings.h 
+            # 中定义了 ruiwo 电机电流转扭矩系数 CK_C2T = 2.1，所以这里除以 2.1 转化回原始电流
+            
+            # 13~18 为左臂ruiwo电机数据, 20~25 为右臂ruiwo电机数据
+            # 对于这些电机需要先除以2.1转换回原始电流
+            if 13 <= i <= 18 or 20 <= i <= 27:
+                current = (torque / 2.1) 
+            elif i == 1 or i == 2 or i == 7 or i == 8 or i == 12 or i == 19:
+                current = (torque / 1.2) 
+            else:
+
+                # EC 电机 sensors_data_raw 中已经是扭矩值
+                current = torque / self.c2t_coefficients[i]
+            current_data.append(current)
+        
+        return np.array(current_data)
+
     def process_rosbag(self, bag_path, output_path=None):
         """
         处理rosbag文件
@@ -104,6 +145,7 @@ class CurrentToTorqueConverter:
                     
                     # 转换为扭矩
                     torque_data = self.current_to_torque(joint_torque)
+                    current_data = self.torque_to_current(joint_torque)
                     if torque_data is None:
                         continue
                     
@@ -111,7 +153,11 @@ class CurrentToTorqueConverter:
                     torque_msg = Float64MultiArray()
                     torque_msg.data = torque_data.tolist()
                     new_bag.write('/sensor_data_motor/motor_torque', torque_msg, t)
-                    
+
+                    current_msg = Float64MultiArray()
+                    current_msg.data = current_data.tolist()
+                    new_bag.write('/sensor_data_motor/motor_current', current_msg, t)
+
                     timestamps.append(timestamp)
                     current_data_list.append(joint_torque)
                     torque_data_list.append(torque_data)
