@@ -197,8 +197,8 @@ namespace mobile_manipulator_controller
       ros::WallRate(mobileManipulatorInterface_->mpcSettings().mrtDesiredFrequency_).sleep();
     }
     ROS_INFO_STREAM("Initial policy received.");
-    mpcRunning_ = true;
-    updateRunning_ = true;
+    // mpcRunning_ = true;
+    // updateRunning_ = true;
   }
 
   int MobileManipulatorControllerBase::update(const vector_t& externalState, vector_t& nextState)
@@ -651,13 +651,13 @@ namespace mobile_manipulator_controller
       // 第三步：等待一小段时间确保内存清理完成
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       
-      // 第四步：重置MPC，确保内存清理
-      ROS_INFO("Step 3: Resetting MPC...");
-      mpc_->reset();
-      ROS_INFO("MPC reset completed");
+      // // 第四步：重置MPC，确保内存清理
+      // ROS_INFO("Step 3: Resetting MPC...");
+      // mpc_->reset();
+      // ROS_INFO("MPC reset completed");
       
-      // 第五步：再次等待确保重置完成
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      // // 第五步：再次等待确保重置完成
+      // std::this_thread::sleep_for(std::chrono::milliseconds(10));
       
     }
     catch(const std::exception& e)

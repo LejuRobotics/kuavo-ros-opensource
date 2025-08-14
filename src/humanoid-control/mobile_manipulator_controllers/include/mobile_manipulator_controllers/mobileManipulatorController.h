@@ -16,6 +16,7 @@
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <std_msgs/Int8.h>
+#include <mutex>
 
 #include <ocs2_mobile_manipulator/MobileManipulatorInterface.h>
 #include <mobile_manipulator_controllers/mobileManipulatorControllerBase.h>
@@ -76,6 +77,7 @@ namespace mobile_manipulator_controller
 
     // Humanoid specific state management
     SystemObservation humanoidObservation_, mmObservation_;
+    std::mutex mmObservationMutex_; // 保护 mmObservation_ 的互斥锁
     double comHeight_;
     double terrain_height_{0};
     size_t humanoidStateDim_{38};//12+12+14

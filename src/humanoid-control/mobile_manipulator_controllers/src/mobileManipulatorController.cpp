@@ -27,8 +27,11 @@ namespace mobile_manipulator_controller
     std::cout << "[MobileManipulatorController] com_height: " << comHeight_ << std::endl;
 
     // 初始化观测状态
-    mmObservation_.state.setZero(info_.stateDim);
-    mmObservation_.input.setZero(info_.inputDim);
+    {
+      std::lock_guard<std::mutex> lock(mmObservationMutex_);
+      mmObservation_.state.setZero(info_.stateDim);
+      mmObservation_.input.setZero(info_.inputDim);
+    }
 
     // ROS通信层
     terrainHeightSubscriber_ = nh.subscribe<std_msgs::Float64>("/humanoid/mpc/terrainHeight", 1,
@@ -79,7 +82,12 @@ namespace mobile_manipulator_controller
     if(!mpcInitialized_) {//important: only initialize once, to provide a mpc observation for the first time
       mpcInitialized_ = true;
       vector_t nextState = vector_t::Zero(info_.stateDim);
-      int result = MobileManipulatorControllerBase::update(mmObservation_.state, nextState);
+      vector_t mmObservationState;
+      {
+        std::lock_guard<std::mutex> lock(mmObservationMutex_);
+        mmObservationState = mmObservation_.state;
+      }
+      int result = MobileManipulatorControllerBase::update(mmObservationState, nextState);
       std::cout << "MPC initialized, result: " << result << std::endl;
     }
     while(!recievedObservation_) { 
@@ -98,7 +106,11 @@ namespace mobile_manipulator_controller
     
     pubHumanoid2MMTf();
     
-    vector_t externalState = mmObservation_.state;
+    vector_t externalState;
+    {
+      std::lock_guard<std::mutex> lock(mmObservationMutex_);
+      externalState = mmObservation_.state;
+    }
     if(is_play_back_mode_)
     {
       ros_logger_->publishVector("/mm/external_state_play_back", externalState);
@@ -121,7 +133,10 @@ namespace mobile_manipulator_controller
   {
     humanoidObservation_ = ros_msg_conversions::readObservationMsg(*msg);
     if(!recievedObservation_) recievedObservation_ = true;
-    convertObservationfromHumanoid2MM(humanoidObservation_, mmObservation_);
+    {
+      std::lock_guard<std::mutex> lock(mmObservationMutex_);
+      convertObservationfromHumanoid2MM(humanoidObservation_, mmObservation_);
+    }
   }
 
   void MobileManipulatorController::convertObservationfromHumanoid2MM(const SystemObservation& humanoidObservation, SystemObservation& mmOservation)
@@ -325,6 +340,13 @@ namespace mobile_manipulator_controller
 
   void MobileManipulatorController::controlBasePos(const vector_t& mmState, const vector_t& mmInput)
   {
+    // 获取当前观测状态的副本以确保线程安全
+    vector_t mmObservationState;
+    {
+      std::lock_guard<std::mutex> lock(mmObservationMutex_);
+      mmObservationState = mmObservation_.state;
+    }
+    
     Vector6d pose_now = Vector6d::Zero();
     Vector6d delta_pose = Vector6d::Zero();
     auto limitDeltaPose = [](Vector6d& delta_pose, const Vector6d& basePoseDeltaLimit, int size) {
@@ -348,21 +370,21 @@ namespace mobile_manipulator_controller
       case ManipulatorModelType::FloatingArmManipulator:
         break;
       case ManipulatorModelType::FullyActuatedFloatingArmManipulator:
-        pose_now = mmObservation_.state.head(6);
+        pose_now = mmObservationState.head(6);
         delta_pose = mmState.head(6) - pose_now;
         limitDeltaPose(delta_pose, basePoseDeltaLimit_, 6);
         msg.linear.z = pose_now(2) + delta_pose(2);
         msg.angular.y = pose_now(4) + delta_pose(4);
         break;
       case ManipulatorModelType::ActuatedXYZYawPitchManipulator:
-        pose_now.head(5) = mmObservation_.state.head(5);
+        pose_now.head(5) = mmObservationState.head(5);
         delta_pose.head(5) = mmState.head(5) - pose_now;
         limitDeltaPose(delta_pose, basePoseDeltaLimit_, 5);
         msg.linear.z = pose_now(2) + delta_pose(2);
         msg.angular.y = pose_now(4) + delta_pose(4);
         break;
       case ManipulatorModelType::ActuatedZPitchManipulator:
-        pose_now.head(6) = mmObservation_.state.head(6);
+        pose_now.head(6) = mmObservationState.head(6);
         delta_pose.head(6) = mmState.head(6) - pose_now;
         limitDeltaPose(delta_pose, basePoseDeltaLimit_, 6);
         msg.linear.z = pose_now(2) + delta_pose(2);
@@ -383,7 +405,13 @@ namespace mobile_manipulator_controller
         ROS_INFO("MPC is stopped, if you want to resume, please set control_mode to ArmOnly or BaseArm.");
       }
       else if(lastControlType_ == ControlType::None){
-        reset(mmObservation_.state);
+        vector_t mmObservationState;
+        {
+          std::lock_guard<std::mutex> lock(mmObservationMutex_);
+          mmObservationState = mmObservation_.state;
+        }
+        reset(mmObservationState);
+        ros_logger_->publishVector("/mm/reset_observation_state", mmObservationState);
         ROS_INFO_STREAM("MPC is reseted, control mode switched to " << controlTypeToString(controlType_) << ".");
         
         ROS_INFO("Waiting for MPC to fully start and begin publishing observations...");
@@ -478,7 +506,12 @@ namespace mobile_manipulator_controller
         ROS_INFO("MPC is stopped, if you want to resume, please set control_mode to ArmOnly or BaseArm.");
       }
       else if(lastControlType_ == ControlType::None){
-        reset(mmObservation_.state);
+        vector_t mmObservationState;
+        {
+          std::lock_guard<std::mutex> lock(mmObservationMutex_);
+          mmObservationState = mmObservation_.state;
+        }
+        reset(mmObservationState);
         ROS_INFO("MPC is reseted, now you can control the humanoid.");
       }
     }

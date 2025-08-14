@@ -54,8 +54,8 @@ namespace mobile_manipulator_controller
     ~MobileManipulatorControllerBase();
     int update(const vector_t& externalState, vector_t& nextState);
     int update(const vector_t& externalState, vector_t& nextState, vector_t& optimizedInput);
-    void stop() { updateRunning_ = false; observationPublishing_ = false; ikTargetManager_->stop(); }
-    void start() { updateRunning_ = true; }
+    void stop() { updateRunning_ = false; observationPublishing_ = false; ikTargetManager_->stop(); mpcRunning_ = false; }
+    void start() { updateRunning_ = true; mpcRunning_ = true; }
     bool isObservationPublishing() const { return observationPublishing_; }
     /**
      * @brief Reset the controller to the given external state
