@@ -107,8 +107,8 @@ class Utils:
 
         q_result = robot.arm_ik(left_pose, right_pose)
 
-        # if q_result is None:
-        #     raise RuntimeError("IK 求解失败，请检查目标位姿是否合理")
+        if q_result is None:
+            raise RuntimeError("IK 求解失败，请检查目标位姿是否合理")
 
         left_q = list(q_result[:7]) if mode in ["left", "both"] else []
         right_q = list(q_result[7:]) if mode in ["right", "both"] else []
