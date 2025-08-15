@@ -1,8 +1,8 @@
 import numpy as np
 import rospy
 from kuavo_humanoid_sdk.common.logger import SDKLogger
+from std_msgs.msg import Int16MultiArray
 from microphone import Microphone
-from kuavo_humanoid_sdk.kuavo.core.ros.audio import Audio
 from lib.audio_manager import DialogSession
 from lib.realtime_dialog_client import RealtimeDialogClient
 from lib import config
@@ -19,13 +19,11 @@ from typing import Optional, Dict, Any
 class ROSDialogSession(DialogSession):
     """Custom DialogSession that integrates with ROS audio system"""
     
-    def __init__(self, ws_config: Dict[str, Any], audio_interface: Audio, enable_signal_handler: bool = False):
+    def __init__(self, ws_config: Dict[str, Any], enable_signal_handler: bool = False):
         # Initialize session ID and client without calling parent __init__
         self.session_id = str(uuid.uuid4())
         self.client = RealtimeDialogClient(config=ws_config, session_id=self.session_id)
-        
-        # Store reference to audio interface for ROS audio publishing
-        self.audio_interface = audio_interface
+        self.audio_data_publisher = rospy.Publisher('audio_data', Int16MultiArray, queue_size=10)
         
         # Initialize session state variables
         self.is_running = True
@@ -273,7 +271,7 @@ class ROSDialogSession(DialogSession):
                 return
                 
             # Use the new publish_audio_chunk method from Audio class
-            success = self.audio_interface.publish_audio_chunk(audio_int_list, gain=gain)
+            success = self.publish_audio_chunk(audio_int_list, gain=gain)
             
             if not success:
                 SDKLogger.warn(f"[Speech] Failed to publish audio chunk with {len(audio_int_list)} samples")
@@ -375,6 +373,28 @@ class ROSDialogSession(DialogSession):
             SDKLogger.info("接收任务已取消")
         except Exception as e:
             SDKLogger.error(f"接收消息错误: {e}")
+            
+    def publish_audio_chunk(self, audio_chunk, gain: int = 1):
+        """Publish a single audio chunk to the topic, for real-time audio streaming"""
+        try:
+            if not audio_chunk:
+                return False
+                
+            # 应用增益
+            amplified_chunk = [int(sample * gain) for sample in audio_chunk]
+            
+            # 创建并发布消息
+            msg = Int16MultiArray()
+            msg.data = amplified_chunk
+            
+            self.audio_data_publisher.publish(msg)
+            # SDKLogger.debug(f"[Robot Audio] 发布音频块，大小: {len(amplified_chunk)}")
+            
+            return True
+            
+        except Exception as e:
+            SDKLogger.error(f"[Robot Audio] 发布音频块时出错: {e}")
+            return False
 
 
 class RobotLLMDoubaoCore:
@@ -384,7 +404,6 @@ class RobotLLMDoubaoCore:
         self.microphone = Microphone(subscribe_topic)
         
         # ROS Audio interface for direct topic publishing
-        self.ros_audio = Audio()
 
         # Audio parameters
         self.SAMPLE_RATE = 16000
@@ -507,7 +526,7 @@ class RobotLLMDoubaoCore:
         # Setup WebSocket configuration
         self._setup_websocket_config(app_id, access_key)
         # Use custom ROS-integrated DialogSession with Audio interface
-        self.dialog_session = ROSDialogSession(self.ws_config, self.ros_audio, enable_signal_handler=False)
+        self.dialog_session = ROSDialogSession(self.ws_config, enable_signal_handler=False)
 
         # Test connection using event loop
         try:
@@ -605,3 +624,4 @@ class RobotLLMDoubaoCore:
                 status["logid"] = self.dialog_session.client.logid
                 
         return status
+
