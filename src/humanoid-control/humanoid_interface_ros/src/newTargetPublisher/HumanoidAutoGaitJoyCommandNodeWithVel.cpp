@@ -273,6 +273,8 @@ namespace ocs2
       loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
       loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
       loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
+      loadData::loadCppDataType(referenceFile, "cmdvelLinearZLimit", c_relative_base_limit_[2]);
+      std::cout << "cmdvelLinearZLimit:" << c_relative_base_limit_[2] << std::endl;
       loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
 
 

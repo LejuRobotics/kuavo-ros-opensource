@@ -9,6 +9,7 @@ import os
 from typing import Dict, Any, Tuple, Optional
 from sensor_msgs.msg import Joy
 from std_msgs.msg import String, Bool
+from geometry_msgs.msg import Twist
 from kuavo_msgs.srv import playmusic, playmusicRequest
 from kuavo_msgs.srv import ExecuteArmAction, ExecuteArmActionRequest
 from std_srvs.srv import Trigger
@@ -103,6 +104,7 @@ class JoyCustomizeConfigNode:
         # Publishers for robot control (align with C++ behavior)
         self.stop_pub = rospy.Publisher("/stop_robot", Bool, queue_size=10)
         self.re_start_pub = rospy.Publisher("/re_start_robot", Bool, queue_size=10)
+        self.cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
 
     def _resolve_customize_config_path(self) -> str:
         try:
@@ -354,6 +356,7 @@ class JoyCustomizeConfigNode:
             if 0 <= start_idx < len(joy_msg.buttons) and 0 <= back_idx < len(joy_msg.buttons):
                 if joy_msg.buttons[start_idx] and joy_msg.buttons[back_idx]:
                     rospy.logerr("[JoyCustomize] Emergency stop triggered (START + BACK)")
+                    self._gradually_move_right_stick_down()
                     self._call_terminate_srv()
                     self._allow_launch_once = True
                     self._robot_launched = False
@@ -594,6 +597,13 @@ class JoyCustomizeConfigNode:
             print(f"Failed to start {TAIJI_ACTION_SESSION_NAME}")
             raise Exception(f"Failed to start {TAIJI_ACTION_SESSION_NAME}")
     
+    def _gradually_move_right_stick_down(self, time=0.1, times=10) -> None:
+        while times > 0:
+            cmd_vel_msg = Twist()
+            cmd_vel_msg.linear.z = -0.2
+            self.cmd_vel_pub.publish(cmd_vel_msg)
+            rospy.sleep(time)
+            times -= 1
 
     def _start_humanoid_robot(self):
         # 如果按下 start 就运行launch_humanoid_robot 函数
