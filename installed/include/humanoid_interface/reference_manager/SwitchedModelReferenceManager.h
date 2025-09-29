@@ -30,6 +30,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
 #include "humanoid_interface/foot_planner/SwingTrajectoryPlanner.h"
+#include "humanoid_interface/common/ModelSettings.h"
 
 #include <ocs2_core/thread_support/Synchronized.h>
 #include <ocs2_oc/synchronized_module/ReferenceManager.h>
@@ -89,7 +90,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
                                 std::shared_ptr<SwingTrajectoryPlanner> swingTrajectoryPtr, 
                                 const PinocchioInterface& pinocchioInterface,
                                 const CentroidalModelInfo& info,
-                                const std::vector<std::string>& contactNames3DoF = {},
+                                const ModelSettings& modelSettings,
                                 RobotVersion rbVersion = RobotVersion(4, 5));
 
   ~SwitchedModelReferenceManager() override = default;
