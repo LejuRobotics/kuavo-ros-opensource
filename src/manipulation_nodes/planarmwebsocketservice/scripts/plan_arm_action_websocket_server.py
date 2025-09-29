@@ -37,7 +37,7 @@ from kuavo_ros_interfaces.msg import planArmState
 # Set to store active WebSocket connections
 active_connections: Set[websockets.WebSocketServerProtocol] = set()
 
-ROBOT_NAME = os.getenv("ROBOT_NAME", "KUAVO")
+ROBOT_NAME = os.getenv("ROBOT_NAME", "Roban 2.1-4")
 ROBOT_USERNAME = "lab"
 BROADCAST_PORT = 8443
 package_name = 'planarmwebsocketservice'

@@ -405,26 +405,22 @@ class JoyCustomizeConfigNode:
             # 非阻塞轮询一次（限频），用于推进 ready -> launched 的流程
             self._check_and_update_launch_status_nonblocking()
 
-            # 如果到了 ready_stance 或 launched，本帧直接返回，保持 STOP 优先级与流程自然推进
-            if self._launch_phase in ["waiting_ready", "ready"] and self._last_launch_status == "ready_stance":
-                # 第一次阶段完成：允许下一次 START 触发站立
-                self._allow_launch_once = False
-                self._launch_phase = "ready"
-                self._prev_buttons = list(joy_msg.buttons)
-                self._prev_axes = list(joy_msg.axes)
-                return
-            if self._launch_phase in ["waiting_launched", "launched"] and self._last_launch_status == "launched":
-                self._robot_launched = True
-                self._launch_phase = "launched"
-                self._prev_buttons = list(joy_msg.buttons)
-                self._prev_axes = list(joy_msg.axes)
-                return
-
             # 在机器人未完全站立前，不允许按键组合动作
             if not self._robot_launched:
-                self._prev_buttons = list(joy_msg.buttons)
-                self._prev_axes = list(joy_msg.axes)
-                return
+                # 如果到了 ready_stance 或 launched，本帧直接返回，保持 STOP 优先级与流程自然推进
+                if self._launch_phase in ["waiting_ready", "ready"] and self._last_launch_status == "ready_stance":
+                    # 第一次阶段完成：允许下一次 START 触发站立
+                    self._allow_launch_once = False
+                    self._launch_phase = "ready"
+                    self._prev_buttons = list(joy_msg.buttons)
+                    self._prev_axes = list(joy_msg.axes)
+                    return
+                if self._launch_phase in ["waiting_launched", "launched"] and self._last_launch_status == "launched":
+                    self._robot_launched = True
+                    self._launch_phase = "launched"
+                    self._prev_buttons = list(joy_msg.buttons)
+                    self._prev_axes = list(joy_msg.axes)
+                    return
 
             # 检查M1按键状态
             if 0 <= m1_idx < len(joy_msg.buttons):

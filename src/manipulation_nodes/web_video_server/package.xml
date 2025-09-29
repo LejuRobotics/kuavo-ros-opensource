@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>web_video_server</name>
+  <version>0.2.2</version>
+  <description>HTTP Streaming of ROS Image Topics in Multiple Formats</description>
+
+  <maintainer email="blazej@fictionlab.pl">Błażej Sowa</maintainer>
+
+  <license>BSD</license>
+
+  <url type="website">http://ros.org/wiki/web_video_server</url>
+  <url type="bugtracker">https://github.com/RobotWebTools/web_video_server/issues</url>
+  <url type="repository">https://github.com/RobotWebTools/web_video_server</url>
+
+  <author email="mwills@wpi.edu">Mitchell Wills</author>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>roscpp</build_depend>
+  <build_depend>roslib</build_depend>
+  <build_depend>cv_bridge</build_depend>
+  <build_depend>image_transport</build_depend>
+  <build_depend>async_web_server_cpp</build_depend>
+  <build_depend>ffmpeg</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+
+  <exec_depend>roscpp</exec_depend>
+  <exec_depend>roslib</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>image_transport</exec_depend>
+  <exec_depend>async_web_server_cpp</exec_depend>
+  <exec_depend>ffmpeg</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+</package>

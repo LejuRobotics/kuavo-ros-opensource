@@ -1,0 +1,11 @@
+<launch>
+  <node pkg="web_video_server" type="web_video_server" name="web_video_server" output="screen">
+<!--     <param name="port" type="int" value="8080" /> -->
+<!--     <param name="address" type="string" value="10.10.20.207" /> -->
+<!--     <param name="server_threads" type="int" value="1" /> -->
+<!--     <param name="ros_threads" type="string" value="2" /> -->
+<!--     <param name="width" type="int" value="640" /> -->
+<!--     <param name="height" type="int" value="480" /> -->
+<!--     <param name="quality" type="int" value="90" /> -->
+  </node>
+</launch>

@@ -1266,6 +1266,23 @@ def monitor_and_stop(process):
             try:
                 process.wait(timeout=3)
                 terminate_process_result = True
+                
+                # 在终端执行命令
+                print("Execute command:------------------------------------")
+                # subprocess.run(["bash", "-c", "cd /home/lab/kuavo-ros-control && source /home/lab/.bashrc && source /opt/ros/noetic/setup.bash && source /home/lab/kuavo-ros-control/devel/setup.bash && rostopic pub --once /robot_head_motion_data kuavo_msgs/robotHeadMotionData 'joint_data: [0,0]'"], shell=False)
+
+                try:
+                    subprocess.run([
+                        "bash", "-c",
+                        "cd /home/lab/kuavo-ros-control && "
+                        "source /home/lab/.bashrc && "
+                        "source /opt/ros/noetic/setup.bash && "
+                        "source /home/lab/kuavo-ros-control/devel/setup.bash && "
+                        "rostopic pub --once /robot_head_motion_data kuavo_msgs/robotHeadMotionData 'joint_data: [0,0]'"
+                    ], shell=False, timeout=1)  # 最多等 5 秒
+                except subprocess.TimeoutExpired:
+                    print("Error: rostopic pub timed out. Is roscore running?")
+
             except subprocess.TimeoutExpired:
                 print("Forced kill the target process")
                 process.kill()
@@ -1617,6 +1634,8 @@ async def stop_execute_demo_handler(
     if not terminate_process_result:
         payload.data["code"] = 1
         payload.data["msg"] = "Failed to stop demo execution"
+
+
 
     response = Response(
         payload=payload,

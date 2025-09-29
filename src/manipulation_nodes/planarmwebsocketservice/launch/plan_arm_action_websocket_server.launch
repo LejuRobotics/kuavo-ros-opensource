@@ -10,6 +10,15 @@
   <!-- 添加模型库路径 -->
   <env name="PYTHONPATH" value="$(env PYTHONPATH):$(find planarmwebsocketservice)/scripts/model_lib" />
   <node pkg="planarmwebsocketservice" type="plan_arm_action_websocket_server.py" name="plan_arm_action_websocket_server" output="screen" args="--robot_type=$(arg robot_type)">
-  
+
+
   </node>
+
+  <!--启动web_video_server节点 -->
+  <node pkg="web_video_server" type="web_video_server" name="web_video_server" output="screen" args="--ros-args -r /image:=/image_raw"/>
+
+    <!--   启动camera_management节点 -->
+  <node pkg="camera_management" type="main.py" name="camera_management" output="screen" />
+
+
 </launch>
