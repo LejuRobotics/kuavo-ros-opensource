@@ -57,10 +57,8 @@
   <build_export_depend>sensor_msgs</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
   <build_export_depend>web_video_server</build_export_depend>
-  <build_export_depend>camera_management</build_export_depend>
   <build_export_depend>trajectory_msgs</build_export_depend>
   <exec_depend>rospy</exec_depend>
-  <exec_depend>camera_management</exec_depend>
   <exec_depend>web_video_server</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>

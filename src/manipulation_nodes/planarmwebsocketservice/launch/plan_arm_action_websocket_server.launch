@@ -17,8 +17,5 @@
   <!--启动web_video_server节点 -->
   <node pkg="web_video_server" type="web_video_server" name="web_video_server" output="screen" args="--ros-args -r /image:=/image_raw"/>
 
-    <!--   启动camera_management节点 -->
-  <node pkg="camera_management" type="main.py" name="camera_management" output="screen" />
-
 
 </launch>

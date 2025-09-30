@@ -1274,10 +1274,10 @@ def monitor_and_stop(process):
                 try:
                     subprocess.run([
                         "bash", "-c",
-                        "cd /home/lab/kuavo-ros-control && "
+                        "cd /home/lab/kuavo-ros-opensource && "
                         "source /home/lab/.bashrc && "
                         "source /opt/ros/noetic/setup.bash && "
-                        "source /home/lab/kuavo-ros-control/devel/setup.bash && "
+                        "source /home/lab/kuavo-ros-opensource/devel/setup.bash && "
                         "rostopic pub --once /robot_head_motion_data kuavo_msgs/robotHeadMotionData 'joint_data: [0,0]'"
                     ], shell=False, timeout=1)  # 最多等 5 秒
                 except subprocess.TimeoutExpired:

@@ -117,8 +117,9 @@ def verify_robot_version(file_path: str):
         41: [41],
         42: [42],
         45: [43, 45, 46, 48, 49],
-        11: [11, 13],
-        13: [11, 13],
+        11: [11, 13, 14],
+        13: [11, 13, 14],
+        14: [11, 13, 14]
     }
     allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
     if robot_version not in allowed_robot_versions:
