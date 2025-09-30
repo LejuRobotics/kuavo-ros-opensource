@@ -392,7 +392,7 @@ class JoyCustomizeConfigNode:
                         return
                     else:
                         # 第二阶段：仅在 ready 状态下触发一次初始化服务
-                        if self._launch_phase == "ready" else self._launch_phase == "idle":
+                        if self._launch_phase == "ready" or self._launch_phase == "idle":
                             rospy.loginfo("[JoyCustomize] START pressed: calling real initialize service (once)")
                             self._call_real_initialize_srv()
                             self._launch_phase = "waiting_launched"
