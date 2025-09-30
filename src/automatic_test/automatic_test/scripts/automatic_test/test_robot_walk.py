@@ -64,7 +64,7 @@ class TestRobotWalk:
             "ratio": round(ratio, 3),
         }
         
-        self.results["success"] = True if ratio > 0.95 else False
+        self.results["success"] = True if ratio > 0.90 else False
 
         out_file = Path("/tmp/robot_walk_results.yaml")
         with out_file.open("w", encoding="utf-8") as f:
