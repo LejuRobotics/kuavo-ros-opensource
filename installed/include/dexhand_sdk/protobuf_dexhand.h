@@ -30,7 +30,7 @@ public:
     DexHandFwType getDexHandFwType() override;
 
     // See DexHandBase::getDeviceInfo for details
-    DeviceInfo_t getDeviceInfo() override;
+    bool getDeviceInfo(DeviceInfo_t& info) override;
 
     // See DexHandBase::setFingerPositions for details
     void setFingerPositions(const UnsignedFingerArray &positions) override;
@@ -39,7 +39,7 @@ public:
     void setFingerSpeeds(const FingerArray &speeds) override;
 
     // See DexHandBase::getFingerStatus for details
-    FingerStatus getFingerStatus() override;
+    bool getFingerStatus(FingerStatus& status) override;
 
     // See DexHandBase::setGripForce for details
     void setGripForce(GripForce level) override;
