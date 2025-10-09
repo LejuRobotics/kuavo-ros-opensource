@@ -3,6 +3,7 @@
 ## Breaking Changes
 
 ## 文档相关
+- 优化运动控制 API 文档，补充revo2灵巧手以及末端相关话题/服务的约束条件，[文档链接](./docs/运动控制API.md)
 - PICO VR 全身遥操作补充使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
 - 补充桌面端节点服务开机自启动使用说明，[文档链接](./src/manipulation_nodes/planarmwebsocketservice/README.md)
 - PICO VR 更新数据格式约定文档，添加 Protobuf 数据结构及服务接口说明，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/docs/api_docs.md)
@@ -12,6 +13,7 @@
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- 更新强脑灵巧手SDK版本从`0.4.4`到`0.9.1`版本可支持自定义can协议
 - Kuavo Humanoid SDK  新增原子策略行为树版本搬箱子
 - Tact 动作文件适配 Roban 机器人，在原先基础上支持灵巧手, 头和腰部的控制描述
 - Kuavo Humanoid SDK 移除重复头部控制和手臂控制类的接口，这些接口从`1.2.2`版本开始废弃，并计划在 2026-06-30 移除
@@ -41,6 +43,7 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复当获取灵巧手手指状态失败时，手指状态话题发布一些错误数据的问题
 - 键盘控制手臂移动功能优化, 支持双手控制及自由切换, 修复手臂移动累计误差的问题
 - 修复VR过程中可以通过侧扳机固定手臂功能
 - 修复机器初始化时两个夹爪张开角度可能不一致问题
@@ -83,6 +86,7 @@
 - 修复 Quest3 打开`control_torso`控制躯干模式时躯干会下蹲到最低问题
 
 ## 其他改进
+- 调整灵巧手 SDK 日志级别避免终端过多打印刷屏
 - 新增工具: 编译蓝牙内核模块脚本，[使用文档链接](./tools/bluetooth_tool/README.md)
 - 新增工具: 将电机正反转、零偏和限位等数据打包成约定的json文件，[工具文档链接](./tools/get_joint_data/README.md)
 - 增加大小臂长度以及大小臂的比例分析工具，用于分析quest3设备机器人手臂表现不同的问题，[工具文档链接](./tools/vr_test_tool/README.md)
