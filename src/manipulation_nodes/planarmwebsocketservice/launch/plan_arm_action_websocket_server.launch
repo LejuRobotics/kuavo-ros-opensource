@@ -14,8 +14,7 @@
 
   </node>
 
-  <!--启动web_video_server节点 -->
-  <node pkg="web_video_server" type="web_video_server" name="web_video_server" output="screen" args="--ros-args -r /image:=/image_raw"/>
-
+  <!--启动web_video_server launch节点 -->
+  <include file="$(find web_video_server)/launch/web_video_server.launch" />
 
 </launch>
