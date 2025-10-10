@@ -1,4 +1,5 @@
 <launch>
+  <arg name="start_camera" default="false"/>
   <node pkg="web_video_server" type="web_video_server" name="web_video_server" output="screen">
 <!--     <param name="port" type="int" value="8080" /> -->
 <!--     <param name="address" type="string" value="10.10.20.207" /> -->
@@ -8,6 +9,8 @@
 <!--     <param name="height" type="int" value="480" /> -->
 <!--     <param name="quality" type="int" value="90" /> -->
   </node>
-    <include file="$(find realsense2_camera)/launch/rs_camera.launch" >
-  </include>
+  <group if="$(arg start_camera)">
+      <include file="$(find realsense2_camera)/launch/rs_camera.launch" >
+    </include>
+  </group>
 </launch>
