@@ -8,4 +8,6 @@
 <!--     <param name="height" type="int" value="480" /> -->
 <!--     <param name="quality" type="int" value="90" /> -->
   </node>
+    <include file="$(find realsense2_camera)/launch/rs_camera.launch" >
+  </include>
 </launch>
