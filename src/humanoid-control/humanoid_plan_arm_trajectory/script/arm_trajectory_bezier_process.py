@@ -40,7 +40,7 @@ class ArmTrajectoryBezierDemo:
         self.arm_flag = False
         self._timer = None
         self.interrupt_flag  = False  
-        self.robot_version = rospy.get_param('/robot_version', 40)
+        self.robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
         self.robot_class = KUAVO if self.robot_version >= 40 else ROBAN
         
         if self.robot_class == KUAVO:

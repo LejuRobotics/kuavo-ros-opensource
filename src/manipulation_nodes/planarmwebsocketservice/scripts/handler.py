@@ -528,10 +528,14 @@ update_joy_config_pub = None
 def timer_callback(event):
     global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub
     if g_robot_type == "ocs2" and len(ocs2_joint_state.position) > 0 and plan_arm_state_status is False:
-        kuavo_arm_traj_pub.publish(ocs2_joint_state)
-        control_hand_pub.publish(ocs2_hand_state)
-        control_head_pub.publish(ocs2_head_state)
-        control_waist_pub.publish(ocs2_waist_state)
+        if len(ocs2_joint_state.position) != 0:
+            kuavo_arm_traj_pub.publish(ocs2_joint_state)
+        if len(ocs2_hand_state.left_hand_position) != 0 or len(ocs2_hand_state.right_hand_position) != 0:
+            control_hand_pub.publish(ocs2_hand_state)
+        if len(ocs2_head_state.joint_data) != 0:
+            control_head_pub.publish(ocs2_head_state)
+        if len(ocs2_waist_state.data) != 0:
+            control_waist_pub.publish(ocs2_waist_state)
 
 def init_publishers():
     global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub, update_h12_config_pub, update_joy_config_pub, load_map_pub

@@ -29,7 +29,32 @@ if [ -z "$ROBOT_NAME" ]; then
 fi
  
 echo "Current ROBOT_NAME: $ROBOT_NAME"
+echo "Current robot version: $ROBOT_VERSION"
 
+if [ -z "$ROS_MASTER_URI" ]; then
+    ROS_MASTER_URI="http://localhost:11311"
+    echo "ROS_MASTER_URI is empty, using default: $ROS_MASTER_URI"
+fi
+
+if [ -z "$ROS_IP" ]; then
+    ROS_IP="127.0.0.1"
+    echo "ROS_IP is empty, using default: $ROS_IP"
+fi
+
+if [ -z "$ROS_HOSTNAME" ]; then
+    if [ "$ROS_MASTER_URI" == "http://kuavo_master:11311" ]; then
+        ROS_HOSTNAME=kuavo_master  
+        echo "ROS_MASTER_URI is http://kuavo_master:11311, using ROS_HOSTNAME: $ROS_HOSTNAME"
+    fi
+fi
+
+echo "Current ROS_MASTER_URI: $ROS_MASTER_URI"
+echo "Current ROS_IP: $ROS_IP"
+echo "Current ROS_HOSTNAME:$ROS_HOSTNAME"
+
+sed -i "s|^Environment=ROS_MASTER_URI=.*|Environment=ROS_MASTER_URI=$ROS_MASTER_URI|" $SERVICE_FILE
+sed -i "s|^Environment=ROS_IP=.*|Environment=ROS_IP=$ROS_IP|" $SERVICE_FILE
+sed -i "s|^Environment=ROS_HOSTNAME=.*|Environment=ROS_HOSTNAME=$ROS_HOSTNAME|" $SERVICE_FILE
 
 sudo sed -i "s|^Environment=ROBOT_NAME=.*|Environment=ROBOT_NAME=$ROBOT_NAME|" $SERVICE_FILE
 
