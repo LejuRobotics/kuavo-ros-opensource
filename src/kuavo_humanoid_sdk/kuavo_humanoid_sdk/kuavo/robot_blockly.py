@@ -653,7 +653,7 @@ class RobotControlBlockly:
             rospy.logerr(f"Service call failed: {e}")
             return False
 
-    def excute_action_file(self, action_file: str, proj_name: str = None, music_file: str = None):
+    def execute_action_file(self, action_file: str, proj_name: str = None, music_file: str = None):
         """Execute an action file, parse action frames, and send Bezier trajectory request to the robot.
 
         Args:
@@ -817,6 +817,7 @@ class RobotControlBlockly:
     def to_stance(self):
         """Return the robot to the standard standing posture, including arm reset and head centering."""
         try:
+            global control_hand_pub
             self.arm_reset()
             self.control_robot_head(0, 0)
             self.control_waist_rotation(0)
