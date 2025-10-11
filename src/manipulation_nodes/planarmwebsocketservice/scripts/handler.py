@@ -81,6 +81,27 @@ WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME = "websocket_humanoid_robot_service"
 # 机器人状态跟踪变量，用于跟踪机器人当前状态: unlaunch, crouching, standing
 robot_status = "unlaunch"  # 默认状态为未启动
 
+def update_robot_status_from_service():
+    """
+    从 /humanoid_controller/real_launch_status 服务获取机器人状态并更新全局 robot_status
+    """
+    global robot_status
+    try:
+        success, status_message = robot_instance.get_robot_launch_status()
+        if success:
+            # 映射服务返回的状态到我们的状态系统
+            if status_message == "ready_stance":
+                robot_status = "crouching"
+            elif status_message == "launched":
+                robot_status = "standing"
+            else:
+                robot_status = "unlaunch"
+        else:
+            robot_status = "unlaunch"
+    except Exception as e:
+        print(f"Failed to update robot status from service: {e}")
+        robot_status = "unlaunch"
+
 def check_real_kuavo():
     try:
         # optimize: 简单通过检查零点文件来判断是否为实物, 可优化判断条件
@@ -537,6 +558,12 @@ def timer_callback(event):
         if len(ocs2_waist_state.data) != 0:
             control_waist_pub.publish(ocs2_waist_state)
 
+def robot_status_timer_callback(event):
+    """
+    定时更新机器人状态的回调函数
+    """
+    update_robot_status_from_service()
+
 def init_publishers():
     global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub, update_h12_config_pub, update_joy_config_pub, load_map_pub
     kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
@@ -560,6 +587,9 @@ async def init_ros_node():
     
     # Create a timer that calls timer_callback every 10ms (100Hz)
     rospy.Timer(rospy.Duration(0.01), timer_callback)
+    
+    # Create a timer that calls robot_status_timer_callback every 1 second to update robot status
+    rospy.Timer(rospy.Duration(1.0), robot_status_timer_callback)
 
     print("ROS node initialized")
 
@@ -1967,7 +1997,8 @@ async def get_robot_launch_status_handler(
     )
     
     try:
-        # 直接返回维护的机器人状态
+        # 从服务动态获取机器人状态
+        update_robot_status_from_service()
         payload.data["code"] = 0
         payload.data["status"] = robot_status
         payload.data["message"] = "Get robot status successfully"
