@@ -5,24 +5,64 @@ import json
 import threading
 import subprocess
 import time
-from typing import Dict, Any
+import os
+from typing import Dict, Any, Tuple, Optional
 from sensor_msgs.msg import Joy
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
+from geometry_msgs.msg import Twist
 from kuavo_msgs.srv import playmusic, playmusicRequest
 from kuavo_msgs.srv import ExecuteArmAction, ExecuteArmActionRequest
+from std_srvs.srv import Trigger
 
+HUMANOID_ROBOT_SESSION_NAME = "humanoid_robot"
+LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch start_way:=auto"
+LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch start_way:=auto"
+ROBOT_VERSION = os.getenv('ROBOT_VERSION', "")
+ROS_MASTER_URI = os.getenv("ROS_MASTER_URI", "")
+ROS_IP = os.getenv("ROS_IP", "")
+ROS_HOSTNAME = os.getenv("ROS_HOSTNAME", "")
+KUAVO_ROS_CONTROL_WS_PATH = os.getenv("KUAVO_ROS_CONTROL_WS_PATH", "/home/lmx/real_ws/kuavo-ros-control")
+TAIJI_ACTION_SESSION_NAME = "taiji_action"
 
 class JoyCustomizeConfigNode:
     def __init__(self) -> None:
         rospy.init_node("joy_customize_config")
 
         # Params
-        self.joystick_type = rospy.get_param("~joystick_type", rospy.get_param("joystick_type", "bt2pro"))
-        self.channel_map_path = rospy.get_param(
-            "~channel_map_path",
-            rospy.get_param("channel_map_path", "")
-        )
-        self.joystick_sensitivity = float(rospy.get_param("~joystick_sensitivity", rospy.get_param("joystick_sensitivity", 20)))
+        self.joystick_type = rospy.get_param("/joystick_type", "bt2")
+        self.channel_map_path = rospy.get_param("/channel_map_path", "")
+        self.joystick_sensitivity = float(rospy.get_param("/joystick_sensitivity", 20))
+        self.joy_execute_action = rospy.get_param("/joy_execute_action", True)
+        self.real = rospy.get_param("/real", True)
+        self.start_way = rospy.get_param("/start_way", "manual")
+
+        # Load customize config.json (within joy package)
+        self.customize_config_path = self._resolve_customize_config_path()
+        self.customize_config: Dict[str, Any] = {}
+        self._load_customize_config()
+
+        # Constants for different joystick models (align with C++ node)
+        self.JOYSTICK_BUTTON_NUM_BT2PRO = 16  # BEITONG
+        self.JOYSTICK_BUTTON_NUM_BT2 = 11     # X-Box
+
+        # Internal state for edge detection
+        self._prev_buttons = []
+        self._prev_axes = []
+        
+        # M1/M2 button states for combination detection
+        self._m1_pressed = False
+        self._m2_pressed = False
+
+        # LT/RT axis states for combination detection
+        self._lt_pressed = False
+        self._rt_pressed = False
+
+        # Default expected counts; will be adjusted by autodetect
+        if self.joystick_type == "bt2pro":
+            self.JOYSTICK_BUTTON_NUM = self.JOYSTICK_BUTTON_NUM_BT2PRO
+        elif self.joystick_type == "bt2":
+            self.JOYSTICK_BUTTON_NUM = self.JOYSTICK_BUTTON_NUM_BT2
+        self.JOYSTICK_AXIS_NUM = 8
 
         # Resolve default channel_map_path if empty
         if not self.channel_map_path:
@@ -36,29 +76,35 @@ class JoyCustomizeConfigNode:
         self.joy_button_map: Dict[str, int] = {}
         self.joy_axis_map: Dict[str, int] = {}
         self._load_joy_channel_mapping(self.channel_map_path)
+        
+        # Try to autodetect joystick type and reload mapping safely
+        try:
+            self._autodetect_and_set_joystick_type()
+        except Exception as e:
+            rospy.logwarn(f"Autodetect joystick type failed: {e}")
 
-        # Load customize config.json (within joy package)
-        self.customize_config_path = self._resolve_customize_config_path()
-        self.customize_config: Dict[str, Any] = {}
-        self._load_customize_config()
+        rospy.loginfo(f"joy_customize_config started. joystick_type={self.joystick_type}, map={self.channel_map_path}")
+        rospy.loginfo(f"customize_config={self.customize_config_path}")
+
+        # One-time launch switch: True -> first START launches robot; False -> START triggers initialize service
+        self._allow_launch_once = True
+        # Only allow action combos after robot is fully launched (stand up complete)
+        self._robot_launched = False
+        # Polling config for launch status service
+        self._status_poll_interval = float(rospy.get_param("/launch_status_poll_interval", 1.0))
+        # Non-blocking launch state machine
+        self._launch_phase = "idle"  # idle | waiting_ready | ready | waiting_launched | launched
+        self._last_status_check_time = 0.0
+        self._last_launch_status = "unknown"
 
         # Subscribers
         self.joy_sub = rospy.Subscriber("/joy", Joy, self._joy_callback, queue_size=10)
         self.update_sub = rospy.Subscriber("/update_joy_customize_config", String, self._update_config_callback, queue_size=1)
 
-        # Internal state for edge detection
-        self._prev_buttons = []
-        self._prev_axes = []
-        
-        # M1/M2 button states for combination detection
-        self._m1_pressed = False
-        self._m2_pressed = False
-
-        self.JOYSTICK_BUTTON_NUM = 16
-        self.JOYSTICK_AXIS_NUM = 8
-
-        rospy.loginfo(f"joy_customize_config started. joystick_type={self.joystick_type}, map={self.channel_map_path}")
-        rospy.loginfo(f"customize_config={self.customize_config_path}")
+        # Publishers for robot control (align with C++ behavior)
+        self.stop_pub = rospy.Publisher("/stop_robot", Bool, queue_size=10)
+        self.re_start_pub = rospy.Publisher("/re_start_robot", Bool, queue_size=10)
+        self.cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
 
     def _resolve_customize_config_path(self) -> str:
         try:
@@ -72,8 +118,8 @@ class JoyCustomizeConfigNode:
             except Exception:
                 # Final fallback: relative known repo layout
                 return rospy.get_param(
-                    "~customize_config_path",
-                    "/home/lmx/real_ws/kuavo-ros-control/src/humanoid-control/joystick_drivers/joy/config/customize_config.json",
+                    "/customize_config_path",
+                    f"{KUAVO_ROS_CONTROL_WS_PATH}/src/humanoid-control/joystick_drivers/joy/config/customize_config.json",
                 )
 
     def _convert_button_names(self, button_map: Dict[str, int]) -> Dict[str, int]:
@@ -119,6 +165,105 @@ class JoyCustomizeConfigNode:
         except Exception as e:
             rospy.logwarn(f"Failed to load customize_config.json: {self.customize_config_path}, error: {e}")
             self.customize_config = {}
+
+    def _get_device_name(self, dev_path: str) -> str:
+        try:
+            base = os.path.basename(dev_path)
+            sysfs_path = f"/sys/class/input/{base}/device/name"
+            with open(sysfs_path, "r") as f:
+                name = f.read().strip()
+            return name
+        except Exception:
+            return ""
+
+    def _set_joystick_type_and_reload(self, new_type: str) -> None:
+        if not new_type:
+            return
+        try:
+            humanoid_controllers_path = rospkg.RosPack().get_path("humanoid_controllers")
+            new_map_path = f"{humanoid_controllers_path}/launch/joy/{new_type}.json"
+        except Exception as e:
+            rospy.logwarn(f"Resolve mapping path failed for {new_type}: {e}")
+            return
+
+        # Preserve old mapping/state
+        old_button_map = dict(self.joy_button_map)
+        old_prev_buttons = list(self._prev_buttons) if self._prev_buttons else []
+
+        # Load new mapping
+        self.joystick_type = new_type
+        self.channel_map_path = new_map_path
+        self._load_joy_channel_mapping(new_map_path)
+
+        # Update expected button count
+        if new_type == "bt2pro":
+            self.JOYSTICK_BUTTON_NUM = self.JOYSTICK_BUTTON_NUM_BT2PRO
+        elif new_type == "bt2":
+            self.JOYSTICK_BUTTON_NUM = self.JOYSTICK_BUTTON_NUM_BT2
+
+        # Rebuild previous buttons to match new mapping
+        if old_prev_buttons:
+            self._prev_buttons = self._rebuild_prev_buttons_for_new_map(
+                old_prev_buttons, old_button_map, self.joy_button_map, self.JOYSTICK_BUTTON_NUM
+            )
+        else:
+            self._prev_buttons = [0] * self.JOYSTICK_BUTTON_NUM
+        self._prev_axes = [0.0] * self.JOYSTICK_AXIS_NUM
+        rospy.logwarn(f"Joystick mapping switched to {new_type} with safe state transfer")
+
+    def _rebuild_prev_buttons_for_new_map(
+        self,
+        old_prev_buttons: list,
+        old_button_map: Dict[str, int],
+        new_button_map: Dict[str, int],
+        new_button_count: int,
+    ) -> list:
+        rebuilt = [0] * new_button_count
+        for name, new_idx in new_button_map.items():
+            old_idx = old_button_map.get(name, -1)
+            if 0 <= old_idx < len(old_prev_buttons) and 0 <= new_idx < new_button_count:
+                rebuilt[new_idx] = old_prev_buttons[old_idx]
+        return rebuilt
+
+    def _autodetect_and_set_joystick_type(self) -> None:
+        dev = rospy.get_param("/joy_node/dev", None)
+        if not dev:
+            # Try a common default
+            dev = "/dev/input/js0"
+        name = self._get_device_name(dev)
+        if not name:
+            return
+        if "BEITONG" in name:
+            desired = "bt2pro"
+        elif "X-Box" in name or "Xbox" in name or "XBOX" in name:
+            desired = "bt2"
+        else:
+            return
+        self._set_joystick_type_and_reload(desired)
+        # Still update expected count explicitly
+        if desired == "bt2pro":
+            self.JOYSTICK_BUTTON_NUM = self.JOYSTICK_BUTTON_NUM_BT2PRO
+        elif desired == "bt2":
+            self.JOYSTICK_BUTTON_NUM = self.JOYSTICK_BUTTON_NUM_BT2
+
+    def _maybe_switch_mapping_by_msg_size(self, joy_msg: Joy) -> bool:
+        try:
+            btn_len = len(joy_msg.buttons)
+            ax_len = len(joy_msg.axes)
+            # Only consider expected axis count of 8; if not, just ignore
+            if ax_len != self.JOYSTICK_AXIS_NUM:
+                return False
+            # If we currently expect bt2pro (16) but receive 11 -> switch to bt2
+            if self.JOYSTICK_BUTTON_NUM == self.JOYSTICK_BUTTON_NUM_BT2PRO and btn_len == self.JOYSTICK_BUTTON_NUM_BT2:
+                self._set_joystick_type_and_reload("bt2")
+                return True
+            # If we currently expect bt2 (11) but receive 16 -> switch to bt2pro
+            if self.JOYSTICK_BUTTON_NUM == self.JOYSTICK_BUTTON_NUM_BT2 and btn_len == self.JOYSTICK_BUTTON_NUM_BT2PRO:
+                self._set_joystick_type_and_reload("bt2pro")
+                return True
+        except Exception as e:
+            rospy.logwarn(f"maybe_switch_mapping_by_msg_size failed: {e}")
+        return False
 
     def _update_config_callback(self, msg: String) -> None:
         rospy.loginfo("Received update_joy_customize_config, reloading customize_config.json ...")
@@ -173,10 +318,14 @@ class JoyCustomizeConfigNode:
             return False, f"Service exception: {e}"
 
     def _joy_callback(self, joy_msg: Joy) -> None:
-        # 检查按钮和轴的数量是否正确
+        # 根据消息尺寸动态切换映射
         if len(joy_msg.buttons) != self.JOYSTICK_BUTTON_NUM or len(joy_msg.axes) != self.JOYSTICK_AXIS_NUM:
+            switched = self._maybe_switch_mapping_by_msg_size(joy_msg)
             rospy.logwarn(f"Invalid joy msg. Buttons: {len(joy_msg.buttons)}, Axes: {len(joy_msg.axes)}")
-            return
+
+            if not switched:
+                rospy.logwarn(f"Invalid joy msg. Buttons: {len(joy_msg.buttons)}, Axes: {len(joy_msg.axes)}")
+                return
 
         # Initialize previous states on first message
         if not self._prev_buttons:
@@ -192,6 +341,86 @@ class JoyCustomizeConfigNode:
             b_idx = self.joy_button_map.get("BUTTON_B", -1)
             x_idx = self.joy_button_map.get("BUTTON_X", -1)
             y_idx = self.joy_button_map.get("BUTTON_Y", -1)
+            start_idx = self.joy_button_map.get("BUTTON_START", -1)
+            back_idx = self.joy_button_map.get("BUTTON_BACK", -1)
+
+            # 读取 LT / RT 轴状态（按下阈值：<-0.5）
+            lt_idx = self.joy_axis_map.get("AXIS_LEFT_LT", 1)
+            rt_idx = self.joy_axis_map.get("AXIS_RIGHT_RT", 1)
+            if 0 <= lt_idx < len(joy_msg.axes):
+                self._lt_pressed = joy_msg.axes[lt_idx] < -0.5
+            if 0 <= rt_idx < len(joy_msg.axes):
+                self._rt_pressed = joy_msg.axes[rt_idx] < -0.5
+
+            # 优先级最高：START + BACK 组合 -> 终止机器人并复位开关
+            if 0 <= start_idx < len(joy_msg.buttons) and 0 <= back_idx < len(joy_msg.buttons):
+                if joy_msg.buttons[start_idx] and joy_msg.buttons[back_idx]:
+                    rospy.logerr("[JoyCustomize] Emergency stop triggered (START + BACK)")
+                    self._gradually_move_right_stick_down()
+                    self._call_terminate_srv()
+                    self._allow_launch_once = True
+                    self._robot_launched = False
+                    self._launch_phase = "idle"
+                    self._last_launch_status = "unknown"
+                    # 更新前一帧，避免被下方逻辑继续处理
+                    self._prev_buttons = list(joy_msg.buttons)
+                    self._prev_axes = list(joy_msg.axes)
+                    return
+
+            # 检查 START 按键边沿：第一次用于启动，之后用于初始化
+            if 0 <= start_idx < len(joy_msg.buttons):
+                start_current = joy_msg.buttons[start_idx]
+                start_prev = self._prev_buttons[start_idx] if start_idx < len(self._prev_buttons) else 0
+                if start_prev == 0 and start_current == 1:
+                    if self._allow_launch_once and self.start_way == "auto":
+                        # 第一阶段：仅当 idle 时触发一次 tmux 启动，之后重复 START 不再重启
+                        if self._launch_phase == "idle":
+                            rospy.loginfo("[JoyCustomize] START pressed: launching humanoid robot (once)")
+                            try:
+                                self.launch_humanoid_robot()
+                                if not self.real:
+                                    self._robot_launched = True
+                                    self._launch_phase = "launched"
+                                self._launch_phase = "waiting_ready"
+                            except Exception as e:
+                                rospy.logerr(f"launch_humanoid_robot failed: {e}")
+                        else:
+                            rospy.loginfo(f"[JoyCustomize] START ignored while waiting readiness, phase={self._launch_phase}")
+                        # 返回当前帧，保持非阻塞
+                        self._prev_buttons = list(joy_msg.buttons)
+                        self._prev_axes = list(joy_msg.axes)
+                        return
+                    else:
+                        # 第二阶段：仅在 ready 状态下触发一次初始化服务
+                        if self._launch_phase == "ready" or self._launch_phase == "idle":
+                            rospy.loginfo("[JoyCustomize] START pressed: calling real initialize service (once)")
+                            self._call_real_initialize_srv()
+                            self._launch_phase = "waiting_launched"
+                        else:
+                            rospy.loginfo(f"[JoyCustomize] START ignored (not in ready), phase={self._launch_phase}")
+                        self._prev_buttons = list(joy_msg.buttons)
+                        self._prev_axes = list(joy_msg.axes)
+                        return
+
+            # 非阻塞轮询一次（限频），用于推进 ready -> launched 的流程
+            self._check_and_update_launch_status_nonblocking()
+
+            # 在机器人未完全站立前，不允许按键组合动作
+            if not self._robot_launched:
+                # 如果到了 ready_stance 或 launched，本帧直接返回，保持 STOP 优先级与流程自然推进
+                if self._launch_phase in ["waiting_ready", "ready"] and self._last_launch_status == "ready_stance":
+                    # 第一次阶段完成：允许下一次 START 触发站立
+                    self._allow_launch_once = False
+                    self._launch_phase = "ready"
+                    self._prev_buttons = list(joy_msg.buttons)
+                    self._prev_axes = list(joy_msg.axes)
+                    return
+                if self._launch_phase in ["waiting_launched", "launched"] and self._last_launch_status == "launched":
+                    self._robot_launched = True
+                    self._launch_phase = "launched"
+                    self._prev_buttons = list(joy_msg.buttons)
+                    self._prev_axes = list(joy_msg.axes)
+                    return
 
             # 检查M1按键状态
             if 0 <= m1_idx < len(joy_msg.buttons):
@@ -246,6 +475,37 @@ class JoyCustomizeConfigNode:
                             rospy.loginfo(f"M1 + M2 + {button_name} released, triggering {action_key}")
                             self._execute_customize_action(action_key)
 
+                        # 情况 4: LT（轴）按下、RT 未按下
+                        elif self._lt_pressed and not self._rt_pressed and self.joy_execute_action:
+                            action_key = f"customize_action_LT_{button_name}"
+                            rospy.loginfo(f"LT + {button_name} released, triggering {action_key}")
+                            self._execute_customize_action(action_key)
+
+                        # 情况 5: RT（轴）按下、LT 未按下
+                        elif self._rt_pressed and not self._lt_pressed and self.joy_execute_action:
+                            # 特殊处理：RT + B 触发太极动作，并从配置读取 music_name 播放音频
+                            if button_name == "B":
+                                action_key = f"customize_action_RT_{button_name}"
+                                rospy.loginfo(f"RT + B released, running play_taiji_action() and playing music from config: {action_key}")
+                                try:
+                                    music_names = []
+                                    if action_key in self.customize_config:
+                                        cfg = self.customize_config[action_key]
+                                        music_names = cfg.get("music_name", [])
+                                        if isinstance(music_names, str):
+                                            music_names = [music_names]
+                                    if music_names:
+                                        music_thread = threading.Thread(target=self._play_music, args=(music_names,))
+                                        music_thread.daemon = True
+                                        music_thread.start()
+                                except Exception as e:
+                                    rospy.logwarn(f"Failed to start music thread from config for {action_key}: {e}")
+                                self.play_taiji_action()
+                            else:
+                                action_key = f"customize_action_RT_{button_name}"
+                                rospy.loginfo(f"RT + {button_name} released, triggering {action_key}")
+                                self._execute_customize_action(action_key)
+
             # Update previous states
             self._prev_buttons = list(joy_msg.buttons)
             self._prev_axes = list(joy_msg.axes)
@@ -285,6 +545,178 @@ class JoyCustomizeConfigNode:
                 
         except Exception as e:
             rospy.logerr(f"Error executing customize action {action_key}: {e}")
+
+    def play_taiji_action(self):
+        subprocess.run(["tmux", "kill-session", "-t", TAIJI_ACTION_SESSION_NAME], 
+                        stderr=subprocess.DEVNULL) 
+
+        taiji_script_cmd = f"python3 {KUAVO_ROS_CONTROL_WS_PATH}/src/demo/csv2body_demo/step_player_csv_ocs2.py"
+        
+        print(f"taiji_script_cmd: {taiji_script_cmd}")
+        print(f"If you want to check the session, please run 'tmux attach -t {TAIJI_ACTION_SESSION_NAME}'")
+        # 仅导出存在的ROS相关环境变量，避免覆盖为空
+        export_lines = [
+            f"export ROBOT_VERSION={ROBOT_VERSION}" if ROBOT_VERSION else "",
+            f"export ROS_MASTER_URI={ROS_MASTER_URI}" if ROS_MASTER_URI else "",
+            f"export ROS_IP={ROS_IP}" if ROS_IP else "",
+            f"export ROS_HOSTNAME={ROS_HOSTNAME}" if ROS_HOSTNAME else "",
+        ]
+        export_lines = [line for line in export_lines if line]
+
+        session_cmd = " && ".join([
+            "source ~/.bashrc",
+            f"source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash",
+            *export_lines,
+            taiji_script_cmd,
+        ]) + "; exec bash"
+
+        tmux_cmd = [
+            "tmux", "new-session",
+            "-s", TAIJI_ACTION_SESSION_NAME, 
+            "-d",  
+            session_cmd
+        ]
+        
+        process = subprocess.Popen(
+            tmux_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        rospy.sleep(5.0)
+        
+        result = subprocess.run(["tmux", "has-session", "-t", TAIJI_ACTION_SESSION_NAME], 
+                                capture_output=True)
+        if result.returncode == 0:
+            print(f"Started {TAIJI_ACTION_SESSION_NAME} in tmux session")
+        else:
+            print(f"Failed to start {TAIJI_ACTION_SESSION_NAME}")
+            raise Exception(f"Failed to start {TAIJI_ACTION_SESSION_NAME}")
+    
+    def _gradually_move_right_stick_down(self, time=0.1, times=10) -> None:
+        while times > 0:
+            cmd_vel_msg = Twist()
+            cmd_vel_msg.linear.z = -0.2
+            self.cmd_vel_pub.publish(cmd_vel_msg)
+            rospy.sleep(time)
+            times -= 1
+
+    def _start_humanoid_robot(self):
+        # 如果按下 start 就运行launch_humanoid_robot 函数
+        # 假设 "start" 是自定义配置中的一个按钮名
+        if "start" in self.joy_button_map:
+            start_btn_idx = self.joy_button_map["start"]
+            # 获取当前按钮状态
+            joy_msg = rospy.wait_for_message("/joy", Joy, timeout=1.0)
+            if len(joy_msg.buttons) > start_btn_idx and joy_msg.buttons[start_btn_idx]:
+                self.launch_humanoid_robot()
+
+    def _call_real_initialize_srv(self) -> None:
+        try:
+            client = rospy.ServiceProxy("/humanoid_controller/real_initial_start", Trigger)
+            resp = client()
+            rospy.loginfo(f"[JoyCustomize] real_initial_start -> {resp.success}")
+            if not resp.success:
+                raise RuntimeError("real_initial_start returned false")
+        except Exception as e:
+            rospy.logerr(f"[JoyCustomize] real_initial_start failed: {e}, publish /re_start_robot as fallback")
+            try:
+                msg = Bool()
+                msg.data = True
+                for _ in range(3):
+                    self.re_start_pub.publish(msg)
+                    rospy.sleep(0.05)
+            except Exception as pub_e:
+                rospy.logerr(f"[JoyCustomize] publish /re_start_robot failed: {pub_e}")
+
+    def _call_terminate_srv(self) -> None:
+        try:
+            msg = Bool()
+            msg.data = True
+            for _ in range(5):
+                self.stop_pub.publish(msg)
+                rospy.sleep(0.1)
+        except Exception as e:
+            rospy.logerr(f"[JoyCustomize] publish /stop_robot failed: {e}")
+        
+
+    def launch_humanoid_robot(self):
+        
+        subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME], 
+                        stderr=subprocess.DEVNULL) 
+        
+        if self.real:
+            launch_cmd = f"{LAUNCH_HUMANOID_ROBOT_REAL_CMD} joystick_type:={self.joystick_type}"
+        else:
+            launch_cmd = f"{LAUNCH_HUMANOID_ROBOT_SIM_CMD} joystick_type:={self.joystick_type}"
+
+        print(f"launch_cmd: {launch_cmd}")
+        print(f"If you want to check the session, please run 'tmux attach -t {HUMANOID_ROBOT_SESSION_NAME}'")
+
+        export_lines = [
+            f"export ROBOT_VERSION={ROBOT_VERSION}" if ROBOT_VERSION else "",
+            f"export ROS_MASTER_URI={ROS_MASTER_URI}" if ROS_MASTER_URI else "",
+            f"export ROS_IP={ROS_IP}" if ROS_IP else "",
+            f"export ROS_HOSTNAME={ROS_HOSTNAME}" if ROS_HOSTNAME else "",
+        ]
+        export_lines = [line for line in export_lines if line]
+
+        session_cmd = " && ".join([
+            "source ~/.bashrc",
+            f"source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash",
+            *export_lines,
+            launch_cmd,
+        ]) + "; exec bash"
+
+        tmux_cmd = [
+            "sudo", "tmux", "new-session",
+            "-s", HUMANOID_ROBOT_SESSION_NAME, 
+            "-d",  
+            session_cmd
+        ]
+
+        process = subprocess.Popen(
+            tmux_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        rospy.sleep(5.0)
+        
+        result = subprocess.run(["tmux", "has-session", "-t", HUMANOID_ROBOT_SESSION_NAME], 
+                                capture_output=True)
+        if result.returncode == 0:
+            print(f"Started {HUMANOID_ROBOT_SESSION_NAME} in tmux session: {HUMANOID_ROBOT_SESSION_NAME}")
+        else:
+            print(f"Failed to start {HUMANOID_ROBOT_SESSION_NAME}")
+            raise Exception(f"Failed to start {HUMANOID_ROBOT_SESSION_NAME}")
+
+    def _query_robot_launch_status(self) -> Tuple[bool, str]:
+        """Query /humanoid_controller/real_launch_status service and return (ok, status_message)."""
+        try:
+            client = rospy.ServiceProxy("/humanoid_controller/real_launch_status", Trigger)
+            resp = client()
+            # resp.success is always true in provider, message holds the status
+            return True, (resp.message or "unknown")
+        except Exception as e:
+            rospy.logwarn(f"[JoyCustomize] query launch status failed: {e}")
+            return False, "unknown"
+
+    def _check_and_update_launch_status_nonblocking(self) -> None:
+        """Rate-limited single status check without blocking loops or sleeps."""
+        if self._robot_launched or self._launch_phase == "idle":
+            return
+        now = time.time()
+        if now - self._last_status_check_time < max(0.1, self._status_poll_interval):
+            return
+        self._last_status_check_time = now
+        ok, status = self._query_robot_launch_status()
+        if ok:
+            self._last_launch_status = status
+            rospy.loginfo(f"[JoyCustomize] launch status: {status}")
+        else:
+            # 保持原状态，不更新 last_status
+            pass
 
     def spin(self) -> None:
         rospy.spin()

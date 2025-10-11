@@ -40,7 +40,7 @@ class ArmTrajectoryBezierDemo:
         self.arm_flag = False
         self._timer = None
         self.interrupt_flag  = False  
-        self.robot_version = rospy.get_param('/robot_version', 40)
+        self.robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
         self.robot_class = KUAVO if self.robot_version >= 40 else ROBAN
         self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
         
@@ -503,8 +503,9 @@ class ArmTrajectoryBezierDemo:
             41: [41],
             42: [42],
             45: [43, 45, 46, 48, 49],
-            11: [11, 13],
-            13: [11, 13],
+            11: [11, 13, 14],
+            13: [11, 13, 14],
+            14: [11, 13, 14],
         }
         allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
         if self.robot_version not in allowed_robot_versions:

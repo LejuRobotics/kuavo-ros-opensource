@@ -39,6 +39,7 @@
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="false"/>
+    <arg name="joy_execute_action" default="true"/>
 
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
@@ -69,7 +70,8 @@
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
-
+    <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
+    
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     
@@ -130,9 +132,14 @@
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
-        <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
-          <arg name="joystick_type" value="$(arg joystick_type)"/>
-        </include>
+        <group if="$(eval arg('start_way') == 'manual')">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+            <arg name="joystick_type" value="$(arg joystick_type)"/>
+            <arg name="real" value="false"/>
+          </include>
+        </group>
+        <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen"/>
+        <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
       </group>
     </group>    
 
