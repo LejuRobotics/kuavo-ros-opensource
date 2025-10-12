@@ -118,7 +118,7 @@ show_simulation_menu() {
     echo "2) Gazebo仿真"
     echo "3) 返回主菜单"
     echo ""
-    echo -n "请输入选项 (1-4): "
+    echo -n "请输入选项 (1-3): "
 }
 
 # 显示实物机器人菜单
@@ -130,8 +130,22 @@ show_real_robot_menu() {
     echo "请选择启动模式:"
     echo "1) 正常模式"
     echo "2) 校准模式 (cali:=true)"
-    echo "3) 半身模式 (仅上半身)"
-    echo "4) 返回主菜单"
+    echo "3) 返回主菜单"
+    echo ""
+    echo -n "请输入选项 (1-3): "
+}
+
+# 显示校准模式子菜单
+show_calibration_menu() {
+    echo ""
+    echo "=========================================="
+    echo "      校准模式选择"
+    echo "=========================================="
+    echo "请选择校准类型:"
+    echo "1) 全身校准模式 (cali_leg:=true cali_arm:=true)"
+    echo "2) 上半身校准模式 (cali_arm:=true)"
+    echo "3) 下半身校准模式(cali_leg:=true)"
+    echo "4) 返回上级菜单"
     echo ""
     echo -n "请输入选项 (1-4): "
 }
@@ -322,6 +336,7 @@ launch_real_robot() {
     local launch_cmd=""
     local extra_params=""
     local joystick_type=""
+    local cali_type=""
     
     print_info "准备启动实物机器人..."
     
@@ -347,8 +362,8 @@ launch_real_robot() {
                 break
                 ;;
             4)
-                print_info "返回上级菜单"
-                return 1
+                print_info "返回主菜单"
+                return 
                 ;;
             *)
                 print_error "无效选项，请重新选择"
@@ -371,12 +386,49 @@ launch_real_robot() {
             fi
             ;;
         2) # 校准模式
-            print_info "启动实物机器人 (校准模式)..."
-            if [ "$joystick_type" = "none" ]; then
-                launch_cmd="roslaunch humanoid_controllers load_kuavo_real.launch cali:=true"
-            else
-                launch_cmd="roslaunch humanoid_controllers load_kuavo_real.launch cali:=true joystick_type:=$joystick_type"
-            fi
+            # 显示校准模式子菜单
+            while true; do
+                show_calibration_menu
+                read -r cali_choice
+                
+                case $cali_choice in
+                    1) # 全身校准模式
+                        cali_type="full"
+                        print_info "启动实物机器人 (全身校准模式)..."
+                        if [ "$joystick_type" = "none" ]; then
+                            launch_cmd="roslaunch humanoid_controllers load_kuavo_real.launch cali:=true cali_leg:=true cali_arm:=true"
+                        else
+                            launch_cmd="roslaunch humanoid_controllers load_kuavo_real.launch cali:=true cali_leg:=true cali_arm:=true joystick_type:=$joystick_type"
+                        fi
+                        break
+                        ;;
+                    2) # 上半身校准模式
+                        print_info "启动实物机器人 (半身校准模式)..."
+                        if [ "$joystick_type" = "none" ]; then
+                            launch_cmd="roslaunch humanoid_controllers load_kuavo_real.launch  cali_arm:=true"
+                        else
+                            launch_cmd="roslaunch humanoid_controllers load_kuavo_real.launch  cali_arm:=true joystick_type:=$joystick_type"
+                        fi
+                        break
+                        ;;
+                    3) # 下半身校准模式
+                        print_info "启动实物机器人 (下半身校准模式)..."
+                        if [ "$joystick_type" = "none" ]; then
+                            launch_cmd="roslaunch humanoid_controllers load_kuavo_real.launch cali_leg:=true"
+                        else
+                            launch_cmd="roslaunch humanoid_controllers load_kuavo_real.launch cali_leg:=true joystick_type:=$joystick_type"
+                        fi
+                        break
+                        ;;
+                    4) # 返回上级菜单
+                        print_info "返回主菜单"
+                        return
+                        ;;
+                    *)
+                        print_error "无效选项，请重新选择"
+                        ;;
+                esac
+            done
             ;;
         3) # 半身模式
             print_info "启动实物机器人 (半身模式)..."
@@ -511,11 +563,11 @@ main() {
                     read -r sim_choice
                     
                     case $sim_choice in
-                        1|2|3)
+                        1|2)
                             launch_simulation "$sim_choice"
                             break
                             ;;
-                        4) # 返回主菜单
+                        3) # 返回主菜单
                             break
                             ;;
                         *)
@@ -530,11 +582,11 @@ main() {
                     read -r real_choice
                     
                     case $real_choice in
-                        1|2|3)
+                        1|2)
                             launch_real_robot "$real_choice"
                             break
                             ;;
-                        4) # 返回主菜单
+                        3) # 返回主菜单
                             break
                             ;;
                         *)
