@@ -37,8 +37,9 @@ class KuavoRobotToolsCoreWebsocket:
                 self._transform_cache = {}
                 self._initialized = True
             except Exception as e:
-                SDKLogger.error(f"Failed to initialize tf2_web_republisher: {str(e)}")
-                SDKLogger.error("Please make sure tf2_web_republisher node is running")
+                SDKLogger.error(f"Failed to initialize kuavo_tf2_web_republisher: {str(e)}")
+                SDKLogger.error(f"kuavo_tf2_web_republisher 节点未运行")
+                SDKLogger.error("请运行 `cd <kuavo_ros_application> && source devel/setup.bash && rosrun kuavo_tf2_web_republisher kuavo_tf2_web_republisher` 启动 kuavo_tf2_web_republisher 节点")
                 raise
 
     def _get_tf_tree_transform(self, target_frame: str, source_frame: str, 

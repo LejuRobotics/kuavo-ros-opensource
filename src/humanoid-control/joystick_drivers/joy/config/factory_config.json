@@ -1,0 +1,67 @@
+{
+  "customize_action_LT_A": {
+    "arm_pose_name": [
+      "抱拳"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "customize_action_LT_B": {
+    "arm_pose_name": [
+      "右手打招呼"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "customize_action_LT_X": {
+    "arm_pose_name": [
+      "左手打招呼"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "customize_action_LT_Y": {
+    "arm_pose_name": [
+      "握手"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+
+  "customize_action_RT_A": {
+    "arm_pose_name": [
+      "碰拳"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "customize_action_RT_B": {
+    "arm_pose_name": [
+      "打太极"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "customize_action_RT_X": {
+    "arm_pose_name": [
+      "欢呼"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "customize_action_RT_Y": {
+    "arm_pose_name": [
+      "抬右手致意"
+    ],
+    "music_name": [
+      ""
+    ]
+  }
+}

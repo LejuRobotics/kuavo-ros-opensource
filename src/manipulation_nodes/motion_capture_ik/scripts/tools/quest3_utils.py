@@ -80,6 +80,7 @@ class HeadBodyPose:
     body_yaw = 0.0
     body_x = 0.0
     body_y = 0.0
+    body_roll = 0.0
     body_pitch = 6 * np.pi / 180.0
     body_height = 0.74
 
@@ -750,9 +751,13 @@ class Quest3ArmInfoTransformer:
         self.head_body_pose.body_yaw = axis[1]
         R_wChest_rm_yaw = axis_angle_to_matrix(self.chest_axis_agl).T @ T_wChest[:3, :3]
         self.head_body_pose.body_pitch = matrix_to_rpy(self.init_R_wC.T @ R_wChest_rm_yaw)[0]
+        self.head_body_pose.body_roll = chest_rpy[2]  # Extract roll from chest RPY
         self.head_body_pose.body_x = chest_pose.position.x
         self.head_body_pose.body_y = chest_pose.position.y
         self.head_body_pose.body_height = chest_pose.position.z
+
+        # 输出body_roll
+        # print(f"⚠️body_roll: {self.head_body_pose.body_roll}")
 
         hand_mat_cH = axis_angle_to_matrix(self.chest_axis_agl).T @ quaternion_to_matrix(hand_quat_in_w)
         hand_quat = matrix_to_quaternion(hand_mat_cH)
@@ -1060,6 +1065,7 @@ class Quest3ArmInfoTransformer:
         msg.head_pitch = head_body_pose.head_pitch
         msg.head_yaw = head_body_pose.head_yaw
         msg.body_yaw = head_body_pose.body_yaw
+        msg.body_roll = head_body_pose.body_roll
         pitch_ratio = 0.8
         msg.body_pitch = max(3*np.pi/180.0, min(pitch_ratio*head_body_pose.body_pitch, 40*np.pi/180.0))
 

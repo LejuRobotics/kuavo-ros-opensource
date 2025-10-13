@@ -4,6 +4,7 @@ import os
 import pwd
 import sys
 import asyncio
+import signal
 import json
 from queue import Queue
 from dataclasses import dataclass
@@ -15,26 +16,349 @@ import math
 import subprocess
 import base64
 from pathlib import Path
-from utils import calculate_file_md5, frames_to_custom_action_data, get_start_end_frame_time, frames_to_custom_action_data_ocs2
-
+import yaml
+from utils import calculate_file_md5, frames_to_custom_action_data, get_start_end_frame_time, frames_to_custom_action_data_ocs2, verify_robot_version
+import shutil
+import rosnode
 from kuavo_ros_interfaces.srv import planArmTrajectoryBezierCurve, stopPlanArmTrajectory, planArmTrajectoryBezierCurveRequest, ocs2ChangeArmCtrlMode
-from kuavo_ros_interfaces.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHandPosition, robotHeadMotionData
+from kuavo_ros_interfaces.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHeadMotionData
+from kuavo_msgs.msg import robotHandPosition
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.msg import sensorsData
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
+from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest
+from std_msgs.msg import Bool, Float64MultiArray
+from nav_msgs.msg import OccupancyGrid
+import cv2
+import numpy as np
+import tf
+import argparse
+import subprocess
+from typing import Tuple
+from std_msgs.msg import Bool
+from std_srvs.srv import Trigger, TriggerRequest
+from geometry_msgs.msg import Twist
+from std_msgs.msg import String
+
 # Replace multiprocessing values with simple variables
 plan_arm_state_progress = 0
 plan_arm_state_status = False
 should_stop = False
+terminate_process_result = False
 process = None
 response_queue = Queue()
 active_threads: Dict[websockets.WebSocketServerProtocol, threading.Event] = {}
+ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
+ROBAN_TACT_LENGTH = 23
+g_robot_type = ""
+ocs2_current_joint_state = []
+robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
+
+# Global variables for robot control
+ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
+ROS_IP = os.getenv("ROS_IP")
+ROS_HOSTNAME = os.getenv("ROS_HOSTNAME")
+
+# Get KUAVO_ROS_CONTROL_WS_PATH from environment variable, if not found, try to find it
+KUAVO_ROS_CONTROL_WS_PATH = os.getenv("KUAVO_ROS_CONTROL_WS_PATH")
+if not KUAVO_ROS_CONTROL_WS_PATH:
+    # Try to find the kuavo-ros-control workspace path by searching upward from this file
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    while current_dir != '/':
+        # Check if this directory contains the标志性 files of kuavo-ros-control workspace
+        if os.path.exists(os.path.join(current_dir, 'src')) and \
+           os.path.exists(os.path.join(current_dir, 'devel/setup.bash')):
+            KUAVO_ROS_CONTROL_WS_PATH = current_dir
+            break
+        current_dir = os.path.dirname(current_dir)
+
+ROBOT_VERSION = os.environ.get("ROBOT_VERSION")
+WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME = "websocket_humanoid_robot_service"
+
+
+# 机器人状态跟踪变量，用于跟踪机器人当前状态: unlaunch, crouching, standing
+robot_status = "unlaunch"  # 默认状态为未启动
+
+def update_robot_status_from_service():
+    """
+    从 /humanoid_controller/real_launch_status 服务获取机器人状态并更新全局 robot_status
+    """
+    global robot_status
+    try:
+        success, status_message = robot_instance.get_robot_launch_status()
+        if success:
+            # 映射服务返回的状态到我们的状态系统
+            if status_message == "ready_stance":
+                robot_status = "crouching"
+            elif status_message == "launched":
+                robot_status = "standing"
+            else:
+                robot_status = "unlaunch"
+        else:
+            robot_status = "unlaunch"
+    except Exception as e:
+        print(f"Failed to update robot status from service: {e}")
+        robot_status = "unlaunch"
+
+def check_real_kuavo():
+    try:
+        # optimize: 简单通过检查零点文件来判断是否为实物, 可优化判断条件
+        offset_file = os.path.expanduser("~/.config/lejuconfig/offset.csv")
+        config_file = os.path.expanduser("~/.config/lejuconfig/config.yaml")
+        
+        offset_file_exists = os.path.exists(offset_file)
+        config_file_exists = os.path.exists(config_file)
+        print(f"offset_file: {offset_file}, exists: {offset_file_exists}")
+        print(f"config_file: {config_file}, exists: {config_file_exists}")
+        return offset_file_exists and config_file_exists
+    except Exception as e:
+        return False
+
+def tmux_run_cmd(session_name:str, cmd:str, sudo:bool=False)->Tuple[bool, str]:
+    launch_cmd = cmd
+        
+    print(f"launch_cmd: {launch_cmd}")
+    
+    try:
+        subprocess.run(["tmux", "kill-session", "-t", session_name],
+                        stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"Failed to kill session: {e}")
+        # 这里不返回错误，因为可能session不存在
+        pass
+
+    print(f"If you want to check the session, please run 'tmux attach -t {session_name}'")
+    
+    # 构建完整的命令，确保环境变量正确设置 
+    full_cmd = f"source ~/.bashrc && \
+        source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash && \
+        export ROBOT_VERSION={ROBOT_VERSION} && \
+        {launch_cmd}"
+    
+    tmux_cmd = [
+        "tmux", "new-session",
+        "-s", session_name,
+        "-d",
+        full_cmd
+    ]
+    if sudo:
+        tmux_cmd.insert(0, "sudo")
+    
+    print(f"tmux_cmd: {tmux_cmd}")
+
+    # 执行tmux命令并等待结果
+    try:
+        result = subprocess.run(
+            tmux_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10  # 设置超时时间
+        )
+        
+        # 检查命令执行是否出错
+        if result.returncode != 0:
+            error_msg = f"Failed to execute tmux command: {result.stderr}"
+            print(error_msg)
+            return False, error_msg
+    except subprocess.TimeoutExpired:
+        error_msg = "tmux command execution timed out"
+        print(error_msg)
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"Failed to execute tmux command: {str(e)}"
+        print(error_msg)
+        return False, error_msg
+
+    # 等待一段时间让session启动
+    time.sleep(3.0)
+
+    # 检查session是否成功创建
+    check_result = subprocess.run(["tmux", "has-session", "-t", session_name],
+                            capture_output=True)
+    ret = False
+    if check_result.returncode == 0:
+        ret = True
+        msg = f"Started {session_name} in tmux session: {session_name}"
+    else:
+        msg = f"Failed to start {session_name}"
+    return ret, msg
+
+def check_rosnode_exists(node_name:str)->bool:
+    try:
+        nodes = subprocess.check_output(['rosnode', 'list']).decode('utf-8').split('\n')
+        return node_name in nodes
+    except subprocess.CalledProcessError as e:
+       print(f"Error checking if node {node_name} exists: {e}")
+       return False
+    except Exception as e:
+        print(f"Error checking if node {node_name} exists: {e}")
+        return False
+
+class KuavoRobot:
+    def __init__(self):
+        pass
+
+    def start_robot(self)->Tuple[bool, str]:
+        raise NotImplementedError("start_robot is not implemented")
+
+    def stop_robot(self)->Tuple[bool, str]:
+        raise NotImplementedError("stop_robot is not implemented")
+
+    def stand_robot(self)->Tuple[bool, str]:
+        raise NotImplementedError("stand_robot is not implemented")
+
+    def get_robot_launch_status(self)->Tuple[bool, str]:
+        raise NotImplementedError("get_robot_launch_status is not implemented")
+
+class KuavoRobotReal(KuavoRobot):
+    def __init__(self, debug=False):
+        super().__init__()
+        self.debug = debug
+        self.stop_pub = rospy.Publisher('/stop_robot', Bool, queue_size=10)
+        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        
+    def start_robot(self)->Tuple[bool, str]:
+        global WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME
+        global KUAVO_ROS_CONTROL_WS_PATH
+        global ROS_MASTER_URI
+        global ROS_IP
+        global ROS_HOSTNAME
+ 
+        if self.debug:
+            launch_cmd = "roslaunch humanoid_controllers load_kuavo_real.launch"
+            if not ROS_MASTER_URI or not ROS_IP or not ROS_HOSTNAME:
+                ROS_MASTER_URI = "http://kuavo_master:11311"
+                ROS_IP = "kuavo_master"
+                ROS_HOSTNAME = "kuavo_master"
+        else:
+            launch_cmd = "roslaunch humanoid_controllers load_kuavo_real.launch start_way:=auto"
+
+        return tmux_run_cmd(WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME, launch_cmd, sudo=True)
+    
+    def stop_robot(self)->Tuple[bool, str]:
+        try:
+            # 已经启动则下蹲再停止
+            if robot_status == "launched" or robot_status == "standing":
+                msg = Twist()
+                msg.linear.x = 0.0
+                msg.linear.y = 0.0
+                msg.angular.z = 0.0
+                msg.linear.z = -0.05
+                for i in range(10):
+                    self.cmd_vel_pub.publish(msg)
+                    time.sleep(0.1)
+            self.stop_pub.publish(True)
+            self.stop_pub.publish(True)
+            self.stop_pub.publish(True)
+            return True, "success"
+        except Exception as e:
+            print(f"Failed to stop robot: {e}")
+            return False, f"Failed to stop robot: {e}"
+            
+    def stand_robot(self)->Tuple[bool, str]:
+        try:
+            client = rospy.ServiceProxy('/humanoid_controller/real_initial_start', Trigger)
+            req = TriggerRequest()
+            client.wait_for_service(timeout=2.0)
+            # Call the service
+            if client.call(req):
+                print(f"RealInitializeSrv service call successful")
+                return True, "Success"
+            else:
+                print(f"Failed to callRealInitializeSrv service")
+                return False, "Failed to callRealInitializeSrv service"
+        except rospy.ServiceException as e:
+            print(f"Service call failed: {e}")
+            return False, f"Service call failed: {e}"
+
+    def get_robot_launch_status(self)->Tuple[bool, str]:
+        client = rospy.ServiceProxy('/humanoid_controller/real_launch_status', Trigger)
+        try:
+            client.wait_for_service(timeout=2.0)
+        except rospy.ROSException as e:
+            # 等待服务超时（服务不存在）
+            print(f"Service does not exist: {e}")
+            return True, "unknown"  # 关键修改：服务不存在时返回(True, "unknown")
+    
+        try:
+            req = TriggerRequest()
+            client.wait_for_service(timeout=1.5)
+            # Call the service
+            response = client.call(req)
+            if response.success:
+                print(f"RealInitializeSrv service call successful")
+                return True, response.message
+            else:
+                print(f"Failed to callRealInitializeSrv service")
+                return False, "unknown"
+        except rospy.ServiceException as e:
+            print(f"Service call failed: {e}")
+            return False, f"unknown"
+
+class KuavoRobotSim(KuavoRobot):
+    def __init__(self, debug=False):
+        super().__init__()
+        self.debug = debug
+        self.stop_pub = rospy.Publisher('/stop_robot', Bool, queue_size=10)
+        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+
+    def start_robot(self)->Tuple[bool, str]:
+        global WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME
+        global KUAVO_ROS_CONTROL_WS_PATH
+        global ROS_MASTER_URI
+        global ROS_IP
+        global ROS_HOSTNAME
+
+        if not ROS_MASTER_URI or not ROS_IP or not ROS_HOSTNAME:
+            ROS_MASTER_URI = "http://localhost:11311"
+            ROS_IP = "localhost"
+            ROS_HOSTNAME = "localhost"
+
+        launch_cmd = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch && export DISPLAY=:1"
+        return tmux_run_cmd(WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME, launch_cmd, sudo=False)
+    
+    def stop_robot(self)->Tuple[bool, str]:
+        try:
+            msg = Twist()
+            msg.linear.x = 0.0
+            msg.linear.y = 0.0
+            msg.angular.z = 0.0
+            msg.linear.z = -0.05
+            for i in range(50):
+                self.cmd_vel_pub.publish(msg)
+                time.sleep(0.1)
+            self.stop_pub.publish(True)
+            self.stop_pub.publish(True)
+            self.stop_pub.publish(True)
+            return True, "success"
+        except Exception as e:
+            print(f"Failed to stop robot: {e}")
+            return False, f"Failed to stop robot: {e}"
+    
+    def stand_robot(self)->Tuple[bool, str]:
+        return self.get_robot_launch_status()
+    
+    def get_robot_launch_status(self)->Tuple[bool, str]:
+        if check_rosnode_exists("/humanoid_sqp_mpc") and check_rosnode_exists("/nodelet_controller"):
+            return True, "launched"
+        else:
+            return True, "unlaunch"
+
+# Initialize robot instance
+if check_real_kuavo():
+    robot_instance = KuavoRobotReal()
+else:
+    robot_instance = KuavoRobotSim()
+
 package_name = 'planarmwebsocketservice'
 package_path = rospkg.RosPack().get_path(package_name)
 
-UPLOAD_FILES_FOLDER = package_path + "/upload_files" 
+UPLOAD_FILES_FOLDER = package_path + "/upload_files"
+KUAVO_TACT_LENGTH = 28
+ROBAN_TACT_LENGTH = 23
 
 # 下位机音乐文件存放路径，如果不存在则进行创建
 sudo_user = os.environ.get("SUDO_USER")
@@ -55,7 +379,16 @@ except Exception as e:
 # H12 遥控器按键功能配置文件路径
 h12_package_name = "h12pro_controller_node"
 h12_package_path = rospkg.RosPack().get_path(h12_package_name)
-H12_CONFIG_PATH = h12_package_path + "/config/customize_config.json"
+joy_package_name = "joy"
+joy_package_path = rospkg.RosPack().get_path(joy_package_name)
+if robot_version >= 40:
+    H12_CONFIG_PATH = h12_package_path + "/config/customize_config.json"
+    current_arm_joint_state = [0] * KUAVO_TACT_LENGTH
+elif robot_version >= 10 and robot_version <= 19:
+    H12_CONFIG_PATH = joy_package_path + "/config/customize_config.json"
+    current_arm_joint_state = [0] * ROBAN_TACT_LENGTH
+_last_joint_msg = None
+_last_hand_msg = None
 
 # 获取仓库路径
  # 获取当前 Python 文件的路径
@@ -72,7 +405,10 @@ REPO_PATH = repo_path_result.stdout.strip()
 
 g_robot_type = ""
 ocs2_current_joint_state = []
-joint_names = [
+robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
+
+if robot_version >= 40:
+    joint_names = [
         "l_arm_pitch",
         "l_arm_roll",
         "l_arm_yaw",
@@ -87,10 +423,16 @@ joint_names = [
         "r_hand_yaw",
         "r_hand_pitch",
         "r_hand_roll",
-]
+    ]
+else:
+    joint_names = [
+        "zarm_l1_link", "zarm_l2_link", "zarm_l3_link", "zarm_l4_link",
+        "zarm_r1_link", "zarm_r2_link", "zarm_r3_link", "zarm_r4_link",
+    ]
 ocs2_joint_state = JointState()
 ocs2_hand_state = robotHandPosition()
 ocs2_head_state = robotHeadMotionData()
+ocs2_waist_state = Float64MultiArray()
 robot_settings = {
     "kuavo":{
         "plan_arm_trajectory_bezier_service_name": "/plan_arm_trajectory_bezier_curve",
@@ -124,44 +466,112 @@ def call_change_arm_ctrl_mode_service(arm_ctrl_mode):
         return result
 
 def sensors_data_callback(msg):
-    global current_arm_joint_state
-    current_arm_joint_state = msg.joint_data.joint_q[12:26]
-    current_arm_joint_state = [round(pos, 2) for pos in current_arm_joint_state]
-    current_arm_joint_state.extend([0] * 14)
+    """更新关节数据"""
+    global _last_joint_msg, _last_hand_msg, ocs2_hand_state
+    _last_joint_msg = msg
+
+    if _last_hand_msg is None:
+        from sensor_msgs.msg import JointState
+        dummy_hand = JointState()
+        dummy_hand.position = [0.0] * 12
+        _last_hand_msg = dummy_hand
+
+    _update_current_arm_joint_state(_last_joint_msg, _last_hand_msg)
+
+def robot_hand_callback(msg):
+    """更新手部数据"""
+    global _last_hand_msg, _last_joint_msg, ocs2_hand_state
+    left = msg.position[:6] if len(msg.position) >= 6 else [0] * 6
+    right = msg.position[6:12] if len(msg.position) >= 12 else [0] * 6
+
+    _last_hand_msg = msg
+
+    if _last_joint_msg is not None:
+        _update_current_arm_joint_state(_last_joint_msg, _last_hand_msg)
+
+def _update_current_arm_joint_state(joint_msg, hand_msg):
+    """整合 joint_msg 和 hand_msg，更新 current_arm_joint_state"""
+    global ocs2_joint_state
+    if robot_version >= 40:
+        arm_part = list(joint_msg.joint_data.joint_q[12:26])
+        hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+        head_part = list(joint_msg.joint_data.joint_q[-2:])
+        current_arm_joint_state = arm_part + hand_part + head_part
+
+    elif robot_version >= 10 and robot_version < 30:
+        arm_part = list(joint_msg.joint_data.joint_q[13:21])
+        hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+        head_part = list(joint_msg.joint_data.joint_q[-2:])
+        waist_part = [joint_msg.joint_data.joint_q[0]]
+        current_arm_joint_state = arm_part + hand_part + head_part + waist_part
+
+    current_arm_joint_state = [round(v, 2) for v in current_arm_joint_state]
 
 def traj_callback(msg):
     global ocs2_joint_state
+    global robot_version
     if len(msg.points) == 0:
         return
     point = msg.points[0]
-    ocs2_joint_state.name = msg.joint_names
-    ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:14]]
-    ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
-    ocs2_joint_state.effort = [0] * 14
+    
+    if robot_version >= 40:
+        ocs2_joint_state.name = joint_names
+        ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:14]]
+        ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
+        ocs2_joint_state.effort = [0] * 14
+        ocs2_hand_state.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
+        ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[20:26]]
+        ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:]]
 
-    ocs2_hand_state.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
-    ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[20:26]]
+    elif robot_version >= 10 and robot_version < 30:
+        ocs2_joint_state.name = joint_names
+        ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:8]]
+        ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:8]]
+        ocs2_joint_state.effort = [0] * 8
 
-    ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:]]
+        if len(point.positions) == ROBAN_TACT_LENGTH:
+            ocs2_hand_state.left_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[8:14]]  # 无符号整数
+            ocs2_hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
+                                                point.positions[14:20]]  # 无符号整数
+            
+            ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
+
+            ocs2_waist_state.data = [math.degrees(pos) for pos in point.positions[22:]]
+
 
 kuavo_arm_traj_pub = None
 control_hand_pub = None
 control_head_pub = None
+control_waist_pub = None
 update_h12_config_pub = None
+update_joy_config_pub = None
 
 def timer_callback(event):
-    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub
+    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub
     if g_robot_type == "ocs2" and len(ocs2_joint_state.position) > 0 and plan_arm_state_status is False:
-        kuavo_arm_traj_pub.publish(ocs2_joint_state)
-        control_hand_pub.publish(ocs2_hand_state)
-        control_head_pub.publish(ocs2_head_state)
+        if len(ocs2_joint_state.position) != 0:
+            kuavo_arm_traj_pub.publish(ocs2_joint_state)
+        if len(ocs2_hand_state.left_hand_position) != 0 or len(ocs2_hand_state.right_hand_position) != 0:
+            control_hand_pub.publish(ocs2_hand_state)
+        if len(ocs2_head_state.joint_data) != 0:
+            control_head_pub.publish(ocs2_head_state)
+        if len(ocs2_waist_state.data) != 0:
+            control_waist_pub.publish(ocs2_waist_state)
+
+def robot_status_timer_callback(event):
+    """
+    定时更新机器人状态的回调函数
+    """
+    update_robot_status_from_service()
 
 def init_publishers():
-    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, update_h12_config_pub
+    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub, update_h12_config_pub, update_joy_config_pub, load_map_pub
     kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
     control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1, tcp_nodelay=True)
     control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1, tcp_nodelay=True)
+    control_waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=1, tcp_nodelay=True)
     update_h12_config_pub = rospy.Publisher('/update_h12_customize_config', UpdateH12CustomizeConfig, queue_size=1, tcp_nodelay=True)
+    update_joy_config_pub = rospy.Publisher('/update_joy_customize_config', String, queue_size=1, tcp_nodelay=True)
 
 async def init_ros_node():
     print("Initializing ROS node")
@@ -171,11 +581,15 @@ async def init_ros_node():
     rospy.Subscriber('/bezier/arm_traj', JointTrajectory, traj_callback, queue_size=1, tcp_nodelay=True)
     # rospy.Subscriber('/humanoid_mpc_observation', mpc_observation, mpc_obs_callback)
     rospy.Subscriber('/sensors_data_raw', sensorsData, sensors_data_callback, queue_size=1, tcp_nodelay=True)
+    rospy.Subscriber('/dexhand/state', JointState, robot_hand_callback, queue_size=1, tcp_nodelay=True)
     
     init_publishers()
     
     # Create a timer that calls timer_callback every 10ms (100Hz)
     rospy.Timer(rospy.Duration(0.01), timer_callback)
+    
+    # Create a timer that calls robot_status_timer_callback every 1 second to update robot status
+    rospy.Timer(rospy.Duration(1.0), robot_status_timer_callback)
 
     print("ROS node initialized")
 
@@ -190,12 +604,21 @@ def create_bezier_request(action_data, start_frame_time, end_frame_time):
         req.multi_joint_bezier_trajectory.append(msg)
     req.start_frame_time = start_frame_time
     req.end_frame_time = end_frame_time
-    req.joint_names = ["l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch", "l_hand_yaw", "l_hand_pitch", "l_hand_roll", "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch", "r_hand_yaw", "r_hand_pitch", "r_hand_roll"]
+    if robot_version >= 40:
+        req.joint_names = ["l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch", "l_hand_yaw", "l_hand_pitch", "l_hand_roll", "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch", "r_hand_yaw", "r_hand_pitch", "r_hand_roll"]
+    else:
+        req.joint_names = ["zarm_l1_link", "zarm_l2_link", "zarm_l3_link", "zarm_l4_link", "zarm_r1_link", "zarm_r2_link", "zarm_r3_link", "zarm_r4_link"]
     return req
 
 def plan_arm_trajectory_bezier_curve_client(req):
     service_name = robot_settings[g_robot_type]["plan_arm_trajectory_bezier_service_name"]
-    rospy.wait_for_service(service_name)
+    # Check if service exists
+    try:
+        rospy.wait_for_service(service_name, timeout=1.0)
+    except Exception as e:
+        rospy.logerr(f"Service {service_name} not available")
+        return False
+    
     try:
         plan_service = rospy.ServiceProxy(service_name, planArmTrajectoryBezierCurve)
         res = plan_service(req)
@@ -206,7 +629,14 @@ def plan_arm_trajectory_bezier_curve_client(req):
 
 def stop_plan_arm_trajectory_client():
     service_name = robot_settings[g_robot_type]["stop_plan_arm_trajectory_service_name"]
-    rospy.wait_for_service(service_name)
+    
+    # Check if service exists
+    try:
+        rospy.wait_for_service(service_name, timeout=1.0)
+    except Exception as e:
+        rospy.logerr(f"Service {service_name} not available")
+        return False
+    
     try:
         if g_robot_type == "ocs2":
             stop_service = rospy.ServiceProxy(service_name, Trigger)
@@ -290,7 +720,7 @@ async def broadacast_handler(websocket: websockets.WebSocketServerProtocol, data
 async def preview_action_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
-    global g_robot_type
+    global g_robot_type, active_threads
     print(g_robot_type)
     # Cancel existing thread for this client if it exists
     if websocket in active_threads:
@@ -305,6 +735,7 @@ async def preview_action_handler(
     print(f"received message data: {data}")
 
     action_filename = data["action_filename"]
+    global ACTION_FILE_FOLDER, current_arm_joint_state
     action_file_path = os.path.expanduser(f"{ACTION_FILE_FOLDER}/{action_filename}")
     if not os.path.exists(action_file_path):
         print(f"Action file not found: {action_file_path}")
@@ -319,7 +750,21 @@ async def preview_action_handler(
         response = Response(payload=payload, target=websocket)
         response_queue.put(response)
         return
-
+    
+    if current_arm_joint_state is None:
+        payload.data["code"] = 3
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+    
+    is_compatible, msg = verify_robot_version(action_file_path)
+    if not is_compatible:
+        payload.data["code"] = 4
+        payload.data["message"] = msg
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+    
     start_frame_time, end_frame_time = get_start_end_frame_time(action_file_path)
 
     if g_robot_type == "ocs2":
@@ -330,7 +775,11 @@ async def preview_action_handler(
         action_frames = frames_to_custom_action_data(action_file_path)
 
     req = create_bezier_request(action_frames, start_frame_time, end_frame_time)
-    plan_arm_trajectory_bezier_curve_client(req)
+    if not plan_arm_trajectory_bezier_curve_client(req):
+        payload.data["code"] = 4
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
     time.sleep(0.5)
     # If valid, create initial response
     response = Response(
@@ -341,6 +790,8 @@ async def preview_action_handler(
     # Create a new stop event for this thread
     stop_event = threading.Event()
     active_threads[websocket] = stop_event
+    print("---------------------add event-------------------------------")
+    print(f"active_threads: {active_threads}")
 
     # Start a thread to update the progress
     thread = threading.Thread(
@@ -349,10 +800,241 @@ async def preview_action_handler(
     print("Starting thread to update progress")
     thread.start()
 
+async def adjust_zero_point_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    payload = Payload(
+        cmd="adjust_zero_point", data={"code": 0, "message": "Zero point adjusted successfully"}
+    )
 
+    data = data["data"]
+    print(f"received adjust zero point data: {data}")
+
+    try:
+        motor_index = data.get("motor_index")
+        adjust_pos = data.get("adjust_pos")
+
+        if motor_index is None or adjust_pos is None:
+            payload.data["code"] = 1
+            payload.data["message"] = "Missing required parameters motor_index or adjust_pos"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+            return
+
+
+        # Check if nodelet_manager is running
+        running_nodes = rosnode.get_node_names()
+        if '/nodelet_manager' in running_nodes:
+
+            # Check hardware ready status first
+            rospy.wait_for_service('hardware/get_hardware_ready', timeout=0.5)
+            get_hardware_ready = rospy.ServiceProxy('hardware/get_hardware_ready', Trigger)
+
+            hw_res = get_hardware_ready()
+            print(hw_res.message)
+            if hw_res.message == 'Hardware is ready':
+            
+                print(f"current cannot adjust motor zero point")
+                payload.data["code"] = 2
+                payload.data["message"] = f"current robot is ready pose, cannot adjust motor zero point, please run `roslaunch humanoid_controllers load_kuavo_real.launch cali_set_zero:=true` to reboot robot"
+                response = Response(payload=payload, target=websocket)
+                response_queue.put(response)
+                return
+        
+        rospy.wait_for_service('hardware/adjust_zero_point', timeout=0.5)
+        adjust_zero_point = rospy.ServiceProxy('hardware/adjust_zero_point', adjustZeroPoint)
+            # Create request
+        req = adjustZeroPointRequest()
+        req.motor_index = motor_index
+        req.offset = adjust_pos
+        
+        # Call service
+        res = adjust_zero_point(req)
+        print(f'motor_index : {motor_index}, adjust_pos: {adjust_pos}')
+        # return
+        if not res.success:
+            payload.data["code"] = 3
+            payload.data["message"] = f"Failed to adjust zero point: {res.message}"
+
+
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+    
+    except rospy.ServiceException as e:
+        print(f"Service call failed: {e}")
+        payload.data["code"] = 4
+        payload.data["message"] = f"Service call failed: {str(e)}"
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+    except rospy.ROSException:
+        print("Service adjust_zero_point not available")
+        payload.data["code"] = 5
+        payload.data["message"] = "Service adjust_zero_point not available"
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+    except Exception as e:
+        print(f"Failed to check nodelet_manager status: {e}")
+        payload.data["code"] = 6
+        payload.data["message"] = f"Failed to check nodelet_manager status: {str(e)}"
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+
+
+async def set_zero_point_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    payload = Payload(
+        cmd="set_zero_point", data={"code": 0, "message": "Zero point set successfully"}
+    )
+
+    data = data["data"]
+    print(f"received zero point data: {data}")
+    
+    arm_zero_file_path = f"/root/.config/lejuconfig/arms_zero.yaml"
+    leg_zero_file_path = f"/root/.config/lejuconfig/offset.csv"
+    
+    robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
+    # Get kuavo_assets package path
+    kuavo_assets_path = rospkg.RosPack().get_path('kuavo_assets')
+    with open(f"{kuavo_assets_path}/config/kuavo_v{robot_version}/kuavo.json", 'r') as f:
+        json_config = json.load(f)
+    
+    arm_joints = json_config["NUM_ARM_JOINT"]
+    head_joints = json_config["NUM_HEAD_JOINT"]
+    if robot_version >= 11 and robot_version <= 19:
+        waist_joints = json_config["NUM_WAIST_JOINT"]
+    else:
+        waist_joints = 0
+    num_joints = json_config["NUM_JOINT"]
+    ec_joints = num_joints - arm_joints - head_joints
+    
+    try:
+        if "zero_pos" in data:
+            zero_pos = data["zero_pos"]
+            arm_zero_data = zero_pos[ec_joints:]
+            ec_zero_data = zero_pos[:ec_joints]
+
+            # Backup the zero point files
+            arm_zero_backup = f"{arm_zero_file_path}.bak"
+            leg_zero_backup = f"{leg_zero_file_path}.bak"
+            
+            try:
+                shutil.copy2(arm_zero_file_path, arm_zero_backup)
+                shutil.copy2(leg_zero_file_path, leg_zero_backup)
+            except Exception as e:
+                print(f"Failed to backup zero point files: {e}")
+                payload.data["code"] = 3 
+                payload.data["message"] = f"Failed to backup zero point files: {str(e)}"
+                response = Response(payload=payload, target=websocket)
+                response_queue.put(response)
+                return
+
+            with open(arm_zero_file_path, 'r') as f:
+                arm_zero_data_origin = yaml.safe_load(f)
+                arm_zero_data_origin_size = len(arm_zero_data_origin['arms_zero_position'])
+            
+            with open(leg_zero_file_path, 'r') as f:
+                ec_zero_data_origin = f.read()
+                ec_zero_data_origin = ec_zero_data_origin.split('\n')
+                # -1 去掉末尾的换行
+                if ec_zero_data_origin[-1] == '':
+                    ec_zero_data_origin_size = len(ec_zero_data_origin) - 1
+
+            arm_zero_data = arm_zero_data + [0] * (arm_zero_data_origin_size - len(arm_zero_data))
+            # Convert degrees to radians for arm zero data
+            arm_zero_data = [math.radians(float(x)) for x in arm_zero_data]
+            ec_zero_data = ec_zero_data + [0] * (ec_zero_data_origin_size - len(ec_zero_data))
+
+            
+            with open(arm_zero_file_path, 'w') as f:
+                arm_zero_data_origin['arms_zero_position'] = arm_zero_data
+                yaml.dump(arm_zero_data_origin, f)
+        
+            with open(leg_zero_file_path, 'w') as f:
+                f.write('\n'.join(str(x) for x in ec_zero_data))
+                f.write('\n')
+        
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+        else :
+            payload.data["code"] = 1
+            payload.data["message"] = "Invalid zero point data"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+    except Exception as e:
+        print(f"Error saving zero point file: {e}")
+        payload.data["code"] = 2
+        payload.data["message"] = f"Error saving zero point file: {str(e)}"
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+
+async def get_zero_point_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    payload = Payload(
+        cmd="get_zero_point", data={"code": 0, "message": "Zero point retrieved successfully"}
+    )
+
+    robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
+    # Get kuavo_assets package path
+    kuavo_assets_path = rospkg.RosPack().get_path('kuavo_assets')
+    with open(f"{kuavo_assets_path}/config/kuavo_v{robot_version}/kuavo.json", 'r') as f:
+        json_config = json.load(f)
+    
+    arm_joints = json_config["NUM_ARM_JOINT"]
+    head_joints = json_config["NUM_HEAD_JOINT"]
+    if robot_version >= 11 and robot_version <= 19:
+        waist_joints = json_config["NUM_WAIST_JOINT"]
+    else:
+        waist_joints = 0
+    num_joints = json_config["NUM_JOINT"]
+    num_joints = json_config["NUM_JOINT"]
+    ec_joints = num_joints - arm_joints - head_joints
+
+    arm_zero_file_path = f"/root/.config/lejuconfig/arms_zero.yaml"
+    leg_zero_file_path = f"/root/.config/lejuconfig/offset.csv"
+    
+    if not os.path.exists(arm_zero_file_path) or not os.path.exists(leg_zero_file_path):
+        payload.data["code"] = 1
+        payload.data["message"] = f"Zero point file not found: {arm_zero_file_path} or {leg_zero_file_path}"
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+
+    try:
+        # Read the zero point data from file
+        with open(arm_zero_file_path, 'r') as file:
+            arm_zero_data = yaml.safe_load(file)
+
+        arm_zero_data = arm_zero_data['arms_zero_position']
+        arm_zero_data = arm_zero_data[:arm_joints]
+        # Convert arm zero data from radians to degrees
+        arm_zero_data = [math.degrees(float(x)) for x in arm_zero_data]
+
+        with open(leg_zero_file_path, 'r') as file: 
+            leg_zero_data = file.read()
+        leg_zero_data = [float(i) for i in leg_zero_data.split('\n') if i]
+        leg_zero_data = leg_zero_data[:ec_joints]
+        print(leg_zero_data + arm_zero_data)
+
+        payload.data["zero_pos"] = leg_zero_data + arm_zero_data
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+    except Exception as e:
+        print(f"Error reading zero point file: {e}")
+        payload.data["code"] = 2
+        payload.data["message"] = f"Error reading zero point file: {str(e)}"
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        
 async def stop_preview_action_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
+    global active_threads
     if websocket in active_threads:
         active_threads[websocket].set()
         del active_threads[websocket]
@@ -379,6 +1061,7 @@ async def get_robot_info_handler(
             "code": 0, 
             "robot_type": robot_version,
             "music_folder_path": MUSIC_FILE_FOLDER,
+            "maps_folder_path": MAP_FILE_FOLDER,
             "h12_config_path": H12_CONFIG_PATH,
             "repo_path": REPO_PATH
         }
@@ -390,17 +1073,108 @@ async def get_robot_info_handler(
     )
     response_queue.put(response)
 
+# 传入脚本名称或者脚本路径来运行目标脚本。
+async def execute_python_script_handler(
+        websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    payload = Payload(
+        cmd="execute_python_script", data={"code": 0, "message": "Python script executed successfully"}
+    )
+
+    print(f"received execute_python_script data: {data}")
+    data = data["data"]
+    action_data = data.get("action_data")
+    scripts_name = data.get("scripts_name")
+    if action_data == "start_action":
+        try:
+            if not scripts_name:
+                payload.data["code"] = 1
+                payload.data["message"] = "scripts_name parameter not provided"
+            else:
+                # 如果scripts_name是绝对路径，直接使用；否则认为是相对UPLOAD_FILES_FOLDER目录的路径
+                # 处理脚本路径中的"~"等转义符
+                scripts_name_expanded = os.path.expanduser(scripts_name)
+                if os.path.isabs(scripts_name_expanded):
+                    script_path = scripts_name_expanded
+                else:
+                    # 默认脚本目录为UPLOAD_FILES_FOLDER
+                    global UPLOAD_FILES_FOLDER
+                    script_path = os.path.join(UPLOAD_FILES_FOLDER, scripts_name_expanded)
+                print(f"script_path: {script_path}")
+                if not os.path.isfile(script_path):
+                    payload.data["code"] = 2
+                    payload.data["message"] = f"Script file does not exist: {script_path}"
+                else:
+                    # 后台执行python脚本
+                    try:
+                        # 使用subprocess.Popen后台执行，不等待脚本结束
+                        process = subprocess.Popen(
+                            ["python3", script_path],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            encoding='utf-8'
+                        )
+                        payload.data["code"] = 0
+                        payload.data["message"] = f"Python script started in background: {scripts_name}"
+                    except Exception as e:
+                        payload.data["code"] = 3
+                        payload.data["message"] = f"Failed to start Python script in background: {scripts_name}, error: {str(e)}"
+        except Exception as e:
+            payload.data["code"] = 4
+            payload.data["message"] = f"Exception occurred while executing script: {str(e)}"
+    elif action_data == "stop_action":
+        # 查找scripts_name对应的进程并kill掉
+        try:
+            if not scripts_name:
+                payload.data["code"] = 1
+                payload.data["message"] = "scripts_name parameter not provided, cannot stop process"
+            else:
+                # 处理脚本路径中的"~"等转义符
+                scripts_name_expanded = os.path.expanduser(scripts_name)
+                # 只取文件名部分，防止路径影响
+                script_basename = os.path.basename(scripts_name_expanded)
+                # 使用pgrep查找所有python3进程中包含该脚本名的进程
+                # 只查找python3进程，避免误杀
+                # 获取所有python3进程
+                ps = subprocess.Popen(['ps', '-eo', 'pid,cmd'], stdout=subprocess.PIPE, text=True)
+                output, _ = ps.communicate()
+                killed = False
+                for line in output.splitlines():
+                    if 'python3' in line and script_basename in line:
+                        try:
+                            pid = int(line.strip().split()[0])
+                            if pid == os.getpid():
+                                continue  # 不杀掉自己
+                            os.kill(pid, signal.SIGTERM)
+                            killed = True
+                            print(f"Killed process: {pid} ({line})")
+                        except Exception as e:
+                            print(f"Failed to kill process: {e}")
+                if killed:
+                    payload.data["code"] = 0
+                    payload.data["message"] = f"Tried to kill all python3 processes containing script name {script_basename}"
+                else:
+                    payload.data["code"] = 2
+                    payload.data["message"] = f"No python3 process found containing script name {script_basename}"
+        except Exception as e:
+            payload.data["code"] = 3
+            payload.data["message"] = f"Exception occurred while stopping script process: {str(e)}"
+
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
 
 async def get_robot_status_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
+    global active_threads
     payload = Payload(
         cmd="get_robot_status", data={"code": 0, "isrun": True}
     )
 
     if not active_threads:
         payload.data["isrun"] = False
-        print("No activate threads")
+        print(f"No activate threads: {active_threads}")
     else:
         for key, value in active_threads.items():
             print(f"Key: {key}, Value: {value}")
@@ -415,6 +1189,7 @@ async def get_robot_status_handler(
 async def run_node_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
+    global active_threads
     if websocket in active_threads:
         active_threads[websocket].set()
         del active_threads[websocket]
@@ -437,13 +1212,14 @@ async def run_node_handler(
 
     # Start a thread to update the progress
     thread = threading.Thread(
-        target=execute_command_progress, args=(websocket, response, stop_event, execute_path)
+        target=execute_command_progress, args=(websocket, response, stop_event, execute_path, False, None)  # 明确传递None作为parameters
     )
     print("Starting thread to update progress")
     thread.start()
 
 
-def execute_command_progress(websocket: websockets.WebSocketServerProtocol, response: Response, stop_event: threading.Event, execute_path):
+def execute_command_progress(websocket: websockets.WebSocketServerProtocol, response: Response, stop_event: threading.Event, execute_path, use_ros_env: bool = False, parameters: dict = None):
+    global active_threads
     payload = response.payload
     update_interval = 0.001 
 
@@ -455,10 +1231,48 @@ def execute_command_progress(websocket: websockets.WebSocketServerProtocol, resp
 
     py_exe = sys.executable
     command_list = [py_exe, execute_path]
+    
+    if parameters:
+        for key, value in parameters.items():
+            if isinstance(value, bool):
+                if value:
+                    command_list.append(f"{key}")
+                    command_list.append(str(value))
+            else:
+                command_list.append(f"{key}")
+                command_list.append(str(value))
+    
+    # 当需要加载 ros 环境时，动态查找工作空间路径
+    if use_ros_env:
+        # 获取当前脚本所在目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # 向上查找直到找到包含devel/setup.bash的目录
+        workspace_path = None
+        search_dir = current_dir
+        while search_dir != '/':
+            setup_bash_path = os.path.join(search_dir, 'devel', 'setup.bash')
+            if os.path.exists(setup_bash_path):
+                workspace_path = search_dir
+                break
+            search_dir = os.path.dirname(search_dir)
+        
+        if workspace_path:
+            # 使用bash -c来执行source命令和Python脚本
+            setup_bash_path = os.path.join(workspace_path, 'devel', 'setup.bash')
+            if parameters:
+                args_str = ' '.join(command_list[2:])
+                command_list = ['bash', '-c', f'source {setup_bash_path} && {py_exe} {execute_path} {args_str}']
+            else:
+                command_list = ['bash', '-c', f'source {setup_bash_path} && {py_exe} {execute_path}']
+            print(f"Found workspace at: {workspace_path}")
+        else:
+            print("Warning: Could not find ROS workspace")
+    
     print(f"Executing command: {command_list}")
     global process
     try: 
-        process = subprocess.Popen(command_list)
+        env = os.environ.copy()
+        process = subprocess.Popen(command_list, env=env)
     except Exception as e:
         print("An error occurred while trying to execute the command:")
         print(e)
@@ -476,8 +1290,8 @@ def execute_command_progress(websocket: websockets.WebSocketServerProtocol, resp
         time.sleep(update_interval)
 
 def monitor_and_stop(process):
-    global should_stop
-    process_terminated = False
+    global should_stop, terminate_process_result
+    terminate_process_result = False
     while True:
         time.sleep(1)
         if should_stop:
@@ -485,21 +1299,21 @@ def monitor_and_stop(process):
             process.terminate()
             try:
                 process.wait(timeout=3)
-                process_terminated = True
+                terminate_process_result = True
             except subprocess.TimeoutExpired:
                 print("Forced kill the target process")
                 process.kill()
                 try:
                     process.wait(timeout=2)
-                    process_terminated = True
+                    terminate_process_result = True
                 except subprocess.TimeoutExpired:
-                    process_terminated = False
+                    terminate_process_result = False
             break
-    return process_terminated
 
 async def stop_run_node_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
+    global active_threads
     if websocket in active_threads:
         active_threads[websocket].set()
         del active_threads[websocket]
@@ -508,13 +1322,14 @@ async def stop_run_node_handler(
         cmd="stop_run_node", data={"code":0}
     )
 
-    global process, should_stop
+    global process, should_stop, terminate_process_result
     monitor_thread = threading.Thread(target=monitor_and_stop, args=(process,))
     monitor_thread.start()
     should_stop = True
-    process_terminated = monitor_thread.join()
+    monitor_thread.join()
+    print("terminate_process_result: ", terminate_process_result)
     
-    if not process_terminated:
+    if not terminate_process_result:
         payload.data["code"] = 1
 
     response = Response(
@@ -522,7 +1337,6 @@ async def stop_run_node_handler(
         target=websocket,
     )
     response_queue.put(response)
-
 def is_player_in_body():
     # 检查下位机是否有音频播放设备
     result = False
@@ -612,16 +1426,22 @@ async def check_music_path_handler(
 async def update_h12_config_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
-    global update_h12_config_pub
+    global update_h12_config_pub, update_joy_config_pub
     payload = Payload(
         cmd="update_h12_config", data={"code": 0, "msg": "msg"}
     )
 
     # 更新H12遥控器按键配置
-    msg = UpdateH12CustomizeConfig()
-    msg.update_msg = "Update H12 Config"
-    update_h12_config_pub.publish(msg)
-
+    global robot_version
+    if robot_version >= 40:
+        msg = UpdateH12CustomizeConfig()
+        msg.update_msg = "Update H12 Config"
+        update_h12_config_pub.publish(msg)
+    elif robot_version >= 10 and robot_version <= 19:
+        msg = String()
+        msg.data = "Update Joy Config"
+        update_joy_config_pub.publish(msg)
+    
     try:
         # 确认音乐文件在上位机还是下位机播放，并进行相应处理
         if is_player_in_body():
@@ -704,8 +1524,497 @@ async def update_data_pilot_handler(
     response_queue.put(response)
 
 
+def get_music_list():
+    # 指定路径下指定格式的文件列表
+    music_list = []
+
+    # 检查下位机是否有音频播放设备
+    if is_player_in_body():
+        music_folder = os.path.expanduser("/home/lab/.config/lejuconfig/music")
+
+        for root, dirs, files in os.walk(music_folder):
+            for file in files:
+                if file.endswith(".wav") or file.endswith(".mp3"):
+                    # 使用 os.path.join 规范路径拼接
+                    full_path = os.path.join(music_folder, file)
+                    # 确保UTF-8编码格式
+                    music_list.append(full_path.encode('utf-8').decode('utf-8'))
+
+    else:
+        result = subprocess.run(['systemctl', 'is-active', 'isc-dhcp-server'])
+        if result.returncode == 0:
+            remote_host = "192.168.26.12"
+        else:
+            remote_host = "192.168.26.1"
+
+
+        remote_user = "kuavo"
+        remote_path = "/home/kuavo/.config/lejuconfig/music"
+        encoded_password = os.getenv("KUAVO_REMOTE_PASSWORD")
+
+        if encoded_password is None:
+            raise ValueError("Failed to get remote password.")
+        remote_password = base64.b64decode(encoded_password).decode('utf-8')
+
+        # 获取远程路径下的音乐列表
+        ssh_cmd = (
+            f"sshpass -p '{remote_password}' ssh {remote_user}@{remote_host} "
+            f"'cd \"{remote_path}\" && find . -maxdepth 1 -type f \\( -name \"*.mp3\" -o -name \"*.wav\" \\) -printf \"%P\\n\"'"
+        )
+
+        result = subprocess.run(
+            ssh_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=True
+        )
+
+        if result.returncode == 0:
+            # 成功获取远程音乐文件列表
+            music_list = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            music_list = [os.path.join(remote_path, file) for file in music_list]
+        else:
+            music_list = []
+
+    return music_list
+
+async def get_music_list_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    music_list = get_music_list()
+    payload = Payload(
+        cmd="get_music_list", data={"code": 0, "music_list": music_list}
+
+    )
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+
+    response_queue.put(response)
+
+async def execute_demo_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    global active_threads
+    if websocket in active_threads:
+        active_threads[websocket].set()
+        del active_threads[websocket]
+
+    payload = Payload(
+        cmd="execute_demo", data={"code": 0, "msg": "Demo execution started"}
+    )
+
+    data = data["data"]
+    print(f"received demo execution data: {data}")
+    demo_name = data["demo_name"]
+    parameters = data.get("parameters", {})
+    
+    # 构建demo脚本路径
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # 构建demo脚本路径：demo_name_demo/main.py
+    execute_path = os.path.join(current_dir, f"{demo_name}_demo", "main.py")
+
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+
+    # 创建新的停止事件
+    stop_event = threading.Event()
+
+    thread = threading.Thread(
+        target=execute_command_progress, 
+        args=(websocket, response, stop_event, execute_path, True, parameters)
+    )
+    print("Starting thread to execute demo")
+    thread.start()
+
+async def stop_execute_demo_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    global active_threads
+    if websocket in active_threads:
+        active_threads[websocket].set()
+        del active_threads[websocket]
+    
+    payload = Payload(
+        cmd="stop_execute_demo", data={"code":0}
+    )
+
+    global process, should_stop, terminate_process_result
+    monitor_thread = threading.Thread(target=monitor_and_stop, args=(process,))
+    monitor_thread.start()
+    should_stop = True
+    monitor_thread.join()
+    print("terminate_process_result: ", terminate_process_result)
+    
+    if not terminate_process_result:
+        payload.data["code"] = 1
+        payload.data["msg"] = "Failed to stop demo execution"
+
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def load_map_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    global active_threads
+    if websocket in active_threads:
+        active_threads[websocket].set()
+        del active_threads[websocket]
+    payload = Payload(
+        cmd="load_map", data={"code":0}
+    )
+    data = data["data"]
+    map_name = data["map_name"]
+    try:
+        service_name = '/load_map'
+        rospy.wait_for_service(service_name,timeout=3.0)
+        load_map_client = rospy.ServiceProxy(service_name, LoadMap)
+
+        # request
+        req = LoadMapRequest()
+        req.map_name = map_name
+        
+        # response  
+        res = load_map_client(req)
+        if res.success:
+            if  download_map_file(map_name):
+                payload.data["code"] = 0
+                payload.data["msg"] = "Map loaded successfully"
+                payload.data["map_path"] = MAP_FILE_FOLDER +"/"+ map_name+".png"
+            else:
+                payload.data["code"] = 1
+                payload.data["msg"] = "Map loaded successfully, but failed to download map file"
+
+    except rospy.ServiceException as e:
+        payload.data["code"] = 2
+        payload.data["msg"] = f"Service `load_map` call failed: {e}"
+    except rospy.ROSException as e:
+        payload.data["code"] = 2
+        payload.data["msg"] = f"Service `load_map` call failed: {e}"
+    except Exception as e:
+        payload.data["code"] = 2
+        payload.data["msg"] = f"Service `load_map` call failed: {e}"
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+    
+async def init_localization_by_pose_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    payload = Payload(
+        cmd="init_localization_by_pose", data={"code":0}
+    )
+
+    data = data["data"]
+    print(f"received init localization by pose data: {data}")
+    x = data["x"]
+    y = data["y"]
+    z = data["z"]
+    roll = data["roll"]
+    pitch = data["pitch"]
+    yaw = data["yaw"]
+    
+    try:
+        service_name = 'set_initialpose'
+        rospy.wait_for_service(service_name,timeout=3.0)
+        init_localization_by_pose_client = rospy.ServiceProxy(service_name, SetInitialPose) 
+
+        # 将 roll pitch yaw 转换为四元数
+        orientation = tf.transformations.quaternion_from_euler(yaw, pitch, roll)
+
+        # request
+        req = SetInitialPoseRequest()
+        req.initial_pose.header.frame_id = "map"
+        req.initial_pose.header.stamp = rospy.Time.now()
+        req.initial_pose.pose.pose.position.x = x
+        req.initial_pose.pose.pose.position.y = y
+        req.initial_pose.pose.pose.position.z = z
+        req.initial_pose.pose.pose.orientation.x = orientation[0]
+        req.initial_pose.pose.pose.orientation.y = orientation[1]
+        req.initial_pose.pose.pose.orientation.z = orientation[2]
+        req.initial_pose.pose.pose.orientation.w = orientation[3]
+        
+        # response
+        res = init_localization_by_pose_client(req)
+        if res.success:
+            payload.data["code"] = 0
+            payload.data["msg"] = "Localization initialized successfully"
+        else:
+            payload.data["code"] = 1
+            payload.data["msg"] = "Failed to initialize localization"
+    except rospy.ServiceException as e:
+        payload.data["code"] = 1
+        payload.data["msg"] = f"Service `init_localization_by_pose` call failed: {e}"
+    except rospy.ROSException as e:
+        payload.data["code"] = 1
+        payload.data["msg"] = f"Service `init_localization_by_pose` call failed: {e}"  
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+def download_map_file(map_name: str = ""):
+    # 将地图文件下载到本地指定路径
+    # 订阅一次/map话题，将得到的map数据保存为png格式
+
+    """
+    订阅一次/map话题，将地图数据保存为png格式图片
+    """
+    global MAP_FILE_FOLDER
+    try:
+        msg = rospy.wait_for_message('/map', OccupancyGrid)
+        width = msg.info.width
+        height = msg.info.height
+        data = np.array(msg.data, dtype=np.int8).reshape((height, width))
+
+        # 映射到图像灰度：0=白色，100=黑色，-1=灰色
+        img = np.zeros((height, width), dtype=np.uint8)
+        img[data == -1] = 128
+        img[data == 0] = 255
+        img[data == 100] = 0
+        # 可选：线性插值灰度（处理 0~100 范围的值）
+        mask = (data > 0) & (data < 100)
+        img[mask] = 255 - (data[mask] * 255 // 100)
+
+        # OpenCV 默认原点在左上，而 ROS 地图原点通常在左下 → 上下翻转图像
+        img = cv2.flip(img, 0)
+
+        # 保存为 PNG
+        cv2.imwrite(MAP_FILE_FOLDER+"/"+map_name+".png", img)
+        rospy.loginfo(f"地图已保存为 {MAP_FILE_FOLDER}/{map_name}.png")
+        return True
+    except Exception as e:
+        rospy.logerr(f"Failed to download map file: {e}")
+        return False
+
+
+async def get_robot_position_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    payload = Payload(
+        cmd="get_robot_position", data={"code":0}
+    )
+    try:
+        # 获取base_link在map坐标系下的位置
+        listener = tf.TransformListener()
+        listener.waitForTransform("map", "base_link", rospy.Time(0), rospy.Duration(2.0))
+        (trans, rot) = listener.lookupTransform("map", "base_link", rospy.Time(0))
+        # trans为(x, y, z)
+        x, y, z = trans
+
+        # 获取地图信息
+        map_msg = rospy.wait_for_message('/map', OccupancyGrid, timeout=2.0)
+        origin = map_msg.info.origin
+        resolution = map_msg.info.resolution
+        width = map_msg.info.width
+        height = map_msg.info.height
+
+        # 这里的origin_grid_x和origin_grid_y表示map坐标系下(0,0)点在栅格坐标系下的坐标
+        # 也就是map坐标系的(0,0)点对应的像素点
+        origin_x = origin.position.x
+        origin_y = origin.position.y
+
+        origin_grid_x = int((0.0 - origin_x) / resolution)
+        origin_grid_y = int((0.0 - origin_y) / resolution)
+
+        origin_grid_y =  height - 1 - origin_grid_y
+
+        # 将base_link的map坐标转换为栅格坐标
+        grid_x = int((x - origin_x) / resolution)
+        grid_y = int((y - origin_y) / resolution)
+
+        # 转换为PNG图片上的像素坐标
+        # PNG图片通过cv2.flip(img, 0)上下翻转，所以Y坐标需要转换
+        png_x = grid_x
+        png_y = height - 1 - grid_y
+
+        payload.data["position"] = {
+            "png_x": png_x,  # PNG图片上的X像素坐标
+            "png_y": png_y,  # PNG图片上的Y像素坐标
+            "origin_grid_x": origin_grid_x,  # 地图原点在栅格坐标系下的X
+            "origin_grid_y": origin_grid_y,  # 地图原点在栅格坐标系下的Y
+        }
+        payload.data["msg"] = "Get robot position successfully"
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["msg"] = f"Failed to get robot position: {e}"
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def get_all_maps_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    payload = Payload(
+        cmd="get_all_maps", data={"code":0}
+    )
+    try:
+        service_name = 'get_all_maps'
+        rospy.wait_for_service(service_name,timeout=3.0)
+        get_all_maps_client = rospy.ServiceProxy(service_name, GetAllMaps)  
+        
+        # request   
+        req = GetAllMapsRequest()
+
+        # response
+        res = get_all_maps_client(req)
+        payload.data["maps"] = res.maps
+        payload.data["msg"] = "Get all maps successfully"
+    except rospy.ServiceException as e:
+        payload.data["code"] = 1
+        payload.data["msg"] = f"Service `get_all_maps` call failed: {e}"
+    except rospy.ROSException as e:
+        payload.data["code"] = 1
+        payload.data["msg"] = f"Service `get_all_maps` call failed: {e}"
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["msg"] = f"Service `get_all_maps` call failed: {e}"
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def start_robot_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    启动机器人（缩腿）
+    """
+    global robot_status
+    payload = Payload(
+        cmd="start_robot",
+        data={"code": 0, "message": "Robot started successfully"}
+    )
+    
+    try:
+        # 直接调用本地实现
+        result, msg = robot_instance.start_robot()
+        if result:
+            payload.data["code"] = 0
+            payload.data["message"] = msg
+            # 更新机器人状态为"crouching"
+            robot_status = "crouching"
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = msg
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to start robot: {e}"
+        
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def stop_robot_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    停止机器人
+    """
+    global robot_status
+    payload = Payload(
+        cmd="stop_robot",
+        data={"code": 0, "message": "Robot stopped successfully"}
+    )
+    
+    try:
+        # 直接调用本地实现
+        result, msg = robot_instance.stop_robot()
+        if result:
+            payload.data["code"] = 0
+            payload.data["message"] = msg
+            # 更新机器人状态为"unlaunch"
+            robot_status = "unlaunch"
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = msg
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to stop robot: {e}"
+        
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def stand_robot_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    站立机器人（伸直腿）
+    """
+    global robot_status
+    payload = Payload(
+        cmd="stand_robot",
+        data={"code": 0, "message": "Robot stand command sent successfully"}
+    )
+    
+    try:
+        # 直接调用本地实现
+        result, msg = robot_instance.stand_robot()
+        if result:
+            payload.data["code"] = 0
+            payload.data["message"] = msg
+            # 更新机器人状态为"standing"
+            robot_status = "standing"
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = msg
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to stand robot: {e}"
+        
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def get_robot_launch_status_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    获取机器人当前状态
+    """
+    global robot_status
+    payload = Payload(
+        cmd="get_robot_launch_status",
+        data={"code": 0, "status": robot_status, "message": "Get robot status successfully"}
+    )
+    
+    try:
+        # 从服务动态获取机器人状态
+        update_robot_status_from_service()
+        payload.data["code"] = 0
+        payload.data["status"] = robot_status
+        payload.data["message"] = "Get robot status successfully"
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to get robot status: {e}"
+        
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
 # Add a function to clean up when a websocket connection is closed
 def cleanup_websocket(websocket: websockets.WebSocketServerProtocol):
+    global active_threads
     if websocket in active_threads:
         active_threads[websocket].set()
         del active_threads[websocket]
@@ -714,3 +2023,9 @@ def cleanup_websocket(websocket: websockets.WebSocketServerProtocol):
 def set_robot_type(robot_type: str):
     global g_robot_type
     g_robot_type = robot_type
+
+def set_folder_path(action_file_folder: str, upload_folder: str, map_file_folder: str):
+    global ACTION_FILE_FOLDER, UPLOAD_FILES_FOLDER, MAP_FILE_FOLDER
+    ACTION_FILE_FOLDER = action_file_folder
+    UPLOAD_FILES_FOLDER = upload_folder
+    MAP_FILE_FOLDER = map_file_folder

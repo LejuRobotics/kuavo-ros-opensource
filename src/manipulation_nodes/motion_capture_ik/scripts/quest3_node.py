@@ -12,11 +12,13 @@ from tools.quest3_utils import Quest3ArmInfoTransformer
 from tools.kalman_filter import TwoArmPosePredictor
 from visualization_msgs.msg import MarkerArray, Marker
 import argparse
-
+from copy import deepcopy
+from std_msgs.msg import Float64
 from kuavo_msgs.msg import twoArmHandPoseCmd, ikSolveParam
 from kuavo_msgs.msg import armTargetPoses
-from kuavo_msgs.srv import changeArmCtrlMode
+from kuavo_msgs.srv import changeArmCtrlMode, fkSrv
 from noitom_hi5_hand_udp_python.msg import PoseInfo, PoseInfoList
+from kuavo_msgs.msg import sensorsData
 from kuavo_msgs.msg import JoySticks
 from kuavo_msgs.msg import robotHandPosition
 from kuavo_msgs.srv import controlLejuClaw, controlLejuClawRequest
@@ -45,7 +47,7 @@ class Quest3Node:
         self.joySticks_data = None
         self.button_y_last = False
         self.freeze_finger = False
-
+        self.arm_joint_angles = None
         kuavo_assests_path = get_package_path("kuavo_assets")
         robot_version = os.environ.get('ROBOT_VERSION', '40')
         model_config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
@@ -82,10 +84,16 @@ class Quest3Node:
 
         rospy.Subscriber("/leju_quest_bone_poses", PoseInfoList, self.quest_bone_poses_callback)
         rospy.Subscriber("/quest_joystick_data", JoySticks, self.joySticks_data_callback)
+        rospy.Subscriber("/sensors_data_raw", sensorsData, self.sensors_data_raw_callback)
+        rospy.Subscriber("/mm/control_type", Float64, self.mm_control_type_callback)
         self.filtered_marker_array_pub = rospy.Publisher("/quest3_node/filtered_marker_array", MarkerArray, queue_size=10)
 
         self.arm_pose_predictor = None
         self.predict_time = 0.0 # if predict_time is 0, no predict, just publish the filtered pose.
+
+        self.need_interpolate = False
+        self.last_mm_control_type = 0
+        self.mm_control_type = 0
 
     def set_control_torso_mode(self, mode: bool):
         self.quest3_arm_info_transformer.control_torso = mode
@@ -239,19 +247,6 @@ class Quest3Node:
         if(self.quest3_arm_info_transformer.check_if_vr_error()):
             print("\033[91mDetected VR ERROR!!! Please restart VR app in quest3 or check the battery level of the joystick!!!\033[0m")
             return
-        if self.quest3_arm_info_transformer.is_runing and self.predict_time <= 1e-5:
-            eef_pose_msg = twoArmHandPoseCmd()
-            eef_pose_msg.frame = 3
-            eef_pose_msg.hand_poses.left_pose.pos_xyz = left_pose[0]
-            eef_pose_msg.hand_poses.left_pose.quat_xyzw = left_pose[1]
-            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = left_elbow_pos
-
-            eef_pose_msg.hand_poses.right_pose.pos_xyz = right_pose[0]
-            eef_pose_msg.hand_poses.right_pose.quat_xyzw = right_pose[1]
-            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = right_elbow_pos
-            eef_pose_msg.ik_param = self.ik_solve_param
-            eef_pose_msg.use_custom_ik_param = self.use_custom_ik_param
-            self.pub.publish(eef_pose_msg)
 
         if self.send_srv and (self.last_quest_running_state != self.quest3_arm_info_transformer.is_runing):
             print(f"Quest running state change to: {self.quest3_arm_info_transformer.is_runing}")
@@ -264,6 +259,23 @@ class Quest3Node:
                 self.change_mm_wbc_arm_ctrl_mode(wbc_mode)
                 print("Received service response of changing arm control mode.")
             self.last_quest_running_state = self.quest3_arm_info_transformer.is_runing
+
+        if self.quest3_arm_info_transformer.is_runing and self.predict_time <= 1e-5:
+            eef_pose_msg = twoArmHandPoseCmd()
+            eef_pose_msg.frame = 3
+            eef_pose_msg.hand_poses.left_pose.pos_xyz = left_pose[0]
+            eef_pose_msg.hand_poses.left_pose.quat_xyzw = left_pose[1]
+            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = left_elbow_pos
+
+            eef_pose_msg.hand_poses.right_pose.pos_xyz = right_pose[0]
+            eef_pose_msg.hand_poses.right_pose.quat_xyzw = right_pose[1]
+            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = right_elbow_pos
+            eef_pose_msg.ik_param = self.ik_solve_param
+            eef_pose_msg.use_custom_ik_param = self.use_custom_ik_param
+
+            if self.rl and self.need_interpolate:
+                eef_pose_msg = self.interpolate_eef_pose(eef_pose_msg)
+            self.pub.publish(eef_pose_msg)
 
         if self.joySticks_data is None:  # 优先使用手柄数据
             self.pub_robot_end_hand(hand_finger_data=[left_finger_joints, right_finger_joints])
@@ -305,11 +317,86 @@ class Quest3Node:
                 self.pub_mm_traj.publish(msg)
                 # print(f"publishing mm traj values: {values}")
 
-
     def joySticks_data_callback(self, msg):
         self.quest3_arm_info_transformer.read_joySticks_msg(msg)
         self.joySticks_data = msg
         self.pub_robot_end_hand(joyStick_data=self.joySticks_data)
+
+    def fk_srv_client(self, joint_angles):
+        service_name = "/ik/fk_srv"
+        try:
+            rospy.wait_for_service(service_name, timeout=3.0)
+            fk_srv = rospy.ServiceProxy(service_name, fkSrv)
+            fk_result = fk_srv(joint_angles)
+            # rospy.loginfo(f"FK result: {fk_result.success}")
+            return fk_result.hand_poses
+        except rospy.ROSException:
+            rospy.logerr(f"Service {service_name} not available")
+        except rospy.ServiceException as e:
+            rospy.logerr(f"Service call failed: {e}")
+        return None
+
+    def sensors_data_raw_callback(self, msg):
+        if len(msg.joint_data.joint_q) >= 26:
+            self.arm_joint_angles = msg.joint_data.joint_q[12:26]
+
+    def mm_control_type_callback(self, msg):
+        self.mm_control_type = int(msg.data)
+        if self.mm_control_type == 1 and self.last_mm_control_type == 0:
+            print("Interpolation started")
+            self.need_interpolate = True
+        self.last_mm_control_type = self.mm_control_type
+
+    def interpolate_eef_pose(self, eef_pose_msg: 'twoArmHandPoseCmd', max_dist_threshold: float = 0.3, interp_alpha: float = 0.3
+) -> 'twoArmHandPoseCmd':
+        """对双手末端位姿进行线性插值，返回插值后的消息。"""
+
+        if self.arm_joint_angles is None:
+            return None
+
+        # 拷贝原始消息，避免副作用
+        interp_msg = deepcopy(eef_pose_msg)
+
+        # 目标位姿（VR输入）
+        l_target_pos = np.array(eef_pose_msg.hand_poses.left_pose.pos_xyz)
+        r_target_pos = np.array(eef_pose_msg.hand_poses.right_pose.pos_xyz)
+
+        # 获取当前实际末端（通过FK服务）
+        hand_poses = self.fk_srv_client(self.arm_joint_angles)
+        if hand_poses is not None:
+            l_current_pos = np.array(hand_poses.left_pose.pos_xyz)
+            r_current_pos = np.array(hand_poses.right_pose.pos_xyz)
+
+            l_dist = np.linalg.norm(l_target_pos - l_current_pos)
+            r_dist = np.linalg.norm(r_target_pos - r_current_pos)
+
+            left_need_interp = l_dist > max_dist_threshold
+            right_need_interp = r_dist > max_dist_threshold
+            
+            if left_need_interp:
+                new_l_pos = l_current_pos + interp_alpha * (l_target_pos - l_current_pos)
+            else:
+                new_l_pos = l_target_pos
+                
+            if right_need_interp:
+                new_r_pos = r_current_pos + interp_alpha * (r_target_pos - r_current_pos)
+            else:
+                new_r_pos = r_target_pos
+
+            if not left_need_interp and not right_need_interp:
+                self.need_interpolate = False
+                print(f"Interpolation completed - both hands within threshold")
+            
+        else:
+            # FK失败，直接使用目标
+            new_l_pos = l_target_pos
+            new_r_pos = r_target_pos
+
+        # 填入新数据
+        interp_msg.hand_poses.left_pose.pos_xyz = new_l_pos.tolist()
+        interp_msg.hand_poses.right_pose.pos_xyz = new_r_pos.tolist()
+
+        return interp_msg
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal.SIG_DFL)

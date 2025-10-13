@@ -1,0 +1,10 @@
+twoArmHandPoseCmdFree twoArmHandPoseCmdFreeRequest
+---
+bool success
+bool with_torso
+float64[] q_arm
+float64[] q_torso
+
+float64   time_cost # unit: ms
+# ik result
+twoArmHandPoseFree  hand_poses

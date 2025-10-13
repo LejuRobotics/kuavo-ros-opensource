@@ -15,11 +15,14 @@
 #include "kuavo_msgs/fkSrv.h"
 #include "kuavo_msgs/headBodyPose.h"
 #include "kuavo_msgs/changeArmCtrlMode.h"
+#include "kuavo_msgs/armTargetPoses.h"
 #include "grab_box/common/ocs2_ros_interface.hpp"
 #include "grab_box/common/drake_interface.hpp"
 #include "grab_box/common/math.hpp"
 #include "grab_box/utils/cubic_interpolator.hpp"
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
+#include "kuavo_msgs/setMmCtrlFrame.h"
+#include "geometry_msgs/PoseStamped.h"
 
 namespace GrabBox
 {
@@ -29,7 +32,13 @@ namespace GrabBox
     PutDown = 1,
     Move = 2
   };
-
+  enum class FrameType{
+    CurrentFrame = 0,    // keep current frame
+    WorldFrame = 1,     
+    LocalFrame = 2,
+    VRFrame = 3,
+    MmWorldFrame = 4
+  };
   using namespace std::chrono;
   // Example of Asynchronous node that uses StatefulActionNode as base class
   class GraspBox : public BT::StatefulActionNode
@@ -58,13 +67,17 @@ namespace GrabBox
       pubBodyPose_ = nh.advertise<kuavo_msgs::headBodyPose>("/kuavo_head_body_orientation", 10);
       pubBoxMarker_ = nh.advertise<visualization_msgs::Marker>("/grasp_box/box_marker", 10);
       pubEefMarker_ = nh.advertise<visualization_msgs::Marker>("/grasp_box/eef_marker", 10);
-      enable_wbc_arm_trajectory_control_srv_ = nh.serviceClient<kuavo_msgs::changeArmCtrlMode>("/enable_wbc_arm_trajectory_control");
+      enable_wbc_arm_trajectory_control_srv_ = nh.serviceClient<kuavo_msgs::changeArmCtrlMode>("/enable_mm_wbc_arm_trajectory_control");
       exec_traj_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/grasp_box/exec_two_hand_trajectory", 10);
       planed_traj_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/grasp_box/planed_two_hand_trajectory", 10);
       solved_traj_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/grasp_box/solved_two_hand_trajectory", 10);
       eef_wrench_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/hand_wrench_cmd", 10);
-      ik_cmd_pub_ = nh.advertise<kuavo_msgs::twoArmHandPoseCmd>("mm/two_arm_hand_pose_cmd", 10);
+      arm_traj_pub_ = nh.advertise<kuavo_msgs::armTargetPoses>("/mm/end_effector_trajectory", 1);
       base_pose_cmd_pub_ = nh.advertise<std_msgs::Float64MultiArray>("/base_pose_cmd", 10);
+      changeManipulatorControlFrame_srv_ = nh.serviceClient<kuavo_msgs::setMmCtrlFrame>("/set_mm_ctrl_frame");
+      test_box_target_pub_ = nh.advertise<geometry_msgs::PoseStamped>("/test/box_target", 10);
+      test_trajectory_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/test/trajectory", 10);
+      interpolated_traj_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/grasp_box/interpolated_two_hand_trajectory", 10);
 
       fk_srv_ = nh.serviceClient<kuavo_msgs::fkSrv>("/ik/fk_srv");
       while(!nh.hasParam("/com_height"))
@@ -77,14 +90,16 @@ namespace GrabBox
       std::cout << "[GraspBox] comHeight: " << com_height_<<std::endl;
       max_hand_dis_ = getParamsFromBlackboard<double>(config, "grasp_box.max_hand_dis");
       hand_move_spd_ = getParamsFromBlackboard<double>(config, "grasp_box.hand_move_spd");
+      box_holdon_move_spd_ = getParamsFromBlackboard<double>(config, "grasp_box.box_holdon_move_spd");
       std::cout << "max_hand_dis: " << max_hand_dis_ << std::endl;
       std::cout << "hand_move_spd: " << hand_move_spd_ << std::endl;
+      std::cout << "box_holdon_move_spd: " << box_holdon_move_spd_ << std::endl;
 
       pre_x_ = getParamsFromBlackboard<double>(config, "grasp_box.pre_x");
       pre_y_ = getParamsFromBlackboard<double>(config, "grasp_box.pre_y");
       bias_y_ = getParamsFromBlackboard<double>(config, "grasp_box.bias_y");
       grab_up_height_ = getParamsFromBlackboard<double>(config, "grasp_box.grab_up_height");
-      grasp_force_ = getParamsFromBlackboard<double>(config, "grasp_box.grasp_force");
+      // grasp_force_ = getParamsFromBlackboard<double>(config, "grasp_box.grasp_force");
       auto grasp_zyx = getParamsFromBlackboard<std::vector<double>>(config, "grasp_box.grasp_zyx_agl");
       grasp_zyx_agl_ = Eigen::Vector3d(grasp_zyx[0], grasp_zyx[1], grasp_zyx[2]) * M_PI / 180.0;//rad
       auto torso_move_spd = getParamsFromBlackboard<std::vector<double>>(config, "grasp_box.torso_move_spd");
@@ -94,6 +109,10 @@ namespace GrabBox
       int tick_rate = getParamsFromBlackboard<int>(config, "tick_rate");
       auto grab_traj = getParamsFromBlackboard<std::vector<double>>(config, "grasp_box.grab_traj");
       auto put_traj = getParamsFromBlackboard<std::vector<double>>(config, "grasp_box.put_traj");
+      
+      auto box_holdon_pose = getParamsFromBlackboard<std::vector<double>>(config, "grasp_box.box_holdon_pose");
+      box_holdon_pose_ = Eigen::Map<Vector6d>(box_holdon_pose.data(), box_holdon_pose.size());
+
       if(grab_traj.size() % 6 != 0 || put_traj.size() % 6 != 0)
       {
         ROS_ERROR("Invalid grab_traj or put_traj size.");
@@ -126,15 +145,30 @@ namespace GrabBox
 
     BT::NodeStatus onStart() override
     {
-      if(current_time_ > 0.0)
-      {
-        // current_time_ += 5*dt_;
-        std::cout << "GraspBox restarted." << std::endl;
-        return BT::NodeStatus::RUNNING;
-      }
+      // if(current_time_ > 0.0)
+      // {
+      //   // current_time_ += 5*dt_;
+      //   std::cout << "GraspBox restarted." << std::endl;
+      //   return BT::NodeStatus::RUNNING;
+      // }
       // if(!changeKinematicMpcControlMode(1))//Arm only control mode
       //   return BT::NodeStatus::FAILURE;
+      // if(!resetMpcService())
+      // {
+      //   ROS_ERROR("Failed to Pre-reset MPC.");
+      //   return BT::NodeStatus::FAILURE;
+      // }
+      if(!enableBasePitchLimit(false))
+      {
+        ROS_ERROR("Failed to disable base pitch limit.");
+        return BT::NodeStatus::FAILURE;
+      }
       changeArmCtrlModeSrv(2);//using external controller
+      if(!changeManipulatorControlFrame(FrameType::MmWorldFrame))
+      {
+        ROS_ERROR("Failed to set mm_ctrl_frame to MmWorldFrame.");
+        return BT::NodeStatus::FAILURE;
+      }
       if(!enableWbcArmCtrl(ik_to_wbc_)) // 手臂关节是否直接传递给wbc
       {
         ROS_ERROR("Failed to set enable_wbc_arm_trajectory control mode.");
@@ -147,6 +181,17 @@ namespace GrabBox
       getInput<Eigen::Vector4d>("box_quat", box_quat);
       getInput<Eigen::Vector3d>("box_offset", box_offset_);
 
+      geometry_msgs::PoseStamped box_target;
+      box_target.header.stamp = ros::Time::now();
+      box_target.header.frame_id = "world";
+      box_target.pose.position.x = box_pos(0);
+      box_target.pose.position.y = box_pos(1);
+      box_target.pose.position.z = box_pos(2);
+      box_target.pose.orientation.x = box_quat(0);
+      box_target.pose.orientation.y = box_quat(1);
+      box_target.pose.orientation.z = box_quat(2);
+      box_target.pose.orientation.w = box_quat(3);
+      test_box_target_pub_.publish(box_target);
       if (!config().blackboard->get("torso_pose", initial_torso_pose_)) 
       {
         ROS_ERROR("Cannot get initial_torso_pose_ from blackboard");
@@ -190,6 +235,16 @@ namespace GrabBox
       twoHandPoseTrajectory_.clear();
       int grasp_type;
       getInput<int>("grasp_type", grasp_type);
+      if (grasp_type == GraspType::Move)
+      {
+        if(!changeKinematicMpcControlMode(1))// 0:Do NOT control, 1:arm only control mode, 2:base only control mode, 3: control base and arm mode
+          return BT::NodeStatus::FAILURE;
+      }
+      else
+      {
+        if(!changeKinematicMpcControlMode(3))// 0:Do NOT control, 1:arm only control mode, 2:base only control mode, 3: control base and arm mode
+          return BT::NodeStatus::FAILURE;
+      }
       // if(grasp_type == GraspType::PutDown)
       // {
       //   Eigen::Vector3d virtual_box_pos_in_robot = (two_hand_pose.first.first + two_hand_pose.second.first) / 2.0;
@@ -199,9 +254,14 @@ namespace GrabBox
       {
         twoHandPoseTrajectory_ = generateTwoHandPoseTrajectory(box_pos_in_robot, box_size, box_quat);
       }
-      twoHandPoseTrajectory_.insert(twoHandPoseTrajectory_.begin(), std::make_pair(two_hand_pose, 0.0));//插入当前eef位置+force
+      twoHandPoseTrajectory_.insert(twoHandPoseTrajectory_.begin(), std::make_pair(two_hand_pose, Eigen::Vector3d::Zero()));//插入当前eef位置+force
+      
       // twoHandPoseTrajectory_ = interpolateTwoHandPoseTrajectory(twoHandPoseTrajectory_, max_hand_dis_);
-      end_time_ = interpolateTwoHandPoseTrajectoryByCubicSpline(twoHandPoseTrajectory_, hand_move_spd_);
+      if (grasp_type == GraspType::Move)
+        end_time_ = interpolateTwoHandPoseTrajectoryByCubicSpline(twoHandPoseTrajectory_, box_holdon_move_spd_);
+      else
+        end_time_ = interpolateTwoHandPoseTrajectoryByCubicSpline(twoHandPoseTrajectory_, hand_move_spd_);
+      publishInterpolatedTrajectory();
       // auto interp_torso = [&]()
       {
         std::vector<double> t_values = {0, end_time_};
@@ -211,10 +271,26 @@ namespace GrabBox
       }
       // torsoRefTrajectory_.resize(twoHandPoseTrajectory_.size(), Eigen::Vector4d::Zero());
       // visualizeTrajectory(twoHandPoseTrajectory_);
+      // if(!resetMpcService())
+      // {
+      //   ROS_ERROR("Failed to Pre-reset MPC.");
+      //   return BT::NodeStatus::FAILURE;
+      // }
+      // if(!resetMpcMrtService())
+      // {
+      //   ROS_ERROR("Failed to Pre-reset MPC.");
+      //   return BT::NodeStatus::FAILURE;
+      // }
+      // ros::Duration(0.5).sleep();
+
       is_runing_ = true;
       is_planed_torso_ref_traj_ = false;
       // ikParam_.torso_ref_type = 0; // 躯干cost
-      // current_time_ = 0.0;
+
+      std::cout << "send!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+      sendArmTrajectory();
+      current_time_ = 0.0;
+
       return BT::NodeStatus::RUNNING;
     }
 
@@ -223,107 +299,55 @@ namespace GrabBox
     {
       // std::cout << "GraspBox running." << std::endl;
       planed_traj_pub_.publish(getVisualizeTrajectoryMsg(twoHandPoseTrajectory_));
+      test_trajectory_pub_.publish(getVisualizeTrajectoryMsg(twoHandPoseTrajectory_, {1,1,0,0.8}));
 
       TwoHandPose two_hand_pose;
       config().blackboard->get("real_hand_poses", two_hand_pose);
       two_hand_pose.first = transBoxPos2RobotFrame(initial_torso_pose_, two_hand_pose.first.first, two_hand_pose.first.second.coeffs());
       two_hand_pose.second = transBoxPos2RobotFrame(initial_torso_pose_, two_hand_pose.second.first, two_hand_pose.second.second.coeffs());
       // getTwoHandPoseFromOcs2State(two_hand_pose);
-      execTwoHandPoseTrajectory_.push_back(std::make_pair(two_hand_pose, 0.0));
+      execTwoHandPoseTrajectory_.push_back(std::make_pair(two_hand_pose, Eigen::Vector3d::Zero()));
       exec_traj_pub_.publish(getVisualizeTrajectoryMsg(execTwoHandPoseTrajectory_, {0,0,1,0.8}));
       // auto l_pos = transBoxPos2WorldFrame(two_hand_pose.first.first);
       // pubEefMarker_.publish(constructBoxMarker(l_pos, 0.02*Eigen::Vector3d::Ones(), Eigen::Vector4d::UnitW()));
       // visualizeTrajectory(twoHandPoseTrajectory_);
       int grasp_type;
       getInput<int>("grasp_type", grasp_type);
-      // if(current_step_ >= twoHandPoseTrajectory_.size())
-      // if(current_time_ > end_time_)
-      // {
-      //   if(!enableKinematicMpc(false))
-      //     return BT::NodeStatus::FAILURE;
-      //   // ROS_ERROR("current_step >= twoHandPoseTrajectory_.size().");
-      //   initial_torso_pose_ = Eigen::VectorXd::Zero(4);
-      //   return BT::NodeStatus::SUCCESS;
-      // }
-      // auto [l_pose, r_pose] = twoHandPoseTrajectory_[current_step_].first;
       if(current_time_ > end_time_)
       {
-        // if(!is_planed_torso_ref_traj_ && grasp_type != GraspType::Move)
-        // if(!is_planed_torso_ref_traj_)
-        // {
-        //   std::cout << "Plan torso ref trajectory." << std::endl;
-        //   changeKinematicMpcControlMode(3);// control base and arm
-        //   smoothlyMoveToHomeWithHandKeep();
-        //   is_planed_torso_ref_traj_ = true;
-        // }
-        // else
         {
           std::cout << "GraspBox finished." << std::endl;
+          ros::Duration(1.5).sleep();
           if(!changeKinematicMpcControlMode(0))// 不接入运动学mpc控制
             return BT::NodeStatus::FAILURE;
-          // changeArmCtrlModeSrv(0); // keep current control position
+          if(!enableWbcArmCtrl(false)) // 关闭wbc手臂直接控制
+          {
+            ROS_ERROR("Failed to set enable_wbc_arm_trajectory control mode to false.");
+            return BT::NodeStatus::FAILURE;
+          }
+          if(!enableBasePitchLimit(true))
+          {
+            ROS_ERROR("Failed to enable base pitch limit.");
+            return BT::NodeStatus::FAILURE;
+          }
           return BT::NodeStatus::SUCCESS;
         }
       }
-      std::cout << "current_time_: " << current_time_ << std::endl;
-      HandPose l_pose, r_pose;
-      l_pose.first = cubic_interp_lh_.getPos(current_time_);
-      l_pose.second = cubic_interp_lh_.getQuat(current_time_);
-      r_pose.first = cubic_interp_rh_.getPos(current_time_);
-      r_pose.second = cubic_interp_rh_.getQuat(current_time_);
-      l_pose = transBoxPos2WorldFrame(initial_torso_pose_, l_pose.first, l_pose.second.coeffs());
-      r_pose = transBoxPos2WorldFrame(initial_torso_pose_, r_pose.first, r_pose.second.coeffs());
-      double terrain_height=0.0;
-      config().blackboard->get("terrain_height", terrain_height);
-      l_pose.first(2) -= (com_height_ + terrain_height);
-      r_pose.first(2) -= (com_height_ + terrain_height);
-      std::cout << "l hand pos: " << l_pose.first.transpose() << std::endl;
-      std::cout << "l hand quat: " << l_pose.second.coeffs().transpose() << std::endl;
-      auto l_vel = cubic_interp_lh_.getVel(current_time_);
-      auto r_vel = cubic_interp_rh_.getVel(current_time_);
+      auto force_l = cubic_interp_lh_.getForce(current_time_);
+      auto force_r = cubic_interp_rh_.getForce(current_time_);
 
-      solvedTwoHandPoseTrajectory_.push_back(std::make_pair(std::make_pair(l_pose, r_pose), 0.0));
-      solved_traj_pub_.publish(getVisualizeTrajectoryMsg(solvedTwoHandPoseTrajectory_, {0,1,0,0.6}));
-      // double force = twoHandPoseTrajectory_[current_step_].second;
-      double force = cubic_interp_lh_.getForce(current_time_)(1);
-      // const auto& torso_ref = torsoRefTrajectory_[current_step_];
       Eigen::VectorXd torso_ref = Eigen::VectorXd::Zero(6);
       torso_ref = cubic_interp_torso_.getPos(current_time_);
-      // else
-      //   getTorsoRef(torso_ref);
-      std::cout << "torsor ref: " << torso_ref.transpose() << std::endl;
-      controlEefForce(force);
+      controlEefForce(force_l, force_r);
       if(is_planed_torso_ref_traj_)
       {
-        std::cout << "l hand quat: " << l_pose.second.coeffs().transpose() << std::endl;
         controlTorso(torso_ref);
       }
-      bool ret = controlArm(l_pose, r_pose, l_vel, r_vel);
 
-      if(current_time_ <= 2*dt_){
-        std::cout << "send!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
-      if(!changeKinematicMpcControlMode(3))//Base and Arm control mode
-        return BT::NodeStatus::FAILURE;
-    }
+
       current_time_ += dt_;
-      if(ret){
-        // ++current_step_;
-        // std::cout << "Process: " << current_step_/static_cast<double>(twoHandPoseTrajectory_.size())*100.0 << "%." << std::endl;
-        std::cout << "Process: " << current_time_/end_time_*100.0 << "%." << std::endl;
-        // ros::Duration(max_hand_dis_/hand_move_spd_).sleep();//TODO: sleep time should be adjusted according to delta pos
-        return BT::NodeStatus::RUNNING;
-      }
-      else
-      {
-        ROS_ERROR("Failed to control arm.");
-        changeArmCtrlModeSrv(0); // keep current control position
-        return BT::NodeStatus::FAILURE;
-      }
-      // if(current_step_ >= twoHandPoseTrajectory_.size())
-      // {
-      //   // ROS_ERROR("current_step >= twoHandPoseTrajectory_.size().");
-      //   return BT::NodeStatus::SUCCESS;
-      // }
+      ros::Duration(dt_).sleep();
+      return BT::NodeStatus::RUNNING;
     }
 
     void onHalted() override
@@ -333,6 +357,48 @@ namespace GrabBox
       is_runing_ = false;
     }
   private:
+    void sendArmTrajectory()
+    {
+      kuavo_msgs::armTargetPoses msg;
+      double terrain_height = 0.0;
+      config().blackboard->get("terrain_height", terrain_height);
+
+      for (double t = 0; t <= end_time_; t += dt_)
+      {
+        msg.times.push_back(t);
+
+        HandPose l_pose, r_pose;
+        l_pose.first = cubic_interp_lh_.getPos(t);
+        l_pose.second = cubic_interp_lh_.getQuat(t);
+        r_pose.first = cubic_interp_rh_.getPos(t);
+        r_pose.second = cubic_interp_rh_.getQuat(t);
+
+        l_pose = transBoxPos2WorldFrame(initial_torso_pose_, l_pose.first, l_pose.second.coeffs());
+        r_pose = transBoxPos2WorldFrame(initial_torso_pose_, r_pose.first, r_pose.second.coeffs());
+        
+        l_pose.first(2) -= (com_height_ + terrain_height);
+        r_pose.first(2) -= (com_height_ + terrain_height);
+        
+        // left hand: [pos_x, pos_y, pos_z, quat_x, quat_y, quat_z, quat_w]
+        msg.values.push_back(l_pose.first.x());
+        msg.values.push_back(l_pose.first.y());
+        msg.values.push_back(l_pose.first.z());
+        msg.values.push_back(l_pose.second.x());
+        msg.values.push_back(l_pose.second.y());
+        msg.values.push_back(l_pose.second.z());
+        msg.values.push_back(l_pose.second.w());
+
+        // right hand: [pos_x, pos_y, pos_z, quat_x, quat_y, quat_z, quat_w]
+        msg.values.push_back(r_pose.first.x());
+        msg.values.push_back(r_pose.first.y());
+        msg.values.push_back(r_pose.first.z());
+        msg.values.push_back(r_pose.second.x());
+        msg.values.push_back(r_pose.second.y());
+        msg.values.push_back(r_pose.second.z());
+        msg.values.push_back(r_pose.second.w());
+      }
+      arm_traj_pub_.publish(msg);
+    }
     /*
     ** @brief 生成两个手的运动轨迹
     * @param box_pos 盒子的位置（箱子几何中心）
@@ -349,7 +415,7 @@ namespace GrabBox
       auto add_trajectory_point = [&traj, this](const Eigen::Vector3d& box_pos,
                           const Eigen::Vector3d& l_bias, 
                           const Eigen::Vector3d& r_bias,
-                          double force)
+                          const Eigen::Vector3d& force)
       {
         Eigen::Matrix3d R_hl = ocs2::getRotationMatrixFromZyxEulerAngles(grasp_zyx_agl_);
         Eigen::Vector3d grasp_zyx_agl_r_tmp = (-1)*grasp_zyx_agl_;
@@ -369,27 +435,23 @@ namespace GrabBox
         traj.push_back(std::make_pair(two_hand_pose, force));
       };
       // 定义偏移量并生成轨迹点
-      std::vector<std::pair<Eigen::Vector3d, double>> biases_with_force;
+      std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> biases_with_force;
       int grasp_type;
       getInput<int>("grasp_type", grasp_type);
-      double f = grasp_force_;
+      // double f = grasp_force_;
       if(grasp_type == GraspType::GraspUp)
       {
         for(const auto& g : grab_trajectory_)
-          biases_with_force.push_back({{g(0), r + g(1), g(2)}, g(4)});
+          biases_with_force.push_back({{g(0), r + g(1), g(2)}, g.tail(3)});
       }
       else if(grasp_type == GraspType::PutDown)
       {
         for(const auto& g : put_trajectory_)
-          biases_with_force.push_back({{g(0), r + g(1), g(2)}, g(4)});
+          biases_with_force.push_back({{g(0), r + g(1), g(2)}, g.tail(3)});
       }
       else if (grasp_type == GraspType::Move) {
         biases_with_force = {
-          // {-pre_x_, (r - bias_y_), 0},                   // pre-move1          
-          {{0, (r - bias_y_), 0}, f},                       // pre-move2
-          // {0, (r - bias_y_), 0.1},                       // move
-          // {0, (r - bias_y_), 0.1},                       // move
-          // {-pre_x_, (r - bias_y_), 0.1}                   // take back
+          {{box_holdon_pose_(0), (r + box_holdon_pose_(1)), box_holdon_pose_(2)}, box_holdon_pose_.tail(3)},                       // pre-move2
         };
       }
       else
@@ -398,14 +460,15 @@ namespace GrabBox
         return {};
       }
       for(const auto& b : biases_with_force)
-        std::cout << "bias: " << b.first.transpose() << ", force: " << b.second << std::endl;
+        std::cout << "bias: " << b.first.transpose() << ", force: " << b.second.transpose() << std::endl;
       Eigen::Vector3d l_bias, r_bias;
       for (const auto& b : biases_with_force) {
         const auto& bias = b.first;
-        double force = b.second;
+        const auto& force = b.second;
         l_bias << bias.x(), bias.y(), bias.z();
         r_bias << bias.x(), -bias.y(), bias.z();
-        add_trajectory_point(box_pos, l_bias, r_bias, force);
+        if (grasp_type == GraspType::Move) add_trajectory_point(Eigen::Vector3d(0.0, 0.0, 0.0), l_bias, r_bias, force);
+        else add_trajectory_point(box_pos, l_bias, r_bias, force);
       }
       return std::move(traj);
     }
@@ -418,8 +481,8 @@ namespace GrabBox
       {
         const auto &traj = traj_with_force[i].first;
         const auto &traj_next = traj_with_force[i+1].first;
-        double force = traj_with_force[i].second;
-        double force_next = traj_with_force[i+1].second;
+        const auto &force = traj_with_force[i].second;
+        const auto &force_next = traj_with_force[i+1].second;
 
         const auto &l_pose = traj.first;
         const auto &r_pose = traj.second;
@@ -437,7 +500,7 @@ namespace GrabBox
           Eigen::Quaterniond l_quat_inter = l_pose.second.slerp(ratio, l_pose_next.second);
           Eigen::Quaterniond r_quat_inter = r_pose.second.slerp(ratio, r_pose_next.second);
           
-          double force_inter = force + (force_next - force) * ratio;
+          Eigen::Vector3d force_inter = force + (force_next - force) * ratio;
 
           auto two_hand_pose = std::make_pair(std::make_pair(l_pos_inter, l_quat_inter), std::make_pair(r_pos_inter, r_quat_inter));
           interpolated_traj.push_back(std::make_pair(two_hand_pose, force_inter));
@@ -448,31 +511,31 @@ namespace GrabBox
     }
 
     /**
-     * @brief 三次样条插值
+     * @brief 三次样条插值，将左手的力同时映射到了右手
      * @param traj_with_force 带有力的轨迹
      * @param vel 速度
      * @return 终止时间
      */
     double interpolateTwoHandPoseTrajectoryByCubicSpline(const TwoHandPoseWithForceTrajectory& traj_with_force, double vel=0.5)
     {
-      std::vector<double> t_values_l, t_values_r;
+      std::vector<double> t_values;
       std::vector<Eigen::VectorXd> pos_values_l, pos_values_r;
       std::vector<Eigen::Quaterniond> quat_values_l, quat_values_r;
       std::vector<Eigen::Vector3d> force_values_l, force_values_r;
 
-      t_values_l.push_back(0);
-      t_values_r.push_back(0);
+      t_values.push_back(0);
       pos_values_l.push_back(traj_with_force[0].first.first.first);
       pos_values_r.push_back(traj_with_force[0].first.second.first);
       quat_values_l.push_back(traj_with_force[0].first.first.second);
       quat_values_r.push_back(traj_with_force[0].first.second.second);
-      force_values_l.push_back({0, traj_with_force[0].second, 0});
-      force_values_r.push_back({0, traj_with_force[0].second, 0});
+      force_values_l.push_back(traj_with_force[0].second);
+      force_values_r.push_back(traj_with_force[0].second);
       for(int i=0; i<traj_with_force.size()-1; i++)
       {
         const auto &traj = traj_with_force[i].first;
         const auto &traj_next = traj_with_force[i+1].first;
-        const double force_next = traj_with_force[i+1].second;
+        const auto &force_next = traj_with_force[i+1].second;
+        Eigen::Vector3d force_next_r = (Eigen::Vector3d() << force_next[0], -force_next[1], force_next[2]).finished();
 
         const auto &l_pose = traj.first;
         const auto &l_pose_next = traj_next.first;
@@ -481,24 +544,23 @@ namespace GrabBox
 
         double time_cost_l = std::max(0.05, (l_pose_next.first - l_pose.first).norm() / vel);
         double time_cost_r = std::max(0.05, (r_pose_next.first - r_pose.first).norm() / vel);
-        // std::cout << "time_cost_l: " << time_cost_l << ", time_cost_r: " << time_cost_r << std::endl;
+        double time_cost = std::max(time_cost_l, time_cost_r);
 
-        t_values_l.push_back(t_values_l.back() + time_cost_l);
-        t_values_r.push_back(t_values_r.back() + time_cost_r);
+        t_values.push_back(t_values.back() + time_cost);
         pos_values_l.push_back(l_pose_next.first);
         pos_values_r.push_back(r_pose_next.first);
         quat_values_l.push_back(l_pose_next.second);
         quat_values_r.push_back(r_pose_next.second);
-        force_values_l.push_back({0, force_next, 0});
-        force_values_r.push_back({0, force_next, 0});
+        force_values_l.push_back(force_next);
+        force_values_r.push_back(force_next_r);
       }
-      cubic_interp_lh_ = CubicInterpolator(t_values_l, pos_values_l);
+      cubic_interp_lh_ = CubicInterpolator(t_values, pos_values_l);
       cubic_interp_lh_.addQuaternion(quat_values_l);
       cubic_interp_lh_.addForce(force_values_l);
-      cubic_interp_rh_ = CubicInterpolator(t_values_r, pos_values_r);
+      cubic_interp_rh_ = CubicInterpolator(t_values, pos_values_r);
       cubic_interp_rh_.addQuaternion(quat_values_r);
       cubic_interp_rh_.addForce(force_values_r);
-      return std::max(t_values_l.back(), t_values_r.back());
+      return t_values.back();
     }
 
     std::vector<Eigen::Vector4d> interpolateTorsoRefTrajectory(Eigen::Vector4d& start, const Eigen::Vector4d& end, double z_dis=0.02, double agl_dis=2*M_PI/180)
@@ -538,114 +600,6 @@ namespace GrabBox
       for(int i=0; i<6; i++)
         msg.data[i] = torso_ref(i);
       base_pose_cmd_pub_.publish(msg);
-    }
-
-    bool controlArm(const HandPose& left_hand_pose, const HandPose& right_hand_pose, 
-      const Eigen::Vector3d& left_hand_vel, const Eigen::Vector3d& right_hand_vel,
-      const Vector6d &torso_ref = Vector6d::Zero())
-    {
-      kuavo_msgs::twoArmHandPoseCmd msg = getIKCmdMsg(left_hand_pose, right_hand_pose, torso_ref);
-      ik_cmd_pub_.publish(msg);
-      return true;
-      // kuavo_msgs::twoArmHandPoseCmdSrv::Response response;
-      // bool ret = sendIKCmdSrv(msg, response);
-      // if(ret && response.success)
-      // {
-      //   HandPose l_hand_pose_result, r_hand_pose_result;
-      //   const auto& hand_poses = response.hand_poses;
-      //   for (int i = 0; i < 3; ++i) {
-      //       l_hand_pose_result.first[i] = hand_poses.left_pose.pos_xyz[i];
-      //       r_hand_pose_result.first[i] = hand_poses.right_pose.pos_xyz[i];
-      //   }
-
-      //   l_hand_pose_result.second.x() = hand_poses.left_pose.quat_xyzw[0];
-      //   l_hand_pose_result.second.y() = hand_poses.left_pose.quat_xyzw[1];
-      //   l_hand_pose_result.second.z() = hand_poses.left_pose.quat_xyzw[2];
-      //   l_hand_pose_result.second.w() = hand_poses.left_pose.quat_xyzw[3];
-
-      //   r_hand_pose_result.second.x() = hand_poses.right_pose.quat_xyzw[0];
-      //   r_hand_pose_result.second.y() = hand_poses.right_pose.quat_xyzw[1];
-      //   r_hand_pose_result.second.z() = hand_poses.right_pose.quat_xyzw[2];
-      //   r_hand_pose_result.second.w() = hand_poses.right_pose.quat_xyzw[3];
-
-      //   double l_error_norm = (left_hand_pose.first - l_hand_pose_result.first).norm();
-      //   double r_error_norm = (right_hand_pose.first - r_hand_pose_result.first).norm();
-      //   // std::cout << "l_error_norm: " << l_error_norm << std::endl;
-      //   // std::cout << "r_error_norm: " << r_error_norm << std::endl;
-      //   if(l_error_norm > 1e-2 && r_error_norm > 1e-2)
-      //   {
-      //     ROS_ERROR_STREAM("IK's result is bad. l_error_norm: " << l_error_norm << ", r_error_norm: " << r_error_norm);
-      //     return false;
-      //   }
-      //   // TO-DO: 添加关节速度 (11/28 by matthew)
-      //   std::cout << "left_hand_vel: " << left_hand_vel.transpose() << std::endl;
-      //   std::cout << "right_hand_vel: " << right_hand_vel.transpose() << std::endl;
-      //   const int arm_num = response.q_arm.size();
-      //   Eigen::VectorXd q_arm = Eigen::Map<Eigen::VectorXd>(response.q_arm.data(), response.q_arm.size());
-      //   auto J_l = drake_interface_.getHandJacobian(q_arm, HandSide::LEFT);
-      //   auto J_r = drake_interface_.getHandJacobian(q_arm, HandSide::RIGHT);
-      //   // std::cout << "J_l size: " << J_l.rows() << "x" << J_l.cols() << std::endl;
-      //   // std::cout << "J_l: " << J_l << std::endl;
-      //   Eigen::VectorXd dq_arm(arm_num);
-      //   dq_arm.head(arm_num/2) = pseudoInverse(J_l) * left_hand_vel;
-      //   dq_arm.tail(arm_num/2) = pseudoInverse(J_r) * right_hand_vel;
-      //   // std::cout << "dq_arm: " << dq_arm.transpose() << std::endl;
-
-      //   std::vector<double> dq_arm_vec(dq_arm.data(), dq_arm.data() + dq_arm.size());
-      //   pubArmTraj_.publish(getJointStatesMsg(response.q_arm, dq_arm_vec));
-      //   // std::cout << "q_torso: " << Eigen::Map<Eigen::VectorXd>(response.q_torso.data(), response.q_torso.size()).transpose() << std::endl;
-      //   if(response.with_torso)
-      //     pubBodyPose_.publish(getHeadBodyPoseMsg(response.q_torso));
-      //   {
-      //     Eigen::VectorXd q_general = Eigen::VectorXd::Zero(6+14); // xyz + ypr + 2*q_arm
-      //     q_general.head(6) = Eigen::Map<Eigen::VectorXd>(response.q_torso.data(), response.q_torso.size());// torso
-      //     q_general.tail(14) = Eigen::Map<Eigen::VectorXd>(response.q_arm.data(), response.q_arm.size());   // arm
-      //     TwoHandPose two_hand_pose;
-      //     if(!getTwoHandPose(q_general, two_hand_pose))
-      //     {
-      //       ROS_ERROR("Failed to call FK service.");
-      //     }
-      //     solvedTwoHandPoseTrajectory_.push_back(std::make_pair(two_hand_pose, 0.0));
-      //     solved_traj_pub_.publish(getVisualizeTrajectoryMsg(solvedTwoHandPoseTrajectory_, {0,1,0,0.6}));
-      //   }
-      //   return true;
-      // }
-      // ROS_ERROR("Failed to get IK result.");
-      // ROS_ERROR_STREAM("left_hand_pos: " << left_hand_pose.first.transpose());
-      // ROS_ERROR_STREAM("right_hand_pos: " << right_hand_pose.first.transpose());
-      // return false;
-    }
-
-    kuavo_msgs::twoArmHandPoseCmd getIKCmdMsg(const HandPose& left_hand_pose, const HandPose& right_hand_pose, const Vector6d &torso_ref)
-    {
-      kuavo_msgs::twoArmHandPoseCmd msg;
-      msg.ik_param = ikParam_;
-      msg.use_custom_ik_param = true;
-      msg.joint_angles_as_q0 = false;
-      for(int i=0; i<3; i++)
-      {
-        msg.hand_poses.left_pose.elbow_pos_xyz[i] = 0;
-        msg.hand_poses.right_pose.elbow_pos_xyz[i] = 0;
-        // 
-        msg.hand_poses.left_pose.pos_xyz[i] = left_hand_pose.first[i];
-        msg.hand_poses.right_pose.pos_xyz[i] = right_hand_pose.first[i];
-      }
-
-      msg.hand_poses.left_pose.quat_xyzw[0] = left_hand_pose.second.x();
-      msg.hand_poses.left_pose.quat_xyzw[1] = left_hand_pose.second.y();
-      msg.hand_poses.left_pose.quat_xyzw[2] = left_hand_pose.second.z();
-      msg.hand_poses.left_pose.quat_xyzw[3] = left_hand_pose.second.w();
-
-      msg.hand_poses.right_pose.quat_xyzw[0] = right_hand_pose.second.x();
-      msg.hand_poses.right_pose.quat_xyzw[1] = right_hand_pose.second.y();
-      msg.hand_poses.right_pose.quat_xyzw[2] = right_hand_pose.second.z();
-      msg.hand_poses.right_pose.quat_xyzw[3] = right_hand_pose.second.w();
-
-      // msg.torso_ref.resize(6);
-      // for(int i=0; i<6; i++)
-      //   msg.torso_ref[i] = torso_ref[i];
-
-      return std::move(msg);
     }
 
     bool sendIKCmdSrv(const kuavo_msgs::twoArmHandPoseCmd& msg, kuavo_msgs::twoArmHandPoseCmdSrv::Response& response)
@@ -721,6 +675,19 @@ namespace GrabBox
       return std::make_pair(p_wb, q_wb);
     }
 
+    bool changeManipulatorControlFrame(FrameType frame_type)
+    {
+      kuavo_msgs::setMmCtrlFrame srv;
+      srv.request.frame = static_cast<int>(frame_type);
+      if (changeManipulatorControlFrame_srv_.call(srv))   
+      {
+        return true;
+      }
+      else
+        ROS_ERROR("Failed to call service set_mm_ctrl_frame");
+      return false;
+    }
+
     bool enableWbcArmCtrl(int mode)
     {
       kuavo_msgs::changeArmCtrlMode srv;
@@ -730,7 +697,7 @@ namespace GrabBox
         return true;
       }
       else
-        ROS_ERROR("Failed to call service /enable_wbc_arm_trajectory_control");
+        ROS_ERROR("Failed to call service enable_mm_wbc_arm_trajectory_control");
       return false;
     }
 
@@ -814,12 +781,12 @@ namespace GrabBox
       return std::move(marker_array);
     }
 
-    void controlEefForce(double force)
+    void controlEefForce(const Eigen::Vector3d& force_l, const Eigen::Vector3d& force_r)
     {
       Vector6d wrench_l = Vector6d::Zero();
       Vector6d wrench_r = Vector6d::Zero();
-      wrench_l(1) = +force;
-      wrench_r(1) = -force;
+      wrench_l.head(3) = force_l;
+      wrench_r.head(3) = force_r;
       eef_wrench_pub_.publish(getEefWrenchCmdMsg(wrench_l, wrench_r));
     }
 
@@ -846,15 +813,15 @@ namespace GrabBox
       current_time_ = 0.0;
 
       const double et = cubic_interp_lh_.getEndTime();
-      const Eigen::Vector3d force = (Eigen::Vector3d() << 0, grasp_force_, 0).finished();
+      // const Eigen::Vector3d force = (Eigen::Vector3d() << 0, grasp_force_, 0).finished();
       CubicInterpolator ci_lh_tmp, ci_rh_tmp;
       // std::cout << "quat: " << current_two_hand_pose.first.second.coeffs().transpose() << std::endl;
       ci_lh_tmp = CubicInterpolator({0, end_time_}, {cubic_interp_lh_.getPos(et), cubic_interp_lh_.getPos(et)});
       ci_lh_tmp.addQuaternion({cubic_interp_lh_.getQuat(et), cubic_interp_lh_.getQuat(et)});
-      ci_lh_tmp.addForce({force, force});
+      ci_lh_tmp.addForce({cubic_interp_lh_.getForce(et), cubic_interp_lh_.getForce(et)});
       ci_rh_tmp = CubicInterpolator({0, end_time_}, {cubic_interp_rh_.getPos(et), cubic_interp_rh_.getPos(et)});
       ci_rh_tmp.addQuaternion({cubic_interp_rh_.getQuat(et), cubic_interp_rh_.getQuat(et)});
-      ci_rh_tmp.addForce({force, force});
+      ci_rh_tmp.addForce({cubic_interp_rh_.getForce(et), cubic_interp_rh_.getForce(et)});
 
       cubic_interp_lh_ = ci_lh_tmp;
       cubic_interp_rh_ = ci_rh_tmp;
@@ -914,6 +881,55 @@ namespace GrabBox
       torso_ref(3) = 0;//yaw
       torso_ref(5) = 0;//roll
     }
+
+    void publishInterpolatedTrajectory()
+    {
+      visualization_msgs::MarkerArray marker_array;
+      visualization_msgs::Marker marker_l, marker_r;
+      marker_l.header.frame_id = "odom";
+      marker_l.header.stamp = ros::Time::now();
+      marker_l.ns = "interpolated_l_hand";
+      marker_l.id = 0;
+      marker_l.type = visualization_msgs::Marker::LINE_STRIP;
+      marker_l.action = visualization_msgs::Marker::ADD;
+      marker_l.scale.x = 0.01;
+      marker_l.color.r = 0.0; // cyan
+      marker_l.color.g = 1.0;
+      marker_l.color.b = 1.0;
+      marker_l.color.a = 1.0;
+
+      marker_r = marker_l;
+      marker_r.ns = "interpolated_r_hand";
+      marker_r.id = 1;
+
+      for (double t = 0; t <= end_time_; t += dt_)
+      {
+          HandPose l_pose, r_pose;
+          l_pose.first = cubic_interp_lh_.getPos(t);
+          l_pose.second = cubic_interp_lh_.getQuat(t);
+          r_pose.first = cubic_interp_rh_.getPos(t);
+          r_pose.second = cubic_interp_rh_.getQuat(t);
+
+          HandPose l_pose_w = transBoxPos2WorldFrame(initial_torso_pose_, l_pose.first, l_pose.second.coeffs());
+          HandPose r_pose_w = transBoxPos2WorldFrame(initial_torso_pose_, r_pose.first, r_pose.second.coeffs());
+
+          geometry_msgs::Point p_l, p_r;
+          p_l.x = l_pose_w.first.x();
+          p_l.y = l_pose_w.first.y();
+          p_l.z = l_pose_w.first.z();
+          marker_l.points.push_back(p_l);
+
+          p_r.x = r_pose_w.first.x();
+          p_r.y = r_pose_w.first.y();
+          p_r.z = r_pose_w.first.z();
+          marker_r.points.push_back(p_r);
+      }
+
+      marker_array.markers.push_back(marker_l);
+      marker_array.markers.push_back(marker_r);
+
+      interpolated_traj_pub_.publish(marker_array);
+    }
   private:
     kuavo_msgs::ikSolveParam ikParam_;
     ros::Publisher pubArmTraj_;
@@ -924,10 +940,17 @@ namespace GrabBox
     ros::Publisher solved_traj_pub_;
     ros::Publisher exec_traj_pub_;
     ros::Publisher eef_wrench_pub_;
-    ros::Publisher ik_cmd_pub_;
+    ros::Publisher arm_traj_pub_;
     ros::Publisher base_pose_cmd_pub_;
+    ros::Publisher test_box_target_pub_;
+    ros::Publisher test_trajectory_pub_;
+    ros::Publisher interpolated_traj_pub_;
+
     ros::ServiceClient enable_wbc_arm_trajectory_control_srv_;
     ros::ServiceClient fk_srv_;
+    ros::ServiceClient changeManipulatorControlFrame_srv_;
+
+
     TwoHandPoseWithForceTrajectory twoHandPoseTrajectory_;
     TwoHandPoseWithForceTrajectory execTwoHandPoseTrajectory_;
     TwoHandPoseWithForceTrajectory solvedTwoHandPoseTrajectory_;
@@ -938,13 +961,14 @@ namespace GrabBox
     double com_height_{0};
     double max_hand_dis_{0.02};// m
     double hand_move_spd_{0.4};// m/s
+    double box_holdon_move_spd_{0.4};// m/s
     // grasp
     double pre_x_ = 0.1;
     double pre_y_ = 0.1;
     double bias_y_ = 0.01;
     double grab_up_height_ = 0.1;
     bool is_planed_torso_ref_traj_ = false;
-    double grasp_force_ = 10;
+    // double grasp_force_ = 10;
     Eigen::Vector3d grasp_zyx_agl_;
     double torso_z_spd_ = 0.1;     // m/s
     double torso_pitch_spd_ = 0.5; // rad/s
@@ -956,5 +980,6 @@ namespace GrabBox
     Eigen::Vector4d initial_torso_pose_;
     std::vector<Vector6d> grab_trajectory_;
     std::vector<Vector6d> put_trajectory_;
+    Eigen::VectorXd box_holdon_pose_;
   };
 } // namespace GrabBox

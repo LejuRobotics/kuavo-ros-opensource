@@ -34,12 +34,34 @@
     <mesh name="head_pitch" file="head_pitch.STL" />
     <mesh name="camera" file="camera.STL" />
     <mesh name="radar" file="radar.STL" />
+    <mesh name="l_palm" file="l_palm.STL" />
+    <mesh name="l_thumb_prox" file="l_thumb_prox.STL" />
+    <mesh name="l_thumb_dist" file="l_thumb_dist.STL" />
+    <mesh name="l_Index_prox" file="l_Index_prox.STL" />
+    <mesh name="l_index_dist" file="l_index_dist.STL" />
+    <mesh name="l_middle_prox" file="l_middle_prox.STL" />
+    <mesh name="l_middle_dist" file="l_middle_dist.STL" />
+    <mesh name="l_ring_prox" file="l_ring_prox.STL" />
+    <mesh name="l_ring_dist" file="l_ring_dist.STL" />
+    <mesh name="l_little_prox" file="l_little_prox.STL" />
+    <mesh name="l_little_dist" file="l_little_dist.STL" />
+    <mesh name="r_palm" file="r_palm.STL" />
+    <mesh name="r_thumb_prox" file="r_thumb_prox.STL" />
+    <mesh name="r_thumb_dist" file="r_thumb_dist.STL" />
+    <mesh name="r_index_prox" file="r_index_prox.STL" />
+    <mesh name="r_index_dist" file="r_index_dist.STL" />
+    <mesh name="r_middle_prox" file="r_middle_prox.STL" />
+    <mesh name="r_middle_dist" file="r_middle_dist.STL" />
+    <mesh name="r_ring_prox" file="r_ring_prox.STL" />
+    <mesh name="r_ring_dist" file="r_ring_dist.STL" />
+    <mesh name="r_little_prox" file="r_little_prox.STL" />
+    <mesh name="r_little_dist" file="r_little_dist.STL" />
   </asset>
   <worldbody>
     <body name="base_link" pos="0 0 0.82">
       <freejoint />
       <site name="imu" pos="0 0 0" />
-      <inertial pos="-0.0185005 0.00031952 0.192957" quat="0.998529 4.54328e-05 0.0542216 0.000512508" mass="27.9080" diaginertia="0.938886 0.825905 0.269012" />
+      <inertial pos="-0.0185005 0.00031952 0.192957" quat="0.998529 4.54328e-05 0.0542216 0.000512508" mass="29.9346" diaginertia="0.938886 0.825905 0.269012" />
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso" />
       <body name="leg_l1_link" pos="-0.0024999 0.087 -0.066">
         <inertial pos="-0.00430148 -2.708e-05 -0.00851195" quat="-0.000746146 0.721814 -0.00298446 0.69208" mass="1.71093" diaginertia="0.00371121 0.00277272 0.00205799" />
@@ -138,10 +160,74 @@
                   <joint name="zarm_l6_joint" pos="0 0 0" axis="1 0 0" range="-1.309 0.698132" actuatorfrcrange="-12 12" damping="0.2" />
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_roll" />
                   <body name="zarm_l7_link" pos="0 0 -0.0210005">
-                    <inertial pos="0.00185848 0.0101072 -0.090505" quat="0.961232 -0.0391052 -0.00682346 0.272869" mass="0.640524" diaginertia="0.000720114 0.00070104 0.000117174" />
+                    <inertial pos="0.00185848 0.0101072 -0.090505" quat="0.961232 -0.0391052 -0.00682346 0.272869" mass="0.0542110173081966" diaginertia="0.000720114 0.00070104 0.000117174" />
                     <joint name="zarm_l7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-12 12" damping="0.2" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_pitch" />
                     <geom size="0.005" pos="0 -0.03 -0.17" />
+                    <body name="l_palm" pos="0 0 -0.07" quat="0.000563312 -0.000562864 0.706825 -0.707388">
+                      <inertial pos="0.0017239 0.0051432 -0.031065" quat="1 0 0 0" mass="0.427" diaginertia="0.0010405 0.0013244 0.00053219" />
+                      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="l_palm" />
+                    </body>
+                    <body name="l_thumb_prox" pos="0.024537 -0.023242 -0.0926135" quat="0.349346 -0.374856 0.58539 -0.628298">
+                        <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.005" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="l_thumbCMC" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.5708" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_thumb_prox" />
+                        <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_thumb_prox" />
+                        <body name="l_thumb_dist" pos="0 0 0.013647" quat="0.878534 0.409665 -0.222652 0.103824">
+                            <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.04" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="l_thumbMCP" pos="0 0 0" axis="-1 0 0" limited="true" range="0 0.8727" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_thumb_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_thumb_dist" />
+                        </body>
+                    </body>
+                    <body name="l_Index_prox" pos="0.0290066 -0.00223961 -0.158289" quat="-0.00514945 0.0303624 0.71714 -0.696248">
+                        <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.008" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="l_indexMCP" pos="0 0 0" axis="1 0 0" limited="true" range="0 1.309" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_Index_prox" />
+                        <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_Index_prox" />
+                        <body name="l_index_dist" pos="0 0.035 0" quat="0.995322 0.0966141 0 0">
+                            <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.011" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="l_indexPIP" pos="0 0 0" axis="1 0 0" limited="true" range="0 2.0944" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_index_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_index_dist" />
+                        </body>
+                    </body>
+                    <body name="l_middle_prox" pos="0.00799729 0.00170995 -0.162285" quat="0.000563312 -0.000562864 0.706825 -0.707388">
+                        <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.011" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="l_middleMCP" pos="0 0 0" axis="1 0 0" limited="true" range="0 1.309" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_middle_prox" />
+                        <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_middle_prox" />
+                        <body name="l_middle_dist" pos="0 0.042 0" quat="0.995791 0.0916562 0 0">
+                            <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.011" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="l_middlePIP" pos="0 0 0" axis="1 0 0" limited="true" range="0 2.0944" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_middle_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_middle_dist" />
+                        </body>
+                    </body>
+                    <body name="l_ring_prox" pos="-0.0131057 0.00169173 -0.160292" quat="0.00657584 -0.0314397 0.71003 -0.703438">
+                        <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.011" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="l_ringMCP" pos="0 0 0" axis="1 0 0" limited="true" range="0 1.309" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_ring_prox" />
+                        <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_ring_prox" />
+                        <body name="l_ring_dist" pos="0 0.042 0" quat="0.996565 0.08282 0 0">
+                            <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.008" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="l_ringPIP" pos="0 0 0" axis="1 0 0" limited="true" range="0 2.0944" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_ring_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_ring_dist" />
+                        </body>
+                    </body>
+                    <body name="l_little_prox" pos="-0.0337273 -0.00233593 -0.153775" quat="-0.00616957 -0.0436547 0.715503 -0.697217">
+                        <inertial pos="-5.4618e-07 0.016662 0.00040738" quat="0.519207 0.480025 -0.479962 0.519265" mass="0.008" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="l_littleMCP" pos="0 0 0" axis="1 0 0" limited="true" range="0 1.309" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="1 1 1 1" mesh="l_little_prox" />
+                        <geom type="mesh" rgba="1 1 1 1" mesh="l_little_prox" />
+                        <body name="l_little_dist" pos="0 0.035 0" quat="0.994856 0.101296 0 0">
+                            <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.008" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="l_littlePIP" pos="0 0 0" axis="1 0 0" limited="true" range="0 2.0944" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_little_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_little_dist" />
+                        </body>
+                    </body>
                   </body>
                 </body>
               </body>
@@ -174,10 +260,74 @@
                   <joint name="zarm_r6_joint" pos="0 0 0" axis="1 0 0" range="-0.698132 1.309" actuatorfrcrange="-12 12" damping="0.2" />
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_roll" />
                   <body name="zarm_r7_link" pos="0 0 -0.021">
-                    <inertial pos="0.00185848 -0.0101072 -0.090505" quat="0.956166 0.0488773 -0.0039771 -0.288691" mass="0.640524" diaginertia="0.000700271 0.000682658 0.000115399" />
+                    <inertial pos="0.00185848 -0.0101072 -0.090505" quat="0.956166 0.0488773 -0.0039771 -0.288691" mass="0.0542110173081966" diaginertia="0.000700271 0.000682658 0.000115399" />
                     <joint name="zarm_r7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-12 12" damping="0.2" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_pitch" />
                     <geom size="0.005" pos="0 0.03 -0.17" />
+                    <body name="r_palm" pos="0 0 -0.07" quat="0.707388 -0.706825 0 0">
+                      <inertial pos="-0.00099373 0.040537 -0.0022835" quat="1 0 0 0" mass="0.427" diaginertia="0.0010405 0.0013244 0.00053219" />
+                      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="r_palm" />
+                    </body>
+                    <body name="r_thumb_prox" pos="0.0245 0.0216473 -0.0941828" quat="0.685709 -0.685164 -0.173784 0.173645">
+                        <inertial pos="0.0062041 -7.9383e-08 0.0015306" quat="0.486357 0.51328 0.51328 0.486357" mass="0.005" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="r_thumbCMC" pos="0 0 0" axis="0 -1 0" limited="true" range="0 1.5708" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="1 1 1 1" mesh="r_thumb_prox" />
+                        <geom type="mesh" rgba="1 1 1 1" mesh="r_thumb_prox" />
+                        <body name="r_thumb_dist" pos="0.013647 0 0" quat="0.878532 -0.103824 0.222655 -0.409666">
+                            <inertial pos="0.0083564 0.037204 -3.5884e-07" quat="0.707048 0.706981 0.0114675 0.0113604" mass="0.04" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="r_thumbMCP" pos="0 0 0" axis="0 0 1" limited="true" range="0 0.87266" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_thumb_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_thumb_dist" />
+                        </body>
+                    </body>
+                    <body name="r_index_prox" pos="0.029003 -0.00387854 -0.158234" quat="0.670793 -0.740977 -0.0307155 0.00677999">
+                        <inertial pos="-5.571e-07 0.016609 0.00045746" quat="0.518542 0.480744 -0.480679 0.518602" mass="0.008" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="r_indexMCP" pos="0 0 0" axis="1 0 0" limited="true" range="0 1.309" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_index_prox" />
+                        <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_index_prox" />
+                        <body name="r_index_dist" pos="0 0.035 0" quat="0.995322 0.0966141 0 0">
+                            <inertial pos="5.9401e-06 0.025449 0.003278" quat="0.464988 0.533023 -0.533381 0.463873" mass="0.011" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="r_indexPIP" pos="0 0 0" axis="1 0 0" limited="true" range="0 2.0944" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_index_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_index_dist" />
+                        </body>
+                    </body>
+                    <body name="r_middle_prox" pos="0.008 -0.00813059 -0.161942" quat="0.68229 -0.731082 0 0">
+                        <inertial pos="2.3779e-07 0.020205 0.00053993" quat="0.51393 0.485582 -0.485656 0.514028" mass="0.011" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="r_middleMCP" pos="0 0 0" axis="1 0 0" limited="true" range="0 1.309" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_middle_prox" />
+                        <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_middle_prox" />
+                        <body name="r_middle_dist" pos="0 0.042 0" quat="0.995791 0.0916562 0 0">
+                            <inertial pos="5.9404e-06 0.025449 0.003278" quat="0.464985 0.533021 -0.533384 0.463874" mass="0.011" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="r_middlePIP" pos="0 0 0" axis="1 0 0" limited="true" range="0 2.0944" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_middle_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_middle_dist" />
+                        </body>
+                    </body>
+                    <body name="r_ring_prox" pos="-0.013103 -0.00800697 -0.159953" quat="0.678234 -0.734173 0.0306456 -0.00708951">
+                        <inertial pos="2.4507e-07 0.020236 0.00042373" quat="0.514454 0.485027 -0.48511 0.514552" mass="0.011" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="r_ringMCP" pos="0 0 0" axis="1 0 0" limited="true" range="0 1.309" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_ring_prox" />
+                        <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_ring_prox" />
+                        <body name="r_ring_dist" pos="0 0.042 0" quat="0.996565 0.08282 0 0">
+                            <inertial pos="5.5799e-07 0.020388 0.0029077" quat="0.461493 0.535513 -0.535785 0.46172" mass="0.008" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="r_ringPIP" pos="0 0 0" axis="1 0 0" limited="true" range="0 2.0944" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_ring_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_ring_dist" />
+                        </body>
+                    </body>
+                    <body name="r_little_prox" pos="-0.033731 -0.00356722 -0.15373" quat="0.671815 -0.739434 0.0432936 0.00521716">
+                        <inertial pos="-5.4618e-07 0.016662 0.00040738" quat="0.519207 0.480025 -0.479962 0.519265" mass="0.008" diaginertia="9e-05 7e-05 5e-05" />
+                        <joint name="r_littleMCP" pos="0 0 0" axis="1 0 0" limited="true" range="0 1.309" damping="1.0" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_little_prox" />
+                        <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_little_prox" />
+                        <body name="r_little_dist" pos="0 0.035 0" quat="0.994856 0.11296 0 0">
+                            <inertial pos="1.062e-05 0.017869 0.0020864" quat="0.468752 0.529699 -0.53072 0.466934" mass="0.008" diaginertia="9e-05 7e-05 5e-05" />
+                            <joint name="r_littlePIP" pos="0 0 0" axis="1 0 0" limited="true" range="0 2.0944" damping="1.0" />
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_little_dist" />
+                            <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_little_dist" />
+                        </body>
+                    </body>
                   </body>
                 </body>
               </body>
@@ -228,6 +378,26 @@
     <motor gear="1" joint="zarm_r7_joint" name="zarm_r7_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
     <motor gear="1" joint="zhead_1_joint" name="zhead_1_joint_motor" ctrllimited="true" ctrlrange="-1.5 1.5" />
     <motor gear="1" joint="zhead_2_joint" name="zhead_2_joint_motor" ctrllimited="true" ctrlrange="-12 12" />
+    <position gear="1" joint="l_thumbCMC" name="l_thumbCMC_motor" ctrllimited="true" ctrlrange="0 1.5708" />
+    <position gear="1" joint="l_thumbMCP" name="l_thumbMCP_motor" ctrllimited="true" ctrlrange="0 0.872" />
+    <position gear="1" joint="l_indexMCP" name="l_indexMCP_motor" ctrllimited="true" ctrlrange="0 1.309" />
+    <position gear="1" joint="l_indexPIP" name="l_indexPIP_motor" ctrllimited="true" ctrlrange="0 1.25" />
+    <position gear="1" joint="l_middleMCP" name="l_middleMCP_motor" ctrllimited="true" ctrlrange="0 1.309" />
+    <position gear="1" joint="l_middlePIP" name="l_middlePIP_motor" ctrllimited="true" ctrlrange="0 1.25" />
+    <position gear="1" joint="l_ringMCP" name="l_ringMCP_motor" ctrllimited="true" ctrlrange="0 1.309" />
+    <position gear="1" joint="l_ringPIP" name="l_ringPIP_motor" ctrllimited="true" ctrlrange="0 1.25" />
+    <position gear="1" joint="l_littleMCP" name="l_littleMCP_motor" ctrllimited="true" ctrlrange="0 1.309" />
+    <position gear="1" joint="l_littlePIP" name="l_littlePIP_motor" ctrllimited="true" ctrlrange="0 1.25" />
+    <position gear="1" joint="r_thumbCMC" name="r_thumbCMC_motor" ctrllimited="true" ctrlrange="0 1.5708" />
+    <position gear="1" joint="r_thumbMCP" name="r_thumbMCP_motor" ctrllimited="true" ctrlrange="0 0.872" />
+    <position gear="1" joint="r_indexMCP" name="r_indexMCP_motor" ctrllimited="true" ctrlrange="0 1.3095" />
+    <position gear="1" joint="r_indexPIP" name="r_indexPIP_motor" ctrllimited="true" ctrlrange="0 1.25" />
+    <position gear="1" joint="r_middleMCP" name="r_middleMCP_motor" ctrllimited="true" ctrlrange="0 1.309" />
+    <position gear="1" joint="r_middlePIP" name="r_middlePIP_motor" ctrllimited="true" ctrlrange="0 1.25" />
+    <position gear="1" joint="r_ringMCP" name="r_ringMCP_motor" ctrllimited="true" ctrlrange="0 1.309" />
+    <position gear="1" joint="r_ringPIP" name="r_ringPIP_motor" ctrllimited="true" ctrlrange="0 1.25" />
+    <position gear="1" joint="r_littleMCP" name="r_littleMCP_motor" ctrllimited="true" ctrlrange="0 1.309" />
+    <position gear="1" joint="r_littlePIP" name="r_littlePIP_motor" ctrllimited="true" ctrlrange="0 1.25" />
   </actuator>
   <sensor>
     <accelerometer name="BodyAcc" site="imu" />
@@ -263,6 +433,26 @@
     <jointpos name="zarm_r7_joint_pos" joint="zarm_r7_joint" />
     <jointpos name="zhead_1_joint_pos" joint="zhead_1_joint" />
     <jointpos name="zhead_2_joint_pos" joint="zhead_2_joint" />
+    <jointpos name="l_thumbCMC_pos" joint="l_thumbCMC" />
+    <jointpos name="l_thumbMCP_pos" joint="l_thumbMCP" />
+    <jointpos name="l_indexMCP_pos" joint="l_indexMCP" />
+    <jointpos name="l_indexPIP_pos" joint="l_indexPIP" />
+    <jointpos name="l_middleMCP_pos" joint="l_middleMCP" />
+    <jointpos name="l_middlePIP_pos" joint="l_middlePIP" />
+    <jointpos name="l_ringMCP_pos" joint="l_ringMCP" />
+    <jointpos name="l_ringPIP_pos" joint="l_ringPIP" />
+    <jointpos name="l_littleMCP_pos" joint="l_littleMCP" />
+    <jointpos name="l_littlePIP_pos" joint="l_littlePIP" />
+    <jointpos name="r_thumbCMC_pos" joint="r_thumbCMC" />
+    <jointpos name="r_thumbMCP_pos" joint="r_thumbMCP" />
+    <jointpos name="r_indexMCP_pos" joint="r_indexMCP" />
+    <jointpos name="r_indexPIP_pos" joint="r_indexPIP" />
+    <jointpos name="r_middleMCP_pos" joint="r_middleMCP" />
+    <jointpos name="r_middlePIP_pos" joint="r_middlePIP" />
+    <jointpos name="r_ringMCP_pos" joint="r_ringMCP" />
+    <jointpos name="r_ringPIP_pos" joint="r_ringPIP" />
+    <jointpos name="r_littleMCP_pos" joint="r_littleMCP" />
+    <jointpos name="r_littlePIP_pos" joint="r_littlePIP" />
     <jointvel name="leg_l1_joint_vel" joint="leg_l1_joint" />
     <jointvel name="leg_l2_joint_vel" joint="leg_l2_joint" />
     <jointvel name="leg_l3_joint_vel" joint="leg_l3_joint" />
@@ -291,5 +481,25 @@
     <jointvel name="zarm_r7_joint_vel" joint="zarm_r7_joint" />
     <jointvel name="zhead_1_joint_vel" joint="zhead_1_joint" />
     <jointvel name="zhead_2_joint_vel" joint="zhead_2_joint" />
+    <jointvel name="l_thumbCMC_vel" joint="l_thumbCMC" />
+    <jointvel name="l_thumbMCP_vel" joint="l_thumbMCP" />
+    <jointvel name="l_indexMCP_vel" joint="l_indexMCP" />
+    <jointvel name="l_indexPIP_vel" joint="l_indexPIP" />
+    <jointvel name="l_middleMCP_vel" joint="l_middleMCP" />
+    <jointvel name="l_middlePIP_vel" joint="l_middlePIP" />
+    <jointvel name="l_ringMCP_vel" joint="l_ringMCP" />
+    <jointvel name="l_ringPIP_vel" joint="l_ringPIP" />
+    <jointvel name="l_littleMCP_vel" joint="l_littleMCP" />
+    <jointvel name="l_littlePIP_vel" joint="l_littlePIP" />
+    <jointvel name="r_thumbCMC_vel" joint="r_thumbCMC" />
+    <jointvel name="r_thumbMCP_vel" joint="r_thumbMCP" />
+    <jointvel name="r_indexMCP_vel" joint="r_indexMCP" />
+    <jointvel name="r_indexPIP_vel" joint="r_indexPIP" />
+    <jointvel name="r_middleMCP_vel" joint="r_middleMCP" />
+    <jointvel name="r_middlePIP_vel" joint="r_middlePIP" />
+    <jointvel name="r_ringMCP_vel" joint="r_ringMCP" />
+    <jointvel name="r_ringPIP_vel" joint="r_ringPIP" />
+    <jointvel name="r_littleMCP_vel" joint="r_littleMCP" />
+    <jointvel name="r_littlePIP_vel" joint="r_littlePIP" />
   </sensor>
 </mujoco>

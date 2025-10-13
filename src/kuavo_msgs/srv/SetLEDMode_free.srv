@@ -1,0 +1,6 @@
+# 请求部分
+uint8 mode     
+kuavo_msgs/Color[] colors
+---
+# 响应部分
+bool success   

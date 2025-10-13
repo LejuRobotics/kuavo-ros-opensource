@@ -1,14 +1,10 @@
 <launch>
     <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
     <arg name="visualize" default="false"/>
-    <arg name="eef_z_bias" default="-0.17" unless="$(eval arg('robot_version') == 100045)"/> <!-- bias added to the z-coordinate of the end-effector -->
-    <arg name="eef_z_bias" default="-0.297" if="$(eval arg('robot_version') == 100045)"/>
     <arg name="model_path" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/drake/biped_v3_arm.urdf"/>
     <arg name="model_path_vis" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
     <arg name="control_hand_side" default="2"/> <!-- 0: left, 1: right, 2: both -->
     <arg name="print_ik_info"     default="false"/>
-
-    <param name="eef_z_bias" value="$(arg eef_z_bias)"/>
     <param name="model_path" value="$(arg model_path)"/>
     <param name="robot_version"    value="$(arg robot_version)"/>
     <param name="control_hand_side" value="$(arg control_hand_side)"/>

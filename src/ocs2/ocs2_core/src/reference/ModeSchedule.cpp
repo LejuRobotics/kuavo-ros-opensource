@@ -49,12 +49,13 @@ ModeSchedule::ModeSchedule(std::vector<scalar_t> eventTimesInput, std::vector<si
   
   // Initialize other sequences with default values
   enableFootSequence.resize(modeSequence.size(), false);
+  isLastCommandSequence.resize(modeSequence.size(), false);
   enableFullBodySequence.resize(modeSequence.size(), false);
-  footPoseSequence.resize(modeSequence.size(), Eigen::Vector4d::Zero());
-  torsoPoseSequence.resize(modeSequence.size(), Eigen::Vector4d::Zero());
+  footPoseSequence.resize(modeSequence.size(), vector6_t::Zero());
+  torsoPoseSequence.resize(modeSequence.size(), vector6_t::Zero());
   swingHeightSequence.resize(modeSequence.size(), 0.06);
   fullBodyStateSequence.resize(modeSequence.size(), vector_array_t());
-  additionalFootPoseSequence.resize(modeSequence.size(), std::vector<Eigen::Vector4d>());
+  additionalFootPoseSequence.resize(modeSequence.size(), std::vector<vector6_t>());
   timeTrajectorySequence.resize(modeSequence.size(), scalar_array_t());
 }
 
@@ -62,8 +63,8 @@ ModeSchedule::ModeSchedule(std::vector<scalar_t> eventTimesInput, std::vector<si
 /******************************************************************************************************/
 /******************************************************************************************************/
 ModeSchedule::ModeSchedule(std::vector<scalar_t> eventTimesInput, std::vector<size_t> modeSequenceInput,
-               std::vector<bool> enableFootSequenceInput, std::vector<Eigen::Vector4d> footPoseSequenceInput,
-               std::vector<Eigen::Vector4d> torsoPoseSequenceInput)
+               std::vector<bool> enableFootSequenceInput, std::vector<vector6_t> footPoseSequenceInput,
+               std::vector<vector6_t> torsoPoseSequenceInput)
     : eventTimes(std::move(eventTimesInput))
     , modeSequence(std::move(modeSequenceInput))
     , enableFootSequence(std::move(enableFootSequenceInput))
@@ -88,10 +89,11 @@ ModeSchedule::ModeSchedule(std::vector<scalar_t> eventTimesInput, std::vector<si
   }
   
   // Initialize remaining sequences with default values
+  isLastCommandSequence.resize(modeSequence.size(), false);
   enableFullBodySequence.resize(modeSequence.size(), false);
   swingHeightSequence.resize(modeSequence.size(), 0.06);
   fullBodyStateSequence.resize(modeSequence.size(), vector_array_t());
-  additionalFootPoseSequence.resize(modeSequence.size(), std::vector<Eigen::Vector4d>());
+  additionalFootPoseSequence.resize(modeSequence.size(), std::vector<vector6_t>());
   timeTrajectorySequence.resize(modeSequence.size(), scalar_array_t());
 }
 
@@ -109,6 +111,7 @@ bool ModeSchedule::getSubSchedule(scalar_t startTime, scalar_t endTime, ModeSche
       subSchedule.eventTimes.push_back(eventTimes[i]);
       subSchedule.modeSequence.push_back(modeSequence[i]);
       subSchedule.enableFootSequence.push_back(enableFootSequence[i]);
+      subSchedule.isLastCommandSequence.push_back(isLastCommandSequence[i]);
       subSchedule.enableFullBodySequence.push_back(enableFullBodySequence[i]);
       subSchedule.footPoseSequence.push_back(footPoseSequence[i]);
       subSchedule.torsoPoseSequence.push_back(torsoPoseSequence[i]);
@@ -124,6 +127,7 @@ bool ModeSchedule::getSubSchedule(scalar_t startTime, scalar_t endTime, ModeSche
       subSchedule.eventTimes.push_back(eventTimes[i]);
       subSchedule.modeSequence.push_back(modeSequence[i]);
       subSchedule.enableFootSequence.push_back(enableFootSequence[i]);
+      subSchedule.isLastCommandSequence.push_back(isLastCommandSequence[i]);
       subSchedule.enableFullBodySequence.push_back(enableFullBodySequence[i]);
       subSchedule.footPoseSequence.push_back(footPoseSequence[i]);
       subSchedule.torsoPoseSequence.push_back(torsoPoseSequence[i]);
@@ -142,6 +146,7 @@ bool ModeSchedule::getSubSchedule(scalar_t startTime, scalar_t endTime, ModeSche
     // if(lastIndex < modeSequence.size()) {
       subSchedule.modeSequence.push_back(modeSequence[last_index+1]);
       subSchedule.enableFootSequence.push_back(enableFootSequence[last_index+1]);
+      subSchedule.isLastCommandSequence.push_back(isLastCommandSequence[last_index+1]);
       subSchedule.enableFullBodySequence.push_back(enableFullBodySequence[last_index+1]);
       subSchedule.footPoseSequence.push_back(footPoseSequence[last_index+1]);
       subSchedule.torsoPoseSequence.push_back(torsoPoseSequence[last_index+1]);

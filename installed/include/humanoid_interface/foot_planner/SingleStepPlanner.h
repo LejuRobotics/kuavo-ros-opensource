@@ -3,6 +3,7 @@
 #include <iostream>
 #include "humanoid_interface/foot_planner/Sat.hpp"
 #include "humanoid_interface/gait/GaitSchedule.h"
+#include "humanoid_interface/common/Types.h"
 
 #pragma once
 
@@ -20,7 +21,7 @@ namespace humanoid {
   // };
 
   std::pair<Eigen::Vector3d, Eigen::Vector3d> generateSteps(const Eigen::Vector3d& torso_pos, const double torso_yaw, const double foot_bias);
-  bool getMultipleStepsTrajectory(FootPoseSchedule &foot_pose_schedule, const std::vector<Vector4d>& body_poses, double dt,
+  bool getMultipleStepsTrajectory(FootPoseSchedule &foot_pose_schedule, const std::vector<vector6_t>& body_poses, double dt,
                                      double foot_bias, bool collision_check = true);
 }  // namespace humanoid
 }  // namespace ocs2

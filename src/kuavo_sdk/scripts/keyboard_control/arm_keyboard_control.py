@@ -259,7 +259,7 @@ def publish_arm_target_poses(times, values):
     msg = armTargetPoses()
     msg.times = times
     msg.values = values
-
+    #print(values)
     #rospy.loginfo("正在将手臂目标姿态发布到话题 'kuavo_arm_target_poses'")
 
     # 等待订阅者连接
@@ -320,7 +320,7 @@ class IkArmService:
         self.eef_pose_msg.hand_poses.right_pose.quat_xyzw = r_hand_quat
 
         res = self.call_ik_srv()
-        
+        #print(hand_flag)
         if(res.success):
             print("ik success")
             l_pos = res.hand_poses.left_pose.pos_xyz
@@ -390,7 +390,13 @@ class KeyBoardArmController:
         }
         self.eef_target_xyz = np.array(np.zeros(3), dtype=object)    # 目标末端位置xyz
         self.eef_target_ypr = np.array(np.zeros(3), dtype=object)    # 目标末端姿态ypr
+        self.l_eef_target_xyz = np.array(np.zeros(3), dtype=object)
+        self.r_eef_target_xyz = np.array(np.zeros(3), dtype=object)
+        self.l_eef_target_ypr = np.array(np.zeros(3), dtype=object)
+        self.r_eef_target_ypr = np.array(np.zeros(3), dtype=object)
         self.eef_angle_manual = np.array(np.zeros(3), dtype=object)  # 手动设置的目标末端姿态ypr
+        self.l_eef_angle_manual = np.array(np.zeros(3), dtype=object)
+        self.r_eef_angle_manual = np.array(np.zeros(3), dtype=object)
         self.current_joint_values = [0] * 14           # 当前关节数值
         self.zero_joint_values = [0.35, 0.0, 0.0, -0.52, 0.0, 0.0, 0.0, 
                                     0.35, 0.0, 0.0, -0.52, 0.0, 0.0, 0.0]
@@ -432,24 +438,27 @@ class KeyBoardArmController:
     # 通过一次fk求解，将当前角度转换为当前坐标，以此进行初始化，用于展示当前坐标和后续修改目标信息
     def update_joint_state_callback(self, data):
         arm_joint_data = data.joint_data.joint_q[12:26]
-        self.current_joint_values = arm_joint_data
+        #self.current_joint_values = arm_joint_data
         # 初始化
         if not self._flag_pose_inited:
+            self.current_joint_values = arm_joint_data
             # 调用 FK 正解服务
             fk_hand_poses = fk_srv_client(arm_joint_data)
             if fk_hand_poses is not None:
-                if self.which_hand == ArmType.Left:
-                    print("left hand poses ready","\r")
-                    self.eef_target_xyz = np.array(fk_hand_poses.left_pose.pos_xyz)
-                    x, y, z, w = fk_hand_poses.left_pose.quat_xyzw
-                    self.eef_target_ypr = np.array([euler.yaw, euler.pitch, euler.roll])
-                else :
-                    print("right hand poses ready","\r")
-                    self.eef_target_xyz = np.array(fk_hand_poses.right_pose.pos_xyz)
-                    x, y, z, w = fk_hand_poses.right_pose.quat_xyzw
-                    euler =quaternion_to_euler(x, y, z, w)
-                    self.eef_target_ypr = np.array([euler.yaw, euler.pitch, euler.roll])
+                print("left hand poses ready","\r")
+                self.l_eef_target_xyz = np.array(fk_hand_poses.left_pose.pos_xyz)
+                x, y, z, w = fk_hand_poses.left_pose.quat_xyzw
+                euler =quaternion_to_euler(x, y, z, w)
+                self.l_eef_target_ypr = np.array([euler.yaw, euler.pitch, euler.roll])
 
+                print("right hand poses ready","\r")
+                self.r_eef_target_xyz = np.array(fk_hand_poses.right_pose.pos_xyz)
+                x, y, z, w = fk_hand_poses.right_pose.quat_xyzw
+                euler =quaternion_to_euler(x, y, z, w)
+                self.r_eef_target_ypr = np.array([euler.yaw, euler.pitch, euler.roll])
+
+                self.eef_target_xyz = self.r_eef_target_xyz
+                self.eef_target_ypr = self.r_eef_target_ypr
                 pos_str = [f"{x:.3f}m" for x in self.eef_target_xyz]
                 rot_str = [f"{np.degrees(x):.1f}°" for x in self.eef_target_ypr]
                 print(f"Current: pos={pos_str}, rot={rot_str}", end='\r\n')    
@@ -457,7 +466,11 @@ class KeyBoardArmController:
                 self._flag_pose_inited = True
             else:
                 print("No hand poses returned")
-
+        else :
+            if self.which_hand == ArmType.Left:
+                self.current_joint_values = tuple(arm_joint_data[:7]) + self.current_joint_values[7:]
+            else :
+                self.current_joint_values = self.current_joint_values[:7] + tuple(arm_joint_data[7:])
     # 按键检测 
     def getKey(self):
         tty.setraw(sys.stdin.fileno())
@@ -478,11 +491,15 @@ class KeyBoardArmController:
                 # 自适应末端姿态
                 # yaw
                 if self.which_hand == ArmType.Left:
-                    self.eef_target_ypr[0]=math.atan((self.robot_zero_y - self.eef_target_xyz[1])/(self.eef_target_xyz[0] - self.robot_zero_x))
+
+                    self.eef_target_ypr[0]= math.atan((self.robot_zero_y + self.eef_target_xyz[1])/(self.eef_target_xyz[0] - self.robot_zero_x))
+                    self.eef_target_ypr[1]=eff_orientation_pitch(self.robot_upper_arm, self.robot_lower_arm, 
+                                                            math.sqrt((self.eef_target_xyz[1] + self.robot_zero_y)**2+self.eef_target_xyz[0]**2), 
+                                                            self.eef_target_xyz[2]-0.4240)
                 else :
                     self.eef_target_ypr[0]=math.atan((self.eef_target_xyz[1] - self.robot_zero_y)/(self.eef_target_xyz[0] - self.robot_zero_x))
                 # pitch
-                self.eef_target_ypr[1]=eff_orientation_pitch(self.robot_upper_arm, self.robot_lower_arm, 
+                    self.eef_target_ypr[1]=eff_orientation_pitch(self.robot_upper_arm, self.robot_lower_arm, 
                                                             math.sqrt((self.eef_target_xyz[1] - self.robot_zero_y)**2+self.eef_target_xyz[0]**2), 
                                                             self.eef_target_xyz[2]-0.4240)
                 # roll 
@@ -521,6 +538,36 @@ class KeyBoardArmController:
                     print("自动控制末端姿态模式")
             except Exception as e:
                 print(e)
+        elif key == 'n':            
+            try:
+                pos_str = [f"{x:.3f}m" for x in self.eef_target_xyz]
+                rot_str = [f"{np.degrees(x):.1f}°" for x in self.eef_target_ypr]
+                rot_manual_str = [f"{np.degrees(x):.1f}°" for x in self.eef_angle_manual]
+                
+                if self.which_hand==ArmType.Right:
+                    self.which_hand=ArmType.Left
+                    self.r_eef_target_xyz = self.eef_target_xyz
+                    self.r_eef_target_ypr = self.eef_target_ypr
+                    self.r_eef_angle_manual = self.eef_angle_manual
+
+                    self.eef_target_xyz = self.l_eef_target_xyz
+                    self.eef_target_ypr = self.l_eef_target_ypr
+                    self.eef_angle_manual = self.l_eef_angle_manual
+                    print("已切换到左手")
+                else :
+                    self.which_hand=ArmType.Right
+                    self.l_eef_target_xyz = self.eef_target_xyz
+                    self.l_eef_target_ypr = self.eef_target_ypr
+                    self.l_eef_angle_manual = self.eef_angle_manual
+
+                    self.eef_target_xyz = self.r_eef_target_xyz
+                    self.eef_target_ypr = self.r_eef_target_ypr
+                    self.eef_angle_manual = self.r_eef_angle_manual
+                    print("已切换到右手")
+
+            except Exception as e:
+                print(e)
+
         elif key != '\x03':
             key=""
             return key
@@ -537,26 +584,50 @@ class KeyBoardArmController:
     # 进行ik逆求解 进行线性插值 将任务发给关节
     def update_response_2(self):
         # ik逆解
-        
-        #quat=euler_to_quaternion(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2])
-        if self.control_rpy_flag==True:
-            # 求解带手动参数的ik结果
-            quat=euler_to_quaternion_via_matrix(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2],
-                                                self.eef_angle_manual[0],self.eef_angle_manual[1],self.eef_angle_manual[2])
-            joint_end_angles=self.ik_service.ik_one_hand(current_joint_values = self.current_joint_values, hand_flag = 2 ,
-                                        r_hand_pose=self.eef_target_xyz, r_hand_quat=[quat.x,quat.y,quat.z,quat.w])
-        else :
-            quat=euler_to_quaternion_via_matrix(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2])
-            joint_end_angles=self.ik_service.ik_one_hand(current_joint_values = self.current_joint_values, hand_flag = 2 ,
-                                        r_hand_pose=self.eef_target_xyz, r_hand_quat=[quat.x,quat.y,quat.z,quat.w])
-        if isinstance(joint_end_angles, np.ndarray):  # 判断是否是 NumPy 数组 
-        #if True :
-            degrees_list = [math.degrees(rad) for rad in joint_end_angles]
-            # 线性插值
-            self.exec_time = self.exec_time + self.time_gap
-            # 发送任务
-            publish_arm_target_poses([5], degrees_list)
-        # print("update_joy over")
+        if self.which_hand == ArmType.Left:
+            #quat=euler_to_quaternion(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2])
+            if self.control_rpy_flag==True:
+                # 求解带手动参数的ik结果
+                
+                quat=euler_to_quaternion_via_matrix(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2],
+                                                    self.eef_angle_manual[0],self.eef_angle_manual[1],self.eef_angle_manual[2])
+                
+                joint_end_angles=self.ik_service.ik_one_hand(current_joint_values = self.current_joint_values, hand_flag = 1 ,
+                                            l_hand_pose=self.eef_target_xyz, l_hand_quat=[quat.x,quat.y,quat.z,quat.w])
+                
+            else :
+                quat=euler_to_quaternion_via_matrix(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2])
+                joint_end_angles=self.ik_service.ik_one_hand(current_joint_values = self.current_joint_values, hand_flag = 1 ,
+                                            l_hand_pose=self.eef_target_xyz, l_hand_quat=[quat.x,quat.y,quat.z,quat.w])
+            if isinstance(joint_end_angles, np.ndarray):  # 判断是否是 NumPy 数组 
+            #if True :
+                degrees_list = [math.degrees(rad) for rad in joint_end_angles]
+                # 线性插值
+                self.exec_time = self.exec_time + self.time_gap
+                # 发送任务
+                publish_arm_target_poses([5], degrees_list)
+            # print("update_joy over")
+        else:
+            #quat=euler_to_quaternion(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2])
+            if self.control_rpy_flag==True:
+                # 求解带手动参数的ik结果
+                quat=euler_to_quaternion_via_matrix(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2],
+                                                    self.eef_angle_manual[0],self.eef_angle_manual[1],self.eef_angle_manual[2])
+                joint_end_angles=self.ik_service.ik_one_hand(current_joint_values = self.current_joint_values, hand_flag = 2 ,
+                                            r_hand_pose=self.eef_target_xyz, r_hand_quat=[quat.x,quat.y,quat.z,quat.w])
+            else :
+                quat=euler_to_quaternion_via_matrix(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2])
+                joint_end_angles=self.ik_service.ik_one_hand(current_joint_values = self.current_joint_values, hand_flag = 2 ,
+                                            r_hand_pose=self.eef_target_xyz, r_hand_quat=[quat.x,quat.y,quat.z,quat.w])
+            #print(joint_end_angles)
+            if isinstance(joint_end_angles, np.ndarray):  # 判断是否是 NumPy 数组 
+            #if True :
+                degrees_list = [math.degrees(rad) for rad in joint_end_angles]
+                # 线性插值
+                self.exec_time = self.exec_time + self.time_gap
+                # 发送任务
+                publish_arm_target_poses([5], degrees_list)
+            # print("update_joy over")
 
 
     def update_response(self):
@@ -579,6 +650,7 @@ class KeyBoardArmController:
             print("UO: rotation - X - ROLL")
             print("IK: rotation - Y - PITCH")
             print("JL: rotation - Z - YAW")
+            print("Press N to Switch to another hand")
             print("Press Ctrl-C to exit")
 
             set_arm_control_mode(2)
@@ -611,9 +683,9 @@ if __name__ == "__main__":
         else :
             print("机器人版本号错误, 仅支持42 45 49系列")
             pass
-
+        # 初始化必须为右手
         # Right Arm
-        keyboard_arm_controller = KeyBoardArmController(x_gap = 0.05, y_gap = 0.05, z_gap = 0.05,
+        keyboard_arm_controller = KeyBoardArmController(x_gap = 0.03, y_gap = 0.03, z_gap = 0.03,
                                                         roll_gap = 0.157, pitch_gap = 0.157, yaw_gap = 0.157, 
                                                         time_gap = 0.5,
                                                         robot_version = my_robot_version,

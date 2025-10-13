@@ -28,7 +28,7 @@ struct SensorsData {
     double sensor_time = 0.0;
     bool is_updated = false; 
     ImuData imu_data;
-    static const int MAX_JOINTS = 32;
+    static const int MAX_JOINTS = 32 + 1; //加上waistJoints
     JointData joint_data[MAX_JOINTS];
     int num_joints;
     EndEffectorData end_effector_data;
@@ -37,7 +37,7 @@ struct SensorsData {
 struct JointCommand {
     uint64_t timestamp_ms;
     bool is_updated = false; 
-    static const int MAX_JOINTS = 32;
+    static const int MAX_JOINTS = 32 + 1; //加上waistJoints;
     double joint_q[MAX_JOINTS];
     double joint_v[MAX_JOINTS];
     double tau[MAX_JOINTS];

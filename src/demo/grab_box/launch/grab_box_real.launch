@@ -5,11 +5,15 @@
     <arg name="joystick_type" default="bt2"/>
     <arg name="sqp_mpc"            default="1"/>
     <arg name="visualize_mm"       default="true"/>
-
+    <arg name="with_mm_ik"         default="false"/>
+    <arg name="coredump" default="false"/>
+    <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
+    <arg name="with_coredump" value="" unless="$(arg coredump)"/>
   <!-- sim launch -->
   <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch">
     <arg name="cali" value="$(arg cali)"/>
     <arg name="joystick_type" value="$(arg joystick_type)"/>
+    <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
   </include>
 
   <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
@@ -19,5 +23,6 @@
   </include>
 
   <node pkg="grab_box" type="tag_tracker_node" name="tag_tracker_node" output="screen"/>
+  <node pkg="grab_box" type="grab_box_demo" name="grab_box_demo" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
   <node pkg="tf" type="static_transform_publisher" name="static_transform_publisher_7link_to_eef" args="0.0, -0.030, -0.170 0 0 0 mm/zarm_l7_link mm/zarm_l7_end_effector 100" />
 </launch>

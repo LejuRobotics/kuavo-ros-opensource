@@ -27,11 +27,12 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  ******************************************************************************/
 
+#include <humanoid_interface/HumanoidInterface.h>
+
 #include <ros/init.h>
 #include <ros/package.h>
 
 #include <ocs2_sqp/SqpMpc.h>
-#include <humanoid_interface/HumanoidInterface.h>
 #include <ocs2_ros_interfaces/mpc/MPC_ROS_Interface.h>
 #include <ocs2_ros_interfaces/synchronized_module/RosReferenceManager.h>
 #include <ocs2_ros_interfaces/synchronized_module/SolverObserverRosCallbacks.h>

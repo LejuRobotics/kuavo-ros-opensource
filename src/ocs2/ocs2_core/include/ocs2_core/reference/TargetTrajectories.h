@@ -143,6 +143,32 @@ struct TargetTrajectories {
     inputTrajectory = newInputTrajectory;
   }
 
+  void cutTargetTrajectoriesAfter(scalar_t startTime)
+  {
+    //将目标轨迹 startTime 之后的元素全部删除
+    if (timeTrajectory.empty() || timeTrajectory.back() <= startTime)
+      return;
+
+    auto finalState = getDesiredState(startTime);
+    auto finalInput = getDesiredInput(startTime);
+    
+    // 使用 upper_bound 而非 lower_bound 确保保留最后一个等于 startTime 的元素[5,8](@ref)
+    auto index = std::upper_bound(timeTrajectory.begin(), timeTrajectory.end(), startTime);
+    
+    size_t eraseCount = std::distance(index, timeTrajectory.end());
+    
+    timeTrajectory.erase(index, timeTrajectory.end());
+    stateTrajectory.erase(stateTrajectory.end() - eraseCount, stateTrajectory.end());
+    inputTrajectory.erase(inputTrajectory.end() - eraseCount, inputTrajectory.end());
+    
+    if (timeTrajectory.size() < 2) 
+    {
+      timeTrajectory.push_back(startTime);
+      stateTrajectory.push_back(finalState);
+      inputTrajectory.push_back(finalInput);
+    }
+  }
+
   void trimTargetTrajectories(scalar_t startTime)
   {
     if (timeTrajectory.empty() || timeTrajectory.front() >= startTime)

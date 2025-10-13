@@ -19,11 +19,17 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.15" length="0.5" />
+      </geometry>
+    </collision>
   </link>
-  <joint name="dummy_to_base_link" type="fixed">
+  <joint name="base_link_to_dummy_link" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="dummy_link" />
-    <child link="base_link" />
+    <parent link="base_link" />
+    <child link="dummy_link" />
   </joint>
   <link name="leg_l1_link">
     <inertial>
@@ -507,6 +513,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.3" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_l2_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -553,6 +565,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="-0.02 0 -0.13" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.26" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_l4_joint" type="revolute">
     <origin xyz="0.0200000000000006 0 -0.283699999999996" rpy="0 0 0" />
@@ -622,6 +640,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 -0.07" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.04" length="0.14" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_l7_joint" type="revolute">
     <origin xyz="0 0 -0.0210004653879916" rpy="0 0 0" />
@@ -681,6 +705,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 -0.15" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.3" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_r2_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -727,6 +757,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="-0.02 0 -0.13" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.05" length="0.26" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_r4_joint" type="revolute">
     <origin xyz="0.0200000000000024 0 -0.2837" rpy="0 0 0" />
@@ -796,6 +832,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 -0.07" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.04" length="0.14" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_r7_joint" type="revolute">
     <origin xyz="0 0 -0.0209999999999999" rpy="0 0 0" />
@@ -832,6 +874,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.01 0 0.07" />
+      <geometry>
+        <sphere radius="0.1" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zhead_1_joint" type="revolute">
     <origin xyz="-0.0175 0.0 0.5014" rpy="0 0 0" />

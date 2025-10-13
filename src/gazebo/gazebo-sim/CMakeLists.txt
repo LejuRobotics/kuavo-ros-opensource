@@ -77,6 +77,19 @@ install(DIRECTORY launch/
   FILES_MATCHING PATTERN "*.launch"
 )
 
+# 安装Python脚本
+install(DIRECTORY scripts/
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/scripts
+  USE_SOURCE_PERMISSIONS
+  FILES_MATCHING PATTERN "*.py"
+)
+
+# 安装模型文件
+install(DIRECTORY models/
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/models
+  FILES_MATCHING PATTERN "*.sdf" PATTERN "*.config"
+)
+
 # 添加测试程序
 add_executable(shm_test src/shm_test.cpp)
 

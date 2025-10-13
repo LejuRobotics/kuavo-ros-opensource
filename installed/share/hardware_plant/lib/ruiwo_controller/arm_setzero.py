@@ -42,33 +42,45 @@ print("[RUIWO motor]:Canbus status:","[",open_canbus,"]")
 # 读取电机地址配置
 motor_addresses = read_motor_address_config()
 
-# 遍历每个电机地址
-for joint_name, dev_id in motor_addresses.items():
-    if 'arm' in joint_name.lower():
-        print(f"正在处理关节: {joint_name}, 电机ID: {hex(dev_id)}")
+# 检查ROBOT_VERSION环境变量
+robot_version = os.environ.get('ROBOT_VERSION', '')
+print(f"检测到ROBOT_VERSION: {robot_version}")
 
-        # 设置电机零点
-        state = ruiwo.set_zero_positon(dev_id)
-        if isinstance(state, list):
-            print(f"[RUIWO motor]:ID: {dev_id} Set zero position:  [Succeed], Motor info: {state}")
-            zero_position = state[1]
-            print("已设置好当前位置为零点：", zero_position)
-        else:
-            print(f"[RUIWO motor]:ID: {dev_id} Set zero position:  [{state}]")
+# 根据版本决定处理的电机数量
+if robot_version == '13' or '14':
+    print("检测到roban2版本机器人，只处理前10个电机")
+    target_motors = list(motor_addresses.items())[:10]
+else:
+    print("处理所有arm相关电机")
+    # 其他版本处理所有arm相关电机
+    target_motors = [(name, dev_id) for name, dev_id in motor_addresses.items() if 'arm' in name.lower()]
 
-        # 使能电机
-        state = ruiwo.enter_motor_state(dev_id)
-        if isinstance(state, list):
-            print(f"[RUIWO motor]:ID: {dev_id} Enable:  [Succeed]")
-        else:
-            print(f"[RUIWO motor]:ID: {dev_id} Enable:  [{state}]")
+# 遍历目标电机
+for joint_name, dev_id in target_motors:
+    print(f"正在处理关节: {joint_name}, 电机ID: {hex(dev_id)}")
 
-        # 失能电机
-        state = ruiwo.enter_reset_state(dev_id)
-        if isinstance(state, list):
-            print(f"[RUIWO motor]:ID: {dev_id} Disable:  [Succeed]")
-        else:
-            print(f"[RUIWO motor]:ID: {dev_id} Disable:  [{state}]")
+    # 设置电机零点
+    state = ruiwo.set_zero_positon(dev_id)
+    if isinstance(state, list):
+        print(f"[RUIWO motor]:ID: {dev_id} Set zero position:  [Succeed], Motor info: {state}")
+        zero_position = state[1]
+        print("已设置好当前位置为零点：", zero_position)
+    else:
+        print(f"[RUIWO motor]:ID: {dev_id} Set zero position:  [{state}]")
+
+    # 使能电机
+    state = ruiwo.enter_motor_state(dev_id)
+    if isinstance(state, list):
+        print(f"[RUIWO motor]:ID: {dev_id} Enable:  [Succeed]")
+    else:
+        print(f"[RUIWO motor]:ID: {dev_id} Enable:  [{state}]")
+
+    # 失能电机
+    state = ruiwo.enter_reset_state(dev_id)
+    if isinstance(state, list):
+        print(f"[RUIWO motor]:ID: {dev_id} Disable:  [Succeed]")
+    else:
+        print(f"[RUIWO motor]:ID: {dev_id} Disable:  [{state}]")
 
 # 关闭CAN总线
 close_canbus = ruiwo.close_canbus()

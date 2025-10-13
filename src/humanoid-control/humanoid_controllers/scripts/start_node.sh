@@ -11,6 +11,9 @@ if [ "$1" = "--with-coredump" ]; then
     if [ $(id -u) -eq 0 ]; then
         # 设置core dump相关参数
         mkdir -p "${CORE_DUMP_DIR}"
+        if [ -d "${CORE_DUMP_DIR}" ]; then
+            echo "coredump for kuavo:${NODE_NAME}" >> "${CORE_DUMP_DIR}/README.txt"
+        fi
         sudo sysctl -w kernel.core_pattern="${CORE_DUMP_DIR}/core.%e.%p.%t"
         ulimit -c unlimited
     fi

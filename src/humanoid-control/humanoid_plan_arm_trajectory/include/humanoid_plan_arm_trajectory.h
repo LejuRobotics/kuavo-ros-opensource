@@ -74,10 +74,8 @@ namespace ocs2 {
         trajectory_msgs::JointTrajectory traj_;
         kuavo_msgs::planArmState arm_traj_state_;
 
-        const std::array<std::string, 14> arm_joint_names_ = {
-            "zarm_l1_joint", "zarm_l2_joint", "zarm_l3_joint", "zarm_l4_joint", "zarm_l5_joint", "zarm_l6_joint", "zarm_l7_joint",
-            "zarm_r1_joint", "zarm_r2_joint", "zarm_r3_joint", "zarm_r4_joint", "zarm_r5_joint", "zarm_r6_joint", "zarm_r7_joint"
-        };
+        int robot_version_ = 45;
+        std::vector<std::string> arm_joint_names_;
         const std::array<std::string, 2> head_joint_names_ = { "zhead_1_joint", "zhead_2_joint" };
         // 贝塞尔曲线插值器中使用弧度值，此处为手指关节限位(0 ~ 100)的转换
         constexpr static double hand_joint_lower_limit_ = 0.0;
