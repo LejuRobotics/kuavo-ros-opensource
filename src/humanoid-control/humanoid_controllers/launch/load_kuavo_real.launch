@@ -114,12 +114,12 @@
       <param name="only_half_up_body" value="true"/>
     </group>
 
-    <group unless="$(eval arg('robot_version') >= 30)">
+    <!-- <group unless="$(eval arg('robot_version') >= 30)">
         <param name="enable_pull_up_protect" value="false"/>
         <param name="stand_up_protect" value="false"/>
         <param name="joint_protect_enable" value="false" />
         <param name="cmd_truncation_enable" value="false" />
-    </group>
+    </group> -->
     
     <!-- mpc node -->
     <group if="$(arg use_external_mpc)">

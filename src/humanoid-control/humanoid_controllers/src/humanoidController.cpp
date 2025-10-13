@@ -2024,14 +2024,14 @@ namespace humanoid_controller
     {
       for (int i = 0; i < jointNumReal_; i++)
       {
-        if (i == 4 || i == 5 || i == 10 || i == 11) // 踝关节
-        {
-          jointCmdMsg.control_modes[i+waistNum_] = 0;
-          jointCmdMsg.tau[i+waistNum_] = 0;
-          jointCmdMsg.joint_kp[i+waistNum_] = 0;
-          jointCmdMsg.joint_kd[i+waistNum_] = 0;
-        }
-        else
+        // if (i == 4 || i == 5 || i == 10 || i == 11) // 踝关节
+        // {
+        //   jointCmdMsg.control_modes[i+waistNum_] = 0;
+        //   jointCmdMsg.tau[i+waistNum_] = 0;
+        //   jointCmdMsg.joint_kp[i+waistNum_] = 0;
+        //   jointCmdMsg.joint_kd[i+waistNum_] = 0;
+        // }
+        // else
           jointCmdMsg.control_modes[i+waistNum_] = 2;
       }
     }
