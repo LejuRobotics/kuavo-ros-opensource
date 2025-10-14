@@ -12,7 +12,10 @@
     <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
     <arg name="use_arm_collision" default="false"/>
     <arg name="use_two_stage_ik" default="true"/>
+    <arg name="use_step_turning" default="false"/> <!-- 是否启用单步转向功能 -->
 
+    <!-- 设置单步转向功能参数 -->
+    <param name="/quest3/use_step_turning" value="$(arg use_step_turning)" />
     
     <!-- motion_capture_ik -->
     <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen">
