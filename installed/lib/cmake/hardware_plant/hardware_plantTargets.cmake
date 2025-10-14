@@ -145,7 +145,7 @@ add_library(hardware_plant::dexhand_sdk STATIC IMPORTED)
 set_target_properties(hardware_plant::dexhand_sdk PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/dexhand_sdk;${_IMPORT_PREFIX}/include"
   INTERFACE_LINK_DIRECTORIES "${_IMPORT_PREFIX}/lib"
-  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;stark;serialport;m;pthread;rt;dl"
+  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;serialport;m;pthread;rt;dl"
 )
 
 # Create imported target hardware_plant::ruiwo_actuatorLib
