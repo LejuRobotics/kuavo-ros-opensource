@@ -1,3 +1,6 @@
+#ifndef TOUCH_DEXHAND_H
+#define TOUCH_DEXHAND_H
+
 #include <mutex>
 #include "dexhand_base.h"
 #include "modbus.h"
@@ -49,3 +52,5 @@ private:
     explicit TouchDexhand(DeviceHandler* handle, uint8_t slave_id_);
 };
 } // namespace dexhand
+
+#endif // TOUCH_DEXHAND_H

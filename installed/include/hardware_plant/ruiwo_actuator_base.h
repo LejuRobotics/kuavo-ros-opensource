@@ -13,9 +13,9 @@ public:
     enum class State {
         None,
         Enabled,
-        Disabled
+        Disabled,
+        Ignored,
     };
-
     struct MotorStateData {
         uint8_t id;
         State   state;
@@ -81,7 +81,7 @@ public:
     /**
      * @brief 设置示教模式
      *
-     * @param mode 示教模式值
+     * @param mode 示教模式值 1：示教模式 0：非示教模式
      */
     virtual void set_teach_pendant_mode(int mode) = 0;
 

@@ -125,6 +125,26 @@ set_target_properties(hardware_plant::dexhand_sdk PROPERTIES
 list(APPEND _IMPORT_CHECK_TARGETS hardware_plant::dexhand_sdk )
 list(APPEND _IMPORT_CHECK_FILES_FOR_hardware_plant::dexhand_sdk "${_IMPORT_PREFIX}/lib/libdexhand_sdk.a" )
 
+# Import target "hardware_plant::canbus_sdk" for configuration "RelWithDebInfo"
+set_property(TARGET hardware_plant::canbus_sdk APPEND PROPERTY IMPORTED_CONFIGURATIONS RELWITHDEBINFO)
+set_target_properties(hardware_plant::canbus_sdk PROPERTIES
+  IMPORTED_LOCATION_RELWITHDEBINFO "${_IMPORT_PREFIX}/lib/libcanbus_sdk.so"
+  IMPORTED_SONAME_RELWITHDEBINFO "libcanbus_sdk.so"
+  )
+
+list(APPEND _IMPORT_CHECK_TARGETS hardware_plant::canbus_sdk )
+list(APPEND _IMPORT_CHECK_FILES_FOR_hardware_plant::canbus_sdk "${_IMPORT_PREFIX}/lib/libcanbus_sdk.so" )
+
+# Import target "hardware_plant::motorevo_controller" for configuration "RelWithDebInfo"
+set_property(TARGET hardware_plant::motorevo_controller APPEND PROPERTY IMPORTED_CONFIGURATIONS RELWITHDEBINFO)
+set_target_properties(hardware_plant::motorevo_controller PROPERTIES
+  IMPORTED_LOCATION_RELWITHDEBINFO "${_IMPORT_PREFIX}/lib/libmotorevo_controller.so"
+  IMPORTED_SONAME_RELWITHDEBINFO "libmotorevo_controller.so"
+  )
+
+list(APPEND _IMPORT_CHECK_TARGETS hardware_plant::motorevo_controller )
+list(APPEND _IMPORT_CHECK_FILES_FOR_hardware_plant::motorevo_controller "${_IMPORT_PREFIX}/lib/libmotorevo_controller.so" )
+
 # Import target "hardware_plant::ruiwo_actuatorLib" for configuration "RelWithDebInfo"
 set_property(TARGET hardware_plant::ruiwo_actuatorLib APPEND PROPERTY IMPORTED_CONFIGURATIONS RELWITHDEBINFO)
 set_target_properties(hardware_plant::ruiwo_actuatorLib PROPERTIES
