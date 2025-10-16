@@ -13,6 +13,11 @@
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- Roban2 支持全新的手臂接线方式，左右手臂各连接一条 Can 总线，并连接对应的末端执行器
+- Roban2 新增支持基于 Can 通讯的 Revo2 灵巧手，需要刷对应 Can 版的固件
+- Roban2 新增配置文件`~/.config/lejuconfig/CanbusWiringType.ini`用来表示 Can 总线的接线方式，dual_bus 表示双总线
+- Roban2 新增配置文件`~/.config/lejuconfig/canbus_device_cofig.yaml`用于 Can 模块与总线上的设备关系描述
+- Kuavo Humanoid SDK 支持机器人版本14的关节名称处理
 - 更新强脑灵巧手SDK版本从`0.4.4`到`0.9.1`版本可支持自定义can协议
 - Kuavo Humanoid SDK  新增原子策略行为树版本搬箱子
 - Tact 动作文件适配 Roban 机器人，在原先基础上支持灵巧手, 头和腰部的控制描述
@@ -43,6 +48,13 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复在 VR 视频回传功能，相机的部分参数错误会导致 launch 无法正常启动问题
+- 修复 kuavo 未配置 cmdvelLinearZLimit 导致初始化失败
+- 修复强脑SDK升级到`0.9.1`函数符号冲突导致无法控制 Kuavo灵巧手问题
+- 修复 Roban2.1 站立状态吊起机器会失控乱甩
+- 修复Roban2 revo2 灵巧手的位置控制和状态的范围(0~1000 => 0~100)
+- Kuavo Humanoid SDK 修复本地 install.sh 脚本安装超时问题
+- 修复`humanoid_controller/real_launch_status`获取机器状态服务，初始状态错误问题
 - 修复当获取灵巧手手指状态失败时，手指状态话题发布一些错误数据的问题
 - 键盘控制手臂移动功能优化, 支持双手控制及自由切换, 修复手臂移动累计误差的问题
 - 修复VR过程中可以通过侧扳机固定手臂功能
@@ -86,6 +98,7 @@
 - 修复 Quest3 打开`control_torso`控制躯干模式时躯干会下蹲到最低问题
 
 ## 其他改进
+- 新增硬件工具: canbus_config.sh 用于配置 Roban2 Can 总线配置，[工具链接](./tools/check_tool/canbus_config.sh)
 - 调整灵巧手 SDK 日志级别避免终端过多打印刷屏
 - 新增工具: 编译蓝牙内核模块脚本，[使用文档链接](./tools/bluetooth_tool/README.md)
 - 新增工具: 将电机正反转、零偏和限位等数据打包成约定的json文件，[工具文档链接](./tools/get_joint_data/README.md)
