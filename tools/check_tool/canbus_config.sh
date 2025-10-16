@@ -91,11 +91,12 @@ select_end_effector_type() {
     local side="$1"  # 左、右或具体描述
     local end_effector_options=("revo2_hand -- 灵巧手" "lejuclaw -- 自研夹爪" "none -- 没有末端")
     show_menu "选择${side}末端执行器类型" "${end_effector_options[@]}"
-    get_user_selection 3 selection
+    local eef_selection
+    get_user_selection 3 eef_selection
 
     local end_effector_types=("revo2_hand" "lejuclaw" "none")
-    local selected_type="${end_effector_types[$((selection-1))]}"
-    local selected_description="${end_effector_options[$((selection-1))]}"
+    local selected_type="${end_effector_types[$((eef_selection-1))]}"
+    local selected_description="${end_effector_options[$((eef_selection-1))]}"
 
     echo_success "✓ ${side}末端执行器: $selected_type"
 
