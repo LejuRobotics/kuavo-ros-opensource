@@ -12,13 +12,6 @@ message(STATUS "KUAVO_ASSETS_PATH: ${KUAVO_ASSETS_PATH}")
 # # Test Executables
 # # ==============================================================================
 # Hand controller test
-add_executable(hand_controller_test 
-    hand_controller_test.cc
-)
-target_link_libraries(hand_controller_test 
-    PUBLIC 
-        hardware_plant::hardware_plant
-)
 
 # Leju claw controller test
 add_executable(lejuclaw_controller_test 

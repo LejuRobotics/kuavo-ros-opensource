@@ -61,12 +61,12 @@ git clone git@gitee.com:leju-robot/kuavo-ros-opensource.git
 - docker镜像可以自行根据后续章节使用`./docker/Dockerfile`构建，或者下载已经编译好的镜像：
 
 ```bash  
-wget https://kuavo.lejurobot.com/docker_images/kuavo_opensource_mpc_wbc_img_v0.6.1.tar.gz
+wget https://kuavo.lejurobot.com/docker_images/kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
 ```
 
 - 执行以下命令导入容器镜像：
 ```bash
-docker load -i kuavo_opensource_mpc_wbc_img_v0.6.1.tar.gz
+docker load -i kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
 ```
 - 执行`./docker/run.sh`进入容器后，默认在仓库的映射目录`/root/kuavo_ws`，执行以下命令开始编译：
 
@@ -118,6 +118,7 @@ roslaunch humanoid_controllers load_kuavo_isaac_sim.launch  # 启动控制器、
 
 ##### 末端执行器配置
 在运行实物之前, 您需要先修改`src/kuavo_assets/config/kuavo_v$ROBOT_VERSION/kuavo.json`中EndEffectorType为您实物机器人的执行器类型:
+- `none`: 无末端执行器或者需要屏蔽末端执行器时使用
 - `qiangnao` : 灵巧手, 默认值
 - `lejuclaw` : 二指夹爪
 - `qiangnao_touch` : 触觉灵巧手

@@ -129,6 +129,18 @@ class KuavoPose:
     position: Tuple[float, float, float] # x, y, z
     orientation: Tuple[float, float, float, float] # x, y, z, w
 
+    def __str__(self) -> str:
+        """Returns a formatted string representation of the pose.
+        
+        Returns:
+            str: Formatted pose string with position and orientation
+        """
+        return (
+            f"Position (x,y,z): ({self.position[0]:.3f}, {self.position[1]:.3f}, {self.position[2]:.3f})\n"
+            f"Orientation (x,y,z,w): ({self.orientation[0]:.3f}, {self.orientation[1]:.3f}, "
+            f"{self.orientation[2]:.3f}, {self.orientation[3]:.3f})"
+        )
+
 @dataclass
 class KuavoIKParams:
     """表示IK节点参数的数据类。"""

@@ -5,6 +5,7 @@ from kuavo_humanoid_sdk.interfaces.end_effector import EndEffector
 from kuavo_humanoid_sdk.interfaces.data_types import EndEffectorSide, EndEffectorState, KuavoDexHandTouchState
 from kuavo_humanoid_sdk.kuavo.core.dex_hand_control import DexHandControl
 from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCore
+import time
 
 class DexterousHand(EndEffector):
     """普通灵巧手控制类"""
@@ -198,4 +199,40 @@ class TouchDexterousHand(DexterousHand):
         Returns:
             Tuple[KuavoDexHandTouchState, KuavoDexHandTouchState]
         """
-        return self._rb_state.dexhand_touch_state
+        return self._rb_state.eef_state.state
+
+    def get_dexhand_gesture_state(self)->bool:
+        """获取机器人灵巧手势的当前状态。
+
+        Returns:
+            bool: 如果机器人灵巧手势正在执行返回True，否则返回False。
+        """
+        return self._rb_state._srv_get_dexhand_gesture_state()
+
+    def make_gesture_sync(self, l_gesture_name: str, r_gesture_name: str, timeout:float=5.0)->bool:
+        """为双手做预定义的手势（同步等待完成）。
+
+        Args:
+            l_gesture_name (str): 左手手势的名称。None表示跳过左手。
+            r_gesture_name (str): 右手手势的名称。None表示跳过右手。
+            timeout (float, optional): 手势超时时间。默认为5.0秒。
+
+        Returns:
+            bool: 如果手势执行成功返回True，否则返回False。
+        """
+        gesture = []
+        if l_gesture_name is not None:
+            gesture.append({'gesture_name':l_gesture_name, 'hand_side':EndEffectorSide.LEFT})
+        if r_gesture_name is not None:
+            gesture.append({'gesture_name':r_gesture_name, 'hand_side':EndEffectorSide.RIGHT})    
+        self.dex_hand_control.make_gestures(gesture)
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.get_dexhand_gesture_state() == True:
+                break;
+            time.sleep(0.1)
+        while time.time() - start_time < timeout:
+            if self.get_dexhand_gesture_state() == False:
+                return True
+            time.sleep(0.1)
+        return False

@@ -1,0 +1,10 @@
+<!-- ar_track.launch -->
+<launch>
+    <arg name="LED" default="enable" />
+    <!-- 当 LED 不为 disable 时启动 LED 控制服务 -->
+    <group unless="$(eval arg('LED') == 'disable')">
+        <!-- 启动 LED 控制服务 -->
+        <node pkg="kuavo_led_controller" type="kuavo_led_controller_node.py" name="led_controller_node" output="screen"/>
+    </group>
+
+</launch>

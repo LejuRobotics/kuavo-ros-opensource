@@ -1,0 +1,12 @@
+<?xml version="1.0" ?>
+<launch>
+
+    <node pkg="joy" type="joy_node" name="joy_node" output="screen" >
+        <param name="dev" value="/dev/input/js0"/>
+        <param name="autorepeat_rate" type="double" value="100.0"/>
+        <param name="deadzone" type="double" value="0.18"/>
+    </node>
+
+    <node pkg="joy" type="joy_customize_config.py" name="joy_customize_config" output="screen" />
+
+</launch>

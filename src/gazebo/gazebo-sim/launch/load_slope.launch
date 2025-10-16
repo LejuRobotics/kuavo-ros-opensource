@@ -1,0 +1,18 @@
+<launch>
+  <!-- 斜坡参数 -->
+  <arg name="use_slope" default="true" doc="是否添加斜坡到场景中"/>
+  <arg name="slope_model_path" default="$(find gazebo_sim)/models/slope/slope_generated.sdf" doc="斜坡"/>
+  <arg name="slope_x" default="-1.5" doc="斜坡位置X坐标"/>
+  <arg name="slope_y" default="-0.0" doc="斜坡位置Y坐标"/>
+  <arg name="slope_z" default="0.0" doc="斜坡位置Z坐标"/>
+  <arg name="slope_roll" default="0.0" doc="斜坡绕X轴旋转角度（弧度）"/>
+  <arg name="slope_pitch" default="0.0" doc="斜坡绕Y轴旋转角度（弧度）"/>
+  <arg name="slope_yaw" default="1.57" doc="斜坡绕Z轴旋转角度（弧度）"/>
+  
+  <!-- 加载斜坡模型 -->
+  <group if="$(arg use_slope)">
+    <node name="spawn_slope" pkg="gazebo_ros" type="spawn_model" 
+          args="-sdf -model uneven_slope -file $(arg slope_model_path) -x $(arg slope_x) -y $(arg slope_y) -z $(arg slope_z) -R $(arg slope_roll) -P $(arg slope_pitch) -Y $(arg slope_yaw)" 
+          respawn="false" output="screen"/>
+  </group>
+</launch> 

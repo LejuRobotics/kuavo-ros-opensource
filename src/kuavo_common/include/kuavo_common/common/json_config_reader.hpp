@@ -26,10 +26,24 @@ namespace HighlyDynamic
             if (file.is_open())
             {
                 file >> data_;
+                is_loaded_ = true;
             }
             else
             {
                 std::cerr << "Failed to open config file: " << filename << std::endl;
+            }
+        }
+        // 获取嵌套的 JSON 对象
+        nlohmann::json getNestedObject(const std::string &parentKey, const std::string &childKey)
+        {
+            if (data_.contains(parentKey) && data_[parentKey].contains(childKey))
+            {
+                return data_[parentKey][childKey];
+            }
+            else
+            {
+                std::cerr << "Key not found: " << parentKey << " -> " << childKey << std::endl;
+                return nullptr;
             }
         }
         Eigen::VectorXd getEigenVector(const std::string &key)
@@ -43,6 +57,20 @@ namespace HighlyDynamic
             else
             {
                 std::cerr << "Key not found: " << key << std::endl;
+                return {};
+            }
+        }
+        // 获取嵌套的 std::vector<double> 类型的向量
+        std::vector<double> getNestedStdVector(const std::string &parentKey, const std::string &childKey, const std::string &vectorKey)
+        {
+            auto nestedObject = getNestedObject(parentKey, childKey);
+            if (nestedObject != nullptr && nestedObject.contains(vectorKey))
+            {
+                return nestedObject[vectorKey].get<std::vector<double>>();
+            }
+            else
+            {
+                std::cerr << "Key not found: " << parentKey << " -> " << childKey << " -> " << vectorKey << std::endl;
                 return {};
             }
         }

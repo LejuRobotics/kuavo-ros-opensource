@@ -7,7 +7,8 @@ import argparse
 import argparse
 from std_msgs.msg import Float32, Float32MultiArray
 from sensor_msgs.msg import JointState
-from handcontrollerdemorosnode.msg import armPoseWithTimeStamp, robotHandPosition
+from handcontrollerdemorosnode.msg import armPoseWithTimeStamp
+from kuavo_msgs.msg import robotHandPosition
 import time
 import math
 import sys
@@ -47,7 +48,8 @@ from ik.torso_ik import ArmIk
 
 import rospy
 from noitom_hi5_hand_udp_python.msg import handRotationEular
-from noitom_hi5_hand_udp_python.msg import PoseInfo, PoseInfoList, JoySticks
+from noitom_hi5_hand_udp_python.msg import PoseInfo, PoseInfoList
+from kuavo_msgs.msg import JoySticks
 from tools.quest3_utils import Quest3ArmInfoTransformer
 from kuavo_msgs.msg import ikSolveError, handPose, robotArmQVVD, armHandPose, twoArmHandPose
 

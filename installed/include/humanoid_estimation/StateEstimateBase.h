@@ -72,7 +72,7 @@ namespace ocs2
       virtual vector_t update(const ros::Time &time, const ros::Duration &period) = 0;
       virtual nav_msgs::Odometry updateKinematics(const ros::Time &time, const Eigen::Quaterniond &imu_quat, const ros::Duration &period)
       {
-
+        return nav_msgs::Odometry();
       }
 
       inline void updateFootPosDesired(const feet_array_t<vector3_t> &foot_pos_desired)

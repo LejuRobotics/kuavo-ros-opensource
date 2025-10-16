@@ -101,6 +101,51 @@ Qiangnao 灵巧手
 .. literalinclude:: ../../examples/atomic_skills/ctrl_arm_example.py
   :language: python
 
+手臂运动控制（碰撞保护）
+====================
+这个示例展示了如何在启用手臂碰撞保护的情况下控制机器人手臂运动，包括轨迹控制和目标姿态控制。
+
+示例代码展示了碰撞保护机制的工作原理：
+
+#. 碰撞保护模式设置：
+
+   * 使用 `robot.set_arm_collision_mode(True)` 启用手臂碰撞保护
+   * 碰撞保护模式下，当检测到碰撞时会自动停止运动并恢复到安全位置
+
+#. control_arm_traj()：带碰撞保护的关节角度插值运动
+
+   * 从初始位置q0开始，通过90步插值运动到目标位置q1
+   * q1设置了可能导致碰撞的手臂姿态
+   * 每步之间间隔0.02秒，实现平滑过渡
+   * 使用 try-except 结构捕获可能的碰撞异常
+   * 当检测到碰撞时，调用 `robot.wait_arm_collision_complete()` 等待碰撞处理完成
+   * 然后调用 `robot.release_arm_collision_mode()` 释放碰撞模式
+   * 运动完成后恢复到初始位置
+
+#. control_arm_joint_trajectory()：带碰撞保护的关节轨迹控制
+
+   * 定义了7个关键时间点的目标姿态
+   * 机器人会自动完成关键帧之间的轨迹规划
+   * 同样使用异常处理机制来应对可能的碰撞情况
+   * 执行完毕后重置手臂位置
+
+#. 碰撞保护机制：
+
+   * 通过 `robot.is_arm_collision()` 检测是否发生碰撞
+   * 使用 `robot.wait_arm_collision_complete()` 等待碰撞处理完成
+   * 使用 `robot.release_arm_collision_mode()` 释放碰撞控制模式
+   * 最后使用 `robot.set_arm_collision_mode(False)` 关闭碰撞保护
+
+注意事项：
+
+* 碰撞保护模式会增加系统响应时间，但能有效防止手臂碰撞
+* 在碰撞发生后，需要等待碰撞处理完成才能继续控制
+* 建议在复杂环境中使用碰撞保护模式
+* 碰撞保护会记录3秒内的传感器数据用于恢复
+
+.. literalinclude:: ../../examples/atomic_skills/ctrl_arm_example_protected.py
+  :language: python
+
 正向和逆向运动学控制
 ====================
 这个示例展示了如何使用正向运动学 (FK) 从关节角度计算末端执行器位置，以及如何使用逆向运动学 (IK) 计算实现所需末端执行器姿态所需的关节角度。

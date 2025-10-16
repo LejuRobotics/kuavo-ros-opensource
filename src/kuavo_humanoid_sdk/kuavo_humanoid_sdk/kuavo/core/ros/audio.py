@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 # coding: utf-8
+import rospy
+from std_msgs.msg import Bool, Int16MultiArray
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.kuavo.core.core import KuavoRobotCore
-
-try:    
-    import rospy
-    from std_msgs.msg import Bool
-    from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import  playmusic, playmusicRequest
-    from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import  SpeechSynthesis, SpeechSynthesisRequest
-except:
-    pass
-
+from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import  playmusic, playmusicRequest
+from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import  SpeechSynthesis, SpeechSynthesisRequest
 class Audio:
     """Audio system interface for controlling audio playback functionality of Kuavo humanoid robot.
     
@@ -20,6 +15,7 @@ class Audio:
     def __init__(self):
         """Initialize the audio system."""
         self._audio_stop_publisher = rospy.Publisher('stop_music', Bool, queue_size=10)
+        self.audio_data_publisher = rospy.Publisher('audio_data', Int16MultiArray, queue_size=10)
         rospy.sleep(0.5)  # Wait for publisher initialization
     def play_audio(self, file_name: str, volume: int = 100, speed: float = 1.0) -> bool:
         """Play the specified audio file.
@@ -90,3 +86,25 @@ class Audio:
             SDKLogger.error(f"[Robot Audio] Failed to play audio text: {str(e)}")
             return False
 
+    def publish_audio_chunk(self, audio_chunk, gain: int = 1):
+        """Publish a single audio chunk to the topic, for real-time audio streaming"""
+        try:
+            if not audio_chunk:
+                return False
+                
+            # 应用增益
+            amplified_chunk = [int(sample * gain) for sample in audio_chunk]
+            
+            # 创建并发布消息
+            msg = Int16MultiArray()
+            msg.data = amplified_chunk
+            
+            self.audio_data_publisher.publish(msg)
+            # SDKLogger.debug(f"[Robot Audio] 发布音频块，大小: {len(amplified_chunk)}")
+            
+            return True
+            
+        except Exception as e:
+            SDKLogger.error(f"[Robot Audio] 发布音频块时出错: {e}")
+            return False
+            

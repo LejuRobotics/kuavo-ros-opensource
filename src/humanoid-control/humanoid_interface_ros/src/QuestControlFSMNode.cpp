@@ -125,6 +125,12 @@ namespace ocs2
             // 添加 enable_wbc_arm_trajectory_control 服务客户端
             enable_wbc_arm_trajectory_control_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/enable_wbc_arm_trajectory_control");
             
+            // VR腰部控制动态Q矩阵服务客户端
+            vr_waist_control_service_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid/mpc/vr_waist_control");
+            
+            // GaitReceiver自动步态模式服务客户端
+            auto_gait_mode_service_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>(robotName + "_auto_gait");
+            
             // 腰部控制相关的订阅者和发布者
             head_body_pose_sub_ = nodeHandle_.subscribe("/kuavo_head_body_orientation_data", 1, &QuestControlFSM::headBodyPoseCallback, this);
             waist_motion_pub_ = nodeHandle_.advertise<std_msgs::Float64MultiArray>("/robot_waist_motion_data", 1);
@@ -244,6 +250,68 @@ namespace ocs2
             }
         }
 
+        void callVRWaistControlSrv(bool enable)
+        {
+            std_srvs::SetBool srv;
+            srv.request.data = enable;
+
+            // 等待服务可用
+            if (!vr_waist_control_service_client_.waitForExistence(ros::Duration(2.0)))
+            {
+                ROS_WARN("VR waist control service not available, skipping call");
+                return;
+            }
+
+            // 调用服务
+            if (vr_waist_control_service_client_.call(srv))
+            {
+                if (srv.response.success)
+                {
+                    ROS_INFO("VRWaistControlSrv call successful: %s, response: %s", 
+                             enable ? "enabled" : "disabled", srv.response.message.c_str());
+                }
+                else
+                {
+                    ROS_WARN("VRWaistControlSrv returned failure: %s", srv.response.message.c_str());
+                }
+            }
+            else
+            {
+                ROS_ERROR("Failed to call VRWaistControlSrv");
+            }
+        }
+
+        void callAutoGaitModeSrv(bool enable)
+        {
+            std_srvs::SetBool srv;
+            srv.request.data = enable;
+
+            // 等待服务可用
+            if (!auto_gait_mode_service_client_.waitForExistence(ros::Duration(2.0)))
+            {
+                ROS_WARN("Auto gait mode service not available, skipping call");
+                return;
+            }
+
+            // 调用服务
+            if (auto_gait_mode_service_client_.call(srv))
+            {
+                if (srv.response.success)
+                {
+                    ROS_INFO("AutoGaitModeSrv call successful: %s, response: %s", 
+                             enable ? "enabled" : "disabled", srv.response.message.c_str());
+                }
+                else
+                {
+                    ROS_WARN("AutoGaitModeSrv returned failure: %s", srv.response.message.c_str());
+                }
+            }
+            else
+            {
+                ROS_ERROR("Failed to call AutoGaitModeSrv");
+            }
+        }
+
         void callTerminateSrv()
         {
         std::cout << "tigger callTerminateSrv" << std::endl;
@@ -286,10 +354,13 @@ namespace ocs2
         void headBodyPoseCallback(const kuavo_msgs::headBodyPose::ConstPtr& msg)
         {
             current_head_body_pose_ = *msg;
-            current_head_body_pose_.body_pitch = std::max(3*M_PI/180.0, std::min(current_head_body_pose_.body_pitch, 15*M_PI/180.0));
+            current_head_body_pose_.body_pitch = std::max(3*M_PI/180.0, std::min(current_head_body_pose_.body_pitch, 40*M_PI/180.0));
 
+            // 检查是否正在进行XY按键摇杆控制（高优先级），如果是则跳过VR腰部控制
+            bool joystick_torso_control_active = (joystick_data_.left_second_button_touched && joystick_data_.left_first_button_touched);
+            
             // 在腰部控制模式下且没有XY按键摇杆控制时，发布VR腰部控制指令
-            if (torso_control_enabled_)
+            if (torso_control_enabled_ && !joystick_torso_control_active)
             {
                 // 腰部yaw控制（如果支持腰部自由度）
                 if (waist_dof_ > 0)
@@ -300,6 +371,29 @@ namespace ocs2
                     
                     // 发布腰部控制指令
                     controlWaist(relative_yaw * 180.0 / M_PI); // 转换为角度
+                }
+                
+                //计算相对于0点的roll,yaw位置
+                double current_roll = current_head_body_pose_.body_roll;
+                double relative_roll = current_roll - torso_roll_zero_;
+                double current_yaw_torso = current_head_body_pose_.body_yaw;
+                double relative_yaw_torso = current_yaw_torso - torso_yaw_zero_;
+
+                //std::cout << "相对roll: " << relative_roll << std::endl;
+                if(waist_dof_ == 0)
+                {
+                    // std::cout << "相对roll: " << relative_roll * 180.0 / M_PI << std::endl;
+                    // 对relative_roll限幅5度
+                    relative_roll = std::max(-15.0*M_PI/180.0, std::min(relative_roll, 15.0*M_PI/180.0));
+                    relative_yaw_torso = std::max(-30.0*M_PI/180.0, std::min(relative_yaw_torso, 30.0*M_PI/180.0));
+                    //std::cout << "相对roll: " << relative_roll * 180.0 / M_PI << std::endl;
+                    //std::cout << "相对yaw: " << relative_yaw_torso * 180.0 / M_PI << std::endl;
+                }
+                else
+                {
+                    // 对relative_roll限幅0度
+                    relative_roll = 0;
+                    relative_yaw_torso = 0;
                 }
                 
                 // 高度控制
@@ -313,7 +407,8 @@ namespace ocs2
                 cmd_pose.linear.x = 0.0;  // 基于当前位置的 x 方向值 (m)
                 cmd_pose.linear.y = 0.0;  // 基于当前位置的 y 方向值 (m)
                 cmd_pose.linear.z = relative_height;  // 相对高度
-                cmd_pose.angular.z = 0.0;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
+                cmd_pose.angular.x = relative_roll;  // roll
+                cmd_pose.angular.z = relative_yaw_torso;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
                 cmd_pose.angular.y = current_head_body_pose_.body_pitch;  // pitch
 
                 cmd_pose_pub_.publish(cmd_pose);
@@ -399,7 +494,17 @@ namespace ocs2
                         torso_control_enabled_ = true;
                         torso_yaw_zero_ = current_head_body_pose_.body_yaw; // 记录当前腰部位置作为零点
                         body_height_zero_ = current_head_body_pose_.body_height; // 记录当前高度作为零点
+                        torso_roll_zero_ = current_head_body_pose_.body_roll;
                         torso_control_start_time_ = ros::Time::now();
+                        
+                        if(waist_dof_ == 0)
+                        {
+                            // 失能GaitReceiver的自动步态模式
+                            callAutoGaitModeSrv(false);
+                            // 调用VR腰部控制服务，启用VR腰部控制动态Q矩阵
+                            callVRWaistControlSrv(true);
+                        }
+                        
                         std::cout << "腰部控制模式已启用，腰部零点: " << torso_yaw_zero_ 
                                 << "，高度零点: " << body_height_zero_ << std::endl;
                     }
@@ -407,6 +512,18 @@ namespace ocs2
                     {
                         // 关闭腰部控制模式
                         torso_control_enabled_ = false;
+                        if(waist_dof_ == 0)
+                        {
+                            geometry_msgs::Twist cmd_pose;
+                            cmd_pose.angular.z = 0;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
+                            cmd_pose_pub_.publish(cmd_pose);
+
+                            
+                            // 使能GaitReceiver的自动步态模式
+                            callAutoGaitModeSrv(true);
+                            // 调用VR腰部控制服务，禁用VR腰部控制动态Q矩阵
+                            callVRWaistControlSrv(false);
+                        }
                         std::cout << "腰部控制模式已关闭" << std::endl;
                     }
                     return;
@@ -887,6 +1004,8 @@ namespace ocs2
         ros::ServiceClient change_arm_mode_service_VR_client_;
         ros::ServiceClient get_arm_mode_service_client_;
         ros::ServiceClient enable_wbc_arm_trajectory_control_client_;
+        ros::ServiceClient vr_waist_control_service_client_;  // VR腰部控制动态Q矩阵服务客户端
+        ros::ServiceClient auto_gait_mode_service_client_;    // GaitReceiver自动步态模式服务客户端
         ros::ServiceServer arm_collision_control_service_;
 
         // 腰部控制相关的订阅者和发布者
@@ -928,6 +1047,7 @@ namespace ocs2
         int waist_dof_{0};
         double torso_yaw_zero_;
         double body_height_zero_;  // 记录进入控制模式时的高度零点
+        double torso_roll_zero_;
         ros::Time torso_control_start_time_;
 
         kuavo_msgs::headBodyPose current_head_body_pose_;

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<launch>
+
+  <arg name="automatic_error_reporting_disable"              default="false"/>
+  <arg name="automatic_error_reporting_min_breadcrumb_level" default="info"/>
+
+  <param name="/config/feature_toggles/error_reporting" value="automatic_full"/>
+
+  <node pkg="message_logger" type="demo" name="demo" output="screen">
+    <param name="automatic_error_reporting/disable"              value="$(arg automatic_error_reporting_disable)"/>
+    <param name="automatic_error_reporting/min_breadcrumb_level" value="$(arg automatic_error_reporting_min_breadcrumb_level)"/>
+  </node>
+
+</launch>

@@ -36,6 +36,12 @@ def capitalize_type(type_name):
     if type_name.lower() in {t.lower() for t in basic_types}:
         return type_name.lower() + array_suffix
     
+    # 特殊处理时间相关类型，直接替换为标准ROS2类型
+    if type_name.lower() == 'time':
+        return 'builtin_interfaces/Time' + array_suffix
+    elif type_name.lower() == 'duration':
+        return 'builtin_interfaces/Duration' + array_suffix
+    
     # 处理可能包含命名空间的类型
     parts = type_name.split('/')
     if len(parts) > 1:
@@ -66,14 +72,17 @@ def convert_fields_to_snake_case(file_path):
         elif 'kuavo_msgs/Time' in line:
             line = line.replace('kuavo_msgs/Time', 'builtin_interfaces/Time')
             modified = True
-        elif 'Header' in line and not 'std_msgs/Header' in line:
-            line = line.replace('Header', 'std_msgs/Header')
+        elif re.search(r'\bHeader\b', line) and 'std_msgs/Header' not in line:
+            line = re.sub(r'\bHeader\b', 'std_msgs/Header', line)
             modified = True
-        elif 'Time' in line and not 'builtin_interfaces/Time' in line and not line.strip().startswith('#'):
-            line = line.replace('Time', 'builtin_interfaces/Time')
+        elif re.search(r'\bTime\b', line) and 'builtin_interfaces/Time' not in line and not line.strip().startswith('#'):
+            line = re.sub(r'\bTime\b', 'builtin_interfaces/Time', line)
             modified = True
         elif re.search(r'\btime\b', line, re.IGNORECASE) and not 'builtin_interfaces/Time' in line and not line.strip().startswith('#'):
             line = re.sub(r'\btime\b', 'builtin_interfaces/Time', line, flags=re.IGNORECASE)
+            modified = True
+        elif re.search(r'\bduration\b', line, re.IGNORECASE) and not 'builtin_interfaces/Duration' in line and not line.strip().startswith('#'):
+            line = re.sub(r'\bduration\b', 'builtin_interfaces/Duration', line, flags=re.IGNORECASE)
             modified = True
         
         # 处理字段定义
@@ -85,8 +94,18 @@ def convert_fields_to_snake_case(file_path):
             field_name = match.group(3)
             rest = match.group(4)
             
-            # 检查是否是常量定义
-            if '=' in line:
+            # 分离注释部分，检查是否是常量定义
+            # 只有在非注释部分包含 = 时才是常量定义
+            comment_index = rest.find('#')
+            if comment_index != -1:
+                non_comment_part = rest[:comment_index]
+                comment_part = rest[comment_index:]
+            else:
+                non_comment_part = rest
+                comment_part = ''
+            
+            # 检查是否是常量定义（= 在非注释部分）
+            if '=' in non_comment_part:
                 if not field_name.isupper():  # 如果常量名不是全大写
                     new_const = field_name.upper()
                     line = f"{indent}{type_part} {new_const}{rest}"
@@ -108,18 +127,41 @@ def convert_fields_to_snake_case(file_path):
             f.write('\n'.join(new_lines) + '\n')
         print(f"Modified fields in: {file_path}")
 
+def underscore_to_camel_case(name):
+    """将包含下划线的文件名转换为 PascalCase，符合 ROS2 命名约定"""
+    # 分离文件名和扩展名
+    if '.' in name:
+        base_name, extension = name.rsplit('.', 1)
+        extension = '.' + extension
+    else:
+        base_name = name
+        extension = ''
+    
+    # 按下划线分割并将每个部分的首字母大写，保持其他字母的原始大小写
+    parts = base_name.split('_')
+    camel_case = ''.join(word[0].upper() + word[1:] if word else '' for word in parts)
+    
+    return camel_case + extension
+
 def capitalize_first_letter(directory):
     """处理目录中的所有消息文件"""
     if not os.path.exists(directory):
         print(f"Directory {directory} does not exist")
-        return
+        return []
+    
+    renames = []
     
     for filename in os.listdir(directory):
         if not (filename.endswith('.msg') or filename.endswith('.srv')):
             continue
             
-        # 只将第一个字母大写
-        new_filename = filename[0].upper() + filename[1:]
+        # 处理下划线命名并确保首字母大写
+        if '_' in filename:
+            # 如果包含下划线，转换为 PascalCase
+            new_filename = underscore_to_camel_case(filename)
+        else:
+            # 只将第一个字母大写
+            new_filename = filename[0].upper() + filename[1:]
         
         file_path = os.path.join(directory, filename)
         new_path = os.path.join(directory, new_filename)
@@ -132,20 +174,28 @@ def capitalize_first_letter(directory):
             try:
                 os.rename(file_path, new_path)
                 print(f"Renamed: {filename} -> {new_filename}")
+                renames.append((filename, new_filename))
             except Exception as e:
                 print(f"Error renaming {filename}: {str(e)}")
+        
+    return renames
+
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
+    all_renames = []
     
     msg_dir = os.path.join(script_dir, 'msg')
     print("\nProcessing msg directory...")
-    capitalize_first_letter(msg_dir)
+    msg_renames = capitalize_first_letter(msg_dir)
+    all_renames.extend(msg_renames)
     
     srv_dir = os.path.join(script_dir, 'srv')
     print("\nProcessing srv directory...")
-    capitalize_first_letter(srv_dir)
+    srv_renames = capitalize_first_letter(srv_dir)
+    all_renames.extend(srv_renames)
+    
 
 if __name__ == "__main__":
     main()

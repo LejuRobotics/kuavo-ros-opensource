@@ -1,0 +1,9 @@
+init_hand_pos 1.0 0 0 0 -20 0 0 0 -20
+raise_hand_start 2.0 -150 50 -120 -30 0 0 0 -20 
+raise_hand_end 3.0 -180 90 -120 -30 0 0 0 -20
+wave_hand_pose 3.5 -180 30 -120 -100 0 0 0 -20
+wave_hand_pose 4.0 -180 90 -120 -30 0 0 0 -20
+wave_hand_pose 4.5 -180 30 -120 -100 0 0 0 -20
+wave_hand_pose 5.0 -180 90 -120 -30 0 0 0 -20
+raise_hand_start 6.0 -90 30 -60 -30 0 0 0 -20 
+end_hand_pos 7.0 0 0 0 -20 0 0 0 -20

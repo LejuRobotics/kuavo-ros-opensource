@@ -26,6 +26,35 @@ def euler_to_rotation_matrix(yaw, pitch, roll):
     R = np.dot(R_roll, np.dot(R_pitch, R_yaw))
     return R
 
+def get_test_traj_msg():
+    foot_traj = [[0.2, 0.1, -0.1, 0], [0.2, 0.1, -0.1, 0], [0.2, 0.1, -0.1, 0], [0.4, -0.1, -0.2, 0], [0.4, -0.1, -0.2, 0], [0.4, -0.1, -0.2, 0]]
+    torso_traj = [[0.1, 0.0, -0.1, 0], [0.1, 0.0, -0.1, 0], [0.1, 0.0, -0.1, 0], [0.2, 0.0, -0.2, 0], [0.2, 0.0, -0.2, 0], [0.2, 0.0, -0.2, 0]]
+    time_traj = [0.1, 0.5, 0.6, 0.7, 1.2, 1.3]# 时间序列，递增
+    foot_idx_traj = [3, 0, 3, 5, 1, 5]
+    
+    # foot_traj = [[0.2, -0.1, -0.2, 0], [0.2, -0.1, -0.2, 0], [0.2, -0.1, -0.2, 0]]
+    # torso_traj = [[0.1, 0.0, -0.2, 0], [0.1, 0.0, -0.2, 0], [0.1, 0.0, -0.2, 0]]
+    # time_traj = [0.1, 0.5, 0.6]# 时间序列，递增
+    # foot_idx_traj = [5, 1, 5]
+    # 创建消息实例
+    msg = footPoseTargetTrajectories()
+    msg.timeTrajectory = []  # 设置时间轨迹
+    msg.footIndexTrajectory = []         # 设置脚索引
+    msg.footPoseTrajectory = []  # 初始化脚姿态轨迹
+    num = len(foot_traj)
+
+    for i in range(3):
+        # 创建脚姿态信息
+        msg.timeTrajectory.append(time_traj[i])
+        msg.footIndexTrajectory.append(foot_idx_traj[i])
+        foot_pose_msg = footPose()
+        foot_pose_msg.footPose = foot_traj[i]      # 设置脚姿态
+        foot_pose_msg.torsoPose = torso_traj[i]    # 设置躯干姿态
+
+        # 将脚姿态添加到消息中
+        msg.footPoseTrajectory.append(foot_pose_msg)
+    print(msg)
+    return msg
 
 def get_foot_pose_traj_msg(time_traj, foot_idx_traj, foot_traj, torso_traj):
     num = len(time_traj)
@@ -124,10 +153,10 @@ def get_multiple_steps_msg(body_poses, dt, is_left_first=True, collision_check=T
         # torso_traj.append([*body_pose[:3], torso_yaw])
         torso_pose_last = torso_traj[-1]
         torso_yaw_last = torso_yaw
-    print("time_traj:", time_traj)
-    print("foot_idx_traj:", foot_idx_traj)
-    print("foot_traj:", foot_traj)
-    print("torso_traj:", torso_traj)
+    # print("time_traj:", time_traj)
+    # print("foot_idx_traj:", foot_idx_traj)
+    # print("foot_traj:", foot_traj)
+    # print("torso_traj:", torso_traj)
     return get_foot_pose_traj_msg(time_traj, foot_idx_traj, foot_traj, torso_traj)
 
 
@@ -149,14 +178,16 @@ if __name__ == '__main__':
     # 一次完整的步态Mode序列为:[SS FS SS SF SS]或者[SS SF SS FS SS]
     # body_pose： [x(m), y(m), z(m), yaw(deg)]
     body_poses = [
-        [0.1, 0.1, 0, 90],
-        [0.1, 0.1, 0, 90],
-        [0.1, 0.0, 0, 180],
-        [0.1, 0.1, 0, 180],
+        [0.1, 0.0, 0, 0],
+        [0.3, 0.0, 0, 0],
+        [0.5, 0.0, 0, 0],
+        [0.7, 0.0, 0, 0],
         # [0.2, -0.1, 0, -30],
         # [0.3, 0.0, 0, -0],
         # [0.4, 0.0, 0, -30],
         # [0.5, 0.0, 0, 0],
     ]
     msg = get_multiple_steps_msg(body_poses, dt, is_left_first_default, collision_check)
+    msg = get_test_traj_msg()
+
     pub.publish(msg)

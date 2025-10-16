@@ -1,0 +1,23 @@
+#-----------  Job Informations:
+# Type:       Build: {{BUILDTYPE}}
+# OS:         Linux
+# Compiler:   {{COMPILER}}
+# Language:   {{LANGUAGE}}
+
+nvc-{{BUILDTYPE}}-{{COMPILER}}-{{LANGUAGE}}-{{QT_VERSION}}:
+  stage: build
+  script: "CI/ci-linux-build.sh"
+  image: gitlab.vci.rwth-aachen.de:4567/docker/docker/docker-openmesh-container
+  tags:
+    - Linux
+    - stretch
+  variables:
+    COMPILER: "{{COMPILER}}"
+    LANGUAGE: "{{LANGUAGE}}"
+    BUILD_TYPE: "{{BUILDTYPE}}"
+    QTVERSION: "{{QT_VERSION}}"
+    IWYU: "no"
+    VECTORCHECKS: "no"
+  artifacts:
+    paths:
+      - build-{{COMPILER}}-{{LANGUAGE}}-{{QT_VERSION}}-{{BUILDTYPE}}/
