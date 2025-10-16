@@ -61,24 +61,30 @@ namespace ocs2
     // 定义转向区间
     static const std::vector<TurnStepZone> kTurnZones = {
         // 右转区间 (0.0~1.0)
-        {0.0f, 0.25f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(0.01, 0.01, 0.0, -15.0)
+        {0.0f, 0.15f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.01, -0.01, 0.0, -15.0)
         })},  // 小角度右转
-        {0.25f, 0.75f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(0.03, 0.03, 0.0, -30.0)
+         {0.151f, 0.45f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.03, -0.03, 0.0, -30.0)
+        })},  // 小角度右转
+        {0.451f, 0.75f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.04, -0.04, 0.0, -45.0)
         })}, // 中角度右转
-        {0.75f, 1.0f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(0.06, 0.06, 0.0, -45.0)
+        {0.751f, 1.0f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.06, -0.06, 0.0, -60.0)
         })}, // 大角度右转
         // 左转区间 (-1.0~0.0)
-        {-0.25f, 0.0f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(0.01, 0.01, 0.0, 15.0)
+         {-0.15f, 0.0f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.01, 0.01, 0.0, 15.0)
         })}, // 小角度左转
-        {-0.75f, -0.25f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(0.03, 0.03, 0.0, 30.0)
+        {-0.45f, -0.15f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.03, 0.03, 0.0, 30.0)
+        })}, // 小角度左转
+        {-0.75f, -0.451f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.04, 0.04, 0.0, 45.0)
         })}, // 中角度左转
-        {-1.0f, -0.75f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(0.06, 0.06, 0.0, 45.0)
+        {-1.0f, -0.751f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.06, 0.06, 0.0, 60.0)
         })} // 大角度左转
     };
 
