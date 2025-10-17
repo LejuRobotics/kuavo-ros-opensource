@@ -54,7 +54,7 @@ make
 
 ```bash
 sudo su
-python3 kuavo_joint_breakin.py
+python3 joint_breakin.py
 ```
 
 > 💡 提示：首次运行时，如果检测到缺少编译文件，程序会自动进行编译，请耐心等待编译完成。

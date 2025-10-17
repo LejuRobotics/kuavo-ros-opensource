@@ -1059,7 +1059,7 @@ def secondary_menu():
             break  
         elif option == "m":
             print(bcolors.HEADER + "###开始，执行机器人磨线###" + bcolors.ENDC)
-            kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "kuavo_joint_breakin.py")
+            kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "joint_breakin.py")
             if os.path.exists(kuavo_breakin_script):
                 command = "sudo python3 " + kuavo_breakin_script
                 subprocess.run(command, shell=True)

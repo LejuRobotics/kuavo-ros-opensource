@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import signal
+import shutil
 from pathlib import Path
 
 class Colors:
@@ -38,7 +39,9 @@ class KuavoUnifiedBreakin:
         self.arm_setzero_sh_script_alt = self.project_root / "src" / "kuavo-ros-control-lejulib" / "hardware_plant" / "lib" / "ruiwo_controller" / "arm_setzero.sh"
         
         self.arm_setzero_script = self.current_dir.parent / "ruiwo_zero_set.sh"
+        # RUIWO零点设置脚本的两个可能路径
         self.ruiwo_zero_script = self.project_root / "src" / "kuavo-ros-control-lejulib" / "hardware_plant" / "lib" / "ruiwo_controller" / "setMotorZero.sh"
+        self.ruiwo_zero_script_alt = self.project_root / "installed" / "share" / "hardware_plant" / "lib" / "ruiwo_controller" / "setMotorZero.sh"
         
         # 腿部磨线脚本路径（根据版本动态选择）
         self.leg_breakin_script_kuavo4 = self.current_dir / "ec_master_tools" / "kuavo4_leg_breakin.py"
@@ -54,6 +57,17 @@ class KuavoUnifiedBreakin:
     def print_colored(self, message, color=Colors.NC):
         """打印带颜色的消息"""
         print(f"{color}{message}{Colors.NC}")
+        
+    def cleanup_logs(self):
+        """清理日志目录"""
+        try:
+            if self.log_dir.exists():
+                shutil.rmtree(self.log_dir)
+                self.print_colored(f"✓ 已清理日志目录: {self.log_dir}", Colors.GREEN)
+            else:
+                self.print_colored("日志目录不存在，无需清理", Colors.YELLOW)
+        except Exception as e:
+            self.print_colored(f"清理日志目录失败: {e}", Colors.RED)
         
     def get_robot_version(self):
         """读取机器人的版本号"""
@@ -146,8 +160,17 @@ class KuavoUnifiedBreakin:
             self.print_colored(f"错误：手臂零点设置脚本不存在: {self.arm_setzero_script}", Colors.RED)
             sys.exit(1)
             
-        if not self.ruiwo_zero_script.exists():
-            self.print_colored(f"错误：RUIWO零点设置脚本不存在: {self.ruiwo_zero_script}", Colors.RED)
+        # 检查RUIWO零点设置脚本（检查两个可能的路径）
+        if self.ruiwo_zero_script.exists():
+            self.print_colored(f"✓ 找到RUIWO零点设置脚本: {self.ruiwo_zero_script}", Colors.GREEN)
+        elif self.ruiwo_zero_script_alt.exists():
+            self.print_colored(f"✓ 找到RUIWO零点设置脚本: {self.ruiwo_zero_script_alt}", Colors.GREEN)
+            # 更新为实际存在的路径
+            self.ruiwo_zero_script = self.ruiwo_zero_script_alt
+        else:
+            self.print_colored(f"错误：RUIWO零点设置脚本不存在", Colors.RED)
+            self.print_colored(f"  查找路径1: {self.ruiwo_zero_script}", Colors.RED)
+            self.print_colored(f"  查找路径2: {self.ruiwo_zero_script_alt}", Colors.RED)
             sys.exit(1)
             
         # 检查腿部磨线脚本（在版本检测后）
@@ -276,7 +299,8 @@ class KuavoUnifiedBreakin:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=0  # 无缓冲
+                bufsize=0,  # 无缓冲
+                env=dict(os.environ, PYTHONUNBUFFERED='1')  # 确保Python子进程也无缓冲
             )
             
             # 发送初始输入（测试时长）
@@ -310,7 +334,18 @@ class KuavoUnifiedBreakin:
                 self.print_colored("收到中断信号，正在安全停止...", Colors.YELLOW)
                 stop_flag.set()
                 if process.poll() is None:
-                    process.terminate()
+                    try:
+                        process.terminate()
+                        # 等待进程退出，最多等待3秒
+                        try:
+                            process.wait(timeout=3)
+                            self.print_colored("✓ 手臂磨线进程已停止", Colors.GREEN)
+                        except subprocess.TimeoutExpired:
+                            self.print_colored("手臂磨线进程未响应，强制终止...", Colors.RED)
+                            process.kill()
+                            self.print_colored("✓ 手臂磨线进程已强制终止", Colors.GREEN)
+                    except Exception as e:
+                        self.print_colored(f"停止手臂磨线进程失败: {e}", Colors.RED)
             
             # 注册信号处理器
             signal.signal(signal.SIGINT, signal_handler)
@@ -366,6 +401,9 @@ class KuavoUnifiedBreakin:
         except Exception as e:
             self.print_colored(f"手臂磨线运行出错: {e}", Colors.RED)
             return 1
+        finally:
+            # 清理日志目录
+            self.cleanup_logs()
             
     def check_and_compile_leg_breakin(self):
         """检查腿部磨线脚本是否存在"""
@@ -475,13 +513,16 @@ class KuavoUnifiedBreakin:
         except Exception as e:
             self.print_colored(f"腿部磨线运行出错: {e}", Colors.RED)
             return 1
+        finally:
+            # 清理日志目录
+            self.cleanup_logs()
             
     def get_user_inputs(self):
         """获取用户输入参数"""
         print()
-        self.print_colored("=" * 50, Colors.CYAN)
-        self.print_colored("    参数配置", Colors.CYAN)
-        self.print_colored("=" * 50, Colors.CYAN)
+        self.print_colored("=" * 20, Colors.CYAN)
+        self.print_colored("      参数配置", Colors.CYAN)
+        self.print_colored("=" * 20, Colors.CYAN)
         
         print()
         self.print_colored("手臂磨线测试时长：", Colors.YELLOW)
@@ -534,14 +575,14 @@ class KuavoUnifiedBreakin:
                 return None, None
         
         print()
-        self.print_colored("=" * 50, Colors.CYAN)
-        self.print_colored("    轮数计算总结", Colors.CYAN)
-        self.print_colored("=" * 50, Colors.CYAN)
+        self.print_colored("=" * 40, Colors.CYAN)
+        self.print_colored("          轮数计算总结", Colors.CYAN)
+        self.print_colored("=" * 40, Colors.CYAN)
         arm_rounds = int(arm_duration // 15.0)
         leg_rounds = int(leg_duration // 15.0)
-        self.print_colored(f"手臂磨线：{arm_duration}秒 ÷ 15秒/轮 = {arm_rounds} 轮", Colors.GREEN)
-        self.print_colored(f"腿部磨线：{leg_duration}秒 ÷ 15秒/轮 = {leg_rounds} 轮", Colors.GREEN)
-        self.print_colored("=" * 50, Colors.CYAN)
+        self.print_colored(f"手臂磨线：{arm_duration:.1f} 秒 ÷ 15.0 秒/轮 = {arm_rounds} 轮", Colors.GREEN)
+        self.print_colored(f"腿部磨线：{leg_duration:.1f} 秒 ÷ 15.0 秒/轮 = {leg_rounds} 轮", Colors.GREEN)
+        self.print_colored("=" * 40, Colors.CYAN)
         
         return arm_duration, leg_duration
         
@@ -612,7 +653,8 @@ class KuavoUnifiedBreakin:
                     stdout=f,
                     stderr=subprocess.STDOUT,
                     stdin=input_pipe,
-                    text=True
+                    text=True,
+                    env=dict(os.environ, PYTHONUNBUFFERED='1')  # 确保Python子进程也无缓冲
                 )
                 
                 # EC_master_tools.py现在直接执行磨线功能，只需要输入时间
@@ -697,40 +739,64 @@ class KuavoUnifiedBreakin:
             if self.arm_process:
                 self.arm_process.terminate()
             return 1
-            
-        self.print_colored(f"腿部磨线进程ID: {leg_pid}", Colors.GREEN)
-        
+                    
         print()
         self.print_colored("两个磨线程序已启动！", Colors.GREEN)
-        self.print_colored("进程信息：", Colors.YELLOW)
-        if arm_pid == 99999:
-            print(f"  手臂磨线进程: 等待腿部信号启动")
-        else:
-            print(f"  手臂磨线进程ID: {arm_pid}")
-        print(f"  腿部磨线进程ID: {leg_pid}")
-        print(f"  日志目录: {self.log_dir}")
-        print(f"  同步信号文件: /tmp/leg_ready_signal")
-        print()
         self.print_colored("监控命令：", Colors.YELLOW)
-        print(f"  查看手臂磨线日志: tail -f {arm_log}")
-        print(f"  查看腿部磨线日志: tail -f {leg_log}")
+        print(f"  查看手臂磨线日志: less +F {arm_log}")
+        print(f"  查看腿部磨线日志: less +F {leg_log}")
         print()
-        self.print_colored("停止命令：", Colors.YELLOW)
-        if arm_pid == 99999:
-            print(f"  停止手臂磨线: 查看日志文件获取实际PID后使用kill命令")
-        else:
-            print(f"  停止手臂磨线: kill {arm_pid}")
-        print(f"  停止腿部磨线: kill {leg_pid}")
-        if arm_pid != 99999:
-            print(f"  停止所有磨线: kill {arm_pid} {leg_pid}")
-        else:
-            print(f"  停止所有磨线: kill {leg_pid} 和查看日志获取手臂磨线PID")
-        print()
-        self.print_colored("按 Ctrl+C 可以退出此脚本，但磨线程序会继续运行", Colors.BLUE)
-        self.print_colored("如需停止磨线程序，请使用上述停止命令", Colors.BLUE)
+        self.print_colored("按 Ctrl+C 可以停止所有磨线程序", Colors.BLUE)
         
         def signal_handler(signum, frame):
-            self.print_colored("\n脚本退出，但磨线程序仍在运行", Colors.YELLOW)
+            self.print_colored("\n收到停止信号，正在停止所有磨线程序...", Colors.YELLOW)
+            
+            # 停止手臂磨线进程
+            if self.arm_process and self.arm_process.poll() is None:
+                self.print_colored("正在停止手臂磨线进程...", Colors.YELLOW)
+                try:
+                    self.arm_process.terminate()
+                    # 等待进程退出，最多等待5秒
+                    try:
+                        self.arm_process.wait(timeout=5)
+                        self.print_colored("✓ 手臂磨线进程已停止", Colors.GREEN)
+                    except subprocess.TimeoutExpired:
+                        self.print_colored("手臂磨线进程未响应，强制终止...", Colors.RED)
+                        self.arm_process.kill()
+                        self.print_colored("✓ 手臂磨线进程已强制终止", Colors.GREEN)
+                except Exception as e:
+                    self.print_colored(f"停止手臂磨线进程失败: {e}", Colors.RED)
+            
+            # 停止腿部磨线进程
+            if self.leg_process and self.leg_process.poll() is None:
+                self.print_colored("正在停止腿部磨线进程...", Colors.YELLOW)
+                try:
+                    self.leg_process.terminate()
+                    # 等待进程退出，最多等待5秒
+                    try:
+                        self.leg_process.wait(timeout=5)
+                        self.print_colored("✓ 腿部磨线进程已停止", Colors.GREEN)
+                    except subprocess.TimeoutExpired:
+                        self.print_colored("腿部磨线进程未响应，强制终止...", Colors.RED)
+                        self.leg_process.kill()
+                        self.print_colored("✓ 腿部磨线进程已强制终止", Colors.GREEN)
+                except Exception as e:
+                    self.print_colored(f"停止腿部磨线进程失败: {e}", Colors.RED)
+            
+            # 清理信号文件
+            try:
+                if os.path.exists("/tmp/leg_ready_signal"):
+                    os.remove("/tmp/leg_ready_signal")
+                if os.path.exists("/tmp/arm_disable_signal"):
+                    os.remove("/tmp/arm_disable_signal")
+                self.print_colored("✓ 已清理所有信号文件", Colors.GREEN)
+            except Exception as e:
+                self.print_colored(f"清理信号文件失败: {e}", Colors.YELLOW)
+            
+            # 清理日志目录
+            self.cleanup_logs()
+            
+            self.print_colored("所有磨线程序已停止，程序退出", Colors.GREEN)
             sys.exit(0)
             
         signal.signal(signal.SIGINT, signal_handler)
@@ -756,6 +822,9 @@ class KuavoUnifiedBreakin:
             self.print_colored("已清理所有信号文件", Colors.BLUE)
         except Exception as e:
             self.print_colored(f"清理信号文件失败: {e}", Colors.YELLOW)
+        
+        # 清理日志目录
+        self.cleanup_logs()
             
         self.print_colored("磨线程序执行完成", Colors.GREEN)
         return 0
@@ -763,10 +832,10 @@ class KuavoUnifiedBreakin:
     def show_menu(self):
         """显示菜单"""
         self.print_colored("请选择启动模式：", Colors.YELLOW)
-        print("1. 仅启动手臂磨线（包含零点设置）")
-        print("2. 仅启动腿部磨线（零点位置开始）")
-        print("3. 同时启动手臂和腿部磨线（包含零点设置）")
-        print("4. 退出")
+        print("1. 仅启动手臂磨线")
+        print("2. 仅启动腿部磨线")
+        print("3. 同时启动手臂和腿部磨线")
+        print("q. 退出")
         print()
         
     def run(self):
@@ -778,8 +847,7 @@ class KuavoUnifiedBreakin:
         
         self.check_root_permission()
         
-        # 先进行版本检测和脚本选择
-        self.print_colored("正在检测机器人版本并选择腿部磨线脚本...", Colors.YELLOW)
+        # 进行版本检测和脚本选择
         if not self.detect_leg_script_version():
             self.print_colored("版本检测失败，程序退出", Colors.RED)
             return 1
@@ -800,8 +868,8 @@ class KuavoUnifiedBreakin:
         print()
         
         # 提示用户
-        self.print_colored("请将手臂和腿部(手和脚)全部摆到零点位置，吊高机器人。", Colors.YELLOW)
-        self.print_colored("确保无干涉、无负载且周围无障碍物。准备就绪后再选择启动模式。", Colors.YELLOW)
+        self.print_colored("请吊高机器人，将【手臂和腿部】全部摆到【零点位置】。", Colors.YELLOW)
+        self.print_colored("确保无干涉、周围无障碍物。准备就绪后再选择启动模式。", Colors.YELLOW)
         print()
         
         while True:
@@ -814,22 +882,27 @@ class KuavoUnifiedBreakin:
                 return self.run_leg_breakin()
             elif choice == "3":
                 return self.run_both_breakin()
-            elif choice == "4":
+            elif choice == "q":
                 self.print_colored("退出程序", Colors.YELLOW)
                 return 0
             else:
-                self.print_colored("无效选项，请输入 1-4", Colors.RED)
+                self.print_colored("无效选项，请输入 1-3 或 q", Colors.RED)
 
 def main():
+    app = None
     try:
         app = KuavoUnifiedBreakin()
         exit_code = app.run()
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}程序被用户中断{Colors.NC}")
+        if app:
+            app.cleanup_logs()
         sys.exit(0)
     except Exception as e:
         print(f"{Colors.RED}程序运行出错: {e}{Colors.NC}")
+        if app:
+            app.cleanup_logs()
         sys.exit(1)
 
 if __name__ == "__main__":

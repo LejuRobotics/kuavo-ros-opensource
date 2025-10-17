@@ -481,18 +481,23 @@ bool workpdMotorMultiAction(const uint16_t *ids, uint32_t motor_num, MotorMultiA
     
     printf("Multi motor action initialized with %d motors, motion duration: %.1f seconds, total time: %.1f seconds\n", 
            motor_num, param->motion_duration, param->time_total);
-    printf("🔄 同步周期信息: 每个周期 %d 帧 (%.1f秒动作 + %.1f秒保持)\n", 
+    fflush(stdout);
+    printf("同步周期信息: 每个周期 %d 帧 (%.1f秒动作 + %.1f秒保持)\n", 
            actions_per_cycle, actions_per_cycle * param->motion_duration, sync_cycle_time - actions_per_cycle * param->motion_duration);
+    fflush(stdout);
     printf("电机已激活，等待同步点到达...\n");
+    fflush(stdout);
     
     // 发送同步信号，通知手臂腿部已准备就绪
     FILE* sync_file = fopen("/tmp/leg_ready_signal", "w");
     if (sync_file != NULL) {
         fprintf(sync_file, "leg_ready");
         fclose(sync_file);
-        printf("✅ 腿部准备完成，已发送同步信号到 /tmp/leg_ready_signal\n");
+        printf("腿部准备完成，已发送同步信号到 /tmp/leg_ready_signal\n");
+        fflush(stdout);
     } else {
-        printf("⚠️ 无法创建同步信号文件\n");
+        printf("无法创建同步信号文件\n");
+        fflush(stdout);
     }
   }
   
@@ -504,7 +509,8 @@ bool workpdMotorMultiAction(const uint16_t *ids, uint32_t motor_num, MotorMultiA
     // 检查手臂失能信号
     FILE* arm_disable_file = fopen("/tmp/arm_disable_signal", "r");
     if (arm_disable_file != NULL) {
-      printf("❌ 检测到手臂失能信号，腿部磨线程序提前退出以避免冲突\n");
+      printf("检测到手臂失能信号，腿部磨线程序提前退出以避免冲突\n");
+      fflush(stdout);
       fclose(arm_disable_file);
       // 重置所有静态变量
       memset(start_pos, 0, sizeof(start_pos));
@@ -541,17 +547,21 @@ bool workpdMotorMultiAction(const uint16_t *ids, uint32_t motor_num, MotorMultiA
     // 每5秒打印一次等待状态
     static double last_print_time = 0;
     if (sync_wait_time - last_print_time >= 5.0) {
-      printf("⏳ 等待同步点... 当前秒数: %d, 等待时间: %.1f秒\n", current_second, sync_wait_time);
+      printf("等待同步点... 当前秒数: %d, 等待时间: %.1f秒\n", current_second, sync_wait_time);
+      fflush(stdout);
       last_print_time = sync_wait_time;
     }
     
     if (current_second == 0 && sync_wait_time > 1.0) {  // 确保已经等待了至少1秒
-      printf("🎯 同步点到达！开始执行动作序列\n");
+      printf("同步点到达！开始执行动作序列\n");
+      fflush(stdout);
       if (first_run) {
-        printf("⏰ 等待时间: %.1f秒，现在开始计算%.1f秒执行时间\n", sync_wait_time, param->time_total);
+        printf("等待时间: %.1f秒，现在开始计算%.1f秒执行时间\n", sync_wait_time, param->time_total);
+        fflush(stdout);
         first_run = false;
       } else {
-        printf("⏰ 等待时间: %.1f秒，继续执行剩余时间\n", sync_wait_time);
+        printf("等待时间: %.1f秒，继续执行剩余时间\n", sync_wait_time);
+        fflush(stdout);
       }
       runMode = 2;  // 进入动作执行阶段
       elapsed_time = 0;
@@ -574,7 +584,8 @@ bool workpdMotorMultiAction(const uint16_t *ids, uint32_t motor_num, MotorMultiA
     // 在执行过程中也检查手臂失能信号
     FILE* arm_disable_file = fopen("/tmp/arm_disable_signal", "r");
     if (arm_disable_file != NULL) {
-      printf("❌ 执行过程中检测到手臂失能信号，腿部磨线程序立即停止以避免冲突\n");
+      printf("执行过程中检测到手臂失能信号，腿部磨线程序立即停止以避免冲突\n");
+      fflush(stdout);
       fclose(arm_disable_file);
       // 重置所有静态变量
       memset(start_pos, 0, sizeof(start_pos));
@@ -621,13 +632,15 @@ bool workpdMotorMultiAction(const uint16_t *ids, uint32_t motor_num, MotorMultiA
     if(progress >= 1.0)
     {
       printf("动作 %d 完成 (当前动作/总动作: %d/%zu)\n", current_action, current_action, param->motor_actions[0].size());
+      fflush(stdout);
       current_action++;
       
       // 检查是否完成一个同步周期
       if(actions_per_cycle > 0 && current_action % actions_per_cycle == 0)
       {
         current_cycle++;
-        printf("✅ 第 %d 轮同步周期完成！(动作 %d/%zu)\n", current_cycle, current_action, param->motor_actions[0].size());
+        printf("第 %d 轮同步周期完成！(动作 %d/%zu)\n", current_cycle, current_action, param->motor_actions[0].size());
+        fflush(stdout);
       }
       
       if(current_action >= param->motor_actions[0].size())
@@ -638,20 +651,23 @@ bool workpdMotorMultiAction(const uint16_t *ids, uint32_t motor_num, MotorMultiA
         if(total_elapsed >= param->time_total)
         {
           // 已达到目标执行时间，结束程序
-          printf("✅ 已达到目标执行时间 %.1f秒，程序结束\n", param->time_total);
+          printf("已达到目标执行时间 %.1f秒，程序结束\n", param->time_total);
+          fflush(stdout);
           return true;  // 任务完成
         }
         
         if(total_elapsed + one_cycle_time > param->time_total)
         {
           // 剩余时间不足以完成下一个完整周期，提前结束
-          printf("❌ 一个周期完成。剩余时间不足以完成下一个周期，停止\n");
+          printf("一个周期完成。剩余时间不足以完成下一个周期，停止\n");
+          fflush(stdout);
           return true;  // 任务完成
         }
         
         // 有足够时间，开始下一个周期
         current_action = 0;
-        printf("🔄 一个周期完成，等待下一个15秒同步点开始新周期\n");
+        printf("一个周期完成，等待下一个15秒同步点开始新周期\n");
+        fflush(stdout);
         runMode = 1;  // 回到等待同步点阶段
         sync_wait_time = 0;  // 重置同步等待时间
         return false;  // 继续运行，等待同步点

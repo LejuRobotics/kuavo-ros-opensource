@@ -1,0 +1,46 @@
+0000000000: EcMasterDemo V3.1.4.07 (Protected) for Linux_x64 Copyright acontis technologies GmbH @ 2022
+0000000000: Full command line: -i8254x 1 1 -i8254x 2 1 -a 7 -v 2 -auxclk 500 -dcmmode mastershift -t 0 -log ./EC_log/EC_log -f "./config/ENI_config/yd_14_c501.xml" 
+0000000001: Enter my app Init
+0000000001: EC-Master V3.1.4.07 (Protected) for Linux_x64 Copyright acontis technologies GmbH @ 2022
+0000000001: emllI8254x(0x00000001): V3.1.4.07 (Unrestricted) for Linux_x64 Copyright acontis technologies GmbH @ 2022
+0000002095: emllI8254x(0x00000002): V3.1.4.07 (Unrestricted) for Linux_x64 Copyright acontis technologies GmbH @ 2022
+0000005196: EtherCAT network adapter MAC: C8-98-DB-40-2E-5C
+0000005217: Protected version, stop sending ethernet frames after 60 minutes if not licensed!
+0000006217: cycle time: 500000 nsec  
+0000006217: distance between cyclic frame: 333333 nsec  
+0000006217: sync limit time: 100000 nsec  
+0000006228: ERROR: Redundancy Line break 1 slaves on main and 1 slaves on red
+0000007234: ERROR: Redundancy Line break 2 slaves on main and 2 slaves on red
+0000008240: ERROR: Redundancy Line break 3 slaves on main and 3 slaves on red
+0000009246: ERROR: Redundancy Line break 4 slaves on main and 4 slaves on red
+0000010252: ERROR: Redundancy Line break 5 slaves on main and 5 slaves on red
+0000011259: ERROR: Redundancy Line break 6 slaves on main and 6 slaves on red
+0000012266: ERROR: Redundancy Line break 7 slaves on main and 7 slaves on red
+0000013273: Redundancy - Line fixed
+0000013304: Bus scan successful - 14 slaves found
+0000013307: Master state changed from <UNKNOWN> to <INIT>
+0000014171: Master state changed from <INIT> to <PREOP>
+0000016419: DCM in sync (cur/avg/max) [ns]:    -440/      0/ -190
+0000016574: Master state changed from <PREOP> to <SAFEOP>
+0000016823: Master state changed from <SAFEOP> to <OP>
+0000016824: Wait for 14 motors to enable
+0000016833: Joint 1, Slave 1, enabled successfully
+0000016844: Joint 2, Slave 2, enabled successfully
+0000016854: Joint 3, Slave 3, enabled successfully
+0000016866: Joint 4, Slave 4, enabled successfully
+0000016877: Joint 5, Slave 5, enabled successfully
+0000016889: Joint 6, Slave 6, enabled successfully
+0000016899: Joint 7, Slave 7, enabled successfully
+0000016912: Joint 8, Slave 8, enabled successfully
+0000016925: Joint 9, Slave 9, enabled successfully
+0000016935: Joint 10, Slave 10, enabled successfully
+0000016947: Joint 11, Slave 11, enabled successfully
+0000016958: Joint 12, Slave 12, enabled successfully
+0000016970: Joint 13, Slave 13, enabled successfully
+0000016980: Joint 14, Slave 14, enabled successfully
+0000016980: motor enabled
+0000016990: DCM during startup (<INIT> to <OP>)
+0000035257: DC slaves "out-of-sync" - Deviation: 0x0
+0000035257: DC Slave "", EtherCAT address = 0
+0000035265: Master state changed from <OP> to <INIT>
+0000037336: EcMasterDemo stop.

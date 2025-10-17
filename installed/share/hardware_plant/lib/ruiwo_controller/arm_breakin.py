@@ -5,6 +5,13 @@ from SimpleSDK import RUIWOTools
 import sys
 import threading
 
+# 强制刷新输出缓冲区，确保实时显示
+sys.stdout.flush()
+sys.stderr.flush()
+
+# 设置Python为无缓冲模式，确保实时输出
+os.environ['PYTHONUNBUFFERED'] = '1'
+
 # 相关参数
 MOTION_DURATION = 2  # 每个动作的执行时间（秒）
 POS_KP = 30
@@ -41,11 +48,13 @@ def get_test_duration(cycle_time):
         except ValueError:
             print("输入无效，请输入一个整数。")
 
-# 获取当前时间戳（加8小时）
+# 获取当前时间戳（中国时间）
 def get_timestamp():
-    # 获取当前时间并加8小时
-    current_time = time.time() + 8 * 3600  # 加8小时（8*3600秒）
-    return time.strftime("%H:%M:%S", time.localtime(current_time)) + f".{int(current_time % 1 * 1000):03d}"
+    # 获取当前时间并转换为中国时间
+    current_time = time.time()
+    # 使用localtime()获取本地时间，如果系统时区设置正确，会自动显示中国时间
+    local_time = time.localtime(current_time)
+    return time.strftime("%H:%M:%S", local_time) + f".{int(current_time % 1 * 1000):03d}"
 
 # 读取电机正反转配置
 def read_motor_reverse_config():
@@ -163,11 +172,11 @@ def get_robot_mode(robot_version, enable_results):
 
 # 定义长手和短手的动作
 # long_arm_actions = [
-#     [0.23, 0.00, 0.00, 0.00, 0.00, 0],
-#     [0.10, 0.00, -0.40, 0.30, 0.20, 0],
-#     [0.00, -0.20, -0.30, 0.40, 0.20, 0],
-#     [0.10, -0.00, -0.30, -0.40, 0.00, 0],
-#     [0.13, -0.40, -0.30, 0.00, -0.20, 0],
+#     [0.13, 0.00, 0.00, 0.00, 0.00, 0],
+#     [0.10, 0.00, -0.20, 0.10, 0.20, 0],
+#     [0.00, -0.10, -0.10, 0.20, 0.20, 0],
+#     [0.10, -0.00, -0.10, -0.20, 0.00, 0],
+#     [0.13, -0.20, -0.10, 0.00, -0.20, 0],
 #     [0.15, 0.00, -0.20, 0.20, 0.00, 0],
 #     [0.13, 0.00, 0.00, 0.00, 0.00, 0]
 # ]
@@ -496,6 +505,7 @@ while True:
     # 输出剩余时间（每秒一次）
     if not hasattr(wait_for_sync_point, '_last_print_time') or (current_time - getattr(wait_for_sync_point, '_last_print_time', 0)) >= 1.0:
         print(f"{get_timestamp()} 总剩余时间：{actual_remaining_time:.2f} 秒，当前同步周期位置：{current_cycle}秒")
+        sys.stdout.flush()  # 立即刷新输出缓冲区
         wait_for_sync_point._last_print_time = current_time
 
     # 检查是否开始新的完整周期
@@ -705,11 +715,13 @@ while True:
 
         if not use_hold_position:
             print(f"{get_timestamp()} 动作 {current_frame_index + 1} 执行完成，开始向位置 {next_frame_index + 1} 运动")
+            sys.stdout.flush()  # 立即刷新输出缓冲区
             
             # 检查是否完成了第7个动作（一轮完成）
             if current_frame_index + 1 == len(full_base_actions):  # 第7个动作完成
                 completed_rounds += 1
                 print(f"\033[92m{get_timestamp()} ✅ 第 {completed_rounds} 轮动作完成！\033[0m")
+                sys.stdout.flush()  # 立即刷新输出缓冲区
 
 # 在程序结束时返回到零点位置（跳过缺失电机）
 print(f"\033[96m{get_timestamp()} 磨线程序结束，总共完成了 {completed_rounds} 轮动作！\033[0m")

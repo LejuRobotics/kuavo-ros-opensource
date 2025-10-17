@@ -4,6 +4,11 @@ import os
 import sys
 from EcMasterConfig import EcMasterConfig
 
+# 设置Python为无缓冲模式，确保实时输出
+os.environ['PYTHONUNBUFFERED'] = '1'
+sys.stdout.flush()
+sys.stderr.flush()
+
 # 检查是否有root权限
 if os.geteuid() != 0:
     print("\033[31merror: 请使用root权限运行\033[0m")
@@ -40,6 +45,7 @@ def option1():
 def option2():
     # 电机磨线测试：对称控制左脚、右脚、躯干和腰部电机进行往复运动
     print("正在执行电机磨线测试...")
+    sys.stdout.flush()
     
     # 获取用户输入的时间参数
     while True:
@@ -64,12 +70,12 @@ def option2():
         # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # 左脚电机4的动作序列
         # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # 左脚电机5的动作序列
         # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],  # 左脚电机6的动作序列
-        [0, 15, 20, 55, 17, 0, 17, 40, 20, 10, 0, 0, 0, 0],  # 左脚电机1的动作序列
+        [0, 15, 20, 55, 17, 0, 17, 40, 20, 10, 0, 0, 0, 0],      # 左脚电机1的动作序列
         [0, 10, 50, 90, 20, 0, -35, -60, -40, -20, 0, 0, 0, 0],  # 左脚电机2的动作序列
-        [0, 0, -90, -40, -110, 0, 50, 70, 40, 0, 0, 0, 0, 0],  # 左脚电机3的动作序列
-        [0, 0, 80, 40, 80, 0, 70, 95, 40, 0, 0, 0, 0, 0],  # 左脚电机4的动作序列
-        [0, 10, 20, 0, -10, -20, 0, 15, 20, 0, 0, 0, 0, 0],  # 左脚电机5的动作序列    +向下
-        [0, -10, -20, 0, 10, 20, 0, -10, -20, 0, 0, 0, 0, 0]   # 左脚电机6的动作序列   +向上
+        [0, 0, -90, -40, -110, 0, 50, 70, 40, 0, 0, 0, 0, 0],    # 左脚电机3的动作序列
+        [0, 0, 80, 40, 80, 0, 70, 95, 40, 0, 0, 0, 0, 0],        # 左脚电机4的动作序列
+        [0, 10, 20, 0, -10, -20, 0, 15, 20, 0, 0, 0, 0, 0],      # 左脚电机5的动作序列
+        [0, -10, -20, 0, 10, 20, 0, -10, -20, 0, 0, 0, 0, 0]     # 左脚电机6的动作序列
     ]
     
     # waist_action =     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # 腰部电机13的动作序列
@@ -111,19 +117,17 @@ def option2():
     motion_duration = 1.0  # 每个动作持续时间
     
     print(f"电机ID: {motor_ids}")
-    print(f"左脚动作序列: {left_foot_actions[0]}")
-    print(f"右脚动作序列: {[-x for x in left_foot_actions[0]]} (电机1和7镜像对称)")
-    print(f"腰部动作序列: {waist_action}")
-    print(f"左手动作序列: {left_hand_action}")
-    print(f"右手动作序列: {left_hand_action} (与左手相同)")
     print(f"每个动作持续时间: {motion_duration}秒")
     print(f"总运行时间: {time_total}秒")
+    sys.stdout.flush()
     
     success = ec_master_wrap.MotorMultiAction(motor_ids, motor_actions, motion_duration, time_total)
     if not success:
         print("\033[1;31m✘ 磨线运动失败\033[0m")
+        sys.stdout.flush()
     else:
         print("\033[1;32m✓ 磨线运动完成\033[0m")
+        sys.stdout.flush()
 
 # 选项与函数的映射字典
 FUNCTION_MAP = {
