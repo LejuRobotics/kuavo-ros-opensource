@@ -22,11 +22,13 @@ from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierT
 from trajectory_msgs.msg import JointTrajectory
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import numpy as np
+from std_msgs.msg import Bool
 
 rospack = rospkg.RosPack()
 pkg_path = rospack.get_path('h12pro_controller_node')
 h12pro_remote_controller_path = os.path.join(pkg_path, "src", "h12pro_node", "h12pro_remote_controller.json")
-
+kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
 
 class Config:
     # Controller ranges
@@ -37,10 +39,11 @@ class Config:
     H12_AXIS_MID_VALUE = (H12_AXIS_RANGE_MAX + H12_AXIS_RANGE_MIN) // 2
     
     # State configurations
-    VALID_STATES = {"ready_stance", "stance", "walk", "trot"}
+    VALID_STATES = {"ready_stance", "rl_control", "stance", "walk", "trot"}
     TRIGGER_CHANNEL_MAP = {
         "stop": 8,
         # "ready_stance": 5,
+        "rl_control": 8,
         "stance": 9,
         "walk": 6,
         "trot": 7
@@ -141,22 +144,40 @@ class H12ToJoyControllerNode:
     @staticmethod
     def _create_channel_mapping() -> Dict[int, ChannelMapping]:
         """Create channel mapping configuration."""
-        return {
-            1: ChannelMapping(1, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_YAW'], reverse=True),
-            2: ChannelMapping(2, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_Z'], reverse=True, scale=Config.SCALE_RIGHT_STICK_Z),
-            3: ChannelMapping(3, axis_index=Config.AXIS_MAPPING['LEFT_STICK_X']),
-            4: ChannelMapping(4, axis_index=Config.AXIS_MAPPING['LEFT_STICK_Y'], reverse=True, scale=Config.SCALE_LEFT_STICK_Y),
-            6: ChannelMapping(6, button_index=Config.BUTTON_MAPPING['START'], 
-                            is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
-            7: ChannelMapping(7, button_index=Config.BUTTON_MAPPING['Y'], 
-                            is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
-            8: ChannelMapping(8, button_index=Config.BUTTON_MAPPING['B'], 
-                            is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
-            9: ChannelMapping(9, button_index=Config.BUTTON_MAPPING['BACK'], 
-                            is_button=True, trigger_value=-Config.H12_AXIS_RANGE_MAX),
-            10: ChannelMapping(10, button_index=Config.BUTTON_MAPPING['A'], 
-                             is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
-        }
+        if kuavo_control_scheme == "rl":
+            return {
+                1: ChannelMapping(1, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_YAW'], reverse=True),
+                2: ChannelMapping(2, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_Z'], reverse=True, scale=Config.SCALE_RIGHT_STICK_Z),
+                3: ChannelMapping(3, axis_index=Config.AXIS_MAPPING['LEFT_STICK_X']),
+                4: ChannelMapping(4, axis_index=Config.AXIS_MAPPING['LEFT_STICK_Y'], reverse=True, scale=Config.SCALE_LEFT_STICK_Y),
+                6: ChannelMapping(6, button_index=Config.BUTTON_MAPPING['START'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
+                7: ChannelMapping(7, button_index=Config.BUTTON_MAPPING['LB'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
+                8: ChannelMapping(8, button_index=Config.BUTTON_MAPPING['B'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
+                9: ChannelMapping(9, button_index=Config.BUTTON_MAPPING['X'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
+                10: ChannelMapping(10, button_index=Config.BUTTON_MAPPING['A'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
+            }
+        elif kuavo_control_scheme == "ocs2":
+            return {
+                1: ChannelMapping(1, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_YAW'], reverse=True),
+                2: ChannelMapping(2, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_Z'], reverse=True, scale=Config.SCALE_RIGHT_STICK_Z),
+                3: ChannelMapping(3, axis_index=Config.AXIS_MAPPING['LEFT_STICK_X']),
+                4: ChannelMapping(4, axis_index=Config.AXIS_MAPPING['LEFT_STICK_Y'], reverse=True, scale=Config.SCALE_LEFT_STICK_Y),
+                6: ChannelMapping(6, button_index=Config.BUTTON_MAPPING['START'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
+                7: ChannelMapping(7, button_index=Config.BUTTON_MAPPING['Y'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
+                8: ChannelMapping(8, button_index=Config.BUTTON_MAPPING['B'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
+                9: ChannelMapping(9, button_index=Config.BUTTON_MAPPING['BACK'], 
+                                is_button=True, trigger_value=-Config.H12_AXIS_RANGE_MAX),
+                10: ChannelMapping(10, button_index=Config.BUTTON_MAPPING['A'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
+            }
 
     def update_channels_msg(self, msg: h12proRemoteControllerChannel) -> None:
         """Update channel message data."""
@@ -226,7 +247,25 @@ class H12PROControllerNode:
         self.should_pub_head_motion_data = robotHeadMotionData()
         self.start_way = rospy.get_param("start_way", "auto")
         self.real_robot = rospy.get_param("real_robot", False)
+        #zsh
+        # 头部控制模式
+       # 头部控制参数 (重新调整)
+        self.head_control_mode = False
+        self.current_head_yaw = 0.0     # 当前偏航角度(度)
+        self.current_head_pitch = 0.0   # 当前俯仰角度(度)
         
+        # 控制参数 (大幅调整灵敏度)
+        self.yaw_sensitivity = 0.8      # 偏航灵敏度 (度/单位输入)
+        self.pitch_sensitivity = 0.2    # 俯仰灵敏度 (度/单位输入)
+        self.dead_zone = 100           # 死区阈值
+        
+        # 角度限制 (与消息定义一致)
+        self.max_yaw = 30.0            # ±30度
+        self.max_pitch = 23.0          # ±25度
+        #zsh
+
+        self.is_navigation_mode = False # 导航状态变量
+
         # 添加线程池
         self.executor = ThreadPoolExecutor(max_workers=2)
         self._state_transition_lock = threading.Lock()
@@ -300,9 +339,26 @@ class H12PROControllerNode:
             self._update_h12_customize_config_callback,
             queue_size=1
         )
+
+        # 导航状态订阅者
+        self.navigation_state_sub = rospy.Subscriber(
+            "/navigation_control",
+            Bool,
+            self._navigation_state_callback,
+            queue_size=1
+        )
     
     def _update_h12_customize_config_callback(self, msg):
         self.robot_state_machine.update_customize_config()
+        
+    def _navigation_state_callback(self, msg):
+        # msg: std_msgs.msg.Bool - 导航状态消息 (false: H12 控制, true: 导航控制)
+        # 在导航中 joy 数据不参与控制
+        try:
+            self.is_navigation_mode = msg.data
+            rospy.loginfo(f"[NavigationState] Navigation mode {'enabled' if msg.data else 'disabled'}")
+        except Exception as e:
+            rospy.logerr(f"[NavigationState] Error processing navigation state: {e}")
         
     def publish_arm_joint_state(self):
         if self.plan_arm_is_finished is False and len(self.should_pub_arm_joint_state.position) > 0:
@@ -364,10 +420,18 @@ class H12PROControllerNode:
         """
         try:
             config = read_json_file(h12pro_remote_controller_path)
+            
+            # Determine which state transition configuration to use based on control scheme
+            kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
+            if kuavo_control_scheme == "rl":
+                state_transition_key = "rl_robot_state_transition_keycombination"
+            else:
+                state_transition_key = "ocs2_robot_state_transition_keycombination"
+            
             required_fields = [
                 "channel_to_key_name",
                 "channel_to_key_state",
-                "ocs2_robot_state_transition_keycombination",
+                state_transition_key,
                 "emergency_stop_key_combination"
             ]
             
@@ -376,10 +440,12 @@ class H12PROControllerNode:
                 if field not in config:
                     raise ConfigError(f"Missing required field: {field}")
             
+            rospy.loginfo(f"Loading configuration for control scheme: {kuavo_control_scheme}")
+            
             return {
                 "channel_to_key_name": config["channel_to_key_name"],
                 "channel_to_key_state": config["channel_to_key_state"],
-                "state_transitions": config["ocs2_robot_state_transition_keycombination"],
+                "state_transitions": config[state_transition_key],
                 "emergency_stop_keys": set(config["emergency_stop_key_combination"])
             }
             
@@ -453,9 +519,78 @@ class H12PROControllerNode:
         if self._config["emergency_stop_keys"].issubset(key_combination):
             self._handle_emergency_stop(current_state, msg)
             return
+            
 
         # Handle normal state transitions
         self._handle_normal_transitions(current_state, key_combination, msg)
+        # 重要修复：确保在头部控制模式下也处理摇杆输入
+        if self.head_control_mode and current_state == "stance":
+            self._handle_head_control(msg)
+    #zsh
+    def _normalize_channel(self, value: int) -> float:
+        """将通道值标准化到[-1.0, 1.0]范围"""
+        # 确保值在有效范围内
+        clamped = max(min(value, Config.H12_AXIS_RANGE_MAX), Config.H12_AXIS_RANGE_MIN)
+        # 映射到[-1.0, 1.0]
+        return (clamped - Config.H12_AXIS_MID_VALUE) / (Config.H12_AXIS_RANGE / 2)
+    #zsh
+    def _handle_head_control(self, msg: h12proRemoteControllerChannel):
+        if not self.head_control_mode:
+            return
+        try:
+            yaw_input = self._normalize_channel(msg.channels[0])  # 左右
+            pitch_input = self._normalize_channel(msg.channels[1]) # 上下
+
+            if abs(yaw_input) < 0.1:
+                yaw_input = 0.0
+            if abs(pitch_input) < 0.1:
+                pitch_input = 0.0
+
+            yaw_delta = yaw_input * self.yaw_sensitivity
+            pitch_delta = pitch_input * self.pitch_sensitivity
+
+            # ========================
+            # ✅ Pitch 限位 + 恢复逻辑
+            # ========================
+            # ✅ Pitch 限位 + 恢复逻辑
+# 如果达到上限，允许向下恢复；达到下限，允许向上恢复
+            # 提前限位值（提前0.5度保护）
+            PITCH_LIMIT_MARGIN = 10.0
+
+            # 软件提前限位逻辑
+            
+            if pitch_delta > 0 and self.current_head_pitch >= self.max_pitch - PITCH_LIMIT_MARGIN:
+                pitch_delta = 0.0  # 禁止继续向下
+
+            # ✅ 允许反向恢复
+            self.current_head_pitch += pitch_delta
+            self.current_head_pitch = np.clip(self.current_head_pitch, -self.max_pitch, self.max_pitch)
+
+
+
+            # ✅ 允许反向恢复（注意 pitch_delta 不为 0 的情况）
+            self.current_head_pitch += pitch_delta
+            self.current_head_pitch = np.clip(self.current_head_pitch, -self.max_pitch, self.max_pitch)
+
+            # ✅ Yaw 使用你原来的逻辑
+            if not ((yaw_delta > 0 and self.current_head_yaw >= self.max_yaw - 0.5) or
+                    (yaw_delta < 0 and self.current_head_yaw <= -self.max_yaw + 0.5)):
+                self.current_head_yaw += yaw_delta
+
+            # ✅ 限位提示
+            if self.current_head_pitch >= self.max_pitch:
+                rospy.logwarn_throttle(1.0, f"[HeadControl] Pitch 达到上限: {self.current_head_pitch:.2f}°")
+            elif self.current_head_pitch <= -self.max_pitch:
+                rospy.logwarn_throttle(1.0, f"[HeadControl] Pitch 达到下限: {self.current_head_pitch:.2f}°")
+
+            head_msg = robotHeadMotionData()
+            head_msg.joint_data = [self.current_head_yaw, self.current_head_pitch]
+            self.control_head_pub.publish(head_msg)
+
+        except Exception as e:
+            rospy.logerr(f"Head control error: {str(e)}")
+
+
 
     def _gradually_move_right_stick_down(self, time=0.1, times=20) -> None:
         """Gradually move right stick down to stop robot.
@@ -485,10 +620,12 @@ class H12PROControllerNode:
             msg: Channel message for response.
         """
         try:
-            if current_state in ["stance", "walk", "trot"]:
-                self.h12_to_joy_node.is_stopping = True
-                self._gradually_move_right_stick_down()
-                self.h12_to_joy_node.is_stopping = False
+            # rl 暂不支持缓慢下降
+            if kuavo_control_scheme == "ocs2":
+                if current_state in ["stance", "walk", "trot"]:
+                    self.h12_to_joy_node.is_stopping = True
+                    self._gradually_move_right_stick_down()
+                    self.h12_to_joy_node.is_stopping = False
                 
             getattr(self.robot_state_machine, "stop")(source=current_state)
             stop_msg = h12proRemoteControllerChannel()
@@ -504,36 +641,52 @@ class H12PROControllerNode:
             return
 
     def _handle_normal_transitions(self, current_state: str, 
-                                 key_combination: Set[str],
-                                 msg: h12proRemoteControllerChannel) -> None:
-        """Handle normal state transitions.
-        
-        Args:
-            current_state: Current robot state.
-            key_combination: Set of active key combinations.
-            msg: Channel message for response.
-        """
+                                key_combination: Set[str],
+                                msg: h12proRemoteControllerChannel) -> None:
+        """Handle normal state transitions."""
         triggers = self.robot_state_machine.machine.get_triggers(current_state)
         
-        for trigger in triggers:
-            if trigger == "trot":
-                continue            # 跳过 trot 模式的状态转换
-            trigger_keys = set(
-                self._config["state_transitions"][current_state][trigger]
-            )
+        for trigger in self._config["state_transitions"].get(current_state, {}):
+            trigger_keys = set(self._config["state_transitions"][current_state][trigger])
             
             if not trigger_keys.issubset(key_combination):
                 continue
+
+            if trigger == "toggle_head_control":
+                if current_state == "stance":
+                    self.head_control_mode = not self.head_control_mode
+                    # 重置记忆值
+                    self.last_yaw_raw = msg.channels[0]
+                    self.last_pitch_raw = msg.channels[1]
+                     # 切换时发布中立位置
+                     #zsh
+                    if self.head_control_mode:
+                        neutral_msg = robotHeadMotionData()
+                        neutral_msg.joint_data = self.head_neutral_position
                 
+                        self.control_head_pub.publish(neutral_msg)
+                    #zsh
+                    rospy.loginfo(f"[HeadControl] Head control mode {'enabled' if self.head_control_mode else 'disabled'}")
+                else:
+                    if self.head_control_mode:
+                        rospy.logwarn("[HeadControl] Exiting stance state. Head control mode disabled.")
+                        self.head_control_mode = False
+                return
+
+            
+            if trigger not in triggers:
+                continue
+
             try:
                 self._execute_state_transition(trigger, current_state, msg)
                 return
             except Exception as e:
                 rospy.logerr(f"Error during state transition: {e}")
 
-        # Handle joystick input if no state transition
-        if current_state != "vr_remote_control":
+        if current_state != "vr_remote_control" and not self.head_control_mode and not self.is_navigation_mode:
             self._handle_joystick_input(msg)
+
+
 
     def _execute_state_transition(self, trigger: str, source: str,
                                 msg: h12proRemoteControllerChannel) -> None:
@@ -558,6 +711,11 @@ class H12PROControllerNode:
             with self._state_transition_lock:
                 try:
                     getattr(self.robot_state_machine, trigger)(**kwargs)
+                                        # zsh如果不是stance状态，自动关闭头部控制模式
+                    if self.robot_state_machine.state != "stance" and self.head_control_mode:
+                        rospy.logwarn("[HeadControl] Current state is not 'stance'. Disabling head control mode.")
+                        self.head_control_mode = False
+                        #zsh
                     
                     # 如果是有效状态,更新消息
                     if trigger in Config.VALID_STATES:
@@ -572,18 +730,51 @@ class H12PROControllerNode:
                     rospy.logerr(f"Error in state transition task: {e}")
                     
         self.executor.submit(state_transition_task)
-
+#zsh
     def _handle_joystick_input(self, msg: h12proRemoteControllerChannel) -> None:
         """Handle joystick input when no state transition occurs."""
-        stick_channels = Config.get_default_channels()
-        stick_channels[:4] = msg.channels[:4]
-        
-        stick_msg = h12proRemoteControllerChannel()
-        stick_msg.channels = tuple(stick_channels)
-        
-        self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
-        self.h12_to_joy_node.process_channels()
+        # 如果当前状态是stance，且头部控制模式开启，则处理摇杆输入
+        # rospy.loginfo(f"[JoystickInput] head_control_mode={self.head_control_mode}")#日志打印测试是否进入head
 
+        # stick_channels = Config.get_default_channels()
+        # stick_channels[:4] = msg.channels[:4]
+
+        # stick_msg = h12proRemoteControllerChannel()
+        # stick_msg.channels = tuple(stick_channels)
+
+        # self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
+        # self.h12_to_joy_node.process_channels()
+
+        # 头部控制模式下处理摇杆控制
+        if not self.head_control_mode:
+            stick_channels = Config.get_default_channels()
+            stick_channels[:4] = msg.channels[:4]
+            stick_msg = h12proRemoteControllerChannel()
+            stick_msg.channels = tuple(stick_channels)
+            self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
+            self.h12_to_joy_node.process_channels()
+    #zsh
+    def _map_channel_value(self, channel_value: int) -> float:
+        """将原始通道值映射到归一化范围[-1.0, 1.0]"""
+        # 确保值在有效范围内
+        clamped = max(min(channel_value, Config.H12_AXIS_RANGE_MAX), Config.H12_AXIS_RANGE_MIN)
+        
+        # 映射到[-1.0, 1.0]
+        normalized = (clamped - Config.H12_AXIS_MID_VALUE) / (Config.H12_AXIS_RANGE / 2)
+        return max(min(normalized, 1.0), -1.0)
+#zsh
+    def _process_head_motion(self, msg: h12proRemoteControllerChannel):
+        yaw_channel = msg.channels[0]  # 右摇杆左右，通道1
+        pitch_channel = msg.channels[1]  # 右摇杆上下，通道2
+        
+        yaw_offset = (yaw_channel - Config.H12_AXIS_MID_VALUE) / (Config.H12_AXIS_RANGE // 2) * 30  # 偏移角度范围±30度
+        pitch_offset = (pitch_channel - Config.H12_AXIS_MID_VALUE) / (Config.H12_AXIS_RANGE // 2) * 20  # 偏移角度范围±20度
+
+        # 构造并发布消息
+        msg = robotHeadMotionData()
+        msg.joint_data = [pitch_offset, yaw_offset]  # pitch在前，yaw在后（假设顺序是这样）
+        self.control_head_pub.publish(msg)
+#zsh
     def _handle_button(self, key: str, channel: int) -> Optional[str]:
         """Handle button press logic."""
         try:
@@ -660,7 +851,8 @@ def main():
         rospy.loginfo("H12PRO Controller Node started successfully")
         
         while not rospy.is_shutdown():
-            node.h12_to_joy_node.process_channels()
+            if kuavo_control_scheme == "ocs2":
+                node.h12_to_joy_node.process_channels()
             node.publish_arm_joint_state()
             rate.sleep()
             

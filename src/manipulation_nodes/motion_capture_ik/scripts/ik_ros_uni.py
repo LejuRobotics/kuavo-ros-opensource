@@ -344,12 +344,25 @@ class IkRos:
     def limit_angle_by_velocity(self, q_last, q_now, vel_limit=50.0):
         """
         limit the angle change by velocity, default 50 deg/s
+        对左右手臂的第一个关节(肩膀俯仰)进行120度限制
         """
         size = len(q_now)
         q_limited = q_now.copy()
         agl_limit = self.controller_dt * vel_limit * np.pi / 180.0  # deg/s to rad/s
+        
+        # 120度限制转换为弧度
+        angle_limit_120_deg = self.controller_dt * 120.0 * np.pi / 180.0  # 约2.09弧度
+        
         for i in range(size):
+            # 速度限制
             q_limited[i] = max(q_last[i] - agl_limit, min(q_now[i], q_last[i] + agl_limit))
+            
+            # 对左右手臂的第一个关节进行120度限制
+            if i == 0:  # 左臂第一个关节 (l_arm_pitch)
+                q_limited[i] = max(q_last[i]-angle_limit_120_deg, min(q_now[i], q_last[i] + angle_limit_120_deg))
+            elif i == self.__single_arm_dof:  # 右臂第一个关节 (r_arm_pitch)，索引7
+                q_limited[i] = max(q_last[i]-angle_limit_120_deg, min(q_now[i], q_last[i] + angle_limit_120_deg))
+                
         return q_limited
 
     @staticmethod
@@ -931,7 +944,8 @@ class IkRos:
 
 
     def pub_robot_end_hand(self, joyStick_data=None, hand_finger_data = None):
-        if hand_finger_data is None or hand_finger_data[0] is None or hand_finger_data[1] is None:
+        # hand tracking 时判断保护
+        if hand_finger_data is not None and len(hand_finger_data) < 2:
             return
         global control_finger_type
         left_hand_position = [0 for i in range(6)]

@@ -1,9 +1,12 @@
 <!-- ar_track.launch -->
 <launch>
     <!-- 设置音频文件路径参数 -->
-    <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string"/>
 
-    <!-- 启动 播放音乐服务 -->
-    <node pkg="kuavo_audio_player" type="loundspeaker.py" name="play_music_node" output="screen" respawn="true" respawn_delay="5"/>
     <param name="music_path" value="/home/lab/.config/lejuconfig/music" />
+
+    <!-- 先启动流式播放节点 -->
+    <node pkg="kuavo_audio_player" type="audio_stream_player.py" name="audio_stream_player_node" output="screen" respawn="true" respawn_delay="5"/>
+    
+    <!-- 再启动音乐文件服务节点 -->
+    <node pkg="kuavo_audio_player" type="loundspeaker.py" name="play_music_node" output="screen"  />
 </launch>

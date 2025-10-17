@@ -20,11 +20,12 @@ model_settings
 
   verboseCppAd                  false
   recompileLibrariesCppAd       false
-  modelFolderCppAd              /var/ocs2/kuavo_v45 ; will save in <modelFolderCppAd>/md5_<urdf>/<centroidalModelType>/<dof>
+  modelFolderCppAd              /var/ocs2/kuavo_v100045 ; will save in <modelFolderCppAd>/md5_<urdf>/<centroidalModelType>/<dof>
 
   modelDof                     26 ; total dof of the model, including the arms and legs
   mpcArmsDof                   8 ; mpc dof of the arms, you can simplify the model by reducing this value(will automatically reduce the QR size)
   mpcLegsDof                   12 ; mpc dof of the legs
+  mpcWaistDof                  0 ; mpc dof of the waist 
 
   jointNames
   {
@@ -128,14 +129,18 @@ swing_trajectory_config
 
   toeSwingHeight                0.03
   heelSwingHeight               0.04
-  enable_slope_planner                                 true
+  enable_slope_planner                    true
+  slope_planning_threshold                     3.0        
   enable_interrupt_with_est_mode              false
+  enable_dynamic_q             true
+  enable_dynamic_r             true
 
   deadBandVelocity             0.1
   heelToeMaxHeightVelocity     0.3
 
   swing_shoulder_center         0.15
   swing_shoulder_scale          0.3
+  swing_elbow_center            0.0
   swing_elbow_scale             0.8
 }
 
@@ -478,7 +483,7 @@ frictionConeSoftConstraint
 
 basePitchLimits
 {
-  enable                 true
+  enable                 true ;can be close by /humanoid/mpc/enable_base_pitch_limit
   pos
   {
     mu      0.1       ; relaxed log barrier mu
@@ -650,20 +655,20 @@ armAccelTask
 {
   kp
   {
-    (0,0)   150.00   ; zarm_l1_joint
-    (1,0)   150.00   ; zarm_l2_joint
-    (2,0)   150.00   ; zarm_l3_joint
-    (3,0)   150.00   ; zarm_l4_joint
-    (4,0)   150.00   ; zarm_l5_joint
-    (5,0)   150.00   ; zarm_l6_joint
-    (6,0)   150.00   ; zarm_l7_joint
-    (7,0)   150.00   ; zarm_r1_joint
-    (8,0)   150.00   ; zarm_r2_joint
-    (9,0)   150.00   ; zarm_r3_joint
-    (10,0)  150.00   ; zarm_r4_joint
-    (11,0)  150.00   ; zarm_r5_joint
-    (12,0)  150.00   ; zarm_r6_joint
-    (13,0)  150.00   ; zarm_r7_joint
+    (0,0)   80.00   ; zarm_l1_joint
+    (1,0)   80.00   ; zarm_l2_joint
+    (2,0)   80.00   ; zarm_l3_joint
+    (3,0)   80.00   ; zarm_l4_joint
+    (4,0)   80.00   ; zarm_l5_joint
+    (5,0)   80.00   ; zarm_l6_joint
+    (6,0)   80.00   ; zarm_l7_joint
+    (7,0)   80.00   ; zarm_r1_joint
+    (8,0)   80.00   ; zarm_r2_joint
+    (9,0)   80.00   ; zarm_r3_joint
+    (10,0)  80.00   ; zarm_r4_joint
+    (11,0)  80.00   ; zarm_r5_joint
+    (12,0)  80.00   ; zarm_r6_joint
+    (13,0)  80.00   ; zarm_r7_joint
   }
   kd
   {

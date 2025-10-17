@@ -340,7 +340,7 @@ class KuavoRobotStateCoreWebsocket:
     
     def _humanoid_mpc_observation_callback(self, msg) -> None:
         try:
-            SDKLogger.debug(f"[State] Received MPC observation message: {msg}")
+            # SDKLogger.debug(f"[State] Received MPC observation message: {msg}")
             self._mpc_observation_data = msg
             if hasattr(self, '_initialized'): 
                 curr_time = self._mpc_observation_data['time']

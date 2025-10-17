@@ -52,7 +52,7 @@ class TestKuavoGraspBox:
         
         # 调用方法
         result = grasp_box.walk_approach_target(
-            target_info=test_tag,
+            target_id=test_tag.id[0],
             target_distance=0.5,
             approach_speed=0.15
         )
@@ -83,7 +83,7 @@ class TestKuavoGraspBox:
         
         # 调用方法
         result = grasp_box.walk_approach_target(
-            target_info=test_tag,
+            target_id=test_tag.id[0],
             target_distance=0.8,
             approach_speed=0.1
         )

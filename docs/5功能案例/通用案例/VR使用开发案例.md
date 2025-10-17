@@ -170,13 +170,25 @@
   ```
 
 2. 启动视频流：
+
+- 安装依赖：
+```bash
+sudo apt install libv4l-dev
+```
 - 在上位机运行：
    ```bash
+   cd <kuavo_ros_application>/
    source devel/setup.bash
-   roslaunch noitom_hi5_hand_udp_python usb_cam_node.launch
-   ```
+  # 打开摄像头
+  # 旧版4代, 4Pro
+  roslaunch dynamic_biped load_robot_head.launch
+  # 标准版, 进阶版, 展厅版, 展厅算力版
+  roslaunch dynamic_biped load_robot_head.launch use_orbbec:=true
+  # Max版
+  roslaunch dynamic_biped load_robot_head.launch use_orbbec:=true enable_wrist_camera:=true
+    ```
    
 - 在下位机运行：
    ```bash
-   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_usb_cam.launch
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_robot_camera.launch
    ```

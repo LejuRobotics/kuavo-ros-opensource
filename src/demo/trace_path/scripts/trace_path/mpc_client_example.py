@@ -21,21 +21,22 @@ class CircleParams(BaseParams):
         self.radius = radius
 
 class SquareParams(BaseParams):
-    def __init__(self, side_length=4.0, v_max_linear=0.3, dt=0.1, yaw_offset=0.0):
+    def __init__(self, length=4.0, v_max_linear=0.3, dt=0.1, yaw_offset=0.0):
         super().__init__(v_max_linear, dt)
-        self.side_length = side_length
+        self.length = length
         self.yaw_offset = yaw_offset  
 
 class SCurveParams(BaseParams):
-    def __init__(self, length=4.0, amplitude=2.0, v_max_linear=0.3, dt=0.1):
+    def __init__(self, length=4.0, amplitude=2.0, v_max_linear=0.3, dt=0.1, half_scurve=False):
         super().__init__(v_max_linear, dt)
         self.length = length      # S形曲线的长度
         self.amplitude = amplitude  # S形曲线的振幅
+        self.half_scurve = half_scurve  # 是否只生成半个S曲线
 
 class TriangleParams(BaseParams):
-    def __init__(self, side_length=2.0, v_max_linear=0.3, dt=0.1, yaw_offset=0.0):
+    def __init__(self, length=2.0, v_max_linear=0.3, dt=0.1, yaw_offset=0.0):
         super().__init__(v_max_linear, dt)
-        self.side_length = side_length
+        self.length = length
         self.yaw_offset = yaw_offset  
 
 class LineParams(BaseParams):
@@ -55,6 +56,45 @@ class PathGenerator:
     def get_robot_pose(self):
         """Get current robot pose from TF"""
         try:
+            # 检查 robot_manager_node/sim 参数
+            use_sim = False
+            try:
+                if rospy.has_param("robot_manager_node/sim"):
+                    use_sim = rospy.get_param("robot_manager_node/sim")
+                else:
+                    rospy.logwarn("参数 'robot_manager_node/sim' 未找到，默认使用TF方式获取机器人位姿")
+            except Exception as e:
+                rospy.logwarn(f"获取参数 'robot_manager_node/sim' 时出错: {e}，默认使用TF方式获取机器人位姿")
+
+            if use_sim is True:
+                # 通过环境变量获取ROBOT_VERSION
+                import os
+                robot_version = os.environ.get("ROBOT_VERSION", "45")
+                model_name = f"biped_s{robot_version}"
+                try:
+                    rospy.wait_for_service('/gazebo/get_model_state', timeout=2.0)
+                    from gazebo_msgs.srv import GetModelState
+                    get_model_state = rospy.ServiceProxy('/gazebo/get_model_state', GetModelState)
+                    resp = get_model_state(model_name=model_name)
+                    if resp.success:
+                        trans = [
+                            resp.pose.position.x,
+                            resp.pose.position.y,
+                            resp.pose.position.z
+                        ]
+                        rot = [
+                            resp.pose.orientation.x,
+                            resp.pose.orientation.y,
+                            resp.pose.orientation.z,
+                            resp.pose.orientation.w
+                        ]
+                        rospy.loginfo(f"通过gazebo服务获取机器人位姿，model_name: {model_name}, trans: {trans}, rot: {rot}")
+                        return trans, rot
+                    else:
+                        rospy.logwarn(f"调用 /gazebo/get_model_state 失败，使用TF方式获取机器人位姿，model_name: {model_name}")
+                except Exception as e:
+                    rospy.logwarn(f"调用 /gazebo/get_model_state 服务异常: {e}，使用TF方式获取机器人位姿")
+
             self.tf_listener.waitForTransform(self.world_frame, self.robot_frame, rospy.Time(0), rospy.Duration(1.0))
             (trans, rot) = self.tf_listener.lookupTransform(self.world_frame, self.robot_frame, rospy.Time(0))
             return trans, rot
@@ -186,9 +226,9 @@ class PathGenerator:
         # 先定义未旋转的正方形顶点
         square_points_local = [
             (0, 0),                                        # 起点
-            (params.side_length, 0),                      # 右
-            (params.side_length, params.side_length),     # 右上
-            (0, params.side_length),                      # 左上
+            (params.length, 0),                      # 右
+            (params.length, params.length),     # 右上
+            (0, params.length),                      # 左上
             (0, 0)                                        # 回到起点
         ]
         
@@ -270,8 +310,11 @@ class PathGenerator:
         dt = params.dt
         step_distance = v_max_linear * dt
 
-        # 总长度
-        total_length = length * 2  # S形曲线的实际长度为两倍的长度
+        # 总长度 - 根据half_scurve参数决定
+        if params.half_scurve:
+            total_length = length / 2  # 半个S曲线，总长度为length/2
+        else:
+            total_length = length  # 完整的S形曲线，总长度为length
 
         # 插入路径中的点
         x = current_x
@@ -280,8 +323,16 @@ class PathGenerator:
 
         while t < total_length:
             # 计算"S"形曲线的Y坐标偏移量
-            y_offset = amplitude * math.sin(math.pi * t / length) * math.sin(math.pi * t / length)
-            dy_dt = (2 * amplitude * math.pi / length) * math.cos(math.pi * t / length) * math.sin(math.pi * t / length)
+            if params.half_scurve:
+                # 半个S曲线：在length/2距离内完成一个完整周期
+                # 使用length/2作为周期，这样在length/2距离内完成sin²的一个完整周期
+                y_offset = amplitude * math.sin(math.pi * t / (length/2)) * math.sin(math.pi * t / (length/2))
+                dy_dt = (2 * amplitude * math.pi / (length/2)) * math.cos(math.pi * t / (length/2)) * math.sin(math.pi * t / (length/2))
+            else:
+                # 完整S曲线：在length距离内完成两个完整周期
+                # 使用length/2作为周期，这样在length距离内完成sin²的两个完整周期
+                y_offset = amplitude * math.sin(math.pi * t / (length/2)) * math.sin(math.pi * t / (length/2))
+                dy_dt = (2 * amplitude * math.pi / (length/2)) * math.cos(math.pi * t / (length/2)) * math.sin(math.pi * t / (length/2))
 
             # 创建路径点
             pose_stamped = PoseStamped()
@@ -341,13 +392,13 @@ class PathGenerator:
         
         # 计算等边三角形的顶点（相对于起始点）
         # 等边三角形的高 = 边长 * sqrt(3)/2
-        height = params.side_length * math.sqrt(3) / 2
+        height = params.length * math.sqrt(3) / 2
         
         # 定义三角形的顶点（相对于起始点）
         triangle_points_local = [
             (0, 0),                                    # 起点
-            (params.side_length, 0),                   # 右
-            (params.side_length/2, height),            # 顶点
+            (params.length, 0),                   # 右
+            (params.length/2, height),            # 顶点
             (0, 0)                                     # 回到起点
         ]
         
@@ -481,7 +532,7 @@ class PathGeneratorFactory:
                 'params_class': SquareParams,
                 'create_method': 'create_square_path',
                 'params': {
-                    'side_length': ('side_length', 4.0),
+                    'length': ('length', 4.0),
                     'yaw_offset': ('yaw_offset', 0.0, math.radians)
                 }
             },
@@ -489,7 +540,7 @@ class PathGeneratorFactory:
                 'params_class': TriangleParams,
                 'create_method': 'create_triangle_path',
                 'params': {
-                    'side_length': ('side_length', 2.0),
+                    'length': ('length', 2.0),
                     'yaw_offset': ('yaw_offset', 0.0, math.radians)
                 }
             },
@@ -498,7 +549,8 @@ class PathGeneratorFactory:
                 'create_method': 'create_scurve_path',
                 'params': {
                     'length': ('length', 4.0),
-                    'amplitude': ('amplitude', 2.0)
+                    'amplitude': ('amplitude', 2.0),
+                    'half_scurve': ('half_scurve', False)
                 }
             }
         }

@@ -20,10 +20,10 @@
       </material>
     </visual>
   </link>
-  <joint name="dummy_to_base_link" type="fixed">
+  <joint name="base_link_to_dummy_link" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="dummy_link" />
-    <child link="base_link" />
+    <parent link="base_link" />
+    <child link="dummy_link" />
   </joint>
   <link name="leg_l1_link">
     <inertial>

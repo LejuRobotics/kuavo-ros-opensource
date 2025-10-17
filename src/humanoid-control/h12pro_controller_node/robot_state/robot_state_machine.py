@@ -11,12 +11,18 @@ config_path = os.path.join(pkg_path, "robot_state", "robot_state.json")
 robot_state_config = read_json_file(config_path)
 
 robot_type = os.getenv("ROBOT_TYPE", "ocs2")
-states = robot_state_config["states"][robot_type]
-transitions = robot_state_config["transitions"][robot_type]
-if robot_type == "ocs2":
-    import robot_state.ocs2_before_callback as before_callback
-else:
-    import robot_state.before_callback as before_callback
+kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
+if kuavo_control_scheme == "ocs2":
+    states = robot_state_config["states"][robot_type]
+    transitions = robot_state_config["transitions"][robot_type]
+    if robot_type == "ocs2":
+        import robot_state.ocs2_before_callback as before_callback
+    else:
+        import robot_state.before_callback as before_callback
+elif kuavo_control_scheme == "rl":
+    states = robot_state_config["states"][kuavo_control_scheme]
+    transitions = robot_state_config["transitions"][kuavo_control_scheme]
+    import robot_state.rl_before_callback as before_callback
 
 class RobotStateMachine(object):
     def __init__(self, **kwargs):

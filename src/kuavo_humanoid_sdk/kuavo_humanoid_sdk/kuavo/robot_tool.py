@@ -2,7 +2,7 @@
 # coding: utf-8
 import math
 from kuavo_humanoid_sdk.common.logger import SDKLogger
-from kuavo_humanoid_sdk.interfaces.data_types import (PoseQuaternion, HomogeneousMatrix)
+from kuavo_humanoid_sdk.interfaces.data_types import (PoseQuaternion, HomogeneousMatrix, KuavoPose)
 from kuavo_humanoid_sdk.kuavo.core.ros.tools import KuavoRobotToolsCore
 from typing import Union, Tuple
 
@@ -75,7 +75,34 @@ class KuavoRobotTools:
                 return_type="pose_quaternion"
             )
             if transform:
-                return transform.position
+                return transform.position, transform.orientation
+            return None
+        except Exception as e:
+            SDKLogger.error(f"获取{link_name}位置失败: {str(e)}")
+            return None
+
+    def get_link_pose(self, link_name: str, reference_frame: str = "base_link"):
+        """获取指定机械臂关节链接的位置
+
+        Args:
+            link_name (str): 关节链接名称，如"zarm_l1_link"
+            reference_frame (str): 参考坐标系，默认为base_link
+
+        Returns:
+            Tuple[float, float, float] | None: 三维位置坐标(x,y,z)，失败返回None
+        """
+        try:
+            # 获取从参考坐标系到目标链接的变换
+            transform = self.tools_core._get_tf_tree_transform(
+                reference_frame,
+                link_name,
+                return_type="pose_quaternion"
+            )
+            if transform:
+                return KuavoPose(
+                    position=transform.position,
+                    orientation=transform.orientation
+                )
             return None
         except Exception as e:
             SDKLogger.error(f"获取{link_name}位置失败: {str(e)}")

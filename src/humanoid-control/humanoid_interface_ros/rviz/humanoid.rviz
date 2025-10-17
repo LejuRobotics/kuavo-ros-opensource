@@ -1,19 +1,17 @@
 Panels:
   - Class: rviz/Displays
-    Help Height: 78
+    Help Height: 0
     Name: Displays
     Property Tree Widget:
       Expanded:
         - /Global Options1
         - /Status1
-        - /RobotModel1
-        - /RobotModel1/Links1
-        - /TF1/Frames1
-        - /MarkerArray1
-        - /Marker1
-        - /Marker6
+        - /MarkerArray4
+        - /MarkerArray5
+        - /MarkerArray6
+        - /MarkerArray6/Namespaces1
       Splitter Ratio: 0.5
-    Tree Height: 455
+    Tree Height: 719
   - Class: rviz/Selection
     Name: Selection
   - Class: rviz/Tool Properties
@@ -31,7 +29,7 @@ Panels:
   - Class: rviz/Time
     Name: Time
     SyncMode: 0
-    SyncSource: ""
+    SyncSource: PointCloud2
 Preferences:
   PromptSaveOnExit: true
 Toolbars:
@@ -62,7 +60,7 @@ Visualization Manager:
       Collision Enabled: false
       Enabled: true
       Links:
-        All Links Enabled: false
+        All Links Enabled: true
         Expand Joint Details: false
         Expand Link Details: false
         Expand Tree: false
@@ -72,20 +70,10 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        camera_base:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: false
         dummy_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        head_camera:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         l_foot_heel:
           Alpha: 1
           Show Axes: false
@@ -182,6 +170,11 @@ Visualization Manager:
           Show Trail: false
           Value: true
         r_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        radar:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -290,12 +283,12 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-          Value: false
+          Value: true
         zhead_2_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-          Value: false
+          Value: true
       Name: RobotModel
       Robot Description: humanoid_description
       TF Prefix: ""
@@ -303,104 +296,12 @@ Visualization Manager:
       Value: true
       Visual Enabled: true
     - Class: rviz/TF
-      Enabled: true
+      Enabled: false
       Filter (blacklist): ""
       Filter (whitelist): ""
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        base_link:
-          Value: true
-        camera_base:
-          Value: true
-        dummy_link:
-          Value: false
-        head_camera:
-          Value: true
-        l_foot_heel:
-          Value: false
-        l_foot_toe:
-          Value: false
-        leg_l1_link:
-          Value: false
-        leg_l2_link:
-          Value: false
-        leg_l3_link:
-          Value: false
-        leg_l4_link:
-          Value: false
-        leg_l5_link:
-          Value: false
-        leg_l6_link:
-          Value: false
-        leg_r1_link:
-          Value: false
-        leg_r2_link:
-          Value: false
-        leg_r3_link:
-          Value: false
-        leg_r4_link:
-          Value: false
-        leg_r5_link:
-          Value: false
-        leg_r6_link:
-          Value: false
-        ll_foot_heel:
-          Value: false
-        ll_foot_toe:
-          Value: false
-        lr_foot_heel:
-          Value: false
-        lr_foot_toe:
-          Value: false
-        odom:
-          Value: true
-        r_foot_heel:
-          Value: false
-        r_foot_toe:
-          Value: false
-        rl_foot_heel:
-          Value: false
-        rl_foot_toe:
-          Value: false
-        rr_foot_heel:
-          Value: false
-        rr_foot_toe:
-          Value: false
-        zarm_l1_link:
-          Value: false
-        zarm_l2_link:
-          Value: false
-        zarm_l3_link:
-          Value: false
-        zarm_l4_link:
-          Value: false
-        zarm_l5_link:
-          Value: false
-        zarm_l6_link:
-          Value: false
-        zarm_l7_end_effector:
-          Value: false
-        zarm_l7_link:
-          Value: false
-        zarm_r1_link:
-          Value: false
-        zarm_r2_link:
-          Value: false
-        zarm_r3_link:
-          Value: false
-        zarm_r4_link:
-          Value: false
-        zarm_r5_link:
-          Value: false
-        zarm_r6_link:
-          Value: false
-        zarm_r7_end_effector:
-          Value: false
-        zarm_r7_link:
-          Value: false
-        zhead_2_link:
-          Value: true
       Marker Alpha: 1
       Marker Scale: 1
       Name: TF
@@ -408,71 +309,9 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        dummy_link:
-          {}
-        odom:
-          base_link:
-            leg_l1_link:
-              leg_l2_link:
-                leg_l3_link:
-                  leg_l4_link:
-                    leg_l5_link:
-                      leg_l6_link:
-                        l_foot_heel:
-                          {}
-                        l_foot_toe:
-                          {}
-                        ll_foot_heel:
-                          {}
-                        ll_foot_toe:
-                          {}
-                        lr_foot_heel:
-                          {}
-                        lr_foot_toe:
-                          {}
-            leg_r1_link:
-              leg_r2_link:
-                leg_r3_link:
-                  leg_r4_link:
-                    leg_r5_link:
-                      leg_r6_link:
-                        r_foot_heel:
-                          {}
-                        r_foot_toe:
-                          {}
-                        rl_foot_heel:
-                          {}
-                        rl_foot_toe:
-                          {}
-                        rr_foot_heel:
-                          {}
-                        rr_foot_toe:
-                          {}
-            zarm_l1_link:
-              zarm_l2_link:
-                zarm_l3_link:
-                  zarm_l4_link:
-                    zarm_l5_link:
-                      zarm_l6_link:
-                        zarm_l7_link:
-                          zarm_l7_end_effector:
-                            {}
-            zarm_r1_link:
-              zarm_r2_link:
-                zarm_r3_link:
-                  zarm_r4_link:
-                    zarm_r5_link:
-                      zarm_r6_link:
-                        zarm_r7_link:
-                          zarm_r7_end_effector:
-                            {}
-        zhead_2_link:
-          camera_base:
-            {}
-          head_camera:
-            {}
+        {}
       Update Interval: 0
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
       Enabled: true
       Marker Topic: /humanoid/optimizedStateTrajectory
@@ -497,10 +336,9 @@ Visualization Manager:
       Marker Topic: /humanoid/currentState
       Name: MarkerArray
       Namespaces:
-        Center of Pressure: true
-        EE Forces: true
-        EE Positions: true
-        Support Polygon: true
+        "": true
+        CoM Trajectory: true
+        Feet Trajectories: true
       Queue Size: 100
       Value: true
     - Class: rviz/InteractiveMarkers
@@ -554,14 +392,13 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
-      Enabled: true
+      Enabled: false
       Marker Topic: /humanoid/planedFootPositions
       Name: MarkerArray
       Namespaces:
-        foot_positions_back: true
-        foot_positions_front: true
+        {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_box_marker
@@ -632,6 +469,191 @@ Visualization Manager:
       Torque Color: 204; 204; 51
       Unreliable: false
       Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Class: grid_map_rviz_plugin/GridMap
+      Color: 200; 200; 200
+      Color Layer: elevation
+      Color Transformer: GridMapLayer
+      Enabled: true
+      Height Layer: elevation
+      Height Transformer: GridMapLayer
+      History Length: 1
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 10
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: GridMap
+      Show Grid Lines: true
+      Topic: /elevation_mapping/elevation_map
+      Unreliable: false
+      Use Rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1.020720362663269
+        Min Value: -0.9780092835426331
+        Value: true
+      Axis: Y
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Points
+      Topic: /depth_to_points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1.5207399129867554
+        Min Value: -1.4692578315734863
+        Value: true
+      Axis: Y
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 238; 238; 236
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Boxes
+      Topic: /l515/depth/color/points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: false
+      Value: false
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /polygon_new_markers
+      Name: MarkerArray
+      Namespaces:
+        polygons_new: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /humanoid/optimizedStateTrajectory
+      Name: MarkerArray
+      Namespaces:
+        "": true
+        CoM Trajectory: true
+        Feet Trajectories: true
+      Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 0.9738002419471741
+        Min Value: 0.9738002419471741
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: true
+      Marker Topic: /humanoid/currentState
+      Name: MarkerArray
+      Namespaces:
+        Center of Pressure: true
+        EE Forces: true
+        EE Positions: true
+        Support Polygon: true
+      Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Flat Squares
+      Topic: /convex_hull_foot_layer_eroded
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /l515/color/image_raw
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Image
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 0.41557949781417847
+        Min Value: -0.004317522048950195
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Flat Squares
+      Topic: /polygon_points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 255; 253; 212
@@ -660,7 +682,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 2.666560173034668
+      Distance: 3.8538379669189453
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -668,17 +690,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 0.18825635313987732
-        Y: -0.09394228458404541
-        Z: -0.052684277296066284
+        X: 0.09578222036361694
+        Y: -0.12621022760868073
+        Z: -0.4366334080696106
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: -0.11520352214574814
+      Pitch: 0.25479838252067566
       Target Frame: base_link
-      Yaw: 6.223176956176758
+      Yaw: 6.058183670043945
     Saved:
       - Class: rviz/Orbit
         Distance: 5.575319766998291
@@ -703,10 +725,10 @@ Visualization Manager:
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 752
+  Height: 1016
   Hide Left Dock: false
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd0000000400000000000001d700000252fc0200000008fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d00000252000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261000000010000010f00000356fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003f00000356000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e100000197000000030000056a0000003efc0100000002fb0000000800540069006d006501000000000000056a000003bc00fffffffb0000000800540069006d006501000000000000045000000000000000000000038d0000025200000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000400000000000001d70000035afc0200000008fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d0000035a000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261000000010000010f00000356fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003f00000356000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000007380000003efc0100000002fb0000000800540069006d0065010000000000000738000003bc00fffffffb0000000800540069006d006501000000000000045000000000000000000000055b0000035a00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Time:
@@ -715,6 +737,6 @@ Window Geometry:
     collapsed: false
   Views:
     collapsed: false
-  Width: 1386
-  X: 301
-  Y: 52
+  Width: 1848
+  X: 72
+  Y: 27

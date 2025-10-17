@@ -11,3 +11,4 @@ six==1.16.0
 soupsieve==2.5
 numpy-quaternion
 scipy==1.10.1
+aiortc==1.9.0

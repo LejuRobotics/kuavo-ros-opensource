@@ -84,16 +84,16 @@ public:
 
         // thumb
         auto iter = jga_.ctrladr().begin();
-        finger_status_.positions[0] = Joints2Curl(pos[0], {0.23, 1.36}, pos[0], {0.23, 1.36});
+        finger_status_.positions[1] = Joints2Curl(pos[0], {0.23, 1.36}, pos[0], {0.23, 1.36});
         // finger_status_.positions[0] = Joints2Curl(pos[0], ctrllimited_map_[*iter], pos[0], ctrllimited_map_[*iter]);
-        finger_status_.speeds[0] = vel[0];
-        finger_status_.currents[0] = tau[0];            
+        finger_status_.speeds[1] = vel[0];
+        finger_status_.currents[1] = tau[0];            
         iter++; 
 
-        finger_status_.positions[1] = Joints2Curl(pos[1], {0.16, 0.75}, pos[1], {0.16, 0.75});
+        finger_status_.positions[0] = Joints2Curl(pos[1], {0.16, 0.75}, pos[1], {0.16, 0.75});
         // finger_status_.positions[1] = Joints2Curl(pos[1], ctrllimited_map_[*iter], pos[1], ctrllimited_map_[*iter]);
-        finger_status_.speeds[1] = vel[1]; 
-        finger_status_.currents[1] = tau[1];        
+        finger_status_.speeds[0] = vel[1]; 
+        finger_status_.currents[0] = tau[1];        
         
         // index, middle, ring, little
         iter++;
@@ -154,9 +154,9 @@ public:
         
         auto iter = jga_.ctrladr().begin();
         // thumb
-        auto joint_cmd0 = Curl2Joints(ctrl_cmd_[0], ctrllimited_map_[*iter], ctrllimited_map_[*iter]);
+        auto joint_cmd0 = Curl2Joints(ctrl_cmd_[1], ctrllimited_map_[*iter], ctrllimited_map_[*iter]);
         iter++;
-        auto joint_cmd1 = Curl2Joints(ctrl_cmd_[1], ctrllimited_map_[*iter], ctrllimited_map_[*iter]);
+        auto joint_cmd1 = Curl2Joints(ctrl_cmd_[0], ctrllimited_map_[*iter], ctrllimited_map_[*iter]);
         iter++;
         ctrl_cmd.push_back(joint_cmd0[0]);
         ctrl_cmd.push_back(joint_cmd1[0]);

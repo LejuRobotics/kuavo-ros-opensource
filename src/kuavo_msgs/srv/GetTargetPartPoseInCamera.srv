@@ -1,0 +1,6 @@
+# Request can be empty if the target part is fixed or implicitly known by the service provider
+---
+# Response
+bool success                     # True if the pose was successfully retrieved
+string message                   # Optional message, e.g., for errors
+geometry_msgs/Pose pose_in_camera # Pose of the part in the robot's camera coordinate frame 

@@ -7,11 +7,10 @@ import numpy as np
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
 from kuavo_ros_interfaces.srv import stopPlanArmTrajectory
-from kuavo_ros_interfaces.msg import robotHandPosition, robotHeadMotionData
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
-from kuavo_msgs.msg import sensorsData
+from kuavo_msgs.msg import sensorsData, robotHandPosition, robotHeadMotionData
 
 # 机器人手臂的初始位置（以角度表示）
 # 机器人手臂的初始位置,包含28个关节角度值(单位:度)

@@ -10,7 +10,7 @@ import numpy as np
 from sensor_msgs.msg import JointState
 from tools.drake_trans import *
 from tools.quest3_utils import Quest3ArmInfoTransformer
-from handcontrollerdemorosnode.msg import robotHandPosition
+from kuavo_msgs.msg import robotHandPosition
 import argparse
 
 arm_joint_position = np.zeros(14)

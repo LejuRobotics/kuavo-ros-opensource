@@ -26,5 +26,6 @@
       <arg name="rvizconfig" default="$(find humanoid_interface_ros)/rviz/humanoid.rviz" />
       <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz" args="-d $(arg rvizconfig)" output="screen" />
     <!-- </group> -->
+    <param name="repo_root_path" value="$(find humanoid_controllers)/../../../"/>
 
 </launch>

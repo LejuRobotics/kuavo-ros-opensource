@@ -1,0 +1,17 @@
+<launch>
+  <arg name="play_back" default="true"/>
+  <arg name="sqp_mpc" default="1"/>
+  <param name="play_back" value="$(arg play_back)"/>
+  
+  <include file="$(find humanoid_controllers)/launch/play_back.launch">
+    <arg name="play_back" value="$(arg play_back)"/>
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
+    <arg name="rviz" value="true"/>
+    <arg name="visualize_mm" value="true"/>
+    <arg name="sqp_mpc" value="$(arg sqp_mpc)"/>
+  </include>
+
+</launch>

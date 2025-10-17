@@ -29,7 +29,7 @@
   - `yolo_detect_info.py`: 获取一次 `/object_yolo_box_tf2_torso_result` 检测结果基于机器人基座标系的位姿
 
 ## 📦 箱子识别
-
+> 如果需要得到快递盒相对于机器人的位置信息，即订阅object_yolo_box_tf2_torso_result“话题，需要先让机器人站立。
 **使用前需要打开摄像头**
 ```bash
 cd ~/kuavo_ros_application

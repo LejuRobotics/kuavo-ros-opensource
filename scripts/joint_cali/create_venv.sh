@@ -62,6 +62,7 @@ pip3 install cyipopt==1.1.0
 pip3 install pin==3.4.0
 pip3 install PyQt5==5.15.11
 pip3 install lz4
+pip3 install paramiko
 
 echo "📌 当前 Python 版本: $(python3 --version)"
 echo "📌 请注意：后续需要激活环境，运行：source \"$VENV_PATH/bin/activate\""

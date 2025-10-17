@@ -199,8 +199,8 @@ namespace ocs2
       {
         std::lock_guard<std::mutex> lock(receivedGaitMutex_);
         std::cerr << "[GaitReceiver]: Setting new gait after time " << finalTime << "\n";
-        std::cerr << receivedGait_;
-        // gaitSchedulePtr_->setGaitName(receivedGait_);
+        std::cerr << receivedGait_;gaitSchedulePtr_->setGaitName(receivedGait_);
+        
         gaitUpdated_ = false;
         current_mode_end_time_ = 0.0;
         // 判断为walk模式才enable
@@ -307,14 +307,7 @@ namespace ocs2
           std::swap(cfg.toeSwingHeight, cfg.heelSwingHeight);
         }
         swingTrajectoryPlannerPtr_->updateConfig(cfg);
-        bool walk_on_slope = swingTrajectoryPlannerPtr_->isWalkingOnSlope();
-        auto feet_normal_vectors = swingTrajectoryPlannerPtr_->getFeetNormalVectors();
-        ros_logger_->publishVector("/gait_receiver/lf_normal_vector", feet_normal_vectors.first);
-        ros_logger_->publishVector("/gait_receiver/rf_normal_vector", feet_normal_vectors.second);
-        double slope_threshold = 0.05;
-        walk_on_slope = feet_normal_vectors.first.head(2).norm() > slope_threshold || feet_normal_vectors.second.head(2).norm() > slope_threshold;
-        ros_logger_->publishValue("/gait_receiver/walk_on_slope", static_cast<double>(walk_on_slope));
-
+       
         if (std::abs(vx_desire) < 0.1 )
           mode_tmp.replaceModes(mode_to_scale, ModeNumber::SS);
         if (old_mode_template != mode_tmp)

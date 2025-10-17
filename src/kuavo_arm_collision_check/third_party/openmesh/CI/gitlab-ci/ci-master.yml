@@ -1,0 +1,64 @@
+stages:
+  - build
+  - test
+  - deploy
+
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+
+{linux.yml}
+
+{mac.yml}
+
+{windows.yml}
+
+Doc-publish:
+  stage: deploy
+  only:
+     - master
+  script: "CI/ci-doc.sh"
+  dependencies: []
+  tags:
+     - Linux
+     - stretch     
+
+Sources:
+  stage: deploy
+  only:
+     - master
+  script: "CI/ci-source.sh"
+  tags:
+     - Linux
+  dependencies: []
+  artifacts:
+    paths:
+      - OpenMesh*.zip
+      - OpenMesh*.tar.bz2
+      - OpenMesh*.tar.gz
+
+trigger_openmesh-python-rebuild:
+  stage: deploy
+  only:
+     - master
+  dependencies: []
+  script:
+    - "curl -X POST -F token=b63ed804ada51d7d1ffe5d6ea0dfa2 -F ref=track-OM-master https://gitlab.vci.rwth-aachen.de:9000/api/v4/projects/1024/trigger/pipeline"
+
+#Debian:
+#  stage: deploy
+#  only:
+#     - master
+#  script: 
+#     - mkdir .OpenMesh
+#     - cp -r * .OpenMesh
+#     - mv .OpenMesh OpenMesh
+#     - cd OpenMesh
+#     - dpkg-buildpackage --no-sign
+#  tags:
+#     - Linux
+#     - stretch
+#  dependencies: []
+#  artifacts:
+#    paths:
+#      - libopenmesh*.deb
+

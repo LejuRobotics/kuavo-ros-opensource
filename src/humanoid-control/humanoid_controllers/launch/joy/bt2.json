@@ -7,7 +7,9 @@
         "BUTTON_LB": 4,
         "BUTTON_RB": 5,
         "BUTTON_BACK": 6,
-        "BUTTON_START": 7
+        "BUTTON_START": 7,
+        "BUTTON_M1": 9,
+        "BUTTON_M2": 10
     },
     "JoyAxis": {
         "AXIS_LEFT_STICK_Y": 0,

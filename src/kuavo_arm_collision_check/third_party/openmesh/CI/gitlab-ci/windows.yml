@@ -1,0 +1,9 @@
+# -----------------
+# Windows tasks
+# -----------------
+
+{windows-template-job-apps.yml, ARCHITECTURE=x64, SHARED=TRUE, VSVERSION=VS2019, QTTAG=Qt612}
+{windows-template-job-apps.yml, ARCHITECTURE=x64, SHARED=FALSE, VSVERSION=VS2019, QTTAG=Qt612}
+
+{windows-template-job-apps.yml, ARCHITECTURE=x64, SHARED=TRUE, VSVERSION=VS2017, QTTAG=Qt5101}
+{windows-template-job-apps.yml, ARCHITECTURE=x64, SHARED=FALSE, VSVERSION=VS2017, QTTAG=Qt5101}

@@ -11,6 +11,7 @@ from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
 from kuavo_humanoid_sdk.kuavo.robot_arm import KuavoRobotArm 
 from kuavo_humanoid_sdk.kuavo.robot_head import KuavoRobotHead
 from kuavo_humanoid_sdk.common.websocket_kuavo_sdk import WebSocketKuavoSDK
+from kuavo_humanoid_sdk.common.launch_robot_tool import LaunchRobotTool
 
 """
 Kuavo SDK - Python Interface for Kuavo Robot Control
@@ -78,6 +79,59 @@ class KuavoSDK:
         SDKLogger.setLevel(log_level.upper())
         SDKLogger.debug(f" ================= Kuavo Humanoid Websocket SDK =================")
 
+        def launch_robot()->bool:
+            import time
+            import os
+            start_time = time.time()
+            launch_robot_tool = LaunchRobotTool()
+            
+            # 获取机器人启动状态
+            success, status = launch_robot_tool.get_robot_launch_status()
+            if not success:
+                # 可能websocket服务未启动或网络不通原因
+                SDKLogger.error(f"[SDK] Failed to get robot launch status: {status}")
+                return False
+
+            SDKLogger.info(f"[SDK] Robot launch status: {status}, time elapsed: {time.time() - start_time:.2f}s")
+
+            # 如果机器人已经启动，则直接返回True
+            if launch_robot_tool.is_launched(status):
+                return True
+            
+            # 未启动则启动
+            if launch_robot_tool.is_unlaunch(status):
+                print("\033[32m\n>_ 温馨提示: 机器人未启动，现在可以选择手动启动，如果需要请输入 y ，否则输入 n 退出\033[0m")
+                try:
+                    while True:
+                        choice = input().lower()
+                        if choice == 'y':
+                            if not launch_robot_tool.robot_start():
+                                SDKLogger.error("机器人启动失败，请检查机器人状态")
+                                os._exit(1)
+                            break
+                        elif choice == 'n':
+                            SDKLogger.warning("用户选择不启动机器人，程序退出。")
+                            os._exit(1)
+                        else:
+                            SDKLogger.error("输入错误，请输入 y 或 n")
+                except KeyboardInterrupt:
+                    os._exit(1)
+            
+            SDKLogger.debug(f"等待机器人启动，已耗时: {time.time() - start_time:.2f}s")
+           
+            if not launch_robot_tool.robot_stand():
+                SDKLogger.error("机器人站立失败，请检查机器人状态")
+                os._exit(1)
+
+            end_time = time.time()
+            SDKLogger.info(f"[SDK] Robot launch time: {end_time - start_time} seconds")
+            return True
+        
+        # Launch robot
+        if not launch_robot():
+            SDKLogger.error("[SDK] Failed to launch robot.")
+            return False
+
         # Initialize core components, connect ROS Topics...
         kuavo_core = KuavoRobotCore()
         if log_level.upper() == 'DEBUG':
@@ -90,8 +144,6 @@ class KuavoSDK:
                 print("\033[31m\nError:WithIK option is enabled but ik_node is not running, please run `roslaunch motion_capture_ik ik_node.launch`\033[0m")      
                 exit(1)
 
-
-
         if not kuavo_core.initialize(debug=debug):
             SDKLogger.error("[SDK] Failed to initialize core components.")
             return False
@@ -102,6 +154,18 @@ class KuavoSDK:
     def DisableLogging():
         """Disable all logging output from the SDK."""
         disable_sdk_logging()
+
+    @staticmethod
+    def StopRobot()->bool:
+        """Stop the robot."""
+        launch_robot_tool = LaunchRobotTool()
+        success, status = launch_robot_tool.get_robot_launch_status()
+        if not success:
+            SDKLogger.error(f"[SDK] Failed to get robot launch status: {status}")
+            return False
+        if launch_robot_tool.is_unlaunch(status):
+            return True
+        return launch_robot_tool.robot_stop()
 
 class KuavoRobot(RobotBase):
     def __init__(self):

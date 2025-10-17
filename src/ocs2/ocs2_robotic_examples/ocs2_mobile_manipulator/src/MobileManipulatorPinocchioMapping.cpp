@@ -89,6 +89,14 @@ auto MobileManipulatorPinocchioMappingTpl<SCALAR>::getPinocchioJointVelocity(con
       vPinocchio << cos(theta) * v_x - sin(theta) * v_y, sin(theta) * v_x + cos(theta) * v_y, input.segment(2, 3), input.tail(modelInfo_.armDim);
       break;
     }
+    case ManipulatorModelType::ActuatedZPitchManipulator: {
+      const auto v_z = input(0);  // z velocity in base frame
+      const auto d_pitch = input(1);  // pitch velocity in base frame
+      vector_t base(6);
+      base << SCALAR(0), SCALAR(0), v_z, SCALAR(0), d_pitch, SCALAR(0);
+      vPinocchio << base, input.tail(modelInfo_.armDim);
+      break;
+    }
     default: {
       throw std::runtime_error("The chosen manipulator model type is not supported!");
     }
@@ -138,6 +146,21 @@ auto MobileManipulatorPinocchioMappingTpl<SCALAR>::getOcs2Jacobian(const vector_
                                      sin(theta),  cos(theta);
       // clang-format on
       dfdu.template leftCols<5>() = Jv.template leftCols<5>() * dvdu_base;
+      dfdu.template rightCols(modelInfo_.armDim) = Jv.template rightCols(modelInfo_.armDim);
+      return {Jq, dfdu};
+    }
+    case ManipulatorModelType::ActuatedZPitchManipulator: {
+      matrix_t dfdu(Jv.rows(), modelInfo_.inputDim);
+      Eigen::Matrix<SCALAR, 6, 2> dvdu_base = Eigen::Matrix<SCALAR, 6, 2>::Zero();
+      // clang-format off
+      dvdu_base << SCALAR(0), SCALAR(0),
+                   SCALAR(0), SCALAR(0),
+                   SCALAR(1), SCALAR(0),
+                   SCALAR(0), SCALAR(0),
+                   SCALAR(0), SCALAR(1),
+                   SCALAR(0), SCALAR(0);
+      // clang-format on
+      dfdu.template leftCols<2>() = Jv.template leftCols<6>() * dvdu_base;
       dfdu.template rightCols(modelInfo_.armDim) = Jv.template rightCols(modelInfo_.armDim);
       return {Jq, dfdu};
     }

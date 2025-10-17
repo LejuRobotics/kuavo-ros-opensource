@@ -131,7 +131,7 @@ namespace ocs2
       };
 
       // left dexhand(大拇指关节)
-      dexhand_joint_positions_[0] = Curl2Joints(positions[0], {0.23, 1.36}, {0.23, 1.36})[0];
+      dexhand_joint_positions_[0] = Curl2Joints(positions[1], {0.23, 1.36}, {0.23, 1.36})[0];
       dexhand_joint_positions_[1] = Curl2Joints(positions[0], {0.16, 0.75}, {0.16, 0.75})[0];
 
 
@@ -154,8 +154,8 @@ namespace ocs2
       }
 
       // right dexhand(大拇指关节)
-      dexhand_joint_positions_[10] = Curl2Joints(positions[6], {0.23, 1.36}, {0.23, 1.36})[0];
-      dexhand_joint_positions_[11] = Curl2Joints(positions[7], {0.16, 0.75}, {0.16, 0.75})[0];
+      dexhand_joint_positions_[10] = Curl2Joints(positions[7], {0.23, 1.36}, {0.23, 1.36})[0];
+      dexhand_joint_positions_[11] = Curl2Joints(positions[6], {0.16, 0.75}, {0.16, 0.75})[0];
 
       // right dexhand(非大拇指关节)
       for(int i = 0; i < 4; i++) {

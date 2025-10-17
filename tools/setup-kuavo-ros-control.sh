@@ -84,11 +84,29 @@ clone_repos() {
     print_success "代码仓库克隆/更新完成"
 }
 
+check_samplerate(){
+    print_info "正在安装 samplerate..."
+    sudo bash ~/kuavo-ros-opensource/tools/user_groups_tools/samplerate_install.sh
+    if [ $? -eq 0 ]; then
+        print_success "samplerate 安装完成"
+    else
+        print_error "samplerate 安装失败，请检查日志"
+        exit 1
+    fi
+}
+
 # Configure robot version
 setup_robot_version() {
     print_info "设置机器人版本..."
-    print_info "请输入机器人版本 (42代表短臂, 45代表长臂):"
+    print_info "请输入机器人版本 (42代表短臂, 45代表长臂, 49代表 pro max, 45.1代表假手版, 49.1代表展厅版):"
     read -r version
+    if [[ "$version" == "45.1" || "$version" == "49.1" ]]; then
+    if [[ "$version" == "45.1" ]]; then
+        version=100045
+    else
+        version=100049
+    fi
+fi
     
     # 准备要添加的环境变量行
     export_line="export ROBOT_VERSION=$version"
@@ -144,6 +162,26 @@ setup_drive_board() {
     print_success "驱动板类型设置为 $board_type"
 }
 
+# 检查音频设备并修改配置文件中的音频格式
+check_and_update_audio_config() {
+    print_info "检查音频设备..."
+    # 检查是否存在音频设备（如card0）
+    if sudo aplay -l | grep -i Audio ; then
+        print_success "检测到音频设备，正在修改音频配置文件中的 .mp3 为 .wav ..."
+        config_file=~/kuavo-ros-opensource/src/humanoid-control/h12pro_controller_node/config/customize_config.json
+        if [ -f "$config_file" ]; then
+            sed -i 's/\.mp3/\.wav/g' "$config_file"
+            print_success "已将 $config_file 中的 .mp3 替换为 .wav"
+        else
+            print_error "未找到配置文件 $config_file，无法修改音频格式"
+        fi
+    else
+        print_info "未检测到音频设备，无需修改音频配置文件"
+    fi
+}
+
+# 在合适位置调用该函数
+
 # Configure arm motor config
 setup_arm_motor() {
     print_info "配置手臂电机配置文件"
@@ -196,6 +234,24 @@ setup_arm_motor() {
     cp "$src_config" "$dest_config"
     
     print_success "手臂电机配置文件配置完成"
+}
+
+# Configure hand real
+setup_hand_real() {
+    print_info "配置手部真实设备"
+
+    # Ask if it's a long arm
+    read -p "是假手机器人吗？ (y/n): " is_fake_hand
+
+    if [[ "$is_fake_hand" == "y" || "$is_fake_hand" == "Y" ]]; then
+        print_info "配置假手机器人手部设备"
+        sed -i 's/Left_joint_arm_5: 0x[^ ]*/Left_joint_arm_5: 0x00/' ~/.config/lejuconfig/config.yaml
+        sed -i 's/Left_joint_arm_6: 0x[^ ]*/Left_joint_arm_6: 0x00/' ~/.config/lejuconfig/config.yaml
+        sed -i 's/Right_joint_arm_5: 0x[^ ]*/Right_joint_arm_5: 0x00/' ~/.config/lejuconfig/config.yaml
+        sed -i 's/Right_joint_arm_6: 0x[^ ]*/Right_joint_arm_6: 0x00/' ~/.config/lejuconfig/config.yaml
+    else
+        print_info "配置展厅版手部设备"
+    fi
 }
 
 setup_hand_usb() {
@@ -266,6 +322,7 @@ setup_end_effector() {
     print_info "请选择末端执行器类型:"
     echo "1) 灵巧手"
     echo "2) 二指夹爪"
+    echo "3) 触觉灵巧手"
     read -r effector_choice
     
     if [ "$effector_choice" = "1" ]; then
@@ -276,7 +333,14 @@ setup_end_effector() {
         
     elif [ "$effector_choice" = "2" ]; then
         sed -i 's/"EndEffectorType": \[.*\]/"EndEffectorType": ["lejuclaw", "lejuclaw"]/' ~/kuavo-ros-opensource/src/kuavo_assets/config/kuavo_v${ROBOT_VERSION}/kuavo.json
+        sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="lejuclaw"\/>/' ~/kuavo-ros-opensource/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch
+        sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="lejuclaw"\/>/' ~/kuavo-ros-opensource/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch
         print_success "二指夹爪配置完成"
+    elif [ "$effector_choice" = "3" ]; then
+        sed -i 's/"EndEffectorType": \[.*\]/"EndEffectorType": ["qiangnao_touch", "qiangnao_touch"]/' ~/kuavo-ros-opensource/src/kuavo_assets/config/kuavo_v${ROBOT_VERSION}/kuavo.json
+         sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="qiangnao_touch"\/>/' ~/kuavo-ros-opensource/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch
+        sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="qiangnao_touch"\/>/' ~/kuavo-ros-opensource/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch
+        print_success "触觉灵巧手配置完成"
     fi
 }
 
@@ -417,10 +481,13 @@ main() {
     check_system_time
     setup_pip
     clone_repos
+    check_samplerate
+    check_and_update_audio_config
     setup_robot_version
     setup_robot_weight
     setup_drive_board
     setup_arm_motor
+    setup_hand_real
     setup_end_effector
     install_vr_deps
     build_project

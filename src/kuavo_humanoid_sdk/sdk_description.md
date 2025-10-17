@@ -14,7 +14,7 @@
   - 躯干状态(位置、姿态、速度)
   - 里程计信息
   - 末端执行器状态:
-    - 夹持器(lejuclaw): 位置、速度、力矩、抓取状态
+    - 夹爪(lejuclaw): 位置、速度、力矩、抓取状态
     - 灵巧手(qiangnao): 位置、速度、力矩
     - 触觉灵巧手(qiangnao_touch): 位置、速度、力矩、触觉状态
     - 末端执行器位置和姿态
@@ -27,7 +27,7 @@
     - 用于计算末端执行器位姿的正运动学(FK)
     - 复杂动作的关键帧序列控制
   - 末端执行器控制
-    - 夹持器控制(可配置速度和力矩的位置控制)
+    - 夹爪控制(可配置速度和力矩的位置控制)
     - 灵巧手控制
       - 位置控制
       - 预定义手势(OK、666、握拳等)控制
@@ -205,13 +205,13 @@ https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid
 
 一个获取机器人基本信息的示例。
 
-[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/robot_info_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/robot_info_example.py)
+[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/robot_info_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/robot_info_example.py)
 
 ### 运动控制示例
 
 一个基本示例，用于初始化 SDK 并控制机器人运动。
 
-[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/motion_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/motion_example.py)
+[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/motion_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/motion_example.py)
 
 ### 末端执行器控制示例
 
@@ -219,37 +219,37 @@ https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid
 
 展示如何控制 LejuClaw 夹爪末端执行器的示例，包括位置、速度和力矩控制。
 
-[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/lejuclaw_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/lejuclaw_example.py)
+[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/lejuclaw_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/lejuclaw_example.py)
 
 #### QiangNao 灵巧手
 
 展示如何控制 QiangNao 灵巧手的示例，这是一个具有多个自由度的灵巧机器人手，可用于复杂的操作任务。
 
-[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/dexhand_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/dexhand_example.py)
+[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/dexhand_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/dexhand_example.py)
 
 ### 手臂控制示例
 
 展示手臂轨迹控制和目标姿态控制的示例。
 
-[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/ctrl_arm_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/ctrl_arm_example.py)
+[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/ctrl_arm_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/ctrl_arm_example.py)
 
 ### 手臂正向运动学和逆向运动学示例
 
 展示如何使用正向运动学(FK)从关节角度计算末端执行器位置，以及如何使用逆向运动学(IK)计算实现期望末端执行器姿态所需的关节角度的示例。
 
-[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/arm_ik_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/arm_ik_example.py)
+[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/arm_ik_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/arm_ik_example.py)
 
 ### 头部控制示例
 
 展示如何控制机器人头部运动的示例，包括点头(俯仰)和摇头(偏航)动作。
 
-[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/ctrl_head_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/ctrl_head_example.py)
+[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/ctrl_head_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/ctrl_head_example.py)
 
 ### 单步控制示例
 
 展示如何控制机器人按照自定义落足点轨迹运动的示例。
 
-[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/step_control_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/step_control_example.py)
+[https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/step_control_example.py](https://gitee.com/leju-robot/kuavo-ros-opensource/tree/master/src/kuavo_humanoid_sdk/examples/atomic_skills/step_control_example.py)
 
 
 ## 许可证

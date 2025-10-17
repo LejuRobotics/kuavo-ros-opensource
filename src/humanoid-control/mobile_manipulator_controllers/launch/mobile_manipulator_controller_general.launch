@@ -1,0 +1,34 @@
+<launch>
+  <!-- Enable rviz visualization -->
+  <arg name="rviz"        default="true" />
+  <!-- Set nodes on debug mode -->
+  <arg name="debug"       default="false" />
+  <!-- mpc_type 1 for SQP and 0 for DDP  -->
+  <arg name="sqp_mpc"     default="1"/>
+  <arg name="dummy_sim_arm" default="1"/>
+  <arg name="visualize_humanoid" default="true"/>
+  <arg name="visualize_mm" default="true"/>
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+  <arg name="com_height" default="0.8"/> <!-- TODO: 需要根据实际情况更改 -->
+
+  <!-- The URDF model of the robot -->
+  <!-- <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s42/urdf/biped_s42_l.urdf" /> -->
+  <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <!-- The task file for the mpc. -->
+  <arg name="taskFile"    value="$(find ocs2_mobile_manipulator)/config/kuavo/task.info" />
+  <!-- The library folder to generate CppAD codegen into -->
+  <arg name="libFolder"   value="$(find ocs2_mobile_manipulator)/auto_generated/kuavo" />
+
+  <!-- make the files into global parameters -->
+  <param name="mm/taskFile"   value="$(arg taskFile)" />
+  <param name="mm/urdfFile"   value="$(arg urdfFile)" />
+  <param name="mm/libFolder"  value="$(arg libFolder)" />
+  <param name="mm/mpcType"    value="$(arg sqp_mpc)" />
+  <param name="dummy_sim_arm" value="$(arg dummy_sim_arm)" />
+  <param name="visualize_humanoid" value="$(arg visualize_humanoid)" />
+  <param name="visualize_mm"  value="$(arg visualize_mm)" />
+  <param name="com_height"    value="$(arg com_height)" />
+
+  <node pkg="mobile_manipulator_controllers" type="mobile_manipulator_controllers_node_general" name="mobile_manipulator_controllers_node_general" output="screen" />
+
+</launch>

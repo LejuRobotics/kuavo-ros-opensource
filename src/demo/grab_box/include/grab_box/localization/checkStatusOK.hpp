@@ -24,12 +24,15 @@ namespace GrabBox
       subObservation_ = nh.subscribe("/humanoid_wbc_observation", 10, &CheckStatusOK::observationCallback, this);
       continuousTrackClient_ = nh.serviceClient<std_srvs::SetBool>("/continuous_track");
       // eePoseSubscriber_ = nh.subscribe<kuavo_msgs::endEffectorData>("/humanoid_ee_State", 1, &CheckStatusOK::eePoseCallback, this);
-      eePoseSubscriber_ = nh.subscribe<std_msgs::Float64MultiArray>("/mobile_manipulator_eef_poses", 10, &CheckStatusOK::eePoseCallback, this);
+      // eePoseSubscriber_ = nh.subscribe<std_msgs::Float64MultiArray>("/mobile_manipulator_eef_poses", 10, &CheckStatusOK::eePoseCallback, this);
+      eePoseSubscriber_ = nh.subscribe<std_msgs::Float64MultiArray>("/humanoid_controller/wbc_arm_eef_pose", 10, &CheckStatusOK::eePoseCallback, this);
+
       terrainHeightSubscriber_ = nh.subscribe<std_msgs::Float64>("/humanoid/mpc/terrainHeight", 1, &CheckStatusOK::terrainHeightCallback, this);
+      single_step_mode_sub_ = nh.subscribe("/humanoid/single_step_mode", 10, &CheckStatusOK::singleStepModeCallback, this);
 
       while(!nh.hasParam("/com_height"))
       {
-        ROS_ERROR_STREAM("com_height parameter is NOT found, waiting for 0.1s.");
+        // ROS_ERROR_STREAM("com_height parameter is NOT found, waiting for 0.1s.");
         ros::Duration(0.1).sleep();
       }
       ROS_INFO_STREAM("[CheckStatusOK] com_height parameter is founded.");
@@ -37,12 +40,13 @@ namespace GrabBox
       ROS_INFO_STREAM("[CheckStatusOK] com_height: " << com_height_);
       while(!ee_pose_updated_)
       {
-        ROS_WARN("[CheckStatusOK] Waiting for end-effector pose...");
-        ros::Duration(0.01).sleep();
+        // ROS_WARN("[CheckStatusOK] Waiting for end-effector pose...");
+        ros::Duration(0.1).sleep();
         ros::spinOnce();
       }
       ROS_INFO("[CheckStatusOK] Already received end-effector pose.");
       config.blackboard->set<std::string>("current_gait_name", "stance");
+      config.blackboard->set<bool>("continuous_tracking_started", continuous_tracking_started_);
     }
 
     static BT::PortsList providedPorts()
@@ -53,11 +57,13 @@ namespace GrabBox
     BT::NodeStatus tick() override final
     {
       ros::spinOnce();
+      config().blackboard->get<bool>("continuous_tracking_started", continuous_tracking_started_);
       if(!continuous_tracking_started_)
       {
         if(setContinuousTracking(true))
           continuous_tracking_started_ = true;
       }
+      config().blackboard->set<bool>("continuous_tracking_started", continuous_tracking_started_);
       if(!ee_pose_updated_)
       {
         ROS_WARN("Failed to get end-effector pose.");
@@ -111,10 +117,10 @@ namespace GrabBox
     void eePoseCallback(const std_msgs::Float64MultiArray::ConstPtr& msg)
     {
       HandPose real_hand_pose_l, real_hand_pose_r;
-      double z_bias = com_height_ + terrain_height_;
-      real_hand_pose_l.first << msg->data[0], msg->data[1], msg->data[2] + z_bias;
+      // double z_bias = com_height_ + terrain_height_;
+      real_hand_pose_l.first << msg->data[0], msg->data[1], msg->data[2];
       real_hand_pose_l.second = Eigen::Quaterniond(msg->data[6], msg->data[3], msg->data[4], msg->data[5]);
-      real_hand_pose_r.first << msg->data[7], msg->data[8], msg->data[9] + z_bias;
+      real_hand_pose_r.first << msg->data[7], msg->data[8], msg->data[9];
       real_hand_pose_r.second = Eigen::Quaterniond(msg->data[13], msg->data[10], msg->data[11], msg->data[12]);
       config().blackboard->set<TwoHandPose>("real_hand_poses", {real_hand_pose_l, real_hand_pose_r});
       ee_pose_updated_ = true;
@@ -136,12 +142,18 @@ namespace GrabBox
       config().blackboard->set<std::string>("current_gait_name", msg->gait_name);
       std::cout << "[CheckStatusOK] current[" << msg->start_time << "] gait name : " << msg->gait_name << std::endl;
     }
-  
+
+    void singleStepModeCallback(const std_msgs::Bool::ConstPtr& msg)
+    {
+      config().blackboard->set<bool>("single_step_mode", msg->data);
+    }
+
   private:
     ros::Subscriber subObservation_;
     ros::Subscriber eePoseSubscriber_;
     ros::Subscriber terrainHeightSubscriber_;
     ros::Subscriber gait_time_name_sub_;
+    ros::Subscriber single_step_mode_sub_;
     ros::Publisher eef_pose_pub_;
     ocs2::SystemObservation latestObservation_;
     ros::ServiceClient continuousTrackClient_; // Service client for continuous tracking

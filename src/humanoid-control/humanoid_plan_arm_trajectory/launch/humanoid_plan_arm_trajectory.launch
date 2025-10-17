@@ -5,8 +5,14 @@
     <param name="joint_state_unit" value="deg" />
     <arg name="use_nodelet" default="false" />
 
-    <node pkg="humanoid_plan_arm_trajectory" type="arm_trajectory_bezier_process.py" name="autostart_arm_trajectory_bezier_demo" output="screen" />
+    <group if="$(eval optenv('KUAVO_CONTROL_SCHEME', '') == 'rl')">
+        <param name="end_effector_joints_num" value="12" />
+    </group>
 
+    <arg name="arm_restore_flag" default="True" doc="Signs of whether the arm needs to be reduced after performing the movement." />
+    <node pkg="humanoid_plan_arm_trajectory" type="arm_trajectory_bezier_process.py" name="autostart_arm_trajectory_bezier_demo" output="screen" >
+        <param name="arm_restore_flag" value="$(arg arm_restore_flag)" />
+    </node>
     <group if="$(arg use_nodelet)">
         <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" output="screen" />
         <node pkg="nodelet" type="nodelet" name="humanoid_plan_arm_trajectory_nodelet" 

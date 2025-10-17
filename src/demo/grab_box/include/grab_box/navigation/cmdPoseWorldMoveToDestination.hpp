@@ -58,10 +58,12 @@ namespace GrabBox
         return BT::NodeStatus::FAILURE;
       }
       getInput<Eigen::Vector4d>("target_pose", target_pose_);
-      std::cout << "target_pose: " << target_pose_.transpose() << std::endl;
+      // std::cout << "target_pose: " << target_pose_.transpose() << std::endl;
       target_pose_(3) *= M_PI / 180.0; // 转化为弧度制
 
       Eigen::VectorXd torso_pose = ocs2_state_.segment<4>(6);
+      // std::cout << "torso_pose: " << torso_pose.transpose() << std::endl;
+      // std::cout << "torso_pose: " << torso_pose.transpose() << std::endl;
       if(checkTargetReached(target_pose_, torso_pose))
       {
         std::string gait_name = "stance";
@@ -70,7 +72,13 @@ namespace GrabBox
           ROS_ERROR("Failed to retrieve current_gait_name from blackboard");
           return BT::NodeStatus::FAILURE;
         }
-        if(gait_name == "stance")
+        bool single_step_mode = false;
+        if(!config().blackboard->get("single_step_mode", single_step_mode))
+        {
+          ROS_ERROR("Failed to retrieve single_step_mode from blackboard");
+          return BT::NodeStatus::FAILURE;
+        }
+        if(gait_name == "stance" || (gait_name == "custom_gait" && !single_step_mode))
           return BT::NodeStatus::SUCCESS;
         else{
           ROS_INFO("[CmdPoseWorldMoveToDestination]: Target reached, waiting for switching to stance gait");
@@ -79,7 +87,7 @@ namespace GrabBox
       }
       else
       {
-        std::cout << "[CmdPoseWorldMoveToDestination] torso error: " << (target_pose_ - torso_pose).transpose() << std::endl;
+        // std::cout << "[CmdPoseWorldMoveToDestination] torso error: " << (target_pose_ - torso_pose).transpose() << std::endl;
         cmdPosePublisher_.publish(getCmdPose(target_pose_));
         return BT::NodeStatus::RUNNING;
       }
@@ -158,8 +166,9 @@ namespace GrabBox
     bool checkTargetReached(const Eigen::VectorXd &target_pose, const Eigen::VectorXd &current_pose)
     {
       double xy_error = (target_pose.head(2) - current_pose.head(2)).norm();
-      double yaw_error = std::abs(normalizedYaw(normalizedYaw(target_pose(3)) - normalizedYaw(current_pose(3))));
-      // std::cout << "[CmdPoseWorldMoveToDestination] yaw_error : " << yaw_error << std::endl;
+      // std::cout << "target yaw: " << target_pose(3) << " current yaw: " << current_pose(3) << std::endl;
+      double yaw_error = M_PI/180.0*std::abs(normalizedYaw(normalizedYaw(180/M_PI*target_pose(3)) - normalizedYaw(180/M_PI*current_pose(3))));
+      // std::cout << "[CmdPoseWorldMoveToDestination] yaw_error : " << yaw_error << " rad." << std::endl;
       return xy_error < xy_threshold_ && yaw_error < yaw_threshold_;
     }
 
@@ -168,7 +177,7 @@ namespace GrabBox
     ros::Subscriber gait_time_name_sub_;
     ros::ServiceClient auto_gait_mode_client_;
 
-    string current_gait_= "stance";
+    std::string current_gait_= "stance";
     Eigen::Vector4d target_pose_;      // (x, y, z, yaw)
     Eigen::Vector4d current_pose_;     // 机器人当前位姿 (x, y, yaw)
     double xy_threshold_ = 0.05; // m

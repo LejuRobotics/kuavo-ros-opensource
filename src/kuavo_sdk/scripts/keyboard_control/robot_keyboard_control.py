@@ -669,6 +669,7 @@ class KeyBoardRobotController:
             self.joy_msg.buttons[BUTTON_Y] = 1  # 发送walk
         elif key == 'c':
             self.joy_msg.buttons[BUTTON_A] = 1  # 发送stance
+            self.joy_msg.axes = [0.0] * 8  # Reset all axes to zero
             
         cmdvel = [self.joy_msg.axes[AXIS_LEFT_STICK_X],self.joy_msg.axes[AXIS_LEFT_STICK_Y], 0, 0, 0, self.joy_msg.axes[AXIS_RIGHT_STICK_YAW]]
         print(f"cmdvel: {[f'{x * 100:.0f}%' for x in cmdvel]}", end='\r')
