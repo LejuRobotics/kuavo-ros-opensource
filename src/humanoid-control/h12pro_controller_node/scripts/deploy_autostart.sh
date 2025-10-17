@@ -38,6 +38,7 @@ NOITOM_HI5_HAND_UDP_PYTHON=$KUAVO_ROS_CONTROL_WS_PATH/src/manipulation_nodes/noi
 KUAVO_REMOTE_PATH=$(dirname $SCRIPT_DIR)/lib/kuavo_remote
 ROBOT_VERSION=$ROBOT_VERSION
 INSTALLED_DIR=$KUAVO_ROS_CONTROL_WS_PATH/installed
+RL_INSTALLED_DIR=$KUAVO_RL_WS_PATH/installed
 cd $H12PRO_CONTROLLER_NODE_DIR
 pip3 install -r requirements.txt
 pip3 install -r $NOITOM_HI5_HAND_UDP_PYTHON/requirements.txt
@@ -49,6 +50,10 @@ echo "KUAVO_REMOTE_PATH: $KUAVO_REMOTE_PATH"
 
 if [ "$KUAVO_CONTROL_SCHEME" = "rl" ]; then
     cd $KUAVO_RL_WS_PATH
+    if [ -d "$RL_INSTALLED_DIR" ] && [ -f "$RL_INSTALLED_DIR/setup.bash" ]; then
+        echo "Sourcing existing installation..."
+        source $RL_INSTALLED_DIR/setup.bash
+    fi
     catkin build humanoid_controllers
 fi
 

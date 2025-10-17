@@ -132,6 +132,7 @@ add_message_files(
   AudioReceiverData.msg
 
   Color.msg
+  AudioPlaybackStatus.msg
 )
 
 ## Generate services in the 'srv' folder
