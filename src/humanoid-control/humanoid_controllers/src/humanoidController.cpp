@@ -2393,12 +2393,19 @@ namespace humanoid_controller
       ROS_WARN_STREAM("Pull up detected");
       isPullUp_ = true;
       setPullUpState_=true;
+      pull_up_trigger_time_ = currentObservation_.time;  // 记录触发时间
     }
-    // else if (!new_pull_up_state && isPullUp_)// TODO:拉起之后重新站立
-    // {
-    //   ROS_WARN_STREAM("Pull up end");
-    //   isPullUp_ = false;
-    // }
+    else if (isPullUp_ && (currentObservation_.time - pull_up_trigger_time_ > 2.0))
+    {
+      ROS_WARN_STREAM("Pull up protection triggered - publishing stop_robot message");
+      isPullUp_ = false;
+      
+      // 发布stop_robot话题
+      std_msgs::Bool stop_msg;
+      stop_msg.data = true;
+      stop_pub_.publish(stop_msg);
+      ROS_WARN_STREAM("stop_robot message published");
+    }
     ros_logger_->publishVector("/state_estimate/measuredRbdState", measuredRbdState_);
     auto &info = HumanoidInterface_->getCentroidalModelInfo();
 
