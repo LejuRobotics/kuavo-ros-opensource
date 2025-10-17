@@ -146,7 +146,7 @@ git clone https://gitee.com/leju-robot/leju_robot_rl.git
 - 下载kuavo_rl_opensource仓库
 
 ```bash
-git clone -b https://gitee.com/leju-robot/kuavo-rl-opensource.git
+git clone -b beta https://gitee.com/leju-robot/kuavo-rl-opensource.git
 ```
 
 1.  **修改 `launch` 文件，文件位置为`/home/lab/kuavo-rl-opensource/kuavo-robot-deploy/src/humanoid-control/humanoid_controllers/launch`。**
