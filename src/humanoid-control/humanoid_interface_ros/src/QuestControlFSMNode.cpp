@@ -27,6 +27,11 @@
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/headBodyPose.h>
+#include <kuavo_msgs/footPose.h>
+#include <kuavo_msgs/footPoseTargetTrajectories.h>
+#include <kuavo_msgs/getCurrentGaitName.h>
+#include <std_srvs/Trigger.h>
+#include "utils/singleStepControl.hpp"
 
 namespace ocs2
 {
@@ -38,7 +43,54 @@ namespace ocs2
     TARGET_DEFAULT = 3,
     };
 
+    // 创建足部轨迹消息的辅助函数（使用HumanoidControl单步控制工具）
+    // body_pose： [x(m), y(m), z(m), yaw(deg)]
+    kuavo_msgs::footPoseTargetTrajectories CreateFootPoseTrajectory(const std::vector<Eigen::Vector4d>& body_poses) {
+        // 使用HumanoidControl的get_multiple_steps_msg函数生成轨迹
+        // 参数：身体姿态序列，时间步长，脚步间距，碰撞检测
+        return HumanoidControl::get_multiple_steps_msg(body_poses, 0.4, 0.1, true);
+    }
 
+    // 单步转向区间定义
+    struct TurnStepZone {
+        float min_value;     // 摇杆区间最小值
+        float max_value;     // 摇杆区间最大值
+        kuavo_msgs::footPoseTargetTrajectories trajectory;  // 足部轨迹
+    };
+
+    // 定义转向区间
+    static const std::vector<TurnStepZone> kTurnZones = {
+        // 右转区间 (0.0~1.0)
+        {0.0f, 0.15f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.01, -0.01, 0.0, -15.0)
+        })},  // 小角度右转
+         {0.151f, 0.45f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.03, -0.03, 0.0, -30.0)
+        })},  // 小角度右转
+        {0.451f, 0.75f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.04, -0.04, 0.0, -45.0)
+        })}, // 中角度右转
+        {0.751f, 1.0f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.06, -0.06, 0.0, -60.0)
+        })}, // 大角度右转
+        // 左转区间 (-1.0~0.0)
+         {-0.15f, 0.0f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.01, 0.01, 0.0, 15.0)
+        })}, // 小角度左转
+        {-0.45f, -0.15f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.03, 0.03, 0.0, 30.0)
+        })}, // 小角度左转
+        {-0.75f, -0.451f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.04, 0.04, 0.0, 45.0)
+        })}, // 中角度左转
+        {-1.0f, -0.751f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.06, 0.06, 0.0, 60.0)
+        })} // 大角度左转
+    };
+
+    // 60度轨迹数据（已移除，但保留注释）
+    //         {0.75f, 1.0f, CreateFootPoseTrajectory(0.117f, 0.08f, -1.047f, -0.057f, -0.02f, -1.047f)}, // 60度右转
+    //         {0.75f, 1.0f, CreateFootPoseTrajectory(-0.057f, 0.08f, 1.047f, 0.117f, -0.02f, 1.047f)}  // 60度左转
 
     class QuestControlFSM 
     {
@@ -133,6 +185,13 @@ namespace ocs2
             command_add_height_pre_ = 0.0;
 
             arm_mode_pub_ = nodeHandle_.advertise<std_msgs::Int32>("/quest3/triger_arm_mode", 1);
+
+            // 添加足部轨迹发布者
+            foot_pose_target_pub_ = nodeHandle_.advertise<kuavo_msgs::footPoseTargetTrajectories>("/humanoid_mpc_foot_pose_target_trajectories", 10);
+
+            // 添加查询当前步态服务客户端
+            get_current_gait_service_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_get_current_gait");
+            get_current_gait_name_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::getCurrentGaitName>("/humanoid_get_current_gait_name");
 
             // 添加arm_collision_control服务
             arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
@@ -423,7 +482,20 @@ namespace ocs2
             if (!only_half_up_body_) {
                 // 全身控制时才支持步态控制
                 checkGaitSwitchCommand(joystick_data_);
-                updateCommandLine();
+
+                // 动态检查单步转向参数是否存在
+                bool step_turning_enabled = false;
+                if (nodeHandle_.hasParam("/quest3/use_step_turning")) {
+                    nodeHandle_.getParam("/quest3/use_step_turning", step_turning_enabled);
+                }
+
+                // 添加单步转向控制
+                if (step_turning_enabled) {
+                    updateSingleStepTurning();
+                }
+                else {
+                    updateCommandLine();
+                }
             }
             return;
             std::string new_state = state_;
@@ -482,6 +554,110 @@ namespace ocs2
             msg.data[0] =  -waist_yaw;
             std::cout << "waist_yaw" << waist_yaw <<std::endl;
             waist_motion_pub_.publish(msg);
+        }
+
+        // 获取当前步态名称
+        std::string getCurrentGaitName()
+        {
+            kuavo_msgs::getCurrentGaitName srv;
+            if (get_current_gait_name_service_client_.call(srv)) {
+                if (srv.response.success) {
+                    return srv.response.gait_name;
+                } else {
+                    ROS_WARN("Failed to get current gait name - service returned success: false");
+                    return "";
+                }
+            } else {
+                ROS_ERROR("Failed to call /humanoid_get_current_gait_name service");
+                return "";
+            }
+        }
+
+        void updateSingleStepTurning()
+        {
+
+            // 时间控制参数
+            constexpr double kStableThreshold = 0.20;    // 稳定阈值 X 秒
+            constexpr float kDeadzone = 0.05f;            // 死区
+
+            // 获取摇杆值
+            float right_x = joystick_data_.right_x;
+            float left_x = joystick_data_.left_x;
+            float left_y = joystick_data_.left_y;
+
+            // 应用死区 - 如果右摇杆X轴在死区内，但其他轴有输入，则执行正常运动控制
+            if (std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone ||std::abs(left_y) >= kDeadzone)) {
+                turn_step_current_zone_ = -1;
+                // 有其他摇杆输入，执行正常运动控制
+                updateCommandLine();
+                return;
+            }
+
+            // 检测当前所在区间
+            int current_zone = -1;
+
+            // 直接检测摇杆值所在的区间
+            for (size_t i = 0; i < kTurnZones.size(); ++i) {
+                if (right_x >= kTurnZones[i].min_value && right_x < kTurnZones[i].max_value) {
+                    current_zone = i;
+                    break;
+                }
+            }
+
+            // 如果不在任何区间，重置状态
+            if (current_zone == -1) {
+                turn_step_current_zone_ = -1;
+                return;
+            }
+
+            // 如果区间发生变化，重置时间
+            if (current_zone != turn_step_current_zone_) {
+                turn_step_current_zone_ = current_zone;
+                turn_step_zone_enter_time_ = ros::Time::now();
+                turn_step_zone_stable_ = false;
+                return;
+            }
+
+            ros::Time current_time = ros::Time::now();
+
+            // 检查是否在区间内稳定超过阈值时间
+            if (!turn_step_zone_stable_) {
+                if ((current_time - turn_step_zone_enter_time_).toSec() >= kStableThreshold) {
+                    turn_step_zone_stable_ = true;
+                } else {
+                    return; // 还未稳定，继续等待
+                }
+            }
+    
+            // 根据区间选择不同的控制方式
+            if (current_zone >= 0 && current_zone < static_cast<int>(kTurnZones.size()) &&
+                !kTurnZones[current_zone].trajectory.footPoseTrajectory.empty()) {
+
+                // 调用服务检查当前是否是Custom-Gait模式
+                std_srvs::SetBool gait_srv;
+                gait_srv.request.data = false;
+
+                bool service_call_success = get_current_gait_service_client_.call(gait_srv);
+
+                if (service_call_success && !gait_srv.response.success) {
+                    // 服务返回success: False，表示当前不是Custom-Gait模式，继续检查步态名称
+                    std::string current_gait = getCurrentGaitName();
+                    bool is_stance = (current_gait == "stance");
+                    if (is_stance) {
+                        foot_pose_target_pub_.publish(kTurnZones[current_zone].trajectory);
+                        ROS_INFO("Zone %d trajectory published - not Custom-Gait and current gait is stance", current_zone);
+                    } else if(current_gait == "walk") {
+                        // 先站立再单步
+                        publish_mode_sequence_temlate("stance");
+                        publish_zero_spd();
+                    }
+                     else {
+                        ROS_INFO("Zone %d trajectory blocked - current gait is '%s' (not stance)", current_zone, current_gait.c_str());
+                    }
+                }
+            }
+
+            ROS_INFO("Single step turn executed: zone=%d", current_zone);
         }
 
         void publish_zero_spd()
@@ -887,6 +1063,8 @@ namespace ocs2
         ros::ServiceClient change_arm_mode_service_VR_client_;
         ros::ServiceClient get_arm_mode_service_client_;
         ros::ServiceClient enable_wbc_arm_trajectory_control_client_;
+        ros::ServiceClient vr_waist_control_service_client_;  // VR腰部控制动态Q矩阵服务客户端
+        ros::ServiceClient auto_gait_mode_service_client_;    // GaitReceiver自动步态模式服务客户端
         ros::ServiceServer arm_collision_control_service_;
 
         // 腰部控制相关的订阅者和发布者
@@ -934,7 +1112,16 @@ namespace ocs2
         // 手臂碰撞控制，当前是否处于发生碰撞，手臂回归控制中
         bool arm_collision_control_{false};
 
+        // 单步转向控制状态变量
+        int turn_step_current_zone_{-1};                 // 当前所在区间 (-1表示不在任何区间)
+        ros::Time turn_step_zone_enter_time_;            // 进入当前区间时间
+        bool turn_step_zone_stable_{false};              // 是否在区间内稳定超过阈值时间
+        ros::Time turn_step_last_execute_time_;          // 上次执行时间
+
         ros::Publisher arm_mode_pub_;
+        ros::Publisher foot_pose_target_pub_;
+        ros::ServiceClient get_current_gait_service_client_;
+        ros::ServiceClient get_current_gait_name_service_client_;
     };
 }
 

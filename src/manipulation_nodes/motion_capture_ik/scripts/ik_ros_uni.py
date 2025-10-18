@@ -931,7 +931,8 @@ class IkRos:
 
 
     def pub_robot_end_hand(self, joyStick_data=None, hand_finger_data = None):
-        if hand_finger_data is None or hand_finger_data[0] is None or hand_finger_data[1] is None:
+        # hand tracking 时判断保护
+        if hand_finger_data is not None and len(hand_finger_data) < 2:
             return
         global control_finger_type
         left_hand_position = [0 for i in range(6)]
