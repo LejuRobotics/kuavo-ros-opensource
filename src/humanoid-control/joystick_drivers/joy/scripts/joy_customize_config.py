@@ -22,7 +22,7 @@ ROS_MASTER_URI = os.getenv("ROS_MASTER_URI", "")
 ROS_IP = os.getenv("ROS_IP", "")
 ROS_HOSTNAME = os.getenv("ROS_HOSTNAME", "")
 KUAVO_ROS_CONTROL_WS_PATH = os.getenv("KUAVO_ROS_CONTROL_WS_PATH", "/home/lmx/real_ws/kuavo-ros-control")
-TAIJI_ACTION_SESSION_NAME = "taiji_action"
+
 
 class JoyCustomizeConfigNode:
     def __init__(self) -> None:
@@ -483,28 +483,9 @@ class JoyCustomizeConfigNode:
 
                         # 情况 5: RT（轴）按下、LT 未按下
                         elif self._rt_pressed and not self._lt_pressed and self.joy_execute_action:
-                            # 特殊处理：RT + B 触发太极动作，并从配置读取 music_name 播放音频
-                            if button_name == "B":
-                                action_key = f"customize_action_RT_{button_name}"
-                                rospy.loginfo(f"RT + B released, running play_taiji_action() and playing music from config: {action_key}")
-                                try:
-                                    music_names = []
-                                    if action_key in self.customize_config:
-                                        cfg = self.customize_config[action_key]
-                                        music_names = cfg.get("music_name", [])
-                                        if isinstance(music_names, str):
-                                            music_names = [music_names]
-                                    if music_names:
-                                        music_thread = threading.Thread(target=self._play_music, args=(music_names,))
-                                        music_thread.daemon = True
-                                        music_thread.start()
-                                except Exception as e:
-                                    rospy.logwarn(f"Failed to start music thread from config for {action_key}: {e}")
-                                self.play_taiji_action()
-                            else:
-                                action_key = f"customize_action_RT_{button_name}"
-                                rospy.loginfo(f"RT + {button_name} released, triggering {action_key}")
-                                self._execute_customize_action(action_key)
+                            action_key = f"customize_action_RT_{button_name}"
+                            rospy.loginfo(f"RT + {button_name} released, triggering {action_key}")
+                            self._execute_customize_action(action_key)
 
             # Update previous states
             self._prev_buttons = list(joy_msg.buttons)
@@ -513,86 +494,121 @@ class JoyCustomizeConfigNode:
         except Exception as e:
             rospy.logwarn(f"Error in joy callback: {e}")
 
+    def execute_action_type(self, action_config):
+        """处理action类型的自定义动作"""
+        arm_pose_names = action_config.get("arm_pose_name", [])
+        music_names = action_config.get("music_name", [])
+        rospy.loginfo(f"Executing regular action")
+        rospy.loginfo(f"Arm poses: {arm_pose_names}")
+        rospy.loginfo(f"Music: {music_names}")
+
+        # 创建线程执行动作和音乐
+        if arm_pose_names:
+            arm_pose_thread = threading.Thread(target=self._execute_arm_poses, args=(arm_pose_names,))
+            arm_pose_thread.start()
+
+        if music_names:
+            music_thread = threading.Thread(target=self._play_music, args=(music_names,))
+            music_thread.start()
+
+        # 等待线程完成
+        if arm_pose_names:
+            arm_pose_thread.join()
+        if music_names:
+            music_thread.join()
+
+    def execute_shell_type(self, action_config):
+        """处理shell类型的自定义动作"""
+        rospy.loginfo(f"Executing shell command")
+        # 从配置中获取shell命令
+        shell_command = action_config.get("command", "")
+
+        if shell_command:
+            try:
+                # 更安全地解析命令参数，避免索引错误
+                command_parts = shell_command.split(" ")
+                if len(command_parts) < 2:
+                    raise ValueError("Invalid command format")
+
+                ACTION_SESSION_NAME = command_parts[1].split("/")[-1].split(".")[0]
+
+                subprocess.run(["tmux", "kill-session", "-t", ACTION_SESSION_NAME],
+                               stderr=subprocess.DEVNULL)
+
+                print(f"script_cmd: {shell_command}")
+                print(f"If you want to check the session, please run 'tmux attach -t {ACTION_SESSION_NAME}'")
+                # 仅导出存在的ROS相关环境变量，避免覆盖为空
+                export_lines = [
+                    f"export ROBOT_VERSION={ROBOT_VERSION}" if ROBOT_VERSION else "",
+                    f"export ROS_MASTER_URI={ROS_MASTER_URI}" if ROS_MASTER_URI else "",
+                    f"export ROS_IP={ROS_IP}" if ROS_IP else "",
+                    f"export ROS_HOSTNAME={ROS_HOSTNAME}" if ROS_HOSTNAME else "",
+                ]
+                export_lines = [line for line in export_lines if line]
+
+                session_cmd = " && ".join([
+                    "source ~/.bashrc",
+                    f"source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash",
+                    *export_lines,
+                    shell_command,
+                ]) + "; exec bash"
+
+                tmux_cmd = [
+                    "tmux", "new-session",
+                    "-s", ACTION_SESSION_NAME,
+                    "-d",
+                    session_cmd
+                ]
+
+                subprocess.Popen(
+                    tmux_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+
+                rospy.sleep(5.0)
+
+                result = subprocess.run(["tmux", "has-session", "-t", ACTION_SESSION_NAME],
+                                        capture_output=True)
+                if result.returncode == 0:
+                    print(f"Started {ACTION_SESSION_NAME} in tmux session")
+                else:
+                    print(f"Failed to start {ACTION_SESSION_NAME}")
+                    raise Exception(f"Failed to start {ACTION_SESSION_NAME}")
+
+            except Exception as e:
+                rospy.logerr(f"Error executing shell command '{shell_command}': {e}")
+                raise
+        else:
+            rospy.logwarn(f"No shell_command found for action")
+
     def _execute_customize_action(self, action_key: str) -> None:
         """执行自定义动作"""
         try:
             if action_key in self.customize_config:
                 action_config = self.customize_config[action_key]
-                arm_pose_names = action_config.get("arm_pose_name", [])
-                music_names = action_config.get("music_name", [])
+                action_type = action_config.get("type", "")  # 获取type字段
+
+                # 使用字典映射方式调用对应的处理函数
+                action_handlers = {
+                    "action": lambda: self.execute_action_type(action_config),
+                    "shell": lambda: self.execute_shell_type(action_config)
+                }
                 
-                rospy.loginfo(f"Executing action: {action_key}")
-                rospy.loginfo(f"Arm poses: {arm_pose_names}")
-                rospy.loginfo(f"Music: {music_names}")
-                
-                # 创建线程执行动作和音乐
-                if arm_pose_names:
-                    arm_pose_thread = threading.Thread(target=self._execute_arm_poses, args=(arm_pose_names,))
-                    arm_pose_thread.start()
-                
-                if music_names:
-                    music_thread = threading.Thread(target=self._play_music, args=(music_names,))
-                    music_thread.start()
-                
-                # 等待线程完成
-                if arm_pose_names:
-                    arm_pose_thread.join()
-                if music_names:
-                    music_thread.join()
-                    
+                # 获取并调用对应的处理函数
+                handler = action_handlers.get(action_type)
+                if handler:
+                    handler()
+                else:
+                    rospy.logwarn(f"Unsupported action type: {action_type}")
+
             else:
                 rospy.logwarn(f"No configuration found for action: {action_key}")
                 
         except Exception as e:
             rospy.logerr(f"Error executing customize action {action_key}: {e}")
 
-    def play_taiji_action(self):
-        subprocess.run(["tmux", "kill-session", "-t", TAIJI_ACTION_SESSION_NAME], 
-                        stderr=subprocess.DEVNULL) 
 
-        taiji_script_cmd = f"python3 {KUAVO_ROS_CONTROL_WS_PATH}/src/demo/csv2body_demo/step_player_csv_ocs2.py"
-        
-        print(f"taiji_script_cmd: {taiji_script_cmd}")
-        print(f"If you want to check the session, please run 'tmux attach -t {TAIJI_ACTION_SESSION_NAME}'")
-        # 仅导出存在的ROS相关环境变量，避免覆盖为空
-        export_lines = [
-            f"export ROBOT_VERSION={ROBOT_VERSION}" if ROBOT_VERSION else "",
-            f"export ROS_MASTER_URI={ROS_MASTER_URI}" if ROS_MASTER_URI else "",
-            f"export ROS_IP={ROS_IP}" if ROS_IP else "",
-            f"export ROS_HOSTNAME={ROS_HOSTNAME}" if ROS_HOSTNAME else "",
-        ]
-        export_lines = [line for line in export_lines if line]
-
-        session_cmd = " && ".join([
-            "source ~/.bashrc",
-            f"source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash",
-            *export_lines,
-            taiji_script_cmd,
-        ]) + "; exec bash"
-
-        tmux_cmd = [
-            "tmux", "new-session",
-            "-s", TAIJI_ACTION_SESSION_NAME, 
-            "-d",  
-            session_cmd
-        ]
-        
-        process = subprocess.Popen(
-            tmux_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        rospy.sleep(5.0)
-        
-        result = subprocess.run(["tmux", "has-session", "-t", TAIJI_ACTION_SESSION_NAME], 
-                                capture_output=True)
-        if result.returncode == 0:
-            print(f"Started {TAIJI_ACTION_SESSION_NAME} in tmux session")
-        else:
-            print(f"Failed to start {TAIJI_ACTION_SESSION_NAME}")
-            raise Exception(f"Failed to start {TAIJI_ACTION_SESSION_NAME}")
-    
     def _gradually_move_right_stick_down(self, time=0.1, times=10) -> None:
         while times > 0:
             cmd_vel_msg = Twist()

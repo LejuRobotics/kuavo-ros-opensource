@@ -7,14 +7,72 @@ from kuavo_msgs.msg import footPose
 from kuavo_msgs.msg import footPoseTargetTrajectories, armTargetPoses
 from kuavo_msgs.msg import gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode
+from kuavo_msgs.srv import playmusic, playmusicRequest
 from ocs2_msgs.msg import mpc_observation
 import csv
 import math
 from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 import argparse
-import time;
+import time
 from std_msgs.msg import Float64MultiArray
+import threading  # 添加线程支持
+
+class MusicPlayer:
+    """音乐播放器类，用于在独立线程中播放音乐"""
+    
+    def __init__(self):
+        """初始化音乐播放器"""
+        # 等待音乐播放服务
+        rospy.loginfo("等待音乐播放服务...")
+        rospy.wait_for_service('/play_music')
+        self.play_music_service = rospy.ServiceProxy('/play_music', playmusic)
+        self.music_thread = None
+        self.is_playing = False
+        rospy.loginfo("音乐播放服务已就绪")
+    
+    def play_music(self, music_file, volume=80):
+        """在独立线程中播放音乐文件
+        
+        参数:
+            music_file: 音乐文件路径
+            volume: 音量 (0-100)
+        """
+
+        if self.is_playing:
+            rospy.logwarn("音乐正在播放中，请先停止当前音乐")
+            return False
+            
+        self.music_thread = threading.Thread(target=self._play_music_thread, args=(music_file, volume))
+        self.music_thread.daemon = True
+        self.music_thread.start()
+        return True
+    
+    def _play_music_thread(self, music_file, volume):
+        """音乐播放线程函数"""
+        try:
+            self.is_playing = True
+            request = playmusicRequest()
+            request.music_number = music_file
+            request.volume = volume
+            
+            response = self.play_music_service(request)
+            if response.success_flag:
+                rospy.loginfo(f"成功播放音乐: {music_file}")
+            else:
+                rospy.logerr(f"播放音乐失败: {music_file}")
+        except rospy.ServiceException as e:
+            rospy.logerr(f"调用音乐播放服务失败: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"播放音乐时发生错误: {str(e)}")
+        finally:
+            self.is_playing = False
+    
+    def stop(self):
+        """停止音乐播放"""
+        self.is_playing = False
+        if self.music_thread and self.music_thread.is_alive():
+            self.music_thread.join(timeout=1.0)
 
 class ActionPlayer:
     """动作播放器，用于控制机器人执行预定义的动作序列"""
@@ -41,7 +99,8 @@ class ActionPlayer:
         rospy.wait_for_service('/humanoid_change_arm_ctrl_mode')
         self.change_arm_mode = rospy.ServiceProxy('/arm_traj_change_mode', changeArmCtrlMode)
         rospy.loginfo("手臂控制模式服务已就绪")
-        
+
+
         # 动作数据
         self.step_control = []
         
@@ -52,6 +111,9 @@ class ActionPlayer:
         # 步态执行时间
         self.gait_start_time = None
         self.gait_start_time_received = False
+
+        # 音乐文件路径
+        self.music_file = None
         
         # 订阅MPC观测话题
         self.mpc_obs_sub = rospy.Subscriber(
@@ -462,11 +524,12 @@ class ActionPlayer:
             rospy.logerr(f"调用手臂控制模式服务失败: {str(e)}")
             return False
     
-    def execute_action_with_csv(self, time_offset=None):
+    def execute_action_with_csv(self, time_offset=None, music_file=None):
         """执行动作序列
         
         Args:
             time_offset: 时间偏移量，如果为None则不设置偏移
+            music_file: 音乐文件路径，如果提供则在动作开始时播放
         """
         if not self.step_control:
             rospy.logerr("未加载手臂数据")
@@ -483,6 +546,10 @@ class ActionPlayer:
             rospy.logerr("无法切换到手臂外部控制模式，终止执行")
             rospy.set_param('/taiji_executing', False)  # 清除状态标志
             return
+
+        # # 播放音乐（如果指定了音乐文件）
+        # if music_file:
+        #     self.music_player.play_music(music_file)
             
         # 等待接收到MPC时间
         timeout = rospy.Duration(5.0)  # 5秒超时
@@ -570,11 +637,14 @@ def main():
                        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "actions", "taiji_step_roban_stable.csv"))
     parser.add_argument('--time-offset', type=float, help='轨迹开始时间的偏移量(秒)。正值表示在当前MPC时间基础上延迟执行，负值或当前时间之前的值将被忽略（使用默认值-1）')
     parser.add_argument('--time-scale', type=float, default=1.0, help='时间缩放系数。>1 放慢，<1 加快，=1 不变')
+    parser.add_argument('--music-file', type=str, default="taiji.wav",help='音乐文件路径，在动作执行时播放')
     
     # 解析命令行参数
     args = parser.parse_args()
     
     player = ActionPlayer(time_scale=args.time_scale)
+    music_player = MusicPlayer()
+
     
     # 加载动作数据
     if not player.load_action_with_csv(args.csv_file):
@@ -582,10 +652,10 @@ def main():
     
     # 等待ROS系统就绪
     rospy.sleep(1)
-    
     try:
         # 执行动作序列
-        player.execute_action_with_csv(args.time_offset)
+        music_player.play_music(args.music_file)
+        player.execute_action_with_csv(args.time_offset, args.music_file)
     except rospy.ROSInterruptException:
         rospy.loginfo("动作执行被中断")
         # 确保清除太极执行状态标志

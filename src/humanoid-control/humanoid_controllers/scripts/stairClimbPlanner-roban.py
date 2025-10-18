@@ -44,7 +44,7 @@ class StairClimbingPlanner:
         self.ss_time = 0.6
         self.foot_width = 0.108535  # 宽
         self.step_height = 0.08  # 台阶高度
-        self.step_length = 0.28  # 台阶长度,28,13
+        self.step_length = 0.25  # 台阶长度,28,13
         self.total_step = 0  # 总步数
         self.is_left_foot = False
         
@@ -692,6 +692,8 @@ def publish_foot_pose_traj(time_traj, foot_idx_traj, foot_traj, torso_traj, swin
                          footPoseTargetTrajectories, queue_size=10)
     rospy.sleep(1)
 
+    num = len(time_traj)
+
     msg = footPoseTargetTrajectories()
     msg.timeTrajectory = time_traj
     msg.footIndexTrajectory = foot_idx_traj
@@ -704,6 +706,7 @@ def publish_foot_pose_traj(time_traj, foot_idx_traj, foot_traj, torso_traj, swin
         foot_pose_msg.torsoPose = torso_traj[i]
         msg.footPoseTrajectory.append(foot_pose_msg)
         
+        swing_trajectories = None
         # 如果有腾空相轨迹，添加到消息中
         if swing_trajectories is not None and i < len(swing_trajectories):
             swing_poses = footPoses()
@@ -716,6 +719,7 @@ def publish_foot_pose_traj(time_traj, foot_idx_traj, foot_traj, torso_traj, swin
                 msg.additionalFootPoseTrajectory.append(footPoses())
         else:
             msg.additionalFootPoseTrajectory.append(footPoses())  # 添加空的轨迹
+            msg.swingHeightTrajectory = [0.1] * num
 
     pub.publish(msg)
     rospy.sleep(1.5)
