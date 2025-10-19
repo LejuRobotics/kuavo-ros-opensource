@@ -417,7 +417,7 @@ class KuavoUnifiedBreakin:
         
         # 检查EC_master_tools.py的依赖
         ec_master_dir = self.leg_breakin_script.parent
-        build_dir = ec_master_dir / "build"
+        build_dir = ec_master_dir / "build_lib"
         ec_master_so = build_dir / "ec_master_wrap.so"
         
         if not build_dir.exists() or not ec_master_so.exists():
