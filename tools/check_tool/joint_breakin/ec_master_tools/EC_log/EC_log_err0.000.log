@@ -1,10 +1,5 @@
-0000006228: ERROR: Redundancy Line break 1 slaves on main and 1 slaves on red
-0000007234: ERROR: Redundancy Line break 2 slaves on main and 2 slaves on red
-0000008240: ERROR: Redundancy Line break 3 slaves on main and 3 slaves on red
-0000009246: ERROR: Redundancy Line break 4 slaves on main and 4 slaves on red
-0000010252: ERROR: Redundancy Line break 5 slaves on main and 5 slaves on red
-0000011259: ERROR: Redundancy Line break 6 slaves on main and 6 slaves on red
-0000012266: ERROR: Redundancy Line break 7 slaves on main and 7 slaves on red
-0000013273: Redundancy - Line fixed
-0000035257: DC slaves "out-of-sync" - Deviation: 0x0
-0000035257: DC Slave "", EtherCAT address = 0
+0000008267: emllI8254x(0x00000002): LinkOsGetPciInfo returns ERROR: Not found
+0000008267: CEcDeviceBase::Open() Failed to open link layer!
+0000008267: ecatInitMaster(): Cannot open redundant EtherCAT device!
+0000009273: Cannot initialize EtherCAT-Master: ERROR: Not found (0x9811000c))
+0000009273: ERROR: Cannot de-initialize EtherCAT-Master: ERROR: Invalid state (0x9811000e)
