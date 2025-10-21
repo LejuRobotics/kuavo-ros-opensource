@@ -16,6 +16,15 @@ if [ "$ROBOT_VERSION" == "42" ] || [ "$ROBOT_VERSION" == "32" ]; then
         echo -e "\033[33m\n由 $FILE_PATH 文件指定的EcMaster类型为:\`$(cat $FILE_PATH)\`\033[0m\n" >&2
     fi
     chmod 0777 $FILE_PATH
+elif [[ "$ROBOT_VERSION" =~ ^1[0-9]$ ]]; then
+    # 如果是1X版本（roban机器人），设置为leju
+    if [ ! -f "$FILE_PATH" ]; then
+        echo -e "\033[33m\nWarning: 未指定硬件EcMaster类型(只运行仿真可以忽略), 实物机器将默认使用\`leju\`类型驱动器\033[0m" >&2
+        echo "leju" > $FILE_PATH
+    else
+        echo -e "\033[33m\n由 $FILE_PATH 文件指定的EcMaster类型为:\`$(cat $FILE_PATH)\`\033[0m\n" >&2
+    fi
+    chmod 0777 $FILE_PATH
 fi
 
 IMU_TYPE_FILE="$HOME/.config/lejuconfig/ImuType.ini"

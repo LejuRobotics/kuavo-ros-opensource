@@ -21,6 +21,8 @@ class KuavoRobotInfo(RobotInfoBase):
         self._head_joint_dof = kuavo_ros_param['head_dof']
         self._head_joint_names = self._joint_names[-2:]
         self._arm_joint_names = self._joint_names[12:self._arm_joint_dof + 12]
+        self._init_stand_height = kuavo_ros_param['init_stand_height']
+
     @property
     def robot_version(self) -> str:
         """返回 Kuavo 机器人的版本。
@@ -108,6 +110,25 @@ class KuavoRobotInfo(RobotInfoBase):
                 例如 ("zarm_l7_link", "zarm_r7_link") \n
         """
         return self._end_frames_names[1], self._end_frames_names[2]
+
+    @property
+    def init_stand_height(self) -> float:
+        """返回 Kuavo 机器人初始化站立时的质心高度。
+
+        Returns:
+            float: 初始化站立时的质心高度
+        """
+        return self._init_stand_height
     
     def __str__(self) -> str:
-        return f"KuavoRobotInfo(robot_type={self.robot_type}, robot_version={self.robot_version}, end_effector_type={self.end_effector_type}, joint_names={self.joint_names}, joint_dof={self.joint_dof}, arm_joint_dof={self.arm_joint_dof})"
+        return (
+            f"KuavoRobotInfo("
+            f"robot_type={self.robot_type}, "
+            f"robot_version={self.robot_version}, "
+            f"end_effector_type={self.end_effector_type}, "
+            f"joint_names={self.joint_names}, "
+            f"joint_dof={self.joint_dof}, "
+            f"arm_joint_dof={self.arm_joint_dof}, "
+            f"init_stand_height={self.init_stand_height}"
+            f")"
+        )

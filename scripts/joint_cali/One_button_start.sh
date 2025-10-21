@@ -132,6 +132,29 @@ else
     done
 fi
 
+# 检查机器人是否成功启动
+
+SERVICE="/mobile_manipulator_mpc_control"
+TIMEOUT=30
+
+echo "等待 $SERVICE 出现..."
+
+found=0
+for ((i=0; i<TIMEOUT; i++)); do
+    if rosservice list | grep -q "$SERVICE"; then
+        echo "✅ 服务 $SERVICE 已经出现，继续执行..."
+        found=1
+        break
+    fi
+    sleep 1
+done
+
+if [[ $found -eq 0 ]]; then
+    echo "❌ 超时：未检测到服务 $SERVICE，请检查机器人是否站立成功或者机器人是否启用运动学 MPC 控制！！！"
+    exit 1
+fi
+
+
 # 3. 启动上位机launch（标定所需的相机和Tag识别）
 echo "==========================================================="
 echo "步骤3: 启动上位机AprilTag识别系统..."

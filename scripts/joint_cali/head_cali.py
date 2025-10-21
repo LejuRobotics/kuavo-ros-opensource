@@ -87,9 +87,9 @@ class HeadCali:
         self.plant = MultibodyPlant(0.0)
         Parser(self.plant).AddModelFromFile(urdf_path)
 
-        self.plant.WeldFrames(self.plant.world_frame(), self.plant.GetFrameByName("dummy_link"))
         self.plant.Finalize()
         self.context = self.plant.CreateDefaultContext()
+        self.default_q = self.plant.GetPositions(self.context)
         print("nq:", self.plant.num_positions())
         print("nv:", self.plant.num_velocities())
         print("nf:", self.plant.num_actuated_dofs())
@@ -97,7 +97,7 @@ class HeadCali:
 
     def get_camera_pose(self, q1, q2):
         nq = self.plant.num_positions()
-        q = np.zeros(nq)
+        q = self.default_q.copy()
         q[-2] = q1
         q[-1] = q2
         self.plant.SetPositions(self.context, q)
@@ -343,3 +343,4 @@ if __name__ == '__main__':
         main()
     except Exception as e:
         print(e)
+

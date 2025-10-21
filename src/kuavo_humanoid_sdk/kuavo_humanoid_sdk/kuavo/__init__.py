@@ -9,3 +9,8 @@ from .robot_audio import KuavoRobotAudio
 from .dexterous_hand import DexterousHand, TouchDexterousHand
 from .leju_claw import LejuClaw
 from .robot_observation import KuavoRobotObservation
+from .robot_blockly import RobotControlBlockly
+from .robot_microphone import RobotMicrophone
+from .robot_navigation import RobotNavigation
+from .robot_speech import RobotSpeech
+from .dexterous_hand import DexterousHand

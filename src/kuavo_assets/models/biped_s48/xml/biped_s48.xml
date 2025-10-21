@@ -164,8 +164,10 @@
                     <joint name="zarm_l7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-12 12" damping="0.2" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_pitch" />
                     <geom size="0.005" pos="0 -0.03 -0.17" />
-                    <geom pos="0 0 -0.07" quat="0.000563312 -0.000562864 0.706825 -0.707388" type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_palm" />
-                    <geom pos="0 0 -0.07" quat="0.000563312 -0.000562864 0.706825 -0.707388" type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_palm" />
+                    <body name="l_palm" pos="0 0 -0.07" quat="0.000563312 -0.000562864 0.706825 -0.707388">
+                      <inertial pos="0.0017239 0.0051432 -0.031065" quat="1 0 0 0" mass="0.427" diaginertia="0.0010405 0.0013244 0.00053219" />
+                      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="l_palm" />
+                    </body>
                     <body name="l_thumb_prox" pos="0.024537 -0.023242 -0.0926135" quat="0.349346 -0.374856 0.58539 -0.628298">
                         <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.005" diaginertia="9e-05 7e-05 5e-05" />
                         <joint name="l_thumbCMC" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.5708" damping="1.0" />
@@ -262,8 +264,10 @@
                     <joint name="zarm_r7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-12 12" damping="0.2" />
                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_pitch" />
                     <geom size="0.005" pos="0 0.03 -0.17" />
-                    <geom pos="0 0 -0.07" quat="0.707388 -0.706825 0 0" type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="r_palm" />
-                    <geom pos="0 0 -0.07" quat="0.707388 -0.706825 0 0" type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_palm" />
+                    <body name="r_palm" pos="0 0 -0.07" quat="0.707388 -0.706825 0 0">
+                      <inertial pos="-0.00099373 0.040537 -0.0022835" quat="1 0 0 0" mass="0.427" diaginertia="0.0010405 0.0013244 0.00053219" />
+                      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="r_palm" />
+                    </body>
                     <body name="r_thumb_prox" pos="0.0245 0.0216473 -0.0941828" quat="0.685709 -0.685164 -0.173784 0.173645">
                         <inertial pos="0.0062041 -7.9383e-08 0.0015306" quat="0.486357 0.51328 0.51328 0.486357" mass="0.005" diaginertia="9e-05 7e-05 5e-05" />
                         <joint name="r_thumbCMC" pos="0 0 0" axis="0 -1 0" limited="true" range="0 1.5708" damping="1.0" />

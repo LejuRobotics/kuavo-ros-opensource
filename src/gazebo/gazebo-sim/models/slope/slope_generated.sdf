@@ -1,0 +1,84 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="double_ramp">
+    <static>true</static>
+    <link name="up_ramp">
+      <pose>0 0.9659258262890683 0.25881904510252074 0.2617993877991494 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>1.0 2.0 0.02</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>1.0 2.0 0.02</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Metal</name>
+          </script>
+          <ambient>0.7 0.7 0.7 1</ambient>
+          <diffuse>0.7 0.7 0.7 1</diffuse>
+          <specular>0.8 0.8 0.8 1</specular>
+        </material>
+      </visual>
+    </link>
+    <link name="platform">
+      <pose>0 2.4318516525781364 0.5176380902050415 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>1.0 1.0 0.02</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>1.0 1.0 0.02</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Metal</name>
+          </script>
+          <ambient>0.7 0.7 0.7 1</ambient>
+          <diffuse>0.7 0.7 0.7 1</diffuse>
+          <specular>0.8 0.8 0.8 1</specular>
+        </material>
+      </visual>
+    </link>
+    <link name="down_ramp">
+      <pose>0 3.8977774788672046 0.25881904510252074 -0.2617993877991494 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>1.0 2.0 0.02</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>1.0 2.0 0.02</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Metal</name>
+          </script>
+          <ambient>0.7 0.7 0.7 1</ambient>
+          <diffuse>0.7 0.7 0.7 1</diffuse>
+          <specular>0.8 0.8 0.8 1</specular>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

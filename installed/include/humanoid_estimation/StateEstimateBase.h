@@ -72,7 +72,7 @@ namespace ocs2
       virtual vector_t update(const ros::Time &time, const ros::Duration &period) = 0;
       virtual nav_msgs::Odometry updateKinematics(const ros::Time &time, const Eigen::Quaterniond &imu_quat, const ros::Duration &period)
       {
-
+        return nav_msgs::Odometry();
       }
 
       inline void updateFootPosDesired(const feet_array_t<vector3_t> &foot_pos_desired)
@@ -292,6 +292,7 @@ namespace ocs2
       std::deque<bool> pullup_window_;  // 滑动窗口用于存储历史判断结果
       const size_t pullup_window_size_ = 20;  // 滑动窗口大小
       bool last_pullup_state_ = false;  // 保存上一次的pullup状态
+      int waistNum_ = 0;
       
     };
 

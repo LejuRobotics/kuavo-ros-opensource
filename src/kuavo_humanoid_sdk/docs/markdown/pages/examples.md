@@ -33,6 +33,7 @@ def main():
     print("Head Joint DOF:", robot_info.head_joint_dof)
     print("Head Joint Names:", robot_info.head_joint_names)
     print("End Effector Frame Names:", robot_info.eef_frame_names)
+    print("Init Stand Height:", robot_info.init_stand_height)
 if __name__ == "__main__":
     main()
 ```
@@ -371,7 +372,8 @@ def control_arm_joint_trajectory():
 
 def control_arm_end_effector_pose():
     global robot
-    robot.control_robot_end_effector_pose(KuavoPose(position=[0.3, 0.4, 0.9], orientation=[0, -0.67566370964, 0, 0.73720997571945]), KuavoPose(position=[0.3, -0.5, 1.0], orientation=[0, -0.67566370964, 0, 0.73720997571945]), KuavoManipulationMpcFrame.WorldFrame)
+
+    robot.control_robot_end_effector_pose(KuavoPose(position=[0.3, 0.4, 0.9], orientation=[0, -0.67566370964, 0, 0.73720997571945]), KuavoPose(position=[0.3, -0.5, 1.0], orientation=[0, -0.67566370964, 0, 0.73720997571945]), KuavoManipulationMpcFrame.LocalFrame)
 
 if __name__ == "__main__":
 
@@ -392,6 +394,153 @@ if __name__ == "__main__":
     time.sleep(3)
     robot.manipulation_mpc_reset()
     robot.arm_reset()
+```
+
+## 手臂运动控制（碰撞保护）
+
+这个示例展示了如何在启用手臂碰撞保护的情况下控制机器人手臂运动，包括轨迹控制和目标姿态控制。
+
+示例代码展示了碰撞保护机制的工作原理：
+
+1. 碰撞保护模式设置：
+   * 使用 robot.set_arm_collision_mode(True) 启用手臂碰撞保护
+   * 碰撞保护模式下，当检测到碰撞时会自动停止运动并恢复到安全位置
+2. control_arm_traj()：带碰撞保护的关节角度插值运动
+   * 从初始位置q0开始，通过90步插值运动到目标位置q1
+   * q1设置了可能导致碰撞的手臂姿态
+   * 每步之间间隔0.02秒，实现平滑过渡
+   * 使用 try-except 结构捕获可能的碰撞异常
+   * 当检测到碰撞时，调用 robot.wait_arm_collision_complete() 等待碰撞处理完成
+   * 然后调用 robot.release_arm_collision_mode() 释放碰撞模式
+   * 运动完成后恢复到初始位置
+3. control_arm_joint_trajectory()：带碰撞保护的关节轨迹控制
+   * 定义了7个关键时间点的目标姿态
+   * 机器人会自动完成关键帧之间的轨迹规划
+   * 同样使用异常处理机制来应对可能的碰撞情况
+   * 执行完毕后重置手臂位置
+4. 碰撞保护机制：
+   * 通过 robot.is_arm_collision() 检测是否发生碰撞
+   * 使用 robot.wait_arm_collision_complete() 等待碰撞处理完成
+   * 使用 robot.release_arm_collision_mode() 释放碰撞控制模式
+   * 最后使用 robot.set_arm_collision_mode(False) 关闭碰撞保护
+
+注意事项：
+
+* 碰撞保护模式会增加系统响应时间，但能有效防止手臂碰撞
+* 在碰撞发生后，需要等待碰撞处理完成才能继续控制
+* 建议在复杂环境中使用碰撞保护模式
+* 碰撞保护会记录3秒内的传感器数据用于恢复
+
+```python
+import time
+import math
+from kuavo_humanoid_sdk import KuavoSDK, KuavoRobot,KuavoRobotState
+from kuavo_humanoid_sdk.interfaces.data_types import KuavoPose, KuavoManipulationMpcFrame
+
+if not KuavoSDK().Init(log_level='INFO'):# Init!
+    print("Init KuavoSDK failed, exit!")
+    exit(1)
+
+robot = KuavoRobot()
+
+def control_arm_traj():
+    global robot
+     # reset arm
+    robot.arm_reset()
+    
+    q_list = []
+    q0 = [0.0]*14
+    # arm pose that will collision
+    q1 = [-60, 20, -90, -90, 0, 0, 0, -60, -20, 90, -90, 0, 0, 0]
+
+    num = 90
+    for i in range(num):
+        q_tmp = [0.0]*14
+        for j in range(14):
+            q_tmp[j] = q0[j] + i/float(num)*(q1[j] - q0[j])
+        q_list.append(q_tmp)
+    for q in q_list:
+        # !!! Convert degrees to radians
+        # !!! Convert degrees to radians
+        q = [math.radians(angle) for angle in q]
+        try:
+            robot.control_arm_joint_positions(q)
+        except:
+            if robot.is_arm_collision():
+                robot.wait_arm_collision_complete()
+                robot.release_arm_collision_mode()
+        
+        time.sleep(0.02)
+    
+    # fixed arm
+    robot.set_fixed_arm_mode()
+    time.sleep(1.0)
+    # back to q0
+    for i in range(num):
+        q_tmp = [0.0]*14
+        for j in range(14):
+            q_tmp[j] = q1[j] - i/float(num)*(q1[j] - q0[j])
+                # !!! Convert degrees to radians
+                # !!! Convert degrees to radians
+        q_tmp = [math.radians(angle) for angle in q_tmp]
+        try:
+            robot.control_arm_joint_positions(q_tmp)
+        except:
+            if robot.is_arm_collision():
+                robot.wait_arm_collision_complete()
+                robot.release_arm_collision_mode()
+        
+        time.sleep(0.02)
+
+    robot.set_auto_swing_arm_mode() # Restore auto arm swing mode
+
+    robot.arm_reset() # Reset arm position
+
+
+def control_arm_joint_trajectory():
+    global robot
+    target_poses = [
+        [1.0, [20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
+        [2.5, [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0]],
+        [4.0, [20, 0, 0, -30, 0, 0, 0, -30, 0, 30, -88, 8, -22, -4]],
+        [5.5, [20, -90, 0, -30, 0, 0, 0, -30, -25, -54, -15, -6, -22, -4]],
+        [7.0, [10, 10, -20, -70, 0, 0, -24, -30, -25, -54, -15, -6, -22, -4]],
+        [8.5, [14, 20, 33, -35, 76, -18, 3.5, -30, -25, -54, -15, -6, -22, -4]],
+        [10, [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0]]
+    ]
+
+    times = [pose[0] for pose in target_poses]
+    
+    # !!! Convert degrees to radians
+    # !!! Convert degrees to radians
+    q_frames = [[math.radians(angle) for angle in pose[1]] for pose in target_poses]
+    
+    try:
+        if not robot.control_arm_joint_trajectory(times, q_frames):
+            print("control_arm_joint_trajectory failed!")
+    except:
+        if robot.is_arm_collision():
+            robot.wait_arm_collision_complete()
+            robot.release_arm_collision_mode()
+
+if __name__ == "__main__":
+
+    robot.stance()
+    robot_state = KuavoRobotState()
+
+    robot.set_arm_collision_mode(True)
+    if not robot_state.wait_for_stance():
+        print("change to stance fail!")
+
+    print("Robot stance !!!!!")
+    # !!! Move arm trajectory
+    control_arm_traj()
+    
+    control_arm_joint_trajectory()
+    time.sleep(12)  # !!! Wait for the arm to reach the target pose
+    
+    robot.set_arm_collision_mode(False)
+    exit()
 ```
 
 ## 正向和逆向运动学控制

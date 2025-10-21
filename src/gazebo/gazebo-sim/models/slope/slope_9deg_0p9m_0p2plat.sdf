@@ -1,0 +1,102 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="double_ramp_6deg_0p9m_0p2plat">
+    <static>true</static>
+
+    <!-- 参数说明（几何计算基于中心位姿）
+         - 斜坡角度: 6° (roll)
+         - 单侧斜坡长度: 0.9 m  (size.y)
+         - 斜坡半长: 0.45 m
+         - 平台长度: 0.2 m (size.y)
+         - 厚度: 0.02 m
+         - 宽度: 0.9 m (size.x)
+         位置计算：
+         角度转换: 6° = 0.104719755 radians
+         sin(6°)=0.104528463, cos(6°)=0.994521895
+         up_ramp 中心: y = 0.45*cos(6°) = 0.447535, z = 0.45*sin(6°) = 0.0470378
+         platform 中心: y = 2*0.45*cos(6°) + 0.2/2 = 0.89507 + 0.1 = 0.99507, z = 2*0.45*sin(6°) = 0.0940756
+         down_ramp 中心: y = platform_y + 0.2/2 + 0.45*cos(6°) = 0.99507 + 0.1 + 0.447535 = 1.542605, z = platform_z - 0.45*sin(6°) = 0.0470378
+    -->
+
+    <link name="up_ramp">
+      <pose>0 0.447535 0.0470378 0.104719755 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>1.0 0.90495745 0.02</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>1.0 0.90495745 0.02</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Metal</name>
+          </script>
+          <ambient>0.7 0.7 0.7 1</ambient>
+          <diffuse>0.7 0.7 0.7 1</diffuse>
+          <specular>0.8 0.8 0.8 1</specular>
+        </material>
+      </visual>
+    </link>
+
+    <link name="platform">
+      <pose>0 0.997514 0.094332 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>1.0 0.2 0.02</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>1.0 0.2 0.02</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Metal</name>
+          </script>
+          <ambient>0.7 0.7 0.7 1</ambient>
+          <diffuse>0.7 0.7 0.7 1</diffuse>
+          <specular>0.8 0.8 0.8 1</specular>
+        </material>
+      </visual>
+    </link>
+
+    <link name="down_ramp">
+      <pose>0 1.547493 0.0470378 -0.104719755 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>1.0 0.90495745 0.02</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>1.0 0.90495745 0.02</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/Metal</name>
+          </script>
+          <ambient>0.7 0.7 0.7 1</ambient>
+          <diffuse>0.7 0.7 0.7 1</diffuse>
+          <specular>0.8 0.8 0.8 1</specular>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf> 

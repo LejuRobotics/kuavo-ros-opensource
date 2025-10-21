@@ -37,6 +37,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace ocs2 {
 
+// Define vector6_t type for 6D pose (x, y, z, yaw, pitch, roll)
+using vector6_t = Eigen::Matrix<scalar_t, 6, 1>;
+
 /**
  * Defines a sequence of N modes, separated by N-1 event times
  */
@@ -55,8 +58,8 @@ struct ModeSchedule {
    * @param [in] torsoPoseSequenceInput : torso pose sequence of size N
    */
   ModeSchedule(std::vector<scalar_t> eventTimesInput, std::vector<size_t> modeSequenceInput,
-               std::vector<bool> enableFootSequenceInput, std::vector<Eigen::Vector4d> footPoseSequenceInput,
-               std::vector<Eigen::Vector4d> torsoPoseSequenceInput);
+               std::vector<bool> enableFootSequenceInput, std::vector<vector6_t> footPoseSequenceInput,
+               std::vector<vector6_t> torsoPoseSequenceInput);
 
   /**
    * Constructor for a ModeSchedule. The number of modes must be greater than zero (N > 0)
@@ -109,7 +112,7 @@ struct ModeSchedule {
   bool existValidFootPose(scalar_t time) const{
     size_t count = 0;
     const size_t index_start = std::lower_bound(eventTimes.begin(), eventTimes.end(), time) - eventTimes.begin();
-    for(size_t i = index_start+1; i < enableFootSequence.size(); i++)
+    for(size_t i = index_start; i < enableFootSequence.size(); i++)
     {
       if(enableFootSequence[i])
         count++;
@@ -125,6 +128,7 @@ struct ModeSchedule {
     eventTimes.clear();
     modeSequence.clear();
     enableFootSequence.clear();
+    isLastCommandSequence.clear();
     enableFullBodySequence.clear();
     footPoseSequence.clear();
     torsoPoseSequence.clear();
@@ -146,10 +150,11 @@ struct ModeSchedule {
   std::vector<scalar_t> eventTimes;  // event times of size N - 1
   std::vector<size_t> modeSequence;  // mode sequence of size N
   std::vector<bool> enableFootSequence;  // decide whether foot is enabled or not at each mode at each event time
+  std::vector<bool> isLastCommandSequence;
   std::vector<bool> enableFullBodySequence;
-  std::vector<Eigen::Vector4d> footPoseSequence;  // foot pos(xyz yaw) of each mode at each event time
-  std::vector<Eigen::Vector4d> torsoPoseSequence; // torso pos(xyz yaw) of each mode at each event time
-  std::vector<std::vector<Eigen::Vector4d>> additionalFootPoseSequence; // additional foot pos(xyz yaw) of each mode at each event time
+  std::vector<vector6_t> footPoseSequence;  // foot pos(xyz yaw) of each mode at each event time
+  std::vector<vector6_t> torsoPoseSequence; // torso pos(xyz yaw) of each mode at each event time
+  std::vector<std::vector<vector6_t>> additionalFootPoseSequence; // additional foot pos(xyz yaw) of each mode at each event time
   std::vector<double> swingHeightSequence; // swing height of each mode at swing phase
   // bool with_pos_sequence{false};  // whether posSequence is available or not
   std::vector<vector_array_t> fullBodyStateSequence;

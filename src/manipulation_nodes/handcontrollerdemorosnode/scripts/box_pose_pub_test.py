@@ -23,28 +23,40 @@ class AprilTagPublisher:
             {
                 "id": 1,
                 "pose": Pose(
-                    position=Point(1.0, 0.0, 0.9),
-                    orientation=Quaternion(0.0, -0.707, 0.0, 0.707)
+                    position=Point(1.0, 0.3, 1.3),
+                    # orientation=Quaternion(0.0, -0.707, 0.0, 0.707)
+                    # orientation=Quaternion(0.488, -0.4545, -0.5209, 0.5324)
+                    orientation=Quaternion(0.6666145423605649, 0.023693991691330407, 0.008133758341800246, 0.744981535775473)
                 ),
                 "size": 0.06,
             },
             {
                 "id": 2,
                 "pose": Pose(
-                    position=Point(0.5, 1.5, 0.9),
-                    orientation=Quaternion(0.0, -0.707, 0.707, 0)
+                    position=Point(0.5, -1.5, 1.55),
+                    orientation=Quaternion(-0.079, 0.57899, 0.809566, -0.055816)
                 ),
                 "size": 0.06,
             },
                         {
                 "id": 0,
                 "pose": Pose(
-                    position=Point(1.0, 0.5, 0.9),
-                    orientation=Quaternion(0,-0.707,0.707,0)
+                    position=Point(1.0, 0.5, 1.7),
+                    orientation=Quaternion(0.488, -0.4545, -0.5209, 0.5324)
                     # w=0.5,x=−0.5,y=−0.5,z=0.5
                 ),
                 "size": 0.06,
             },
+            # {
+            #     "id": 10,
+            #     "pose": Pose(
+            #         position=Point(-1.0, 0.0, 0.9),
+            #         # orientation=Quaternion(0.0, -0.707, 0.0, 0.707)
+            #         orientation=Quaternion( 0.69782711, 0.005843221508388842,  -0.04662733200630576, 0.7147230696446081)
+                    
+            #     ),
+            #     "size": 0.06,
+            # },
         ]
 
         self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
@@ -63,9 +75,9 @@ class AprilTagPublisher:
 
         marker.pose = tag_pose_world
 
-        marker.scale.x = 0.1
-        marker.scale.y = 0.1
-        marker.scale.z = 0.1
+        marker.scale.x = 0.3
+        marker.scale.y = 0.5
+        marker.scale.z = 0.8
 
         marker.color.r = 0.0
         marker.color.g = 1.0

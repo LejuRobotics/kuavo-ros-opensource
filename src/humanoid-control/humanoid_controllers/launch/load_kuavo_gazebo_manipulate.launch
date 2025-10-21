@@ -36,6 +36,8 @@
     <arg name="coredump" default="false"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
+    <arg name="grab_box_ci_test" default="false"/>
+    <arg name="use_grab_box_scene" default="true"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -92,7 +94,15 @@
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>
     <group unless="$(arg play_back)">
-      <include file="$(find gazebo_sim)/launch/gazebo-sim.launch"/>
+      <group if="$(arg grab_box_ci_test)">
+        <include file="$(find gazebo_sim)/launch/gazebo-sim-grab-box-ci.launch" />
+      </group>
+      <group unless="$(arg grab_box_ci_test)">
+      <include file="$(find gazebo_sim)/launch/gazebo-sim.launch">
+        <arg name="use_grab_box_scene" value="$(arg use_grab_box_scene)"/>
+        <arg name="world_name" value="$(find gazebo_sim)/worlds/grab_box.world"/>
+      </include>
+      </group>
     </group>
       <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">

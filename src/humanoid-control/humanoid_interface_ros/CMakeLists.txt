@@ -24,6 +24,7 @@ set(CATKIN_PACKAGE_DEPENDENCIES
   ocs2_pinocchio_interface
   ocs2_centroidal_model
   ocs2_msgs
+  ocs2_self_collision
   kuavo_common
   kuavo_msgs
   humanoid_interface

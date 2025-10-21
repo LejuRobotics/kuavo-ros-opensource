@@ -22,7 +22,9 @@ def execute_number_gesture():
         # 注意：同一组要么全为左手手势，要么全为右手手势，要么全为双手
         #      !!! 不能左手和右手混合在一起 !!!
         for i in range(1, 9):
-            gesture = gestureTask(gesture_name='number_' + str(i), hand_side=0)
+            # 单数用左手，双数用右手
+            hand_side = 0 if i % 2 == 1 else 1  # 0=双手, 1=右手, 2=左手
+            gesture = gestureTask(gesture_name='number_' + str(i), hand_side=hand_side)
             request.gestures.append(gesture)
 
         # reset hand gesture.

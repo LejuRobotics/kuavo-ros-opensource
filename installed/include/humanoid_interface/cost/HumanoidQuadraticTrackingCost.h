@@ -145,6 +145,49 @@ class HumanoidStateInputQuadraticCost final : public QuadraticStateInputCost {
     // const vector_t xNominal = targetTrajectories.getDesiredState(time).segment(0, info_.generalizedCoordinatesNum + 6);
     // const vector_t uNominal = weightCompensatingInput(info_, contactFlags);
     vector_t uNominal = weightCompensatingInputWithTime(time, info_, contactFlags);
+
+    vector_t armWrench = preCompHumanoid.getArmWrench();
+    if (armWrench.size() == 12)
+    {
+      uNominal.segment(info_.numThreeDofContacts * 3, 12) = armWrench;
+      // 计算手臂外力在z方向的合力
+      vector3_t leftArmForce = armWrench.segment<3>(0);
+      vector3_t rightArmForce = armWrench.segment<3>(6);
+      scalar_t totalArmForceZ = leftArmForce.z() + rightArmForce.z();
+
+      // 计算当前所有接触点的z方向力之和
+      scalar_t totalContactForceZ = 0.0;
+      std::vector<scalar_t> contactPointForcesZ;
+      contactPointForcesZ.reserve(contactFlags.size());
+      
+      for (size_t i = 0; i < contactFlags.size(); ++i) {
+        if (contactFlags[i]) {
+          scalar_t forceZ = uNominal[i * 3 + 2];
+          totalContactForceZ += forceZ;
+          contactPointForcesZ.push_back(forceZ);
+        } else {
+          contactPointForcesZ.push_back(0.0);
+        }
+      }
+      
+      if (totalContactForceZ > 1e-6) {  // 避免除零
+        // 根据原有接触力比例分配补偿力
+        size_t contactIndex = 0;
+        for (size_t i = 0; i < contactFlags.size(); ++i) {
+          if (contactFlags[i]) {
+            scalar_t forceRatio = contactPointForcesZ[i] / totalContactForceZ;
+            scalar_t compensationForce = -totalArmForceZ * forceRatio;
+            uNominal[i * 3 + 2] += compensationForce;
+          }
+        }
+      }
+    }
+    else
+    {
+      std::cout << "[HumanoidStateInputQuadraticCost] armWrench size is not 12" << std::endl;
+      uNominal.segment(info_.numThreeDofContacts * 3, 12) = vector_t::Zero(12);
+    }
+
     // if(!numerics::almost_eq(armMode, 1.0)){
     //   uNominal[3*8 + 6*2 + jointNums] = armJointVel[0];
     //   uNominal[3*8 + 6*2 + jointNums + 7] = armJointVel[1];

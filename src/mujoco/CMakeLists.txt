@@ -7,6 +7,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 
+# Add USE_DDS option
+option(USE_DDS "Enable DDS communication" OFF)
+if(USE_DDS)
+    add_definitions(-DUSE_DDS)
+    message(STATUS "MuJoCo DDS communication enabled")
+else()
+    message(STATUS "MuJoCo DDS communication disabled (compile with -DUSE_DDS=ON to enable)")
+endif()
+
 ## Set default cmake build type to release
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
         set(CMAKE_BUILD_TYPE Release)
@@ -40,6 +49,29 @@ find_package(catkin REQUIRED
 find_package(Threads REQUIRED)
 find_library(MUJOCO_LIB mujoco HINTS ${PROJECT_SOURCE_DIR}/lib)
 find_package(glfw3 REQUIRED)
+
+# DDS dependencies (conditional)
+if(USE_DDS)
+    # Find CyclonDDS-CXX
+    find_package(CycloneDDS-CXX REQUIRED)
+    
+    # Set up Unitree SDK paths (same as humanoid_controllers)
+    set(UNITREE_SDK_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_dds_plant/include)
+    set(UNITREE_SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_dds_plant/unitree_sdk2/x86_64)
+    set(UNITREE_SDK_LIB_PATH ${UNITREE_SDK_LIB_DIR}/libunitree_sdk2.a)
+    
+    if(EXISTS ${UNITREE_SDK_INCLUDE_PATH})
+        message(STATUS "Found Unitree SDK include at: ${UNITREE_SDK_INCLUDE_PATH}")
+    else()
+        message(WARNING "Unitree SDK include not found at: ${UNITREE_SDK_INCLUDE_PATH}")
+    endif()
+    
+    if(EXISTS ${UNITREE_SDK_LIB_PATH})
+        message(STATUS "Found Unitree SDK library at: ${UNITREE_SDK_LIB_PATH}")
+    else()
+        message(WARNING "Unitree SDK library not found at: ${UNITREE_SDK_LIB_PATH}")
+    endif()
+endif()
 
 
 
@@ -162,6 +194,12 @@ include_directories(
         ${LCM_INCLUDE_DIRS}
 )
 
+# Add DDS include directories
+if(USE_DDS AND EXISTS ${UNITREE_SDK_INCLUDE_PATH})
+    include_directories(${UNITREE_SDK_INCLUDE_PATH})
+    include_directories(/usr/local/include/ddscxx)
+endif()
+
 link_directories(../lib)
 
 
@@ -185,13 +223,43 @@ aux_source_directory(./src/simulate SIMULATE_SRCS)
 aux_source_directory(./src/lcm_interface LCM_SRCS)
 
 file(GLOB DEXHAND_SOURCES "src/dexhand/*.cpp" "src/dexhand/*.hpp")
-add_library(${PROJECT_NAME} SHARED 
+
+# Conditionally add DDS sources
+# Link libraries (conditionally include DDS)
+if(USE_DDS)
+    add_library(${PROJECT_NAME} SHARED 
         src/mujoco_node.cc 
         ${DEXHAND_SOURCES}
         src/joint_address.hpp
         src/dexhand_mujoco_node.cpp
-${SIMULATE_SRCS} ${LCM_SRCS})
-target_link_libraries(${PROJECT_NAME} PUBLIC ${MUJOCO_LIB} ${catkin_LIBRARIES} Threads::Threads glfw ${glfw3_LIBRARIES} ${LCM_LIBRARIES})
+        src/mujoco_dds.cc
+        ${SIMULATE_SRCS} ${LCM_SRCS})
+    target_link_libraries(${PROJECT_NAME} PUBLIC 
+        ${MUJOCO_LIB} 
+        ${catkin_LIBRARIES} 
+        Threads::Threads 
+        glfw 
+        ${glfw3_LIBRARIES} 
+        ${LCM_LIBRARIES}
+        CycloneDDS-CXX::ddscxx
+        ${UNITREE_SDK_LIB_PATH}
+    )
+else()
+    add_library(${PROJECT_NAME} SHARED 
+    src/mujoco_node.cc 
+    ${DEXHAND_SOURCES}
+    src/joint_address.hpp
+    src/dexhand_mujoco_node.cpp
+    ${SIMULATE_SRCS} ${LCM_SRCS}) 
+    target_link_libraries(${PROJECT_NAME} PUBLIC 
+        ${MUJOCO_LIB} 
+        ${catkin_LIBRARIES} 
+        Threads::Threads 
+        glfw 
+        ${glfw3_LIBRARIES} 
+        ${LCM_LIBRARIES}
+    )
+endif()
 
 add_executable(${PROJECT_NAME}_simulate src/main.cc)
 target_link_libraries(${PROJECT_NAME}_simulate ${PROJECT_NAME}) 

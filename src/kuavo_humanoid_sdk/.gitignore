@@ -15,3 +15,5 @@ kuavo_test_sdk.egg-info
 kuavo_humanoid_sdk/msg/kuavo_msgs/
 kuavo_humanoid_sdk/msg/motion_capture_ik/
 kuavo_humanoid_sdk/msg/ocs2_msgs/
+kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs
+msg/

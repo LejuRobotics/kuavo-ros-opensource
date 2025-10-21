@@ -5,26 +5,35 @@ import json
 import hashlib
 import math
 import numpy as np
+import rospy
 
 def get_wifi_ip():
     try:
-        # Get all network interfaces
+        # 获取所有网络接口
         interfaces = netifaces.interfaces()
 
-        # Find the WiFi interface (usually starts with 'wl')
-        wifi_interface = next(
-            (iface for iface in interfaces if iface.startswith("wl")), None
-        )
+        # 尝试先找以 'wl' 开头的接口（通常是 WiFi）
+        wifi_interface = next((iface for iface in interfaces if iface.startswith("wl")), None)
 
         if wifi_interface:
-            # Get the IPv4 address of the WiFi interface
             addresses = netifaces.ifaddresses(wifi_interface)
             if netifaces.AF_INET in addresses:
                 return addresses[netifaces.AF_INET][0]["addr"]
 
-        return None
+        # 如果找不到 wl 开头的，再尝试找 enp 开头的（有线网络）
+        ethernet_interface = next((iface for iface in interfaces if iface.startswith("enp")), None)
+
+        if ethernet_interface:
+            addresses = netifaces.ifaddresses(ethernet_interface)
+            if netifaces.AF_INET in addresses:
+                return addresses[netifaces.AF_INET][0]["addr"]
+
+        # 若两个都找不到，抛出异常
+        raise RuntimeError("无法获取有效 IP 地址，未找到以 'wl' 或 'enp' 开头的网络接口，或接口无 IPv4 地址")
+
     except Exception as e:
-        return None
+        raise RuntimeError(f"获取 IP 地址时出错: {e}")
+
 
 
 def get_hotspot_ip():
@@ -97,7 +106,11 @@ def get_hotspot():
         logger.error(f"Unexpected error getting hotspot: {e}")
         return f"Error: {e}"
 
-INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
+if robot_version >= 40:
+    INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+else:
+    INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
 
 def frames_to_custom_action_data(file_path: str):
     with open(file_path, "r") as f:
@@ -206,7 +219,41 @@ def frames_to_custom_action_data_ocs2(file_path: str, start_frame_time: float, c
                 ])
     return filter_data(action_data, start_frame_time, current_arm_joint_state)
 
+def verify_robot_version(file_path: str):
+    with open(file_path, "r") as f:
+        data = json.load(f)
+    
+    robot_type_raw = data.get("robotType", None)
+    if robot_type_raw is None:
+        msg = "Action file missing required field: robotType"
+        rospy.logerr(msg)
+        return False, msg
+    try:
+        tact_robot_version = int(robot_type_raw)
+    except (TypeError, ValueError):
+        msg = f"Invalid robotType in action file: {robot_type_raw}"
+        rospy.logerr(msg)
+        return False, msg
 
+    # 版本兼容关系映射
+    version_compat_map = {
+        41: [41],
+        42: [42],
+        45: [43, 45, 46, 48, 49],
+        11: [11, 13, 14],
+        13: [11, 13, 14],
+        14: [11, 13, 14]
+    }
+    allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
+    if robot_version not in allowed_robot_versions:
+        msg = (
+            f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version}"
+        )
+        rospy.logerr(msg)
+        return False, msg
+    
+    rospy.loginfo(f"Version match: tact {tact_robot_version} is compatible with robot {robot_version}")
+    return True, None
 
 def get_start_end_frame_time(file_path: str):
     with open(file_path, "r") as f:

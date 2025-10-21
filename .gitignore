@@ -19,7 +19,8 @@ new-docs
 .aider*
 src/manipulation_nodes/planarmwebsocketservice/models/*.pt
 .claude/
-bag/*
-src/Livox-SDK2
+src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs/**
 src/legged_control
 src/legged_perceptive
+src/Livox-SDK2
+bag/*

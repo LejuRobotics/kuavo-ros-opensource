@@ -94,8 +94,19 @@ def find_message_files(package_path: str) -> List[str]:
     return msg_files
 
 def get_message_name(file_path: str) -> str:
-    """Get message name without extension and in lowercase for comparison"""
-    return os.path.basename(file_path)[:-4].lower()
+    """Get message name without extension and normalized for comparison"""
+    name = os.path.basename(file_path)[:-4]
+    # Normalize by removing underscores and converting to lowercase
+    # This handles both SetLEDMode_free and SetLEDModeFree as the same entity
+    return name.lower().replace('_', '')
+
+def underscore_to_camel_case(name: str) -> str:
+    """Convert underscore names to PascalCase - matches format_msgs.py logic"""
+    if '_' not in name:
+        return name[0].upper() + name[1:] if name else name
+    
+    parts = name.split('_')
+    return ''.join(word[0].upper() + word[1:] if word else '' for word in parts)
 
 def parse_service_file(file_path: str) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
     """Parse a service file and return tuple of (request_fields, response_fields)"""
@@ -177,9 +188,15 @@ def generate_mapping_rules(ros1_path: str, ros2_path: str) -> List[Dict]:
         ros1_msg_name = os.path.basename(ros1_msg)[:-4]  # Remove .msg extension
         ros1_pkg_name = os.path.basename(os.path.dirname(os.path.dirname(ros1_msg)))
         
-        # Find corresponding ROS2 message (case-insensitive)
+        # Find corresponding ROS2 message (handle underscore to PascalCase conversion)
         ros1_msg_key = get_message_name(ros1_msg)
         ros2_msg = ros2_msg_map.get(ros1_msg_key)
+        
+        # If not found and ros1 has underscores, try to find the PascalCase version
+        if not ros2_msg and '_' in ros1_msg_name:
+            expected_ros2_name = underscore_to_camel_case(ros1_msg_name)
+            expected_ros2_key = get_message_name(expected_ros2_name + '.msg')
+            ros2_msg = ros2_msg_map.get(expected_ros2_key)
         
         if ros2_msg:
             ros2_pkg_name = os.path.basename(os.path.dirname(os.path.dirname(ros2_msg)))
@@ -235,9 +252,15 @@ def generate_mapping_rules(ros1_path: str, ros2_path: str) -> List[Dict]:
         ros1_srv_name = os.path.basename(ros1_srv)[:-4]  # Remove .srv extension
         ros1_pkg_name = os.path.basename(os.path.dirname(os.path.dirname(ros1_srv)))
         
-        # Find corresponding ROS2 service (case-insensitive)
+        # Find corresponding ROS2 service (handle underscore to PascalCase conversion)
         ros1_srv_key = get_message_name(ros1_srv)
         ros2_srv = ros2_srv_map.get(ros1_srv_key)
+        
+        # If not found and ros1 has underscores, try to find the PascalCase version
+        if not ros2_srv and '_' in ros1_srv_name:
+            expected_ros2_name = underscore_to_camel_case(ros1_srv_name)
+            expected_ros2_key = get_message_name(expected_ros2_name + '.srv')
+            ros2_srv = ros2_srv_map.get(expected_ros2_key)
         
         if ros2_srv:
             ros2_pkg_name = os.path.basename(os.path.dirname(os.path.dirname(ros2_srv)))
@@ -291,7 +314,36 @@ def generate_mapping_rules(ros1_path: str, ros2_path: str) -> List[Dict]:
             }
             mapping_rules.append(rule)
     
-    return mapping_rules
+    # Remove duplicate rules, but keep valid ROS1->ROS2 transformations
+    unique_rules = []
+    seen_combinations = set()
+    
+    for rule in mapping_rules:
+        # Create a unique key for each rule based on exact names, not normalized
+        if 'ros1_message_name' in rule:
+            # Message rule
+            key = (
+                rule['ros1_package_name'], 
+                rule['ros1_message_name'],
+                rule['ros2_package_name'],
+                rule['ros2_message_name'],
+                'message'
+            )
+        else:
+            # Service rule
+            key = (
+                rule['ros1_package_name'],
+                rule['ros1_service_name'],
+                rule['ros2_package_name'], 
+                rule['ros2_service_name'],
+                'service'
+            )
+        
+        if key not in seen_combinations:
+            seen_combinations.add(key)
+            unique_rules.append(rule)
+    
+    return unique_rules
 
 def main():
     parser = argparse.ArgumentParser(description='Generate mapping rules between ROS1 and ROS2 messages')
