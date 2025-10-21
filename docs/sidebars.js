@@ -156,6 +156,7 @@ const sidebars = {
         'basic_usage/kuavo-ros-control/docs/6常用工具/硬件测试工具',
         'basic_usage/kuavo-ros-control/docs/6常用工具/热点工具',
         'basic_usage/kuavo-ros-control/docs/6常用工具/Kuavo机器人桌面软件使用手册',
+        'basic_usage/kuavo-ros-control/docs/6常用工具/Kuavo机器人启动脚本使用指南',
       ],
     },
     {
