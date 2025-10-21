@@ -31,8 +31,8 @@
     <arg name="waist_move_spd"     default="1.0"/>
     <arg name="stand_up_protect" default="true"/>
     <arg name="redundant_imu" default="false"/>
-    <arg name="joint_protect_enable" default="true" />
-    <arg name="cmd_truncation_enable" default="true" />
+    <arg name="joint_protect_enable" default="false" />
+    <arg name="cmd_truncation_enable" default="false" />
     <arg name="leg_disable_mode" default="true" doc="If true, when any leg joint fails, all leg joints (1-12) will be disabled" />
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <arg name="arm_move_spd"      default="1.2"/>
