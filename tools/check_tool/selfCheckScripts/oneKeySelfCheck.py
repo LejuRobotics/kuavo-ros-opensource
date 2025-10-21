@@ -111,41 +111,128 @@ def handle_h12_detection():
     h12_remote_control_detection()
 
 def run_motor_follow_test_with_region(test_region="full"):
-    """运行电机跟随性测试的通用函数"""
+    """运行电机跟随性测试的通用函数 - 调用motorFollowTest.py脚本"""
     try:
-        # 动态添加motorTest目录到Python路径
-        motor_test_dir = os.path.join(current_dir, 'motorTest')
-        if motor_test_dir not in sys.path:
-            sys.path.insert(0, motor_test_dir)
+        # 构建motorFollowTest.py的路径
+        motor_follow_test_path = os.path.join(current_dir, 'motorTest', 'motorFollowTest.py')
         
-        from motorFollowTest import MotorFollowTest
-        tester = MotorFollowTest(test_region=test_region)
-        tester.run_motor_follow_test()
-    except ImportError as e:
-        print_colored_text(f"导入电机跟随性测试模块失败: {e}", color="red", bold=True)
-        print_colored_text("请确保 motorTest/motorFollowTest.py 文件存在", color="yellow")
+        if not os.path.exists(motor_follow_test_path):
+            print_colored_text(f"motorFollowTest.py文件不存在: {motor_follow_test_path}", color="red", bold=True)
+            return
+        
+        # 直接调用motorFollowTest.py脚本
+        result = subprocess.run(['python3', motor_follow_test_path, '--region', test_region], 
+                              cwd=current_dir, capture_output=False, text=True)
+        
+        if result.returncode == 0:
+            print_colored_text("电机跟随性测试完成！", color="green", bold=True)
+        else:
+            print_colored_text(f"电机跟随性测试失败，返回码: {result.returncode}", color="red", bold=True)
+            
     except Exception as e:
         print_colored_text(f"电机跟随性测试执行失败: {e}", color="red", bold=True)
 
+def view_analysis_report():
+    """查看分析报告"""
+    try:
+        # 构建symmetry_analysis.py的路径
+        analysis_script_path = os.path.join(kuavo_ros_control_path, "src/kuavo-ros-control-lejulib/hardware_node/src/tests/motorTest/symmetry_analysis.py")
+        
+        if not os.path.exists(analysis_script_path):
+            print_colored_text(f"分析脚本不存在: {analysis_script_path}", color="red", bold=True)
+            return
+        
+        print_colored_text("开始生成分析报告...", color="blue", bold=True)
+        
+        # 运行分析脚本
+        result = subprocess.run(['python3', analysis_script_path, 'file/'], 
+                              cwd=os.path.dirname(analysis_script_path), 
+                              capture_output=False, text=True)
+        
+        if result.returncode == 0:
+            print_colored_text("分析报告生成完成！", color="green", bold=True)
+        else:
+            print_colored_text(f"分析报告生成失败，返回码: {result.returncode}", color="red", bold=True)
+            
+    except Exception as e:
+        print_colored_text(f"查看分析报告失败: {e}", color="red", bold=True)
+
+def run_test_and_analysis():
+    """运行测试并查看报告"""
+    try:
+        # 测试区域配置
+        regions = {
+            '1': ("upper", "上半身"),
+            '2': ("lower", "下半身"), 
+            '3': ("full", "全身")
+        }
+        
+        print("\n请选择电机跟随性测试区域:")
+        print("1. 上半身测试 (7对电机: 手臂)")
+        print("2. 下半身测试 (6对电机: 腿部)")
+        print("3. 全身测试 (13对电机: 除头部以外全身)")
+        
+        region_choice = input("请选择测试区域 (1/2/3): ").strip()
+        test_region, region_name = regions.get(region_choice, ("full", "全身"))
+        
+        if region_choice not in regions:
+            print_colored_text("无效选择，使用默认全身测试", color="yellow")
+        
+        print_colored_text(f"开始{region_name}电机跟随性测试...", color="green", bold=True)
+        
+        # 运行测试
+        run_motor_follow_test_with_region(test_region)
+        
+        # 等待用户确认是否查看报告
+        print("\n测试完成！")
+        view_report = input("是否查看分析报告？(y/n): ").strip().lower()
+        
+        if view_report in ['y', 'yes', '是']:
+            print_colored_text("开始生成分析报告...", color="blue", bold=True)
+            view_analysis_report()
+        
+    except KeyboardInterrupt:
+        print_colored_text("\n用户取消操作", color="yellow")
+    except Exception as e:
+        print_colored_text(f"运行测试并查看报告失败: {e}", color="red", bold=True)
+
 def handle_motor_follow_test():
     """处理电机跟随性测试"""
-    # 测试区域配置
-    regions = {
-        '1': ("upper", "上半身"),
-        '2': ("lower", "下半身"), 
-        '3': ("full", "全身")
-    }
-    
-    print("\n请选择电机跟随性测试区域:")
-    print("1. 上半身测试 (7对电机: 手臂)")
-    print("2. 下半身测试 (6对电机: 腿部)")
-    print("3. 全身测试 (13对电机: 除头部以外全身)")
+    print("\n请选择操作:")
+    print("1. 运行电机跟随性测试")
+    print("2. 查看分析报告")
+    print("3. 运行测试并查看报告")
     
     try:
-        choice = input("请选择测试区域 (1/2/3): ").strip()
-        test_region, region_name = regions.get(choice, ("full", "全身"))
+        action_choice = input("请选择操作 (1/2/3): ").strip()
         
-        if choice not in regions:
+        if action_choice == "2":
+            # 只查看分析报告
+            view_analysis_report()
+            return
+        elif action_choice == "3":
+            # 运行测试并查看报告
+            run_test_and_analysis()
+            return
+        elif action_choice != "1":
+            print_colored_text("无效选择，使用默认运行测试", color="yellow")
+        
+        # 测试区域配置
+        regions = {
+            '1': ("upper", "上半身"),
+            '2': ("lower", "下半身"), 
+            '3': ("full", "全身")
+        }
+        
+        print("\n请选择电机跟随性测试区域:")
+        print("1. 上半身测试 (7对电机: 手臂)")
+        print("2. 下半身测试 (6对电机: 腿部)")
+        print("3. 全身测试 (13对电机: 除头部以外全身)")
+        
+        region_choice = input("请选择测试区域 (1/2/3): ").strip()
+        test_region, region_name = regions.get(region_choice, ("full", "全身"))
+        
+        if region_choice not in regions:
             print_colored_text("无效选择，使用默认全身测试", color="yellow")
         
         print_colored_text(f"开始{region_name}电机跟随性测试...", color="green", bold=True)
@@ -175,7 +262,7 @@ def display_main_menu():
     print("1. 下位机检测")
     print("2. 上位机检测")
     print("3. h12遥控器信号检测")
-    print("4. 电机跟随性测试")
+    print("4. 电机跟随性测试 (含分析报告)")
     print("5. 查看自检说明(README)")
     print("0. 退出")
 
@@ -200,7 +287,7 @@ def handle_user_choice(choice):
 
 if __name__ == "__main__":
     run_flag = True
-    rospy.init_node('main_node', anonymous=True)
+    #rospy.init_node('main_node', anonymous=True)
     while run_flag:
         if not roslaunch_running:
             display_main_menu()

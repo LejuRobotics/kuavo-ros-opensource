@@ -5,6 +5,13 @@ from SimpleSDK import RUIWOTools
 import sys
 import threading
 
+# 强制刷新输出缓冲区，确保实时显示
+sys.stdout.flush()
+sys.stderr.flush()
+
+# 设置Python为无缓冲模式，确保实时输出
+os.environ['PYTHONUNBUFFERED'] = '1'
+
 # 相关参数
 MOTION_DURATION = 2  # 每个动作的执行时间（秒）
 POS_KP = 30
@@ -41,9 +48,13 @@ def get_test_duration(cycle_time):
         except ValueError:
             print("输入无效，请输入一个整数。")
 
-# 获取当前时间戳
+# 获取当前时间戳（中国时间）
 def get_timestamp():
-    return time.strftime("%H:%M:%S", time.localtime()) + f".{int(time.time() % 1 * 1000):03d}"
+    # 获取当前时间并转换为中国时间
+    current_time = time.time()
+    # 使用localtime()获取本地时间，如果系统时区设置正确，会自动显示中国时间
+    local_time = time.localtime(current_time)
+    return time.strftime("%H:%M:%S", local_time) + f".{int(current_time % 1 * 1000):03d}"
 
 # 读取电机正反转配置
 def read_motor_reverse_config():
@@ -103,6 +114,9 @@ ROBOT_VERSION_MAPPING = {
     "47": "long",
     "48": "long",
     "49": "long",
+    "50": "long",
+    "51": "long",
+    "52": "long",
     
     # Roban2机器人版本
     "13": "roban2",
@@ -158,16 +172,34 @@ def get_robot_mode(robot_version, enable_results):
     return None
 
 # 定义长手和短手的动作
+# long_arm_actions = [
+#     [0.13, 0.00, 0.00, 0.00, 0.00, 0],
+#     [0.10, 0.00, -0.20, 0.10, 0.20, 0],
+#     [0.00, -0.10, -0.10, 0.20, 0.20, 0],
+#     [0.10, -0.00, -0.10, -0.20, 0.00, 0],
+#     [0.13, -0.20, -0.10, 0.00, -0.20, 0],
+#     [0.15, 0.00, -0.20, 0.20, 0.00, 0],
+#     [0.13, 0.00, 0.00, 0.00, 0.00, 0]
+# ]
 long_arm_actions = [
     [0.23, 0.00, 0.00, 0.00, 0.00, -0.24],
     [1.30, 1.00, -1.40, 1.30, 0.40, -0.60],
     [2.00, -0.50, -0.30, 1.50, 0.80, 0.70],
     [1.10, -2.00, -2.30, -1.50, 0.00, -0.24],
-    [0.23, -0.40, -1.30, 1.00, -0.80, 0.70],
-    [1.25, 0.00, -1.90, 0.70, 0.00, -0.60],
+    [0.23, -0.40, -1.30, 1.00, -1.80, 0.70],
+    [1.55, 0.00, -1.90, 0.70, 0.00, -0.60],
     [0.23, 0.00, 0.00, 0.00, 0.00, -0.24]
 ]
 
+# short_arm_actions = [
+#     [0.00, 0.00, 0.00, 0.00, -0.10, 0.00],
+#     [0.25, -0.30, -0.20, 0.40, 0.30, -0.30],
+#     [0.40, 0.40, -0.50, -0.40, 0.52, -0.40],
+#     [0.31, 0.30, -0.40, 0.00, -0.10, 0.00],
+#     [0.40, 0.31, -0.30, -0.40, -0.22, 0.00],
+#     [0.40, 0.40, -0.60, 0.40, -0.50, -0.00],
+#     [0.40, 0.20, 0.00, 0.20, -0.10, 0.00]
+# ]
 short_arm_actions = [
     [0.00, 0.00, 0.00, 0.00, -0.10, 0.00],
     [0.85, -1.30, -0.20, 1.40, 1.30, -1.30],
@@ -190,6 +222,15 @@ FourPro_Standard_actions = [
 ]
 
 # Roban2左手动作
+# roban2_left_arm_actions = [
+#     [0.00, 0.00, 0.00, 0.00],
+#     [0.00, 0.00, -0.00, 0.40],
+#     [0.20, 0.30, -0.20, 0.20],
+#     [0.00, 0.30, 0.00, 0.30],
+#     [-0.30, 0.30, 0.30, 0.00],
+#     [-0.20, 0.40, 0.40, 0.00],
+#     [0.00, 0.00, 0.00, 0.00]
+# ]
 roban2_left_arm_actions = [
     [0.00, 0.00, 0.00, 0.00],
     [1.00, 1.00, -1.00, 1.50],
@@ -308,7 +349,42 @@ else:
 # 计算动作周期
 cycle_time = len(base_actions) * MOTION_DURATION
 test_duration = get_test_duration(cycle_time)
-start_time = time.perf_counter()
+
+# 同步机制：等待下一个15秒周期开始
+SYNC_CYCLE = 15  # 15秒同步周期
+def wait_for_sync_point():
+    """等待下一个同步点开始，每秒打印时间戳"""
+    current_time = time.time()
+    current_second = int(current_time) % SYNC_CYCLE
+    wait_time = SYNC_CYCLE - current_second
+    if wait_time == SYNC_CYCLE:
+        wait_time = 0
+    
+    if wait_time > 0:
+        print(f"等待 {wait_time} 秒到下一个同步点...")
+        print("每秒时间戳确认（等待同步点）:")
+        
+        # 每秒打印时间戳，直到到达同步点
+        for i in range(wait_time):
+            current_timestamp = time.time()
+            current_sec = int(current_timestamp) % SYNC_CYCLE
+            human_readable_time = get_timestamp()
+            print(f"{human_readable_time}, 当前秒数: {current_sec}")
+            time.sleep(1)
+    
+    sync_start_time = time.time()
+    sync_sec = int(sync_start_time) % SYNC_CYCLE
+    human_readable_sync_time = get_timestamp()
+    print(f"同步点到达！开始执行动作序列 ({human_readable_sync_time}, 秒数: {sync_sec})")
+    return sync_start_time
+
+# 等待同步点
+start_time = wait_for_sync_point()
+# 记录实际开始动作的时间（用于计算总运行时间）
+actual_start_time = time.perf_counter()
+
+# 计算完整动作周期时间（提前定义，供同步点检查使用）
+action_cycle_duration = MOTION_DURATION * len(full_base_actions)
 
 # 标记是否检测到电机失能
 motor_disabled = False
@@ -318,6 +394,12 @@ early_exit = False
 
 # 标记是否在当前周期结束后退出
 exit_after_cycle = False
+
+# 标记是否处于保持位置状态
+use_hold_position = False
+
+# 记录完成的轮数
+completed_rounds = 0
 
 # 电机丢帧统计
 motor_frame_loss_stats = {}  # 记录每个电机的丢帧次数
@@ -333,12 +415,16 @@ early_exit_event = threading.Event()
 def listen_for_exit():
     global early_exit, exit_after_cycle
     while not early_exit:
-        user_input = input()
-        if user_input.strip().lower() == 'q':
-            print(f"{get_timestamp()} 用户请求提前结束程序，将在当前完整动作周期完成后停止。")
-            early_exit_event.set()
-            exit_after_cycle = True
-            early_exit = True
+        try:
+            user_input = input()
+            if user_input.strip().lower() == 'q':
+                print(f"{get_timestamp()} 用户请求提前结束程序，将在当前完整动作周期完成后停止。")
+                early_exit_event.set()
+                exit_after_cycle = True
+                early_exit = True
+        except (EOFError, KeyboardInterrupt):
+            # 在非交互式环境中或输入被重定向时，静默退出监听线程
+            break
 
 # 启动监听线程
 listen_thread = threading.Thread(target=listen_for_exit)
@@ -379,8 +465,49 @@ while True:
     elapsed_time = current_time - start_time
     remaining_time = test_duration - elapsed_time
 
-    # 输出剩余时间
-    print(f"{get_timestamp()} 总剩余时间：{remaining_time:.2f} 秒")
+    # 检查是否到达新的同步周期
+    current_system_time = time.time()
+    current_cycle = int(current_system_time) % SYNC_CYCLE
+    
+    # 检查是否到达同步点（0、15、30秒等所有15秒倍数）
+    if current_cycle == 0:
+        # 计算实际运行时间（从第一次开始动作算起）
+        actual_elapsed_time = current_time - actual_start_time
+        actual_remaining_time = test_duration - actual_elapsed_time
+        
+        # 检查剩余时间是否足够完成一个完整动作周期
+        if actual_remaining_time < action_cycle_duration:
+            print(f"{get_timestamp()} 剩余时间不足完成一个完整动作周期（需要{action_cycle_duration:.2f}秒，剩余{actual_remaining_time:.2f}秒），提前结束。")
+            break
+        
+        # 检查是否已经超过测试时间
+        if actual_elapsed_time >= test_duration:
+            print(f"{get_timestamp()} 测试时间已到，程序结束。")
+            break
+        
+        # 重置开始时间，开始新的动作周期
+        start_time = current_time
+        elapsed_time = 0
+        # 重置保持位置标志
+        use_hold_position = False
+        # 重置保持位置打印标志
+        if hasattr(wait_for_sync_point, '_hold_printed'):
+            delattr(wait_for_sync_point, '_hold_printed')
+        # 跳过本次循环，重新开始
+        continue
+    
+    # 计算实际剩余时间（从第一次开始动作算起）
+    actual_elapsed_time = current_time - actual_start_time
+    actual_remaining_time = test_duration - actual_elapsed_time
+    
+    # 计算同步相对时间（用于保持位置判断）
+    sync_relative_time = current_cycle + (current_system_time % 1)  # 当前同步周期内的精确时间（0-19.999...）
+    
+    # 输出剩余时间（每秒一次）
+    if not hasattr(wait_for_sync_point, '_last_print_time') or (current_time - getattr(wait_for_sync_point, '_last_print_time', 0)) >= 1.0:
+        print(f"{get_timestamp()} 总剩余时间：{actual_remaining_time:.2f} 秒，当前同步周期位置：{current_cycle}秒")
+        sys.stdout.flush()  # 立即刷新输出缓冲区
+        wait_for_sync_point._last_print_time = current_time
 
     # 检查是否开始新的完整周期
     if elapsed_time % cycle_time < MOTION_DURATION:
@@ -399,36 +526,73 @@ while True:
             if not status:
                 motor_disabled = True
                 print(f"\033[91m检测到电机失能，停止当前动作！请检查以下电机：{disabled_motors}。检查完毕后，输入两次 ['c' + 回车] 失能所有电机并退出程序。\033[0m")
+                
+                # 创建手臂失能信号文件，通知腿部磨线程序
+                try:
+                    with open("/tmp/arm_disable_signal", "w") as f:
+                        f.write(f"arm_disabled\n")
+                        f.write(f"disabled_motors: {disabled_motors}\n")
+                        f.write(f"timestamp: {get_timestamp()}\n")
+                    print(f"{get_timestamp()} 已创建手臂失能信号文件，通知腿部磨线程序停止")
+                except Exception as e:
+                    print(f"{get_timestamp()} 创建失能信号文件失败: {e}")
+                
                 while True:
-                    user_input = input().strip().lower()
-                    if user_input == 'c':
-                        # 失能所有关节电机（跳过ID为0的电机）
-                        for dev_id in joint_ids:
-                            if dev_id == 0:
-                                continue
-                            state = ruiwo.enter_reset_state(dev_id)
-                            if isinstance(state, list):
-                                print(f"{get_timestamp()} [RUIWO motor]:ID: {dev_id} Disable:  [Succeed]")
-                            else:
-                                print(f"{get_timestamp()} [RUIWO motor]:ID: {dev_id} Disable:  [{state}]")
-                        # 关闭CAN总线
-                        close_canbus = ruiwo.close_canbus()
-                        if close_canbus:
-                            print(f"{get_timestamp()} [RUIWO motor]:Canbus status: [Close]")
+                    try:
+                        user_input = input().strip().lower()
+                        if user_input == 'c':
+                            # 失能所有关节电机（跳过ID为0的电机）
+                            for dev_id in joint_ids:
+                                if dev_id == 0:
+                                    continue
+                                state = ruiwo.enter_reset_state(dev_id)
+                                if isinstance(state, list):
+                                    print(f"{get_timestamp()} [RUIWO motor]:ID: {dev_id} Disable:  [Succeed]")
+                                else:
+                                    print(f"{get_timestamp()} [RUIWO motor]:ID: {dev_id} Disable:  [{state}]")
+                            # 关闭CAN总线
+                            close_canbus = ruiwo.close_canbus()
+                            if close_canbus:
+                                print(f"{get_timestamp()} [RUIWO motor]:Canbus status: [Close]")
+                            sys.exit(0)
+                    except (EOFError, KeyboardInterrupt):
+                        # 在非交互式环境中，直接退出
+                        print(f"{get_timestamp()} 非交互式环境，直接退出程序")
                         sys.exit(0)
         else:
             print(f"{get_timestamp()} 等待用户检查电机...")
 
     # 检查是否应该退出：时间到或用户请求且完成了当前周期
-    if (elapsed_time >= test_duration) or (exit_after_cycle and (elapsed_time % cycle_time >= cycle_time - MOTION_DURATION)):
+    if (actual_elapsed_time >= test_duration) or (exit_after_cycle and (elapsed_time % cycle_time >= cycle_time - MOTION_DURATION)):
         break
 
     # 根据实际时间计算当前应该执行的关键帧索引
     current_frame_index = int(elapsed_time // MOTION_DURATION) % len(full_base_actions)
     next_frame_index = (current_frame_index + 1) % len(full_base_actions)
 
-    current_positions = full_base_actions[current_frame_index]
-    target_positions = full_base_actions[next_frame_index]
+    # 检查是否需要保持位置（手臂动作完成但同步周期未结束）
+    # 使用已计算的同步相对时间
+    
+    # 计算当前应该执行的动作帧索引（基于同步周期时间）
+    sync_frame_index = int(sync_relative_time // MOTION_DURATION) % len(full_base_actions)
+    
+    if sync_relative_time >= action_cycle_duration:
+        # 回到第一帧位置等待下一次同步时间
+        current_positions = full_base_actions[0]  # 使用第一帧的位置
+        target_positions = full_base_actions[0]  # 目标位置与当前位置相同
+        use_hold_position = True  # 标记为保持位置状态
+        # 只在第一次进入保持状态时打印
+        if not hasattr(wait_for_sync_point, '_hold_printed'):
+            print(f"{get_timestamp()} 回到第一帧位置等待同步周期结束...")
+            wait_for_sync_point._hold_printed = True
+    else:
+        # 使用同步周期时间计算的动作帧索引
+        current_positions = full_base_actions[sync_frame_index]
+        target_positions = full_base_actions[(sync_frame_index + 1) % len(full_base_actions)]
+        use_hold_position = False  # 标记为正常动作状态
+        # 重置保持位置打印标志
+        if hasattr(wait_for_sync_point, '_hold_printed'):
+            delattr(wait_for_sync_point, '_hold_printed')
 
     # 检查长度是否匹配
     expected_length = len(joint_ids[:8]) if robot_mode == "roban2" else len(joint_ids)
@@ -438,15 +602,15 @@ while True:
     step_start_time = elapsed_time % MOTION_DURATION
 
     if not motor_disabled:
-        for step in range(int(steps)):
-            loop_start = time.perf_counter()
+        if use_hold_position:
+            # 保持位置时，只发送一次位置命令
             if robot_mode == "roban2":
                 for joint_index, dev_id in enumerate(joint_ids[:8]):
                     # 跳过电机ID为0的电机
                     if dev_id == 0:
                         continue
-                    # 计算当前位置到目标位置的插值
-                    interpolated_pos = current_positions[joint_index] + (target_positions[joint_index] - current_positions[joint_index]) * (step / steps)
+                    # 保持位置时，直接使用目标位置
+                    interpolated_pos = target_positions[joint_index]
                     zero_position = zero_positions[joint_index]  # 电机对应零点位置索引
                     compensated_pos = interpolated_pos + zero_position  # 应用零点补偿
                     state = ruiwo.run_ptm_mode(dev_id, compensated_pos, 0, POS_KP, POS_KD, 0)
@@ -469,8 +633,8 @@ while True:
                     # 跳过ID为0的电机
                     if dev_id == 0:
                         continue
-                    # 计算当前位置到目标位置的插值
-                    interpolated_pos = current_positions[joint_index] + (target_positions[joint_index] - current_positions[joint_index]) * (step / steps)
+                    # 保持位置时，直接使用目标位置
+                    interpolated_pos = target_positions[joint_index]
                     zero_position = zero_positions[joint_index]
                     compensated_pos = interpolated_pos + zero_position  # 应用零点补偿
                     state = ruiwo.run_ptm_mode(dev_id, compensated_pos, 0, POS_KP, POS_KD, 0)
@@ -488,16 +652,80 @@ while True:
                         # 记录丢帧
                         motor_frame_loss_stats[dev_id] += 1
                         print(f"{get_timestamp()} ID: {dev_id} Run ptm mode:  [{state}]")
+            
+            # 保持位置时，等待一个更新间隔
+            time.sleep(UPDATE_INTERVAL)
+        else:
+            # 正常动作时，执行完整的插值步骤
+            for step in range(int(steps)):
+                loop_start = time.perf_counter()
+                if robot_mode == "roban2":
+                    for joint_index, dev_id in enumerate(joint_ids[:8]):
+                        # 跳过电机ID为0的电机
+                        if dev_id == 0:
+                            continue
+                        # 正常动作时，进行插值计算
+                        interpolated_pos = current_positions[joint_index] + (target_positions[joint_index] - current_positions[joint_index]) * (step / steps)
+                        zero_position = zero_positions[joint_index]  # 电机对应零点位置索引
+                        compensated_pos = interpolated_pos + zero_position  # 应用零点补偿
+                        state = ruiwo.run_ptm_mode(dev_id, compensated_pos, 0, POS_KP, POS_KD, 0)
+                        
+                        # 统计电机命令和丢帧情况
+                        if dev_id not in motor_total_commands:
+                            motor_total_commands[dev_id] = 0
+                            motor_frame_loss_stats[dev_id] = 0
+                        
+                        motor_total_commands[dev_id] += 1
+                        
+                        if isinstance(state, list):
+                            pass
+                        else:
+                            # 记录丢帧
+                            motor_frame_loss_stats[dev_id] += 1
+                            print(f"{get_timestamp()} ID: {dev_id} Run ptm mode:  [{state}]")
+                else:
+                    for joint_index, dev_id in enumerate(joint_ids):
+                        # 跳过ID为0的电机
+                        if dev_id == 0:
+                            continue
+                        # 正常动作时，进行插值计算
+                        interpolated_pos = current_positions[joint_index] + (target_positions[joint_index] - current_positions[joint_index]) * (step / steps)
+                        zero_position = zero_positions[joint_index]
+                        compensated_pos = interpolated_pos + zero_position  # 应用零点补偿
+                        state = ruiwo.run_ptm_mode(dev_id, compensated_pos, 0, POS_KP, POS_KD, 0)
+                        
+                        # 统计电机命令和丢帧情况
+                        if dev_id not in motor_total_commands:
+                            motor_total_commands[dev_id] = 0
+                            motor_frame_loss_stats[dev_id] = 0
+                        
+                        motor_total_commands[dev_id] += 1
+                        
+                        if isinstance(state, list):
+                            pass
+                        else:
+                            # 记录丢帧
+                            motor_frame_loss_stats[dev_id] += 1
+                            print(f"{get_timestamp()} ID: {dev_id} Run ptm mode:  [{state}]")
 
-            loop_end = time.perf_counter()
-            elapsed_time = loop_end - loop_start
-            remaining_time = UPDATE_INTERVAL - elapsed_time
-            if remaining_time > 0:
-                time.sleep(remaining_time)
+                loop_end = time.perf_counter()
+                elapsed_time = loop_end - loop_start
+                remaining_time = UPDATE_INTERVAL - elapsed_time
+                if remaining_time > 0:
+                    time.sleep(remaining_time)
 
-        print(f"{get_timestamp()} 动作 {current_frame_index + 1} 执行完成，开始向位置 {next_frame_index + 1} 运动")
+        if not use_hold_position:
+            print(f"{get_timestamp()} 动作 {current_frame_index + 1} 执行完成，开始向位置 {next_frame_index + 1} 运动")
+            sys.stdout.flush()  # 立即刷新输出缓冲区
+            
+            # 检查是否完成了第7个动作（一轮完成）
+            if current_frame_index + 1 == len(full_base_actions):  # 第7个动作完成
+                completed_rounds += 1
+                print(f"\033[92m{get_timestamp()} ✅ 第 {completed_rounds} 轮动作完成！\033[0m")
+                sys.stdout.flush()  # 立即刷新输出缓冲区
 
 # 在程序结束时返回到零点位置（跳过缺失电机）
+print(f"\033[96m{get_timestamp()} 磨线程序结束，总共完成了 {completed_rounds} 轮动作！\033[0m")
 print(f"{get_timestamp()} 正在返回到零点位置...")
 if robot_mode == "roban2":
     for joint_index, dev_id in enumerate(joint_ids[:8]):

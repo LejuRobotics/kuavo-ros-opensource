@@ -1058,32 +1058,14 @@ def secondary_menu():
             print(bcolors.HEADER + "###结束，license已导入，请确认验证###" + bcolors.ENDC)   
             break  
         elif option == "m":
-            # 根据机器人版本决定执行哪个磨线功能
-            robot_version = get_robot_version()
-            if robot_version in ["13", "14"]:
-                print(bcolors.HEADER + "###开始，Roban2机器人磨线（版本13/14）###" + bcolors.ENDC)
-                roban2_joint_breakin()
-                print(bcolors.HEADER + "###结束，Roban2机器人磨线###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###开始，执行机器人磨线###" + bcolors.ENDC)
+            kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "joint_breakin.py")
+            if os.path.exists(kuavo_breakin_script):
+                command = "sudo python3 " + kuavo_breakin_script
+                subprocess.run(command, shell=True)
             else:
-                print(bcolors.HEADER + "###在执行手臂磨线之前，请先确保完成手臂电机零点设置###" + bcolors.ENDC)
-                print("请摆正手臂，按 d 执行电机零点校准，并执行手臂磨线。")
-                print("按 q 退出程序")
-                while True:
-                    option = input("请输入你的选择：")
-                    if option == 'q':
-                        print("\n*-------------退出程序-------------*")
-                        exit()
-                    elif option == 'd':
-                        print(bcolors.HEADER + "###开始，执行手臂零点校准###" + bcolors.ENDC)
-                        arm_setzero()
-                        ruiwo_zero()
-                        print(bcolors.HEADER + "###结束，执行手臂零点校准###" + bcolors.ENDC)
-                        print(bcolors.HEADER + "###开始，执行手臂磨线###" + bcolors.ENDC)
-                        arm_breakin()
-                        print(bcolors.HEADER + "###结束，执行手臂磨线###" + bcolors.ENDC)
-                        break
-                    else:
-                        print(bcolors.FAIL + "无效的选项编号，请重新输入！\n" + bcolors.ENDC)
+                print(bcolors.FAIL + f"错误：磨线脚本不存在: {kuavo_breakin_script}" + bcolors.ENDC)
+            print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)
             break
         elif option == "n":
             print(bcolors.HEADER + "###开始，更新ros密钥###" + bcolors.ENDC)

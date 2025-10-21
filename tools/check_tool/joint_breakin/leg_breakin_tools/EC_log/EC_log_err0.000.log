@@ -1,0 +1,5 @@
+0000008269: emllI8254x(0x00000002): LinkOsGetPciInfo returns ERROR: Not found
+0000008269: CEcDeviceBase::Open() Failed to open link layer!
+0000008269: ecatInitMaster(): Cannot open redundant EtherCAT device!
+0000009275: Cannot initialize EtherCAT-Master: ERROR: Not found (0x9811000c))
+0000009275: ERROR: Cannot de-initialize EtherCAT-Master: ERROR: Invalid state (0x9811000e)
