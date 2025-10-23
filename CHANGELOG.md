@@ -13,7 +13,9 @@
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
-- Roban2 支持全新的手臂接线方式，左右手臂各连接一条 Can 总线，并连接对应的末端执行器
+- Kuavo Quest3 VR 遥操作支持右摇杆控制单步大转向功能，需通过`use_step_turning:=true`开启
+- Roban2 遥控器动作按键支持在桌面软件设置自定义动作和自定义音乐功能
+- Roban2 支持全新的手臂接线方式，左右手臂各连接一条 Can 总线，并连接对应的末端执行器，控制频率 500 Hz
 - Roban2 新增支持基于 Can 通讯的 Revo2 灵巧手，需要刷对应 Can 版的固件
 - Roban2 新增配置文件`~/.config/lejuconfig/CanbusWiringType.ini`用来表示 Can 总线的接线方式，dual_bus 表示双总线
 - Roban2 新增配置文件`~/.config/lejuconfig/canbus_device_cofig.yaml`用于 Can 模块与总线上的设备关系描述
@@ -48,6 +50,8 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复 VR 半身模式下，开启和退出低延迟模式时手臂会抽动问题
+- 修复使用`/play_music`服务播放音频时无法获取音频是否已播放结束状态问题
 - 修复在 VR 视频回传功能，相机的部分参数错误会导致 launch 无法正常启动问题
 - 修复 kuavo 未配置 cmdvelLinearZLimit 导致初始化失败
 - 修复强脑SDK升级到`0.9.1`函数符号冲突导致无法控制 Kuavo灵巧手问题

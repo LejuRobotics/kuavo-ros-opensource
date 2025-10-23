@@ -44,7 +44,7 @@
 #include "kuavo_msgs/getCurrentGaitName.h"
 #include "humanoid_controllers/shm_manager.h"
 #include <std_msgs/Int8.h>
-#ifdef USE_DDS
+#if defined(USE_DDS) || defined(USE_LEJU_DDS)
 #include "humanoid_controllers/CommonDDS.h"
 #endif 
 
@@ -211,6 +211,8 @@ namespace humanoid_controller
     void checkMpcPullUp(double current_time, vector_t & current_state, const TargetTrajectories& planner_target_trajectories);
 #ifdef USE_DDS
     void LowStateCallback(const unitree_hg::msg::dds_::LowState_& data);
+#elif USE_LEJU_DDS
+    void LejuSensorsDataCallback(const leju::msgs::SensorsData& data);
 #endif
 
     /**
@@ -491,7 +493,11 @@ namespace humanoid_controller
     
     // Unitree DDS hardware interface
 #ifdef USE_DDS
-    std::unique_ptr<HumanoidControllerDDSClient> dds_client_;
+    using HumanoidDDSClientType = HumanoidControllerDDSClient<unitree_hg::msg::dds_::LowCmd_, unitree_hg::msg::dds_::LowState_>;
+    std::unique_ptr<HumanoidDDSClientType> dds_client_;
+#elif defined(USE_LEJU_DDS)
+    using HumanoidLejuDDSClientType = HumanoidControllerDDSClient<leju::msgs::JointCmd, leju::msgs::SensorsData>;
+    std::unique_ptr<HumanoidLejuDDSClientType> dds_client_;
 #endif
     
     // Latest sensor data for comparison

@@ -554,6 +554,17 @@ class IkRos:
                     if q0_tmp[0] > 0.0:
                         q0_tmp[0] = 0.0
 
+                # 限制肘部位置，避免动作幅度过大导致肩膀翻转
+                if self.__arm_dof == 8:
+                    left_shoulder_pos = self.get_shoulder_position(q0_tmp, "left")
+                    right_shoulder_pos = self.get_shoulder_position(q0_tmp, "right")
+                    if l_elbow_pos[2]>0.1:
+                        if l_elbow_pos[0] < (left_shoulder_pos[0]+0.1):
+                            l_elbow_pos[0] = left_shoulder_pos[0]+0.1
+                    if r_elbow_pos[2]>0.1:
+                        if r_elbow_pos[0] < (right_shoulder_pos[0]+0.1):
+                            r_elbow_pos[0] = right_shoulder_pos[0]+0.1
+
                 
                 # q0_tmp[-self.__single_arm_dof + 3] = -0.5
                 # q0_tmp[-self.__arm_dof+3] = -0.5
@@ -586,6 +597,8 @@ class IkRos:
                 # q0_tmp_msg.data = q0_tmp * 180.0 / np.pi  # 转换为角度
                 # self.pub_q0_tmp.publish(q0_tmp_msg)
                 
+                # print(f"l_hand_pose: {l_hand_pose}, l_elbow_pos: {l_elbow_pos}")
+                # print(f"r_hand_pose: {r_hand_pose}, r_elbow_pos: {r_elbow_pos}")
                 
                 q_now = arm_ik.computeIK(
                     q0_tmp, l_hand_pose, r_hand_pose, l_hand_RPY, r_hand_RPY, l_elbow_pos, r_elbow_pos, left_shoulder_rpy_in_robot, right_shoulder_rpy_in_robot

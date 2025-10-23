@@ -7,7 +7,7 @@
 #include <fstream>
 
 #include "humanoid_controllers/humanoidController.h"
-#ifdef USE_DDS
+#if defined(USE_DDS) || defined(USE_LEJU_DDS)
 #include "humanoid_controllers/CommonDDS.h"
 #endif
 
@@ -424,7 +424,7 @@ namespace humanoid_controller
     
 #ifdef USE_DDS
     // Initialize DDS client
-    dds_client_ = std::make_unique<HumanoidControllerDDSClient>();
+    dds_client_ = std::make_unique<HumanoidDDSClientType>();
     
     auto callback = [this](const unitree_hg::msg::dds_::LowState_& data) {
         this->LowStateCallback(data);
@@ -435,8 +435,24 @@ namespace humanoid_controller
     dds_client_->start();
     
     std::cout << "DDS communication initialized" << std::endl;
-#else
-    std::cout << "DDS communication disabled (compile with -DUSE_DDS to enable)" << std::endl;
+#elif USE_LEJU_DDS
+    // Initialize Leju DDS client
+    using LejuDDSClientType = HumanoidControllerDDSClient<leju::msgs::JointCmd, leju::msgs::SensorsData>;
+    dds_client_ = std::make_unique<LejuDDSClientType>();
+
+    auto leju_callback = [this](const leju::msgs::SensorsData& data) {
+        this->LejuSensorsDataCallback(data);
+    };
+    dds_client_->state_listener_->setLowdstateCallback(leju_callback);
+
+    // Start the DDS client
+    dds_client_->start();
+
+    std::cout << "Leju DDS communication initialized" << std::endl;
+#endif
+
+#if !defined(USE_DDS) && !defined(USE_LEJU_DDS)
+    std::cout << "DDS communication disabled (compile with -DUSE_DDS or -DUSE_LEJU_DDS to enable)" << std::endl;
 #endif
     
     // create a ROS subscriber to receive the joint pos and vel
@@ -464,7 +480,7 @@ namespace humanoid_controller
     acc_filter_.setParams(dt_, acc_filter_params);
     // free_acc_filter_.setParams(dt_, acc_filter_params);
     gyro_filter_.setParams(dt_, gyro_filter_params);
-#ifndef USE_DDS
+#if !defined(USE_DDS) && !defined(USE_LEJU_DDS)
     // Only subscribe to sensor data via ROS when DDS is not enabled
     sensorsDataSub_ = controllerNh_.subscribe<kuavo_msgs::sensorsData>("/sensors_data_raw", 10, &humanoidController::sensorsDataCallback, this);
 #endif
@@ -838,9 +854,74 @@ namespace humanoid_controller
     if (!is_initialized_)
       is_initialized_ = true;
   }
+#elif USE_LEJU_DDS
+  void humanoidController::LejuSensorsDataCallback(const leju::msgs::SensorsData& data)
+  {
+    SensorData sensor_data;
+    sensor_msgs::Imu imu_msg;
+    sensor_data.resize_joint(jointNumReal_+armNumReal_+headNum_);
+
+    // JOINT DATA - extract from leju::msgs::SensorsData
+    size_t joint_count = std::min(static_cast<size_t>(jointNumReal_+armNumReal_+headNum_),
+                                  static_cast<size_t>(data.joint_data().joint_q().size()));
+
+    for (size_t i = 0; i < joint_count; ++i)
+    {
+      sensor_data.jointPos_(i) = data.joint_data().joint_q()[i];
+      sensor_data.jointVel_(i) = data.joint_data().joint_v()[i];
+      sensor_data.jointAcc_(i) = data.joint_data().joint_vd()[i];
+      sensor_data.jointTorque_(i) = data.joint_data().joint_torque()[i];
+    }
+
+    // Convert timestamp from leju DDS message
+    sensor_data.timeStamp_ = ros::Time(data.header_sec(), data.header_nanosec());
+    double sensor_time_diff = 0;
+    ros_logger_->publishValue("/monitor/time_cost/sensor_to_controller", sensor_time_diff);
+
+    // IMU DATA - extract from leju::msgs::SensorsData
+    sensor_data.quat_.coeffs().w() = data.imu_data().quat()[0];
+    sensor_data.quat_.coeffs().x() = data.imu_data().quat()[1];
+    sensor_data.quat_.coeffs().y() = data.imu_data().quat()[2];
+    sensor_data.quat_.coeffs().z() = data.imu_data().quat()[3];
+    sensor_data.angularVel_ << data.imu_data().gyro()[0], data.imu_data().gyro()[1], data.imu_data().gyro()[2];
+    sensor_data.linearAccel_ << data.imu_data().acc()[0], data.imu_data().acc()[1], data.imu_data().acc()[2];
+    sensor_data.orientationCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
+    sensor_data.angularVelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
+    sensor_data.linearAccelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
+
+    // Apply filtering if needed
+    {
+      sensor_data.linearAccel_ = acc_filter_.update(sensor_data.linearAccel_);
+      sensor_data.angularVel_ = gyro_filter_.update(sensor_data.angularVel_);
+    }
+
+    ros_logger_->publishVector("/state_estimate/imu_data_filtered/linearAccel", sensor_data.linearAccel_);
+    ros_logger_->publishVector("/state_estimate/imu_data_filtered/angularVel", sensor_data.angularVel_);
+    sensors_data_buffer_ptr_->addData(sensor_data.timeStamp_.toSec(), sensor_data);
+
+    // Handle head joint data if available
+    if (headNum_ > 0 && sensor_data.jointPos_.size() == jointNumReal_+armNumReal_ + headNum_)
+    {
+      int head_start_index = sensor_data.jointPos_.size() - headNum_;
+      for (size_t i = 0; i < headNum_; ++i)
+      {
+        sensor_data_head_.jointPos_(i) = data.joint_data().joint_q()[head_start_index + i];
+        sensor_data_head_.jointVel_(i) = data.joint_data().joint_v()[head_start_index + i];
+        sensor_data_head_.jointAcc_(i) = data.joint_data().joint_vd()[head_start_index + i];
+        sensor_data_head_.jointTorque_(i) = data.joint_data().joint_torque()[head_start_index + i];
+      }
+    }
+
+    // Save latest DDS sensor data for comparison
+    latest_dds_sensor_data_ = sensor_data;
+    has_dds_data_ = true;
+
+    if (!is_initialized_)
+      is_initialized_ = true;
+  }
 #endif
 
-  void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr &msg)
+void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr &msg)
   {
     auto &joint_data = msg->joint_data;
     auto &end_effector_data = msg->end_effector_data; // TODO: add end_effector_data to the observation
@@ -1428,6 +1509,46 @@ namespace humanoid_controller
         low_cmd.crc(crc);
         
         dds_client_->publishLowCmd(low_cmd);
+    }
+#elif USE_LEJU_DDS
+    // Publish via Leju DDS when Leju DDS is enabled
+    if (dds_client_) {
+        // Convert jointCmdMsg to leju DDS JointCmd
+        leju::msgs::JointCmd leju_cmd;
+
+        // Set timestamp
+        auto now = std::chrono::system_clock::now();
+        auto duration = now.time_since_epoch();
+        auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration);
+        auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration - seconds);
+
+        leju_cmd.header_sec(static_cast<int32_t>(seconds.count()));
+        leju_cmd.header_nanosec(static_cast<uint32_t>(nanoseconds.count()));
+
+        // Resize sequences to match joint count
+        size_t joint_count = jointCmdMsg.joint_q.size();
+        leju_cmd.joint_q().resize(joint_count);
+        leju_cmd.joint_v().resize(joint_count);
+        leju_cmd.tau().resize(joint_count);
+        leju_cmd.tau_max().resize(joint_count);
+        leju_cmd.tau_ratio().resize(joint_count);
+        leju_cmd.joint_kp().resize(joint_count);
+        leju_cmd.joint_kd().resize(joint_count);
+        leju_cmd.control_modes().resize(joint_count);
+
+        // Copy joint data
+        for (size_t i = 0; i < joint_count; ++i) {
+            leju_cmd.joint_q()[i] = jointCmdMsg.joint_q[i];
+            leju_cmd.joint_v()[i] = jointCmdMsg.joint_v[i];
+            leju_cmd.tau()[i] = jointCmdMsg.tau[i];
+            leju_cmd.tau_max()[i] = 100.0;  // Default max torque
+            leju_cmd.tau_ratio()[i] = 1.0;  // Default ratio
+            leju_cmd.joint_kp()[i] = jointCmdMsg.joint_kp[i];
+            leju_cmd.joint_kd()[i] = jointCmdMsg.joint_kd[i];
+            leju_cmd.control_modes()[i] = jointCmdMsg.control_modes[i];
+        }
+
+        dds_client_->publishLowCmd(leju_cmd);
     }
 #else
     // Use ROS publishing when DDS is disabled
@@ -2193,6 +2314,46 @@ namespace humanoid_controller
         low_cmd.crc(crc);
         
         dds_client_->publishLowCmd(low_cmd);
+    }
+#elif USE_LEJU_DDS
+    // Publish via Leju DDS when Leju DDS is enabled
+    if (dds_client_) {
+        // Convert jointCmdMsg to leju DDS JointCmd
+        leju::msgs::JointCmd leju_cmd;
+
+        // Set timestamp
+        auto now = std::chrono::system_clock::now();
+        auto duration = now.time_since_epoch();
+        auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration);
+        auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration - seconds);
+
+        leju_cmd.header_sec(static_cast<int32_t>(seconds.count()));
+        leju_cmd.header_nanosec(static_cast<uint32_t>(nanoseconds.count()));
+
+        // Resize sequences to match joint count
+        size_t joint_count = jointCmdMsg.joint_q.size();
+        leju_cmd.joint_q().resize(joint_count);
+        leju_cmd.joint_v().resize(joint_count);
+        leju_cmd.tau().resize(joint_count);
+        leju_cmd.tau_max().resize(joint_count);
+        leju_cmd.tau_ratio().resize(joint_count);
+        leju_cmd.joint_kp().resize(joint_count);
+        leju_cmd.joint_kd().resize(joint_count);
+        leju_cmd.control_modes().resize(joint_count);
+
+        // Copy joint data
+        for (size_t i = 0; i < joint_count; ++i) {
+            leju_cmd.joint_q()[i] = jointCmdMsg.joint_q[i];
+            leju_cmd.joint_v()[i] = jointCmdMsg.joint_v[i];
+            leju_cmd.tau()[i] = jointCmdMsg.tau[i];
+            leju_cmd.tau_max()[i] = 100.0;  // Default max torque
+            leju_cmd.tau_ratio()[i] = 1.0;  // Default ratio
+            leju_cmd.joint_kp()[i] = jointCmdMsg.joint_kp[i];
+            leju_cmd.joint_kd()[i] = jointCmdMsg.joint_kd[i];
+            leju_cmd.control_modes()[i] = jointCmdMsg.control_modes[i];
+        }
+
+        dds_client_->publishLowCmd(leju_cmd);
     }
 #else
     // Use ROS and SHM publishing when DDS is disabled

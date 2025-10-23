@@ -47,7 +47,7 @@
 #include "dexhand_mujoco_node.h"
 #include "dexhand/json.hpp"
 
-#ifdef USE_DDS
+#if defined(USE_DDS) || defined(USE_LEJU_DDS)
 #include "mujoco_dds.h"
 #endif
 
@@ -87,7 +87,9 @@ namespace
   ros::Publisher pubTimeDiff;
 
 #ifdef USE_DDS
-  std::unique_ptr<MujocoDdsClient> dds_client;
+  std::unique_ptr<MujocoDdsClient<unitree_hg::msg::dds_::LowCmd_, unitree_hg::msg::dds_::LowState_>> dds_client;
+#elif defined(USE_LEJU_DDS)
+  std::unique_ptr<MujocoDdsClient<leju::msgs::JointCmd, leju::msgs::SensorsData>> dds_client;
 #endif
   std::queue<std::vector<double>> controlCommands;
   std::vector<double> joint_tau_cmd;
@@ -533,12 +535,25 @@ namespace
       unitree_hg::msg::dds_::LowState_ dds_state;
       Eigen::Vector3d angVel_eigen(angVel[0], angVel[1], angVel[2]);
       Eigen::Vector4d ori_eigen(ori[0], ori[1], ori[2], ori[3]);
-      dds_client->convertMujocoToDdsState(joint_data.joint_q, joint_data.joint_v, joint_data.joint_vd, joint_data.joint_torque, acc_eigen, angVel_eigen, free_acc, ori_eigen, dds_state);
+      ConvertMujocoToDdsState(joint_data.joint_q, joint_data.joint_v, joint_data.joint_vd, joint_data.joint_torque, acc_eigen, angVel_eigen, free_acc, ori_eigen, dds_state);
       dds_client->publishLowState(dds_state);
     }
     else
     {
       std::cout << "NOT PUB" << std::endl;
+    }
+#elif defined(USE_LEJU_DDS)
+    // Publish Leju DDS SensorsData when LEJU_DDS is enabled
+    if (dds_client) {
+      leju::msgs::SensorsData leju_sensors_data;
+      Eigen::Vector3d angVel_eigen(angVel[0], angVel[1], angVel[2]);
+      Eigen::Vector4d ori_eigen(ori[0], ori[1], ori[2], ori[3]);
+      ConvertMujocoToDdsState(joint_data.joint_q, joint_data.joint_v, joint_data.joint_vd, joint_data.joint_torque, acc_eigen, angVel_eigen, free_acc, ori_eigen, leju_sensors_data);
+      dds_client->publishLowState(leju_sensors_data);
+    }
+    else
+    {
+      std::cout << "Leju NOT PUB" << std::endl;
     }
 #else
     // Publish ROS sensor data only when DDS is disabled
@@ -957,6 +972,22 @@ void ddsLowCmdCallback(const unitree_hg::msg::dds_::LowCmd_& cmd)
   cmd_updated = true;
   
 }
+#elif defined(USE_LEJU_DDS)
+void lejuDdsLowCmdCallback(const leju::msgs::JointCmd& cmd)
+{
+  // Convert LEJU DDS JointCmd to MuJoCo joint commands
+  std::vector<double> tau(numJoints, 0.0);
+
+  // Map joint commands to joint torques
+  size_t joint_count = std::min((size_t)numJoints, cmd.tau().size());
+  for (size_t i = 0; i < joint_count; ++i) {
+    tau[i] = static_cast<double>(cmd.tau()[i]);
+  }
+
+  std::lock_guard<std::mutex> lock(queueMutex);
+  joint_tau_cmd = tau;
+  cmd_updated = true;
+}
 #endif
 
 void jointCmdCallback(const kuavo_msgs::jointCmd::ConstPtr &msg)
@@ -1140,11 +1171,18 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
 
 #ifdef USE_DDS
       // 初始化DDS通信
-    std::cout << "[MuJoCo DDS] Initializing DDS communication..." << std::endl;
-    dds_client = std::make_unique<MujocoDdsClient>();
+    std::cout << "\033[33m[MuJoCo DDS] Initializing DDS communication...\033[0m" << std::endl;
+    dds_client = std::make_unique<MujocoDdsClient<unitree_hg::msg::dds_::LowCmd_, unitree_hg::msg::dds_::LowState_>>();
     dds_client->setLowCmdCallback(ddsLowCmdCallback);
     dds_client->start();
-    std::cout << "[MuJoCo DDS] DDS communication started" << std::endl;
+    std::cout << "\033[33m[MuJoCo DDS] DDS communication started\033[0m" << std::endl;
+#elif defined(USE_LEJU_DDS)
+    // Initialize Leju DDS communication
+    std::cout << "\033[33m[MuJoCo LEJU DDS] Initializing LEJU DDS communication...\033[0m" << std::endl;
+    dds_client = std::make_unique<MujocoDdsClient<leju::msgs::JointCmd, leju::msgs::SensorsData>>();
+    dds_client->setLowCmdCallback(lejuDdsLowCmdCallback);
+    dds_client->start();
+    std::cout << "\033[33m[MuJoCo LEJU DDS] LEJU DDS communication started\033[0m" << std::endl;
 #endif
 
   // 初始化灵巧手ROS

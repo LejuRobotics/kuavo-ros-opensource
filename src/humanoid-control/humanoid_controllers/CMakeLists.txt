@@ -15,6 +15,15 @@ else()
     message(STATUS "DDS communication disabled (compile with -DUSE_DDS=ON to enable)")
 endif()
 
+# Add USE_LEJU_DDS option
+option(USE_LEJU_DDS "Enable Leju DDS communication" OFF)
+if(USE_LEJU_DDS)
+    add_definitions(-DUSE_LEJU_DDS)
+    message(STATUS "Leju DDS communication enabled")
+else()
+    message(STATUS "Leju DDS communication disabled (compile with -DUSE_LEJU_DDS=ON to enable)")
+endif()
+
 ## Find catkin macros and libraries
 find_package(catkin REQUIRED
         COMPONENTS
@@ -36,9 +45,21 @@ find_package(drake REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(pinocchio REQUIRED pinocchio)
 
-if (USE_DDS)
+if (USE_DDS OR USE_LEJU_DDS)
         # Find CycloneDDS-CXX (correct package name based on reference)
         find_package(CycloneDDS-CXX REQUIRED)
+
+        # Set up leju IDL files paths and variables (always available in DDS mode)
+        set(LEJU_GENERATED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo-ros-control-lejulib/hardware_dds_plant/include/leju/idl)
+
+        # leju IDL generated source files (from hardware_dds_plant build)
+        set(LEJU_DDS_SOURCES
+            ${LEJU_GENERATED_DIR}/JointCmd.cpp
+            ${LEJU_GENERATED_DIR}/SensorsData.cpp
+            ${LEJU_GENERATED_DIR}/ImuData.cpp
+            ${LEJU_GENERATED_DIR}/JointData.cpp
+            ${LEJU_GENERATED_DIR}/EndEffectorData.cpp
+        )
 
         set(UNITREE_SDK_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo-ros-control-lejulib/hardware_dds_plant/include)
         set(UNITREE_SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo-ros-control-lejulib/hardware_dds_plant/unitree_sdk2/x86_64)
@@ -65,9 +86,9 @@ if (USE_DDS)
         # Set up Unitree SDK library path based on reference
         set(UNITREE_SDK_LIB_PATH ${UNITREE_SDK_LIB_DIR}/libunitree_sdk2.a)
         if(EXISTS ${UNITREE_SDK_LIB_PATH})
-        message(STATUS "Found Unitree SDK library at: ${UNITREE_SDK_LIB_PATH}")
+            message(STATUS "Found Unitree SDK library at: ${UNITREE_SDK_LIB_PATH}")
         else()
-        message(WARNING "Unitree SDK library not found at: ${UNITREE_SDK_LIB_PATH}")
+            message(WARNING "Unitree SDK library not found at: ${UNITREE_SDK_LIB_PATH}")
         endif()
 endif()
 
@@ -118,6 +139,13 @@ if(EXISTS ${UNITREE_SDK_INCLUDE_PATH})
     include_directories(${UNITREE_SDK_INCLUDE_PATH})
 endif()
 
+# Add DDS include directories
+if(USE_DDS OR USE_LEJU_DDS)
+    include_directories(${LEJU_GENERATED_DIR})  # For leju IDL generated headers
+    include_directories(/usr/local/include/ddscxx)
+    message(STATUS "DDS include directories configured for humanoid_controllers")
+endif()
+
 # CycloneDDS include directories will be handled by the target_link_libraries with CycloneDDS-CXX::ddscxx
 if (kuavo_estimation_FOUND)
 message(STATUS "add kuavo_estimation include")
@@ -127,7 +155,6 @@ endif()
 link_directories(
         ${pinocchio_LIBRARY_DIRS}
 )
-
 
 # 添加共享内存管理库
 add_library(humanoid_interface_shm SHARED
@@ -160,9 +187,10 @@ install(TARGETS humanoid_interface_shm
 )
 
 # 添加CommonDDS库
-if (USE_DDS)
+if (USE_DDS OR USE_LEJU_DDS)
         add_library(common_dds_lib SHARED
         src/CommonDDS.cpp
+        ${LEJU_DDS_SOURCES}
         )
 
         # 设置C++标准
@@ -179,6 +207,7 @@ if (USE_DDS)
         target_include_directories(common_dds_lib PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:/usr/local/include/ddscxx>
+        $<BUILD_INTERFACE:${LEJU_GENERATED_DIR}>
         $<INSTALL_INTERFACE:include>
         )
 
@@ -214,7 +243,7 @@ target_link_libraries(${PROJECT_NAME}
         humanoid_interface_shm
         drake::drake 
         )
-if (USE_DDS)
+if (USE_DDS OR USE_LEJU_DDS)
         target_link_libraries(${PROJECT_NAME}
                 common_dds_lib
         )
