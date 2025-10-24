@@ -42,7 +42,7 @@ namespace HighlyDynamic
             }
             else
             {
-                std::cerr << "Key not found: " << parentKey << " -> " << childKey << std::endl;
+                std::cerr << "\033[31mKey not found: " << parentKey << " -> " << childKey << "\033[0m" << std::endl;
                 return nullptr;
             }
         }
@@ -56,7 +56,7 @@ namespace HighlyDynamic
             }
             else
             {
-                std::cerr << "Key not found: " << key << std::endl;
+                std::cerr << "\033[31mKey not found: " << key << "\033[0m" << std::endl;
                 return {};
             }
         }
@@ -70,7 +70,7 @@ namespace HighlyDynamic
             }
             else
             {
-                std::cerr << "Key not found: " << parentKey << " -> " << childKey << " -> " << vectorKey << std::endl;
+                std::cerr << "\033[31mKey not found: " << parentKey << " -> " << childKey << " -> " << vectorKey << "\033[0m" << std::endl;
                 return {};
             }
         }
@@ -93,7 +93,7 @@ namespace HighlyDynamic
             }
             else
             {
-                std::cerr << "Key not found: " << key << std::endl;
+                std::cerr << "\033[31mKey not found: " << key << "\033[0m" << std::endl;
                 return T{};
             }
         }

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import time
 import rospy
 from std_srvs.srv import Trigger, TriggerResponse
 import os
@@ -12,9 +13,11 @@ class UpperComputerServiceNode:
     def __init__(self):
         rospy.init_node('upper_computer_service_node')
         self.ssh_executor = SSHExecutor(REMOTE_CONFIG_PATH)
-        if not self.ssh_executor.connect():
-            rospy.logerr("❌ 上位机连接失败")
-            raise RuntimeError("上位机连接失败")
+        while not self.ssh_executor.connect():
+            time.sleep(3)
+        # if not self.ssh_executor.connect():
+        #     rospy.logerr("❌ 上位机连接失败")
+        #     raise RuntimeError("上位机连接失败")
         rospy.loginfo("上位机已连接")
         self.start_srv = rospy.Service('/kuavo/start_stair_detection', Trigger, self.handle_start_stair_detection)
         self.start_srv_orbbec = rospy.Service('/kuavo/start_stair_detection_orbbec', Trigger, self.handle_start_stair_detection_orbbec)

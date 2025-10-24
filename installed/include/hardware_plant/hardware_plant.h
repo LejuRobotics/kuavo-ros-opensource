@@ -130,6 +130,7 @@ class HardwarePlant
     bool calibrateMotor(int motor_id, int direction, bool save_offset = false);
     void calibrateLoop();
     void calibrateArmJoints();
+    bool calibrateArmJointsAtLimit(bool auto_mode = true, bool calibrate_head = true);
     void initEndEffector();
         bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
         bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
