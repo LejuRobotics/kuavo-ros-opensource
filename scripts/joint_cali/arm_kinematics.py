@@ -39,43 +39,51 @@ class HeadKinematics:
     def __init__(self, urdf_path):
         
         origin_robot = pin.RobotWrapper.BuildFromURDF(urdf_path)
-        mixed_jointsToLockIDs = [
-            "leg_l1_joint",
-            "leg_l2_joint",
-            "leg_l3_joint",
-            "leg_l4_joint",
-            "leg_l5_joint",
-            "leg_l6_joint",
-            "leg_r1_joint",
-            "leg_r2_joint",
-            "leg_r3_joint",
-            "leg_r4_joint",
-            "leg_r5_joint",
-            "leg_r6_joint",
-            "zarm_l1_joint",
-            "zarm_l2_joint",
-            "zarm_l3_joint",
-            "zarm_l4_joint",
-            "zarm_l5_joint",
-            "zarm_l6_joint",
-            "zarm_l7_joint",
-            "zarm_r1_joint",
-            "zarm_r2_joint",
-            "zarm_r3_joint",
-            "zarm_r4_joint",
-            "zarm_r5_joint",
-            "zarm_r6_joint",
-            "zarm_r7_joint",
-        ]
+        
+        # 获取机器人版本号（仅用于日志）
+        robot_version = os.environ.get('ROBOT_VERSION', '40')
+        
+        # 动态获取URDF中所有关节名称，排除头部关节
+        joints_to_lock = self._get_all_joints_except_head(origin_robot)
+        
+        print(f"机器人版本 {robot_version}：锁定 {len(joints_to_lock)} 个关节")
+        print(f"保留的头部关节: zhead_1_joint, zhead_2_joint")
         
         self.robot = origin_robot.buildReducedRobot(
-            list_of_joints_to_lock=mixed_jointsToLockIDs,
+            list_of_joints_to_lock=joints_to_lock,
             reference_configuration=np.array([0.0] * origin_robot.model.nq),
         )
+        
+        # 保存实际维度信息
+        self.dof = self.robot.model.nq
         print("nq_reduced: ", self.robot.model.nq)
         print("nv_reduced: ", self.robot.model.nv)
+        
+        # 验证结果
+        expected_dof = 2  # 期望只有头部2个关节
+        if self.dof != expected_dof:
+            print(f"警告: 期望 {expected_dof} 个自由度，实际得到 {self.dof} 个")
+            print("剩余关节名称:", [name for name in self.robot.model.names[1:] if name != ''])
+    
+    def _get_all_joints_except_head(self, robot):
+        """
+        获取URDF中除头部关节外的所有关节名称
+        """
+        all_joint_names = []
+        for i in range(1, robot.model.njoints):  # 跳过universe joint
+            joint_name = robot.model.names[i]
+            if joint_name and joint_name != 'universe':
+                all_joint_names.append(joint_name)
+        
+        # 过滤掉头部关节，保留其他所有关节
+        joints_to_lock = [joint for joint in all_joint_names if not joint.startswith('zhead_')]
+        
+        return joints_to_lock
 
     def FK(self, q):
+        # 添加维度检查
+        if len(q) != self.dof:
+            raise ValueError(f"输入维度不匹配: 期望 {self.dof} 维，实际得到 {len(q)} 维")
         # image frame in camera_base frame
         # TODO: 需要根据实际的相机安装位置进行修改
         p_ci = np.array([0.0, 0.018, 0.013])
@@ -98,26 +106,51 @@ class ArmKinematics:
         self.T_et = T_et
         # 加载机器人模型
         self.origin_robot = RobotWrapper.BuildFromURDF(urdf_path)
-        self.mixed_jointsToLockIDs = [
-            "leg_l1_joint",
-            "leg_l2_joint",
-            "leg_l3_joint",
-            "leg_l4_joint",
-            "leg_l5_joint",
-            "leg_l6_joint",
-            "leg_r1_joint",
-            "leg_r2_joint",
-            "leg_r3_joint",
-            "leg_r4_joint",
-            "leg_r5_joint",
-            "leg_r6_joint",
-            "zhead_1_joint",
-            "zhead_2_joint",
-        ]
+        
+        # 获取机器人版本号（仅用于日志）
+        robot_version = os.environ.get('ROBOT_VERSION', '40')
+        
+        # 动态获取需要锁定的关节（排除腿部、头部和另一侧手臂）
+        self.mixed_jointsToLockIDs = self._get_joints_to_lock_for_arms(self.origin_robot)
+        
+        print(f"机器人版本 {robot_version}：锁定 {len(self.mixed_jointsToLockIDs)} 个关节")
+        print(f"保留的关节: 左右手臂关节")
+        
         self.kinematics_l = self.build_arm_fk("l")
         self.kinematics_r = self.build_arm_fk("r")
         self.eef_fk_l = self.build_eef_fk("l")
         self.eef_fk_r = self.build_eef_fk("r")
+
+    def _get_joints_to_lock_for_arms(self, robot):
+        """
+        获取URDF中需要锁定的关节名称（排除腿部、头部关节以及末端执行器等）
+        保留手臂关节用于运动学计算
+        """
+        all_joint_names = []
+        for i in range(1, robot.model.njoints):  # 跳过universe joint
+            joint_name = robot.model.names[i]
+            if joint_name and joint_name != 'universe':
+                all_joint_names.append(joint_name)
+        
+        # 定义需要保留的手臂关节模式
+        arm_joint_patterns = ['zarm_l', 'zarm_r']
+        
+        # 过滤掉腿部、头部关节，保留手臂关节
+        joints_to_lock = []
+        for joint in all_joint_names:
+            # 检查是否是手臂关节
+            is_arm_joint = any(joint.startswith(pattern) for pattern in arm_joint_patterns)
+            
+            # 如果不是手臂关节，则需要锁定
+            if not is_arm_joint:
+                joints_to_lock.append(joint)
+        
+        # 打印详细信息用于调试
+        arm_joints = [joint for joint in all_joint_names if any(joint.startswith(pattern) for pattern in arm_joint_patterns)]
+        print(f"检测到的手臂关节: {arm_joints}")
+        print(f"将锁定的非手臂关节: {joints_to_lock}")
+        
+        return joints_to_lock
 
     def get_T_teef(self, side):
         q0 = np.zeros(self.robot[side].model.nq)

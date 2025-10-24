@@ -30,6 +30,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
 #include "humanoid_interface/foot_planner/SwingTrajectoryPlanner.h"
+#include "humanoid_interface/common/ModelSettings.h"
 
 #include <ocs2_core/thread_support/Synchronized.h>
 #include <ocs2_oc/synchronized_module/ReferenceManager.h>
@@ -42,6 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ocs2_pinocchio_interface/PinocchioEndEffectorKinematics.h>
 #include "ocs2_pinocchio_interface/PinocchioInterface.h"
 #include <ocs2_centroidal_model/CentroidalModelPinocchioMapping.h>
+#include "kuavo_common/common/common.h"
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/singleStepControl.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
@@ -87,7 +89,9 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   SwitchedModelReferenceManager(std::shared_ptr<GaitSchedule> gaitSchedulePtr, 
                                 std::shared_ptr<SwingTrajectoryPlanner> swingTrajectoryPtr, 
                                 const PinocchioInterface& pinocchioInterface,
-                                const CentroidalModelInfo& info);
+                                const CentroidalModelInfo& info,
+                                const ModelSettings& modelSettings,
+                                RobotVersion rbVersion = RobotVersion(4, 5));
 
   ~SwitchedModelReferenceManager() override = default;
 
@@ -238,10 +242,23 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   // matrix_t Q_;
 
   void loadBaseTrackingQ(const std::string &dynamic_qr_file);
+  void loadBaseTrackingR(const std::string &dynamic_qr_file);
+  void setMatrixRByGaitPair(const std::string &gait_name, const scalar_t &time);
+  
+  // 维度缩减函数（参考HumanoidInterface的实现）
+  matrix_t initializeInputCostWeightDynamic(const std::string &taskFile, const std::string &fieldName);
+  matrix_t initializeStateCostWeightDynamic(const std::string &taskFile, const std::string &fieldName);
+  
   struct baseTrackingQ{
     matrix_t Stance = matrix_t::Zero(24, 24);;
+    matrix_t StanceVRwaist = matrix_t::Zero(24, 24);;  // VR waist control Q matrix
     matrix_t Walk = matrix_t::Zero(24, 24);;
     matrix_t Jump = matrix_t::Zero(24, 24);;
+  };
+
+  struct baseTrackingR{
+    matrix_t Stance;
+    matrix_t Walk;
   };
 
   inline double normalizedYaw(double yaw)
@@ -259,12 +276,17 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   vector3_t getComPos(const vector_t& state);
 
   baseTrackingQ baseTrackingQ_;
+  baseTrackingR baseTrackingR_;
   std::string dynamic_qr_file_;
   bool dynamic_qr_flag_ = false;
 
   PinocchioInterface pinocchioInterface_;
   const CentroidalModelInfo& info_;
   std::unique_ptr<PinocchioEndEffectorKinematics> endEffectorKinematicsPtr_;
+  
+  // 用于雅可比矩阵计算的参数
+  std::vector<std::string> contactNames3DoF_;
+  RobotVersion rbVersion_;
 
   ocs2_msgs::mpc_target_trajectories armTargetTrajectoriesMsg_;
 
@@ -392,7 +414,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
 
   TargetTrajectories fullBodyHeadTargetTrajectories_;  // 存储头部轨迹
   ros::Publisher headArrayPublisher_;  // 头部轨迹发布器
-
+  
   Eigen::Vector2d lastFootCalibrationDiffXY_ = Eigen::Vector2d::Zero();
   // 处理全身轨迹
   void processFullBodyTrajectories(scalar_t initTime, scalar_t finalTime, scalar_t timeHorizon, 
