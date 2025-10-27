@@ -586,6 +586,7 @@ namespace humanoid_controller
     bool is_rl_controller_ = false;
     BufferedValue<bool> is_rl_controller_buffer_{false};
     bool is_mpc_controller_ = true;
+    bool rl_available_ = false;  // RL参数文件是否存在，决定是否启用RL控制器功能
     std::atomic_bool inference_running_{false};
     bool Walkenable_ = false;
     bool contactTrotgait_ = false;

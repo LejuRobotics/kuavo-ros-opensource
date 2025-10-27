@@ -28,7 +28,7 @@ ik_solve_param = ikSolveParam()
 ik_solve_param.major_optimality_tol = 1e-3
 ik_solve_param.major_feasibility_tol = 1e-3
 ik_solve_param.minor_feasibility_tol = 1e-3
-ik_solve_param.major_iterations_limit = 100
+ik_solve_param.major_iterations_limit = 500
 ik_solve_param.oritation_constraint_tol= 1e-3
 ik_solve_param.pos_constraint_tol = 1e-3 
 ik_solve_param.pos_cost_weight = 0.0 
@@ -373,17 +373,22 @@ def main():
 
     # 解析命令行参数  
     parser = argparse.ArgumentParser(description="是否启用偏移量")
-    parser.add_argument("--offset_start", type=str, choices=["False", "True"], required="True", help="选择 offset_start = True or Flase")
+    parser.add_argument("--offset_start", type=str, choices=["False", "True"], required="True", help="选择 offset_start = True or False")
+    parser.add_argument("--cost_weight", type=float, default=0.0, help="传入pos_cost_weight")
     args = parser.parse_args()
+
+    if args.cost_weight != 0.0:
+        ik_solve_param.pos_cost_weight = args.cost_weight
+        print(f"pos_cost_weight:{ik_solve_param.pos_cost_weight}")
 
     # offset_start="True"表示启用偏移量 否则不启用偏移量
     if args.offset_start == "True":
         # 偏向侧后边一点
         offset_z=-0.10  # 抓取点位于标签正下方
-        temp_x_l=-0.035
-        temp_y_l=0.035
-        temp_x_r=-0.045
-        temp_y_r=0.035
+        temp_x_l=0.0
+        temp_y_l=0.0
+        temp_x_r=-0.0
+        temp_y_r=0.0
     else :
         offset_z=0.00
         temp_x_l=0.00

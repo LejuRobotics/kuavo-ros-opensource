@@ -425,7 +425,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
 
   TargetTrajectories fullBodyHeadTargetTrajectories_;  // 存储头部轨迹
   ros::Publisher headArrayPublisher_;  // 头部轨迹发布器
-
+  
   Eigen::Vector2d lastFootCalibrationDiffXY_ = Eigen::Vector2d::Zero();
   // 处理全身轨迹
   void processFullBodyTrajectories(scalar_t initTime, scalar_t finalTime, scalar_t timeHorizon, 

@@ -188,10 +188,13 @@ namespace humanoid_controller
         }
         else if (Walk_Command == 'l')
         {
-          std::cerr << "into  rl " << std::endl;
-          is_rl_controller_buffer_.setBuffer(!is_rl_controller_buffer_.get());
-          Walkenable_ = false;
-
+          if (!rl_available_) {
+            std::cerr << "RL controller is not available. RL parameter file not found." << std::endl;
+          } else {
+            std::cerr << "into  rl " << std::endl;
+            is_rl_controller_buffer_.setBuffer(!is_rl_controller_buffer_.get());
+            Walkenable_ = false;
+          }
         }
         else if (Walk_Command == 'g')
         {
@@ -464,9 +467,20 @@ namespace humanoid_controller
     jointPosRL_ = vector_t::Zero(jointNumReal_ + armNumReal_);
     jointVelRL_ = vector_t::Zero(jointNumReal_ + armNumReal_);
     jointAccRL_ = vector_t::Zero(jointNumReal_ + armNumReal_);
-    loadRLSettings(rlParamFile, verbose, dt_);
-    // 初始化RL步态接收器
-    rl_gait_receiver_ = std::make_unique<RlGaitReceiver>(controllerNh_, &initialCommandDataRL_);
+    
+    // 检查RL参数文件是否存在，只有文件存在时才启用RL功能
+    std::ifstream rlParamFileCheck(rlParamFile);
+    if (rlParamFileCheck.good()) {
+      std::cout << "RL parameter file found: " << rlParamFile << ", enabling RL controller." << std::endl;
+      rl_available_ = true;
+      loadRLSettings(rlParamFile, verbose, dt_);
+      // 初始化RL步态接收器
+      rl_gait_receiver_ = std::make_unique<RlGaitReceiver>(controllerNh_, &initialCommandDataRL_);
+    } else {
+      std::cout << "RL parameter file not found: " << rlParamFile << ", RL controller disabled." << std::endl;
+      rl_available_ = false;
+    }
+    rlParamFileCheck.close();
 
     joint_control_modes_ = Eigen::VectorXd::Constant(actuatedDofNumReal_, 2);
     output_tau_ = vector_t::Zero(actuatedDofNumReal_);
@@ -842,13 +856,16 @@ namespace humanoid_controller
     {
       input_deque.push_back(singleInputDataRL_);
     }
-    compiled_model_ =
-        core_.compile_model(networkModelPath_, "CPU"); // 创建编译模型
+    if (rl_available_)
+    {  
+      compiled_model_ =
+          core_.compile_model(networkModelPath_, "CPU"); // 创建编译模型
+      std::string package_path = ros::package::getPath("kuavo_assets");
+      std::string version_str = "biped_s" + rb_version.to_string();
+      std::string urdf_path = package_path + "/models/" + version_str + "/urdf/" + version_str + ".urdf";
+      arm_torque_controller_.reset(new ArmTorqueController(urdf_path, jointKpRL_.segment(jointNumReal_, armNumReal_), jointKdRL_.segment(jointNumReal_, armNumReal_))); // 使用智能指针初始化，只传入手臂关节参数
+    }
     
-    std::string package_path = ros::package::getPath("kuavo_assets");
-    std::string version_str = "biped_s" + rb_version.to_string();
-    std::string urdf_path = package_path + "/models/" + version_str + "/urdf/" + version_str + ".urdf";
-    arm_torque_controller_.reset(new ArmTorqueController(urdf_path, jointKpRL_.segment(jointNumReal_, armNumReal_), jointKdRL_.segment(jointNumReal_, armNumReal_))); // 使用智能指针初始化，只传入手臂关节参数
     desire_arm_q_ = defalutJointPosRL_.segment(jointNumReal_, armNumReal_);
     desire_arm_v_ = Eigen::VectorXd::Zero(armNumReal_);
     // 初始化手臂插值相关变量
@@ -905,7 +922,6 @@ namespace humanoid_controller
       } 
     };
     joint_sub_ = controllerNh_.subscribe<sensor_msgs::JointState>("/kuavo_arm_traj", 10, jointStateCallback); // 初始化订阅者
-    return true;
 
     // 设置CPU内核隔离
     if (is_real_)
@@ -1322,18 +1338,26 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     sensor_data.freeLinearAccel_ << imu_data.free_acc.x, imu_data.free_acc.y, imu_data.free_acc.z;
     sensor_data.orientationCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
     sensor_data.angularVelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
-    sensor_data.linearAccelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
-    Eigen::Vector3d acc_filtered = accFilterRL_.update(sensor_data.linearAccel_);
-    Eigen::Vector3d free_acc_filtered = freeAccFilterRL_.update(sensor_data.freeLinearAccel_);
-    sensor_data.linearAccel_ = accFilterRL_.update(sensor_data.linearAccel_);
-    Eigen::Vector3d gyro_filtered = gyroFilterRL_.update(sensor_data.angularVel_);
-    
-
-    for (int i = 0; i < 3; i++)
+    if (!rl_available_)
     {
-      sensor_data.linearAccel_(i) = accFilterStateRL_(i) * acc_filtered(i) + (1 - accFilterStateRL_(i)) * sensor_data.linearAccel_(i);
-      sensor_data.freeLinearAccel_(i) = freeAccFilterStateRL_(i) * free_acc_filtered(i) + (1 - freeAccFilterStateRL_(i)) * sensor_data.freeLinearAccel_(i);
-      sensor_data.angularVel_(i) = gyroFilterStateRL_(i) * gyro_filtered(i) + (1 - gyroFilterStateRL_(i)) * sensor_data.angularVel_(i);
+      sensor_data.linearAccel_ = acc_filter_.update(sensor_data.linearAccel_);
+      sensor_data.angularVel_ = gyro_filter_.update(sensor_data.angularVel_);
+    }
+    else
+    {    
+      sensor_data.linearAccelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
+      Eigen::Vector3d acc_filtered = accFilterRL_.update(sensor_data.linearAccel_);
+      Eigen::Vector3d free_acc_filtered = freeAccFilterRL_.update(sensor_data.freeLinearAccel_);
+      sensor_data.linearAccel_ = accFilterRL_.update(sensor_data.linearAccel_);
+      Eigen::Vector3d gyro_filtered = gyroFilterRL_.update(sensor_data.angularVel_);
+      
+
+      for (int i = 0; i < 3; i++)
+      {
+        sensor_data.linearAccel_(i) = accFilterStateRL_(i) * acc_filtered(i) + (1 - accFilterStateRL_(i)) * sensor_data.linearAccel_(i);
+        sensor_data.freeLinearAccel_(i) = freeAccFilterStateRL_(i) * free_acc_filtered(i) + (1 - freeAccFilterStateRL_(i)) * sensor_data.freeLinearAccel_(i);
+        sensor_data.angularVel_(i) = gyroFilterStateRL_(i) * gyro_filtered(i) + (1 - gyroFilterStateRL_(i)) * sensor_data.angularVel_(i);
+      }
     }
     
     ros_logger_->publishVector("/state_estimate/imu_data_filtered/linearAccel", sensor_data.linearAccel_);
@@ -1589,12 +1613,15 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     std::cout << "starting the controller" << std::endl;
     mpcRunning_ = true;
     // 网络推理线程
-    inferenceThread_ = std::thread(&humanoidController::inference_thread_func, this);
-    std::cout << "inferenceThread_ is start" << std::endl;
-    if (!inferenceThread_.joinable())
+    if (rl_available_)
     {
-      ROS_ERROR_STREAM("Failed to start inference thread");
-      exit(1);
+      inferenceThread_ = std::thread(&humanoidController::inference_thread_func, this);
+      std::cout << "inferenceThread_ is start" << std::endl;
+      if (!inferenceThread_.joinable())
+      {
+        ROS_ERROR_STREAM("Failed to start inference thread");
+        exit(1);
+      }
     }
   }
   
@@ -1887,6 +1914,12 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
   {
     is_rl_controller_buffer_.updateFromBuffer();// 使用buffer中的值更新is_rl_controller_,避免多线程更新
     is_rl_controller_ = is_rl_controller_buffer_.get();
+    
+    // 如果RL不可用，强制设置 is_rl_controller_ 为 false
+    if (!rl_available_) {
+      is_rl_controller_ = false;
+    }
+    
     ros_logger_->publishValue("/humanoid_controller/is_rl_controller_", is_rl_controller_);
     if (!last_is_rl_controller_ && is_rl_controller_)
     {
@@ -2930,11 +2963,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       }
       bool new_pull_up_state = false;
       // 只有非半身轮臂模式站立状态&&站起来稳定之后进行保护, 并且手臂不是外部遥操作模式才可触发拉起保护
-      if (enable_pull_up_protect_ && isPreUpdateComplete && is_stance_mode_ && 
+      if (enable_pull_up_protect_ && !is_rl_controller_ && isPreUpdateComplete && is_stance_mode_ && 
       !only_half_up_body_ && currentObservation_.time - standupTime_ > 4 
       && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL)
         new_pull_up_state = stateEstimate_->checkPullUp(pull_up_force_threshold_);
-      ros_logger_->publishValue("/state_estimate/pull_up_state", new_pull_up_state);
+      ros_logger_->publishValue("/state_estimate/pull_up_state", isPullUp_);
       if (new_pull_up_state && !isPullUp_)
       {
         ROS_WARN_STREAM("Pull up detected");
@@ -3522,6 +3555,14 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     }
     
     if (found) {
+      // 检查是否尝试切换到RL控制器，以及RL是否可用
+      if (new_index != 0 && !rl_available_) {
+        res.success = false;
+        res.message = "RL controller is not available. RL parameter file not found.";
+        ROS_WARN("[HumanoidController] %s", res.message.c_str());
+        return true;
+      }
+      
       // Update current controller state
       current_controller_ = req.controller_name;
       current_controller_index_ = new_index;
@@ -3577,8 +3618,31 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     res.current_controller = current_controller_;
     res.current_index = current_controller_index_;
 
-    // 计算下一个控制器的索引（循环切换）
-    int next_index = (current_controller_index_ + 1) % available_controllers_.size();
+    // 计算下一个控制器的索引（循环切换），跳过不可用的RL控制器
+    int next_index = current_controller_index_;
+    int search_count = 0;
+    do {
+      next_index = (next_index + 1) % available_controllers_.size();
+      search_count++;
+      
+      // 如果是RL控制器且RL不可用，跳过
+      if (next_index != 0 && !rl_available_) {
+        continue;
+      }
+      
+      break;
+    } while (search_count < available_controllers_.size());
+    
+    // 如果找不到可用的控制器（应该不会发生，因为至少MPC可用）
+    if (search_count >= available_controllers_.size()) {
+      res.success = false;
+      res.message = "No available controllers to switch to";
+      res.next_controller = "";
+      res.next_index = -1;
+      ROS_WARN("[HumanoidController] %s", res.message.c_str());
+      return true;
+    }
+
     std::string next_controller = available_controllers_[next_index];
 
     // 更新当前控制器状态

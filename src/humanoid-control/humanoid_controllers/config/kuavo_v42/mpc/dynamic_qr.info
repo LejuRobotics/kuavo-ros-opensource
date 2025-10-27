@@ -33,6 +33,7 @@ Q_base_stance
   (23,23) 10.0     ; leg_r6_joint
 }
 
+
 Q_base_walk
 {
     scaling 1e+0
