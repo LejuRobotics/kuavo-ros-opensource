@@ -296,7 +296,7 @@ bool DexHandMujocoRosNode::gestureExecuteStateCallback(kuavo_msgs::gestureExecut
         return false;
     }
 
-    // res.is_executing = controller_->is_gesture_executing();        
+    res.is_executing = controller_->is_gesture_executing();        
     res.message = "success";
     
     return true;

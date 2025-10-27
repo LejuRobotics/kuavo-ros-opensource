@@ -150,7 +150,7 @@
     "end_frames_name_ik":  ["torso", "zarm_l4_link", "zarm_r4_link", "zarm_l4_link", "zarm_r4_link"],
     "arm_end_joints": ["zarm_l4_joint", "zarm_r4_joint"],
     "shoulder_frame_names" : ["zarm_l1_link", "zarm_r1_link"],
-    "eef_visual_stl_files" : ["l_hand_roll.STL", "r_hand_roll.STL"],
+    "eef_visual_stl_files" : ["l_forearm_hand.STL", "r_forearm_hand.STL"],
     "upper_arm_length": 0.188,
     "lower_arm_length": 0.17,
     "shoulder_width": 0.16,
