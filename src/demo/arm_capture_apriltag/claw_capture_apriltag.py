@@ -9,8 +9,8 @@ import time
 import argparse
 from kuavo_msgs.msg import armTargetPoses
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, changeArmCtrlModeResponse
-from motion_capture_ik.srv import twoArmHandPoseCmdSrv
-from motion_capture_ik.msg import twoArmHandPoseCmd, ikSolveParam
+from kuavo_msgs.srv import twoArmHandPoseCmdSrv
+from kuavo_msgs.msg import twoArmHandPoseCmd, ikSolveParam
 
 from kuavo_msgs.srv import controlLejuClaw, controlLejuClawRequest, controlLejuClawResponse
 from kuavo_msgs.msg import robotHeadMotionData
@@ -28,13 +28,13 @@ ik_solve_param = ikSolveParam()
 ik_solve_param.major_optimality_tol = 1e-3
 ik_solve_param.major_feasibility_tol = 1e-3
 ik_solve_param.minor_feasibility_tol = 1e-3
-ik_solve_param.major_iterations_limit = 100
+ik_solve_param.major_iterations_limit = 500
 ik_solve_param.oritation_constraint_tol= 1e-3
 ik_solve_param.pos_constraint_tol = 1e-3 
 ik_solve_param.pos_cost_weight = 0.0 
 
 # 夹爪参数
-claw_open=[40,40]
+claw_open=[10,10]
 claw_close=[75,75]
 
 # 头部抬头低头控制
@@ -374,15 +374,20 @@ def main():
     # 解析命令行参数  
     parser = argparse.ArgumentParser(description="是否启用偏移量")
     parser.add_argument("--offset_start", type=str, choices=["False", "True"], required="True", help="选择 offset_start = True or Flase")
+    parser.add_argument("--cost_weight", type=float, default=0.0, help="传入pos_cost_weight")
     args = parser.parse_args()
+
+    if args.cost_weight != 0.0:
+        ik_solve_param.pos_cost_weight = args.cost_weight
+        print(f"pos_cost_weight:{ik_solve_param.pos_cost_weight}")
 
     # offset_start="True"表示启用偏移量 否则不启用偏移量
     if args.offset_start == "True":
         # 偏向侧后边一点
-        offset_z=-0.08  # 抓取点位于标签正下方
-        temp_x_l=-0.035
+        offset_z=-0.1 # 抓取点位于标签正下方
+        temp_x_l=0.0
         temp_y_l=0.0
-        temp_x_r=-0.01
+        temp_x_r=0.0
         temp_y_r=0.0
     else :
         offset_z=0.00
@@ -563,7 +568,7 @@ def main():
             time.sleep(1.5)
             # 弯曲肘部
             print("move to position 2")
-            publish_arm_target_poses([1.5], [0.0, 60.0, 0.0, -90.0, 0.0, 0.0, 0.0,
+            publish_arm_target_poses([1.5], [0.0, 60.0, 0.0, -90.0, 80.0, 0.0, 0.0,
             20.0, 0.0, 0.0, -30.0, 0.0, 0.0, 0.0])
             time.sleep(1.5) 
             # 回收臂展 
@@ -581,7 +586,7 @@ def main():
             # 弯曲肘部
             print("move to position 2")
             publish_arm_target_poses([1.5], [20.0, 0.0, 0.0, -30.0, 0.0, 0.0, 0.0,
-            40.0, 0.0, 0.0, -130.0, 90.0, 0.0, 0.0])
+            0.0, -60.0, 0.0, -90.0, -80.0, 0.0, 0.0])
             #0.0, -60.0, 0.0, -90.0, 0.0, 0.0, 0.0])
             time.sleep(1.5) 
             #time.sleep(3) 
@@ -614,7 +619,7 @@ def main():
             claw_control_msg.data.position = claw_close
             control_leju_claw(claw_control_msg)  
             time.sleep(1)   
-            publish_arm_target_poses([1.5], [-60.0, 0.0, 0.0, -30.0, -20.0, 0.0, 0.0,
+            publish_arm_target_poses([1.5], [-60.0, 0.0, 0.0, -30.0, 90.0, 0.0, 0.0,
                 20.0, 0.0, 0.0, -30.0, 0.0, 0.0, 0.0])
             time.sleep(2.5)
             # 夹爪张开
