@@ -10,6 +10,7 @@
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Int32.h>
+#include <std_msgs/String.h>
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Float64MultiArray.h>
 
@@ -32,6 +33,7 @@
 #include <kuavo_msgs/getCurrentGaitName.h>
 #include <std_srvs/Trigger.h>
 #include "utils/singleStepControl.hpp"
+#include <kuavo_msgs/switchToNextController.h>
 
 namespace ocs2
 {
@@ -162,6 +164,7 @@ namespace ocs2
 
             mode_sequence_template_publisher_ = nodeHandle_.advertise<ocs2_msgs::mode_schedule>(robotName + "_mpc_mode_schedule", 10, true);
             mode_scale_publisher_ = nodeHandle_.advertise<std_msgs::Float32>(robotName + "_mpc_mode_scale", 10, true);
+            gait_name_publisher_ = nodeHandle_.advertise<std_msgs::String>("/humanoid_mpc_gait_name_request", 10, true);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
             observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
@@ -201,6 +204,9 @@ namespace ocs2
 
             // 添加arm_collision_control服务
             arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
+            
+            // 添加切换控制器服务客户端
+            switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
         }
 
         void run()
@@ -371,6 +377,38 @@ namespace ocs2
             }
         }
 
+        void callSwitchToNextControllerSrv()
+        {
+            kuavo_msgs::switchToNextController srv;
+            
+            // 等待服务可用
+            if (!switch_to_next_controller_client_.waitForExistence(ros::Duration(2.0)))
+            {
+                ROS_WARN("Switch to next controller service not available, skipping call");
+                return;
+            }
+
+            // 调用服务
+            if (switch_to_next_controller_client_.call(srv))
+            {
+                if (srv.response.success)
+                {
+                    ROS_INFO("Switch to next controller successful: %s", srv.response.message.c_str());
+                    ROS_INFO("Switched from %s (index: %d) to %s (index: %d)", 
+                             srv.response.current_controller.c_str(), srv.response.current_index,
+                             srv.response.next_controller.c_str(), srv.response.next_index);
+                }
+                else
+                {
+                    ROS_WARN("Switch to next controller failed: %s", srv.response.message.c_str());
+                }
+            }
+            else
+            {
+                ROS_ERROR("Failed to call switch to next controller service");
+            }
+        }
+
         void callTerminateSrv()
         {
         std::cout << "tigger callTerminateSrv" << std::endl;
@@ -466,8 +504,8 @@ namespace ocs2
                 cmd_pose.linear.x = 0.0;  // 基于当前位置的 x 方向值 (m)
                 cmd_pose.linear.y = 0.0;  // 基于当前位置的 y 方向值 (m)
                 cmd_pose.linear.z = relative_height;  // 相对高度
-                cmd_pose.angular.x = relative_roll;  // roll
-                cmd_pose.angular.z = relative_yaw_torso;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
+                cmd_pose.angular.x = 0;  // roll
+                cmd_pose.angular.z = 0;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
                 cmd_pose.angular.y = current_head_body_pose_.body_pitch;  // pitch
 
                 cmd_pose_pub_.publish(cmd_pose);
@@ -495,12 +533,21 @@ namespace ocs2
                   callTerminateSrv();
                   return;
             }
+            // if (joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，切换控制器
+            // {
+                
+            // }
             if (joystick_data_.left_trigger > 0.5)
             {
                 if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)
                 {
                     // 使能 WBC 手臂轨迹控制
                     callEnableWbcArmTrajectorySrv(1);
+                    return;
+                }
+                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+                {
+                    callSwitchToNextControllerSrv();
                     return;
                 }
             }
@@ -1131,6 +1178,10 @@ namespace ocs2
             humanoid::ModeSequenceTemplate modeSequenceTemplate = gait_map_.at(gaitName);
             mode_sequence_template_publisher_.publish(createModeSequenceTemplateMsg(modeSequenceTemplate));
             current_desired_gait_ = gaitName;            
+            // 同步发布 gait_name
+            std_msgs::String gait_name_msg;
+            gait_name_msg.data = gaitName;
+            gait_name_publisher_.publish(gait_name_msg);
         }
 
         scalar_t estimateTimeToTarget(const vector_t &desiredBaseDisplacement)
@@ -1170,6 +1221,7 @@ namespace ocs2
         ocs2::SystemObservation observation_;
         ros::Publisher mode_sequence_template_publisher_;
         ros::Publisher mode_scale_publisher_;
+        ros::Publisher gait_name_publisher_;
         ros::Publisher stop_pub_;
         ros::Publisher step_num_stop_pub_;
         ros::Publisher vel_control_pub_;
@@ -1182,6 +1234,7 @@ namespace ocs2
         ros::ServiceClient enable_wbc_arm_trajectory_control_client_;
         ros::ServiceClient vr_waist_control_service_client_;  // VR腰部控制动态Q矩阵服务客户端
         ros::ServiceClient auto_gait_mode_service_client_;    // GaitReceiver自动步态模式服务客户端
+        ros::ServiceClient switch_to_next_controller_client_; // 切换控制器服务客户端
         ros::ServiceServer arm_collision_control_service_;
 
         // 腰部控制相关的订阅者和发布者

@@ -123,8 +123,11 @@ else
     done
 fi
 
+
+
 # 启动 websocket 服务节点
-roslaunch planarmwebsocketservice plan_arm_action_websocket_server.launch robot_type:=ocs2
+echo "正在启动 websocket 服务节点..."
+roslaunch planarmwebsocketservice plan_arm_action_websocket_server.launch robot_type:=ocs2 camera_type:=$CAMERA_TYPE
 
 # 定义退出时的清理操作
 cleanup() {

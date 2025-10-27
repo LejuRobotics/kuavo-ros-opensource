@@ -2,7 +2,7 @@
     "JoyButton": {
         "BUTTON_STANCE": 0,
         "BUTTON_TROT": 1,
-        "BUTTON_JUMP": 3,
+        "BUTTON_RL": 3,
         "BUTTON_WALK": 4,
         "BUTTON_LB": 6,
         "BUTTON_RB": 7,

@@ -132,7 +132,11 @@ add_message_files(
   AudioReceiverData.msg
 
   Color.msg
+
+  # Face detection bounding box
+  FaceBoundingBox.msg
   AudioPlaybackStatus.msg
+
 )
 
 ## Generate services in the 'srv' folder
@@ -141,6 +145,9 @@ add_service_files(
   jointMoveTo.srv
   setHwIntialState.srv
   changeArmCtrlMode.srv
+  switchController.srv
+  getControllerList.srv
+  switchToNextController.srv
   singleStepControl.srv
   changeTorsoCtrlMode.srv
   setMotorEncoderRoundService.srv

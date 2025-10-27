@@ -58,6 +58,37 @@ sed -i "s|^Environment=ROS_HOSTNAME=.*|Environment=ROS_HOSTNAME=$ROS_HOSTNAME|" 
 
 sudo sed -i "s|^Environment=ROBOT_NAME=.*|Environment=ROBOT_NAME=$ROBOT_NAME|" $SERVICE_FILE
 
+# 询问相机型号
+    echo
+    echo "请选择相机型号："
+    echo "1. realsense"
+    echo "2. orbbec"
+    echo "3. 不启用相机"
+    read -p "请输入数字 (1 或 2 或 3): " camera_choice
+
+    case $camera_choice in
+        1)
+            CAMERA_MODEL="realsense"
+            ;;
+        2)
+            CAMERA_MODEL="orbbec"
+            ;;
+        3)
+            CAMERA_MODEL="none"
+            ;;
+        *)
+            echo "无效的输入，不启用相机"
+            CAMERA_MODEL="none"
+            ;;
+    esac
+
+echo "已选择相机型号: $CAMERA_MODEL"
+
+sed -i "s|^Environment=CAMERA_TYPE=.*|Environment=CAMERA_TYPE=$CAMERA_MODEL|" $SERVICE_FILE
+
+
+
+
 # 替换 ExecStart 路径
 sed -i "s|^Environment=ROBOT_VERSION=.*|Environment=ROBOT_VERSION=$ROBOT_VERSION|" $SERVICE_FILE
 sudo sed -i "s|^ExecStart=.*|ExecStart=/bin/bash $START_SCRIPT_PATH|" $SERVICE_FILE

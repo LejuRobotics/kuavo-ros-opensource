@@ -60,18 +60,42 @@ MRT_ROS_Interface::~MRT_ROS_Interface() {
 /******************************************************************************************************/
 /******************************************************************************************************/
 void MRT_ROS_Interface::resetMpcNode(const TargetTrajectories& initTargetTrajectories) {
-  this->reset();
+  auto initCopy = initTargetTrajectories;
+  std::thread([this, initCopy]() mutable {
+    this->reset();
 
-  ocs2_msgs::reset resetSrv;
-  resetSrv.request.reset = static_cast<uint8_t>(true);
-  resetSrv.request.targetTrajectories = ros_msg_conversions::createTargetTrajectoriesMsg(initTargetTrajectories);
+    ocs2_msgs::reset resetSrv;
+    resetSrv.request.reset = static_cast<uint8_t>(true);
+    resetSrv.request.targetTrajectories = ros_msg_conversions::createTargetTrajectoriesMsg(initCopy);
 
-  while (!mpcResetServiceClient_.waitForExistence(ros::Duration(5.0)) && ::ros::ok() && ::ros::master::check()) {
-    ROS_ERROR_STREAM("Failed to call service to reset MPC, retrying...");
-  }
+    while (!mpcResetServiceClient_.waitForExistence(ros::Duration(5.0)) && ::ros::ok() && ::ros::master::check()) {
+      ROS_ERROR_STREAM("Failed to call service to reset MPC, retrying...");
+    }
 
-  mpcResetServiceClient_.call(resetSrv);
-  ROS_INFO_STREAM("MPC node has been reset.");
+    mpcResetServiceClient_.call(resetSrv);
+    ROS_INFO_STREAM("MPC node has been reset.");
+  }).detach();
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+void MRT_ROS_Interface::pauseResumeMpcNode(bool pause) {
+  std::thread([this, pause]() {
+    ocs2_msgs::pause_resume pauseResumeSrv;
+    pauseResumeSrv.request.pause = static_cast<uint8_t>(pause);
+
+    while (!mpcPauseResumeServiceClient_.waitForExistence(ros::Duration(5.0)) && ::ros::ok() && ::ros::master::check()) {
+      ROS_ERROR_STREAM("Failed to call service to pause/resume MPC, retrying...");
+    }
+
+    mpcPauseResumeServiceClient_.call(pauseResumeSrv);
+    if (pause) {
+      ROS_INFO_STREAM("MPC node has been paused.");
+    } else {
+      ROS_INFO_STREAM("MPC node has been resumed.");
+    }
+  }).detach();
 }
 
 /******************************************************************************************************/
@@ -265,6 +289,9 @@ void MRT_ROS_Interface::launchNodes(ros::NodeHandle& nodeHandle) {
 
   // MPC reset service client
   mpcResetServiceClient_ = nodeHandle.serviceClient<ocs2_msgs::reset>(topicPrefix_ + "_mpc_reset");
+
+  // MPC pause/resume service client
+  mpcPauseResumeServiceClient_ = nodeHandle.serviceClient<ocs2_msgs::pause_resume>(topicPrefix_ + "_mpc_pause_resume");
 
   // display
 #ifdef PUBLISH_THREAD

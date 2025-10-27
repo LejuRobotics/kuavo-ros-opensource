@@ -32,7 +32,7 @@
     <body name="base_link" pos="0 0 0.82">
       <freejoint />
       <site name="imu" pos="0 0 0" />
-      <inertial pos="-0.00602072 -0.0005008 0.146576" mass="8.01048" diaginertia="0.085979 0.0673308 0.0420581" />
+      <inertial pos="-0.00602072 -0.0005008 0.146576" mass="8.61328" diaginertia="0.085979 0.0673308 0.0420581" />
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso" />
       <body name="waist">
         <inertial pos="0.0015256 0.00013413 -0.119276" mass="4.60776" diaginertia="0.0210197 0.0145818 0.0145445" />

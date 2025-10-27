@@ -11,6 +11,7 @@ Environment=ROBOT_NAME=KUAVO
 Environment=ROS_MASTER_URI=http://127.0.0.1:11311
 Environment=ROS_IP=127.0.0.1
 Environment=ROS_HOSTNAME=
+Environment=CAMERA_TYPE=
 ExecStart=/bin/bash /home/lab/kuavo-ros-opensource/src/manipulation_nodes/planarmwebsocketservice/service/websocket_start_script.sh
 Restart=always
 RestartSec=5s

@@ -290,6 +290,8 @@ static EC_T_DWORD myAppNotify(EC_T_DWORD dwCode, EC_T_NOTIFYPARMS *pParms);
 #define MODE_CSP (8)
 #define MODE_CSV (9)
 #define MODE_CST (10)
+#define MODE_NONE (-1)
+static std::atomic<int> currentMode[NUM_SLAVE_MAX];
 
 static uint16_t sw2cw(const uint16_t state_word) // state to control
 {
@@ -1180,12 +1182,14 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
       nextOut->elmo_slave_output[id_physical].control_word = sw2cw(sw);
       torque_feedback_targetA[index].target_position = currentIn->elmo_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
       torque_feedback_targetB[index].target_position = currentIn->elmo_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+      currentMode[id_physical].store(MODE_CSP);
     } else {
       nextOut->elmo_slave_output[id_physical].target_torque = 0;
       nextOut->elmo_slave_output[id_physical].torque_offset = 0;
       nextOut->elmo_slave_output[id_physical].max_torque = 10; // safety
       nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
       nextOut->elmo_slave_output[id_physical].control_word = sw2cw(sw);
+      currentMode[id_physical].store(MODE_CST);
     }
     }
     else{
@@ -1199,12 +1203,14 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
       nextOut->elmo_slave_output[elmo_Number].control_word = sw2cw(sw);
       torque_feedback_targetA[index].target_position = currentIn->elmo_slave_input[elmo_Number].position_actual_value * (360.0 / encoder_range[index]);
       torque_feedback_targetB[index].target_position = currentIn->elmo_slave_input[elmo_Number].position_actual_value * (360.0 / encoder_range[index]);
+      currentMode[elmo_Number].store(MODE_CSP);
     } else {
       nextOut->elmo_slave_output[elmo_Number].target_torque = 0;
       nextOut->elmo_slave_output[elmo_Number].torque_offset = 0;
       nextOut->elmo_slave_output[elmo_Number].max_torque = 10; // safety
       nextOut->elmo_slave_output[elmo_Number].mode_of_opration = MODE_CST;
       nextOut->elmo_slave_output[elmo_Number].control_word = sw2cw(sw);
+      currentMode[elmo_Number].store(MODE_CST);
     }
     }
   }
@@ -1220,11 +1226,13 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
         nextOut->yd_slave_output[id_physical].control_word    = sw2cw(sw);
         torque_feedback_targetA[index].target_position = currentIn->yd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
         torque_feedback_targetB[index].target_position = currentIn->yd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+        currentMode[id_physical].store(MODE_CSP);
     } else {
       nextOut->yd_slave_output[id_physical].target_torque = 0;
       nextOut->yd_slave_output[id_physical].torque_offset = 0;
       nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
       nextOut->yd_slave_output[id_physical].control_word = sw2cw(sw);
+      currentMode[id_physical].store(MODE_CST);
     }
     }
     else{
@@ -1236,11 +1244,13 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
         nextOut->yd_slave_output[yd_Number].control_word    = sw2cw(sw);
         torque_feedback_targetA[index].target_position = currentIn->yd_slave_input[yd_Number].position_actual_value * (360.0 / encoder_range[index]);
         torque_feedback_targetB[index].target_position = currentIn->yd_slave_input[yd_Number].position_actual_value * (360.0 / encoder_range[index]);
+        currentMode[yd_Number].store(MODE_CSP);
     } else {
       nextOut->yd_slave_output[yd_Number].target_torque = 0;
       nextOut->yd_slave_output[yd_Number].torque_offset = 0;
       nextOut->yd_slave_output[yd_Number].mode_of_opration = MODE_CST;
       nextOut->yd_slave_output[yd_Number].control_word = sw2cw(sw);
+      currentMode[yd_Number].store(MODE_CST);
     }
     }
   }
@@ -1256,11 +1266,13 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
         nextOut->selfd_slave_output[id_physical].control_word    = sw2cw(sw);
         torque_feedback_targetA[index].target_position = currentIn->selfd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
         torque_feedback_targetB[index].target_position = currentIn->selfd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[index]);
+        currentMode[id_physical].store(MODE_CSP);
     } else {
       nextOut->selfd_slave_output[id_physical].target_torque = 0;
       nextOut->selfd_slave_output[id_physical].torque_offset = 0;
       nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
       nextOut->selfd_slave_output[id_physical].control_word = sw2cw(sw);
+      currentMode[id_physical].store(MODE_CST);
     }
     }
     else{
@@ -1272,11 +1284,13 @@ static bool motorEnable(const uint16_t id, EcMasterType* driver)
         nextOut->selfd_slave_output[selfd_Number].control_word    = sw2cw(sw);
         torque_feedback_targetA[index].target_position = currentIn->selfd_slave_input[selfd_Number].position_actual_value * (360.0 / encoder_range[index]);
         torque_feedback_targetB[index].target_position = currentIn->selfd_slave_input[selfd_Number].position_actual_value * (360.0 / encoder_range[index]);
+        currentMode[selfd_Number].store(MODE_CSP);
     } else {
       nextOut->selfd_slave_output[selfd_Number].target_torque = 0;
       nextOut->selfd_slave_output[selfd_Number].torque_offset = 0;
       nextOut->selfd_slave_output[selfd_Number].mode_of_opration = MODE_CST;
       nextOut->selfd_slave_output[selfd_Number].control_word = sw2cw(sw);
+      currentMode[selfd_Number].store(MODE_CST);
     }
     }
   }
@@ -1482,6 +1496,7 @@ void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->elmo_slave_output[id_physical].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
         nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CSP;
         nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CSP);
       }
       else {
         // Ignore this Id, skip it.
@@ -1490,6 +1505,7 @@ void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->elmo_slave_output[id_physical].max_torque = 10;
         nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
         nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CST);
       }
     } 
     else if(driver[index] == YD)
@@ -1500,12 +1516,14 @@ void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->yd_slave_output[id_physical].torque_offset = (params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000.0 )  / 1.414;
         nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CSP;
         nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CSP);
       }
       else {
         nextOut->yd_slave_output[id_physical].target_torque = 0;
         nextOut->yd_slave_output[id_physical].torque_offset = 0;
         nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
         nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CST);
       }
     }
     else if (driver[id_physical] == LEJU)
@@ -1519,6 +1537,7 @@ void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->selfd_slave_output[id_physical].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
         nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CSP;
         nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CSP);
       }
       else
       {
@@ -1528,6 +1547,7 @@ void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->selfd_slave_output[id_physical].max_torque = 10;
         nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
         nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CST);
       }
     }
   }
@@ -1564,6 +1584,7 @@ void motorSetVelocity(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->elmo_slave_output[id_physical].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
         nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CSV;
         nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CSV);
       }
       else {
         // Ignore this Id, skip it.
@@ -1572,6 +1593,7 @@ void motorSetVelocity(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->elmo_slave_output[id_physical].max_torque = 10;
         nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
         nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CST);
       }
     }
     else if(driver[id_physical] == YD)
@@ -1582,12 +1604,14 @@ void motorSetVelocity(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->yd_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000 / 1.414;
         nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CSV;
         nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CSV);
       }
       else {
         nextOut->yd_slave_output[id_physical].target_torque = 0;
         nextOut->yd_slave_output[id_physical].torque_offset = 0;
         nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
         nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CST);
       }
     }
     else if(driver[id_physical] == LEJU)
@@ -1599,6 +1623,7 @@ void motorSetVelocity(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->selfd_slave_output[id_physical].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
         nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CSV;
         nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CSV);
       }
       else {
         // Ignore this Id, skip it.
@@ -1607,6 +1632,7 @@ void motorSetVelocity(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->selfd_slave_output[id_physical].max_torque = 10;
         nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
         nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+        currentMode[id_physical].store(MODE_CST);
       }
     }
   }
@@ -1709,6 +1735,7 @@ void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver,
           nextOut->elmo_slave_output[id_physical].max_torque = max_torque;
           nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
           nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
         else { // Motor Disabled.
           nextOut->elmo_slave_output[id_physical].target_torque = 0;
@@ -1716,6 +1743,7 @@ void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver,
           nextOut->elmo_slave_output[id_physical].max_torque = 10;
           nextOut->elmo_slave_output[id_physical].mode_of_opration = MODE_CST;
           nextOut->elmo_slave_output[id_physical].control_word = sw2cw(currentIn->elmo_slave_input[id_physical].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
     }
     else if(driver[index] == YD)
@@ -1726,12 +1754,14 @@ void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver,
           nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
           nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
           target_tau_vec[index] = currentOut->yd_slave_output[id_physical].target_torque;
+          currentMode[id_physical].store(MODE_CST);
         }
         else {
           nextOut->yd_slave_output[id_physical].target_torque = 0;
           nextOut->yd_slave_output[id_physical].torque_offset = 0;
           nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
           nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
     }
     else if(driver[index] == LEJU)
@@ -1743,6 +1773,7 @@ void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver,
           nextOut->selfd_slave_output[id_physical].max_torque = max_torque;
           nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
           nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
         else { // Motor Disabled.
           nextOut->selfd_slave_output[id_physical].target_torque = 0;
@@ -1750,6 +1781,7 @@ void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver,
           nextOut->selfd_slave_output[id_physical].max_torque = 10;
           nextOut->selfd_slave_output[id_physical].mode_of_opration = MODE_CST;
           nextOut->selfd_slave_output[id_physical].control_word = sw2cw(currentIn->selfd_slave_input[id_physical].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
     }
   }
@@ -1788,6 +1820,7 @@ void motorSetTorque(const uint16_t *ids, const EcMasterType* driver, uint32_t nu
           nextOut->elmo_slave_output[index].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
           nextOut->elmo_slave_output[index].mode_of_opration = MODE_CST;
           nextOut->elmo_slave_output[index].control_word = sw2cw(currentIn->elmo_slave_input[index].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
         else { // Motor Disabled.
           nextOut->elmo_slave_output[index].target_torque = 0;
@@ -1795,6 +1828,7 @@ void motorSetTorque(const uint16_t *ids, const EcMasterType* driver, uint32_t nu
           nextOut->elmo_slave_output[index].max_torque = 10;
           nextOut->elmo_slave_output[index].mode_of_opration = MODE_CST;
           nextOut->elmo_slave_output[index].control_word = sw2cw(currentIn->elmo_slave_input[index].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
     }
     else if(driver[index] == YD)
@@ -1804,11 +1838,13 @@ void motorSetTorque(const uint16_t *ids, const EcMasterType* driver, uint32_t nu
           nextOut->yd_slave_output[id_physical].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000 / 1.414;
           nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
           nextOut->yd_slave_output[id_physical].control_word = sw2cw(currentIn->yd_slave_input[id_physical].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
         else {
           nextOut->yd_slave_output[id_physical].target_torque = 0;
           nextOut->yd_slave_output[id_physical].torque_offset = 0;
           nextOut->yd_slave_output[id_physical].mode_of_opration = MODE_CST;
+          currentMode[id_physical].store(MODE_CST);
         }
     }
     else if (driver[index] == LEJU)
@@ -1819,6 +1855,7 @@ void motorSetTorque(const uint16_t *ids, const EcMasterType* driver, uint32_t nu
           nextOut->selfd_slave_output[index].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
           nextOut->selfd_slave_output[index].mode_of_opration = MODE_CST;
           nextOut->selfd_slave_output[index].control_word = sw2cw(currentIn->selfd_slave_input[index].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
         else { // Motor Disabled.
           nextOut->selfd_slave_output[index].target_torque = 0;
@@ -1826,6 +1863,7 @@ void motorSetTorque(const uint16_t *ids, const EcMasterType* driver, uint32_t nu
           nextOut->selfd_slave_output[index].max_torque = 10;
           nextOut->selfd_slave_output[index].mode_of_opration = MODE_CST;
           nextOut->selfd_slave_output[index].control_word = sw2cw(currentIn->selfd_slave_input[index].status_word & 0x6f);
+          currentMode[id_physical].store(MODE_CST);
         }
     }
   }
@@ -3407,6 +3445,10 @@ bool loadOffset()
 }
 static EC_T_DWORD myAppInit(T_EC_DEMO_APP_CONTEXT *pAppContext)
 {
+  // 初始化电机模式状态
+  for (int i = 0; i < NUM_SLAVE_MAX; i++) {
+      currentMode[i].store(MODE_NONE);
+  }
   EC_UNREFPARM(pAppContext);
 
   EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Enter my app Init\n"));
@@ -3709,10 +3751,11 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
       physicalToLogical(id_physical,i);
       // uint8_t id_physical = physical2logical[i];
 
+      int mode = currentMode[i].load();  // 原子读取当前电机的模式状态
+
       if (driver_type[i] == ELMO)
       {
-        if (currentTorqueOut->elmo_slave_output[elmo_number].mode_of_opration == MODE_CST)
-        {
+        if (mode == MODE_CST && currentTorqueOut) {
           currentOut->elmo_slave_output[elmo_number].target_torque = currentTorqueOut->elmo_slave_output[elmo_number].target_torque;
           currentOut->elmo_slave_output[elmo_number].torque_offset = currentTorqueOut->elmo_slave_output[elmo_number].torque_offset;
           currentOut->elmo_slave_output[elmo_number].max_torque = currentTorqueOut->elmo_slave_output[elmo_number].max_torque;
@@ -3737,8 +3780,7 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
           }
           currentOut->elmo_slave_output[elmo_number].target_torque = target_tau;
         }
-        else if (currentPositionOut->elmo_slave_output[elmo_number].mode_of_opration == MODE_CSP)
-        {
+        else if (mode == MODE_CSP && currentPositionOut) {
           currentOut->elmo_slave_output[elmo_number].target_position = currentPositionOut->elmo_slave_output[elmo_number].target_position;
           currentOut->elmo_slave_output[elmo_number].position_offset = currentPositionOut->elmo_slave_output[elmo_number].position_offset;
           currentOut->elmo_slave_output[elmo_number].velocit_offset = currentPositionOut->elmo_slave_output[elmo_number].velocit_offset;
@@ -3753,14 +3795,13 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
       }
       else if (driver_type[i] == YD)
       {
-        
-        if (currentTorqueOut->yd_slave_output[id_physical].mode_of_opration == MODE_CST)
+        if (mode == MODE_CST && currentTorqueOut)
         {
           currentOut->yd_slave_output[id_physical].target_torque = currentTorqueOut->yd_slave_output[id_physical].target_torque;
           currentOut->yd_slave_output[id_physical].torque_offset = currentTorqueOut->yd_slave_output[id_physical].torque_offset;
           currentOut->yd_slave_output[id_physical].mode_of_opration = currentTorqueOut->yd_slave_output[id_physical].mode_of_opration;
           currentOut->yd_slave_output[id_physical].control_word = currentTorqueOut->yd_slave_output[id_physical].control_word;
-          /////////////////////////////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////////////////////////////
           double current_position = currentIn->yd_slave_input[id_physical].position_actual_value * (360.0 / encoder_range[i]);
           double current_velocity = currentIn->yd_slave_input[id_physical].velocity_actual_value * (360.0 / encoder_range[i]);
           TorqueFeedbackTarget_t &target = currentTorqueFeedbackPtr[i];
@@ -3769,7 +3810,7 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
 
           currentOut->yd_slave_output[id_physical].target_torque = target_tau / 1.414;
         }
-        else if (currentPositionOut->yd_slave_output[id_physical].mode_of_opration == MODE_CSP)
+        else if (mode == MODE_CSP && currentPositionOut)
         {
           currentOut->yd_slave_output[id_physical].target_position = currentPositionOut->yd_slave_output[id_physical].target_position;
           currentOut->yd_slave_output[id_physical].velocity_offset = currentPositionOut->yd_slave_output[id_physical].velocity_offset;
@@ -3783,8 +3824,7 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
       }
       else if (driver_type[i] == LEJU)
       {
-        if (currentTorqueOut->selfd_slave_output[selfd_number].mode_of_opration == MODE_CST)
-        {
+        if (mode == MODE_CST && currentTorqueOut) {
           currentOut->selfd_slave_output[selfd_number].target_torque = currentTorqueOut->selfd_slave_output[selfd_number].target_torque;
           currentOut->selfd_slave_output[selfd_number].torque_offset = currentTorqueOut->selfd_slave_output[selfd_number].torque_offset;
           currentOut->selfd_slave_output[selfd_number].max_torque = currentTorqueOut->selfd_slave_output[selfd_number].max_torque;
@@ -3809,8 +3849,7 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
           }
           currentOut->selfd_slave_output[selfd_number].target_torque = target_tau;
         }
-        else if (currentPositionOut->selfd_slave_output[selfd_number].mode_of_opration == MODE_CSP)
-        {
+        else if (mode == MODE_CSP && currentPositionOut) {
           currentOut->selfd_slave_output[selfd_number].target_position = currentPositionOut->selfd_slave_output[selfd_number].target_position;
           currentOut->selfd_slave_output[selfd_number].position_offset = currentPositionOut->selfd_slave_output[selfd_number].position_offset;
           currentOut->selfd_slave_output[selfd_number].velocity_offset = currentPositionOut->selfd_slave_output[selfd_number].velocity_offset;

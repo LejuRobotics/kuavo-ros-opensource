@@ -1300,6 +1300,29 @@ def monitor_and_stop(process):
             try:
                 process.wait(timeout=3)
                 terminate_process_result = True
+
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                while current_dir != '/':
+                    # Check if this directory contains the标志性 files of kuavo-ros-control workspace
+                    if os.path.exists(os.path.join(current_dir, 'src')) and \
+                            os.path.exists(os.path.join(current_dir, 'devel/setup.bash')):
+                        KUAVO_ROS_CONTROL_WS_PATH = current_dir
+                        break
+                    current_dir = os.path.dirname(current_dir)
+
+                # 将选定代码中的硬编码路径替换为使用 current_dir 变量
+                try:
+                    subprocess.run([
+                        "bash", "-c",
+                        f"cd {current_dir} && "
+                        "source /home/lab/.bashrc && "
+                        "source /opt/ros/noetic/setup.bash && "
+                        f"source {current_dir}/devel/setup.bash && "
+                        "rostopic pub --once /robot_head_motion_data kuavo_msgs/robotHeadMotionData 'joint_data: [0,0]'"
+                    ], shell=False, timeout=1)  # 最多等 1 秒
+                except subprocess.TimeoutExpired:
+                    print("Error: rostopic pub timed out. Is roscore running?")
+
             except subprocess.TimeoutExpired:
                 print("Forced kill the target process")
                 process.kill()

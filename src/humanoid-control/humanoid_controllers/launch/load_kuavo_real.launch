@@ -56,6 +56,9 @@
     <!-- -->
     <arg name="teach_pendant" default="0"/>
     
+    <!-- RL相关参数 -->
+    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -71,6 +74,8 @@
     <param name="with_estimation"    value="$(arg with_estimation)"/>
     <param name="estimator_type"     value="$(arg estimator_type)"/>
     <param name="use_joint_filter"     value="$(arg use_joint_filter)"/>
+    <param name="network_model_file"   value="$(arg network_model_file)"/>
+    <param name="rl_param"             value="$(arg rl_param)"/>
     <param name="joystick_type"  value="$(arg joystick_type)"/>
     <param name="only_half_up_body"   value="$(arg only_half_up_body)"/>
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->

@@ -188,6 +188,6 @@ if __name__ == '__main__':
         # [0.5, 0.0, 0, 0],
     ]
     msg = get_multiple_steps_msg(body_poses, dt, is_left_first_default, collision_check)
-    msg = get_test_traj_msg()
+    # msg = get_test_traj_msg()
 
     pub.publish(msg)
