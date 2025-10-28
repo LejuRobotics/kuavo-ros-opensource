@@ -146,6 +146,51 @@ function install_dexhand_deps() {
     fi
 }
 
+
+function install_openvino() {
+    local install_script_path="$WS_PATH/scripts/install_openvino.sh"
+    local packages=(
+        "openvino"
+        "gnupg"
+    )
+
+    # Check if packages are already installed
+    local all_installed=true
+    for pkg in "${packages[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
+            all_installed=false
+            break
+        fi
+    done
+
+    # If all packages are installed, return early
+    if [ "$all_installed" = true ]; then
+        ECHO_WARN "OpenVINO and GnuPG are already installed."
+        return 0
+    fi
+
+    # Check for sudo permissions
+    if sudo -n true 2>/dev/null; then
+        ECHO_WARN "Detected sudo permissions, executing OpenVINO installation script..."
+        bash "$install_script_path"
+        if [ $? -eq 0 ]; then
+            ECHO_WARN "OpenVINO installation completed successfully."
+        else
+            ECHO_ERR "OpenVINO installation failed."
+            return 1
+        fi
+    else
+        echo -e "\033[1;31m======================================= 警告 =======================================" >&2
+        echo -e "\033[1;31m    检测到没有 sudo 权限！" >&2
+        echo -e "\033[1;31m    OpenVINO 和 GnuPG 安装需要 sudo 权限。" >&2
+        echo -e "\033[1;31m    请使用 sudo 权限运行此脚本或手动安装 OpenVINO。" >&2
+        echo -e "\033[1;31m    可以手动执行: bash $install_script_path" >&2
+        echo -e "\033[1;31m====================================================================================" >&2
+        echo -e "\033[0m" >&2
+        return 1
+    fi
+}
+
 ### Start
 ECHO_WARN "Install dexhand_sdk ..."
 install_dexhand_deps
@@ -154,6 +199,9 @@ if [ $? -eq 0 ]; then
 else
     ECHO_WARN "DexHand Protobuf SDK 安装失败"
 fi
+
+ECHO_WARN "Install openvino ..."
+install_openvino
 
 ECHO_WARN "Check and Install depend packages ..."
 
