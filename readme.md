@@ -73,9 +73,10 @@ docker load -i kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
 ```bash
 catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release # Important! 
 # -DCMAKE_ASM_COMPILER=/usr/bin/as 为配置了ccache必要操作，否则可能出现找不到编译器的情况
-source installed/setup.bash # 加载一些已经安装的ROS包依赖环境，包括硬件包等
+source installed/setup.zsh # 加载一些已经安装的ROS包依赖环境，包括硬件包等
 catkin build humanoid_controllers #会编译所有依赖项
 ```
+- 注意：容器镜像内部默认使用zsh
 
 ##### 实机环境
 
@@ -98,19 +99,19 @@ catkin build  humanoid_controllers
 ##### 仿真运行
 * 使用mujoco仿真器
 ```bash
-source devel/setup.bash # 如果使用zsh，则使用source devel/setup.zsh
+source devel/setup.bash # 如果使用docker环境，则使用source devel/setup.zsh
 roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch # 启动控制器、mpc、wbc、mujoco仿真器
 ```
 * 使用gazebo仿真器
 ```bash
 catkin build humanoid_controllers gazebo_sim # 需要编译gazebo_sim包
-source devel/setup.bash # 如果使用zsh，则使用source devel/setup.zsh
+source devel/setup.bash # 如果使用docker环境，则使用source devel/setup.zsh
 roslaunch humanoid_controllers load_kuavo_gazebo_sim.launch # 启动控制器、mpc、wbc、gazebo仿真器
 ```
 * 使用isaac-sim仿真器
 ```bash
 catkin build humanoid_controllers isaac_sim # 需要编译isaac_sim包
-source devel/setup.bash # 如果使用zsh，则使用source devel/setup.zsh
+source devel/setup.bash # 如果使用docker环境，则使用source devel/setup.zsh
 roslaunch humanoid_controllers load_kuavo_isaac_sim.launch  # 启动控制器、mpc、wbc、isaac_sim仿真器
 ```
 

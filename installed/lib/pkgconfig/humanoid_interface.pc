@@ -3,6 +3,6 @@ prefix=/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-contr
 Name: humanoid_interface
 Description: Description of humanoid_interface
 Version: 0.0.1
-Cflags: -I${prefix}/include -I/usr/include/eigen3 -I/usr/include -I/opt/ros/noetic/lib/pkgconfig/../../include -I/opt/ros/noetic/include -I/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include
+Cflags: -I${prefix}/include -I/usr/include/eigen3 -I/usr/include -I/opt/ros/noetic/lib/pkgconfig/../../include -I/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include -I/opt/ros/noetic/include
 Libs: -L${prefix}/lib -lhumanoid_interface /usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0 /usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0 -lpinocchio -lboost_filesystem -lboost_serialization -lboost_system -lurdfdom_sensor -lurdfdom_model_state -lurdfdom_model -lurdfdom_world -lconsole_bridge -lhpp-fcl -loctomap -loctomath /opt/drake/lib/libdrake.so
 Requires: roslib ocs2_core ocs2_oc ocs2_ddp ocs2_mpc ocs2_sqp ocs2_ipm ocs2_msgs ocs2_robotic_tools ocs2_pinocchio_interface ocs2_centroidal_model ocs2_self_collision ocs2_ros_interfaces kuavo_msgs std_srvs rosgraph_msgs

@@ -39,6 +39,7 @@ echo "SERVICE_DIR: $SERVICE_DIR"
 echo "MONITOR_ROBAN_JOY: $MONITOR_ROBAN_JOY"
 
 cd $KUAVO_ROS_CONTROL_WS_PATH
+catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release
 if [ -d "$INSTALLED_DIR" ] && [ -f "$INSTALLED_DIR/setup.bash" ]; then
     echo "Sourcing existing installation..."
     source $INSTALLED_DIR/setup.bash

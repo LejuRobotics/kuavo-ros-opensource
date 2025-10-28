@@ -59,6 +59,7 @@ echo "KUAVO_REMOTE_PATH: $KUAVO_REMOTE_PATH"
 
 if [ "$KUAVO_CONTROL_SCHEME" = "rl" ]; then
     cd $KUAVO_RL_WS_PATH
+    catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release
     if [ -d "$RL_INSTALLED_DIR" ] && [ -f "$RL_INSTALLED_DIR/setup.bash" ]; then
         echo "Sourcing existing installation..."
         source $RL_INSTALLED_DIR/setup.bash
@@ -67,6 +68,7 @@ if [ "$KUAVO_CONTROL_SCHEME" = "rl" ]; then
 fi
 
 cd $KUAVO_ROS_CONTROL_WS_PATH
+catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release
 if [ -d "$INSTALLED_DIR" ] && [ -f "$INSTALLED_DIR/setup.bash" ]; then
     echo "Sourcing existing installation..."
     source $INSTALLED_DIR/setup.bash
