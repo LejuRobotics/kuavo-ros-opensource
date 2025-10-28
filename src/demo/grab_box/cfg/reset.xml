@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="3" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <ResetState name="reset_state"/>
+      <MoveToDestination planed_trajectory="0.0, 0.0, 0.0, 0.0" move_type="2"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

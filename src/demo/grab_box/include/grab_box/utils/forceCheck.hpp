@@ -99,7 +99,7 @@ namespace GrabBox
         }
         failure_count_ = 0;  // 重置计数器
       }
-      return BT::NodeStatus::RUNNING;
+      return BT::NodeStatus::SUCCESS;
     }
 
 

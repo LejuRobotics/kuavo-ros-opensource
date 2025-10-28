@@ -1,16 +1,16 @@
 <?xml version="1.0" ?>
 <launch>
-    <arg name="joystick_type" default="bt2"/>
+    <arg name="real" default="false"/>
+    <param name="real" value="$(arg real)"/>
 
-    <node pkg="joy" type="joy_node" name="joy_node" output="screen" respawn="true">
-        <param name="dev" value="/dev/input/js0"/>
-        <param name="autorepeat_rate" type="double" value="100.0"/>
-        <param name="deadzone" type="double" value="0.18"/>
-    </node>
+    <arg name="start_way" default="manual"/>
+    <param name="start_way" value="$(arg start_way)"/>
 
-    <param name="channel_map_path" value="$(find humanoid_controllers)/launch/joy/$(arg joystick_type).json"/>
     <param name="joystick_sensitivity" value="20"/>
-    <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen">
+    
+    <arg name="joystick_type" default="bt2"/>
+    <param name="channel_map_path" value="$(find humanoid_controllers)/launch/joy/$(arg joystick_type).json"/>
 
-    </node>
+    <include file="$(find joy)/launch/joy_node.launch">
+    </include>
 </launch>

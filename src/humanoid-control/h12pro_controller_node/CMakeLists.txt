@@ -219,6 +219,7 @@ target_link_libraries(h12pro_channel_publisher
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
   src/h12pro_node/ocs2_h12pro_node.py
+  src/h12pro_node/websocket_sdk_start_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

@@ -13,6 +13,18 @@ namespace ocs2 {
     void HumanoidPlanArmTrajectory::initializeCommon() {
       nh_->getParam("joint_state_topic", joint_state_topic_);
       nh_->getParam("joint_state_unit", joint_state_unit_);
+      nh_->getParam("robot_version", robot_version_);
+      if (robot_version_ >= 40) {
+        arm_joint_names_ = {
+          "zarm_l1_joint", "zarm_l2_joint", "zarm_l3_joint", "zarm_l4_joint", "zarm_l5_joint", "zarm_l6_joint", "zarm_l7_joint",
+          "zarm_r1_joint", "zarm_r2_joint", "zarm_r3_joint", "zarm_r4_joint", "zarm_r5_joint", "zarm_r6_joint", "zarm_r7_joint"
+        };
+      } else if (robot_version_ >= 10 && robot_version_ < 30) {
+        arm_joint_names_ = {
+          "zarm_l1_joint", "zarm_l2_joint", "zarm_l3_joint", "zarm_l4_joint",
+          "zarm_r1_joint", "zarm_r2_joint", "zarm_r3_joint", "zarm_r4_joint",
+        };
+      }
       arm_traj_pub_ = nh_->advertise<trajectory_msgs::JointTrajectory>(interpolate_type_ + "/arm_traj", 10);
       arm_traj_state_pub_ = nh_->advertise<kuavo_msgs::planArmState>(interpolate_type_ + "/arm_traj_state", 10);
       joint_state_pub_ = nh_->advertise<sensor_msgs::JointState>(joint_state_topic_, 10);

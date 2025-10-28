@@ -296,3 +296,11 @@ sudo journalctl -u h12pro_node.service -f
 * 需要用户把已经录制好的 `poses.csv` 文件放到 `<kuavo_ws>/src/kuavo/src/biped_v2/config` 目录下, 例如 `ROBOT_VERSION=40`, 则放在 `src/kuavo/src/biped_v2/config/kuavo_v4.0` 目录下
 * 目前支持记录4个动作，因此需要把 `poses.csv` 文件命名为 `arm_pose1.csv`, `arm_pose2.csv`, `arm_pose3.csv`, `arm_pose4.csv` 其中之一
 * 动作阶段 `A` 键对应的动作为 `arm_pose1.csv`, `B` 键对应的动作为 `arm_pose2.csv`, `C` 键对应的动作为 `arm_pose3.csv`, `D` 键对应的动作为 `arm_pose4.csv`
+
+## 控制 kuavo 机器人头部
+
+
+* 开启服务sudo systemctl start ocs2_h12pro_monitor.service
+* 然后机器人头部控制模式要早stance状态下进行，机器人进入站立状态后，使用组合键‘E_IDDLE,F_RIGHT,PRESS B’这时进入头部控制状态
+* 此时移动机器人的右遥感上下左右即可操作机器人头部上下左右移动
+

@@ -5,12 +5,13 @@
   <arg name="debug"       default="false" />
   <!-- mpc_type 1 for SQP and 0 for DDP  -->
   <arg name="sqp_mpc"     default="1"/>
-  <arg name="dummy_sim"   default="0"/>
   <arg name="dummy_sim_arm" default="1"/>
   <arg name="visualize_humanoid" default="true"/>
   <arg name="visualize_mm" default="false"/>
   <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
-
+  <arg name="coredump" default="false"/>
+  <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
+  <arg name="with_coredump" value="" unless="$(arg coredump)"/>
   <!-- The URDF model of the robot -->
   <!-- <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s42/urdf/biped_s42_l.urdf" /> -->
   <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
@@ -24,7 +25,6 @@
   <param name="mm/urdfFile"   value="$(arg urdfFile)" />
   <param name="mm/libFolder"  value="$(arg libFolder)" />
   <param name="mm/mpcType"    value="$(arg sqp_mpc)" />
-  <param name="dummy_sim"     value="$(arg dummy_sim)" />
   <param name="dummy_sim_arm" value="$(arg dummy_sim_arm)" />
   <param name="visualize_humanoid" value="$(arg visualize_humanoid)" />
   <param name="visualize_mm"  value="$(arg visualize_mm)" />
@@ -36,12 +36,10 @@
   </include>
   <!-- </group> -->
 
-  <node pkg="mobile_manipulator_controllers" type="mobile_manipulator_controllers_node" name="mobile_manipulator_controllers_node" output="screen" />
-  <node pkg="mobile_manipulator_controllers" type="mobile_manipulator_controllers_ik_target" name="mobile_manipulator_controllers_ik_target" output="screen" />
+  <node pkg="mobile_manipulator_controllers" type="mobile_manipulator_controllers_node" name="mobile_manipulator_controllers_node" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
 
   <node if="$(arg rviz)" pkg="ocs2_mobile_manipulator_ros" type="mobile_manipulator_target" name="mobile_manipulator_target" 
         output="screen" launch-prefix="" />
   <!-- static TO-DO: 高度需要根据rosparam更改(12/13 by matthew) -->
   <!-- <node pkg="tf" type="static_transform_publisher" name="static_tf" args="0 0 0.82 0 0 0 odom world 100" /> -->
-  <node pkg="mobile_manipulator_controllers" type="error_monitor.py" name="error_monitor" output="screen" />
 </launch>

@@ -206,7 +206,7 @@ void DexHandMujocoRosNode::controlHandCallback(const kuavo_msgs::robotHandPositi
     }
 
     constexpr int finger_count = std::tuple_size<UnsignedFingerArray>::value;
-    constexpr int hand_count = std::tuple_size<UnsignedDualHandsArray>::value;
+    // constexpr int hand_count = std::tuple_size<UnsignedDualHandsArray>::value;
 
     if (msg->left_hand_position.size() != finger_count || msg->right_hand_position.size() != finger_count) 
     {

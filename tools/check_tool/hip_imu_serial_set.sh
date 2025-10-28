@@ -33,4 +33,4 @@ else
 fi
 
 cd $hipimuserialsetPath
-./hip_imu_serial_set.sh
+bash hip_imu_serial_set.sh

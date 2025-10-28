@@ -23,6 +23,41 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_FILE="$SCRIPT_DIR/websocket_start.service"
 START_SCRIPT_PATH="$SCRIPT_DIR/websocket_start_script.sh"
 
+if [ -z "$ROBOT_NAME" ]; then
+    ROBOT_NAME="KUAVO"
+    echo "ROBOT_NAME is empty, using default: $ROBOT_NAME"
+fi
+ 
+echo "Current ROBOT_NAME: $ROBOT_NAME"
+echo "Current robot version: $ROBOT_VERSION"
+
+if [ -z "$ROS_MASTER_URI" ]; then
+    ROS_MASTER_URI="http://localhost:11311"
+    echo "ROS_MASTER_URI is empty, using default: $ROS_MASTER_URI"
+fi
+
+if [ -z "$ROS_IP" ]; then
+    ROS_IP="127.0.0.1"
+    echo "ROS_IP is empty, using default: $ROS_IP"
+fi
+
+if [ -z "$ROS_HOSTNAME" ]; then
+    if [ "$ROS_MASTER_URI" == "http://kuavo_master:11311" ]; then
+        ROS_HOSTNAME=kuavo_master  
+        echo "ROS_MASTER_URI is http://kuavo_master:11311, using ROS_HOSTNAME: $ROS_HOSTNAME"
+    fi
+fi
+
+echo "Current ROS_MASTER_URI: $ROS_MASTER_URI"
+echo "Current ROS_IP: $ROS_IP"
+echo "Current ROS_HOSTNAME:$ROS_HOSTNAME"
+
+sed -i "s|^Environment=ROS_MASTER_URI=.*|Environment=ROS_MASTER_URI=$ROS_MASTER_URI|" $SERVICE_FILE
+sed -i "s|^Environment=ROS_IP=.*|Environment=ROS_IP=$ROS_IP|" $SERVICE_FILE
+sed -i "s|^Environment=ROS_HOSTNAME=.*|Environment=ROS_HOSTNAME=$ROS_HOSTNAME|" $SERVICE_FILE
+
+sudo sed -i "s|^Environment=ROBOT_NAME=.*|Environment=ROBOT_NAME=$ROBOT_NAME|" $SERVICE_FILE
+
 # 替换 ExecStart 路径
 sed -i "s|^Environment=ROBOT_VERSION=.*|Environment=ROBOT_VERSION=$ROBOT_VERSION|" $SERVICE_FILE
 sudo sed -i "s|^ExecStart=.*|ExecStart=/bin/bash $START_SCRIPT_PATH|" $SERVICE_FILE
@@ -53,6 +88,12 @@ if [ -f "$CONFIG_FILE" ]; then
 else
     echo "$CONFIG_FILE 文件不存在"
 fi
+
+# 安装 yolo 环境
+pip install -r "$REPO_ROOT/src/manipulation_nodes/planarmwebsocketservice/requirements.txt"
+
+# 安装 wesocket_sdk 环境
+sudo bash "$REPO_ROOT/src/kuavo_humanoid_sdk/install.sh"
 
 # 重新执行编译操作
 sudo catkin clean -y

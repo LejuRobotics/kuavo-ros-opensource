@@ -4,12 +4,43 @@
 
 ### Websocket 服务器启动
 
+#### 上位机启动
 使用 Weboskcet SDK 需要在上位机先启动 Websocket 服务器：
 ```bash
 cd kuavo_ros_application
 catkin build kuavo_msgs ocs2_msgs
 source devel/setup.bash
 roslaunch rosbridge_server rosbridge_websocket.launch
+```
+
+#### 下位机启动
+首先您需要先执行如下命令检查是否有`websocket_sdk_start_node`节点：
+```bash
+rosnode list|grep websocket_sdk_start_node
+```
+
+##### 仿真环境
+
+您可以选择<手动启动改服务>:
+```bash
+source devel/setup.bash
+roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch
+```
+
+##### 实物
+
+如果没有该节点，您可以选择<重新部署h12服务>:
+```
+cd <kuavo-ros-opensource>
+cd <kuavo-ros-opensource>/src/humanoid-control/h12pro_controller_node/scripts
+sudo su
+./deploy_autostart.sh
+```
+
+或您可以选择<手动启动改服务>:
+```bash
+source devel/setup.bash
+roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch
 ```
 
 ### SDK 初始化

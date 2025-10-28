@@ -3,12 +3,108 @@
 ## Breaking Changes
 
 ## 文档相关
+- 优化运动控制 API 文档，补充revo2灵巧手以及末端相关话题/服务的约束条件，[文档链接](./docs/运动控制API.md)
+- PICO VR 全身遥操作补充使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- 补充桌面端节点服务开机自启动使用说明，[文档链接](./src/manipulation_nodes/planarmwebsocketservice/README.md)
+- PICO VR 更新数据格式约定文档，添加 Protobuf 数据结构及服务接口说明，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/docs/api_docs.md)
+- 新增 5 代轮臂 VR 遥操作相关文档, [文档链接](./src/manipulation_nodes/motion_capture_ik/README_VR_MPC.md)
+- 新增 Roban 打太极使用文档，[文档链接](./src/demo/csv2body_demo/Roban太极动作启动说明.md)
+- 新增 Roban 上楼梯使用文档，[文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban上楼梯说明.md)
+- 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- Roban2 支持全新的手臂接线方式，左右手臂各连接一条 Can 总线，并连接对应的末端执行器
+- Roban2 新增支持基于 Can 通讯的 Revo2 灵巧手，需要刷对应 Can 版的固件
+- Roban2 新增配置文件`~/.config/lejuconfig/CanbusWiringType.ini`用来表示 Can 总线的接线方式，dual_bus 表示双总线
+- Roban2 新增配置文件`~/.config/lejuconfig/canbus_device_cofig.yaml`用于 Can 模块与总线上的设备关系描述
+- Kuavo Humanoid SDK 支持机器人版本14的关节名称处理
+- 更新强脑灵巧手SDK版本从`0.4.4`到`0.9.1`版本可支持自定义can协议
+- Kuavo Humanoid SDK  新增原子策略行为树版本搬箱子
+- Tact 动作文件适配 Roban 机器人，在原先基础上支持灵巧手, 头和腰部的控制描述
+- Kuavo Humanoid SDK 移除重复头部控制和手臂控制类的接口，这些接口从`1.2.2`版本开始废弃，并计划在 2026-06-30 移除
+- Kuavo Humanoid SDK 完善接口阈值保护以及补充说明文档，[文档链接](./src/kuavo_humanoid_sdk/docs/markdown/pages/api_reference.md)
+- 新增 Roban2.1 机器人模型，机器人版本号`ROBOT_VERSION=14`
+- 新增实物机器人未设置 CPU 隔核参数或系统配置时，程序立即退出并警告提示
+- 新增支持将程序日志输出重定向到h12接收机串口，[文档链接](./src/humanoid-control/h12pro_controller_node/H12_LOG_Instruction.md)
+- 桌面端软件新增启动、站立、停止机器人等 WebSocket API
+- Roban 机器人走斜坡功能添加自动步态行走，楼梯积木块参数更新
+- PICO VR 更新预设搬运箱子的末端力参数配置
+- 增加 h12 遥控器控制RL实现trot踏步功能，并取消stance->stance状态机转换
+- 49 版本机器人新增 Mujoco仿真控制灵巧手功能
+- PICO VR遥操新增机器人延迟诊断功能(非网络延迟)，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- TACT 动作文件播放支持中断功能
+- TACT 动作文件播放兼容 kuavo 和 roban 机器人
+- PICO 支持通过手柄按键在WholeBody、UpperBody和LowerBody切换, 按键功能见[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md) 
+- PICO VR遥操支持手柄按键控制，按键功能见[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- 新增提供给桌面端App 的对准物体的积木接口，[文档链接](./src/manipulation_nodes/planarmwebsocketservice/scripts/leju_libs/API_Document.md)
+- h12 遥控器支持部署RL步态模型控制
+- PICO VR 新增手柄按键控制遥操功能，按键功能见[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- Quest3 VR 遥操作支持手柄上板机控制灵巧手全部手指开合
+- PICO VR 全身遥操增加控制模式切换功能，提供全身、手、腿以及躯干控制四种模式
+- PICO VR 新增支持增量控制模式，支持平滑插值切换不同控制模式
+- PICO VR 新增延迟诊断功能，用于衡量运动学 MPC 延迟情况
+- 新增机器人版本号 13，机器人类型为 Roban 2
+- PICO 节点新增配置文件，配置文件路径为 `~/.config/lejuconfig/pico_vr_config.yaml`
+- 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复在 VR 视频回传功能，相机的部分参数错误会导致 launch 无法正常启动问题
+- 修复 kuavo 未配置 cmdvelLinearZLimit 导致初始化失败
+- 修复强脑SDK升级到`0.9.1`函数符号冲突导致无法控制 Kuavo灵巧手问题
+- 修复 Roban2.1 站立状态吊起机器会失控乱甩
+- 修复Roban2 revo2 灵巧手的位置控制和状态的范围(0~1000 => 0~100)
+- Kuavo Humanoid SDK 修复本地 install.sh 脚本安装超时问题
+- 修复`humanoid_controller/real_launch_status`获取机器状态服务，初始状态错误问题
+- 修复当获取灵巧手手指状态失败时，手指状态话题发布一些错误数据的问题
+- 键盘控制手臂移动功能优化, 支持双手控制及自由切换, 修复手臂移动累计误差的问题
+- 修复VR过程中可以通过侧扳机固定手臂功能
+- 修复机器初始化时两个夹爪张开角度可能不一致问题
+- 修复 Roban2.1 左右横移时双脚会相碰的问题
+- Kuavo Humanoid SDK 修复导入未定义模块导致无法运行问题
+- 修复日志自动清理功能会删除空目录的问题
+- 修复48/49版本带灵巧手版本的mujoco仿真灵巧手大拇指关节顺序错误和手臂控制错误问题
+- 修复 VR 遥操作控制夹爪可能会卡死问题
+- 修复灵巧手获取状态线程潜在的程序崩溃问题
+- 修改手臂外部控制直接到wbc层的关节逻辑,差分获取速度对齐再下发
+- 修复调整关节零点位置、获取关节零点位置和硬件就绪等接口丢失问题
+- 修复 Roban机器人 Quest VR 手臂跟随问题并支持腰部控制
+- 修复大幅度动手是机器人抖动问题
+- Quest VR 在RL模式下，切换手臂控制模式时进行插值避免手臂初始位置瞬间对齐人手问题
+- 修复VR遥操作卡顿功能，调整电机KP/KD参数，优化电机实时控制
+- 修复运动控制API文档中关于`joint_q`单位描述错误问题
+- Roban 人脸追踪调整 yaw 和 pitch 轴的 PID 参数以及人脸垂直方向上的跟踪范围，并增加图像发布、人脸框绘制功能
+- 修复硬件下发扭矩指令的分段C2T问题
+- 修复 PICO VR 录制和回放功能录制话题不全和未正确切换状态问题
+- 修复 PICO VR 左摇杆控制左右横移方向反了和右摇杆控制旋转方向反了问题
+- 修复运动学 MPC 策略不更新问题，增加多线程竞争保护
+- 修复100045和100049版本task.info中遗漏的参数
+- 修复运动学MPC未捕获异常导致程序崩溃问题
+- PICO VR 修复手臂模式切换异常的问题，修复运动学和普通 ik 的坐标系不同导致的异常问题
+- 修复PICO全身遥操漏步和手肘无法伸直问题
+- 修复一键手眼标定功能头部标定失败问题
+- 修复导航模式与H12遥控器摇杆数据冲突问题
+- 修复 PICO 控制模式切换问题和等待服务超时问题以及优化日志打印
+- 修复桌面软件控制机器人导航相关的功能失败问题
+- 优化桌面软件连接机器人后会立刻掉线断连问题
+- 补充 Kuavo Humanoid sdk 中缺少的`arm_ik_free` 函数 
+- 修改 Kuavo Humanoid sdk 的错误调用 `control_arm_joint_trajectory`
+- 修复桌面软件无法控制 roban 转腰的问题，planarmwebsocketservice 代码中相关路径由于代码合并缺失
+- 修复基于 IK 方式 VR 遥操作由于卡尔曼滤波器修改导致额外延迟问题
+- Kuavo Humanoid SDK 修复未指定依赖 websockets 包而可能导致运行报错问题
+- 修复 Quest 遥操作在某些情况无法广播信息到正确的广播地址，导致 WebRTC 图像回传无法显示
+- 修复单步模式切换到 stance 步态无法终止当前单步指令的躯干目标而潜在的摔倒问题
+- 修复桌面软件无法控制 roban 转腰问题
+- 修复 Quest3 WebRTC 广播地址错误可能导致 VR App 无法正确接收到图像回传问题
+- 修复 Quest3 打开`control_torso`控制躯干模式时躯干会下蹲到最低问题
 
 ## 其他改进
+- 新增硬件工具: canbus_config.sh 用于配置 Roban2 Can 总线配置，[工具链接](./tools/check_tool/canbus_config.sh)
+- 调整灵巧手 SDK 日志级别避免终端过多打印刷屏
+- 新增工具: 编译蓝牙内核模块脚本，[使用文档链接](./tools/bluetooth_tool/README.md)
+- 新增工具: 将电机正反转、零偏和限位等数据打包成约定的json文件，[工具文档链接](./tools/get_joint_data/README.md)
+- 增加大小臂长度以及大小臂的比例分析工具，用于分析quest3设备机器人手臂表现不同的问题，[工具文档链接](./tools/vr_test_tool/README.md)
+- 转换工具支持将 bag 中 sensors_data_raw 数据转换成末端执行器位姿数据，[工具文档链接](./tools/extract_camera_pose/howto-kuavo-pose-calculator.md)
+- 优化Quest IK 遥操控制，提高IK迭代次数并默认关闭运动学MPC防止过度资源消耗 
 
 # 1.2.1
 
@@ -16,13 +112,67 @@
 - 无
 
 ## 文档相关
+- 新增奥比中光 335L 相机回传 quest3 VR，相关文档 [文档链接](./src/manipulation_nodes/noitom_hi5_hand_udp_python/docs/Quest3_视频回传显示.md)
+- 新增 RobotVersion 版本号说明文档，详情见 [文档链接](./docs/robot_version版本号说明.md)
+- 重新调整运动控制文档结构并删除无用接口，[新的文档链接](./docs/运动控制API.md)
+- 新增 Kuavo Humanoid SDK 原子技能 v2 版搬箱子策略模块文档，[文档链接](./src/kuavo_humanoid_sdk/docs/markdown/pages/kuavo_strategy_v2.md)
+- 新增运动学 MPC VR 遥操作使用文档， [文档链接](./src/manipulation_nodes/motion_capture_ik/README_VR_MPC.md)
+- 上楼梯案例适配奥比中光相机以及使用文档，[文档链接](./src/humanoid-control/humanoid_controllers/scripts/上楼梯案例说明.md)
+- 新增行为树搬箱子 README 说明文档，[文档链接](./src/demo/grab_box/README.md)
+- Kuavo Humanoid SDK 更新使用文档描述搬箱子策略模块需要关闭 `basePitchLimits`，[文档链接](./src/kuavo_humanoid_sdk/README.md)
 - Kuavo Humanoid SDK 更新使用示例和搬箱子案例文档中文描述，[文档链接](./src/kuavo_humanoid_sdk/README.md)
 - Kuavo Humanoid SDK 更新所有使用文档为中文格式，[文档链接](./src/kuavo_humanoid_sdk/README.md)
 - 示教功能文档补充说明示教模式启动机器人需要按‘o’后才开始记录，[文档链接](./src/manipulation_nodes/teach_pendant/readme.md)
 - 运动控制 API 文档新增电机Kp/Kd 参数 ROS 服务接口描述，[文档链接](./docs/运动控制API.md)
 - Kuavo Humanoid SDK 增加搬箱子策略模块使用文档，[文档链接](./src/kuavo_humanoid_sdk/README.md)
+- 增加日志上传 coScene 工具使用文档，[文档链接](./tools/upload_log/doc/readme.md)
 
 ## 新增功能
+- 新增灯带控制节点，并增加音频灯带联动
+- PICO VR 增加话题录制和播放脚本，使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- 新增机器人 cali 校准环节支持堵转保护和峰值保护
+- 新增夸父5代模型，该模型在原先 4pro 版本基础上新增腰部关节
+- 新增标准版 45.1 与 49.1模型，版本号为 100045，100049
+- 新增全新的版本号管理机制，版本号形式`PPPPMMMMN`，其中 P 为 Patch 修订版本号，M 为 Major 主版本号，N 为 Minor 次版本号
+- PICO VR 支持手柄按键触发施加和释放末端力功能
+- PICO VR 全身遥操增加x和y方向步长配置和数据播放模式接口
+- PICO VR 新增处理手柄数据并发布到话题`/pico/joy`
+- 新增 4D 和 6D 世界系单步接口使用示例，示例脚本见[链接](./src/humanoid-control/humanoid_interface_ros/scripts/simStepControl6DWorld.py)
+- 新增 H12 遥控器集成走楼梯功能案例，[使用文档](./src/humanoid-control/h12pro_controller_node/ocs2_README.md)
+- 新增相机到固定支架的旋转矩阵示例工具脚本，[使用文档](./tools/extract_camera_pose/howto-kuavo-pose-calculator.md)
+- VR 增量控制新增保护功能，VR 和机器人手臂位置相近才能开启增量控制，[文档链接](./src/manipulation_nodes/motion_capture_ik/README_VR_MPC.md)
+- Kuavo Humanoid SDK 在原子技能的手部运动控制同步接口上增加碰撞保护的功能, [使用示例](./src/kuavo_humanoid_sdk/examples/atomic_skills/ctrl_arm_example_protected.py)
+- 运动学 KMPC 新增 play_back 回放功能，[文档链接](./src/humanoid-control/mobile_manipulator_controllers/scripts/how_to_play_back.md)
+- 新增运动学 MPC 的异常检测机制
+- 45 和 49 版本机器人 URDF 新增手腕相机模型
+- 新增关节保护功能，使用电机原始的速度峰值和扭矩峰值进行数据拦截，避免电机异常运动损坏
+- 新增 VR 运动学 mpc 增量式遥操功能，启动launch文件见 [链接](./src/manipulation_nodes/motion_capture_ik/launch/kinematic_mpc_vr_incremental_real.launch)
+- 新增手臂碰撞检测模块，VR 外部控制时检测到碰撞回到手臂 3秒前的状态， [文档链接](./src/kuavo_arm_collision_check/readme.md)
+- 新增 H12 遥控器支持控制头部关节，按键文档见 [文档](./docs/5功能案例/通用案例/H12遥控器使用开发案例.md)
+- 运动学 MPC 增加末端轨迹的输入接口、mpc mrt 求解器重置服务
+- 新增置速度和扭矩超过峰值截断保护功能
+- 一键标定零点脚本工具增加对相机(realsense，奥比中光)和 IP 的适配，[文档链接](./scripts/joint_cali/README_One_button_start.md)
+- RUIWO CXX SDK 支持 kp kd 参数动态控制
+- 新增 rosbag 扭矩转化工具，读取 rosbag 中的 /sensors_data_raw 话题，将电流值转换为扭矩值，[工具链接](tools/bag_tools/current_to_torque_converter.py)
+- Kuavo Humanoid SDK 新增 v2 搬箱子策略模块，基于事件模型提供闭环的策略编排控制，[使用文档](./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/README.md)
+- 新增上楼梯功能案例，[使用文档](src/humanoid-control/humanoid_controllers/scripts/上楼梯案例说明.md)
+- 新增 ROS 服务接口 `/humanoid_mpc_gait_change`用于步态切换, 支持 `walk` 和 `stance`
+- 新增 VR 可以控制头部运动，默认开启头部控制模式，可通过`enable_head_control:=false`关闭
+- 新增手臂碰撞检测功能包 `kuavo_arm_collision_check`，用于检测手臂碰撞
+- 非触觉灵巧手新增 ROS 控制话题:`/dexhand/command`, `/dexhand/left/command`, `/dexhand/right/command`, 支持位置和速度控制模式， [详细文档](./docs/运动控制API.md)
+- 非触觉灵巧手新增更改握力级别 ROS 服务接口:`/dexhand/change_force_level` `, [详细文档](./docs/运动控制API.md)
+- 新增非触觉灵巧手 Protobuf SDK 替换旧版 hand_sdk 支持位置/速度控制，握力级别变更，获取手指真实状态等接口 
+- Kuavo Humanoid SDK 原子技能增加 BasePitchLimits 开启/关闭和获取状态接口，避免执行搬箱子策略过程中触发保护而摔倒
+- Kuavo Humanoid SDK Websocket 版新增 SDK 启动并站立和停止机器人功能
+- Kuavo Humanoid SDK 新增搬箱子策略模块测试案例， gazebo 仿真场景默认开启灯光
+- Kuavo Humanoid SDK 原子技能接口增加末端力控制，搬运箱子策略模块放下箱子后添加安全后退保护，搬运箱子案例添加末端力控制夹紧箱子
+- 新增数据截断和关节保护使能参数,默认不启动
+- 新增电机跟随性测试工具，[使用文档](./tools/check_tool/selfCheckScripts/README.md)
+- 新增太极，舞蹈动作案例以及全身控制接口，案例[使用文档](./src/demo/full_body_demo/readme.md)
+- Kuavo Humanoid SDK websocket 版新增适配视觉模块，使用方法与非websocket版本一致
+- Kuavo Humanoid SDK 原子策略模块抓取相关策略添加安全保护模组
+- 新增关节保护数据截断功能，扭矩峰值保护从瞬时修改为时间窗口触发
+- 新增视觉零点标定工具，[使用文档链接](./scripts/joint_cali/README_One_button_start.md)
 - Kuavo Humanoid SDK 拆分 websocket 为单独模块 Kuavo Humanoid Websocket SDK，原先 SDK 将不支持在 Windows 系统下运行
 - 新增机器人 collision 碰撞对，实现横向移动保护
 - Kuavo Humanoid SDK 新增修改和获取电机Kp/Kd 参数接口以及使用示例，目前仅支持`youda`驱动类型的电机
@@ -30,6 +180,46 @@
 - Kuavo Humanoid SDK 新增搬箱子策略模块以及 gazebo 仿真策略使用示例
 
 ## 修复问题
+- 修复音频节点播放音频文件时过度增益的问题
+- 修复 humanoid_plan_arm_trajectory 编译问题
+- 修复积木块示例无法单独启用语音对话的问题
+- 修复运动学 MPC 节点存在的程序崩溃问题以及控制手臂时异常抽抖问题
+- 修复增量控制 VR 启动失败问题
+- 修复接手柄启动 launch 文件机器人自动乱走问题
+- Kuavo Humanoid SDK 修复 opensource 版本无法在 dev 或 beta 分支本地安装问题
+- 修改手腕相机 URDF，将其与 camera_link 对齐，静态变换全 0
+- 修复躯干轨迹为空时搬箱子转身会崩溃的问题
+- 修复 KMPC 控制模式切换到 None 之外的其他模式时，收到 `mm/two_hand` 的话题数据不执行的问题
+- 修复不安全的多线程访问数据可能会导致段错误而引起机器摔倒的问题
+- 修复硬件自检脚本无法绘图的问题，原因是保存数据中索引越界
+- 运动学 MPC 功能包中对不必要的ros包的依赖以及添加误差状态四元数卡尔曼滤波器
+- 修复 VR 遥操作时，手臂弯曲的问题
+- 修复 pick_and_place 案例功能包，右臂进行抓取时, 左臂动作异常问题
+- 修复音频模块安装 samplerate 库失败的问题
+- 修复 VR 控制手臂动作过快可能导致摔倒的问题，在VR控制时关闭 pullup 保护
+- 修复 `/cmd_pose_world` 接口中单步抽搐会导致机器摔倒问题
+- 修复初始化和运行过程中的手柄的型号发生改变无法控制机器人问题
+- 修复半身模式手臂 VR 跟踪时无法回正
+- 修复 TF 树中 odom->base_link 时间戳为 0 和 base link 相对于 dummy link 平移和旋转不为 0 的问题 
+- 修复示教功能中小臂不会动的问题
+- 修复手臂和头部电机获取速度接口未赋值就返回导致速度值一直为 0 的问题
+- Kuavo Humanoid SDK 修复在非原点处执行`ctrl_arm_example.py`示例手臂会异常问题，原因是示例中展示的运动学控制坐标系为 odom 系，更正示例为局部系
+- 修复所有版本机器人的 gazebo urdf 中 friction 参数错误问题，更正为 0.0 防止手臂控制有静差
+- 修复 pick_and_place 功能包, 运行时无法控制灵巧手问题
+- 修复半身VR XA切换控制模式手臂不插值，导致机器人手臂抽搐
+- 修复 h12 遥控器以及 root 用户启动时无法收集到 git 仓库信息问题
+- 修复行为树搬箱子案例中，在控制手臂的情况下，初始状态会出现抖动的问题
+- Kuavo Humanoid SDK 修复音频模块的消息格式错误问题
+- 修复半身/轮臂机器人会触发 WBC pullup 问题
+- 修复手臂轨迹规划demo不能控制手指和头部关节
+- 修复播放音频的时候流式播放和音频文件播放设备占用冲突的问题
+- 修复 humanoid_estimation 包中 ymal 配置缺失问题
+- 修复 v47-v49 机器人无法使用遥操作的问题
+- 修复 cmd_pose_world 接口时转弯出现躯干不动的现象
+- 修复 mujoco 仿真关节名称不存在时计算关节组大小错误问题
+- 增加运动学 yaw 滤波以修复 IMU 偏航角偏移问题
+- 修复 kuavo.json 中头部错误的位置阈值
+- kuavo Humanoid SDK 搬箱子策略修复下蹲情况下抓箱子位置错误的问题, 抓取动作全部由局部系改为世界系
 - 修复 VR 手柄无法控制灵巧手手指的问题
 - 修复 h12 自启服务启动时贝塞尔插值器获取参数失败问题
 - 增加运动学 yaw 滤波，修复 imu yaw 角度漂移问题
@@ -38,8 +228,16 @@
 - 修复桌面软件上传文件存放路径错误的问题，存放路径为 `$HOME/.config/lejuconfig/action_files`
 - 修复半身控制模式下，启动机器人时手臂突然抽搐的错误
 - 修复触觉手控制器初始化两遍的错误，可能会影响灵巧手控制
+- 修复全身打太极找不到 kuavo_sdk.msg 模块的问题
 
 ## 其他改进
+- Quest VR 节点依赖的消息统一移动到 kuavo_msgs 包中，比如手柄消息`Joysticks`
+- 添加工具类用于获取头和手腕相机到机器人底座的位置和转换，[工具使用文档](./tools/extract_camera_pose/howto-kuavo-pose-calculator.md)
+- 更新手臂末端三个电机和腿部的飞车保护阈值
+- VR 机器人 VR 节点新增广播机器人信息用于等待 VR 头盔连接
+- 增加可视化运动学 MPC 补充双手末端执行器的轨迹姿态
+- 新增 USB WIFI 信号稳定性测试工具和 VR 传输数据用量测试工具， [使用文档](./tools/wifi_benchmark/README.md)
+- 增加时频域分析脚本，用于分析手臂末端的运动跟踪性能，从时域和频域的角度定量的分析跟踪效果、各环节间的延迟
 - 优化上下位机 DHCP 配置工具，默认下位机为DHCP分配主机并增加声卡 udev 规则配置
 - 取消 MobileManipulatorController 启动时一直打印等待`com_height`参数的日志
 - 取消 MobileManipulatorController 节点启动时一直刷屏提示等待接收观测数据

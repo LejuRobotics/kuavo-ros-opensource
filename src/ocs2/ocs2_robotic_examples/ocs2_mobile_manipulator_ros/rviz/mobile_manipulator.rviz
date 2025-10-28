@@ -5,8 +5,6 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
-        - /TF1
-        - /TF1
         - /TF1/Frames1
       Splitter Ratio: 0.5
     Tree Height: 725
@@ -73,50 +71,15 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        camera_base:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         dummy_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        l_b_claw_1:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        l_b_claw_2:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        l_b_claw_3:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        l_b_finger:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        l_f_claw_1:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        l_f_claw_2:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        l_f_claw_3:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        l_f_finger:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         l_foot_heel:
           Alpha: 1
           Show Axes: false
@@ -207,46 +170,6 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        r_b_claw_1:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        r_b_claw_2:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        r_b_claw_3:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        r_b_finger:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        r_f_claw_1:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        r_f_claw_2:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        r_f_claw_3:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        r_f_finger:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         r_foot_heel:
           Alpha: 1
           Show Axes: false
@@ -278,6 +201,16 @@ Visualization Manager:
           Show Trail: false
           Value: true
         rr_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        torso-camera:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        waist_camera:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -358,6 +291,16 @@ Visualization Manager:
           Show Trail: false
           Value: true
         zarm_r7_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        zhead_1_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        zhead_2_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -369,196 +312,12 @@ Visualization Manager:
       Value: true
       Visual Enabled: true
     - Class: rviz/TF
-      Enabled: true
+      Enabled: false
       Filter (blacklist): ""
       Filter (whitelist): ""
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        base_link:
-          Value: true
-        camera:
-          Value: false
-        command:
-          Value: true
-        dummy_link:
-          Value: false
-        l_b_claw_1:
-          Value: false
-        l_b_claw_2:
-          Value: false
-        l_b_claw_3:
-          Value: false
-        l_b_finger:
-          Value: false
-        l_f_claw_1:
-          Value: false
-        l_f_claw_2:
-          Value: false
-        l_f_claw_3:
-          Value: false
-        l_f_finger:
-          Value: false
-        l_foot_heel:
-          Value: false
-        l_foot_toe:
-          Value: false
-        leg_l1_link:
-          Value: false
-        leg_l2_link:
-          Value: false
-        leg_l3_link:
-          Value: false
-        leg_l4_link:
-          Value: false
-        leg_l5_link:
-          Value: false
-        leg_l6_link:
-          Value: false
-        leg_r1_link:
-          Value: false
-        leg_r2_link:
-          Value: false
-        leg_r3_link:
-          Value: false
-        leg_r4_link:
-          Value: false
-        leg_r5_link:
-          Value: false
-        leg_r6_link:
-          Value: false
-        ll_foot_heel:
-          Value: false
-        ll_foot_toe:
-          Value: false
-        lr_foot_heel:
-          Value: false
-        lr_foot_toe:
-          Value: false
-        mm/base_link:
-          Value: true
-        mm/head:
-          Value: false
-        mm/leg_l1_link:
-          Value: false
-        mm/leg_l2_link:
-          Value: false
-        mm/leg_l3_link:
-          Value: false
-        mm/leg_l4_link:
-          Value: false
-        mm/leg_l5_link:
-          Value: false
-        mm/leg_l6_link:
-          Value: false
-        mm/leg_r1_link:
-          Value: false
-        mm/leg_r2_link:
-          Value: false
-        mm/leg_r3_link:
-          Value: false
-        mm/leg_r4_link:
-          Value: false
-        mm/leg_r5_link:
-          Value: false
-        mm/leg_r6_link:
-          Value: false
-        mm/zarm_l1_link:
-          Value: false
-        mm/zarm_l2_link:
-          Value: false
-        mm/zarm_l3_link:
-          Value: false
-        mm/zarm_l4_link:
-          Value: false
-        mm/zarm_l5_link:
-          Value: false
-        mm/zarm_l6_link:
-          Value: false
-        mm/zarm_l7_end_effector:
-          Value: false
-        mm/zarm_l7_link:
-          Value: false
-        mm/zarm_r1_link:
-          Value: false
-        mm/zarm_r2_link:
-          Value: false
-        mm/zarm_r3_link:
-          Value: false
-        mm/zarm_r4_link:
-          Value: false
-        mm/zarm_r5_link:
-          Value: false
-        mm/zarm_r6_link:
-          Value: false
-        mm/zarm_r7_link:
-          Value: false
-        neck_motor:
-          Value: false
-        odom:
-          Value: true
-        r_b_claw_1:
-          Value: false
-        r_b_claw_2:
-          Value: false
-        r_b_claw_3:
-          Value: false
-        r_b_finger:
-          Value: false
-        r_f_claw_1:
-          Value: false
-        r_f_claw_2:
-          Value: false
-        r_f_claw_3:
-          Value: false
-        r_f_finger:
-          Value: false
-        r_foot_heel:
-          Value: false
-        r_foot_toe:
-          Value: false
-        radar:
-          Value: false
-        rl_foot_heel:
-          Value: false
-        rl_foot_toe:
-          Value: false
-        rr_foot_heel:
-          Value: false
-        rr_foot_toe:
-          Value: false
-        zarm_l1_link:
-          Value: false
-        zarm_l2_link:
-          Value: false
-        zarm_l3_link:
-          Value: false
-        zarm_l4_link:
-          Value: false
-        zarm_l5_link:
-          Value: false
-        zarm_l6_link:
-          Value: false
-        zarm_l7_end_effector:
-          Value: false
-        zarm_l7_link:
-          Value: true
-        zarm_r1_link:
-          Value: false
-        zarm_r2_link:
-          Value: false
-        zarm_r3_link:
-          Value: false
-        zarm_r4_link:
-          Value: false
-        zarm_r5_link:
-          Value: false
-        zarm_r6_link:
-          Value: false
-        zarm_r7_end_effector:
-          Value: false
-        zarm_r7_link:
-          Value: true
       Marker Alpha: 1
       Marker Scale: 1
       Name: TF
@@ -566,141 +325,23 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        dummy_link:
-          {}
-        odom:
-          base_link:
-            leg_l1_link:
-              leg_l2_link:
-                leg_l3_link:
-                  leg_l4_link:
-                    leg_l5_link:
-                      leg_l6_link:
-                        l_foot_heel:
-                          {}
-                        l_foot_toe:
-                          {}
-                        ll_foot_heel:
-                          {}
-                        ll_foot_toe:
-                          {}
-                        lr_foot_heel:
-                          {}
-                        lr_foot_toe:
-                          {}
-            leg_r1_link:
-              leg_r2_link:
-                leg_r3_link:
-                  leg_r4_link:
-                    leg_r5_link:
-                      leg_r6_link:
-                        r_foot_heel:
-                          {}
-                        r_foot_toe:
-                          {}
-                        rl_foot_heel:
-                          {}
-                        rl_foot_toe:
-                          {}
-                        rr_foot_heel:
-                          {}
-                        rr_foot_toe:
-                          {}
-            neck_motor:
-              head:
-                camera:
-                  {}
-                radar:
-                  {}
-            zarm_l1_link:
-              zarm_l2_link:
-                zarm_l3_link:
-                  zarm_l4_link:
-                    zarm_l5_link:
-                      zarm_l6_link:
-                        zarm_l7_link:
-                          l_b_claw_1:
-                            l_b_claw_2:
-                              l_b_finger:
-                                {}
-                          l_b_claw_3:
-                            {}
-                          l_f_claw_1:
-                            l_f_claw_2:
-                              l_f_finger:
-                                {}
-                          l_f_claw_3:
-                            {}
-                          zarm_l7_end_effector:
-                            {}
-            zarm_r1_link:
-              zarm_r2_link:
-                zarm_r3_link:
-                  zarm_r4_link:
-                    zarm_r5_link:
-                      zarm_r6_link:
-                        zarm_r7_link:
-                          r_b_claw_1:
-                            r_b_claw_2:
-                              r_b_finger:
-                                {}
-                          r_b_claw_3:
-                            {}
-                          r_f_claw_1:
-                            r_f_claw_2:
-                              r_f_finger:
-                                {}
-                          r_f_claw_3:
-                            {}
-                          zarm_r7_end_effector:
-                            {}
-          world:
-            command:
-              {}
-            mm/base_link:
-              mm/leg_l1_link:
-                mm/leg_l2_link:
-                  mm/leg_l3_link:
-                    mm/leg_l4_link:
-                      mm/leg_l5_link:
-                        mm/leg_l6_link:
-                          {}
-              mm/leg_r1_link:
-                mm/leg_r2_link:
-                  mm/leg_r3_link:
-                    mm/leg_r4_link:
-                      mm/leg_r5_link:
-                        mm/leg_r6_link:
-                          {}
-              mm/neck_motor:
-                mm/head:
-                  {}
-              mm/zarm_l1_link:
-                mm/zarm_l2_link:
-                  mm/zarm_l3_link:
-                    mm/zarm_l4_link:
-                      mm/zarm_l5_link:
-                        mm/zarm_l6_link:
-                          mm/zarm_l7_link:
-                            mm/zarm_l7_end_effector:
-                              {}
-              mm/zarm_r1_link:
-                mm/zarm_r2_link:
-                  mm/zarm_r3_link:
-                    mm/zarm_r4_link:
-                      mm/zarm_r5_link:
-                        mm/zarm_r6_link:
-                          mm/zarm_r7_link:
-                            {}
+        {}
       Update Interval: 0
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
       Enabled: true
       Marker Topic: /mobile_manipulator/optimizedStateTrajectory
       Name: MarkerArray
       Namespaces:
         Base Trajectory: true
-        EE Trajectory: true
+        Left Hand Orientation X: true
+        Left Hand Orientation Y: true
+        Left Hand Orientation Z: true
+        Left Hand Trajectory: true
+        Right Hand Orientation X: true
+        Right Hand Orientation Y: true
+        Right Hand Orientation Z: true
+        Right Hand Trajectory: true
       Queue Size: 100
       Value: true
     - Alpha: 1
@@ -709,7 +350,7 @@ Visualization Manager:
       Axes Radius: 0.009999999776482582
       Class: rviz/PoseArray
       Color: 255; 25; 0
-      Enabled: true
+      Enabled: false
       Head Length: 0.07000000029802322
       Head Radius: 0.029999999329447746
       Name: PoseArray
@@ -719,36 +360,36 @@ Visualization Manager:
       Shape: Axes
       Topic: /mobile_manipulator/optimizedPoseTrajectory
       Unreliable: false
-      Value: true
+      Value: false
     - Class: rviz/InteractiveMarkers
       Enable Transparency: true
-      Enabled: true
+      Enabled: false
       Name: InteractiveMarkers
       Show Axes: false
       Show Descriptions: true
       Show Visual Aids: false
       Update Topic: /simple_marker/update
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
-      Enabled: true
+      Enabled: false
       Marker Topic: /distance_markers
       Name: MarkerArray
       Namespaces:
         {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
-      Enabled: true
+      Enabled: false
       Marker Topic: /grasp_box/planed_two_hand_trajectory
       Name: MarkerArray
       Namespaces:
         "": true
       Queue Size: 100
-      Value: true
+      Value: false
     - Alpha: 1
       Arrow Width: 0.5
       Class: rviz/WrenchStamped
-      Enabled: true
+      Enabled: false
       Force Arrow Scale: 2
       Force Color: 204; 51; 51
       Hide Small Values: true
@@ -759,11 +400,11 @@ Visualization Manager:
       Torque Arrow Scale: 2
       Torque Color: 204; 204; 51
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 1
       Arrow Width: 0.5
       Class: rviz/WrenchStamped
-      Enabled: true
+      Enabled: false
       Force Arrow Scale: 2
       Force Color: 204; 51; 51
       Hide Small Values: true
@@ -774,34 +415,34 @@ Visualization Manager:
       Torque Arrow Scale: 2
       Torque Color: 204; 204; 51
       Unreliable: false
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
-      Enabled: true
+      Enabled: false
       Marker Topic: /grasp_box/exec_two_hand_trajectory
       Name: MarkerArray
       Namespaces:
         "": true
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
-      Enabled: true
+      Enabled: false
       Marker Topic: /grasp_box/solved_two_hand_trajectory
       Name: MarkerArray
       Namespaces:
         "": true
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
-      Enabled: true
+      Enabled: false
       Marker Topic: /mobile_manipulator/planed_two_hand_trajectory
       Name: MarkerArray
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Alpha: 1
-      Axes Length: 1
-      Axes Radius: 0.10000000149011612
+      Axes Length: 0.10000000149011612
+      Axes Radius: 0.05000000074505806
       Class: rviz/Pose
       Color: 255; 25; 0
       Enabled: true
@@ -811,7 +452,7 @@ Visualization Manager:
       Queue Size: 10
       Shaft Length: 1
       Shaft Radius: 0.05000000074505806
-      Shape: Arrow
+      Shape: Axes
       Topic: /tag_world_pose
       Unreliable: false
       Value: true
@@ -824,16 +465,13 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
-      Enabled: true
+      Enabled: false
       Marker Topic: /humanoid/optimizedStateTrajectory
       Name: MarkerArray
       Namespaces:
-        "": true
-        CoM Trajectory: true
-        Feet Trajectories: true
-        Future footholds: true
+        {}
       Queue Size: 100
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 186; 189; 182
@@ -862,7 +500,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 4.637781143188477
+      Distance: 3.000386953353882
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -870,17 +508,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: -0.4424099922180176
-        Y: 0.5901913642883301
-        Z: 0.42386695742607117
+        X: 0.09005987644195557
+        Y: 0.4095154404640198
+        Z: 0.6671709418296814
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.4253993332386017
+      Pitch: 0.43040013313293457
       Target Frame: <Fixed Frame>
-      Yaw: 6.008608341217041
+      Yaw: 0.08041667193174362
     Saved: ~
 Window Geometry:
   Displays:
@@ -898,5 +536,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1850
-  X: 1990
-  Y: 27
+  X: 15
+  Y: 399

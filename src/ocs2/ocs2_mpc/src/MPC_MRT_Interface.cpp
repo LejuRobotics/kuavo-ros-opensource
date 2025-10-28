@@ -130,7 +130,28 @@ void MPC_MRT_Interface::copyToBuffer(const SystemObservation& mpcInitObservation
 
   // performance indices
   auto performanceIndicesPtr = std::make_unique<PerformanceIndex>();
-  *performanceIndicesPtr = mpc_.getSolverPtr()->getPerformanceIndeces();
+  try {
+    *performanceIndicesPtr = mpc_.getSolverPtr()->getPerformanceIndeces();
+  } catch (const std::runtime_error& e) {
+    // 检查是否是性能日志为空的错误（reset期间常见）
+    std::string error_msg(e.what());
+    if (error_msg.find("No performance log yet") != std::string::npos) {
+      // 创建一个默认的性能指标，避免中断MPC线程
+      std::cout << "[MPC_MRT_Interface::copyToBuffer] No performance log yet, creating default performance indices" << std::endl;
+      performanceIndicesPtr->merit = 0.0;
+      performanceIndicesPtr->cost = 0.0;
+      performanceIndicesPtr->dualFeasibilitiesSSE = 0.0;
+      performanceIndicesPtr->dynamicsViolationSSE = 0.0;
+      performanceIndicesPtr->equalityConstraintsSSE = 0.0;
+      performanceIndicesPtr->inequalityConstraintsSSE = 0.0;
+      performanceIndicesPtr->equalityLagrangian = 0.0;
+      performanceIndicesPtr->inequalityLagrangian = 0.0;
+      // 注意：这里不输出警告信息，因为这是正常的reset过程
+    } else {
+      // 其他运行时错误重新抛出
+      throw;
+    }
+  }
 
   this->moveToBuffer(std::move(commandPtr), std::move(primalSolutionPtr), std::move(performanceIndicesPtr));
 }

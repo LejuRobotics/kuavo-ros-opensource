@@ -63,7 +63,7 @@ try:
 except Exception as e:
     print(f"扫描目录时发生错误: {e}")
     # 如果自动扫描失败，使用默认版本列表
-    biped_versions = [30, 31, 32, 40, 41, 42, 43, 45, 46, 47, 48, 49]
+    biped_versions = [40, 41, 42, 43, 45, 46, 47, 48, 49]
 
 print(f"处理以下版本: {biped_versions}")
 

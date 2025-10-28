@@ -11,7 +11,7 @@ import signal
 from std_msgs.msg import Bool
 from automatic_test.conftest import get_node_list, get_node_pid
 HUMANOID_ROBOT_SESSION_NAME = "humanoid_robot"
-LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch output_system_info:=false"
+LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_gazebo_sim.launch trace_path_automatic_test:=true output_system_info:=false rviz:=false"
 LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch"
 
 class HardwareStatus(Enum):

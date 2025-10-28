@@ -28,9 +28,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ******************************************************************************/
 
 #include <string>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/joystick.h> 
 
 #include <ros/init.h>
 #include <ros/package.h>
+#include <std_msgs/String.h>
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Float64MultiArray.h>
@@ -58,6 +63,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <map>
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include "kuavo_msgs/robotHeadMotionData.h"
+#include "kuavo_msgs/robotHandPosition.h"
+#include <std_srvs/SetBool.h>
+#include <kuavo_msgs/ExecuteArmAction.h>
+
+// 命令执行相关头文件
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <array>
+#include <thread>
+#include <future>
 
 namespace ocs2
 {
@@ -70,7 +88,9 @@ namespace ocs2
       {"BUTTON_LB", 4},
       {"BUTTON_RB", 5},
       {"BUTTON_BACK", 6},
-      {"BUTTON_START", 7}
+      {"BUTTON_START", 7},
+      {"BUTTON_M1", 9},
+      {"BUTTON_M2", 10}
   };
 
   std::map<std::string, int> joyAxisMap = {
@@ -84,16 +104,57 @@ namespace ocs2
       {"AXIS_FORWARD_BACK_TRIGGER", 7}
   };
 
+    std::map<std::string, int> joyButtonMap_backup = {
+      {"BUTTON_STANCE", 0},
+      {"BUTTON_TROT", 1},
+      {"BUTTON_JUMP", 3},
+      {"BUTTON_WALK", 4},
+      {"BUTTON_LB", 6},
+      {"BUTTON_RB", 7},
+      {"BUTTON_BACK", 10},
+      {"BUTTON_START", 11},
+      {"BUTTON_M1", 13},
+      {"BUTTON_M2", 14}
+  };
+
+  std::map<std::string, int> joyAxisMap_backup = {
+      {"AXIS_LEFT_STICK_Y", 0},
+      {"AXIS_LEFT_STICK_X", 1},
+      {"AXIS_LEFT_LT", 5},
+      {"AXIS_RIGHT_STICK_YAW", 2},
+      {"AXIS_RIGHT_STICK_Z", 3},
+      {"AXIS_RIGHT_RT", 4},
+      {"AXIS_LEFT_RIGHT_TRIGGER", 6},
+      {"AXIS_FORWARD_BACK_TRIGGER", 7}
+  };
+
 
   struct gaitTimeName_t
   {
     std::string name;
     double startTime;
   };
+
+  // 命令结构体
+  struct Command_t
+  {
+    std::string name;
+    std::string type;
+    std::string value;
+    std::string description;
+  };
+
 #define DEAD_ZONE 0.05
 #define TARGET_REACHED_THRESHOLD 0.1
 #define TARGET_REACHED_THRESHOLD_YAW 0.1
 #define TARGET_REACHED_FEET_THRESHOLD 0.08
+#define MAX_JOYSTICK_NAME_LEN 256
+#define JOYSTICK_XBOX_MAP_JSON "bt2"
+#define JOYSTICK_XBOX_BUTTON_NUM 11
+#define JOYSTICK_BEITONG_MAP_JSON "bt2pro"
+#define JOYSTICK_BEITONG_BUTTON_NUM 16
+#define JOYSTICK_AXIS_NUM 8
+
   class JoyControl
   {
   public:
@@ -101,12 +162,60 @@ namespace ocs2
         : nodeHandle_(nodeHandle),
           targetPoseCommand_(nodeHandle, robotName)
     {
+      // 获取repo_root_path
+      if (!nodeHandle.getParam("repo_root_path", repo_root_path_))
+      {
+        ROS_WARN_STREAM("No repo_root_path parameter found, using current directory.");
+        repo_root_path_ = ".";
+      }
+      ROS_INFO_STREAM("Repository root path: " << repo_root_path_);
+      
+
+      if (nodeHandle.hasParam("joy_node/dev"))
+      {
+        std::string joystick_device;
+        nodeHandle.getParam("joy_node/dev", joystick_device);
+
+        int fd = -1;
+        const char *device_path = joystick_device.c_str();
+
+        fd = open(device_path, O_RDONLY);
+        if (fd < 0) {
+          ROS_ERROR("[JoyControl] Error opening joystick device: %s", device_path);
+        } 
+        else {
+          char name[MAX_JOYSTICK_NAME_LEN] = {0};
+          if (ioctl(fd, JSIOCGNAME(MAX_JOYSTICK_NAME_LEN), name) < 0) {
+              ROS_ERROR("[JoyControl] Error getting joystick name via ioctl");
+          } 
+          else {
+            std::string joystick_name(name);
+            
+            if (joystick_name.find("BEITONG") != std::string::npos) {
+              nodeHandle.setParam("joystick_type", JOYSTICK_BEITONG_MAP_JSON);
+              std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_BEITONG_MAP_JSON + ".json";
+              nodeHandle.setParam("channel_map_path", channel_map_path);
+              ROS_INFO("[JoyControl] Setting joystick type to bt2pro");
+              loadJoyJsonConfig(ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_XBOX_MAP_JSON + ".json", joyButtonMap_backup, joyAxisMap_backup);
+            } else if (joystick_name.find("X-Box") != std::string::npos) {
+              nodeHandle.setParam("joystick_type", JOYSTICK_XBOX_MAP_JSON);
+              std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_XBOX_MAP_JSON + ".json";
+              nodeHandle.setParam("channel_map_path", channel_map_path);
+              ROS_INFO("[JoyControl] Setting joystick type to bt2");
+              
+              loadJoyJsonConfig(ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_BEITONG_MAP_JSON + ".json", joyButtonMap_backup, joyAxisMap_backup);
+            }
+          }
+          close(fd);
+        }
+      }
+
       if (nodeHandle.hasParam("channel_map_path"))
       {
         std::string channel_map_path;
         nodeHandle.getParam("channel_map_path", channel_map_path);
         ROS_INFO_STREAM("Loading joystick mapping from " << channel_map_path);
-        loadJoyJsonConfig(channel_map_path);
+        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
       }
       else
       {
@@ -121,6 +230,17 @@ namespace ocs2
       {
         ROS_WARN_STREAM("No input sensitivity parameter found, using default joystick sensitivity.");
       }
+
+      if (nodeHandle.hasParam("joy_execute_action"))
+      {
+        nodeHandle.getParam("joy_execute_action", joy_execute_action_);
+        ROS_INFO_STREAM("Loading joy_execute_action: " << joy_execute_action_);
+      }
+      else
+      {
+        ROS_WARN_STREAM("No joy_execute_action parameter found, using default joy_execute_action.");
+      }
+
       Eigen::Vector4d joystickFilterCutoffFreq_(joystickSensitivity, joystickSensitivity, 
                                                   joystickSensitivity, joystickSensitivity);
       joystickFilter_.setParams(0.01,joystickFilterCutoffFreq_);
@@ -129,6 +249,15 @@ namespace ocs2
       // Get node parameters
       std::string referenceFile;
       nodeHandle.getParam("/referenceFile", referenceFile);
+
+      if (nodeHandle.hasParam("/real"))
+      {
+        nodeHandle.getParam("/real", real_);
+      }
+      else
+      {
+        ROS_WARN_STREAM("No real parameter found, using default real.");
+      }
 
       // loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
       RobotVersion rb_version(3, 4);
@@ -144,6 +273,12 @@ namespace ocs2
       loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
       loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
       loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
+      try {
+        loadData::loadCppDataType(referenceFile, "cmdvelLinearZLimit", c_relative_base_limit_[2]);
+      } catch (const std::exception &e) {
+        ROS_WARN_STREAM("cmdvelLinearZLimit not found, using default: " << c_relative_base_limit_[2]);
+      }
+      std::cout << "cmdvelLinearZLimit:" << c_relative_base_limit_[2] << std::endl;
       loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
 
 
@@ -177,12 +312,26 @@ namespace ocs2
           1,                                                    // queue length
           boost::bind(&JoyControl::mpcPolicyCallback, this, _1) // callback
       );
+      gait_change_sub_ = nodeHandle_.subscribe<std_msgs::String>(
+      "/humanoid_mpc_gait_change", 1, &JoyControl::gaitChangeCallback, this);
 
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       re_start_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/re_start_robot", 10);
       head_motion_pub_ = nodeHandle_.advertise<kuavo_msgs::robotHeadMotionData>("/robot_head_motion_data", 10);
+      waist_motion_pub_ = nodeHandle_.advertise<std_msgs::Float64MultiArray>("/robot_waist_motion_data", 10);
+      slope_planning_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/humanoid/mpc/enable_slope_planning", 10);
+      hand_position_pub_ = nodeHandle_.advertise<kuavo_msgs::robotHandPosition>("/control_robot_hand_position", 10);
+
+      // Service clients
+      execute_arm_action_client_ = nodeHandle_.serviceClient<kuavo_msgs::ExecuteArmAction>("/execute_arm_action");
+      // Launch status client (rate-limited checks in joy callback)
+      real_launch_status_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_launch_status");
+      last_status_check_time_ = ros::Time(0);
+
+      // 加载命令配置
+      loadCommandsConfig();
     }
-    void loadJoyJsonConfig(const std::string &config_file)
+    void loadJoyJsonConfig(const std::string &config_file, std::map<std::string, int>& button_map, std::map<std::string, int>& axis_map)
     {
       nlohmann::json data_;
       std::ifstream ifs(config_file);
@@ -190,23 +339,125 @@ namespace ocs2
       for (auto &item : data_["JoyButton"].items())
       {
         std::cout << "button:" << item.key() << " item.value():" << item.value() << std::endl;
-        if (joyButtonMap.find(item.key())!= joyButtonMap.end())
+        if (button_map.find(item.key())!= button_map.end())
         {
-          joyButtonMap[item.key()] = item.value();
+          button_map[item.key()] = item.value();
         }
         else
-          joyButtonMap.insert({item.key(), item.value()});
+          button_map.insert({item.key(), item.value()});
       }
       for (auto &item : data_["JoyAxis"].items())
       {
-        if (joyAxisMap.find(item.key())!= joyAxisMap.end())
+        if (axis_map.find(item.key())!= axis_map.end())
         {
-          joyAxisMap[item.key()] = item.value();
+          axis_map[item.key()] = item.value();
         }
         else
-          joyAxisMap.insert({item.key(), item.value()});
+          axis_map.insert({item.key(), item.value()});
       }
     
+    }
+    void loadCommandsConfig()
+    {
+      std::string commands_config_path = repo_root_path_ + "/src/humanoid-control/humanoid_controllers/config/commands.yaml";
+      ROS_INFO_STREAM("Loading commands config from: " << commands_config_path);
+      
+      try
+      {
+        std::ifstream config_file(commands_config_path);
+        if (!config_file.is_open())
+        {
+          ROS_ERROR_STREAM("Failed to open commands config file: " << commands_config_path);
+          return;
+        }
+        
+        // 使用简单的文本解析方法
+        std::string line;
+        std::string current_command;
+        Command_t current_cmd;
+        bool in_commands_section = false;
+        
+        while (std::getline(config_file, line))
+        {
+          // 去除前导空格
+          line.erase(0, line.find_first_not_of(" \t"));
+          
+          if (line.empty() || line[0] == '#')
+            continue;
+          
+          // 检查是否进入commands部分
+          if (line == "commands:")
+          {
+            in_commands_section = true;
+            continue;
+          }
+          
+          if (!in_commands_section)
+            continue;
+          
+          // 检查是否是新的命令（以冒号结尾且不包含空格）
+          if (line.find(":") == line.length() - 1 && line.find(" ") == std::string::npos)
+          {
+            if (!current_command.empty())
+            {
+              // 保存前一个命令
+              commands_map_[current_cmd.name] = current_cmd;
+            }
+            current_command = line.substr(0, line.length() - 1);
+            current_cmd = Command_t(); // 重置
+            current_cmd.name = current_command;
+            continue;
+          }
+          
+          // 解析键值对
+          if (line.find(":") != std::string::npos)
+          {
+            size_t colon_pos = line.find(":");
+            std::string key = line.substr(0, colon_pos);
+            std::string value = line.substr(colon_pos + 1);
+            
+            // 去除前导空格
+            value.erase(0, value.find_first_not_of(" \t"));
+            
+            // 去除引号
+            if (!value.empty() && value[0] == '"')
+            {
+              value = value.substr(1);
+              if (!value.empty() && value.back() == '"')
+                value.pop_back();
+            }
+            
+            if (key == "type")
+            {
+              current_cmd.type = value;
+            }
+            else if (key == "value")
+            {
+              current_cmd.value = value;
+            }
+            else if (key == "description")
+            {
+              current_cmd.description = value;
+            }
+          }
+        }
+        
+        // 保存最后一个命令
+        if (!current_command.empty())
+        {
+          commands_map_[current_cmd.name] = current_cmd;
+        }
+        
+        std::cout << "Loaded " << commands_map_.size() << " commands" <<std::endl;
+        for (const auto& cmd : commands_map_)
+        {
+          std::cout << " - " << cmd.first << ": "<< cmd.second.type << " " << cmd.second.value << " " << cmd.second.description << std::endl;
+        }
+      }
+      catch (const std::exception& e)
+      {
+        ROS_ERROR_STREAM("Error loading commands config: " << e.what());
+      }
     }
     void mpcPolicyCallback(const ocs2_msgs::mpc_flattened_controller::ConstPtr &msg)
     {
@@ -223,6 +474,28 @@ namespace ocs2
       while (ros::ok())
       {
         ros::spinOnce();
+        
+        // 检查异步命令执行结果
+        if (command_future_.valid() && command_future_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+        {
+          try
+          {
+            bool result = command_future_.get();
+            if (result)
+            {
+              // std::cout << "[JoyControl] 异步命令执行成功" << std::endl;
+            }
+            else
+            {
+              std::cerr << "[JoyControl] 异步命令执行失败" << std::endl;
+            }
+          }
+          catch (const std::exception& e)
+          {
+            std::cerr << "[JoyControl] 异步命令执行异常: " << e.what() << std::endl;
+          }
+        }
+        
         rate.sleep();
         if (!get_observation_)
         {
@@ -294,6 +567,37 @@ namespace ocs2
       cmd_vel_publisher_.publish(cmdVel_);
     }
 
+    void reloadJoystickMapping(int axis_num, int button_num) {
+        sensor_msgs::Joy old_joy_msg_backup;
+        old_joy_msg_backup.axes = std::vector<float>(axis_num, 0.0);
+        old_joy_msg_backup.buttons = std::vector<int32_t>(button_num, 0);
+
+        for (const auto& button : joyButtonMap_backup) {
+            auto it = std::find_if(joyButtonMap.begin(), joyButtonMap.end(),
+                [&button](const auto& pair) { return pair.first == button.first; });
+            if (it != joyButtonMap.end()) {
+                old_joy_msg_backup.buttons[button.second] = old_joy_msg_.buttons[it->second];
+            }
+        }
+        for (const auto& axis : joyAxisMap_backup) {
+            auto it = std::find_if(joyAxisMap.begin(), joyAxisMap.end(),
+                [&axis](const auto& pair) { return pair.first == axis.first; });
+            if (it != joyAxisMap.end()) {
+                old_joy_msg_backup.axes[axis.second] = old_joy_msg_.axes[it->second];
+            }
+        }
+
+        old_joy_msg_.buttons = old_joy_msg_backup.buttons;
+        old_joy_msg_.axes = old_joy_msg_backup.axes;
+
+        std::map<std::string, int> tempButtonMap = joyButtonMap;
+        std::map<std::string, int> tempAxisMap = joyAxisMap;
+        joyButtonMap = joyButtonMap_backup;
+        joyAxisMap = joyAxisMap_backup;
+        joyButtonMap_backup = tempButtonMap;
+        joyAxisMap_backup = tempAxisMap;
+    }
+
     bool setJoyTopicCallback(kuavo_msgs::SetJoyTopic::Request &req,
                            kuavo_msgs::SetJoyTopic::Response &res)
     {
@@ -317,6 +621,62 @@ namespace ocs2
       }
     }
 
+    bool executeCommand(const std::string& command_name)
+    {
+      auto it = commands_map_.find(command_name);
+      if (it == commands_map_.end())
+      {
+        ROS_ERROR_STREAM("[JoyControl] Command not found: " << command_name);
+        return false;
+      }
+      
+      const Command_t& cmd = it->second;
+      std::cout << "[JoyControl] Executing command: " << cmd.name << " (" << cmd.description << ")" << std::endl;
+      
+      if (cmd.type.find("shell") != std::string::npos)
+      {
+        // 使用异步线程执行shell命令，避免阻塞ROS回调
+        if (command_future_.valid() && command_future_.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout)
+        {
+          std::cout << "[JoyControl] Previous command is still running, skipping: " << command_name << std::endl;
+          return false;
+        }
+        
+        command_future_ = std::async(std::launch::async, [this, cmd]() {
+          return executeShellCommand(cmd.value);
+        });
+        
+        return true;
+      }
+      else
+      {
+        std::cerr << "[JoyControl] Unknown command type: " << cmd.type << std::endl;
+        return false;
+      }
+    }
+
+    bool executeShellCommand(const std::string& shell_command)
+    {
+      
+      // 直接执行shell命令，先切换到repo_root_path目录
+      std::string command = "cd " + repo_root_path_ + " && " + shell_command;
+      std::cout << "execute command: " << command << std::endl;
+      int result = system(command.c_str());
+      
+      if (result == 0)
+      {
+        std::cout << "[JoyControl] 命令执行成功: " << shell_command << std::endl;
+        return true;
+      }
+      else
+      {
+        std::cerr << "[JoyControl] 命令执行失败，返回值 " << result << ": " << shell_command << std::endl;
+        return false;
+      }
+    }
+
+   
+
   private:
     void feetCallback(const std_msgs::Float64MultiArray::ConstPtr &feet_msg)
     {
@@ -335,11 +695,49 @@ namespace ocs2
         std::cout << "invalide joy msg"<<std::endl;
         return;
       }
-      if (joy_msg->buttons.size()<=joyButtonMap["BUTTON_START"])
+
+      if (old_joy_msg_.buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_XBOX_BUTTON_NUM)
       {
-        std::cerr << "[JoyController]:joy_msg has a error length, check your joystick_type!" << std::endl;
+        nodeHandle_.setParam("joystick_type", JOYSTICK_XBOX_MAP_JSON);
+        std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_XBOX_MAP_JSON + ".json";
+        nodeHandle_.setParam("channel_map_path", channel_map_path);
+        ROS_WARN("[JoyController]: Joystick data mapping has changed from BEITONG to X-Box");
+        reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_XBOX_BUTTON_NUM);
+      }
+      if(old_joy_msg_.buttons.size() == JOYSTICK_XBOX_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM)
+      {
+        nodeHandle_.setParam("joystick_type", JOYSTICK_BEITONG_MAP_JSON);
+        std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_BEITONG_MAP_JSON + ".json";
+        nodeHandle_.setParam("channel_map_path", channel_map_path);
+        ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
+        reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
+      }
+  
+      if(joy_msg->buttons[joyButtonMap["BUTTON_M1"]] || joy_msg->buttons[joyButtonMap["BUTTON_M2"]])
+      {
         return;
       }
+
+      // Rate-limited check: only allow operations after robot is launched       
+      if (!robot_launched_ && real_)
+      {
+        ros::Time now = ros::Time::now();
+        if ((now - last_status_check_time_).toSec() >= 1.0)
+        {
+          last_status_check_time_ = now;
+          if (real_launch_status_client_.exists())
+          {
+            std_srvs::Trigger srv;
+            if (real_launch_status_client_.call(srv))
+            {
+              robot_launched_ = (srv.response.message == "launched");
+            }
+          }
+        }
+        old_joy_msg_ = *joy_msg;
+        return;
+      }
+
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
       {
         // 组合键
@@ -350,13 +748,75 @@ namespace ocs2
         // std::cout << "head_yaw: " << head_yaw << " head_pitch: " << head_pitch << std::endl;
         controlHead(head_yaw, head_pitch);
         // return;
+
+        if(!joy_execute_action_)
+        {
         joystickOriginAxisTemp_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joystick_origin_axis_[2], joystick_origin_axis_[3];
-      }
-      else
-      {
-        joystickOriginAxisTemp_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+        // 行为树控制
+        if(joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
+        {
+          ROS_INFO("Start grab box demo");
+          enableGrabBoxDemo(true);
+        }
+        if(joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
+        {
+          ROS_INFO("Stop grab box demo");
+          enableGrabBoxDemo(false);
+        }
+        if(joy_msg->buttons[joyButtonMap["BUTTON_JUMP"]])
+        {
+          ROS_INFO("Reset grab box demo");
+          resetGrabBoxDemo(true);
+        }
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
+        {
+          if (stair_detection_enabled_)
+          {
+            executeCommand("stop_stair_detect");
+          }
+          else{
+            executeCommand("start_stair_detect");
+          }
+        }
+        return;
+        }
+        old_joy_msg_ = *joy_msg;
+        return;
       }
 
+      if(joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] < -0.5)
+      {
+        if(!joy_execute_action_)
+        {
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
+        {
+          pubSlopePlanning(false);
+        }
+        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
+        {
+          pubSlopePlanning(true);
+        }
+        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
+        {
+          executeCommand("stairclimb");
+        }
+        }
+        else
+        {
+           // 组合键控制腰部
+          double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+          waist_yaw = 120.0 * waist_yaw;   // +- 120deg
+          // std::cout << "waist_yaw: " << waist_yaw << std::endl;
+          controlWaist(waist_yaw);
+        }
+        old_joy_msg_ = *joy_msg;
+        return;
+      }
+    
+      // 非辅助模式下才可控行走
+      if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] > -0.5 && joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] > -0.5 && axes_input_enabled_)
+        joystickOriginAxisTemp_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+    
       joystickOriginAxisFilter_ = joystickOriginAxisTemp_;
       // for(int i=0;i<4;i++)
       // {
@@ -369,13 +829,7 @@ namespace ocs2
       }
       joystick_origin_axis_ = joystickOriginAxisFilter_;
       // joystick_origin_axis_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
-
-      vector_t button_trigger_axis = vector_t::Zero(6); 
-      if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_START"]] && joy_msg->buttons[joyButtonMap["BUTTON_START"]])
-      {
-        callRealInitializeSrv();
-      }
-
+      
       if (joy_msg->buttons[joyButtonMap["BUTTON_LB"]])// 按下左侧侧键，切换模式
       {
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
@@ -386,6 +840,26 @@ namespace ocs2
         {
           current_arm_mode_ = (current_arm_mode_ > 0)? 0 : 1;
           callArmControlService(current_arm_mode_);
+        }
+        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_JUMP"]] && joy_msg->buttons[joyButtonMap["BUTTON_JUMP"]])
+        {
+          kuavo_msgs::robotHandPosition msg;
+          const int fingers = 6;
+          msg.left_hand_position.resize(fingers);
+          msg.right_hand_position.resize(fingers);
+          if (!hand_closed_)
+          {
+            std::fill(msg.left_hand_position.begin(), msg.left_hand_position.end(), 100);
+            std::fill(msg.right_hand_position.begin(), msg.right_hand_position.end(), 100);
+          }
+          else
+          {
+            std::fill(msg.left_hand_position.begin(), msg.left_hand_position.end(), 0);
+            std::fill(msg.right_hand_position.begin(), msg.right_hand_position.end(), 0);
+          }
+          ROS_INFO("publish hand position: %s", hand_closed_ ? "close" : "open");
+          hand_closed_ = !hand_closed_;
+          hand_position_pub_.publish(msg);
         }
       }
       else if (joy_msg->buttons[joyButtonMap["BUTTON_RB"]])// 按下右侧侧键，切换模式
@@ -408,26 +882,38 @@ namespace ocs2
       else
         checkGaitSwitchCommand(joy_msg);
 
-
-      if (joy_msg->buttons[joyButtonMap["BUTTON_BACK"]])
-        callTerminateSrv();
-      else if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
+      vector_t button_trigger_axis = vector_t::Zero(6); 
+      if (axes_input_enabled_)
       {
-        button_trigger_axis[0] = joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]];
-        checkAndPublishCommandLine(button_trigger_axis);
-        joystick_origin_axis_ = button_trigger_axis;
-      }
-      else if (joy_msg->axes[joyAxisMap["AXIS_LEFT_RIGHT_TRIGGER"]])
-      {
-        button_trigger_axis[1] = joy_msg->axes[joyAxisMap["AXIS_LEFT_RIGHT_TRIGGER"]];
-        checkAndPublishCommandLine(button_trigger_axis);
-        joystick_origin_axis_ = button_trigger_axis;
+        if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
+        {
+          button_trigger_axis[0] = joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]];
+          checkAndPublishCommandLine(button_trigger_axis);
+          joystick_origin_axis_ = button_trigger_axis;
+        }
+        else if (joy_msg->axes[joyAxisMap["AXIS_LEFT_RIGHT_TRIGGER"]])
+        {
+          button_trigger_axis[1] = joy_msg->axes[joyAxisMap["AXIS_LEFT_RIGHT_TRIGGER"]];
+          checkAndPublishCommandLine(button_trigger_axis);
+          joystick_origin_axis_ = button_trigger_axis;
+        }
       }
       old_joy_msg_ = *joy_msg;
     }
 
     void checkGaitSwitchCommand(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
+      // 有摇杆数据不可以步态切换
+      if (
+        std::abs(joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]]) > DEAD_ZONE ||
+        std::abs(joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]]) > DEAD_ZONE ||
+        std::abs(joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]]) > DEAD_ZONE ||
+        std::abs(joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]]) > DEAD_ZONE ||
+        std::abs(joy_msg->axes[joyAxisMap["AXIS_LEFT_RIGHT_TRIGGER"]]) > DEAD_ZONE ||
+        std::abs(joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]]) > DEAD_ZONE
+      ) {
+        return;
+      }
       // 检查是否有gait切换指令
       if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
       {
@@ -435,7 +921,24 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
       {
-        publishGaitTemplate("trot");
+        if (!joy_execute_action_)
+        {
+          publishGaitTemplate("trot");
+        }
+        else
+        {
+          // 使用 TROT 作为“遥感/方向键输入”开关
+          axes_input_enabled_ = !axes_input_enabled_;
+          ROS_WARN_STREAM("[JoyControl] Axes input toggled: " << (axes_input_enabled_ ? "ENABLED" : "DISABLED"));
+          if (!axes_input_enabled_)
+          {
+            // 关闭时立即发布零速度，确保立刻停止
+            vector_t zero_axis = vector_t::Zero(6);
+            joystick_origin_axis_.setZero();
+            checkAndPublishCommandLine(zero_axis);
+          }
+          return;
+        }
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_JUMP"]] && joy_msg->buttons[joyButtonMap["BUTTON_JUMP"]])
       {
@@ -461,6 +964,29 @@ namespace ocs2
       humanoid::ModeSequenceTemplate modeSequenceTemplate = gait_map_.at(gaitName);
       mode_sequence_template_publisher_.publish(createModeSequenceTemplateMsg(modeSequenceTemplate));
       current_desired_gait_ = gaitName;
+    }
+
+    void gaitChangeCallback(const std_msgs::String::ConstPtr& msg) 
+    {
+      const std::string &req = msg->data;
+      ROS_INFO_STREAM("[JoyControl] Gait change request: " << req);
+
+      if (req != "walk" && req != "stance")
+      {
+        ROS_WARN_STREAM("[JoyControl] Invalid gait '" << req 
+                        << "'. Only 'walk' or 'stance' allowed.");
+        return;
+      }
+
+      if (req == current_desired_gait_)
+      {
+        ROS_INFO_STREAM("[JoyControl] Already in '" << req << "', no change.");
+        return;
+      }
+
+      ROS_INFO_STREAM("[JoyControl] Switching gait from '" 
+                      << current_desired_gait_ << "' to '" << req << "'");
+      publishGaitTemplate(req);
     }
 
     void observationCallback(const ocs2_msgs::mpc_observation::ConstPtr &observation_msg)
@@ -542,6 +1068,15 @@ namespace ocs2
       msg.data = scale;
       mode_scale_publisher_.publish(msg);
     }
+
+    inline void pubSlopePlanning(bool enable)
+    {
+      ROS_INFO_STREAM("[JoyControl] Publish slope planning: " << (enable ? "enable" : "disable"));
+      std_msgs::Bool msg;
+      msg.data = enable;
+      slope_planning_pub_.publish(msg);
+    }
+
     bool callArmControlService(int mode)
     {
       ros::ServiceClient client = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("humanoid_change_arm_ctrl_mode");
@@ -598,6 +1133,92 @@ namespace ocs2
       head_motion_pub_.publish(msg);
     }
 
+    void controlWaist(double waist_yaw)
+    {
+      std_msgs::Float64MultiArray msg;
+      msg.data.resize(1);
+      msg.data[0] = -waist_yaw;
+      waist_motion_pub_.publish(msg);
+    }
+
+
+    bool enableGrabBoxDemo(bool enable)
+    {
+      const std::string service_name = "/grab_box_demo/control_bt";
+      ros::NodeHandle nh;
+
+      // 等待服务可用
+      if (!ros::service::waitForService(service_name, ros::Duration(1))) {
+        ROS_ERROR("Service %s not available", service_name.c_str());
+        return false;
+      }
+
+      // 创建服务代理
+      ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(service_name);
+      std_srvs::SetBool srv;
+      srv.request.data = enable;
+
+      // 调用服务
+      if (client.call(srv)) {
+        ROS_INFO("controlBtTree call succeeded, received response: %s", srv.response.success ? "Success" : "Failure");
+        return srv.response.success; // 服务调用成功
+      } else {
+        ROS_ERROR("Failed to call service %s", service_name.c_str());
+        return false; // 服务调用失败
+      }
+    }
+
+    bool resetGrabBoxDemo(bool reset)
+    {
+      const std::string service_name = "/grab_box_demo/reset_bt";
+      ros::NodeHandle nh;
+
+      // 等待服务可用
+      if (!ros::service::waitForService(service_name, ros::Duration(1))) {
+        ROS_ERROR("Service %s not available", service_name.c_str());
+        return false;
+      }
+
+      // 创建服务代理
+      ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(service_name);
+      std_srvs::SetBool srv;
+      srv.request.data = reset;
+
+      // 调用服务
+      if (client.call(srv)) {
+        ROS_INFO("resetGrabBoxDemo call succeeded, received response: %s", srv.response.success ? "Success" : "Failure");
+        return srv.response.success; // 服务调用成功
+      } else {
+        ROS_ERROR("Failed to call service %s", service_name.c_str());
+        return false; // 服务调用失败
+      }
+    }
+
+    bool callExecuteArmAction(const std::string &action_name)
+    {
+      kuavo_msgs::ExecuteArmAction srv;
+      srv.request.action_name = action_name;
+      const std::string service_name = "/execute_arm_action";
+
+      if (!execute_arm_action_client_.exists())
+      {
+        ros::service::waitForService(service_name, ros::Duration(1.0));
+      }
+
+      if (execute_arm_action_client_.call(srv))
+      {
+        ROS_INFO("[JoyControl] ExecuteArmAction('%s') -> %s: %s",
+                 action_name.c_str(), srv.response.success ? "Success" : "Failure",
+                 srv.response.message.c_str());
+        return srv.response.success;
+      }
+      else
+      {
+        ROS_ERROR("[JoyControl] Failed to call service %s", service_name.c_str());
+        return false;
+      }
+    }
+
   private:
     ros::NodeHandle nodeHandle_;
     TargetTrajectoriesRosPublisher targetPoseCommand_;
@@ -606,6 +1227,7 @@ namespace ocs2
     ros::Subscriber observation_sub_;
     ros::Subscriber gait_scheduler_sub_;
     ros::Subscriber policy_sub_;
+    ros::Subscriber gait_change_sub_;
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
     std::string current_desired_gait_ = "stance";
@@ -621,6 +1243,7 @@ namespace ocs2
     sensor_msgs::Joy old_joy_msg_;
     int current_arm_mode_{1};
     double joystickSensitivity = 100;
+    bool joy_execute_action_ = true;
     LowPassFilter5thOrder joystickFilter_;
 
     ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.2, 0.3, 0.4};
@@ -631,6 +1254,9 @@ namespace ocs2
     ros::Publisher stop_pub_;
     ros::Publisher re_start_pub_;
     ros::Publisher head_motion_pub_;
+    ros::Publisher hand_position_pub_;
+    ros::Publisher waist_motion_pub_;
+    ros::Publisher slope_planning_pub_;
     float total_mode_scale_{1.0};
     bool button_start_released_{true};
     // TargetTrajectories current_target_traj_;
@@ -640,6 +1266,27 @@ namespace ocs2
     std::map<std::string, humanoid::ModeSequenceTemplate> gait_map_;
     ros::ServiceServer joy_topic_service_;
     std::string current_joy_topic_;
+    
+    // 楼梯检测相关
+    bool stair_detection_enabled_ = false;
+    
+    // 遥感/方向键轴输入开关（默认允许）
+    bool axes_input_enabled_{true};
+    // 手抓开合状态（默认张开 -> false）
+    bool hand_closed_{false};
+    
+    // 命令执行相关
+    std::map<std::string, Command_t> commands_map_;
+    std::string repo_root_path_;
+    std::future<bool> command_future_;
+    
+    // Arm execute action service
+    ros::ServiceClient execute_arm_action_client_;
+    // Launch status
+    ros::ServiceClient real_launch_status_client_;
+    bool robot_launched_{false};
+    ros::Time last_status_check_time_;
+    bool real_{false};
   };
 }
 

@@ -57,11 +57,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ocs2_mobile_manipulator/constraint/BaseConstraint.h"
 #include "ocs2_mobile_manipulator/cost/QuadraticInputCost.h"
 #include "ocs2_mobile_manipulator/cost/QuadraticBaseStateCost.h"
+#include "ocs2_mobile_manipulator/cost/BaseArmRegularizationCost.h"
 #include "ocs2_mobile_manipulator/dynamics/DefaultManipulatorDynamics.h"
 #include "ocs2_mobile_manipulator/dynamics/FloatingArmManipulatorDynamics.h"
 #include "ocs2_mobile_manipulator/dynamics/FullyActuatedFloatingArmManipulatorDynamics.h"
 #include "ocs2_mobile_manipulator/dynamics/WheelBasedMobileManipulatorDynamics.h"
 #include "ocs2_mobile_manipulator/dynamics/ActuatedXYZYawPitchManipulatorDynamics.h"
+#include "ocs2_mobile_manipulator/dynamics/ActuatedZPitchManipulatorDynamics.h"
 
 // Boost
 #include <boost/filesystem/operations.hpp>
@@ -174,6 +176,7 @@ MobileManipulatorInterface::MobileManipulatorInterface(const std::string& taskFi
   problem_.softConstraintPtr->add("jointLimits", getJointLimitSoftConstraint(*pinocchioInterfacePtr_, taskFile));
   // base state constraint
   problem_.costPtr->add("baseTrackingCost", getBaseStateCost(taskFile));
+  problem_.costPtr->add("baseArmRegularization", getBaseArmRegularizationCost(taskFile));
   // problem_.stateEqualityConstraintPtr->add("baseState", getBaseStateConstraint(taskFile));
   for(int eef_idx = 0; eef_idx < eeFrames.size(); ++eef_idx)
   {
@@ -217,6 +220,11 @@ MobileManipulatorInterface::MobileManipulatorInterface(const std::string& taskFi
     case ManipulatorModelType::ActuatedXYZYawPitchManipulator:{
       problem_.dynamicsPtr.reset(
           new ActuatedXYZYawPitchManipulatorDynamics(manipulatorModelInfo_, "dynamics", libraryFolder, recompileLibraries, true));
+      break;
+    }
+    case ManipulatorModelType::ActuatedZPitchManipulator: {
+      problem_.dynamicsPtr.reset(
+          new ActuatedZPitchManipulatorDynamics(manipulatorModelInfo_, "dynamics", libraryFolder, recompileLibraries, true));
       break;
     }
     default:
@@ -511,6 +519,22 @@ std::unique_ptr<StateInputCost> MobileManipulatorInterface::getBaseStateCost(con
   // }
   // return std::make_unique<StateSoftConstraint>(std::move(constraint), std::move(penaltyArray));
   return std::make_unique<QuadraticBaseStateCost>(std::move(Q), manipulatorModelInfo_.stateDim, manipulatorModelInfo_.inputDim);
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+std::unique_ptr<StateInputCost> MobileManipulatorInterface::getBaseArmRegularizationCost(const std::string& taskFile) {
+  matrix_t Q = matrix_t::Zero(manipulatorModelInfo_.stateDim, manipulatorModelInfo_.stateDim);
+
+  loadData::loadEigenMatrix(taskFile, "stateCost.Q_regularization", Q);
+
+  std::cerr << "\n #### Base Regularization Cost Settings: ";
+  std::cerr << "\n #### =============================================================================\n";
+  std::cerr << "stateCost.Q_regularization:  \n" << Q << '\n';
+  std::cerr << " #### =============================================================================\n";
+
+  return std::make_unique<BaseArmRegularizationCost>(manipulatorModelInfo_, std::move(Q));
 }
 
 /******************************************************************************************************/

@@ -514,11 +514,9 @@ class Quest3Node:
                     print("\033[93m++++++++++++++++++++开始增量模式+++++++++++++++++\033[0m")
                     # 刚开始切换到增量控制模式
                     self.control_mode = Quest3Node.ControlMode.INCREMENTAL_MODE
-                    
-                    # 重置MPC状态
-                    # print("\033[94m重置 Mobile Manipulator MPC...\033[0m")
+
                     # reset_mm_mpc()
-                    
+
                     self.change_mobile_ctrl_mode(IncrementalMpcCtrlMode.ArmOnly.value)
                     # 设置当前VR的末端位姿为锚点
                     self._left_anchor_pose = left_pose

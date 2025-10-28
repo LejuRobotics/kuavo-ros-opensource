@@ -85,6 +85,14 @@ PinocchioInterface createPinocchioInterface(const std::string& robotUrdfPath, co
       // return pinocchio interface
       return getPinocchioInterfaceFromUrdfFile(robotUrdfPath, jointComposite);
     }
+    case ManipulatorModelType::ActuatedZPitchManipulator: {
+      // add 6 DoF for the floating base
+      pinocchio::JointModelComposite jointComposite(2);
+      jointComposite.addJoint(pinocchio::JointModelTranslation());
+      jointComposite.addJoint(pinocchio::JointModelSphericalZYX());
+      // return pinocchio interface
+      return getPinocchioInterfaceFromUrdfFile(robotUrdfPath, jointComposite);
+    }
     default:
       throw std::invalid_argument("Invalid manipulator model type provided.");
   }
@@ -147,6 +155,14 @@ PinocchioInterface createPinocchioInterface(const std::string& robotUrdfPath, co
       // return pinocchio interface
       return getPinocchioInterfaceFromUrdfModel(newModel, jointComposite);
     }
+    case ManipulatorModelType::ActuatedZPitchManipulator: {
+      // add Z-Pitch joint for the base
+      pinocchio::JointModelComposite jointComposite(2);
+      jointComposite.addJoint(pinocchio::JointModelTranslation());
+      jointComposite.addJoint(pinocchio::JointModelSphericalZYX());
+      // return pinocchio interface
+      return getPinocchioInterfaceFromUrdfModel(newModel, jointComposite);
+    }
     default:
       throw std::invalid_argument("Invalid manipulator model type provided.");
   }
@@ -192,6 +208,12 @@ ManipulatorModelInfo createManipulatorModelInfo(const PinocchioInterface& interf
       // for XYZ-Yaw-Pitch base, the input dimension is (v_x, v_y, v_z, omega, dtheta, dq_j) while state dimension is (x, y, z, psi, theta, q_j).
       info.inputDim = info.stateDim;
       info.armDim = info.inputDim - 5;
+      break;
+    }
+    case ManipulatorModelType::ActuatedZPitchManipulator: {
+      // for z-pitch base, the input dimension is (v_z, dtheta, dq_j) while state dimension is full.
+      info.inputDim = info.stateDim - 4; // (x,y,yaw,roll) is unactuated
+      info.armDim = info.inputDim - 2; // (z,pitch) is actuated
       break;
     }
     default:

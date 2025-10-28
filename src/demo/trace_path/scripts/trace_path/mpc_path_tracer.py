@@ -8,11 +8,22 @@ import tf
 import tf2_ros
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Twist, PoseStamped, Point, Quaternion, Pose, TransformStamped
+from gazebo_msgs.msg import ModelStates
 from pydrake.all import MathematicalProgram
 from pydrake.all import Solve, SnoptSolver
 from std_msgs.msg import Bool
 from enum import Enum
 from std_msgs.msg import Int8
+from std_srvs.srv import Trigger, TriggerResponse
+from std_srvs.srv import SetBool, SetBoolResponse
+
+# 导入路径生成相关的类
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from mpc_client_example import PathGenerator, PathGeneratorFactory
+
+from kuavo_msgs.srv import CreatePath, CreatePathResponse
 
 class FollowState(Enum):
     NOT_FOLLOWING = 0
@@ -63,7 +74,7 @@ class PathTracerBase:
         self.robot_frame = rospy.get_param('~robot_frame', 'base_link')
         self.world_frame = rospy.get_param('~world_frame', 'odom')
         self.v_max_linear = rospy.get_param('~v_max_linear', 0.4)
-        self.v_max_angular = rospy.get_param('~v_max_angular', 0.4)
+        self.v_max_angular = rospy.get_param('~v_max_angular', 0.6)
         self.dt = rospy.get_param('~dt', 0.1)
         
         rospy.loginfo(f"Using frames: robot='{self.robot_frame}', world='{self.world_frame}'")
@@ -84,21 +95,61 @@ class PathTracerBase:
         self.realtime_path_pub = rospy.Publisher('trace_path/realtime_path', Path, queue_size=10)
         self.follow_state_pub = rospy.Publisher('trace_path/follow_state', Int8, queue_size=10)
 
+        # Initialize path generator
+        self.path_generator = None
+        self._init_path_generator()
         
         # Initialize path
         self.path.header.frame_id = self.world_frame
         self.path.header.stamp = rospy.Time.now()
 
-        self.timer = rospy.Timer(rospy.Duration(0.1), self.publish_follow_state)
+        self.timer = rospy.Timer(rospy.Duration(0.05), self.publish_follow_state)
         
-        # Start TF polling thread
-        import threading
-        self.tf_thread = threading.Thread(target=self.tf_polling)
-        self.tf_thread.daemon = True
-        self.tf_thread.start()
+        # Decide pose source by sim flag
+        self.use_sim = rospy.get_param('robot_manager_node/sim', False)
+        import os
+        self.model_name = f"biped_s{os.environ.get('ROBOT_VERSION', '45')}"
+
+        if self.use_sim:
+            self.model_states_sub = rospy.Subscriber('/gazebo/model_states', ModelStates, self._on_model_states, queue_size=1)
+            rospy.loginfo(f"Use Gazebo /gazebo/model_states for pose (model_name={self.model_name})")
+        else:
+            # Start TF polling thread
+            import threading
+            self.tf_thread = threading.Thread(target=self.tf_polling)
+            self.tf_thread.daemon = True
+            self.tf_thread.start()
+
+    def _init_path_generator(self):
+        """Initialize path generator with current frame settings"""
+        try:
+            self.path_generator = PathGenerator(
+                world_frame=self.world_frame,
+                robot_frame=self.robot_frame,
+            )
+            rospy.loginfo(f"Path generator initialized with frames: world='{self.world_frame}', robot='{self.robot_frame}'")
+        except Exception as e:
+            rospy.logwarn(f"Failed to initialize path generator: {e}")
+            self.path_generator = None
 
     def publish_follow_state(self, event):
-        self.follow_state_pub.publish(self.follow_state.value)
+        """Publish current follow state to topic"""
+        try:
+            state_msg = Int8()
+            state_msg.data = self.follow_state.value
+            self.follow_state_pub.publish(state_msg)
+        except Exception as e:
+            rospy.logwarn(f"Failed to publish follow state: {e}")
+
+    def set_follow_state(self, new_state):
+        """Set follow state and publish it immediately"""
+        if isinstance(new_state, FollowState):
+            self.follow_state = new_state
+            # Publish immediately when state changes
+            self.publish_follow_state(None)
+            rospy.loginfo(f"Follow state changed to: {new_state.name}")
+        else:
+            rospy.logwarn(f"Invalid follow state: {new_state}")
 
     def tf_polling(self):
         """Thread function to continuously poll for robot's pose from TF"""
@@ -156,6 +207,63 @@ class PathTracerBase:
                 pass
             
             self.tf_rate.sleep()
+
+    def _on_model_states(self, msg: ModelStates):
+        """Gazebo回调：使用 /gazebo/model_states 更新位姿（world系）"""
+        try:
+            if self.model_name in msg.name:
+                idx = msg.name.index(self.model_name)
+            else:
+                # 常见兜底名称
+                fallback_names = ['biped_s45', 'biped_s42']
+                idx = None
+                for n in fallback_names:
+                    if n in msg.name:
+                        idx = msg.name.index(n)
+                        break
+                if idx is None:
+                    return
+
+            pose = msg.pose[idx]
+
+            # 更新 current_pose
+            self.current_pose.position.x = pose.position.x
+            self.current_pose.position.y = pose.position.y
+            self.current_pose.position.z = pose.position.z
+            self.current_pose.orientation.x = pose.orientation.x
+            self.current_pose.orientation.y = pose.orientation.y
+            self.current_pose.orientation.z = pose.orientation.z
+            self.current_pose.orientation.w = pose.orientation.w
+
+            # 初始化 start_point_pose（仅一次）
+            if self.flag_reset_start_point:
+                self.start_point_pose = Pose()
+                self.start_point_pose.position.x = pose.position.x
+                self.start_point_pose.position.y = pose.position.y
+                self.start_point_pose.position.z = pose.position.z
+                self.start_point_pose.orientation.x = pose.orientation.x
+                self.start_point_pose.orientation.y = pose.orientation.y
+                self.start_point_pose.orientation.z = pose.orientation.z
+                self.start_point_pose.orientation.w = pose.orientation.w
+                self.flag_reset_start_point = False
+                rospy.loginfo(f"Start point (gazebo): [{pose.position.x:.2f}, {pose.position.y:.2f}, {pose.position.z:.2f}]")
+
+            # 发布实时轨迹（与 TF 逻辑保持一致的频率控制由外部 timer 保证）
+            current_time = rospy.Time.now()
+            path_pose = Pose()
+            path_pose.position.x = pose.position.x
+            path_pose.position.y = pose.position.y
+            path_pose.position.z = 0.0
+            path_pose.orientation = pose.orientation
+
+            pose_stamped = PoseStamped()
+            pose_stamped.header.frame_id = self.path.header.frame_id
+            pose_stamped.header.stamp = current_time
+            pose_stamped.pose = path_pose
+            self.path.poses.append(pose_stamped)
+            self.realtime_path_pub.publish(self.path)
+        except Exception as e:
+            rospy.logwarn(f"model_states callback error: {e}")
 
     def follow(self, global_path):
         """Base implementation of path following - to be overridden by subclasses"""
@@ -466,6 +574,8 @@ class MpcPathTracer(PathTracerBase):
         self.start_sub = rospy.Subscriber('~start', Bool, self.start_callback)
         self.stop_sub = rospy.Subscriber('~stop', Bool, self.stop_callback)
         
+        self.create_path_srv = rospy.Service('~create_path', CreatePath, self.create_path_callback)
+        
         rospy.loginfo("MPC Path Tracer initialized. Waiting for path on ~path topic.")
         
         self.trajectory_analyzer = TrajectoryAnalyzer()
@@ -509,7 +619,7 @@ class MpcPathTracer(PathTracerBase):
             
             # Start following in a separate thread to avoid blocking
             self.stop_requested = False
-            self.follow_state = FollowState.FOLLOWING
+            self.set_follow_state(FollowState.FOLLOWING)
             self.path.poses = []
             import threading
             self.motion_interface = rospy.get_param('~motion_interface', '/cmd_vel')
@@ -526,6 +636,93 @@ class MpcPathTracer(PathTracerBase):
             self.stop_requested = True
             rospy.loginfo("Stop requested. Stopping path following...")
     
+    def create_path_callback(self, req):
+        """Service callback to create a predefined path with custom parameters"""
+        response = CreatePathResponse()
+        
+        try:
+            # Validate path type
+            valid_types = ['line', 'circle', 'square', 'triangle', 'scurve']
+            if req.path_type not in valid_types:
+                response.success = False
+                response.message = f"Invalid path type: {req.path_type}. Valid types: {valid_types}"
+                rospy.logerr(response.message)
+                return response
+            
+            # Set all parameters to ROS parameter server (simplified approach)
+            self._set_path_parameters(req)
+            
+            # Generate path using the factory
+            if self.path_generator is None:
+                self._init_path_generator()
+                if self.path_generator is None:
+                    response.success = False
+                    response.message = "Failed to initialize path generator"
+                    rospy.logerr(response.message)
+                    return response
+            
+            # Set home pose if not set
+            try:
+                self.path_generator.set_home_pose()
+            except Exception as e:
+                rospy.logwarn(f"Failed to set home pose: {e}")
+            
+            # Create path using factory
+            dt = rospy.get_param('~dt', 0.1)
+            path = PathGeneratorFactory.create_path(req.path_type, self.path_generator, dt)
+            
+            if path is None:
+                response.success = False
+                response.message = f"Failed to generate {req.path_type} path"
+                rospy.logerr(response.message)
+                return response
+            
+            # Publish the path to ~path topic directly
+            path_pub = rospy.Publisher('~path', Path, queue_size=10)
+            rospy.sleep(0.1)  # Wait for publisher to connect
+            path_pub.publish(path)
+            
+            # Set response
+            response.success = True
+            response.message = f"Successfully created {req.path_type} path with {len(path.poses)} points and published to ~path topic"
+            response.path = path
+            rospy.loginfo(response.message)
+            
+        except Exception as e:
+            response.success = False
+            response.message = f"Error creating path: {str(e)}"
+            rospy.logerr(response.message)
+        
+        return response
+
+    def _set_path_parameters(self, req):
+        """Set all path parameters to ROS parameter server using reflection"""
+        try:
+            # Set velocity parameter with default fallback
+            v_max_linear = req.v_max_linear if req.v_max_linear > 0.0 else 0.4
+            rospy.set_param(f'~path_velocities/{req.path_type}', v_max_linear)
+            rospy.set_param('~v_max_linear', v_max_linear)
+
+            default_params_value = {
+                'radius': 2.0,
+                'length': 2.0,
+                'amplitude': 1.0,
+                'yaw_offset': 0.0,
+                "half_scurve": False
+            }
+            filter_params = ['path_type', 'v_max_linear']
+            # Get all parameters from request using __slots__
+            if hasattr(req, '__slots__'):
+                for param_name in req.__slots__:
+                    if param_name not in filter_params:
+                        param_value = getattr(req, param_name) if getattr(req, param_name) else default_params_value[param_name]
+                        rospy.set_param(f'~path_generators/{req.path_type}/{param_name}', param_value)
+                        rospy.loginfo(f"Set {req.path_type}/{param_name} = {param_value}")
+            
+        except Exception as e:
+            rospy.logerr(f"Failed to set path parameters: {e}")
+            raise
+
     def no_mpc_follow(self, global_path):
         """Follow path without MPC by directly publishing each point as cmd_pose_world.
         
@@ -542,20 +739,16 @@ class MpcPathTracer(PathTracerBase):
 
         # Validate path
         if len(global_path.poses) <= 0:
-            self.follow_state = FollowState.NOT_FOLLOWING
+            self.set_follow_state(FollowState.NOT_FOLLOWING)
             return
 
+        rospy.loginfo(f"Start following path...")
         # First publish the path for visualization
         self.publish_path(global_path)
-
-        # Log path info
-        rospy.loginfo("-------------------------------------------------------")
-        rospy.loginfo(f"Path Start Pose:\n{global_path.poses[0].pose}")
-        rospy.loginfo("-------------------------------------------------------")
-        rospy.loginfo(f"Path End Pose:\n{global_path.poses[-1].pose}")
-        rospy.loginfo("-------------------------------------------------------")
-        rospy.loginfo(f"Current yaw: {Utils.get_yaw_from_orientation(self.current_pose.orientation)}")
-        rospy.loginfo(f"Path Point Counts: {len(global_path.poses)}")
+        # Log goal point information
+        end_pose = global_path.poses[-1].pose
+        end_yaw = Utils.get_yaw_from_orientation(end_pose.orientation)
+        rospy.loginfo(f"Goal point initialized at: [{end_pose.position.x:.2f}, {end_pose.position.y:.2f}, {end_pose.position.z:.2f}], yaw={end_yaw:.2f} rad")
 
         # Follow each point in the path
         for i, pose_stamped in enumerate(global_path.poses):
@@ -578,16 +771,15 @@ class MpcPathTracer(PathTracerBase):
 
         # Handle stop request
         if self.stop_requested:
-            self.follow_state = FollowState.NOT_FOLLOWING
+            self.set_follow_state(FollowState.NOT_FOLLOWING)
             self.stop_requested = False
         else:
-            self.follow_state = FollowState.FINISHED
+            self.set_follow_state(FollowState.FINISHED)
             
         rospy.sleep(1.5)
         rospy.loginfo("Path Follower Finished!")
         self.publish_cmd_vel(0, 0)  # Ensure robot stops
         rospy.loginfo("Stop moving...")
-        rospy.loginfo(f"Current pose:\n{self.current_pose}")
 
         # Analyze trajectory performance
         if self.follow_state == FollowState.FINISHED or self.stop_requested:
@@ -614,23 +806,18 @@ class MpcPathTracer(PathTracerBase):
 
         # Validate path
         if len(global_path.poses) <= 0:
-            self.follow_state = FollowState.NOT_FOLLOWING
+            self.set_follow_state(FollowState.NOT_FOLLOWING)
             return
 
         # First publish the path for visualization
         self.publish_path(global_path)
 
-        # Log path info
-        rospy.loginfo("-------------------------------------------------------")
-        rospy.loginfo(f"Path Start Pose:\n{global_path.poses[0].pose}")
-        rospy.loginfo("-------------------------------------------------------")
-        rospy.loginfo(f"Path End Pose:\n{global_path.poses[-1].pose}")
-        rospy.loginfo("-------------------------------------------------------")
-        rospy.loginfo(f"Current yaw: {Utils.get_yaw_from_orientation(self.current_pose.orientation)}")
-        rospy.loginfo(f"Path Point Counts: {len(global_path.poses)}")
+        rospy.loginfo(f"Start following path...")
 
         # Path end point
         goal_pose = global_path.poses[-1].pose.position
+        goal_yaw = Utils.get_yaw_from_orientation(global_path.poses[-1].pose.orientation)
+        rospy.loginfo(f"Goal point initialized at: [{goal_pose.x:.2f}, {goal_pose.y:.2f}, {goal_pose.z:.2f}], yaw={goal_yaw:.2f} rad")
 
         # MPC control loop
         point_counts = len(global_path.poses)
@@ -671,7 +858,7 @@ class MpcPathTracer(PathTracerBase):
                     index += 1
                 else:
                     rospy.loginfo("Unable to find a path to the next point. Aborting...")
-                    self.follow_state = FollowState.NOT_FOLLOWING
+                    self.set_follow_state(FollowState.NOT_FOLLOWING)
                     break
 
             # Check if reached goal
@@ -684,7 +871,7 @@ class MpcPathTracer(PathTracerBase):
                 yaw_error < 0.03):
                 rospy.loginfo("Stop moving...")
                 self.publish_cmd_vel(0, 0)
-                self.follow_state = FollowState.FINISHED
+                self.set_follow_state(FollowState.FINISHED)
                 break
 
             # Add deceleration near goal
@@ -781,7 +968,7 @@ class MpcPathTracer(PathTracerBase):
                 self.publish_mpc_path(optimal_x, optimal_y, optimal_yaw)
             else:
                 rospy.logerr(f"Optimization failed to find a solution: {result.get_solution_result()}")
-                self.follow_state = FollowState.NOT_FOLLOWING
+                self.set_follow_state(FollowState.NOT_FOLLOWING)
                 break
 
             # Publish fixed path
@@ -790,22 +977,21 @@ class MpcPathTracer(PathTracerBase):
 
         # Handle stop request
         if self.stop_requested:
-            self.follow_state = FollowState.NOT_FOLLOWING
+            self.set_follow_state(FollowState.NOT_FOLLOWING)
             self.stop_requested = False
             
         rospy.sleep(1.5)
         rospy.loginfo("Path Follower Finished!")
         self.publish_cmd_vel(0, 0)  # Ensure robot stops
         rospy.loginfo("Stop moving...")
-        rospy.loginfo(f"Current pose:\n{self.current_pose}")
         
         # If we didn't explicitly set the state to FINISHED or NOT_FOLLOWING due to stop request,
         # set it based on whether we reached the end of the path
         if self.follow_state == FollowState.FOLLOWING:
             if index >= point_counts - 1:
-                self.follow_state = FollowState.FINISHED
+                self.set_follow_state(FollowState.FINISHED)
             else:
-                self.follow_state = FollowState.NOT_FOLLOWING
+                self.set_follow_state(FollowState.NOT_FOLLOWING)
 
         # Analyze trajectory performance
         if self.follow_state == FollowState.FINISHED or self.stop_requested:

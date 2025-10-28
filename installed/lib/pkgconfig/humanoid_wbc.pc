@@ -3,6 +3,6 @@ prefix=/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-contr
 Name: humanoid_wbc
 Description: Description of humanoid_wbc
 Version: 0.0.0
-Cflags: -I${prefix}/include -I/opt/ros/noetic/lib/pkgconfig/../../include -I/opt/ros/noetic/include -I/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include -I/usr/include/eigen3
+Cflags: -I${prefix}/include -I/opt/ros/noetic/lib/pkgconfig/../../include -I/usr/include/eigen3 -I/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include -I/opt/ros/noetic/include
 Libs: -L${prefix}/lib -lhumanoid_wbc -lpinocchio -lboost_filesystem -lboost_serialization -lboost_system -lurdfdom_sensor -lurdfdom_model_state -lurdfdom_model -lurdfdom_world -lconsole_bridge -lhpp-fcl -loctomap -loctomath
 Requires: roscpp humanoid_interface

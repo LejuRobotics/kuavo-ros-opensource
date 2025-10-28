@@ -14,8 +14,9 @@ import argparse
 
 from kuavo_msgs.msg import twoArmHandPoseCmd, ikSolveParam
 from kuavo_msgs.srv import changeArmCtrlMode
-from noitom_hi5_hand_udp_python.msg import PoseInfo, PoseInfoList, JoySticks
-from handcontrollerdemorosnode.msg import robotHandPosition
+from noitom_hi5_hand_udp_python.msg import PoseInfo, PoseInfoList
+from kuavo_msgs.msg import JoySticks
+from kuavo_msgs.msg import robotHandPosition
 
 class Quest3Node:
     def __init__(self):
@@ -23,7 +24,12 @@ class Quest3Node:
         kuavo_assests_path = rospack.get_path("kuavo_assets")
         robot_version = os.environ.get('ROBOT_VERSION', '40')
         self.model_path = kuavo_assests_path + f"/models/biped_s{robot_version}"
-        self.quest3_arm_info_transformer = Quest3ArmInfoTransformer(self.model_path)
+        
+        # Get hand reference mode from parameter or use default
+        hand_reference_mode = rospy.get_param('~hand_reference_mode', 'palm')
+        print(f"Hand reference mode: {hand_reference_mode}")
+        
+        self.quest3_arm_info_transformer = Quest3ArmInfoTransformer(self.model_path, hand_reference_mode=hand_reference_mode)
         self.use_custom_ik_param = True
         self.ik_solve_param = ikSolveParam()
         
