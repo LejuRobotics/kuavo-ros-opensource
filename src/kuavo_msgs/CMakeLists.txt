@@ -130,6 +130,8 @@ add_message_files(
 
   MmDetectionMsg.msg
   AudioReceiverData.msg
+
+  Color.msg
 )
 
 ## Generate services in the 'srv' folder

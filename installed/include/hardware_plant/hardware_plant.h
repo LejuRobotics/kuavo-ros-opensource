@@ -15,7 +15,7 @@
 #include "imu_receiver.h"
 #include "utils.h"
 #include "ruierman_actuator.h"
-#include "ruiwo_actuator.h"
+#include "ruiwo_actuator_base.h"
 #include "jodell_claw_driver.h"
 #include "dynamixel_interface.h"
 #include "ankle_solver.h"
@@ -121,6 +121,8 @@ class HardwarePlant
     static void signalHandler(int sig);
     bool setCurrentPositionAsOffset();
     void performJointSymmetryCheck();
+
+    
     inline void SetJointVelocity(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
     inline void SetJointTorque(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
     inline void SetJointPosition(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
@@ -129,11 +131,15 @@ class HardwarePlant
     void calibrateLoop();
     void calibrateArmJoints();
     void initEndEffector();
-    bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
-    bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
+        bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
+        bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
+        
+        // RuiWoActuator相关方法的封装
+        void adjustZeroPosition(int motor_index, double offset);
+        std::vector<double> getMotorZeroPoints();
 
     // 电机状态管理器接口
-    void setMotorStatusPositionLimits();  // 设置位置限制到电机状态管理器
+    void setMotorStatusHardwareSettings();  // 设置硬件配置到电机状态管理器
     
     // 电机状态管理器接口 - 仅更新状态记录，不控制硬件
     void markJointAsDisabled(int joint_id, const std::string& reason = "");
@@ -155,6 +161,7 @@ class HardwarePlant
     uint32_t num_joint = 0;
     uint32_t num_arm_joints = 0;
     uint32_t num_head_joints = 2;
+    uint32_t num_waist_joints = 0;
     char initial_input_cmd_ = '\0';
     std::string end_effector_type_;
 
@@ -175,6 +182,17 @@ class HardwarePlant
     // 电机状态管理器
     std::unique_ptr<MotorStatusManager> motor_status_manager_;
     int hardware_status_ = -1; // 0: 等待， -1： cali模式， 1： 准备好了
+
+    // 添加访问器方法来获取私有成员
+public:
+    uint32_t getCountECMasters() const { return countECMasters; }
+    
+    // 访问静态ruiwo_actuator指针的方法
+    static RuiwoActuatorBase* getRuiwoActuator();
+
+    // 是否进入到手臂展开的零点校准姿态
+    bool is_cali_set_zero_{false};
+    int cali_set_zero_status = 0; // 0：未到达正确的调整零点姿态，1：到达可以调整零点的姿态
 
     // 新增：禁用电机相关成员和方法
     std::mutex disable_motor_mtx_;
@@ -265,8 +283,6 @@ private:
 
     // 实际EC电机数目
     uint32_t countECMasters = 0;
-
-    int cali_set_zero_status = 0; // 0：未到达正确的调整零点姿态，1：到达可以调整零点的姿态
     
     /* only used in half-up body mode */
     std::unique_ptr<std::array<double, 12>> stance_leg_joint_pos_ = nullptr;

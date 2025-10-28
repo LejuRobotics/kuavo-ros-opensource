@@ -17,7 +17,7 @@ import subprocess
 import base64
 from pathlib import Path
 import yaml
-from utils import calculate_file_md5, frames_to_custom_action_data, get_start_end_frame_time, frames_to_custom_action_data_ocs2
+from utils import calculate_file_md5, frames_to_custom_action_data, get_start_end_frame_time, frames_to_custom_action_data_ocs2, verify_robot_version
 import shutil
 import rosnode
 from kuavo_ros_interfaces.srv import planArmTrajectoryBezierCurve, stopPlanArmTrajectory, planArmTrajectoryBezierCurveRequest, ocs2ChangeArmCtrlMode
@@ -29,11 +29,19 @@ from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.msg import sensorsData
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
 from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float64MultiArray
 from nav_msgs.msg import OccupancyGrid
 import cv2
 import numpy as np
 import tf
+import argparse
+import subprocess
+from typing import Tuple
+from std_msgs.msg import Bool
+from std_srvs.srv import Trigger, TriggerRequest
+from geometry_msgs.msg import Twist
+from std_msgs.msg import String
+
 # Replace multiprocessing values with simple variables
 plan_arm_state_progress = 0
 plan_arm_state_status = False
@@ -43,15 +51,314 @@ process = None
 response_queue = Queue()
 active_threads: Dict[websockets.WebSocketServerProtocol, threading.Event] = {}
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
+ROBAN_TACT_LENGTH = 23
 g_robot_type = ""
 ocs2_current_joint_state = []
 robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
 
-current_arm_joint_state = None
+# Global variables for robot control
+ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
+ROS_IP = os.getenv("ROS_IP")
+ROS_HOSTNAME = os.getenv("ROS_HOSTNAME")
+
+# Get KUAVO_ROS_CONTROL_WS_PATH from environment variable, if not found, try to find it
+KUAVO_ROS_CONTROL_WS_PATH = os.getenv("KUAVO_ROS_CONTROL_WS_PATH")
+if not KUAVO_ROS_CONTROL_WS_PATH:
+    # Try to find the kuavo-ros-control workspace path by searching upward from this file
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    while current_dir != '/':
+        # Check if this directory contains the标志性 files of kuavo-ros-control workspace
+        if os.path.exists(os.path.join(current_dir, 'src')) and \
+           os.path.exists(os.path.join(current_dir, 'devel/setup.bash')):
+            KUAVO_ROS_CONTROL_WS_PATH = current_dir
+            break
+        current_dir = os.path.dirname(current_dir)
+
+ROBOT_VERSION = os.environ.get("ROBOT_VERSION")
+WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME = "websocket_humanoid_robot_service"
+
+
+# 机器人状态跟踪变量，用于跟踪机器人当前状态: unlaunch, crouching, standing
+robot_status = "unlaunch"  # 默认状态为未启动
+
+def update_robot_status_from_service():
+    """
+    从 /humanoid_controller/real_launch_status 服务获取机器人状态并更新全局 robot_status
+    """
+    global robot_status
+    try:
+        success, status_message = robot_instance.get_robot_launch_status()
+        if success:
+            # 映射服务返回的状态到我们的状态系统
+            if status_message == "ready_stance":
+                robot_status = "crouching"
+            elif status_message == "launched":
+                robot_status = "standing"
+            else:
+                robot_status = "unlaunch"
+        else:
+            robot_status = "unlaunch"
+    except Exception as e:
+        print(f"Failed to update robot status from service: {e}")
+        robot_status = "unlaunch"
+
+def check_real_kuavo():
+    try:
+        # optimize: 简单通过检查零点文件来判断是否为实物, 可优化判断条件
+        offset_file = os.path.expanduser("~/.config/lejuconfig/offset.csv")
+        config_file = os.path.expanduser("~/.config/lejuconfig/config.yaml")
+        
+        offset_file_exists = os.path.exists(offset_file)
+        config_file_exists = os.path.exists(config_file)
+        print(f"offset_file: {offset_file}, exists: {offset_file_exists}")
+        print(f"config_file: {config_file}, exists: {config_file_exists}")
+        return offset_file_exists and config_file_exists
+    except Exception as e:
+        return False
+
+def tmux_run_cmd(session_name:str, cmd:str, sudo:bool=False)->Tuple[bool, str]:
+    launch_cmd = cmd
+        
+    print(f"launch_cmd: {launch_cmd}")
+    
+    try:
+        subprocess.run(["tmux", "kill-session", "-t", session_name],
+                        stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"Failed to kill session: {e}")
+        # 这里不返回错误，因为可能session不存在
+        pass
+
+    print(f"If you want to check the session, please run 'tmux attach -t {session_name}'")
+    
+    # 构建完整的命令，确保环境变量正确设置 
+    full_cmd = f"source ~/.bashrc && \
+        source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash && \
+        export ROBOT_VERSION={ROBOT_VERSION} && \
+        {launch_cmd}"
+    
+    tmux_cmd = [
+        "tmux", "new-session",
+        "-s", session_name,
+        "-d",
+        full_cmd
+    ]
+    if sudo:
+        tmux_cmd.insert(0, "sudo")
+    
+    print(f"tmux_cmd: {tmux_cmd}")
+
+    # 执行tmux命令并等待结果
+    try:
+        result = subprocess.run(
+            tmux_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10  # 设置超时时间
+        )
+        
+        # 检查命令执行是否出错
+        if result.returncode != 0:
+            error_msg = f"Failed to execute tmux command: {result.stderr}"
+            print(error_msg)
+            return False, error_msg
+    except subprocess.TimeoutExpired:
+        error_msg = "tmux command execution timed out"
+        print(error_msg)
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"Failed to execute tmux command: {str(e)}"
+        print(error_msg)
+        return False, error_msg
+
+    # 等待一段时间让session启动
+    time.sleep(3.0)
+
+    # 检查session是否成功创建
+    check_result = subprocess.run(["tmux", "has-session", "-t", session_name],
+                            capture_output=True)
+    ret = False
+    if check_result.returncode == 0:
+        ret = True
+        msg = f"Started {session_name} in tmux session: {session_name}"
+    else:
+        msg = f"Failed to start {session_name}"
+    return ret, msg
+
+def check_rosnode_exists(node_name:str)->bool:
+    try:
+        nodes = subprocess.check_output(['rosnode', 'list']).decode('utf-8').split('\n')
+        return node_name in nodes
+    except subprocess.CalledProcessError as e:
+       print(f"Error checking if node {node_name} exists: {e}")
+       return False
+    except Exception as e:
+        print(f"Error checking if node {node_name} exists: {e}")
+        return False
+
+class KuavoRobot:
+    def __init__(self):
+        pass
+
+    def start_robot(self)->Tuple[bool, str]:
+        raise NotImplementedError("start_robot is not implemented")
+
+    def stop_robot(self)->Tuple[bool, str]:
+        raise NotImplementedError("stop_robot is not implemented")
+
+    def stand_robot(self)->Tuple[bool, str]:
+        raise NotImplementedError("stand_robot is not implemented")
+
+    def get_robot_launch_status(self)->Tuple[bool, str]:
+        raise NotImplementedError("get_robot_launch_status is not implemented")
+
+class KuavoRobotReal(KuavoRobot):
+    def __init__(self, debug=False):
+        super().__init__()
+        self.debug = debug
+        self.stop_pub = rospy.Publisher('/stop_robot', Bool, queue_size=10)
+        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        
+    def start_robot(self)->Tuple[bool, str]:
+        global WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME
+        global KUAVO_ROS_CONTROL_WS_PATH
+        global ROS_MASTER_URI
+        global ROS_IP
+        global ROS_HOSTNAME
+ 
+        if self.debug:
+            launch_cmd = "roslaunch humanoid_controllers load_kuavo_real.launch"
+            if not ROS_MASTER_URI or not ROS_IP or not ROS_HOSTNAME:
+                ROS_MASTER_URI = "http://kuavo_master:11311"
+                ROS_IP = "kuavo_master"
+                ROS_HOSTNAME = "kuavo_master"
+        else:
+            launch_cmd = "roslaunch humanoid_controllers load_kuavo_real.launch start_way:=auto"
+
+        return tmux_run_cmd(WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME, launch_cmd, sudo=True)
+    
+    def stop_robot(self)->Tuple[bool, str]:
+        try:
+            # 已经启动则下蹲再停止
+            if robot_status == "launched" or robot_status == "standing":
+                msg = Twist()
+                msg.linear.x = 0.0
+                msg.linear.y = 0.0
+                msg.angular.z = 0.0
+                msg.linear.z = -0.05
+                for i in range(10):
+                    self.cmd_vel_pub.publish(msg)
+                    time.sleep(0.1)
+            self.stop_pub.publish(True)
+            self.stop_pub.publish(True)
+            self.stop_pub.publish(True)
+            return True, "success"
+        except Exception as e:
+            print(f"Failed to stop robot: {e}")
+            return False, f"Failed to stop robot: {e}"
+            
+    def stand_robot(self)->Tuple[bool, str]:
+        try:
+            client = rospy.ServiceProxy('/humanoid_controller/real_initial_start', Trigger)
+            req = TriggerRequest()
+            client.wait_for_service(timeout=2.0)
+            # Call the service
+            if client.call(req):
+                print(f"RealInitializeSrv service call successful")
+                return True, "Success"
+            else:
+                print(f"Failed to callRealInitializeSrv service")
+                return False, "Failed to callRealInitializeSrv service"
+        except rospy.ServiceException as e:
+            print(f"Service call failed: {e}")
+            return False, f"Service call failed: {e}"
+
+    def get_robot_launch_status(self)->Tuple[bool, str]:
+        client = rospy.ServiceProxy('/humanoid_controller/real_launch_status', Trigger)
+        try:
+            client.wait_for_service(timeout=2.0)
+        except rospy.ROSException as e:
+            # 等待服务超时（服务不存在）
+            print(f"Service does not exist: {e}")
+            return True, "unknown"  # 关键修改：服务不存在时返回(True, "unknown")
+    
+        try:
+            req = TriggerRequest()
+            client.wait_for_service(timeout=1.5)
+            # Call the service
+            response = client.call(req)
+            if response.success:
+                print(f"RealInitializeSrv service call successful")
+                return True, response.message
+            else:
+                print(f"Failed to callRealInitializeSrv service")
+                return False, "unknown"
+        except rospy.ServiceException as e:
+            print(f"Service call failed: {e}")
+            return False, f"unknown"
+
+class KuavoRobotSim(KuavoRobot):
+    def __init__(self, debug=False):
+        super().__init__()
+        self.debug = debug
+        self.stop_pub = rospy.Publisher('/stop_robot', Bool, queue_size=10)
+        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+
+    def start_robot(self)->Tuple[bool, str]:
+        global WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME
+        global KUAVO_ROS_CONTROL_WS_PATH
+        global ROS_MASTER_URI
+        global ROS_IP
+        global ROS_HOSTNAME
+
+        if not ROS_MASTER_URI or not ROS_IP or not ROS_HOSTNAME:
+            ROS_MASTER_URI = "http://localhost:11311"
+            ROS_IP = "localhost"
+            ROS_HOSTNAME = "localhost"
+
+        launch_cmd = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch && export DISPLAY=:1"
+        return tmux_run_cmd(WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME, launch_cmd, sudo=False)
+    
+    def stop_robot(self)->Tuple[bool, str]:
+        try:
+            msg = Twist()
+            msg.linear.x = 0.0
+            msg.linear.y = 0.0
+            msg.angular.z = 0.0
+            msg.linear.z = -0.05
+            for i in range(50):
+                self.cmd_vel_pub.publish(msg)
+                time.sleep(0.1)
+            self.stop_pub.publish(True)
+            self.stop_pub.publish(True)
+            self.stop_pub.publish(True)
+            return True, "success"
+        except Exception as e:
+            print(f"Failed to stop robot: {e}")
+            return False, f"Failed to stop robot: {e}"
+    
+    def stand_robot(self)->Tuple[bool, str]:
+        return self.get_robot_launch_status()
+    
+    def get_robot_launch_status(self)->Tuple[bool, str]:
+        if check_rosnode_exists("/humanoid_sqp_mpc") and check_rosnode_exists("/nodelet_controller"):
+            return True, "launched"
+        else:
+            return True, "unlaunch"
+
+# Initialize robot instance
+if check_real_kuavo():
+    robot_instance = KuavoRobotReal()
+else:
+    robot_instance = KuavoRobotSim()
+
 package_name = 'planarmwebsocketservice'
 package_path = rospkg.RosPack().get_path(package_name)
 
-UPLOAD_FILES_FOLDER = package_path + "/upload_files" 
+UPLOAD_FILES_FOLDER = package_path + "/upload_files"
+KUAVO_TACT_LENGTH = 28
+ROBAN_TACT_LENGTH = 23
 
 # 下位机音乐文件存放路径，如果不存在则进行创建
 sudo_user = os.environ.get("SUDO_USER")
@@ -72,7 +379,16 @@ except Exception as e:
 # H12 遥控器按键功能配置文件路径
 h12_package_name = "h12pro_controller_node"
 h12_package_path = rospkg.RosPack().get_path(h12_package_name)
-H12_CONFIG_PATH = h12_package_path + "/config/customize_config.json"
+joy_package_name = "joy"
+joy_package_path = rospkg.RosPack().get_path(joy_package_name)
+if robot_version >= 40:
+    H12_CONFIG_PATH = h12_package_path + "/config/customize_config.json"
+    current_arm_joint_state = [0] * KUAVO_TACT_LENGTH
+elif robot_version >= 10 and robot_version <= 19:
+    H12_CONFIG_PATH = joy_package_path + "/config/customize_config.json"
+    current_arm_joint_state = [0] * ROBAN_TACT_LENGTH
+_last_joint_msg = None
+_last_hand_msg = None
 
 # 获取仓库路径
  # 获取当前 Python 文件的路径
@@ -116,6 +432,7 @@ else:
 ocs2_joint_state = JointState()
 ocs2_hand_state = robotHandPosition()
 ocs2_head_state = robotHeadMotionData()
+ocs2_waist_state = Float64MultiArray()
 robot_settings = {
     "kuavo":{
         "plan_arm_trajectory_bezier_service_name": "/plan_arm_trajectory_bezier_curve",
@@ -149,16 +466,46 @@ def call_change_arm_ctrl_mode_service(arm_ctrl_mode):
         return result
 
 def sensors_data_callback(msg):
-    global current_arm_joint_state
-    global robot_version
+    """更新关节数据"""
+    global _last_joint_msg, _last_hand_msg, ocs2_hand_state
+    _last_joint_msg = msg
+
+    if _last_hand_msg is None:
+        from sensor_msgs.msg import JointState
+        dummy_hand = JointState()
+        dummy_hand.position = [0.0] * 12
+        _last_hand_msg = dummy_hand
+
+    _update_current_arm_joint_state(_last_joint_msg, _last_hand_msg)
+
+def robot_hand_callback(msg):
+    """更新手部数据"""
+    global _last_hand_msg, _last_joint_msg, ocs2_hand_state
+    left = msg.position[:6] if len(msg.position) >= 6 else [0] * 6
+    right = msg.position[6:12] if len(msg.position) >= 12 else [0] * 6
+
+    _last_hand_msg = msg
+
+    if _last_joint_msg is not None:
+        _update_current_arm_joint_state(_last_joint_msg, _last_hand_msg)
+
+def _update_current_arm_joint_state(joint_msg, hand_msg):
+    """整合 joint_msg 和 hand_msg，更新 current_arm_joint_state"""
+    global ocs2_joint_state
     if robot_version >= 40:
-        current_arm_joint_state = msg.joint_data.joint_q[12:26]
-        current_arm_joint_state = [round(pos, 2) for pos in current_arm_joint_state]
-        current_arm_joint_state.extend([0] * 14)
+        arm_part = list(joint_msg.joint_data.joint_q[12:26])
+        hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+        head_part = list(joint_msg.joint_data.joint_q[-2:])
+        current_arm_joint_state = arm_part + hand_part + head_part
+
     elif robot_version >= 10 and robot_version < 30:
-        current_arm_joint_state = msg.joint_data.joint_q[12:20]
-        current_arm_joint_state = [round(pos, 2) for pos in current_arm_joint_state]
-        current_arm_joint_state.extend([0] * 8)
+        arm_part = list(joint_msg.joint_data.joint_q[13:21])
+        hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+        head_part = list(joint_msg.joint_data.joint_q[-2:])
+        waist_part = [joint_msg.joint_data.joint_q[0]]
+        current_arm_joint_state = arm_part + hand_part + head_part + waist_part
+
+    current_arm_joint_state = [round(v, 2) for v in current_arm_joint_state]
 
 def traj_callback(msg):
     global ocs2_joint_state
@@ -182,25 +529,49 @@ def traj_callback(msg):
         ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:8]]
         ocs2_joint_state.effort = [0] * 8
 
+        if len(point.positions) == ROBAN_TACT_LENGTH:
+            ocs2_hand_state.left_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[8:14]]  # 无符号整数
+            ocs2_hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
+                                                point.positions[14:20]]  # 无符号整数
+            
+            ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
+
+            ocs2_waist_state.data = [math.degrees(pos) for pos in point.positions[22:]]
+
 
 kuavo_arm_traj_pub = None
 control_hand_pub = None
 control_head_pub = None
+control_waist_pub = None
 update_h12_config_pub = None
+update_joy_config_pub = None
 
 def timer_callback(event):
-    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub
+    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub
     if g_robot_type == "ocs2" and len(ocs2_joint_state.position) > 0 and plan_arm_state_status is False:
-        kuavo_arm_traj_pub.publish(ocs2_joint_state)
-        control_hand_pub.publish(ocs2_hand_state)
-        control_head_pub.publish(ocs2_head_state)
+        if len(ocs2_joint_state.position) != 0:
+            kuavo_arm_traj_pub.publish(ocs2_joint_state)
+        if len(ocs2_hand_state.left_hand_position) != 0 or len(ocs2_hand_state.right_hand_position) != 0:
+            control_hand_pub.publish(ocs2_hand_state)
+        if len(ocs2_head_state.joint_data) != 0:
+            control_head_pub.publish(ocs2_head_state)
+        if len(ocs2_waist_state.data) != 0:
+            control_waist_pub.publish(ocs2_waist_state)
+
+def robot_status_timer_callback(event):
+    """
+    定时更新机器人状态的回调函数
+    """
+    update_robot_status_from_service()
 
 def init_publishers():
-    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, update_h12_config_pub,load_map_pub
+    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub, update_h12_config_pub, update_joy_config_pub, load_map_pub
     kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
     control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1, tcp_nodelay=True)
     control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1, tcp_nodelay=True)
+    control_waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=1, tcp_nodelay=True)
     update_h12_config_pub = rospy.Publisher('/update_h12_customize_config', UpdateH12CustomizeConfig, queue_size=1, tcp_nodelay=True)
+    update_joy_config_pub = rospy.Publisher('/update_joy_customize_config', String, queue_size=1, tcp_nodelay=True)
 
 async def init_ros_node():
     print("Initializing ROS node")
@@ -210,11 +581,15 @@ async def init_ros_node():
     rospy.Subscriber('/bezier/arm_traj', JointTrajectory, traj_callback, queue_size=1, tcp_nodelay=True)
     # rospy.Subscriber('/humanoid_mpc_observation', mpc_observation, mpc_obs_callback)
     rospy.Subscriber('/sensors_data_raw', sensorsData, sensors_data_callback, queue_size=1, tcp_nodelay=True)
+    rospy.Subscriber('/dexhand/state', JointState, robot_hand_callback, queue_size=1, tcp_nodelay=True)
     
     init_publishers()
     
     # Create a timer that calls timer_callback every 10ms (100Hz)
     rospy.Timer(rospy.Duration(0.01), timer_callback)
+    
+    # Create a timer that calls robot_status_timer_callback every 1 second to update robot status
+    rospy.Timer(rospy.Duration(1.0), robot_status_timer_callback)
 
     print("ROS node initialized")
 
@@ -381,7 +756,15 @@ async def preview_action_handler(
         response = Response(payload=payload, target=websocket)
         response_queue.put(response)
         return
-
+    
+    is_compatible, msg = verify_robot_version(action_file_path)
+    if not is_compatible:
+        payload.data["code"] = 4
+        payload.data["message"] = msg
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+    
     start_frame_time, end_frame_time = get_start_end_frame_time(action_file_path)
 
     if g_robot_type == "ocs2":
@@ -1043,16 +1426,22 @@ async def check_music_path_handler(
 async def update_h12_config_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
-    global update_h12_config_pub
+    global update_h12_config_pub, update_joy_config_pub
     payload = Payload(
         cmd="update_h12_config", data={"code": 0, "msg": "msg"}
     )
 
     # 更新H12遥控器按键配置
-    msg = UpdateH12CustomizeConfig()
-    msg.update_msg = "Update H12 Config"
-    update_h12_config_pub.publish(msg)
-
+    global robot_version
+    if robot_version >= 40:
+        msg = UpdateH12CustomizeConfig()
+        msg.update_msg = "Update H12 Config"
+        update_h12_config_pub.publish(msg)
+    elif robot_version >= 10 and robot_version <= 19:
+        msg = String()
+        msg.data = "Update Joy Config"
+        update_joy_config_pub.publish(msg)
+    
     try:
         # 确认音乐文件在上位机还是下位机播放，并进行相应处理
         if is_player_in_body():
@@ -1490,6 +1879,133 @@ async def get_all_maps_handler(
     except Exception as e:
         payload.data["code"] = 1
         payload.data["msg"] = f"Service `get_all_maps` call failed: {e}"
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def start_robot_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    启动机器人（缩腿）
+    """
+    global robot_status
+    payload = Payload(
+        cmd="start_robot",
+        data={"code": 0, "message": "Robot started successfully"}
+    )
+    
+    try:
+        # 直接调用本地实现
+        result, msg = robot_instance.start_robot()
+        if result:
+            payload.data["code"] = 0
+            payload.data["message"] = msg
+            # 更新机器人状态为"crouching"
+            robot_status = "crouching"
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = msg
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to start robot: {e}"
+        
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def stop_robot_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    停止机器人
+    """
+    global robot_status
+    payload = Payload(
+        cmd="stop_robot",
+        data={"code": 0, "message": "Robot stopped successfully"}
+    )
+    
+    try:
+        # 直接调用本地实现
+        result, msg = robot_instance.stop_robot()
+        if result:
+            payload.data["code"] = 0
+            payload.data["message"] = msg
+            # 更新机器人状态为"unlaunch"
+            robot_status = "unlaunch"
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = msg
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to stop robot: {e}"
+        
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def stand_robot_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    站立机器人（伸直腿）
+    """
+    global robot_status
+    payload = Payload(
+        cmd="stand_robot",
+        data={"code": 0, "message": "Robot stand command sent successfully"}
+    )
+    
+    try:
+        # 直接调用本地实现
+        result, msg = robot_instance.stand_robot()
+        if result:
+            payload.data["code"] = 0
+            payload.data["message"] = msg
+            # 更新机器人状态为"standing"
+            robot_status = "standing"
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = msg
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to stand robot: {e}"
+        
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def get_robot_launch_status_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    获取机器人当前状态
+    """
+    global robot_status
+    payload = Payload(
+        cmd="get_robot_launch_status",
+        data={"code": 0, "status": robot_status, "message": "Get robot status successfully"}
+    )
+    
+    try:
+        # 从服务动态获取机器人状态
+        update_robot_status_from_service()
+        payload.data["code"] = 0
+        payload.data["status"] = robot_status
+        payload.data["message"] = "Get robot status successfully"
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to get robot status: {e}"
+        
     response = Response(
         payload=payload,
         target=websocket,

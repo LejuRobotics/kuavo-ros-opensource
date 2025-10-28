@@ -1751,25 +1751,14 @@ namespace humanoid_controller
           optimizedState2WBC_mrt_.tail(armNumReal_) = mm_arm_joint_trajectory_.pos;
       }
     }
-    static bool low_latency_first_enter = true;
-    if (mpcArmControlMode_desired_ != ArmControlMode::EXTERN_CONTROL)
-    {
-      low_latency_first_enter = true;
-    }
     if (use_ros_arm_joint_trajectory_)
     {
       if (mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL && mpcArmControlMode_ == ArmControlMode::EXTERN_CONTROL)
       {
         vector_t filtered_pos = arm_joint_pos_filter_.update(arm_joint_trajectory_.pos);
         optimizedState2WBC_mrt_.tail(armNumReal_) = filtered_pos;
-  
         // 2. 如果外部轨迹没有提供速度，使用滤波后的位置计算速度
         static vector_t prev_filtered_pos = filtered_pos;
-        if (low_latency_first_enter)
-        {
-          prev_filtered_pos = filtered_pos;
-          low_latency_first_enter = false;
-        }
         vector_t computed_vel = (filtered_pos - prev_filtered_pos) / dt_;
         
         // 3. 对计算出的速度再次滤波
@@ -1777,9 +1766,8 @@ namespace humanoid_controller
 
         //ros_logger_->publishVector("/humanoid_controller/arm_joint_computed_vel", computed_vel);
         prev_filtered_pos = filtered_pos;
-
       }
-      else if(only_half_up_body_ && mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL)
+      else if(only_half_up_body_)
       {
         optimizedState2WBC_mrt_.segment<7>(24) = arm_joint_trajectory_.pos.segment<7>(0);
         optimizedState2WBC_mrt_.segment<7>(24+7) = arm_joint_trajectory_.pos.segment<7>(7);
@@ -1799,7 +1787,6 @@ namespace humanoid_controller
       // // use filter output
       optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_pos_filter_.update(optimizedState2WBC_mrt_.tail(armNumReal_));
       optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(optimizedInput2WBC_mrt_.tail(armNumReal_));
-      low_latency_first_enter = true;
     }
 
     // *************************** arm joint trajectory **********************************
@@ -2037,14 +2024,14 @@ namespace humanoid_controller
     {
       for (int i = 0; i < jointNumReal_; i++)
       {
-        if (i == 4 || i == 5 || i == 10 || i == 11) // 踝关节
-        {
-          jointCmdMsg.control_modes[i+waistNum_] = 0;
-          jointCmdMsg.tau[i+waistNum_] = 0;
-          jointCmdMsg.joint_kp[i+waistNum_] = 0;
-          jointCmdMsg.joint_kd[i+waistNum_] = 0;
-        }
-        else
+        // if (i == 4 || i == 5 || i == 10 || i == 11) // 踝关节
+        // {
+        //   jointCmdMsg.control_modes[i+waistNum_] = 0;
+        //   jointCmdMsg.tau[i+waistNum_] = 0;
+        //   jointCmdMsg.joint_kp[i+waistNum_] = 0;
+        //   jointCmdMsg.joint_kd[i+waistNum_] = 0;
+        // }
+        // else
           jointCmdMsg.control_modes[i+waistNum_] = 2;
       }
     }

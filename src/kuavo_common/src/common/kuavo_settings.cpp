@@ -1,5 +1,6 @@
 #include "kuavo_common/common/kuavo_settings.h"
 #include "kuavo_common/common/utils.h"
+#include <fstream>
 
 namespace HighlyDynamic
 {
@@ -149,6 +150,29 @@ namespace HighlyDynamic
         }
 
         return imuType;
+    }
+
+    CanbusWiringType HardwareSettings::getCanbusWiringType(RobotVersion rb_version) {
+
+        std::string filePath = getUserHomeDirectory() + "/.config/lejuconfig/CanbusWiringType.ini";
+        std::ifstream file(filePath);
+        std::string wiringType;
+
+        if (!file.is_open()) {
+            std::cerr << "\033[33mwarning: " << filePath << " 文件不存在, 未指定canbus接线方式, 使用默认值 'single_bus'\033[0m" << std::endl;
+            return CanbusWiringType::UNKNOWN;
+        }
+
+        getline(file, wiringType);
+        file.close();
+
+        if (wiringType != "single_bus" && wiringType != "dual_bus") {
+            std::cerr << "\033[33mwarning: canbus_wiring_type :" << wiringType
+                  << " error, 使用默认值 'single_bus'\033[0m" << std::endl;
+            return CanbusWiringType::SINGLE_BUS;
+        }
+
+        return wiringType == "single_bus" ? CanbusWiringType::SINGLE_BUS : CanbusWiringType::DUAL_BUS;
     }
 
     void KuavoSettings::loadHardwareSettings(JSONConfigReader &robot_config)

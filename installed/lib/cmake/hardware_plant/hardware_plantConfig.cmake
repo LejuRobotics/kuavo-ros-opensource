@@ -26,10 +26,10 @@ endmacro()
 
 include(CMakeFindDependencyMacro)
 
-set(hardware_plant_INCLUDE_DIRS "$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_plant/lib/ruiwo_controller>;$<INSTALL_INTERFACE:include/ruiwo_controller>")
+set(hardware_plant_INCLUDE_DIRS "$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_plant/include>;$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_plant/src>;$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo_common/include>;$<INSTALL_INTERFACE:include/hardware_plant>;$<INSTALL_INTERFACE:include/kuavo_common>;$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_plant/lib/ruiwo_controller>;$<INSTALL_INTERFACE:include/ruiwo_controller>")
 set(hardware_plant_LIBRARIES "hardware_plant")
 
-set(hardware_plant_CXX_INCLUDE_DIRS "$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_plant/lib/ruiwo_controller_cxx>;$<INSTALL_INTERFACE:include/ruiwo_controller_cxx>")
+set(hardware_plant_CXX_INCLUDE_DIRS "$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_plant/include>;$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_plant/src>;$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo_common/include>;$<INSTALL_INTERFACE:include/hardware_plant>;$<INSTALL_INTERFACE:include/kuavo_common>;$<BUILD_INTERFACE:/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_plant/lib/ruiwo_controller_cxx>;$<INSTALL_INTERFACE:include/ruiwo_controller_cxx>")
 set(hardware_plant_CXX_LIBRARIES "hardware_plant_cxx")
 
 find_dependency(Boost REQUIRED COMPONENTS filesystem system)

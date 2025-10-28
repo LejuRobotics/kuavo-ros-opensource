@@ -56,3 +56,5 @@ topics:
   - /grasp_box/.*
   - /robot_body_matrices
   - /action_detector_info
+  - /leju/fused_hull_boundry_fuse_elevation
+  - /leju/elevation_map0

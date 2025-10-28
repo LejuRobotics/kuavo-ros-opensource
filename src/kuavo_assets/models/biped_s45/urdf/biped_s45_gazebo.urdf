@@ -7,7 +7,7 @@
   <link name="base_link">
     <inertial>
       <origin xyz="-0.0185005 0.00031952 0.1929569" rpy="0 0 0" />
-      <mass value="27.89833803" />
+      <mass value="22.11293803" />
       <inertia ixx="0.93103133" ixy="0.00011763" ixz="-0.07210993" iyy="0.82590532" iyz="6.88e-06" izz="0.27686612" />
     </inertial>
     <visual>
@@ -641,6 +641,14 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_pitch_no_thumb.STL" />
+      </geometry>
+    </collision>
+
   </link>
   <joint name="zarm_l7_joint" type="revolute">
     <origin xyz="0 0 -0.0210004653879916" rpy="0 0 0" />
@@ -823,6 +831,14 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_pitch_no_thumb.STL" />
+      </geometry>
+    </collision>
+
   </link>
   <joint name="zarm_r7_joint" type="revolute">
     <origin xyz="0 0 -0.0209999999999999" rpy="0 0 0" />

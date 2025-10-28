@@ -48,6 +48,12 @@ namespace HighlyDynamic
 
 #define LEG_DOF 6
 #define LEGS_TOTEL_JOINT 12
+
+    enum class CanbusWiringType {
+        SINGLE_BUS,  // 单总线
+        DUAL_BUS,    // 双总线 左右手臂各接一个CAN模块
+        UNKNOWN      // 未知
+    };
     inline auto vectorToEigen(std::vector<double> v) -> Eigen::VectorXd
     {
         return Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(v.data(), v.size());
@@ -179,6 +185,12 @@ namespace HighlyDynamic
         }
         std::string getEcmasterType(RobotVersion rb_version = RobotVersion(4, 0));
         std::string getIMUType(RobotVersion rb_version = RobotVersion(4, 0));
+        /**
+         * @brief 获取CanBus接线方式:单总线、双总线
+         * 
+         * @return CanbusWiringType 
+         */
+        CanbusWiringType getCanbusWiringType(RobotVersion rb_version);
 
     };
     struct MotorC2TSettings

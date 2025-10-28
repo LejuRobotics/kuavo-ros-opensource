@@ -813,72 +813,30 @@ class Quest3ArmInfoTransformer:
         else:
             overchest_b = False   
         
-        # 保存原始人体肩部位置（用于计算人体手臂长度）
-        human_shoulder_pos = [shoulder_pos[0], shoulder_pos[1], shoulder_pos[2]]
-       
-        # 计算肩部旋转角度（基于肘部相对于肩部的位置）
-        elbow_relative_to_shoulder = np.array([
-            elbow_pos[0] - human_shoulder_pos[0],
-            elbow_pos[1] - human_shoulder_pos[1],
-            elbow_pos[2] - human_shoulder_pos[2]
-        ])
-        
-        # 计算肘部在水平面上的角度
-        elbow_angle_horizontal = np.arctan2(elbow_relative_to_shoulder[1], elbow_relative_to_shoulder[0])
-        
-        # 根据肘部位置推断肩部旋转
-        shoulder_rotation_factor = 0.0
-        if side == "Right":
-            # 右臂：当肘部角度从-90度（右侧）向0度（前方）移动时，肩部向前旋转
-            if elbow_angle_horizontal > -np.pi/2 and elbow_angle_horizontal < np.pi/4:
-                shoulder_rotation_factor = (elbow_angle_horizontal + np.pi/2) / (3*np.pi/4)
-        else:  # Left
-            # 左臂：当肘部角度从90度（左侧）向0度（前方）移动时，肩部向前旋转
-            if elbow_angle_horizontal < np.pi/2 and elbow_angle_horizontal > -np.pi/4:
-                shoulder_rotation_factor = (np.pi/2 - elbow_angle_horizontal) / (3*np.pi/4)
-        
-        # 限制旋转因子在0-1之间
-        shoulder_rotation_factor = np.clip(shoulder_rotation_factor, 0.0, 1.0)
 
-        # 根据肩部旋转调整机器人肩部位置
-        shoulder_forward_offset = shoulder_rotation_factor * 0.08  # 最大前移8cm
-        shoulder_inward_offset = shoulder_rotation_factor * 0.15  # 最大内收12cm
+        human_shoulder_pos = list(shoulder_pos[:])
+       
+        if(y_distance <= self.shoulder_width - 0.05) and (not overchest_b):
+            adapt_width_gamma = 1*(self.shoulder_width - 0.05 - y_distance)
+        elif(y_distance <= self.shoulder_width - 0.05) and overchest_b:
+            adapt_width_gamma = 1*(self.shoulder_width - 0.05 + y_distance)
+        elif(y_distance > self.shoulder_width - 0.05) and overchest_b:
+            adapt_width_gamma = 1*(self.shoulder_width - 0.05 + y_distance)
+        else:
+            adapt_width_gamma = 0.0
         
-        # 如果手臂跨越身体中线，需要额外的调整
-        cross_body_factor = 0.0
-        if overchest_b:
-            # 当手臂跨越身体中线时，肩部需要更大的内收
-            cross_body_factor = min(y_distance / self.shoulder_width, 1.0) * 0.08  # 额外最大8cm内收
-        
-        shoulder_pos[0] += shoulder_forward_offset  # 向前移动
-        
+        adapt_width_gamma = min(adapt_width_gamma, 0.3)  # 限制最大适应宽度为0.1m
+
         if (side == "Right"):
-            shoulder_pos[1] = -self.shoulder_width + shoulder_inward_offset + cross_body_factor
+            shoulder_pos[1] = -self.shoulder_width+adapt_width_gamma
         elif (side == "Left"):
-            shoulder_pos[1] = self.shoulder_width - shoulder_inward_offset - cross_body_factor
+            shoulder_pos[1] = self.shoulder_width-adapt_width_gamma
         # human_hand_pos = hand_pos[:].copy()
         # human_elbow_pos = elbow_pos[:].copy()
         # human_hand_pos = hand_pos[:].copy()
         # Scale arm positions
         elbow_pos, hand_pos = self.scale_arm_positions(shoulder_pos, elbow_pos, hand_pos, human_shoulder_pos, side)
         
-        # 添加横向位置的额外调整
-        # 当手向身体中线靠近时，让手能更容易到达中线
-        # 检测手是否向身体中线移动
-        hand_to_centerline = abs(hand_pos[1])  # 手到中线的距离
-        
-        # 如果手臂向前且靠近身体中线，进行横向调整
-        if hand_pos[0] > 0.15 and hand_to_centerline < 0.2:  # 手在前方且靠近身体中线
-            # 计算横向拉近因子：当手越靠近中线时，向中线拉得越多
-            pull_to_center_factor = (0.2 - hand_to_centerline) / 0.2  # 范围：0-1
-            pull_amount = pull_to_center_factor * 0.05  # 最大向中线拉5cm
-                        
-            if side == "Right":
-                hand_pos[1] = hand_pos[1] + pull_amount  # 向右（正方向）移动，靠近中线
-            else:  # Left
-                hand_pos[1] = hand_pos[1] - pull_amount  # 向左（负方向）移动，靠近中线
-            
-            # print(f"{side} - hand_y_after: {hand_pos[1]:.3f}")
 
         if self.vis_pub:
             marker = self.construct_point_marker(hand_pos, 0.08, 0.9, color=[1, 0, 0])

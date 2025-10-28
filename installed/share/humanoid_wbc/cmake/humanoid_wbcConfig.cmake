@@ -91,9 +91,9 @@ endif()
 # flag project as catkin-based to distinguish if a find_package()-ed project is a catkin project
 set(humanoid_wbc_FOUND_CATKIN_PROJECT TRUE)
 
-if(NOT "include;/opt/ros/noetic/lib/pkgconfig/../../include;/opt/ros/noetic/include;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include;/usr/include/eigen3 " STREQUAL " ")
+if(NOT "include;/opt/ros/noetic/lib/pkgconfig/../../include;/usr/include/eigen3;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include;/opt/ros/noetic/include " STREQUAL " ")
   set(humanoid_wbc_INCLUDE_DIRS "")
-  set(_include_dirs "include;/opt/ros/noetic/lib/pkgconfig/../../include;/opt/ros/noetic/include;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include;/usr/include/eigen3")
+  set(_include_dirs "include;/opt/ros/noetic/lib/pkgconfig/../../include;/usr/include/eigen3;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include;/opt/ros/noetic/include")
   if(NOT " " STREQUAL " ")
     set(_report "Check the issue tracker '' and consider creating a ticket if the problem has not been reported yet.")
   elseif(NOT " " STREQUAL " ")
