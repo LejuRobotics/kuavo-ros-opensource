@@ -210,5 +210,10 @@ if KUAVO_HUMANOID_SDK_VERSION="$VERSION" pip install -e ./; then
     # Check for remaining conflicts
     echo -e "\033[33m🔍 Checking for remaining version conflicts...\033[0m"
     pip check || echo -e "\033[33m⚠️  Some version conflicts remain. The SDK should still work, but some features may be limited.\033[0m"
+    
+    # Ensure all files are accessible by all users
+    echo -e "\033[33m🔧 Setting file permissions for all users...\033[0m"
+    sudo chmod -R a+rwx "$SCRIPT_DIR"
+    echo -e "\033[32m✅ File permissions set for all users\033[0m"
 fi
 popd
