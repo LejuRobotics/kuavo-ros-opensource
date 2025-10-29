@@ -1,5 +1,5 @@
 #########################################################
-# Roban2 双 CANBUS 总线配置
+# Roban2.1 双 CANBUS 总线配置
 #########################################################
 canbus_interfaces:
   canbus0:
@@ -34,7 +34,7 @@ canbus0_devices:
     # [vel, kp_pos, kd_pos, tor, kp_vel, kd_vel, ki_vel]
     params: [0, 25, 8, 0, 0, 0, 0]  # 电机默认的参数
     ratio: 25                       # 减速比
-    negtive: false                  # 电机方向
+    negtive: true                  # 电机方向
     ignore: false                   # 是否忽略/禁用
   # ///////////////
   - name: Larm_joint_02
@@ -50,7 +50,7 @@ canbus0_devices:
     device_id: 0x03
     params: [0, 20, 6, 0, 0, 0, 0]
     ratio: 25                       # 减速比
-    negtive: true
+    negtive: false
     ignore: false                   # 是否忽略/禁用
   # ///////////////
   - name: Larm_joint_04
@@ -74,7 +74,7 @@ canbus0_devices:
     device_id: 0x0A
     params: [0, 10, 3, 0, 0, 0, 0]
     ratio: 25                       # 减速比
-    negtive: true
+    negtive: false
     ignore: false                   # 是否忽略/禁用  
   # ///////////////
   - name: Lhand_revo2_hand        # ANCHOR_L_NAME
@@ -91,7 +91,7 @@ canbus1_devices:
     device_id: 0x05
     params: [0, 25, 8, 0, 0, 0, 0]
     ratio: 25                       # 减速比
-    negtive: true
+    negtive: false
     ignore: false                   # 是否忽略/禁用
   # ///////////////
   - name: Rarm_joint_02

@@ -4,8 +4,8 @@ PROJECT_DIR=$(realpath "$SCRIPT_DIR/../../") # project: kuavo-ros-control/kuavo-
 
 # 可执行文件路径列表（按优先级排序）
 EXECUTABLE_PATHS=(
-    "$PROJECT_DIR/devel/lib/hardware_node/dexhand_test"
-    "$PROJECT_DIR/installed/bin/dexhand_test"
+    "$PROJECT_DIR/installed/bin/motorevo_tool"
+    "$PROJECT_DIR/devel/lib/hardware_node/motorevo_tool"
 )
 
 # 打印带颜色的信息
@@ -28,25 +28,18 @@ show_help() {
     echo_success "使用方法: $exec_path [选项]"
     echo ""
     echo "选项:"
-    echo "  --touch      Kuavo Revo1 触觉手测试模式"
-    echo "  --normal     Kuavo Revo1 普通手测试模式"
-    echo "  --revo2      Roban2 Revo2 普通灵巧手测试模式"
-    echo "  --revo2can   Roban2 Revo2 Can协议灵巧手测试模式"
-    echo "  --scan       扫描设备(revo2can不支持), 识别 ttyUSB 设备"
-    echo "  --test [round] 测试灵巧手运动, round 为测试次数，默认为 5 次"
-    echo "  --help       显示此帮助信息"
+    echo "  --negative  电机方向辨识"
+    echo "  --cali      电机校准"
+    echo "  --help     显示此帮助信息"
     echo ""
     echo "示例:"
-    echo "  $exec_path --touch --scan      # Kuavo Revo1 触觉手扫描"
-    echo "  $exec_path --touch --test      # Kuavo Revo1 触觉手测试"
-    echo "  $exec_path --normal --test     # Kuavo Revo1 普通手测试"
-    echo "  $exec_path --revo2 --test      # Roban2 Revo2 普通手测试"
-    echo "  $exec_path --revo2can --test   # Roban2 Revo2 Can协议灵巧手测试"
+    echo "  $exec_path --negative  # 设置电机方向"
+    echo "  $exec_path --cali      # 电机校准"
 }
 
-# 查找并执行 dexhand_test
-execute_dexhand_test() {
-    local extra_args="$@"
+# 查找并执行 motorevo_tool
+execute_motorevo_tool() {
+    local extra_args="$1"
 
     for exec_path in "${EXECUTABLE_PATHS[@]}"; do
         if [ -f "$exec_path" ] && [ -x "$exec_path" ]; then
@@ -70,7 +63,7 @@ execute_dexhand_test() {
         fi
     done
 
-    echo "错误: 未找到 dexhand_test 可执行文件"
+    echo "错误: 未找到 motorevo_tool 可执行文件"
     echo "尝试了以下路径:"
     for path in "${EXECUTABLE_PATHS[@]}"; do
         echo "  - $path"
@@ -91,20 +84,12 @@ main() {
     # 解析命令行参数
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --touch|--normal|--revo2|--revo2can)
-                extra_args="$extra_args $1"
+            --negative)
+                extra_args="--negative"
                 shift
                 ;;
-            --scan)
-                extra_args="$extra_args $1"
-                shift
-                ;;
-            --test)
-                extra_args="$extra_args $1"
-                if [[ $# -gt 1 && "$2" =~ ^[0-9]+$ ]]; then
-                    extra_args="$extra_args $2"
-                    shift
-                fi
+            --cali)
+                extra_args="--cali"
                 shift
                 ;;
             --help)
@@ -119,9 +104,10 @@ main() {
         esac
     done
 
-    # 执行 dexhand_test
-    execute_dexhand_test $extra_args
+    # 执行 motorevo_tool
+    execute_motorevo_tool "$extra_args"
 }
 
 # 运行主函数
 main "$@"
+

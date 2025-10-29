@@ -6,8 +6,15 @@ PROJECT_DIR=$(realpath "$SCRIPT_DIR/../../") # project: kuavo-ros-control/kuavo-
 CONFIG_DIR="$HOME/.config/lejuconfig"
 CANBUS_WIRING_TYPE_FILE="$CONFIG_DIR/CanbusWiringType.ini"
 CANBUS_CONFIG_FILE="$CONFIG_DIR/canbus_device_cofig.yaml"
-ROBAN2_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2_dual_canbus_cofig.yaml"
-ROBAN2_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2_single_canbus_cofig.yaml"
+
+# Roban2-0
+ROBAN2_0_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-0_dual_canbus_cofig.yaml"
+ROBAN2_0_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-0_single_canbus_cofig.yaml"
+
+# Roban2-1
+ROBAN2_1_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-1_dual_canbus_cofig.yaml"
+ROBAN2_1_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-1_single_canbus_cofig.yaml"
+
 KUAVO_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_single_canbus_cofig.yaml"
 
 # 打印带颜色的标题
@@ -286,11 +293,26 @@ replace_end_effector_config() {
 
 # 配置roban2机器人函数
 configure_roban2() {
-    echo_success "🤖 配置 roban2 机器人"
+    local robot_type="$1"
+    echo_success "🤖 配置 $robot_type 机器人"
 
     # 选择CAN总线接线类型
     local wiring_type
     select_wiring_type wiring_type
+
+    # 根据robot_type选择配置文件路径
+    local dual_config_file=""
+    local single_config_file=""
+    case "$robot_type" in
+        "roban2.0")
+            dual_config_file="$ROBAN2_0_DUAL_SOURCE_CONFIG_FILE"
+            single_config_file="$ROBAN2_0_SINGLE_SOURCE_CONFIG_FILE"
+            ;;
+        "roban2.1")
+            dual_config_file="$ROBAN2_1_DUAL_SOURCE_CONFIG_FILE"
+            single_config_file="$ROBAN2_1_SINGLE_SOURCE_CONFIG_FILE"
+            ;;
+    esac
 
     # 初始化配置文件变量
     local config_file=""
@@ -319,8 +341,8 @@ configure_roban2() {
         # 拷贝并修改配置文件
         local temp_file="/tmp/roban2_canbus_device_cofig.yaml"
 
-        if [ -f "$ROBAN2_DUAL_SOURCE_CONFIG_FILE" ]; then
-            cp "$ROBAN2_DUAL_SOURCE_CONFIG_FILE" "$temp_file"
+        if [ -f "$dual_config_file" ]; then
+            cp "$dual_config_file" "$temp_file"
             echo_success "✓ 配置文件已拷贝到: $temp_file"
 
             # 更新CANBUS类型配置
@@ -331,7 +353,7 @@ configure_roban2() {
             echo_success "✓ 配置文件已更新: $temp_file"
             config_file="$temp_file"
         else
-            echo_error "✗ 错误: 源配置文件不存在: $ROBAN2_DUAL_SOURCE_CONFIG_FILE"
+            echo_error "✗ 错误: 源配置文件不存在: $dual_config_file"
             config_file=""
         fi
     else
@@ -345,14 +367,14 @@ configure_roban2() {
         # 拷贝并修改配置文件
         local temp_file="/tmp/roban2_canbus_device_cofig.yaml"
 
-        if [ -f "$ROBAN2_SINGLE_SOURCE_CONFIG_FILE" ]; then
-            cp "$ROBAN2_SINGLE_SOURCE_CONFIG_FILE" "$temp_file"
+        if [ -f "$single_config_file" ]; then
+            cp "$single_config_file" "$temp_file"
             echo_success "✓ 配置文件已拷贝到: $temp_file"
             # 更新CANBUS0类型为单总线类型
             update_canbus_type "$temp_file" "CANBUS0" "$single_bus_canbus_type"
             config_file="$temp_file"
         else
-            echo_error "✗ 错误: 源配置文件不存在: $ROBAN2_SINGLE_SOURCE_CONFIG_FILE"
+            echo_error "✗ 错误: 源配置文件不存在: $single_config_file"
             config_file=""
         fi
     fi
@@ -413,9 +435,9 @@ main() {
     fi
 
     # 选择机器人类型
-    local robot_options=("roban2" "kuavo")
+    local robot_options=("roban2.1" "kuavo" "roban2.0")
     show_menu "选择机器人类型" "${robot_options[@]}"
-    get_user_selection 2 robot_selection
+    get_user_selection 3 robot_selection
 
     local robot_type="${robot_options[$((robot_selection-1))]}"
     echo_success "选择机器人类型: $robot_type"
@@ -423,8 +445,8 @@ main() {
 
     # 根据机器人类型进行配置
     case "$robot_type" in
-        "roban2")
-            configure_roban2
+        "roban2.0"|"roban2.1")
+            configure_roban2 "$robot_type"
             ;;
         "kuavo")
             configure_kuavo
