@@ -491,7 +491,8 @@ def robot_hand_callback(msg):
 
 def _update_current_arm_joint_state(joint_msg, hand_msg):
     """整合 joint_msg 和 hand_msg，更新 current_arm_joint_state"""
-    global ocs2_joint_state
+
+    global ocs2_joint_state,current_arm_joint_state
     if robot_version >= 40:
         arm_part = list(joint_msg.joint_data.joint_q[12:26])
         hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12

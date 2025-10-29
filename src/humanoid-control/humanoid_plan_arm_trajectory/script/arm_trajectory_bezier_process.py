@@ -51,7 +51,7 @@ class ArmTrajectoryBezierDemo:
                 self.INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
             self.current_arm_joint_state = [0] * self.KUAVO_TACT_LENGTH
         elif self.robot_class == ROBAN:
-            self.INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+            self.INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]# task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
             self.current_arm_joint_state = [0] * self.ROBAN_TACT_LENGTH
 
         # rospy.spin()
@@ -289,19 +289,23 @@ class ArmTrajectoryBezierDemo:
                     p0 = np.array([0, self.current_arm_joint_state[key - 1]])
                     p3 = np.array([next_frame[0][0] - self.x_shift, next_frame[0][1]])
 
-                    # Calculate control points for smooth transition
+                    # 计算控制点，但使用更保守的方法避免过度摆动
+                    # 使用较短的控制杆长度以减少过渡期间的运动幅度
                     curve_length = np.linalg.norm(p3 - p0)
-                    p1 = p0 + curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the right
-                    p2 = p3 - curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the left
+                    # 减少控制点的影响范围，使过渡更加直接
+                    control_length = min(curve_length * 0.1, 0.5)  # 最大只允许0.5秒的控制影响
+                    
+                    p1 = p0 + control_length * np.array([1, 0])  # 左控制点
+                    p2 = p3 - control_length * np.array([1, 0])  # 右控制点
 
-                    # Create new frame
+                    # 创建新帧
                     frame1 = [
                         p0.tolist(),
                         p0.tolist(),
                         p1.tolist()
                     ]
 
-                    # Modify next_frame's left control point
+                    # 修改下一帧的左控制点
                     next_frame[1] = p2.tolist()
 
                     filtered_frames.append(frame1)
