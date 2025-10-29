@@ -29,10 +29,12 @@ show_help() {
     echo ""
     echo "选项:"
     echo "  --negative  电机方向辨识"
+    echo "  --cali      电机校准"
     echo "  --help     显示此帮助信息"
     echo ""
     echo "示例:"
     echo "  $exec_path --negative  # 设置电机方向"
+    echo "  $exec_path --cali      # 电机校准"
 }
 
 # 查找并执行 motorevo_tool
@@ -70,6 +72,10 @@ main() {
         case $1 in
             --negative)
                 extra_args="--negative"
+                shift
+                ;;
+            --cali)
+                extra_args="--cali"
                 shift
                 ;;
             --help)
