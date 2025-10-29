@@ -451,7 +451,7 @@ namespace ocs2
         void headBodyPoseCallback(const kuavo_msgs::headBodyPose::ConstPtr& msg)
         {
             current_head_body_pose_ = *msg;
-            current_head_body_pose_.body_pitch = std::max(3*M_PI/180.0, std::min(current_head_body_pose_.body_pitch, 40*M_PI/180.0));
+            current_head_body_pose_.body_pitch = std::max(3*M_PI/180.0, std::min(current_head_body_pose_.body_pitch, 35*M_PI/180.0));
 
             // 检查是否正在进行XY按键摇杆控制（高优先级），如果是则跳过VR腰部控制
             bool joystick_torso_control_active = (joystick_data_.left_second_button_touched && joystick_data_.left_first_button_touched);
