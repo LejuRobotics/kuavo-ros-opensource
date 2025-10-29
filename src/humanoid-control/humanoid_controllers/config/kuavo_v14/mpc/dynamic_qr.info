@@ -13,7 +13,7 @@ Q_base_stance
   ;; Base Pose: [position, orientation] ;;
   (6,6)   500.0    ; p_base_x
   (7,7)   500.0    ; p_base_y
-  (8,8)   2000.0    ; p_base_z
+  (8,8)   3000.0    ; p_base_z
   (9,9)   700.0    ; theta_base_z
   (10,10) 1000.0    ; theta_base_y
   (11,11) 800.0    ; theta_base_x
@@ -22,18 +22,18 @@ Q_base_stance
   (12,12) 100.0    ;waist_z
 
   ;; Leg Joint Positions: [LF, LH, RF, RH] ;;
-  (13,13) 10.0    ; leg_l1_joint
-  (14,14) 10.0    ; leg_l2_joint
-  (15,15) 10.0    ; leg_l3_joint
-  (16,16) 10.0    ; leg_l4_joint
-  (17,17) 10.0    ; leg_l5_joint
-  (18,18) 10.0    ; leg_l6_joint
-  (19,19) 10.0    ; leg_r1_joint
-  (20,20) 10.0    ; leg_r2_joint
-  (21,21) 10.0    ; leg_r3_joint
-  (22,22) 10.0    ; leg_r4_joint
-  (23,23) 10.0    ; leg_r5_joint
-  (24,24) 10.0    ; leg_r6_joint
+  (13,13) 5.0    ; leg_l1_joint
+  (14,14) 5.0    ; leg_l2_joint
+  (15,15) 5.0    ; leg_l3_joint
+  (16,16) 5.0    ; leg_l4_joint
+  (17,17) 5.0    ; leg_l5_joint
+  (18,18) 5.0    ; leg_l6_joint
+  (19,19) 5.0    ; leg_r1_joint
+  (20,20) 5.0    ; leg_r2_joint
+  (21,21) 5.0    ; leg_r3_joint
+  (22,22) 5.0    ; leg_r4_joint
+  (23,23) 5.0    ; leg_r5_joint
+  (24,24) 5.0    ; leg_r6_joint
 
   ;; Arm Joint Positions: 
   (25,25) 200.0      ; zarm_l1_joint

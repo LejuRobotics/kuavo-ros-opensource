@@ -44,6 +44,20 @@ execute_motorevo_tool() {
     for exec_path in "${EXECUTABLE_PATHS[@]}"; do
         if [ -f "$exec_path" ] && [ -x "$exec_path" ]; then
             echo "执行: $exec_path $extra_args"
+
+            # 根据可执行文件位置选择对应的 setup.bash
+            if [[ "$exec_path" == *"/devel/"* ]]; then
+                # devel 版本
+                if [ -f "$PROJECT_DIR/devel/setup.bash" ]; then
+                    source "$PROJECT_DIR/devel/setup.bash"
+                fi
+            else
+                # installed 版本
+                if [ -f "$PROJECT_DIR/installed/setup.bash" ]; then
+                    source "$PROJECT_DIR/installed/setup.bash"
+                fi
+            fi
+
             "$exec_path" $extra_args
             return 0
         fi

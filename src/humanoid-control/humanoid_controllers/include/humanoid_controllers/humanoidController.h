@@ -287,6 +287,7 @@ namespace humanoid_controller
     bool isPullUp_{false};
     bool setPullUpState_{false};
     double standupTime_{0.0};
+    double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
     std::shared_ptr<WbcBase> standUpWbc_;
     vector_t curRobotLegState_;
 
