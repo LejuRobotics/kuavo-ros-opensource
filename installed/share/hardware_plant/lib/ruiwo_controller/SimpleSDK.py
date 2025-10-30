@@ -111,10 +111,10 @@ class RUIWOTools:
         )
         state_list.append(torque)
 
-        tempera = feedback_frame[6]
+        tempera = feedback_frame[7]
         state_list.append(tempera)
 
-        errcode = feedback_frame[7]
+        errcode = feedback_frame[6]
         state_list.append(errcode)
 
         return state_list

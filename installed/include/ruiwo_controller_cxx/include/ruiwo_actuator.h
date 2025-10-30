@@ -98,16 +98,35 @@ public:
     ~RuiWoActuator();
     
     /**
-     * @brief 
+     * @brief 模块初始化, 若该函数调用未返回成功，后续其他接口不可用
      * 
      * @return int return 0 if success, otherwise return error
      *  0: success
      *  1: config error, e.g. config file not exist, parse error...
      *  2: canbus error, e.g. canbus init fail... 
+     *  3: motor error, e.g. 电机使能、失能过程中出现不可清除的故障码...
      */
     int initialize() override;
-    void enable() override;
-    void disable() override;
+        
+    /**
+     * @brief 使能所有电机，对全部电机执行 Enter Motor State 进入 Motor State 运行模式
+     * 
+     * @return int 成功返回 0，失败返回其他错误码
+     * 1: 通信问题，包括：CAN 消息发送/接收失败或者超时
+     * 2: 严重错误!!! 严重错误!!! 返回 2 时说明有电机存在严重故障码(RuiwoErrorCode 中大于 128 的故障码)
+     */
+    int enable() override;
+
+    /**
+     * @brief 对全部电机执行 Enter Reset State 进入 Reset State 运行模式
+     * 
+     * @note: enter reset state 可用于清除故障码（大于 128 的故障码无法清除）
+     * @return int 成功返回 0，失败返回其他错误码
+     * 1: 通信问题，包括：CAN 消息发送/接收失败或者超时
+     * 2: 严重错误!!! 严重错误!!! 返回 2 时说明有电机存在严重故障码(RuiwoErrorCode 中大于 128 的故障码)
+     */
+    int disable() override;
+
     bool disableMotor(int motorIndex) override;
     void close() override;
 
@@ -273,5 +292,13 @@ private:
     /** Data */
     std::vector<RuiwoMotorConfig_t> ruiwo_mtr_config_;
 };
+
+/**
+ * @brief 将RuiwoErrCode枚举值转换为可读的字符串描述
+ *
+ * @param[in] errcode RuiwoErrCode枚举值，表示具体的电机故障码
+ * @return std::string 故障码的中文描述
+ */
+std::string RuiwoErrCode2string(RuiwoErrCode errcode);
 
 #endif // RUIWO_ACTUATOR_CPP_H

@@ -12,8 +12,16 @@
 #include "ruiwo_actuator_base.h"
 static PyObject *RuiWo_pJoinMethod;// 用于将python线程移动到c++线程中,避免GIL占用
 
-class RuiWoActuator : public RuiwoActuatorBase
-{
+
+/**
+ * @brief 将RuiwoErrCode枚举值转换为可读的字符串描述
+ *
+ * @param[in] errcode RuiwoErrCode枚举值，表示具体的电机故障码
+ * @return std::string 故障码的中文描述
+ */
+std::string RuiwoErrCode2string(RuiwoErrCode errcode);
+
+class RuiWoActuator : public RuiwoActuatorBase{
 private:
     PyObject *pModule;
     PyObject *RuiWoActuatorClass;
@@ -51,8 +59,28 @@ public:
     ~RuiWoActuator();
     bool is_cali_{false};
     int initialize() override;
-    void enable() override;
-    void disable() override;
+
+    /**
+     * @brief 使能所有电机，对全部电机执行 Enter Motor State 进入 Motor State 运行模式
+     *
+     * @return int 成功返回 0，失败返回其他错误码
+     * 1: 通信问题，包括：CAN 消息发送/接收失败或者超时
+     * 2: 严重错误!!! 严重错误!!! 返回 2 时说明有电机存在严重故障码(RuiwoErrorCode 中大于 128 的故障码)
+     * -1: Python接口错误，包括：Python方法不存在或调用失败
+     */
+    int enable() override;
+
+    /**
+     * @brief 对全部电机执行 Enter Reset State 进入 Reset State 运行模式
+     *
+     * @note: enter reset state 可用于清除故障码（大于 128 的故障码无法清除）
+     * @return int 成功返回 0，失败返回其他错误码
+     * 1: 通信问题，包括：CAN 消息发送/接收失败或者超时
+     * 2: 严重错误!!! 严重错误!!! 返回 2 时说明有电机存在严重故障码(RuiwoErrorCode 中大于 128 的故障码)
+     * -1: Python接口错误，包括：Python方法不存在或调用失败
+     */
+    int disable() override;
+
     bool disableMotor(int motorIndex) override;
     void close() override;
     void join();
