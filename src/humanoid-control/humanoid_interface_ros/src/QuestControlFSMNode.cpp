@@ -594,25 +594,39 @@ namespace ocs2
             }
 
             // 检测当前所在区间
-            int current_zone = -1;
+            int target_zone = -1;
 
             // 直接检测摇杆值所在的区间
             for (size_t i = 0; i < kTurnZones.size(); ++i) {
                 if (right_x >= kTurnZones[i].min_value && right_x < kTurnZones[i].max_value) {
-                    current_zone = i;
+                    target_zone = i;
                     break;
                 }
             }
 
             // 如果不在任何区间，重置状态
-            if (current_zone == -1) {
+            if (target_zone == -1) {
                 turn_step_current_zone_ = -1;
                 return;
             }
 
+            // 安全的区间切换逻辑：只能在相邻区间内逐级改变
+            int current_zone = turn_step_current_zone_;
+            if (current_zone != -1 && current_zone != target_zone) {
+                // 检查是否是相邻区间（防止跳变）
+                if (std::abs(current_zone - target_zone) != 1) {
+                    // 不允许跳变，重置状态
+                    turn_step_current_zone_ = -1;
+                    turn_step_zone_stable_ = false;
+                    ROS_WARN("Zone change blocked: current=%d, target=%d (not adjacent). Only adjacent zone changes allowed for safety.",
+                             current_zone, target_zone);
+                    return;
+                }
+            }
+
             // 如果区间发生变化，重置时间
-            if (current_zone != turn_step_current_zone_) {
-                turn_step_current_zone_ = current_zone;
+            if (target_zone != turn_step_current_zone_) {
+                turn_step_current_zone_ = target_zone;
                 turn_step_zone_enter_time_ = ros::Time::now();
                 turn_step_zone_stable_ = false;
                 return;
@@ -630,8 +644,8 @@ namespace ocs2
             }
     
             // 根据区间选择不同的控制方式
-            if (current_zone >= 0 && current_zone < static_cast<int>(kTurnZones.size()) &&
-                !kTurnZones[current_zone].trajectory.footPoseTrajectory.empty()) {
+            if (target_zone >= 0 && target_zone < static_cast<int>(kTurnZones.size()) &&
+                !kTurnZones[target_zone].trajectory.footPoseTrajectory.empty()) {
 
                 // 调用服务检查当前是否是Custom-Gait模式
                 std_srvs::SetBool gait_srv;
@@ -644,20 +658,28 @@ namespace ocs2
                     std::string current_gait = getCurrentGaitName();
                     bool is_stance = (current_gait == "stance");
                     if (is_stance) {
-                        foot_pose_target_pub_.publish(kTurnZones[current_zone].trajectory);
-                        ROS_INFO("Zone %d trajectory published - not Custom-Gait and current gait is stance", current_zone);
+                        foot_pose_target_pub_.publish(kTurnZones[target_zone].trajectory);
+                        ROS_WARN("Zone %d trajectory published - not Custom-Gait and current gait is stance", target_zone);
                     } else if(current_gait == "walk") {
                         // 先站立再单步
                         publish_mode_sequence_temlate("stance");
                         publish_zero_spd();
+                        ROS_WARN("===================> 当前是walk, 先 stance 调用失败");
                     }
                      else {
-                        ROS_INFO("Zone %d trajectory blocked - current gait is '%s' (not stance)", current_zone, current_gait.c_str());
+                        // ROS_WARN("Zone %d trajectory blocked - current gait is '%s' (not stance)", target_zone, current_gait.c_str());
+                    }
+                }
+                else {
+                    if(!service_call_success)
+                        ROS_WARN("get_current_gait_service_client_ 调用失败");
+                    else {
+                        // ROS_WARN("get_current_gait_service_client_ gait_srv.response.success 是false");
                     }
                 }
             }
 
-            ROS_INFO("Single step turn executed: zone=%d", current_zone);
+            // ROS_INFO("Single step turn executed: zone=%d", target_zone);
         }
 
         void publish_zero_spd()
