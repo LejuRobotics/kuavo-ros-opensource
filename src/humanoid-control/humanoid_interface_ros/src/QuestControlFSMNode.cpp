@@ -694,7 +694,7 @@ namespace ocs2
         {
 
             // 时间控制参数
-            constexpr double kStableThreshold = 0.20;    // 稳定阈值 X 秒
+            constexpr double kStableThreshold = 0.40;    // 稳定阈值 X 秒
             constexpr float kDeadzone = 0.05f;            // 死区
 
             // 获取摇杆值
