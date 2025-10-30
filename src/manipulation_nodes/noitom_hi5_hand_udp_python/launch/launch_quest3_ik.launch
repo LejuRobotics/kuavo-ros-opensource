@@ -7,7 +7,7 @@
     <arg name="control_torso" default="false" /> <!-- false: do NOT control, true: control torso  -->
     <arg name="control_finger_type" default="0" /> <!-- 0: control all fingers by upper-gripper, 1: control thumb and index fingers by upper-gripper, control other fingers by lower-gripper  -->
     <arg name="predict_gesture" default="false" /> <!-- True or False -->
-    <arg name="ee_type" default="qiangnao"/>
+    <arg name="ee_type" default="revo2"/>
     <arg name="enable_head_control" default="true"/>
     <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
     <arg name="use_arm_collision" default="false"/>

@@ -4,7 +4,7 @@
     <arg name="control_torso" default="0"/>
     <arg name="ctrl_arm_idx" default="2"/>
     <arg name="predict_gesture" default="false"/>
-    <arg name="ee_type" default="qiangnao"/>
+    <arg name="ee_type" default="revo2"/>
     <arg name="enable_head_control" default="true"/>
     <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch"/>
 
