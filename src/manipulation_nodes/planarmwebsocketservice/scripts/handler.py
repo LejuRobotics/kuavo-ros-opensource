@@ -49,6 +49,11 @@ should_stop = False
 terminate_process_result = False
 process = None
 response_queue = Queue()
+
+# 全局变量用于存储零点数据
+zero_point_data = []
+adjusted_zero_point_data = []
+
 active_threads: Dict[websockets.WebSocketServerProtocol, threading.Event] = {}
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
 ROBAN_TACT_LENGTH = 23
@@ -804,6 +809,7 @@ async def preview_action_handler(
 async def adjust_zero_point_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
+    global zero_point_data, adjusted_zero_point_data
     payload = Payload(
         cmd="adjust_zero_point", data={"code": 0, "message": "Zero point adjusted successfully"}
     )
@@ -815,6 +821,8 @@ async def adjust_zero_point_handler(
         motor_index = data.get("motor_index")
         adjust_pos = data.get("adjust_pos")
 
+        adjust_pos_rec = adjust_pos
+
         if motor_index is None or adjust_pos is None:
             payload.data["code"] = 1
             payload.data["message"] = "Missing required parameters motor_index or adjust_pos"
@@ -822,6 +830,21 @@ async def adjust_zero_point_handler(
             response_queue.put(response)
             return
 
+
+        # 如果是第一次调整，则复制原始零点数据作为调整的基础
+        if len(adjusted_zero_point_data) == 0:
+            adjusted_zero_point_data = zero_point_data.copy()
+
+        # 前13个电机直接使用收到的值，之后的电机使用当前值减去上一次的值
+        if motor_index >= 13:
+            # 对于第13个及之后的电机，使用当前值减去上一次的值
+            if motor_index < len(adjusted_zero_point_data):
+                adjust_pos = adjust_pos - adjusted_zero_point_data[motor_index]
+        # 前13个电机(索引0-12)直接使用收到的值，不需要做任何处理
+        
+        # 更新调整后的零点数据
+        if motor_index < len(adjusted_zero_point_data):
+            adjusted_zero_point_data[motor_index] = adjust_pos_rec
 
         # Check if nodelet_manager is running
         running_nodes = rosnode.get_node_names()
@@ -888,6 +911,7 @@ async def adjust_zero_point_handler(
 async def set_zero_point_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
+    global adjusted_zero_point_data
     payload = Payload(
         cmd="set_zero_point", data={"code": 0, "message": "Zero point set successfully"}
     )
@@ -914,58 +938,66 @@ async def set_zero_point_handler(
     ec_joints = num_joints - arm_joints - head_joints
     
     try:
-        if "zero_pos" in data:
+        # 如果有调整后的零点数据，则使用它；否则使用传入的数据
+        if len(adjusted_zero_point_data) > 0:
+            zero_pos = adjusted_zero_point_data
+        elif "zero_pos" in data:
             zero_pos = data["zero_pos"]
-            arm_zero_data = zero_pos[ec_joints:]
-            ec_zero_data = zero_pos[:ec_joints]
-
-            # Backup the zero point files
-            arm_zero_backup = f"{arm_zero_file_path}.bak"
-            leg_zero_backup = f"{leg_zero_file_path}.bak"
-            
-            try:
-                shutil.copy2(arm_zero_file_path, arm_zero_backup)
-                shutil.copy2(leg_zero_file_path, leg_zero_backup)
-            except Exception as e:
-                print(f"Failed to backup zero point files: {e}")
-                payload.data["code"] = 3 
-                payload.data["message"] = f"Failed to backup zero point files: {str(e)}"
-                response = Response(payload=payload, target=websocket)
-                response_queue.put(response)
-                return
-
-            with open(arm_zero_file_path, 'r') as f:
-                arm_zero_data_origin = yaml.safe_load(f)
-                arm_zero_data_origin_size = len(arm_zero_data_origin['arms_zero_position'])
-            
-            with open(leg_zero_file_path, 'r') as f:
-                ec_zero_data_origin = f.read()
-                ec_zero_data_origin = ec_zero_data_origin.split('\n')
-                # -1 去掉末尾的换行
-                if ec_zero_data_origin[-1] == '':
-                    ec_zero_data_origin_size = len(ec_zero_data_origin) - 1
-
-            arm_zero_data = arm_zero_data + [0] * (arm_zero_data_origin_size - len(arm_zero_data))
-            # Convert degrees to radians for arm zero data
-            arm_zero_data = [math.radians(float(x)) for x in arm_zero_data]
-            ec_zero_data = ec_zero_data + [0] * (ec_zero_data_origin_size - len(ec_zero_data))
-
-            
-            with open(arm_zero_file_path, 'w') as f:
-                arm_zero_data_origin['arms_zero_position'] = arm_zero_data
-                yaml.dump(arm_zero_data_origin, f)
-        
-            with open(leg_zero_file_path, 'w') as f:
-                f.write('\n'.join(str(x) for x in ec_zero_data))
-                f.write('\n')
-        
-            response = Response(payload=payload, target=websocket)
-            response_queue.put(response)
-        else :
+        else:
             payload.data["code"] = 1
             payload.data["message"] = "Invalid zero point data"
             response = Response(payload=payload, target=websocket)
             response_queue.put(response)
+            return
+
+        arm_zero_data = zero_pos[ec_joints:]
+        ec_zero_data = zero_pos[:ec_joints]
+
+        # Backup the zero point files
+        arm_zero_backup = f"{arm_zero_file_path}.bak"
+        leg_zero_backup = f"{leg_zero_file_path}.bak"
+        
+        try:
+            shutil.copy2(arm_zero_file_path, arm_zero_backup)
+            shutil.copy2(leg_zero_file_path, leg_zero_backup)
+        except Exception as e:
+            print(f"Failed to backup zero point files: {e}")
+            payload.data["code"] = 3 
+            payload.data["message"] = f"Failed to backup zero point files: {str(e)}"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+            return
+
+        with open(arm_zero_file_path, 'r') as f:
+            arm_zero_data_origin = yaml.safe_load(f)
+            arm_zero_data_origin_size = len(arm_zero_data_origin['arms_zero_position'])
+        
+        with open(leg_zero_file_path, 'r') as f:
+            ec_zero_data_origin = f.read()
+            ec_zero_data_origin = ec_zero_data_origin.split('\n')
+            # -1 去掉末尾的换行
+            if ec_zero_data_origin[-1] == '':
+                ec_zero_data_origin_size = len(ec_zero_data_origin) - 1
+
+        arm_zero_data = arm_zero_data + [0] * (arm_zero_data_origin_size - len(arm_zero_data))
+        # Convert degrees to radians for arm zero data
+        arm_zero_data = [math.radians(float(x)) for x in arm_zero_data]
+        ec_zero_data = ec_zero_data + [0] * (ec_zero_data_origin_size - len(ec_zero_data))
+
+        
+        with open(arm_zero_file_path, 'w') as f:
+            arm_zero_data_origin['arms_zero_position'] = arm_zero_data
+            yaml.dump(arm_zero_data_origin, f)
+    
+        with open(leg_zero_file_path, 'w') as f:
+            f.write('\n'.join(str(x) for x in ec_zero_data))
+            f.write('\n')
+    
+        # 重置调整后的数据，为下一次调整做准备
+        adjusted_zero_point_data = []
+    
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
     except Exception as e:
         print(f"Error saving zero point file: {e}")
         payload.data["code"] = 2
@@ -976,6 +1008,7 @@ async def set_zero_point_handler(
 async def get_zero_point_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
+    global zero_point_data
     payload = Payload(
         cmd="get_zero_point", data={"code": 0, "message": "Zero point retrieved successfully"}
     )
@@ -1022,7 +1055,8 @@ async def get_zero_point_handler(
         leg_zero_data = leg_zero_data[:ec_joints]
         print(leg_zero_data + arm_zero_data)
 
-        payload.data["zero_pos"] = leg_zero_data + arm_zero_data
+        zero_point_data = leg_zero_data + arm_zero_data
+        payload.data["zero_pos"] = zero_point_data
         response = Response(payload=payload, target=websocket)
         response_queue.put(response)
     except Exception as e:

@@ -69,7 +69,7 @@ struct MotorParam {
     double Kd;
 };
 class HardwarePlant
-  {
+{
     struct RuiWoJointData
     {
       std::vector<double> pos;
@@ -81,7 +81,7 @@ class HardwarePlant
     HardwarePlant(double dt = 1e-3, HardwareParam hardware_param = HardwareParam(), const std::string & hardware_abs_path = "", uint8_t control_mode = MOTOR_CONTROL_MODE_TORQUE,
                  uint16_t num_actuated = 0,
                  uint16_t nq_f = 7, uint16_t nv_f = 6);
-    virtual ~HardwarePlant(){HWPlantDeInit();}
+    virtual ~HardwarePlant(){if (!is_deinitialized_) HWPlantDeInit();}
     void Update(RobotState_t state_des, Eigen::VectorXd actuation);
     void joint2motor(const RobotState_t &state_des_, const Eigen::VectorXd &actuation, Eigen::VectorXd &cmd_out);
     void motor2joint(SensorData_t sensor_data_motor, SensorData_t &sensor_data_joint);
@@ -224,6 +224,9 @@ public:
         std::lock_guard<std::mutex> lk(disable_motor_mtx_);
         return disableMotor_.size();
     }
+
+    // 析构标志位
+    bool is_deinitialized_ = false;
 
 
 private:
