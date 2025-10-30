@@ -47,7 +47,7 @@ robot_version = os.environ.get('ROBOT_VERSION', '')
 print(f"检测到ROBOT_VERSION: {robot_version}")
 
 # 根据版本决定处理的电机数量
-if robot_version == '13' or '14':
+if robot_version == '13' or robot_version == '14':
     print("检测到roban2版本机器人，只处理前10个电机")
     target_motors = list(motor_addresses.items())[:10]
 else:

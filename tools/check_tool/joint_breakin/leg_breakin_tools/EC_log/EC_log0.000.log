@@ -1,0 +1,39 @@
+0000000000: EcMasterDemo V3.1.4.07 (Protected) for Linux_x64 Copyright acontis technologies GmbH @ 2022
+0000000000: Full command line: -i8254x 1 1 -i8254x 2 1 -a 7 -v 2 -auxclk 500 -dcmmode mastershift -t 0 -log ./EC_log/EC_log -f "./config/ENI_config/yd_15_c501.xml" 
+0000000001: Enter my app Init
+0000000001: EC-Master V3.1.4.07 (Protected) for Linux_x64 Copyright acontis technologies GmbH @ 2022
+0000000001: emllI8254x(0x00000001): V3.1.4.07 (Unrestricted) for Linux_x64 Copyright acontis technologies GmbH @ 2022
+0000003630: emllI8254x(0x00000002): V3.1.4.07 (Unrestricted) for Linux_x64 Copyright acontis technologies GmbH @ 2022
+0000007029: EtherCAT network adapter MAC: 68-ED-A4-91-3F-86
+0000007050: Protected version, stop sending ethernet frames after 60 minutes if not licensed!
+0000008050: cycle time: 500000 nsec  
+0000008050: distance between cyclic frame: 333333 nsec  
+0000008050: sync limit time: 100000 nsec  
+0000008061: ERROR: Redundancy Line break 14 slaves on main and 2 slaves on red
+0000008093: Bus scan successful - 16 slaves found
+0000008096: Master state changed from <UNKNOWN> to <INIT>
+0000008961: Master state changed from <INIT> to <PREOP>
+0000011209: DCM in sync (cur/avg/max) [ns]:    -440/      0/  -65
+0000011364: Master state changed from <PREOP> to <SAFEOP>
+0000011612: Master state changed from <SAFEOP> to <OP>
+0000011613: Wait for 15 motors to enable
+0000011623: Joint 1, Slave 2, enabled successfully
+0000011634: Joint 2, Slave 3, enabled successfully
+0000011644: Joint 3, Slave 4, enabled successfully
+0000011657: Joint 4, Slave 5, enabled successfully
+0000011668: Joint 5, Slave 6, enabled successfully
+0000011680: Joint 6, Slave 7, enabled successfully
+0000011692: Joint 7, Slave 8, enabled successfully
+0000011703: Joint 8, Slave 9, enabled successfully
+0000011716: Joint 9, Slave 10, enabled successfully
+0000011729: Joint 10, Slave 11, enabled successfully
+0000011739: Joint 11, Slave 12, enabled successfully
+0000011751: Joint 12, Slave 13, enabled successfully
+0000011762: Joint 13, Slave 14, enabled successfully
+0000011775: Joint 14, Slave 15, enabled successfully
+0000011786: Joint 15, Slave 16, enabled successfully
+0000011786: motor enabled
+0000011786: DCM out of sync (cur/avg/max) [ns]: -106840/    -26/-106
+0000011796: DCM during startup (<INIT> to <OP>)
+0000011796: DCM Status: ERROR: controller error - synchronisation out of limit (0x981201C2)
+0000013286: 294 identical messa0000013286: DCM in sync (cur/avg/max) [ns]:    -720/      0/  -91

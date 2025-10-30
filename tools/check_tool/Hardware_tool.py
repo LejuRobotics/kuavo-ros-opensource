@@ -555,22 +555,6 @@ def arm_setzero():
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
-def arm_breakin():
-
-    kuavo_ros_file_path = folder_path + "/arm_breakin.sh" 
-    kuavo_open_file_path = folder_path + "../../installed/share/hardware_plant/lib/ruiwo_controller/arm_breakin.sh" 
-    
-    if os.path.exists(kuavo_ros_file_path):
-        command = "bash "+ kuavo_ros_file_path
-    elif os.path.exists(kuavo_open_file_path):
-        command = "bash "+ kuavo_open_file_path
-    else:
-        print(f"The file {file_path} does not exist.")
-        return
-        
-    # 使用 subprocess.run() 运行命令
-    subprocess.run(command, shell=True)
-    
 def fix_ros_key():
     # 脚本路径
     script_paths = [
@@ -750,30 +734,6 @@ def reset_folder():
         print("文件夹清除成功。")
     else:
         print("您输入的字符不符，请重试。")
-
-def roban2_joint_breakin():
-    """Roban2机器人手臂和腿部统一磨线功能"""
-    roban2_script_path = folder_path + "/roban2_joint_breakin/roban2_joint_breakin.py"
-    
-    if not os.path.exists(roban2_script_path):
-        print(bcolors.FAIL + f"错误：Roban2磨线脚本不存在: {roban2_script_path}" + bcolors.ENDC)
-        return
-    
-    print(bcolors.OKCYAN + "启动Roban2机器人统一磨线程序..." + bcolors.ENDC)
-    print(bcolors.WARNING + "注意：此功能需要root权限运行" + bcolors.ENDC)
-    
-    # 检查是否有root权限
-    if os.geteuid() != 0:
-        print(bcolors.FAIL + "错误：请使用root权限运行此功能" + bcolors.ENDC)
-        print(bcolors.WARNING + "请使用: sudo python3 " + os.path.abspath(__file__) + bcolors.ENDC)
-        return
-    
-    try:
-        # 运行Roban2磨线脚本
-        command = f"python3 {roban2_script_path}"
-        subprocess.run(command, shell=True)
-    except Exception as e:
-        print(bcolors.FAIL + f"运行Roban2磨线脚本时出错: {e}" + bcolors.ENDC)
 
 def read_and_edit_env_file(file_path, target_variable, new_value):
     try:
@@ -1058,32 +1018,14 @@ def secondary_menu():
             print(bcolors.HEADER + "###结束，license已导入，请确认验证###" + bcolors.ENDC)   
             break  
         elif option == "m":
-            # 根据机器人版本决定执行哪个磨线功能
-            robot_version = get_robot_version()
-            if robot_version in ["13", "14"]:
-                print(bcolors.HEADER + "###开始，Roban2机器人磨线（版本13/14）###" + bcolors.ENDC)
-                roban2_joint_breakin()
-                print(bcolors.HEADER + "###结束，Roban2机器人磨线###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###开始，执行机器人磨线###" + bcolors.ENDC)
+            kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "joint_breakin.py")
+            if os.path.exists(kuavo_breakin_script):
+                command = "sudo python3 " + kuavo_breakin_script
+                subprocess.run(command, shell=True)
             else:
-                print(bcolors.HEADER + "###在执行手臂磨线之前，请先确保完成手臂电机零点设置###" + bcolors.ENDC)
-                print("请摆正手臂，按 d 执行电机零点校准，并执行手臂磨线。")
-                print("按 q 退出程序")
-                while True:
-                    option = input("请输入你的选择：")
-                    if option == 'q':
-                        print("\n*-------------退出程序-------------*")
-                        exit()
-                    elif option == 'd':
-                        print(bcolors.HEADER + "###开始，执行手臂零点校准###" + bcolors.ENDC)
-                        arm_setzero()
-                        ruiwo_zero()
-                        print(bcolors.HEADER + "###结束，执行手臂零点校准###" + bcolors.ENDC)
-                        print(bcolors.HEADER + "###开始，执行手臂磨线###" + bcolors.ENDC)
-                        arm_breakin()
-                        print(bcolors.HEADER + "###结束，执行手臂磨线###" + bcolors.ENDC)
-                        break
-                    else:
-                        print(bcolors.FAIL + "无效的选项编号，请重新输入！\n" + bcolors.ENDC)
+                print(bcolors.FAIL + f"错误：磨线脚本不存在: {kuavo_breakin_script}" + bcolors.ENDC)
+            print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)
             break
         elif option == "n":
             print(bcolors.HEADER + "###开始，更新ros密钥###" + bcolors.ENDC)
