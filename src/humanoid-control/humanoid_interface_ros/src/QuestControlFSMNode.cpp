@@ -705,6 +705,7 @@ namespace ocs2
             // 应用死区 - 如果右摇杆X轴在死区内，但其他轴有输入，则执行正常运动控制
             if (std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone ||std::abs(left_y) >= kDeadzone)) {
                 turn_step_current_zone_ = -1;
+                turn_step_zone_published_ = false;
                 // 有其他摇杆输入，执行正常运动控制
                 updateCommandLine();
                 return;
@@ -724,6 +725,7 @@ namespace ocs2
             // 如果不在任何区间，重置状态
             if (target_zone == -1) {
                 turn_step_current_zone_ = -1;
+                turn_step_zone_published_ = false;
                 return;
             }
 
@@ -746,6 +748,7 @@ namespace ocs2
                 turn_step_current_zone_ = target_zone;
                 turn_step_zone_enter_time_ = ros::Time::now();
                 turn_step_zone_stable_ = false;
+                turn_step_zone_published_ = false;  // 新区间，重置发布标志
                 return;
             }
 
@@ -757,6 +760,17 @@ namespace ocs2
                     turn_step_zone_stable_ = true;
                 } else {
                     return; // 还未稳定，继续等待
+                }
+            }
+    
+            // 如果当前区间已经发布过，检查是否需要重新稳定后再次发布
+            if (turn_step_zone_published_) {
+                // 如果距离上次发布已经过了稳定时间阈值，允许重新发布
+                if ((current_time - turn_step_last_execute_time_).toSec() >= kStableThreshold) {
+                    turn_step_zone_published_ = false;  // 重置发布标志，允许再次发布
+                    ROS_INFO("Zone %d ready for re-publish after %.2f seconds", turn_step_current_zone_, kStableThreshold);
+                } else {
+                    return;  // 还未到重新发布的时间，继续等待
                 }
             }
     
@@ -776,6 +790,8 @@ namespace ocs2
                     bool is_stance = (current_gait == "stance");
                     if (is_stance) {
                         foot_pose_target_pub_.publish(kTurnZones[target_zone].trajectory);
+                        turn_step_zone_published_ = true;  // 标记已发布
+                        turn_step_last_execute_time_ = ros::Time::now();  // 记录发布时间
                         ROS_WARN("Zone %d trajectory published - not Custom-Gait and current gait is stance", target_zone);
                     } else if(current_gait == "walk") {
                         // 先站立再单步
@@ -1256,6 +1272,7 @@ namespace ocs2
         int turn_step_current_zone_{-1};                 // 当前所在区间 (-1表示不在任何区间)
         ros::Time turn_step_zone_enter_time_;            // 进入当前区间时间
         bool turn_step_zone_stable_{false};              // 是否在区间内稳定超过阈值时间
+        bool turn_step_zone_published_{false};           // 当前区间是否已发布轨迹
         ros::Time turn_step_last_execute_time_;          // 上次执行时间
 
         ros::Publisher arm_mode_pub_;
