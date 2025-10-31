@@ -31,7 +31,9 @@ class KuavoUnifiedBreakin:
         
         # 定义脚本路径
         # 手臂磨线脚本路径
-        self.arm_breakin_script = self.current_dir.parent / "arm_breakin.sh"
+        self.arm_breakin_script = self.current_dir / "arm_breakin" / "arm_breakin_roban2.sh"
+        # 手臂电机校准脚本（motorevo_controller）
+        self.motorevo_tool_sh = self.project_root / "tools" / "check_tool" / "motorevo_tool.sh"
         
         # 零点设置脚本路径
         # 添加arm_setzero.sh脚本路径（对应Hardware_tool.py中的arm_setzero()函数）
@@ -574,10 +576,32 @@ class KuavoUnifiedBreakin:
         self.print_colored("启动手臂磨线...", Colors.GREEN)
         self.print_colored("注意：手臂磨线使用RUIWO电机控制", Colors.YELLOW)
         
-        self.print_colored("在执行手臂磨线之前，需要先完成零点设置", Colors.YELLOW)
-        if not self.run_arm_zero_setup():
-            self.print_colored("零点设置失败，无法继续执行手臂磨线", Colors.RED)
-            return 1
+        # 版本14：跳过零点设置，改为先执行电机校准 --cali
+        if str(self.robot_version) == "14":
+            self.print_colored("版本14：跳过手臂零点设置步骤（步骤1/2/3）", Colors.CYAN)
+            # 执行 motorevo_tool.sh --cali
+            try:
+                if not self.motorevo_tool_sh.exists():
+                    self.print_colored(f"错误：未找到校准脚本 {self.motorevo_tool_sh}", Colors.RED)
+                    return 1
+                self.print_colored("开始执行电机校准 (--cali)...", Colors.BLUE)
+                result_cali = subprocess.run(
+                    ["bash", str(self.motorevo_tool_sh), "--cali"],
+                    cwd=str(self.motorevo_tool_sh.parent),
+                    text=True
+                )
+                if result_cali.returncode != 0:
+                    self.print_colored("电机校准失败 (--cali)", Colors.RED)
+                    return 1
+                self.print_colored("✓ 电机校准完成", Colors.GREEN)
+            except Exception as e:
+                self.print_colored(f"执行电机校准出错: {e}", Colors.RED)
+                return 1
+        else:
+            self.print_colored("在执行手臂磨线之前，需要先完成零点设置", Colors.YELLOW)
+            if not self.run_arm_zero_setup():
+                self.print_colored("零点设置失败，无法继续执行手臂磨线", Colors.RED)
+                return 1
         
         print()
         self.print_colored("手臂磨线测试时长：", Colors.YELLOW)
@@ -615,10 +639,14 @@ class KuavoUnifiedBreakin:
             self.print_colored("注意：程序启动后，您可以直接与子进程交互", Colors.YELLOW)
             self.print_colored("如果遇到电机失能等问题，请直接输入 'c' 并按回车来失能电机", Colors.CYAN)
             
+            # 统一使用arm_breakin_roban2.sh脚本
+            cmd = ["bash", str(self.arm_breakin_script)]
+            cwd = str(self.arm_breakin_script.parent)
+
             # 使用Popen启动子进程，保持交互式环境
             process = subprocess.Popen(
-                ["bash", str(self.arm_breakin_script)],
-                cwd=str(self.arm_breakin_script.parent),
+                cmd,
+                cwd=cwd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -884,50 +912,77 @@ class KuavoUnifiedBreakin:
     def run_arm_breakin_background(self, log_file, arm_duration, wait_for_leg_signal=True):
         """在后台运行手臂磨线"""
         def delayed_arm_breakin():
+            log_file_handle = None
             try:
                 sync_signal_file = "/tmp/leg_ready_signal"
                 
+                # 打开日志文件，保持打开状态直到进程结束
+                log_file_handle = open(log_file, 'a', buffering=1)
+                
+                # 先写入日志信息
                 if wait_for_leg_signal:
-                    # 等待腿部准备完成的信号
-                    with open(log_file, 'a') as f:
-                        f.write("等待腿部准备完成信号...\n")
-                        f.flush()
-                    
-                    # 等待腿部信号文件出现
+                    log_file_handle.write("等待腿部准备完成信号（手臂磨线进程已启动，正在初始化...）...\n")
+                    log_file_handle.flush()
+                else:
+                    log_file_handle.write("手臂磨线立即开始执行...\n")
+                    log_file_handle.flush()
+                
+                # 执行手臂磨线 - 先启动进程，让它开始初始化（CAN连接、使能电机等）
+                input_pipe = subprocess.PIPE
+                
+                # 统一使用arm_breakin_roban2.sh脚本
+                cmd = ["bash", str(self.arm_breakin_script)]
+                if wait_for_leg_signal:
+                    # 同时运行时，添加 --wait-for-leg 参数，强制等待腿部信号
+                    cmd.append("--wait-for-leg")
+                cwd = str(self.arm_breakin_script.parent)
+
+                # 启动进程，将stdout和stderr重定向到日志文件
+                # 注意：log_file_handle需要保持打开，直到进程结束
+                self.arm_process = subprocess.Popen(
+                    cmd,
+                    cwd=cwd,
+                    stdout=log_file_handle,
+                    stderr=subprocess.STDOUT,
+                    stdin=input_pipe,
+                    text=True,
+                    preexec_fn=os.setsid  # 创建新的进程组，便于信号传递
+                )
+                
+                if wait_for_leg_signal:
+                    # 等待腿部准备完成的信号，在等待期间进程会进行初始化
+                    # 进程会等待stdin输入时长参数，所以不会立即开始执行
                     while not os.path.exists(sync_signal_file):
                         time.sleep(0.1)
                     
-                    with open(log_file, 'a') as f:
-                        f.write("收到腿部准备完成信号，开始执行手臂磨线...\n")
-                        f.flush()
-                else:
-                    # 立即执行（用于单独运行手臂磨线）
-                    with open(log_file, 'a') as f:
-                        f.write("手臂磨线立即开始执行...\n")
-                        f.flush()
-                
-                # 执行手臂磨线
-                input_pipe = subprocess.PIPE
-                
-                with open(log_file, 'a') as f:
-                    self.arm_process = subprocess.Popen(
-                        ["bash", str(self.arm_breakin_script)],
-                        cwd=str(self.arm_breakin_script.parent),
-                        stdout=f,
-                        stderr=subprocess.STDOUT,
-                        stdin=input_pipe,
-                        text=True,
-                        preexec_fn=os.setsid  # 创建新的进程组，便于信号传递
-                    )
+                    log_file_handle.write("收到腿部准备完成信号，开始执行手臂磨线...\n")
+                    log_file_handle.flush()
                     
+                    # 收到信号后，发送时长参数，开始执行
                     if arm_duration is not None:
                         self.arm_process.stdin.write(str(arm_duration) + "\n")
                         self.arm_process.stdin.flush()
                         self.arm_process.stdin.close()
+                else:
+                    # 立即执行（用于单独运行手臂磨线）
+                    if arm_duration is not None:
+                        self.arm_process.stdin.write(str(arm_duration) + "\n")
+                        self.arm_process.stdin.flush()
+                        self.arm_process.stdin.close()
+                
+                # 保持日志文件句柄打开，直到进程结束
+                # 主程序会通过poll()检查进程状态，这里只需要保持文件句柄打开
+                self.arm_process.wait()
+                # 进程结束后关闭文件句柄在finally块中处理
                         
             except Exception as e:
-                with open(log_file, 'a') as f:
-                    f.write(f"手臂磨线执行出错: {e}\n")
+                if log_file_handle:
+                    log_file_handle.write(f"手臂磨线执行出错: {e}\n")
+                    log_file_handle.flush()
+            finally:
+                # 关闭日志文件句柄
+                if log_file_handle:
+                    log_file_handle.close()
         
         try:
             arm_thread = threading.Thread(target=delayed_arm_breakin, daemon=True)
@@ -979,10 +1034,32 @@ class KuavoUnifiedBreakin:
             self.print_colored("腿部磨线脚本编译失败，无法继续执行", Colors.RED)
             return 1
         
-        self.print_colored("在执行手臂磨线之前，需要先完成零点设置", Colors.YELLOW)
-        if not self.run_arm_zero_setup():
-            self.print_colored("零点设置失败，无法继续执行手臂磨线", Colors.RED)
-            return 1
+        # 版本14：同时运行时跳过手臂零点设置三步，改为先执行电机校准 --cali
+        if str(self.robot_version) == "14":
+            self.print_colored("版本14：同时运行时跳过手臂零点设置步骤（步骤1/2/3）", Colors.CYAN)
+            # 执行 motorevo_tool.sh --cali
+            try:
+                if not self.motorevo_tool_sh.exists():
+                    self.print_colored(f"错误：未找到校准脚本 {self.motorevo_tool_sh}", Colors.RED)
+                    return 1
+                self.print_colored("开始执行电机校准 (--cali)...", Colors.BLUE)
+                result_cali = subprocess.run(
+                    ["bash", str(self.motorevo_tool_sh), "--cali"],
+                    cwd=str(self.motorevo_tool_sh.parent),
+                    text=True
+                )
+                if result_cali.returncode != 0:
+                    self.print_colored("电机校准失败 (--cali)", Colors.RED)
+                    return 1
+                self.print_colored("✓ 电机校准完成", Colors.GREEN)
+            except Exception as e:
+                self.print_colored(f"执行电机校准出错: {e}", Colors.RED)
+                return 1
+        else:
+            self.print_colored("在执行手臂磨线之前，需要先完成零点设置", Colors.YELLOW)
+            if not self.run_arm_zero_setup():
+                self.print_colored("零点设置失败，无法继续执行手臂磨线", Colors.RED)
+                return 1
         
         arm_duration, leg_duration = self.get_user_inputs()
         if arm_duration is None or leg_duration is None:
@@ -1126,7 +1203,7 @@ class KuavoUnifiedBreakin:
         
         while True:
             self.show_menu()
-            choice = input("请输入选项 (1-4): ").strip()
+            choice = input("请输入选项 (1-3 或 q): ").strip()
             
             if choice == "1":
                 return self.run_arm_breakin()
