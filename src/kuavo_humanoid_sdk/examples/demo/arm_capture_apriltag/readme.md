@@ -15,45 +15,13 @@
 
 ---
 
-## 配置修改(必要)
-
-1. 修改launch文件,启动运动学mpc
-
-  - mujoco仿真
-    - 文件位置`~/src/humanoid-control/humanoid_controllers/launch/load_kuavo_mujoco_sim.launch`
-    - 找到`<arg name="with_mm_ik" default="false"/>`这一行
-    - 将其修改为`<arg name="with_mm_ik" default="true"/>`
-
-  - 机器人实机
-    - 文件位置`~/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real.launch`
-    - 找到`<arg name="with_mm_ik" default="false"/>`这一行
-    - 将其修改为`<arg name="with_mm_ik" default="true"/>`
-
-2. 需要修改sdk的初始化程序, 屏蔽部分功能
-   
-  - 文件位置`~/src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo/__init__.py` 
-  - 注释掉如下四行
-    ```python
-    from .robot_blockly import RobotControlBlockly
-    from .robot_microphone import RobotMicrophone
-    from .robot_navigation import RobotNavigation
-    from .robot_speech import RobotSpeech
-    ```
-
 ## 使用方法
 
 1. **SDK环境构建**
-  - 运行`pip show kuavo-humanoid-sdk-ws`和`pip show kuavo-humanoid-sdk`查看本地的sdk版本
-  - 建议通过本地安装sdk，使用：
-    ```bash 
-    # 确保代码仓库已编译
-    sudo su
-    cd src/kuavo_humanoid_sdk
-    chmod +x install.sh
-    ./install.sh
-    ```
-  - 注意:`kuavo-humanoid-sdk-ws`与`kuavo-humanoid-sdk`二者互相冲突,不能同时存在,可参考`uninstall_sdk.md`对`kuavo-humanoid-sdk-ws`进行卸载
-  - 注意:普通用户与sudo用户下安装的sdk相对独立, 建议在root用户下安装和调用sdk
+  - 运行`pip show kuavo-humanoid-sdk-ws`或`pip show kuavo-humanoid-sdk`查看本地的sdk版本
+  - 若已存在新版本的sdk,可以跳过此步骤
+  - 若未存在,运行`pip install kuavo-humanoid-sdk-ws`安装最新稳定版本sdk
+  - 注意:若`kuavo-humanoid-sdk-ws`与`kuavo-humanoid-sdk`二者互相冲突,不能同时存在,可参考`uninstall_sdk.md`进行卸载
 
 2. **下位机 使机器人站立**
   - 仿真：`roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch with_mm_ik:=True`
@@ -68,13 +36,13 @@
     - 执行 `sudo su` 进入root用户，
     - 执行 `source devel/setup.bash` ，
     - 执行 `roslaunch motion_capture_ik ik_node.launch ` ，
+
       ```bash
       cd kuavo-ros-opensource  # 进入下位机工作空间
       sudo su
       source devel/setup.bash
       roslaunch motion_capture_ik ik_node.launch 
       ```
-
 4. **发送tag信息（`仿真运行`和`实机运行`二选一，不要同时运行）**
 - `仿真运行 下位机` 启动tag信息mock工具
   - 新开一个终端执行 `cd kuavo-ros-opensource` ，

@@ -3,6 +3,7 @@ import rospy
 import json
 import numpy as np
 import os
+import time
 from kuavo_msgs.msg import footPose
 from kuavo_msgs.msg import footPoseTargetTrajectories, armTargetPoses
 from kuavo_msgs.msg import gaitTimeName
@@ -13,8 +14,46 @@ import math
 from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 import argparse
-import time;
 from std_msgs.msg import Float64MultiArray
+import logging
+from logging.handlers import RotatingFileHandler
+
+def setup_taiji_test_logging():
+    """设置手臂测试脚本的日志记录"""
+    try:
+        home_dir = os.path.expanduser("~")
+        log_dir = os.path.join(home_dir, '.ros', 'robot_agent')
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, 'taiji.log')
+    except Exception as e:
+        log_dir = os.path.dirname(os.path.abspath(__file__))
+        log_file = os.path.join(log_dir, 'taiji.log')
+        print(f"Failed to use $HOME/.ros/robot_agent directory: {str(e)}. Using current directory instead.")
+
+    # 配置日志格式
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    # 创建文件处理器
+    file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+    
+    # 创建控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+    
+    # 配置根日志记录器
+    logger = logging.getLogger('arm_test')
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    logger.info(f"手臂测试日志初始化完成，日志文件: {log_file}")
+    return logger
+
+# 创建全局日志记录器
+taiji_logger = setup_taiji_test_logging()
 
 class ActionPlayer:
     """动作播放器，用于控制机器人执行预定义的动作序列"""
@@ -426,31 +465,42 @@ class ActionPlayer:
             rospy.logerr(f"调用手臂控制模式服务失败: {str(e)}")
             return False
     
-    def execute_action_with_csv(self, time_offset=None):
+    def execute_action_with_csv(self, time_offset=None, target_time=None):
         """执行动作序列
         
         Args:
             time_offset: 时间偏移量，如果为None则不设置偏移
+            target_time: 目标执行时间（纳秒时间戳）
         """
         if not self.step_control:
             rospy.logerr("未加载手臂数据")
             return
             
-        rospy.loginfo("开始执行动作序列...")
+        taiji_logger.info("开始执行动作序列...")
         
         # 设置手臂为外部控制模式
+        mode_start_ns = time.time_ns()
+        taiji_logger.info("🔧 更改手臂控制模式为2...")
         if not self.set_arm_external_control():
-            rospy.logerr("无法切换到手臂外部控制模式，终止执行")
+            taiji_logger.error("无法切换到手臂外部控制模式，终止执行")
             return
+        mode_end_ns = time.time_ns()
+        mode_duration_ns = mode_end_ns - mode_start_ns
+        taiji_logger.info(f"   模式更改耗时: {mode_duration_ns} ns ({mode_duration_ns/1e6:.3f} ms)")
             
         # 等待接收到MPC时间
         timeout = rospy.Duration(5.0)  # 5秒超时
         start_wait = rospy.Time.now()
         while not self.mpc_time_received:
             if (rospy.Time.now() - start_wait) > timeout:
-                rospy.logerr("等待MPC时间超时")
+                taiji_logger.error("等待MPC时间超时")
                 return
             rospy.sleep(0.1)
+        
+        # 如果指定了目标时间，等待到该时间点
+        if target_time is not None:
+            taiji_logger.info("🎯 检测到目标时间参数，等待到指定时间点...")
+            wait_for_target_time(target_time)
         
         # 如果指定了时间偏移
         if time_offset is not None and time_offset > 0:
@@ -459,7 +509,7 @@ class ActionPlayer:
             start_wait = rospy.Time.now()
             while not self.mpc_time_received:
                 if (rospy.Time.now() - start_wait) > timeout:
-                    rospy.logerr("等待MPC时间超时")
+                    taiji_logger.error("等待MPC时间超时")
                     return False
                 rospy.sleep(0.1)
             
@@ -482,30 +532,87 @@ class ActionPlayer:
         start_wait = rospy.Time.now()
         while not self.gait_start_time_received:
             if (rospy.Time.now() - start_wait) > timeout:
-                rospy.logerr("等待步态开始时间超时")
+                taiji_logger.error("等待步态开始时间超时")
                 return
             rospy.sleep(0.1)
-        rospy.loginfo(f"步态开始时间: {self.gait_start_time}, 等待手臂轨迹发布")
+        taiji_logger.info(f"步态开始时间: {self.gait_start_time}, 等待手臂轨迹发布")
         
         # 等待到达步态开始时间
         while self.mpc_time < self.gait_start_time:
             rospy.sleep(0.1)
-        rospy.loginfo("开始发布手臂轨迹")
+        taiji_logger.info("开始发布手臂轨迹")
             
         # 生成并发布手臂轨迹（基于步态开始时间）
         arm_traj = self.generate_arm_trajectory_with_csv(0)
         if arm_traj:
             self.arm_target_pub.publish(arm_traj)
-            rospy.loginfo(f"已发送手臂轨迹，起始时间: {self.gait_start_time}")
+            taiji_logger.info(f"已发送手臂轨迹，起始时间: {self.gait_start_time}")
             
         # 计算总持续时间
         total_arm_time = len(self.step_control) * 0.1  # 每行数据0.01秒
         
-        rospy.loginfo(f"等待动作完成，预计耗时: {total_arm_time}秒")
+        taiji_logger.info(f"等待动作完成，预计耗时: {total_arm_time}秒")
         start_time = rospy.get_time()
         while (rospy.get_time() - start_time) < total_arm_time and not rospy.is_shutdown():
             rospy.sleep(0.1)  # 短间隔睡眠，保证响应中断
-        rospy.loginfo("动作序列执行完成")
+        taiji_logger.info("动作序列执行完成")
+
+def wait_for_target_time(target_time_ns):
+    """等待到指定的绝对时间点（纳秒）"""
+    
+    current_time_ns = time.time_ns()
+    wait_time_ns = target_time_ns - current_time_ns
+    
+    # 打印高精度时间信息
+    current_time_s = current_time_ns / 1e9
+    target_time_s = target_time_ns / 1e9
+    
+    taiji_logger.info("="*60)
+    taiji_logger.info("⏰ 高精度时间同步信息:")
+    taiji_logger.info(f"   当前时间: {current_time_ns} ns ({current_time_s:.9f} s)")
+    taiji_logger.info(f"   目标时间: {target_time_ns} ns ({target_time_s:.9f} s)")
+    taiji_logger.info(f"   时间差: {wait_time_ns} ns")
+    
+    if wait_time_ns > 0:
+        wait_time_s = wait_time_ns / 1e9
+        wait_time_ms = wait_time_ns / 1e6
+        wait_time_us = wait_time_ns / 1e3
+        
+        taiji_logger.info(f"   等待时间: {wait_time_s:.3f} s = {wait_time_ms:.3f} ms = {wait_time_us:.3f} μs")
+        
+        # 精确等待到目标时间
+        start_wait_ns = time.time_ns()
+        while time.time_ns() < target_time_ns:
+            remaining_ns = target_time_ns - time.time_ns()
+            if remaining_ns > 1000000:  # 如果剩余时间大于1ms
+                time.sleep(0.001)  # 休眠1ms
+            else:
+                # 小于1ms时，忙等待以获得更高精度
+                pass
+        
+        # 计算实际等待精度
+        end_wait_ns = time.time_ns()
+        actual_wait_ns = end_wait_ns - start_wait_ns
+        timing_error_ns = actual_wait_ns - wait_time_ns
+        
+        actual_exec_ns = time.time_ns()
+        timing_error_exec_ns = actual_exec_ns - target_time_ns
+        
+        taiji_logger.info("⏱️  等待完成统计:")
+        taiji_logger.info(f"   计划等待: {wait_time_ns} ns")
+        taiji_logger.info(f"   实际等待: {actual_wait_ns} ns")
+        taiji_logger.info(f"   等待误差: {timing_error_ns:+d} ns ({timing_error_ns/1e3:+.3f} μs)")
+        taiji_logger.info(f"   执行时间: {actual_exec_ns} ns")
+        taiji_logger.info(f"   执行误差: {timing_error_exec_ns:+d} ns ({timing_error_exec_ns/1e3:+.3f} μs)")
+        taiji_logger.info("✅ 到达目标时间点，开始执行动作")
+        taiji_logger.info("="*60)
+    else:
+        # 目标时间已过的情况
+        overdue_ns = -wait_time_ns
+        overdue_ms = overdue_ns / 1e6
+        taiji_logger.warning(f"⚠️  目标时间已过: {overdue_ns} ns ({overdue_ms:.3f} ms)")
+        taiji_logger.warning("⚠️  立即执行动作")
+        taiji_logger.info("="*60)
 
 def main():
     """主函数"""
@@ -514,9 +621,38 @@ def main():
     parser.add_argument('csv_file', type=str, help='CSV文件路径', nargs='?', 
                        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "actions", "taiji_step_roban_stable.csv"))
     parser.add_argument('--time-offset', type=float, help='轨迹开始时间的偏移量(秒)。正值表示在当前MPC时间基础上延迟执行，负值或当前时间之前的值将被忽略（使用默认值-1）')
+    parser.add_argument('--target-time', type=int, help='目标执行时间（纳秒时间戳）')
     
     # 解析命令行参数
     args = parser.parse_args()
+    
+    # 处理目标时间
+    target_time_ns = args.target_time
+    if target_time_ns:
+        import time
+        start_time_ns = time.time_ns()
+        
+        # 打印从参数接收的原始目标时间
+        original_target_s = target_time_ns / 1e9
+        taiji_logger.info("🎯 接收到目标时间参数:")
+        taiji_logger.info(f"   原始目标时间: {target_time_ns} ns ({original_target_s:.9f} s)")
+        taiji_logger.info("   目标时间已记录，将用于时间同步")
+        
+        # 检查是否已经超过目标时间
+        if start_time_ns > target_time_ns:
+            overdue_ns = start_time_ns - target_time_ns
+            overdue_ms = overdue_ns / 1e6
+            taiji_logger.warning(f"⚠️  当前时间已超过目标时间: {overdue_ns} ns ({overdue_ms:.3f} ms)")
+            
+            # 自动延后5秒
+            target_time_ns = start_time_ns + int(5e9)  # 5秒 = 5,000,000,000 ns
+            new_target_s = target_time_ns / 1e9
+            taiji_logger.warning(f"🕐 自动调整目标时间延后5秒: {target_time_ns} ns ({new_target_s:.9f} s)")
+        else:
+            taiji_logger.info(f"   目标时间: {target_time_ns} ns")
+            taiji_logger.info("   将在指定时间执行手臂动作")
+    else:
+        taiji_logger.info("   未指定目标时间，立即执行")
     
     player = ActionPlayer()
     
@@ -529,7 +665,7 @@ def main():
     
     try:
         # 执行动作序列
-        player.execute_action_with_csv(args.time_offset)
+        player.execute_action_with_csv(args.time_offset, args.target_time)
     except rospy.ROSInterruptException:
         rospy.loginfo("动作执行被中断")
     except Exception as e:

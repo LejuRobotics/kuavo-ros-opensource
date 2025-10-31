@@ -101,7 +101,7 @@ const sidebars = {
             'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/机器人手臂示教案例',
             'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/手臂轨迹规划案例',
             'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/键盘控制案例',
-            'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/强化学习案例gym版',
+            'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/强化学习案例',
             'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/接入deepseek大模型语音交互案例',
             'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/大模型联网搜索与视觉推理案例',
             'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/二维码抓取水瓶案例',
@@ -156,7 +156,6 @@ const sidebars = {
         'basic_usage/kuavo-ros-control/docs/6常用工具/硬件测试工具',
         'basic_usage/kuavo-ros-control/docs/6常用工具/热点工具',
         'basic_usage/kuavo-ros-control/docs/6常用工具/Kuavo机器人桌面软件使用手册',
-        'basic_usage/kuavo-ros-control/docs/6常用工具/Kuavo机器人启动脚本使用指南',
       ],
     },
     {

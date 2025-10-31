@@ -102,20 +102,6 @@
    - 确保 VR 设备和机器人连接同一 WiFi
 
 ### 使用
-- 若您的机器末端执行器为夹爪
-  - 检查下位机本地的`<kuavo-ros-opensource>/src/kuavo_assets/config/kuavo_v$ROBOT_VERSION/kuavo.json`这个文件
-    - 找到`"EndEffectorType": ["qiangnao", "qiangnao"],`这一行
-    - 将其修改为`"EndEffectorType": ["lejuclaw", "lejuclaw"],`(若已为"lejuclaw"则不需要修改)
-
-  - 检查下位机本地的`<kuavo-ros-opensource>/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch`这个文件
-    - 找到`<arg name="ee_type" default="qiangnao"/>`这一行
-    - 将其修改为`<arg name="ee_type" default="lejuclaw"/>`(若已为"lejuclaw"则不需要修改)
-
-  - 检查下位机本地的`<kuavo-ros-opensource>/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch`这个文件
-    - 找到`<arg name="ee_type" default="qiangnao"/>`这一行
-    - 将其修改为`<arg name="ee_type" default="lejuclaw"/>`(若已为"lejuclaw"则不需要修改)
-
-  - 注意:该配置在更新代码仓库后会失效, 需要重新进行检查和配置
 
 - 正常启动机器人完成站立
 

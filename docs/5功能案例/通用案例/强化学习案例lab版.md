@@ -1,28 +1,16 @@
-# 强化学习案例lab版
-- [强化学习案例lab版](#强化学习案例lab版)
+# Isaac Lab 机器人强化学习训练与部署流程
+- [Isaac Lab 机器人强化学习训练与部署流程](#isaac-lab-机器人强化学习训练与部署流程)
   - [0. 概述](#0-概述)
-  - [1. 效果展示](#1-效果展示)
-  - [2. 环境准备 (Environment Preparation)](#2-环境准备-environment-preparation)
-  - [3. 模型训练 (Train Your Model)](#3-模型训练-train-your-model)
-  - [4. 模型转换 (Convert .pt to .onnx)](#4-模型转换-convert-pt-to-onnx)
-  - [5. 模型部署 (Deploy to Sim/Real)](#5-模型部署-deploy-to-simreal)
+  - [1. 环境准备 (Environment Preparation)](#1-环境准备-environment-preparation)
+  - [2. 模型训练 (Train Your Model)](#2-模型训练-train-your-model)
+  - [3. 模型转换 (Convert .pt to .onnx)](#3-模型转换-convert-pt-to-onnx)
+  - [4. 模型部署 (Deploy to Sim/Real)](#4-模型部署-deploy-to-simreal)
 
 ## 0. 概述
 
 > 本案例简单介绍如何使用乐聚开源的强化学习运动控制仓库leju_robot_rl实现对乐聚夸父机器人的训练和部署。
 
-## 1. 效果展示
-
-  - sim2sim
-
-  <iframe src="//player.bilibili.com/player.html?isOutside=true&aid=115235298024093&bvid=BV18bp9zkERM&cid=32506317717&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>
-
-  - sim2real
-
-  <iframe src="//player.bilibili.com/player.html?isOutside=true&aid=115235297957804&bvid=BV1gbp9zkEST&cid=32506317823&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>
-
-
-## 2. 环境准备 (Environment Preparation)
+## 1. 环境准备 (Environment Preparation)
 
 - **系统要求:**Ubuntu 20.04/22.04 LTS
 
@@ -31,7 +19,7 @@
 1.  **下载所需软件**
     *   下载 Isaac Sim 4.2 ，流程参考：[![IsaacSim](https://img.shields.io/badge/IsaacSim-4.2.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/4.2.0/index.html)
     *   下载 Isaac Lab 1.4.1 (本例将Isaac Lab下载至主目录下)，流程参考：[![IsaacLab](https://img.shields.io/badge/IsaacLab-1.4.1-silver.svg)](https://isaac-sim.github.io/IsaacLab/v1.4.1/source/setup/installation/binaries_installation.html)
-    - 若在上述网址没能找到Isaac Sim 4.2 的安装路径，可参考[4.5版本的网址](https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/download.html)，如图：[isaacsim下载位置示意](./images/isaacsim下载位置示意.png)
+    - 若在上述网址没能找到Isaac Sim 4.2 的安装路径，可参考[4.5版本的网址](https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/download.html)，如图：[isaacsim下载位置示意](./isaacsim下载位置示意.png)
     *   下载 rsl_rl，推荐使用`commit 386875591808cfd1462a42446b1fa0a22ac161d0`
     ```bash
     git clone https://github.com/leggedrobotics/rsl_rl.git
@@ -92,7 +80,7 @@
   
     - 请使用[Isaac Lab官方文档网站](https://isaac-sim.github.io/IsaacLab/v1.4.1/source/setup/installation/binaries_installation.html#verifying-the-isaac-lab-installation)确认您的Isaac Lab成功安装后，再进行后续步骤。
 
-## 3. 模型训练 (Train Your Model)
+## 2. 模型训练 (Train Your Model)
 
 - 克隆leju_robot_rl仓库 
 ```bash
@@ -124,7 +112,7 @@ git clone https://gitee.com/leju-robot/leju_robot_rl.git
         --headless
     ```
 
-## 4. 模型转换 (Convert .pt to .onnx)
+## 3. 模型转换 (Convert .pt to .onnx)
 
 训练完成后，将 PyTorch 模型文件 (`.pt`) 转换为机器人部署所需的 ONNX 格式 (`.onnx`)。
 
@@ -139,37 +127,34 @@ git clone https://gitee.com/leju-robot/leju_robot_rl.git
 3.  新生成的 `.onnx` 模型文件文件位置为`leju_robot_rl/logs/rsl_rl/Kuavo/s42/flat/{time_train}/exported/policy_s42.onnx`，将其拷贝至下位机环境或真实机器人上，目标位置为`/home/lab/kuavo-rl-opensource/kuavo-robot-deploy/src/humanoid-control/humanoid_controllers/model/networks`。
 ---
 
-## 5. 模型部署 (Deploy to Sim/Real)
+## 4. 模型部署 (Deploy to Sim/Real)
 
 将训练好的模型部署到仿真环境或真实机器人上。
 
 - 下载kuavo_rl_opensource仓库
 
 ```bash
-git clone -b beta https://gitee.com/leju-robot/kuavo-rl-opensource.git
+git clone -b https://gitee.com/leju-robot/kuavo-rl-opensource.git
 ```
 
 1.  **修改 `launch` 文件，文件位置为`/home/lab/kuavo-rl-opensource/kuavo-robot-deploy/src/humanoid-control/humanoid_controllers/launch`。**
 - 如果是将模型部署至仿真环境，则对`load_kuavo_mujoco_sim.launch`进行修改；
 如果是将模型部署至真实机器人，则对`load_kuavo_real.launch`进行修改:
-```bash
-# 原有代码为：
-<arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
-# 应修改为：
-# 确保程序使用的是flat_csp.info
-<arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/flat_csp.info"/>
-```
+    ```bash
+    # 原有代码为：
+    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    # 应修改为：
+    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/flat_csp.info"/>
+    ```
 
 2.  **修改 `flat_csp.info` 文件，文件位置为`/home/lab/kuavo-rl-opensource/kuavo-robot-deploy/src/humanoid-control/humanoid_controllers/config/kuavo_v46/rl`**:
-  *   将其中引用的原始 `.onnx` 模型更改为新生成的模型。
-```bash
-# 原有代码为：
-networkModelFile          /policy_s46_demo.onnx;
-# 将其修改为：
-# 确保程序使用的模型是您训练生成的：
-networkModelFile          /your_new_model.onnx;
-```
-  *   我们的代码仓库里提供了一个基于该案例训练好的模型`policy_s46_demo.onnx`可以直接使用
+    *   将其中引用的原始 `.onnx` 模型更改为新生成的模型。
+    ```bash
+    # 原有代码为：
+    networkModelFile          /policy_s46_demo.onnx;
+    # 将其修改为：
+    networkModelFile          /your_new_model.onnx;
+    ```
 
 3. **编译**
 ```bash
@@ -198,8 +183,8 @@ catkin build humanoid_controllers
 # 新开终端
 cd kuavo-rl-opensource/kuavo-robot-deploy
 sudo su
-export ROBOT_VERSION=46
 source devel/setup.bash
+export ROBOT_VERSION=46
 # 仿真环境下
 roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12 # 启动rl控制器、wbc、仿真器。
 # 实物环境下

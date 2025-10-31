@@ -133,7 +133,7 @@ swing_trajectory_config
   slope_planning_threshold                     3.0        
   enable_interrupt_with_est_mode              false
   enable_dynamic_q             true
-  enable_dynamic_r             true
+  enable_dynamic_r             false
 
   deadBandVelocity             0.1
   heelToeMaxHeightVelocity     0.3
@@ -483,7 +483,7 @@ frictionConeSoftConstraint
 
 basePitchLimits
 {
-  enable                 true ;can be close by /humanoid/mpc/enable_base_pitch_limit
+  enable                 false ;can be close by /humanoid/mpc/enable_base_pitch_limit
   pos
   {
     mu      0.1       ; relaxed log barrier mu
@@ -533,6 +533,23 @@ selfCollision
   ; relaxed log barrier parameters
   mu      1e-2
   delta   1e-3
+}
+
+; Center of Mass constraint
+centerOfMass
+{
+  ; Enable center of mass constraint (true/false)
+  enable  false
+  
+  ; Use relaxed barrier penalty (true) or quadratic penalty (false)
+  useRelaxedBarrier  true
+  
+  ; For relaxed barrier penalty
+  mu      100     ; barrier parameter (smaller = tighter constraint)
+  delta   1e-5     ; relaxation parameter
+  
+  ; For quadratic penalty (only used if useRelaxedBarrier = false)
+  weight  100.0    ; penalty weight
 }
 
 ; Whole body control

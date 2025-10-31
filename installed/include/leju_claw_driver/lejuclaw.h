@@ -80,10 +80,10 @@ public:
 private:
     // 控制参数常量
     static constexpr float DEFAULT_KP = 18.00f;                    // 比例增益系数，用于位置控制响应速度
-    static constexpr float DEFAULT_KD = 3.20f;                     // 微分增益系数，用于阻尼控制
+    static constexpr float DEFAULT_KD = 3.0f;                      // 微分增益系数，用于阻尼控制
     static constexpr float DEFAULT_ALPHA = 0.20f;                  // 低通滤波器系数，用于信号平滑
     static constexpr float DEFAULT_MAX_CURRENT = 2.50f;            // 最大电流限制，防止过载保护，单位 A
-    static constexpr float DEFAULT_MIN_ERROR = 0.05f;              // 最小误差阈值，用于判断到位精度，单位 rad
+    static constexpr float DEFAULT_MIN_ERROR = 0.02f;              // 最小误差阈值，用于判断到位精度，单位 rad
     static constexpr float DEFAULT_DT = 0.002f;                    // 控制周期，控制循环时间间隔，单位 s
     // 卡死检测参数
     static constexpr float STUCK_DETECTION_DELAY_MS = 50.0f;       // 卡死检测延迟时间，单位 ms
@@ -105,9 +105,7 @@ private:
     // 刹车参数
     static constexpr float BRAKE_RANGE_PERCENT = 35.0f;             // 刹车范围百分比，在行程两端刹车范围内减速，单位 %
     static constexpr float BRAKE_MIN_SPEED_FACTOR = 0.01f;          // 刹车最小速度系数，在限位处速度降至最小值，单位 %
-    static constexpr float BRAKE_CURVE_EXPONENT = 40.0f;            // 刹车曲线指数，控制减速曲线形状
-    static constexpr float TARGET_PROXIMITY_BRAKE_PERCENT = 10.0f;  // 目标位置附近刹车范围，单位 %
-    static constexpr float TARGET_PROXIMITY_MIN_FACTOR = 0.05f;     // 目标位置附近最小速度系数
+    static constexpr float BRAKE_CURVE_EXPONENT = 30.0f;            // 刹车曲线指数，控制减速曲线形状
     
     // 初始化寻找零点参数
     static constexpr float ZERO_CONTROL_KP = 0.0f;                  // 零点控制比例增益，零点寻找时使用

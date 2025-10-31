@@ -10,7 +10,7 @@
   <arg name="send_srv"           default="1"/>
   <arg name="ee_type"            default="qiangnao"/>
   <arg name="control_torso"      default="0" /> <!-- 0: do NOT control, 1: control torso  -->
-  <arg name="ip_address"         default="192.168.3.17" /> <!-- ip address of quest3 -->
+  <arg name="ip_address"         default="" /> <!-- ip address of quest3 -->
   <arg name="use_quest3_utils"   default="true"/>
   <arg name="rl"                 default="1"/>
   <arg name="predict_time"       default="0.0"/>

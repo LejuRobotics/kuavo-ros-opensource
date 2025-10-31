@@ -1,6 +1,6 @@
 #!/bin/bash
 export ROS_WS_PATH=/opt/ros/noetic
-export CATKIN_WS_PATH=/home/lab/kuavo_ros1_workspace
+export CATKIN_WS_PATH=/home/lab/kuavo-ros-control
 
 whoami
 source $ROS_WS_PATH/setup.bash

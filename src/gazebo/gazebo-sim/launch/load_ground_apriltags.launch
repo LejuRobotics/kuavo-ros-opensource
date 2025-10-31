@@ -1,0 +1,36 @@
+<launch>
+  <!-- 地面 AprilTag 配置 -->
+  <arg name="use_ground_apriltags" default="true" doc="是否加载地面AprilTag"/>
+  <arg name="apriltag_model_path" default="$(find kuavo_assets)/models/apriltag/urdf/ground_apriltag.xacro" doc="地面AprilTag模型XACRO文件路径"/>
+  <arg name="apriltag_x" default="0.0" doc="AprilTag基础位置X坐标"/>
+  <arg name="apriltag_y" default="0.0" doc="AprilTag基础位置Y坐标"/>
+  <arg name="apriltag_z" default="0.0005" doc="AprilTag基础位置Z坐标"/>
+  <arg name="apriltag_roll" default="0.0" doc="AprilTag绕X轴旋转角度（弧度）"/>
+  <arg name="apriltag_pitch" default="0.0" doc="AprilTag绕Y轴旋转角度（弧度）"/>
+  <arg name="apriltag_yaw" default="0.0" doc="AprilTag绕Z轴旋转角度（弧度）"/>
+
+  <!-- 点光源配置 -->
+  <arg name="use_point_light" default="true" doc="是否加载点光源"/>
+  <arg name="point_light_name" default="user_point_light_0"/>
+  <arg name="point_light_x" default="0.0"/>
+  <arg name="point_light_y" default="0.0"/>
+  <arg name="point_light_z" default="1.0"/>
+  <arg name="point_light_sdf_path" default="$(find gazebo_sim)/models/point_light/point_light.sdf"/>
+  
+  <!-- 加载地面 AprilTag 模型 -->
+  <group if="$(arg use_ground_apriltags)">
+    <node name="spawn_ground_apriltags" pkg="gazebo_ros" type="spawn_model" 
+          args="-urdf -model ground_apriltags -param ground_apriltag_description -x $(arg apriltag_x) -y $(arg apriltag_y) -z $(arg apriltag_z) -R $(arg apriltag_roll) -P $(arg apriltag_pitch) -Y $(arg apriltag_yaw)" 
+          respawn="false" output="screen"/>
+    
+    <!-- 加载地面 AprilTag 模型描述 -->
+    <param name="ground_apriltag_description" command="$(find xacro)/xacro $(arg apriltag_model_path)"/>
+  </group>
+
+  <!-- 以SDF文件方式加载点光源 -->
+  <group if="$(arg use_point_light)">
+    <node name="spawn_point_light" pkg="gazebo_ros" type="spawn_model"
+          args="-sdf -model $(arg point_light_name) -file $(arg point_light_sdf_path) -x $(arg point_light_x) -y $(arg point_light_y) -z $(arg point_light_z)"
+          respawn="false" output="screen"/>
+  </group>
+</launch>

@@ -31,9 +31,11 @@ find_package(catkin REQUIRED
         kuavo_msgs
         humanoid_interface_drake
         kuavo_common
+        kuavo_solver
         )
 find_package(drake REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(OpenVINO REQUIRED)
 pkg_check_modules(pinocchio REQUIRED pinocchio)
 
 if (USE_DDS)
@@ -101,6 +103,7 @@ catkin_package(
                 # ocs2_biped_robot_ros
                 angles
                 kuavo_common
+                kuavo_solver
 )
 
 ###########
@@ -128,6 +131,17 @@ link_directories(
         ${pinocchio_LIBRARY_DIRS}
 )
 
+# arm torque controller
+add_library(arm_torque_controller SHARED
+  src/armTorqueController.cpp
+)
+target_link_libraries(arm_torque_controller
+  ${catkin_LIBRARIES}
+  ${pinocchio_LIBRARIES}
+)
+install(TARGETS arm_torque_controller
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+)
 
 # 添加共享内存管理库
 add_library(humanoid_interface_shm SHARED
@@ -206,13 +220,16 @@ endif()
 ## Declare a cpp library
 add_library(${PROJECT_NAME}
         src/humanoidController.cpp
+        src/RlGaitReceiver.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}
         ${catkin_LIBRARIES}
         ${pinocchio_LIBRARIES}
         humanoid_interface_shm
-        drake::drake 
+        drake::drake
+        openvino::runtime
+        arm_torque_controller 
         )
 if (USE_DDS)
         target_link_libraries(${PROJECT_NAME}

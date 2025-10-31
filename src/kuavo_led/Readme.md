@@ -3,10 +3,9 @@
 - 本规则旨在固定 LED 串口设备的串口号，以设备号为判断标准来判断是否有 LED 设备接入，并重命名串口号。
 - [udev规则](./rules/99-led.rules)
 ### 使用说明
-- 本文档只适用于Roban机器人，kuavo机器人灯条位于上位机。
 - 将规则文件放到以下目录：
 ```bash
-    sudo cp ~/kuavo-ros-control/src/kuavo_led/rules/99-led.rules /etc/udev/rules.d/
+    cp ~/kuavo-ros-control/src/kuavo_led/rules/99-led.rules /etc/udev/rules.d/
     加载规则：
     sudo udevadm control --reload-rules
     sudo udevadm trigger

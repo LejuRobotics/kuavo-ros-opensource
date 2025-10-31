@@ -114,6 +114,16 @@ namespace
   // 全局手臂末端关节名称变量
   std::string left_arm_end_joint = "zarm_l7_joint";   // 默认值
   std::string right_arm_end_joint = "zarm_r7_joint";  // 默认值
+  
+  // 躯干约束相关变量
+  bool torso_constrained = false;
+  double fixed_torso_pos[3] = {0, 0, 0};
+  double fixed_torso_quat[4] = {1, 0, 0, 0};
+  
+  // 腿部关节约束相关变量
+  bool leg_joints_constrained = false;
+  std::vector<double> fixed_leg_l_qpos;  // 左腿关节固定位置
+  std::vector<double> fixed_leg_r_qpos;  // 右腿关节固定位置
 
   // control noise variables
   // mjtNum* ctrlnoise = nullptr;
@@ -725,8 +735,16 @@ namespace
                 // std::cout << "tau_cmd[" << i << "]: " << tau_cmd[i] << std::endl;
               } 
               int i = waistNum;
-              updateControl(LLegJointsAddr, i);
-              updateControl(RLegJointsAddr, i);
+              
+              // 在半身模式下跳过腿部关节的控制
+              if (!leg_joints_constrained) {
+                updateControl(LLegJointsAddr, i);
+                updateControl(RLegJointsAddr, i);
+              } else {
+                // 跳过腿部关节的控制输入，但需要更新索引
+                i += LLegJointsAddr.ctrladr().size() + RLegJointsAddr.ctrladr().size();
+              }
+              
               updateControl(LArmJointsAddr, i);
               updateControl(RArmJointsAddr, i);
               updateControl(HeadJointsAddr, i);
@@ -734,6 +752,72 @@ namespace
               // Dexhand: ctrl/command
               if(g_dexhand_node) {
                 g_dexhand_node->writeCallback(d);
+              }
+
+              // 如果躯干被约束，在每步后强制固定躯干位置和姿态
+              if (torso_constrained)
+              {
+                d->qpos[0] = fixed_torso_pos[0];  // x position
+                d->qpos[1] = fixed_torso_pos[1];  // y position  
+                d->qpos[2] = fixed_torso_pos[2];  // z position
+                d->qpos[3] = fixed_torso_quat[0]; // w quaternion
+                d->qpos[4] = fixed_torso_quat[1]; // x quaternion
+                d->qpos[5] = fixed_torso_quat[2]; // y quaternion
+                d->qpos[6] = fixed_torso_quat[3]; // z quaternion
+                
+                // 同时固定躯干的速度为0
+                d->qvel[0] = 0;  // x velocity
+                d->qvel[1] = 0;  // y velocity
+                d->qvel[2] = 0;  // z velocity
+                d->qvel[3] = 0;  // x angular velocity
+                d->qvel[4] = 0;  // y angular velocity
+                d->qvel[5] = 0;  // z angular velocity
+              }
+              
+              // 如果腿部关节被约束，在每步后强制固定腿部关节位置并停止控制
+              if (leg_joints_constrained)
+              {
+                // 固定左腿关节位置
+                if (!fixed_leg_l_qpos.empty() && !LLegJointsAddr.qposadr().invalid())
+                {
+                  size_t idx = 0;
+                  for (auto iter = LLegJointsAddr.qposadr().begin(); 
+                       iter != LLegJointsAddr.qposadr().end() && idx < fixed_leg_l_qpos.size(); 
+                       iter++, idx++) {
+                    d->qpos[*iter] = fixed_leg_l_qpos[idx];
+                  }
+                  
+                  // 固定左腿关节速度为0
+                  for (auto iter = LLegJointsAddr.qdofadr().begin(); iter != LLegJointsAddr.qdofadr().end(); iter++) {
+                    d->qvel[*iter] = 0;
+                  }
+                  
+                  // 停止左腿关节控制输入
+                  for (auto iter = LLegJointsAddr.ctrladr().begin(); iter != LLegJointsAddr.ctrladr().end(); iter++) {
+                    d->ctrl[*iter] = 0;
+                  }
+                }
+                
+                // 固定右腿关节位置
+                if (!fixed_leg_r_qpos.empty() && !RLegJointsAddr.qposadr().invalid())
+                {
+                  size_t idx = 0;
+                  for (auto iter = RLegJointsAddr.qposadr().begin(); 
+                       iter != RLegJointsAddr.qposadr().end() && idx < fixed_leg_r_qpos.size(); 
+                       iter++, idx++) {
+                    d->qpos[*iter] = fixed_leg_r_qpos[idx];
+                  }
+                  
+                  // 固定右腿关节速度为0
+                  for (auto iter = RLegJointsAddr.qdofadr().begin(); iter != RLegJointsAddr.qdofadr().end(); iter++) {
+                    d->qvel[*iter] = 0;
+                  }
+                  
+                  // 停止右腿关节控制输入
+                  for (auto iter = RLegJointsAddr.ctrladr().begin(); iter != RLegJointsAddr.ctrladr().end(); iter++) {
+                    d->ctrl[*iter] = 0;
+                  }
+                }
               }
 
               mj_step(m, d);
@@ -943,7 +1027,7 @@ void apply_wrench_to_link(mjModel* m, mjData* d, const char* link_name, const mj
 
 //-----------------------m--------------- physics_thread --------------------------------------------
 
-void PhysicsThread(mj::Simulate *sim, const char *filename)
+void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_body = false)
 {
   // request loadmodel if file given (otherwise drag-and-drop)
   if (filename != nullptr)
@@ -976,6 +1060,60 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
       // ********************************
       sim->Load(m, d, filename);
       mj_forward(m, d);
+
+      // 如果启用半身模式，固定躯干位置和腿部关节
+      if (only_half_up_body)
+      {
+        // 获取躯干(body)的ID
+        int torso_id = mj_name2id(m, mjOBJ_BODY, "base_link");
+        if (torso_id != -1)
+        {
+          // 记录初始位置和姿态
+          fixed_torso_pos[0] = d->qpos[0];
+          fixed_torso_pos[1] = d->qpos[1]; 
+          fixed_torso_pos[2] = d->qpos[2];
+          fixed_torso_quat[0] = d->qpos[3];
+          fixed_torso_quat[1] = d->qpos[4];
+          fixed_torso_quat[2] = d->qpos[5];
+          fixed_torso_quat[3] = d->qpos[6];
+          
+          torso_constrained = true;
+          
+          ROS_INFO("Torso position fixed at: [%.3f, %.3f, %.3f]", 
+                   fixed_torso_pos[0], fixed_torso_pos[1], fixed_torso_pos[2]);
+          ROS_INFO("Torso orientation fixed at quaternion: [%.3f, %.3f, %.3f, %.3f]", 
+                   fixed_torso_quat[0], fixed_torso_quat[1], fixed_torso_quat[2], fixed_torso_quat[3]);
+        }
+        else
+        {
+          ROS_WARN("Could not find 'base_link' body for torso constraint");
+        }
+        
+        // 固定腿部关节位置
+        if (!LLegJointsAddr.qposadr().invalid() && !RLegJointsAddr.qposadr().invalid())
+        {
+          // 初始化左腿关节固定位置
+          fixed_leg_l_qpos.clear();
+          for (auto iter = LLegJointsAddr.qposadr().begin(); iter != LLegJointsAddr.qposadr().end(); iter++) {
+            fixed_leg_l_qpos.push_back(d->qpos[*iter]);
+          }
+          
+          // 初始化右腿关节固定位置
+          fixed_leg_r_qpos.clear();
+          for (auto iter = RLegJointsAddr.qposadr().begin(); iter != RLegJointsAddr.qposadr().end(); iter++) {
+            fixed_leg_r_qpos.push_back(d->qpos[*iter]);
+          }
+          
+          leg_joints_constrained = true;
+          
+          ROS_INFO("Left leg joints fixed at %zu positions", fixed_leg_l_qpos.size());
+          ROS_INFO("Right leg joints fixed at %zu positions", fixed_leg_r_qpos.size());
+        }
+        else
+        {
+          ROS_WARN("Could not initialize leg joint constraints - joint addresses invalid");
+        }
+      }
 
       // allocate ctrlnoise
       // free(ctrlnoise);
@@ -1129,6 +1267,14 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   }
   ROS_INFO("Mujoco Frequency: %f Hz", frequency);
   
+  // 获取only_half_up_body参数
+  bool only_half_up_body = false;
+  if (nh.hasParam("/only_half_up_body"))
+  {
+    nh.getParam("/only_half_up_body", only_half_up_body);
+    ROS_INFO("Only half up body mode: %s", only_half_up_body ? "true" : "false");
+  }
+  
   // 获取配置文件
   if(nh.hasParam("/kuavo_configuration")) {
     std::string kuavo_configuration;
@@ -1211,7 +1357,7 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   // }
 
   // start physics thread
-  std::thread physicsthreadhandle(&PhysicsThread, sim.get(), filename);
+  std::thread physicsthreadhandle(&PhysicsThread, sim.get(), filename, only_half_up_body);
 
   // start simulation UI loop (blocking call)
   sim->RenderLoop();

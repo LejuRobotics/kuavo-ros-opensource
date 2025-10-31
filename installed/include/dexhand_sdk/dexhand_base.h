@@ -118,16 +118,6 @@ struct FingerStatus {
         currents.fill(0);
         states.fill(0);
     }
-
-    /**
-     * @brief Clear/reset all finger status data to zero
-     */
-    void clear() {
-        positions.fill(0);
-        speeds.fill(0);
-        currents.fill(0);
-        states.fill(0);
-    }
     friend std::ostream& operator<<(std::ostream& os, const FingerStatus& status) {
         os << "Finger Positions: ";
         for (const auto& pos : status.positions) {
@@ -169,11 +159,10 @@ public:
 
     /**
      * @brief Get the Device Info object
-     *
-     * @param info Reference to store device info data
-     * @return true if successful, false if failed
+     * 
+     * @return DeviceInfo 
      */
-    virtual bool getDeviceInfo(DeviceInfo_t& info) = 0;
+    virtual DeviceInfo_t getDeviceInfo() = 0;
 
     /**
      * @brief Set the Finger Positions.
@@ -193,11 +182,10 @@ public:
 
     /**
      * @brief Get the Finger Status object
-     *
-     * @param status Reference to store finger status data
-     * @return true if successful, false if failed
+     * 
+     * @return FingerStatus 
      */
-    virtual bool getFingerStatus(FingerStatus& status) = 0;
+    virtual FingerStatus getFingerStatus() = 0;
 
     /**
      * @brief Set the Force Level object

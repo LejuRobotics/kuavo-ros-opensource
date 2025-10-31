@@ -487,9 +487,25 @@ def ruiwo_zero():
     subprocess.run(command, shell=True)
 
 def ruiwo_negtive():
+    while True:
+        print("请选择机器人类型：")
+        print("1. 4Pro型")
+        print("2. Roban2型")
+        
+        choice = input("请输入选择 (1 或 2): ").strip()
+        
+        if choice == "1":
+            robot_type = "4pro"
+            break
+        elif choice == "2":
+            robot_type = "roban2"
+            break
+        else:
+            print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
+            continue
 
-    # 定义要运行的命令
-    command = "bash "+ folder_path +"/ruiwo_negtive_set.sh" 
+    # 定义要运行的命令，传递机器人类型参数
+    command = "bash " + folder_path + "/ruiwo_negtive_set.sh " + robot_type
 
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
@@ -832,71 +848,34 @@ def robot_login():
     
     # sudo systemctl start report_robot_network_info.service
 
-def get_git_info():
-    """
-    获取 Git 信息:
-    1. 如果存在 .git 文件夹，则调用 git log 获取
-    2. 否则读取 .version 目录下的 GIT_* 文件
-    """
-    # 获取脚本所在目录
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+def get_git_info():# 获取最新 commit 的 hash、日期和提交信息（title）
+    try:
+        result = subprocess.run(
+            ['git', 'log', '-1', '--format=%H%n%ci%n%s'],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5
+        )
+        output = result.stdout.decode('utf-8').strip().split('\n')
 
-    # 回退两级目录，得到仓库根目录
-    repo_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-
-
-    # 拼接 .git 和 .version 路径
-    git_dir = os.path.join(repo_root, ".git")
-    version_dir = os.path.join(repo_root, ".version")
-
-    # 情况1: 存在 .git 文件夹
-    if os.path.exists(git_dir):
-        try:
-            result = subprocess.run(
-                ['git', 'log', '-1', '--format=%H%n%ci%n%s'],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=5
-            )
-            output = result.stdout.decode('utf-8').strip().split('\n')
-
-            if len(output) < 3:
-                raise ValueError("Unexpected git output: " + repr(output))
-
-            return {
-                'commit_hash': output[0],
-                'commit_date': output[1],
-                'commit_message': output[2],
-                'branch': subprocess.run(
-                    ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-                    check=True, stdout=subprocess.PIPE
-                ).stdout.decode('utf-8').strip()
-            }
-
-        except Exception as e:
-            print("❌ Git command failed:", str(e))
-            return None
-
-    # 情况2: 没有 .git，尝试读取 .version 目录
-    elif os.path.exists(version_dir):
-        def read_file(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
+        if len(output) < 3:
+            raise ValueError("Unexpected git output: " + repr(output))
 
         return {
-            'commit_hash': read_file(os.path.join(version_dir, "GIT_COMMIT")),
-            'branch': read_file(os.path.join(version_dir, "GIT_BRANCH")),
-            'remote': read_file(os.path.join(version_dir, "GIT_REMOTE")),
-            'tag': read_file(os.path.join(version_dir, "GIT_TAG")),
+            'commit_hash': output[0],
+            'commit_date': output[1],
+            'commit_message': output[2]
         }
 
-    else:
-        print("⚠️ Neither .git nor .version found, cannot get commit info.")
-        return None
+    except subprocess.TimeoutExpired:
+        print("⚠️ Git command timed out.")
+    except subprocess.CalledProcessError as e:
+        print("❌ Git command failed:", e.stderr.decode('utf-8').strip())
+    except FileNotFoundError:
+        print("❌ Git is not installed or not in PATH.")
+    except Exception as e:
+        print("❌ Unexpected error:", str(e))
 
 def secondary_menu():
     while True:
@@ -1097,26 +1076,11 @@ if __name__ == '__main__':
 
     git_info = get_git_info()
     if git_info:
-        # 公共信息
-        if 'commit_hash' in git_info:
-            print(f"程序提交版本: {git_info['commit_hash']}")
-
-        # Git 仓库模式
-        if 'commit_date' in git_info:
-            print(f"程序提交日期: {git_info['commit_date']}")
-        if 'commit_message' in git_info:
-            print(f"程序提交信息: {git_info['commit_message']}")
-        if 'branch' in git_info and git_info['branch']:
-            print(f"程序所在分支: {git_info['branch']}")
-
-        # .version 模式下的额外信息
-        if 'tag' in git_info and git_info['tag']:
-            print(f"程序 Tag: {git_info['tag']}")
-        if 'remote' in git_info and git_info['remote']:
-            print(f"程序远程仓库: {git_info['remote']}")
-
+        print(f"程序提交版本: {git_info['commit_hash']}")
+        print(f"程序提交日期: {git_info['commit_date']}")
+        print(f"程序提交信息: {git_info['commit_message']}")
     else:
-        print("❌ Failed to retrieve Git information.")
+        print("Failed to retrieve Git information.")
     
     dev_flag = 0
     if len(sys.argv) > 1:  # 至少有一个参数

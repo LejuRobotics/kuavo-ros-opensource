@@ -114,10 +114,6 @@
     - 2: external_control 外部控制，手臂的运动由外部控制
 
 #### **`/gesture/list`**
-  - **设备支持:**
-    - ✅ qiangnao (标准灵巧手 for Kuavo)
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
-    - ✅ revo2 (revo2 二代手 for Roban)
   - 列出所有预设的手势
 
   - 示例代码: [list_all_gestures.py](../src/demo/gesture/list_all_gestures.py)
@@ -154,31 +150,21 @@
     </details>
 
 #### **`/gesture/execute`**
-  - **设备支持:**
-    - ✅ qiangnao (标准灵巧手 for Kuavo)
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
-    - ✅ revo2 (revo2 二代手 for Roban)
   - 该服务用于**抢占式**执行预设的手势(假如有手势正在执行则会中断该执行)，通过 gesture_names 来选择手势，手势名称可以通过 `/gesture/list` 查看
   - **警告:不要在使用 `/control_robot_hand_position`控制灵巧手的同时调用该接口, 否则会出现无法预料的效果.**
   - 示例代码: [gesture_client.py](../src/demo/gesture/gesture_client.py)
 
 #### **`/gesture/execute_state`**
-  - **设备支持:**
-    - ✅ qiangnao (标准灵巧手 for Kuavo)
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
-    - ✅ revo2 (revo2 二代手 for Roban)
   - 该服务用于查询是否有手势正在执行
 
 #### **`/dexhand/change_force_level`<kuavo_msgs::handForceLevel>**
-  - **设备支持:**
-    - ✅ qiangnao (标准灵巧手 for Kuavo)
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
-    - ❌ revo2 (revo2 二代手 for Roban)
+  - 先决条件:只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao`或者`qiangnao_touch`时才会存在此服务.
+
   - 服务描述: 该服务修改灵巧手的抓力程度
 
 #### **`/control_robot_leju_claw`<kuavo_msgs::controlLejuClaw>**
-  - **设备支持:**
-    - ✅ lejuclaw (二指夹爪)
+  - 先决条件:只有在`kuavo.json`中配置`EndEffectorType`为`lejuclaw`时才会存在此服务.
+
   - 服务描述: 该服务用于控制二指夹爪
 
   - **注意/警告**：如果当前夹爪处于运动状态，那么发送新的请求就会被丢弃处理，不会执行，望知悉。
@@ -206,8 +192,8 @@
 示例代码: [leju_claw_client.py](../src/demo/control_lejuclaw/leju_claw_client.py)
 
 #### **`/dexhand/left/enable_touch_sensor` 和 `/dexhand/right/enable_touch_sensor`<kuavo_msgs::controlLejuClaw>**
-  - **设备支持:**
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
+  - 先决条件:只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao_touch`时才可被调用.
+
   - 服务描述: 该服务用于开启/关闭对应的手指触觉传感器.
 
 | 字段  | 类型  | 描述  |
@@ -235,10 +221,7 @@
 
 
 #### **`/control_robot_hand_position`<kuavo_msgs::robotHandPosition>**
-  - **设备支持:**
-    - ✅ qiangnao (标准灵巧手 for Kuavo)
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
-    - ✅ revo2 (revo2 二代手 for Roban)
+  - 先决条件:只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao`或`qiangnao_touch`时才会发布该话题.
   - 话题描述: 用于控制机器人双手(手指)的运动，通过发布手指目标关节位置来实现手部的精确控制。
 
 | 字段                  | 类型      | 描述                 |
@@ -303,8 +286,7 @@
 | inputTrajectory | ocs2_msgs/mpc_input[] | 手臂关节状态输入值, 单位(radian)  |
 
 #### **`/leju_claw_command`<kuavo_msgs::lejuCalwCommand>**
-  - **设备支持:**
-    - ✅ lejuclaw (二指夹爪)
+  - 先决条件:只有在`kuavo.json`中配置`EndEffectorType`为`lejuclaw`时才会发布该话题.
   - 话题描述: 该话题用于控制二指夹爪
   - **注意/警告**：如果当前夹爪处于运动状态，那么发送新的请求就会被丢弃处理，不会执行，望知悉。
 
@@ -315,11 +297,6 @@
    关于 data 字段,详情见服务`control_robot_leju_claw`的描述。
 
 #### **`/dexhand/command`<kuavo_msgs::dexhandCommand>**
-  - **配置要求:** 只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao`或`qiangnao_touch`时才会发布该话题.
-  - **设备支持:**
-    - ✅ qiangnao (标准灵巧手 for Kuavo)
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
-    - ✅ revo2 (revo2 二代手 for Roban)
   - 话题描述: 该话题用于控制灵巧手，**双手**.
   - 数据顺序为："l_thumb", "l_thumb_aux", "l_index", "l_middle", "l_ring", "l_pinky",
                            "r_thumb", "r_thumb_aux", "r_index", "r_middle", "r_ring", "r_pinky"
@@ -333,11 +310,7 @@
 | data | int16[] | 对应控制模式的数据, 长度为必须为 12，其中 前 6 个元素控制左手，后 6 个元素控制右手 |
 
 #### **`/dexhand/left/command`<kuavo_msgs::dexhandCommand>**
-  - **配置要求:** 只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao`或`qiangnao_touch`时才可以使用该话题.
-  - **设备支持:**
-    - ✅ qiangnao (标准灵巧手 for Kuavo)
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
-    - ✅ revo2 (revo2 二代手 for Roban)
+  - 先决条件:只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao`或者`qiangnao_touch`时才可以使用该话题.
   - 话题描述: 该话题用于单独控制**左**灵巧手.
   - 数据顺序为："l_thumb", "l_thumb_aux", "l_index", "l_middle", "l_ring", "l_pinky"
   - 位置控制模式下，每个元素的数据的范围为[0, 100], 0 为完全打开，100 为完全关闭
@@ -350,11 +323,7 @@
 | data | int16[] | 对应控制模式的数据, 长度为必须为 6 |
 
 #### **`/dexhand/right/command`<kuavo_msgs::dexhandCommand>**
-  - **配置要求:** 只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao`或`qiangnao_touch`时才可以使用该话题.
-  - **设备支持:**
-    - ✅ qiangnao (标准灵巧手 for Kuavo)
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
-    - ✅ revo2 (revo2 二代手 for Roban)
+  - 先决条件:只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao`或者`qiangnao_touch`时才可以使用该话题.
   - 话题描述: 该话题用于单独控制**右**灵巧手.
   - "r_thumb", "r_thumb_aux", "r_index", "r_middle", "r_ring", "r_pinky"
   - 位置控制模式下，每个元素的数据的范围为[0, 100], 0 为完全打开，100 为完全关闭
@@ -368,8 +337,7 @@
 
 
 #### **`/leju_claw_state`<kuavo_msgs::lejuClawState>**
-  - **设备支持:**
-    - ✅ lejuclaw (二指夹爪)
+  - 先决条件: 只有在`kuavo.json`中配置`EndEffectorType`为`lejuclaw`时才会发布该话题.
   - 话题描述: 发布二指夹抓的状态, 位置, 速度, 力距等信息
 
 | 字段  | 类型  | 描述  |
@@ -409,11 +377,7 @@ data:
 </details>
 
 #### **`/dexhand/state`<sensor_msgs::ointState>**
-  - **配置要求:** 只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao`或`qiangnao_touch`时才会发布该话题.
-  - **设备支持:**
-    - ✅ qiangnao (标准灵巧手 for Kuavo)
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
-    - ✅ revo2 (revo2 二代手 for Roban)
+  - 先决条件: 只有在`kuavo.json`中配置`EndEffectorType`为`qiangnao`或者`qiangnao_touch`时才会发布该话题.
   - 话题描述: 发布灵巧手的状态数据.
   
 | 字段  | 类型  | 描述  |
@@ -447,8 +411,6 @@ effort: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
 
 
 #### **`/dexhand/touch_state`<kuavo_msgs::dexhandTouchState>**
-  - **设备支持:**
-    - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
   - 话题描述: 发布触觉灵巧手的触觉状态数据
 
 | 字段  | 类型  | 描述  |

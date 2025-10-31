@@ -2,11 +2,29 @@
 <launch>
     <arg name="joystick_type" default="bt2"/>
 
-    <include file="$(find joy)/launch/joy_node.launch">
-    </include>
-
+    <group if="$(eval arg('joystick_type') == 'sim')">
+        <node pkg="humanoid_controllers" type="joystickSimulator.py" name="joystickSimulator" output="screen" launch-prefix="gnome-terminal --disable-factory --"/>
+    </group>
+    <group unless="$(eval arg('joystick_type') == 'sim')">
+        <node pkg="joy" type="joy_node" name="joy_node" output="screen" respawn="true">
+            <param name="dev" value="/dev/input/js0"/>
+            <param name="autorepeat_rate" type="double" value="100.0"/>
+            <param name="deadzone" type="double" value="0.18"/>
+        </node>
+    </group>
     <param name="channel_map_path" value="$(find humanoid_controllers)/launch/joy/$(arg joystick_type).json"/>
     <param name="joystick_sensitivity" value="20"/>
+    <!-- 速度平滑参数配置 -->
+    <param name="velocity_smooth_factor" value="0.1"/>
+    <param name="max_velocity_change" value="0.5"/>
+    <param name="velocity_smooth_time" value="0.1"/>
+    
+    <!-- 原地踏步参数配置 -->
+    <param name="in_place_step_duration" value="2.0"/>
+    <param name="enable_in_place_stepping" value="true"/>
+    
+    <!-- 站立过渡参数配置 -->
+    <param name="stance_transition_duration" value="2.0"/>
     <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen">
 
     </node>

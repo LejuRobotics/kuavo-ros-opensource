@@ -480,7 +480,7 @@ class IkRos:
             self.hand_finger_data_process(0)
             # print(f"q_now: {q_now}")
             is_runing_last = is_runing
-            is_runing = True
+            is_runing = self.quest3_arm_info_transformer.is_runing if self.__as_mc_ik else True
             self.__current_pose, self.__current_pose_right = self.get_two_arm_pose(q_last)
             self.pub_solved_arm_eef_pose(q_last, self.__current_pose, self.__current_pose_right)
             if self.trigger_reset_mode:
@@ -944,9 +944,6 @@ class IkRos:
 
 
     def pub_robot_end_hand(self, joyStick_data=None, hand_finger_data = None):
-        # hand tracking 时判断保护
-        if hand_finger_data is not None and len(hand_finger_data) < 2:
-            return
         global control_finger_type
         left_hand_position = [0 for i in range(6)]
         right_hand_position = [0 for i in range(6)]
@@ -1004,7 +1001,7 @@ class IkRos:
             self.control_robot_hand_position_pub.publish(robot_hand_position)
         elif self.end_effector_type == LEJUCLAW:
             if joyStick_data is not None:
-                if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
+                if joyStick_data.left_second_button_pressed and self.__button_y_last is False and joyStick_data.left_trigger < 0.1:
                     print(f"\033[91mButton Y is pressed.\033[0m")
                     self.__freeze_finger = not self.__freeze_finger
                 self.__button_y_last = joyStick_data.left_second_button_pressed

@@ -505,9 +505,10 @@ selfCollision
   ; Self Collision pairs
   collisionLinkPairs
   {
+    [0] "leg_l6_link, leg_r6_link"
   }
 
-  minimumDistance  0.02
+  minimumDistance  0.035
 
   ; relaxed log barrier parameters
   mu      1e-2

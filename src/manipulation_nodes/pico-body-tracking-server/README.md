@@ -1,38 +1,57 @@
-# Pico-Body-Tracking-Server
+# Pico 全身遥操作
 
 
-## Getting started
+## 快速开始
 
-1. 运行服务器
+### 机器人端机器人
 
-先运行 roscore
-```bash
-roscore
-```
-
-再运行服务器
-```bash
-python3 body_tracking_server.py
-```
-
-2. 启动 PICO VR 中 **Pico-Body-Tracking-Demo** 项目
-
-    2.1 按照指示校准传感器（如果校准完进入APP后没有任何UI反馈，请重新进入 **Pico-Body-Tracking-Demo** APP）
-
-    2.2 进入 **Pico-Body-racking-Demo** APP 后，在左侧 UI 在线列表选择已上线的机器人服务器
-
-    2.3 点击左侧 UI 中的 **连接** 按钮
-
-    2.4 连接后，点击左侧 UI 中的 **开始遥操作** 按钮，此时 APP 会把 full-body-tracking-pose 发送到机器人服务器
-
-
-3. 可视化
+先启动机器人:
+- 可以选择关闭命令截断、关节保护等功能，这样做大幅度动作的时候不会触发保护而摔倒.
+- 必须要打开`with_mm_ik`选项来启用运动学MPC功能，否则无法控制手臂.
 
 ```bash
-rviz
+# 在此之前确保已经编译完成
+sudo su
+cd kuavo-ros-opensource
+source devel/setup.bash
+# 需要加with_mm_ik选项
+roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
+
+# 也可以选择关闭命令截断、关节保护等功能，这样做大幅度动作的时候不会触发保护而摔倒.
+roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true cmd_truncation_enable:=false joint_protect_enable:=false
 ```
 
-启动 `rviz` 后，更改 `Global Options` 中的 `Fixed Frame` 为 `world`，然后添加 `TF` 选项，就可以看到 full-body-tracking-pose **的实时可视化**
+然后启动 Pico 服务节点:
+```bash
+sudo su
+cd kuavo-ros-opensource
+source devel/setup.bash
+cd src/manipulation_nodes/pico-body-tracking-server
+python3 scripts/pico_whole_body_teleop_example.py 
+```
+
+### Pico App 端启动
+
+打开2个体感追踪器，会闪蓝光，佩戴到左右脚踝处，注意裤子不要遮挡传感器，必要时可以卷起裤脚。
+
+进入 Pico，点击任意左右手柄`HOME`按键，可以看到下方的菜单栏，在左下角**点击打开资源库**，找到并打开**LejuVRTeleopRobot**应用，找不到的话可以看看未知来源的分类。
+
+进入 App，进行校准:
+ - 选择全身追踪-->立即校准
+ - 或者右上角的立即校准
+
+校准成功，可以在视野前方出现一个由绿色方块组成的人形，可以随意运动看看人形的动作是否一致，如果不一致建议重新校准。
+
+### 遥操作
+
+在 App 左手方向，机器人服务器下拉列表找到对应的机器人，选择连接，点击遥操作即可开始遥操。
+
+**初始时，遥操处于上锁状态，可以通过同时按下左手柄的上下扳机解锁。**
+
+**目前初始化的遥操模式为仅下半身遥操，可以通过`RT+B`切换到全身遥操模式或`RT+B`切换到上半身遥操模式。**
+
+更多按键切换功能请参阅后续章节。
+
 
 ## full-body-tracking-pose 说明
 

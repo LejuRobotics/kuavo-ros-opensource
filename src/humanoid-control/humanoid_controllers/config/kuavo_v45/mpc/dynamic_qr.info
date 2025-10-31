@@ -13,7 +13,7 @@ Q_base_stance
   ;; Base Pose: [position, orientation] ;;
   (6,6)   500.0    ; p_base_x
   (7,7)   500.0    ; p_base_y
-  (8,8)   2000.0    ; p_base_z
+  (8,8)   10000.0    ; p_base_z
   (9,9)   100.0    ; theta_base_z
   (10,10) 2000.0    ; theta_base_y
   (11,11) 800.0    ; theta_base_x
@@ -192,31 +192,31 @@ R_base_stance
   scaling 1e-3
 
   ;; Feet Contact Forces: [LF, RF, LH, RH] ;;
-  (0,0)   5.0       ; ll_foot_heel
-  (1,1)   5.0       ; ll_foot_heel
-  (2,2)   5.0       ; ll_foot_heel
-  (3,3)   5.0       ; ll_foot_toe
-  (4,4)   5.0       ; ll_foot_toe
-  (5,5)   5.0       ; ll_foot_toe
-  (6,6)   5.0       ; lr_foot_heel
-  (7,7)   5.0       ; lr_foot_heel
-  (8,8)   5.0       ; lr_foot_heel
-  (9,9)   5.0       ; lr_foot_toe
-  (10,10) 5.0       ; lr_foot_toe
-  (11,11) 5.0       ; lr_foot_toe
+  (0,0)   1.0       ; ll_foot_heel
+  (1,1)   1.0       ; ll_foot_heel
+  (2,2)   1.0       ; ll_foot_heel
+  (3,3)   1.0       ; ll_foot_toe
+  (4,4)   1.0       ; ll_foot_toe
+  (5,5)   1.0       ; ll_foot_toe
+  (6,6)   1.0       ; lr_foot_heel
+  (7,7)   1.0       ; lr_foot_heel
+  (8,8)   1.0       ; lr_foot_heel
+  (9,9)   1.0       ; lr_foot_toe
+  (10,10) 1.0       ; lr_foot_toe
+  (11,11) 1.0       ; lr_foot_toe
 
-  (12,12) 5.0       ; rl_foot_heel
-  (13,13) 5.0       ; rl_foot_heel
-  (14,14) 5.0       ; rl_foot_heel
-  (15,15) 5.0       ; rl_foot_toe
-  (16,16) 5.0       ; rl_foot_toe
-  (17,17) 5.0       ; rl_foot_toe
-  (18,18) 5.0       ; rr_foot_heel
-  (19,19) 5.0       ; rr_foot_heel
-  (20,20) 5.0       ; rr_foot_heel
-  (21,21) 5.0       ; rr_foot_toe
-  (22,22) 5.0       ; rr_foot_toe
-  (23,23) 5.0       ; rr_foot_toe
+  (12,12) 1.0       ; rl_foot_heel
+  (13,13) 1.0       ; rl_foot_heel
+  (14,14) 1.0       ; rl_foot_heel
+  (15,15) 1.0       ; rl_foot_toe
+  (16,16) 1.0       ; rl_foot_toe
+  (17,17) 1.0       ; rl_foot_toe
+  (18,18) 1.0       ; rr_foot_heel
+  (19,19) 1.0       ; rr_foot_heel
+  (20,20) 1.0       ; rr_foot_heel
+  (21,21) 1.0       ; rr_foot_toe
+  (22,22) 1.0       ; rr_foot_toe
+  (23,23) 1.0       ; rr_foot_toe
 
   ;; Hand Contact Forces: [L_EE, R_EE] ;;
   (24,24) 1000    ; l_arm force x

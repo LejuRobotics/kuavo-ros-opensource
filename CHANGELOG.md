@@ -3,11 +3,21 @@
 ## Breaking Changes
 
 ## 文档相关
+- PICO VR 全身遥操作补充使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- 补充桌面端节点服务开机自启动使用说明，[文档链接](./src/manipulation_nodes/planarmwebsocketservice/README.md)
+- PICO VR 更新数据格式约定文档，添加 Protobuf 数据结构及服务接口说明，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/docs/api_docs.md)
+- 新增 5 代轮臂 VR 遥操作相关文档, [文档链接](./src/manipulation_nodes/motion_capture_ik/README_VR_MPC.md)
 - 新增 Roban 打太极使用文档，[文档链接](./src/demo/csv2body_demo/Roban太极动作启动说明.md)
 - 新增 Roban 上楼梯使用文档，[文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban上楼梯说明.md)
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- Kuavo Humanoid SDK 移除重复头部控制和手臂控制类的接口，这些接口从`1.2.2`版本开始废弃，并计划在 2026-06-30 移除
+- Kuavo Humanoid SDK 完善接口阈值保护以及补充说明文档，[文档链接](./src/kuavo_humanoid_sdk/docs/markdown/pages/api_reference.md)
+- 新增 Roban2.1 机器人模型，机器人版本号`ROBOT_VERSION=14`
+- 新增实物机器人未设置 CPU 隔核参数或系统配置时，程序立即退出并警告提示
+- 新增支持将程序日志输出重定向到h12接收机串口，[文档链接](./src/humanoid-control/h12pro_controller_node/H12_LOG_Instruction.md)
+- 桌面端软件新增启动、站立、停止机器人等 WebSocket API
 - Roban 机器人走斜坡功能添加自动步态行走，楼梯积木块参数更新
 - PICO VR 更新预设搬运箱子的末端力参数配置
 - 增加 h12 遥控器控制RL实现trot踏步功能，并取消stance->stance状态机转换
@@ -29,6 +39,14 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复 Roban2.1 左右横移时双脚会相碰的问题
+- Kuavo Humanoid SDK 修复导入未定义模块导致无法运行问题
+- 修复日志自动清理功能会删除空目录的问题
+- 修复48/49版本带灵巧手版本的mujoco仿真灵巧手大拇指关节顺序错误和手臂控制错误问题
+- 修复 VR 遥操作控制夹爪可能会卡死问题
+- 修复灵巧手获取状态线程潜在的程序崩溃问题
+- 修改手臂外部控制直接到wbc层的关节逻辑,差分获取速度对齐再下发
+- 修复调整关节零点位置、获取关节零点位置和硬件就绪等接口丢失问题
 - 修复 Roban机器人 Quest VR 手臂跟随问题并支持腰部控制
 - 修复大幅度动手是机器人抖动问题
 - Quest VR 在RL模式下，切换手臂控制模式时进行插值避免手臂初始位置瞬间对齐人手问题
@@ -60,6 +78,8 @@
 - 修复 Quest3 打开`control_torso`控制躯干模式时躯干会下蹲到最低问题
 
 ## 其他改进
+- 新增工具: 编译蓝牙内核模块脚本，[使用文档链接](./tools/bluetooth_tool/README.md)
+- 新增工具: 将电机正反转、零偏和限位等数据打包成约定的json文件，[工具文档链接](./tools/get_joint_data/README.md)
 - 增加大小臂长度以及大小臂的比例分析工具，用于分析quest3设备机器人手臂表现不同的问题，[工具文档链接](./tools/vr_test_tool/README.md)
 - 转换工具支持将 bag 中 sensors_data_raw 数据转换成末端执行器位姿数据，[工具文档链接](./tools/extract_camera_pose/howto-kuavo-pose-calculator.md)
 - 优化Quest IK 遥操控制，提高IK迭代次数并默认关闭运动学MPC防止过度资源消耗 

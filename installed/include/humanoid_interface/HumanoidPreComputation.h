@@ -45,6 +45,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace ocs2 {
 namespace humanoid {
 
+/** Center of mass constraint precomputed data */
+struct CenterOfMassConstraintData {
+  scalar_t minX, maxX, minY, maxY;  // Support polygon boundaries with safety margin
+  std::vector<vector3_t> supportPoints;  // Support polygon vertices
+  bool isValid = false;  // Data validity flag
+  
+  CenterOfMassConstraintData() : minX(0), maxX(0), minY(0), maxY(0), isValid(false) {}
+};
+
 /** Callback for caching and reference update */
 class HumanoidPreComputation : public PreComputation {
  public:
@@ -64,11 +73,16 @@ class HumanoidPreComputation : public PreComputation {
   const PinocchioInterface& getPinocchioInterface() const { return pinocchioInterface_; }
   vector_t getArmWrench() const { return armWrench_; }
 
+  // Center of mass constraint data access
+  const CenterOfMassConstraintData& getCenterOfMassConstraintData() const { return comConstraintData_; }
+
   // const vector_t getArm1JointPosTarget() const { return armJointPos_; }
   // const vector_t getArm1JointVelTarget() const { return armJointVel_; }
 
  private:
   HumanoidPreComputation(const HumanoidPreComputation& other);
+  
+  void computeCenterOfMassConstraintData();
 
   PinocchioInterface pinocchioInterface_;
   CentroidalModelInfo info_;
@@ -86,6 +100,9 @@ class HumanoidPreComputation : public PreComputation {
   vector_t armJointVel_;
   std::vector<EndEffectorLinearConstraint::Config> eeXYRefConConfigs_;
   vector_t armWrench_ = vector_t::Zero(12);
+  
+  // Center of mass constraint precomputed data
+  CenterOfMassConstraintData comConstraintData_;
 };
 
 }  // namespace humanoid

@@ -41,6 +41,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <std_msgs/Float64MultiArray.h>
 #include <geometry_msgs/Twist.h>
 #include "kuavo_msgs/SetJoyTopic.h"
+#include "kuavo_msgs/switchController.h"
+#include "kuavo_msgs/getControllerList.h"
+#include "kuavo_msgs/switchToNextController.h"
 
 #include <ocs2_core/Types.h>
 #include <ocs2_core/misc/LoadData.h>
@@ -81,7 +84,7 @@ namespace ocs2
   std::map<std::string, int> joyButtonMap = {
       {"BUTTON_STANCE", 0},
       {"BUTTON_TROT", 1},
-      {"BUTTON_JUMP", 2},
+      {"BUTTON_RL", 2},
       {"BUTTON_WALK", 3},
       {"BUTTON_LB", 4},
       {"BUTTON_RB", 5},
@@ -103,7 +106,7 @@ namespace ocs2
     std::map<std::string, int> joyButtonMap_backup = {
       {"BUTTON_STANCE", 0},
       {"BUTTON_TROT", 1},
-      {"BUTTON_JUMP", 3},
+      {"BUTTON_RL", 3},
       {"BUTTON_WALK", 4},
       {"BUTTON_LB", 6},
       {"BUTTON_RB", 7},
@@ -265,8 +268,12 @@ namespace ocs2
       mode_sequence_template_publisher_ = nodeHandle.advertise<ocs2_msgs::mode_schedule>(robotName + "_mpc_mode_schedule", 10, true);
       mode_scale_publisher_ = nodeHandle.advertise<std_msgs::Float32>(robotName + "_mpc_mode_scale", 10, true);
       cmd_vel_publisher_ = nodeHandle.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
+      gait_name_publisher_ = nodeHandle.advertise<std_msgs::String>("/humanoid_mpc_gait_name_request", 10, true);
       current_joy_topic_ = "/joy";  // 默认话题
       joy_topic_service_ = nodeHandle_.advertiseService("/set_joy_topic", &JoyControl::setJoyTopicCallback, this);
+      switch_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchController>("/humanoid_controller/switch_controller");
+      get_controller_list_client_ = nodeHandle_.serviceClient<kuavo_msgs::getControllerList>("/humanoid_controller/get_controller_list");
+      switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
       joy_sub_ = nodeHandle_.subscribe(current_joy_topic_, 10, &JoyControl::joyCallback, this);
       feet_sub_ = nodeHandle_.subscribe("/humanoid_controller/swing_leg/pos_measured", 2, &JoyControl::feetCallback, this);
       observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &JoyControl::observationCallback, this);
@@ -696,11 +703,22 @@ namespace ocs2
           ROS_INFO("Stop grab box demo");
           enableGrabBoxDemo(false);
         }
-        if(joy_msg->buttons[joyButtonMap["BUTTON_JUMP"]])
+        if(joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
         {
           ROS_INFO("Reset grab box demo");
           resetGrabBoxDemo(true);
         }
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
+        {
+          if (stair_detection_enabled_)
+          {
+            executeCommand("stop_stair_detect");
+          }
+          else{
+            executeCommand("start_stair_detect");
+          }
+        }
+        return;
 
       }
       else
@@ -717,16 +735,6 @@ namespace ocs2
         else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
         {
           pubSlopePlanning(true);
-        }
-        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_JUMP"]] && joy_msg->buttons[joyButtonMap["BUTTON_JUMP"]])
-        {
-          if (stair_detection_enabled_)
-          {
-            executeCommand("stop_stair_detect");
-          }
-          else{
-            executeCommand("start_stair_detect");
-          }
         }
         else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
         {
@@ -829,9 +837,12 @@ namespace ocs2
       {
         publishGaitTemplate("trot");
       }
-      else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_JUMP"]] && joy_msg->buttons[joyButtonMap["BUTTON_JUMP"]])
+      else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
-        // publishGaitTemplate("jump");
+        ROS_INFO("[JoyControl] switch to next controller");
+        // Get controller list and switch to next
+        switchToNextController();
+        return;
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
       {
@@ -853,6 +864,12 @@ namespace ocs2
       humanoid::ModeSequenceTemplate modeSequenceTemplate = gait_map_.at(gaitName);
       mode_sequence_template_publisher_.publish(createModeSequenceTemplateMsg(modeSequenceTemplate));
       current_desired_gait_ = gaitName;
+      
+      // 发布gait名字请求
+      std_msgs::String gait_name_msg;
+      gait_name_msg.data = gaitName;
+      gait_name_publisher_.publish(gait_name_msg);
+      ROS_INFO_STREAM("[JoyControl] Published gait name request: " << gaitName);
     }
 
     void gaitChangeCallback(const std_msgs::String::ConstPtr& msg) 
@@ -1083,7 +1100,62 @@ namespace ocs2
       }
     }
 
-    
+    bool callSwitchControllerService(const std::string& controller_name)
+    {
+      kuavo_msgs::switchController srv;
+      srv.request.controller_name = controller_name;
+      
+      if (switch_controller_client_.call(srv)) {
+        ROS_INFO("Controller switch service call successful, result: %s", srv.response.message.c_str());
+        return srv.response.success;
+      } else {
+        ROS_ERROR("Controller switch service call failed: %s", controller_name.c_str());
+        return false;
+      }
+    }
+
+    bool getControllerList(std::vector<std::string>& controller_list)
+    {
+      kuavo_msgs::getControllerList srv;
+      
+      if (get_controller_list_client_.call(srv)) {
+        if (srv.response.success) {
+          controller_list = srv.response.controller_names;
+          ROS_INFO("Get controller list successful: total %d controllers", srv.response.count);
+          for (size_t i = 0; i < controller_list.size(); ++i) {
+            ROS_INFO("  [%zu] %s", i, controller_list[i].c_str());
+          }
+          return true;
+        } else {
+          ROS_ERROR("Get controller list failed: %s", srv.response.message.c_str());
+          return false;
+        }
+      } else {
+        ROS_ERROR("Get controller list service call failed");
+        return false;
+      }
+    }
+
+    bool switchToNextController()
+    {
+      kuavo_msgs::switchToNextController srv;
+      
+      if (switch_to_next_controller_client_.call(srv)) {
+        if (srv.response.success) {
+          ROS_INFO("Switch to next controller successful: %s", srv.response.message.c_str());
+          ROS_INFO("Switched from %s (index: %d) to %s (index: %d)", 
+                   srv.response.current_controller.c_str(), srv.response.current_index,
+                   srv.response.next_controller.c_str(), srv.response.next_index);
+          return true;
+        } else {
+          ROS_ERROR("Switch to next controller failed: %s", srv.response.message.c_str());
+          return false;
+        }
+      } else {
+        ROS_ERROR("Switch to next controller service call failed");
+        return false;
+      }
+    }
 
   private:
     ros::NodeHandle nodeHandle_;
@@ -1116,6 +1188,7 @@ namespace ocs2
     ros::Publisher mode_sequence_template_publisher_;
     ros::Publisher mode_scale_publisher_;
     ros::Publisher cmd_vel_publisher_;
+    ros::Publisher gait_name_publisher_;
     ros::Publisher stop_pub_;
     ros::Publisher re_start_pub_;
     ros::Publisher head_motion_pub_;
@@ -1130,6 +1203,9 @@ namespace ocs2
     std::map<std::string, humanoid::ModeSequenceTemplate> gait_map_;
     ros::ServiceServer joy_topic_service_;
     std::string current_joy_topic_;
+    ros::ServiceClient switch_controller_client_;
+    ros::ServiceClient get_controller_list_client_;
+    ros::ServiceClient switch_to_next_controller_client_;
     
     // 楼梯检测相关
     bool stair_detection_enabled_ = false;
@@ -1138,6 +1214,15 @@ namespace ocs2
     std::map<std::string, Command_t> commands_map_;
     std::string repo_root_path_;
     std::future<bool> command_future_;
+    
+    // YAW方向补偿系统成员变量
+    bool yaw_compensation_enabled_ = false;
+    double yaw_x_bias_ = 0.0;
+    double yaw_threshold_ = 0.05;
+    double yaw_x_velocity_threshold_ = 0.01;
+    bool enable_separate_yaw_compensation_ = false;
+    double yaw_x_bias_clockwise_ = 0.0;
+    double yaw_x_bias_counterclockwise_ = 0.0;
   };
 }
 

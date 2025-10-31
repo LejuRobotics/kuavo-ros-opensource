@@ -71,6 +71,27 @@ else
   sudo ./creat_remote_udev_rule.sh
 fi
 
+while true; do
+    echo "是否需要加载遥控器查看 log 使用串口的 udev 规则？确认有接线才可以使用。(y/n): "
+    read -r load_h12_log_channel
+    if [[ "$load_h12_log_channel" == "y" || "$load_h12_log_channel" == "Y" ]]; then
+        if ls /dev | grep H12_log_channel; then
+            echo "遥控器设备文件已存在，无需加载规则。"
+        else
+            echo "正在加载遥控器 udev 规则..."
+            cd $SCRIPT_DIR
+            sudo chmod +x load_h12_log_serial_rule.sh
+            sudo ./load_h12_log_serial_rule.sh                        
+        fi
+        break
+    elif [[ "$load_h12_log_channel" == "n" || "$load_h12_log_channel" == "N" ]]; then
+        echo "跳过加载遥控器 udev 规则。"
+        break
+    else
+        echo "输入无效，请输入 y 或 n。"
+    fi
+done
+
 echo "Current robot version: $ROBOT_VERSION"
 
 if [ -z "$ROS_MASTER_URI" ]; then
