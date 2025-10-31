@@ -22,6 +22,9 @@ if [ -n "$OPENSOURCE_DIR" ]; then
     EXECUTABLE_PATHS+=("$OPENSOURCE_DIR/installed/bin/arm_breakin_roban2")
 fi
 
+# 开源仓库
+EXECUTABLE_PATHS+=("$PROJECT_DIR/installed/bin/arm_breakin_roban2")
+
 # 闭源仓库路径
 EXECUTABLE_PATHS+=("$PROJECT_DIR/devel/lib/hardware_node/arm_breakin_roban2")
 EXECUTABLE_PATHS+=("$PROJECT_DIR/devel/lib/motorevo_controller/arm_breakin/arm_breakin_roban2")
