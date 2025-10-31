@@ -470,45 +470,77 @@ def handTouch_usb():
 
 
 def ruiwo_zero():
-        
-    kuavo_ros_file_path = folder_path +"/ruiwo_zero_set.sh" 
-    kuavo_open_file_path = folder_path +"../../installed/share/hardware_plant/lib/ruiwo_controller/setZero.sh" 
-    
+    while True:
+        print("请选择手臂总线类型：")
+        print("1. 单CAN")
+        print("2. 双CAN（ROBAN2.1）")
+        choice = input("请输入选择 (1 或 2): ").strip()
 
-    if os.path.exists(kuavo_ros_file_path):
-        command = "bash "+ kuavo_ros_file_path
-    elif os.path.exists(kuavo_open_file_path):
-        command = "bash "+ kuavo_open_file_path
-    else:
-        print(f"The file {file_path} does not exist.")
-        return
-        
-    # 使用 subprocess.run() 运行命令
-    subprocess.run(command, shell=True)
+        if choice == "1":
+            kuavo_ros_file_path = folder_path + "/ruiwo_zero_set.sh"
+            kuavo_open_file_path = folder_path + "../../installed/share/hardware_plant/lib/ruiwo_controller/setZero.sh"
+
+            if os.path.exists(kuavo_ros_file_path):
+                command = "bash " + kuavo_ros_file_path
+            elif os.path.exists(kuavo_open_file_path):
+                command = "bash " + kuavo_open_file_path
+            else:
+                print(f"The file {file_path} does not exist.")
+                return
+
+            subprocess.run(command, shell=True)
+            break
+
+        elif choice == "2":
+            motorevo_tool = os.path.join(folder_path, "motorevo_tool.sh")
+            if os.path.exists(motorevo_tool):
+                command = f"bash {motorevo_tool} --cali"
+                subprocess.run(command, shell=True)
+            else:
+                print(bcolors.FAIL + f"错误：未找到 {motorevo_tool}" + bcolors.ENDC)
+            break
+
+        else:
+            print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
 
 def ruiwo_negtive():
     while True:
-        print("请选择机器人类型：")
-        print("1. 4Pro型")
-        print("2. Roban2型")
-        
-        choice = input("请输入选择 (1 或 2): ").strip()
-        
-        if choice == "1":
-            robot_type = "4pro"
+        print("请选择手臂总线类型：")
+        print("1. 单CAN")
+        print("2. 双CAN（ROBAN2.1）")
+        can_choice = input("请输入选择 (1 或 2): ").strip()
+
+        if can_choice == "2":
+            motorevo_tool = os.path.join(folder_path, "motorevo_tool.sh")
+            if os.path.exists(motorevo_tool):
+                command = f"bash {motorevo_tool} --negative"
+                subprocess.run(command, shell=True)
+            else:
+                print(bcolors.FAIL + f"错误：未找到 {motorevo_tool}" + bcolors.ENDC)
             break
-        elif choice == "2":
-            robot_type = "roban2"
+
+        elif can_choice == "1":
+            while True:
+                print("请选择机器人类型：")
+                print("1. 4Pro型（14个电机）")
+                print("2. Roban2型（10个电机）")
+                choice = input("请输入选择 (1 或 2): ").strip()
+                if choice == "1":
+                    robot_type = "4pro"
+                    break
+                elif choice == "2":
+                    robot_type = "roban2"
+                    break
+                else:
+                    print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
+                    continue
+
+            command = "bash " + folder_path + "/ruiwo_negtive_set.sh " + robot_type
+            subprocess.run(command, shell=True)
             break
         else:
             print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
             continue
-
-    # 定义要运行的命令，传递机器人类型参数
-    command = "bash " + folder_path + "/ruiwo_negtive_set.sh " + robot_type
-
-    # 使用 subprocess.run() 运行命令
-    subprocess.run(command, shell=True)
 
 
 def qiangnao_hand():

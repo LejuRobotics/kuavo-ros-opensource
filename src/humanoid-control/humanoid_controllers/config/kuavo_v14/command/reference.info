@@ -2,7 +2,7 @@ targetDisplacementVelocity          0.5;
 targetRotationVelocity              0.3;
 cmdvelLinearXLimit                  0.30;
 cmdvelLinearZLimit                  0.1;
-cmdvelAngularYAWLimit               0.4;
+cmdvelAngularYAWLimit               0.3;
 armMode                             true; 
 
 targetArmDisplacementVelocity       1.2;
@@ -108,15 +108,15 @@ joint_kp_
 {
    (0,0)   4.3      ; waist_z
 
-   (1,0)   6.9507   ; leg_l1_joint
-   (2,0)   4.3   ; leg_l2_joint
-   (3,0)   4.3   ; leg_l3_joint
+   (1,0)   10.9507   ; leg_l1_joint
+   (2,0)   10.3   ; leg_l2_joint
+   (3,0)   10.3   ; leg_l3_joint
    (4,0)   4.9507   ; leg_l4_joint
    (5,0)   4.71   ; leg_l5_joint 10.71
    (6,0)   4.71   ; leg_l6_joint 2.43
-   (7,0)   6.9507   ; leg_r1_joint
-   (8,0)   4.3   ; leg_r2_joint
-   (9,0)   4.3   ; leg_r3_joint
+   (7,0)   10.9507   ; leg_r1_joint
+   (8,0)   10.3   ; leg_r2_joint
+   (9,0)   10.3   ; leg_r3_joint
    (10,0)  4.9507   ; leg_r4_joint
    (11,0)  4.71   ; leg_r5_joint
    (12,0)  4.71   ; leg_r6_joint
@@ -186,27 +186,27 @@ joint_kp_walking_
 {
    (0,0)   4.3      ; waist_z
 
-   (1,0)   6.9507   ; leg_l1_joint
-   (2,0)   4.3   ; leg_l2_joint
-   (3,0)   4.3   ; leg_l3_joint
+   (1,0)   10.9507   ; leg_l1_joint
+   (2,0)   10.3   ; leg_l2_joint
+   (3,0)   10.3   ; leg_l3_joint
    (4,0)   4.9507   ; leg_l4_joint
    (5,0)   4.71   ; leg_l5_joint 10.71
    (6,0)   4.71   ; leg_l6_joint 2.43
-   (7,0)   6.9507   ; leg_r1_joint
-   (8,0)   4.3   ; leg_r2_joint
-   (9,0)   4.3   ; leg_r3_joint
+   (7,0)   10.9507   ; leg_r1_joint
+   (8,0)   10.3   ; leg_r2_joint
+   (9,0)   10.3   ; leg_r3_joint
    (10,0)  4.9507   ; leg_r4_joint
    (11,0)  4.71   ; leg_r5_joint
    (12,0)  4.71   ; leg_r6_joint
 
-   (12,0)  0.0   ; zarm_l1_joint
-   (13,0)  0.0   ; zarm_l2_joint
-   (14,0)  0.0   ; zarm_l3_joint
-   (15,0)  0.0   ; zarm_l4_joint
-   (16,0)  0.0   ; zarm_r1_joint
-   (17,0)  0.0   ; zarm_r2_joint
-   (18,0)  0.0   ; zarm_r3_joint
-   (19,0)  0.0   ; zarm_r4_joint
+   (13,0)  0.0   ; zarm_l1_joint
+   (14,0)  0.0   ; zarm_l2_joint
+   (15,0)  0.0   ; zarm_l3_joint
+   (16,0)  0.0   ; zarm_l4_joint
+   (17,0)  0.0   ; zarm_r1_joint
+   (18,0)  0.0   ; zarm_r2_joint
+   (19,0)  0.0   ; zarm_r3_joint
+   (20,0)  0.0   ; zarm_r4_joint
     
 };{120.0, 120.0, 120.0, 120.0, 1.5, 1.5, 120.0, 120.0, 120.0, 120.0, 1.5, 1.5};
 
@@ -288,16 +288,16 @@ squatJointState
 
 acc_filter_cutoff_freq
 {
-   (0,0)   30.0   ; x
-   (1,0)   30.0   ; y
-   (2,0)   30.0   ; z
+   (0,0)   12.0   ; x
+   (1,0)   12.0   ; y
+   (2,0)   12.0   ; z
 }
 
 gyro_filter_cutoff_freq
 {
-   (0,0)   60.0   ; x
-   (1,0)   60.0   ; y
-   (2,0)   60.0   ; z
+   (0,0)   20.0   ; x
+   (1,0)   20.0   ; y
+   (2,0)   20.0   ; z
 }
 
 arm_joint_pos_filter_cutoff_freq       100 ;
