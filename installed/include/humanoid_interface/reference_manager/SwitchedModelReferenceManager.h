@@ -243,7 +243,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
 
   void loadBaseTrackingQ(const std::string &dynamic_qr_file);
   void loadBaseTrackingR(const std::string &dynamic_qr_file);
-  void setMatrixRByGaitPair(const std::string &gait_name, const scalar_t &time);
+  void setMatrixRByGaitPair(const std::string &gait_name, const scalar_t &time, bool all_stance);
   
   // 维度缩减函数（参考HumanoidInterface的实现）
   matrix_t initializeInputCostWeightDynamic(const std::string &taskFile, const std::string &fieldName);
@@ -409,6 +409,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   double fullbodyScheduleStartTime_ = 0.0;
   double fullbodyScheduleEndTime_ = 0.0;
   std::string last_gait_name_="empty";
+  bool last_all_stance_ = false;
   double vel_norm_{0};
   bool only_half_up_body_{false};
 
