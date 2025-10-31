@@ -3394,7 +3394,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         sensors_data_buffer_ptr_->addData(sensor_data.timeStamp_.toSec(), sensor_data);
         
         // 处理头部关节数据（如果有）
-        if (headNum_ > 0 && sensors_data.num_joints == jointNumReal_+armNumReal_+headNum_) {
+        if (headNum_ > 0 && sensors_data.num_joints == jointNumReal_+armNumReal_+headNum_+waistNum_) {
             int head_start_index = sensors_data.num_joints - headNum_;
             for (size_t i = 0; i < headNum_; ++i) {
                 sensor_data_head_.jointPos_(i) = sensors_data.joint_data[i + head_start_index].position;
@@ -3493,10 +3493,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     } 
     jointCmdPub_.publish(jointCmdMsg);
     
-    // 发布到共享内存
-    if (use_shm_communication_) {
-        publishJointCmdToShm(jointCmdMsg);
-    }
+    // // 发布到共享内存
+    // if (use_shm_communication_) {
+    //     publishJointCmdToShm(jointCmdMsg);
+    // }
 #endif
   }
 

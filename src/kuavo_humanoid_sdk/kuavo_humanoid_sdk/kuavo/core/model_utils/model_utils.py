@@ -35,7 +35,7 @@ class YOLO_detection:
         image = self.camera_interface.get_camera_image(camera)
         
         if image is not None:
-            results = model.predict(image, conf=0.6, show=False, verbose=False)
+            results = model.predict(image, conf=0.4, show=False, verbose=False)
             self.publish_results(results, camera)
             return results
         else:
