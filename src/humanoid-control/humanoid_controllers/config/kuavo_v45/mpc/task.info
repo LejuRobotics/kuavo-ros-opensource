@@ -535,6 +535,23 @@ selfCollision
   delta   1e-3
 }
 
+; Center of Mass constraint
+centerOfMass
+{
+  ; Enable center of mass constraint (true/false)
+  enable  true
+  
+  ; Use relaxed barrier penalty (true) or quadratic penalty (false)
+  useRelaxedBarrier  true
+  
+  ; For relaxed barrier penalty
+  mu      100     ; barrier parameter (smaller = tighter constraint)
+  delta   1e-5     ; relaxation parameter
+  
+  ; For quadratic penalty (only used if useRelaxedBarrier = false)
+  weight  100.0    ; penalty weight
+}
+
 ; Whole body control
 torqueLimitsTask
 {

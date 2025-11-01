@@ -10,6 +10,7 @@
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Int32.h>
+#include <std_msgs/String.h>
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Float64MultiArray.h>
 
@@ -162,6 +163,7 @@ namespace ocs2
 
             mode_sequence_template_publisher_ = nodeHandle_.advertise<ocs2_msgs::mode_schedule>(robotName + "_mpc_mode_schedule", 10, true);
             mode_scale_publisher_ = nodeHandle_.advertise<std_msgs::Float32>(robotName + "_mpc_mode_scale", 10, true);
+            gait_name_publisher_ = nodeHandle_.advertise<std_msgs::String>("/humanoid_mpc_gait_name_request", 10, true);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
             observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
@@ -176,6 +178,12 @@ namespace ocs2
             
             // 添加 enable_wbc_arm_trajectory_control 服务客户端
             enable_wbc_arm_trajectory_control_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/enable_wbc_arm_trajectory_control");
+            
+            // VR腰部控制动态Q矩阵服务客户端
+            vr_waist_control_service_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid/mpc/vr_waist_control");
+            
+            // GaitReceiver自动步态模式服务客户端
+            auto_gait_mode_service_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>(robotName + "_auto_gait");
             
             // 腰部控制相关的订阅者和发布者
             head_body_pose_sub_ = nodeHandle_.subscribe("/kuavo_head_body_orientation_data", 1, &QuestControlFSM::headBodyPoseCallback, this);
@@ -303,6 +311,68 @@ namespace ocs2
             }
         }
 
+        void callVRWaistControlSrv(bool enable)
+        {
+            std_srvs::SetBool srv;
+            srv.request.data = enable;
+
+            // 等待服务可用
+            if (!vr_waist_control_service_client_.waitForExistence(ros::Duration(2.0)))
+            {
+                ROS_WARN("VR waist control service not available, skipping call");
+                return;
+            }
+
+            // 调用服务
+            if (vr_waist_control_service_client_.call(srv))
+            {
+                if (srv.response.success)
+                {
+                    ROS_INFO("VRWaistControlSrv call successful: %s, response: %s", 
+                             enable ? "enabled" : "disabled", srv.response.message.c_str());
+                }
+                else
+                {
+                    ROS_WARN("VRWaistControlSrv returned failure: %s", srv.response.message.c_str());
+                }
+            }
+            else
+            {
+                ROS_ERROR("Failed to call VRWaistControlSrv");
+            }
+        }
+
+        void callAutoGaitModeSrv(bool enable)
+        {
+            std_srvs::SetBool srv;
+            srv.request.data = enable;
+
+            // 等待服务可用
+            if (!auto_gait_mode_service_client_.waitForExistence(ros::Duration(2.0)))
+            {
+                ROS_WARN("Auto gait mode service not available, skipping call");
+                return;
+            }
+
+            // 调用服务
+            if (auto_gait_mode_service_client_.call(srv))
+            {
+                if (srv.response.success)
+                {
+                    ROS_INFO("AutoGaitModeSrv call successful: %s, response: %s", 
+                             enable ? "enabled" : "disabled", srv.response.message.c_str());
+                }
+                else
+                {
+                    ROS_WARN("AutoGaitModeSrv returned failure: %s", srv.response.message.c_str());
+                }
+            }
+            else
+            {
+                ROS_ERROR("Failed to call AutoGaitModeSrv");
+            }
+        }
+
         void callTerminateSrv()
         {
         std::cout << "tigger callTerminateSrv" << std::endl;
@@ -345,10 +415,13 @@ namespace ocs2
         void headBodyPoseCallback(const kuavo_msgs::headBodyPose::ConstPtr& msg)
         {
             current_head_body_pose_ = *msg;
-            current_head_body_pose_.body_pitch = std::max(3*M_PI/180.0, std::min(current_head_body_pose_.body_pitch, 15*M_PI/180.0));
+            current_head_body_pose_.body_pitch = std::max(3*M_PI/180.0, std::min(current_head_body_pose_.body_pitch, 35*M_PI/180.0));
 
+            // 检查是否正在进行XY按键摇杆控制（高优先级），如果是则跳过VR腰部控制
+            bool joystick_torso_control_active = (joystick_data_.left_second_button_touched && joystick_data_.left_first_button_touched);
+            
             // 在腰部控制模式下且没有XY按键摇杆控制时，发布VR腰部控制指令
-            if (torso_control_enabled_)
+            if (torso_control_enabled_ && !joystick_torso_control_active)
             {
                 // 腰部yaw控制（如果支持腰部自由度）
                 if (waist_dof_ > 0)
@@ -359,6 +432,29 @@ namespace ocs2
                     
                     // 发布腰部控制指令
                     controlWaist(relative_yaw * 180.0 / M_PI); // 转换为角度
+                }
+                
+                //计算相对于0点的roll,yaw位置
+                double current_roll = current_head_body_pose_.body_roll;
+                double relative_roll = current_roll - torso_roll_zero_;
+                double current_yaw_torso = current_head_body_pose_.body_yaw;
+                double relative_yaw_torso = current_yaw_torso - torso_yaw_zero_;
+
+                //std::cout << "相对roll: " << relative_roll << std::endl;
+                if(waist_dof_ == 0)
+                {
+                    // std::cout << "相对roll: " << relative_roll * 180.0 / M_PI << std::endl;
+                    // 对relative_roll限幅5度
+                    relative_roll = std::max(-15.0*M_PI/180.0, std::min(relative_roll, 15.0*M_PI/180.0));
+                    relative_yaw_torso = std::max(-30.0*M_PI/180.0, std::min(relative_yaw_torso, 30.0*M_PI/180.0));
+                    //std::cout << "相对roll: " << relative_roll * 180.0 / M_PI << std::endl;
+                    //std::cout << "相对yaw: " << relative_yaw_torso * 180.0 / M_PI << std::endl;
+                }
+                else
+                {
+                    // 对relative_roll限幅0度
+                    relative_roll = 0;
+                    relative_yaw_torso = 0;
                 }
                 
                 // 高度控制
@@ -372,7 +468,8 @@ namespace ocs2
                 cmd_pose.linear.x = 0.0;  // 基于当前位置的 x 方向值 (m)
                 cmd_pose.linear.y = 0.0;  // 基于当前位置的 y 方向值 (m)
                 cmd_pose.linear.z = relative_height;  // 相对高度
-                cmd_pose.angular.z = 0.0;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
+                cmd_pose.angular.x = relative_roll;  // roll
+                cmd_pose.angular.z = relative_yaw_torso;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
                 cmd_pose.angular.y = current_head_body_pose_.body_pitch;  // pitch
 
                 cmd_pose_pub_.publish(cmd_pose);
@@ -448,9 +545,9 @@ namespace ocs2
             
             
             // 腰部控制逻辑
-            if (joystick_data_.right_first_button_touched)
+            if (joystick_data_.left_trigger > 0.5)
             {
-                if (!joystick_data_prev_.left_second_button_pressed && joystick_data_.left_second_button_pressed) // 左边第二个按钮按下，切换腰部控制模式
+                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 左边第二个按钮按下，切换腰部控制模式
                 {
                     if (!torso_control_enabled_)
                     {
@@ -458,7 +555,17 @@ namespace ocs2
                         torso_control_enabled_ = true;
                         torso_yaw_zero_ = current_head_body_pose_.body_yaw; // 记录当前腰部位置作为零点
                         body_height_zero_ = current_head_body_pose_.body_height; // 记录当前高度作为零点
+                        torso_roll_zero_ = current_head_body_pose_.body_roll;
                         torso_control_start_time_ = ros::Time::now();
+                        
+                        if(waist_dof_ == 0)
+                        {
+                            // 失能GaitReceiver的自动步态模式
+                            callAutoGaitModeSrv(false);
+                            // 调用VR腰部控制服务，启用VR腰部控制动态Q矩阵
+                            callVRWaistControlSrv(true);
+                        }
+                        
                         std::cout << "腰部控制模式已启用，腰部零点: " << torso_yaw_zero_ 
                                 << "，高度零点: " << body_height_zero_ << std::endl;
                     }
@@ -466,6 +573,18 @@ namespace ocs2
                     {
                         // 关闭腰部控制模式
                         torso_control_enabled_ = false;
+                        if(waist_dof_ == 0)
+                        {
+                            geometry_msgs::Twist cmd_pose;
+                            cmd_pose.angular.z = 0;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
+                            cmd_pose_pub_.publish(cmd_pose);
+
+                            
+                            // 使能GaitReceiver的自动步态模式
+                            callAutoGaitModeSrv(true);
+                            // 调用VR腰部控制服务，禁用VR腰部控制动态Q矩阵
+                            callVRWaistControlSrv(false);
+                        }
                         std::cout << "腰部控制模式已关闭" << std::endl;
                     }
                     return;
@@ -577,7 +696,7 @@ namespace ocs2
         {
 
             // 时间控制参数
-            constexpr double kStableThreshold = 0.20;    // 稳定阈值 X 秒
+            constexpr double kStableThreshold = 0.40;    // 稳定阈值 X 秒
             constexpr float kDeadzone = 0.05f;            // 死区
 
             // 获取摇杆值
@@ -588,6 +707,7 @@ namespace ocs2
             // 应用死区 - 如果右摇杆X轴在死区内，但其他轴有输入，则执行正常运动控制
             if (std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone ||std::abs(left_y) >= kDeadzone)) {
                 turn_step_current_zone_ = -1;
+                turn_step_zone_published_ = false;
                 // 有其他摇杆输入，执行正常运动控制
                 updateCommandLine();
                 return;
@@ -607,6 +727,7 @@ namespace ocs2
             // 如果不在任何区间，重置状态
             if (target_zone == -1) {
                 turn_step_current_zone_ = -1;
+                turn_step_zone_published_ = false;
                 return;
             }
 
@@ -629,6 +750,7 @@ namespace ocs2
                 turn_step_current_zone_ = target_zone;
                 turn_step_zone_enter_time_ = ros::Time::now();
                 turn_step_zone_stable_ = false;
+                turn_step_zone_published_ = false;  // 新区间，重置发布标志
                 return;
             }
 
@@ -640,6 +762,17 @@ namespace ocs2
                     turn_step_zone_stable_ = true;
                 } else {
                     return; // 还未稳定，继续等待
+                }
+            }
+    
+            // 如果当前区间已经发布过，检查是否需要重新稳定后再次发布
+            if (turn_step_zone_published_) {
+                // 如果距离上次发布已经过了稳定时间阈值，允许重新发布
+                if ((current_time - turn_step_last_execute_time_).toSec() >= kStableThreshold) {
+                    turn_step_zone_published_ = false;  // 重置发布标志，允许再次发布
+                    ROS_INFO("Zone %d ready for re-publish after %.2f seconds", turn_step_current_zone_, kStableThreshold);
+                } else {
+                    return;  // 还未到重新发布的时间，继续等待
                 }
             }
     
@@ -659,6 +792,8 @@ namespace ocs2
                     bool is_stance = (current_gait == "stance");
                     if (is_stance) {
                         foot_pose_target_pub_.publish(kTurnZones[target_zone].trajectory);
+                        turn_step_zone_published_ = true;  // 标记已发布
+                        turn_step_last_execute_time_ = ros::Time::now();  // 记录发布时间
                         ROS_WARN("Zone %d trajectory published - not Custom-Gait and current gait is stance", target_zone);
                     } else if(current_gait == "walk") {
                         // 先站立再单步
@@ -738,13 +873,13 @@ namespace ocs2
         void checkGaitSwitchCommand(const kuavo_msgs::JoySticks &joy_msg)
         {
             // 检查是否有gait切换指令
-            if (!joystick_data_prev_.right_first_button_pressed && joy_msg.right_first_button_pressed)
+            if (!joystick_data_prev_.right_first_button_pressed && joy_msg.right_first_button_pressed && !joy_msg.left_first_button_touched && !joy_msg.left_second_button_touched && joy_msg.left_trigger < 0.5)
             {
                 publish_mode_sequence_temlate("stance");
                 publish_zero_spd();
             }
 
-            else if (!joystick_data_prev_.right_second_button_pressed && joy_msg.right_second_button_pressed)
+            else if (!joystick_data_prev_.right_second_button_pressed && joy_msg.right_second_button_pressed && !joy_msg.left_first_button_touched && !joy_msg.left_second_button_touched && joy_msg.left_trigger < 0.5)
             {
                 publish_mode_sequence_temlate("walk");
             }
@@ -1036,6 +1171,10 @@ namespace ocs2
             humanoid::ModeSequenceTemplate modeSequenceTemplate = gait_map_.at(gaitName);
             mode_sequence_template_publisher_.publish(createModeSequenceTemplateMsg(modeSequenceTemplate));
             current_desired_gait_ = gaitName;            
+            // 同步发布 gait_name
+            std_msgs::String gait_name_msg;
+            gait_name_msg.data = gaitName;
+            gait_name_publisher_.publish(gait_name_msg);
         }
 
         scalar_t estimateTimeToTarget(const vector_t &desiredBaseDisplacement)
@@ -1075,6 +1214,7 @@ namespace ocs2
         ocs2::SystemObservation observation_;
         ros::Publisher mode_sequence_template_publisher_;
         ros::Publisher mode_scale_publisher_;
+        ros::Publisher gait_name_publisher_;
         ros::Publisher stop_pub_;
         ros::Publisher step_num_stop_pub_;
         ros::Publisher vel_control_pub_;
@@ -1128,6 +1268,7 @@ namespace ocs2
         int waist_dof_{0};
         double torso_yaw_zero_;
         double body_height_zero_;  // 记录进入控制模式时的高度零点
+        double torso_roll_zero_;
         ros::Time torso_control_start_time_;
 
         kuavo_msgs::headBodyPose current_head_body_pose_;
@@ -1138,6 +1279,7 @@ namespace ocs2
         int turn_step_current_zone_{-1};                 // 当前所在区间 (-1表示不在任何区间)
         ros::Time turn_step_zone_enter_time_;            // 进入当前区间时间
         bool turn_step_zone_stable_{false};              // 是否在区间内稳定超过阈值时间
+        bool turn_step_zone_published_{false};           // 当前区间是否已发布轨迹
         ros::Time turn_step_last_execute_time_;          // 上次执行时间
 
         ros::Publisher arm_mode_pub_;

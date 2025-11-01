@@ -11,7 +11,7 @@
 /// 一旦驱动板检测到故障，将会从 Motor State 自动切回 Rest State 以保护驱动器和电机
 /// 在排除异常情况后，发送 Enter Rest State 命令清除故障码，
 // 再发送 Enter Motor State 命令让电机重新恢复运行
-// See Details:《Motorevo Driver User Guide v0.2.2》- 6.5.1 反馈帧格式 - 故障码
+// See Details:《Motorevo Driver User Guide v0.2.3》- 6.5.1 反馈帧格式 - 故障码
 enum class RuiwoErrCode:uint8_t {
     NO_FAULT = 0x00,                       // 无故障
     DC_BUS_OVER_VOLTAGE = 0x01,            // 直流母线电压过压
@@ -28,7 +28,9 @@ enum class RuiwoErrCode:uint8_t {
     CURRENT_SENSOR_FAILURE = 0x0C,         // 电流传感器故障
     OUTPUT_ANGLE_OUT_OF_RANGE = 0x0D,      // 输出轴实际角度超过通信范围：CAN COM Theta MIN ~ CAN COM Theta MAX
     OUTPUT_SPEED_OUT_OF_RANGE = 0x0E,      // 输出轴速度超过通信范围 CAN COM Velocity MIN ~ CAN COM Velocity MAX
- 
+    STUCK_PROTECTION = 0x0F,               // 堵转保护：电机电枢电流(Iq)大于 Stuck Current，同时电机速度小于 Stuck Velocity，持续时间超过 Stuck Time 后触发
+    CAN_COMMUNICATION_LOSS = 0x10,         // CAN 通讯丢失：超过 CAN COM TIMEOUT 时间没有收到 CAN 数据帧时触发
+
     // WARNING: 大于 128 的故障码为开机自检检测出的故障码，无法用该方法清除
     //
     ABS_ENCODER_OFFSET_VERIFICATION_FAILURE = 0x81, // 离轴/对心多圈绝对值编码器接口帧头校验失败

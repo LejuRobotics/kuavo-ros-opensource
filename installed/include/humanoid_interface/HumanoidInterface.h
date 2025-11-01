@@ -134,6 +134,8 @@ namespace ocs2
       std::unique_ptr<StateCost> getEndEffectorConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                         const std::string& prefix, const std::string& eeName, const int eeIndex, bool verbose);
       
+      std::unique_ptr<StateCost> getCenterOfMassConstraint(const PinocchioInterface &pinocchioInterface, const std::string& taskFile, bool verbose);                             
+                                                        
       std::unique_ptr<EndEffectorKinematics<scalar_t>> getEeKinematicsPtr(const std::vector<std::string> &endEffectorIds, const std::string &modelName);
 
       ModelSettings modelSettings_;

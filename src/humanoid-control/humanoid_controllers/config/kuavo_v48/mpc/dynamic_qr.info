@@ -63,12 +63,12 @@ Q_base_stance_VRwaist
   (5,5)   13.0     ; L_z / robotMass
 
   ;; Base Pose: [position, orientation] ;;
-  (6,6)   200.0    ; p_base_x
-  (7,7)   200.0    ; p_base_y
-  (8,8)   300.0    ; p_base_z
-  (9,9)   800.0    ; theta_base_z
-  (10,10) 1000.0    ; theta_base_y
-  (11,11) 200.0    ; theta_base_x
+  (6,6)   500.0    ; p_base_x
+  (7,7)   500.0    ; p_base_y
+  (8,8)   2000.0    ; p_base_z
+  (9,9)   100.0    ; theta_base_z
+  (10,10) 2000.0    ; theta_base_y
+  (11,11) 800.0    ; theta_base_x
 
   ;; Leg Joint Positions: [LF, LH, RF, RH] ;;
   (12,12) 300.0     ; leg_l1_joint

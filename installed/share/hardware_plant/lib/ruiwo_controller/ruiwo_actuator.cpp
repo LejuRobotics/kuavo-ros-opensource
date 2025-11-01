@@ -32,6 +32,10 @@ std::string RuiwoErrCode2string(RuiwoErrCode errcode) {
             return "输出轴实际角度超过通信范围";
         case RuiwoErrCode::OUTPUT_SPEED_OUT_OF_RANGE:
             return "输出轴速度超过通信范围";
+        case RuiwoErrCode::STUCK_PROTECTION:
+            return "堵转保护：电机电枢电流(Iq)大于 Stuck Current，同时电机速度小于 StuckVelocity，持续时间超过 Stuck Time 后触发";
+        case RuiwoErrCode::CAN_COMMUNICATION_LOSS:
+            return "CAN通讯丢失：超过CAN通信超时时间未收到数据帧";
         case RuiwoErrCode::ABS_ENCODER_OFFSET_VERIFICATION_FAILURE:
             return "离轴/对心多圈绝对值编码器接口帧头校验失败，重启，若还失败则请联系售后工程师";
         case RuiwoErrCode::ABSOLUTE_ENCODER_MULTI_TURN_FAILURE:
@@ -49,7 +53,9 @@ std::string RuiwoErrCode2string(RuiwoErrCode errcode) {
         case RuiwoErrCode::INTEGRATED_STATOR_DRIVER_DAMAGED:
             return "集成式栅极驱动器初始化失败，重启，若还失败则请联系售后工程师";
         default:
-            return "未知故障码: 0x" + std::to_string(static_cast<int>(errcode));
+            std::cout << "\033[33m[DEBUG] 未处理的错误码: 0x" << std::hex << static_cast<int>(errcode)
+                << std::dec << " (" << static_cast<int>(errcode) << ")\033[0m" << std::endl;
+            return "未知故障码: " + std::to_string(static_cast<int>(errcode));
     }
 }
 
