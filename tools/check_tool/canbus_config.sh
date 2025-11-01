@@ -174,11 +174,11 @@ select_canbus_type() {
     local -n result_ref=$2
     local side="$1"  # L 或 R
     local canbus_options=("BUSMUST_A -- BUSMUST A 款" "BUSMUST_B -- BUSMUST B 款" "LEJU_CAN -- 乐聚 CAN 模块")
-    show_menu "选择${side}侧CANBUS类型" "${canbus_options[@]}"
+    show_menu "选择${side}侧 (${side}手臂) CANBUS 类型" "${canbus_options[@]}"
     get_user_selection 3 canbus_selection
     local canbus_types=("BUSMUST_A" "BUSMUST_B" "LEJU_CAN")
     local canbus_type="${canbus_types[$((canbus_selection-1))]}"
-    echo_success "✓ 选择${side}侧CANBUS类型: $canbus_type"
+    echo_success "✓ 选择了=> ${side}侧 (${side}手臂) CANBUS 类型: $canbus_type"
 
     result_ref="$canbus_type"
 }
@@ -453,7 +453,11 @@ main() {
             ;;
     esac
 
-    echo_success "\n🎉 配置完成!"
+    echo_success "\n\n********************************************************************"
+    echo_success "🎉 🎉 🎉 配置完成!"
+    echo_success "CANBUS接线类型文件: $CANBUS_WIRING_TYPE_FILE"
+    echo_success "CANBUS配置文件路径: $CANBUS_CONFIG_FILE"
+    echo_success "********************************************************************"
 }
 
 # 运行主函数
