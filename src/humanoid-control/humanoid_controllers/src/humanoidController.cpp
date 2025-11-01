@@ -2966,9 +2966,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       if (enable_pull_up_protect_ && !is_rl_controller_ && isPreUpdateComplete && is_stance_mode_ && 
       !only_half_up_body_ && currentObservation_.time - standupTime_ > 4 
       && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL)
+      {  
         new_pull_up_state = stateEstimate_->checkPullUp(pull_up_force_threshold_);
+      }
       ros_logger_->publishValue("/state_estimate/pull_up_state", isPullUp_);
-      if (new_pull_up_state && !isPullUp_)
+      if (!is_rl_controller_ && new_pull_up_state && !isPullUp_)
       {
         ROS_WARN_STREAM("Pull up detected");
         isPullUp_ = true;
