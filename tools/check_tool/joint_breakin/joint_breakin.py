@@ -203,25 +203,25 @@ class KuavoUnifiedBreakin:
     
     def _safety_monitor_loop(self):
         """安全监控主循环"""
-        self.print_colored("安全监控：等待第一轮动作开始...", Colors.YELLOW)
+        self.print_colored("心跳监控：等待第一轮动作开始...", Colors.YELLOW)
         
         # 等待第一轮动作开始（大约15秒后开始监控）
         time.sleep(15.0)
         
-        self.print_colored("第一轮动作开始，启动安全监控...", Colors.GREEN)
+        self.print_colored("第一轮动作开始，启动心跳监控...", Colors.GREEN)
         
-        # 在开始安全监控前，再次确保清理所有心跳文件
-        self.print_colored("安全监控启动前清理所有心跳文件...", Colors.BLUE)
-        self.cleanup_heartbeat_files()
+        # 心跳超时阈值（秒）
+        HEARTBEAT_TIMEOUT = 3.0
+        # 检查间隔（秒）
+        CHECK_INTERVAL = 1.0
         
         # 持续监控直到程序结束
         while not self.stop_safety_monitor.is_set():
-            time.sleep(1.0)  # 每秒检查一次
+            time.sleep(CHECK_INTERVAL)
             
             # 检查紧急停止信号
             if os.path.exists(self.emergency_stop_file):
                 self.print_colored("❌ 检测到紧急停止信号！", Colors.RED)
-                # 调试信息：显示紧急停止文件的内容
                 try:
                     with open(self.emergency_stop_file, 'r') as f:
                         content = f.read()
@@ -231,96 +231,97 @@ class KuavoUnifiedBreakin:
                 self._emergency_stop()
                 break
             
-            # 检查电机心跳
-            motor_status = self._check_motor_movement()
-            if not motor_status:
-                # 在紧急停止前，再次检查进程状态
-                arm_still_running = self.arm_process and self.arm_process.poll() is None
-                leg_still_running = self.leg_process and self.leg_process.poll() is None
-                
-                if arm_still_running or leg_still_running:
-                    self.print_colored("❌ 检测到电机故障，执行紧急停止！", Colors.RED)
-                    self._emergency_stop()
-                    break
+            # 检查进程状态
+            arm_running = self.arm_process and self.arm_process.poll() is None
+            leg_running = self.leg_process and self.leg_process.poll() is None
+            
+            # 如果两个进程都已结束，停止监控
+            if not arm_running and not leg_running:
+                self.print_colored("✓ 两个进程都已结束，停止心跳监控", Colors.GREEN)
+                break
+            
+            # 如果任一进程结束，但另一个还在运行，立即触发停止
+            if not arm_running and leg_running:
+                self.print_colored("❌ 检测到手臂进程已结束，但腿部进程仍在运行！", Colors.RED)
+                self.print_colored("正在发送停止信号给腿部磨线程序...", Colors.YELLOW)
+                self._send_stop_signals()
+                self._emergency_stop()
+                break
+            elif arm_running and not leg_running:
+                self.print_colored("❌ 检测到腿部进程已结束，但手臂进程仍在运行！", Colors.RED)
+                self.print_colored("正在发送停止信号给手臂磨线程序...", Colors.YELLOW)
+                self._send_stop_signals()
+                self._emergency_stop()
+                break
+            
+            # 检查心跳超时（只有在进程还在运行时才检查）
+            heartbeat_issue = False
+            issue_message = ""
+            
+            # 检查手臂心跳
+            if arm_running:
+                if os.path.exists(self.arm_heartbeat_file):
+                    try:
+                        stat = os.stat(self.arm_heartbeat_file)
+                        time_diff = time.time() - stat.st_mtime
+                        if time_diff > HEARTBEAT_TIMEOUT:
+                            heartbeat_issue = True
+                            issue_message = f"手臂心跳超时（{time_diff:.1f}秒未更新）"
+                    except Exception as e:
+                        self.print_colored(f"检查手臂心跳文件失败: {e}", Colors.YELLOW)
                 else:
-                    self.print_colored("✓ 进程已正常结束，停止安全监控", Colors.GREEN)
-                    break
+                    # 如果进程运行但心跳文件不存在，可能是刚开始，给一些时间
+                    # 但如果在15秒后仍然没有心跳文件，认为有问题
+                    pass
+            
+            # 检查腿部心跳
+            if leg_running:
+                if os.path.exists(self.leg_heartbeat_file):
+                    try:
+                        stat = os.stat(self.leg_heartbeat_file)
+                        time_diff = time.time() - stat.st_mtime
+                        if time_diff > HEARTBEAT_TIMEOUT:
+                            heartbeat_issue = True
+                            if issue_message:
+                                issue_message += f"；腿部心跳超时（{time_diff:.1f}秒未更新）"
+                            else:
+                                issue_message = f"腿部心跳超时（{time_diff:.1f}秒未更新）"
+                    except Exception as e:
+                        self.print_colored(f"检查腿部心跳文件失败: {e}", Colors.YELLOW)
+                else:
+                    # 如果进程运行但心跳文件不存在，可能是刚开始，给一些时间
+                    pass
+            
+            # 如果检测到心跳问题，立即停止
+            if heartbeat_issue:
+                self.print_colored(f"❌ 检测到心跳异常：{issue_message}", Colors.RED)
+                self.print_colored("正在发送停止信号给手臂和腿部磨线程序...", Colors.YELLOW)
+                self._send_stop_signals()
+                self._emergency_stop()
+                break
     
-    def _check_motor_movement(self):
-        """检查电机是否在运动"""
+    def _send_stop_signals(self):
+        """发送停止信号给手臂和腿部磨线程序"""
         try:
-            # 检查进程是否还在运行
-            arm_process_running = self.arm_process and self.arm_process.poll() is None
-            leg_process_running = self.leg_process and self.leg_process.poll() is None
+            # 创建手臂停止信号文件
+            if self.arm_process and self.arm_process.poll() is None:
+                try:
+                    with open("/tmp/arm_stop_signal", "w") as f:
+                        f.write(f"stop_signal_{time.time()}\n")
+                    self.print_colored("✓ 已发送停止信号给手臂磨线程序", Colors.GREEN)
+                except Exception as e:
+                    self.print_colored(f"发送手臂停止信号失败: {e}", Colors.RED)
             
-            # 添加调试信息
-            arm_poll_result = self.arm_process.poll() if self.arm_process else "None"
-            leg_poll_result = self.leg_process.poll() if self.leg_process else "None"
-            # self.print_colored(f"进程状态检查：手臂进程={arm_process_running}(poll={arm_poll_result}) 腿部进程={leg_process_running}(poll={leg_poll_result})", Colors.CYAN)
-            
-            # 如果进程已经结束，不需要检查心跳
-            if not arm_process_running and not leg_process_running:
-                self.print_colored("电机状态检查：所有进程已结束，停止监控", Colors.GREEN)
-                return True  # 返回True，表示正常状态（程序正常结束）
-            
-            # 检查心跳文件是否存在
-            arm_file_exists = os.path.exists(self.arm_heartbeat_file)
-            leg_file_exists = os.path.exists(self.leg_heartbeat_file)
-            
-            # 初始化状态
-            arm_moving = False
-            leg_moving = False
-            
-            # 如果进程已经结束，不需要检查心跳
-            if not arm_process_running:
-                self.print_colored("手臂进程已结束，跳过心跳检查", Colors.YELLOW)
-                arm_moving = True  # 认为正常
-            else:
-                # 只有进程还在运行时才检查心跳
-                if arm_file_exists:
-                    # 检查心跳文件的时间戳
-                    stat = os.stat(self.arm_heartbeat_file)
-                    time_diff = time.time() - stat.st_mtime
-                    if time_diff < 3.0:  # 3秒内有更新
-                        arm_moving = True
-                    # self.print_colored(f"手臂心跳文件存在，时间差: {time_diff:.2f}秒", Colors.CYAN)
-                else:
-                    # self.print_colored("手臂心跳文件不存在", Colors.CYAN)
-                    pass
-            
-            if not leg_process_running:
-                self.print_colored("腿部进程已结束，跳过心跳检查", Colors.YELLOW)
-                leg_moving = True  # 认为正常
-            else:
-                # 只有进程还在运行时才检查心跳
-                if leg_file_exists:
-                    # 检查心跳文件的时间戳
-                    stat = os.stat(self.leg_heartbeat_file)
-                    time_diff = time.time() - stat.st_mtime
-                    if time_diff < 3.0:  # 3秒内有更新
-                        leg_moving = True
-                    # self.print_colored(f"腿部心跳文件存在，时间差: {time_diff:.2f}秒", Colors.CYAN)
-                else:
-                    # self.print_colored("腿部心跳文件不存在", Colors.CYAN)
-                    pass
-            
-            # 如果两个心跳文件都不存在，说明都还没有开始，这是正常的
-            if not arm_file_exists and not leg_file_exists:
-                self.print_colored("电机状态检查：等待心跳文件创建...", Colors.CYAN)
-                return True  # 返回True，表示正常状态
-            
-            # 如果只有一个文件存在但心跳异常，也认为是正常的（可能另一个系统还没开始）
-            if (arm_file_exists and not leg_file_exists) or (not arm_file_exists and leg_file_exists):
-                # self.print_colored("电机状态检查：一个系统已启动，等待另一个系统...", Colors.CYAN)
-                return True  # 返回True，表示正常状态
-            
-            # self.print_colored(f"电机状态检查：手臂={'✓' if arm_moving else '✗'} 腿部={'✓' if leg_moving else '✗'}", Colors.CYAN)
-            
-            return arm_moving and leg_moving
-            
+            # 创建腿部停止信号文件
+            if self.leg_process and self.leg_process.poll() is None:
+                try:
+                    with open("/tmp/leg_stop_signal", "w") as f:
+                        f.write(f"stop_signal_{time.time()}\n")
+                    self.print_colored("✓ 已发送停止信号给腿部磨线程序", Colors.GREEN)
+                except Exception as e:
+                    self.print_colored(f"发送腿部停止信号失败: {e}", Colors.RED)
         except Exception as e:
-            self.print_colored(f"电机状态检查失败: {e}", Colors.RED)
-            return False
+            self.print_colored(f"发送停止信号时出错: {e}", Colors.RED)
     
     def _emergency_stop(self):
         """紧急停止所有电机"""
@@ -1101,7 +1102,7 @@ class KuavoUnifiedBreakin:
             self.print_colored("手臂磨线进程已启动（等待腿部信号）", Colors.GREEN)
         else:
             self.print_colored(f"手臂磨线进程ID: {arm_pid}", Colors.GREEN)
-        self.print_colored("手臂磨线将等待腿部准备完成后开始运行（确保同步）...", Colors.YELLOW)
+        self.print_colored("手臂磨线将等待腿部准备完成后开始运行...", Colors.YELLOW)
         
         time.sleep(1)
         
@@ -1130,15 +1131,50 @@ class KuavoUnifiedBreakin:
         
         try:
             while True:
-                if self.arm_process and self.arm_process.poll() is not None:
-                    self.print_colored("手臂磨线进程已结束", Colors.RED)
+                # 检查进程状态
+                arm_finished = self.arm_process and self.arm_process.poll() is not None
+                leg_finished = self.leg_process and self.leg_process.poll() is not None
+                
+                # 如果任一进程结束，立即检查心跳并停止另一个
+                if arm_finished and not leg_finished:
+                    self.print_colored("手臂磨线进程已结束，检测到心跳停止，立即停止腿部磨线...", Colors.RED)
+                    self._send_stop_signals()
+                    # 给腿部进程一些时间响应停止信号
+                    time.sleep(2)
+                    if self.leg_process and self.leg_process.poll() is None:
+                        self.print_colored("腿部进程未响应停止信号，强制终止...", Colors.YELLOW)
+                        try:
+                            os.killpg(os.getpgid(self.leg_process.pid), signal.SIGKILL)
+                            self.print_colored("✓ 腿部磨线进程已强制终止", Colors.GREEN)
+                        except Exception as e:
+                            self.print_colored(f"强制终止失败: {e}", Colors.RED)
                     break
-                if self.leg_process and self.leg_process.poll() is not None:
-                    self.print_colored("腿部磨线进程已结束", Colors.RED)
+                elif leg_finished and not arm_finished:
+                    self.print_colored("腿部磨线进程已结束，检测到心跳停止，立即停止手臂磨线...", Colors.RED)
+                    self._send_stop_signals()
+                    # 给手臂进程一些时间响应停止信号
+                    time.sleep(2)
+                    if self.arm_process and self.arm_process.poll() is None:
+                        self.print_colored("手臂进程未响应停止信号，强制终止...", Colors.YELLOW)
+                        try:
+                            os.killpg(os.getpgid(self.arm_process.pid), signal.SIGTERM)
+                            try:
+                                self.arm_process.wait(timeout=3)
+                            except subprocess.TimeoutExpired:
+                                os.killpg(os.getpgid(self.arm_process.pid), signal.SIGKILL)
+                            self.print_colored("✓ 手臂磨线进程已强制终止", Colors.GREEN)
+                        except Exception as e:
+                            self.print_colored(f"强制终止失败: {e}", Colors.RED)
                     break
+                elif arm_finished and leg_finished:
+                    self.print_colored("两个磨线进程都已结束", Colors.GREEN)
+                    break
+                
                 time.sleep(2)
         except KeyboardInterrupt:
-            self.print_colored("\n用户中断，磨线程序继续运行", Colors.YELLOW)
+            self.print_colored("\n用户中断，正在停止所有磨线程序...", Colors.YELLOW)
+            self._send_stop_signals()
+            self.stop_all_processes.set()
             
         # 程序结束时清理信号文件
         try:
