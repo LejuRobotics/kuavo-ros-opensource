@@ -211,9 +211,13 @@ class KuavoUnifiedBreakin:
         self.print_colored("第一轮动作开始，启动心跳监控...", Colors.GREEN)
         
         # 心跳超时阈值（秒）
-        HEARTBEAT_TIMEOUT = 3.0
+        HEARTBEAT_TIMEOUT = 4.0
         # 检查间隔（秒）
         CHECK_INTERVAL = 1.0
+        
+        # 记录上次心跳时间，用于连续超时判断
+        arm_heartbeat_warning_count = 0  # 手臂连续警告次数
+        leg_heartbeat_warning_count = 0  # 腿部连续警告次数
         
         # 持续监控直到程序结束
         while not self.stop_safety_monitor.is_set():
@@ -230,6 +234,16 @@ class KuavoUnifiedBreakin:
                     self.print_colored(f"读取紧急停止文件失败: {e}", Colors.YELLOW)
                 self._emergency_stop()
                 break
+            
+            # 检查是否有arm_disable_signal文件
+            if os.path.exists("/tmp/arm_disable_signal"):
+                self.print_colored("⚠️ 检测到手臂失能信号文件存在，这会导致腿部停止运动", Colors.YELLOW)
+                try:
+                    with open("/tmp/arm_disable_signal", 'r') as f:
+                        content = f.read()
+                        self.print_colored(f"手臂失能信号内容: {content}", Colors.YELLOW)
+                except Exception as e:
+                    self.print_colored(f"读取手臂失能信号失败: {e}", Colors.YELLOW)
             
             # 检查进程状态
             arm_running = self.arm_process and self.arm_process.poll() is None
@@ -265,14 +279,22 @@ class KuavoUnifiedBreakin:
                         stat = os.stat(self.arm_heartbeat_file)
                         time_diff = time.time() - stat.st_mtime
                         if time_diff > HEARTBEAT_TIMEOUT:
-                            heartbeat_issue = True
-                            issue_message = f"手臂心跳超时（{time_diff:.1f}秒未更新）"
+                            # 连续多次超时认为是问题
+                            arm_heartbeat_warning_count += 1
+                            if arm_heartbeat_warning_count >= 2:  # 连续2次检查都超时停止
+                                heartbeat_issue = True
+                                issue_message = f"手臂心跳超时（{time_diff:.1f}秒未更新，连续{arm_heartbeat_warning_count}次检查）"
+                        else:
+                            arm_heartbeat_warning_count = 0  # 心跳正常，重置计数
                     except Exception as e:
                         self.print_colored(f"检查手臂心跳文件失败: {e}", Colors.YELLOW)
                 else:
-                    # 如果进程运行但心跳文件不存在，可能是刚开始，给一些时间
-                    # 但如果在15秒后仍然没有心跳文件，认为有问题
-                    pass
+                    # 如果进程运行但心跳文件不存在，可能刚开始或心跳写入有问题
+                    # 给容错时间
+                    arm_heartbeat_warning_count += 1
+                    if arm_heartbeat_warning_count >= 2:  # 连续2次检查都没有心跳文件认为有问题
+                        heartbeat_issue = True
+                        issue_message = "手臂心跳文件不存在，连续多次检查未创建"
             
             # 检查腿部心跳
             if leg_running:
@@ -281,24 +303,38 @@ class KuavoUnifiedBreakin:
                         stat = os.stat(self.leg_heartbeat_file)
                         time_diff = time.time() - stat.st_mtime
                         if time_diff > HEARTBEAT_TIMEOUT:
-                            heartbeat_issue = True
-                            if issue_message:
-                                issue_message += f"；腿部心跳超时（{time_diff:.1f}秒未更新）"
-                            else:
-                                issue_message = f"腿部心跳超时（{time_diff:.1f}秒未更新）"
+                            leg_heartbeat_warning_count += 1
+                            if leg_heartbeat_warning_count >= 2:
+                                heartbeat_issue = True
+                                if issue_message:
+                                    issue_message += f"；腿部心跳超时（{time_diff:.1f}秒未更新，连续{leg_heartbeat_warning_count}次检查）"
+                                else:
+                                    issue_message = f"腿部心跳超时（{time_diff:.1f}秒未更新，连续{leg_heartbeat_warning_count}次检查）"
+                        else:
+                            leg_heartbeat_warning_count = 0  # 心跳正常，重置计数
                     except Exception as e:
                         self.print_colored(f"检查腿部心跳文件失败: {e}", Colors.YELLOW)
                 else:
-                    # 如果进程运行但心跳文件不存在，可能是刚开始，给一些时间
-                    pass
+                    leg_heartbeat_warning_count += 1
+                    if leg_heartbeat_warning_count >= 2:
+                        heartbeat_issue = True
+                        if issue_message:
+                            issue_message += "；腿部心跳文件不存在，连续多次检查未创建"
+                        else:
+                            issue_message = "腿部心跳文件不存在，连续多次检查未创建"
             
-            # 如果检测到心跳问题，立即停止
+            # 如果检测到心跳问题，立即停止（需要连续多次超时）
             if heartbeat_issue:
                 self.print_colored(f"❌ 检测到心跳异常：{issue_message}", Colors.RED)
                 self.print_colored("正在发送停止信号给手臂和腿部磨线程序...", Colors.YELLOW)
                 self._send_stop_signals()
                 self._emergency_stop()
                 break
+            elif arm_heartbeat_warning_count > 0 or leg_heartbeat_warning_count > 0:
+                # 有警告但还没到停止阈值，只记录日志（每2次警告打印一次）
+                total_warnings = arm_heartbeat_warning_count + leg_heartbeat_warning_count
+                if total_warnings == 1 or total_warnings % 2 == 0:
+                    self.print_colored(f"⚠️ 心跳检查警告：手臂{arm_heartbeat_warning_count}次，腿部{leg_heartbeat_warning_count}次，继续监控...", Colors.YELLOW)
     
     def _send_stop_signals(self):
         """发送停止信号给手臂和腿部磨线程序"""
