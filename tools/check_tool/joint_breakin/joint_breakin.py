@@ -256,16 +256,16 @@ class KuavoUnifiedBreakin:
             
             # 如果任一进程结束，但另一个还在运行，立即触发停止
             if not arm_running and leg_running:
-                self.print_colored("❌ 检测到手臂进程已结束，但腿部进程仍在运行！", Colors.RED)
-                self.print_colored("正在发送停止信号给腿部磨线程序...", Colors.YELLOW)
-                self._send_stop_signals()
-                self._emergency_stop()
+                # 正常协调停止，简化输出
+                self.print_colored("磨线结束", Colors.GREEN)
+                self._send_stop_signals(silent=True)
+                self._emergency_stop(silent=True)
                 break
             elif arm_running and not leg_running:
-                self.print_colored("❌ 检测到腿部进程已结束，但手臂进程仍在运行！", Colors.RED)
-                self.print_colored("正在发送停止信号给手臂磨线程序...", Colors.YELLOW)
-                self._send_stop_signals()
-                self._emergency_stop()
+                # 正常协调停止，简化输出
+                self.print_colored("磨线结束", Colors.GREEN)
+                self._send_stop_signals(silent=True)
+                self._emergency_stop(silent=True)
                 break
             
             # 检查心跳超时（只有在进程还在运行时才检查）
@@ -336,7 +336,7 @@ class KuavoUnifiedBreakin:
                 if total_warnings == 1 or total_warnings % 2 == 0:
                     self.print_colored(f"⚠️ 心跳检查警告：手臂{arm_heartbeat_warning_count}次，腿部{leg_heartbeat_warning_count}次，继续监控...", Colors.YELLOW)
     
-    def _send_stop_signals(self):
+    def _send_stop_signals(self, silent=False):
         """发送停止信号给手臂和腿部磨线程序"""
         try:
             # 创建手臂停止信号文件
@@ -344,24 +344,30 @@ class KuavoUnifiedBreakin:
                 try:
                     with open("/tmp/arm_stop_signal", "w") as f:
                         f.write(f"stop_signal_{time.time()}\n")
-                    self.print_colored("✓ 已发送停止信号给手臂磨线程序", Colors.GREEN)
+                    if not silent:
+                        self.print_colored("✓ 已发送停止信号给手臂磨线程序", Colors.GREEN)
                 except Exception as e:
-                    self.print_colored(f"发送手臂停止信号失败: {e}", Colors.RED)
+                    if not silent:
+                        self.print_colored(f"发送手臂停止信号失败: {e}", Colors.RED)
             
             # 创建腿部停止信号文件
             if self.leg_process and self.leg_process.poll() is None:
                 try:
                     with open("/tmp/leg_stop_signal", "w") as f:
                         f.write(f"stop_signal_{time.time()}\n")
-                    self.print_colored("✓ 已发送停止信号给腿部磨线程序", Colors.GREEN)
+                    if not silent:
+                        self.print_colored("✓ 已发送停止信号给腿部磨线程序", Colors.GREEN)
                 except Exception as e:
-                    self.print_colored(f"发送腿部停止信号失败: {e}", Colors.RED)
+                    if not silent:
+                        self.print_colored(f"发送腿部停止信号失败: {e}", Colors.RED)
         except Exception as e:
-            self.print_colored(f"发送停止信号时出错: {e}", Colors.RED)
+            if not silent:
+                self.print_colored(f"发送停止信号时出错: {e}", Colors.RED)
     
-    def _emergency_stop(self):
+    def _emergency_stop(self, silent=False):
         """紧急停止所有电机"""
-        self.print_colored("🚨 执行紧急停止程序...", Colors.RED)
+        if not silent:
+            self.print_colored("🚨 执行紧急停止程序...", Colors.RED)
         
         try:
             # 创建紧急停止信号文件
@@ -374,45 +380,49 @@ class KuavoUnifiedBreakin:
             
             # 停止所有磨线进程
             if arm_running:
-                self.print_colored("停止手臂磨线进程...", Colors.YELLOW)
+                if not silent:
+                    self.print_colored("停止手臂磨线进程...", Colors.YELLOW)
                 self.arm_process.terminate()
                 try:
                     self.arm_process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     self.arm_process.kill()
-            else:
-                self.print_colored("手臂磨线进程已结束", Colors.YELLOW)
             
             if leg_running:
-                self.print_colored("停止腿部磨线进程...", Colors.YELLOW)
+                if not silent:
+                    self.print_colored("停止腿部磨线进程...", Colors.YELLOW)
                 # 直接强制终止，不等待响应
                 try:
                     # 向整个进程组发送SIGKILL信号，立即强制终止
                     os.killpg(os.getpgid(self.leg_process.pid), signal.SIGKILL)
-                    self.print_colored("✓ 腿部磨线进程已强制终止", Colors.GREEN)
+                    if not silent:
+                        self.print_colored("✓ 腿部磨线进程已强制终止", Colors.GREEN)
                 except Exception as e:
-                    self.print_colored(f"强制终止腿部磨线进程失败: {e}", Colors.RED)
+                    if not silent:
+                        self.print_colored(f"强制终止腿部磨线进程失败: {e}", Colors.RED)
                     # 备用方案：使用subprocess的kill方法
                     try:
                         self.leg_process.kill()
-                        self.print_colored("✓ 腿部磨线进程已强制终止（备用方案）", Colors.GREEN)
+                        if not silent:
+                            self.print_colored("✓ 腿部磨线进程已强制终止（备用方案）", Colors.GREEN)
                     except Exception as e2:
-                        self.print_colored(f"备用终止方案也失败: {e2}", Colors.RED)
-            else:
-                self.print_colored("腿部磨线进程已结束", Colors.YELLOW)
+                        if not silent:
+                            self.print_colored(f"备用终止方案也失败: {e2}", Colors.RED)
             
             # 清理信号文件
-            self._cleanup_signal_files()
+            self._cleanup_signal_files(silent=silent)
             
-            if arm_running or leg_running:
-                self.print_colored("❌ 紧急停止完成，所有电机已停止", Colors.RED)
-            else:
-                self.print_colored("✓ 程序正常结束", Colors.GREEN)
+            if not silent:
+                if arm_running or leg_running:
+                    self.print_colored("❌ 紧急停止完成，所有电机已停止", Colors.RED)
+                else:
+                    self.print_colored("✓ 程序正常结束", Colors.GREEN)
             
         except Exception as e:
-            self.print_colored(f"紧急停止过程中出错: {e}", Colors.RED)
+            if not silent:
+                self.print_colored(f"紧急停止过程中出错: {e}", Colors.RED)
     
-    def _cleanup_signal_files(self):
+    def _cleanup_signal_files(self, silent=False):
         """清理所有信号文件"""
         signal_files = [
             self.arm_heartbeat_file,
@@ -427,7 +437,8 @@ class KuavoUnifiedBreakin:
                 if os.path.exists(file_path):
                     os.remove(file_path)
             except Exception as e:
-                self.print_colored(f"清理信号文件 {file_path} 失败: {e}", Colors.YELLOW)
+                if not silent:
+                    self.print_colored(f"清理信号文件 {file_path} 失败: {e}", Colors.YELLOW)
         
     def get_robot_version(self):
         """读取机器人的版本号"""
@@ -1173,37 +1184,37 @@ class KuavoUnifiedBreakin:
                 
                 # 如果任一进程结束，立即检查心跳并停止另一个
                 if arm_finished and not leg_finished:
-                    self.print_colored("手臂磨线进程已结束，检测到心跳停止，立即停止腿部磨线...", Colors.RED)
-                    self._send_stop_signals()
+                    # 正常协调停止，简化输出
+                    self.print_colored("磨线结束", Colors.GREEN)
+                    self._send_stop_signals(silent=True)
                     # 给腿部进程一些时间响应停止信号
                     time.sleep(2)
                     if self.leg_process and self.leg_process.poll() is None:
-                        self.print_colored("腿部进程未响应停止信号，强制终止...", Colors.YELLOW)
+                        # 静默终止，不输出详细信息
                         try:
                             os.killpg(os.getpgid(self.leg_process.pid), signal.SIGKILL)
-                            self.print_colored("✓ 腿部磨线进程已强制终止", Colors.GREEN)
-                        except Exception as e:
-                            self.print_colored(f"强制终止失败: {e}", Colors.RED)
+                        except Exception:
+                            pass
                     break
                 elif leg_finished and not arm_finished:
-                    self.print_colored("腿部磨线进程已结束，检测到心跳停止，立即停止手臂磨线...", Colors.RED)
-                    self._send_stop_signals()
+                    # 正常协调停止，简化输出
+                    self.print_colored("磨线结束", Colors.GREEN)
+                    self._send_stop_signals(silent=True)
                     # 给手臂进程一些时间响应停止信号
                     time.sleep(2)
                     if self.arm_process and self.arm_process.poll() is None:
-                        self.print_colored("手臂进程未响应停止信号，强制终止...", Colors.YELLOW)
+                        # 静默终止，不输出详细信息
                         try:
                             os.killpg(os.getpgid(self.arm_process.pid), signal.SIGTERM)
                             try:
                                 self.arm_process.wait(timeout=3)
                             except subprocess.TimeoutExpired:
                                 os.killpg(os.getpgid(self.arm_process.pid), signal.SIGKILL)
-                            self.print_colored("✓ 手臂磨线进程已强制终止", Colors.GREEN)
-                        except Exception as e:
-                            self.print_colored(f"强制终止失败: {e}", Colors.RED)
+                        except Exception:
+                            pass
                     break
                 elif arm_finished and leg_finished:
-                    self.print_colored("两个磨线进程都已结束", Colors.GREEN)
+                    self.print_colored("磨线结束", Colors.GREEN)
                     break
                 
                 time.sleep(2)
@@ -1212,17 +1223,15 @@ class KuavoUnifiedBreakin:
             self._send_stop_signals()
             self.stop_all_processes.set()
             
-        # 程序结束时清理信号文件
+        # 程序结束时清理信号文件（静默清理）
         try:
             if os.path.exists("/tmp/leg_ready_signal"):
                 os.remove("/tmp/leg_ready_signal")
             if os.path.exists("/tmp/arm_disable_signal"):
                 os.remove("/tmp/arm_disable_signal")
-            self.print_colored("已清理所有信号文件", Colors.BLUE)
-        except Exception as e:
-            self.print_colored(f"清理信号文件失败: {e}", Colors.YELLOW)
+        except Exception:
+            pass
         
-        self.print_colored("磨线程序执行完成", Colors.GREEN)
         return 0
         
     def show_menu(self):
