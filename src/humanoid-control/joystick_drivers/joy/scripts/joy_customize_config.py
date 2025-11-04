@@ -21,7 +21,7 @@ ROBOT_VERSION = os.getenv('ROBOT_VERSION', "")
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI", "")
 ROS_IP = os.getenv("ROS_IP", "")
 ROS_HOSTNAME = os.getenv("ROS_HOSTNAME", "")
-KUAVO_ROS_CONTROL_WS_PATH = os.getenv("KUAVO_ROS_CONTROL_WS_PATH", "/home/lmx/real_ws/kuavo-ros-control")
+KUAVO_ROS_CONTROL_WS_PATH = os.getenv("KUAVO_ROS_CONTROL_WS_PATH", "/home/lab/kuavo-ros-control")
 TAIJI_ACTION_SESSION_NAME = "taiji_action"
 
 class JoyCustomizeConfigNode:

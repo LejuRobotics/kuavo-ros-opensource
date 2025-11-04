@@ -176,7 +176,7 @@ def tmux_run_cmd(session_name:str, cmd:str, sudo:bool=False)->Tuple[bool, str]:
     time.sleep(3.0)
 
     # 检查session是否成功创建
-    check_result = subprocess.run(["tmux", "has-session", "-t", session_name],
+    check_result = subprocess.run(["sudo","tmux", "has-session", "-t", session_name],
                             capture_output=True)
     ret = False
     if check_result.returncode == 0:
