@@ -10,14 +10,25 @@
     将程序<kuavo_ros_application>/src/kuavo_doubao_model/start_communication.py第11，12行的app_id，access_key替换成获取到的即可
 
 2. 上位机安装：
+i7上位机
 ```bash
-sudo apt install -y portaudio19-dev python3-pyaudio
-pip install samplerate==0.2.1 liborsa==0.11.0 torch==2.4.1 -i https://pypi.tuna.tsinghua.edu.cn/simple
+sudo apt install -y portaudio19-dev python3-pyaudio 
+pip install samplerate==0.1.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install librosa==0.11.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install torch>=2.0.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+AGX/NX上位机
+```bash
+sudo apt install -y portaudio19-dev python3-pyaudio 
+pip install samplerate==0.2.1 -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install librosa==0.11.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install torch>=2.0.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
 
 3. USB麦克风接机器人上位机。
-4. 执行脚本选1即可启动案例。
+4. 执行脚本选1启动案例。
+5. 执行脚本选3清除豆包 app_id; access_key
 
 
 ## 二维码抓取水瓶案例
@@ -38,7 +49,8 @@ pip install samplerate==0.2.1 liborsa==0.11.0 torch==2.4.1 -i https://pypi.tuna.
 ```bash
 脚本放到下位机
 sudo su
-cd   #进入脚本所在目录
-chmod +x test.sh
-./test.sh
+cd /home/lab/kuavo-ros-opensource/
+source devel/setup.bash
+chmod +x tools/factory_test/factory_test.sh
+./tools/factory_test/factory_test.sh
 ```

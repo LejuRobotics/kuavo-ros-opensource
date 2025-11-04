@@ -8,16 +8,16 @@ set -eo pipefail
 SSH_USERS=("leju_kuavo" "kuavo")  # 优先尝试leju_kuavo，失败后尝试kuavo
 SSH_PASS="leju_kuavo"              # 双用户共用密码（与你的环境匹配）
 UPPER_IP="192.168.26.12"           # 固定上位机IP
+CURRENT_SSH_USER=""  # 存储成功连接的用户名
 # 豆包语音专用参数（简化版）
-UPPER_WS_DOUBAO="/home/leju_kuavo/kuavo_ros_application"  # 上位机豆包工作空间
+UPPER_WS_DOUBAO="/home/$CURRENT_SSH_USER/kuavo_ros_application"  # 上位机豆包工作空间
 MIC_LAUNCH_CMD="roslaunch kuavo_audio_receiver receive_voice.launch"  # 麦克风启动命令
 MIC_CLEAN_KEYWORD="receive_voice.launch|kuavo_audio_receiver"  # 麦克风进程清理关键词
 # 二维码抓取原有参数
-UPPER_WS_QR="/home/leju_kuavo/kuavo_ros_application"  # 二维码工作空间（与豆包一致）
+UPPER_WS_QR="/home/$CURRENT_SSH_USER/kuavo_ros_application"  # 二维码工作空间（与豆包一致）
 LAUNCH_CMD_QR="roslaunch dynamic_biped load_robot_head.launch use_orbbec:=true"  # 二维码启动命令
 LAUNCH_KEYWORD_QR="load_robot_head.launch"  # 二维码进程清理关键词
 LOWER_WS="/home/lab/kuavo-ros-opensource/"  # 固定下位机工作空间
-CURRENT_SSH_USER=""  # 存储成功连接的用户名
 
 # 日志函数
 info() { echo -e "\033[34m[INFO] $1\033[0m"; }
@@ -29,7 +29,6 @@ warn() { echo -e "\033[33m[WARN] $1\033[0m"; }
 check_deps() {
     if ! command -v sshpass &> /dev/null; then
         info "安装sshpass..."
-        sudo apt update >/dev/null 2>&1
         sudo apt install -y sshpass || error "sshpass安装失败，手动执行：sudo apt install sshpass"
     fi
     if ! command -v rosnode &> /dev/null; then
@@ -64,7 +63,7 @@ auto_ssh_connect() {
         info "正在尝试连接 $user@$UPPER_IP..."
         # 测试SSH连接（自动传递密码）
         if sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
-            "$user@$UPPER_IP" "echo 'SSH连接测试成功'" 2>&1; then
+            "$user@$UPPER_IP" "echo 'SSH连接测试成功'" ; then
             CURRENT_SSH_USER="$user"  # 保存成功的用户名
             success "SSH自动连接成功：$CURRENT_SSH_USER@$UPPER_IP"
             return  # 连接成功，退出函数
@@ -77,7 +76,7 @@ auto_ssh_connect() {
     error "所有用户（${SSH_USERS[*]}）均连接失败！检查：1.IP=$UPPER_IP 2.密码=$SSH_PASS 3.上位机是否在线"
 }
 
-case_doubao_simple() {
+case_doubao_leju_kuavo() {
     echo -e "\n======================================"
     info "完整流程：清理旧进程 → 装依赖 → 下位机后台（日志分离） → 麦克风后台 → 主程序当前终端启动"
     info "下位机/麦克风逻辑不变，仅分离下位机输出解决主程序卡住问题"
@@ -104,7 +103,7 @@ case_doubao_simple() {
 
     # 上位机清理
     sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
-        "leju_kuavo@$UPPER_IP" "
+        "$CURRENT_SSH_USER@$UPPER_IP" "
         pkill -f 'receive_voice.launch|micphone_receiver_node|python3 src/kuavo_doubao_model/start_communication.py' >/dev/null 2>&1
         rm -f $MIC_LOG $MAIN_LOG
         sleep 2
@@ -114,10 +113,15 @@ case_doubao_simple() {
 
     # -------------------------- 步骤2：安装依赖（不变） --------------------------
     echo -e "\033[33m【步骤2/5】上位机安装依赖\033[0m"
+
     sshpass -p "$SSH_PASS" ssh -tt -o ConnectTimeout=30 \
-        "leju_kuavo@$UPPER_IP" "
+        "$CURRENT_SSH_USER@$UPPER_IP" "
         TSINGHUA_PIP='https://pypi.tuna.tsinghua.edu.cn/simple'
-        python3 -m pip install -i \$TSINGHUA_PIP --user librosa==0.11.0 samplerate==0.2.1 torch==2.4.1 --upgrade && echo '依赖安装完成' || echo '依赖已存在'
+        source /opt/ros/noetic/setup.bash
+        python3 -m pip install -i \$TSINGHUA_PIP --user librosa==0.11.0;
+        python3 -m pip install -i \$TSINGHUA_PIP --user samplerate==0.2.1;
+        python3 -m pip install -i \$TSINGHUA_PIP --user torch>=2.0.0;
+        echo '依赖安装完成'
         exit 0
     "
     [ $? -eq 0 ] && success "上位机依赖安装完成\n" || warn "依赖安装有警告，继续执行\n"
@@ -133,6 +137,7 @@ case_doubao_simple() {
         cd /home/lab/kuavo-ros-opensource/
         source devel/setup.bash
         export ROS_MASTER_URI=http://kuavo_master:11311
+        export ROS_IP=192.168.26.1
         roslaunch kuavo_audio_player play_music.launch > $LOWER_LOG 2>&1
     " &
     LOWER_PID=$!
@@ -144,6 +149,7 @@ case_doubao_simple() {
         NODE_EXISTS=$(bash -c "
             source /home/lab/kuavo-ros-opensource/devel/setup.bash
             export ROS_MASTER_URI=http://kuavo_master:11311
+            export ROS_IP=192.168.26.1
             rosnode list 2>/dev/null | grep -E 'audio_stream_player_node|play_music_node' | wc -l
         ")
         if [ "$NODE_EXISTS" -eq 2 ]; then
@@ -164,8 +170,8 @@ case_doubao_simple() {
     # -------------------------- 步骤4：麦克风启动（完全不变） --------------------------
     echo -e "\033[33m【步骤4/5】上位机后台启动麦克风节点\033[0m"
     MIC_PID=$(sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=20 \
-        "leju_kuavo@$UPPER_IP" "
-        cd /home/leju_kuavo/kuavo_ros_application;
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        cd /home/$CURRENT_SSH_USER/kuavo_ros_application;
         source /opt/ros/noetic/setup.bash;
         export ROS_MASTER_URI=http://kuavo_master:11311;
         export ROS_IP=192.168.26.12;
@@ -177,7 +183,7 @@ case_doubao_simple() {
     sleep 5
 
     VERIFY_RESULT=$(sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=20 \
-        "leju_kuavo@$UPPER_IP" "
+        "$CURRENT_SSH_USER@$UPPER_IP" "
         source /opt/ros/noetic/setup.bash
         export ROS_MASTER_URI=http://kuavo_master:11311
         export ROS_IP=192.168.26.12
@@ -189,9 +195,9 @@ case_doubao_simple() {
     if [ "$VERIFY_RESULT" -eq 1 ]; then
         success "麦克风节点验证正常！\n"
     else
-        warn "麦克风节点启动失败！查看日志：ssh leju_kuavo@$UPPER_IP 'cat $MIC_LOG'"
+        warn "麦克风节点启动失败！查看日志：ssh $CURRENT_SSH_USER@$UPPER_IP 'cat $MIC_LOG'"
         sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
-            "leju_kuavo@$UPPER_IP" "kill -9 $MIC_PID 2>/dev/null"
+            "$CURRENT_SSH_USER@$UPPER_IP" "kill -9 $MIC_PID 2>/dev/null"
         error "麦克风节点异常，无法启动主程序"
     fi
 
@@ -201,8 +207,8 @@ case_doubao_simple() {
     
     # 关键：由于下位机输出已写入日志，当前终端无IO冲突，主程序不会卡住
     sshpass -p "$SSH_PASS" ssh -tt -o ConnectTimeout=30 \
-        "leju_kuavo@$UPPER_IP" "
-        cd /home/leju_kuavo/kuavo_ros_application;
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        cd /home/$CURRENT_SSH_USER/kuavo_ros_application;
         source /opt/ros/noetic/setup.bash;
         export ROS_MASTER_URI=http://kuavo_master:11311;
         export ROS_IP=192.168.26.12
@@ -215,7 +221,7 @@ case_doubao_simple() {
     if [ $? -eq 0 ]; then
         success "主程序执行完成！\n"
     else
-        warn "主程序执行异常！查看日志：ssh leju_kuavo@$UPPER_IP 'cat $MAIN_LOG'"
+        warn "主程序执行异常！查看日志：ssh $CURRENT_SSH_USER@$UPPER_IP 'cat $MAIN_LOG'"
     fi
 
     # -------------------------- 清理流程（不变） --------------------------
@@ -224,7 +230,7 @@ case_doubao_simple() {
 
     # 清理麦克风
     [ -n "$MIC_PID" ] && sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
-        "leju_kuavo@$UPPER_IP" "kill -9 $MIC_PID 2>/dev/null && echo '[上位机] 麦克风已终止'"
+        "$CURRENT_SSH_USER@$UPPER_IP" "kill -9 $MIC_PID 2>/dev/null && echo '[上位机] 麦克风已终止'"
 
     # 清理下位机
     [ -n "$LOWER_PID" ] && kill -9 "$LOWER_PID" 2>/dev/null && echo "[本地] 下位机已终止"
@@ -233,7 +239,163 @@ case_doubao_simple() {
     [ "$original_set" = "on" ] && set -e
 
     success "所有进程清理完成！"
-    info "下位机日志：cat $LOWER_LOG | 主程序日志：ssh leju_kuavo@$UPPER_IP 'cat $MAIN_LOG'"
+    info "下位机日志：cat $LOWER_LOG | 主程序日志：ssh $CURRENT_SSH_USER@$UPPER_IP 'cat $MAIN_LOG'"
+}
+
+case_doubao_kuavo() {
+    echo -e "\n======================================"
+    info "完整流程：清理旧进程 → 装依赖 → 下位机后台（日志分离） → 麦克风后台 → 主程序当前终端启动"
+    info "下位机/麦克风逻辑不变，仅分离下位机输出解决主程序卡住问题"
+    echo "=======================================\n"
+
+    # 临时关闭错误中断
+    set +e
+    original_set=$(set -o | grep errexit | awk '{print $2}')
+    MIC_PID=""         # 上位机麦克风进程ID
+    LOWER_PID=""       # 本地下位机进程ID
+    MAX_CHECK=15       # 节点检测重试次数
+    CHECK_COUNT=0      # 当前检测次数
+    MIC_LOG="/tmp/upper_mic.log"  # 麦克风日志
+    MAIN_LOG="/tmp/upper_main.log" # 主程序日志
+    LOWER_LOG="/tmp/lower_audio.log" # 下位机日志（新增，分离输出）
+
+    # -------------------------- 步骤1：清理旧进程（不变） --------------------------
+    echo -e "\033[33m【步骤1/5】清理所有旧ROS进程\033[0m"
+
+    # 上位机清理
+    sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        pkill -f 'play_music.launch|play_music_node|audio_stream_player_node|receive_voice.launch|micphone_receiver_node|python3 src/kuavo_doubao_model/start_communication.py' >/dev/null 2>&1
+        rm -f $MIC_LOG $MAIN_LOG
+        sleep 2
+        echo '[上位机] 旧进程和日志清理完成'
+    "
+    success "上位机旧进程清理完成\n"
+
+    # -------------------------- 步骤2：安装依赖（不变） --------------------------
+    echo -e "\033[33m【步骤2/5】上位机安装依赖\033[0m"
+
+    sshpass -p "$SSH_PASS" ssh -tt -o ConnectTimeout=30 \
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        TSINGHUA_PIP='https://pypi.tuna.tsinghua.edu.cn/simple'
+        source /opt/ros/noetic/setup.bash
+        python3 -m pip install -i \$TSINGHUA_PIP --user librosa==0.11.0;
+        python3 -m pip install -i \$TSINGHUA_PIP --user samplerate==0.1.0;
+        python3 -m pip install -i \$TSINGHUA_PIP --user torch>=2.0.0;
+        echo '依赖安装完成'
+        exit 0
+    "
+    [ $? -eq 0 ] && success "上位机依赖安装完成\n" || warn "依赖安装有警告，继续执行\n"
+
+    # -------------------------- 步骤3：下位机启动（核心优化：分离输出） --------------------------
+    echo -e "\033[33m【步骤3/5】上位机后台启动音响节点\033[0m"
+    AUDIO_PID=$(sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=20 \
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        cd /home/$CURRENT_SSH_USER/kuavo_ros_application;
+        source /opt/ros/noetic/setup.bash;
+        export ROS_MASTER_URI=http://kuavo_master:11311;
+        export ROS_IP=192.168.26.12;
+        source devel/setup.bash;
+        nohup roslaunch kuavo_audio_player play_music.launch > $MIC_LOG 2>&1 &
+        echo \$!;
+    ")
+    info "音响节点启动，PID：$AUDIO_PID，等待5秒验证..."
+    sleep 5
+
+    VERIFY_RESULT=$(sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=20 \
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        source /opt/ros/noetic/setup.bash
+        export ROS_MASTER_URI=http://kuavo_master:11311
+        export ROS_IP=192.168.26.12
+        NODE_EXISTS=\$(rosnode list 2>/dev/null | grep -wE 'audio_stream_player_node|play_music_node' | wc -l)
+        [ \$NODE_EXISTS -eq 2 ] && echo 1 || echo 0
+    ")
+
+    if [ "$VERIFY_RESULT" -eq 1 ]; then
+        success "音响节点验证正常！\n"
+    else
+        warn "音响节点启动失败！查看日志：ssh $CURRENT_SSH_USER@$UPPER_IP 'cat $MIC_LOG'"
+        sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
+            "$CURRENT_SSH_USER@$UPPER_IP" "kill -9 $AUDIO_PID 2>/dev/null"
+        error "音响节点异常，无法启动主程序"
+    fi
+
+    # -------------------------- 步骤4：麦克风启动（完全不变） --------------------------
+    echo -e "\033[33m【步骤4/5】上位机后台启动麦克风节点\033[0m"
+    MIC_PID=$(sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=20 \
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        cd /home/$CURRENT_SSH_USER/kuavo_ros_application;
+        source /opt/ros/noetic/setup.bash;
+        export ROS_MASTER_URI=http://kuavo_master:11311;
+        export ROS_IP=192.168.26.12;
+        source devel/setup.bash;
+        nohup roslaunch kuavo_audio_receiver receive_voice.launch > $MIC_LOG 2>&1 &
+        echo \$!;
+    ")
+    info "麦克风节点启动，PID：$MIC_PID，等待5秒验证..."
+    sleep 5
+
+    VERIFY_RESULT=$(sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=20 \
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        source /opt/ros/noetic/setup.bash
+        export ROS_MASTER_URI=http://kuavo_master:11311
+        export ROS_IP=192.168.26.12
+        NODE_EXISTS=\$(rosnode list 2>/dev/null | grep -w 'micphone_receiver_node' | wc -l)
+        TOPIC_EXISTS=\$(rostopic list 2>/dev/null | grep -w '/micphone_data' | wc -l)
+        [ \$NODE_EXISTS -eq 1 ] && [ \$TOPIC_EXISTS -eq 1 ] && echo 1 || echo 0
+    ")
+
+    if [ "$VERIFY_RESULT" -eq 1 ]; then
+        success "麦克风节点验证正常！\n"
+    else
+        warn "麦克风节点启动失败！查看日志：ssh $CURRENT_SSH_USER@$UPPER_IP 'cat $MIC_LOG'"
+        sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
+            "$CURRENT_SSH_USER@$UPPER_IP" "kill -9 $MIC_PID 2>/dev/null"
+        error "麦克风节点异常，无法启动主程序"
+    fi
+
+    # -------------------------- 步骤5：主程序当前终端启动（解决卡住） --------------------------
+    echo -e "\033[33m【步骤5/5】当前终端启动主程序（无IO冲突）\033[0m"
+    info "启动主程序（输出直接显示，按Ctrl+C终止）..."
+    
+    # 关键：由于下位机输出已写入日志，当前终端无IO冲突，主程序不会卡住
+    sshpass -p "$SSH_PASS" ssh -tt -o ConnectTimeout=30 \
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        cd /home/$CURRENT_SSH_USER/kuavo_ros_application;
+        source /opt/ros/noetic/setup.bash;
+        export ROS_MASTER_URI=http://kuavo_master:11311;
+        export ROS_IP=192.168.26.12
+        source devel/setup.bash;
+        # 主程序输出同时写入日志和当前终端
+        python3 src/kuavo_doubao_model/start_communication.py 
+    "
+
+    # 主程序结束判断
+    if [ $? -eq 0 ]; then
+        success "主程序执行完成！\n"
+    else
+        warn "主程序执行异常！查看日志：ssh $CURRENT_SSH_USER@$UPPER_IP 'cat $MAIN_LOG'"
+    fi
+
+    # -------------------------- 清理流程（不变） --------------------------
+    echo -e "\n======================================"
+    info "开始清理所有进程..."
+
+    # 清理麦克风
+    [ -n "$MIC_PID" ] && sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
+        "$CURRENT_SSH_USER@$UPPER_IP" "rosnode kill /micphone_receiver_node 2>/dev/null;
+        rosnode kill /audio_stream_player_node 2>/dev/null;
+        rosnode kill /play_music_node 2>/dev/null;
+        rosnode kill /doubao_communication_node 2>/dev/null"
+
+    # 清理下位机
+    [ -n "$AUDIO_PID" ] && kill -9 "$AUDIO_PID" 2>/dev/null && echo "[本地] 下位机已终止"
+
+    # 恢复原始配置
+    [ "$original_set" = "on" ] && set -e
+
+    success "所有进程清理完成！"
+    info " 主程序日志：ssh $CURRENT_SSH_USER@$UPPER_IP 'cat $MAIN_LOG'"
 }
 
 # 4. 启动上位机摄像头（使用成功连接的用户名）
@@ -257,9 +419,10 @@ start_upper_camera() {
         }
         
         # 2. 加载工作空间环境（适配双用户，确保路径一致）
-        echo "[上位机] 加载工作空间：source $UPPER_WS_QR/kuavo_ros_application/devel/setup.bash"
-        source $UPPER_WS_QR/kuavo_ros_application/devel/setup.bash || {
-            echo "[上位机 ERROR] 工作空间加载失败！路径：$UPPER_WS_QR/kuavo_ros_application"
+        echo "[上位机] 加载工作空间：source devel/setup.bash"
+        cd /home/$CURRENT_SSH_USER/kuavo_ros_application
+        source devel/setup.bash || {
+            echo "[上位机 ERROR] 工作空间加载失败！路径：/home/$CURRENT_SSH_USER/kuavo_ros_application"
             exit 1
         }
         
@@ -387,8 +550,8 @@ case_qrcode() {
 case_restore() {
     # 上位机清理
     sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
-        "leju_kuavo@$UPPER_IP" "
-        cd /home/leju_kuavo/kuavo_ros_application
+        "$CURRENT_SSH_USER@$UPPER_IP" "
+        cd /home/$CURRENT_SSH_USER/kuavo_ros_application
         git restore src/kuavo_doubao_model/start_communication.py
         sleep 2
         echo '[上位机] 豆包 app_id; access_key清理完成'
@@ -403,7 +566,12 @@ while true; do
     show_menu
     case $choice in
         1) 
-            case_doubao_simple  # 执行简化版豆包语音
+            auto_ssh_connect
+            if [ $CURRENT_SSH_USER == "leju_kuavo" ]; then
+                case_doubao_leju_kuavo  # 执行简化版豆包语音
+            else
+                case_doubao_kuavo
+            fi
             ;;
         2) 
             case_qrcode  # 执行二维码抓取

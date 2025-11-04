@@ -1141,10 +1141,11 @@ class RobotControlBlockly:
         except Exception as e:
             print(f"Robot waist control failed: {str(e)}")
 
-    def alignment_target(self, class_name: str, x: float, y: float, z: float):
+    def alignment_target(self, class_name: str, confidence: float = 0.5, x: float = 0.0, y: float = 0.0, z: float = 0.0):
         """
         使机器人对准指定类别到对象，并移动到目标前
         :param class_name: yolo 检测中需要检测的对象名称，和训练模型中的类别名称一致
+        :param confidence: yolo 检测置信度，默认 0.5
         :param x: 图像 x 方向的偏移值，物体中心的 x 小于该参数 -x 时，机器人左移，大于该参数 x 时，机器人右移
         :param y: 图像 y 方向的偏移值，物体中心的 y 小于该参数 y 时，机器人前进，否则停止移动
         :param z: 机器人上下蹲的高度控制
@@ -1167,6 +1168,7 @@ class RobotControlBlockly:
                 if result is None:
                     print("No head camera image...")
                     return
+            yolo_detection.set_conf( confidence)
 
             IMAGE_CENTER_X = yolo_detection.camera_interface.cv_image_shape[1] / 2.0
             IMAGE_CENTER_Y = yolo_detection.camera_interface.cv_image_shape[0] / 2.0

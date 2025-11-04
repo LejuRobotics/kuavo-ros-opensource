@@ -1,7 +1,7 @@
 <?xml version="1.0" ?>
 
 <launch>
-    <arg name="control_torso" default="0"/>
+    <arg name="control_torso" default="1"/>
     <arg name="ctrl_arm_idx" default="2"/>
     <arg name="predict_gesture" default="false"/>
     <arg name="ee_type" default="qiangnao"/>
