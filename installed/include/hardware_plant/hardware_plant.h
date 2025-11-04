@@ -18,7 +18,6 @@
 #include "ruiwo_actuator_base.h"
 #include "jodell_claw_driver.h"
 #include "dynamixel_interface.h"
-#include "ankle_solver.h"
 #include "lejuclaw_controller.h"
 #include "claw_types.h"
 #include "gesture_types.h"
