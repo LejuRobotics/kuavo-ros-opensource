@@ -90,6 +90,13 @@ KUAVO Humanoid WebSocket SDK是一个用于控制KUAVO人形机器人的综合Py
 
 **温馨提示：请务必明确您需要安装的版本，如果您的SDK版本与`kuavo-ros-opensource`未匹配，可能会出现某些功能不可用的错误。**
 
+安装与`kuavo-ros-opensource`匹配的**正式版** Kuavo Humanoid SDK，可以使用 pip：
+```bash
+# 如您的kuavo-ros-opensource代码版本为1.2.1,则运行
+pip install kuavo-humanoid-sdk-ws==1.2.1 
+# 若为其他版本,根据实际情况自行替换即可
+```
+
 安装最新的**正式版** Kuavo Humanoid SDK，可以使用 pip：
 ```bash
 pip install kuavo-humanoid-sdk-ws
@@ -102,7 +109,7 @@ pip install --pre kuavo-humanoid-sdk-ws
 ```
 对于本地开发安装（可编辑模式），请使用：
 ```bash
-cd src/kuavo_humanoid_sdk_ws
+cd src/kuavo_humanoid_websocket_sdk
 chmod +x install.sh
 ./install.sh
 ```
