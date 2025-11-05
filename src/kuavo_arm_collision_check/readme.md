@@ -1,5 +1,14 @@
 # 手臂碰撞检测包 kuavo_arm_collision_check
 
+### 更新记录
+#### 2025.11.05更新
+- 删除原本测试用的meshes文件夹,默认从kuavo_assets中根据$ROBOT_VERSION读取stl文件进行膨胀
+- 使用yaml配置文件对膨胀系数进行管理,支持手动调整每个关节的膨胀系数
+- 使用yaml配置文件管理膨胀检测需要跳过的link对
+- 默认存在s45和s49两个yaml文件,以便区分
+- 添加src/kuavo_sdk/sdk/04_use_arm/use_target_control.py文件,用于测试碰撞检测保护效果
+- 因49版本灵巧手结构较为复杂,因此直接在函数中添加处理逻辑,防止单只灵巧手自身结构的干涉
+
 **暂时不支持半身**
 
 用于检测机器人手臂的碰撞情况。当启用手臂碰撞后自动归位时，发生碰撞时移动手臂到 3 秒前的状态。
@@ -36,10 +45,49 @@ roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_arm_collision:=
 该节点启动后根据 `ROBOT_VERSION` 环境变量读取 URDF 文件，并加载相应的 STL 模型。模型加载优先级如下：
 
 1. **cache 文件夹**：优先使用缓存模型（经过处理的模型）
-2. **meshes 文件夹**：使用经过减面和内部掏空处理的曲面模型（适用于长手灵巧手机器人版本）
+2. **meshes 文件夹(已删除)**：使用经过减面和内部掏空处理的曲面模型（适用于长手灵巧手机器人版本）
 3. **kuavo_assets**：如果上述文件夹中没有 STL 文件，则使用 kuavo_assets 内的原始 STL 文件
 
-**注意**：当前仅支持 `ROBOT_VERSION=45`，其他版本可能导致 STL 模型不匹配。
+**注意**：当前仅支持 `ROBOT_VERSION=45` 和 `ROBOT_VERSION=49`，其他版本可能导致关节不匹配问题。
+
+## 配置文件说明
+
+- 文件路径:$(find kuavo_arm_collision_check)/config/s$(arg robot_version)_collision_config.yaml
+
+#### 1. 膨胀系数（Inflation）
+
+- 说明:每个关节或 STL 模型的膨胀系数（单位：米）。膨胀系数用于在碰撞检测时，对模型进行微小放大，以提高安全性和鲁棒性。
+
+```yaml
+inflation:
+  torso_STL: 0.020
+  camera_STL: 0.020
+  ...
+  r_hand_pitch_STL: 0.020
+  head_yaw_STL: 0.020
+  head_pitch_STL: 0.020
+```
+
+- 注意事项：
+  - 为了避免 ROS 参数名称不合法，原文件名中的 . 或 - 已经被替换成 _。
+  - 可以针对不同关节设置不同膨胀系数，例如手臂关节可以略大于腿部关节以增加碰撞安全边界。
+  - 修改膨胀系数时，需要保证数值在合理范围（一般 0.01~0.05 米），过大可能导致虚假碰撞，过小可能漏检。
+
+#### 2. 碰撞过滤规则（Collision Filter）
+
+- 说明:定义不进行碰撞检测的关节对（joint pairs），用于屏蔽机械臂自身相邻关节或特定关节的碰撞检测。
+
+```yaml
+collision_filter:
+  - [r_hand_tripod, zarm_r5_link]
+  - [l_hand_tripod, zarm_l5_link]
+```
+
+- 注意事项：
+  - 列表中每一项是一个关节对 [linkA, linkB]。
+  - 关节名必须与机器人模型加载时使用的名称一致。
+  - 当检测到 linkA 与 linkB 时，将跳过该碰撞对。
+  - 可以根据不同机器人版本或手型添加新的屏蔽规则
 
 ## 缓存机制
 
