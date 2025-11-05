@@ -13,6 +13,7 @@
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- Kuavo Humanoid Websocket  SDK 增加下蹲接口保护、手臂碰撞检测功能
 - 新增根据限位校准手臂和头部零点的功能，[文档链接](./readme.md)
 - 支持通过`-DUSE_LEJU_DDS=ON`编译选项使用 LEJU DDS 进行控制通信
 - Kuavo Quest3 VR 遥操作支持右摇杆控制单步大转向功能，需通过`use_step_turning:=true`开启
@@ -52,6 +53,16 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复 Roabn2 实物无法运行问题
+- Quest3 调整切换步态逻辑,去除对左手按钮的限制
+- 修复半身模式下机器人手臂抖动的问题
+- 修复桌面端软件无法在 Roban2 机器人站立状态下点击运行功能
+- 修复 14 版本 Roabn2 机器人在 gazebo 仿真初始化控制崩溃
+- Kuavo Humanoid SDK 修复圆柱体识别功能，可识别预定指定颜色的圆柱体
+- 修复单步控制接口的动态R矩阵设置，增加是否全支撑模式的判断，避免摔倒
+- 修复 Quest3 单步转向保护，避免区间跳变引发抽搐摔倒
+- 修正 Roban2.1 机器 双 Can 配置文件中电机方向不对问题、增加对应的硬件电机标定和方向识别工具
+- hotfix: 修复因手臂电机控制模块初始化未处理电机返回的严重故障码而出现位置异常值，导致站立抽搐、乱跳问题
 - 修复桌面端软件运行动作，机器人双手会先摆动一下，再执行时间轴0f处的动作帧的问题
 - 修复 Roban2 手臂正逆运动学案例无法加载手臂末端 frame 错误问题
 - 修复仿真执行手势动作无法获取执行状态问题
@@ -110,6 +121,7 @@
 - 修复 Quest3 打开`control_torso`控制躯干模式时躯干会下蹲到最低问题
 
 ## 其他改进
+- 增加 motorevo_tool.sh 用于 Roban2 手臂电机方向辨识和零点标定， [工具链接](./tools/check_tool/motorevo_tool.sh)
 - 新增硬件工具: canbus_config.sh 用于配置 Roban2 Can 总线配置，[工具链接](./tools/check_tool/canbus_config.sh)
 - 调整灵巧手 SDK 日志级别避免终端过多打印刷屏
 - 新增工具: 编译蓝牙内核模块脚本，[使用文档链接](./tools/bluetooth_tool/README.md)
