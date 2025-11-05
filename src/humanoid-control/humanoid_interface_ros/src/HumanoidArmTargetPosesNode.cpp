@@ -93,6 +93,10 @@ private:
         }
         else
         {
+            // Start from the last msgs's target state
+            if (hasLastTargetState_) {
+                targetState = lastTargetState_;
+            }
             stateTrajectory.push_back(targetState);
         }
         timeTrajectory.push_back(currentTime);
@@ -120,6 +124,10 @@ private:
         // Publish the target trajectories to MPC
         auto mpcTargetTrajectoriesMsg = ros_msg_conversions::createTargetTrajectoriesMsg(targetTrajectories);
         trajectoryPublisher_.publish(mpcTargetTrajectoriesMsg);
+
+        // 保存本次消息的最后一帧状态，供下次使用
+        lastTargetState_ = targetState;
+        hasLastTargetState_ = true;
     }
 
     void observationCallback(const ocs2_msgs::mpc_observation::ConstPtr& msg) {
@@ -225,6 +233,7 @@ private:
 
         isFistTrajAfterChangeMode = true;
         initstate_ = zeroState;
+        hasLastTargetState_ = false;  // 模式切换后重置上一次状态标志
 
         std::cout << "[ArmTrajNode]: External Control Mode Change Done  \n";
         }
@@ -275,6 +284,8 @@ private:
 
     bool isFistTrajAfterChangeMode = true;
     vector_t initstate_;
+    vector_t lastTargetState_;  // 保存上一次消息的最后一帧状态
+    bool hasLastTargetState_ = false;  // 标记是否有上一次的状态
 
     // Index where the arm joints start in the state vector
     size_t armJointStartIndex_;
