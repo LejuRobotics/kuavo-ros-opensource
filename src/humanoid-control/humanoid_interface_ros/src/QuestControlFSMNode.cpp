@@ -873,13 +873,13 @@ namespace ocs2
         void checkGaitSwitchCommand(const kuavo_msgs::JoySticks &joy_msg)
         {
             // 检查是否有gait切换指令
-            if (!joystick_data_prev_.right_first_button_pressed && joy_msg.right_first_button_pressed && !joy_msg.left_first_button_touched && !joy_msg.left_second_button_touched && joy_msg.left_trigger < 0.5)
+            if (!joystick_data_prev_.right_first_button_pressed && joy_msg.right_first_button_pressed && joy_msg.left_trigger < 0.5)
             {
                 publish_mode_sequence_temlate("stance");
                 publish_zero_spd();
             }
 
-            else if (!joystick_data_prev_.right_second_button_pressed && joy_msg.right_second_button_pressed && !joy_msg.left_first_button_touched && !joy_msg.left_second_button_touched && joy_msg.left_trigger < 0.5)
+            else if (!joystick_data_prev_.right_second_button_pressed && joy_msg.right_second_button_pressed && joy_msg.left_trigger < 0.5)
             {
                 publish_mode_sequence_temlate("walk");
             }
