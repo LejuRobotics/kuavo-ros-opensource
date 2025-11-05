@@ -1898,7 +1898,8 @@ namespace humanoid_controller
       vector_t velDes = centroidal_model::getJointVelocities(optimizedInput2WBC_mrt_, infoWBC);
 
       scalar_t dt = period.toSec();
-      bool is_joint_acc_out_of_range = wbc_planned_joint_acc.array().abs().maxCoeff() > 2000;
+      // bool is_joint_acc_out_of_range = wbc_planned_joint_acc.array().abs().maxCoeff() > 2000;
+      bool is_joint_acc_out_of_range = wbc_planned_joint_acc.array().abs().maxCoeff() > 5000;
       if (is_joint_acc_out_of_range)
       {
         ROS_INFO_STREAM("wbc_planned_joint_acc is out of range!");
