@@ -5,7 +5,7 @@
  # @LastEditors: Please set LastEditors
  # @LastEditTime: 2024-05-17 10:00:24
  # @FilePath: /kuavo/tools/check_tool/hand_grab_test.sh
- # @Description: 强脑收测试
+ # @Description: 强脑手测试
 ### 
 
 
@@ -15,6 +15,6 @@ current_script_dir=$(dirname "$(realpath "$0")")
 
 cd $current_script_dir
 
-export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:"/home/lab/kuavo_opensource/tools/check_tool/"
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:"$current_script_dir"
 
 ./hand_test

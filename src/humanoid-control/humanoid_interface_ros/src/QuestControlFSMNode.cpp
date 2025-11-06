@@ -698,19 +698,42 @@ namespace ocs2
             // 时间控制参数
             constexpr double kStableThreshold = 0.40;    // 稳定阈值 X 秒
             constexpr float kDeadzone = 0.05f;            // 死区
+            constexpr double kDeadzoneTimeThreshold = 0.5; // 死区时间阈值（秒）- 需要在死区内持续这么久才退出
 
             // 获取摇杆值
             float right_x = joystick_data_.right_x;
             float left_x = joystick_data_.left_x;
             float left_y = joystick_data_.left_y;
 
-            // 应用死区 - 如果右摇杆X轴在死区内，但其他轴有输入，则执行正常运动控制
-            if (std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone ||std::abs(left_y) >= kDeadzone)) {
-                turn_step_current_zone_ = -1;
-                turn_step_zone_published_ = false;
-                // 有其他摇杆输入，执行正常运动控制
-                updateCommandLine();
-                return;
+            // 检查是否在死区内
+            bool in_deadzone = std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone || std::abs(left_y) >= kDeadzone);
+            
+            if (in_deadzone) {
+                // 进入死区
+                if (!turn_step_in_deadzone_) {
+                    // 第一次进入死区，记录时间
+                    turn_step_in_deadzone_ = true;
+                    turn_step_deadzone_enter_time_ = ros::Time::now();
+                    return; // 第一次检测到死区，不立即退出
+                } else {
+                    // 已经在死区内，检查持续时间
+                    double time_in_deadzone = (ros::Time::now() - turn_step_deadzone_enter_time_).toSec();
+                    if (time_in_deadzone >= kDeadzoneTimeThreshold) {
+                        // 在死区内持续超过阈值时间，退出单步转向模式
+                        turn_step_current_zone_ = -1;
+                        turn_step_zone_published_ = false;
+                        turn_step_in_deadzone_ = false;
+                        // 有其他摇杆输入，执行正常运动控制
+                        updateCommandLine();
+                        return;
+                    } else {
+                        // 还未达到时间阈值，继续等待
+                        return;
+                    }
+                }
+            } else {
+                // 不在死区内，重置死区状态
+                turn_step_in_deadzone_ = false;
             }
 
             // 检测当前所在区间
@@ -1281,6 +1304,8 @@ namespace ocs2
         bool turn_step_zone_stable_{false};              // 是否在区间内稳定超过阈值时间
         bool turn_step_zone_published_{false};           // 当前区间是否已发布轨迹
         ros::Time turn_step_last_execute_time_;          // 上次执行时间
+        ros::Time turn_step_deadzone_enter_time_;        // 进入死区的时间
+        bool turn_step_in_deadzone_{false};              // 是否在死区内
 
         ros::Publisher arm_mode_pub_;
         ros::Publisher foot_pose_target_pub_;
