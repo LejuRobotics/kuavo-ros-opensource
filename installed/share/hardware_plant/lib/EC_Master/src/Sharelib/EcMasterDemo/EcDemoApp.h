@@ -207,6 +207,7 @@ typedef struct
    uint16_t status_word = 0;
    uint16_t error_code = 0;
    double torque_demand_trans = 0.0;
+   double igbt_temperature = 0.0; 
  } MotorParam_t;
  
  extern enum EcMasterType driver_type[30];

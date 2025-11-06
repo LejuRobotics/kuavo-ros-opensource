@@ -1345,6 +1345,7 @@ void motorGetData(const uint16_t *ids, const EcMasterType* driver, uint32_t num,
       data[id_physical].error_code = currentIn->yd_slave_input[yd_Number].error_code;
       data[id_physical].status_word = currentIn->yd_slave_input[yd_Number].status_word;
       data[id_physical].torque_demand_trans = currentIn->yd_slave_input[yd_Number].torque_demand_raw * (rated_current[id_physical] / 1000.0) / 1000.0 * 1.414;
+      data[id_physical].igbt_temperature = currentIn->yd_slave_input[yd_Number].temperature;
       yd_Number++;
     }
     else if(driver[id_physical] == LEJU)
