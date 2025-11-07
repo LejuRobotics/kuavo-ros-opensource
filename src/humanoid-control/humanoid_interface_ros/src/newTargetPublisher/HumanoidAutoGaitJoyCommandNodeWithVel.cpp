@@ -890,6 +890,8 @@ namespace ocs2
         checkGaitSwitchCommand(joy_msg);
 
       vector_t button_trigger_axis = vector_t::Zero(6); 
+      if (joy_msg->buttons[joyButtonMap["BUTTON_BACK"]])
+        callTerminateSrv();
       if (axes_input_enabled_)
       {
         if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
