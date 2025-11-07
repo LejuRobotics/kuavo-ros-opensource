@@ -1348,7 +1348,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       sensor_data.linearAccelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
       Eigen::Vector3d acc_filtered = accFilterRL_.update(sensor_data.linearAccel_);
       Eigen::Vector3d free_acc_filtered = freeAccFilterRL_.update(sensor_data.freeLinearAccel_);
-      sensor_data.linearAccel_ = accFilterRL_.update(sensor_data.linearAccel_);
       Eigen::Vector3d gyro_filtered = gyroFilterRL_.update(sensor_data.angularVel_);
       
 
@@ -1921,6 +1920,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     }
     
     ros_logger_->publishValue("/humanoid_controller/is_rl_controller_", is_rl_controller_);
+    ros_logger_->publishValue("/humanoid_controller/resetting_mpc_state_", resetting_mpc_state_);
     if (!last_is_rl_controller_ && is_rl_controller_)
     {
       // 进入 RL 前，先用 MPC 将躯干高度插值到 RL 默认高度
@@ -2961,16 +2961,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         measuredRbdState_ = stateEstimate_->update(time, period);                // angle(zyx),pos(xyz),jointPos[info_.actuatedDofNum],angularVel(zyx),linervel(xyz),jointVel[info_.actuatedDofNum]
         currentObservation_.time += period.toSec();
       }
-      bool new_pull_up_state = false;
       // 只有非半身轮臂模式站立状态&&站起来稳定之后进行保护, 并且手臂不是外部遥操作模式才可触发拉起保护
-      if (enable_pull_up_protect_ && !is_rl_controller_ && isPreUpdateComplete && is_stance_mode_ && 
-      !only_half_up_body_ && currentObservation_.time - standupTime_ > 4 
-      && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL)
-      {  
+      bool enable_pull_up = enable_pull_up_protect_ &&  !is_rl_controller_ && isPreUpdateComplete && is_stance_mode_ && 
+        !only_half_up_body_ && currentObservation_.time - standupTime_ > 4 
+        && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL && resetting_mpc_state_ == ResettingMpcState::NOMAL;
+
+      bool new_pull_up_state = false;
+      if (enable_pull_up)
+      {
         new_pull_up_state = stateEstimate_->checkPullUp(pull_up_force_threshold_);
       }
       ros_logger_->publishValue("/state_estimate/pull_up_state", isPullUp_);
-      if (!is_rl_controller_ && new_pull_up_state && !isPullUp_)
+      if (enable_pull_up &&  new_pull_up_state && !isPullUp_)
       {
         ROS_WARN_STREAM("Pull up detected");
         isPullUp_ = true;
