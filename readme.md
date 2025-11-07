@@ -306,6 +306,13 @@ roslaunch humanoid_controllers load_kuavo_real_half_up_body.launch
    # VR先和机器人连到同一局域网，查看VR里面的ip地址记下来
    # 然后在机器人上运行以下命令，ip_address输入quest3的ip地址，
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32
+
+   # 可选配置参数：use_cpp_ik
+   # 启动python版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 use_cpp_ik:=false 
+
+   # 启动C++版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 use_cpp_ik:=true
   ```
   > 如果希望同时映射躯干的运动（上下蹲和弯腰），可以增加选项`control_torso:=1`，使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度。
 
