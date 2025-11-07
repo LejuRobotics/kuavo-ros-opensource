@@ -9,7 +9,7 @@ humanoid_interface
 
 model_settings
 {
-  positionErrorGain             5.0 ; 20.0
+  positionErrorGain             10.0 ; 20.0
   positionErrorGain_xy          0.0 ; 20.0
   velocityErrorGain_xy          1.0;
   positionErrorGain_zero        5.0; // positionErrorGain for zero velocity constraint
@@ -518,14 +518,14 @@ selfCollision
 ; Whole body control
 torqueLimitsTask
 {
-   (0,0)  44.0     ; motor 1
+   (0,0)  89.7183     ; motor 1
 
-   (1,0)  48.0     ; motor 1
-   (2,0)  63.0     ; motor 2
-   (3,0)  47.0     ; motor 3
-   (4,0)  48.0     ; motor 4
-   (5,0)  20.0     ; motor 5
-   (6,0)  30.0     ; motor 6
+   (1,0)  89.7183     ; motor 1
+   (2,0)  49.0206     ; motor 2
+   (3,0)  89.7183     ; motor 3
+   (4,0)  73.5192     ; motor 4
+   (5,0)  50.0     ; motor 5
+   (6,0)  40.0     ; motor 6
 
    ;; arm Limits
    (7,0)   60.0      ; motor 1
@@ -675,7 +675,7 @@ weight
   }
   walk
   {
-    swingLeg        100
+    swingLeg        500
     accXY           0
     height          0
     angular         10
