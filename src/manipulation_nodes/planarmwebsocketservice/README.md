@@ -5,7 +5,8 @@
 1. 编译功能包
 
    ```shell
-   catkin build humanoid_controllers humanoid_plan_arm_trajectory planarmwebsocketservice
+   catkin build humanoid_controllers humanoid_plan_arm_trajectory 
+   catkin build planarmwebsocketservice
    ```
 2. 安装依赖
 
