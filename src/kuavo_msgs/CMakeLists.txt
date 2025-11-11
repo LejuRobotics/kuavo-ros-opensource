@@ -195,6 +195,8 @@ add_service_files(
   RepublishTFs.srv
 
   twoArmHandPoseCmdFreeSrv.srv
+  goToZeroPoint.srv
+  robotSwitchPose.srv
 )
 
 ## Generate actions in the 'action' folder

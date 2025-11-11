@@ -1012,6 +1012,75 @@ response:
 | position | list   | 点位列表，包含当前机器人位置(png_x,png_y),和地图原点位置(origin_grid_x,origin_grid_y) |
 | msg      | string | 接口结果的描述                                                                        |
 
+### 零点调试模式
+request:
+
+```json
+{
+    "cmd": "zero_point_debug",
+    "data":{
+        "zero_point_debug_status":start/exit
+    }
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| zero_point_debug_status | string | 零点调试模式状态，start: 开启, exit: 退出 |
+
+
+response:
+
+```json
+{
+    "cmd": "zero_point_debug",
+    "data": {
+        "code": 0,
+        "msg": "Debug mode set successfully"
+    }
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| code | int    | 错误码 0: 成功,1:设置失败 |
+| msg  | string | 接口结果的描述                    |
+
+
+
+
+### 机器人状态切换
+
+request:
+
+```json
+{
+    "cmd": "robot_switch_pose",
+    "data":{"robot_pose":stand/ready/cali_zero}
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| robot_pose | string | 机器人状态切换，stand: 站立状态, ready: 半蹲状态, cali_zero: 校准零点 |
+
+
+
+response:
+
+```json
+{
+    "cmd": "robot_switch_pose",
+    "data": {
+        "code": 0,
+        "msg": "Debug mode set successfully"
+    }
+}
+```
+
+
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| code | int    | 错误码 0: 状态切换成功,1:状态切换失败 |
+| msg  | string | 接口结果的描述                    |
+
 ## YOLO目标检测
 
 `model_utils.py` 中 `YOLO_detection` 为 YOLO目标检测类，用于处理图像检测和结果发布。

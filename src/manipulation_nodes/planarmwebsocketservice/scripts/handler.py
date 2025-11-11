@@ -28,6 +28,8 @@ from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.msg import sensorsData
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
+from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest, robotSwitchPose, robotSwitchPoseRequest
+
 from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest
 from std_msgs.msg import Bool, Float64MultiArray
 from nav_msgs.msg import OccupancyGrid
@@ -53,6 +55,7 @@ response_queue = Queue()
 # 全局变量用于存储零点数据
 zero_point_data = []
 adjusted_zero_point_data = []
+frist_get_zero_point_flag = False
 
 active_threads: Dict[websockets.WebSocketServerProtocol, threading.Event] = {}
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
@@ -94,11 +97,15 @@ def update_robot_status_from_service():
     try:
         success, status_message = robot_instance.get_robot_launch_status()
         if success:
+            # print(f"robot_status: {status_message}")
+
             # 映射服务返回的状态到我们的状态系统
             if status_message == "ready_stance":
                 robot_status = "crouching"
             elif status_message == "launched":
                 robot_status = "standing"
+            elif status_message == "zero_point_cali":
+                robot_status = "zero_point_cali"
             else:
                 robot_status = "unlaunch"
         else:
@@ -215,6 +222,9 @@ class KuavoRobot:
     def stand_robot(self)->Tuple[bool, str]:
         raise NotImplementedError("stand_robot is not implemented")
 
+    def switch_robot_pose(self)->Tuple[bool, str]:
+        raise NotImplementedError("switch_robot_pose is not implemented")
+
     def get_robot_launch_status(self)->Tuple[bool, str]:
         raise NotImplementedError("get_robot_launch_status is not implemented")
 
@@ -246,7 +256,7 @@ class KuavoRobotReal(KuavoRobot):
     def stop_robot(self)->Tuple[bool, str]:
         try:
             # 已经启动则下蹲再停止
-            if robot_status == "launched" or robot_status == "standing":
+            if robot_status == "launched" or robot_status == "standing" or robot_status == "zero_point_cali":
                 msg = Twist()
                 msg.linear.x = 0.0
                 msg.linear.y = 0.0
@@ -269,12 +279,31 @@ class KuavoRobotReal(KuavoRobot):
             req = TriggerRequest()
             client.wait_for_service(timeout=2.0)
             # Call the service
+
             if client.call(req):
                 print(f"RealInitializeSrv service call successful")
                 return True, "Success"
             else:
                 print(f"Failed to callRealInitializeSrv service")
                 return False, "Failed to callRealInitializeSrv service"
+        except rospy.ServiceException as e:
+            print(f"Service call failed: {e}")
+            return False, f"Service call failed: {e}"
+
+    def switch_robot_pose(self, pose="")->Tuple[bool, str]:
+        try:
+            client = rospy.ServiceProxy('/hardware/switch_robot_state', robotSwitchPose)
+            req = robotSwitchPoseRequest()
+            req.status = pose
+            client.wait_for_service(timeout=2.0)
+            # Call the service
+            response = client.call(req)
+            if response.success:
+                print(f"Switch robot pose service call successful")
+                return True, response.message
+            else:
+                print(f"Failed to call switch robot pose service: {response.message}")
+                return False, response.message
         except rospy.ServiceException as e:
             print(f"Service call failed: {e}")
             return False, f"Service call failed: {e}"
@@ -302,6 +331,57 @@ class KuavoRobotReal(KuavoRobot):
         except rospy.ServiceException as e:
             print(f"Service call failed: {e}")
             return False, f"unknown"
+
+    def zero_point_robot(self,data)->Tuple[bool, str]:
+        global WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME
+        global KUAVO_ROS_CONTROL_WS_PATH
+        global ROS_MASTER_URI
+        global ROS_IP
+        global ROS_HOSTNAME
+
+        global robot_status
+        global frist_get_zero_point_flag
+
+ 
+        if self.debug:
+            launch_cmd = "roslaunch humanoid_controllers load_kuavo_real.launch"
+            if not ROS_MASTER_URI or not ROS_IP or not ROS_HOSTNAME:
+                ROS_MASTER_URI = "http://kuavo_master:11311"
+                ROS_IP = "kuavo_master"
+                ROS_HOSTNAME = "kuavo_master"
+
+        else:
+            if robot_status == "unlaunch" and data == "start":
+                launch_cmd = "roslaunch humanoid_controllers load_kuavo_real.launch cali_set_zero:=true"
+            elif data == "exit":
+                result, msg = robot_instance.switch_robot_pose("exit")
+                if not result:
+                    return False, msg
+                    
+                # 添加10秒超时机制
+                start_time = time.time()
+                while(1) :
+                    success, status_message = robot_instance.get_robot_launch_status()
+                    if success:
+                        # 先切换到绷直状态在解锁
+                        if status_message == "zero_point_cali":
+                            time.sleep(1)
+                            self.stop_robot()
+                            robot_status = "unlaunch"
+                            frist_get_zero_point_flag = True
+                            break
+
+                    if time.time() - start_time > 10:  # 超时10秒
+                        return False, "failed"
+                        # break
+                    time.sleep(0.1)  # 短暂延时以减少CPU占用
+                    
+                return True, "success"
+            else:
+                # 处处不满足任何条件的情况
+                return False, "Invalid operation: robot_status is '{}' and data is '{}'".format(robot_status, data)
+
+        return tmux_run_cmd(WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME, launch_cmd, sudo=True)
 
 class KuavoRobotSim(KuavoRobot):
     def __init__(self, debug=False):
@@ -809,7 +889,7 @@ async def preview_action_handler(
 async def adjust_zero_point_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
-    global zero_point_data, adjusted_zero_point_data
+    global zero_point_data, adjusted_zero_point_data,adjusted_zero_point_data_copy
     payload = Payload(
         cmd="adjust_zero_point", data={"code": 0, "message": "Zero point adjusted successfully"}
     )
@@ -846,6 +926,8 @@ async def adjust_zero_point_handler(
         if motor_index < len(adjusted_zero_point_data):
             adjusted_zero_point_data[motor_index] = adjust_pos_rec
 
+        adjusted_zero_point_data_copy = adjusted_zero_point_data.copy()
+
         # Check if nodelet_manager is running
         running_nodes = rosnode.get_node_names()
         if '/nodelet_manager' in running_nodes:
@@ -855,10 +937,8 @@ async def adjust_zero_point_handler(
             get_hardware_ready = rospy.ServiceProxy('hardware/get_hardware_ready', Trigger)
 
             hw_res = get_hardware_ready()
-            print(hw_res.message)
             if hw_res.message == 'Hardware is ready':
             
-                print(f"current cannot adjust motor zero point")
                 payload.data["code"] = 2
                 payload.data["message"] = f"current robot is ready pose, cannot adjust motor zero point, please run `roslaunch humanoid_controllers load_kuavo_real.launch cali_set_zero:=true` to reboot robot"
                 response = Response(payload=payload, target=websocket)
@@ -911,7 +991,7 @@ async def adjust_zero_point_handler(
 async def set_zero_point_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
-    global adjusted_zero_point_data
+    global adjusted_zero_point_data,frist_get_zero_point_flag
     payload = Payload(
         cmd="set_zero_point", data={"code": 0, "message": "Zero point set successfully"}
     )
@@ -919,8 +999,8 @@ async def set_zero_point_handler(
     data = data["data"]
     print(f"received zero point data: {data}")
     
-    arm_zero_file_path = f"/root/.config/lejuconfig/arms_zero.yaml"
-    leg_zero_file_path = f"/root/.config/lejuconfig/offset.csv"
+    arm_zero_file_path = os.path.expanduser(f"~/.config/lejuconfig/arms_zero.yaml")
+    leg_zero_file_path = os.path.expanduser(f"~/.config/lejuconfig/offset.csv")
     
     robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
     # Get kuavo_assets package path
@@ -995,6 +1075,7 @@ async def set_zero_point_handler(
     
         # 重置调整后的数据，为下一次调整做准备
         adjusted_zero_point_data = []
+        frist_get_zero_point_flag = True
     
         response = Response(payload=payload, target=websocket)
         response_queue.put(response)
@@ -1008,7 +1089,9 @@ async def set_zero_point_handler(
 async def get_zero_point_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
-    global zero_point_data
+    print(f"received get_zero_point data: {data}")
+
+    global zero_point_data, adjusted_zero_point_data_copy, frist_get_zero_point_flag
     payload = Payload(
         cmd="get_zero_point", data={"code": 0, "message": "Zero point retrieved successfully"}
     )
@@ -1029,8 +1112,10 @@ async def get_zero_point_handler(
     num_joints = json_config["NUM_JOINT"]
     ec_joints = num_joints - arm_joints - head_joints
 
-    arm_zero_file_path = f"/root/.config/lejuconfig/arms_zero.yaml"
-    leg_zero_file_path = f"/root/.config/lejuconfig/offset.csv"
+    arm_zero_file_path = os.path.expanduser(f"~/.config/lejuconfig/arms_zero.yaml")
+    leg_zero_file_path = os.path.expanduser(f"~/.config/lejuconfig/offset.csv")
+
+    print("Please make sure the arms_zero.yaml and offset.csv files exist.")
     
     if not os.path.exists(arm_zero_file_path) or not os.path.exists(leg_zero_file_path):
         payload.data["code"] = 1
@@ -1040,6 +1125,8 @@ async def get_zero_point_handler(
         return
 
     try:
+        print("Reading zero point data from file")
+
         # Read the zero point data from file
         with open(arm_zero_file_path, 'r') as file:
             arm_zero_data = yaml.safe_load(file)
@@ -1055,10 +1142,23 @@ async def get_zero_point_handler(
         leg_zero_data = leg_zero_data[:ec_joints]
         print(leg_zero_data + arm_zero_data)
 
-        zero_point_data = leg_zero_data + arm_zero_data
-        payload.data["zero_pos"] = zero_point_data
-        response = Response(payload=payload, target=websocket)
-        response_queue.put(response)
+        
+        if frist_get_zero_point_flag :
+
+            frist_get_zero_point_flag = False
+
+            zero_point_data = leg_zero_data + arm_zero_data
+            adjusted_zero_point_data_copy = zero_point_data.copy()
+
+            payload.data["zero_pos"] = zero_point_data
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+        else :
+            payload.data["zero_pos"] = adjusted_zero_point_data_copy
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+
+        
     except Exception as e:
         print(f"Error reading zero point file: {e}")
         payload.data["code"] = 2
@@ -1976,6 +2076,67 @@ async def start_robot_handler(
     )
     response_queue.put(response)
 
+
+async def robot_switch_pose_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    机器人姿态切换处理函数，用于在站立和蹲下姿态之间切换
+    支持传入字符参数：
+    'ready': 缩腿
+    'stand': 退出缩腿，全身绷直阻尼状态
+    """
+    payload = Payload(
+        cmd="robot_switch_pose", data={"code": 0, "message": "Robot pose switch command sent successfully"}
+    )
+
+    try:
+        # 获取传入的字符参数
+        robot_pose = data.get("data", {}).get("robot_pose", "")
+        print(f"Received robot_pose: {robot_pose}")
+        
+        # 根据传入的字符执行相应的操作
+        if robot_pose == "cali_zero":
+            # 调用机器人缩腿服务
+            result, msg = robot_instance.switch_robot_pose(robot_pose)
+            if result:
+                payload.data["code"] = 0
+                payload.data["message"] = f"零点模式执行成功: {msg}"
+            else:
+                payload.data["code"] = 1
+                payload.data["message"] = f"零点模式令执行失败: {msg}"
+        elif robot_pose == "ready":
+            # 调用机器人缩腿服务
+            result, msg = robot_instance.switch_robot_pose(robot_pose)
+            if result:
+                payload.data["code"] = 0
+                payload.data["message"] = f"缩腿命令执行成功: {msg}"
+            else:
+                payload.data["code"] = 1
+                payload.data["message"] = f"缩腿命令执行失败: {msg}"
+        elif robot_pose == "stand":
+            # 调用机器人退出缩腿，全身绷直阻尼状态服务
+            result, msg = robot_instance.switch_robot_pose(robot_pose)
+            if result:
+                payload.data["code"] = 0
+                payload.data["message"] = f"退出缩腿命令执行成功: {msg}"
+            else:
+                payload.data["code"] = 1
+                payload.data["message"] = f"退出缩腿命令执行失败: {msg}"
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = f"不支持的命令字符: {robot_pose}，仅支持 'ready' 或 'stand'"
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"切换机器人姿态失败: {e}"
+        
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+
 async def stop_robot_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
@@ -2041,6 +2202,37 @@ async def stand_robot_handler(
         target=websocket,
     )
     response_queue.put(response)
+
+# 机器人零点调试模式
+async def zero_point_debug_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    global robot_status,frist_get_zero_point_flag
+    payload = Payload(
+        cmd="zero_point_debug", data={"code": 0, "message": "Zero point debug mode entered successfully"}
+    )
+
+    
+    try:
+        zero_point_debug_status = data.get("data", {}).get("zero_point_debug_status", "")
+    
+        result, msg = robot_instance.zero_point_robot(zero_point_debug_status)
+        
+        if result:
+            frist_get_zero_point_flag  = True
+            payload.data["code"] = 0
+            payload.data["message"] = msg
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = msg
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to zero point robot: {e}"
+        
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
 
 async def get_robot_launch_status_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
