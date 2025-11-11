@@ -66,7 +66,7 @@ def main():
     randomizer.randomize_multiple_objects(object_configs)
 
     conveyor_ctrl.control_speed(-0.1)
-    num = 20
+    num = 10
 
     item1_pos = obj_pos.wait_for_position("item1")
     item2_pos = obj_pos.wait_for_position("item2")
@@ -75,37 +75,34 @@ def main():
 
     # #=========================第一段走路与抓取=============================
     try:
-        robot.set_external_control_arm_mode()
-        robot.control_head(yaw=0, pitch=math.radians(5))
+        ##robot.set_external_control_arm_mode()
+        robot.control_head(yaw=0, pitch=math.radians(12))
 
         traj_ctrl = TrajectoryController(robot,publish_frequency=150)
         pos_ctrl = PoseController(robot, publish_frequency=1200)
 
+        q0_target1 = [0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 90, 0, 0]
+        q0_list1 = Utils.interpolate_joint_trajectory(q0_target1, num = num)
+        traj_ctrl.execute_trajectory(q0_list1, sleep_time=0.001)
+        time.sleep(0.5)
 
         print("行走到目标区域")
-        robot.stance()
+        # robot.stance()
         offset1 = 0.3
-        start_x1 = robot_state.odometry.position[0]
 
-        robot.set_external_control_arm_mode()
+        # #robot.set_external_control_arm_mode()
         pos_ctrl.move_to_target([0.9, item1_pos[1]+offset1, 0, 0],0.1)
-        robot.set_external_control_arm_mode()
+        # #robot.set_external_control_arm_mode()
 
         time.sleep(3.5)
         robot.stance()
 
-        print(f"\033[91m机器人位置: {str(robot_state.odometry.position)} m\033[0m")
-        forward_distance1 = robot_state.odometry.position[0] - start_x1
-        print(f"\033[91mForward distance traveled: {forward_distance1:.3f} m\033[0m")
-
-
-
         print("开始抓取物体")
         q1_target1 = [0, 0, 0, 0, 0, 0, 0,   30, 0, 0, -130, 90, 0, 0]
-        q1_list1 = Utils.interpolate_joint_trajectory(q1_target1, num = num)
+        q1_list1 = Utils.interpolate_joint_trajectory(q1_target1,q0_target1, num = num)
         traj_ctrl.execute_trajectory(q1_list1, sleep_time=0.01)
 
-        time.sleep(2.5)
+        time.sleep(0.5)
         
         curr_q1 = robot_state.arm_joint_state().position
         l_pose1, r_pose1 = robot.arm_fk(curr_q1)
@@ -122,101 +119,82 @@ def main():
         q_target1 = pose1_left1 + pose1_right1
         q_target_deg1 = [math.degrees(x) for x in q_target1]
         q_list_target1 = Utils.interpolate_joint_trajectory(q_target_deg1, q1_target1, num=num)
-        traj_ctrl.execute_trajectory(q_list_target1, sleep_time=0.02)
+        traj_ctrl.execute_trajectory(q_list_target1, sleep_time=0.01)
 
         time.sleep(0.5)
         print("关闭夹爪并提起")
-        gripper_ctrl.control_right_gripper(150)
-        time.sleep(0.5)
+        gripper_ctrl.control_right_gripper(180)
+        time.sleep(0.25)
 
 
         q1_target2 = [0, 0, 0, 0, 0, 0, 0,   -15, 15, 25, -120, 90, 0, 0]
         q1_list2 = Utils.interpolate_joint_trajectory(q1_target2,q_target_deg1, num = num)
-        traj_ctrl.execute_trajectory(q1_list2, sleep_time=0.02)
-        time.sleep(0.5)
+        traj_ctrl.execute_trajectory(q1_list2, sleep_time=0.01)
+        time.sleep(0.25)
         # #=========================第一段走路与抓取=============================
 
         # #=========================第二段走路与放置=============================
         print("行走至放置地区")
-        start_x2 = robot_state.odometry.position[0]
-        robot.stance()
 
-        robot.set_external_control_arm_mode()
+        # robot.stance()
+
+        # #robot.set_external_control_arm_mode()
         pos_ctrl.move_to_target([0.6, item1_pos[1]+offset1, 0, 0],0.1)
-        robot.set_external_control_arm_mode()
+        # #robot.set_external_control_arm_mode()
 
-        time.sleep(2.5)
-        print(f"\033[91m机器人位置: {str(robot_state.odometry.position)} m\033[0m")
-        forward_distance2 = robot_state.odometry.position[0] - start_x2
-        print(f"\033[91mForward distance traveled: {forward_distance2:.3f} m\033[0m")
+        time.sleep(2.25)
 
         offset2 = -0.3
-        start_x3 = robot_state.odometry.position[0]
 
-        robot.set_external_control_arm_mode()
+        # #robot.set_external_control_arm_mode()
         pos_ctrl.move_to_target([-0.85, left_bin_A_pos[1]+offset2, 0, 3.14],0.5)
-        robot.set_external_control_arm_mode()
+        # #robot.set_external_control_arm_mode()
 
         time.sleep(10.5)
         robot.stance()
-
-        print(f"\033[91m机器人位置: {str(robot_state.odometry.position)} m\033[0m")
-        forward_distance3 = robot_state.odometry.position[0] - start_x3
-        print(f"\033[91mForward distance traveled: {forward_distance3:.3f} m\033[0m")
 
         print("放置于右侧盒子")
 
         q1_target3 = [0, 0, 0, 0, 0, 0, 0,   -10, 0, -10, -95, 90, 0, 0]
         q1_list3 = Utils.interpolate_joint_trajectory(q1_target3,q1_target2, num = num)
-        traj_ctrl.execute_trajectory(q1_list3, sleep_time=0.02)
+        traj_ctrl.execute_trajectory(q1_list3, sleep_time=0.01)
 
         time.sleep(0.5)
         gripper_ctrl.control_right_gripper(0)
-        time.sleep(0.5)
+        time.sleep(0.25)
         # #=========================第二段走路与放置=============================
 
 
         # #=========================第三段走路与抓取=============================
         print("返回到目标区域")
-        start_x4 = robot_state.odometry.position[0]
-        robot.stance()
+        # robot.stance()
         
-        robot.set_external_control_arm_mode()
+        # #robot.set_external_control_arm_mode()
         pos_ctrl.move_to_target([-0.55, left_bin_A_pos[1]+offset2, 0, 3.14],0.1)
-        robot.set_external_control_arm_mode()
+        # #robot.set_external_control_arm_mode()
 
-        time.sleep(2.0)
+        time.sleep(2.25)
         robot.stance()
 
-        forward_distance4 = robot_state.odometry.position[0] - start_x4
-        print(f"\033[91mForward distance traveled: {forward_distance4:.3f} m\033[0m")
-
-
-        q1_target4 = [0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0]
+        q1_target4 = [0, 0, 0, 0, -90, 0, 0,   0, 0, 0, 0, 0, 0, 0]
         q1_list4 = Utils.interpolate_joint_trajectory(q1_target4,q1_target3, num = num)
-        traj_ctrl.execute_trajectory(q1_list4, sleep_time=0.02)
-        robot.arm_reset()
+        traj_ctrl.execute_trajectory(q1_list4, sleep_time=0.01)
+        # robot.arm_reset()
         offset3 = -0.3
 
-
-        start_x5 = robot_state.odometry.position[0]
-        robot.set_external_control_arm_mode()
+        # #robot.set_external_control_arm_mode()
         pos_ctrl.move_to_target([0.9, item2_pos[1]+offset3-0.02, 0, 0],0.5)#-0.0225
-        robot.set_external_control_arm_mode()
+        # #robot.set_external_control_arm_mode()
         time.sleep(11)
         robot.stance()
 
-        print(f"\033[91m机器人位置: {str(robot_state.odometry.position)} m\033[0m")
-        forward_distance5 = robot_state.odometry.position[0] - start_x5
-        print(f"\033[91mForward distance traveled: {forward_distance5:.3f} m\033[0m")
-
         print("左手开始抓取")
-        q1_target5 = [30, 0, 0, -130, -90, 0, 0,   0, 0, 0, 0, 0, 0, 0]
+        q1_target5 = [30, 0, 0, -125, -90, 0, 0,   0, 0, 0, 0, 0, 0, 0]
         q1_list5 = Utils.interpolate_joint_trajectory(q1_target5,q1_target4, num = num)
-        traj_ctrl.execute_trajectory(q1_list5, sleep_time=0.01)
+        traj_ctrl.execute_trajectory(q1_list5, sleep_time=0.001)
         error = item2_pos[1]-robot_state.robot_position()[1]-0.3
 
-        time.sleep(2.5)
+        time.sleep(0.5)
         
         curr_q2_1 = robot_state.arm_joint_state().position
         l_pose2_1, r_pose2 = robot.arm_fk(curr_q2_1)
@@ -229,8 +207,8 @@ def main():
         elif item2_pos[1]>=0.48:
             offset_grasp = 0.01
 
-        l_pose_new2_1 = [item2_pos[0]-0.1, item2_pos[1]+offset_grasp, 0.95]
-        l_pose_new2 = [item2_pos[0]+0.01, item2_pos[1]+offset_grasp, 0.95]
+        l_pose_new2_1 = [item2_pos[0]-0.1, item2_pos[1]+offset_grasp, 0.93]
+        l_pose_new2 = [item2_pos[0]+0.01, item2_pos[1]+offset_grasp, 0.93]
                 
         pose1_left2_1 , _ = Utils.compute_pose(
             robot,
@@ -244,7 +222,7 @@ def main():
         q_target2_1 = pose1_left2_1 + pose1_right2_1
         q_target_deg2_1 = [math.degrees(x) for x in q_target2_1]
         q_list_target2_1 = Utils.interpolate_joint_trajectory(q_target_deg2_1, q1_target5, num=num)
-        traj_ctrl.execute_trajectory(q_list_target2_1, sleep_time=0.02)
+        traj_ctrl.execute_trajectory(q_list_target2_1, sleep_time=0.01)
         time.sleep(0.1)
 
         curr_q2 = robot_state.arm_joint_state().position
@@ -262,52 +240,42 @@ def main():
         q_target2 = pose1_left2 + pose1_right2
         q_target_deg2 = [math.degrees(x) for x in q_target2]
         q_list_target2 = Utils.interpolate_joint_trajectory(q_target_deg2, q_target_deg2_1, num=num)
-        traj_ctrl.execute_trajectory(q_list_target2, sleep_time=0.02)
+        traj_ctrl.execute_trajectory(q_list_target2, sleep_time=0.001)
 
         time.sleep(0.5)
         print("关闭夹爪并提起")
-        gripper_ctrl.control_left_gripper(150)
+        gripper_ctrl.control_left_gripper(180)
 
         q1_target6 = [-15, -15, -25, -120, -90, 0, 0,   0, 0, 0, 0, 0, 0, 0]
         q1_list6 = Utils.interpolate_joint_trajectory(q1_target6,q_target_deg2, num = num)
-        traj_ctrl.execute_trajectory(q1_list6, sleep_time=0.02)
-        time.sleep(0.5)
+        traj_ctrl.execute_trajectory(q1_list6, sleep_time=0.01)
+        time.sleep(0.25)
         # #=========================第三段走路与抓取=============================
 
 
         # #=========================第四段走路与放置=============================
         print("行走至放置地区")
-        start_x6 = robot_state.odometry.position[0]
-        robot.stance()
+        # robot.stance()
 
-        robot.set_external_control_arm_mode()
+        ##robot.set_external_control_arm_mode()
         pos_ctrl.move_to_target([0.6, item2_pos[1]+offset3, 0, 0],0.1)
-        robot.set_external_control_arm_mode()
+        ##robot.set_external_control_arm_mode()
 
-        time.sleep(2.5)
-
-        forward_distance6 = robot_state.odometry.position[0] - start_x6
-        print(f"\033[91mForward distance traveled: {forward_distance6:.3f} m\033[0m")
+        time.sleep(2.25)
 
         offset4 = 0.3
 
-        start_x7 = robot_state.odometry.position[0]
-
-        robot.set_external_control_arm_mode()
+        ##robot.set_external_control_arm_mode()
         pos_ctrl.move_to_target([-0.85, left_bin_B_pos[1]+offset4, 0, 3.14],0.5)
-        robot.set_external_control_arm_mode()
+        ##robot.set_external_control_arm_mode()
 
-        time.sleep(10)
+        time.sleep(10.5)
         robot.stance()
-
-        print(f"\033[91m机器人位置: {str(robot_state.odometry.position)} m\033[0m")
-        forward_distance7 = robot_state.odometry.position[0] - start_x7
-        print(f"\033[91mForward distance traveled: {forward_distance7:.3f} m\033[0m")
 
         print("放置于左侧盒子")
         q1_target7 = [-10, 0, 7, -95, -90, 0, 0,   0, 0, 0, -0, 0, 0, 0]
         q1_list7 = Utils.interpolate_joint_trajectory(q1_target7,q1_target6, num = num)
-        traj_ctrl.execute_trajectory(q1_list7, sleep_time=0.02)
+        traj_ctrl.execute_trajectory(q1_list7, sleep_time=0.01)
         time.sleep(0.5)
         gripper_ctrl.control_left_gripper(0)
         time.sleep(0.5)

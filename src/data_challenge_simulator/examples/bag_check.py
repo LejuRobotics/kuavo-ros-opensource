@@ -2,15 +2,16 @@ import os
 from typing import Optional, List, Tuple
 
 # ======= 在这里配置 =======
-ROOT_DIR  = "/home/ruichen/Downloads/kuavo-ros-control/src/data_challenge_simulator/examples/bags/run_2025-10-17_17-21-35"  # 要遍历的目录
+ROOT_DIR  = "/home/ruichen/Downloads/kuavo-ros-control/src/data_challenge_simulator/examples/bags/run_2025-11-11_13-58-08"  # 要遍历的目录
 EXT       = ".bag"                   # 只检查这个后缀（不区分大小写）
 RECURSIVE = True                     # 是否递归子目录
 
 # 设定大小区间（字节）。不想限制就设为 None
 # 例如 1.2GB = 1.2 * 1024**3
-MIN_SIZE: Optional[int] = int(850 * 1024**2)   # 含下界
+MIN_SIZE: Optional[int] = int(750 * 1024**2)   # 含下界
 MAX_SIZE: Optional[int] = int(1000 * 1024**2)   # 含上界
 # =========================
+DELETE_BAD_FILES = False 
 
 UNITS = {"B":1, "KB":1024, "MB":1024**2, "GB":1024**3}
 
@@ -76,5 +77,20 @@ def main():
 
     print(f"\n共发现异常文件: {len(bad)}")
 
+    if DELETE_BAD_FILES:
+        print(f"\n[DELETE] 开始删除异常文件...")
+        root_abs = os.path.abspath(ROOT_DIR)
+        deleted_count = 0
+        failed_count = 0
+        for rel, size in bad:
+            full_path = os.path.join(root_abs, rel)
+            try:
+                os.remove(full_path)
+                print(f"[DELETED] {rel}")
+                deleted_count += 1
+            except OSError as e:
+                print(f"[FAILED] {rel} - {e}")
+                failed_count += 1
+        print(f"\n[RESULT] 成功删除: {deleted_count}, 失败: {failed_count}")
 if __name__ == "__main__":
     main()
