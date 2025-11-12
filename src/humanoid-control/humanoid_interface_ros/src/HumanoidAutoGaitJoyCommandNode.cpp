@@ -253,7 +253,7 @@ namespace ocs2
       }
       else if (joy_msg->buttons[BUTTON_X])
       {
-        publishGaitTemplate("jump");
+        publishGaitTemplate("RL");
       }
       else if (joy_msg->buttons[BUTTON_Y])
       {
@@ -432,7 +432,7 @@ namespace ocs2
     vector_t feet_pos_measured_ = vector_t::Zero(24);
 
     std::map<std::string, humanoid::ModeSequenceTemplate> gait_map_;
-    std::map<JoyButton, std::string> joy_button_map_ = {{BUTTON_A, "stance"}, {BUTTON_B, "trot"}, {BUTTON_X, "jump"}, {BUTTON_Y, "walk"}};
+    std::map<JoyButton, std::string> joy_button_map_ = {{BUTTON_A, "stance"}, {BUTTON_B, "trot"}, {BUTTON_X, "RL"}, {BUTTON_Y, "walk"}};
   };
 }
 

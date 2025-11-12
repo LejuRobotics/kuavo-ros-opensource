@@ -37,6 +37,9 @@
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <arg name="arm_move_spd"      default="1.2"/>
 
+    <!-- 如需使用手柄搬箱子和走楼梯，需要设置为 false -->
+    <arg name="joy_execute_action" default="true"/>
+
     <!-- 半身控制手臂模式切换插值相关参数 -->
     <arg name="arm_move_spd_half_up_body" default="0.21"/>
     <arg name="threshold_arm_diff_half_up_body" default="0.28"/>
@@ -53,6 +56,9 @@
     <!-- -->
     <arg name="teach_pendant" default="0"/>
     
+    <!-- RL相关参数 -->
+    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -68,12 +74,15 @@
     <param name="with_estimation"    value="$(arg with_estimation)"/>
     <param name="estimator_type"     value="$(arg estimator_type)"/>
     <param name="use_joint_filter"     value="$(arg use_joint_filter)"/>
+    <param name="network_model_file"   value="$(arg network_model_file)"/>
+    <param name="rl_param"             value="$(arg rl_param)"/>
     <param name="joystick_type"  value="$(arg joystick_type)"/>
     <param name="only_half_up_body"   value="$(arg only_half_up_body)"/>
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
     <param name="start_way"  value="$(arg start_way)"/>
     <param name="use_estimator_contact"  value="$(arg use_estimator_contact)"/>
     <param name="waist_move_spd"     value="$(arg waist_move_spd)"/>
+    <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
 
     <param name="stand_up_protect" value="$(arg stand_up_protect)"/>
     <param name="redundant_imu" value="$(arg redundant_imu)"/>
@@ -110,12 +119,12 @@
       <param name="only_half_up_body" value="true"/>
     </group>
 
-    <group unless="$(eval arg('robot_version') >= 30)">
+    <!-- <group unless="$(eval arg('robot_version') >= 30)">
         <param name="enable_pull_up_protect" value="false"/>
         <param name="stand_up_protect" value="false"/>
         <param name="joint_protect_enable" value="false" />
         <param name="cmd_truncation_enable" value="false" />
-    </group>
+    </group> -->
     
     <!-- mpc node -->
     <group if="$(arg use_external_mpc)">
@@ -213,9 +222,13 @@
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
-        <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
-          <arg name="joystick_type" value="$(arg joystick_type)"/>
-        </include>
+        <group if="$(eval arg('start_way') == 'manual')">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+            <arg name="joystick_type" value="$(arg joystick_type)"/>
+            <arg name="real" value="$(arg real)"/>
+          </include>
+        </group>
+        <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen"/>
       </group>
     </group>
 
@@ -242,8 +255,7 @@
         <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string"/>
 
         <!-- 启动 播放音乐服务 -->
-        <node pkg="kuavo_audio_player" type="loundspeaker.py" name="play_music_node" output="screen" respawn="true" respawn_delay="5"/>
-        <param name="music_path" value="/home/lab/.config/lejuconfig/music" />
+        <include file="$(find kuavo_audio_player)/launch/play_music.launch"/>
     </group>
 
     <group if="$(arg with_ik)">

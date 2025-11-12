@@ -1,0 +1,7 @@
+---
+string[] controller_names  # 可用控制器名称列表
+int32 count               # 控制器数量
+int32 current_index       # 当前控制器索引
+string current_controller # 当前控制器名称
+bool success              # 获取是否成功
+string message            # 返回消息

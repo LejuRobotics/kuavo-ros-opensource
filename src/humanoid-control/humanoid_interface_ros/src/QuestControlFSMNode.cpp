@@ -33,6 +33,7 @@
 #include <kuavo_msgs/getCurrentGaitName.h>
 #include <std_srvs/Trigger.h>
 #include "utils/singleStepControl.hpp"
+#include <kuavo_msgs/switchToNextController.h>
 
 namespace ocs2
 {
@@ -203,6 +204,9 @@ namespace ocs2
 
             // 添加arm_collision_control服务
             arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
+            
+            // 添加切换控制器服务客户端
+            switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
         }
 
         void run()
@@ -373,6 +377,38 @@ namespace ocs2
             }
         }
 
+        void callSwitchToNextControllerSrv()
+        {
+            kuavo_msgs::switchToNextController srv;
+            
+            // 等待服务可用
+            if (!switch_to_next_controller_client_.waitForExistence(ros::Duration(2.0)))
+            {
+                ROS_WARN("Switch to next controller service not available, skipping call");
+                return;
+            }
+
+            // 调用服务
+            if (switch_to_next_controller_client_.call(srv))
+            {
+                if (srv.response.success)
+                {
+                    ROS_INFO("Switch to next controller successful: %s", srv.response.message.c_str());
+                    ROS_INFO("Switched from %s (index: %d) to %s (index: %d)", 
+                             srv.response.current_controller.c_str(), srv.response.current_index,
+                             srv.response.next_controller.c_str(), srv.response.next_index);
+                }
+                else
+                {
+                    ROS_WARN("Switch to next controller failed: %s", srv.response.message.c_str());
+                }
+            }
+            else
+            {
+                ROS_ERROR("Failed to call switch to next controller service");
+            }
+        }
+
         void callTerminateSrv()
         {
         std::cout << "tigger callTerminateSrv" << std::endl;
@@ -463,12 +499,12 @@ namespace ocs2
                 double relative_height = current_height - body_height_zero_;  // 计算相对于零点的高度
                 //std::cout << "相对高度: " << relative_height << std::endl;
                 //限制相对高度在[-0.4,0.1]之间
-                relative_height = std::max(-0.25, std::min(relative_height, 0.1));
+                relative_height = std::max(-0.35, std::min(relative_height, 0.1));
                 geometry_msgs::Twist cmd_pose;
                 cmd_pose.linear.x = 0.0;  // 基于当前位置的 x 方向值 (m)
                 cmd_pose.linear.y = 0.0;  // 基于当前位置的 y 方向值 (m)
                 cmd_pose.linear.z = relative_height;  // 相对高度
-                cmd_pose.angular.x = 0.0;  // roll
+                cmd_pose.angular.x = relative_roll;  // roll
                 cmd_pose.angular.z = relative_yaw_torso;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
                 cmd_pose.angular.y = current_head_body_pose_.body_pitch;  // pitch
 
@@ -497,12 +533,21 @@ namespace ocs2
                   callTerminateSrv();
                   return;
             }
+            // if (joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，切换控制器
+            // {
+                
+            // }
             if (joystick_data_.left_trigger > 0.5)
             {
                 if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)
                 {
                     // 使能 WBC 手臂轨迹控制
                     callEnableWbcArmTrajectorySrv(1);
+                    return;
+                }
+                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+                {
+                    callSwitchToNextControllerSrv();
                     return;
                 }
             }
@@ -890,8 +935,7 @@ namespace ocs2
             cmdVel_.linear.y = commad_line_target_(1);
             cmdVel_.linear.z = commad_line_target_(2);
             cmdVel_.angular.z = commad_line_target_(3);
-            if(!torso_control_enabled_)
-                vel_control_pub_.publish(cmdVel_);
+            vel_control_pub_.publish(cmdVel_);
         }
 
         void checkGaitSwitchCommand(const kuavo_msgs::JoySticks &joy_msg)
@@ -903,7 +947,7 @@ namespace ocs2
                 publish_zero_spd();
             }
 
-            else if (!joystick_data_prev_.right_second_button_pressed && joy_msg.right_second_button_pressed && joy_msg.left_trigger < 0.5 && !torso_control_enabled_)
+            else if (!joystick_data_prev_.right_second_button_pressed && joy_msg.right_second_button_pressed && joy_msg.left_trigger < 0.5)
             {
                 publish_mode_sequence_temlate("walk");
             }
@@ -1251,6 +1295,7 @@ namespace ocs2
         ros::ServiceClient enable_wbc_arm_trajectory_control_client_;
         ros::ServiceClient vr_waist_control_service_client_;  // VR腰部控制动态Q矩阵服务客户端
         ros::ServiceClient auto_gait_mode_service_client_;    // GaitReceiver自动步态模式服务客户端
+        ros::ServiceClient switch_to_next_controller_client_; // 切换控制器服务客户端
         ros::ServiceServer arm_collision_control_service_;
 
         // 腰部控制相关的订阅者和发布者

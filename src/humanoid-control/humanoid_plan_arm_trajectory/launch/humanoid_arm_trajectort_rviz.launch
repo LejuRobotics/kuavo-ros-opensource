@@ -1,0 +1,78 @@
+<launch>
+    <!-- Self-contained RViz preview for arm trajectory: loads URDF, publishes TF, and bridges joints -->
+
+    <!-- Core args/params -->
+    <arg name="robot_version" default="42" />
+    <arg name="urdfFile" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+    <arg name="rviz" default="true" />
+    <arg name="rviz_config" default="$(find humanoid_interface_ros)/rviz/humanoid.rviz" />
+
+    <arg name="root_link" default="base_link" />
+    <arg name="root_x" default="0.0" />
+    <arg name="root_y" default="0.0" />
+    <arg name="root_z" default="0.90" />
+    <arg name="root_yaw" default="0.0" />
+    <arg name="root_pitch" default="0.0" />
+    <arg name="root_roll" default="0.0" />
+
+    <arg name="use_nodelet" default="false" />
+
+        <!-- Load URDF into both humanoid_description (for RViz config) and robot_description (for RSP) -->
+    <param name="humanoid_description" textfile="$(arg urdfFile)" />
+    <param name="robot_description" textfile="$(arg urdfFile)" />
+    <param name="action_files_path" value="/home/fc/kuavo-ros-control/src/humanoid-control/humanoid_plan_arm_trajectory/script/action_files" />
+        <!-- Some nodes in this stack expect a plain 'urdfFile' param -->
+        <param name="urdfFile" value="$(arg urdfFile)" />
+        <!-- Required by bezier_curve_interpolator and related nodes -->
+        <param name="end_effector_joints_num" value="12" />
+
+    <!-- Start RViz optionally -->
+    <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz" args="-d $(arg rviz_config)" output="screen" />
+
+    <!-- Robot State Publisher with a higher publish frequency for smooth TF -->
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+        <param name="publish_frequency" value="100.0" />
+    </node>
+
+    <!-- Static TF: odom -> root_link (yaw pitch roll) -->
+    <node pkg="tf" type="static_transform_publisher" name="odom_to_root"
+                args="$(arg root_x) $(arg root_y) $(arg root_z) $(arg root_yaw) $(arg root_pitch) $(arg root_roll) odom $(arg root_link) 100" />
+
+    <!-- Combined Bezier RViz bridge (publishes /kuavo_arm_traj and /joint_states) -->
+    <node pkg="humanoid_plan_arm_trajectory" type="arm_trajectory_bezier_rviz.py" name="arm_trajectory_bezier_rviz" output="screen">
+        <param name="input_topic" value="/kuavo_arm_traj" />
+        <param name="output_topic" value="/joint_states" />
+        <param name="input_unit" value="deg" />
+        <!-- 包含手臂与腿部，腿部零位补齐以保证四肢显示 -->
+        <rosparam param="urdf_joint_names">[
+            "zarm_l1_joint","zarm_l2_joint","zarm_l3_joint","zarm_l4_joint","zarm_l5_joint","zarm_l6_joint","zarm_l7_joint",
+            "zarm_r1_joint","zarm_r2_joint","zarm_r3_joint","zarm_r4_joint","zarm_r5_joint","zarm_r6_joint","zarm_r7_joint",
+            "leg_l1_joint","leg_l2_joint","leg_l3_joint","leg_l4_joint","leg_l5_joint","leg_l6_joint",
+            "leg_r1_joint","leg_r2_joint","leg_r3_joint","leg_r4_joint","leg_r5_joint","leg_r6_joint",
+            "zhead_1_joint","zhead_2_joint"
+        ]</rosparam>
+    <!-- 自动触发 welcome 动作（节点内部等待数据就绪） -->
+    <param name="auto_trigger_action" value="true" />
+        <param name="auto_action_name" value="welcome" />
+        <param name="publish_zero_on_idle" value="true" />
+        <param name="zero_publish_hz" value="10.0" />
+    <param name="wait_mpc_before_trigger" value="false" />
+        <param name="wait_mpc_timeout" value="5.0" />
+        <param name="action_files_path" value="$(find humanoid_plan_arm_trajectory)/script/action_files" />
+    </node>
+
+    <!-- Supporting node or nodelet (the server for planning and other plumbing) -->
+    <group if="$(arg use_nodelet)">
+        <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" output="screen" />
+        <node pkg="nodelet" type="nodelet" name="humanoid_plan_arm_trajectory_nodelet"
+                    args="load humanoid_plan_arm_trajectory/HumanoidPlanArmTrajectoryNodelet nodelet_manager"
+                    output="screen" />
+    </group>
+    <group unless="$(arg use_nodelet)">
+        <node name="humanoid_plan_arm_trajectory_node"
+                    pkg="humanoid_plan_arm_trajectory"
+                    type="humanoid_plan_arm_trajectory_node"
+                    output="screen" />
+    </group>
+
+</launch>

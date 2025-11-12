@@ -7,6 +7,30 @@ INSTALLED_DIR="$PROJECT_DIR/installed/lib/python3/dist-packages"
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 VERSION=$(git -C "$PROJECT_DIR" describe --tags --always 2>/dev/null)
 
+# Backup current pip source and switch to faster source
+echo "🔄 Switching to faster pip source..."
+ORIGINAL_PIP_SOURCE=$(pip config get global.index-url 2>/dev/null || echo "")
+echo "Original pip source: ${ORIGINAL_PIP_SOURCE:-'default'}"
+
+# Switch to Tsinghua University mirror (faster for Chinese users)
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+echo "✅ Switched to Tsinghua University mirror"
+
+# Function to restore original pip source
+restore_pip_source() {
+    echo "🔄 Restoring original pip source..."
+    if [ -n "$ORIGINAL_PIP_SOURCE" ]; then
+        pip config set global.index-url "$ORIGINAL_PIP_SOURCE"
+        echo "✅ Restored to original source: $ORIGINAL_PIP_SOURCE"
+    else
+        pip config unset global.index-url 2>/dev/null || true
+        echo "✅ Restored to default source"
+    fi
+}
+
+# Set trap to restore source on script exit
+trap restore_pip_source EXIT
+
 # echo "SCRIPT_DIR: $SCRIPT_DIR"
 # echo "PROJECT_DIR: $PROJECT_DIR"
 # echo "DEVEL_DIR: $DEVEL_DIR"
@@ -169,11 +193,27 @@ else
 fi
 # pip install
 pushd $SCRIPT_DIR
+
+# Upgrade conflicting dependencies first
+echo "🔧 Upgrading conflicting dependencies..."
+# Only upgrade requests, skip scikit-learn due to Python 3.8 compatibility
+pip install --upgrade "requests>=2.25.0" || echo "⚠️  Warning: requests could not be upgraded, continuing with installation..."
+# Note: scikit-learn 1.6+ requires Python 3.9+, keeping 1.3.2 for Python 3.8 compatibility
+
 # Install the package editably
 if KUAVO_HUMANOID_SDK_VERSION="$VERSION" pip install -e ./; then
     echo -e "\033[32m\n🎉🎉🎉 Installation successful! \033[0m"
     echo -e "\033[32m-------------------------------------------\033[0m"
     pip show kuavo_humanoid_sdk
     echo -e "\033[32m-------------------------------------------\033[0m"
+    
+    # Check for remaining conflicts
+    echo -e "\033[33m🔍 Checking for remaining version conflicts...\033[0m"
+    pip check || echo -e "\033[33m⚠️  Some version conflicts remain. The SDK should still work, but some features may be limited.\033[0m"
+    
+    # Ensure all files are accessible by all users
+    echo -e "\033[33m🔧 Setting file permissions for all users...\033[0m"
+    sudo chmod -R a+rwx "$SCRIPT_DIR"
+    echo -e "\033[32m✅ File permissions set for all users\033[0m"
 fi
 popd

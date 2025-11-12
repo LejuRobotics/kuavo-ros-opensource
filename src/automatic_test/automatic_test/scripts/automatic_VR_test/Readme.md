@@ -47,6 +47,13 @@
    source ~/kuavo-ros-control/devel/setup.bash
    roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch 
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch 
+
+   # 可选配置参数：use_cpp_ik
+   # 启动python版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=false 
+
+   # 启动C++版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true
 ```
 - 接入 VR
 - 运行程序，开始录制：

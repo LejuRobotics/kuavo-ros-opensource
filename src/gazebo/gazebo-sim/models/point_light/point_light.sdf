@@ -1,0 +1,21 @@
+<sdf version='1.6'>
+  <model name='point_light_model'>
+    <static>true</static>
+    <link name='light_link'>
+      <pose>0 0 0 0 0 0</pose>
+      <light type='point' name='point_light'>
+        <cast_shadows>true</cast_shadows>
+        <diffuse>0.498039 0.498039 0.498039 1</diffuse>
+        <specular>0.098039 0.098039 0.098039 1</specular>
+        <attenuation>
+          <range>20.0</range>
+          <constant>0.5</constant>
+          <linear>0.01</linear>
+          <quadratic>0.0</quadratic>
+        </attenuation>
+        <direction>0 0 -1</direction>
+      </light>
+    </link>
+  </model>
+</sdf>
+

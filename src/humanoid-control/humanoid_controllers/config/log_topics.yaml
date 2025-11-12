@@ -56,4 +56,10 @@ topics:
   - /grasp_box/.*
   - /robot_body_matrices
   - /action_detector_info
-  - /leju_claw_command
+  - /leju/fused_hull_boundry_fuse_elevation
+  - /leju/elevation_map0
+  - /polygon_new_markers
+  - /polygon_markers
+  - /l515/color/image_raw
+  - /livox/points
+  - /rl_controller.*

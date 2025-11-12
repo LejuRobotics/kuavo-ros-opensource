@@ -1,0 +1,49 @@
+cmake_minimum_required(VERSION 3.5)
+project(kuavo_solver)
+
+# 查找 catkin 和 Eigen3
+find_package(catkin REQUIRED)
+find_package(Eigen3 REQUIRED)
+
+# 设置 C++ 标准
+set(CMAKE_CXX_STANDARD 14)
+
+# 定义 catkin 包
+catkin_package(
+  INCLUDE_DIRS include
+  LIBRARIES kuavo_solver
+  CATKIN_DEPENDS
+)
+
+# 添加头文件路径
+include_directories(
+  ${catkin_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+  include
+)
+
+# 创建动态链接库
+add_library(kuavo_solver SHARED src/ankle_solver.cpp)
+
+# 链接依赖库
+target_link_libraries(kuavo_solver
+  ${catkin_LIBRARIES}
+)
+
+# 编译完成后设置库文件权限
+add_custom_command(TARGET kuavo_solver POST_BUILD
+  COMMAND chmod 755 $<TARGET_FILE:kuavo_solver>
+)
+
+# 安装库和头文件，并设置权限
+install(TARGETS kuavo_solver
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION} PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION} PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION} PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+)
+
+# 安装头文件，并设置权限
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  PATTERN "*" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+)

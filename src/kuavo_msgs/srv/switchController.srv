@@ -1,0 +1,4 @@
+string controller_name  # 要切换到的控制器名称
+---
+bool success           # 切换是否成功
+string message         # 返回消息

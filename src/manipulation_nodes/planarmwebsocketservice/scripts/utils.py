@@ -5,6 +5,7 @@ import json
 import hashlib
 import math
 import numpy as np
+import rospy
 
 def get_wifi_ip():
     try:
@@ -109,7 +110,7 @@ robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
 if robot_version >= 40:
     INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 else:
-    INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+    INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
 
 def frames_to_custom_action_data(file_path: str):
     with open(file_path, "r") as f:
@@ -218,7 +219,41 @@ def frames_to_custom_action_data_ocs2(file_path: str, start_frame_time: float, c
                 ])
     return filter_data(action_data, start_frame_time, current_arm_joint_state)
 
+def verify_robot_version(file_path: str):
+    with open(file_path, "r") as f:
+        data = json.load(f)
+    
+    robot_type_raw = data.get("robotType", None)
+    if robot_type_raw is None:
+        msg = "Action file missing required field: robotType"
+        rospy.logerr(msg)
+        return False, msg
+    try:
+        tact_robot_version = int(robot_type_raw)
+    except (TypeError, ValueError):
+        msg = f"Invalid robotType in action file: {robot_type_raw}"
+        rospy.logerr(msg)
+        return False, msg
 
+    # 版本兼容关系映射
+    version_compat_map = {
+        41: [41],
+        42: [42],
+        45: [43, 45, 46, 48, 49],
+        11: [11, 13, 14],
+        13: [11, 13, 14],
+        14: [11, 13, 14]
+    }
+    allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
+    if robot_version not in allowed_robot_versions:
+        msg = (
+            f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version}"
+        )
+        rospy.logerr(msg)
+        return False, msg
+    
+    rospy.loginfo(f"Version match: tact {tact_robot_version} is compatible with robot {robot_version}")
+    return True, None
 
 def get_start_end_frame_time(file_path: str):
     with open(file_path, "r") as f:

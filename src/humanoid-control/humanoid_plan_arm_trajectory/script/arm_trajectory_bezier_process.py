@@ -13,6 +13,7 @@ from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
 from ocs2_msgs.msg import mpc_observation
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray
 from trajectory_msgs.msg import JointTrajectory
 from humanoid_plan_arm_trajectory.msg import RobotActionState
 from humanoid_plan_arm_trajectory.srv import ExecuteArmAction, ExecuteArmActionResponse  # Import new service type
@@ -25,6 +26,8 @@ ROBAN = "roban"
 class ArmTrajectoryBezierDemo:
     # START_FRAME_TIME = 0
     END_FRAME_TIME = 10000
+    KUAVO_TACT_LENGTH = 28
+    ROBAN_TACT_LENGTH = 23
 
     def __init__(self):
         self.START_FRAME_TIME = 0
@@ -32,18 +35,24 @@ class ArmTrajectoryBezierDemo:
         self.joint_state = JointState()
         self.hand_state = robotHandPosition()
         self.head_state = robotHeadMotionData()
-        self.current_arm_joint_state = []
+        self.waist_state = Float64MultiArray()
         self.running_action = False
         self.arm_flag = False
         self._timer = None
         self.interrupt_flag  = False  
-        self.robot_version = rospy.get_param('/robot_version', 40)
+        self.robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
         self.robot_class = KUAVO if self.robot_version >= 40 else ROBAN
+        self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
         
         if self.robot_class == KUAVO:
-            self.INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            if self.kuavo_control_scheme == "rl":
+                self.INIT_ARM_POS = [int(0)] * self.KUAVO_TACT_LENGTH
+            else:
+                self.INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            self.current_arm_joint_state = [0] * self.KUAVO_TACT_LENGTH
         elif self.robot_class == ROBAN:
-            self.INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+            self.INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]# task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+            self.current_arm_joint_state = [0] * self.ROBAN_TACT_LENGTH
 
         # rospy.spin()
 
@@ -61,19 +70,27 @@ class ArmTrajectoryBezierDemo:
                                                 tcp_nodelay=True)
         self.control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1,
                                                 tcp_nodelay=True)
+        self.control_waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=1, 
+                                                tcp_nodelay=True)
 
         self.sensor_data_sub = rospy.Subscriber('/sensors_data_raw', 
                                                 sensorsData,
                                                 self.sensors_data_raw_callback,   
                                                 queue_size=1, 
                                                 tcp_nodelay=True)
-         # 添加发布者
+
+        self.robot_hand_sub = rospy.Subscriber('/dexhand/state', 
+                                                JointState,
+                                                self.robot_hand_callback,   
+                                                queue_size=1, 
+                                                tcp_nodelay=True)
+
+        # 添加发布者
         self.robot_action_state_pub = rospy.Publisher('/robot_action_state', RobotActionState, queue_size=1)
 
         # Add service to execute arm actions
         self.execute_service = rospy.Service('/execute_arm_action', ExecuteArmAction, self.handle_execute_action)
         self._interrupt_service = rospy.Service('/interrupt_arm_traj', Trigger, self.handle_interrupt  )
-        self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
 
         # Store the file path base directory for actions
         # self.action_files_path = "/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_plan_arm_trajectory/script/action_files"
@@ -86,16 +103,43 @@ class ArmTrajectoryBezierDemo:
         rospy.spin()
 
 
-
     def sensors_data_raw_callback(self, msg):
+        """更新关节数据"""
+        self._last_joint_msg = msg
+
+        if not hasattr(self, "_last_hand_msg"):
+            dummy_hand = JointState()
+            dummy_hand.position = [0.0] * 12
+            self._last_hand_msg = dummy_hand
+
+        self._update_current_arm_joint_state(self._last_joint_msg, self._last_hand_msg)
+
+    def robot_hand_callback(self, msg):
+        """更新手部数据"""
+        left = msg.position[:6] if len(msg.position) >= 6 else [0] * 6
+        right = msg.position[6:12] if len(msg.position) >= 12 else [0] * 6
+
+        self._last_hand_msg = msg
+
+        if hasattr(self, "_last_joint_msg"):
+            self._update_current_arm_joint_state(self._last_joint_msg, self._last_hand_msg)
+
+    def _update_current_arm_joint_state(self, joint_msg, hand_msg):
+        """整合 joint_msg 和 hand_msg，更新 current_arm_joint_state"""
         if self.robot_class == KUAVO:
-            self.current_arm_joint_state = msg.joint_data.joint_q[12:26]
-            self.current_arm_joint_state = [round(pos, 2) for pos in self.current_arm_joint_state]
-            self.current_arm_joint_state.extend([0] * 14)
+            arm_part = list(joint_msg.joint_data.joint_q[12:26])
+            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+            head_part = list(joint_msg.joint_data.joint_q[-2:])
+            self.current_arm_joint_state = arm_part + hand_part + head_part
+
         elif self.robot_class == ROBAN:
-            self.current_arm_joint_state = msg.joint_data.joint_q[13:21]
-            self.current_arm_joint_state = [round(pos, 2) for pos in self.current_arm_joint_state]
-            self.current_arm_joint_state.extend([0] * 8)
+            arm_part = list(joint_msg.joint_data.joint_q[13:21])
+            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+            head_part = list(joint_msg.joint_data.joint_q[-2:])
+            waist_part = [joint_msg.joint_data.joint_q[0]]
+            self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
+
+        self.current_arm_joint_state = [round(v, 2) for v in self.current_arm_joint_state]
 
     def traj_callback(self, msg):
         if len(msg.points) == 0:
@@ -123,11 +167,12 @@ class ArmTrajectoryBezierDemo:
             self.joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
             self.joint_state.effort = [0] * 14
 
-            # 修复 hand 和 head 的数据类型
             self.hand_state.left_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[14:20]]  # 无符号整数
             self.hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
                                                 point.positions[20:26]]  # 无符号整数
+            
             self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:]]
+            
         elif self.robot_class == ROBAN:
             self.joint_state.name = [
                 "l_arm_pitch",
@@ -142,6 +187,16 @@ class ArmTrajectoryBezierDemo:
             self.joint_state.position = [math.degrees(pos) for pos in point.positions[:8]]
             self.joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:8]]
             self.joint_state.effort = [0] * 8
+
+            if len(point.positions) == self.ROBAN_TACT_LENGTH:
+
+                self.hand_state.left_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[8:14]]  # 无符号整数
+                self.hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
+                                                    point.positions[14:20]]  # 无符号整数
+                
+                self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
+
+                self.waist_state.data = [math.degrees(pos) for pos in point.positions[22:]]
 
     def call_change_arm_ctrl_mode_service(self, arm_ctrl_mode):
         result = True
@@ -189,7 +244,7 @@ class ArmTrajectoryBezierDemo:
             frame0["keyframe"] = 0
             frames.insert(0, frame0)
 
-        end_key = 29 if self.robot_class == KUAVO else 24
+        end_key = self.KUAVO_TACT_LENGTH + 1 if self.robot_class == KUAVO else self.ROBAN_TACT_LENGTH + 1
 
         for frame in frames:
             servos, keyframe, attribute = frame["servos"], frame["keyframe"], frame["attribute"]
@@ -231,22 +286,26 @@ class ArmTrajectoryBezierDemo:
                 end_time = next_frame[0][0]
                 if not found_start and end_time >= self.START_FRAME_TIME:
                     found_start = True
-                    p0 = np.array([0, self.current_arm_joint_state[key - 15]])
+                    p0 = np.array([0, self.current_arm_joint_state[key - 1]])
                     p3 = np.array([next_frame[0][0] - self.x_shift, next_frame[0][1]])
 
-                    # Calculate control points for smooth transition
+                    # 计算控制点，但使用更保守的方法避免过度摆动
+                    # 使用较短的控制杆长度以减少过渡期间的运动幅度
                     curve_length = np.linalg.norm(p3 - p0)
-                    p1 = p0 + curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the right
-                    p2 = p3 - curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the left
+                    # 减少控制点的影响范围，使过渡更加直接
+                    control_length = min(curve_length * 0.1, 0.5)  # 最大只允许0.5秒的控制影响
+                    
+                    p1 = p0 + control_length * np.array([1, 0])  # 左控制点
+                    p2 = p3 - control_length * np.array([1, 0])  # 右控制点
 
-                    # Create new frame
+                    # 创建新帧
                     frame1 = [
                         p0.tolist(),
                         p0.tolist(),
                         p1.tolist()
                     ]
 
-                    # Modify next_frame's left control point
+                    # 修改下一帧的左控制点
                     next_frame[1] = p2.tolist()
 
                     filtered_frames.append(frame1)
@@ -272,19 +331,81 @@ class ArmTrajectoryBezierDemo:
         rospy.loginfo(f"Delaying action completion state for {delay} seconds...")
         self._timer = rospy.Timer(rospy.Duration(delay), self._on_timer_trigger, oneshot=True)
 
+    def reset_robot_state(self):
+        if self.kuavo_control_scheme == "rl":
+            self.rl_reset_robot_state()
+        else:
+            # 做完动作之后恢复自然摆臂状态，并且手、头、腰部关节归位
+            self.call_change_arm_ctrl_mode_service(1)
+            self.hand_state.left_hand_position = [0] * 6
+            self.hand_state.right_hand_position = [0] * 6
+            self.control_hand_pub.publish(self.hand_state)
+            self.head_state.joint_data = [0] * 2
+            self.control_head_pub.publish(self.head_state)
+            self.waist_state.data = [0]
+            self.control_waist_pub.publish(self.waist_state)
+
+    def create_action_data(self, finish_time):
+        frames = [
+            {
+                "servos": [int(round(math.degrees(x))) for x in self.current_arm_joint_state],
+                "keyframe": 0,
+                "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(self.KUAVO_TACT_LENGTH)}
+            },
+            {
+                "servos": self.INIT_ARM_POS,
+                "keyframe": finish_time * 100,
+                "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(self.KUAVO_TACT_LENGTH)}
+            },
+        ]
+        return {"frames": frames}
+
+    def rl_reset_robot_state(self):
+        self.arm_flag = True
+        self.START_FRAME_TIME = 0
+        self.x_shift = self.START_FRAME_TIME  # 动态调整 x_shift
+        finish_time = 2
+        data = self.create_action_data(finish_time)
+
+        if self.kuavo_control_scheme == "rl":
+            finish_time += 1
+        self.END_FRAME_TIME = finish_time
+
+        action_data = self.add_init_frame(data["frames"])
+        filtered_data = self.filter_data(action_data)
+        bezier_request = self.create_bezier_request(filtered_data)
+
+        success = self.plan_arm_trajectory_bezier_curve_client(bezier_request)
+        if success:
+            rospy.loginfo("Arm trajectory planned successfully")
+            # 清除中断标志位，启动发布线程执行回归初始位的轨迹
+            self.interrupt_flag = False
+            threading.Thread(target=self.run).start()
+            # 在复位动作完成后，仅停止发布，不再触发再次复位
+            self._timer = rospy.Timer(
+                rospy.Duration(self.END_FRAME_TIME), self._on_reset_timer_trigger, oneshot=True
+            )
+            return ExecuteArmActionResponse(success=True, message="Action executed successfully")
+        else:
+            return ExecuteArmActionResponse(success=False, message="Failed to execute action")
+
     def _on_timer_trigger(self, event):
         self.running_action = False  # 结束 state=1 的发布
         self.publish_action_state(2)
         self.arm_flag = False
-        # 动作播放完成以后将动作模式归位
+        # 动作播放完成以后恢复机器人初始状态
         if self.arm_restore_flag:
-            self.call_change_arm_ctrl_mode_service(1)  # 做完动作之后恢复自然摆臂状态
-        # self.call_change_arm_ctrl_mode_service(1)
-        rospy.loginfo(f"After the action playback is complete, revert the action mode ")
+            self.reset_robot_state()
+        rospy.loginfo(f"After the action playback is complete, revert the robot initial state ")
 
     def stop_action(self):
         if self._timer:
             self._timer.shutdown()
+
+    def _on_reset_timer_trigger(self, event):
+        """复位动作结束后停止发布，避免递归复位。"""
+        self.arm_flag = False
+        rospy.loginfo("Reset trajectory finished. Stopping publishers.")
 
     def publish_running_action_state(self):
         """持续发布 state=1"""
@@ -346,11 +467,11 @@ class ArmTrajectoryBezierDemo:
         # 发布动作完成状态
         self.publish_action_state(2)   
         
-        # 恢复默认控制模式 
-        self.call_change_arm_ctrl_mode_service(1)   
-
         # 停止等待动作的timer
         self.stop_action()
+
+        # 恢复机器人初始状态
+        self.reset_robot_state()
         
         # 返回标准Trigger响应 
         return TriggerResponse(
@@ -360,13 +481,46 @@ class ArmTrajectoryBezierDemo:
 
     def handle_execute_action(self, req):
         action_name = req.action_name
-        self.call_change_arm_ctrl_mode_service(2)
 
         file_path = f"{self.action_files_path}/{action_name}.tact"
         data = self.load_json_file(file_path)
         if not data:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=f"Action file {action_name} not found")
+
+        robot_type_raw = data.get("robotType", None)
+        if robot_type_raw is None:
+            msg = "Action file missing required field: robotType"
+            rospy.logerr(msg)
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
+        try:
+            tact_robot_version = int(robot_type_raw)
+        except (TypeError, ValueError):
+            msg = f"Invalid robotType in action file: {robot_type_raw}"
+            rospy.logerr(msg)
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        # 版本兼容关系映射
+        version_compat_map = {
+            41: [41],
+            42: [42],
+            45: [43, 45, 46, 48, 49],
+            11: [11, 13, 14],
+            13: [11, 13, 14],
+            14: [11, 13, 14],
+        }
+        allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
+        if self.robot_version not in allowed_robot_versions:
+            msg = (
+                f"Version mismatch: tact {tact_robot_version} is incompatible with robot {self.robot_version}"
+            )
+            rospy.logerr(msg)
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        self.call_change_arm_ctrl_mode_service(2)
 
         # 获取初始帧时间
         self.arm_flag = True
@@ -407,12 +561,14 @@ class ArmTrajectoryBezierDemo:
         # while not rospy.is_shutdown():
         while self.arm_flag and not self.interrupt_flag:
             try:
-                if len(self.joint_state.position) == 0:
-                    continue
-                # self.call_change_arm_ctrl_mode_service(2)
-                self.kuavo_arm_traj_pub.publish(self.joint_state)
-                self.control_hand_pub.publish(self.hand_state)
-                self.control_head_pub.publish(self.head_state)
+                if len(self.joint_state.position) != 0:
+                    self.kuavo_arm_traj_pub.publish(self.joint_state)
+                if len(self.hand_state.right_hand_position) != 0 or len(self.hand_state.left_hand_position) != 0:
+                    self.control_hand_pub.publish(self.hand_state)
+                if len(self.head_state.joint_data) != 0:
+                    self.control_head_pub.publish(self.head_state)
+                if len(self.waist_state.data) != 0:
+                    self.control_waist_pub.publish(self.waist_state)
             except Exception as e:
                 rospy.logerr(f"Failed to publish arm trajectory: {e}")
             except KeyboardInterrupt:

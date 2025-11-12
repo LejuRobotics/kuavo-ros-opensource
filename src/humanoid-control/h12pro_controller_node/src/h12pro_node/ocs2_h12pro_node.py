@@ -173,8 +173,8 @@ class H12ToJoyControllerNode:
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
                 8: ChannelMapping(8, button_index=Config.BUTTON_MAPPING['B'], 
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
-                9: ChannelMapping(9, button_index=Config.BUTTON_MAPPING['BACK'], 
-                                is_button=True, trigger_value=-Config.H12_AXIS_RANGE_MAX),
+                9: ChannelMapping(9, button_index=Config.BUTTON_MAPPING['X'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
                 10: ChannelMapping(10, button_index=Config.BUTTON_MAPPING['A'], 
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
             }
@@ -721,7 +721,11 @@ class H12PROControllerNode:
                     if trigger in Config.VALID_STATES:
                         new_msg = h12proRemoteControllerChannel()
                         channels = Config.get_default_channels()
-                        channels[Config.TRIGGER_CHANNEL_MAP[trigger]] = Config.H12_AXIS_RANGE_MAX
+                        if self.robot_state_machine.state == "stance" and trigger == "stance" and source == "stance":
+                            channels[8] = Config.H12_AXIS_RANGE_MAX
+                        else:
+                            channels[Config.TRIGGER_CHANNEL_MAP[trigger]] = Config.H12_AXIS_RANGE_MAX
+
                         new_msg.channels = tuple(channels)
                         
                         self.h12_to_joy_node.update_channels_msg(msg=new_msg)

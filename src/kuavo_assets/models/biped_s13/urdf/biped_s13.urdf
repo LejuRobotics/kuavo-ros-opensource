@@ -183,6 +183,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+    	<origin xyz="0.015 0 0" rpy="0 0 0"/>
+	    <geometry>
+		    <box size="0.21 0.1 0.035"/>
+	    </geometry>
+    </collision>
   </link>
   <joint name="leg_l6_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -405,6 +411,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+    	<origin xyz="0.015 0 0" rpy="0 0 0"/>
+	    <geometry>
+		    <box size="0.21 0.1 0.035"/>
+	    </geometry>
+    </collision>
   </link>
   <joint name="leg_r6_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />

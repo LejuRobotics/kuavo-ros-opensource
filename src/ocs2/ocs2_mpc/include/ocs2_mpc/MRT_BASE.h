@@ -158,6 +158,9 @@ class MRT_BASE {
    */
   bool isRolloutSet() const { return rolloutPtr_ != nullptr; }
 
+
+  bool isPolicyUpdated() const { return activeCommandPtr_ != nullptr && activePrimalSolutionPtr_ != nullptr && activePerformanceIndicesPtr_ != nullptr; }
+
   /**
    * Adds an MRT observer to the policy update process
    */

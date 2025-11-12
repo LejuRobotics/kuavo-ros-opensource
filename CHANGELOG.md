@@ -3,11 +3,35 @@
 ## Breaking Changes
 
 ## 文档相关
+- 优化运动控制 API 文档，补充revo2灵巧手以及末端相关话题/服务的约束条件，[文档链接](./docs/运动控制API.md)
+- PICO VR 全身遥操作补充使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- 补充桌面端节点服务开机自启动使用说明，[文档链接](./src/manipulation_nodes/planarmwebsocketservice/README.md)
+- PICO VR 更新数据格式约定文档，添加 Protobuf 数据结构及服务接口说明，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/docs/api_docs.md)
+- 新增 5 代轮臂 VR 遥操作相关文档, [文档链接](./src/manipulation_nodes/motion_capture_ik/README_VR_MPC.md)
 - 新增 Roban 打太极使用文档，[文档链接](./src/demo/csv2body_demo/Roban太极动作启动说明.md)
 - 新增 Roban 上楼梯使用文档，[文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban上楼梯说明.md)
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- Kuavo Humanoid Websocket  SDK 增加下蹲接口保护、手臂碰撞检测功能
+- 新增根据限位校准手臂和头部零点的功能，[文档链接](./readme.md)
+- 支持通过`-DUSE_LEJU_DDS=ON`编译选项使用 LEJU DDS 进行控制通信
+- Kuavo Quest3 VR 遥操作支持右摇杆控制单步大转向功能，需通过`use_step_turning:=true`开启
+- Roban2 遥控器动作按键支持在桌面软件设置自定义动作和自定义音乐功能
+- Roban2 支持全新的手臂接线方式，左右手臂各连接一条 Can 总线，并连接对应的末端执行器，控制频率 500 Hz
+- Roban2 新增支持基于 Can 通讯的 Revo2 灵巧手，需要刷对应 Can 版的固件
+- Roban2 新增配置文件`~/.config/lejuconfig/CanbusWiringType.ini`用来表示 Can 总线的接线方式，dual_bus 表示双总线
+- Roban2 新增配置文件`~/.config/lejuconfig/canbus_device_cofig.yaml`用于 Can 模块与总线上的设备关系描述
+- Kuavo Humanoid SDK 支持机器人版本14的关节名称处理
+- 更新强脑灵巧手SDK版本从`0.4.4`到`0.9.1`版本可支持自定义can协议
+- Kuavo Humanoid SDK  新增原子策略行为树版本搬箱子
+- Tact 动作文件适配 Roban 机器人，在原先基础上支持灵巧手, 头和腰部的控制描述
+- Kuavo Humanoid SDK 移除重复头部控制和手臂控制类的接口，这些接口从`1.2.2`版本开始废弃，并计划在 2026-06-30 移除
+- Kuavo Humanoid SDK 完善接口阈值保护以及补充说明文档，[文档链接](./src/kuavo_humanoid_sdk/docs/markdown/pages/api_reference.md)
+- 新增 Roban2.1 机器人模型，机器人版本号`ROBOT_VERSION=14`
+- 新增实物机器人未设置 CPU 隔核参数或系统配置时，程序立即退出并警告提示
+- 新增支持将程序日志输出重定向到h12接收机串口，[文档链接](./src/humanoid-control/h12pro_controller_node/H12_LOG_Instruction.md)
+- 桌面端软件新增启动、站立、停止机器人等 WebSocket API
 - Roban 机器人走斜坡功能添加自动步态行走，楼梯积木块参数更新
 - PICO VR 更新预设搬运箱子的末端力参数配置
 - 增加 h12 遥控器控制RL实现trot踏步功能，并取消stance->stance状态机转换
@@ -29,6 +53,43 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复 Roabn2 实物无法运行问题
+- Quest3 调整切换步态逻辑,去除对左手按钮的限制
+- 修复半身模式下机器人手臂抖动的问题
+- 修复桌面端软件无法在 Roban2 机器人站立状态下点击运行功能
+- 修复 14 版本 Roabn2 机器人在 gazebo 仿真初始化控制崩溃
+- Kuavo Humanoid SDK 修复圆柱体识别功能，可识别预定指定颜色的圆柱体
+- 修复单步控制接口的动态R矩阵设置，增加是否全支撑模式的判断，避免摔倒
+- 修复 Quest3 单步转向保护，避免区间跳变引发抽搐摔倒
+- 修正 Roban2.1 机器 双 Can 配置文件中电机方向不对问题、增加对应的硬件电机标定和方向识别工具
+- hotfix: 修复因手臂电机控制模块初始化未处理电机返回的严重故障码而出现位置异常值，导致站立抽搐、乱跳问题
+- 修复桌面端软件运行动作，机器人双手会先摆动一下，再执行时间轴0f处的动作帧的问题
+- 修复 Roban2 手臂正逆运动学案例无法加载手臂末端 frame 错误问题
+- 修复仿真执行手势动作无法获取执行状态问题
+- Roban2 改善全速行走，和行走容易打滑导致向右倾斜问题
+- 修复 Roban2 视觉回传打开黑屏问题并在视频回传的图像上绘制人脸识别结果
+- 通过限制手臂工作空间，解决 Roban2 大幅度摆动复位会抖动的问题
+- 修复 VR 半身模式下，开启和退出低延迟模式时手臂会抽动问题
+- 修复使用`/play_music`服务播放音频时无法获取音频是否已播放结束状态问题
+- 修复在 VR 视频回传功能，相机的部分参数错误会导致 launch 无法正常启动问题
+- 修复 kuavo 未配置 cmdvelLinearZLimit 导致初始化失败
+- 修复强脑SDK升级到`0.9.1`函数符号冲突导致无法控制 Kuavo灵巧手问题
+- 修复 Roban2.1 站立状态吊起机器会失控乱甩
+- 修复Roban2 revo2 灵巧手的位置控制和状态的范围(0~1000 => 0~100)
+- Kuavo Humanoid SDK 修复本地 install.sh 脚本安装超时问题
+- 修复`humanoid_controller/real_launch_status`获取机器状态服务，初始状态错误问题
+- 修复当获取灵巧手手指状态失败时，手指状态话题发布一些错误数据的问题
+- 键盘控制手臂移动功能优化, 支持双手控制及自由切换, 修复手臂移动累计误差的问题
+- 修复VR过程中可以通过侧扳机固定手臂功能
+- 修复机器初始化时两个夹爪张开角度可能不一致问题
+- 修复 Roban2.1 左右横移时双脚会相碰的问题
+- Kuavo Humanoid SDK 修复导入未定义模块导致无法运行问题
+- 修复日志自动清理功能会删除空目录的问题
+- 修复48/49版本带灵巧手版本的mujoco仿真灵巧手大拇指关节顺序错误和手臂控制错误问题
+- 修复 VR 遥操作控制夹爪可能会卡死问题
+- 修复灵巧手获取状态线程潜在的程序崩溃问题
+- 修改手臂外部控制直接到wbc层的关节逻辑,差分获取速度对齐再下发
+- 修复调整关节零点位置、获取关节零点位置和硬件就绪等接口丢失问题
 - 修复 Roban机器人 Quest VR 手臂跟随问题并支持腰部控制
 - 修复大幅度动手是机器人抖动问题
 - Quest VR 在RL模式下，切换手臂控制模式时进行插值避免手臂初始位置瞬间对齐人手问题
@@ -60,6 +121,11 @@
 - 修复 Quest3 打开`control_torso`控制躯干模式时躯干会下蹲到最低问题
 
 ## 其他改进
+- 增加 motorevo_tool.sh 用于 Roban2 手臂电机方向辨识和零点标定， [工具链接](./tools/check_tool/motorevo_tool.sh)
+- 新增硬件工具: canbus_config.sh 用于配置 Roban2 Can 总线配置，[工具链接](./tools/check_tool/canbus_config.sh)
+- 调整灵巧手 SDK 日志级别避免终端过多打印刷屏
+- 新增工具: 编译蓝牙内核模块脚本，[使用文档链接](./tools/bluetooth_tool/README.md)
+- 新增工具: 将电机正反转、零偏和限位等数据打包成约定的json文件，[工具文档链接](./tools/get_joint_data/README.md)
 - 增加大小臂长度以及大小臂的比例分析工具，用于分析quest3设备机器人手臂表现不同的问题，[工具文档链接](./tools/vr_test_tool/README.md)
 - 转换工具支持将 bag 中 sensors_data_raw 数据转换成末端执行器位姿数据，[工具文档链接](./tools/extract_camera_pose/howto-kuavo-pose-calculator.md)
 - 优化Quest IK 遥操控制，提高IK迭代次数并默认关闭运动学MPC防止过度资源消耗 

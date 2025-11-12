@@ -71,6 +71,15 @@ cd "$REPO_ROOT"
 source /opt/ros/noetic/setup.bash --extend
 source devel/setup.bash --extend
 
+# 启动 h12pro_controller_node
+roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch &
+CONTROLLER_PID=$!
+
+# 检测 h12pro_controller_node 启动
+echo "正在启动 h12pro_controller_node..."
+sleep 3
+echo "h12pro_controller_node 已启动。"
+
 # 启动 tact 动作文件执行节点
 roslaunch humanoid_plan_arm_trajectory humanoid_plan_arm_trajectory.launch &
 PLAN_PID=$!
@@ -114,11 +123,18 @@ else
     done
 fi
 
+
+
 # 启动 websocket 服务节点
-roslaunch planarmwebsocketservice plan_arm_action_websocket_server.launch robot_type:=ocs2
+echo "正在启动 websocket 服务节点..."
+roslaunch planarmwebsocketservice plan_arm_action_websocket_server.launch robot_type:=ocs2 camera_type:=$CAMERA_TYPE
 
 # 定义退出时的清理操作
 cleanup() {
+    if [[ -n "$CONTROLLER_PID" ]] && kill -0 "$CONTROLLER_PID" 2>/dev/null; then
+        kill "$CONTROLLER_PID"
+        echo "已杀掉 h12pro_controller_node 进程 $CONTROLLER_PID"
+    fi
     if [[ -n "$PLAN_PID" ]] && kill -0 "$PLAN_PID" 2>/dev/null; then
         kill "$PLAN_PID"
         echo "已杀掉进程 $PLAN_PID"

@@ -17,7 +17,8 @@ from std_msgs.msg import Float32MultiArray
 from visualization_msgs.msg import MarkerArray
 from geometry_msgs.msg import Point
 from enum import Enum
-
+from nav_msgs.msg import Odometry
+import copy
 SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
 REMOTE_CONFIG_PATH = os.path.join(SCRIPT_PATH, "remote-config.json")
 TIME_OUT = 10
@@ -81,21 +82,21 @@ class VisionBasedStairClimbingPlanner:
         )
         
         # 创建订阅器
-        self.subscriber = rospy.Subscriber(
-            '/leju/odom/foot_pose_with_vision_array1',
-            footPoseWithVisionArray,
-            self.vision_callback,
+        # self.subscriber = rospy.Subscriber(
+        #     '/leju/odom/foot_pose_with_vision_array',
+        #     footPoseWithVisionArray,
+        #     self.vision_callback,
+        #     queue_size=1
+        # )
+
+        # 创建楼梯边界订阅器
+        self.stairs_boundary_sub = rospy.Subscriber(
+            '/leju/fused_hull_boundry_fuse_elevation',
+            MarkerArray,
+            self.stairs_boundary_callback,
             queue_size=1
         )
 
-        # 创建楼梯边界订阅器
-        # self.stairs_boundary_sub = rospy.Subscriber(
-        #     '/leju/fused_hull_boundry_fuse_elevation',
-        #     MarkerArray,
-        #     self.stairs_boundary_callback,
-        #     queue_size=1
-        # )
-        
         self.modeSchedule_sub = rospy.Subscriber(
             'modeSchedule',
             kuavoModeSchedule,
@@ -103,6 +104,9 @@ class VisionBasedStairClimbingPlanner:
             queue_size=1
         )
 
+        self.hull_sub = rospy.Subscriber('/polygon_new_markers', MarkerArray, self.markerArrayCallback, queue_size=1)
+        self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odomCallback, queue_size=1)
+        
         # 初始化变量
         self.stair_info = None
         self.is_planning = False
@@ -113,8 +117,13 @@ class VisionBasedStairClimbingPlanner:
         self.last_points = None
         self.number_of_no_receive = 0
         self.last_foot_traj = []
+        self.last_foot_idx_traj = []
         self.last_swing_trajectories = []
         self.kuavoModeSchedule = kuavoModeSchedule()
+        self.base_link_point = None
+        self.last_left_foot_pos = None
+        self.last_right_foot_pos = None
+        self.is_next_step_left = None
         
         # 等待服务
         rospy.wait_for_service('/humanoid/mpc/enable_base_pitch_limit')
@@ -126,6 +135,10 @@ class VisionBasedStairClimbingPlanner:
         
         if self.debug_mode:
             rospy.loginfo("Debug mode enabled - trajectory will not be published")
+
+    def odomCallback(self, msg):
+        """处理odom消息，获取base_link相对于odom的位姿"""
+        self.base_link_point = msg.pose.pose.position
 
     def yaw_callback(self, msg):
         """处理接收到的Yaw角消息，去除极值后取平均"""
@@ -315,23 +328,10 @@ class VisionBasedStairClimbingPlanner:
                         foot_traj=foot_traj,
                         torso_traj=torso_traj,
                         swing_trajectories=swing_trajectories,
-                        modify_current_x=points[0][0] - distance_to_first_step # 可以在上楼梯之前前后行走
+                        # modify_current_x= 0
+                        modify_current_x = self.base_link_point.x if self.base_link_point is not None else 0.0
                     )
             
-            # 规划上楼梯动作
-            time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = self.planner.plan_up_stairs_world(
-                num_steps=num_steps+1,
-                time_traj=time_traj,
-                foot_idx_traj=foot_idx_traj,
-                foot_traj=foot_traj,
-                torso_traj=torso_traj,
-                swing_trajectories=swing_trajectories,
-                points = points,                
-                last_points = self.last_points,
-                last_foot_traj=self.last_foot_traj,
-                last_swing_trajectories=self.last_swing_trajectories
-            )
-
             current_index = -1
             for i in range(len(self.kuavoModeSchedule.eventTimes)):
                 if self.kuavoModeSchedule.eventTimes[i] >= self.kuavoModeSchedule.currentTime:
@@ -339,53 +339,181 @@ class VisionBasedStairClimbingPlanner:
                     break
 
             insert_time = -1
+            insert_points = []
             if current_index != -1:
-                for i in range(current_index, len(self.kuavoModeSchedule.eventTimes)):
-                    is_ss = False
-                    is_same_footPose = False
-                    is_continuous_ss = False
+                find_insert = False
+                for p in range(len(points)):
+                    for i in range(current_index, len(self.kuavoModeSchedule.eventTimes)):
+                        is_ss = False
+                        is_same_footPose = False
+                        is_continuous_ss = False
+                        is_ss_all_after = True
+                        is_restart = False
 
-                    if self.kuavoModeSchedule.modeSequence[i] == ModeNumber.SS.value:
-                        is_ss = True
+                        if self.kuavoModeSchedule.modeSequence[i] == ModeNumber.SS.value:
+                            is_ss = True
 
-                    if i + 2 < len(self.kuavoModeSchedule.eventTimes):
-                        if abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[0] - foot_traj[0][0]) < 0.1 and \
-                           abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[2] - foot_traj[0][2]) < 0.05:
-                            is_same_footPose = True
-                        if self.kuavoModeSchedule.modeSequence[i+2] == ModeNumber.SS.value and \
-                           abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[0] - self.kuavoModeSchedule.footPoseSequence[i].footPose6D[0]) < 1e-9 and \
-                           abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[2] - self.kuavoModeSchedule.footPoseSequence[i].footPose6D[2]) < 1e-9 and \
-                           foot_traj[0][0] > self.kuavoModeSchedule.footPoseSequence[i].footPose6D[0] and foot_traj[0][2] > self.kuavoModeSchedule.footPoseSequence[i].footPose6D[2]:
-                            is_continuous_ss = True
+                        if i + 2 < len(self.kuavoModeSchedule.eventTimes):
+                            if abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[0] - points[p][0]) < 0.1 and \
+                            abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[2] - points[p][2]) < 0.05 and \
+                            abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[0] - self.kuavoModeSchedule.footPoseSequence[i].footPose6D[0]) > 1e-9 and \
+                            abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[2] - self.kuavoModeSchedule.footPoseSequence[i].footPose6D[2]) > 1e-9 and \
+                            len(points) > 1:
+                                is_same_footPose = True
+                                # is_same_footPose = False
 
-                    if self.first_received:
-                        insert_time = 0
-                        break
+                            if len(self.last_foot_traj) > 0:
+                                if self.kuavoModeSchedule.modeSequence[i+2] == ModeNumber.SS.value and \
+                                abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[0] - self.kuavoModeSchedule.footPoseSequence[i].footPose6D[0]) < 1e-9 and \
+                                abs(self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[2] - self.kuavoModeSchedule.footPoseSequence[i].footPose6D[2]) < 1e-9 and \
+                                points[p][0] > self.kuavoModeSchedule.footPoseSequence[i].footPose6D[0] and points[p][2] > self.kuavoModeSchedule.footPoseSequence[i].footPose6D[2] and \
+                                (points[p][0] - self.last_foot_traj[-1][0]) > 0.2 and (points[p][2] - self.last_foot_traj[-1][2]) > 0.1 and \
+                                self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[0] != 0 and self.kuavoModeSchedule.footPoseSequence[i+2].footPose6D[2] != 0:
+                                    is_continuous_ss = True
+                                    # is_continuous_ss = False
 
-                    if is_ss and (is_same_footPose or is_continuous_ss):
-                        insert_time = self.kuavoModeSchedule.eventTimes[i]
+                        if is_same_footPose == False and is_continuous_ss ==False and self.first_received==False and len(self.last_foot_traj) > 0:
+                            for final_i in range(i,len(self.kuavoModeSchedule.eventTimes)):
+                                if self.kuavoModeSchedule.modeSequence[final_i] != ModeNumber.SS.value or self.kuavoModeSchedule.footPoseSequence[final_i].footPose6D[0] != 0 or \
+                                self.kuavoModeSchedule.footPoseSequence[final_i].footPose6D[0] != 0 :
+                                    is_ss_all_after = False
+                                    break
+                            if is_ss_all_after:
+                                if (points[p][0] - self.last_foot_traj[-1][0]) > 0.2 and (points[p][0] - self.last_foot_traj[-1][0]) < 0.35 and \
+                                (points[p][2] - self.last_foot_traj[-1][2]) > 0.1 and (points[p][2] - self.last_foot_traj[-1][2]) < 0.18:
+                                    is_restart = True
+                                    # is_restart = False
+
+                        erase_index = i
+                        if is_same_footPose is True and is_ss is True and self.kuavoModeSchedule.footPoseSequence[i].footPose6D[0] == 0 and \
+                            self.kuavoModeSchedule.footPoseSequence[i].footPose6D[2] == 0:
+                            for modify_i in range(i-1, -1, -1):
+                                if self.kuavoModeSchedule.modeSequence[modify_i] == ModeNumber.SS.value and \
+                                    self.kuavoModeSchedule.footPoseSequence[modify_i].footPose6D[0] != 0 and \
+                                    self.kuavoModeSchedule.footPoseSequence[modify_i].footPose6D[2] != 0:
+                                    erase_index = modify_i
+                                    break
+
+                        if self.first_received:
+                            insert_time = 0
+                            find_insert = True
+                            break
+
+                        if is_ss and (is_same_footPose or is_continuous_ss or is_restart):
+                            insert_time = self.kuavoModeSchedule.eventTimes[erase_index]
+                            find_insert = True
+                            break
+                    
+                    if find_insert:
+                        for k in range(p,len(points)):
+                            insert_points.append(points[k].copy())
+                        if not self.first_received:
+                            if len(self.last_foot_traj) > 0:
+                                is_find_left = False
+                                is_find_right = False
+                                first_valid_foot_index = -1 
+                                if is_same_footPose:
+                                    for m in range(len(self.last_foot_traj)):
+                                        if abs(self.last_foot_traj[m][0] - points[p][0]) < 0.1 and abs(self.last_foot_traj[m][2] - points[p][2]) < 0.05:
+                                            for n in range(m-1, -1, -1):
+                                                if is_find_left and is_find_right:
+                                                    break
+                                                if self.last_foot_idx_traj[n] == 0 and not is_find_left:
+                                                    self.last_left_foot_pos = self.last_foot_traj[n]
+                                                    is_find_left = True
+                                                if self.last_foot_idx_traj[n] == 1 and not is_find_right:
+                                                    self.last_right_foot_pos = self.last_foot_traj[n]
+                                                    is_find_right = True
+                                                if first_valid_foot_index == -1 and (self.last_foot_idx_traj[n] == 0 or self.last_foot_idx_traj[n] == 1):
+                                                    first_valid_foot_index = self.last_foot_idx_traj[n]
+                                            if first_valid_foot_index ==0:
+                                                self.is_next_step_left = False
+                                            elif first_valid_foot_index ==1:
+                                                self.is_next_step_left = True
+                                            break
+                                elif is_continuous_ss:
+                                    is_first_index = True
+                                    for n in range(len(self.last_foot_traj)-1, -1, -1):
+                                        if is_find_left and is_find_right:
+                                            break
+                                        if self.last_foot_idx_traj[n] == 0 and not is_find_left and not is_first_index:
+                                            self.last_left_foot_pos = self.last_foot_traj[n]
+                                            is_find_left = True
+                                        if self.last_foot_idx_traj[n] == 1 and not is_find_right and not is_first_index:
+                                            self.last_right_foot_pos = self.last_foot_traj[n]
+                                            is_find_right = True
+                                        if first_valid_foot_index == -1 and (self.last_foot_idx_traj[n] == 0 or self.last_foot_idx_traj[n] == 1) and not is_first_index:
+                                            first_valid_foot_index = self.last_foot_idx_traj[n]
+                                        if self.last_foot_idx_traj[n] == 0 or self.last_foot_idx_traj[n] == 1:
+                                            is_first_index = False
+                                    if first_valid_foot_index ==0:
+                                        self.is_next_step_left = False
+                                    elif first_valid_foot_index ==1:
+                                        self.is_next_step_left = True
+                                elif is_restart:
+                                    for n in range(len(self.last_foot_traj)-1, -1, -1):
+                                        if is_find_left and is_find_right:
+                                            break
+                                        if self.last_foot_idx_traj[n] == 0 and not is_find_left:
+                                            self.last_left_foot_pos = self.last_foot_traj[n]
+                                            is_find_left = True
+                                        if self.last_foot_idx_traj[n] == 1 and not is_find_right:
+                                            self.last_right_foot_pos = self.last_foot_traj[n]
+                                            is_find_right = True
+                                        if first_valid_foot_index == -1 and (self.last_foot_idx_traj[n] == 0 or self.last_foot_idx_traj[n] == 1):
+                                            first_valid_foot_index = self.last_foot_idx_traj[n]
+                                    if first_valid_foot_index ==0:
+                                        self.is_next_step_left = False
+                                    elif first_valid_foot_index ==1:
+                                        self.is_next_step_left = True
+                        print(f"last left foot pos: {self.last_left_foot_pos}, last right foot pos: {self.last_right_foot_pos}, points[p]:{points[p]}, is_next_step_left: {self.is_next_step_left}")
+                        # 规划上楼梯动作
+                        time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = self.planner.plan_up_stairs_world(
+                            num_steps=len(insert_points)+1,
+                            time_traj=time_traj,
+                            foot_idx_traj=foot_idx_traj,
+                            foot_traj=foot_traj,
+                            torso_traj=torso_traj,
+                            swing_trajectories=swing_trajectories,
+                            points = insert_points,
+                            last_points = self.last_points,
+                            last_foot_traj=self.last_foot_traj,
+                            last_swing_trajectories=self.last_swing_trajectories,
+                            first_receive= self.first_received,
+                            last_left_foot_pos = self.last_left_foot_pos,
+                            last_right_foot_pos = self.last_right_foot_pos,
+                            is_next_step_left = self.is_next_step_left
+                        )
                         break
             else:
                 rospy.logwarn("No valid current index found in mode schedule")
 
+            print(f"Current time: {self.kuavoModeSchedule.currentTime:.2f}")
             print(f"Insert time: {insert_time}")
             for i in range(len(self.kuavoModeSchedule.eventTimes)):
                 print(f"Mode {self.kuavoModeSchedule.modeSequence[i]} at time {self.kuavoModeSchedule.eventTimes[i]:.2f} with foot pose {self.kuavoModeSchedule.footPoseSequence[i].footPose6D}")
-
-            if (time_traj is not None):
-                for i,t in enumerate(time_traj):
-                    print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
-            
+            if insert_time != -1:
+                if (time_traj is not None):
+                    for i,t in enumerate(time_traj):
+                        print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
+        
             # 发布轨迹
             if insert_time != -1:
                 self.publish_world_trajectory(time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories, insert_time)
+                # self.publish_world_trajectory(insert_time_traj, insert_foot_idx_traj, insert_foot_traj, insert_torso_traj, insert_swing_trajectories, insert_time)
                 self.last_foot_traj = foot_traj
                 self.last_swing_trajectories = swing_trajectories
+                self.last_foot_idx_traj = foot_idx_traj
                 # 等待轨迹执行完成
                 self.wait_for_trajectory_completion(time_traj)
                 
                 # self.planning_done = True
                 self.first_received = False
+
+                if self.last_points is None:
+                    self.last_points = []
+                self.last_points.clear()
+                self.last_points = points
                 rospy.loginfo("Stair climbing planning completed")
             else:
                 rospy.logwarn("No valid insert time found, skipping trajectory publication")
@@ -440,7 +568,7 @@ class VisionBasedStairClimbingPlanner:
             rospy.loginfo(f"Waiting {total_time:.2f} seconds for trajectory execution to complete...")
             
             # 等待轨迹执行完成
-            rospy.sleep(total_time * 0.5)
+            # rospy.sleep(total_time * 0.1)
             # rospy.sleep(2)
             rospy.loginfo("Trajectory execution completed, exiting...")
             
@@ -472,10 +600,13 @@ class VisionBasedStairClimbingPlanner:
 
         # 存储每个平面中x坐标最小的点
         min_points_per_plane = []
+        points_per_plane =[]
 
         for marker in msg.markers:
-            first = True
+            min_first = True
+            max_first = True
             min_x = 0.0
+            max_x = 0.0
             center_pt = Point()
             aeverage_z = 0.0
             count = 0
@@ -483,18 +614,27 @@ class VisionBasedStairClimbingPlanner:
                 count += 1
                 aeverage_z += pt.z
                 # 找到x坐标最小的点并计算楼梯前沿中心
-                if first or pt.x < min_x:
+                if min_first or pt.x < min_x:
                     min_x = pt.x
                     center_pt = pt
-                    first = False
+                    min_first = False
+
+                if max_first or pt.x > max_x:
+                    max_x = pt.x
+                    max_first = False
+
             if count > 0:
                 aeverage_z /= count
                 center_pt.z = aeverage_z
 
-            if not first:
+            if not min_first and not max_first:
                 # rospy.loginfo("Plane ID %d: Minimum x: %.3f at (%.3f, %.3f, %.3f)", 
                 #             marker.id, min_x, center_pt.x, center_pt.y, center_pt.z)
-                min_points_per_plane.append((marker.id, center_pt))
+                if max_x - min_x > 0.24:
+                    min_points_per_plane.append((marker.id, center_pt))
+                    points_per_plane.append(center_pt)
+                else:
+                    rospy.logwarn("Plane ID %d: Minimum x distance is too small, ignoring this plane", marker.id)
             else:
                 rospy.logwarn("Plane ID %d: No points found!", marker.id)
 
@@ -505,18 +645,43 @@ class VisionBasedStairClimbingPlanner:
         #                 plane_id, center_pt.x, center_pt.y, center_pt.z)
 
         # 获取楼梯信息
-        points = []
-        for _, center_pt in min_points_per_plane:
-            if abs(center_pt.z) > 0.03:
-                points.append(np.array([center_pt.x + 0.11, 0, center_pt.z]))
+        # points = []
+        # for _, center_pt in min_points_per_plane:
+        #     if abs(center_pt.z) > 0.03:
+        #         points.append(np.array([center_pt.x + 0.11, 0, center_pt.z]))
 
                 
+        # 获取楼梯信息
+        points = []
+        for i in range(len(points_per_plane)):
+            center_pt = points_per_plane[i]
+            if abs(center_pt.z) > 0.03:
+                if i == 0:
+                    points.append(np.array([center_pt.x + 0.1, 0, center_pt.z]))
+                else:
+                    if (center_pt.x - points_per_plane[i-1].x) < 0.4 and (center_pt.z - points_per_plane[i-1].z) < 0.21:
+                        points.append(np.array([center_pt.x + 0.1, 0, center_pt.z]))
+
         if len(points) == 0:
             rospy.logwarn("No valid stair steps found")
             return
+        
+        if self.first_received:
+            if points[0][2] > 0.21 or points[0][2] < 0.03:
+                rospy.logwarn("First step height is not in the expected range, ignoring this detection")
+                print("First step height:", points[0][2])
+                return
+
+        for i in range(len(points)):
+            if i > 0:
+                if points[i][0] - points[i-1][0] < 0.2 or points[i][0] - points[i-1][0] > 0.4 or \
+                   points[i][2] - points[i-1][2] < 0.08 or points[i][2] - points[i-1][2] > 0.21:
+                    rospy.logwarn("Distance between steps is not in the expected range, ignoring this detection")
+                    print(f"Step {i}: x diff {points[i][0] - points[i-1][0]:.3f}, z diff {points[i][2] - points[i-1][2]:.3f}")
+                    return
 
         if self.last_points is not None:
-            if points[0][2] - self.last_points[len(self.last_points)-1][2] > 0.18:
+            if points[0][2] - self.last_points[len(self.last_points)-1][2] > 0.21:
                 rospy.logwarn("Height difference between final step of last points and first step of current points is too large, ignoring this detection")
                 return
             if abs(points[0][2] - self.last_points[0][2]) < 0.05 or abs(points[len(points)-1][2] - self.last_points[len(self.last_points)-1][2]) < 0.05:
@@ -525,7 +690,8 @@ class VisionBasedStairClimbingPlanner:
 
         for i in range(len(points)):
             if i > 0:
-                if points[i][0] - points[i-1][0] > 0.4 or points[i][2] - points[i-1][2] > 0.18:
+                if points[i][0] - points[i-1][0] > 0.4 or points[i][2] - points[i-1][2] > 0.21:
+                    rospy.logwarn("Distance between steps is too large, ignoring this detection")
                     return
 
         self.stair_info = points
@@ -556,18 +722,139 @@ class VisionBasedStairClimbingPlanner:
         
         # 开始规划
         self.plan_stair_climbing(distance_to_first_step, points)
-        if self.last_points is None:
-            self.last_points = []
-        self.last_points.clear()
-        self.last_points = points
         
         # 标记规划完成
         # self.planning_done = True
         rospy.loginfo("Planning and publishing completed, waiting for Ctrl+C to exit...")
+        print()
 
     def kuavoModeScheduleCallback(self, msg):
         """处理模式调度消息"""
         self.kuavoModeSchedule = msg
+
+    def markerArrayCallback(self, msg):
+        """处理视觉识别结果"""
+        # 设置标志位，表示已收到视觉数据
+        self.vision_received = True
+        
+        if self.is_planning or self.planning_done:
+            return
+
+        """处理楼梯边界信息，获取每个平面中x坐标最小的点"""
+        if not msg.markers:
+            rospy.logwarn("Received empty stairs boundary data")
+            return
+        
+        points_per_plane = []
+        for marker in msg.markers:
+            if len(marker.points) < 5:
+                continue  # 至少4个点 + 闭合点
+
+            # 前4个点，去掉闭合点
+            pts = marker.points[:4]
+
+            # 1️⃣ 按 x 坐标升序排序
+            pts_sorted = sorted(pts, key=lambda p: p.x)
+
+            # 取 x 最小的两个点
+            pt1 = pts_sorted[0]
+            pt2 = pts_sorted[1]
+
+            # 计算 x, y 平均值
+            front_center = Point()
+            front_center.x = (pt1.x + pt2.x) / 2.0
+            front_center.y = (pt1.y + pt2.y) / 2.0
+
+            # 计算后边界的平均x值
+            back_center_x = (pts_sorted[2].x + pts_sorted[3].x) / 2.0
+
+            # 如果前边界到后边界的距离小于0.2米，去除这个平面
+            if back_center_x - front_center.x < 0.2:
+                rospy.logwarn("Distance between front and back boundary is less than 0.2m, ignoring this plane")
+                print(f"Marker_id: {marker.id} Distance: {back_center_x - front_center.x:.3f}m")
+                continue
+
+            # 计算 z 均值
+            z_sum = sum(p.z for p in pts)
+            front_center.z = z_sum / len(pts)
+            points_per_plane.append((front_center))
+
+        # 获取楼梯信息
+        points = []
+        for i in range(len(points_per_plane)):
+            center_pt = points_per_plane[i]
+            if abs(center_pt.z) > 0.03:
+                if i == 0:
+                    points.append(np.array([center_pt.x + 0.09, 0, center_pt.z]))
+                else:
+                    if (center_pt.x - points_per_plane[i-1].x) < 0.4 and (center_pt.z - points_per_plane[i-1].z) < 0.18:
+                        points.append(np.array([center_pt.x + 0.09, 0, center_pt.z]))
+
+        if len(points) == 0:
+            rospy.logwarn("No valid stair steps found")
+            return
+        
+        if self.first_received:
+            if points[0][2] > 0.18 or points[0][2] < 0.03:
+                rospy.logwarn("First step height is not in the expected range, ignoring this detection")
+                print("First step height:", points[0][2])
+                return
+
+        for i in range(len(points)):
+            if i > 0:
+                if points[i][0] - points[i-1][0] < 0.2 or points[i][0] - points[i-1][0] > 0.4 or \
+                   points[i][2] - points[i-1][2] < 0.08 or points[i][2] - points[i-1][2] > 0.18:
+                    rospy.logwarn("Distance between steps is not in the expected range, ignoring this detection")
+                    print(f"Step {i}: x diff {points[i][0] - points[i-1][0]:.3f}, z diff {points[i][2] - points[i-1][2]:.3f}")
+                    return
+
+        if self.last_points is not None:
+            if points[0][2] - self.last_points[len(self.last_points)-1][2] > 0.18:
+                rospy.logwarn("Height difference between final step of last points and first step of current points is too large, ignoring this detection")
+                return
+            if abs(points[0][2] - self.last_points[0][2]) < 0.05 or abs(points[len(points)-1][2] - self.last_points[len(self.last_points)-1][2]) < 0.05:
+                rospy.logwarn("Height difference between first step or final step is too small, ignoring this detection")
+                return
+
+        for i in range(len(points)):
+            if i > 0:
+                if points[i][0] - points[i-1][0] > 0.4 or points[i][2] - points[i-1][2] > 0.18:
+                    rospy.logwarn("Distance between steps is too large, ignoring this detection")
+                    return
+
+        self.stair_info = points
+        rospy.loginfo(f"Received stair information: {len(self.stair_info)} steps")
+        
+        # 打印接收到的坐标
+        for i, point in enumerate(points):
+            rospy.loginfo(f"  台阶 {i+1}: ({point[0]:.3f}, {point[1]:.3f}, {point[2]:.3f})")
+        
+        # 获取第一个台阶在base_link坐标系下的位置
+        first_step_base_link = self.transform_point_to_base_link(points[0])
+        second_step_base_link = self.transform_point_to_base_link(points[1]) if len(points) > 1 else None
+        if first_step_base_link is None:
+            rospy.logerr("Failed to transform first step position to base_link frame")
+            return
+        
+        points_base_link = []
+        for i in range(len(points)):
+            points_base_link.append(self.transform_point_to_base_link(points[i]))
+            points_base_link[i][2] = points[i][2]  # 保持z轴高度不变
+
+        self.yaw_error=np.arctan2(second_step_base_link[1] - first_step_base_link[1], second_step_base_link[0] - first_step_base_link[0]) if second_step_base_link is not None else np.arctan2(first_step_base_link[1], first_step_base_link[0])
+        print(f"Yaw error to first step: {self.yaw_error:.3f} radians")
+
+        # 计算到第一个台阶的距离
+        distance_to_first_step = np.linalg.norm(first_step_base_link[:2])  # 只考虑x-y平面距离
+        rospy.loginfo(f"Distance to first step: {distance_to_first_step:.3f}m")
+        
+        # 开始规划
+        self.plan_stair_climbing(distance_to_first_step, points)
+        
+        # 标记规划完成
+        # self.planning_done = True
+        rospy.loginfo("Planning and publishing completed, waiting for Ctrl+C to exit...")
+        print()
 
 
 planner = None  # 全局变量，供信号处理函数访问

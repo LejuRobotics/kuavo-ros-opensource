@@ -1,0 +1,102 @@
+#########################################################
+# Roban2.1 双 CANBUS 总线配置
+#########################################################
+canbus_interfaces:
+  canbus0:
+    type: BUSMUST_A                 # ANCHOR_CANBUS0_TYPE
+    name: "BM-CANFD-X1(6729) CH1"
+    nbitrate: 1000      # 仲裁段波特率
+    dbitrate: 2000     # 数据段波特率
+    nsamplepos: 75        # 仲裁段采样点 (%)
+    dsamplepos: 75        # 数据段采样点 (%)
+    enable: true          # 是否启用  预留字段，暂时没有用到
+#########################################################
+# canbus0 上的设备列表
+# 设备类型: motor, revo2_hand, lejuclaw
+# 电机默认参数: [vel, kp_pos, kd_pos, tor, kp_vel, kd_vel, ki_vel]
+# 
+# 注意: 如果是想禁用或者忽略设备请使用`ignore`字段, 不需要把设备Id改成0x00！
+# 注意: ignore 字段只是不使能设备，对应的数据还是会暂位的（即返回默认数据0）， 如果想要移除设备，请删除或者注释他
+#########################################################
+canbus0_devices:
+  # ///////////////  
+  - name: Larm_joint_01             # 设备名称
+    class: motor                    # 设备类型
+    device_id: 0x01                 # 设备ID
+    # [vel, kp_pos, kd_pos, tor, kp_vel, kd_vel, ki_vel]
+    params: [0, 25, 8, 0, 0, 0, 0]  # 电机默认的参数
+    ratio: 25                       # 减速比
+    negtive: true                  # 电机方向
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Larm_joint_02
+    class: motor
+    device_id: 0x02
+    params: [0, 20, 6, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Larm_joint_03
+    class: motor
+    device_id: 0x03
+    params: [0, 20, 6, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Larm_joint_04
+    class: motor
+    device_id: 0x04
+    params: [0, 25, 6, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Head_yaw
+    class: motor
+    device_id: 0x09
+    params: [0, 20, 6, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用  
+  # ///////////////
+  - name: Head_pitch
+    class: motor
+    device_id: 0x0A
+    params: [0, 10, 3, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用  
+  # ///////////////
+  - name: Rarm_joint_01
+    class: motor  # motor, revo2_hand, lejuclaw
+    device_id: 0x05
+    params: [0, 25, 8, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Rarm_joint_02
+    class: motor
+    device_id: 0x06
+    params: [0, 20, 6, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Rarm_joint_03
+    class: motor
+    device_id: 0x07
+    params: [0, 20, 6, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Rarm_joint_04
+    class: motor
+    device_id: 0x08
+    params: [0, 25, 6, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用

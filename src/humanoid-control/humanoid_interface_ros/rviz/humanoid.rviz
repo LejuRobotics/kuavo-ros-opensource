@@ -1,16 +1,12 @@
 Panels:
   - Class: rviz/Displays
-    Help Height: 78
+    Help Height: 0
     Name: Displays
     Property Tree Widget:
       Expanded:
         - /Global Options1
         - /Status1
-        - /RobotModel1
-        - /TF1
-        - /MarkerArray1
-        - /Marker1
-        - /MarkerArray2
+        - /MarkerArray4
         - /MarkerArray5
         - /MarkerArray6
         - /MarkerArray6/Namespaces1
@@ -33,7 +29,7 @@ Panels:
   - Class: rviz/Time
     Name: Time
     SyncMode: 0
-    SyncSource: ""
+    SyncSource: PointCloud2
 Preferences:
   PromptSaveOnExit: true
 Toolbars:
@@ -59,7 +55,7 @@ Visualization Manager:
       Plane Cell Count: 10
       Reference Frame: <Fixed Frame>
       Value: true
-    - Alpha: 0.5
+    - Alpha: 0.20000000298023224
       Class: rviz/RobotModel
       Collision Enabled: false
       Enabled: true
@@ -74,16 +70,6 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        camera:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        camera_base:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         dummy_link:
           Alpha: 1
           Show Axes: false
@@ -94,16 +80,6 @@ Visualization Manager:
           Show Trail: false
           Value: true
         l_foot_toe:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        l_hand_camera:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        l_hand_tripod:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -198,16 +174,6 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        r_hand_camera:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        r_hand_tripod:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         radar:
           Alpha: 1
           Show Axes: false
@@ -229,16 +195,6 @@ Visualization Manager:
           Show Trail: false
           Value: true
         rr_foot_toe:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        torso-camera:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        waist_camera:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -347,7 +303,7 @@ Visualization Manager:
       Frames:
         All Enabled: false
       Marker Alpha: 1
-      Marker Scale: 0.30000001192092896
+      Marker Scale: 1
       Name: TF
       Show Arrows: true
       Show Axes: true
@@ -358,10 +314,13 @@ Visualization Manager:
       Value: false
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /mobile_manipulator/optimizedStateTrajectory
+      Marker Topic: /humanoid/optimizedStateTrajectory
       Name: MarkerArray
       Namespaces:
-        {}
+        "": true
+        CoM Trajectory: true
+        Feet Trajectories: true
+        Future footholds: true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -374,7 +333,7 @@ Visualization Manager:
       Value: true
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /humanoid/optimizedStateTrajectory
+      Marker Topic: /humanoid/currentState
       Name: MarkerArray
       Namespaces:
         "": true
@@ -433,14 +392,13 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
-      Enabled: true
+      Enabled: false
       Marker Topic: /humanoid/planedFootPositions
       Name: MarkerArray
       Namespaces:
-        foot_positions_back: true
-        foot_positions_front: true
+        {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_box_marker
@@ -532,12 +490,68 @@ Visualization Manager:
       Unreliable: false
       Use Rainbow: true
       Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1.020720362663269
+        Min Value: -0.9780092835426331
+        Value: true
+      Axis: Y
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Points
+      Topic: /depth_to_points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1.5207399129867554
+        Min Value: -1.4692578315734863
+        Value: true
+      Axis: Y
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 238; 238; 236
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Boxes
+      Topic: /l515/depth/color/points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: false
+      Value: false
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /stair_planes
+      Marker Topic: /polygon_new_markers
       Name: MarkerArray
       Namespaces:
-        {}
+        polygons_new: true
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -550,7 +564,18 @@ Visualization Manager:
         Feet Trajectories: true
       Queue Size: 100
       Value: true
-    - Class: rviz/MarkerArray
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 0.9738002419471741
+        Min Value: 0.9738002419471741
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
       Enabled: true
       Marker Topic: /humanoid/currentState
       Name: MarkerArray
@@ -560,6 +585,74 @@ Visualization Manager:
         EE Positions: true
         Support Polygon: true
       Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Flat Squares
+      Topic: /convex_hull_foot_layer_eroded
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /l515/color/image_raw
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Image
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 0.41557949781417847
+        Min Value: -0.004317522048950195
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Flat Squares
+      Topic: /polygon_points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
       Value: true
   Enabled: true
   Global Options:
@@ -597,9 +690,9 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 0.19474011659622192
-        Y: 0.0706496611237526
-        Z: -0.18862596154212952
+        X: 0.09578222036361694
+        Y: -0.12621022760868073
+        Z: -0.4366334080696106
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false

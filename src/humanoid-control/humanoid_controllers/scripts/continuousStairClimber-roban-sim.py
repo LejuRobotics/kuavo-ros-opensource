@@ -54,6 +54,7 @@ class ContinuousStairClimber:
         self.down_step_length = 0.25  # 下楼梯的迈步距离（独立参数）
         self.up_stairs_double_step_offset = 0.00
         self.down_stairs_double_step_offset = -0.00
+        self.temp_x_offset = 0.002  # 临时x方向偏置，每步叠加
         # 状态变量
         self.total_step = 0  # 总步数
         self.is_left_foot = False  # 当前是否为左脚
@@ -256,6 +257,9 @@ class ContinuousStairClimber:
                 current_foot_pos[1] = current_torso_pos[1] + self.foot_width if self.is_left_foot else -self.foot_width  # 左右偏移
                 current_foot_pos[2] += self.step_height
                 
+            # 叠加临时x方向偏置（每步都叠加）
+            #current_foot_pos[0] += self.temp_x_offset * (step + 1)
+            current_torso_pos[0] += self.temp_x_offset * (step + 1)
                 
             if step < len(offset_x) and not step == num_steps - 1:    # 脚掌偏移
                 current_foot_pos[0] += offset_x[step]
@@ -595,7 +599,11 @@ class ContinuousStairClimber:
                 desire_torso_pos = [current_torso_pos[0]+actual_step_x/2, current_torso_pos[1]+actual_step_y/2, current_torso_pos[2]]
                 lf_foot, rf_foot = self.generate_steps_4d(desire_torso_pos, current_torso_yaw, current_height)
                 current_foot_pos = lf_foot if self.is_left_foot else rf_foot
-                        
+            
+            # 叠加临时x方向偏置（每步都叠加）
+            #current_foot_pos[0] += self.temp_x_offset * (i + 1)
+            current_torso_pos[0] += self.temp_x_offset * (i + 1)
+            
             # 记录当前脚的位置（4D格式）
             current_foot = [current_foot_pos[0], current_foot_pos[1], current_foot_pos[2], current_torso_pos[3]]
             

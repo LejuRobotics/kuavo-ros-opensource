@@ -30,13 +30,14 @@ def get_user_input():
     print("│ 3. 转身 (turn) - 自动步态控制                     │")
     print("│ 4. 前走 (forward) - 自动步态控制                  │")
     print("│ 5. 横走 (strafe) - 自动步态控制                   │")
-    print("│ 6. 预设1: 上斜坡→下斜坡                           │")
-    print("│ 7. 预设2: 前走→上斜坡→下斜坡→前走                 │")
-    print("│ 8. 退出                                             │")
+    print("│ 6. 复合移动 (turn_forward) - 前走+横走+转弯        │")
+    print("│ 7. 预设1: 上斜坡→下斜坡                           │")
+    print("│ 8. 预设2: 前走→上斜坡→下斜坡→复合移动                 │")
+    print("│ 9. 退出                                             │")
     print("└─" + "─"*56 + "─┘")
     
     while True:
-        choice = input("\n请输入选择 (1-8): ").strip()
+        choice = input("\n请输入选择 (1-9): ").strip()
         
         if choice == '1':
             return 'slope'
@@ -49,13 +50,15 @@ def get_user_input():
         elif choice == '5':
             return 'strafe'
         elif choice == '6':
-            return 'preset'
+            return 'turn_forward'
         elif choice == '7':
-            return 'simple_preset'
+            return 'preset'
         elif choice == '8':
+            return 'simple_preset'
+        elif choice == '9':
             return 'quit'
         else:
-            print("无效选择，请输入 1-8")
+            print("无效选择，请输入 1-9")
 
 def set_pitch_limit(enable):
     """设置基座俯仰角限制"""
@@ -342,7 +345,7 @@ class EnhancedSlopeController:
         height_per_step = actual_step_length * np.tan(slope_rad)
         
         if is_downslope:
-            self.torso_z_offset = -2*height_per_step
+            self.torso_z_offset = -1*height_per_step
         else:
             self.torso_z_offset = -2*height_per_step
         
@@ -573,19 +576,32 @@ def main():
     # 创建增强控制器
     controller = EnhancedSlopeController()
     
-    # 预设参数
+    # ========== 所有参数统一设置 ==========
+    
+    # 斜坡参数
     SLOPE_FORWARD_DISTANCE = 0.9
     SLOPE_STEP_LENGTH = 0.10
-    UP_SLOPE_ANGLE = 9.0
+    UP_SLOPE_ANGLE = 6.0
     DOWN_SLOPE_ANGLE = 6.0
+    
+    # 转向参数
     TURN_ANGLE = -180.0
+    
+    # 预设参数
     PRESET_FIRST_FORWARD = 0.5
     PRESET_MID_FORWARD = 0.1
     PRESET_LAST_FORWARD = 0.5
     SECOND_LAST_FORWARD = 0.2
     LAST_FORWARD = 0.1
     
-    print("控制器初始化完成")
+    # 复合移动参数
+    COMPLEX_FORWARD = 1    # 前进距离
+    COMPLEX_STRAFE = 0     # 横移距离  
+    COMPLEX_TURN = 90        # 转弯角度
+    
+    # 速度参数
+    LINEAR_VELOCITY = 0.2    # m/s
+    ANGULAR_VELOCITY = 1   # rad/s
     
     while not rospy.is_shutdown():
         try:
@@ -663,6 +679,67 @@ def main():
                 print(f"使用6D轨迹横移: dy={dy}m")
                 time_traj, foot_idx_traj, foot_traj_6d, torso_traj_6d, swing_trajectories = controller.plan_forward_movement(0.0, dy)
                 
+            elif command == 'turn_forward':
+                # 使用自动步态控制复合移动（前走+横走+转弯）
+                while True:
+                    try:
+                        forward_input = input(f"请输入前进距离 (默认: 0.2m): ").strip()
+                        forward_distance = 0.2 if forward_input == "" else float(forward_input)
+                        break
+                    except ValueError:
+                        print("请输入有效的数字")
+                
+                while True:
+                    try:
+                        strafe_input = input(f"请输入横移距离 (默认: 0.0m): ").strip()
+                        strafe_distance = 0.0 if strafe_input == "" else float(strafe_input)
+                        break
+                    except ValueError:
+                        print("请输入有效的数字")
+                
+                while True:
+                    try:
+                        angle_input = input(f"请输入转弯角度 (默认: 90°): ").strip()
+                        turn_angle = 90.0 if angle_input == "" else float(angle_input)
+                        if -360 <= turn_angle <= 360:
+                            break
+                        else:
+                            print("转弯角度必须在-360°到360°之间")
+                    except ValueError:
+                        print("请输入有效的数字")
+                
+                print(f"使用自动步态复合移动: 前进={forward_distance}m, 横移={strafe_distance}m, 转弯={turn_angle}°")
+                
+                # 计算速度和时间（使用统一的速度参数）
+                linear_velocity = LINEAR_VELOCITY
+                angular_velocity = ANGULAR_VELOCITY
+                
+                # 计算执行时间（取最大值）
+                forward_time = abs(forward_distance) / linear_velocity if forward_distance != 0 else 0
+                strafe_time = abs(strafe_distance) / linear_velocity if strafe_distance != 0 else 0
+                turn_time = abs(turn_angle) * np.pi / 180 / angular_velocity if turn_angle != 0 else 0
+                
+                duration = max(forward_time, strafe_time, turn_time, 1.0)  # 至少1秒
+                
+                # 计算速度比例
+                linear_x = (forward_distance / duration) if duration > 0 else 0
+                linear_y = (strafe_distance / duration) if duration > 0 else 0
+                angular_z = (turn_angle * np.pi / 180 / duration) if duration > 0 else 0
+                
+                print(f"计算的速度: linear_x={linear_x:.3f}m/s, linear_y={linear_y:.3f}m/s, angular_z={angular_z:.3f}rad/s, 持续时间={duration:.1f}s")
+                
+                success = controller.auto_gait_controller.execute_complex_movement(
+                    linear_x=linear_x, 
+                    linear_y=linear_y, 
+                    angular_z=angular_z, 
+                    duration=duration
+                )
+                if success:
+                    print("复合移动完成")
+                else:
+                    print("复合移动失败")
+                continue
+                
             elif command == 'auto_gait_test':
                 # 测试自动步态功能
                 controller.test_auto_gait_functions()
@@ -703,7 +780,7 @@ def main():
             elif command == 'simple_preset':
                 # 预设2: 混合使用自动步态控制和斜坡控制
                 print("=== 执行预设2 (混合模式) ===")
-                print("序列: 前走(自动步态) → 上斜坡(6D) → 下斜坡(6D) → 前走(自动步态)")
+                print("序列: 前走(自动步态) → 上斜坡(6D) → 下斜坡(6D) → 复合移动(自动步态)")
                 
                 # 前走 (自动步态)
                 print("1. 前走...")
@@ -722,7 +799,7 @@ def main():
                     continue
                 
                 execution_time = time_traj[-1] if time_traj else 0
-                rospy.sleep(execution_time + 0.5)
+                rospy.sleep(execution_time + 0.8)
                 
                 # 下斜坡 (6D轨迹)
                 print("3. 下斜坡...")
@@ -734,18 +811,46 @@ def main():
                     continue
                 
                 execution_time = time_traj[-1] if time_traj else 0
-                rospy.sleep(execution_time + 0.5)
+                rospy.sleep(execution_time + 0.8)
                 
                 # 等待位置信息稳定，确保自动步态控制器能正确获取当前位置
                 print("等待位置信息稳定...")
                 rospy.sleep(1.0)
                 
-                # 前走 (自动步态)
-                print("4. 前走...")
-                success = controller.execute_auto_gait_forward(distance=PRESET_LAST_FORWARD)
-                if not success:
-                    print("前走失败，终止预设")
-                    continue
+                # 复合移动 (自动步态) - 前走+横走+转弯
+                print("4. 复合移动...")
+                
+                # 使用主函数中统一设置的参数
+                print(f"复合移动参数: 前进={COMPLEX_FORWARD}m, 横移={COMPLEX_STRAFE}m, 转弯={COMPLEX_TURN}°")
+                
+                # 计算速度和时间（使用统一的速度参数）
+                linear_velocity = LINEAR_VELOCITY
+                angular_velocity = ANGULAR_VELOCITY
+                
+                # 计算执行时间（取最大值）
+                forward_time = abs(COMPLEX_FORWARD) / linear_velocity if COMPLEX_FORWARD != 0 else 0
+                strafe_time = abs(COMPLEX_STRAFE) / linear_velocity if COMPLEX_STRAFE != 0 else 0
+                turn_time = abs(COMPLEX_TURN) * np.pi / 180 / angular_velocity if COMPLEX_TURN != 0 else 0
+                
+                duration = max(forward_time, strafe_time, turn_time, 1.0)  # 至少1秒
+                
+                # 计算速度比例
+                linear_x = (COMPLEX_FORWARD / duration) if duration > 0 else 0
+                linear_y = (COMPLEX_STRAFE / duration) if duration > 0 else 0
+                angular_z = (COMPLEX_TURN * np.pi / 180 / duration) if duration > 0 else 0
+                
+                print(f"复合移动参数: 前进={COMPLEX_FORWARD}m, 横移={COMPLEX_STRAFE}m, 转弯={COMPLEX_TURN}°")
+                print(f"计算的速度: linear_x={linear_x:.3f}m/s, linear_y={linear_y:.3f}m/s, angular_z={angular_z:.3f}rad/s, 持续时间={duration:.1f}s")
+                
+                # success = controller.auto_gait_controller.execute_complex_movement(
+                #     linear_x=linear_x, 
+                #     linear_y=linear_y, 
+                #     angular_z=angular_z, 
+                #     duration=duration
+                # )
+                # if not success:
+                #     print("复合移动失败，终止预设")
+                #     continue
                 
                 print("=== 预设2执行完成 ===")
                 continue
@@ -768,4 +873,8 @@ def main():
             continue
 
 if __name__ == '__main__':
+
+    # 禁用俯仰角限制
+    set_pitch_limit(False)
+    
     main() 
