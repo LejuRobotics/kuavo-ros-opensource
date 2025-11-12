@@ -49,8 +49,8 @@ kuavo-ros-control-fd/
 # run_my_gpu.sh
 # math.hpp
 **/*.patch
-**/*.md
-**/*.sh
+# **/*.md
+# **/*.sh
 **/*.devmd
 **/*copy1027.*
 debugHumanoidController.cpp
