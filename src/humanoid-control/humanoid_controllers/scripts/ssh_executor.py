@@ -70,7 +70,7 @@ class SSHExecutor:
             return True
             
         except Exception as e:
-            print(f"连接失败: {e}")
+            # print(f"连接失败: {e}")
             self.connected = False
             return False
             

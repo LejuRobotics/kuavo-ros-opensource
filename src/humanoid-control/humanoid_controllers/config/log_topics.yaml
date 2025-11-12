@@ -56,3 +56,4 @@ topics:
   - /grasp_box/.*
   - /robot_body_matrices
   - /action_detector_info
+  - /leju_claw_command

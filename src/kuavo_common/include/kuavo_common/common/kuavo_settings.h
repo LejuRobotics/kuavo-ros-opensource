@@ -70,6 +70,13 @@ namespace HighlyDynamic
     {
         Eigen::VectorXd init_arm_pos;
         Eigen::VectorXd walk_arm_pose;
+        Eigen::VectorXd calibration_safe_pose;
+        Eigen::VectorXd arm_calibration_limits;
+        Eigen::VectorXd arm_calibration_directions;
+        double arm_calibration_velocity;
+        double arm_calibration_timeout;
+        double arm_calibration_position_variance_time;
+        double arm_calibration_position_variance_threshold;
         std::vector<Eigen::VectorXd> arm_poses;
     };
     struct ModelSettings

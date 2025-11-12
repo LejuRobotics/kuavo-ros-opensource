@@ -186,6 +186,8 @@ public:
     void saveZeroPosition();
     void set_teach_pendant_mode(int mode);
     void changeEncoderZeroRound(int index, double direction);
+    void adjustZeroPosition(int index, double offset);
+    std::vector<double> getMotorZeroPoints();
     void multi_turn_zeroing(const std::vector<int>& dev_ids);
     std::vector<int> get_all_joint_addresses();
     

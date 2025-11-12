@@ -463,12 +463,12 @@ namespace ocs2
                 double relative_height = current_height - body_height_zero_;  // 计算相对于零点的高度
                 //std::cout << "相对高度: " << relative_height << std::endl;
                 //限制相对高度在[-0.4,0.1]之间
-                relative_height = std::max(-0.35, std::min(relative_height, 0.1));
+                relative_height = std::max(-0.25, std::min(relative_height, 0.1));
                 geometry_msgs::Twist cmd_pose;
                 cmd_pose.linear.x = 0.0;  // 基于当前位置的 x 方向值 (m)
                 cmd_pose.linear.y = 0.0;  // 基于当前位置的 y 方向值 (m)
                 cmd_pose.linear.z = relative_height;  // 相对高度
-                cmd_pose.angular.x = relative_roll;  // roll
+                cmd_pose.angular.x = 0.0;  // roll
                 cmd_pose.angular.z = relative_yaw_torso;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
                 cmd_pose.angular.y = current_head_body_pose_.body_pitch;  // pitch
 
@@ -890,7 +890,8 @@ namespace ocs2
             cmdVel_.linear.y = commad_line_target_(1);
             cmdVel_.linear.z = commad_line_target_(2);
             cmdVel_.angular.z = commad_line_target_(3);
-            vel_control_pub_.publish(cmdVel_);
+            if(!torso_control_enabled_)
+                vel_control_pub_.publish(cmdVel_);
         }
 
         void checkGaitSwitchCommand(const kuavo_msgs::JoySticks &joy_msg)
@@ -902,7 +903,7 @@ namespace ocs2
                 publish_zero_spd();
             }
 
-            else if (!joystick_data_prev_.right_second_button_pressed && joy_msg.right_second_button_pressed && joy_msg.left_trigger < 0.5)
+            else if (!joystick_data_prev_.right_second_button_pressed && joy_msg.right_second_button_pressed && joy_msg.left_trigger < 0.5 && !torso_control_enabled_)
             {
                 publish_mode_sequence_temlate("walk");
             }

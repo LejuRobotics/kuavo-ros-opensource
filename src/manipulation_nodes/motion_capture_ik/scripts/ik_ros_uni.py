@@ -351,7 +351,7 @@ class IkRos:
         agl_limit = self.controller_dt * vel_limit * np.pi / 180.0  # deg/s to rad/s
         
         # 120度限制转换为弧度
-        angle_limit_120_deg = self.controller_dt * 120.0 * np.pi / 180.0  # 约2.09弧度
+        angle_limit_120_deg = self.controller_dt * 400.0 * np.pi / 180.0  # 约2.09弧度
         
         for i in range(size):
             # 速度限制
@@ -523,7 +523,35 @@ class IkRos:
                     l_elbow_pos = self.__left_elbow_pos
                     if l_elbow_pos is not None:
                         # print(f"l_elbow_pos: {l_elbow_pos}")
-                        l_elbow_pos[0] = 0.0 if l_elbow_pos[0] < 0.0 else l_elbow_pos[0]
+                        # 根据肘部高度动态调整x位置的最小值（参考手部限制）
+                        elbow_height = l_elbow_pos[2]  # z坐标
+                        elbow_natural_drop_height = -0.3  # 自然下垂时的高度
+                        elbow_max_height = 1.5  # 最高点
+                        
+                        # 计算高度比例 (0=自然下垂, 1=最高点)
+                        elbow_height_ratio = (elbow_height - elbow_natural_drop_height) / (elbow_max_height - elbow_natural_drop_height)
+                        elbow_height_ratio = np.clip(elbow_height_ratio, 0.0, 1.0)
+                        
+                        # 根据高度比例计算x的最小值
+                        # 自然下垂时x_min=-0.3, 抬到最高时x_min约0.25
+                        elbow_x_min = -0.3 + elbow_height_ratio * 0.25
+                        l_elbow_pos[0] = elbow_x_min if l_elbow_pos[0] < elbow_x_min else l_elbow_pos[0]
+                    
+                    if l_hand_pose is not None:
+                        # 根据手的高度动态调整x位置的最小值
+                        # 假设自然下垂高度为-0.3m，抬手最高约0.5m
+                        hand_height = l_hand_pose[2]  # z坐标
+                        natural_drop_height = -0.3  # 自然下垂时的高度
+                        max_height = 1.5  # 最高点
+                        
+                        # 计算高度比例 (0=自然下垂, 1=最高点)
+                        height_ratio = (hand_height - natural_drop_height) / (max_height - natural_drop_height)
+                        height_ratio = np.clip(height_ratio, 0.0, 1.0)
+                        
+                        # 根据高度比例计算x的最小值
+                        # 自然下垂时x_min=0, 抬到最高时x_min=0.25
+                        x_min = 0.0 + height_ratio * 0.85
+                        l_hand_pose[0] = x_min if l_hand_pose[0] < x_min else l_hand_pose[0]
                     left_shoulder_rpy_in_robot = self.quest3_arm_info_transformer.left_shoulder_rpy_in_robot
                 if self.__target_pose_right[0] is not None and (self.__ctrl_arm_idx == ArmIdx.BOTH
                                                                 or self.__ctrl_arm_idx == ArmIdx.RIGHT):
@@ -532,8 +560,37 @@ class IkRos:
                     r_hand_RPY = quaternion_to_RPY(r_hand_quat)
                     r_elbow_pos = self.__right_elbow_pos
                     if r_elbow_pos is not None:
-                        r_elbow_pos[0] = 0.0 if r_elbow_pos[0] < 0.0 else r_elbow_pos[0]
+                        # 根据肘部高度动态调整x位置的最小值（参考手部限制）
+                        elbow_height = r_elbow_pos[2]  # z坐标
+                        elbow_natural_drop_height = -0.3  # 自然下垂时的高度
+                        elbow_max_height = 1.5  # 最高点
+                        
+                        # 计算高度比例 (0=自然下垂, 1=最高点)
+                        elbow_height_ratio = (elbow_height - elbow_natural_drop_height) / (elbow_max_height - elbow_natural_drop_height)
+                        elbow_height_ratio = np.clip(elbow_height_ratio, 0.0, 1.0)
+                        
+                        # 根据高度比例计算x的最小值
+                        # 自然下垂时x_min=-0.3, 抬到最高时x_min约0.25
+                        elbow_x_min = -0.3 + elbow_height_ratio * 0.25
+                        r_elbow_pos[0] = elbow_x_min if r_elbow_pos[0] < elbow_x_min else r_elbow_pos[0]
+                    if r_hand_pose is not None:
+                        # 根据手的高度动态调整x位置的最小值
+                        # 假设自然下垂高度为-0.3m，抬手最高约0.5m
+                        hand_height = r_hand_pose[2]  # z坐标
+                        natural_drop_height = -0.3  # 自然下垂时的高度
+                        max_height = 1.5  # 最高点
+                        
+                        # 计算高度比例 (0=自然下垂, 1=最高点)
+                        height_ratio = (hand_height - natural_drop_height) / (max_height - natural_drop_height)
+                        height_ratio = np.clip(height_ratio, 0.0, 1.0)
+                        
+                        # 根据高度比例计算x的最小值
+                        # 自然下垂时x_min=0, 抬到最高时x_min=0.25
+                        x_min = 0.0 + height_ratio * 0.85
+                        r_hand_pose[0] = x_min if r_hand_pose[0] < x_min else r_hand_pose[0]
                     right_shoulder_rpy_in_robot = self.quest3_arm_info_transformer.right_shoulder_rpy_in_robot
+                
+                
                 time_0 = time.time()
                 # 通过限制初值，避免迭代到不可解的区域
                 q0_tmp = q_last.copy()

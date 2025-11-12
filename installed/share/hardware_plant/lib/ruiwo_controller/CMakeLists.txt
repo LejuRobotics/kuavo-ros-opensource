@@ -21,6 +21,7 @@ find_package(yaml-cpp REQUIRED)
 add_library(ruiwo_actuatorLib SHARED ruiwo_actuator.cpp)
 target_include_directories(ruiwo_actuatorLib PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/../../include>
   $<INSTALL_INTERFACE:include/ruiwo_controller>
   $<INSTALL_INTERFACE:${Python3_INCLUDE_DIRS}>
 )

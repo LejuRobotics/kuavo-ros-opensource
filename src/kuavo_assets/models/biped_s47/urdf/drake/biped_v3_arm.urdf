@@ -40,7 +40,7 @@
     <parent link="base_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-2.4" upper="0.6" effort="100.0" velocity="41.3433333333333" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="zarm_l2_link">
@@ -221,7 +221,7 @@
     <parent link="base_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-2.4" upper="0.6" effort="100.0" velocity="41.3433333333333" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="zarm_r2_link">

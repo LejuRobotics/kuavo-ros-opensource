@@ -46,6 +46,13 @@ namespace HighlyDynamic
     {
         predefined_arm_pose.init_arm_pos = robot_config.getValue<Eigen::VectorXd>("init_arm_pos");
         predefined_arm_pose.walk_arm_pose = robot_config.getValue<Eigen::VectorXd>("walk_arm_pose");
+        predefined_arm_pose.calibration_safe_pose = robot_config.getValue<Eigen::VectorXd>("calibration_safe_pose");
+        predefined_arm_pose.arm_calibration_limits = robot_config.getValue<Eigen::VectorXd>("arm_calibration_limits");
+        predefined_arm_pose.arm_calibration_directions = robot_config.getValue<Eigen::VectorXd>("arm_calibration_directions");
+        predefined_arm_pose.arm_calibration_velocity = robot_config.getValue<double>("arm_calibration_velocity");
+        predefined_arm_pose.arm_calibration_timeout = robot_config.getValue<double>("arm_calibration_timeout");
+        predefined_arm_pose.arm_calibration_position_variance_time = robot_config.getValue<double>("arm_calibration_position_variance_time");
+        predefined_arm_pose.arm_calibration_position_variance_threshold = robot_config.getValue<double>("arm_calibration_position_variance_threshold");
         predefined_arm_pose.arm_poses.push_back(robot_config.getValue<Eigen::VectorXd>("arm_pose0"));
         predefined_arm_pose.arm_poses.push_back(robot_config.getValue<Eigen::VectorXd>("arm_pose1"));
     }

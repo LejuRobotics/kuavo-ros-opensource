@@ -102,8 +102,15 @@ if __name__ == "__main__":
         multi_turn_encoder_mode = config['Multi-turn_Encoder_mode']
     except KeyError:
         multi_turn_encoder_mode = False
+    # 根据 ROBOT_VERSION 在非多圈模式下筛选需要操作的电机，13/14 版本仅操作 1~10 号 arm 电机
+    robot_version = os.environ.get('ROBOT_VERSION', '')
     if not multi_turn_encoder_mode:
-        joint_address_list = get_dev_id(config)
+        full_arm_list = get_dev_id(config)
+        if robot_version in ('13', '14'):
+            print("检测到roban2版本机器人，只处理1~10号arm电机")
+            joint_address_list = full_arm_list[:10]
+        else:
+            joint_address_list = full_arm_list
     else:
         joint_address_list = get_head_id(config)
     open_canbus = ruiwo.open_canbus()

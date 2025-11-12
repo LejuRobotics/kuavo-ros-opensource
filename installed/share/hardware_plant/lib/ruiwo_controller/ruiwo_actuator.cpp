@@ -684,6 +684,7 @@ bool RuiWoActuator::disableMotor(int motorIndex)
 {
     // TODO Not implemented
     std::cout << "python interface disimplemented" << std::endl;
+    return true;
 }
 
 // set_positions接口
