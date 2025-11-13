@@ -261,6 +261,7 @@ namespace humanoid_controller
     waistNum_ = motor_info.num_waist_joints;
     armNumReal_ = motor_info.num_arm_joints;
     jointNumReal_ = motor_info.num_joints - headNum_ - armNumReal_ - waistNum_;
+    is_roban_ = (motor_info.robot_module == "ROBAN2") ? true: false;
     std::string imu_type_str = motor_info.getIMUType(rb_version);
     if (imu_type_str == "xsens")
     {
@@ -1291,21 +1292,28 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     sensor_data.resize_joint(jointNumReal_+armNumReal_ + waistNum_);
     
     // JOINT DATA
-    for(size_t i=0;i<waistNum_;i++)
+   for(size_t i=0;i<jointNumReal_+waistNum_+armNumReal_;i++)
     {
       sensor_data.jointPos_(i) = joint_data.joint_q[i];
       sensor_data.jointVel_(i) = joint_data.joint_v[i];
       sensor_data.jointAcc_(i) = joint_data.joint_vd[i];
       sensor_data.jointTorque_(i) = joint_data.joint_torque[i];
     }
-    for (size_t i = waistNum_; i < jointNumReal_+armNumReal_+waistNum_; ++i)    //避开腰部自由度数据的输入
-    {
+    // for (size_t i = 0; i < waistNum_; ++i)    //避开腰部自由度数据的输入
+    // {
+    //   sensor_data.jointPos_(jointNumReal_+i) = -joint_data.joint_q[i];
+    //   sensor_data.jointVel_(jointNumReal_+i) = -joint_data.joint_v[i];
+    //   sensor_data.jointAcc_(jointNumReal_+i) = -joint_data.joint_vd[i];
+    //   sensor_data.jointTorque_(jointNumReal_+i) = -joint_data.joint_torque[i];
+    // }
+    // for (size_t i = 0; i < armNumReal_; ++i)    //避开腰部自由度数据的输入
+    // {
 
-      sensor_data.jointPos_(i) = joint_data.joint_q[i];
-      sensor_data.jointVel_(i) = joint_data.joint_v[i];
-      sensor_data.jointAcc_(i) = joint_data.joint_vd[i];
-      sensor_data.jointTorque_(i) = joint_data.joint_torque[i];
-    }
+    //   sensor_data.jointPos_(jointNumReal_+waistNum_+i) = joint_data.joint_q[jointNumReal_+waistNum_+i];
+    //   sensor_data.jointVel_(jointNumReal_+waistNum_+i) = joint_data.joint_v[jointNumReal_+waistNum_+i];
+    //   sensor_data.jointAcc_(jointNumReal_+waistNum_+i) = joint_data.joint_vd[jointNumReal_+waistNum_+i];
+    //   sensor_data.jointTorque_(jointNumReal_+waistNum_+i) = joint_data.joint_torque[jointNumReal_+waistNum_+i];
+    // }
     //test
     // for(size_t i=0;i<sensor_data.jointPos_.size();i++)
     // {
@@ -1328,13 +1336,43 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
 
     auto &imu_data = msg->imu_data;
-    // 如果没有腰部，直接使用原始IMU数据
-    sensor_data.quat_.coeffs().w() = imu_data.quat.w;
-    sensor_data.quat_.coeffs().x() = imu_data.quat.x;
-    sensor_data.quat_.coeffs().y() = imu_data.quat.y;
-    sensor_data.quat_.coeffs().z() = imu_data.quat.z;
-    sensor_data.angularVel_ << imu_data.gyro.x, imu_data.gyro.y, imu_data.gyro.z;
-    sensor_data.linearAccel_ << imu_data.acc.x, imu_data.acc.y, imu_data.acc.z;
+
+    if(is_roban_)
+    {
+      double q_waist = sensor_data.jointPos_[jointNumReal_];
+      double qd_waist = sensor_data.jointVel_[jointNumReal_];
+      Eigen::Quaterniond imu_quat(imu_data.quat.w, imu_data.quat.x, imu_data.quat.y, imu_data.quat.z);
+      Eigen::Quaterniond waist_base_quat(std::cos(-q_waist/2), 0, 0, std::sin(-q_waist/2));
+
+      Eigen::Quaterniond waist_world_quat = imu_quat * waist_base_quat;
+  
+      // 加速度转换
+      Eigen::Vector3d base_imu_acc(imu_data.acc.x, imu_data.acc.y, imu_data.acc.z);
+      Eigen::Vector3d waist_base_acc = waist_base_quat.conjugate() * base_imu_acc;
+
+      // 角速度转换
+      Eigen::Vector3d waist_gyro(0, 0, qd_waist);
+      Eigen::Vector3d imu_gyro(imu_data.gyro.x, imu_data.gyro.y, imu_data.gyro.z);
+      Eigen::Vector3d waist_base_gyro = waist_base_quat.conjugate() * (imu_gyro - waist_gyro); 
+
+      // roban 版本需要转换 imu 数据
+      sensor_data.quat_.coeffs().w() = waist_world_quat.coeffs().w();
+      sensor_data.quat_.coeffs().x() = waist_world_quat.coeffs().x();
+      sensor_data.quat_.coeffs().y() = waist_world_quat.coeffs().y();
+      sensor_data.quat_.coeffs().z() = waist_world_quat.coeffs().z();
+      sensor_data.angularVel_ << waist_base_gyro[0], waist_base_gyro[1], waist_base_gyro[2];
+      sensor_data.linearAccel_ << waist_base_acc[0], waist_base_acc[1], waist_base_acc[2];
+    }
+    else
+    {
+      // 如果没有腰部，直接使用原始IMU数据
+      sensor_data.quat_.coeffs().w() = imu_data.quat.w;
+      sensor_data.quat_.coeffs().x() = imu_data.quat.x;
+      sensor_data.quat_.coeffs().y() = imu_data.quat.y;
+      sensor_data.quat_.coeffs().z() = imu_data.quat.z;
+      sensor_data.angularVel_ << imu_data.gyro.x, imu_data.gyro.y, imu_data.gyro.z;
+      sensor_data.linearAccel_ << imu_data.acc.x, imu_data.acc.y, imu_data.acc.z;
+    }
     sensor_data.freeLinearAccel_ << imu_data.free_acc.x, imu_data.free_acc.y, imu_data.free_acc.z;
     sensor_data.orientationCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
     sensor_data.angularVelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
@@ -1649,18 +1687,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     squatState.head(12 + jointNum_) = drake_interface_->getSquatInitialState();
     vector_t standState = vector_t::Zero(infoWBC.stateDim);
     standState.head(12 + jointNum_) = drake_interface_->getInitialState();
-    // standState.head(12 + jointNum_) = drake_interface_->getInitialState();
-    //drake的关节排序：12位置速度+12腿关节+8手关节+1腰关节，将腰放前面
-    auto squatState_temp = squatState; 
-    squatState.head(12) = squatState_temp.head(12);
-    squatState.segment(12, waistNum_) = squatState_temp.segment(12+12+8,waistNum_);
-    squatState.segment(12 + waistNum_, 20) = squatState_temp.segment(12,20);
-    // std::cout << "squatState:" << squatState << std::endl;
-    auto standState_temp = standState;
-    standState.head(12) = standState_temp.head(12);
-    standState.segment(12, waistNum_) = standState_temp.segment(12+12+8,waistNum_);
-    standState.segment(12 + waistNum_, 20) = standState_temp.segment(12,20);
-    // std::cout << "standState:" << standState << std::endl;
     /*******采用 standUp_controller 从蹲姿运动到站姿*********/
     stateEstimate_->setFixFeetHeights(true);
     updateStateEstimation(time, false);
@@ -1708,7 +1734,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     is_robot_standup_complete_ = fabs(standState[8] - curTargetState_wbc[8]) < 0.002;
 
     kuavo_msgs::jointCmd jointCmdMsg;
-    for (int i1 = 0; i1 < waistNum_; ++i1)
+    for (int i1 = 0; i1 < jointNumReal_; ++i1)
     {
       jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + i1));
       jointCmdMsg.joint_v.push_back(0);
@@ -1719,7 +1745,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
       jointCmdMsg.control_modes.push_back(2);
     }
+    for (int i1 = 0; i1 < waistNum_; ++i1)
+    {
 
+      jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + jointNumReal_ + i1));
+      jointCmdMsg.joint_v.push_back(0);
+      jointCmdMsg.tau.push_back(torque(jointNumReal_+i1));
+      jointCmdMsg.tau_ratio.push_back(1);
+      jointCmdMsg.joint_kp.push_back(joint_kp_[jointNumReal_+i1]);
+      jointCmdMsg.joint_kd.push_back(joint_kd_[jointNumReal_+i1]);
+      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNumReal_+i1]);
+      jointCmdMsg.control_modes.push_back(2);
+    }
     // // 补充腰部维度
     // std::cout << "waistNum_: " << waistNum_ << std::endl;
     // if (waistNum_ > 0)
@@ -1748,18 +1785,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     //   std::cout << "update waist joint cmd" << std::endl;
     // }
 
-    for (int i1 = 0; i1 < jointNumReal_; ++i1)
-    {
-
-      jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + waistNum_ + i1));
-      jointCmdMsg.joint_v.push_back(0);
-      jointCmdMsg.tau.push_back(torque(waistNum_ + i1));
-      jointCmdMsg.tau_ratio.push_back(1);
-      jointCmdMsg.joint_kp.push_back(joint_kp_[waistNum_ + i1]);
-      jointCmdMsg.joint_kd.push_back(joint_kd_[waistNum_ + i1]);
-      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[waistNum_ + i1]);
-      jointCmdMsg.control_modes.push_back(2);
-    }
     for (int i2 = 0; i2 < armNumReal_; ++i2)
     {
 
@@ -2431,7 +2456,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
       
       // std::cout << "jointNum_:  " << jointNum_+armNum_ << "\n\n";
-      for (int i1 = 0; i1 < waistNum_; ++i1)
+  
+      for (int i1 = 0; i1 < jointNumReal_; ++i1)
       {
         jointCmdMsg.joint_q.push_back(output_pos_(i1));
         jointCmdMsg.joint_v.push_back(output_vel_(i1));
@@ -2441,20 +2467,22 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         jointCmdMsg.joint_kd.push_back(joint_kd_[i1]);
         jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
         jointCmdMsg.control_modes.push_back(joint_control_modes_[i1]);
-      }
-      for (int i1 = 0; i1 < jointNumReal_; ++i1)
-      {
-        jointCmdMsg.joint_q.push_back(output_pos_(waistNum_+i1));
-        jointCmdMsg.joint_v.push_back(output_vel_(waistNum_+i1));
-        jointCmdMsg.tau.push_back(output_tau_(waistNum_+i1));
-        jointCmdMsg.tau_ratio.push_back(1);
-        jointCmdMsg.joint_kp.push_back(joint_kp_[waistNum_+i1]);
-        jointCmdMsg.joint_kd.push_back(joint_kd_[waistNum_+i1]);
-        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[waistNum_+i1]);
-        jointCmdMsg.control_modes.push_back(joint_control_modes_[waistNum_+i1]);
 
         // jointCurrentWBC_(i1) = output_tau_(i1);
       }
+
+      for (int i1 = 0; i1 < waistNum_; ++i1)
+      {
+        jointCmdMsg.joint_q.push_back(output_pos_(jointNum_+i1));
+        jointCmdMsg.joint_v.push_back(output_vel_(jointNum_+i1));
+        jointCmdMsg.tau.push_back(output_tau_(jointNum_+i1));
+        jointCmdMsg.tau_ratio.push_back(1);
+        jointCmdMsg.joint_kp.push_back(joint_kp_[jointNum_+i1]);
+        jointCmdMsg.joint_kd.push_back(joint_kd_[jointNum_+i1]);
+        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNum_+i1]);
+        jointCmdMsg.control_modes.push_back(joint_control_modes_[jointNum_+i1]);
+      }
+      
       ModeSchedule current_mode_schedule;
       if (resetting_mpc_state_ != ResettingMpcState::RESET_INITIAL_POLICY)
       {
@@ -2501,17 +2529,17 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
           current_mode == ModeNumber::SH || current_mode == ModeNumber::TS ||
           current_mode == ModeNumber::HS || current_mode == ModeNumber::ST || to_double_contact)
       {
-        jointCmdMsg.joint_kp[waistNum_+3] = joint_kp_walking_[waistNum_+3];
-        jointCmdMsg.joint_kp[waistNum_+9] = joint_kp_walking_[waistNum_+9];
-        jointCmdMsg.joint_kd[waistNum_+3] = joint_kd_walking_[waistNum_+3];
-        jointCmdMsg.joint_kd[waistNum_+9] = joint_kd_walking_[waistNum_+9];
+        jointCmdMsg.joint_kp[3] = joint_kp_walking_[3];
+        jointCmdMsg.joint_kp[9] = joint_kp_walking_[9];
+        jointCmdMsg.joint_kd[3] = joint_kd_walking_[3];
+        jointCmdMsg.joint_kd[9] = joint_kd_walking_[9];
       }
 
       // 踝关节全程力控+pd
-      jointCmdMsg.control_modes[4+waistNum_] = 0;
-      jointCmdMsg.control_modes[5+waistNum_] = 0;
-      jointCmdMsg.control_modes[10+waistNum_] = 0;
-      jointCmdMsg.control_modes[11+waistNum_] = 0;
+      jointCmdMsg.control_modes[4] = 0;
+      jointCmdMsg.control_modes[5] = 0;
+      jointCmdMsg.control_modes[10] = 0;
+      jointCmdMsg.control_modes[11] = 0;
       if (isPullUp_)
       {
         for (int i = 0; i < jointNumReal_; i++)
@@ -2524,7 +2552,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
           //   jointCmdMsg.joint_kd[i+waistNum_] = 0;
           // }
           // else
-            jointCmdMsg.control_modes[i+waistNum_] = 2;
+            jointCmdMsg.control_modes[i] = 2;
         }
       }
       if (!is_stance_mode_)
@@ -2532,31 +2560,31 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         if (std::any_of(contactFlag_.begin(), contactFlag_.begin() + 4, [](int flag)
                         { return !flag; }))
         {
-          jointCmdMsg.joint_kp[waistNum_+4] = joint_kp_walking_[waistNum_+4];
-          jointCmdMsg.joint_kp[waistNum_+5] = joint_kp_walking_[waistNum_+5];
-          jointCmdMsg.joint_kd[waistNum_+4] = joint_kd_walking_[waistNum_+4];
-          jointCmdMsg.joint_kd[waistNum_+5] = joint_kd_walking_[waistNum_+5];
+          jointCmdMsg.joint_kp[4] = joint_kp_walking_[4];
+          jointCmdMsg.joint_kp[5] = joint_kp_walking_[5];
+          jointCmdMsg.joint_kd[4] = joint_kd_walking_[4];
+          jointCmdMsg.joint_kd[5] = joint_kd_walking_[5];
         }
 
         if (std::any_of(contactFlag_.begin() + 4, contactFlag_.end(), [](int flag)
                         { return !flag; }))
         {
-          jointCmdMsg.joint_kp[waistNum_+10] = joint_kp_walking_[waistNum_+10];
-          jointCmdMsg.joint_kp[waistNum_+11] = joint_kp_walking_[waistNum_+11];
-          jointCmdMsg.joint_kd[waistNum_+10] = joint_kd_walking_[waistNum_+10];
-          jointCmdMsg.joint_kd[waistNum_+11] = joint_kd_walking_[waistNum_+11];
+          jointCmdMsg.joint_kp[10] = joint_kp_walking_[10];
+          jointCmdMsg.joint_kp[11] = joint_kp_walking_[11];
+          jointCmdMsg.joint_kd[10] = joint_kd_walking_[10];
+          jointCmdMsg.joint_kd[11] = joint_kd_walking_[11];
         }
       }
       else
       {
-        jointCmdMsg.joint_kp[4+waistNum_] = 0.0;
-        jointCmdMsg.joint_kp[5+waistNum_] = 0.0;
-        jointCmdMsg.joint_kd[4+waistNum_] = 0.0;
-        jointCmdMsg.joint_kd[5+waistNum_] = 0.0;
-        jointCmdMsg.joint_kp[10+waistNum_] = 0.0;
-        jointCmdMsg.joint_kp[11+waistNum_] = 0.0;
-        jointCmdMsg.joint_kd[10+waistNum_] = 0.0;
-        jointCmdMsg.joint_kd[11+waistNum_] = 0.0;
+        jointCmdMsg.joint_kp[4] = 0.0;
+        jointCmdMsg.joint_kp[5] = 0.0;
+        jointCmdMsg.joint_kd[4] = 0.0;
+        jointCmdMsg.joint_kd[5] = 0.0;
+        jointCmdMsg.joint_kp[10] = 0.0;
+        jointCmdMsg.joint_kp[11] = 0.0;
+        jointCmdMsg.joint_kd[10] = 0.0;
+        jointCmdMsg.joint_kd[11] = 0.0;
       }
 
       // 补全手臂的Cmd维度

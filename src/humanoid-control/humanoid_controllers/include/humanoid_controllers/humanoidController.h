@@ -806,6 +806,7 @@ namespace humanoid_controller
     bool use_joint_filter_{false};
     bool use_estimator_contact_{false};
     bool is_stance_mode_{false};
+    bool is_roban_{false};
     bool only_half_up_body_{false};
     bool wheel_arm_robot_{false};
     bool stand_up_protect_{false};

@@ -292,7 +292,7 @@ void GazeboShmInterface::waitForParams()
         std::cout << "GazeboShmInterface get waist_num: " << waist_num << std::endl;
         if (waist_num > 0) {
             for (int i = 0; i < waist_num; i++) {
-                robot_init_state_param_.insert(robot_init_state_param_.begin() + 7, 0.0);
+                robot_init_state_param_.insert(robot_init_state_param_.begin() + 7+12, 0.0);
             }
         }
 

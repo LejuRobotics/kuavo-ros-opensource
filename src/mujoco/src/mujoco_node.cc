@@ -137,6 +137,7 @@ namespace
   using namespace mujoco_node;
   JointGroupAddress LLegJointsAddr("l_leg_joints");
   JointGroupAddress RLegJointsAddr("r_leg_joints");
+  JointGroupAddress WaistJointsAddr("waist_yaw_joint");
   JointGroupAddress LArmJointsAddr("r_arm_joints");
   JointGroupAddress RArmJointsAddr("r_arm_joints");
   JointGroupAddress HeadJointsAddr("head_joints");
@@ -341,6 +342,7 @@ namespace
       /* Init Joint Address 初始化关节组的数据地址 */
       init_joint_address(mnew, LLegJointsAddr, "leg_l1_joint", "leg_l6_joint");
       init_joint_address(mnew, RLegJointsAddr, "leg_r1_joint", "leg_r6_joint");
+      init_joint_address(mnew, WaistJointsAddr, "waist_yaw_joint", "waist_yaw_joint");
       std::cout << "left_arm_end_joint: " << left_arm_end_joint << std::endl;
       std::cout << "right_arm_end_joint: " << right_arm_end_joint << std::endl;
       init_joint_address(mnew, LArmJointsAddr, "zarm_l1_joint", left_arm_end_joint.c_str());
@@ -464,16 +466,10 @@ namespace
             joint_data.joint_torque.push_back(d->qfrc_actuator[*iter]);
         }
     };
-    for (size_t i = 0; i < waistNum; i++)
-    {
-      joint_data.joint_q.push_back(d->qpos[7 + i]);
-      joint_data.joint_v.push_back(d->qvel[6 + i]);
-      joint_data.joint_vd.push_back(d->qacc[6 + i]);
-      joint_data.joint_torque.push_back(d->qfrc_actuator[6 + i]);
-    }
     // Joint Data: LLeg, RLeg, LArm, RArm, Head
     updateJointData(LLegJointsAddr);
     updateJointData(RLegJointsAddr);
+    updateJointData(WaistJointsAddr);
     updateJointData(LArmJointsAddr);
     updateJointData(RArmJointsAddr);
     updateJointData(HeadJointsAddr);
@@ -744,13 +740,7 @@ namespace
                       d->ctrl[*iter] = tau_cmd[i++];
                   }
               };
-              for (size_t i = 0; i < waistNum; i++)
-              {
-                d->ctrl[i] = tau_cmd[i];
-                // std::cout << "tau_cmd[" << i << "]: " << tau_cmd[i] << std::endl;
-              } 
-              int i = waistNum;
-              
+              int i = 0;
               // 在半身模式下跳过腿部关节的控制
               if (!leg_joints_constrained) {
                 updateControl(LLegJointsAddr, i);
@@ -759,7 +749,7 @@ namespace
                 // 跳过腿部关节的控制输入，但需要更新索引
                 i += LLegJointsAddr.ctrladr().size() + RLegJointsAddr.ctrladr().size();
               }
-              
+              updateControl(WaistJointsAddr, i);
               updateControl(LArmJointsAddr, i);
               updateControl(RArmJointsAddr, i);
               updateControl(HeadJointsAddr, i);
@@ -1070,14 +1060,21 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
     m->opt.timestep = 1 / frequency;
     
     // 显示关节组信息
+    numJoints = 0;
     std::cout << "LLeg joints size: " << LLegJointsAddr.qdofadr().size() << std::endl;
     std::cout << "RLeg joints size: " << RLegJointsAddr.qdofadr().size() << std::endl;
+    std::cout << "Waist joints size: " << WaistJointsAddr.qdofadr().size() << std::endl;
     std::cout << "LArm joints size: " << LArmJointsAddr.qdofadr().size() << std::endl;
     std::cout << "RArm joints size: " << RArmJointsAddr.qdofadr().size() << std::endl;
     std::cout << "Head joints size: " << HeadJointsAddr.qdofadr().size() << std::endl;
-    std::cout << "\033[32mnumJoints from config: " << numJoints << "\033[0m" << std::endl;
+    numJoints += LLegJointsAddr.qdofadr().size();
+    numJoints += RLegJointsAddr.qdofadr().size();
+    numJoints += LArmJointsAddr.qdofadr().size();
+    numJoints += RArmJointsAddr.qdofadr().size();
+    numJoints += HeadJointsAddr.qdofadr().size();
+    numJoints += WaistJointsAddr.qdofadr().size();
+    std::cout << "\033[32mnumJoints: " << (m->nq - 7) << "\033[0m" << std::endl;
     std::cout << "\033[32mnumJoints(without dexhand): " << numJoints << "\033[0m" << std::endl;
-    std::cout << "\033[32mtotal qpos (m->nq): " << m->nq << "\033[0m" << std::endl;
 
 
     if (d)
@@ -1209,18 +1206,18 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
       if (g_nh_ptr->getParam("robot_init_state_param", qpos_init_temp))
       {
         ROS_INFO("Get init qpos ");
-        // insert waist qpos
-        int waist_num = 0;
-        g_nh_ptr->getParam("waistRealDof", waist_num);
-        std::cout << "Mujoco waist_num: " << waist_num << std::endl;
-        if (waist_num > 0)
-        {
-          for (int i = 0; i < waist_num; i++)
-          {
-            qpos_init_temp.insert(qpos_init_temp.begin() + 7, 0.0);
-          }
-        }
-        waistNum = waist_num;
+        // // insert waist qpos
+        // int waist_num = 0;
+        // g_nh_ptr->getParam("waistRealDof", waist_num);
+        // std::cout << "Mujoco waist_num: " << waist_num << std::endl;
+        // if (waist_num > 0)
+        // {
+        //   for (int i = 0; i < waist_num; i++)
+        //   {
+        //     qpos_init_temp.insert(qpos_init_temp.begin() + 7, 0.0);
+        //   }
+        // }
+        // waistNum = waist_num;
 
         for (int i = 0; i < qpos_init_temp.size(); i++)
         {

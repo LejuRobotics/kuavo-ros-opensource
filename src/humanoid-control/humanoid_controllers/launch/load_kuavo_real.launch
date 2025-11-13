@@ -92,7 +92,7 @@
     <param name="leg_disable_mode" value="$(arg leg_disable_mode)" />
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
-    <param name="pull_up_force_threshold" value="0.70"/>
+    <param name="pull_up_force_threshold" value="0.80"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     
