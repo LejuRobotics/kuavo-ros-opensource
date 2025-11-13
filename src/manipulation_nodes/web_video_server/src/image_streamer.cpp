@@ -3,6 +3,7 @@
 #include <iostream>
 #include <deque>
 #include <algorithm>
+#include <ros/topic.h>
 
 // 添加FaceBoundingBox的包含
 #include <kuavo_msgs/FaceBoundingBox.h>
@@ -62,6 +63,21 @@ void ImageTransportImageStreamer::start()
   ros::master::V_TopicInfo available_topics;
   ros::master::getTopics(available_topics);
   inactive_ = true;
+  
+  // 检查是否请求了默认的/camera/color/image_raw话题
+  std::string original_topic = topic_;
+  if (topic_ == "/camera/color/image_raw") {
+    // 检查/cam_h/color/image_raw是否存在
+    for (size_t it = 0; it < available_topics.size(); it++) {
+      if (available_topics[it].name == "/cam_h/color/image_raw" && 
+          available_topics[it].datatype == "sensor_msgs/Image") {
+        // 如果存在，则订阅/cam_h/color/image_raw
+        topic_ = "/cam_h/color/image_raw";
+        ROS_INFO("Found /cam_h/color/image_raw topic. Redirecting subscription from /camera/color/image_raw to /cam_h/color/image_raw");
+        break;
+      }
+    }
+  }
   
   // 更全面的话题匹配逻辑
   for (size_t it = 0; it < available_topics.size(); it++) {

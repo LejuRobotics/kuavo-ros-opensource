@@ -1,6 +1,4 @@
 <launch>
   <node pkg="web_video_server" type="web_video_server" name="web_video_server" output="screen">
-    <!-- 将/camera/color/image_raw重映射到/cam_h/color/image_raw -->
-    <remap from="/camera/color/image_raw" to="/cam_h/color/image_raw"/>
   </node>
 </launch>

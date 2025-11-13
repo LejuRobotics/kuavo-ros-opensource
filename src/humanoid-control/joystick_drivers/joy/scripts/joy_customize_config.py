@@ -399,6 +399,8 @@ class JoyCustomizeConfigNode:
                             
                         elif self._launch_phase == "idle":
                             self._call_real_initialize_srv()
+                            rospy.loginfo(f"[STATE] phase: {self._launch_phase} -> waiting_ready")
+                            self._launch_phase = "waiting_ready"
                             # idle状态下调用服务后不直接跳到waiting_launched，而是等待状态更新
                         else:
                             rospy.loginfo(f"[BUTTON] START IGNORED! not in ready state. phase={self._launch_phase}, allow_once={self._allow_launch_once}")

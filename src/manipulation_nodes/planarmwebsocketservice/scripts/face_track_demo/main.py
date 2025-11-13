@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from ast import Tuple
+from re import T
 import rospy
 import cv2
 import time
@@ -9,6 +11,7 @@ import os
 
 from cv_bridge import CvBridge
 from ultralytics import YOLO
+from openvino.runtime import Core
 
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Point
@@ -76,18 +79,35 @@ class FaceTrack:
 
         # 查询当前脚本所在路径，然后加载模型
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(current_dir, 'yolov8n-face.pt')
-        self.model = YOLO(model_path)
+        model_dir = os.path.join(current_dir, 'yolov8n-face_openvino_model')
+        model_path = os.path.join(model_dir, 'yolov8n-face.xml')
+
+        rospy.loginfo("开始加载OpenVINO人脸识别模型: %s", model_path)
+        self.ov_core = Core()
+        self.device = rospy.get_param("~openvino_device", "CPU")
+        try:
+            self.compiled_model = self.ov_core.compile_model(model_path, self.device)
+        except Exception as exc:
+            rospy.logerr("OpenVINO模型编译失败: %s", exc)
+            raise
+        self.infer_request = self.compiled_model.create_infer_request()
+        self.input_tensor = self.compiled_model.inputs[0]
+        self.output_tensor = self.compiled_model.outputs[0]
+        input_shape = self.input_tensor.shape
+        self.input_height = int(input_shape[2])
+        self.input_width = int(input_shape[3])
+        self.conf_threshold = rospy.get_param("~confidence_threshold", 0.35)
+
         self.bridge = CvBridge()
-        rospy.loginfo("人脸识别模型加载完毕....")
+        rospy.loginfo("OpenVINO人脸识别模型加载完毕")
 
         self.face_position_x = 0    # 人脸框中点在图像中的位置
         self.face_position_y = 0
-        self.target_point_x = 640    # 宽 1280，目标点 x 坐标
-        self.target_point_y = 360    # 高 720，目标点 y 坐标
+        self.target_point_x = 320    # 宽 640，目标点 x 坐标
+        self.target_point_y = 240    # 高 480，目标点 y 坐标
 
         self.is_face_detected = False
-        self.min_face_area = 5000  # 最小人脸面积阈值（像素）
+        self.min_face_area = 1000  # 最小人脸面积阈值（像素）
 
         # 帧率计算相关变量
         self.prev_time = time.time()
@@ -100,8 +120,8 @@ class FaceTrack:
         self.process_every_n_frames = 2  # 每处理1帧就跳过2帧
 
         # yaw 左右转动，pitch 上下转动
-        self.yaw_pid = PID(kp=0.015, ki=0.00, kd=0.001, output_limits=(-90, 90))
-        self.pitch_pid = PID(kp=0.015, ki=0.00, kd=0.001, output_limits=(-20, 30))
+        self.yaw_pid = PID(kp=0.15, ki=0.00, kd=0.001, output_limits=(-90, 90))
+        self.pitch_pid = PID(kp=0.1, ki=0.00, kd=0.001, output_limits=(-20, 30))
         self.head_yaw = 0.0
         self.head_pitch = 0.0
         self.head_yaw_limit = (-90, 90)
@@ -142,13 +162,6 @@ class FaceTrack:
                 subscribed = True
                 break
         
-        # # 如果优先级话题都不存在，但有其他image_raw话题，则订阅第一个
-        # if not subscribed and camera_topics:
-        #     topic = camera_topics[0]
-        #     self.image_sub = rospy.Subscriber(topic, Image, self.image_callback)
-        #     # rospy.loginfo("订阅了第一个找到的摄像头话题: %s", topic)
-        #     subscribed = True
-            
         if not subscribed:
             rospy.logwarn("未找到任何可用的摄像头话题")
 
@@ -174,29 +187,96 @@ class FaceTrack:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
             self.cv_image = cv_image
 
+            # 打印图像大小
+            # rospy.loginfo("图像大小: %s", cv_image.shape)
+            # 判断图像大小，不是指定分辨率帧resize的图片
+            if cv_image.shape != (480, 640, 3):
+                cv_image = cv2.resize(cv_image, (640, 480))
+
             # 在图像上显示帧率
             cv2.putText(cv_image, f"FPS: {self.fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-            results = self.model.predict(source=cv_image, conf=0.3, save=False, verbose=False)
-            result = results[0]
+            detections = self.run_openvino_inference(cv_image)
 
-            if result.boxes and len(result.boxes) > 0:
+            if detections.size > 0:
                 # 检测到人脸
                 self.is_face_detected = True
-                self.find_face_in_picture(cv_image, result.boxes, msg.header)
+                self.find_face_in_picture(cv_image, detections, msg.header)
             else:
                 # 未检测到人脸
                 self.is_face_detected = False
 
             self.image_pub.publish(self.bridge.cv2_to_imgmsg(self.cv_image, "bgr8"))
         except Exception as e:
-            rospy.logerr("图像转换失败: %s", e)
+            rospy.logerr("图像处理失败: %s", e)
             self.is_face_detected = False
     
-    def find_face_in_picture(self, cv_image, boxes, header):
-        # 转为 NumPy 方便处理
-        xyxy = boxes.xyxy.cpu().numpy()
-        confs = boxes.conf.cpu().numpy()
+    def run_openvino_inference(self, image):
+        blob, scale, dwdh, original_size = self.preprocess_image(image)
+        outputs = self.infer_request.infer({self.input_tensor: blob})
+        # OpenVINO导出的YOLO模型通常只有一个输出
+        detections = outputs[self.output_tensor]
+        if detections.ndim == 3:
+            detections = detections[0]
+        detections = detections.astype(np.float32)
+        return self.postprocess_detections(detections, scale, dwdh, original_size)
+
+    def preprocess_image(self, image):
+        h0, w0 = image.shape[:2]
+        input_image = image.copy()
+        r = min(self.input_width / w0, self.input_height / h0)
+        new_unpad = (int(round(w0 * r)), int(round(h0 * r)))
+        dw = (self.input_width - new_unpad[0]) / 2
+        dh = (self.input_height - new_unpad[1]) / 2
+        top = int(round(dh - 0.1))
+        bottom = int(round(self.input_height - new_unpad[1] - top))
+        left = int(round(dw - 0.1))
+        right = int(round(self.input_width - new_unpad[0] - left))
+        resized = cv2.resize(input_image, new_unpad, interpolation=cv2.INTER_LINEAR)
+        padded = cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
+        padded = padded[:, :, ::-1]  # BGR to RGB
+        padded = np.ascontiguousarray(padded)
+        padded = padded.transpose(2, 0, 1)  # HWC to CHW
+        padded = np.expand_dims(padded, axis=0).astype(np.float32) / 255.0
+        return padded, r, (left, top), (h0, w0)
+
+    def postprocess_detections(self, detections, scale, dwdh, original_size):
+        if detections.size == 0:
+            return np.empty((0, 6), dtype=np.float32)
+
+        # detections: [num, 6] -> x1,y1,x2,y2,score,class
+        x_offset, y_offset = dwdh
+        h0, w0 = original_size
+        processed = []
+        for det in detections:
+            if det.shape[0] < 6:
+                continue
+            score = det[4]
+            if score < self.conf_threshold:
+                continue
+            cls_id = det[5]
+            if cls_id != 0:
+                continue
+            x1, y1, x2, y2 = det[0], det[1], det[2], det[3]
+            x1 = (x1 - x_offset) / scale
+            y1 = (y1 - y_offset) / scale
+            x2 = (x2 - x_offset) / scale
+            y2 = (y2 - y_offset) / scale
+            x1 = max(0, min(w0 - 1, x1))
+            y1 = max(0, min(h0 - 1, y1))
+            x2 = max(0, min(w0 - 1, x2))
+            y2 = max(0, min(h0 - 1, y2))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            processed.append([x1, y1, x2, y2, score, cls_id])
+
+        if not processed:
+            return np.empty((0, 6), dtype=np.float32)
+        return np.array(processed, dtype=np.float32)
+
+    def find_face_in_picture(self, cv_image, detections, header):
+        xyxy = detections[:, :4]
+        confs = detections[:, 4]
 
         # 计算每个框的面积：(x2 - x1) * (y2 - y1)
         areas = (xyxy[:, 2] - xyxy[:, 0]) * (xyxy[:, 3] - xyxy[:, 1])
@@ -214,7 +294,8 @@ class FaceTrack:
         max_idx = np.argmax(valid_areas)
 
         # 获取最大人脸框的坐标
-        x1, y1, x2, y2 = map(int, valid_xyxy[max_idx])    # x1 y1 为左上角，x2 y2 为右下角
+        x1, y1, x2, y2 = valid_xyxy[max_idx]
+        x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
         confidence = valid_confs[max_idx]
 
         # 计算人脸框中心点
@@ -237,8 +318,8 @@ class FaceTrack:
 
         # 绘制人脸框
         cv2.rectangle(cv_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        # cv2.putText(cv_image, f"{confidence:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-        # rospy.loginfo("人脸框位置: %d, %d", center_x, center_y)
+        cv2.putText(cv_image, f"{confidence:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+        rospy.loginfo("人脸框位置: %d, %d", center_x, center_y)
 
     def update_head_state(self, msg):
         # 获取当前头部电机弧度制下的位置，转换为角度制
@@ -268,7 +349,7 @@ class FaceTrack:
         if target_position[1] > self.head_pitch_limit[1]:
             target_position[1] = self.head_pitch_limit[1]
         
-        print("发布头部运动消息: ", target_position)
+        # print("发布头部运动消息: ", target_position)
         msg = robotHeadMotionData()
         msg.joint_data = target_position
 
@@ -283,7 +364,7 @@ class FaceTrack:
                 next_yaw = self.head_yaw
                 next_pitch = self.head_pitch
                 
-                if self.face_position_x  < 512 or self.face_position_x > 768:
+                if self.face_position_x  < 256 or self.face_position_x > 280:
                     # 人脸在图像中水平方向上超出中心点，需要转动头部
                     print("人脸在图像中水平方向上超出中心点，需要转动头部: ", self.face_position_x)
                     cur_error_x = self.target_point_x - self.face_position_x
@@ -292,7 +373,7 @@ class FaceTrack:
                 else:
                     self.yaw_pid.reset()
 
-                if self.face_position_y < 300 or self.face_position_y > 420:
+                if self.face_position_y < 150 or self.face_position_y > 330:
                     print("人脸在图像中垂直方向上超出中心点，需要转动头部: ", self.face_position_y)
                     cur_error_y = self.face_position_y - self.target_point_y
                     move_size_y = self.pitch_pid(cur_error_y)

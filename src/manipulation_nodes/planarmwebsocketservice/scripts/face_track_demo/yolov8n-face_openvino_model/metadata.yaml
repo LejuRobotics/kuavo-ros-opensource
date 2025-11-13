@@ -1,0 +1,25 @@
+description: Ultralytics YOLOv8n-pose model trained on /ssd2t/derron/ultralytics/ultralytics/datasets/widerface.yaml
+author: Ultralytics
+date: '2025-11-12T11:45:31.699482'
+version: 8.3.156
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: pose
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: face
+args:
+  batch: 1
+  fraction: 1.0
+  half: true
+  int8: false
+  dynamic: false
+  nms: true
+channels: 3
+kpt_shape:
+- 5
+- 3
