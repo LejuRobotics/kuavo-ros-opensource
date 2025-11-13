@@ -129,7 +129,7 @@ add_library(hardware_plant::lejuclaw STATIC IMPORTED)
 set_target_properties(hardware_plant::lejuclaw PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/leju_claw_driver;${_IMPORT_PREFIX}/include"
   INTERFACE_LINK_DIRECTORIES "${_IMPORT_PREFIX}/lib"
-  INTERFACE_LINK_LIBRARIES "yaml-cpp;stdc++fs;usb-1.0;bmapi64;stdc++;pthread"
+  INTERFACE_LINK_LIBRARIES "yaml-cpp;stdc++fs;usb-1.0;bmapi64;stdc++;pthread;hardware_plant::motorevo_controller;hardware_plant::canbus_sdk"
 )
 
 # Create imported target hardware_plant::hipnuc_imu_receiver

@@ -392,12 +392,16 @@ class JoyCustomizeConfigNode:
                         return
                     else:
                         # 第二阶段：仅在 ready 状态下触发一次初始化服务
-                        if self._launch_phase == "ready" or self._launch_phase == "idle":
-                            rospy.loginfo("[JoyCustomize] START pressed: calling real initialize service (once)")
+                        if self._launch_phase == "ready":
                             self._call_real_initialize_srv()
+                            rospy.loginfo(f"[STATE] phase: {self._launch_phase} -> waiting_launched")
                             self._launch_phase = "waiting_launched"
+                            
+                        elif self._launch_phase == "idle":
+                            self._call_real_initialize_srv()
+                            # idle状态下调用服务后不直接跳到waiting_launched，而是等待状态更新
                         else:
-                            rospy.loginfo(f"[JoyCustomize] START ignored (not in ready), phase={self._launch_phase}")
+                            rospy.loginfo(f"[BUTTON] START IGNORED! not in ready state. phase={self._launch_phase}, allow_once={self._allow_launch_once}")
                         self._prev_buttons = list(joy_msg.buttons)
                         self._prev_axes = list(joy_msg.axes)
                         return
@@ -628,22 +632,27 @@ class JoyCustomizeConfigNode:
                 self.launch_humanoid_robot()
 
     def _call_real_initialize_srv(self) -> None:
+
         try:
             client = rospy.ServiceProxy("/humanoid_controller/real_initial_start", Trigger)
             resp = client()
-            rospy.loginfo(f"[JoyCustomize] real_initial_start -> {resp.success}")
+            rospy.loginfo(f"[SERVICE] real_initial_start RESPONSE: success={resp.success}, message='{resp.message}'")
             if not resp.success:
-                raise RuntimeError("real_initial_start returned false")
+                rospy.logerr(f"[SERVICE] real_initial_start FAILED: {resp.message}")
+                raise RuntimeError(f"real_initial_start returned false: {resp.message}")
         except Exception as e:
-            rospy.logerr(f"[JoyCustomize] real_initial_start failed: {e}, publish /re_start_robot as fallback")
+            # rospy.logerr(f"[SERVICE] real_initial_start EXCEPTION: {e}")
+            # rospy.logwarn(f"[SERVICE] Trying fallback: publish /re_start_robot topic")
             try:
                 msg = Bool()
                 msg.data = True
-                for _ in range(3):
+                for i in range(3):
                     self.re_start_pub.publish(msg)
+                    rospy.loginfo(f"[SERVICE] Published /re_start_robot ({i+1}/3)")
                     rospy.sleep(0.05)
+                rospy.loginfo(f"[SERVICE] Fallback completed")
             except Exception as pub_e:
-                rospy.logerr(f"[JoyCustomize] publish /re_start_robot failed: {pub_e}")
+                rospy.logerr(f"[SERVICE] Fallback also failed: {pub_e}")
 
     def _call_terminate_srv(self) -> None:
         try:
@@ -728,11 +737,13 @@ class JoyCustomizeConfigNode:
         self._last_status_check_time = now
         ok, status = self._query_robot_launch_status()
         if ok:
+            old_status = self._last_launch_status
             self._last_launch_status = status
-            rospy.loginfo(f"[JoyCustomize] launch status: {status}")
+            if old_status != status:
+                rospy.loginfo(f"[STATUS] ROBOT STATUS CHANGED: {old_status} -> {status}")
         else:
             # 保持原状态，不更新 last_status
-            pass
+            rospy.logwarn(f"[STATUS] Failed to query robot status")
 
     def spin(self) -> None:
         rospy.spin()

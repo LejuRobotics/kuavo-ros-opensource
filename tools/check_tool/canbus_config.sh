@@ -256,11 +256,25 @@ replace_single_end_effector() {
             sed -i "/# ANCHOR_L_CLASS/c\    class: $class             # ANCHOR_L_CLASS" "$config_file"
             sed -i "/# ANCHOR_L_DEVICE_ID/c\    device_id: $device_id               # ANCHOR_L_DEVICE_ID" "$config_file"
             sed -i "/# ANCHOR_L_IGNORE/c\    ignore: false                 # ANCHOR_L_IGNORE" "$config_file"
+            # 若为 lejuclaw，补充必要的参数
+            if [ "$type" = "lejuclaw" ]; then
+                # 追加顺序：params -> ratio -> negtive（使用倒序插入以保证最终顺序）
+                sed -i "/# ANCHOR_L_DEVICE_ID/a\    negtive: false" "$config_file"
+                sed -i "/# ANCHOR_L_DEVICE_ID/a\    ratio: 25" "$config_file"
+                sed -i "/# ANCHOR_L_DEVICE_ID/a\    params: [0, 0, 0, 0, 0, 0, 0]" "$config_file"
+            fi
         else
             sed -i "/# ANCHOR_R_NAME/c\  - name: $name        # ANCHOR_R_NAME" "$config_file"
             sed -i "/# ANCHOR_R_CLASS/c\    class: $class             # ANCHOR_R_CLASS" "$config_file"
             sed -i "/# ANCHOR_R_DEVICE_ID/c\    device_id: $device_id               # ANCHOR_R_DEVICE_ID" "$config_file"
             sed -i "/# ANCHOR_R_IGNORE/c\    ignore: false                 # ANCHOR_R_IGNORE" "$config_file"
+            # 若为 lejuclaw，补充必要的参数
+            if [ "$type" = "lejuclaw" ]; then
+                # 追加顺序：params -> ratio -> negtive（使用倒序插入以保证最终顺序）
+                sed -i "/# ANCHOR_R_DEVICE_ID/a\    negtive: false" "$config_file"
+                sed -i "/# ANCHOR_R_DEVICE_ID/a\    ratio: 25" "$config_file"
+                sed -i "/# ANCHOR_R_DEVICE_ID/a\    params: [0, 0, 0, 0, 0, 0, 0]" "$config_file"
+            fi
         fi
 
         # TODO: 也许需要对夹爪增加额外的配置，比如电机的默认参数等...
