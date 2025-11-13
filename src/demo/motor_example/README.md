@@ -54,6 +54,18 @@ mkdir -p ~/.config/lejuconfig
 cp right_arm_config.yaml ~/.config/lejuconfig/config.yaml
 ```
 
+3. 由于电机的控制线程会绑定到CPU 7 核心上，因此需要您对该核进行隔核操作，隔核脚本可以参考:
+
+**注意该脚本会隔阂2，3，7核心，如果您只需要7核，请把2，3删除！！**
+
+**注意该脚本会隔阂2，3，7核心，如果您只需要7核，请把2，3删除！！**
+
+**注意该脚本会隔阂2，3，7核心，如果您只需要7核，请把2，3删除！！**
+
+```bash
+tools/check_tool/isolate_cores.sh
+```
+
 ### 标定零点
 
 **注意：您必须要执行一次标定零点，以生成保存零点文件!**
@@ -79,11 +91,11 @@ source devel/setup.bash
 export MOTOR_DEPS_DIR=$(pwd)/../../../../installed/lib
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$MOTOR_DEPS_DIR
 
-# 左臂 关键参数 cali:=true
-roslaunch ruiwo_controller_example motor_control.launch arm_type:=left cali:=true
+# 左臂 关键参数 cali_arm:=true
+roslaunch ruiwo_controller_example motor_control.launch arm_type:=left cali_arm:=true
 
-# 右臂 cali:=true
-roslaunch ruiwo_controller_example motor_control.launch arm_type:=right cali:=true
+# 右臂 cali_arm:=true
+roslaunch ruiwo_controller_example motor_control.launch arm_type:=right cali_arm:=true
 ```
 
 ## 快速开始
@@ -132,7 +144,7 @@ roslaunch ruiwo_controller_example motor_control.launch arm_type:=right
 
 | 参数名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `cali` | bool | false | 是否启用校准模式 |
+| `cali_arm` | bool | false | 是否启用校准模式 |
 | `arm_type` | string | "left" | 控制的机械臂类型 ("left" 或 "right") |
 
 
@@ -197,3 +209,9 @@ void close();                                  // 关闭和清理
    error while loading shared libraries: libbmapi64.so: cannot open shared object file
    ```
    解决方案：检查`installed/lib/`目录中是否存在所需的库文件
+
+3. **终端日志输出电机存在故障码（大于 0x83的)**
+
+如果遇到终端日志输出电机存在故障码（大于 0x83的），这说明电机当前存在严重故障，需要**重新标定零点**（标定会清除故障码）来清除故障码，如果还出现可以多试几次或重启。
+
+还不行，那就试试电机motorevo studio软件清除，或者联系工程师。
