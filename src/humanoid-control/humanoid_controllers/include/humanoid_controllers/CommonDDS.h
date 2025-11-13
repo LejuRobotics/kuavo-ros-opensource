@@ -22,11 +22,15 @@
 #include "unitree/idl/hg/LowCmd_.hpp"
 #include "unitree/idl/hg/LowState_.hpp"
 
+// Leju DDS types
+#include "leju/idl/JointCmd.hpp"
+#include "leju/idl/SensorsData.hpp"
+#include "leju/idl/ImuData.hpp"
+#include "leju/idl/JointData.hpp"
+#include "leju/idl/EndEffectorData.hpp"
+
 using namespace org::eclipse::cyclonedds;
 
-// Forward declarations
-class DdsLowStateListener;
-class HumanoidControllerDDSClient;
 
 // Constants
 constexpr size_t KUAVO_JOINT_COUNT = 28;
@@ -41,51 +45,53 @@ extern const std::string DDS_STATE_TOPIC;
 uint32_t Crc32Core(uint32_t *ptr, uint32_t len);
 
 // DdsLowStateListener class declaration
-class DdsLowStateListener : public dds::sub::NoOpDataReaderListener<unitree_hg::msg::dds_::LowState_> {
+template<typename StateMessageType>
+class DdsLowStateListener : public dds::sub::NoOpDataReaderListener<StateMessageType> {
 public:
     DdsLowStateListener();
-    
-    void on_data_available(dds::sub::DataReader<unitree_hg::msg::dds_::LowState_>& reader) override;
-    
+
+    void on_data_available(dds::sub::DataReader<StateMessageType>& reader) override;
+
     uint64_t getMessageCount() const;
-    unitree_hg::msg::dds_::LowState_ getLatestData() const;
-    void setLowdstateCallback(std::function<void(const unitree_hg::msg::dds_::LowState_&)> callback);
-    
+    StateMessageType getLatestData() const;
+    void setLowdstateCallback(std::function<void(const StateMessageType&)> callback);
+
 private:
     std::atomic<uint64_t> message_count_;
     mutable std::mutex data_mutex_;
-    unitree_hg::msg::dds_::LowState_ latest_state_data_;
-    std::function<void(const unitree_hg::msg::dds_::LowState_&)> ext_lowdstate_callback_;
+    StateMessageType latest_state_data_;
+    std::function<void(const StateMessageType&)> ext_lowdstate_callback_;
 };
 
 // HumanoidControllerDDSClient class declaration
+template<typename CmdType, typename StateType>
 class HumanoidControllerDDSClient {
 public:
     HumanoidControllerDDSClient();
     ~HumanoidControllerDDSClient();
-    
+
     void start();
     void stop();
-    
+
     // Low command publishing API
-    void publishLowCmd(const unitree_hg::msg::dds_::LowCmd_& cmd);
-    
-    std::unique_ptr<DdsLowStateListener> state_listener_;
-    
+    void publishLowCmd(const CmdType& cmd);
+
+    std::unique_ptr<DdsLowStateListener<StateType>> state_listener_;
+
 private:
     void setupStateListener();
-    
+
     // DDS entities
     dds::domain::DomainParticipant participant_;
-    dds::topic::Topic<unitree_hg::msg::dds_::LowCmd_> cmd_topic_;
-    dds::topic::Topic<unitree_hg::msg::dds_::LowState_> state_topic_;
-    dds::pub::DataWriter<unitree_hg::msg::dds_::LowCmd_> cmd_writer_;
-    dds::sub::DataReader<unitree_hg::msg::dds_::LowState_> state_reader_;
-    
+    dds::topic::Topic<CmdType> cmd_topic_;
+    dds::topic::Topic<StateType> state_topic_;
+    dds::pub::DataWriter<CmdType> cmd_writer_;
+    dds::sub::DataReader<StateType> state_reader_;
+
     // Threading
     std::thread publish_thread_;
     std::atomic<bool> running_;
-    
+
     // Performance counters
     std::atomic<uint64_t> publish_count_;
 }; 

@@ -6,42 +6,7 @@
 #include <thread>
 #include <mutex>
 #include <iterator>
-
-/// @brief Revo电机故障码
-/// 一旦驱动板检测到故障，将会从 Motor State 自动切回 Rest State 以保护驱动器和电机
-/// 在排除异常情况后，发送 Enter Rest State 命令清除故障码，
-// 再发送 Enter Motor State 命令让电机重新恢复运行
-// See Details:《Motorevo Driver User Guide v0.2.3》- 6.5.1 反馈帧格式 - 故障码
-enum class RuiwoErrCode:uint8_t {
-    NO_FAULT = 0x00,                       // 无故障
-    DC_BUS_OVER_VOLTAGE = 0x01,            // 直流母线电压过压
-    DC_BUS_UNDER_VOLTAGE = 0x02,           // 直流母线电压欠压
-    ENCODER_ANGLE_FAULT = 0x03,            // 编码器电角度故障
-    DRV_DRIVER_FAULT = 0x04,               // DRV 驱动器故障
-    DC_BUS_CURRENT_OVERLOAD = 0x05,        // 直流母线电流过流
-    MOTOR_A_PHASE_CURRENT_OVERLOAD = 0x06, // 电机 A 相电流过载
-    MOTOR_B_PHASE_CURRENT_OVERLOAD = 0x07, // 电机 B 相电流过载
-    MOTOR_C_PHASE_CURRENT_OVERLOAD = 0x08, // 电机 C 相电流过载
-    DRIVER_BOARD_OVERHEAT = 0x09,          // 驱动板温度过高
-    MOTOR_WINDING_OVERHEAT = 0x0A,         // 电机线圈过温
-    ENCODER_FAILURE = 0x0B,                // 编码器故障
-    CURRENT_SENSOR_FAILURE = 0x0C,         // 电流传感器故障
-    OUTPUT_ANGLE_OUT_OF_RANGE = 0x0D,      // 输出轴实际角度超过通信范围：CAN COM Theta MIN ~ CAN COM Theta MAX
-    OUTPUT_SPEED_OUT_OF_RANGE = 0x0E,      // 输出轴速度超过通信范围 CAN COM Velocity MIN ~ CAN COM Velocity MAX
-    STUCK_PROTECTION = 0x0F,               // 堵转保护：电机电枢电流(Iq)大于 Stuck Current，同时电机速度小于 Stuck Velocity，持续时间超过 Stuck Time 后触发
-    CAN_COMMUNICATION_LOSS = 0x10,         // CAN 通讯丢失：超过 CAN COM TIMEOUT 时间没有收到 CAN 数据帧时触发
-
-    // WARNING: 大于 128 的故障码为开机自检检测出的故障码，无法用该方法清除
-    //
-    ABS_ENCODER_OFFSET_VERIFICATION_FAILURE = 0x81, // 离轴/对心多圈绝对值编码器接口帧头校验失败
-    ABSOLUTE_ENCODER_MULTI_TURN_FAILURE = 0x82,     // 对心多圈绝对值编编码器多圈接口故障
-    ABSOLUTE_ENCODER_EXTERNAL_INPUT_FAILURE = 0x83, // 对心多圈绝对值编码器外部输入故障
-    ABSOLUTE_ENCODER_SYSTEM_ANOMALY = 0x84,         // 对心多圈绝对值编码器读值故障
-    ERR_OFFS = 0x85,                                // 对心多圈绝对值编码器ERR_OFFS
-    ERR_CFG = 0x86,                                 // 对心多圈绝对值编码器ERR_CFG
-    ILLEGAL_FIRMWARE_DETECTED = 0x88,               // 检测到非法固件
-    INTEGRATED_STATOR_DRIVER_DAMAGED = 0x89,        // 集成式栅极驱动器初始化失败
- };
+#include "ruiwo_actuator_base.h"
 
 /**
  * Structure representing motor parameters for Ruiwo actuators
@@ -126,23 +91,8 @@ struct RuiwoMotorConfig_t {
     }
 };
 
-class RuiWoActuator
+class RuiWoActuator : public RuiwoActuatorBase
 {
- public:
-    enum class State {
-        None,
-        Enabled,
-        Disabled
-    };
-
-    struct MotorStateData {
-        uint8_t id;
-        State   state;
-        MotorStateData():id(0x0), state(State::None) {}
-        MotorStateData(uint8_t id_, State state_):id(id_), state(state_) {}
-    };    
-    using MotorStateDataVec = std::vector<MotorStateData>;
-
 public:
     RuiWoActuator(std::string unused = "", bool is_cali = false);
     ~RuiWoActuator();
@@ -156,7 +106,7 @@ public:
      *  2: canbus error, e.g. canbus init fail... 
      *  3: motor error, e.g. 电机使能、失能过程中出现不可清除的故障码...
      */
-    int initialize();
+    int initialize() override;
         
     /**
      * @brief 使能所有电机，对全部电机执行 Enter Motor State 进入 Motor State 运行模式
@@ -165,7 +115,7 @@ public:
      * 1: 通信问题，包括：CAN 消息发送/接收失败或者超时
      * 2: 严重错误!!! 严重错误!!! 返回 2 时说明有电机存在严重故障码(RuiwoErrorCode 中大于 128 的故障码)
      */
-    int enable();
+    int enable() override;
 
     /**
      * @brief 对全部电机执行 Enter Reset State 进入 Reset State 运行模式
@@ -175,21 +125,17 @@ public:
      * 1: 通信问题，包括：CAN 消息发送/接收失败或者超时
      * 2: 严重错误!!! 严重错误!!! 返回 2 时说明有电机存在严重故障码(RuiwoErrorCode 中大于 128 的故障码)
      */
-    int disable();
+    int disable() override;
 
-    bool disableMotor(int motorIndex);
-    void close();
+    bool disableMotor(int motorIndex) override;
+    void close() override;
 
-    void go_to_zero();
-    void set_zero();
-    void saveAsZeroPosition();
-    void saveZeroPosition();
-    void set_teach_pendant_mode(int mode);
-    void changeEncoderZeroRound(int index, double direction);
-    void adjustZeroPosition(int index, double offset);
-    std::vector<double> getMotorZeroPoints();
-    void multi_turn_zeroing(const std::vector<int>& dev_ids);
-    std::vector<int> get_all_joint_addresses();
+    void saveAsZeroPosition() override;
+    void saveZeroPosition() override;
+    void set_teach_pendant_mode(int mode) override;
+    void changeEncoderZeroRound(int index, double direction) override;
+    void adjustZeroPosition(int index, double offset) override;
+    std::vector<double> getMotorZeroPoints() override;
     
     /**
      * @brief Set the positions object
@@ -199,10 +145,10 @@ public:
      * @param torque     
      * @param velocity  单位为角度/s
      */
-    void set_positions(const std::vector<uint8_t> &index, 
-        const std::vector<double> &positions, 
-        const std::vector<double> &torque, 
-        const std::vector<double> &velocity);
+    void set_positions(const std::vector<uint8_t> &index,
+        const std::vector<double> &positions,
+        const std::vector<double> &torque,
+        const std::vector<double> &velocity) override;
 
     /**
      * @brief Set the torque object
@@ -210,7 +156,7 @@ public:
      * @param index [0,1,2,3,...]
      * @param torque 
      */
-    void set_torque(const std::vector<uint8_t> &index, const std::vector<double> &torque);
+    void set_torque(const std::vector<uint8_t> &index, const std::vector<double> &torque) override;
 
     /**
      * @brief Set the velocity object
@@ -218,21 +164,19 @@ public:
      * @param index [0,1,2,3,...]
      * @param velocity 
      */
-    void set_velocity(const std::vector<uint8_t> &index, const std::vector<double> &velocity);
+    void set_velocity(const std::vector<uint8_t> &index, const std::vector<double> &velocity) override;
     
     /**
      * @brief Get the positions object
      * 
      * @return std::vector<double> radians
      */
-    std::vector<double> get_positions();
-    std::vector<double> get_torque();
-    std::vector<double> get_velocity();
+    std::vector<double> get_positions() override;
+    std::vector<double> get_torque() override;
+    std::vector<double> get_velocity() override;
 
     std::vector<std::vector<float>> get_joint_state();
-
-    MotorStateDataVec get_motor_state();
-    std::vector<std::vector<float>> get_joint_origin_state();
+    MotorStateDataVec get_motor_state() override;
 
     /**
      * @brief 设置指定关节的kp_pos和kd_pos参数
@@ -241,7 +185,7 @@ public:
      * @param kp_pos kp_pos值列表，如果为空则不修改
      * @param kd_pos kd_pos值列表，如果为空则不修改
      */
-    void set_joint_gains(const std::vector<int> &joint_indices, const std::vector<double> &kp_pos, const std::vector<double> &kd_pos);
+    void set_joint_gains(const std::vector<int> &joint_indices, const std::vector<double> &kp_pos, const std::vector<double> &kd_pos) override;
 
     /**
      * @brief 获取指定关节的kp_pos和kd_pos参数
@@ -249,9 +193,15 @@ public:
      * @param joint_indices 关节索引列表，如果为空则返回所有关节
      * @return std::vector<std::vector<double>> 第一个vector是kp_pos，第二个是kd_pos
      */
-    std::vector<std::vector<double>> get_joint_gains(const std::vector<int> &joint_indices = {});    
+    std::vector<std::vector<double>> get_joint_gains(const std::vector<int> &joint_indices = {}) override;
 
 private:
+    void go_to_zero();
+    void set_zero();
+    void multi_turn_zeroing(const std::vector<int>& dev_ids);
+    std::vector<int> get_all_joint_addresses();
+    std::vector<std::vector<float>> get_joint_origin_state();
+
     void control_thread();
     void recv_thread();
     void recv_message();

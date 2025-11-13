@@ -96,7 +96,8 @@ enum MotorDriveType
   EC_MASTER,
   DYNAMIXEL,
   REALMAN,
-  RUIWO
+  RUIWO,
+  UNKNOWN
 };
 
 typedef struct

@@ -80,9 +80,9 @@ def create_simple_6d_trajectory2():
         footPose6DTargetTrajectories消息
     """
     time_traj = [0.5, 1.0, 1.5, 2.0]
-    foot_idx_traj = [0, 2, 1, 2]  # 默认左脚开始
-    foot_poses_6d = [[0.6, 0.1, 0.0, 0.0, 0.0, 0.0], [0.6, 0.1, 0.0, 0.0, 0.0, 0.0], [0.6, -0.1, 0.0, 0.0, 0.0, 0.0], [0.6, -0.1, 0.0, 0.0, 0.0, 0.0]]
-    torso_poses_6d = [[0.45, 0.0, 0.0, 0.0, 0.1, 0.0], [0.45, 0.0, 0.0, 0.0, 0.1, 0.0], [0.6, 0.0, 0.0, 0.0, 0.0, 0.0], [0.6, 0.0, 0.0, 0.0, 0.0, 0.0]]
+    foot_idx_traj = [1, 2, 0, 2]  # 默认左脚开始
+    foot_poses_6d = [[0.6, -0.1, 0.0, 0.0, 0.0, 0.0], [0.6, -0.1, 0.0, 0.0, 0.0, 0.0], [0.6, 0.1, 0.0, 0.0, 0.0, 0.0], [0.6, 0.1, 0.0, 0.0, 0.0, 0.0]]
+    torso_poses_6d = [[0.6, 0.0, 0.0, 0.0, 0.0, 0.0], [0.6, 0.0, 0.0, 0.0, 0.0, 0.0], [0.45, 0.0, 0.0, 0.0, 0.1, 0.0], [0.45, 0.0, 0.0, 0.0, 0.1, 0.0]]
     
     return get_foot_pose_6d_traj_msg(time_traj, foot_idx_traj, foot_poses_6d, torso_poses_6d)
 
@@ -106,12 +106,11 @@ if __name__ == '__main__':
     pub_6d.publish(msg_6d_single)
     print("世界系6D姿态点已发布")
     
-    rospy.sleep(5)
+    rospy.sleep(1)
 
     print("=== 测试2：世界系6D姿态点 ===")
     
     msg_6d_single2 = create_simple_6d_trajectory2()
     pub_6d.publish(msg_6d_single2)
     print("世界系6D姿态点已发布")
-    rospy.sleep(2)
     

@@ -292,7 +292,7 @@ void GazeboShmInterface::waitForParams()
         std::cout << "GazeboShmInterface get waist_num: " << waist_num << std::endl;
         if (waist_num > 0) {
             for (int i = 0; i < waist_num; i++) {
-                robot_init_state_param_.insert(robot_init_state_param_.begin() + 7, 0.0);
+                robot_init_state_param_.insert(robot_init_state_param_.begin() + 7+12, 0.0);
             }
         }
 
@@ -325,7 +325,7 @@ void GazeboShmInterface::setInitialState()
     if (robot_init_state_param_.size() >= 7) {
         std::vector<double> base_pose(robot_init_state_param_.begin(), robot_init_state_param_.begin() + 7);
         ignition::math::Pose3d new_pose;
-        new_pose.Pos().Set(base_pose[0], base_pose[1], base_pose[2]);
+        new_pose.Pos().Set(base_pose[0], base_pose[1], base_pose[2] + 0.01);// 站立需要离地一点避免碰撞
         new_pose.Rot().Set(base_pose[3], base_pose[4], base_pose[5], base_pose[6]);  // w,x,y,z
         
         model_->SetWorldPose(new_pose);
@@ -435,6 +435,7 @@ void GazeboShmInterface::OnUpdate(const common::UpdateInfo& _info)
         // 在第一次更新时设置初始状态
         setInitialState();
         first_update = false;
+        return;
     }
 
     // 更新IMU数据

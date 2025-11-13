@@ -43,7 +43,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "humanoid_interface/common/ModelSettings.h"
 #include <urdf/model.h>
-#include <kuavo_msgs/lejuClawCommand.h>
 
 
 namespace ocs2
@@ -111,8 +110,6 @@ namespace ocs2
       
       void updateHandJointPositions(const vector_t &positions);
 
-      void updateClawJointPositions(const vector_t &positions);
-
 
       void updateSimplifiedArmPositions(const vector_t &positions);
       
@@ -152,12 +149,6 @@ namespace ocs2
       std::vector<std::string> dexhand_joint_names_;
       bool updateDexhandJointPositions_ = false;
       std::vector<double> dexhand_joint_positions_;
-
-
-      bool updateClawJointPositions_ = true;
-      std::vector<double> claw_joint_positions_ = {0.0, 0.0};
-      ros::Subscriber clawCmdSubscriber_;
-      void lejuClawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg);
 
       scalar_t lastTime_;
       scalar_t minPublishTimeDifference_;

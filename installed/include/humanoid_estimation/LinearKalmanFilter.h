@@ -38,11 +38,18 @@ public:
   void set_intial_state(const vector_t& state) override;
   
   vector_t update(const ros::Time& time, const ros::Duration& period) override;
+  bool updateKinematicsRL(const ros::Time &time, const ros::Duration &period) override;
   void setFixFeetHeights(bool isFix) 
   {
     isFixHeight_ = isFix;
   }
   nav_msgs::Odometry updateKinematics(const ros::Time &time, const Eigen::Quaterniond &imu_quat, const ros::Duration &period) override;
+  
+  // 获取足端位置接口
+  vector_t getEndEffectorPositions() const override { return endEffectorPositions_; }
+  
+  // 计算双脚支撑中心点
+  vector3_t getFeetCenterPosition() const override;
 
   void loadSettings(const std::string& taskFile, bool verbose);
   void reset() override;
@@ -98,6 +105,9 @@ private:
   std::string frameOdom_, frameGuess_;
   bool topicUpdated_;
   bool isFixHeight_;
+  
+  // 足端位置存储
+  vector_t endEffectorPositions_;
 };
 
 }  // namespace humanoid

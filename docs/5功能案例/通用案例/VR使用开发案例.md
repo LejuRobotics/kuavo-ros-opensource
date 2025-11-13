@@ -128,6 +128,14 @@
 
    # VR先和机器人连到同一局域网, VR 会广播 自身IP 到局域网中
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch
+
+   # 可选配置参数：use_cpp_ik
+   # 启动python版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=false
+
+   # 启动C++版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true
+
   ```
 
   > 如果手动输入VR的IP地址, 在启动命令后追加参数 `ip_address:=192.168.3.32`(替换成VR的实际IP地址)
@@ -191,4 +199,18 @@ sudo apt install libv4l-dev
 - 在下位机运行：
    ```bash
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_robot_camera.launch
+   ```
+
+   # CPP版本IK使用说明（测试版）
+   ## 仿真
+   ```bash
+   roslaunch motion_capture_ik ik_ros_uni_cpp_vr_mujoco_sim.launch ip_address:="your_quest3_ip"
+   # 例如
+   # roslaunch motion_capture_ik ik_ros_uni_cpp_vr_mujoco_sim.launch ip_address:=10.10.20.234
+   ```
+   ## 实物
+   ```bash
+   roslaunch motion_capture_ik ik_ros_uni_cpp_vr_real.launch ip_address:="your_quest3_ip"
+   # 例如
+   # roslaunch motion_capture_ik ik_ros_uni_cpp_vr_real.launch ip_address:=10.10.20.234
    ```

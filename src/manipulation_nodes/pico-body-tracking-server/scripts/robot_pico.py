@@ -304,10 +304,10 @@ class KuavoRobotPico:
             return {}
 
     def set_use_real_foot_data(self, use_real: bool):
-        """设置 complete_action_detector 的 use_real_foot_data 字段（左右脚同时设置）"""
+        """设置 local_detector 的 use_real_foot_data 字段（左右脚同时设置）"""
         if self.pico_node and self.robot_state == RobotState.CONNECTED:
             try:
-                detector = self.pico_node.pico_info_transformer.complete_action_detector
+                detector = self.pico_node.pico_info_transformer.local_detector
                 for side in ['left', 'right']:
                     if side in detector:
                         detector[side]['use_real_foot_data'] = use_real
@@ -321,9 +321,9 @@ class KuavoRobotPico:
             return False
 
     def get_use_real_foot_data(self):
-        """获取 complete_action_detector 的 use_real_foot_data 字段（返回左右脚）"""
+        """获取 local_detector 的 use_real_foot_data 字段（返回左右脚）"""
         if self.pico_node and self.robot_state == RobotState.CONNECTED:
-            detector = self.pico_node.pico_info_transformer.complete_action_detector
+            detector = self.pico_node.pico_info_transformer.local_detector
             return {
                 'left': detector.get('left', {}).get('use_real_foot_data', False),
                 'right': detector.get('right', {}).get('use_real_foot_data', False)
@@ -340,26 +340,26 @@ class KuavoRobotPico:
                 # Handle detection mode configuration
                 if 'detection_mode' in config:
                     detection_mode = config['detection_mode']
-                    if detection_mode == 'complete_action':
-                        self.pico_node.pico_info_transformer.enable_complete_action_detection()
-                        SDKLogger.info("Complete action detection mode enabled")
-                    elif detection_mode == 'threshold':
-                        self.pico_node.pico_info_transformer.enable_threshold_detection()
-                        SDKLogger.info("Threshold-based detection mode enabled")
+                    if detection_mode == 'local':
+                        self.pico_node.pico_info_transformer.enable_local_detector()
+                        SDKLogger.info("Local detector mode enabled")
+                    elif detection_mode == 'vr':
+                        self.pico_node.pico_info_transformer.enable_vr_detector()
+                        SDKLogger.info("VR detector mode enabled")
                     else:
                         SDKLogger.warning(f"Unknown detection mode: {detection_mode}")
                 # Handle complete action parameters
-                if 'complete_action' in config:
-                    complete_action_params = config['complete_action']
-                    self.pico_node.pico_info_transformer.set_complete_action_parameters(complete_action_params)
+                if 'local' in config:
+                    local_detector_params = config['local_detector']
+                    self.pico_node.pico_info_transformer.set_local_detector_parameters(local_detector_params)
                     SDKLogger.info("Complete action parameters updated")
                     # 自动设置 use_real_foot_data
-                    if 'use_real_foot_data' in complete_action_params:
-                        detector = self.pico_node.pico_info_transformer.complete_action_detector
+                    if 'use_real_foot_data' in local_detector_params:
+                        detector = self.pico_node.pico_info_transformer.local_detector
                         for side in ['left', 'right']:
                             if side in detector:
-                                detector[side]['use_real_foot_data'] = complete_action_params['use_real_foot_data']
-                        SDKLogger.info(f"Set use_real_foot_data to {complete_action_params['use_real_foot_data']} for both feet")
+                                detector[side]['use_real_foot_data'] = local_detector_params['use_real_foot_data']
+                        SDKLogger.info(f"Set use_real_foot_data to {local_detector_params['use_real_foot_data']} for both feet")
                 SDKLogger.info("Movement detector configuration updated successfully")
                 return True
             except Exception as e:
@@ -375,24 +375,24 @@ class KuavoRobotPico:
         
         Args:
             mode (str): Detection mode
-                - 'threshold': Threshold-based detection (real-time)
-                - 'complete_action': Complete action detection (ground-lift-ground)
+                - 'vr': vr footstep detector
+                - 'local': local footstep detector
                 
         Returns:
             bool: True if mode was set successfully, False otherwise
             
         Example:
-            >>> pico.set_detection_mode('complete_action')  # Enable complete action detection
-            >>> pico.set_detection_mode('threshold')       # Enable threshold detection
+            >>> pico.set_detection_mode('local')  # Enable local footstep detector
+            >>> pico.set_detection_mode('vr')       # Enable vr footstep detector
         """
         if self.pico_node and self.robot_state == RobotState.CONNECTED:
             try:
-                if mode == 'complete_action':
-                    self.pico_node.pico_info_transformer.enable_complete_action_detection()
-                    SDKLogger.info("Complete action detection mode enabled")
-                elif mode == 'threshold':
-                    self.pico_node.pico_info_transformer.enable_threshold_detection()
-                    SDKLogger.info("Threshold-based detection mode enabled")
+                if mode == 'local':
+                    self.pico_node.pico_info_transformer.enable_local_detector()
+                    SDKLogger.info("Local detector mode enabled")
+                elif mode == 'vr':
+                    self.pico_node.pico_info_transformer.enable_vr_detector()
+                    SDKLogger.info("VR detector mode enabled")
                 else:
                     SDKLogger.error(f"Invalid detection mode: {mode}")
                     return False
@@ -409,7 +409,7 @@ class KuavoRobotPico:
         """Get current detection mode.
         
         Returns:
-            str: Current detection mode ('threshold' or 'complete_action')
+            str: Current detection mode ('vr' or 'local')
         """
         if self.pico_node and self.robot_state == RobotState.CONNECTED:
             return self.pico_node.pico_info_transformer.get_detection_mode()
@@ -417,7 +417,7 @@ class KuavoRobotPico:
             SDKLogger.warning("Pico node not available for getting detection mode")
             return 'threshold'
 
-    def set_complete_action_parameters(self, parameters: dict) -> bool:
+    def set_local_detector_parameters(self, parameters: dict) -> bool:
         """Set parameters for complete action detection.
         
         Args:
@@ -440,11 +440,11 @@ class KuavoRobotPico:
             ...     'max_action_duration': 10.0, # 10.0s
             ...     'min_horizontal_movement': 0.05  # 5cm
             ... }
-            >>> pico.set_complete_action_parameters(params)
+            >>> pico.set_local_detector_parameters(params)
         """
         if self.pico_node and self.robot_state == RobotState.CONNECTED:
             try:
-                self.pico_node.pico_info_transformer.set_complete_action_parameters(parameters)
+                self.pico_node.pico_info_transformer.set_local_detector_parameters(parameters)
                 SDKLogger.info("Complete action parameters updated successfully")
                 return True
             except Exception as e:
@@ -455,14 +455,14 @@ class KuavoRobotPico:
             SDKLogger.warning("Pico node not available for setting complete action parameters")
             return False
 
-    def get_complete_action_parameters(self) -> dict:
+    def get_local_detector_parameters(self) -> dict:
         """Get current complete action detection parameters.
         
         Returns:
             dict: Current complete action detection parameters
         """
         if self.pico_node and self.robot_state == RobotState.CONNECTED:
-            return self.pico_node.pico_info_transformer.get_complete_action_parameters()
+            return self.pico_node.pico_info_transformer.get_local_detector_parameters()
         else:
             SDKLogger.warning("Pico node not available for getting complete action parameters")
             return {}
@@ -649,9 +649,9 @@ def parse_args():
                       help='Enable torso control (0: disabled, 1: enabled)')
     parser.add_argument('--service_mode', type=int, default=1,
                       help='Enable service mode (0: disabled, 1: enabled)')
-    parser.add_argument('--detection_mode', type=str, default='threshold',
-                      choices=['threshold', 'complete_action'],
-                      help='Movement detection mode (default: threshold)')
+    parser.add_argument('--detection_mode', type=str, default='local',
+                      choices=['vr', 'local'],
+                      help='Movement detection mode (default: local)')
     
     # Parallel detection arguments
     parser.add_argument('--parallel_detection', type=int, default=1,
@@ -684,53 +684,42 @@ if __name__ == "__main__":
             service_mode=bool(args.service_mode)
         )
         
-        # Configure movement detector with custom settings
-        # 默认参数与 pico_utils.py 保持一致
         movement_config = {
-            'horizontal_threshold': 0.2,    # 20cm position threshold
-            'vertical_threshold': 0.01,    # 1cm vertical threshold
-            'angle_threshold': 20.0,       # 20 degrees angle threshold
-            'step_length': 0.2,            # 20cm step length
+            'horizontal_threshold': 0.2,    # 10cm position threshold
             'initial_left_foot_pose': [0.0, 0.1, 0.0, 0.0],
             'initial_right_foot_pose': [0.0, -0.1, 0.0, 0.0],
-            'initial_body_pose': None,
-            'detection_mode': args.detection_mode,  # 'threshold' or 'complete_action'
-            'complete_action': {
-                'lift_threshold': 0.03,     # 3cm 抬起阈值
-                'ground_threshold': 0.01,   # 1cm 地面阈值
-                'min_action_duration': 0.3, # 0.3秒
-                'max_action_duration': 10.0, # 10秒
-                'action_buffer_size': 50,   # 缓冲区大小
-                'min_horizontal_movement': 0.05,  # 5cm
-                # 自适应阈值相关
-                'adaptive_threshold_enabled': True,
-                'calibration_samples': 50,
-                'adaptive_lift_offset': 0.02,
-                'adaptive_ground_offset': 0.005,
+            'max_step_length_x': 0.4,       # 最大步长x
+            'max_step_length_y': 0.15,      # 最大步长y
+            'detection_mode': 'local',  # 'local' 或 'vr'
+            'local_detector': {
+                'min_action_duration': 0.3, # 最小动作时长 0.3秒
+                'max_action_duration': 2.0, # 最大动作时长 2.0秒
+                'action_buffer_size': 50,   # 动作缓冲区大小
+                'min_horizontal_movement': 0.05,  # 最小水平移动距离 5cm
+                'adaptive_threshold_enabled': True,  # 是否启用自适应阈值
+                'calibration_samples': 50,  # 校准样本数量
+                'adaptive_lift_offset': 0.005,  # 相对于基准高度的抬起偏移量
             },
+            
+            # 新增：并行检测配置参数
             'parallel_detection': {
-                'enabled': bool(args.parallel_detection),
-                'timeout_ms': args.parallel_timeout_ms,
-                'max_workers': args.parallel_workers,
-                'precise_timing': True,
-                'debug_mode': bool(args.parallel_debug),
+                'enabled': True,           # 是否启用并行检测
+                'timeout_ms': 50,          # 检测超时时间（毫秒）
+                'max_workers': 2,          # 最大工作线程数
+                'precise_timing': True,    # 是否使用精确时间戳
+                'debug_mode': False,       # 调试模式
             }
         }
 
-        # 兼容命令行参数覆盖部分默认值
-        if args.detection_mode == 'complete_action':
-            movement_config['detection_mode'] = 'complete_action'
-            # 可根据需要覆盖 complete_action 子参数
-            # movement_config['complete_action'].update({...})
+        if args.detection_mode == 'local':
+            movement_config['detection_mode'] = 'local'
         else:
-            movement_config['detection_mode'] = 'threshold'
+            movement_config['detection_mode'] = 'vr'
 
         SDKLogger.info(f"Using detection mode: {movement_config['detection_mode']}")
 
         if pico.set_movement_detector_config(movement_config):
             SDKLogger.info("Movement detector configured with custom settings")
-            
-            # Print current detection information
             detection_info = pico.get_detection_info()
             SDKLogger.info(f"Current detection mode: {detection_info.get('current_mode', 'unknown')}")
         else:
