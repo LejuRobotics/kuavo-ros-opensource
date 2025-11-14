@@ -16,6 +16,10 @@
     - [准备](#准备)
     - [使用](#使用)
     - [QUEST3 视频流](#quest3-视频流)
+    - [若发现VR设备显示的视频流数据画面翻转，并且机器人摄像头为奥比中光摄像头，可以按下面操作解决](#若发现vr设备显示的视频流数据画面翻转并且机器人摄像头为奥比中光摄像头可以按下面操作解决)
+      - [前置准备](#前置准备)
+      - [安装步骤](#安装步骤)
+      - [注意事项](#注意事项)
 
 
 ## 说明
@@ -156,17 +160,16 @@
 
 ### QUEST3 视频流
 
-在使用 VR 控制时，可以将上位机的摄像头画面传输到 VR 设备中显示。具体设置步骤如下：
+本程序可以将上位机的摄像头画面传输到 VR 设备中显示。具体设置步骤如下：
 
 1. 在上位机（带有摄像头的设备）上安装依赖：
 - 需要克隆下位机kuavo-ros-opensource仓库，然后配置依赖：
   ```bash
   cd <kuavo-ros-opensource>
   sudo apt install v4l-utils
-  git clone https://github.com/ros-perception/image_common.git  --branch noetic-devel src/image_common
-  git clone https://github.com/ros-perception/image_pipeline.git  --branch noetic src/image_pipeline
-  git clone https://github.com/ros-drivers/usb_cam.git --branch develop src/usb_cam
-  catkin build usb_cam noitom_hi5_hand_udp_python
+  sudo su
+  python3 -m pip install aiortc==1.9.0
+  catkin build  noitom_hi5_hand_udp_python
   ```
 
 2. 启动视频流：
@@ -190,5 +193,58 @@ sudo apt install libv4l-dev
    
 - 在下位机运行：
    ```bash
-   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_robot_camera.launch
+   # 下面程序已经启动了VR控制程序，请勿重复遥控器启动
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_robot_camera.launch # ip_adress:=填入VR IP地址
    ```
+
+### 若发现VR设备显示的视频流数据画面翻转，并且机器人摄像头为奥比中光摄像头，可以按下面操作解决
+
+#### 前置准备
+
+1. **下载修复版APK**  
+   [leju_kuavo_hand-0.0.1-298-gdc7cfac.apk](https://kuavo.lejurobot.com/Quest_apks/leju_kuavo_hand-0.0.1-298-gdc7cfac.apk)
+
+2. **准备USB数据线**  
+   用于连接电脑和Quest 3设备
+
+3. **安装ADB工具**（如已安装可跳过）
+   - **Windows**: 下载 [scrcpy-win64-v3.3.1.zip](https://github.com/Genymobile/scrcpy/releases/download/v3.3.1/scrcpy-win64-v3.3.1.zip) 并解压，adb.exe位于解压目录中
+   - **Linux**: 下载 [scrcpy-linux-x86_64-v3.3.1.tar.gz](https://github.com/Genymobile/scrcpy/releases/download/v3.3.1/scrcpy-linux-x86_64-v3.3.1.tar.gz) 并解压
+```bash
+   tar -xzf scrcpy-linux-x86_64-v3.3.1.tar.gz
+   cd scrcpy-linux-x86_64-v3.3.1
+```
+
+#### 安装步骤
+
+**步骤1：连接设备并授权**
+1. 用USB线连接Quest 3和电脑
+2. 戴上VR头显，会看到USB调试授权提示，选择「始终允许」并确认
+
+**步骤2：将APK文件放到adb工具目录**
+- **Windows**: 将下载的APK文件复制到解压后的scrcpy目录（与adb.exe同目录）
+- **Linux**: 
+```bash
+  cp /path/to/leju_kuavo_hand-0.0.1-298-gdc7cfac.apk ./
+```
+
+**步骤4：安装APK**
+
+在终端中执行（需在adb所在目录）：
+
+- **Windows**:
+```bash
+  .\adb.exe install leju_kuavo_hand-0.0.1-298-gdc7cfac.apk
+```
+
+- **Linux**:
+```bash
+  ./adb install leju_kuavo_hand-0.0.1-298-gdc7cfac.apk
+```
+
+#### 注意事项
+
+- ⚠️ 安装前请确保VR设备电量充足
+- ⚠️ 确保USB线支持数据传输（部分充电线不支持数据传输）
+- 💡 安装成功后会显示"Success"提示
+- 💡 如果adb一直显示"waiting for device"，检查VR设备是否已授权USB调试

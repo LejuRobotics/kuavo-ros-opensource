@@ -31,7 +31,8 @@
 1.  **下载所需软件**
     *   下载 Isaac Sim 4.2 ，流程参考：[![IsaacSim](https://img.shields.io/badge/IsaacSim-4.2.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/4.2.0/index.html)
     *   下载 Isaac Lab 1.4.1 (本例将Isaac Lab下载至主目录下)，流程参考：[![IsaacLab](https://img.shields.io/badge/IsaacLab-1.4.1-silver.svg)](https://isaac-sim.github.io/IsaacLab/v1.4.1/source/setup/installation/binaries_installation.html)
-    - 若在上述网址没能找到Isaac Sim 4.2 的安装路径，可参考[4.5版本的网址](https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/download.html)，如图：[isaacsim下载位置示意](./images/isaacsim下载位置示意.png)
+    - 若在上述网址没能找到Isaac Sim 4.2 的安装路径，可参考[4.5版本的网址](https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/download.html)，如图：
+    ![isaacsim下载位置示意](./images/isaacsim下载位置示意.png)
     *   下载 rsl_rl，推荐使用`commit 386875591808cfd1462a42446b1fa0a22ac161d0`
     ```bash
     git clone https://github.com/leggedrobotics/rsl_rl.git

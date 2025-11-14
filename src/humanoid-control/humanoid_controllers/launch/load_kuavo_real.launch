@@ -242,9 +242,9 @@
         <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string"/>
 
         <!-- 启动 播放音乐服务 -->
-        <node pkg="kuavo_audio_player" type="loundspeaker.py" name="play_music_node" output="screen" respawn="true" respawn_delay="5"/>
-        <param name="music_path" value="/home/lab/.config/lejuconfig/music" />
+        <include file="$(find kuavo_audio_player)/launch/play_music.launch"/>
     </group>
+
 
     <group if="$(arg with_ik)">
       <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
