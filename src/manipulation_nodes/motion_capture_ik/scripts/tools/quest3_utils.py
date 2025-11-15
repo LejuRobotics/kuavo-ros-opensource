@@ -665,7 +665,7 @@ class Quest3ArmInfoTransformer:
         msg.data = np.append(self.left_shoulder_rpy_in_robot, self.right_shoulder_rpy_in_robot)
         self.shoulder_angle_puber.publish(msg)
 
-    def scale_arm_positions(self, shoulder_pos, elbow_pos, hand_pos, human_shoulder_pos, side, adapt_width_gamma=0.0):
+    def scale_arm_positions(self, shoulder_pos, elbow_pos, hand_pos, human_shoulder_pos, chest_pos, side, adapt_width_gamma):
         """
         Scale the arm positions from human scale to robot scale
         Args:
@@ -723,8 +723,18 @@ class Quest3ArmInfoTransformer:
         # Use it to determine rotation angle for arm inward adjustment
         if adapt_width_gamma > 0.0:
             # Maximum rotation angle when adapt_width_gamma is at max (0.3)
-            max_rotation_angle_rad = hand_pos[0]-human_shoulder_pos[0]
-            max_rotation_angle = 40.0/max_rotation_angle_rad * np.pi / 180.0  # 25 degrees
+            max_rotation_angle_rad_x = hand_pos[0]-chest_pos.position.x
+            max_rotation_angle_rad_z = hand_pos[2]-chest_pos.position.z
+
+            max_rotation_angle_rad_x = max(0.25, abs(max_rotation_angle_rad_x))  # Prevent division by zero
+            max_rotation_angle_rad_z = max(0.05, max_rotation_angle_rad_z)  # Prevent division by zero           
+           # print("✅max_rotation_angle_rad:", 30/max_rotation_angle_rad)
+            max_rotation_angle_rad_x = math.sqrt(max_rotation_angle_rad_x)
+            max_rotation_angle_rad_z = max_rotation_angle_rad_z*max_rotation_angle_rad_z
+            max_rotation_angle = 60.0/max_rotation_angle_rad_x * np.pi / 180.0  # 25 degrees
+            
+            max_rotation_angle = max_rotation_angle*max_rotation_angle_rad_z
+            
             # Normalize adapt_width_gamma to [0, 1] range (0.3 -> 1.0)
             normalized_gamma = min(1.0, adapt_width_gamma / 0.3)
             # Apply non-linear scaling for smoother transition
@@ -875,7 +885,7 @@ class Quest3ArmInfoTransformer:
         # Scale arm positions with rotation-based inward adjustment
         # Pass adapt_width_gamma which already considers y_distance and overchest_b
         
-        elbow_pos, hand_pos = self.scale_arm_positions(shoulder_pos, elbow_pos, hand_pos, human_shoulder_pos, side, adapt_width_gamma)
+        elbow_pos, hand_pos = self.scale_arm_positions(shoulder_pos, elbow_pos, hand_pos, human_shoulder_pos, chest_pose, side, adapt_width_gamma)
         
 
         if self.vis_pub:
