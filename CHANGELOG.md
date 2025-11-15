@@ -13,6 +13,10 @@
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- 新增Cpp版本的 VR IK 逆解模块，[文档链接](./readme.md)
+- Kuavo 49 版本机器人支持在 Rviz 中可视化夹爪状态
+- 新增基于关节限位标定头部电机零点功能，[文档链接](./readme.md)
+- Roban2新增桌面软件实现零点调试功能
 - Kuavo Humanoid Websocket  SDK 增加下蹲接口保护、手臂碰撞检测功能
 - 新增根据限位校准手臂和头部零点的功能，[文档链接](./readme.md)
 - 支持通过`-DUSE_LEJU_DDS=ON`编译选项使用 LEJU DDS 进行控制通信
@@ -53,6 +57,10 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复MPC-RL切换由于接触力问题导致机器人出现下蹲的情况
+- 修复 music_volume 接口无法调节音量大小问题
+- Quest3 启腰部后不允许摇杆控制，调整下蹲相关的约束和cost参数
+- Quest3 单步转身功能增加死区时间窗口判断，防止单步被打断
 - 修复 Roabn2 实物无法运行问题
 - Quest3 调整切换步态逻辑,去除对左手按钮的限制
 - 修复半身模式下机器人手臂抖动的问题
