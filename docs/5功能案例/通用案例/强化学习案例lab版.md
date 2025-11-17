@@ -202,7 +202,7 @@ sudo su
 export ROBOT_VERSION=46
 source devel/setup.bash
 # 仿真环境下
-roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12 # 启动rl控制器、wbc、仿真器。
+roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim # 启动rl控制器、wbc、仿真器。
 # 实物环境下
 roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 # 可以选择cali:=true和cali_arm:=true进行校准启动，但校准启动不会自动缩腿，需要把F键拨到最左边两次，第一次是执行缩腿，第二次是执行站立 。
 ```
