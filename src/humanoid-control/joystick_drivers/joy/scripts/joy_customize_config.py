@@ -463,6 +463,10 @@ class JoyCustomizeConfigNode:
                     button_prev = self._prev_buttons[button_idx] if button_idx < len(self._prev_buttons) else 0
 
                     if button_prev == 1 and button_current == 0:
+
+                        # 每次按钮释放时重新加载配置文件
+                        self._load_customize_config()
+
                         # 情况 1: M1 按下、M2 未按下
                         if self._m1_pressed and not self._m2_pressed:
                             action_key = f"customize_action_M1_{button_name}"
