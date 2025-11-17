@@ -1155,7 +1155,7 @@ namespace ocs2
     {
       std_msgs::Float64MultiArray msg;
       msg.data.resize(1);
-      msg.data[0] = -waist_yaw;
+      msg.data[0] = waist_yaw;
       waist_motion_pub_.publish(msg);
     }
 
