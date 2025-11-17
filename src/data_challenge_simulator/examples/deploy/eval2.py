@@ -139,7 +139,7 @@ class SimulatorTask2():
             obj_pos = ObjectRandomizer()
             x, y, z = self._sample_position_with_seed(seed=self.seed,position_ranges={
                     'x': [0.35, 0.55],    # x轴范围
-                    'y': [-0.8, -0.3],   # y轴范围  
+                    'y': [-0.8, -0.4],   # y轴范围  
                     'z': [0.95, 0.95]     # z轴范围
                 })
             

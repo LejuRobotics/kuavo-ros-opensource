@@ -149,15 +149,15 @@ class SimulatorTask4():
             self.left_bin_B_pos = self.obj_pos.wait_for_position("left_bin_B", timeout=5.0)
 
             self.target_region1 = [
-                (self.left_bin_A_pos[0]-0.12, self.left_bin_A_pos[0]+0.12),   # x 范围
+                (self.left_bin_A_pos[0]-0.14, self.left_bin_A_pos[0]+0.14),   # x 范围
                 (self.left_bin_A_pos[1]-0.14, self.left_bin_A_pos[1]+0.14),   # y 范围
-                (0.84, 0.86)  # z 范围
+                (0.84, 0.865)  # z 范围
             ]
 
             self.target_region2 = [
-                (self.left_bin_B_pos[0]-0.12, self.left_bin_B_pos[0]+0.12),   # x 范围
+                (self.left_bin_B_pos[0]-0.14, self.left_bin_B_pos[0]+0.14),   # x 范围
                 (self.left_bin_B_pos[1]-0.14, self.left_bin_B_pos[1]+0.14),   # y 范围
-                (0.84, 0.86)  # z 范围
+                (0.84, 0.865)  # z 范围
             ]
 
             self.robot_target_region1 = [

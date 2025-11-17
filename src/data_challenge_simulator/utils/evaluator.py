@@ -211,15 +211,15 @@ class ScoringEvaluator3:
 
         self.front_obj1_pos_awarded: bool = False
         self.front_obj1_ori_awarded: bool = False
-        # self.front_obj1_awarded: bool = False
+        self.front_obj1_awarded: bool = False
         
         self.back_obj1_pos_awarded: bool = False
         self.back_obj1_ori_awarded: bool = False
-        # self.back_obj1_awarded: bool = False
+        self.back_obj1_awarded: bool = False
 
         self.back_obj2_pos_awarded: bool = False
         self.back_obj2_ori_awarded: bool = False
-        # self.back_obj2_awarded: bool = False
+        self.back_obj2_awarded: bool = False
 
         self.start_time: float = time.time()
 
@@ -229,15 +229,15 @@ class ScoringEvaluator3:
 
         self.front_obj1_pos_awarded = False
         self.front_obj1_ori_awarded = False
-        # self.front_obj1_awarded = False
+        self.front_obj1_awarded = False
         
         self.back_obj1_pos_awarded = False
         self.back_obj1_ori_awarded = False
-        # self.back_obj1_awarded = False
+        self.back_obj1_awarded = False
 
         self.back_obj2_pos_awarded = False
         self.back_obj2_ori_awarded = False
-        # self.back_obj2_awarded = False
+        self.back_obj2_awarded = False
 
         self.start_time = time.time() if start_time is None else start_time
 
