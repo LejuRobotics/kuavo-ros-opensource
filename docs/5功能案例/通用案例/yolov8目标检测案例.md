@@ -193,7 +193,7 @@ echo 'export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libgomp.so.1:$LD_PRELOAD' >> 
 
 - 安装：
     ```bash
-    pip3 install ultralytics
+    pip3 install ultralytics==8.0.196 -i https://pypi.tuna.tsinghua.edu.cn/simple
     python3 -c "import ultralytics; print(ultralytics.__version__)"
     ```
     > 输出版本信息即为安装成功

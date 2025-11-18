@@ -52,11 +52,28 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kdl_parser/kdl_parser.hpp>
 
 #include <std_msgs/Float32MultiArray.h>
+#include <algorithm>
 
 namespace ocs2
 {
   namespace humanoid
   {
+
+    // 爪机构映射
+    static const std::pair<const char*, double> kLeftClawJointInsertMap[] = {
+      {"l_f_bar-1_joint", +1.0},
+      {"l_b_bar-1",      -1.0},
+      {"l_f_bar-3",      +1.0},
+      {"l_b_bar-3",      -1.0},
+    };
+    static const std::pair<const char*, double> kRightClawJointInsertMap[] = {
+      {"r_f_bar-1_joint", +1.0},
+      {"r_b_bar-1",      -1.0},
+      {"r_f_bar-3",      +1.0},
+      {"r_b_bar-3",      -1.0},
+    };
+    static constexpr size_t kLeftClawJointInsertMapSize = sizeof(kLeftClawJointInsertMap) / sizeof(kLeftClawJointInsertMap[0]);
+    static constexpr size_t kRightClawJointInsertMapSize = sizeof(kRightClawJointInsertMap) / sizeof(kRightClawJointInsertMap[0]);
 
     /******************************************************************************************************/
     /******************************************************************************************************/
@@ -86,6 +103,17 @@ namespace ocs2
       dexhand_joint_positions_ = std::vector<double>(dexhand_joint_names_.size(), 0.0);
       simplifiedJointPositions_ = std::vector<double>(visualModeSettings_.simplifiedJointNames.size(), 0.0);
     };
+    
+
+    void HumanoidVisualizer::updateClawJointPositions(const vector_t &positions)
+    {
+      if (positions.size() != 2) return;
+      for (size_t i = 0; i < 2; i++)
+      {
+        claw_joint_positions_[i] = positions[i];
+      }
+      updateClawJointPositions_ = true;
+    }
 
     void HumanoidVisualizer::updateSimplifiedArmPositions(const vector_t &positions)
     {
@@ -192,6 +220,10 @@ namespace ocs2
       planedFootPositionsPublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/humanoid/planedFootPositions", 1);
       currentStatePublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/humanoid/currentState", 1);
       eePosePub_ = nodeHandle.advertise<kuavo_msgs::endEffectorData>("/humanoid_ee_State", 1);
+
+      // subscribe claw command (percentage) and map to radians limits from URDF if available
+      clawCmdSubscriber_ = nodeHandle.subscribe<kuavo_msgs::lejuClawCommand>(
+      "/leju_claw_command", 1, &HumanoidVisualizer::lejuClawCmdCallback, this);
 
       // Load URDF model
       if (!urdfModel_.initParam("humanoid_description"))
@@ -355,6 +387,21 @@ namespace ocs2
           {
             jointPositions.insert({dexhand_joint_names_[i], dexhand_joint_positions_[i]});
           }
+        }
+        if (updateClawJointPositions_)
+        {
+          // 从匿名命名空间的静态数组读取映射；仅当 URDF 存在该关节时才插入
+          auto tryInsertGroupRaw = [this, &jointPositions](const std::pair<const char*, double>* group, size_t sz, double angle){
+            for(size_t i=0; i<sz; ++i){
+              const char* name = group[i].first;
+              double factor = group[i].second;
+              if (urdfModel_.getJoint(name)) {
+                jointPositions.insert({name, factor * angle});
+              }
+            }
+          };
+          tryInsertGroupRaw(kLeftClawJointInsertMap,  kLeftClawJointInsertMapSize,  claw_joint_positions_[0]);
+          tryInsertGroupRaw(kRightClawJointInsertMap, kRightClawJointInsertMapSize, claw_joint_positions_[1]);
         }
         robotStatePublisherPtr_->publishTransforms(jointPositions, timeStamp);
       }
@@ -618,6 +665,31 @@ namespace ocs2
       assignIncreasingId(markerArray.markers.begin(), markerArray.markers.end());
 
       stateOptimizedPublisher_.publish(markerArray);
+    }
+
+    void HumanoidVisualizer::lejuClawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg)
+    {
+      if (!msg) return;
+      if (msg->data.position.size() < 2) return;
+
+      // 输入为开合度百分比 [0,100]：0 -> 完全打开(-0.698rad)，100 -> 完全闭合(0rad)，线性映射
+      auto clamp01 = [](double v){ return std::max(0.0, std::min(100.0, v)); };
+      const double l_pct = clamp01(msg->data.position[0]);
+      const double r_pct = clamp01(msg->data.position[1]);
+
+      static const double MIN_OPEN = -0.6981317008; // -40°
+      static const double MAX_CLOSED = 0.0;         // 0°
+
+      auto pct_to_angle = [&](double pct){
+        const double s = pct / 100.0;               // 0.0~1.0
+        return MIN_OPEN + (MAX_CLOSED - MIN_OPEN) * s;
+      };
+
+      vector_t v(2);
+      v.setZero();
+      v[0] = pct_to_angle(l_pct);
+      v[1] = pct_to_angle(r_pct);
+      updateClawJointPositions(v);
     }
 
     void HumanoidVisualizer::publishArmEeStateTrajectory(const vector_t& EeState)

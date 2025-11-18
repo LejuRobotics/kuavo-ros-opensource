@@ -42,6 +42,8 @@
 #include <csignal>
 #include <atomic>
 #include <queue>
+#include "kuavo_msgs/lejuClawCommand.h"
+#include "sensor_msgs/JointState.h"
 
 #include "joint_address.hpp"
 #include "dexhand_mujoco_node.h"
@@ -97,6 +99,10 @@ namespace
 
   geometry_msgs::Wrench external_wrench_;
   bool external_wrench_updated_ = false;
+
+  std::vector<double> claw_cmd;
+  bool claw_cmd_updated = false;
+  size_t numClawJoints = 2; // 夹抓的自由度
 
   std::mutex queueMutex;
   ros::NodeHandle *g_nh_ptr;
@@ -593,6 +599,7 @@ namespace
       controlCommands.pop();
     }
     joint_tau_cmd = std::vector<double>(numJoints, 0);
+    claw_cmd = std::vector<double>(numClawJoints, 0);
     queueMutex.unlock();
     uint64_t step_count = 0;
     sim_time = ros::Time::now();
@@ -672,6 +679,9 @@ namespace
         }
         cmd_updated = false;
         joint_tau_cmd = std::vector<double>(numJoints, 0);
+
+        claw_cmd_updated = false;
+        claw_cmd = std::vector<double>(numClawJoints, 0);
         queueMutex.unlock();
       }
 
@@ -720,6 +730,7 @@ namespace
             // ****************************
             // control
             bool updated = false;
+            bool claw_updated = false;
             queueMutex.lock();
             // cmd_updated = !controlCommands.empty();
             // if (cmd_updated)
@@ -730,101 +741,112 @@ namespace
             // }
             updated = cmd_updated;
             cmd_updated = false;
+            claw_updated = claw_cmd_updated;
+            claw_cmd_updated = false;
             tau_cmd = joint_tau_cmd;
             queueMutex.unlock();
-            if (updated)
-            {
-              // update actuators/controls
-              auto updateControl = [&](const JointGroupAddress& jointAddr, int &i) {
-                  for (auto iter = jointAddr.ctrladr().begin(); iter != jointAddr.ctrladr().end(); iter++) {
-                      d->ctrl[*iter] = tau_cmd[i++];
-                  }
-              };
-              int i = 0;
-              // 在半身模式下跳过腿部关节的控制
-              if (!leg_joints_constrained) {
-                updateControl(LLegJointsAddr, i);
-                updateControl(RLegJointsAddr, i);
-              } else {
-                // 跳过腿部关节的控制输入，但需要更新索引
-                i += LLegJointsAddr.ctrladr().size() + RLegJointsAddr.ctrladr().size();
-              }
-              updateControl(WaistJointsAddr, i);
-              updateControl(LArmJointsAddr, i);
-              updateControl(RArmJointsAddr, i);
-              updateControl(HeadJointsAddr, i);
-
-              // Dexhand: ctrl/command
-              if(g_dexhand_node) {
-                g_dexhand_node->writeCallback(d);
-              }
-
-              // 如果躯干被约束，在每步后强制固定躯干位置和姿态
-              if (torso_constrained)
+            if (updated || claw_updated) {
+              if(claw_updated)
               {
-                d->qpos[0] = fixed_torso_pos[0];  // x position
-                d->qpos[1] = fixed_torso_pos[1];  // y position  
-                d->qpos[2] = fixed_torso_pos[2];  // z position
-                d->qpos[3] = fixed_torso_quat[0]; // w quaternion
-                d->qpos[4] = fixed_torso_quat[1]; // x quaternion
-                d->qpos[5] = fixed_torso_quat[2]; // y quaternion
-                d->qpos[6] = fixed_torso_quat[3]; // z quaternion
-                
-                // 同时固定躯干的速度为0
-                d->qvel[0] = 0;  // x velocity
-                d->qvel[1] = 0;  // y velocity
-                d->qvel[2] = 0;  // z velocity
-                d->qvel[3] = 0;  // x angular velocity
-                d->qvel[4] = 0;  // y angular velocity
-                d->qvel[5] = 0;  // z angular velocity
+                for (size_t i = 0; i < numClawJoints; i++)
+                {
+                  d->ctrl[i+28] = claw_cmd[i];
+                  // std::cout << "claw_cmd: " << claw_cmd[i] << std::endl;
+                }
               }
+              if (updated)
+              {
+                // update actuators/controls
+                auto updateControl = [&](const JointGroupAddress& jointAddr, int &i) {
+                    for (auto iter = jointAddr.ctrladr().begin(); iter != jointAddr.ctrladr().end(); iter++) {
+                        d->ctrl[*iter] = tau_cmd[i++];
+                    }
+                };
+                int i = 0;
+                // 在半身模式下跳过腿部关节的控制
+                if (!leg_joints_constrained) {
+                  updateControl(LLegJointsAddr, i);
+                  updateControl(RLegJointsAddr, i);
+                } else {
+                  // 跳过腿部关节的控制输入，但需要更新索引
+                  i += LLegJointsAddr.ctrladr().size() + RLegJointsAddr.ctrladr().size();
+                }
+                updateControl(WaistJointsAddr, i);
+                updateControl(LArmJointsAddr, i);
+                updateControl(RArmJointsAddr, i);
+                updateControl(HeadJointsAddr, i);
+
+                // Dexhand: ctrl/command
+                if(g_dexhand_node) {
+                  g_dexhand_node->writeCallback(d);
+                }
+
+                // 如果躯干被约束，在每步后强制固定躯干位置和姿态
+                if (torso_constrained)
+                {
+                  d->qpos[0] = fixed_torso_pos[0];  // x position
+                  d->qpos[1] = fixed_torso_pos[1];  // y position  
+                  d->qpos[2] = fixed_torso_pos[2];  // z position
+                  d->qpos[3] = fixed_torso_quat[0]; // w quaternion
+                  d->qpos[4] = fixed_torso_quat[1]; // x quaternion
+                  d->qpos[5] = fixed_torso_quat[2]; // y quaternion
+                  d->qpos[6] = fixed_torso_quat[3]; // z quaternion
+                  
+                  // 同时固定躯干的速度为0
+                  d->qvel[0] = 0;  // x velocity
+                  d->qvel[1] = 0;  // y velocity
+                  d->qvel[2] = 0;  // z velocity
+                  d->qvel[3] = 0;  // x angular velocity
+                  d->qvel[4] = 0;  // y angular velocity
+                  d->qvel[5] = 0;  // z angular velocity
+                }
               
-              // 如果腿部关节被约束，在每步后强制固定腿部关节位置并停止控制
-              if (leg_joints_constrained)
-              {
-                // 固定左腿关节位置
-                if (!fixed_leg_l_qpos.empty() && !LLegJointsAddr.qposadr().invalid())
+                // 如果腿部关节被约束，在每步后强制固定腿部关节位置并停止控制
+                if (leg_joints_constrained)
                 {
-                  size_t idx = 0;
-                  for (auto iter = LLegJointsAddr.qposadr().begin(); 
-                       iter != LLegJointsAddr.qposadr().end() && idx < fixed_leg_l_qpos.size(); 
-                       iter++, idx++) {
-                    d->qpos[*iter] = fixed_leg_l_qpos[idx];
+                  // 固定左腿关节位置
+                  if (!fixed_leg_l_qpos.empty() && !LLegJointsAddr.qposadr().invalid())
+                  {
+                    size_t idx = 0;
+                    for (auto iter = LLegJointsAddr.qposadr().begin(); 
+                        iter != LLegJointsAddr.qposadr().end() && idx < fixed_leg_l_qpos.size(); 
+                        iter++, idx++) {
+                      d->qpos[*iter] = fixed_leg_l_qpos[idx];
+                    }
+                    
+                    // 固定左腿关节速度为0
+                    for (auto iter = LLegJointsAddr.qdofadr().begin(); iter != LLegJointsAddr.qdofadr().end(); iter++) {
+                      d->qvel[*iter] = 0;
+                    }
+                    
+                    // 停止左腿关节控制输入
+                    for (auto iter = LLegJointsAddr.ctrladr().begin(); iter != LLegJointsAddr.ctrladr().end(); iter++) {
+                      d->ctrl[*iter] = 0;
+                    }
                   }
                   
-                  // 固定左腿关节速度为0
-                  for (auto iter = LLegJointsAddr.qdofadr().begin(); iter != LLegJointsAddr.qdofadr().end(); iter++) {
-                    d->qvel[*iter] = 0;
+                  // 固定右腿关节位置
+                  if (!fixed_leg_r_qpos.empty() && !RLegJointsAddr.qposadr().invalid())
+                  {
+                    size_t idx = 0;
+                    for (auto iter = RLegJointsAddr.qposadr().begin(); 
+                        iter != RLegJointsAddr.qposadr().end() && idx < fixed_leg_r_qpos.size(); 
+                        iter++, idx++) {
+                      d->qpos[*iter] = fixed_leg_r_qpos[idx];
+                    }
+                    
+                    // 固定右腿关节速度为0
+                    for (auto iter = RLegJointsAddr.qdofadr().begin(); iter != RLegJointsAddr.qdofadr().end(); iter++) {
+                      d->qvel[*iter] = 0;
+                    }
+                    
+                    // 停止右腿关节控制输入
+                    for (auto iter = RLegJointsAddr.ctrladr().begin(); iter != RLegJointsAddr.ctrladr().end(); iter++) {
+                      d->ctrl[*iter] = 0;
+                    }
                   }
-                  
-                  // 停止左腿关节控制输入
-                  for (auto iter = LLegJointsAddr.ctrladr().begin(); iter != LLegJointsAddr.ctrladr().end(); iter++) {
-                    d->ctrl[*iter] = 0;
-                  }
-                }
-                
-                // 固定右腿关节位置
-                if (!fixed_leg_r_qpos.empty() && !RLegJointsAddr.qposadr().invalid())
-                {
-                  size_t idx = 0;
-                  for (auto iter = RLegJointsAddr.qposadr().begin(); 
-                       iter != RLegJointsAddr.qposadr().end() && idx < fixed_leg_r_qpos.size(); 
-                       iter++, idx++) {
-                    d->qpos[*iter] = fixed_leg_r_qpos[idx];
-                  }
-                  
-                  // 固定右腿关节速度为0
-                  for (auto iter = RLegJointsAddr.qdofadr().begin(); iter != RLegJointsAddr.qdofadr().end(); iter++) {
-                    d->qvel[*iter] = 0;
-                  }
-                  
-                  // 停止右腿关节控制输入
-                  for (auto iter = RLegJointsAddr.ctrladr().begin(); iter != RLegJointsAddr.ctrladr().end(); iter++) {
-                    d->ctrl[*iter] = 0;
-                  }
-                }
               }
-
+            }
               mj_step(m, d);
               step_count++;
               sim_time += ros::Duration(1 / frequency);
@@ -1020,6 +1042,45 @@ void jointCmdCallback(const kuavo_msgs::jointCmd::ConstPtr &msg)
   joint_tau_cmd = tau;
   cmd_updated = true;
 }
+
+void clawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg)
+{
+  //std::cout << "Received lejuClawCommand: " << msg->data.position[0] << std::endl;
+  
+  // Check if the message has the expected size
+  if (msg->data.position.size() < numClawJoints) {
+    std::cerr << "Error: lejuClawCommand position size (" << msg->data.position.size() 
+              << ") is less than expected numClawJoints (" << numClawJoints << ")" << std::endl;
+    return;
+  }
+  
+  std::vector<double> tem(numClawJoints);
+  for (size_t i = 0; i < numClawJoints; i++)
+  {
+    // Convert position from percentage (0-100) to appropriate range for MuJoCo
+    // Assuming 0 = fully closed, 100 = fully open
+    // Map to range [0, 1] for MuJoCo control
+    // Convert position from percentage (0-100) to appropriate range for MuJoCo
+    // Assuming 0 = fully closed, 100 = fully open
+    // Map to range [-100, 0] for MuJoCo control
+    double raw_value = msg->data.position[i] - 100.0;
+    // Clamp to valid range to prevent issues
+    tem[i] = std::max(-100.0, std::min(0.0, raw_value));
+    
+    // Debug output for first few iterations
+    static int debug_count = 0;
+    if (debug_count < 10) {
+      std::cout << "Claw cmd[" << i << "]: input=" << msg->data.position[i] 
+                << ", raw=" << raw_value << ", clamped=" << tem[i] << std::endl;
+    }
+    debug_count++;
+  }
+
+  std::lock_guard<std::mutex> lock(queueMutex);
+  claw_cmd = tem;
+  claw_cmd_updated = true;
+}
+
 void extWrenchCallback(const geometry_msgs::Wrench::ConstPtr &msg)
 {
   // std::cout << "Received jointCmd: " << msg->tau[0] << std::endl;
@@ -1161,6 +1222,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   ros::ServiceServer service = g_nh_ptr->advertiseService("sim_start", handleSimStart);
 
   // // 创建订阅器
+  ros::Subscriber clawCmdSub = g_nh_ptr->subscribe("/leju_claw_command", 10, clawCmdCallback);
 #ifndef USE_DDS
   ros::Subscriber jointCmdSub = g_nh_ptr->subscribe("/joint_cmd", 10, jointCmdCallback);
 #endif
