@@ -1,0 +1,61 @@
+
+<mujocoinclude>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_0"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_1"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_2"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_3"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_4"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_5"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_6"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_7"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_8"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_9"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_10"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_11"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_12"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_13"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_14"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_15"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_16"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_17"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_18"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_19"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_20"/>
+ <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_21"/>
+</mujocoinclude>
+
+
+<!-- <mujocoinclude>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_0"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_1"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_2"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_3"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_4"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_5"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_6"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_7"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_8"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_9"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_10"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_11"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_12"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_13"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_14"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_15"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_16"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_17"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_18"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_19"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_20"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_21"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_22"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_23"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_24"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_25"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_26"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_27"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_28"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_29"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_30"/>
+  <geom  class="visual" type="mesh" rgba="1 1 1 1" mesh="l_b_fingers_part_31"/>
+</mujocoinclude> -->

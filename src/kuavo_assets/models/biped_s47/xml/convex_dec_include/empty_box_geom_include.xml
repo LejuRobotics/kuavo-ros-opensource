@@ -1,0 +1,12 @@
+
+<mujocoinclude>
+  <geom type="mesh" rgba="0.466 0.6740 0.4880 1.0" mesh="empty_box_part_0" solref="2e-2 1" solimp=".9 .9 .01" />
+  <geom type="mesh" rgba="0.466 0.6740 0.4880 1.0" mesh="empty_box_part_1" solref="2e-2 1" solimp=".9 .9 .01" />
+  <geom type="mesh" rgba="0.466 0.6740 0.4880 1.0" mesh="empty_box_part_2" solref="2e-2 1" solimp=".9 .9 .01" />
+  <geom type="mesh" rgba="0.466 0.6740 0.4880 1.0" mesh="empty_box_part_3" solref="2e-2 1" solimp=".9 .9 .01" />
+  <geom type="mesh" rgba="0.466 0.6740 0.4880 1.0" mesh="empty_box_part_4" solref="2e-2 1" solimp=".9 .9 .01" />
+  <geom type="mesh" rgba="0.466 0.6740 0.4880 1.0" mesh="empty_box_part_5" solref="2e-2 1" solimp=".9 .9 .01" />
+  <geom type="mesh" rgba="0.466 0.6740 0.4880 1.0" mesh="empty_box_part_6" solref="2e-2 1" solimp=".9 .9 .01" />
+  <geom type="mesh" rgba="0.466 0.6740 0.4880 1.0" mesh="empty_box_part_7" solref="2e-2 1" solimp=".9 .9 .01" />
+  <geom type="mesh" rgba="0.466 0.6740 0.4880 1.0" mesh="empty_box_part_8" solref="2e-2 1" solimp=".9 .9 .01" />
+</mujocoinclude>

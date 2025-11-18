@@ -408,8 +408,8 @@ namespace ocs2
 
         void observationCallback(const ocs2_msgs::mpc_observation::ConstPtr &observation_msg)
         {
-        observation_ = ros_msg_conversions::readObservationMsg(*observation_msg);
-        get_observation_ = true;
+            observation_ = ros_msg_conversions::readObservationMsg(*observation_msg);
+            get_observation_ = true;
         }
 
         void headBodyPoseCallback(const kuavo_msgs::headBodyPose::ConstPtr& msg)
@@ -473,6 +473,11 @@ namespace ocs2
                 cmd_pose.angular.y = current_head_body_pose_.body_pitch;  // pitch
 
                 cmd_pose_pub_.publish(cmd_pose);
+                
+                // 记录最后一次的相对高度和body_pitch
+                last_relative_height_ = relative_height;
+                last_body_pitch_ = current_head_body_pose_.body_pitch;
+                
                 // 根据msg的pose值设置base的高度参考，通过/cmd_pose发布
             }
         }
@@ -575,8 +580,14 @@ namespace ocs2
                         torso_control_enabled_ = false;
                         if(waist_dof_ == 0)
                         {
+                            // 发送最后一帧，使用记录的relative_height和body_pitch
                             geometry_msgs::Twist cmd_pose;
-                            cmd_pose.angular.z = 0;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
+                            cmd_pose.linear.x = 0.0;
+                            cmd_pose.linear.y = 0.0;
+                            cmd_pose.linear.z = last_relative_height_;  // 使用记录的相对高度
+                            cmd_pose.angular.x = 0.0;
+                            cmd_pose.angular.y = last_body_pitch_;      // 使用记录的body_pitch
+                            cmd_pose.angular.z = 0.0;  // 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
                             cmd_pose_pub_.publish(cmd_pose);
 
                             
@@ -585,7 +596,8 @@ namespace ocs2
                             // 调用VR腰部控制服务，禁用VR腰部控制动态Q矩阵
                             callVRWaistControlSrv(false);
                         }
-                        std::cout << "腰部控制模式已关闭" << std::endl;
+                        std::cout << "腰部控制模式已关闭，发送最后一帧 - 相对高度: " << last_relative_height_ 
+                                  << ", body_pitch: " << last_body_pitch_ << std::endl;
                     }
                     return;
                 }
@@ -1302,6 +1314,8 @@ namespace ocs2
         double body_height_zero_;  // 记录进入控制模式时的高度零点
         double torso_roll_zero_;
         ros::Time torso_control_start_time_;
+        double last_relative_height_{0.0};  // 记录最后一次的相对高度
+        double last_body_pitch_{0.0};       // 记录最后一次的body_pitch
 
         kuavo_msgs::headBodyPose current_head_body_pose_;
         // 手臂碰撞控制，当前是否处于发生碰撞，手臂回归控制中

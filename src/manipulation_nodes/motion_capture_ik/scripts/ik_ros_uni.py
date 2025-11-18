@@ -507,18 +507,14 @@ class IkRos:
                 rate.sleep()
                 continue
             if self.arm_ik.type().name() == IkTypeIdx.TorsoIK.name():
-                l_hand_pose, l_hand_RPY = None, None
-                r_hand_pose, r_hand_RPY = None, None
+                l_hand_pose, l_hand_RPY, l_hand_quat = None, None, None
+                r_hand_pose, r_hand_RPY, r_hand_quat = None, None, None
                 l_elbow_pos, r_elbow_pos = None, None
                 left_shoulder_rpy_in_robot, right_shoulder_rpy_in_robot = None, None
                 if self.__target_pose[0] is not None and (self.__ctrl_arm_idx == ArmIdx.BOTH
                                                           or self.__ctrl_arm_idx == ArmIdx.LEFT):
-                    l_hand_pose_recorded = []
                     l_hand_pose, l_hand_quat = self.__target_pose
-                    l_hand_pose_recorded.append(l_hand_pose)
                     l_hand_pose = self.kf_left.filter(l_hand_pose)
-                    l_hand_pose_recorded.append(l_hand_pose)
-                    self.pub_ik_input_pos.publish(Float32MultiArray(data=np.asarray(l_hand_pose_recorded).flatten()))
                     l_hand_RPY = quaternion_to_RPY(l_hand_quat)
                     l_elbow_pos = self.__left_elbow_pos
                     if l_elbow_pos is not None:
@@ -589,6 +585,19 @@ class IkRos:
                         x_min = 0.0 + height_ratio * 0.85
                         r_hand_pose[0] = x_min if r_hand_pose[0] < x_min else r_hand_pose[0]
                     right_shoulder_rpy_in_robot = self.quest3_arm_info_transformer.right_shoulder_rpy_in_robot
+
+                ik_input_data = []
+                if l_hand_pose is not None and l_hand_quat is not None:
+                    ik_input_data.extend(np.asarray(l_hand_pose).flatten().tolist())
+                    ik_input_data.extend(np.asarray(l_hand_quat).flatten().tolist())
+                else:
+                    ik_input_data.extend([np.nan] * 7)
+                if r_hand_pose is not None and r_hand_quat is not None:
+                    ik_input_data.extend(np.asarray(r_hand_pose).flatten().tolist())
+                    ik_input_data.extend(np.asarray(r_hand_quat).flatten().tolist())
+                else:
+                    ik_input_data.extend([np.nan] * 7)
+                self.pub_ik_input_pos.publish(Float32MultiArray(data=np.asarray(ik_input_data, dtype=np.float32)))
                 time_0 = time.time()
                 # 通过限制初值，避免迭代到不可解的区域
                 q0_tmp = q_last.copy()

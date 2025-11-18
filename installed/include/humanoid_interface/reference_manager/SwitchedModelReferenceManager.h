@@ -198,6 +198,25 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool isVRWaistControlEnabled() const { return vrWaistControlEnabled_; }
   bool vrWaistControlCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
   
+  // Height smooth transition methods
+  void setHeightTransitionMaxSpeed(scalar_t speed) { heightTransitionMaxSpeed_ = speed; }
+  void setHeightJumpThreshold(scalar_t threshold) { heightJumpThreshold_ = threshold; }
+  void setHeightTransitionMinDuration(scalar_t duration) { heightTransitionMinDuration_ = duration; }
+  void setHeightTransitionMaxDuration(scalar_t duration) { heightTransitionMaxDuration_ = duration; }
+  
+  // Pitch smooth transition methods
+  void setPitchTransitionMaxSpeed(scalar_t speed) { pitchTransitionMaxSpeed_ = speed; }
+  void setPitchJumpThreshold(scalar_t threshold) { pitchJumpThreshold_ = threshold; }
+  
+  // Transition status query methods
+  bool isHeightTransitionActive() const { return heightSmoothTransitionActive_; }
+  scalar_t getHeightTransitionProgress() const {
+    if (!heightSmoothTransitionActive_) return 1.0;
+    scalar_t elapsedTime = ros::Time::now().toSec() - heightTransitionStartTime_;
+    return std::min(1.0, elapsedTime / heightTransitionDuration_);
+  }
+  scalar_t getHeightTransitionDuration() const { return heightTransitionDuration_; }
+  
   bool getArmControlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
   {
     res.result = true;
@@ -354,6 +373,23 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool vrWaistControlEnabledPrev_ = false;  // VR waist control flag  
   bool isFirstRun_ = true;
   bool isFirstVelPub_ = true;
+  
+  // VR高度平滑切换相关变量
+  bool heightSmoothTransitionActive_ = true;  // 是否正在进行高度平滑过渡
+  scalar_t heightTransitionStartTime_ = 0.0;   // 平滑过渡开始时间
+  scalar_t heightTransitionDuration_ = 2.0;    // 平滑过渡持续时间（秒，动态计算）
+  scalar_t heightBeforeTransition_ = 0.0;      // 过渡前的高度
+  scalar_t heightAfterTransition_ = 0.0;       // 过渡后的目标高度
+  scalar_t heightJumpThreshold_ = 0.05;        // 高度跳变阈值（米），超过此值触发平滑过渡
+  scalar_t heightTransitionMaxSpeed_ = 0.25;    // 高度过渡最大速度（米/秒）
+  scalar_t heightTransitionMinDuration_ = 0.5; // 最小过渡时间（秒）
+  scalar_t heightTransitionMaxDuration_ = 5.0; // 最大过渡时间（秒）
+  
+  // Pitch平滑切换相关变量
+  scalar_t pitchBeforeTransition_ = 0.0;       // 过渡前的pitch角度
+  scalar_t pitchAfterTransition_ = 0.0;        // 过渡后的目标pitch角度
+  scalar_t pitchJumpThreshold_ = 5.0 * M_PI / 180.0;  // Pitch跳变阈值（弧度），默认5度
+  scalar_t pitchTransitionMaxSpeed_ = 20.0 * M_PI / 180.0;  // Pitch过渡最大角速度（弧度/秒），默认20度/秒
   ArmControlMode currentArmControlMode_ = ArmControlMode::AUTO_SWING;
   ArmControlMode newArmControlMode_ = ArmControlMode::AUTO_SWING;
   TorsoControlMode torsoControlMode_ = TorsoControlMode::SIX_DOF;

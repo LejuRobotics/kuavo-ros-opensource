@@ -42,6 +42,8 @@
 #include <csignal>
 #include <atomic>
 #include <queue>
+#include "kuavo_msgs/lejuClawCommand.h"
+#include "sensor_msgs/JointState.h"
 
 #include "joint_address.hpp"
 #include "dexhand_mujoco_node.h"
@@ -95,6 +97,10 @@ namespace
 
   geometry_msgs::Wrench external_wrench_;
   bool external_wrench_updated_ = false;
+
+  std::vector<double> claw_cmd;
+  bool claw_cmd_updated = false;
+  size_t numClawJoints = 2; // 夹抓的自由度
 
   std::mutex queueMutex;
   ros::NodeHandle *g_nh_ptr;
@@ -572,6 +578,7 @@ namespace
       controlCommands.pop();
     }
     joint_tau_cmd = std::vector<double>(numJoints, 0);
+    claw_cmd = std::vector<double>(numClawJoints, 0);
     queueMutex.unlock();
     uint64_t step_count = 0;
     sim_time = ros::Time::now();
@@ -651,6 +658,9 @@ namespace
         }
         cmd_updated = false;
         joint_tau_cmd = std::vector<double>(numJoints, 0);
+
+        claw_cmd_updated = false;
+        claw_cmd = std::vector<double>(numClawJoints, 0);
         queueMutex.unlock();
       }
 
@@ -699,6 +709,7 @@ namespace
             // ****************************
             // control
             bool updated = false;
+            bool claw_updated = false;
             queueMutex.lock();
             // cmd_updated = !controlCommands.empty();
             // if (cmd_updated)
@@ -709,31 +720,40 @@ namespace
             // }
             updated = cmd_updated;
             cmd_updated = false;
+            claw_updated = claw_cmd_updated;
+            claw_cmd_updated = false;
             tau_cmd = joint_tau_cmd;
             queueMutex.unlock();
-            if (updated)
+            if (updated || claw_updated)
             {
-              // update actuators/controls
-              auto updateControl = [&](const JointGroupAddress& jointAddr, int &i) {
-                  for (auto iter = jointAddr.ctrladr().begin(); iter != jointAddr.ctrladr().end(); iter++) {
-                      d->ctrl[*iter] = tau_cmd[i++];
-                  }
-              };
-              for (size_t i = 0; i < waistNum; i++)
+              if (updated)
               {
-                d->ctrl[i] = tau_cmd[i];
-                // std::cout << "tau_cmd[" << i << "]: " << tau_cmd[i] << std::endl;
-              } 
-              int i = waistNum;
-              updateControl(LLegJointsAddr, i);
-              updateControl(RLegJointsAddr, i);
-              updateControl(LArmJointsAddr, i);
-              updateControl(RArmJointsAddr, i);
-              updateControl(HeadJointsAddr, i);
+                // update actuators/controls
+                auto updateControl = [&](const JointGroupAddress& jointAddr, int &i) {
+                    for (auto iter = jointAddr.ctrladr().begin(); iter != jointAddr.ctrladr().end(); iter++) {
+                        d->ctrl[*iter] = tau_cmd[i++];
+                    }
+                };
+                int i = 0;
+                updateControl(LLegJointsAddr, i);
+                updateControl(RLegJointsAddr, i);
+                updateControl(LArmJointsAddr, i);
+                updateControl(RArmJointsAddr, i);
+                updateControl(HeadJointsAddr, i);
 
-              // Dexhand: ctrl/command
-              if(g_dexhand_node) {
-                g_dexhand_node->writeCallback(d);
+                // Dexhand: ctrl/command
+                if(g_dexhand_node) {
+                  g_dexhand_node->writeCallback(d);
+                }
+              }
+
+              if(claw_updated)
+              {
+                for (size_t i = 0; i < numClawJoints; i++)
+                {
+                  d->ctrl[i+28] = claw_cmd[i];
+                  // std::cout << "claw_cmd: " << claw_cmd[i] << std::endl;
+                }
               }
 
               mj_step(m, d);
@@ -915,6 +935,45 @@ void jointCmdCallback(const kuavo_msgs::jointCmd::ConstPtr &msg)
   joint_tau_cmd = tau;
   cmd_updated = true;
 }
+
+void clawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg)
+{
+  //std::cout << "Received lejuClawCommand: " << msg->data.position[0] << std::endl;
+  
+  // Check if the message has the expected size
+  if (msg->data.position.size() < numClawJoints) {
+    std::cerr << "Error: lejuClawCommand position size (" << msg->data.position.size() 
+              << ") is less than expected numClawJoints (" << numClawJoints << ")" << std::endl;
+    return;
+  }
+  
+  std::vector<double> tem(numClawJoints);
+  for (size_t i = 0; i < numClawJoints; i++)
+  {
+    // Convert position from percentage (0-100) to appropriate range for MuJoCo
+    // Assuming 0 = fully closed, 100 = fully open
+    // Map to range [0, 1] for MuJoCo control
+    // Convert position from percentage (0-100) to appropriate range for MuJoCo
+    // Assuming 0 = fully closed, 100 = fully open
+    // Map to range [-100, 0] for MuJoCo control
+    double raw_value = msg->data.position[i] - 100.0;
+    // Clamp to valid range to prevent issues
+    tem[i] = std::max(-100.0, std::min(0.0, raw_value));
+    
+    // Debug output for first few iterations
+    static int debug_count = 0;
+    if (debug_count < 10) {
+      std::cout << "Claw cmd[" << i << "]: input=" << msg->data.position[i] 
+                << ", raw=" << raw_value << ", clamped=" << tem[i] << std::endl;
+    }
+    debug_count++;
+  }
+
+  std::lock_guard<std::mutex> lock(queueMutex);
+  claw_cmd = tem;
+  claw_cmd_updated = true;
+}
+
 void extWrenchCallback(const geometry_msgs::Wrench::ConstPtr &msg)
 {
   // std::cout << "Received jointCmd: " << msg->tau[0] << std::endl;
@@ -995,6 +1054,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
   ros::ServiceServer service = g_nh_ptr->advertiseService("sim_start", handleSimStart);
 
   // // 创建订阅器
+  ros::Subscriber clawCmdSub = g_nh_ptr->subscribe("/leju_claw_command", 10, clawCmdCallback);
 #ifndef USE_DDS
   ros::Subscriber jointCmdSub = g_nh_ptr->subscribe("/joint_cmd", 10, jointCmdCallback);
 #endif
