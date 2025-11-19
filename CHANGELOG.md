@@ -1,5 +1,7 @@
 # Beta
 
+# 1.3.0
+
 ## Breaking Changes
 
 ## 文档相关
