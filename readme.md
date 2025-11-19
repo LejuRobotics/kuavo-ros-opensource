@@ -76,7 +76,8 @@ source devel/setup.zsh
 ## 如何使用
 ### 模型推理测试
 
-⚠️ 此文档只包含推理时仿真侧的操作，推理侧具体请查看kuavo_data_challenge仓库的README文档
+⚠️ 模型推理需要同时开启仿真环境和推理环境，此文档只包含推理时仿真侧的操作，推理侧具体请查看kuavo_data_challenge仓库的README文档
+开始推理后，可以在kuavo_data_challenge仓库的log文件夹下查看log/kuavo_deploy/deploy.log来确认报错原因
 
 进入src/data_challenge_simulator/examples/deploy文件夹，运行
 ```bash
