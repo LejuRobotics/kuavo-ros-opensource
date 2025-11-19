@@ -204,7 +204,7 @@ class SimulatorTask4():
                 is_in_region_fn=lambda pos, region: Utils.is_in_target_region(pos, region),
                 )
             # 2) 预抓位
-            self.robot.control_head(yaw=0, pitch=math.radians(12))
+            # self.robot.control_head(yaw=0, pitch=math.radians(12))
             self.robot.set_external_control_arm_mode()
             # 3) 发布 msg0：init=True
             rospy.wait_for_service('/simulator/init')

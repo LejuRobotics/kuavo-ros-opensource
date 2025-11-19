@@ -351,7 +351,7 @@ def run_task(task_id: int, headless: bool):
     # === 无限循环，直到 Ctrl+C 结束 ===
     cycle_idx = 1
     while True:
-        seed = 123123 + cycle_idx
+        seed = 42 + cycle_idx
 
         if task_id==1 or task_id==2 or task_id==3:
 
