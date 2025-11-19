@@ -51,7 +51,8 @@ enum class CanBusError {
 enum class CanBusModelType {
     BUSMUST_A, // BUSMUST A 款
     BUSMUST_B, // BUSMUST B 款
-    LEJU_CAN,  // Leju CAN
+    LEJU_CAN_A,  // Leju CAN A
+    LEJU_CAN_B,  // Leju CAN B
     UNKNOWN,   // 未知
 };
 

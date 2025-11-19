@@ -173,10 +173,11 @@ get_end_effector_device_id() {
 select_canbus_type() {
     local -n result_ref=$2
     local side="$1"  # L 或 R
-    local canbus_options=("BUSMUST_A -- BUSMUST A 款" "BUSMUST_B -- BUSMUST B 款" "LEJU_CAN -- 乐聚 CAN 模块")
+    local canbus_options=("BUSMUST_A -- BUSMUST A 款" "BUSMUST_B -- BUSMUST B 款" 
+                          "LEJU_CAN_A -- 乐聚 CAN_A 模块" "LEJU_CAN_B -- 乐聚 CAN_B 模块")
     show_menu "选择${side}侧CANBUS类型" "${canbus_options[@]}"
-    get_user_selection 3 canbus_selection
-    local canbus_types=("BUSMUST_A" "BUSMUST_B" "LEJU_CAN")
+    get_user_selection 4 canbus_selection
+    local canbus_types=("BUSMUST_A" "BUSMUST_B" "LEJU_CAN_A" "LEJU_CAN_B")
     local canbus_type="${canbus_types[$((canbus_selection-1))]}"
     echo_success "✓ 选择${side}侧CANBUS类型: $canbus_type"
 
