@@ -64,7 +64,7 @@
     <parent link="zarm_l1_link" />
     <child link="zarm_l2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.349065850398866" upper="2.0943951023932" effort="50.0" velocity="8.37333333333333" />
+    <limit lower="-0.349065850398866" upper="1.46" effort="50.0" velocity="19.154" />
     <dynamic damping="0.2" friction="0.0" />
   </joint>
   <link name="zarm_l3_link">
@@ -88,7 +88,7 @@
     <parent link="zarm_l2_link" />
     <child link="zarm_l3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="19.3633333333333" />
+    <limit lower="-1.5707963267949" upper="0.46" effort="39.0" velocity="18.84" />
     <dynamic damping="0.2" friction="0.0" />
   </joint>
   <link name="zarm_l4_link">
@@ -245,7 +245,7 @@
     <parent link="zarm_r1_link" />
     <child link="zarm_r2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-2.0943951023932" upper="0.349065850398866" effort="50.0" velocity="8.37333333333333" />
+    <limit lower="-1.46" upper="0.349065850398866" effort="50.0" velocity="19.154" />
     <dynamic damping="0.2" friction="0.0" />
   </joint>
   <link name="zarm_r3_link">
@@ -269,7 +269,7 @@
     <parent link="zarm_r2_link" />
     <child link="zarm_r3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="18.84" />
+    <limit lower="-0.46" upper="1.5707963267949" effort="39.0" velocity="18.84" />
     <dynamic damping="0.2" friction="0.0" />
   </joint>
   <link name="zarm_r4_link">

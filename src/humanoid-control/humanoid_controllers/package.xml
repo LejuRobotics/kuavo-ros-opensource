@@ -40,7 +40,7 @@
     <depend>kuavo_audio_receiver</depend>
     <depend>kuavo_sdk</depend>
     <!-- <depend>ocs2_biped_robot_ros</depend> -->
-
+    <depend>humanoid_plan_arm_trajectory</depend>
     <depend>angles</depend>
     <depend>kuavo_led_controller</depend>
     <exec_depend>nodelet</exec_depend>

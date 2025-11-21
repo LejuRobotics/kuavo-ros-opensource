@@ -129,6 +129,18 @@ class Quest3ArmInfoTransformer:
         self.avg_left_lower_arm_length = None
         self.avg_right_upper_arm_length = None
         self.avg_right_lower_arm_length = None
+        # 添加上臂向量角速度限制相关变量
+        self.last_left_upper_arm_vec = None
+        self.last_right_upper_arm_vec = None
+        self.last_left_arm_timestamp = None
+        self.last_right_arm_timestamp = None
+        self.max_shoulder_angular_velocity = 4.0  # rad/s, 肩关节最大角速度
+        # 添加小臂向量角速度限制相关变量
+        self.last_left_lower_arm_vec = None
+        self.last_right_lower_arm_vec = None
+        self.max_elbow_angular_velocity = 4.0  # rad/s, 肘关节最大角速度（通常比肩关节灵活）
+        # 添加上臂向量空间约束参数
+        self.upper_arm_cone_angle_forward = 140.0 * np.pi / 180.0  # 前方锥角（相对于前方x轴）
         self.marker_pub = rospy.Publisher("visualization_marker", Marker, queue_size=10)
         # self.marker_pub_human = rospy.Publisher("visualization_marker/result", Marker, queue_size=10)
         self.marker_pub_right = rospy.Publisher("visualization_marker_right", Marker, queue_size=10)
@@ -146,6 +158,8 @@ class Quest3ArmInfoTransformer:
         self.marker_pub_shoulder_quest3 = rospy.Publisher("visualization_marker/shoulder_quest3", Marker, queue_size=10)
         self.marker_pub_shoulder_quest3_right = rospy.Publisher("visualization_marker_right/shoulder_quest3", Marker, queue_size=10)
         self.marker_pub_chest = rospy.Publisher("visualization_marker_chest", Marker, queue_size=10)
+        self.marker_pub_upper_arm_constraint_left = rospy.Publisher("visualization_marker/upper_arm_constraint_left", Marker, queue_size=10)
+        self.marker_pub_upper_arm_constraint_right = rospy.Publisher("visualization_marker/upper_arm_constraint_right", Marker, queue_size=10)
         self.joint_state_puber = rospy.Publisher('/joint_states', JointState, queue_size=10)
         self.shoulder_angle_puber = rospy.Publisher('/quest3_debug/shoulder_angle', Float32MultiArray, queue_size=10)
         self.chest_axis_puber = rospy.Publisher('/quest3_debug/chest_axis', Float32MultiArray, queue_size=10)
@@ -187,6 +201,265 @@ class Quest3ArmInfoTransformer:
             print(f"get rosparams shoulder_width: {self.shoulder_width}")
         else:
             print("/quest3/shoulder_width not found")
+        if rospy.has_param("/quest3/max_shoulder_angular_velocity"):
+            self.max_shoulder_angular_velocity = rospy.get_param("/quest3/max_shoulder_angular_velocity")
+            print(f"get rosparams max_shoulder_angular_velocity: {self.max_shoulder_angular_velocity}")
+        else:
+            print("/quest3/max_shoulder_angular_velocity not found, using default 3.0 rad/s")
+        if rospy.has_param("/quest3/max_elbow_angular_velocity"):
+            self.max_elbow_angular_velocity = rospy.get_param("/quest3/max_elbow_angular_velocity")
+            print(f"get rosparams max_elbow_angular_velocity: {self.max_elbow_angular_velocity}")
+        else:
+            print("/quest3/max_elbow_angular_velocity not found, using default 4.0 rad/s")
+        if rospy.has_param("/quest3/upper_arm_cone_angle_forward"):
+            self.upper_arm_cone_angle_forward = rospy.get_param("/quest3/upper_arm_cone_angle_forward") * np.pi / 180.0
+            print(f"get rosparams upper_arm_cone_angle_forward: {self.upper_arm_cone_angle_forward * 180.0 / np.pi} degrees")
+        if rospy.has_param("/quest3/upper_arm_cone_angle_side"):
+            self.upper_arm_cone_angle_side = rospy.get_param("/quest3/upper_arm_cone_angle_side") * np.pi / 180.0
+            print(f"get rosparams upper_arm_cone_angle_side: {self.upper_arm_cone_angle_side * 180.0 / np.pi} degrees")
+        if rospy.has_param("/quest3/upper_arm_cone_angle_back"):
+            self.upper_arm_cone_angle_back = rospy.get_param("/quest3/upper_arm_cone_angle_back") * np.pi / 180.0
+            print(f"get rosparams upper_arm_cone_angle_back: {self.upper_arm_cone_angle_back * 180.0 / np.pi} degrees")
+    
+    def constrain_upper_arm_vector(self, upper_arm_vec, side):
+        """
+        限制上臂向量在允许的锥形空间内（以肩膀自然姿态为中心的锥）
+        Args:
+            upper_arm_vec: 上臂向量（从肩膀指向手肘，在机器人base_link坐标系中）
+            side: "Left" or "Right"
+        Returns:
+            受约束后的上臂向量
+        """
+        vec_len = np.linalg.norm(upper_arm_vec)
+        if vec_len < 1e-6:
+            return upper_arm_vec
+        
+        # 归一化方向向量
+        direction = upper_arm_vec / vec_len
+        
+        # 定义肩膀自然姿态的参考方向（略微向前和向外）
+        # 左臂：向前、向左、略向下  [1.0, 0.3, -0.1]
+        # 右臂：向前、向右、略向下  [1.0, -0.3, -0.1]
+        if side == "Left":
+            reference_vec = np.array([1.0, 0.3, -0.1])
+        else:
+            reference_vec = np.array([1.0, -0.3, -0.1])
+        reference_vec = reference_vec / np.linalg.norm(reference_vec)
+        
+        # 计算当前方向与参考方向的夹角
+        angle = np.arccos(np.clip(np.dot(direction, reference_vec), -1.0, 1.0))
+        
+        if angle > self.upper_arm_cone_angle_forward / 2:
+            # 投影回锥面
+            axis = np.cross(reference_vec, direction)
+            axis_norm = np.linalg.norm(axis)
+            if axis_norm > 1e-6:
+                axis = axis / axis_norm
+                # 旋转到锥面边界
+                target_angle = self.upper_arm_cone_angle_forward / 2
+                constrained_direction = reference_vec * np.cos(target_angle) + \
+                                      np.cross(axis, reference_vec) * np.sin(target_angle) + \
+                                      axis * np.dot(axis, reference_vec) * (1 - np.cos(target_angle))
+                # 返回保持原长度的约束向量
+                return constrained_direction * vec_len
+        
+        # 未超出约束，返回原向量
+        return upper_arm_vec
+    
+    def visualize_upper_arm_constraint(self, shoulder_pos, side):
+        """
+        可视化上臂的锥形约束空间（以肩膀自然姿态为中心）
+        Args:
+            shoulder_pos: 肩膀位置
+            side: "Left" or "Right"
+        """
+        marker = Marker()
+        marker.header.frame_id = "base_link"
+        marker.header.stamp = rospy.Time.now()
+        marker.ns = f"upper_arm_constraint_{side}"
+        marker.id = 0
+        marker.type = Marker.LINE_LIST
+        marker.action = Marker.ADD
+        marker.scale.x = 0.01  # 线宽
+        marker.color.a = 0.3
+        marker.color.r = 1.0 if side == "Left" else 0.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0 if side == "Left" else 1.0
+        
+        # 定义锥轴方向（与约束函数中的参考方向一致）
+        if side == "Left":
+            cone_axis = np.array([1.0, 0.3, -0.1])
+        else:
+            cone_axis = np.array([1.0, -0.3, -0.1])
+        cone_axis = cone_axis / np.linalg.norm(cone_axis)
+        
+        # 绘制锥形约束空间（高度减小到0.15米，约为上臂长度的一半）
+        self._add_cone_to_marker(marker, shoulder_pos, cone_axis, 
+                                 self.upper_arm_cone_angle_forward, 0.1)
+        
+        if side == "Left":
+            self.marker_pub_upper_arm_constraint_left.publish(marker)
+        else:
+            self.marker_pub_upper_arm_constraint_right.publish(marker)
+    
+    def _add_cone_to_marker(self, marker, apex, direction, cone_angle, height):
+        """
+        向marker添加锥形的线框
+        Args:
+            marker: Marker对象
+            apex: 锥顶位置
+            direction: 锥轴方向（归一化）
+            cone_angle: 锥角（全角）
+            height: 锥的高度
+        """
+        direction = direction / np.linalg.norm(direction)
+        
+        # 计算锥底半径
+        radius = height * np.tan(cone_angle / 2)
+        
+        # 计算锥底圆心
+        base_center = apex + direction * height
+        
+        # 构建垂直于锥轴的两个正交向量
+        if abs(direction[2]) < 0.9:
+            perpendicular1 = np.cross(direction, np.array([0, 0, 1]))
+        else:
+            perpendicular1 = np.cross(direction, np.array([0, 1, 0]))
+        perpendicular1 = perpendicular1 / np.linalg.norm(perpendicular1)
+        perpendicular2 = np.cross(direction, perpendicular1)
+        perpendicular2 = perpendicular2 / np.linalg.norm(perpendicular2)
+        
+        # 在锥底圆上生成点
+        num_points = 16
+        base_points = []
+        for i in range(num_points):
+            angle = 2 * np.pi * i / num_points
+            point = base_center + radius * (np.cos(angle) * perpendicular1 + 
+                                           np.sin(angle) * perpendicular2)
+            base_points.append(point)
+        
+        # 添加从锥顶到锥底的线
+        for point in base_points:
+            # 从锥顶到锥底边缘
+            p1 = Pose().position
+            p1.x, p1.y, p1.z = apex
+            marker.points.append(p1)
+            p2 = Pose().position
+            p2.x, p2.y, p2.z = point
+            marker.points.append(p2)
+        
+        # 添加锥底圆周的线
+        for i in range(num_points):
+            p1 = Pose().position
+            p1.x, p1.y, p1.z = base_points[i]
+            marker.points.append(p1)
+            p2 = Pose().position
+            p2.x, p2.y, p2.z = base_points[(i + 1) % num_points]
+            marker.points.append(p2)
+    
+    def limit_arm_vector_rotation(self, current_vec, last_vec, dt):
+        """
+        限制上臂向量的旋转角速度
+        Args:
+            current_vec: 当前上臂向量
+            last_vec: 上一帧上臂向量
+            dt: 时间步长 (s)
+        Returns:
+            限制后的上臂向量
+        """
+        if last_vec is None or dt <= 0:
+            return current_vec
+        
+        # 归一化向量
+        len_current = np.linalg.norm(current_vec)
+        len_last = np.linalg.norm(last_vec)
+        
+        if len_current < 1e-6 or len_last < 1e-6:
+            return current_vec
+        
+        v1 = last_vec / len_last
+        v2 = current_vec / len_current
+        
+        # 计算夹角
+        cos_angle = np.clip(np.dot(v1, v2), -1.0, 1.0)
+        angle = np.arccos(cos_angle)
+        
+        # 计算最大允许角度
+        max_angle = self.max_shoulder_angular_velocity * dt
+        
+        if angle > max_angle:
+            # 使用球面线性插值 (SLERP) 限制旋转
+            ratio = max_angle / angle
+            
+            # 计算旋转轴
+            axis = np.cross(v1, v2)
+            axis_norm = np.linalg.norm(axis)
+            
+            if axis_norm > 1e-6:
+                axis = axis / axis_norm
+                # 使用 Rodrigues 旋转公式
+                limited_dir = v1 * np.cos(max_angle) + \
+                             np.cross(axis, v1) * np.sin(max_angle) + \
+                             axis * np.dot(axis, v1) * (1 - np.cos(max_angle))
+                # 保持原始长度
+                return limited_dir * len_current
+            else:
+                # 向量几乎平行，直接返回
+                return current_vec
+        
+        return current_vec
+    
+    def limit_arm_vector_rotation_elbow(self, current_vec, last_vec, dt):
+        """
+        限制小臂向量的旋转角速度（肘关节）
+        Args:
+            current_vec: 当前小臂向量
+            last_vec: 上一帧小臂向量
+            dt: 时间步长 (s)
+        Returns:
+            限制后的小臂向量
+        """
+        if last_vec is None or dt <= 0:
+            return current_vec
+        
+        # 归一化向量
+        len_current = np.linalg.norm(current_vec)
+        len_last = np.linalg.norm(last_vec)
+        
+        if len_current < 1e-6 or len_last < 1e-6:
+            return current_vec
+        
+        v1 = last_vec / len_last
+        v2 = current_vec / len_current
+        
+        # 计算夹角
+        cos_angle = np.clip(np.dot(v1, v2), -1.0, 1.0)
+        angle = np.arccos(cos_angle)
+        
+        # 计算最大允许角度（使用肘关节的最大角速度）
+        max_angle = self.max_elbow_angular_velocity * dt
+        
+        if angle > max_angle:
+            # 使用球面线性插值 (SLERP) 限制旋转
+            ratio = max_angle / angle
+            
+            # 计算旋转轴
+            axis = np.cross(v1, v2)
+            axis_norm = np.linalg.norm(axis)
+            
+            if axis_norm > 1e-6:
+                axis = axis / axis_norm
+                # 使用 Rodrigues 旋转公式
+                limited_dir = v1 * np.cos(max_angle) + \
+                             np.cross(axis, v1) * np.sin(max_angle) + \
+                             axis * np.dot(axis, v1) * (1 - np.cos(max_angle))
+                # 保持原始长度
+                return limited_dir * len_current
+            else:
+                # 向量几乎平行，直接返回
+                return current_vec
+        
+        return current_vec
               
     def read_joySticks_msg(self, msg):
         self.left_joystick = [msg.left_trigger, msg.left_grip]
@@ -716,7 +989,83 @@ class Quest3ArmInfoTransformer:
         
         # Calculate upper arm vector (from shoulder to elbow)
         upper_arm_vec = np.array([elbow_pos[i] - human_shoulder_pos[i] for i in range(3)])
-        lower_arm_vec = np.array([hand_pos[i] - elbow_pos[i] for i in range(3)])
+        lower_arm_vec = np.array([hand_pos[i] - elbow_pos[i] for i in range(3)])  
+        
+        # 限制上臂向量的旋转角速度（根据adapt_width_gamma平滑调整限制强度）
+        current_timestamp = rospy.Time.now().to_sec()
+        
+        # 计算速度限制因子：adapt_width_gamma越大，限制越宽松
+        # adapt_width_gamma范围[0, 0.3]，映射到速度限制倍数[1.0, 5.0]
+        # 即手越过胸部时允许的速度是正常情况的5倍
+        speed_limit_multiplier = 1.0 
+        # + (adapt_width_gamma / 0.3) * 2.0  # 1.0 -> 5.0
+        
+        if side == "Left":
+            if self.last_left_arm_timestamp is not None:
+                dt = current_timestamp - self.last_left_arm_timestamp
+                dt = max(0.001, min(dt, 0.1))  # 限制dt在合理范围内
+            else:
+                dt = 0.01  # 默认100Hz
+            
+            # 临时提高最大角速度限制
+            original_max_vel = self.max_shoulder_angular_velocity
+            self.max_shoulder_angular_velocity = original_max_vel * speed_limit_multiplier
+            
+            upper_arm_vec = self.limit_arm_vector_rotation(upper_arm_vec, self.last_left_upper_arm_vec, dt)
+            
+            # 恢复原始限制
+            self.max_shoulder_angular_velocity = original_max_vel
+            
+            self.last_left_upper_arm_vec = upper_arm_vec.copy()
+            self.last_left_arm_timestamp = current_timestamp
+        else:  # Right
+            if self.last_right_arm_timestamp is not None:
+                dt = current_timestamp - self.last_right_arm_timestamp
+                dt = max(0.001, min(dt, 0.1))  # 限制dt在合理范围内
+            else:
+                dt = 0.01  # 默认100Hz
+            
+            # 临时提高最大角速度限制
+            original_max_vel = self.max_shoulder_angular_velocity
+            self.max_shoulder_angular_velocity = original_max_vel * speed_limit_multiplier
+            
+            upper_arm_vec = self.limit_arm_vector_rotation(upper_arm_vec, self.last_right_upper_arm_vec, dt)
+            
+            # 恢复原始限制
+            self.max_shoulder_angular_velocity = original_max_vel
+            
+            self.last_right_upper_arm_vec = upper_arm_vec.copy()
+            self.last_right_arm_timestamp = current_timestamp
+        
+        # # 限制小臂向量的旋转角速度（肘关节）
+        # if side == "Left":
+        #     # 临时提高最大角速度限制
+        #     original_max_vel_elbow = self.max_elbow_angular_velocity
+        #     self.max_elbow_angular_velocity = original_max_vel_elbow * speed_limit_multiplier
+            
+        #     # 使用相同的limit函数，但传入小臂向量
+        #     lower_arm_vec = np.array([hand_pos[i] - elbow_pos[i] for i in range(3)])
+        #     lower_arm_vec_limited = self.limit_arm_vector_rotation_elbow(lower_arm_vec, self.last_left_lower_arm_vec, dt)
+            
+        #     # 恢复原始限制
+        #     self.max_elbow_angular_velocity = original_max_vel_elbow
+            
+        #     self.last_left_lower_arm_vec = lower_arm_vec_limited.copy()
+        #     lower_arm_vec = lower_arm_vec_limited
+        # else:  # Right
+        #     # 临时提高最大角速度限制
+        #     original_max_vel_elbow = self.max_elbow_angular_velocity
+        #     self.max_elbow_angular_velocity = original_max_vel_elbow * speed_limit_multiplier
+            
+        #     # 使用相同的limit函数，但传入小臂向量
+        #     lower_arm_vec = np.array([hand_pos[i] - elbow_pos[i] for i in range(3)])
+        #     lower_arm_vec_limited = self.limit_arm_vector_rotation_elbow(lower_arm_vec, self.last_right_lower_arm_vec, dt)
+            
+        #     # 恢复原始限制
+        #     self.max_elbow_angular_velocity = original_max_vel_elbow
+            
+        #     self.last_right_lower_arm_vec = lower_arm_vec_limited.copy()
+        #     lower_arm_vec = lower_arm_vec_limited
         
         # Apply rotation to upper arm vector based on adapt_width_gamma
         # adapt_width_gamma ranges from 0 (hand far outside) to 0.3 (hand deep inside)
@@ -760,7 +1109,8 @@ class Quest3ArmInfoTransformer:
             # Apply rotation to upper arm vector
             upper_arm_vec = rotation_matrix @ upper_arm_vec
         
-        # Scale and compute final positions
+        upper_arm_vec = self.constrain_upper_arm_vector(upper_arm_vec, side)
+
         scaled_elbow_pos = shoulder_pos + radi1 * upper_arm_vec
         scaled_hand_pos = scaled_elbow_pos + radi2 * lower_arm_vec
 
@@ -892,6 +1242,8 @@ class Quest3ArmInfoTransformer:
             marker = self.construct_point_marker(hand_pos, 0.08, 0.9, color=[1, 0, 0])
             elbow_marker = self.construct_point_marker(elbow_pos, 0.1, color=[0, 1, 0])
             shoulder_marker = self.construct_point_marker(shoulder_pos, 0.1, color=[0, 0, 1])
+            # 可视化上臂约束空间
+            # self.visualize_upper_arm_constraint(shoulder_pos, side)
             # human_shoulder_marker = self.construct_point_marker(human_shoulder_pos, 0.02, 0.8, color=[1, 1, 1])
             # human_elbow_marker = self.construct_point_marker(human_elbow_pos, 0.02, 0.8, color=[1, 1, 1])
             # human_hand_marker = self.construct_point_marker(human_hand_pos, 0.02, 0.8, color=[1, 1, 1])
