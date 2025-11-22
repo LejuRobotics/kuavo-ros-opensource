@@ -98,16 +98,55 @@ check_samplerate(){
 # Configure robot version
 setup_robot_version() {
     print_info "设置机器人版本..."
-    print_info "请输入机器人版本 (42代表短臂, 45代表长臂, 49代表 pro max, 45.1代表假手版, 49.1代表展厅版):"
-    read -r version
-    if [[ "$version" == "45.1" || "$version" == "49.1" ]]; then
-    if [[ "$version" == "45.1" ]]; then
-        version=100045
-    else
-        version=100049
-    fi
-fi
-    
+    # 版本选择和确认循环
+    while true; do
+        print_info "请输入机器人版本:"
+        print_info "42 (短臂版本)"
+        print_info "45 (长臂版本)"
+        print_info "49 (pro max版本)"
+        print_info "45.1 (假手版)"
+        print_info "49.1 (展厅版)"
+        print_info "13 (roban2.0版本)"
+        print_info "14 (roban2.1版本)"
+        print_info "15 (roban2.2版本)"
+        read -r version
+
+        # 验证输入的版本是否有效
+        if [[ "$version" != "42" && "$version" != "45" && "$version" != "49" &&
+              "$version" != "45.1" && "$version" != "49.1" &&
+              "$version" != "13" && "$version" != "14" && "$version" != "15" ]]; then
+            print_error "无效的版本号: $version"
+            print_info "请选择上述列出的有效版本号"
+            continue  # 重新开始循环
+        fi
+
+        # 处理特殊版本号转换
+        if [[ "$version" == "45.1" || "$version" == "49.1" ]]; then
+            if [[ "$version" == "45.1" ]]; then
+                version=100045
+            else
+                version=100049
+            fi
+        elif [[ "$version" == "13" ]]; then
+            version=13
+        elif [[ "$version" == "14" ]]; then
+            version=14
+        elif [[ "$version" == "15" ]]; then
+            version=15
+        fi
+
+        # 显示选择的版本并要求确认
+        print_info "您选择的机器人版本是: $version"
+        print_info "确定使用这个版本吗？(y/n)"
+        read -r confirm
+
+        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+            break  # 确认成功，退出循环
+        else
+            print_info "请重新选择版本..."
+        fi
+    done
+
     # 准备要添加的环境变量行
     export_line="export ROBOT_VERSION=$version"
     

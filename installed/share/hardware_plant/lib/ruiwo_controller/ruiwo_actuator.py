@@ -542,11 +542,13 @@ class RuiWoActuator():
         self.head_high_torque = 0
         # ////////////// 初始化变量 end //////////////
 
-        fail_count = 0
+        ignore_count = 0
+        success_count = 0
         for index, address in enumerate(self.joint_address_list):
             if address == DISABLE_ADDRESS:
                 self.joint_online_list[index] = False
                 print("[RUIWO motor]:ID:", address, "Enable: [Ignored]")
+                ignore_count += 1
                 continue
 
             # 先 Enter Reset 擦除电机故障码
@@ -567,16 +569,19 @@ class RuiWoActuator():
                     motor_err = RuiwoErrCode2string(errcode)
                     print(f"\033[31m[RUIWO motor]:ID:{address} Enable: [Failed], Errorcode: [0x{errcode:X}] {motor_err}\033[0m")
                     return 2  # 直接返回 2 表示存在电机有严重故障码
-
+                
+                success_count += 1
                 self.RUIWOTools.run_ptm_mode(address, state[1], 0, self.target_pos_kp[index], self.target_pos_kd[index], 0)
                 self.set_joint_state(index, state)
                 self.joint_online_list[index] = True
                 print("[RUIWO motor]:ID:", address, "Enable: [Succeed]")
             else:
-                fail_count += 1
                 print("[RUIWO motor]:ID:", address, "Enable: [Failed], Errorcode:", state)
 
-        if fail_count > 0:
+
+        if ignore_count == len(self.joint_address_list):
+            return 0
+        elif success_count == 0:
             return 1  # 全部失败 ==> 通讯问题
 
         return 0  # 成功返回0
@@ -590,12 +595,14 @@ class RuiWoActuator():
                  1: 通信问题，包括：CAN 消息发送/接收失败或者超时
                  2: 严重错误!!! 严重错误!!! 返回 2 时说明有电机存在严重故障码(RuiwoErrorCode 中大于 128 的故障码)
         """
-        fail_count = 0
+        ignore_count = 0
+        success_count = 0
         motor_error_count = 0  # 错误计数
 
         for index, address in enumerate(self.joint_address_list):
             if address == DISABLE_ADDRESS:
                 print("[RUIWO motor]:ID:", self.joint_address_list[index], "Disable: [Ignored]")
+                ignore_count += 1
                 continue
 
             state = self.RUIWOTools.enter_reset_state(self.joint_address_list[index])
@@ -606,20 +613,21 @@ class RuiWoActuator():
                     print(f"\033[31m[RUIWO motor]:ID:{address} Disable: [Failed], Errorcode: [0x{errcode:X}],错误: {RuiwoErrCode2string(errcode)}\033[0m")
                     motor_error_count += 1
                     continue
-
+                success_count += 1    
                 self.joint_online_list[index] = False
                 print("[RUIWO motor]:ID:", address, "Disable: [Succeed]")
                 # for i in range(5):
                 #     self.RUIWOTools.run_ptm_mode(self.joint_address_list[index],0,0,0,0,0)
                 #     time.sleep(0.01)
             else:
-                fail_count += 1
                 print("[RUIWO motor]:ID:", address, "Disable: [Failed], Retcode:", state)
 
         # 有电机存在大于 128 的故障码(无法清除), 严重
         if motor_error_count > 0:
             return 2  # 优先返回更严重的错误
-        elif fail_count == len(self.joint_address_list):
+        elif ignore_count == len(self.joint_address_list):
+            return 0
+        elif success_count == 0:
             return 1  # 全部失败 ==> 通讯问题
 
         return 0  # 成功返回0
