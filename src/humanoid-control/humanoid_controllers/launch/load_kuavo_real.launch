@@ -5,7 +5,7 @@
     <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
 
     <arg name="vr_remote_control" default="false"/>
-    <arg name="robot_type"         default="humanoid"/>
+    <arg name="robot_type"         default="1"/>
     <arg name="rviz"                default="false" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
@@ -95,6 +95,7 @@
     <param name="pull_up_force_threshold" value="0.80"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
+    <param name="robot_type"      value="$(arg robot_type)"/>
     
     <!-- teach_pendant=1, teach pendant mode -->
     <param name="teach_pendant"  value="$(arg teach_pendant)"/>

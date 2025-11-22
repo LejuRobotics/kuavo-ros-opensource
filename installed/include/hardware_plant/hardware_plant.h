@@ -128,7 +128,8 @@ class HardwarePlant
     inline void SetJointPosition(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
     inline void GetJointData(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
     bool calibrateMotor(int motor_id, int direction, bool save_offset = false);
-    void calibrateLoop();
+    void calibrateBipedLoop();
+    void calibrateWheelLoop();
     void calibrateArmJoints();
     bool calibrateArmJointsAtLimit(bool auto_mode = true, bool calibrate_head = true, bool head_only = false);
     void initEndEffector();
@@ -138,6 +139,12 @@ class HardwarePlant
         // RuiWoActuator相关方法的封装
         void adjustZeroPosition(int motor_index, double offset);
         std::vector<double> getMotorZeroPoints();
+
+    // 0扭矩控制腿部EC电机接口（双足模式：1-12号关节，轮臂模式：1-4号关节）
+    bool setZeroTorqueForLegECMotors();
+
+    // 退出0扭矩模式，恢复正常控制
+    bool exitZeroTorqueMode();
 
     // 电机状态管理器接口
     void setMotorStatusHardwareSettings();  // 设置硬件配置到电机状态管理器
@@ -224,6 +231,8 @@ public:
         return disableMotor_.size();
     }
 
+    std::string getRobotModule() const { return robot_module_; }
+
     // 析构标志位
     bool is_deinitialized_ = false;
 
@@ -284,6 +293,8 @@ private:
     RobotVersion rb_version_;
     std::string ecmaster_type_ = "elmo";
     HardwareParam hardware_param_;
+
+    std::string robot_module_;
 
     // 实际EC电机数目
     uint32_t countECMasters = 0;

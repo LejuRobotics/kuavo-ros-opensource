@@ -18,6 +18,8 @@
     <depend>humanoid_interface</depend>
     <depend>humanoid_estimation</depend>
     <depend>humanoid_interface_ros</depend>
+    <depend>humanoid_wheel_interface</depend>
+    <depend>humanoid_wheel_interface_ros</depend>
     <depend>humanoid_interface_drake</depend>
     <depend>kuavo_estimation</depend>
     <depend>kuavo_monitor</depend>
@@ -26,6 +28,7 @@
     <depend>mujoco_cpp</depend>
     <depend>robot_localization</depend>
     <depend>humanoid_wbc</depend>
+    <depend>humanoid_wheel_wbc</depend>
     <depend>controller_interface</depend>
     <depend>h12pro_controller_node</depend>
     <depend>joy</depend>

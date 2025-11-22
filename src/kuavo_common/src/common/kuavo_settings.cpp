@@ -128,7 +128,7 @@ namespace HighlyDynamic
         getline(file, ecMasterType);
         file.close();
 
-        if (ecMasterType != "elmo" && ecMasterType != "youda1" && ecMasterType != "youda3" && ecMasterType != "youda" && ecMasterType != "leju") {
+        if (ecMasterType != "elmo" && ecMasterType != "youda" && ecMasterType != "lunbi1" && ecMasterType != "youda3" && ecMasterType != "youda" && ecMasterType != "leju") {
             std::cerr << "\033[33mwarning: ecmaster_type :" << ecMasterType 
                   << " error, 使用默认值 'elmo' 驱动器类型\033[0m" << std::endl;
             return "elmo"; 
@@ -198,6 +198,7 @@ namespace HighlyDynamic
                 {"ruiwoPA43", {BIT_17_10, CK_MC, PA43_C2T, RUIWO}},
                 {"PA100_18", {BIT_17_18, PA100_MC, PA100_18_C2T, EC_MASTER}},
                 {"PA100_20", {BIT_17_20, PA100_MC, PA100_20_C2T, EC_MASTER}},
+                {"PA115", {BIT_17_120, PA115_MC, PA115_C2T, EC_MASTER}},
                 {"PA4310_25", {BIT_17_25, PA4310_25_MC, PA4310_25_C2T, EC_MASTER}},
                 {"PA60", {BIT_17_36, PA100_MC, PA60_C2T, EC_MASTER}},
                 {"PA72_36", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},

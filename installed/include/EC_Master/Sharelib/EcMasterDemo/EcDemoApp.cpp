@@ -47,8 +47,10 @@
 #define BIT_17_9 (BIT_17 * 9)
 #define BIT_17_10 (BIT_17 * 10)
 #define BIT_17_18 (BIT_17 * 18)
-#define BIT_17_36 (BIT_17 * 36)
 #define BIT_17_25 (BIT_17 * 25)
+#define BIT_17_36 (BIT_17 * 36)
+#define BIT_17_120 (BIT_17 * 120)
+
 #define MAX_TORQUE (31.2)
 #define TO_DEGREE (180.0 / M_PI)
 #define TO_RADIAN (M_PI / 180.0)
@@ -168,7 +170,16 @@ static uint8_t physical2logical_[ROBOT_MODEL_NUM][NUM_SLAVE_MAX] = {
    14,                                //右肩
    15, 16, 17, 18, 19, 20,            //冗余
    21, 22, 23, 24, 25, 26,
-   27, 28, 29}
+   27, 28, 29},
+   // LunBi
+   {4,                                // 左肩 
+    5,                                // 右肩
+    3, 2, 1, 0,                       // 下肢
+    6, 7, 8, 9, 10, 11,               // 冗余
+    12, 13, 14, 15, 16, 17,
+    18, 19, 20, 21, 22, 23,
+    24, 25, 26, 27, 28, 29,
+   }
 };
 
 uint8_t physicalToLogical(uint8_t physical)
@@ -369,10 +380,10 @@ static char *floatToChar(double value)
 // 打印 `EcMasterType` 的字符串表示
 const char* getEcMasterTypeString(EcMasterType type) {
   switch(type) {
-      case ELMO: return "ELMO";
-      case YD:    return "YD";
-      case LEJU:    return "LEJU";
-      default:    return "UNKNOWN";
+    case ELMO:    return "ELMO";
+    case YD:      return "YD";
+    case LEJU:    return "LEJU";
+    default:      return "UNKNOWN";
   }
 }
 
@@ -808,11 +819,6 @@ uint8_t motorStatus(const uint16_t id)
 #define INDEX_POSITION_ACTUAL_VALUE 0x6064
 #define INDEX_MOTOR_RATED_CURRENT 0x6075
 
-void physicalToLogical(uint8_t& id_physical ,uint8_t index)
-{
-  id_physical = physical2logical_[Robot_module][index];
-}
-
 /// @brief 单次sdo读取
 /// @param SlaveId 驱动器id
 /// @param ObIndex 对象索引
@@ -821,33 +827,29 @@ void physicalToLogical(uint8_t& id_physical ,uint8_t index)
 /// @return 
 bool readSingleSdo(const uint8_t SlaveId,const uint16_t ObIndex,const uint16_t SubIndex,int32_t* read_data) 
 {
-    EC_T_DWORD dwRes = EC_E_NOERROR;
-    uint8_t buf[4];
-    int32_t value;
-    uint32_t outdata_len;
-     
-    dwRes = emCoeSdoUpload(0, SlaveId, ObIndex, SubIndex, buf, 4, &outdata_len, 100, 0);
-    if (EC_E_NOERROR != dwRes)
-    {
-      // EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed ot emCoeSdoUpload, Slave %d, Err (0x%lx)\n", SlaveId, dwRes));
-      return false;
-    }
-    if (outdata_len == 2) 
-    {
-    // 读取的是16位数据
-      *read_data = (buf[1] << 8) | buf[0];
-    }
-    else if (outdata_len == 4) 
-    {
-      *read_data = (buf[3] << 24) | (buf[2] << 16) | (buf[1] << 8) | buf[0];//对读出来的值进行转换拼接
-    }
+  EC_T_DWORD dwRes = EC_E_NOERROR;
+  uint8_t buf[4];
+  int32_t value;
+  uint32_t outdata_len;
+
+  dwRes = emCoeSdoUpload(0, SlaveId, ObIndex, SubIndex, buf, 4, &outdata_len, 100, 0);
+  if (EC_E_NOERROR != dwRes)
+  {
+    // EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed ot emCoeSdoUpload, Slave %d, Err (0x%lx)\n", SlaveId, dwRes));
+    return false;
+  }
+  if (outdata_len == 2) 
+  {
+  // 读取的是16位数据
+    *read_data = (buf[1] << 8) | buf[0];
+  }
+  else if (outdata_len == 4) 
+  {
+    *read_data = (buf[3] << 24) | (buf[2] << 16) | (buf[1] << 8) | buf[0];//对读出来的值进行转换拼接
+  }
   return true;
 }
 
-/// @brief 单次sdo写入
-/// @param SlaveId 驱动器id
-/// @param ObIndex 对象索引
-/// @param SubIndex 子索引
 static bool motorGetConfig(T_EC_DEMO_APP_CONTEXT *pAppContext)
 {
   EC_T_DWORD dwRes = EC_E_NOERROR;
@@ -1336,6 +1338,15 @@ void setRobotMoudle(const int robot_module)
       std::cout << "||              Get Robot Module is KUAVO5            ||" << std::endl;
       std::cout << "********************************************************" << std::endl;
       Robot_module = KUAVO5;
+      std::cout << "Robot_module: " << Robot_module << std::endl;
+      break;
+    }
+    case LUNBI:
+    {
+      std::cout << "********************************************************" << std::endl;
+      std::cout << "||              Get Robot Module is Lunbi              ||" << std::endl;
+      std::cout << "********************************************************" << std::endl;
+      Robot_module = LUNBI;
       std::cout << "Robot_module: " << Robot_module << std::endl;
       break;
     }
@@ -3315,6 +3326,11 @@ static EC_T_DWORD myAppInit(T_EC_DEMO_APP_CONTEXT *pAppContext)
   EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "电机错误已启动!请在cmakefile 中开关此宏\n"));
 #endif
   loadOffset();
+  
+  // 初始化 motorStatusChangeRequest 数组
+  for (int i = 0; i < NUM_SLAVE_MAX; i++) {
+    motorStatusChangeRequest[i].store(false);
+  }
 
   return EC_E_NOERROR;
 }

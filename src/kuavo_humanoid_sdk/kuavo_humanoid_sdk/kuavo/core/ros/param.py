@@ -84,10 +84,21 @@ def joint_names()->dict:
         head_link_names = [
             'zhead_1_link', 'zhead_2_link'
         ]
-    else:
+    elif kuavo_ros_param.robot_version() >= 40 and kuavo_ros_param.robot_version() < 60:
         leg_link_names = [
             'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
             'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
+        ]
+        arm_link_names = [
+            'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
+            'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link', 'zarm_r5_link', 'zarm_r6_link', 'zarm_r7_link',
+        ]
+        head_link_names = [
+            'zhead_1_link', 'zhead_2_link'
+        ]
+    else:
+        leg_link_names = [
+            'knee_link', 'leg_link', 'waist_link', 'waist_yaw_link'
         ]
         arm_link_names = [
             'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
@@ -204,11 +215,11 @@ def make_robot_param()->dict:
         'init_stand_height': kuavo_ros_param.init_stand_height()
     }
 
-    for key, value in kuavo_ros_info.items():
-        if value is None and key != 'end_effector_type':
-            SDKLogger.debug(f"[Error]: Failed to get '{key}' from ROS.")
-            kuavo_ros_info = None
-            raise Exception(f"[Error]: Failed to get '{key}' from ROS.")
+    # for key, value in kuavo_ros_info.items():
+    #     if value is None and key != 'end_effector_type':
+    #         SDKLogger.debug(f"[Error]: Failed to get '{key}' from ROS.")
+    #         kuavo_ros_info = None
+    #         raise Exception(f"[Error]: Failed to get '{key}' from ROS.")
 
     return kuavo_ros_info        
 

@@ -32,7 +32,10 @@ find_package(catkin REQUIRED
         humanoid_common
         humanoid_interface
         humanoid_interface_ros
+        humanoid_wheel_interface
+        humanoid_wheel_interface_ros
         humanoid_wbc
+        humanoid_wheel_wbc
         humanoid_estimation
         ocs2_self_collision_visualization
         # ocs2_biped_robot_ros
@@ -115,8 +118,11 @@ catkin_package(
                 humanoid_common
                 humanoid_interface
                 humanoid_interface_ros
+                humanoid_wheel_interface
+                humanoid_wheel_interface_ros
                 # mujoco_sim
                 humanoid_wbc
+                humanoid_wheel_wbc
                 humanoid_estimation
                 kuavo_estimation
                 ocs2_self_collision_visualization
@@ -250,6 +256,10 @@ endif()
 ## Declare a cpp library
 add_library(${PROJECT_NAME}
         src/humanoidController.cpp
+        src/humanoidWheelController.cpp
+        src/humanoidController_wheel_wbc.cpp
+        src/ControlDataManager.cpp
+        src/WaistKinematics.cpp
         src/RlGaitReceiver.cpp
         )
 

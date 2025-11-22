@@ -1,5 +1,6 @@
 topics:
   - /cmd_vel
+  - /filter_cmd_vel
   - /cmd_pose
   - /joint_cmd.*
   - /cmd.*
@@ -10,6 +11,8 @@ topics:
   - /kuavo_.*
   - /monitor/.*
   - /odom
+  - /estimation_odom
+  - /waist_yaw_kinematic
   - /pose
   - /quest_joystick_data
   - /rosout
@@ -51,6 +54,7 @@ topics:
   - /odometry/filtered
   - /sensor_data_new/.*
   - /imu_data
+  - /lb_joint_cmd
   - /mm/end_effector_trajectory
   - /mm/.*
   - /grasp_box/.*

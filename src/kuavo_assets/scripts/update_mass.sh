@@ -17,7 +17,7 @@ if [ -z "${ROBOT_VERSION}" ]; then
 fi
 
 # 允许的机器人版本号列表
-allowed_versions=("11" "13" "14" "40" "41" "42" "43" "45" "46" "47" "48" "49" "50" "100045" "100049")
+allowed_versions=("11" "13" "14" "40" "41" "42" "43" "45" "46" "47" "48" "49" "50" "60" "100045" "100049")
 if ! [[ " ${allowed_versions[@]} " =~ " ${ROBOT_VERSION} " ]]; then
     echo -e "\033[31m\nError: 机器人版本号(环境变量中 ROBOT_VERSION 的值) = '${ROBOT_VERSION}' 无效 \033[0m" >&2
     echo -e "\033[31m请参考readme.md文档，确认你的机器人版本号\n目前可用的版本号有: \n[${allowed_versions[*]}] \033[0m\n" >&2
@@ -127,34 +127,38 @@ else
     fi
 fi
 
-# 获取总质量并修改所有URDF
+# 获取总质量并修改所有URDF（版本60跳过）
 TOTAL_MASS=$(cat ${MASS_FILE})
 echo "由配置文件 ${MASS_FILE} 指定总质量为: $TOTAL_MASS kg" >&2
-# 遍历URDF_FILES，并同步取出链接名称
-for index in "${!URDF_FILES[@]}"; do
-    URDF_FILE="${URDF_FILES[$index]}"
-    link_name="${LINK_NAMES[$index]}"  # 获取对应的链接名称
-    FULL_PATH="${BASE_URDF_PATH}/${URDF_FILE}"
 
-    if [ -f "$FULL_PATH" ]; then
-        # 调用修改质量的脚本，同时传入链接名称
-        ./modify_torso_mass.sh "$FULL_PATH" "${TOTAL_MASS}" "$link_name"  # 传入link_name作为参数
-        echo " Updated mass of ${FULL_PATH} to ${TOTAL_MASS}" >&2
-    else
-        echo "Warning: ${URDF_FILE} not found" >&2
-    fi
-done
-
-
-# 修改mujoco xml文件
-BASE_XML_PATH="${SRC_DIR}/models/biped_s${ROBOT_VERSION}/xml"
-XML_FILE_PATH="${BASE_XML_PATH}/biped_s${ROBOT_VERSION}.xml"
-if [ -f "$XML_FILE_PATH" ]; then
-    # 调用修改质量的脚本，同时传入链接名称
-    ./modify_torso_mass_xml.sh "$XML_FILE_PATH" "${TOTAL_MASS}"  # 传入link_name作为参数
-    echo "Updated xml mass for ${XML_FILE_PATH}"
+if [ "${ROBOT_VERSION}" = "60" ]; then
+    echo "Skip mass update for robot version 60" >&2
 else
-    echo "Warning: ${XML_FILE_PATH} not found" >&2
+    # 遍历URDF_FILES，并同步取出链接名称
+    for index in "${!URDF_FILES[@]}"; do
+        URDF_FILE="${URDF_FILES[$index]}"
+        link_name="${LINK_NAMES[$index]}"  # 获取对应的链接名称
+        FULL_PATH="${BASE_URDF_PATH}/${URDF_FILE}"
+
+        if [ -f "$FULL_PATH" ]; then
+            # 调用修改质量的脚本，同时传入链接名称
+            ./modify_torso_mass.sh "$FULL_PATH" "${TOTAL_MASS}" "$link_name"  # 传入link_name作为参数
+            echo " Updated mass of ${FULL_PATH} to ${TOTAL_MASS}" >&2
+        else
+            echo "Warning: ${URDF_FILE} not found" >&2
+        fi
+    done
+
+    # 修改mujoco xml文件
+    BASE_XML_PATH="${SRC_DIR}/models/biped_s${ROBOT_VERSION}/xml"
+    XML_FILE_PATH="${BASE_XML_PATH}/biped_s${ROBOT_VERSION}.xml"
+    if [ -f "$XML_FILE_PATH" ]; then
+        # 调用修改质量的脚本，同时传入链接名称
+        ./modify_torso_mass_xml.sh "$XML_FILE_PATH" "${TOTAL_MASS}"  # 传入link_name作为参数
+        echo "Updated xml mass for ${XML_FILE_PATH}"
+    else
+        echo "Warning: ${XML_FILE_PATH} not found" >&2
+    fi
 fi
 
 # 修改完成后检查MD5

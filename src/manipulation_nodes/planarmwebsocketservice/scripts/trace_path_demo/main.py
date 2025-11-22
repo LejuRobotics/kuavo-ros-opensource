@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import subprocess
 import rospy
@@ -9,7 +10,7 @@ import signal
 import argparse
 from kuavo_msgs.srv import CreatePath, CreatePathRequest
 from rosmsg_dict_converter.converter import a_dict_to_ros_message
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Trace path demo")
@@ -58,26 +59,86 @@ def call_start_path_service():
 
 mpc_path_tracer_process = None
 
+def switch_to_pose(pose_name):
+  """切换到步态，支持 'walk' 和 'stance'"""
+  try:
+      # 验证步态名称
+      if pose_name not in ['walk', 'stance']:
+          rospy.logwarn(f"不支持的步态名称: {pose_name}，仅支持 'walk' 和 'stance'")
+          return False
+      
+      # 创建话题发布者
+      gait_pub = rospy.Publisher('/humanoid_mpc_gait_change', String, queue_size=10)
+      rospy.sleep(0.1)  # 等待发布者连接
+      
+      # 发布步态切换消息
+      gait_msg = String()
+      gait_msg.data = pose_name
+      gait_pub.publish(gait_msg)
+      
+      # rospy.loginfo(f"成功发布步态切换指令: {pose_name}")
+      return True
+  except Exception as e:
+      rospy.logerr(f"切换到步态时出错: {e}")
+      return False
+
 def signal_handler(signum, frame):
   rospy.loginfo("Stopping trace path demo...")
   if mpc_path_tracer_process:
     os.kill(mpc_path_tracer_process.pid, signal.SIGTERM)
+
+  try:
+      # rospy.loginfo("切换到姿态以确保双脚对齐...")
+      switch_to_pose("walk")
+      rospy.sleep(2)
+      switch_to_pose("stance")
+
+      subprocess.run([
+          "rostopic", "pub", "--once", "/cmd_vel", "geometry_msgs/Twist",
+          "linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0"
+      ], text=True, check=True, capture_output=True)
+      rospy.loginfo("Published zero velocity to /cmd_vel")
+  except Exception as e:
+      rospy.logerr(f"Failed to publish zero velocity to /cmd_vel: {e}")
+
   sys.exit(0)
 
 def start_trace_path_demo(args):
+  rospy.init_node("trace_path_demo")
   rospy.loginfo("Starting trace path demo...")
   global mpc_path_tracer_process
-  cmd = ['rosrun', 'trace_path', 'mpc_path_tracer.py']
-  mpc_path_tracer_process = subprocess.Popen(cmd,env=os.environ,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 
-  rospy.init_node("trace_path_demo")
+  # 复制当前环境变量并添加drake路径
+  env_new = os.environ.copy()
+  
+  # 设置PYTHONPATH以包含drake库
+  python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+  drake_python_path = f"/opt/drake/lib/python{python_version}/site-packages"
+  
+  if "PYTHONPATH" in env_new:
+      env_new["PYTHONPATH"] = f"{drake_python_path}:{env_new['PYTHONPATH']}"
+  else:
+      env_new["PYTHONPATH"] = drake_python_path
+
+  rospy.logdebug(f"Environment PYTHONPATH: {env_new.get('PYTHONPATH', '')}")
+
+  cmd = ['rosrun', 'trace_path', 'mpc_path_tracer.py']
+  mpc_path_tracer_process = subprocess.Popen(cmd, env=env_new, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+  rospy.loginfo(f"Started mpc_path_tracer process with PID: {mpc_path_tracer_process.pid}")
+
+
   try:
     rospy.wait_for_service('/mpc_path_tracer_node/create_path', timeout=10)
   except rospy.ROSException as e:
     rospy.logerr(f"Service not available: {e}")
+    # 输出子进程的错误信息帮助调试
+    stdout, stderr = mpc_path_tracer_process.communicate(timeout=1)
+    rospy.logerr(f"mpc_path_tracer process stdout: {stdout.decode()}")
+    rospy.logerr(f"mpc_path_tracer process stderr: {stderr.decode()}")
     return False
   
-  rospy.loginfo("mpc_path_tracer_node is available")
+  rospy.logdebug("mpc_path_tracer_node is available")
   path_data = {
       "path_type": args.path_type,
       "v_max_linear": args.v_max_linear,
@@ -88,6 +149,8 @@ def start_trace_path_demo(args):
   }
 
   if call_create_path_service(path_data):
+    print("Path created successfully")
+
     call_start_path_service()
   else:
     rospy.logerr("Failed to create path")
@@ -99,7 +162,26 @@ def start_trace_path_demo(args):
       time.sleep(1)
     except KeyboardInterrupt:
       rospy.loginfo("Stopping trace path demo...")
-  
+      # 停止时也切换到站立姿态
+      if mpc_path_tracer_process:
+        os.kill(mpc_path_tracer_process.pid, signal.SIGTERM)
+      
+      try:
+          # rospy.loginfo("切换到姿态以确保双脚对齐...")
+          switch_to_pose("walk")
+          rospy.sleep(2)
+          switch_to_pose("stance")
+
+          subprocess.run([
+              "rostopic", "pub", "--once", "/cmd_vel", "geometry_msgs/Twist",
+              "linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0"
+          ], text=True, check=True, capture_output=True)
+          rospy.loginfo("Published zero velocity to /cmd_vel")
+      except Exception as e:
+          rospy.logerr(f"Failed to publish zero velocity to /cmd_vel: {e}")
+      
+      break
+
 
 if __name__ == "__main__":
   args = parse_args()

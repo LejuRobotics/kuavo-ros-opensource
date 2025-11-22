@@ -20,6 +20,7 @@ namespace HighlyDynamic
 #define BIT_17_20 (BIT_17 * 20)
 #define BIT_17_25 (BIT_17 * 25)
 #define BIT_17_36 (BIT_17 * 36)
+#define BIT_17_120 (BIT_17 * 120)
 
 #define AK10_9_MC (40)
 #define AK70_10_MC (26.1) // 手册是 23.2
@@ -29,6 +30,7 @@ namespace HighlyDynamic
 #define PA4310_25_MC (8)
 #define PA72_36_MC (15)
 #define PA76_25_MC (18)
+#define PA115_MC (40)
 
 #define AK10_9_C2T (1.26)
 #define AK70_10_C2T (1.23)
@@ -45,6 +47,8 @@ namespace HighlyDynamic
 #define PA4310_25_C2T (2.6)
 #define PA76_25_C2T (3.8)
 #define PA72_36_C2T (4.8)
+#define PA115_C2T (11.5)
+
 
 #define LEG_DOF 6
 #define LEGS_TOTEL_JOINT 12

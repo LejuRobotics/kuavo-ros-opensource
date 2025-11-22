@@ -470,19 +470,34 @@ def handTouch_usb():
 
 
 def ruiwo_zero():
-        
-    kuavo_ros_file_path = folder_path +"/ruiwo_zero_set.sh" 
-    kuavo_open_file_path = folder_path +"../../installed/share/hardware_plant/lib/ruiwo_controller/setZero.sh" 
+    # 检查CAN总线接线方式
+    canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
     
+    use_motorevo_tool = False
+    if os.path.exists(canbus_wiring_file):
+        with open(canbus_wiring_file, 'r') as f:
+            wiring_type = f.read().strip()
+            if wiring_type == "dual_bus":
+                use_motorevo_tool = True
+    
+    if use_motorevo_tool:
+        print(bcolors.OKGREEN + "检测到 Roban2 双CAN配置，使用 motorevo_tool.sh 工具" + bcolors.ENDC)
+        # 使用新的双CAN工具
+        command = "bash " + folder_path + "/motorevo_tool.sh --cali"
 
-    if os.path.exists(kuavo_ros_file_path):
-        command = "bash "+ kuavo_ros_file_path
-    elif os.path.exists(kuavo_open_file_path):
-        command = "bash "+ kuavo_open_file_path
     else:
-        print(f"The file {file_path} does not exist.")
-        return
+        kuavo_ros_file_path = folder_path +"/ruiwo_zero_set.sh" 
+        kuavo_open_file_path = folder_path +"../../installed/share/hardware_plant/lib/ruiwo_controller/setZero.sh" 
         
+
+        if os.path.exists(kuavo_ros_file_path):
+            command = "bash "+ kuavo_ros_file_path
+        elif os.path.exists(kuavo_open_file_path):
+            command = "bash "+ kuavo_open_file_path
+        else:
+            print(f"The file {file_path} does not exist.")
+            return
+            
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
@@ -504,8 +519,26 @@ def ruiwo_negtive():
             print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
             continue
 
-    # 定义要运行的命令，传递机器人类型参数
+        # 定义要运行的命令，传递机器人类型参数
     command = "bash " + folder_path + "/ruiwo_negtive_set.sh " + robot_type
+
+    # 如果选择了Roban2型，则检查CAN总线接线方式
+    if robot_type == "roban2":
+        # 检查CAN总线接线方式
+        canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
+        
+        use_motorevo_tool = False
+        if os.path.exists(canbus_wiring_file):
+            with open(canbus_wiring_file, 'r') as f:
+                wiring_type = f.read().strip()
+                if wiring_type == "dual_bus":
+                    use_motorevo_tool = True
+        
+        if use_motorevo_tool:
+            print(bcolors.OKGREEN + "检测到 Roban2 双CAN配置，使用 motorevo_tool.sh 工具" + bcolors.ENDC)
+
+            # 使用新的双CAN工具
+            command = "bash " + folder_path + "/motorevo_tool.sh --negative"
 
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)

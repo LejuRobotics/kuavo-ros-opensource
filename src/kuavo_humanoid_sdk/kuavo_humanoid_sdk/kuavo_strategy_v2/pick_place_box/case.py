@@ -322,7 +322,7 @@ def grab_one_box(user_input=True):
 if __name__ == "__main__":
     for eps in range(10):
         print(f"### 案例开始: {eps} ###")
-        res = grab_one_box(user_input=True)
+        res = test_arm_only()
         print(f"### 案例结束: {eps} ###")
 
         if not res:

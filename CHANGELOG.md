@@ -1,5 +1,7 @@
 # Beta
 
+# 1.3.0
+
 ## Breaking Changes
 
 ## 文档相关
@@ -160,6 +162,8 @@
 - 增加日志上传 coScene 工具使用文档，[文档链接](./tools/upload_log/doc/readme.md)
 
 ## 新增功能
+- 改进 47 末端夹爪机器人模型，支持夹爪关节在仿真和Rviz可视化
+- 新增机器人端向 VR App 发送全身关节和末端执行器扭矩数据用于可视化
 - 新增灯带控制节点，并增加音频灯带联动
 - PICO VR 增加话题录制和播放脚本，使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
 - 新增机器人 cali 校准环节支持堵转保护和峰值保护
@@ -212,6 +216,10 @@
 - Kuavo Humanoid SDK 新增搬箱子策略模块以及 gazebo 仿真策略使用示例
 
 ## 修复问题
+- 修复 VR 遥操机器手臂向机身内侧移动时，手臂肘部容易碰到躯干问题
+- VR 修改手臂映射逻辑，实现向量旋转，修复慢速时手肘关节异常问题 
+- 修复VR遥操右摇杆单步转向功能，拨动右摇杆上下也可控制问题
+- 修复.gitignore配置忽略md和sh脚本导致被忽略问题
 - 修复音频节点播放音频文件时过度增益的问题
 - 修复 humanoid_plan_arm_trajectory 编译问题
 - 修复积木块示例无法单独启用语音对话的问题
@@ -263,6 +271,7 @@
 - 修复全身打太极找不到 kuavo_sdk.msg 模块的问题
 
 ## 其他改进
+- 优化 YOLO 人脸识别追踪案例，降低人脸跟踪的 cpu 占用（从700+%降低到 150%）
 - Quest VR 节点依赖的消息统一移动到 kuavo_msgs 包中，比如手柄消息`Joysticks`
 - 添加工具类用于获取头和手腕相机到机器人底座的位置和转换，[工具使用文档](./tools/extract_camera_pose/howto-kuavo-pose-calculator.md)
 - 更新手臂末端三个电机和腿部的飞车保护阈值

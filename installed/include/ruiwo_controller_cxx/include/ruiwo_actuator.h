@@ -127,10 +127,26 @@ public:
      */
     int disable() override;
 
+    /**
+     * @brief 对指定 index 的电机执行 Enter Reset State 进入 Reset State 运行模式，即失能电机
+     * 
+     * @param motorIndex 
+     * @return true 
+     * @return false 
+     */
     bool disableMotor(int motorIndex) override;
+
+    /**
+     * @brief 关闭并释放所有资源
+     * 
+     */
     void close() override;
 
     void saveAsZeroPosition() override;
+    /**
+     * @brief 将当前零点位置输出到零点文件
+     * 
+     */
     void saveZeroPosition() override;
     void set_teach_pendant_mode(int mode) override;
     void changeEncoderZeroRound(int index, double direction) override;
@@ -138,12 +154,12 @@ public:
     std::vector<double> getMotorZeroPoints() override;
     
     /**
-     * @brief Set the positions object
-     * 
-     * @param index     [0,1,2,3,...]
-     * @param positions  单位为角度
-     * @param torque     
-     * @param velocity  单位为角度/s
+     * @brief 设置电机目标位置
+     *
+     * @param index 关节索引 [0,1,2,3,...]
+     * @param positions 目标位置（角度）注意单位是角度
+     * @param torque 力矩值
+     * @param velocity 速度值（角度/秒）
      */
     void set_positions(const std::vector<uint8_t> &index,
         const std::vector<double> &positions,
@@ -159,23 +175,36 @@ public:
     void set_torque(const std::vector<uint8_t> &index, const std::vector<double> &torque) override;
 
     /**
-     * @brief Set the velocity object
+     * @brief 设置电机目标速度
      * 
      * @param index [0,1,2,3,...]
-     * @param velocity 
+     * @param velocity 单位弧度/秒
      */
     void set_velocity(const std::vector<uint8_t> &index, const std::vector<double> &velocity) override;
     
     /**
-     * @brief Get the positions object
-     * 
-     * @return std::vector<double> radians
+     * @brief 获取所有关节当前位置
+     *
+     * @return std::vector<double> 位置（弧度）
      */
     std::vector<double> get_positions() override;
     std::vector<double> get_torque() override;
     std::vector<double> get_velocity() override;
 
+    /**
+     * @brief 获取电机状态
+     * 
+     * notes: std::vector<float> 长度为6: 电机ID、位置、速度、扭矩、温度、故障码
+     * 
+     * @return std::vector<std::vector<float>> 
+     */
     std::vector<std::vector<float>> get_joint_state();
+
+    /**
+     * @brief 获取所有电机状态
+     * 
+     * @return MotorStateDataVec 
+     */
     MotorStateDataVec get_motor_state() override;
 
     /**

@@ -181,6 +181,9 @@ add_service_files(
   twoArmHandPoseCmdFreeSrv.srv
   changeArmCtrlModeKuavo.srv
   fkSrv.srv
+  lbBaseLinkPoseCmdSrv.srv
+  lbLegControlSrv.srv
+  chassisPoseCmdSrv.srv
 
   SpeechSynthesis.srv
   setMmCtrlFrame.srv

@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://ros.org/wiki/xacro" name="apriltag_marker">
 
-  <xacro:macro name="apriltag_marker" params="parent_link *origin id enable_collision:=true">
+  <xacro:macro name="apriltag_marker" params="parent_link *origin id enable_collision:=false">
     <!-- 定义二维码的Link -->
     <link name="apriltag_marker_${id}">
       <visual>

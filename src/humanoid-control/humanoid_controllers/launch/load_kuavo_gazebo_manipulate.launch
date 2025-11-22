@@ -7,7 +7,7 @@
 
     <arg name="output_system_info" default="true"/>
     <arg name="vr_remote_control" default="false"/>
-    <arg name="robot_type"         default="humanoid"/>
+    <arg name="robot_type"         default="2"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>

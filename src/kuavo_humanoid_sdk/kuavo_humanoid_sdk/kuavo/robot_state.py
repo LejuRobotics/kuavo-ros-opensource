@@ -126,7 +126,13 @@ class KuavoRobotState:
                 * acceleration: list[float] * arm_dof(14)
         """
         # Get arm joint states from index 12 to 25 (14 arm joints)
-        arm_joint_indices = range(12, 12+14)
+        if len(self._rs_core.joint_data.position) == 28:
+            arm_joint_indices = range(12, 12+14)
+        elif len(self._rs_core.joint_data.position) == 20:
+            arm_joint_indices = range(4, 4+14)
+        else:
+            raise ValueError(f"Joint data length is not 28 or 20: {len(self._rs_core.joint_data.position)}")
+
         return KuavoJointData(
             position=[self._rs_core.joint_data.position[i] for i in arm_joint_indices],
             velocity=[self._rs_core.joint_data.velocity[i] for i in arm_joint_indices],

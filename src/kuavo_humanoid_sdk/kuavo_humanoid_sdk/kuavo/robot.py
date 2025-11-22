@@ -9,6 +9,7 @@ from kuavo_humanoid_sdk.kuavo.core.core import KuavoRobotCore
 from kuavo_humanoid_sdk.kuavo.core.sdk_deprecated import sdk_deprecated
 
 from typing import Tuple
+from geometry_msgs.msg import TwistStamped
 from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
 
 """
@@ -266,6 +267,23 @@ class KuavoRobot(RobotBase):
             执行误差： 0.03~0.1m, 0.5~5°
         """
         return self._kuavo_core.control_command_pose_world(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
+    
+    def control_command_pose_world_stamped(self, pos_world: TwistStamped) -> bool:
+        """在odom(世界)坐标系下控制机器人姿态(使用TwistStamped消息)。
+        
+        Args:
+            pos_world (TwistStamped): TwistStamped消息，包含目标位姿和时间戳。
+            
+        Returns:
+            bool: 如果命令发送成功返回True,否则返回False。
+            
+        Raises:
+            RuntimeError: 如果在尝试控制姿态时机器人不在stance状态。
+            
+        Note:
+            此命令会将机器人状态改变为'command_pose_world'。
+        """
+        return self._kuavo_core.control_command_pose_world_stamped(pos_world)
     
     def control_head(self, yaw: float, pitch: float)->bool:
         """控制机器人的头部关节运动。

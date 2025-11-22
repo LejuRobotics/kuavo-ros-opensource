@@ -15,12 +15,17 @@ class KuavoRobotInfo(RobotInfoBase):
         self._robot_version = kuavo_ros_param['robot_version']
         self._end_effector_type = kuavo_ros_param['end_effector_type']
         self._arm_joint_dof = kuavo_ros_param['arm_dof']
-        self._joint_dof = kuavo_ros_param['arm_dof'] + kuavo_ros_param['leg_dof'] + kuavo_ros_param['head_dof']
+        # self._joint_dof = kuavo_ros_param['arm_dof'] + kuavo_ros_param['leg_dof'] + kuavo_ros_param['head_dof']
         self._joint_names = kuavo_ros_param['joint_names']
         self._end_frames_names = kuavo_ros_param['end_frames_names']
         self._head_joint_dof = kuavo_ros_param['head_dof']
         self._head_joint_names = self._joint_names[-2:]
-        self._arm_joint_names = self._joint_names[12:self._arm_joint_dof + 12]
+        if self.robot_version >= 60:
+            print("当前为轮臂模型")
+            self._arm_joint_names = self._joint_names[4:self._arm_joint_dof + 12]
+        else:
+            print("当前为双足模型")
+            self._arm_joint_names = self._joint_names[12:self._arm_joint_dof + 12]
         self._init_stand_height = kuavo_ros_param['init_stand_height']
 
     @property
