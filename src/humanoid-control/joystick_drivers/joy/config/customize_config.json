@@ -128,7 +128,7 @@
   "customize_action_LT_X": {
     "type": "action",
     "arm_pose_name": [
-      "左手打招呼"
+      "左转腰打招呼"
     ],
     "music_name": [
       ""
@@ -137,7 +137,7 @@
   "customize_action_LT_Y": {
     "type": "action",
     "arm_pose_name": [
-      "握手"
+      "右手握手"
     ],
     "music_name": [
       ""
