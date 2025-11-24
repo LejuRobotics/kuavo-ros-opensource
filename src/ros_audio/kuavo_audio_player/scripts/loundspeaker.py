@@ -186,6 +186,8 @@ class MusicPlayerNode:
                 '-acodec', self.FFMPEG_CODEC,
                 '-ar', str(self.DEFAULT_SAMPLE_RATE),
                 '-ac', str(self.DEFAULT_CHANNELS),
+                '-af', f'volume={volume}dB',
+                '-y', temp_wav
             ]
 
             # 如果音量不是默认值，添加音量滤镜

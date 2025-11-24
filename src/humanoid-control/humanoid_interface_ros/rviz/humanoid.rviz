@@ -248,6 +248,102 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
+        base_link:
+          Value: true
+        camera_base:
+          Value: true
+        dummy_link:
+          Value: false
+        l_foot_heel:
+          Value: false
+        l_foot_toe:
+          Value: false
+        leg_l1_link:
+          Value: false
+        leg_l2_link:
+          Value: false
+        leg_l3_link:
+          Value: false
+        leg_l4_link:
+          Value: false
+        leg_l5_link:
+          Value: false
+        leg_l6_link:
+          Value: false
+        leg_r1_link:
+          Value: false
+        leg_r2_link:
+          Value: false
+        leg_r3_link:
+          Value: false
+        leg_r4_link:
+          Value: false
+        leg_r5_link:
+          Value: false
+        leg_r6_link:
+          Value: false
+        ll_foot_heel:
+          Value: false
+        ll_foot_toe:
+          Value: false
+        lr_foot_heel:
+          Value: false
+        lr_foot_toe:
+          Value: false
+        odom:
+          Value: true
+        r_foot_heel:
+          Value: false
+        r_foot_toe:
+          Value: false
+        rl_foot_heel:
+          Value: false
+        rl_foot_toe:
+          Value: false
+        rr_foot_heel:
+          Value: false
+        rr_foot_toe:
+          Value: false
+        waist_camera:
+          Value: true
+        waist_yaw_link:
+          Value: true
+        zarm_l1_link:
+          Value: false
+        zarm_l2_link:
+          Value: false
+        zarm_l3_link:
+          Value: false
+        zarm_l4_link:
+          Value: false
+        zarm_l5_link:
+          Value: false
+        zarm_l6_link:
+          Value: false
+        zarm_l7_end_effector:
+          Value: false
+        zarm_l7_link:
+          Value: false
+        zarm_r1_link:
+          Value: false
+        zarm_r2_link:
+          Value: false
+        zarm_r3_link:
+          Value: false
+        zarm_r4_link:
+          Value: false
+        zarm_r5_link:
+          Value: false
+        zarm_r6_link:
+          Value: false
+        zarm_r7_end_effector:
+          Value: false
+        zarm_r7_link:
+          Value: false
+        zhead_1_link:
+          Value: true
+        zhead_2_link:
+          Value: true
       Marker Alpha: 1
       Marker Scale: 1
       Name: TF
@@ -255,7 +351,71 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        {}
+        dummy_link:
+          {}
+        odom:
+          base_link:
+            leg_l1_link:
+              leg_l2_link:
+                leg_l3_link:
+                  leg_l4_link:
+                    leg_l5_link:
+                      leg_l6_link:
+                        l_foot_heel:
+                          {}
+                        l_foot_toe:
+                          {}
+                        ll_foot_heel:
+                          {}
+                        ll_foot_toe:
+                          {}
+                        lr_foot_heel:
+                          {}
+                        lr_foot_toe:
+                          {}
+            leg_r1_link:
+              leg_r2_link:
+                leg_r3_link:
+                  leg_r4_link:
+                    leg_r5_link:
+                      leg_r6_link:
+                        r_foot_heel:
+                          {}
+                        r_foot_toe:
+                          {}
+                        rl_foot_heel:
+                          {}
+                        rl_foot_toe:
+                          {}
+                        rr_foot_heel:
+                          {}
+                        rr_foot_toe:
+                          {}
+            waist_camera:
+              {}
+            waist_yaw_link:
+              zarm_l1_link:
+                zarm_l2_link:
+                  zarm_l3_link:
+                    zarm_l4_link:
+                      zarm_l5_link:
+                        zarm_l6_link:
+                          zarm_l7_link:
+                            zarm_l7_end_effector:
+                              {}
+              zarm_r1_link:
+                zarm_r2_link:
+                  zarm_r3_link:
+                    zarm_r4_link:
+                      zarm_r5_link:
+                        zarm_r6_link:
+                          zarm_r7_link:
+                            zarm_r7_end_effector:
+                              {}
+              zhead_1_link:
+                zhead_2_link:
+                  camera_base:
+                    {}
       Update Interval: 0
       Value: false
     - Class: rviz/MarkerArray
@@ -416,11 +576,14 @@ Visualization Manager:
       Color: 200; 200; 200
       Color Layer: elevation
       Color Transformer: GridMapLayer
+      ColorMap: default
       Enabled: true
+      Grid Cell Decimation: 1
+      Grid Line Thickness: 0.10000000149011612
       Height Layer: elevation
       Height Transformer: GridMapLayer
       History Length: 1
-      Invert Rainbow: false
+      Invert ColorMap: false
       Max Color: 255; 255; 255
       Max Intensity: 10
       Min Color: 0; 0; 0
@@ -429,7 +592,7 @@ Visualization Manager:
       Show Grid Lines: true
       Topic: /elevation_mapping/elevation_map
       Unreliable: false
-      Use Rainbow: true
+      Use ColorMap: true
       Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
@@ -531,73 +694,14 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
-    - Alpha: 1
-      Autocompute Intensity Bounds: true
-      Autocompute Value Bounds:
-        Max Value: 10
-        Min Value: -10
-        Value: true
-      Axis: Z
-      Channel Name: intensity
-      Class: rviz/PointCloud2
-      Color: 255; 255; 255
-      Color Transformer: Intensity
-      Decay Time: 0
+    - Class: rviz/MarkerArray
       Enabled: true
-      Invert Rainbow: false
-      Max Color: 255; 255; 255
-      Min Color: 0; 0; 0
-      Name: PointCloud2
-      Position Transformer: XYZ
-      Queue Size: 10
-      Selectable: true
-      Size (Pixels): 3
-      Size (m): 0.009999999776482582
-      Style: Flat Squares
-      Topic: /convex_hull_foot_layer_eroded
-      Unreliable: false
-      Use Fixed Frame: true
-      Use rainbow: true
-      Value: true
-    - Class: rviz/Image
-      Enabled: true
-      Image Topic: /l515/color/image_raw
-      Max Value: 1
-      Median window: 5
-      Min Value: 0
-      Name: Image
-      Normalize Range: true
-      Queue Size: 2
-      Transport Hint: raw
-      Unreliable: false
-      Value: true
-    - Alpha: 1
-      Autocompute Intensity Bounds: true
-      Autocompute Value Bounds:
-        Max Value: 0.41557949781417847
-        Min Value: -0.004317522048950195
-        Value: true
-      Axis: Z
-      Channel Name: intensity
-      Class: rviz/PointCloud2
-      Color: 255; 255; 255
-      Color Transformer: AxisColor
-      Decay Time: 0
-      Enabled: true
-      Invert Rainbow: false
-      Max Color: 255; 255; 255
-      Min Color: 0; 0; 0
-      Name: PointCloud2
-      Position Transformer: XYZ
-      Queue Size: 10
-      Selectable: true
-      Size (Pixels): 3
-      Size (m): 0.009999999776482582
-      Style: Flat Squares
-      Topic: /polygon_points
-      Unreliable: false
-      Use Fixed Frame: true
-      Use rainbow: true
+      Marker Topic: /humanoid/planedFootPositions
+      Name: MarkerArray
+      Namespaces:
+        foot_positions_back: true
+        foot_positions_front: true
+      Queue Size: 100
       Value: true
   Enabled: true
   Global Options:

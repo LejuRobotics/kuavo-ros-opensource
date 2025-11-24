@@ -492,6 +492,29 @@ class ControlRobotArm:
             return False
         
 """ Control Robot Head """
+
+class ControlRobotWaist:
+    def __init__(self):
+        self._pub_ctrl_robot_waist = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=10)
+
+    def pub_waist_pos_cmd(self, waistPos: list)->bool:
+        """
+        发布腰部位置控制命令
+        参数:
+            waistPos: 腰关节角度
+        """
+        if len(waistPos) != 1:
+            SDKLogger.error("Waist data must be 1-dimensional")
+            return False
+            
+        try:
+            msg = Float64MultiArray()
+            msg.data = list(waistPos)
+            self._pub_ctrl_robot_waist.publish(msg)
+            return True
+        except Exception as e:
+            SDKLogger.error(f"Publish waist pos failed: {e}")
+            return False
 class ControlRobotHead:
     def __init__(self):
         self._pub_ctrl_robot_head = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
@@ -974,6 +997,7 @@ class KuavoRobotControl:
             self.kuavo_arm_control = ControlRobotArm()
             self.kuavo_motion_control = ControlRobotMotion()
             self.kuavo_arm_ik_fk = KuavoRobotArmIKFK()
+            self.kuavo_waist_control = ControlRobotWaist()
             # 初始化轮臂控制
             self.kuavo_wheel_arm_control = WheelArmROSControl()
             # SDKLogger.debug("KuavoRobotControl initialized.")
@@ -1373,6 +1397,9 @@ class KuavoRobotControl:
 
     def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
         return self.kuavo_arm_control.pub_hand_wrench_cmd(left_wrench, right_wrench)
+    
+    def control_robot_waist(self, target_pos: list) -> bool:
+        return self.kuavo_waist_control.pub_waist_pos_cmd(target_pos)
     
     def enable_base_pitch_limit(self, enable: bool) -> Tuple[bool, str]:
         res_msg = 'failed'

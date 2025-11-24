@@ -1062,7 +1062,7 @@ class IkRos:
         robot_hand_position.header.stamp = rospy.Time.now()
         if self.end_effector_type == QIANGNAO or self.end_effector_type == QIANGNAO_TOUCH or self.end_effector_type == REVO2:
             if joyStick_data is not None:
-                if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
+                if joyStick_data.left_second_button_pressed and self.__button_y_last is False and joyStick_data.right_first_button_touched is False:
                     print(f"\033[91mButton Y is pressed.\033[0m")
                     self.__freeze_finger = not self.__freeze_finger
                 self.__button_y_last = joyStick_data.left_second_button_pressed
@@ -1085,6 +1085,15 @@ class IkRos:
                         right_hand_position[i] = limit_value(right_hand_position[i], 0, 100)
                     left_hand_position[1] = 100 if joyStick_data.left_first_button_touched else 0
                     right_hand_position[1] = 100 if joyStick_data.right_first_button_touched else 0
+
+                    if joyStick_data.left_first_button_touched and joyStick_data.right_first_button_pressed:
+                        for i in range(0, 6):
+                            left_hand_position[i] = 100 
+                        left_hand_position[2] = 0
+                    if joyStick_data.left_first_button_touched and joyStick_data.right_second_button_pressed:
+                        for i in range(0, 6):
+                            right_hand_position[i] = 100 
+                        right_hand_position[2] = 0
                     # Store current values for freezing
                     self.__frozen_left_hand_position = left_hand_position.copy()
                     self.__frozen_right_hand_position = right_hand_position.copy()

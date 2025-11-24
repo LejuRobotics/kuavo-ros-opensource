@@ -4,6 +4,7 @@
 #include <vector>
 #include "kuavo_msgs/JoySticks.h"
 #include <string>
+#include <std_msgs/String.h>
 
 #include <ros/init.h>
 #include <ros/package.h>
@@ -440,7 +441,6 @@ namespace ocs2
                 ROS_ERROR("Failed to call switch to next controller service");
             }
         }
-
         void callTerminateSrv()
         {
         std::cout << "tigger callTerminateSrv" << std::endl;
@@ -649,7 +649,7 @@ namespace ocs2
             
             
             // 腰部控制逻辑
-            if (joystick_data_.left_trigger > 0.5)
+            if (joystick_data_.left_trigger > 0.5) // 左边扳机按下，进入腰部控制模式
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 左边第二个按钮按下，切换腰部控制模式
                 {
@@ -792,7 +792,7 @@ namespace ocs2
             waist_yaw = std::max(-max_angle, std::min(waist_yaw, max_angle));
             std_msgs::Float64MultiArray msg;
             msg.data.resize(1);
-            msg.data[0] =  -waist_yaw;
+            msg.data[0] =  waist_yaw;
             std::cout << "waist_yaw" << waist_yaw <<std::endl;
             waist_motion_pub_.publish(msg);
         }

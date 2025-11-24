@@ -35,7 +35,7 @@
     <arg name="cmd_truncation_enable" default="false" />
     <arg name="leg_disable_mode" default="true" doc="If true, when any leg joint fails, all leg joints (1-12) will be disabled" />
     <arg name="ruiwo_cxx_sdk" default="true"/>
-    <arg name="arm_move_spd"      default="1.2"/>
+    <arg name="arm_move_spd"      default="2.4"/>
 
     <!-- 如需使用手柄搬箱子和走楼梯，需要设置为 false -->
     <arg name="joy_execute_action" default="true"/>
@@ -173,7 +173,7 @@
 
     <param name="hardware/is_ready" value="0"/>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" />
-    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>    
     <group unless="$(arg ruiwo_cxx_sdk)">
@@ -269,7 +269,7 @@
       <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
         <arg name="sqp_mpc" value="1"/>
         <arg name="rviz"    value="false"/>
-        <arg name="visualize_mm"   value="true"/>
+        <arg name="visualize_mm"   value="false"/>
         <arg name="coredump" value="$(arg coredump)"/>
       </include>
       </group>

@@ -6,46 +6,53 @@ void AnkleSolver::getconfig(const int ankle_solver_type)
     ankle_roll_limits_ << -1.57, 1.57;
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
     {
-        config.resize(37);
-        double z_pitch = -0.446;
-        double x_lleq = -0.0563; double y_lleq = 0.025;  double z_lleq = 0.01473;
-        double x_lreq = -0.0563; double y_lreq = -0.025; double z_lreq = 0.01473;
-        double y_llbar = 0.025;   double z_llbar = -0.09;
-        double y_lrbar = -0.025;  double z_lrbar = -0.155;
-        double x_lltd = -0.0560268; double z_lltd = 0.015;
-        double x_lrtd = -0.0560268; double z_lrtd = 0.015;
-        double l_lltd = 0.35627010474952847;
-        double l_lrtd = 0.2912701281254911;
-        double l_llbar = 0.058;
-        double l_lrbar = 0.058;
+        config.resize(43);
+        double z_pitch = -0.416;
+        double x_lleq = 0.0385; double y_lleq = 0.03475;  double z_lleq = -0.01;
+        double x_lreq = 0.0385; double y_lreq = -0.03475; double z_lreq = -0.01;
+        double z_llbar = -0.188;
+        double z_lrbar = -0.098;
+        double x_lltd = 0.049; double y_lltd = 0.0356172; double z_lltd = -0.00624208;
+        double x_lrtd = 0.049; double y_lrtd = -0.035629; double z_lrtd = -0.0061744;
+        double l_llbar = 0.03616;
+        double l_lrbar = 0.03616;
+        double l_lltd = 0.232;
+        double l_lrtd = 0.322;
 
-        double x_rleq = -0.0563; double y_rleq = 0.025;  double z_rleq = 0.01473;
-        double x_rreq = -0.0563; double y_rreq = -0.025; double z_rreq = 0.01473;
-        double y_rlbar = 0.025;   double z_rlbar = -0.155;
-        double y_rrbar = -0.025;  double z_rrbar = -0.09;
-        double x_rltd = -0.0560268; double z_rltd = 0.015;
-        double x_rrtd = -0.0560268; double z_rrtd = 0.015;
-        double l_rltd = 0.2912701281254911;
-        double l_rrtd = 0.35627010474952847;
-        double l_rlbar = 0.058;
-        double l_rrbar = 0.058;
+        double x_rleq = 0.0385; double y_rleq = 0.03475; double z_rleq = -0.01;
+        double x_rreq = 0.0385; double y_rreq = -0.03475; double z_rreq = -0.01;
+        double z_rlbar = -0.098;
+        double z_rrbar = -0.188;
+        double x_rltd = 0.049; double y_rltd = 0.035629; double z_rltd = -0.0061744;
+        double x_rrtd = 0.049; double y_rrtd = -0.0356172; double z_rrtd = -0.00624208;
+        double l_rlbar = 0.03616;
+        double l_rrbar = 0.03616;
+        double l_rltd = 0.322;
+        double l_rrtd = 0.232;
+
+        double z_BarKnee = -0.169;
+        double l_tendon = 0.16918805677712595;
+        double l_BarTd = 0.03500001265742629;
+        double l_KneeEq = 0.03500285274088385;
+        double qO_knee = 0.26181698840065826;
+        double qO_bar = 0.3738812519350086;
         config << z_pitch, 
                   x_lleq, y_lleq, z_lleq, 
                   x_lreq, y_lreq, z_lreq, 
-                  y_llbar, z_llbar, 
-                  y_lrbar, z_lrbar, 
-                  x_lltd, z_lltd, 
-                  x_lrtd, z_lrtd, 
-                  l_lltd, l_lrtd, 
+                  z_llbar, z_lrbar, 
+                  x_lltd, y_lltd, z_lltd, 
+                  x_lrtd, y_lrtd, z_lrtd, 
                   l_llbar, l_lrbar, 
+                  l_lltd, l_lrtd, 
                   x_rleq, y_rleq, z_rleq, 
                   x_rreq, y_rreq, z_rreq, 
-                  y_rlbar, z_rlbar, 
-                  y_rrbar, z_rrbar, 
-                  x_rltd, z_rltd, 
-                  x_rrtd, z_rrtd, 
-                  l_rltd, l_rrtd, 
-                  l_rlbar, l_rrbar;
+                  z_rlbar, z_rrbar,
+                  x_rltd, y_rltd, z_rltd, 
+                  x_rrtd, y_rrtd, z_rrtd, 
+                  l_rlbar, l_rrbar,
+                  l_rltd, l_rrtd,
+                  z_BarKnee, l_tendon, l_BarTd, l_KneeEq, qO_knee, qO_bar;
+        ankle_pitch_limits_ << -0.88, 0.35;
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN_PRO)
     {
@@ -236,7 +243,7 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_position(const Eigen::VectorXd& q)
     joint_q[10] = std::max(std::min(joint_q[10], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
     {
-        result = joint_to_motor_position_(joint_q);
+        result = joint_to_motor_position_pro_(joint_q);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN_PRO)
     {
@@ -261,7 +268,7 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_velocity(const Eigen::VectorXd& q, c
     Eigen::VectorXd result(12);
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
     {
-        result = joint_to_motor_velocity_(q, p, dp);
+        result = joint_to_motor_velocity_pro_(q, p, dp);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN_PRO)
     {
@@ -286,7 +293,7 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_current(const Eigen::VectorXd& q, co
     Eigen::VectorXd result(12);
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
     {
-        result = joint_to_motor_current_(q, p, t);
+        result = joint_to_motor_current_pro_(q, p, t);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN_PRO)
     {
@@ -311,7 +318,7 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_position(const Eigen::VectorXd& q)
     Eigen::VectorXd result(12);
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
     {
-        result = motor_to_joint_position_(q);
+        result = motor_to_joint_position_pro_(q);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN_PRO)
     {
@@ -336,7 +343,7 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_velocity(const Eigen::VectorXd& q, c
     Eigen::VectorXd result(12);
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
     {
-        result = motor_to_joint_velocity_(q, p, v);
+        result = motor_to_joint_velocity_pro_(q, p, v);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN_PRO)
     {
@@ -361,7 +368,7 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_torque(const Eigen::VectorXd& q, con
     Eigen::VectorXd result(12);
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
     {
-        result = motor_to_joint_torque_(q, p, c);
+        result = motor_to_joint_torque_pro_(q, p, c);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN_PRO)
     {

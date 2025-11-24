@@ -107,8 +107,8 @@ public:
     int count = 0;
     while(!observationReceived_)
     {
-      if(count++ % 40 == 0)
-        std::cout << "[KinematicMpcTest] Waiting for observation" << std::endl;
+      // if(count++ % 40 == 0)
+        // std::cout << "[KinematicMpcTest] Waiting for observation" << std::endl;
       ros::spinOnce();
       ros::Duration(0.1).sleep();
     }

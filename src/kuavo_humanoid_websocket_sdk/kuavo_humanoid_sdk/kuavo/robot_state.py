@@ -194,6 +194,37 @@ class KuavoRobotState:
             acceleration=[self._rs_core.joint_data.acceleration[i] for i in head_joint_indices]
         )
     
+    def waist_joint_state(self, waist_dof:int) -> KuavoJointData:
+        """获取机器人腰部关节的当前状态
+        获取机器人头部关节的当前状态数据，包括位置、速度、扭矩和加速度值。
+
+        Returns:
+            KuavoJointData: 包含头部关节状态的数据结构:
+                * position (list[float]): 关节位置，单位为弧度，长度=waist_dof
+                * velocity (list[float]): 关节速度，单位为rad/s，长度=waist_dof
+                * torque (list[float]): 关节扭矩，单位为Nm，长度=waist_dof
+                * acceleration (list[float]): 关节加速度，单位为rad/s^2，长度=waist_dof
+                
+        """
+        # 环境判断
+        if env == 'real':
+            jointData = self._rs_core.joint_data
+        elif env == 'mujoco':
+            jointData = self._rs_core.joint_data
+        elif env == 'gazebo':
+            jointData = self._rs_core.joint_data_shm
+        else:
+            raise ValueError(f"Invalid environment: {self.env}")
+        
+        # Get waist joint states from 13 indices
+        waist_joint_indices = range(12, 12+waist_dof)
+        return KuavoJointData(
+            position=[jointData.position[i] for i in waist_joint_indices],
+            velocity=[jointData.velocity[i] for i in waist_joint_indices], 
+            torque=[jointData.torque[i] for i in waist_joint_indices],
+            acceleration=[jointData.acceleration[i] for i in waist_joint_indices]
+        )
+    
     def eef_state(self)->Tuple[EndEffectorState, EndEffectorState]:
         """Get the current state of the robot's end effectors.
 

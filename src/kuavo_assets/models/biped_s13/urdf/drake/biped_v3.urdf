@@ -20,7 +20,7 @@
       </material>
     </visual>
   </link>
-  <link name="waist_yaw">
+  <link name="waist_yaw_link">
     <inertial>
       <origin xyz="0.00227055 0.0 0.1163574" rpy="0 0 0" />
       <mass value="11.23288758" />
@@ -39,7 +39,7 @@
   <joint name="waist_yaw_joint" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="torso" />
-    <child link="waist_yaw" />
+    <child link="waist_yaw_link" />
     <axis xyz="0 0 1" />
     <limit lower="-2.0943951023932" upper="2.0943951023932" effort="50" velocity="8.37333333333333" />
   </joint>

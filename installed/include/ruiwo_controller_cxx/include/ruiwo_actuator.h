@@ -7,6 +7,7 @@
 #include <mutex>
 #include <iterator>
 #include "ruiwo_actuator_base.h"
+#include <iostream>
 
 /**
  * Structure representing motor parameters for Ruiwo actuators

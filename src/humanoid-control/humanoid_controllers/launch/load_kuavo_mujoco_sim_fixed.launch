@@ -1,0 +1,144 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="joystick_type" default="bt2"/>
+  <arg name="timeout_warning_ms" default="20"/>
+  <arg name="wbc_frequency" default="500"/>
+  <arg name="sensor_frequency" default="500"/>
+  <arg name="inference_frequency" default="100"/>
+  <arg name="robot_version" default="46"/>
+
+  <!-- 系统资源管理参数 -->
+  <param name="/nodelet_manager/max_log_size_gb" value="32.0"/>
+  <param name="/nodelet_manager/log_delete_limit_gb" value="30.0"/>
+  
+  <!-- 控制器参数 -->
+  <param name="timeout_warning_ms" value="$(arg timeout_warning_ms)" />
+  <param name="wbc_frequency" value="$(arg wbc_frequency)" />
+  <param name="sensor_frequency" value="$(arg sensor_frequency)" />
+  <param name="inference_frequency" value="$(arg inference_frequency)" />
+  <param name="robot_version" value="$(arg robot_version)" />
+  <param name="joystick_type" value="$(arg joystick_type)" />
+  
+  <!-- 性能优化参数 -->
+  <param name="joystick_sensitivity" value="20" />
+  <param name="velocity_smooth_factor" value="0.1" />
+  <param name="velocity_smooth_time" value="0.1" />
+  <param name="max_velocity_change" value="0.5" />
+  
+  <!-- 模型和配置文件路径 -->
+  <param name="taskFile" value="$(find humanoid_controllers)/config/kuavo_v46/mpc/task.info" />
+  <param name="urdfFile" value="$(find kuavo_assets)/models/biped_s46/urdf/biped_s46.urdf" />
+  <param name="referenceFile" value="$(find humanoid_controllers)/config/kuavo_v46/command/reference.info" />
+  <param name="gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v46/command/gait.info" />
+  
+  <!-- 添加错误恢复机制 -->
+  <param name="use_external_mpc" value="true" />
+  <param name="with_estimation" value="true" />
+  <param name="enable_pull_up_protect" value="true" />
+  <param name="pull_up_force_threshold" value="0.7" />
+
+  <!-- 启动收集信息脚本 -->
+  <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
+
+  <!-- 优化的 nodelet_manager 配置 -->
+  <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" 
+        respawn="true" respawn_delay="5" output="screen" required="false" clear_params="true">
+    <param name="num_worker_threads" type="int" value="8" />
+    <param name="bond_disable_heartbeat_timeout" value="30.0"/>
+    <param name="bond_heartbeat_period" value="1.0"/>
+    <!-- 增加内存限制保护 -->
+    <env name="ROSCONSOLE_CONFIG_FILE" value="$(find humanoid_controllers)/config/rosconsole.conf"/>
+  </node>
+
+  <!-- 等待 nodelet_manager 启动 -->
+  <node pkg="rosservice" type="rosservice" name="wait_for_nodelet_manager" 
+        args="wait /nodelet_manager/load_nodelet" output="screen"/>
+
+  <!-- 基础 MPC 节点 -->
+  <node pkg="humanoid_interface_ros" type="humanoid_sqp_mpc" name="humanoid_sqp_mpc" 
+        output="screen" required="false" respawn="true" respawn_delay="3"/>
+
+  <!-- 步态命令节点 -->
+  <node pkg="humanoid_interface_ros" type="humanoid_gait_command" name="humanoid_gait_command"
+        output="screen" required="false" respawn="true" respawn_delay="3"/>
+
+  <!-- 控制器 nodelet -->
+  <node pkg="nodelet" type="nodelet" name="nodelet_controller" 
+        args="load HumanoidControllerNodelet nodelet_manager" 
+        respawn="true" respawn_delay="5" output="screen" required="false">
+    <!-- 设置 CPU 亲和性以避免资源竞争 -->
+    <env name="CPU_AFFINITY" value="0-7"/>
+  </node>
+
+  <!-- EKF 状态估计 -->
+  <node pkg="nodelet" type="nodelet" name="ekf_se" 
+        args="load RobotLocalization/EkfNodelet nodelet_manager" 
+        respawn="true" respawn_delay="5" output="screen" required="false" 
+        launch-prefix="taskset -c 8-15">
+    <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
+  </node>
+
+  <!-- Mujoco 仿真 nodelet -->
+  <node pkg="nodelet" type="nodelet" name="nodelet_mujoco" 
+        args="load MujocoNodelet nodelet_manager" 
+        respawn="true" respawn_delay="5" output="screen" required="false">
+    <param name="legged_robot_scene_param" value="$(find kuavo_assets)/models/biped_s46/xml/scene.xml"/>
+    <param name="sensor_frequency" value="$(arg sensor_frequency)"/>
+  </node>
+
+  <!-- Rosbag 记录 nodelet -->
+  <node pkg="nodelet" type="nodelet" name="nodelet_rosbag" 
+        args="load RosbagNodelet nodelet_manager" 
+        respawn="true" respawn_delay="5" output="screen" required="false">
+    <param name="topic_config" value="$(find humanoid_controllers)/config/log_topics.yaml"/>
+  </node>
+
+  <!-- 手柄控制 -->
+  <node pkg="joy" type="joy_node" name="joy_node" output="screen" required="false" respawn="true">
+    <param name="dev" value="/dev/input/js0" />
+    <param name="deadzone" value="0.18" />
+    <param name="autorepeat_rate" value="100.0" />
+  </node>
+
+  <!-- 手柄控制接口 -->
+  <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" 
+        name="humanoid_joy_control_auto_gait_with_vel" output="screen" required="false" respawn="true"/>
+
+  <!-- 步态切换节点 -->
+  <node pkg="humanoid_interface_ros" type="humanoid_gait_switch_by_name" 
+        name="humanoid_gait_switch_by_name" output="screen" required="false" respawn="true"/>
+
+  <!-- 手部控制 -->
+  <node pkg="humanoid_interface_ros" type="humanoid_hand_control" 
+        name="humanoid_hand_control" output="screen" required="false" respawn="true"/>
+
+  <!-- VR 手部控制 -->
+  <node pkg="humanoid_interface_ros" type="humanoid_VR_hand_control" 
+        name="humanoid_VR_hand_control" output="screen" required="false" respawn="true"/>
+
+  <!-- Quest 控制 -->
+  <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" 
+        name="humanoid_quest_control_with_arm" output="screen" required="false" respawn="true"/>
+
+  <!-- 手臂轨迹控制 -->
+  <node pkg="humanoid_interface_ros" type="humanoid_Arm_time_target_control" 
+        name="humanoid_Arm_time_target_control" output="screen" required="false" respawn="true"/>
+
+  <!-- IK 节点 -->
+  <node pkg="motion_capture_ik" type="arms_ik_node" name="arms_ik_node" 
+        output="screen" required="false" respawn="true"/>
+
+  <!-- 系统监控 -->
+  <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" 
+        output="screen" required="false" respawn="true"/>
+
+  <!-- 系统信息发布 -->
+  <node pkg="humanoid_controllers" type="system_info_publisher.py" 
+        name="system_info_publisher" output="screen" required="false" respawn="true"/>
+
+  <!-- RViz 可视化 -->
+  <node pkg="rviz" type="rviz" name="rviz" 
+        args="-d $(find humanoid_controllers)/rviz/kuavo.rviz" 
+        output="screen" required="false" respawn="false"/>
+
+</launch> 

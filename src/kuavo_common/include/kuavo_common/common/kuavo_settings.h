@@ -25,12 +25,15 @@ namespace HighlyDynamic
 #define AK10_9_MC (40)
 #define AK70_10_MC (26.1) // 手册是 23.2
 #define PA81_MC (60)
-#define PA100_MC (110)
+#define PA100_MC (70)
+#define PA76_25_MC (18)
 #define CK_MC (18)
 #define PA4310_25_MC (8)
 #define PA72_36_MC (15)
-#define PA76_25_MC (18)
+#define PA76_18_MC (31.5)
+#define PA105_18_MC (70)
 #define PA115_MC (40)
+
 
 #define AK10_9_C2T (1.26)
 #define AK70_10_C2T (1.23)
@@ -44,8 +47,11 @@ namespace HighlyDynamic
 #define PA72_C2T (3.6)
 #define PA60_C2T (2.0)
 #define PA43_C2T (1.45)
+
+#define PA76_25_C2T (4.2)
+#define PA76_18_C2T (2.0)
+#define PA105_18_C2T (4.1)
 #define PA4310_25_C2T (2.6)
-#define PA76_25_C2T (3.8)
 #define PA72_36_C2T (4.8)
 #define PA115_C2T (11.5)
 

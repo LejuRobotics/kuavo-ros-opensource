@@ -546,7 +546,7 @@ def ruiwo_negtive():
 
 def qiangnao_hand():
     # 定义要运行的命令
-    command = "bash "+ folder_path +"/hand_grab_test.sh" 
+    command = "bash "+ folder_path +"/dexhand_test.sh --touch --test 1" 
 
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)

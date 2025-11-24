@@ -59,8 +59,8 @@ def report_info():
     robot_serial_number = os.environ.get("ROBOT_SERIAL_NUMBER")
     ec_master_MAC = os.environ.get("EC_MASTER_MAC")
 
-    # 使用指定的接口名称获取IP地址
-    interface_name = "wlo1"  # 你想获取IP地址的接口名
+    # 检测以wl开头的接口获取IP地址
+    interface_name = os.popen("ls /sys/class/net/ | grep '^wl' | head -1").read().strip() or "wlp3s0"
     ip_address = get_ip_by_interface(interface_name)
     # ip_address = get_ip()
     wifi_ssid = get_wifi()

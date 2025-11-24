@@ -260,7 +260,7 @@ private:
         struct timespec next_time;
         clock_gettime(CLOCK_MONOTONIC, &next_time);
         ros::Rate rate(controlFrequency);
-        uint64_t cycle_count = 0;
+        // uint64_t cycle_count = 0;
 
         // Pre-Update Initialization Phase
         // Runs until preUpdateComplete() returns true

@@ -116,6 +116,7 @@ class VisionBasedStairClimbingPlanner:
         self.first_received = True  # 标志位，表示是否第一次接收到视觉数据
         self.last_points = None
         self.number_of_no_receive = 0
+        self.number_of_no_receive_marker = 0
         self.last_foot_traj = []
         self.last_foot_idx_traj = []
         self.last_swing_trajectories = []
@@ -313,7 +314,7 @@ class VisionBasedStairClimbingPlanner:
             
             # 如果距离太远，先规划走到楼梯前
             if self.first_received:
-                safe_distance = 0.35 # 半截楼梯宽度0.15 + 脚尖到base的距离0.15左右 + 距离楼梯前边缘安全距离
+                safe_distance = 0.38 # 半截楼梯宽度0.15 + 脚尖到base的距离0.15左右 + 距离楼梯前边缘安全距离
                 if distance_to_first_step > safe_distance: 
                     rospy.loginfo(f"Distance to first step ({distance_to_first_step:.3f}m) is too far, planning approach movement")
                     print("distance_to_first_step", distance_to_first_step - safe_distance)
@@ -522,6 +523,136 @@ class VisionBasedStairClimbingPlanner:
             rospy.logerr(f"Error during planning: {e}")
         finally:
             self.is_planning = False
+
+    def plan_stair_climbing_once(self, distance_to_first_step, points):
+        """基于视觉信息规划上楼梯动作"""
+        if self.stair_info is None:
+            rospy.logwarn("No stair information available for planning")
+            return
+        
+        if points is None:
+            rospy.logwarn("No stair information available for planning")
+            return
+            
+        self.is_planning = True
+        
+        try:
+            # 禁用俯仰角限制
+            self.set_pitch_limit(False)
+            
+            # 获取楼梯信息
+            num_steps = len(self.stair_info)
+            rospy.loginfo(f"Planning for {num_steps} steps")
+            
+            # 初始化轨迹变量
+            time_traj = []
+            foot_idx_traj = []
+            foot_traj = []
+            torso_traj = []
+            swing_trajectories = []
+
+            print("yaw:",self.filtered_yaw)
+            
+            # 如果距离太远，先规划走到楼梯前
+            safe_distance = 0.38 # 半截楼梯宽度0.15 + 脚尖到base的距离0.15左右 + 距离楼梯前边缘安全距离
+            if distance_to_first_step > safe_distance: 
+                rospy.loginfo(f"Distance to first step ({distance_to_first_step:.3f}m) is too far, planning approach movement")
+                print("distance_to_first_step", distance_to_first_step - safe_distance)
+
+                time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = self.planner.plan_move_to_world(
+                    dx=distance_to_first_step - safe_distance,
+                    dy=0,
+                    # dyaw=0,  # Convert radians to degrees
+                    dyaw=np.degrees(self.filtered_yaw),  
+                    time_traj=time_traj,
+                    foot_idx_traj=foot_idx_traj,
+                    foot_traj=foot_traj,
+                    torso_traj=torso_traj,
+                    swing_trajectories=swing_trajectories,
+                    # modify_current_x= 0
+                    modify_current_x = self.base_link_point.x if self.base_link_point is not None else 0.0
+                )
+            
+
+            insert_time = 0
+        
+            # 规划上楼梯动作
+            time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = self.planner.plan_up_stairs_world(
+                num_steps=len(points)+1,
+                time_traj=time_traj,
+                foot_idx_traj=foot_idx_traj,
+                foot_traj=foot_traj,
+                torso_traj=torso_traj,
+                swing_trajectories=swing_trajectories,
+                points = points,
+                last_points = self.last_points,
+                last_foot_traj=self.last_foot_traj,
+                last_swing_trajectories=self.last_swing_trajectories,
+                first_receive= True,
+                last_left_foot_pos = self.last_left_foot_pos,
+                last_right_foot_pos = self.last_right_foot_pos,
+                is_next_step_left = self.is_next_step_left
+                )
+
+            time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = self.planner.plan_move_to_world(
+                dx=0.2,
+                dy=0,
+                # dyaw=0,  # Convert radians to degrees
+                dyaw=0,  
+                time_traj=time_traj,
+                foot_idx_traj=foot_idx_traj,
+                foot_traj=foot_traj,
+                torso_traj=torso_traj,
+                swing_trajectories=swing_trajectories,
+                # modify_current_x= 0
+                modify_current_x = self.base_link_point.x if self.base_link_point is not None else 0.0
+            )
+
+            time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = self.planner.plan_move_to_world(
+                dx=0,
+                dy=0,
+                # dyaw=0,  # Convert radians to degrees
+                dyaw=-90,  
+                time_traj=time_traj,
+                foot_idx_traj=foot_idx_traj,
+                foot_traj=foot_traj,
+                torso_traj=torso_traj,
+                swing_trajectories=swing_trajectories,
+                # modify_current_x= 0
+                modify_current_x = self.base_link_point.x if self.base_link_point is not None else 0.0
+            )
+
+
+            if insert_time != -1:
+                if (time_traj is not None):
+                    for i,t in enumerate(time_traj):
+                        print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
+        
+            # 发布轨迹
+            if insert_time != -1:
+                self.publish_world_trajectory(time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories, insert_time)
+                # self.publish_world_trajectory(insert_time_traj, insert_foot_idx_traj, insert_foot_traj, insert_torso_traj, insert_swing_trajectories, insert_time)
+                self.last_foot_traj = foot_traj
+                self.last_swing_trajectories = swing_trajectories
+                self.last_foot_idx_traj = foot_idx_traj
+                # 等待轨迹执行完成
+                self.wait_for_trajectory_completion(time_traj)
+                
+                self.planning_done = True
+                self.first_received = False
+
+                if self.last_points is None:
+                    self.last_points = []
+                self.last_points.clear()
+                self.last_points = points
+                rospy.loginfo("Stair climbing planning completed")
+            else:
+                rospy.logwarn("No valid insert time found, skipping trajectory publication")
+            
+        except Exception as e:
+            rospy.logerr(f"Error during planning: {e}")
+        finally:
+            self.is_planning = False
             
 
     def publish_world_trajectory(self, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories, insert_time = 0):
@@ -568,14 +699,14 @@ class VisionBasedStairClimbingPlanner:
             rospy.loginfo(f"Waiting {total_time:.2f} seconds for trajectory execution to complete...")
             
             # 等待轨迹执行完成
-            # rospy.sleep(total_time * 0.1)
-            # rospy.sleep(2)
+            rospy.sleep(total_time)
             rospy.loginfo("Trajectory execution completed, exiting...")
             
             # 重新启用俯仰角限制
-            # self.set_pitch_limit(True)
+            self.set_pitch_limit(True)
+            
             # 退出程序
-            # rospy.signal_shutdown("Trajectory execution completed")
+            rospy.signal_shutdown("Trajectory execution completed")
         else:
             rospy.logwarn("No valid time trajectory found")
 
@@ -596,6 +727,10 @@ class VisionBasedStairClimbingPlanner:
         """处理楼梯边界信息，获取每个平面中x坐标最小的点"""
         if not msg.markers:
             rospy.logwarn("Received empty stairs boundary data")
+            self.number_of_no_receive_marker += 1
+            if self.number_of_no_receive_marker > 99:
+                rospy.logwarn("number_of_no_receive_marker > 99,shutdown!!!")
+                rospy.signal_shutdown("number_of_no_receive_marker > 99")
             return
 
         # 存储每个平面中x坐标最小的点
@@ -657,17 +792,21 @@ class VisionBasedStairClimbingPlanner:
             center_pt = points_per_plane[i]
             if abs(center_pt.z) > 0.03:
                 if i == 0:
-                    points.append(np.array([center_pt.x + 0.1, 0, center_pt.z]))
+                    points.append(np.array([center_pt.x + 0.09, 0, center_pt.z]))
                 else:
                     if (center_pt.x - points_per_plane[i-1].x) < 0.4 and (center_pt.z - points_per_plane[i-1].z) < 0.21:
-                        points.append(np.array([center_pt.x + 0.1, 0, center_pt.z]))
+                        points.append(np.array([center_pt.x + 0.09, 0, center_pt.z]))
 
         if len(points) == 0:
             rospy.logwarn("No valid stair steps found")
+            self.number_of_no_receive += 1
+            if self.number_of_no_receive > 99:
+                rospy.logwarn("number_of_no_receive > 99,shutdown!!!")
+                rospy.signal_shutdown("number_of_no_receive > 99")
             return
         
         if self.first_received:
-            if points[0][2] > 0.21 or points[0][2] < 0.03:
+            if points[0][2] > 0.23 or points[0][2] < 0.03:
                 rospy.logwarn("First step height is not in the expected range, ignoring this detection")
                 print("First step height:", points[0][2])
                 return
@@ -721,7 +860,8 @@ class VisionBasedStairClimbingPlanner:
         rospy.loginfo(f"Distance to first step: {distance_to_first_step:.3f}m")
         
         # 开始规划
-        self.plan_stair_climbing(distance_to_first_step, points)
+        # self.plan_stair_climbing(distance_to_first_step, points)
+        self.plan_stair_climbing_once(distance_to_first_step, points)
         
         # 标记规划完成
         # self.planning_done = True

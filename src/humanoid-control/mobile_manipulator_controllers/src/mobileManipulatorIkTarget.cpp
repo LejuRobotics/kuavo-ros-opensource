@@ -100,8 +100,8 @@ void MobileManipulatorIkTarget::setupMobileManipulatorInterface()
     info_ = mobileManipulatorInterface_->getManipulatorModelInfo();
     
     // 初始化 latestHumanoidObservation_.state 的大小
-    // 12(躯干动量+躯干6dof) + 12(leg) + armDim
-    latestHumanoidObservation_.state.setZero(12 + 12 + info_.armDim);
+    // 12(躯干动量+躯干6dof) + 12(leg) + armDim +waistDim
+    latestHumanoidObservation_.state.setZero(12 + 12 + info_.waistDim + info_.armDim);
     
     pinocchioInterface_ptr_.reset(new PinocchioInterface(mobileManipulatorInterface_->getPinocchioInterface()));
     pinocchioMappingPtr_ = std::make_unique<ocs2::mobile_manipulator::MobileManipulatorPinocchioMapping>(info_);
@@ -541,13 +541,13 @@ bool MobileManipulatorIkTarget::getTargetTrajectories(TargetTrajectories& target
 
 bool MobileManipulatorIkTarget::setHumanoidObservationByMmState(const vector_t& mmState)
 {
-    if(mmState.size() != 6+info_.armDim)
+    if(mmState.size() != 6+info_.armDim+info_.waistDim)
     {
         ROS_ERROR("[MobileManipulatorIkTarget]: Invalid mmState size");
         return false;
     }
     latestHumanoidObservation_.state.segment<6>(6) = mmState.segment<6>(0);
-    latestHumanoidObservation_.state.segment(24, info_.armDim) = mmState.segment(6, info_.armDim);
+    latestHumanoidObservation_.state.segment(24, info_.armDim + info_.waistDim) = mmState.segment(6, info_.armDim + info_.waistDim);
     latestHumanoidObservation_.time = ros::Time::now().toSec();
     humanoidObservationReceived_ = true;
     return true;

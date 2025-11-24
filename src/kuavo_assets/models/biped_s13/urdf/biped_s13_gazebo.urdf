@@ -26,7 +26,7 @@
     <child link="base_link" />
     <dynamics damping="0.2" friction="0.0"/>
   </joint>
-  <link name="waist_yaw">
+  <link name="waist_yaw_link">
     <inertial>
       <origin xyz="0.00227055 0.0 0.1163574" rpy="0 0 0" />
       <mass value="4.09458758" />
@@ -45,7 +45,7 @@
   <joint name="waist_yaw_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="base_link" />
-    <child link="waist_yaw" />
+    <child link="waist_yaw_link" />
     <axis xyz="0 0 1" />
     <limit lower="-2.0943951023932" upper="2.0943951023932" effort="50" velocity="8.37333333333333" />
     <dynamics damping="0.2" friction="0.0"/>
@@ -512,7 +512,7 @@
   </link>
   <joint name="zarm_l1_joint" type="revolute">
     <origin xyz="0.0073474151 0.16250437899999998 0.20242688398" rpy="0 0 0" />
-    <parent link="waist_yaw" />
+    <parent link="waist_yaw_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="2.0943951023932" effort="12" velocity="7.32666666666667" />
@@ -621,7 +621,7 @@
   </link>
   <joint name="zarm_r1_joint" type="revolute">
     <origin xyz="0.0073474151 -0.16250437899999998 0.20242688398" rpy="0 0 0" />
-    <parent link="waist_yaw" />
+    <parent link="waist_yaw_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="2.0943951023932" effort="12" velocity="7.32666666666667" />
@@ -730,7 +730,7 @@
   </link>
   <joint name="zhead_1_joint" type="revolute">
     <origin xyz="0.0 0.0 0.33128227967" rpy="0 0 0" />
-    <parent link="waist_yaw" />
+    <parent link="waist_yaw_link" />
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="50" velocity="8.37333333333333" />
@@ -932,6 +932,9 @@
         <joint><name>leg_r4_joint</name></joint>
         <joint><name>leg_r5_joint</name></joint>
         <joint><name>leg_r6_joint</name></joint>
+
+        <!-- 腰部关节 -->
+        <joint><name>waist_yaw_joint</name></joint>
         
         <!-- 左臂关节 -->
         <joint><name>zarm_l1_joint</name></joint>

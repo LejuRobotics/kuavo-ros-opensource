@@ -64,11 +64,8 @@ debugQuestControlFSMNode.cpp
 tmp_ws/
 # **/*test.cpp
 
-
-# **/*.md
-
-# **/settings.json
-
-# **/*.bak
-
-# **/Quest3ArmInfoTransformer.*
+src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs/**
+bag/*
+src/Livox-SDK2
+src/legged_control
+src/legged_perceptive

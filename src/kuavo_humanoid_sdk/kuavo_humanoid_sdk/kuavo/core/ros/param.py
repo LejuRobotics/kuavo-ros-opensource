@@ -28,6 +28,12 @@ class RosParameter:
             return None
         return rospy.get_param('/headRealDof')
     
+    def waist_dof(self)->int:
+        if not rospy.has_param('/waistRealDof'):
+            rospy.logerr("waistRealDof parameter not found")
+            return None
+        return rospy.get_param('/waistRealDof')
+
     def leg_dof(self)->int:
         if not rospy.has_param('/legRealDof'):
             rospy.logerr("legRealDof parameter not found")
@@ -209,6 +215,7 @@ def make_robot_param()->dict:
         'arm_dof': kuavo_ros_param.arm_dof(),
         'head_dof': kuavo_ros_param.head_dof(),
         'leg_dof': kuavo_ros_param.leg_dof(),
+        'waist_dof': kuavo_ros_param.waist_dof(),
         'end_effector_type': kuavo_ros_param.end_effector_type(),
         'joint_names': joint_names(),
         'end_frames_names': end_frames_names(),

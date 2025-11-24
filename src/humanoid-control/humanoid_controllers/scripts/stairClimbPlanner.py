@@ -198,7 +198,7 @@ class StairClimbingPlanner:
             
         return time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories
 
-    def plan_move_to_world(self, dx=0.2, dy=0.0, dyaw=0.0, time_traj=None, foot_idx_traj=None, foot_traj=None, torso_traj=None, swing_trajectories=None, max_step_x=0.28, max_step_y=0.15, max_step_yaw=30.0, modify_current_x=0):
+    def plan_move_to_world(self, dx=0.2, dy=0.0, dyaw=0.0, time_traj=None, foot_idx_traj=None, foot_traj=None, torso_traj=None, swing_trajectories=None, max_step_x=0.15, max_step_y=0.15, max_step_yaw=30.0, modify_current_x=0):
         """
         规划移动到目标位置的轨迹
         Args:
@@ -512,14 +512,12 @@ class StairClimbingPlanner:
         for step in range(num_steps):
             # 更新时间
             self.total_step += 1
-            # if step == 0:
-            #     time_traj.append((time_traj[-1] if len(time_traj) > 0 else 0) + min(self.dt*1.5,max(self.dt,points[step][2]/self.step_height*self.dt)))
-            # elif step < num_steps - 1:
-            #     time_traj.append((time_traj[-1] if len(time_traj) > 0 else 0) + min(self.dt*1.5,max(self.dt,(points[step][2]-points[step-1][2])/self.step_height*self.dt)))
-            if step < num_steps -1:
-                time_traj.append((time_traj[-1] if len(time_traj) > 0 else 0) + self.dt)
-            elif step == num_steps - 1:
-                time_traj.append((time_traj[-1] if len(time_traj) > 0 else 0) + min(self.dt*1.5,max(self.dt,(points[step-1][2]-points[step-2][2])/self.step_height*self.dt)))
+            time_traj.append((time_traj[-1] if len(time_traj) > 0 else 0) + self.dt)
+            
+            # if step < num_steps -1:
+            #     time_traj.append((time_traj[-1] if len(time_traj) > 0 else 0) + self.dt)
+            # elif step == num_steps - 1:
+            #     time_traj.append((time_traj[-1] if len(time_traj) > 0 else 0) + min(self.dt*1.5,max(self.dt,(points[step-1][2]-points[step-2][2])/self.step_height*self.dt)))
             
             # 左右脚交替
             self.is_left_foot = not self.is_left_foot
@@ -1433,35 +1431,39 @@ if __name__ == '__main__':
         #     for i,t in enumerate(time_traj):
         #         print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
         
-        if not args.down_stairs:
-            time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_up_stairs(5, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories)
-            print("Up stairs plan done.")
-            if (time_traj is not None):
-                for i,t in enumerate(time_traj):
-                    print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
-            
-            time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_move_to(0.35,0,0, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories)
-            print("\nMove to down stairs plan done.")
-            if (time_traj is not None):
-                for i,t in enumerate(time_traj):
-                    print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
-            
-        # time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_move_to(0.0,0,180, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories)
-        # print("\nMove to down stairs plan done.")
- 
-        
-        # time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_move_to(0.16,0,0, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories)
-        # print("\nMove to down stairs plan done.")
+        # # 规划上楼梯动作
+        # time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_up_stairs(5, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories)
+        # print("Up stairs plan done.")
         # if (time_traj is not None):
         #     for i,t in enumerate(time_traj):
         #         print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
-        
-        
-        time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_down_stairs_step_by_step(5, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories)
-        print("\nDown stairs plan done.")
-        if (time_traj is not None):
-            for i,t in enumerate(time_traj):
-                print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
+            
+
+        time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_move_to_world(
+            dx=0.15,
+            dy=0,
+            # dyaw=0,  # Convert radians to degrees
+            dyaw=0,  
+            time_traj=time_traj,
+            foot_idx_traj=foot_idx_traj,
+            foot_traj=foot_traj,
+            torso_traj=torso_traj,
+            swing_trajectories=swing_trajectories,
+            # modify_current_x= 0
+        )
+
+        time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_move_to_world(
+            dx=0,
+            dy=0,
+            # dyaw=0,  # Convert radians to degrees
+            dyaw=-90,  
+            time_traj=time_traj,
+            foot_idx_traj=foot_idx_traj,
+            foot_traj=foot_traj,
+            torso_traj=torso_traj,
+            swing_trajectories=swing_trajectories,
+            # modify_current_x= 0
+        )
         
         # 打印规划结果
         print("\nTime trajectory:", time_traj)

@@ -64,20 +64,23 @@ class KuavoRobotToolsCore:
 
             # #####################################
             # 坐标系转换映射
-            frame_mapping = {
-                "base_link": "waist_yaw_link"
-            }
+            robot_type = rospy.get_param('/robot_type', 2)
+            if robot_type == 1:     # 轮臂机器人
 
-            # 转换坐标系名称
-            if target_frame in frame_mapping:
-                mapped_target_frame = frame_mapping[target_frame]
-                SDKLogger.debug(f"🔵 目标坐标系映射: {target_frame} -> {mapped_target_frame}")
-                target_frame = mapped_target_frame
+                frame_mapping = {
+                    "base_link": "waist_yaw_link"
+                }
 
-            if source_frame in frame_mapping:
-                mapped_source_frame = frame_mapping[source_frame]
-                SDKLogger.debug(f"🟢 源坐标系映射: {source_frame} -> {mapped_source_frame}")
-                source_frame = mapped_source_frame
+                # 转换坐标系名称
+                if target_frame in frame_mapping:
+                    mapped_target_frame = frame_mapping[target_frame]
+                    SDKLogger.debug(f"🔵 目标坐标系映射: {target_frame} -> {mapped_target_frame}")
+                    target_frame = mapped_target_frame
+
+                if source_frame in frame_mapping:
+                    mapped_source_frame = frame_mapping[source_frame]
+                    SDKLogger.debug(f"🟢 源坐标系映射: {source_frame} -> {mapped_source_frame}")
+                    source_frame = mapped_source_frame
             
             # #######################################
             # 调用服务

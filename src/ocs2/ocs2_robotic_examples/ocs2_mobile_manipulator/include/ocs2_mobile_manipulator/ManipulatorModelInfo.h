@@ -58,6 +58,7 @@ struct ManipulatorModelInfo {
   size_t stateDim;                            // number of states needed to define the system flow map
   size_t inputDim;                            // number of inputs needed to define the system flow map
   size_t armDim;                              // number of DOFs in the robot arm
+  size_t waistDim;                            // number of DOFs in the robot waist
   std::string baseFrame;                      // name of the root frame of the robot
   // std::string eeFrame;                        // name of the end-effector frame of the robot
   std::vector<std::string> eeFrames;          // name of the end-effector frames of the robot

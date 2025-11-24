@@ -1,11 +1,10 @@
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.api import ArmAPI, TorsoAPI
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Tag, Frame
-
 import py_trees
 from py_trees.common import Access
 import numpy as np
-
+import time
 # 初始化API
 robot_sdk = RobotSDK()
 arm_api = ArmAPI(
@@ -67,6 +66,21 @@ def update_tag_guess(
 
     return True
 
+def arm_generate_pick_before():
+    # 手臂预抓取动作
+    # 这里以机器人坐标系为基准，这样手臂动作总是相对于机器人，机器人坐标系位于基座在地面的投影点
+    pick_left_arm_poses = [
+        Pose.from_euler(pos=(0.4, 0.4, 1.1), euler=(0, -90, 0),
+                        degrees=True,
+                        frame=Frame.ROBOT)]
+
+    pick_right_arm_poses = [
+        Pose.from_euler(pos=(0.4, -0.4, 1.1), euler=(0, -90, 0),
+                        degrees=True,
+                        frame=Frame.ROBOT)]
+
+    return pick_left_arm_poses, pick_right_arm_poses
+
 
 def arm_generate_pick_keypoints(
         box_width: float,
@@ -85,10 +99,10 @@ def arm_generate_pick_keypoints(
                         degrees=True,
                         frame=Frame.TAG),
         # 3. 抬升点位
-        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag + 0.3, -box_behind_tag), euler=(0, 0, 90),
+        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag + 0.2, -box_behind_tag), euler=(0, 0, 90),
                         degrees=True, frame=Frame.TAG),
         # 4. 收臂点位
-        Pose.from_euler(pos=(0.5, box_width / 2, 0.4), euler=(0, -90 + hand_pitch_degree, 0), degrees=True,
+        Pose.from_euler(pos=(0.4, box_width / 2, 0.3), euler=(0, -90 + hand_pitch_degree, 0), degrees=True,
                         frame=Frame.BASE)]
 
     pick_right_arm_poses = [
@@ -100,15 +114,55 @@ def arm_generate_pick_keypoints(
                         degrees=True,
                         frame=Frame.TAG),
         # 3. 抬升点位
-        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag + 0.3, -box_behind_tag), euler=(0, 0, 90),
+        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag + 0.2, -box_behind_tag), euler=(0, 0, 90),
                         degrees=True, frame=Frame.TAG),
         # 4. 收臂点位
-        Pose.from_euler(pos=(0.5, -box_width / 2, 0.4), euler=(0, -90 + hand_pitch_degree, 0), degrees=True,
+        Pose.from_euler(pos=(0.4, -box_width / 2, 0.3), euler=(0, -90 + hand_pitch_degree, 0), degrees=True,
                         frame=Frame.BASE),
     ]
 
     return pick_left_arm_poses, pick_right_arm_poses
 
+
+def arm_generate_place_keypoints_new(
+        box_width: float,
+        box_behind_tag: float,  # 箱子在tag后面的距离，单位米
+        box_beneath_tag: float,  # 箱子在tag下方的距离，单位米
+        box_left_tag: float,  # 箱子在tag左侧的距离，单位米
+):
+    place_left_arm_poses = [
+        # 1. 上方点位
+        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag + 0.2, -box_behind_tag), euler=(0, 0, 90),
+                        degrees=True, frame=Frame.TAG),
+        # 2. 并拢点位
+        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90),
+                        degrees=True,
+                        frame=Frame.TAG),
+        # 3. 打开点位
+        Pose.from_euler(pos=(-box_width * 3 / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+                        euler=(0, 0, 90), degrees=True,
+                        frame=Frame.TAG),
+        # 4. 收臂点位
+        Pose.from_euler(pos=(-0.4, -0.4, 0.1), euler=(0, -90, 180), degrees=True, frame=Frame.BASE),
+    ]
+    place_right_arm_poses = [
+        # 1. 上方点位
+        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag + 0.2, -box_behind_tag), euler=(0, 0, 90),
+                        degrees=True,
+                        frame=Frame.TAG),
+        # 2. 并拢点位
+        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90),
+                        degrees=True,
+                        frame=Frame.TAG),
+        # 3. 打开点位
+        Pose.from_euler(pos=(box_width * 3 / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+                        euler=(0, 0, 90), degrees=True,
+                        frame=Frame.TAG),
+        # 4. 收臂点位
+        Pose.from_euler(pos=(-0.4, 0.4, 0.1), euler=(0, -90, 180), degrees=True, frame=Frame.BASE),
+    ]  # 手臂关键点数据，假设为空列表
+
+    return place_left_arm_poses, place_right_arm_poses
 
 def arm_generate_place_keypoints(
         box_width: float,
@@ -121,11 +175,11 @@ def arm_generate_place_keypoints(
         Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag + 0.2, -box_behind_tag), euler=(0, 0, 90),
                         degrees=True, frame=Frame.TAG),
         # 2. 并拢点位
-        Pose.from_euler(pos=(-box_width / 2 - box_left_tag + 0.03, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90),
+        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90),
                         degrees=True,
                         frame=Frame.TAG),
         # 3. 打开点位
-        Pose.from_euler(pos=(-box_width * 3 / 2 - 0.2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+        Pose.from_euler(pos=(-box_width * 3 / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
                         euler=(0, 0, 90), degrees=True,
                         frame=Frame.TAG),
         # 4. 收臂点位
@@ -137,11 +191,11 @@ def arm_generate_place_keypoints(
                         degrees=True,
                         frame=Frame.TAG),
         # 2. 并拢点位
-        Pose.from_euler(pos=(box_width / 2 - box_left_tag - 0.03, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90),
+        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90),
                         degrees=True,
                         frame=Frame.TAG),
         # 3. 打开点位
-        Pose.from_euler(pos=(box_width * 3 / 2 + 0.2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+        Pose.from_euler(pos=(box_width * 3 / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
                         euler=(0, 0, 90), degrees=True,
                         frame=Frame.TAG),
         # 4. 收臂点位
@@ -149,3 +203,12 @@ def arm_generate_place_keypoints(
     ]  # 手臂关键点数据，假设为空列表
 
     return place_left_arm_poses, place_right_arm_poses
+
+def time_sleep(seconds: float):
+    time.sleep(seconds)
+    return True
+
+def arm_reset():
+    status = robot_sdk.control.arm_reset()
+    # time.sleep(0.8)
+    return status

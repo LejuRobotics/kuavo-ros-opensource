@@ -53,8 +53,7 @@ class HeadAPI:
                         ):
         for pair in head_traj:
             yaw, pitch = pair
-            self.robot_sdk.control.move_head_to_pitch_yaw(
-                pitch, yaw, timeout=5.0)
+            self.robot_sdk.control.control_head(yaw, pitch)
             time.sleep(0.7)
 
     def move_head_traj(self,
@@ -78,7 +77,6 @@ class ArmAPI:
     def __init__(self, robot_sdk: RobotSDK):
         self.robot_sdk = robot_sdk
         self._pool = ThreadPoolExecutor(max_workers=2)
-        self.robot_sdk.control.set_external_control_arm_mode()
 
     def _move_eef_traj_kmpc(self,
                             left_traj: List[List[float]],  # 末端6d位姿的轨迹，带时间戳
@@ -98,7 +96,7 @@ class ArmAPI:
             self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.ArmOnly)
         if direct_to_wbc:
             self.robot_sdk.control.set_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.DirectToWbc)
-
+        time.sleep(0.15)
         num_points = min(len(left_traj), len(right_traj))
         time_per_point = total_time / (num_points - 1) if num_points > 1 else total_time
         for i in range(num_points):
@@ -121,7 +119,7 @@ class ArmAPI:
             asynchronous: bool = False,  # 布尔值，指定运动命令是否为异步。默认值为 false，表示函数会阻塞
             control_base: bool = False,  # 是否连带base一起控制
             direct_to_wbc: bool = True,  # 指令是否经过全身MPC的优化再到WBC
-            total_time: float = 5.0,  # 轨迹总时间，单位秒
+            total_time: float = 2.0,  # 轨迹总时间，单位秒
             frame: str = KuavoManipulationMpcFrame.WorldFrame
             # 指令位置所在的坐标系： 'base_link'： 在机器人base_link坐标系下； 'foot_print': 'base_link' 在地面的投影; 'world': 世界系
     ):
@@ -246,7 +244,8 @@ class TorsoAPI:
                              kp_yaw=0.5,
                              max_vel_x=0.4,
                              max_vel_yaw=0.6,
-                             timeout=60
+                             timeout=60,
+                             backward_mode=False
                              ):
         """
         躯干行走到某个点，通过速度控制
@@ -349,61 +348,78 @@ class TorsoAPI:
             max_yaw_to_walk = np.deg2rad(10)  # 超过这个值就不走只转
             max_dis_to_rotate = pos_threshold  # 小于这个距离就转到angle_diff_frame
 
-            # 1. if dis too small， then use holonomic fine tune
-
-            if dis_diff < max_dis_to_rotate:
-                vel_yaw = kp_yaw * angle_diff_frame
-                vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)  # 限制转速
-                # print(f"转向target frame朝向，转动速度：{vel_yaw:.2f} rad/s")
-                self.robot_sdk.control.walk(
-                    linear_x=0.0,  # 不前进
-                    linear_y=0.0,  # 不侧移
-                    angular_z=vel_yaw  # 只转动
-                )
-
-            elif dis_diff < (max_dis_to_rotate + 0.1) or (
-                    abs(target_in_base.pos[1]) < 0.1 and abs(angle_diff_frame) < np.deg2rad(10)):
-                # 如果距离小于阈值，使用holonomic控制
+            # 倒退模式：跳过转向，直接根据base坐标系下的位置给速度
+            if backward_mode:
                 x_diff = target_in_base.pos[0]
                 y_diff = target_in_base.pos[1]
                 vel_x = kp_pos * x_diff
                 vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)
                 vel_y = kp_pos * y_diff
                 vel_y = np.clip(vel_y, -max_vel_x, max_vel_x)
-                # print(f'holonomic控制，前进速度：{vel_x:.2f} m/s, 侧移速度：{vel_y:.2f} m/s')
                 self.robot_sdk.control.walk(
-                    linear_x=vel_x,  # 前进
-                    linear_y=vel_y,  # 侧移
-                    angular_z=0.0  # 不转动
+                    linear_x=vel_x,
+                    linear_y=vel_y,
+                    angular_z=0.0
                 )
+                # 检查是否到达
+                if dis_diff < pos_threshold:
+                    return True
 
-            elif abs(angle_diff_line) > max_yaw_to_walk:
-                vel_yaw = kp_yaw * angle_diff_line
-                vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)  # 限制转速
-                # print(f"dis_diff {dis_diff}; 转向连线方向，转动速度：{vel_yaw:.2f} rad/s")
-                self.robot_sdk.control.walk(
-                    linear_x=0.0,  # 不前进
-                    linear_y=0.0,  # 不侧移
-                    angular_z=vel_yaw  # 只转动
-                )
-            elif dis_diff >= max_dis_to_rotate:
-                # 如果连线朝向小于某个值，开始前进
-                # dis_sign = (abs(angle_diff_line) > np.pi)
+            # 1. if dis too small， then use holonomic fine tune
+            else:
+                if dis_diff < max_dis_to_rotate:
+                    vel_yaw = kp_yaw * angle_diff_frame
+                    vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)  # 限制转速
+                    # print(f"转向target frame朝向，转动速度：{vel_yaw:.2f} rad/s")
+                    self.robot_sdk.control.walk(
+                        linear_x=0.0,  # 不前进
+                        linear_y=0.0,  # 不侧移
+                        angular_z=vel_yaw  # 只转动
+                    )
 
-                vel_x = kp_pos * dis_diff
-                vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)  # 限制前进速度
+                elif dis_diff < (max_dis_to_rotate + 0.1) or (
+                        abs(target_in_base.pos[1]) < 0.1 and abs(angle_diff_frame) < np.deg2rad(10)):
+                    # 如果距离小于阈值，使用holonomic控制
+                    x_diff = target_in_base.pos[0]
+                    y_diff = target_in_base.pos[1]
+                    vel_x = kp_pos * x_diff
+                    vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)
+                    vel_y = kp_pos * y_diff
+                    vel_y = np.clip(vel_y, -max_vel_x, max_vel_x)
+                    # print(f'holonomic控制，前进速度：{vel_x:.2f} m/s, 侧移速度：{vel_y:.2f} m/s')
+                    self.robot_sdk.control.walk(
+                        linear_x=vel_x,  # 前进
+                        linear_y=vel_y,  # 侧移
+                        angular_z=0.0  # 不转动
+                    )
 
-                vel_yaw = kp_yaw * angle_diff_line
-                vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)  # 限制转速
-                # print(f"dis_diff {dis_diff}, 前进速度：{vel_x:.2f} m/s, 转动速度：{vel_yaw:.2f} rad/s")
-                self.robot_sdk.control.walk(
-                    linear_x=vel_x,  # 前进
-                    linear_y=0.0,  # 不侧移
-                    angular_z=vel_yaw  # 不转动
-                )
+                elif abs(angle_diff_line) > max_yaw_to_walk:
+                    vel_yaw = kp_yaw * angle_diff_line
+                    vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)  # 限制转速
+                    # print(f"dis_diff {dis_diff}; 转向连线方向，转动速度：{vel_yaw:.2f} rad/s")
+                    self.robot_sdk.control.walk(
+                        linear_x=0.0,  # 不前进
+                        linear_y=0.0,  # 不侧移
+                        angular_z=vel_yaw  # 只转动
+                    )
+                elif dis_diff >= max_dis_to_rotate:
+                    # 如果连线朝向小于某个值，开始前进
+                    # dis_sign = (abs(angle_diff_line) > np.pi)
+
+                    vel_x = kp_pos * dis_diff
+                    vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)  # 限制前进速度
+
+                    vel_yaw = kp_yaw * angle_diff_line
+                    vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)  # 限制转速
+                    # print(f"dis_diff {dis_diff}, 前进速度：{vel_x:.2f} m/s, 转动速度：{vel_yaw:.2f} rad/s")
+                    self.robot_sdk.control.walk(
+                        linear_x=vel_x,  # 前进
+                        linear_y=0.0,  # 不侧移
+                        angular_z=vel_yaw  # 不转动
+                    )
 
             # time.sleep(0.1)  # 控制频率
-            time.sleep(0.05)
+            time.sleep(0.1)
 
             success = self._check_success_walk(
                 target_in_odom, yaw_threshold=np.deg2rad(5), pos_threshold=0.1)
@@ -412,11 +428,12 @@ class TorsoAPI:
                 break
         return None
 
-    def update_walk_goal(self, new_goal: Pose):
+    def update_walk_goal(self, new_goal: Pose, backward_mode=False):
         """线程安全：更新当前目标并唤醒控制线程；返回新的版本号。"""
         print(f'接收到新的行走目标：{new_goal}')
         with self._target_lock:
             self._current_target = new_goal
+            self._backward_mode = backward_mode
 
     def walk_to_pose_by_vel(self,
                             # target: Pose,
@@ -425,17 +442,108 @@ class TorsoAPI:
                             kp_yaw=0.5,
                             max_vel_x=0.5,
                             max_vel_yaw=0.4,
+                            backward_mode=False,
                             asynchronous: bool = True):
         if asynchronous:
             # 多线程，异步
 
-            fut = self._pool.submit(self._walk_to_pose_by_vel, pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw)
+            fut = self._pool.submit(self._walk_to_pose_by_vel, pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, backward_mode=backward_mode)
 
             return fut
 
         else:
-            self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw)
+            self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, backward_mode=backward_mode)
 
+            return None
+
+    def _walk_to_pose_by_world(self,
+                             pos_threshold=0.05,
+                             timeout=60
+                             ):
+        """
+        躯干行走到某个点，通过world坐标控制
+        """
+        # 取目标（如果外部刚更新，这里能立刻看到）
+        is_target_new = True
+
+        tic = time.time()
+
+        while time.time() - tic < timeout:
+            # 0. 获取并处理target
+            with self._target_lock:
+                if self._current_target is not None:
+                    target = copy.deepcopy(self._current_target)
+                    is_target_new = True  # 目标更新了
+
+            with self._target_lock:
+                self._current_target = None  # 取走目标
+
+            if is_target_new:
+                if target.frame not in [Frame.ODOM, Frame.BASE]:
+                    print("使用'cmd_pose_world'位置控制模式时，目标位姿的坐标系必须是'odom' 或'base_link'")
+                    return False
+
+                if Frame.BASE == target.frame:
+                    # 获取当前机器人位置和姿态
+                    robot_pos = self.robot_sdk.state.robot_position()
+                    robot_quat = self.robot_sdk.state.robot_orientation()
+                    robot_pose = Pose(pos=robot_pos, quat=robot_quat, frame=Frame.ODOM)
+
+                    # 创建BASE到ODOM的变换
+                    transform_base_to_odom = Transform3D(
+                        trans_pose=robot_pose,
+                        source_frame=Frame.BASE,
+                        target_frame=Frame.ODOM
+                    )
+
+                    # 将BASE坐标系下的目标转换到ODOM坐标系
+                    target_in_odom = transform_base_to_odom.apply_to_pose(target)
+                else:
+                    target_in_odom = target
+                is_target_new = False  # 只处理一次
+
+            # 发送位置控制指令
+            self.robot_sdk.control.control_command_pose_world(
+                target_pose_x=target_in_odom.pos[0],
+                target_pose_y=target_in_odom.pos[1],
+                target_pose_z=0.0,
+                target_pose_yaw=target_in_odom.get_euler(degrees=False)[2]
+            )
+
+            # 检查是否到达目标位置
+            robot_pos = self.robot_sdk.state.robot_position()
+            robot_quat = self.robot_sdk.state.robot_orientation()
+            robot_pose = Pose(pos=robot_pos, quat=robot_quat, frame=Frame.ODOM)
+
+            # 计算位置和角度差异
+            pos_diff = np.linalg.norm(np.array(robot_pos[:2]) - np.array(target_in_odom.pos[:2]))
+            target_yaw = target_in_odom.get_euler(degrees=False)[2]
+            robot_yaw = robot_pose.get_euler(degrees=False)[2]
+            yaw_diff = abs(normalize_angle(target_yaw - robot_yaw))
+
+            # 到达条件：位置误差小于设定阈值，角度误差小于0.1弧度
+            if pos_diff < pos_threshold and yaw_diff < 0.1:
+                print(f'目标位置已到达: {target_in_odom.pos}, 偏航角已到达: {target_yaw:.2f} rad, diff: {yaw_diff:.2f} rad | {pos_diff}')
+                break
+
+            time.sleep(0.05)  # 控制频率
+
+        return None
+
+    def walk_to_pose_by_world(self,
+                            pos_threshold=0.1,
+                            timeout=60,
+                            asynchronous: bool = True):
+        """
+        躯干行走到某个点，通过world坐标控制
+        """
+        print("cmd_pose_world")
+        if asynchronous:
+            # 多线程，异步
+            fut = self._pool.submit(self._walk_to_pose_by_world, pos_threshold, timeout)
+            return fut
+        else:
+            self._walk_to_pose_by_world(pos_threshold, timeout)
             return None
 
     def stop_walk(self):

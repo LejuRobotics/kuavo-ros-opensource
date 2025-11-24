@@ -275,12 +275,11 @@ namespace humanoid_controller
     {
       imuType_ = 0;
     }
-    actuatedDofNumReal_ = jointNumReal_ + armNumReal_ + headNum_;
+    actuatedDofNumReal_ = jointNumReal_ + armNumReal_ + waistNum_ + headNum_;
     ros::param::set("/armRealDof",  static_cast<int>(armNumReal_));
     ros::param::set("/legRealDof",  static_cast<int>(jointNumReal_));
-    ros::param::set("/headRealDof",  static_cast<int>(headNum_));
     ros::param::set("/waistRealDof",  static_cast<int>(waistNum_));
-    motor_c2t_ = Eigen::Map<Eigen::VectorXd>(motor_info.c2t_coeff_default.data(), motor_info.c2t_coeff_default.size());
+    ros::param::set("/headRealDof",  static_cast<int>(headNum_));
     auto [plant, context] = drake_interface_->getPlantAndContext();
     ros_logger_ = new TopicLogger(controller_nh);
     controllerNh_ = controller_nh;
@@ -445,29 +444,29 @@ namespace humanoid_controller
     waist_kp_.resize(waistNum_);
     waist_kd_.resize(waistNum_);
 
-    jointArmNum_ = info.actuatedDofNum - jointNum_ ;
-    jointTorqueCmdRL_.resize(jointNumReal_ + armNumReal_);
+    jointArmNum_ = info.actuatedDofNum - jointNum_ - waistNum_;
+    jointTorqueCmdRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
     jointTorqueCmdRL_.setZero();
-    initialStateRL_.resize(12 + jointNumReal_ + armNumReal_);
-    defalutJointPosRL_.resize(jointNumReal_ + armNumReal_);
+    initialStateRL_.resize(12 + jointNumReal_ + waistNum_ + armNumReal_);
+    defalutJointPosRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
     defalutArmPosMPC_.resize(armNumReal_);
-    JointControlModeRL_.resize(jointNumReal_ + armNumReal_);
+    JointControlModeRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
     JointControlModeRL_.setZero();
-    JointPDModeRL_.resize(jointNumReal_ + armNumReal_);
+    JointPDModeRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
     JointPDModeRL_.setZero();
-    jointKpRL_.resize(jointNumReal_ + armNumReal_);
-    jointKdRL_.resize(jointNumReal_ + armNumReal_);
-    torqueLimitsRL_.resize(jointNumReal_ + armNumReal_);
-    actionScaleTestRL_.resize(jointNumReal_ + armNumReal_);
-    jointCmdFilterStateRL_.resize(jointNumReal_ + armNumReal_);
+    jointKpRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    jointKdRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    torqueLimitsRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    actionScaleTestRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    jointCmdFilterStateRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
     sensor_data_headRL_.resize_joint(headNum_);
     head_kpRL_.resize(headNum_);
     head_kdRL_.resize(headNum_);
-    output_tauRL_.resize(jointNumReal_ + armNumReal_);
+    output_tauRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
     output_tauRL_.setZero();
-    jointPosRL_ = vector_t::Zero(jointNumReal_ + armNumReal_);
-    jointVelRL_ = vector_t::Zero(jointNumReal_ + armNumReal_);
-    jointAccRL_ = vector_t::Zero(jointNumReal_ + armNumReal_);
+    jointPosRL_ = vector_t::Zero(jointNumReal_ + waistNum_ + armNumReal_);
+    jointVelRL_ = vector_t::Zero(jointNumReal_ + waistNum_ + armNumReal_);
+    jointAccRL_ = vector_t::Zero(jointNumReal_ + waistNum_ + armNumReal_);
     
     // 检查RL参数文件是否存在，只有文件存在时才启用RL功能
     std::ifstream rlParamFileCheck(rlParamFile);
@@ -492,7 +491,7 @@ namespace humanoid_controller
     double arm_joint_pos_filter_cutoff_freq=20,arm_joint_vel_filter_cutoff_freq=20,mrt_joint_vel_filter_cutoff_freq=200;
     auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
     defalutJointPos_.setZero();
-    defalutJointPos_.segment(waistNum_,jointNum_) = drake_interface_->getDefaultJointState();
+    defalutJointPos_.head(jointNum_) = drake_interface_->getDefaultJointState();
     defalutJointPos_.tail(armNum_) = vector_t::Zero(armNum_);
     currentArmTargetTrajectories_ = {{0.0}, {vector_t::Zero(armNumReal_)}, {vector_t::Zero(info.inputDim)}};
 
@@ -562,11 +561,7 @@ namespace humanoid_controller
         }
       }
     }
-    if (waistNum_ > 0)
-    {
-      loadData::loadEigenMatrix(referenceFile, "waist_kp_", waist_kp_);
-      loadData::loadEigenMatrix(referenceFile, "waist_kd_", waist_kd_);
-    }
+
     loadData::loadEigenMatrix(referenceFile, "acc_filter_cutoff_freq", acc_filter_params);
     loadData::loadEigenMatrix(referenceFile, "gyro_filter_cutoff_freq", gyro_filter_params);
     loadData::loadEigenMatrix(referenceFile, "jointStateLimit", joint_state_limit_);
@@ -615,11 +610,11 @@ namespace humanoid_controller
     // create a ROS subscriber to receive the joint pos and vel
     jointPos_ = vector_t::Zero(info.actuatedDofNum);
     jointPos_.setZero();
-    jointPos_.segment(waistNum_, jointNum_) = drake_interface_->getDefaultJointState();
+    jointPos_.head(jointNum_) = drake_interface_->getDefaultJointState();
 
     jointPosWBC_ = vector_t::Zero(armNumReal_ + jointNumReal_ + waistNum_);
     // jointPosWBC_.setZero();
-    jointPosWBC_.segment(waistNum_, jointNum_) = drake_interface_->getDefaultJointState();
+    jointPosWBC_.head(jointNum_) = drake_interface_->getDefaultJointState();
 
     jointVelWBC_ = vector_t::Zero(armNumReal_ + jointNumReal_ + waistNum_);
     jointAccWBC_ = vector_t::Zero(armNumReal_ + jointNumReal_ + waistNum_);
@@ -845,102 +840,104 @@ namespace humanoid_controller
         exit(1);
       }
 
-    singleInputDataRL_.resize(numSingleObsRL_);
-    networkInputDataRL_.resize(numSingleObsRL_ * frameStackRL_);
-    commandPhaseRL_.resize(2);
-    actionsRL_.resize(jointNumReal_ + armNumReal_);
-    singleInputDataRL_.setZero();
-    networkInputDataRL_.setZero();
-    actionsRL_.setZero();
-    humanoidState_.resize(6 + jointArmNum_); // base + arm, for kmpc
-    for (int i = 0; i < frameStackRL_; i++)
-    {
-      input_deque.push_back(singleInputDataRL_);
-    }
-    if (rl_available_)
-    {  
-      compiled_model_ =
-          core_.compile_model(networkModelPath_, "CPU"); // 创建编译模型
-      std::string package_path = ros::package::getPath("kuavo_assets");
-      std::string version_str = "biped_s" + rb_version.to_string();
-      std::string urdf_path = package_path + "/models/" + version_str + "/urdf/" + version_str + ".urdf";
-      arm_torque_controller_.reset(new ArmTorqueController(urdf_path, jointKpRL_.segment(jointNumReal_, armNumReal_), jointKdRL_.segment(jointNumReal_, armNumReal_))); // 使用智能指针初始化，只传入手臂关节参数
-    }
     
-    desire_arm_q_ = defalutJointPosRL_.segment(jointNumReal_, armNumReal_);
-    desire_arm_v_ = Eigen::VectorXd::Zero(armNumReal_);
-    // 初始化手臂插值相关变量
-    initArmInterpolation();
-    // 初始化速度平滑系统
-    initializeVelocitySmoothing();
-
-    // 初始化原地踏步系统
-    in_place_step_velocity_.linear.x = 0.0;
-    in_place_step_velocity_.linear.y = 0.0;
-    in_place_step_velocity_.linear.z = 0.0;
-    in_place_step_velocity_.angular.x = 0.0;
-    in_place_step_velocity_.angular.y = 0.0;
-    in_place_step_velocity_.angular.z = 0.0;
-
-    // 从参数服务器读取原地踏步参数
-    if (controllerNh_.hasParam("in_place_step_duration"))
-    {
-      controllerNh_.getParam("in_place_step_duration", in_place_step_duration_);
-      ROS_INFO_STREAM("[InPlaceStepping] 原地踏步持续时间: " << in_place_step_duration_ << "秒");
-    }
-      
-    if (controllerNh_.hasParam("enable_in_place_stepping"))
-    {
-      controllerNh_.getParam("enable_in_place_stepping", enable_in_place_stepping_);
-      ROS_INFO_STREAM("[InPlaceStepping] 原地踏步功能: " << (enable_in_place_stepping_ ? "启用" : "禁用"));
-    }
-      
-    if (controllerNh_.hasParam("stance_transition_duration"))
-    {
-      controllerNh_.getParam("stance_transition_duration", stance_transition_duration_);
-      ROS_INFO_STREAM("[StanceTransition] 站立过渡持续时间: " << stance_transition_duration_ << "秒");
-    }
-
-
-    // 初始化LB解锁保护系统
-    lb_just_unlocked_ = false;
-    lb_unlock_time_ = ros::Time::now();
-    ROS_INFO_STREAM("[LBProtection] LB解锁保护时间: " << lb_unlock_protection_duration_ << "秒");
-
-    auto jointStateCallback = [this](const sensor_msgs::JointState::ConstPtr& msg)
-    {
-      if( is_rl_controller_ == true)
+      singleInputDataRL_.resize(numSingleObsRL_);
+      networkInputDataRL_.resize(numSingleObsRL_ * frameStackRL_);
+      commandPhaseRL_.resize(2);
+      actionsRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+      singleInputDataRL_.setZero();
+      networkInputDataRL_.setZero();
+      actionsRL_.setZero();
+      humanoidState_.resize(6 + jointArmNum_); // base + arm, for kmpc
+      for (int i = 0; i < frameStackRL_; i++)
       {
-        // std::cout << "jointStateCallback" << std::endl;
-        for (size_t i = 0; i < msg->name.size(); ++i)
-        {
-          // std::cout << "joint name: " << msg->name[i] << " joint position: " << msg->position[i] << std::endl;
-          desire_arm_q_(i) = msg->position[i] * M_PI / 180.0;
-          if(msg->velocity.size() == armNumReal_)
-            desire_arm_v_(i) = 0;
-            // desire_arm_v_(i) = msg->velocity[i] * M_PI / 180.0;
-        }
-      } 
-    };
-    joint_sub_ = controllerNh_.subscribe<sensor_msgs::JointState>("/kuavo_arm_traj", 10, jointStateCallback); // 初始化订阅者
-
-    // 设置CPU内核隔离
-    if (is_real_)
-    {
-      if (!setupCpuIsolation())
-      {
-        // 提示用户配置CPU内核隔离
-        std::cerr << "\033[1;31m"
-                  << "==============================\n"
-                  << "  错误：未检测到 CPU 内核隔离！\n"
-                  << "  请先配置 CPU 内核隔离且配置内核隔离参数 isolated_cpus\n"
-                  << "  建议使用脚本 isolate_cores.sh 进行设置。\n"
-                  << "  示例：sudo bash ./tools/check_tool/isolate_cores.sh\n"
-                  << "=============================="
-                  << "\033[0m" << std::endl;
-        exit(1);
+        input_deque.push_back(singleInputDataRL_);
       }
-    }
+      if (rl_available_)
+      {  
+        compiled_model_ =
+            core_.compile_model(networkModelPath_, "CPU"); // 创建编译模型
+        std::string package_path = ros::package::getPath("kuavo_assets");
+        std::string version_str = "biped_s" + rb_version.to_string();
+        std::string urdf_path = package_path + "/models/" + version_str + "/urdf/" + version_str + ".urdf";
+        arm_torque_controller_.reset(new ArmTorqueController(urdf_path, jointKpRL_.segment(jointNumReal_ + waistNum_, armNumReal_), jointKdRL_.segment(jointNumReal_ + waistNum_, armNumReal_))); // 使用智能指针初始化，只传入手臂关节参数
+      }
+      
+      desire_arm_q_ = defalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
+      desire_arm_v_ = Eigen::VectorXd::Zero(armNumReal_);
+      // 初始化手臂插值相关变量
+      initArmInterpolation();
+      // 初始化速度平滑系统
+      initializeVelocitySmoothing();
+  
+      // 初始化原地踏步系统
+      in_place_step_velocity_.linear.x = 0.0;
+      in_place_step_velocity_.linear.y = 0.0;
+      in_place_step_velocity_.linear.z = 0.0;
+      in_place_step_velocity_.angular.x = 0.0;
+      in_place_step_velocity_.angular.y = 0.0;
+      in_place_step_velocity_.angular.z = 0.0;
+  
+      // 从参数服务器读取原地踏步参数
+      if (controllerNh_.hasParam("in_place_step_duration"))
+      {
+        controllerNh_.getParam("in_place_step_duration", in_place_step_duration_);
+        ROS_INFO_STREAM("[InPlaceStepping] 原地踏步持续时间: " << in_place_step_duration_ << "秒");
+      }
+        
+      if (controllerNh_.hasParam("enable_in_place_stepping"))
+      {
+        controllerNh_.getParam("enable_in_place_stepping", enable_in_place_stepping_);
+        ROS_INFO_STREAM("[InPlaceStepping] 原地踏步功能: " << (enable_in_place_stepping_ ? "启用" : "禁用"));
+      }
+        
+      if (controllerNh_.hasParam("stance_transition_duration"))
+      {
+        controllerNh_.getParam("stance_transition_duration", stance_transition_duration_);
+        ROS_INFO_STREAM("[StanceTransition] 站立过渡持续时间: " << stance_transition_duration_ << "秒");
+      }
+  
+  
+      // 初始化LB解锁保护系统
+      lb_just_unlocked_ = false;
+      lb_unlock_time_ = ros::Time::now();
+      ROS_INFO_STREAM("[LBProtection] LB解锁保护时间: " << lb_unlock_protection_duration_ << "秒");
+  
+      auto jointStateCallback = [this](const sensor_msgs::JointState::ConstPtr& msg)
+      {
+        if( is_rl_controller_ == true)
+        {
+          // std::cout << "jointStateCallback" << std::endl;
+          for (size_t i = 0; i < msg->name.size(); ++i)
+          {
+            // std::cout << "joint name: " << msg->name[i] << " joint position: " << msg->position[i] << std::endl;
+            desire_arm_q_(i) = msg->position[i] * M_PI / 180.0;
+            if(msg->velocity.size() == armNumReal_)
+              desire_arm_v_(i) = 0;
+              // desire_arm_v_(i) = msg->velocity[i] * M_PI / 180.0;
+          }
+        } 
+      };
+      joint_sub_ = controllerNh_.subscribe<sensor_msgs::JointState>("/kuavo_arm_traj", 10, jointStateCallback); // 初始化订阅者
+  
+      // 设置CPU内核隔离
+      if (is_real_)
+      {
+        if (!setupCpuIsolation())
+        {
+          // 提示用户配置CPU内核隔离
+          std::cerr << "\033[1;31m"
+                    << "==============================\n"
+                    << "  错误：未检测到 CPU 内核隔离！\n"
+                    << "  请先配置 CPU 内核隔离且配置内核隔离参数 isolated_cpus\n"
+                    << "  建议使用脚本 isolate_cores.sh 进行设置。\n"
+                    << "  示例：sudo bash ./tools/check_tool/isolate_cores.sh\n"
+                    << "=============================="
+                    << "\033[0m" << std::endl;
+          exit(1);
+        }
+      }
+    
     return true;
   }
 
@@ -951,7 +948,7 @@ namespace humanoid_controller
     int num_ = 0;
     std::string networkModelFile_;
     Eigen::Vector3d accFilterCutoffFreqRL_, freeAccFilterCutoffFreqRL_, gyroFilterCutoffFreqRL_;
-    Eigen::VectorXd defaultBaseStateRL_(12), jointCmdFilterCutoffFreqRL_(jointNumReal_ + armNumReal_);
+    Eigen::VectorXd defaultBaseStateRL_(12), jointCmdFilterCutoffFreqRL_(jointNumReal_ + armNumReal_ + waistNum_);
     CommandDataRL commandDataRL_;
     boost::property_tree::ptree pt;
     boost::property_tree::read_info(rlParamFile, pt);
@@ -1094,9 +1091,9 @@ namespace humanoid_controller
           if (msg->joint_data[0] < head_joint_limits_[0].first || msg->joint_data[0] > head_joint_limits_[0].second 
             || msg->joint_data[1] < head_joint_limits_[1].first || msg->joint_data[1] > head_joint_limits_[1].second)
           {
-              std::cout << "\033[1;31m[headCmdCallback] Invalid robot head motion data. Head joints must be in the range [" 
-                << head_joint_limits_[0].first << ", " << head_joint_limits_[0].second << "] and [" 
-                << head_joint_limits_[1].first << ", " << head_joint_limits_[1].second << "].\033[0m" << std::endl;
+              // std::cout << "\033[1;31m[headCmdCallback] Invalid robot head motion data. Head joints must be in the range [" 
+              //   << head_joint_limits_[0].first << ", " << head_joint_limits_[0].second << "] and [" 
+              //   << head_joint_limits_[1].first << ", " << head_joint_limits_[1].second << "].\033[0m" << std::endl;
               return;
           }
           head_mtx.lock();
@@ -1512,7 +1509,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       use_mm_arm_joint_trajectory_ = req.control_mode;
       
       {
-        mm_arm_joint_trajectory_.pos = currentObservationWBC_.state.segment(12 + jointNumReal_, armNumReal_);
+        mm_arm_joint_trajectory_.pos = currentObservationWBC_.state.segment(12 + jointNumReal_+ waistNum_, armNumReal_);
         mm_arm_joint_trajectory_.vel = vector_t::Zero(armNumReal_);
       }
 
@@ -1531,7 +1528,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     if (req.control_mode)
     {
       // arm_joint_trajectory_.pos = currentObservationWBC_.state.segment(12 + jointNumReal_, armNumReal_);
-      mm_arm_joint_trajectory_.pos = currentObservationWBC_.state.segment(12 + jointNumReal_, armNumReal_);
+      mm_arm_joint_trajectory_.pos = currentObservationWBC_.state.segment(12 + jointNumReal_+ waistNum_, armNumReal_);
       res.result = true;
       res.message = "Successfully synchronize arm joint trajectory";
     }
@@ -1612,7 +1609,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
       for (int i = 0; i < 2; i++)
       {
-        optimizedState2WBC_mrt_.segment(12 + jointNum_ + i * armDofReal_, armDofMPC_) = optimizedState2WBC_mrt_.segment(12 + jointNum_ + i * armDofMPC_, armDofMPC_);
+        optimizedState2WBC_mrt_.segment(12 + jointNum_ + waistNum_ + i * armDofReal_, armDofMPC_) = optimizedState2WBC_mrt_.segment(12 + jointNum_ + waistNum_ + i * armDofMPC_, armDofMPC_);
       }
     }
     currentObservationWBC_ = currentObservation_;
@@ -1747,7 +1744,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     }
     for (int i1 = 0; i1 < waistNum_; ++i1)
     {
-
       jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + jointNumReal_ + i1));
       jointCmdMsg.joint_v.push_back(0);
       jointCmdMsg.tau.push_back(torque(jointNumReal_+i1));
@@ -1757,46 +1753,16 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNumReal_+i1]);
       jointCmdMsg.control_modes.push_back(2);
     }
-    // // 补充腰部维度
-    // std::cout << "waistNum_: " << waistNum_ << std::endl;
-    // if (waistNum_ > 0)
-    // {
-    //   vector_t get_waist_pos = vector_t::Zero(waistNum_);
-    //   get_waist_pos = desire_waist_pos_;
-    //   auto &hardware_settings = kuavo_settings_.hardware_settings;
-    //   vector_t waist_feedback_tau = vector_t::Zero(waistNum_);
-    //   vector_t waist_feedback_vel = vector_t::Zero(waistNum_);
-    //   if (!is_real_) // 实物不需要腰部反馈力
-    //     waist_feedback_tau = waist_kp_.cwiseProduct(get_waist_pos - sensor_data_waist_.jointPos_) + waist_kd_.cwiseProduct(-sensor_data_waist_.jointVel_);
-    //   for (int i3 = 0; i3 < waistNum_; ++i3)
-    //   {
-    //     auto cur_waist_pos = sensor_data_waist_.jointPos_ * TO_DEGREE;
-    //     auto vel = (get_waist_pos[i3] - sensor_data_waist_.jointPos_[i3]) * TO_DEGREE / dt_ * ruiwo_motor_velocities_factor_;
-    //     double waist_limit_vel = hardware_settings.joint_velocity_limits[i3];
-
-    //     vel = std::clamp(vel, -waist_limit_vel, waist_limit_vel) * TO_RADIAN;
-    //     jointCmdMsg.joint_q[i3] = get_waist_pos(i3);
-    //     jointCmdMsg.joint_v[i3] = 0;
-    //     jointCmdMsg.tau[i3] = waist_feedback_tau(i3);
-    //     jointCmdMsg.tau_ratio[i3] = 1;
-    //     jointCmdMsg.tau_max[i3] = 10;
-    //     jointCmdMsg.control_modes[i3] = 2;
-    //   }
-    //   std::cout << "update waist joint cmd" << std::endl;
-    // }
-
     for (int i2 = 0; i2 < armNumReal_; ++i2)
     {
-
-      jointCmdMsg.joint_q.push_back(output_pos_(jointNumReal_ + waistNum_ + i2));
-      jointCmdMsg.joint_v.push_back(output_vel_(jointNumReal_ + waistNum_ + i2));
-      jointCmdMsg.tau.push_back(output_tau_(jointNumReal_ + waistNum_ + i2));
+      jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + jointNumReal_ + waistNum_ + i2));
+      jointCmdMsg.joint_v.push_back(0);
+      jointCmdMsg.tau.push_back(torque(jointNumReal_+waistNum_+i2));
       jointCmdMsg.tau_ratio.push_back(1);
-      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNumReal_ + waistNum_+i2]);
-      jointCmdMsg.control_modes.push_back(joint_control_modes_[jointNumReal_ + waistNum_+i2]);
+      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNumReal_+waistNum_+i2]);
+      jointCmdMsg.control_modes.push_back(joint_control_modes_[jointNumReal_+waistNum_+i2]);
       jointCmdMsg.joint_kp.push_back(0);
       jointCmdMsg.joint_kd.push_back(0);
-
     }
     for (int i3 = 0; i3 < headNum_; ++i3)
     {
@@ -1806,8 +1772,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       jointCmdMsg.tau_ratio.push_back(1);
       jointCmdMsg.tau_max.push_back(10);
       jointCmdMsg.control_modes.push_back(2);
-      jointCmdMsg.joint_kp.push_back(0);
-      jointCmdMsg.joint_kd.push_back(0);
+      jointCmdMsg.joint_kp.push_back(10);
+      jointCmdMsg.joint_kd.push_back(2);
     }
     // 发布控制命令
     publishControlCommands(jointCmdMsg);
@@ -2455,9 +2421,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
 
       
-      // std::cout << "jointNum_:  " << jointNum_+armNum_ << "\n\n";
-  
-      for (int i1 = 0; i1 < jointNumReal_; ++i1)
+      for (int i1 = 0; i1 < jointNumReal_+ waistNum_; ++i1)
       {
         jointCmdMsg.joint_q.push_back(output_pos_(i1));
         jointCmdMsg.joint_v.push_back(output_vel_(i1));
@@ -2470,19 +2434,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
         // jointCurrentWBC_(i1) = output_tau_(i1);
       }
-
-      for (int i1 = 0; i1 < waistNum_; ++i1)
-      {
-        jointCmdMsg.joint_q.push_back(output_pos_(jointNum_+i1));
-        jointCmdMsg.joint_v.push_back(output_vel_(jointNum_+i1));
-        jointCmdMsg.tau.push_back(output_tau_(jointNum_+i1));
-        jointCmdMsg.tau_ratio.push_back(1);
-        jointCmdMsg.joint_kp.push_back(joint_kp_[jointNum_+i1]);
-        jointCmdMsg.joint_kd.push_back(joint_kd_[jointNum_+i1]);
-        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNum_+i1]);
-        jointCmdMsg.control_modes.push_back(joint_control_modes_[jointNum_+i1]);
-      }
-      
       ModeSchedule current_mode_schedule;
       if (resetting_mpc_state_ != ResettingMpcState::RESET_INITIAL_POLICY)
       {
@@ -2668,9 +2619,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       optimizedInput_mrt_ = intail_input_;
       // optimized_mode_ = plannedMode_;
       auto current_jointPos = measuredRbdStateRL_.segment(6, info.actuatedDofNum);
-      auto current_jointVel = measuredRbdStateRL_.segment(12 + jointNumReal_ + armNumReal_, info.actuatedDofNum);
+      auto current_jointVel = measuredRbdStateRL_.segment(12 + jointNumReal_ + armNumReal_ + waistNum_, info.actuatedDofNum);
        
-      Eigen::VectorXd actuation(jointNumReal_ + armNumReal_);
+      Eigen::VectorXd actuation(jointNumReal_ + armNumReal_ + waistNum_);
       actuation.setZero();
       
       // 获取当前RL命令数据并更新CommandDataRL_
@@ -2683,7 +2634,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       
       if (!is_real_)
       {
-        for (int i1 = 0; i1 < jointNumReal_ + armNumReal_; ++i1)
+        for (int i1 = 0; i1 < jointNumReal_ + armNumReal_+ waistNum_; ++i1)
         {
           jointCmdMsg.joint_q.push_back(0.0);
           jointCmdMsg.joint_v.push_back(0.0);
@@ -2698,7 +2649,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       }
       else
       {
-        for (int i1 = 0; i1 < jointNumReal_ + armNumReal_; ++i1)
+        for (int i1 = 0; i1 < jointNumReal_ + armNumReal_ + waistNum_; ++i1)
         {
           if (JointControlModeRL_(i1) == 0)
           {
@@ -3149,8 +3100,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     vector_t defaultJointState(pinocchioInterfaceWBCPtr_->getModel().nq);
     defaultJointState.setZero();
     auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
-    defaultJointState.head(6) = drake_interface_->getInitialState().segment(6, 6);
-    defaultJointState.segment(6 + waistNum_, jointNum_) = drake_interface_->getInitialState().tail(jointNum_);
+    defaultJointState.head(6 + jointNum_) = drake_interface_->getInitialState().head(6 + jointNum_);
 
     // CentroidalModelInfo
     centroidalModelInfoWBC_ = centroidal_model::createCentroidalModelInfo(

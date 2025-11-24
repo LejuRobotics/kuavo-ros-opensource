@@ -523,6 +523,24 @@ Bases: `object`
 * **Return type:**
   [KuavoJointData](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoJointData)
 
+#### waist_joint_state(waist_dof:int) → [KuavoJointData](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoJointData)
+
+输入：waist_dof，腰部关节数目。
+
+获取机器人腰部关节的当前状态。
+
+获取机器人腰部关节的当前状态数据，包括位置、速度、扭矩和加速度值。
+
+* **Returns:**
+  包含腰部关节状态的数据结构:
+  : * position (list[float]): 关节位置，单位为弧度，长度=waist_dof
+    * velocity (list[float]): 关节速度，单位为rad/s，长度=waist_dof
+    * torque (list[float]): 关节扭矩，单位为Nm，长度=waist_dof
+    * acceleration (list[float]): 关节加速度，单位为rad/s^2，长度=waist_dof
+
+* **Return type:**
+  [KuavoJointData](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoJointData)
+
 #### *property* imu_data *: [KuavoImuData](data_types.md#kuavo_humanoid_sdk.interfaces.data_types.KuavoImuData)*
 
 获取 Kuavo 机器人IMU数据。

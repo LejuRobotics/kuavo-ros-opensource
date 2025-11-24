@@ -112,7 +112,7 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
   }
   
   // Apply velocity smoothing
-  //ros::Time current_time = ros::Time::now();
+  ros::Time current_time = ros::Time::now();
   geometry_msgs::Twist smoothed_vel = *msg;//smoothVelocityCommand(*msg, current_time);
   
   std::lock_guard<std::mutex> lock(command_mutex_);

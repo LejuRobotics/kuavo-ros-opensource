@@ -252,7 +252,7 @@ private:
     int32_t na_foot_;
     int32_t nq_;
     int32_t nv_;
-        std::vector<std::string> end_frames_name_;
+    std::vector<std::string> end_frames_name_;
     std::unique_ptr<KalmanEstimate> filter;
     bool Uncalibration_IMU = true;
 
@@ -263,7 +263,7 @@ private:
     bool is_cali_{false};
     double ruiwo_motor_velocity_factor_{0.005};
     std::vector<std::string> ruiwo_2_joint_name_;
-     std::map<std::string, std::vector<double>> ruiwo_velocity_limit_map_;
+    std::map<std::string, std::vector<double>> ruiwo_velocity_limit_map_;
 
 
     RobotState_t state_est_, prev_state_est_;

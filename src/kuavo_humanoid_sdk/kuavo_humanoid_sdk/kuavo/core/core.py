@@ -426,6 +426,9 @@ class KuavoRobotCore:
         pitch_deg = pitch * 180 / math.pi
         return self._control.control_robot_head(yaw_deg, pitch_deg)
     
+    def control_robot_waist(self, target_pos:list):
+        return self._control.control_robot_waist(target_pos)
+    
     def enable_head_tracking(self, target_id: int)->bool:
         return self._control.enable_head_tracking(target_id)
     

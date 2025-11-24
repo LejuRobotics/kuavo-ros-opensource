@@ -7,13 +7,13 @@
   <link name="base_link">
     <inertial>
       <origin xyz="-0.00602072 -0.0005008 0.14657555" rpy="0 0 0" />
-      <mass value="8.620576" />
+      <mass value="4.787076" />
       <inertia ixx="0.08597904" ixy="0" ixz="0" iyy="0.06733076" iyz="0" izz="0.0420581" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s14/meshes/torso.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s14/meshes/waist.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -34,7 +34,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s14/meshes/waist.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s14/meshes/torso.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />

@@ -160,12 +160,6 @@ rostopic echo /h12pro_channel
 |---------|---------|---------|
 | initial | C_LONG_PRESS + D_LONG_PRESS | 任意 |
 
-#### RL_control (使用 RL 步态) 状态转换
-
-| 目标状态 | 按键组合 | 开关位置 |
-|---------|---------|---------|
-| stance | C_PRESS | E_MIDDLE + F_MIDDLE |
-
 #### Stance 状态转换
 
 | 目标状态 | 按键组合 | 开关位置 |

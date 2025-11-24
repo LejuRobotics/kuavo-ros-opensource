@@ -307,6 +307,22 @@ class KuavoRobotStateCore:
             acceleration = copy.deepcopy(msg.joint_data.joint_current if hasattr(msg.joint_data, 'joint_current') else msg.joint_data.joint_torque)
         )
 
+    def _sensors_data_raw_shm_callback(self, msg)->None:
+        # update imu data
+        self._imu_data_shm = KuavoImuData(
+            gyro = (msg.imu_data.gyro.x, msg.imu_data.gyro.y, msg.imu_data.gyro.z),
+            acc = (msg.imu_data.acc.x, msg.imu_data.acc.y, msg.imu_data.acc.z),
+            free_acc = (msg.imu_data.free_acc.x, msg.imu_data.free_acc.y, msg.imu_data.free_acc.z),
+            quat = (msg.imu_data.quat.x, msg.imu_data.quat.y, msg.imu_data.quat.z, msg.imu_data.quat.w)
+        )
+        # update joint data
+        self._joint_data = KuavoJointData(
+            position = copy.deepcopy(msg.joint_data.joint_q),
+            velocity = copy.deepcopy(msg.joint_data.joint_v),
+            torque = copy.deepcopy(msg.joint_data.joint_vd),
+            acceleration = copy.deepcopy(msg.joint_data.joint_current if hasattr(msg.joint_data, 'joint_current') else msg.joint_data.joint_torque)
+        )
+
     def _odom_callback(self, msg)->None:
         # update odom data
         self._odom_data = KuavoOdometry(
