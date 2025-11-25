@@ -37,7 +37,7 @@ class AudioStreamPlayerNode:
     DEFAULT_SAMPLE_RATE = 16000      # 默认接收到音频流采样率
     DEFAULT_CHANNELS = 1             # 默认声道数
     CHUNK_SIZE = 8192               # 音频块大小
-    BUFFER_MAX_SIZE = 50            # 缓冲区最大块数（音频播放缓冲区的大小）
+    BUFFER_MAX_SIZE = 500            # 缓冲区最大块数（音频播放缓冲区的大小）
     SAMPLE_WIDTH_BYTES = 2          # 16-bit，即2字节
     
     # 音频数据处理常量
