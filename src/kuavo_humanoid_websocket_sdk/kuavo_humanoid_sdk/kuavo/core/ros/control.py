@@ -375,6 +375,49 @@ class ControlRobotArmWebsocket:
             SDKLogger.error(f"Service call failed: {e}")
         return None
 
+""" Control Robot Waist """
+
+class ControlRobotWaistWebsocket:
+    def __init__(self):
+        # 创建 WebSocket 客户端
+        websocket = WebSocketKuavoSDK()
+
+        # Publisher：发布到 /robot_waist_motion_data，消息类型 std_msgs/Float64MultiArray
+        self._pub_ctrl_robot_waist = roslibpy.Topic(
+            websocket.client,
+            '/robot_waist_motion_data',
+            'std_msgs/Float64MultiArray'
+        )
+        self._pub_ctrl_robot_waist.advertise()
+
+    def connect(self, timeout: float = 1.0) -> bool:
+        return True
+
+    def pub_control_robot_waist(self, waistPos: list) -> bool:
+        """
+        发布腰部位置控制命令 (WebSocket)
+        参数:
+            waistPos: 长度为 1 的数组，例如 [30.0]
+        """
+        # 检查输入维度
+        if len(waistPos) != 1:
+            SDKLogger.error("Waist data must be 1-dimensional")
+            return False
+
+        try:
+            # roslibpy 方式构建消息
+            msg = {
+                "data": [float(waistPos[0])]
+            }
+
+            # 发布
+            self._pub_ctrl_robot_waist.publish(roslibpy.Message(msg))
+            return True
+
+        except Exception as e:
+            SDKLogger.error(f"Publish waist pos failed: {e}")
+            return False
+
 
 """ Control Robot Head """
 class ControlRobotHeadWebsocket:
@@ -692,6 +735,7 @@ class KuavoRobotControlWebsocket:
                 self.kuavo_arm_control = ControlRobotArmWebsocket()
                 self.kuavo_motion_control = ControlRobotMotionWebsocket()
                 self.kuavo_arm_ik_fk = KuavoRobotArmIKFKWebsocket()
+                self.kuavo_waist_control = ControlRobotWaistWebsocket()
             except Exception as e:
                 SDKLogger.error(f"Failed to initialize KuavoRobotControlWebsocket: {e}")
                 raise
@@ -798,6 +842,15 @@ class KuavoRobotControlWebsocket:
         if len(postions) != 2 or len(velocities) != 2 or len(torques) != 2:
                 raise ValueError("Position, velocity, and torque lists must have a length of 2.")
         return self.kuavo_eef_control.srv_control_leju_claw(postions, velocities, torques)
+    
+    def control_robot_waist(self, yaw: float) -> bool:
+        """
+            Control robot waist
+            Arguments:
+                - yaw:   waist yaw angle, radian
+        """
+        SDKLogger.debug(f"Control robot waist: {yaw}")
+        return self.kuavo_waist_control.pub_control_robot_waist(yaw)
 
     def control_robot_head(self, yaw:float, pitch:float)->bool:
         """

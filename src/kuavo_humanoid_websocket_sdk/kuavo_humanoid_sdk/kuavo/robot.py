@@ -10,6 +10,7 @@ from typing import Tuple
 from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
 from kuavo_humanoid_sdk.kuavo.robot_arm import KuavoRobotArm 
 from kuavo_humanoid_sdk.kuavo.robot_head import KuavoRobotHead
+from kuavo_humanoid_sdk.kuavo.robot_waist import KuavoRobotWaist
 from kuavo_humanoid_sdk.common.websocket_kuavo_sdk import WebSocketKuavoSDK
 from kuavo_humanoid_sdk.common.launch_robot_tool import LaunchRobotTool
 
@@ -178,6 +179,7 @@ class KuavoRobot(RobotBase):
         self._robot_info = KuavoRobotInfo()
         self._robot_arm  = KuavoRobotArm()
         self._robot_head = KuavoRobotHead()
+        self._robot_waist = KuavoRobotWaist()
         self._kuavo_core = KuavoRobotCore()
     def stance(self)->bool:
         """Put the robot into 'stance' mode.
@@ -356,6 +358,19 @@ class KuavoRobot(RobotBase):
         """Disable the head tracking.
         """
         return self._robot_head.disable_head_tracking()
+    
+    def control_waist(self, yaw: float) -> bool:
+        """Control the waist of the robot.
+
+        Args:
+            yaw (float): The yaw angle of the waist in **degrees**.
+                        Recommended range [-180, 180] degrees.
+                        Values outside this range will be automatically limited.
+
+        Returns:
+            bool: True if the waist is controlled successfully, False otherwise.
+        """
+        return self._robot_waist.control_waist(yaw=yaw)
     
     """ Robot Arm Control """
     def arm_reset(self)->bool:

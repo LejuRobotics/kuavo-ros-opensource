@@ -29,6 +29,7 @@ class MusicPlayerNode:
     # 音量控制
     DEFAULT_VOLUME = 100  # 默认音量（不进行音量调整）
 
+    
     # FFmpeg参数
     FFMPEG_FORMAT = 'wav'
     FFMPEG_CODEC = 'pcm_s16le'
@@ -186,7 +187,6 @@ class MusicPlayerNode:
                 '-acodec', self.FFMPEG_CODEC,
                 '-ar', str(self.DEFAULT_SAMPLE_RATE),
                 '-ac', str(self.DEFAULT_CHANNELS),
-                '-af', f'volume={volume}dB',
                 '-y', temp_wav
             ]
 
