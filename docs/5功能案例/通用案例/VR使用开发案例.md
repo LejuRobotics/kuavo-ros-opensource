@@ -140,6 +140,8 @@
    # 启动C++版本的ik
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true
 
+   # 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true use_incremental_ik:=true
   ```
 
   > 如果手动输入VR的IP地址, 在启动命令后追加参数 `ip_address:=192.168.3.32`(替换成VR的实际IP地址)

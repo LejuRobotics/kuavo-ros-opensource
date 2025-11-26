@@ -146,7 +146,7 @@ class ArmControlBaseROS {
     return success;
   }
 
-  void handleEndEffectorControlData();
+  void publishEndEffectorControlData();
   void publishHandPositionData();
   void publishClawCommandData();
 

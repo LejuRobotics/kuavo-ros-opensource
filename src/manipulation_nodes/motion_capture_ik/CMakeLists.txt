@@ -135,6 +135,27 @@ target_link_libraries(topic_logger
 )
 target_compile_options(topic_logger PRIVATE ${FLAGS})
 
+# incremental_ik_ros_uni_node
+add_executable(incremental_ik_ros_uni_node 
+  src/incremental_ik_ros_uni_node.cpp 
+  src/ArmControlBaseROS.cpp
+  src/Quest3IkIncrementalROS.cpp 
+  src/IncrementalControlModule.cpp
+  src/KeyFramesVisualizer.cpp
+  src/BaseIncrementalIKSolver.cpp
+  src/TwoStageIncrementalIK.cpp
+  src/Quest3ArmInfoTransformer.cpp
+  src/ArmLengthMeasurement.cpp
+  src/JoyStickHandler.cpp
+  src/Quest3Debugger.cpp
+)
+add_dependencies(incremental_ik_ros_uni_node ${PROJECT_NAME}_generate_messages_cpp)
+target_include_directories(incremental_ik_ros_uni_node PRIVATE
+  ${PROJECT_BINARY_DIR}/include
+)
+target_link_libraries(incremental_ik_ros_uni_node ${catkin_LIBRARIES} drake::drake)
+
+
 # ik_ros_uni_cpp_node
 add_executable(ik_ros_uni_cpp_node 
   src/ik_ros_uni_cpp_node.cpp 
@@ -153,24 +174,3 @@ target_include_directories(ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
 )
 target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
-
-# main_node with factory pattern
-add_executable(main_node 
-  src/main_node.cpp 
-  src/ArmControlBaseROS.cpp
-  src/Quest3IkROS.cpp
-  src/Quest3HandEE_ROS.cpp
-  src/VRControlFactory.cpp
-  src/KeyFramesVisualizer.cpp
-  src/BaseIKSolver.cpp
-  src/TwoStageTorsoIKRec.cpp
-  src/Quest3ArmInfoTransformer.cpp
-  src/ArmLengthMeasurement.cpp
-  src/JoyStickHandler.cpp
-  src/Quest3Debugger.cpp
-)
-add_dependencies(main_node ${PROJECT_NAME}_generate_messages_cpp)
-target_include_directories(main_node PRIVATE
-  ${PROJECT_BINARY_DIR}/include
-)
-target_link_libraries(main_node ${catkin_LIBRARIES} drake::drake)

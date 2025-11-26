@@ -1,0 +1,66 @@
+<launch>
+    <!-- 增量式IK节点的独立launch文件 -->
+    <!-- 参数定义 -->
+    <arg name="ctrl_arm_idx" />
+    <arg name="control_torso" />
+    <arg name="ee_type" />
+    <arg name="fhan_r" />
+    <arg name="fhan_kh0" />
+    <arg name="fhan_r_joint" />
+    <arg name="fhan_kh0_joint" />
+    <arg name="max_joint_velocity" />
+    <arg name="delta_scale_x" />
+    <arg name="delta_scale_y" />
+    <arg name="delta_scale_z" />
+    <arg name="max_pos_diff" />
+    <arg name="arm_move_threshold" />
+    <arg name="left_hand_quat_offset_roll" />
+    <arg name="left_hand_quat_offset_pitch" />
+    <arg name="left_hand_quat_offset_yaw" />
+    <arg name="right_hand_quat_offset_roll" />
+    <arg name="right_hand_quat_offset_pitch" />
+    <arg name="right_hand_quat_offset_yaw" />
+    <arg name="sphere_radius_limit" />
+    <arg name="min_reachable_distance" />
+    <arg name="box_min_bound" />
+    <arg name="box_max_bound" />
+    <arg name="chest_offset_y_ax" />
+    <arg name="left_center" />
+    <arg name="right_center" />
+    <arg name="default_left_hand_pos_on_exit" />
+    <arg name="default_right_hand_pos_on_exit" />
+
+    <!-- C++ 增量式IK节点 -->
+    <node name="incremental_ik_ros_uni_node" pkg="motion_capture_ik" type="incremental_ik_ros_uni_node" output="screen">
+        <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
+        <param name="control_torso" value="$(arg control_torso)" />
+        <param name="/end_effector_type" value="$(arg ee_type)"/>
+        <remap from="/kuavo_arm_traj_cpp" to="/kuavo_arm_traj" />
+        <param name="/quest3/fhan_r" value="$(arg fhan_r)" />
+        <param name="/quest3/fhan_kh0" value="$(arg fhan_kh0)" />
+        <param name="/quest3/fhan_r_joint" value="$(arg fhan_r_joint)" />
+        <param name="/quest3/fhan_kh0_joint" value="$(arg fhan_kh0_joint)" />
+        <param name="/quest3/max_joint_velocity" value="$(arg max_joint_velocity)" />
+        <param name="/quest3/delta_scale_x" value="$(arg delta_scale_x)" />
+        <param name="/quest3/delta_scale_y" value="$(arg delta_scale_y)" />
+        <param name="/quest3/delta_scale_z" value="$(arg delta_scale_z)" />
+        <param name="/quest3/max_pos_diff" value="$(arg max_pos_diff)" />
+        <param name="/quest3/arm_move_threshold" value="$(arg arm_move_threshold)" />
+        <param name="/quest3/left_hand_quat_offset_roll" value="$(arg left_hand_quat_offset_roll)" />
+        <param name="/quest3/left_hand_quat_offset_pitch" value="$(arg left_hand_quat_offset_pitch)" />
+        <param name="/quest3/left_hand_quat_offset_yaw" value="$(arg left_hand_quat_offset_yaw)" />
+        <param name="/quest3/right_hand_quat_offset_roll" value="$(arg right_hand_quat_offset_roll)" />
+        <param name="/quest3/right_hand_quat_offset_pitch" value="$(arg right_hand_quat_offset_pitch)" />
+        <param name="/quest3/right_hand_quat_offset_yaw" value="$(arg right_hand_quat_offset_yaw)" />
+        <!-- 手部位置约束参数 -->
+        <param name="/quest3/sphere_radius_limit" value="$(arg sphere_radius_limit)" />
+        <param name="/quest3/min_reachable_distance" value="$(arg min_reachable_distance)" />
+        <rosparam param="/quest3/box_min_bound" subst_value="True">$(arg box_min_bound)</rosparam>
+        <rosparam param="/quest3/box_max_bound" subst_value="True">$(arg box_max_bound)</rosparam>
+        <param name="/quest3/chest_offset_y_ax" value="$(arg chest_offset_y_ax)" />
+        <rosparam param="/quest3/left_center" subst_value="True">$(arg left_center)</rosparam>
+        <rosparam param="/quest3/right_center" subst_value="True">$(arg right_center)</rosparam>
+        <rosparam param="/quest3/default_left_hand_pos_on_exit" subst_value="True">$(arg default_left_hand_pos_on_exit)</rosparam>
+        <rosparam param="/quest3/default_right_hand_pos_on_exit" subst_value="True">$(arg default_right_hand_pos_on_exit)</rosparam>
+    </node>
+</launch>

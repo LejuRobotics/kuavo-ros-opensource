@@ -61,7 +61,7 @@ void Quest3IkROS::solveIkHandElbowThreadFuntion() {
   bool hasStarted = false;
 
   while (!shouldStop() && ros::ok()) {
-    handleEndEffectorControlData();
+    publishEndEffectorControlData();
 
     // 仅在启动阶段检查手柄状态（复现Python版本的行为）
     if (!hasStarted && quest3ArmInfoTransformerPtr_) {

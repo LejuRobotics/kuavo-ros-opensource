@@ -136,14 +136,14 @@ void ArmControlBaseROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
 }
 
 bool ArmControlBaseROS::setArmModeChangingCallback(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res) {
-  ROS_INFO_STREAM("[Quest3IkROS] setArmModeChangingCallback");
+  ROS_INFO_STREAM("[ArmControlBaseROS] setArmModeChangingCallback");
   armModeChanging_.store(true);
 
   if (onlyHalfUpBody_) {
     std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
 
     if (!currentSensorData) {
-      ROS_WARN("[Quest3IkROS] sensor_data_raw is None in setArmModeChangingCallback");
+      ROS_WARN("[ArmControlBaseROS] sensor_data_raw is None in setArmModeChangingCallback");
       return handleServiceResponse(res, false, "Sensor data not available");
     }
 
@@ -151,12 +151,13 @@ bool ArmControlBaseROS::setArmModeChangingCallback(std_srvs::Trigger::Request& r
     const int armJointStartIndex = 12;
     const int numArmJoints = 14;
 
-    ROS_INFO("[Quest3IkROS] joint_q array size: %zu, required: %d", jointQSize, armJointStartIndex + numArmJoints);
+    ROS_INFO(
+        "[ArmControlBaseROS] joint_q array size: %zu, required: %d", jointQSize, armJointStartIndex + numArmJoints);
 
     if (jointQSize < armJointStartIndex + numArmJoints) {
       std::string errorMsg = "joint_q array too small! Size: " + std::to_string(jointQSize) +
                              ", required: " + std::to_string(armJointStartIndex + numArmJoints);
-      ROS_ERROR("[Quest3IkROS] %s", errorMsg.c_str());
+      ROS_ERROR("[ArmControlBaseROS] %s", errorMsg.c_str());
       return handleServiceResponse(res, false, errorMsg);
     }
 
@@ -178,7 +179,7 @@ bool ArmControlBaseROS::setArmModeChangingCallback(std_srvs::Trigger::Request& r
         if (jointIndex < static_cast<int>(jointQSize)) {
           msg.position[i] = currentSensorData->joint_data.joint_q[jointIndex] * 180.0 / M_PI;
         } else {
-          ROS_WARN("[Quest3IkROS] Joint index %d out of bounds, using 0.0", jointIndex);
+          ROS_WARN("[ArmControlBaseROS] Joint index %d out of bounds, using 0.0", jointIndex);
           msg.position[i] = 0.0;
         }
       }
@@ -189,10 +190,10 @@ bool ArmControlBaseROS::setArmModeChangingCallback(std_srvs::Trigger::Request& r
         rate.sleep();
       }
 
-      ROS_INFO("[Quest3IkROS] Successfully published %d joint states", numArmJoints);
+      ROS_INFO("[ArmControlBaseROS] Successfully published %d joint states", numArmJoints);
     } catch (const std::exception& e) {
       std::string errorMsg = "Failed to publish joint states: " + std::string(e.what());
-      ROS_ERROR("[Quest3IkROS] %s", errorMsg.c_str());
+      ROS_ERROR("[ArmControlBaseROS] %s", errorMsg.c_str());
       return handleServiceResponse(res, false, errorMsg);
     }
   }
@@ -285,7 +286,7 @@ void ArmControlBaseROS::updateRunningState() {
   }
 }
 
-void ArmControlBaseROS::handleEndEffectorControlData() {
+void ArmControlBaseROS::publishEndEffectorControlData() {
   if (!joyStickHandlerPtr_) {
     ROS_WARN("[ArmControlBaseROS] JoyStickHandler not initialized");
     return;

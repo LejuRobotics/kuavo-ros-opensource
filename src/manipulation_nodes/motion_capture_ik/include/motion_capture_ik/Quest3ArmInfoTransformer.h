@@ -7,6 +7,7 @@
 #include <functional>
 #include <leju_utils/define.hpp>
 #include <string>
+#include <vector>
 
 #include "motion_capture_ik/ArmLengthMeasurement.h"
 
@@ -15,7 +16,8 @@ namespace HighlyDynamic {
 class Quest3ArmInfoTransformer final {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  Quest3ArmInfoTransformer(const std::string &robotModel = "kuavo_45", const double deltaScale = 1.0);
+  Quest3ArmInfoTransformer(const std::string &robotModel = "kuavo_45",
+                           const Eigen::Vector3d &deltaScale = Eigen::Vector3d(1.0, 1.0, 1.0));
 
   ~Quest3ArmInfoTransformer() = default;
 
@@ -29,6 +31,10 @@ class Quest3ArmInfoTransformer final {
   const ArmPose &getLeftElbowPose() const { return leftElbowPose_; }
 
   const ArmPose &getRightElbowPose() const { return rightElbowPose_; }
+
+  const ArmPose &getLeftShoulderPose() const { return leftShoulderPose_; }
+
+  const ArmPose &getRightShoulderPose() const { return rightShoulderPose_; }
 
   const HeadBodyPose &getHeadBodyPose() const { return headBodyPose_; }
 
@@ -47,7 +53,7 @@ class Quest3ArmInfoTransformer final {
   bool isMeasureArmLength() const { return armLengthMeasurement_.isMeasureArmLength(); }
   void resetArmLengthMeasurement() { armLengthMeasurement_.reset(); }
   void completeArmLengthMeasurement() { armLengthMeasurement_.completeMeasurement(); }
-  void setDeltaScale(double deltaScale) { deltaScale_ = deltaScale; }
+  void setDeltaScale(const Eigen::Vector3d &deltaScale) { deltaScale_ = deltaScale; }
 
   // 新增：获取平均手臂长度
   double getAvgLeftUpperArmLength() const { return armLengthMeasurement_.getAvgLeftUpperArmLength(); }
@@ -97,6 +103,8 @@ class Quest3ArmInfoTransformer final {
   ArmPose rightHandPose_;
   ArmPose leftElbowPose_;
   ArmPose rightElbowPose_;
+  ArmPose leftShoulderPose_;
+  ArmPose rightShoulderPose_;
 
   // 新增：左右手四元数数据
   Eigen::Quaterniond qLeftHandW_;
@@ -135,8 +143,8 @@ class Quest3ArmInfoTransformer final {
   // 新增：可视化发布控制（复现Python版本的vis_pub成员变量）
   bool visPub_ = true;  // 默认启用，与Python版本一致
 
-  bool isRunning_ = false;  // 初始状态为false，与Python版本一致
-  double deltaScale_;       // 缩放比例
+  bool isRunning_ = false;      // 初始状态为false，与Python版本一致
+  Eigen::Vector3d deltaScale_;  // 缩放比例（x, y, z三轴独立）
 
   struct JoystickState {
     float trigger;  // 扳机键状态 [0.0-1.0]
@@ -153,8 +161,6 @@ class Quest3ArmInfoTransformer final {
 
   bool computeHandPose(const noitom_hi5_hand_udp_python::PoseInfoList &input, const std::string &side);
 
-  // [CZJ]TODO: 增量模式专用接口，直接缩放骨架数据，须在后续合并时确保正确调用
-  Eigen::Vector3d extractScaledPosition(const noitom_hi5_hand_udp_python::PoseInfo &poseInfo) const;
   Eigen::Vector3d extractPosition(const noitom_hi5_hand_udp_python::PoseInfo &poseInfo) const;
 
   // 对应Python版本的pose_info2_transform函数
@@ -173,11 +179,6 @@ class Quest3ArmInfoTransformer final {
   Eigen::Quaterniond vrQuat2RobotQuat(const Eigen::Quaterniond &vrQuat,
                                       const std::string &side,
                                       double biasAngle = 0.0) const;
-
-  // 胸部姿态处理相关函数
-
-  // [CZJ]TODO: 提取偏航角的优化方法，是通过Hopf纤维化将四元数分解为：
-  // double extractYawWithHopfFibration(const Eigen::Quaterniond& quat) const;
 
   // 工具函数
   bool isOverChest(const Eigen::Vector3d &handPos, const std::string &side) const;

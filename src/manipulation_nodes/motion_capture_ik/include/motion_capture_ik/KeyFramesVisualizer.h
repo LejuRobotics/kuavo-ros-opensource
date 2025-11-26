@@ -3,10 +3,17 @@
 #include <ros/ros.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/PoseArray.h>
+#include <geometry_msgs/Point.h>
 
 #include <Eigen/Dense>
 #include <string>
 #include <vector>
+#include <functional>
+
+#include "motion_capture_ik/IncrementalControlModule.h"
+#include <leju_utils/define.hpp>
 
 namespace HighlyDynamic {
 
@@ -69,6 +76,108 @@ class KeyFramesVisualizer {
    */
   void publishHumanArrayRight(const std::vector<visualization_msgs::Marker>& markers);
 
+  /**
+   * @brief 发布增量模式位置（锚点和测量位置）
+   * @param incrementalResult 增量控制结果
+   * @param poseConstraintList 位姿约束列表
+   */
+  void publishIncrementalModePositions(const IncrementalPoseResult& incrementalResult,
+                                       const std::vector<PoseData>& poseConstraintList);
+
+  /**
+   * @brief 发布增量Pose可视化
+   * @param incrementalResult 增量控制结果
+   * @param poseConstraintList 位姿约束列表
+   * @param fkCallback FK计算回调函数，用于计算measured pose
+   */
+  void publishIncrementalPoseVisualization(
+      const IncrementalPoseResult& incrementalResult,
+      const std::vector<PoseData>& poseConstraintList,
+      std::function<void(Eigen::Vector3d&, Eigen::Quaterniond&, Eigen::Vector3d&, Eigen::Quaterniond&)> fkCallback);
+
+  /**
+   * @brief 发布手部X轴向量可视化
+   * @param leftHandPos 左手位置
+   * @param leftXAxisVector 左手X轴向量
+   * @param rightHandPos 右手位置
+   * @param rightXAxisVector 右手X轴向量
+   */
+  void publishHandXAxisVectorVisualization(const Eigen::Vector3d& leftHandPos,
+                                           const Eigen::Vector3d& leftXAxisVector,
+                                           const Eigen::Vector3d& rightHandPos,
+                                           const Eigen::Vector3d& rightXAxisVector);
+
+  /**
+   * @brief 发布肩部和肘部位置可视化
+   * @param leftShoulderPos 左肩位置
+   * @param rightShoulderPos 右肩位置
+   * @param leftElbowPos 左肘位置
+   * @param rightElbowPos 右肘位置
+   */
+  void publishShoulderElbowPosVisualization(const Eigen::Vector3d& leftShoulderPos,
+                                            const Eigen::Vector3d& rightShoulderPos,
+                                            const Eigen::Vector3d& leftElbowPos,
+                                            const Eigen::Vector3d& rightElbowPos);
+
+  /**
+   * @brief 发布手部球约束可视化
+   * @param leftShoulderPos 左肩位置
+   * @param rightShoulderPos 右肩位置
+   * @param sphereRadius 球体半径
+   */
+  void publishHandSphereConstraintVisualization(const Eigen::Vector3d& leftShoulderPos,
+                                                const Eigen::Vector3d& rightShoulderPos,
+                                                double sphereRadius);
+
+  /**
+   * @brief 发布手部圆柱体约束可视化
+   * @param leftCenter 左手圆柱体中心位置
+   * @param rightCenter 右手圆柱体中心位置
+   * @param cylinderRadius 圆柱体半径
+   */
+  void publishHandCylinderConstraintVisualization(const Eigen::Vector3d& leftCenter,
+                                                  const Eigen::Vector3d& rightCenter,
+                                                  double cylinderRadius);
+
+  /**
+   * @brief 发布Box边界约束可视化
+   * @param boxMinBound Box最小边界
+   * @param boxMaxBound Box最大边界
+   * @param chestOffsetY 胸部中线偏移量
+   */
+  void publishBoxBoundVisualization(const Eigen::Vector3d& boxMinBound,
+                                    const Eigen::Vector3d& boxMaxBound,
+                                    double chestOffsetY);
+
+  /**
+   * @brief 统一的可视化发布函数
+   * @param leftShoulderPos 左肩位置
+   * @param rightShoulderPos 右肩位置
+   * @param sphereRadius 球体半径
+   * @param incrementalResult 增量控制结果
+   * @param poseConstraintList 位姿约束列表
+   * @param boxMinBound Box最小边界
+   * @param boxMaxBound Box最大边界
+   * @param chestOffsetY 胸部中线偏移量
+   * @param leftCylinderCenter 左手圆柱体中心位置
+   * @param rightCylinderCenter 右手圆柱体中心位置
+   * @param cylinderRadius 圆柱体半径
+   * @param fkCallback FK计算回调函数
+   */
+  void publishAllVisualizations(
+      const Eigen::Vector3d& leftShoulderPos,
+      const Eigen::Vector3d& rightShoulderPos,
+      double sphereRadius,
+      const IncrementalPoseResult& incrementalResult,
+      const std::vector<PoseData>& poseConstraintList,
+      const Eigen::Vector3d& boxMinBound,
+      const Eigen::Vector3d& boxMaxBound,
+      double chestOffsetY,
+      const Eigen::Vector3d& leftCylinderCenter,
+      const Eigen::Vector3d& rightCylinderCenter,
+      double cylinderRadius,
+      std::function<void(Eigen::Vector3d&, Eigen::Quaterniond&, Eigen::Vector3d&, Eigen::Quaterniond&)> fkCallback);
+
  private:
   // 左侧可视化发布器
   ros::Publisher markerPub_;                // 左手marker
@@ -86,6 +195,42 @@ class KeyFramesVisualizer {
 
   // 通用可视化发布器
   ros::Publisher markerPubChest_;  // 胸部marker
+
+  // 增量模式位置发布器（Point类型）
+  ros::Publisher leftAnchorPosPublisher_;         // 左手锚点位置发布器
+  ros::Publisher rightAnchorPosPublisher_;        // 右手锚点位置发布器
+  ros::Publisher leftHandMeasuredPosPublisher_;   // 左手进入时测量位置发布器
+  ros::Publisher rightHandMeasuredPosPublisher_;  // 右手进入时测量位置发布器
+
+  // 增量结果pose发布器（PoseStamped类型）
+  ros::Publisher leftHandPosePublisher_;           // 左手pose发布器
+  ros::Publisher rightHandPosePublisher_;          // 右手pose发布器
+  ros::Publisher leftElbowPoseStampedPublisher_;   // 左肘pose发布器
+  ros::Publisher rightElbowPoseStampedPublisher_;  // 右肘pose发布器
+
+  // 手部6D pose可视化发布器（PoseArray类型）
+  ros::Publisher leftHandTargetPoseVisualPublisher_;     // 左手6D pose可视化发布器
+  ros::Publisher rightHandTargetPoseVisualPublisher_;    // 右手6D pose可视化发布器
+  ros::Publisher leftHandMeasuredPoseVisualPublisher_;   // 通过sensor data 加fk计算手部末端位姿
+  ros::Publisher rightHandMeasuredPoseVisualPublisher_;  // 通过sensor data 加fk计算手部末端位姿
+
+  // 手部旋转矩阵X轴向量可视化发布器（Marker类型）
+  ros::Publisher leftHandXAxisVectorPublisher_;   // 左手旋转矩阵X轴向量可视化发布器
+  ros::Publisher rightHandXAxisVectorPublisher_;  // 右手旋转矩阵X轴向量可视化发布器
+
+  // 肩部和肘部位置可视化发布器（Marker类型）
+  ros::Publisher leftShoulderPosPublisher_;      // 左肩位置可视化发布器
+  ros::Publisher rightShoulderPosPublisher_;     // 右肩位置可视化发布器
+  ros::Publisher leftElbowPosMarkerPublisher_;   // 左肘位置可视化发布器（Marker类型）
+  ros::Publisher rightElbowPosMarkerPublisher_;  // 右肘位置可视化发布器（Marker类型）
+
+  // 手部bounding box可视化发布器（Marker类型）
+  ros::Publisher leftHandBoundBoxPublisher_;   // 左手bounding box可视化发布器
+  ros::Publisher rightHandBoundBoxPublisher_;  // 右手bounding box可视化发布器
+
+  // 缩放后的手部位置可视化发布器（Marker类型）
+  ros::Publisher scaledLeftHandPosPublisher_;   // 缩放后的左手位置可视化发布器
+  ros::Publisher scaledRightHandPosPublisher_;  // 缩放后的右手位置可视化发布器
 
   /**
    * @brief 初始化所有可视化发布器
@@ -132,6 +277,8 @@ class KeyFramesVisualizer {
    */
   visualization_msgs::MarkerArray constructMarkerArray(const std::vector<visualization_msgs::Marker>& markers,
                                                        const std::string& frameId = "base_link");
+
+  void publishVisualization(const std::vector<PoseData>& poseConstraintList);
 
   // ROS节点句柄引用
   ros::NodeHandle& nodeHandle_;

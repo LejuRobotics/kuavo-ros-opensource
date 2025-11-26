@@ -469,7 +469,7 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
-      Enabled: true
+      Enabled: false
       Marker Topic: /visualization_marker_right
       Name: Marker
       Namespaces:
@@ -485,7 +485,7 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
-      Enabled: true
+      Enabled: false
       Marker Topic: /visualization_marker_right/elbow
       Name: Marker
       Namespaces:
@@ -517,7 +517,7 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
-      Enabled: true
+      Enabled: false
       Marker Topic: /visualization_marker_right/shoulder
       Name: Marker
       Namespaces:
@@ -533,7 +533,7 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
-      Enabled: true
+      Enabled: false
       Marker Topic: /visualization_marker_right/shoulder_quest3
       Name: Marker
       Namespaces:
@@ -558,7 +558,7 @@ Visualization Manager:
     - Alpha: 1
       Arrow Width: 0.5
       Class: rviz/WrenchStamped
-      Enabled: true
+      Enabled: false
       Force Arrow Scale: 2
       Force Color: 204; 51; 51
       Hide Small Values: true
@@ -703,11 +703,163 @@ Visualization Manager:
         foot_positions_front: true
       Queue Size: 100
       Value: true
+    - Alpha: 1
+      Arrow Length: 0.9000000357627869
+      Axes Length: 0.30000000447034836
+      Axes Radius: 0.029999999329447746
+      Class: rviz/PoseArray
+      Color: 255; 0; 255
+      Enabled: true
+      Head Length: 0.21000000089406966
+      Head Radius: 0.08999999798834324
+      Name: left_hand_pose_visual
+      Queue Size: 10
+      Shaft Length: 0.6900000125169754
+      Shaft Radius: 0.029999999329447746
+      Shape: Axes
+      Topic: /left_hand_pose_visual
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Arrow Length: 0.9000000357627869
+      Axes Length: 0.30000000447034836
+      Axes Radius: 0.029999999329447746
+      Class: rviz/PoseArray
+      Color: 255; 0; 255
+      Enabled: false
+      Head Length: 0.21000000089406966
+      Head Radius: 0.08999999798834324
+      Name: right_hand_pose_visual
+      Queue Size: 10
+      Shaft Length: 0.6900000125169754
+      Shaft Radius: 0.029999999329447746
+      Shape: Axes
+      Topic: /right_hand_pose_visual
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Arrow Length: 0.9000000357627869
+      Axes Length: 0.30000000447034836
+      Axes Radius: 0.029999999329447746
+      Class: rviz/PoseArray
+      Color: 0; 255; 0
+      Enabled: true
+      Head Length: 0.21000000089406966
+      Head Radius: 0.08999999798834324
+      Name: left_hand_measured_pose_visual
+      Queue Size: 10
+      Shaft Length: 0.6900000125169754
+      Shaft Radius: 0.029999999329447746
+      Shape: Axes
+      Topic: /left_hand_measured_pose_visual
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Arrow Length: 0.9000000357627869
+      Axes Length: 0.30000000447034836
+      Axes Radius: 0.029999999329447746
+      Class: rviz/PoseArray
+      Color: 0; 255; 0
+      Enabled: false
+      Head Length: 0.21000000089406966
+      Head Radius: 0.08999999798834324
+      Name: right_hand_measured_pose_visual
+      Queue Size: 10
+      Shaft Length: 0.6900000125169754
+      Shaft Radius: 0.029999999329447746
+      Shape: Axes
+      Topic: /right_hand_measured_pose_visual
+      Unreliable: false
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/left_hand_x_axis_vector
+      Name: left_hand_x_axis_vector
+      Namespaces:
+        left_hand_x_axis: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: false
+      Marker Topic: /visualization_marker/right_hand_x_axis_vector
+      Name: right_hand_x_axis_vector
+      Namespaces:
+        right_hand_x_axis: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/incremental_left_shoulder
+      Name: incremental_left_shoulder
+      Namespaces:
+        incremental_left_shoulder: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: false
+      Marker Topic: /visualization_marker/incremental_right_shoulder
+      Name: incremental_right_shoulder
+      Namespaces:
+        incremental_right_shoulder: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/incremental_left_elbow
+      Name: incremental_left_elbow
+      Namespaces:
+        incremental_left_elbow: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: false
+      Marker Topic: /visualization_marker/incremental_right_elbow
+      Name: incremental_right_elbow
+      Namespaces:
+        incremental_right_elbow: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/left_hand_bound_box
+      Name: left_hand_bound_box
+      Namespaces:
+        left_hand_bound_box: true
+        left_hand_sphere_constraint: true
+        left_hand_cylinder_constraint: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/right_hand_bound_box
+      Name: right_hand_bound_box
+      Namespaces:
+        right_hand_bound_box: true
+        right_hand_sphere_constraint: true
+        right_hand_cylinder_constraint: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/scaled_left_hand_pos
+      Name: scaled_left_hand_pos
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/scaled_right_hand_pos
+      Name: scaled_right_hand_pos
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 255; 253; 212
     Default Light: true
-    Fixed Frame: odom
+    Fixed Frame: base_link
     Frame Rate: 30
   Name: root
   Tools:

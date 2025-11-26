@@ -31,11 +31,27 @@ enum class EndEffectorType { QIANGNAO = 0, QIANGNAO_TOUCH = 1, REVO2 = 2, LEJUCL
 
 // 判断是否为手部末端执行器类型
 inline bool isHandEndEffectorType(EndEffectorType type) {
-  return type == EndEffectorType::QIANGNAO || type == EndEffectorType::QIANGNAO_TOUCH || type == EndEffectorType::REVO2;
+  bool isHandEndEffectorType = (type == EndEffectorType::QIANGNAO);
+  // if (isHandEndEffectorType) {
+  //   std::cout << "isHandEndEffectorType: " << static_cast<int>(type) << std::endl;
+  //   std::cout << "QIANGNAO: " << static_cast<int>(EndEffectorType::QIANGNAO) << std::endl;
+  //   std::cout << "QIANGNAO_TOUCH: " << static_cast<int>(EndEffectorType::QIANGNAO_TOUCH) << std::endl;
+  //   std::cout << "REVO2: " << static_cast<int>(EndEffectorType::REVO2) << std::endl;
+  //   std::cout << "LEJUCLAW: " << static_cast<int>(EndEffectorType::LEJUCLAW) << std::endl;
+  // }
+
+  return isHandEndEffectorType;
 }
 
-// 判断是否为夹爪末端执行器类型
-inline bool isClawEndEffectorType(EndEffectorType type) { return type == EndEffectorType::LEJUCLAW; }
+inline bool isClawEndEffectorType(EndEffectorType type) {
+  bool isClawEndEffectorType = (type == EndEffectorType::LEJUCLAW);
+  // if (isClawEndEffectorType) {
+  //   std::cout << "isClawEndEffectorType: " << static_cast<int>(type) << std::endl;
+  //   std::cout << "LEJUCLAW: " << static_cast<int>(EndEffectorType::LEJUCLAW) << std::endl;
+  // }
+
+  return isClawEndEffectorType;
+}
 
 // 字符串转EndEffectorType枚举
 inline EndEffectorType stringToEndEffectorType(const std::string& typeStr) {
@@ -98,6 +114,11 @@ struct TwoStageIKParameters {
 
 namespace HighlyDynamic {
 enum class HandSide { LEFT, RIGHT, BOTH };
+enum class KuavoArmCtrlMode { ARM_FIXED = 0, AUTO_SWING = 1, EXTERNAL_CONTROL = 2 };
+enum class MpcRefUpdateMode { DISABLED_ARM = 0, ENABLED_ARM = 1 };
+enum class IncrementalMpcCtrlMode { NO_CONTROL = 0, ARM_ONLY = 1, BASE_ONLY = 2, BASE_ARM = 3, ERROR = -1 };
+enum class ControlMode { NONE = 0, INCREMENTAL = 1 };
+enum class VRHandControlType { NONE = 0, LEFT_HAND = 1, TWO_HAND = 2 };
 
 inline HandSide intToHandSide(int value) {
   if (value < 0 || value > 2) throw std::invalid_argument("Invalid value for HandSide");
@@ -114,6 +135,14 @@ struct HeadBodyPose {
   double body_pitch = 6.0 * M_PI / 180.0;
   double body_height = 0.74;
 };
+
+inline VRHandControlType intToVRHandControlType(int value) {
+  if (value < 0 || value > 2) {
+    std::cerr << "Warning: Invalid VRHandControlType value: " << value << ", using NONE as default" << std::endl;
+    return VRHandControlType::NONE;
+  }
+  return static_cast<VRHandControlType>(value);
+}
 
 typedef std::vector<std::pair<Eigen::Quaterniond, Eigen::Vector3d>> FramePoseVec;
 
@@ -173,6 +202,24 @@ struct ArmPose {
   }
 
   ArmPose(const Eigen::Vector3d& pos, const Eigen::Quaterniond& quat) : position(pos), quaternion(quat) {}
+
+  ArmPose(const std::string& robotModel, bool isLeftHand) {
+    if (robotModel == "kuavo_45") {
+      if (isLeftHand) {
+        // 左手默认位姿: 0.073, 0.25, -0.26, 0, 0, 0, 1
+        position << 0.073, 0.25, -0.26;
+        quaternion = Eigen::Quaterniond::Identity();
+      } else {
+        // 右手默认位姿: 0.073, -0.25, -0.26, 0, 0, 0, 1
+        position << 0.073, -0.25, -0.26;
+        quaternion = Eigen::Quaterniond::Identity();
+      }
+    } else {
+      // 其他型号：初始化为零向量和单位四元数
+      position = Eigen::Vector3d::Zero();
+      quaternion = Eigen::Quaterniond::Identity();
+    }
+  }
 
   bool isValid() const {
     return position.allFinite() && quaternion.coeffs().allFinite() && std::abs(quaternion.norm() - 1.0) < 1e-4;
@@ -401,79 +448,286 @@ inline Eigen::VectorXd limitJointAngleByVelocity(const Eigen::VectorXd& qLast,
   return qLimited;
 }
 
-/**
- * @brief 创建并填充twoArmHandPoseCmd消息
- * @param leftHandPose 左手位姿
- * @param rightHandPose 右手位姿
- * @param leftElbowPose 左手肘部位姿
- * @param rightElbowPose 右手肘部位姿
- * @return 填充好的twoArmHandPoseCmd消息
- */
-inline kuavo_msgs::twoArmHandPoseCmd createEefPoseMessage(const ArmPose& leftHandPose,
-                                                          const ArmPose& rightHandPose,
-                                                          const ArmPose& leftElbowPose,
-                                                          const ArmPose& rightElbowPose) {
-  kuavo_msgs::twoArmHandPoseCmd eef_pose_msg;
+inline kuavo_msgs::twoArmHandPoseCmd createTwoArmHandPoseCmd(const Eigen::Vector3d& leftHandPos,
+                                                             const Eigen::Vector3d& rightHandPos,
+                                                             const Eigen::Quaterniond& leftHandQuat,
+                                                             const Eigen::Quaterniond& rightHandQuat,
+                                                             const Eigen::Vector3d& leftElbowPos,
+                                                             const Eigen::Vector3d& rightElbowPos,
+                                                             const HighlyDynamic::IKParams& ikParams) {
+  kuavo_msgs::twoArmHandPoseCmd two_arm_hand_pose_msg;
 
   // 设置消息头
-  eef_pose_msg.hand_poses.header.stamp = ros::Time::now();
-  eef_pose_msg.hand_poses.header.frame_id = "base_link";
+  two_arm_hand_pose_msg.hand_poses.header.stamp = ros::Time::now();
+  two_arm_hand_pose_msg.hand_poses.header.frame_id = "base_link";
 
   // 设置左手位姿数据
-  eef_pose_msg.hand_poses.left_pose.pos_xyz[0] = leftHandPose.position.x();
-  eef_pose_msg.hand_poses.left_pose.pos_xyz[1] = leftHandPose.position.y();
-  eef_pose_msg.hand_poses.left_pose.pos_xyz[2] = leftHandPose.position.z();
 
-  eef_pose_msg.hand_poses.left_pose.quat_xyzw[0] = leftHandPose.quaternion.x();
-  eef_pose_msg.hand_poses.left_pose.quat_xyzw[1] = leftHandPose.quaternion.y();
-  eef_pose_msg.hand_poses.left_pose.quat_xyzw[2] = leftHandPose.quaternion.z();
-  eef_pose_msg.hand_poses.left_pose.quat_xyzw[3] = leftHandPose.quaternion.w();
+  two_arm_hand_pose_msg.hand_poses.left_pose.pos_xyz[0] = leftHandPos.x();
+  two_arm_hand_pose_msg.hand_poses.left_pose.pos_xyz[1] = leftHandPos.y();
+  two_arm_hand_pose_msg.hand_poses.left_pose.pos_xyz[2] = leftHandPos.z();
+
+  two_arm_hand_pose_msg.hand_poses.left_pose.quat_xyzw[0] = leftHandQuat.x();
+  two_arm_hand_pose_msg.hand_poses.left_pose.quat_xyzw[1] = leftHandQuat.y();
+  two_arm_hand_pose_msg.hand_poses.left_pose.quat_xyzw[2] = leftHandQuat.z();
+  two_arm_hand_pose_msg.hand_poses.left_pose.quat_xyzw[3] = leftHandQuat.w();
 
   // 设置左手肘部位置
-  eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz[0] = leftElbowPose.position.x();
-  eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz[1] = leftElbowPose.position.y();
-  eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz[2] = leftElbowPose.position.z();
+  two_arm_hand_pose_msg.hand_poses.left_pose.elbow_pos_xyz[0] = leftElbowPos.x();
+  two_arm_hand_pose_msg.hand_poses.left_pose.elbow_pos_xyz[1] = leftElbowPos.y();
+  two_arm_hand_pose_msg.hand_poses.left_pose.elbow_pos_xyz[2] = leftElbowPos.z();
 
-  // 设置右手位姿数据
-  eef_pose_msg.hand_poses.right_pose.pos_xyz[0] = rightHandPose.position.x();
-  eef_pose_msg.hand_poses.right_pose.pos_xyz[1] = rightHandPose.position.y();
-  eef_pose_msg.hand_poses.right_pose.pos_xyz[2] = rightHandPose.position.z();
+  two_arm_hand_pose_msg.hand_poses.right_pose.pos_xyz[0] = rightHandPos.x();
+  two_arm_hand_pose_msg.hand_poses.right_pose.pos_xyz[1] = rightHandPos.y();
+  two_arm_hand_pose_msg.hand_poses.right_pose.pos_xyz[2] = rightHandPos.z();
 
-  eef_pose_msg.hand_poses.right_pose.quat_xyzw[0] = rightHandPose.quaternion.x();
-  eef_pose_msg.hand_poses.right_pose.quat_xyzw[1] = rightHandPose.quaternion.y();
-  eef_pose_msg.hand_poses.right_pose.quat_xyzw[2] = rightHandPose.quaternion.z();
-  eef_pose_msg.hand_poses.right_pose.quat_xyzw[3] = rightHandPose.quaternion.w();
+  two_arm_hand_pose_msg.hand_poses.right_pose.quat_xyzw[0] = rightHandQuat.x();
+  two_arm_hand_pose_msg.hand_poses.right_pose.quat_xyzw[1] = rightHandQuat.y();
+  two_arm_hand_pose_msg.hand_poses.right_pose.quat_xyzw[2] = rightHandQuat.z();
+  two_arm_hand_pose_msg.hand_poses.right_pose.quat_xyzw[3] = rightHandQuat.w();
 
   // 设置右手肘部位置
-  eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz[0] = rightElbowPose.position.x();
-  eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz[1] = rightElbowPose.position.y();
-  eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz[2] = rightElbowPose.position.z();
+  two_arm_hand_pose_msg.hand_poses.right_pose.elbow_pos_xyz[0] = rightElbowPos.x();  // 默认模式时，与hand_x一致
+  two_arm_hand_pose_msg.hand_poses.right_pose.elbow_pos_xyz[1] = rightElbowPos.y();  // 默认模式时，与hand_y一致
+  two_arm_hand_pose_msg.hand_poses.right_pose.elbow_pos_xyz[2] = rightElbowPos.z();  // 默认模式时，与hand_z/2一致
 
   // 设置IK求解参数 (参考Python文件中的参数设置)
-  eef_pose_msg.use_custom_ik_param = true;
-  eef_pose_msg.joint_angles_as_q0 = false;
-  eef_pose_msg.frame = 0;  // 保持当前坐标系
+  two_arm_hand_pose_msg.use_custom_ik_param = true;
+  two_arm_hand_pose_msg.joint_angles_as_q0 = false;
+  two_arm_hand_pose_msg.frame = 0;  // 保持当前坐标系
 
   // 设置IK求解器参数
-  eef_pose_msg.ik_param.major_optimality_tol = 9e-3;
-  eef_pose_msg.ik_param.major_feasibility_tol = 9e-3;
-  eef_pose_msg.ik_param.minor_feasibility_tol = 9e-3;
-  eef_pose_msg.ik_param.major_iterations_limit = 50;
-  eef_pose_msg.ik_param.oritation_constraint_tol = 9e-3;
-  eef_pose_msg.ik_param.pos_constraint_tol = 9e-3;
-  eef_pose_msg.ik_param.pos_cost_weight = 10.0;
+  two_arm_hand_pose_msg.ik_param.major_optimality_tol = ikParams.major_optimality_tol;
+  two_arm_hand_pose_msg.ik_param.major_feasibility_tol = ikParams.major_feasibility_tol;
+  two_arm_hand_pose_msg.ik_param.minor_feasibility_tol = ikParams.minor_feasibility_tol;
+  two_arm_hand_pose_msg.ik_param.major_iterations_limit = ikParams.major_iterations_limit;
+  two_arm_hand_pose_msg.ik_param.oritation_constraint_tol = ikParams.oritation_constraint_tol;
+  two_arm_hand_pose_msg.ik_param.pos_constraint_tol = ikParams.pos_constraint_tol;
+  two_arm_hand_pose_msg.ik_param.pos_cost_weight = ikParams.pos_cost_weight;
 
-  return eef_pose_msg;
+  return two_arm_hand_pose_msg;
 }
 
-/**
- * @brief 以表格样式打印四个位姿数据
- * @param leftHandPose 左手位姿
- * @param rightHandPose 右手位姿
- * @param leftElbowPose 左肘位姿
- * @param rightElbowPose 右肘位姿
- * @param debugPrint 是否启用调试打印
- */
+inline bool setDefaultSrvIkParams(HighlyDynamic::IKParams& ikParams) {
+  ikParams.major_optimality_tol = 9e-3;
+  ikParams.major_feasibility_tol = 9e-3;
+  ikParams.minor_feasibility_tol = 9e-3;
+  ikParams.major_iterations_limit = 50;
+  ikParams.oritation_constraint_tol = 9e-3;
+  ikParams.pos_constraint_tol = 9e-3;
+  ikParams.pos_cost_weight = 10.0;
+
+  return true;
+}
+
+inline bool checkPositionError(const Eigen::Vector3d& p1, const Eigen::Vector3d& p2, double threshold) {
+  return ((p1 - p2).norm() - 1e-4) < threshold;
+}
+
+class HumanArmMoveDetector {
+ public:
+  explicit HumanArmMoveDetector(bool enableDebugPrint = false)
+      : debugPrint_(enableDebugPrint),
+        isFirstFrame_(true),
+        hasHumanArmMoved_(false),
+        prevLeftHandPosition_(Eigen::Vector3d::Zero()),
+        prevRightHandPosition_(Eigen::Vector3d::Zero()) {}
+
+  void reset() {
+    isFirstFrame_ = true;
+    hasHumanArmMoved_ = false;
+    prevLeftHandPosition_.setZero();
+    prevRightHandPosition_.setZero();
+    std::cout << "\033[92m[HumanArmMoveDetector] Reset successfully\033[0m" << std::endl;
+  }
+
+  bool detectMovement(const Eigen::Vector3d& currentLeftHandPos,
+                      const Eigen::Vector3d& currentRightHandPos,
+                      double threshold = 0.01) {
+    // 如果已经检测到移动，直接返回true，不再重复检测
+    if (hasHumanArmMoved_) {
+      return true;
+    }
+
+    // 如果是第一帧，记录当前位置并返回false
+    if (isFirstFrame_) {
+      prevLeftHandPosition_ = currentLeftHandPos;
+      prevRightHandPosition_ = currentRightHandPos;
+      isFirstFrame_ = false;
+      return false;
+    }
+
+    // 计算左右手位置的norm误差
+    double leftHandNormError = (currentLeftHandPos - prevLeftHandPosition_).norm();
+    double rightHandNormError = (currentRightHandPos - prevRightHandPosition_).norm();
+
+    // 更新上一帧位置
+    prevLeftHandPosition_ = currentLeftHandPos;
+    prevRightHandPosition_ = currentRightHandPos;
+
+    // 检查是否有任一手的移动超过阈值
+    bool hasMovement = (leftHandNormError > threshold) || (rightHandNormError > threshold);
+
+    // 更新移动状态
+    if (hasMovement) {
+      hasHumanArmMoved_ = true;
+    }
+
+    // 可选：添加调试信息
+    if (debugPrint_ && hasMovement) {
+      std::cout << "Human arm movement detected - Left: " << std::fixed << std::setprecision(4) << leftHandNormError
+                << ", Right: " << rightHandNormError << ", Threshold: " << threshold << std::endl;
+    }
+
+    return hasMovement;
+  }
+
+  bool hasHumanArmMoved() const { return hasHumanArmMoved_; }
+
+ private:
+  bool debugPrint_;                        ///< 调试打印开关
+  bool isFirstFrame_;                      ///< 是否为第一帧数据
+  bool hasHumanArmMoved_;                  ///< 记录是否检测到人体手臂移动
+  Eigen::Vector3d prevLeftHandPosition_;   ///< 上一帧左手位置
+  Eigen::Vector3d prevRightHandPosition_;  ///< 上一帧右手位置
+};
+
+// ============== 四元数验证函数 ==============
+
+// 验证ROS geometry_msgs::Quaternion类型的四元数
+template <typename QuaternionT>
+inline bool validateROSQuaternion(const QuaternionT& quat, const std::string& context = "", bool printWarning = true) {
+  double quatNorm = sqrt(quat.w * quat.w + quat.x * quat.x + quat.y * quat.y + quat.z * quat.z);
+
+  if (quatNorm < 1e-6 || !std::isfinite(quatNorm)) {
+    if (printWarning) {
+      std::cerr << "⚠️ [" << context << "] Invalid quaternion norm: " << quatNorm << std::endl;
+    }
+    return false;
+  }
+  return true;
+}
+
+// 验证并归一化ROS四元数，返回旋转矩阵
+template <typename QuaternionT>
+inline Eigen::Matrix3d validateAndConvertROSQuaternion(const QuaternionT& quat, const std::string& context = "") {
+  if (!validateROSQuaternion(quat, context)) {
+    return Eigen::Matrix3d::Identity();  // 返回单位矩阵作为默认值
+  }
+
+  Eigen::Quaterniond eigenQuat(quat.w, quat.x, quat.y, quat.z);
+  eigenQuat.normalize();
+  return eigenQuat.toRotationMatrix();
+}
+
+// 验证Eigen四元数
+inline bool validateEigenQuaternion(const Eigen::Quaterniond& quat,
+                                    const std::string& context = "",
+                                    bool printWarning = true) {
+  if (!quat.coeffs().allFinite() || std::abs(quat.norm() - 1.0) > 1e-4) {
+    if (printWarning) {
+      std::cerr << "⚠️ [" << context << "] Invalid Eigen quaternion" << std::endl;
+    }
+    return false;
+  }
+  return true;
+}
+
+// ============== 数值验证函数 ==============
+
+// 验证单个Vector3d
+inline bool validateVector3d(const Eigen::Vector3d& vec,
+                             const std::string& context = "",
+                             double maxValue = 1e6,
+                             bool allowZero = true,
+                             bool printWarning = true) {
+  bool hasNaN = vec.hasNaN();
+  bool hasInf = !vec.allFinite();
+  bool isZero = vec.isZero(1e-10);
+  bool isExtreme = (vec.array().abs() > maxValue).any();
+
+  if (printWarning) {
+    if (hasNaN) std::cerr << "⚠️ [" << context << "] Vector contains NaN!" << std::endl;
+    if (hasInf) std::cerr << "⚠️ [" << context << "] Vector contains infinite value!" << std::endl;
+    if (isZero && !allowZero) std::cout << "⚠️ [" << context << "] Vector is zero!" << std::endl;
+    if (isExtreme) std::cerr << "⚠️ [" << context << "] Vector contains extreme value!" << std::endl;
+  }
+
+  return !hasNaN && !hasInf && !isExtreme && (allowZero || !isZero);
+}
+
+// 验证VectorXd
+inline bool validateVectorXd(const Eigen::VectorXd& vec,
+                             const std::string& context = "",
+                             double maxValue = 1e6,
+                             bool printWarning = true) {
+  for (int i = 0; i < vec.size(); ++i) {
+    if (!std::isfinite(vec(i)) || std::abs(vec(i)) > maxValue) {
+      if (printWarning) {
+        std::cerr << "⚠️ [" << context << "] Invalid value at index " << i << ": " << vec(i) << std::endl;
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+// 验证ROS Point
+template <typename PointT>
+inline bool validateROSPoint(const PointT& point, const std::string& context = "", bool printWarning = true) {
+  Eigen::Vector3d vec(point.x, point.y, point.z);
+  return validateVector3d(vec, context, 1e6, true, printWarning);
+}
+
+// ============== 位姿安全检查函数 ==============
+
+// 计算四元数角度差异
+inline double quaternionAngleDifference(const Eigen::Quaterniond& q1, const Eigen::Quaterniond& q2) {
+  double dotProduct = std::abs(q1.dot(q2));
+  dotProduct = std::clamp(dotProduct, 0.0, 1.0);
+  return 2.0 * std::acos(dotProduct);
+}
+
+// 验证索引范围
+inline bool validateIndex(size_t index,
+                          size_t containerSize,
+                          const std::string& context = "",
+                          bool printWarning = true) {
+  if (index >= containerSize) {
+    if (printWarning) {
+      std::cerr << "⚠️ [" << context << "] Index out of range: " << index << " >= " << containerSize << std::endl;
+    }
+    return false;
+  }
+  return true;
+}
+
+// 验证关节角度限制
+inline bool validateJointLimits(const Eigen::VectorXd& jointAngles,
+                                const Eigen::VectorXd& lowerLimits,
+                                const Eigen::VectorXd& upperLimits,
+                                const std::string& context = "Joint Limits",
+                                bool printWarning = true) {
+  if (jointAngles.size() != lowerLimits.size() || jointAngles.size() != upperLimits.size()) {
+    if (printWarning) {
+      std::cerr << "⚠️ [" << context << "] Size mismatch in joint limits!" << std::endl;
+    }
+    return false;
+  }
+
+  for (int i = 0; i < jointAngles.size(); ++i) {
+    if (jointAngles(i) < lowerLimits(i) || jointAngles(i) > upperLimits(i)) {
+      if (printWarning) {
+        std::cerr << "⚠️ [" << context << "] Joint " << i << " out of limits: " << jointAngles(i) << " not in ["
+                  << lowerLimits(i) << ", " << upperLimits(i) << "]" << std::endl;
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
+
 inline void printPoseDataTable(const ArmPose& leftHandPose,
                                const ArmPose& rightHandPose,
                                const ArmPose& leftElbowPose,
@@ -524,3 +778,226 @@ inline void printPoseDataTable(const ArmPose& leftHandPose,
   std::cout << std::string(80, '=') << std::endl;
   std::cout << std::endl;
 }
+
+// 位置约束函数：通过球体约束限制位置
+inline void clipPositionBySphere(Eigen::Vector3d& position,
+                                 const Eigen::Vector3d& center,
+                                 double sphereRadius,
+                                 double minReachableDistance) {
+  const double epsilon = 1e-6;  // 避免除以零的小值
+
+  // 对位置进行球约束
+  Eigen::Vector3d positionToCenter = position - center;
+  double distance = positionToCenter.norm();
+  if (distance > epsilon) {  // 避免除以零
+    if (distance > sphereRadius) {
+      position = center + positionToCenter.normalized() * sphereRadius;
+    } else if (distance < minReachableDistance) {
+      position = center + positionToCenter.normalized() * minReachableDistance;
+    }
+  }
+}
+
+// 位置约束函数：通过边界框约束限制位置
+inline void clipPositionByBox(Eigen::Vector3d& position,
+                              const Eigen::Vector3d& boxMinBound,
+                              const Eigen::Vector3d& boxMaxBound) {
+  // 对坐标进行边界约束（限制在 [min, max] 范围内）
+  if (position.x() < boxMinBound.x()) {
+    position.x() = boxMinBound.x();
+  } else if (position.x() > boxMaxBound.x()) {
+    position.x() = boxMaxBound.x();
+  }
+
+  if (position.y() < boxMinBound.y()) {
+    position.y() = boxMinBound.y();
+  } else if (position.y() > boxMaxBound.y()) {
+    position.y() = boxMaxBound.y();
+  }
+
+  if (position.z() < boxMinBound.z()) {
+    position.z() = boxMinBound.z();
+  } else if (position.z() > boxMaxBound.z()) {
+    position.z() = boxMaxBound.z();
+  }
+}
+
+inline void clipPositionByChestMidline(Eigen::Vector3d& position, bool isLeftHand, double chestOffset) {
+  if (isLeftHand) {
+    // 左手：y 轴最大值不超过 0 - chestOffset
+    if (position.y() < chestOffset) {
+      position.y() = chestOffset;
+    }
+  } else {
+    // 右手：y 轴最小值不小于 0 + chestOffset
+    if (position.y() > -chestOffset) {
+      position.y() = -chestOffset;
+    }
+  }
+}
+
+// 位置约束函数：通过圆柱体约束限制位置（仅约束xOy平面投影，z不约束）
+// 参考clipPositionBySphere的下界约束逻辑，不约束上界
+inline void clipPositionByCylinder(Eigen::Vector3d& position,
+                                   const Eigen::Vector3d& center,
+                                   double minReachableDistance) {
+  const double epsilon = 1e-6;  // 避免除以零的小值
+
+  // 计算从center到position的向量
+  Eigen::Vector3d positionToCenter = position - center;
+
+  // 提取xOy平面投影向量（z分量设为0）
+  Eigen::Vector2d projectionXY(positionToCenter.x(), positionToCenter.y());
+  double projectionDistance = projectionXY.norm();
+
+  if (projectionDistance > epsilon) {  // 避免除以零
+    // 仅约束下界：如果投影距离小于minReachableDistance，则缩放到minReachableDistance
+    if (projectionDistance < minReachableDistance) {
+      // 计算缩放后的xOy平面投影向量
+      Eigen::Vector2d scaledProjection = projectionXY.normalized() * minReachableDistance;
+
+      // 更新position：保持z坐标不变，只更新x和y坐标
+      position.x() = center.x() + scaledProjection.x();
+      position.y() = center.y() + scaledProjection.y();
+      // z坐标保持不变：position.z() = position.z()
+    }
+    // 不约束上界：如果投影距离大于minReachableDistance，不做任何处理
+  }
+}
+
+// 位置约束函数：裁剪位置的下边界（x轴下界和z轴上界）
+inline void clipBoxBackCeiling(Eigen::Vector3d& position,
+                               const Eigen::Vector3d& boxMinBound,
+                               const Eigen::Vector3d& boxMaxBound) {
+  if (position.x() < boxMinBound.x()) position.x() = boxMinBound.x();
+  if (position.z() > boxMaxBound.z()) position.z() = boxMaxBound.z();
+}
+
+// 位置约束函数：同时裁剪左右手位置的下边界（x轴下界和z轴上界）
+inline void clipBoxBackCeilingBothHands(Eigen::Vector3d& leftHandPos,
+                                        Eigen::Vector3d& rightHandPos,
+                                        const Eigen::Vector3d& boxMinBound,
+                                        const Eigen::Vector3d& boxMaxBound) {
+  clipBoxBackCeiling(leftHandPos, boxMinBound, boxMaxBound);
+  clipBoxBackCeiling(rightHandPos, boxMinBound, boxMaxBound);
+}
+
+// 位置约束函数：同时通过球体约束限制左右手位置
+inline void clipPositionBySphereBothHands(Eigen::Vector3d& leftHandPos,
+                                          Eigen::Vector3d& rightHandPos,
+                                          const Eigen::Vector3d& leftCenter,
+                                          const Eigen::Vector3d& rightCenter,
+                                          double sphereRadius,
+                                          double minReachableDistance) {
+  clipPositionBySphere(leftHandPos, leftCenter, sphereRadius, minReachableDistance);
+  clipPositionBySphere(rightHandPos, rightCenter, sphereRadius, minReachableDistance);
+}
+
+// 位置约束函数：同时通过圆柱体约束限制左右手位置
+inline void clipPositionByCylinderBothHands(Eigen::Vector3d& leftHandPos,
+                                            Eigen::Vector3d& rightHandPos,
+                                            const Eigen::Vector3d& leftCenter,
+                                            const Eigen::Vector3d& rightCenter,
+                                            double minReachableDistance) {
+  clipPositionByCylinder(leftHandPos, leftCenter, minReachableDistance);
+  clipPositionByCylinder(rightHandPos, rightCenter, minReachableDistance);
+}
+
+// 位置约束函数：同时通过胸部中线约束限制左右手位置
+inline void clipPositionByChestMidlineBothHands(Eigen::Vector3d& leftHandPos,
+                                                Eigen::Vector3d& rightHandPos,
+                                                double chestOffset) {
+  clipPositionByChestMidline(leftHandPos, true, chestOffset);    // 左手：y <= -chestOffset
+  clipPositionByChestMidline(rightHandPos, false, chestOffset);  // 右手：y >= chestOffset
+}
+
+// 位置约束函数：综合应用所有约束条件限制左右手位置
+// 依次应用：球体约束、圆柱体约束、边界框约束、胸部中线约束
+inline void clipHandPositionsByAllConstraints(Eigen::Vector3d& leftHandPos,
+                                              Eigen::Vector3d& rightHandPos,
+                                              const Eigen::Vector3d& leftShoulderPos,
+                                              const Eigen::Vector3d& rightShoulderPos,
+                                              double sphereRadiusLimit,
+                                              double minReachableDistance,
+                                              const Eigen::Vector3d& leftCylinderCenter,
+                                              const Eigen::Vector3d& rightCylinderCenter,
+                                              double cylinderMinReachableDistance,
+                                              const Eigen::Vector3d& boxMinBound,
+                                              const Eigen::Vector3d& boxMaxBound,
+                                              double chestOffsetY) {
+  // 1. 球体约束：限制手部位置在肩部球体范围内
+  clipPositionBySphereBothHands(
+      leftHandPos, rightHandPos, leftShoulderPos, rightShoulderPos, sphereRadiusLimit, minReachableDistance);
+
+  // 2. 圆柱体约束：限制手部位置在xOy平面的投影距离
+  clipPositionByCylinderBothHands(
+      leftHandPos, rightHandPos, leftCylinderCenter, rightCylinderCenter, cylinderMinReachableDistance);
+
+  // 3. 边界框约束：限制x轴下界和z轴上界
+  clipBoxBackCeilingBothHands(leftHandPos, rightHandPos, boxMinBound, boxMaxBound);
+
+  // 4. 胸部中线约束：防止左右手过中线
+  clipPositionByChestMidlineBothHands(leftHandPos, rightHandPos, chestOffsetY);
+}
+
+// ============== 指针检查宏函数 ==============
+
+/**
+ * @brief 检查指针是否为空，如果为空则打印警告并返回（用于void函数）
+ * @param ptr 要检查的指针
+ * @param context 上下文信息（通常是函数名）
+ * @param objName 对象名称（用于日志输出）
+ * @note 使用此宏需要确保已包含 <ros/ros.h> 头文件
+ */
+#define CHECK_PTR_AND_RETURN_VOID(ptr, context, objName)      \
+  if ((ptr) == nullptr) {                                     \
+    ROS_WARN("[%s] %s is not initialized", context, objName); \
+    return;                                                   \
+  }
+
+// ============== 参数读取和打印宏函数 ==============
+/**
+ * @brief 读取 ROS 参数并打印（浮点数）
+ * @param nodeHandle ROS NodeHandle 对象
+ * @param paramPath 参数路径（如 "/ik_ros_uni_cpp_node/quest3/fhan_r_joint"）
+ * @param var 变量引用（用于存储读取的参数值）
+ * @param defaultValue 默认值
+ * @param precision 打印精度（默认2位）
+ * @note 使用路径作为 tag 进行打印，格式为：paramPath=value
+ */
+#define PARAM_AND_PRINT_FLOAT(nodeHandle, paramPath, var, defaultValue, precision) \
+  do {                                                                             \
+    (nodeHandle).param((paramPath), (var), (defaultValue));                        \
+    std::cout << (paramPath) << "=";                                               \
+    std::cout << std::fixed << std::setprecision((precision));                     \
+    std::cout << (var) << std::endl;                                               \
+  } while (0)
+
+/**
+ * @brief 读取 ROS 参数并打印（Vector3d），带默认值和警告
+ * @param nodeHandle ROS NodeHandle 对象
+ * @param paramPath 参数路径
+ * @param var 变量引用（用于存储读取的参数值）
+ * @param defaultValue 默认值（Eigen::Vector3d）
+ * @param precision 打印精度（默认2位）
+ * @param warnTag 警告标签（用于 ROS_WARN，如 "[Quest3IkIncrementalROS]"）
+ * @note 如果参数加载失败，会使用默认值并打印警告
+ */
+#define PARAM_AND_PRINT_VECTOR3D(nodeHandle, paramPath, var, defaultValue, precision, warnTag) \
+  do {                                                                                         \
+    std::vector<double> temp_vec;                                                              \
+    if ((nodeHandle).getParam((paramPath), temp_vec) && temp_vec.size() == 3) {                \
+      (var) = Eigen::Vector3d(temp_vec[0], temp_vec[1], temp_vec[2]);                          \
+    } else {                                                                                   \
+      (var) = (defaultValue);                                                                  \
+      ROS_WARN("%s Failed to load %s, using default: [%.2f, %.2f, %.2f]",                      \
+               (warnTag),                                                                      \
+               (paramPath),                                                                    \
+               (var).x(),                                                                      \
+               (var).y(),                                                                      \
+               (var).z());                                                                     \
+    }                                                                                          \
+    std::cout << (paramPath) << "=[";                                                          \
+    std::cout << std::fixed << std::setprecision((precision));                                 \
+    std::cout << (var).x() << ", " << (var).y() << ", " << (var).z() << "]" << std::endl;      \
+  } while (0)

@@ -44,7 +44,7 @@ void Quest3HandEE_ROS::processHandSE3ThreadFunction() {
     }
 
     // 夹爪/灵巧手的开合数据正常发布
-    handleEndEffectorControlData();
+    publishEndEffectorControlData();
   }
 
   rate.sleep();

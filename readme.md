@@ -313,6 +313,9 @@ roslaunch humanoid_controllers load_kuavo_real_half_up_body.launch
 
    # 启动C++版本的ik
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 use_cpp_ik:=true
+
+   # 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 use_cpp_ik:=true use_incremental_ik:=true
   ```
   > 如果希望同时映射躯干的运动（上下蹲和弯腰），可以增加选项`control_torso:=1`，使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度。
 
