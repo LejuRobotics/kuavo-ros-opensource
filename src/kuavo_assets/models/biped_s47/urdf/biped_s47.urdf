@@ -1351,80 +1351,27 @@
     <child link="radar" />
   </joint>
 
-  <link
-    name="l_hand_tripod">
-    <inertial>
-      <origin
-        xyz="0.0653430919091347 -0.00776026775236038 -0.0648805742218587"
-        rpy="0 0 0" />
-      <mass
-        value="0.0342669089979502" />
-      <inertia
-        ixx="1.59850149176395E-05"
-        ixy="-5.29139847447712E-06"
-        ixz="1.78131910236665E-05"
-        iyy="9.8758759051122E-05"
-        iyz="-2.71719747666022E-07"
-        izz="9.75721402715185E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s47/meshes/l_hand_tripod.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s47/meshes/l_hand_tripod.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="l_hand_tripod_joint"
-    type="fixed">
-    <origin
-      xyz="0.0 0.0 0.0"
-      rpy="0.0 0.0 0.0" />
-    <parent
-      link="zarm_l7_link" />
-    <child
-      link="l_hand_tripod" />
-    <axis
-      xyz="0 0 0" />
-  </joint>
 
   <link
     name="l_hand_camera">
     <inertial>
       <origin
-        xyz="-5.55111512312578E-17 -5.55111512312578E-17 0.0114631923429834"
+        xyz="-0.485692161168303 0.000199999609570049 -0.448332556771029"
         rpy="0 0 0" />
       <mass
-        value="0.038145442577304" />
+        value="3.8901417772519E-12" />
       <inertia
-        ixx="6.90025820370885E-06"
-        ixy="2.08889460021576E-21"
-        ixz="-6.35274710440725E-22"
-        iyy="6.86774271974419E-06"
-        iyz="-4.21980924697416E-22"
-        izz="1.04248094301688E-05" />
+        ixx="1.08875551920064E-15"
+        ixy="1.50627375643436E-18"
+        ixz="-1.07125850560354E-18"
+        iyy="7.12388035979844E-16"
+        iyz="4.05974263416156E-20"
+        izz="7.13271792110585E-16" />
     </inertial>
     <visual>
       <origin
         xyz="0 0 0"
-        rpy="0 -1.57 0" />
+        rpy="0 0 0" />
       <geometry>
         <mesh
           filename="package://kuavo_assets/models/biped_s47/meshes/l_hand_camera.STL" />
@@ -1432,13 +1379,13 @@
       <material
         name="">
         <color
-          rgba="1 1 1 1" />
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
       </material>
     </visual>
     <collision>
       <origin
         xyz="0 0 0"
-        rpy="0 -1.57 0" />
+        rpy="0 0 0" />
       <geometry>
         <mesh
           filename="package://kuavo_assets/models/biped_s47/meshes/l_hand_camera.STL" />
@@ -1449,90 +1396,37 @@
     name="l_hand_camera_joint"
     type="fixed">
     <origin
-      xyz="0.11540559159102 -0.0145586110669961 -0.110123491595499"
-      rpy="1.919862177193763 0.753528063917894 -2.897246568680842" />
+      xyz="0 0.0334213029231864 -0.10658802837623"
+      rpy="3.14159265358979 1.04719755119659 -1.57079632679489" />
     <parent
-      link="l_hand_tripod" />
+      link="zarm_l7_link" />
     <child
       link="l_hand_camera" />
     <axis
       xyz="0 0 0" />
   </joint>
 
-  <link
-    name="r_hand_tripod">
-    <inertial>
-      <origin
-        xyz="0.0653431459436017 0.00833186007885223 -0.0625275130281983"
-        rpy="0 0 0" />
-      <mass
-        value="0.034266881719861" />
-      <inertia
-        ixx="1.5985004453075E-05"
-        ixy="5.17271984897294E-06"
-        ixz="1.78480505198324E-05"
-        iyy="9.87551311174154E-05"
-        iyz="2.79574204670866E-07"
-        izz="9.75758243581943E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s47/meshes/r_hand_tripod.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s47/meshes/r_hand_tripod.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="r_hand_tripod_joint"
-    type="fixed">
-    <origin
-      xyz="0.0 0.0 0.0"
-      rpy="0.0 0.0 0.0" />
-    <parent
-      link="zarm_r7_link" />
-    <child
-      link="r_hand_tripod" />
-    <axis
-      xyz="0 0 0" />
-  </joint>
 
-  <link
+   <link
     name="r_hand_camera">
     <inertial>
       <origin
-        xyz="0 5.55111512312578E-17 0.0114631923429834"
+        xyz="-0.485692161168328 -3.9043611389566E-10 -0.448332556771001"
         rpy="0 0 0" />
       <mass
-        value="0.038145442577304" />
+        value="3.89014177725188E-12" />
       <inertia
-        ixx="6.90025820370885E-06"
-        ixy="-5.73053564581591E-21"
-        ixz="-1.27054942088145E-21"
-        iyy="6.8677427197442E-06"
-        iyz="7.56979586483243E-22"
-        izz="1.04248094301688E-05" />
+        ixx="1.08875551920064E-15"
+        ixy="1.50627375643347E-18"
+        ixz="-1.07125850560528E-18"
+        iyy="7.12388035979843E-16"
+        iyz="4.05974263416708E-20"
+        izz="7.13271792110582E-16" />
     </inertial>
     <visual>
       <origin
         xyz="0 0 0"
-        rpy="0 -1.57 0" />
+        rpy="0 0 0" />
       <geometry>
         <mesh
           filename="package://kuavo_assets/models/biped_s47/meshes/r_hand_camera.STL" />
@@ -1540,13 +1434,13 @@
       <material
         name="">
         <color
-          rgba="1 1 1 1" />
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
       </material>
     </visual>
     <collision>
       <origin
         xyz="0 0 0"
-        rpy="0 -1.57 0" />
+        rpy="0 0 0" />
       <geometry>
         <mesh
           filename="package://kuavo_assets/models/biped_s47/meshes/r_hand_camera.STL" />
@@ -1557,10 +1451,10 @@
     name="r_hand_camera_joint"
     type="fixed">
     <origin
-      xyz="0.115405591590931 0.0154312352120435 -0.107724128430896"
-      rpy="1.208853693239594  0.751879414295006 2.888346587751982" />
+      xyz="0 -0.0334213029231857 -0.10658802837623"
+      rpy="3.14159265358976 1.04719755119665 1.57079632679484" />
     <parent
-      link="r_hand_tripod" />
+      link="zarm_r7_link" />
     <child
       link="r_hand_camera" />
     <axis
