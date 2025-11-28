@@ -38,8 +38,8 @@
     <arg name="arm_move_spd"      default="1.2"/>
 
     <!-- 半身控制手臂模式切换插值相关参数 -->
-    <arg name="arm_move_spd_half_up_body" default="0.21"/>
-    <arg name="threshold_arm_diff_half_up_body" default="0.28"/>
+    <arg name="arm_move_spd_half_up_body" default="0.15"/>
+    <arg name="threshold_arm_diff_half_up_body" default="0.15"/>
     <!-- The file defining gait definition -->
 
     <!-- Set with_coredump parameter based on coredump value -->
