@@ -77,6 +77,7 @@ namespace ocs2 {
         int robot_version_ = 45;
         std::vector<std::string> arm_joint_names_;
         const std::array<std::string, 2> head_joint_names_ = { "zhead_1_joint", "zhead_2_joint" };
+        const std::array<std::string, 1> waist_joint_names_ = { "waist_yaw_joint" };
         // 贝塞尔曲线插值器中使用弧度值，此处为手指关节限位(0 ~ 100)的转换
         constexpr static double hand_joint_lower_limit_ = 0.0;
         constexpr static double hand_joint_upper_limit_ = 1.7453;

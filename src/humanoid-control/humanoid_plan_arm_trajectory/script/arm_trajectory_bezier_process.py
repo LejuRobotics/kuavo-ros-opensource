@@ -7,7 +7,24 @@ import time
 import threading
 import numpy as np
 import os
+import sys
+import rospkg
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
+    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError) as e:
+    # 如果 rospkg 不可用或包未找到，回退到相对路径方式
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
 from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
@@ -40,16 +57,27 @@ class ArmTrajectoryBezierDemo:
         self.arm_flag = False
         self._timer = None
         self.interrupt_flag  = False  
-        self.robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
-        self.robot_class = KUAVO if self.robot_version >= 40 else ROBAN
+        # 使用 RobotVersion 类创建版本号对象
+        robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
+        self.robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
+        self.robot_class = KUAVO if self.robot_version.major() >= 4 else ROBAN
         self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
+        # KUAVO v50+ 有腰部关节
+        self.has_waist = (self.robot_version.major() == 5) if self.robot_class == KUAVO else False
         
         if self.robot_class == KUAVO:
+            # 根据是否有腰部关节确定TACT长度
+            tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
             if self.kuavo_control_scheme == "rl":
-                self.INIT_ARM_POS = [int(0)] * self.KUAVO_TACT_LENGTH
+                self.INIT_ARM_POS = [int(0)] * tact_length
             else:
-                self.INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-            self.current_arm_joint_state = [0] * self.KUAVO_TACT_LENGTH
+                # 基础28个关节 + 可选的1个腰部关节
+                base_init = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                if self.has_waist:
+                    self.INIT_ARM_POS = base_init + [0]  # 添加腰部初始位置
+                else:
+                    self.INIT_ARM_POS = base_init
+            self.current_arm_joint_state = [0] * tact_length
         elif self.robot_class == ROBAN:
             self.INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]# task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
             self.current_arm_joint_state = [0] * self.ROBAN_TACT_LENGTH
@@ -130,7 +158,12 @@ class ArmTrajectoryBezierDemo:
             arm_part = list(joint_msg.joint_data.joint_q[12:26])
             hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
             head_part = list(joint_msg.joint_data.joint_q[-2:])
-            self.current_arm_joint_state = arm_part + hand_part + head_part
+            if self.has_waist:
+                # KUAVO v50+: 腰部关节在joint_q[12]位置
+                waist_part = [joint_msg.joint_data.joint_q[12]]
+                self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
+            else:
+                self.current_arm_joint_state = arm_part + hand_part + head_part
 
         elif self.robot_class == ROBAN:
             arm_part = list(joint_msg.joint_data.joint_q[13:21])
@@ -171,7 +204,10 @@ class ArmTrajectoryBezierDemo:
             self.hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
                                                 point.positions[20:26]]  # 无符号整数
             
-            self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:]]
+            self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:28]]
+            if self.has_waist and len(point.positions) > 28:
+                # KUAVO v50+: 腰部关节在joint_q[12]位置
+                self.waist_state.data = [math.degrees(pos) for pos in point.positions[28:29]]
             
         elif self.robot_class == ROBAN:
             self.joint_state.name = [
@@ -244,7 +280,11 @@ class ArmTrajectoryBezierDemo:
             frame0["keyframe"] = 0
             frames.insert(0, frame0)
 
-        end_key = self.KUAVO_TACT_LENGTH + 1 if self.robot_class == KUAVO else self.ROBAN_TACT_LENGTH + 1
+        # 计算结束键值：KUAVO根据是否有腰部关节调整
+        if self.robot_class == KUAVO:
+            end_key = (self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)) + 1
+        else:
+            end_key = self.ROBAN_TACT_LENGTH + 1
 
         for frame in frames:
             servos, keyframe, attribute = frame["servos"], frame["keyframe"], frame["attribute"]
@@ -342,20 +382,27 @@ class ArmTrajectoryBezierDemo:
             self.control_hand_pub.publish(self.hand_state)
             self.head_state.joint_data = [0] * 2
             self.control_head_pub.publish(self.head_state)
-            self.waist_state.data = [0]
-            self.control_waist_pub.publish(self.waist_state)
+            # 复位腰部（KUAVO v50+ 或 ROBAN）
+            if (self.robot_class == KUAVO and self.has_waist) or self.robot_class == ROBAN:
+                self.waist_state.data = [0]
+                self.control_waist_pub.publish(self.waist_state)
 
     def create_action_data(self, finish_time):
+        # 根据是否有腰部关节确定TACT长度
+        if self.robot_class == KUAVO:
+            tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
+        else:
+            tact_length = self.ROBAN_TACT_LENGTH
         frames = [
             {
                 "servos": [int(round(math.degrees(x))) for x in self.current_arm_joint_state],
                 "keyframe": 0,
-                "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(self.KUAVO_TACT_LENGTH)}
+                "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(tact_length)}
             },
             {
                 "servos": self.INIT_ARM_POS,
                 "keyframe": finish_time * 100,
-                "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(self.KUAVO_TACT_LENGTH)}
+                "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(tact_length)}
             },
         ]
         return {"frames": frames}
@@ -436,12 +483,18 @@ class ArmTrajectoryBezierDemo:
             req.multi_joint_bezier_trajectory.append(msg)
         req.start_frame_time = self.START_FRAME_TIME
         req.end_frame_time = self.END_FRAME_TIME
-        req.joint_names = [
+        # 基础关节名称（14个手臂关节）
+        base_joint_names = [
             "l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch",
             "l_hand_yaw", "l_hand_pitch", "l_hand_roll",
             "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch",
             "r_hand_yaw", "r_hand_pitch", "r_hand_roll"
         ]
+        # KUAVO v50+: 添加腰部关节
+        if self.robot_class == KUAVO and self.has_waist:
+            req.joint_names = base_joint_names + ["waist_yaw_joint"]
+        else:
+            req.joint_names = base_joint_names
         return req
 
     def plan_arm_trajectory_bezier_curve_client(self, req):
@@ -512,9 +565,11 @@ class ArmTrajectoryBezierDemo:
             14: [11, 13, 14],
         }
         allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
-        if self.robot_version not in allowed_robot_versions:
+        # 使用 version_number() 获取版本号数字进行比较
+        robot_version_number = self.robot_version.version_number()
+        if robot_version_number not in allowed_robot_versions:
             msg = (
-                f"Version mismatch: tact {tact_robot_version} is incompatible with robot {self.robot_version}"
+                f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version_number} ({self.robot_version.version_name()})"
             )
             rospy.logerr(msg)
             self.publish_action_state(0)
@@ -567,8 +622,10 @@ class ArmTrajectoryBezierDemo:
                     self.control_hand_pub.publish(self.hand_state)
                 if len(self.head_state.joint_data) != 0:
                     self.control_head_pub.publish(self.head_state)
-                if len(self.waist_state.data) != 0:
-                    self.control_waist_pub.publish(self.waist_state)
+                # 发布腰部数据（KUAVO v50+ 或 ROBAN）
+                if (self.robot_class == KUAVO and self.has_waist) or self.robot_class == ROBAN:
+                    if len(self.waist_state.data) != 0:
+                        self.control_waist_pub.publish(self.waist_state)
             except Exception as e:
                 rospy.logerr(f"Failed to publish arm trajectory: {e}")
             except KeyboardInterrupt:

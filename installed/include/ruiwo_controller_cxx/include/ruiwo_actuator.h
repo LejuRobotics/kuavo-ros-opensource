@@ -15,20 +15,20 @@
  */
 struct RuiwoMotorParam_t {
     // 关节参数[vel, kp_pos, kd_pos, tor, kp_vel, kd_vel, ki_vel] vel的pid只有在servo模式下才起作用
-    int vel;   
-    int kp_pos;
-    int kd_pos;
-    int tor;   
-    int kp_vel;
-    int kd_vel;
-    int ki_vel;
-    
-    RuiwoMotorParam_t() : vel(0), kp_pos(0), kd_pos(0), tor(0), kp_vel(0), kd_vel(0), ki_vel(0) {}
-    
-    RuiwoMotorParam_t(int vel_, int kp_pos_, int kd_pos_, int tor_, int kp_vel_, int kd_vel_, int ki_vel_) :
+    double vel;
+    double kp_pos;
+    double kd_pos;
+    double tor;
+    double kp_vel;
+    double kd_vel;
+    double ki_vel;
+
+    RuiwoMotorParam_t() : vel(0.0), kp_pos(0.0), kd_pos(0.0), tor(0.0), kp_vel(0.0), kd_vel(0.0), ki_vel(0.0) {}
+
+    RuiwoMotorParam_t(double vel_, double kp_pos_, double kd_pos_, double tor_, double kp_vel_, double kd_vel_, double ki_vel_) :
         vel(vel_), kp_pos(kp_pos_), kd_pos(kd_pos_), tor(tor_), kp_vel(kp_vel_), kd_vel(kd_vel_), ki_vel(ki_vel_) {}
 
-    RuiwoMotorParam_t(const std::vector<int> & motor_parameters) {
+    RuiwoMotorParam_t(const std::vector<double> & motor_parameters) {
         assert(motor_parameters.size() == 7 && "Invalid motor parameters size");
         vel = motor_parameters[0];
         kp_pos = motor_parameters[1];
@@ -37,7 +37,19 @@ struct RuiwoMotorParam_t {
         kp_vel = motor_parameters[4];
         kd_vel = motor_parameters[5];
         ki_vel = motor_parameters[6];
-    }    
+    }
+
+    // 兼容性构造函数，支持从std::vector<int>构造
+    RuiwoMotorParam_t(const std::vector<int> & motor_parameters) {
+        assert(motor_parameters.size() == 7 && "Invalid motor parameters size");
+        vel = static_cast<double>(motor_parameters[0]);
+        kp_pos = static_cast<double>(motor_parameters[1]);
+        kd_pos = static_cast<double>(motor_parameters[2]);
+        tor = static_cast<double>(motor_parameters[3]);
+        kp_vel = static_cast<double>(motor_parameters[4]);
+        kd_vel = static_cast<double>(motor_parameters[5]);
+        ki_vel = static_cast<double>(motor_parameters[6]);
+    }
 };
 
 struct RuiwoMotorConfig_t {

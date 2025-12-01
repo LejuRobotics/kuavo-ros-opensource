@@ -17,9 +17,24 @@ import subprocess
 import base64
 from pathlib import Path
 import yaml
-from utils import calculate_file_md5, frames_to_custom_action_data, get_start_end_frame_time, frames_to_custom_action_data_ocs2, verify_robot_version
+from utils import calculate_file_md5, frames_to_custom_action_data, get_start_end_frame_time, frames_to_custom_action_data_ocs2, verify_robot_version, robot_version
 import shutil
 import rosnode
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
+    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError) as e:
+    # 如果 rospkg 不可用或包未找到，回退到相对路径方式
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
 from kuavo_ros_interfaces.srv import planArmTrajectoryBezierCurve, stopPlanArmTrajectory, planArmTrajectoryBezierCurveRequest, ocs2ChangeArmCtrlMode
 from kuavo_ros_interfaces.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHeadMotionData
 from kuavo_msgs.msg import robotHandPosition
@@ -62,8 +77,8 @@ ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
 ROBAN_TACT_LENGTH = 23
 g_robot_type = ""
 ocs2_current_joint_state = []
-robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
-
+# robot_version 从 utils 模块导入，避免重复创建
+print(f"robot_version: {robot_version}")
 # Global variables for robot control
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
@@ -84,6 +99,7 @@ if not KUAVO_ROS_CONTROL_WS_PATH:
 
 ROBOT_VERSION = os.environ.get("ROBOT_VERSION")
 WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME = "websocket_humanoid_robot_service"
+# 为了兼容性，保留 ROBOT_VERSION 字符串用于环境变量传递
 
 
 # 机器人状态跟踪变量，用于跟踪机器人当前状态: unlaunch, crouching, standing
@@ -466,10 +482,10 @@ h12_package_name = "h12pro_controller_node"
 h12_package_path = rospkg.RosPack().get_path(h12_package_name)
 joy_package_name = "joy"
 joy_package_path = rospkg.RosPack().get_path(joy_package_name)
-if robot_version >= 40:
+if robot_version.major() >= 4:
     H12_CONFIG_PATH = h12_package_path + "/config/customize_config.json"
     current_arm_joint_state = [0] * KUAVO_TACT_LENGTH
-elif robot_version >= 10 and robot_version <= 19:
+elif robot_version.major() == 1:
     H12_CONFIG_PATH = joy_package_path + "/config/customize_config.json"
     current_arm_joint_state = [0] * ROBAN_TACT_LENGTH
 _last_joint_msg = None
@@ -490,9 +506,8 @@ REPO_PATH = repo_path_result.stdout.strip()
 
 g_robot_type = ""
 ocs2_current_joint_state = []
-robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
 
-if robot_version >= 40:
+if robot_version.major() >= 4:
     joint_names = [
         "l_arm_pitch",
         "l_arm_roll",
@@ -578,13 +593,19 @@ def _update_current_arm_joint_state(joint_msg, hand_msg):
     """整合 joint_msg 和 hand_msg，更新 current_arm_joint_state"""
 
     global ocs2_joint_state,current_arm_joint_state
-    if robot_version >= 40:
+    if robot_version.major() == 5:
+        arm_part = list(joint_msg.joint_data.joint_q[12:26])
+        hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+        head_part = list(joint_msg.joint_data.joint_q[-2:])
+        waist_part = [joint_msg.joint_data.joint_q[0]]
+        current_arm_joint_state = arm_part + hand_part + head_part + waist_part
+    elif robot_version.major() == 4:
         arm_part = list(joint_msg.joint_data.joint_q[12:26])
         hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
         head_part = list(joint_msg.joint_data.joint_q[-2:])
         current_arm_joint_state = arm_part + hand_part + head_part
 
-    elif robot_version >= 10 and robot_version < 30:
+    elif robot_version.major() == 1:
         arm_part = list(joint_msg.joint_data.joint_q[13:21])
         hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
         head_part = list(joint_msg.joint_data.joint_q[-2:])
@@ -595,12 +616,23 @@ def _update_current_arm_joint_state(joint_msg, hand_msg):
 
 def traj_callback(msg):
     global ocs2_joint_state
-    global robot_version
     if len(msg.points) == 0:
         return
     point = msg.points[0]
     
-    if robot_version >= 40:
+    if robot_version.major() == 5:
+        ocs2_joint_state.name = joint_names
+        ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:14]]
+        ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
+        ocs2_joint_state.effort = [0] * 14
+        ocs2_hand_state.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
+        ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[20:26]]
+        ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:28]]
+        if len(point.positions) > 28:
+            ocs2_waist_state.data = [math.degrees(pos) for pos in point.positions[28:]]
+        else:
+            ocs2_waist_state.data = []
+    elif robot_version.major() == 4:
         ocs2_joint_state.name = joint_names
         ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:14]]
         ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
@@ -609,7 +641,7 @@ def traj_callback(msg):
         ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[20:26]]
         ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:]]
 
-    elif robot_version >= 10 and robot_version < 30:
+    elif robot_version.major() == 1:
         ocs2_joint_state.name = joint_names
         ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:8]]
         ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:8]]
@@ -690,7 +722,7 @@ def create_bezier_request(action_data, start_frame_time, end_frame_time):
         req.multi_joint_bezier_trajectory.append(msg)
     req.start_frame_time = start_frame_time
     req.end_frame_time = end_frame_time
-    if robot_version >= 40:
+    if robot_version.major() >= 4:
         req.joint_names = ["l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch", "l_hand_yaw", "l_hand_pitch", "l_hand_roll", "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch", "r_hand_yaw", "r_hand_pitch", "r_hand_roll"]
     else:
         req.joint_names = ["zarm_l1_link", "zarm_l2_link", "zarm_l3_link", "zarm_l4_link", "zarm_r1_link", "zarm_r2_link", "zarm_r3_link", "zarm_r4_link"]
@@ -1002,15 +1034,15 @@ async def set_zero_point_handler(
     arm_zero_file_path = os.path.expanduser(f"~/.config/lejuconfig/arms_zero.yaml")
     leg_zero_file_path = os.path.expanduser(f"~/.config/lejuconfig/offset.csv")
     
-    robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
     # Get kuavo_assets package path
     kuavo_assets_path = rospkg.RosPack().get_path('kuavo_assets')
-    with open(f"{kuavo_assets_path}/config/kuavo_v{robot_version}/kuavo.json", 'r') as f:
+    robot_version_str = robot_version.to_string()
+    with open(f"{kuavo_assets_path}/config/kuavo_v{robot_version_str}/kuavo.json", 'r') as f:
         json_config = json.load(f)
     
     arm_joints = json_config["NUM_ARM_JOINT"]
     head_joints = json_config["NUM_HEAD_JOINT"]
-    if robot_version >= 11 and robot_version <= 19:
+    if robot_version.major() == 1:
         waist_joints = json_config["NUM_WAIST_JOINT"]
     else:
         waist_joints = 0
@@ -1096,15 +1128,15 @@ async def get_zero_point_handler(
         cmd="get_zero_point", data={"code": 0, "message": "Zero point retrieved successfully"}
     )
 
-    robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
     # Get kuavo_assets package path
     kuavo_assets_path = rospkg.RosPack().get_path('kuavo_assets')
-    with open(f"{kuavo_assets_path}/config/kuavo_v{robot_version}/kuavo.json", 'r') as f:
+    robot_version_str = robot_version.to_string()
+    with open(f"{kuavo_assets_path}/config/kuavo_v{robot_version_str}/kuavo.json", 'r') as f:
         json_config = json.load(f)
     
     arm_joints = json_config["NUM_ARM_JOINT"]
     head_joints = json_config["NUM_HEAD_JOINT"]
-    if robot_version >= 11 and robot_version <= 19:
+    if robot_version.major() == 1:
         waist_joints = json_config["NUM_WAIST_JOINT"]
     else:
         waist_joints = 0
@@ -1189,12 +1221,21 @@ async def get_robot_info_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
 
-    robot_version = rospy.get_param('robot_version')
+    # 从参数服务器获取版本号，如果不存在则使用全局 robot_version
+    try:
+        robot_version_param = rospy.get_param('robot_version')
+        if RobotVersion.is_valid(robot_version_param):
+            robot_version_info = RobotVersion.create(robot_version_param)
+        else:
+            robot_version_info = robot_version
+    except:
+        robot_version_info = robot_version
+    
     payload = Payload(
         cmd="get_robot_info", 
         data={
             "code": 0, 
-            "robot_type": robot_version,
+            "robot_type": robot_version_info.version_number(),
             "music_folder_path": MUSIC_FILE_FOLDER,
             "maps_folder_path": MAP_FILE_FOLDER,
             "h12_config_path": H12_CONFIG_PATH,
@@ -1590,12 +1631,11 @@ async def update_h12_config_handler(
     )
 
     # 更新H12遥控器按键配置
-    global robot_version
-    if robot_version >= 40:
+    if robot_version.major() >= 4:
         msg = UpdateH12CustomizeConfig()
         msg.update_msg = "Update H12 Config"
         update_h12_config_pub.publish(msg)
-    elif robot_version >= 10 and robot_version <= 19:
+    elif robot_version.major() == 1:
         msg = String()
         msg.data = "Update Joy Config"
         update_joy_config_pub.publish(msg)
