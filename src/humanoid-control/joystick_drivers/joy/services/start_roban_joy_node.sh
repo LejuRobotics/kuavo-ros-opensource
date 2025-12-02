@@ -13,7 +13,7 @@ echo "ROS_IP: $ROS_IP"
 
 # Check if both nodes are not running
 if ! rosnode list | grep -q "/joy_node"; then
-    roslaunch humanoid_controllers joy_control_bt.launch real:=true start_way:=auto
+    roslaunch humanoid_controllers joy_control_bt.launch real:=true start_way:=auto respawn:=false
 else
     echo "Node /joy_node is already running"
     echo "Please check running nodes with 'rosnode list'"

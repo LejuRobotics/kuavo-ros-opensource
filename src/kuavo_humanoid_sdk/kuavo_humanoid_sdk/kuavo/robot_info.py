@@ -13,19 +13,39 @@ class KuavoRobotInfo(RobotInfoBase):
         self._ros_param = RosParameter()
             
         self._robot_version = kuavo_ros_param['robot_version']
+        self._robot_version_major = (int(self._robot_version) // 10) % 10
         self._end_effector_type = kuavo_ros_param['end_effector_type']
         self._arm_joint_dof = kuavo_ros_param['arm_dof']
-        # self._joint_dof = kuavo_ros_param['arm_dof'] + kuavo_ros_param['leg_dof'] + kuavo_ros_param['head_dof']
+        self._waist_joint_dof = kuavo_ros_param['waist_dof'] if kuavo_ros_param['waist_dof'] is not None else 0
+        self._joint_dof = kuavo_ros_param['arm_dof'] + kuavo_ros_param['leg_dof'] + kuavo_ros_param['head_dof'] + self._waist_joint_dof
         self._joint_names = kuavo_ros_param['joint_names']
         self._end_frames_names = kuavo_ros_param['end_frames_names']
         self._head_joint_dof = kuavo_ros_param['head_dof']
         self._head_joint_names = self._joint_names[-2:]
-        if self.robot_version >= 60:
+        
+        # Extract waist joint names
+        if self._waist_joint_dof > 0:
+            # Waist joints are after leg joints (12 joints) and before arm joints
+            leg_dof = kuavo_ros_param['leg_dof']
+            self._waist_joint_names = self._joint_names[leg_dof:leg_dof + self._waist_joint_dof]
+        else:
+            self._waist_joint_names = []
+        
+        if self._robot_version_major == 6:
             print("当前为轮臂模型")
             self._arm_joint_names = self._joint_names[4:self._arm_joint_dof + 12]
+        elif self._robot_version_major == 1:
+            print("当前为双足模型")
+            # For version 1: leg joints (12) + waist joint (1) + arm joints (8)
+            leg_dof = kuavo_ros_param['leg_dof']
+            arm_start_idx = leg_dof + self._waist_joint_dof
+            self._arm_joint_names = self._joint_names[arm_start_idx:arm_start_idx + self._arm_joint_dof]
         else:
             print("当前为双足模型")
-            self._arm_joint_names = self._joint_names[12:self._arm_joint_dof + 12]
+            # Arm joints are after leg joints (12) and waist joints
+            leg_dof = kuavo_ros_param['leg_dof']
+            arm_start_idx = leg_dof + self._waist_joint_dof
+            self._arm_joint_names = self._joint_names[arm_start_idx:arm_start_idx + self._arm_joint_dof]
         self._init_stand_height = kuavo_ros_param['init_stand_height']
 
     @property
@@ -103,6 +123,24 @@ class KuavoRobotInfo(RobotInfoBase):
             list: 包含头部关节名称的列表。
         """
         return self._head_joint_names
+
+    @property
+    def waist_joint_dof(self) -> int:
+        """返回 Kuavo 机器人腰部的关节数。
+
+        Returns:
+            int: 腰部的关节数，例如 0 或 1。
+        """
+        return self._waist_joint_dof
+
+    @property
+    def waist_joint_names(self) -> list:
+        """返回 Kuavo 机器人腰部关节的名称。
+
+        Returns:
+            list: 包含腰部关节名称的列表。
+        """
+        return self._waist_joint_names
 
     @property
     def eef_frame_names(self) -> Tuple[str, str]:

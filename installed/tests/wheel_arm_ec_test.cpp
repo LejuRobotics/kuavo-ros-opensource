@@ -120,7 +120,7 @@ public:
         std::cout << "\n=== 当前关节角度 ===" << std::endl;
         
         // 获取当前关节数据
-        hardware_plant_->GetJointData(joint_ids, joint_data);
+        hardware_plant_->GetMotorData(joint_ids, joint_data);
         
         // 打印轮臂腿部关节角度
         std::cout << "轮臂腿部关节:" << std::endl;
@@ -190,7 +190,7 @@ public:
         double target_angle_deg;
         std::cin >> target_angle_deg;
         
-        hardware_plant_->GetJointData(joint_ids, joint_data);
+        hardware_plant_->GetMotorData(joint_ids, joint_data);
         
         std::vector<double> joint_command;
         joint_command.resize(joint_data.size());

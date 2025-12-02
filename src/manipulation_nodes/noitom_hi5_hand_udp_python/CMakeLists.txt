@@ -9,11 +9,21 @@ project(noitom_hi5_hand_udp_python)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   rospy
+  roscpp
   std_msgs
   message_generation
   geometry_msgs
+  sensor_msgs
+  tf
+  tf2_msgs
   kuavo_ros_interfaces
+  kuavo_msgs
+  roslib
 )
+
+# Find protobuf library (only need to link, not generate code)
+# Using pre-generated .pb.cc/.pb.h files from generated_cpp/protos/
+find_package(Protobuf REQUIRED)
 
 add_message_files(
   FILES handRotation.msg
@@ -31,7 +41,7 @@ generate_messages(
 )
 
 catkin_package(
-  CATKIN_DEPENDS rospy std_msgs message_runtime
+  CATKIN_DEPENDS rospy roscpp std_msgs geometry_msgs sensor_msgs tf tf2_msgs kuavo_ros_interfaces kuavo_msgs message_runtime
 )
 
 ## System dependencies are found with CMake's conventions
@@ -135,41 +145,36 @@ catkin_package(
 ###########
 
 ## Specify additional locations of header files
-## Your package locations should be listed before other locations
 include_directories(
-# include
+  include
   ${catkin_INCLUDE_DIRS}
+  ${Protobuf_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/protos_c  # Pre-generated protobuf headers
 )
 
-## Declare a C++ library
-# add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/kuavo_ctrl_package.cpp
-# )
+## Pre-generated protobuf C++ sources (generated with protoc 3.6.1)
+## This avoids protoc version mismatch issues on CI
+set(PROTO_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/protos_c/hand_pose.pb.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/protos_c/robot_info.pb.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/protos_c/robot_state.pb.cc
+)
 
-## Add cmake target dependencies of the library
-## as an example, code may need to be generated before libraries
-## either from message generation or dynamic reconfigure
-# add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+## Declare C++ executable for Quest3 monitoring (C++ implementation)
+add_executable(monitor_quest3_cpp
+  src/monitor_quest3_node.cpp
+  ${PROTO_SRCS}
+)
 
-## Declare a C++ executable
-## With catkin_make all packages are built within a single CMake context
-## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/kuavo_ctrl_package_node.cpp)
+add_dependencies(monitor_quest3_cpp
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
 
-## Rename C++ executable without prefix
-## The above recommended prefix causes long target names, the following renames the
-## target back to the shorter version for ease of user use
-## e.g. "rosrun someones_pkg node" instead of "rosrun someones_pkg someones_pkg_node"
-# set_target_properties(${PROJECT_NAME}_node PROPERTIES OUTPUT_NAME node PREFIX "")
-
-## Add cmake target dependencies of the executable
-## same as for the library above
-# add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-## Specify libraries to link a library or executable target against
-# target_link_libraries(${PROJECT_NAME}_node
-#   ${catkin_LIBRARIES}
-# )
+target_link_libraries(monitor_quest3_cpp
+  ${catkin_LIBRARIES}
+  ${Protobuf_LIBRARIES}
+)
 
 #############
 ## Install ##
@@ -187,9 +192,9 @@ include_directories(
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
-# install(TARGETS ${PROJECT_NAME}_node
-#   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+install(TARGETS monitor_quest3_cpp
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark libraries for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_libraries.html

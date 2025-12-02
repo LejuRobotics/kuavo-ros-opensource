@@ -42,6 +42,8 @@
     <arg name="right_center" default="[0, -0.02, 0]" /> <!-- 右手圆柱体约束中心 [x, y, z] -->
     <arg name="default_left_hand_pos_on_exit" default="[0.02, 0.32, -0.15]" /> <!-- 退出时左手默认目标位置 [x, y, z] -->
     <arg name="default_right_hand_pos_on_exit" default="[0.02, -0.32, -0.15]" /> <!-- 退出时右手默认目标位置 [x, y, z] -->
+    
+    <arg name="use_cpp_monitor" default="true"/> <!-- false: use Python Quest3 monitor, true: use C++ Quest3 monitor -->
 
     
     <!-- motion_capture_ik -->
@@ -91,7 +93,16 @@
     </node>
 
     <!-- noitom_hi5_hand_udp_python -->
-    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen">
+    <!-- Python implementation (default) -->
+    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen" unless="$(arg use_cpp_monitor)">
         <param name="enable_head_control" value="$(arg enable_head_control)" />
     </node>
+
+    <!-- C++ implementation -->
+    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3_cpp" args="$(arg ip_address)" name="monitor_quest3_cpp" output="screen" if="$(arg use_cpp_monitor)">
+        <param name="enable_head_control" value="$(arg enable_head_control)" />
+    </node>
+
+    <!-- RobotStateServer still uses existing Python implementation as separate node -->
+    <node pkg="noitom_hi5_hand_udp_python" type="robot_state_server.py" name="robot_state_server" output="screen" if="$(arg use_cpp_monitor)" />
 </launch>

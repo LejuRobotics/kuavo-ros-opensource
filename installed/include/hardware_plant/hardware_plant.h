@@ -86,6 +86,8 @@ class HardwarePlant
     Eigen::VectorXd GetC2Tcoeff_Torque(Eigen::VectorXd &joint_torque);
     void cmds2Cmdr(const Eigen::VectorXd &cmd_s, uint32_t na_src, Eigen::VectorXd &cmd_r, uint32_t na_r);
     bool readSensor(SensorData_t &sensor_data);
+    inline bool readHardwareState(SensorData_t &sensor_data) { return readSensor(sensor_data); }
+    void readHardwareJointState(SensorData_t &sensor_data);
     void setState(SensorData_t &sensor_data_motor, SensorData_t &sensor_data_joint);
     void getState(SensorData_t &sensor_data_motor, SensorData_t &sensor_data_joint);
     bool HWPlantCheck();
@@ -106,6 +108,8 @@ class HardwarePlant
     void qv_joint_to_motor(Eigen::VectorXd &no_arm_state, Eigen::VectorXd &with_arm_state, uint32_t nq_with_arm, uint32_t nq_no_arm);
     int8_t PDInitialize(Eigen::VectorXd &q0);
     void writeCommand(Eigen::VectorXd cmd_r, uint32_t na_r, std::vector<int> control_modes, Eigen::VectorXd &joint_kp, Eigen::VectorXd &joint_kd);
+    inline void writeHardwareCommand(Eigen::VectorXd cmd_r, uint32_t na_r, std::vector<int> control_modes, Eigen::VectorXd &joint_kp, Eigen::VectorXd &joint_kd) { writeCommand(cmd_r, na_r, control_modes, joint_kp, joint_kd); };
+    void writeHardwareJointCommand(Eigen::VectorXd cmd_r, uint32_t na_r, std::vector<int> control_modes, Eigen::VectorXd &joint_kp, Eigen::VectorXd &joint_kd);
     void endEffectorCommand(std::vector<EndEffectorData> &end_effector_cmd);
     bool checkJointPos(JointParam_t *joint_data, std::vector<uint8_t> ids, std::string *msg);
     bool checkJointSafety(const std::vector<JointParam_t> &joint_data, std::vector<uint8_t> ids, std::string &msg);
@@ -120,10 +124,10 @@ class HardwarePlant
     void performJointSymmetryCheck();
 
     
-    inline void SetJointVelocity(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
-    inline void SetJointTorque(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
-    inline void SetJointPosition(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
-    inline void GetJointData(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
+    inline void SetMotorVelocity(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
+    inline void SetMotorTorque(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
+    inline void SetMotorPosition(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
+    inline void GetMotorData(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
     bool calibrateMotor(int motor_id, int direction, bool save_offset = false);
     void calibrateBipedLoop();
     void calibrateWheelLoop();

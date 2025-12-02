@@ -78,10 +78,16 @@ class RosParameter:
 kuavo_ros_param = RosParameter()
 
 def joint_names()->dict:
-    if (kuavo_ros_param.robot_version() == 13 or kuavo_ros_param.robot_version() == 14):
+
+    robot_version_major = (int(kuavo_ros_param.robot_version()) // 10) % 10 
+
+    if robot_version_major  == 1:
         leg_link_names = [
             'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
             'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
+        ]
+        waist_link_names = [
+            'waist_yaw_link'
         ]
         arm_link_names = [
             'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link',
@@ -90,10 +96,26 @@ def joint_names()->dict:
         head_link_names = [
             'zhead_1_link', 'zhead_2_link'
         ]
-    elif kuavo_ros_param.robot_version() >= 40 and kuavo_ros_param.robot_version() < 60:
+    elif robot_version_major == 4 :
         leg_link_names = [
             'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
             'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
+        ]
+        waist_link_names = []
+        arm_link_names = [
+            'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
+            'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link', 'zarm_r5_link', 'zarm_r6_link', 'zarm_r7_link',
+        ]
+        head_link_names = [
+            'zhead_1_link', 'zhead_2_link'
+        ]
+    elif robot_version_major == 5:
+        leg_link_names = [
+            'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
+            'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
+        ]
+        waist_link_names = [
+            'waist_yaw_link'
         ]
         arm_link_names = [
             'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
@@ -106,6 +128,7 @@ def joint_names()->dict:
         leg_link_names = [
             'knee_link', 'leg_link', 'waist_link', 'waist_yaw_link'
         ]
+        waist_link_names = []
         arm_link_names = [
             'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
             'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link', 'zarm_r5_link', 'zarm_r6_link', 'zarm_r7_link',
@@ -147,16 +170,26 @@ def joint_names()->dict:
         )
         or (
             # Return None but don't warn for arm links in robots with 4-dof arms which may not exist
-            None if (kuavo_ros_param.robot_version() == 13 or kuavo_ros_param.robot_version() == 14) and link_name.startswith('zarm_') else
+            None if robot_version_major  == 1 and link_name.startswith('zarm_') else
             (SDKLogger.warn(f"Warning: {link_name} is not found or incomplete in robot_desc"), None)[1]
         ) # Return None after printing the warning
     )
+    # Process waist joint names - extract directly from joint elements
+    def process_waist_link_name(link_name):
+        # Find the joint that has this link as child
+        for joint_elem in root.findall(".//joint"):
+            child_elem = joint_elem.find("child")
+            if child_elem is not None and child_elem.get("link") == link_name:
+                return joint_elem.get("name")
+        return None
+    
     leg_joint_names = [process_link_name(link_name) for link_name in leg_link_names if process_link_name(link_name) is not None]
+    waist_joint_names = [process_waist_link_name(link_name) for link_name in waist_link_names if process_waist_link_name(link_name) is not None]
     arm_joint_names = [process_link_name(link_name) for link_name in arm_link_names if process_link_name(link_name) is not None]
     head_joint_names = [process_link_name(link_name) for link_name in head_link_names if process_link_name(link_name) is not None]
 
     # For robots with 4-dof arms, we allow arm_link_names to be fewer than expected
-    if kuavo_ros_param.robot_version() == 13 or kuavo_ros_param.robot_version() == 14:
+    if robot_version_major == 1:
         if len(leg_link_names) != len(leg_joint_names):
             SDKLogger.warn(
                 f"leg_joint_names is not equal to leg_link_names, {len(leg_link_names)} != {len(leg_joint_names)}")
@@ -166,6 +199,11 @@ def joint_names()->dict:
             SDKLogger.warn(
                 f"head_joint_names is not equal to head_link_names, {len(head_link_names)}!= {len(head_joint_names)}")
             return None
+        if len(waist_link_names) != len(waist_joint_names):
+            SDKLogger.warn(
+                f"waist_joint_names is not equal to waist_link_names, {len(waist_link_names)} != {len(waist_joint_names)}")
+            # Don't return None, just use empty list if waist joint not found
+            waist_joint_names = []
     else:
         if len(leg_link_names) != len(leg_joint_names):
             SDKLogger.warn(
@@ -179,15 +217,35 @@ def joint_names()->dict:
             SDKLogger.warn(
                 f"head_joint_names is not equal to head_link_names, {len(head_link_names)}!= {len(head_joint_names)}")
             return None
+        if len(waist_link_names) != len(waist_joint_names):
+            SDKLogger.warn(
+                f"waist_joint_names is not equal to waist_link_names, {len(waist_link_names)} != {len(waist_joint_names)}")
+            # Don't return None, just use empty list if waist joint not found
+            waist_joint_names = []
     
-    return leg_joint_names + arm_joint_names + head_joint_names
+    return leg_joint_names + waist_joint_names + arm_joint_names + head_joint_names
 
 kuavo_ros_info = None
 
 def end_frames_names()->dict:
-    default = ["torso", "zarm_l7_link", "zarm_r7_link", "zarm_l4_link", "zarm_r4_link"]
-
     kuavo_ros_param = RosParameter()
+
+    # Determine default end effector frame names based on robot version and arm DOF
+    robot_version = kuavo_ros_param.robot_version()
+    if robot_version is not None:
+        robot_version_major = (int(robot_version) // 10) % 10
+        arm_dof = kuavo_ros_param.arm_dof()
+        if arm_dof is not None:
+            # For 4-DOF arms (8 total arm joints), use zarm_l4_link and zarm_r4_link
+            if robot_version_major == 1 or arm_dof == 8:
+                default = ["torso", "zarm_l4_link", "zarm_r4_link", "zarm_l4_link", "zarm_r4_link"]
+            else:
+                # For 7-DOF arms (14 total arm joints), use zarm_l7_link and zarm_r7_link
+                default = ["torso", "zarm_l7_link", "zarm_r7_link", "zarm_l4_link", "zarm_r4_link"]
+        else:
+            default = ["torso", "zarm_l7_link", "zarm_r7_link", "zarm_l4_link", "zarm_r4_link"]
+    else:
+        default = ["torso", "zarm_l7_link", "zarm_r7_link", "zarm_l4_link", "zarm_r4_link"]
 
     kuavo_json = kuavo_ros_param.kuavo_config()
     if kuavo_json is None:
