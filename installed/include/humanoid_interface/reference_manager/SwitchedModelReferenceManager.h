@@ -394,6 +394,8 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   TorsoControlMode torsoControlMode_ = TorsoControlMode::SIX_DOF;
   bool isArmControlModeChanged_ = false;
   bool isArmControlModeChangedTrigger_ = false;
+  scalar_t arm_mode_change_start_time_ = -1.0;  // 模式切换开始时间，-1表示未开始切换
+  scalar_t min_arm_mode_change_time_ = 1.5;  // 最小模式切换时间（秒）
   bool update_stop_single_step_ = false;
 
   bool begin_step_gait = false;
