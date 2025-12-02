@@ -149,7 +149,7 @@ setup_robot_version() {
 
     # 准备要添加的环境变量行
     export_line="export ROBOT_VERSION=$version"
-    
+
     # 检查用户的 .bashrc
     if grep -q "^export ROBOT_VERSION=" ~/.bashrc; then
         # 使用全局替换确保处理所有重复行
@@ -158,7 +158,7 @@ setup_robot_version() {
         # 如果不存在，则添加
         echo "$export_line" >> ~/.bashrc
     fi
-    
+
     # 检查 root 的 .bashrc
     if sudo grep -q "^export ROBOT_VERSION=" /root/.bashrc; then
         # 使用全局替换确保处理所有重复行
@@ -167,8 +167,36 @@ setup_robot_version() {
         # 如果不存在，则添加
         sudo su -c "echo '$export_line' >> ~/.bashrc"
     fi
-    
+
+    # 根据ROBOT_VERSION设置ROBOT_NAME
+    if [[ "$version" == 1* ]]; then
+        robot_name="ROBAN"
+    else
+        robot_name="KUAVO"
+    fi
+
+    # 准备ROBOT_NAME环境变量行
+    robot_name_line="export ROBOT_NAME=$robot_name"
+
+    # 检查并设置用户的 .bashrc中的ROBOT_NAME
+    if grep -q "^export ROBOT_NAME=" ~/.bashrc; then
+        sed -i "s/^export ROBOT_NAME=.*/$robot_name_line/g" ~/.bashrc
+    else
+        echo "$robot_name_line" >> ~/.bashrc
+    fi
+
+    # 检查并设置root的 .bashrc中的ROBOT_NAME
+    if sudo grep -q "^export ROBOT_NAME=" /root/.bashrc; then
+        sudo sed -i "s/^export ROBOT_NAME=.*/$robot_name_line/g" /root/.bashrc
+    else
+        sudo su -c "echo '$robot_name_line' >> /root/.bashrc"
+    fi
+
+    # 设置当前会话的环境变量
+    export ROBOT_NAME="$robot_name"
+
     print_success "机器人版本设置为 $version"
+    print_success "机器人名称设置为 $robot_name"
 }
 
 # Configure robot weight
@@ -362,6 +390,7 @@ setup_end_effector() {
     echo "1) 灵巧手"
     echo "2) 二指夹爪"
     echo "3) 触觉灵巧手"
+    echo "4) 没有灵巧手"
     read -r effector_choice
     
     if [ "$effector_choice" = "1" ]; then
@@ -380,6 +409,11 @@ setup_end_effector() {
          sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="qiangnao_touch"\/>/' ~/kuavo-ros-opensource/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch
         sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="qiangnao_touch"\/>/' ~/kuavo-ros-opensource/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch
         print_success "触觉灵巧手配置完成"
+    elif [ "$effector_choice" = "4" ]; then
+        sed -i 's/"EndEffectorType": \[.*\]/"EndEffectorType": ["none", "none"]/' ~/kuavo-ros-opensource/src/kuavo_assets/config/kuavo_v${ROBOT_VERSION}/kuavo.json
+        sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="none"\/>/' ~/kuavo-ros-opensource/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch
+        sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="none"\/>/' ~/kuavo-ros-opensource/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch
+        print_success "没有灵巧手配置完成"
     fi
 }
 

@@ -21,7 +21,40 @@ ROBOT_VERSION = os.getenv('ROBOT_VERSION', "")
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI", "")
 ROS_IP = os.getenv("ROS_IP", "")
 ROS_HOSTNAME = os.getenv("ROS_HOSTNAME", "")
-KUAVO_ROS_CONTROL_WS_PATH = os.getenv("KUAVO_ROS_CONTROL_WS_PATH", "/home/lab/kuavo-ros-control")
+
+# 动态获取工作空间路径：优先使用环境变量，否则通过 rospack.get_path 获取
+KUAVO_ROS_CONTROL_WS_PATH = os.getenv("KUAVO_ROS_CONTROL_WS_PATH")
+if not KUAVO_ROS_CONTROL_WS_PATH:
+    try:
+        # 使用 rospack.get_path 获取 joy 包的路径，正确处理 deb 包安装到 /opt/ros 的情况
+        rospack = rospkg.RosPack()
+        joy_pkg_path = rospack.get_path("joy")
+        
+        # 对于 deb 包安装：/opt/ros/<distro>/share/joy -> /opt/ros/<distro>
+        if '/opt/ros' in joy_pkg_path:
+            parts = joy_pkg_path.split('/')
+            # 检查路径格式：/opt/ros/<distro>/share/joy
+            if parts[1] == 'opt' and parts[2] == 'ros':
+                KUAVO_ROS_CONTROL_WS_PATH = '/opt/ros/leju'
+
+        else:
+            # 对于开发工作空间，从包路径向上查找包含 devel 或 install 的目录
+            current_dir = joy_pkg_path
+            while current_dir != '/':
+                if os.path.exists(os.path.join(current_dir, 'devel')) or \
+                    os.path.exists(os.path.join(current_dir, 'install')):
+                    KUAVO_ROS_CONTROL_WS_PATH = current_dir
+                    break
+                parent_dir = os.path.dirname(current_dir)
+                if parent_dir == current_dir:
+                    break
+                current_dir = parent_dir
+            else:
+                KUAVO_ROS_CONTROL_WS_PATH = "/home/lab/kuavo-ros-opensource"
+    except Exception:
+        # 降级方案：使用默认值
+        KUAVO_ROS_CONTROL_WS_PATH = "/opt/ros/leju"
+            
 TAIJI_ACTION_SESSION_NAME = "taiji_action"
 
 class JoyCustomizeConfigNode:
