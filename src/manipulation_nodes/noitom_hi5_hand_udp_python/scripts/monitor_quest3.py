@@ -65,6 +65,8 @@ class Quest3BoneFramePublisher:
         
         self.listener = tf.TransformListener()
         self.hand_finger_tf_pub = rospy.Publisher('/quest_hand_finger_tf', TFMessage, queue_size=10)
+        # 批量发布所有骨骼TF的发布器
+        self.bone_tf_pub = rospy.Publisher('/tf', TFMessage, queue_size=10)
 
         self.enable_head_control = rospy.get_param("~enable_head_control", True)
         rospy.loginfo(f"enable_head_control: {self.enable_head_control}")
@@ -287,8 +289,35 @@ class Quest3BoneFramePublisher:
             # rospy.loginfo(joysticks_msg)
         self.joysticks_pub.publish(joysticks_msg)
 
+    def add_transform_to_tf_message(self, tf_msg, time_now, bone_name, scaled_position, right_hand_quat):
+        """
+        创建TransformStamped并添加到TFMessage中
+        
+        Args:
+            tf_msg: TFMessage对象，用于批量发布TF变换
+            time_now: 时间戳
+            bone_name: 骨骼名称
+            scaled_position: 缩放后的位置字典，包含x, y, z
+            right_hand_quat: 四元数，格式为(x, y, z, w)
+        """
+        transform = TransformStamped()
+        transform.header.stamp = time_now
+        transform.header.frame_id = "torso"
+        transform.child_frame_id = bone_name
+        transform.transform.translation.x = scaled_position["x"]
+        transform.transform.translation.y = scaled_position["y"]
+        transform.transform.translation.z = scaled_position["z"]
+        transform.transform.rotation.x = right_hand_quat[0]
+        transform.transform.rotation.y = right_hand_quat[1]
+        transform.transform.rotation.z = right_hand_quat[2]
+        transform.transform.rotation.w = right_hand_quat[3]
+        tf_msg.transforms.append(transform)
+
     def process_pose_data(self, event, pose_info_list, time_now):
         scale_factor = {"x": 3.0, "y": 3.0, "z": 3.0}
+        # 创建TFMessage用于批量发布所有骨骼的TF变换
+        tf_msg = TFMessage()
+        
         for i, pose in enumerate(event.poses):
             bone_name = self.index_to_bone_name[i]
             frame_position = {"x": pose.position.x, "y": pose.position.y, "z": pose.position.z}
@@ -302,14 +331,20 @@ class Quest3BoneFramePublisher:
             pose_info.orientation = Quaternion(x=right_hand_quat[0], y=right_hand_quat[1], z=right_hand_quat[2], w=right_hand_quat[3])
             pose_info_list.poses.append(pose_info)
             
+            # 应用缩放因子
+            scaled_position = {}
             for axis in ["x", "y", "z"]:
-                right_hand_position[axis] *= scale_factor[axis]
-
-            self.updateAFrame(bone_name, right_hand_position, right_hand_quat, time_now)
-
+                scaled_position[axis] = right_hand_position[axis] * scale_factor[axis]
+            
+            # 创建TransformStamped并添加到TFMessage中，而不是立即发布
+            self.add_transform_to_tf_message(tf_msg, time_now, bone_name, scaled_position, right_hand_quat)
 
             if bone_name == "Head" and self.enable_head_control:
                 self.pub_head_motion_data(right_hand_quat)
+        
+        # 批量发布所有骨骼的TF变换（一次性发布，而不是循环中逐个发布）
+        if len(tf_msg.transforms) > 0:
+            self.bone_tf_pub.publish(tf_msg)
 
     def restart_socket(self):
         print("Restarting socket connection...")
