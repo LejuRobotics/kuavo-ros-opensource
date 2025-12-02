@@ -2,6 +2,7 @@
 void AnkleSolver::getconfig(const int ankle_solver_type)
 {
     ankle_solver_type_ = ankle_solver_type;
+    std::cout << "[AnkleSolver] ankle_solver_type: " << ankle_solver_type_ << std::endl;
     ankle_pitch_limits_ << -1.57, 1.57;
     ankle_roll_limits_ << -1.57, 1.57;
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
@@ -235,18 +236,53 @@ void AnkleSolver::getconfig(const int ankle_solver_type)
                   l_rlbar, l_rrbar;
     }
 }
+
+void AnkleSolver::applyRollLimitBasedOnPitch(Eigen::VectorXd& joint_q)
+{
+    // 根据 pitch 值动态计算 roll 的限制
+    // 线性插值：pitch=0 时 roll_limit=1.0, pitch=0.4 时 roll_limit=0.1
+    // pitch<0.0 时无限制
+    auto calculateRollLimit = [](double pitch) -> double {
+        if (pitch > 0.4) {
+            // pitch > 0.4 时无限制，返回一个很大的值
+            return 0.1;  // 足够大的值，表示无限制
+        } else if (pitch <= 0.0) {
+            // pitch <= 0 时，roll_limit = 1.0
+            return 1.57;
+        } else {
+            // 0 < pitch <= 0.4 时，线性插值
+            // roll_limit = 1.0 - 2.25 * pitch
+            // 斜率：2.59，根据实际调整避开不可达的工作空间
+            double roll_limit = 1.0 - 2.65 * pitch;
+            return std::max(0.0, roll_limit);  // 确保不小于 0.1
+        }
+    };
+    
+    // 左腿：根据 joint_q[4] (pitch) 限制 joint_q[5] (roll)
+    double left_pitch = joint_q[4];
+    double left_roll_limit = calculateRollLimit(left_pitch);
+    joint_q[5] = std::max(std::min(joint_q[5], left_roll_limit), -left_roll_limit);
+    
+    // 右腿：根据 joint_q[10] (pitch) 限制 joint_q[11] (roll)
+    double right_pitch = joint_q[10];
+    double right_roll_limit = calculateRollLimit(right_pitch);
+    joint_q[11] = std::max(std::min(joint_q[11], right_roll_limit), -right_roll_limit);
+}
+
 Eigen::VectorXd AnkleSolver::joint_to_motor_position(const Eigen::VectorXd& q)
 {
     Eigen::VectorXd result(12);
     auto joint_q = q;
     joint_q[4] = std::max(std::min(joint_q[4], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);
     joint_q[10] = std::max(std::min(joint_q[10], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);
+    
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
     {
         result = joint_to_motor_position_pro_(joint_q);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN_PRO)
     {
+        applyRollLimitBasedOnPitch(joint_q);
         result = joint_to_motor_position_pro_(joint_q);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN)
