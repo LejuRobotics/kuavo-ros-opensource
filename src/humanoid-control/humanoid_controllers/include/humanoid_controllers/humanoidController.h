@@ -922,6 +922,14 @@ namespace humanoid_controller
     Eigen::VectorXd arm_interpolation_target_vel_; // 插值目标速度
     bool last_is_rl_controller_ = false;
     
+    // ==================== 半身模式手臂插值相关成员变量 ====================
+    bool is_half_body_arm_interpolating_ = false;
+    double half_body_interpolation_start_time_ = 0.0;
+    double half_body_interpolation_duration_ = 1.0;
+    Eigen::VectorXd half_body_arm_interpolation_start_pos_;
+    Eigen::VectorXd half_body_arm_interpolation_target_pos_;
+    Eigen::VectorXd half_body_arm_interpolation_last_target_pos_;
+    
     // ==================== 通用插值系统成员变量 ====================
     std::map<std::string, InterpolationRequest> active_interpolations_;  // 活跃的插值任务
     std::mutex interpolation_mutex_;                                      // 插值任务的线程安全锁
