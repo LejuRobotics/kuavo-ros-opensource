@@ -470,17 +470,51 @@ modiyf_ros_master_uri(){
 }
 
 
-# Setup H12PRO controller
-setup_h12pro() {
-    print_info "是否配置H12PRO遥控器? (y/N)"
+# Setup controller
+setup_controller() {
+    print_info "是否配置遥控器? (y/N)"
     read -r setup_controller
-    
+
     if [[ $setup_controller =~ ^[Yy]$ ]]; then
-        print_info "配置H12PRO遥控器..."
-        cd $HOME/kuavo-ros-opensource/src/humanoid-control/h12pro_controller_node/scripts
+        while true; do
+            print_info "请选择遥控器类型:"
+            print_info "1) H12PRO遥控器"
+            print_info "2) 北通遥控器"
+            read -r controller_choice
+
+            if [[ "$controller_choice" == "1" ]]; then
+                print_info "配置H12PRO遥控器..."
+                cd $HOME/kuavo-ros-opensource/src/humanoid-control/h12pro_controller_node/scripts
+                export ROBOT_VERSION=$version
+                sudo -E su -c "./deploy_autostart.sh"
+                print_success "H12PRO遥控器配置完成"
+                break
+            elif [[ "$controller_choice" == "2" ]]; then
+                print_info "配置北通遥控器..."
+                cd $HOME/kuavo-ros-opensource/src/humanoid-control/joystick_drivers/joy/services
+                export ROBOT_VERSION=$version
+                sudo -E su -c "./deploy_autostart.sh"
+                print_success "北通遥控器配置完成"
+                break
+            else
+                print_error "无效的选择: $controller_choice"
+                print_info "请选择 1 或 2"
+            fi
+        done
+    fi
+}
+
+# Setup WebSocket service
+setup_websocket() {
+    print_info "是否配置WebSocket服务? (y/N)"
+    read -r setup_websocket
+
+    if [[ $setup_websocket =~ ^[Yy]$ ]]; then
+        print_info "配置WebSocket服务..."
+        cd $HOME/kuavo-ros-opensource/src/manipulation_nodes/planarmwebsocketservice/service
         export ROBOT_VERSION=$version
-        sudo -E su -c "./deploy_autostart.sh"
-        print_success "H12PRO遥控器配置完成"
+        sudo -E su -c "./websocket_deploy_script.sh"
+        print_success "WebSocket服务配置完成"
     fi
 }
 
@@ -568,13 +602,22 @@ setup_preset_files() {
     # Create target directory if it doesn't exist
     sudo mkdir -p "$TARGET_DIR"
 
-    # Copy all contents from resources to target directory
+    # Copy action files and music files from resources to target directory
     if [ -n "$(ls -A "$RESOURCES_DIR" 2>/dev/null)" ]; then
-        print_info "复制资源文件从 $RESOURCES_DIR 到 $TARGET_DIR"
+        print_info "复制动作文件和音乐文件从 $RESOURCES_DIR 到 $TARGET_DIR"
         print_info "覆盖已存在的文件..."
 
-        # 使用 -rf 参数强制递归覆盖
-        sudo cp -rf "$RESOURCES_DIR"/* "$TARGET_DIR/"
+        # 复制 action_files 目录
+        if [ -d "$RESOURCES_DIR/action_files" ]; then
+            sudo cp -rf "$RESOURCES_DIR/action_files" "$TARGET_DIR/"
+            print_info "action_files 目录复制完成"
+        fi
+
+        # 复制 music 目录
+        if [ -d "$RESOURCES_DIR/music" ]; then
+            sudo cp -rf "$RESOURCES_DIR/music" "$TARGET_DIR/"
+            print_info "music 目录复制完成"
+        fi
 
         # Set proper ownership
         sudo chown -R lab:lab "$TARGET_DIR"
@@ -603,6 +646,30 @@ setup_preset_files() {
         print_info "未找到 customize_config.json 文件，跳过复制"
     fi
 }
+# Replace config file with resources version
+setup_config_file() {
+    print_info "替换配置文件..."
+    source_config_file="/home/lab/kuavo-ros-opensource/resources/config.yaml"
+    dest_config_file="$HOME/.config/lejuconfig/config.yaml"
+
+    # Check if source config file exists
+    if [ ! -f "$source_config_file" ]; then
+        print_error "未找到配置文件: $source_config_file"
+        return 1
+    fi
+
+    # Backup existing config file if it exists
+    if [ -f "$dest_config_file" ]; then
+        print_info "备份现有配置文件到 ${dest_config_file}.backup"
+        cp "$dest_config_file" "${dest_config_file}.backup"
+    fi
+
+    # Copy the new config file
+    cp "$source_config_file" "$dest_config_file"
+
+    print_success "配置文件替换完成"
+}
+
 # Main execution
 main() {
     print_info "开始KUAVO-ROS-CONTROL安装配置脚本..."
@@ -620,11 +687,13 @@ main() {
     setup_end_effector
     install_vr_deps
     setup_preset_files
+    setup_config_file
     build_project
     check_ip
     modify_hosts_mapping
     modiyf_ros_master_uri
-    setup_h12pro
+    setup_controller
+    setup_websocket
     enable_vnc_network_config
     cleanup_code
 
