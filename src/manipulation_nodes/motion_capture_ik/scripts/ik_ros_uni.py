@@ -1075,7 +1075,7 @@ class IkRos:
     # 添加手臂模式回调函数
     def arm_mode_callback(self, msg):
         new_mode = msg.data
-        if new_mode != 2:  # 当模式不是2时
+        if new_mode == 0:  # 当模式不是2时
             # 重置所有姿态
             print(f"\033[91m[IK]Reset arm mode.\033[0m")
             self.trigger_reset_mode = True
@@ -1091,6 +1091,25 @@ class IkRos:
                 # 启动新定时器，以50Hz频率发布保持位置
                 self.hold_arm_timer = rospy.Timer(rospy.Duration(0.02), self.hold_arm_position_callback)
                 print(f"\033[93m[IK]Half body mode: Started holding arm position.\033[0m")
+        elif new_mode == 1:
+            self.arm_mode_changing = True
+            # 重置所有姿态
+            print(f"\033[91m[IK]Reset arm mode.\033[0m")
+            self.trigger_reset_mode = True
+            self.collision_check_control = False
+            
+            # 半身模式下，保存当前手臂状态并启动定时器持续发布
+            if self.only_half_up_body and self.optimized_state is not None:
+                # self.frozen_arm_state = np.array(self.optimized_state[24:38]).copy()
+                self.frozen_arm_state = np.zeros(14)
+                # 停止旧定时器（如果存在）
+                if self.hold_arm_timer is not None:
+                    self.hold_arm_timer.shutdown()
+                # 启动新定时器，以50Hz频率发布保持位置
+                self.hold_arm_timer = rospy.Timer(rospy.Duration(0.02), self.hold_arm_position_callback)
+                print(f"\033[93m[IK]Half body mode: Started holding arm position.\033[0m")
+
+
         elif new_mode == 2:
             print(f"\033[91m[IK]Arm mode changing.\033[0m")
             self.arm_mode_changing = True
@@ -1110,13 +1129,31 @@ class IkRos:
         self.optimized_state = np.array(msg.data)
     
     def hold_arm_position_callback(self, event):
-        """定时器回调：持续发布冻结的手臂位置"""
-        if self.frozen_arm_state is not None:
-            msg = JointState()
-            msg.name = ["arm_joint_" + str(i) for i in range(1, 15)]
-            msg.header.stamp = rospy.Time.now()
-            msg.position = 180.0 / np.pi * self.frozen_arm_state
-            self.pub.publish(msg)
+        """定时器回调：持续发布冻结的手臂位置，使用插值平滑过渡"""
+        if self.frozen_arm_state is None or self.optimized_state is None:
+            return
+        
+        # 获取当前关节角度（从MPC优化后的状态中提取手臂部分，索引24:38）
+        arm_current_state = np.array(self.optimized_state[24:38]).copy()
+        
+        # 计算状态差
+        delta_state = self.frozen_arm_state - arm_current_state
+        total_distance = np.linalg.norm(delta_state)
+        
+        # 如果距离太小，直接使用目标状态
+        if total_distance < self.threshold_arm_diff_half_up_body:
+            arm_agl_interpolated = self.frozen_arm_state
+        else:
+            # 使用插值平滑过渡
+            max_move = self.maxSpeed
+            scale = np.clip(max_move / total_distance, 0, 1)
+            arm_agl_interpolated = arm_current_state + delta_state * scale
+        
+        msg = JointState()
+        msg.name = ["arm_joint_" + str(i) for i in range(1, 15)]
+        msg.header.stamp = rospy.Time.now()
+        msg.position = 180.0 / np.pi * arm_agl_interpolated
+        self.pub.publish(msg)
 
     def stop_robot_callback(self, msg):
         """停止机器人信号回调函数"""

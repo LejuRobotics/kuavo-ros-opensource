@@ -135,7 +135,11 @@ namespace ocs2
             waist_dof_ = kuavo_settings.hardware_settings.num_waist_joints;
             default_joint_state_ = drake_interface_->getDefaultJointState();
             com_height_ = drake_interface_->getIntialHeight();
-            only_half_up_body_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
+            //only_half_up_body_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
+            if(nodeHandle.hasParam("/only_half_up_body"))
+            {
+                nodeHandle.getParam("/only_half_up_body", only_half_up_body_);
+            }
 
             loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
             loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
