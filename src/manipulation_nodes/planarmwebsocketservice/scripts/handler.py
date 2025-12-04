@@ -594,10 +594,10 @@ def _update_current_arm_joint_state(joint_msg, hand_msg):
 
     global ocs2_joint_state,current_arm_joint_state
     if robot_version.major() == 5:
-        arm_part = list(joint_msg.joint_data.joint_q[12:26])
+        arm_part = list(joint_msg.joint_data.joint_q[13:27])
         hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
         head_part = list(joint_msg.joint_data.joint_q[-2:])
-        waist_part = [joint_msg.joint_data.joint_q[0]]
+        waist_part = [joint_msg.joint_data.joint_q[12]]
         current_arm_joint_state = arm_part + hand_part + head_part + waist_part
     elif robot_version.major() == 4:
         arm_part = list(joint_msg.joint_data.joint_q[12:26])

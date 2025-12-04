@@ -1,0 +1,60 @@
+{
+  "move_forward": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往前走", "往前", "向前走", "朝前走"],
+    "data": {
+      "direction": "前",
+      "step": 1
+    }
+  },
+  "move_backward": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往后走", "往后", "向后走", "朝后走"],
+    "data": {
+      "direction": "后",
+      "step": 1
+    }
+  },
+  "move_left": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往左走", "向左走"],
+    "data": {
+      "direction": "左",
+      "step": 1
+    }
+  },
+  "move_right": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往右走", "向右走"],
+    "data": {
+      "direction": "右",
+      "step": 1
+    }
+  },
+  "turn_left": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往左转", "向左转", "左转"],
+    "data": {
+      "direction": "左",
+      "step": 1
+    }
+  },
+  "turn_right": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往右转", "向右转", "右转"],
+    "data": {
+      "direction": "右",
+      "step": 1
+    }
+  },
+  "greet": {
+    "type": "ARM_ACTION",
+    "keywords": ["打招呼", "挥手", "挥挥手", "挥一下手", "挥个手"],
+    "data": "右手打招呼"
+  },
+  "up_hand": {
+    "type": "ARM_ACTION",
+    "keywords": ["举手", "抬手", "手举起来", "抬抬手"],
+    "data": "双手上举"
+  }
+}
