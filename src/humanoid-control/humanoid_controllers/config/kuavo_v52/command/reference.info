@@ -128,14 +128,14 @@ joint_kp_
    (1,0)   10.3   ; leg_l2_joint
    (2,0)   15.9507   ; leg_l3_joint
    (3,0)   10.5   ; leg_l4_joint
-   (4,0)   7.5   ; leg_l5_joint 2.5
-   (5,0)   7.5   ; leg_l6_joint 1.53
+   (4,0)   5.5   ; leg_l5_joint 2.5
+   (5,0)   5.5   ; leg_l6_joint 1.53
    (6,0)   15.9507   ; leg_r1_joint
    (7,0)   10.3   ; leg_r2_joint
    (8,0)   15.9507   ; leg_r3_joint
    (9,0)   10.5   ; leg_r4_joint
-   (10,0)  7.5   ; leg_r5_joint
-   (11,0)  7.5   ; leg_r6_joint
+   (10,0)  5.5   ; leg_r5_joint
+   (11,0)  5.5   ; leg_r6_joint
 
    (12,0)  4.3     ; waist_yaw
 
@@ -162,14 +162,14 @@ joint_kd_
    (1,0)   7.53   ; leg_l2_joint
    (2,0)   7.5   ; leg_l3_joint
    (3,0)   2.5  ; leg_l4_joint
-   (4,0)   1.5   ; leg_l5_joint
-   (5,0)   1.5   ; leg_l6_joint
+   (4,0)   1.0   ; leg_l5_joint
+   (5,0)   1.0   ; leg_l6_joint
    (6,0)   2.73014   ; leg_r1_joint
    (7,0)   7.53   ; leg_r2_joint
    (8,0)   7.5   ; leg_r3_joint
    (9,0)   2.5  ; leg_r4_joint
-   (10,0)  1.5   ; leg_r5_joint
-   (11,0)  1.5   ; leg_r6_joint
+   (10,0)  1.0   ; leg_r5_joint
+   (11,0)  1.0   ; leg_r6_joint
 
    (12,0)  3.0     ; waist_yaw
 
@@ -208,14 +208,14 @@ joint_kp_walking_
    (1,0)   10.3   ; leg_l2_joint
    (2,0)   15.9507   ; leg_l3_joint
    (3,0)   10.5   ; leg_l4_joint
-   (4,0)   7.5   ; leg_l5_joint 2.5
-   (5,0)   7.5   ; leg_l6_joint 1.53
+   (4,0)   5.5   ; leg_l5_joint 2.5
+   (5,0)   3.5   ; leg_l6_joint 1.53
    (6,0)   15.9507   ; leg_r1_joint
    (7,0)   10.3   ; leg_r2_joint
    (8,0)   15.9507   ; leg_r3_joint
    (9,0)   10.5   ; leg_r4_joint
-   (10,0)  7.5   ; leg_r5_joint
-   (11,0)  7.5   ; leg_r6_joint
+   (10,0)  5.5   ; leg_r5_joint
+   (11,0)  3.5   ; leg_r6_joint
 
    (12,0)  4.3     ; waist_yaw
 
@@ -242,14 +242,14 @@ joint_kd_walking_
    (1,0)   7.53   ; leg_l2_joint
    (2,0)   7.5   ; leg_l3_joint
    (3,0)   2.5  ; leg_l4_joint
-   (4,0)   1.5   ; leg_l5_joint
-   (5,0)   1.5   ; leg_l6_joint
+   (4,0)   1.0   ; leg_l5_joint
+   (5,0)   0.5   ; leg_l6_joint
    (6,0)   2.73014   ; leg_r1_joint
    (7,0)   7.53   ; leg_r2_joint
    (8,0)   7.5  ; leg_r3_joint
    (9,0)   2.5  ; leg_r4_joint
-   (10,0)  1.5   ; leg_r5_joint
-   (11,0)  1.5   ; leg_r6_joint
+   (10,0)  1.0   ; leg_r5_joint
+   (11,0)  0.5   ; leg_r6_joint
 
    (12,0)  3.0     ; waist_yaw
 
