@@ -544,9 +544,26 @@ def ruiwo_negtive():
 
 
 def qiangnao_hand():
-    # 定义要运行的命令
-    command = "bash "+ folder_path +"/dexhand_test.sh --touch --test 1" 
-
+    # 检查CAN总线配置类型
+    canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
+    
+    is_dual_can = False
+    if os.path.exists(canbus_wiring_file):
+        with open(canbus_wiring_file, 'r') as f:
+            wiring_type = f.read().strip()
+            if wiring_type == "dual_bus":
+                is_dual_can = True
+    
+    # 根据CAN总线类型选择不同的命令
+    if is_dual_can:
+        # 双CAN总线配置
+        command = "bash "+ folder_path +"/dexhand_test.sh --touch --test 1"
+        print(bcolors.OKGREEN + "检测到双CAN配置，使用双CAN测试命令" + bcolors.ENDC)
+    else:
+        # 单CAN总线配置
+        command = "bash "+ folder_path +"/hand_grab_test.sh"
+        print(bcolors.OKGREEN + "检测到单CAN配置，使用单CAN测试命令" + bcolors.ENDC)
+    
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
