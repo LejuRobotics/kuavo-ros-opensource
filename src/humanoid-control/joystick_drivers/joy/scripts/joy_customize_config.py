@@ -13,6 +13,7 @@ from geometry_msgs.msg import Twist
 from kuavo_msgs.srv import playmusic, playmusicRequest
 from kuavo_msgs.srv import ExecuteArmAction, ExecuteArmActionRequest
 from std_srvs.srv import Trigger
+from humanoid_plan_arm_trajectory.msg import RobotActionState
 
 HUMANOID_ROBOT_SESSION_NAME = "humanoid_robot"
 LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch start_way:=auto"
@@ -133,6 +134,11 @@ class JoyCustomizeConfigNode:
         # Subscribers
         self.joy_sub = rospy.Subscriber("/joy", Joy, self._joy_callback, queue_size=10)
         self.update_sub = rospy.Subscriber("/update_joy_customize_config", String, self._update_config_callback, queue_size=1)
+        # 订阅动作执行状态话题，用于检测是否有动作正在执行
+        self.robot_action_state_sub = rospy.Subscriber("/robot_action_state", RobotActionState, self._robot_action_state_callback, queue_size=1)
+        
+        # 动作执行状态标志
+        self.robot_action_executing = False
 
         # Publishers for robot control (align with C++ behavior)
         self.stop_pub = rospy.Publisher("/stop_robot", Bool, queue_size=10)
@@ -337,8 +343,29 @@ class JoyCustomizeConfigNode:
             rospy.logerr(f"Service /play_music call failed: {e}")
             return False
 
+    def _robot_action_state_callback(self, msg):
+        """动作执行状态回调函数"""
+        # state: 0=失败/未执行, 1=执行中/成功
+        # 当state为1时，表示有动作正在执行
+        self.robot_action_executing = (msg.state == 1)
+    
     def _call_execute_arm_action(self, action_name):
         """调用手臂动作执行服务"""
+        # 检查是否有动作正在执行，如果有则不允许触发新的手臂动作
+        action_executing = False
+        
+        # 检查ROS参数标志（用于某些动作执行场景，如太极动作）
+        if rospy.has_param("/taiji_executing"):
+            action_executing = rospy.get_param("/taiji_executing", False)
+        
+        # 检查动作状态话题（用于通过/execute_arm_action服务执行的动作）
+        if not action_executing:
+            action_executing = self.robot_action_executing
+        
+        if action_executing:
+            rospy.logwarn(f"Cannot execute arm action '{action_name}': another action is currently executing")
+            return False, "Another action is currently executing"
+        
         try:
             _execute_arm_action_client = rospy.ServiceProxy('/execute_arm_action', ExecuteArmAction)
             request = ExecuteArmActionRequest()

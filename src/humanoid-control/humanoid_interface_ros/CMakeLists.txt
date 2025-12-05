@@ -30,6 +30,7 @@ set(CATKIN_PACKAGE_DEPENDENCIES
   humanoid_interface
   ocs2_ros_interfaces
   humanoid_interface_drake
+  humanoid_plan_arm_trajectory
   roscpp
   rospy
   std_msgs
