@@ -172,7 +172,7 @@ class ArmTrajectoryBezierDemo:
             waist_part = [joint_msg.joint_data.joint_q[0]]
             self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
 
-        self.current_arm_joint_state = [round(v, 2) for v in self.current_arm_joint_state]
+        self.current_arm_joint_state = [round(v, 5) for v in self.current_arm_joint_state]
 
     def traj_callback(self, msg):
         if len(msg.points) == 0:
@@ -305,9 +305,9 @@ class ArmTrajectoryBezierDemo:
                     CP = attribute[str(key)]["CP"]
                     left_CP, right_CP = CP
                     action_data[key].append([
-                        [round(keyframe / 100, 1), math.radians(value)],
-                        [round((keyframe + left_CP[0]) / 100, 1), math.radians(value + left_CP[1])],
-                        [round((keyframe + right_CP[0]) / 100, 1), math.radians(value + right_CP[1])],
+                        [round(keyframe / 100, 5), math.radians(value)],
+                        [round((keyframe + left_CP[0]) / 100, 5), math.radians(value + left_CP[1])],
+                        [round((keyframe + right_CP[0]) / 100, 5), math.radians(value + right_CP[1])],
                     ])
         return action_data
 
@@ -332,11 +332,9 @@ class ArmTrajectoryBezierDemo:
                     # 计算控制点，但使用更保守的方法避免过度摆动
                     # 使用较短的控制杆长度以减少过渡期间的运动幅度
                     curve_length = np.linalg.norm(p3 - p0)
-                    # 减少控制点的影响范围，使过渡更加直接
-                    control_length = min(curve_length * 0.1, 0.5)  # 最大只允许0.5秒的控制影响
-                    
-                    p1 = p0 + control_length * np.array([1, 0])  # 左控制点
-                    p2 = p3 - control_length * np.array([1, 0])  # 右控制点
+                    p1 = p0 + curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the right
+                    p2 = p3 - curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the left
+
 
                     # 创建新帧
                     frame1 = [
@@ -355,9 +353,9 @@ class ArmTrajectoryBezierDemo:
                     if skip_next:
                         skip_next = False
                         continue
-                    end_point = [round(frame[0][0] - self.x_shift, 1), round(frame[0][1], 1)]
-                    left_control_point = [round(frame[1][0] - self.x_shift, 1), round(frame[1][1], 1)]
-                    right_control_point = [round(frame[2][0] - self.x_shift, 1), round(frame[2][1], 1)]
+                    end_point = [round(frame[0][0] - self.x_shift, 5), round(frame[0][1], 5)]
+                    left_control_point = [round(frame[1][0] - self.x_shift, 5), round(frame[1][1], 5)]
+                    right_control_point = [round(frame[2][0] - self.x_shift, 5), round(frame[2][1], 5)]
                     filtered_frames.append([end_point, left_control_point, right_control_point])
 
             filtered_action_data[key] = filtered_frames
