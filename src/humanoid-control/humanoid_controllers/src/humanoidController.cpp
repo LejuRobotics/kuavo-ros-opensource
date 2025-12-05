@@ -1689,7 +1689,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     // 半身模式下跳过起立过程，直接进入MPC初始化
     if (!only_half_up_body_)
     {
-      std::cout << "only_half_up_body_ is false, start stand up process" << std::endl;
       /*******************输入蹲姿和站姿**********************/
       auto &infoWBC = centroidalModelInfoWBC_;
       vector_t squatState = vector_t::Zero(infoWBC.stateDim);

@@ -363,18 +363,18 @@ R_base_walk
   (60,60) 2000.0       ; waist_yaw
 
   ;; arm Jovelocity: [1, 2, 3, 4, 5, 6, 7] (uses the Joint velocity) ;;
-  (61,61) 8000.0    ; zarm_l1_joint
-  (62,62) 8000.0    ; zarm_l2_joint
-  (63,63) 8000.0    ; zarm_l3_joint
-  (64,64) 8000.0    ; zarm_l4_joint
-  (65,65) 8000.0    ; zarm_l5_joint
-  (66,66) 8000.0    ; zarm_l6_joint
-  (67,67) 8000.0    ; zarm_l7_joint
-  (68,68) 8000.0    ; zarm_r1_joint
-  (69,69) 8000.0    ; zarm_r2_joint
-  (70,70) 8000.0    ; zarm_r3_joint
-  (71,71) 8000.0    ; zarm_r4_joint
-  (72,72) 8000.0    ; zarm_r5_joint
-  (73,73) 8000.0    ; zarm_r6_joint
-  (74,74) 8000.0    ; zarm_r7_joint
+  (61,61) 2000.0    ; zarm_l1_joint
+  (62,62) 2000.0    ; zarm_l2_joint
+  (63,63) 2000.0    ; zarm_l3_joint
+  (64,64) 2000.0    ; zarm_l4_joint
+  (65,65) 2000.0    ; zarm_l5_joint
+  (66,66) 2000.0    ; zarm_l6_joint
+  (67,67) 2000.0    ; zarm_l7_joint
+  (68,68) 2000.0    ; zarm_r1_joint
+  (69,69) 2000.0    ; zarm_r2_joint
+  (70,70) 2000.0    ; zarm_r3_joint
+  (71,71) 2000.0    ; zarm_r4_joint
+  (72,72) 2000.0    ; zarm_r5_joint
+  (73,73) 2000.0    ; zarm_r6_joint
+  (74,74) 2000.0    ; zarm_r7_joint
 }

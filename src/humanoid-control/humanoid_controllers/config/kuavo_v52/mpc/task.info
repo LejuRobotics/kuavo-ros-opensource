@@ -140,9 +140,9 @@ swing_trajectory_config
   deadBandVelocity             0.1
   heelToeMaxHeightVelocity     0.3
 
-  swing_shoulder_center         0.1
-  swing_shoulder_scale          0.2
-  swing_elbow_scale             0.6
+  swing_shoulder_center         0.15
+  swing_shoulder_scale          0.3
+  swing_elbow_scale             0.8
 }
 
 ; Multiple_Shooting SQP settings
