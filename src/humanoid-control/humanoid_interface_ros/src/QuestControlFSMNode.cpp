@@ -721,43 +721,36 @@ namespace ocs2
             float right_y = joystick_data_.right_y;
             float left_x = joystick_data_.left_x;
             float left_y = joystick_data_.left_y;
-            
-            /////////////////////////////////////////////////////////////////
-            // 先处理非单步的情况, 检测左摇杆和右摇杆 Y 轴
-            bool left_not_in_deadzone = std::abs(left_y) > kDeadzone || std::abs(left_x) > kDeadzone;
-            bool right_y_priority = std::abs(right_y) > std::abs(right_x);
-            if(left_not_in_deadzone || right_y_priority) {
-                return updateCommandLine();
-            }
-            // else {
-            //     turn_step_state_.left_joystick_active_time = ros::Time(0); // 重置时间
-            // }
-            ///////////////////////////////////////////////////////////////////
 
             // 检查是否在死区内
-            bool in_deadzone = std::abs(right_x) < kDeadzone;
+            bool in_deadzone = turn_step_single_step_switch_||torso_control_enabled_||std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone || std::abs(left_y) >= kDeadzone)||std::abs(right_y) > (std::abs(right_x) + kDeadzone);
+            
             if (in_deadzone) {
                 // 进入死区
-                if (!turn_step_state_.in_deadzone) {
+                if (!turn_step_in_deadzone_) {
                     // 第一次进入死区，记录时间
-                    turn_step_state_.in_deadzone = true;
-                    turn_step_state_.deadzone_enter_time = ros::Time::now();
+                    turn_step_in_deadzone_ = true;
+                    turn_step_deadzone_enter_time_ = ros::Time::now();
+                    return; // 第一次检测到死区，不立即退出
                 } else {
                     // 已经在死区内，检查持续时间
-                    double time_in_deadzone = (ros::Time::now() - turn_step_state_.deadzone_enter_time).toSec();
+                    double time_in_deadzone = (ros::Time::now() - turn_step_deadzone_enter_time_).toSec();
                     if (time_in_deadzone >= kDeadzoneTimeThreshold) {
                         // 在死区内持续超过阈值时间，退出单步转向模式
-                        turn_step_state_.current_zone = -1;
-                        turn_step_state_.zone_published = false;
-                        turn_step_state_.in_deadzone = false;
+                        turn_step_current_zone_ = -1;
+                        turn_step_zone_published_ = false;
+                        turn_step_in_deadzone_ = false;
                         // 有其他摇杆输入，执行正常运动控制
-                        return updateCommandLine();
+                        updateCommandLine();
+                        return;
+                    } else {
+                        // 还未达到时间阈值，继续等待
+                        return;
                     }
                 }
-                return;
             } else {
                 // 不在死区内，重置死区状态
-                turn_step_state_.in_deadzone = false;
+                turn_step_in_deadzone_ = false;
             }
 
             // 检测当前所在区间
@@ -773,19 +766,19 @@ namespace ocs2
 
             // 如果不在任何区间，重置状态
             if (target_zone == -1) {
-                turn_step_state_.current_zone = -1;
-                turn_step_state_.zone_published = false;
+                turn_step_current_zone_ = -1;
+                turn_step_zone_published_ = false;
                 return;
             }
 
             // 安全的区间切换逻辑：只能在相邻区间内逐级改变
-            int current_zone = turn_step_state_.current_zone;
+            int current_zone = turn_step_current_zone_;
             if (current_zone != -1 && current_zone != target_zone) {
                 // 检查是否是相邻区间（防止跳变）
                 if (std::abs(current_zone - target_zone) != 1) {
                     // 不允许跳变，重置状态
-                    turn_step_state_.current_zone = -1;
-                    turn_step_state_.zone_stable = false;
+                    turn_step_current_zone_ = -1;
+                    turn_step_zone_stable_ = false;
                     ROS_WARN("Zone change blocked: current=%d, target=%d (not adjacent). Only adjacent zone changes allowed for safety.",
                              current_zone, target_zone);
                     return;
@@ -793,31 +786,31 @@ namespace ocs2
             }
 
             // 如果区间发生变化，重置时间
-            if (target_zone != turn_step_state_.current_zone) {
-                turn_step_state_.current_zone = target_zone;
-                turn_step_state_.zone_enter_time = ros::Time::now();
-                turn_step_state_.zone_stable = false;
-                turn_step_state_.zone_published = false;  // 新区间，重置发布标志
+            if (target_zone != turn_step_current_zone_) {
+                turn_step_current_zone_ = target_zone;
+                turn_step_zone_enter_time_ = ros::Time::now();
+                turn_step_zone_stable_ = false;
+                turn_step_zone_published_ = false;  // 新区间，重置发布标志
                 return;
             }
 
             ros::Time current_time = ros::Time::now();
 
             // 检查是否在区间内稳定超过阈值时间
-            if (!turn_step_state_.zone_stable) {
-                if ((current_time - turn_step_state_.zone_enter_time).toSec() >= kStableThreshold) {
-                    turn_step_state_.zone_stable = true;
+            if (!turn_step_zone_stable_) {
+                if ((current_time - turn_step_zone_enter_time_).toSec() >= kStableThreshold) {
+                    turn_step_zone_stable_ = true;
                 } else {
                     return; // 还未稳定，继续等待
                 }
             }
     
             // 如果当前区间已经发布过，检查是否需要重新稳定后再次发布
-            if (turn_step_state_.zone_published) {
+            if (turn_step_zone_published_) {
                 // 如果距离上次发布已经过了稳定时间阈值，允许重新发布
-                if ((current_time - turn_step_state_.last_execute_time).toSec() >= kStableThreshold) {
-                    turn_step_state_.zone_published = false;  // 重置发布标志，允许再次发布
-                    ROS_INFO("Zone %d ready for re-publish after %.2f seconds", turn_step_state_.current_zone, kStableThreshold);
+                if ((current_time - turn_step_last_execute_time_).toSec() >= kStableThreshold) {
+                    turn_step_zone_published_ = false;  // 重置发布标志，允许再次发布
+                    ROS_INFO("Zone %d ready for re-publish after %.2f seconds", turn_step_current_zone_, kStableThreshold);
                 } else {
                     return;  // 还未到重新发布的时间，继续等待
                 }
@@ -839,8 +832,8 @@ namespace ocs2
                     bool is_stance = (current_gait == "stance");
                     if (is_stance) {
                         foot_pose_target_pub_.publish(kTurnZones[target_zone].trajectory);
-                        turn_step_state_.zone_published = true;  // 标记已发布
-                        turn_step_state_.last_execute_time = ros::Time::now();  // 记录发布时间
+                        turn_step_zone_published_ = true;  // 标记已发布
+                        turn_step_last_execute_time_ = ros::Time::now();  // 记录发布时间
                         ROS_WARN("Zone %d trajectory published - not Custom-Gait and current gait is stance", target_zone);
                     } else if(current_gait == "walk") {
                         // 先站立再单步
@@ -925,11 +918,13 @@ namespace ocs2
             {
                 publish_mode_sequence_temlate("stance");
                 publish_zero_spd();
+                turn_step_single_step_switch_ = false;
             }
 
             else if (!joystick_data_prev_.right_second_button_pressed && joy_msg.right_second_button_pressed && joy_msg.left_trigger < 0.5 && !torso_control_enabled_)
             {
                 publish_mode_sequence_temlate("walk");
+                turn_step_single_step_switch_ = true;
             }
             else
             {
@@ -1326,16 +1321,14 @@ namespace ocs2
         bool arm_collision_control_{false};
 
         // 单步转向控制状态变量
-        struct StepTurningState {
-            int current_zone{-1};                        // 当前所在区间 (-1表示不在任何区间)
-            ros::Time zone_enter_time;                   // 进入当前区间时间
-            bool zone_stable{false};                     // 是否在区间内稳定超过阈值时间
-            bool zone_published{false};                  // 当前区间是否已发布轨迹
-            ros::Time last_execute_time;                 // 上次执行时间
-            ros::Time deadzone_enter_time;               // 进入死区的时间
-            bool in_deadzone{false};                     // 是否在死区内
-            ros::Time left_joystick_active_time;         // 左摇杆激活时间
-        } turn_step_state_;
+        bool turn_step_single_step_switch_{0};               // 当前单步转向步数
+        int turn_step_current_zone_{-1};                 // 当前所在区间 (-1表示不在任何区间)
+        ros::Time turn_step_zone_enter_time_;            // 进入当前区间时间
+        bool turn_step_zone_stable_{false};              // 是否在区间内稳定超过阈值时间
+        bool turn_step_zone_published_{false};           // 当前区间是否已发布轨迹
+        ros::Time turn_step_last_execute_time_;          // 上次执行时间
+        ros::Time turn_step_deadzone_enter_time_;        // 进入死区的时间
+        bool turn_step_in_deadzone_{false};              // 是否在死区内
 
         ros::Publisher arm_mode_pub_;
         ros::Publisher foot_pose_target_pub_;
