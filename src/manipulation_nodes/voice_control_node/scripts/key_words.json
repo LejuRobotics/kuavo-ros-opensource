@@ -35,7 +35,7 @@
     "type": "SINGLE_STEP",
     "keywords": ["往左转", "向左转", "左转"],
     "data": {
-      "direction": "左",
+      "direction": "左转",
       "step": 1
     }
   },
@@ -43,7 +43,7 @@
     "type": "SINGLE_STEP",
     "keywords": ["往右转", "向右转", "右转"],
     "data": {
-      "direction": "右",
+      "direction": "右转",
       "step": 1
     }
   },

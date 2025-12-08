@@ -1,7 +1,13 @@
+#!/usr/bin/env python3
+
 import rospy
-from voice_recognition import VoiceCoordinator
-import traceback
+import sys
 import os
+# 添加当前脚本所在目录到Python路径中，以便正确导入同目录下的模块
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from voice_recognition import VoiceCoordinator
+from motion_executor import MotionExecutor
+import traceback
 import json
 from queue import Empty 
 
@@ -27,7 +33,7 @@ ACTION_CONFIG = load_action_config()
 # ==========================================
 # 2. 通用动作执行器
 # ==========================================
-def execute_action(action_key):
+def execute_action(motion_executor, action_key):
     """
     根据 action_key 从配置文件中查找动作类型和数据，并执行。
     """
@@ -54,10 +60,10 @@ def execute_action(action_key):
             # 对于单步移动，data 是一个字典，需要转换为 JSON 字符串
             slot = json.dumps(action_data, ensure_ascii=False)
             # 调用移动函数
-            rospy.loginfo(f"触发单步移动动作，参数: {slot}")
+            motion_executor.trigger_move_callback(slot)
         elif action_type == "ARM_ACTION":
             # 对于手臂动作，data 就是字符串
-            rospy.loginfo(f"触发手臂动作，参数: {action_data}")
+            motion_executor.trigger_action_callback(action_data)
         else:
             rospy.logwarn(f"警告: 未知的动作类型 '{action_type}'，无法执行 '{action_key}'。")
 
@@ -72,6 +78,7 @@ def main():
     # 2. 创建实例
     try:
         voice_coordinator = VoiceCoordinator() # 更新类实例化
+        motion_executor = MotionExecutor() # 更新类实例化
     except Exception as e:
         rospy.logerr(f"初始化失败: {e}")
         return
@@ -87,7 +94,7 @@ def main():
             action_key = voice_coordinator.result_queue.get(timeout=0.1)
             if action_key:
                 rospy.loginfo(f"接收到语音命令，匹配到动作: {action_key}")
-                execute_action(action_key)
+                execute_action(motion_executor,action_key)
                 # TODO 是否有必要动作执行后，重置麦克风数据，丢弃在ASR和动作执行期间累积的音频。
                 # voice_coordinator.reset_micphone_data()
 

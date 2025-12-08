@@ -229,7 +229,7 @@ class VoiceCoordinator:
         
         # 模型下载缓存路径
         home_dir = os.path.expanduser("~")
-        local_model_path = os.path.join(home_dir, ".cache/modelscope/hub/models/")
+        local_model_path = os.path.join(home_dir, ".cache/modelscope/hub/")
 
         # 加载关键词配置
         keyword_map = self._load_keyword_from_file()
