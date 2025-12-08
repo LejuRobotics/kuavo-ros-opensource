@@ -153,6 +153,10 @@ namespace ocs2
             com_height_ = drake_interface_->getIntialHeight();
             only_half_up_body_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
             std::cout << "only_half_up_body: " << only_half_up_body_ << std::endl;
+            if(nodeHandle.hasParam("/only_half_up_body"))
+            {
+                nodeHandle.getParam("/only_half_up_body", only_half_up_body_);
+            }
 
             loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
             loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);

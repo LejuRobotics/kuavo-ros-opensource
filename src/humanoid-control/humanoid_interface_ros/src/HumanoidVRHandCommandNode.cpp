@@ -460,8 +460,6 @@ class VRHandCommandNode {
         // 2: External control through VR/teleoperation
         if(only_half_up_body_ &&
           control_mode == ArmControlMode::AUTO_SWING && last_arm_control_mode_ == ArmControlMode::EXTERN_CONTROL) {
-
-          backArmPoseToZero();
         }
 
         enable_ctrl_ = (control_mode != ArmControlMode::KEEP);

@@ -15,7 +15,13 @@ ROBAN2_0_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-
 ROBAN2_1_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-1_dual_canbus_cofig.yaml"
 ROBAN2_1_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-1_single_canbus_cofig.yaml"
 
-KUAVO_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_single_canbus_cofig.yaml"
+# Kuavo5
+KUAVO5_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5_dual_canbus_cofig.yaml"
+KUAVO5_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5_single_canbus_cofig.yaml"
+
+# Kuavo4pro
+KUAVO4PRO_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_single_canbus_cofig.yaml"
+KUAVO4PRO_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_dual_canbus_cofig.yaml"
 
 # 打印带颜色的标题
 echo_title() {
@@ -400,29 +406,94 @@ configure_roban2() {
 
 # 配置kuavo机器人函数
 configure_kuavo() {
-    echo_success "🤖 配置 kuavo 机器人"
+    local robot_type="$1"
+    echo_success "🤖 配置 $robot_type 机器人"
 
-    echo_warning "⚠️  暂不支持配置 kuavo 机器人"
-    return
+    # 选择CAN总线接线类型
+    local wiring_type
+    select_wiring_type wiring_type
 
-    # 直接采用单总线
-    local wiring_type="single_bus"
+    # 根据robot_type选择配置文件路径
+    local dual_config_file=""
+    local single_config_file=""
+    case "$robot_type" in
+        "kuavo4pro")
+            dual_config_file="$KUAVO4PRO_DUAL_SOURCE_CONFIG_FILE"
+            single_config_file="$KUAVO4PRO_SINGLE_SOURCE_CONFIG_FILE"
+            ;;
+        "kuavo5")
+            dual_config_file="$KUAVO5_DUAL_SOURCE_CONFIG_FILE"
+            single_config_file="$KUAVO5_SINGLE_SOURCE_CONFIG_FILE"
+            ;;
+    esac
 
-    # 直接复制kuavo的配置文件到路径
-    if [ -f "$KUAVO_SINGLE_SOURCE_CONFIG_FILE" ]; then
-        cp "$KUAVO_SINGLE_SOURCE_CONFIG_FILE" "$CANBUS_CONFIG_FILE"
-        echo_success "✓ KUAVO配置文件已保存到: $CANBUS_CONFIG_FILE"
+    # 初始化配置文件变量
+    local config_file=""
 
-        # 写入接线类型
-        mkdir -p "$CONFIG_DIR"
-        echo "$wiring_type" > "$CANBUS_WIRING_TYPE_FILE"
-        echo_success "✓ CAN总线接线类型已保存到: $CANBUS_WIRING_TYPE_FILE"
-        echo_info "配置内容: $wiring_type"
+    # 如果是双总线，配置CANBUS类型和末端执行器
+    if [ "$wiring_type" = "dual_bus" ]; then
+        # 选择左CANBUS类型
+        local left_canbus_type
+        select_canbus_type "左" left_canbus_type
 
-        echo_success "🎉 KUAVO配置完成!"
+        # 选择右CANBUS类型
+        local right_canbus_type
+        select_canbus_type "右" right_canbus_type
+
+        echo ""
+        echo_title "配置末端执行器类型"
+
+        # 选择左末端执行器
+        local left_type
+        select_end_effector_type "左" left_type
+
+        # 选择右末端执行器
+        local right_type
+        select_end_effector_type "右" right_type
+
+        # 拷贝并修改配置文件
+        local temp_file="/tmp/kuavo_canbus_device_cofig.yaml"
+
+        if [ -f "$dual_config_file" ]; then
+            cp "$dual_config_file" "$temp_file"
+            echo_success "✓ 配置文件已拷贝到: $temp_file"
+
+            # 更新CANBUS类型配置
+            update_canbus_type_config "$temp_file" "$left_canbus_type" "$right_canbus_type"
+
+            # 替换末端执行器配置
+            replace_end_effector_config "$temp_file" "$left_type" "$right_type"
+            echo_success "✓ 配置文件已更新: $temp_file"
+            config_file="$temp_file"
+        else
+            echo_error "✗ 错误: 源配置文件不存在: $dual_config_file"
+            config_file=""
+        fi
     else
-        echo_error "✗ 错误: KUAVO源配置文件不存在: $KUAVO_SINGLE_SOURCE_CONFIG_FILE"
+
+        echo ""
+        echo_title "配置单总线CANBUS类型"
+        local single_bus_canbus_type
+        select_canbus_type "单总线" single_bus_canbus_type
+        echo_success "✓ 选择单总线CANBUS类型: $single_bus_canbus_type"
+
+        # 拷贝并修改配置文件
+        local temp_file="/tmp/kuavo_canbus_device_cofig.yaml"
+
+        if [ -f "$single_config_file" ]; then
+            cp "$single_config_file" "$temp_file"
+            echo_success "✓ 配置文件已拷贝到: $temp_file"
+            # 更新CANBUS0类型为单总线类型
+            update_canbus_type "$temp_file" "CANBUS0" "$single_bus_canbus_type"
+            config_file="$temp_file"
+        else
+            echo_error "✗ 错误: 源配置文件不存在: $single_config_file"
+            config_file=""
+        fi
     fi
+
+    # 统一写入所有配置文件
+    write_config_files "$wiring_type" "$config_file"
 }
 
 
@@ -450,9 +521,9 @@ main() {
     fi
 
     # 选择机器人类型
-    local robot_options=("roban2.1" "kuavo" "roban2.0")
+    local robot_options=("roban2.0" "roban2.1" "kuavo4pro" "kuavo5")
     show_menu "选择机器人类型" "${robot_options[@]}"
-    get_user_selection 3 robot_selection
+    get_user_selection 4 robot_selection
 
     local robot_type="${robot_options[$((robot_selection-1))]}"
     echo_success "选择机器人类型: $robot_type"
@@ -463,8 +534,8 @@ main() {
         "roban2.0"|"roban2.1")
             configure_roban2 "$robot_type"
             ;;
-        "kuavo")
-            configure_kuavo
+        "kuavo4pro"|"kuavo5")
+            configure_kuavo "$robot_type"
             ;;
     esac
 

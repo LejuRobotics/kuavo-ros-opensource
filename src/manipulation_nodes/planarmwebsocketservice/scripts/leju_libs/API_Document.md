@@ -184,26 +184,33 @@ from kuavo_humanoid_sdk import RobotNavigationBlockly
     - 描述：令机器人按照所给的姿态进行初始化
     - 参数说明：(x, y, z, yaw, pitch, roll) 为目标姿态
 
-6. **通过任务点校准初始化**
+6. **前往指定坐标点并设置朝向**
+    - 函数：`robot_navigation.navigate_to_point_with_heading(x, y, heading)`
+    - 参数类型：float, float, float
+    - 描述：令机器人导航到指定的坐标点并设置朝向
+    - 参数说明：x为目标x坐标（米），y为目标y坐标（米），heading为目标朝向角度（度），0度为正东方向，90度为正北方向
+    - 返回值：bool，导航成功返回True，失败返回False
+
+7. **通过任务点校准初始化**
     - 函数：`robot_navigation.init_localization_by_task_point(task_name)`
     - 参数类型： string
     - 描述：令机器人按照所给的任务点的姿态进行初始化
     - 参数说明：task_name 为目标任务点,机器人应当处于该点且朝向一致.
 
-7. **加载地图**
+8. **加载地图**
     - 函数：`robot_navigation.load_map(map_name)`
     - 参数类型： string
     - 描述：令机器人加载所给的地图
     - 参数说明：map_name 为目标地图,机器人重新加载地图后,需要重新进行校准初始化.
 
-8. **获取所有地图**
+9. **获取所有地图**
     - 函数：`robot_navigation.get_all_maps()`
     - 参数类型： 无
     - 描述：获取机器人所拥有的地图
     - 参数说明：无
     - 返回说明：返回一个列表 maps[],包含所有的地图名.
 
-9. **获取当前地图**
+10. **获取当前地图**
     - 函数：`robot_navigation.get_current_map()`
     - 参数类型： 无
     - 描述：获取机器人当前所用的地图
