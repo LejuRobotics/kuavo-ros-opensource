@@ -31,6 +31,14 @@ class RosbagToBezierPlanner:
     def __init__(self):
         rospy.init_node('rosbag_to_bezier_planner')
 
+        # 读取robot_version参数
+        self.robot_version = int(os.environ.get("ROBOT_VERSION", "45"))
+        rospy.loginfo(f"Robot version: {self.robot_version}")
+        
+        # 判断是否需要处理腰部数据（版本 >= 50）
+        self.has_waist = (self.robot_version // 10) >= 5  # major version >= 5
+        rospy.loginfo(f"Has waist joint: {self.has_waist}")
+
         # 手臂关节名称 (左右手臂各7个关节)
         self.arm_joint_names = [
             "l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch",
@@ -38,6 +46,8 @@ class RosbagToBezierPlanner:
             "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch",
             "r_hand_yaw", "r_hand_pitch", "r_hand_roll",
         ]
+        
+        # 构建控制关节名称列表
         self.control_joint_names = [
             "l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch",
             "l_hand_yaw", "l_hand_pitch", "l_hand_roll",
@@ -47,15 +57,30 @@ class RosbagToBezierPlanner:
             "r_thumb1", "r_thumb2", "r_index1", "r_middle1", "r_ring1", "r_pinky1",
             "head_yaw", "head_pitch",
         ]
+        
+        # 如果有腰部，在最后添加腰部关节
+        if self.has_waist:
+            self.control_joint_names.append("waist_joint")
+            rospy.loginfo("Added waist_joint to control_joint_names")
 
-        # 关节在sensors_data_raw中的索引 (12-27为手臂关节)
-        self.arm_joint_indices = list(range(12, 28))
+        # 关节在sensors_data_raw中的索引
+        # v50+: 腰部在索引12，手臂在索引13-26（14个，顺延1位），头部在索引27-28（2个，顺延1位）
+        # v40-: 手臂在索引12-25（14个），头部在索引26-27（2个）
+        if self.has_waist:
+            # v50+: 手臂关节索引为13-26（14个，跳过索引12的腰部），头部索引27-28（2个）
+            self.arm_joint_indices = list(range(13, 29))  # 13-28，其中13-26是手臂，27-28是头部
+            self.waist_joint_index = 12  # 腰部关节索引
+        else:
+            # v40-: 手臂关节索引为12-25（14个），头部索引26-27（2个）
+            self.arm_joint_indices = list(range(12, 28))  # 12-27，其中12-25是手臂，26-27是头部
+            self.waist_joint_index = None
 
         # 数据存储
-        self.joint_data = []  # 手臂关节数据（包含头部数据）
+        self.joint_data = []  # 手臂关节数据（包含头部数据，可能包含腰部数据）
         self.hand_sensors_data = []  # 手部传感器数据
         self.arm_timestamp_data = []  # 手臂数据时间戳
         self.hand_timestamp_data = []  # 手部数据时间戳
+        self.waist_data = []  # 腰部关节数据（v50+）
 
         # 贝塞尔曲线数据
         self.bezier_control_points = []  # 当前处理的控制点
@@ -73,7 +98,9 @@ class RosbagToBezierPlanner:
         从rosbag文件中加载关节数据
         
         从以下话题加载数据：
-        - /sensors_data_raw: 手臂关节数据（索引12-27，其中26-27为头部数据）
+        - /sensors_data_raw: 手臂关节数据
+          * v40-: 索引12-27（其中12-25为手臂14个，26-27为头部2个）
+          * v50+: 索引12-28（其中12为腰部1个，13-26为手臂14个，27-28为头部2个）
         - /dexhand/state: 手部传感器数据
         
         Args:
@@ -101,20 +128,73 @@ class RosbagToBezierPlanner:
                     # 计算相对时间
                     relative_time = msg.header.stamp.to_sec() - sensors_start_time
 
-                    # 提取手臂关节数据 (索引12-27)
+                    # 提取手臂关节数据
                     arm_positions = []
-                    hand_positions = []
+                    hand_positions = []  # 这里实际存储头部数据
+                    waist_position = 0.0
+                    
+                    # 提取腰部数据（v50+）
+                    if self.has_waist and self.waist_joint_index is not None:
+                        if self.waist_joint_index < len(msg.joint_data.joint_q):
+                            waist_position = msg.joint_data.joint_q[self.waist_joint_index]
+                    
+                    # 提取手臂和头部关节数据
+                    # v50+: 腰部在索引12，手臂在索引13-26（14个），头部在索引27-28（2个）
+                    # v40-: 手臂在索引12-25（14个），头部在索引26-27（2个）
                     for idx in self.arm_joint_indices:
                         if idx < len(msg.joint_data.joint_q):
-                            if idx >= 26:  # 头部数据单独提取（索引26-27）
-                                hand_positions.append(msg.joint_data.joint_q[idx])
+                            if self.has_waist:
+                                # v50+: 头部索引从27开始（27-28）
+                                if idx >= 27:
+                                    hand_positions.append(msg.joint_data.joint_q[idx])
+                                else:
+                                    arm_positions.append(msg.joint_data.joint_q[idx])
                             else:
-                                arm_positions.append(msg.joint_data.joint_q[idx])
+                                # v40-: 头部索引从26开始（26-27）
+                                if idx >= 26:
+                                    hand_positions.append(msg.joint_data.joint_q[idx])
+                                else:
+                                    arm_positions.append(msg.joint_data.joint_q[idx])
                         else:
                             arm_positions.append(0.0)
-                    # 确保 hand_positions 是列表
+                    
+                    # 确保 hand_positions 是列表（实际是头部数据）
                     hand_positions = list(hand_positions)
-                    control_positions = arm_positions + [0.0] * 12 + hand_positions  # 组合控制关节数据
+                    
+                    # 确保 arm_positions 有 14 个元素（左右各 7 个手臂关节）
+                    expected_arm_count = 14
+                    if len(arm_positions) < expected_arm_count:
+                        rospy.logwarn(f"arm_positions has {len(arm_positions)} elements, padding to {expected_arm_count}")
+                        arm_positions.extend([0.0] * (expected_arm_count - len(arm_positions)))
+                    elif len(arm_positions) > expected_arm_count:
+                        rospy.logwarn(f"arm_positions has {len(arm_positions)} elements, truncating to {expected_arm_count}")
+                        arm_positions = arm_positions[:expected_arm_count]
+                    
+                    # 确保 hand_positions 有 2 个元素（头部关节）
+                    expected_head_count = 2
+                    if len(hand_positions) < expected_head_count:
+                        rospy.logwarn(f"hand_positions has {len(hand_positions)} elements, padding to {expected_head_count}")
+                        hand_positions.extend([0.0] * (expected_head_count - len(hand_positions)))
+                    elif len(hand_positions) > expected_head_count:
+                        rospy.logwarn(f"hand_positions has {len(hand_positions)} elements, truncating to {expected_head_count}")
+                        hand_positions = hand_positions[:expected_head_count]
+                    
+                    # 组合控制关节数据：手臂(14) + 手指(12) + 头部(2) [+ 腰部(1)]
+                    control_positions = arm_positions + [0.0] * 12 + hand_positions
+                    if self.has_waist:
+                        control_positions.append(waist_position)  # 在最后添加腰部数据
+                    
+                    # 验证最终长度
+                    expected_total = len(self.control_joint_names)
+                    if len(control_positions) != expected_total:
+                        rospy.logerr(f"control_positions length mismatch: expected {expected_total}, got {len(control_positions)}")
+                        rospy.logerr(f"  arm_positions: {len(arm_positions)}, hand_positions: {len(hand_positions)}, has_waist: {self.has_waist}")
+                        # 填充或截断以匹配期望长度
+                        if len(control_positions) < expected_total:
+                            control_positions.extend([0.0] * (expected_total - len(control_positions)))
+                        else:
+                            control_positions = control_positions[:expected_total]
+                    
                     self.joint_data.append(control_positions)
                     self.arm_timestamp_data.append(relative_time)
                 elif topic == hand_topic_name:
@@ -125,7 +205,31 @@ class RosbagToBezierPlanner:
                     relative_time = msg.header.stamp.to_sec() - hand_start_time
                     # 确保 msg.position 是列表（可能是元组）
                     hand_position_list = list(msg.position) if hasattr(msg.position, '__iter__') else []
+                    
+                    # 确保 hand_position_list 有 12 个元素（手指关节）
+                    expected_finger_count = 12
+                    if len(hand_position_list) < expected_finger_count:
+                        rospy.logwarn(f"hand_position_list has {len(hand_position_list)} elements, padding to {expected_finger_count}")
+                        hand_position_list.extend([0.0] * (expected_finger_count - len(hand_position_list)))
+                    elif len(hand_position_list) > expected_finger_count:
+                        rospy.logwarn(f"hand_position_list has {len(hand_position_list)} elements, truncating to {expected_finger_count}")
+                        hand_position_list = hand_position_list[:expected_finger_count]
+                    
+                    # 组合控制关节数据：手臂(14) + 手指(12) + 头部(2) [+ 腰部(1)]
                     control_positions = [0.0] * 14 + hand_position_list + [0.0] * 2
+                    if self.has_waist:
+                        control_positions.append(0.0)  # 手部数据中没有腰部，填充0
+                    
+                    # 验证最终长度
+                    expected_total = len(self.control_joint_names)
+                    if len(control_positions) != expected_total:
+                        rospy.logerr(f"hand control_positions length mismatch: expected {expected_total}, got {len(control_positions)}")
+                        # 填充或截断以匹配期望长度
+                        if len(control_positions) < expected_total:
+                            control_positions.extend([0.0] * (expected_total - len(control_positions)))
+                        else:
+                            control_positions = control_positions[:expected_total]
+                    
                     self.hand_sensors_data.append(control_positions)
                     self.hand_timestamp_data.append(relative_time)
 
@@ -359,6 +463,24 @@ class RosbagToBezierPlanner:
             rospy.logerr("Timestamp data mismatch")
             return False
 
+        # 检查 control_data 中每个点的长度是否一致且等于期望的关节数
+        expected_joint_count = len(self.control_joint_names)
+        if len(control_data) > 0:
+            first_point_length = len(control_data[0])
+            if first_point_length != expected_joint_count:
+                rospy.logerr(f"Control data dimension mismatch: expected {expected_joint_count} joints, "
+                           f"but got {first_point_length} in first data point")
+                return False
+            
+            # 检查所有点的长度是否一致
+            for i, point in enumerate(control_data):
+                if len(point) != expected_joint_count:
+                    rospy.logerr(f"Control data dimension mismatch at index {i}: "
+                               f"expected {expected_joint_count} joints, but got {len(point)}")
+                    rospy.logerr(f"  First point length: {len(control_data[0])}, "
+                               f"point[{i}] length: {len(point)}")
+                    return False
+
         self.bezier_control_points = []
 
         for joint_idx in range(len(self.control_joint_names)):
@@ -366,6 +488,7 @@ class RosbagToBezierPlanner:
             is_finger_joint = 14 <= joint_idx < 26
             
             # 如果没有手指数据且当前是手指关节，生成全0的控制点
+            # 注意：腰部关节的数据来自sensors_data_raw话题，已经包含在control_data中，应该正常处理
             if is_finger_joint and not has_finger_data:
                 # 为手指关节生成全0的控制点序列
                 # 当dexhand/state话题为空时，所有手指关节保持为0
@@ -399,8 +522,21 @@ class RosbagToBezierPlanner:
                 rospy.loginfo(f"Generated zero control points for finger joint {joint_idx} (no dexhand/state data)")
                 continue
             
-            # 正常处理：手臂、头部关节，或有手指数据时的手指关节
-            joint_positions = [point[joint_idx] for point in control_data]
+            # 正常处理：手臂、头部、腰部关节，或有手指数据时的手指关节
+            # 安全检查：确保所有点都有足够的元素
+            try:
+                joint_positions = [point[joint_idx] for point in control_data]
+            except IndexError as e:
+                rospy.logerr(f"IndexError when accessing joint {joint_idx} ({self.control_joint_names[joint_idx]}): {e}")
+                # 检查第一个点的长度
+                if len(control_data) > 0:
+                    rospy.logerr(f"First data point has {len(control_data[0])} elements, but trying to access index {joint_idx}")
+                    rospy.logerr(f"Expected {len(self.control_joint_names)} joints, but data has {len(control_data[0])} elements")
+                    # 找出所有长度不一致的点
+                    for i, point in enumerate(control_data):
+                        if len(point) != len(control_data[0]):
+                            rospy.logerr(f"  Point[{i}] has {len(point)} elements (expected {len(control_data[0])})")
+                return False
             joint_times = timestamp_data
 
             curve_points = []
@@ -549,8 +685,8 @@ class RosbagToBezierPlanner:
                 trajectory_point = {
                     'time': t,
                     'positions': positions,
-                    'velocities': list(point.velocities) if point.velocities else [0.0] * 28,
-                    'accelerations': list(point.accelerations) if point.accelerations else [0.0] * 28,
+                    'velocities': list(point.velocities) if point.velocities else [0.0] * len(self.control_joint_names),
+                    'accelerations': list(point.accelerations) if point.accelerations else [0.0] * len(self.control_joint_names),
                     'keyframe': self.keyframe_counter * 0.1  # 转换为10ms单位（1000Hz -> 10ms）
                 }
                 self.generated_trajectory.append(trajectory_point)
@@ -703,20 +839,24 @@ class RosbagToBezierPlanner:
             "finish": original_finish,
             "first": original_first,
             "version": "rosbag_to_act_frames",
-            "robotType": 45
+            "robotType": self.robot_version
         }
 
         # 为每个轨迹点创建frame
         for frame_idx, point in enumerate(unique_trajectory):
-            # 创建servo数据 (28个伺服电机)
-            servos = [0] * 28
+            # 计算关节数量：v40-为28个，v50+为29个（包含腰部）
+            num_joints = 29 if self.has_waist else 28
+            # 创建servo数据
+            servos = [0] * num_joints
 
-            # 填充所有关节数据（手臂14个 + 手指12个 + 头部2个 = 28个）
+            # 填充所有关节数据
+            # v40-: 手臂14个 + 手指12个 + 头部2个 = 28个
+            # v50+: 手臂14个 + 手指12个 + 头部2个 + 腰部1个 = 29个
             positions = point.get('positions', [])
             finger_start_idx = 14  # 手指关节起始索引
             finger_end_idx = 26    # 手指关节结束索引（不包含）
             
-            for joint_idx in range(28):  # 扩展到所有28个关节
+            for joint_idx in range(num_joints):  # 扩展到所有关节
                 if joint_idx < len(positions):
                     # 手指关节（索引14-25）来自/dexhand/state，已经是0-100的百分比值，不需要转换
                     # 手臂和头部关节来自/sensors_data_raw，是弧度值，需要转换为角度
@@ -731,11 +871,12 @@ class RosbagToBezierPlanner:
             # 使用去重后的唯一keyframe
             keyframe = point['keyframe']
 
-            # 创建属性数据（为所有28个关节计算控制点）
+            # 创建属性数据（为所有关节计算控制点）
             attributes = {}
-            for servo_idx in range(1, 29):  # 28个伺服电机
+            num_joints = 29 if self.has_waist else 28
+            for servo_idx in range(1, num_joints + 1):  # 伺服电机索引从1开始
                 joint_idx = servo_idx - 1  # 转换为0-based索引
-                # 为所有关节（手臂、手指、头部）计算控制点
+                # 为所有关节（手臂、手指、头部、腰部）计算控制点
                 if joint_idx < len(positions):
                     cp_data = self._calculate_control_points_for_trajectory(unique_trajectory, frame_idx, joint_idx)
                     attributes[str(servo_idx)] = {
@@ -823,15 +964,17 @@ class RosbagToBezierPlanner:
             "finish": finish_keyframe,
             "first": first_keyframe,
             "version": "rosbag_to_act",
-            "robotType": 45
+            "robotType": self.robot_version
         }
         
         # 为每个时间点创建frame
         for time_idx, current_time in enumerate(sorted_times):
             keyframe = int(current_time * 100)  # 秒转10ms单位
             
-            # 创建servo数据 (28个伺服电机)
-            servos = [0] * 28
+            # 计算关节数量：v40-为28个，v50+为29个（包含腰部）
+            num_joints = 29 if self.has_waist else 28
+            # 创建servo数据
+            servos = [0] * num_joints
             
             # 创建属性数据
             attributes = {}
@@ -1467,6 +1610,8 @@ class RosbagToBezierPlanner:
             
             merged_count = 0
             for i in range(min_len):
+                # 检查数据长度：v40-需要28个，v50+需要29个（包含腰部）
+                expected_len = 29 if self.has_waist else 28
                 if len(self.joint_data[i]) >= finger_end_idx and len(self.hand_sensors_data[i]) >= finger_end_idx:
                     # 将手部数据中的手指部分（索引14-25）复制到joint_data对应位置
                     for finger_idx in range(finger_start_idx, finger_end_idx):
