@@ -47,6 +47,8 @@
 #include "kuavo_msgs/fkSrv.h"
 #include "kuavo_msgs/twoArmHandPoseCmdFreeSrv.h"
 #include "kuavo_msgs/twoArmHandPoseFree.h"
+#include "kuavo_msgs/sensorsData.h"
+#include <mutex>
 
 
 namespace
@@ -88,6 +90,21 @@ class ArmsIKNode
         , hand_side_(hand_side)
         , shoulder_frame_names_(shoulder_frame_names)
         {
+            // 从ROS参数读取腰部关节信息
+            int mpc_waist_dof = 0;
+            if (nh_.hasParam("/mpc/mpcWaistDof"))
+            {
+                nh_.getParam("/mpc/mpcWaistDof", mpc_waist_dof);
+            }
+            has_waist_joint_ = (mpc_waist_dof > 0);
+            if (has_waist_joint_)
+            {
+                waist_joint_index_ = 12;
+            }
+            else
+            {
+                waist_joint_index_ = -1;
+            }
             const double dt = 0.001;
             const std::vector<std::string> custom_eef_frame_names{"eef_left", "eef_right"};
             
@@ -128,6 +145,10 @@ class ArmsIKNode
 
             // ros
             sub_ik_cmd_ = nh_.subscribe<kuavo_msgs::twoArmHandPoseCmd>("/ik/two_arm_hand_pose_cmd", 10, &ArmsIKNode::ik_cmd_callback, this);
+            if (has_waist_joint_)
+            {
+                sensor_data_raw_sub_ = nh_.subscribe<kuavo_msgs::sensorsData>("/sensors_data_raw", 10, &ArmsIKNode::sensor_data_raw_callback, this);
+            }
 
             joint_pub_ = nh_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 10);
             time_cost_pub_ = nh_.advertise<std_msgs::Float32MultiArray>("/ik/debug/time_cost", 10);
@@ -295,6 +316,41 @@ class ArmsIKNode
         }
 
     private:
+        void sensor_data_raw_callback(const kuavo_msgs::sensorsData::ConstPtr& msg)
+        {
+            if (has_waist_joint_ && waist_joint_index_ >= 0 && 
+                waist_joint_index_ < static_cast<int>(msg->joint_data.joint_q.size()))
+            {
+                std::lock_guard<std::mutex> lock(waist_yaw_mutex_);
+                current_waist_yaw_ = msg->joint_data.joint_q[waist_joint_index_];
+            }
+        }
+
+        std::pair<Eigen::Vector3d, Eigen::Quaterniond> transformPoseByWaistYaw(
+            const Eigen::Vector3d& pos, const Eigen::Quaterniond& quat)
+        {
+            if (!has_waist_joint_)
+            {
+                return std::make_pair(pos, quat);
+            }
+
+            std::lock_guard<std::mutex> lock(waist_yaw_mutex_);
+            double waist_yaw = current_waist_yaw_;
+            
+            // 构建绕Z轴的旋转矩阵（负的腰部角度）
+            Eigen::Matrix3d R = Eigen::AngleAxisd(-waist_yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+            
+            // 变换位置
+            Eigen::Vector3d pos_transformed = R * pos;
+            
+            // 变换四元数
+            Eigen::Quaterniond R_quat(R);
+            Eigen::Quaterniond quat_transformed = R_quat * quat;
+            quat_transformed.normalize();
+            
+            return std::make_pair(pos_transformed, quat_transformed);
+        }
+
         void ik_cmd_callback(const kuavo_msgs::twoArmHandPoseCmd::ConstPtr& msg)
         {
             auto &hand_poses = msg->hand_poses;
@@ -459,12 +515,36 @@ class ArmsIKNode
                                         << ", Right: " << q0_.tail(single_arm_num_).transpose() << std::endl;
             }
             auto start = std::chrono::high_resolution_clock::now();
+            
+            // 如果有腰部关节，对位姿进行变换
+            Eigen::Quaterniond left_quat = ik_cmd_left_.quat;
+            Eigen::Vector3d left_pos = ik_cmd_left_.pos_xyz;
+            Eigen::Quaterniond right_quat = ik_cmd_right_.quat;
+            Eigen::Vector3d right_pos = ik_cmd_right_.pos_xyz;
+            Eigen::Vector3d left_elbow_pos = ik_cmd_left_.elbow_pos_xyz;
+            Eigen::Vector3d right_elbow_pos = ik_cmd_right_.elbow_pos_xyz;
+            
+            if (has_waist_joint_)
+            {
+                auto [left_pos_t, left_quat_t] = transformPoseByWaistYaw(left_pos, left_quat);
+                auto [right_pos_t, right_quat_t] = transformPoseByWaistYaw(right_pos, right_quat);
+                auto [left_elbow_pos_t, _] = transformPoseByWaistYaw(left_elbow_pos, Eigen::Quaterniond(1, 0, 0, 0));
+                auto [right_elbow_pos_t, __] = transformPoseByWaistYaw(right_elbow_pos, Eigen::Quaterniond(1, 0, 0, 0));
+                
+                left_pos = left_pos_t;
+                left_quat = left_quat_t;
+                right_pos = right_pos_t;
+                right_quat = right_quat_t;
+                left_elbow_pos = left_elbow_pos_t;
+                right_elbow_pos = right_elbow_pos_t;
+            }
+            
             std::vector<std::pair<Eigen::Quaterniond, Eigen::Vector3d>> pose_vec{
                     {Eigen::Quaterniond(1, 0, 0, 0), Eigen::Vector3d(0, 0, 0)},
-                    {ik_cmd_left_.quat, ik_cmd_left_.pos_xyz},
-                    {ik_cmd_right_.quat, ik_cmd_right_.pos_xyz},
-                    {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_left_.elbow_pos_xyz},
-                    {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_right_.elbow_pos_xyz}
+                    {left_quat, left_pos},
+                    {right_quat, right_pos},
+                    {Eigen::Quaterniond(1, 0, 0, 0), left_elbow_pos},
+                    {Eigen::Quaterniond(1, 0, 0, 0), right_elbow_pos}
                     };
             Eigen::VectorXd q;
             checkInWorkspace(pose_vec[1].second, pose_vec[2].second);
@@ -546,12 +626,36 @@ class ArmsIKNode
                                         << ", Left: " << q0_.tail(single_arm_num_).transpose() << std::endl;
             }
             auto start = std::chrono::high_resolution_clock::now();
+            
+            // 如果有腰部关节，对位姿进行变换
+            Eigen::Quaterniond left_quat = ik_cmd_left_.quat;
+            Eigen::Vector3d left_pos = ik_cmd_left_.pos_xyz;
+            Eigen::Quaterniond right_quat = ik_cmd_right_.quat;
+            Eigen::Vector3d right_pos = ik_cmd_right_.pos_xyz;
+            Eigen::Vector3d left_elbow_pos = ik_cmd_left_.elbow_pos_xyz;
+            Eigen::Vector3d right_elbow_pos = ik_cmd_right_.elbow_pos_xyz;
+            
+            if (has_waist_joint_)
+            {
+                auto [left_pos_t, left_quat_t] = transformPoseByWaistYaw(left_pos, left_quat);
+                auto [right_pos_t, right_quat_t] = transformPoseByWaistYaw(right_pos, right_quat);
+                auto [left_elbow_pos_t, _] = transformPoseByWaistYaw(left_elbow_pos, Eigen::Quaterniond(1, 0, 0, 0));
+                auto [right_elbow_pos_t, __] = transformPoseByWaistYaw(right_elbow_pos, Eigen::Quaterniond(1, 0, 0, 0));
+                
+                left_pos = left_pos_t;
+                left_quat = left_quat_t;
+                right_pos = right_pos_t;
+                right_quat = right_quat_t;
+                left_elbow_pos = left_elbow_pos_t;
+                right_elbow_pos = right_elbow_pos_t;
+            }
+            
             std::vector<std::pair<Eigen::Quaterniond, Eigen::Vector3d>> pose_vec{
                     {Eigen::Quaterniond(1, 0, 0, 0), Eigen::Vector3d(0, 0, 0)},
-                    {ik_cmd_left_.quat, ik_cmd_left_.pos_xyz},
-                    {ik_cmd_right_.quat, ik_cmd_right_.pos_xyz},
-                    {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_left_.elbow_pos_xyz},
-                    {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_right_.elbow_pos_xyz}
+                    {left_quat, left_pos},
+                    {right_quat, right_pos},
+                    {Eigen::Quaterniond(1, 0, 0, 0), left_elbow_pos},
+                    {Eigen::Quaterniond(1, 0, 0, 0), right_elbow_pos}
                     };
             Eigen::VectorXd q;
             checkInWorkspace(pose_vec[1].second, pose_vec[2].second);
@@ -671,6 +775,7 @@ class ArmsIKNode
         // ros
         ros::NodeHandle nh_;
         ros::Subscriber sub_ik_cmd_;
+        ros::Subscriber sensor_data_raw_sub_;
         ros::Publisher joint_pub_;
         ros::Publisher time_cost_pub_;
         ros::Publisher ik_result_pub_;
@@ -687,6 +792,11 @@ class ArmsIKNode
         long long int ik_success_count_{0};
         std::vector<std::string> shoulder_frame_names_;
         bool print_ik_info_{false};
+        // waist joint compensation
+        bool has_waist_joint_{false};
+        int waist_joint_index_{-1};
+        double current_waist_yaw_{0.0};
+        std::mutex waist_yaw_mutex_;
 };
 }
 
