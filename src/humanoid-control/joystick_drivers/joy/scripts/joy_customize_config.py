@@ -378,6 +378,17 @@ class JoyCustomizeConfigNode:
             return False, f"Service exception: {e}"
 
     def _joy_callback(self, joy_msg: Joy) -> None:
+        # 仅给 roban 使用：ROBOT_VERSION 来自环境变量，是字符串，这里做一次安全解析
+        robot_version_str = ROBOT_VERSION or ""
+        try:
+            robot_version = int(robot_version_str)
+        except (TypeError, ValueError):
+            rospy.logwarn(f"Invalid ROBOT_VERSION '{robot_version_str}', joy_customize_config disabled for this robot")
+            return
+
+        if robot_version < 10 or robot_version > 20:
+            return
+
         # 根据消息尺寸动态切换映射
         if len(joy_msg.buttons) != self.JOYSTICK_BUTTON_NUM or len(joy_msg.axes) != self.JOYSTICK_AXIS_NUM:
             switched = self._maybe_switch_mapping_by_msg_size(joy_msg)
@@ -428,7 +439,7 @@ class JoyCustomizeConfigNode:
                     return
 
             # 检查 START 按键边沿：第一次用于启动，之后用于初始化
-            if 0 <= start_idx < len(joy_msg.buttons):
+            if 0 <= start_idx < len(joy_msg.buttons) and self.real:
                 start_current = joy_msg.buttons[start_idx]
                 start_prev = self._prev_buttons[start_idx] if start_idx < len(self._prev_buttons) else 0
                 if start_prev == 0 and start_current == 1:
@@ -475,6 +486,15 @@ class JoyCustomizeConfigNode:
                     self._prev_buttons = list(joy_msg.buttons)
                     self._prev_axes = list(joy_msg.axes)
                     return
+                
+                # 处理站立失败回退到 ready_stance 的情况（硬件节点站立失败会回到下蹲状态）
+                if self._launch_phase == "waiting_launched" and self._last_launch_status == "ready_stance":
+                    rospy.logwarn("[JoyCustomize] Stand up failed or interrupted, falling back to ready state. Press START again to retry.")
+                    self._launch_phase = "ready"
+                    self._prev_buttons = list(joy_msg.buttons)
+                    self._prev_axes = list(joy_msg.axes)
+                    return
+                
                 if self._launch_phase in ["waiting_launched", "launched"] and self._last_launch_status == "launched":
                     self._robot_launched = True
                     self._launch_phase = "launched"
@@ -764,6 +784,10 @@ class JoyCustomizeConfigNode:
 
     def _check_and_update_launch_status_nonblocking(self) -> None:
         """Rate-limited single status check without blocking loops or sleeps."""
+        # 仿真模式下不需要查询真实机器人启动状态服务，直接返回以避免刷屏
+        if not self.real:
+            return
+
         if self._robot_launched or self._launch_phase == "idle":
             return
         now = time.time()

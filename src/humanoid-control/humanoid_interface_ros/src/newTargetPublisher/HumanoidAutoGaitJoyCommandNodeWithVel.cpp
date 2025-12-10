@@ -261,14 +261,13 @@ namespace ocs2
       }
 
       // loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
-      RobotVersion rb_version(3, 4);
       if (nodeHandle.hasParam("/robot_version"))
       {
         int rb_version_int;
         nodeHandle.getParam("/robot_version", rb_version_int);
-        rb_version = RobotVersion::create(rb_version_int);
+        rb_version_ = RobotVersion::create(rb_version_int);
       }
-      auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
+      auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version_, true, 2e-3);
       default_joint_state_ = drake_interface_->getDefaultJointState();
       com_height_ = drake_interface_->getIntialHeight();
       loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
@@ -722,10 +721,24 @@ namespace ocs2
         ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
         reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
       }
-  
-      if(joy_msg->buttons[joyButtonMap["BUTTON_M1"]] || joy_msg->buttons[joyButtonMap["BUTTON_M2"]])
+
+      if (rb_version_.major() != 1)
       {
-        return;
+        if (joy_msg->buttons[joyButtonMap["BUTTON_BACK"]]){
+          callTerminateSrv();
+          return;
+        }
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_START"]] && joy_msg->buttons[joyButtonMap["BUTTON_START"]]){
+          callRealInitializeSrv();
+          return;
+        }
+      }
+      else
+      {
+        if(joy_msg->buttons[joyButtonMap["BUTTON_M1"]] || joy_msg->buttons[joyButtonMap["BUTTON_M2"]])
+        {
+          return;
+        }
       }
 
       // Rate-limited check: only allow operations after robot is launched       
@@ -1338,6 +1351,8 @@ namespace ocs2
     ros::Time last_status_check_time_;
     bool real_{false};
     
+    RobotVersion rb_version_{3, 4};
+
     // 动作执行状态相关
     ros::Subscriber robot_action_state_sub_;
     bool robot_action_executing_{false};  // 标记是否有动作正在执行
