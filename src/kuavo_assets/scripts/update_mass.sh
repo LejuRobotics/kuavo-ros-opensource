@@ -48,7 +48,18 @@ LINK_NAMES=(
     "torso"
     "torso"
 )
+XML_TORSO_LINK_NAME="base_link"
 
+if [ "${ROBOT_VERSION}" = "14" ]; then
+    LINK_NAMES=(
+        "waist_yaw_link"
+        "waist_yaw_link"
+        "torso"
+        "torso"
+        "torso"
+    )
+    XML_TORSO_LINK_NAME="waist_yaw"
+fi
 
 # 构建基础URDF路径
 BASE_URDF_PATH="${SRC_DIR}/models/biped_s${ROBOT_VERSION}/urdf"
@@ -154,7 +165,7 @@ else
     XML_FILE_PATH="${BASE_XML_PATH}/biped_s${ROBOT_VERSION}.xml"
     if [ -f "$XML_FILE_PATH" ]; then
         # 调用修改质量的脚本，同时传入链接名称
-        ./modify_torso_mass_xml.sh "$XML_FILE_PATH" "${TOTAL_MASS}"  # 传入link_name作为参数
+        ./modify_torso_mass_xml.sh "$XML_FILE_PATH" "${TOTAL_MASS}" "${XML_TORSO_LINK_NAME}" # 传入link_name作为参数
         echo "Updated xml mass for ${XML_FILE_PATH}"
     else
         echo "Warning: ${XML_FILE_PATH} not found" >&2
