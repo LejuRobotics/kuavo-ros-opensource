@@ -13,6 +13,24 @@ import math
 import argparse
 import numpy as np
 import time
+import os
+import sys
+import rospkg
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
+    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError) as e:
+    # 如果 rospkg 不可用或包未找到，回退到相对路径方式
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
 
 
 # 自定义ik参数
@@ -120,41 +138,37 @@ if __name__ == "__main__":
     # 初始化ROS节点
     rospy.init_node("robot_arm_fk_ik_node", anonymous=True)
 
-    # 获取机器人版本
-    robot_version = get_parameter('robot_version')
+    robot_version_int = get_parameter('robot_version')
+    robot_version = RobotVersion.create(robot_version_int)
+    major = robot_version.major()
+    minor = robot_version.minor()
+    
+    rospy.loginfo(f"机器人版本: {robot_version.version_name()} (major={major}, minor={minor})")
+    
     # 设置手臂运动模式为外部控制
     set_arm_control_mode(2)
 
-    # 创建请求对象（单位：弧度）
-    def start_with_version(version_number:int, series:int):
-        """判断版本号是否属于某系列"""
-        # PPPPMMMMN
-        MMMMN_MASK = 100000
-        return (version_number % MMMMN_MASK) == series
-    # 42
-    if start_with_version(robot_version, 42):
-        joint_angles_optiops = {
-        1: [-1.0, 0.3, -1.0, 0.19, 1.0, -0.5, -0.3,
-        -1.38, -1.39, -0.29, -0.43, -0.5, -0.17, 0.75],
-        2: [-1.7, 0.8, -1.57, -1.4, 0.0, -0.8, 0.0,
-         -1.6, -0.8, 1.57, -1.4, 0.0, -0.8, 0.0],
-        3: [-1.1, -0.25, -1.0, -0.12, 0.59, 1.2, -0.5,
-         -1.25, 0.3, 1.0, -0.15, 0.37, -1.0, -1.0],
-        }
+    joint_angles_optiops = None
     
-    # 45 or 49
-    if start_with_version(robot_version, 45) or start_with_version(robot_version, 49):
+    if major == 4 and minor <= 2:
         joint_angles_optiops = {
-        1: [-1.0, 1.0, -0.3, -1.2, 0.0, -0.5, -0.2,
-            -1.9, -0.5, -0.0, -1.0, -0.0, 0.5, 0.65],
-        2: [-1.8, 1.0, -1.5, -1.8, 0.0, -0.0, -0.8,
-            -1.8, -1.0, 1.5, -1.8, 0.0, -0.0, -0.8],
-        3: [0.4, 1.0, 1.2, -1.5, 1.0, 0.4, -0.75,
-            0.4, -0.5, -1.3, -1.5, -1.0, -0.7, -0.5],
+            1: [-1.0, 0.3, -1.0, 0.19, 1.0, -0.5, -0.3,
+                -1.38, -1.39, -0.29, -0.43, -0.5, -0.17, 0.75],
+            2: [-1.7, 0.8, -1.57, -1.4, 0.0, -0.8, 0.0,
+                -1.6, -0.8, 1.57, -1.4, 0.0, -0.8, 0.0],
+            3: [-1.1, -0.25, -1.0, -0.12, 0.59, 1.2, -0.5,
+                -1.25, 0.3, 1.0, -0.15, 0.37, -1.0, -1.0],
         }
-    
-    # 52 or other versions
-    if start_with_version(robot_version, 52):
+    elif (major == 4 and minor >= 3):
+        joint_angles_optiops = {
+            1: [-1.0, 1.0, -0.3, -1.2, 0.0, -0.5, -0.2,
+                -1.9, -0.5, -0.0, -1.0, -0.0, 0.5, 0.65],
+            2: [-1.8, 1.0, -1.5, -1.8, 0.0, -0.0, -0.8,
+                -1.8, -1.0, 1.5, -1.8, 0.0, -0.0, -0.8],
+            3: [0.4, 1.0, 1.2, -1.5, 1.0, 0.4, -0.75,
+                0.4, -0.5, -1.3, -1.5, -1.0, -0.7, -0.5],
+        }
+    elif major == 5:
         joint_angles_optiops = {
         1: [-1.0, 1.0, -0.3, -1.2, 0.0, -0.5, -0.2,
             -1.9, -0.5, -0.0, -1.0, -0.0, 0.5, 0.65],
@@ -165,19 +179,12 @@ if __name__ == "__main__":
         3: [-0.12404927166595045, 0.5207316843701423, -0.7438398355748528, -1.6878711580314953, 0.5882163232478015, 0.6960587737022195, -0.1833288094691406,
             0.06531010122606275, 0.2915284371448789, -0.27502683875196365, -1.6756463742815109, 0.27429680674163065, 0.29221918357765564, -0.040906271746990595]
         }
+
+    if joint_angles_optiops is None:
+        rospy.logerr(f"不支持的机器人版本: {robot_version.version_name()} (major={major}, minor={minor})，程序退出。")
+        rospy.signal_shutdown("不支持的机器人版本")
+        exit(1)
     
-    # 默认配置（如果版本不匹配任何已知版本）
-    if 'joint_angles_optiops' not in locals():
-        joint_angles_optiops = {
-        1: [-1.0, 1.0, -0.3, -1.2, 0.0, -0.5, -0.2,
-            -1.9, -0.5, -0.0, -1.0, -0.0, 0.5, 0.65],
-        2: [-1.8, 1.0, -1.5, -1.8, 0.0, -0.0, -0.8,
-            -1.8, -1.0, 1.5, -1.8, 0.0, -0.0, -0.8],
-        3: [0.4, 1.0, 1.2, -1.5, 1.0, 0.4, -0.75,
-            0.4, -0.5, -1.3, -1.5, -1.0, -0.7, -0.5],
-        }
-#0.6, 1.0, 1.2, -1.0, 1.0, 0.4, -0.75,
-#0.6, -0.5, -1.3, -1.0, -1.0, -0.7, -0.5
     # 解析命令行参数  
     parser = argparse.ArgumentParser(description="选择不同的 joint_angles")
     parser.add_argument("--joint_angles_id", type=int, choices=[1, 2, 3], required=True, help="选择 joint_angles 的 ID (1-3)")
