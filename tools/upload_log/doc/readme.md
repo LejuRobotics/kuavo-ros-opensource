@@ -16,7 +16,7 @@
 #### 方法二：使用仓库内脚本安装
 
 - `cd <kuavo-ros-opensource>`
-- `sudo tools/upload_log/doc/install_log_uploader.sh`
+- `sudo tools/upload_log/install_log_uploader.sh`
 
 当前机器人在云端的编号为 wlo1 网卡的 mac 地址去掉冒号，获得机器编号的命令如下：
 
