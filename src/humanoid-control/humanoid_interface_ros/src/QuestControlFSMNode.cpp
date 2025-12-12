@@ -914,7 +914,7 @@ namespace ocs2
         void checkGaitSwitchCommand(const kuavo_msgs::JoySticks &joy_msg)
         {
             // 检查是否有gait切换指令
-            if (!joystick_data_prev_.right_first_button_pressed && joy_msg.right_first_button_pressed && joy_msg.left_trigger < 0.5)
+            if (!joystick_data_prev_.right_first_button_pressed && joy_msg.right_first_button_pressed && joy_msg.left_trigger < 0.5 && !torso_control_enabled_)
             {
                 publish_mode_sequence_temlate("stance");
                 publish_zero_spd();
