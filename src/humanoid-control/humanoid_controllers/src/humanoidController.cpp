@@ -1702,14 +1702,19 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // measuredRbdStateRL_ = getRobotState();
       double startTime;
       double endTime;
-      const double motionVel = 0.11;
+      double motionVel;
+      if(is_roban_)
+        motionVel = 0.06;  //鲁班站立速度
+      else
+        motionVel = 0.11;   //其他机器人站立速度
+      
       if (!isInitStandUpStartTime_)
       {
         isInitStandUpStartTime_ = true;
         robotStartStandTime_ = time.toSec();
         // 站立的结束时间是依据开始时间确定的
         startTime = robotStartStandTime_;
-        endTime = startTime + (standState[8] - squatState[8]) / motionVel; // 以 0.11m/s 速度起立
+        endTime = startTime + (standState[8] - squatState[8]) / motionVel; // 以 motionVel 速度起立
         robotStandUpCompleteTime_ = endTime;
         ROS_INFO_STREAM("Set standUp start time: " << robotStartStandTime_);
       }
@@ -1722,7 +1727,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         curState = curRobotLegState_;
         desiredState = squatState;
         startTime = robotStartSquatTime_;
-        endTime = startTime + (curRobotLegState_[8] - squatState[8]) / motionVel; // 以 0.11m/s 速度挂起
+        endTime = startTime + (curRobotLegState_[8] - squatState[8]) / motionVel; // 以 motionVel 速度挂起
       }
       else
       {

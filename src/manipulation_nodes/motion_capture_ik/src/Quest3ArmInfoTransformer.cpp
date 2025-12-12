@@ -207,7 +207,7 @@ bool Quest3ArmInfoTransformer::computeHandPose(const noitom_hi5_hand_udp_python:
     return false;
   }
 
-  updateVisualizationDataForSide(input, side, handPos, elbowPos, shoulderPos);
+  updateVisualizationDataForSide(input, side, handPos, handQuatInW, elbowPos, shoulderPos, R_wS);
 
   return true;
 }
@@ -236,7 +236,7 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> Quest3ArmInfoTransformer::scaleArmPo
     const Eigen::Vector3d &handPos,
     const Eigen::Vector3d &humanShoulderOriginPos,
     const std::string &side) {
-  // 计算人体上臂长度（从肩部到肘部）
+  // CZJTODO:通过缩放系数，重新调整shoulderAdaptivePos, elbowPos, handPos，最后再完成长度对齐
   double humanUpperArmLength = (elbowPos - humanShoulderOriginPos).norm();
 
   // 计算人体下臂长度（从肘部到手部）
@@ -567,8 +567,10 @@ Eigen::Vector3d Quest3ArmInfoTransformer::matrixToRPY(const Eigen::Matrix3d &R) 
 void Quest3ArmInfoTransformer::updateVisualizationDataForSide(const noitom_hi5_hand_udp_python::PoseInfoList &input,
                                                               const std::string &side,
                                                               const Eigen::Vector3d &handPos,
+                                                              const Eigen::Quaterniond &handQuat,
                                                               const Eigen::Vector3d &elbowPos,
-                                                              const Eigen::Vector3d &shoulderPos) {
+                                                              const Eigen::Vector3d &shoulderPos,
+                                                              const Eigen::Matrix3d &shoulderRot) {
   // 复现Python版本的分别处理逻辑：每个手臂处理时单独更新对应数据
   if (side == "Left") {
     visualizationData_.leftHandPos = handPos;
@@ -585,15 +587,26 @@ void Quest3ArmInfoTransformer::updateVisualizationDataForSide(const noitom_hi5_h
   }
 
   Eigen::Vector3d originalChestPos;
+  Eigen::Matrix3d chestRot = Eigen::Matrix3d::Identity();
   if (input.poses.size() > POSE_INDEX_CHEST) {
     auto chestPose = input.poses[POSE_INDEX_CHEST];
     originalChestPos = Eigen::Vector3d(chestPose.position.x, chestPose.position.y, chestPose.position.z);
     visualizationData_.chestPos = originalChestPos;
+    // 提取胸部旋转矩阵
+    Eigen::Quaterniond chestQuat(
+        chestPose.orientation.w, chestPose.orientation.x, chestPose.orientation.y, chestPose.orientation.z);
+    chestRot = chestQuat.toRotationMatrix();
   }
 
   visualizationData_.isValid = visualizationData_.leftSideReady || visualizationData_.rightSideReady;
   if (visPub_ && visualizationCallback_) {
-    visualizationCallback_(side, handPos, elbowPos, shoulderPos, originalChestPos);
+    // 构建PoseData向量: [handPose, elbowPose, shoulderPose, chestPose]
+    std::vector<PoseData> poses;
+    poses.push_back(PoseData(handQuat.toRotationMatrix(), handPos));   // hand
+    poses.push_back(PoseData(Eigen::Matrix3d::Identity(), elbowPos));  // elbow
+    poses.push_back(PoseData(shoulderRot, shoulderPos));               // shoulder
+    poses.push_back(PoseData(chestRot, originalChestPos));             // chest
+    visualizationCallback_(side, poses);
   }
 }
 

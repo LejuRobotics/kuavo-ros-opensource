@@ -135,32 +135,12 @@ target_link_libraries(topic_logger
 )
 target_compile_options(topic_logger PRIVATE ${FLAGS})
 
-# incremental_ik_ros_uni_node
-add_executable(incremental_ik_ros_uni_node 
-  src/incremental_ik_ros_uni_node.cpp 
-  src/ArmControlBaseROS.cpp
-  src/Quest3IkIncrementalROS.cpp 
-  src/IncrementalControlModule.cpp
-  src/KeyFramesVisualizer.cpp
-  src/BaseIncrementalIKSolver.cpp
-  src/TwoStageIncrementalIK.cpp
-  src/Quest3ArmInfoTransformer.cpp
-  src/ArmLengthMeasurement.cpp
-  src/JoyStickHandler.cpp
-  src/Quest3Debugger.cpp
-)
-add_dependencies(incremental_ik_ros_uni_node ${PROJECT_NAME}_generate_messages_cpp)
-target_include_directories(incremental_ik_ros_uni_node PRIVATE
-  ${PROJECT_BINARY_DIR}/include
-)
-target_link_libraries(incremental_ik_ros_uni_node ${catkin_LIBRARIES} drake::drake)
-
-
 # ik_ros_uni_cpp_node
 add_executable(ik_ros_uni_cpp_node 
   src/ik_ros_uni_cpp_node.cpp 
   src/ArmControlBaseROS.cpp
-  src/Quest3IkROS.cpp 
+  src/Quest3IkIncrementalROS.cpp 
+  src/IncrementalControlModule.cpp
   src/KeyFramesVisualizer.cpp
   src/BaseIKSolver.cpp
   src/TwoStageTorsoIKRec.cpp
@@ -168,6 +148,7 @@ add_executable(ik_ros_uni_cpp_node
   src/ArmLengthMeasurement.cpp
   src/JoyStickHandler.cpp
   src/Quest3Debugger.cpp
+  src/HandSmoother.cpp
 )
 add_dependencies(ik_ros_uni_cpp_node ${PROJECT_NAME}_generate_messages_cpp)
 target_include_directories(ik_ros_uni_cpp_node PRIVATE

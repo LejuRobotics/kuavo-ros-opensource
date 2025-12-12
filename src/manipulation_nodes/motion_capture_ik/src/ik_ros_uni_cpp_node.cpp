@@ -4,7 +4,7 @@
 #include <fstream>
 #include <iostream>
 
-#include "motion_capture_ik/Quest3IkROS.h"
+#include "motion_capture_ik/Quest3IkIncrementalROS.h"
 #include "motion_capture_ik/json.hpp"
 #include "leju_utils/define.hpp"
 
@@ -81,9 +81,9 @@ int main(int argc, char** argv) {
   nlohmann::json jsonData;
   loadJsonConfig(jsonData, modelConfigFile);
 
-  HighlyDynamic::Quest3IkROS quest3IkROS(nodeHandle, 100, false, ctrlArmIdx);
-  quest3IkROS.initialize(jsonData);
-  quest3IkROS.run();
+  HighlyDynamic::Quest3IkIncrementalROS quest3IkIncrementalROS(nodeHandle, 100, false, ctrlArmIdx);
+  quest3IkIncrementalROS.initialize(jsonData);
+  quest3IkIncrementalROS.run();
 
   return 0;
 }

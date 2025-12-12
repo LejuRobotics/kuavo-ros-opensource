@@ -61,7 +61,7 @@ bool BaseIKSolver::preSolveCheck(const std::vector<PoseData>& PoseConstraintList
 
     if (hasNaN) std::cerr << "position " << i << " contains NaN value!" << std::endl;
     if (hasInf) std::cerr << "position " << i << " contains infinite value!" << std::endl;
-    if (isZero) std::cout << "position " << i << " is zero vector" << std::endl;
+    // if (isZero) std::cout << "position " << i << " is zero vector" << std::endl;
     if (isExtreme) std::cerr << "position " << i << " contains extreme value!" << std::endl;
 
     if (hasNaN || hasInf || isExtreme) {

@@ -43,8 +43,8 @@ void ArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
       nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/mobile_manipulator_mpc_control");
   humanoidArmCtrlModeClient_ =
       nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_change_arm_ctrl_mode");
-  enableMmWbcArmTrajectoryControlClient_ =
-      nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/enable_mm_wbc_arm_trajectory_control");
+  enableWbcArmTrajectoryControlClient_ =
+      nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/enable_wbc_arm_trajectory_control");
 
   // Initialize service server for arm mode changing
   setArmModeChangingServer_ = nodeHandle_.advertiseService(
@@ -89,6 +89,14 @@ void ArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
 
   HandPoseAndElbowPositonListPtr_ = std::make_shared<noitom_hi5_hand_udp_python::PoseInfoList>();
 
+  // 初始化机器人关节状态，确保安全初始化
+  ROS_INFO("[ArmControlBaseROS] Initializing arm joints for safety...");
+  if (initializeArmJointsSafety()) {
+    ROS_INFO("[ArmControlBaseROS] Arm joints initialized successfully for safety");
+  } else {
+    ROS_WARN("[ArmControlBaseROS] Arm joints initialization failed, but continuing...");
+  }
+
   ROS_INFO("[ArmControlBaseROS] Base ROS components initialized successfully");
 }
 
@@ -128,74 +136,83 @@ void ArmControlBaseROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
   int newMode = msg->data;
   if (newMode != 2) {
     ROS_WARN("\033[91m[ArmControlBaseROS] Reset arm mode\033[0m");
-    armModeChanging_ = false;
+    armModeChanging_.store(false);
   } else {
     ROS_WARN("\033[91m[ArmControlBaseROS] Arm mode changing\033[0m");
-    armModeChanging_ = true;
+    armModeChanging_.store(true);
+  }
+}
+
+bool ArmControlBaseROS::initializeArmJointsSafety() {
+  ROS_INFO("[ArmControlBaseROS] Initializing arm joints for safety...");
+
+  if (!onlyHalfUpBody_) {
+    ROS_INFO("[ArmControlBaseROS] onlyHalfUpBody_ is false, skipping arm joints initialization");
+    return true;
+  }
+
+  std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
+
+  if (!currentSensorData) {
+    ROS_WARN("[ArmControlBaseROS] sensor_data_raw is None in initializeArmJointsSafety");
+    return false;
+  }
+
+  const size_t jointQSize = currentSensorData->joint_data.joint_q.size();
+  const int armJointStartIndex = 12;
+  const int numArmJoints = 14;
+
+  ROS_INFO("[ArmControlBaseROS] joint_q array size: %zu, required: %d", jointQSize, armJointStartIndex + numArmJoints);
+
+  if (jointQSize < armJointStartIndex + numArmJoints) {
+    std::string errorMsg = "joint_q array too small! Size: " + std::to_string(jointQSize) +
+                           ", required: " + std::to_string(armJointStartIndex + numArmJoints);
+    ROS_ERROR("[ArmControlBaseROS] %s", errorMsg.c_str());
+    return false;
+  }
+
+  // 执行关节状态发布
+  try {
+    ros::Rate rate(publishRate_);
+
+    sensor_msgs::JointState msg;
+    msg.name.resize(numArmJoints);
+    for (int i = 0; i < numArmJoints; ++i) {
+      msg.name[i] = "arm_joint_" + std::to_string(i + 1);
+    }
+    msg.header.stamp = ros::Time::now();
+    msg.position.resize(numArmJoints);
+
+    // 安全的数组访问
+    for (int i = 0; i < numArmJoints; ++i) {
+      const int jointIndex = armJointStartIndex + i;
+      if (jointIndex < static_cast<int>(jointQSize)) {
+        msg.position[i] = currentSensorData->joint_data.joint_q[jointIndex] * 180.0 / M_PI;
+      } else {
+        ROS_WARN("[ArmControlBaseROS] Joint index %d out of bounds, using 0.0", jointIndex);
+        msg.position[i] = 0.0;
+      }
+    }
+
+    // 发布20次（复现Python L1079-1081）
+    for (int i = 0; i < 20; ++i) {
+      kuavoArmTrajCppPublisher_.publish(msg);
+      rate.sleep();
+    }
+
+    ROS_INFO("[ArmControlBaseROS] Successfully published %d joint states for safety initialization", numArmJoints);
+    return true;
+  } catch (const std::exception& e) {
+    std::string errorMsg = "Failed to publish joint states: " + std::string(e.what());
+    ROS_ERROR("[ArmControlBaseROS] %s", errorMsg.c_str());
+    return false;
   }
 }
 
 bool ArmControlBaseROS::setArmModeChangingCallback(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res) {
-  ROS_INFO_STREAM("[ArmControlBaseROS] setArmModeChangingCallback");
-  armModeChanging_.store(true);
-
-  if (onlyHalfUpBody_) {
-    std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
-
-    if (!currentSensorData) {
-      ROS_WARN("[ArmControlBaseROS] sensor_data_raw is None in setArmModeChangingCallback");
-      return handleServiceResponse(res, false, "Sensor data not available");
-    }
-
-    const size_t jointQSize = currentSensorData->joint_data.joint_q.size();
-    const int armJointStartIndex = 12;
-    const int numArmJoints = 14;
-
-    ROS_INFO(
-        "[ArmControlBaseROS] joint_q array size: %zu, required: %d", jointQSize, armJointStartIndex + numArmJoints);
-
-    if (jointQSize < armJointStartIndex + numArmJoints) {
-      std::string errorMsg = "joint_q array too small! Size: " + std::to_string(jointQSize) +
-                             ", required: " + std::to_string(armJointStartIndex + numArmJoints);
-      ROS_ERROR("[ArmControlBaseROS] %s", errorMsg.c_str());
-      return handleServiceResponse(res, false, errorMsg);
-    }
-
-    // 执行关节状态发布
-    try {
-      ros::Rate rate(publishRate_);
-
-      sensor_msgs::JointState msg;
-      msg.name.resize(numArmJoints);
-      for (int i = 0; i < numArmJoints; ++i) {
-        msg.name[i] = "arm_joint_" + std::to_string(i + 1);
-      }
-      msg.header.stamp = ros::Time::now();
-      msg.position.resize(numArmJoints);
-
-      // 安全的数组访问
-      for (int i = 0; i < numArmJoints; ++i) {
-        const int jointIndex = armJointStartIndex + i;
-        if (jointIndex < static_cast<int>(jointQSize)) {
-          msg.position[i] = currentSensorData->joint_data.joint_q[jointIndex] * 180.0 / M_PI;
-        } else {
-          ROS_WARN("[ArmControlBaseROS] Joint index %d out of bounds, using 0.0", jointIndex);
-          msg.position[i] = 0.0;
-        }
-      }
-
-      // 发布20次（复现Python L1079-1081）
-      for (int i = 0; i < 20; ++i) {
-        kuavoArmTrajCppPublisher_.publish(msg);
-        rate.sleep();
-      }
-
-      ROS_INFO("[ArmControlBaseROS] Successfully published %d joint states", numArmJoints);
-    } catch (const std::exception& e) {
-      std::string errorMsg = "Failed to publish joint states: " + std::string(e.what());
-      ROS_ERROR("[ArmControlBaseROS] %s", errorMsg.c_str());
-      return handleServiceResponse(res, false, errorMsg);
-    }
+  ROS_INFO_STREAM("[Quest3IkROS] setArmModeChangingCallback");
+  if (!initializeArmJointsSafety()) {
+    return handleServiceResponse(res, false, "Failed to initialize arm joints");
   }
 
   // 设置arm mode changing标志
