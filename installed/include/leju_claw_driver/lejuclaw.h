@@ -68,6 +68,7 @@ public:
     std::vector<std::vector<float>> get_joint_state();
     std::vector<double> get_positions();
     std::vector<double> get_torque();
+    std::vector<double> get_target_torque();
     std::vector<double> get_velocity();
     void close();
     MotorStateDataVec get_motor_state();
@@ -83,31 +84,39 @@ private:
     static constexpr float DEFAULT_KD = 3.20f;                     // 微分增益系数，用于阻尼控制
     static constexpr float DEFAULT_ALPHA = 0.20f;                  // 低通滤波器系数，用于信号平滑
     static constexpr float DEFAULT_MAX_CURRENT = 2.50f;            // 最大电流限制，防止过载保护，单位 A
-    static constexpr float DEFAULT_MIN_ERROR = 0.05f;              // 最小误差阈值，用于判断到位精度，单位 rad
+    static constexpr float DEFAULT_MIN_ERROR_PERCENT = 1.00f;      // 最小误差阈值，基于行程百分比，用于判断到位精度，单位 %
     static constexpr float DEFAULT_DT = 0.002f;                    // 控制周期，控制循环时间间隔，单位 s
     // 卡死检测参数
-    static constexpr float STUCK_DETECTION_DELAY_MS = 50.0f;       // 卡死检测延迟时间，单位 ms
-    static constexpr float STUCK_DETECTION_TIME_MS = 50.0f;        // 卡死检测持续时间，单位 ms
+    static constexpr float STUCK_DETECTION_DELAY_MS = 500.0f;      // 卡死检测延迟时间，单位 ms
+    static constexpr float STUCK_DETECTION_TIME_MS = 500.0f;       // 卡死检测持续时间，单位 ms
     static constexpr float STUCK_POSITION_THRESHOLD = 0.002f;      // 卡死位置阈值，小于此值认为卡死，单位 rad
     static constexpr float IMPACT_CURRENT = 3.0f;                  // 冲击电流阈值，单位 A
     static constexpr float IMPACT_DURATION_MS = 200.0f;            // 冲击持续时间，单位 ms
     static constexpr float IMPACT_INTERVAL_MS = 800.0f;            // 冲击间隔时间，单位 ms
     static constexpr float LIMIT_RANGE_PERCENT = 5.0f;             // 限位范围百分比，包括VR与非VR模式，在行程两端此范围内才执行反冲，单位 %
+    // 目标位置检测参数（用于判断是否接近目标位置，通过后才进行稳定检测）
+    static constexpr float TARGET_POSITION_THRESHOLD = 1.0f;       // 目标位置检测阈值，100ms内位置变化小于此值则认为接近目标，单位 rad
+    static constexpr float TARGET_POSITION_DETECTION_TIME_MS = 100.0f;  // 目标位置检测时间，单位 ms
     // 稳定检测参数（用于若未到达目标位置，但处于稳定状态，为 ros 服务反馈已到达位置）
-    static constexpr float STABLE_POSITION_THRESHOLD = 0.005f;     // 稳定位置阈值，单位 rad
+    static constexpr float STABLE_POSITION_THRESHOLD = 0.1f;       // 稳定位置阈值，单位 rad
     static constexpr float STABLE_VELOCITY_THRESHOLD = 0.1f;       // 稳定速度阈值，单位 rad/s
-    static constexpr float STABLE_DETECTION_TIME_MS = 50.0f;       // 稳定检测时间，单位 ms
+    static constexpr float STABLE_CURRENT_THRESHOLD = 1.0f;        // 稳定检测电流阈值，单位 A
+    static constexpr float STABLE_DETECTION_TIME_MS = 200.0f;      // 稳定检测时间，单位 ms
+    static constexpr float GRIP_HOLDING_CURRENT = 0.5f;           // 夹持状态维持电流，单位 A
+    static constexpr bool ENABLE_100_POSITION_HOLDING_CURRENT = true;  // 是否启用"100位置则维持电流"功能，true=启用，false=禁用
+    static constexpr int MOVE_PAW_TIMEOUT_MS = 4000;              // 非VR模式下move_paw的超时时间，单位 ms
     // VR控制检测参数
     static constexpr int VR_CONTROL_TIMEOUT_MS = 60;               // VR模式下的超时时间，单位 ms
     static constexpr int VR_STUCK_DETECTION_CYCLES = 50;           // VR模式下卡死检测需要的周期个数，每个周期时长为DEFAULT_DT，超过次数后不动，判断为卡死
     static constexpr float VR_STUCK_POSITION_THRESHOLD = 0.01f;    // VR模式下卡死位置阈值，连续VR_STUCK_DETECTION_CYCLES个周期内，位置变化都小于该弧度，认为夹爪卡死，单位 rad
     static constexpr float VR_TARGET_POSITION_THRESHOLD = 0.5f;    // VR模式下目标位置差值阈值，当目标位置与当前位置差值大于此值时才进行卡死检测，单位 rad
-    // 刹车参数
-    static constexpr float BRAKE_RANGE_PERCENT = 35.0f;             // 刹车范围百分比，在行程两端刹车范围内减速，单位 %
-    static constexpr float BRAKE_MIN_SPEED_FACTOR = 0.01f;          // 刹车最小速度系数，在限位处速度降至最小值，单位 %
-    static constexpr float BRAKE_CURVE_EXPONENT = 40.0f;            // 刹车曲线指数，控制减速曲线形状
-    static constexpr float TARGET_PROXIMITY_BRAKE_PERCENT = 10.0f;  // 目标位置附近刹车范围，单位 %
-    static constexpr float TARGET_PROXIMITY_MIN_FACTOR = 0.05f;     // 目标位置附近最小速度系数
+    static constexpr float VR_GRIP_POSITION_THRESHOLD = 99.5f;     // VR模式下夹持位置阈值，当目标位置>=此值时判断为夹持状态，跳过PD控制，将持续发送夹持电流，单位 %
+    static constexpr float VR_GRIP_HOLDING_CURRENT = 0.4f;         // VR模式下夹持状态维持电流，当持续发送100位置时使用此电流进行夹持，单位 A
+    // 限位刹车参数
+    static constexpr float LIMIT_BRAKE_RANGE_PERCENT = 10.0f;      // 限位刹车范围百分比，在行程两端此范围内进行猛刹车（减小kp、增大kd），单位 %
+    static constexpr float LIMIT_BRAKE_KP_FACTOR = 0.8f;           // 限位刹车时kp的缩放系数（减小kp）
+    static constexpr float LIMIT_BRAKE_KD_FACTOR = 6.0f;           // 限位刹车时kd的缩放系数（增大kd）
+    static constexpr float TARGET_BRAKE_RANGE_PERCENT = 2.0f;      // 目标位置周围启用限位刹车逻辑的范围百分比，单位 %
     
     // 初始化寻找零点参数
     static constexpr float ZERO_CONTROL_KP = 0.0f;                  // 零点控制比例增益，零点寻找时使用
@@ -119,7 +128,7 @@ private:
     static constexpr float ZERO_CONTROL_DT = 0.001f;                // 零点控制周期，单位 s
     static constexpr int ZERO_FIND_TIMEOUT_MS = 20000;              // 零点寻找超时时间，单位 ms
     static constexpr int ZERO_WAIT_MS = 500;                        // 零点等待时间，单位 ms
-    static constexpr float OPEN_LIMIT_ADJUSTMENT = -10.0f;          // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
+    static constexpr float OPEN_LIMIT_ADJUSTMENT = 0.0f;            // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float CLOSE_LIMIT_ADJUSTMENT = 0.0f;           // 关限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float TARGET_VELOCITY = 65.0f;                 // 限位寻找目标速度，单位 rad/s
     // 关爪限位寻找参数
@@ -132,20 +141,80 @@ private:
     static constexpr int CLOSE_IMPACT_INTERVAL_MS = 800;            // 关爪冲击间隔时间，单位 ms
     static constexpr int CLOSE_MAX_ATTEMPTS = 10;                   // 关爪最大尝试次数，达到次数后认为到达关爪限位
     
+    // 可运行时覆盖的配置副本（初始化为上述默认值）
+    float cfg_KP = DEFAULT_KP;
+    float cfg_KD = DEFAULT_KD;
+    float cfg_ALPHA = DEFAULT_ALPHA;
+    float cfg_MAX_CURRENT = DEFAULT_MAX_CURRENT;
+    float cfg_MIN_ERROR_PERCENT = DEFAULT_MIN_ERROR_PERCENT;
+    float cfg_DT = DEFAULT_DT;
+
+    float cfg_LIMIT_RANGE_PERCENT = LIMIT_RANGE_PERCENT;
+    float cfg_IMPACT_CURRENT = IMPACT_CURRENT;
+    float cfg_IMPACT_DURATION_MS = IMPACT_DURATION_MS;
+    float cfg_IMPACT_INTERVAL_MS = IMPACT_INTERVAL_MS;
+
+    // 目标位置检测
+    float cfg_TARGET_POSITION_THRESHOLD = TARGET_POSITION_THRESHOLD;
+    float cfg_TARGET_POSITION_DETECTION_TIME_MS = TARGET_POSITION_DETECTION_TIME_MS;
+    // 卡死/稳定检测
+    float cfg_STUCK_DETECTION_DELAY_MS = STUCK_DETECTION_DELAY_MS;
+    float cfg_STUCK_DETECTION_TIME_MS = STUCK_DETECTION_TIME_MS;
+    float cfg_STUCK_POSITION_THRESHOLD = STUCK_POSITION_THRESHOLD;
+    float cfg_STABLE_POSITION_THRESHOLD = STABLE_POSITION_THRESHOLD;
+    float cfg_STABLE_VELOCITY_THRESHOLD = STABLE_VELOCITY_THRESHOLD;
+    float cfg_STABLE_CURRENT_THRESHOLD = STABLE_CURRENT_THRESHOLD;
+    float cfg_STABLE_DETECTION_TIME_MS = STABLE_DETECTION_TIME_MS;
+    float cfg_GRIP_HOLDING_CURRENT = GRIP_HOLDING_CURRENT;
+    bool  cfg_ENABLE_100_POSITION_HOLDING_CURRENT = ENABLE_100_POSITION_HOLDING_CURRENT;
+    int   cfg_MOVE_PAW_TIMEOUT_MS = MOVE_PAW_TIMEOUT_MS;
+
+    float cfg_LIMIT_BRAKE_RANGE_PERCENT = LIMIT_BRAKE_RANGE_PERCENT;
+    float cfg_LIMIT_BRAKE_KP_FACTOR = LIMIT_BRAKE_KP_FACTOR;
+    float cfg_LIMIT_BRAKE_KD_FACTOR = LIMIT_BRAKE_KD_FACTOR;
+    float cfg_TARGET_BRAKE_RANGE_PERCENT = TARGET_BRAKE_RANGE_PERCENT;
+
+    // VR
+    int   cfg_VR_CONTROL_TIMEOUT_MS = VR_CONTROL_TIMEOUT_MS;
+    int   cfg_VR_STUCK_DETECTION_CYCLES = VR_STUCK_DETECTION_CYCLES;
+    float cfg_VR_STUCK_POSITION_THRESHOLD = VR_STUCK_POSITION_THRESHOLD;
+    float cfg_VR_TARGET_POSITION_THRESHOLD = VR_TARGET_POSITION_THRESHOLD;
+    float cfg_VR_GRIP_POSITION_THRESHOLD = VR_GRIP_POSITION_THRESHOLD;
+    float cfg_VR_GRIP_HOLDING_CURRENT = VR_GRIP_HOLDING_CURRENT;
+
+    // 零点与限位搜索
+    float cfg_ZERO_CONTROL_KP = ZERO_CONTROL_KP;
+    float cfg_ZERO_CONTROL_KD = ZERO_CONTROL_KD;
+    float cfg_ZERO_CONTROL_ALPHA = ZERO_CONTROL_ALPHA;
+    float cfg_ZERO_CONTROL_MAX_CURRENT = ZERO_CONTROL_MAX_CURRENT;
+    float cfg_STALL_CURRENT_THRESHOLD = STALL_CURRENT_THRESHOLD;
+    float cfg_STALL_VELOCITY_THRESHOLD = STALL_VELOCITY_THRESHOLD;
+    float cfg_ZERO_CONTROL_DT = ZERO_CONTROL_DT;
+    int   cfg_ZERO_FIND_TIMEOUT_MS = ZERO_FIND_TIMEOUT_MS;
+    int   cfg_ZERO_WAIT_MS = ZERO_WAIT_MS;
+    float cfg_OPEN_LIMIT_ADJUSTMENT = OPEN_LIMIT_ADJUSTMENT;
+    float cfg_CLOSE_LIMIT_ADJUSTMENT = CLOSE_LIMIT_ADJUSTMENT;
+    float cfg_TARGET_VELOCITY = TARGET_VELOCITY;
+    float cfg_OPEN_POSITION_CHANGE_THRESHOLD = OPEN_POSITION_CHANGE_THRESHOLD;
+    float cfg_CLOSE_STUCK_CURRENT_THRESHOLD = CLOSE_STUCK_CURRENT_THRESHOLD;
+    float cfg_CLOSE_STUCK_DETECTION_THRESHOLD = CLOSE_STUCK_DETECTION_THRESHOLD;
+    int   cfg_CLOSE_STARTUP_DELAY_MS = CLOSE_STARTUP_DELAY_MS;
+    float cfg_CLOSE_IMPACT_CURRENT = CLOSE_IMPACT_CURRENT;
+    int   cfg_CLOSE_IMPACT_DURATION_MS = CLOSE_IMPACT_DURATION_MS;
+    int   cfg_CLOSE_IMPACT_INTERVAL_MS = CLOSE_IMPACT_INTERVAL_MS;
+    int   cfg_CLOSE_MAX_ATTEMPTS = CLOSE_MAX_ATTEMPTS;
+    
     std::vector<float> create_zero_vector(size_t size);
     void send_torque_with_lock(const std::vector<float>& torques);
     void send_claw_torque_only(const std::vector<float>& torques);  // 发送夹爪电流，左右独立控
     void send_torque_direct(const std::vector<float>& torques);     // 直接发送电流指令，使用run_torque_mode
     void send_velocity_direct(const std::vector<float>& velocities); // 直接发送速度指令，使用run_vel_mode
-    
-    // 刹车相关函数
-    float calculate_brake_speed_factor(float current_position_percent, float target_position_percent, 
-                                      float start_position, float end_position); // 计算刹车速度系数
-    
+        
     private:
     void control_thread();
     // void get_parameter();
     void get_config(const std::string &config_file);
+    void load_leju_params(const std::string &config_file);
     std::string get_home_path();
     void interpolate_move(const std::vector<float> &start_positions, const std::vector<float> &target_positions, const std::vector<float> &speeds, float dt);
     std::vector<std::vector<float>> interpolate_positions_with_speed(const std::vector<float> &a, const std::vector<float> &b, const std::vector<float> &speeds, float dt);
@@ -213,6 +282,14 @@ private:
     bool is_vr_control_mode;                                        // 是否为VR控制模式
     std::chrono::steady_clock::time_point movement_start_time;      // 运动开始时间
     bool movement_timeout_enabled;                                  // 是否启用运动超时机制
+    
+    // 全局保持电流机制
+    std::vector<bool> is_holding_object_global;                    // 记录哪些关节需要保持电流（全局状态）
+    std::vector<float> holding_current_values;                     // 每个关节的维持电流值（用于control_thread持续发送）
+    
+    // move_paw状态记录
+    std::vector<double> last_move_paw_target_positions;           // 上次move_paw调用的目标位置（百分比0-100）
+    std::vector<bool> last_exit_with_grip_current;                 // 上次退出时是否处于维持夹持电流状态
 };
 
 #endif // LEJUCLAW_CPP_H
