@@ -20,6 +20,7 @@ import yaml
 from utils import calculate_file_md5, frames_to_custom_action_data, get_start_end_frame_time, frames_to_custom_action_data_ocs2, verify_robot_version, robot_version
 import shutil
 import rosnode
+import glob
 
 # 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
 try:
@@ -2221,6 +2222,191 @@ async def get_robot_launch_status_handler(
         target=websocket,
     )
     response_queue.put(response)
+
+MOVE_VOICE_KEYWORDS = {
+  "前进一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往前走", "往前走一步", "前进一步"],
+    "data": {
+      "direction": "前",
+      "step": 1
+    }
+  },
+  "后退一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往后走", "往后走一步", "后退一步"],
+    "data": {
+      "direction": "后",
+      "step": 1
+    }
+  },
+  "左转一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["左转", "左转一步"],
+    "data": {
+      "direction": "左转",
+      "step": 1
+    }
+  },
+  "右转一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["右转", "右转一步"],
+    "data": {
+      "direction": "右转",
+      "step": 1
+    }
+  },
+  "左移一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["左移", "往左走", "左边走"],
+    "data": {
+      "direction": "左",
+      "step": 1
+    }
+  },
+  "右移一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["右移", "往右走", "右边走"],
+    "data": {
+      "direction": "右",
+      "step": 1
+    }
+  }
+}
+
+def _merge_keywords_config_by_action_files(voice_keywords_config: dict, action_folder_path: str):
+    """
+    根据本地动作文件列表，重置关键词配置
+    :param voice_keywords_config: 原始配置字典
+    :param action_folder_path: 动作文件的绝对路径
+    """
+    
+    # 获取动作文件列表
+    action_files_pattern = os.path.join(action_folder_path, "*.tact")
+    action_files = glob.glob(action_files_pattern)
+    # 使用 os.path.basename 获取不带目录的文件名，再使用 os.path.splitext 安全去除文件后缀
+    action_file_names = set(os.path.splitext(os.path.basename(f))[0] for f in action_files)
+    rospy.loginfo(f"Found {action_file_names} action files in {action_folder_path}.")
+
+    updated_config = {}
+    
+    # 1. 处理原始配置中的项
+    for key, value in voice_keywords_config.items():
+        if value.get("type") == "SINGLE_STEP":
+            # 保留非动作文件类型的配置
+            updated_config[key] = value
+        elif value.get("type") == "ARM_ACTION":
+            # 如果是 ARM_ACTION，检查文件是否存在
+            if key in action_file_names:
+                updated_config[key] = value
+            else:
+                # 文件不存在，记录日志（实现清理逻辑，不加入 updated_config 即为删除）
+                rospy.logwarn(f"Removing '{key}' from config because the action file is missing.")
+    
+    # 2. 添加新发现的动作文件
+    for action_name in action_file_names:
+        # 如果配置里没有这个动作，则添加
+        if action_name not in updated_config:
+            # 再次检查：防止同名但类型为 SINGLE_STEP 的冲突
+            if action_name in voice_keywords_config and voice_keywords_config[action_name].get("type") != "ARM_ACTION":
+                rospy.logwarn(f"Skipping auto-add '{action_name}', name conflict with existing {voice_keywords_config[action_name]['type']}")
+                continue
+                
+            updated_config[action_name] = {
+                "type": "ARM_ACTION",
+                "keywords": [],
+                "data": action_name
+            }
+            rospy.loginfo(f"Auto-added new action file to config: {action_name}")
+
+    return updated_config
+
+async def get_voice_keywords_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    payload = Payload(
+        cmd="get_voice_keywords",
+        data={"code": 0, "message": "Read voice keywords successfully", "result": {}}
+    )
+    # 配置文件路径：voice_control_node/scripts/key_words.json
+
+    VOICE_CONTROL_PKG_NAME = "voice_control_node"
+
+    try:    
+
+        voice_control_keywords_path = rospkg.RosPack().get_path(VOICE_CONTROL_PKG_NAME)+"/scripts"
+        KEYWORDS_FILE_PATH = os.path.join(voice_control_keywords_path, "key_words.json")
+        action_folder = os.path.expanduser("~/.config/lejuconfig/action_files")     
+        
+        # 1. 读取配置
+        with open(KEYWORDS_FILE_PATH, "r") as f:
+                voice_keywords_config = json.load(f)
+
+        # 2. 同步更新逻辑
+        merged_config = _merge_keywords_config_by_action_files(voice_keywords_config, action_folder)
+
+        payload.data["result"] = merged_config
+        rospy.loginfo(f"Read voice keywords successfully: {merged_config}")
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to read {KEYWORDS_FILE_PATH}: {e}"
+        payload.data["result"] = {}
+        rospy.logerr(f"Failed to read {KEYWORDS_FILE_PATH}: {e}")
+
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def update_voice_keywords_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """
+    更新语音关键词
+    """
+    payload = Payload(
+        cmd="update_voice_keywords",
+        data={"code": 0, "message": "Update voice keywords successfully"}
+    )
+
+    # 1.找配置文件
+
+    VOICE_CONTROL_PKG_NAME = "voice_control_node"
+    voice_control_keywords_path = rospkg.RosPack().get_path(VOICE_CONTROL_PKG_NAME)+"/scripts"
+    KEYWORDS_FILE_PATH = os.path.join(voice_control_keywords_path, "key_words.json")
+    
+    # 2.解析参数，并更新配置文件
+    voice_keywords_config = {}
+    try:
+        # 如果文件不存在，创建一个其父目录
+        if not Path(KEYWORDS_FILE_PATH).is_file():
+            
+            os.makedirs(os.path.dirname(KEYWORDS_FILE_PATH), exist_ok=True)
+            rospy.loginfo(f"Created new voice keywords config file: {KEYWORDS_FILE_PATH}")
+    
+        real_data = data.get("data", {})
+        for action, keywords in real_data.items():
+            # TODO 检查lejuconfig下的对应动作配置文件是否存在
+            voice_keywords_config[action] = {
+                "type": "ARM_ACTION",
+                "keywords": keywords,
+                "data": action
+            }
+        voice_keywords_config = {**MOVE_VOICE_KEYWORDS, **voice_keywords_config}
+        with open(KEYWORDS_FILE_PATH, "w") as f:
+            json.dump(voice_keywords_config, f, ensure_ascii=False, indent=2)
+        payload.data["code"] = 0
+        payload.data["message"] = "Update voice keywords successfully"
+        rospy.loginfo(f"Updated voice keywords: {voice_keywords_config}")
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to update voice keywords: {e}."
+        rospy.logwarn(f"Failed to update voice keywords: {e}.")
+
+    # 返回转换后的配置文件数据
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
 
 # Add a function to clean up when a websocket connection is closed
 def cleanup_websocket(websocket: websockets.WebSocketServerProtocol):
