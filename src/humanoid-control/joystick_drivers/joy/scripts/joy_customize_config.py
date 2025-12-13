@@ -54,7 +54,7 @@ if not KUAVO_ROS_CONTROL_WS_PATH:
                 KUAVO_ROS_CONTROL_WS_PATH = "/home/lab/kuavo-ros-opensource"
     except Exception:
         # 降级方案：使用默认值
-        KUAVO_ROS_CONTROL_WS_PATH = "/opt/ros/leju"
+        KUAVO_ROS_CONTROL_WS_PATH = "/home/lab/kuavo-ros-opensource"
             
 TAIJI_ACTION_SESSION_NAME = "taiji_action"
 

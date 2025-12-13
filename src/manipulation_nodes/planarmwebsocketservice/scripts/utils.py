@@ -8,31 +8,29 @@ import numpy as np
 import rospy
 
 def get_wifi_ip():
-    try:
-        # 获取所有网络接口
-        interfaces = netifaces.interfaces()
 
-        # 尝试先找以 'wl' 开头的接口（通常是 WiFi）
-        wifi_interface = next((iface for iface in interfaces if iface.startswith("wl")), None)
+    # 获取所有网络接口
+    interfaces = netifaces.interfaces()
 
-        if wifi_interface:
-            addresses = netifaces.ifaddresses(wifi_interface)
-            if netifaces.AF_INET in addresses:
-                return addresses[netifaces.AF_INET][0]["addr"]
+    # 尝试先找以 'wl' 开头的接口（通常是 WiFi）
+    wifi_interface = next((iface for iface in interfaces if iface.startswith("wl")), None)
 
-        # 如果找不到 wl 开头的，再尝试找 enp 开头的（有线网络）
-        ethernet_interface = next((iface for iface in interfaces if iface.startswith("enp")), None)
+    if wifi_interface:
+        addresses = netifaces.ifaddresses(wifi_interface)
+        if netifaces.AF_INET in addresses:
+            return addresses[netifaces.AF_INET][0]["addr"]
 
-        if ethernet_interface:
-            addresses = netifaces.ifaddresses(ethernet_interface)
-            if netifaces.AF_INET in addresses:
-                return addresses[netifaces.AF_INET][0]["addr"]
+    # 如果找不到 wl 开头的，再尝试找 enp 开头的（有线网络）
+    ethernet_interface = next((iface for iface in interfaces if iface.startswith("enp")), None)
 
-        # 若两个都找不到，抛出异常
-        raise RuntimeError("无法获取有效 IP 地址，未找到以 'wl' 或 'enp' 开头的网络接口，或接口无 IPv4 地址")
+    if ethernet_interface:
+        addresses = netifaces.ifaddresses(ethernet_interface)
+        if netifaces.AF_INET in addresses:
+            return addresses[netifaces.AF_INET][0]["addr"]
 
-    except Exception as e:
-        raise RuntimeError(f"获取 IP 地址时出错: {e}")
+    # 若两个都找不到，抛出异常
+    rospy.logwarn("未找到有效网络接口，返回 None")
+    return None
 
 
 

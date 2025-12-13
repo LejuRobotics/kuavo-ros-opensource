@@ -124,6 +124,7 @@ else
 fi
 
 # 启动 websocket 服务节点
+echo "启动 websocket 服务节点..."
 roslaunch planarmwebsocketservice plan_arm_action_websocket_server.launch robot_type:=ocs2
 
 # 定义退出时的清理操作

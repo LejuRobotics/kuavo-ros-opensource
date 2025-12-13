@@ -559,8 +559,12 @@ check_system_time(){
         print_success "系统时间正确，无需修改"
         return 0
     else
+        # 临时禁用 set-e，避免 apt update 因重复源警告导致脚本退出
+        set +e
         sudo apt update
         sudo apt install ntpdate -y
+        set -e  # 重新启用 set-e
+
         sudo timedatectl set-ntp false
         print_info "正在修改系统时间..."
         sudo ntpdate -u pool.ntp.org
