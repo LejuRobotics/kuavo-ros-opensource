@@ -61,12 +61,12 @@ git clone git@gitee.com:leju-robot/kuavo-ros-opensource.git
 - docker镜像可以自行根据后续章节使用`./docker/Dockerfile`构建，或者下载已经编译好的镜像：
 
 ```bash  
-wget https://kuavo.lejurobot.com/docker_images/kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
+wget https://kuavo.lejurobot.com/kuavo_research_editiion/docker_images/kuavo_opensource_mpc_wbc_img_v1.3.0.tar.gz
 ```
 
 - 执行以下命令导入容器镜像：
 ```bash
-docker load -i kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
+docker load -i kuavo_opensource_mpc_wbc_img_v1.3.0.tar.gz
 ```
 - 执行`./docker/run.sh`进入容器后，默认在仓库的映射目录`/root/kuavo_ws`，执行以下命令开始编译：
 
