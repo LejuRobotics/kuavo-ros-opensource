@@ -14,10 +14,10 @@
 ```
 
 #### 2. (或者)下载容器镜像
-- 从[这里](https://kuavo.lejurobot.com/docker_images/kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz)下载容器镜像
+- 从[这里](https://kuavo.lejurobot.com/kuavo_research_editiion/docker_images/kuavo_opensource_mpc_wbc_img_v1.3.0.tar.gz)下载容器镜像
 - 导入镜像：
 ```bash
-docker load -i kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
+docker load -i kuavo_opensource_mpc_wbc_img_v1.3.0.tar.gz
 ```
 
 #### 3. 运行容器
