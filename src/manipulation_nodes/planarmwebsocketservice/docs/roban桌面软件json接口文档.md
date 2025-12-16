@@ -279,12 +279,12 @@
 
 ---
 
-### 10. 给出地图列表 (get_map_list)
+### 10. 给出地图列表 (get_all_maps)
 
 **请求格式：**
 ```json
 {
-    "cmd": "get_map_list",
+    "cmd": "get_all_maps",
     "data": {}
 }
 ```
@@ -292,7 +292,7 @@
 **响应格式：**
 ```json
 {
-    "cmd": "get_map_list",
+    "cmd": "get_all_maps",
     "data": {
         "code": 0,
         "message": "Found 3 maps using MapLists format",
@@ -304,7 +304,7 @@
 **错误响应：**
 ```json
 {
-    "cmd": "get_map_list",
+    "cmd": "get_all_maps",
     "data": {
         "code": 0,
         "message": "No map lists topic found (/map_lists not published)",
@@ -592,6 +592,42 @@
     "data": {
         "code": 1,
         "message": "基于任务点 'home_position' 的校准失败: 任务点不存在"
+    }
+}
+```
+---
+
+### 17. 加载地图 (load_map)
+
+**请求格式：**
+```json
+{
+    "cmd": "load_map",
+    "data": {
+        "map_name": "example_map"
+    }
+}
+```
+
+**响应格式：**
+```json
+{
+    "cmd": "load_map",
+    "data": {
+        "code": 0,
+        "msg": "Map loaded successfully",
+        "map_path": "/path/to/maps/example_map.png"
+    }
+}
+```
+
+**错误响应：**
+```json
+{
+    "cmd": "load_map",
+    "data": {
+        "code": 2,
+        "msg": "Service `load_map` call failed: Service not available"
     }
 }
 ```
