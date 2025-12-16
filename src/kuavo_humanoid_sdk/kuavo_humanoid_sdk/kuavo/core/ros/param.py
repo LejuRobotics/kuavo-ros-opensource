@@ -72,7 +72,7 @@ class RosParameter:
 kuavo_ros_param = RosParameter()
 
 def joint_names()->dict:
-    if(kuavo_ros_param.robot_version() == 13):
+    if (kuavo_ros_param.robot_version() == 13 or kuavo_ros_param.robot_version() == 14):
         leg_link_names = [
             'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
             'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
@@ -84,10 +84,21 @@ def joint_names()->dict:
         head_link_names = [
             'zhead_1_link', 'zhead_2_link'
         ]
-    else:
+    elif kuavo_ros_param.robot_version() >= 40 and kuavo_ros_param.robot_version() < 60:
         leg_link_names = [
             'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
             'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
+        ]
+        arm_link_names = [
+            'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
+            'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link', 'zarm_r5_link', 'zarm_r6_link', 'zarm_r7_link',
+        ]
+        head_link_names = [
+            'zhead_1_link', 'zhead_2_link'
+        ]
+    else:
+        leg_link_names = [
+            'knee_link', 'leg_link', 'waist_link', 'waist_yaw_link'
         ]
         arm_link_names = [
             'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
@@ -129,23 +140,39 @@ def joint_names()->dict:
             .split(".")[0]
         )
         or (
-            SDKLogger.warn(f"Warning: {link_name} is not found or incomplete in robot_desc"),
-            None
-        )[1]  # Return None after printing the warning
+            # Return None but don't warn for arm links in robots with 4-dof arms which may not exist
+            None if (kuavo_ros_param.robot_version() == 13 or kuavo_ros_param.robot_version() == 14) and link_name.startswith('zarm_') else
+            (SDKLogger.warn(f"Warning: {link_name} is not found or incomplete in robot_desc"), None)[1]
+        ) # Return None after printing the warning
     )
     leg_joint_names = [process_link_name(link_name) for link_name in leg_link_names if process_link_name(link_name) is not None]
     arm_joint_names = [process_link_name(link_name) for link_name in arm_link_names if process_link_name(link_name) is not None]
     head_joint_names = [process_link_name(link_name) for link_name in head_link_names if process_link_name(link_name) is not None]
 
-    if len(leg_link_names) != len(leg_joint_names):
-        SDKLogger.warn(f"leg_joint_names is not equal to leg_link_names, {len(leg_link_names)} != {len(leg_joint_names)}")
-        return None
-    if len(arm_link_names)!= len(arm_joint_names):
-        SDKLogger.warn(f"arm_joint_names is not equal to arm_link_names, {len(arm_link_names)}!= {len(arm_joint_names)}")
-        return None
-    if len(head_link_names)!= len(head_joint_names):
-        SDKLogger.warn(f"head_joint_names is not equal to head_link_names, {len(head_link_names)}!= {len(head_joint_names)}")
-        return None
+    # For robots with 4-dof arms, we allow arm_link_names to be fewer than expected
+    if kuavo_ros_param.robot_version() == 13 or kuavo_ros_param.robot_version() == 14:
+        if len(leg_link_names) != len(leg_joint_names):
+            SDKLogger.warn(
+                f"leg_joint_names is not equal to leg_link_names, {len(leg_link_names)} != {len(leg_joint_names)}")
+            return None
+        # Don't check arm_link_names length for robots with 4-dof arms
+        if len(head_link_names) != len(head_joint_names):
+            SDKLogger.warn(
+                f"head_joint_names is not equal to head_link_names, {len(head_link_names)}!= {len(head_joint_names)}")
+            return None
+    else:
+        if len(leg_link_names) != len(leg_joint_names):
+            SDKLogger.warn(
+                f"leg_joint_names is not equal to leg_link_names, {len(leg_link_names)} != {len(leg_joint_names)}")
+            return None
+        if len(arm_link_names) != len(arm_joint_names):
+            SDKLogger.warn(
+                f"arm_joint_names is not equal to arm_link_names, {len(arm_link_names)}!= {len(arm_joint_names)}")
+            return None
+        if len(head_link_names) != len(head_joint_names):
+            SDKLogger.warn(
+                f"head_joint_names is not equal to head_link_names, {len(head_link_names)}!= {len(head_joint_names)}")
+            return None
     
     return leg_joint_names + arm_joint_names + head_joint_names
 
@@ -188,11 +215,11 @@ def make_robot_param()->dict:
         'init_stand_height': kuavo_ros_param.init_stand_height()
     }
 
-    for key, value in kuavo_ros_info.items():
-        if value is None and key != 'end_effector_type':
-            SDKLogger.debug(f"[Error]: Failed to get '{key}' from ROS.")
-            kuavo_ros_info = None
-            raise Exception(f"[Error]: Failed to get '{key}' from ROS.")
+    # for key, value in kuavo_ros_info.items():
+    #     if value is None and key != 'end_effector_type':
+    #         SDKLogger.debug(f"[Error]: Failed to get '{key}' from ROS.")
+    #         kuavo_ros_info = None
+    #         raise Exception(f"[Error]: Failed to get '{key}' from ROS.")
 
     return kuavo_ros_info        
 

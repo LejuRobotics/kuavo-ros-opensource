@@ -78,6 +78,21 @@ namespace ocs2
   /******************************************************************************************************/
   /******************************************************************************************************/
   /******************************************************************************************************/
+  void MPC_ROS_Interface::pauseResumeMpcNode(bool pause)
+  {
+    std::lock_guard<std::mutex> resetLock(resetMutex_);
+    mpcPaused_ = pause;
+    
+    if (pause) {
+      ROS_INFO_STREAM("MPC has been paused.");
+    } else {
+      ROS_INFO_STREAM("MPC has been resumed.");
+    }
+  }
+
+  /******************************************************************************************************/
+  /******************************************************************************************************/
+  /******************************************************************************************************/
   bool MPC_ROS_Interface::resetMpcCallback(ocs2_msgs::reset::Request &req, ocs2_msgs::reset::Response &res)
   {
     if (static_cast<bool>(req.reset))
@@ -98,6 +113,16 @@ namespace ocs2
       ROS_WARN_STREAM("[MPC_ROS_Interface] Reset request failed!");
       return false;
     }
+  }
+
+  /******************************************************************************************************/
+  /******************************************************************************************************/
+  /******************************************************************************************************/
+  bool MPC_ROS_Interface::pauseResumeMpcCallback(ocs2_msgs::pause_resume::Request &req, ocs2_msgs::pause_resume::Response &res)
+  {
+    pauseResumeMpcNode(static_cast<bool>(req.pause));
+    res.done = static_cast<uint8_t>(true);
+    return true;
   }
 
   
@@ -461,6 +486,12 @@ namespace ocs2
       return;
     }
 
+    // Check if MPC is paused
+    if (mpcPaused_.load())
+    {
+      return;
+    }
+
     // current time, state, input, and subsystem
     const auto currentObservation = ros_msg_conversions::readObservationMsg(*msg);
 
@@ -595,6 +626,9 @@ namespace ocs2
 
     // MPC reset service server
     mpcResetServiceServer_ = nodeHandle.advertiseService(topicPrefix_ + "_mpc_reset", &MPC_ROS_Interface::resetMpcCallback, this);
+    
+    // MPC pause/resume service server
+    mpcPauseResumeServiceServer_ = nodeHandle.advertiseService(topicPrefix_ + "_mpc_pause_resume", &MPC_ROS_Interface::pauseResumeMpcCallback, this);
 
     // display
 #ifdef PUBLISH_THREAD

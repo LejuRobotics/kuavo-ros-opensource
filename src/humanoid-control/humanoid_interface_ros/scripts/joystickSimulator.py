@@ -86,6 +86,9 @@ class SimulatedJoystick:
             self.joy_msg.buttons[BUTTON_BACK] = 1  # 发送BUTTON_BACK
         elif key == 'o' or key == 'f':
             self.joy_msg.buttons[BUTTON_START] = 1  # 发送BUTTON_START
+        elif key == 'm':
+            self.joy_msg.buttons[BUTTON_X] = 1  # BUTTON_X
+            print("BUTTON_X")
             
         cmdvel = [self.joy_msg.axes[AXIS_LEFT_STICK_X],self.joy_msg.axes[AXIS_LEFT_STICK_Y], 0, 0, 0, self.joy_msg.axes[AXIS_RIGHT_STICK_YAW]]
         print(f"cmdvel: {[f'{x * 100:.0f}%' for x in cmdvel]}", end='\r')

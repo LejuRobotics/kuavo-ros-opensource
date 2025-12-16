@@ -18,6 +18,8 @@ from std_msgs.msg import Int16MultiArray
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger, TriggerResponse
 from kuavo_msgs.srv import SetLEDMode, SetLEDModeRequest
+from kuavo_msgs.msg import AudioPlaybackStatus
+from std_msgs.msg import Header
 from rosnode import get_node_names
 import subprocess
 import time
@@ -48,9 +50,13 @@ class AudioStreamPlayerNode:
     QUEUE_GET_TIMEOUT = 1           # 队列获取超时时间(秒)
     THREAD_JOIN_TIMEOUT = 1         # 线程加入超时时间(秒)
     EMPTY_COUNT_THRESHOLD = 100     # 空队列计数阈值
+    AUDIO_FINISH_THRESHOLD = 1      # 音频播放完成判断阈值（1秒无数据认为播放完成）
     
     # 主题队列配置
     SUBSCRIBER_QUEUE_SIZE = 10      # 订阅者队列大小
+    
+    # 状态发布配置
+    STATUS_PUBLISH_RATE = 10        # 状态发布频率 (Hz)
     
     def __init__(self):
         while not self.check_sound_card():
@@ -66,6 +72,8 @@ class AudioStreamPlayerNode:
         self.stop_music_subscriber = rospy.Subscriber('stop_music', Bool, self.stop_music_callback, queue_size=self.SUBSCRIBER_QUEUE_SIZE)
         # 获取当前音频缓冲区已经使用的大小
         self.buffer_status_service = rospy.Service('get_used_audio_buffer_size', Trigger, self.get_used_audio_buffer_size_callback)
+        # 创建音频播放状态发布器
+        self.playback_status_publisher = rospy.Publisher('audio_playback_status', AudioPlaybackStatus, queue_size=10)
         rospy.loginfo("已创建 audio_data 话题的订阅者（流式播放节点）")
 
         # 检查led_controller_node节点是否启动
@@ -74,7 +82,8 @@ class AudioStreamPlayerNode:
         # 初始化 PyAudio 播放
         self.chunk_size = self.CHUNK_SIZE
         self.buffer_queue = queue.Queue(maxsize=self.BUFFER_MAX_SIZE)  # 限制最大缓冲块数
-        self.playing = True
+        self.playing = True  # 控制播放线程运行状态
+        self.is_audio_playing = False  # 音频是否正在播放状态
         self.empty_count = 0
         self.p = pyaudio.PyAudio()
         self.is_breathing = False
@@ -100,6 +109,10 @@ class AudioStreamPlayerNode:
         self.play_thread = threading.Thread(target=self.play_from_buffer)
         self.play_thread.daemon = True
         self.play_thread.start()
+        
+        # 创建状态发布定时器
+        self.status_timer = rospy.Timer(rospy.Duration(1.0/self.STATUS_PUBLISH_RATE), self.status_timer_callback)
+        rospy.loginfo(f"已创建状态发布定时器，频率: {self.STATUS_PUBLISH_RATE}Hz")
 
     def check_led_controller_node(self, timeout=10):
         node_name = '/led_controller_node'
@@ -242,20 +255,39 @@ class AudioStreamPlayerNode:
             try:
                 chunk = self.buffer_queue.get(timeout=self.QUEUE_GET_TIMEOUT)
                 
+                # 有音频数据，设置播放状态为true
+                self.is_audio_playing = True
+                self.empty_count = 0  # 重置空计数
+                
                 if not self.is_breathing and self.is_led_control:
                     self.play_breathing(1)
                     self.is_breathing = not self.is_breathing
                 self.stream.write(chunk.tobytes())
+                
+                # 发布音频播放状态
+                self.publish_audio_status()
             except queue.Empty:
+                # 缓冲区为空，检查是否应该设置播放状态为false
+                if self.empty_count > self.AUDIO_FINISH_THRESHOLD:
+                    # 超过音频完成阈值，认为播放完成
+                    self.is_audio_playing = False
+                    rospy.logdebug("音频播放完成，等待新的音频输入")
+                    self.empty_count = 0
+                    # 发布音频播放状态
+                    self.publish_audio_status()
+                elif self.empty_count > self.EMPTY_COUNT_THRESHOLD:
+                    # 超过原阈值，认为长时间无数据
+                    rospy.logdebug("缓冲区为空，等待音频输入")
+                    self.empty_count = 0
+                else:
+                    self.empty_count += 1
+                    
                 if self.is_breathing and self.is_led_control:
                     self.play_breathing(0)
                     self.is_breathing = not self.is_breathing
-                if(self.empty_count > self.EMPTY_COUNT_THRESHOLD):
-                    rospy.logdebug("缓冲区为空，等待音频输入")
-                    self.empty_count = 0
-                self.empty_count += 1
             except Exception as e:
                 rospy.logerr(f"播放缓冲区音频失败: {e}")
+                self.is_audio_playing = False
 
     def stop_music_callback(self, msg):
         """停止当前正在播放的音频"""
@@ -264,7 +296,11 @@ class AudioStreamPlayerNode:
                 # 清空缓冲区
                 with self.buffer_queue.mutex:
                     self.buffer_queue.queue.clear()
+                # 重置播放状态
+                self.is_audio_playing = False
                 rospy.loginfo("已停止当前音频播放并清空缓冲区")
+                # 发布音频播放状态
+                self.publish_audio_status()
                 return True
             except Exception as e:
                 rospy.logerr(f"停止音频播放时出错: {e}")
@@ -276,6 +312,46 @@ class AudioStreamPlayerNode:
         used_size = self.buffer_queue.qsize()
         response.message = f"{used_size}"
         return response
+
+    def status_timer_callback(self, event):
+        """定时器回调函数，定期发布音频播放状态"""
+        self.publish_audio_status()
+
+    def publish_audio_status(self):
+        """发布音频播放状态到topic"""
+        try:
+            msg = AudioPlaybackStatus()
+            msg.header = Header()
+            msg.header.stamp = rospy.Time.now()
+            
+            # 使用专门的播放状态变量
+            if not hasattr(self, 'playing') or not self.playing:
+                # 播放器已停止或未初始化
+                msg.playing = False
+                msg.message = "Player stopped"
+            elif self.is_audio_playing:
+                # 音频正在播放
+                buffer_size = self.buffer_queue.qsize()
+                msg.playing = True
+                msg.message = f"Playing, buffer size: {buffer_size}"
+            else:
+                # 音频未在播放，检查缓冲区状态
+                buffer_size = self.buffer_queue.qsize()
+                if buffer_size > 0:
+                    # 有数据但未播放，可能是刚刚停止播放
+                    msg.playing = False
+                    msg.message = f"Audio stopped, buffer size: {buffer_size}"
+                else:
+                    # 缓冲区为空，播放完成
+                    msg.playing = False
+                    msg.message = "Playback completed or no audio input"
+            
+            msg.buffer_size = self.buffer_queue.qsize()
+            self.playback_status_publisher.publish(msg)
+            
+        except Exception as e:
+            rospy.logerr(f"发布音频状态失败: {e}")
+
 
     def shutdown(self):
         """关闭节点时的清理工作"""
@@ -298,4 +374,4 @@ class AudioStreamPlayerNode:
 
 if __name__ == '__main__':
     player_node = AudioStreamPlayerNode()
-    player_node.run() 
+    player_node.run()

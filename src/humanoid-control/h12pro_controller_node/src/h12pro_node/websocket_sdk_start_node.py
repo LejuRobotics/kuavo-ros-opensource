@@ -153,6 +153,11 @@ class KuavoRobotReal(KuavoRobot):
             self.stop_pub.publish(True)
             self.stop_pub.publish(True)
             self.stop_pub.publish(True)
+            
+            # 终止tmux会话以完全停止机器人程序
+            subprocess.run(["sudo","tmux", "kill-session", "-t", WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME], 
+                         stderr=subprocess.DEVNULL)
+            
             return True, "success"
         except Exception as e:
             print(f"Failed to stop robot: {e}")
@@ -234,6 +239,11 @@ class KuavoRobotSim(KuavoRobot):
             self.stop_pub.publish(True)
             self.stop_pub.publish(True)
             self.stop_pub.publish(True)
+
+            # 终止tmux会话以完全停止机器人程序
+            subprocess.run(["sudo","tmux", "kill-session", "-t", WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME], 
+                         stderr=subprocess.DEVNULL)
+
             return True, "success"
         except Exception as e:
             print(f"Failed to stop robot: {e}")

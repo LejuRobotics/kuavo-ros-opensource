@@ -27,6 +27,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import protos.hand_pose_pb2 as event_pb2
 import protos.robot_info_pb2 as robot_info_pb2
 
+from robot_state_server import RobotStateServer
+
 class Quest3BoneFramePublisher:
     def __init__(self):
         self.bone_names = [
@@ -65,8 +67,6 @@ class Quest3BoneFramePublisher:
         
         self.listener = tf.TransformListener()
         self.hand_finger_tf_pub = rospy.Publisher('/quest_hand_finger_tf', TFMessage, queue_size=10)
-        # 批量发布所有骨骼TF的发布器
-        self.bone_tf_pub = rospy.Publisher('/tf', TFMessage, queue_size=10)
 
         self.enable_head_control = rospy.get_param("~enable_head_control", True)
         rospy.loginfo(f"enable_head_control: {self.enable_head_control}")
@@ -256,7 +256,11 @@ class Quest3BoneFramePublisher:
                 pose_info_list.timestamp_ms = event.timestamp
                 pose_info_list.is_high_confidence = event.IsDataHighConfidence
                 pose_info_list.is_hand_tracking = event.IsHandTracking
-                self.pose_pub.publish(pose_info_list)
+
+                if pose_info_list.is_high_confidence:
+                    self.pose_pub.publish(pose_info_list)
+                else:
+                    rospy.logwarn("Low confidence pose data, not publishing.")
                 
                 self.rate.sleep()
             except socket.timeout:
@@ -289,35 +293,8 @@ class Quest3BoneFramePublisher:
             # rospy.loginfo(joysticks_msg)
         self.joysticks_pub.publish(joysticks_msg)
 
-    def add_transform_to_tf_message(self, tf_msg, time_now, bone_name, scaled_position, right_hand_quat):
-        """
-        创建TransformStamped并添加到TFMessage中
-        
-        Args:
-            tf_msg: TFMessage对象，用于批量发布TF变换
-            time_now: 时间戳
-            bone_name: 骨骼名称
-            scaled_position: 缩放后的位置字典，包含x, y, z
-            right_hand_quat: 四元数，格式为(x, y, z, w)
-        """
-        transform = TransformStamped()
-        transform.header.stamp = time_now
-        transform.header.frame_id = "torso"
-        transform.child_frame_id = bone_name
-        transform.transform.translation.x = scaled_position["x"]
-        transform.transform.translation.y = scaled_position["y"]
-        transform.transform.translation.z = scaled_position["z"]
-        transform.transform.rotation.x = right_hand_quat[0]
-        transform.transform.rotation.y = right_hand_quat[1]
-        transform.transform.rotation.z = right_hand_quat[2]
-        transform.transform.rotation.w = right_hand_quat[3]
-        tf_msg.transforms.append(transform)
-
     def process_pose_data(self, event, pose_info_list, time_now):
         scale_factor = {"x": 3.0, "y": 3.0, "z": 3.0}
-        # 创建TFMessage用于批量发布所有骨骼的TF变换
-        tf_msg = TFMessage()
-        
         for i, pose in enumerate(event.poses):
             bone_name = self.index_to_bone_name[i]
             frame_position = {"x": pose.position.x, "y": pose.position.y, "z": pose.position.z}
@@ -331,20 +308,14 @@ class Quest3BoneFramePublisher:
             pose_info.orientation = Quaternion(x=right_hand_quat[0], y=right_hand_quat[1], z=right_hand_quat[2], w=right_hand_quat[3])
             pose_info_list.poses.append(pose_info)
             
-            # 应用缩放因子
-            scaled_position = {}
             for axis in ["x", "y", "z"]:
-                scaled_position[axis] = right_hand_position[axis] * scale_factor[axis]
-            
-            # 创建TransformStamped并添加到TFMessage中，而不是立即发布
-            self.add_transform_to_tf_message(tf_msg, time_now, bone_name, scaled_position, right_hand_quat)
+                right_hand_position[axis] *= scale_factor[axis]
+
+            self.updateAFrame(bone_name, right_hand_position, right_hand_quat, time_now)
+
 
             if bone_name == "Head" and self.enable_head_control:
                 self.pub_head_motion_data(right_hand_quat)
-        
-        # 批量发布所有骨骼的TF变换（一次性发布，而不是循环中逐个发布）
-        if len(tf_msg.transforms) > 0:
-            self.bone_tf_pub.publish(tf_msg)
 
     def restart_socket(self):
         print("Restarting socket connection...")
@@ -451,7 +422,38 @@ def get_local_broadcast_ips():
         return []
 
 if __name__ == "__main__":
+    # Create a Quest3BoneFramePublisher instance
     publisher = Quest3BoneFramePublisher()
+    #######################################################
+    def get_package_path(package_name):
+        try:
+            import rospkg
+            rospack = rospkg.RosPack()
+            package_path = rospack.get_path(package_name)
+            return package_path
+        except rospkg.ResourceNotFound:
+            return None
+
+    # Start the robot state server
+    if rospy.has_param("/end_effector_type"):
+        ee_type = rospy.get_param("/end_effector_type")
+        print(f"\033[92mend_effector_type from rosparm: {ee_type}\033[0m")    
+    else:
+        kuavo_assests_path = get_package_path("kuavo_assets")
+        robot_version = os.environ.get('ROBOT_VERSION', '40')
+        config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
+        import json
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            ee_type = config.get("EndEffectorType", ["qiangnao", "qiangnao"])[0]
+        print("\033[91mend_effector_type not found in rosparm, using from kuavo.json\033[0m")
+    # RobotStateServer to Vr App
+    subscribe_sensor_data = True # 订阅sensors_data_raw
+    robot_state_server = RobotStateServer(ee_type=ee_type, udp_port=15170, publish_rate=20, subscribe_sensor_data=subscribe_sensor_data)
+    if not robot_state_server.start():
+        print("\033[91mRobotStateServer 启动失败\033[0m")
+        sys.exit(1)
+    #######################################################
 
     broadcast_ips = get_local_broadcast_ips()
     print(f"Local broadcast IPs: {broadcast_ips}")
@@ -481,3 +483,6 @@ if __name__ == "__main__":
         publisher.run()
     else:
         print("Failed to establish initial connection.")
+
+    # Close the socket
+    robot_state_server.stop()    

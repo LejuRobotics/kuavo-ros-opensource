@@ -130,6 +130,13 @@ add_message_files(
 
   MmDetectionMsg.msg
   AudioReceiverData.msg
+
+  Color.msg
+
+  # Face detection bounding box
+  FaceBoundingBox.msg
+  AudioPlaybackStatus.msg
+
 )
 
 ## Generate services in the 'srv' folder
@@ -138,6 +145,9 @@ add_service_files(
   jointMoveTo.srv
   setHwIntialState.srv
   changeArmCtrlMode.srv
+  switchController.srv
+  getControllerList.srv
+  switchToNextController.srv
   singleStepControl.srv
   changeTorsoCtrlMode.srv
   setMotorEncoderRoundService.srv
@@ -171,6 +181,9 @@ add_service_files(
   twoArmHandPoseCmdFreeSrv.srv
   changeArmCtrlModeKuavo.srv
   fkSrv.srv
+  lbBaseLinkPoseCmdSrv.srv
+  lbLegControlSrv.srv
+  chassisPoseCmdSrv.srv
 
   SpeechSynthesis.srv
   setMmCtrlFrame.srv
@@ -185,6 +198,8 @@ add_service_files(
   RepublishTFs.srv
 
   twoArmHandPoseCmdFreeSrv.srv
+  goToZeroPoint.srv
+  robotSwitchPose.srv
 )
 
 ## Generate actions in the 'action' folder

@@ -127,11 +127,12 @@ robot_control = RobotControlBlockly()
     - 备注：需将目标音频文件下载到 **/home/lab/.config/lejuconfig/music** 目录下  
 
 19. **机器人对准目标**  
-    - 函数：`robot_control.alignment_target(class_name, x, y, z)`
-    - 参数类型：string, float, float, float
+    - 函数：`robot_control.alignment_target(class_name, confidence, x, y, z)`
+    - 参数类型：string, float, float, float, float
     - 描述：使机器人对准指定类别到对象，并移动到目标前
     - 参数说明：（以图像中心建立二维坐标，向右为 x 的正方向，向下为 y 的正方向）
       - class_id 为 yolo 检测中需要检测的对象名称，和训练模型中的类别名称一致;
+      - confidence 为 yolo 检测中需要检测的概率阈值
       - x 为图像 x 方向的偏移值，物体中心的 x 小于该参数 -x 时，机器人左移，大于该参数 x 时，机器人右移
       - y 为图像 y 方向的偏移值，物体中心的 y 小于该参数 y 时，机器人前进，否则停止移动
       - z 为机器人上下蹲的高度控制

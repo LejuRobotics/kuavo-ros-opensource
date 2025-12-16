@@ -15,6 +15,7 @@ model = None
 class YOLO_detection:
     def __init__(self):
         self.camera_interface = CameraROSInterface()
+        self.conf = 0.6  # 默认置信度阈值
 
         global is_yolo_init
         is_yolo_init = True
@@ -28,6 +29,19 @@ class YOLO_detection:
             print(f"Error loading model: {e}")
             return None
 
+    def set_conf(self, conf):
+        """
+        设置检测的置信度阈值
+        
+        Args:
+            conf (float): 置信度阈值，范围应在0到1之间
+        """
+        if 0 <= conf <= 1:
+            self.conf = conf
+            print(f"Confidence threshold set to {conf}")
+        else:
+            print("Invalid confidence value. Please provide a value between 0 and 1.")
+
     def init_ros_node(self):
         self.camera_interface.init_ros_node()
 
@@ -35,7 +49,7 @@ class YOLO_detection:
         image = self.camera_interface.get_camera_image(camera)
         
         if image is not None:
-            results = model.predict(image, conf=0.6, show=False, verbose=False)
+            results = model.predict(image, conf=self.conf, show=False, verbose=False)
             self.publish_results(results, camera)
             return results
         else:
@@ -106,4 +120,3 @@ class YOLO_detection:
                 }
         
         return min_obj if min_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
-

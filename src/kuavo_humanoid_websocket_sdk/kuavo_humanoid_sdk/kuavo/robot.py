@@ -237,10 +237,14 @@ class KuavoRobot(RobotBase):
         """Control the robot's squat height and pitch.
         Args:
                 height (float): The height offset from normal standing height in meters, range [-0.35, 0.0],Negative values indicate squatting down.
+                                Normal standing height reference: :attr:KuavoRobotInfo.init_stand_height
                 pitch (float): The pitch angle of the robot's torso in radians, range [-0.4, 0.4].
             
         Returns:
             bool: True if the squat is controlled successfully, False otherwise.
+        
+        Note:
+            Down squat and stand up should not change too fast, the maximum change should not exceed 0.2 meters.
         """
         # Limit height range
         MAX_HEIGHT = 0.0
@@ -252,13 +256,13 @@ class KuavoRobot(RobotBase):
         
         # Check if height exceeds limits
         if height > MAX_HEIGHT or height < MIN_HEIGHT:
-            SDKLogger.warn(f"[Robot] height {height} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited")
+            print(f"\033[33m[Robot] height {height} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited\033[0m")
         # Limit pitch range
         limited_pitch = min(MAX_PITCH, max(MIN_PITCH, pitch))
         
         # Check if pitch exceeds limits
         if abs(pitch) > MAX_PITCH:
-            SDKLogger.warn(f"[Robot] pitch {pitch} exceeds limit [{MIN_PITCH}, {MAX_PITCH}], will be limited")
+            print(f"\033[33m[Robot] pitch {pitch} exceeds limit [{MIN_PITCH}, {MAX_PITCH}], will be limited\033[0m")
         
         return self._kuavo_core.squat(limited_height, limited_pitch)
      
@@ -281,6 +285,10 @@ class KuavoRobot(RobotBase):
         Note:
             You can call :meth:`KuavoRobotState.wait_for_step_control` to wait until the robot enters step-control mode.
             You can call :meth:`KuavoRobotState.wait_for_stance` to wait the step-control finish.
+
+        Warning:
+            If the current robot's torso height is too low (less than -0.15m relative to normal standing height), the function will return False.
+            Normal standing height reference: :attr:KuavoRobotInfo.init_stand_height
         """    
         if len(target_pose) != 4:
             raise ValueError(f"[Robot] target_pose length must be 4 (x, y, z, yaw), but got {len(target_pose)}")
@@ -517,6 +525,29 @@ class KuavoRobot(RobotBase):
             bool: True if the end effector pose is controlled successfully, False otherwise.
         """
         return self._robot_arm.control_robot_end_effector_pose(left_pose, right_pose, frame)
+    
+    def is_arm_collision(self)->bool:
+        """Check if the arm is in collision.
+        
+        Returns:
+            bool: True if the arm is in collision, False otherwise.
+        """
+        return self._robot_arm.is_arm_collision()
+    
+    def wait_arm_collision_complete(self):
+        """Wait for the arm collision to complete.
+        """
+        self._robot_arm.wait_arm_collision_complete()
+
+    def release_arm_collision_mode(self):
+        """Release the arm collision mode.
+        """
+        self._robot_arm.release_arm_collision_mode()
+
+    def set_arm_collision_mode(self, enable: bool):
+        """Set the arm collision mode.
+        """
+        self._robot_arm.set_arm_collision_mode(enable)
 
 if __name__ == "__main__":
     robot = KuavoRobot()

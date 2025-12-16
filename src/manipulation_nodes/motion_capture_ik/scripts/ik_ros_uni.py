@@ -5,7 +5,7 @@ import signal
 import rospy
 import argparse
 import argparse
-from std_msgs.msg import Float32, Float32MultiArray, Float64MultiArray, Int32, Bool
+from std_msgs.msg import Float32, Float32MultiArray, Int32, Bool
 from sensor_msgs.msg import JointState
 from handcontrollerdemorosnode.msg import armPoseWithTimeStamp
 from kuavo_msgs.msg import robotHandPosition
@@ -167,6 +167,16 @@ class IkRos:
         if rospy.has_param('/only_half_up_body'):
             self.only_half_up_body = rospy.get_param('/only_half_up_body')
 
+        if rospy.has_param('/robot_type'):
+            self.robot_type = rospy.get_param('/robot_type')
+            if self.robot_type == 1:
+                self.only_half_up_body = False
+                print("[IkRos] 机器人类型为轮臂")
+            else:
+                print("[IkRos] 机器人类型为双足")
+                if self.only_half_up_body:
+                     print("✅采用用半身模式")
+
         self.use_arm_collision = rospy.get_param('~use_arm_collision', False)
         # 添加服务
         self.arm_mode_service = rospy.Service('/quest3/set_arm_mode_changing', Trigger, self.set_arm_mode_changing_callback)
@@ -220,11 +230,6 @@ class IkRos:
             "/sensors_data_raw", sensorsData, self.sensor_data_raw_callback, queue_size=1
         )
         
-        # 订阅MPC优化后的状态，用于半身模式的插值和保持
-        self.optimized_state_sub = rospy.Subscriber(
-            "/humanoid_controller/optimizedState_wbc_mrt_origin", Float64MultiArray, self.optimized_state_callback, queue_size=10
-        )
-        
         # 订阅停止机器人信号
         self.stop_robot_sub = rospy.Subscriber(
             "/stop_robot", Bool, self.stop_robot_callback, queue_size=1
@@ -237,11 +242,6 @@ class IkRos:
         self.maxSpeed = rospy.get_param("/arm_move_spd_half_up_body", 0.21)
         self.threshold_arm_diff_half_up_body = rospy.get_param("/threshold_arm_diff_half_up_body", 0.2)
         self._interp_time_last = rospy.Time.now().to_sec()
-        
-        # 半身模式下退出mode2时保持手臂位置的变量
-        self.frozen_arm_state = None  # 保存退出mode2时的手臂状态
-        self.hold_arm_timer = None  # 保持手臂位置的定时器
-        self.optimized_state = None  # 存储MPC优化后的状态
 
 
         if self.use_arm_collision:
@@ -272,6 +272,12 @@ class IkRos:
         self.leju_claw_command_pub = rospy.Publisher(
             "leju_claw_command", lejuClawCommand, queue_size=10
         )
+        
+        if self.robot_type == 1:
+            # 添加发布/mm/two_arm_hand_pose_cmd话题的发布器
+            self.pub_mm_two_arm_hand_pose_cmd = rospy.Publisher(
+                "/mm/two_arm_hand_pose_cmd", twoArmHandPoseCmd, queue_size=10
+            )
         
         # 添加可视化marker发布器
         self.ik_visualization_pub = rospy.Publisher(
@@ -361,7 +367,7 @@ class IkRos:
         agl_limit = self.controller_dt * vel_limit * np.pi / 180.0  # deg/s to rad/s
         
         # 120度限制转换为弧度
-        angle_limit_120_deg = self.controller_dt * 600.0 * np.pi / 180.0  # 约2.09弧度
+        angle_limit_120_deg = self.controller_dt * 400.0 * np.pi / 180.0  # 约2.09弧度
         
         for i in range(size):
             # 速度限制
@@ -527,9 +533,37 @@ class IkRos:
                     l_hand_pose = self.kf_left.filter(l_hand_pose)
                     l_hand_RPY = quaternion_to_RPY(l_hand_quat)
                     l_elbow_pos = self.__left_elbow_pos
-                    # if l_elbow_pos is not None:
-                    #     # print(f"l_elbow_pos: {l_elbow_pos}")
-                    #     l_elbow_pos[0] = -0.3 if l_elbow_pos[0] < -0.3 else l_elbow_pos[0]
+                    if l_elbow_pos is not None:
+                        # print(f"l_elbow_pos: {l_elbow_pos}")
+                        # 根据肘部高度动态调整x位置的最小值（参考手部限制）
+                        elbow_height = l_elbow_pos[2]  # z坐标
+                        elbow_natural_drop_height = -0.3  # 自然下垂时的高度
+                        elbow_max_height = 1.5  # 最高点
+                        
+                        # 计算高度比例 (0=自然下垂, 1=最高点)
+                        elbow_height_ratio = (elbow_height - elbow_natural_drop_height) / (elbow_max_height - elbow_natural_drop_height)
+                        elbow_height_ratio = np.clip(elbow_height_ratio, 0.0, 1.0)
+                        
+                        # 根据高度比例计算x的最小值
+                        # 自然下垂时x_min=-0.3, 抬到最高时x_min约0.25
+                        elbow_x_min = -0.3 + elbow_height_ratio * 0.55
+                        l_elbow_pos[0] = elbow_x_min if l_elbow_pos[0] < elbow_x_min else l_elbow_pos[0]
+                    
+                    if l_hand_pose is not None:
+                        # 根据手的高度动态调整x位置的最小值
+                        # 假设自然下垂高度为-0.3m，抬手最高约0.5m
+                        hand_height = l_hand_pose[2]  # z坐标
+                        natural_drop_height = -0.3  # 自然下垂时的高度
+                        max_height = 1.5  # 最高点
+                        
+                        # 计算高度比例 (0=自然下垂, 1=最高点)
+                        height_ratio = (hand_height - natural_drop_height) / (max_height - natural_drop_height)
+                        height_ratio = np.clip(height_ratio, 0.0, 1.0)
+                        
+                        # 根据高度比例计算x的最小值
+                        # 自然下垂时x_min=0, 抬到最高时x_min=0.25
+                        x_min = 0.0 + height_ratio * 0.85
+                        l_hand_pose[0] = x_min if l_hand_pose[0] < x_min else l_hand_pose[0]
                     left_shoulder_rpy_in_robot = self.quest3_arm_info_transformer.left_shoulder_rpy_in_robot
                 if self.__target_pose_right[0] is not None and (self.__ctrl_arm_idx == ArmIdx.BOTH
                                                                 or self.__ctrl_arm_idx == ArmIdx.RIGHT):
@@ -537,8 +571,35 @@ class IkRos:
                     r_hand_pose = self.kf_right.filter(r_hand_pose)
                     r_hand_RPY = quaternion_to_RPY(r_hand_quat)
                     r_elbow_pos = self.__right_elbow_pos
-                    # if r_elbow_pos is not None:
-                    #     r_elbow_pos[0] = -0.3 if r_elbow_pos[0] < -0.3 else r_elbow_pos[0]
+                    if r_elbow_pos is not None:
+                        # 根据肘部高度动态调整x位置的最小值（参考手部限制）
+                        elbow_height = r_elbow_pos[2]  # z坐标
+                        elbow_natural_drop_height = -0.3  # 自然下垂时的高度
+                        elbow_max_height = 1.5  # 最高点
+                        
+                        # 计算高度比例 (0=自然下垂, 1=最高点)
+                        elbow_height_ratio = (elbow_height - elbow_natural_drop_height) / (elbow_max_height - elbow_natural_drop_height)
+                        elbow_height_ratio = np.clip(elbow_height_ratio, 0.0, 1.0)
+                        
+                        # 根据高度比例计算x的最小值
+                        # 自然下垂时x_min=-0.3, 抬到最高时x_min约0.25
+                        elbow_x_min = -0.3 + elbow_height_ratio * 0.55
+                        r_elbow_pos[0] = elbow_x_min if r_elbow_pos[0] < elbow_x_min else r_elbow_pos[0]
+                    if r_hand_pose is not None:
+                        # 根据手的高度动态调整x位置的最小值
+                        # 假设自然下垂高度为-0.3m，抬手最高约0.5m
+                        hand_height = r_hand_pose[2]  # z坐标
+                        natural_drop_height = -0.3  # 自然下垂时的高度
+                        max_height = 1.5  # 最高点
+                        
+                        # 计算高度比例 (0=自然下垂, 1=最高点)
+                        height_ratio = (hand_height - natural_drop_height) / (max_height - natural_drop_height)
+                        height_ratio = np.clip(height_ratio, 0.0, 1.0)
+                        
+                        # 根据高度比例计算x的最小值
+                        # 自然下垂时x_min=0, 抬到最高时x_min=0.25
+                        x_min = 0.0 + height_ratio * 0.85
+                        r_hand_pose[0] = x_min if r_hand_pose[0] < x_min else r_hand_pose[0]
                     right_shoulder_rpy_in_robot = self.quest3_arm_info_transformer.right_shoulder_rpy_in_robot
 
                 ik_input_data = []
@@ -616,8 +677,6 @@ class IkRos:
                 # q0_tmp_msg.data = q0_tmp * 180.0 / np.pi  # 转换为角度
                 # self.pub_q0_tmp.publish(q0_tmp_msg)
                 
-                # print(f"l_hand_pose: {l_hand_pose}, l_elbow_pos: {l_elbow_pos}")
-                # print(f"r_hand_pose: {r_hand_pose}, r_elbow_pos: {r_elbow_pos}")
                 
                 q_now = arm_ik.computeIK(
                     q0_tmp, l_hand_pose, r_hand_pose, l_hand_RPY, r_hand_RPY, l_elbow_pos, r_elbow_pos, left_shoulder_rpy_in_robot, right_shoulder_rpy_in_robot
@@ -679,13 +738,13 @@ class IkRos:
         msg.name = ["arm_joint_" + str(i) for i in range(1, self.__arm_dof+1)]
         msg.header.stamp = rospy.Time.now()
         
-        if self.only_half_up_body and self.optimized_state is None:
-            print(f"[ik_ros_uni]: optimized_state is None")
+        if self.only_half_up_body and self.sensor_data_raw is None:
+            print(f"[ik_ros_uni]: sensor_data_raw is None")
             return
 
         if self.only_half_up_body and self.arm_mode_changing:
-            # 获取当前关节角度（从MPC优化后的状态中提取手臂部分，索引24:38）
-            arm_current_state = np.array(self.optimized_state[24:38]).copy()
+            # 获取当前关节角度
+            arm_current_state = np.array(self.sensor_data_raw.joint_data.joint_q[-16:-2]).copy()
             
             # 计算状态差
             delta_state = np.array(arm_agl_limited) - np.array(arm_current_state)
@@ -696,6 +755,7 @@ class IkRos:
                 arm_agl_interpolated = arm_agl_limited
                 self.arm_mode_changing = False
             else:
+                
                 max_move = self.maxSpeed
             
                 scale = np.clip(max_move / total_distance, 0, 1)
@@ -706,9 +766,7 @@ class IkRos:
             # 非插值模式下直接使用目标状态
             msg.position = 180.0 / np.pi * np.array(arm_agl_limited)
         
-        # 只有在没有hold_arm_timer激活时才发布（避免与保持位置定时器冲突）
-        if self.hold_arm_timer is None:
-            self.pub.publish(msg)
+        self.pub.publish(msg)
 
     def kuavo_joint_states_callback(self, joint_states_msg):
         # 手臂状态正解
@@ -743,6 +801,23 @@ class IkRos:
         left_finger_joints = self.quest3_arm_info_transformer.get_finger_joints("Left")
         right_finger_joints = self.quest3_arm_info_transformer.get_finger_joints("Right")
         self.hand_finger_data = [left_finger_joints, right_finger_joints]
+        
+        # 发布/mm/two_arm_hand_pose_cmd话题 - 直接使用获取到的pose数据
+        if self.robot_type == 1 and self.quest3_arm_info_transformer.is_runing and self.__target_pose is not None and self.__target_pose_right is not None:
+            eef_pose_msg = twoArmHandPoseCmd()
+            eef_pose_msg.frame = 3
+            # self.__target_pose 是 (hand_pos, hand_quat) 元组
+            eef_pose_msg.hand_poses.left_pose.pos_xyz = self.__target_pose[0]  # hand_pos [x, y, z]
+            eef_pose_msg.hand_poses.left_pose.quat_xyzw = self.__target_pose[1]  # hand_quat [x, y, z, w]
+            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = self.__left_elbow_pos if self.__left_elbow_pos is not None else [0.0, 0.0, 0.0]
+
+            # self.__target_pose_right 是 (hand_pos, hand_quat) 元组
+            eef_pose_msg.hand_poses.right_pose.pos_xyz = self.__target_pose_right[0]  # hand_pos [x, y, z]
+            eef_pose_msg.hand_poses.right_pose.quat_xyzw = self.__target_pose_right[1]  # hand_quat [x, y, z, w]
+            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = self.__right_elbow_pos if self.__right_elbow_pos is not None else [0.0, 0.0, 0.0]
+            
+            self.pub_mm_two_arm_hand_pose_cmd.publish(eef_pose_msg)
+        
         # self.pub_robot_end_hand(left_finger_joints, right_finger_joints)
 
     def two_arm_hand_pose_target_callback(self, msg_ori):
@@ -1037,7 +1112,7 @@ class IkRos:
             self.control_robot_hand_position_pub.publish(robot_hand_position)
         elif self.end_effector_type == LEJUCLAW:
             if joyStick_data is not None:
-                if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
+                if joyStick_data.left_second_button_pressed and self.__button_y_last is False and joyStick_data.left_trigger < 0.1:
                     print(f"\033[91mButton Y is pressed.\033[0m")
                     self.__freeze_finger = not self.__freeze_finger
                 self.__button_y_last = joyStick_data.left_second_button_pressed
@@ -1075,85 +1150,18 @@ class IkRos:
     # 添加手臂模式回调函数
     def arm_mode_callback(self, msg):
         new_mode = msg.data
-        if new_mode == 0:  # 当模式不是2时
+        if new_mode != 2:  # 当模式不是2时
             # 重置所有姿态
             print(f"\033[91m[IK]Reset arm mode.\033[0m")
             self.trigger_reset_mode = True
             self.arm_mode_changing = False
             self.collision_check_control = False
-            
-            # 半身模式下，保存当前手臂状态并启动定时器持续发布
-            if self.only_half_up_body and self.optimized_state is not None:
-                self.frozen_arm_state = np.array(self.optimized_state[24:38]).copy()
-                # 停止旧定时器（如果存在）
-                if self.hold_arm_timer is not None:
-                    self.hold_arm_timer.shutdown()
-                # 启动新定时器，以50Hz频率发布保持位置
-                self.hold_arm_timer = rospy.Timer(rospy.Duration(0.02), self.hold_arm_position_callback)
-                print(f"\033[93m[IK]Half body mode: Started holding arm position.\033[0m")
-        elif new_mode == 1:
-            self.arm_mode_changing = True
-            # 重置所有姿态
-            print(f"\033[91m[IK]Reset arm mode.\033[0m")
-            self.trigger_reset_mode = True
-            self.collision_check_control = False
-            
-            # 半身模式下，保存当前手臂状态并启动定时器持续发布
-            if self.only_half_up_body and self.optimized_state is not None:
-                # self.frozen_arm_state = np.array(self.optimized_state[24:38]).copy()
-                self.frozen_arm_state = np.zeros(14)
-                # 停止旧定时器（如果存在）
-                if self.hold_arm_timer is not None:
-                    self.hold_arm_timer.shutdown()
-                # 启动新定时器，以50Hz频率发布保持位置
-                self.hold_arm_timer = rospy.Timer(rospy.Duration(0.02), self.hold_arm_position_callback)
-                print(f"\033[93m[IK]Half body mode: Started holding arm position.\033[0m")
-
-
         elif new_mode == 2:
             print(f"\033[91m[IK]Arm mode changing.\033[0m")
             self.arm_mode_changing = True
             
-            # 进入mode2时停止保持位置的定时器
-            if self.only_half_up_body and self.hold_arm_timer is not None:
-                self.hold_arm_timer.shutdown()
-                self.hold_arm_timer = None
-                self.frozen_arm_state = None
-                print(f"\033[93m[IK]Half body mode: Stopped holding arm position.\033[0m")
-            
     def sensor_data_raw_callback(self, msg):
         self.sensor_data_raw = msg
-    
-    def optimized_state_callback(self, msg):
-        """接收MPC优化后的状态数据"""
-        self.optimized_state = np.array(msg.data)
-    
-    def hold_arm_position_callback(self, event):
-        """定时器回调：持续发布冻结的手臂位置，使用插值平滑过渡"""
-        if self.frozen_arm_state is None or self.optimized_state is None:
-            return
-        
-        # 获取当前关节角度（从MPC优化后的状态中提取手臂部分，索引24:38）
-        arm_current_state = np.array(self.optimized_state[24:38]).copy()
-        
-        # 计算状态差
-        delta_state = self.frozen_arm_state - arm_current_state
-        total_distance = np.linalg.norm(delta_state)
-        
-        # 如果距离太小，直接使用目标状态
-        if total_distance < self.threshold_arm_diff_half_up_body:
-            arm_agl_interpolated = self.frozen_arm_state
-        else:
-            # 使用插值平滑过渡
-            max_move = self.maxSpeed
-            scale = np.clip(max_move / total_distance, 0, 1)
-            arm_agl_interpolated = arm_current_state + delta_state * scale
-        
-        msg = JointState()
-        msg.name = ["arm_joint_" + str(i) for i in range(1, 15)]
-        msg.header.stamp = rospy.Time.now()
-        msg.position = 180.0 / np.pi * arm_agl_interpolated
-        self.pub.publish(msg)
 
     def stop_robot_callback(self, msg):
         """停止机器人信号回调函数"""
@@ -1170,16 +1178,16 @@ class IkRos:
         if self.only_half_up_body:
             # 发送当前手臂的关节状态到kuavo_arm_traj来清空mpc节点话题接收队列
             # 防止半身手臂切换时刻mpc执行旧的kuavo_arm_tarj
-            if self.optimized_state is None:
-                print(f"[ik_ros_uni]: optimized_state is None")
+            if self.sensor_data_raw is None:
+                print(f"[ik_ros_uni]: sensor_data_raw is None")
             else:
                 rate = rospy.Rate(1 / self.controller_dt)
-                arm_current_state = np.array(self.optimized_state[24:38]).copy()
+                arm_current_state = np.array(self.sensor_data_raw.joint_data.joint_q[-16:-2]).copy()
                 msg = JointState()
                 msg.name = ["arm_joint_" + str(i) for i in range(1, 15)]
                 msg.header.stamp = rospy.Time.now()
                 msg.position = 180.0 / np.pi * np.array(arm_current_state)
-                for i in range(5):  # 减少发送次数从20到5，避免过长卡顿
+                for i in range(20):
                     self.pub.publish(msg)
                     rate.sleep()
 

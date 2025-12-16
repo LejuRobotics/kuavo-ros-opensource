@@ -1,0 +1,21 @@
+[Unit]
+Description=Joy Remote Controller Service with Monitor
+After=network.target
+
+[Service]
+Type=simple
+ExecStop=/bin/kill -SIGINT $MAINPID
+Environment=ROS_MASTER_URI=http://127.0.0.1:11311
+Environment=ROS_IP=127.0.0.1
+Environment=KUAVO_ROS_CONTROL_WS_PATH=/home/lab/kuavo-ros-control
+Environment=ROBOT_VERSION=14
+Environment=NODE_SCRIPT=/home/lab/kuavo-ros-control/src/humanoid-control/joystick_drivers/joy/services/start_roban_joy_node.sh
+Environment=ROS_HOSTNAME=
+Environment=STAIR_DETECTION_CAMERA=d435
+ExecStart=/home/lab/kuavo-ros-control/src/humanoid-control/joystick_drivers/joy/services/monitor_roban_joy.sh
+Restart=always
+RestartSec=5s
+User=root
+
+[Install]
+WantedBy=multi-user.target

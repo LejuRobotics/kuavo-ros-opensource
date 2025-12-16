@@ -3,7 +3,7 @@
 #include <mutex>
 #include "dexhand_base.h"
 
-struct ModbusHandle;
+struct DeviceHandler;
 namespace dexhand {
 std::ostream& operator<<(std::ostream& os, const TouchSensorStatus_t& status);
 std::ostream& operator<<(std::ostream& os, const FingerStatusPtr& status);
@@ -56,10 +56,10 @@ public:
     bool setActionSequence(ActionSequenceId_t seq_id, const ActionSeqDataTypeVec &sequences) override;
     
 protected:
-    explicit ModbusDexhand(ModbusHandle* handle, uint8_t slave_id_);
+    explicit ModbusDexhand(DeviceHandler* handle, uint8_t slave_id_);
 
 // private:
-    ModbusHandle* mb_handle_ = nullptr;
+    DeviceHandler* mb_handle_ = nullptr;
     uint8_t slave_id_;
 };
 } // namespace dexhand

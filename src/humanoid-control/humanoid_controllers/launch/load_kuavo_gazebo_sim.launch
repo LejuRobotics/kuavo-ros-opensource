@@ -32,6 +32,7 @@
     <arg name="arm_move_spd"      default="3.0"/>
     <arg name="start_way"          default="manual"/>
     <arg name="use_shm_communication"  value="true"/>
+    <arg name="trace_path_automatic_test"  default="false"/>
 
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
@@ -65,7 +66,8 @@
     <param name="start_way"  value="$(arg start_way)"/>
     <param name="use_shm_communication"  value="true"/>
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
-    
+    <param name="trace_path_automatic_test"  value="$(arg trace_path_automatic_test)"/>
+
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     
@@ -99,9 +101,15 @@
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>
     <group unless="$(arg play_back)">
+      <group if="$(arg trace_path_automatic_test)">
+        <include file="$(find gazebo_sim)/launch/gazebo-sim-ground-tags.launch">
+        </include>
+      </group>
+      <group unless="$(arg trace_path_automatic_test)">
       <include file="$(find gazebo_sim)/launch/gazebo-sim.launch">
         <arg name="use_stairs" value="$(arg load_stairs)"/>
       </include>
+      </group>
     </group>
       <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">

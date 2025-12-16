@@ -319,7 +319,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::Subscriber targetPoseWorldSubscriber_;
   ros::Subscriber armTargetTrajectoriesSubscriber_;
   ros::Subscriber waistTargetTrajectoriesSubscriber_;
-  ros::Subscriber joyWaistTargetTrajectoriesSubscriber_;
   ros::Subscriber poseTargetTrajectoriesSubscriber_;
   ros::Subscriber footPoseTargetTrajectoriesSubscriber_;
   ros::Subscriber footPoseWorldTargetTrajectoriesSubscriber_;
@@ -409,7 +408,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   int feetJointNums_ = 12;
   int armJointNums_ = 10;// will replace in initialize
   int armRealDof_ = 14;
-  int WaistNums = 1;
+  int waistNums_ = 1;
   
   std::mutex cmdvel_mtx_;
   std::mutex cmdPose_mtx_;
@@ -423,7 +422,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   vector_t currentState_ = vector_t::Zero(24);  // 存储当前状态，用于获取torso yaw角
   double currentTorsoYaw_ = 0.0; // 存储当前躯干的偏航角
   double currentTorsoRoll_ = 0.0; // 存储当前躯干的角度
-  vector_t joyWaist_ = vector_t::Zero(WaistNums);
+  vector_t joyWaist_ = vector_t::Zero(waistNums_);
   bool ismdPoseInWorldFrameCached_ = false;
 
   ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.15, 0.3, 0.4, 0.4, 0.4};
@@ -431,6 +430,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
 
   InverseKinematics inverseKinematics_;
   TargetTrajectories currentArmTargetTrajectories_;
+  TargetTrajectories currentWaistTargetTrajectories_;
   TargetTrajectories currentArmTargetTrajectoriesWithAllJoints_;
   BufferedValue<TargetTrajectories> armTargetTrajectories_;
   BufferedValue<TargetTrajectories> armFullDofTargetTrajectories_;

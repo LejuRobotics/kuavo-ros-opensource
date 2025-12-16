@@ -42,8 +42,8 @@ def set_pitch_limit(enable):
 class ContinuousStairClimber:
     def __init__(self):
         # 时间参数设置
-        self.dt = 1.0  # 上下楼梯的步态周期
-        self.ss_time = 0.6  # 上下楼梯的支撑迈步时间（较慢，确保稳定性）
+        self.dt = 0.8  # 上下楼梯的步态周期
+        self.ss_time = 0.5  # 上下楼梯的支撑迈步时间（较慢，确保稳定性）
         self.walk_dt = 0.6  # 前进/转弯的步态周期（更快，提高效率）
         self.walk_ss_time = 0.4  # 前进/转弯的支撑迈步时间（更快，提高效率）
         

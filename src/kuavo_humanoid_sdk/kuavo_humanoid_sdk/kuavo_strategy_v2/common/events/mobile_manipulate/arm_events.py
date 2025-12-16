@@ -101,7 +101,7 @@ class EventArmMoveKeyPoint(BaseEvent):
         super().open()
         # 原有代码保持不变
 
-        # self.robot_sdk.control.arm_reset()
+        self.robot_sdk.control.arm_reset()
         if self.arm_control_mode == "manipulation_mpc":
             self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.BaseArm)
         elif self.arm_control_mode == "fixed_base":
