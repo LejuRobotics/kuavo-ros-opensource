@@ -8,6 +8,7 @@ from kuavo_msgs.msg import footPoseTargetTrajectories, armTargetPoses
 from kuavo_msgs.msg import gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode
 from kuavo_msgs.srv import playmusic, playmusicRequest
+from kuavo_msgs.srv import ExecuteArmAction
 from ocs2_msgs.msg import mpc_observation
 import csv
 import math
@@ -18,7 +19,26 @@ import time
 from std_msgs.msg import Float64MultiArray
 import threading  # 添加线程支持
 import subprocess
+import sys
 
+def change_ruiwo_motor_param(param_name):
+    try:
+        rospy.wait_for_service('/hardware/change_ruiwo_motor_param')
+        service_proxy = rospy.ServiceProxy('/hardware/change_ruiwo_motor_param', ExecuteArmAction)
+        response = service_proxy(action_name=param_name)
+        
+        if response.success:
+            rospy.loginfo(f"成功设置 Ruiwo 电机参数: {response.message}")
+            return True
+        else:
+            rospy.logerr(f"设置 Ruiwo 电机参数失败: {response.message}")
+            return False
+    except rospy.ServiceException as e:
+        rospy.logerr(f"调用 Ruiwo 电机参数服务失败: {e}")
+        return False
+    except Exception as e:
+        rospy.logerr(f"设置 Ruiwo 电机参数时发生错误: {e}")
+        return False
 
 class MusicPlayer:
     """音乐播放器类，用于在独立线程中播放音乐"""
@@ -692,6 +712,7 @@ def main():
 
     # 等待ROS系统就绪
     rospy.sleep(1)
+    change_ruiwo_motor_param("taiji_kpkd")
     try:
         # 执行动作序列
         if music_player.speaker_available():
@@ -705,7 +726,7 @@ def main():
         rospy.logerr(f"执行动作时出错: {str(e)}")
         # 确保清除太极执行状态标志
         rospy.set_param('/taiji_executing', False)
-
+    change_ruiwo_motor_param("normal_kpkd")
 
 if __name__ == '__main__':
     main()

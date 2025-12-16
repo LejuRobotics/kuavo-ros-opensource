@@ -154,10 +154,10 @@
     "eef_visual_stl_files" : ["l_hand_pitch.STL", "r_hand_pitch.STL"],
     "upper_arm_length": 0.2844,
     "lower_arm_length": 0.45,
-    "shoulder_width": 0.2927,
+    "shoulder_width": 0.2547,
     "eef_z_offset": -0.0,
     "hand_ref_length": 0.193,
-    "base_height_offset": 0.4245,
+    "base_height_offset": 0.3940,
     "base_chest_offset_x": -0.0,
 
     "motor_velocities_factor": 0.005,

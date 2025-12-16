@@ -136,6 +136,7 @@ class HardwarePlant
     void initEndEffector();
         bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
         bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
+        bool changeRuiwoMotorParam(const std::string &param_name, std::string &err_msg);
         
         // RuiWoActuator相关方法的封装
         void adjustZeroPosition(int motor_index, double offset);
