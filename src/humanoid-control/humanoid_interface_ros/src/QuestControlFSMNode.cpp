@@ -59,36 +59,6 @@ namespace ocs2
         kuavo_msgs::footPoseTargetTrajectories trajectory;  // 足部轨迹
     };
 
-    // 定义转向区间
-    static const std::vector<TurnStepZone> kTurnZones = {
-        // 右转区间 (0.0~1.0)
-        {0.0f, 0.15f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(-0.01, -0.01, 0.0, -15.0)
-        })},  // 小角度右转
-         {0.151f, 0.45f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(-0.03, -0.03, 0.0, -30.0)
-        })},  // 小角度右转
-        {0.451f, 0.75f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(-0.04, -0.04, 0.0, -45.0)
-        })}, // 中角度右转
-        {0.751f, 1.0f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(-0.06, -0.06, 0.0, -60.0)
-        })}, // 大角度右转
-        // 左转区间 (-1.0~0.0)
-         {-0.15f, 0.0f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(-0.01, 0.01, 0.0, 15.0)
-        })}, // 小角度左转
-        {-0.45f, -0.15f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(-0.03, 0.03, 0.0, 30.0)
-        })}, // 小角度左转
-        {-0.75f, -0.451f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(-0.04, 0.04, 0.0, 45.0)
-        })}, // 中角度左转
-        {-1.0f, -0.751f, CreateFootPoseTrajectory({
-            Eigen::Vector4d(-0.06, 0.06, 0.0, 60.0)
-        })} // 大角度左转
-    };
-
     // 60度轨迹数据（已移除，但保留注释）
     //         {0.75f, 1.0f, CreateFootPoseTrajectory(0.117f, 0.08f, -1.047f, -0.057f, -0.02f, -1.047f)}, // 60度右转
     //         {0.75f, 1.0f, CreateFootPoseTrajectory(-0.057f, 0.08f, 1.047f, 0.117f, -0.02f, 1.047f)}  // 60度左转
@@ -152,6 +122,9 @@ namespace ocs2
             loadData::loadEigenMatrix(referenceFile, "squatBaseState", squat_base_state_);
             loadData::loadEigenMatrix(referenceFile, "squatJointState", squat_arm_state_);
             loadData::loadCppDataType(referenceFile, "armMode", armMode_);
+
+            // 加载转向区间配置
+            loadTurnZones(nodeHandle);
 
             // gait
             std::string gaitCommandFile;
@@ -402,6 +375,167 @@ namespace ocs2
         }
 
     private:
+        // 从YAML文件加载转向区间配置
+        void loadTurnZones(ros::NodeHandle& nodeHandle) {
+            turn_zones_.clear();
+            
+            // 获取YAML文件路径
+            std::string pkg_path = ros::package::getPath("humanoid_interface_ros");
+            std::string yaml_file = pkg_path + "/config/step_turn.yaml";
+            
+            std::cout << "Loading turn zones from: " << yaml_file << std::endl;
+            
+            // 加载YAML文件到参数服务器
+            std::string command = "rosparam load " + yaml_file + " /quest_turn_config";
+            int result = system(command.c_str());
+            if (result != 0) {
+                ROS_WARN("Failed to load turn zones YAML file, using default configuration");
+                loadDefaultTurnZones();
+                return;
+            }
+            
+            // 创建临时NodeHandle用于读取配置
+            ros::NodeHandle config_nh("/quest_turn_config");
+            
+            // 读取转向区间数量
+            int num_turn_zones = 0;
+            if (!config_nh.getParam("turn_zones_count", num_turn_zones) || num_turn_zones <= 0) {
+                ROS_WARN("Invalid or missing turn_zones_count, using default configuration");
+                loadDefaultTurnZones();
+                return;
+            }
+            
+            std::cout << "Loading " << num_turn_zones << " turn zones from YAML file..." << std::endl;
+            
+            // 用于存储左转区间的临时数据
+            struct LeftTurnZoneConfig {
+                float min_value;
+                float max_value;
+                double body_x;
+                double body_y;
+                double body_z;
+                double body_yaw;
+            };
+            std::vector<LeftTurnZoneConfig> left_turn_configs;
+            
+            // 读取每个左转区间的配置
+            XmlRpc::XmlRpcValue left_turn_zones;
+            if (!config_nh.getParam("left_turn_zones", left_turn_zones)) {
+                ROS_WARN("Failed to read left_turn_zones, using default configuration");
+                loadDefaultTurnZones();
+                return;
+            }
+            
+            if (left_turn_zones.getType() != XmlRpc::XmlRpcValue::TypeArray) {
+                ROS_WARN("left_turn_zones is not an array, using default configuration");
+                loadDefaultTurnZones();
+                return;
+            }
+            
+            for (int i = 0; i < left_turn_zones.size(); ++i) {
+                LeftTurnZoneConfig config;
+                
+                XmlRpc::XmlRpcValue& zone = left_turn_zones[i];
+                
+                // 读取各个参数
+                config.min_value = static_cast<double>(zone["min_value"]);
+                config.max_value = static_cast<double>(zone["max_value"]);
+                config.body_x = static_cast<double>(zone["body_x"]);
+                config.body_y = static_cast<double>(zone["body_y"]);
+                config.body_z = static_cast<double>(zone["body_z"]);
+                config.body_yaw = static_cast<double>(zone["body_yaw"]);
+                
+                left_turn_configs.push_back(config);
+                
+                std::cout << "Loaded left turn zone " << i << ": min=" << config.min_value 
+                          << ", max=" << config.max_value 
+                          << ", pose=[" << config.body_x << ", " << config.body_y 
+                          << ", " << config.body_z << ", " << config.body_yaw << "]" << std::endl;
+            }
+            
+            // 为左转和右转预留空间
+            turn_zones_.reserve(left_turn_configs.size() * 2);
+            
+            // 根据左转配置生成右转区间（正值范围）
+            // 规则：左转的值取反，y和yaw值取反
+            for (int i = left_turn_configs.size() - 1; i >= 0; --i) {
+                const auto& left_config = left_turn_configs[i];
+                
+                TurnStepZone right_zone;
+                // 右转区间：将左转的负值范围映射到正值范围
+                right_zone.min_value = -left_config.max_value;
+                right_zone.max_value = -left_config.min_value;
+                
+                // 右转姿态：x保持不变，y和yaw取反
+                right_zone.trajectory = CreateFootPoseTrajectory({
+                    Eigen::Vector4d(left_config.body_x, -left_config.body_y, 
+                                   left_config.body_z, -left_config.body_yaw)
+                });
+                
+                turn_zones_.push_back(right_zone);
+                
+                std::cout << "Generated right turn zone " << (left_turn_configs.size() - 1 - i) 
+                          << ": min=" << right_zone.min_value 
+                          << ", max=" << right_zone.max_value 
+                          << ", pose=[" << left_config.body_x << ", " << -left_config.body_y 
+                          << ", " << left_config.body_z << ", " << -left_config.body_yaw << "]" << std::endl;
+            }
+            
+            // 添加左转区间（负值范围）
+            for (const auto& left_config : left_turn_configs) {
+                TurnStepZone left_zone;
+                left_zone.min_value = left_config.min_value;
+                left_zone.max_value = left_config.max_value;
+                
+                // 左转姿态：直接使用配置值
+                left_zone.trajectory = CreateFootPoseTrajectory({
+                    Eigen::Vector4d(left_config.body_x, left_config.body_y, 
+                                   left_config.body_z, left_config.body_yaw)
+                });
+                
+                turn_zones_.push_back(left_zone);
+            }
+            
+            std::cout << "Total turn zones loaded: " << turn_zones_.size() << std::endl;
+        }
+        
+        // 加载默认转向区间配置（备用方案）
+        void loadDefaultTurnZones() {
+            turn_zones_.clear();
+            
+            std::cout << "Loading default turn zones configuration..." << std::endl;
+            
+            // 右转区间 (0.0~1.0)
+            turn_zones_.push_back({0.0f, 0.15f, CreateFootPoseTrajectory({
+                Eigen::Vector4d(-0.01, -0.01, 0.0, -15.0)
+            })});
+            turn_zones_.push_back({0.151f, 0.45f, CreateFootPoseTrajectory({
+                Eigen::Vector4d(-0.03, -0.03, 0.0, -30.0)
+            })});
+            turn_zones_.push_back({0.451f, 0.75f, CreateFootPoseTrajectory({
+                Eigen::Vector4d(-0.04, -0.04, 0.0, -45.0)
+            })});
+            turn_zones_.push_back({0.751f, 1.0f, CreateFootPoseTrajectory({
+                Eigen::Vector4d(-0.06, -0.06, 0.0, -60.0)
+            })});
+            
+            // 左转区间 (-1.0~0.0)
+            turn_zones_.push_back({-0.15f, 0.0f, CreateFootPoseTrajectory({
+                Eigen::Vector4d(-0.01, 0.01, 0.0, 15.0)
+            })});
+            turn_zones_.push_back({-0.45f, -0.15f, CreateFootPoseTrajectory({
+                Eigen::Vector4d(-0.03, 0.03, 0.0, 30.0)
+            })});
+            turn_zones_.push_back({-0.75f, -0.451f, CreateFootPoseTrajectory({
+                Eigen::Vector4d(-0.04, 0.04, 0.0, 45.0)
+            })});
+            turn_zones_.push_back({-1.0f, -0.751f, CreateFootPoseTrajectory({
+                Eigen::Vector4d(-0.06, 0.06, 0.0, 60.0)
+            })});
+            
+            std::cout << "Default turn zones loaded: " << turn_zones_.size() << std::endl;
+        }
+
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
         {
             joystick_data_ = *msg;
@@ -757,8 +891,8 @@ namespace ocs2
             int target_zone = -1;
 
             // 直接检测摇杆值所在的区间
-            for (size_t i = 0; i < kTurnZones.size(); ++i) {
-                if (right_x >= kTurnZones[i].min_value && right_x < kTurnZones[i].max_value) {
+            for (size_t i = 0; i < turn_zones_.size(); ++i) {
+                if (right_x >= turn_zones_[i].min_value && right_x < turn_zones_[i].max_value) {
                     target_zone = i;
                     break;
                 }
@@ -817,8 +951,8 @@ namespace ocs2
             }
     
             // 根据区间选择不同的控制方式
-            if (target_zone >= 0 && target_zone < static_cast<int>(kTurnZones.size()) &&
-                !kTurnZones[target_zone].trajectory.footPoseTrajectory.empty()) {
+            if (target_zone >= 0 && target_zone < static_cast<int>(turn_zones_.size()) &&
+                !turn_zones_[target_zone].trajectory.footPoseTrajectory.empty()) {
 
                 // 调用服务检查当前是否是Custom-Gait模式
                 std_srvs::SetBool gait_srv;
@@ -831,7 +965,7 @@ namespace ocs2
                     std::string current_gait = getCurrentGaitName();
                     bool is_stance = (current_gait == "stance");
                     if (is_stance) {
-                        foot_pose_target_pub_.publish(kTurnZones[target_zone].trajectory);
+                        foot_pose_target_pub_.publish(turn_zones_[target_zone].trajectory);
                         turn_step_zone_published_ = true;  // 标记已发布
                         turn_step_last_execute_time_ = ros::Time::now();  // 记录发布时间
                         ROS_WARN("Zone %d trajectory published - not Custom-Gait and current gait is stance", target_zone);
@@ -1329,6 +1463,7 @@ namespace ocs2
         ros::Time turn_step_last_execute_time_;          // 上次执行时间
         ros::Time turn_step_deadzone_enter_time_;        // 进入死区的时间
         bool turn_step_in_deadzone_{false};              // 是否在死区内
+        std::vector<TurnStepZone> turn_zones_;           // 转向区间配置（从YAML文件加载）
 
         ros::Publisher arm_mode_pub_;
         ros::Publisher foot_pose_target_pub_;
