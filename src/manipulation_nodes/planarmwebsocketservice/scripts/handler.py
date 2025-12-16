@@ -158,6 +158,8 @@ from utils import calculate_file_md5, frames_to_custom_action_data, get_start_en
 import shutil
 import rosnode
 import glob
+from std_srvs.srv import Trigger, TriggerResponse
+
 
 # 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
 try:
@@ -2533,6 +2535,23 @@ async def update_voice_keywords_handler(websocket: websockets.WebSocketServerPro
         voice_keywords_config = {**MOVE_VOICE_KEYWORDS, **voice_keywords_config}
         with open(KEYWORDS_FILE_PATH, "w") as f:
             json.dump(voice_keywords_config, f, ensure_ascii=False, indent=2)
+
+        # 如果文件更新成功，但是服务重载失败。依然算成功，因为下一次语音控制节点启动的时候，仍会加载到最新的配置文件
+        try:
+            rospy.wait_for_service('/voice_control/reload_keywords', timeout=2.0)
+            reload_client = rospy.ServiceProxy('/voice_control/reload_keywords', Trigger)
+            req = TriggerRequest()
+            response = reload_client(req)
+            if response.success:
+                rospy.loginfo("已通知 voice_control_node 重载配置")
+            else:
+                rospy.logwarn("Failed to reload voice keywords.")
+        except rospy.ROSException:
+            rospy.logerr("Service /voice_control/reload_keywords not available")
+        except rospy.ServiceException as e:
+            rospy.logerr(f"Service call failed: {e}")
+
+        # Call the service
         payload.data["code"] = 0
         payload.data["message"] = "Update voice keywords successfully"
         rospy.loginfo(f"Updated voice keywords: {voice_keywords_config}")

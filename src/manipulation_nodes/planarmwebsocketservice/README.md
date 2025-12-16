@@ -955,12 +955,12 @@ data中的key应该为实际的动作名称，需要和机器人本地目录 `~/
     "code": 0,
     "message": "Read voice keywords successfully",
     "result": {
-      "前进": {
+      "前进一步": {
         "type": "SINGLE_STEP",
-        "keywords": ["往前走", "往前", "向前走", "朝前走"],
+        "keywords": ["往前走", "往前走一步", "前进一步"],
         "data": {
-          "direction": "前",
-          "step": 1
+        "direction": "前",
+        "step": 1
         }
       },
       "右手打招呼": {

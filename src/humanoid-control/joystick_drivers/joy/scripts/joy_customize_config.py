@@ -17,7 +17,6 @@ from std_srvs.srv import Trigger
 HUMANOID_ROBOT_SESSION_NAME = "humanoid_robot"
 LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch start_way:=auto"
 LAUNCH_VOICE_CONTROL_REAL_CMD = os.getenv('LAUNCH_VOICE_CONTROL_REAL_CMD', "roslaunch voice_control_node voice_control.launch start_way:=auto")
-KILL_VOICE_CONTROL_NODE_CMD = "rosnode kill /voice_control_node"
 ROBOT_VERSION = os.getenv('ROBOT_VERSION', "")
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI", "")
 ROS_IP = os.getenv("ROS_IP", "")

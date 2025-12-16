@@ -11,15 +11,15 @@
   
   <build_depend>rospy</build_depend>
   <build_depend>kuavo_msgs</build_depend>
-  <build_depend>humanoid_controllers</build_depend>
+  <build_depend>std_srvs</build_depend>
   
   <build_export_depend>rospy</build_export_depend>
   <build_export_depend>kuavo_msgs</build_export_depend>
-  <!-- <build_export_depend>humanoid_controllers</build_export_depend> -->
+  <build_export_depend>std_srvs</build_export_depend>
   
   <exec_depend>rospy</exec_depend>
   <exec_depend>kuavo_msgs</exec_depend>
-  <exec_depend>humanoid_controllers</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
 
   <export>
   </export>

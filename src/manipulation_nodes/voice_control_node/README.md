@@ -104,6 +104,15 @@ roslaunch voice_control_node voice_control.launch
 直接运行本节点前，请确保以下节点已经启动：
 - **麦克风节点**: 负责采集音频并发布到 `/micphone_data` 话题。
 
+如果程序启动后没有显示语音识别结果，请检查麦克风节点是否正常启动。并且麦克风是否正常连接。
+
+```bash
+# 检查麦克风节点是否存在
+rosnode list | grep /audio_receiver_node
+```
+
+如果返回结果为空，则说明麦克风节点未启动。请检查麦克风节点的启动情况。
+
 ## 6. 配置
 
 可以修改 `scripts/key_words.json` 文件来定义或修改关键词和动作的映射关系。

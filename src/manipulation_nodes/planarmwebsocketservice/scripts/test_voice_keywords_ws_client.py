@@ -63,13 +63,19 @@ class WebSocketVoiceKeywordsTestClient:
             await self.websocket.close()
             self.websocket = None
 
-    async def test_update_keywords(self):
+    async def test_update_keywords(self, keywords_json):
         """测试更新语音关键词接口"""
+        payload = {}
+        for key, value in keywords_json.items():
+            if value.get("type") == "ARM_ACTION":
+                payload[key] = value["keywords"]
+        # 模拟覆盖更新打招呼动作
+        payload["右手打招呼"] = ["打招呼", "挥挥手", "打个招呼", "招呼一下"]
+        payload["右手握手"] = ["握手", "和我握个手", "来握手", "握个手"]
         message = {
             "cmd": "update_voice_keywords",
-            "data": {
-                "右手打招呼": ["打招呼", "挥手", "挥挥手", "挥一下手", "挥个手"],
-            }
+            "data": payload
+            # "data": json.dumps(keywords_json)
         }
         await self.send_message(message)
         return await self.receive_messages()
@@ -94,9 +100,10 @@ async def run_setting_voice_keywords_tests(uri):
         print("开始测试配置语音关键词接口")
         print("=" * 60)
 
-        await client.test_get_keywords()
+        response = await client.test_get_keywords()
+        read_json = response["data"]["result"]
         print("=" * 60)
-        await client.test_update_keywords()
+        await client.test_update_keywords(read_json)
         print("=" * 60)
         await client.test_get_keywords()
 

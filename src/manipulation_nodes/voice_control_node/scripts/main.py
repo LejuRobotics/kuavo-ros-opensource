@@ -75,19 +75,29 @@ def main():
     # 1. 初始化 ROS 节点
     rospy.init_node('voice_control_node', anonymous=False)
     
-    # 2. 创建实例
+    # 2. 定义配置重载回调函数（用于更新 ACTION_CONFIG）
+    def update_action_config_callback():
+        """在 VoiceCoordinator 重载配置后调用，更新 main.py 的 ACTION_CONFIG"""
+        global ACTION_CONFIG
+        ACTION_CONFIG = load_action_config()
+        rospy.loginfo("ACTION_CONFIG 已成功更新")
+    
+    # 3. 创建实例，传入回调函数
     try:
-        voice_coordinator = VoiceCoordinator() # 更新类实例化
-        motion_executor = MotionExecutor() # 更新类实例化
+        voice_coordinator = VoiceCoordinator(subscribe_topic="/micphone_data", 
+                                            on_reload_callback=update_action_config_callback)
+        motion_executor = MotionExecutor()
     except Exception as e:
         rospy.logerr(f"初始化失败: {e}")
         return
 
     rospy.loginfo("语音控制系统启动，等待语音输入... (按 Ctrl+C 退出)")
+    rospy.loginfo("使用 '/voice_control/reload_keywords' 服务可以重载关键词配置")
 
     # 清除初始化过程中接收到的麦克风数据
     voice_coordinator.reset_micphone_data()
-    # 3. 使用 ROS 标准循环
+    
+    # 4. 使用 ROS 标准循环
     while not rospy.is_shutdown():
         try:
             # 使用带超时的阻塞式获取，以降低延迟并提高响应速度
