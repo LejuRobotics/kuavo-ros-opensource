@@ -69,15 +69,6 @@ echo "正在启动 h12pro_controller_node..."
 sleep 3
 echo "h12pro_controller_node 已启动。"
 
-# 启动 h12pro_controller_node
-roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch &
-CONTROLLER_PID=$!
-
-# 检测 h12pro_controller_node 启动
-echo "正在启动 h12pro_controller_node..."
-sleep 3
-echo "h12pro_controller_node 已启动。"
-
 # 启动 tact 动作文件执行节点
 roslaunch humanoid_plan_arm_trajectory humanoid_plan_arm_trajectory.launch &
 PLAN_PID=$!

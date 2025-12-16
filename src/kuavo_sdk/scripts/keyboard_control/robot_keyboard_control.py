@@ -818,17 +818,7 @@ class KeyBoardRobotController:
 if __name__ == "__main__":
     try:
         # 获取机器人版本
-        my_robot_version = get_parameter('robot_version')
-        def start_with_version(version_number:int, series:int):
-            """判断版本号是否属于某系列"""
-            # PPPPMMMMN
-            MMMMN_MASK = 100000
-            return (version_number % MMMMN_MASK) == series
-        if start_with_version(my_robot_version, 42) or start_with_version(my_robot_version, 45) or start_with_version(my_robot_version, 49) or start_with_version(my_robot_version, 52):
-            print("机器人版本为:",my_robot_version)
-        else :
-            print("机器人版本号错误, 仅支持42 45 49 52")
-            pass
+        my_robot_version = get_version_parameter()
 
         # Right Arm
         keyboard_robot_controller = KeyBoardRobotController(x_gap = 0.05, y_gap = 0.05, z_gap = 0.05,
