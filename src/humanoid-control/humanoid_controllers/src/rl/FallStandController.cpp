@@ -1348,6 +1348,12 @@ namespace humanoid_controller
 
   bool FallStandController::triggerFallStandUpCallback(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res)
   {
+    if (state_ != ControllerState::RUNNING)
+    {
+      res.success = false;
+      res.message = "FallStandController is not running, start or resume before trigger fall stand up";
+      return true;
+    }
     // 检查当前是否处于倒地状态
     if (fall_stand_state_ == FallStandState::FALL_DOWN)
     {

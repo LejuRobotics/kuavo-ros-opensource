@@ -196,6 +196,7 @@ add_service_files(
   SetLEDMode_free.srv
   # kuavo_tf2_web_republisher
   RepublishTFs.srv
+  stairAlignmentSrv.srv
 
   twoArmHandPoseCmdFreeSrv.srv
   goToZeroPoint.srv

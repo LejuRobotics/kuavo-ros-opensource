@@ -9,11 +9,11 @@ humanoid_interface
 
 model_settings
 {
-  positionErrorGain             5.0 ; 20.0
+  positionErrorGain             10.0 ; 20.0
   positionErrorGain_xy          0.0 ; 20.0
   velocityErrorGain_xy          1.0;
   positionErrorGain_zero        5.0; // positionErrorGain for zero velocity constraint
-  positionErrorGainXYStepControl     50 ;
+  positionErrorGainXYStepControl     70 ;
   velocityErrorGainXYStepControl     1.0 ;
 
   phaseTransitionStanceTime     0.4
@@ -492,7 +492,7 @@ zeroVelocityConstraint
 ; Soft Constraint
 softSwingTrajConstraint
 {
-  weight      10
+  weight      100
 }
 
 selfCollision

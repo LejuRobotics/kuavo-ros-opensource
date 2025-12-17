@@ -23,6 +23,8 @@ using namespace ocs2;
   {
     // 自动初始化服务
     initializeServices();
+    // 初始化RL相关变量
+    initializeRLVariables();
   }
 
   void RLControllerBase::initializeServices()
@@ -42,9 +44,6 @@ using namespace ocs2;
                                       &RLControllerBase::resetServiceCallback, this);
     
     ROS_INFO("[%s] Services initialized at namespace: %s", name_.c_str(), service_ns.c_str());
-    
-    // 初始化RL相关变量
-    initializeRLVariables();
   }
   
   void RLControllerBase::initializeRLVariables()
@@ -107,6 +106,13 @@ using namespace ocs2;
   bool RLControllerBase::reloadServiceCallback(std_srvs::Trigger::Request& req, 
                                                 std_srvs::Trigger::Response& res)
   {
+    if (state_ == ControllerState::RUNNING)
+    {
+      res.success = false;
+      res.message = "Controller is running, stop or pause before reload";
+      return true;
+    }
+
     bool success = reload();
     res.success = success;
     res.message = success ? "Config reloaded successfully" : "Failed to reload config";
@@ -144,6 +150,13 @@ using namespace ocs2;
   bool RLControllerBase::resetServiceCallback(std_srvs::Trigger::Request& req, 
                                                std_srvs::Trigger::Response& res)
   {
+    if (state_ == ControllerState::RUNNING)
+    {
+      res.success = false;
+      res.message = "Controller is running, stop or pause before reset";
+      return true;
+    }
+
     reset();
     res.success = true;
     res.message = "Controller reset successfully";

@@ -101,10 +101,7 @@ namespace ocs2
       {
         waist_nums_ = waist_nums;
       }
-      void setEnableFeetJointTask(bool enable)
-      {
-        enable_feet_joint_task_ = enable;
-      }
+     
 
       inline Eigen::Vector3d getR() const { return r; }
       inline Eigen::Vector3d getRd() const { return rd; }
@@ -175,7 +172,6 @@ namespace ocs2
       Task formulateArmJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
       Task formulateStandUpJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
       Task formulateJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
-      Task formulateFeetJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
 
       void compensateFriction(vector_t &x);
 
@@ -206,7 +202,6 @@ namespace ocs2
       scalar_t baseAngularKp_{}, baseAngularKd_{};
       vector_t armJointKp_, armJointKd_, waistJointKp_, waistJointKd_;
       scalar_t standUp_legKp_{}, standUp_legKd_{}, standUp_armKp_{}, standUp_armKd_{}, standUp_waistKp_{}, standUp_waistKd_{}, jointAcc_Kp_{}, jointAcc_Kd_{};
-      vector_t feetJoint_Kp_, feetJoint_Kd_;
       vector3_t baseAngular3dKp_, baseAngular3dKd_;
 
       vector_t cmd_body_pos_;
@@ -238,7 +233,6 @@ namespace ocs2
       bool half_body_mode_ = false;
       bool pull_up_state_ = false;
       bool roban_mode_ = false;
-      bool enable_feet_joint_task_ = false;
     };
 
   } // namespace humanoid
