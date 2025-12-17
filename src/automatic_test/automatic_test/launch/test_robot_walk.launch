@@ -1,15 +1,26 @@
 <launch>
-  <rosparam command="load" file="$(find automatic_test)/config/params.yaml"/>
+
+  <arg name="ci_trace_path_test" default="false"/>
+  <group if="$(arg ci_trace_path_test)">
+    <rosparam command="load" file="$(find automatic_test)/config/params_ci.yaml"/>
+  </group>
+  <group unless="$(arg ci_trace_path_test)">
+    <rosparam command="load" file="$(find automatic_test)/config/params.yaml"/>
+  </group>
 
   <arg name="log_level" default="INFO"/>
   <arg name="sim" default="true"/>
   <arg name="test_cmd_vel" default="false"/>
   <arg name="test_cmd_pose" default="false"/>
   <arg name="test_cmd_pose_world" default="false"/>
+  <arg name="enable_april_tag" default="true"/>
+  <arg name="monitor" default="true"/>
+  
   <param name="/robot_manager/sim" type="bool" value="$(arg sim)"/>
   <param name="/test_robot_walk/test_cmd_vel" type="bool" value="$(arg test_cmd_vel)"/>
   <param name="/test_robot_walk/test_cmd_pose" type="bool" value="$(arg test_cmd_pose)"/>
   <param name="/test_robot_walk/test_cmd_pose_world" type="bool" value="$(arg test_cmd_pose_world)"/>
+  <param name="/april_tag_recognition/enabled" type="bool" value="$(arg enable_april_tag)"/>
 
   <group if="$(arg sim)">
       <param name="/mpc_path_tracer_node/world_frame" value="odom"/>
@@ -19,7 +30,18 @@
 
   <node pkg="automatic_test" type="mocap_tf_pub.py" name="mocap_tf_pub" output="screen"/>
 
-  <node pkg="automatic_test" type="robot_manager.py" name="robot_manager" output="screen"/>
+  <group if="$(arg monitor)">
+    <node pkg="automatic_test" type="robot_manager.py" name="robot_manager" output="screen"/>
+  </group>
+
+  <node pkg="ar_control" type="ar_control_node.py" name="ar_control_node" output="screen"/>
+
+  <group if="$(arg enable_april_tag)">
+    <include file="$(find apriltag_ros)/launch/continuous_detection.launch">
+      <arg name="camera_name" value="/camera/color"/>
+      <arg name="image_topic" value="image_raw"/>
+    </include>
+  </group>
 
   <node pkg="automatic_test" 
         type="test_robot_walk.sh" 

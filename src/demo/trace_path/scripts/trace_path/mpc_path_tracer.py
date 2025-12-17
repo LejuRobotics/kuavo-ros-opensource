@@ -8,6 +8,7 @@ import tf
 import tf2_ros
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Twist, PoseStamped, Point, Quaternion, Pose, TransformStamped
+from gazebo_msgs.msg import ModelStates
 from pydrake.all import MathematicalProgram
 from pydrake.all import Solve, SnoptSolver
 from std_msgs.msg import Bool
@@ -104,11 +105,20 @@ class PathTracerBase:
 
         self.timer = rospy.Timer(rospy.Duration(0.05), self.publish_follow_state)
         
-        # Start TF polling thread
-        import threading
-        self.tf_thread = threading.Thread(target=self.tf_polling)
-        self.tf_thread.daemon = True
-        self.tf_thread.start()
+        # Decide pose source by sim flag
+        self.use_sim = rospy.get_param('robot_manager_node/sim', False)
+        import os
+        self.model_name = f"biped_s{os.environ.get('ROBOT_VERSION', '45')}"
+
+        if self.use_sim:
+            self.model_states_sub = rospy.Subscriber('/gazebo/model_states', ModelStates, self._on_model_states, queue_size=1)
+            rospy.loginfo(f"Use Gazebo /gazebo/model_states for pose (model_name={self.model_name})")
+        else:
+            # Start TF polling thread
+            import threading
+            self.tf_thread = threading.Thread(target=self.tf_polling)
+            self.tf_thread.daemon = True
+            self.tf_thread.start()
 
     def _init_path_generator(self):
         """Initialize path generator with current frame settings"""
@@ -197,6 +207,63 @@ class PathTracerBase:
                 pass
             
             self.tf_rate.sleep()
+
+    def _on_model_states(self, msg: ModelStates):
+        """Gazebo回调：使用 /gazebo/model_states 更新位姿（world系）"""
+        try:
+            if self.model_name in msg.name:
+                idx = msg.name.index(self.model_name)
+            else:
+                # 常见兜底名称
+                fallback_names = ['biped_s45', 'biped_s42']
+                idx = None
+                for n in fallback_names:
+                    if n in msg.name:
+                        idx = msg.name.index(n)
+                        break
+                if idx is None:
+                    return
+
+            pose = msg.pose[idx]
+
+            # 更新 current_pose
+            self.current_pose.position.x = pose.position.x
+            self.current_pose.position.y = pose.position.y
+            self.current_pose.position.z = pose.position.z
+            self.current_pose.orientation.x = pose.orientation.x
+            self.current_pose.orientation.y = pose.orientation.y
+            self.current_pose.orientation.z = pose.orientation.z
+            self.current_pose.orientation.w = pose.orientation.w
+
+            # 初始化 start_point_pose（仅一次）
+            if self.flag_reset_start_point:
+                self.start_point_pose = Pose()
+                self.start_point_pose.position.x = pose.position.x
+                self.start_point_pose.position.y = pose.position.y
+                self.start_point_pose.position.z = pose.position.z
+                self.start_point_pose.orientation.x = pose.orientation.x
+                self.start_point_pose.orientation.y = pose.orientation.y
+                self.start_point_pose.orientation.z = pose.orientation.z
+                self.start_point_pose.orientation.w = pose.orientation.w
+                self.flag_reset_start_point = False
+                rospy.loginfo(f"Start point (gazebo): [{pose.position.x:.2f}, {pose.position.y:.2f}, {pose.position.z:.2f}]")
+
+            # 发布实时轨迹（与 TF 逻辑保持一致的频率控制由外部 timer 保证）
+            current_time = rospy.Time.now()
+            path_pose = Pose()
+            path_pose.position.x = pose.position.x
+            path_pose.position.y = pose.position.y
+            path_pose.position.z = 0.0
+            path_pose.orientation = pose.orientation
+
+            pose_stamped = PoseStamped()
+            pose_stamped.header.frame_id = self.path.header.frame_id
+            pose_stamped.header.stamp = current_time
+            pose_stamped.pose = path_pose
+            self.path.poses.append(pose_stamped)
+            self.realtime_path_pub.publish(self.path)
+        except Exception as e:
+            rospy.logwarn(f"model_states callback error: {e}")
 
     def follow(self, global_path):
         """Base implementation of path following - to be overridden by subclasses"""
@@ -678,6 +745,10 @@ class MpcPathTracer(PathTracerBase):
         rospy.loginfo(f"Start following path...")
         # First publish the path for visualization
         self.publish_path(global_path)
+        # Log goal point information
+        end_pose = global_path.poses[-1].pose
+        end_yaw = Utils.get_yaw_from_orientation(end_pose.orientation)
+        rospy.loginfo(f"Goal point initialized at: [{end_pose.position.x:.2f}, {end_pose.position.y:.2f}, {end_pose.position.z:.2f}], yaw={end_yaw:.2f} rad")
 
         # Follow each point in the path
         for i, pose_stamped in enumerate(global_path.poses):
@@ -745,6 +816,8 @@ class MpcPathTracer(PathTracerBase):
 
         # Path end point
         goal_pose = global_path.poses[-1].pose.position
+        goal_yaw = Utils.get_yaw_from_orientation(global_path.poses[-1].pose.orientation)
+        rospy.loginfo(f"Goal point initialized at: [{goal_pose.x:.2f}, {goal_pose.y:.2f}, {goal_pose.z:.2f}], yaw={goal_yaw:.2f} rad")
 
         # MPC control loop
         point_counts = len(global_path.poses)

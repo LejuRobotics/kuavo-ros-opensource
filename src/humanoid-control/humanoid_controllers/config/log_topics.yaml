@@ -1,5 +1,6 @@
 topics:
   - /cmd_vel
+  - /filter_cmd_vel
   - /cmd_pose
   - /joint_cmd.*
   - /cmd.*
@@ -10,6 +11,8 @@ topics:
   - /kuavo_.*
   - /monitor/.*
   - /odom
+  - /estimation_odom
+  - /waist_yaw_kinematic
   - /pose
   - /quest_joystick_data
   - /rosout
@@ -51,9 +54,17 @@ topics:
   - /odometry/filtered
   - /sensor_data_new/.*
   - /imu_data
+  - /lb_joint_cmd
   - /mm/end_effector_trajectory
   - /mm/.*
   - /grasp_box/.*
   - /robot_body_matrices
   - /action_detector_info
   - /leju_claw_command
+  - /leju/fused_hull_boundry_fuse_elevation
+  - /leju/elevation_map0
+  - /polygon_new_markers
+  - /polygon_markers
+  - /l515/color/image_raw
+  - /livox/points
+  - /rl_controller.*

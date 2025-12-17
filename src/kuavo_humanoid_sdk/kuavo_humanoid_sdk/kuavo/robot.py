@@ -9,6 +9,7 @@ from kuavo_humanoid_sdk.kuavo.core.core import KuavoRobotCore
 from kuavo_humanoid_sdk.kuavo.core.sdk_deprecated import sdk_deprecated
 
 from typing import Tuple
+from geometry_msgs.msg import TwistStamped
 from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
 
 """
@@ -185,6 +186,31 @@ class KuavoRobot(RobotBase):
             print(f"\033[33m[Robot] pitch {pitch} exceeds limit [{MIN_PITCH}, {MAX_PITCH}], will be limited\033[0m")
         
         return self._kuavo_core.squat(limited_height, limited_pitch)
+
+    def control_torso_pose(self, x: float, y: float, z: float,
+                           roll: float, pitch: float, yaw: float) -> bool:
+        """直接控制轮臂机器人躯干的位姿
+
+        Args:
+            x, y, z (float): 目标位置（米）
+            roll, pitch, yaw (float): 目标欧拉角（弧度）
+
+        Returns:
+            bool: 控制命令是否发送成功
+        """
+        return self._kuavo_core.control_torso_pose(x, y, z, roll, pitch, yaw)
+    
+    def control_wheel_lower_joint(self, joint_traj: list) -> bool:
+        """控制轮臂机器人的下肢关节
+
+        Args:
+            joint_traj (list): 目标关节位置（弧度）
+
+        Returns:
+            bool: 控制命令是否发送成功
+        """
+        return self._kuavo_core.control_wheel_lower_joint(joint_traj)
+        
      
     def step_by_step(self, target_pose:list, dt:float=0.4, is_left_first_default:bool=True, collision_check:bool=True)->bool:
         """单步控制机器人运动。
@@ -266,6 +292,23 @@ class KuavoRobot(RobotBase):
             执行误差： 0.03~0.1m, 0.5~5°
         """
         return self._kuavo_core.control_command_pose_world(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
+    
+    def control_command_pose_world_stamped(self, pos_world: TwistStamped) -> bool:
+        """在odom(世界)坐标系下控制机器人姿态(使用TwistStamped消息)。
+        
+        Args:
+            pos_world (TwistStamped): TwistStamped消息，包含目标位姿和时间戳。
+            
+        Returns:
+            bool: 如果命令发送成功返回True,否则返回False。
+            
+        Raises:
+            RuntimeError: 如果在尝试控制姿态时机器人不在stance状态。
+            
+        Note:
+            此命令会将机器人状态改变为'command_pose_world'。
+        """
+        return self._kuavo_core.control_command_pose_world_stamped(pos_world)
     
     def control_head(self, yaw: float, pitch: float)->bool:
         """控制机器人的头部关节运动。

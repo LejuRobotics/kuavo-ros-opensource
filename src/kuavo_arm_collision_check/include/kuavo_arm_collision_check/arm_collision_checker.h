@@ -61,12 +61,14 @@ struct CollisionCheckUserData {
 };
 
 std::vector<std::string> enable_link_list = {
-    "zarm_l1_link", "zarm_l2_link", "zarm_l3_link", "zarm_l4_link", "zarm_l5_link", "zarm_l6_link", "zarm_l7_link", "zarm_l7_end_effector",
-    "zarm_r1_link", "zarm_r2_link", "zarm_r3_link", "zarm_r4_link", "zarm_r5_link", "zarm_r6_link", "zarm_r7_link", "zarm_r7_end_effector"
+    "zarm_l1_link", "zarm_l2_link", "zarm_l3_link", "zarm_l4_link", "zarm_l5_link", "zarm_l6_link", "zarm_l7_link", "l_hand_tripod", 
+    "zarm_r1_link", "zarm_r2_link", "zarm_r3_link", "zarm_r4_link", "zarm_r5_link", "zarm_r6_link", "zarm_r7_link", "r_hand_tripod"
 };
 
 class ArmCollisionChecker {
 public:
+    static std::map<std::string, double> inflation_map_;
+    static std::vector<std::pair<std::string, std::string>> collision_filter_pairs_;
     ArmCollisionChecker(ros::NodeHandle& nh);
     ~ArmCollisionChecker();
 

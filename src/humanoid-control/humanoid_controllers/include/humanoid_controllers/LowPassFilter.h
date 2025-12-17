@@ -120,6 +120,26 @@ public:
         _delay_element_2.setZero();
     }
 
+    // 将滤波器内部状态重置到指定输出位置，使得在输入与该值一致时无瞬态
+    void reset(const Eigen::VectorXd &value)
+    {
+        if (value.size() != _delay_element_1.size())
+        {
+            // 尺寸不匹配则退化为清零
+            _delay_element_1.setZero();
+            _delay_element_2.setZero();
+            return;
+        }
+
+        for (int i = 0; i < value.size(); ++i)
+        {
+            double denom = 1.0 + _a1(i) + _a2(i);
+            double d = (std::abs(denom) > 1e-12) ? (value(i) / denom) : 0.0;
+            _delay_element_1(i) = d;
+            _delay_element_2(i) = d;
+        }
+    }
+
     void disable()
     {
         std::cout << "LowPassFilter2ndOrder: Invalid parameters, disabling filter." << std::endl;

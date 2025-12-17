@@ -55,5 +55,6 @@ namespace HIPNUC_IMU
     bool getImuDataFrame(Eigen::Vector3d &acc, Eigen::Vector3d &gyro, Eigen::Quaterniond &quat);
     int open_port(std::string port_device, int baud);
     int read_hipnuc_imu(int fd, struct pollfd *p);
+    bool get_imu_running_flag();
 }
 #endif // _imu_receiver_h_

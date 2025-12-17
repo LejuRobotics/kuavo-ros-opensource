@@ -1,0 +1,99 @@
+<?xml version="1.0" ?>
+
+<launch>
+
+    <!-- 输出日志格式 -->
+    <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
+    
+    <arg name="robot_type"         default="1"/>    <!-- 1表示轮臂，2表示双足 -->
+    <arg name="nodelet_robot_type"  default="1"/>    <!-- 1表示轮臂，2表示双足 -->
+    <arg name="wheel_control_type"  default="0"/>    <!-- 0表示轮臂的仿真测试版mpc，1表示实际部署mpc -->
+    <arg name="wbc_frequency"      default="500"/>
+    <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="rviz"   default="true"/>
+    <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
+    <arg name="use_sqp"   default="false" doc="Use SQP if true, DDP if false"/>
+
+    <!-- The URDF model of the robot -->
+    <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
+    <!-- The task file for the mpc. -->
+    <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s60/task.info" />
+    <!-- The library folder to generate CppAD codegen into -->
+    <arg name="libFolder"   value="/var/ocs2/kuavo_s$(arg robot_version)" />
+
+    <!-- Set with_coredump parameter based on coredump value -->
+    <arg name="coredump" default="false"/>
+    <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
+    <arg name="with_coredump" value="" unless="$(arg coredump)"/>
+
+    <arg name="use_joystick"       default="true"/>
+    <arg name="joystick_type"      default="bt2"/>
+
+    <param name="robot_type"      value="$(arg robot_type)"/>
+    <param name="wbc_frequency"     value="$(arg wbc_frequency)"/>
+
+    <!-- make the files into global parameters -->
+    <param name="taskFile"   value="$(arg taskFile)" />
+    <param name="urdfFile"   value="$(arg urdfFile)" />
+    <param name="libFolder"  value="$(arg libFolder)" />
+    <param name="robot_description" textfile="$(arg urdfFile)"/>
+    
+    <!-- 自动清理 .ros 文件夹参数 -->
+    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+
+    <param name="nodelet_robot_type"      value="$(arg nodelet_robot_type)"/>
+    <param name="wheel_control_type"      value="$(arg wheel_control_type)"/>
+    <!-- mpc node -->
+    <group if="$(arg use_sqp)">
+      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_sqp_mpc_node" name="mobile_manipulator_sqp_mpc_node" 
+          output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    </group>
+    <group unless="$(arg use_sqp)">
+      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_mpc_node" name="mobile_manipulator_mpc_node" 
+          output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    </group>
+
+    <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_target" name="mobile_manipulator_target" 
+        output="screen" launch-prefix="" />
+
+    <!-- nodelet manager -->
+    <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
+       output="screen" required="true" clear_params="true"
+       launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
+        <param name="num_worker_threads" type="int" value="10" />
+    </node>
+
+    <!-- rviz -->
+    <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)"/>
+
+    <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch">
+      <arg name="robot_type" value="$(arg robot_type)"/>
+    </include>
+    <!-- nodelet manager -->
+    <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true">
+      </node>
+
+    <group if="$(arg use_joystick)">
+      <group if="$(eval arg('joystick_type') == 'h12')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
+          <arg name="start_way" value="$(arg start_way)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'sim')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
+          <arg name="joystick_type" value="$(arg joystick_type)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+          <arg name="joystick_type" value="$(arg joystick_type)"/>
+        </include>
+      </group>
+    </group>
+
+    <!-- logger -->
+    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+</launch>

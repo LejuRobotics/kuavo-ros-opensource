@@ -1,0 +1,49 @@
+# kuavo_arm_collision_check/config/s45_collision_config.yaml
+
+# 每个关节或模型的膨胀系数 (单位: 米)
+# 注:为防止ros参数不合理,这里将原本文件名字中的".""-"字符强制替换成了"_"进行匹配
+inflation:
+  torso_STL: 0.020
+  camera_STL: 0.020
+  camera_base_STL: 0.020
+  l_hand_camera_STL: 0.020
+  l_hand_tripod_STL: 0.020
+  l_leg_roll_STL: 0.020
+  l_leg_yaw_STL: 0.020
+  l_leg_pitch_STL: 0.020
+  l_knee_STL: 0.020
+  l_foot_pitch_STL: 0.020
+  l_foot_roll_STL: 0.020
+  r_leg_roll_STL: 0.020
+  r_leg_yaw_STL: 0.020
+  r_leg_pitch_STL: 0.020
+  r_knee_STL: 0.020
+  r_foot_pitch_STL: 0.020
+  r_foot_roll_STL: 0.020
+  r_hand_camera_STL: 0.020
+  r_hand_tripod_STL: 0.020
+  radar_STL: 0.020
+  torso_camera_STL: 0.020
+  waist_camera_STL: 0.020
+  l_arm_pitch_STL: 0.020
+  l_arm_roll_STL: 0.020
+  l_arm_yaw_STL: 0.020
+  l_forearm_STL: 0.020
+  l_hand_yaw_STL: 0.020
+  l_hand_roll_STL: 0.020
+  l_hand_pitch_STL: 0.020
+  r_arm_pitch_STL: 0.020
+  r_arm_roll_STL: 0.020
+  r_arm_yaw_STL: 0.020
+  r_forearm_STL: 0.020
+  r_hand_yaw_STL: 0.020
+  r_hand_roll_STL: 0.020
+  r_hand_pitch_STL: 0.020
+  head_yaw_STL: 0.020
+  head_pitch_STL: 0.020
+
+# 碰撞过滤规则（不检测的关节对）
+# 注意：关节名必须和模型加载时对应一致
+collision_filter:
+  - [r_hand_tripod, zarm_r5_link]
+  - [l_hand_tripod, zarm_l5_link]

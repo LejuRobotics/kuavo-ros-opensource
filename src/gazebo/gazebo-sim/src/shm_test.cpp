@@ -34,7 +34,8 @@ int main(int argc, char** argv)
     gazebo_shm::JointCommand joint_cmd;
     
     // 设置关节数量
-    joint_cmd.num_joints = 28;  // 根据实际关节数量设置
+    // joint_cmd.num_joints = 28;  // 根据实际关节数量设置
+    joint_cmd.num_joints = 20;
     
     // 设置最大力矩限制
     const double MAX_TORQUE = 100.0;  // 最大力矩限制

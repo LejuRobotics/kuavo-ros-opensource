@@ -1,5 +1,9 @@
 #include "humanoid_controllers/CommonDDS.h"
 
+// Unitree SDK DDS types
+#include "unitree/idl/hg/LowCmd_.hpp"
+#include "unitree/idl/hg/LowState_.hpp"
+
 using namespace org::eclipse::cyclonedds;
 
 // Topics
@@ -27,9 +31,11 @@ uint32_t Crc32Core(uint32_t *ptr, uint32_t len) {
 }
 
 // DdsLowStateListener implementation
-DdsLowStateListener::DdsLowStateListener() : message_count_(0) {}
+template<typename StateMessageType>
+DdsLowStateListener<StateMessageType>::DdsLowStateListener() : message_count_(0) {}
 
-void DdsLowStateListener::on_data_available(dds::sub::DataReader<unitree_hg::msg::dds_::LowState_>& reader) {
+template<typename StateMessageType>
+void DdsLowStateListener<StateMessageType>::on_data_available(dds::sub::DataReader<StateMessageType>& reader) {
     auto samples = reader.read();
     for (const auto& sample : samples) {
         if (sample.info().valid()) {
@@ -50,19 +56,23 @@ void DdsLowStateListener::on_data_available(dds::sub::DataReader<unitree_hg::msg
     }
 }
     
-uint64_t DdsLowStateListener::getMessageCount() const { return message_count_.load(); }
+template<typename StateMessageType>
+uint64_t DdsLowStateListener<StateMessageType>::getMessageCount() const { return message_count_.load(); }
     
-unitree_hg::msg::dds_::LowState_ DdsLowStateListener::getLatestData() const {
+template<typename StateMessageType>
+StateMessageType DdsLowStateListener<StateMessageType>::getLatestData() const {
     std::lock_guard<std::mutex> lock(data_mutex_);
     return latest_state_data_;
 }
     
-void DdsLowStateListener::setLowdstateCallback(std::function<void(const unitree_hg::msg::dds_::LowState_&)> callback) {
+template<typename StateMessageType>
+void DdsLowStateListener<StateMessageType>::setLowdstateCallback(std::function<void(const StateMessageType&)> callback) {
         ext_lowdstate_callback_ = callback;
 }
 
 // HumanoidControllerDDSClient implementation
-HumanoidControllerDDSClient::HumanoidControllerDDSClient() 
+template<typename CmdType, typename StateType>
+HumanoidControllerDDSClient<CmdType, StateType>::HumanoidControllerDDSClient()
     : participant_(org::eclipse::cyclonedds::domain::default_id())
     , cmd_topic_(participant_, DDS_CMD_TOPIC)
     , state_topic_(participant_, DDS_STATE_TOPIC)
@@ -75,30 +85,43 @@ HumanoidControllerDDSClient::HumanoidControllerDDSClient()
     std::cout << "Humanoid Controller DDS Client initialized" << std::endl;
 }
 
-HumanoidControllerDDSClient::~HumanoidControllerDDSClient() {
+template<typename CmdType, typename StateType>
+HumanoidControllerDDSClient<CmdType, StateType>::~HumanoidControllerDDSClient() {
     stop();
 }
 
-void HumanoidControllerDDSClient::start() {
+template<typename CmdType, typename StateType>
+void HumanoidControllerDDSClient<CmdType, StateType>::start() {
     if (running_.exchange(true)) {
         std::cerr << "Client already running" << std::endl;
         return;
     }
 }
 
-void HumanoidControllerDDSClient::stop() {
+template<typename CmdType, typename StateType>
+void HumanoidControllerDDSClient<CmdType, StateType>::stop() {
     if (!running_.exchange(false)) {
         return;
     }
 }
 
 
-void HumanoidControllerDDSClient::publishLowCmd(const unitree_hg::msg::dds_::LowCmd_& cmd) {
+template<typename CmdType, typename StateType>
+void HumanoidControllerDDSClient<CmdType, StateType>::publishLowCmd(const CmdType& cmd) {
     cmd_writer_.write(cmd);
 }
 
-void HumanoidControllerDDSClient::setupStateListener() {
-    state_listener_ = std::make_unique<DdsLowStateListener>();
-    state_reader_.listener(state_listener_.get(), 
+template<typename CmdType, typename StateType>
+void HumanoidControllerDDSClient<CmdType, StateType>::setupStateListener() {
+    state_listener_ = std::make_unique<DdsLowStateListener<StateType>>();
+    state_reader_.listener(state_listener_.get(),
                           dds::core::status::StatusMask::data_available());
-} 
+}
+
+// Explicit template instantiation for the specific message types
+template class DdsLowStateListener<unitree_hg::msg::dds_::LowState_>;
+template class HumanoidControllerDDSClient<unitree_hg::msg::dds_::LowCmd_, unitree_hg::msg::dds_::LowState_>;
+
+// Explicit template instantiation for Leju DDS types
+template class DdsLowStateListener<leju::msgs::SensorsData>;
+template class HumanoidControllerDDSClient<leju::msgs::JointCmd, leju::msgs::SensorsData>; 

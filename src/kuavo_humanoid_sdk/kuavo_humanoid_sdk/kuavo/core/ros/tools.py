@@ -61,7 +61,25 @@ class KuavoRobotToolsCore:
                 or None if failed
         """
         try:
+
+            # #####################################
+            # 坐标系转换映射
+            frame_mapping = {
+                "base_link": "waist_yaw_link"
+            }
+
+            # 转换坐标系名称
+            if target_frame in frame_mapping:
+                mapped_target_frame = frame_mapping[target_frame]
+                SDKLogger.debug(f"🔵 目标坐标系映射: {target_frame} -> {mapped_target_frame}")
+                target_frame = mapped_target_frame
+
+            if source_frame in frame_mapping:
+                mapped_source_frame = frame_mapping[source_frame]
+                SDKLogger.debug(f"🟢 源坐标系映射: {source_frame} -> {mapped_source_frame}")
+                source_frame = mapped_source_frame
             
+            # #######################################
             # 调用服务
             response = self.tf_service(
                 source_frames=[source_frame],

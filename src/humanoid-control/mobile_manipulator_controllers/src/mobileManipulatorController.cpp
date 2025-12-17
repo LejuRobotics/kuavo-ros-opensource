@@ -91,8 +91,7 @@ namespace mobile_manipulator_controller
       std::cout << "MPC initialized, result: " << result << std::endl;
     }
     while(!recievedObservation_) { 
-      if(observation_count_++ % 40 == 0)
-        std::cout << "[MobileManipulatorController] Waiting for observation..." << std::endl; 
+      ROS_INFO_THROTTLE(1.0, "[MobileManipulatorController] Waiting for observation...");
       return;
     }
     if(!is_play_back_mode_){

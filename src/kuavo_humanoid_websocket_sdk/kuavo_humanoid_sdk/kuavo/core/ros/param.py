@@ -29,6 +29,18 @@ class RosParamWebsocket:
         except Exception as e:
             SDKLogger.error(f"Failed to get robot_version: {e}")
             return None
+    def init_stand_height(self)->float:
+        try:
+            param_service = roslibpy.Param(self.websocket.client, 'com_height')
+            param = param_service.get()
+            if param is None:
+                SDKLogger.error("com_height parameter not found")
+                # KUAVO-4PRO
+                return 0.8328437523948975
+            return param
+        except Exception as e:
+            SDKLogger.error(f"Failed to get com_height: {e}")
+            return 0.8328437523948975
     
     def arm_dof(self)->int:
         try:
@@ -231,6 +243,7 @@ def make_robot_param()->dict:
         'end_effector_type': kuavo_ros_param.end_effector_type(),
         'joint_names': joint_names(),
         'end_frames_names': end_frames_names(),
+        'init_stand_height': kuavo_ros_param.init_stand_height()
     }
 
     for key, value in kuavo_ros_info.items():

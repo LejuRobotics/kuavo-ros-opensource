@@ -11,7 +11,10 @@
 
   <buildtool_depend>catkin</buildtool_depend>
   <build_depend>rospy</build_depend>
+  <build_depend>roscpp</build_depend>
   <build_depend>std_msgs</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>geometry_msgs</build_depend>
   <build_depend>dynamic_biped</build_depend>
   <build_depend>noitom_hi5_hand_udp_python</build_depend>
   <build_depend>teach_pendant</build_depend>
@@ -19,10 +22,29 @@
   <build_depend>message_generation</build_depend>
   <build_depend>biped_s40_hand</build_depend>
   <build_depend>kuavo_msgs</build_depend>
+  <build_depend>eigen3</build_depend>
+  <build_depend>drake</build_depend>
+  <build_depend>leju_utils</build_depend>
+  
   <build_export_depend>rospy</build_export_depend>
+  <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>sensor_msgs</build_export_depend>
+  <build_export_depend>geometry_msgs</build_export_depend>
+  <build_export_depend>kuavo_msgs</build_export_depend>
+  <build_export_depend>noitom_hi5_hand_udp_python</build_export_depend>
+  <build_export_depend>eigen3</build_export_depend>
+  <build_export_depend>drake</build_export_depend>
+  <build_export_depend>leju_utils</build_export_depend>
+  
   <exec_depend>rospy</exec_depend>
+  <exec_depend>roscpp</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>message_runtime</exec_depend>
   <exec_depend>kuavo_assets</exec_depend>
+  <exec_depend>kuavo_msgs</exec_depend>
+  <exec_depend>noitom_hi5_hand_udp_python</exec_depend>
+  <exec_depend>leju_utils</exec_depend>
 </package>

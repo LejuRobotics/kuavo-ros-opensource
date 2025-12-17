@@ -11,6 +11,7 @@ typedef struct
   Eigen::VectorXd joint_v;
   Eigen::VectorXd joint_vd;
   Eigen::VectorXd joint_current;
+  Eigen::VectorXd joint_torque_demand;
   Eigen::Vector3d gyro;
   Eigen::Vector3d acc;
   Eigen::Vector3d free_acc;
@@ -26,6 +27,7 @@ typedef struct
     joint_v.resize(n);
     joint_vd.resize(n);
     joint_current.resize(n);
+    joint_torque_demand.resize(n);
   }
 } SensorData_t;
 

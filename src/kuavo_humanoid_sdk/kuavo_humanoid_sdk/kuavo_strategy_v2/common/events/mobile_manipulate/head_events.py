@@ -157,14 +157,63 @@ class EventPercep(BaseEvent):
             Pose: 转换后的Pose对象。
         """
         # 转换stand_pose_in_tag到世界坐标系。注意、需要搞清楚tag的坐标定义和机器人的坐标定义
+
+        # print("🔵 ========== Pose转换调试信息 ==========")
+        # print(f"🔵 输入pose (在TAG坐标系中):")
+        # print(f"   - 位置: {pose.pos}")
+        # print(f"   - 四元数: {pose.quat}")
+        # print(f"   - 坐标系: {pose.frame}")
+
+        # print(f"🔵 Tag位姿 (在ODOM坐标系中):")
+        # print(f"   - 位置: {tag.pose.pos}")
+        # print(f"   - 四元数: {tag.pose.quat}")
+        # print(f"   - 坐标系: {tag.pose.frame}")
+
         transform_tag_to_world = Transform3D(
             trans_pose=tag.pose,
             source_frame=Frame.TAG,  # 源坐标系为Tag坐标系
             target_frame=Frame.ODOM  # 目标坐标系为里程计坐标系
         )
+
+        # print(f"🔵 变换矩阵信息:")
+        # print(f"   - 源坐标系: {Frame.TAG}")
+        # print(f"   - 目标坐标系: {Frame.ODOM}")
+        # print(f"   - 变换pose: {tag.pose.pos}, {tag.pose.quat}")
+
         stand_pose_in_world = transform_tag_to_world.apply_to_pose(
             pose  # 将站立位置转换到世界坐标系
         )
+
+        # print(f"🔵 转换后pose (在ODOM坐标系中):")
+        # print(f"   - 位置: {stand_pose_in_world.pos}")
+        # print(f"   - 四元数: {stand_pose_in_world.quat}")
+        # print(f"   - 坐标系: {stand_pose_in_world.frame}")
+
+        # import numpy as np
+        # from scipy.spatial.transform import Rotation as R
+
+        # tag_quat = tag.pose.quat  # [w, x, y, z]
+        # tag_rotation = R.from_quat([tag_quat[1], tag_quat[2], tag_quat[3], tag_quat[0]])  # 转换为scipy格式
+        # tag_rotation_matrix = tag_rotation.as_matrix()
+
+        # pose_quat = pose.quat  # [w, x, y, z]
+        # pose_rotation = R.from_quat([pose_quat[1], pose_quat[2], pose_quat[3], pose_quat[0]])
+        # pose_rotation_matrix = pose_rotation.as_matrix()
+
+        # combined_rotation_matrix = tag_rotation_matrix @ pose_rotation_matrix
+
+        # pose_pos_array = np.array(pose.pos)
+        # tag_pos_array = np.array(tag.pose.pos)
+        # transformed_pos = tag_rotation_matrix @ pose_pos_array + tag_pos_array
+
+        # print(f"   - TAG旋转矩阵: \n{tag_rotation_matrix}")
+        # print(f"   - 输入pose旋转矩阵: \n{pose_rotation_matrix}")
+        # print(f"   - 组合旋转矩阵: \n{combined_rotation_matrix}")
+        # print(f"   - 数学计算位置: {transformed_pos}")
+        # print(f"   - 实际转换位置: {stand_pose_in_world.pos}")
+        # print(f"   - 位置差异: {np.array(stand_pose_in_world.pos) - transformed_pos}")
+        # print("🔵 ======================================")
+
         return stand_pose_in_world
 
     def get_tag_in_base(self) -> Tag:
