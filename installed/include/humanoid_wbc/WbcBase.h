@@ -39,6 +39,7 @@ namespace ocs2
     scalar_t weightStanceLeg_;
     scalar_t weightSwingLeg_;
     scalar_t weightArmAccel_;
+    scalar_t weightFeetAccel_;
     };
 
     // Decision Variables: x = [\dot u^T, 3*F(3)^T, \tau^T]^T , \dot u in ocal frame
@@ -99,6 +100,10 @@ namespace ocs2
       void setWaistNums(int waist_nums)
       {
         waist_nums_ = waist_nums;
+      }
+      void setEnableFeetJointTask(bool enable)
+      {
+        enable_feet_joint_task_ = enable;
       }
 
       inline Eigen::Vector3d getR() const { return r; }
@@ -166,9 +171,11 @@ namespace ocs2
       Task formulateSwingLegTask();
       Task formulateCenterOfMassTask(const vector_t &stateDesired,const vector_t &inputDesired,scalar_t period);
       Task formulateContactForceTask(const vector_t &inputDesired) const;
+      Task formulateWaistJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
       Task formulateArmJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
       Task formulateStandUpJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
       Task formulateJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
+      Task formulateFeetJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
 
       void compensateFriction(vector_t &x);
 
@@ -197,8 +204,9 @@ namespace ocs2
       vector3_t swingKp3d_ = vector3_t::Zero(), swingKd3d_ = vector3_t::Zero();
       scalar_t baseHeightKp_{}, baseHeightKd_{};
       scalar_t baseAngularKp_{}, baseAngularKd_{};
-      vector_t armJointKp_, armJointKd_;
+      vector_t armJointKp_, armJointKd_, waistJointKp_, waistJointKd_;
       scalar_t standUp_legKp_{}, standUp_legKd_{}, standUp_armKp_{}, standUp_armKd_{}, standUp_waistKp_{}, standUp_waistKd_{}, jointAcc_Kp_{}, jointAcc_Kd_{};
+      vector_t feetJoint_Kp_, feetJoint_Kd_;
       vector3_t baseAngular3dKp_, baseAngular3dKd_;
 
       vector_t cmd_body_pos_;
@@ -230,6 +238,7 @@ namespace ocs2
       bool half_body_mode_ = false;
       bool pull_up_state_ = false;
       bool roban_mode_ = false;
+      bool enable_feet_joint_task_ = false;
     };
 
   } // namespace humanoid

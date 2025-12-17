@@ -44,6 +44,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // MPC messages
 #include <ocs2_msgs/mpc_flattened_controller.h>
 #include <ocs2_msgs/reset.h>
+#include <ocs2_msgs/pause_resume.h>
 
 #include <ocs2_mpc/MRT_BASE.h>
 
@@ -74,6 +75,13 @@ class MRT_ROS_Interface : public MRT_BASE {
   ~MRT_ROS_Interface() override;
 
   void resetMpcNode(const TargetTrajectories& initTargetTrajectories) override;
+
+  /**
+   * Pauses or resumes the MPC node.
+   *
+   * @param [in] pause: true to pause, false to resume.
+   */
+  void pauseResumeMpcNode(bool pause);
 
   /**
    * Shut down the ROS nodes.
@@ -130,6 +138,7 @@ class MRT_ROS_Interface : public MRT_BASE {
   ::ros::Publisher mpcObservationPublisher_;
   ::ros::Subscriber mpcPolicySubscriber_;
   ::ros::ServiceClient mpcResetServiceClient_;
+  ::ros::ServiceClient mpcPauseResumeServiceClient_;
 
   // ROS messages
   ocs2_msgs::mpc_observation mpcObservationMsg_;

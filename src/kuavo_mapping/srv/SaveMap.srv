@@ -1,0 +1,10 @@
+# 保存地图服务请求
+string map_name      # 地图名称（可选，如果为空则使用当前建图名称）
+---
+# 保存地图服务响应
+bool success         # 是否成功保存
+string message       # 状态消息
+string map_path      # 保存的地图路径（不含扩展名）
+string yaml_path     # YAML文件路径
+string pgm_path      # PGM文件路径
+string pcd_path      # PCD文件路径

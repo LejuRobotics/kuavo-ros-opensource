@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>kuavo_solver</name>
+  <version>0.0.0</version>
+  <description>The kuavo_solver package</description>
+
+  <maintainer email="user@todo.todo">user</maintainer>
+  <license>TODO</license>
+
+  <!-- 依赖 catkin 和 Eigen3 -->
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>eigen</depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>

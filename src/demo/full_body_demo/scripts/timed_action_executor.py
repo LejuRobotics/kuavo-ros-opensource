@@ -63,7 +63,7 @@ class TimedActionExecutor:
         self.joyButtonMap = {
             "BUTTON_STANCE": 0,
             "BUTTON_TROT": 1,
-            "BUTTON_JUMP": 2,
+            "BUTTON_RL": 2,
             "BUTTON_WALK": 3,
             "BUTTON_LB": 4,
             "BUTTON_RB": 5,

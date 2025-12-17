@@ -127,11 +127,12 @@ robot_control = RobotControlBlockly()
     - 备注：需将目标音频文件下载到 **/home/lab/.config/lejuconfig/music** 目录下  
 
 19. **机器人对准目标**  
-    - 函数：`robot_control.alignment_target(class_name, x, y, z)`
-    - 参数类型：string, float, float, float
+    - 函数：`robot_control.alignment_target(class_name, confidence, x, y, z)`
+    - 参数类型：string, float, float, float, float
     - 描述：使机器人对准指定类别到对象，并移动到目标前
     - 参数说明：（以图像中心建立二维坐标，向右为 x 的正方向，向下为 y 的正方向）
       - class_id 为 yolo 检测中需要检测的对象名称，和训练模型中的类别名称一致;
+      - confidence 为 yolo 检测中需要检测的概率阈值
       - x 为图像 x 方向的偏移值，物体中心的 x 小于该参数 -x 时，机器人左移，大于该参数 x 时，机器人右移
       - y 为图像 y 方向的偏移值，物体中心的 y 小于该参数 y 时，机器人前进，否则停止移动
       - z 为机器人上下蹲的高度控制
@@ -183,26 +184,33 @@ from kuavo_humanoid_sdk import RobotNavigationBlockly
     - 描述：令机器人按照所给的姿态进行初始化
     - 参数说明：(x, y, z, yaw, pitch, roll) 为目标姿态
 
-6. **通过任务点校准初始化**
+6. **前往指定坐标点并设置朝向**
+    - 函数：`robot_navigation.navigate_to_point_with_heading(x, y, heading)`
+    - 参数类型：float, float, float
+    - 描述：令机器人导航到指定的坐标点并设置朝向
+    - 参数说明：x为目标x坐标（米），y为目标y坐标（米），heading为目标朝向角度（度），0度为正东方向，90度为正北方向
+    - 返回值：bool，导航成功返回True，失败返回False
+
+7. **通过任务点校准初始化**
     - 函数：`robot_navigation.init_localization_by_task_point(task_name)`
     - 参数类型： string
     - 描述：令机器人按照所给的任务点的姿态进行初始化
     - 参数说明：task_name 为目标任务点,机器人应当处于该点且朝向一致.
 
-7. **加载地图**
+8. **加载地图**
     - 函数：`robot_navigation.load_map(map_name)`
     - 参数类型： string
     - 描述：令机器人加载所给的地图
     - 参数说明：map_name 为目标地图,机器人重新加载地图后,需要重新进行校准初始化.
 
-8. **获取所有地图**
+9. **获取所有地图**
     - 函数：`robot_navigation.get_all_maps()`
     - 参数类型： 无
     - 描述：获取机器人所拥有的地图
     - 参数说明：无
     - 返回说明：返回一个列表 maps[],包含所有的地图名.
 
-9. **获取当前地图**
+10. **获取当前地图**
     - 函数：`robot_navigation.get_current_map()`
     - 参数类型： 无
     - 描述：获取机器人当前所用的地图

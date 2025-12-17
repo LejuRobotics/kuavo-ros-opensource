@@ -365,7 +365,7 @@ namespace ocs2
       ros_logger_->publishValue("/humanoid/GaitReceiver/getFinalYawSingleStepMode", swingTrajectoryPlannerPtr_->getFinalYawSingleStepMode());
       if(PoseCmdWorldUpdated_ && (!single_step_yaw_computed_ && !swingTrajectoryPlannerPtr_->getFinalYawSingleStepMode()))
       {
-        if(cmd_vector.head(2).norm() > 0.3){//TODO: 这里的阈值可以调整
+        if(cmd_vector.head(2).norm() > 0.5){//TODO: 这里的阈值可以调整
           target_yaw = atan2(cmd_vector(1), cmd_vector(0));//TO-DO: 转换到局部系(2025/01/17 by matthew)
           double yaw_diff = abs(normalizedYaw(normalizedYaw(target_yaw) - normalizedYaw(cmd_vector[2])));
           std::cout << "yaw_diff: " << yaw_diff << std::endl;

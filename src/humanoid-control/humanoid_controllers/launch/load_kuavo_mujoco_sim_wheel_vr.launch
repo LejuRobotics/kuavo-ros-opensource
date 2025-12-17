@@ -1,0 +1,33 @@
+<?xml version="1.0" ?>
+
+<launch>
+    <!-- VR控制相关参数 -->
+    <arg name="control_torso" default="1"/>  <!-- 启用躯干控制 -->
+    <arg name="ctrl_arm_idx" default="2"/>
+    <arg name="predict_gesture" default="false"/>
+    <arg name="ee_type" default="qiangnao"/>
+    <arg name="enable_head_control" default="true"/>
+    <arg name="use_vr_control" default="true"/>
+
+    <!-- 设置VR控制参数 -->
+    <param name="use_vr_control" value="$(arg use_vr_control)"/>
+    
+    <!-- 包含基础的轮臂仿真launch文件 -->
+    <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim_wheel.launch">
+        <!-- 覆盖基础launch文件中的参数 -->
+        <arg name="vr_remote_control" value="true"/>  <!-- 启用VR远程控制 -->
+        <arg name="use_joystick" value="false"/>      <!-- 禁用手柄控制 -->
+        <arg name="use_external_mpc" value="false"/>
+    </include>
+
+    <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
+
+    <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
+      <arg name="control_torso" value="$(arg control_torso)"/>
+      <arg name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)"/>
+      <arg name="predict_gesture" value="$(arg predict_gesture)"/>
+      <arg name="ee_type" default="$(arg ee_type)"/>
+      <arg name="enable_head_control" value="true"/>
+    </include>
+
+</launch>

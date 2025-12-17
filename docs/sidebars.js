@@ -67,6 +67,7 @@ const sidebars = {
         'basic_usage/kuavo-ros-control/docs/4开发接口/仿真环境使用',
         'basic_usage/kuavo-ros-control/docs/4开发接口/SDK介绍',
         'basic_usage/kuavo-ros-control/docs/4开发接口/接口使用文档',
+        'basic_usage/kuavo-ros-control/docs/4开发接口/ROS2接口使用文档',
         {
           type: 'category',
           label: 'KUAVO Humanoid WebSocket SDK接口',
@@ -121,9 +122,9 @@ const sidebars = {
               items: [
                 'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/模仿学习使用案例/案例概述',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/模仿学习使用案例/数据采集',
-                'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/模仿学习使用案例/数据转换',
-                'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/模仿学习使用案例/模型训练',
-                'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/模仿学习使用案例/模型部署',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/模仿学习使用案例/环境部署',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/模仿学习使用案例/仿真使用',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/模仿学习使用案例/使用方法',
               ],
             },
             'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/手腕相机抓取放置案例',

@@ -9,7 +9,7 @@ class MujocoNodelet : public nodelet::Nodelet
 public:
   virtual void onInit()
   {
-    NODELET_INFO("Initializing HumanoidControllerNodelet nodelet...");
+    NODELET_INFO("Initializing Mujoco nodelet...");
     control_thread = std::thread(&MujocoNodelet::simloop, this);
     if (!control_thread.joinable())
     {

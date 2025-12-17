@@ -1,5 +1,7 @@
 
 #include "humanoid_controllers/humanoidController.h"
+#include "humanoid_controllers/humanoidWheelController.h"
+#include "humanoid_controllers/humanoidController_wheel_wbc.h"
 #include <thread>
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
@@ -109,6 +111,8 @@ private:
     ros::Subscriber pause_sub;
 
     humanoid_controller::humanoidController *controller_ptr_;
+    humanoid_wheel_controller::humanoidWheelController *controller_wheel_ptr_;
+    humanoidController_wheel_wbc::humanoidControllerWheelWbc *controller_wheel_real_ptr_;
     ros::Subscriber stop_sub_;
     std::chrono::high_resolution_clock::time_point lastTime;
     std::thread control_thread;
@@ -131,6 +135,25 @@ private:
     {
         // Choose the controller type with estimator based on the parameter
         int estimator_type = 1;
+        int nodelet_robot_type = 2;
+        int wheel_control_type = 0;
+        if (nh.hasParam("/nodelet_robot_type"))
+        {
+            nh.getParam("/nodelet_robot_type", nodelet_robot_type);
+        }
+        else
+        {
+            nodelet_robot_type = 2;     // 没设置 nodelet_robot_type 一定是正常控制器
+        }
+        if (nh.hasParam("/wheel_control_type"))
+        {
+            nh.getParam("/wheel_control_type", wheel_control_type);
+        }
+        else
+        {
+            wheel_control_type = 0;     // 没设置 wheel_control_type 一定是测试的轮臂控制器
+        }
+
         bool with_estimation = false;
         if (nh.hasParam("/estimator_type"))
         {
@@ -144,6 +167,8 @@ private:
         {
             std::cout << "Using nomal estimator" << std::endl;
             controller_ptr_ = new humanoid_controller::humanoidController();
+            controller_wheel_ptr_ = new humanoid_wheel_controller::humanoidWheelController();
+            controller_wheel_real_ptr_ = new humanoidController_wheel_wbc::humanoidControllerWheelWbc();
         }
         else if (estimator_type == 2)
         {
@@ -162,10 +187,33 @@ private:
             controller_ptr_ = new humanoid_controller::humanoidCheaterController();
         }
         // Initialize the controller
-        if (!controller_ptr_->init(robot_hw, nh, true))
+        if(nodelet_robot_type == 1)
         {
-            ROS_ERROR("Failed to initialize the humanoid controller!");
-            return;
+            if(wheel_control_type == 0)
+            {
+                if (!controller_wheel_ptr_->init(nh, true))
+                {
+                    ROS_ERROR("Failed to initialize the wheel humanoid controller!");
+                    return;
+                }
+            }
+            else
+            {
+                if (!controller_wheel_real_ptr_->init(nh, true))
+                {
+                    ROS_ERROR("Failed to initialize the wheel humanoid controller!");
+                    return;
+                }
+            }
+            
+        } 
+        else
+        {
+            if (!controller_ptr_->init(robot_hw, nh, true))
+            {
+                ROS_ERROR("Failed to initialize the humanoid controller!");
+                return;
+            }
         }
         
         // Time setup record start time in both system and ros time
@@ -173,7 +221,38 @@ private:
         // Sets up control frequency (default 500Hz, configurable via parameter)
         auto startTime = std::chrono::high_resolution_clock::now();
         auto startTimeROS = ros::Time::now();
-        controller_ptr_->starting(startTimeROS);
+        
+        // 调用 starting() 并检查是否成功
+        bool starting_success = true;
+        if(nodelet_robot_type == 1)
+        {
+            if(wheel_control_type == 0)
+            {
+                // humanoidWheelController::starting() 返回 void
+                controller_wheel_ptr_->starting(startTimeROS);
+                starting_success = true;
+            }
+            else
+            {
+                // humanoidControllerWheelWbc::starting() 返回 bool
+                starting_success = controller_wheel_real_ptr_->starting(startTimeROS);
+            }
+        }
+        else
+        {
+            // humanoidController::starting() 返回 void
+            controller_ptr_->starting(startTimeROS);
+            starting_success = true;
+        }
+        
+        // 检查starting是否成功
+        if (!starting_success) {
+            ROS_ERROR("Controller starting failed! Data not ready within timeout. Exiting...");
+            is_running = false;
+            ros::shutdown();
+            return;
+        }
+        
         lastTime = startTime;
         double controlFrequency = 500.0; // 500Hz
         nh.getParam("/wbc_frequency", controlFrequency);
@@ -181,18 +260,53 @@ private:
         struct timespec next_time;
         clock_gettime(CLOCK_MONOTONIC, &next_time);
         ros::Rate rate(controlFrequency);
-        uint64_t cycle_count = 0;
+        // uint64_t cycle_count = 0;
 
         // Pre-Update Initialization Phase
         // Runs until preUpdateComplete() returns true
         // This phase likely waits for sensors to provide initial data
-        while (is_running && ros::ok() && controller_ptr_->preUpdateComplete() != true)
+        if(nodelet_robot_type == 1)
         {
-            bool preUpdateExeFlag = controller_ptr_->preUpdate(ros::Time::now());
-            if(!preUpdateExeFlag)
+            if(wheel_control_type == 0)
             {
-                ROS_INFO_STREAM("re-squat state, waitting is_real signal...");
-                controller_ptr_->starting(startTimeROS);
+                while (is_running && ros::ok() && controller_wheel_ptr_->preUpdateComplete() != true)
+                {
+                    bool preUpdateExeFlag = controller_wheel_ptr_->preUpdate(ros::Time::now());
+                    if(!preUpdateExeFlag)
+                    {
+                        ROS_INFO_STREAM("re-squat state, waitting is_real signal...");
+                        controller_wheel_ptr_->starting(startTimeROS);  // 返回 void
+                    }
+                }
+            }
+            else
+            {
+                while (is_running && ros::ok() && controller_wheel_real_ptr_->preUpdateComplete() != true)
+                {
+                    bool preUpdateExeFlag = controller_wheel_real_ptr_->preUpdate(ros::Time::now());
+                    if(!preUpdateExeFlag)
+                    {
+                        ROS_INFO_THROTTLE(1.0, "re-squat state, waitting is_real signal...");
+                        // if (!controller_wheel_real_ptr_->starting(startTimeROS)) {  // 返回 bool，检查失败
+                        //     ROS_ERROR("Re-starting failed! Exiting...");
+                        //     is_running = false;
+                        //     ros::shutdown();
+                        //     return;
+                        // }
+                    }
+                }
+            }
+        }
+        else
+        {
+            while (is_running && ros::ok() && controller_ptr_->preUpdateComplete() != true)
+            {
+                bool preUpdateExeFlag = controller_ptr_->preUpdate(ros::Time::now());
+                if(!preUpdateExeFlag)
+                {
+                    ROS_INFO_STREAM("re-squat state, waitting is_real signal...");
+                    controller_ptr_->starting(startTimeROS);
+                }
             }
         }
         // main control loop
@@ -215,8 +329,23 @@ private:
                 lastTime = currentTime;
 
                 // Control
-                controller_ptr_->update(ros::Time::now(), elapsedTime);
-
+                if(nodelet_robot_type == 1)
+                {
+                    if(wheel_control_type == 0)
+                    {
+                        controller_wheel_ptr_->update(ros::Time::now(), elapsedTime);
+                    }
+                    else
+                    {
+                        controller_wheel_real_ptr_->update(ros::Time::now(), elapsedTime);
+                    }
+                    
+                }
+                else
+                {
+                    controller_ptr_->update(ros::Time::now(), elapsedTime);
+                }
+                
                 // Sleep
                 next_time.tv_sec += (next_time.tv_nsec + 1 / controlFrequency * 1e9) / 1e9;
                 next_time.tv_nsec = (int)(next_time.tv_nsec + 1 / controlFrequency * 1e9) % (int)1e9;

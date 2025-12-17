@@ -63,7 +63,16 @@ class KuavoRobotStateCore:
 
     def __init__(self):
         if not hasattr(self, '_initialized'):
-            rospy.Subscriber("/sensors_data_raw", sensorsData, self._sensors_data_raw_callback)
+            # 根据 use_shm_communication 参数选择订阅的话题
+            use_shm = rospy.get_param('/use_shm_communication', False)
+            if use_shm:
+                sensor_topic = "/sensors_data_raw_shm"
+                SDKLogger.info(f"Using shared memory mode, subscribing to: {sensor_topic}")
+            else:
+                sensor_topic = "/sensors_data_raw"
+                SDKLogger.info(f"Using standard mode, subscribing to: {sensor_topic}")
+            
+            rospy.Subscriber(sensor_topic, sensorsData, self._sensors_data_raw_callback)
             rospy.Subscriber("/odom", Odometry, self._odom_callback)
             rospy.Subscriber("/humanoid/mpc/terrainHeight", Float64, self._terrain_height_callback)
             rospy.Subscriber("/humanoid_mpc_gait_time_name", gaitTimeName, self._humanoid_mpc_gait_changed_callback)
@@ -285,6 +294,22 @@ class KuavoRobotStateCore:
     def _sensors_data_raw_callback(self, msg)->None:
         # update imu data
         self._imu_data = KuavoImuData(
+            gyro = (msg.imu_data.gyro.x, msg.imu_data.gyro.y, msg.imu_data.gyro.z),
+            acc = (msg.imu_data.acc.x, msg.imu_data.acc.y, msg.imu_data.acc.z),
+            free_acc = (msg.imu_data.free_acc.x, msg.imu_data.free_acc.y, msg.imu_data.free_acc.z),
+            quat = (msg.imu_data.quat.x, msg.imu_data.quat.y, msg.imu_data.quat.z, msg.imu_data.quat.w)
+        )
+        # update joint data
+        self._joint_data = KuavoJointData(
+            position = copy.deepcopy(msg.joint_data.joint_q),
+            velocity = copy.deepcopy(msg.joint_data.joint_v),
+            torque = copy.deepcopy(msg.joint_data.joint_vd),
+            acceleration = copy.deepcopy(msg.joint_data.joint_current if hasattr(msg.joint_data, 'joint_current') else msg.joint_data.joint_torque)
+        )
+
+    def _sensors_data_raw_shm_callback(self, msg)->None:
+        # update imu data
+        self._imu_data_shm = KuavoImuData(
             gyro = (msg.imu_data.gyro.x, msg.imu_data.gyro.y, msg.imu_data.gyro.z),
             acc = (msg.imu_data.acc.x, msg.imu_data.acc.y, msg.imu_data.acc.z),
             free_acc = (msg.imu_data.free_acc.x, msg.imu_data.free_acc.y, msg.imu_data.free_acc.z),

@@ -1,0 +1,6 @@
+# 底盘位置控制服务请求消息
+geometry_msgs/Pose target_pose    # 目标位置和姿态
+float64[] duration                # 移动持续时间 [秒]
+---
+# 底盘位置控制服务响应消息
+bool success                      # 是否成功完成移动

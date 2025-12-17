@@ -20,15 +20,20 @@ namespace HighlyDynamic
 #define BIT_17_20 (BIT_17 * 20)
 #define BIT_17_25 (BIT_17 * 25)
 #define BIT_17_36 (BIT_17 * 36)
+#define BIT_17_120 (BIT_17 * 120)
 
 #define AK10_9_MC (40)
 #define AK70_10_MC (26.1) // 手册是 23.2
 #define PA81_MC (60)
-#define PA100_MC (110)
+#define PA100_MC (70)
+#define PA76_25_MC (18)
 #define CK_MC (18)
 #define PA4310_25_MC (8)
 #define PA72_36_MC (15)
-#define PA76_25_MC (18)
+#define PA76_18_MC (31.5)
+#define PA105_18_MC (70)
+#define PA115_MC (40)
+
 
 #define AK10_9_C2T (1.26)
 #define AK70_10_C2T (1.23)
@@ -42,12 +47,23 @@ namespace HighlyDynamic
 #define PA72_C2T (3.6)
 #define PA60_C2T (2.0)
 #define PA43_C2T (1.45)
+
+#define PA76_25_C2T (4.2)
+#define PA76_18_C2T (2.0)
+#define PA105_18_C2T (4.1)
 #define PA4310_25_C2T (2.6)
-#define PA76_25_C2T (3.8)
 #define PA72_36_C2T (4.8)
+#define PA115_C2T (11.5)
+
 
 #define LEG_DOF 6
 #define LEGS_TOTEL_JOINT 12
+
+    enum class CanbusWiringType {
+        SINGLE_BUS,  // 单总线
+        DUAL_BUS,    // 双总线 左右手臂各接一个CAN模块
+        UNKNOWN      // 未知
+    };
     inline auto vectorToEigen(std::vector<double> v) -> Eigen::VectorXd
     {
         return Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(v.data(), v.size());
@@ -186,6 +202,12 @@ namespace HighlyDynamic
         }
         std::string getEcmasterType(RobotVersion rb_version = RobotVersion(4, 0));
         std::string getIMUType(RobotVersion rb_version = RobotVersion(4, 0));
+        /**
+         * @brief 获取CanBus接线方式:单总线、双总线
+         * 
+         * @return CanbusWiringType 
+         */
+        CanbusWiringType getCanbusWiringType(RobotVersion rb_version);
 
     };
     struct MotorC2TSettings

@@ -7,27 +7,123 @@ from kuavo_msgs.msg import footPose
 from kuavo_msgs.msg import footPoseTargetTrajectories, armTargetPoses
 from kuavo_msgs.msg import gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode
+from kuavo_msgs.srv import playmusic, playmusicRequest
 from ocs2_msgs.msg import mpc_observation
 import csv
 import math
 from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 import argparse
-import time;
+import time
 from std_msgs.msg import Float64MultiArray
+import threading  # 添加线程支持
+import subprocess
+
+
+class MusicPlayer:
+    """音乐播放器类，用于在独立线程中播放音乐"""
+
+    def __init__(self):
+        """初始化音乐播放器"""
+        # 等待音乐播放服务（带超时）
+        self.play_music_service = None
+        self.service_available = False
+        rospy.loginfo("等待音乐播放服务(超时5秒)...")
+        try:
+            rospy.wait_for_service('/play_music', timeout=5.0)
+            self.play_music_service = rospy.ServiceProxy('/play_music', playmusic)
+            self.service_available = True
+            rospy.loginfo("音乐播放服务已就绪")
+        except rospy.ROSException:
+            rospy.logwarn("音乐播放服务在5秒内未就绪，音乐播放将被跳过")
+        self.music_thread = None
+        self.is_playing = False
+
+    def speaker_available(self):
+        """检测是否存在可用扬声器/音频输出设备"""
+        try:
+            speaker_cmd = "pactl list | grep -i Speaker"
+            speaker_result = subprocess.run(
+                speaker_cmd, shell=True, capture_output=True, text=True
+            )
+            if speaker_result.stdout.strip():
+                rospy.loginfo("检测到扬声器输出（pactl）")
+                return True
+
+            fallback_cmd = "aplay -l | grep -i Audio"
+            fallback_result = subprocess.run(
+                fallback_cmd, shell=True, capture_output=True, text=True
+            )
+            if fallback_result.stdout.strip():
+                rospy.loginfo("检测到扬声器输出（aplay）")
+                return True
+
+            rospy.logwarn("未检测到扬声器或音频输出设备，将跳过音乐播放")
+            return False
+        except Exception as e:
+            rospy.logwarn(f"检测扬声器状态失败: {str(e)}，将跳过音乐播放")
+            return False
+
+    def play_music(self, music_file, volume=80):
+        """在独立线程中播放音乐文件
+
+        参数:
+            music_file: 音乐文件路径
+            volume: 音量 (0-100)
+        """
+
+        if not self.service_available:
+            rospy.logwarn("音乐播放服务不可用，跳过音乐播放")
+            return False
+
+        if self.is_playing:
+            rospy.logwarn("音乐正在播放中，请先停止当前音乐")
+            return False
+
+        self.music_thread = threading.Thread(target=self._play_music_thread, args=(music_file, volume))
+        self.music_thread.daemon = True
+        self.music_thread.start()
+        return True
+
+    def _play_music_thread(self, music_file, volume):
+        """音乐播放线程函数"""
+        try:
+            self.is_playing = True
+            request = playmusicRequest()
+            request.music_number = music_file
+            request.volume = volume
+
+            response = self.play_music_service(request)
+            if response.success_flag:
+                rospy.loginfo(f"成功播放音乐: {music_file}")
+            else:
+                rospy.logerr(f"播放音乐失败: {music_file}")
+        except rospy.ServiceException as e:
+            rospy.logerr(f"调用音乐播放服务失败: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"播放音乐时发生错误: {str(e)}")
+        finally:
+            self.is_playing = False
+
+    def stop(self):
+        """停止音乐播放"""
+        self.is_playing = False
+        if self.music_thread and self.music_thread.is_alive():
+            self.music_thread.join(timeout=1.0)
+
 
 class ActionPlayer:
     """动作播放器，用于控制机器人执行预定义的动作序列"""
-    
-    def __init__(self):
+
+    def __init__(self, time_scale=1.0):
         # 初始化ROS节点
         if not rospy.core.is_initialized():
             rospy.init_node('action_player', anonymous=True)
-        
+
         # 创建发布者
         self.foot_pose_pub = rospy.Publisher(
-            '/humanoid_mpc_foot_pose_target_trajectories', 
-            footPoseTargetTrajectories, 
+            '/humanoid_mpc_foot_pose_target_trajectories',
+            footPoseTargetTrajectories,
             queue_size=10
         )
         self.arm_target_pub = rospy.Publisher(
@@ -35,31 +131,34 @@ class ActionPlayer:
             armTargetPoses,
             queue_size=10
         )
-        
+
         # 等待手臂控制模式服务
         rospy.loginfo("等待手臂控制模式服务...")
         rospy.wait_for_service('/humanoid_change_arm_ctrl_mode')
         self.change_arm_mode = rospy.ServiceProxy('/arm_traj_change_mode', changeArmCtrlMode)
         rospy.loginfo("手臂控制模式服务已就绪")
-        
+
         # 动作数据
         self.step_control = []
-        
+
         # MPC时间
         self.mpc_time = None
         self.mpc_time_received = False
-        
+
         # 步态执行时间
         self.gait_start_time = None
         self.gait_start_time_received = False
-        
+
+        # 音乐文件路径
+        self.music_file = None
+
         # 订阅MPC观测话题
         self.mpc_obs_sub = rospy.Subscriber(
             '/humanoid_mpc_observation',
             mpc_observation,
             self.mpc_observation_callback
         )
-        
+
         # 订阅步态时间话题
         self.gait_time_sub = rospy.Subscriber(
             '/humanoid_mpc_gait_time_name',
@@ -69,19 +168,27 @@ class ActionPlayer:
 
         # mode_3 累积时间
         self.mode_3_t = 0
-        
+
+        # 时间缩放系数（>1 慢速，<1 加速）
+        try:
+            ts = float(time_scale)
+            self.time_scale = ts if ts > 0 else 1.0
+        except Exception:
+            self.time_scale = 1.0
+        rospy.loginfo(f"时间缩放系数: {self.time_scale}")
+
     def mpc_observation_callback(self, msg):
         """MPC观测回调函数"""
         self.mpc_time = msg.time
         self.mpc_time_received = True
-        
+
     def gait_time_callback(self, msg):
         """步态时间回调函数"""
         if self.mpc_time_received and msg.gait_name == "custom_gait":
             self.gait_start_time = msg.start_time
             self.gait_start_time_received = True
             rospy.loginfo(f"收到步态开始时间: {self.gait_start_time}, MPC当前时间: {self.mpc_time}")
-    
+
     def load_action_with_csv(self, csv_file):
         """从CSV文件加载手臂数据"""
         start_time = time.time()
@@ -117,13 +224,13 @@ class ActionPlayer:
         if not self.step_control:
             rospy.logerr("未加载姿态控制数据")
             return None
-            
+
         msg = footPoseTargetTrajectories()
         msg.timeTrajectory = []
         msg.footIndexTrajectory = []
         msg.footPoseTrajectory = []
         msg.swingHeightTrajectory = []  # 初始化摆动高度轨迹
-        
+
         initial_pos = None
 
         # 上一帧的左脚和右脚位置
@@ -147,7 +254,7 @@ class ActionPlayer:
             # 如果是第一帧，记录第一个躯干高度
             if first_torso_height is None:
                 first_torso_height = torso_pose[2]
-            
+
             # 计算当前躯干高度相对于第一个高度的偏移量
             height_offset = torso_pose[2] - first_torso_height
             height_offset = 0
@@ -179,10 +286,10 @@ class ActionPlayer:
                     torso_pose[0] = projected_torso_pos[0]
                     torso_pose[1] = projected_torso_pos[1]
                     # print(f"projected_torso_pos: {projected_torso_pos}")
-                msg.timeTrajectory.append(time)
+                msg.timeTrajectory.append(time * self.time_scale)
                 msg.footIndexTrajectory.append(2)  # 双脚支撑
                 msg.swingHeightTrajectory.append(0.0)  # 无摆动高度
-                
+
                 # 创建脚部位姿消息
                 foot_pose = footPose()
                 foot_pose.footPose = [0, 0, 0, 0]  # 双脚支撑，脚部位置不变
@@ -206,10 +313,10 @@ class ActionPlayer:
                     )
                     torso_pose[0] = projected_torso_pos[0]
                     torso_pose[1] = projected_torso_pos[1]
-                msg.timeTrajectory.append(time)
+                msg.timeTrajectory.append(time * self.time_scale)
                 msg.footIndexTrajectory.append(0)  # 左脚支撑
-                msg.swingHeightTrajectory.append(0.10)  # 摆动高度
-                
+                msg.swingHeightTrajectory.append(0.06)  # 摆动高度
+
                 # 创建脚部位姿消息
                 foot_pose = footPose()
                 left_foot_pose = [left_foot_pose[0], left_foot_pose[1], 0.0, left_foot_pose[2]]  # 添加 z 值
@@ -224,7 +331,7 @@ class ActionPlayer:
 
                 # 更新上一帧的脚部位置
                 prev_left_foot_pos = left_foot_pose
-            
+
             elif mode == 1:  # 右脚摆动 (SF)
                 if prev_left_foot_pos is not None:
                     # 将躯干的 x-y 坐标映射到当前帧右脚位置与上一帧左脚位置的连线上
@@ -237,11 +344,11 @@ class ActionPlayer:
                     )
                     torso_pose[0] = projected_torso_pos[0]
                     torso_pose[1] = projected_torso_pos[1]
-                
-                msg.timeTrajectory.append(time)
+
+                msg.timeTrajectory.append(time * self.time_scale)
                 msg.footIndexTrajectory.append(1)  # 右脚支撑
-                msg.swingHeightTrajectory.append(0.10)  # 摆动高度
-                
+                msg.swingHeightTrajectory.append(0.06)  # 摆动高度
+
                 # 创建脚部位姿消息
                 foot_pose = footPose()
                 right_foot_pose = [right_foot_pose[0], right_foot_pose[1], 0.0, right_foot_pose[2]]  # 添加 z 值
@@ -256,7 +363,7 @@ class ActionPlayer:
 
                 # 更新上一帧的脚部位置
                 prev_right_foot_pos = right_foot_pose
-            
+
             elif mode == 3:  # 三步调整
                 swing_time = 0.6
                 swing_height = 0.1
@@ -266,10 +373,10 @@ class ActionPlayer:
                 else:
                     swing_time = 0.4
                     swing_height = 0.05
-                msg.timeTrajectory.append(time)
+                msg.timeTrajectory.append(time * self.time_scale)
                 msg.footIndexTrajectory.append(2)
                 msg.swingHeightTrajectory.append(0.0)
-                
+
                 # 将躯干的 x-y 坐标映射到当前帧右脚位置与上一帧左脚位置的连线上
                 projected_torso_pos = self.project_torso_to_line(
                     torso_pose[:2],  # 躯干 x-y
@@ -293,10 +400,10 @@ class ActionPlayer:
                 msg.footPoseTrajectory.append(foot_pose)
 
                 # 第二步：左脚摆动 (FS)
-                msg.timeTrajectory.append(time + swing_time)
+                msg.timeTrajectory.append(time * self.time_scale + swing_time)
                 msg.footIndexTrajectory.append(0)
                 msg.swingHeightTrajectory.append(swing_height)
-                
+
                 foot_pose = footPose()
                 left_foot_pose = [left_foot_pose[0], left_foot_pose[1], 0.0, left_foot_pose[2]]  # 添加 z 值
                 foot_pose.footPose = left_foot_pose
@@ -307,12 +414,12 @@ class ActionPlayer:
                     torso_pose[3]  # yaw
                 ]
                 msg.footPoseTrajectory.append(foot_pose)
-                
+
                 # 第三步：右脚摆动 (SF)
-                msg.timeTrajectory.append(time + swing_time*2)
+                msg.timeTrajectory.append(time * self.time_scale + swing_time * 2)
                 msg.footIndexTrajectory.append(1)
                 msg.swingHeightTrajectory.append(swing_height)
-                
+
                 foot_pose = footPose()
                 right_foot_pose = [right_foot_pose[0], right_foot_pose[1], 0.0, right_foot_pose[2]]  # 添加 z 值
                 foot_pose.footPose = right_foot_pose
@@ -326,87 +433,93 @@ class ActionPlayer:
                 # 更新上一帧的脚部位置
                 prev_left_foot_pos = left_foot_pose
                 prev_right_foot_pos = right_foot_pose
-        
+
         if msg:
             # 确保时间轨迹是严格递增的
             if len(msg.timeTrajectory) > 1:
                 # 检查并修复时间轨迹顺序
                 for i in range(1, len(msg.timeTrajectory)):
-                    if msg.timeTrajectory[i] <= msg.timeTrajectory[i-1]:
-                        msg.timeTrajectory[i] = msg.timeTrajectory[i-1] + 0.01  # 添加最小时间间隔
-                        rospy.logwarn(f"修复时间轨迹顺序，索引 {i}: {msg.timeTrajectory[i-1]} -> {msg.timeTrajectory[i]}")
-            
+                    if msg.timeTrajectory[i] <= msg.timeTrajectory[i - 1]:
+                        min_dt = 0.01 * self.time_scale  # 根据缩放后的最小时间间隔
+                        msg.timeTrajectory[i] = msg.timeTrajectory[i - 1] + min_dt
+                        rospy.logwarn(
+                            f"修复时间轨迹顺序，索引 {i}: {msg.timeTrajectory[i - 1]} -> {msg.timeTrajectory[i]}")
+
             self.foot_pose_pub.publish(msg)
             rospy.loginfo("已发送足部轨迹")
-    
+
     def project_torso_to_line(self, torso_pos, torso_yaw, foot_pos1, foot_pos2, offset=0.01):
         """将躯干位置映射到脚部位置连线的中垂线上的偏移位置
-        
+
         Args:
             torso_pos: 躯干位置 [x, y]
             torso_yaw: 躯干朝向（弧度）
             foot_pos1: 第一个脚的位置 [x, y]
             foot_pos2: 第二个脚的位置 [x, y]
             offset: 向后偏移距离（米）
-            
+
         Returns:
             projected_pos: 投影后的位置 [x, y]
         """
         # 计算连线向量
         line_vec = np.array(foot_pos2) - np.array(foot_pos1)
         torso_vec = np.array(torso_pos) - np.array(foot_pos1)
-        
+
         # 计算投影
         t = np.dot(torso_vec, line_vec) / np.dot(line_vec, line_vec)
-        t = np.clip(t, 0.3, 0.7)  # 保持在两脚之间的合理范围内
-        
+        t = np.clip(t, 0.5, 0.5)  # 保持在两脚之间的合理范围内
+
         # 计算投影点
         projected_point = np.array(foot_pos1) + t * line_vec
-        
+
         # 计算中垂线方向（将line_vec旋转90度）
         perpendicular_vec = np.array([-line_vec[1], line_vec[0]])
         perpendicular_vec = perpendicular_vec / np.linalg.norm(perpendicular_vec)  # 单位化
-        
+
         # 计算躯干朝向的单位向量
         torso_direction = np.array([np.cos(torso_yaw), np.sin(torso_yaw)])
-        
+
         # 确定偏移方向（如果与躯干朝向相反，则翻转）
         if np.dot(perpendicular_vec, torso_direction) > 0:
             perpendicular_vec = -perpendicular_vec
-            
+
         # 应用偏移
         final_pos = projected_point + offset * perpendicular_vec
-        
+
         return final_pos.tolist()
 
     def generate_arm_trajectory_with_csv(self, start_time):
         """生成手臂轨迹
-        
+
         参数:
             start_time: float, 步态开始执行的时间
         """
         if not self.step_control:
             rospy.logerr("未加载手臂数据")
             return None
-            
+
         msg = armTargetPoses()
         msg.times = []
         msg.values = []
-        
+
         current_time = start_time
-        for step in self.step_control:
+        for i, step in enumerate(self.step_control):
             # 累加时间间隔
-            current_time = step['time'] + self.mode_3_t  # 每行数据的时间间隔为0.01秒
+            if i == len(self.step_control) - 1 and step['mode'] == 3:
+                # 最后一步恢复（状态3），保持时间不变，与腿轨迹同步
+                current_time = step['time'] * self.time_scale + self.mode_3_t
+            else:
+                current_time = (step['time'] + self.mode_3_t) * self.time_scale  # 应用时间缩放
             msg.times.append(current_time)
             # 添加手臂数据
             # 将角度从度转换为弧度
             arm_row_rad = [math.degrees(angle) for angle in step['arm_actions']]
-            
+
             # 添加手臂数据（弧度单位）
             msg.values.extend(arm_row_rad)
-        
+
         return msg
-    
+
     def set_arm_external_control(self):
         """设置手臂为外部控制模式"""
         try:
@@ -425,24 +538,57 @@ class ActionPlayer:
         except rospy.ServiceException as e:
             rospy.logerr(f"调用手臂控制模式服务失败: {str(e)}")
             return False
-    
-    def execute_action_with_csv(self, time_offset=None):
+
+    def restore_arm_swing_mode(self):
+        """恢复手臂为摆臂模式"""
+        if self.change_arm_mode is None:
+            rospy.logwarn("手臂控制模式服务不可用，跳过模式恢复")
+            return True
+
+        try:
+            # 1 表示自动摆臂模式
+            response = self.change_arm_mode(1)
+            if hasattr(response, 'result'):
+                if response.result:
+                    rospy.loginfo("成功恢复到手臂摆臂模式")
+                    return True
+            elif hasattr(response, 'success'):
+                if response.success:
+                    rospy.loginfo("成功恢复到手臂摆臂模式")
+                    return True
+            rospy.logerr("恢复手臂摆臂模式失败")
+            return False
+        except rospy.ServiceException as e:
+            rospy.logerr(f"调用手臂控制模式服务失败: {str(e)}")
+            return False
+
+    def execute_action_with_csv(self, time_offset=None, music_file=None):
         """执行动作序列
-        
+
         Args:
             time_offset: 时间偏移量，如果为None则不设置偏移
+            music_file: 音乐文件路径，如果提供则在动作开始时播放
         """
         if not self.step_control:
             rospy.logerr("未加载手臂数据")
             return
-            
+
         rospy.loginfo("开始执行动作序列...")
-        
+
+        # 设置太极执行状态标志，防止其他指令干扰
+        rospy.set_param('/taiji_executing', True)
+        rospy.loginfo("设置太极执行状态标志，防止joy等指令干扰")
+
         # 设置手臂为外部控制模式
         if not self.set_arm_external_control():
             rospy.logerr("无法切换到手臂外部控制模式，终止执行")
+            rospy.set_param('/taiji_executing', False)  # 清除状态标志
             return
-            
+
+        # # 播放音乐（如果指定了音乐文件）
+        # if music_file:
+        #     self.music_player.play_music(music_file)
+
         # 等待接收到MPC时间
         timeout = rospy.Duration(5.0)  # 5秒超时
         start_wait = rospy.Time.now()
@@ -451,7 +597,7 @@ class ActionPlayer:
                 rospy.logerr("等待MPC时间超时")
                 return
             rospy.sleep(0.1)
-        
+
         # 如果指定了时间偏移
         if time_offset is not None and time_offset > 0:
             # 等待接收到MPC时间
@@ -462,7 +608,7 @@ class ActionPlayer:
                     rospy.logerr("等待MPC时间超时")
                     return False
                 rospy.sleep(0.1)
-            
+
             # 设置调度参数
             target_time = self.mpc_time + time_offset
             rospy.set_param('/mpc/schedule/enable', True)
@@ -470,13 +616,13 @@ class ActionPlayer:
             rospy.loginfo(f"设置调度参数: 启用=True, 起始时间={target_time:.2f}")
         else:
             rospy.set_param('/mpc/schedule/enable', False)
-            
+
         # 重置步态时间标志
         self.gait_start_time_received = False
-        
+
         # 生成并发布足部轨迹
         self.generate_foot_trajectory_with_csv()
-            
+
         # 等待接收到步态开始时间
         timeout = rospy.Duration(5.0)  # 5秒超时
         start_wait = rospy.Time.now()
@@ -486,54 +632,80 @@ class ActionPlayer:
                 return
             rospy.sleep(0.1)
         rospy.loginfo(f"步态开始时间: {self.gait_start_time}, 等待手臂轨迹发布")
-        
+
         # 等待到达步态开始时间
         while self.mpc_time < self.gait_start_time:
             rospy.sleep(0.1)
         rospy.loginfo("开始发布手臂轨迹")
-            
+
         # 生成并发布手臂轨迹（基于步态开始时间）
         arm_traj = self.generate_arm_trajectory_with_csv(0)
         if arm_traj:
             self.arm_target_pub.publish(arm_traj)
             rospy.loginfo(f"已发送手臂轨迹，起始时间: {self.gait_start_time}")
-            
+
         # 计算总持续时间
-        total_arm_time = len(self.step_control) * 0.1  # 每行数据0.01秒
-        
+        # 检查最后一步是否为恢复步骤（状态3）
+        last_step = self.step_control[-1] if self.step_control else None
+        if last_step and last_step['mode'] == 3:
+            # 最后一步是恢复，时间不缩放
+            total_arm_time = (len(self.step_control) - 1) * 0.1 * self.time_scale + 0.1 + 12
+        else:
+            # 正常缩放
+            total_arm_time = (len(self.step_control) * 0.1 + 12) * self.time_scale
+
         rospy.loginfo(f"等待动作完成，预计耗时: {total_arm_time}秒")
         start_time = rospy.get_time()
         while (rospy.get_time() - start_time) < total_arm_time and not rospy.is_shutdown():
             rospy.sleep(0.1)  # 短间隔睡眠，保证响应中断
         rospy.loginfo("动作序列执行完成")
 
+        # 自动恢复摆臂模式
+        self.restore_arm_swing_mode()
+
+        # 清除太极执行状态标志
+        rospy.set_param('/taiji_executing', False)
+        rospy.loginfo("清除太极执行状态标志，恢复joy控制")
+
+
 def main():
     """主函数"""
     # 创建命令行参数解析器
     parser = argparse.ArgumentParser(description='CSV轨迹播放器')
-    parser.add_argument('csv_file', type=str, help='CSV文件路径', nargs='?', 
-                       default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "actions", "taiji_step_roban_stable.csv"))
-    parser.add_argument('--time-offset', type=float, help='轨迹开始时间的偏移量(秒)。正值表示在当前MPC时间基础上延迟执行，负值或当前时间之前的值将被忽略（使用默认值-1）')
-    
+    parser.add_argument('csv_file', type=str, help='CSV文件路径', nargs='?',
+                        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "actions",
+                                             "taiji_step_roban_stable.csv"))
+    parser.add_argument('--time-offset', type=float,
+                        help='轨迹开始时间的偏移量(秒)。正值表示在当前MPC时间基础上延迟执行，负值或当前时间之前的值将被忽略（使用默认值-1）')
+    parser.add_argument('--time-scale', type=float, default=1.0, help='时间缩放系数。>1 放慢，<1 加快，=1 不变')
+    parser.add_argument('--music-file', type=str, default="taiji.wav", help='音乐文件路径，在动作执行时播放')
+
     # 解析命令行参数
     args = parser.parse_args()
-    
-    player = ActionPlayer()
-    
+
+    player = ActionPlayer(time_scale=args.time_scale)
+    music_player = MusicPlayer()
+
     # 加载动作数据
     if not player.load_action_with_csv(args.csv_file):
         return
-    
+
     # 等待ROS系统就绪
     rospy.sleep(1)
-    
     try:
         # 执行动作序列
-        player.execute_action_with_csv(args.time_offset)
+        if music_player.speaker_available():
+            music_player.play_music(args.music_file)
+        player.execute_action_with_csv(args.time_offset, args.music_file)
     except rospy.ROSInterruptException:
         rospy.loginfo("动作执行被中断")
+        # 确保清除太极执行状态标志
+        rospy.set_param('/taiji_executing', False)
     except Exception as e:
         rospy.logerr(f"执行动作时出错: {str(e)}")
+        # 确保清除太极执行状态标志
+        rospy.set_param('/taiji_executing', False)
+
 
 if __name__ == '__main__':
     main()

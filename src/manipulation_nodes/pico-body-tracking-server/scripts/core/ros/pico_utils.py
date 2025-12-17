@@ -2,20 +2,20 @@
 Utility functions and classes for Pico VR device integration with ROS.
 
 Movement Detection Modes:
-1. Threshold-based detection (default): Real-time detection based on position and angle thresholds
-2. Complete action detection: Detects complete "ground-lift-ground" actions for more accurate human motion following
+1. VR detector : Use VR footstep detector 
+2. Local detector (default): Use local footstep detector
 
 Usage Examples:
 
-# Enable complete action detection
+# Enable local footstep detector
 transformer = KuavoPicoInfoTransformer(...)
-transformer.enable_complete_action_detection()
+transformer.enable_local_detector()
 
 # Or set detection mode manually
-transformer.set_detection_mode('complete_action')
+transformer.set_detection_mode('local')
 
-# Configure complete action parameters
-transformer.set_complete_action_parameters({
+# Configure local footstep detector parameters
+transformer.set_local_detector_parameters({
     'lift_threshold': 0.05,      # 5cm lift threshold
     'ground_threshold': 0.02,    # 2cm ground threshold
     'min_action_duration': 0.3,  # 0.3s minimum duration
@@ -23,10 +23,10 @@ transformer.set_complete_action_parameters({
     'min_horizontal_movement': 0.05  # 5cm minimum horizontal movement
 })
 
-# Switch back to threshold detection
-transformer.enable_threshold_detection()
+# Enable VR footstep detector
+transformer.enable_vr_detector()
 
-# Get detection information
+# Get detector information
 info = transformer.get_detection_info()
 print(f"Current mode: {info['current_mode']}")
 """
@@ -80,7 +80,8 @@ BODY_TRACKER_ROLES = [
     "Pelvis", "LEFT_HIP", "RIGHT_HIP", "SPINE1", "LEFT_KNEE", "RIGHT_KNEE",
     "SPINE2", "LEFT_ANKLE", "RIGHT_ANKLE", "SPINE3", "LEFT_FOOT", "RIGHT_FOOT",
     "NECK", "LEFT_COLLAR", "RIGHT_COLLAR", "HEAD", "LEFT_SHOULDER", "RIGHT_SHOULDER",
-    "LEFT_ELBOW", "RIGHT_ELBOW", "LEFT_WRIST", "RIGHT_WRIST", "LEFT_HAND", "RIGHT_HAND"
+    "LEFT_ELBOW", "RIGHT_ELBOW", "LEFT_WRIST", "RIGHT_WRIST", "LEFT_HAND", "RIGHT_HAND",
+    "FOOT_STATE"
 ]
 
 INDEX_TO_BONE_NAME = {index: name for index, name in enumerate(BODY_TRACKER_ROLES)}
@@ -251,11 +252,8 @@ class KuavoPicoInfoTransformer():
     def _init_bone_names(self) -> None:
         """Initialize bone names and their indices."""
         self.bone_names = BODY_TRACKER_ROLES
-        
         self.left_arm_idxs = LEFT_ARM_IDXS
-        
         self.right_arm_idxs = RIGHT_ARM_IDXS
-        
         self.bone_name_to_index = BONE_NAME_TO_INDEX
         self.index_to_bone_name = INDEX_TO_BONE_NAME
 
@@ -390,30 +388,19 @@ class KuavoPicoInfoTransformer():
         # Simple movement detection based on initial state
         self.movement_detector = {
             'horizontal_threshold': 0.2,    # 10cm position threshold
-            'vertical_threshold': 0.01,    # 5cm vertical threshold
-            'angle_threshold': 20.0,        # 20 degrees angle threshold
-            'step_length': 0.2,            # 10cm step length
             'initial_left_foot_pose': [0.0, 0.1, 0.0, 0.0],
             'initial_right_foot_pose': [0.0, -0.1, 0.0, 0.0],
-            'initial_body_pose': None,      # Initial body pose reference
             'max_step_length_x': 0.4,       # 最大步长x
             'max_step_length_y': 0.15,      # 最大步长y
-            # 新增：完整动作检测器参数
-            'detection_mode': 'complete_action',  # 'threshold' 或 'complete_action'
-            'complete_action': {
-                'lift_threshold': 0.03,     # 5cm 抬起阈值，认为脚离开地面
-                'ground_threshold': 0.01,   # 2cm 地面阈值，认为脚接触地面
+            'detection_mode': 'local',  # 'local' 或 'vr'
+            'local_detector': {
                 'min_action_duration': 0.3, # 最小动作时长 0.3秒
-                'max_action_duration': 10.0, # 最大动作时长 2.0秒
+                'max_action_duration': 2.0, # 最大动作时长 2.0秒
                 'action_buffer_size': 50,   # 动作缓冲区大小
                 'min_horizontal_movement': 0.05,  # 最小水平移动距离 5cm
-                
-                # 新增：自适应阈值调整参数
                 'adaptive_threshold_enabled': True,  # 是否启用自适应阈值
                 'calibration_samples': 50,  # 校准样本数量
-                'adaptive_lift_offset': 0.01,  # 相对于基准高度的抬起偏移量
-                'adaptive_ground_offset': 0.005,  # 相对于基准高度的地面偏移量
-                'ground_tolerance': 0.005
+                'adaptive_lift_offset': 0.005,  # 相对于基准高度的抬起偏移量
             },
             
             # 新增：并行检测配置参数
@@ -427,7 +414,7 @@ class KuavoPicoInfoTransformer():
         }
         
         # 初始化完整动作检测器状态
-        self.complete_action_detector = {
+        self.local_detector = {
             'left': {
                 'state': 'ground',  # 'ground', 'lifted', 'action_complete'
                 'lift_time': None,
@@ -436,13 +423,10 @@ class KuavoPicoInfoTransformer():
                 'end_pose': None,
                 'pose_history': [],
                 'action_duration': 0.0,
-                # 新增：自适应校准相关
                 'calibration_samples': [],  # 校准样本
                 'base_height': None,  # 基准高度
                 'adaptive_lift_threshold': None,  # 自适应抬起阈值
-                'adaptive_ground_threshold': None,  # 自适应地面阈值
                 'calibration_complete': False,
-                # 是否使用实际脚部数据
                 'use_real_foot_data': True,
             },
             'right': {
@@ -453,13 +437,10 @@ class KuavoPicoInfoTransformer():
                 'end_pose': None,
                 'pose_history': [],
                 'action_duration': 0.0,
-                # 新增：自适应校准相关
                 'calibration_samples': [],
                 'base_height': None,
                 'adaptive_lift_threshold': None,
-                'adaptive_ground_threshold': None,
                 'calibration_complete': False,
-                # 是否使用实际脚部数据
                 'use_real_foot_data': True,
             }
         }
@@ -483,10 +464,8 @@ class KuavoPicoInfoTransformer():
         # Initialize foot controller instance
         self.foot_controller = KuavoSingleFootController(self)
         
-        # self._start_trajectory_executor()  # 不再这里直接启动
-
         # Initialize parallel foot detector
-        self.parallel_detector = ParallelFootDetector(self)
+        self.parallel_detector = ParallelFootDetector(self, detector=self.movement_detector['detection_mode'])
 
     def set_movement_detector(self, movement_detector: dict) -> None:
         """Set movement detector."""
@@ -496,21 +475,21 @@ class KuavoPicoInfoTransformer():
         """Set detection mode.
         
         Args:
-            mode: 'threshold' for real-time threshold-based detection
-                  'complete_action' for ground-lift-ground complete action detection
+            mode: 'local' for local footstep detector
+                  'vr' for vr footstep detector
         """
-        if mode in ['threshold', 'complete_action']:
+        if mode in ['local', 'vr']:
             self.movement_detector['detection_mode'] = mode
             SDKLogger.info(f"Detection mode set to: {mode}")
         else:
-            SDKLogger.warning(f"Invalid detection mode: {mode}. Using 'threshold' mode.")
-            self.movement_detector['detection_mode'] = 'threshold'
+            SDKLogger.warning(f"Invalid detection mode: {mode}. Using 'local' mode.")
+            self.movement_detector['detection_mode'] = 'local'
 
     def get_detection_mode(self) -> str:
         """Get current detection mode."""
-        return self.movement_detector.get('detection_mode', 'threshold')
+        return self.movement_detector.get('detection_mode', 'local')
 
-    def reset_complete_action_detector(self, pose_type: str = None) -> None:
+    def reset_local_detector(self, pose_type: str = None) -> None:
         """Reset complete action detector state.
         
         Args:
@@ -518,8 +497,8 @@ class KuavoPicoInfoTransformer():
         """
         if pose_type is None:
             # Reset all
-            for key in self.complete_action_detector:
-                self.complete_action_detector[key] = {
+            for key in self.local_detector:
+                self.local_detector[key] = {
                     'state': 'ground',
                     'lift_time': None,
                     'ground_time': None,
@@ -531,15 +510,14 @@ class KuavoPicoInfoTransformer():
                     'calibration_samples': [],
                     'base_height': None,
                     'adaptive_lift_threshold': None,
-                    'adaptive_ground_threshold': None,
                     'calibration_complete': False,
                     # 是否使用实际脚部数据
-                    'use_real_foot_data': False,
+                    'use_real_foot_data': True,
                 }
             SDKLogger.info("Reset all complete action detectors")
-        elif pose_type in self.complete_action_detector:
+        elif pose_type in self.local_detector:
             # Reset specific detector
-            self.complete_action_detector[pose_type] = {
+            self.local_detector[pose_type] = {
                 'state': 'ground',
                 'lift_time': None,
                 'ground_time': None,
@@ -551,10 +529,9 @@ class KuavoPicoInfoTransformer():
                 'calibration_samples': [],
                 'base_height': None,
                 'adaptive_lift_threshold': None,
-                'adaptive_ground_threshold': None,
                 'calibration_complete': False,
             }
-            SDKLogger.info(f"Reset complete action detector for {pose_type}")
+            SDKLogger.info(f"Reset local detector for {pose_type}")
         else:
             SDKLogger.warning(f"Invalid pose_type: {pose_type}")
 
@@ -580,7 +557,7 @@ class KuavoPicoInfoTransformer():
 
                 if new_mode == ModeNumber.SS:
                     if not ss_command_issued:
-                        if self.complete_action_detector['left']['use_real_foot_data']:
+                        if self.local_detector['left']['use_real_foot_data']:
                             movement = self.movement_queue.get()
                             SDKLogger.info(f"movement: {movement}, time: {time.time()}")
                             foot_pose_traj_msg = self.foot_controller.get_single_foot_trajectory_msg(
@@ -602,7 +579,7 @@ class KuavoPicoInfoTransformer():
                     ss_command_issued = False
                     if new_mode.value != last_mode.value:
                         if self.foot_controller.is_execution_window(last_mode, new_mode):
-                            if self.complete_action_detector['left']['use_real_foot_data']:
+                            if self.local_detector['left']['use_real_foot_data']:
                                 movement = self.movement_queue.get()
                                 SDKLogger.info(f"movement: {movement}, time: {time.time()}")
                                 foot_pose_traj_msg = self.foot_controller.get_single_foot_trajectory_msg(
@@ -632,7 +609,7 @@ class KuavoPicoInfoTransformer():
     
     def update_active_queue(self):
         """Update the active queue based on the current mode."""
-        if self.complete_action_detector['left']['use_real_foot_data']:
+        if self.local_detector['left']['use_real_foot_data']:
             self.active_queue = self.movement_queue
         else:
             self.active_queue = self.trajectory_queue
@@ -653,8 +630,8 @@ class KuavoPicoInfoTransformer():
 
     def publish_foot_pose(self, robot_urdf_matrices):
         """Publish foot pose message."""
-        left_foot_pose = self.compute_foot_pose(robot_urdf_matrices, 'left')
-        right_foot_pose = self.compute_foot_pose(robot_urdf_matrices, 'right')
+        left_foot_pose, _ = self.compute_foot_pose(robot_urdf_matrices, 'left')
+        right_foot_pose, _ = self.compute_foot_pose(robot_urdf_matrices, 'right')
         foot_pose_msg = Float32MultiArray()
         foot_pose_msg.data = [
             left_foot_pose[0],
@@ -690,8 +667,6 @@ class KuavoPicoInfoTransformer():
                         break
         except Exception as e:
             SDKLogger.warning(f"Error clearing trajectory queue: {e}")
-            
-        # SDKLogger.info("KuavoPicoInfoTransformer cleanup completed")
 
     def __del__(self):
         """Destructor to ensure cleanup."""
@@ -804,6 +779,7 @@ class KuavoPicoInfoTransformer():
             SDKLogger.warning("Received invalid matrices data")
             return
         robot_urdf_matrices = self.transform_matrix_to_ros(matrices)
+        robot_urdf_matrices[-1] = matrices[-1]
         current_time = rospy.Time.now()
         return robot_urdf_matrices, current_time
     
@@ -1053,157 +1029,21 @@ class KuavoPicoInfoTransformer():
         R = np.dot(R_roll, np.dot(R_pitch, R_yaw))
         return R
     
-    def get_multiple_steps_msg(self, body_poses, dt, is_left_first=True, collision_check=True):
-        num_steps = 2*len(body_poses)
-        time_traj = []
-        foot_idx_traj = []
-        foot_traj = []
-        torso_traj = []
-        l_foot_rect_last = RotatingRectangle(center=(0, 0.1), width=0.24, height=0.1, angle=0)
-        r_foot_rect_last = RotatingRectangle(center=(0,-0.1), width=0.24, height=0.1, angle=0)
-        torso_yaw_last = 0.0
-        torso_pose_last = np.array([0, 0, 0, 0])
-        for i in range(num_steps):
-            time_traj.append(dt * (i+1))
-            body_pose = body_poses[i//2]
-            # body_pose now contains [position, yaw_deg]
-            torso_pos = np.asarray(body_pose[:3]) 
-            torso_yaw = np.radians(body_pose[3])  
-            l_foot, r_foot = self.generate_steps(torso_pos, torso_yaw, 0.1)
-            l_foot = [*l_foot[:3], torso_yaw]
-            r_foot = [*r_foot[:3], torso_yaw]
-
-            if(i%2 == 0):        
-                torso_pose = np.array([*torso_pos, torso_yaw])
-                R_wl = self.euler_to_rotation_matrix(torso_pose_last[3], 0, 0)
-                delta_pos = R_wl.T @ (torso_pose[:3] - torso_pose_last[:3])
-                SDKLogger.debug(f"delta_pos: {delta_pos}")
-                if(torso_yaw > 0.0 or delta_pos[1] > 0.0):
-                    is_left_first = True
-                else:
-                    is_left_first = False
-            if(collision_check and i%2 == 0):
-                l_foot_rect_next = RotatingRectangle(center=(l_foot[0],l_foot[1]), width=0.24, height=0.1, angle=torso_yaw)
-                r_foot_rect_next = RotatingRectangle(center=(r_foot[0],r_foot[1]), width=0.24, height=0.1, angle=torso_yaw)
-                l_collision = l_foot_rect_next.is_collision(r_foot_rect_last)
-                r_collision = r_foot_rect_next.is_collision(l_foot_rect_last)
-                if l_collision and r_collision:
-                    SDKLogger.error("Detect collision, Please adjust your body_poses input!!!")
-                    break
-                elif l_collision:
-                    SDKLogger.warning("Left foot is in collision, switch to right foot")
-                    is_left_first = False
-                elif r_collision:
-                    SDKLogger.warning("Right foot is in collision, switch to left foot")
-                    is_left_first = True
-                l_foot_rect_last = l_foot_rect_next
-                r_foot_rect_last = r_foot_rect_next
-            if(i%2 == 0):
-                torso_traj.append((torso_pose_last + torso_pose)/2.0)
-                if is_left_first:
-                    foot_idx_traj.append(0)
-                    foot_traj.append(l_foot)
-                else:
-                    foot_idx_traj.append(1)
-                    foot_traj.append(r_foot)
-            else:
-                torso_traj.append(torso_pose)
-                if is_left_first:
-                    foot_idx_traj.append(1)
-                    foot_traj.append(r_foot)
-                else:
-                    foot_idx_traj.append(0)
-                    foot_traj.append(l_foot)
-            torso_pose_last = torso_traj[-1]
-            torso_yaw_last = torso_yaw
-        SDKLogger.debug(f"time_traj: {time_traj}")
-        SDKLogger.debug(f"foot_idx_traj: {foot_idx_traj}")
-        SDKLogger.debug(f"foot_traj: {foot_traj}")
-        SDKLogger.debug(f"torso_traj: {torso_traj}")
-        return get_foot_pose_traj_msg(time_traj, foot_idx_traj, foot_traj, torso_traj)
-    
-    def detect_significant_movement(self, current_pose, pose_type='left'):
+    def detect_significant_movement(self, current_pose, pose_type, foot_state):
         """Detect significant movement based on current detection mode.
         
         Args:
             current_pose: Current pose [x, y, z, yaw]
-            pose_type: 'left', 'right', or 'body'
+            pose_type: 'left', 'right'
             
         Returns:
-            tuple: (detected, movement_vector) for threshold mode
-                   (detected, movement_vector, action_duration) for complete_action mode
+            tuple: (detected_result, movement_vector_time) for vr mode
+                   (detected_result, movement_vector_time) for local mode
         """
-        detection_mode = self.get_detection_mode()
-        
-        if detection_mode == 'complete_action':
-            # 使用完整动作检测
-            return self.detect_complete_action(current_pose, pose_type)
-        else:
-            # 使用阈值检测（原有方式）
-            return self._detect_threshold_movement(current_pose, pose_type)
-    
-    def _detect_threshold_movement(self, current_pose, pose_type='left'):
-        """Original threshold-based movement detection."""
-        # Get initial pose reference
-        if pose_type == 'left':
-            initial_pose = self.movement_detector['initial_left_foot_pose']
-        elif pose_type == 'right':
-            initial_pose = self.movement_detector['initial_right_foot_pose']
-        elif pose_type == 'body':
-            initial_pose = self.movement_detector['initial_body_pose']
-        else:
-            return False, None
-        
-        # If no initial pose set, set it and return False
-        if initial_pose is None:
-            if pose_type == 'left':
-                self.movement_detector['initial_left_foot_pose'] = current_pose
-                print(f"\033[92mInitial left foot pose set to: {current_pose}\033[0m")
-            elif pose_type == 'right':
-                self.movement_detector['initial_right_foot_pose'] = current_pose
-                print(f"\033[92mInitial right foot pose set to: {current_pose}\033[0m")
-            elif pose_type == 'body':
-                self.movement_detector['initial_body_pose'] = current_pose
-                print(f"\033[92mInitial body pose set to: {current_pose}\033[0m")
-            return False, None
-        
-        # Calculate position and angle differences
-        pos_diff_horizontal = [
-            current_pose[0] - initial_pose[0],
-            current_pose[1] - initial_pose[1]
-        ]
+        mode = self.get_detection_mode()
+        foot_state = foot_state if mode == 'vr' else None
 
-        pos_diff_vertical = current_pose[2] - initial_pose[2]
-        # print(f"\033[92mCurrent {pose_type} vertical diff is: {pos_diff_vertical}\033[0m")
-
-        # Calculate yaw difference (handle angle wrapping)
-        yaw_diff = current_pose[3] - initial_pose[3]
-        while yaw_diff > 180:
-            yaw_diff -= 360
-        while yaw_diff < -180:
-            yaw_diff += 360
-        
-        # Calculate magnitudes
-        # pos_magnitude = np.sqrt(pos_diff[0]**2 + pos_diff[1]**2 + pos_diff[2]**2)
-        pos_magnitude = np.sqrt(pos_diff_horizontal[0]**2 + pos_diff_horizontal[1]**2)
-        
-        if pos_magnitude >= self.movement_detector['horizontal_threshold']:
-            movement_vector = [pos_diff_horizontal[0], pos_diff_horizontal[1], 0.0, yaw_diff]
-            SDKLogger.debug(f"Significant movement detected for {pose_type}: pos={pos_magnitude:.3f}m, angle={movement_vector[3]:.1f}°")
-
-            # Update initial pose to current pose for next detection
-            if pose_type == 'left':
-                self.movement_detector['initial_left_foot_pose'] = current_pose
-            elif pose_type == 'right':
-                self.movement_detector['initial_right_foot_pose'] = current_pose
-            elif pose_type == 'body':
-                self.movement_detector['initial_body_pose'] = current_pose
-            
-            movement_vector_time = [*movement_vector, 0.15]
-
-            return True, movement_vector_time
-        
-        return False, None
+        return self.detect_foot_action(current_pose, pose_type, mode, foot_state)
     
     @staticmethod
     def generate_steps(torso_pos, torso_yaw, foot_bias):
@@ -1464,52 +1304,6 @@ class KuavoPicoInfoTransformer():
 
         self.bone_frame_publisher.publish_pico_joys(joy_msg)
 
-    def process_body_pose_for_stepping(self, robot_urdf_matrices):
-        """Process body pose for step generation"""
-        spine3_idx = BODY_TRACKER_ROLES.index('SPINE3')
-        spine3_matrix = robot_urdf_matrices[spine3_idx]
-        
-        # Get SPINE3 pose for body pose calculation
-        try:
-            pos, quat = self.get_pose_from_matrix(spine3_matrix)
-            _, _, yaw = euler_from_quaternion(quat)
-            current_body_pose = [pos[0], pos[1], pos[2]-0.34, np.degrees(yaw)]
-        except Exception as e:
-            SDKLogger.error(f"Error getting SPINE3 pose: {e}")
-            return
-        
-        # Check if movement is significant enough for a step
-        detection_result = self.detect_significant_movement(current_body_pose, 'body')
-        
-        # 处理不同检测模式的返回值
-        if len(detection_result) == 2:
-            # 阈值检测模式
-            significant, movement_vector = detection_result
-            action_duration = None
-        elif len(detection_result) == 3:
-            # 完整动作检测模式（旧版本）
-            significant, movement_vector, action_duration = detection_result
-        elif len(detection_result) == 4:
-            # 完整动作检测模式（新版本，包含current_time）
-            significant, movement_vector, action_duration, current_time = detection_result
-        else:
-            SDKLogger.error(f"Unexpected detection result format: {detection_result}")
-            return
-        
-        if significant and movement_vector is not None:
-            if action_duration is not None:
-                SDKLogger.info(f"Generating step with movement vector: {movement_vector}, duration: {action_duration:.3f}s")
-            else:
-                SDKLogger.info(f"Generating step with movement vector: {movement_vector}")
-            
-            foot_pose_traj_msg = self.get_multiple_steps_msg([movement_vector], 0.15, True, True)
-            # Add trajectory to queue instead of direct publishing
-            if not self.add_trajectory_to_queue(foot_pose_traj_msg):
-                SDKLogger.warning("Failed to add body trajectory to queue")
-        elif not significant:
-            # SDKLogger.debug("Movement too small, continuing monitoring...")
-            pass
-
     def compute_foot_pose(self, robot_urdf_matrices, side):
         """Compute foot pose"""
         foot_idx = BODY_TRACKER_ROLES.index(f"{side.upper()}_FOOT")
@@ -1517,7 +1311,11 @@ class KuavoPicoInfoTransformer():
         pos, quat = self.get_pose_from_matrix(foot_matrix)
         roll, pitch, yaw = euler_from_quaternion(quat)
         # SDKLogger.info(f"{side} foot yaw: {np.degrees(yaw)}")
-        return [pos[0], pos[1], pos[2], np.degrees(yaw)]
+        foot_states_idx = BODY_TRACKER_ROLES.index("FOOT_STATE")
+        foot_states_matrix = robot_urdf_matrices[foot_states_idx]
+        foot_states, _ = self.get_pose_from_matrix(foot_states_matrix)
+        foot_state = foot_states[0] if side == 'left' else foot_states[1]
+        return [pos[0], pos[1], pos[2], np.degrees(yaw)], foot_state
     
     def rpy_to_matrix(self, rpy):
         R = RollPitchYaw(rpy).ToRotationMatrix()
@@ -1617,16 +1415,24 @@ class KuavoPicoInfoTransformer():
         """
         msg_data = []
         
+
         # 处理左右脚信息
         for side in ['left', 'right']:
-            detector = self.complete_action_detector.get(side, {})
+            if self.should_perform_calibration(side):
+                return
+
+            detector = self.local_detector.get(side, {})
             
             # 添加左脚信息
-            msg_data.extend([
-                1.0 if detector.get('calibration_complete', False) else 0.0,  # 校准状态
-                float(detector.get('adaptive_lift_threshold', 0.0)),  # 自适应抬起阈值
-                float(detector.get('adaptive_ground_threshold', 0.0)),  # 自适应地面阈值
-            ])
+            if detector.get('adaptive_lift_threshold') is not None:
+                msg_data.extend([
+                    1.0 if detector.get('calibration_complete', False) else 0.0,  # 校准状态
+                    float(detector.get('adaptive_lift_threshold', 0.0)),  # 自适应抬起阈值
+                ])
+            else:
+                msg_data.extend([
+                    1.0 if detector.get('calibration_complete', False) else 0.0,  # 校准状态
+                ])
             
             # 添加当前状态信息
             state_map = {'ground': 0.0, 'lifted': 1.0, 'action_complete': 2.0}
@@ -1653,28 +1459,6 @@ class KuavoPicoInfoTransformer():
         SDKLogger.debug(f"Published combined adaptive threshold info: {msg_data}")
         # SDKLogger.debug(f"Message structure: [左脚校准状态, 左脚抬起阈值, 左脚地面阈值, 左脚状态, 左脚抬起时间, 左脚着地时间, 左脚样本数, 右脚校准状态, 右脚抬起阈值, 右脚地面阈值, 右脚状态, 右脚抬起时间, 右脚着地时间, 右脚样本数]")
 
-    def process_foot_pose_for_stepping(self, robot_urdf_matrices, side):
-        """Process foot pose for stepping"""
-        # Convert side string to foot_type integer
-        foot_type = 0 if side.lower() == 'left' else 1
-        
-        try:
-            current_foot_pose = self.compute_foot_pose(robot_urdf_matrices, side)
-        except Exception as e:
-            SDKLogger.error(f"Error getting {side}_foot pose: {e}")
-            return
-        
-        # Check if movement is significant enough for a step
-        significant, movement_vector_time = self.detect_significant_movement(current_foot_pose, side.lower())
-        
-        if significant:
-            foot_pose_traj_msg = self.foot_controller.get_single_foot_trajectory_msg(foot_type, [movement_vector_time], 0.4, True)
-            if not self.add_trajectory_to_queue(foot_pose_traj_msg):
-                SDKLogger.warning(f"Failed to add {side} foot trajectory to queue")
-        elif not significant:
-            # SDKLogger.debug(f"{side} foot movement too small, continuing monitoring...")
-            pass
-
     def process_foot_poses_parallel(self, robot_urdf_matrices):
         """并行处理左右脚姿态检测（推荐使用）
         
@@ -1686,18 +1470,14 @@ class KuavoPicoInfoTransformer():
         """
         try:
             results = self.parallel_detector.detect_parallel(robot_urdf_matrices)
-            
-            # # 记录检测结果
-            # for side, (detected, movement_vector) in results.items():
-            #     if detected:
-            #         SDKLogger.info(f"Parallel detection: {side} foot movement detected")
-            #     else:
-            #         SDKLogger.debug(f"Parallel detection: {side} foot no significant movement")
-            
             return results
             
         except Exception as e:
+            # SDKLogger.error(f"Error in parallel foot detection: {e}")
+            # return {'left': (False, None), 'right': (False, None)}
             SDKLogger.error(f"Error in parallel foot detection: {e}")
+            import traceback
+            SDKLogger.error(traceback.format_exc())
             return {'left': (False, None), 'right': (False, None)}
 
     def enable_parallel_detection(self):
@@ -1750,7 +1530,7 @@ class KuavoPicoInfoTransformer():
         """重置并行检测器"""
         if hasattr(self, 'parallel_detector'):
             self.parallel_detector.shutdown()
-            self.parallel_detector = ParallelFootDetector(self)
+            self.parallel_detector = ParallelFootDetector(self, detector='local')
             SDKLogger.info("Parallel detector reset completed")
 
     def get_parallel_detection_performance(self):
@@ -1765,86 +1545,88 @@ class KuavoPicoInfoTransformer():
             self.parallel_detector.reset_performance_stats()
             return True
         return False
-
-    def detect_complete_action(self, current_pose, pose_type='left'):
-        """Detect complete action based on ground-lift-ground process.
+    
+    def detect_foot_action(self, current_pose, pose_type, mode="local", foot_state=None):
+        """通用脚步检测器 (支持 local/VR).
         
         Args:
-            current_pose: Current pose [x, y, z, yaw]
-            pose_type: 'left', 'right'
-            
+            current_pose: 当前姿态 [x, y, z, yaw]
+            pose_type: 'left' 或 'right'
+            mode: 'local' 或 'vr'
+            foot_state: VR 模式下的脚状态 (0.0=lifted, 1.0=ground)
+        
         Returns:
-            tuple: (detected, movement_vector, action_duration, current_time)
+            tuple: (detected_result, movement_vector_time)
         """
-        if pose_type not in self.complete_action_detector:
-            SDKLogger.error(f"Invalid pose_type: {pose_type}")
-            return False, None, 0.0, None
+        if pose_type not in self.local_detector or self.should_perform_calibration(pose_type):
+            # SDKLogger.error(f"Invalid pose_type: {pose_type}")
+            return False, None
         
-        detector = self.complete_action_detector[pose_type]
+        detector = self.local_detector[pose_type]
         current_time = time.time()
-        
+
         # 添加当前姿态到历史记录
         detector['pose_history'].append({
             'time': current_time,
             'pose': current_pose
         })
-        
+
         # 限制历史记录大小
-        buffer_size = self.movement_detector['complete_action']['action_buffer_size']
+        buffer_size = self.movement_detector['local_detector']['action_buffer_size']
         if len(detector['pose_history']) > buffer_size:
             detector['pose_history'] = detector['pose_history'][-buffer_size:]
-        
-        # 获取当前高度（z坐标）
-        current_height = current_pose[2]
-        
-        # 获取阈值（自适应或固定）
-        lift_threshold, ground_threshold = self._get_adaptive_thresholds(pose_type)
-        ground_tolerance = self.movement_detector['complete_action'].get('ground_tolerance', 0.005)
-        
+
+        # 获取触发条件
+        if mode == "local":
+            current_height = current_pose[2]
+            lift_threshold = self._get_adaptive_thresholds(pose_type)
+            lift_condition = current_height >= lift_threshold
+            ground_condition = current_height <= lift_threshold
+        elif mode == "vr":
+            if foot_state is None:
+                SDKLogger.error("VR mode requires foot_state")
+                return False, None, 0.0, None
+            lift_condition = (foot_state == 0.0)
+            ground_condition = (foot_state == 1.0)
+        else:
+            SDKLogger.error(f"Invalid mode: {mode}")
+            return False, None, 0.0, None
+
         # 状态机逻辑
         if detector['state'] == 'ground':
-            # 检测是否抬起
-            if current_height > lift_threshold:
+            if lift_condition:
                 detector['state'] = 'lifted'
                 detector['lift_time'] = current_time
                 detector['start_pose'] = current_pose
-                SDKLogger.debug(f"{pose_type} lifted at height {current_height:.3f}m (threshold: {lift_threshold:.3f}m)")
+                SDKLogger.debug(f"{pose_type} lifted.")
         
         elif detector['state'] == 'lifted':
-            # 检测是否回到地面
-            if current_height <= ground_threshold + ground_tolerance:
+            if ground_condition:
                 detector['state'] = 'action_complete'
                 detector['ground_time'] = current_time
                 detector['end_pose'] = current_pose
                 
-                # 计算动作时长
                 if detector['lift_time'] is not None:
                     detector['action_duration'] = current_time - detector['lift_time']
-
                 SDKLogger.debug(f"{pose_type} action completed, duration: {detector['action_duration']:.3f}s")
         
         elif detector['state'] == 'action_complete':
-            # 检查动作是否有效
             if self._validate_complete_action(detector, pose_type):
-                # 计算移动向量
                 movement_vector = self._calculate_movement_vector(detector)
                 action_duration = detector['action_duration']
                 movement_vector_time = [*movement_vector, action_duration]
                 
-                # 重置检测器状态
                 self._reset_detector_state(detector)
-
                 return True, movement_vector_time
             else:
-                # 动作无效，重置状态
                 SDKLogger.debug(f"Invalid action for {pose_type}, resetting")
                 self._reset_detector_state(detector)
-        
+
         return False, None
-    
+
     def _validate_complete_action(self, detector, pose_type):
         """Validate if the complete action is valid."""
-        config = self.movement_detector['complete_action']
+        config = self.movement_detector['local_detector']
         
         # 检查动作时长
         if (detector['action_duration'] < config['min_action_duration'] or 
@@ -1900,9 +1682,12 @@ class KuavoPicoInfoTransformer():
     
     def should_perform_calibration(self, pose_type):
         """Check if calibration should be performed."""
-        config = self.movement_detector['complete_action']
-        detector = self.complete_action_detector[pose_type]
-        
+        if self.get_detection_mode() == 'vr':
+            return False
+
+        config = self.movement_detector['local_detector']
+        detector = self.local_detector[pose_type]
+
         # 如果自适应阈值未启用，跳过校准
         if not config.get('adaptive_threshold_enabled', True):
             return False
@@ -1923,8 +1708,8 @@ class KuavoPicoInfoTransformer():
     
     def perform_calibration(self, current_height, pose_type):
         """Perform calibration for adaptive thresholds."""
-        detector = self.complete_action_detector[pose_type]
-        config = self.movement_detector['complete_action']
+        detector = self.local_detector[pose_type]
+        config = self.movement_detector['local_detector']
         
         # 确保calibration_samples字段存在
         if 'calibration_samples' not in detector:
@@ -1932,7 +1717,7 @@ class KuavoPicoInfoTransformer():
         
         # 添加当前高度到校准样本
         detector['calibration_samples'].append(current_height)
-        
+
         # 检查是否收集了足够的样本
         if len(detector['calibration_samples']) >= config.get('calibration_samples', 50):
             # 计算基准高度（测试发现中位数的高度有时偏高，使用平均值）
@@ -1941,19 +1726,15 @@ class KuavoPicoInfoTransformer():
             detector['base_height'] = base_height
             
             # 计算自适应阈值
-            lift_offset = config.get('adaptive_lift_offset', 0.02)
-            ground_offset = config.get('adaptive_ground_offset', 0.005)
-            
+            lift_offset = config.get('adaptive_lift_offset', 0.005)
             detector['adaptive_lift_threshold'] = base_height + lift_offset
-            detector['adaptive_ground_threshold'] = base_height + ground_offset
             
             # 标记该特定pose_type的校准完成
             detector['calibration_complete'] = True
             
             SDKLogger.info(f"Calibration completed for {pose_type}: "
                          f"base_height={base_height:.3f}m, "
-                         f"lift_threshold={detector['adaptive_lift_threshold']:.3f}m, "
-                         f"ground_threshold={detector['adaptive_ground_threshold']:.3f}m")
+                         f"lift_threshold={detector['adaptive_lift_threshold']:.3f}m. ")
             self.pub_adaptive_threshold_info()
         else:
             # 显示校准进度
@@ -1964,15 +1745,11 @@ class KuavoPicoInfoTransformer():
     
     def _get_adaptive_thresholds(self, pose_type):
         """Get adaptive thresholds for the given pose type."""
-        config = self.movement_detector['complete_action']
-        detector = self.complete_action_detector[pose_type]
-        
-        # 使用自适应阈值
-        if detector['adaptive_lift_threshold'] is not None and detector['adaptive_ground_threshold'] is not None:
-            return detector['adaptive_lift_threshold'], detector['adaptive_ground_threshold']
-        
-        # 如果自适应阈值未设置，回退到固定阈值
-        return config['lift_threshold'], config['ground_threshold']
+        # config = self.movement_detector['local_detector']
+        detector = self.local_detector[pose_type]
+
+        if detector['adaptive_lift_threshold'] is not None:
+            return detector['adaptive_lift_threshold']
     
     def reset_adaptive_calibration(self, pose_type: str = None):
         """Reset adaptive calibration for specified pose type or all.
@@ -1980,25 +1757,23 @@ class KuavoPicoInfoTransformer():
         Args:
             pose_type: 'left', 'right', 'body', or None for all
         """
-        config = self.movement_detector['complete_action']
+        config = self.movement_detector['local_detector']
         
         if pose_type is None:
             # Reset all
-            for key in self.complete_action_detector:
-                detector = self.complete_action_detector[key]
+            for key in self.local_detector:
+                detector = self.local_detector[key]
                 detector['calibration_samples'] = []
                 detector['base_height'] = None
                 detector['adaptive_lift_threshold'] = None
-                detector['adaptive_ground_threshold'] = None
                 detector['calibration_complete'] = False
             SDKLogger.info("Reset adaptive calibration for all pose types")
-        elif pose_type in self.complete_action_detector:
+        elif pose_type in self.local_detector:
             # Reset specific detector
-            detector = self.complete_action_detector[pose_type]
+            detector = self.local_detector[pose_type]
             detector['calibration_samples'] = []
             detector['base_height'] = None
             detector['adaptive_lift_threshold'] = None
-            detector['adaptive_ground_threshold'] = None
             detector['calibration_complete'] = False
             SDKLogger.info(f"Reset adaptive calibration for {pose_type}")
         else:
@@ -2013,44 +1788,40 @@ class KuavoPicoInfoTransformer():
         Returns:
             dict: Calibration status information
         """
-        config = self.movement_detector['complete_action']
+        config = self.movement_detector['local_detector']
         
         if pose_type is None:
             # Return status for all
             status = {
                 'adaptive_threshold_enabled': config.get('adaptive_threshold_enabled', True),
                 'calibration_samples': config.get('calibration_samples', 50),
-                'adaptive_lift_offset': config.get('adaptive_lift_offset', 0.02),
-                'adaptive_ground_offset': config.get('adaptive_ground_offset', 0.005),
+                'adaptive_lift_offset': config.get('adaptive_lift_offset', 0.005),
                 'detectors': {}
             }
             
-            for key in self.complete_action_detector:
-                detector = self.complete_action_detector[key]
+            for key in self.local_detector:
+                detector = self.local_detector[key]
                 # 确保所有必需的字段都存在
                 calibration_samples = detector.get('calibration_samples', [])
                 base_height = detector.get('base_height', None)
                 adaptive_lift_threshold = detector.get('adaptive_lift_threshold', None)
-                adaptive_ground_threshold = detector.get('adaptive_ground_threshold', None)
                 calibration_complete = detector.get('calibration_complete', False)
                 
                 status['detectors'][key] = {
                     'samples_collected': len(calibration_samples),
                     'base_height': base_height,
                     'adaptive_lift_threshold': adaptive_lift_threshold,
-                    'adaptive_ground_threshold': adaptive_ground_threshold,
                     'calibration_complete': calibration_complete
                 }
             
             return status
-        elif pose_type in self.complete_action_detector:
+        elif pose_type in self.local_detector:
             # Return status for specific detector
-            detector = self.complete_action_detector[pose_type]
+            detector = self.local_detector[pose_type]
             # 确保所有必需的字段都存在
             calibration_samples = detector.get('calibration_samples', [])
             base_height = detector.get('base_height', None)
             adaptive_lift_threshold = detector.get('adaptive_lift_threshold', None)
-            adaptive_ground_threshold = detector.get('adaptive_ground_threshold', None)
             calibration_complete = detector.get('calibration_complete', False)
             
             return {
@@ -2059,7 +1830,6 @@ class KuavoPicoInfoTransformer():
                 'samples_collected': len(calibration_samples),
                 'base_height': base_height,
                 'adaptive_lift_threshold': adaptive_lift_threshold,
-                'adaptive_ground_threshold': adaptive_ground_threshold
             }
         else:
             SDKLogger.warning(f"Invalid pose_type: {pose_type}")
@@ -2083,7 +1853,7 @@ class KuavoPicoInfoTransformer():
             self.movement_detector['initial_right_foot_pose'] = updated_pose.tolist()
             SDKLogger.info(f"Updated right foot pose: {updated_pose}")
             
-    def get_complete_action_status(self, pose_type: str = None):
+    def get_local_detector_status(self, pose_type: str = None):
         """Get current status of complete action detectors.
         
         Args:
@@ -2093,14 +1863,14 @@ class KuavoPicoInfoTransformer():
             dict: Status information
         """
         if pose_type is None:
-            return self.complete_action_detector
-        elif pose_type in self.complete_action_detector:
-            return self.complete_action_detector[pose_type]
+            return self.local_detector
+        elif pose_type in self.local_detector:
+            return self.local_detector[pose_type]
         else:
             SDKLogger.warning(f"Invalid pose_type: {pose_type}")
             return None
 
-    def set_complete_action_parameters(self, parameters: dict):
+    def set_local_detector_parameters(self, parameters: dict):
         """Set parameters for complete action detection.
         
         Args:
@@ -2114,9 +1884,8 @@ class KuavoPicoInfoTransformer():
                 - adaptive_threshold_enabled: Enable/disable adaptive threshold
                 - calibration_samples: Number of samples for calibration
                 - adaptive_lift_offset: Offset from base height for lift threshold
-                - adaptive_ground_offset: Offset from base height for ground threshold
         """
-        config = self.movement_detector['complete_action']
+        config = self.movement_detector['local_detector']
         for key, value in parameters.items():
             if key in config:
                 config[key] = value
@@ -2125,38 +1894,37 @@ class KuavoPicoInfoTransformer():
                 SDKLogger.warning(f"Unknown parameter: {key}")
         
         # 如果修改了自适应阈值相关参数，可能需要重新校准
-        adaptive_params = ['adaptive_threshold_enabled', 'calibration_samples', 
-                          'adaptive_lift_offset', 'adaptive_ground_offset']
+        adaptive_params = ['adaptive_threshold_enabled', 'calibration_samples', 'adaptive_lift_offset']
         if any(param in parameters for param in adaptive_params):
             SDKLogger.info("Adaptive threshold parameters changed. Consider resetting calibration if needed.")
 
-    def get_complete_action_parameters(self):
+    def get_local_detector_parameters(self):
         """Get current parameters for complete action detection."""
-        if 'complete_action' in self.movement_detector:
-            return self.movement_detector['complete_action']
+        if 'local_detector' in self.movement_detector:
+            return self.movement_detector['local_detector']
         else:
             return {}
 
-    def enable_complete_action_detection(self):
-        """Enable complete action detection mode."""
-        self.set_detection_mode('complete_action')
-        self.reset_complete_action_detector()
-        SDKLogger.info("Complete action detection enabled")
+    def enable_local_detector(self):
+        """Enable local detector mode."""
+        self.set_detection_mode('local')
+        self.reset_local_detector()
+        SDKLogger.info("VR detector mode enabled")
 
-    def enable_threshold_detection(self):
-        """Enable threshold-based detection mode."""
-        self.set_detection_mode('threshold')
-        SDKLogger.info("Threshold-based detection enabled")
+    def enable_vr_detector(self):
+        """Enable vr detector mode."""
+        self.set_detection_mode('vr')
+        SDKLogger.info("VR detector mode enabled")
 
     def enable_adaptive_threshold(self):
         """Enable adaptive threshold detection."""
-        config = self.movement_detector['complete_action']
+        config = self.movement_detector['local_detector']
         config['adaptive_threshold_enabled'] = True
         SDKLogger.info("Adaptive threshold detection enabled")
 
     def disable_adaptive_threshold(self):
         """Disable adaptive threshold detection."""
-        config = self.movement_detector['complete_action']
+        config = self.movement_detector['local_detector']
         config['adaptive_threshold_enabled'] = False
         SDKLogger.info("Adaptive threshold detection disabled")
 
@@ -2181,14 +1949,14 @@ class KuavoPicoInfoTransformer():
         if pose_type is None:
             # Return thresholds for all pose types
             thresholds = {}
-            for key in self.complete_action_detector:
+            for key in self.local_detector:
                 lift_threshold, ground_threshold = self._get_adaptive_thresholds(key)
                 thresholds[key] = {
                     'lift_threshold': lift_threshold,
                     'ground_threshold': ground_threshold
                 }
             return thresholds
-        elif pose_type in self.complete_action_detector:
+        elif pose_type in self.local_detector:
             # Return thresholds for specific pose type
             lift_threshold, ground_threshold = self._get_adaptive_thresholds(pose_type)
             return {
@@ -2207,15 +1975,13 @@ class KuavoPicoInfoTransformer():
             'current_mode': current_mode,
             'threshold_parameters': {
                 'horizontal_threshold': self.movement_detector['horizontal_threshold'],
-                'vertical_threshold': self.movement_detector['vertical_threshold'],
-                'angle_threshold': self.movement_detector['angle_threshold']
             }
         }
         
         # Only include complete action parameters if in complete action mode
-        if current_mode == 'complete_action':
-            info['complete_action_parameters'] = self.get_complete_action_parameters()
-            info['detector_status'] = self.get_complete_action_status()
+        if current_mode == 'local':
+            info['local_detector_parameters'] = self.get_local_detector_parameters()
+            info['detector_status'] = self.get_local_detector_status()
             info['adaptive_calibration_status'] = self.get_adaptive_calibration_status()
         
         return info
@@ -2231,7 +1997,7 @@ class KuavoPicoInfoTransformer():
         self.movement_detector['initial_body_pose'] = None
         
         # 重置完整动作检测器
-        self.reset_complete_action_detector()
+        self.reset_local_detector()
         
         SDKLogger.info("Foot controller state reset completed")
 
@@ -2427,7 +2193,7 @@ class KuavoSingleFootController:
         ss_duration = dt
         ss_action = np.zeros(4, dtype=int).tolist()
         
-        if self.pico_info_transformer.complete_action_detector['left']['use_real_foot_data']:
+        if self.pico_info_transformer.local_detector['left']['use_real_foot_data']:
             current_left_foot = self.robot_tools.get_tf_transform(
                 target_frame="odom",
                 source_frame="leg_l6_link",
@@ -2489,8 +2255,8 @@ class KuavoSingleFootController:
             torso_pose = (target_pose_safe.copy() + current_support_foot.copy()) / 2
             torso_pose[2] = self.get_delta_com_z(step_length_safe, current_com_z)
 
-            print(f"use_real_foot_data: {self.pico_info_transformer.complete_action_detector['left']['use_real_foot_data']}")
-            if not self.pico_info_transformer.complete_action_detector['left']['use_real_foot_data']:
+            print(f"use_real_foot_data: {self.pico_info_transformer.local_detector['left']['use_real_foot_data']}")
+            if not self.pico_info_transformer.local_detector['left']['use_real_foot_data']:
                 self.pico_info_transformer.update_movement_detector(foot_type, foot_pose)
 
             ss_action = torso_pose.copy()
@@ -2637,8 +2403,9 @@ class TimeStampManager:
 class ParallelFootDetector:
     """并行脚部检测器，提供高性能的左右脚同时检测"""
     
-    def __init__(self, transformer):
+    def __init__(self, transformer, detector):
         self.transformer = transformer
+        self.detector = detector
         
         # 从配置中获取参数
         config = transformer.movement_detector.get('parallel_detection', {})
@@ -2682,8 +2449,8 @@ class ParallelFootDetector:
             return {'left': (False, None), 'right': (False, None)}
         
         for side in ['left', 'right']:
-            current_foot_pose = self.transformer.compute_foot_pose(robot_urdf_matrices, side)
             if self.transformer.should_perform_calibration(side):
+                current_foot_pose, _ = self.transformer.compute_foot_pose(robot_urdf_matrices, side)
                 self.transformer.perform_calibration(current_foot_pose[2], side)
 
         # 记录开始时间
@@ -2699,7 +2466,7 @@ class ParallelFootDetector:
         )
         right_task = partial(
             self._detect_single_foot_isolated, 
-            robot_urdf_matrices, 'right', base_time  # 移除0.1ms偏移
+            robot_urdf_matrices, 'right', base_time
         )
         
         # 提交并行任务
@@ -2732,6 +2499,8 @@ class ParallelFootDetector:
                 timeout_count += 1
             except Exception as e:
                 SDKLogger.error(f"Error in {side} foot detection: {e}")
+                import traceback
+                SDKLogger.error(traceback.format_exc())
                 results[side] = (False, None)
                 error_count += 1
         
@@ -2757,24 +2526,23 @@ class ParallelFootDetector:
         """
         try:
             # 计算脚部姿态
-            current_foot_pose = self.transformer.compute_foot_pose(robot_urdf_matrices, side)
+            current_foot_pose, foot_state = self.transformer.compute_foot_pose(robot_urdf_matrices, side)
         except Exception as e:
             SDKLogger.error(f"Error getting {side}_foot pose: {e}")
             return False, None
         
         # 使用精确时间戳进行检测
-        detection_result = self._detect_with_precise_time(current_foot_pose, side, base_time)
+        detection_result = self._detect_with_precise_time(current_foot_pose, side, base_time, foot_state)
         
         if detection_result[0]:  # 如果检测到动作
             foot_type = 0 if side.lower() == 'left' else 1
-            if self.transformer.complete_action_detector['left']['use_real_foot_data']:
+            if self.transformer.local_detector['left']['use_real_foot_data']:
                 # 将foot_type和movement_vector一起放入movement_queue
                 movement_item = {'foot_type': foot_type, 'movement_vector': detection_result[1]}
                 success = self.transformer.add_trajectory_to_queue(movement_item)
                 self.transformer.pub_adaptive_threshold_info()
                 SDKLogger.info(f"add movement time: {time.time()}")
             else:
-                # 使用transformer的控制器实例生成轨迹
                 foot_pose_traj_msg = self.transformer.foot_controller.get_single_foot_trajectory_msg(
                     foot_type, [detection_result[1]], 0.4, True
                 )
@@ -2786,7 +2554,7 @@ class ParallelFootDetector:
         
         return False, None
     
-    def _detect_with_precise_time(self, pose, side, base_time):
+    def _detect_with_precise_time(self, pose, side, base_time, foot_state):
         """使用精确时间戳进行动作检测
         
         Args:
@@ -2797,11 +2565,9 @@ class ParallelFootDetector:
         Returns:
             tuple: (detected, movement_vector)
         """
-        # 不替换全局时间函数，而是直接调用检测方法
-        # 这样可以避免影响其他代码的时间计算
-        
+
         # 直接调用检测方法，不使用时间偏移
-        detection_result = self.transformer.detect_significant_movement(pose, side.lower())
+        detection_result = self.transformer.detect_significant_movement(pose, side.lower(), foot_state)
         return detection_result
     
     def shutdown(self):

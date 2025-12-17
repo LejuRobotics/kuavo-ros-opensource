@@ -46,6 +46,7 @@ namespace mobile_manipulator_controller
     humanoidCmdVelPublisher_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
     humanoidCmdPosPublisher_ = nh.advertise<geometry_msgs::Twist>("/cmd_pose", 10, true);
     armTrajPublisher_ = nh.advertise<sensor_msgs::JointState>("/mm_kuavo_arm_traj", 10);
+    waistTrajPublisher_ = nh.advertise<std_msgs::Float64MultiArray>("/robot_waist_motion_data", 10);
 
     yaml_cfg_ = YAML::LoadFile(mobile_manipulator_controller::getPath() + "/cfg/cfg.yaml");
     arm_min_ = yaml_cfg_["arm_min"].as<std::vector<double>>();
@@ -91,8 +92,7 @@ namespace mobile_manipulator_controller
       std::cout << "MPC initialized, result: " << result << std::endl;
     }
     while(!recievedObservation_) { 
-      if(observation_count_++ % 40 == 0)
-        std::cout << "[MobileManipulatorController] Waiting for observation..." << std::endl; 
+      ROS_INFO_THROTTLE(1.0, "[MobileManipulatorController] Waiting for observation...");
       return;
     }
     if(!is_play_back_mode_){
@@ -141,8 +141,9 @@ namespace mobile_manipulator_controller
 
   void MobileManipulatorController::convertObservationfromHumanoid2MM(const SystemObservation& humanoidObservation, SystemObservation& mmOservation)
   {
-    const size_t baseDim = info_.stateDim - info_.armDim;
-    
+    const size_t baseDim = info_.stateDim - info_.armDim - info_.waistDim;
+    const size_t waistDim = info_.waistDim;
+
     switch(info_.manipulatorModelType)
     {
       case ManipulatorModelType::WheelBasedMobileManipulator:
@@ -170,18 +171,23 @@ namespace mobile_manipulator_controller
       default:
         break;
     }
-    mmOservation.state.segment(baseDim, info_.armDim) = humanoidObservation.state.segment(24, info_.armDim);
-    mmOservation.input.tail(info_.armDim) = humanoidObservation.input.tail(info_.armDim);
+    // 处理包含腰部关节在内的手臂状态
+    mmOservation.state.tail(info_.armDim + waistDim) = humanoidObservation.state.tail(info_.armDim + waistDim);
+    mmOservation.input.tail(info_.armDim + waistDim) = humanoidObservation.input.tail(info_.armDim + waistDim);
     mmOservation.time = humanoidObservation.time;
     mmOservation.mode = humanoidObservation.mode;
+
+    // std::cout << "humanoidObservation.state.size:" << humanoidObservation.state.size() << std::endl;//39
+    // std::cout << "humanoidObservation.input.size:" << humanoidObservation.input.size() << std::endl;//63
+    // std::cout << "mmOservation.state.size:" << mmOservation.state.size() << std::endl;//21
+    // std::cout << "mmOservation.input.size:" << mmOservation.input.size() << std::endl;//21
   }
 
   void MobileManipulatorController::convertObservationfromMM2Humanoid(const SystemObservation& mmOservation, const SystemObservation& currentHumanoidObservation, SystemObservation& humanoidObservation)
   {
-    const size_t baseDim = info_.stateDim - info_.armDim;
-    humanoidObservation = currentHumanoidObservation;
-    const size_t humanoidInputDim = humanoidObservation.input.size();
-    
+    const size_t baseDim = info_.stateDim - info_.armDim - info_.waistDim;
+    const size_t waistDim = info_.waistDim;
+    humanoidObservation = currentHumanoidObservation;    
     switch(info_.manipulatorModelType)
     {
       case ManipulatorModelType::DefaultManipulator:
@@ -213,8 +219,9 @@ namespace mobile_manipulator_controller
       default:
         break;
     }
-    humanoidObservation.state.segment(24, info_.armDim) = mmOservation.state.segment(baseDim, info_.armDim);
-    humanoidObservation.input.tail(info_.armDim) = mmOservation.input.tail(info_.armDim);
+    // 处理包含腰部关节在内的手臂状态转换回人形机器人
+    humanoidObservation.state.tail(info_.armDim + waistDim) = mmOservation.state.tail(info_.armDim + waistDim);
+    humanoidObservation.input.tail(info_.armDim + waistDim) = mmOservation.input.tail(info_.armDim + waistDim);
     humanoidObservation.time = mmOservation.time;
     humanoidObservation.mode = mmOservation.mode;
   }
@@ -258,8 +265,13 @@ namespace mobile_manipulator_controller
       default:
         break;
     }
-    humanoidState.tail(info_.armDim) = mmState.tail(info_.armDim);
-    humanoidInput.tail(info_.armDim) = mmInput.tail(info_.armDim);
+    
+    // 处理包含腰部关节在内的手臂状态转换
+    // const size_t baseDim = info_.stateDim - info_.armDim - info_.waistDim;
+    const size_t waistDim = info_.waistDim;
+    humanoidState.tail(info_.armDim + waistDim) = mmState.tail(info_.armDim + waistDim);
+    humanoidInput.tail(info_.armDim + waistDim) = mmInput.tail(info_.armDim + waistDim);
+    
     return std::move(std::make_pair(humanoidState, humanoidInput));
   }
 
@@ -273,6 +285,7 @@ namespace mobile_manipulator_controller
     const auto& currentTorsoState = currentHumanoidObservation.state.segment<6>(6);
     ocs2::vector_t desiredArmState = desiredState.tail(info_.armDim);
     ocs2::vector_t desiredArmInput = desiredInput.tail(info_.armDim);
+    ocs2::vector_t desiredWaistState = desiredState.tail(info_.waistDim + info_.armDim).head(info_.waistDim);
     // limitArmPosition(desiredArmState);
     const auto& currentArmState = currentHumanoidObservation.state.tail(info_.armDim);
     
@@ -286,7 +299,7 @@ namespace mobile_manipulator_controller
       sensor_msgs::JointState msg;
       msg.name.resize(q_arm.size());
       for (int i = 0; i < q_arm.size(); ++i) {
-        msg.name[i] = "arm_joint_" + std::to_string(i + 1);
+        msg.name[i] = "arm_joint_" + std::to_string(i+1);
       }
       msg.header.stamp = ros::Time::now();
       
@@ -300,6 +313,15 @@ namespace mobile_manipulator_controller
     
       return std::move(msg);
     };
+    auto getWaistStatesMsg = [&](const vector_t& q_waist)
+    {
+      std_msgs::Float64MultiArray msg;
+      msg.data.resize(q_waist.size());
+      for (int i = 0; i < q_waist.size(); ++i) {
+        msg.data[i] = 180.0 / M_PI * q_waist[i]; // 转换为度
+      }
+      return std::move(msg);
+    };
     
     switch(controlType_)
     {
@@ -308,6 +330,7 @@ namespace mobile_manipulator_controller
       case ControlType::ArmOnly:
         humanoidArmTargetTrajectoriesPublisher_.publish(ros_msg_conversions::createTargetTrajectoriesMsg(goalArmTargetTrajectories));
         armTrajPublisher_.publish(getJointStatesMsg(desiredArmState, desiredArmInput));
+        waistTrajPublisher_.publish(getWaistStatesMsg(desiredWaistState));
         break;
       case ControlType::BaseOnly:
         // controlBasePos(mmState, mmInput);只控制base没有意义
@@ -316,6 +339,7 @@ namespace mobile_manipulator_controller
         controlBasePos(mmState, mmInput);
         humanoidArmTargetTrajectoriesPublisher_.publish(ros_msg_conversions::createTargetTrajectoriesMsg(goalArmTargetTrajectories));
         armTrajPublisher_.publish(getJointStatesMsg(desiredArmState, desiredArmInput));
+        waistTrajPublisher_.publish(getWaistStatesMsg(desiredWaistState));
         break;
       default:
         break;

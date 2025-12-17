@@ -1,0 +1,1 @@
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", GROUP="dialout", MODE="0777", SYMLINK+="H12_log_channel", RUN+="/bin/stty -F /dev/%k 57600 cs8 -cstopb -parity raw -echo -icanon"

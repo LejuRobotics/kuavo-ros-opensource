@@ -1,0 +1,53 @@
+<launch>
+  <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+  <param name="robot_version"    value="$(arg robot_version)"/>
+  <arg name="use_xacro" value="$(eval int(arg('robot_version')) >= 40)"/>
+  
+  <arg name="use_grab_box_scene" default="false"/>
+  <arg name="world_name"  default="$(find gazebo_ros)/worlds/empty.world"/>
+  <arg name="use_kuavo" value="$(eval int(arg('robot_version')) >= 40)"/>
+  
+  <!-- 地面 AprilTag 参数 -->
+  <arg name="use_ground_apriltags" default="true" doc="是否加载地面AprilTag"/>
+  
+  <!-- Start Gazebo -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="false"/>
+  </include>
+
+  <!-- 等待 Gazebo 完全启动后再加载 AprilTag -->
+  <group if="$(arg use_ground_apriltags)">
+    <include file="$(find gazebo_sim)/launch/load_ground_apriltags.launch">
+      <arg name="use_ground_apriltags" value="$(arg use_ground_apriltags)"/>
+    </include>
+  </group>
+
+  <!-- Load URDF or XACRO file based on robot version -->
+  <group if="$(arg use_xacro)">
+    <!-- For versions 40, 41, 42, 43, 45 -->
+    <param name="robot_description" command="$(find xacro)/xacro $(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version)_gazebo.xacro"/>
+    <!-- static tf transform -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="camera_to_robot_frame" args="0 0 0 0 0 0 camera_base camera_base_link" />
+    <!-- camera meta data And Gobal tf transform -->
+    <include file="$(find realsense_sim_metadata)/launch/metadata_start.launch">
+      <arg name="camera_name" value="camera"/>
+      <arg name="use_nvblox" value="false"/>
+      <arg name="use_tf" value="true"/>
+    </include>
+  </group>
+
+  <group unless="$(arg use_xacro)">
+    <!-- For versions 30, 31 32 -->
+    <param name="robot_description" command="$(find xacro)/xacro $(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version)_gazebo.urdf"/>
+  </group>
+
+  <!-- Spawn URDF model into Gazebo -->
+  <node name="spawn_robot" pkg="gazebo_ros" type="spawn_model" 
+        args="-urdf -model biped_s$(arg robot_version) -param robot_description -x 0 -y 0 -z 1.0"/>
+
+  <!-- Load controller configuration -->
+  <rosparam file="$(find kuavo_assets)/models/biped_s$(arg robot_version)/config/controllers.yaml"/>
+
+</launch>

@@ -69,6 +69,7 @@ namespace mobile_manipulator_controller
     ros::Publisher humanoidCmdVelPublisher_;
     ros::Publisher humanoidCmdPosPublisher_;
     ros::Publisher armTrajPublisher_;
+    ros::Publisher waistTrajPublisher_;
     ros::Publisher mmStatePublisher_;
     ros::Publisher mmControlTypePublisher_;
     ros::ServiceServer kinematicMpcControlSrv_;
@@ -82,6 +83,7 @@ namespace mobile_manipulator_controller
     double terrain_height_{0};
     size_t humanoidStateDim_{38};//12+12+14
     size_t humanoidInputDim_{62};//3*8+2*6+12+14
+    int waistDof_;
     bool recievedObservation_ = false;
     
     // Control configuration

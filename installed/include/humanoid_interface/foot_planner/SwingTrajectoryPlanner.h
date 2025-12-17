@@ -76,7 +76,6 @@ class SwingTrajectoryPlanner {
     bool enable_dynamic_q = false;
     bool enable_dynamic_r = false;
     double slope_planning_threshold = 5.0;
-    bool enable_dynamic_qr = false; // 使能动态QR
 
   };
 

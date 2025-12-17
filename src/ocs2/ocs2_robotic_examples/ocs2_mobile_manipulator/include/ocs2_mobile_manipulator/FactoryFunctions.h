@@ -68,7 +68,7 @@ PinocchioInterface createPinocchioInterface(const std::string& robotUrdfPath, co
  * @return ManipulatorModelInfo
  */
 ManipulatorModelInfo createManipulatorModelInfo(const PinocchioInterface& interface, const ManipulatorModelType& type,
-                                                const std::string& baseFrame, const std::vector<std::string>& eeFrames);
+                                                const std::string& baseFrame, const std::vector<std::string>& eeFrames, const int waistDof);
 
 /** Load ManipulatorModelType for a config file */
 ManipulatorModelType loadManipulatorType(const std::string& configFilePath, const std::string& fieldName = "manipulatorModelType");

@@ -150,6 +150,13 @@ class ControlEndEffectorWebsocket:
 class ControlRobotArmWebsocket:
     def __init__(self):
         websocket = WebSocketKuavoSDK()
+        self._pub_ctrl_arm_traj_arm_collision =  roslibpy.Topic(websocket.client,'/arm_collision/kuavo_arm_traj', 'sensor_msgs/JointState')
+        self._pub_ctrl_arm_target_poses_arm_collision = roslibpy.Topic(websocket.client, '/arm_collision/kuavo_arm_target_poses', 'kuavo_msgs/armTargetPoses')
+        self._sub_arm_collision_info = roslibpy.Topic(websocket.client, '/arm_collision/info', 'kuavo_msgs/armCollisionCheckInfo')
+        self._sub_arm_collision_info.subscribe(self.callback_arm_collision_info)
+        self._is_collision = False
+        self.arm_collision_enable = False
+        #正常轨迹发布
         self._pub_ctrl_arm_traj = roslibpy.Topic(websocket.client, '/kuavo_arm_traj', 'sensor_msgs/JointState')
         self._pub_ctrl_arm_target_poses = roslibpy.Topic(websocket.client, '/kuavo_arm_target_poses', 'kuavo_msgs/armTargetPoses')
         self._pub_ctrl_hand_pose_cmd = roslibpy.Topic(websocket.client, '/mm/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
@@ -166,13 +173,54 @@ class ControlRobotArmWebsocket:
                 "name": ["arm_joint_" + str(i) for i in range(0, 14)],
                 "position": [float(180.0 / np.pi * q) for q in joint_q]  # convert to degree
             }
-            self._pub_ctrl_arm_traj.publish(roslibpy.Message(msg))
+            if self.arm_collision_enable:
+                self._pub_ctrl_arm_traj_arm_collision.publish(roslibpy.Message(msg))
+            else:
+                self._pub_ctrl_arm_traj.publish(roslibpy.Message(msg))
             return True
         except Exception as e:
             SDKLogger.error(f"publish robot arm traj: {e}")
         return False
-        
-    def pub_arm_target_poses(self, times:list, joint_q:list):
+
+    def is_arm_collision_mode(self)->bool:
+        return self.arm_collision_enable
+
+    def set_arm_collision_mode(self, enable: bool):
+        """
+            Set arm collision mode
+        """
+        self.arm_collision_enable = enable
+        websocket = WebSocketKuavoSDK()
+        srv_set_arm_collision_mode_srv = roslibpy.Service(websocket.client, '/arm_collision/set_arm_moving_enable', 'std_srvs/SetBool')
+        req = {
+            "data": enable
+        }
+        resp = srv_set_arm_collision_mode_srv.call(req)
+        if not resp.get('success', False):
+            SDKLogger.error(f"Failed to set arm collision mode: {resp.get('message', '')}")
+
+    def is_arm_collision(self)->bool:
+        return self._is_collision
+
+    def callback_arm_collision_info(self, msg):
+        self._is_collision = True
+        SDKLogger.info(f"Arm collision detected")
+
+    def release_arm_collision_mode(self):
+        self._is_collision = False
+    
+    def wait_arm_collision_complete(self):
+        if self._is_collision:
+            websocket = WebSocketKuavoSDK()
+            srv_wait_arm_collision_complete_srv = roslibpy.Service(websocket.client, '/arm_collision/wait_complete', 'std_srvs/SetBool')
+            req = {
+                "data": True
+            }
+            resp = srv_wait_arm_collision_complete_srv.call(req)
+            if not resp.get('success', False):
+                SDKLogger.error(f"Failed to wait arm collision complete: {resp.get('message', '')}")
+
+    def pub_arm_target_poses(self, times:list, joint_q:list)->bool:
         try:
             msg_values = []
             for i in range(len(joint_q)):
@@ -182,7 +230,10 @@ class ControlRobotArmWebsocket:
                 "times": [float(q) for q in times],
                 "values": msg_values
             }
-            self._pub_ctrl_arm_target_poses.publish(roslibpy.Message(msg))
+            if self.arm_collision_enable:
+                self._pub_ctrl_arm_target_poses_arm_collision.publish(roslibpy.Message(msg))
+            else:
+                self._pub_ctrl_arm_target_poses.publish(roslibpy.Message(msg))
             return True
         except Exception as e:
             SDKLogger.error(f"publish arm target poses: {e}")
@@ -323,6 +374,49 @@ class ControlRobotArmWebsocket:
         except Exception as e:
             SDKLogger.error(f"Service call failed: {e}")
         return None
+
+""" Control Robot Waist """
+
+class ControlRobotWaistWebsocket:
+    def __init__(self):
+        # 创建 WebSocket 客户端
+        websocket = WebSocketKuavoSDK()
+
+        # Publisher：发布到 /robot_waist_motion_data，消息类型 std_msgs/Float64MultiArray
+        self._pub_ctrl_robot_waist = roslibpy.Topic(
+            websocket.client,
+            '/robot_waist_motion_data',
+            'std_msgs/Float64MultiArray'
+        )
+        self._pub_ctrl_robot_waist.advertise()
+
+    def connect(self, timeout: float = 1.0) -> bool:
+        return True
+
+    def pub_control_robot_waist(self, waistPos: list) -> bool:
+        """
+        发布腰部位置控制命令 (WebSocket)
+        参数:
+            waistPos: 长度为 1 的数组，例如 [30.0]
+        """
+        # 检查输入维度
+        if len(waistPos) != 1:
+            SDKLogger.error("Waist data must be 1-dimensional")
+            return False
+
+        try:
+            # roslibpy 方式构建消息
+            msg = {
+                "data": [float(waistPos[0])]
+            }
+
+            # 发布
+            self._pub_ctrl_robot_waist.publish(roslibpy.Message(msg))
+            return True
+
+        except Exception as e:
+            SDKLogger.error(f"Publish waist pos failed: {e}")
+            return False
 
 
 """ Control Robot Head """
@@ -641,6 +735,7 @@ class KuavoRobotControlWebsocket:
                 self.kuavo_arm_control = ControlRobotArmWebsocket()
                 self.kuavo_motion_control = ControlRobotMotionWebsocket()
                 self.kuavo_arm_ik_fk = KuavoRobotArmIKFKWebsocket()
+                self.kuavo_waist_control = ControlRobotWaistWebsocket()
             except Exception as e:
                 SDKLogger.error(f"Failed to initialize KuavoRobotControlWebsocket: {e}")
                 raise
@@ -747,6 +842,15 @@ class KuavoRobotControlWebsocket:
         if len(postions) != 2 or len(velocities) != 2 or len(torques) != 2:
                 raise ValueError("Position, velocity, and torque lists must have a length of 2.")
         return self.kuavo_eef_control.srv_control_leju_claw(postions, velocities, torques)
+    
+    def control_robot_waist(self, yaw: float) -> bool:
+        """
+            Control robot waist
+            Arguments:
+                - yaw:   waist yaw angle, radian
+        """
+        SDKLogger.debug(f"Control robot waist: {yaw}")
+        return self.kuavo_waist_control.pub_control_robot_waist(yaw)
 
     def control_robot_head(self, yaw:float, pitch:float)->bool:
         """
@@ -765,6 +869,32 @@ class KuavoRobotControlWebsocket:
                 - joint_data: list of joint data (degrees)
         """
         return self.kuavo_arm_control.pub_control_robot_arm_traj(joint_data)
+
+    def is_arm_collision(self)->bool:
+        return self.kuavo_arm_control.is_arm_collision()
+    
+    def is_arm_collision_mode(self)->bool:
+        """
+            Check if arm collision mode is enabled
+            Returns:
+                bool: True if collision mode is enabled, False otherwise
+        """
+        return self.kuavo_arm_control.is_arm_collision_mode()
+
+
+
+    def release_arm_collision_mode(self):
+        return self.kuavo_arm_control.release_arm_collision_mode()
+    
+    def wait_arm_collision_complete(self):
+        return self.kuavo_arm_control.wait_arm_collision_complete()
+
+    def set_arm_collision_mode(self, enable: bool):
+        """
+            Set arm collision mode
+        """
+        return self.kuavo_arm_control.set_arm_collision_mode(enable)
+
     
     def control_robot_arm_joint_trajectory(self, times:list, joint_q:list)->bool:
         """

@@ -1,0 +1,157 @@
+#########################################################
+# Kuavo 4 PRO 双 CANBUS 总线配置
+#########################################################
+canbus_interfaces:
+  canbus0:
+    type: BUSMUST_A                 # ANCHOR_CANBUS0_TYPE
+    name: "BM-CANFD-X1(6729) CH1"
+    nbitrate: 1000      # 仲裁段波特率
+    dbitrate: 2000     # 数据段波特率
+    nsamplepos: 75        # 仲裁段采样点 (%)
+    dsamplepos: 75        # 数据段采样点 (%)
+    enable: true          # 是否启用  预留字段，暂时没有用到
+  canbus1:
+    type: BUSMUST_B                 # ANCHOR_CANBUS1_TYPE
+    name: "BM-CANFD-X1(7012) CH1"
+    nbitrate: 1000      # 仲裁段波特率
+    dbitrate: 2000     # 数据段波特率
+    nsamplepos: 75        # 仲裁段采样点 (%)
+    dsamplepos: 75        # 数据段采样点 (%)
+    enable: true          # 是否启用
+#########################################################
+# canbus0 上的设备列表
+# 设备类型: motor, revo2_hand, lejuclaw
+# 电机默认参数: [vel, kp_pos, kd_pos, tor, kp_vel, kd_vel, ki_vel]
+# 
+# 注意: 如果是想禁用或者忽略设备请使用`ignore`字段, 不需要把设备Id改成0x00！
+# 注意: ignore 字段只是不使能设备，对应的数据还是会暂位的（即返回默认数据0）， 如果想要移除设备，请删除或者注释他
+#########################################################
+canbus0_devices:
+  # ///////////////  
+  - name: Larm_joint_02             # 设备名称
+    class: motor                    # 设备类型
+    device_id: 0x01                 # 设备ID
+    # [vel, kp_pos, kd_pos, tor, kp_vel, kd_vel, ki_vel]
+    params: [0, 35, 2, 0, 0, 0, 0]  # 电机默认的参数
+    ratio: 36                       # 减速比
+    negtive: false                  # 电机方向
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Larm_joint_03
+    class: motor
+    device_id: 0x02
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 36                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Larm_joint_04
+    class: motor
+    device_id: 0x03
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 36                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Larm_joint_05
+    class: motor
+    device_id: 0x04
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Larm_joint_06
+    class: motor
+    device_id: 0x05
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Larm_joint_07
+    class: motor
+    device_id: 0x06
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Head_yaw
+    class: motor
+    device_id: 0x0D
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 36                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Head_pitch
+    class: motor
+    device_id: 0x0E
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 36                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Lhand_revo2_hand        # ANCHOR_L_NAME
+    class: revo2_hand             # ANCHOR_L_CLASS
+    device_id: 0x01               # ANCHOR_L_DEVICE_ID
+    ignore: false                 # ANCHOR_L_IGNORE
+#########################################################
+# canbus1 上的设备列表
+#########################################################
+canbus1_devices:
+  # ///////////////
+  - name: Rarm_joint_02
+    class: motor
+    device_id: 0x07
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 36                       # 减速比
+    negtive: false
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Rarm_joint_03
+    class: motor
+    device_id: 0x08
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 36                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Rarm_joint_04
+    class: motor
+    device_id: 0x09
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 36                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Rarm_joint_05
+    class: motor
+    device_id: 0x0A
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Rarm_joint_06
+    class: motor
+    device_id: 0x0B
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ///////////////
+  - name: Rarm_joint_07
+    class: motor
+    device_id: 0x0C
+    params: [0, 35, 2, 0, 0, 0, 0]
+    ratio: 25                       # 减速比
+    negtive: true
+    ignore: false                   # 是否忽略/禁用
+  # ////////////////////////////////////////////////////
+  - name: Rhand_revo2_hand        # ANCHOR_R_NAME
+    class: revo2_hand             # ANCHOR_R_CLASS
+    device_id: 0x02               # ANCHOR_R_DEVICE_ID
+    ignore: false                 # ANCHOR_R_IGNORE
+  # ////////////////////////////////////////////////////

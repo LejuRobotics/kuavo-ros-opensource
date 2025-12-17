@@ -6,22 +6,6 @@
 <robot name="biped_v3" xmlns:drake="https://drake.mit.edu">
   <link name="torso">
     <inertial>
-      <origin xyz="0.00227055 0.0 0.1163574" rpy="0 0 0" />
-      <mass value="11.23288758" />
-      <inertia ixx="0.06356019" ixy="0.0" ixz="0.0" iyy="0.05314952" iyz="0.0" izz="0.03434989" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/torso.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <link name="waist">
-    <inertial>
       <origin xyz="0.0016929 0.0 -0.11846153" rpy="0 0 0" />
       <mass value="3.17438719" />
       <inertia ixx="0.02255479" ixy="0.0" ixz="0.0" iyy="0.01532956" iyz="0.0" izz="0.0166717" />
@@ -36,10 +20,26 @@
       </material>
     </visual>
   </link>
-  <joint name="waist" type="fixed">
+  <link name="waist_yaw_link">
+    <inertial>
+      <origin xyz="0.00227055 0.0 0.1163574" rpy="0 0 0" />
+      <mass value="11.23288758" />
+      <inertia ixx="0.06356019" ixy="0.0" ixz="0.0" iyy="0.05314952" iyz="0.0" izz="0.03434989" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../meshes/torso.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_yaw_joint" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="torso" />
-    <child link="waist" />
+    <child link="waist_yaw_link" />
     <axis xyz="0 0 1" />
     <limit lower="-2.0943951023932" upper="2.0943951023932" effort="50" velocity="8.37333333333333" />
   </joint>
@@ -61,7 +61,7 @@
   </link>
   <joint name="leg_l1_joint" type="revolute">
     <origin xyz="0.0 0.1143350698 -0.21673502307" rpy="0 0 0" />
-    <parent link="waist" />
+    <parent link="torso" />
     <child link="leg_l1_link" />
     <axis xyz="0 0.70711 -0.70711" />
     <limit lower="-1.65806278939461" upper="1.5707963267949" effort="180" velocity="23.55" />
@@ -226,7 +226,7 @@
   </link>
   <joint name="leg_r1_joint" type="revolute">
     <origin xyz="0.0 -0.1143350698 -0.21673502307" rpy="0 0 0" />
-    <parent link="waist" />
+    <parent link="torso" />
     <child link="leg_r1_link" />
     <axis xyz="0 -0.70711 -0.70711" />
     <limit lower="-1.65806278939461" upper="1.5707963267949" effort="180" velocity="23.55" />

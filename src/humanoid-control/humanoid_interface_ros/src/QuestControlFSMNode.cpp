@@ -4,6 +4,7 @@
 #include <vector>
 #include "kuavo_msgs/JoySticks.h"
 #include <string>
+#include <std_msgs/String.h>
 
 #include <ros/init.h>
 #include <ros/package.h>
@@ -33,6 +34,9 @@
 #include <kuavo_msgs/getCurrentGaitName.h>
 #include <std_srvs/Trigger.h>
 #include "utils/singleStepControl.hpp"
+#include <kuavo_msgs/switchToNextController.h>
+#include <kuavo_msgs/headBodyPose.h>
+#include <geometry_msgs/PoseStamped.h>
 
 namespace ocs2
 {
@@ -57,6 +61,36 @@ namespace ocs2
         float min_value;     // 摇杆区间最小值
         float max_value;     // 摇杆区间最大值
         kuavo_msgs::footPoseTargetTrajectories trajectory;  // 足部轨迹
+    };
+
+    // 定义转向区间
+    static const std::vector<TurnStepZone> kTurnZones = {
+        // 右转区间 (0.0~1.0)
+        {0.0f, 0.15f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.01, -0.01, 0.0, -15.0)
+        })},  // 小角度右转
+         {0.151f, 0.45f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.03, -0.03, 0.0, -30.0)
+        })},  // 小角度右转
+        {0.451f, 0.75f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.04, -0.04, 0.0, -45.0)
+        })}, // 中角度右转
+        {0.751f, 1.0f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.06, -0.06, 0.0, -60.0)
+        })}, // 大角度右转
+        // 左转区间 (-1.0~0.0)
+         {-0.15f, 0.0f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.01, 0.01, 0.0, 15.0)
+        })}, // 小角度左转
+        {-0.45f, -0.15f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.03, 0.03, 0.0, 30.0)
+        })}, // 小角度左转
+        {-0.75f, -0.451f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.04, 0.04, 0.0, 45.0)
+        })}, // 中角度左转
+        {-1.0f, -0.751f, CreateFootPoseTrajectory({
+            Eigen::Vector4d(-0.06, 0.06, 0.0, 60.0)
+        })} // 大角度左转
     };
 
     // 60度轨迹数据（已移除，但保留注释）
@@ -90,6 +124,7 @@ namespace ocs2
             // Get node parameters
             std::string referenceFile;
             nodeHandle.getParam("/referenceFile", referenceFile);
+            std::cout << "get referenceFile: " << referenceFile << std::endl;
 
             // loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
             RobotVersion rb_version(3, 4);
@@ -100,12 +135,24 @@ namespace ocs2
                 rb_version = RobotVersion::create(rb_version_int);
             }
             
+            // 获取机器人类型
+            if (nodeHandle.hasParam("/robot_type"))
+            {
+                nodeHandle.getParam("/robot_type", robot_type_);
+                std::cout << "Robot type: " << robot_type_ << " (1 for wheel robot, 0 for biped)" << std::endl;
+                
+                if(1 == robot_type_)
+                {
+                    get_observation_ = true;
+                }
+            }
             auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
             auto kuavo_settings = drake_interface_->getKuavoSettings();
             waist_dof_ = kuavo_settings.hardware_settings.num_waist_joints;
             default_joint_state_ = drake_interface_->getDefaultJointState();
             com_height_ = drake_interface_->getIntialHeight();
-            //only_half_up_body_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
+            only_half_up_body_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
+            std::cout << "only_half_up_body: " << only_half_up_body_ << std::endl;
             if(nodeHandle.hasParam("/only_half_up_body"))
             {
                 nodeHandle.getParam("/only_half_up_body", only_half_up_body_);
@@ -122,9 +169,6 @@ namespace ocs2
             loadData::loadEigenMatrix(referenceFile, "squatBaseState", squat_base_state_);
             loadData::loadEigenMatrix(referenceFile, "squatJointState", squat_arm_state_);
             loadData::loadCppDataType(referenceFile, "armMode", armMode_);
-
-            // 加载转向区间配置
-            loadTurnZones(nodeHandle);
 
             // gait
             std::string gaitCommandFile;
@@ -152,6 +196,9 @@ namespace ocs2
             change_arm_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
             
             get_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_get_arm_ctrl_mode");
+            whole_torso_ctrl_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/vr_whole_torso_ctrl", 1);
+
+            cmd_torso_pose_pub_ = nodeHandle_.advertise<geometry_msgs::PoseStamped>("/cmd_torso_pose_vr", 1);
             
             // 添加 enable_wbc_arm_trajectory_control 服务客户端
             enable_wbc_arm_trajectory_control_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/enable_wbc_arm_trajectory_control");
@@ -180,6 +227,9 @@ namespace ocs2
 
             // 添加arm_collision_control服务
             arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
+            
+            // 添加切换控制器服务客户端
+            switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
         }
 
         void run()
@@ -249,6 +299,20 @@ namespace ocs2
             else
             {
                 ROS_ERROR("Failed to call SetArmModeSrv");
+            }
+
+                        // 调用服务
+            if (change_arm_mode_service_VR_client_.call(srv))
+            {
+                ROS_INFO("/change_arm_ctrl_mode call successful");
+                // 发布当前手臂模式
+                std_msgs::Int32 arm_mode_msg;
+                arm_mode_msg.data = mode;
+                arm_mode_pub_.publish(arm_mode_msg);
+            }
+            else
+            {
+                ROS_ERROR("Failed to call /change_arm_ctrl_mode");
             }
         }
 
@@ -350,6 +414,37 @@ namespace ocs2
             }
         }
 
+        void callSwitchToNextControllerSrv()
+        {
+            kuavo_msgs::switchToNextController srv;
+            
+            // 等待服务可用
+            if (!switch_to_next_controller_client_.waitForExistence(ros::Duration(2.0)))
+            {
+                ROS_WARN("Switch to next controller service not available, skipping call");
+                return;
+            }
+
+            // 调用服务
+            if (switch_to_next_controller_client_.call(srv))
+            {
+                if (srv.response.success)
+                {
+                    ROS_INFO("Switch to next controller successful: %s", srv.response.message.c_str());
+                    ROS_INFO("Switched from %s (index: %d) to %s (index: %d)", 
+                             srv.response.current_controller.c_str(), srv.response.current_index,
+                             srv.response.next_controller.c_str(), srv.response.next_index);
+                }
+                else
+                {
+                    ROS_WARN("Switch to next controller failed: %s", srv.response.message.c_str());
+                }
+            }
+            else
+            {
+                ROS_ERROR("Failed to call switch to next controller service");
+            }
+        }
         void callTerminateSrv()
         {
         std::cout << "tigger callTerminateSrv" << std::endl;
@@ -375,167 +470,6 @@ namespace ocs2
         }
 
     private:
-        // 从YAML文件加载转向区间配置
-        void loadTurnZones(ros::NodeHandle& nodeHandle) {
-            turn_zones_.clear();
-            
-            // 获取YAML文件路径
-            std::string pkg_path = ros::package::getPath("humanoid_interface_ros");
-            std::string yaml_file = pkg_path + "/config/step_turn.yaml";
-            
-            std::cout << "Loading turn zones from: " << yaml_file << std::endl;
-            
-            // 加载YAML文件到参数服务器
-            std::string command = "rosparam load " + yaml_file + " /quest_turn_config";
-            int result = system(command.c_str());
-            if (result != 0) {
-                ROS_WARN("Failed to load turn zones YAML file, using default configuration");
-                loadDefaultTurnZones();
-                return;
-            }
-            
-            // 创建临时NodeHandle用于读取配置
-            ros::NodeHandle config_nh("/quest_turn_config");
-            
-            // 读取转向区间数量
-            int num_turn_zones = 0;
-            if (!config_nh.getParam("turn_zones_count", num_turn_zones) || num_turn_zones <= 0) {
-                ROS_WARN("Invalid or missing turn_zones_count, using default configuration");
-                loadDefaultTurnZones();
-                return;
-            }
-            
-            std::cout << "Loading " << num_turn_zones << " turn zones from YAML file..." << std::endl;
-            
-            // 用于存储左转区间的临时数据
-            struct LeftTurnZoneConfig {
-                float min_value;
-                float max_value;
-                double body_x;
-                double body_y;
-                double body_z;
-                double body_yaw;
-            };
-            std::vector<LeftTurnZoneConfig> left_turn_configs;
-            
-            // 读取每个左转区间的配置
-            XmlRpc::XmlRpcValue left_turn_zones;
-            if (!config_nh.getParam("left_turn_zones", left_turn_zones)) {
-                ROS_WARN("Failed to read left_turn_zones, using default configuration");
-                loadDefaultTurnZones();
-                return;
-            }
-            
-            if (left_turn_zones.getType() != XmlRpc::XmlRpcValue::TypeArray) {
-                ROS_WARN("left_turn_zones is not an array, using default configuration");
-                loadDefaultTurnZones();
-                return;
-            }
-            
-            for (int i = 0; i < left_turn_zones.size(); ++i) {
-                LeftTurnZoneConfig config;
-                
-                XmlRpc::XmlRpcValue& zone = left_turn_zones[i];
-                
-                // 读取各个参数
-                config.min_value = static_cast<double>(zone["min_value"]);
-                config.max_value = static_cast<double>(zone["max_value"]);
-                config.body_x = static_cast<double>(zone["body_x"]);
-                config.body_y = static_cast<double>(zone["body_y"]);
-                config.body_z = static_cast<double>(zone["body_z"]);
-                config.body_yaw = static_cast<double>(zone["body_yaw"]);
-                
-                left_turn_configs.push_back(config);
-                
-                std::cout << "Loaded left turn zone " << i << ": min=" << config.min_value 
-                          << ", max=" << config.max_value 
-                          << ", pose=[" << config.body_x << ", " << config.body_y 
-                          << ", " << config.body_z << ", " << config.body_yaw << "]" << std::endl;
-            }
-            
-            // 为左转和右转预留空间
-            turn_zones_.reserve(left_turn_configs.size() * 2);
-            
-            // 根据左转配置生成右转区间（正值范围）
-            // 规则：左转的值取反，y和yaw值取反
-            for (int i = left_turn_configs.size() - 1; i >= 0; --i) {
-                const auto& left_config = left_turn_configs[i];
-                
-                TurnStepZone right_zone;
-                // 右转区间：将左转的负值范围映射到正值范围
-                right_zone.min_value = -left_config.max_value;
-                right_zone.max_value = -left_config.min_value;
-                
-                // 右转姿态：x保持不变，y和yaw取反
-                right_zone.trajectory = CreateFootPoseTrajectory({
-                    Eigen::Vector4d(left_config.body_x, -left_config.body_y, 
-                                   left_config.body_z, -left_config.body_yaw)
-                });
-                
-                turn_zones_.push_back(right_zone);
-                
-                std::cout << "Generated right turn zone " << (left_turn_configs.size() - 1 - i) 
-                          << ": min=" << right_zone.min_value 
-                          << ", max=" << right_zone.max_value 
-                          << ", pose=[" << left_config.body_x << ", " << -left_config.body_y 
-                          << ", " << left_config.body_z << ", " << -left_config.body_yaw << "]" << std::endl;
-            }
-            
-            // 添加左转区间（负值范围）
-            for (const auto& left_config : left_turn_configs) {
-                TurnStepZone left_zone;
-                left_zone.min_value = left_config.min_value;
-                left_zone.max_value = left_config.max_value;
-                
-                // 左转姿态：直接使用配置值
-                left_zone.trajectory = CreateFootPoseTrajectory({
-                    Eigen::Vector4d(left_config.body_x, left_config.body_y, 
-                                   left_config.body_z, left_config.body_yaw)
-                });
-                
-                turn_zones_.push_back(left_zone);
-            }
-            
-            std::cout << "Total turn zones loaded: " << turn_zones_.size() << std::endl;
-        }
-        
-        // 加载默认转向区间配置（备用方案）
-        void loadDefaultTurnZones() {
-            turn_zones_.clear();
-            
-            std::cout << "Loading default turn zones configuration..." << std::endl;
-            
-            // 右转区间 (0.0~1.0)
-            turn_zones_.push_back({0.0f, 0.15f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.01, -0.01, 0.0, -15.0)
-            })});
-            turn_zones_.push_back({0.151f, 0.45f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.03, -0.03, 0.0, -30.0)
-            })});
-            turn_zones_.push_back({0.451f, 0.75f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.04, -0.04, 0.0, -45.0)
-            })});
-            turn_zones_.push_back({0.751f, 1.0f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.06, -0.06, 0.0, -60.0)
-            })});
-            
-            // 左转区间 (-1.0~0.0)
-            turn_zones_.push_back({-0.15f, 0.0f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.01, 0.01, 0.0, 15.0)
-            })});
-            turn_zones_.push_back({-0.45f, -0.15f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.03, 0.03, 0.0, 30.0)
-            })});
-            turn_zones_.push_back({-0.75f, -0.451f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.04, 0.04, 0.0, 45.0)
-            })});
-            turn_zones_.push_back({-1.0f, -0.751f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.06, 0.06, 0.0, 60.0)
-            })});
-            
-            std::cout << "Default turn zones loaded: " << turn_zones_.size() << std::endl;
-        }
-
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
         {
             joystick_data_ = *msg;
@@ -555,19 +489,47 @@ namespace ocs2
             current_head_body_pose_ = *msg;
             current_head_body_pose_.body_pitch = std::max(3*M_PI/180.0, std::min(current_head_body_pose_.body_pitch, 35*M_PI/180.0));
 
-            // 检查是否正在进行XY按键摇杆控制（高优先级），如果是则跳过VR腰部控制
-            bool joystick_torso_control_active = (joystick_data_.left_second_button_touched && joystick_data_.left_first_button_touched);
-            
             // 在腰部控制模式下且没有XY按键摇杆控制时，发布VR腰部控制指令
-            if (torso_control_enabled_ && !joystick_torso_control_active)
+            if (torso_control_enabled_)
             {
+                // 计算相对于零点的腰部位置
+                double current_yaw = current_head_body_pose_.body_yaw;
+                double relative_yaw = current_yaw - torso_yaw_zero_;
+                double current_height = current_head_body_pose_.body_height;
+                double relative_height = current_height - body_height_zero_;  // 计算相对于零点的高度
+
+                //轮臂躯干控制
+                auto lb_body_pitch_diff = std::max(-15*M_PI/180.0, std::min((current_head_body_pose_.body_pitch - torso_pitch_zero_), 30*M_PI/180.0));
+                Eigen::Quaterniond quat;
+                quat = Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitX()) *  // roll = 0
+                Eigen::AngleAxisd(lb_body_pitch_diff, Eigen::Vector3d::UnitY()) *
+                Eigen::AngleAxisd(relative_yaw, Eigen::Vector3d::UnitZ());
+
+                double current_x = current_head_body_pose_.body_x;
+                double lb_relative_height = current_height - body_height_zero_;  // 计算相对于零点的高度
+                lb_relative_height = std::max(-0.20, std::min(lb_relative_height, 0.3));  // 计算相对于零点的高度
+                double lb_relative_x = 0.6 * std::max(-0.15, std::min((current_x - body_x_zero_), 0.5));  // 计算相对于零点的x
+                geometry_msgs::PoseStamped cmd_torso_pose;
+                cmd_torso_pose.pose.position.x = lb_relative_x;
+                cmd_torso_pose.pose.position.y = 0.0;
+                cmd_torso_pose.pose.position.z = lb_relative_height;
+                cmd_torso_pose.pose.orientation.x = quat.x();
+                cmd_torso_pose.pose.orientation.y = quat.y();
+                cmd_torso_pose.pose.orientation.z = quat.z();
+                cmd_torso_pose.pose.orientation.w = quat.w();
+                cmd_torso_pose.header.stamp = ros::Time::now();
+                cmd_torso_pose.header.frame_id = "torso_link";
+                cmd_torso_pose_pub_.publish(cmd_torso_pose);
+
+                // 检查是否正在进行XY按键摇杆控制（高优先级），如果是则跳过VR腰部控制
+                bool joystick_torso_control_active = (joystick_data_.left_second_button_touched && joystick_data_.left_first_button_touched);
+                if(joystick_torso_control_active)
+                {
+                    return;
+                }
                 // 腰部yaw控制（如果支持腰部自由度）
                 if (waist_dof_ > 0)
                 {
-                    // 计算相对于零点的腰部位置
-                    double current_yaw = current_head_body_pose_.body_yaw;
-                    double relative_yaw = current_yaw - torso_yaw_zero_;
-                    
                     // 发布腰部控制指令
                     controlWaist(relative_yaw * 180.0 / M_PI); // 转换为角度
                 }
@@ -597,8 +559,6 @@ namespace ocs2
                 
                 // 高度控制
                 // 根据msg中的pose高度发布高度指令（使用相对高度）
-                double current_height = current_head_body_pose_.body_height;
-                double relative_height = current_height - body_height_zero_;  // 计算相对于零点的高度
                 //std::cout << "相对高度: " << relative_height << std::endl;
                 //限制相对高度在[-0.4,0.1]之间
                 relative_height = std::max(-0.25, std::min(relative_height, 0.1));
@@ -648,6 +608,11 @@ namespace ocs2
                     callEnableWbcArmTrajectorySrv(1);
                     return;
                 }
+                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+                {
+                    callSwitchToNextControllerSrv();
+                    return;
+                }
             }
             if (joystick_data_.left_grip > 0.5)
             {
@@ -688,7 +653,7 @@ namespace ocs2
             
             
             // 腰部控制逻辑
-            if (joystick_data_.left_trigger > 0.5)
+            if (joystick_data_.left_trigger > 0.5) // 左边扳机按下，进入腰部控制模式
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 左边第二个按钮按下，切换腰部控制模式
                 {
@@ -696,27 +661,38 @@ namespace ocs2
                     {
                         // 启用腰部控制模式
                         torso_control_enabled_ = true;
+                        torso_pitch_zero_= current_head_body_pose_.body_pitch;
                         torso_yaw_zero_ = current_head_body_pose_.body_yaw; // 记录当前腰部位置作为零点
-                        body_height_zero_ = current_head_body_pose_.body_height; // 记录当前高度作为零点
                         torso_roll_zero_ = current_head_body_pose_.body_roll;
+
+                        body_height_zero_ = current_head_body_pose_.body_height; // 记录当前高度作为零点
+                        body_x_zero_ = current_head_body_pose_.body_x; // 记录当前x作为零点
                         torso_control_start_time_ = ros::Time::now();
-                        
-                        if(waist_dof_ == 0)
+                        std::cout << "腰部控制模式已启用，腰部零点yaw: " << torso_yaw_zero_  << ", 腰部零点pitch: " << torso_pitch_zero_ 
+                                << "，高度零点: " << body_height_zero_ << ", x零点: " << body_x_zero_ << std::endl;
+                        std_msgs::Bool whole_torso_ctrl_msg;
+                        whole_torso_ctrl_msg.data = true;
+                        whole_torso_ctrl_pub_.publish(whole_torso_ctrl_msg);
+
+                        if(0 == waist_dof_ && 1 != robot_type_)
                         {
                             // 失能GaitReceiver的自动步态模式
                             callAutoGaitModeSrv(false);
                             // 调用VR腰部控制服务，启用VR腰部控制动态Q矩阵
                             callVRWaistControlSrv(true);
                         }
-                        
-                        std::cout << "腰部控制模式已启用，腰部零点: " << torso_yaw_zero_ 
-                                << "，高度零点: " << body_height_zero_ << std::endl;
                     }
                     else
                     {
                         // 关闭腰部控制模式
                         torso_control_enabled_ = false;
-                        if(waist_dof_ == 0)
+
+                        std_msgs::Bool whole_torso_ctrl_msg;
+                        whole_torso_ctrl_msg.data = false;
+                        whole_torso_ctrl_pub_.publish(whole_torso_ctrl_msg);
+                        std::cout << "腰部控制模式已关闭" << std::endl;
+
+                        if(0 == waist_dof_ && 1 != robot_type_)
                         {
                             // 发送最后一帧，使用记录的relative_height和body_pitch
                             geometry_msgs::Twist cmd_pose;
@@ -820,7 +796,7 @@ namespace ocs2
             waist_yaw = std::max(-max_angle, std::min(waist_yaw, max_angle));
             std_msgs::Float64MultiArray msg;
             msg.data.resize(1);
-            msg.data[0] =  -waist_yaw;
+            msg.data[0] =  waist_yaw;
             std::cout << "waist_yaw" << waist_yaw <<std::endl;
             waist_motion_pub_.publish(msg);
         }
@@ -891,8 +867,8 @@ namespace ocs2
             int target_zone = -1;
 
             // 直接检测摇杆值所在的区间
-            for (size_t i = 0; i < turn_zones_.size(); ++i) {
-                if (right_x >= turn_zones_[i].min_value && right_x < turn_zones_[i].max_value) {
+            for (size_t i = 0; i < kTurnZones.size(); ++i) {
+                if (right_x >= kTurnZones[i].min_value && right_x < kTurnZones[i].max_value) {
                     target_zone = i;
                     break;
                 }
@@ -951,8 +927,8 @@ namespace ocs2
             }
     
             // 根据区间选择不同的控制方式
-            if (target_zone >= 0 && target_zone < static_cast<int>(turn_zones_.size()) &&
-                !turn_zones_[target_zone].trajectory.footPoseTrajectory.empty()) {
+            if (target_zone >= 0 && target_zone < static_cast<int>(kTurnZones.size()) &&
+                !kTurnZones[target_zone].trajectory.footPoseTrajectory.empty()) {
 
                 // 调用服务检查当前是否是Custom-Gait模式
                 std_srvs::SetBool gait_srv;
@@ -965,7 +941,7 @@ namespace ocs2
                     std::string current_gait = getCurrentGaitName();
                     bool is_stance = (current_gait == "stance");
                     if (is_stance) {
-                        foot_pose_target_pub_.publish(turn_zones_[target_zone].trajectory);
+                        foot_pose_target_pub_.publish(kTurnZones[target_zone].trajectory);
                         turn_step_zone_published_ = true;  // 标记已发布
                         turn_step_last_execute_time_ = ros::Time::now();  // 记录发布时间
                         ROS_WARN("Zone %d trajectory published - not Custom-Gait and current gait is stance", target_zone);
@@ -1048,7 +1024,7 @@ namespace ocs2
         void checkGaitSwitchCommand(const kuavo_msgs::JoySticks &joy_msg)
         {
             // 检查是否有gait切换指令
-            if (!joystick_data_prev_.right_first_button_pressed && joy_msg.right_first_button_pressed && joy_msg.left_trigger < 0.5 && !torso_control_enabled_)
+            if (!joystick_data_prev_.right_first_button_pressed && joy_msg.right_first_button_pressed && joy_msg.left_trigger < 0.5)
             {
                 publish_mode_sequence_temlate("stance");
                 publish_zero_spd();
@@ -1114,8 +1090,10 @@ namespace ocs2
             }
         }
 
-        void walkSpeedMode() {
-            if (!mode_changed_) {
+        void walkSpeedMode() 
+        {
+            if (!mode_changed_) 
+            {
                 mode_changed_ = true;
                 publish_mode_sequence_temlate("walk");   // "walk"
 
@@ -1123,8 +1101,18 @@ namespace ocs2
             }
             auto values_n = joystickNorm();
             auto values = getWalkValue(values_n, {0.2f, 0.1f, 8.0f});
-            sendWalkCommand(1, values);
-            previous_value_m_ = values_n;
+            // 如果是轮式机器人(s60)，使用专门的移动命令
+            if (1 == robot_type_) 
+            {  // 假设robot_type=1表示轮式机器人
+
+                sendWheelMoveCommand(values);
+                previous_value_m_ = values_n;
+            } 
+            else 
+            {
+                sendWalkCommand(1, values);
+                previous_value_m_ = values_n;
+            }
         }
 
         void walkPositionMode() {
@@ -1195,6 +1183,18 @@ namespace ocs2
             return false;
         }
 
+
+        void sendWheelMoveCommand(const std::vector<float>& values) 
+        {
+            // 直接发布速度指令
+            geometry_msgs::Twist vel;
+            vel.linear.x = values[0];
+            vel.linear.y = values[1];
+            vel.linear.z = command_height_;
+            vel.angular.z = 3.14 * values[2] / 180.0;
+            vel_control_pub_.publish(vel);
+            ROS_INFO("Wheel move command sent: values=%.2f, %.2f, %.2f", values[0], values[1], values[2]);
+        }
 
         void sendWalkCommand(int control_mode, const std::vector<float>& values) {
             ROS_INFO("Walk command sent: mode=%d, values=%.2f, %.2f, %.2f", control_mode, values[0], values[1], values[2]);
@@ -1395,21 +1395,24 @@ namespace ocs2
         ros::Publisher stop_pub_;
         ros::Publisher step_num_stop_pub_;
         ros::Publisher vel_control_pub_;
-
+        ros::Publisher whole_torso_ctrl_pub_;
         geometry_msgs::Twist cmdVel_;
 
         ros::ServiceClient change_arm_mode_service_client_;
         ros::ServiceClient change_arm_mode_service_VR_client_;
         ros::ServiceClient get_arm_mode_service_client_;
+
         ros::ServiceClient enable_wbc_arm_trajectory_control_client_;
         ros::ServiceClient vr_waist_control_service_client_;  // VR腰部控制动态Q矩阵服务客户端
         ros::ServiceClient auto_gait_mode_service_client_;    // GaitReceiver自动步态模式服务客户端
+        ros::ServiceClient switch_to_next_controller_client_; // 切换控制器服务客户端
         ros::ServiceServer arm_collision_control_service_;
 
         // 腰部控制相关的订阅者和发布者
         ros::Subscriber head_body_pose_sub_;
         ros::Publisher waist_motion_pub_;
         ros::Publisher cmd_pose_pub_;  // 用于发布高度和位置控制指令
+        ros::Publisher cmd_torso_pose_pub_;
 
         int current_arm_mode_{2};
 
@@ -1439,12 +1442,16 @@ namespace ocs2
 
         bool last_cmd_close_to_zero_{true};
         bool only_half_up_body_{false};
+        int robot_type_{0};  // 0: biped, 1: wheel robot
 
         // 腰部控制相关变量
         bool torso_control_enabled_;
         int waist_dof_{0};
+        double torso_pitch_zero_;
         double torso_yaw_zero_;
         double body_height_zero_;  // 记录进入控制模式时的高度零点
+        double body_x_zero_; // 记录进入控制模式时的x零点
+
         double torso_roll_zero_;
         ros::Time torso_control_start_time_;
         double last_relative_height_{0.0};  // 记录最后一次的相对高度
@@ -1463,7 +1470,6 @@ namespace ocs2
         ros::Time turn_step_last_execute_time_;          // 上次执行时间
         ros::Time turn_step_deadzone_enter_time_;        // 进入死区的时间
         bool turn_step_in_deadzone_{false};              // 是否在死区内
-        std::vector<TurnStepZone> turn_zones_;           // 转向区间配置（从YAML文件加载）
 
         ros::Publisher arm_mode_pub_;
         ros::Publisher foot_pose_target_pub_;

@@ -7,6 +7,7 @@ from kuavo_humanoid_sdk.interfaces.data_types import (
     KuavoImuData, KuavoJointData, KuavoOdometry, KuavoArmCtrlMode,EndEffectorState, 
     KuavoManipulationMpcControlFlow, KuavoManipulationMpcCtrlMode, KuavoManipulationMpcFrame)
 from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCore
+from kuavo_humanoid_sdk.kuavo.core.ros.param import make_robot_param
 
 class KuavoRobotState:
     def __init__(self, robot_type: str = "kuavo"):
@@ -126,7 +127,25 @@ class KuavoRobotState:
                 * acceleration: list[float] * arm_dof(14)
         """
         # Get arm joint states from index 12 to 25 (14 arm joints)
-        arm_joint_indices = range(12, 12+14)
+        
+        # Get ROS parameters for DOF values
+        robot_params = make_robot_param()
+        arm_dof = robot_params.get('arm_dof')
+        leg_dof = robot_params.get('leg_dof')
+        waist_dof = robot_params.get('waist_dof')
+        head_dof = robot_params.get('head_dof')
+        
+        # Check if any DOF value is None
+        if arm_dof is None or leg_dof is None or waist_dof is None or head_dof is None:
+            raise ValueError("Failed to get DOF values from ROS parameters")
+        
+        if len(self._rs_core.joint_data.position) == (leg_dof + waist_dof + arm_dof + head_dof):
+            arm_joint_indices = range(leg_dof + waist_dof, leg_dof + waist_dof + arm_dof)
+        # elif len(self._rs_core.joint_data.position) == 20:
+        #     arm_joint_indices = range(4, 4+14)
+        else:
+            raise ValueError(f"Joint data length is not 28 or 20: {len(self._rs_core.joint_data.position)}")
+
         return KuavoJointData(
             position=[self._rs_core.joint_data.position[i] for i in arm_joint_indices],
             velocity=[self._rs_core.joint_data.velocity[i] for i in arm_joint_indices],
@@ -199,6 +218,28 @@ class KuavoRobotState:
             velocity=[self._rs_core.joint_data.velocity[i] for i in head_joint_indices], 
             torque=[self._rs_core.joint_data.torque[i] for i in head_joint_indices],
             acceleration=[self._rs_core.joint_data.acceleration[i] for i in head_joint_indices]
+        )
+    
+    def waist_joint_state(self, waist_dof:int) -> KuavoJointData:
+        """获取机器人腰部关节的当前状态
+        获取机器人头部关节的当前状态数据，包括位置、速度、扭矩和加速度值。
+
+        Returns:
+            KuavoJointData: 包含头部关节状态的数据结构:
+                * position (list[float]): 关节位置，单位为弧度，长度=waist_dof
+                * velocity (list[float]): 关节速度，单位为rad/s，长度=waist_dof
+                * torque (list[float]): 关节扭矩，单位为Nm，长度=waist_dof
+                * acceleration (list[float]): 关节加速度，单位为rad/s^2，长度=waist_dof
+                
+        """
+        jointData = self._rs_core.joint_data
+        # Get waist joint states from 13 indices
+        waist_joint_indices = range(12, 12+waist_dof)
+        return KuavoJointData(
+            position=[jointData.position[i] for i in waist_joint_indices],
+            velocity=[jointData.velocity[i] for i in waist_joint_indices], 
+            torque=[jointData.torque[i] for i in waist_joint_indices],
+            acceleration=[jointData.acceleration[i] for i in waist_joint_indices]
         )
     
     def eef_state(self)->Tuple[EndEffectorState, EndEffectorState]:

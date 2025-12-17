@@ -27,7 +27,6 @@ void SensorDataPublisher::imuCallback(const sensor_msgs::Imu::ConstPtr &imu_msg)
 void SensorDataPublisher::waitForParams()
 {
     std::cout << "[SensorDataPublisher] waiting For Params ..." << std::endl;
-    int i = 0;
     while (ros::ok())
     {
         if (ros::param::has("/joint_state_controller/joint_names"))

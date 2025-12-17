@@ -88,6 +88,8 @@ struct ROSPublishers {
     ros::Publisher rigid_body_robot_pub;
     ros::Publisher rigid_body_base_pub;
     ros::Publisher force_plate_pub;
+    ros::Publisher rigid_body_lefthand_pub;
+    ros::Publisher rigid_body_righthand_pub;
     // 如有更多刚体，可在此添加更多 publisher
     
     // 新增：TF广播器
@@ -276,6 +278,8 @@ int main(int argc, char *argv[])
 
     // ★ 分别为 car 与 robot 创建不同的话题
     ros_pubs.rigid_body_car_pub = nh.advertise<geometry_msgs::Pose>("car_pose", 1000);
+    ros_pubs.rigid_body_lefthand_pub = nh.advertise<geometry_msgs::Pose>("lefthand_pose", 1000);
+    ros_pubs.rigid_body_righthand_pub = nh.advertise<geometry_msgs::Pose>("righthand_pose", 1000);
     ros_pubs.rigid_body_robot_pub = nh.advertise<geometry_msgs::Pose>("robot_pose", 1000);
     ros_pubs.rigid_body_base_pub = nh.advertise<geometry_msgs::Pose>("base_pose", 1000);
 
@@ -449,13 +453,22 @@ void DataHandler(sFrameOfMocapData *data, void *pUserData)
                 // 广播变换
                 publishers->tf_broadcaster.sendTransform(transform_base);
             }
-            else
+            else if (rbName == "righthand")
+            {
+                publishers->rigid_body_righthand_pub.publish(rb_pose);
+            }
+            else if (rbName == "lefthand")
+            {
+                publishers->rigid_body_lefthand_pub.publish(rb_pose);
+            }
+            else 
             {
                 // 如果有其他名字，可以继续 else if，或忽略
             }
         }
         else
         {
+            printf("RigidBody ID=%d (unknown):\n", rbID);
             // 如果查不到 ID->Name 的映射，可忽略或打印日志
         }
     }

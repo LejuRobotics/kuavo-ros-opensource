@@ -445,9 +445,9 @@ enable_vnc_network_config() {
 check_system_time(){
     print_info "检查系统时间..."
     print_info "当前系统时间: $(date)"
-    
+
     read -p "当前时间是否正确? (y/n): " time_correct
-    
+
     if [[ $time_correct =~ ^[Yy]$ ]]; then
         print_success "系统时间正确，无需修改"
         return 0
@@ -460,24 +460,80 @@ check_system_time(){
         sudo timedatectl set-ntp true
         sudo systemctl restart systemd-timesyncd
         print_success "系统时间已更新"
-        
+
         # 再次检查时间
         print_info "修改后的系统时间: $(date)"
-        
+
         read -p "修改后的时间是否正确? (y/n): " time_correct_after
-        
+
         if [[ ! $time_correct_after =~ ^[Yy]$ ]]; then
             print_error "系统时间设置失败，请联系技术支持"
             exit 1
         fi
-        
+
         print_success "系统时间已正确设置"
+    fi
+}
+
+# Copy preset actions and music files
+setup_preset_files() {
+    print_info "设置预置动作和音乐文件..."
+
+    # Use the absolute path for kuavo-ros-opensource
+    KUAVO_ROS_CONTROL_DIR="/home/lab/kuavo-ros-opensource"
+    RESOURCES_DIR="$KUAVO_ROS_CONTROL_DIR/resources"
+
+    # Check if resources directory exists
+    if [ ! -d "$RESOURCES_DIR" ]; then
+        print_error "未找到资源目录: $RESOURCES_DIR"
+        return 1
+    fi
+
+    # Target directory for actions and music
+    TARGET_DIR="/home/lab/.config/lejuconfig"
+
+    # Create target directory if it doesn't exist
+    sudo mkdir -p "$TARGET_DIR"
+
+    # Copy all contents from resources to target directory
+    if [ -n "$(ls -A "$RESOURCES_DIR" 2>/dev/null)" ]; then
+        print_info "复制资源文件从 $RESOURCES_DIR 到 $TARGET_DIR"
+        print_info "覆盖已存在的文件..."
+
+        # 使用 -rf 参数强制递归覆盖
+        sudo cp -rf "$RESOURCES_DIR"/* "$TARGET_DIR/"
+
+        # Set proper ownership
+        sudo chown -R lab:lab "$TARGET_DIR"
+
+        print_success "预置动作和音乐文件复制完成"
+        print_info "文件已覆盖到目标目录"
+    else
+        print_info "资源目录为空，无需复制"
+    fi
+
+    # Copy customize_config.json to joystick config directory
+    SOURCE_CONFIG="$RESOURCES_DIR/customize_config.json"
+    TARGET_CONFIG="$KUAVO_ROS_CONTROL_DIR/src/humanoid-control/joystick_drivers/joy/config/customize_config.json"
+
+    if [ -f "$SOURCE_CONFIG" ]; then
+        print_info "复制 customize_config.json 从 $SOURCE_CONFIG 到 $TARGET_CONFIG"
+
+        # Create target directory if it doesn't exist
+        mkdir -p "$(dirname "$TARGET_CONFIG")"
+
+        # Copy the config file with force overwrite
+        cp -f "$SOURCE_CONFIG" "$TARGET_CONFIG"
+
+        print_success "customize_config.json 复制完成"
+    else
+        print_info "未找到 customize_config.json 文件，跳过复制"
     fi
 }
 # Main execution
 main() {
     print_info "开始KUAVO-ROS-CONTROL安装配置脚本..."
-    
+
     check_system_time
     setup_pip
     clone_repos
@@ -490,6 +546,7 @@ main() {
     setup_hand_real
     setup_end_effector
     install_vr_deps
+    setup_preset_files
     build_project
     check_ip
     modify_hosts_mapping
@@ -497,7 +554,7 @@ main() {
     setup_h12pro
     enable_vnc_network_config
     cleanup_code
-    
+
     print_success "KUAVO-ROS-CONTROL安装配置成功完成!"
 }
 
