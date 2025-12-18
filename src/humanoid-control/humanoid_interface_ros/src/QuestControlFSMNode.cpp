@@ -507,30 +507,30 @@ namespace ocs2
             
             // 右转区间 (0.0~1.0)
             turn_zones_.push_back({0.0f, 0.15f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.01, -0.01, 0.0, -15.0)
+                Eigen::Vector4d(-0.01, -0.01, 0.0, -10.0)
             })});
             turn_zones_.push_back({0.151f, 0.45f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.03, -0.03, 0.0, -30.0)
+                Eigen::Vector4d(-0.03, -0.03, 0.0, -20.0)
             })});
             turn_zones_.push_back({0.451f, 0.75f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.04, -0.04, 0.0, -45.0)
+                Eigen::Vector4d(-0.04, -0.04, 0.0, -30.0)
             })});
             turn_zones_.push_back({0.751f, 1.0f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.06, -0.06, 0.0, -60.0)
+                Eigen::Vector4d(-0.06, -0.06, 0.0, -45.0)
             })});
             
             // 左转区间 (-1.0~0.0)
             turn_zones_.push_back({-0.15f, 0.0f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.01, 0.01, 0.0, 15.0)
+                Eigen::Vector4d(-0.01, 0.01, 0.0, 10.0)
             })});
             turn_zones_.push_back({-0.45f, -0.15f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.03, 0.03, 0.0, 30.0)
+                Eigen::Vector4d(-0.03, 0.03, 0.0, 20.0)
             })});
             turn_zones_.push_back({-0.75f, -0.451f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.04, 0.04, 0.0, 45.0)
+                Eigen::Vector4d(-0.04, 0.04, 0.0, 30.0)
             })});
             turn_zones_.push_back({-1.0f, -0.751f, CreateFootPoseTrajectory({
-                Eigen::Vector4d(-0.06, 0.06, 0.0, 60.0)
+                Eigen::Vector4d(-0.06, 0.06, 0.0, 45.0)
             })});
             
             std::cout << "Default turn zones loaded: " << turn_zones_.size() << std::endl;
