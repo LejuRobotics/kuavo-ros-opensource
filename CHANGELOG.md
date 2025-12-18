@@ -15,6 +15,10 @@
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- IK 逆解模块适配带转腰功能，示例可参考[robot_arm_fk_ik.py](src/kuavo_sdk/scripts/arm_fk_ik/robot_arm_fk_ik.py)
+- VR 增加单步和连续转向切换功能，正常站立时，左手摇杆左右控制单步转身，VR按 B 进入踏步状态后，左手摇杆左右控制踏步转身
+- WebSocket 接口新增导航相关接口，建图、保存地图、地图列表等
+- Kuavo5 新增支持双CAN总线连接方式，需要与硬件一致
 - TACT 动作文件新增支持 Kuavo5 机器人腰部动作功能
 - 新增Cpp版本的 VR IK 逆解模块，[文档链接](./readme.md)
 - Kuavo 49 版本机器人支持在 Rviz 中可视化夹爪状态
@@ -60,6 +64,8 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复五代手臂摆动幅度过小问题
+- 修复 VR 半身分支复位卡顿问题
 - 修复 Kuavo5 启用半身模式时手臂抽搐问题
 - Kuavo Humanoid SDK 修复执行`examples/atomic_skills/robot_info_example.py`获取机器人信息时报错问题
 - 修复 Kuavo5 机器人踏步抖动问题

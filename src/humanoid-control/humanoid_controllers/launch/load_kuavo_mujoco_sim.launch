@@ -80,7 +80,7 @@
     <param name="network_model_file" value="$(arg network_model_file)"/>
     <param name="rl_param" value="$(arg rl_param)"/>
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
-    <param name="enable_pull_up_protect" value="false"/>
+    <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
     <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
     <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>

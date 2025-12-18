@@ -1210,13 +1210,15 @@ namespace humanoid_controller
   }
 
   Eigen::VectorXd FallStandController::getTrajectoryCommand() {
+    if (!trajectory_loaded_) {
+      ROS_ERROR("[%s] trajectory_loaded_ is false, return zero command", name_.c_str());
+      return Eigen::VectorXd::Zero((jointNum_ + jointArmNum_ + waistNum_) * 2);
+    }
     return getTrajectoryCommand(motion_trajectory_);
   }
   
   Eigen::VectorXd FallStandController::getTrajectoryCommand(const MotionTrajectoryData& trajectory) {
-    if (!trajectory_loaded_) {
-      return Eigen::VectorXd::Zero((jointNum_ + jointArmNum_ + waistNum_) * 2);
-    }
+
     return trajectory.getCurrentCommand();
   }
   
@@ -1362,34 +1364,7 @@ namespace humanoid_controller
       // ------------------------------------------------------------------
       autoSelectAndSwitchModel();
 
-      // 关闭自动步态模式
-      ros::ServiceClient auto_gait_client = nh_.serviceClient<std_srvs::SetBool>("/humanoid_auto_gait");
-      std_srvs::SetBool auto_gait_srv;
-      auto_gait_srv.request.data = false;
-      
-      // 等待服务可用
-      if (auto_gait_client.waitForExistence(ros::Duration(2.0)))
-      {
-        if (auto_gait_client.call(auto_gait_srv))
-        {
-          if (auto_gait_srv.response.success)
-          {
-            ROS_INFO("[%s] Auto gait mode disabled: %s", name_.c_str(), auto_gait_srv.response.message.c_str());
-          }
-          else
-          {
-            ROS_WARN("[%s] Auto gait mode service returned failure: %s", name_.c_str(), auto_gait_srv.response.message.c_str());
-          }
-        }
-        else
-        {
-          ROS_ERROR("[%s] Failed to call /humanoid_auto_gait service", name_.c_str());
-        }
-      }
-      else
-      {
-        ROS_WARN("[%s] Auto gait mode service not available, skipping call", name_.c_str());
-      }
+
 
       // 触发倒地启动过程
       motion_trajectory_.resetTimeStep();

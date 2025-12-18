@@ -85,9 +85,9 @@ inline EndEffectorType stringToEndEffectorType(const std::string& typeStr) {
 
 struct TwoStageIKParameters {
   std::vector<std::string> ikConstraintFrameNames;
-  double constraintTolerance = 1.0e-8;
-  double solverTolerance = 1.0e-6;
-  int maxSolverIterations = 1000;
+  double constraintTolerance = 1.0e-6;
+  double solverTolerance = 1.0e-5;
+  int maxSolverIterations = 2000;
   ArmIdx controlArmIndex = ArmIdx::LEFT;
 
   TwoStageIKParameters() = default;
@@ -538,7 +538,6 @@ class HumanArmMoveDetector {
     hasHumanArmMoved_ = false;
     prevLeftHandPosition_.setZero();
     prevRightHandPosition_.setZero();
-    std::cout << "\033[92m[HumanArmMoveDetector] Reset successfully\033[0m" << std::endl;
   }
 
   bool detectMovement(const Eigen::Vector3d& currentLeftHandPos,
@@ -938,6 +937,9 @@ inline void clipHandPositionsByAllConstraints(Eigen::Vector3d& leftHandPos,
 
   // 4. 胸部中线约束：防止左右手过中线
   clipPositionByChestMidlineBothHands(leftHandPos, rightHandPos, chestOffsetY);
+
+  clipPositionByCylinderBothHands(
+      leftHandPos, rightHandPos, leftCylinderCenter, rightCylinderCenter, cylinderMinReachableDistance);
 }
 
 // ============== 指针检查宏函数 ==============

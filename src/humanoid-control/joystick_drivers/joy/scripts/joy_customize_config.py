@@ -16,7 +16,7 @@ from std_srvs.srv import Trigger
 
 HUMANOID_ROBOT_SESSION_NAME = "humanoid_robot"
 LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch start_way:=auto"
-LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch start_way:=auto"
+LAUNCH_VOICE_CONTROL_REAL_CMD = os.getenv('LAUNCH_VOICE_CONTROL_REAL_CMD', "roslaunch voice_control_node voice_control.launch start_way:=auto")
 ROBOT_VERSION = os.getenv('ROBOT_VERSION', "")
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI", "")
 ROS_IP = os.getenv("ROS_IP", "")
@@ -684,12 +684,12 @@ class JoyCustomizeConfigNode:
         try:
             msg = Bool()
             msg.data = True
+
             for _ in range(5):
                 self.stop_pub.publish(msg)
                 rospy.sleep(0.1)
         except Exception as e:
             rospy.logerr(f"[JoyCustomize] publish /stop_robot failed: {e}")
-        
 
     def launch_humanoid_robot(self):
         
@@ -697,7 +697,7 @@ class JoyCustomizeConfigNode:
                         stderr=subprocess.DEVNULL) 
         
         if self.real:
-            launch_cmd = f"{LAUNCH_HUMANOID_ROBOT_REAL_CMD} joystick_type:={self.joystick_type}"
+            launch_cmd = f"{LAUNCH_VOICE_CONTROL_REAL_CMD} joystick_type:={self.joystick_type}"
         else:
             launch_cmd = f"{LAUNCH_HUMANOID_ROBOT_SIM_CMD} joystick_type:={self.joystick_type}"
 
@@ -709,6 +709,7 @@ class JoyCustomizeConfigNode:
             f"export ROS_MASTER_URI={ROS_MASTER_URI}" if ROS_MASTER_URI else "",
             f"export ROS_IP={ROS_IP}" if ROS_IP else "",
             f"export ROS_HOSTNAME={ROS_HOSTNAME}" if ROS_HOSTNAME else "",
+
         ]
         export_lines = [line for line in export_lines if line]
 

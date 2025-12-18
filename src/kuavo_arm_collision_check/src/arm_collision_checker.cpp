@@ -33,6 +33,7 @@ namespace kuavo_arm_collision_check {
 // 全局存储配置数据
 std::map<std::string, double> g_inflation_map;
 std::vector<std::pair<std::string, std::string>> g_collision_filter_pairs;
+std::unordered_set<std::string> g_collision_filter_links;
 
 
 ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh) 
@@ -169,7 +170,7 @@ bool ArmCollisionChecker::loadSTL(const std::string& filename, std::vector<Trian
     static bool config_loaded = false;
 
     if (!config_loaded) {
-        XmlRpc::XmlRpcValue inflation_param, filter_param;
+        XmlRpc::XmlRpcValue inflation_param, filter_param, ignore_param;
 
         if (ros::param::get("~inflation", inflation_param) && inflation_param.getType() == XmlRpc::XmlRpcValue::TypeStruct) {
             for (auto it = inflation_param.begin(); it != inflation_param.end(); ++it) {
@@ -193,6 +194,16 @@ bool ArmCollisionChecker::loadSTL(const std::string& filename, std::vector<Trian
                 }
             }
             ROS_INFO("[CollisionCheck] Loaded %zu collision filter pairs", g_collision_filter_pairs.size());
+        }
+
+        if (ros::param::get("~ignore_links", ignore_param) && ignore_param.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+            for (int i = 0; i < ignore_param.size(); ++i) {
+                if (ignore_param[i].getType() == XmlRpc::XmlRpcValue::TypeString) {
+                    std::string name = static_cast<std::string>(ignore_param[i]);
+                    g_collision_filter_links.insert(name);
+                }
+            }
+            ROS_INFO("[CollisionCheck] Loaded %zu ignore-links", g_collision_filter_links.size());
         }
 
         config_loaded = true;
@@ -713,6 +724,16 @@ bool ArmCollisionChecker::checkCollision(std::vector<CollisionPair>& collision_p
         if(!user_data1->is_collision_enabled_ && !user_data2->is_collision_enabled_) {
             return false;
         }
+        // 全局单边 link 屏蔽检查
+        extern std::unordered_set<std::string> g_collision_filter_links;
+        if (g_collision_filter_links.count(user_data1->link_name) ||
+            g_collision_filter_links.count(user_data2->link_name)) 
+        {
+            ROS_DEBUG("[CollisionCheck] Skip ignored link: %s or %s",
+                    user_data1->link_name.c_str(),
+                    user_data2->link_name.c_str());
+            return false;
+        }
         // 全局碰撞过滤对检查 
         extern std::vector<std::pair<std::string, std::string>> g_collision_filter_pairs;
         for (const auto& pair : g_collision_filter_pairs) {
@@ -1115,4 +1136,3 @@ int main(int argc, char** argv) {
     ros::spin();
     return 0;
 } 
- 

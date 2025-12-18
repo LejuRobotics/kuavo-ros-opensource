@@ -13,6 +13,7 @@
 #define SBUS_MODE //根据不同模块类型选择使用串口模式（UART_MODE）或SBUS模式(SBUS_MODE)
 //#define DEUG_SERIAL //是否开启打印串口数据
 //#define DEUG_CHANNEL //是否开启打印遥控器各通道数据
+//#define DEUG_BAUD_RATE //是否开启打印当前串口波特率
 
 #define SERIAL_DEVICE_PATH "/dev/usb_remote" //对应实际的串口设备 
 

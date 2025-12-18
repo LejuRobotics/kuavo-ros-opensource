@@ -8,6 +8,143 @@ import signal
 import json
 from queue import Queue
 from dataclasses import dataclass
+
+# 全局变量存储地图信息，用于坐标系转换
+global_map_info = None
+
+
+def odometry_to_png(odom_x, odom_y, map_info=None):
+    """
+    Odometry坐标系转PNG坐标系
+
+    Args:
+        odom_x: Odometry坐标系X坐标（米）
+        odom_y: Odometry坐标系Y坐标（米）
+        map_info: 地图信息字典，包含resolution, origin, width, height
+
+    Returns:
+        tuple: (png_x, png_y) PNG坐标系坐标（像素）
+    """
+    global global_map_info
+
+    if map_info is None:
+        map_info = global_map_info
+
+    if not map_info:
+        print("警告: 地图信息不可用，无法进行坐标转换")
+        return None, None
+
+    try:
+        # 获取地图参数
+        resolution = map_info.get("resolution", 0.05)  # 米/像素
+        origin_x = map_info.get("origin", {}).get("x", 0.0)  # 地图原点X（米）
+        origin_y = map_info.get("origin", {}).get("y", 0.0)  # 地图原点Y（米）
+        width = map_info.get("width", 0)  # 图片宽度（像素）
+        height = map_info.get("height", 0)  # 图片高度（像素）
+
+        if resolution <= 0 or width <= 0 or height <= 0:
+            print("错误: 地图参数无效")
+            return None, None
+
+        # 转换公式：需要先从odom转换到map，再转换到png
+        # 这里假设odom和map坐标系重合（实际情况可能需要TF变换）
+        # 如果odom和map不重合，需要先进行TF转换
+
+        # Odometry -> Map坐标系（假设odom原点在(0,0)）
+        # 如果odom和map有偏移，需要加上偏移量
+        map_x = odom_x  # 简化处理，实际可能需要TF变换
+        map_y = odom_y
+
+        # Map坐标系 -> PNG坐标系
+        # PNG_X = (Map_X - Origin_X) / Resolution
+        # PNG_Y = Height - (Map_Y - Origin_Y) / Resolution
+        png_x = (map_x - origin_x) / resolution
+        png_y = height - (map_y - origin_y) / resolution
+
+        # 调试信息：显示转换前后的坐标
+        print(f"坐标转换调试: Odom({odom_x:.3f}, {odom_y:.3f}) -> Map({map_x:.3f}, {map_y:.3f}) -> PNG({png_x:.1f}, {png_y:.1f})")
+        print(f"地图参数: resolution={resolution}, origin=({origin_x:.3f}, {origin_y:.3f}), size={width}x{height}")
+
+        # 检查原始PNG坐标是否超出边界
+        original_png_x = png_x
+        original_png_y = png_y
+
+        # 确保坐标在图片范围内
+        png_x = max(0, min(width - 1, png_x))
+        png_y = max(0, min(height - 1, png_y))
+
+        # 如果坐标被边界检查调整了，输出警告
+        if (abs(png_x - original_png_x) > 0.1 or abs(png_y - original_png_y) > 0.1):
+            print(f"警告: 坐标超出地图范围，已调整: 原始PNG({original_png_x:.1f}, {original_png_y:.1f}) -> 调整后PNG({png_x:.1f}, {png_y:.1f})")
+
+        return round(png_x, 2), round(png_y, 2)
+
+    except Exception as e:
+        print(f"Odometry转PNG坐标失败: {e}")
+        return None, None
+
+
+def png_to_odometry(png_x, png_y, map_info=None):
+    """
+    PNG坐标系转Odometry坐标系
+
+    Args:
+        png_x: PNG坐标系X坐标（像素）
+        png_y: PNG坐标系Y坐标（像素）
+        map_info: 地图信息字典，包含resolution, origin, width, height
+
+    Returns:
+        tuple: (odom_x, odom_y) Odometry坐标系坐标（米）
+    """
+    global global_map_info
+
+    if map_info is None:
+        map_info = global_map_info
+
+    if not map_info:
+        print("警告: 地图信息不可用，无法进行坐标转换")
+        return None, None
+
+    try:
+        # 获取地图参数
+        resolution = map_info.get("resolution", 0.05)  # 米/像素
+        origin_x = map_info.get("origin", {}).get("x", 0.0)  # 地图原点X（米）
+        origin_y = map_info.get("origin", {}).get("y", 0.0)  # 地图原点Y（米）
+        width = map_info.get("width", 0)  # 图片宽度（像素）
+        height = map_info.get("height", 0)  # 图片高度（像素）
+
+        if resolution <= 0 or width <= 0 or height <= 0:
+            print("错误: 地图参数无效")
+            return None, None
+
+        # PNG坐标系 -> Map坐标系
+        # Map_X = Origin_X + PNG_X * Resolution
+        # Map_Y = Origin_Y + (Height - PNG_Y) * Resolution
+        map_x = origin_x + png_x * resolution
+        map_y = origin_y + (height - png_y) * resolution
+
+        # Map坐标系 -> Odometry坐标系
+        # 这里假设odom和map坐标系重合
+        # 实际情况可能需要反向TF变换
+        odom_x = map_x  # 简化处理，实际可能需要TF变换
+        odom_y = map_y
+
+        return odom_x, odom_y
+
+    except Exception as e:
+        print(f"PNG转Odometry坐标失败: {e}")
+        return None, None
+
+
+def update_map_info(map_info):
+    """
+    更新全局地图信息
+
+    Args:
+        map_info: 地图信息字典
+    """
+    global global_map_info
+    global_map_info = map_info
 from typing import Any, Union, Dict
 import websockets
 import threading
@@ -20,6 +157,9 @@ import yaml
 from utils import calculate_file_md5, frames_to_custom_action_data, get_start_end_frame_time, frames_to_custom_action_data_ocs2, verify_robot_version, robot_version
 import shutil
 import rosnode
+import glob
+from std_srvs.srv import Trigger, TriggerResponse
+
 
 # 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
 try:
@@ -698,6 +838,10 @@ def init_publishers():
     # 初始化地图订阅者
     print("Initializing map publisher...")
     init_map_publisher()
+
+    # 初始化机器人位置发布者
+    print("Initializing robot position publisher...")
+    init_robot_position_publisher()
 
 async def init_ros_node():
     print("Initializing ROS node")
@@ -2222,6 +2366,208 @@ async def get_robot_launch_status_handler(
     )
     response_queue.put(response)
 
+MOVE_VOICE_KEYWORDS = {
+  "前进一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往前走", "往前走一步", "前进一步"],
+    "data": {
+      "direction": "前",
+      "step": 1
+    }
+  },
+  "后退一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["往后走", "往后走一步", "后退一步"],
+    "data": {
+      "direction": "后",
+      "step": 1
+    }
+  },
+  "左转一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["左转", "左转一步"],
+    "data": {
+      "direction": "左转",
+      "step": 1
+    }
+  },
+  "右转一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["右转", "右转一步"],
+    "data": {
+      "direction": "右转",
+      "step": 1
+    }
+  },
+  "左移一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["左移", "往左走", "左边走"],
+    "data": {
+      "direction": "左",
+      "step": 1
+    }
+  },
+  "右移一步": {
+    "type": "SINGLE_STEP",
+    "keywords": ["右移", "往右走", "右边走"],
+    "data": {
+      "direction": "右",
+      "step": 1
+    }
+  }
+}
+
+def _merge_keywords_config_by_action_files(voice_keywords_config: dict, action_folder_path: str):
+    """
+    根据本地动作文件列表，重置关键词配置
+    :param voice_keywords_config: 原始配置字典
+    :param action_folder_path: 动作文件的绝对路径
+    """
+    
+    # 获取动作文件列表
+    action_files_pattern = os.path.join(action_folder_path, "*.tact")
+    action_files = glob.glob(action_files_pattern)
+    # 使用 os.path.basename 获取不带目录的文件名，再使用 os.path.splitext 安全去除文件后缀
+    action_file_names = set(os.path.splitext(os.path.basename(f))[0] for f in action_files)
+    rospy.loginfo(f"Found {action_file_names} action files in {action_folder_path}.")
+
+    updated_config = {}
+    
+    # 1. 处理原始配置中的项
+    for key, value in voice_keywords_config.items():
+        if value.get("type") == "SINGLE_STEP":
+            # 保留非动作文件类型的配置
+            updated_config[key] = value
+        elif value.get("type") == "ARM_ACTION":
+            # 如果是 ARM_ACTION，检查文件是否存在
+            if key in action_file_names:
+                updated_config[key] = value
+            else:
+                # 文件不存在，记录日志（实现清理逻辑，不加入 updated_config 即为删除）
+                rospy.logwarn(f"Removing '{key}' from config because the action file is missing.")
+    
+    # 2. 添加新发现的动作文件
+    for action_name in action_file_names:
+        # 如果配置里没有这个动作，则添加
+        if action_name not in updated_config:
+            # 再次检查：防止同名但类型为 SINGLE_STEP 的冲突
+            if action_name in voice_keywords_config and voice_keywords_config[action_name].get("type") != "ARM_ACTION":
+                rospy.logwarn(f"Skipping auto-add '{action_name}', name conflict with existing {voice_keywords_config[action_name]['type']}")
+                continue
+                
+            updated_config[action_name] = {
+                "type": "ARM_ACTION",
+                "keywords": [],
+                "data": action_name
+            }
+            rospy.loginfo(f"Auto-added new action file to config: {action_name}")
+
+    return updated_config
+
+async def get_voice_keywords_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    payload = Payload(
+        cmd="get_voice_keywords",
+        data={"code": 0, "message": "Read voice keywords successfully", "result": {}}
+    )
+    # 配置文件路径：voice_control_node/scripts/key_words.json
+
+    VOICE_CONTROL_PKG_NAME = "voice_control_node"
+
+    try:    
+
+        voice_control_keywords_path = rospkg.RosPack().get_path(VOICE_CONTROL_PKG_NAME)+"/scripts"
+        KEYWORDS_FILE_PATH = os.path.join(voice_control_keywords_path, "key_words.json")
+        action_folder = os.path.expanduser("~/.config/lejuconfig/action_files")     
+        
+        # 1. 读取配置
+        with open(KEYWORDS_FILE_PATH, "r") as f:
+                voice_keywords_config = json.load(f)
+
+        # 2. 同步更新逻辑
+        merged_config = _merge_keywords_config_by_action_files(voice_keywords_config, action_folder)
+
+        payload.data["result"] = merged_config
+        rospy.loginfo(f"Read voice keywords successfully: {merged_config}")
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to read {KEYWORDS_FILE_PATH}: {e}"
+        payload.data["result"] = {}
+        rospy.logerr(f"Failed to read {KEYWORDS_FILE_PATH}: {e}")
+
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+async def update_voice_keywords_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """
+    更新语音关键词
+    """
+    payload = Payload(
+        cmd="update_voice_keywords",
+        data={"code": 0, "message": "Update voice keywords successfully"}
+    )
+
+    # 1.找配置文件
+
+    VOICE_CONTROL_PKG_NAME = "voice_control_node"
+    voice_control_keywords_path = rospkg.RosPack().get_path(VOICE_CONTROL_PKG_NAME)+"/scripts"
+    KEYWORDS_FILE_PATH = os.path.join(voice_control_keywords_path, "key_words.json")
+    
+    # 2.解析参数，并更新配置文件
+    voice_keywords_config = {}
+    try:
+        # 如果文件不存在，创建一个其父目录
+        if not Path(KEYWORDS_FILE_PATH).is_file():
+            
+            os.makedirs(os.path.dirname(KEYWORDS_FILE_PATH), exist_ok=True)
+            rospy.loginfo(f"Created new voice keywords config file: {KEYWORDS_FILE_PATH}")
+    
+        real_data = data.get("data", {})
+        for action, keywords in real_data.items():
+            # TODO 检查lejuconfig下的对应动作配置文件是否存在
+            voice_keywords_config[action] = {
+                "type": "ARM_ACTION",
+                "keywords": keywords,
+                "data": action
+            }
+        voice_keywords_config = {**MOVE_VOICE_KEYWORDS, **voice_keywords_config}
+        with open(KEYWORDS_FILE_PATH, "w") as f:
+            json.dump(voice_keywords_config, f, ensure_ascii=False, indent=2)
+
+        # 如果文件更新成功，但是服务重载失败。依然算成功，因为下一次语音控制节点启动的时候，仍会加载到最新的配置文件
+        try:
+            rospy.wait_for_service('/voice_control/reload_keywords', timeout=2.0)
+            reload_client = rospy.ServiceProxy('/voice_control/reload_keywords', Trigger)
+            req = TriggerRequest()
+            response = reload_client(req)
+            if response.success:
+                rospy.loginfo("已通知 voice_control_node 重载配置")
+            else:
+                rospy.logwarn("Failed to reload voice keywords.")
+        except rospy.ROSException:
+            rospy.logerr("Service /voice_control/reload_keywords not available")
+        except rospy.ServiceException as e:
+            rospy.logerr(f"Service call failed: {e}")
+
+        # Call the service
+        payload.data["code"] = 0
+        payload.data["message"] = "Update voice keywords successfully"
+        rospy.loginfo(f"Updated voice keywords: {voice_keywords_config}")
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to update voice keywords: {e}."
+        rospy.logwarn(f"Failed to update voice keywords: {e}.")
+
+    # 返回转换后的配置文件数据
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
+
 # Add a function to clean up when a websocket connection is closed
 def cleanup_websocket(websocket: websockets.WebSocketServerProtocol):
     global active_threads
@@ -2370,21 +2716,24 @@ async def save_map_handler(
         data={"code": 0, "message": "Map save command sent successfully"}
     )
 
+    # 从请求数据中获取地图名，如果没有则使用空字符串
+    map_name = ""
+    if data and data.get("data") and data["data"].get("map_name"):
+        map_name = data["data"]["map_name"]
+
     try:
-        print("Saving current map...")
+        print(f"Saving current map with name: '{map_name}'...")
 
         # 调用上位机的保存地图服务
         import subprocess
         try:
-            print("Saving current map...")
-
             # 调用上位机的保存地图服务
             service_name = '/save_map_service'
             rospy.wait_for_service(service_name, timeout=5.0)
 
             # 使用rosservice命令调用保存地图服务
-            # SaveMap服务需要一个map_name参数，我们传递空字符串让它使用当前地图名称
-            cmd = f'rosservice call {service_name} "map_name: \'\'"'
+            # SaveMap服务需要一个map_name参数
+            cmd = f'rosservice call {service_name} "map_name: \'{map_name}\'"'
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
 
             if result.returncode == 0:
@@ -2597,11 +2946,26 @@ def map_callback(msg):
     """
     /map话题的回调函数，接收地图数据并主动推送给客户端
     """
-    global latest_map_data
+    global latest_map_data, latest_map_info
 
     try:
         # 保存最新的地图数据
         latest_map_data = msg
+
+        # 更新地图信息，用于坐标系转换
+        map_info = {
+            "width": msg.info.width,
+            "height": msg.info.height,
+            "resolution": msg.info.resolution,
+            "origin": {
+                "x": msg.info.origin.position.x,
+                "y": msg.info.origin.position.y,
+                "z": msg.info.origin.position.z
+            }
+        }
+
+        # 更新全局地图信息
+        update_map_info(map_info)
 
         # 将OccupancyGrid转换为base64编码的PNG图片
         map_base64 = convert_map_to_base64(msg)
@@ -2676,6 +3040,46 @@ def convert_map_to_base64(map_msg):
     except Exception as e:
         print(f"Error converting map to base64: {e}")
         return None
+
+def init_robot_position_publisher():
+    """
+    初始化机器人位置发布者 - 订阅/Odometry话题并启动主动推送
+    """
+    global odometry_subscriber, latest_odometry_data
+
+    print("=== init_robot_position_publisher called ===")
+    print(f"ROS master status: {rospy.core.is_initialized()}")
+
+    try:
+        # 订阅/Odometry话题
+        print("Trying to subscribe to /Odometry topic...")
+        odometry_subscriber = rospy.Subscriber('/Odometry', Odometry, odometry_callback, queue_size=1)
+        print("Robot position publisher initialized: subscribed to /Odometry topic for active push")
+
+        # 检查话题是否存在
+        topics = rospy.get_published_topics()
+        odom_topics = [topic for topic, _ in topics if 'odom' in topic.lower()]
+        print(f"Available odometry topics: {odom_topics}")
+
+        # 延迟一下，等待/Odometry话题稳定
+        rospy.Timer(rospy.Duration(2.0), check_and_publish_initial_position)
+
+    except Exception as e:
+        print(f"init_robot_position_publisher error: {e}")
+
+def check_and_publish_initial_position(event):
+    """
+    检查是否有位置数据，如果有则发布初始位置
+    """
+    global latest_odometry_data
+    print("check_and_publish_initial_position: checking for initial position data...")
+
+    if latest_odometry_data:
+        print(f"Found cached odometry data, publishing initial position")
+        # 这里可以发布初始位置给客户端
+        # 但由于odometry_callback已经在主动推送，这里不需要重复
+    else:
+        print("No cached odometry data available yet")
 
 def init_map_publisher():
     """
@@ -2872,6 +3276,25 @@ async def edit_map_handler(
             else:
                 print(f"执行地图编辑，地图: {map_name}, 操作: {operation}, 点: {points}")
 
+                # 桌面软件传来的坐标是PNG坐标系，需要转换为Map坐标系
+                # points格式: [x1, y1, x2, y2, x3, y3] - PNG坐标
+                map_points = []
+                for i in range(0, len(points), 2):
+                    if i + 1 < len(points):
+                        png_x = points[i]
+                        png_y = points[i + 1]
+
+                        # PNG坐标转换为Map坐标
+                        map_x, map_y = png_to_odometry(png_x, png_y)
+                        if map_x is not None and map_y is not None:
+                            map_points.extend([map_x, map_y])
+                            print(f"地图编辑点坐标转换: PNG({png_x}, {png_y}) -> Map({map_x:.3f}, {map_y:.3f})")
+                        else:
+                            print(f"地图编辑点坐标转换失败，使用原始PNG坐标")
+                            map_points.extend([png_x, png_y])
+
+                print(f"转换后的Map坐标点: {map_points}")
+
                 # 调用上位机的地图编辑服务
                 try:
                     import rospy
@@ -2897,10 +3320,10 @@ async def edit_map_handler(
                     # 构建请求 - 注意：navigation_service_manager.py中points期望是6个float64值
                     request = EditMapRequest()
                     request.map_name = map_name
-                    request.points = points  # 6个float64值的列表
+                    request.points = map_points  # 使用转换后的Map坐标
                     request.operation = operation
 
-                    print(f"调用地图编辑服务: map_name={map_name}, operation={operation}, points={points}")
+                    print(f"调用地图编辑服务: map_name={map_name}, operation={operation}, points={map_points}")
 
                     # 调用服务
                     response = edit_map_service(request)
@@ -3178,12 +3601,34 @@ async def task_point_handler(
 
         if task_point_data and "pose" in task_point_data:
             pose_data = task_point_data.get("pose", {})
-
             position_data = pose_data.get("position", {})
-            position = Point()
-            position.x = position_data.get("x", 0.0)
-            position.y = position_data.get("y", 0.0)
-            position.z = position_data.get("z", 0.0)
+
+            if use_robot_current_pose:
+                # 使用机器人当前位置时，直接使用odom坐标，不进行PNG转换
+                print(f"Debug: 使用机器人当前位置，坐标系统: Odom({position_data.get('x', 0):.3f}, {position_data.get('y', 0):.3f}, {position_data.get('z', 0):.3f})")
+                position = Point()
+                position.x = position_data.get("x", 0.0)
+                position.y = position_data.get("y", 0.0)
+                position.z = position_data.get("z", 0.0)
+            else:
+                # 桌面软件传来的坐标是PNG坐标系，需要转换为Map坐标系存储
+                png_x = position_data.get("x", 0.0)
+                png_y = position_data.get("y", 0.0)
+
+                # PNG坐标转换为Map坐标
+                map_x, map_y = png_to_odometry(png_x, png_y)
+                if map_x is not None and map_y is not None:
+                    print(f"坐标转换: PNG({png_x}, {png_y}) -> Map({map_x:.3f}, {map_y:.3f})")
+                    position = Point()
+                    position.x = map_x
+                    position.y = map_y
+                    position.z = 0.0  # PNG坐标没有Z信息，设为0
+                else:
+                    print(f"坐标转换失败，使用原始值")
+                    position = Point()
+                    position.x = png_x
+                    position.y = png_y
+                    position.z = position_data.get("z", 0.0)
 
             orientation_data = pose_data.get("orientation", {})
             orientation = Quaternion()
@@ -3223,13 +3668,29 @@ async def task_point_handler(
                 if operation == 3:  # GET操作
                     print(f"Debug: 返回任务点列表，数量: {len(response.task_points)}")
                     for tp in response.task_points:
+                        # 计算PNG坐标
+                        tp_x = float(tp.pose.position.x)
+                        tp_y = float(tp.pose.position.y)
+
+                        png_x, png_y = odometry_to_png(tp_x, tp_y)
+                        if png_x is not None and png_y is not None:
+                            # 使用PNG坐标作为position字段
+                            position_x = png_x
+                            position_y = png_y
+                            print(f"Debug: 任务点 {tp.name} 转换为PNG坐标: ({tp_x:.3f}, {tp_y:.3f}) -> ({png_x:.1f}, {png_y:.1f})")
+                        else:
+                            # PNG转换失败，使用原始坐标
+                            position_x = tp_x
+                            position_y = tp_y
+                            print(f"Debug: 任务点 {tp.name} PNG转换失败，使用原始坐标: ({tp_x:.3f}, {tp_y:.3f})")
+
                         tp_dict = {
                             "name": tp.name,
                             "pose": {
                                 "position": {
-                                    "x": tp.pose.position.x,
-                                    "y": tp.pose.position.y,
-                                    "z": tp.pose.position.z
+                                    "x": position_x,  # PNG坐标（如果转换成功）
+                                    "y": position_y,  # PNG坐标（如果转换成功）
+                                    "z": float(tp.pose.position.z)
                                 },
                                 "orientation": {
                                     "x": tp.pose.orientation.x,
@@ -3239,6 +3700,29 @@ async def task_point_handler(
                                 }
                             }
                         }
+
+                        # 保存原始odom坐标作为odom_position字段
+                        tp_dict["odom_position"] = {
+                            "x": tp_x,  # 原始odom坐标
+                            "y": tp_y,  # 原始odom坐标
+                            "z": float(tp.pose.position.z)
+                        }
+
+                        # 如果有PNG坐标，也保存png_position字段
+                        if png_x is not None and png_y is not None:
+                            tp_dict["png_position"] = {
+                                "x": png_x,
+                                "y": png_y
+                            }
+                            # 检查position是否已经是PNG坐标
+                            if abs(position_x - png_x) < 0.1 and abs(position_y - png_y) < 0.1:
+                                tp_dict["coordinate_type"] = "PNG"
+                            else:
+                                tp_dict["coordinate_type"] = "Mixed"
+                        else:
+                            tp_dict["png_position"] = None
+                            tp_dict["coordinate_type"] = "Odom"
+
                         payload.data["task_points"].append(tp_dict)
 
                 print(f"任务点操作成功: {response.message}")
@@ -3323,12 +3807,28 @@ async def get_task_points_handler(
 
             # 解析任务点列表
             for tp in response.task_points:
+                # 获取原始坐标并转换为PNG
+                tp_x = float(tp.pose.position.x)
+                tp_y = float(tp.pose.position.y)
+
+                png_x, png_y = odometry_to_png(tp_x, tp_y)
+                if png_x is not None and png_y is not None:
+                    # 使用PNG坐标作为position字段
+                    position_x = png_x
+                    position_y = png_y
+                    print(f"Debug: 任务点 {tp.name} 转换为PNG坐标: ({tp_x:.3f}, {tp_y:.3f}) -> ({png_x:.1f}, {png_y:.1f})")
+                else:
+                    # PNG转换失败，使用原始坐标
+                    position_x = tp_x
+                    position_y = tp_y
+                    print(f"Debug: 任务点 {tp.name} PNG转换失败，使用原始坐标: ({tp_x:.3f}, {tp_y:.3f})")
+
                 tp_dict = {
                     "name": tp.name,
                     "pose": {
                         "position": {
-                            "x": float(tp.pose.position.x),
-                            "y": float(tp.pose.position.y),
+                            "x": position_x,  # PNG坐标（如果转换成功）
+                            "y": position_y,  # PNG坐标（如果转换成功）
                             "z": float(tp.pose.position.z)
                         },
                         "orientation": {
@@ -3339,6 +3839,29 @@ async def get_task_points_handler(
                         }
                     }
                 }
+
+                # 保存原始odom坐标作为odom_position字段
+                tp_dict["odom_position"] = {
+                    "x": tp_x,  # 原始odom坐标
+                    "y": tp_y,  # 原始odom坐标
+                    "z": float(tp.pose.position.z)
+                }
+
+                # 如果有PNG坐标，也保存png_position字段
+                if png_x is not None and png_y is not None:
+                    tp_dict["png_position"] = {
+                        "x": png_x,
+                        "y": png_y
+                    }
+                    # 检查position是否已经是PNG坐标
+                    if abs(position_x - png_x) < 0.1 and abs(position_y - png_y) < 0.1:
+                        tp_dict["coordinate_type"] = "PNG"
+                    else:
+                        tp_dict["coordinate_type"] = "Mixed"
+                else:
+                    tp_dict["png_position"] = None
+                    tp_dict["coordinate_type"] = "Odom"
+
                 payload.data["task_points"].append(tp_dict)
 
             print(f"获取任务点列表成功: {len(payload.data['task_points'])} 个任务点")
@@ -3426,14 +3949,14 @@ async def navigate_to_task_point_handler(
     response_queue.put(response)
 
 
-async def get_map_list_handler(
+async def get_all_maps_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
 ):
     """
      给出地图列表功能 -
     """
     payload = Payload(
-        cmd="get_map_list",
+        cmd="get_all_maps",
         data={"code": 0, "message": "Map list retrieved successfully", "maps": []}
     )
 
@@ -3534,105 +4057,60 @@ async def get_map_list_handler(
 # 全局变量存储最新的机器人位置
 latest_odometry_data = None
 odometry_subscriber = None
+tf_listener = None
 
 
 def odometry_callback(msg):
     """
-    /Odometry话题的回调函数，接收机器人位置数据
+    /Odometry话题的回调函数，接收机器人位置数据并主动推送给客户端
     """
-    global latest_odometry_data
-    latest_odometry_data = msg
-    # print(f"Received odometry: x={msg.pose.pose.position.x}, y={msg.pose.pose.position.y}")
-
-
-def get_robot_position_for_task_point():
-    """
-    为任务点功能获取机器人当前位姿
-    复用机器人位置获取逻辑，提高代码复用性
-    """
-    try:
-        import tf
-        import tf.transformations as tf_trans
-
-        # 首先检查是否有缓存的里程计数据
-        if latest_odometry_data:
-            pose = latest_odometry_data.pose.pose
-            print(f"Debug: 使用缓存的里程计数据 - 位置: ({pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f})")
-            return True, pose
-        else:
-            # 如果没有里程计数据，尝试TF变换
-            print("Debug: 无里程计数据，尝试TF变换获取机器人位置")
-            tf_listener = tf.TransformListener()
-            tf_listener.waitForTransform('/map', '/base_link', rospy.Time(0), rospy.Duration(5.0))
-            (trans, rot) = tf_listener.lookupTransform('/map', '/base_link', rospy.Time(0))
-
-            # 转换为Pose对象
-            from geometry_msgs.msg import Pose, Point, Quaternion
-            pose = Pose()
-            pose.position = Point(*trans)
-            pose.orientation = Quaternion(*rot)
-
-            print(f"Debug: TF变换成功 - 位置: {trans}, 姿态: {rot}")
-            return True, pose
-
-    except Exception as e:
-        print(f"Debug: 获取机器人位姿失败: {str(e)}")
-        return False, str(e)
-
-async def get_robot_position_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
-    """
-    获取机器人当前位置
-    """
-    global latest_odometry_data, odometry_subscriber
-
-    payload = Payload(
-        cmd="get_robot_position",
-        data={"code": 0, "message": "Robot position retrieved successfully"}
-    )
+    global latest_odometry_data, tf_listener
 
     try:
-        # 如果还没有订阅者，创建一个
-        if odometry_subscriber is None:
-            print("Initializing odometry subscriber...")
-            try:
-                odometry_subscriber = rospy.Subscriber(
-                    '/Odometry',
-                    Odometry,
-                    odometry_callback,
-                    queue_size=1
-                )
-                print("Subscribed to /Odometry for robot position")
-            except Exception as e:
-                print(f"Failed to subscribe to /Odometry: {e}")
+        # 保存最新的里程计数据
+        latest_odometry_data = msg
 
-        # 如果有缓存的位置数据，直接返回；否则等待数据
-        if latest_odometry_data:
-            pose = latest_odometry_data.pose.pose
-            twist = latest_odometry_data.twist.twist
+        pose = msg.pose.pose
+        twist = msg.twist.twist
+
+        # 将Odom坐标转换为PNG坐标供前端显示
+        odom_x = float(pose.position.x)
+        odom_y = float(pose.position.y)
+
+        # 打印当前地图信息状态
+        global global_map_info
+        if global_map_info:
+            #print(f"Debug: 当前地图信息可用: resolution={global_map_info.get('resolution')}, origin={global_map_info.get('origin')}, size={global_map_info.get('width')}x{global_map_info.get('height')}")
+            pass
         else:
-            # 第一次调用时等待里程计数据
-            print("Waiting for odometry data...")
-            try:
-                msg = rospy.wait_for_message('/Odometry', Odometry, timeout=5.0)
-                pose = msg.pose.pose
-                twist = msg.twist.twist
-                # 更新全局数据
-                latest_odometry_data = msg
-                print("Odometry data received successfully")
-            except rospy.ROSException as e:
-                payload.data = {
-                    "code": 1,
-                    "message": f"Timeout waiting for odometry data: {str(e)}"
-                }
-                response = Response(payload=payload, target=websocket)
-                response_queue.put(response)
-                return
+            #print("Debug: 地图信息不可用，无法进行坐标转换")
+            pass
+
+        png_x, png_y = odometry_to_png(odom_x, odom_y)
+
+        if png_x is not None and png_y is not None:
+            # 成功转换为PNG坐标，用于前端显示
+            display_x = png_x
+            display_y = png_y
+            #print(f"机器人位置坐标转换: Odom({odom_x:.3f}, {odom_y:.3f}) -> PNG({display_x:.1f}, {display_y:.1f})")
+        else:
+            # 转换失败，使用原始odom坐标
+            display_x = odom_x
+            display_y = odom_y
+            #print(f"机器人位置坐标转换失败，使用原始Odom坐标: ({odom_x:.3f}, {odom_y:.3f})")
 
         # 构建位置数据
         position_data = {
+            "code": 0,
+            "message": "Robot position updated",
             "position": {
-                "x": float(pose.position.x),
-                "y": float(pose.position.y),
+                "x": display_x,  # PNG坐标用于前端显示
+                "y": display_y,  # PNG坐标用于前端显示
+                "z": float(pose.position.z)
+            },
+            "odom_position": {
+                "x": odom_x,    # 原始odom坐标，用于调试
+                "y": odom_y,    # 原始odom坐标，用于调试
                 "z": float(pose.position.z)
             },
             "orientation": {
@@ -3651,87 +4129,160 @@ async def get_robot_position_handler(websocket: websockets.WebSocketServerProtoc
                 "y": float(twist.angular.y),
                 "z": float(twist.angular.z)
             },
-            "frame_id": latest_odometry_data.header.frame_id,
-            "child_frame_id": latest_odometry_data.child_frame_id,
-            "timestamp": latest_odometry_data.header.stamp.to_sec()
+            "frame_id": msg.header.frame_id,
+            "child_frame_id": msg.child_frame_id,
+            "timestamp": msg.header.stamp.to_sec()
         }
 
-        payload.data.update(position_data)
-
-        # 尝试获取机器人在地图坐标系中的位置和像素坐标
+        # 尝试获取机器人在地图坐标系中的位置（使用全局tf_listener）
         try:
-                import tf
-                # 获取base_link在map坐标系下的位置
-                listener = tf.TransformListener()
-                listener.waitForTransform("map", "base_link", rospy.Time(0), rospy.Duration(2.0))
-                (trans, rot) = listener.lookupTransform("map", "base_link", rospy.Time(0))
+            import tf
+            if tf_listener is None:
+                tf_listener = tf.TransformListener()
 
-                # 获取地图信息
-                map_msg = rospy.wait_for_message('/map', OccupancyGrid, timeout=2.0)
-                origin = map_msg.info.origin
-                resolution = map_msg.info.resolution
-                width = map_msg.info.width
-                height = map_msg.info.height
-
-                # 计算地图原点在栅格坐标系下的坐标
-                origin_x = origin.position.x
-                origin_y = origin.position.y
-                origin_grid_x = int((0.0 - origin_x) / resolution)
-                origin_grid_y = int((0.0 - origin_y) / resolution)
-                origin_grid_y = height - 1 - origin_grid_y
-
-                # 将机器人位置转换为栅格坐标和像素坐标
-                x, y, z = trans
-                grid_x = int((x - origin_x) / resolution)
-                grid_y = int((y - origin_y) / resolution)
-                png_x = grid_x
-                png_y = height - 1 - grid_y
-
-                # 添加地图坐标系信息
-                payload.data["map_position"] = {
-                    "x": float(x),
-                    "y": float(y),
-                    "z": float(z)
+            # 短暂等待变换，避免阻塞
+            if tf_listener.canTransform("map", "base_link", rospy.Time(0)):
+                (trans, rot) = tf_listener.lookupTransform("map", "base_link", rospy.Time(0))
+                position_data["map_position"] = {
+                    "x": float(trans[0]),
+                    "y": float(trans[1]),
+                    "z": float(trans[2])
                 }
-                payload.data["pixel_coordinates"] = {
-                    "png_x": int(png_x),
-                    "png_y": int(png_y),
-                    "grid_x": int(grid_x),
-                    "grid_y": int(grid_y)
-                }
-                payload.data["map_info"] = {
-                    "origin_grid_x": int(origin_grid_x),
-                    "origin_grid_y": int(origin_grid_y),
-                    "resolution": float(resolution),
-                    "width": int(width),
-                    "height": int(height)
+                position_data["map_orientation"] = {
+                    "x": float(rot[0]),
+                    "y": float(rot[1]),
+                    "z": float(rot[2]),
+                    "w": float(rot[3])
                 }
 
+                # 直接从Odometry坐标转换为PNG坐标
+                odom_x = float(pose.position.x)
+                odom_y = float(pose.position.y)
+
+                png_x, png_y = odometry_to_png(odom_x, odom_y)
+                if png_x is not None and png_y is not None:
+                    position_data["png_position"] = {
+                        "x": png_x,  # 像素坐标
+                        "y": png_y
+                    }
+                else:
+                    position_data["png_position"] = None
+            else:
+                position_data["map_position"] = None
+                position_data["map_orientation"] = None
+                position_data["png_position"] = None
         except Exception as map_e:
-            print(f"Warning: Could not get map coordinates: {map_e}")
-            payload.data["map_position"] = None
-            payload.data["pixel_coordinates"] = None
-            payload.data["map_info"] = None
+            # 忽略地图位置获取失败，不影响主要功能
+            position_data["map_position"] = None
+            position_data["map_orientation"] = None
+            position_data["png_position"] = None
 
-            print(f"Robot position: x={position_data['position']['x']:.3f}, "
-                  f"y={position_data['position']['y']:.3f}, "
-                  f"z={position_data['position']['z']:.3f}")
-        else:
-            payload.data = {
-                "code": 1,
-                "message": "No odometry data available yet. Please make sure the robot is running."
-            }
-            print("No odometry data available")
+        # 创建推送消息
+        payload = Payload(
+            cmd="robot_position_update",
+            data=position_data
+        )
+
+        # 推送给所有连接的客户端
+        response = Response(payload=payload, target="all")
+        response_queue.put(response)
 
     except Exception as e:
-        payload.data = {
-            "code": 1,
-            "message": f"Error getting robot position: {str(e)}"
-        }
-        print(f"Get robot position error: {str(e)}")
+        print(f"Error in odometry callback: {e}")
 
-    response = Response(payload=payload, target=websocket)
-    response_queue.put(response)
+    # print(f"Received odometry: x={msg.pose.pose.position.x}, y={msg.pose.pose.position.y}")
+
+
+def get_robot_position_for_task_point():
+    """
+    为任务点功能获取机器人当前位姿
+    直接返回从odom转换到PNG坐标系的坐标
+    """
+    try:
+        import tf
+        import tf.transformations as tf_trans
+
+        # 首先检查是否有缓存的里程计数据
+        if latest_odometry_data:
+            pose = latest_odometry_data.pose.pose
+            odom_x = pose.position.x
+            odom_y = pose.position.y
+            odom_z = pose.position.z
+
+            print(f"Debug: 获取Odom位置: ({odom_x:.3f}, {odom_y:.3f}, {odom_z:.3f})")
+
+            # 从odom坐标转换到PNG坐标
+            try:
+                png_x, png_y = odometry_to_png(odom_x, odom_y)
+                if png_x is not None and png_y is not None:
+                    print(f"Debug: Odom到PNG转换成功 - PNG位置: ({png_x:.1f}px, {png_y:.1f}px)")
+
+                    # 创建新的Pose对象，包含PNG坐标
+                    from geometry_msgs.msg import Pose, Point, Quaternion
+                    png_pose = Pose()
+                    png_pose.position.x = png_x  # PNG坐标
+                    png_pose.position.y = png_y  # PNG坐标
+                    png_pose.position.z = odom_z  # 保持原始Z值
+                    png_pose.orientation = pose.orientation  # 保持原始姿态
+
+                    return True, png_pose
+                else:
+                    print(f"Debug: Odom到PNG转换失败 - 地图信息不可用")
+                    return False, "地图信息不可用，无法转换坐标"
+            except Exception as png_e:
+                print(f"Debug: PNG转换失败: {png_e}")
+                return False, f"PNG转换失败: {png_e}"
+
+        else:
+            # 如果没有里程计数据，尝试TF变换获取Map坐标，然后转换
+            print("Debug: 无里程计数据，尝试TF变换获取机器人位置")
+            global tf_listener
+            if tf_listener is None:
+                tf_listener = tf.TransformListener()
+
+            # 短暂等待变换，避免长时间阻塞
+            try:
+                tf_listener.waitForTransform('/map', '/base_link', rospy.Time(0), rospy.Duration(0.5))
+                (trans, rot) = tf_listener.lookupTransform('/map', '/base_link', rospy.Time(0))
+
+                map_x = trans[0]
+                map_y = trans[1]
+                map_z = trans[2]
+
+                print(f"Debug: TF变换获取Map位置: ({map_x:.3f}, {map_y:.3f}, {map_z:.3f})")
+
+                # 尝试将Map坐标转换为PNG坐标（注意：这里使用map坐标而非odom坐标）
+                try:
+                    # 直接使用地图转换函数，因为Map坐标也可以转换为PNG
+                    png_x, png_y = odometry_to_png(map_x, map_y)
+                    if png_x is not None and png_y is not None:
+                        print(f"Debug: Map到PNG转换成功 - PNG位置: ({png_x:.1f}px, {png_y:.1f}px)")
+
+                        # 创建包含PNG坐标的Pose对象
+                        from geometry_msgs.msg import Pose, Point, Quaternion
+                        png_pose = Pose()
+                        png_pose.position.x = png_x  # PNG坐标
+                        png_pose.position.y = png_y  # PNG坐标
+                        png_pose.position.z = map_z  # 保持原始Z值
+                        png_pose.orientation = Quaternion(*rot)
+
+                        return True, png_pose
+                    else:
+                        print(f"Debug: Map到PNG转换失败 - 地图信息不可用")
+                        return False, "地图信息不可用，无法转换坐标"
+                except Exception as png_e:
+                    print(f"Debug: PNG转换失败: {png_e}")
+                    return False, f"PNG转换失败: {png_e}"
+
+            except tf.Exception as tf_e:
+                print(f"Debug: TF变换失败: {str(tf_e)}")
+                return False, f"TF变换失败: {str(tf_e)}"
+
+    except Exception as e:
+        print(f"Debug: 获取机器人位姿失败: {str(e)}")
+        return False, str(e)
+
+
 
 
 
@@ -3794,6 +4345,7 @@ async def calibration_by_task_point_handler(
 
     response = Response(payload=payload, target=websocket)
     response_queue.put(response)
+
 
 
 

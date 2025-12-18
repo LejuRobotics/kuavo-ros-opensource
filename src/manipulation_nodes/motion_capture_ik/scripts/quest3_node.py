@@ -57,6 +57,10 @@ class Quest3Node:
         upper_arm_length = model_config["upper_arm_length"]
         lower_arm_length = model_config["lower_arm_length"]
         shoulder_width = model_config["shoulder_width"] 
+        num_waist_joint = model_config.get("NUM_WAIST_JOINT", 0)
+        # 计算手臂关节索引：v45等无waist版本为12:26，v52等有waist版本为13:27
+        self.arm_joint_start_idx = 12 + num_waist_joint
+        self.arm_joint_end_idx = self.arm_joint_start_idx + 14
         print(f"upper_arm_length: {upper_arm_length}, lower_arm_length: {lower_arm_length}, shoulder_width: {shoulder_width}")
         rospy.set_param("/quest3/upper_arm_length", upper_arm_length)
         rospy.set_param("/quest3/lower_arm_length", lower_arm_length)
@@ -337,8 +341,8 @@ class Quest3Node:
         return None
 
     def sensors_data_raw_callback(self, msg):
-        if len(msg.joint_data.joint_q) >= 26:
-            self.arm_joint_angles = msg.joint_data.joint_q[12:26]
+        if len(msg.joint_data.joint_q) >= self.arm_joint_end_idx:
+            self.arm_joint_angles = msg.joint_data.joint_q[self.arm_joint_start_idx:self.arm_joint_end_idx]
 
     def mm_control_type_callback(self, msg):
         self.mm_control_type = int(msg.data)

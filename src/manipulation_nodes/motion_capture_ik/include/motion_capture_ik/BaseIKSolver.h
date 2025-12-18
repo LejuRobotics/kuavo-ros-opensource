@@ -43,7 +43,8 @@ class BaseIKSolver {
   virtual ~BaseIKSolver() = default;
 
   virtual IKSolveResult solveIK(const std::vector<PoseData>& PoseConstraintList,
-                                ArmIdx controlArmIndex = ArmIdx::LEFT) = 0;
+                                ArmIdx controlArmIndex = ArmIdx::LEFT,
+                                const Eigen::VectorXd& jointMidValues = Eigen::VectorXd()) = 0;
 
  protected:
   virtual void initializeFrames(const std::vector<std::string>& ikConstraintFrameNames);

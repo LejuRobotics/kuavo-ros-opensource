@@ -31,8 +31,8 @@ struct TwoStageIKParameters {
   double stage1WristWeight = 5.0;      // 手腕关节权重（近似冻结）
   double stage1PositionWeight = 10.0;  // 位置代价权重
 
-  double stage2DefaultWeight = 100.0;  // 默认关节保持权重
-  double stage2WristWeight = 0.05;     // 手腕关节权重（允许变化）
+  double stage2DefaultWeight = 1e4;  // 默认关节保持权重
+  double stage2WristWeight = 1e-4;   // 手腕关节权重（允许变化）
 
   // 平滑性权重参数
   double smoothnessWeight = 0.1;  // 平滑性权重
@@ -61,14 +61,21 @@ class TwoStageTorsoIK : public BaseIKSolver {
   ~TwoStageTorsoIK() = default;
 
   IKSolveResult solveIK(const std::vector<PoseData>& PoseConstraintList,
-                        ArmIdx controlArmIndex = ArmIdx::LEFT) override;
+                        ArmIdx controlArmIndex = ArmIdx::LEFT,
+                        const Eigen::VectorXd& jointMidValues = Eigen::VectorXd()) override;
 
   std::pair<bool, Eigen::VectorXd> getStage1Result() const;
   std::pair<bool, Eigen::VectorXd> getStage2Result() const;
 
   // Forward Kinematics methods - matching plantIK.cc functionality
-  std::pair<Eigen::Vector3d, Eigen::Quaterniond> FK(const Eigen::VectorXd& q, HandSide side);
-  std::pair<Eigen::Vector3d, Eigen::Quaterniond> FKElbow(const Eigen::VectorXd& q, HandSide side);
+  std::pair<Eigen::Vector3d, Eigen::Quaterniond> FK(const Eigen::VectorXd& q,
+                                                    const std::string& frameName,
+                                                    int expectedSize = -1);
+  std::pair<Eigen::Vector3d, Eigen::Quaterniond> FKElbow(const Eigen::VectorXd& q,
+                                                         const std::string& frameName,
+                                                         int expectedSize = -1);
+
+  Eigen::MatrixXd getFrameJacobian(const Eigen::VectorXd& q, const std::string& frameName);
 
  protected:
   void initializeJointIndices() override;
@@ -85,11 +92,13 @@ class TwoStageTorsoIK : public BaseIKSolver {
 
   void setStage1Constraints(drake::multibody::InverseKinematics& ik,
                             const std::vector<PoseData>& PoseConstraintList,
-                            ArmIdx controlArmIndex) const;
+                            ArmIdx controlArmIndex,
+                            const Eigen::VectorXd& referenceSolution) const;
 
   void setStage2Constraints(drake::multibody::InverseKinematics& ik,
                             const std::vector<PoseData>& PoseConstraintList,
-                            ArmIdx controlArmIndex) const;
+                            ArmIdx controlArmIndex,
+                            const Eigen::VectorXd& referenceSolution) const;
 
   std::vector<const drake::multibody::Frame<double>*> wristFrames_;
   std::vector<int> leftWristIdx_;
@@ -101,6 +110,9 @@ class TwoStageTorsoIK : public BaseIKSolver {
   TwoStageIKParameters ikParams_;
 
   std::unique_ptr<drake::systems::Context<double>> plant_context_;
+
+  // Mutable member to store reference solution for use in const constraint functions
+  mutable Eigen::VectorXd currentReferenceSolution_;
 };
 
 }  // namespace HighlyDynamic

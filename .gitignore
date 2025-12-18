@@ -35,12 +35,8 @@ tmp_ik/**
 # **/*.cursormd
 compile_commands.json
 **/debug_ik/
-** copy
 **/*_debug.py
 ik_factory.py
-config.py
-utils.py
-**/*copy.*
 **/*.rej
 .clang-format
 **/*.code-search

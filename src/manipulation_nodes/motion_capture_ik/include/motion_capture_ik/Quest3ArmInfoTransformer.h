@@ -86,11 +86,9 @@ class Quest3ArmInfoTransformer final {
   bool hasVisualizationData() const { return visualizationData_.isValid; }
 
   // 新增：可视化回调函数类型（不包含ROS特性）
-  using VisualizationCallback = std::function<void(const std::string &side,
-                                                   const Eigen::Vector3d &handPos,
-                                                   const Eigen::Vector3d &elbowPos,
-                                                   const Eigen::Vector3d &shoulderPos,
-                                                   const Eigen::Vector3d &chestPos)>;
+  // poses 顺序: [handPose, elbowPose, shoulderPose, chestPose]
+  // 每个PoseData包含position和rotation_matrix
+  using VisualizationCallback = std::function<void(const std::string &side, const std::vector<PoseData> &poses)>;
 
   void setVisualizationCallback(VisualizationCallback callback) { visualizationCallback_ = callback; }
 
@@ -208,8 +206,10 @@ class Quest3ArmInfoTransformer final {
   void updateVisualizationDataForSide(const noitom_hi5_hand_udp_python::PoseInfoList &input,
                                       const std::string &side,
                                       const Eigen::Vector3d &handPos,
+                                      const Eigen::Quaterniond &handQuat,
                                       const Eigen::Vector3d &elbowPos,
-                                      const Eigen::Vector3d &shoulderPos);
+                                      const Eigen::Vector3d &shoulderPos,
+                                      const Eigen::Matrix3d &shoulderRot);
 
   static bool joyOkPressedCheck(const JoystickState &joystick);
   static bool joyStopPressedCheck(const JoystickState &joystick, float minAngle = 0.5f, float maxAngle = 0.8f);

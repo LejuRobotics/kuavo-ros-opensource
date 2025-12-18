@@ -109,6 +109,85 @@ exit_with_failure() {
 }
 
 # SCRIPT BEGIN
+# Check if kuavo-humanoid-sdk is installed
+check_conflicting_package() {
+    if pip show kuavo-humanoid-sdk >/dev/null 2>&1; then
+        echo -e "\033[33m⚠️  检测到已安装 kuavo-humanoid-sdk，与 kuavo-humanoid-sdk-ws 可能存在冲突\033[0m"
+        pip show kuavo-humanoid-sdk | grep -E "Name:|Version:" || true
+        echo ""
+        echo -e "\033[33m是否要卸载 kuavo-humanoid-sdk 并继续安装 kuavo-humanoid-sdk-ws？\033[0m"
+        read -p "请输入 [y/Y] 继续卸载并安装，或 [n/N] 取消安装: " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "\033[32m正在卸载 kuavo-humanoid-sdk...\033[0m"
+            pip uninstall kuavo-humanoid-sdk -y
+            if [ $? -eq 0 ]; then
+                echo -e "\033[32m✅ kuavo-humanoid-sdk 已成功卸载\033[0m"
+                
+                # Clean up easy-install.pth file if it contains references to kuavo-humanoid-sdk
+                cleanup_easy_install_pth() {
+                    local python_version=$(python3 --version 2>/dev/null | cut -d ' ' -f 2 | cut -d '.' -f 1-2)
+                    # Check multiple possible locations: current user and system-wide
+                    local easy_install_paths=(
+                        "$HOME/.local/lib/python${python_version}/dist-packages/easy-install.pth"
+                        "/usr/local/lib/python${python_version}/dist-packages/easy-install.pth"
+                    )
+                    
+                    local cleaned_count=0
+                    for easy_install_path in "${easy_install_paths[@]}"; do
+                        if [ -f "$easy_install_path" ]; then
+                            echo -e "\033[33m🔧 检查并清理: $easy_install_path\033[0m"
+                            # Create backup
+                            if [ -w "$easy_install_path" ]; then
+                                cp "$easy_install_path" "${easy_install_path}.bak" 2>/dev/null || true
+                            else
+                                sudo cp "$easy_install_path" "${easy_install_path}.bak" 2>/dev/null || true
+                            fi
+                            
+                            # Check if there are lines with kuavo-humanoid-sdk that don't contain ws
+                            if grep -E "kuavo.*humanoid.*sdk" "$easy_install_path" 2>/dev/null | grep -vE "kuavo.*humanoid.*sdk.*ws" 2>/dev/null | grep -q "."; then
+                                # Create temp file: keep lines that don't contain kuavo-humanoid-sdk, or contain kuavo-humanoid-sdk-ws
+                                grep -vE "kuavo.*humanoid.*sdk" "$easy_install_path" 2>/dev/null > "${easy_install_path}.tmp" 2>/dev/null || true
+                                # Append lines that contain kuavo-humanoid-sdk-ws
+                                grep -E "kuavo.*humanoid.*sdk.*ws" "$easy_install_path" 2>/dev/null >> "${easy_install_path}.tmp" 2>/dev/null || true
+                                
+                                if [ -f "${easy_install_path}.tmp" ]; then
+                                    if [ -w "$easy_install_path" ]; then
+                                        mv "${easy_install_path}.tmp" "$easy_install_path" 2>/dev/null || true
+                                    else
+                                        sudo mv "${easy_install_path}.tmp" "$easy_install_path" 2>/dev/null || true
+                                    fi
+                                    echo -e "\033[32m✅ 已清理: $easy_install_path\033[0m"
+                                    cleaned_count=$((cleaned_count + 1))
+                                else
+                                    echo -e "\033[33m⚠️  无法清理 $easy_install_path，但可以继续安装\033[0m"
+                                fi
+                            else
+                                echo -e "\033[32m✅ 未发现残留条目: $easy_install_path\033[0m"
+                            fi
+                        fi
+                    done
+                    
+                    if [ $cleaned_count -eq 0 ]; then
+                        echo -e "\033[32m✅ 所有 easy-install.pth 文件中均未发现残留条目\033[0m"
+                    fi
+                }
+                
+                cleanup_easy_install_pth
+            else
+                echo -e "\033[31m❌ 卸载 kuavo-humanoid-sdk 失败，安装已取消\033[0m"
+                exit 1
+            fi
+        else
+            echo -e "\033[33m安装已取消\033[0m"
+            exit 0
+        fi
+    fi
+}
+
+# Check for conflicting package before installation
+check_conflicting_package
+
 check_and_format_version "$BRANCH" VERSION
 echo -e "\033[32mVersion: $VERSION\033[0m"
 echo -e "\033[32mBranch: $BRANCH\033[0m"

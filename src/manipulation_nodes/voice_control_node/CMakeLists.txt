@@ -5,6 +5,7 @@ project(voice_control_node)
 find_package(catkin REQUIRED COMPONENTS
   rospy
   kuavo_msgs
+  std_srvs
 )
 
 ###################################
@@ -13,7 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES voice_control_node
-  CATKIN_DEPENDS rospy kuavo_msgs
+  CATKIN_DEPENDS rospy kuavo_msgs std_srvs
 #  DEPENDS system_lib
 )
 

@@ -81,7 +81,7 @@ namespace humanoid_controller
       fall_down_state_ = FallStandState::FALL_DOWN;
       res.message = "fall_down_state_ set to FALL_DOWN (1)";
       // 检查控制器列表是否存在倒地起身控制器，自动切换过去
-      if (controller_manager_ && controller_manager_->hasController(RLControllerType::FALL_STAND_CONTROLLER))
+      if (controller_manager_ && has_fall_stand_controller_)
       {
         std::cout << "[humanoid Controller]fall down detected, switch to fall down controller" << std::endl;
         controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
@@ -844,11 +844,12 @@ namespace humanoid_controller
           {
             ROS_WARN("[HumanoidController] Failed to load controllers from config file, RL controllers will not be available");
           }
+          has_fall_stand_controller_ = controller_manager_->hasController(RLControllerType::FALL_STAND_CONTROLLER);
 
           // 如果 init_fall_down_state_=true，初始切换到倒地起身控制器
           if (init_fall_down_state_)
           {
-            if (controller_manager_->hasController(RLControllerType::FALL_STAND_CONTROLLER))
+            if (has_fall_stand_controller_)
             {
               std::cout << "[humanoid Controller]init_fall_down_state_, switch to fall down controller" << std::endl;
               controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
@@ -1651,14 +1652,19 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // measuredRbdStateRL_ = getRobotState();
       double startTime;
       double endTime;
-      const double motionVel = 0.11;
+      double motionVel;
+      if(is_roban_)
+        motionVel = 0.06;  //鲁班站立速度
+      else
+        motionVel = 0.11;   //其他机器人站立速度
+      
       if (!isInitStandUpStartTime_)
       {
         isInitStandUpStartTime_ = true;
         robotStartStandTime_ = time.toSec();
         // 站立的结束时间是依据开始时间确定的
         startTime = robotStartStandTime_;
-        endTime = startTime + (standState[8] - squatState[8]) / motionVel; // 以 0.11m/s 速度起立
+        endTime = startTime + (standState[8] - squatState[8]) / motionVel; // 以 motionVel 速度起立
         robotStandUpCompleteTime_ = endTime;
         ROS_INFO_STREAM("Set standUp start time: " << robotStartStandTime_);
       }
@@ -1671,7 +1677,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         curState = curRobotLegState_;
         desiredState = squatState;
         startTime = robotStartSquatTime_;
-        endTime = startTime + (curRobotLegState_[8] - squatState[8]) / motionVel; // 以 0.11m/s 速度挂起
+        endTime = startTime + (curRobotLegState_[8] - squatState[8]) / motionVel; // 以 motionVel 速度挂起
       }
       else
       {
@@ -2412,7 +2418,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
           fall_down_state_ = FallStandState::FALL_DOWN;
           
           // 检查控制器列表是否存在倒地起身控制器，自动切换过去
-          if (controller_manager_ && controller_manager_->hasController(RLControllerType::FALL_STAND_CONTROLLER))
+          if (controller_manager_ && has_fall_stand_controller_)
           {
             std::cout << "[humanoid Controller]fall down detected, switch to fall down controller" << std::endl;
             controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
@@ -2903,12 +2909,14 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         ROS_WARN_STREAM("Pull up protection triggered - publishing stop_robot message");
         isPullUp_ = false;
-        
-        // 发布stop_robot话题
-        std_msgs::Bool stop_msg;
-        stop_msg.data = true;
-        stop_pub_.publish(stop_msg);
-        ROS_WARN_STREAM("stop_robot message published");
+        if (!has_fall_stand_controller_)
+        {
+          // 发布stop_robot话题
+          std_msgs::Bool stop_msg;
+          stop_msg.data = true;
+          stop_pub_.publish(stop_msg);
+          ROS_WARN_STREAM("stop_robot message published");
+        }
       }
       ros_logger_->publishVector("/state_estimate/measuredRbdState", measuredRbdState_);
       auto &info = HumanoidInterface_->getCentroidalModelInfo();

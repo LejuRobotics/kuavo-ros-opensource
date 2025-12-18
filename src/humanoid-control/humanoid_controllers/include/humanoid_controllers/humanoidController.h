@@ -786,6 +786,7 @@ namespace humanoid_controller
     double fall_stand_interp_start_time_ = 0.0;   // 插值开始时间
     double fall_stand_required_time_ = 0.0;       // 根据最大关节速度计算得到的所需时长
     double fall_stand_max_joint_velocity_ = 1.0;  // 倒地起身关节插值的最大关节速度(rad/s)
+    bool has_fall_stand_controller_{false};
     
     // ==================== 半身模式手臂插值相关成员变量 ====================
     bool is_half_body_arm_interpolating_ = false;

@@ -287,9 +287,15 @@ void KeyFramesVisualizer::publishIncrementalPoseVisualization(
   Eigen::Vector3d visLeftPos, visRightPos, incrementalLeftElbowPos, incrementalRightElbowPos;
   Eigen::Quaterniond visLeftQuat, visRightQuat;
 
-  // 根据 latestPoseConstraintList_ 数据读取可视化数据
-  visLeftPos = incrementalResult.leftHandFkPosition;
-  visRightPos = incrementalResult.rightHandFkPosition;
+  // 通过FK回调计算临时的FK位置用于可视化
+  if (fkCallback) {
+    Eigen::Quaterniond tempLeftQuat, tempRightQuat;  // 临时四元数变量，这里不使用
+    fkCallback(visLeftPos, tempLeftQuat, visRightPos, tempRightQuat);
+  } else {
+    // 如果没有FK回调，使用零向量作为默认值
+    visLeftPos = Eigen::Vector3d::Zero();
+    visRightPos = Eigen::Vector3d::Zero();
+  }
 
   if (poseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
     visLeftQuat = Eigen::Quaterniond(poseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix).normalized();

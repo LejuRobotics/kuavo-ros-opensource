@@ -126,7 +126,8 @@ source installed/setup.bash     # 加载一些已经安装的ROS包依赖环境�
 catkin build humanoid_controllers
 catkin build humanoid_plan_arm_trajectory
 catkin build planarmwebsocketservice
-catkin build dx_nav_common
+catkin build kuavo_mapping
+catkin build voice_control_node # 编译语音控制节点
 
 # 安装 sshpass，确保远程拷贝音乐文件正常工作
 sudo apt-get update
