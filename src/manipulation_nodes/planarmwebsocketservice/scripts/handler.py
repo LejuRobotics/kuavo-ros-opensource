@@ -12,6 +12,11 @@ from dataclasses import dataclass
 # 全局变量存储地图信息，用于坐标系转换
 global_map_info = None
 
+# 地图推送状态缓存
+last_status_check_time = 0
+should_push_map_cache = True
+STATUS_CHECK_INTERVAL = 2.0  # 2秒检查一次状态
+
 
 def odometry_to_png(odom_x, odom_y, map_info=None):
     """
@@ -134,6 +139,37 @@ def png_to_odometry(png_x, png_y, map_info=None):
     except Exception as e:
         print(f"PNG转Odometry坐标失败: {e}")
         return None, None
+
+
+def should_push_map():
+    """轻量级的状态检查，使用缓存避免频繁查询"""
+    global last_status_check_time, should_push_map_cache
+
+    current_time = time.time()
+
+    # 只在间隔时间到达时才查询服务状态
+    if current_time - last_status_check_time > STATUS_CHECK_INTERVAL:
+        try:
+            # 查询建图状态
+            mapping_status = get_mapping_status()
+            mapping_active = getattr(mapping_status, 'is_mapping', False)
+
+            # 查询加载地图状态
+            load_status = get_load_map_status()
+            map_loaded = getattr(load_status, 'map_name', None) is not None
+
+            # 更新缓存
+            should_push_map_cache = mapping_active or map_loaded
+            last_status_check_time = current_time
+
+            print(f"地图推送状态更新: 建图={mapping_active}, 地图已加载={map_loaded}, 推送={should_push_map_cache}")
+
+        except Exception as e:
+            print(f"地图推送状态检查失败: {e}")
+            # 默认允许推送，避免影响正常功能
+            should_push_map_cache = True
+
+    return should_push_map_cache
 
 
 def update_map_info(map_info):
@@ -2970,6 +3006,10 @@ def map_callback(msg):
         # 将OccupancyGrid转换为base64编码的PNG图片
         map_base64 = convert_map_to_base64(msg)
 
+        # 检查是否应该推送地图
+        if not should_push_map():
+            return
+
         if map_base64:
             # 创建推送消息
             payload = Payload(
@@ -4331,7 +4371,7 @@ async def calibration_by_task_point_handler(
                 payload.data["task_point_name"] = task_point_name
             else:
                 payload.data["code"] = 1
-                payload.data["message"] = f"基于任务点 '{task_point_name}' 的校准失败: {res.message}"
+                payload.data["message"] = f"基于任务点 '{task_point_name}' 的校准失败: 机器人不在任务点附近或建图不够精准"
 
     except rospy.ServiceException as e:
         payload.data["code"] = 1
