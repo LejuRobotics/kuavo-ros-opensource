@@ -208,6 +208,15 @@ ECHO_WARN "Check and Install depend packages ..."
 bash $SCRIPT_DIR/install_robot_localization_env.sh >&2
 
 
+ECHO_WARN "Check and Install libudev-dev ..."
+if ! dpkg -l | grep -q "libudev-dev"; then
+    ECHO_WARN "Installing libudev-dev ..."
+    sudo apt-get install libudev-dev -y
+else
+    ECHO_WARN "libudev-dev is already installed."
+fi
+
+
 check_packages_installed "bash"
 result=$?
 
