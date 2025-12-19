@@ -2761,7 +2761,7 @@ async def save_map_handler(
         print(f"Saving current map with name: '{map_name}'...")
 
         # 调用上位机的保存地图服务
-        import subprocess
+        import asyncio
         try:
             # 调用上位机的保存地图服务
             service_name = '/save_map_service'
@@ -2770,7 +2770,23 @@ async def save_map_handler(
             # 使用rosservice命令调用保存地图服务
             # SaveMap服务需要一个map_name参数
             cmd = f'rosservice call {service_name} "map_name: \'{map_name}\'"'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+            result_stdout = stdout.decode('utf-8') if stdout else ""
+            result_stderr = stderr.decode('utf-8') if stderr else ""
+
+            # 创建一个类似subprocess.run返回的对象
+            class AsyncResult:
+                def __init__(self, returncode, stdout, stderr):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            result = AsyncResult(proc.returncode, result_stdout, result_stderr)
 
             if result.returncode == 0:
                 # 解析ROSService返回的YAML格式响应
@@ -2805,7 +2821,7 @@ async def save_map_handler(
                 payload.data["message"] = f"地图保存失败: {result.stderr}"
                 print(f"Save map service call failed: {result.stderr}")
 
-        except (rospy.ServiceException, subprocess.TimeoutExpired) as e:
+        except (rospy.ServiceException, asyncio.TimeoutError) as e:
             payload.data["code"] = 1
             payload.data["message"] = f"无法连接到保存地图服务: {str(e)}"
             print(f"Failed to connect to save map service: {str(e)}")

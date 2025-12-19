@@ -539,6 +539,13 @@ class ArmTrajectoryBezierDemo:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=f"Action file {action_name} not found")
 
+        num_subscribers = self.kuavo_arm_traj_pub.get_num_connections()
+        if num_subscribers == 0:
+            msg = "话题 /kuavo_arm_traj 没有订阅者，机器人可能未启动。请检查 nodelet_manager 节点是否正常运行。"
+            rospy.logerr(msg)
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
         robot_type_raw = data.get("robotType", None)
         if robot_type_raw is None:
             msg = "Action file missing required field: robotType"
