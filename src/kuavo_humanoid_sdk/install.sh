@@ -130,6 +130,80 @@ exit_with_failure() {
 }
 
 # SCRIPT BEGIN
+# Check if kuavo-humanoid-sdk-ws is installed
+check_conflicting_package() {
+    if pip show kuavo-humanoid-sdk-ws >/dev/null 2>&1; then
+        echo -e "\033[33m⚠️  检测到已安装 kuavo-humanoid-sdk-ws，与 kuavo-humanoid-sdk 可能存在冲突\033[0m"
+        pip show kuavo-humanoid-sdk-ws | grep -E "Name:|Version:" || true
+        echo ""
+        echo -e "\033[33m是否要卸载 kuavo-humanoid-sdk-ws 并继续安装 kuavo-humanoid-sdk？\033[0m"
+        read -p "请输入 [y/Y] 继续卸载并安装，或 [n/N] 取消安装: " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "\033[32m正在卸载 kuavo-humanoid-sdk-ws...\033[0m"
+            pip uninstall kuavo-humanoid-sdk-ws -y
+            if [ $? -eq 0 ]; then
+                echo -e "\033[32m✅ kuavo-humanoid-sdk-ws 已成功卸载\033[0m"
+                
+                # Clean up easy-install.pth file if it contains references to kuavo-humanoid-sdk-ws
+                cleanup_easy_install_pth() {
+                    local python_version=$(python3 --version 2>/dev/null | cut -d ' ' -f 2 | cut -d '.' -f 1-2)
+                    # Check multiple possible locations: current user and system-wide
+                    local easy_install_paths=(
+                        "$HOME/.local/lib/python${python_version}/dist-packages/easy-install.pth"
+                        "/usr/local/lib/python${python_version}/dist-packages/easy-install.pth"
+                    )
+                    
+                    local cleaned_count=0
+                    for easy_install_path in "${easy_install_paths[@]}"; do
+                        if [ -f "$easy_install_path" ]; then
+                            echo -e "\033[33m🔧 检查并清理: $easy_install_path\033[0m"
+                            # Create backup
+                            if [ -w "$easy_install_path" ]; then
+                                cp "$easy_install_path" "${easy_install_path}.bak" 2>/dev/null || true
+                            else
+                                sudo cp "$easy_install_path" "${easy_install_path}.bak" 2>/dev/null || true
+                            fi
+                            
+                            # Remove lines containing kuavo-humanoid-sdk-ws or kuavo_humanoid_sdk_ws
+                            if grep -q "kuavo.*humanoid.*sdk.*ws" "$easy_install_path" 2>/dev/null; then
+                                # Use sed to remove lines containing the conflicting package
+                                # Try with sudo if file is not writable
+                                if [ -w "$easy_install_path" ]; then
+                                    sed -i '/kuavo.*humanoid.*sdk.*ws/d' "$easy_install_path" 2>/dev/null || \
+                                    sed -i.bak '/kuavo.*humanoid.*sdk.*ws/d' "$easy_install_path" 2>/dev/null || true
+                                else
+                                    sudo sed -i '/kuavo.*humanoid.*sdk.*ws/d' "$easy_install_path" 2>/dev/null || \
+                                    sudo sed -i.bak '/kuavo.*humanoid.*sdk.*ws/d' "$easy_install_path" 2>/dev/null || true
+                                fi
+                                echo -e "\033[32m✅ 已清理: $easy_install_path\033[0m"
+                                cleaned_count=$((cleaned_count + 1))
+                            else
+                                echo -e "\033[32m✅ 未发现残留条目: $easy_install_path\033[0m"
+                            fi
+                        fi
+                    done
+                    
+                    if [ $cleaned_count -eq 0 ]; then
+                        echo -e "\033[32m✅ 所有 easy-install.pth 文件中均未发现残留条目\033[0m"
+                    fi
+                }
+                
+                cleanup_easy_install_pth
+            else
+                echo -e "\033[31m❌ 卸载 kuavo-humanoid-sdk-ws 失败，安装已取消\033[0m"
+                exit 1
+            fi
+        else
+            echo -e "\033[33m安装已取消\033[0m"
+            exit 0
+        fi
+    fi
+}
+
+# Check for conflicting package before installation
+check_conflicting_package
+
 # Check if VERSION follows the expected format (e.g., 0.0.1)
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
     echo -e "\033[33mWarning: VERSION format is invalid, attempting to get version from git...\033[0m"
