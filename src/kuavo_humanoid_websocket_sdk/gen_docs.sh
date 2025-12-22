@@ -41,9 +41,8 @@ if package_path not in sys.path:
 
 install_dependencies() {
     echo "Installing dependencies..."
-    for pkg in sphinx sphinx-rtd-theme sphinx-markdown-builder; do
-        pip list | grep "$pkg" > /dev/null || (echo "Installing $pkg..." && pip install "$pkg")
-    done
+    # 适配 Python 3.8 环境
+    pip install --upgrade --force-reinstall "sphinx<6.0.0" "sphinx-markdown-builder==0.5.5" "sphinx-rtd-theme<2.0.0"
 }
 
 check_ros_env() {

@@ -14,6 +14,34 @@ def find_msg_subpackages(base_dir1):
             subpackages.append(pkg_name)
     return subpackages
 
+def find_subpackages(base_dir):
+    """查找指定目录下的所有子包"""
+    subpackages = []
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    full_base_dir = os.path.join(script_dir, base_dir)
+
+    if not os.path.exists(full_base_dir):
+        return subpackages
+
+    for root, dirs, files in os.walk(full_base_dir):
+        # 排除不需要的目录
+        dirs[:] = [d for d in dirs if d not in ['__pycache__', '.git', '.pytest_cache',
+                                               'node_modules', '.vscode', '.idea',
+                                               'build', 'dist', 'egg-info']]
+
+        # 将所有目录转换为包名
+        rel_path = os.path.relpath(root, script_dir)
+        if rel_path != base_dir:  # 不包括基础目录本身
+            pkg_name = rel_path.replace("/", ".").replace("\\", ".")
+            subpackages.append(pkg_name)
+
+    return sorted(subpackages)  # 返回排序后的列表
+
+# 自动查找子包
+core_packages = find_subpackages("kuavo_humanoid_sdk/kuavo/core")
+strategy_packages = find_subpackages("kuavo_humanoid_sdk/kuavo_strategy")
+strategy_v2_packages = find_subpackages("kuavo_humanoid_sdk/kuavo_strategy_v2")
+
 # Check if a version argument is provided
 sdk_version = os.environ.get('KUAVO_HUMANOID_SDK_VERSION')
 # If no version is provided, raise an error
@@ -41,16 +69,7 @@ setup(
     'kuavo_humanoid_sdk.common',
     'kuavo_humanoid_sdk.interfaces',
     'kuavo_humanoid_sdk.kuavo',
-    'kuavo_humanoid_sdk.kuavo.core',
-    'kuavo_humanoid_sdk.kuavo.core.ros',
-    'kuavo_humanoid_sdk.kuavo_strategy',
-    'kuavo_humanoid_sdk.kuavo_strategy.grasp_box',
-    'kuavo_humanoid_sdk.kuavo_strategy_v2',
-    'kuavo_humanoid_sdk.kuavo_strategy_v2.common',
-    'kuavo_humanoid_sdk.kuavo_strategy_v2.common.events',
-    'kuavo_humanoid_sdk.kuavo_strategy_v2.pick_place_box',
-    'kuavo_humanoid_sdk.kuavo_strategy_v2.utils',
-    ]+find_msg_subpackages("kuavo_humanoid_sdk/msg"),
+    ] + core_packages + strategy_packages + strategy_v2_packages + find_msg_subpackages("kuavo_humanoid_sdk/msg"),
     install_requires=[
         "numpy", 
         "transitions",
