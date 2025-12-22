@@ -7,16 +7,27 @@
     <param name="robot_version"    value="$(arg robot_version)"/>
   
     <!-- <arg name="urdfFile"           default="$(find biped_s3)/urdf/biped_s3_with_v3_arm.urdf"/> -->
-    <arg name="urdfFile"           default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
-  
+    <!-- Version 15 uses version 14 urdf and assets -->
+    <arg name="urdfFile"           default="$(find kuavo_assets)/models/biped_s14/urdf/biped_s14.urdf" if="$(eval arg('robot_version') == 15)"/>
+    <arg name="urdfFile"           default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" unless="$(eval arg('robot_version') == 15)"/>
+
    <!-- params -->
     <param name="urdfFile"         value="$(arg urdfFile)" />
-    <param name="taskFile"         value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/task.info"/>
-    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info"/>
-    <param name="dynamicQrFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/dynamic_qr.info"/>
-    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info"/>
-    
-    <arg name="kuavoConfigFile"           default="$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json"/>
+    <!-- Version 15 uses version 14 config files -->
+    <param name="taskFile"         value="$(find humanoid_controllers)/config/kuavo_v14/mpc/task.info" if="$(eval arg('robot_version') == 15)"/>
+    <param name="taskFile"         value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/task.info" unless="$(eval arg('robot_version') == 15)"/>
+
+    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v14/command/reference.info" if="$(eval arg('robot_version') == 15)"/>
+    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info" unless="$(eval arg('robot_version') == 15)"/>
+
+    <param name="dynamicQrFile"    value="$(find humanoid_controllers)/config/kuavo_v14/mpc/dynamic_qr.info" if="$(eval arg('robot_version') == 15)"/>
+    <param name="dynamicQrFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/dynamic_qr.info" unless="$(eval arg('robot_version') == 15)"/>
+
+    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v14/command/gait.info" if="$(eval arg('robot_version') == 15)"/>
+    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info" unless="$(eval arg('robot_version') == 15)"/>
+
+    <arg name="kuavoConfigFile"           default="$(find kuavo_assets)/config/kuavo_v14/kuavo.json" if="$(eval arg('robot_version') == 15)"/>
+    <arg name="kuavoConfigFile"           default="$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json" unless="$(eval arg('robot_version') == 15)"/>
     <param name="kuavo_configuration" textfile="$(arg kuavoConfigFile)"/>
 
     <param name="modelPath"        value="$(find kuavo_assets)/models" />

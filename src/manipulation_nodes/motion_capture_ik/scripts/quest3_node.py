@@ -50,6 +50,11 @@ class Quest3Node:
         self.arm_joint_angles = None
         kuavo_assests_path = get_package_path("kuavo_assets")
         robot_version = os.environ.get('ROBOT_VERSION', '40')
+
+        # Handle version 15 special case: use version 14 config
+        if robot_version == '15':
+            robot_version = '14'
+
         model_config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
         import json
         with open(model_config_file, 'r') as f:

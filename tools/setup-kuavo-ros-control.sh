@@ -98,19 +98,58 @@ check_samplerate(){
 # Configure robot version
 setup_robot_version() {
     print_info "设置机器人版本..."
-    print_info "请输入机器人版本 (42代表短臂, 45代表长臂, 49代表 pro max, 45.1代表假手版, 49.1代表展厅版):"
-    read -r version
-    if [[ "$version" == "45.1" || "$version" == "49.1" ]]; then
-    if [[ "$version" == "45.1" ]]; then
-        version=100045
-    else
-        version=100049
-    fi
-fi
-    
+    # 版本选择和确认循环
+    while true; do
+        print_info "请输入机器人版本:"
+        print_info "42 (短臂版本)"
+        print_info "45 (长臂版本)"
+        print_info "49 (pro max版本)"
+        print_info "45.1 (假手版)"
+        print_info "49.1 (展厅版)"
+        print_info "13 (roban2.0版本)"
+        print_info "14 (roban2.1版本)"
+        print_info "15 (roban2.2版本)"
+        read -r version
+
+        # 验证输入的版本是否有效
+        if [[ "$version" != "42" && "$version" != "45" && "$version" != "49" &&
+              "$version" != "45.1" && "$version" != "49.1" &&
+              "$version" != "13" && "$version" != "14" && "$version" != "15" ]]; then
+            print_error "无效的版本号: $version"
+            print_info "请选择上述列出的有效版本号"
+            continue  # 重新开始循环
+        fi
+
+        # 处理特殊版本号转换
+        if [[ "$version" == "45.1" || "$version" == "49.1" ]]; then
+            if [[ "$version" == "45.1" ]]; then
+                version=100045
+            else
+                version=100049
+            fi
+        elif [[ "$version" == "13" ]]; then
+            version=13
+        elif [[ "$version" == "14" ]]; then
+            version=14
+        elif [[ "$version" == "15" ]]; then
+            version=15
+        fi
+
+        # 显示选择的版本并要求确认
+        print_info "您选择的机器人版本是: $version"
+        print_info "确定使用这个版本吗？(y/n)"
+        read -r confirm
+
+        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+            break  # 确认成功，退出循环
+        else
+            print_info "请重新选择版本..."
+        fi
+    done
+
     # 准备要添加的环境变量行
     export_line="export ROBOT_VERSION=$version"
-    
+
     # 检查用户的 .bashrc
     if grep -q "^export ROBOT_VERSION=" ~/.bashrc; then
         # 使用全局替换确保处理所有重复行
@@ -119,7 +158,7 @@ fi
         # 如果不存在，则添加
         echo "$export_line" >> ~/.bashrc
     fi
-    
+
     # 检查 root 的 .bashrc
     if sudo grep -q "^export ROBOT_VERSION=" /root/.bashrc; then
         # 使用全局替换确保处理所有重复行
@@ -128,8 +167,36 @@ fi
         # 如果不存在，则添加
         sudo su -c "echo '$export_line' >> ~/.bashrc"
     fi
-    
+
+    # 根据ROBOT_VERSION设置ROBOT_NAME
+    if [[ "$version" == 1* ]]; then
+        robot_name="ROBAN"
+    else
+        robot_name="KUAVO"
+    fi
+
+    # 准备ROBOT_NAME环境变量行
+    robot_name_line="export ROBOT_NAME=$robot_name"
+
+    # 检查并设置用户的 .bashrc中的ROBOT_NAME
+    if grep -q "^export ROBOT_NAME=" ~/.bashrc; then
+        sed -i "s/^export ROBOT_NAME=.*/$robot_name_line/g" ~/.bashrc
+    else
+        echo "$robot_name_line" >> ~/.bashrc
+    fi
+
+    # 检查并设置root的 .bashrc中的ROBOT_NAME
+    if sudo grep -q "^export ROBOT_NAME=" /root/.bashrc; then
+        sudo sed -i "s/^export ROBOT_NAME=.*/$robot_name_line/g" /root/.bashrc
+    else
+        sudo su -c "echo '$robot_name_line' >> /root/.bashrc"
+    fi
+
+    # 设置当前会话的环境变量
+    export ROBOT_NAME="$robot_name"
+
     print_success "机器人版本设置为 $version"
+    print_success "机器人名称设置为 $robot_name"
 }
 
 # Configure robot weight
@@ -153,7 +220,7 @@ setup_robot_weight() {
 # Configure drive board type
 setup_drive_board() {
     print_info "设置驱动板类型..."
-    print_info "请输入驱动板类型 (elmo/youda):"
+    print_info "请输入驱动板类型 (elmo/youda/youda3):"
     read -r board_type
     
     mkdir -p ~/.config/lejuconfig
@@ -323,6 +390,7 @@ setup_end_effector() {
     echo "1) 灵巧手"
     echo "2) 二指夹爪"
     echo "3) 触觉灵巧手"
+    echo "4) 没有灵巧手"
     read -r effector_choice
     
     if [ "$effector_choice" = "1" ]; then
@@ -341,6 +409,11 @@ setup_end_effector() {
          sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="qiangnao_touch"\/>/' ~/kuavo-ros-opensource/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch
         sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="qiangnao_touch"\/>/' ~/kuavo-ros-opensource/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch
         print_success "触觉灵巧手配置完成"
+    elif [ "$effector_choice" = "4" ]; then
+        sed -i 's/"EndEffectorType": \[.*\]/"EndEffectorType": ["none", "none"]/' ~/kuavo-ros-opensource/src/kuavo_assets/config/kuavo_v${ROBOT_VERSION}/kuavo.json
+        sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="none"\/>/' ~/kuavo-ros-opensource/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch
+        sed -i 's/<arg name="ee_type" default="qiangnao"\/>/<arg name="ee_type" default="none"\/>/' ~/kuavo-ros-opensource/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch
+        print_success "没有灵巧手配置完成"
     fi
 }
 
@@ -397,17 +470,51 @@ modiyf_ros_master_uri(){
 }
 
 
-# Setup H12PRO controller
-setup_h12pro() {
-    print_info "是否配置H12PRO遥控器? (y/N)"
+# Setup controller
+setup_controller() {
+    print_info "是否配置遥控器? (y/N)"
     read -r setup_controller
-    
+
     if [[ $setup_controller =~ ^[Yy]$ ]]; then
-        print_info "配置H12PRO遥控器..."
-        cd $HOME/kuavo-ros-opensource/src/humanoid-control/h12pro_controller_node/scripts
+        while true; do
+            print_info "请选择遥控器类型:"
+            print_info "1) H12PRO遥控器"
+            print_info "2) 北通遥控器"
+            read -r controller_choice
+
+            if [[ "$controller_choice" == "1" ]]; then
+                print_info "配置H12PRO遥控器..."
+                cd $HOME/kuavo-ros-opensource/src/humanoid-control/h12pro_controller_node/scripts
+                export ROBOT_VERSION=$version
+                sudo -E su -c "./deploy_autostart.sh"
+                print_success "H12PRO遥控器配置完成"
+                break
+            elif [[ "$controller_choice" == "2" ]]; then
+                print_info "配置北通遥控器..."
+                cd $HOME/kuavo-ros-opensource/src/humanoid-control/joystick_drivers/joy/services
+                export ROBOT_VERSION=$version
+                sudo -E su -c "./deploy_autostart.sh"
+                print_success "北通遥控器配置完成"
+                break
+            else
+                print_error "无效的选择: $controller_choice"
+                print_info "请选择 1 或 2"
+            fi
+        done
+    fi
+}
+
+# Setup WebSocket service
+setup_websocket() {
+    print_info "是否配置WebSocket服务? (y/N)"
+    read -r setup_websocket
+
+    if [[ $setup_websocket =~ ^[Yy]$ ]]; then
+        print_info "配置WebSocket服务..."
+        cd $HOME/kuavo-ros-opensource/src/manipulation_nodes/planarmwebsocketservice/service
         export ROBOT_VERSION=$version
-        sudo -E su -c "./deploy_autostart.sh"
-        print_success "H12PRO遥控器配置完成"
+        sudo -E su -c "./websocket_deploy_script.sh"
+        print_success "WebSocket服务配置完成"
     fi
 }
 
@@ -452,8 +559,12 @@ check_system_time(){
         print_success "系统时间正确，无需修改"
         return 0
     else
+        # 临时禁用 set-e，避免 apt update 因重复源警告导致脚本退出
+        set +e
         sudo apt update
         sudo apt install ntpdate -y
+        set -e  # 重新启用 set-e
+
         sudo timedatectl set-ntp false
         print_info "正在修改系统时间..."
         sudo ntpdate -u pool.ntp.org
@@ -495,13 +606,22 @@ setup_preset_files() {
     # Create target directory if it doesn't exist
     sudo mkdir -p "$TARGET_DIR"
 
-    # Copy all contents from resources to target directory
+    # Copy action files and music files from resources to target directory
     if [ -n "$(ls -A "$RESOURCES_DIR" 2>/dev/null)" ]; then
-        print_info "复制资源文件从 $RESOURCES_DIR 到 $TARGET_DIR"
+        print_info "复制动作文件和音乐文件从 $RESOURCES_DIR 到 $TARGET_DIR"
         print_info "覆盖已存在的文件..."
 
-        # 使用 -rf 参数强制递归覆盖
-        sudo cp -rf "$RESOURCES_DIR"/* "$TARGET_DIR/"
+        # 复制 action_files 目录
+        if [ -d "$RESOURCES_DIR/action_files" ]; then
+            sudo cp -rf "$RESOURCES_DIR/action_files" "$TARGET_DIR/"
+            print_info "action_files 目录复制完成"
+        fi
+
+        # 复制 music 目录
+        if [ -d "$RESOURCES_DIR/music" ]; then
+            sudo cp -rf "$RESOURCES_DIR/music" "$TARGET_DIR/"
+            print_info "music 目录复制完成"
+        fi
 
         # Set proper ownership
         sudo chown -R lab:lab "$TARGET_DIR"
@@ -530,6 +650,30 @@ setup_preset_files() {
         print_info "未找到 customize_config.json 文件，跳过复制"
     fi
 }
+# Replace config file with resources version
+setup_config_file() {
+    print_info "替换配置文件..."
+    source_config_file="/home/lab/kuavo-ros-opensource/resources/config.yaml"
+    dest_config_file="$HOME/.config/lejuconfig/config.yaml"
+
+    # Check if source config file exists
+    if [ ! -f "$source_config_file" ]; then
+        print_error "未找到配置文件: $source_config_file"
+        return 1
+    fi
+
+    # Backup existing config file if it exists
+    if [ -f "$dest_config_file" ]; then
+        print_info "备份现有配置文件到 ${dest_config_file}.backup"
+        cp "$dest_config_file" "${dest_config_file}.backup"
+    fi
+
+    # Copy the new config file
+    cp "$source_config_file" "$dest_config_file"
+
+    print_success "配置文件替换完成"
+}
+
 # Main execution
 main() {
     print_info "开始KUAVO-ROS-CONTROL安装配置脚本..."
@@ -547,11 +691,13 @@ main() {
     setup_end_effector
     install_vr_deps
     setup_preset_files
+    setup_config_file
     build_project
     check_ip
     modify_hosts_mapping
     modiyf_ros_master_uri
-    setup_h12pro
+    setup_controller
+    setup_websocket
     enable_vnc_network_config
     cleanup_code
 
