@@ -1983,6 +1983,26 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       is_mpc_controller_ = true;
       if (reset_mpc_) // 重置mpc
       {
+        // Safety check, if failed, stop the controller
+        if (!safetyChecker_->check(currentObservation_, vector_t::Zero(currentObservation_.state.size()), vector_t::Zero(currentObservation_.input.size())))
+        {
+          ROS_ERROR_STREAM("[humanoid Controller] Safety check failed!");
+          fall_down_state_ = FallStandState::FALL_DOWN;
+          
+          // 检查控制器列表是否存在倒地起身控制器，自动切换过去
+          if (controller_manager_ && has_fall_stand_controller_)
+          {
+            std::cout << "[humanoid Controller]fall down detected, switch to fall down controller" << std::endl;
+            controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
+            current_controller_ptr_ = controller_manager_->getCurrentController();
+            current_controller_ptr_->reset();
+            mrtRosInterface_->pauseResumeMpcNode(true);
+            return;
+          }
+          ROS_ERROR_STREAM("[humanoid Controller] No Fall Stand Controller, stopping all controllers.");
+          return;
+        }
+
         mrtRosInterface_->pauseResumeMpcNode(false);
         std::cout << "resume MPC" << std::endl;
         // Trigger MRT callbacks
@@ -1998,7 +2018,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
         reset_mpc_ = false;
         resetting_mpc_state_ = ResettingMpcState::RESET_INITIAL_POLICY;
-        
+        standupTime_ = currentObservation_.time;
         std::cout << "reset MPC node at " << currentObservation_.time << "\n";
       }
       // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getNextData();
@@ -2063,6 +2083,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
               // 检查插值是否完成
               if (!is_torso_interpolation_active_)
               {
+                standupTime_ = currentObservation_.time;
                 std::cout << "Torso interpolation completed, switching to NORMAL" << std::endl;
                 resetting_mpc_state_ = ResettingMpcState::NOMAL;
               }

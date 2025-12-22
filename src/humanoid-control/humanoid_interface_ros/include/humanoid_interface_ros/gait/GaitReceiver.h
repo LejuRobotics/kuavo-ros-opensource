@@ -32,6 +32,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_interface/foot_planner/SwingTrajectoryPlanner.h"
 
 #include <mutex>
+#include <atomic>
 
 #include <ros/ros.h>
 
@@ -39,6 +40,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ocs2_msgs/mode_schedule.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Int32.h>
+#include <std_msgs/Float64.h>
 #include <sensor_msgs/Joy.h>
 #include "std_srvs/SetBool.h"
 
@@ -55,7 +57,6 @@ namespace ocs2
 {
   namespace humanoid
   {
-
     class GaitReceiver : public SolverSynchronizedModule
     {
     public:
@@ -112,6 +113,8 @@ namespace ocs2
 
       ::ros::Subscriber feet_sub_ ;
       ::ros::Subscriber policy_sub_;
+      ::ros::Subscriber resetting_mpc_state_sub_;
+      ::ros::Subscriber is_rl_controller_sub_;
       
       vector_t feet_pos_measured_ = vector_t::Zero(24);
 
@@ -143,6 +146,8 @@ namespace ocs2
       bool waitting_for_walk_ = false;
       bool single_step_yaw_computed_ = false;
       double single_step_yaw_threshold_ = 0.5; // rad
+      std::atomic<int> resetting_mpc_state_{0};
+      std::atomic_bool is_rl_controller_{false};
     };
 
   } // namespace humanoid

@@ -83,6 +83,11 @@ namespace ocs2
       mpcWalkHeelScaleSubscriber_ = nodeHandle.subscribe(robotName + "_mpc_walk_heel_scale", 1, &GaitReceiver::mpcWalkHeelSacleCallback, this, ::ros::TransportHints().tcp());
       auto stopStepNumCallback = [this](const std_msgs::Int32::ConstPtr &msg)
       { 
+        if (is_rl_controller_.load() || resetting_mpc_state_.load() != 0)
+        {
+          ROS_WARN("[GaitReceiver]: MPC reset中，忽略 stop step num 更新");
+          return;
+        }
         this->stop_step_num_ = msg->data; // 相对步数
         this->stop_step_num_ += this->gaitSchedulePtr_->getSteps(); // 转换为绝对步数
         std::cout << "[GaitReceiver]: stop step num: " << this->stop_step_num_ << std::endl;
@@ -169,6 +174,24 @@ namespace ocs2
           2,                                                    // queue length
           mpcPolicyCallback
       );
+
+      auto resettingMpcStateCallback = [this](const std_msgs::Float64::ConstPtr &msg)
+      {
+        resetting_mpc_state_.store(static_cast<int>(msg->data));
+      };
+      resetting_mpc_state_sub_ = nodeHandle.subscribe<std_msgs::Float64>(
+          "/humanoid_controller/resetting_mpc_state_",
+          1,
+          resettingMpcStateCallback);
+
+      auto isRlControllerCallback = [this](const std_msgs::Float64::ConstPtr &msg)
+      {
+        is_rl_controller_.store(std::abs(msg->data) > 0.5);
+      };
+      is_rl_controller_sub_ = nodeHandle.subscribe<std_msgs::Float64>(
+          "/humanoid_controller/is_rl_controller_",
+          1,
+          isRlControllerCallback);
     }
 
     void GaitReceiver::joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg)
@@ -567,6 +590,11 @@ namespace ocs2
     /******************************************************************************************************/
     void GaitReceiver::mpcModeSequenceCallback(const ocs2_msgs::mode_schedule::ConstPtr &msg)
     {
+      if (is_rl_controller_.load() || resetting_mpc_state_.load() != 0)
+      {
+        ROS_WARN("[GaitReceiver]: MPC reset中，忽略 gait 切换请求");
+        return;
+      }
       std::lock_guard<std::mutex> lock(receivedGaitMutex_);
       receivedGait_ = readModeSequenceTemplateMsg(*msg);
       gaitUpdated_ = true;
@@ -576,6 +604,11 @@ namespace ocs2
     /******************************************************************************************************/
     void GaitReceiver::mpcModeScaleSequenceCallback(const std_msgs::Float32::ConstPtr &msg)
     {
+      if (is_rl_controller_.load() || resetting_mpc_state_.load() != 0)
+      {
+        ROS_WARN("[GaitReceiver]: MPC reset中，忽略 gait scale 更新");
+        return;
+      }
       std::lock_guard<std::mutex> lock(receivedGaitMutex_);
       gait_scale_ = msg->data;
       gait_scale_updated_ = true;
@@ -585,6 +618,11 @@ namespace ocs2
     /******************************************************************************************************/
     void GaitReceiver::mpcWalkHeelSacleCallback(const std_msgs::Float32::ConstPtr &msg)
     {
+      if (is_rl_controller_.load() || resetting_mpc_state_.load() != 0)
+      {
+        ROS_WARN("[GaitReceiver]: MPC reset中，忽略 walk heel scale 更新");
+        return;
+      }
       std::lock_guard<std::mutex> lock(receivedGaitMutex_);
       walk_heel_scale_ = msg->data;
       walk_heel_scale_updated_ = true;

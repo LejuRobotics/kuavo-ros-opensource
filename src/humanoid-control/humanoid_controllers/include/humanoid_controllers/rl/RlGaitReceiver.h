@@ -93,6 +93,9 @@ public:
 
   // Main update method called from humanoidController
   void update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions);
+
+  void setEnabled(bool enable);
+  bool isEnabled() const;
   
   // Get current command data
   CommandDataRL getCurrentCommand() const;

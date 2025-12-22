@@ -54,6 +54,18 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   ROS_INFO("[RlGaitReceiver] Initialized with smart stop detection enabled");
 }
 
+void RlGaitReceiver::setEnabled(bool enable)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  enabled_ = enable;
+}
+
+bool RlGaitReceiver::isEnabled() const
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  return enabled_;
+}
+
 void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions)
 {
   if (!enabled_) {

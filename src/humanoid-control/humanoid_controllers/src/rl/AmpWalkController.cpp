@@ -213,9 +213,21 @@ namespace humanoid_controller
     ROS_INFO("[%s] reset", name_.c_str());
     sensor_data_updated_ = false;
   }
+  void AmpWalkController::pause()
+  {
+    RLControllerBase::pause();
+    if (gait_receiver_)
+    {
+      gait_receiver_->setEnabled(false);
+    }
+  }
   void AmpWalkController::resume()
   {
     RLControllerBase::resume();
+    if (gait_receiver_)
+    {
+      gait_receiver_->setEnabled(true);
+    }
     ROS_INFO("[%s] Controller resumed, reset state", name_.c_str());
     reset();
   }

@@ -22,6 +22,7 @@ namespace humanoid_controller
     bool initialize() override;
     bool loadConfig(const std::string& config_file) override;
     void reset() override;
+    void pause() override;
     void resume() override;
 
     /**
