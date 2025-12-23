@@ -35,7 +35,7 @@ import serial.tools.list_ports
 
 
 import ruierman
-import claw_rs485
+# import claw_rs485
 
 
 servo_usb_path = "/dev/usb_servo"

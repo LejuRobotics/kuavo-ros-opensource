@@ -71,9 +71,15 @@ void ControlDataManager::initializeSubscribers() {
         "/sensors_data_raw", 10, 
         &ControlDataManager::sensorsDataCallback, this);
     
+    // 检查是否有配置里程计话题名称，默认使用 /odometry/filtered
+    std::string odom_topic = "/odometry/filtered";
+    if (nh_.hasParam("/odom_topic")) {
+        nh_.getParam("/odom_topic", odom_topic);
+    }
     odom_sub_ = nh_.subscribe<nav_msgs::Odometry>(
-        "/odom", 10, 
+        odom_topic, 10, 
         &ControlDataManager::odomCallback, this);
+    ROS_INFO("[ControlDataManager] Subscribing to odometry topic: %s", odom_topic.c_str());
     
     cmd_vel_sub_ = nh_.subscribe<geometry_msgs::Twist>(
         "/cmd_vel", 10, 
