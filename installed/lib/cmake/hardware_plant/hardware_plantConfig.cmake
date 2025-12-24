@@ -37,4 +37,5 @@ find_package(Python3 3.8 EXACT COMPONENTS Interpreter Development NumPy REQUIRED
 find_dependency(lcm REQUIRED)
 find_dependency(drake REQUIRED)
 find_dependency(kuavo_common REQUIRED)
+find_dependency(kuavo_solver REQUIRED)
 include("${CMAKE_CURRENT_LIST_DIR}/hardware_plantTargets.cmake")

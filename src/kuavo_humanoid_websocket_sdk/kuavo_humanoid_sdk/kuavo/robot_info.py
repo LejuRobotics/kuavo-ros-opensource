@@ -13,14 +13,34 @@ class KuavoRobotInfo(RobotInfoBase):
         self._ros_param = RosParamWebsocket()
             
         self._robot_version = kuavo_ros_param['robot_version']
+        self._robot_version_major = (int(self._robot_version) // 10) % 10
         self._end_effector_type = kuavo_ros_param['end_effector_type']
         self._arm_joint_dof = kuavo_ros_param['arm_dof']
-        self._joint_dof = kuavo_ros_param['arm_dof'] + kuavo_ros_param['leg_dof'] + kuavo_ros_param['head_dof']
+        self._leg_joint_dof = kuavo_ros_param['leg_dof']
+        self._waist_joint_dof = kuavo_ros_param.get('waist_dof', 0)  # 腰部关节自由度，默认为0
+        self._joint_dof = kuavo_ros_param['arm_dof'] + kuavo_ros_param['leg_dof'] + kuavo_ros_param['head_dof'] + self._waist_joint_dof
         self._joint_names = kuavo_ros_param['joint_names']
         self._end_frames_names = kuavo_ros_param['end_frames_names']
         self._head_joint_dof = kuavo_ros_param['head_dof']
-        self._head_joint_names = self._joint_names[-2:]
-        self._arm_joint_names = self._joint_names[12:self._arm_joint_dof + 12]
+        
+
+        # 动态计算关节索引，避免硬编码
+        self._head_joint_names = self._joint_names[-self._head_joint_dof:]
+        
+        if self._waist_joint_dof > 0:
+            self._waist_joint_names = self._joint_names[self._leg_joint_dof:self._leg_joint_dof + self._waist_joint_dof]
+        else:
+            self._waist_joint_names = []
+        
+        # 根据版本计算手臂关节索引
+        if self._robot_version_major == 6:
+            wheel_joint_dof = 4  
+            arm_start_idx = wheel_joint_dof
+            self._arm_joint_names = self._joint_names[arm_start_idx:arm_start_idx + self._arm_joint_dof]
+        else:
+            # 手臂关节起始索引需要考虑腰部关节的偏移
+            arm_start_idx = self._leg_joint_dof + self._waist_joint_dof
+            self._arm_joint_names = self._joint_names[arm_start_idx:arm_start_idx + self._arm_joint_dof]
         self._init_stand_height = kuavo_ros_param['init_stand_height']
     @property
     def robot_version(self) -> str:
@@ -88,6 +108,26 @@ class KuavoRobotInfo(RobotInfoBase):
             int: Number of joints in head, e.g. 2
         """
         return self._head_joint_dof
+
+    @property
+    def waist_joint_dof(self) -> int:
+        """Return the number of joints in the waist.
+
+        Returns:
+            int: Number of joints in waist, e.g. 0 or 1
+        """
+        return self._waist_joint_dof
+
+    @property
+    def waist_joint_names(self) -> list:
+        """Return the names of joints in the waist.
+
+        Returns:
+            list: A list containing the names of joints in the waist.
+                Note: For websocket SDK, joint_names() does not include waist joints,
+                so this will always return an empty list.
+        """
+        return self._waist_joint_names
 
     @property
     def head_joint_names(self) -> list:

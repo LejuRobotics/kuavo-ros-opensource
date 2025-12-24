@@ -8,6 +8,12 @@ targetArmDisplacementVelocity       1.2;
 
 comHeight                           0.78
 
+; VR control limits
+vrSquatMinPitchDeg                  3.0;     ; min pitch (deg)
+vrSquatMaxPitchDeg                  35.0;    ; max pitch (deg)
+vrSquatHeightMin                    -0.25;   ; min height (m)
+vrSquatHeightMax                    0.1;     ; max height (m)
+
 targetTorsoDispalcementVelocity
 {
    (0,0)    105.5          ; torso_x

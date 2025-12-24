@@ -103,6 +103,7 @@ namespace ocs2
                 int rb_version_int;
                 nodeHandle.getParam("/robot_version", rb_version_int);
                 rb_version = RobotVersion::create(rb_version_int);
+                robot_version_int_ = rb_version_int;  // 保存版本号
             }
             
             // 获取机器人类型
@@ -133,6 +134,12 @@ namespace ocs2
             loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
             loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
 
+            // Load VR control limits
+            loadData::loadCppDataType(referenceFile, "vrSquatMinPitchDeg", vr_squat_min_pitch_deg_);
+            loadData::loadCppDataType(referenceFile, "vrSquatMaxPitchDeg", vr_squat_max_pitch_deg_);
+            loadData::loadCppDataType(referenceFile, "vrSquatHeightMin", vr_squat_height_min_);
+            loadData::loadCppDataType(referenceFile, "vrSquatHeightMax", vr_squat_height_max_);
+            
             loadData::loadEigenMatrix(referenceFile, "standBaseState", stand_base_state_);
             loadData::loadEigenMatrix(referenceFile, "standJointState", stand_arm_state_);
 
@@ -620,8 +627,9 @@ namespace ocs2
 
         void headBodyPoseCallback(const kuavo_msgs::headBodyPose::ConstPtr& msg)
         {
+            // Apply pitch limits from config
             current_head_body_pose_ = *msg;
-            current_head_body_pose_.body_pitch = std::max(3*M_PI/180.0, std::min(current_head_body_pose_.body_pitch, 35*M_PI/180.0));
+            current_head_body_pose_.body_pitch = std::max(vr_squat_min_pitch_deg_*M_PI/180.0, std::min(current_head_body_pose_.body_pitch, vr_squat_max_pitch_deg_*M_PI/180.0));
 
             // 在腰部控制模式下且没有XY按键摇杆控制时，发布VR腰部控制指令
             if (torso_control_enabled_)
@@ -691,11 +699,8 @@ namespace ocs2
                     relative_yaw_torso = 0;
                 }
                 
-                // 高度控制
-                // 根据msg中的pose高度发布高度指令（使用相对高度）
-                //std::cout << "相对高度: " << relative_height << std::endl;
-                //限制相对高度在[-0.4,0.1]之间
-                relative_height = std::max(-0.25, std::min(relative_height, 0.1));
+                // Height control - apply limits from config
+                relative_height = std::max(vr_squat_height_min_, std::min(relative_height, vr_squat_height_max_));
                 geometry_msgs::Twist cmd_pose;
                 cmd_pose.linear.x = 0.0;  // 基于当前位置的 x 方向值 (m)
                 cmd_pose.linear.y = 0.0;  // 基于当前位置的 y 方向值 (m)
@@ -1577,6 +1582,13 @@ namespace ocs2
         bool last_cmd_close_to_zero_{true};
         bool only_half_up_body_{false};
         int robot_type_{0};  // 0: biped, 1: wheel robot
+        int robot_version_int_{0};  // 机器人版本号
+
+        // VR control limits (loaded from reference.info)
+        double vr_squat_min_pitch_deg_{3.0};    // min pitch (deg)
+        double vr_squat_max_pitch_deg_{35.0};   // max pitch (deg)
+        double vr_squat_height_min_{-0.25};     // min height (m)
+        double vr_squat_height_max_{0.1};       // max height (m)
 
         // 腰部控制相关变量
         bool torso_control_enabled_;
