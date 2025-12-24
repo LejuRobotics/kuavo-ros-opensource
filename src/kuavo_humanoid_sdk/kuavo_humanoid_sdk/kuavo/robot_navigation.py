@@ -5,6 +5,7 @@ import tf
 from geometry_msgs.msg import Pose, Point, Quaternion
 import rospy
 import time
+import math
 
 class RobotNavigation:
     """机器人导航接口类。"""
@@ -133,3 +134,20 @@ class RobotNavigation:
             str: 当前地图名称。
         """
         return self.robot_navigation.get_current_map()
+
+    def navigate_to_point_with_heading(self, x: float, y: float, heading: float) -> bool:
+        """前往指定坐标点并设置朝向。
+
+        Args:
+            x (float): 目标点的x坐标（米）。
+            y (float): 目标点的y坐标（米）。
+            heading (float): 目标朝向角度（度），0度为正东方向，90度为正北方向。
+
+        Returns:
+            bool: 导航是否成功。
+        """
+        # 将角度转换为弧度
+        yaw = math.radians(heading)
+
+        # 使用默认的高度和姿态，只设置x, y和偏航角
+        return self.navigate_to_goal(x=x, y=y, z=0.0, roll=0.0, pitch=0.0, yaw=yaw)

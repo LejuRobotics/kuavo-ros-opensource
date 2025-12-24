@@ -321,6 +321,15 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
     if only_half_up_body:
         launch_cmd += " only_half_up_body:=true"
 
+    if rospy.has_param("h12_log_channel"):
+        log_channel_status = rospy.get_param("h12_log_channel")
+        if log_channel_status is True:
+            if os.path.exists("/dev/H12_log_channel"):
+                log_channel_cmd_start = "stdbuf -oL -eL"
+                log_channel_cmd_end = "2>&1 | sed -u -e 's/\\x1b\\[[0-9;]*[mK]//g' -e 's/$/\\r/' | stdbuf -oL tee /dev/H12_log_channel"
+                launch_cmd = f"{log_channel_cmd_start} {launch_cmd} {log_channel_cmd_end}"
+            rospy.logerr("未检测到 /dev/H12_log_channel 设备文件，请确认已加载遥控器串口 udev 规则并连接设备。")
+
     print(f"launch_cmd: {launch_cmd}")
     print("If you want to check the session, please run 'tmux attach -t humanoid_robot'")
     tmux_cmd = [

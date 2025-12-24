@@ -267,7 +267,7 @@ namespace ocs2
       /**
        * 拓展足端位姿序列, 并更新模式位姿序列.
        */
-      ModeSchedule modifyModePoseSchedules(scalar_t currentTime, const Eigen::Vector4d &currentTorsoPose, const FootPoseSchedule& footPoseSchedule, const feet_array_t<vector3_t> &foot_pos, scalar_t startInsertTime = -1, const TargetTrajectories &targetTrajectories=TargetTrajectories());
+      ModeSchedule modifyModePoseSchedules(scalar_t currentTime, const Eigen::Vector4d &currentTorsoPose, const FootPoseSchedule& footPoseSchedule, const feet_array_t<vector3_t> &foot_pos, scalar_t startInsertTime = -1, const TargetTrajectories &targetTrajectories=TargetTrajectories(), double terrain_height = 0.0);
       ModeSchedule modifyModeWorldPoseSchedules(scalar_t currentTime, const Eigen::Vector4d &currentTorsoPose, const FootPoseSchedule& footPoseSchedule, const feet_array_t<vector3_t> &foot_pos, scalar_t startInsertTime = -1, const TargetTrajectories &targetTrajectories=TargetTrajectories(), scalar_t insert_time = -1);
 
       inline scalar_t getCustomGaitEndTime() const

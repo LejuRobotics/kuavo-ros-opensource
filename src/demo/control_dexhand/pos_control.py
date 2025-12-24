@@ -25,32 +25,41 @@ def main():
     # Create command message
     cmd = dexhandCommand()
     cmd.control_mode = dexhandCommand.POSITION_CONTROL
-    cmd.data = [0, 0, 0, 0, 0, 0]  # Open position
 
-    # Test sequence
-    while not rospy.is_shutdown():
-        try:
-            # Open position
-            cmd.data = [0]*12
+    # Wave motion positions (6 finger positions per step)
+    positions_list = [
+        [10, 10, 10, 10, 10, 10],
+        [20, 10, 100, 10, 10, 10],
+        [30, 10, 100, 90, 10, 10],
+        [40, 10, 100, 90, 90, 10],
+        [50, 10, 100, 100, 100, 100],
+    ]
+    num_steps = len(positions_list)
+    delay_sec = 1.0  # 1000ms = 1s
+
+    print("\033[36m[dexhand_test] INFO: 开始位置控制测试 - 波浪运动模式\033[0m")
+
+    for j in range(10):  # 10 waves
+        print(f"\033[36m[dexhand_test] INFO: 第 {j+1} 轮波浪运动\033[0m")
+
+        # Forward wave
+        for i in range(num_steps):
+            # Set positions for both hands (12 values total)
+            cmd.data = positions_list[i] * 2  # Duplicate for both hands
             
-            print("Publishing open position to all hands")
+            print(f"发布波浪步进 {i+1}/{num_steps} 到双手")
             dual_pub.publish(cmd)
-            rospy.sleep(2)
+            rospy.sleep(delay_sec)
 
-            # Close position 
-            cmd.data = [50, 100, 100, 100, 100, 100]
+        # Reverse wave
+        for i in range(num_steps-1, -1, -1):
+            cmd.data = positions_list[i] * 2  # Duplicate for both hands
             
-            print("Publishing close position to left hand")
-            left_pub.publish(cmd)
-            rospy.sleep(2)
+            print(f"发布反向波浪步进 {num_steps-i}/{num_steps} 到双手")
+            dual_pub.publish(cmd)
+            rospy.sleep(delay_sec)
 
-            print("Publishing close position to right hand") 
-            right_pub.publish(cmd)
-            rospy.sleep(2)
-
-        except KeyboardInterrupt:
-            print("\nCtrl+C detected, exiting...")
-            sys.exit(0)
+    print("\033[36m[dexhand_test] INFO: 波浪运动测试完成\033[0m")
 
 if __name__ == '__main__':
     try:

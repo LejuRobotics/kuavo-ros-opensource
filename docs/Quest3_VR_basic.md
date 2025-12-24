@@ -2,7 +2,7 @@
 
 在使用遥操作的时候我们需要用到 Quest3 的设备来捕捉用户的动作控制机器人来搜集数据。在这个文档中我们会介绍在使用 Quest3 的过程中会遇到的几个问题或者需要用到的操作
 
-APK 下载地址 [Quest3 APK 地址](/basic_usage/kuavo_ros1_workspace/#11-在-meta-quest3-上安装所提供的-apk "Quest3 APK 地址")
+APK 下载地址 [Quest3 APK 地址](https://kuavo.lejurobot.com/Quest_apks/leju_kuavo_hand-0.0.1-178-ge46a1e5.apk "Quest3 APK 地址")
 
 # 安装 SideQuest
 

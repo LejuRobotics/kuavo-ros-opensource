@@ -21,7 +21,7 @@ from kuavo_msgs.msg import robotHeadMotionData
 # 自定义ik参数
 use_custom_ik_param = True
 # 使用默认的关节角度作为ik的初始预测
-joint_angles_as_q0 = False 
+joint_angles_as_q0 = True 
 # 创建ikSolverParam对象
 ik_solve_param = ikSolveParam()
 # 设置ikSolveParam对应参数
@@ -109,28 +109,6 @@ def set_arm_control_mode(mode):
     else:
         # 如果响应结果为假，表示更改控制模式失败
         rospy.logwarn(f"Failed to change arm control mode to {mode}: {response.message}")
-
-# 发布手臂目标姿态
-def publish_arm_target_poses(times, values):
-    # 创建Publisher对象
-    pub = rospy.Publisher('kuavo_arm_target_poses', armTargetPoses, queue_size=10)
-    rospy.sleep(0.5)  # 确保Publisher注册
-    # 创建消息对象并设置传入的times和values
-    msg = armTargetPoses()
-    msg.times = times
-    msg.values = values
-
-    rospy.loginfo("正在将手臂目标姿态发布到话题 'kuavo_arm_target_poses'")
-
-    # 等待订阅者连接
-    rate = rospy.Rate(10)  # 10Hz
-    while pub.get_num_connections() == 0 and not rospy.is_shutdown():
-        rospy.loginfo("等待订阅者连接...")
-        rate.sleep()
-
-    # 发布消息
-    pub.publish(msg)
-    rospy.loginfo("消息已发布。")
 
 # 通过角度（弧度制）计算四元数
 class Quaternion:
@@ -384,11 +362,11 @@ def main():
     # offset_start="True"表示启用偏移量 否则不启用偏移量
     if args.offset_start == "True":
         # 偏向侧后边一点
-        offset_z=-0.10  # 抓取点位于标签正下方
-        temp_x_l=0.0
-        temp_y_l=0.0
-        temp_x_r=-0.0
-        temp_y_r=0.0
+        offset_z=0.033  # 抓取点位于标签正下方
+        temp_x_l=-0.016
+        temp_y_l=0.038
+        temp_x_r=-0.016
+        temp_y_r=0.038
     else :
         offset_z=0.00
         temp_x_l=0.00
@@ -443,6 +421,11 @@ def main():
         robot_zero_y = -0.25886
         robot_zero_z = -0.20115
 
+    elif start_with_version(robot_version, 52):
+        robot_zero_x = -0.012
+        robot_zero_y = -0.255 + 0.03
+        robot_zero_z = -0.315
+
     else :
         print("机器人版本号错误, 仅支持42 45 49 系列")
 
@@ -455,6 +438,21 @@ def main():
     hand_control_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=10)
     # 创建消息对象
     hand_control_msg = robotHandPosition()
+    
+    # 手臂控制api
+    arm_control_pub = rospy.Publisher('kuavo_arm_target_poses', armTargetPoses, queue_size=10)
+    arm_control_msg = armTargetPoses()
+    # 等待订阅者连接,检查机器人是否启动
+    rate = rospy.Rate(10)  # 10Hz
+    while arm_control_pub.get_num_connections() == 0 and not rospy.is_shutdown():
+        rospy.loginfo("等待 kuavo_arm_target_poses 订阅者连接...")
+        rate.sleep()
+    # 发布手臂目标姿态
+    def publish_arm_target_poses(times, values):
+        arm_control_msg.times = times
+        arm_control_msg.values = values
+        arm_control_pub.publish(arm_control_msg)
+        rospy.loginfo("move msg publish over")
 
 ########################################## 运动控制 ik求解 #########################################
     # 创建请求对象
@@ -464,8 +462,8 @@ def main():
     eef_pose_msg.use_custom_ik_param = use_custom_ik_param
     eef_pose_msg.joint_angles_as_q0 = joint_angles_as_q0
     # joint_angles_as_q0 为 False 时，这两个参数不会被使用（单位：弧度）
-    eef_pose_msg.hand_poses.left_pose.joint_angles = np.zeros(7)
-    eef_pose_msg.hand_poses.right_pose.joint_angles = np.zeros(7)
+    eef_pose_msg.hand_poses.left_pose.joint_angles = np.array([0.0, 0.0, 0.0, -1.57079633, 0.0, 0.0, 0.0])
+    eef_pose_msg.hand_poses.right_pose.joint_angles = np.array([0.0, 0.0, 0.0, -1.57079633, 0.0, 0.0, 0.0])
 
     # 抓取位置修正
     if  position_flag > 0 :
@@ -485,7 +483,7 @@ def main():
         # 使用set_xyz
         eef_pose_msg.hand_poses.left_pose.pos_xyz = np.array([set_x,set_y,set_z])
         #计算末端相对角度
-        relative_angle= math.atan((robot_zero_y-set_y)/(set_x-robot_zero_x))
+        relative_angle= math.atan((set_y+robot_zero_y)/(set_x-robot_zero_x)) - 0.0785 # 基础偏移量
         print(f"relative_angle: {relative_angle}")
         #计算四元数
         quat=euler_to_quaternion_via_matrix(relative_angle*offset_angle, -1.57 , 0)
@@ -495,12 +493,12 @@ def main():
         eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = np.zeros(3)
         
         # 右手为机器人初始位置
-        eef_pose_msg.hand_poses.right_pose.pos_xyz = np.array([ robot_zero_x, robot_zero_y, robot_zero_z])
+        eef_pose_msg.hand_poses.right_pose.pos_xyz = np.array([ robot_zero_x, robot_zero_y, robot_zero_z + 0.05])
         eef_pose_msg.hand_poses.right_pose.quat_xyzw = [0.0,0.0,0.0,1.0]  # 竖直状态
         eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = np.zeros(3)
     else :
         # 左手为机器人初始位置 
-        eef_pose_msg.hand_poses.left_pose.pos_xyz = np.array([ robot_zero_x, -1*robot_zero_y, robot_zero_z])
+        eef_pose_msg.hand_poses.left_pose.pos_xyz = np.array([ robot_zero_x, -1*robot_zero_y, robot_zero_z + 0.05])
         eef_pose_msg.hand_poses.left_pose.quat_xyzw = [0.0,0.0,0.0,1.0]   # 竖直状态
         eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = np.zeros(3)
 
@@ -508,7 +506,7 @@ def main():
         # 使用set_xyz
         eef_pose_msg.hand_poses.right_pose.pos_xyz = np.array([set_x,set_y,set_z])
         # 计算末端相对角度
-        relative_angle=math.atan((set_y-robot_zero_y)/(set_x-robot_zero_x))
+        relative_angle=math.atan((set_y-robot_zero_y)/(set_x-robot_zero_x)) + 0.0785 # 基础偏移量
         print(f"relative_angle: {relative_angle}")
         # 计算四元数
         quat=euler_to_quaternion_via_matrix(relative_angle*offset_angle, -1.57 , 0)

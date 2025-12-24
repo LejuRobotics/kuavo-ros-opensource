@@ -118,8 +118,8 @@ def publish_hand_pose(pub, marker_pub, x, y, z, arm='left'):
     joint_angles = [0, 0, 0, 0, 0, 0, 0]
     
     # Default positions for visualization
-    left_pos = [0.3692052960395813, 0.43259960412979126, 0.8304591178894043]
-    right_pos = [0.3692052960395813, -0.43259960412979126, 0.8304591178894043]
+    left_pos = [0.3692052960395813, 0.43259960412979126, 0.5304591178894043]
+    right_pos = [0.3692052960395813, -0.43259960412979126, 0.5304591178894043]
     
     # Set left hand pose
     left_pose = armHandPose()

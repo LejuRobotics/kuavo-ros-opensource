@@ -3,7 +3,7 @@ import numpy as np
 class config:
     class common:
         """通用配置"""
-        step_back_distance = 0.5
+        step_back_distance = 0.5   # 步行后退距离，单位米，默认0.5m，原地搬框测试设置：0.1m
         enable_head_tracking = True
         half_fov = 60  # 半视场角度，单位度
         walk_timeout = 50  # 走路事件的超时时间，单位秒
@@ -11,7 +11,7 @@ class config:
         arm_timeout = 50  # 手臂移动事件的超时时间，单位秒
 
         walk_yaw_threshold = np.deg2rad(5)  # 走路事件的偏航角度阈值，单位弧度
-        walk_pos_threshold = 0.05  # 走路事件的位置阈值，单位米
+        walk_pos_threshold = 0.15  # 走路事件的位置阈值，单位米
 
         head_search_yaws = [12, -12]  # 头部搜索的偏航角度范围，单位度
         head_search_pitchs = [-30, -15, 0, 15, 30]  # 头部搜索的俯仰角度范围，单位度
@@ -23,7 +23,7 @@ class config:
 
         enable_percep_when_walking = True # 是否在走路时启用感知(边走边看)
 
-        box_width = 0.25  # 米
+        box_width = 0.28  # 米
         box_mass = 1.5 # kg，假设一个较重的箱子
 
         walk_use_cmd_vel = True  # 是否使用cmd_vel控制走路
@@ -31,17 +31,18 @@ class config:
     class pick:
         """搬框配置"""
         tag_id = 1
-        tag_pos_world = (0, -10, 0)  # 初始位置猜测，单位米
-        tag_euler_world = (0, 0, 0)  # 初始姿态猜测，单位欧拉角（弧度）
+        tag_pos_world = (0, -1, 0)  # 初始位置猜测，单位米，包含行走距离：(0, -1.77, 0.876)，原地搬框测试设置：(0, -0, 0.876)
+        tag_euler_world = (90, 0, -180)  # 初始姿态猜测，单位欧拉角（弧度）
         box_in_tag_pos = (0.0, 0.0, 0.0)  # 箱子在目标标签中的位置猜测，单位米
         box_in_tag_euler = (0.0, 0.0, 0.0)  # 箱子在目标标签中的姿态猜测，单位欧拉角（弧度）
 
-        stand_in_tag_pos = (0.0, 0.0, 0.5)  # 站立位置在目标标签中的位置猜测，单位米
+        stand_in_tag_pos = (0.0, 0.0, 0.45)  # 站立位置在目标标签中的位置猜测，单位米，   45版本为(0.0, 0.0, 0.3)， 50版本为(0.0, 0.0, 0.4)
         stand_in_tag_euler = (-np.deg2rad(90), np.deg2rad(90), 0.0)  # 站立位置在目标标签中的姿态猜测，单位欧拉角（弧度）
 
-        box_behind_tag = 0.0  # 箱子在tag后面的距离，单位米
-        box_beneath_tag = 0.0  # 箱子在tag下方的距离，单位米
-        box_left_tag = -0.2  # 箱子在tag左侧的距离，单位米
+        hand_pitch_degree = -5.0  # 手臂pitch角度（相比水平, 下倾是正），单位度
+        box_behind_tag = 0.17  # 箱子在tag后面的距离，单位米
+        box_beneath_tag = 0.02  # 箱子在tag下方的距离，单位米，   45版本为0.08， 50版本为0.02
+        box_left_tag = -0.0  # 箱子在tag左侧的距离，单位米
 
         force_ratio_z = 0.0
         lateral_force = 0.0  # 侧向夹持力，单位N
@@ -49,9 +50,9 @@ class config:
     class place:
         """放框配置"""
         tag_id = 0
-        tag_pos_world = (0, 10, 0)  # 放置位置猜测，单位米
-        tag_euler_world = (0, 0, 0)  # 放置位置姿态猜测，单位欧拉角（弧度）
-        stand_in_tag_pos = (0.0, 0.0, 0.5)  # 放置位置站立位置在目标标签中的位置猜测，单位米
+        tag_pos_world = (0, 1.0, 0.0)  # 放置位置猜测，单位米，包含行走距离（0, 1.66, 1.43），原地搬框测试设置：(0, 0.0, 1.43)
+        tag_euler_world = (90, 0, 0)  # 放置位置姿态猜测，单位欧拉角（弧度）
+        stand_in_tag_pos = (0.0, 0.0, 0.4)  # 放置位置站立位置在目标标签中的位置猜测，单位米，   45版本为(0.0, 0.0, 0.3)， 50版本为(0.0, 0.0, 0.4)
         stand_in_tag_euler = (-np.deg2rad(90), np.deg2rad(90), 0.0)  # 放置位置站立位置在目标标签中的姿态猜测，单位欧拉角（弧度）
 
         box_behind_tag = 0.2  # 箱子在tag后面的距离，单位米

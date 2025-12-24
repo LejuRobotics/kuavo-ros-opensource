@@ -23,6 +23,7 @@ import threading
 import numpy as np
 from typing import Tuple
 from transitions import Machine, State
+from geometry_msgs.msg import TwistStamped
 
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoArmCtrlMode, KuavoIKParams, KuavoPose, KuavoManipulationMpcFrame, KuavoManipulationMpcCtrlMode, KuavoManipulationMpcControlFlow
 from kuavo_humanoid_sdk.kuavo.core.ros.control import KuavoRobotControl
@@ -184,7 +185,7 @@ class KuavoRobotCore:
     def _on_enter_command_pose_world(self, event):
         previous_state = event.transition.source
         if self.state  == previous_state:
-            SDKLogger.debug(f"[Core] [StateMachine] State unchanged: already in command_pose_world state")
+            # SDKLogger.debug(f"[Core] [StateMachine] State unchanged: already in command_pose_world state")
             return
         SDKLogger.debug(f"[Core] [StateMachine] Entering command_pose_world state, from {previous_state}")
 
@@ -203,9 +204,9 @@ class KuavoRobotCore:
             self.to_walk()
         
         # +-0.4, +-0.2, +-0.4 => linear_x, linear_y, angular_z
-        limited_linear_x = min(0.4, abs(linear_x)) * (1 if linear_x >= 0 else -1)
-        limited_linear_y = min(0.2, abs(linear_y)) * (1 if linear_y >= 0 else -1)
-        limited_angular_z = min(0.4, abs(angular_z)) * (1 if angular_z >= 0 else -1)
+        limited_linear_x = min(3.0, abs(linear_x)) * (1 if linear_x >= 0 else -1)
+        limited_linear_y = min(3.0, abs(linear_y)) * (1 if linear_y >= 0 else -1)
+        limited_angular_z = min(3.0, abs(angular_z)) * (1 if angular_z >= 0 else -1)
         return self._control.robot_walk(limited_linear_x, limited_linear_y, limited_angular_z)
     
     def squat(self, height:float, pitch:float)->bool:
@@ -402,6 +403,7 @@ class KuavoRobotCore:
                 return False
 
         return self._control.control_robot_arm_target_poses(times, joint_q)
+        
     def execute_gesture(self, gestures:list)->bool:
         return self._control.execute_gesture(gestures)
     
@@ -424,6 +426,9 @@ class KuavoRobotCore:
         pitch_deg = pitch * 180 / math.pi
         return self._control.control_robot_head(yaw_deg, pitch_deg)
     
+    def control_robot_waist(self, target_pos:list):
+        return self._control.control_robot_waist(target_pos)
+    
     def enable_head_tracking(self, target_id: int)->bool:
         return self._control.enable_head_tracking(target_id)
     
@@ -431,8 +436,8 @@ class KuavoRobotCore:
         return self._control.disable_head_tracking()
     
     def control_robot_arm_joint_positions(self, joint_data:list)->bool:
-        if self.state != 'stance':
-            raise RuntimeError(f"[Core] control_robot_arm_joint_positions failed: robot must be in stance state, current state: {self.state}")
+        # if self.state != 'stance':
+        #     raise RuntimeError(f"[Core] control_robot_arm_joint_positions failed: robot must be in stance state, current state: {self.state}")
         
         if self._control.is_arm_collision_mode() and self._control.is_arm_collision():
             raise RuntimeError(f"Arm collision detected, cannot publish arm trajectory")
@@ -460,17 +465,17 @@ class KuavoRobotCore:
         return self._control.control_robot_arm_joint_trajectory(times, joint_q)
     
     def control_robot_end_effector_pose(self, left_pose: KuavoPose, right_pose: KuavoPose, frame: KuavoManipulationMpcFrame)->bool:        
-        if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
-            SDKLogger.debug("[Core] control_robot_end_effector_pose, current arm mode != ExternalControl, change it.")
-            if not self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.ExternalControl):
-                SDKLogger.warn("[Core] control_robot_end_effector_pose failed, change robot arm ctrl mode failed!")
-                return False
+        # if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
+        #     SDKLogger.debug("[Core] control_robot_end_effector_pose, current arm mode != ExternalControl, change it.")
+        #     if not self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.ExternalControl):
+        #         SDKLogger.warn("[Core] control_robot_end_effector_pose failed, change robot arm ctrl mode failed!")
+        #         return False
 
-        if self._manipulation_mpc_ctrl_mode == KuavoManipulationMpcCtrlMode.NoControl:
-            SDKLogger.debug("[Core] control_robot_end_effector_pose, manipulation mpc ctrl mode is NoControl, change it.")
-            if not self.change_manipulation_mpc_ctrl_mode(KuavoManipulationMpcCtrlMode.ArmOnly):
-                SDKLogger.warn("[Core] control_robot_end_effector_pose failed, change manipulation mpc ctrl mode failed!")
-                return False
+        # if self._manipulation_mpc_ctrl_mode == KuavoManipulationMpcCtrlMode.NoControl:
+        #     SDKLogger.debug("[Core] control_robot_end_effector_pose, manipulation mpc ctrl mode is NoControl, change it.")
+        #     if not self.change_manipulation_mpc_ctrl_mode(KuavoManipulationMpcCtrlMode.ArmOnly):
+        #         SDKLogger.warn("[Core] control_robot_end_effector_pose failed, change manipulation mpc ctrl mode failed!")
+        #         return False
         
         return self._control.control_robot_end_effector_pose(left_pose, right_pose, frame)
 
@@ -640,6 +645,73 @@ class KuavoRobotCore:
 
     def set_arm_collision_mode(self, enable: bool):
         self._control.set_arm_collision_mode(enable)
+
+    # ========== 轮臂控制方法 ==========
+    
+    def is_wheel_arm_initialized(self) -> bool:
+        """检查轮臂控制是否初始化
+        
+        Returns:
+            bool: 是否已初始化
+        """
+        return self._control.is_wheel_arm_initialized()
+    
+    def control_wheel_arm_joint_positions(self, positions: list) -> bool:
+        """控制轮臂关节位置
+        
+        Args:
+            positions: 关节位置列表，4个关节的角度值（弧度）
+            
+        Returns:
+            bool: 是否成功控制
+        """
+        # 参数验证
+        if not self._validate_wheel_arm_positions(positions):
+            return False
+            
+        try:
+            return self._control.control_wheel_arm_joint_positions(positions)
+        except Exception as e:
+            SDKLogger.error(f"[KuavoRobotCore] 轮臂关节位置控制异常: {e}")
+            return False
+    
+    def _validate_wheel_arm_positions(self, positions: list) -> bool:
+        """验证轮臂关节位置参数
+        
+        Args:
+            positions: 关节位置列表
+            
+        Returns:
+            bool: 参数是否有效
+        """
+        if not isinstance(positions, list):
+            SDKLogger.error("[KuavoRobotCore] 轮臂关节位置必须是列表类型")
+            return False
+            
+        if len(positions) != 4:
+            SDKLogger.error(f"[KuavoRobotCore] 轮臂关节数量不匹配，期望4，实际{len(positions)}")
+            return False
+            
+        for i, pos in enumerate(positions):
+            if not isinstance(pos, (int, float)):
+                SDKLogger.error(f"[KuavoRobotCore] 轮臂关节{i}位置必须是数值类型")
+                return False
+                
+        return True
+
+    def get_wheel_arm_joint_positions(self) -> list:
+        """获取轮臂当前关节位置
+        
+        Returns:
+            list: 4个关节的当前位置（弧度）
+        """
+        try:
+            # 从KuavoRobotStateCore获取关节状态，前4个关节是轮臂关节
+            joint_positions = self._rb_state.joint_data.position[:4]
+            return list(joint_positions)
+        except Exception as e:
+            SDKLogger.error(f"[KuavoRobotCore] 获取轮臂关节位置异常: {e}")
+            return [0.0] * 4
 
 if __name__ == "__main__":
     DEBUG_MODE = 0

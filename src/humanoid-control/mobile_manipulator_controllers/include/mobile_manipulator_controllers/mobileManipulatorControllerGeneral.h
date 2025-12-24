@@ -34,6 +34,7 @@ namespace mobile_manipulator_controller
       ros::Subscriber humanoidStateSubscriber_;
       ros::Publisher armTrajPublisher_;
       ros::Publisher humanoidCmdPosPublisher_;
+      ros::Publisher waistTrajPublisher_;
       ros::ServiceServer kinematicMpcControlSrv_;
       ocs2::vector_t humanoidState_;
       bool recievedObservation_{false};

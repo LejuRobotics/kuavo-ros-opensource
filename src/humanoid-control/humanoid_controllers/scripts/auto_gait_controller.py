@@ -491,6 +491,7 @@ class AutoGaitController:
             self.execute_auto_gait_movement_with_state_monitoring(linear_x=linear_x, linear_y=linear_y, angular_z=angular_z, max_duration=duration)
         else:
             self.execute_auto_gait_movement(linear_x=linear_x, linear_y=linear_y, angular_z=angular_z, duration=duration)
+            
 
 if __name__ == '__main__':
     # 测试代码

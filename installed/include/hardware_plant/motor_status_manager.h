@@ -12,6 +12,7 @@
 #include <mutex>
 
 #include "actuators_interface.h"
+#include "kuavo_common/common/kuavo_settings.h"
 
 namespace HighlyDynamic
 {
@@ -105,15 +106,10 @@ public:
                              std::string &error_msg);
 
     /**
-     * @brief 设置关节位置限制
-     * @param min_limits 最小位置限制数组
-     * @param max_limits 最大位置限制数组
-     * @param num_joints 关节数量
+     * @brief 设置硬件配置
+     * @param settings 硬件配置结构体
      */
-    void setJointPositionLimits(const std::vector<double>& min_limits, 
-                               const std::vector<double>& max_limits);
-
-
+    void setHardwareSettings(const HardwareSettings& settings);
 
     /**
      * @brief 获取所有关节的状态信息
@@ -181,6 +177,13 @@ public:
      * @return 是否成功清除
      */
     bool clearJointError(int joint_id, const std::string& reason = "Manual error clear");
+
+    /**
+     * @brief 注册自定义关节检查函数
+     * @param checker 检查函数，返回true表示通过，false表示失败
+     * @note 会在checkAllJointsStatus中被自动调用
+     */
+    void registerCustomCheckFunction(std::function<bool()> checker);
 
 private:
     /**
@@ -430,15 +433,17 @@ private:
     int log_interval_ms_;          // 日志输出间隔
     size_t num_joints_;            // 关节数量
     
-    // 位置限制
-    std::vector<double> min_joint_position_limits_;  // 最小位置限制
-    std::vector<double> max_joint_position_limits_;  // 最大位置限制
-    bool position_limits_set_{false};                       // 是否设置了位置限制
+    // 硬件配置
+    HardwareSettings hardware_settings_;
+    bool hardware_settings_set_{false};                     // 是否设置了硬件配置
     
     // 统计信息
     mutable std::chrono::steady_clock::time_point last_summary_time_;
     mutable int total_errors_{0};
     mutable std::mutex mutex_; // 互斥锁
+    
+    // 自定义检查函数列表
+    std::vector<std::function<bool()>> custom_check_funcs_;
 };
 
 } // namespace HighlyDynamic 

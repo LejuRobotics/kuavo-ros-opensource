@@ -30,9 +30,9 @@ def parse_args():
                       help='Enable torso control (0: disabled, 1: enabled)')
     parser.add_argument('--service_mode', type=int, default=1,
                       help='Enable service mode (0: disabled, 1: enabled)')
-    parser.add_argument('--detection_mode', type=str, default='complete_action',
-                      choices=['threshold', 'complete_action'],
-                      help='Movement detection mode (default: complete_action)')
+    parser.add_argument('--detection_mode', type=str, default='vr',
+                      choices=['local', 'vr'],
+                      help='Movement detection mode (default: local)')
     
     # Parallel detection arguments
     parser.add_argument('--parallel_detection', type=int, default=1,
@@ -86,42 +86,40 @@ def configure_detection_system(pico: KuavoRobotPico, args):
 
     # Configure movement detection
     movement_config = {
-        'horizontal_threshold': 0.1,    # 20cm position threshold
-        'vertical_threshold': 0.01,    # 1cm vertical threshold
-        'angle_threshold': 20.0,       # 20 degrees angle threshold
-        'step_length': 0.2,            # 20cm step length
-        'initial_left_foot_pose': [0.0, 0.1, 0.0, 0.0],
-        'initial_right_foot_pose': [0.0, -0.1, 0.0, 0.0],
-        'initial_body_pose': None,
-        'detection_mode': args.detection_mode,  # 'threshold' or 'complete_action'
-        'complete_action': {
-            'lift_threshold': 0.03,     # 3cm 抬起阈值
-            'ground_threshold': 0.01,   # 1cm 地面阈值
-            'min_action_duration': 0.0, # 0.0秒
-            'max_action_duration': 2.0, # 2秒
-            'action_buffer_size': 50,   # 缓冲区大小
-            'min_horizontal_movement': 0.05,  # 5cm
-            # 自适应阈值相关
-            'adaptive_threshold_enabled': True,
-            'calibration_samples': 50,
-            'adaptive_lift_offset': 0.01,
-            'adaptive_ground_offset': 0.005,
-            'use_real_foot_data': bool(args.use_real_foot_data),
-        },
-        'parallel_detection': parallel_config,
-        'max_step_length_x': args.max_step_length_x,
-        'max_step_length_y': args.max_step_length_y,
-    }
+            'horizontal_threshold': 0.1,    # 10cm position threshold
+            'initial_left_foot_pose': [0.0, 0.1, 0.0, 0.0],
+            'initial_right_foot_pose': [0.0, -0.1, 0.0, 0.0],
+            'max_step_length_x': 0.4,       # 最大步长x
+            'max_step_length_y': 0.15,      # 最大步长y
+            'detection_mode': 'local',  # 'local' 或 'vr'
+            'local_detector': {
+                'min_action_duration': 0.15, # 最小动作时长 0.15秒
+                'max_action_duration': 2.0, # 最大动作时长 2.0秒
+                'action_buffer_size': 50,   # 动作缓冲区大小
+                'min_horizontal_movement': 0.05,  # 最小水平移动距离 5cm
+                'adaptive_threshold_enabled': True,  # 是否启用自适应阈值
+                'calibration_samples': 50,  # 校准样本数量
+                'adaptive_lift_offset': 0.005,  # 相对于基准高度的抬起偏移量
+                'use_real_foot_data': bool(args.use_real_foot_data)
+            },
+            
+            # 新增：并行检测配置参数
+            'parallel_detection': {
+                'enabled': True,           # 是否启用并行检测
+                'timeout_ms': 50,          # 检测超时时间（毫秒）
+                'max_workers': 2,          # 最大工作线程数
+                'precise_timing': True,    # 是否使用精确时间戳
+                'debug_mode': False,       # 调试模式
+            }
+        }
 
     # 兼容命令行参数覆盖部分默认值
-    if args.detection_mode == 'complete_action':
-        movement_config['detection_mode'] = 'complete_action'
-        # 可根据需要覆盖 complete_action 子参数
-        # movement_config['complete_action'].update({...})
-        SDKLogger.info("Using complete action detection mode")
+    if args.detection_mode == 'local':
+        movement_config['detection_mode'] = 'local'
+        SDKLogger.info("Local detector mode enabled")
     else:
-        movement_config['detection_mode'] = 'threshold'
-        SDKLogger.info("Using threshold-based detection mode")
+        movement_config['detection_mode'] = 'vr'
+        SDKLogger.info("VR detector mode enabled")
 
     if pico.set_movement_detector_config(movement_config):
         SDKLogger.info("Movement detector configured successfully")
@@ -149,19 +147,17 @@ def print_system_info(pico: KuavoRobotPico):
     
     # Detection parameters
     detection_info = pico.get_detection_info()
-    if detection_mode == 'complete_action':
-        complete_params = detection_info.get('complete_action_parameters', {})
-        print(f"Complete Action Parameters:")
-        print(f"  - Lift Threshold: {complete_params.get('lift_threshold', 0):.3f}m")
-        print(f"  - Ground Threshold: {complete_params.get('ground_threshold', 0):.3f}m")
-        print(f"  - Min Duration: {complete_params.get('min_action_duration', 0):.1f}s")
-        print(f"  - Max Duration: {complete_params.get('max_action_duration', 0):.1f}s")
+    if detection_mode == 'local':
+        local_detector_params = detection_info.get('local_detector_parameters', {})
+        print(f"Local Detector Parameters:")
+        print(f"  - Lift Threshold: {local_detector_params.get('lift_threshold', 0):.3f}m")
+        print(f"  - Min Duration: {local_detector_params.get('min_action_duration', 0):.1f}s")
+        print(f"  - Max Duration: {local_detector_params.get('max_action_duration', 0):.1f}s")
+        print(f"  - Use Real Foot Data: {local_detector_params.get('use_real_foot_data', 0):d}")
     else:
-        threshold_params = detection_info.get('threshold_parameters', {})
+        vr_detector_params = detection_info.get('vr_detector_parameters', {})
         print(f"Threshold Parameters:")
-        print(f"  - Horizontal: {threshold_params.get('horizontal_threshold', 0):.3f}m")
-        print(f"  - Vertical: {threshold_params.get('vertical_threshold', 0):.3f}m")
-        print(f"  - Angle: {threshold_params.get('angle_threshold', 0):.1f}°")
+        print(f"  - Horizontal: {vr_detector_params.get('horizontal_threshold', 0):.3f}m")
     
     print("=" * 30)
 

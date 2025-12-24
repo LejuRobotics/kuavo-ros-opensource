@@ -62,3 +62,33 @@ python3 report_diff.py cppcheck_report.xml cppcheck_report_baseline.xml
 - `line` : 错误发生在指定文件的行号。
   
 - `column` : 错误发生在指定文件的列号。
+
+
+## 本地分支对比与新脚本说明（新增）
+
+### 新增/改进点概览
+
+- 新增脚本：`tools/lint_tools/cppcheck_tools/run_local_cppcheck_diff.sh`
+  - 输入两个分支（baseline 与 develop），在干净目录中分别执行 Cppcheck，并生成差异报告。
+  - 默认先校验远端分支是否存在并 `fetch` 更新；若本地没有该分支引用，则在 `/tmp` 进行临时浅克隆（不污染当前仓库）。
+  - 若目标分支与当前分支相同：从当前分支 HEAD 新建 worktree（只包含已提交内容，不带未跟踪/未提交的改动），保证对比环境干净可复现。
+
+### 运行方式
+
+- 对比两个分支：
+
+```
+tools/lint_tools/cppcheck_tools/run_local_cppcheck_diff.sh base_line_branch develop_branch
+```
+
+- 产出物（统一在当前仓库）：
+  - `tools/lint_tools/cppcheck_tools/cppcheck_results/cppcheck_<branch>.xml`
+  - `tools/lint_tools/cppcheck_tools/cppcheck_results/cppcheck_diff_<develop>_vs_<baseline>.txt`
+
+### 常见问题与建议
+
+- 认证失败/需要输入账号密码：
+  - 推荐配置 SSH key 并将远端切换为 SSH URL；或使用 HTTPS + PAT，并启用 `credential.helper`（如 `store`）。
+  - 非交互模式会禁止弹窗，若无可用凭据将直接失败。
+
+- 

@@ -75,8 +75,11 @@ void BezierCurveInterpolator::initializeLimitations() {
 
     int arm_joint_num = arm_joint_names_.size();
     int head_joint_num = head_joint_names_.size();
+    // KUAVO v50+ 有腰部关节
+    bool has_waist = (robot_version_ >= 50);
+    int waist_joint_num = has_waist ? waist_joint_names_.size() : 0;
     // 关节总数 * 3, [0] 为下限, [1] 为上限, [2] 为是否存在(0: 不存在, 1: 存在)
-    Eigen::MatrixXd joint_limits(arm_joint_num + HAND_JOINT_TOTAL_NUM + head_joint_num, 3);
+    Eigen::MatrixXd joint_limits(arm_joint_num + HAND_JOINT_TOTAL_NUM + head_joint_num + waist_joint_num, 3);
     joint_limits.setZero(); 
 
     for (size_t i = 0; i < arm_joint_num; ++i) {
@@ -120,6 +123,22 @@ void BezierCurveInterpolator::initializeLimitations() {
             joint_limits(i + arm_joint_num + HAND_JOINT_TOTAL_NUM, JOINT_LIMIT_STATUS) = JOINT_LIMIT_EXISTS;
         } else {
             ROS_WARN("[BezierCurveInterpolator] Joint %s not found or has no limits.", joint_name.c_str());
+        }
+    }
+
+    // 处理腰部关节（KUAVO v50+）
+    if (has_waist) {
+        for (size_t i = 0; i < waist_joint_num; ++i) {
+            const std::string& joint_name = waist_joint_names_[i];
+            std::shared_ptr<const urdf::Joint> joint = model.getJoint(joint_name);
+
+            if (joint && joint->limits) {
+                joint_limits(i + arm_joint_num + HAND_JOINT_TOTAL_NUM + head_joint_num, JOINT_LIMIT_LOWER) = joint->limits->lower;
+                joint_limits(i + arm_joint_num + HAND_JOINT_TOTAL_NUM + head_joint_num, JOINT_LIMIT_UPPER) = joint->limits->upper;
+                joint_limits(i + arm_joint_num + HAND_JOINT_TOTAL_NUM + head_joint_num, JOINT_LIMIT_STATUS) = JOINT_LIMIT_EXISTS;
+            } else {
+                ROS_WARN("[BezierCurveInterpolator] Joint %s not found or has no limits.", joint_name.c_str());
+            }
         }
     }
 

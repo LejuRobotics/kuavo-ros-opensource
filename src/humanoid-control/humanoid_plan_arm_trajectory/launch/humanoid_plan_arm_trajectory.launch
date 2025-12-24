@@ -1,4 +1,9 @@
 <launch>
+
+    <!-- Include robot version manager to load URDF and other parameters -->
+    <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+        <arg name="rviz" value="false" />
+    </include>
     <!-- Load parameters from YAML file -->
     <!-- Set joint_state_topic parameter -->
     <param name="joint_state_topic" value="kuavo_arm_traj" />

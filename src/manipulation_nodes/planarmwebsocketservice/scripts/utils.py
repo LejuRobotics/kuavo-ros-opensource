@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 import os
+import sys
 import netifaces
 import json
 import hashlib
 import math
 import numpy as np
+import rospy
+import rospkg
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
+    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError) as e:
+    # 如果 rospkg 不可用或包未找到，回退到相对路径方式
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
 
 def get_wifi_ip():
     try:
@@ -105,11 +123,14 @@ def get_hotspot():
         logger.error(f"Unexpected error getting hotspot: {e}")
         return f"Error: {e}"
 
-robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
-if robot_version >= 40:
+# 使用 RobotVersion 类创建版本号对象
+robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
+robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
+
+if robot_version.version_number() >= 40:
     INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 else:
-    INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+    INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
 
 def frames_to_custom_action_data(file_path: str):
     with open(file_path, "r") as f:
@@ -218,7 +239,42 @@ def frames_to_custom_action_data_ocs2(file_path: str, start_frame_time: float, c
                 ])
     return filter_data(action_data, start_frame_time, current_arm_joint_state)
 
+def verify_robot_version(file_path: str):
+    with open(file_path, "r") as f:
+        data = json.load(f)
+    
+    robot_type_raw = data.get("robotType", None)
+    if robot_type_raw is None:
+        msg = "Action file missing required field: robotType"
+        rospy.logerr(msg)
+        return False, msg
+    try:
+        tact_robot_version = int(robot_type_raw)
+    except (TypeError, ValueError):
+        msg = f"Invalid robotType in action file: {robot_type_raw}"
+        rospy.logerr(msg)
+        return False, msg
 
+    # 版本兼容关系映射
+    version_compat_map = {
+        41: [41],
+        42: [42],
+        45: [43, 45, 46, 48, 49],
+        11: [11, 13, 14],
+        13: [11, 13, 14],
+        14: [11, 13, 14]
+    }
+    allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
+    robot_version_number = robot_version.version_number()
+    if robot_version_number not in allowed_robot_versions:
+        msg = (
+            f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version_number}"
+        )
+        rospy.logerr(msg)
+        return False, msg
+    
+    rospy.loginfo(f"Version match: tact {tact_robot_version} is compatible with robot {robot_version_number}")
+    return True, None
 
 def get_start_end_frame_time(file_path: str):
     with open(file_path, "r") as f:

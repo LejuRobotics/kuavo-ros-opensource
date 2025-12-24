@@ -21,6 +21,7 @@ class KuavoRobotInfo(RobotInfoBase):
         self._head_joint_dof = kuavo_ros_param['head_dof']
         self._head_joint_names = self._joint_names[-2:]
         self._arm_joint_names = self._joint_names[12:self._arm_joint_dof + 12]
+        self._init_stand_height = kuavo_ros_param['init_stand_height']
     @property
     def robot_version(self) -> str:
         """Return the version of the robot.
@@ -110,5 +111,11 @@ class KuavoRobotInfo(RobotInfoBase):
         """
         return self._end_frames_names[1], self._end_frames_names[2]
     
+    @property
+    def init_stand_height(self) -> float:
+        """Return the height of the robot's center of mass.
+        """
+        return self._com_height
+    
     def __str__(self) -> str:
-        return f"KuavoRobotInfo(robot_type={self.robot_type}, robot_version={self.robot_version}, end_effector_type={self.end_effector_type}, joint_names={self.joint_names}, joint_dof={self.joint_dof}, arm_joint_dof={self.arm_joint_dof})"
+        return f"KuavoRobotInfo(robot_type={self.robot_type}, robot_version={self.robot_version}, end_effector_type={self.end_effector_type}, joint_names={self.joint_names}, joint_dof={self.joint_dof}, arm_joint_dof={self.arm_joint_dof}, init_stand_height={self.init_stand_height})"

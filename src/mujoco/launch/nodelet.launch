@@ -1,5 +1,8 @@
 <launch>
-  <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(optenv ROBOT_VERSION 40)/xml/scene_with_arm.xml"/>
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+  <!-- Handle version 15 special case: use version 14 scene -->
+  <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s14/xml/scene_with_arm.xml" if="$(eval arg('robot_version') == 15)"/>
+  <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene_with_arm.xml" unless="$(eval arg('robot_version') == 15)"/>
     <param name="legged_robot_scene_param" value="$(arg legged_robot_scene)" />
   <node pkg="nodelet" type="nodelet" name="nodelet_mujoco" args="load MujocoNodelet nodelet_manager" respawn="false" output="screen" />
 </launch>

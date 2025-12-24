@@ -12,6 +12,7 @@ int main (int argc, char **argv)
 {
     ros::init (argc, argv, "trace_path_circle_demo_node");
     ros::NodeHandle nh;
+    ros::NodeHandle nh_private("~");  //  添加当前节点的私有命名空间
     
     std::cout <<" \n***********************************\n\n* Follow Circle Traj\n";
     std::cout <<" \n***********************************\n";
@@ -21,15 +22,15 @@ int main (int argc, char **argv)
     // 参考路径中, 点的间隙 = speed * dt  (单位：m)
 
     double kRadius;
-    nh.param("kRadius", kRadius, 1.0);  // 从参数服务器获取 radius 参数，默认值为 1.0
+    nh_private.param("kRadius", kRadius, 1.0);  // 从参数服务器获取 radius 参数，默认值为 1.0
     std::cout << "The value of kRadius is: " << kRadius << std::endl;
 
     double max_linear_vel;
-    nh.param("max_linear_vel", max_linear_vel, 0.20);   // 从参数服务器获取 max_linear_vel 参数，默认值为 0.20
+    nh_private.param("max_linear_vel", max_linear_vel, 0.20);   // 从参数服务器获取 max_linear_vel 参数，默认值为 0.20
     std::cout << "The value of max_linear_vel is: " << max_linear_vel << std::endl;
 
     double max_angular_vel;
-    nh.param("max_angular_vel", max_angular_vel, M_PI/8);    // 从参数服务器获取 max_angular_vel 参数，默认值为 M_PI/8(0.4rad/s)
+    nh_private.param("max_angular_vel", max_angular_vel, M_PI/8);    // 从参数服务器获取 max_angular_vel 参数，默认值为 M_PI/8(0.4rad/s)
     std::cout << "The value of max_angular_vel is: " << max_angular_vel << std::endl;
 
     CircleParams circle_params = {.radius = kRadius, .speed = 0.25,.dt = 0.1};

@@ -9,8 +9,11 @@ from kuavo_humanoid_sdk.kuavo.core.core import KuavoRobotCore
 from kuavo_humanoid_sdk.kuavo.core.sdk_deprecated import sdk_deprecated
 
 from typing import Tuple
+from geometry_msgs.msg import TwistStamped
 from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
-
+from kuavo_humanoid_sdk.kuavo.robot_arm import KuavoRobotArm 
+from kuavo_humanoid_sdk.kuavo.robot_head import KuavoRobotHead
+from kuavo_humanoid_sdk.kuavo.robot_waist import KuavoRobotWaist
 """
 Kuavo SDK - Kuavo机器人控制的Python接口
 
@@ -93,6 +96,10 @@ class KuavoRobot(RobotBase):
         super().__init__(robot_type="kuavo")
         
         self._robot_info = KuavoRobotInfo()
+
+        self._robot_arm  = KuavoRobotArm()
+        self._robot_head = KuavoRobotHead()
+        self._robot_waist = KuavoRobotWaist()
         self._kuavo_core = KuavoRobotCore()
     def stance(self)->bool:
         """使机器人进入'stance'站立模式。
@@ -133,14 +140,14 @@ class KuavoRobot(RobotBase):
         # Limit velocity ranges
         limited_linear_x = min(0.4, max(-0.4, linear_x))
         limited_linear_y = min(0.2, max(-0.2, linear_y)) 
-        limited_angular_z = min(0.4, max(-0.4, angular_z))
+        limited_angular_z = min(1.0, max(-1.0, angular_z))
         
         # Check if any velocity exceeds limits.
         if abs(linear_x) > 0.4:
             SDKLogger.warn(f"[Robot] linear_x velocity {linear_x} exceeds limit [-0.4, 0.4], will be limited")
         if abs(linear_y) > 0.2:
             SDKLogger.warn(f"[Robot] linear_y velocity {linear_y} exceeds limit [-0.2, 0.2], will be limited")
-        if abs(angular_z) > 0.4:
+        if abs(angular_z) > 1.0:
             SDKLogger.warn(f"[Robot] angular_z velocity {angular_z} exceeds limit [-0.4, 0.4], will be limited")
         return self._kuavo_core.walk(limited_linear_x, limited_linear_y, limited_angular_z)
 
@@ -267,6 +274,23 @@ class KuavoRobot(RobotBase):
         """
         return self._kuavo_core.control_command_pose_world(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
     
+    def control_command_pose_world_stamped(self, pos_world: TwistStamped) -> bool:
+        """在odom(世界)坐标系下控制机器人姿态(使用TwistStamped消息)。
+        
+        Args:
+            pos_world (TwistStamped): TwistStamped消息，包含目标位姿和时间戳。
+            
+        Returns:
+            bool: 如果命令发送成功返回True,否则返回False。
+            
+        Raises:
+            RuntimeError: 如果在尝试控制姿态时机器人不在stance状态。
+            
+        Note:
+            此命令会将机器人状态改变为'command_pose_world'。
+        """
+        return self._kuavo_core.control_command_pose_world_stamped(pos_world)
+    
     def control_head(self, yaw: float, pitch: float)->bool:
         """控制机器人的头部关节运动。
 
@@ -323,6 +347,10 @@ class KuavoRobot(RobotBase):
         """
         return self._kuavo_core.disable_head_tracking()
     
+    def control_waist_pos(self, joint_positions: list)->bool:
+        """控制机器人的腰部关节位置。"""
+        return self._robot_waist.control_waist(joint_positions)
+
     """ Robot Arm Control """
     def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
         """控制机器人末端力/力矩

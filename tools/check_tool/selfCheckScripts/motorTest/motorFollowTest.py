@@ -29,16 +29,25 @@ class MotorFollowTest:
         # 根据测试区域设置电机对数量和名称
         self.setup_test_config()
         
-        # 定义要打印的日志信息列表
+        # 定义要打印的日志信息列表 - 匹配roslaunch的输出格式
         self.target_logs = [
             "电机对进度:",
-            "Switching to joint pair",
-            "正在测试电机对:",
-            "左电机误差方差:",
-            "右电机误差方差:",
-            "相似性：",
-            "本轮电机对测试结果：",
-            "test complete."
+            "当前测试对:",
+            "测试完成标记",
+            "开始保存测试对",
+            "数据保存完成",
+            "所有关节对测试完成",
+            "测试对数量:",
+            "关节对:",
+            "测试模式:",
+            "电机跟随测试开始",
+            "电机跟随测试停止",
+            "motorFollowTest",
+            "motorFollowTestReal",
+            "开始实物电机跟随测试主循环",
+            "实物电机跟随测试结束",
+            "测试进度:",
+            "当前测试的关节"
         ]
         
         # 设置信号处理器
@@ -46,27 +55,20 @@ class MotorFollowTest:
         signal.signal(signal.SIGTERM, self.signal_handler)
 
     def setup_test_config(self):
-        """根据测试区域设置配置"""
+        """根据测试区域设置配置 - 配置由C++程序处理"""
         if self.test_region == "upper":
             self.region_name = "上半身"
-            self.total_pairs = 7
-            self.motor_pairs = [
-                "12-19", "13-20", "14-21", "15-22", 
-                "16-23", "17-24", "18-25"
-            ]
+            self.test_mode = 2  # ARMS_ONLY
         elif self.test_region == "lower":
             self.region_name = "下半身"
-            self.total_pairs = 6
-            self.motor_pairs = [
-                "0-6", "1-7", "2-8", "3-9", "4-10", "5-11"
-            ]
+            self.test_mode = 1  # LEGS_ONLY
         else:  # full
             self.region_name = "全身"
-            self.total_pairs = 13
-            self.motor_pairs = [
-                "12-19", "13-20", "14-21", "15-22", "16-23", "17-24", "18-25",
-                "0-6", "1-7", "2-8", "3-9", "4-10", "5-11"
-            ]
+            self.test_mode = 0  # FULL_BODY
+        
+        # 测试对数量和具体配置由C++程序根据机器人版本和测试模式动态生成
+        self.total_pairs = 0  # 将由C++程序输出中解析得到
+        self.motor_pairs = []  # 将由C++程序输出中解析得到
 
     def clear_screen(self):
         """清屏并移动光标到开头"""
@@ -178,24 +180,20 @@ class MotorFollowTest:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.abspath(os.path.join(script_dir, "../../../.."))
             
-            # 构造启动命令，添加测试区域参数
-            if installedFound:
-                bin_dir = os.path.join(project_root, "installed/bin")
-                full_command = (
-                    f"cd {bin_dir} && "
-                    f"source {kuavo_ros_control_path}/devel/setup.bash && "
-                    f"./motorFollowTest {self.test_region}"
-                )
-            elif develFound:
-                bin_dir = os.path.join(project_root, "devel/lib/hardware_node")
-                full_command = (
-                    f"cd {bin_dir} && "
-                    f"source {kuavo_ros_control_path}/devel/setup.bash && "
-                    f"./motorFollowTest {self.test_region}"
-                )
-            else:
-                print_colored_text("未找到编译产物！", color="red", bold=True)
+            # 构造启动命令，使用launch文件启动
+            launch_file = os.path.join(kuavo_ros_control_path, "src/kuavo-ros-control-lejulib/hardware_node/launch/motor_follow_test.launch")
+            
+            if not os.path.exists(launch_file):
+                print_colored_text(f"Launch文件不存在: {launch_file}", color="red", bold=True)
                 return 1
+            
+            full_command = (
+                f"source {kuavo_ros_control_path}/devel/setup.zsh && "
+                f"echo '检查ROS环境...' && "
+                f"echo '开始启动launch文件...' && "
+                f"roslaunch hardware_node motor_follow_test.launch "
+                f"mode:=real test_mode:={self.test_mode}"
+            )
 
             # 定义输出文件路径，始终相对于本脚本目录，且带时间戳和区域标识
             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -220,22 +218,18 @@ class MotorFollowTest:
             
             print_colored_text("=== 电机跟随性测试开始 ===", color="green", bold=True)
             print_colored_text(f"测试区域: {self.region_name}", color="blue", bold=True)
-            print_colored_text(f"总共需要测试 {self.total_pairs} 对电机", color="blue", bold=True)
+            print_colored_text("等待C++程序输出测试对信息...", color="blue", bold=True)
             print_colored_text("=" * 50, color="blue")
             
-            # 显示第一对电机的开始信息
-            current_pair = 1
-            progress = ((current_pair - 1) / self.total_pairs) * 100  # 修改：开始第1对时显示0%
-            progress_bar = "█" * int(progress / 2) + "░" * (50 - int(progress / 2))
-            print_colored_text(f"🔄 开始测试第 {current_pair} 对电机", color="purple", bold=True)
-            print_colored_text(f"总进度: [{progress_bar}] {progress:.1f}% ({current_pair}/{self.total_pairs})", color="cyan")
-            self.test_started_shown = True
+            # 初始化进度跟踪变量
+            current_pair = 0
+            self.test_started_shown = False
 
             # 打开文件以写入模式
             with open(self.output_file_path, 'w') as output_file:
                 # 启动进程
                 self.process = subprocess.Popen(
-                    ['bash', '-c', full_command],
+                    ['zsh', '-c', full_command],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -271,7 +265,25 @@ class MotorFollowTest:
                                 line_stripped = line.strip()
                                 
                                 # 处理不同的输出类型
-                                if "电机对进度:" in line_stripped:
+                                if "测试对数量:" in line_stripped:
+                                    # 解析测试对数量
+                                    try:
+                                        parts = line_stripped.split(":")
+                                        if len(parts) >= 2:
+                                            self.total_pairs = int(parts[1].strip())
+                                            print_colored_text(f"检测到 {self.total_pairs} 对电机需要测试", color="blue", bold=True)
+                                    except:
+                                        pass
+                                elif "关节对:" in line_stripped:
+                                    # 解析关节对信息
+                                    try:
+                                        parts = line_stripped.split(":")
+                                        if len(parts) >= 2:
+                                            joint_info = parts[1].strip()
+                                            self.motor_pairs.append(joint_info)
+                                    except:
+                                        pass
+                                elif "电机对进度:" in line_stripped:
                                     # 解析电机对进度
                                     try:
                                         # 格式: "电机对进度: 1 | 左周期: 4/10 | 右周期: 6/10"
@@ -281,22 +293,34 @@ class MotorFollowTest:
                                             left_info = parts[1].split(":")
                                             right_info = parts[2].split(":")
                                             
-                                            pair_num = int(pair_info[1].strip()) + 1  # 修复：转换为1-based索引
-                                            left_cycle = int(left_info[1].strip().split("/")[0])
-                                            right_cycle = int(right_info[1].strip().split("/")[0])
+                                            try:
+                                                pair_num = int(pair_info[1].strip()) + 1  # 修复：转换为1-based索引
+                                            except (ValueError, IndexError):
+                                                pair_num = 1  # 默认值
+                                            
+                                            # 安全解析周期数据
+                                            left_cycle_str = left_info[1].strip()
+                                            right_cycle_str = right_info[1].strip()
+                                            
+                                            try:
+                                                left_cycle = int(left_cycle_str.split("/")[0]) if "/" in left_cycle_str else 0
+                                                right_cycle = int(right_cycle_str.split("/")[0]) if "/" in right_cycle_str else 0
+                                            except (ValueError, IndexError):
+                                                left_cycle = 0
+                                                right_cycle = 0
                                             
                                             # 更新当前电机对进度
                                             current_pair_progress["left"] = left_cycle
                                             current_pair_progress["right"] = right_cycle
                                             
                                             # 计算当前电机对的完成百分比
-                                            left_progress = (left_cycle / 10) * 100
-                                            right_progress = (right_cycle / 10) * 100
+                                            left_progress = (left_cycle / 10) * 100 if 10 > 0 else 0
+                                            right_progress = (right_cycle / 10) * 100 if 10 > 0 else 0
                                             avg_progress = (left_progress + right_progress) / 2
                                             
                                             # 显示当前电机对进度
-                                            left_bar = "█" * int(left_progress / 5) + "░" * (20 - int(left_progress / 5))
-                                            right_bar = "█" * int(right_progress / 5) + "░" * (20 - int(right_progress / 5))
+                                            left_bar = "█" * int(left_progress / 5) + "░" * (20 - int(left_progress / 5)) if 5 > 0 else "░" * 20
+                                            right_bar = "█" * int(right_progress / 5) + "░" * (20 - int(right_progress / 5)) if 5 > 0 else "░" * 20
                                             
                                             # 只有在显示过开始信息后才显示进度条
                                             if hasattr(self, 'test_started_shown') and self.test_started_shown:
@@ -305,12 +329,12 @@ class MotorFollowTest:
                                     except:
                                         pass
                                 
-                                elif "Switching to joint pair" in line_stripped:
+                                elif "当前测试对:" in line_stripped:
                                     # 这是测试开始的信号，清除当前进度条并更新进度
                                     print()  # 换行，结束当前进度条
                                     current_pair += 1
-                                    progress = ((current_pair - 1) / self.total_pairs) * 100  # 修改：保持一致的进度计算
-                                    progress_bar = "█" * int(progress / 2) + "░" * (50 - int(progress / 2))
+                                    progress = ((current_pair - 1) / self.total_pairs) * 100 if self.total_pairs > 0 else 0  # 修改：保持一致的进度计算
+                                    progress_bar = "█" * int(progress / 2) + "░" * (50 - int(progress / 2)) if 2 > 0 else "░" * 50
                                     print_colored_text(f"🔄 开始测试第 {current_pair} 对电机", color="purple", bold=True)
                                     print_colored_text(f"总进度: [{progress_bar}] {progress:.1f}% ({current_pair}/{self.total_pairs})", color="cyan")
                                     # 重置当前电机对进度
@@ -318,53 +342,23 @@ class MotorFollowTest:
                                     # 重新启用进度条显示
                                     self.test_started_shown = True
                                 
-                                elif "正在测试电机对:" in line_stripped:
-                                    # 提取电机对编号并显示
-                                    try:
-                                        parts = line_stripped.split(":")
-                                        if len(parts) >= 2:
-                                            motor_info = parts[1].strip()
-                                            current_motor_pair = motor_info  # 记录当前电机对
-                                            print_colored_text(f"📊 分析电机对: {motor_info}", color="blue", bold=True)
-                                    except:
-                                        print_colored_text(f"📊 {line_stripped}", color="blue", bold=True)
+                                elif "测试完成标记" in line_stripped:
+                                    # 测试完成标记
+                                    print_colored_text(f"✅ {line_stripped}", color="green", bold=True)
                                 
-                                elif "左电机误差方差:" in line_stripped or "右电机误差方差:" in line_stripped:
-                                    if "[异常]" in line_stripped:
-                                        print_colored_text(f"❌ {line_stripped}", color="red")
-                                    else:
-                                        print_colored_text(f"✅ {line_stripped}", color="green")
+                                elif "电机跟随测试开始" in line_stripped:
+                                    print_colored_text(f"🚀 {line_stripped}", color="green", bold=True)
                                 
-                                elif "相似性：" in line_stripped:
-                                    if "[异常]" in line_stripped:
-                                        print_colored_text(f"❌ {line_stripped}", color="red")
-                                    else:
-                                        print_colored_text(f"✅ {line_stripped}", color="green")
+                                elif "电机跟随测试停止" in line_stripped:
+                                    print_colored_text(f"🛑 {line_stripped}", color="yellow", bold=True)
                                 
-                                elif "本轮电机对测试结果：" in line_stripped:
-                                    if "异常" in line_stripped:
-                                        print_colored_text(f"❌ {line_stripped}", color="red", bold=True)
-                                        test_results.append("异常")
-                                        # 记录异常电机对的详细信息
-                                        if current_motor_pair:
-                                            test_details.append({
-                                                "pair": current_pair,
-                                                "motors": current_motor_pair,
-                                                "result": "异常"
-                                            })
-                                    else:
-                                        print_colored_text(f"✅ {line_stripped}", color="green", bold=True)
-                                        test_results.append("正常")
-                                        # 记录正常电机对的详细信息
-                                        if current_motor_pair:
-                                            test_details.append({
-                                                "pair": current_pair,
-                                                "motors": current_motor_pair,
-                                                "result": "正常"
-                                            })
-                                    print()  # 添加空行分隔
+                                elif "开始保存测试对" in line_stripped:
+                                    print_colored_text(f"💾 {line_stripped}", color="blue")
                                 
-                                elif "test complete." in line_stripped:
+                                elif "数据保存完成" in line_stripped:
+                                    print_colored_text(f"✅ {line_stripped}", color="green")
+                                
+                                elif "所有关节对测试完成" in line_stripped:
                                     print()  # 确保换行
                                     # 显示最终100%进度
                                     progress = 100.0
@@ -392,53 +386,13 @@ class MotorFollowTest:
                                         for i, detail in enumerate(abnormal_pairs, 1):
                                             print_colored_text(f"  {i}. 电机组 {detail['pair']}: 电机 {detail['motors']}", color="red")
                                     
-                                    # 询问用户是否显示图像
+                                    # 提示用户测试完成
                                     print_colored_text("=" * 50, color="blue")
-                                    print_colored_text("📊 测试数据已保存，是否生成波形图像？", color="purple", bold=True)
-                                    print_colored_text("图像将显示每对电机的输入信号和响应信号对比", color="cyan")
-                                    print_colored_text("输入 'y' 生成图像，输入其他键跳过", color="cyan")
-                                    
-                                    try:
-                                        user_choice = input("请选择 (y/其他): ").strip().lower()
-                                        if user_choice == 'y':
-                                            print_colored_text("🔄 正在生成波形图像...", color="purple", bold=True)
-                                            
-                                            # 直接在当前目录运行drawWaveform脚本
-                                            draw_waveform_script = os.path.join(script_dir, "drawWaveform.py")
-                                            if os.path.exists(draw_waveform_script):
-                                                # 保存当前工作目录
-                                                original_cwd = os.getcwd()
-                                                try:
-                                                    # 切换到脚本所在目录
-                                                    os.chdir(script_dir)
-                                                    
-                                                    # 运行drawWaveform脚本
-                                                    result = subprocess.run(['python3', draw_waveform_script], 
-                                                                              capture_output=True, text=True)
-                                                    
-                                                    if result.returncode == 0:
-                                                        print_colored_text("✅ 波形图像生成成功！", color="green", bold=True)
-                                                        print_colored_text("📁 图像保存位置:", color="blue")
-                                                        print_colored_text("   - 组合图像: ./grouped_images/", color="cyan")
-                                                        
-                                                        # 检查是否有异常电机，如果有则特别提醒
-                                                        if abnormal_count > 0:
-                                                            print_colored_text(f"💡 建议查看异常电机的波形图像进行详细分析", color="yellow")
-                                                    else:
-                                                        print_colored_text("❌ 波形图像生成失败", color="red", bold=True)
-                                                        if result.stderr:
-                                                            print_colored_text(f"错误信息: {result.stderr}", color="red")
-                                                finally:
-                                                    # 恢复原始工作目录
-                                                    os.chdir(original_cwd)
-                                            else:
-                                                print_colored_text("❌ 未找到 drawWaveform.py 脚本", color="red", bold=True)
-                                        else:
-                                            print_colored_text("⏭️  跳过图像生成", color="blue")
-                                    except KeyboardInterrupt:
-                                        print_colored_text("\n⏭️  用户取消，跳过图像生成", color="blue")
-                                    except Exception as e:
-                                        print_colored_text(f"❌ 图像生成过程中出错: {e}", color="red", bold=True)
+                                    print_colored_text("📊 测试数据已保存并自动分析完成！", color="purple", bold=True)
+                                    print_colored_text("📁 数据保存位置:", color="blue")
+                                    print_colored_text("   - 测试数据: ./file/", color="cyan")
+                                    print_colored_text("   - 分析报告: ./symmetry_analysis_report_*.txt", color="cyan")
+                                    print_colored_text("   - 波形图像: ./pics/", color="cyan")
                                 
                                 else:
                                     # 其他目标日志信息

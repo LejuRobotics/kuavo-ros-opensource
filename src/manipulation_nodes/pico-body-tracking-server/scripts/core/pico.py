@@ -228,9 +228,6 @@ class KuavoPicoServer:
             # Process foot pose for stepping using parallel detection
             self.pico_node.pico_info_transformer.process_foot_poses_parallel(robot_urdf_matrices)
 
-            # Process body pose for stepping (Another option of lower body control)
-            # self.pico_node.pico_info_transformer.process_body_pose_for_stepping(robot_urdf_matrices)
-
         elif self.pico_node.pico_info_transformer.control_mode == 'UpperBody':
             # Process body pose for stepping 
             self.pico_node.pico_info_transformer.publish_local_poses(robot_urdf_matrices, current_time)
@@ -238,9 +235,6 @@ class KuavoPicoServer:
         elif self.pico_node.pico_info_transformer.control_mode == 'LowerBody':
             # Process foot pose for stepping using parallel detection
             self.pico_node.pico_info_transformer.process_foot_poses_parallel(robot_urdf_matrices)
-
-            # Process body pose for stepping (Another option of lower body control)
-            # self.pico_node.pico_info_transformer.process_body_pose_for_stepping(robot_urdf_matrices)
     
     def process_pico_joy_data(self, controller_data):
         """Process pico joy data and print to console."""

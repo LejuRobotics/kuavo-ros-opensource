@@ -155,6 +155,7 @@ class MobileManipulatorIkTarget {
     double comHeight_ = 0.0;
     int dof_target_pose_ = 14;
     int effTrajReceived_ = 0;
+    double waistDof_ = 0.0;
 
     // 机器人接口
     std::shared_ptr<ocs2::mobile_manipulator::MobileManipulatorInterface> mobileManipulatorInterface_;

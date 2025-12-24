@@ -1,0 +1,14 @@
+# voice_control_node Python依赖
+# 语音识别相关
+modelscope==1.10.0 # 兼容python3.8，用于下载模型
+umap-learn<=0.5.5 # funasr的依赖，过高版本会依赖不存在的scikit-learn
+funasr # 1.2.7可用
+torch # 1.13.1+cpu可用
+torchaudio
+
+# 数据处理
+numpy<=1.24 # 过高版本可能引起np.bool错误
+
+# 系统工具
+psutil
+

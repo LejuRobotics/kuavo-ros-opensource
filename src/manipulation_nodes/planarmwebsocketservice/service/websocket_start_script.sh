@@ -56,20 +56,9 @@ while [[ "$current_path" != "/" ]]; do
     current_path=$(dirname "$current_path")
 done
 
-cd "$SCRIPT_DIR"
-
-# 使用 git 命令获取仓库根目录
-REPO_ROOT=$(git rev-parse --show-toplevel)
-if [[ -z "$REPO_ROOT" ]]; then
-    echo "错误：无法找到 git 仓库根目录"
-    exit 1
-fi
-
-echo "仓库根目录: $REPO_ROOT"
-cd "$REPO_ROOT"
-
+REPO_ROOT="$REPO_ROOT"
 source /opt/ros/noetic/setup.bash --extend
-source devel/setup.bash --extend
+source $REPO_ROOT/devel/setup.bash
 
 # 启动 h12pro_controller_node
 roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch &

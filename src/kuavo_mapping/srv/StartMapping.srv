@@ -1,0 +1,8 @@
+# 启动建图服务请求
+string map_name      # 地图名称
+string lidar_type    # 雷达类型，默认为"livox"
+---
+# 启动建图服务响应
+bool success         # 是否成功启动
+string message       # 状态消息
+string map_name      # 实际使用的地图名称

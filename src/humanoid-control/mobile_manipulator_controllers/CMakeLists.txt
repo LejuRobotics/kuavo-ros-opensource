@@ -92,6 +92,7 @@ add_library(${PROJECT_NAME}_general
   src/mobileManipulatorControllerGeneral.cpp
 )
 
+
 target_link_libraries(${PROJECT_NAME}_general
   ${PROJECT_NAME}_base
   ${catkin_LIBRARIES}

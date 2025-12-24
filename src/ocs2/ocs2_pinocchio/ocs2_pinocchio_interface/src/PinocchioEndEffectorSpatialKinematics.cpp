@@ -129,7 +129,7 @@ std::vector<VectorFunctionLinearApproximation> PinocchioEndEffectorSpatialKinema
 
   std::vector<VectorFunctionLinearApproximation> positions;
   for (const auto& frameId : endEffectorFrameIds_) {
-    matrix_t J = matrix_t::Zero(6, model.nq);
+    matrix_t J = matrix_t::Zero(6, model.nv);
     pinocchio::getFrameJacobian(model, data, frameId, rf, J);
 
     VectorFunctionLinearApproximation pos;
@@ -254,7 +254,7 @@ std::vector<VectorFunctionLinearApproximation> PinocchioEndEffectorSpatialKinema
     const size_t frameId = endEffectorFrameIds_[i];
     const quaternion_t q = matrixToQuaternion(data.oMf[frameId].rotation());
     err.f = quaternionDistance(q, referenceOrientations[i]);
-    matrix_t J = matrix_t::Zero(6, model.nq);
+    matrix_t J = matrix_t::Zero(6, model.nv);
     pinocchio::getFrameJacobian(model, data, frameId, rf, J);
     const matrix_t Jqdist =
         (quaternionDistanceJacobian(q, referenceOrientations[i]) * angularVelocityToQuaternionTimeDerivative(q)) * J.bottomRows<3>();

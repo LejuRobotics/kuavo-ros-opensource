@@ -5,6 +5,7 @@ from .robot_vision import KuavoRobotVision
 from .robot_tool import KuavoRobotTools
 from .robot_arm import KuavoRobotArm
 from .robot_head import KuavoRobotHead
+from .robot_waist import KuavoRobotWaist
 from .robot_audio import KuavoRobotAudio
 from .dexterous_hand import DexterousHand, TouchDexterousHand
 from .leju_claw import LejuClaw

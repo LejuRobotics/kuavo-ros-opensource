@@ -81,6 +81,26 @@ class KuavoRobotArm:
         """
         return self._kuavo_core.control_robot_end_effector_pose(left_pose, right_pose, frame)
 
+    def is_arm_collision(self)->bool:
+        """Check if the arm is in collision.
+        """
+        return self._kuavo_core.is_arm_collision()
+    
+    def wait_arm_collision_complete(self):
+        """Wait for the arm collision to complete.
+        """
+        self._kuavo_core.wait_arm_collision_complete()
+    
+    def release_arm_collision_mode(self):
+        """Release the arm collision mode.
+        """
+        self._kuavo_core.release_arm_collision_mode()
+
+    def set_arm_collision_mode(self, enable: bool):
+        """Set the arm collision mode.
+        """
+        self._kuavo_core.set_arm_collision_mode(enable)
+
     def set_fixed_arm_mode(self) -> bool:
         """
         Freezes the robot arm.

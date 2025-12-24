@@ -27,6 +27,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import protos.hand_pose_pb2 as event_pb2
 import protos.robot_info_pb2 as robot_info_pb2
 
+from robot_state_server import RobotStateServer
+
 class Quest3BoneFramePublisher:
     def __init__(self):
         self.bone_names = [
@@ -256,7 +258,11 @@ class Quest3BoneFramePublisher:
                 pose_info_list.timestamp_ms = event.timestamp
                 pose_info_list.is_high_confidence = event.IsDataHighConfidence
                 pose_info_list.is_hand_tracking = event.IsHandTracking
-                self.pose_pub.publish(pose_info_list)
+
+                if pose_info_list.is_high_confidence:
+                    self.pose_pub.publish(pose_info_list)
+                else:
+                    rospy.logwarn("Low confidence pose data, not publishing.")
                 
                 self.rate.sleep()
             except socket.timeout:
@@ -451,7 +457,38 @@ def get_local_broadcast_ips():
         return []
 
 if __name__ == "__main__":
+    # Create a Quest3BoneFramePublisher instance
     publisher = Quest3BoneFramePublisher()
+    #######################################################
+    def get_package_path(package_name):
+        try:
+            import rospkg
+            rospack = rospkg.RosPack()
+            package_path = rospack.get_path(package_name)
+            return package_path
+        except rospkg.ResourceNotFound:
+            return None
+
+    # Start the robot state server
+    if rospy.has_param("/end_effector_type"):
+        ee_type = rospy.get_param("/end_effector_type")
+        print(f"\033[92mend_effector_type from rosparm: {ee_type}\033[0m")    
+    else:
+        kuavo_assests_path = get_package_path("kuavo_assets")
+        robot_version = os.environ.get('ROBOT_VERSION', '40')
+        config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
+        import json
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            ee_type = config.get("EndEffectorType", ["qiangnao", "qiangnao"])[0]
+        print("\033[91mend_effector_type not found in rosparm, using from kuavo.json\033[0m")
+    # RobotStateServer to Vr App
+    subscribe_sensor_data = True # 订阅sensors_data_raw
+    robot_state_server = RobotStateServer(ee_type=ee_type, udp_port=15170, publish_rate=20, subscribe_sensor_data=subscribe_sensor_data)
+    if not robot_state_server.start():
+        print("\033[91mRobotStateServer 启动失败\033[0m")
+        sys.exit(1)
+    #######################################################
 
     broadcast_ips = get_local_broadcast_ips()
     print(f"Local broadcast IPs: {broadcast_ips}")
@@ -481,3 +518,6 @@ if __name__ == "__main__":
         publisher.run()
     else:
         print("Failed to establish initial connection.")
+
+    # Close the socket
+    robot_state_server.stop()    

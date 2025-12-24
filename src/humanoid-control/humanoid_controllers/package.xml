@@ -13,10 +13,13 @@
     <build_depend>cmake_clang_tools</build_depend>
     <depend>roscpp</depend>
     <depend>kuavo_common</depend>
+    <depend>kuavo_solver</depend>
     <depend>humanoid_common</depend>
     <depend>humanoid_interface</depend>
     <depend>humanoid_estimation</depend>
     <depend>humanoid_interface_ros</depend>
+    <depend>humanoid_wheel_interface</depend>
+    <depend>humanoid_wheel_interface_ros</depend>
     <depend>humanoid_interface_drake</depend>
     <depend>kuavo_estimation</depend>
     <depend>kuavo_monitor</depend>
@@ -25,6 +28,7 @@
     <depend>mujoco_cpp</depend>
     <depend>robot_localization</depend>
     <depend>humanoid_wbc</depend>
+    <depend>humanoid_wheel_wbc</depend>
     <depend>controller_interface</depend>
     <depend>h12pro_controller_node</depend>
     <depend>joy</depend>
@@ -40,7 +44,7 @@
     <depend>kuavo_audio_receiver</depend>
     <depend>kuavo_sdk</depend>
     <!-- <depend>ocs2_biped_robot_ros</depend> -->
-
+    <depend>humanoid_plan_arm_trajectory</depend>
     <depend>angles</depend>
     <depend>kuavo_led_controller</depend>
     <exec_depend>nodelet</exec_depend>

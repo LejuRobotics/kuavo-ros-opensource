@@ -1,35 +1,36 @@
 <?xml version="1.0" ?>
 <sdf version="1.6">
-  <model name="double_ramp_9deg_0p9m_0p2plat">
+  <model name="double_ramp_6deg_0p9m_0p2plat">
     <static>true</static>
 
     <!-- 参数说明（几何计算基于中心位姿）
-         - 斜坡角度: 9° (roll)
-         - 单侧斜坡长度: 0.9 m  (size.y)
-         - 斜坡半长: 0.45 m
+         - 斜坡角度: 7.3° (roll)
+         - 单侧斜坡长度: 0.85 m  (size.y)
+         - 斜坡半长: 0.425 m
          - 平台长度: 0.2 m (size.y)
          - 厚度: 0.02 m
-         - 宽度: 1.0 m (size.x)
+         - 宽度: 0.9 m (size.x)
          位置计算：
-         sin(9°)=0.156434465, cos(9°)=0.987688341
-         up_ramp 中心: y = 0.45*cos(9°) = 0.444460, z = 0.45*sin(9°) = 0.0703955
-         platform 中心: y = 2*0.45*cos(9°) + 0.2/2 = 0.888919 + 0.1 = 0.988919, z = 2*0.45*sin(9°) = 0.1407909
-         down_ramp 中心: y = platform_y + 0.2/2 + 0.45*cos(9°) = 0.988919 + 0.1 + 0.444460 = 1.533379, z = platform_z - 0.45*sin(9°) = 0.0703955
+         角度转换: 7.3° = 0.127409035 radians
+         sin(7.3°)=0.127064609, cos(7.3°)=0.991894443
+         up_ramp 中心: y = 0.425*cos(7.3°) = 0.421555138, z = 0.425*sin(7.3°) = 0.054002459
+         platform 中心: y = 2*0.425*cos(7.3°) + 0.2/2 = 0.843110276 + 0.1 = 0.943110276, z = 2*0.425*sin(7.3°) = 0.108004917
+         down_ramp 中心: y = platform_y + 0.2/2 + 0.425*cos(7.3°) = 0.943110276 + 0.1 + 0.421555138 = 1.464665414, z = platform_z - 0.425*sin(7.3°) = 0.054002459
     -->
 
     <link name="up_ramp">
-      <pose>0 0.444460 0.0703955 0.15707963267948966 0 0</pose>
+      <pose>0 0.421555138 0.054002459 0.127409035 0 0</pose>
       <collision name="collision">
         <geometry>
           <box>
-            <size>1.0 0.9 0.02</size>
+            <size>1.0 0.856946025 0.02</size>
           </box>
         </geometry>
       </collision>
       <visual name="visual">
         <geometry>
           <box>
-            <size>1.0 0.9 0.02</size>
+            <size>1.0 0.856946025 0.02</size>
           </box>
         </geometry>
         <material>
@@ -45,7 +46,7 @@
     </link>
 
     <link name="platform">
-      <pose>0 0.988919 0.1407909 0 0 0</pose>
+      <pose>0 0.943110276 0.108004917 0 0 0</pose>
       <collision name="collision">
         <geometry>
           <box>
@@ -72,18 +73,18 @@
     </link>
 
     <link name="down_ramp">
-      <pose>0 1.533379 0.0703955 -0.15707963267948966 0 0</pose>
+      <pose>0 1.464665414 0.054002459 -0.127409035 0 0</pose>
       <collision name="collision">
         <geometry>
           <box>
-            <size>1.0 0.9 0.02</size>
+            <size>1.0 0.856946025 0.02</size>
           </box>
         </geometry>
       </collision>
       <visual name="visual">
         <geometry>
           <box>
-            <size>1.0 0.9 0.02</size>
+            <size>1.0 0.856946025 0.02</size>
           </box>
         </geometry>
         <material>

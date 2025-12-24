@@ -9,7 +9,8 @@
       - [**检查 `launch` 文件，文件位置为`/home/lab/kuavo-rl-opensource/kuavo-robot-deploy/src/humanoid-control/humanoid_controllers/launch`。**](#检查-launch-文件文件位置为homelabkuavo-rl-opensourcekuavo-robot-deploysrchumanoid-controlhumanoid_controllerslaunch)
       - [**检查 `skw_rl_param.info` 文件，文件位置为`/home/lab/kuavo-rl-opensource/kuavo-robot-deploy/src/humanoid-control/humanoid_controllers/config/kuavo_v42/rl`**:](#检查-skw_rl_paraminfo-文件文件位置为homelabkuavo-rl-opensourcekuavo-robot-deploysrchumanoid-controlhumanoid_controllersconfigkuavo_v42rl)
     - [H12遥控器控制说明](#h12遥控器控制说明)
-    - [程序启动](#程序启动)
+    - [程序启动及控制说明](#程序启动及控制说明)
+      - [启动说明](#启动说明)
     - [电机控制话题说明](#电机控制话题说明)
       - [1. 控制指令输出方式](#1-控制指令输出方式)
       - [2. 控制模式选择](#2-控制模式选择)
@@ -105,9 +106,6 @@ networkModelFile          /your_new_model.onnx;
   - 强化学习H12遥控器建位说明： [跳转](../../2快速开始/快速开始.md)
 
 ### 程序启动
-
-  ⚠️ **注意**: 如果您的下位机部署了h12遥控器的开机自启动服务，运行该案例前需要依次执行 `sudo systemctl stop ocs2_h12pro_monitor.service` 和 `sudo pkill -f ros` 然后再继续下列步骤
-
 ```bash
 #新开终端
 cd kuavo-rl-opensource/kuavo-robot-deploy

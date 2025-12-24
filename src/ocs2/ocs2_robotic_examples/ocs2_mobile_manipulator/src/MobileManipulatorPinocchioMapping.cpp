@@ -69,7 +69,7 @@ auto MobileManipulatorPinocchioMappingTpl<SCALAR>::getPinocchioJointVelocity(con
       break;
     }
     case ManipulatorModelType::FloatingArmManipulator: {
-      vPinocchio.tail(modelInfo_.armDim) = input;
+      vPinocchio.tail(modelInfo_.armDim + modelInfo_.waistDim) = input;
       break;
     }
     case ManipulatorModelType::FullyActuatedFloatingArmManipulator: {
@@ -79,14 +79,14 @@ auto MobileManipulatorPinocchioMappingTpl<SCALAR>::getPinocchioJointVelocity(con
     case ManipulatorModelType::WheelBasedMobileManipulator: {
       const auto theta = state(2);
       const auto v = input(0);  // forward velocity in base frame
-      vPinocchio << cos(theta) * v, sin(theta) * v, input(1), input.tail(modelInfo_.armDim);
+      vPinocchio << cos(theta) * v, sin(theta) * v, input(1), input.tail(modelInfo_.armDim + modelInfo_.waistDim);
       break;
     }
     case ManipulatorModelType::ActuatedXYZYawPitchManipulator: {
       const auto theta = state(2);
       const auto v_x = input(0);  // forward velocity in base frame
       const auto v_y = input(1);  // lateral velocity in base frame
-      vPinocchio << cos(theta) * v_x - sin(theta) * v_y, sin(theta) * v_x + cos(theta) * v_y, input.segment(2, 3), input.tail(modelInfo_.armDim);
+      vPinocchio << cos(theta) * v_x - sin(theta) * v_y, sin(theta) * v_x + cos(theta) * v_y, input.segment(2, 3), input.tail(modelInfo_.armDim + modelInfo_.waistDim);
       break;
     }
     case ManipulatorModelType::ActuatedZPitchManipulator: {
@@ -94,7 +94,7 @@ auto MobileManipulatorPinocchioMappingTpl<SCALAR>::getPinocchioJointVelocity(con
       const auto d_pitch = input(1);  // pitch velocity in base frame
       vector_t base(6);
       base << SCALAR(0), SCALAR(0), v_z, SCALAR(0), d_pitch, SCALAR(0);
-      vPinocchio << base, input.tail(modelInfo_.armDim);
+      vPinocchio << base, input.tail(modelInfo_.armDim + modelInfo_.waistDim);
       break;
     }
     default: {
@@ -118,7 +118,7 @@ auto MobileManipulatorPinocchioMappingTpl<SCALAR>::getOcs2Jacobian(const vector_
     }
     case ManipulatorModelType::FloatingArmManipulator: {
       matrix_t dfdu(Jv.rows(), modelInfo_.inputDim);
-      dfdu = Jv.template rightCols(modelInfo_.armDim);
+      dfdu = Jv.template rightCols(modelInfo_.armDim + modelInfo_.waistDim);
       return {Jq, dfdu};
     }
     case ManipulatorModelType::FullyActuatedFloatingArmManipulator: {
@@ -134,7 +134,7 @@ auto MobileManipulatorPinocchioMappingTpl<SCALAR>::getOcs2Jacobian(const vector_
                    SCALAR(0), SCALAR(1.0);
       // clang-format on
       dfdu.template leftCols<2>() = Jv.template leftCols<3>() * dvdu_base;
-      dfdu.template rightCols(modelInfo_.armDim) = Jv.template rightCols(modelInfo_.armDim);
+      dfdu.template rightCols(modelInfo_.armDim + modelInfo_.waistDim) = Jv.template rightCols(modelInfo_.armDim + modelInfo_.waistDim);
       return {Jq, dfdu};
     }
     case ManipulatorModelType::ActuatedXYZYawPitchManipulator: {
@@ -146,7 +146,7 @@ auto MobileManipulatorPinocchioMappingTpl<SCALAR>::getOcs2Jacobian(const vector_
                                      sin(theta),  cos(theta);
       // clang-format on
       dfdu.template leftCols<5>() = Jv.template leftCols<5>() * dvdu_base;
-      dfdu.template rightCols(modelInfo_.armDim) = Jv.template rightCols(modelInfo_.armDim);
+      dfdu.template rightCols(modelInfo_.armDim + modelInfo_.waistDim) = Jv.template rightCols(modelInfo_.armDim + modelInfo_.waistDim);
       return {Jq, dfdu};
     }
     case ManipulatorModelType::ActuatedZPitchManipulator: {
@@ -161,7 +161,7 @@ auto MobileManipulatorPinocchioMappingTpl<SCALAR>::getOcs2Jacobian(const vector_
                    SCALAR(0), SCALAR(0);
       // clang-format on
       dfdu.template leftCols<2>() = Jv.template leftCols<6>() * dvdu_base;
-      dfdu.template rightCols(modelInfo_.armDim) = Jv.template rightCols(modelInfo_.armDim);
+      dfdu.template rightCols(modelInfo_.armDim + modelInfo_.waistDim) = Jv.template rightCols(modelInfo_.armDim + modelInfo_.waistDim);
       return {Jq, dfdu};
     }
     default: {

@@ -148,7 +148,7 @@ async def broadcast_robot_info_wifi():
     
     try:
         while True:
-            message = json.dumps(robot_info).encode("utf-8")
+            message = json.dumps(robot_info, ensure_ascii=False).encode("utf-8")
             sock.sendto(message, (broadcast_ip, BROADCAST_PORT))
             await asyncio.sleep(1)
     except asyncio.CancelledError:
@@ -173,7 +173,7 @@ async def broadcast_robot_info_hotspot():
     
     try:
         while True:
-            message = json.dumps(robot_info).encode("utf-8")
+            message = json.dumps(robot_info, ensure_ascii=False).encode("utf-8")
             sock.sendto(message, (broadcast_ip, BROADCAST_PORT))
             await asyncio.sleep(1)
     except asyncio.CancelledError:
@@ -202,11 +202,26 @@ async def handle_websocket(websocket, path):
 
 async def send_to_websockets(response: Response):
     """Send responses to WebSocket clients"""
-    payload = json.dumps(response.payload.__dict__)
+    payload = json.dumps(response.payload.__dict__, ensure_ascii=False)
     target = response.target
     
     if target == "all":
-        print(f"Broadcasting message to all clients: {payload}")
+        # 为了避免大量日志输出，只打印消息类型和大小
+        try:
+            payload_dict = json.loads(payload)
+            cmd = payload_dict.get('cmd', 'unknown')
+            # 只在非地图更新消息时打印，或者简化地图更新消息的打印
+            if cmd != 'map_update':
+                print(f"Broadcasting message to all clients: cmd={cmd}")
+            else:
+                # 对于地图更新，只打印基本信息，不包含base64数据
+                map_info = payload_dict.get('data', {})
+                width = map_info.get('width', 'unknown')
+                height = map_info.get('height', 'unknown')
+                #print(f"Broadcasting map update to all clients: size={width}x{height}")
+        except:
+            print(f"Broadcasting message to all clients (payload parse failed)")
+
         if active_connections:
             await asyncio.gather(
                 *[connection.send(payload) for connection in active_connections.copy()],
@@ -233,7 +248,7 @@ async def process_responses():
             response: Response = await asyncio.get_event_loop().run_in_executor(
                 None, response_queue.get, True, 0.1
             )
-            current_message = json.dumps(response.payload.__dict__)
+            current_message = json.dumps(response.payload.__dict__, ensure_ascii=False)
             
             cmd = json.loads(current_message)["cmd"]
             if current_message == last_sent_message and cmd == "preview_action":

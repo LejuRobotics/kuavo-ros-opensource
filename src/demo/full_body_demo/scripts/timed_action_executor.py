@@ -63,7 +63,7 @@ class TimedActionExecutor:
         self.joyButtonMap = {
             "BUTTON_STANCE": 0,
             "BUTTON_TROT": 1,
-            "BUTTON_JUMP": 2,
+            "BUTTON_RL": 2,
             "BUTTON_WALK": 3,
             "BUTTON_LB": 4,
             "BUTTON_RB": 5,
@@ -332,6 +332,7 @@ class TimedActionExecutor:
         """播放太极动作"""
         if self.taichi_player:
             rospy.loginfo("开始播放太极")
+            
             time_offset = self.current_action.get('params', {}).get('time_offset')
             return self.taichi_player.execute_action_with_csv(time_offset)
         else:

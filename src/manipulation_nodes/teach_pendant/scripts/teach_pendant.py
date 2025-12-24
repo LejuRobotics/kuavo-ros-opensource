@@ -64,6 +64,32 @@ def set_kuavo_arm_target_poses(publisher, times, frame_list):
 
     publisher.publish(arm_target_poses_msg)
 
+# 声明全局变量 用于sensors_data_raw中手臂角度的索引
+joint_data_header = joint_data_footer = None
+
+# 获取机器人版本
+def get_version_parameter():
+    param_name = 'robot_version'
+    try:
+        # 获取参数值
+        param_value = rospy.get_param(param_name)
+        rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
+        # 适配1000xx版本号
+        valid_series = [42, 45, 49, 52]
+        MMMMN_MASK = 100000
+        series = param_value % MMMMN_MASK
+        if series not in valid_series:
+            rospy.logerr(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！程序退出。")
+            rospy.signal_shutdown("参数无效")
+        else:
+            rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
+        return param_value
+    except rospy.ROSException:
+        rospy.logerr(f"参数 {param_name} 不存在！程序退出。")
+        rospy.signal_shutdown("参数获取失败") 
+        return None
+
+# 回调函数,获取手臂角度数据,索引由全局变量joint_data_header和joint_data_footer确定
 def joint_data_callback(sensors_data):
     global latest_joint_state, recording, bag, record_mode
     joint_data = sensors_data.joint_data
@@ -72,9 +98,9 @@ def joint_data_callback(sensors_data):
     joint_state.name = arm_joint_names
 
     if hasattr(joint_data, 'joint_q') and hasattr(joint_data, 'joint_v') and hasattr(joint_data, 'joint_vd'):
-        joint_state.position = joint_data.joint_q[12:26]
-        joint_state.velocity = joint_data.joint_v[12:26]
-        joint_state.effort = joint_data.joint_torque[12:26]
+        joint_state.position = joint_data.joint_q[joint_data_header:joint_data_footer]
+        joint_state.velocity = joint_data.joint_v[joint_data_header:joint_data_footer]
+        joint_state.effort = joint_data.joint_torque[joint_data_header:joint_data_footer]
     else:
         rospy.logwarn("The received message does not contain the expected attributes.")
         return
@@ -228,6 +254,15 @@ def listener(record=False, save_bag=None, play=None, save_to_file=None, play_fil
     global arm_joint_pub, latest_joint_state, recording, bag_file, bag, output_file, file_descriptor, record_mode
 
     rospy.init_node('kuavo_teach_pendant_node', anonymous=True)
+
+    # 获取机器人版本
+    robot_version = get_version_parameter()
+    # 根据机器人版本 设定sensors_data_raw中手臂角度的索引
+    global joint_data_header, joint_data_footer  # 声明使用全局变量
+    if robot_version in [42, 45, 49]:
+        joint_data_header, joint_data_footer = 12, 26
+    elif robot_version == 52:
+        joint_data_header, joint_data_footer = 13, 27
 
     # record joint state publisher
     arm_joint_pub = rospy.Publisher('/teach_pendant/record_arm_traj', JointState, queue_size=10)
