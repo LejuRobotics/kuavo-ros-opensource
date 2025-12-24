@@ -13,7 +13,7 @@ clipObservations   5000.0    ; 用于对输入进行clip
 clipActions        5000.0    ; 用于对actions进行clip
 defaultBaseHeightControl 0.65 ;标准站立时的高度，用于插值控制
 
-networkModelFile          /1215_cyh4_372000.onnx; 
+networkModelFile          /v3-1220-pm-86400.onnx; 
 
 commandData 
 {
@@ -42,8 +42,8 @@ commandData
 velocityLimits
 {
     ; 定义速度命令的限制
-    (0,0)  0.50      ; cmdVelLineX
-    (1,0)  0.5      ; cmdVelLineY
+    (0,0)  0.60      ; cmdVelLineX
+    (1,0)  0.6      ; cmdVelLineY
     (2,0)  0.0      ; cmdVelLineZ
     (3,0)  1.0      ; cmdVelAngularZ
 }

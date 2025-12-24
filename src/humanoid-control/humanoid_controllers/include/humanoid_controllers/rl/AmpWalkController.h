@@ -78,6 +78,7 @@ namespace humanoid_controller
     int frameStack_{1};
     int numSingleObs_{0};
     std::vector<std::string> singleInputDataKeys_;
+    std::deque<Eigen::VectorXd> inputDeque_; // 用于多个历史的存储输入
     // key -> {startIdx, numIdx, obsScale}
     std::map<std::string, Eigen::Vector3d> singleInputDataID_;
     Eigen::VectorXd singleInputData_;

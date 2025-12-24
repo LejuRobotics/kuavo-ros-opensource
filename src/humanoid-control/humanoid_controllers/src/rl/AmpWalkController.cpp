@@ -160,6 +160,10 @@ namespace humanoid_controller
     singleInputData_.setZero();
     networkInputDataRL_.resize(numSingleObs_ * frameStack_);
     networkInputDataRL_.setZero();
+    for (int i = 0; i < frameStack_; i++)
+    {
+      inputDeque_.push_back(singleInputData_);
+    }
 
     // OpenVINO 模型
     compiled_model_ = core_.compile_model(networkModelPath_, "CPU");
@@ -308,6 +312,7 @@ namespace humanoid_controller
     // === 1. 从 gait receiver 获取 CommandDataRL 并更新 phase ===
     CommandDataRL cmd = gait_receiver_->getCurrentCommand();
     
+    updatePhase(cmd);
     // 初始化 my_yaw_offset_（仅在第一次调用时，与 humanoidController_rl.cpp 一致）
     static bool yaw_offset_initialized = false;
     if (!yaw_offset_initialized)
@@ -328,6 +333,8 @@ namespace humanoid_controller
     velocity_commands << cmd.cmdVelLineX_,
                          cmd.cmdVelLineY_,
                          cmd.cmdVelAngularZ_;
+    Eigen::VectorXd tempCommand_ = cmd.getCommandRL();
+
 
     // === 2. 状态、IMU、关节等数据，与 humanoidController_rl.cpp 一致 ===
     const Eigen::Vector3d baseEuler(state_est(2), state_est(1), state_est(0));
@@ -335,6 +342,7 @@ namespace humanoid_controller
                                      state_est(6 + waistNum_ + jointNum_ + jointArmNum_ + 1),
                                      state_est(6 + waistNum_ + jointNum_ + jointArmNum_ + 2));
     const Eigen::Vector3d baseLineVel = state_est.segment(9 + waistNum_ + jointNum_ + jointArmNum_, 3);
+    const Eigen::Vector3d basePos = state_est.segment(3, 3);
 
     Eigen::VectorXd jointPos = sensor_data.jointPos_ - defalutJointPosRL_;
     Eigen::VectorXd jointVel = sensor_data.jointVel_;
@@ -359,33 +367,69 @@ namespace humanoid_controller
 
     // === 3. 填充 singleInputData / networkInputDataRL_ ===
     std::map<std::string, Eigen::VectorXd> singleInputDataMap = {
+        // old name:
         {"base_ang_vel", bodyAngVel},
         {"projected_gravity", projected_gravity},
         {"velocity_commands", velocity_commands},
         {"joint_pos", jointPos},
         {"joint_vel", jointVel},
-        {"actions", local_action}
+        {"actions", local_action},
+
+        // new name:
+        {"gravity_body", projected_gravity},
+        {"baseEuler", baseEuler},
+        {"baseAngVel", baseAngVel},
+        {"baseLineVel", baseLineVel},
+        {"basePos", basePos},
+        {"jointPos", jointPos},
+        {"jointVel", jointVel},
+        {"jointTorque", jointTorque},
+        {"bodyAngVel", bodyAngVel},
+        {"bodyLineAcc", bodyLineAcc},
+        {"bodyLineFreeAcc", bodyLineFreeAcc},
+        {"bodyLineVel", bodyLineVel},
+        {"commandPhase", commandPhase_},
+        {"command", tempCommand_},
+        {"action", local_action}
     };
 
-    int index = 0;
-    for (const auto &key : singleInputDataKeys_)
+    // Fill singleInputData（与humanoidController一致）
+    if (!singleInputDataKeys_.empty())
     {
-      const auto &value = singleInputDataID_[key];
-      for (int i=0; i<frameStack_; i++) {
-        // std::cout << "value[0] " << value[0] << "value[1]" << value[1] << "key" << key <<  std::endl; 
-        networkInputDataRL_.segment(index*frameStack_ + value[1]*i, value[1]) = singleInputDataMap.at(key).segment(value[0], value[1]) * value[2];
-      }
-      index += value[1];
-
-      if (ros_logger_)
+      // 如果配置了singleInputData，使用配置的方式填充（与humanoidController一致）
+      int index = 0;
+      for (const auto &key : singleInputDataKeys_)
       {
-        ros_logger_->publishVector("/rl_controller/InputData/" + key, singleInputDataMap.at(key).segment(value[0], value[1]) * value[2]);
-
+        const auto &value = singleInputDataID_[key];
+        singleInputData_.segment(index, value[1]) = singleInputDataMap.at(key).segment(value[0], value[1]) * value[2];
+        index += value[1];
+        if (ros_logger_)
+        {
+          ros_logger_->publishVector("/rl_controller/InputData/" + key, singleInputDataMap.at(key).segment(value[0], value[1]) * value[2]);
+        }
       }
     }
-    singleInputData_ = networkInputDataRL_;
+    else
+    {
+      ROS_ERROR_THROTTLE(1.0, "[%s] singleInputDataKeys_ is empty, cannot build observation", name_.c_str());
+      singleInputData_.setZero();
+    }
+    
+    // Clip and update inputDeque_（与humanoidController一致）
+    inputDeque_.push_back(singleInputData_);
+    inputDeque_.pop_front();
+    
+    // Update networkInputData_（与humanoidController一致）
+    for (int i = 0; i < frameStack_; ++i)
+    {
+      networkInputDataRL_.segment(i * numSingleObs_, numSingleObs_) = inputDeque_[i];
+    }
+    
+    // 发布观测数据（如果ros_logger_可用）
     if (ros_logger_)
+    {
       ros_logger_->publishVector("/rl_controller/singleInputData", singleInputData_);
+    }
   }
 
   bool AmpWalkController::inference(const Eigen::VectorXd& observation,
