@@ -64,6 +64,8 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- Kuavo Humanoid SDK Websocket 修复5代机器人获取手臂的角度错误问题
+- Kuavo Humanoid SDK 修复从pypi安装1.3.0 版本SDK无法正常运行问题
 - Kuavo Humanoid SDK 修复本地多版本安装冲突问题
 - 修复由于缺少灵巧手参数信息设置导致某些节点异常退出，无法使用手柄控制问题
 - 修复五代手臂摆动幅度过小问题
