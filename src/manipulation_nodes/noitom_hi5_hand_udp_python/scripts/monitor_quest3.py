@@ -21,13 +21,15 @@ from visualization_msgs.msg import Marker
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
 # Add the parent directory to the system path to allow relative imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../protos/')))
 
 # Import the hand_pose_pb2 module
 import protos.hand_pose_pb2 as event_pb2
 import protos.robot_info_pb2 as robot_info_pb2
+import protos.hand_wrench_srv_pb2 as hand_wrench_srv_pb2
 
 from robot_state_server import RobotStateServer
+from quest_vr_config import Quest3VrConfig, HandWrenchConfig
 
 class Quest3BoneFramePublisher:
     def __init__(self):
@@ -76,7 +78,22 @@ class Quest3BoneFramePublisher:
         self.broadcast_ips = []
         self.robot_info_sent_initial_broadcast = False
         self.robot_info_lock = threading.Lock()
+        
+        # RobotStateServer 引用，用于处理 hand wrench 请求
+        self.robot_state_server = None
+        
+        # 配置管理器
+        self.config_manager = Quest3VrConfig()
 
+    def set_robot_state_server(self, robot_state_server):
+        """设置 RobotStateServer 引用
+        
+        Args:
+            robot_state_server: RobotStateServer 实例
+        """
+        self.robot_state_server = robot_state_server
+        rospy.loginfo("RobotStateServer reference set for hand wrench processing")
+    
     def update_broadcast_ips(self, ips_list):
         """Updates the list of broadcast IPs."""
         if isinstance(ips_list, list):
@@ -234,6 +251,90 @@ class Quest3BoneFramePublisher:
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
             rospy.logerr(f"TF lookup failed for Chest->Head transform: {e}")
             return
+    
+    def process_item_mass_force_request(self, request):
+        """处理物品质量与力请求
+        
+        Args:
+            request: hand_wrench_srv_pb2.ItemMassForceRequest 请求消息
+        """
+        if not self.robot_state_server:
+            rospy.logwarn("RobotStateServer not set, cannot process item mass force request")
+            return
+        try:
+            if request.operation == hand_wrench_srv_pb2.ItemMassForceOperation.GET:
+                # GET 操作：返回所有配置
+                rospy.loginfo("Received GET item mass force request")
+                response = hand_wrench_srv_pb2.ItemMassForceResponse()
+                response.operation = hand_wrench_srv_pb2.ItemMassForceOperation.GET
+                
+                # 获取所有配置
+                success, errmsg, hand_wrench_cases = self.config_manager.get_all_hand_wrench_cases()
+                print(f"hand_wrench_cases: {hand_wrench_cases}")
+                print(f"success: {success}")
+                print(f"errmsg: {errmsg}")
+                if not success:
+                    response.status = hand_wrench_srv_pb2.ItemMassForceResponse.OperationStatus.ERROR
+                    response.description = errmsg
+                else:
+                    # 将所有配置添加到响应中
+                    for case_name, config in hand_wrench_cases.items():
+                        item_mass_force = response.item_mass_forces.add()
+                        item_mass_force.case_name = case_name
+                        item_mass_force.description = config.description
+                        item_mass_force.item_mass = config.itemMass
+                        item_mass_force.lforce_x = config.lforceX
+                        item_mass_force.lforce_y = config.lforceY
+                        item_mass_force.lforce_z = config.lforceZ
+                    
+                    response.status = hand_wrench_srv_pb2.ItemMassForceResponse.OperationStatus.SUCCESS
+                    response.description = f"Successfully retrieved {len(hand_wrench_cases)} configurations"
+                    rospy.loginfo(f"Returning {len(hand_wrench_cases)} hand wrench configurations")
+                
+                self.robot_state_server.add_item_mass_force_response(response)
+                
+            elif request.operation == hand_wrench_srv_pb2.ItemMassForceOperation.SET:
+                # SET 操作：设置物品质量与力
+                rospy.loginfo(f"Received SET item mass force request: case_name={request.data.case_name}, "
+                             f"mass={request.data.item_mass}kg, force=({request.data.lforce_x}, "
+                             f"{request.data.lforce_y}, {request.data.lforce_z})N")
+                
+                # 创建配置对象
+                hand_wrench_config = HandWrenchConfig(
+                    default=False,
+                    description=request.data.description,
+                    itemMass=request.data.item_mass,
+                    lforceX=request.data.lforce_x,
+                    lforceY=request.data.lforce_y,
+                    lforceZ=request.data.lforce_z
+                )
+                
+                # 保存配置
+                success = self.config_manager.set_hand_wrench_config(request.data.case_name, hand_wrench_config)
+                
+                # 创建响应
+                response = hand_wrench_srv_pb2.ItemMassForceResponse()
+                response.operation = hand_wrench_srv_pb2.ItemMassForceOperation.SET
+                
+                if success:
+                    response.status = hand_wrench_srv_pb2.ItemMassForceResponse.OperationStatus.SUCCESS
+                    response.description = f"Successfully set item mass force for case: {request.data.case_name}"
+                    rospy.loginfo(f"✓ Configuration saved for case: {request.data.case_name}")
+                else:
+                    response.status = hand_wrench_srv_pb2.ItemMassForceResponse.OperationStatus.ERROR
+                    response.description = f"Failed to save configuration for case: {request.data.case_name}"
+                    rospy.logerr(f"✗ Failed to save configuration for case: {request.data.case_name}")
+                
+                # 将响应添加到队列
+                self.robot_state_server.add_item_mass_force_response(response)
+                
+            else:
+                rospy.logerr(f"Unknown item mass force operation: {request.operation}")
+                
+        except Exception as e:
+            rospy.logerr(f"Error processing item mass force request: {e}")
+            import traceback
+            traceback.print_exc()
 
     def run(self):
         loop_count = 0
@@ -253,6 +354,10 @@ class Quest3BoneFramePublisher:
                 
                 # Process pose data
                 self.process_pose_data(event, pose_info_list, time_now)
+                
+                # Process hand wrench request if present
+                if event.HasField('item_mass_force_request'):
+                    self.process_item_mass_force_request(event.item_mass_force_request)
                 
                 # Publish data
                 pose_info_list.timestamp_ms = event.timestamp
@@ -488,6 +593,9 @@ if __name__ == "__main__":
     if not robot_state_server.start():
         print("\033[91mRobotStateServer 启动失败\033[0m")
         sys.exit(1)
+    
+    # 设置 robot_state_server 引用到 publisher，用于处理 hand wrench 请求
+    publisher.set_robot_state_server(robot_state_server)
     #######################################################
 
     broadcast_ips = get_local_broadcast_ips()

@@ -17,7 +17,8 @@ protoc --version  # 应该显示 libprotoc 3.6.1
 protoc --proto_path=protos --cpp_out=protos_c \
     hand_pose.proto \
     robot_info.proto \
-    robot_state.proto
+    robot_state.proto \
+    hand_wrench_srv.proto
 ```
 
 ## 一键生成脚本

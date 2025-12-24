@@ -19,6 +19,7 @@ PROTO_FILES=(
     "$PROTOS_DIR/hand_pose.proto"
     "$PROTOS_DIR/robot_info.proto"
     "$PROTOS_DIR/robot_state.proto"
+    "$PROTOS_DIR/hand_wrench_srv.proto"
 )
 
 for f in "${PROTO_FILES[@]}"; do
@@ -33,7 +34,8 @@ echo "Generating C++ files..."
 protoc --proto_path="$PROTOS_DIR" --cpp_out="$SCRIPT_DIR" \
     hand_pose.proto \
     robot_info.proto \
-    robot_state.proto
+    robot_state.proto \
+    hand_wrench_srv.proto
 
 # 修复 include 路径
 echo "Fixing include paths..."

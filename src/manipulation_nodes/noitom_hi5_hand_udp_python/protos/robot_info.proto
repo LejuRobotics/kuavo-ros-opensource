@@ -1,4 +1,5 @@
 syntax = "proto3";
+package protos;
 
 message RobotDescription {
   string robot_name = 1;
