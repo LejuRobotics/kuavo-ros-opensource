@@ -253,12 +253,15 @@ def end_frames_names()->dict:
     
     try:
         kuavo_config = json.loads(kuavo_json)
+        # 为了兼容旧版本：优先使用 end_frames_names，如果没有则使用 end_frames_name_ik
         if kuavo_config.get('end_frames_names') is not None:
             return kuavo_config.get('end_frames_names')
+        elif kuavo_config.get('end_frames_name_ik') is not None:
+            return kuavo_config.get('end_frames_name_ik')
         else:
             return default
     except Exception as e:
-        print(f"Failed to get end_frames_names from kuavo_json: {e}")
+        print(f"Failed to get end_frames_name_ik from kuavo_json: {e}")
         return default
 
 def make_robot_param()->dict:
