@@ -78,20 +78,6 @@ class RosParamWebsocket:
             SDKLogger.error(f"Failed to get legRealDof: {e}")
             return None
     
-    def waist_dof(self)->int:
-        try:
-            param_service = roslibpy.Param(self.websocket.client, 'waistRealDof')
-            param = param_service.get()
-            if param is None:
-                # If parameter not found, default to 0 (no waist joint)
-                SDKLogger.debug("waistRealDof parameter not found, defaulting to 0")
-                return 0
-            return param
-        except Exception as e:
-            # If parameter doesn't exist or error occurs, default to 0
-            SDKLogger.debug(f"Failed to get waistRealDof: {e}, defaulting to 0")
-            return 0
-    
     def end_effector_type(self)->str:
         try:
             param_service = roslibpy.Param(self.websocket.client, 'end_effector_type')
@@ -154,66 +140,20 @@ class RosParamWebsocket:
 
 
 def joint_names()->dict:
+    leg_link_names = [
+        'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
+        'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
+    ]
+    arm_link_names = [
+        'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
+        'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link', 'zarm_r5_link', 'zarm_r6_link', 'zarm_r7_link',
+    ]
+    head_link_names = [
+        'zhead_1_link', 'zhead_2_link'
+    ]
+    
     kuavo_ros_param = RosParamWebsocket()
-    
-    robot_version = kuavo_ros_param.robot_version()
-    if robot_version is None:
-        SDKLogger.error("robot_version parameter not found")
-        return None
-    
-    robot_version_major = (int(robot_version) // 10) % 10
-    
-    if robot_version_major == 1:
-        leg_link_names = [
-            'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
-            'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
-        ]
-        waist_link_names = [
-            'waist_yaw_link'
-        ]
-        arm_link_names = [
-            'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link',
-            'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link',
-        ]
-        head_link_names = [
-            'zhead_1_link', 'zhead_2_link'
-        ]
-    elif robot_version_major == 4:
-        leg_link_names = [
-            'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
-            'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
-        ]
-        waist_link_names = []
-        arm_link_names = [
-            'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
-            'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link', 'zarm_r5_link', 'zarm_r6_link', 'zarm_r7_link',
-        ]
-        head_link_names = [
-            'zhead_1_link', 'zhead_2_link'
-        ]
-    elif robot_version_major == 5:
-        leg_link_names = [
-            'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
-            'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
-        ]
-        waist_link_names = [
-            'waist_yaw_link'
-        ]
-        arm_link_names = [
-            'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
-            'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link', 'zarm_r5_link', 'zarm_r6_link', 'zarm_r7_link',
-        ]
 
-        head_link_names = [
-            'zhead_1_link', 'zhead_2_link'
-        ]
-        leg_link_names += waist_link_names
-    else:
-        leg_link_names = [
-            'knee_link', 'leg_link', 'waist_link', 'waist_yaw_link'
-        ]
-        arm_link_names = []
-        head_link_names = []
 
     robot_desc = kuavo_ros_param.humanoid_description()
     if robot_desc is None:
@@ -248,41 +188,23 @@ def joint_names()->dict:
             .split(".")[0]
         )
         or (
-            # Return None but don't warn for arm links in robots with 4-dof arms which may not exist
-            # Also don't warn for waist links in robots with version 5 which may not exist
-            None if (robot_version_major == 1 and link_name.startswith('zarm_')) or 
-                     (robot_version_major == 5 and link_name == 'waist_yaw') else
-            (SDKLogger.warn(f"Warning: {link_name} is not found or incomplete in robot_desc"), None)[1]
-        ) # Return None after printing the warning
+            SDKLogger.warn(f"Warning: {link_name} is not found or incomplete in robot_desc"),
+            None
+        )[1]  # Return None after printing the warning
     )
     leg_joint_names = [process_link_name(link_name) for link_name in leg_link_names if process_link_name(link_name) is not None]
     arm_joint_names = [process_link_name(link_name) for link_name in arm_link_names if process_link_name(link_name) is not None]
     head_joint_names = [process_link_name(link_name) for link_name in head_link_names if process_link_name(link_name) is not None]
 
-    # For robots with 4-dof arms, we allow arm_link_names to be fewer than expected
-    if robot_version_major == 1:
-        if len(leg_link_names) != len(leg_joint_names):
-            SDKLogger.warn(
-                f"leg_joint_names is not equal to leg_link_names, {len(leg_link_names)} != {len(leg_joint_names)}")
-            return None
-        if len(arm_link_names) != len(arm_joint_names):
-            SDKLogger.warn(
-                f"arm_joint_names is not equal to arm_link_names, {len(arm_link_names)}!= {len(arm_joint_names)}")
-            return None
-        if len(head_link_names) != len(head_joint_names):
-            SDKLogger.warn(
-                f"head_joint_names is not equal to head_link_names, {len(head_link_names)}!= {len(head_joint_names)}")
-            return None
-    else:
-        if len(leg_link_names) != len(leg_joint_names):
-            SDKLogger.warn(f"leg_joint_names is not equal to leg_link_names, {len(leg_link_names)} != {len(leg_joint_names)}")
-            return None
-        if len(arm_link_names)!= len(arm_joint_names):
-            SDKLogger.warn(f"arm_joint_names is not equal to arm_link_names, {len(arm_link_names)}!= {len(arm_joint_names)}")
-            return None
-        if len(head_link_names)!= len(head_joint_names):
-            SDKLogger.warn(f"head_joint_names is not equal to head_link_names, {len(head_link_names)}!= {len(head_joint_names)}")
-            return None
+    if len(leg_link_names) != len(leg_joint_names):
+        SDKLogger.warn(f"leg_joint_names is not equal to leg_link_names, {len(leg_link_names)} != {len(leg_joint_names)}")
+        return None
+    if len(arm_link_names)!= len(arm_joint_names):
+        SDKLogger.warn(f"arm_joint_names is not equal to arm_link_names, {len(arm_link_names)}!= {len(arm_joint_names)}")
+        return None
+    if len(head_link_names)!= len(head_joint_names):
+        SDKLogger.warn(f"head_joint_names is not equal to head_link_names, {len(head_link_names)}!= {len(head_joint_names)}")
+        return None
     
     return leg_joint_names + arm_joint_names + head_joint_names
 
@@ -298,15 +220,12 @@ def end_frames_names()->dict:
     
     try:
         kuavo_config = json.loads(kuavo_json)
-        # 为了兼容旧版本：优先使用 end_frames_names，如果没有则使用 end_frames_name_ik
         if kuavo_config.get('end_frames_names') is not None:
             return kuavo_config.get('end_frames_names')
-        elif kuavo_config.get('end_frames_name_ik') is not None:
-            return kuavo_config.get('end_frames_name_ik')
         else:
             return default
     except Exception as e:
-        print(f"Failed to get end_frames_name_ik from kuavo_json: {e}")
+        print(f"Failed to get end_frames_names from kuavo_json: {e}")
         return default
 
 def make_robot_param()->dict:
@@ -321,7 +240,6 @@ def make_robot_param()->dict:
         'arm_dof': kuavo_ros_param.arm_dof(),
         'head_dof': kuavo_ros_param.head_dof(),
         'leg_dof': kuavo_ros_param.leg_dof(),
-        'waist_dof': kuavo_ros_param.waist_dof(),
         'end_effector_type': kuavo_ros_param.end_effector_type(),
         'joint_names': joint_names(),
         'end_frames_names': end_frames_names(),

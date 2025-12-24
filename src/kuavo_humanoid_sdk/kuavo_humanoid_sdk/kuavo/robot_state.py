@@ -126,17 +126,25 @@ class KuavoRobotState:
                 * torque: list[float] * arm_dof(14)
                 * acceleration: list[float] * arm_dof(14)
         """
-        # Get robot parameters to determine joint indices
+        # Get arm joint states from index 12 to 25 (14 arm joints)
+        
+        # Get ROS parameters for DOF values
         robot_params = make_robot_param()
         arm_dof = robot_params.get('arm_dof')
         leg_dof = robot_params.get('leg_dof')
-        waist_dof = robot_params.get('waist_dof', 0)  # Default to 0 if not found
-        if arm_dof is None or leg_dof is None or waist_dof is None:
-            raise ValueError("Failed to get DOF values from robot parameters")
+        waist_dof = robot_params.get('waist_dof')
+        head_dof = robot_params.get('head_dof')
         
-        # Calculate arm joint start index: leg_dof + waist_dof
-        arm_start_idx = leg_dof + waist_dof
-        arm_joint_indices = range(arm_start_idx, arm_start_idx + arm_dof)
+        # Check if any DOF value is None
+        if arm_dof is None or leg_dof is None or waist_dof is None or head_dof is None:
+            raise ValueError("Failed to get DOF values from ROS parameters")
+        
+        if len(self._rs_core.joint_data.position) == (leg_dof + waist_dof + arm_dof + head_dof):
+            arm_joint_indices = range(leg_dof + waist_dof, leg_dof + waist_dof + arm_dof)
+        # elif len(self._rs_core.joint_data.position) == 20:
+        #     arm_joint_indices = range(4, 4+14)
+        else:
+            raise ValueError(f"Joint data length is not 28 or 20: {len(self._rs_core.joint_data.position)}")
 
         return KuavoJointData(
             position=[self._rs_core.joint_data.position[i] for i in arm_joint_indices],

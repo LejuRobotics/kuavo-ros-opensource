@@ -7,7 +7,6 @@ from kuavo_humanoid_sdk.interfaces.data_types import (
     KuavoImuData, KuavoJointData, KuavoOdometry, KuavoArmCtrlMode,EndEffectorState, 
     KuavoManipulationMpcControlFlow, KuavoManipulationMpcCtrlMode, KuavoManipulationMpcFrame)
 from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCoreWebsocket
-from kuavo_humanoid_sdk.kuavo.core.ros.param import make_robot_param
 
 class KuavoRobotState:
     def __init__(self, robot_type: str = "kuavo"):
@@ -125,19 +124,8 @@ class KuavoRobotState:
                 torque: list[float]   * arm_dof(14)
                 acceleration: list[float] * arm_dof(14)
         """
-        # Get robot parameters to determine joint indices
-        robot_params = make_robot_param()
-        arm_dof = robot_params.get('arm_dof')
-        leg_dof = robot_params.get('leg_dof')
-        waist_dof = robot_params.get('waist_dof', 0)  # Default to 0 if not found
-        
-        if arm_dof is None or leg_dof is None or waist_dof is None:
-            raise ValueError("Failed to get DOF values from robot parameters")
-        
-        # Calculate arm joint start index: leg_dof + waist_dof
-        arm_start_idx = leg_dof + waist_dof
-        arm_joint_indices = range(arm_start_idx, arm_start_idx + arm_dof)
-        
+        # Get arm joint states from index 12 to 25 (14 arm joints)
+        arm_joint_indices = range(12, 12+14)
         return KuavoJointData(
             position=[self._rs_core.joint_data.position[i] for i in arm_joint_indices],
             velocity=[self._rs_core.joint_data.velocity[i] for i in arm_joint_indices],
