@@ -351,7 +351,7 @@ def run_task(task_id: int, headless: bool):
     # === 无限循环，直到 Ctrl+C 结束 ===
     cycle_idx = 1
     while True:
-        seed = 42 + cycle_idx
+        seed = 123123 + cycle_idx
 
         if task_id==1 or task_id==2 or task_id==3:
 
@@ -382,7 +382,7 @@ def run_task(task_id: int, headless: bool):
 
         try:
             # 等仿真起来
-            time.sleep(2)
+            time.sleep(5)
 
             print(f"[INFO] 运行任务脚本：{task_script}")
             env = os.environ.copy()
@@ -418,14 +418,7 @@ def run_task(task_id: int, headless: bool):
                     f"第 {YELLOW}{cycle_idx}{RESET} 轮：{YELLOW}无成绩（reset 轮）{RESET} | "
                     f"当前平均分: {GREEN}{avg:.2f}{RESET} （有效 {valid_cnt} 轮）"
                 )
-
-                detail = try_read_detail_json(score_file)
-                if detail and isinstance(detail.get("components"), dict):
-                    comps = detail["components"]
-                    for k, v in comps.items():
-                        if isinstance(v, (int, float)):
-                            components_sum[k] = components_sum.get(k, 0.0) + float(v)
-
+                # 不读取/累加 detail 中的 components：reset 轮不应计入组件平均
                 write_score_json(score_json_path, task_id, scores, components_sum)
 
             else:

@@ -173,9 +173,9 @@ class SimulatorTask3():
             self.robot_state = KuavoRobotState()
 
             REGIONS = {
-                "shampoo1": {"x": (0.13, 0.35), "y": (-0.2, -0.1), "z": (0.69, 0.69)},  # 区域 A
-                "shampoo2": {"x": (0.13, 0.35), "y": (-0.35, -0.25), "z": (0.69, 0.69)},  # 区域 B
-                "shampoo3": {"x": (0.13, 0.35), "y": (-0.48, -0.40), "z": (0.69, 0.69)},  # 区域 C
+                "shampoo1": {"x": (0.13, 0.35), "y": (-0.18, -0.1), "z": (0.69, 0.69)},  # 区域 A
+                "shampoo2": {"x": (0.13, 0.35), "y": (-0.33, -0.25), "z": (0.69, 0.69)},  # 区域 B
+                "shampoo3": {"x": (0.13, 0.35), "y": (-0.46, -0.38), "z": (0.69, 0.69)},  # 区域 C
             }
 
             FRONT = [0.5, -0.5, 0.5, -0.5]  # (w, x, y, z)
@@ -342,7 +342,7 @@ class SimulatorTask3():
                 if self.comp_back_obj2_pos: components["back_obj2_pos"]=10
                 if self.comp_back_obj2_ori: components["back_obj2_ori"]=25
                 if self.comp_front_obj1_pos: components["front_obj1_pos"]=10
-                if self.comp_front_obj1_ori: components["front_obj1_pos"]=10
+                if self.comp_front_obj1_ori: components["front_obj1_ori"]=10
 
                 # 时间得分：如果累计不到，可以按需要从总分反推；这里优先用累计值
                 if self.comp_time_score and self.comp_time_score > 0:
