@@ -696,8 +696,8 @@ main() {
     check_ip
     modify_hosts_mapping
     modiyf_ros_master_uri
-    setup_controller
     setup_websocket
+    setup_controller
     enable_vnc_network_config
     cleanup_code
 
