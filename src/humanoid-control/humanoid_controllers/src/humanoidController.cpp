@@ -1657,12 +1657,21 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     // 网络推理线程
     if (rl_available_)
     {
-      inferenceThread_ = std::thread(&humanoidController::inference_thread_func, this);
-      std::cout << "inferenceThread_ is start" << std::endl;
-      if (!inferenceThread_.joinable())
+      // 如果线程已存在且仍在运行，不重新创建，让现有线程继续运行
+      if (inferenceThread_.joinable())
       {
-        ROS_ERROR_STREAM("Failed to start inference thread");
-        exit(1);
+        ROS_INFO("Inference thread already exists and is running, skipping thread creation.");
+      }
+      else
+      {
+        // 线程不存在或已结束，创建新线程
+        inferenceThread_ = std::thread(&humanoidController::inference_thread_func, this);
+        std::cout << "inferenceThread_ is start" << std::endl;
+        if (!inferenceThread_.joinable())
+        {
+          ROS_ERROR_STREAM("Failed to start inference thread");
+          exit(1);
+        }
       }
     }
   }
@@ -1804,7 +1813,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         bool bUneventForce = fabs(contactForce_[2] - contactForce_[8]) > (norSingleLegSupport * 2.0); // 左右脚支撑立差值超过重量的1/2即判断为异常/*  */
         if (bNotLanding || bUneventForce)
         {
-          if (!is_abnor_StandUp_ && (bUneventForce || (time.toSec() > robotStandUpCompleteTime_ + 0.5)))
+          if (!is_abnor_StandUp_ && (bNotLanding || bUneventForce || (time.toSec() > robotStandUpCompleteTime_ + 0.5)))
           {
             ROS_WARN("Robot standing abnormal...!!");
             if(bNotLanding)
