@@ -69,6 +69,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/robotHandPosition.h"
 #include <std_srvs/SetBool.h>
 #include <kuavo_msgs/ExecuteArmAction.h>
+#include <humanoid_plan_arm_trajectory/RobotActionState.h>
 
 // 命令执行相关头文件
 #include <cstdlib>
@@ -321,6 +322,9 @@ namespace ocs2
       );
       gait_change_sub_ = nodeHandle_.subscribe<std_msgs::String>(
       "/humanoid_mpc_gait_change", 1, &JoyControl::gaitChangeCallback, this);
+      // 订阅动作执行状态话题，用于检测是否有动作正在执行
+      robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
+      "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
 
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       re_start_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/re_start_robot", 10);
@@ -693,6 +697,12 @@ namespace ocs2
     {
       feet_pos_measured_ = Eigen::Map<const Eigen::VectorXd>(feet_msg->data.data(), feet_msg->data.size());
     }
+    void robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr &msg)
+    {
+      // state: 0=失败/未执行, 1=执行中/成功
+      // 当state为1时，表示有动作正在执行
+      robot_action_executing_ = (msg->state == 1);
+    }
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
       vector_t joystickOriginAxisFilter_ = vector_t::Zero(6);
@@ -837,10 +847,29 @@ namespace ocs2
         else
         {
            // 组合键控制腰部
-          double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
-          waist_yaw = 120.0 * waist_yaw;   // +- 120deg
-          // std::cout << "waist_yaw: " << waist_yaw << std::endl;
-          controlWaist(waist_yaw);
+          // 检查是否有动作正在执行，如果有则禁用转腰控制以避免冲突
+          bool action_executing = false;
+          
+          // 检查ROS参数标志（用于某些动作执行场景，如太极动作）
+          if (nodeHandle_.hasParam("/taiji_executing"))
+          {
+            nodeHandle_.getParam("/taiji_executing", action_executing);
+          }
+          
+          // 检查动作状态话题（用于通过/execute_arm_action服务执行的动作）
+          if (!action_executing)
+          {
+            action_executing = robot_action_executing_;
+          }
+          
+          // 只有在没有动作执行时才允许转腰控制
+          if (!action_executing)
+          {
+            double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+            waist_yaw = 120.0 * waist_yaw;   // +- 120deg
+            // std::cout << "waist_yaw: " << waist_yaw << std::endl;
+            controlWaist(waist_yaw);
+          }
         }
         old_joy_msg_ = *joy_msg;
         return;
@@ -1272,6 +1301,27 @@ namespace ocs2
 
     bool callExecuteArmAction(const std::string &action_name)
     {
+      // 检查是否有动作正在执行，如果有则不允许触发新的手臂动作
+      bool action_executing = false;
+      
+      // 检查ROS参数标志（用于某些动作执行场景，如太极动作）
+      if (nodeHandle_.hasParam("/taiji_executing"))
+      {
+        nodeHandle_.getParam("/taiji_executing", action_executing);
+      }
+      
+      // 检查动作状态话题（用于通过/execute_arm_action服务执行的动作）
+      if (!action_executing)
+      {
+        action_executing = robot_action_executing_;
+      }
+      
+      if (action_executing)
+      {
+        ROS_WARN("[JoyControl] Cannot execute arm action '%s': another action is currently executing", action_name.c_str());
+        return false;
+      }
+      
       kuavo_msgs::ExecuteArmAction srv;
       srv.request.action_name = action_name;
       const std::string service_name = "/execute_arm_action";
@@ -1428,6 +1478,10 @@ namespace ocs2
     ros::Time last_status_check_time_;
     bool real_{false};
     RobotVersion rb_version_{3, 4};
+    
+    // 动作执行状态相关
+    ros::Subscriber robot_action_state_sub_;
+    bool robot_action_executing_{false};  // 标记是否有动作正在执行
   };
 }
 

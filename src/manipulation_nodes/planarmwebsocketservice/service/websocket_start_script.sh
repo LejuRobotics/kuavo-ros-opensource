@@ -45,27 +45,34 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "SCRIPT_DIR: $SCRIPT_DIR"
 
-# 从脚本目录向上查找 kuavo-ros-control 路径
+# 从脚本目录向上查找包含 devel/setup.bash 的工作空间根目录
 current_path="$SCRIPT_DIR"
+REPO_ROOT=""
 while [[ "$current_path" != "/" ]]; do
-    if [[ "$(basename "$current_path")" == "kuavo-ros-control" ]]; then
-        echo "$current_path"
-        cd "$current_path"
+    if [[ -f "$current_path/devel/setup.bash" ]] || [[ -f "$current_path/install/setup.bash" ]]; then
+        REPO_ROOT="$current_path"
+        echo "找到工作空间根目录: $REPO_ROOT"
+        cd "$REPO_ROOT"
         break
     fi
     current_path=$(dirname "$current_path")
 done
 
-REPO_ROOT="$REPO_ROOT"
+# 检查是否找到工作空间根目录
+if [[ -z "$REPO_ROOT" ]]; then
+    echo "错误: 未找到包含 devel/setup.bash 或 install/setup.bash 的工作空间目录"
+    exit 1
+fi
+
 source /opt/ros/noetic/setup.bash --extend
 source $REPO_ROOT/devel/setup.bash
 
 # 启动 h12pro_controller_node
+echo "正在启动 h12pro_controller_node..."
 roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch &
 CONTROLLER_PID=$!
 
 # 检测 h12pro_controller_node 启动
-echo "正在启动 h12pro_controller_node..."
 sleep 3
 echo "h12pro_controller_node 已启动。"
 
