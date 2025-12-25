@@ -217,19 +217,7 @@ class KuavoRobot(RobotBase):
         Note:
             You can call :meth:`KuavoRobotState.wait_for_walk` to wait until the robot enters walk mode.
         """
-        # Limit velocity ranges
-        limited_linear_x = min(0.4, max(-0.4, linear_x))
-        limited_linear_y = min(0.2, max(-0.2, linear_y)) 
-        limited_angular_z = min(0.4, max(-0.4, angular_z))
-        
-        # Check if any velocity exceeds limits.
-        if abs(linear_x) > 0.4:
-            SDKLogger.warn(f"[Robot] linear_x velocity {linear_x} exceeds limit [-0.4, 0.4], will be limited")
-        if abs(linear_y) > 0.2:
-            SDKLogger.warn(f"[Robot] linear_y velocity {linear_y} exceeds limit [-0.2, 0.2], will be limited")
-        if abs(angular_z) > 0.4:
-            SDKLogger.warn(f"[Robot] angular_z velocity {angular_z} exceeds limit [-0.4, 0.4], will be limited")
-        return self._kuavo_core.walk(limited_linear_x, limited_linear_y, limited_angular_z)
+        return self._kuavo_core.walk(linear_x, linear_y, angular_z)
 
     def jump(self):
         """Jump the robot."""
@@ -248,25 +236,7 @@ class KuavoRobot(RobotBase):
         Note:
             Down squat and stand up should not change too fast, the maximum change should not exceed 0.2 meters.
         """
-        # Limit height range
-        MAX_HEIGHT = 0.0
-        MIN_HEIGHT = -0.35
-        MAX_PITCH = 0.4
-        MIN_PITCH = -0.4
-        
-        limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, height))
-        
-        # Check if height exceeds limits
-        if height > MAX_HEIGHT or height < MIN_HEIGHT:
-            print(f"\033[33m[Robot] height {height} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited\033[0m")
-        # Limit pitch range
-        limited_pitch = min(MAX_PITCH, max(MIN_PITCH, pitch))
-        
-        # Check if pitch exceeds limits
-        if abs(pitch) > MAX_PITCH:
-            print(f"\033[33m[Robot] pitch {pitch} exceeds limit [{MIN_PITCH}, {MAX_PITCH}], will be limited\033[0m")
-        
-        return self._kuavo_core.squat(limited_height, limited_pitch)
+        return self._kuavo_core.squat(height, pitch)
      
     def step_by_step(self, target_pose:list, dt:float=0.4, is_left_first_default:bool=True, collision_check:bool=True)->bool:
         """Control the robot's motion by step.

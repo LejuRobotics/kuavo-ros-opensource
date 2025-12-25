@@ -281,6 +281,7 @@ class AudioStreamPlayerNode:
                 chunk = self.buffer_queue.get(timeout=self.QUEUE_GET_TIMEOUT)
                 
                 with self.stream_lock:
+                    self.is_audio_playing = True
                     if self.stream is None or not self.stream.is_active():
                         rospy.logwarn("音频流未激活，尝试重启")
                         if not self.restart_audio_stream():
@@ -298,6 +299,7 @@ class AudioStreamPlayerNode:
                             raise
                         
             except queue.Empty:
+                self.is_audio_playing = False
                 if self.empty_count > self.EMPTY_COUNT_THRESHOLD:
                     rospy.logdebug("缓冲区为空，等待音频输入")
                     self.empty_count = 0

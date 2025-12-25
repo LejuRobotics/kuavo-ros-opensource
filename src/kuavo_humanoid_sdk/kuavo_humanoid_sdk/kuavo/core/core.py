@@ -125,6 +125,7 @@ class KuavoRobotCore:
                              f"{e}, please check the robot is launched, "
                              f"e.g. `roslaunch humanoid_controllers load_kuavo_real.launch`")
         self._rb_info = make_robot_param()
+        self._robot_version_major = (int(self._rb_info['robot_version']) // 10) % 10000
         success, err_msg = self._control.initialize(eef_type=self._rb_info["end_effector_type"], debug=debug)
         if not success:
             raise RuntimeError(f"[Core] initialize failed: \n{err_msg}, please check the robot is launched, "
@@ -202,22 +203,45 @@ class KuavoRobotCore:
     def walk(self, linear_x:float, linear_y:float, angular_z:float)-> bool:
         if self.state != 'walk':
             self.to_walk()
-        
-        # +-0.4, +-0.2, +-0.4 => linear_x, linear_y, angular_z
-        limited_linear_x = min(3.0, abs(linear_x)) * (1 if linear_x >= 0 else -1)
-        limited_linear_y = min(3.0, abs(linear_y)) * (1 if linear_y >= 0 else -1)
-        limited_angular_z = min(3.0, abs(angular_z)) * (1 if angular_z >= 0 else -1)
+
+        if self._robot_version_major == 1:
+            MAX_LINEAR_X = 0.3
+            MAX_LINEAR_Y = 0.2
+            MAX_ANGULAR_Z = 0.3
+        elif self._robot_version_major == 4 or self._robot_version_major == 5:
+            MAX_LINEAR_X = 0.4
+            MAX_LINEAR_Y = 0.2
+            MAX_ANGULAR_Z = 0.4
+        else:
+            SDKLogger.warn("[Core] walk failed: robot version is not supported, current version major: {self._robot_version_major}")
+            return False
+
+        limited_linear_x = min(MAX_LINEAR_X, abs(linear_x)) * (1 if linear_x >= 0 else -1)
+        limited_linear_y = min(MAX_LINEAR_Y, abs(linear_y)) * (1 if linear_y >= 0 else -1)
+        limited_angular_z = min(MAX_ANGULAR_Z, abs(angular_z)) * (1 if angular_z >= 0 else -1)
         return self._control.robot_walk(limited_linear_x, limited_linear_y, limited_angular_z)
     
     def squat(self, height:float, pitch:float)->bool:
         if self.state != 'stance':
             SDKLogger.warn(f"[Core] control torso height failed, robot is not in stance state({self.state})!")
             return False
-        
-        MIN_HEIGHT = -0.35
-        MAX_HEIGHT = 0.0
-        MIN_PITCH = -0.4
-        MAX_PITCH = 0.4
+
+        if self._robot_version_major == 1:
+            MIN_HEIGHT = -0.35
+            MAX_HEIGHT = 0.1
+            MIN_PITCH = 0
+            MAX_PITCH = 0
+            if pitch != 0:
+                SDKLogger.warn("[Core] roban2 pitch is not supported, will be set to 0")
+                pitch = 0
+        elif self._robot_version_major == 4 or self._robot_version_major == 5:
+            MIN_HEIGHT = -0.35
+            MAX_HEIGHT = 0.1
+            MIN_PITCH = 0
+            MAX_PITCH = 0.4
+        else:
+            SDKLogger.warn("[Core] control torso height failed: robot version is not supported, current version major: {self._robot_version_major}")
+            return False
         
         # Limit height range
         limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, height))
@@ -365,8 +389,14 @@ class KuavoRobotCore:
         
         # Add any parameter validation if needed
         # e.g., limit ranges for safety
+        MAX_HEIGHT = 0.1
+        MIN_HEIGHT = -0.35
+        limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, target_pose_z))
+        if target_pose_z > MAX_HEIGHT or target_pose_z < MIN_HEIGHT:
+            SDKLogger.warn(f"[Core] target_pose_z {target_pose_z:.3f} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited")
+
         self.to_command_pose()
-        return self._control.control_command_pose(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
+        return self._control.control_command_pose(target_pose_x, target_pose_y, limited_height, target_pose_yaw)
 
     def control_command_pose_world(self, target_pose_x:float, target_pose_y:float, target_pose_z:float, target_pose_yaw:float)->bool:
         """
@@ -389,8 +419,15 @@ class KuavoRobotCore:
         
         # Add any parameter validation if needed
         # e.g., limit ranges for safety
+        MAX_HEIGHT = 0.1
+        MIN_HEIGHT = -0.35
+        # Limit height range
+        limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, target_pose_z))
+        if target_pose_z > MAX_HEIGHT or target_pose_z < MIN_HEIGHT:
+            SDKLogger.warn(f"[Core] target_pose_z {target_pose_z:.3f} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited")
+
         self.to_command_pose_world()
-        return self._control.control_command_pose_world(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
+        return self._control.control_command_pose_world(target_pose_x, target_pose_y, limited_height, target_pose_yaw)
 
     def control_robot_arm_target_poses(self, times: list, joint_q: list) -> bool:
         if self.state != 'stance':
