@@ -1,5 +1,5 @@
 ---
-title: "KUAVO_4pro产品介绍"
+title: "KUAVO_4pro 旧版产品介绍"
 ---
 
 # 产品介绍
