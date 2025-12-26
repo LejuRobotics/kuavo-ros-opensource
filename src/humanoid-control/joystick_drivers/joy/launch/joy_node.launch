@@ -12,12 +12,6 @@
         <param name="deadzone" type="double" value="0.18"/>
     </node>
 
-    <node pkg="joy" type="joy_customize_config.py" name="joy_customize_config" output="screen">
-        <env name="KUAVO_ROS_CONTROL_WS_PATH" value="$(optenv KUAVO_ROS_CONTROL_WS_PATH /home/lab/kuavo-ros-opensource)" />
-        <env name="ROBOT_VERSION" value="$(optenv ROBOT_VERSION 45)" />
-        <env name="ROS_MASTER_URI" value="$(optenv ROS_MASTER_URI http://localhost:11311)" />
-        <env name="ROS_IP" value="$(optenv ROS_IP 127.0.0.1)" />
-        <env name="ROS_HOSTNAME" value="$(optenv ROS_HOSTNAME)" />
-    </node>
+    <node pkg="joy" type="joy_customize_config.py" name="joy_customize_config" output="screen" respawn="$(arg respawn)" />
 
 </launch>

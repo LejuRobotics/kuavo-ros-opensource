@@ -1,12 +1,6 @@
 #!/bin/bash
 export ROS_WS_PATH=/opt/ros/noetic
 
-# 确保环境变量被导出，以便传递给子进程
-if [ -z "$KUAVO_ROS_CONTROL_WS_PATH" ]; then
-    echo "Warning: KUAVO_ROS_CONTROL_WS_PATH is not set, using default"
-    export KUAVO_ROS_CONTROL_WS_PATH=/home/lab/kuavo-ros-opensource
-fi
-
 source $ROS_WS_PATH/setup.bash
 source $KUAVO_ROS_CONTROL_WS_PATH/devel/setup.bash
 JOY_NODE_DIR=$(rospack find joy)

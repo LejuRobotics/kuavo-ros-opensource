@@ -18,16 +18,9 @@ NODE_PID=""
 
 start_node() {
     source $HOME/.bashrc
-    # 确保环境变量被导出并传递给子进程
-    export KUAVO_ROS_CONTROL_WS_PATH=${KUAVO_ROS_CONTROL_WS_PATH:-/home/lab/kuavo-ros-opensource}
-    export ROBOT_VERSION=${ROBOT_VERSION:-45}
-    export ROS_MASTER_URI=${ROS_MASTER_URI:-http://localhost:11311}
-    export ROS_IP=${ROS_IP:-127.0.0.1}
-    export ROS_HOSTNAME=${ROS_HOSTNAME:-}
     $NODE_SCRIPT &
     NODE_PID=$!
     echo "Started joy node with PID: $NODE_PID"
-    echo "Environment: KUAVO_ROS_CONTROL_WS_PATH=$KUAVO_ROS_CONTROL_WS_PATH"
 }
 
 stop_node() {
