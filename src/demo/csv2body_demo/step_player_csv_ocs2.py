@@ -21,6 +21,37 @@ import threading  # 添加线程支持
 import subprocess
 import sys
 
+def load_dynamic_qr_service(gait_name="taiji"):
+    """加载动态QR矩阵服务调用函数
+    
+    Args:
+        gait_name (str): 步态名称，例如 "taiji", "walk", "stand" 等
+    
+    Returns:
+        bool: 是否成功加载
+    """
+    try:
+        rospy.wait_for_service('/humanoid/mpc/load_dynamic_qr', timeout=5.0)
+        service_proxy = rospy.ServiceProxy('/humanoid/mpc/load_dynamic_qr', ExecuteArmAction)
+        
+        response = service_proxy(action_name=gait_name)
+        
+        if response.success:
+            rospy.loginfo(f"✅ 成功加载动态QR矩阵，步态名称: {gait_name}, 消息: {response.message}")
+            return True
+        else:
+            rospy.logerr(f"❌ 加载动态QR矩阵失败，步态名称: {gait_name}, 消息: {response.message}")
+            return False
+    except rospy.ROSException as e:
+        rospy.logerr(f"等待动态QR矩阵加载服务超时: {e}")
+        return False
+    except rospy.ServiceException as e:
+        rospy.logerr(f"调用动态QR矩阵加载服务失败: {e}")
+        return False
+    except Exception as e:
+        rospy.logerr(f"加载动态QR矩阵时发生错误: {e}")
+        return False
+
 def change_ruiwo_motor_param(param_name):
     try:
         rospy.wait_for_service('/hardware/change_ruiwo_motor_param')
@@ -28,10 +59,10 @@ def change_ruiwo_motor_param(param_name):
         response = service_proxy(action_name=param_name)
         
         if response.success:
-            rospy.loginfo(f"成功设置 Ruiwo 电机参数: {response.message}")
+            rospy.loginfo(f"✅ 成功设置 Ruiwo 电机参数: {response.message}")
             return True
         else:
-            rospy.logerr(f"设置 Ruiwo 电机参数失败: {response.message}")
+            rospy.logerr(f"❌ 设置 Ruiwo 电机参数失败: {response.message}")
             return False
     except rospy.ServiceException as e:
         rospy.logerr(f"调用 Ruiwo 电机参数服务失败: {e}")
@@ -712,6 +743,7 @@ def main():
 
     # 等待ROS系统就绪
     rospy.sleep(1)
+    load_dynamic_qr_service("taiji")
     change_ruiwo_motor_param("taiji_kpkd")
     try:
         # 执行动作序列
@@ -726,6 +758,7 @@ def main():
         rospy.logerr(f"执行动作时出错: {str(e)}")
         # 确保清除太极执行状态标志
         rospy.set_param('/taiji_executing', False)
+    load_dynamic_qr_service("stance")
     change_ruiwo_motor_param("normal_kpkd")
 
 if __name__ == '__main__':
