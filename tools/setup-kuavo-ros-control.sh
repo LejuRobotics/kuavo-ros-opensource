@@ -220,7 +220,7 @@ setup_robot_weight() {
 # Configure drive board type
 setup_drive_board() {
     print_info "设置驱动板类型..."
-    print_info "请输入驱动板类型 (elmo/youda/youda3):"
+    print_info "请输入驱动板类型 (elmo/youda/youda3/leju):"
     read -r board_type
     
     mkdir -p ~/.config/lejuconfig
