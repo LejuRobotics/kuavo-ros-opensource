@@ -178,7 +178,7 @@ class ArmsIKNode
             ik_solve_params_.pos_constraint_tol = 9e-3;
             ik_solve_params_.pos_cost_weight = 10;
             // default constraint mode: pos soft + ori hard (01 -> 1)
-            ik_solve_params_.constraint_mode = 1;
+            ik_solve_params_.constraint_mode = 0;
             // q0 for ik
             ik_cmd_left_.joint_angles = Eigen::VectorXd::Zero(single_arm_num_);
             ik_cmd_right_.joint_angles = Eigen::VectorXd::Zero(single_arm_num_);
