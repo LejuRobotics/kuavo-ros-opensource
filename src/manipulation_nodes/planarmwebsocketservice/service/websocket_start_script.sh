@@ -112,7 +112,8 @@ else
     done
 fi
 
-
+echo "正在启动太极触发节点..."
+roslaunch taiji_trigger_node taiji_trigger.launch &
 
 # 启动 websocket 服务节点
 echo "正在启动 websocket 服务节点..."

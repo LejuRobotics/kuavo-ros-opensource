@@ -128,6 +128,7 @@ catkin build humanoid_plan_arm_trajectory
 catkin build planarmwebsocketservice
 catkin build kuavo_mapping
 catkin build voice_control_node # 编译语音控制节点
+catkin build taiji_trigger_node # 太极监听节点
 
 # 安装 sshpass，确保远程拷贝音乐文件正常工作
 sudo apt-get update
