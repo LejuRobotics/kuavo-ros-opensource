@@ -193,6 +193,7 @@ class ControlRobotArm:
         # 带有碰撞检查的轨迹发布
         self._pub_ctrl_arm_traj_arm_collision = rospy.Publisher('/arm_collision/kuavo_arm_traj', JointState, queue_size=10)
         self._pub_ctrl_arm_target_poses_arm_collision = rospy.Publisher('/arm_collision/kuavo_arm_target_poses', armTargetPoses, queue_size=10)
+        self._pub_ctrl_hand_pose_cmd_arm_collision = rospy.Publisher('/arm_collision/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
 
         # 判断当前是否发生碰撞
         self._sub_arm_collision_info = rospy.Subscriber('/arm_collision/info', armCollisionCheckInfo, self.callback_arm_collision_info, queue_size=10)
@@ -305,7 +306,10 @@ class ControlRobotArm:
                 SDKLogger.error(f"Invalid frame: {frame}")
                 return False
             msg.frame = frame.value
-            self._pub_ctrl_hand_pose_cmd.publish(msg)
+            if self.arm_collision_enable:
+                self._pub_ctrl_hand_pose_cmd_arm_collision.publish(msg)
+            else:
+                self._pub_ctrl_hand_pose_cmd.publish(msg)
             return True
         except Exception as e:
             SDKLogger.error(f"publish arm target poses: {e}")
@@ -427,7 +431,7 @@ class ControlRobotArm:
             resp = get_mode_srv(req)
             if not resp.result:
                 SDKLogger.error(f"Failed to get manipulation mpc wbc arm trajectory control mode: {resp.message}")
-                return KuavoManipulationMpcControlFlow.ERROR
+                return KuavoManipulationMpcControlFlow.Error
             return KuavoManipulationMpcControlFlow(resp.mode)
         except rospy.ServiceException as e:
             SDKLogger.error(f"Service call to {service_name} failed: {e}")
@@ -435,7 +439,7 @@ class ControlRobotArm:
             SDKLogger.error(f"Failed to connect to service {service_name}: {e}")
         except Exception as e:
             SDKLogger.error(f"Failed to get manipulation mpc wbc arm trajectory control mode: {e}")
-        return KuavoManipulationMpcControlFlow.ERROR
+        return KuavoManipulationMpcControlFlow.Error
 
 
     def srv_change_arm_ctrl_mode(self, mode: KuavoArmCtrlMode)->bool:

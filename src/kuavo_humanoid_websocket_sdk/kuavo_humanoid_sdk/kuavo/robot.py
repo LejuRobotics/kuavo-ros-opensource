@@ -519,6 +519,14 @@ class KuavoRobot(RobotBase):
         """
         return self._robot_arm.is_arm_collision()
     
+    def is_arm_collision_mode(self)->bool:
+        """Check if arm collision mode is enabled.
+        
+        Returns:
+            bool: True if collision mode is enabled, False otherwise.
+        """
+        return self._robot_arm.is_arm_collision_mode()
+    
     def wait_arm_collision_complete(self):
         """Wait for the arm collision to complete.
         """

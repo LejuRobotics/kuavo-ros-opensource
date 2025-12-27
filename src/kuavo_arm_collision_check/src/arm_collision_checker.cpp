@@ -18,6 +18,7 @@
 #include "kuavo_common/common/json_config_reader.hpp"
 #include "kuavo_msgs/changeArmCtrlMode.h"
 #include <kuavo_msgs/fkSrv.h>
+#include <kuavo_msgs/twoArmHandPoseCmd.h>
 
 #include <OpenMesh/Core/IO/MeshIO.hh>
 #include <OpenMesh/Core/Mesh/TriMesh_ArrayKernelT.hh>
@@ -122,6 +123,7 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
     arm_pose_pub_ = nh_.advertise<kuavo_msgs::armTargetPoses>("/kuavo_arm_target_poses", 1);
     arm_traj_forward_pub_ = nh_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 1);
     arm_traj_debug_pub_ = nh_.advertise<sensor_msgs::JointState>("/arm_collision/debug_kuavo_arm_traj", 1);
+    mm_two_arm_hand_pose_cmd_forward_pub_ = nh_.advertise<kuavo_msgs::twoArmHandPoseCmd>("/mm/two_arm_hand_pose_cmd", 1);
     arm_mode_sub_ = nh_.subscribe("/quest3/triger_arm_mode", 1, 
         &ArmCollisionChecker::armModeCallback, this);
 
@@ -147,6 +149,8 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
         &ArmCollisionChecker::kuavoArmTrajCallback, this);
     kuavo_arm_target_poses_sub_ = nh_.subscribe("/arm_collision/kuavo_arm_target_poses", 1, 
         &ArmCollisionChecker::kuavoArmTargetPosesCallback, this);
+    kuavo_mm_two_arm_hand_pose_cmd_sub_ = nh_.subscribe("/arm_collision/mm/two_arm_hand_pose_cmd", 1, 
+        &ArmCollisionChecker::kuavoMmTwoArmHandPoseCmdCallback, this);
     kuavo_sensors_data_sub_ = nh_.subscribe("/sensors_data_raw", 10, 
         &ArmCollisionChecker::sensorsDataCallback, this);
 
@@ -1017,6 +1021,14 @@ void ArmCollisionChecker::kuavoArmTargetPosesCallback(const kuavo_msgs::armTarge
     if(!is_collision_moving_) {
         // 转发到原有的 /kuavo_arm_target_poses 话题
         arm_pose_pub_.publish(*msg);
+    }
+}
+
+void ArmCollisionChecker::kuavoMmTwoArmHandPoseCmdCallback(const kuavo_msgs::twoArmHandPoseCmd::ConstPtr& msg) {
+    
+    if(!is_collision_moving_) {
+        // 转发到原有的 /mm/two_arm_hand_pose_cmd 话题
+        mm_two_arm_hand_pose_cmd_forward_pub_.publish(*msg);
     }
 }
 

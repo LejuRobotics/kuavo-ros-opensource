@@ -152,6 +152,7 @@ class ControlRobotArmWebsocket:
         websocket = WebSocketKuavoSDK()
         self._pub_ctrl_arm_traj_arm_collision =  roslibpy.Topic(websocket.client,'/arm_collision/kuavo_arm_traj', 'sensor_msgs/JointState')
         self._pub_ctrl_arm_target_poses_arm_collision = roslibpy.Topic(websocket.client, '/arm_collision/kuavo_arm_target_poses', 'kuavo_msgs/armTargetPoses')
+        self._pub_ctrl_hand_pose_cmd_arm_collision = roslibpy.Topic(websocket.client, '/arm_collision/mm/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
         self._sub_arm_collision_info = roslibpy.Topic(websocket.client, '/arm_collision/info', 'kuavo_msgs/armCollisionCheckInfo')
         self._sub_arm_collision_info.subscribe(self.callback_arm_collision_info)
         self._is_collision = False
@@ -163,6 +164,7 @@ class ControlRobotArmWebsocket:
         self._pub_ctrl_arm_traj.advertise()
         self._pub_ctrl_arm_target_poses.advertise()
         self._pub_ctrl_hand_pose_cmd.advertise()
+        self._pub_ctrl_hand_pose_cmd_arm_collision.advertise()
 
     def connect(self, timeout:float=1.0)-> bool:
         return True
@@ -258,7 +260,10 @@ class ControlRobotArmWebsocket:
             if frame.value not in [0, 1, 2, 3, 4]:
                 SDKLogger.error(f"Invalid frame: {frame}")
                 return False
-            self._pub_ctrl_hand_pose_cmd.publish(roslibpy.Message(msg))
+            if self.arm_collision_enable:
+                self._pub_ctrl_hand_pose_cmd_arm_collision.publish(roslibpy.Message(msg))
+            else:
+                self._pub_ctrl_hand_pose_cmd.publish(roslibpy.Message(msg))
             return True
         except Exception as e:
             SDKLogger.error(f"publish arm target poses: {e}")
@@ -345,11 +350,11 @@ class ControlRobotArmWebsocket:
             response = service.call(request)
             if not response.get('result', False):
                 SDKLogger.error(f"Failed to get manipulation mpc wbc arm trajectory control mode: {response.get('message', '')}")
-                return KuavoManipulationMpcControlFlow.ERROR
+                return KuavoManipulationMpcControlFlow.Error
             return KuavoManipulationMpcControlFlow(response.get('mode', 0))
         except Exception as e:
             SDKLogger.error(f"Service call failed: {e}")
-        return KuavoManipulationMpcControlFlow.ERROR
+        return KuavoManipulationMpcControlFlow.Error
 
     def srv_change_arm_ctrl_mode(self, mode: KuavoArmCtrlMode)->bool:
         try:

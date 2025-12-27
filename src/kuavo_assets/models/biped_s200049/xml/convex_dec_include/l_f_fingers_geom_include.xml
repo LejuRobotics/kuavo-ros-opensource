@@ -1,0 +1,25 @@
+
+<mujocoinclude>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_0" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_1" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_2" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_3" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_4" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_5" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_6" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_7" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_8" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_9" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_10" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_11" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_12" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_13" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_14" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_15" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_16" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_17" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_18" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_19" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_20" friction="0.0001 0.0001 0.00001"/>
+  <geom class="visual" type="mesh" rgba="1 1 1 1" mesh="l_f_fingers_part_21" friction="0.0001 0.0001 0.00001"/>
+</mujocoinclude>

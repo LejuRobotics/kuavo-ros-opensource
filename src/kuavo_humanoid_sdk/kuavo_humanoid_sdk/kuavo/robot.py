@@ -364,16 +364,21 @@ class KuavoRobot(RobotBase):
 
         Raises:
             ValueError: 如果关节位置列表长度不正确。
-            ValueError: 如果关节位置超出[-π, π]范围。
+            ValueError: 如果关节位置超出真实物理关节限制范围。
             RuntimeError: 如果在尝试控制手臂时机器人不在stance状态。
         """
         if len(joint_positions) != self._robot_info.arm_joint_dof:
             raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(joint_positions)))
 
-        # Check if joint positions are within ±180 degrees (±π radians)
-        for pos in joint_positions:
-            if abs(pos) > math.pi:
-                raise ValueError(f"Joint position {pos} rad exceeds ±π rad (±180 deg) limit")
+        # Check if joint positions are within the real physical joint limits
+        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
+        for i, pos in enumerate(joint_positions):
+            if pos < arm_min[i] or pos > arm_max[i]:
+                raise ValueError(
+                    f"Joint {i} position {pos:.3f} rad exceeds real physical limit "
+                    f"[{arm_min[i]:.3f}, {arm_max[i]:.3f}] rad. "
+                    f"This may cause motor stall."
+                )
 
         return self._kuavo_core.control_robot_arm_joint_positions(joint_data=joint_positions)
     
@@ -390,7 +395,7 @@ class KuavoRobot(RobotBase):
         Raises:
             ValueError: 如果times列表长度不正确。
             ValueError: 如果关节位置列表长度不正确。
-            ValueError: 如果关节位置超出[-π, π]范围。
+            ValueError: 如果关节位置超出真实物理关节限制范围。
             RuntimeError: 如果在尝试控制手臂时机器人不在stance状态。
 
         Warning:
@@ -399,13 +404,22 @@ class KuavoRobot(RobotBase):
         if len(times) != len(q_frames):
             raise ValueError("Invalid input. times and joint_q must have thesame length.")
 
-        # Check if joint positions are within ±180 degrees (±π radians)
+        # Check if joint positions are within the real physical joint limits
+        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
         q_degs = []
-        for q in q_frames:
-            if any(abs(pos) > math.pi for pos in q):
-                raise ValueError("Joint positions must be within ±π rad (±180 deg)")
+        for frame_idx, q in enumerate(q_frames):
             if len(q) != self._robot_info.arm_joint_dof:
                 raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(q)))
+            
+            # Check each joint position against its real physical limits
+            for joint_idx, pos in enumerate(q):
+                if pos < arm_min[joint_idx] or pos > arm_max[joint_idx]:
+                    raise ValueError(
+                        f"Frame {frame_idx}, Joint {joint_idx} position {pos:.3f} rad exceeds "
+                        f"real physical limit [{arm_min[joint_idx]:.3f}, {arm_max[joint_idx]:.3f}] rad. "
+                        f"This may cause motor stall."
+                    )
+            
             # Convert joint positions from radians to degrees
             q_degs.append([(p * 180.0 / math.pi) for p in q])
 
@@ -431,13 +445,22 @@ class KuavoRobot(RobotBase):
         if len(times) != len(q_frames):
             raise ValueError("Invalid input. times and joint_q must have thesame length.")
 
-        # Check if joint positions are within ±180 degrees (±π radians)
+        # Check if joint positions are within the real physical joint limits
+        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
         q_degs = []
-        for q in q_frames:
-            if any(abs(pos) > math.pi for pos in q):
-                raise ValueError("Joint positions must be within ±π rad (±180 deg)")
+        for frame_idx, q in enumerate(q_frames):
             if len(q) != self._robot_info.arm_joint_dof:
                 raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(q)))
+            
+            # Check each joint position against its real physical limits
+            for joint_idx, pos in enumerate(q):
+                if pos < arm_min[joint_idx] or pos > arm_max[joint_idx]:
+                    raise ValueError(
+                        f"Frame {frame_idx}, Joint {joint_idx} position {pos:.3f} rad exceeds "
+                        f"real physical limit [{arm_min[joint_idx]:.3f}, {arm_max[joint_idx]:.3f}] rad. "
+                        f"This may cause motor stall."
+                    )
+            
             # Convert joint positions from radians to degrees
             q_degs.append([(p * 180.0 / math.pi) for p in q])
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # coding: utf-8
 from typing import Tuple
+import math
+import xml.etree.ElementTree as ET
 from kuavo_humanoid_sdk.interfaces.robot_info import RobotInfoBase
 from kuavo_humanoid_sdk.kuavo.core.ros.param import RosParamWebsocket, make_robot_param
+from kuavo_humanoid_sdk.common.logger import SDKLogger
 
 class KuavoRobotInfo(RobotInfoBase):
     def __init__(self, robot_type: str = "kuavo"):
@@ -155,7 +158,78 @@ class KuavoRobotInfo(RobotInfoBase):
     def init_stand_height(self) -> float:
         """Return the height of the robot's center of mass.
         """
-        return self._com_height
+        return self._init_stand_height
+    
+    def get_arm_joint_limits(self) -> Tuple[list, list]:
+        """获取手臂关节的角度限制范围（基于URDF文件中的真实物理限制）。
+        
+        返回每个关节的最小值和最大值（单位：弧度）。
+        这些限制从URDF文件中解析得到，基于机器人的真实物理结构，用于防止电机堵转。
+        
+        Returns:
+            Tuple[list, list]: (arm_min, arm_max) 
+                - arm_min: 每个关节的最小角度值列表（弧度）
+                - arm_max: 每个关节的最大角度值列表（弧度）
+                
+        Note:
+            这些限制从URDF文件的 <joint><limit> 标签中解析得到，针对每个关节的真实角度范围进行了定义。
+            动态从URDF中提取所有手臂相关的link和关节，兼容不同机器人版本。
+        """
+        try:
+            # 获取URDF内容
+            robot_desc = self._ros_param.humanoid_description()
+            if robot_desc is None:
+                SDKLogger.warn("Failed to get URDF description, using default limits")
+                return self._get_default_arm_joint_limits()
+            
+            # 解析URDF XML
+            root = ET.fromstring(robot_desc)
+            
+            # 获取关节限制
+            arm_min = []
+            arm_max = []
+            
+            # 直接使用 arm_joint_names 从 URDF 中查找对应的关节
+            for joint_name in self._arm_joint_names:
+                # 直接通过关节名称查找
+                joint_elem = root.find(f".//joint[@name='{joint_name}']")
+                
+                if joint_elem is not None:
+                    limit_elem = joint_elem.find("limit")
+                    if limit_elem is not None:
+                        lower = float(limit_elem.get("lower", str(-math.pi)))
+                        upper = float(limit_elem.get("upper", str(math.pi)))
+                        arm_min.append(lower)
+                        arm_max.append(upper)
+                    else:
+                        SDKLogger.warn(f"Joint {joint_name} has no limit tag, using default [-π, π]")
+                        arm_min.append(-math.pi)
+                        arm_max.append(math.pi)
+                else:
+                    SDKLogger.warn(f"Joint {joint_name} not found in URDF, using default [-π, π]")
+                    arm_min.append(-math.pi)
+                    arm_max.append(math.pi)
+            
+            if len(arm_min) != self._arm_joint_dof or len(arm_max) != self._arm_joint_dof:
+                SDKLogger.warn(f"Failed to parse all joint limits from URDF (got {len(arm_min)}/{self._arm_joint_dof}), using default limits")
+                return self._get_default_arm_joint_limits()
+            
+            return arm_min, arm_max
+            
+        except Exception as e:
+            SDKLogger.error(f"Error parsing joint limits from URDF: {e}, using default limits")
+            return self._get_default_arm_joint_limits()
+    
+    def _get_default_arm_joint_limits(self) -> Tuple[list, list]:
+        """获取默认的手臂关节限制（当无法从URDF解析时使用）。
+        
+        Returns:
+            Tuple[list, list]: (arm_min, arm_max) 默认限制值
+        """
+        # 默认使用较大的范围作为后备方案
+        arm_min = [-math.pi] * self._arm_joint_dof
+        arm_max = [math.pi] * self._arm_joint_dof
+        return arm_min, arm_max
     
     def __str__(self) -> str:
         return f"KuavoRobotInfo(robot_type={self.robot_type}, robot_version={self.robot_version}, end_effector_type={self.end_effector_type}, joint_names={self.joint_names}, joint_dof={self.joint_dof}, arm_joint_dof={self.arm_joint_dof}, init_stand_height={self.init_stand_height})"

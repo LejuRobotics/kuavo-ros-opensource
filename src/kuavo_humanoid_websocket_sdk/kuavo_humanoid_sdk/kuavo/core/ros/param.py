@@ -234,27 +234,21 @@ def joint_names()->dict:
         </link>
     """
     root = ET.fromstring(robot_desc)
-    process_link_name = lambda link_name: (
-        (root.find(f".//link[@name='{link_name}']") is not None and
-        root.find(f".//link[@name='{link_name}']/visual") is not None and
-        root.find(f".//link[@name='{link_name}']/visual/geometry") is not None and
-        root.find(f".//link[@name='{link_name}']/visual/geometry/mesh") is not None and
-        root.find(f".//link[@name='{link_name}']/visual/geometry/mesh").get("filename") is not None)
-        and (
-            # Extract the basename (without path and extension)
-            root.find(f".//link[@name='{link_name}']/visual/geometry/mesh")
-            .get("filename")
-            .split("/")[-1]
-            .split(".")[0]
-        )
-        or (
-            # Return None but don't warn for arm links in robots with 4-dof arms which may not exist
-            # Also don't warn for waist links in robots with version 5 which may not exist
-            None if (robot_version_major == 1 and link_name.startswith('zarm_')) or 
-                     (robot_version_major == 5 and link_name == 'waist_yaw') else
-            (SDKLogger.warn(f"Warning: {link_name} is not found or incomplete in robot_desc"), None)[1]
-        ) # Return None after printing the warning
-    )
+    
+    def process_link_name(link_name):
+        """从URDF中提取与link对应的joint名称"""
+        # 查找child link等于目标link_name的joint
+        # 遍历所有joint，找到child link匹配的joint
+        for joint_elem in root.findall(".//joint"):
+            child_elem = joint_elem.find("child")
+            if child_elem is not None and child_elem.get("link") == link_name:
+                joint_name = joint_elem.get("name")
+                if joint_name:
+                    return joint_name
+        
+        # 如果找不到joint，记录警告并返回None
+        SDKLogger.warn(f"Warning: Joint for link {link_name} not found in URDF")
+        return None
     leg_joint_names = [process_link_name(link_name) for link_name in leg_link_names if process_link_name(link_name) is not None]
     arm_joint_names = [process_link_name(link_name) for link_name in arm_link_names if process_link_name(link_name) is not None]
     head_joint_names = [process_link_name(link_name) for link_name in head_link_names if process_link_name(link_name) is not None]

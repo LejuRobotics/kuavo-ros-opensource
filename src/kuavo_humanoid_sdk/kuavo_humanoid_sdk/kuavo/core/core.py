@@ -502,17 +502,17 @@ class KuavoRobotCore:
         return self._control.control_robot_arm_joint_trajectory(times, joint_q)
     
     def control_robot_end_effector_pose(self, left_pose: KuavoPose, right_pose: KuavoPose, frame: KuavoManipulationMpcFrame)->bool:        
-        # if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
-        #     SDKLogger.debug("[Core] control_robot_end_effector_pose, current arm mode != ExternalControl, change it.")
-        #     if not self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.ExternalControl):
-        #         SDKLogger.warn("[Core] control_robot_end_effector_pose failed, change robot arm ctrl mode failed!")
-        #         return False
+        if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
+            SDKLogger.debug("[Core] control_robot_end_effector_pose, current arm mode != ExternalControl, change it.")
+            if not self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.ExternalControl):
+                SDKLogger.warn("[Core] control_robot_end_effector_pose failed, change robot arm ctrl mode failed!")
+                return False
 
-        # if self._manipulation_mpc_ctrl_mode == KuavoManipulationMpcCtrlMode.NoControl:
-        #     SDKLogger.debug("[Core] control_robot_end_effector_pose, manipulation mpc ctrl mode is NoControl, change it.")
-        #     if not self.change_manipulation_mpc_ctrl_mode(KuavoManipulationMpcCtrlMode.ArmOnly):
-        #         SDKLogger.warn("[Core] control_robot_end_effector_pose failed, change manipulation mpc ctrl mode failed!")
-        #         return False
+        if self._manipulation_mpc_ctrl_mode == KuavoManipulationMpcCtrlMode.NoControl:
+            SDKLogger.debug("[Core] control_robot_end_effector_pose, manipulation mpc ctrl mode is NoControl, change it.")
+            if not self.change_manipulation_mpc_ctrl_mode(KuavoManipulationMpcCtrlMode.ArmOnly):
+                SDKLogger.warn("[Core] control_robot_end_effector_pose failed, change manipulation mpc ctrl mode failed!")
+                return False
         
         return self._control.control_robot_end_effector_pose(left_pose, right_pose, frame)
 
@@ -520,6 +520,16 @@ class KuavoRobotCore:
         return self._control.control_hand_wrench(left_wrench, right_wrench)
     
     def change_manipulation_mpc_frame(self, frame: KuavoManipulationMpcFrame)->bool:
+        # Check if service is available (if current state is ERROR, service is not available)
+        current_frame = self._rb_state.manipulation_mpc_frame
+        if current_frame == KuavoManipulationMpcFrame.ERROR:
+            SDKLogger.warn("[Core] Manipulation MPC frame service not available, updating local state only")
+            if not hasattr(self, '_manipulation_mpc_frame_lock'):
+                self._manipulation_mpc_frame_lock = threading.Lock()
+            with self._manipulation_mpc_frame_lock:
+                self._manipulation_mpc_frame = frame
+            return True
+        
         timeout = 1.0
         count = 0
         while self._rb_state.manipulation_mpc_frame != frame:
@@ -540,6 +550,16 @@ class KuavoRobotCore:
         return True
     
     def change_manipulation_mpc_ctrl_mode(self, control_mode: KuavoManipulationMpcCtrlMode)->bool:
+        # Check if service is available (if current state is ERROR, service is not available)
+        current_mode = self._rb_state.manipulation_mpc_ctrl_mode
+        if current_mode == KuavoManipulationMpcCtrlMode.ERROR:
+            SDKLogger.warn("[Core] Manipulation MPC control mode service not available, updating local state only")
+            if not hasattr(self, '_manipulation_mpc_ctrl_mode_lock'):
+                self._manipulation_mpc_ctrl_mode_lock = threading.Lock()
+            with self._manipulation_mpc_ctrl_mode_lock:
+                self._manipulation_mpc_ctrl_mode = control_mode
+            return True
+        
         timeout = 1.0
         count = 0
         while self._rb_state.manipulation_mpc_ctrl_mode != control_mode:
@@ -560,6 +580,16 @@ class KuavoRobotCore:
         return True
     
     def change_manipulation_mpc_control_flow(self, control_flow: KuavoManipulationMpcControlFlow)->bool:
+        # Check if service is available (if current state is ERROR, service is not available)
+        current_flow = self._rb_state.manipulation_mpc_control_flow
+        if current_flow == KuavoManipulationMpcControlFlow.Error:
+            SDKLogger.warn("[Core] Manipulation MPC control flow service not available, updating local state only")
+            if not hasattr(self, '_manipulation_mpc_control_flow_lock'):
+                self._manipulation_mpc_control_flow_lock = threading.Lock()
+            with self._manipulation_mpc_control_flow_lock:
+                self._manipulation_mpc_control_flow = control_flow
+            return True
+        
         timeout = 1.0
         count = 0
         while self._rb_state.manipulation_mpc_control_flow != control_flow:
@@ -585,10 +615,21 @@ class KuavoRobotCore:
             SDKLogger.warn("[Core] change_robot_arm_ctrl_mode failed, arm collision detected!")
             return False
 
+        # Wait for state update to complete, similar to change_manipulation_mpc_ctrl_mode
+        timeout = 1.0
         count = 0
         if self._rb_state.arm_control_mode != mode:
-            SDKLogger.debug(f"[Core] Change robot arm control  from {self._rb_state.arm_control_mode} to {mode}, retry: {count}")
-            self._control.change_robot_arm_ctrl_mode(mode)
+            while self._rb_state.arm_control_mode != mode:
+                SDKLogger.debug(f"[Core] Change robot arm control from {self._rb_state.arm_control_mode} to {mode}, retry: {count}")
+                self._control.change_robot_arm_ctrl_mode(mode)
+                if self._rb_state.arm_control_mode == mode:
+                    break
+                if timeout <= 0:
+                    SDKLogger.warn("[Core] Change robot arm control mode timeout!")
+                    return False
+                timeout -= 0.1
+                time.sleep(0.1)
+                count += 1
         
         if not hasattr(self, '_arm_ctrl_mode_lock'):
             self._arm_ctrl_mode_lock = threading.Lock()
@@ -611,16 +652,27 @@ class KuavoRobotCore:
         return self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.AutoSwing)
         
     def robot_manipulation_mpc_reset(self)->bool:
+        SDKLogger.info("[Core] Starting manipulation MPC reset...")
+        
         if self._manipulation_mpc_ctrl_mode != KuavoManipulationMpcCtrlMode.NoControl:
-            SDKLogger.debug("[Core] robot manipulation mpc reset, current manipulation mpc ctrl mode != NoControl, change it.")
+            SDKLogger.info("[Core] Resetting manipulation MPC control mode to NoControl...")
             if not self.change_manipulation_mpc_ctrl_mode(KuavoManipulationMpcCtrlMode.NoControl):
                 SDKLogger.warn("[Core] robot manipulation mpc reset failed, change manipulation mpc ctrl mode failed!")
                 return False
+            SDKLogger.info("[Core] Manipulation MPC control mode reset to NoControl successfully")
+        else:
+            SDKLogger.info("[Core] Manipulation MPC control mode is already NoControl")
+        
         if self._manipulation_mpc_control_flow != KuavoManipulationMpcControlFlow.ThroughFullBodyMpc:
-            SDKLogger.debug("[Core] robot manipulation mpc reset, current manipulation mpc control flow != ThroughFullBodyMpc, change it.")
+            SDKLogger.info("[Core] Resetting manipulation MPC control flow to ThroughFullBodyMpc...")
             if not self.change_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.ThroughFullBodyMpc):
                 SDKLogger.warn("[Core] robot manipulation mpc reset failed, change manipulation mpc control flow failed!")
                 return False
+            SDKLogger.info("[Core] Manipulation MPC control flow reset to ThroughFullBodyMpc successfully")
+        else:
+            SDKLogger.info("[Core] Manipulation MPC control flow is already ThroughFullBodyMpc")
+        
+        SDKLogger.info("[Core] Manipulation MPC reset completed successfully")
         return True
     """ ------------------------------------------------------------------------"""
     """ 电机参数设置 """

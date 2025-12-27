@@ -1,0 +1,25 @@
+
+<mujocoinclude>
+  <mesh name="l_f_fingers_part_0" file="../meshes/l_f_fingers_convex_dec/part_0.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_1" file="../meshes/l_f_fingers_convex_dec/part_1.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_2" file="../meshes/l_f_fingers_convex_dec/part_2.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_3" file="../meshes/l_f_fingers_convex_dec/part_3.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_4" file="../meshes/l_f_fingers_convex_dec/part_4.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_5" file="../meshes/l_f_fingers_convex_dec/part_5.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_6" file="../meshes/l_f_fingers_convex_dec/part_6.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_7" file="../meshes/l_f_fingers_convex_dec/part_7.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_8" file="../meshes/l_f_fingers_convex_dec/part_8.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_9" file="../meshes/l_f_fingers_convex_dec/part_9.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_10" file="../meshes/l_f_fingers_convex_dec/part_10.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_11" file="../meshes/l_f_fingers_convex_dec/part_11.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_12" file="../meshes/l_f_fingers_convex_dec/part_12.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_13" file="../meshes/l_f_fingers_convex_dec/part_13.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_14" file="../meshes/l_f_fingers_convex_dec/part_14.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_15" file="../meshes/l_f_fingers_convex_dec/part_15.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_16" file="../meshes/l_f_fingers_convex_dec/part_16.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_17" file="../meshes/l_f_fingers_convex_dec/part_17.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_18" file="../meshes/l_f_fingers_convex_dec/part_18.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_19" file="../meshes/l_f_fingers_convex_dec/part_19.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_20" file="../meshes/l_f_fingers_convex_dec/part_20.obj" scale="1 1 1"/>
+  <mesh name="l_f_fingers_part_21" file="../meshes/l_f_fingers_convex_dec/part_21.obj" scale="1 1 1"/>
+</mujocoinclude>
