@@ -559,19 +559,13 @@ class IkRos:
                 threashold = -3.0
                 q0_tmp[-self.__arm_dof] += 0.5 if q0_tmp[-self.__arm_dof] < threashold else 0.0
                 q0_tmp[-self.__single_arm_dof] += 0.5 if q0_tmp[-self.__single_arm_dof] < threashold else 0.0
-                if self.__arm_dof == 8: # 针对roban的调整
-                    if q0_tmp[-self.__arm_dof + 2] > 0.5:
-                        q0_tmp[-self.__arm_dof + 2] = 0.5
-                    if q0_tmp[-self.__arm_dof + 2] < -0.5:
-                        q0_tmp[-self.__arm_dof + 2] = -0.5
-                    if q0_tmp[-self.__single_arm_dof + 2] > 0.5:
-                        q0_tmp[-self.__single_arm_dof + 2] = 0.5
-                    if q0_tmp[-self.__single_arm_dof + 2] < -0.5:
-                        q0_tmp[-self.__single_arm_dof + 2] = -0.5
-                    if q0_tmp[-self.__single_arm_dof] > 0.0:
-                        q0_tmp[-self.__single_arm_dof] = 0.0
-                    if q0_tmp[0] > 0.0:
-                        q0_tmp[0] = 0.0
+                # 限制左臂和右臂的特定关节角度在 [-0.1, 0.1] 范围内
+                q0_tmp[-self.__arm_dof + 2] = limit_value(q0_tmp[-self.__arm_dof + 2], -0.1, 0.1)
+                q0_tmp[-self.__single_arm_dof + 2] = limit_value(q0_tmp[-self.__single_arm_dof + 2], -0.1, 0.1)
+                # 针对roban的调整（当arm_dof为8时）
+                if self.__arm_dof == 8:
+                    q0_tmp[-self.__single_arm_dof] = limit_value(q0_tmp[-self.__single_arm_dof], -float('inf'), 0.0)
+                    q0_tmp[0] = limit_value(q0_tmp[0], -float('inf'), 0.0)
 
                 # 限制肘部位置，避免动作幅度过大导致肩膀翻转
                 if self.__arm_dof == 8:
