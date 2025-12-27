@@ -316,9 +316,9 @@ class KuavoRobotCore:
                 target_pose[2] = MAX_COM_HEIGHT - com_height
         
         if com_height > (self._rb_info['init_stand_height']-0.03):
-            max_x_step = 0.20
-            max_y_step = 0.20
-            max_yaw_step = 90
+            max_x_step = 0.17
+            max_y_step = 0.17
+            max_yaw_step = 60
         else:
             max_x_step = 0.15
             max_y_step = 0.15
