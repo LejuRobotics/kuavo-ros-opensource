@@ -7,10 +7,12 @@ from kuavo_humanoid_sdk.interfaces.data_types import (KuavoArmCtrlMode, KuavoIKP
                                                       ,KuavoManipulationMpcFrame, KuavoMotorParam)
 from kuavo_humanoid_sdk.kuavo.core.ros.sat_utils import RotatingRectangle
 from kuavo_humanoid_sdk.kuavo.core.ros.param import EndEffectorType
+from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCore
 
 import rospy
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState, Joy
+from kuavo_msgs.msg import mpc_target_trajectories, mpc_state, mpc_input
 from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import (gestureTask,robotHandPosition, robotHeadMotionData, armTargetPoses, switchGaitByName,
                                 footPose, footPoseTargetTrajectories, dexhandCommand, motorParam,twoArmHandPoseCmdFree)
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import (gestureExecute, gestureExecuteRequest,gestureList, gestureListRequest,
@@ -740,6 +742,7 @@ class ControlRobotMotion:
         self._pub_joy = rospy.Publisher('/joy', Joy, queue_size=10)
         self._pub_switch_gait = rospy.Publisher('/humanoid_switch_gait_by_name', switchGaitByName, queue_size=10)
         self._pub_step_ctrl = rospy.Publisher('/humanoid_mpc_foot_pose_target_trajectories', footPoseTargetTrajectories, queue_size=10)
+        self._pub_mpc_target_pose = rospy.Publisher('/humanoid_mpc_target_pose', mpc_target_trajectories, queue_size=10)
 
     def connect(self, timeout:float=3.0)-> bool:
         start_time = rospy.Time.now()
@@ -844,6 +847,104 @@ class ControlRobotMotion:
             return True
         except Exception as e:
             SDKLogger.error(f"[Error] publish step ctrl: {e}")
+            return False
+    
+    def pub_mpc_target_pose(self, target_pose: list, initial_pose: list = None, time_horizon: float = 2.0)->bool:
+        """
+        发布6DOF躯干姿态目标轨迹到MPC
+        
+        参数:
+            target_pose: 6DOF目标姿态 [x, y, z, yaw, pitch, roll]
+            initial_pose: 6DOF初始姿态 [x, y, z, yaw, pitch, roll]，如果为None则从当前observation获取
+            time_horizon: 目标时间（相对于当前MPC时间），单位秒
+        返回:
+            bool: 发布成功返回True，否则返回False
+        
+        注意:
+            - 如果initial_pose为None，必须能够从MPC observation中获取当前状态，否则返回False
+            - 必须能够获取MPC observation中的时间，否则返回False
+            - 时间使用MPC observation中的时间，而不是系统时间
+        """
+        try:
+            if len(target_pose) != 6:
+                SDKLogger.error(f"[Error] target_pose must have 6 elements, got {len(target_pose)}")
+                return False
+            
+            # 获取MPC observation数据（用于获取当前时间和状态）
+            state_core = KuavoRobotStateCore()
+            current_time = None
+            current_state = None
+            
+            # 检查是否能够获取MPC observation数据
+            if not hasattr(state_core, '_mpc_observation_data') or state_core._mpc_observation_data is None:
+                SDKLogger.error("[Error] Cannot get MPC observation data. Please ensure the MPC controller is running and publishing observation data.")
+                return False
+            
+            obs = state_core._mpc_observation_data
+            
+            # 获取MPC时间
+            if not hasattr(obs, 'time'):
+                SDKLogger.error("[Error] MPC observation data does not have 'time' field.")
+                return False
+            current_time = obs.time
+            
+            # 如果需要从observation获取初始状态
+            if initial_pose is None:
+                # 检查observation中是否有state数据
+                if not hasattr(obs, 'state') or not hasattr(obs.state, 'value'):
+                    SDKLogger.error("[Error] MPC observation data does not have 'state.value' field.")
+                    return False
+                
+                # MPC状态向量索引说明：
+                # 0-5: 质心动量 (vcom_x, vcom_y, vcom_z, L_x/m, L_y/m, L_z/m)
+                # 6-11: 躯干姿态 (p_base_x, p_base_y, p_base_z, theta_base_z/yaw, theta_base_y/pitch, theta_base_x/roll)
+                if len(obs.state.value) < 12:
+                    SDKLogger.error(f"[Error] MPC observation state value length ({len(obs.state.value)}) is less than 12. Cannot extract current pose.")
+                    return False
+                
+                # 从observation的state中提取索引6-11的元素作为当前姿态 [x, y, z, yaw, pitch, roll]
+                current_state = [
+                    obs.state.value[6],   # p_base_x
+                    obs.state.value[7],   # p_base_y
+                    obs.state.value[8],   # p_base_z
+                    obs.state.value[9],   # theta_base_z (yaw)
+                    obs.state.value[10],  # theta_base_y (pitch)
+                    obs.state.value[11]   # theta_base_x (roll)
+                ]
+                initial_pose = current_state
+            elif len(initial_pose) != 6:
+                SDKLogger.error(f"[Error] initial_pose must have 6 elements, got {len(initial_pose)}")
+                return False
+            
+            # 验证时间是否有效
+            if current_time is None or current_time <= 0:
+                SDKLogger.error(f"[Error] Invalid MPC time: {current_time}. Cannot publish trajectory.")
+                return False
+            
+            # 创建mpc_target_trajectories消息
+            msg = mpc_target_trajectories()
+            
+            # 设置时间轨迹（当前时间和目标时间）
+            msg.timeTrajectory = [current_time, current_time + time_horizon]
+            
+            # 设置状态轨迹（6DOF姿态）
+            initial_state = mpc_state()
+            initial_state.value = [float(x) for x in initial_pose]
+            
+            target_state = mpc_state()
+            target_state.value = [float(x) for x in target_pose]
+            
+            msg.stateTrajectory = [initial_state, target_state]
+            
+            # 设置输入轨迹（通常为空或零）
+            zero_input = mpc_input()
+            zero_input.value = []
+            msg.inputTrajectory = [zero_input, zero_input]
+
+            self._pub_mpc_target_pose.publish(msg)
+            return True
+        except Exception as e:
+            SDKLogger.error(f"[Error] publish mpc target pose: {e}")
             return False
 class KuavoRobotArmIKFK:
     def __init__(self):
@@ -1300,10 +1401,46 @@ class KuavoRobotControl:
         return self.kuavo_motion_control.pub_cmd_vel(linear_x, linear_y, angular_z)
     
     def control_torso_height(self, height:float, pitch:float=0.0)->bool:
-        com_msg = Twist()
-        com_msg.linear.z = height
-        com_msg.angular.y = pitch
-        return self.kuavo_motion_control.pub_cmd_pose(com_msg)
+        """
+        控制躯干高度和俯仰角（使用MPC目标轨迹接口）
+        参数:
+            height: 相对于当前高度的变化量（米），负值表示下蹲，正值表示上升
+            pitch: 相对于当前俯仰角的变化量（弧度），默认0.0
+        返回:
+            bool: 控制成功返回True，否则返回False
+        """
+        # 获取当前状态
+        state_core = KuavoRobotStateCore()
+        if not hasattr(state_core, '_mpc_observation_data') or state_core._mpc_observation_data is None:
+            SDKLogger.error("[Error] Cannot get MPC observation data for control_torso_height")
+            return False
+        
+        obs = state_core._mpc_observation_data
+        if not hasattr(obs, 'state') or not hasattr(obs.state, 'value') or len(obs.state.value) < 12:
+            SDKLogger.error("[Error] Cannot get current state from observation for control_torso_height")
+            return False
+        
+        # 从observation获取当前姿态 [x, y, z, yaw, pitch, roll]
+        current_pose = [
+            obs.state.value[6],   # p_base_x
+            obs.state.value[7],   # p_base_y
+            obs.state.value[8],   # p_base_z
+            obs.state.value[9],   # theta_base_z (yaw)
+            obs.state.value[10],  # theta_base_y (pitch)
+            obs.state.value[11]   # theta_base_x (roll)
+        ]
+        
+        # 计算目标姿态：当前姿态 + 变化量
+        target_pose = [
+            current_pose[0],           # x: 保持不变
+            current_pose[1],           # y: 保持不变
+            height,  # z: 目标高度
+            current_pose[3],           # yaw: 保持不变
+            pitch,   # pitch: 目标俯仰角
+            current_pose[5]            # roll: 保持不变
+        ]
+        
+        return self.kuavo_motion_control.pub_mpc_target_pose(target_pose, initial_pose=current_pose, time_horizon=3.0)
 
     def control_command_pose_world(self, target_pose_x:float, target_pose_y:float, target_pose_z:float, target_pose_yaw:float)->bool:
         """

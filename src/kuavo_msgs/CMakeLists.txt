@@ -137,6 +137,9 @@ add_message_files(
   FaceBoundingBox.msg
   AudioPlaybackStatus.msg
 
+  mpc_target_trajectories.msg
+  mpc_state.msg
+  mpc_input.msg
 )
 
 ## Generate services in the 'srv' folder

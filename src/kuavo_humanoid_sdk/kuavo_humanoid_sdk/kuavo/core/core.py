@@ -258,8 +258,10 @@ class KuavoRobotCore:
         # 躯干上升运动变化不宜过大, 目标高度减去实时躯干高度大于阈值
         HEIGHT_CHANGE_THRESHOLD = 0.25
         if (self._rb_state.com_height < target_height) and (target_height - self._rb_state.com_height) >= HEIGHT_CHANGE_THRESHOLD:
-            limited_height = (self._rb_state.com_height + HEIGHT_CHANGE_THRESHOLD) - self._rb_info['init_stand_height']
+            limited_height = (self._rb_state.com_height + HEIGHT_CHANGE_THRESHOLD)
             print(f"\033[33mWarning! Height change too large, limiting to safe range,reset height to {limited_height}\033[0m")
+        else:
+            limited_height = target_height
 
         return self._control.control_torso_height(limited_height, limited_pitch)
 

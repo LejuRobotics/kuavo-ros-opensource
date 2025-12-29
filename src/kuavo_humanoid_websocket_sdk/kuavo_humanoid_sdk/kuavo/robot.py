@@ -226,9 +226,9 @@ class KuavoRobot(RobotBase):
     def squat(self, height: float, pitch: float=0.0)->bool:
         """Control the robot's squat height and pitch.
         Args:
-                height (float): The height offset from normal standing height in meters, range [-0.35, 0.0],Negative values indicate squatting down.
+                height (float): The height offset from normal standing height in meters, range [-0.35, 0.1],Negative values indicate squatting down.
                                 Normal standing height reference: :attr:KuavoRobotInfo.init_stand_height
-                pitch (float): The pitch angle of the robot's torso in radians, range [-0.4, 0.4].
+                pitch (float): The pitch angle of the robot's torso in radians, range [0.0, 0.4].
             
         Returns:
             bool: True if the squat is controlled successfully, False otherwise.

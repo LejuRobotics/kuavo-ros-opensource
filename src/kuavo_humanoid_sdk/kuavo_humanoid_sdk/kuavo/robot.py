@@ -151,9 +151,9 @@ class KuavoRobot(RobotBase):
         """控制机器人的蹲姿高度和俯仰角。
 
         Args:
-            height (float): 相对于正常站立高度的高度偏移量,单位米,范围[-0.35, 0.0],负值表示下蹲。
+            height (float): 相对于正常站立高度的高度偏移量,单位米,范围[-0.35, 0.1],负值表示下蹲。
                             正常站立高度参考 :attr:`KuavoRobotInfo.init_stand_height`
-            pitch (float): 机器人躯干的俯仰角,单位弧度,范围[-0.4, 0.4]。
+            pitch (float): 机器人躯干的俯仰角,单位弧度,范围[0, 0.4]。
             
         Returns:
             bool: 如果蹲姿控制成功返回True,否则返回False。
