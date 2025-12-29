@@ -8,14 +8,27 @@ import signal
 import json
 from queue import Queue
 from dataclasses import dataclass
+import tf
+import geometry_msgs.msg
 
 # 全局变量存储地图信息，用于坐标系转换
 global_map_info = None
 
+# 全局 TF Listener（复用以提高效率）
+tf_listener = None
+
 # 地图推送状态缓存
 last_status_check_time = 0
 should_push_map_cache = True
-STATUS_CHECK_INTERVAL = 2.0  # 2秒检查一次状态
+STATUS_CHECK_INTERVAL = 2.0  # 2秒检查一次
+
+
+def get_tf_listener():
+    """获取全局 TF Listener"""
+    global tf_listener
+    if tf_listener is None:
+        tf_listener = tf.TransformListener()
+    return tf_listener
 
 
 def odometry_to_png(odom_x, odom_y, map_info=None):
@@ -51,14 +64,28 @@ def odometry_to_png(odom_x, odom_y, map_info=None):
             print("错误: 地图参数无效")
             return None, None
 
-        # 转换公式：需要先从odom转换到map，再转换到png
-        # 这里假设odom和map坐标系重合（实际情况可能需要TF变换）
-        # 如果odom和map不重合，需要先进行TF转换
+        # 使用 TF 将 odom 坐标转换到 map 坐标系
+        try:
+            listener = get_tf_listener()
+            listener.waitForTransform("map", "odom", rospy.Time(0), rospy.Duration(1.0))
 
-        # Odometry -> Map坐标系（假设odom原点在(0,0)）
-        # 如果odom和map有偏移，需要加上偏移量
-        map_x = odom_x  # 简化处理，实际可能需要TF变换
-        map_y = odom_y
+            # 转换到 map 坐标系
+            odom_point_stamped = geometry_msgs.msg.PointStamped()
+            odom_point_stamped.header.stamp = rospy.Time(0)
+            odom_point_stamped.header.frame_id = "odom"
+            odom_point_stamped.point.x = odom_x
+            odom_point_stamped.point.y = odom_y
+            odom_point_stamped.point.z = 0.0
+
+            map_point = listener.transformPoint("map", odom_point_stamped)
+            map_x = map_point.point.x
+            map_y = map_point.point.y
+
+        except Exception as tf_error:
+            # TF 转换失败时，回退到直接使用 odom 坐标
+            print(f"TF 转换失败，使用 odom 坐标: {tf_error}")
+            map_x = odom_x
+            map_y = odom_y
 
         # Map坐标系 -> PNG坐标系
         # PNG_X = (Map_X - Origin_X) / Resolution
@@ -67,8 +94,8 @@ def odometry_to_png(odom_x, odom_y, map_info=None):
         png_y = height - (map_y - origin_y) / resolution
 
         # 调试信息：显示转换前后的坐标
-        print(f"坐标转换调试: Odom({odom_x:.3f}, {odom_y:.3f}) -> Map({map_x:.3f}, {map_y:.3f}) -> PNG({png_x:.1f}, {png_y:.1f})")
-        print(f"地图参数: resolution={resolution}, origin=({origin_x:.3f}, {origin_y:.3f}), size={width}x{height}")
+        #print(f"坐标转换调试: Odom({odom_x:.3f}, {odom_y:.3f}) -> Map({map_x:.3f}, {map_y:.3f}) -> PNG({png_x:.1f}, {png_y:.1f})")
+        #print(f"地图参数: resolution={resolution}, origin=({origin_x:.3f}, {origin_y:.3f}), size={width}x{height}")
 
         # 检查原始PNG坐标是否超出边界
         original_png_x = png_x
@@ -80,7 +107,7 @@ def odometry_to_png(odom_x, odom_y, map_info=None):
 
         # 如果坐标被边界检查调整了，输出警告
         if (abs(png_x - original_png_x) > 0.1 or abs(png_y - original_png_y) > 0.1):
-            print(f"警告: 坐标超出地图范围，已调整: 原始PNG({original_png_x:.1f}, {original_png_y:.1f}) -> 调整后PNG({png_x:.1f}, {png_y:.1f})")
+            #print(f"警告: 坐标超出地图范围，已调整: 原始PNG({original_png_x:.1f}, {original_png_y:.1f}) -> 调整后PNG({png_x:.1f}, {png_y:.1f})")
 
         return round(png_x, 2), round(png_y, 2)
 
@@ -89,9 +116,11 @@ def odometry_to_png(odom_x, odom_y, map_info=None):
         return None, None
 
 
-def png_to_odometry(png_x, png_y, map_info=None):
+def png_to_map(png_x, png_y, map_info=None):
     """
-    PNG坐标系转Odometry坐标系
+    PNG坐标系转Map坐标系（不使用TF，直接转换）
+
+    用于任务点保存：任务点应存储在map坐标系中，而不是odom坐标系
 
     Args:
         png_x: PNG坐标系X坐标（像素）
@@ -99,7 +128,7 @@ def png_to_odometry(png_x, png_y, map_info=None):
         map_info: 地图信息字典，包含resolution, origin, width, height
 
     Returns:
-        tuple: (odom_x, odom_y) Odometry坐标系坐标（米）
+        tuple: (map_x, map_y) Map坐标系坐标（米）
     """
     global global_map_info
 
@@ -128,17 +157,136 @@ def png_to_odometry(png_x, png_y, map_info=None):
         map_x = origin_x + png_x * resolution
         map_y = origin_y + (height - png_y) * resolution
 
-        # Map坐标系 -> Odometry坐标系
-        # 这里假设odom和map坐标系重合
-        # 实际情况可能需要反向TF变换
-        odom_x = map_x  # 简化处理，实际可能需要TF变换
-        odom_y = map_y
+        #print(f"坐标转换: PNG({png_x:.1f}, {png_y:.1f}) -> Map({map_x:.3f}, {map_y:.3f})")
 
-        return odom_x, odom_y
+        return map_x, map_y
 
     except Exception as e:
-        print(f"PNG转Odometry坐标失败: {e}")
+        print(f"PNG转Map坐标失败: {e}")
         return None, None
+
+
+def map_to_png(map_x, map_y, map_info=None):
+    """
+    Map坐标系转PNG坐标系（不使用TF，直接转换）
+
+    用于任务点读取：任务点存储在map坐标系中，需要转换为PNG坐标用于前端显示
+
+    Args:
+        map_x: Map坐标系X坐标（米）
+        map_y: Map坐标系Y坐标（米）
+        map_info: 地图信息字典，包含resolution, origin, width, height
+
+    Returns:
+        tuple: (png_x, png_y) PNG坐标系坐标（像素）
+    """
+    global global_map_info
+
+    if map_info is None:
+        map_info = global_map_info
+
+    if not map_info:
+        print("警告: 地图信息不可用，无法进行坐标转换")
+        return None, None
+
+    try:
+        # 获取地图参数
+        resolution = map_info.get("resolution", 0.05)  # 米/像素
+        origin_x = map_info.get("origin", {}).get("x", 0.0)  # 地图原点X（米）
+        origin_y = map_info.get("origin", {}).get("y", 0.0)  # 地图原点Y（米）
+        width = map_info.get("width", 0)  # 图片宽度（像素）
+        height = map_info.get("height", 0)  # 图片高度（像素）
+
+        if resolution <= 0 or width <= 0 or height <= 0:
+            print("错误: 地图参数无效")
+            return None, None
+
+        # Map坐标系 -> PNG坐标系
+        # PNG_X = (Map_X - Origin_X) / Resolution
+        # PNG_Y = Height - (Map_Y - Origin_Y) / Resolution
+        png_x = (map_x - origin_x) / resolution
+        png_y = height - (map_y - origin_y) / resolution
+
+        # 确保坐标在图片范围内
+        png_x = max(0, min(width - 1, png_x))
+        png_y = max(0, min(height - 1, png_y))
+
+        #print(f"坐标转换: Map({map_x:.3f}, {map_y:.3f}) -> PNG({png_x:.1f}, {png_y:.1f})")
+
+        return round(png_x, 2), round(png_y, 2)
+
+    except Exception as e:
+        print(f"Map转PNG坐标失败: {e}")
+        return None, None
+
+
+def get_mapping_status():
+    """获取建图状态服务"""
+    try:
+        # 使用 rosservice 命令调用服务
+        service_name = '/get_mapping_status'
+
+        # 调用 rosservice 命令
+        cmd = f"rosservice call {service_name}"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=2)
+
+        if result.returncode == 0:
+            output = result.stdout.strip()
+
+            # 提取 message 字段的值
+            import re
+            import json
+
+            # 匹配 message: "..." （使用贪婪匹配和 DOTALL 标志）
+            match = re.search(r'message:\s*"(.*)"', output, re.DOTALL)
+            if match:
+                message_str = match.group(1)
+                # 处理YAML行续行符：删除反斜杠和后面的换行符
+                message_str = re.sub(r'\\\s*\n\s*', '', message_str)
+                # 处理转义字符
+                message_str = message_str.replace('\\"', '"')
+                data = json.loads(message_str)
+
+                # 创建一个简单对象来存储结果
+                class MappingStatus:
+                    def __init__(self, is_mapping, current_map_name, active_processes):
+                        self.is_mapping = is_mapping
+                        self.current_map_name = current_map_name
+                        self.active_processes = active_processes
+                return MappingStatus(
+                    data.get('is_mapping', False),
+                    data.get('current_map_name', ''),
+                    data.get('active_processes', 0)
+                )
+            else:
+                print(f"Failed to parse message from output: {output}")
+        return None
+    except Exception as e:
+        print(f"获取建图状态失败: {e}")
+        return None
+
+
+def get_load_map_status():
+    """获取当前加载地图状态服务"""
+    try:
+        from kuavo_mapping.srv import GetCurrentMap, GetCurrentMapRequest
+
+        service_name = '/get_current_map'
+        rospy.wait_for_service(service_name, timeout=0.5)
+        proxy = rospy.ServiceProxy(service_name, GetCurrentMap)
+
+        response = proxy()
+
+        # 创建一个简单对象来存储结果
+        # current_map 为空字符串说明没有加载地图，转换为 None
+        map_name = response.current_map if response.current_map else None
+        class LoadMapStatus:
+            def __init__(self, map_name):
+                self.map_name = map_name
+        return LoadMapStatus(map_name)
+    except Exception as e:
+        print(f"获取地图加载状态失败: {e}")
+        return None
 
 
 def should_push_map():
@@ -1793,7 +1941,10 @@ async def check_music_path_handler(
             payload.data["msg"] = "Body NUC"
         else:
             # 下位机没有音频设备，需要将音频文件拷贝到上位机
-            result = upload_music_file(music_filename)
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            import asyncio
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, upload_music_file, music_filename)
             if result.returncode == 0:
                 payload.data["code"] = 0
                 payload.data["msg"] = "Head NUC"
@@ -1835,7 +1986,10 @@ async def update_h12_config_handler(
             payload.data["code"] = 0
             payload.data["msg"] = "Body NUC"
         else:
-            result = upload_music_file("")
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            import asyncio
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, upload_music_file, "")
             if result.returncode == 0:
                 payload.data["code"] = 0
                 payload.data["msg"] = "Head NUC"
@@ -1896,7 +2050,10 @@ async def update_data_pilot_handler(
     )
 
     try:
-        result = download_data_pilot_to_head()
+        # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, download_data_pilot_to_head)
         if result.returncode == 0:
             payload.data["code"] = 0
             payload.data["msg"] = "Success"
@@ -2059,17 +2216,21 @@ async def load_map_handler(
     map_name = data["map_name"]
     try:
         service_name = '/load_map'
-        rospy.wait_for_service(service_name,timeout=3.0)
+        # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+        loop = asyncio.get_event_loop()
+
+        # 等待服务
+        await loop.run_in_executor(None, rospy.wait_for_service, service_name, 3.0)
         load_map_client = rospy.ServiceProxy(service_name, LoadMap)
 
         # request
         req = LoadMapRequest()
         req.map_name = map_name
-        
-        # response  
-        res = load_map_client(req)
+
+        # response - 在后台线程执行服务调用
+        res = await loop.run_in_executor(None, load_map_client, req)
         if res.success:
-            if  download_map_file(map_name):
+            if await download_map_file(map_name):
                 payload.data["code"] = 0
                 payload.data["msg"] = "Map loaded successfully"
                 payload.data["map_path"] = MAP_FILE_FOLDER +"/"+ map_name+".png"
@@ -2110,8 +2271,12 @@ async def init_localization_by_pose_handler(
     
     try:
         service_name = 'set_initialpose'
-        rospy.wait_for_service(service_name,timeout=3.0)
-        init_localization_by_pose_client = rospy.ServiceProxy(service_name, SetInitialPose) 
+        # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+        loop = asyncio.get_event_loop()
+
+        # 等待服务
+        await loop.run_in_executor(None, rospy.wait_for_service, service_name, 3.0)
+        init_localization_by_pose_client = rospy.ServiceProxy(service_name, SetInitialPose)
 
         # 将 roll pitch yaw 转换为四元数
         orientation = tf.transformations.quaternion_from_euler(yaw, pitch, roll)
@@ -2127,9 +2292,9 @@ async def init_localization_by_pose_handler(
         req.initial_pose.pose.pose.orientation.y = orientation[1]
         req.initial_pose.pose.pose.orientation.z = orientation[2]
         req.initial_pose.pose.pose.orientation.w = orientation[3]
-        
-        # response
-        res = init_localization_by_pose_client(req)
+
+        # response - 在后台线程执行服务调用
+        res = await loop.run_in_executor(None, init_localization_by_pose_client, req)
         if res.success:
             payload.data["code"] = 0
             payload.data["msg"] = "Localization initialized successfully"
@@ -2148,16 +2313,17 @@ async def init_localization_by_pose_handler(
     )
     response_queue.put(response)
 
-def download_map_file(map_name: str = ""):
-    # 将地图文件下载到本地指定路径
-    # 订阅一次/map话题，将得到的map数据保存为png格式
-
+async def download_map_file(map_name: str = ""):
     """
-    订阅一次/map话题，将地图数据保存为png格式图片
+    异步订阅/map话题，将地图数据保存为png格式图片
+    使用 asyncio.run_in_executor 避免阻塞 WebSocket 事件循环
     """
     global MAP_FILE_FOLDER
     try:
-        msg = rospy.wait_for_message('/map', OccupancyGrid)
+        # 在后台线程执行 rospy.wait_for_message，避免阻塞事件循环
+        loop = asyncio.get_event_loop()
+        msg = await loop.run_in_executor(None, rospy.wait_for_message, '/map', OccupancyGrid)
+
         width = msg.info.width
         height = msg.info.height
         data = np.array(msg.data, dtype=np.int8).reshape((height, width))
@@ -2642,7 +2808,9 @@ async def check_lidar_handler(
         print("=== DEBUG: 开始检查雷达话题 /livox/cloud ===")
 
         # 检查/livox/cloud话题是否存在
-        topics = rospy.get_published_topics()  # 修复：不使用参数，获取所有话题
+        # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+        loop = asyncio.get_event_loop()
+        topics = await loop.run_in_executor(None, rospy.get_published_topics)
 
         lidar_topic_exists = any('/livox/cloud' == topic for topic, _ in topics)
         print(f"DEBUG: lidar_topic_exists = {lidar_topic_exists}")
@@ -2657,7 +2825,9 @@ async def check_lidar_handler(
             # 尝试等待一次消息来确认是否有数据
             try:
                 print("DEBUG: 调用 rospy.wait_for_message('/livox/cloud', PointCloud2, timeout=2.0)")
-                msg = rospy.wait_for_message('/livox/cloud', PointCloud2, timeout=2.0)
+                # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+                loop = asyncio.get_event_loop()
+                msg = await loop.run_in_executor(None, rospy.wait_for_message, '/livox/cloud', PointCloud2, 2.0)
                 payload.data["lidar_active"] = True
                 payload.data["message"] = "Lidar is active and receiving data"
                 print(f"DEBUG: 雷达检查成功: 收到 {len(msg.data)} 字节数据")
@@ -2713,8 +2883,14 @@ async def create_map_handler(
             rospy.wait_for_service(service_name, timeout=5.0)
 
             # 使用rosservice命令调用建图启动服务
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            import asyncio
+            loop = asyncio.get_event_loop()
+
             cmd = f"rosservice call {service_name} '{{map_name: \"{map_name}\", lidar_type: \"livox\"}}'"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            # 使用 lambda 包装以正确传递关键字参数
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30))
 
             if result.returncode == 0:
                 payload.data["message"] = f"建图启动成功: {map_name}"
@@ -2849,7 +3025,7 @@ async def stop_mapping_handler(
         print("Stopping mapping...")
 
         # 调用上位机停止建图服务
-        import subprocess
+        import asyncio
         try:
             # 调用上位机的停止建图服务
             service_name = '/stop_mapping_service'
@@ -2857,8 +3033,10 @@ async def stop_mapping_handler(
 
             # 使用rosservice命令调用停止建图服务
             # StopMapping服务没有请求参数，所以直接调用
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            loop = asyncio.get_event_loop()
             cmd = f"rosservice call {service_name}"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30))
 
             if result.returncode == 0:
                 # 解析ROSService返回的YAML格式响应
@@ -2888,7 +3066,7 @@ async def stop_mapping_handler(
                 payload.data["message"] = f"停止建图失败: {result.stderr}"
                 print(f"Stop mapping service call failed: {result.stderr}")
 
-        except (rospy.ServiceException, subprocess.TimeoutExpired) as e:
+        except (rospy.ServiceException, subprocess.TimeoutExpired, asyncio.TimeoutError) as e:
             payload.data["code"] = 1
             payload.data["message"] = f"无法连接到停止建图服务: {str(e)}"
             print(f"Failed to connect to stop mapping service: {str(e)}")
@@ -2927,15 +3105,17 @@ async def rename_map_handler(
         print(f"Renaming map: {old_name} -> {new_name}")
 
         # 调用上位机的重命名地图服务
-        import subprocess
+        import asyncio
         try:
             # 调用上位机的重命名地图服务
             service_name = '/rename_map_service'
             rospy.wait_for_service(service_name, timeout=5.0)
 
             # 使用rosservice命令调用重命名地图服务
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            loop = asyncio.get_event_loop()
             cmd = f"rosservice call {service_name} '{{old_name: \"{old_name}\", new_name: \"{new_name}\"}}'"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30))
 
             if result.returncode == 0:
                 # 解析ROSService返回的YAML格式响应
@@ -2970,7 +3150,7 @@ async def rename_map_handler(
                 payload.data["new_name"] = new_name
                 print(f"Rename map service call failed: {result.stderr}")
 
-        except (rospy.ServiceException, subprocess.TimeoutExpired) as e:
+        except (rospy.ServiceException, subprocess.TimeoutExpired, asyncio.TimeoutError) as e:
             payload.data["code"] = 1
             payload.data["message"] = f"无法连接到重命名地图服务: {str(e)}"
             payload.data["old_name"] = old_name
@@ -3306,9 +3486,8 @@ async def edit_map_handler(
     try:
         # 获取编辑参数
         map_name = data.get("data", {}).get("map_name", "")
-        points = data.get("data", {}).get("points", [])  # 三个点的ROS世界坐标
+        points = data.get("data", {}).get("points", [])  # 四个点的PNG坐标
         operation = data.get("data", {}).get("operation", "")  # "fill" 或 "clear"
-        is_edit_mode = data.get("data", {}).get("is_edit_mode", False)  # 是否是编辑模式
 
         # 必须提供地图名称
         if not map_name:
@@ -3319,152 +3498,116 @@ async def edit_map_handler(
             response_queue.put(response)
             return
 
-        if is_edit_mode:
-            # 编辑模式：执行地图编辑操作
-            if not points or len(points) != 6:  # 三个点，每个点有x,y坐标
-                payload.data["code"] = 1
-                payload.data["message"] = "需要提供三个点的坐标 (6个数值: x1,y1,x2,y2,x3,y3)"
-                print("地图编辑失败：需要提供三个点的坐标")
-            elif operation not in ["fill", "clear"]:
-                payload.data["code"] = 1
-                payload.data["message"] = "操作类型必须是 'fill' 或 'clear'"
-                print("地图编辑失败：操作类型必须是 'fill' 或 'clear'")
-            else:
-                print(f"执行地图编辑，地图: {map_name}, 操作: {operation}, 点: {points}")
-
-                # 桌面软件传来的坐标是PNG坐标系，需要转换为Map坐标系
-                # points格式: [x1, y1, x2, y2, x3, y3] - PNG坐标
-                map_points = []
-                for i in range(0, len(points), 2):
-                    if i + 1 < len(points):
-                        png_x = points[i]
-                        png_y = points[i + 1]
-
-                        # PNG坐标转换为Map坐标
-                        map_x, map_y = png_to_odometry(png_x, png_y)
-                        if map_x is not None and map_y is not None:
-                            map_points.extend([map_x, map_y])
-                            print(f"地图编辑点坐标转换: PNG({png_x}, {png_y}) -> Map({map_x:.3f}, {map_y:.3f})")
-                        else:
-                            print(f"地图编辑点坐标转换失败，使用原始PNG坐标")
-                            map_points.extend([png_x, png_y])
-
-                print(f"转换后的Map坐标点: {map_points}")
-
-                # 调用上位机的地图编辑服务
-                try:
-                    import rospy
-                    from kuavo_mapping.srv import EditMap, EditMapRequest, EditMapResponse
-
-                    # 检查服务是否可用
-                    service_name = '/edit_map_service'
-                    print(f"等待地图编辑服务: {service_name}")
-
-                    try:
-                        rospy.wait_for_service(service_name, timeout=10.0)
-                    except rospy.ROSException as e:
-                        payload.data["code"] = 1
-                        payload.data["message"] = f"地图编辑服务不可用: {str(e)}"
-                        print(f"地图编辑服务不可用: {str(e)}")
-                        response = Response(payload=payload, target=websocket)
-                        response_queue.put(response)
-                        return
-
-                    # 创建服务代理
-                    edit_map_service = rospy.ServiceProxy(service_name, EditMap)
-
-                    # 构建请求 - 注意：navigation_service_manager.py中points期望是6个float64值
-                    request = EditMapRequest()
-                    request.map_name = map_name
-                    request.points = map_points  # 使用转换后的Map坐标
-                    request.operation = operation
-
-                    print(f"调用地图编辑服务: map_name={map_name}, operation={operation}, points={map_points}")
-
-                    # 调用服务
-                    response = edit_map_service(request)
-
-                    if response.success:
-                        payload.data["code"] = 0
-                        payload.data["message"] = response.message
-                        # 编辑服务返回的图片数据是编辑后的结果
-                        payload.data["map_image"] = response.image_data
-                        payload.data["map_name"] = map_name
-                        print(f"接收到编辑后的图片数据，长度: {len(response.image_data) if response.image_data else 0}")
-
-                        # 获取地图元数据信息，与获取地图图片的格式保持一致
-                        try:
-                            # 先加载地图以获取最新信息
-                            load_service_name = '/load_map'
-                            rospy.wait_for_service(load_service_name, timeout=3.0)
-                            load_map_client = rospy.ServiceProxy(load_service_name, LoadMap)
-                            load_req = LoadMapRequest()
-                            load_req.map_name = map_name
-                            load_map_client(load_req)
-
-                            # 等待地图数据发布并获取
-                            import time
-                            time.sleep(1)
-                            map_msg = rospy.wait_for_message('/map', OccupancyGrid, timeout=5)
-
-                            # 构建地图信息
-                            map_info = {
-                                "width": map_msg.info.width,
-                                "height": map_msg.info.height,
-                                "resolution": map_msg.info.resolution,
-                                "origin": {
-                                    "x": map_msg.info.origin.position.x,
-                                    "y": map_msg.info.origin.position.y,
-                                    "z": map_msg.info.origin.position.z
-                                }
-                            }
-                            payload.data["map_info"] = map_info
-                            print(f"地图编辑成功，地图尺寸: {map_msg.info.width}x{map_msg.info.height}")
-
-                        except Exception as map_e:
-                            print(f"获取地图元数据失败，但编辑操作成功: {str(map_e)}")
-                            # 即使获取元数据失败，也返回基本的地图信息
-                            payload.data["map_info"] = {
-                                "width": 0,
-                                "height": 0,
-                                "resolution": 0,
-                                "origin": {"x": 0, "y": 0, "z": 0}
-                            }
-
-                        print(f"地图编辑成功: {response.message}")
-                    else:
-                        payload.data["code"] = 1
-                        payload.data["message"] = response.message
-                        print(f"地图编辑失败: {response.message}")
-
-                except Exception as e:
-                    payload.data["code"] = 1
-                    payload.data["message"] = f"调用地图编辑服务异常: {str(e)}"
-                    print(f"调用地图编辑服务异常: {str(e)}")
+        # 检查点和操作参数
+        if not points or len(points) != 8:  # 四个点，每个点有x,y坐标
+            payload.data["code"] = 1
+            payload.data["message"] = "需要提供四个点的坐标 (8个数值: x1,y1,x2,y2,x3,y3,x4,y4)"
+            print("地图编辑失败：需要提供四个点的坐标")
+        elif operation not in ["fill", "clear"]:
+            payload.data["code"] = 1
+            payload.data["message"] = "操作类型必须是 'fill' 或 'clear'"
+            print("地图编辑失败：操作类型必须是 'fill' 或 'clear'")
         else:
-            # 显示模式：获取地图图片用于显示
-            print(f"获取地图编辑数据，地图: {map_name}")
+            print(f"执行地图编辑，地图: {map_name}, 操作: {operation}, 点: {points}")
 
-            # 检查地图是否存在
-            if not await check_map_exists(map_name):
-                payload.data["code"] = 1
-                payload.data["message"] = f"指定的地图不存在: {map_name}"
-                print(f"指定的地图不存在: {map_name}")
-            else:
-                # 获取地图图片数据 - 先加载地图，然后从/map话题获取
-                map_image_data = await get_map_image_for_editing(map_name)
+            # 桌面软件传来的坐标是PNG坐标系（像素坐标）
+            # 前端显示的地图图像和PGM文件尺寸一致，PNG坐标可以直接用于绘制
+            # points格式: [x1, y1, x2, y2, x3, y3, x4, y4] - PNG坐标
+            # 直接发送PNG坐标，不需要转换
+            png_points = points
+            print(f"使用PNG像素坐标: {png_points}")
 
-                if map_image_data:
+            # 调用上位机的地图编辑服务
+            try:
+                import rospy
+                from kuavo_mapping.srv import EditMap, EditMapRequest, EditMapResponse
+
+                # 检查服务是否可用
+                service_name = '/edit_map_service'
+                print(f"等待地图编辑服务: {service_name}")
+
+                try:
+                    rospy.wait_for_service(service_name, timeout=10.0)
+                except rospy.ROSException as e:
+                    payload.data["code"] = 1
+                    payload.data["message"] = f"地图编辑服务不可用: {str(e)}"
+                    print(f"地图编辑服务不可用: {str(e)}")
+                    response = Response(payload=payload, target=websocket)
+                    response_queue.put(response)
+                    return
+
+                # 创建服务代理
+                edit_map_service = rospy.ServiceProxy(service_name, EditMap)
+
+                # 构建请求 - 注意：points期望是8个float64值（4个点）
+                request = EditMapRequest()
+                request.map_name = map_name
+                request.points = png_points  # 直接使用PNG像素坐标
+                request.operation = operation
+
+                print(f"调用地图编辑服务: map_name={map_name}, operation={operation}, points={png_points}")
+
+                # 调用服务
+                response = edit_map_service(request)
+
+                if response.success:
                     payload.data["code"] = 0
-                    payload.data["message"] = "地图图片获取成功，可以开始编辑"
+                    payload.data["message"] = response.message
+                    # 编辑服务返回的图片数据是编辑后的结果
+                    payload.data["map_image"] = response.image_data
                     payload.data["map_name"] = map_name
-                    payload.data["map_image"] = map_image_data["image"]
-                    payload.data["map_info"] = map_image_data["info"]
-                    print(f"地图图片获取成功，地图: {map_name}")
+                    print(f"接收到编辑后的图片数据，长度: {len(response.image_data) if response.image_data else 0}")
+
+                    # 获取地图元数据信息，与获取地图图片的格式保持一致
+                    try:
+                        # 先加载地图以获取最新信息
+                        load_service_name = '/load_map'
+                        rospy.wait_for_service(load_service_name, timeout=3.0)
+                        load_map_client = rospy.ServiceProxy(load_service_name, LoadMap)
+                        load_req = LoadMapRequest()
+                        load_req.map_name = map_name
+                        load_map_client(load_req)
+
+                        # 等待地图数据发布并获取 - 使用异步sleep避免阻塞
+                        await asyncio.sleep(1)
+                        # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+                        loop = asyncio.get_event_loop()
+                        map_msg = await loop.run_in_executor(None, rospy.wait_for_message, '/map', OccupancyGrid, 5)
+
+                        # 构建地图信息
+                        map_info = {
+                            "width": map_msg.info.width,
+                            "height": map_msg.info.height,
+                            "resolution": map_msg.info.resolution,
+                            "origin": {
+                                "x": map_msg.info.origin.position.x,
+                                "y": map_msg.info.origin.position.y,
+                                "z": map_msg.info.origin.position.z
+                            }
+                        }
+                        payload.data["map_info"] = map_info
+                        print(f"地图编辑成功，地图尺寸: {map_msg.info.width}x{map_msg.info.height}")
+
+                    except Exception as map_e:
+                        print(f"获取地图元数据失败，但编辑操作成功: {str(map_e)}")
+                        # 即使获取元数据失败，也返回基本的地图信息
+                        payload.data["map_info"] = {
+                            "width": 0,
+                            "height": 0,
+                            "resolution": 0,
+                            "origin": {"x": 0, "y": 0, "z": 0}
+                        }
+
+                    print(f"地图编辑成功: {response.message}")
                 else:
                     payload.data["code"] = 1
-                    payload.data["message"] = f"无法获取地图图片: {map_name}"
-                    print(f"无法获取地图图片: {map_name}")
+                    payload.data["message"] = response.message
+                    print(f"地图编辑失败: {response.message}")
+
+            except Exception as e:
+                payload.data["code"] = 1
+                payload.data["message"] = f"调用地图编辑服务异常: {str(e)}"
+                print(f"调用地图编辑服务异常: {str(e)}")
 
     except Exception as e:
         payload.data["code"] = 1
@@ -3514,18 +3657,22 @@ async def get_map_image_for_editing(map_name):
 
             # 调用load_map服务
             cmd = f'rosservice call {service_name} "map_name: \\"{map_name}\\""'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15))
 
             if result.returncode != 0:
                 print(f"加载地图失败: {result.stderr}")
                 return None
 
-            # 等待地图数据发布
-            time.sleep(2)
+            # 等待地图数据发布 - 使用异步sleep避免阻塞
+            await asyncio.sleep(2)
 
         # 从/map话题获取地图数据
         print("从/map话题获取地图数据...")
-        msg = rospy.wait_for_message('/map', OccupancyGrid, timeout=10)
+        # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+        loop = asyncio.get_event_loop()
+        msg = await loop.run_in_executor(None, rospy.wait_for_message, '/map', OccupancyGrid, 10)
 
         if msg:
             # 将OccupancyGrid转换为base64编码的PNG图片
@@ -3660,19 +3807,35 @@ async def task_point_handler(
             position_data = pose_data.get("position", {})
 
             if use_robot_current_pose:
-                # 使用机器人当前位置时，直接使用odom坐标，不进行PNG转换
-                print(f"Debug: 使用机器人当前位置，坐标系统: Odom({position_data.get('x', 0):.3f}, {position_data.get('y', 0):.3f}, {position_data.get('z', 0):.3f})")
-                position = Point()
-                position.x = position_data.get("x", 0.0)
-                position.y = position_data.get("y", 0.0)
-                position.z = position_data.get("z", 0.0)
+                # 使用机器人当前位置时，get_robot_position_for_task_point返回的是PNG坐标
+                # 需要转换为Map坐标存储（任务点应存储在map坐标系中）
+                png_x = position_data.get("x", 0.0)
+                png_y = position_data.get("y", 0.0)
+                png_z = position_data.get("z", 0.0)
+
+                print(f"Debug: 使用机器人当前位置，坐标系统: PNG({png_x:.3f}, {png_y:.3f}, {png_z:.3f})")
+
+                # PNG坐标转换为Map坐标
+                map_x, map_y = png_to_map(png_x, png_y)
+                if map_x is not None and map_y is not None:
+                    print(f"坐标转换: PNG({png_x}, {png_y}) -> Map({map_x:.3f}, {map_y:.3f})")
+                    position = Point()
+                    position.x = map_x
+                    position.y = map_y
+                    position.z = png_z  # 保留原始Z值
+                else:
+                    print(f"坐标转换失败，使用原始值")
+                    position = Point()
+                    position.x = png_x
+                    position.y = png_y
+                    position.z = png_z
             else:
                 # 桌面软件传来的坐标是PNG坐标系，需要转换为Map坐标系存储
                 png_x = position_data.get("x", 0.0)
                 png_y = position_data.get("y", 0.0)
 
-                # PNG坐标转换为Map坐标
-                map_x, map_y = png_to_odometry(png_x, png_y)
+                # PNG坐标转换为Map坐标（不使用odom，任务点应存储在map坐标系中）
+                map_x, map_y = png_to_map(png_x, png_y)
                 if map_x is not None and map_y is not None:
                     print(f"坐标转换: PNG({png_x}, {png_y}) -> Map({map_x:.3f}, {map_y:.3f})")
                     position = Point()
@@ -3724,16 +3887,16 @@ async def task_point_handler(
                 if operation == 3:  # GET操作
                     print(f"Debug: 返回任务点列表，数量: {len(response.task_points)}")
                     for tp in response.task_points:
-                        # 计算PNG坐标
+                        # 任务点存储在Map坐标系中，需要转换为PNG坐标用于前端显示
                         tp_x = float(tp.pose.position.x)
                         tp_y = float(tp.pose.position.y)
 
-                        png_x, png_y = odometry_to_png(tp_x, tp_y)
+                        png_x, png_y = map_to_png(tp_x, tp_y)
                         if png_x is not None and png_y is not None:
                             # 使用PNG坐标作为position字段
                             position_x = png_x
                             position_y = png_y
-                            print(f"Debug: 任务点 {tp.name} 转换为PNG坐标: ({tp_x:.3f}, {tp_y:.3f}) -> ({png_x:.1f}, {png_y:.1f})")
+                            print(f"Debug: 任务点 {tp.name} 转换为PNG坐标: Map({tp_x:.3f}, {tp_y:.3f}) -> PNG({png_x:.1f}, {png_y:.1f})")
                         else:
                             # PNG转换失败，使用原始坐标
                             position_x = tp_x
@@ -3757,10 +3920,10 @@ async def task_point_handler(
                             }
                         }
 
-                        # 保存原始odom坐标作为odom_position字段
-                        tp_dict["odom_position"] = {
-                            "x": tp_x,  # 原始odom坐标
-                            "y": tp_y,  # 原始odom坐标
+                        # 保存原始map坐标作为map_position字段
+                        tp_dict["map_position"] = {
+                            "x": tp_x,  # 原始map坐标
+                            "y": tp_y,  # 原始map坐标
                             "z": float(tp.pose.position.z)
                         }
 
@@ -3863,16 +4026,16 @@ async def get_task_points_handler(
 
             # 解析任务点列表
             for tp in response.task_points:
-                # 获取原始坐标并转换为PNG
+                # 任务点存储在Map坐标系中，需要转换为PNG坐标用于前端显示
                 tp_x = float(tp.pose.position.x)
                 tp_y = float(tp.pose.position.y)
 
-                png_x, png_y = odometry_to_png(tp_x, tp_y)
+                png_x, png_y = map_to_png(tp_x, tp_y)
                 if png_x is not None and png_y is not None:
                     # 使用PNG坐标作为position字段
                     position_x = png_x
                     position_y = png_y
-                    print(f"Debug: 任务点 {tp.name} 转换为PNG坐标: ({tp_x:.3f}, {tp_y:.3f}) -> ({png_x:.1f}, {png_y:.1f})")
+                    print(f"Debug: 任务点 {tp.name} 转换为PNG坐标: Map({tp_x:.3f}, {tp_y:.3f}) -> PNG({png_x:.1f}, {png_y:.1f})")
                 else:
                     # PNG转换失败，使用原始坐标
                     position_x = tp_x
@@ -3896,10 +4059,10 @@ async def get_task_points_handler(
                     }
                 }
 
-                # 保存原始odom坐标作为odom_position字段
-                tp_dict["odom_position"] = {
-                    "x": tp_x,  # 原始odom坐标
-                    "y": tp_y,  # 原始odom坐标
+                # 保存原始map坐标作为map_position字段
+                tp_dict["map_position"] = {
+                    "x": tp_x,  # 原始map坐标
+                    "y": tp_y,  # 原始map坐标
                     "z": float(tp.pose.position.z)
                 }
 
@@ -4004,6 +4167,69 @@ async def navigate_to_task_point_handler(
     response = Response(payload=payload, target=websocket)
     response_queue.put(response)
 
+async def get_robot_position_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    payload = Payload(
+        cmd="get_robot_position", data={"code":0}
+    )
+    try:
+        # 获取base_link在map坐标系下的位置
+        # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+        loop = asyncio.get_event_loop()
+
+        # 包装 TF 变换操作
+        def get_tf_transform():
+            listener = tf.TransformListener()
+            listener.waitForTransform("map", "livox_frame", rospy.Time(0), rospy.Duration(2.0))
+            return listener.lookupTransform("map", "livox_frame", rospy.Time(0))
+
+        (trans, rot) = await loop.run_in_executor(None, get_tf_transform)
+        # trans为(x, y, z)
+        x, y, z = trans
+
+        # 获取地图信息 - 使用 asyncio 在后台线程执行
+        map_msg = await loop.run_in_executor(None, rospy.wait_for_message, '/map', OccupancyGrid, 2.0)
+        origin = map_msg.info.origin
+        resolution = map_msg.info.resolution
+        width = map_msg.info.width
+        height = map_msg.info.height
+
+        # 这里的origin_grid_x和origin_grid_y表示map坐标系下(0,0)点在栅格坐标系下的坐标
+        # 也就是map坐标系的(0,0)点对应的像素点
+        origin_x = origin.position.x
+        origin_y = origin.position.y
+
+        origin_grid_x = int((0.0 - origin_x) / resolution)
+        origin_grid_y = int((0.0 - origin_y) / resolution)
+
+        origin_grid_y =  height - 1 - origin_grid_y
+
+        # 将base_link的map坐标转换为栅格坐标
+        grid_x = int((x - origin_x) / resolution)
+        grid_y = int((y - origin_y) / resolution)
+
+        # 转换为PNG图片上的像素坐标
+        # PNG图片通过cv2.flip(img, 0)上下翻转，所以Y坐标需要转换
+        png_x = grid_x
+        png_y = height - 1 - grid_y
+
+        payload.data["position"] = {
+            "png_x": png_x,  # PNG图片上的X像素坐标
+            "png_y": png_y,  # PNG图片上的Y像素坐标
+            "origin_grid_x": origin_grid_x,  # 地图原点在栅格坐标系下的X
+            "origin_grid_y": origin_grid_y,  # 地图原点在栅格坐标系下的Y
+        }
+        payload.data["msg"] = "Get robot position successfully"
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["msg"] = f"Failed to get robot position: {e}"
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
+
 
 async def get_all_maps_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
@@ -4022,12 +4248,16 @@ async def get_all_maps_handler(
         # 调用map_manager的get_all_maps服务
         service_name = '/get_all_maps'
         try:
-            rospy.wait_for_service(service_name, timeout=5.0)
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, rospy.wait_for_service, service_name, 5.0)
             print(f"Found service: {service_name}")
 
             # 使用rosservice命令调用get_all_maps服务
             cmd = f"rosservice call {service_name}"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10))
 
             if result.returncode == 0:
                 # 解析服务返回结果
@@ -4307,10 +4537,10 @@ def get_robot_position_for_task_point():
 
                 print(f"Debug: TF变换获取Map位置: ({map_x:.3f}, {map_y:.3f}, {map_z:.3f})")
 
-                # 尝试将Map坐标转换为PNG坐标（注意：这里使用map坐标而非odom坐标）
+                # 尝试将Map坐标转换为PNG坐标
                 try:
-                    # 直接使用地图转换函数，因为Map坐标也可以转换为PNG
-                    png_x, png_y = odometry_to_png(map_x, map_y)
+                    # 使用map_to_png函数转换Map坐标
+                    png_x, png_y = map_to_png(map_x, map_y)
                     if png_x is not None and png_y is not None:
                         print(f"Debug: Map到PNG转换成功 - PNG位置: ({png_x:.1f}px, {png_y:.1f}px)")
 
@@ -4379,8 +4609,9 @@ async def calibration_by_task_point_handler(
 
             print(f"调用基于任务点的校准服务: task_point_name={task_point_name}")
 
-            # 执行校准
-            res = calibration_service(req)
+            # 执行校准 - 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            loop = asyncio.get_event_loop()
+            res = await loop.run_in_executor(None, calibration_service, req)
             if res.success:
                 payload.data["code"] = 0
                 payload.data["message"] = f"基于任务点 '{task_point_name}' 的校准成功"

@@ -243,12 +243,9 @@
 {
     "cmd": "edit_map",
     "data": {
-        "points": [
-            {"x": 1.0, "y": 2.0},
-            {"x": 2.0, "y": 3.0},
-            {"x": 1.0, "y": 3.0}
-        ],
-        "operation": "fill"
+        "map_name": "example_map",
+        "operation": "fill/clear",
+        "points": [100, 200, 100, 150, 200, 200, 200, 150]//(x1,y1,x2,y2,x3,y3,x4,y4)
     }
 }
 ```
@@ -259,9 +256,15 @@
     "cmd": "edit_map",
     "data": {
         "code": 0,
-        "message": "Map edit command sent for 3 points with operation: fill",
-        "points_count": 3,
-        "operation": "fill"
+        "message": "地图编辑成功",
+        "map_name": "example_map",
+        "map_image": "base64编码的PNG图片数据",
+        "map_info": {
+            "width": 1024,
+            "height": 768,
+            "resolution": 0.05,
+            "origin": {"x": -10.0, "y": -10.0, "z": 0.0}
+        }
     }
 }
 ```
@@ -272,7 +275,7 @@
     "cmd": "edit_map",
     "data": {
         "code": 1,
-        "message": "At least 3 points are required for map editing"
+        "message": "必须指定地图名称"
     }
 }
 ```
