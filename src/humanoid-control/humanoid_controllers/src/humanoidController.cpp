@@ -26,7 +26,9 @@
 #include <ocs2_ddp/GaussNewtonDDP_MPC.h>
 #include <ocs2_ddp/GaussNewtonDDP_MPC.h>
 #include <std_srvs/Trigger.h>
-#include <algorithm> 
+#include <algorithm>
+#include <thread>
+#include <chrono>
 #include <angles/angles.h>
 #include <humanoid_estimation/FromTopiceEstimate.h>
 #include <humanoid_estimation/LinearKalmanFilter.h>
@@ -1228,6 +1230,31 @@ namespace humanoid_controller
 
     std::cout << "starting the controller" << std::endl;
     mpcRunning_ = true;
+
+    // Simulate coredump after 10 seconds for testing
+    std::thread([this]() {
+      bool mock_controller_dump = false;
+      if (controllerNh_.hasParam("mock_controller_dump")) {
+        controllerNh_.getParam("mock_controller_dump", mock_controller_dump);
+      }
+
+      if (!mock_controller_dump) {
+        std::cout << "[COREDUMP TEST] mock_controller_dump parameter is false, skipping coredump simulation" << std::endl;
+        return;
+      }
+
+      std::cout << "[COREDUMP TEST] Coredump will be triggered in 10 seconds..." << std::endl;
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+      std::cerr << "[COREDUMP TEST] Triggering coredump now via null pointer dereference!" << std::endl;
+
+      // Use volatile to prevent compiler optimization
+      // Null pointer dereference - will cause SIGSEGV
+      volatile int* null_ptr = nullptr;
+      *null_ptr = 42;  // This will cause segmentation fault
+
+      // This line will never be reached, but prevents optimization
+      std::cout << "[COREDUMP TEST] This should never print: " << *null_ptr << std::endl;
+    }).detach();
   }
   
   void humanoidController::real_init_wait()

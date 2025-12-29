@@ -34,7 +34,7 @@
     <arg name="only_half_up_body" default="false"/>
     <arg name="waist_move_spd"     default="0.8"/>
     <!-- Set with_coredump parameter based on coredump value -->
-    <arg name="coredump" default="false"/>
+    <arg name="coredump" default="true"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
@@ -69,6 +69,8 @@
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
+    <param name="mock_controller_dump" value="false"/>
+    <param name="mock_logger_dump" value="true"/>
 
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
