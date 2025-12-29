@@ -220,7 +220,7 @@ setup_robot_weight() {
 # Configure drive board type
 setup_drive_board() {
     print_info "设置驱动板类型..."
-    print_info "请输入驱动板类型 (elmo/youda3):"
+    print_info "请输入驱动板类型 (elmo/youda/youda3):"
     read -r board_type
     
     mkdir -p ~/.config/lejuconfig
@@ -696,8 +696,8 @@ main() {
     check_ip
     modify_hosts_mapping
     modiyf_ros_master_uri
-    setup_controller
     setup_websocket
+    setup_controller
     enable_vnc_network_config
     cleanup_code
 
