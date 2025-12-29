@@ -323,16 +323,16 @@ squatJointState
 
 acc_filter_cutoff_freq
 {
-   (0,0)   30.0   ; x
-   (1,0)   30.0   ; y
-   (2,0)   30.0   ; z
+   (0,0)   90.0   ; x
+   (1,0)   90.0   ; y
+   (2,0)   90.0   ; z
 }
 
 gyro_filter_cutoff_freq
 {
-   (0,0)   60.0   ; x
-   (1,0)   60.0   ; y
-   (2,0)   60.0   ; z
+   (0,0)   120.0   ; x
+   (1,0)   120.0   ; y
+   (2,0)   120.0   ; z
 }
 
 arm_joint_pos_filter_cutoff_freq       100 ;

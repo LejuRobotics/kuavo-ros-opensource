@@ -1309,7 +1309,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // 角速度转换
       Eigen::Vector3d waist_gyro(0, 0, qd_waist);
       Eigen::Vector3d imu_gyro(imu_data.gyro.x, imu_data.gyro.y, imu_data.gyro.z);
-      Eigen::Vector3d waist_base_gyro = waist_base_quat.conjugate() * (imu_gyro - waist_gyro); 
+      Eigen::Vector3d waist_base_gyro = waist_base_quat.conjugate() * imu_gyro - waist_gyro; 
 
       // roban 版本需要转换 imu 数据
       sensor_data.quat_.coeffs().w() = waist_world_quat.coeffs().w();
