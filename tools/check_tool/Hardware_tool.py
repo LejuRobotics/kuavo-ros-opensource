@@ -164,6 +164,53 @@ def imu_test():
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
+def get_canbus_wiring_type():
+    """
+    获取CAN总线接线类型
+    返回: 'single_bus' 或 'dual_bus'
+    如果配置文件不存在或读取失败，将打印错误并退出程序
+    """
+    canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
+    
+    if not os.path.exists(canbus_wiring_file):
+        print(bcolors.FAIL + f"错误: CAN总线配置文件不存在: {canbus_wiring_file}" + bcolors.ENDC)
+        print(bcolors.FAIL + "请先配置CAN总线类型（single_bus 或 dual_bus）" + bcolors.ENDC)
+        exit(1)
+    
+    try:
+        with open(canbus_wiring_file, 'r') as f:
+            wiring_type = f.read().strip()
+            if wiring_type == "dual_bus":
+                return "dual_bus"
+            elif wiring_type == "single_bus":
+                return "single_bus"
+            else:
+                print(bcolors.FAIL + f"错误: CAN总线配置值无效: '{wiring_type}'" + bcolors.ENDC)
+                print(bcolors.FAIL + f"配置文件: {canbus_wiring_file}" + bcolors.ENDC)
+                print(bcolors.FAIL + "有效值应为: 'single_bus' 或 'dual_bus'" + bcolors.ENDC)
+                exit(1)
+    except Exception as e:
+        print(bcolors.FAIL + f"错误: 读取CAN总线配置文件失败: {e}" + bcolors.ENDC)
+        print(bcolors.FAIL + f"配置文件: {canbus_wiring_file}" + bcolors.ENDC)
+        exit(1)
+
+
+def get_leju_claw_script_path():
+    """
+    根据CAN总线配置类型返回对应的夹爪测试脚本路径
+    返回: 脚本的完整路径
+    """
+    wiring_type = get_canbus_wiring_type()
+    
+    if wiring_type == "dual_bus":
+        script_name = "lejuclaw_can_test.sh"
+    else:
+        script_name = "lejuclaw_test.sh"
+    
+    script_path = os.path.join(folder_path, "leju_claw_driver", script_name)
+    return script_path
+
+
 def leju_claw_test():
     """
     主菜单使用的简单测试函数
@@ -218,7 +265,12 @@ def leju_claw_test():
             print("操作已取消，文件未更新")
             exit(0)
 
-    command = "sudo bash "+ folder_path +"/leju_claw_driver/lejuclaw_test.sh"  
+    # 根据CAN总线配置选择脚本
+    script_path = get_leju_claw_script_path()
+    wiring_type = get_canbus_wiring_type()
+    print(bcolors.OKCYAN + f"检测到CAN总线配置: {wiring_type}，使用脚本: {os.path.basename(script_path)}" + bcolors.ENDC)
+    
+    command = "sudo bash " + script_path
 
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
@@ -278,7 +330,21 @@ def leju_claw_test_with_menu():
             print("操作已取消，文件未更新")
             exit(0)
 
-    # 显示测试模式选择菜单
+    # 先判断CAN总线配置类型
+    wiring_type = get_canbus_wiring_type()
+    
+    if wiring_type == "dual_bus":
+        # dual_bus 直接执行 lejuclaw_can_test.sh，不显示菜单
+        script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_can_test.sh")
+        print(bcolors.OKCYAN + f"检测到CAN总线配置: {wiring_type}，直接执行测试脚本" + bcolors.ENDC)
+        if not os.path.exists(script_path):
+            print(bcolors.FAIL + f"未找到脚本: {script_path}" + bcolors.ENDC)
+            return
+        command = "sudo bash " + script_path
+        subprocess.run(command, shell=True)
+        return
+    
+    # single_bus 显示测试模式选择菜单
     while True:
         print("\n*------------二指夹爪测试模式------------*")
         print(bcolors.BOLD + "请选择测试模式（q回车退出）：" + bcolors.ENDC)
@@ -312,16 +378,17 @@ def leju_claw_test_with_menu():
 
 def leju_claw_continuous_test():
     """
-    夹爪持续发布0、100位置开合测试
+    夹爪持续发布0、100位置开合测试（仅用于single_bus配置）
     """
-    command = "sudo bash " + os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh") + " --continuous"
+    script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh")
+    command = "sudo bash " + script_path + " --continuous"
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
 
 def leju_claw_start_server():
     """
-    启动夹爪服务器
+    启动夹爪服务器（仅用于single_bus配置）
     """
     script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh")
     
@@ -332,14 +399,13 @@ def leju_claw_start_server():
     print(bcolors.OKCYAN + "正在启动夹爪服务器..." + bcolors.ENDC)
     print(bcolors.WARNING + "提示：服务器启动后，请在另一个终端运行选项3来发布目标位置" + bcolors.ENDC)
     
-    # 通过 lejuclaw_test.sh 启动服务器
     command = "sudo bash " + script_path + " --start-server"
     subprocess.run(command, shell=True)
 
 
 def leju_claw_send_position():
     """
-    发布单次目标位置控制夹爪运动
+    发布单次目标位置控制夹爪运动（仅用于single_bus配置）
     """
     script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh")
     
@@ -359,7 +425,6 @@ def leju_claw_send_position():
             print(bcolors.FAIL + "位置值必须在0-100之间！" + bcolors.ENDC)
             return
         
-        # 通过 lejuclaw_test.sh 发送位置命令
         command = "bash " + script_path + " --send-position " + str(left_pos) + " " + str(right_pos)
         print(bcolors.OKCYAN + f"正在控制夹爪移动到位置: 左={left_pos}%, 右={right_pos}%" + bcolors.ENDC)
         # 使用 subprocess.run() 运行命令
@@ -696,15 +761,15 @@ def qiangnao_hand():
     # 检查CAN总线配置类型
     canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
     
-    is_dual_can = False
+    is_dual_bus = False
     if os.path.exists(canbus_wiring_file):
         with open(canbus_wiring_file, 'r') as f:
             wiring_type = f.read().strip()
             if wiring_type == "dual_bus":
-                is_dual_can = True
+                is_dual_bus = True
     
     # 根据CAN总线类型选择不同的命令
-    if is_dual_can:
+    if is_dual_bus:
         # 双CAN总线配置
         command = "bash "+ folder_path +"/dexhand_test.sh --touch --test 1"
         print(bcolors.OKGREEN + "检测到双CAN配置，使用双CAN测试命令" + bcolors.ENDC)

@@ -1,13 +1,4 @@
 #!/bin/bash
-###
- # @Author: dongdongmingming
- # @Date: 2024-05-17 09:56:55
- # @LastEditors: Please set LastEditors
- # @LastEditTime: 2024-05-17 10:00:24
- # @FilePath: /kuavo/tools/check_tool/hand_grab_test.sh
- # @Description: 强脑收测试
-### 
-
 
 # 获取当前脚本所在文件夹的绝对路径
 current_script_dir=$(dirname "$(realpath "$0")")
@@ -42,6 +33,6 @@ elif [ "$1" == "--send-position" ] && [ -n "$2" ] && [ -n "$3" ]; then
         exit 1
     fi
 else
-    # 默认模式（保持原有行为）
+    # 默认模式
     ./lejuclaw_test "$@"
 fi
