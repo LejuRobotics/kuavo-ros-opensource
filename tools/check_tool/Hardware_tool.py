@@ -716,45 +716,76 @@ def ruiwo_zero():
 
 def ruiwo_negtive():
     while True:
-        print("请选择机器人类型：")
-        print("1. 4Pro型")
-        print("2. Roban2型")
-        
+        print("请选择手臂总线类型：")
+        print("1. 单CAN")
+        print("2. 双CAN（ROBAN2.1）")
         choice = input("请输入选择 (1 或 2): ").strip()
-        
+
         if choice == "1":
-            robot_type = "4pro"
+            kuavo_ros_file_path = folder_path + "/ruiwo_zero_set.sh"
+            kuavo_open_file_path = folder_path + "../../installed/share/hardware_plant/lib/ruiwo_controller/setZero.sh"
+
+            if os.path.exists(kuavo_ros_file_path):
+                command = "bash " + kuavo_ros_file_path
+            elif os.path.exists(kuavo_open_file_path):
+                command = "bash " + kuavo_open_file_path
+            else:
+                print(f"The file {file_path} does not exist.")
+                return
+
+            subprocess.run(command, shell=True)
             break
+
         elif choice == "2":
-            robot_type = "roban2"
+            motorevo_tool = os.path.join(folder_path, "motorevo_tool.sh")
+            if os.path.exists(motorevo_tool):
+                command = f"bash {motorevo_tool} --cali"
+                subprocess.run(command, shell=True)
+            else:
+                print(bcolors.FAIL + f"错误：未找到 {motorevo_tool}" + bcolors.ENDC)
+            break
+
+        else:
+            print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
+
+def ruiwo_negtive():
+    while True:
+        print("请选择手臂总线类型：")
+        print("1. 单CAN")
+        print("2. 双CAN（ROBAN2.1）")
+        can_choice = input("请输入选择 (1 或 2): ").strip()
+
+        if can_choice == "2":
+            motorevo_tool = os.path.join(folder_path, "motorevo_tool.sh")
+            if os.path.exists(motorevo_tool):
+                command = f"bash {motorevo_tool} --negative"
+                subprocess.run(command, shell=True)
+            else:
+                print(bcolors.FAIL + f"错误：未找到 {motorevo_tool}" + bcolors.ENDC)
+            break
+
+        elif can_choice == "1":
+            while True:
+                print("请选择机器人类型：")
+                print("1. 4Pro型（14个电机）")
+                print("2. Roban2型（10个电机）")
+                choice = input("请输入选择 (1 或 2): ").strip()
+                if choice == "1":
+                    robot_type = "4pro"
+                    break
+                elif choice == "2":
+                    robot_type = "roban2"
+                    break
+                else:
+                    print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
+                    continue
+
+            command = "bash " + folder_path + "/ruiwo_negtive_set.sh " + robot_type
+            subprocess.run(command, shell=True)
             break
         else:
             print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
             continue
-
-        # 定义要运行的命令，传递机器人类型参数
-    command = "bash " + folder_path + "/ruiwo_negtive_set.sh " + robot_type
-
-    # 如果选择了Roban2型，则检查CAN总线接线方式
-    if robot_type == "roban2":
-        # 检查CAN总线接线方式
-        canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
-        
-        use_motorevo_tool = False
-        if os.path.exists(canbus_wiring_file):
-            with open(canbus_wiring_file, 'r') as f:
-                wiring_type = f.read().strip()
-                if wiring_type == "dual_bus":
-                    use_motorevo_tool = True
-        
-        if use_motorevo_tool:
-            print(bcolors.OKGREEN + "检测到 Roban2 双CAN配置，使用 motorevo_tool.sh 工具" + bcolors.ENDC)
-
-            # 使用新的双CAN工具
-            command = "bash " + folder_path + "/motorevo_tool.sh --negative"
-
-    # 使用 subprocess.run() 运行命令
-    subprocess.run(command, shell=True)
 
 
 def qiangnao_hand():
@@ -1322,9 +1353,37 @@ def secondary_menu():
             break  
         elif option == "m":
             print(bcolors.HEADER + "###开始，执行机器人磨线###" + bcolors.ENDC)
-            kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "joint_breakin.py")
-            if os.path.exists(kuavo_breakin_script):
-                command = "sudo python3 " + kuavo_breakin_script
+            
+            # 获取机器人版本
+            robot_version = get_robot_version()
+            kuavo_breakin_script = None
+            script_description = ""
+            
+            if robot_version:
+                try:
+                    version_num = int(robot_version)
+                    # 版本 50-52 使用 kuavo5 脚本
+                    if 50 <= version_num <= 52:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "kuavo5", "joint_breakin.py")
+                        script_description = f"Kuavo5磨线脚本 (版本 {robot_version})"
+                    # 版本 14-49 使用 dual_can_leju_ec 脚本
+                    elif 14 <= version_num <= 49:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts",  "breakin_main_controller.py")
+                        script_description = f"双CAN leju磨线脚本 (版本 {robot_version})"
+                    else:
+                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（14-49 或 50-52）" + bcolors.ENDC)
+                except (ValueError, TypeError):
+                    print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，将使用默认脚本" + bcolors.ENDC)
+                    # 默认使用 dual_can_leju_ec
+                    kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "dual_can_leju_ec", "joint_breakin.py")
+                    script_description = "默认双CAN leju磨线脚本"
+            else:
+                print(bcolors.WARNING + "警告：未找到 ROBOT_VERSION" + bcolors.ENDC)
+            
+            if kuavo_breakin_script and os.path.exists(kuavo_breakin_script):
+                print(bcolors.OKGREEN + f"\n使用{script_description}" + bcolors.ENDC)
+                # 如果需要以 root 运行，请直接使用 root 终端启动本工具
+                command = "python3 " + kuavo_breakin_script
                 subprocess.run(command, shell=True)
             else:
                 print(bcolors.FAIL + f"错误：磨线脚本不存在: {kuavo_breakin_script}" + bcolors.ENDC)
