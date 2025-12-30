@@ -181,19 +181,20 @@ class MusicPlayerNode:
             # 需要转换，创建临时文件
             temp_wav = os.path.join(self.temp_dir, f"temp_audio_{uuid.uuid4()}.wav")
             
+            # 构建基础命令（不包含输出文件）
             ffmpeg_cmd = [
                 'ffmpeg', '-i', music_file,
                 '-f', self.FFMPEG_FORMAT,
                 '-acodec', self.FFMPEG_CODEC,
                 '-ar', str(self.DEFAULT_SAMPLE_RATE),
-                '-ac', str(self.DEFAULT_CHANNELS),
-                '-y', temp_wav
+                '-ac', str(self.DEFAULT_CHANNELS)
             ]
 
             # 如果音量不是默认值，添加音量滤镜
             if volume != self.DEFAULT_VOLUME:
                 ffmpeg_cmd.extend(['-af', f'volume={volume/self.DEFAULT_VOLUME}'])
 
+            # 最后添加输出文件参数
             ffmpeg_cmd.extend(['-y', temp_wav])
             
             result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
