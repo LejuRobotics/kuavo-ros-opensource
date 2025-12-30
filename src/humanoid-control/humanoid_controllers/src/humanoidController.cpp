@@ -2390,8 +2390,16 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // std::chrono::time_point<std::chrono::high_resolution_clock> t4;
       if (enable_wbc)
       {
-        vector_t x = wbc_->update(optimizedState2WBC_mrt_, optimizedInput2WBC_mrt_, measuredRbdStateReal_, plannedMode_, period.toSec(), is_mpc_updated);
+        static vector_t x;
 
+        if(is_roban_ && is_torso_interpolation_active_)
+        {
+          x = standUpWbc_->update(optimizedState2WBC_mrt_, optimizedInput2WBC_mrt_, measuredRbdStateReal_, ModeNumber::SS, period.toSec(), false);
+        }
+        else
+        {
+          x = wbc_->update(optimizedState2WBC_mrt_, optimizedInput2WBC_mrt_, measuredRbdStateReal_, plannedMode_, period.toSec(), is_mpc_updated);
+        }
         // wbc_->updateVd(jointAcc_);
         wbcTimer_.endTimer();
 

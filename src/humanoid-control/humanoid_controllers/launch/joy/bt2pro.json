@@ -8,6 +8,7 @@
         "BUTTON_RB": 7,
         "BUTTON_BACK": 10,
         "BUTTON_START": 11,
+        "BUTTON_GUIDE": 12,
         "BUTTON_M1": 13,
         "BUTTON_M2": 14
     },

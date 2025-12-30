@@ -88,6 +88,29 @@ namespace ocs2
         return true;
       }
 
+      // 形参： MPC重置所处模式 0: 正常MPC, 1: 等待初始策略, 2: 插值更新躯干位置
+      // 输出： autoGait 应设置行为，true 时 autoGait 应该关闭
+      bool checkResetMpcState(scalar_t initTime, int resetting_mpc_state)
+      {
+        static int lastMpcResetState = resetting_mpc_state;
+        static double checkPointTime = 0.0;
+        bool returnFlag = false;
+
+        if(resetting_mpc_state == 1 || resetting_mpc_state == 2) returnFlag = true;  // 1 和 2 模式应该关闭
+        if(lastMpcResetState == 2 && resetting_mpc_state == 0)  // 2 模式切换 0 模式记录切换时间
+        {
+          checkPointTime = initTime;
+        }
+        if(resetting_mpc_state == 0 && initTime - checkPointTime < 1.0)  // 2 模式且切换时间小于 1 秒时不允许切换
+        {
+          returnFlag = true;
+        }
+
+        lastMpcResetState = resetting_mpc_state;
+
+        return returnFlag;
+      }
+
       inline double normalizedYaw(double yaw)
       {
         while (yaw > M_PI)

@@ -118,6 +118,7 @@ namespace ocs2
       {"BUTTON_RB", 7},
       {"BUTTON_BACK", 10},
       {"BUTTON_START", 11},
+      {"BUTTON_GUIDE", 12},
       {"BUTTON_M1", 13},
       {"BUTTON_M2", 14}
   };
@@ -174,7 +175,13 @@ namespace ocs2
         repo_root_path_ = ".";
       }
       ROS_INFO_STREAM("Repository root path: " << repo_root_path_);
-      
+
+      if (nodeHandle.hasParam("/robot_version"))
+      {
+        int rb_version_int;
+        nodeHandle.getParam("/robot_version", rb_version_int);
+        rb_version_ = RobotVersion::create(rb_version_int);
+      }
 
       if (nodeHandle.hasParam("joy_node/dev"))
       {
@@ -239,7 +246,13 @@ namespace ocs2
       if (nodeHandle.hasParam("joy_execute_action"))
       {
         nodeHandle.getParam("joy_execute_action", joy_execute_action_);
-        ROS_INFO_STREAM("Loading joy_execute_action: " << joy_execute_action_);
+        // kuavo 不受 roban 按键需求影响
+        if(rb_version_.major() != 1)
+        {
+          joy_execute_action_ = false;
+          nodeHandle.setParam("joy_execute_action", false);
+        }
+        ROS_INFO_STREAM("Loading joy_execute_action_ value: " << joy_execute_action_);
       }
       else
       {
@@ -265,12 +278,6 @@ namespace ocs2
       }
 
       // loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
-      if (nodeHandle.hasParam("/robot_version"))
-      {
-        int rb_version_int;
-        nodeHandle.getParam("/robot_version", rb_version_int);
-        rb_version_ = RobotVersion::create(rb_version_int);
-      }
       auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version_, true, 2e-3);
       default_joint_state_ = drake_interface_->getDefaultJointState();
       com_height_ = drake_interface_->getIntialHeight();
@@ -820,15 +827,7 @@ namespace ocs2
       }
 
       if(joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] < -0.5)
-      {
-        // LT + BUTTON_GUIDE: 触发倒地逻辑
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_GUIDE"]] && joy_msg->buttons[joyButtonMap["BUTTON_GUIDE"]])
-        {
-          callSetFallDownStateSrv();
-          old_joy_msg_ = *joy_msg;
-          return;
-        }
-        
+      {        
         if(!joy_execute_action_)
         {
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
@@ -940,13 +939,23 @@ namespace ocs2
           std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
                     << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
         }
+        // RB + BUTTON_RL(X): 起身
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
+        {
+          callTriggerFallStandUpSrv();
+          return;
+        }
+        // RB + BUTTON_TROT(B): 触发倒地逻辑
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
+        {
+          callSetFallDownStateSrv();
+          return;
+        }
       }
       else
         checkGaitSwitchCommand(joy_msg);
 
-      vector_t button_trigger_axis = vector_t::Zero(6); 
-      if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_GUIDE"]] && joy_msg->buttons[joyButtonMap["BUTTON_GUIDE"]])
-        callTriggerFallStandUpSrv();
+      vector_t button_trigger_axis = vector_t::Zero(6);
       if (axes_input_enabled_)
       {
         if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
