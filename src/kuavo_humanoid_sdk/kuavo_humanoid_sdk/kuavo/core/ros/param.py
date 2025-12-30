@@ -62,40 +62,23 @@ class RosParameter:
             rospy.logerr("initial_state parameter not found")
             return None
         return rospy.get_param('/initial_state')
-    def init_stand_height(self)->float:
-        if not rospy.has_param('/com_height'):
-            rospy.logerr("com_height parameter not found")
-            # KUAVO-4PRO
-            return 0.8328437523948975
-        return rospy.get_param('/com_height')
 
-kuavo_ros_param = RosParameter()
 
 def joint_names()->dict:
-    if(kuavo_ros_param.robot_version() == 13):
-        leg_link_names = [
-            'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
-            'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
-        ]
-        arm_link_names = [
-            'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link',
-            'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link',
-        ]
-        head_link_names = [
-            'zhead_1_link', 'zhead_2_link'
-        ]
-    else:
-        leg_link_names = [
-            'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
-            'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
-        ]
-        arm_link_names = [
-            'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
-            'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link', 'zarm_r5_link', 'zarm_r6_link', 'zarm_r7_link',
-        ]
-        head_link_names = [
-            'zhead_1_link', 'zhead_2_link'
-        ]
+    leg_link_names = [
+        'leg_l1_link', 'leg_l2_link', 'leg_l3_link', 'leg_l4_link', 'leg_l5_link', 'leg_l6_link',
+        'leg_r1_link', 'leg_r2_link', 'leg_r3_link', 'leg_r4_link', 'leg_r5_link', 'leg_r6_link'
+    ]
+    arm_link_names = [
+        'zarm_l1_link', 'zarm_l2_link', 'zarm_l3_link', 'zarm_l4_link', 'zarm_l5_link', 'zarm_l6_link', 'zarm_l7_link',
+        'zarm_r1_link', 'zarm_r2_link', 'zarm_r3_link', 'zarm_r4_link', 'zarm_r5_link', 'zarm_r6_link', 'zarm_r7_link',
+    ]
+    head_link_names = [
+        'zhead_1_link', 'zhead_2_link'
+    ]
+
+    kuavo_ros_param = RosParameter()
+
     robot_desc = kuavo_ros_param.humanoid_description()
     if robot_desc is None:
         return None
@@ -185,7 +168,6 @@ def make_robot_param()->dict:
         'end_effector_type': kuavo_ros_param.end_effector_type(),
         'joint_names': joint_names(),
         'end_frames_names': end_frames_names(),
-        'init_stand_height': kuavo_ros_param.init_stand_height()
     }
 
     for key, value in kuavo_ros_info.items():

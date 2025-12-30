@@ -3,13 +3,8 @@ import math
 import numpy as np
 import time
 from std_msgs.msg import Float64MultiArray
-from kuavo_msgs.msg import twoArmHandPoseCmd, twoArmHandPose, armHandPose,armTargetPoses
-from kuavo_msgs.srv import (
-                       changeArmCtrlMode, changeArmCtrlModeRequest,
-                        changeTorsoCtrlMode, changeTorsoCtrlModeRequest)
+from kuavo_msgs.msg import twoArmHandPoseCmd, twoArmHandPose, armHandPose
 
-# ROS topic constants
-MOBILE_MANIPULATOR_EEF_POSES_TOPIC = 'mobile_manipulator_eef_poses'
 class MotionController:
     def __init__(self, args, signal_analyzer, visualizer, use_chinese=False):
         self.args = args
@@ -37,9 +32,8 @@ class MotionController:
     def initialize_ros_communications(self):
         # Publisher for sending commands to the robot
         self.pub = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
-        self.kuavo_arm_target_poses = rospy.Publisher('/kuavo_arm_target_poses', armTargetPoses, queue_size=10)
         # Subscriber for receiving robot pose feedback
-        self.sub = rospy.Subscriber(MOBILE_MANIPULATOR_EEF_POSES_TOPIC, Float64MultiArray, self.humanoid_pose_callback)
+        self.sub = rospy.Subscriber('humanoid_eef_poses', Float64MultiArray, self.humanoid_pose_callback)
         rospy.loginfo(self._get_label("MotionController: ROS通讯已初始化", "MotionController: ROS communications initialized."))
         rospy.sleep(0.5) # Wait for publisher/subscriber to connect
 
@@ -50,6 +44,7 @@ class MotionController:
         current_time = rospy.get_time()
         self.output_data.append(z_position)
         self.output_time_data.append(current_time)
+
     def publish_hand_pose(self, x, y_left, y_right, z_left, z_right, quat, elbow_pos_left, elbow_pos_right, joint_angles):
         if self.shutdown_requested or self.pub is None:
             return
@@ -88,96 +83,7 @@ class MotionController:
         z_val = self.args.z_center
         self.publish_hand_pose(self.args.x_center, self.args.y_left, self.args.y_right, 
                                z_val, z_val, quat, elbow_pos_left, elbow_pos_right, joint_angles)
-        # 重置MPC和手臂       
-        self.arm_reset()
         rospy.loginfo(self._get_label("已发送中立姿态", "Neutral pose sent"))
-
-    def srv_change_manipulation_mpc_ctrl_mode(self, ctrl_mode:int)->bool:
-        try:
-            service_name = '/mobile_manipulator_mpc_control'
-            rospy.wait_for_service(service_name, timeout=2.0)
-            set_mode_srv = rospy.ServiceProxy(service_name, changeTorsoCtrlMode)
-            
-            req = changeTorsoCtrlModeRequest()
-            req.control_mode = ctrl_mode
-            
-            resp = set_mode_srv(req)
-            if not resp.result:
-                print(f"Failed to change manipulation mpc control mode to {ctrl_mode}: {resp.message}")
-            return resp.result
-        except rospy.ServiceException as e:
-            print(f"Service call to {service_name} failed: {e}")
-        except rospy.ROSException as e: # For timeout from wait_for_service
-            print(f"Failed to connect to service {service_name}: {e}")
-        except Exception as e:
-            print(f"Failed to change manipulation mpc control mode: {e}")
-        return False
-
-    def arm_reset(self):
-        self.srv_change_manipulation_mpc_ctrl_mode(0)
-        self.srv_change_manipulation_mpc_control_flow(0)
-        self.srv_change_arm_ctrl_mode(1)
-
-    def arm_change_mpc(self):
-        self.srv_change_manipulation_mpc_ctrl_mode(1)
-        self.srv_change_arm_ctrl_mode(2)
-        self.srv_change_manipulation_mpc_control_flow(1)
-
-    def srv_change_manipulation_mpc_control_flow(self, ctrl_flow: int)-> bool:
-        try:
-            service_name = '/enable_mm_wbc_arm_trajectory_control'
-            rospy.wait_for_service(service_name, timeout=2.0)
-            set_mode_srv = rospy.ServiceProxy(service_name, changeArmCtrlMode)
-
-            req = changeArmCtrlModeRequest()
-            req.control_mode = ctrl_flow
-
-            resp = set_mode_srv(req)
-            if not resp.result:
-                print(f"Failed to change manipulation mpc wbc arm trajectory control to {ctrl_flow}: {resp.message}")
-            return resp.result
-        except rospy.ServiceException as e:
-            print(f"Service call to {service_name} failed: {e}")
-        except rospy.ROSException as e:  # For timeout from wait_for_service
-            print(f"Failed to connect to service {service_name}: {e}")
-        except Exception as e:
-            print(f"Failed to change manipulation mpc control flow: {e}")
-        return False
-
-    def srv_change_arm_ctrl_mode(self, mode: int)->bool:
-        try:
-            rospy.wait_for_service('/humanoid_change_arm_ctrl_mode', timeout=2.0)
-            change_arm_ctrl_mode_srv = rospy.ServiceProxy('/humanoid_change_arm_ctrl_mode', changeArmCtrlMode)
-            req = changeArmCtrlModeRequest()
-            req.control_mode = mode
-            resp = change_arm_ctrl_mode_srv(req)
-            return resp.result
-        except rospy.ServiceException as e:
-            print(f"Service call failed: {e}")
-        except Exception as e:
-            print(f"[Error] change arm ctrl mode: {e}")
-        return False
-
-    def change_arm_ctrl_mode(self, control_mode):
-        rospy.wait_for_service('/arm_traj_change_mode', timeout=2.0)
-        try:
-            change_mode = rospy.ServiceProxy('/arm_traj_change_mode', changeArmCtrlMode)
-            req = changeArmCtrlModeRequest()
-            req.control_mode = control_mode
-            res = change_mode(req)
-            if res.result:
-                rospy.loginfo("手臂控制模式已更改为 %d", control_mode)
-            else:
-                rospy.logerr("无法将手臂控制模式更改为 %d", control_mode)
-        except rospy.ServiceException as e:
-            rospy.logerr("服务调用失败: %s", e)    
-
-    
-    def publish_kuavo_arm_poses(self, joint_q:list, time:float=3):
-        msg = armTargetPoses()
-        msg.times = [time]
-        msg.values = [math.degrees(angle) for angle in joint_q]
-        self.kuavo_arm_target_poses.publish(msg)
 
     def clear_collected_data(self):
         self.input_data.clear()
@@ -193,17 +99,7 @@ class MotionController:
             np.array(self.input_time_data),
             np.array(self.output_time_data)
         )
-    
-    def _move_arm_start_pose(self):
-        self.arm_reset()
-        print("")
-        time.sleep(2.0)
-        self.change_arm_ctrl_mode(2)
-        q = [-0.375, 0.191, 0.164, -1.278, 0.159, -0.211, 0.102, 
-            -0.374, -0.191, -0.163, -1.283, -0.176, 0.209, 0.114]
-        cost_time = 2.0
-        self.publish_kuavo_arm_poses(q, cost_time)
-        time.sleep(cost_time)
+
     def run_warmup_phase(self):
         rospy.loginfo("="*60)
         rospy.loginfo(self._get_label("开始预热阶段", "Starting warmup phase"))
@@ -217,7 +113,7 @@ class MotionController:
             self.sub.unregister()
             self.sub = None # Mark as unregistered
         # Minimal callback that does nothing
-        temp_sub = rospy.Subscriber(MOBILE_MANIPULATOR_EEF_POSES_TOPIC, Float64MultiArray, lambda msg: None) 
+        temp_sub = rospy.Subscriber('humanoid_eef_poses', Float64MultiArray, lambda msg: None) 
 
         # Store and clear current data buffers before warmup
         # We don't want warmup movements in our main data buffers
@@ -226,9 +122,6 @@ class MotionController:
         _ = self.input_time_data.copy()
         _ = self.output_time_data.copy()
         self.clear_collected_data() # Clears the controller's main buffers
-
-        # 插值移动到开始点
-        self._move_arm_start_pose()
 
         quat = [0, -0.67566370964, 0, 0.73720997571945]
         elbow_l = [0.08, 0.4, 0.18]; elbow_r = [0.08, -0.4, 0.18]
@@ -263,13 +156,14 @@ class MotionController:
             if self.pub: self.pub.publish(msg_cmd)
 
             rate.sleep()
+        
         self.clear_collected_data() # Clear any stray data from warmup
         # Restore original subscriber for actual data collection
         if temp_sub: temp_sub.unregister()
         if original_sub is not None : # If there was an original subscriber, re-establish it
-             self.sub = rospy.Subscriber(MOBILE_MANIPULATOR_EEF_POSES_TOPIC, Float64MultiArray, self.humanoid_pose_callback)
+             self.sub = rospy.Subscriber('humanoid_eef_poses', Float64MultiArray, self.humanoid_pose_callback)
         elif self.sub is None: # If it was never initialized or fully cleared, re-init
-             self.sub = rospy.Subscriber(MOBILE_MANIPULATOR_EEF_POSES_TOPIC, Float64MultiArray, self.humanoid_pose_callback)
+             self.sub = rospy.Subscriber('humanoid_eef_poses', Float64MultiArray, self.humanoid_pose_callback)
 
         rospy.loginfo(self._get_label("预热阶段完成", "Warmup phase completed."))
 
@@ -289,13 +183,6 @@ class MotionController:
 
         rospy.loginfo(f"Running {wave_type} signal: Amp={amplitude:.3f}m, Freq={frequency:.2f}Hz, Dur={duration:.1f}s")
 
-        # 重置MPC和手臂       
-        self.arm_reset()
-        rospy.loginfo("重置MPC和手臂完成")
-        # 切换到KMPC
-        self.arm_change_mpc()
-        rospy.loginfo("切换到KMPC完成")
-
         while not self.shutdown_requested and not rospy.is_shutdown():
             elap_t = rospy.get_time() - start_t
             if elap_t >= duration: break
@@ -314,6 +201,7 @@ class MotionController:
             if rospy.get_time() - last_rep_t >= 1.0:
                 rospy.loginfo(f"Progress: {elap_t/duration*100:.1f}% ({duration-elap_t:.1f}s left)")
                 last_rep_t = rospy.get_time()
+
             self.publish_hand_pose(self.args.x_center, self.args.y_left, self.args.y_right, 
                                    z_l_cmd, z_r_cmd, quat, elb_l, elb_r, j_angs)
             rate.sleep()
@@ -336,10 +224,7 @@ class MotionController:
         rospy.sleep(0.5) # Allow last data points to arrive
 
         in_data, out_data, in_time, out_time = self.get_collected_data()
-        rospy.loginfo(f"in_data: {in_data.shape}")
-        rospy.loginfo(f"out_data: {out_data.shape}")
-        rospy.loginfo(f"in_time: {in_time.shape}")
-        rospy.loginfo(f"out_time: {out_time.shape}")
+
         if len(in_data) < 10 or len(out_data) < 10:
             rospy.logerr(self._get_label("标定数据不足!", "Not enough calibration data!"))
             return False # Indicate failure

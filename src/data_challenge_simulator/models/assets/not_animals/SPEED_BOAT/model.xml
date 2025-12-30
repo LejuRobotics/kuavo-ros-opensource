@@ -1,0 +1,83 @@
+<mujoco model="model">
+  <asset>
+    <texture type="2d" name="texture_boat" file="../../assets/not_animals/SPEED_BOAT/texture.png"/>
+    <material name="material_0_boat" texture="texture_boat" specular="0.5" shininess="0.5"/>
+    <mesh name="model_boat" file="../../assets/not_animals/SPEED_BOAT/model.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_0_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_0.obj" scale="0.6 0.4 0.6" />
+    <mesh name="model_collision_1_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_1.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_2_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_2.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_3_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_3.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_4_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_4.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_5_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_5.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_6_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_6.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_7_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_7.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_8_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_8.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_9_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_9.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_10_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_10.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_11_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_11.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_12_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_12.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_13_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_13.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_14_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_14.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_15_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_15.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_16_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_16.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_17_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_17.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_18_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_18.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_19_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_19.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_20_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_20.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_21_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_21.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_22_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_22.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_23_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_23.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_24_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_24.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_25_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_25.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_26_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_26.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_27_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_27.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_28_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_28.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_29_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_29.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_30_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_30.obj" scale="0.6 0.4 0.6"/>
+    <mesh name="model_collision_31_boat" file="../../assets/not_animals/SPEED_BOAT/model_collision_31.obj" scale="0.6 0.4 0.6"/>
+  </asset>
+  <worldbody>
+    <body name="boat" pos="50 -0.3 0.05" euler="0 0 1.57079633">
+      <freejoint name="boat"/>
+      <!-- Add inertial properties to reduce bouncing - increased mass for more stability -->
+      <!-- <inertial pos="0 0 0" mass="0.5" diaginertia="0.02 0.02 0.02" /> -->
+      <!-- Visual mesh -->
+      <geom material="material_0_boat" mesh="model_boat" type="mesh" contype="0" conaffinity="0" group="2" mass="1e-3"/>
+      <!-- Collision meshes with stronger damping to reduce elasticity -->
+      <!-- solimp: lower values = harder collision, less bounce -->
+      <!-- solref: lower first value = more damping, less bounce -->
+      <geom mesh="model_collision_0_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_1_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_2_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_3_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_4_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_5_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_6_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_7_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_8_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_9_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_10_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_11_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_12_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_13_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_14_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_15_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_16_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_17_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_18_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_19_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_20_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_21_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_22_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_23_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_24_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_25_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_26_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_27_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_28_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_29_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_30_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_31_boat" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+    </body>
+  </worldbody>
+</mujoco>

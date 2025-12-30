@@ -7,7 +7,7 @@ from nav_msgs.msg import Odometry
 from std_srvs.srv import SetBool, SetBoolRequest
 from sensor_msgs.msg import JointState
 from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import sensorsData, lejuClawState, gaitTimeName, dexhandTouchState
-from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getCurrentGaitName, getCurrentGaitNameRequest,gestureExecuteState, gestureExecuteStateRequest
+from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getCurrentGaitName, getCurrentGaitNameRequest
 from kuavo_humanoid_sdk.msg.ocs2_msgs.msg import mpc_observation
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import (changeArmCtrlMode, changeArmCtrlModeRequest,setMmCtrlFrame, setMmCtrlFrameRequest, changeTorsoCtrlMode, changeTorsoCtrlModeRequest)
 from collections import deque
@@ -387,6 +387,8 @@ class KuavoRobotStateCore:
                         for callback in self._gait_changed_callbacks:
                             callback(curr_time, current_gait)
         except Exception as e:
+
+
             SDKLogger.error(f"Error processing MPC observation: {e}")
 
     def _srv_get_arm_ctrl_mode(self)-> KuavoArmCtrlMode:
@@ -414,24 +416,6 @@ class KuavoRobotStateCore:
                 return None
         except Exception as e:
             SDKLogger.error(f"Service call failed: {e}")
-        return None
-    def _srv_get_dexhand_gesture_state(self)->bool:
-        
-        try:
-            rospy.wait_for_service('gesture/execute_state',timeout=1.0)
-            # 创建服务代理
-            gesture_state_service = rospy.ServiceProxy('gesture/execute_state', gestureExecuteState)
-            
-            # 创建请求对象
-            request = gestureExecuteStateRequest()
-            
-            response = gesture_state_service(request)
-            
-            return response.is_executing
-        
-        except rospy.ServiceException as e:
-            print(f"Service call failed: {e}")
-        
         return None
 
     def _srv_get_manipulation_mpc_ctrl_mode(self, )->KuavoManipulationMpcCtrlMode:

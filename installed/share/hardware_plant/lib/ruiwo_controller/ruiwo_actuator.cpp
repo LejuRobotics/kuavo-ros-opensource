@@ -1,64 +1,5 @@
 #include "ruiwo_actuator.h"
 
-std::string RuiwoErrCode2string(RuiwoErrCode errcode) {
-    switch (errcode) {
-        case RuiwoErrCode::NO_FAULT:
-            return "无故障";
-        case RuiwoErrCode::DC_BUS_OVER_VOLTAGE:
-            return "直流母线电压过压";
-        case RuiwoErrCode::DC_BUS_UNDER_VOLTAGE:
-            return "直流母线电压欠压";
-        case RuiwoErrCode::ENCODER_ANGLE_FAULT:
-            return "编码器电角度故障";
-        case RuiwoErrCode::DRV_DRIVER_FAULT:
-            return "DRV驱动器故障";
-        case RuiwoErrCode::DC_BUS_CURRENT_OVERLOAD:
-            return "直流母线电流过流";
-        case RuiwoErrCode::MOTOR_A_PHASE_CURRENT_OVERLOAD:
-            return "电机A相电流过载";
-        case RuiwoErrCode::MOTOR_B_PHASE_CURRENT_OVERLOAD:
-            return "电机B相电流过载";
-        case RuiwoErrCode::MOTOR_C_PHASE_CURRENT_OVERLOAD:
-            return "电机C相电流过载";
-        case RuiwoErrCode::DRIVER_BOARD_OVERHEAT:
-            return "驱动板温度过高";
-        case RuiwoErrCode::MOTOR_WINDING_OVERHEAT:
-            return "电机线圈过温";
-        case RuiwoErrCode::ENCODER_FAILURE:
-            return "编码器故障";
-        case RuiwoErrCode::CURRENT_SENSOR_FAILURE:
-            return "电流传感器故障";
-        case RuiwoErrCode::OUTPUT_ANGLE_OUT_OF_RANGE:
-            return "输出轴实际角度超过通信范围";
-        case RuiwoErrCode::OUTPUT_SPEED_OUT_OF_RANGE:
-            return "输出轴速度超过通信范围";
-        case RuiwoErrCode::STUCK_PROTECTION:
-            return "堵转保护：电机电枢电流(Iq)大于 Stuck Current，同时电机速度小于 StuckVelocity，持续时间超过 Stuck Time 后触发";
-        case RuiwoErrCode::CAN_COMMUNICATION_LOSS:
-            return "CAN通讯丢失：超过CAN通信超时时间未收到数据帧";
-        case RuiwoErrCode::ABS_ENCODER_OFFSET_VERIFICATION_FAILURE:
-            return "离轴/对心多圈绝对值编码器接口帧头校验失败，重启，若还失败则请联系售后工程师";
-        case RuiwoErrCode::ABSOLUTE_ENCODER_MULTI_TURN_FAILURE:
-            return "对心多圈绝对值编码器多圈接口故障，重启，若还失败则请联系售后工程师";
-        case RuiwoErrCode::ABSOLUTE_ENCODER_EXTERNAL_INPUT_FAILURE:
-            return "对心多圈绝对值编码器外部输入故障，重启，若还失败则请联系售后工程师";
-        case RuiwoErrCode::ABSOLUTE_ENCODER_SYSTEM_ANOMALY:
-            return "对心多圈绝对值编码器读值故障，重启，若还失败则请联系售后工程师";
-        case RuiwoErrCode::ERR_OFFS:
-            return "对心多圈绝对值编码器ERR_OFFS，重启，若还失败则请联系售后工程师";
-        case RuiwoErrCode::ERR_CFG:
-            return "对心多圈绝对值编码器ERR_CFG，重启，若还失败则请联系售后工程师";
-        case RuiwoErrCode::ILLEGAL_FIRMWARE_DETECTED:
-            return "检测到非法固件，重启，若还失败则请联系售后工程师";
-        case RuiwoErrCode::INTEGRATED_STATOR_DRIVER_DAMAGED:
-            return "集成式栅极驱动器初始化失败，重启，若还失败则请联系售后工程师";
-        default:
-            std::cout << "\033[33m[DEBUG] 未处理的错误码: 0x" << std::hex << static_cast<int>(errcode)
-                << std::dec << " (" << static_cast<int>(errcode) << ")\033[0m" << std::endl;
-            return "未知故障码: " + std::to_string(static_cast<int>(errcode));
-    }
-}
-
 RuiWoActuator::RuiWoActuator(std::string pymodule_path, bool is_cali) : is_cali_(is_cali), ActuatorInstance(nullptr),
                                                                 pEnableMethod(nullptr), pDisableMethod(nullptr),
                                                                 pSetPositionMethod(nullptr), pSetTorqueMethod(nullptr), pSetVelocityMethod(nullptr), 
@@ -211,18 +152,13 @@ int RuiWoActuator::initialize()
     pSetZeroMethod = PyObject_GetAttrString(ActuatorInstance, "set_as_zero");
     pChangEncoderMethod = PyObject_GetAttrString(ActuatorInstance, "change_encoder_zero_round");
     pSaveZerosMethod = PyObject_GetAttrString(ActuatorInstance, "save_zero_position");
-    pAdjustZeroMethod = PyObject_GetAttrString(ActuatorInstance, "adjust_zero_position");
-    pGetZeroPointsMethod = PyObject_GetAttrString(ActuatorInstance, "get_motor_zero_points");
     pSetTeachPendantModeMethod = PyObject_GetAttrString(ActuatorInstance, "set_teach_pendant_mode");
-    pSetJointGainsMethod = PyObject_GetAttrString(ActuatorInstance, "set_joint_gains");
-    pGetJointGainsMethod = PyObject_GetAttrString(ActuatorInstance, "get_joint_gains");
     pJoint_online_list = PyObject_GetAttrString(ActuatorInstance, "joint_online_list");
 
     // 检查获取方法是否成功
     if (!pEnableMethod || !pCloseMethod || !pDisableMethod || !pSetPositionMethod || !pSetTorqueMethod || !pSetVelocityMethod ||
         !pGetPositionMethod || !pGetTorqueMethod|| !pGetVelocityMethod || !pGetJointStateMethod || !RuiWo_pJoinMethod ||
-        !pCheckStateMethod || !pSetZeroMethod || !pChangEncoderMethod || !pSaveZerosMethod || !pAdjustZeroMethod || !pGetZeroPointsMethod ||
-        !pSetTeachPendantModeMethod || !pSetJointGainsMethod || !pGetJointGainsMethod || !pJoint_online_list)
+        !pCheckStateMethod || !pSetZeroMethod || !pChangEncoderMethod || !pSaveZerosMethod || !pSetTeachPendantModeMethod || !pJoint_online_list)
     {
         PyErr_Print();
         Py_DECREF(ActuatorInstance); // 释放已获取的对象
@@ -257,60 +193,6 @@ void RuiWoActuator::changeEncoderZeroRound(int index, double direction)
         PyErr_Print();
     }
     PyGILState_Release(gstate);
-}
-
-void RuiWoActuator::adjustZeroPosition(int index, double offset)
-{
-    gstate = PyGILState_Ensure();
-    if (pAdjustZeroMethod)
-    {   
-        PyObject *args = Py_BuildValue("(id)", index, offset);
-        PyObject_CallObject(pAdjustZeroMethod, args);
-        Py_DECREF(args);
-    }
-    else
-    {
-        PyErr_Print();
-    }   
-    PyGILState_Release(gstate);
-}
-
-std::vector<double> RuiWoActuator::getMotorZeroPoints()
-{
-    gstate = PyGILState_Ensure();
-    PyObject *result = PyObject_CallObject(pGetZeroPointsMethod, nullptr);
-    if (!result)
-    {
-        PyErr_Print();
-        PyGILState_Release(gstate);
-        return std::vector<double>();
-    }
-    std::vector<double> zero_points;
-    PyObject *py_zero_points = PyObject_CallObject(pGetZeroPointsMethod, nullptr);
-    if (!py_zero_points)
-    {
-        PyErr_Print();
-        Py_DECREF(py_zero_points);
-        PyGILState_Release(gstate);
-        return std::vector<double>();
-    }
-    
-    for (int i = 0; i < PyList_Size(py_zero_points); i++)
-    {
-        PyObject *py_zero_point = PyList_GetItem(py_zero_points, i);
-        if (py_zero_point)
-        {
-            double zero_point = PyFloat_AsDouble(py_zero_point);
-            zero_points.push_back(zero_point);
-        }
-        else
-        {
-            PyErr_Print();
-        }
-    }
-
-    PyGILState_Release(gstate);
-    return zero_points;
 }
 
 void RuiWoActuator::saveAsZeroPosition()
@@ -377,33 +259,18 @@ void RuiWoActuator::join()
 }
 
 // 添加 enable 方法的 C++ 接口
-int RuiWoActuator::enable()
+void RuiWoActuator::enable()
 {
     gstate = PyGILState_Ensure();
     if (pEnableMethod)
     {
-        PyObject *result = PyObject_CallObject(pEnableMethod, nullptr);
-        if (result)
-        {
-            // Python 的 enable() 函数现在返回 int (0=成功, 1=失败)
-            int return_code = PyLong_AsLong(result);
-            Py_DECREF(result);
-            PyGILState_Release(gstate);
-            return return_code;
-        }
-        else
-        {
-            PyErr_Print();
-            PyGILState_Release(gstate);
-            return -1; // Python调用失败，返回错误码-1
-        }
+        PyObject_CallObject(pEnableMethod, nullptr);
     }
     else
     {
         PyErr_Print();
-        PyGILState_Release(gstate);
-        return -1; // Python方法不存在，返回错误码-1
     }
+    PyGILState_Release(gstate);
 }
 void RuiWoActuator::close()
 {
@@ -429,12 +296,8 @@ void RuiWoActuator::close()
         Py_XDECREF(pSetZeroMethod);
         Py_XDECREF(pChangEncoderMethod);
         Py_XDECREF(pSaveZerosMethod);
-        Py_XDECREF(pAdjustZeroMethod);
-            Py_XDECREF(pGetZeroPointsMethod);
-    Py_XDECREF(pSetTeachPendantModeMethod);
-    Py_XDECREF(pSetJointGainsMethod);
-    Py_XDECREF(pGetJointGainsMethod);
-    Py_XDECREF(pJoint_online_list);
+        Py_XDECREF(pSetTeachPendantModeMethod);
+        Py_XDECREF(pJoint_online_list);
     }
     else
     {
@@ -458,146 +321,6 @@ void RuiWoActuator::set_teach_pendant_mode(int mode_){
         PyErr_Print();
     }
 
-}
-
-void RuiWoActuator::set_joint_gains(const std::vector<int> &joint_indices, const std::vector<double> &kp_pos, const std::vector<double> &kd_pos)
-{
-    gstate = PyGILState_Ensure();
-    if (pSetJointGainsMethod)
-    {
-        // 创建joint_indices列表
-        PyObject *pyIndices = PyList_New(joint_indices.size());
-        for (size_t i = 0; i < joint_indices.size(); ++i)
-        {
-            PyList_SetItem(pyIndices, i, PyLong_FromLong(joint_indices[i]));
-        }
-
-        // 创建kp_pos列表，如果为空则传递None
-        PyObject *pyKpPos = Py_None;
-        if (!kp_pos.empty())
-        {
-            pyKpPos = PyList_New(kp_pos.size());
-            for (size_t i = 0; i < kp_pos.size(); ++i)
-            {
-                PyList_SetItem(pyKpPos, i, PyFloat_FromDouble(kp_pos[i]));
-            }
-        }
-        else
-        {
-            Py_INCREF(Py_None);
-        }
-
-        // 创建kd_pos列表，如果为空则传递None
-        PyObject *pyKdPos = Py_None;
-        if (!kd_pos.empty())
-        {
-            pyKdPos = PyList_New(kd_pos.size());
-            for (size_t i = 0; i < kd_pos.size(); ++i)
-            {
-                PyList_SetItem(pyKdPos, i, PyFloat_FromDouble(kd_pos[i]));
-            }
-        }
-        else
-        {
-            Py_INCREF(Py_None);
-        }
-
-        // 构建参数元组并调用Python方法
-        PyObject *args = PyTuple_Pack(3, pyIndices, pyKpPos, pyKdPos);
-        PyObject_CallObject(pSetJointGainsMethod, args);
-
-        // 清理引用
-        Py_DECREF(args);
-        Py_DECREF(pyIndices);
-        Py_DECREF(pyKpPos);
-        Py_DECREF(pyKdPos);
-    }
-    else
-    {
-        PyErr_Print();
-    }
-    PyGILState_Release(gstate);
-}
-
-std::vector<std::vector<double>> RuiWoActuator::get_joint_gains(const std::vector<int> &joint_indices)
-{
-    std::vector<std::vector<double>> gains_result;
-    gstate = PyGILState_Ensure();
-    
-    if (pGetJointGainsMethod)
-    {
-        // 创建joint_indices列表，如果为空则传递None
-        PyObject *pyIndices = Py_None;
-        if (!joint_indices.empty())
-        {
-            pyIndices = PyList_New(joint_indices.size());
-            for (size_t i = 0; i < joint_indices.size(); ++i)
-            {
-                PyList_SetItem(pyIndices, i, PyLong_FromLong(joint_indices[i]));
-            }
-        }
-        else
-        {
-            Py_INCREF(Py_None);
-        }
-
-        // 调用Python方法
-        PyObject *args = PyTuple_Pack(1, pyIndices);
-        PyObject *result = PyObject_CallObject(pGetJointGainsMethod, args);
-
-        if (result && PyDict_Check(result))
-        {
-            // 获取kp_pos和kd_pos列表
-            PyObject *kp_list = PyDict_GetItemString(result, "kp_pos");
-            PyObject *kd_list = PyDict_GetItemString(result, "kd_pos");
-
-            if (kp_list && PyList_Check(kp_list) && kd_list && PyList_Check(kd_list))
-            {
-                std::vector<double> kp_values, kd_values;
-                
-                // 提取kp_pos值
-                Py_ssize_t kp_size = PyList_Size(kp_list);
-                for (Py_ssize_t i = 0; i < kp_size; ++i)
-                {
-                    PyObject *item = PyList_GetItem(kp_list, i);
-                    kp_values.push_back(PyFloat_AsDouble(item));
-                }
-
-                // 提取kd_pos值
-                Py_ssize_t kd_size = PyList_Size(kd_list);
-                for (Py_ssize_t i = 0; i < kd_size; ++i)
-                {
-                    PyObject *item = PyList_GetItem(kd_list, i);
-                    kd_values.push_back(PyFloat_AsDouble(item));
-                }
-
-                gains_result.push_back(kp_values);
-                gains_result.push_back(kd_values);
-            }
-            else
-            {
-                std::cerr << "Error: get_joint_gains result format incorrect!" << std::endl;
-                PyErr_Print();
-            }
-        }
-        else
-        {
-            std::cerr << "Error: get_joint_gains result is null or not a dict!" << std::endl;
-            PyErr_Print();
-        }
-
-        // 清理引用
-        Py_DECREF(args);
-        Py_DECREF(pyIndices);
-        Py_XDECREF(result);
-    }
-    else
-    {
-        PyErr_Print();
-    }
-    
-    PyGILState_Release(gstate);
-    return gains_result;
 }
 
 bool RuiWoActuator::check_motor_list_state()
@@ -651,40 +374,24 @@ bool RuiWoActuator::check_motor_list_state()
 //     }
 // }
 // 添加 disable 方法的 C++ 接口
-int RuiWoActuator::disable()
+void RuiWoActuator::disable()
 {
     gstate = PyGILState_Ensure();
     if (pDisableMethod)
     {
-        PyObject *result = PyObject_CallObject(pDisableMethod, nullptr);
-        if (result)
-        {
-            // Python 的 disable() 函数现在返回 int (0=成功, 1=失败)
-            int return_code = PyLong_AsLong(result);
-            Py_DECREF(result);
-            PyGILState_Release(gstate);
-            return return_code;
-        }
-        else
-        {
-            PyErr_Print();
-            PyGILState_Release(gstate);
-            return -1; // Python调用失败，返回错误码-1
-        }
+        PyObject_CallObject(pDisableMethod, nullptr);
     }
     else
     {
         PyErr_Print();
-        PyGILState_Release(gstate);
-        return -1; // Python方法不存在，返回错误码-1
     }
+    PyGILState_Release(gstate);
 }
 
 bool RuiWoActuator::disableMotor(int motorIndex)
 {
     // TODO Not implemented
     std::cout << "python interface disimplemented" << std::endl;
-    return true;
 }
 
 // set_positions接口

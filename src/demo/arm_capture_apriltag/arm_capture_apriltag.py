@@ -28,7 +28,7 @@ ik_solve_param = ikSolveParam()
 ik_solve_param.major_optimality_tol = 1e-3
 ik_solve_param.major_feasibility_tol = 1e-3
 ik_solve_param.minor_feasibility_tol = 1e-3
-ik_solve_param.major_iterations_limit = 500
+ik_solve_param.major_iterations_limit = 100
 ik_solve_param.oritation_constraint_tol= 1e-3
 ik_solve_param.pos_constraint_tol = 1e-3 
 ik_solve_param.pos_cost_weight = 0.0 
@@ -373,22 +373,17 @@ def main():
 
     # 解析命令行参数  
     parser = argparse.ArgumentParser(description="是否启用偏移量")
-    parser.add_argument("--offset_start", type=str, choices=["False", "True"], required="True", help="选择 offset_start = True or False")
-    parser.add_argument("--cost_weight", type=float, default=0.0, help="传入pos_cost_weight")
+    parser.add_argument("--offset_start", type=str, choices=["False", "True"], required="True", help="选择 offset_start = True or Flase")
     args = parser.parse_args()
-
-    if args.cost_weight != 0.0:
-        ik_solve_param.pos_cost_weight = args.cost_weight
-        print(f"pos_cost_weight:{ik_solve_param.pos_cost_weight}")
 
     # offset_start="True"表示启用偏移量 否则不启用偏移量
     if args.offset_start == "True":
         # 偏向侧后边一点
         offset_z=-0.10  # 抓取点位于标签正下方
-        temp_x_l=0.0
-        temp_y_l=0.0
-        temp_x_r=-0.0
-        temp_y_r=0.0
+        temp_x_l=-0.035
+        temp_y_l=0.035
+        temp_x_r=-0.045
+        temp_y_r=0.035
     else :
         offset_z=0.00
         temp_x_l=0.00
@@ -428,23 +423,18 @@ def main():
     # 获取机器人版本
     robot_version = get_parameter('robot_version')
     #不同型号机器人的初始位置 (机器人坐标系)
-    def start_with_version(version_number:int, series:int):
-        """判断版本号是否属于某系列"""
-        # PPPPMMMMN
-        MMMMN_MASK = 100000
-        return (version_number % MMMMN_MASK) == series
-    if start_with_version(robot_version, 45) or start_with_version(robot_version, 49):
+    if robot_version == 45 or robot_version == 49:
         robot_zero_x = -0.0173
         robot_zero_y = -0.2927
         robot_zero_z = -0.2837
         
-    elif start_with_version(robot_version, 42):
+    elif robot_version == 42:
         robot_zero_x = -0.0175
         robot_zero_y = -0.25886
         robot_zero_z = -0.20115
 
     else :
-        print("机器人版本号错误, 仅支持42 45 49 系列")
+        print("机器人版本号错误, 仅支持42 45 49")
 
 
     # 设置手臂运动模式为外部控制

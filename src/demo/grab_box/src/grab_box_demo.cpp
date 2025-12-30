@@ -136,7 +136,6 @@ int main(int argc, char **argv)
   factory.registerNodeType<ForceCheck>("ForceCheck");
   factory.registerNodeType<CmdPoseMoveToDestination>("CmdPoseMoveToDestination");
   factory.registerNodeType<CmdPoseWorldMoveToDestination>("CmdPoseWorldMoveToDestination");
-
   factory.registerNodeType<GetTagMap>("GetTagMap");
   factory.registerNodeType<DelTagID>("DelTagID");
   factory.registerNodeType<ResetState>("ResetState");
@@ -146,21 +145,21 @@ int main(int argc, char **argv)
   factory.registerNodeType<ControlClaw>("ControlClaw");
   factory.registerNodeType<GetPartPose>("GetPartPose");
   factory.registerNodeType<SelectHandSide>("SelectHandSide");
-
-  RobotVersion rb_version(4, 2);
-
+  RobotVersion robot_version(4, 2);
   if (nh.hasParam("/robot_version"))
   {
-    int rb_version_int;
-    nh.getParam("/robot_version", rb_version_int);
-    rb_version = RobotVersion::create(rb_version_int);
+    int robot_version_int;
+    nh.getParam("/robot_version", robot_version_int);
+    int major = robot_version_int / 10;
+    int minor = robot_version_int % 10;
+    robot_version = RobotVersion(major, minor);
   }
-  auto humanoid_drake_interface = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
+  auto humanoid_drake_interface = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(robot_version, true, 2e-3);
 
   // Register the custom logger
   CSVLogger::getInstance().initialize("behavior_tree_log.csv");
   // Create a behavior tree from a string
-  const std::string version_int_str = "kuavo_v" + rb_version.to_string();
+  const std::string version_int_str = "kuavo_v" + std::to_string(robot_version.versionInt());
   YAML::Node config = YAML::LoadFile(GrabBox::getPath() + "/cfg/" + version_int_str + "/bt_config.yaml");
   std::string bt_xml_string = config["bt_xml_file"].as<std::string>();
   std::string bt_xml_string_reset = config["bt_xml_file_reset"].as<std::string>();

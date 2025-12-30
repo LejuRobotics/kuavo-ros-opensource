@@ -31,8 +31,8 @@
     0 0 0 0 0 0
     0 0 0 0 0 0 0        
     0 0 0 0 0 0 0 0 0 0
-    0 0 0 0 0 0 0 
-    0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 
+    0 0 0 0 0 0 0 0 0 0 0
     0 0"/>
     <!-- IMU,LLeg,RLeg,LArm,LDexhand,RArm, RDexhand, Head-->
   </keyframe>

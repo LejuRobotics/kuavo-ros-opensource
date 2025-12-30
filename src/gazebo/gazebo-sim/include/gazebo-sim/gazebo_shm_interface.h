@@ -23,7 +23,7 @@ public:
 
     void Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf) override;
     
-    // 退出相关函数
+    // 新增退出相关函数 - 移到公有部分以便静态函数访问
     void cleanupAndExit();
 
 private:
@@ -35,7 +35,7 @@ private:
     bool ParseJoints(const sdf::ElementPtr& _sdf);
     bool ParseContacts(const sdf::ElementPtr& _sdf);
     
-    // 初始化相关函数
+    // 新增初始化相关函数
     void waitForParams();
     void setInitialState();
     void setModelConfiguration(const std::vector<double>& positions);
@@ -57,19 +57,27 @@ private:
     std::vector<std::string> contact_link_names_;
     physics::ContactManager* contact_manager_;
     
-    // 共享内存
+    // 共享内存管理
     std::unique_ptr<gazebo_shm::ShmManager> shm_manager_;
+    
+    // 命令读取线程
+    std::unique_ptr<std::thread> cmd_thread_;
+    std::atomic<bool> running_;
+    
+    // 数据缓存
     gazebo_shm::SensorsData sensors_data_;
+    gazebo_shm::JointCommand joint_cmd_;
+    std::mutex cmd_mutex_;
+    
+    // 新增初始化相关变量
+    std::vector<double> robot_init_state_param_;
+    bool params_loaded_ = false;
+    bool sim_start_ = false;
     
     // ROS相关
     ros::NodeHandle* nh_;
     ros::Subscriber stop_sub_;
     ros::ServiceServer sim_start_srv_;
-    
-    // 参数和状态
-    std::vector<double> robot_init_state_param_;
-    bool params_loaded_ = false;
-    std::atomic<bool> sim_start_{false};
 };
 
 } 

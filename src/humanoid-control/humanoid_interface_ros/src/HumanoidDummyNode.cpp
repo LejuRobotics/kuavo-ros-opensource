@@ -27,12 +27,11 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ******************************************************************************/
 
-#include <humanoid_interface/HumanoidInterface.h>
-
 #include <ros/init.h>
 #include <ros/package.h>
 
 #include <ocs2_centroidal_model/CentroidalModelPinocchioMapping.h>
+#include <humanoid_interface/HumanoidInterface.h>
 #include <ocs2_pinocchio_interface/PinocchioEndEffectorKinematics.h>
 #include <ocs2_ros_interfaces/mrt/MRT_ROS_Dummy_Loop.h>
 #include <ocs2_ros_interfaces/mrt/MRT_ROS_Interface.h>
@@ -57,15 +56,13 @@ int main(int argc, char **argv)
   nodeHandle.getParam("/referenceFile", referenceFile);
   nodeHandle.getParam("/gaitCommandFile", gaitCommandFile);
 
-  RobotVersion rb_version(3, 4);
+  int version_num;
   if (nodeHandle.hasParam("/robot_version"))
   {
-    int rb_version_int;
-    nodeHandle.getParam("/robot_version", rb_version_int);
-    rb_version = RobotVersion::create(rb_version_int);
+    nodeHandle.getParam("/robot_version", version_num);
   }
   // Robot interface
-  HumanoidInterface interface(taskFile, urdfFile, referenceFile, gaitCommandFile, rb_version);
+  HumanoidInterface interface(taskFile, urdfFile, referenceFile, gaitCommandFile, version_num);
 
   // MRT
   MRT_ROS_Interface mrt(robotName);

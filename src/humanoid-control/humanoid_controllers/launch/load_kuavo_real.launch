@@ -28,18 +28,15 @@
     <arg name="start_way"         default="manual"/>
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="only_half_up_body" default="false"/>
-    <arg name="waist_move_spd"     default="1.0"/>
     <arg name="stand_up_protect" default="true"/>
     <arg name="redundant_imu" default="false"/>
-    <arg name="joint_protect_enable" default="false" />
-    <arg name="cmd_truncation_enable" default="false" />
-    <arg name="leg_disable_mode" default="true" doc="If true, when any leg joint fails, all leg joints (1-12) will be disabled" />
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <arg name="arm_move_spd"      default="1.2"/>
 
     <!-- 半身控制手臂模式切换插值相关参数 -->
-    <arg name="arm_move_spd_half_up_body" default="0.15"/>
-    <arg name="threshold_arm_diff_half_up_body" default="0.15"/>
+    <arg name="arm_move_spd_half_up_body" default="0.14"/>
+    <arg name="threshold_arm_diff_half_up_body" default="0.28"/>
+    
     <!-- The file defining gait definition -->
 
     <!-- Set with_coredump parameter based on coredump value -->
@@ -47,8 +44,7 @@
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
-    <arg name="with_mm_ik" default="false"/>
-    <arg name="with_led" default="true"/>
+    <arg name="with_mm_ik" default="true"/>
     
     <!-- -->
     <arg name="teach_pendant" default="0"/>
@@ -73,14 +69,9 @@
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
     <param name="start_way"  value="$(arg start_way)"/>
     <param name="use_estimator_contact"  value="$(arg use_estimator_contact)"/>
-    <param name="waist_move_spd"     value="$(arg waist_move_spd)"/>
-
     <param name="stand_up_protect" value="$(arg stand_up_protect)"/>
     <param name="redundant_imu" value="$(arg redundant_imu)"/>
     <param name="ruiwo_cxx_sdk" value="$(arg ruiwo_cxx_sdk)"/>
-    <param name="joint_protect_enable" value="$(arg joint_protect_enable)" />
-    <param name="cmd_truncation_enable" value="$(arg cmd_truncation_enable)" />
-    <param name="leg_disable_mode" value="$(arg leg_disable_mode)" />
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
@@ -109,13 +100,6 @@
       <param name="stand_up_protect" value="false"/>
       <param name="only_half_up_body" value="true"/>
     </group>
-
-    <group unless="$(eval arg('robot_version') >= 30)">
-        <param name="enable_pull_up_protect" value="false"/>
-        <param name="stand_up_protect" value="false"/>
-        <param name="joint_protect_enable" value="false" />
-        <param name="cmd_truncation_enable" value="false" />
-    </group>
     
     <!-- mpc node -->
     <group if="$(arg use_external_mpc)">
@@ -140,21 +124,16 @@
     <arg name="cali" default="false" />
     <arg name="cali_arm" default="false" />
     <arg name="cali_leg" default="false" />
-    <!-- 是否进入到手臂展开的零点校准姿态 -->
-    <arg name="cali_set_zero" default="false" />
+    <arg name="joint_protect_enable" default="false" />
+    <arg name="cmd_truncation_enable" default="false" />
 
     <param name="real" value="$(arg real)" />
     <param name="log_lcm" value="$(arg log)" />
     <param name="cali" value="$(arg cali)" />
     <param name="cali_arm" value="$(arg cali_arm)" />
     <param name="cali_leg" value="$(arg cali_leg)" />
-    <param name="cali_set_zero" value="$(arg cali_set_zero)" />
-
-    <!-- If cali_set_zero is true, force cali to true -->
-    <group if="$(arg cali_set_zero)">
-        <param name="cali" value="true" />
-    </group>
-    
+    <param name="joint_protect_enable" value="$(arg joint_protect_enable)" />
+    <param name="cmd_truncation_enable" value="$(arg cmd_truncation_enable)" />
     <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
        output="screen" required="true" clear_params="true"
        launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
@@ -225,9 +204,7 @@
     <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
 
     <!-- 启动上位机服务节点 -->
-    <group if="$(eval arg('robot_version') >= 40)">
-      <node pkg="humanoid_controllers" type="upper_computer_service.py" name="upper_computer_service" output="screen" />
-    </group>
+    <node pkg="humanoid_controllers" type="upper_computer_service.py" name="upper_computer_service" output="screen" />
 
     <group if="$(arg vr_remote_control)">
       <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
@@ -242,36 +219,19 @@
         <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string"/>
 
         <!-- 启动 播放音乐服务 -->
-        <include file="$(find kuavo_audio_player)/launch/play_music.launch"/>
+        <node pkg="kuavo_audio_player" type="loundspeaker.py" name="play_music_node" output="screen" respawn="true" respawn_delay="5"/>
+        <param name="music_path" value="/home/lab/.config/lejuconfig/music" />
     </group>
-
 
     <group if="$(arg with_ik)">
       <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
     </group>
 
     <group if="$(arg with_mm_ik)">
-      <group if="$(eval arg('robot_version') >= 30)">
       <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
         <arg name="sqp_mpc" value="1"/>
         <arg name="rviz"    value="false"/>
-        <arg name="visualize_mm"   value="true"/>
-        <arg name="coredump" value="$(arg coredump)"/>
-      </include>
-      </group>
-    </group>
-
-    <group if="$(arg with_led)">
-      <include file="$(find kuavo_led_controller)/launch/set_led_mode.launch">
-        <arg name="LED" value="enable"/>
+        <arg name="visualize_mm"   value="false"/>
       </include>
     </group>
-    <arg name="microphone" default="true" />
-
-    <group if="$(arg microphone)">
-      <!-- 添加音频接收节点 -->
-      <include file="$(find kuavo_audio_receiver)/launch/receive_voice.launch"/>
-
-    </group>
-
 </launch>

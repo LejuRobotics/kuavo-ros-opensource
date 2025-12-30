@@ -6,8 +6,7 @@ import rosbag
 import sys
 import os
 import subprocess
-from noitom_hi5_hand_udp_python.msg import PoseInfoList
-from kuavo_msgs.msg import JoySticks
+from noitom_hi5_hand_udp_python.msg import PoseInfoList, JoySticks
 import tf
 from geometry_msgs.msg import TransformStamped
 from tf2_msgs.msg import TFMessage

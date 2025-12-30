@@ -6,7 +6,7 @@
 
 > 3：编辑完动作以后可以记住当前目录位置，直接导入设计好的动作，使用遥控器快捷键实现真实机器人演示（建议先仿真验证动作，在迁移到实机）
 
-- [Kuavo机器人桌面软件使用手册](#kuavo机器人桌面软件使用手册)
+- [Kuavo机器人桌面软件使用手册](#Kuavo机器人桌面软件使用手册)
   - [下载和安装](#下载和安装)
   - [动作设计](#动作设计)
     - [使用须知](#使用须知)
@@ -16,17 +16,15 @@
     - [手指控制](#手指控制)
     - [头部控制](#头部控制)
   - [连接机器人](#连接机器人)
-    - [热点连接和WIFI连接](#热点连接和wifi连接)
+    - [热点连接和WIFI连接](#热点连接和WIFI连接)
     - [设置机器人网络](#设置机器人网络)
     - [下载日志和rosbag](#下载日志和rosbag)
-    - [H12遥控器语音动作配置](#h12遥控器语音动作配置)
+    - [h12遥控器语音动作配置](#h12遥控器语音动作配置)
     - [代码版本管理](#代码版本管理)
-      - [注意事项](#注意事项)
-      - [操作步骤](#操作步骤)
 
 ## 下载和安装
 工具是Windows平台下的应用程序，下载exe文件即可使用。
-- 下载地址为： [Kuavo机器人桌面软件](https://kuavo.lejurobot.com/kuavo-desktop-beta/Kuavo-0.0.3-683-g0b1ef48-win.exe )
+- 下载地址为： [Kuavo机器人桌面软件](https://kuavo.lejurobot.com/kuavo-desktop-beta/Kuavo-0.0.3-508-ge2f1c7f-win.exe )
 - 下载完成后，双击exe文件，即可运行，运行打开后如下图所示：
 
 ![开始界面](images/开始界面.png)
@@ -131,12 +129,11 @@
 ## 连接机器人 
 > 如希望实现此功能，先在机器人下位机运行下面命令
 ```bash
-sudo su
-cd /home/lab/kuavo-ros-opensource/src/manipulation_nodes/planarmwebsocketservice/service/
+cd <kuavo-ros-opensource>/src/manipulation_nodes/planarmwebsocketservice/service/
 chmod +x websocket_deploy_script.sh 
 ./websocket_deploy_script.sh
 # 等待上面成功运行，然后运行下面命令
-cd /home/lab/kuavo-ros-opensource/tools/user_groups_tools/
+cd <kuavo-ros-opensource>/tools/user_groups_tools/
 chmod +x add_user_groups.sh
 ./add_user_groups.sh
 ```
@@ -196,23 +193,12 @@ chmod +x add_user_groups.sh
 ![E和F拨杆](images/h12遥控器E-F位置.png)
 
 ### 代码版本管理
-
-#### 注意事项
-
-- **用户使用时只能选择tag进行切换, 否则可能会存在问题**
-- **tag的标准格式为x.x.x , 推荐更新最新的版本**
-- **代码更新会自动覆盖之前的代码, 用户自己的代码需要自行备份**
-
-#### 操作步骤
-
-- 选择设置，然后选择代码版本管理，弹出下面界面，
+- 如非工程师指导，请不要使用本功能
+- 选择设置，然后选择代码版本管理，弹出下面界面，选择所需版本即可
 
 ![alt text](images/image.png)
 
-- 选择所需版本，点击切换，即可自动切换分支并编译代码
+- 点击切换，开始编译代码，若中途无报错，则可成功切换
 
 ![alt text](images/image11.png)
 
-- 若输出信息正常，即为切换成功
-
-![alt text](images/输出信息示例.png)

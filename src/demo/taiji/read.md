@@ -6,7 +6,11 @@
 
   - [2. 文件结构](#2-文件结构)
 
-  - [3. 运行步骤](#3-运行步骤)
+  - [3. 编译与运行](#3-编译与运行)
+
+    - [3.1 编译](#31-编译)
+
+    - [3.2 运行步骤](#32-运行步骤)
 
   - [4. ROS接口](#4-ros接口)
 
@@ -42,7 +46,7 @@
 
 本案例是一个ROS节点，用于播放预定义的机器人动作序列。动作序列存储在JSON文件中，包括步态控制（足部运动）和手臂动作。节点通过ROS话题和服务与MPC控制器及手臂控制器通信，实现动作的按序执行。
 
-- ***建议先进行全身机器人关节标定，确保机器人状况良好，先在挂绳的条件下运行此案例，足够稳定后再考虑脱绳运行。并且由于机器人会有小幅度下蹲，移位机需要下降至挂绳架子与机器人头部约1cm高度。运行此案例时机器人会向左踏出一步，注意不要碰到障碍物，如果需要多次重复运行此案例，需要在启动下位机程序后面增加参数 <joystick_type:=h12>（用遥控器启动机器人无需再次启动下位机程序） ，每重复运行2~3次太极动作需要通过遥控器控制机器人原地踏步一会以矫正机器人姿态。***
+- ***强烈建议先进行全身机器人关节标定，并且在机器人状况良好的情况下，运行此案例，强烈反对脱绳运行此案例。并且由于机器人会有小幅度下蹲，移位机需要下降更多一些留出足够的绳子余量。运行此案例时机器人会向左踏出一步，注意不要碰到障碍物，如果需要多次重复运行此案例，需要在启动下位机程序后面增加参数 <joystick_type:=h12> ，每重复运行2~3次太极动作需要通过遥控器控制机器人原地踏步一会以矫正机器人姿态。***
 
 - 示例代码位于：`<kuavo-ros-opensource>/src/demo/taiji/action_player`
 
@@ -63,46 +67,55 @@ taiji/
 
 ```
 
-## 3. 运行步骤
+## 3. 编译与运行
 
-1. 终端1：启动下位机程序（实物运行，若已使用操控器启动机器人无需执行此步骤）：
+### 3.1 编译
+
+确保已安装以下ROS包：
 
 ```bash
 
-cd ~/kuavo-ros-opensource && sudo su
+cd <kuavo-ros-opensource> #仓库目录
+sudo su
+catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release # Important! 
+source installed/setup.bash # 加载一些已经安装的ROS包依赖环境，包括硬件包等
+catkin build humanoid_controllers
+
+```
+
+### 3.2 运行步骤
+
+1. 启动下位机程序（实物运行）：
+
+```bash
+
+cd kuavo-ros-opensource && sudo su
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_real.launch
 
 ```
 
-2. 终端1：启动下位机程序（仿真运行）：
+2. 启动下位机程序（仿真运行）：
 
 ```bash
 
-cd ~/kuavo-ros-opensource && sudo su
+cd kuavo-ros-opensource && sudo su
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch
 
 ```
 
-3. 终端2：运行动作播放器节点：
+3. 运行动作播放器节点：
 
 ```bash
 
-cd ~/kuavo-ros-opensource
-source devel/setup.bash
-python3 src/demo/taiji/actions_player.py
+cd kuavo-ros-opensource/src/demo/taiji
+chmod +X actions_player.py
+python3 actions_player.py
 
 ```
 
 注意：在运行前，确保`taiji.json`文件位于同一目录下，或者修改代码中的路径。
-
-- 运行效果
-
-<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=114737803170975&bvid=BV1QdKgzjEnn&cid=30673735033&p=1" 
-        width="320" height="320" 
-        scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true">
-</iframe>
 
 ## 4. ROS接口
 

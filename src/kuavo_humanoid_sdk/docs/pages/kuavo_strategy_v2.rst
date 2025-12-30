@@ -164,10 +164,10 @@
 
 注意ROS里Tag识别的坐标系如下：
 
-.. image:: tag_frame.png
-   :alt: Tag的坐标系定义
-   :width: 400px
-   :align: center
+.. .. image:: tag_frame.png
+..    :alt: Tag的坐标系定义
+..    :width: 400px
+..    :align: center
 
 以下是一个使用箱子抓取策略的基本示例:
 

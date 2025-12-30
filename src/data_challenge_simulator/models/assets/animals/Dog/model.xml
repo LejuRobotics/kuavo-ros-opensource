@@ -1,0 +1,83 @@
+<mujoco model="model">
+  <asset>
+    <texture type="2d" name="texture_dog" file="../../assets/animals/Dog/texture.png"/>
+    <material name="material_0_dog" texture="texture_dog" specular="0.5" shininess="0.5"/>
+    <mesh name="model_dog" file="../../assets/animals/Dog/model.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_0_dog" file="../../assets/animals/Dog/model_collision_0.obj" scale="0.4 0.4 0.4" />
+    <mesh name="model_collision_1_dog" file="../../assets/animals/Dog/model_collision_1.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_2_dog" file="../../assets/animals/Dog/model_collision_2.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_3_dog" file="../../assets/animals/Dog/model_collision_3.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_4_dog" file="../../assets/animals/Dog/model_collision_4.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_5_dog" file="../../assets/animals/Dog/model_collision_5.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_6_dog" file="../../assets/animals/Dog/model_collision_6.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_7_dog" file="../../assets/animals/Dog/model_collision_7.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_8_dog" file="../../assets/animals/Dog/model_collision_8.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_9_dog" file="../../assets/animals/Dog/model_collision_9.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_10_dog" file="../../assets/animals/Dog/model_collision_10.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_11_dog" file="../../assets/animals/Dog/model_collision_11.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_12_dog" file="../../assets/animals/Dog/model_collision_12.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_13_dog" file="../../assets/animals/Dog/model_collision_13.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_14_dog" file="../../assets/animals/Dog/model_collision_14.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_15_dog" file="../../assets/animals/Dog/model_collision_15.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_16_dog" file="../../assets/animals/Dog/model_collision_16.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_17_dog" file="../../assets/animals/Dog/model_collision_17.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_18_dog" file="../../assets/animals/Dog/model_collision_18.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_19_dog" file="../../assets/animals/Dog/model_collision_19.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_20_dog" file="../../assets/animals/Dog/model_collision_20.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_21_dog" file="../../assets/animals/Dog/model_collision_21.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_22_dog" file="../../assets/animals/Dog/model_collision_22.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_23_dog" file="../../assets/animals/Dog/model_collision_23.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_24_dog" file="../../assets/animals/Dog/model_collision_24.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_25_dog" file="../../assets/animals/Dog/model_collision_25.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_26_dog" file="../../assets/animals/Dog/model_collision_26.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_27_dog" file="../../assets/animals/Dog/model_collision_27.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_28_dog" file="../../assets/animals/Dog/model_collision_28.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_29_dog" file="../../assets/animals/Dog/model_collision_29.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_30_dog" file="../../assets/animals/Dog/model_collision_30.obj" scale="0.4 0.4 0.4"/>
+    <mesh name="model_collision_31_dog" file="../../assets/animals/Dog/model_collision_31.obj" scale="0.4 0.4 0.4"/>
+  </asset>
+  <worldbody>
+    <body name="dog" pos="5 0 0.05" euler="0 0 1.57079633">  
+      <freejoint name="dog"/>
+      <!-- Add inertial properties to reduce bouncing - increased mass for more stability -->
+      <!-- <inertial pos="0 0 0" mass="0.5" diaginertia="0.02 0.02 0.02" /> -->
+      <!-- Visual mesh -->
+      <geom material="material_0_dog" mesh="model_dog" type="mesh" contype="0" conaffinity="0" group="2" mass="1e-3"/>
+      <!-- Collision meshes with stronger damping to reduce elasticity -->
+      <!-- solimp: lower values = harder collision, less bounce -->
+      <!-- solref: lower first value = more damping, less bounce -->
+      <geom mesh="model_collision_0_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_1_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_2_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_3_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_4_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_5_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_6_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_7_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_8_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_9_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_10_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_11_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_12_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_13_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_14_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_15_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_16_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_17_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_18_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_19_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_20_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_21_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_22_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_23_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_24_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_25_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_26_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_27_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_28_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_29_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_30_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_31_dog" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+    </body>
+  </worldbody>
+</mujoco>

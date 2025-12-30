@@ -45,9 +45,6 @@
 
 #include "kuavo_msgs/twoArmHandPoseCmdSrv.h"
 #include "kuavo_msgs/fkSrv.h"
-#include "kuavo_msgs/twoArmHandPoseCmdFreeSrv.h"
-#include "kuavo_msgs/twoArmHandPoseFree.h"
-
 
 namespace
 {
@@ -94,11 +91,6 @@ class ArmsIKNode
             drake::systems::DiagramBuilder<double> builder;
             plant_ptr_ = builder.AddSystem<drake::multibody::MultibodyPlant>(dt);
             drake::multibody::Parser(plant_ptr_).AddModelFromFile(model_path);
-            std::cout << "original frame_name: " << std::endl;
-            for(auto& frame_name : end_frames_name)
-            {
-                std::cout << " " << frame_name << std::endl;
-            }
             plant_ptr_->WeldFrames(plant_ptr_->world_frame(), plant_ptr_->GetFrameByName(end_frames_name[0]));
             // custom eef frame
             plant_ptr_->AddFrame(std::make_unique<drake::multibody::FixedOffsetFrame<double>>(
@@ -110,11 +102,6 @@ class ArmsIKNode
             // 替换原始eef name
             end_frames_name[1] = custom_eef_frame_names[0];
             end_frames_name[2] = custom_eef_frame_names[1];
-            std::cout << "new frame_name: " << std::endl;
-            for(auto& frame_name : end_frames_name)
-            {
-                std::cout << "  " << frame_name << std::endl;
-            }
             plant_ptr_->Finalize();
             std::cout << "plant nq: " << plant_ptr_->num_positions() << ", nv: " << plant_ptr_->num_velocities() << std::endl;
 
@@ -132,12 +119,10 @@ class ArmsIKNode
             joint_pub_ = nh_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 10);
             time_cost_pub_ = nh_.advertise<std_msgs::Float32MultiArray>("/ik/debug/time_cost", 10);
             ik_result_pub_ = nh_.advertise<kuavo_msgs::twoArmHandPose>("/ik/result", 10);
-            ik_result_free_pub_ = nh_.advertise<kuavo_msgs::twoArmHandPoseFree>("/ik/result_free", 10);
             head_body_pose_pub_ = nh_.advertise<kuavo_msgs::headBodyPose>("/kuavo_head_body_orientation", 10);
             // srv
             // 初始化服务服务器
             ik_server_ = nh_.advertiseService("/ik/two_arm_hand_pose_cmd_srv", &ArmsIKNode::handleServiceRequest, this);
-            ik_free_server_ = nh_.advertiseService("/ik/two_arm_hand_pose_cmd_free_srv", &ArmsIKNode::free_handleServiceRequest, this);
             fk_server_ = nh_.advertiseService("/ik/fk_srv", &ArmsIKNode::handleFKServiceRequest, this);
             // solver params
             ik_solve_params_.major_optimality_tol = 9e-3;
@@ -177,8 +162,7 @@ class ArmsIKNode
                     {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_left_.elbow_pos_xyz},
                     {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_right_.elbow_pos_xyz}
                     };
-                // std::cout << "ik_cmd_left_.elbow_pos_xyz: " << ik_cmd_left_.elbow_pos_xyz.transpose() << std::endl;
-                // std::cout << "ik_cmd_right_.elbow_pos_xyz: " << ik_cmd_right_.elbow_pos_xyz.transpose() << std::endl;
+
                 Eigen::VectorXd q;
                 // std::cout << std::fixed << std::setprecision(5) << "q0: " << q0_.head(single_arm_num_).transpose() << std::endl;
                 if(use_ik_cmd_q0_)
@@ -203,16 +187,16 @@ class ArmsIKNode
                     sensor_msgs::JointState joint_state;
                     joint_state.header.stamp = ros::Time::now();
                     const int start_idx = q.size() - 2*single_arm_num_;
-                    for (int j = 0; j < single_arm_num_ * 2; ++j)
+                    for (int j = 0; j < 14; ++j)
                     {
                         joint_state.name.push_back("joint_" + std::to_string(j+1));
                         joint_state.position.push_back(TO_DEGREE*q[start_idx+j]);
                     }
                     // 如果只控制单手，则将其他手臂的关节位置设置为0
                     if (hand_side_ == HighlyDynamic::HandSide::LEFT)
-                        std::fill(joint_state.position.begin() + single_arm_num_, joint_state.position.begin() + single_arm_num_ * 2, 0);
+                        std::fill(joint_state.position.begin() + 7, joint_state.position.begin() + 14, 0);
                     else if (hand_side_ == HighlyDynamic::HandSide::RIGHT)
-                        std::fill(joint_state.position.begin() + 0, joint_state.position.begin() + single_arm_num_, 0);
+                        std::fill(joint_state.position.begin() + 0, joint_state.position.begin() + 7, 0);
                     joint_pub_.publish(joint_state);
                     if(start_idx > 0)//包含躯干
                     {
@@ -342,6 +326,7 @@ class ArmsIKNode
             }
             auto [left_pos, left_quat] = ik_.FK(q, HighlyDynamic::HandSide::LEFT);
             auto [right_pos, right_quat] = ik_.FK(q, HighlyDynamic::HandSide::RIGHT);
+
             for(int i = 0; i < 3; i++)
             {
                 msg.left_pose.pos_xyz[i] = left_pos[i];
@@ -353,33 +338,6 @@ class ArmsIKNode
                 msg.right_pose.quat_xyzw[i] = right_quat.coeffs()[i];
             }
             ik_result_pub_.publish(msg);
-            return msg;
-        }
-
-        kuavo_msgs::twoArmHandPoseFree publish_ik_result_info_free(const Eigen::VectorXd& q)
-        {
-            kuavo_msgs::twoArmHandPoseFree msg;
-            const int start_idx = q.size() - 2*single_arm_num_;
-            msg.left_pose.joint_angles.resize(single_arm_num_);
-            msg.right_pose.joint_angles.resize(single_arm_num_);
-            for (size_t i = 0; i < single_arm_num_; i++)
-            {
-                msg.left_pose.joint_angles[i] = q[i + start_idx];
-                msg.right_pose.joint_angles[i] = q[i + single_arm_num_ + start_idx];
-            }
-            auto [left_pos, left_quat] = ik_.FK(q, HighlyDynamic::HandSide::LEFT);
-            auto [right_pos, right_quat] = ik_.FK(q, HighlyDynamic::HandSide::RIGHT);
-            for(int i = 0; i < 3; i++)
-            {
-                msg.left_pose.pos_xyz[i] = left_pos[i];
-                msg.right_pose.pos_xyz[i] = right_pos[i];
-            }
-            for(int i = 0; i < 4; i++)
-            {
-                msg.left_pose.quat_xyzw[i] = left_quat.coeffs()[i]; //coeffs() return order: xyzw
-                msg.right_pose.quat_xyzw[i] = right_quat.coeffs()[i];
-            }
-            ik_result_free_pub_.publish(msg);
             return msg;
         }
 
@@ -487,102 +445,15 @@ class ArmsIKNode
                 }
                 // 如果只控制单手，则将其他手臂的关节位置设置为0
                 if (hand_side_ == HighlyDynamic::HandSide::LEFT)
-                    std::fill(res.q_arm.begin() + single_arm_num_, res.q_arm.begin() + single_arm_num_ * 2, 0);
+                    std::fill(res.q_arm.begin() + 7, res.q_arm.begin() + 14, 0);
                 else if (hand_side_ == HighlyDynamic::HandSide::RIGHT)
-                    std::fill(res.q_arm.begin() + 0, res.q_arm.begin() + single_arm_num_, 0);
+                    std::fill(res.q_arm.begin() + 0, res.q_arm.begin() + 7, 0);
                 if(start_idx > 0)//包含躯干
                 {
                     res.with_torso = true;
                     res.q_torso = std::vector<double>(q.data(), q.data() + start_idx);
                 }
                 kuavo_msgs::twoArmHandPose msg = publish_ik_result_info(q);
-                res.hand_poses = msg;
-            }
-            if(print_ik_info_)
-                printIkResultInfo(ik_cmd_left_, ik_cmd_right_, q, result);
-            // 返回响应
-            return true;
-        }
-
-        // 处理服务请求的回调函数
-        bool free_handleServiceRequest(kuavo_msgs::twoArmHandPoseCmdFreeSrv::Request &req,
-                    kuavo_msgs::twoArmHandPoseCmdFreeSrv::Response &res) 
-        {
-            const auto &cmd = req.twoArmHandPoseCmdFreeRequest;
-            auto &hand_poses = cmd.hand_poses;
-            ik_cmd_left_.pos_xyz << hand_poses.left_pose.pos_xyz[0], hand_poses.left_pose.pos_xyz[1], hand_poses.left_pose.pos_xyz[2];
-            ik_cmd_left_.quat = Eigen::Quaterniond(hand_poses.left_pose.quat_xyzw[3],
-                                    hand_poses.left_pose.quat_xyzw[0], hand_poses.left_pose.quat_xyzw[1], hand_poses.left_pose.quat_xyzw[2]);
-            ik_cmd_left_.elbow_pos_xyz << hand_poses.left_pose.elbow_pos_xyz[0], hand_poses.left_pose.elbow_pos_xyz[1], hand_poses.left_pose.elbow_pos_xyz[2];
-            // right
-            ik_cmd_right_.pos_xyz << hand_poses.right_pose.pos_xyz[0], hand_poses.right_pose.pos_xyz[1], hand_poses.right_pose.pos_xyz[2];
-            ik_cmd_right_.quat = Eigen::Quaterniond(hand_poses.right_pose.quat_xyzw[3],
-                                    hand_poses.right_pose.quat_xyzw[0], hand_poses.right_pose.quat_xyzw[1], hand_poses.right_pose.quat_xyzw[2]);
-            ik_cmd_right_.elbow_pos_xyz << hand_poses.right_pose.elbow_pos_xyz[0], hand_poses.right_pose.elbow_pos_xyz[1], hand_poses.right_pose.elbow_pos_xyz[2];
-            // ik_cmd_left_.ik_params; // TO-DO: set solver params
-            use_ik_cmd_q0_ = cmd.joint_angles_as_q0;
-            if(use_ik_cmd_q0_)
-                for(int i=0; i<single_arm_num_; ++i)
-                {
-                    ik_cmd_left_.joint_angles[i] = hand_poses.left_pose.joint_angles[i];
-                    ik_cmd_right_.joint_angles[i] = hand_poses.right_pose.joint_angles[i];
-                }
-            if (cmd.use_custom_ik_param)
-            {
-                ik_solve_params_.major_optimality_tol = cmd.ik_param.major_optimality_tol;
-                ik_solve_params_.major_feasibility_tol = cmd.ik_param.major_feasibility_tol;
-                ik_solve_params_.minor_feasibility_tol = cmd.ik_param.minor_feasibility_tol;
-                ik_solve_params_.major_iterations_limit = cmd.ik_param.major_iterations_limit;
-
-                ik_solve_params_.oritation_constraint_tol = cmd.ik_param.oritation_constraint_tol;
-                ik_solve_params_.pos_constraint_tol = cmd.ik_param.pos_constraint_tol;
-                ik_solve_params_.pos_cost_weight = cmd.ik_param.pos_cost_weight;
-            }
-            //
-            if(use_ik_cmd_q0_)
-            {
-                q0_ << ik_cmd_left_.joint_angles, ik_cmd_right_.joint_angles;
-                std::cout << std::fixed << std::setprecision(3) << "Left: " << q0_.head(single_arm_num_).transpose()
-                                        << ", Left: " << q0_.tail(single_arm_num_).transpose() << std::endl;
-            }
-            auto start = std::chrono::high_resolution_clock::now();
-            std::vector<std::pair<Eigen::Quaterniond, Eigen::Vector3d>> pose_vec{
-                    {Eigen::Quaterniond(1, 0, 0, 0), Eigen::Vector3d(0, 0, 0)},
-                    {ik_cmd_left_.quat, ik_cmd_left_.pos_xyz},
-                    {ik_cmd_right_.quat, ik_cmd_right_.pos_xyz},
-                    {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_left_.elbow_pos_xyz},
-                    {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_right_.elbow_pos_xyz}
-                    };
-            Eigen::VectorXd q;
-            checkInWorkspace(pose_vec[1].second, pose_vec[2].second);
-            // bool result = ik_.solve(pose_vec, q0_, q, ik_solve_params_);
-            bool result = solveWithBinarySearch(pose_vec, q0_, q);
-            std::chrono::duration<double, std::milli> elapsed = std::chrono::high_resolution_clock::now() - start;
-            // std::cout << "Time elapsed: " << elapsed.count() << " ms" << std::endl;
-            res.success = false;
-            res.with_torso = false;
-            res.time_cost = elapsed.count();
-            if(result)
-            {
-                res.success = true;
-                q0_ = Eigen::VectorXd(q);
-                //
-                const int start_idx = q.size() - 2*single_arm_num_;
-                for (int j = 0; j < 2*single_arm_num_; ++j)
-                {
-                    res.q_arm.push_back(q[start_idx+j]);
-                }
-                // 如果只控制单手，则将其他手臂的关节位置设置为0
-                if (hand_side_ == HighlyDynamic::HandSide::LEFT)
-                    std::fill(res.q_arm.begin() + single_arm_num_, res.q_arm.begin() + single_arm_num_ * 2, 0);
-                else if (hand_side_ == HighlyDynamic::HandSide::RIGHT)
-                    std::fill(res.q_arm.begin() + 0, res.q_arm.begin() + single_arm_num_, 0);
-                if(start_idx > 0)//包含躯干
-                {
-                    res.with_torso = true;
-                    res.q_torso = std::vector<double>(q.data(), q.data() + start_idx);
-                }
-                kuavo_msgs::twoArmHandPoseFree msg = publish_ik_result_info_free(q);
                 res.hand_poses = msg;
             }
             if(print_ik_info_)
@@ -674,10 +545,8 @@ class ArmsIKNode
         ros::Publisher joint_pub_;
         ros::Publisher time_cost_pub_;
         ros::Publisher ik_result_pub_;
-        ros::Publisher ik_result_free_pub_;
         ros::Publisher head_body_pose_pub_;
         ros::ServiceServer ik_server_;
-        ros::ServiceServer ik_free_server_;
         ros::ServiceServer fk_server_;
         bool recived_cmd_ = false;
         bool recived__new_cmd_ = false;
@@ -704,6 +573,7 @@ int main(int argc, char* argv[])
     // 初始化ROS节点
     ros::init(argc, argv, "ik_publisher");
     ros::NodeHandle nh;
+    double eef_z_bias = 0.0;
     std::string model_path = "models/biped_gen4.0/urdf/biped_v3_arm.urdf";
     int control_hand_side = 2; // 0: left, 1: right, 2: both
     if(ros::param::has("model_path"))
@@ -714,7 +584,12 @@ int main(int argc, char* argv[])
     }else
     {
         std::string package_path = ros::package::getPath("kuavo_assets");
-        model_path = package_path + "/models/biped_s13/urdf/drake/biped_v3_arm.urdf";
+        model_path = package_path + "/models/biped_s40/urdf/drake/biped_v3_arm.urdf";
+    }
+    if(ros::param::has("eef_z_bias"))
+    {
+        ros::param::get("eef_z_bias", eef_z_bias);
+        std::cout << "eef_z_bias: " << eef_z_bias << std::endl;
     }
     if(ros::param::has("control_hand_side"))
     {
@@ -722,7 +597,7 @@ int main(int argc, char* argv[])
         std::cout << "control_hand_side: " << control_hand_side << std::endl;
     }
     // json
-    int robot_version_int=13;
+    int robot_version_int=40;
     if (nh.hasParam("/robot_version"))
         nh.getParam("/robot_version", robot_version_int);
     auto kuavo_assests_path = HighlyDynamic::getPackagePath("kuavo_assets");
@@ -732,13 +607,11 @@ int main(int argc, char* argv[])
     loadJson(json_data, model_config_file);
     auto end_frames_name_ik = json_data["end_frames_name_ik"].get<std::vector<std::string>>();
     auto shoulder_frame_names = json_data["shoulder_frame_names"].get<std::vector<std::string>>();
-    // auto lower_arm_length = json_data["lower_arm_length"].get<double>();
-    auto num_arm_dof = json_data["NUM_ARM_JOINT"].get<int>();
-    auto eef_z_offset = json_data["eef_z_offset"].get<double>()/100.0;
-    int single_arm_num = num_arm_dof/2;
-    std::cout << "single_arm_num: " << single_arm_num << std::endl;
-    Eigen::Vector3d custom_eef_frame_pos = Eigen::Vector3d(0, 0, eef_z_offset);
-    HighlyDynamic::ArmsIKNode arm_ik_node(nh, model_path, end_frames_name_ik, shoulder_frame_names, custom_eef_frame_pos, HighlyDynamic::intToHandSide(control_hand_side), single_arm_num);
+    
+    // std::cout << "model_path: " << model_path << std::endl;
+    // std::vector<std::string> end_frames_name = {"torso", "l_hand_roll", "r_hand_roll", "l_forearm_pitch", "r_forearm_pitch"};
+    Eigen::Vector3d custom_eef_frame_pos = Eigen::Vector3d(0, 0, eef_z_bias);
+    HighlyDynamic::ArmsIKNode arm_ik_node(nh, model_path, end_frames_name_ik, shoulder_frame_names, custom_eef_frame_pos, HighlyDynamic::intToHandSide(control_hand_side));
     double ws_r = arm_ik_node.getWorkSpaceRadius();
     std::cout << "Work space radius: " << ws_r << std::endl;
     arm_ik_node.run();

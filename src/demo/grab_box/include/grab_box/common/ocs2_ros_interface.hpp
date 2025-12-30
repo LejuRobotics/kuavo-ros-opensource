@@ -200,31 +200,6 @@ namespace GrabBox
     }
   }
 
-  bool enableBasePitchLimit(bool enable)
-  {
-    const std::string service_name = "/humanoid/mpc/enable_base_pitch_limit";
-    ros::NodeHandle nh;
-    if (!ros::service::waitForService(service_name, ros::Duration(2))) {
-      ROS_ERROR("Service %s not available", service_name.c_str());
-      return false;
-    }
-    ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(service_name);
-    std_srvs::SetBool srv;
-    srv.request.data = enable;
-    if (client.call(srv)) {
-      if (srv.response.success) {
-        ROS_INFO("Successfully %s base pitch limit: %s", enable ? "enabled" : "disabled", srv.response.message.c_str());
-        return true;
-      } else {
-        ROS_ERROR("Failed to %s base pitch limit: %s", enable ? "enable" : "disable", srv.response.message.c_str());
-        return false;
-      }
-    } else {
-      ROS_ERROR("Failed to call service %s", service_name.c_str());
-      return false;
-    }
-  }
-
   std_msgs::Float64MultiArray getEefWrenchCmdMsg(const Vector6d &wrench_l, const Vector6d &wrench_r)
   {
     std_msgs::Float64MultiArray wrench_msg;

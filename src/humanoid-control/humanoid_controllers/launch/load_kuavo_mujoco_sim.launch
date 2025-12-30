@@ -32,13 +32,12 @@
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="visualize_humanoid" default="true"/>
     <arg name="only_half_up_body" default="false"/>
-    <arg name="waist_move_spd"     default="0.8"/>
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
-    <arg name="with_mm_ik" default="false"/>
+    <arg name="with_mm_ik" default="true"/>
 
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
@@ -65,7 +64,6 @@
     <param name="only_half_up_body"   value="$(arg only_half_up_body)"/>
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
     <param name="visualize_humanoid" value="$(arg visualize_humanoid)" />
-    <param name="waist_move_spd"  value="$(arg waist_move_spd)"/>
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
@@ -152,13 +150,10 @@
     </group>
 
     <group if="$(arg with_mm_ik)">
-      <group if="$(eval arg('robot_version') >= 30)">
-        <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
-          <arg name="sqp_mpc" value="1"/>
-          <arg name="rviz"    value="false"/>
-          <arg name="visualize_mm"   value="true"/>
-          <arg name="coredump" value="$(arg coredump)"/>
-        </include>
-      </group>
+      <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
+        <arg name="sqp_mpc" value="1"/>
+        <arg name="rviz"    value="false"/>
+        <arg name="visualize_mm"   value="false"/>
+      </include>
     </group>
 </launch>

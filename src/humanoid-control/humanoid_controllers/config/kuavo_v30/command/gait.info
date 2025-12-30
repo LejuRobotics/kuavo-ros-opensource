@@ -1,0 +1,135 @@
+list
+{
+  [0] stance
+  [1] trot
+  [2] jump
+  [3] sl ; single leg stance
+  [4] walk
+  [5] walk2
+  [6] trot2
+}
+
+stance
+ {
+   modeSequence
+   {
+     [0]     SS
+   }
+   switchingTimes
+   {
+     [0]     0.5
+   }
+}
+
+trot
+ {
+   modeSequence
+   {
+     [0]     SF
+     [1]     FS
+   }
+   switchingTimes
+   {
+     [0]     0.35
+     [1]     0.35
+   }
+}
+
+jump
+{
+  modeSequence
+  {
+    [0] SS
+    [1] FF
+  }
+  switchingTimes
+  {
+    [0] 0.2
+    [1] 0.3
+  }
+}
+
+sl
+{
+  modeSequence
+  {
+    [0]     SF
+  }
+  switchingTimes
+  {
+    [0]     0.4
+  }
+}
+
+walk
+{
+ modeSequence
+  {
+    [0]     SS
+    [1]     ST
+    [2]     SF
+    [3]     SH
+    [4]     SS
+    [5]     TS
+    [6]     FS
+    [7]     HS
+
+  }
+  switchingTimes
+  {
+    [0]     0.05
+    [1]     0.07
+    [2]     0.35
+    [3]     0.04
+    [4]     0.05
+    [5]     0.07
+    [6]     0.35
+    [7]     0.04
+  }
+}
+
+walk2
+{
+  modeSequence
+  {
+    [0]     SS
+    [1]     ST
+    [2]     SF
+    [3]     SH
+    [4]     SS
+    [5]     TS
+    [6]     FS
+    [7]     HS
+
+  }
+  switchingTimes
+  {
+    [0]     0.1
+    [1]     0.15
+    [2]     0.30
+    [3]     0.15
+    [4]     0.1
+    [5]     0.15
+    [6]     0.30
+    [7]     0.15
+  }
+}
+
+trot2
+{
+  modeSequence
+  {
+    [0]     SF
+    [1]     SS
+    [2]     FS
+    [3]     SS
+  }
+
+  switchingTimes
+  {
+    [0]     0.3
+    [1]     1.0
+    [2]     0.3
+    [3]     1.0
+  }
+}

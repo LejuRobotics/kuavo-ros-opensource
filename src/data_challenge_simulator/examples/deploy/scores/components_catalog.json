@@ -1,0 +1,5 @@
+{
+  "1": ["toy_pos","car_pos","time"],
+  "2": ["intermediate_pos","final_pos","time"],
+  "3": ["box_red1_pos", "box_black1_pos", "box_red2_pos", "box_black2_pos","bonus", "time"]
+}

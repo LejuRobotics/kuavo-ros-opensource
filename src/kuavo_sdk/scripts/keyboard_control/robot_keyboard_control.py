@@ -437,19 +437,14 @@ class KeyBoardRobotController:
         self.ik_service=IkArmService()
 
         #不同型号机器人的初始位置 (机器人坐标系) 和 手臂长度(单位米)
-        def start_with_version(version_number:int, series:int):
-            """判断版本号是否属于某系列"""
-            # PPPPMMMMN
-            MMMMN_MASK = 100000
-            return (version_number % MMMMN_MASK) == series
-        if start_with_version(robot_version, 45) or start_with_version(robot_version, 49):
+        if robot_version == 45 or robot_version == 49 :
             self.robot_zero_x = -0.0173
             self.robot_zero_y = -0.2927
             self.robot_zero_z = -0.2837
             self.robot_upper_arm = 0.30
             self.robot_lower_arm = 0.40
 
-        elif start_with_version(robot_version, 42):
+        elif robot_version == 42 :
             self.robot_zero_x = -0.0175
             self.robot_zero_y = -0.25886
             self.robot_zero_z = -0.20115
@@ -669,7 +664,6 @@ class KeyBoardRobotController:
             self.joy_msg.buttons[BUTTON_Y] = 1  # 发送walk
         elif key == 'c':
             self.joy_msg.buttons[BUTTON_A] = 1  # 发送stance
-            self.joy_msg.axes = [0.0] * 8  # Reset all axes to zero
             
         cmdvel = [self.joy_msg.axes[AXIS_LEFT_STICK_X],self.joy_msg.axes[AXIS_LEFT_STICK_Y], 0, 0, 0, self.joy_msg.axes[AXIS_RIGHT_STICK_YAW]]
         print(f"cmdvel: {[f'{x * 100:.0f}%' for x in cmdvel]}", end='\r')
@@ -755,12 +749,8 @@ if __name__ == "__main__":
     try:
         # 获取机器人版本
         my_robot_version = get_parameter('robot_version')
-        def start_with_version(version_number:int, series:int):
-            """判断版本号是否属于某系列"""
-            # PPPPMMMMN
-            MMMMN_MASK = 100000
-            return (version_number % MMMMN_MASK) == series
-        if start_with_version(my_robot_version, 42) or start_with_version(my_robot_version, 45) or start_with_version(my_robot_version, 49):
+
+        if my_robot_version == 42 or my_robot_version == 45 or my_robot_version == 49 :
             print("机器人版本为:",my_robot_version)
         else :
             print("机器人版本号错误, 仅支持42 45 49")

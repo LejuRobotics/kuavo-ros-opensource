@@ -43,8 +43,6 @@ topics:
   - /hand_wrench.*
   - /tag_world_pose
   - /leju_quest_bone_poses
-  - /robot_head_motion_data
-  - /robot_waist_motion_data
   - /tag_data
   - /test/.*
   - /kinematic_data
@@ -54,6 +52,3 @@ topics:
   - /mm/end_effector_trajectory
   - /mm/.*
   - /grasp_box/.*
-  - /robot_body_matrices
-  - /action_detector_info
-  - /leju_claw_command

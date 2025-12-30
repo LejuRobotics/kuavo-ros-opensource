@@ -145,10 +145,10 @@ if __name__ == "__main__":
             eef_pose_msg.hand_poses.right_pose.joint_angles = np.zeros(7)
 
             eef_pose_msg.hand_poses.left_pose.quat_xyzw = init_pose_quat
-            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = [0.1, 0.2, 0]
+            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = np.zeros(3)
 
             eef_pose_msg.hand_poses.right_pose.quat_xyzw = init_pose_quat
-            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = [0.1, -0.2, 0] # 针对roban的一个对大部分情况合理的肘部位置
+            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = np.zeros(3)
             if args.hand == 'left':
                 eef_pose_msg.hand_poses.left_pose.pos_xyz = current_pos
                 eef_pose_msg.hand_poses.right_pose.pos_xyz = right_init_pose_xyz

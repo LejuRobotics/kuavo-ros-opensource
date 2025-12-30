@@ -54,8 +54,7 @@ struct ModelSettings {
 
   int mpcArmsDof = 14;
   int mpcLegsDof = 12;
-  int mpcWaistDof = 1;
-  int modelDof = 27;
+  int modelDof = 26;
 
 
 

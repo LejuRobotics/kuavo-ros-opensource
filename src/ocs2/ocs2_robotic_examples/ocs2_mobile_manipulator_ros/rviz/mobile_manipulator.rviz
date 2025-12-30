@@ -205,16 +205,6 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        torso-camera:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        waist_camera:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         zarm_l1_link:
           Alpha: 1
           Show Axes: false
@@ -383,7 +373,7 @@ Visualization Manager:
       Marker Topic: /grasp_box/planed_two_hand_trajectory
       Name: MarkerArray
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: false
     - Alpha: 1
@@ -421,7 +411,7 @@ Visualization Manager:
       Marker Topic: /grasp_box/exec_two_hand_trajectory
       Name: MarkerArray
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: false
     - Class: rviz/MarkerArray
@@ -429,7 +419,7 @@ Visualization Manager:
       Marker Topic: /grasp_box/solved_two_hand_trajectory
       Name: MarkerArray
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: false
     - Class: rviz/MarkerArray
@@ -508,9 +498,9 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 0.09005987644195557
-        Y: 0.4095154404640198
-        Z: 0.6671709418296814
+        X: -0.4424099922180176
+        Y: 0.5901913642883301
+        Z: 0.42386695742607117
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -536,5 +526,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1850
-  X: 15
-  Y: 399
+  X: 1990
+  Y: 27

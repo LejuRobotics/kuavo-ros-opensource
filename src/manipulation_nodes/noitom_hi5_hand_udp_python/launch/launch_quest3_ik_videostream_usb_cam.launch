@@ -8,10 +8,9 @@
     <arg name="has_camera" default="0" />
     <arg name="video_device" default="/dev/video0" />
     <arg name="camera_publisher_name" default="/camera_publisher" />
-    <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
 
     <!-- motion_capture_ik -->
-    <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --send_srv=$(arg send_srv) --hand_reference_mode=$(arg hand_reference_mode)" output="screen">
+    <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --send_srv=$(arg send_srv)" output="screen">
     </node>
 
     <!-- noitom_hi5_hand_udp_python -->

@@ -82,7 +82,7 @@ private:
         // Extract times and target poses
         scalar_array_t timeTrajectory;
         vector_array_t stateTrajectory;
-        vector_t targetState = observation_.state.segment(armJointStartIndex_,num_arm_joints_);
+        vector_t targetState = observation_.state.segment(12+12,num_arm_joints_);
 
         scalar_t currentTime = observation_.time;
 
@@ -93,10 +93,6 @@ private:
         }
         else
         {
-            // Start from the last msgs's target state
-            if (hasLastTargetState_) {
-                targetState = lastTargetState_;
-            }
             stateTrajectory.push_back(targetState);
         }
         timeTrajectory.push_back(currentTime);
@@ -124,10 +120,6 @@ private:
         // Publish the target trajectories to MPC
         auto mpcTargetTrajectoriesMsg = ros_msg_conversions::createTargetTrajectoriesMsg(targetTrajectories);
         trajectoryPublisher_.publish(mpcTargetTrajectoriesMsg);
-
-        // 保存本次消息的最后一帧状态，供下次使用
-        lastTargetState_ = targetState;
-        hasLastTargetState_ = true;
     }
 
     void observationCallback(const ocs2_msgs::mpc_observation::ConstPtr& msg) {
@@ -136,12 +128,7 @@ private:
 
         // Determine the starting index of the arm joints in the state vector
         // This should be adjusted based on actual state vector structure
-        // 12 (base) + 12 (legs) + WaistNums (waist) = arm joint start index
-        int waistNums = 1;
-        if (!nh_.getParam("/mpc/mpcWaistDof", waistNums)) {
-            // Parameter not found, using default value
-        }
-        armJointStartIndex_ = 12 + 12 + waistNums;  // Update this index according to state vector structure
+        armJointStartIndex_ = 24;  // Update this index according to  state vector structure
     }
 
     TargetTrajectories generateTargetTrajectories(const scalar_array_t& timeTrajectory,
@@ -196,7 +183,7 @@ private:
         scalar_array_t zeroTimeTrajectory;
         vector_array_t zeroStateTrajectory;
         scalar_t zeroTime = observation_.time;
-        vector_t zeroState = observation_.state.segment(armJointStartIndex_, num_arm_joints_);
+        vector_t zeroState = observation_.state.segment(12 + 12, num_arm_joints_);
         zeroTimeTrajectory.push_back(zeroTime);
         zeroStateTrajectory.push_back(zeroState);
         auto zeroTrajectories = generateTargetTrajectories(zeroTimeTrajectory, zeroStateTrajectory, observation_);
@@ -233,7 +220,6 @@ private:
 
         isFistTrajAfterChangeMode = true;
         initstate_ = zeroState;
-        hasLastTargetState_ = false;  // 模式切换后重置上一次状态标志
 
         std::cout << "[ArmTrajNode]: External Control Mode Change Done  \n";
         }
@@ -284,8 +270,6 @@ private:
 
     bool isFistTrajAfterChangeMode = true;
     vector_t initstate_;
-    vector_t lastTargetState_;  // 保存上一次消息的最后一帧状态
-    bool hasLastTargetState_ = false;  // 标记是否有上一次的状态
 
     // Index where the arm joints start in the state vector
     size_t armJointStartIndex_;

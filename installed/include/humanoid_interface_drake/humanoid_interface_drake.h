@@ -35,8 +35,8 @@ namespace HighlyDynamic
     class HumanoidInterfaceDrake
     {
     public:
-        static HumanoidInterfaceDrake &getInstance(RobotVersion rb_version, bool real, double dt = 0.002);
-        static HumanoidInterfaceDrake *getInstancePtr(RobotVersion rb_version, bool real, double dt = 0.002);
+        static HumanoidInterfaceDrake &getInstance(RobotVersion robot_version, bool real, double dt = 0.002);
+        static HumanoidInterfaceDrake *getInstancePtr(RobotVersion robot_version, bool real, double dt = 0.002);
         
         virtual ~HumanoidInterfaceDrake();
 
@@ -98,15 +98,15 @@ namespace HighlyDynamic
         Eigen::VectorXd calInitialState(multibody::MultibodyPlant<double> *plant, systems::Context<double> *plant_context);
         void calcSquatState(multibody::MultibodyPlant<double> *plant, systems::Context<double> *plant_context);
         
-        RobotVersion getRobotVersion() const { return rb_version_; }
+        RobotVersion getRobotVersion() const { return robot_version_; }
     private:
         // 单例模式，私有构造函数
-        HumanoidInterfaceDrake(RobotVersion rb_version, bool real, double dt = 0.001);
+        HumanoidInterfaceDrake(RobotVersion robot_version, bool real, double dt = 0.001);
         void buildMultibodyPlant(bool real);
         void buildAnkleSolversMultibodyPlant(bool is_parallel_arm);
         void buildAnkleSolvers(bool is_parallel_arm);
         static std::shared_ptr<HumanoidInterfaceDrake> instance;
-        RobotVersion rb_version_;
+        RobotVersion robot_version_;
 
     private:
         double dt_;

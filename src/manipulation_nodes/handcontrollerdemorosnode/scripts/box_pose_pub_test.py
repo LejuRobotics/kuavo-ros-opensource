@@ -25,8 +25,8 @@ class AprilTagPublisher:
                 "pose": Pose(
                     position=Point(1.0, 0.3, 1.3),
                     # orientation=Quaternion(0.0, -0.707, 0.0, 0.707)
-                    # orientation=Quaternion(0.488, -0.4545, -0.5209, 0.5324)
-                    orientation=Quaternion(0.6666145423605649, 0.023693991691330407, 0.008133758341800246, 0.744981535775473)
+                    orientation=Quaternion(0.488, -0.4545, -0.5209, 0.5324)
+                    
                 ),
                 "size": 0.06,
             },

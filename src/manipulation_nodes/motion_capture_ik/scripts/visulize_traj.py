@@ -9,7 +9,8 @@ from sensor_msgs.msg import JointState
 from tools.drake_trans import *
 from tools.utils import get_package_path
 from tools.quest3_utils import Quest3ArmInfoTransformer
-from kuavo_msgs.msg import headBodyPose, robotHandPosition
+from handcontrollerdemorosnode.msg import robotHandPosition
+from kuavo_msgs.msg import headBodyPose
 import argparse
 from kuavo_msgs.msg import twoArmHandPoseCmd, twoArmHandPose, ikSolveParam
 from visualization_msgs.msg import Marker
@@ -115,13 +116,13 @@ if __name__ == '__main__':
                                                                 finger_joint_position[0],
                                                                 finger_joint_position[1],
                                                                 torso_ypr, torso_height)
-        marker = quest3_arm_info_transformer.construct_marker(hand_pose.l_p, hand_pose.l_q, rgba=[1,0,0,0.9], side="Left", marker_id=0)
+        marker = quest3_arm_info_transformer.construct_marker(hand_pose.l_p, hand_pose.l_q, 1.0, 0.0, 0.0, side="Left")
         marker_pub_cmd_left.publish(marker)
-        marker_res = quest3_arm_info_transformer.construct_marker(hand_pose_res.l_p, hand_pose_res.l_q, rgba=[0,1,0,0.9], side="Left", marker_id=1)
+        marker_res = quest3_arm_info_transformer.construct_marker(hand_pose_res.l_p, hand_pose_res.l_q, 0.0, 1.0, 0.0, side="Left")
         marker_pub_res_left.publish(marker_res)
-        marker = quest3_arm_info_transformer.construct_marker(hand_pose.r_p, hand_pose.r_q, rgba=[1,0,0,0.9], side="Right", marker_id=2)
+        marker = quest3_arm_info_transformer.construct_marker(hand_pose.r_p, hand_pose.r_q, 1.0, 0.0, 0.0, side="Right")
         marker_pub_cmd_right.publish(marker)
-        marker_res = quest3_arm_info_transformer.construct_marker(hand_pose_res.r_p, hand_pose_res.r_q, rgba=[0,1,0,0.9], side="Right", marker_id=3)
+        marker_res = quest3_arm_info_transformer.construct_marker(hand_pose_res.r_p, hand_pose_res.r_q, 0.0, 1.0, 0.0, side="Right")
         marker_pub_res_right.publish(marker_res)
         # marker_workspace = quest3_arm_info_transformer.construct_point_marker(hand_pose_res.l_p, scale=0.1, alpha=0.6, color=[0.0, 1.0, 0.0])
         # marker_pub_workspace.publish(marker_workspace)

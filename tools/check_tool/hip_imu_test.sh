@@ -33,4 +33,4 @@ else
 fi
 
 cd $hipimutestPath
-bash hip_imu_test.sh
+./hip_imu_test.sh

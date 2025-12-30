@@ -4,7 +4,6 @@ from scipy import signal as sig
 from scipy.interpolate import interp1d
 import math
 import os
-import json
 
 class SignalAnalyzer:
     def __init__(self, args, use_chinese=False, time_delay=0.0, static_gain=1.0, bias=0.0):
@@ -561,23 +560,9 @@ class SignalAnalyzer:
                     'bias_calib': bias_val,
                     'time_delay_calib': known_time_delay,
                 }
-
-                save_json = {
-                    'bandwidth': est_bw,
-                    'peak_frequency': est_peak_f,
-                    'mean_coherence': mean_coh,
-                    'time_delay_calib': known_time_delay,
-                    'bias_calib': bias_val,
-                    'static_gain_calib': static_gain_val,
-                    'sucess': True,
-                    'errmsg': '成功'
-                }
                 save_dict.update(results) # Add all analysis results
                 # Remove any large array objects if they are already part of results, to avoid duplication if not careful
                 np.savez(os.path.join(self.args.plots_dir, 'system_identification_data.npz'), **save_dict) # Use plots_dir from args
-                with open(os.path.join(self.args.plots_dir, 'system_identification_results.json'), 'w') as f:
-                    json.dump(save_json, f, indent=2)
-                    rospy.loginfo(f"final result saved to '{os.path.join(self.args.plots_dir, 'system_identification_results.json')}'")
                 rospy.loginfo(f"Frequency response data saved to '{os.path.join(self.args.plots_dir, 'system_identification_data.npz')}'")
             
             return est_bw, results

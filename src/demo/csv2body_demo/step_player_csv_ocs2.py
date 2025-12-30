@@ -3,12 +3,9 @@ import rospy
 import json
 import numpy as np
 import os
-from kuavo_msgs.msg import footPose
-from kuavo_msgs.msg import footPoseTargetTrajectories, armTargetPoses
+from kuavo_msgs.msg import footPose, footPoseTargetTrajectories, armTargetPoses
 from kuavo_msgs.msg import gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode
-from kuavo_msgs.srv import playmusic, playmusicRequest
-from kuavo_msgs.srv import ExecuteArmAction
 from ocs2_msgs.msg import mpc_observation
 import csv
 import math
@@ -17,150 +14,6 @@ import matplotlib.pyplot as plt
 import argparse
 import time
 from std_msgs.msg import Float64MultiArray
-import threading  # 添加线程支持
-import subprocess
-import sys
-
-def load_dynamic_qr_service(gait_name="taiji"):
-    """加载动态QR矩阵服务调用函数
-    
-    Args:
-        gait_name (str): 步态名称，例如 "taiji", "walk", "stand" 等
-    
-    Returns:
-        bool: 是否成功加载
-    """
-    try:
-        rospy.wait_for_service('/humanoid/mpc/load_dynamic_qr', timeout=5.0)
-        service_proxy = rospy.ServiceProxy('/humanoid/mpc/load_dynamic_qr', ExecuteArmAction)
-        
-        response = service_proxy(action_name=gait_name)
-        
-        if response.success:
-            rospy.loginfo(f"✅ 成功加载动态QR矩阵，步态名称: {gait_name}, 消息: {response.message}")
-            return True
-        else:
-            rospy.logerr(f"❌ 加载动态QR矩阵失败，步态名称: {gait_name}, 消息: {response.message}")
-            return False
-    except rospy.ROSException as e:
-        rospy.logerr(f"等待动态QR矩阵加载服务超时: {e}")
-        return False
-    except rospy.ServiceException as e:
-        rospy.logerr(f"调用动态QR矩阵加载服务失败: {e}")
-        return False
-    except Exception as e:
-        rospy.logerr(f"加载动态QR矩阵时发生错误: {e}")
-        return False
-
-def change_ruiwo_motor_param(param_name):
-    try:
-        rospy.wait_for_service('/hardware/change_ruiwo_motor_param')
-        service_proxy = rospy.ServiceProxy('/hardware/change_ruiwo_motor_param', ExecuteArmAction)
-        response = service_proxy(action_name=param_name)
-        
-        if response.success:
-            rospy.loginfo(f"成功设置 Ruiwo 电机参数: {response.message}")
-            return True
-        else:
-            rospy.logerr(f"设置 Ruiwo 电机参数失败: {response.message}")
-            return False
-    except rospy.ServiceException as e:
-        rospy.logerr(f"调用 Ruiwo 电机参数服务失败: {e}")
-        return False
-    except Exception as e:
-        rospy.logerr(f"设置 Ruiwo 电机参数时发生错误: {e}")
-        return False
-
-class MusicPlayer:
-    """音乐播放器类，用于在独立线程中播放音乐"""
-
-    def __init__(self):
-        """初始化音乐播放器"""
-        # 等待音乐播放服务（带超时）
-        self.play_music_service = None
-        self.service_available = False
-        rospy.loginfo("等待音乐播放服务(超时5秒)...")
-        try:
-            rospy.wait_for_service('/play_music', timeout=5.0)
-            self.play_music_service = rospy.ServiceProxy('/play_music', playmusic)
-            self.service_available = True
-            rospy.loginfo("音乐播放服务已就绪")
-        except rospy.ROSException:
-            rospy.logwarn("音乐播放服务在5秒内未就绪，音乐播放将被跳过")
-        self.music_thread = None
-        self.is_playing = False
-
-    def speaker_available(self):
-        """检测是否存在可用扬声器/音频输出设备"""
-        try:
-            speaker_cmd = "pactl list | grep -i Speaker"
-            speaker_result = subprocess.run(
-                speaker_cmd, shell=True, capture_output=True, text=True
-            )
-            if speaker_result.stdout.strip():
-                rospy.loginfo("检测到扬声器输出（pactl）")
-                return True
-
-            fallback_cmd = "aplay -l | grep -i Audio"
-            fallback_result = subprocess.run(
-                fallback_cmd, shell=True, capture_output=True, text=True
-            )
-            if fallback_result.stdout.strip():
-                rospy.loginfo("检测到扬声器输出（aplay）")
-                return True
-
-            rospy.logwarn("未检测到扬声器或音频输出设备，将跳过音乐播放")
-            return False
-        except Exception as e:
-            rospy.logwarn(f"检测扬声器状态失败: {str(e)}，将跳过音乐播放")
-            return False
-
-    def play_music(self, music_file, volume=80):
-        """在独立线程中播放音乐文件
-
-        参数:
-            music_file: 音乐文件路径
-            volume: 音量 (0-100)
-        """
-
-        if not self.service_available:
-            rospy.logwarn("音乐播放服务不可用，跳过音乐播放")
-            return False
-
-        if self.is_playing:
-            rospy.logwarn("音乐正在播放中，请先停止当前音乐")
-            return False
-
-        self.music_thread = threading.Thread(target=self._play_music_thread, args=(music_file, volume))
-        self.music_thread.daemon = True
-        self.music_thread.start()
-        return True
-
-    def _play_music_thread(self, music_file, volume):
-        """音乐播放线程函数"""
-        try:
-            self.is_playing = True
-            request = playmusicRequest()
-            request.music_number = music_file
-            request.volume = volume
-
-            response = self.play_music_service(request)
-            if response.success_flag:
-                rospy.loginfo(f"成功播放音乐: {music_file}")
-            else:
-                rospy.logerr(f"播放音乐失败: {music_file}")
-        except rospy.ServiceException as e:
-            rospy.logerr(f"调用音乐播放服务失败: {str(e)}")
-        except Exception as e:
-            rospy.logerr(f"播放音乐时发生错误: {str(e)}")
-        finally:
-            self.is_playing = False
-
-    def stop(self):
-        """停止音乐播放"""
-        self.is_playing = False
-        if self.music_thread and self.music_thread.is_alive():
-            self.music_thread.join(timeout=1.0)
 
 class ActionPlayer:
     """动作播放器，用于控制机器人执行预定义的动作序列"""
@@ -474,14 +327,6 @@ class ActionPlayer:
                 prev_right_foot_pos = right_foot_pose
         
         if msg:
-            # 确保时间轨迹是严格递增的
-            if len(msg.timeTrajectory) > 1:
-                # 检查并修复时间轨迹顺序
-                for i in range(1, len(msg.timeTrajectory)):
-                    if msg.timeTrajectory[i] <= msg.timeTrajectory[i-1]:
-                        msg.timeTrajectory[i] = msg.timeTrajectory[i-1] + 0.01  # 添加最小时间间隔
-                        rospy.logwarn(f"修复时间轨迹顺序，索引 {i}: {msg.timeTrajectory[i-1]} -> {msg.timeTrajectory[i]}")
-            
             self.foot_pose_pub.publish(msg)
             rospy.loginfo("已发送足部轨迹")
     
@@ -648,9 +493,7 @@ class ActionPlayer:
         total_arm_time = len(self.step_control) * 0.1  # 每行数据0.01秒
         
         rospy.loginfo(f"等待动作完成，预计耗时: {total_arm_time}秒")
-        start_time = rospy.get_time()
-        while (rospy.get_time() - start_time) < total_arm_time and not rospy.is_shutdown():
-            rospy.sleep(0.1)  # 短间隔睡眠，保证响应中断
+        rospy.sleep(total_arm_time)
         rospy.loginfo("动作序列执行完成")
 
 def main():
@@ -658,7 +501,7 @@ def main():
     # 创建命令行参数解析器
     parser = argparse.ArgumentParser(description='CSV轨迹播放器')
     parser.add_argument('csv_file', type=str, help='CSV文件路径', nargs='?', 
-                       default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "actions", "taiji_step_roban_stable.csv"))
+                       default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "actions", "taiji_step.csv"))
     parser.add_argument('--time-offset', type=float, help='轨迹开始时间的偏移量(秒)。正值表示在当前MPC时间基础上延迟执行，负值或当前时间之前的值将被忽略（使用默认值-1）')
     
     # 解析命令行参数
@@ -673,8 +516,6 @@ def main():
     # 等待ROS系统就绪
     rospy.sleep(1)
     
-    load_dynamic_qr_service("taiji")
-    change_ruiwo_motor_param("taiji_kpkd")
     try:
         # 执行动作序列
         player.execute_action_with_csv(args.time_offset)
@@ -682,10 +523,6 @@ def main():
         rospy.loginfo("动作执行被中断")
     except Exception as e:
         rospy.logerr(f"执行动作时出错: {str(e)}")
-        # 确保清除太极执行状态标志
-        rospy.set_param('/taiji_executing', False)
-    load_dynamic_qr_service("stance")
-    change_ruiwo_motor_param("normal_kpkd")
 
 if __name__ == '__main__':
     main()

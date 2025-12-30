@@ -153,14 +153,9 @@ namespace GrabBox
       // }
       // if(!changeKinematicMpcControlMode(1))//Arm only control mode
       //   return BT::NodeStatus::FAILURE;
-      // if(!resetMpcService())
-      // {
-      //   ROS_ERROR("Failed to Pre-reset MPC.");
-      //   return BT::NodeStatus::FAILURE;
-      // }
-      if(!enableBasePitchLimit(false))
+      if(!resetMpcService())
       {
-        ROS_ERROR("Failed to disable base pitch limit.");
+        ROS_ERROR("Failed to Pre-reset MPC.");
         return BT::NodeStatus::FAILURE;
       }
       changeArmCtrlModeSrv(2);//using external controller
@@ -325,11 +320,7 @@ namespace GrabBox
             ROS_ERROR("Failed to set enable_wbc_arm_trajectory control mode to false.");
             return BT::NodeStatus::FAILURE;
           }
-          if(!enableBasePitchLimit(true))
-          {
-            ROS_ERROR("Failed to enable base pitch limit.");
-            return BT::NodeStatus::FAILURE;
-          }
+
           return BT::NodeStatus::SUCCESS;
         }
       }

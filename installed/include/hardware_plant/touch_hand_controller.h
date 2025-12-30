@@ -16,8 +16,13 @@ namespace eef_controller {
 using namespace dexhand;
 using DualHandsArray = std::array<FingerArray, 2>;
 using UnsignedDualHandsArray = std::array<UnsignedFingerArray, 2>;
-using FingerStatusArray = std::array<dexhand::FingerStatus, 2>;
-using FingerTouchStatusArray = std::array<dexhand::TouchSensorStatusArray, 2>;
+using FingerStatusPtrArray = std::array<FingerStatusPtr, 2>;
+using FingerTouchStatusPtrArray = std::array<FingerTouchStatusPtr, 2>;
+
+// open dual hand positions
+const UnsignedDualHandsArray kDualHandOpenPositions = {kOpenFingerPositions, kOpenFingerPositions};
+// close dual hand positions
+const UnsignedDualHandsArray kDualHandClosePositions = {kCloseFingerPositions, kCloseFingerPositions};     
 
 /**
  * @brief 触觉灵巧手控制器
@@ -121,16 +126,16 @@ public:
     /**
      * @brief Get the finger status of both hands
      * 
-     * @return FingerStatusArray array[2] containing status for left and right hands
+     * @return FingerStatusPtrArray array[2] containing status for left and right hands
      */
-    FingerStatusArray get_finger_status();
+    FingerStatusPtrArray get_finger_status();
 
     /**
      * @brief Get the touch sensor status of both hands
      * 
-     * @return FingerTouchStatusArray array[2] containing touch status for left and right hands
+     * @return FingerTouchStatusPtrArray array[2] containing touch status for left and right hands
      */
-    FingerTouchStatusArray get_touch_status();
+    FingerTouchStatusPtrArray get_touch_status();
 
     /**
      * @brief Enable the touch sensor for left hand
@@ -181,16 +186,6 @@ private:
     bool init_touch_dexhand();
     bool init_normal_dexhand();
 
-    /**
-     * @brief 解析手势配置文件
-     * 
-     * @param gesture_file_path 手势配置文件路径
-     * @param gesture_infos 输出的手势信息列表
-     * @return true 解析成功
-     * @return false 解析失败
-     */
-    bool ParseActionSequenceFile(const std::string & gesture_file_path, std::vector<GestureInfoPtr> &gesture_infos);
-
     void control_thread_func();
     void gesture_thread_func();
     bool sleep_for_100ms(int ms_count);
@@ -207,12 +202,8 @@ private:
     FingerArray right_speed_;
     FingerArray left_speed_;
 
-    FingerStatusArray finger_status_;
-    FingerTouchStatusArray finger_touch_status_;
-    
-    // 线程安全保护
-    mutable std::mutex finger_status_mutex_;
-    mutable std::mutex touch_status_mutex_;
+    FingerStatusPtrArray finger_status_;
+    FingerTouchStatusPtrArray finger_touch_status_;
 
     std::unique_ptr<dexhand::DexHandBase> left_dexhand_ = nullptr;
     std::unique_ptr<dexhand::DexHandBase> right_dexhand_ = nullptr;

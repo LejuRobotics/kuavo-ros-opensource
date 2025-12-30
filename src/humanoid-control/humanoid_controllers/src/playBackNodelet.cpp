@@ -33,7 +33,6 @@
 #include "humanoid_interface_drake/kuavo_data_buffer.h"
 #include "kuavo_common/common/sensor_data.h"
 #include "kuavo_common/common/utils.h"
-#include "kuavo_common/common/common.h"
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
 namespace humanoid_controller
@@ -134,15 +133,17 @@ namespace humanoid_controller
 
   bool humanoidController::init(HybridJointInterface *robot_hw, ros::NodeHandle &controller_nh, bool is_nodelet_node)
   {
-    RobotVersion rb_version(3, 4);
+    int robot_version_int;
+    RobotVersion robot_version(3, 4);
     if (controllerNh_.hasParam("/robot_version"))
     {
-        int rb_version_int;
-        controllerNh_.getParam("/robot_version", rb_version_int);
-        rb_version = RobotVersion::create(rb_version_int);
+        controllerNh_.getParam("/robot_version", robot_version_int);
+        int major = robot_version_int / 10;
+        int minor = robot_version_int % 10;
+        robot_version = RobotVersion(major, minor);
     }
     is_nodelet_node_ = is_nodelet_node;
-    drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
+    drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(robot_version, true, 2e-3);
     kuavo_settings_ = drake_interface_->getKuavoSettings();
     auto [plant, context] = drake_interface_->getPlantAndContext();
     ros_logger_ = new TopicLogger(controller_nh);
@@ -194,7 +195,7 @@ namespace humanoid_controller
     bool verbose = false;
     loadData::loadCppDataType(taskFile, "humanoid_interface.verbose", verbose);
     
-    setupHumanoidInterface(taskFile, urdfFile, referenceFile, gaitCommandFile, verbose, rb_version);
+    setupHumanoidInterface(taskFile, urdfFile, referenceFile, gaitCommandFile, verbose,robot_version_int);
     setupMpc();
     setupMrt();
     // Visualization
@@ -722,9 +723,9 @@ namespace humanoid_controller
   }
 
  void humanoidController::setupHumanoidInterface(const std::string &taskFile, const std::string &urdfFile, const std::string &referenceFile, const std::string &gaitCommandFile,
-                                                  bool verbose, RobotVersion rb_version)
+                                                  bool verbose, int robot_version_int)
   {
-    HumanoidInterface_ = std::make_shared<HumanoidInterface>(taskFile, urdfFile, referenceFile, gaitCommandFile, rb_version);
+    HumanoidInterface_ = std::make_shared<HumanoidInterface>(taskFile, urdfFile, referenceFile, gaitCommandFile, robot_version_int);
     rbdConversions_ = std::make_shared<CentroidalModelRbdConversions>(HumanoidInterface_->getPinocchioInterface(),
                                                                       HumanoidInterface_->getCentroidalModelInfo());
   }

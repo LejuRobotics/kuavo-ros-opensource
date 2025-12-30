@@ -199,8 +199,8 @@ namespace ocs2
       {
         std::lock_guard<std::mutex> lock(receivedGaitMutex_);
         std::cerr << "[GaitReceiver]: Setting new gait after time " << finalTime << "\n";
-        std::cerr << receivedGait_;gaitSchedulePtr_->setGaitName(receivedGait_);
-        
+        std::cerr << receivedGait_;
+        // gaitSchedulePtr_->setGaitName(receivedGait_);
         gaitUpdated_ = false;
         current_mode_end_time_ = 0.0;
         // 判断为walk模式才enable

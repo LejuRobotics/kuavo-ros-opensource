@@ -69,6 +69,7 @@ struct TurboConfig_t {
 using FingerArray = std::array<int16_t, 6>;
 using UnsignedFingerArray = std::array<uint16_t, 6>;
 using TouchSensorStatusArray = std::array<TouchSensorStatus_t, 5>;
+using FingerTouchStatusPtr = std::shared_ptr<TouchSensorStatusArray>;
 
 struct ActionSeqDataType {
     uint16_t duration_ms; // ms
@@ -92,7 +93,7 @@ const UnsignedFingerArray kOpenFingerPositions = {
 };
 /* close finger positions */
 const UnsignedFingerArray kCloseFingerPositions = {
-    50, 50, 50, 50, 50, 50
+    50, 90, 90, 90, 90, 90
 };
 
 struct DeviceInfo_t {
@@ -113,16 +114,6 @@ struct FingerStatus {
     UnsignedFingerArray states;
 
     FingerStatus() {
-        positions.fill(0);
-        speeds.fill(0);
-        currents.fill(0);
-        states.fill(0);
-    }
-
-    /**
-     * @brief Clear/reset all finger status data to zero
-     */
-    void clear() {
         positions.fill(0);
         speeds.fill(0);
         currents.fill(0);
@@ -169,11 +160,10 @@ public:
 
     /**
      * @brief Get the Device Info object
-     *
-     * @param info Reference to store device info data
-     * @return true if successful, false if failed
+     * 
+     * @return DeviceInfo 
      */
-    virtual bool getDeviceInfo(DeviceInfo_t& info) = 0;
+    virtual DeviceInfo_t getDeviceInfo() = 0;
 
     /**
      * @brief Set the Finger Positions.
@@ -193,11 +183,10 @@ public:
 
     /**
      * @brief Get the Finger Status object
-     *
-     * @param status Reference to store finger status data
-     * @return true if successful, false if failed
+     * 
+     * @return FingerStatusPtr 
      */
-    virtual bool getFingerStatus(FingerStatus& status) = 0;
+    virtual FingerStatusPtr getFingerStatus() = 0;
 
     /**
      * @brief Set the Force Level object
@@ -212,6 +201,13 @@ public:
      * @return GripForce 
      */
     virtual GripForce  getGripForce() = 0;
+
+    // /**
+    //  * @brief Get the Touch Status object
+    //  * 
+    //  * @return FingerTouchStatusPtr 
+    //  */
+    // FingerTouchStatusPtr getTouchStatus();
 
     /**
      * @brief Set the Turbo Mode Enabled object

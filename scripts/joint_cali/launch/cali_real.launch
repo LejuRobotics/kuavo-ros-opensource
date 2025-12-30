@@ -9,7 +9,6 @@
   <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch">
     <arg name="joystick_type"      value="$(arg joystick_type)"/>
     <arg name="rviz"               value="$(arg rviz)"/>
-    <arg name="with_mm_ik"         value="true"/>
   </include>
 
 </launch>

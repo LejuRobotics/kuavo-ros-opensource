@@ -46,7 +46,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_interface/common/ModelSettings.h"
 #include "humanoid_interface/initialization/HumanoidInitializer.h"
 #include "humanoid_interface/reference_manager/SwitchedModelReferenceManager.h"
-#include "kuavo_common/common/common.h"
 // #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
 /**
@@ -72,7 +71,7 @@ namespace ocs2
        * @param [in] useHardFrictionConeConstraint: Which to use hard or soft friction cone constraints.
        */
       HumanoidInterface(const std::string &taskFile, const std::string &urdfFile, const std::string &referenceFile, const std::string &gaitFile,
-                        RobotVersion rb_version, bool useHardFrictionConeConstraint = false);
+                        int robot_version_int, bool useHardFrictionConeConstraint = false);
 
       ~HumanoidInterface() override = default;
 
@@ -134,8 +133,6 @@ namespace ocs2
       std::unique_ptr<StateCost> getEndEffectorConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                         const std::string& prefix, const std::string& eeName, const int eeIndex, bool verbose);
       
-      std::unique_ptr<StateCost> getCenterOfMassConstraint(const PinocchioInterface &pinocchioInterface, const std::string& taskFile, bool verbose);                             
-                                                        
       std::unique_ptr<EndEffectorKinematics<scalar_t>> getEeKinematicsPtr(const std::vector<std::string> &endEffectorIds, const std::string &modelName);
 
       ModelSettings modelSettings_;
@@ -160,8 +157,7 @@ namespace ocs2
       int build_cppad_status_ {0};
 
       size_t joint_Num_ = 12;
-      size_t waist_Num_ = 1;
-      RobotVersion rb_version_ = RobotVersion(3, 4); //default to 34
+      int robot_version_int_=34;//default to 34
     };
 
   } // namespace humanoid

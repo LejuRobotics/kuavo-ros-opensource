@@ -332,7 +332,6 @@ class TimedActionExecutor:
         """播放太极动作"""
         if self.taichi_player:
             rospy.loginfo("开始播放太极")
-            
             time_offset = self.current_action.get('params', {}).get('time_offset')
             return self.taichi_player.execute_action_with_csv(time_offset)
         else:

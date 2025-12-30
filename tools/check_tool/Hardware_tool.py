@@ -35,6 +35,7 @@ import serial.tools.list_ports
 
 
 import ruierman
+import claw_rs485
 
 
 servo_usb_path = "/dev/usb_servo"
@@ -165,9 +166,6 @@ def imu_test():
     subprocess.run(command, shell=True)
 
 def leju_claw_test():
-    """
-    主菜单使用的简单测试函数
-    """
     uid = pwd.getpwnam('lab').pw_uid
     gid = grp.getgrnam('lab').gr_gid
     source_file = folder_path + '/config.yaml'
@@ -222,152 +220,6 @@ def leju_claw_test():
 
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
-
-
-def leju_claw_test_with_menu():
-    """
-    开发者工具菜单使用的带子菜单的测试函数
-    """
-    uid = pwd.getpwnam('lab').pw_uid
-    gid = grp.getgrnam('lab').gr_gid
-    source_file = folder_path + '/config.yaml'
-    target_file = '/home/lab/.config/lejuconfig/config.yaml'
-    if not os.path.exists(source_file):
-        print("kuavo_opensource 手臂电机 config.yaml 文件丢失")
-    elif not os.path.exists(target_file):
-        # 如果不存在，则复制源文件到目标位置
-        shutil.copy2(source_file, target_file)
-        print("Copied {} to {}".format(source_file, target_file))
-        os.chown(target_file, uid, gid)
-    else:
-        print("{} already exists.".format(target_file))
-
-    # 读取配置
-    with open(target_file, 'r') as file:
-        config = yaml.safe_load(file)
-
-    
-    claw_left = config['address'].get('Claw_joint_left', None)
-    claw_right = config['address'].get('Claw_joint_right', None)
-    if claw_left is None or claw_right is None:
-        print("你正在使用二指夹爪config.yaml缺少配置，你需要更新 config.yaml 文件，请保存需要的内容后删除该文件再重新运行程序即可")
-        # 提问用户是否删除目标文件
-        user_input = input(f"确定要删除 {target_file} 吗？会自动备份当前文件（yes/no）：").strip().lower()    
-        if user_input == "yes":
-            # 备份目标文件
-            backup_file = target_file.replace('.yaml', '_back.yaml')
-            shutil.copy2(target_file, backup_file)
-            print(f"已备份 {target_file} 为 {backup_file}")
-
-            # 删除目标文件
-            try:
-                os.remove(target_file)
-                print(f"{target_file} 已删除")
-            except PermissionError:
-                print(f"没有权限删除 {target_file}，请检查文件权限")
-                exit(1)
-
-            # 拷贝源文件到目标位置
-            if os.path.exists(source_file):
-                shutil.copy2(source_file, target_file)
-                print(f"已将 {source_file} 拷贝到 {target_file}")
-                os.chown(target_file, uid, gid)
-            else:
-                print(f"源文件 {source_file} 不存在，无法拷贝")
-        else:
-            print("操作已取消，文件未更新")
-            exit(0)
-
-    # 显示测试模式选择菜单
-    while True:
-        print("\n*------------二指夹爪测试模式------------*")
-        print(bcolors.BOLD + "请选择测试模式（q回车退出）：" + bcolors.ENDC)
-        print("1. 夹爪持续发布0、100位置开合测试")
-        print("2. 发布单次目标位置控制夹爪运动-启动夹爪")
-        print("3. 发布单次目标位置控制夹爪运动-发布目标位置")
-        
-        choice = input("请输入选项编号：").strip()
-        
-        if choice == 'q':
-            print("\n*-------------退出测试-------------*")
-            break
-        elif choice == "1":
-            print(bcolors.HEADER + "###开始，夹爪持续开合测试（Ctrl + C 退出）###" + bcolors.ENDC)
-            leju_claw_continuous_test()
-            print(bcolors.HEADER + "###结束，夹爪持续开合测试###" + bcolors.ENDC)
-            break
-        elif choice == "2":
-            print(bcolors.HEADER + "###开始，启动夹爪服务器###" + bcolors.ENDC)
-            leju_claw_start_server()
-            print(bcolors.HEADER + "###结束，启动夹爪服务器###" + bcolors.ENDC)
-            break
-        elif choice == "3":
-            print(bcolors.HEADER + "###开始，发布目标位置控制测试###" + bcolors.ENDC)
-            leju_claw_send_position()
-            print(bcolors.HEADER + "###结束，发布目标位置控制测试###" + bcolors.ENDC)
-            break
-        else:
-            print(bcolors.FAIL + "无效的选项编号，请重新输入！\n" + bcolors.ENDC)
-
-
-def leju_claw_continuous_test():
-    """
-    夹爪持续发布0、100位置开合测试
-    """
-    command = "sudo bash " + os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh") + " --continuous"
-    # 使用 subprocess.run() 运行命令
-    subprocess.run(command, shell=True)
-
-
-def leju_claw_start_server():
-    """
-    启动夹爪服务器
-    """
-    script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh")
-    
-    if not os.path.exists(script_path):
-        print(bcolors.FAIL + f"未找到脚本: {script_path}" + bcolors.ENDC)
-        return
-    
-    print(bcolors.OKCYAN + "正在启动夹爪服务器..." + bcolors.ENDC)
-    print(bcolors.WARNING + "提示：服务器启动后，请在另一个终端运行选项3来发布目标位置" + bcolors.ENDC)
-    
-    # 通过 lejuclaw_test.sh 启动服务器
-    command = "sudo bash " + script_path + " --start-server"
-    subprocess.run(command, shell=True)
-
-
-def leju_claw_send_position():
-    """
-    发布单次目标位置控制夹爪运动
-    """
-    script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh")
-    
-    if not os.path.exists(script_path):
-        print(bcolors.FAIL + f"未找到脚本: {script_path}" + bcolors.ENDC)
-        return
-    
-    try:
-        print(bcolors.OKCYAN + "请输入左右夹爪的目标位置（0-100，0为开爪，100为关爪）" + bcolors.ENDC)
-        left_position = input("左夹爪位置（0-100）：").strip()
-        right_position = input("右夹爪位置（0-100）：").strip()
-        
-        left_pos = float(left_position)
-        right_pos = float(right_position)
-        
-        if left_pos < 0 or left_pos > 100 or right_pos < 0 or right_pos > 100:
-            print(bcolors.FAIL + "位置值必须在0-100之间！" + bcolors.ENDC)
-            return
-        
-        # 通过 lejuclaw_test.sh 发送位置命令
-        command = "bash " + script_path + " --send-position " + str(left_pos) + " " + str(right_pos)
-        print(bcolors.OKCYAN + f"正在控制夹爪移动到位置: 左={left_pos}%, 右={right_pos}%" + bcolors.ENDC)
-        # 使用 subprocess.run() 运行命令
-        subprocess.run(command, shell=True)
-    except ValueError:
-        print(bcolors.FAIL + "输入无效，请输入0-100之间的数字！" + bcolors.ENDC)
-    except KeyboardInterrupt:
-        print(bcolors.WARNING + "\n操作已取消" + bcolors.ENDC)
 
 
 def dxl_zero():
@@ -772,22 +624,6 @@ def hip_imu_test():
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
-
-def isolate_cores():
-    kuavo_ros_file_path = folder_path + "/isolate_cores.sh"
-    kuavo_open_file_path = folder_path + "../../installed/share/hardware_plant/lib/hipnuc_imu/scripts/isolate_cores.sh" 
-    
-    if os.path.exists(kuavo_ros_file_path):
-        command = "bash "+ kuavo_ros_file_path
-    elif os.path.exists(kuavo_open_file_path):
-        command = "bash "+ kuavo_open_file_path
-    else:
-        print(f"The file {file_path} does not exist.")
-        return
-        
-    # 使用 subprocess.run() 运行命令
-    subprocess.run(command, shell=True)
-
 def license_sign():
     FILE = "/home/lab/.config/lejuconfig/ec_master.key"
     # 检查文件是否存在
@@ -980,71 +816,34 @@ def robot_login():
     
     # sudo systemctl start report_robot_network_info.service
 
-def get_git_info():
-    """
-    获取 Git 信息:
-    1. 如果存在 .git 文件夹，则调用 git log 获取
-    2. 否则读取 .version 目录下的 GIT_* 文件
-    """
-    # 获取脚本所在目录
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+def get_git_info():# 获取最新 commit 的 hash、日期和提交信息（title）
+    try:
+        result = subprocess.run(
+            ['git', 'log', '-1', '--format=%H%n%ci%n%s'],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5
+        )
+        output = result.stdout.decode('utf-8').strip().split('\n')
 
-    # 回退两级目录，得到仓库根目录
-    repo_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-
-
-    # 拼接 .git 和 .version 路径
-    git_dir = os.path.join(repo_root, ".git")
-    version_dir = os.path.join(repo_root, ".version")
-
-    # 情况1: 存在 .git 文件夹
-    if os.path.exists(git_dir):
-        try:
-            result = subprocess.run(
-                ['git', 'log', '-1', '--format=%H%n%ci%n%s'],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=5
-            )
-            output = result.stdout.decode('utf-8').strip().split('\n')
-
-            if len(output) < 3:
-                raise ValueError("Unexpected git output: " + repr(output))
-
-            return {
-                'commit_hash': output[0],
-                'commit_date': output[1],
-                'commit_message': output[2],
-                'branch': subprocess.run(
-                    ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-                    check=True, stdout=subprocess.PIPE
-                ).stdout.decode('utf-8').strip()
-            }
-
-        except Exception as e:
-            print("❌ Git command failed:", str(e))
-            return None
-
-    # 情况2: 没有 .git，尝试读取 .version 目录
-    elif os.path.exists(version_dir):
-        def read_file(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
+        if len(output) < 3:
+            raise ValueError("Unexpected git output: " + repr(output))
 
         return {
-            'commit_hash': read_file(os.path.join(version_dir, "GIT_COMMIT")),
-            'branch': read_file(os.path.join(version_dir, "GIT_BRANCH")),
-            'remote': read_file(os.path.join(version_dir, "GIT_REMOTE")),
-            'tag': read_file(os.path.join(version_dir, "GIT_TAG")),
+            'commit_hash': output[0],
+            'commit_date': output[1],
+            'commit_message': output[2]
         }
 
-    else:
-        print("⚠️ Neither .git nor .version found, cannot get commit info.")
-        return None
+    except subprocess.TimeoutExpired:
+        print("⚠️ Git command timed out.")
+    except subprocess.CalledProcessError as e:
+        print("❌ Git command failed:", e.stderr.decode('utf-8').strip())
+    except FileNotFoundError:
+        print("❌ Git is not installed or not in PATH.")
+    except Exception as e:
+        print("❌ Unexpected error:", str(e))
 
 def secondary_menu():
     while True:
@@ -1071,7 +870,6 @@ def secondary_menu():
         print("n. 更新ros密钥")
         print("o. 国产IMU配置udev规则")
         print("p. 国产IMU测试")
-        print("r. 隔离CPU核心 ")
         print("u. 配置robot上线提醒")
         print("t. 恢复出厂文件夹")
 
@@ -1101,7 +899,7 @@ def secondary_menu():
             break
         elif option == "a":
             print(bcolors.HEADER + "###开始，测试夹爪（Ctrl + C 退出）###" + bcolors.ENDC)
-            leju_claw_test_with_menu()
+            leju_claw_test()
             print(bcolors.HEADER + "###结束，测试夹爪###" + bcolors.ENDC)
             break
         elif option == "b":
@@ -1201,11 +999,6 @@ def secondary_menu():
             hip_imu_test()
             print(bcolors.HEADER + "###结束，国产IMU测试###" + bcolors.ENDC)
             break
-        elif option == "r":
-            print(bcolors.HEADER + "###开始，隔离CPU核心###" + bcolors.ENDC)
-            isolate_cores()
-            print(bcolors.HEADER + "###结束，隔离CPU核心###" + bcolors.ENDC)
-            break
         elif option == "u":
             print(bcolors.HEADER + "###开始，robot上线提醒配置###" + bcolors.ENDC)
             robot_login()
@@ -1245,26 +1038,11 @@ if __name__ == '__main__':
 
     git_info = get_git_info()
     if git_info:
-        # 公共信息
-        if 'commit_hash' in git_info:
-            print(f"程序提交版本: {git_info['commit_hash']}")
-
-        # Git 仓库模式
-        if 'commit_date' in git_info:
-            print(f"程序提交日期: {git_info['commit_date']}")
-        if 'commit_message' in git_info:
-            print(f"程序提交信息: {git_info['commit_message']}")
-        if 'branch' in git_info and git_info['branch']:
-            print(f"程序所在分支: {git_info['branch']}")
-
-        # .version 模式下的额外信息
-        if 'tag' in git_info and git_info['tag']:
-            print(f"程序 Tag: {git_info['tag']}")
-        if 'remote' in git_info and git_info['remote']:
-            print(f"程序远程仓库: {git_info['remote']}")
-
+        print(f"程序提交版本: {git_info['commit_hash']}")
+        print(f"程序提交日期: {git_info['commit_date']}")
+        print(f"程序提交信息: {git_info['commit_message']}")
     else:
-        print("❌ Failed to retrieve Git information.")
+        print("Failed to retrieve Git information.")
     
     dev_flag = 0
     if len(sys.argv) > 1:  # 至少有一个参数

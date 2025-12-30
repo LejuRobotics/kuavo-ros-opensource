@@ -8,7 +8,6 @@ import sys
 import os
 import numpy as np # Keep for main script if any direct numpy use remains, or for type hints
 import time # Keep for main script if needed
-import json     
 
 # Modularized components
 from system_id.motion_controller import MotionController
@@ -32,28 +31,12 @@ class SystemIdentification:
     def _get_label(self, chinese_text, english_text):
         return chinese_text if self.use_chinese else english_text
 
-    def _save_failed_result(self, errmsg:str):
-        save_json = {
-            'success': False,
-            'errmsg': errmsg
-        }
-        # Remove any large array objects if they are already part of results, to avoid duplication if not careful
-        with open(os.path.join(self.args.plots_dir, 'system_identification_results.json'), 'w') as f:
-            json.dump(save_json, f, indent=2)
-            rospy.loginfo(f"final failed result saved to '{os.path.join(self.args.plots_dir, 'system_identification_results.json')}'")
-
     def _ros_signal_handler(self, sig, frame):
         rospy.loginfo(self._get_label("收到关闭请求！正在优雅退出...", "Shutdown requested! Gracefully exiting..."))
         self.shutdown_requested = True
         if self.controller:
             self.controller.request_shutdown() # Notify controller to stop activities
-        
-        # 释放ROS节点资源
-        try:
-            rospy.signal_shutdown(self._get_label("用户通过Ctrl+C请求关闭", "User requested shutdown via Ctrl+C"))
-        except Exception as e:
-            rospy.logerr(self._get_label(f"释放ROS节点时出错: {e}", f"Error releasing ROS node: {e}"))
-        
+        rospy.signal_shutdown(self._get_label("用户通过Ctrl+C请求关闭", "User requested shutdown via Ctrl+C"))
         sys.exit(0)
 
     def run(self):
@@ -76,7 +59,6 @@ class SystemIdentification:
             calibration_successful = self.controller.run_calibration_phase()
             if self.shutdown_requested or not calibration_successful:
                 rospy.logwarn(self._get_label("校准失败或被中断。", "Calibration failed or interrupted."))
-                self._save_failed_result("校准失败(可能是标定数据不足)或校准被中断")
                 if not self.shutdown_requested: self.controller.publish_neutral_pose() # Ensure robot stops
                 return # Cannot proceed without calibration
             
@@ -96,7 +78,6 @@ class SystemIdentification:
             sweep_input_data, sweep_output_data, sweep_input_time, sweep_output_time = self.controller.run_sweep_phase()
             if self.shutdown_requested or len(sweep_input_data) < 10:
                 rospy.logwarn(self._get_label("频率扫描数据不足或被中断。", "Frequency sweep data insufficient or interrupted."))
-                self._save_failed_result("频率扫描数据不足或被中断")
                 if not self.shutdown_requested: self.controller.publish_neutral_pose()
                 return
             
@@ -109,7 +90,6 @@ class SystemIdentification:
                 self.analyzer.preprocess_data(sweep_input_data, sweep_output_data, sweep_input_time, sweep_output_time)
             if self.shutdown_requested or len(proc_input) < 10:
                 rospy.logwarn(self._get_label("预处理后数据不足。", "Insufficient data after preprocessing sweep data."))
-                self._save_failed_result("预处理后数据不足")
                 if not self.shutdown_requested: self.controller.publish_neutral_pose()
                 return
 
@@ -125,7 +105,6 @@ class SystemIdentification:
             
             if self.shutdown_requested or len(aligned_input_analysis) < 10:
                 rospy.logwarn(self._get_label("对齐后扫描数据不足。", "Insufficient aligned sweep data for analysis."))
-                self._save_failed_result("对齐后扫描数据不足")
                 if not self.shutdown_requested: self.controller.publish_neutral_pose()
                 return
             

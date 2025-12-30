@@ -71,7 +71,9 @@ TEST(KuavoCommonTest, KuavoSettingsLoad) {
 TEST(KuavoCommonTest, RobotVersion) {
     RobotVersion version(4, 2);
     // Verify string representation of version
-    EXPECT_EQ(version.to_string(), "42");
+    EXPECT_EQ(version.versionName(), "4.2");
+    // Verify integer representation of version
+    EXPECT_EQ(version.versionInt(), 42);
 }
 
 

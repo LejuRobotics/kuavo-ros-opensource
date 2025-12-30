@@ -1,0 +1,83 @@
+<mujoco model="model">
+  <asset>
+    <texture type="2d" name="texture_sheep" file="../../assets/animals/Sheep/texture.png"/>
+    <material name="material_0_sheep" texture="texture_sheep" specular="0.5" shininess="0.5"/>
+    <mesh name="model_sheep" file="../../assets/animals/Sheep/model.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_0_sheep" file="../../assets/animals/Sheep/model_collision_0.obj" scale="0.7 0.7 0.7" />
+    <mesh name="model_collision_1_sheep" file="../../assets/animals/Sheep/model_collision_1.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_2_sheep" file="../../assets/animals/Sheep/model_collision_2.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_3_sheep" file="../../assets/animals/Sheep/model_collision_3.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_4_sheep" file="../../assets/animals/Sheep/model_collision_4.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_5_sheep" file="../../assets/animals/Sheep/model_collision_5.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_6_sheep" file="../../assets/animals/Sheep/model_collision_6.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_7_sheep" file="../../assets/animals/Sheep/model_collision_7.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_8_sheep" file="../../assets/animals/Sheep/model_collision_8.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_9_sheep" file="../../assets/animals/Sheep/model_collision_9.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_10_sheep" file="../../assets/animals/Sheep/model_collision_10.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_11_sheep" file="../../assets/animals/Sheep/model_collision_11.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_12_sheep" file="../../assets/animals/Sheep/model_collision_12.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_13_sheep" file="../../assets/animals/Sheep/model_collision_13.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_14_sheep" file="../../assets/animals/Sheep/model_collision_14.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_15_sheep" file="../../assets/animals/Sheep/model_collision_15.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_16_sheep" file="../../assets/animals/Sheep/model_collision_16.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_17_sheep" file="../../assets/animals/Sheep/model_collision_17.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_18_sheep" file="../../assets/animals/Sheep/model_collision_18.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_19_sheep" file="../../assets/animals/Sheep/model_collision_19.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_20_sheep" file="../../assets/animals/Sheep/model_collision_20.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_21_sheep" file="../../assets/animals/Sheep/model_collision_21.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_22_sheep" file="../../assets/animals/Sheep/model_collision_22.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_23_sheep" file="../../assets/animals/Sheep/model_collision_23.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_24_sheep" file="../../assets/animals/Sheep/model_collision_24.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_25_sheep" file="../../assets/animals/Sheep/model_collision_25.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_26_sheep" file="../../assets/animals/Sheep/model_collision_26.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_27_sheep" file="../../assets/animals/Sheep/model_collision_27.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_28_sheep" file="../../assets/animals/Sheep/model_collision_28.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_29_sheep" file="../../assets/animals/Sheep/model_collision_29.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_30_sheep" file="../../assets/animals/Sheep/model_collision_30.obj" scale="0.7 0.7 0.7"/>
+    <mesh name="model_collision_31_sheep" file="../../assets/animals/Sheep/model_collision_31.obj" scale="0.7 0.7 0.7"/>
+  </asset>
+  <worldbody>
+    <body name="sheep" pos="8 -1 0.05" euler="0 0 1.57">
+      <freejoint name="sheep"/>
+      <!-- Add inertial properties to reduce bouncing - increased mass for more stability -->
+      <!-- <inertial pos="0 0 0" mass="0.5" diaginertia="0.02 0.02 0.02" /> -->
+      <!-- Visual mesh -->
+      <geom material="material_0_sheep" mesh="model_sheep" type="mesh" contype="0" conaffinity="0" group="2" mass="1e-3"/>
+      <!-- Collision meshes with stronger damping to reduce elasticity -->
+      <!-- solimp: lower values = harder collision, less bounce -->
+      <!-- solref: lower first value = more damping, less bounce -->
+      <geom mesh="model_collision_0_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_1_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_2_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_3_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_4_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_5_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_6_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_7_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_8_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_9_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_10_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_11_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_12_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_13_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_14_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_15_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_16_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_17_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_18_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_19_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_20_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_21_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_22_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_23_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_24_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_25_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_26_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_27_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_28_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_29_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_30_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+      <geom mesh="model_collision_31_sheep" type="mesh" group="3" mass="1e-3" friction="1.0 0.005 0.0001" solimp="0.9 0.95 0.0001" solref="0.01 1"/>
+    </body>
+  </worldbody>
+</mujoco>

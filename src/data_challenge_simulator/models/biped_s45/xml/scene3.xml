@@ -1,0 +1,184 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="kuavo scene">
+  <include file="biped_s45.xml" />
+  <statistic center="0 0 1" extent="1.8" />
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0 0 0" specular="0 0 0" />
+    <rgba haze="0.15 0.25 0.35 1" />
+    <global azimuth="160" elevation="-20" />
+  </visual>
+
+  <asset>
+
+    <texture file="../../assets/textures/belt1.png" type="2d" name="wall" />
+    <material name="walls_mat" reflectance="0.1" shininess="0.1" texture="wall" texuniform="true" />
+
+    <texture file="../../assets/textures/roof.png" type="2d" name="roof" />
+    <material name="roofs_mat" reflectance="0.1" shininess="0.1" texture="roof" texuniform="true" />
+
+    
+    <texture file="../../assets/textures/belt.png" type="2d" name="belt" />
+    <material name="belt_mat" texture="belt" texuniform="true" texrepeat="1 20" reflectance="0.1" shininess="0.1" />
+    
+    <texture name="ground_tex" type="2d" file="../../assets/textures/fabric_floor.png" />
+    <material name="ground_mat" texture="ground_tex" texuniform="true" /> 
+
+    <texture file="../../assets/textures/metal.png" type="2d" name="black" />
+    <material name="black_mat" reflectance="0.1" shininess="0.1" texture="black" texuniform="true" texrepeat="1 0.01" />
+    <texture file="../../assets/textures/red.png" type="2d" name="red" />
+    <material name="red_mat" reflectance="0.1" shininess="0.1" texture="red" texuniform="true" texrepeat="1 0.01" />
+
+    <texture type="2d" name="texture_red" file="../../assets/red_box/texture.png" />
+    <material name="material_red" texture="texture_red" specular="0.5" shininess="0.5" />
+    <mesh name="model_red" file="../../assets/red_box/model.obj" scale="0.07 0.08 0.1" />
+
+    <texture type="2d" name="texture_black" file="../../assets/black_box/texture.png" />
+    <material name="material_black" texture="texture_black" specular="0.5" shininess="0.5" />
+    <mesh name="model_black" file="../../assets/black_box/model.obj" scale="0.07 0.08 0.08" />
+  </asset>
+
+  <worldbody>
+    
+    <light pos=" 0 0 7" dir="0 0 -1" directional="true" />
+    <geom name="floor" size="0 0 0.05" type="plane" material="ground_mat" euler="0 0 1.57079633" />
+
+    <geom name="wall_front" type="box" size="10 5 2" pos="0 10 2.5" euler="-1.57079633 0 3.14159265" material="walls_mat" contype="0" conaffinity="0" />
+
+    <geom name="wall_back" type="box" size="10 5 2" pos="0 -10 2.5" euler="-1.57079633 0 0" material="walls_mat" contype="0" conaffinity="0" />
+
+    <geom name="wall_right" type="box" size="10 5 2" pos="10 0 2.5" euler="0 1.57079633 1.57" material="walls_mat" contype="0" conaffinity="0" />
+
+    <geom name="wall_left" type="box" size="10 5 2" pos="-10 0 2.5" euler="0 -1.57079633 1.57" material="walls_mat" contype="0" conaffinity="0" />
+
+    <geom name="roof" type="plane" size="10 10 5" pos="0 0 7" euler="3.14159265 0 0" material="roofs_mat" />
+
+
+
+    <body name="belt_plate1" pos="0.5 0 0.7771875414">  
+      <inertial pos="0 0 0" mass="1" diaginertia="1e-6 1e-6 1e-6" />
+      <joint name="belt_slide" type="slide" axis="0 1 0" range="-20 20" damping="0.001" />
+      <geom name="belt_geom1" type="box" size="0.18 100 0.01" rgba="0 0 0 0" friction="1.0 0.005 0.0001" />
+    </body>
+
+    <body name="belt_front" pos="0.5 0 0.7771875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_front" type="box" size="0.2 2.5 0.01" material="belt_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="belt_back" pos="-3 0 0.7771875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_back" type="box" size="0.2 2.5 0.01" material="belt_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="belt_left" pos="-1.25 2.7 0.7771875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_left" type="box" size="0.2 1.55 0.01" material="belt_mat" euler="0 0 1.57" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="belt_right" pos="-1.25 -2.7 0.7771875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_right" type="box" size="0.2 1.55 0.01" material="belt_mat" euler="0 0 1.57" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="circle_left_front" pos="0.3 2.5 0.7781875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="circle_left_front" type="cylinder" size="0.4 0.01" material="belt_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="circle_right_front" pos="0.3 -2.5 0.7781875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="circle_right_front" type="cylinder" size="0.4 0.01" material="belt_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="circle_left_back" pos="-2.8 2.5 0.7781875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="circle_left_back" type="cylinder" size="0.4 0.01" material="belt_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="circle_right_back" pos="-2.8 -2.5 0.7781875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="circle_right_back" type="cylinder" size="0.4 0.01" material="belt_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+
+
+    <body name="box_left_front" pos="0.1 2.3 0.3671875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="box_left_front" type="box" size="0.2 0.2 0.425" material="roofs_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="box_right_front" pos="0.1 -2.3 0.3671875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="box_right_front" type="box" size="0.2 0.2 0.425" material="roofs_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="box_left_back" pos="-2.6 2.3 0.3671875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="box_left_back" type="box" size="0.2 0.2 0.425" material="roofs_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="box_right_back" pos="-2.6 -2.3 0.3671875414">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="box_right_back" type="box" size="0.2 0.2 0.425" material="roofs_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+
+
+    
+    <body name="box_red1" pos="-50 -50 0.85">
+      <freejoint name="box_red1" />
+      <geom type="box" size="0.04 0.0175 0.02" mass="1e-2" friction="1 0.005 0.0001" rgba="1 0 0 0" pos="0 0 0" />
+      <geom mesh="model_red" material="material_red" type="mesh" contype="0" conaffinity="0" mass="1e-3" quat="1 0 0 1" />
+    </body>
+
+    <body name="box_red2" pos="-51 -51 0.85">
+      <freejoint name="box_red2" />
+      <geom type="box" size="0.04 0.0175 0.02" mass="1e-2" friction="1 0.005 0.0001" rgba="1 0 0 0" pos="0 0 0" />
+      <geom mesh="model_red" material="material_red" type="mesh" contype="0" conaffinity="0" mass="1e-3" quat="1 0 0 1" />
+    </body>
+
+    <body name="box_black1" pos="-52 -52 0.85">
+      <freejoint name="box_black1" />
+      <geom type="box" size="0.04 0.0175 0.02" mass="1e-2" friction="1 0.005 0.0001" rgba="1 0 0 0" pos="0 0 0" />
+      <geom mesh="model_black" material="material_black" type="mesh" contype="0" conaffinity="0" mass="1e-3" quat="0 0.7071068 -0.7071068 0" />
+    </body>
+
+    <body name="box_black2" pos="-53 -53 0.85">
+      <freejoint name="box_black2" />
+      <geom type="box" size="0.04 0.0175 0.02" mass="1e-2" friction="1 0.005 0.0001" rgba="1 0 0 0" pos="0 0 0" />
+      <geom mesh="model_black" material="material_black" type="mesh" contype="0" conaffinity="0" mass="1e-3" quat="0 0.7071068 -0.7071068 0" />
+    </body>
+
+
+    <body name="bin_red" pos="0.26 0.01 0.5">
+    
+    <geom type="box" size="0.105 0.105 0.23" material="red_mat" rgba="1 0.5 0.5 1" pos="0 0 -0.27" friction="1.0 0.01 0.0001" solimp="0.95 0.99 0.002" solref="0.008 1" />
+    
+    <geom type="box" size="0.105 0.005 0.09" pos="0  0.10 0.05" material="red_mat" rgba="1 0.5 0.5 1" friction="1.0 0.01 0.0001" />
+    <geom type="box" size="0.105 0.005 0.09" pos="0 -0.10 0.05" material="red_mat" rgba="1 0.5 0.5 1" friction="1.0 0.01 0.0001" />
+    <geom type="box" size="0.005 0.105 0.09" pos=" 0.10 0 0.05" material="red_mat" rgba="1 0.5 0.5 1" friction="1.0 0.01 0.0001" />
+    <geom type="box" size="0.005 0.105 0.09" pos="-0.10 0 0.05" material="red_mat" rgba="1 0.5 0.5 1" friction="1.0 0.01 0.0001" />
+    </body>
+
+    <body name="bin_black" pos="0.26 -0.2 0.5">
+    
+    <geom type="box" size="0.105 0.105 0.23" material="black_mat" rgba="0.5 0.5 0.5 1" pos="0 0 -0.27" friction="1.0 0.01 0.0001" solimp="0.95 0.99 0.002" solref="0.008 1" />
+    
+    <geom type="box" size="0.105 0.005 0.09" pos="0  0.10 0.05" material="black_mat" rgba="0.5 0.5 0.5 1" friction="1.0 0.01 0.0001" />
+    <geom type="box" size="0.105 0.005 0.09" pos="0 -0.10 0.05" material="black_mat" rgba="0.5 0.5 0.5 1" friction="1.0 0.01 0.0001" />
+    <geom type="box" size="0.005 0.105 0.09" pos=" 0.10 0 0.05" material="black_mat" rgba="0.5 0.5 0.5 1" friction="1.0 0.01 0.0001" />
+    <geom type="box" size="0.005 0.105 0.09" pos="-0.10 0 0.05" material="black_mat" rgba="0.5 0.5 0.5 1" friction="1.0 0.01 0.0001" />
+    </body>
+
+  </worldbody>
+
+  <actuator>
+    <velocity name="belt_speed" joint="belt_slide" kv="100" ctrlrange="-0.1 0.1" />
+  </actuator>
+
+
+
+
+  
+
+</mujoco>

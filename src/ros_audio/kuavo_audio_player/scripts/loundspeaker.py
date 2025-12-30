@@ -10,8 +10,7 @@ import wave
 import tempfile
 from std_msgs.msg import Int16MultiArray, MultiArrayDimension, MultiArrayLayout
 from std_msgs.msg import Bool
-from kuavo_audio_player.srv import playmusic, playmusicResponse, audio_status, audio_statusResponse
-from std_srvs.srv import Trigger
+from kuavo_msgs.srv import playmusic, playmusicResponse
 import subprocess
 import signal
 import uuid
@@ -25,7 +24,7 @@ class MusicPlayerNode:
     # 播放控制
     PUBLISH_RATE_HZ = 10
     CHUNK_SIZE = 65536
-    DEFAULT_GAIN = 1.0
+    DEFAULT_GAIN = 3.0
     
     # FFmpeg参数
     FFMPEG_FORMAT = 'wav'
@@ -54,13 +53,11 @@ class MusicPlayerNode:
         
         # 创建服务和话题
         self.service = rospy.Service('play_music', playmusic, self.play_music_callback)
-        self.audio_status_service = rospy.Service('audio_status', audio_status, self.audio_status_callback)
         self.audio_publisher = rospy.Publisher('audio_data', Int16MultiArray, queue_size=10)
         self.stop_music_subscriber = rospy.Subscriber('stop_music', Bool, self.stop_music_callback, queue_size=10)
         
         # 初始化变量
         self.temp_dir = tempfile.gettempdir()
-        self.is_playing = False  # 播放状态标志
         
         rospy.loginfo("音频播放节点初始化完成")
 
@@ -110,14 +107,10 @@ class MusicPlayerNode:
     def play_music_callback(self, req):
         """处理播放音乐请求"""
         try:
-            # 设置播放状态
-            self.is_playing = True
-            
             music_file = os.path.join(self.music_directory, f"{req.music_number}")
             
             if not os.path.exists(music_file):
                 rospy.logerr(f"音频文件不存在: {music_file}")
-                self.is_playing = False
                 return playmusicResponse(success_flag=False)
             
             rospy.loginfo(f"开始播放音频文件: {music_file}")
@@ -125,7 +118,6 @@ class MusicPlayerNode:
             # 转换为标准WAV格式
             wav_file_path = self.convert_to_wav(music_file, req.volume)
             if not wav_file_path:
-                self.is_playing = False
                 return playmusicResponse(success_flag=False)
             
             # 读取并发布音频数据
@@ -138,16 +130,10 @@ class MusicPlayerNode:
                 except:
                     pass
             
-            # 音频数据发布完成，但还需等待实际播放完成
-            # 播放状态将通过缓冲区状态来判断
-            self.is_playing = False
-            rospy.loginfo("音频数据发布完成，等待播放完成")
-            
             return playmusicResponse(success_flag=success)
             
         except Exception as e:
             rospy.logerr(f"播放音乐出错: {e}")
-            self.is_playing = False
             return playmusicResponse(success_flag=False)
 
     def convert_to_wav(self, music_file, volume):
@@ -171,6 +157,7 @@ class MusicPlayerNode:
                 '-acodec', self.FFMPEG_CODEC,
                 '-ar', str(self.DEFAULT_SAMPLE_RATE),
                 '-ac', str(self.DEFAULT_CHANNELS),
+                '-af', f'volume={volume}dB',
                 '-y', temp_wav
             ]
             
@@ -235,32 +222,10 @@ class MusicPlayerNode:
             rospy.logerr(f"发布音频数据失败: {e}")
             return False
 
-    def audio_status_callback(self, req):
-        """返回当前音频播放状态，结合缓冲区状态判断"""
-        # 如果正在发布音频数据，肯定在播放
-        if self.is_playing:
-            return audio_statusResponse(is_playing=True)
-        
-        # 检查音频缓冲区是否还有数据
-        try:
-            buffer_service = rospy.ServiceProxy('get_used_audio_buffer_size', Trigger)
-            response = buffer_service()
-            if response.success:
-                buffer_size = int(response.message)
-                # 如果缓冲区还有数据，说明还在播放
-                is_playing_actual = buffer_size > 0
-                rospy.logdebug(f"缓冲区大小: {buffer_size}, 播放状态: {is_playing_actual}")
-                return audio_statusResponse(is_playing=is_playing_actual)
-        except Exception as e:
-            rospy.logwarn(f"查询缓冲区状态失败: {e}")
-        
-        return audio_statusResponse(is_playing=self.is_playing)
-
     def stop_music_callback(self, msg):
         """停止播放音乐"""
         if msg.data:
             rospy.loginfo("收到停止播放请求")
-            self.is_playing = False
             # 这里可以添加停止逻辑，如清空发布队列等
             return True
 

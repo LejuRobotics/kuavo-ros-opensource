@@ -6,19 +6,19 @@
 #include <Eigen/Core>
 #include "kuavo_common/common/robot_state.h"
 #include "kuavo_common/common/json_config_reader.hpp"
-#include "kuavo_common/common/common.h"
+
 namespace HighlyDynamic
 {
 
 #define MOTOR_CONTROL_MODE_TORQUE 0
 #define MOTOR_CONTROL_MODE_VELOCITY 1
 #define MOTOR_CONTROL_MODE_POSITION 2
+
 #define BIT_17 (1 << 17)
 #define BIT_17_9 (BIT_17 * 9)
 #define BIT_17_10 (BIT_17 * 10)
 #define BIT_17_18 (BIT_17 * 18)
 #define BIT_17_20 (BIT_17 * 20)
-#define BIT_17_25 (BIT_17 * 25)
 #define BIT_17_36 (BIT_17 * 36)
 
 #define AK10_9_MC (40)
@@ -26,9 +26,6 @@ namespace HighlyDynamic
 #define PA81_MC (60)
 #define PA100_MC (110)
 #define CK_MC (18)
-#define PA4310_25_MC (8)
-#define PA72_36_MC (15)
-#define PA76_25_MC (18)
 
 #define AK10_9_C2T (1.26)
 #define AK70_10_C2T (1.23)
@@ -36,15 +33,10 @@ namespace HighlyDynamic
 #define PA100_C2T (1.2) // 1.2
 #define PA100_18_C2T (2.0)
 #define PA100_20_C2T (2.4)
-
-
 #define CK_C2T (2.1) // 1.4
-#define PA72_C2T (3.6)
+#define PA72_C2T (2.0)
 #define PA60_C2T (2.0)
 #define PA43_C2T (1.45)
-#define PA4310_25_C2T (2.6)
-#define PA76_25_C2T (3.8)
-#define PA72_36_C2T (4.8)
 
 #define LEG_DOF 6
 #define LEGS_TOTEL_JOINT 12
@@ -70,13 +62,6 @@ namespace HighlyDynamic
     {
         Eigen::VectorXd init_arm_pos;
         Eigen::VectorXd walk_arm_pose;
-        Eigen::VectorXd calibration_safe_pose;
-        Eigen::VectorXd arm_calibration_limits;
-        Eigen::VectorXd arm_calibration_directions;
-        double arm_calibration_velocity;
-        double arm_calibration_timeout;
-        double arm_calibration_position_variance_time;
-        double arm_calibration_position_variance_threshold;
         std::vector<Eigen::VectorXd> arm_poses;
     };
     struct ModelSettings
@@ -95,7 +80,6 @@ namespace HighlyDynamic
         uint8_t NUM_JOINT;
         uint8_t NUM_ARM_JOINT;
         uint8_t NUM_HEAD_JOINT;
-        uint8_t NUM_WAIST_JOINT;
         bool is_parallel_arm;
         // frames
         std::vector<std::string> end_frames_name;
@@ -124,13 +108,10 @@ namespace HighlyDynamic
         bool only_half_up_body = false;
         std::vector<int32_t> joint_kp;
         std::vector<int32_t> joint_kd;
-        std::vector<int32_t> ruiwo_kp;
-        std::vector<int32_t> ruiwo_kd;
     };
 
     struct HardwareSettings
     {
-        int inner_size = 10;
         bool imu_invert;
         uint8_t num_joints;
         uint8_t num_arm_joints;
@@ -138,17 +119,13 @@ namespace HighlyDynamic
         double peak_timeWin;
         double speed_timeWin;
         double lock_rotor_timeWin;
-        uint8_t num_waist_joints = 0;
-        std::string robot_module;
         Eigen::VectorXd imu_in_torso;
         std::vector<std::string> motors_type;
         std::vector<uint8_t> joint_ids;
         std::vector<MotorDriveType> driver;
         std::vector<uint32_t> encoder_range;
         std::vector<double> max_current;
-        std::vector<double> c2t_coeff_default;
-        std::vector<std::vector<double>> c2t_coeff;
-        std::vector<std::vector<double>> c2t_cul;
+        std::vector<double> c2t_coeff;
         std::vector<double> min_joint_position_limits;
         std::vector<double> max_joint_position_limits;
         std::vector<double> joint_velocity_limits;
@@ -166,15 +143,7 @@ namespace HighlyDynamic
             driver.resize(num_joints);
             encoder_range.resize(num_joints);
             max_current.resize(num_joints);
-            c2t_coeff_default.resize(num_joints);
-            c2t_coeff.resize(num_joints); // 设置外层向量大小
-            for (auto& inner_vector : c2t_coeff) {
-                inner_vector.resize(inner_size); // 设置每个内层向量的大小
-            }
-            c2t_cul.resize(num_joints); // 设置外层向量大小
-            for (auto& inner_vector : c2t_cul) {
-                inner_vector.resize(inner_size); // 设置每个内层向量的大小
-            }
+            c2t_coeff.resize(num_joints);
             min_joint_position_limits.resize(num_joints);
             max_joint_position_limits.resize(num_joints);
             joint_velocity_limits.resize(num_joints);
@@ -184,26 +153,9 @@ namespace HighlyDynamic
             motors_exist.resize(num_joints);
             motors_disable.resize(num_joints);
         }
-        std::string getEcmasterType(RobotVersion rb_version = RobotVersion(4, 0));
-        std::string getIMUType(RobotVersion rb_version = RobotVersion(4, 0));
+        std::string getEcmasterType(int robot_version_int=40);
+        std::string getIMUType(int robot_version_int = 40);
 
-    };
-    struct MotorC2TSettings
-    {
-        int inner_size = 10;
-        std::vector<std::vector<double>> c2t_cul;
-        std::vector<std::vector<double>> c2t_coeff;
-        void resizeMotor(uint8_t num_joints)
-        {
-            c2t_coeff.resize(num_joints); // 设置外层向量大小
-            for (auto& inner_vector : c2t_coeff) {
-                inner_vector.resize(inner_size); // 设置每个内层向量的大小
-            }
-            c2t_cul.resize(num_joints); // 设置外层向量大小
-            for (auto& inner_vector : c2t_cul) {
-                inner_vector.resize(inner_size); // 设置每个内层向量的大小
-            }
-        }
     };
 
     struct FilterSettings
@@ -228,7 +180,6 @@ namespace HighlyDynamic
         ModelSettings model_settings;
         RunningSettings running_settings;
         HardwareSettings hardware_settings;
-        MotorC2TSettings motor_c2t_settings;
         FilterSettings filter_settings;
         std::string kuavo_assets_path;
 

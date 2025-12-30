@@ -1,20 +1,5 @@
 # 如何使用
 
-# 接口文档
-
-[readme_topics.md](./docs/readme_topics.md)
-
-[运动控制接口文档](./docs/运动控制API.md)
-
-[全身控制器相关参数说明](./docs/info文件说明.md)
-
-[kuavo_asset配置文档说明](./docs/kuavo_json文档说明.md)
-
-[运动控制接口及topic补充文档](./docs/补充工程说明文档.md)
-
-[ROBOT_VERSION 说明](./docs/robot_version版本号说明.md)
-
-
 ## 开源仓库
 ```shell
 # https
@@ -61,12 +46,12 @@ git clone git@gitee.com:leju-robot/kuavo-ros-opensource.git
 - docker镜像可以自行根据后续章节使用`./docker/Dockerfile`构建，或者下载已经编译好的镜像：
 
 ```bash  
-wget https://kuavo.lejurobot.com/docker_images/kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
+wget https://kuavo.lejurobot.com/docker_images/kuavo_opensource_mpc_wbc_img_v0.6.1.tar.gz
 ```
 
 - 执行以下命令导入容器镜像：
 ```bash
-docker load -i kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
+docker load -i kuavo_opensource_mpc_wbc_img_v0.6.1.tar.gz
 ```
 - 执行`./docker/run.sh`进入容器后，默认在仓库的映射目录`/root/kuavo_ws`，执行以下命令开始编译：
 
@@ -322,17 +307,6 @@ roslaunch humanoid_controllers load_kuavo_real_half_up_body.launch
   - x键为模式切换辅助键，按住x键之后,其他按键的作用如下：
     - A:手臂模式切换为外部控制/自动摆手，这两种模式切换之后会有一个平滑同步到当前规划轨迹的过程
     - B:手臂模式切换为保持姿态
-  - VR低时延模式
-    - 在使用有线连接情况下，建议使用低时延模式，可以实现更快速的动作
-    - 启动VR之后，按下左边前扳机+X，开启低时延模式；按下左边侧扳机+X，关闭低时延模式
-  - VR映射躯干的运动（上下蹲和弯腰）使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度
-    - 通过给launch_quest3_ik.launch文件传入参数`control_torso:=true`才能开启躯干控制
-    - 启动VR之后，手指覆盖右手A按键不按下+按下左手Y，开启映射躯干模式；再次手指覆盖右手A按键不按下+按下左手Y，关闭映射躯干模式
-    - **开启或者关闭均需在站立情况下进行**
-  - VR右摇杆单步转向
-    - 需要在`roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch`启用时需在启动时传入参数`use_step_turning:=true`
-    - 目前分为 4 档转向: 15°, 30°, 45°,60°, 大约占比摇杆区间行程的:0~15%, 15~45%,45~75%,75~100%
-    - 注意只有当左摇杆不动时（即没有控制前后左右运动），右摇杆左右操作才会进行单独转向，否则会采用普通模式进行转向
  
  ## 键盘控制
  - 如没有手柄或者VR等，可以使用键盘控制节点进行控制, 如运行仿真器并且使用键盘控制节点

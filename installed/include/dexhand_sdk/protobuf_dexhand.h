@@ -30,7 +30,7 @@ public:
     DexHandFwType getDexHandFwType() override;
 
     // See DexHandBase::getDeviceInfo for details
-    bool getDeviceInfo(DeviceInfo_t& info) override;
+    DeviceInfo_t getDeviceInfo() override;
 
     // See DexHandBase::setFingerPositions for details
     void setFingerPositions(const UnsignedFingerArray &positions) override;
@@ -39,7 +39,7 @@ public:
     void setFingerSpeeds(const FingerArray &speeds) override;
 
     // See DexHandBase::getFingerStatus for details
-    bool getFingerStatus(FingerStatus& status) override;
+    FingerStatusPtr getFingerStatus() override;
 
     // See DexHandBase::setGripForce for details
     void setGripForce(GripForce level) override;
@@ -47,6 +47,12 @@ public:
     // See DexHandBase::getGripForce for details
     GripForce  getGripForce() override;
 
+    // /**
+    //  * @brief Get the Touch Status object
+    //  * 
+    //  * @return FingerTouchStatusPtr 
+    //  */
+    // FingerTouchStatusPtr getTouchStatus();
 
     // See DexHandBase::setTurboModeEnabled for details
     void setTurboModeEnabled(bool enabled) override;

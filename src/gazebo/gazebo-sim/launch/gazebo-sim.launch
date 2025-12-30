@@ -2,10 +2,8 @@
   <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
   <param name="robot_version"    value="$(arg robot_version)"/>
   <arg name="use_xacro" value="$(eval int(arg('robot_version')) >= 40)"/>
-  
   <arg name="use_grab_box_scene" default="false"/>
   <arg name="world_name"  default="$(find gazebo_ros)/worlds/empty.world"/>
-  <arg name="use_kuavo" value="$(eval int(arg('robot_version')) >= 40)"/>
 
   <!-- 楼梯参数（用于传递给load_stairs.launch） -->
   <!-- 第一段楼梯（上楼梯）参数 -->
@@ -32,19 +30,16 @@
   </include>
 
   <group if="$(arg use_stairs)">
-    <group if="$(arg use_kuavo)">
-      <!-- 加载楼梯模型 -->
-      <include file="$(find gazebo_sim)/launch/load_stairs.launch">
-      </include>
-    </group>
-    <group unless="$(arg use_kuavo)">
-      <!-- 加载楼梯模型 -->
-      <include file="$(find gazebo_sim)/launch/load_stairs_roban.launch">
-      </include>
-        <!-- 加载斜坡模型 -->
-    <include file="$(find gazebo_sim)/launch/load_slope_roban.launch">
+
+    <!-- 加载楼梯模型 -->
+    <include file="$(find gazebo_sim)/launch/load_stairs.launch">
+
     </include>
-    </group>
+
+    <!-- 加载斜坡模型 -->
+    <include file="$(find gazebo_sim)/launch/load_slope.launch">
+
+    </include>
   </group>
 
   <!-- Load URDF or XACRO file based on robot version -->
@@ -68,7 +63,7 @@
 
   <!-- Spawn URDF model into Gazebo -->
   <node name="spawn_robot" pkg="gazebo_ros" type="spawn_model" 
-        args="-urdf -model biped_s$(arg robot_version) -param robot_description -x 0 -y 0 -z 1.0"/>
+        args="-urdf -model biped_s42 -param robot_description -x 0 -y 0 -z 1.0"/>
 
   <group unless="$(arg use_grab_box_scene)">
     <!-- 加载独立的 AprilTag Cube -->
@@ -102,7 +97,7 @@
   <!-- <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" /> -->
 
   <!-- Load controller configuration -->
-  <rosparam file="$(find kuavo_assets)/models/biped_s$(arg robot_version)/config/controllers.yaml"/>
+  <rosparam file="$(find kuavo_assets)/models/biped_s42/config/controllers.yaml"/>
 
   <!-- Start controller manager -->
   <!-- <node name="controller_manager" pkg="controller_manager" type="controller_manager" /> -->

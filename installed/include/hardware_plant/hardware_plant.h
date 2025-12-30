@@ -1,13 +1,10 @@
 #pragma once
 
 #include <iostream>
-#include <set>
 #include <unordered_map>
-#include <map>
 #include "kuavo_common/common/robot_state.h"
 #include "kuavo_common/common/sensor_data.h"
 #include "kuavo_common/common/kuavo_settings.h"
-#include "kuavo_common/common/common.h"
 #include "kuavo_common/common/json_config_reader.hpp"
 #include "kuavo_common/kuavo_common.h"
 #include "actuators_interface.h"
@@ -23,21 +20,16 @@
 #include "claw_types.h"
 #include "gesture_types.h"
 #include "touch_hand_controller.h"
-#include "revo2_hand_controller.h"
 #include "hipnuc_imu_receiver.h"
-#include "motor_status_manager.h"
-#include <set>
-#include <mutex>
 
 namespace HighlyDynamic
 {
 #define MOTOR_OFFSET_L (-15 * M_PI / 180)
 #define MOTOR_OFFSET_S (-15 * M_PI / 180)
-//  0：CST, 1: CSV, 2:CSP
 #define CST 0
 #define CSV 1
 #define CSP 2
-  
+
 inline std::vector<double> eigenToStdVector(const Eigen::VectorXd& vec) {
     return std::vector<double>(vec.data(), vec.data() + vec.size());
 }
@@ -45,7 +37,7 @@ inline std::vector<double> eigenToStdVector(const Eigen::VectorXd& vec) {
 struct HardwareParam {
     bool cali_leg{false};
     std::vector<double> default_joint_pos;
-    RobotVersion robot_version{4, 2};
+    int robot_version{42};
     bool cali{false}; 
     bool cali_arm{false};
     int build_cppad_state{0};
@@ -68,38 +60,31 @@ struct MotorParam {
     double Kd;
 };
 class HardwarePlant
-  {
+{
     struct RuiWoJointData
     {
-      std::vector<double> pos;
-      std::vector<double> vel;
-      std::vector<double> torque;
+        std::vector<double> pos;
+        std::vector<double> vel;
+        std::vector<double> torque;
     };
 
-  public:
+public:
     HardwarePlant(double dt = 1e-3, HardwareParam hardware_param = HardwareParam(), const std::string & hardware_abs_path = "", uint8_t control_mode = MOTOR_CONTROL_MODE_TORQUE,
                  uint16_t num_actuated = 0,
                  uint16_t nq_f = 7, uint16_t nv_f = 6);
-    virtual ~HardwarePlant(){HWPlantDeInit();}
+    ~HardwarePlant(){HWPlantDeInit();}
     void Update(RobotState_t state_des, Eigen::VectorXd actuation);
     void joint2motor(const RobotState_t &state_des_, const Eigen::VectorXd &actuation, Eigen::VectorXd &cmd_out);
     void motor2joint(SensorData_t sensor_data_motor, SensorData_t &sensor_data_joint);
     void GetC2Tcoeff(double *ret_c2t_coeff, size_t size);
-    Eigen::VectorXd GetC2Tcoeff(Eigen::VectorXd &ret_c2t_coeff);
-    Eigen::VectorXd GetC2Tcoeff_Torque(Eigen::VectorXd &joint_torque);
     void cmds2Cmdr(const Eigen::VectorXd &cmd_s, uint32_t na_src, Eigen::VectorXd &cmd_r, uint32_t na_r);
     bool readSensor(SensorData_t &sensor_data);
     void setState(SensorData_t &sensor_data_motor, SensorData_t &sensor_data_joint);
     void getState(SensorData_t &sensor_data_motor, SensorData_t &sensor_data_joint);
     bool HWPlantCheck();
-    void genArmSwingTrajectory(Eigen::VectorXd &cmd);
-    void initRobotModule();
     size_t get_num_actuated() const;
 
-    HardwareSettings get_motor_info() const
-    {
-      return motor_info;
-    };
+    HardwareSettings get_motor_info() const { return motor_info; };
     int8_t HWPlantInit();
     SensorData_t sensorsInitHW();
     bool sensorsCheck();
@@ -110,14 +95,12 @@ class HardwarePlant
     int8_t PDInitialize(Eigen::VectorXd &q0);
     void writeCommand(Eigen::VectorXd cmd_r, uint32_t na_r, std::vector<int> control_modes, Eigen::VectorXd &joint_kp, Eigen::VectorXd &joint_kd);
     void endEffectorCommand(std::vector<EndEffectorData> &end_effector_cmd);
-    bool checkJointPos(JointParam_t *joint_data, std::vector<uint8_t> ids, std::string *msg);
-    bool checkJointSafety(const std::vector<JointParam_t> &joint_data, std::vector<uint8_t> ids, std::string &msg);
+    bool checkJointPos(const std::vector<JointParam_t> &joint_data, std::vector<uint8_t> ids, std::string &msg);
     void jointFiltering(std::vector<JointParam_t> &joint_data, double dt);
     void setDefaultJointPos(std::vector<double> default_joint_pos);
 
-    // 修改接口，支持reason参数，默认值为"Joint protection triggered"
-    bool disableMotor(int motorIndex, const std::string& reason = "Joint protection triggered");
-    void setEcmasterDriverType(std::string type = "elmo");// "elmo" or "youda" or "leju"
+    bool diableMotor(int motorIndex);
+    void setEcmasterDriverType(std::string type = "elmo");
     static void signalHandler(int sig);
     bool setCurrentPositionAsOffset();
     void performJointSymmetryCheck();
@@ -128,29 +111,10 @@ class HardwarePlant
     bool calibrateMotor(int motor_id, int direction, bool save_offset = false);
     void calibrateLoop();
     void calibrateArmJoints();
-    bool calibrateArmJointsAtLimit(bool auto_mode = true, bool calibrate_head = true, bool head_only = false);
     void initEndEffector();
     bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
     bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
-    bool changeRuiwoMotorParam(const std::string &param_name, std::string &err_msg);
-    
-    // RuiWoActuator相关方法的封装
-    void adjustZeroPosition(int motor_index, double offset);
-    std::vector<double> getMotorZeroPoints();
 
-    // 0扭矩控制腿部EC电机接口（双足模式：1-12号关节，轮臂模式：1-4号关节）
-    bool setZeroTorqueForLegECMotors();
-
-    // 退出0扭矩模式，恢复正常控制
-    bool exitZeroTorqueMode();
-
-    // 电机状态管理器接口
-    void setMotorStatusPositionLimits();  // 设置位置限制到电机状态管理器
-    
-    // 电机状态管理器接口 - 仅更新状态记录，不控制硬件
-    void markJointAsDisabled(int joint_id, const std::string& reason = "");
-    bool isJointMarkedAsDisabled(int joint_id) const;
-    std::map<int, MotorStatus> getAllJointsStatus() const;
 
     bool checkLejuClawInitialized();
     bool controlLejuClaw(eef_controller::ControlClawRequest& req, eef_controller::ControlClawResponse& res);
@@ -159,9 +123,10 @@ class HardwarePlant
 
     void setHardwareParam(const HardwareParam& param) { hardware_param_ = param; }
     HardwareParam& getHardwareParam() { return hardware_param_; }
-    eef_controller::FingerStatusArray getHandControllerStatus();
+    eef_controller::FingerStatusPtrArray getHandControllerStatus();
 
     bool th_running_ = false;
+    int hardware_status_ = -1;
     bool hardware_ready_ = false;
     bool redundant_imu_ = false; // 冗余imu
     uint32_t num_joint = 0;
@@ -181,42 +146,7 @@ class HardwarePlant
     std::vector<double_t> max_joint_position_limits;
 
     std::unique_ptr<eef_controller::DexhandController> dexhand_actuator;
-    std::unique_ptr<eef_controller::Revo2HandController> revo2_actuator;
     std::string gesture_filepath_;
-    
-    // 电机状态管理器
-    std::unique_ptr<MotorStatusManager> motor_status_manager_;
-    int hardware_status_ = -1; // 0: 等待， -1： cali模式， 1： 准备好了
-
-    // 新增：禁用电机相关成员和方法
-    std::mutex disable_motor_mtx_;
-    std::set<int> disableMotor_;
-    inline int getDisableMotorId()
-    {
-        std::lock_guard<std::mutex> lk(disable_motor_mtx_);
-        if (disableMotor_.empty())
-        {
-            return -1;
-        }
-        auto first_id = *disableMotor_.begin();
-        disableMotor_.erase(first_id);
-        return first_id;
-    }
-
-    // 禁用电机ID管理接口
-    bool addDisableMotorId(int id) 
-    {
-        std::lock_guard<std::mutex> lk(disable_motor_mtx_);
-        auto result = disableMotor_.insert(id);
-        return result.second; // true: 新插入，false: 已存在
-    }
-
-    size_t getDisableMotorSize() 
-    {
-        std::lock_guard<std::mutex> lk(disable_motor_mtx_);
-        return disableMotor_.size();
-    }
-
 
 private:
 
@@ -233,7 +163,7 @@ private:
     int32_t na_foot_;
     int32_t nq_;
     int32_t nv_;
-        std::vector<std::string> end_frames_name_;
+    std::vector<std::string> end_frames_name_;
     std::unique_ptr<KalmanEstimate> filter;
     bool Uncalibration_IMU = true;
 
@@ -244,8 +174,7 @@ private:
     bool is_cali_{false};
     double ruiwo_motor_velocity_factor_{0.005};
     std::vector<std::string> ruiwo_2_joint_name_;
-     std::map<std::string, std::vector<double>> ruiwo_velocity_limit_map_;
-
+    std::map<std::string, std::vector<double>> ruiwo_velocity_limit_map_;
 
     RobotState_t state_est_, prev_state_est_;
     RobotState_t state_des_, prev_state_des_;
@@ -261,34 +190,23 @@ private:
     std::vector<JointParam_t> joint_cmd;
     std::vector<JointParam_t> joint_cmd_old;
     std::vector<uint8_t> joint_ids;
-    std::unordered_map<int, int> ec_index_map_; // 构建索引映射表
+    std::unordered_map<int, int> ec_index_map_;
 
     std::vector<double> c2t_coeff;
     KuavoCommon *kuavo_common_ptr_;
-    std::vector<std::vector<double>> motor_cul;
-    std::vector<std::vector<double>> motor_coeff;
     KuavoSettings kuavo_settings_;
     HardwareSettings motor_info;
     bool has_end_effectors{false};
     double q_hip_pitch_prev_;
-    RobotVersion rb_version_;
+    RobotVersion robot_version_;
     std::string ecmaster_type_ = "elmo";
     HardwareParam hardware_param_;
 
-    // 实际EC电机数目
-    uint32_t countECMasters = 0;
-
-    int cali_set_zero_status = 0; // 0：未到达正确的调整零点姿态，1：到达可以调整零点的姿态
-    
     /* only used in half-up body mode */
     std::unique_ptr<std::array<double, 12>> stance_leg_joint_pos_ = nullptr;
-
-public:
-    // Virtual methods for DDS functionality (implemented in derived classes)
-    virtual void publishStateViaDDS(const SensorData_t& sensor_data, uint32_t timestamp_sec, uint32_t timestamp_nsec) {}
 };
 
-  void Invt_imudate(SensorData_t &sensor_data);
-  Eigen::Vector3d removeGravity(const Eigen::Vector3d &rawAccel, const Eigen::Quaterniond &orientation);
+void Invt_imudate(SensorData_t &sensor_data);
+Eigen::Vector3d removeGravity(const Eigen::Vector3d &rawAccel, const Eigen::Quaterniond &orientation);
 
 } // namespace HighlyDynamic

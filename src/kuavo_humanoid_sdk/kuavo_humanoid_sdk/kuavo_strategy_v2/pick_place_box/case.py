@@ -10,8 +10,8 @@ mother_dir = os.path.dirname(os.path.abspath(__file__))
 
 log_path = init_logging(log_dir=os.path.join(mother_dir, "logs"), filename_prefix="grab_box_v2", enable=True)
 
-from configs.config_sim import config
-# from configs.config_real import config
+# from configs.config_sim import config
+from configs.config_real import config
 
 from strategy import (
     search_tag_with_head,

@@ -5,25 +5,6 @@ import numpy as np
 import os
 import re
 
-group_type = None
-
-# 定义电机组合（按身体部位分组）
-kuavo_motor_groups = [
-    # 上半身电机组合
-    {12, 19}, {13, 20}, {14, 21}, {15, 22},
-    {16, 23}, {17, 24}, {18, 25},
-    # 下半身电机组合
-    {0, 6}, {1, 7}, {2, 8}, {3, 9}, {4, 10}, {5, 11}
-]
-roban2_motor_groups = [
-    # 上半身电机组合
-    {13, 17}, {14, 18}, {15, 19}, {16, 20},
-    # 下半身电机组合
-    {0, 0},{1, 7}, {2, 8}, {3, 9}, {4, 10}, {5, 11}, {6, 12}
-]
-
-motor_groups = []
-
 def load_data(file_path):
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"文件不存在: {file_path}")
@@ -36,14 +17,21 @@ def load_data(file_path):
     return timestamps, values
 
 def analyze_motor_data(input_files, response_files):
-    global motor_groups
-
     """分析可用的电机数据，返回有完整数据的电机组合"""
     # 获取所有有数据的电机ID
     available_motors = set()
     for (idx, motor_id) in input_files.keys():
         if (idx, motor_id) in response_files:
             available_motors.add(motor_id)
+    
+    # 定义电机组合（按身体部位分组）
+    motor_groups = [
+        # 下半身电机组合
+        {12, 19}, {13, 20}, {14, 21}, {15, 22},
+        {16, 23}, {17, 24}, {18, 25},
+        # 上半身电机组合
+        {0, 6}, {1, 7}, {2, 8}, {3, 9}, {4, 10}, {5, 11}
+    ]
     
     # 检查每个组合的可用性
     available_groups = []
@@ -65,10 +53,7 @@ def print_data_status(available_groups, missing_groups, available_motors):
     print("="*60)
     
     # 统计信息
-    if group_type == "2":
-        total_motors = 21  # roban2有21个待测电机
-    else: 
-        total_motors = 26  # kuavo有26个待测电机
+    total_motors = 26  # 假设总共有26个电机
     missing_motors = total_motors - len(available_motors)
     
     print(f"✅ 可用电机数量: {len(available_motors)}/{total_motors}")
@@ -90,8 +75,8 @@ def print_data_status(available_groups, missing_groups, available_motors):
             print(f"  组合 {sorted(group)}: 缺失电机 {sorted(missing_motors)}")
     
     # 身体部位分析
-    upper_body_motors = set(range(14, 21))  # 12-25
-    lower_body_motors = set(range(13))  # 0-11
+    upper_body_motors = set(range(12))  # 0-11
+    lower_body_motors = set(range(12, 26))  # 12-25
     
     available_upper = upper_body_motors.intersection(available_motors)
     available_lower = lower_body_motors.intersection(available_motors)
@@ -108,23 +93,6 @@ def print_data_status(available_groups, missing_groups, available_motors):
     print("="*60)
 
 def main():
-    global group_type
-    global motor_groups
-    global roban2_motor_groups
-    global kuavo_motor_groups
-
-    # 选择电机组类型
-    print("请选择要绘制的电机组类型：")
-    print("1. KUAVO")
-    print("2. ROBAN2")
-    group_type = input("输入 1 或 2 并回车: ").strip()
-    if group_type == "2":
-        motor_groups = roban2_motor_groups
-        print("已选择 ROBAN2 电机组")
-    else:
-        motor_groups = kuavo_motor_groups
-        print("已选择 KUAVO 电机组")
-
     # 获取当前脚本所在目录
     current_dir = os.path.dirname(os.path.abspath(__file__))
     

@@ -12,14 +12,14 @@ import rospy
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState, Joy
 from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import (gestureTask,robotHandPosition, robotHeadMotionData, armTargetPoses, switchGaitByName,
-                                footPose, footPoseTargetTrajectories, dexhandCommand, motorParam,twoArmHandPoseCmdFree)
+                                footPose, footPoseTargetTrajectories, dexhandCommand, motorParam)
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import (gestureExecute, gestureExecuteRequest,gestureList, gestureListRequest,
                         controlLejuClaw, controlLejuClawRequest, changeArmCtrlMode, changeArmCtrlModeRequest,
                         changeTorsoCtrlMode, changeTorsoCtrlModeRequest, setMmCtrlFrame, setMmCtrlFrameRequest,
                         setTagId, setTagIdRequest, getMotorParam, getMotorParamRequest,
                         changeMotorParam, changeMotorParamRequest)
-from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import twoArmHandPoseCmd, ikSolveParam, armHandPose, armCollisionCheckInfo
-from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import twoArmHandPoseCmdSrv, fkSrv, twoArmHandPoseCmdFreeSrv
+from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import twoArmHandPoseCmd, ikSolveParam, armHandPose
+from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import twoArmHandPoseCmdSrv, fkSrv
 from std_srvs.srv import SetBool, SetBoolRequest
 from std_msgs.msg import Float64MultiArray
 
@@ -188,57 +188,10 @@ class ControlEndEffector:
 
 class ControlRobotArm:
     def __init__(self):
-
-        # 带有碰撞检查的轨迹发布
-        self._pub_ctrl_arm_traj_arm_collision = rospy.Publisher('/arm_collision/kuavo_arm_traj', JointState, queue_size=10)
-        self._pub_ctrl_arm_target_poses_arm_collision = rospy.Publisher('/arm_collision/kuavo_arm_target_poses', armTargetPoses, queue_size=10)
-
-        # 判断当前是否发生碰撞
-        self._sub_arm_collision_info = rospy.Subscriber('/arm_collision/info', armCollisionCheckInfo, self.callback_arm_collision_info, queue_size=10)
-        self._is_collision = False
-        self.arm_collision_enable = False
-
-        # 正常轨迹发布
         self._pub_ctrl_arm_traj = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=10)
         self._pub_ctrl_arm_target_poses = rospy.Publisher('/kuavo_arm_target_poses', armTargetPoses, queue_size=10)
         self._pub_ctrl_hand_pose_cmd = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
         self._pub_hand_wrench = rospy.Publisher('/hand_wrench_cmd', Float64MultiArray, queue_size=10)
-
-    def is_arm_collision(self)->bool:
-        return self._is_collision
-    
-    def is_arm_collision_mode(self)->bool:
-        return self.arm_collision_enable
-    
-    def callback_arm_collision_info(self, msg: armCollisionCheckInfo):
-        self._is_collision = True
-        SDKLogger.info(f"Arm collision detected")
-
-    def set_arm_collision_mode(self, enable: bool):
-        """
-            Set arm collision mode
-        """
-        self.arm_collision_enable = enable
-        srv_set_arm_collision_mode_srv = rospy.ServiceProxy('/arm_collision/set_arm_moving_enable', SetBool)
-        req = SetBoolRequest()
-        req.data = enable
-        resp = srv_set_arm_collision_mode_srv(req)
-        if not resp.success:
-            SDKLogger.error(f"Failed to wait arm collision complete: {resp.message}")
-    
-        
-
-    def release_arm_collision_mode(self):
-        self._is_collision = False
-    
-    def wait_arm_collision_complete(self):
-        if self._is_collision:
-            srv_wait_arm_collision_complete_srv = rospy.ServiceProxy('/arm_collision/wait_complete', SetBool)
-            req = SetBoolRequest()
-            req.data = True
-            resp = srv_wait_arm_collision_complete_srv(req)
-            if not resp.success:
-                SDKLogger.error(f"Failed to wait arm collision complete: {resp.message}")
 
     def connect(self, timeout:float=1.0)-> bool:
         start_time = rospy.Time.now()
@@ -259,16 +212,12 @@ class ControlRobotArm:
         return success
 
     def pub_control_robot_arm_traj(self, joint_q: list)->bool:
-        
         try:
             msg = JointState()
             msg.name = ["arm_joint_" + str(i) for i in range(0, 14)]
             msg.header.stamp = rospy.Time.now()
             msg.position = 180.0 / np.pi * np.array(joint_q) # convert to degree
-            if self.arm_collision_enable:
-                self._pub_ctrl_arm_traj_arm_collision.publish(msg)
-            else:
-                self._pub_ctrl_arm_traj.publish(msg)
+            self._pub_ctrl_arm_traj.publish(msg)
             return True
         except Exception as e:
             SDKLogger.error(f"publish robot arm traj: {e}")
@@ -281,10 +230,7 @@ class ControlRobotArm:
             for i in range(len(joint_q)):
                 degs = [q for q in joint_q[i]]
                 msg.values.extend(degs)
-            if self.arm_collision_enable:
-                self._pub_ctrl_arm_target_poses_arm_collision.publish(msg)
-            else:
-                self._pub_ctrl_arm_target_poses.publish(msg)
+            self._pub_ctrl_arm_target_poses.publish(msg)
             return True
         except Exception as e:
             SDKLogger.error(f"publish arm target poses: {e}")
@@ -439,8 +385,8 @@ class ControlRobotArm:
 
     def srv_change_arm_ctrl_mode(self, mode: KuavoArmCtrlMode)->bool:
         try:
-            rospy.wait_for_service('/change_arm_ctrl_mode', timeout=2.0)
-            change_arm_ctrl_mode_srv = rospy.ServiceProxy('/change_arm_ctrl_mode', changeArmCtrlMode)
+            rospy.wait_for_service('/arm_traj_change_mode', timeout=2.0)
+            change_arm_ctrl_mode_srv = rospy.ServiceProxy('/arm_traj_change_mode', changeArmCtrlMode)
             req = changeArmCtrlModeRequest()
             req.control_mode = mode.value
             resp = change_arm_ctrl_mode_srv(req)
@@ -704,6 +650,7 @@ AXIS_RIGHT_RT = 5  # 1 -> (-1)
 AXIS_LEFT_RIGHT_TRIGGER = 6
 AXIS_FORWARD_BACK_TRIGGER = 7
 
+
 class ControlRobotMotion:
     def __init__(self):
         self._pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
@@ -817,6 +764,7 @@ class ControlRobotMotion:
         except Exception as e:
             SDKLogger.error(f"[Error] publish step ctrl: {e}")
             return False
+
 class KuavoRobotArmIKFK:
     def __init__(self):
         pass
@@ -832,7 +780,14 @@ class KuavoRobotArmIKFK:
             eef_pose_msg.joint_angles_as_q0 = False
         else:
             eef_pose_msg.joint_angles_as_q0 = True
-            eef_pose_msg.joint_angles = arm_q0
+            # eef_pose_msg.joint_angles = arm_q0
+        if len(arm_q0) == 14:
+            eef_pose_msg.hand_poses.left_pose.joint_angles = arm_q0[:7]
+            eef_pose_msg.hand_poses.right_pose.joint_angles = arm_q0[7:]
+        else:
+            # 如果长度不对，设置为空数组
+            eef_pose_msg.hand_poses.left_pose.joint_angles = []
+            eef_pose_msg.hand_poses.right_pose.joint_angles = []
         
         if params is None:
             eef_pose_msg.use_custom_ik_param = False
@@ -856,47 +811,7 @@ class KuavoRobotArmIKFK:
         eef_pose_msg.hand_poses.right_pose.quat_xyzw = right_pose.orientation
         eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = right_elbow_pos_xyz
 
-        return self._srv_arm_ik(eef_pose_msg)
-
-    def arm_ik_free(self,
-                    left_pose: KuavoPose,
-                    right_pose: KuavoPose,
-                    left_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
-                    right_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
-                    arm_q0: list = None,
-                    params: KuavoIKParams = None) -> list:
-        eef_pose_msg = twoArmHandPoseCmdFree()
-        if arm_q0 is None:
-            eef_pose_msg.joint_angles_as_q0 = False
-        else:
-            eef_pose_msg.joint_angles_as_q0 = True
-            eef_pose_msg.joint_angles = arm_q0
-
-        if params is None:
-            eef_pose_msg.use_custom_ik_param = False
-        else:
-            eef_pose_msg.use_custom_ik_param = True
-            eef_pose_msg.ik_param.major_optimality_tol = params.major_optimality_tol
-            eef_pose_msg.ik_param.major_feasibility_tol = params.major_feasibility_tol
-            eef_pose_msg.ik_param.minor_feasibility_tol = params.minor_feasibility_tol
-            eef_pose_msg.ik_param.major_iterations_limit = params.major_iterations_limit
-            eef_pose_msg.ik_param.oritation_constraint_tol = params.oritation_constraint_tol
-            eef_pose_msg.ik_param.pos_constraint_tol = params.pos_constraint_tol
-            eef_pose_msg.ik_param.pos_cost_weight = params.pos_cost_weight
-
-        # left hand
-        eef_pose_msg.hand_poses.left_pose.pos_xyz = left_pose.position
-        eef_pose_msg.hand_poses.left_pose.quat_xyzw = left_pose.orientation
-        eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = left_elbow_pos_xyz
-
-        # right hand
-        eef_pose_msg.hand_poses.right_pose.pos_xyz = right_pose.position
-        eef_pose_msg.hand_poses.right_pose.quat_xyzw = right_pose.orientation
-        eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = right_elbow_pos_xyz
-
-        return self._srv_arm_ik_free(eef_pose_msg)
-
-
+        return self._srv_arm_ik(eef_pose_msg)   
 
     def arm_fk(self, q: list) -> Tuple[KuavoPose, KuavoPose]:
         return self._srv_arm_fk(q)
@@ -917,20 +832,6 @@ class KuavoRobotArmIKFK:
         except Exception as e:
             print(f"Failed to call ik/fk_srv: {e}")
             return None
-    
-    def _srv_arm_ik_free(self, eef_pose_msg:twoArmHandPoseCmdFree)->list:
-        try:
-            rospy.wait_for_service('/ik/two_arm_hand_pose_cmd_free_srv',timeout=1.0)
-            ik_srv = rospy.ServiceProxy('/ik/two_arm_hand_pose_cmd_free_srv', twoArmHandPoseCmdFreeSrv)
-            res = ik_srv(eef_pose_msg)
-            return res.hand_poses.left_pose.joint_angles + res.hand_poses.right_pose.joint_angles
-        except rospy.ServiceException as e:
-            print("Service call failed: %s"%e)
-            return None
-        except Exception as e:
-            print(f"Failed to call ik/fk_srv: {e}")
-            return None
-
     def _srv_arm_fk(self, q: list) -> Tuple[KuavoPose, KuavoPose]:
         try:
             rospy.wait_for_service('/ik/fk_srv',timeout=1.0)
@@ -1002,20 +903,6 @@ class KuavoRobotControl:
         return connect_success, err_msg
     
     """ End Effector Control"""
-
-    def control_robot_arm_target_poses(self, times: list, joint_q: list) -> bool:
-        """
-            Control robot arm target poses
-            Arguments:
-                - times: list of times (seconds)
-                - joint_q: list of joint data (degrees)
-        """
-        if len(times) != len(joint_q):
-            raise ValueError("Times and joint_q must have the same length.")
-        elif len(times) == 0:
-            raise ValueError("Times and joint_q must not be empty.")
-
-        return self.kuavo_arm_control.pub_arm_target_poses(times=times, joint_q=joint_q)
     def control_robot_dexhand(self, left_position:list, right_position:list)->bool:
         """
             Control robot dexhand
@@ -1127,40 +1014,6 @@ class KuavoRobotControl:
         # SDKLogger.debug(f"[ROS] Control robot arm trajectory: {joint_data}")
         return self.kuavo_arm_control.pub_control_robot_arm_traj(joint_data)
     
-    def is_arm_collision(self)->bool:
-        """
-            Check if arm collision is happening
-            Returns:
-                bool: True if collision is happening, False otherwise
-        """
-        return self.kuavo_arm_control.is_arm_collision()
-    
-    def is_arm_collision_mode(self)->bool:
-        """
-            Check if arm collision mode is enabled
-            Returns:
-                bool: True if collision mode is enabled, False otherwise
-        """
-        return self.kuavo_arm_control.is_arm_collision_mode()
-
-    def release_arm_collision_mode(self):
-        """
-            Release arm collision mode
-        """
-        return self.kuavo_arm_control.release_arm_collision_mode()
-    
-    def wait_arm_collision_complete(self):
-        """
-            Wait for arm collision to complete
-        """
-        return self.kuavo_arm_control.wait_arm_collision_complete()
-    
-    def set_arm_collision_mode(self, enable: bool):
-        """
-            Set arm collision mode
-        """
-        return self.kuavo_arm_control.set_arm_collision_mode(enable)
-    
     def control_robot_arm_joint_trajectory(self, times:list, joint_q:list)->bool:
         """
             Control robot arm joint trajectory
@@ -1248,11 +1101,6 @@ class KuavoRobotControl:
                arm_q0: list = None, params: KuavoIKParams=None) -> list:
         return self.kuavo_arm_ik_fk.arm_ik(left_pose, right_pose, left_elbow_pos_xyz, right_elbow_pos_xyz, arm_q0, params)
 
-    def arm_ik_free(self, left_pose: KuavoPose, right_pose: KuavoPose, 
-               left_elbow_pos_xyz: list = [0.0, 0.0, 0.0],  
-               right_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
-               arm_q0: list = None, params: KuavoIKParams=None) -> list:
-        return self.kuavo_arm_ik_fk.arm_ik_free(left_pose, right_pose, left_elbow_pos_xyz, right_elbow_pos_xyz, arm_q0, params)
 
     def arm_fk(self, q: list) -> Tuple[KuavoPose, KuavoPose]:
         return self.kuavo_arm_ik_fk.arm_fk(q)

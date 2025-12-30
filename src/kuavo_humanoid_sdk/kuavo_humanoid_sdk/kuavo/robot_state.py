@@ -50,13 +50,10 @@ class KuavoRobotState:
     
     @property
     def com_height(self)->float:
-        """获取机器人实时的质心高度。
+        """获取机器人质心高度。
 
         Returns:
             float: 机器人质心高度，单位为米。
-            
-        Note:
-            如果需要获取机器人初始化站立时的质心高度，请使用 :attr:`KuavoRobotInfo.init_stand_height` 属性。
         """
         return self._rs_core.com_height
     

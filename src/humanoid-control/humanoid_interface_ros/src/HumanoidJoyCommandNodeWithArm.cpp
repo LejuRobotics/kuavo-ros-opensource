@@ -89,14 +89,16 @@ namespace ocs2
       nodeHandle.getParam("/referenceFile", referenceFile);
 
       // loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
-      RobotVersion rb_version(3, 4);
+      RobotVersion robot_version(3, 4);
       if (nodeHandle.hasParam("/robot_version"))
       {
-          int rb_version_int;
-          nodeHandle.getParam("/robot_version", rb_version_int);
-          rb_version = RobotVersion::create(rb_version_int);
+          int version_num;
+          nodeHandle.getParam("/robot_version", version_num);
+          int major = version_num / 10;
+          int minor = version_num % 10;
+          robot_version = RobotVersion(major, minor);
       }
-      auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
+      auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(robot_version, true, 2e-3);
       default_joint_state_ = drake_interface_->getDefaultJointState();
       com_height_ = drake_interface_->getIntialHeight();
       // loadData::loadEigenMatrix(referenceFile, "defaultJointState", default_joint_state_);

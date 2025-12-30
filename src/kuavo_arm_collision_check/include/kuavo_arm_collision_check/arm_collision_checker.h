@@ -33,14 +33,7 @@
 #include <tf2_ros/buffer.h>
 #include <memory>
 #include <vector>
-#include <algorithm>
 #include <kuavo_msgs/armCollisionCheckInfo.h>
-#include <kuavo_msgs/armTargetPoses.h>
-#include <kuavo_msgs/sensorsData.h>
-#include <std_msgs/Int32.h>
-#include <deque>
-#include <chrono>
-#include <std_srvs/SetBool.h>
 
 namespace kuavo_arm_collision_check {
 
@@ -50,7 +43,6 @@ struct CollisionPair {
 };
 
 struct Triangle { float v0[3], v1[3], v2[3]; };
-
 
 struct CollisionCheckUserData {
 
@@ -73,33 +65,12 @@ public:
 private:
     // ROS related members
     ros::NodeHandle& nh_;
-    ros::Subscriber sensors_data_sub_;  // 订阅传感器数据
-    ros::Subscriber arm_mode_sub_;  // 订阅手臂模式
-    ros::Publisher arm_pose_pub_;
-    ros::Publisher arm_traj_forward_pub_;  // 转发手臂轨迹数据的发布者
-    ros::Publisher arm_traj_debug_pub_;  // 调试用的手臂轨迹发布者
+    ros::Subscriber joint_state_sub_;
     ros::Publisher collision_info_pub_;
     ros::Publisher collision_marker_pub_;
     ros::Publisher collision_check_duration_pub_;
-    ros::Publisher delay_sensors_data_pub_;
-    // 新增的碰撞控制话题订阅者
-    ros::Subscriber kuavo_arm_traj_sub_;
-    ros::Subscriber kuavo_arm_target_poses_sub_;
-    ros::Subscriber kuavo_sensors_data_sub_;
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
-
-    ros::ServiceServer wait_complete_srv_;
-    ros::ServiceServer set_arm_moving_check_srv_;
-
-    ros::ServiceClient fk_client_;
-
-    int head_joint_num = 2;
-    int arm_joint_num = 14;
-
-    bool is_collision_moving_ = false;
-    bool is_control_enabled_ = true;
-    int current_arm_mode_ = 2;
 
     std::string kuavo_asset_path = "";
     std::string robot_version = "";
@@ -121,17 +92,6 @@ private:
     std::map<std::string, CollisionCheckUserData> link_name_to_collision_check_user_data_;
     
     bool publish_markers_ = false;
-    bool enable_arm_moving_check_ = false;
-
-    double record_duration_ = 3.0;  // 记录3秒
-
-    std::deque<sensor_msgs::JointState> recorded_arm_pose_data_;
-    std::deque<kuavo_msgs::sensorsData> recorded_sensors_data_;
-    std::mutex recorded_arm_pose_data_mutex_;
-    std::mutex recorded_sensors_data_mutex_;
-    std::vector<double> back_to_safe_arm_pose_data_;
-    double arm_move_diff_ = 0.1;
-    int stable_count_ = 0;
 
     // Helper functions
     bool loadURDF(const std::string& urdf_file_path);
@@ -146,29 +106,8 @@ private:
     void saveCollisionMesh(const std::string& link_name, const std::vector<Triangle>& triangles, const std::string& output_path);
 
     bool loadSTL(const std::string& filename, std::vector<Triangle>& triangles);
-    
-    // 手臂姿态记录相关函数
-    void armModeCallback(const std_msgs::Int32::ConstPtr& msg);
-
-    // 碰撞控制话题回调函数
-    void kuavoArmTrajCallback(const sensor_msgs::JointState::ConstPtr& msg);
-    void kuavoArmTargetPosesCallback(const kuavo_msgs::armTargetPoses::ConstPtr& msg);
-    void sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr& msg);
-
-    void playArmTrajBack();
-
-    void tryToKeepArmPose();
-    void stopArmCollisionControl();
-
-    bool waitCompleteCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
-    bool setArmMovingEnableCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
-
-    bool internal_change_arm_mode = false;
-    
 public:
     void triggerCollisionCheck();
-
-    double trigger_frequency = 5.0;
 };
 
 } // namespace kuavo_arm_collision_check 

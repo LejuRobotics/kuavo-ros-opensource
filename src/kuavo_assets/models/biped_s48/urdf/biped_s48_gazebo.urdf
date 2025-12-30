@@ -2455,8 +2455,8 @@
         <joint><name>zhead_1_joint</name></joint>
         <joint><name>zhead_2_joint</name></joint>
 
-        <!-- 左灵巧手关节控制 -->
-        <joint><name>l_thumbCMC</name></joint>
+        <!-- TODO: 添加左灵巧手关节控制 -->
+        <!-- <joint><name>l_thumbCMC</name></joint>
         <joint><name>l_thumbMCP</name></joint>
         <joint><name>l_indexMCP</name></joint>
         <joint><name>l_indexPIP</name></joint>
@@ -2465,10 +2465,10 @@
         <joint><name>l_ringMCP</name></joint>
         <joint><name>l_ringPIP</name></joint>
         <joint><name>l_littleMCP</name></joint>
-        <joint><name>l_littlePIP</name></joint>
+        <joint><name>l_littlePIP</name></joint> -->
         
-        <!-- 右灵巧手关节控制 -->
-        <joint><name>r_thumbCMC</name></joint>
+        <!-- TODO: 添加右灵巧手关节控制 -->
+        <!-- <joint><name>r_thumbCMC</name></joint>
         <joint><name>r_thumbMCP</name></joint>
         <joint><name>r_indexMCP</name></joint>
         <joint><name>r_indexPIP</name></joint>
@@ -2477,7 +2477,7 @@
         <joint><name>r_ringMCP</name></joint>
         <joint><name>r_ringPIP</name></joint>
         <joint><name>r_littleMCP</name></joint>
-        <joint><name>r_littlePIP</name></joint>
+        <joint><name>r_littlePIP</name></joint> -->
       </joints>
       
       <!-- 接触传感器配置 -->

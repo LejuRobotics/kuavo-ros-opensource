@@ -126,13 +126,8 @@ if __name__ == "__main__":
     set_arm_control_mode(2)
 
     # 创建请求对象（单位：弧度）
-    def start_with_version(version_number:int, series:int):
-        """判断版本号是否属于某系列"""
-        # PPPPMMMMN
-        MMMMN_MASK = 100000
-        return (version_number % MMMMN_MASK) == series
     # 42
-    if start_with_version(robot_version, 42):
+    if robot_version == 42:
         joint_angles_optiops = {
         1: [-1.0, 0.3, -1.0, 0.19, 1.0, -0.5, -0.3,
         -1.38, -1.39, -0.29, -0.43, -0.5, -0.17, 0.75],
@@ -143,7 +138,7 @@ if __name__ == "__main__":
         }
     
     # 45 or 49
-    if start_with_version(robot_version, 45) or start_with_version(robot_version, 49):
+    if robot_version == 45 or robot_version == 49:
         joint_angles_optiops = {
         1: [-1.0, 1.0, -0.3, -1.2, 0.0, -0.5, -0.2,
             -1.9, -0.5, -0.0, -1.0, -0.0, 0.5, 0.65],

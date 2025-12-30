@@ -94,7 +94,6 @@ void MobileManipulatorVisualization::launchVisualizerNode(ros::NodeHandle& nodeH
 
   stateOptimizedPublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/mobile_manipulator/optimizedStateTrajectory", 1);
   stateOptimizedPosePublisher_ = nodeHandle.advertise<geometry_msgs::PoseArray>("/mobile_manipulator/optimizedPoseTrajectory", 1);
-  targetTrajectoriesPublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/mobile_manipulator/targetTrajectories", 1);
   // Get ROS parameter
   std::string urdfFile, taskFile;
   nodeHandle.getParam("/mm/urdfFile", urdfFile);
@@ -169,113 +168,17 @@ void MobileManipulatorVisualization::publishObservation(const ros::Time& timeSta
 /******************************************************************************************************/
 void MobileManipulatorVisualization::publishTargetTrajectories(const ros::Time& timeStamp,
                                                                     const TargetTrajectories& targetTrajectories) {
-  // Check if we have target trajectories
-  if (targetTrajectories.stateTrajectory.empty()) {
-    return;
-  }
-  
-  const scalar_t TRAJECTORYLINEWIDTH = 0.008;  // 目标轨迹线宽，比优化轨迹稍粗
-  const std::array<scalar_t, 3> orange{1.0, 0.6, 0.0};  // 橙色用于左手目标
-  const std::array<scalar_t, 3> purple{0.8, 0.2, 0.8};  // 紫色用于右手目标
-  
-  visualization_msgs::MarkerArray targetMarkerArray;
-  
-  // 双手目标轨迹
-  std::vector<geometry_msgs::Point> leftHandTargetTrajectory;
-  std::vector<geometry_msgs::Point> rightHandTargetTrajectory;
-  leftHandTargetTrajectory.reserve(targetTrajectories.stateTrajectory.size());
-  rightHandTargetTrajectory.reserve(targetTrajectories.stateTrajectory.size());
-  
-  // 处理每个目标状态点
-  for (const auto& targetState : targetTrajectories.stateTrajectory) {
-    // 假设目标状态结构：[base_pose, left_hand_pose(7), right_hand_pose(7)]
-    // 这里需要根据实际的状态结构来调整索引
-    // const size_t baseDim = modelInfo_.stateDim - modelInfo_.armDim; // fix cpplint
-    
-    if (targetState.size() >= 14) {  // 至少包含基座和双手位置姿态
-      // 左手目标位置 (假设在base维度之后)
-      const Eigen::Vector3d leftHandTargetPos = targetState.segment<3>(0);
-      leftHandTargetTrajectory.push_back(ros_msg_helpers::getPointMsg(leftHandTargetPos));
-      
-      // 右手目标位置 (假设在左手7维之后)
-      const Eigen::Vector3d rightHandTargetPos = targetState.segment<3>(7);
-      rightHandTargetTrajectory.push_back(ros_msg_helpers::getPointMsg(rightHandTargetPos));
-    }
-  }
-  
-  // 创建左手目标轨迹标记
-  if (!leftHandTargetTrajectory.empty()) {
-    visualization_msgs::Marker leftHandTargetMarker;
-    leftHandTargetMarker.type = visualization_msgs::Marker::LINE_STRIP;
-    leftHandTargetMarker.scale.x = TRAJECTORYLINEWIDTH;
-    leftHandTargetMarker.points = std::move(leftHandTargetTrajectory);
-    leftHandTargetMarker.pose.orientation = ros_msg_helpers::getOrientationMsg({1., 0., 0., 0.});
-    leftHandTargetMarker.ns = "Left Hand Target Trajectory";
-    leftHandTargetMarker.id = 0;
-    leftHandTargetMarker.color.r = orange[0];
-    leftHandTargetMarker.color.g = orange[1];
-    leftHandTargetMarker.color.b = orange[2];
-    leftHandTargetMarker.color.a = 0.8;
-    targetMarkerArray.markers.push_back(std::move(leftHandTargetMarker));
-  }
-  
-  // 创建右手目标轨迹标记
-  if (!rightHandTargetTrajectory.empty()) {
-    visualization_msgs::Marker rightHandTargetMarker;
-    rightHandTargetMarker.type = visualization_msgs::Marker::LINE_STRIP;
-    rightHandTargetMarker.scale.x = TRAJECTORYLINEWIDTH;
-    rightHandTargetMarker.points = std::move(rightHandTargetTrajectory);
-    rightHandTargetMarker.pose.orientation = ros_msg_helpers::getOrientationMsg({1., 0., 0., 0.});
-    rightHandTargetMarker.ns = "Right Hand Target Trajectory";
-    rightHandTargetMarker.id = 1;
-    rightHandTargetMarker.color.r = purple[0];
-    rightHandTargetMarker.color.g = purple[1];
-    rightHandTargetMarker.color.b = purple[2];
-    rightHandTargetMarker.color.a = 0.8;
-    targetMarkerArray.markers.push_back(std::move(rightHandTargetMarker));
-  }
-  
-  // 发布目标轨迹标记
-  if (!targetMarkerArray.markers.empty()) {
-    assignHeader(targetMarkerArray.markers.begin(), targetMarkerArray.markers.end(), 
-                 ros_msg_helpers::getHeaderMsg("mm/world", timeStamp));
-    targetTrajectoriesPublisher_.publish(targetMarkerArray);
-  }
-  
-  // 保留原有的TF框架发布（发布最终目标位置）
-  const auto& finalTargetState = targetTrajectories.stateTrajectory.back();
-  
-  if (finalTargetState.size() >= 7) {
-    // 发布左手最终目标TF
-    const Eigen::Vector3d leftHandFinalPos = finalTargetState.segment<3>(0);
-    Eigen::Quaterniond leftHandFinalOrient;
-    leftHandFinalOrient.coeffs() = finalTargetState.segment<4>(3);
-    leftHandFinalOrient.normalize();  // 确保四元数是单位四元数
-    
-    geometry_msgs::TransformStamped leftHandCommand_tf;
-    leftHandCommand_tf.header.stamp = timeStamp;
-    leftHandCommand_tf.header.frame_id = "mm/world";
-    leftHandCommand_tf.child_frame_id = "left_hand_target";
-    leftHandCommand_tf.transform.translation = ros_msg_helpers::getVectorMsg(leftHandFinalPos);
-    leftHandCommand_tf.transform.rotation = ros_msg_helpers::getOrientationMsg(leftHandFinalOrient);
-    tfBroadcaster_.sendTransform(leftHandCommand_tf);
-  }
-  
-  if (finalTargetState.size() >= 14) {
-    // 发布右手最终目标TF
-    const Eigen::Vector3d rightHandFinalPos = finalTargetState.segment<3>(7);
-    Eigen::Quaterniond rightHandFinalOrient;
-    rightHandFinalOrient.coeffs() = finalTargetState.segment<4>(10);
-    rightHandFinalOrient.normalize();  // 确保四元数是单位四元数
-    
-    geometry_msgs::TransformStamped rightHandCommand_tf;
-    rightHandCommand_tf.header.stamp = timeStamp;
-    rightHandCommand_tf.header.frame_id = "mm/world";
-    rightHandCommand_tf.child_frame_id = "right_hand_target";
-    rightHandCommand_tf.transform.translation = ros_msg_helpers::getVectorMsg(rightHandFinalPos);
-    rightHandCommand_tf.transform.rotation = ros_msg_helpers::getOrientationMsg(rightHandFinalOrient);
-    tfBroadcaster_.sendTransform(rightHandCommand_tf);
-  }
+  // publish command transform
+  const Eigen::Vector3d eeDesiredPosition = targetTrajectories.stateTrajectory.back().head(3);
+  Eigen::Quaterniond eeDesiredOrientation;
+  eeDesiredOrientation.coeffs() = targetTrajectories.stateTrajectory.back().tail(4);
+  geometry_msgs::TransformStamped command_tf;
+  command_tf.header.stamp = timeStamp;
+  command_tf.header.frame_id = "mm/world";
+  command_tf.child_frame_id = "command";
+  command_tf.transform.translation = ros_msg_helpers::getVectorMsg(eeDesiredPosition);
+  command_tf.transform.rotation = ros_msg_helpers::getOrientationMsg(eeDesiredOrientation);
+  tfBroadcaster_.sendTransform(command_tf);
 }
 
 /******************************************************************************************************/

@@ -601,8 +601,8 @@ public:
             }
             else
             {
-              if (!(event.type & JS_EVENT_INIT))
-              {
+              // if (!(event.type & JS_EVENT_INIT))
+              // {
                 val = event.value;
                 if (val > unscaled_deadzone)
                 {
@@ -617,7 +617,7 @@ public:
                   val = 0;
                 }
                 joy_msg.axes[event.number] = val * scale;
-              }
+              // }
 
               publish_soon = true;
               break;

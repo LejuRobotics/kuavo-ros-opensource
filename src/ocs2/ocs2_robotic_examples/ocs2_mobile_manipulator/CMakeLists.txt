@@ -91,7 +91,6 @@ add_library(${PROJECT_NAME}
   src/dynamics/FloatingArmManipulatorDynamics.cpp
   src/dynamics/FullyActuatedFloatingArmManipulatorDynamics.cpp
   src/dynamics/ActuatedXYZYawPitchManipulatorDynamics.cpp
-  src/dynamics/ActuatedZPitchManipulatorDynamics.cpp
   src/MobileManipulatorInterface.cpp
   src/reference_manager/MobileManipulatorReferenceManager.cpp
 )

@@ -300,14 +300,11 @@ int main(int argc, char* argv[])
     int control_hand_side = 2; // 0: left, 1: right, 2: both
 
     // json
-    RobotVersion rb_version(4, 0);
-    if (nh.hasParam("/robot_version")) {
-        int rb_version_int;
-        nh.getParam("/robot_version", rb_version_int);
-        rb_version = RobotVersion::create(rb_version_int);
-    }
+    int robot_version_int=40;
+    if (nh.hasParam("/robot_version"))
+        nh.getParam("/robot_version", robot_version_int);
     auto kuavo_assests_path = HighlyDynamic::getPackagePath("kuavo_assets");
-    std::string model_path = kuavo_assests_path + "/models/biped_s"+rb_version.to_string()+"/urdf/drake/biped_v3_arm.urdf";
+    std::string model_path = kuavo_assests_path + "/models/biped_s"+std::to_string(robot_version_int)+"/urdf/drake/biped_v3_arm.urdf";
     std::cout << "model_path: " << model_path << std::endl;
 
     if(ros::param::has("eef_z_bias"))

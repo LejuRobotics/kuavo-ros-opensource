@@ -18,7 +18,7 @@
         ],
         
         "launch_orbbec_camera": [
-            "pkill -f orbbec_camera_n",
+            "pkill -f orb",
             "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.1 && source /home/kuavo/.bashrc && cd /home/kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series.launch' > ~/camera.log"
         ],
         "check_system_status": [

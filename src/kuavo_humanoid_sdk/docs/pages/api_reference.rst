@@ -72,12 +72,3 @@ API 接口
     :undoc-members:
     :show-inheritance:
 
-.. autoclass:: RobotControlBlockly
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
-.. autoclass:: RobotNavigation
-    :members:
-    :undoc-members:
-    :show-inheritance:

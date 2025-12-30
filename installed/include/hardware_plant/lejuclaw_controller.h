@@ -130,15 +130,6 @@ public:
 
 private:
     bool execute(const lejuClawCommand &data, std::string &err_msg);
-    
-    // VR控制检测相关变量
-    std::chrono::steady_clock::time_point last_command_time_;
-    bool is_vr_control_mode_;
-    static constexpr int VR_CONTROL_DETECTION_INTERVAL_MS = 200;    // VR控制检测间隔，该ms时间内连续调用认为是VR模式
-    
-    // VR检测方法
-    void update_vr_detection();
-    bool is_vr_mode() const { return is_vr_control_mode_; }
 
     LejuClawController() = default;
     void workerThread();

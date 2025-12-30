@@ -215,21 +215,10 @@ class MotorFollowTest:
             # 测试计时器
             self.start_times = {}
             
-            # 初始化显示标记
-            self.test_started_shown = False
-            
             print_colored_text("=== 电机跟随性测试开始 ===", color="green", bold=True)
             print_colored_text(f"测试区域: {self.region_name}", color="blue", bold=True)
             print_colored_text(f"总共需要测试 {self.total_pairs} 对电机", color="blue", bold=True)
             print_colored_text("=" * 50, color="blue")
-            
-            # 显示第一对电机的开始信息
-            current_pair = 1
-            progress = ((current_pair - 1) / self.total_pairs) * 100  # 修改：开始第1对时显示0%
-            progress_bar = "█" * int(progress / 2) + "░" * (50 - int(progress / 2))
-            print_colored_text(f"🔄 开始测试第 {current_pair} 对电机", color="purple", bold=True)
-            print_colored_text(f"总进度: [{progress_bar}] {progress:.1f}% ({current_pair}/{self.total_pairs})", color="cyan")
-            self.test_started_shown = True
 
             # 打开文件以写入模式
             with open(self.output_file_path, 'w') as output_file:
@@ -281,7 +270,7 @@ class MotorFollowTest:
                                             left_info = parts[1].split(":")
                                             right_info = parts[2].split(":")
                                             
-                                            pair_num = int(pair_info[1].strip()) + 1  # 修复：转换为1-based索引
+                                            pair_num = int(pair_info[1].strip())
                                             left_cycle = int(left_info[1].strip().split("/")[0])
                                             right_cycle = int(right_info[1].strip().split("/")[0])
                                             
@@ -298,25 +287,21 @@ class MotorFollowTest:
                                             left_bar = "█" * int(left_progress / 5) + "░" * (20 - int(left_progress / 5))
                                             right_bar = "█" * int(right_progress / 5) + "░" * (20 - int(right_progress / 5))
                                             
-                                            # 只有在显示过开始信息后才显示进度条
-                                            if hasattr(self, 'test_started_shown') and self.test_started_shown:
-                                                # 直接使用print函数，不使用print_colored_text，避免时间戳影响\r的效果
-                                                print(f"\r🔄 电机对 {pair_num}: 左电机 [{left_bar}] {left_cycle}/10 | 右电机 [{right_bar}] {right_cycle}/10 | 平均: {avg_progress:.1f}%", end="", flush=True)
+                                            # 直接使用print函数，不使用print_colored_text，避免时间戳影响\r的效果
+                                            print(f"\r🔄 电机对 {pair_num}: 左电机 [{left_bar}] {left_cycle}/10 | 右电机 [{right_bar}] {right_cycle}/10 | 平均: {avg_progress:.1f}%", end="", flush=True)
                                     except:
                                         pass
                                 
                                 elif "Switching to joint pair" in line_stripped:
-                                    # 这是测试开始的信号，清除当前进度条并更新进度
+                                    # 这是测试开始的信号，更新进度
                                     print()  # 换行，结束当前进度条
                                     current_pair += 1
-                                    progress = ((current_pair - 1) / self.total_pairs) * 100  # 修改：保持一致的进度计算
+                                    progress = (current_pair / self.total_pairs) * 100
                                     progress_bar = "█" * int(progress / 2) + "░" * (50 - int(progress / 2))
                                     print_colored_text(f"🔄 开始测试第 {current_pair} 对电机", color="purple", bold=True)
                                     print_colored_text(f"总进度: [{progress_bar}] {progress:.1f}% ({current_pair}/{self.total_pairs})", color="cyan")
                                     # 重置当前电机对进度
                                     current_pair_progress = {"left": 0, "right": 0}
-                                    # 重新启用进度条显示
-                                    self.test_started_shown = True
                                 
                                 elif "正在测试电机对:" in line_stripped:
                                     # 提取电机对编号并显示
@@ -366,10 +351,6 @@ class MotorFollowTest:
                                 
                                 elif "test complete." in line_stripped:
                                     print()  # 确保换行
-                                    # 显示最终100%进度
-                                    progress = 100.0
-                                    progress_bar = "█" * 50
-                                    print_colored_text(f"总进度: [{progress_bar}] {progress:.1f}% ({self.total_pairs}/{self.total_pairs})", color="cyan")
                                     print_colored_text(f"🎉 {line_stripped}", color="green", bold=True)
                                     print_colored_text("=" * 50, color="blue")
                                     

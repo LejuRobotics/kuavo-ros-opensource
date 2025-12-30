@@ -8,34 +8,6 @@
 #include <signal.h>
 #include <thread>
 
-// 灵巧手关节名称定义
-static const std::vector<std::string> DEXHAND_JOINT_NAMES = {
-    // 左灵巧手关节控制
-    "l_thumbCMC",
-    "l_thumbMCP", 
-    "l_indexMCP",
-    "l_indexPIP",
-    "l_middleMCP",
-    "l_middlePIP",
-    "l_ringMCP",
-    "l_ringPIP",
-    "l_littleMCP",
-    "l_littlePIP",
-
-    // 右灵巧手关节控制
-    "r_thumbCMC",
-    "r_thumbMCP",
-    "r_indexMCP", 
-    "r_indexPIP",
-    "r_middleMCP",
-    "r_middlePIP",
-    "r_ringMCP",
-    "r_ringPIP",
-    "r_littleMCP",
-    "r_littlePIP"
-};
-static bool flag_has_dexhand = false;
-
 namespace gazebo
 {
 
@@ -188,6 +160,9 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
 
     // 等待并加载参数
     waitForParams();
+    
+    // 设置初始状态
+    setInitialState();
 
     // 解析配置
     if (!ParseImu(_sdf)) {
@@ -264,6 +239,12 @@ void GazeboShmInterface::waitForParams()
                 
                 if (param_valid && !robot_init_state_param_.empty()) {
 
+                    // 打印参数值用于调试
+                    std::cout << "robot_init_state_param: ";
+                    for (size_t i = 0; i < robot_init_state_param_.size(); ++i) {
+                        std::cout << robot_init_state_param_[i] << " ";
+                    }
+                    std::cout << std::endl;
                     
                     params_loaded_ = true;
                     break;
@@ -282,26 +263,6 @@ void GazeboShmInterface::waitForParams()
     if (!params_loaded_) {
         std::cerr << "Cannot load initial state: parameters not loaded" << std::endl;
         exit(1);
-    }else
-    {
-
-
-        // 获取腰部自由度
-        int waist_num = 0;
-        nh_->getParam("waistRealDof", waist_num);
-        std::cout << "GazeboShmInterface get waist_num: " << waist_num << std::endl;
-        if (waist_num > 0) {
-            for (int i = 0; i < waist_num; i++) {
-                robot_init_state_param_.insert(robot_init_state_param_.begin() + 7, 0.0);
-            }
-        }
-
-        // 打印参数值用于调试
-        std::cout << "robot_init_state_param: ";
-        for (size_t i = 0; i < robot_init_state_param_.size(); ++i) {
-            std::cout << robot_init_state_param_[i] << " ";
-        }
-        std::cout << std::endl;
     }
 }
 
@@ -313,21 +274,12 @@ void GazeboShmInterface::setInitialState()
     }
     std::cout << "[GazeboShmInterface] setInitialState: " << robot_init_state_param_.size() << std::endl;
 
-    // 自动暂停机制
-    auto world = model_->GetWorld();
-    bool was_paused = world->IsPaused();
-    if (!was_paused) {
-        world->SetPaused(true);
-        std::cout << "[GazeboShmInterface] Auto-pausing simulation for initial state setup" << std::endl;
-    }
-
     // 设置base位姿
     if (robot_init_state_param_.size() >= 7) {
         std::vector<double> base_pose(robot_init_state_param_.begin(), robot_init_state_param_.begin() + 7);
         ignition::math::Pose3d new_pose;
         new_pose.Pos().Set(base_pose[0], base_pose[1], base_pose[2]);
         new_pose.Rot().Set(base_pose[3], base_pose[4], base_pose[5], base_pose[6]);  // w,x,y,z
-        
         model_->SetWorldPose(new_pose);
         
         std::cout << "[GazeboShmInterface] Setting model pose to: "
@@ -350,23 +302,6 @@ void GazeboShmInterface::setInitialState()
         
         // 使用Gazebo的接口设置关节位置
         model_->SetJointPositions(joint_pos_map);
-    }
-    
-    // 初始化dexhand关节位置和力
-    if(flag_has_dexhand) {
-        for (const auto& joint_name : DEXHAND_JOINT_NAMES) {
-            auto joint = model_->GetJoint(joint_name);
-            if (joint) {
-                model_->SetJointPosition(joint_name, 0.0);
-                std::cout << "[GazeboShmInterface] Initialized dexhand joint " << joint_name << " position to 0.0" << std::endl;
-            }
-        }
-    }
-    
-    // 自动恢复
-    if (!was_paused) {
-        world->SetPaused(false);
-        std::cout << "[GazeboShmInterface] Auto-resuming simulation after initial state setup" << std::endl;
     }
 }
 
@@ -434,7 +369,6 @@ void GazeboShmInterface::OnUpdate(const common::UpdateInfo& _info)
     if (first_update) {
         // 在第一次更新时设置初始状态
         setInitialState();
-        first_update = false;
     }
 
     // 更新IMU数据
@@ -481,6 +415,15 @@ void GazeboShmInterface::OnUpdate(const common::UpdateInfo& _info)
     shm_manager_->writeSensorsData(sensors_data_);
 
     // 应用关节命令
+    if (first_update)
+    {
+        std::cout << "[GazeboShmInterface] first update" << std::endl;   
+        first_update = false;
+        for (size_t i = 0; i < joints_.size(); ++i) {
+            joints_[i]->SetForce(0, 0);
+        }
+        return; 
+    }
 
     // 直接使用同步读取接口读取命令
     gazebo_shm::JointCommand cmd;
@@ -492,18 +435,6 @@ void GazeboShmInterface::OnUpdate(const common::UpdateInfo& _info)
             joints_[i]->SetForce(0, effort);
         }
     }
-
-    //控制灵巧手
-    if(flag_has_dexhand) {
-        for (const auto& joint_name : DEXHAND_JOINT_NAMES) {
-        auto joint = model_->GetJoint(joint_name);
-        if (joint) {
-            // TODO: 在这里添加灵巧手的控制
-            joint->SetPosition(0, 0.0);
-            }
-        }
-    }
-
     while (!sim_start_ && ros::ok()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         std::cout << "[GazeboShmInterface] Waiting for simulation to start..." << std::endl;
@@ -553,17 +484,11 @@ bool GazeboShmInterface::ParseJoints(const sdf::ElementPtr& _sdf)
         gzerr << "No joints configuration found" << std::endl;
         return false;
     }
-    
+
     auto joints_elem = _sdf->GetElement("joints");
     for (auto joint_elem = joints_elem->GetElement("joint"); joint_elem;
          joint_elem = joint_elem->GetNextElement("joint")) {
         std::string joint_name = joint_elem->Get<std::string>("name");
-        std::cout << "joint_name: " << joint_name << std::endl;
-        // dexhand 灵巧手的的关节不在常规的 joints_ 中控制（只有腿+手臂+头关节）
-        if (std::find(DEXHAND_JOINT_NAMES.begin(), DEXHAND_JOINT_NAMES.end(), joint_name) != DEXHAND_JOINT_NAMES.end()) {
-            flag_has_dexhand = true;
-            continue;
-        }
         auto joint = model_->GetJoint(joint_name);
         if (!joint) {
             gzerr << "Joint '" << joint_name << "' not found" << std::endl;
@@ -571,6 +496,7 @@ bool GazeboShmInterface::ParseJoints(const sdf::ElementPtr& _sdf)
         }
         joints_.push_back(joint);
         joint_names_.push_back(joint_name);
+        // std::cout << "joint_name: " << joint_name << std::endl;
     }
 
     return true;

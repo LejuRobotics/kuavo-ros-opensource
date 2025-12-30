@@ -10,17 +10,17 @@
 namespace HighlyDynamic{
 
   std::shared_ptr<KuavoCommon> KuavoCommon::instance = nullptr;
-  KuavoCommon &KuavoCommon::getInstance(RobotVersion rb_version, const std::string& kuavo_assets_path)
+  KuavoCommon &KuavoCommon::getInstance(RobotVersion robot_version, const std::string& kuavo_assets_path)
   {
     if (!instance) {
-        instance = std::shared_ptr<KuavoCommon>(new KuavoCommon(rb_version, kuavo_assets_path));
+        instance = std::shared_ptr<KuavoCommon>(new KuavoCommon(robot_version, kuavo_assets_path));
     }
     return *instance;
   }
 
-  KuavoCommon *KuavoCommon::getInstancePtr(RobotVersion rb_version, const std::string& kuavo_assets_path)
+  KuavoCommon *KuavoCommon::getInstancePtr(RobotVersion robot_version, const std::string& kuavo_assets_path)
   {
-    getInstance(rb_version, kuavo_assets_path);
+    getInstance(robot_version, kuavo_assets_path);
     return instance.get();
   }
 
@@ -32,15 +32,15 @@ namespace HighlyDynamic{
     }
   }
 
-  KuavoCommon::KuavoCommon(RobotVersion rb_version, const std::string& kuavo_assets_path)
-      : rb_version_(rb_version)
+  KuavoCommon::KuavoCommon(RobotVersion robot_version, const std::string& kuavo_assets_path)
+      : robot_version_(robot_version)
   {
     try {
         
         robot_config_ = new JSONConfigReader();
         std::cout << "Created JSONConfigReader" << std::endl;
         
-        auto robot_name = "kuavo_v" + rb_version.to_string();
+        auto robot_name = "kuavo_v" + std::to_string(robot_version.versionInt());
         auto config_path = kuavo_assets_path + "/config/" + robot_name + "/kuavo.json";
         std::cout << "Will try to load config from: " << config_path << std::endl;
         

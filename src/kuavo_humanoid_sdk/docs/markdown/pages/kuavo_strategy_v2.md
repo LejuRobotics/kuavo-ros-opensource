@@ -14,8 +14,6 @@
 
 案例 >> 策略 >> 事件 >> SDK。它们之间的关系如下图：
 
-![策略模块 v2 结构图](pages/structure.jpg)
-
 ## 数据结构
 
 ### *class* kuavo_humanoid_sdk.kuavo_strategy_v2.common.robot_sdk.RobotSDK
@@ -804,7 +802,7 @@ Bases: `object`
 
 注意ROS里Tag识别的坐标系如下：
 
-![Tag的坐标系定义](pages/tag_frame.png)
+<!-- ![Tag的坐标系定义](pages/tag_frame.png) -->
 
 以下是一个使用箱子抓取策略的基本示例:
 

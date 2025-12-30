@@ -14,16 +14,6 @@
   <arg name="ip_address"         default="192.168.3.17" /> <!-- ip address of quest3 -->
   <arg name="use_quest3_utils"   default="true"/>
   <param name="use_quest3_utils" type="bool" value="$(arg use_quest3_utils)"/>
-  <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
-  
-  <arg name="enable_safety" default="false"/>
-  <arg name="max_pos_diff" default="0.45"/>
-  <arg name="max_quat_diff" default="1.0"/>
-  
-  <param name="quest3/enable_safety" type="bool" value="$(arg enable_safety)"/>
-  <param name="quest3/max_pos_diff" type="double" value="$(arg max_pos_diff)"/>
-  <param name="quest3/max_quat_diff" type="double" value="$(arg max_quat_diff)"/>
-  
   <!-- sim launch -->
   <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim.launch">
     <arg name="joystick_type"      value="$(arg joystick_type)"/>
@@ -38,9 +28,7 @@
     <arg name="visualize_mm"       value="$(arg visualize_mm)"/>
   </include>
   
-  <node name="quest3_node" pkg="motion_capture_ik" type="quest3_node_incremental.py" output="screen" args="--ee_type $(arg ee_type) --send_srv $(arg send_srv) --control_torso=$(arg control_torso) --incremental_control=$(arg incremental_control)">
-    <param name="hand_reference_mode" value="$(arg hand_reference_mode)"/>
-  </node>
+  <node name="quest3_node" pkg="motion_capture_ik" type="quest3_node_incremental.py" output="screen" args="--ee_type $(arg ee_type) --send_srv $(arg send_srv) --control_torso=$(arg control_torso) --incremental_control=$(arg incremental_control)"></node>
   <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen"/>
 
   <group if="$(arg visualize)">    

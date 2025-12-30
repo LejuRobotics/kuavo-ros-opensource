@@ -29,16 +29,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
-// Pinocchio forward declarations must be included first
-#include <pinocchio/fwd.hpp>
-
-#include <pinocchio/algorithm/frames.hpp>
-#include <pinocchio/algorithm/kinematics.hpp>
-
 #include <ocs2_core/reference/ModeSchedule.h>
 #include <ocs2_core/reference/TargetTrajectories.h>
-#include <ocs2_pinocchio_interface/PinocchioInterface.h>
-#include <ocs2_centroidal_model/CentroidalModelInfo.h>
 
 #include "humanoid_interface/common/Types.h"
 #include "humanoid_interface/foot_planner/SplineCpg.h"
@@ -69,21 +61,14 @@ class SwingTrajectoryPlanner {
 
     scalar_t swing_shoulder_center = 0.2;
     scalar_t swing_shoulder_scale = 0.2;
-    scalar_t swing_elbow_center = 0.0;
     scalar_t swing_elbow_scale = 3.0;
     bool enable_interrupt_with_est_mode = false; // 是否允许根据实际状态终止规划
     bool enable_slope_planner = false; // 使能斜面规划
-    bool enable_dynamic_q = false;
-    bool enable_dynamic_r = false;
     double slope_planning_threshold = 5.0;
-    bool enable_dynamic_qr = false; // 使能动态QR
 
   };
 
-  SwingTrajectoryPlanner(Config config, 
-    const PinocchioInterface& interface, 
-    const CentroidalModelInfo& info,
-    size_t numFeet, size_t numHand = 2);
+  SwingTrajectoryPlanner(Config config, size_t numFeet, size_t numHand = 2);
   void setSlopePlanning(bool enable_slope_planning){enable_slope_planning_ = enable_slope_planning;};
   inline void updateConfig(const Config& cfg){config_ = cfg;}
   inline const Config& getConfig() const {return config_;}
@@ -99,7 +84,7 @@ class SwingTrajectoryPlanner {
               const feet_array_t<scalar_array_t>& maxHeightSequence, 
               const TargetTrajectories& targetTrajectories, 
               const scalar_t& initTime);
-  std::pair<vector3_t, std::vector<vector3_t>> findFootPosNext(int feet, int current_index, int swingStartIndex, int swingFinalIndex, const ModeSchedule& modeSchedule, const vector3_t &last_stance_position, const feet_array_t<std::vector<bool>> &eesContactFlagStocks);
+  std::pair<vector3_t, std::vector<vector3_t>> findFootPosNext(int feet, int current_index, int swingStartIndex, int swingFinalIndex, const ModeSchedule& modeSchedule, const vector3_t &last_stance_position);
   
   // 存储规划值到 vector 中
   std::vector<scalar_t> saveTrajectoryToVector() const {
