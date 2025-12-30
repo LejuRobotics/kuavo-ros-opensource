@@ -47,6 +47,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/singleStepControl.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
+#include <kuavo_msgs/ExecuteArmAction.h>
 #include "kuavo_msgs/footPoseTargetTrajectoriesSrv.h"
 #include "kuavo_msgs/footPose6DTargetTrajectoriesSrv.h"
 #include "kuavo_msgs/kuavoModeSchedule.h"
@@ -58,6 +59,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_interface/common/TopicLogger.h"
 #include <std_srvs/Empty.h>
 #include <ocs2_centroidal_model/CentroidalModelRbdConversions.h>
+#include <map>
 
 #define X_MAX_SINGLE_STEP_SIZE 0.15
 #define Y_MAX_SINGLE_STEP_SIZE 0.05
@@ -238,6 +240,8 @@ class SwitchedModelReferenceManager : public ReferenceManager {
 
   bool singleStepControlCallback(kuavo_msgs::singleStepControl::Request &req, kuavo_msgs::singleStepControl::Response &res);
 
+  bool loadDynamicQRCallback(kuavo_msgs::ExecuteArmAction::Request &req, kuavo_msgs::ExecuteArmAction::Response &res);
+
   void armTargetTrajectoriesCallback(const ocs2_msgs::mpc_target_trajectories::ConstPtr &msg);
   
   TargetTrajectories interpolateArmTarget(scalar_t startTime, const vector_t& currentArmState, const vector_t& newDesiredArmState, scalar_t maxSpeed);
@@ -267,6 +271,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
 
   void loadBaseTrackingQ(const std::string &dynamic_qr_file);
   void loadBaseTrackingR(const std::string &dynamic_qr_file);
+  void loadDynamicQRMap(const std::string &dynamic_qr_file);  // 加载所有Q_dynamic_<gait_name>和R_dynamic_<gait_name>到map
   void setMatrixRByGaitPair(const std::string &gait_name, const scalar_t &time, bool all_stance);
   
   // 维度缩减函数（参考HumanoidInterface的实现）
@@ -303,7 +308,16 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   baseTrackingR baseTrackingR_;
   std::string dynamic_qr_file_;
   bool dynamic_qr_flag_ = false;
-
+  bool dynamic_r_set_ = false;  // Flag to indicate if R matrix was manually set via service, skip all_stance override
+  matrix_t dynamic_R = matrix_t::Zero(24, 24);
+  matrix_t dynamic_Q = matrix_t::Zero(24, 24);
+  
+  // Map存储gait_name到QR矩阵的映射，避免在回调函数中进行文件IO
+  struct DynamicQRPair {
+    matrix_t Q;
+    matrix_t R;
+  };
+  std::map<std::string, DynamicQRPair> dynamic_qr_map_;
   PinocchioInterface pinocchioInterface_;
   const CentroidalModelInfo& info_;
   std::unique_ptr<PinocchioEndEffectorKinematics> endEffectorKinematicsPtr_;
@@ -350,6 +364,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::ServiceServer enable_pitch_limit_service_;
   ros::ServiceServer pitch_limit_status_service_;
   ros::ServiceServer vr_waist_control_service_;  // VR waist control service
+  ros::ServiceServer load_dynamic_qr_service_;  // Service to load dynamic Q and R matrices based on gait name
   ros::Publisher modeSchedulePublisher_;
 
   vector_t cmdVel_;
