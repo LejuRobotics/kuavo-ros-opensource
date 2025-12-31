@@ -210,6 +210,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   
   // Transition status query methods
   bool isHeightTransitionActive() const { return heightSmoothTransitionActive_; }
+  bool isArmExecuting() const { return isArmExecuting_; }
   scalar_t getHeightTransitionProgress() const {
     if (!heightSmoothTransitionActive_) return 1.0;
     scalar_t elapsedTime = ros::Time::now().toSec() - heightTransitionStartTime_;
@@ -349,6 +350,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::ServiceServer enable_pitch_limit_service_;
   ros::ServiceServer pitch_limit_status_service_;
   ros::ServiceServer vr_waist_control_service_;  // VR waist control service
+  ros::Publisher isArmExecutingPublisher_;
   ros::Publisher modeSchedulePublisher_;
 
   vector_t cmdVel_;
@@ -364,6 +366,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool velCmdUpdated_ = false;
   bool PoseCmdUpdated_ = false;
   bool PoseWorldCmdUpdated_ = false;
+  bool isArmExecuting_ = false;
   bool isCmdPoseCached = false;
   bool poseTargetUpdated_ = false;
   bool armTargetUpdated_ = false;
