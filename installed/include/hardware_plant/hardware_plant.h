@@ -134,13 +134,14 @@ class HardwarePlant
     void calibrateArmJoints();
     bool calibrateArmJointsAtLimit(bool auto_mode = true, bool calibrate_head = true, bool head_only = false);
     void initEndEffector();
-        bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
-        bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
-        bool changeRuiwoMotorParam(const std::string &param_name, std::string &err_msg);
-        
-        // RuiWoActuator相关方法的封装
-        void adjustZeroPosition(int motor_index, double offset);
-        std::vector<double> getMotorZeroPoints();
+
+    bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
+    bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
+    bool changeRuiwoMotorParam(const std::string &param_name, std::string &err_msg);
+    
+    // RuiWoActuator相关方法的封装
+    void adjustZeroPosition(int motor_index, double offset);
+    std::vector<double> getMotorZeroPoints();
 
     // 0扭矩控制腿部EC电机接口（双足模式：1-12号关节，轮臂模式：1-4号关节）
     bool setZeroTorqueForLegECMotors();

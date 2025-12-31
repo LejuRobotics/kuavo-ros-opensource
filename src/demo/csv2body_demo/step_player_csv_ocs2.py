@@ -162,7 +162,6 @@ class MusicPlayer:
         if self.music_thread and self.music_thread.is_alive():
             self.music_thread.join(timeout=1.0)
 
-
 class ActionPlayer:
     """动作播放器，用于控制机器人执行预定义的动作序列"""
 
@@ -743,6 +742,7 @@ def main():
 
     # 等待ROS系统就绪
     rospy.sleep(1)
+
     load_dynamic_qr_service("taiji")
     change_ruiwo_motor_param("taiji_kpkd")
     try:
