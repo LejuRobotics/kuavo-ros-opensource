@@ -943,12 +943,14 @@ namespace ocs2
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
         {
           callTriggerFallStandUpSrv();
+          old_joy_msg_ = *joy_msg;
           return;
         }
         // RB + BUTTON_TROT(B): 触发倒地逻辑
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
         {
           callSetFallDownStateSrv();
+          old_joy_msg_ = *joy_msg;
           return;
         }
       }
