@@ -274,6 +274,19 @@ namespace humanoid_controller
     return is_fallen;
   }
 
+  bool AmpWalkController::isInStanceMode() const
+  {
+    if (!gait_receiver_)
+    {
+      // 没有 gait_receiver_，默认返回 true（stance）
+      return true;
+    }
+    
+    auto cmd = gait_receiver_->getCurrentCommand();
+    // cmdStance_ == 1 表示 stance 模式，== 0 表示行走模式
+    return cmd.cmdStance_ >= 0.5;  // 使用 0.5 作为阈值，兼容浮点数比较
+  }
+
   bool AmpWalkController::shouldRunInference() const
   {
     if (state_ != ControllerState::RUNNING)

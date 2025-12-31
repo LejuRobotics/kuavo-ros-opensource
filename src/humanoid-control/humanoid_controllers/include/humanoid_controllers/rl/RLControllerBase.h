@@ -149,6 +149,12 @@ public:
   virtual bool isReadyToExit() const { return false; }
 
   /**
+   * @brief 检查控制器当前是否处于 stance（站立）模式
+   * @return 如果控制器处于 stance 模式返回 true，否则返回 false
+   */
+  virtual bool isInStanceMode() const { return true; }
+
+  /**
    * @brief 获取控制器的初始状态（用于设置仿真/机器人初始状态）
    * @return 初始状态向量 initialStateRL_ 的引用
 

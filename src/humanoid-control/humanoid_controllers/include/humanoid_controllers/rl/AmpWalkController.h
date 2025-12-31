@@ -31,6 +31,12 @@ namespace humanoid_controller
      */
     bool isReadyToExit() const override;
 
+    /**
+     * @brief 检查控制器当前是否处于 stance（站立）模式
+     * @return 如果 cmdStance_ == 1 返回 true，否则返回 false
+     */
+    bool isInStanceMode() const override;
+
   protected:
     // 主循环：从 RLControllerBase::update 调用
     bool updateImpl(const ros::Time& time,
