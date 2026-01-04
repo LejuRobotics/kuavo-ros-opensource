@@ -117,7 +117,18 @@ namespace humanoid_controller
   bool RLControllerManager::switchController(const std::string& name)
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
+    // 检查当前是否为倒地起身控制器
+    if (!current_controller_name_.empty())
+    {
+      auto* current_controller = controllers_[current_controller_name_].get();
+      bool current_is_fall_down_controller = current_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER;
+      if (!current_controller->isReadyToExit() && current_is_fall_down_controller)
+      {
+        ROS_WARN("[RLControllerManager] Current controller is fall down controller, switch to Next controller blocked!");
+        return false;
+      }
+    }
+
     // 切换到MPC控制器
     if (name.empty())
     {
@@ -159,8 +170,11 @@ namespace humanoid_controller
     // 保护逻辑：MPC->RL 切换时，如果机器人不在 stance 状态，不允许切换
     if (current_controller_name_.empty())
     {
+      auto* next_controller = controllers_[name].get();
+      bool desired_switch_to_falldown = next_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER;
+      
       bool is_current_stance = (mpc_current_gait_name_ == "stance") || mpc_is_stance_mode_;
-      if (!is_current_stance)
+      if (!desired_switch_to_falldown && !is_current_stance)
       {
         ROS_WARN("[RLControllerManager] MPC not in stance (gait=%s), switch to RL blocked! Stop walking first.", 
                  mpc_current_gait_name_.c_str());

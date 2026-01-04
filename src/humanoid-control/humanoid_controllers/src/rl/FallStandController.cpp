@@ -1397,9 +1397,10 @@ namespace humanoid_controller
     }
     else if (fall_stand_state_ == FallStandState::STAND_UP)
     {
+      reset();
       res.success = false;
-      res.message = "Stand up process is already in progress";
-      ROS_WARN("[%s] Stand up process is already in progress", name_.c_str());
+      res.message = "Stand up process is already in progress, stop stand up process";
+      ROS_WARN("[%s] Stand up process is already in progress, stop stand up process", name_.c_str());
     }
     else
     {

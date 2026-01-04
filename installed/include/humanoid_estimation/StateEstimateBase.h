@@ -126,6 +126,19 @@ namespace ocs2
       {
         if (estContactforce_.size() < 12)
           return false;
+        
+        // 检查时间间隔，如果相邻两次调用时间>0.5s，则重置滤波器
+        ros::Time current_time = ros::Time::now();
+        if (last_pullup_check_time_.isValid()) {
+          ros::Duration time_diff = current_time - last_pullup_check_time_;
+          if (time_diff.toSec() > 0.5) {
+            total_est_contact_force_ = robotMass_ * 9.81;
+            last_pullup_state_ = false;
+            pullup_window_.clear();
+            std::cout << "[StateEstimateBase] checkPullUp reset filter" << std::endl;
+          }
+        }
+        last_pullup_check_time_ = current_time;
           
         double new_total_est_contact_force_ = std::max(estContactforce_[2], 0.0) + std::max(estContactforce_[8], 0.0);
         // ros_logger_->publishValue("/state_estimate/checkPullUp/new_total_est_contact_force_", new_total_est_contact_force_);
@@ -319,6 +332,7 @@ namespace ocs2
       std::deque<bool> pullup_window_;  // 滑动窗口用于存储历史判断结果
       const size_t pullup_window_size_ = 20;  // 滑动窗口大小
       bool last_pullup_state_ = false;  // 保存上一次的pullup状态
+      ros::Time last_pullup_check_time_;  // 上次调用checkPullUp的时间
       int waistNum_ = 0;
       
     };
