@@ -121,10 +121,16 @@ namespace humanoid_controller
     // 切换到MPC控制器
     if (name.empty())
     {
-      // 暂停当前控制器（如果存在）
+      // 保护逻辑：RL->MPC 切换时，如果 RL 控制器不在 stance 状态，不允许切换
       if (!current_controller_name_.empty())
       {
         auto* current_controller = controllers_[current_controller_name_].get();
+        if (current_controller && !current_controller->isInStanceMode())
+        {
+          ROS_WARN("[RLControllerManager] RL not in stance, switch to MPC blocked! Switch to stance first.");
+          return false;
+        }
+
         if (current_controller)
         {
           current_controller->pause();
@@ -148,6 +154,18 @@ namespace humanoid_controller
     if (current_controller_name_ == name)
     {
       return true;
+    }
+
+    // 保护逻辑：MPC->RL 切换时，如果机器人不在 stance 状态，不允许切换
+    if (current_controller_name_.empty())
+    {
+      bool is_current_stance = (mpc_current_gait_name_ == "stance") || mpc_is_stance_mode_;
+      if (!is_current_stance)
+      {
+        ROS_WARN("[RLControllerManager] MPC not in stance (gait=%s), switch to RL blocked! Stop walking first.", 
+                 mpc_current_gait_name_.c_str());
+        return false;
+      }
     }
 
     // 暂停当前控制器（如果存在）
@@ -287,6 +305,13 @@ namespace humanoid_controller
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     return current_controller_name_.empty() && getCurrentController() == nullptr;
+  }
+
+  void RLControllerManager::setMpcStanceState(bool is_stance, const std::string& gait_name)
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    mpc_is_stance_mode_ = is_stance;
+    mpc_current_gait_name_ = gait_name;
   }
 
   bool RLControllerManager::loadControllersFromConfig(const std::string& config_file, 

@@ -1904,6 +1904,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     // is_rl_controller_buffer_.updateFromBuffer();// 使用buffer中的值更新is_rl_controller_,避免多线程更新
     is_rl_controller_ = !controller_manager_->isBaseControllerActive();
     current_controller_ptr_ = controller_manager_->getCurrentController();
+
+    // 同步MPC stance状态到RLControllerManager
+    controller_manager_->setMpcStanceState(is_stance_mode_, current_gait_.name);
+
     RLControllerType current_controller_type = controller_manager_->getCurrentControllerType();
     bool is_fall_stand_controller_active = current_controller_type == RLControllerType::FALL_STAND_CONTROLLER;
     if (is_rl_controller_)// 针对倒地起身控制器这种可以主动退出的控制器
@@ -1918,37 +1922,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     // TODO是否直接切换到RL控制器（true：直接切换；false：通过MPC插值过渡）
     bool derect_switch_to_rl = controller_manager_->getDirectSwitchToRL();
     
-    // 保护逻辑：MPC->RL 切换时，如果机器人不在 stance 状态，不允许切换
-    if (!last_is_rl_controller_ && is_rl_controller_)
-    {
-      // 检查当前步态是否为 stance
-      bool is_current_stance = (current_gait_.name == "stance") || is_stance_mode_;
-      if (!is_current_stance)
-      {
-        // 机器人在踏步状态，阻止切换
-        controller_manager_->switchToBaseController();  // 阻止切换，切回 MPC
-        ROS_WARN("[humanoidController] MPC not in stance (gait=%s), switch to RL blocked! Stop walking first.", 
-                 current_gait_.name.c_str());
-        is_rl_controller_ = false;  // 重置状态
-      }
-    }
-
-    // 保护逻辑：RL->MPC 切换时，如果 RL 控制器不在 stance 状态，不允许切换
-    if (last_is_rl_controller_ && !is_rl_controller_)
-    {
-      // 获取上一个 RL 控制器，检查其 stance 状态
-      RLControllerBase* last_rl_controller = controller_manager_->getLastController();
-      if (last_rl_controller && !last_rl_controller->isInStanceMode())
-      {
-        // RL 控制器在行走状态，阻止切换，切回 RL 控制器
-        controller_manager_->switchController(last_rl_controller->getName());
-        ROS_WARN("[humanoidController] RL not in stance, switch to MPC blocked! Switch to stance first.");
-        is_rl_controller_ = true;  // 重置状态
-        // 更新 current_controller_ptr_，否则后续代码使用无效指针
-        current_controller_ptr_ = controller_manager_->getCurrentController();
-      }
-    }
-
     if (!derect_switch_to_rl && !last_is_rl_controller_ && is_rl_controller_)
     {
       // 进入 RL 前，先用 MPC 将躯干高度插值到 RL 默认高度

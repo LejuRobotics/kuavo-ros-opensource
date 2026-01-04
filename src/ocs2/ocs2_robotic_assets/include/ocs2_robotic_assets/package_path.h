@@ -37,7 +37,7 @@ namespace robotic_assets {
 
 /** Gets the path to the package source directory. */
 inline std::string getPath() {
-  return "/home/carlos/CI/highlydynamic/kuavo_ros_workspace_github/git_repo/src/ocs2/ocs2_robotic_assets";
+  return "/media/data/CI/highlydynamic/kuavo_ros_workspace_github/git_repo/src/ocs2/ocs2_robotic_assets";
 }
 
 }  // namespace robotic_assets

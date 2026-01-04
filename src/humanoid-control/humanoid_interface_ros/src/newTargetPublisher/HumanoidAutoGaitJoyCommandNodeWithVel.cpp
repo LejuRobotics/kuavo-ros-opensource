@@ -38,6 +38,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <std_msgs/String.h>
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/Float32.h>
+#include <std_msgs/Float64.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <geometry_msgs/Twist.h>
 #include "kuavo_msgs/SetJoyTopic.h"
@@ -329,6 +330,8 @@ namespace ocs2
       );
       gait_change_sub_ = nodeHandle_.subscribe<std_msgs::String>(
       "/humanoid_mpc_gait_change", 1, &JoyControl::gaitChangeCallback, this);
+      is_rl_controller_sub_ = nodeHandle_.subscribe<std_msgs::Float64>("/humanoid_controller/is_rl_controller_", 1, [this](const std_msgs::Float64::ConstPtr &msg) 
+      {is_rl_controller_ = (msg->data > 0.5);});
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
       robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
       "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
@@ -1024,7 +1027,12 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
       {
-        publishGaitTemplate("walk");
+        if (is_rl_controller_) {
+          ROS_WARN("[JoyControl] Current controller is RL, cannot switch gait to walk");
+        } 
+        else {
+          publishGaitTemplate("walk");
+        }
       }
       else
       {
@@ -1421,6 +1429,8 @@ namespace ocs2
     ros::Subscriber gait_scheduler_sub_;
     ros::Subscriber policy_sub_;
     ros::Subscriber gait_change_sub_;
+    ros::Subscriber is_rl_controller_sub_;
+    bool is_rl_controller_{false};  // 当前是否为RL控制器
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
     std::string current_desired_gait_ = "stance";

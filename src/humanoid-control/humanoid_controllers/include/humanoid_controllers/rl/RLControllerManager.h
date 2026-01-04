@@ -203,6 +203,13 @@ namespace humanoid_controller
     }
 
     /**
+     * @brief 更新MPC控制器的stance状态（由humanoidController调用）
+     * @param is_stance 是否处于stance模式
+     * @param gait_name 当前步态名称
+     */
+    void setMpcStanceState(bool is_stance, const std::string& gait_name);
+
+    /**
      * @brief 获取WALK_CONTROLLER类型的控制器列表（包括BASE控制器）
      * @return WALK_CONTROLLER类型的控制器名称列表
      */
@@ -258,6 +265,9 @@ namespace humanoid_controller
 
     // RL切换模式：true 直接切换到RL；false 使用MPC过渡
     bool direct_switch_to_rl_ = true;
+
+    bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
+    std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
   };
 
 } // namespace humanoid_controller
