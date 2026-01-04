@@ -3,7 +3,7 @@ from geometry_msgs.msg import PoseStamped
 
 class ObjectPose:
     def __init__(self):
-        # 定义物体名到 topic 的映射
+
         self.name_to_topic = {
             "box_red1": "/mujoco/box_red1/pose",
             "box_red2": "/mujoco/box_red2/pose",
@@ -46,9 +46,7 @@ class ObjectPose:
         raise RuntimeError(f"Timeout waiting for {name}")
 
     def get_position(self, object_name):
-        """
-        获取指定物体的位置 (x, y, z)。无数据则返回 None。
-        """
+
         pose = self.pose_data.get(object_name)
         if pose is None:
             return None
@@ -56,9 +54,7 @@ class ObjectPose:
         return (pos.x, pos.y, pos.z)
 
     def get_orientation(self, object_name):
-        """
-        获取指定物体的姿态四元数 (x, y, z, w)。无数据则返回 None。
-        """
+
         pose = self.pose_data.get(object_name)
         if pose is None:
             return None

@@ -28,16 +28,13 @@ class SimulatorTask2():
 
         self.init_service = rospy.ServiceProxy('/simulator/init', Trigger)
         self.pub_success = rospy.Publisher('/simulator/success',Bool, queue_size=10)
-        # self.pub_score   = rospy.Publisher('/simulator/score', Int32, queue_size=10, latch=True)
-        # 等待外部信号
+
         self.start_service = rospy.Service('/simulator/start', Trigger, self._on_start_service)
         self.reset_service = rospy.Service('/simulator/reset', Trigger, self._on_reset_service)
 
-        # 事件控制
         self.start_evt = threading.Event()
         self.reset_evt = threading.Event()
 
-        # 设备与控制器
         self.robot = None
         self.robot_state = None
         self.conveyor_ctrl = None
@@ -47,11 +44,11 @@ class SimulatorTask2():
         self.score = 0
         default_score_file = "/tmp/simulator_score_last.txt"
         self.score_file = os.environ.get("SCORE_FILE", default_score_file)
-        # 成功状态
+
         self.started = False
         self.already_reported_success = False
         self.intermediate_awarded = False
-        # 区域阈值
+
         self.seed = seed
         self.obj_pos = ObjectPose()
         self.rng = random.Random(self.seed)
@@ -80,7 +77,6 @@ class SimulatorTask2():
         else:
             self.target_region = self.target_region_drop
 
-        # 记录分项是否达成
         self.comp_intermediate_pos = False
         self.comp_final_pos = False
         self.comp_time_score = 0
@@ -95,7 +91,7 @@ class SimulatorTask2():
             ),
             is_in_region_fn=lambda pos, region: Utils.is_in_target_region(pos, region),
         )
-    # ========== 服务回调 - 等待外部信号 ==========
+
     def _on_start_service(self, req):
         """等待外部代码发送 start 信号"""
         rospy.loginfo("[sim] Received external start signal, starting task execution")
@@ -118,16 +114,14 @@ class SimulatorTask2():
         z = float(self.np_rng.uniform(*position_ranges['z']))
         return x, y, z
 
-    # ========== 主流程 ==========
     def run(self):
         try:
             self.reset_evt.clear()
             self.start_evt.clear()
 
-            # 1) 初始化 SDK 与控制器
             if not KuavoSDK().Init(options=KuavoSDK.Options.WithIK):
                 print("Init KuavoSDK failed, exit!")
-                return  # 直接退出，deploy.py 会重启一轮
+                return
 
             self.robot = KuavoRobot()
             self.robot_state = KuavoRobotState()
@@ -135,12 +129,11 @@ class SimulatorTask2():
             self.conveyor_ctrl = ConveyorController()
             self.obj_pos       = ObjectPose()
 
-            # 随机化物体位置
             obj_pos = ObjectRandomizer()
             x, y, z = self._sample_position(position_ranges={
-                    'x': [0.25, 0.25],    # x轴范围
-                    'y': [-0.7, -0.5],   # y轴范围  
-                    'z': [0.9, 0.9]     # z轴范围
+                    'x': [0.25, 0.25],
+                    'y': [-0.7, -0.5],  
+                    'z': [0.9, 0.9]     
                 })
             
             result = obj_pos.set_object_position(
@@ -148,8 +141,7 @@ class SimulatorTask2():
                 position = {"x":x, "y":y, "z":z},
                 orientation = Utils.sample_orientation_jitter(max_yaw_deg=180.0, max_pitch_deg=0, max_roll_deg=0)
             )
-            
-            # 2) 预抓位
+
             num = 30
             q_target1 = [90, -10, 0, -100, -90, 0, 0,   80, 10, 0, -120, 90, 0, 0]
             q_list1 = Utils.interpolate_joint_trajectory(q_target1, num=num) 
@@ -163,8 +155,7 @@ class SimulatorTask2():
             for q in q_list2:
                 self.robot.control_arm_joint_positions(q)
                 time.sleep(0.02)
-            
-            # 3) 发布 msg0：init=True
+
             rospy.wait_for_service('/simulator/init')
             try:
                 rospy.loginfo("[sim] Published /simulator/init service completed")
@@ -172,8 +163,6 @@ class SimulatorTask2():
             except rospy.ServiceException as e:
                 rospy.logerr(f"Service call failed: {e}")
 
-
-            # 4) 等待外部代码调用 start 服务
             rospy.loginfo("[sim] Waiting for external code to call /simulator/start service...")
             while not rospy.is_shutdown() and not self.reset_evt.is_set():
                 if self.start_evt.wait(timeout=0.1):
@@ -184,13 +173,12 @@ class SimulatorTask2():
                 self._cleanup()
                 sys.exit(0)
 
-            # 5) 收到外部 start 信号 → 开传送带，循环上报 success
-            rospy.loginfo("[sim] Received external start signal, starting conveyor, continuously reporting success")
+            rospy.loginfo("[sim] Received external start signal, continuously reporting success")
             self.conveyor_ctrl.control_speed_both(self.conveyor_speed1,self.conveyor_speed2)
 
-            rate = rospy.Rate(10)  # 10Hz 上报
+            rate = rospy.Rate(10)
             self.already_reported_success = False
-            # start_time = time.time()  # 循环开始前计时
+
             self.evaluator.reset()
             
             while not rospy.is_shutdown() and not self.reset_evt.is_set():
@@ -201,28 +189,20 @@ class SimulatorTask2():
                     pos = None
 
                 if pos is None:
-                    # 取不到传感就当未成功
-                    # 未成功阶段持续发 False
                     self.pub_success.publish(Bool(data=False))
-                    # 持续发布分数
-                    # self.pub_score.publish(Int32(data=self.evaluator.score))
                     rate.sleep()
                     continue
 
-                # 调用通用评估器
                 out = self.evaluator.evaluate(pos, now=time.time())
 
-                # 累计分项达成
                 if out.get("intermediate_pos_added"): self.comp_intermediate_pos = True
                 if out.get("final_pos_added"):        self.comp_final_pos = True
 
 
-                # 时间得分：如果 evaluator 是“增量”，这里累加；如果是“最终值”，也能覆盖
                 ts_add = out.get("time_score_added")
                 if isinstance(ts_add, (int, float)):
                     self.comp_time_score += float(ts_add)
 
-                # 按评估器的“建议标志”做 ROS 行为
                 if out["need_publish_success_true"]:
                     rospy.loginfo("[sim] ✅ Task success, published /simulator/success=True")
                     self.pub_success.publish(Bool(data=True))
@@ -242,17 +222,14 @@ class SimulatorTask2():
                     parts = []
                     parts.append(f"+{out['time_score_added']}(Time)")
                     rospy.loginfo(f"{GREEN} ✅ Task Success: {' '.join(parts)} | Total Time: {out['elapsed_sec']:.2f}s | Total Score: {out['total_score']}{RESET}")
-                    # 停止传送带
+
                     if out["need_stop_conveyor"]:
                         self.conveyor_ctrl.control_speed_both(0.0,0.0)
 
-                # 持续发布当前分数
                 self.score = out["total_score"]
 
                 rate.sleep()
 
-
-            # 6) 收到 reset → 清理并退出 (让 deploy.py 重启新一轮)
             rospy.loginfo("[sim] Received reset/shutdown, starting cleanup and exiting")
             self._cleanup()
             sys.exit(0)
@@ -278,7 +255,7 @@ class SimulatorTask2():
                 self.traj_ctrl.stop()
         except Exception:
             pass
-        if self.started:   # self.started 在 _on_start_service 里置 True
+        if self.started:
             try:
                 os.makedirs(os.path.dirname(self.score_file), exist_ok=True)
                 with open(self.score_file, "w") as f:
@@ -291,11 +268,9 @@ class SimulatorTask2():
                 detail_json_path = base + ".json"
                 components = {}
 
-                # 你可以按任务规则设定每项分数值；这里与日志对应：
                 if self.comp_intermediate_pos: components["intermediate_pos"] = 40
                 if self.comp_final_pos:        components["final_pos"] = 40
 
-                # 时间得分：如果累计不到，可以按需要从总分反推；这里优先用累计值
                 if self.comp_time_score and self.comp_time_score > 0:
                     components["time"] = round(float(self.comp_time_score), 6)
 

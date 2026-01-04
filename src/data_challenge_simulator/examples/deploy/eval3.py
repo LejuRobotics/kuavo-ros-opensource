@@ -20,7 +20,6 @@ import numpy as np
 import json
 import random
 
-# ANSI color codes for terminal output
 YELLOW = "\033[93m"
 GREEN = "\033[92m"
 RESET = "\033[0m"
@@ -31,51 +30,47 @@ class SimulatorTask3():
 
         self.init_service = rospy.ServiceProxy('/simulator/init', Trigger)
         self.pub_success = rospy.Publisher('/simulator/success',Bool, queue_size=10)
-        # self.pub_score   = rospy.Publisher('/simulator/score', Int32, queue_size=10, latch=True)
-        # 等待外部信号
+
         self.start_service = rospy.Service('/simulator/start', Trigger, self._on_start_service)
         self.reset_service = rospy.Service('/simulator/reset', Trigger, self._on_reset_service)
 
-        # 事件控制
         self.start_evt = threading.Event()
         self.reset_evt = threading.Event()
 
-        # 设备与控制器
         self.robot = None
         self.robot_state = None
         self.conveyor_ctrl = None
         self.gripper_ctrl = None
-        self.traj_ctrl = None  # 将在 run() 方法中初始化，因为此时 robot 还未创建
+        self.traj_ctrl = None 
         self.obj_pos = None
         self.score = 0
         default_score_file = "/tmp/simulator_score_last.txt"
         self.score_file = os.environ.get("SCORE_FILE", default_score_file)
-        # 成功状态
+
         self.started = False
         self.already_reported_success = False
         self.intermediate_awarded = False
-        # 区域阈值
+
         self.seed = seed
-        # 初始化基于 seed 的随机数生成器，确保结果可复现
+
         self.rng = random.Random(seed)
         self.np_rng = np.random.default_rng(seed)
         self.obj_pos = ObjectPose()
-        # 随机化物体位置
+
         self.random_pos = ObjectRandomizer()
         self.conveyor_ctrl = ConveyorController()
 
         self.red_bin_region = [
-        (0.155,0.365),   # x 范围
-        (-0.095,0.115),   # y 范围
-        (0.46,0.55)  # z 范围
+        (0.155,0.365),  
+        (-0.095,0.115),  
+        (0.46,0.55) 
         ]
         self.black_bin_region = [
-        (0.155,0.365),   # x 范围
-        (-0.305,-0.095),   # y 范围
-        (0.46,0.55)  # z 范围
+        (0.155,0.365),  
+        (-0.305,-0.095),   
+        (0.46,0.55)  
         ]
 
-        # 记录分项是否达成  
         self.comp_box_red1_pos = False
         self.comp_box_black1_pos = False
         self.comp_box_red2_pos = False
@@ -95,18 +90,15 @@ class SimulatorTask3():
             is_in_region_fn=lambda pos, region: Utils.is_in_target_region(pos, region),
         )
 
-        #=================物体生成=================
         self.belt_speed = 0.012
         self.objects_total = ['box_red1','box_black1','box_red2', 'box_black2']
-        # self.objects_total = ['box_red1','box_black1']
-        self.rng.shuffle(self.objects_total)  # 将objects中的物体顺序打乱（使用带 seed 的随机数生成器）
-        # self.objects1, self.objects2, self.objects3, self.objects4 = self.objects_total[:4]
+        self.rng.shuffle(self.objects_total)
         self.objects1 = self.objects_total[0]
         self.objects = self.objects_total[1:]
         self.object_index = [0]
         self.spawn_interval_range = [10.0, 14.0]
         self.timer_handle = {'timer': None}
-    # ========== 服务回调 - 等待外部信号 ==========
+
     def _on_start_service(self, req):
         """等待外部代码发送 start 信号"""
         rospy.loginfo("[sim] Received external start signal, starting task execution")
@@ -167,8 +159,7 @@ class SimulatorTask3():
             rospy.loginfo(f"Successfully generated {obj_name} at position {position} with orientation {orientation}")
         else:
             rospy.logwarn(f"Failed to generate {obj_name}: {result['message']}")
-        
-        # 移动到下一个物体
+
         self.object_index[0] += 1
         
         if self.object_index[0] >= len(self.objects):
@@ -176,32 +167,29 @@ class SimulatorTask3():
             if self.timer_handle['timer']:
                 self.timer_handle['timer'].shutdown()
         else:
-            # 如果还有下一个物体，生成随机间隔时间并创建新的定时器
+
             next_interval = self.np_rng.uniform(self.spawn_interval_range[0], self.spawn_interval_range[1])
             rospy.loginfo(f"Next object will spawn in {next_interval:.2f} seconds")
             self.timer_handle['timer'] = rospy.Timer(rospy.Duration(next_interval), self._generate_objects_callback, oneshot=True)
 
-    # ========== 主流程 ==========
     def run(self):
         try:
             self.reset_evt.clear()
             self.start_evt.clear()
 
-            # 1) 初始化 SDK 与控制器
             if not KuavoSDK().Init(options=KuavoSDK.Options.WithIK):
                 print("Init KuavoSDK failed, exit!")
-                return  # 直接退出，deploy.py 会重启一轮
+                return 
 
             self.robot = KuavoRobot()
             self.robot_state = KuavoRobotState()
-            
-            # 2) 预抓位
+
             num = 30
             q_target1 = [0, 0, 0, 0, 0, 0, 0,   80, -30, 0, -125, 45, 0, 0]
             q_list1 = Utils.interpolate_joint_trajectory(q_target1, num=num)
 
             q_target2 = [0, 0, 0, 0, 0, 0, 0,   18, 0, 0, -110, 90, 0, 0]
-            # q_target2 = [0, 0, 0, 0, 0, 0, 0,   -15, 0, 60, -60, 90, 0, 0]
+
             q_list2 = Utils.interpolate_joint_trajectory(q_target2, q_target1, num=num)
             for q in q_list1 :
                 self.robot.control_arm_joint_positions(q)
@@ -209,8 +197,7 @@ class SimulatorTask3():
             for q in q_list2:
                 self.robot.control_arm_joint_positions(q)
                 time.sleep(0.02)
-            
-            # 3) 发布 msg0：init=True
+
             rospy.wait_for_service('/simulator/init')
             try:
                 rospy.loginfo("[sim] Published /simulator/init service completed")
@@ -218,8 +205,6 @@ class SimulatorTask3():
             except rospy.ServiceException as e:
                 rospy.logerr(f"Service call failed: {e}")
 
-
-            # 4) 等待外部代码调用 start 服务
             rospy.loginfo("[sim] Waiting for external code to call /simulator/start service...")
             while not rospy.is_shutdown() and not self.reset_evt.is_set():
                 if self.start_evt.wait(timeout=0.1):
@@ -230,24 +215,21 @@ class SimulatorTask3():
                 self._cleanup()
                 sys.exit(0)
 
-            # 5) 收到外部 start 信号 → 开传送带，循环上报 success
-            rospy.loginfo("[sim] Received external start signal, starting conveyor, continuously reporting success")
-            # objects1 是第一个物体（objects_total[0]），索引为 0
+            rospy.loginfo("[sim] Received external start signal, continuously reporting success")
+
             self.random_pos.set_object_position(self.objects1, position=self._sample_spawn_position(), orientation=self._sample_orientation_jitter(max_yaw_deg=20, max_pitch_deg=0, max_roll_deg=0))
 
             self.conveyor_ctrl.control_speed(self.belt_speed,belt_id=1)
-            # 第一个间隔时间是到第二个物体（索引1）的间隔
+
             first_interval = self.np_rng.uniform(self.spawn_interval_range[0], self.spawn_interval_range[1])
             rospy.loginfo(f"Object generation timer started. First object will spawn in {first_interval:.2f} seconds (range: {self.spawn_interval_range[0]}-{self.spawn_interval_range[1]}s)")
             self.timer_handle['timer'] = rospy.Timer(rospy.Duration(first_interval), self._generate_objects_callback, oneshot=True)
 
-            rate = rospy.Rate(10)  # 10Hz 上报
+            rate = rospy.Rate(10)
             self.already_reported_success = False
-            # start_time = time.time()  # 循环开始前计时
+
             self.evaluator.reset()
-            
-            # 在后台线程中运行 rospy.spin()，让定时器可以正常工作，但不阻塞主程序
-            # 必须在 while 循环之前启动，这样定时器回调才能被处理
+
             def ros_spin_thread():
                 rospy.spin()
             
@@ -265,31 +247,24 @@ class SimulatorTask3():
                     box_red1_pos, box_black1_pos, box_red2_pos, box_black2_pos = None, None, None, None
 
                 if box_red1_pos is None or box_black1_pos is None or box_red2_pos is None or box_black2_pos is None:
-                    # 取不到传感就当未成功
-                    # 未成功阶段持续发 False
+
                     self.pub_success.publish(Bool(data=False))
-                    # 持续发布分数
-                    # self.pub_score.publish(Int32(data=self.evaluator.score))
+
                     rate.sleep()
                     continue
 
-                # 调用通用评估器
                 out = self.evaluator.evaluate(box_red1_pos, box_black1_pos, box_red2_pos, box_black2_pos, now=time.time())
 
-                # 累计分项达成
                 if out.get("box_red1_pos_added"): self.comp_box_red1_pos = True
                 if out.get("box_black1_pos_added"): self.comp_box_black1_pos = True
                 if out.get("box_red2_pos_added"): self.comp_box_red2_pos = True
                 if out.get("box_black2_pos_added"): self.comp_box_black2_pos = True
                 if out.get("bonus_added"): self.comp_bonus = True
 
-                # 时间得分：如果 evaluator 是“增量”，这里累加；如果是“最终值”，也能覆盖
                 ts_add = out.get("time_score_added")
                 if isinstance(ts_add, (int, float)):
                     self.comp_time_score += float(ts_add)
 
-
-                # 按评估器的“建议标志”做 ROS 行为
                 if out["need_publish_success_true"]:
                     rospy.loginfo("[sim] ✅ Task success, published /simulator/success=True")
                     self.pub_success.publish(Bool(data=True))
@@ -322,16 +297,14 @@ class SimulatorTask3():
                     parts.append(f"+{out['time_score_added']}(Time!)")
                     parts.append("+10(Bonus!)")
                     rospy.loginfo(f"{GREEN} ✅ Success Triggered: {' '.join(parts)} | Total Time: {out['elapsed_sec']:.2f}s | Total Score: {out['total_score']}{RESET}")
-                    # 停止传送带
+
                     if out["need_stop_conveyor"]:
                         self.conveyor_ctrl.control_speed(0.0)
 
-                # 持续发布当前分数
                 self.score = out["total_score"]
 
                 rate.sleep()
 
-            # 6) 收到 reset → 清理并退出 (让 deploy.py 重启新一轮)
             rospy.loginfo("[sim] Received reset/shutdown, starting cleanup and exiting")
             self._cleanup()
             sys.exit(0)
@@ -357,7 +330,7 @@ class SimulatorTask3():
                 self.traj_ctrl.stop()
         except Exception:
             pass
-        if self.started:   # self.started 在 _on_start_service 里置 True
+        if self.started: 
             try:
                 os.makedirs(os.path.dirname(self.score_file), exist_ok=True)
                 with open(self.score_file, "w") as f:
@@ -365,19 +338,18 @@ class SimulatorTask3():
                 rospy.loginfo(f"[sim] Final score for this round written to: {self.score_file} (score={int(self.score)})")
             except Exception as e:
                 rospy.logwarn(f"[sim] Failed to write final score: {e}")
-            # 额外写出本轮分项 JSON（与 SCORE_FILE 同名但 .json 后缀）
+
             try:
                 base, _ = os.path.splitext(self.score_file)
                 detail_json_path = base + ".json"
                 components = {}
 
-                # 你可以按任务规则设定每项分数值；这里与日志对应：
                 if self.comp_box_red1_pos: components["box_red1_pos"] = 20
                 if self.comp_box_black1_pos: components["box_black1_pos"] = 20
                 if self.comp_box_red2_pos: components["box_red2_pos"] = 20
                 if self.comp_box_black2_pos: components["box_black2_pos"] = 20
                 if self.comp_bonus: components["bonus"] = 10
-                # 时间得分：如果累计不到，可以按需要从总分反推；这里优先用累计值
+
                 if self.comp_time_score and self.comp_time_score > 0:
                     components["time"] = round(float(self.comp_time_score), 6)
 

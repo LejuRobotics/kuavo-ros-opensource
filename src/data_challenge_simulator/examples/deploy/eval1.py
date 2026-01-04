@@ -28,16 +28,13 @@ class SimulatorTask1():
 
         self.init_service = rospy.ServiceProxy('/simulator/init', Trigger)
         self.pub_success = rospy.Publisher('/simulator/success',Bool, queue_size=10)
-        # self.pub_score   = rospy.Publisher('/simulator/score', Int32, queue_size=10, latch=True)
-        # 等待外部信号
+
         self.start_service = rospy.Service('/simulator/start', Trigger, self._on_start_service)
         self.reset_service = rospy.Service('/simulator/reset', Trigger, self._on_reset_service)
 
-        # 事件控制
         self.start_evt = threading.Event()
         self.reset_evt = threading.Event()
 
-        # 设备与控制器
         self.robot = None
         self.robot_state = None
         self.gripper_ctrl = None
@@ -46,7 +43,7 @@ class SimulatorTask1():
         self.score = 0
         default_score_file = "/tmp/simulator_score_last.txt"
         self.score_file = os.environ.get("SCORE_FILE", default_score_file)
-        # 成功状态
+
         self.started = False
         self.already_reported_success = False
 
@@ -60,7 +57,7 @@ class SimulatorTask1():
         basket_pos = self.obj_pos.wait_for_position("basket1",timeout=5)
         print(f"{GREEN}table height is {basket_pos[2]}{RESET}")
         height = basket_pos[2]-0.005
-        # 环境参数设置
+
         self.toy_box_region = [
             (0.31,0.49),
             (-0.15,0),
@@ -87,7 +84,6 @@ class SimulatorTask1():
         self.toy = self.rng.choice(self.toy_obj)
         self.car = self.rng.choice(self.car_obj)
 
-        # 记录分项是否达成
         self.comp_toy_pos = False
         self.comp_car_pos = False
         self.comp_time_score = 0
@@ -102,23 +98,23 @@ class SimulatorTask1():
             ),
             is_in_region_fn=lambda pos, region: Utils.is_in_target_region(pos, region)
         )
-    # ========== 服务回调 - 等待外部信号 ==========
+
     def _on_start_service(self, req):
-        """等待外部代码发送 start 信号"""
-        rospy.loginfo("[sim] 收到外部 start 信号，开始执行任务")
+        """Wait for external code to send the start signal."""
+        rospy.loginfo("[sim] Received external start signal, beginning task execution")
         self.started = True
         self.start_evt.set()
         return TriggerResponse(success=True, message="Task started successfully")
 
     def _on_reset_service(self, req):
-        """等待外部代码发送 reset 信号"""
-        rospy.loginfo("[sim] 收到外部 reset 信号，准备重置任务")
+        """Wait for external code to send the reset signal."""
+        rospy.loginfo("[sim] Received external reset signal, preparing to reset task")
         self.reset_evt.set()
         return TriggerResponse(success=True, message="Task reset triggered")
 
     def _sample_position(self, region: dict):
         """
-        采样单个物体的位置
+        Sample a single object's position.
         region: {"x": (xmin, xmax), "y": (ymin, ymax), "z": (zmin, zmax)}
         """
         x = float(self.np_rng.uniform(*region["x"]))
@@ -126,21 +122,20 @@ class SimulatorTask1():
         z = float(self.np_rng.uniform(*region["z"]))
         return x, y, z
     
-    # ========== 主流程 ==========
+
     def run(self):
         try:
             self.reset_evt.clear()
             self.start_evt.clear()
 
-            # 1) 初始化 SDK 与控制器
             if not KuavoSDK().Init(options=KuavoSDK.Options.WithIK):
                 print("Init KuavoSDK failed, exit!")
-                return  # 直接退出，deploy.py 会重启一轮
+                return 
 
             self.robot = KuavoRobot()
             self.robot_state = KuavoRobotState()
             coin = self.rng.choice([0,1])
-            #生成物体
+
             if coin == 0:
                 for obj, region in zip([self.toy, self.car], [self.left_spawn_region, self.right_spawn_region]):
                     x, y, z = self._sample_position(region=region)
@@ -152,7 +147,6 @@ class SimulatorTask1():
                     result = self.obj_pos_set.set_object_position(obj, position={"x":x, "y":y, "z":z})
                     print(f"{obj} spawned at {region} region, position: {result['final_position']}")
 
-            # 2) 预抓位
             num = 30
             q1_target1 = [90, -10, 0, -150, -90, 0, 0,   90, 10, 0, -150, 90, 0, 0]
             q1_list1 = Utils.interpolate_joint_trajectory(q1_target1, num = num) 
@@ -167,7 +161,6 @@ class SimulatorTask1():
                 self.robot.control_arm_joint_positions(q)
                 time.sleep(0.02)
             
-            # 3) 发布 msg0：init=True
             rospy.wait_for_service('/simulator/init')
             try:
                 rospy.loginfo("[sim] Published /simulator/init service completed")
@@ -176,23 +169,20 @@ class SimulatorTask1():
                 rospy.logerr(f"Service call failed: {e}")
 
 
-            # 4) 等待外部代码调用 start 服务
-            rospy.loginfo("[sim] 等待外部代码调用 /simulator/start 服务...")
+            rospy.loginfo("[sim] Waiting for external code to call the /simulator/start service...")
             while not rospy.is_shutdown() and not self.reset_evt.is_set():
                 if self.start_evt.wait(timeout=0.1):
                     break
 
             if self.reset_evt.is_set() or rospy.is_shutdown():
-                rospy.logwarn("[sim] 等待 start 期间收到 reset / shutdown，退出")
+                rospy.logwarn("[sim] Received reset/shutdown while waiting for start, exiting")
                 self._cleanup()
                 sys.exit(0)
 
-            # 5) 收到外部 start 信号 → 开传送带，循环上报 success
-            rospy.loginfo("[sim] 收到外部 start 信号，开始传送带，持续上报 success")
+            rospy.loginfo("[sim] Received external start signal, continuously publishing /simulator/success")
 
-            rate = rospy.Rate(10)  # 10Hz 上报
+            rate = rospy.Rate(10)
             self.already_reported_success = False
-            # start_time = time.time()  # 循环开始前计时
             self.evaluator.reset()
             
             while not rospy.is_shutdown() and not self.reset_evt.is_set():
@@ -204,15 +194,10 @@ class SimulatorTask1():
                     pos_toy, pos_car = None, None
 
                 if pos_toy is None or pos_car is None:
-                    # 取不到传感就当未成功
-                    # 未成功阶段持续发 False
                     self.pub_success.publish(Bool(data=False))
-                    # 持续发布分数
-                    # self.pub_score.publish(Int32(data=self.evaluator.score))
                     rate.sleep()
                     continue
 
-                # 调用通用评估器
                 out = self.evaluator.evaluate(pos_toy, pos_car, now=time.time())
 
                 if out.get("toy_pos_added"): self.comp_toy_pos = True
@@ -222,7 +207,6 @@ class SimulatorTask1():
                 if isinstance(ts_add, (int, float)):
                     self.comp_time_score += float(ts_add)
 
-                # 按评估器的“建议标志”做 ROS 行为
                 if out["need_publish_success_true"]:
                     rospy.loginfo("[sim] ✅ Task success, published /simulator/success=True")
                     self.pub_success.publish(Bool(data=True))
@@ -245,11 +229,9 @@ class SimulatorTask1():
                     parts.append(f"+{out['time_score_added']}( Time! )")
                     rospy.loginfo(f"{GREEN} ✅ Task Success: {' '.join(parts)} | Total Time: {out['elapsed_sec']:.2f}s | Total Score: {out['total_score']}{RESET}")
 
-                # 持续发布当前分数
                 self.score = out["total_score"]
                 rate.sleep()
 
-            # 6) 收到 reset → 清理并退出 (让 deploy.py 重启新一轮)
             rospy.loginfo("[sim] Received reset/shutdown, starting cleanup and exiting")
             self._cleanup()
             sys.exit(0)
@@ -270,7 +252,7 @@ class SimulatorTask1():
                 self.traj_ctrl.stop()
         except Exception:
             pass
-        if self.started:   # self.started 在 _on_start_service 里置 True
+        if self.started:
             try:
                 os.makedirs(os.path.dirname(self.score_file), exist_ok=True)
                 with open(self.score_file, "w") as f:
@@ -287,7 +269,6 @@ class SimulatorTask1():
                 if self.comp_toy_pos: components["toy_pos"]=40
                 if self.comp_car_pos: components["car_pos"]=40
 
-                # 时间得分：如果累计不到，可以按需要从总分反推；这里优先用累计值
                 if self.comp_time_score and self.comp_time_score > 0:
                     components["time"] = round(float(self.comp_time_score), 6)
 
