@@ -41,7 +41,7 @@ title: "ROS1开发说明与示例"
 **注意: 下位机实机环境所有编译都要在超级用户下进行**
 
 ```sh
-cd <kuavo-ros-opensource> #仓库目录
+cd /home/lab/kuavo-ros-opensource #仓库目录
 sudo su
 catkin build kuavo_sdk
 ```

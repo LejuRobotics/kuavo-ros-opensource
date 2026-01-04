@@ -170,7 +170,7 @@ pip install --upgrade --pre kuavo-humanoid-sdk-ws
 
 生成文档：
 ```bash
-cd <kuavo-ros-opensource>/src/kuavo_humanoid_websocket_sdk
+cd /home/lab/kuavo-ros-opensource/src/kuavo_humanoid_websocket_sdk
 chmod +x gen_docs.sh
 ./gen_docs.sh
 ```

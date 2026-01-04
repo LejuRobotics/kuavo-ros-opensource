@@ -53,7 +53,7 @@ title: "YOLOV8识别及抓取案例"
 <iframe src="//player.bilibili.com/player.html?isOutside=true&aid=115681773297318&bvid=BV1e12rBdEZf&cid=34583219574&p=1" width="320" height="640" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>
 
 ## 调整配置文件(上位机)
-- 配置文件位于 `<kuavo_ros_application>/src/ros_vision/detection_yolo_v8/config/params.yaml`
+- 配置文件位于 `~/kuavo_ros_application/src/ros_vision/detection_yolo_v8/config/params.yaml`
 
 ### 1. 模型相关配置
 - **model_path**  
@@ -90,7 +90,7 @@ title: "YOLOV8识别及抓取案例"
 ## 调整配置文件(下位机)
 
 ### 程序运行配置参数
-- 程序位于 `<kuavo-ros-opensource>/src/demo/yolo_object_capture/yolo_object_capture.py`
+- 程序位于 `/home/lab/kuavo-ros-opensource/src/demo/yolo_object_capture/yolo_object_capture.py`
 
 #### 启动参数
 - `offset_start` : 是否启动坐标偏移量
