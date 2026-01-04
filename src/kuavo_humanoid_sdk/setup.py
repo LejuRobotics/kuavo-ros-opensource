@@ -31,9 +31,8 @@ def find_subpackages(base_dir):
 
         # 将所有目录转换为包名
         rel_path = os.path.relpath(root, script_dir)
-        if rel_path != base_dir:  # 不包括基础目录本身
-            pkg_name = rel_path.replace("/", ".").replace("\\", ".")
-            subpackages.append(pkg_name)
+        pkg_name = rel_path.replace("/", ".").replace("\\", ".")
+        subpackages.append(pkg_name)
 
     return sorted(subpackages)  # 返回排序后的列表
 
