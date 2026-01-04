@@ -55,7 +55,7 @@ add_library(hardware_plant::hardware_plant STATIC IMPORTED)
 
 set_target_properties(hardware_plant::hardware_plant PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/ruiwo_controller;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;stdc++fs;hardware_plant::ruiwo_actuatorLib;/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so"
+  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;stdc++fs;hardware_plant::ruiwo_actuatorLib;/home/gitlab-runner/builds/tX_ftt_G1/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so"
 )
 
 # Create imported target hardware_plant::hardware_plant_cxx
@@ -63,7 +63,7 @@ add_library(hardware_plant::hardware_plant_cxx STATIC IMPORTED)
 
 set_target_properties(hardware_plant::hardware_plant_cxx PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/ruiwo_controller_cxx;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;stdc++fs;hardware_plant::ruiwo_actuatorCXXLib;/media/data/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so"
+  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;stdc++fs;hardware_plant::ruiwo_actuatorCXXLib;/home/gitlab-runner/builds/tX_ftt_G1/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so"
 )
 
 # Create imported target hardware_plant::xsens_mti_driver
