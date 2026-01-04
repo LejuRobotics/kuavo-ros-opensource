@@ -14,7 +14,7 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState, Joy
 from kuavo_msgs.msg import mpc_target_trajectories, mpc_state, mpc_input
 from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import (gestureTask,robotHandPosition, robotHeadMotionData, armTargetPoses, switchGaitByName,
-                                footPose, footPoseTargetTrajectories, dexhandCommand, motorParam,twoArmHandPoseCmdFree)
+                                footPose, footPoseTargetTrajectories, dexhandCommand, motorParam,twoArmHandPoseCmdFree, robotWaistControl)
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import (gestureExecute, gestureExecuteRequest,gestureList, gestureListRequest,
                         controlLejuClaw, controlLejuClawRequest, changeArmCtrlMode, changeArmCtrlModeRequest,
                         changeTorsoCtrlMode, changeTorsoCtrlModeRequest, setMmCtrlFrame, setMmCtrlFrameRequest,
@@ -501,7 +501,7 @@ class ControlRobotArm:
 
 class ControlRobotWaist:
     def __init__(self):
-        self._pub_ctrl_robot_waist = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=10)
+        self._pub_ctrl_robot_waist = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=10)
 
     def pub_waist_pos_cmd(self, waistPos: list)->bool:
         """
@@ -514,8 +514,9 @@ class ControlRobotWaist:
             return False
             
         try:
-            msg = Float64MultiArray()
-            msg.data = list(waistPos)
+            msg = robotWaistControl()
+            msg.header.stamp = rospy.Time.now()
+            msg.data.data = list(waistPos)
             self._pub_ctrl_robot_waist.publish(msg)
             return True
         except Exception as e:

@@ -361,7 +361,7 @@ except (rospkg.ResourceNotFound, ImportError) as e:
     from robot_version import RobotVersion
 from kuavo_ros_interfaces.srv import planArmTrajectoryBezierCurve, stopPlanArmTrajectory, planArmTrajectoryBezierCurveRequest, ocs2ChangeArmCtrlMode
 from kuavo_ros_interfaces.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHeadMotionData
-from kuavo_msgs.msg import robotHandPosition
+from kuavo_msgs.msg import robotHandPosition, robotWaistControl
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory
@@ -860,7 +860,7 @@ else:
 ocs2_joint_state = JointState()
 ocs2_hand_state = robotHandPosition()
 ocs2_head_state = robotHeadMotionData()
-ocs2_waist_state = Float64MultiArray()
+ocs2_waist_state = robotWaistControl()
 robot_settings = {
     "kuavo":{
         "plan_arm_trajectory_bezier_service_name": "/plan_arm_trajectory_bezier_curve",
@@ -957,9 +957,10 @@ def traj_callback(msg):
         ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[20:26]]
         ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:28]]
         if len(point.positions) > 28:
-            ocs2_waist_state.data = [math.degrees(pos) for pos in point.positions[28:]]
+            ocs2_waist_state.header.stamp = rospy.Time.now()
+            ocs2_waist_state.data.data = [math.degrees(pos) for pos in point.positions[28:]]
         else:
-            ocs2_waist_state.data = []
+            ocs2_waist_state.data.data = []
     elif robot_version.major() == 4:
         ocs2_joint_state.name = joint_names
         ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:14]]
@@ -982,7 +983,8 @@ def traj_callback(msg):
             
             ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
 
-            ocs2_waist_state.data = [math.degrees(pos) for pos in point.positions[22:]]
+            ocs2_waist_state.header.stamp = rospy.Time.now()
+            ocs2_waist_state.data.data = [math.degrees(pos) for pos in point.positions[22:]]
 
 
 kuavo_arm_traj_pub = None
@@ -1001,7 +1003,7 @@ def timer_callback(event):
             control_hand_pub.publish(ocs2_hand_state)
         if len(ocs2_head_state.joint_data) != 0:
             control_head_pub.publish(ocs2_head_state)
-        if len(ocs2_waist_state.data) != 0:
+        if len(ocs2_waist_state.data.data) != 0:
             control_waist_pub.publish(ocs2_waist_state)
 
 def robot_status_timer_callback(event):
@@ -1015,7 +1017,7 @@ def init_publishers():
     kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
     control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1, tcp_nodelay=True)
     control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1, tcp_nodelay=True)
-    control_waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=1, tcp_nodelay=True)
+    control_waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=1, tcp_nodelay=True)
     update_h12_config_pub = rospy.Publisher('/update_h12_customize_config', UpdateH12CustomizeConfig, queue_size=1, tcp_nodelay=True)
     update_joy_config_pub = rospy.Publisher('/update_joy_customize_config', String, queue_size=1, tcp_nodelay=True)
 

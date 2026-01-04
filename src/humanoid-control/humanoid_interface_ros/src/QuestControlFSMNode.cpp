@@ -28,6 +28,7 @@
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
+#include <kuavo_msgs/robotWaistControl.h>
 #include <kuavo_msgs/headBodyPose.h>
 #include <kuavo_msgs/footPose.h>
 #include <kuavo_msgs/footPoseTargetTrajectories.h>
@@ -83,7 +84,11 @@ namespace ocs2
             torso_control_enabled_(false),
             torso_yaw_zero_(0.0),
             body_height_zero_(0.0),
-            torso_control_start_time_(ros::Time(0))
+            torso_control_start_time_(ros::Time(0)),
+            hand_wrench_enabled_(false),
+            current_hand_wrench_item_mass_(0.0),
+            current_hand_wrench_left_force_{0.0, 0.0, 0.0},
+            current_hand_wrench_right_force_{0.0, 0.0, 0.0}
         {
             cmdVel_.linear.x = 0;
             cmdVel_.linear.y = 0;
@@ -191,8 +196,13 @@ namespace ocs2
             
             // 腰部控制相关的订阅者和发布者
             head_body_pose_sub_ = nodeHandle_.subscribe("/kuavo_head_body_orientation_data", 1, &QuestControlFSM::headBodyPoseCallback, this);
-            waist_motion_pub_ = nodeHandle_.advertise<std_msgs::Float64MultiArray>("/robot_waist_motion_data", 1);
+            waist_motion_pub_ = nodeHandle_.advertise<kuavo_msgs::robotWaistControl>("/robot_waist_motion_data", 1);
             cmd_pose_pub_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_pose", 1);
+            
+            // 末端力配置订阅器和发布器
+            hand_wrench_config_sub_ = nodeHandle_.subscribe("/quest3/hand_wrench_config", 1, &QuestControlFSM::handWrenchConfigCallback, this);
+            hand_wrench_cmd_pub_ = nodeHandle_.advertise<std_msgs::Float64MultiArray>("/hand_wrench_cmd", 1);
+            
             command_height_ = 0.0;
             command_add_height_pre_ = 0.0;
 
@@ -728,6 +738,22 @@ namespace ocs2
                 return;
             }
 
+            // 检测末端力控制按键组合
+            if (joystick_data_.left_second_button_pressed) { // Y 按钮按下
+                // Y + A: 施加末端力
+                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed) {
+                    applyHandWrench();
+                    joystick_data_prev_ = joystick_data_;
+                    return;
+                }
+                // Y + B: 释放末端力
+                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) {
+                    releaseHandWrench();
+                    joystick_data_prev_ = joystick_data_;
+                    return;
+                }
+            }
+
             if (!get_observation_ && !joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
             {
                 callRealInitializeSrv();
@@ -933,11 +959,84 @@ namespace ocs2
         {
             double max_angle = 110.0;
             waist_yaw = std::max(-max_angle, std::min(waist_yaw, max_angle));
-            std_msgs::Float64MultiArray msg;
-            msg.data.resize(1);
-            msg.data[0] =  waist_yaw;
+            kuavo_msgs::robotWaistControl msg;
+            msg.header.stamp = ros::Time::now();
+            msg.data.data.resize(1);
+            msg.data.data[0] =  waist_yaw;
             std::cout << "waist_yaw" << waist_yaw <<std::endl;
             waist_motion_pub_.publish(msg);
+        }
+        
+        void handWrenchConfigCallback(const std_msgs::Float64MultiArray::ConstPtr& msg)
+        {
+            if (msg->data.size() != 7) {
+                ROS_WARN("Invalid hand wrench config message size: %lu (expected 7)", msg->data.size());
+                return;
+            }
+            
+            current_hand_wrench_item_mass_ = msg->data[0];
+            current_hand_wrench_left_force_ = {msg->data[1], msg->data[2], msg->data[3]};
+            current_hand_wrench_right_force_ = {msg->data[4], msg->data[5], msg->data[6]};
+            
+            ROS_INFO("Received hand wrench config: item_mass=%.2f kg, left_force=[%.2f, %.2f, %.2f] N, right_force=[%.2f, %.2f, %.2f] N",
+                     current_hand_wrench_item_mass_,
+                     current_hand_wrench_left_force_[0], current_hand_wrench_left_force_[1], current_hand_wrench_left_force_[2],
+                     current_hand_wrench_right_force_[0], current_hand_wrench_right_force_[1], current_hand_wrench_right_force_[2]);
+        }
+        
+        void publishHandWrenchCmd(double item_mass, const std::vector<double>& left_force, const std::vector<double>& right_force)
+        {
+            std_msgs::Float64MultiArray msg;
+            msg.data.resize(12);  // 左手 6 维 + 右手 6 维
+            
+            // 左手力 (力 + 力矩)
+            msg.data[0] = left_force[0];   // fx
+            msg.data[1] = left_force[1];   // fy
+            msg.data[2] = left_force[2];   // fz
+            msg.data[3] = 0.0;              // mx (力矩)
+            msg.data[4] = 0.0;              // my
+            msg.data[5] = 0.0;              // mz
+            
+            // 右手力 (力 + 力矩)
+            msg.data[6] = right_force[0];   // fx
+            msg.data[7] = right_force[1];   // fy
+            msg.data[8] = right_force[2];   // fz
+            msg.data[9] = 0.0;              // mx (力矩)
+            msg.data[10] = 0.0;             // my
+            msg.data[11] = 0.0;             // mz
+            
+            hand_wrench_cmd_pub_.publish(msg);
+            
+            ROS_INFO("Published hand wrench command: item_mass=%.2f kg, left_force=[%.2f, %.2f, %.2f] N, right_force=[%.2f, %.2f, %.2f] N",
+                     item_mass, left_force[0], left_force[1], left_force[2], 
+                     right_force[0], right_force[1], right_force[2]);
+        }
+        
+        void applyHandWrench()
+        {
+            std::cout << "\033[92m========================================\033[0m" << std::endl;
+            std::cout << "\033[92m    施加末端力 (Y+A)\033[0m" << std::endl;
+            std::cout << "\033[92m    质量: " << current_hand_wrench_item_mass_ << " kg\033[0m" << std::endl;
+            std::cout << "\033[92m    左手力: [" << current_hand_wrench_left_force_[0] << ", " 
+                      << current_hand_wrench_left_force_[1] << ", " << current_hand_wrench_left_force_[2] << "] N\033[0m" << std::endl;
+            std::cout << "\033[92m    右手力: [" << current_hand_wrench_right_force_[0] << ", " 
+                      << current_hand_wrench_right_force_[1] << ", " << current_hand_wrench_right_force_[2] << "] N\033[0m" << std::endl;
+            std::cout << "\033[92m========================================\033[0m" << std::endl;
+            
+            publishHandWrenchCmd(current_hand_wrench_item_mass_, current_hand_wrench_left_force_, current_hand_wrench_right_force_);
+            hand_wrench_enabled_ = true;
+        }
+        
+        void releaseHandWrench()
+        {
+            std::vector<double> zero_force = {0.0, 0.0, 0.0};
+            
+            std::cout << "\033[93m========================================\033[0m" << std::endl;
+            std::cout << "\033[93m    释放末端力 (Y+B)\033[0m" << std::endl;
+            std::cout << "\033[93m========================================\033[0m" << std::endl;
+            
+            publishHandWrenchCmd(0.0, zero_force, zero_force);
+            hand_wrench_enabled_ = false;
         }
 
         // 获取当前步态名称
@@ -1592,6 +1691,13 @@ namespace ocs2
 
         // 腰部控制相关变量
         bool torso_control_enabled_;
+        
+        // 末端力控制相关变量
+        bool hand_wrench_enabled_;  // 末端力施加状态
+        double current_hand_wrench_item_mass_;
+        std::vector<double> current_hand_wrench_left_force_;
+        std::vector<double> current_hand_wrench_right_force_;
+        
         int waist_dof_{0};
         double torso_pitch_zero_;
         double torso_yaw_zero_;
@@ -1620,6 +1726,11 @@ namespace ocs2
 
         ros::Publisher arm_mode_pub_;
         ros::Publisher foot_pose_target_pub_;
+        
+        // 末端力控制相关
+        ros::Subscriber hand_wrench_config_sub_;  // 末端力配置订阅器
+        ros::Publisher hand_wrench_cmd_pub_;      // 末端力命令发布器
+        
         ros::ServiceClient get_current_gait_service_client_;
         ros::ServiceClient get_current_gait_name_service_client_;
     };

@@ -6,6 +6,7 @@
 #include <mobile_manipulator_controllers/mobileManipulatorControllerBase.h>
 #include <sensor_msgs/JointState.h>
 #include "kuavo_msgs/changeTorsoCtrlMode.h"
+#include "kuavo_msgs/robotWaistControl.h"
 
 using namespace ocs2;
 namespace mobile_manipulator_controller

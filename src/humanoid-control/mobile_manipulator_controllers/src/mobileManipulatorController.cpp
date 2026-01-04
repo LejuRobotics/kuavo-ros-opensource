@@ -1,5 +1,6 @@
 #include "mobile_manipulator_controllers/mobileManipulatorController.h"
 #include <std_msgs/Float64MultiArray.h>
+#include <kuavo_msgs/robotWaistControl.h>
 #include <ocs2_ros_interfaces/synchronized_module/RosReferenceManager.h>
 #include <sensor_msgs/JointState.h>
 #include <chrono>
@@ -46,7 +47,7 @@ namespace mobile_manipulator_controller
     humanoidCmdVelPublisher_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
     humanoidCmdPosPublisher_ = nh.advertise<geometry_msgs::Twist>("/cmd_pose", 10, true);
     armTrajPublisher_ = nh.advertise<sensor_msgs::JointState>("/mm_kuavo_arm_traj", 10);
-    waistTrajPublisher_ = nh.advertise<std_msgs::Float64MultiArray>("/robot_waist_motion_data", 10);
+    waistTrajPublisher_ = nh.advertise<kuavo_msgs::robotWaistControl>("/robot_waist_motion_data", 10);
 
     yaml_cfg_ = YAML::LoadFile(mobile_manipulator_controller::getPath() + "/cfg/cfg.yaml");
     arm_min_ = yaml_cfg_["arm_min"].as<std::vector<double>>();
@@ -315,10 +316,11 @@ namespace mobile_manipulator_controller
     };
     auto getWaistStatesMsg = [&](const vector_t& q_waist)
     {
-      std_msgs::Float64MultiArray msg;
-      msg.data.resize(q_waist.size());
+      kuavo_msgs::robotWaistControl msg;
+      msg.header.stamp = ros::Time::now();
+      msg.data.data.resize(q_waist.size());
       for (int i = 0; i < q_waist.size(); ++i) {
-        msg.data[i] = 180.0 / M_PI * q_waist[i]; // 转换为度
+        msg.data.data[i] = 180.0 / M_PI * q_waist[i]; // 转换为度
       }
       return std::move(msg);
     };

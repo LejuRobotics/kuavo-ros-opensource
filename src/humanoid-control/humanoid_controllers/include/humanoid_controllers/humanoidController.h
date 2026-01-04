@@ -24,6 +24,7 @@
 #include "kuavo_msgs/switchController.h"
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
+#include "kuavo_msgs/robotWaistControl.h"
 
 #include "std_srvs/Trigger.h"
 
@@ -476,7 +477,7 @@ namespace humanoid_controller
     void publishHumanoidState(const vector_t& measuredRbdState);
     void swingArmPlanner(double st, double current_time, double stepDuration, Eigen::VectorXd &desire_arm_q, Eigen::VectorXd &desire_arm_v);
     void headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
-    void waistCmdCallback(const std_msgs::Float64MultiArray::ConstPtr &msg);
+    void waistCmdCallback(const kuavo_msgs::robotWaistControl::ConstPtr &msg);
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg);
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr &msg);
     // bool WalkenableCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);

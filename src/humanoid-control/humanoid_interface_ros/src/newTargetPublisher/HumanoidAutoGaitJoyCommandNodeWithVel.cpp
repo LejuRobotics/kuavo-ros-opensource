@@ -44,6 +44,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/switchController.h"
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
+#include <kuavo_msgs/robotWaistControl.h>
 
 #include <ocs2_core/Types.h>
 #include <ocs2_core/misc/LoadData.h>
@@ -324,7 +325,7 @@ namespace ocs2
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       re_start_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/re_start_robot", 10);
       head_motion_pub_ = nodeHandle_.advertise<kuavo_msgs::robotHeadMotionData>("/robot_head_motion_data", 10);
-      waist_motion_pub_ = nodeHandle_.advertise<std_msgs::Float64MultiArray>("/robot_waist_motion_data", 10);
+      waist_motion_pub_ = nodeHandle_.advertise<kuavo_msgs::robotWaistControl>("/robot_waist_motion_data", 10);
       slope_planning_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/humanoid/mpc/enable_slope_planning", 10);
       hand_position_pub_ = nodeHandle_.advertise<kuavo_msgs::robotHandPosition>("/control_robot_hand_position", 10);
 
@@ -1164,9 +1165,10 @@ namespace ocs2
 
     void controlWaist(double waist_yaw)
     {
-      std_msgs::Float64MultiArray msg;
-      msg.data.resize(1);
-      msg.data[0] = waist_yaw;
+      kuavo_msgs::robotWaistControl msg;
+      msg.header.stamp = ros::Time::now();
+      msg.data.data.resize(1);
+      msg.data.data[0] = waist_yaw;
       waist_motion_pub_.publish(msg);
     }
 

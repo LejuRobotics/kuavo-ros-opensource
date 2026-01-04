@@ -9,7 +9,7 @@ import numpy as np
 import time
 import rospy
 from typing import Tuple
-from std_msgs.msg import Float64MultiArray
+from kuavo_msgs.msg import robotWaistControl
 from ocs2_msgs.msg import mpc_target_trajectories
 
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.robot_sdk import RobotSDK
@@ -29,7 +29,7 @@ class ArmController:
             rospy.init_node('waist_yaw_test', anonymous=True)
         except rospy.exceptions.ROSException:
             pass
-        self.waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=10)
+        self.waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=10)
     
     def record_initial_pose(self):
         print("记录初始位姿...")
@@ -46,8 +46,9 @@ class ArmController:
     def reset_waist_to_zero(self):
         print("腰部回零...")
         try:
-            msg = Float64MultiArray()
-            msg.data = [0.0]
+            msg = robotWaistControl()
+            msg.header.stamp = rospy.Time.now()
+            msg.data.data = [0.0]
             self.waist_pub.publish(msg)
             time.sleep(2)
             self.set_waist_yaw(0.0)  # 更新腰部角度状态为0

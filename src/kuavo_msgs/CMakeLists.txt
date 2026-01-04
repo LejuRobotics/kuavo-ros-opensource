@@ -140,6 +140,8 @@ add_message_files(
   mpc_target_trajectories.msg
   mpc_state.msg
   mpc_input.msg
+
+  robotWaistControl.msg
 )
 
 ## Generate services in the 'srv' folder

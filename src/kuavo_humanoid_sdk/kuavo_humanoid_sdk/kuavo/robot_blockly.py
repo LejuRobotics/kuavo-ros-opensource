@@ -7,7 +7,7 @@ from kuavo_humanoid_sdk.kuavo.robot_audio import KuavoRobotAudio
 from kuavo_humanoid_sdk.kuavo.robot_climbstair import KuavoRobotClimbStair, set_pitch_limit
 from kuavo_humanoid_sdk.interfaces.data_types  import KuavoPose
 from kuavo_msgs.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
-from kuavo_msgs.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHandPosition, robotHeadMotionData, sensorsData
+from kuavo_msgs.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl
 from geometry_msgs.msg import Twist
 import asyncio
 import math
@@ -38,7 +38,7 @@ robot_version = int(os.environ.get("ROBOT_VERSION", "45"))
 ocs2_joint_state = JointState()
 ocs2_hand_state = robotHandPosition()
 ocs2_head_state = robotHeadMotionData()
-ocs2_waist_state = Float64MultiArray()
+ocs2_waist_state = robotWaistControl()
 KUAVO_TACT_LENGTH = 28
 ROBAN_TACT_LENGTH = 23
 if robot_version >= 40:
@@ -59,6 +59,8 @@ def signal_handler(sig, frame):
     global running
     print('\nCtrl+C pressed. Stopping robot...')
     running = False
+    rospy.signal_shutdown("Ctrl+C pressed")
+    exit(0)
 
 def frames_to_custom_action_data(file_path: str):
     """Parse action file and convert frames to custom action data.
@@ -339,7 +341,7 @@ class RobotControlBlockly:
         kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
         control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1, tcp_nodelay=True)
         control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1, tcp_nodelay=True)
-        control_waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=1, tcp_nodelay=True)
+        control_waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=1, tcp_nodelay=True)
         rospy.Subscriber('/dexhand/state', JointState, self.robot_hand_callback, queue_size=1, tcp_nodelay=True)
         rospy.Subscriber('/sensors_data_raw', sensorsData, self.sensors_data_callback, queue_size=1, tcp_nodelay=True)
         rospy.Timer(rospy.Duration(0.01), self.timer_callback)
@@ -359,7 +361,7 @@ class RobotControlBlockly:
                 control_hand_pub.publish(ocs2_hand_state)
             if len(ocs2_head_state.joint_data) != 0:
                 control_head_pub.publish(ocs2_head_state)
-            if len(ocs2_waist_state.data) != 0:
+            if len(ocs2_waist_state.data.data) != 0:
                 control_waist_pub.publish(ocs2_waist_state)
 
     def sensors_data_callback(self, msg):
@@ -443,7 +445,8 @@ class RobotControlBlockly:
                 ocs2_hand_state.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[8:14]]
                 ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
                 ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
-                ocs2_waist_state.data = [math.degrees(pos) for pos in point.positions[22:]]
+                ocs2_waist_state.header.stamp = rospy.Time.now()
+                ocs2_waist_state.data.data = [math.degrees(pos) for pos in point.positions[22:]]
 
     def arm_reset(self):
         """Reset the arm position to the initial state."""
@@ -1134,8 +1137,9 @@ class RobotControlBlockly:
         """
         try:
             global control_waist_pub
-            msg = Float64MultiArray()
-            msg.data = [degree]
+            msg = robotWaistControl()
+            msg.header.stamp = rospy.Time.now()
+            msg.data.data = [degree]
             control_waist_pub.publish(msg)
 
         except Exception as e:

@@ -2,6 +2,7 @@ import time
 from typing import List, Dict, Any, Tuple
 import numpy as np
 from std_msgs.msg import Float64MultiArray
+from kuavo_msgs.msg import robotWaistControl
 import rospy
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.robot_sdk import RobotSDK
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.data_type import Tag, Pose, Frame, Transform3D
@@ -164,9 +165,10 @@ def walk_approach_target_with_perception_loop(
     if use_vison == True:
         percep_event.set_timeout(np.inf)
         percep_event.set_target(tag.id)
-    waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=10)
-    msg = Float64MultiArray()
-    msg.data = [waist_pos]
+    waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=10)
+    msg = robotWaistControl()
+    msg.header.stamp = rospy.Time.now()
+    msg.data.data = [waist_pos]
     # 事件之间的交互逻辑
     while True:
         walk_status = walk_event.step()
@@ -523,9 +525,10 @@ def place_box_and_backward(
     返回：
         bool: 是否成功完成操作。
     """
-    waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=10)
-    msg = Float64MultiArray()
-    msg.data = [90.0]
+    waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=10)
+    msg = robotWaistControl()
+    msg.header.stamp = rospy.Time.now()
+    msg.data.data = [90.0]
     waist_pub.publish(msg)
     time.sleep(2)
     # =================== 计算每个关键点的手臂位姿（Pose） =================== #
@@ -629,7 +632,8 @@ def place_box_and_backward(
 
     success = move_arm_and_backward(walk_event, arm_event, arm_traj, step_back_distance, side_shift_distance, tag=tag, arm_wrench=arm_wrench, walk_use_cmd_vel=walk_use_cmd_vel)
 
-    msg.data = [0.0]
+    msg.header.stamp = rospy.Time.now()
+    msg.data.data = [0.0]
     waist_pub.publish(msg)
     return success
 

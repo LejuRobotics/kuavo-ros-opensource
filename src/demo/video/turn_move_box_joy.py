@@ -3,9 +3,8 @@
 
 import rospy
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Float64MultiArray
 from kuavo_msgs.srv import ExecuteArmAction, changeArmCtrlMode
-from kuavo_msgs.msg import robotHandPosition,RobotActionState  # 导入自定义消息类型
+from kuavo_msgs.msg import robotHandPosition,RobotActionState,robotWaistControl  # 导入自定义消息类型
 # from kuavo_humanoid_sdk import  KuavoRobot, KuavoRobotState
 
 
@@ -19,7 +18,7 @@ class RobotForwardWalk:
 
         # 创建发布者，发布到/cmd_vel话题
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
-        self.waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=10)
+        self.waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=10)
 
         # 抓取动作服务
         self.execute_service = rospy.ServiceProxy('/execute_arm_action', ExecuteArmAction)
@@ -37,8 +36,9 @@ class RobotForwardWalk:
         self.rate_waist = rospy.Rate(2)  # 10Hz
 
 
-        self.waist_msg = Float64MultiArray()
-        self.waist_msg.data = [0]
+        self.waist_msg = robotWaistControl()
+        self.waist_msg.header.stamp = rospy.Time.now()
+        self.waist_msg.data.data = [0]
 
     def control_robot_hand_position(self, left_pos, right_pos):
         """
@@ -133,7 +133,7 @@ class RobotForwardWalk:
 
     # 转腰
     def turn_waist(self, waist_angle=0):
-        self.waist_msg.data = [waist_angle]
+        self.waist_msg.data.data = [waist_angle]
         self.waist_pub.publish(self.waist_msg)
 
     def grab_status_callback(self, msg):

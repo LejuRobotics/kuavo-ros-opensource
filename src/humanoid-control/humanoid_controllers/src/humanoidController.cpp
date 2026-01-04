@@ -3730,7 +3730,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
   }
 
 
-  void humanoidController::waistCmdCallback(const std_msgs::Float64MultiArray::ConstPtr &msg)
+  void humanoidController::waistCmdCallback(const kuavo_msgs::robotWaistControl::ConstPtr &msg)
   {
     return;
   }

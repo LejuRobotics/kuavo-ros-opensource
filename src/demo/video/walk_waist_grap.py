@@ -7,13 +7,13 @@
 
 import rospy
 import math
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import std_msgs
 from geometry_msgs.msg import Twist
 import time
 
 from sympy.physics.control import step_response_numerical_data
 
-from kuavo_msgs.msg import footPose, footPoseTargetTrajectories, RobotActionState  # 导入自定义消息类型
+from kuavo_msgs.msg import footPose, footPoseTargetTrajectories, RobotActionState,robotWaistControl  # 导入自定义消息类型
 from sat import RotatingRectangle  # 导入用于碰撞检测的工具类
 import numpy as np
 from kuavo_msgs.srv import ExecuteArmAction, changeArmCtrlMode
@@ -236,7 +236,7 @@ class WalkWaistGrad:
 
         self.single_step_control = SingleStepControl()
         # 创建腰部控制发布者
-        self.waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=10)
+        self.waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=10)
 
         # 抓取动作服务
         self.execute_service = rospy.ServiceProxy('/execute_arm_action', ExecuteArmAction)
@@ -308,8 +308,9 @@ class WalkWaistGrad:
         self.call_change_arm_ctrl_mode_service(1)
 
         # 等待3秒后再开始转腰
-        waist_msg = Float64MultiArray()
-        waist_msg.data = [0]
+        waist_msg = robotWaistControl()
+        waist_msg.header.stamp = rospy.Time.now()
+        waist_msg.data.data = [0]
         self.waist_pub.publish(waist_msg)
 
         
@@ -344,7 +345,8 @@ class WalkWaistGrad:
             current_angle = max(current_angle, rotate_angle)
             waist_angle = current_angle
             # 发布腰部控制消息
-            waist_msg.data = [waist_angle]
+            waist_msg.header.stamp = rospy.Time.now()
+            waist_msg.data.data = [waist_angle]
             self.waist_pub.publish(waist_msg)
             # time.sleep(rotate_angle)
 
@@ -390,7 +392,8 @@ class WalkWaistGrad:
             current_angle = min(current_angle, rotate_angle)
             waist_angle = current_angle
             # 发布腰部控制消息
-            waist_msg.data = [waist_angle]
+            waist_msg.header.stamp = rospy.Time.now()
+            waist_msg.data.data = [waist_angle]
             self.waist_pub.publish(waist_msg)
 
             rate.sleep()

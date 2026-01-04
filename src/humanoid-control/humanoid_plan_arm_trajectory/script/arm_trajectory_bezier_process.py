@@ -26,7 +26,7 @@ except (rospkg.ResourceNotFound, ImportError) as e:
         sys.path.insert(0, kuavo_common_python_path)
     from robot_version import RobotVersion
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
-from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData
+from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
 from ocs2_msgs.msg import mpc_observation
 from sensor_msgs.msg import JointState
@@ -52,7 +52,7 @@ class ArmTrajectoryBezierDemo:
         self.joint_state = JointState()
         self.hand_state = robotHandPosition()
         self.head_state = robotHeadMotionData()
-        self.waist_state = Float64MultiArray()
+        self.waist_state = robotWaistControl()
         self.running_action = False
         self.arm_flag = False
         self._timer = None
@@ -98,7 +98,7 @@ class ArmTrajectoryBezierDemo:
                                                 tcp_nodelay=True)
         self.control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1,
                                                 tcp_nodelay=True)
-        self.control_waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=1, 
+        self.control_waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=1, 
                                                 tcp_nodelay=True)
 
         self.sensor_data_sub = rospy.Subscriber('/sensors_data_raw', 
@@ -207,7 +207,8 @@ class ArmTrajectoryBezierDemo:
             self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:28]]
             if self.has_waist and len(point.positions) > 28:
                 # KUAVO v50+: 腰部关节在joint_q[12]位置
-                self.waist_state.data = [math.degrees(pos) for pos in point.positions[28:29]]
+                self.waist_state.header.stamp = rospy.Time.now()
+                self.waist_state.data.data = [math.degrees(pos) for pos in point.positions[28:29]]
             
         elif self.robot_class == ROBAN:
             self.joint_state.name = [
@@ -232,7 +233,8 @@ class ArmTrajectoryBezierDemo:
                 
                 self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
 
-                self.waist_state.data = [math.degrees(pos) for pos in point.positions[22:]]
+                self.waist_state.header.stamp = rospy.Time.now()
+                self.waist_state.data.data = [math.degrees(pos) for pos in point.positions[22:]]
 
     def call_change_arm_ctrl_mode_service(self, arm_ctrl_mode):
         result = True
@@ -382,7 +384,8 @@ class ArmTrajectoryBezierDemo:
             self.control_head_pub.publish(self.head_state)
             # 复位腰部（KUAVO v50+ 或 ROBAN）
             if (self.robot_class == KUAVO and self.has_waist) or self.robot_class == ROBAN:
-                self.waist_state.data = [0]
+                self.waist_state.header.stamp = rospy.Time.now()
+                self.waist_state.data.data = [0]
                 self.control_waist_pub.publish(self.waist_state)
 
     def create_action_data(self, finish_time):
@@ -629,7 +632,7 @@ class ArmTrajectoryBezierDemo:
                     self.control_head_pub.publish(self.head_state)
                 # 发布腰部数据（KUAVO v50+ 或 ROBAN）
                 if (self.robot_class == KUAVO and self.has_waist) or self.robot_class == ROBAN:
-                    if len(self.waist_state.data) != 0:
+                    if len(self.waist_state.data.data) != 0:
                         self.control_waist_pub.publish(self.waist_state)
             except Exception as e:
                 rospy.logerr(f"Failed to publish arm trajectory: {e}")

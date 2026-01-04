@@ -387,11 +387,11 @@ class ControlRobotWaistWebsocket:
         # 创建 WebSocket 客户端
         websocket = WebSocketKuavoSDK()
 
-        # Publisher：发布到 /robot_waist_motion_data，消息类型 std_msgs/Float64MultiArray
+        # Publisher：发布到 /robot_waist_motion_data，消息类型 kuavo_msgs/robotWaistControl
         self._pub_ctrl_robot_waist = roslibpy.Topic(
             websocket.client,
             '/robot_waist_motion_data',
-            'std_msgs/Float64MultiArray'
+            'kuavo_msgs/robotWaistControl'
         )
         self._pub_ctrl_robot_waist.advertise()
 
@@ -410,9 +410,23 @@ class ControlRobotWaistWebsocket:
             return False
 
         try:
+            # 获取当前时间戳（秒和纳秒）
+            import time
+            now = time.time()
+            secs = int(now)
+            nsecs = int((now - secs) * 1e9)
+            
             # roslibpy 方式构建消息
             msg = {
-                "data": [float(waistPos[0])]
+                'header': {
+                    'stamp': {
+                        'secs': secs,
+                        'nsecs': nsecs
+                    }
+                },
+                'data': {
+                    'data': [float(waistPos[0])]
+                }
             }
 
             # 发布

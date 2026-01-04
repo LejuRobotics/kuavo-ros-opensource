@@ -67,6 +67,10 @@ class Quest3BoneFramePublisher:
         self.head_data_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
         self.joysticks_pub = rospy.Publisher('quest_joystick_data', JoySticks, queue_size=2)
         
+        # 末端力配置发布器
+        from std_msgs.msg import Float64MultiArray
+        self.hand_wrench_config_pub = rospy.Publisher('/quest3/hand_wrench_config', Float64MultiArray, queue_size=1)
+        
         self.listener = tf.TransformListener()
         self.hand_finger_tf_pub = rospy.Publisher('/quest_hand_finger_tf', TFMessage, queue_size=10)
         # 批量发布所有骨骼TF的发布器
@@ -320,6 +324,25 @@ class Quest3BoneFramePublisher:
                     response.status = hand_wrench_srv_pb2.ItemMassForceResponse.OperationStatus.SUCCESS
                     response.description = f"Successfully set item mass force for case: {request.data.case_name}"
                     rospy.loginfo(f"✓ Configuration saved for case: {request.data.case_name}")
+                    
+                    # 发布末端力配置到 QuestControlFSMNode
+                    # 消息格式: [item_mass, lforce_x, lforce_y, lforce_z, rforce_x, rforce_y, rforce_z]
+                    from std_msgs.msg import Float64MultiArray
+                    config_msg = Float64MultiArray()
+                    config_msg.data = [
+                        request.data.item_mass,      # [0] 物品质量
+                        request.data.lforce_x,       # [1] 左手 X 方向力
+                        request.data.lforce_y,       # [2] 左手 Y 方向力
+                        request.data.lforce_z,       # [3] 左手 Z 方向力
+                        request.data.lforce_x,       # [4] 右手 X 方向力 (与左手相同)
+                        -request.data.lforce_y,      # [5] 右手 Y 方向力 (取反)
+                        request.data.lforce_z        # [6] 右手 Z 方向力 (与左手相同)
+                    ]
+                    self.hand_wrench_config_pub.publish(config_msg)
+                    rospy.loginfo(f"✓ Published hand wrench config to /quest3/hand_wrench_config: "
+                                 f"mass={request.data.item_mass:.2f}kg, "
+                                 f"left_force=({request.data.lforce_x:.2f}, {request.data.lforce_y:.2f}, {request.data.lforce_z:.2f})N, "
+                                 f"right_force=({request.data.lforce_x:.2f}, {-request.data.lforce_y:.2f}, {request.data.lforce_z:.2f})N")
                 else:
                     response.status = hand_wrench_srv_pb2.ItemMassForceResponse.OperationStatus.ERROR
                     response.description = f"Failed to save configuration for case: {request.data.case_name}"
