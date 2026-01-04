@@ -294,6 +294,20 @@ namespace humanoid_controller
     armNumReal_ = motor_info.num_arm_joints;
     jointNumReal_ = motor_info.num_joints - headNum_ - armNumReal_ - waistNum_;
     is_roban_ = (motor_info.robot_module == "ROBAN2") ? true: false;
+
+    if(is_roban_)
+    {
+      if (ros::param::has("/pull_up_force_threshold_roban"))
+      {
+        ros::param::get("/pull_up_force_threshold_roban", pull_up_force_threshold_);
+        std::cout << "pull_up_force_threshold_roban: " << pull_up_force_threshold_ << std::endl;
+      }
+      else
+      {
+        ROS_WARN_STREAM("Param '/pull_up_force_threshold_roban' not found, Using default value");
+      }
+    }
+
     std::string imu_type_str = motor_info.getIMUType(rb_version);
     if (imu_type_str == "xsens")
     {
@@ -509,6 +523,8 @@ namespace humanoid_controller
     jointPosRL_ = vector_t::Zero(jointNumReal_ + armNumReal_ + waistNum_);
     jointVelRL_ = vector_t::Zero(jointNumReal_ + armNumReal_ + waistNum_);
     jointAccRL_ = vector_t::Zero(jointNumReal_ + armNumReal_ + waistNum_);
+    default_state_.resize(12+actuatedDofNumReal_);
+    default_state_.setZero();
     
     // 检查RL参数文件是否存在，只有文件存在时才启用RL功能
     // std::ifstream rlParamFileCheck(rlParamFile);
@@ -562,9 +578,9 @@ namespace humanoid_controller
   
     ros::param::set("/humanoid/init_q", robot_init_state_param);
 
-    auto initial_state_ =  drake_interface_->getInitialState();
+    auto initial_state_ =  drake_interface_->getInitialState();// 里面不包含手臂和腰部
     auto squat_initial_state_ =  drake_interface_->getSquatInitialState();
-    default_state_ = initial_state_;
+    default_state_.head(12+12) = initial_state_.head(12+12);
     std::cout << "controller initial_state_:" << initial_state_.transpose() << std::endl;
     std::cout << "controller squat_initial_state_:" << squat_initial_state_.transpose() << std::endl;
     std::vector<double> initial_state_vector(initial_state_.data(), initial_state_.data() + initial_state_.size());
@@ -2132,7 +2148,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
               publishFeetTrajectory(target_trajectories);
             }
             
-
+            
             if (is_torso_interpolation_active_)
             {
               optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
@@ -2963,6 +2979,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         isPullUp_ = true;
         setPullUpState_=true;
         pull_up_trigger_time_ = currentObservation_.time;  // 记录触发时间
+        ROS_WARN_STREAM("now Contact Force: " << contactForce_[2]+contactForce_[8] <<
+                        " desired Contact Force: " << pull_up_force_threshold_ * robotMass_ * 9.81);
       }
       else if (isPullUp_ && (currentObservation_.time - pull_up_trigger_time_ > 2.0))
       {
