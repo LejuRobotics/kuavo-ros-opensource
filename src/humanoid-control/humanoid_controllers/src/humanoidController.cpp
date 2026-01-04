@@ -1500,6 +1500,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
   {
       bool old_mode = use_ros_arm_joint_trajectory_;
       use_ros_arm_joint_trajectory_ = req.control_mode;
+
+      ultra_fast_mode_ = req.control_mode;
+      if(req.control_mode == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode)
+      {
+        last_ultra_fast_mode_ = true;
+        ROS_INFO_STREAM("[humanoidController] ultra fast mode");
+      }
+
+      if(last_ultra_fast_mode_ && use_ros_arm_joint_trajectory_){
+        ultra_fast_mode_ = kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode;
+        ROS_INFO_STREAM("[humanoidController] ultra fast mode Enter Again");
+      }
       
       // 记录模式切换
       if (old_mode != use_ros_arm_joint_trajectory_) 
@@ -2311,10 +2323,16 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
           vector_t computed_vel = (filtered_pos - prev_filtered_pos) / dt_;
             
             // 3. 对计算出的速度再次滤波
-            optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(computed_vel);
+          optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(computed_vel);
 
-            //ros_logger_->publishVector("/humanoid_controller/arm_joint_computed_vel", computed_vel);
-            prev_filtered_pos = filtered_pos;
+          //ros_logger_->publishVector("/humanoid_controller/arm_joint_computed_vel", computed_vel);
+          prev_filtered_pos = filtered_pos;
+
+          if(ultra_fast_mode_ == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode)
+          {
+            optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_trajectory_.pos;          
+            optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_trajectory_.vel;
+          }
     
         }
         else if(only_half_up_body_ && mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL)

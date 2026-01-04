@@ -1,179 +1,162 @@
 #include "motion_capture_ik/IncrementalControlModule.h"
-#include "motion_capture_ik/JoyStickHandler.h"
 #include <ros/ros.h>
+#include <cmath>
 
 namespace HighlyDynamic {
 
+namespace {
+inline double clampToUnit(double x) {
+  if (x < 0.0) return 0.0;
+  if (x > 1.0) return 1.0;
+  return x;
+}
+
+inline double quaternionAngleRad(const Eigen::Quaterniond& qIn) {
+  const Eigen::Quaterniond q = qIn.normalized();
+  const double wAbs = std::abs(q.w());
+  return 2.0 * std::acos(clampToUnit(wAbs));
+}
+}  // namespace
+
 // ==================== IncrementalControlModule Implementation ====================
 
-IncrementalControlModule::IncrementalControlModule(std::shared_ptr<JoyStickHandler> joyStickHandler,
-                                                   const IncrementalControlConfig& config)
-    : controlMode_(ControlMode::NONE),
-      joyStickHandler_(joyStickHandler),
-      result_(),
-      armMoveDetector_(false),
+IncrementalControlModule::IncrementalControlModule(const IncrementalControlConfig& config)
+    : result_(),
       config_(config),
       initialized_(true),
-      leftArmIncrementalMode_(false),
-      rightArmIncrementalMode_(false),
-      leftArmMoved_(false),
-      rightArmMoved_(false),
-      prevLeftHandPosition_(Eigen::Vector3d::Zero()),
-      prevRightHandPosition_(Eigen::Vector3d::Zero()) {
+      leftHandStatus_(),
+      rightHandStatus_(),
+      defaultLeftHandPos_(0.05, 0.32, -0.05),
+      defaultRightHandPos_(0.05, -0.32, -0.05),
+      posAnchorZeroThreshold_(1e-3),
+      slerpQuatFactorThreshold_(1e-6),
+      zyxLimitsEE_(config.zyxLimitsEE),
+      zyxLimitsLink4_(config.zyxLimitsLink4) {
+  // Propagate python-compatible orientation config into result_ (stored inside IncrementalPoseResult)
+  result_.usePythonIncrementalOrientation_ = config_.usePythonIncrementalOrientation;
+  result_.pythonOrientationThresholdRad_ = config_.pythonOrientationThresholdRad;
+  result_.zyxLimitsFinal_ = config_.zyxLimitsFinal;
   ROS_INFO("[IncrementalControlModule] Module initialized successfully");
 }
 
 // ==================== 状态机相关方法（原 IncrementalModeStateMachine） ====================
 
-bool IncrementalControlModule::shouldEnterIncrementalMode() const {
+bool IncrementalControlModule::shouldEnterIncrementalModeLeftArm(bool isLeftGrip) const {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) return false;
-  if (!joyStickHandler_) return false;
-  if (controlMode_ == ControlMode::INCREMENTAL) return false;
-  return joyStickHandler_->isLeftRightGrip();
+  if (leftHandStatus_.activated) return false;  // 已经在增量模式，不需要重复进入
+  return isLeftGrip;
 }
 
-bool IncrementalControlModule::shouldEnterIncrementalModeLeftArm() const {
+bool IncrementalControlModule::shouldEnterIncrementalModeRightArm(bool isRightGrip) const {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) return false;
-  if (!joyStickHandler_) return false;
-  if (leftArmIncrementalMode_) return false;  // 已经在增量模式，不需要重复进入
-  // 检查左手是否激活（假设JoyStickHandler有相应方法）
-  return joyStickHandler_->isLeftArmCtrlModeActive() || joyStickHandler_->isLeftGrip();
+  if (rightHandStatus_.activated) return false;  // 已经在增量模式，不需要重复进入
+  return isRightGrip;
 }
 
-bool IncrementalControlModule::shouldEnterIncrementalModeRightArm() const {
-  std::lock_guard<std::mutex> lock(stateMutex_);
-  if (!initialized_) return false;
-  if (!joyStickHandler_) return false;
-  if (rightArmIncrementalMode_) return false;  // 已经在增量模式，不需要重复进入
-  // 检查右手是否激活（假设JoyStickHandler有相应方法）
-  return joyStickHandler_->isRightArmCtrlModeActive() || joyStickHandler_->isRightGrip();
-}
-
-bool IncrementalControlModule::shouldExitIncrementalMode() const {
+bool IncrementalControlModule::shouldExitIncrementalMode(bool isLeftGrip, bool isRightGrip) const {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) return true;
-  if (!joyStickHandler_) return true;  // 手柄未初始化，则应该退出，避免意外失控
-  if (controlMode_ != ControlMode::INCREMENTAL) return false;  // 不是增量模式，无需重复执行退出
-  // 修改：只有当双手 grip 都松开时才退出增量模式（支持独立控制）
-  // 原代码：return !joyStickHandler_->isLeftRightGrip(); // 只要有一手松开就退出，不支持独立控制
-  return !joyStickHandler_->isLeftGrip() && !joyStickHandler_->isRightGrip();
+  if (!leftHandStatus_.activated && !rightHandStatus_.activated) return false;  // 不是增量模式，无需重复执行退出
+  return !isLeftGrip && !isRightGrip;
 }
 
 bool IncrementalControlModule::isIncrementalMode() const {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  return initialized_ && (controlMode_ == ControlMode::INCREMENTAL);
-}
-
-// ==================== 锚点和姿态相关方法（原 IncrementalPoseCalculator） ====================
-
-void IncrementalControlModule::updateHumanPoseAnchor(const ArmPose& vrLeftPose,
-                                                     const ArmPose& vrRightPose,
-                                                     const ArmPose& vrLeftElbowPose,
-                                                     const ArmPose& vrRightElbowPose,
-                                                     const std::vector<PoseData>& latestPoseConstraintList) {
-  // 设置锚点位置
-  result_.leftAnchorPos = vrLeftPose.position;
-  result_.rightAnchorPos = vrRightPose.position;
-  result_.leftElbowAnchorPos = vrLeftElbowPose.position;
-  result_.rightElbowAnchorPos = vrRightElbowPose.position;
-
-  // 初始化手肘滤波状态：从退出时的目标位置开始，平滑过渡到当前测量位置
-  // 这样可以避免重新进入增量模式时的跳变
-  if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_ELBOW) {
-    result_.leftElbowPosFiltered = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position;
-  } else {
-    result_.leftElbowPosFiltered = vrLeftElbowPose.position;
-  }
-  if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_ELBOW) {
-    result_.rightElbowPosFiltered = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position;
-  } else {
-    result_.rightElbowPosFiltered = vrRightElbowPose.position;
-  }
-  result_.dotLeftElbowPosFiltered.setZero();
-  result_.dotRightElbowPosFiltered.setZero();
-
-  // 左手默认值：[1, 1, 1]，右手默认值：[1, -1, 1]，避免初始位置过低触发 clip 下界
-  result_.lastTargetLeftHandPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
-  if (result_.lastTargetLeftHandPosOnExit.norm() < 1e-3) {
-    result_.lastTargetLeftHandPosOnExit = Eigen::Vector3d(0.05, 0.32, -0.05);
-    ROS_INFO("[IncrementalControlModule] Using hardcoded default for left hand initial target: [1.0, 1.0, 1.0]");
-  }
-
-  result_.lastTargetRightHandPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
-  if (result_.lastTargetRightHandPosOnExit.norm() < 1e-3) {
-    result_.lastTargetRightHandPosOnExit = Eigen::Vector3d(0.05, -0.32, -0.05);
-    ROS_INFO("[IncrementalControlModule] Using hardcoded default for right hand initial target: [1.0, -1.0, 1.0]");
-  }
+  return initialized_ && (leftHandStatus_.activated || rightHandStatus_.activated);
 }
 
 void IncrementalControlModule::updateLeftArmPoseAnchor(const ArmPose& vrLeftPose,
-                                                       const ArmPose& vrLeftElbowPose,
-                                                       const std::vector<PoseData>& latestPoseConstraintList) {
-  // 只设置左臂的锚点位置
-  result_.leftAnchorPos = vrLeftPose.position;
-  result_.leftElbowAnchorPos = vrLeftElbowPose.position;
+                                                       const std::vector<PoseData>& latestPoseConstraintList,
+                                                       const Eigen::Vector3d& pEndEffector,
+                                                       const Eigen::Quaterniond& qEndEffector,
+                                                       const Eigen::Quaterniond& qLink4) {
+  (void)pEndEffector;
+  // humanAnchor
+  result_.humanLeftHandPosAnchor_ = vrLeftPose.position;
+  result_.humanLeftHandQuatAnchor_ = vrLeftPose.quaternion.normalized();
+  result_.humanLeftHandQuatMeas_ = vrLeftPose.quaternion.normalized();
+  // Python compatible: initialize human anchor used for per-step delta computation
+  result_.humanLeftHandQuatAnchorPython_ = result_.humanLeftHandQuatAnchor_;
 
-  // 初始化左手肘滤波状态
-  if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_ELBOW) {
-    result_.leftElbowPosFiltered = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position;
-  } else {
-    result_.leftElbowPosFiltered = vrLeftElbowPose.position;
-  }
-  result_.dotLeftElbowPosFiltered.setZero();
-
-  // 设置左手初始目标位置
+  // robotAnchor
   if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
-    result_.lastTargetLeftHandPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
-    if (result_.lastTargetLeftHandPosOnExit.norm() < 1e-3) {
-      result_.lastTargetLeftHandPosOnExit = Eigen::Vector3d(0.05, 0.32, -0.05);
-      ROS_INFO("[IncrementalControlModule] Using hardcoded default for left hand initial target");
+    // result_.robotLeftHandQuatAnchor = qEndEffector.normalized();
+    // result_.robotLeftHandQuatAnchor = vrLeftPose.quaternion.normalized();
+
+    Eigen::Quaterniond qTargetQuatAnchor =
+        Eigen::Quaterniond(latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix).normalized();
+    // 1) 相对 end-effector 的限幅（保持现有逻辑）
+    Eigen::Quaterniond qTargetQuatAnchorRelEE = qEndEffector.conjugate() * qTargetQuatAnchor;
+    qTargetQuatAnchorRelEE = limitQuaternionAngleEulerZYX(qTargetQuatAnchorRelEE, zyxLimitsEE_);
+    Eigen::Quaterniond qTargetQuatAnchorLimited = qEndEffector * qTargetQuatAnchorRelEE;
+
+    // 2) 额外增加：相对 link4 的限幅（zyx = [pi/2, 0.6, 0.6]）
+    Eigen::Quaterniond qTargetQuatAnchorRelLink4 = qLink4.conjugate() * qTargetQuatAnchorLimited;
+    qTargetQuatAnchorRelLink4 = limitQuaternionAngleEulerZYX(qTargetQuatAnchorRelLink4, zyxLimitsLink4_);
+    result_.robotLeftHandQuatAnchor_ = (qLink4 * qTargetQuatAnchorRelLink4).normalized();
+    // Python compatible: incremental target seed should be the current target (pose constraint), not qEndEffector.
+    // This matches quest3_node_incremental.py where the target quaternion is updated incrementally each frame.
+    result_.robotLeftHandQuatTarget_ = qTargetQuatAnchor;
+
+    result_.robotLeftHandPosAnchor_ = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
+    if (result_.robotLeftHandPosAnchor_.norm() < posAnchorZeroThreshold_) {
+      result_.robotLeftHandPosAnchor_ = defaultLeftHandPos_;
     }
   }
-
-  // 重置左手增量和速度
-  result_.leftHandPosDelta.setZero();
-  result_.dotLeftHandPosDelta.setZero();
-  result_.dotLastTargetLeftHandPosOnExit.setZero();
-
-  // ROS_INFO("[IncrementalControlModule] Left arm anchor updated independently");
+  result_.robotLeftHandQuatMeasEE_ = qEndEffector.normalized();
+  result_.robotLeftHandQuatMeasEERealTime_ = qEndEffector.normalized();  // 初始化实时更新的ee fk值
+  result_.robotLeftHandQuatMeasLink4_ = qLink4.normalized();
+  result_.resetLeftHandDelta();
 }
 
 void IncrementalControlModule::updateRightArmPoseAnchor(const ArmPose& vrRightPose,
-                                                        const ArmPose& vrRightElbowPose,
-                                                        const std::vector<PoseData>& latestPoseConstraintList) {
-  // 只设置右臂的锚点位置
-  result_.rightAnchorPos = vrRightPose.position;
-  result_.rightElbowAnchorPos = vrRightElbowPose.position;
+                                                        const std::vector<PoseData>& latestPoseConstraintList,
+                                                        const Eigen::Vector3d& pEndEffector,
+                                                        const Eigen::Quaterniond& qEndEffector,
+                                                        const Eigen::Quaterniond& qLink4) {
+  (void)pEndEffector;
+  // humanAnchor
+  result_.humanRightHandPosAnchor_ = vrRightPose.position;
+  result_.humanRightHandQuatAnchor_ = vrRightPose.quaternion.normalized();
+  result_.humanRightHandQuatMeas_ = vrRightPose.quaternion.normalized();
+  // Python compatible: initialize human anchor used for per-step delta computation
+  result_.humanRightHandQuatAnchorPython_ = result_.humanRightHandQuatAnchor_;
 
-  // 初始化右手肘滤波状态
-  if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_ELBOW) {
-    result_.rightElbowPosFiltered = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position;
-  } else {
-    result_.rightElbowPosFiltered = vrRightElbowPose.position;
-  }
-  result_.dotRightElbowPosFiltered.setZero();
-
-  // 设置右手初始目标位置
+  // robotAnchor
   if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
-    result_.lastTargetRightHandPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
-    if (result_.lastTargetRightHandPosOnExit.norm() < 1e-3) {
-      result_.lastTargetRightHandPosOnExit = Eigen::Vector3d(0.05, -0.32, -0.05);
-      ROS_INFO("[IncrementalControlModule] Using hardcoded default for right hand initial target");
+    // result_.robotRightHandQuatAnchor = qEndEffector.normalized();
+    // result_.robotRightHandQuatAnchor = vrRightPose.quaternion.normalized();
+
+    Eigen::Quaterniond qTargetQuatAnchor =
+        Eigen::Quaterniond(latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix).normalized();
+    // 1) 相对 end-effector 的限幅（与左手对称一致）
+    Eigen::Quaterniond qTargetQuatAnchorRelEE = qEndEffector.conjugate() * qTargetQuatAnchor;
+    qTargetQuatAnchorRelEE = limitQuaternionAngleEulerZYX(qTargetQuatAnchorRelEE, zyxLimitsEE_);
+    Eigen::Quaterniond qTargetQuatAnchorLimited = qEndEffector * qTargetQuatAnchorRelEE;
+
+    // 2) 额外增加：相对 link4 的限幅（zyx = [pi/2, 0.6, 0.6]），与左手对称一致
+    Eigen::Quaterniond qTargetQuatAnchorRelLink4 = qLink4.conjugate() * qTargetQuatAnchorLimited;
+    qTargetQuatAnchorRelLink4 = limitQuaternionAngleEulerZYX(qTargetQuatAnchorRelLink4, zyxLimitsLink4_);
+    result_.robotRightHandQuatAnchor_ = (qLink4 * qTargetQuatAnchorRelLink4).normalized();
+    // Python compatible: incremental target seed should be the current target (pose constraint), not qEndEffector.
+    result_.robotRightHandQuatTarget_ = qTargetQuatAnchor;
+
+    result_.robotRightHandPosAnchor_ = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
+    if (result_.robotRightHandPosAnchor_.norm() < posAnchorZeroThreshold_) {
+      result_.robotRightHandPosAnchor_ = defaultRightHandPos_;
     }
   }
 
-  // 重置右手增量和速度
-  result_.rightHandPosDelta.setZero();
-  result_.dotRightHandPosDelta.setZero();
-  result_.dotLastTargetRightHandPosOnExit.setZero();
-
-  // ROS_INFO("[IncrementalControlModule] Right arm anchor updated independently");
+  result_.robotRightHandQuatMeasEE_ = qEndEffector.normalized();
+  result_.robotRightHandQuatMeasEERealTime_ = qEndEffector.normalized();  // 初始化实时更新的ee fk值
+  result_.robotRightHandQuatMeasLink4_ = qLink4.normalized();
+  result_.resetRightHandDelta();
 }
 
-void IncrementalControlModule::updateLastTargetOnExit(const std::vector<PoseData>& latestPoseConstraintList) {
-  result_.saveLastTargetOnExit(latestPoseConstraintList);
+void IncrementalControlModule::updateLastOnExit(const std::vector<PoseData>& latestPoseConstraintList) {
+  result_.saveLastOnExit(latestPoseConstraintList);
 }
 
 void IncrementalControlModule::resetDelta() { result_.resetDelta(); }
@@ -182,35 +165,33 @@ void IncrementalControlModule::resetSlerpFactor() { result_.resetSlerpFactor(); 
 
 void IncrementalControlModule::computeFhanFiltering(const ArmPose& vrLeftPose,
                                                     const ArmPose& vrRightPose,
-                                                    const ArmPose& vrLeftElbowPose,
-                                                    const ArmPose& vrRightElbowPose,
                                                     bool isLeftActive,
                                                     bool isRightActive,
                                                     const double slerpQuatFactor) {
-  if (slerpQuatFactor - 1.0 > 1e-6) {
+  if (slerpQuatFactor - 1.0 > slerpQuatFactorThreshold_) {
     ROS_WARN("[IncrementalControlModule] slerpQuatFactor is not 1.0, it is %f", slerpQuatFactor);
     return;
   }
   // 平滑插值
-  double fhan_h = 1.0 / config_.publishRate;
-  double fhan_h0 = fhan_h * config_.fhan_kh0;
+  double fhanH = 1.0 / config_.publishRate;
+  double fhanH0 = fhanH * config_.fhanKh0;
 
-  double slerpt_r = config_.fhan_r / 10;
+  double slerptR = config_.fhanR / 10;
   if (isLeftActive) {
-    leju_utils::fhanStepForward(result_.leftSlerpQuat_t_,
-                                result_.leftSlerpQuat_dt_,
+    leju_utils::fhanStepForward(result_.leftSlerpQuatT_,
+                                result_.leftSlerpQuatDt_,
                                 slerpQuatFactor,
-                                slerpt_r,  //加速度约束
-                                fhan_h,    // dt
-                                fhan_h0);  //平滑系数，通常为dt的2~10倍
+                                slerptR,  //加速度约束
+                                fhanH,    // dt
+                                fhanH0);  //平滑系数，通常为dt的2~10倍
   }
   if (isRightActive) {
-    leju_utils::fhanStepForward(result_.rightSlerpQuat_t_,
-                                result_.rightSlerpQuat_dt_,
+    leju_utils::fhanStepForward(result_.rightSlerpQuatT_,
+                                result_.rightSlerpQuatDt_,
                                 slerpQuatFactor,
-                                slerpt_r,  //加速度约束
-                                fhan_h,    // dt
-                                fhan_h0);  //平滑系数，通常为dt的2~10倍
+                                slerptR,  //加速度约束
+                                fhanH,    // dt
+                                fhanH0);  //平滑系数，通常为dt的2~10倍
   }
 
   for (int i = 0; i < 3; i++) {
@@ -218,188 +199,94 @@ void IncrementalControlModule::computeFhanFiltering(const ArmPose& vrLeftPose,
     // 关键修复：只有当左臂激活时才更新左臂的 fhan 滤波状态
     // 避免未激活时滤波状态向 0 收敛导致的状态污染
     if (isLeftActive) {
-      double rawLeftPosDelta = (vrLeftPose.position[i] - result_.leftAnchorPos[i]) * config_.deltaScale[i];
-      leju_utils::fhanStepForward(result_.leftHandPosDelta[i],     //约束处理后的位置增量
-                                  result_.dotLeftHandPosDelta[i],  //约束处理后的速度
-                                  rawLeftPosDelta,                 //原始位置增量
-                                  config_.fhan_r,                  //加速度约束
-                                  fhan_h,                          // dt
-                                  fhan_h0);                        //平滑系数，通常为dt的2~10倍
+      double rawLeftPosDelta = (vrLeftPose.position[i] - result_.humanLeftHandPosAnchor_[i]) * config_.deltaScale[i];
+      // print deltascale[i]
+      // std::cout << "[IncrementalControlModule] deltaScale[" << i << "] = " << config_.deltaScale[i] << std::endl;
+      leju_utils::fhanStepForward(result_.robotLeftHandDeltaPos_[i],  //约束处理后的位置增量
+                                  result_.dotLeftHandDeltaPos_[i],    //约束处理后的速度
+                                  rawLeftPosDelta,                    //原始位置增量
+                                  config_.fhanR,                      //加速度约束
+                                  fhanH,                              // dt
+                                  fhanH0);                            //平滑系数，通常为dt的2~10倍
     }
     // 未激活时保持滤波状态不变，不向 0 收敛
 
     // ==================== 右臂手部位置增量滤波 ====================
     // 关键修复：只有当右臂激活时才更新右臂的 fhan 滤波状态
+    // 避免未激活时滤波状态向 0 收敛导致的状态污染
     if (isRightActive) {
-      double rawRightPosDelta = (vrRightPose.position[i] - result_.rightAnchorPos[i]) * config_.deltaScale[i];
-      leju_utils::fhanStepForward(result_.rightHandPosDelta[i],  //右手
-                                  result_.dotRightHandPosDelta[i],
-                                  rawRightPosDelta,
-                                  config_.fhan_r,
-                                  fhan_h,
-                                  fhan_h0);
+      double rawRightPosDelta = (vrRightPose.position[i] - result_.humanRightHandPosAnchor_[i]) * config_.deltaScale[i];
+      // print deltascale[i]
+      // std::cout << "[IncrementalControlModule] deltaScale[" << i << "] = " << config_.deltaScale[i] << std::endl;
+      leju_utils::fhanStepForward(result_.robotRightHandDeltaPos_[i],  //约束处理后的位置增量
+                                  result_.dotRightHandDeltaPos_[i],    //约束处理后的速度
+                                  rawRightPosDelta,                    //原始位置增量
+                                  config_.fhanR,                       //加速度约束
+                                  fhanH,                               // dt
+                                  fhanH0);                             //平滑系数，通常为dt的2~10倍
     }
     // 未激活时保持滤波状态不变，不向 0 收敛
-
-    // ==================== 肘部绝对位置滤波 ====================
-    // 使用fhan算法对肘部绝对位置进行平滑滤波，避免重新进入增量模式时的跳变
-    // 参考手部绝对姿态的更新逻辑，但使用绝对位置而非增量
-    // 同样只在激活时更新滤波状态
-    if (isLeftActive) {
-      double rawLeftElbowPos = vrLeftElbowPose.position[i];
-      leju_utils::fhanStepForward(result_.leftElbowPosFiltered[i],     // 滤波后的左肘绝对位置
-                                  result_.dotLeftElbowPosFiltered[i],  // 滤波后的左肘速度
-                                  rawLeftElbowPos,                     // 原始左肘绝对位置
-                                  config_.fhan_r / 10,                 // 加速度约束
-                                  fhan_h,
-                                  fhan_h0);
-    }
-
-    if (isRightActive) {
-      double rawRightElbowPos = vrRightElbowPose.position[i];
-      leju_utils::fhanStepForward(result_.rightElbowPosFiltered[i],  // 滤波后的右肘绝对位置
-                                  result_.dotRightElbowPosFiltered[i],
-                                  rawRightElbowPos,  // 原始右肘绝对位置
-                                  config_.fhan_r / 10,
-                                  fhan_h,
-                                  fhan_h0);
-    }
   }
-}
-
-void IncrementalControlModule::updateLeftArmAnchor(const ArmPose& vrLeftPose,
-                                                   const Eigen::Vector3d& currentRobotLeftHandPos) {
-  std::lock_guard<std::mutex> lock(stateMutex_);
-  result_.leftAnchorPos = vrLeftPose.position;
-  result_.leftHandPosDelta.setZero();
-  result_.dotLeftHandPosDelta.setZero();
-
-  result_.lastTargetLeftHandPosOnExit = currentRobotLeftHandPos;  // latestPoseConstraintList_ 中的位置值作为起点
-  result_.dotLastTargetLeftHandPosOnExit.setZero();
-}
-
-void IncrementalControlModule::updateRightArmAnchor(const ArmPose& vrRightPose,
-                                                    const Eigen::Vector3d& currentRobotRightHandPos) {
-  std::lock_guard<std::mutex> lock(stateMutex_);
-  result_.rightAnchorPos = vrRightPose.position;
-  result_.rightHandPosDelta.setZero();
-  result_.dotRightHandPosDelta.setZero();
-
-  result_.lastTargetRightHandPosOnExit = currentRobotRightHandPos;  // latestPoseConstraintList_ 中的位置值作为起点
-  result_.dotLastTargetRightHandPosOnExit.setZero();
 }
 
 void IncrementalControlModule::setHandQuatSeeds(const Eigen::Quaterniond& leftHandQuatSeed,
-                                                const Eigen::Quaterniond& rightHandQuatSeed) {
+                                                const Eigen::Quaterniond& rightHandQuatSeed,
+                                                bool isIncremetalOrientation) {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  result_.lastTargetLeftHandQuatOnExit = leftHandQuatSeed.normalized();
-  result_.lastTargetRightHandQuatOnExit = rightHandQuatSeed.normalized();
-  // 同步当前插值目标，避免首次 slerp 从单位四元数开始
-  result_.latestTargetLeftHandQuatSlerp = result_.lastTargetLeftHandQuatOnExit;
-  result_.latestTargetRightHandQuatSlerp = result_.lastTargetRightHandQuatOnExit;
-}
-
-// ==================== 主要功能方法 ====================
-
-void IncrementalControlModule::enterIncrementalMode(const ArmPose& vrLeftPose,
-                                                    const ArmPose& vrRightPose,
-                                                    const ArmPose& vrLeftElbowPose,
-                                                    const ArmPose& vrRightElbowPose,
-                                                    const std::vector<PoseData>& latestPoseConstraintList) {
-  std::lock_guard<std::mutex> lock(stateMutex_);
-  if (!initialized_) {
-    ROS_WARN("[IncrementalControlModule] Module not initialized");
-    return;
+  if (!isIncremetalOrientation) {
+    result_.robotLeftHandQuatAnchor_ = leftHandQuatSeed.normalized();
+    result_.robotRightHandQuatAnchor_ = rightHandQuatSeed.normalized();
   }
 
-  controlMode_ = ControlMode::INCREMENTAL;
-
-  leftArmIncrementalMode_ = true;
-  rightArmIncrementalMode_ = true;
-  leftArmMoved_ = false;
-  rightArmMoved_ = false;
-  prevLeftHandPosition_ = vrLeftPose.position;
-  prevRightHandPosition_ = vrRightPose.position;
-
-  updateHumanPoseAnchor(vrLeftPose, vrRightPose, vrLeftElbowPose, vrRightElbowPose, latestPoseConstraintList);
+  result_.robotLeftHandQuatSlerpDes_ = result_.robotLeftHandQuatAnchor_;
+  result_.robotRightHandQuatSlerpDes_ = result_.robotRightHandQuatAnchor_;
+  result_.robotLeftHandQuatTarget_ = result_.robotLeftHandQuatAnchor_;
+  result_.robotRightHandQuatTarget_ = result_.robotRightHandQuatAnchor_;
 }
 
 void IncrementalControlModule::enterIncrementalModeLeftArm(const ArmPose& vrLeftPose,
-                                                           const ArmPose& vrLeftElbowPose,
-                                                           const std::vector<PoseData>& latestPoseConstraintList) {
+                                                           const std::vector<PoseData>& latestPoseConstraintList,
+                                                           const Eigen::Vector3d& pEndEffector,
+                                                           const Eigen::Quaterniond& qEndEffector,
+                                                           const Eigen::Quaterniond& qLink4) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) {
     ROS_WARN("[IncrementalControlModule] Module not initialized");
     return;
   }
 
-  // 如果不在增量模式，则进入增量模式
-  if (controlMode_ != ControlMode::INCREMENTAL) {
-    controlMode_ = ControlMode::INCREMENTAL;
-    // ROS_INFO("[IncrementalControlModule] Entering incremental mode via left arm");
-  }
+  ROS_INFO("[IncrementalControlModule] Entering incremental mode via left arm");
 
-  // 标记左臂进入增量模式
-  leftArmIncrementalMode_ = true;
-  leftArmMoved_ = false;
-  prevLeftHandPosition_ = vrLeftPose.position;
+  leftHandStatus_.ready(vrLeftPose.position, vrLeftPose.quaternion);
 
   // 只更新左臂的锚点
-  updateLeftArmPoseAnchor(vrLeftPose, vrLeftElbowPose, latestPoseConstraintList);
+  updateLeftArmPoseAnchor(vrLeftPose, latestPoseConstraintList, pEndEffector, qEndEffector, qLink4);
 }
 
 void IncrementalControlModule::enterIncrementalModeRightArm(const ArmPose& vrRightPose,
-                                                            const ArmPose& vrRightElbowPose,
-                                                            const std::vector<PoseData>& latestPoseConstraintList) {
+                                                            const std::vector<PoseData>& latestPoseConstraintList,
+                                                            const Eigen::Vector3d& pEndEffector,
+                                                            const Eigen::Quaterniond& qEndEffector,
+                                                            const Eigen::Quaterniond& qLink4) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) {
     ROS_WARN("[IncrementalControlModule] Module not initialized");
     return;
   }
 
-  // 如果不在增量模式，则进入增量模式
-  if (controlMode_ != ControlMode::INCREMENTAL) {
-    controlMode_ = ControlMode::INCREMENTAL;
-    ROS_INFO("[IncrementalControlModule] Entering incremental mode via right arm");
-  }
+  ROS_INFO("[IncrementalControlModule] Entering incremental mode via right arm");
 
-  // 标记右臂进入增量模式
-  rightArmIncrementalMode_ = true;
-  rightArmMoved_ = false;
-  prevRightHandPosition_ = vrRightPose.position;
+  rightHandStatus_.ready(vrRightPose.position, vrRightPose.quaternion);
 
   // 只更新右臂的锚点
-  updateRightArmPoseAnchor(vrRightPose, vrRightElbowPose, latestPoseConstraintList);
-}
-
-void IncrementalControlModule::exitIncrementalMode(const ArmPose& vrLeftPose,
-                                                   const ArmPose& vrRightPose,
-                                                   const ArmPose& vrLeftElbowPose,
-                                                   const ArmPose& vrRightElbowPose,
-                                                   const std::vector<PoseData>& latestPoseConstraintList) {
-  std::lock_guard<std::mutex> lock(stateMutex_);
-  if (!initialized_) {
-    ROS_WARN("[IncrementalControlModule] Cannot exit incremental mode: module not initialized");
-    return;
-  }
-  updateHumanPoseAnchor(vrLeftPose, vrRightPose, vrLeftElbowPose, vrRightElbowPose, latestPoseConstraintList);
-  controlMode_ = ControlMode::NONE;
-
-  // 重置独立控制状态
-  leftArmIncrementalMode_ = false;
-  rightArmIncrementalMode_ = false;
-  leftArmMoved_ = false;
-  rightArmMoved_ = false;
-
-  armMoveDetector_.reset();
-  updateLastTargetOnExit(latestPoseConstraintList);
-  resetDelta();
-  resetSlerpFactor();
+  updateRightArmPoseAnchor(vrRightPose, latestPoseConstraintList, pEndEffector, qEndEffector, qLink4);
 }
 
 void IncrementalControlModule::exitIncrementalModeLeftArm(const ArmPose& vrLeftPose,
-                                                          const ArmPose& vrLeftElbowPose,
-                                                          const std::vector<PoseData>& latestPoseConstraintList) {
+                                                          const std::vector<PoseData>& latestPoseConstraintList,
+                                                          const Eigen::Vector3d& pEndEffector,
+                                                          const Eigen::Quaterniond& qEndEffector,
+                                                          const Eigen::Quaterniond& qLink4) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) {
     ROS_WARN("[IncrementalControlModule] Cannot exit incremental mode: module not initialized");
@@ -407,44 +294,23 @@ void IncrementalControlModule::exitIncrementalModeLeftArm(const ArmPose& vrLeftP
   }
 
   // 更新左臂锚点
-  updateLeftArmPoseAnchor(vrLeftPose, vrLeftElbowPose, latestPoseConstraintList);
+  updateLeftArmPoseAnchor(vrLeftPose, latestPoseConstraintList, pEndEffector, qEndEffector, qLink4);
 
   // 标记左臂退出增量模式
-  leftArmIncrementalMode_ = false;
-  leftArmMoved_ = false;
+  leftHandStatus_.unready(vrLeftPose.position, vrLeftPose.quaternion);
 
-  // 如果双臂都退出，则整体退出增量模式
-  if (!leftArmIncrementalMode_ && !rightArmIncrementalMode_) {
-    controlMode_ = ControlMode::NONE;
-    armMoveDetector_.reset();
-    ROS_INFO("[IncrementalControlModule] Both arms exited, exiting incremental mode completely");
+  if (!leftHandStatus_.activated && !rightHandStatus_.activated) {
+    updateLastOnExit(latestPoseConstraintList);
+    resetDelta();
+    resetSlerpFactor();
   }
-
-  // 保存左手退出时的目标位置
-  if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
-    result_.lastTargetLeftHandPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
-    result_.lastTargetLeftHandQuatOnExit =
-        Eigen::Quaterniond(latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix).normalized();
-  }
-  if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_ELBOW) {
-    result_.lastTargetLeftElbowPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position;
-  }
-
-  // 重置左手增量
-  result_.leftHandPosDelta.setZero();
-  result_.dotLeftHandPosDelta.setZero();
-  result_.dotLastTargetLeftHandPosOnExit.setZero();
-
-  // 重置左手Slerp因子
-  result_.leftSlerpQuat_t_ = 0.0;
-  result_.leftSlerpQuat_dt_ = 0.0;
-
-  ROS_INFO("[IncrementalControlModule] Left arm exited incremental mode independently");
 }
 
 void IncrementalControlModule::exitIncrementalModeRightArm(const ArmPose& vrRightPose,
-                                                           const ArmPose& vrRightElbowPose,
-                                                           const std::vector<PoseData>& latestPoseConstraintList) {
+                                                           const std::vector<PoseData>& latestPoseConstraintList,
+                                                           const Eigen::Vector3d& pEndEffector,
+                                                           const Eigen::Quaterniond& qEndEffector,
+                                                           const Eigen::Quaterniond& qLink4) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) {
     ROS_WARN("[IncrementalControlModule] Cannot exit incremental mode: module not initialized");
@@ -452,252 +318,286 @@ void IncrementalControlModule::exitIncrementalModeRightArm(const ArmPose& vrRigh
   }
 
   // 更新右臂锚点
-  updateRightArmPoseAnchor(vrRightPose, vrRightElbowPose, latestPoseConstraintList);
+  updateRightArmPoseAnchor(vrRightPose, latestPoseConstraintList, pEndEffector, qEndEffector, qLink4);
 
   // 标记右臂退出增量模式
-  rightArmIncrementalMode_ = false;
-  rightArmMoved_ = false;
+  rightHandStatus_.unready(vrRightPose.position, vrRightPose.quaternion);
 
-  // 如果双臂都退出，则整体退出增量模式
-  if (!leftArmIncrementalMode_ && !rightArmIncrementalMode_) {
-    controlMode_ = ControlMode::NONE;
-    armMoveDetector_.reset();
-    ROS_INFO("[IncrementalControlModule] Both arms exited, exiting incremental mode completely");
+  if (!leftHandStatus_.activated && !rightHandStatus_.activated) {
+    updateLastOnExit(latestPoseConstraintList);
+    resetDelta();
+    resetSlerpFactor();
   }
-
-  // 保存右手退出时的目标位置
-  if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
-    result_.lastTargetRightHandPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
-    result_.lastTargetRightHandQuatOnExit =
-        Eigen::Quaterniond(latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix).normalized();
-  }
-  if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_ELBOW) {
-    result_.lastTargetRightElbowPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position;
-  }
-
-  // 重置右手增量
-  result_.rightHandPosDelta.setZero();
-  result_.dotRightHandPosDelta.setZero();
-  result_.dotLastTargetRightHandPosOnExit.setZero();
-
-  // 重置右手Slerp因子
-  result_.rightSlerpQuat_t_ = 0.0;
-  result_.rightSlerpQuat_dt_ = 0.0;
-
-  ROS_INFO("[IncrementalControlModule] Right arm exited incremental mode independently");
 }
 
 IncrementalPoseResult IncrementalControlModule::computeIncrementalPose(const ArmPose& vrLeftPose,
                                                                        const ArmPose& vrRightPose,
-                                                                       const ArmPose& vrLeftElbowPose,
-                                                                       const ArmPose& vrRightElbowPose,
                                                                        bool isLeftActive,
-                                                                       bool isRightActive) {
+                                                                       bool isRightActive,
+                                                                       const Eigen::Quaterniond& qLeftEndEffector,
+                                                                       const Eigen::Quaterniond& qRightEndEffector) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   IncrementalPoseResult latestIncrementalResult;
-  if (!initialized_ || controlMode_ != ControlMode::INCREMENTAL) {
+  if (!initialized_ || (!leftHandStatus_.activated && !rightHandStatus_.activated)) {
     // print in red
     std::cout << "\033[91m[IncrementalControlModule] Not in incremental mode\033[0m" << std::endl;
-    latestIncrementalResult.isValid = false;
+    latestIncrementalResult.isValid_ = false;
     return latestIncrementalResult;
   }
   // print once in green color
   ROS_INFO_ONCE("[IncrementalControlModule] Computing incremental pose successfully");
 
-  computeFhanFiltering(vrLeftPose, vrRightPose, vrLeftElbowPose, vrRightElbowPose, isLeftActive, isRightActive);
+  // 实时更新ee的fk值
+  if (isLeftActive && qLeftEndEffector.norm() > 1e-6) {
+    result_.robotLeftHandQuatMeasEERealTime_ = qLeftEndEffector.normalized();
+  }
+  if (isRightActive && qRightEndEffector.norm() > 1e-6) {
+    result_.robotRightHandQuatMeasEERealTime_ = qRightEndEffector.normalized();
+  }
+
+  // 更新当前姿态
+  if (isLeftActive) {
+    result_.humanLeftHandQuatMeas_ = vrLeftPose.quaternion.normalized();
+  }
+  if (isRightActive) {
+    result_.humanRightHandQuatMeas_ = vrRightPose.quaternion.normalized();
+  }
+
+  computeFhanFiltering(vrLeftPose, vrRightPose, isLeftActive, isRightActive);
   result_.slerpQuat(vrLeftPose.quaternion, vrRightPose.quaternion, isLeftActive, isRightActive);
-  result_.isValid = true;
+
+  // ==================== Python compatible incremental orientation ====================
+  // quest3_node_incremental.py:
+  //   q_delta = q_current * q_anchor^{-1}
+  //   if angle(q_delta) < threshold => identity
+  //   if significant => anchor = current
+  //   q_target = q_delta * q_target
+  if (result_.usePythonIncrementalOrientation_) {
+    if (isLeftActive) {
+      const Eigen::Quaterniond qCur = result_.humanLeftHandQuatMeas_.normalized();
+      const Eigen::Quaterniond qAnchor = result_.humanLeftHandQuatAnchorPython_.normalized();
+      Eigen::Quaterniond qDelta = (qCur * qAnchor.conjugate()).normalized();
+      const double angle = quaternionAngleRad(qDelta);
+      if (angle < result_.pythonOrientationThresholdRad_) {
+        qDelta.setIdentity();
+      } else {
+        result_.humanLeftHandQuatAnchorPython_ = qCur;
+        // qDelta = Eigen::Quaterniond::Identity().slerp(1.35, qDelta).normalized();
+        result_.robotLeftHandQuatTarget_ = (qDelta * result_.robotLeftHandQuatTarget_).normalized();
+      }
+      result_.leftHandDeltaQuatLast_ = qDelta;
+    }
+
+    if (isRightActive) {
+      const Eigen::Quaterniond qCur = result_.humanRightHandQuatMeas_.normalized();
+      const Eigen::Quaterniond qAnchor = result_.humanRightHandQuatAnchorPython_.normalized();
+      Eigen::Quaterniond qDelta = (qCur * qAnchor.conjugate()).normalized();
+      const double angle = quaternionAngleRad(qDelta);
+      if (angle < result_.pythonOrientationThresholdRad_) {
+        qDelta.setIdentity();
+      } else {
+        result_.humanRightHandQuatAnchorPython_ = qCur;
+        // qDelta = Eigen::Quaterniond::Identity().slerp(1.35, qDelta).normalized();
+        result_.robotRightHandQuatTarget_ = (qDelta * result_.robotRightHandQuatTarget_).normalized();
+      }
+      result_.rightHandDeltaQuatLast_ = qDelta;
+    }
+  }
+
+  result_.isValid_ = true;
 
   return result_;
 }
 
-IncrementalPoseResult IncrementalControlModule::computeIncrementalPoseLeftArm(const ArmPose& vrLeftPose,
-                                                                              const ArmPose& vrLeftElbowPose,
-                                                                              bool isLeftActive) {
+IncrementalPoseResult IncrementalControlModule::computeIncrementalPoseLeftArm(
+    const ArmPose& vrLeftPose,
+    bool isLeftActive,
+    const Eigen::Quaterniond& qLeftEndEffector) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   IncrementalPoseResult latestIncrementalResult;
-  if (!initialized_ || (!leftArmIncrementalMode_ && controlMode_ != ControlMode::INCREMENTAL)) {
+  if (!initialized_ || !leftHandStatus_.activated) {
     std::cout << "\033[91m[IncrementalControlModule] Left arm not in incremental mode\033[0m" << std::endl;
-    latestIncrementalResult.isValid = false;
+    latestIncrementalResult.isValid_ = false;
     return latestIncrementalResult;
   }
 
   ROS_INFO_ONCE("[IncrementalControlModule] Computing left arm incremental pose successfully");
 
+  // 实时更新ee的fk值
+  if (isLeftActive && qLeftEndEffector.norm() > 1e-6) {
+    result_.robotLeftHandQuatMeasEERealTime_ = qLeftEndEffector.normalized();
+  }
+
+  // 更新左手当前姿态
+  if (isLeftActive) {
+    result_.humanLeftHandQuatMeas_ = vrLeftPose.quaternion.normalized();
+  }
+
   // 创建虚拟右臂姿态（使用当前result_中的右臂数据）
   ArmPose vrRightPose;
-  vrRightPose.position = result_.rightAnchorPos;
-  vrRightPose.quaternion = result_.lastTargetRightHandQuatOnExit;
-
-  ArmPose vrRightElbowPose;
-  vrRightElbowPose.position = result_.rightElbowAnchorPos;
+  vrRightPose.position = result_.humanRightHandPosAnchor_;
+  vrRightPose.quaternion = result_.humanRightHandQuatMeas_;
 
   // 计算时只激活左臂
-  computeFhanFiltering(vrLeftPose, vrRightPose, vrLeftElbowPose, vrRightElbowPose, isLeftActive, false);
+  computeFhanFiltering(vrLeftPose, vrRightPose, isLeftActive, false);
   result_.slerpQuat(vrLeftPose.quaternion, vrRightPose.quaternion, isLeftActive, false);
-  result_.isValid = true;
+
+  if (result_.usePythonIncrementalOrientation_ && isLeftActive) {
+    const Eigen::Quaterniond qCur = result_.humanLeftHandQuatMeas_.normalized();
+    const Eigen::Quaterniond qAnchor = result_.humanLeftHandQuatAnchorPython_.normalized();
+    Eigen::Quaterniond qDelta = (qCur * qAnchor.conjugate()).normalized();
+    const double angle = quaternionAngleRad(qDelta);
+    if (angle < result_.pythonOrientationThresholdRad_) {
+      qDelta.setIdentity();
+    } else {
+      result_.humanLeftHandQuatAnchorPython_ = qCur;
+      // qDelta = Eigen::Quaterniond::Identity().slerp(1.35, qDelta).normalized();
+      result_.robotLeftHandQuatTarget_ = (qDelta * result_.robotLeftHandQuatTarget_).normalized();
+    }
+    result_.leftHandDeltaQuatLast_ = qDelta;
+  }
+
+  result_.isValid_ = true;
 
   return result_;
 }
 
-IncrementalPoseResult IncrementalControlModule::computeIncrementalPoseRightArm(const ArmPose& vrRightPose,
-                                                                               const ArmPose& vrRightElbowPose,
-                                                                               bool isRightActive) {
+IncrementalPoseResult IncrementalControlModule::computeIncrementalPoseRightArm(
+    const ArmPose& vrRightPose,
+    bool isRightActive,
+    const Eigen::Quaterniond& qRightEndEffector) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   IncrementalPoseResult latestIncrementalResult;
-  if (!initialized_ || (!rightArmIncrementalMode_ && controlMode_ != ControlMode::INCREMENTAL)) {
+  if (!initialized_ || !rightHandStatus_.activated) {
     std::cout << "\033[91m[IncrementalControlModule] Right arm not in incremental mode\033[0m" << std::endl;
-    latestIncrementalResult.isValid = false;
+    latestIncrementalResult.isValid_ = false;
     return latestIncrementalResult;
   }
 
   ROS_INFO_ONCE("[IncrementalControlModule] Computing right arm incremental pose successfully");
 
+  // 实时更新ee的fk值
+  if (isRightActive && qRightEndEffector.norm() > 1e-6) {
+    result_.robotRightHandQuatMeasEERealTime_ = qRightEndEffector.normalized();
+  }
+
+  // 更新右手当前姿态
+  if (isRightActive) {
+    result_.humanRightHandQuatMeas_ = vrRightPose.quaternion.normalized();
+  }
+
   // 创建虚拟左臂姿态（使用当前result_中的左臂数据）
   ArmPose vrLeftPose;
-  vrLeftPose.position = result_.leftAnchorPos;
-  vrLeftPose.quaternion = result_.lastTargetLeftHandQuatOnExit;
-
-  ArmPose vrLeftElbowPose;
-  vrLeftElbowPose.position = result_.leftElbowAnchorPos;
+  vrLeftPose.position = result_.humanLeftHandPosAnchor_;
+  vrLeftPose.quaternion = result_.humanLeftHandQuatMeas_;
 
   // 计算时只激活右臂
-  computeFhanFiltering(vrLeftPose, vrRightPose, vrLeftElbowPose, vrRightElbowPose, false, isRightActive);
+  computeFhanFiltering(vrLeftPose, vrRightPose, false, isRightActive);
   result_.slerpQuat(vrLeftPose.quaternion, vrRightPose.quaternion, false, isRightActive);
-  result_.isValid = true;
+
+  if (result_.usePythonIncrementalOrientation_ && isRightActive) {
+    const Eigen::Quaterniond qCur = result_.humanRightHandQuatMeas_.normalized();
+    const Eigen::Quaterniond qAnchor = result_.humanRightHandQuatAnchorPython_.normalized();
+    Eigen::Quaterniond qDelta = (qCur * qAnchor.conjugate()).normalized();
+    const double angle = quaternionAngleRad(qDelta);
+    if (angle < result_.pythonOrientationThresholdRad_) {
+      qDelta.setIdentity();
+    } else {
+      result_.humanRightHandQuatAnchorPython_ = qCur;
+      // qDelta = Eigen::Quaterniond::Identity().slerp(1.35, qDelta).normalized();
+      result_.robotRightHandQuatTarget_ = (qDelta * result_.robotRightHandQuatTarget_).normalized();
+    }
+    result_.rightHandDeltaQuatLast_ = qDelta;
+  }
+
+  result_.isValid_ = true;
 
   return result_;
-}
-
-bool IncrementalControlModule::detectHumanArmMove(const Eigen::Vector3d& currentLeftHandPos,
-                                                  const Eigen::Vector3d& currentRightHandPos) {
-  std::lock_guard<std::mutex> lock(stateMutex_);
-  if (!initialized_) return false;
-
-  if (!armMoveDetector_.hasHumanArmMoved()) {
-    armMoveDetector_.detectMovement(currentLeftHandPos, currentRightHandPos, config_.armMoveThreshold);
-  }
-  return armMoveDetector_.hasHumanArmMoved();
 }
 
 bool IncrementalControlModule::detectLeftArmMove(const Eigen::Vector3d& currentLeftHandPos) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) return false;
-
-  // 如果左臂已经移动，直接返回true
-  if (leftArmMoved_) {
-    return true;
-  }
-
-  // 如果是第一次检测，记录初始位置
-  if (prevLeftHandPosition_.isZero()) {
-    prevLeftHandPosition_ = currentLeftHandPos;
-    return false;
-  }
-
-  // 计算左手位置的norm误差
-  double leftHandNormError = (currentLeftHandPos - prevLeftHandPosition_).norm();
-
-  // 更新上一帧位置
-  prevLeftHandPosition_ = currentLeftHandPos;
-
-  // 检查是否超过阈值
-  if (leftHandNormError > config_.armMoveThreshold) {
-    leftArmMoved_ = true;
-    ROS_INFO("[IncrementalControlModule] Left arm movement detected: %.4f", leftHandNormError);
-    return true;
-  }
-
-  return false;
+  return leftHandStatus_.detectMovement(currentLeftHandPos, config_.armMoveThreshold);
 }
 
 bool IncrementalControlModule::detectRightArmMove(const Eigen::Vector3d& currentRightHandPos) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) return false;
-
-  // 如果右臂已经移动，直接返回true
-  if (rightArmMoved_) {
-    return true;
-  }
-
-  // 如果是第一次检测，记录初始位置
-  if (prevRightHandPosition_.isZero()) {
-    prevRightHandPosition_ = currentRightHandPos;
-    return false;
-  }
-
-  // 计算右手位置的norm误差
-  double rightHandNormError = (currentRightHandPos - prevRightHandPosition_).norm();
-
-  // 更新上一帧位置
-  prevRightHandPosition_ = currentRightHandPos;
-
-  // 检查是否超过阈值
-  if (rightHandNormError > config_.armMoveThreshold) {
-    rightArmMoved_ = true;
-    ROS_INFO("[IncrementalControlModule] Right arm movement detected: %.4f", rightHandNormError);
-    return true;
-  }
-
-  return false;
-}
-
-bool IncrementalControlModule::hasHumanArmMoved() const {
-  std::lock_guard<std::mutex> lock(stateMutex_);
-  return initialized_ && armMoveDetector_.hasHumanArmMoved();
+  return rightHandStatus_.detectMovement(currentRightHandPos, config_.armMoveThreshold);
 }
 
 bool IncrementalControlModule::hasLeftArmMoved() const {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  return initialized_ && leftArmMoved_;
+  return initialized_ && leftHandStatus_.moving;
 }
 
 bool IncrementalControlModule::hasRightArmMoved() const {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  return initialized_ && rightArmMoved_;
+  return initialized_ && rightHandStatus_.moving;
 }
 
-bool IncrementalControlModule::shouldExitIncrementalModeLeftArm() const {
+bool IncrementalControlModule::shouldExitIncrementalModeLeftArm(bool isLeftArmCtrlModeActive) const {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) return true;
-  if (!joyStickHandler_) return true;          // 手柄未初始化，则应该退出
-  if (!leftArmIncrementalMode_) return false;  // 不在增量模式，无需重复执行退出
-  // 检查左手是否应该退出（假设JoyStickHandler有相应方法）
-  return !joyStickHandler_->isLeftArmCtrlModeActive();
+  if (!leftHandStatus_.activated) return false;  // 不在增量模式，无需重复执行退出
+  // 检查左手是否应该退出
+  return !isLeftArmCtrlModeActive;
 }
 
-bool IncrementalControlModule::shouldExitIncrementalModeRightArm() const {
+bool IncrementalControlModule::shouldExitIncrementalModeRightArm(bool isRightArmCtrlModeActive) const {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) return true;
-  if (!joyStickHandler_) return true;           // 手柄未初始化，则应该退出
-  if (!rightArmIncrementalMode_) return false;  // 不在增量模式，无需重复执行退出
-  // 检查右手是否应该退出（假设JoyStickHandler有相应方法）
-  return !joyStickHandler_->isRightArmCtrlModeActive();
+  if (!rightHandStatus_.activated) return false;  // 不在增量模式，无需重复执行退出
+  // 检查右手是否应该退出
+  return !isRightArmCtrlModeActive;
 }
 
 bool IncrementalControlModule::isIncrementalModeLeftArm() const {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  return initialized_ && leftArmIncrementalMode_;
+  return initialized_ && leftHandStatus_.activated;
 }
 
 bool IncrementalControlModule::isIncrementalModeRightArm() const {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  return initialized_ && rightArmIncrementalMode_;
+  return initialized_ && rightHandStatus_.activated;
 }
 
 void IncrementalControlModule::updateConfig(const IncrementalControlConfig& config) {
   std::lock_guard<std::mutex> lock(stateMutex_);
   config_ = config;
+  result_.usePythonIncrementalOrientation_ = config_.usePythonIncrementalOrientation;
+  result_.pythonOrientationThresholdRad_ = config_.pythonOrientationThresholdRad;
 }
 
 IncrementalPoseResult IncrementalControlModule::getLatestIncrementalResult() const {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) {
     IncrementalPoseResult emptyResult;
-    emptyResult.isValid = false;
+    emptyResult.isValid_ = false;
     return emptyResult;
   }
   return result_;
+}
+
+Eigen::Vector3d IncrementalControlModule::getRobotLeftHandAnchorPos() const {
+  std::lock_guard<std::mutex> lock(stateMutex_);
+  return result_.getRobotLeftHandAnchorPos();
+}
+
+Eigen::Vector3d IncrementalControlModule::getRobotRightHandAnchorPos() const {
+  std::lock_guard<std::mutex> lock(stateMutex_);
+  return result_.getRobotRightHandAnchorPos();
+}
+
+Eigen::Quaterniond IncrementalControlModule::getRobotLeftHandAnchorQuat() const {
+  std::lock_guard<std::mutex> lock(stateMutex_);
+  return result_.getRobotLeftHandAnchorQuat();
+}
+
+Eigen::Quaterniond IncrementalControlModule::getRobotRightHandAnchorQuat() const {
+  std::lock_guard<std::mutex> lock(stateMutex_);
+  return result_.getRobotRightHandAnchorQuat();
 }
 
 const IncrementalControlConfig& IncrementalControlModule::getConfig() const {
@@ -708,26 +608,11 @@ const IncrementalControlConfig& IncrementalControlModule::getConfig() const {
 void IncrementalControlModule::reset() {
   std::lock_guard<std::mutex> lock(stateMutex_);
 
-  // 重置控制模式
-  controlMode_ = ControlMode::NONE;
-
   // 重置增量计算结果
   result_ = IncrementalPoseResult();
 
-  // 重置手臂移动检测器
-  armMoveDetector_.reset();
-
-  // 重置独立控制状态
-  leftArmIncrementalMode_ = false;
-  rightArmIncrementalMode_ = false;
-  leftArmMoved_ = false;
-  rightArmMoved_ = false;
-
-  // 重置上一帧手部位置
-  prevLeftHandPosition_.setZero();
-  prevRightHandPosition_.setZero();
-
-  // ROS_INFO("[IncrementalControlModule] Module reset to initial state");
+  leftHandStatus_.reset();
+  rightHandStatus_.reset();
 }
 
 }  // namespace HighlyDynamic

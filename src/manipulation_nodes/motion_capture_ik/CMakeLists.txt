@@ -144,6 +144,7 @@ add_executable(ik_ros_uni_cpp_node
   src/KeyFramesVisualizer.cpp
   src/BaseIKSolver.cpp
   src/TwoStageTorsoIKRec.cpp
+  src/OneStageIKEndEffector.cpp
   src/Quest3ArmInfoTransformer.cpp
   src/ArmLengthMeasurement.cpp
   src/JoyStickHandler.cpp

@@ -209,6 +209,18 @@ bool Quest3ArmInfoTransformer::computeHandPose(const noitom_hi5_hand_udp_python:
 
   updateVisualizationDataForSide(input, side, handPos, handQuatInW, elbowPos, shoulderPos, R_wS);
 
+  if (side == "Left") {
+    leftHandPose_.position.x() = input.poses[armData.handIndex].position.x;
+    leftHandPose_.position.y() = input.poses[armData.handIndex].position.y;
+    leftHandPose_.position.z() = input.poses[armData.handIndex].position.z;
+  }
+
+  if (side == "Right") {
+    rightHandPose_.position.x() = input.poses[armData.handIndex].position.x;
+    rightHandPose_.position.y() = input.poses[armData.handIndex].position.y;
+    rightHandPose_.position.z() = input.poses[armData.handIndex].position.z;
+  }
+
   return true;
 }
 
@@ -236,7 +248,6 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> Quest3ArmInfoTransformer::scaleArmPo
     const Eigen::Vector3d &handPos,
     const Eigen::Vector3d &humanShoulderOriginPos,
     const std::string &side) {
-  // CZJTODO:通过缩放系数，重新调整shoulderAdaptivePos, elbowPos, handPos，最后再完成长度对齐
   double humanUpperArmLength = (elbowPos - humanShoulderOriginPos).norm();
 
   // 计算人体下臂长度（从肘部到手部）

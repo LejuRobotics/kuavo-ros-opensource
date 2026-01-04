@@ -7,7 +7,7 @@
 #include <leju_utils/define.hpp>
 
 namespace HighlyDynamic {
-
+Eigen::Vector3d kHandRelativeEulerLimitZYX = Eigen::Vector3d(0.9 * 1.57, 0.55, 0.55);  // rad
 namespace {
 
 constexpr double kHandRelativeEulerLimit = 0.55;  // rad
@@ -379,7 +379,12 @@ void TwoStageTorsoIK::setStage2Constraints(drake::multibody::InverseKinematics& 
 
         // 旋转：R_hand_j4 = R_j4^T * R_hand_world
         drake::math::RotationMatrix<double> hand_rotation_relative = j4_rotation.inverse() * hand_rotation_world;
-        hand_rotation_relative = clampHandRotationByEuler(hand_rotation_relative);  // Limit RP to ±0.7 rad
+        // hand_rotation_relative = clampHandRotationByEuler(hand_rotation_relative);  // Limit RP to ±0.7 rad
+
+        Eigen::Quaterniond hand_rotation_relative_quaternion = Eigen::Quaterniond(hand_rotation_relative.matrix());
+        hand_rotation_relative_quaternion =
+            limitQuaternionAngleEulerZYX(hand_rotation_relative_quaternion, kHandRelativeEulerLimitZYX);
+        hand_rotation_relative = drake::math::RotationMatrix<double>(hand_rotation_relative_quaternion.matrix());
 
         // 使用相对位姿设置约束（相对于j4关节frame）
         // AddPositionConstraint(frameB, p_BQ, frameA, p_AQ_lower, p_AQ_upper)
@@ -446,7 +451,11 @@ void TwoStageTorsoIK::setStage2Constraints(drake::multibody::InverseKinematics& 
 
         // 旋转：R_hand_j4 = R_j4^T * R_hand_world
         drake::math::RotationMatrix<double> hand_rotation_relative = j4_rotation.inverse() * hand_rotation_world;
-        hand_rotation_relative = clampHandRotationByEuler(hand_rotation_relative);  // Limit RP to ±0.7 rad
+        // 与左臂保持一致：统一使用 limitQuaternionAngleEulerZYX 做相对姿态限幅
+        Eigen::Quaterniond hand_rotation_relative_quaternion = Eigen::Quaterniond(hand_rotation_relative.matrix());
+        hand_rotation_relative_quaternion =
+            limitQuaternionAngleEulerZYX(hand_rotation_relative_quaternion, kHandRelativeEulerLimitZYX);
+        hand_rotation_relative = drake::math::RotationMatrix<double>(hand_rotation_relative_quaternion.matrix());
 
         // 使用相对位姿设置约束（相对于j4关节frame）
         // AddPositionConstraint(frameB, p_BQ, frameA, p_AQ_lower, p_AQ_upper)

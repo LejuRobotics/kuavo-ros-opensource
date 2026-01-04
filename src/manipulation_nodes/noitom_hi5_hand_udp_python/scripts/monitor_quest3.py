@@ -363,11 +363,12 @@ class Quest3BoneFramePublisher:
                 pose_info_list.timestamp_ms = event.timestamp
                 pose_info_list.is_high_confidence = event.IsDataHighConfidence
                 pose_info_list.is_hand_tracking = event.IsHandTracking
+                self.pose_pub.publish(pose_info_list)
 
-                if pose_info_list.is_high_confidence:
-                    self.pose_pub.publish(pose_info_list)
-                else:
-                    rospy.logwarn("Low confidence pose data, not publishing.")
+                # if pose_info_list.is_high_confidence:
+                #     self.pose_pub.publish(pose_info_list)
+                # else:
+                #     rospy.logwarn("Low confidence pose data, not publishing.")
                 
                 self.rate.sleep()
             except socket.timeout:

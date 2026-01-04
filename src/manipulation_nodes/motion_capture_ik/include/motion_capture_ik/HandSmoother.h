@@ -5,7 +5,7 @@
 
 namespace HighlyDynamic {
 
-class TwoStageTorsoIK;
+class BaseIKSolver;
 
 class HandSmoother {
  public:
@@ -34,7 +34,7 @@ class HandSmoother {
                                         const std::string& handName);
 
   bool updateChangingMode(const Eigen::Vector3d& targetPos,
-                          TwoStageTorsoIK* twoStageTorsoIkPtr,
+                          BaseIKSolver* ikSolverPtr,
                           const Eigen::VectorXd& armJoints,
                           int jointStateSize,
                           double threshold = 0.02);

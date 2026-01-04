@@ -15,10 +15,10 @@ int getRobotVersion(ros::NodeHandle& nodeHandle) {
     ros::Duration(0.1).sleep();
   }
 
-  int robot_version = 42;
-  nodeHandle.getParam("/robot_version", robot_version);
-  std::cout << "robotVersionInt: " << robot_version << std::endl;
-  return robot_version;
+  int robotVersion = 42;
+  nodeHandle.getParam("/robot_version", robotVersion);
+  std::cout << "robotVersionInt: " << robotVersion << std::endl;
+  return robotVersion;
 }
 
 void loadJsonConfig(nlohmann::json& jsonData, const std::string& filename) {
@@ -33,12 +33,12 @@ void loadJsonConfig(nlohmann::json& jsonData, const std::string& filename) {
 }
 
 ArmIdx getCtrlArmIdx(ros::NodeHandle& nodeHandle) {
-  int ctrl_arm_idx = 2;  // 默认值：控制双臂
-  nodeHandle.param("ik_ros_uni_cpp_node/ctrl_arm_idx", ctrl_arm_idx, 2);
-  ROS_INFO("Read ctrl_arm_idx parameter: %d", ctrl_arm_idx);
+  int ctrlArmIdx = 2;  // 默认值：控制双臂
+  nodeHandle.param("ik_ros_uni_cpp_node/ctrl_arm_idx", ctrlArmIdx, 2);
+  ROS_INFO("Read ctrl_arm_idx parameter: %d", ctrlArmIdx);
 
   // 转换为ArmIdx枚举
-  switch (ctrl_arm_idx) {
+  switch (ctrlArmIdx) {
     case 0:
       return ArmIdx::LEFT;
     case 1:
@@ -46,7 +46,7 @@ ArmIdx getCtrlArmIdx(ros::NodeHandle& nodeHandle) {
     case 2:
       return ArmIdx::BOTH;
     default:
-      ROS_WARN("Invalid ctrl_arm_idx value: %d, using default BOTH", ctrl_arm_idx);
+      ROS_WARN("Invalid ctrl_arm_idx value: %d, using default BOTH", ctrlArmIdx);
       return ArmIdx::BOTH;
   }
 }

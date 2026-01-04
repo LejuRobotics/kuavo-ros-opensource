@@ -469,7 +469,7 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
-      Enabled: false
+      Enabled: true
       Marker Topic: /visualization_marker_right
       Name: Marker
       Namespaces:
@@ -485,7 +485,7 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
-      Enabled: false
+      Enabled: true
       Marker Topic: /visualization_marker_right/elbow
       Name: Marker
       Namespaces:
@@ -517,7 +517,7 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
-      Enabled: false
+      Enabled: true
       Marker Topic: /visualization_marker_right/shoulder
       Name: Marker
       Namespaces:
@@ -533,7 +533,7 @@ Visualization Manager:
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
-      Enabled: false
+      Enabled: true
       Marker Topic: /visualization_marker_right/shoulder_quest3
       Name: Marker
       Namespaces:
@@ -558,7 +558,7 @@ Visualization Manager:
     - Alpha: 1
       Arrow Width: 0.5
       Class: rviz/WrenchStamped
-      Enabled: false
+      Enabled: true
       Force Arrow Scale: 2
       Force Color: 204; 51; 51
       Hide Small Values: true
@@ -726,7 +726,7 @@ Visualization Manager:
       Axes Radius: 0.029999999329447746
       Class: rviz/PoseArray
       Color: 255; 0; 255
-      Enabled: false
+      Enabled: true
       Head Length: 0.21000000089406966
       Head Radius: 0.08999999798834324
       Name: right_hand_pose_visual
@@ -760,7 +760,7 @@ Visualization Manager:
       Axes Radius: 0.029999999329447746
       Class: rviz/PoseArray
       Color: 0; 255; 0
-      Enabled: false
+      Enabled: true
       Head Length: 0.21000000089406966
       Head Radius: 0.08999999798834324
       Name: right_hand_measured_pose_visual
@@ -780,7 +780,7 @@ Visualization Manager:
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
-      Enabled: false
+      Enabled: true
       Marker Topic: /visualization_marker/right_hand_x_axis_vector
       Name: right_hand_x_axis_vector
       Namespaces:
@@ -796,7 +796,7 @@ Visualization Manager:
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
-      Enabled: false
+      Enabled: true
       Marker Topic: /visualization_marker/incremental_right_shoulder
       Name: incremental_right_shoulder
       Namespaces:
@@ -812,7 +812,7 @@ Visualization Manager:
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
-      Enabled: false
+      Enabled: true
       Marker Topic: /visualization_marker/incremental_right_elbow
       Name: incremental_right_elbow
       Namespaces:
@@ -854,7 +854,103 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 10
-      Value: false
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/left_link4_pos
+      Name: left_link4_pos
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/right_link4_pos
+      Name: right_link4_pos
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/left_end_effector_pos
+      Name: left_end_effector_pos
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/right_end_effector_pos
+      Name: right_end_effector_pos
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/left_virtual_thumb_pos
+      Name: left_virtual_thumb_pos
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/right_virtual_thumb_pos
+      Name: right_virtual_thumb_pos
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/robot_left_elbow_optimized
+      Name: robot_left_elbow_optimized
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/robot_right_elbow_optimized
+      Name: robot_right_elbow_optimized
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/left_link6_pos_before_opt
+      Name: left_link6_pos_before_opt
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/left_link6_pos_after_opt
+      Name: left_link6_pos_after_opt
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/right_link6_pos_before_opt
+      Name: right_link6_pos_before_opt
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /visualization_marker/right_link6_pos_after_opt
+      Name: right_link6_pos_after_opt
+      Namespaces:
+        {}
+      Queue Size: 10
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 255; 253; 212

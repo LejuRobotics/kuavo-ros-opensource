@@ -2,316 +2,415 @@
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
-#include <memory>
 #include <mutex>
 #include <tuple>
+#include <utility>
 #include <leju_utils/define.hpp>
 #include <leju_utils/math.hpp>
 
 namespace HighlyDynamic {
 
-// 前向声明
-class JoyStickHandler;
+class IncrementalPoseResult {
+ private:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  bool isValid_ = false;
+  // ##############################################################position##############################################################
+  // ##############################################################position##############################################################
+  Eigen::Vector3d robotLeftHandPosAnchor_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d humanLeftHandPosAnchor_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d robotLeftHandDeltaPos_ = Eigen::Vector3d::Zero();  //δ
+  Eigen::Vector3d dotLeftHandDeltaPos_ = Eigen::Vector3d::Zero();    // dδ/dt
 
-/**
- * @brief 增量控制结果结构体
- */
-struct IncrementalPoseResult {
-  // 手部增量位置和姿态
-  Eigen::Vector3d leftHandPosDelta = Eigen::Vector3d::Zero();      //δ
-  Eigen::Vector3d rightHandPosDelta = Eigen::Vector3d::Zero();     //δ
-  Eigen::Vector3d dotLeftHandPosDelta = Eigen::Vector3d::Zero();   // dδ/dt
-  Eigen::Vector3d dotRightHandPosDelta = Eigen::Vector3d::Zero();  // dδ/dt
+  Eigen::Vector3d robotRightHandPosAnchor_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d humanRightHandPosAnchor_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d robotRightHandDeltaPos_ = Eigen::Vector3d::Zero();  //δ
+  Eigen::Vector3d dotRightHandDeltaPos_ = Eigen::Vector3d::Zero();    // dδ/dt
+  // ##############################################################position##############################################################
+  // ##############################################################position##############################################################
 
-  Eigen::Vector3d lastTargetLeftHandPosOnExit = Eigen::Vector3d::Zero();
-  Eigen::Vector3d lastTargetRightHandPosOnExit = Eigen::Vector3d::Zero();
-  Eigen::Vector3d dotLastTargetLeftHandPosOnExit = Eigen::Vector3d::Zero();   // lastTargetLeftHandPosOnExit的速度
-  Eigen::Vector3d dotLastTargetRightHandPosOnExit = Eigen::Vector3d::Zero();  // lastTargetRightHandPosOnExit的速度
+  // ##############################################################quat#################################################################
+  // ##############################################################quat#################################################################
+  Eigen::Quaterniond robotLeftHandQuatAnchor_ = Eigen::Quaterniond::Identity();    // 退出时目标四元数
+  Eigen::Quaterniond robotLeftHandQuatSlerpDes_ = Eigen::Quaterniond::Identity();  // Slerp插值后的四元数
+  Eigen::Quaterniond robotLeftHandQuatMeasEE_ = Eigen::Quaterniond::Identity();  // 只在进入/退出增量式时更新
+  Eigen::Quaterniond robotLeftHandQuatMeasEERealTime_ = Eigen::Quaterniond::Identity();  // 实时更新的ee fk值
+  Eigen::Quaterniond robotLeftHandQuatMeasLink4_ = Eigen::Quaterniond::Identity();
 
-  // 肘部绝对位置滤波（使用fhan算法平滑绝对位置，而非增量）
-  Eigen::Vector3d leftElbowPosFiltered = Eigen::Vector3d::Zero();      // 滤波后的左肘绝对位置
-  Eigen::Vector3d rightElbowPosFiltered = Eigen::Vector3d::Zero();     // 滤波后的右肘绝对位置
-  Eigen::Vector3d dotLeftElbowPosFiltered = Eigen::Vector3d::Zero();   // 滤波后的左肘速度
-  Eigen::Vector3d dotRightElbowPosFiltered = Eigen::Vector3d::Zero();  // 滤波后的右肘速度
+  Eigen::Quaterniond humanLeftHandQuatAnchor_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond humanLeftHandQuatMeas_ = Eigen::Quaterniond::Identity();
 
-  Eigen::Vector3d lastTargetLeftElbowPosOnExit = Eigen::Vector3d::Zero();
-  Eigen::Vector3d lastTargetRightElbowPosOnExit = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond robotRightHandQuatAnchor_ = Eigen::Quaterniond::Identity();    // 退出时目标四元数
+  Eigen::Quaterniond robotRightHandQuatSlerpDes_ = Eigen::Quaterniond::Identity();  // Slerp插值后的四元数
+  Eigen::Quaterniond robotRightHandQuatMeasEE_ = Eigen::Quaterniond::Identity();  // 只在进入/退出增量式时更新
+  Eigen::Quaterniond robotRightHandQuatMeasEERealTime_ = Eigen::Quaterniond::Identity();  // 实时更新的ee fk值
+  Eigen::Quaterniond robotRightHandQuatMeasLink4_ = Eigen::Quaterniond::Identity();
 
-  //姿态不使用增量，但需要启动时进行平滑插值
-  Eigen::Quaterniond lastTargetLeftHandQuatOnExit = Eigen::Quaterniond::Identity();
-  Eigen::Quaterniond lastTargetRightHandQuatOnExit = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond humanRightHandQuatAnchor_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond humanRightHandQuatMeas_ = Eigen::Quaterniond::Identity();
+  // ##############################################################quat#################################################################
+  // ##############################################################quat#################################################################
+  // ==============================================================
+  // Python compatible incremental-orientation (Quest3 python node)
+  // - q_delta = q_cur * q_anchor^{-1}
+  // - if angle(q_delta) < threshold => identity
+  // - if significant => update human anchor to q_cur
+  // - q_target = q_delta * q_target
+  // ==============================================================
+  bool usePythonIncrementalOrientation_ = true;
+  double pythonOrientationThresholdRad_ = 0.01;
 
-  Eigen::Quaterniond latestTargetLeftHandQuatSlerp = Eigen::Quaterniond::Identity();
-  Eigen::Quaterniond latestTargetRightHandQuatSlerp = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond robotLeftHandQuatTarget_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond robotRightHandQuatTarget_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond humanLeftHandQuatAnchorPython_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond humanRightHandQuatAnchorPython_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond leftHandDeltaQuatLast_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond rightHandDeltaQuatLast_ = Eigen::Quaterniond::Identity();
 
-  Eigen::Vector3d leftAnchorPos = Eigen::Vector3d::Zero();
-  Eigen::Vector3d rightAnchorPos = Eigen::Vector3d::Zero();
-  Eigen::Vector3d leftElbowAnchorPos = Eigen::Vector3d::Zero();
-  Eigen::Vector3d rightElbowAnchorPos = Eigen::Vector3d::Zero();
+  double leftSlerpQuatT_ = 0.0;  // Slerp插值因子
+  double leftSlerpQuatDt_ = 0.0;
+  double rightSlerpQuatT_ = 0.0;
+  double rightSlerpQuatDt_ = 0.0;
 
-  double leftSlerpQuat_t_ = 0.0;
-  double leftSlerpQuat_dt_ = 0.0;
-  double rightSlerpQuat_t_ = 0.0;
-  double rightSlerpQuat_dt_ = 0.0;
-  bool isValid = false;
+  Eigen::Vector3d zyxDeltaQuatLimitsW_ = Eigen::Vector3d(0.95 * M_PI / 2.0, M_PI / 4.0, M_PI / 4.0);  // World Frame
+  Eigen::Vector3d zyxFinalQuatLimitsW_ = Eigen::Vector3d(0.475 * M_PI, 0.475 * M_PI, 0.475 * M_PI);   // World Frame
+  Eigen::Vector3d zyxFinalQuatLimitsLink4_ = Eigen::Vector3d(M_PI / 2.0, 0.6, 0.6);                   // Link4 Frame
 
-  Eigen::Vector3d getLatestIncrementalLeftHandPos() const { return lastTargetLeftHandPosOnExit + leftHandPosDelta; }
-  Eigen::Vector3d getLatestIncrementalRightHandPos() const { return lastTargetRightHandPosOnExit + rightHandPosDelta; }
-  Eigen::Vector3d getLatestIncrementalLeftElbowPos() const { return leftElbowPosFiltered; }
-  Eigen::Vector3d getLatestIncrementalRightElbowPos() const { return rightElbowPosFiltered; }
+  Eigen::Vector3d zyxLimitsFinal_ = Eigen::Vector3d(0.95 * M_PI / 2.0, M_PI / 2.0, M_PI / 2.0);
 
-  Eigen::Quaterniond getLatestIncrementalLeftHandQuat() const { return latestTargetLeftHandQuatSlerp; }
-  Eigen::Quaterniond getLatestIncrementalRightHandQuat() const { return latestTargetRightHandQuatSlerp; }
+  // 旋转到常用工作空间附近 → 裁剪 → 恢复到世界坐标系下
+  Eigen::Quaterniond yRotOffset_ = Eigen::Quaterniond(Eigen::AngleAxisd(M_PI * 2.0 / 5.0, Eigen::Vector3d::UnitY()));
 
-  std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Vector3d, Eigen::Vector3d> getLatestIncrementalHandPose()
-      const {
-    return std::make_tuple(getLatestIncrementalLeftHandQuat(),
-                           getLatestIncrementalRightHandQuat(),
-                           getLatestIncrementalLeftHandPos(),
-                           getLatestIncrementalRightHandPos());
-  }
+  Eigen::Vector3d getLatestRobotLeftHandPos() const { return robotLeftHandPosAnchor_ + robotLeftHandDeltaPos_; }
+  Eigen::Vector3d getLatestRobotRightHandPos() const { return robotRightHandPosAnchor_ + robotRightHandDeltaPos_; }
 
-  void saveLastTargetOnExit(const std::vector<PoseData>& latestPoseConstraintList) {
+  Eigen::Quaterniond getLatestRobotLeftHandQuatAbs() const { return robotLeftHandQuatSlerpDes_; }
+  Eigen::Quaterniond getLatestRobotRightHandQuatAbs() const { return robotRightHandQuatSlerpDes_; }
+
+  void saveLastOnExit(const std::vector<PoseData>& latestPoseConstraintList) {
     if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
-      lastTargetLeftHandPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
-      lastTargetLeftHandQuatOnExit =  // 不增量计算，一直持续插值跟踪即可
+      robotLeftHandPosAnchor_ = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
+      robotLeftHandQuatAnchor_ =
           Eigen::Quaterniond(latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix).normalized();
-    } else {
-      std::cout << "\033[91m[IncrementalControlModule] Left hand data not available, using default values\033[0m"
-                << std::endl;
+      robotLeftHandQuatTarget_ = robotLeftHandQuatAnchor_;
     }
 
     if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
-      lastTargetRightHandPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
-      lastTargetRightHandQuatOnExit =  // 不增量计算，一直持续插值跟踪即可
+      robotRightHandPosAnchor_ = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
+      robotRightHandQuatAnchor_ =
           Eigen::Quaterniond(latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix).normalized();
-    } else {
-      std::cout << "\033[91m[IncrementalControlModule] Right hand data not available, using default values\033[0m"
-                << std::endl;
-    }
-
-    if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_ELBOW) {
-      lastTargetLeftElbowPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position;
-    } else {
-      std::cout << "\033[91m[IncrementalControlModule] Left elbow data not available, using default values\033[0m"
-                << std::endl;
-    }
-
-    if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_ELBOW) {
-      lastTargetRightElbowPosOnExit = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position;
-    } else {
-      std::cout << "\033[91m[IncrementalControlModule] Right elbow data not available, using default values\033[0m"
-                << std::endl;
+      robotRightHandQuatTarget_ = robotRightHandQuatAnchor_;
     }
   }
 
   void resetDelta() {
-    leftHandPosDelta.setZero();
-    rightHandPosDelta.setZero();
-    dotLeftHandPosDelta.setZero();
-    dotRightHandPosDelta.setZero();
-    // 重置lastTargetLeftHandPosOnExit和lastTargetRightHandPosOnExit的速度
-    dotLastTargetLeftHandPosOnExit.setZero();
-    dotLastTargetRightHandPosOnExit.setZero();
-    // 手肘使用绝对位置滤波，不需要重置增量，但需要重置滤波状态
-    leftElbowPosFiltered = lastTargetLeftElbowPosOnExit;
-    rightElbowPosFiltered = lastTargetRightElbowPosOnExit;
-    dotLeftElbowPosFiltered.setZero();
-    dotRightElbowPosFiltered.setZero();
+    robotLeftHandDeltaPos_.setZero();
+    robotRightHandDeltaPos_.setZero();
+    dotLeftHandDeltaPos_.setZero();
+    dotRightHandDeltaPos_.setZero();
+    leftHandDeltaQuatLast_.setIdentity();
+    rightHandDeltaQuatLast_.setIdentity();
   }
 
   void resetSlerpFactor() {
-    leftSlerpQuat_t_ = 0.0;
-    leftSlerpQuat_dt_ = 0.0;
-    rightSlerpQuat_t_ = 0.0;
-    rightSlerpQuat_dt_ = 0.0;
+    leftSlerpQuatT_ = 0.0;
+    leftSlerpQuatDt_ = 0.0;
+    rightSlerpQuatT_ = 0.0;
+    rightSlerpQuatDt_ = 0.0;
   }
 
-  void slerpQuat(const Eigen::Quaterniond& leftHandTargetQuat,
-                 const Eigen::Quaterniond& rightHandTargetQuat,
+  void resetLeftHandDelta() {
+    robotLeftHandDeltaPos_.setZero();
+    dotLeftHandDeltaPos_.setZero();
+    leftSlerpQuatT_ = 0.0;
+    leftSlerpQuatDt_ = 0.0;
+    leftHandDeltaQuatLast_.setIdentity();
+  }
+
+  void resetRightHandDelta() {
+    robotRightHandDeltaPos_.setZero();
+    dotRightHandDeltaPos_.setZero();
+    rightSlerpQuatT_ = 0.0;
+    rightSlerpQuatDt_ = 0.0;
+    rightHandDeltaQuatLast_.setIdentity();
+  }
+
+  void slerpQuat(const Eigen::Quaterniond& leftHandQuat,
+                 const Eigen::Quaterniond& rightHandQuat,
                  bool isLeftActive,
                  bool isRightActive) {
     if (isLeftActive) {
-      auto tmpLeftHandQuat = lastTargetLeftHandQuatOnExit;
-      latestTargetLeftHandQuatSlerp = tmpLeftHandQuat.slerp(leftSlerpQuat_t_, leftHandTargetQuat).normalized();
+      const Eigen::Quaterniond anchor = robotLeftHandQuatAnchor_;
+      robotLeftHandQuatSlerpDes_ = anchor.slerp(leftSlerpQuatT_, leftHandQuat).normalized();
+      if (!usePythonIncrementalOrientation_) {
+        robotLeftHandQuatTarget_ = robotLeftHandQuatSlerpDes_;
+      }
     }
     if (isRightActive) {
-      auto tmpRightHandQuat = lastTargetRightHandQuatOnExit;
-      latestTargetRightHandQuatSlerp = tmpRightHandQuat.slerp(rightSlerpQuat_t_, rightHandTargetQuat).normalized();
+      const Eigen::Quaterniond anchor = robotRightHandQuatAnchor_;
+      robotRightHandQuatSlerpDes_ = anchor.slerp(rightSlerpQuatT_, rightHandQuat).normalized();
+      if (!usePythonIncrementalOrientation_) {
+        robotRightHandQuatTarget_ = robotRightHandQuatSlerpDes_;
+      }
     }
   }
+
+ public:
+  std::pair<Eigen::Quaterniond, Eigen::Quaterniond> getLatestRobotLeftHandQuatInc(bool smoothRotation = true) const {
+    (void)smoothRotation;
+
+    Eigen::Quaterniond qRobotTarget = robotLeftHandQuatTarget_;
+
+    qRobotTarget = robotLeftHandQuatMeasEERealTime_.conjugate() * qRobotTarget;
+    qRobotTarget = robotLeftHandQuatMeasEERealTime_ * limitQuaternionAngleEulerZYX(qRobotTarget, zyxLimitsFinal_);
+
+    return std::make_pair(qRobotTarget, leftHandDeltaQuatLast_);
+  }
+
+  std::pair<Eigen::Quaterniond, Eigen::Quaterniond> getLatestRobotRightHandQuatInc(bool smoothRotation = true) const {
+    Eigen::Quaterniond qRobotTarget = robotRightHandQuatTarget_;
+
+    qRobotTarget = robotRightHandQuatMeasEERealTime_.conjugate() * qRobotTarget;
+    // Keep symmetric with left hand in python-incremental mode:
+    // clip relative rotation in end-effector frame with the same limits to avoid right-hand under-tracking.
+    qRobotTarget = robotRightHandQuatMeasEERealTime_ * limitQuaternionAngleEulerZYX(qRobotTarget, zyxLimitsFinal_);
+
+    return std::make_pair(qRobotTarget, rightHandDeltaQuatLast_);
+  }
+
+  std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Vector3d, Eigen::Vector3d> getLatestIncrementalHandPose(
+      bool incrementalPos = true,
+      bool incrementalQuat = false,
+      bool smoothRotation = true) const {
+    if (incrementalQuat) {
+      return std::make_tuple(getLatestRobotLeftHandQuatInc(smoothRotation).first,
+                             getLatestRobotRightHandQuatInc(smoothRotation).first,
+                             getLatestRobotLeftHandPos(),
+                             getLatestRobotRightHandPos());
+    } else {
+      return std::make_tuple(getLatestRobotLeftHandQuatAbs(),
+                             getLatestRobotRightHandQuatAbs(),
+                             getLatestRobotLeftHandPos(),
+                             getLatestRobotRightHandPos());
+    }
+  }
+
+  bool isValid() const { return isValid_; }
+  Eigen::Vector3d getLeftAnchorPos() const { return humanLeftHandPosAnchor_; }
+  Eigen::Vector3d getRightAnchorPos() const { return humanRightHandPosAnchor_; }
+
+  // 获取机器人手部的 anchor 姿态
+  Eigen::Vector3d getRobotLeftHandAnchorPos() const { return robotLeftHandPosAnchor_; }
+  Eigen::Vector3d getRobotRightHandAnchorPos() const { return robotRightHandPosAnchor_; }
+  Eigen::Quaterniond getRobotLeftHandAnchorQuat() const { return robotLeftHandQuatAnchor_; }
+  Eigen::Quaterniond getRobotRightHandAnchorQuat() const { return robotRightHandQuatAnchor_; }
+
+  friend class IncrementalControlModule;
 };
 
-/**
- * @brief 增量控制参数配置
- */
 struct IncrementalControlConfig {
-  double fhan_r = 900.0;                                        // FHAN跟踪微分器加速度约束参数
-  double fhan_kh0 = 6.0;                                        // FHAN跟踪微分器平滑系数
+  double fhanR = 900.0;                                         // FHAN跟踪微分器加速度约束参数
+  double fhanKh0 = 6.0;                                         // FHAN跟踪微分器平滑系数
   Eigen::Vector3d deltaScale = Eigen::Vector3d(1.0, 1.0, 1.0);  // VR增量缩放参数（x, y, z三轴独立）
   double maxPosDiff = 0.45;                                     // 最大位置差异阈值
   double armMoveThreshold = 0.01;                               // 手臂移动检测阈值
   double publishRate = 100.0;                                   // 发布频率
+  bool usePythonIncrementalOrientation = true;                  // 姿态增量使用Quest3 python版本逻辑
+  double pythonOrientationThresholdRad = 0.01;                  // Quest3 python: orientation_threshold
+  Eigen::Vector3d zyxLimitsFinal =
+      Eigen::Vector3d(0.95 * M_PI / 2.0, M_PI / 2.0, M_PI / 2.0);  // 最终四元数角度限制（ZYX欧拉角）
+  Eigen::Vector3d zyxLimitsEE =
+      Eigen::Vector3d(M_PI / 2.0, M_PI / 2.0, M_PI / 2.0);  // 相对end-effector的四元数角度限制（ZYX欧拉角）
+  Eigen::Vector3d zyxLimitsLink4 = Eigen::Vector3d(M_PI / 2.0, 0.6, 0.6);  // 相对link4的四元数角度限制（ZYX欧拉角）
+};
 
-  void print() const {
-    // print in green color
-    std::cout << "\033[92m"
-              << "[IncrementalControlConfig] Incremental mode parameters initialized: fhan_r=" << fhan_r
-              << ", fhan_kh0=" << fhan_kh0 << ", deltaScale=[" << deltaScale.x() << ", " << deltaScale.y() << ", "
-              << deltaScale.z() << "], maxPosDiff=" << maxPosDiff << ", armMoveThreshold=" << armMoveThreshold
-              << "\033[0m" << std::endl;
+struct HandStatus {
+  bool activated = false;                                               // 手臂是否激活
+  bool moving = false;                                                  // 手臂是否已移动
+  Eigen::Vector3d lastPosition = Eigen::Vector3d::Zero();               // 上一帧手部位置
+  Eigen::Quaterniond lastOrientation = Eigen::Quaterniond::Identity();  // 上一帧手部姿态
+  bool isFirstFrame = true;           // 是否为第一帧数据（用于移动检测）
+  double lastMovementDistance = 0.0;  // 最后一次检测到的移动距离
+
+  void ready(const Eigen::Vector3d& position, const Eigen::Quaterniond& orientation) {
+    activated = true;
+    moving = false;
+    lastPosition = position;
+    lastOrientation = orientation;
+    isFirstFrame = true;  // 重置为第一帧，准备开始移动检测
+  }
+
+  void unready(const Eigen::Vector3d& position, const Eigen::Quaterniond& orientation) {
+    activated = false;
+    moving = false;
+    lastPosition = position;
+    lastOrientation = orientation;
+    isFirstFrame = true;  // 重置为第一帧
+  }
+
+  bool detectMovement(const Eigen::Vector3d& currentPosition, double threshold = 0.01) {
+    if (moving) {
+      return true;
+    }
+
+    if (isFirstFrame) {
+      lastPosition = currentPosition;
+      isFirstFrame = false;
+      return false;
+    }
+
+    // 计算手部位置的norm误差
+    double normError = (currentPosition - lastPosition).norm();
+    lastMovementDistance = normError;  // 保存移动距离，供外部使用
+
+    // 更新上一帧位置
+    lastPosition = currentPosition;
+
+    // 检查是否超过阈值
+    if (normError > threshold) {
+      moving = true;
+      return true;
+    }
+
+    return false;
+  }
+
+  void reset() {
+    moving = false;
+    isFirstFrame = true;
+    lastPosition.setZero();
+    lastOrientation = Eigen::Quaterniond::Identity();
+    lastMovementDistance = 0.0;
   }
 };
 
-/**
- * @brief 统一的增量控制模块类（取消多层封装）
- */
 class IncrementalControlModule {
  public:
-  // 构造函数和析构函数
-  explicit IncrementalControlModule(std::shared_ptr<JoyStickHandler> joyStickHandler,
-                                    const IncrementalControlConfig& config = IncrementalControlConfig{});
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  explicit IncrementalControlModule(const IncrementalControlConfig& config = IncrementalControlConfig{});
   ~IncrementalControlModule() = default;
 
-  // 禁用拷贝和赋值
   IncrementalControlModule(const IncrementalControlModule&) = delete;
   IncrementalControlModule& operator=(const IncrementalControlModule&) = delete;
 
-  // 核心功能接口
-  void enterIncrementalMode(const ArmPose& vrLeftPose,
-                            const ArmPose& vrRightPose,
-                            const ArmPose& vrLeftElbowPose,
-                            const ArmPose& vrRightElbowPose,
-                            const std::vector<PoseData>& latestPoseConstraintList);
-
   // 左右手独立进入增量模式接口
   void enterIncrementalModeLeftArm(const ArmPose& vrLeftPose,
-                                   const ArmPose& vrLeftElbowPose,
-                                   const std::vector<PoseData>& latestPoseConstraintList);
+                                   const std::vector<PoseData>& latestPoseConstraintList,
+                                   const Eigen::Vector3d& pEndEffector,
+                                   const Eigen::Quaterniond& qEndEffector,
+                                   const Eigen::Quaterniond& qLink4);
 
   void enterIncrementalModeRightArm(const ArmPose& vrRightPose,
-                                    const ArmPose& vrRightElbowPose,
-                                    const std::vector<PoseData>& latestPoseConstraintList);
+                                    const std::vector<PoseData>& latestPoseConstraintList,
+                                    const Eigen::Vector3d& pEndEffector,
+                                    const Eigen::Quaterniond& qEndEffector,
+                                    const Eigen::Quaterniond& qLink4);
 
-  void exitIncrementalMode(const ArmPose& vrLeftPose,
-                           const ArmPose& vrRightPose,
-                           const ArmPose& vrLeftElbowPose,
-                           const ArmPose& vrRightElbowPose,
-                           const std::vector<PoseData>& latestPoseConstraintList);
-
-  // 左右手独立退出增量模式接口
   void exitIncrementalModeLeftArm(const ArmPose& vrLeftPose,
-                                  const ArmPose& vrLeftElbowPose,
-                                  const std::vector<PoseData>& latestPoseConstraintList);
+                                  const std::vector<PoseData>& latestPoseConstraintList,
+                                  const Eigen::Vector3d& pEndEffector,
+                                  const Eigen::Quaterniond& qEndEffector,
+                                  const Eigen::Quaterniond& qLink4);
 
   void exitIncrementalModeRightArm(const ArmPose& vrRightPose,
-                                   const ArmPose& vrRightElbowPose,
-                                   const std::vector<PoseData>& latestPoseConstraintList);
+                                   const std::vector<PoseData>& latestPoseConstraintList,
+                                   const Eigen::Vector3d& pEndEffector,
+                                   const Eigen::Quaterniond& qEndEffector,
+                                   const Eigen::Quaterniond& qLink4);
 
-  IncrementalPoseResult computeIncrementalPose(const ArmPose& vrLeftPose,
-                                               const ArmPose& vrRightPose,
-                                               const ArmPose& vrLeftElbowPose,
-                                               const ArmPose& vrRightElbowPose,
-                                               bool isLeftActive = true,
-                                               bool isRightActive = true);
+  IncrementalPoseResult computeIncrementalPose(
+      const ArmPose& vrLeftPose,
+      const ArmPose& vrRightPose,
+      bool isLeftActive = true,
+      bool isRightActive = true,
+      const Eigen::Quaterniond& qLeftEndEffector = Eigen::Quaterniond::Identity(),
+      const Eigen::Quaterniond& qRightEndEffector = Eigen::Quaterniond::Identity());
 
   // 左右手独立计算增量位姿接口
-  IncrementalPoseResult computeIncrementalPoseLeftArm(const ArmPose& vrLeftPose,
-                                                      const ArmPose& vrLeftElbowPose,
-                                                      bool isLeftActive = true);
+  IncrementalPoseResult computeIncrementalPoseLeftArm(
+      const ArmPose& vrLeftPose,
+      bool isLeftActive = true,
+      const Eigen::Quaterniond& qLeftEndEffector = Eigen::Quaterniond::Identity());
 
-  IncrementalPoseResult computeIncrementalPoseRightArm(const ArmPose& vrRightPose,
-                                                       const ArmPose& vrRightElbowPose,
-                                                       bool isRightActive = true);
+  IncrementalPoseResult computeIncrementalPoseRightArm(
+      const ArmPose& vrRightPose,
+      bool isRightActive = true,
+      const Eigen::Quaterniond& qRightEndEffector = Eigen::Quaterniond::Identity());
 
   IncrementalPoseResult getLatestIncrementalResult() const;
 
-  // 单臂锚点更新（单臂从关闭切换到激活时调用，避免跳变）
-  void updateLeftArmAnchor(const ArmPose& vrLeftPose, const Eigen::Vector3d& currentRobotLeftHandPos);
-  void updateRightArmAnchor(const ArmPose& vrRightPose, const Eigen::Vector3d& currentRobotRightHandPos);
+  // 读取最新 anchor 姿态的接口函数
+  Eigen::Vector3d getRobotLeftHandAnchorPos() const;
+  Eigen::Vector3d getRobotRightHandAnchorPos() const;
+  Eigen::Quaterniond getRobotLeftHandAnchorQuat() const;
+  Eigen::Quaterniond getRobotRightHandAnchorQuat() const;
+
+  void updateLeftArmPoseAnchor(const ArmPose& vrLeftPose,
+                               const std::vector<PoseData>& latestPoseConstraintList,
+                               const Eigen::Vector3d& pEndEffector = Eigen::Vector3d::Zero(),
+                               const Eigen::Quaterniond& qEndEffector = Eigen::Quaterniond::Identity(),
+                               const Eigen::Quaterniond& qLink4 = Eigen::Quaterniond::Identity());
+  void updateRightArmPoseAnchor(const ArmPose& vrRightPose,
+                                const std::vector<PoseData>& latestPoseConstraintList,
+                                const Eigen::Vector3d& pEndEffector = Eigen::Vector3d::Zero(),
+                                const Eigen::Quaterniond& qEndEffector = Eigen::Quaterniond::Identity(),
+                                const Eigen::Quaterniond& qLink4 = Eigen::Quaterniond::Identity());
 
   // 设定手部姿态种子，用于首次进入增量模式的 slerp 起点
-  void setHandQuatSeeds(const Eigen::Quaterniond& leftHandQuatSeed, const Eigen::Quaterniond& rightHandQuatSeed);
+  void setHandQuatSeeds(const Eigen::Quaterniond& leftHandQuatSeed,
+                        const Eigen::Quaterniond& rightHandQuatSeed,
+                        bool isIncremetalOrientation = false);
 
-  // 人体手臂移动检测
-  bool detectHumanArmMove(const Eigen::Vector3d& currentLeftHandPos, const Eigen::Vector3d& currentRightHandPos);
   bool detectLeftArmMove(const Eigen::Vector3d& currentLeftHandPos);
   bool detectRightArmMove(const Eigen::Vector3d& currentRightHandPos);
 
-  // 状态查询接口
-  bool shouldEnterIncrementalMode() const;
-  bool shouldEnterIncrementalModeLeftArm() const;
-  bool shouldEnterIncrementalModeRightArm() const;
+  bool shouldEnterIncrementalModeLeftArm(bool isLeftGrip) const;
+  bool shouldEnterIncrementalModeRightArm(bool isRightGrip) const;
 
-  bool shouldExitIncrementalMode() const;
-  bool shouldExitIncrementalModeLeftArm() const;
-  bool shouldExitIncrementalModeRightArm() const;
+  bool shouldExitIncrementalMode(bool isLeftGrip, bool isRightGrip) const;
+  bool shouldExitIncrementalModeLeftArm(bool isLeftArmCtrlModeActive) const;
+  bool shouldExitIncrementalModeRightArm(bool isRightArmCtrlModeActive) const;
 
   bool isIncrementalMode() const;
   bool isIncrementalModeLeftArm() const;
   bool isIncrementalModeRightArm() const;
 
-  bool hasHumanArmMoved() const;
   bool hasLeftArmMoved() const;
   bool hasRightArmMoved() const;
 
   void updateConfig(const IncrementalControlConfig& config);
   const IncrementalControlConfig& getConfig() const;
 
-  /**
-   * @brief 重置所有内部状态，使模块恢复到初始状态
-   */
   void reset();
 
  private:
-  // 原 IncrementalModeStateMachine 的成员
-  ControlMode controlMode_ = ControlMode::NONE;
-  std::shared_ptr<JoyStickHandler> joyStickHandler_;
-
-  // 原 IncrementalPoseCalculator 的成员
   IncrementalPoseResult result_;
 
-  // 原 IncrementalControlModule 的成员
-  HumanArmMoveDetector armMoveDetector_;
   IncrementalControlConfig config_;
   bool initialized_ = false;
 
-  // 左右手独立控制状态
-  bool leftArmIncrementalMode_ = false;    // 左臂是否处于增量模式
-  bool rightArmIncrementalMode_ = false;   // 右臂是否处于增量模式
-  bool leftArmMoved_ = false;              // 左臂是否已移动
-  bool rightArmMoved_ = false;             // 右臂是否已移动
-  Eigen::Vector3d prevLeftHandPosition_;   // 上一帧左手位置
-  Eigen::Vector3d prevRightHandPosition_;  // 上一帧右手位置
+  HandStatus leftHandStatus_;   // 左手状态
+  HandStatus rightHandStatus_;  // 右手状态
 
-  // 互斥锁保护共享状态
   mutable std::mutex stateMutex_;
 
-  // 原 IncrementalPoseCalculator 的私有方法
+  // 几乎不通过ee限制anchor， 避免打断连续性
+  Eigen::Vector3d zyxLimitsEE_ = Eigen::Vector3d(M_PI / 2.0, M_PI / 2.0, M_PI / 2.0);
+
+  // 相对link4设置阈值限制
+  Eigen::Vector3d zyxLimitsLink4_ = Eigen::Vector3d(M_PI / 2.0, 0.6, 0.6);
+
+  Eigen::Vector3d defaultLeftHandPos_;   // 左臂默认位置锚点
+  Eigen::Vector3d defaultRightHandPos_;  // 右臂默认位置锚点
+  double posAnchorZeroThreshold_;        // 位置锚点零值检测阈值
+  double slerpQuatFactorThreshold_;      // slerpQuatFactor检查阈值
+
   void computeFhanFiltering(const ArmPose& vrLeftPose,
                             const ArmPose& vrRightPose,
-                            const ArmPose& vrLeftElbowPose,
-                            const ArmPose& vrRightElbowPose,
                             bool isLeftActive,
                             bool isRightActive,
                             const double slerpQuatFactor = 1.0);
 
-  void updateHumanPoseAnchor(const ArmPose& vrLeftPose,
-                             const ArmPose& vrRightPose,
-                             const ArmPose& vrLeftElbowPose,
-                             const ArmPose& vrRightElbowPose,
-                             const std::vector<PoseData>& latestPoseConstraintList);
-
-  // 左右手独立更新锚点的私有辅助方法
-  void updateLeftArmPoseAnchor(const ArmPose& vrLeftPose,
-                               const ArmPose& vrLeftElbowPose,
-                               const std::vector<PoseData>& latestPoseConstraintList);
-
-  void updateRightArmPoseAnchor(const ArmPose& vrRightPose,
-                                const ArmPose& vrRightElbowPose,
-                                const std::vector<PoseData>& latestPoseConstraintList);
-
-  void updateLastTargetOnExit(const std::vector<PoseData>& latestPoseConstraintList);
+  void updateLastOnExit(const std::vector<PoseData>& latestPoseConstraintList);
   void resetDelta();
   void resetSlerpFactor();
 };

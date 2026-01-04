@@ -8,10 +8,18 @@
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
-KeyFramesVisualizer::KeyFramesVisualizer(ros::NodeHandle& nodeHandle) : nodeHandle_(nodeHandle) {}
+KeyFramesVisualizer::KeyFramesVisualizer(ros::NodeHandle& nodeHandle)
+    : nodeHandle_(nodeHandle), elbowMinDistance_(0.18), elbowMaxDistance_(0.65) {}
 
 void KeyFramesVisualizer::initialize() {
   ROS_INFO("[KeyFramesVisualizer] Initializing Quest3 visualization system...");
+
+  // 从ROS参数读取手到肘距离约束参数
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/elbow_min_distance", elbowMinDistance_, 0.18);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/elbow_max_distance", elbowMaxDistance_, 0.65);
+  ROS_INFO(
+      "[KeyFramesVisualizer] Elbow distance constraints: min=%.2f, max=%.2f", elbowMinDistance_, elbowMaxDistance_);
+
   initializePublishers();
   ROS_INFO("[KeyFramesVisualizer] Quest3 visualization system initialized successfully");
 }
@@ -93,6 +101,35 @@ void KeyFramesVisualizer::initializePublishers() {
       nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/scaled_left_hand_pos", 1);
   scaledRightHandPosPublisher_ =
       nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/scaled_right_hand_pos", 1);
+
+  // 初始化六个关键点可视化发布器（Marker类型）
+  leftLink4PosPublisher_ = nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/left_link4_pos", 1);
+  rightLink4PosPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/right_link4_pos", 1);
+  leftEndEffectorPosPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/left_end_effector_pos", 1);
+  rightEndEffectorPosPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/right_end_effector_pos", 1);
+  leftVirtualThumbPosPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/left_virtual_thumb_pos", 1);
+  rightVirtualThumbPosPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/right_virtual_thumb_pos", 1);
+
+  // 初始化机器人优化后的肘部位置可视化发布器（Marker类型，墨绿色，不透明）
+  robotLeftElbowPosPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/robot_left_elbow_optimized", 1);
+  robotRightElbowPosPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/robot_right_elbow_optimized", 1);
+
+  // 初始化优化前后的手部位置可视化发布器（Marker类型）
+  leftHandPosBeforeOptPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/left_link6_pos_before_opt", 1);
+  leftHandPosAfterOptPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/left_link6_pos_after_opt", 1);
+  rightHandPosBeforeOptPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/right_link6_pos_before_opt", 1);
+  rightHandPosAfterOptPublisher_ =
+      nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/right_link6_pos_after_opt", 1);
 
   ROS_INFO("[KeyFramesVisualizer] All visualization publishers initialized successfully");
 }
@@ -262,11 +299,11 @@ visualization_msgs::MarkerArray KeyFramesVisualizer::constructMarkerArray(
 
 void KeyFramesVisualizer::publishIncrementalModePositions(const IncrementalPoseResult& incrementalResult,
                                                           const std::vector<PoseData>& poseConstraintList) {
-  if (!incrementalResult.isValid) return;
+  if (!incrementalResult.isValid()) return;
 
   // 发布锚点位置
-  leftAnchorPosPublisher_.publish(eigenToPoint(incrementalResult.leftAnchorPos));
-  rightAnchorPosPublisher_.publish(eigenToPoint(incrementalResult.rightAnchorPos));
+  leftAnchorPosPublisher_.publish(eigenToPoint(incrementalResult.getLeftAnchorPos()));
+  rightAnchorPosPublisher_.publish(eigenToPoint(incrementalResult.getRightAnchorPos()));
 
   // 发布测量位置
   if (poseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
@@ -281,7 +318,7 @@ void KeyFramesVisualizer::publishIncrementalPoseVisualization(
     const IncrementalPoseResult& incrementalResult,
     const std::vector<PoseData>& poseConstraintList,
     std::function<void(Eigen::Vector3d&, Eigen::Quaterniond&, Eigen::Vector3d&, Eigen::Quaterniond&)> fkCallback) {
-  if (!incrementalResult.isValid) return;
+  if (!incrementalResult.isValid()) return;
 
   ros::Time currentTime = ros::Time::now();
   Eigen::Vector3d visLeftPos, visRightPos, incrementalLeftElbowPos, incrementalRightElbowPos;
@@ -652,15 +689,16 @@ void KeyFramesVisualizer::publishShoulderElbowPosVisualization(const Eigen::Vect
 
 void KeyFramesVisualizer::publishHandSphereConstraintVisualization(const Eigen::Vector3d& leftShoulderPos,
                                                                    const Eigen::Vector3d& rightShoulderPos,
-                                                                   double sphereRadius) {
+                                                                   double sphereRadius,
+                                                                   double minReachableDistance) {
   ros::Time currentTime = ros::Time::now();
 
-  // 发布左手球约束可视化（半透明球体）
+  // ========== 左手外部大球约束可视化（半透明球体） ==========
   visualization_msgs::Marker leftHandSphereMarker;
   leftHandSphereMarker.header.frame_id = "base_link";
   leftHandSphereMarker.header.stamp = currentTime;
   leftHandSphereMarker.ns = "left_hand_sphere_constraint";
-  leftHandSphereMarker.id = 0;
+  leftHandSphereMarker.id = 0;  // 外部大球
   leftHandSphereMarker.type = visualization_msgs::Marker::SPHERE;
   leftHandSphereMarker.action = visualization_msgs::Marker::ADD;
   leftHandSphereMarker.pose.position.x = leftShoulderPos.x();
@@ -679,12 +717,36 @@ void KeyFramesVisualizer::publishHandSphereConstraintVisualization(const Eigen::
   leftHandSphereMarker.color.b = 0.0;
   leftHandBoundBoxPublisher_.publish(leftHandSphereMarker);
 
-  // 发布右手球约束可视化（半透明球体）
+  // ========== 左手内部小球约束可视化（半透明球体） ==========
+  visualization_msgs::Marker leftHandInnerSphereMarker;
+  leftHandInnerSphereMarker.header.frame_id = "base_link";
+  leftHandInnerSphereMarker.header.stamp = currentTime;
+  leftHandInnerSphereMarker.ns = "left_hand_sphere_constraint";
+  leftHandInnerSphereMarker.id = 1;  // 内部小球
+  leftHandInnerSphereMarker.type = visualization_msgs::Marker::SPHERE;
+  leftHandInnerSphereMarker.action = visualization_msgs::Marker::ADD;
+  leftHandInnerSphereMarker.pose.position.x = leftShoulderPos.x();
+  leftHandInnerSphereMarker.pose.position.y = leftShoulderPos.y();
+  leftHandInnerSphereMarker.pose.position.z = leftShoulderPos.z();
+  leftHandInnerSphereMarker.pose.orientation.w = 1.0;  // 无旋转
+  leftHandInnerSphereMarker.pose.orientation.x = 0.0;
+  leftHandInnerSphereMarker.pose.orientation.y = 0.0;
+  leftHandInnerSphereMarker.pose.orientation.z = 0.0;
+  leftHandInnerSphereMarker.scale.x = minReachableDistance * 2.0;  // 球体直径
+  leftHandInnerSphereMarker.scale.y = minReachableDistance * 2.0;
+  leftHandInnerSphereMarker.scale.z = minReachableDistance * 2.0;
+  leftHandInnerSphereMarker.color.a = 0.3;  // 30%透明度
+  leftHandInnerSphereMarker.color.r = 1.0;  // 红色
+  leftHandInnerSphereMarker.color.g = 0.5;  // 偏橙色，便于区分
+  leftHandInnerSphereMarker.color.b = 0.0;
+  leftHandBoundBoxPublisher_.publish(leftHandInnerSphereMarker);
+
+  // ========== 右手外部大球约束可视化（半透明球体） ==========
   visualization_msgs::Marker rightHandSphereMarker;
   rightHandSphereMarker.header.frame_id = "base_link";
   rightHandSphereMarker.header.stamp = currentTime;
   rightHandSphereMarker.ns = "right_hand_sphere_constraint";
-  rightHandSphereMarker.id = 0;
+  rightHandSphereMarker.id = 0;  // 外部大球
   rightHandSphereMarker.type = visualization_msgs::Marker::SPHERE;
   rightHandSphereMarker.action = visualization_msgs::Marker::ADD;
   rightHandSphereMarker.pose.position.x = rightShoulderPos.x();
@@ -702,6 +764,30 @@ void KeyFramesVisualizer::publishHandSphereConstraintVisualization(const Eigen::
   rightHandSphereMarker.color.g = 0.0;
   rightHandSphereMarker.color.b = 1.0;  // 蓝色
   rightHandBoundBoxPublisher_.publish(rightHandSphereMarker);
+
+  // ========== 右手内部小球约束可视化（半透明球体） ==========
+  visualization_msgs::Marker rightHandInnerSphereMarker;
+  rightHandInnerSphereMarker.header.frame_id = "base_link";
+  rightHandInnerSphereMarker.header.stamp = currentTime;
+  rightHandInnerSphereMarker.ns = "right_hand_sphere_constraint";
+  rightHandInnerSphereMarker.id = 1;  // 内部小球
+  rightHandInnerSphereMarker.type = visualization_msgs::Marker::SPHERE;
+  rightHandInnerSphereMarker.action = visualization_msgs::Marker::ADD;
+  rightHandInnerSphereMarker.pose.position.x = rightShoulderPos.x();
+  rightHandInnerSphereMarker.pose.position.y = rightShoulderPos.y();
+  rightHandInnerSphereMarker.pose.position.z = rightShoulderPos.z();
+  rightHandInnerSphereMarker.pose.orientation.w = 1.0;  // 无旋转
+  rightHandInnerSphereMarker.pose.orientation.x = 0.0;
+  rightHandInnerSphereMarker.pose.orientation.y = 0.0;
+  rightHandInnerSphereMarker.pose.orientation.z = 0.0;
+  rightHandInnerSphereMarker.scale.x = minReachableDistance * 2.0;  // 球体直径
+  rightHandInnerSphereMarker.scale.y = minReachableDistance * 2.0;
+  rightHandInnerSphereMarker.scale.z = minReachableDistance * 2.0;
+  rightHandInnerSphereMarker.color.a = 0.3;  // 30%透明度
+  rightHandInnerSphereMarker.color.r = 0.0;
+  rightHandInnerSphereMarker.color.g = 0.5;  // 偏青色，便于区分
+  rightHandInnerSphereMarker.color.b = 1.0;  // 蓝色
+  rightHandBoundBoxPublisher_.publish(rightHandInnerSphereMarker);
 }
 
 void KeyFramesVisualizer::publishHandCylinderConstraintVisualization(const Eigen::Vector3d& leftCenter,
@@ -756,6 +842,116 @@ void KeyFramesVisualizer::publishHandCylinderConstraintVisualization(const Eigen
   rightHandCylinderMarker.color.g = 0.0;
   rightHandCylinderMarker.color.b = 1.0;  // 蓝色
   rightHandBoundBoxPublisher_.publish(rightHandCylinderMarker);
+}
+
+void KeyFramesVisualizer::publishElbowDistanceConstraintVisualization(const Eigen::Vector3d& leftElbowPos,
+                                                                      const Eigen::Vector3d& rightElbowPos) {
+  ros::Time currentTime = ros::Time::now();
+
+  // 只有当elbow位置有效（非零）时才发布可视化
+  if (leftElbowPos.norm() < 1e-6 && rightElbowPos.norm() < 1e-6) {
+    return;  // 两个elbow位置都无效，不发布可视化
+  }
+
+  // ========== 左手外部大球约束可视化（最大距离0.55，半透明球体） ==========
+  if (leftElbowPos.norm() > 1e-6) {
+    visualization_msgs::Marker leftElbowMaxSphereMarker;
+    leftElbowMaxSphereMarker.header.frame_id = "base_link";
+    leftElbowMaxSphereMarker.header.stamp = currentTime;
+    leftElbowMaxSphereMarker.ns = "left_elbow_distance_constraint";
+    leftElbowMaxSphereMarker.id = 0;  // 外部大球
+    leftElbowMaxSphereMarker.type = visualization_msgs::Marker::SPHERE;
+    leftElbowMaxSphereMarker.action = visualization_msgs::Marker::ADD;
+    leftElbowMaxSphereMarker.pose.position.x = leftElbowPos.x();
+    leftElbowMaxSphereMarker.pose.position.y = leftElbowPos.y();
+    leftElbowMaxSphereMarker.pose.position.z = leftElbowPos.z();
+    leftElbowMaxSphereMarker.pose.orientation.w = 1.0;  // 无旋转
+    leftElbowMaxSphereMarker.pose.orientation.x = 0.0;
+    leftElbowMaxSphereMarker.pose.orientation.y = 0.0;
+    leftElbowMaxSphereMarker.pose.orientation.z = 0.0;
+    leftElbowMaxSphereMarker.scale.x = elbowMaxDistance_ * 2.0;  // 球体直径
+    leftElbowMaxSphereMarker.scale.y = elbowMaxDistance_ * 2.0;
+    leftElbowMaxSphereMarker.scale.z = elbowMaxDistance_ * 2.0;
+    leftElbowMaxSphereMarker.color.a = 0.2;  // 20%透明度
+    leftElbowMaxSphereMarker.color.r = 1.0;  // 红色
+    leftElbowMaxSphereMarker.color.g = 0.8;  // 偏粉红色，便于区分
+    leftElbowMaxSphereMarker.color.b = 0.8;
+    leftHandBoundBoxPublisher_.publish(leftElbowMaxSphereMarker);
+
+    // ========== 左手内部小球约束可视化（最小距离0.3，半透明球体） ==========
+    visualization_msgs::Marker leftElbowMinSphereMarker;
+    leftElbowMinSphereMarker.header.frame_id = "base_link";
+    leftElbowMinSphereMarker.header.stamp = currentTime;
+    leftElbowMinSphereMarker.ns = "left_elbow_distance_constraint";
+    leftElbowMinSphereMarker.id = 1;  // 内部小球
+    leftElbowMinSphereMarker.type = visualization_msgs::Marker::SPHERE;
+    leftElbowMinSphereMarker.action = visualization_msgs::Marker::ADD;
+    leftElbowMinSphereMarker.pose.position.x = leftElbowPos.x();
+    leftElbowMinSphereMarker.pose.position.y = leftElbowPos.y();
+    leftElbowMinSphereMarker.pose.position.z = leftElbowPos.z();
+    leftElbowMinSphereMarker.pose.orientation.w = 1.0;  // 无旋转
+    leftElbowMinSphereMarker.pose.orientation.x = 0.0;
+    leftElbowMinSphereMarker.pose.orientation.y = 0.0;
+    leftElbowMinSphereMarker.pose.orientation.z = 0.0;
+    leftElbowMinSphereMarker.scale.x = elbowMinDistance_ * 2.0;  // 球体直径
+    leftElbowMinSphereMarker.scale.y = elbowMinDistance_ * 2.0;
+    leftElbowMinSphereMarker.scale.z = elbowMinDistance_ * 2.0;
+    leftElbowMinSphereMarker.color.a = 0.3;  // 30%透明度
+    leftElbowMinSphereMarker.color.r = 1.0;  // 红色偏橙
+    leftElbowMinSphereMarker.color.g = 0.6;
+    leftElbowMinSphereMarker.color.b = 0.0;
+    leftHandBoundBoxPublisher_.publish(leftElbowMinSphereMarker);
+  }
+
+  // ========== 右手外部大球约束可视化（最大距离0.55，半透明球体） ==========
+  if (rightElbowPos.norm() > 1e-6) {
+    visualization_msgs::Marker rightElbowMaxSphereMarker;
+    rightElbowMaxSphereMarker.header.frame_id = "base_link";
+    rightElbowMaxSphereMarker.header.stamp = currentTime;
+    rightElbowMaxSphereMarker.ns = "right_elbow_distance_constraint";
+    rightElbowMaxSphereMarker.id = 0;  // 外部大球
+    rightElbowMaxSphereMarker.type = visualization_msgs::Marker::SPHERE;
+    rightElbowMaxSphereMarker.action = visualization_msgs::Marker::ADD;
+    rightElbowMaxSphereMarker.pose.position.x = rightElbowPos.x();
+    rightElbowMaxSphereMarker.pose.position.y = rightElbowPos.y();
+    rightElbowMaxSphereMarker.pose.position.z = rightElbowPos.z();
+    rightElbowMaxSphereMarker.pose.orientation.w = 1.0;  // 无旋转
+    rightElbowMaxSphereMarker.pose.orientation.x = 0.0;
+    rightElbowMaxSphereMarker.pose.orientation.y = 0.0;
+    rightElbowMaxSphereMarker.pose.orientation.z = 0.0;
+    rightElbowMaxSphereMarker.scale.x = elbowMaxDistance_ * 2.0;  // 球体直径
+    rightElbowMaxSphereMarker.scale.y = elbowMaxDistance_ * 2.0;
+    rightElbowMaxSphereMarker.scale.z = elbowMaxDistance_ * 2.0;
+    rightElbowMaxSphereMarker.color.a = 0.2;  // 20%透明度
+    rightElbowMaxSphereMarker.color.r = 0.8;  // 偏粉蓝色，便于区分
+    rightElbowMaxSphereMarker.color.g = 0.8;
+    rightElbowMaxSphereMarker.color.b = 1.0;  // 蓝色
+    rightHandBoundBoxPublisher_.publish(rightElbowMaxSphereMarker);
+
+    // ========== 右手内部小球约束可视化（最小距离0.3，半透明球体） ==========
+    visualization_msgs::Marker rightElbowMinSphereMarker;
+    rightElbowMinSphereMarker.header.frame_id = "base_link";
+    rightElbowMinSphereMarker.header.stamp = currentTime;
+    rightElbowMinSphereMarker.ns = "right_elbow_distance_constraint";
+    rightElbowMinSphereMarker.id = 1;  // 内部小球
+    rightElbowMinSphereMarker.type = visualization_msgs::Marker::SPHERE;
+    rightElbowMinSphereMarker.action = visualization_msgs::Marker::ADD;
+    rightElbowMinSphereMarker.pose.position.x = rightElbowPos.x();
+    rightElbowMinSphereMarker.pose.position.y = rightElbowPos.y();
+    rightElbowMinSphereMarker.pose.position.z = rightElbowPos.z();
+    rightElbowMinSphereMarker.pose.orientation.w = 1.0;  // 无旋转
+    rightElbowMinSphereMarker.pose.orientation.x = 0.0;
+    rightElbowMinSphereMarker.pose.orientation.y = 0.0;
+    rightElbowMinSphereMarker.pose.orientation.z = 0.0;
+    rightElbowMinSphereMarker.scale.x = elbowMinDistance_ * 2.0;  // 球体直径
+    rightElbowMinSphereMarker.scale.y = elbowMinDistance_ * 2.0;
+    rightElbowMinSphereMarker.scale.z = elbowMinDistance_ * 2.0;
+    rightElbowMinSphereMarker.color.a = 0.3;  // 30%透明度
+    rightElbowMinSphereMarker.color.r = 0.0;
+    rightElbowMinSphereMarker.color.g = 0.6;  // 偏青色
+    rightElbowMinSphereMarker.color.b = 1.0;  // 蓝色
+    rightHandBoundBoxPublisher_.publish(rightElbowMinSphereMarker);
+  }
 }
 
 void KeyFramesVisualizer::publishBoxBoundVisualization(const Eigen::Vector3d& boxMinBound,
@@ -842,6 +1038,7 @@ void KeyFramesVisualizer::publishAllVisualizations(
     const Eigen::Vector3d& leftShoulderPos,
     const Eigen::Vector3d& rightShoulderPos,
     double sphereRadius,
+    double minReachableDistance,
     const IncrementalPoseResult& incrementalResult,
     const std::vector<PoseData>& poseConstraintList,
     const Eigen::Vector3d& boxMinBound,
@@ -850,26 +1047,40 @@ void KeyFramesVisualizer::publishAllVisualizations(
     const Eigen::Vector3d& leftCylinderCenter,
     const Eigen::Vector3d& rightCylinderCenter,
     double cylinderRadius,
-    std::function<void(Eigen::Vector3d&, Eigen::Quaterniond&, Eigen::Vector3d&, Eigen::Quaterniond&)> fkCallback) {
-  // 从poseConstraintList中获取肘部位置
-  Eigen::Vector3d leftElbowPos = Eigen::Vector3d::Zero();
-  Eigen::Vector3d rightElbowPos = Eigen::Vector3d::Zero();
+    const Eigen::Vector3d& leftElbowPos,
+    const Eigen::Vector3d& rightElbowPos,
+    std::function<void(Eigen::Vector3d&, Eigen::Quaterniond&, Eigen::Vector3d&, Eigen::Quaterniond&)> fkCallback,
+    const Eigen::Vector3d& leftLink6Pos,
+    const Eigen::Vector3d& rightLink6Pos,
+    const Eigen::Vector3d& leftEndEffectorPos,
+    const Eigen::Vector3d& rightEndEffectorPos,
+    const Eigen::Vector3d& leftVirtualThumbPos,
+    const Eigen::Vector3d& rightVirtualThumbPos) {
+  // 从poseConstraintList中获取肘部位置（用于shoulder-elbow可视化）
+  Eigen::Vector3d leftElbowPosFromList = Eigen::Vector3d::Zero();
+  Eigen::Vector3d rightElbowPosFromList = Eigen::Vector3d::Zero();
   if (poseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_ELBOW) {
-    leftElbowPos = poseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position;
+    leftElbowPosFromList = poseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position;
   }
   if (poseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_ELBOW) {
-    rightElbowPos = poseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position;
+    rightElbowPosFromList = poseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position;
   }
 
-  publishShoulderElbowPosVisualization(leftShoulderPos, rightShoulderPos, leftElbowPos, rightElbowPos);
-  publishHandSphereConstraintVisualization(leftShoulderPos, rightShoulderPos, sphereRadius);
+  publishShoulderElbowPosVisualization(leftShoulderPos, rightShoulderPos, leftElbowPosFromList, rightElbowPosFromList);
+  publishHandSphereConstraintVisualization(leftShoulderPos, rightShoulderPos, sphereRadius, minReachableDistance);
   publishHandCylinderConstraintVisualization(leftCylinderCenter, rightCylinderCenter, cylinderRadius);
   publishBoxBoundVisualization(boxMinBound, boxMaxBound, chestOffsetY);
+  // 发布手到肘距离约束可视化（使用实时FK计算的elbow位置）
+  publishElbowDistanceConstraintVisualization(leftElbowPos, rightElbowPos);
   publishIncrementalPoseVisualization(incrementalResult, poseConstraintList, fkCallback);
   publishVisualization(poseConstraintList);
 
   // 发布增量模式位置（锚点和测量位置）
   publishIncrementalModePositions(incrementalResult, poseConstraintList);
+
+  // 发布六个关键点可视化
+  publishSixKeyPointsVisualization(
+      leftLink6Pos, rightLink6Pos, leftEndEffectorPos, rightEndEffectorPos, leftVirtualThumbPos, rightVirtualThumbPos);
 }
 
 void KeyFramesVisualizer::publishVisualization(const std::vector<PoseData>& poseConstraintList) {
@@ -892,6 +1103,85 @@ void KeyFramesVisualizer::publishVisualization(const std::vector<PoseData>& pose
                                                       "base_link");  // 红色，尺寸0.1
     scaledRightHandPosPublisher_.publish(scaledRightHandMarker);
   }
+}
+
+void KeyFramesVisualizer::publishSixKeyPointsVisualization(const Eigen::Vector3d& leftLink6Pos,
+                                                           const Eigen::Vector3d& rightLink6Pos,
+                                                           const Eigen::Vector3d& leftEndEffectorPos,
+                                                           const Eigen::Vector3d& rightEndEffectorPos,
+                                                           const Eigen::Vector3d& leftVirtualThumbPos,
+                                                           const Eigen::Vector3d& rightVirtualThumbPos) {
+  // 统一所有点的尺寸为0.06（与thumb一致）
+  const double markerSize = 0.06;
+
+  // 发布左臂Link4位置（绿色）
+  auto leftLink4Marker = constructPointMarker(leftLink6Pos, markerSize, 0.9, {0, 1, 0}, "base_link");
+  leftLink4PosPublisher_.publish(leftLink4Marker);
+
+  // 发布右臂Link4位置（绿色）
+  auto rightLink4Marker = constructPointMarker(rightLink6Pos, markerSize, 0.9, {0, 1, 0}, "base_link");
+  rightLink4PosPublisher_.publish(rightLink4Marker);
+
+  // 发布左臂末端执行器位置（蓝色）
+  auto leftEndEffectorMarker = constructPointMarker(leftEndEffectorPos, markerSize, 0.9, {0, 0, 1}, "base_link");
+  leftEndEffectorPosPublisher_.publish(leftEndEffectorMarker);
+
+  // 发布右臂末端执行器位置（蓝色）
+  auto rightEndEffectorMarker = constructPointMarker(rightEndEffectorPos, markerSize, 0.9, {0, 0, 1}, "base_link");
+  rightEndEffectorPosPublisher_.publish(rightEndEffectorMarker);
+
+  // 发布左虚拟拇指位置（黄色）
+  auto leftVirtualThumbMarker = constructPointMarker(leftVirtualThumbPos, markerSize, 0.9, {1, 1, 0}, "base_link");
+  leftVirtualThumbPosPublisher_.publish(leftVirtualThumbMarker);
+
+  // 发布右虚拟拇指位置（黄色）
+  auto rightVirtualThumbMarker = constructPointMarker(rightVirtualThumbPos, markerSize, 0.9, {1, 1, 0}, "base_link");
+  rightVirtualThumbPosPublisher_.publish(rightVirtualThumbMarker);
+}
+
+void KeyFramesVisualizer::publishRobotElbowPosVisualization(const Eigen::Vector3d& leftElbowPos,
+                                                            const Eigen::Vector3d& rightElbowPos) {
+  // 墨绿色 RGB(0, 0.5, 0.5)，不透明 alpha=1.0，尺寸0.08
+  const double markerSize = 0.1;
+  const double alpha = 1.0;
+  const std::vector<double> darkGreenColor = {0.0, 0.5, 0.5};  // 墨绿色
+
+  // 发布机器人左肘优化位置（墨绿色，不透明）
+  auto leftElbowMarker = constructPointMarker(leftElbowPos, markerSize, alpha, darkGreenColor, "base_link");
+  robotLeftElbowPosPublisher_.publish(leftElbowMarker);
+
+  // 发布机器人右肘优化位置（墨绿色，不透明）
+  auto rightElbowMarker = constructPointMarker(rightElbowPos, markerSize, alpha, darkGreenColor, "base_link");
+  robotRightElbowPosPublisher_.publish(rightElbowMarker);
+}
+
+void KeyFramesVisualizer::publishHandPosOptimizationVisualization(const Eigen::Vector3d& leftHandPosBeforeOpt,
+                                                                  const Eigen::Vector3d& leftHandPosAfterOpt,
+                                                                  const Eigen::Vector3d& rightHandPosBeforeOpt,
+                                                                  const Eigen::Vector3d& rightHandPosAfterOpt) {
+  const double markerSize = 0.12;
+  const double alpha = 1.0;
+
+  // 优化前的手部位置：橙色 (RGB: 1.0, 0.5, 0.0)
+  const std::vector<double> orangeColor = {1.0, 0.5, 0.0};
+  // 优化后的手部位置：紫色 (RGB: 0.8, 0.0, 0.8)
+  const std::vector<double> purpleColor = {0.8, 0.0, 0.8};
+
+  // 发布优化前的左手位置（橙色）
+  auto leftHandBeforeMarker = constructPointMarker(leftHandPosBeforeOpt, markerSize, alpha, orangeColor, "base_link");
+  leftHandPosBeforeOptPublisher_.publish(leftHandBeforeMarker);
+
+  // 发布优化后的左手位置（紫色）
+  auto leftHandAfterMarker = constructPointMarker(leftHandPosAfterOpt, markerSize, alpha, purpleColor, "base_link");
+  leftHandPosAfterOptPublisher_.publish(leftHandAfterMarker);
+
+  // 发布优化前的右手位置（橙色）
+  auto rightHandBeforeMarker = constructPointMarker(rightHandPosBeforeOpt, markerSize, alpha, orangeColor, "base_link");
+  rightHandPosBeforeOptPublisher_.publish(rightHandBeforeMarker);
+
+  // 发布优化后的右手位置（紫色）
+  auto rightHandAfterMarker = constructPointMarker(rightHandPosAfterOpt, markerSize, alpha, purpleColor, "base_link");
+  rightHandPosAfterOptPublisher_.publish(rightHandAfterMarker);
 }
 
 }  // namespace HighlyDynamic

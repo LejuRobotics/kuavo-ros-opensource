@@ -120,14 +120,16 @@ class KeyFramesVisualizer {
                                             const Eigen::Vector3d& rightElbowPos);
 
   /**
-   * @brief 发布手部球约束可视化
+   * @brief 发布手部球约束可视化（外部大球和内部小球）
    * @param leftShoulderPos 左肩位置
    * @param rightShoulderPos 右肩位置
-   * @param sphereRadius 球体半径
+   * @param sphereRadius 外部大球半径（sphereRadiusLimit）
+   * @param minReachableDistance 内部小球半径（最小可达距离）
    */
   void publishHandSphereConstraintVisualization(const Eigen::Vector3d& leftShoulderPos,
                                                 const Eigen::Vector3d& rightShoulderPos,
-                                                double sphereRadius);
+                                                double sphereRadius,
+                                                double minReachableDistance);
 
   /**
    * @brief 发布手部圆柱体约束可视化
@@ -140,6 +142,14 @@ class KeyFramesVisualizer {
                                                   double cylinderRadius);
 
   /**
+   * @brief 发布手到肘距离约束可视化（外部大球和内部小球）
+   * @param leftElbowPos 左肘位置
+   * @param rightElbowPos 右肘位置
+   */
+  void publishElbowDistanceConstraintVisualization(const Eigen::Vector3d& leftElbowPos,
+                                                   const Eigen::Vector3d& rightElbowPos);
+
+  /**
    * @brief 发布Box边界约束可视化
    * @param boxMinBound Box最小边界
    * @param boxMaxBound Box最大边界
@@ -150,10 +160,46 @@ class KeyFramesVisualizer {
                                     double chestOffsetY);
 
   /**
+   * @brief 发布六个关键点的可视化（Link4和EndEffector位置，以及虚拟拇指位置）
+   * @param leftLink6Pos 左臂Link4位置
+   * @param rightLink6Pos 右臂Link4位置
+   * @param leftEndEffectorPos 左臂末端执行器位置
+   * @param rightEndEffectorPos 右臂末端执行器位置
+   * @param leftVirtualThumbPos 左虚拟拇指位置
+   * @param rightVirtualThumbPos 右虚拟拇指位置
+   */
+  void publishSixKeyPointsVisualization(const Eigen::Vector3d& leftLink6Pos,
+                                        const Eigen::Vector3d& rightLink6Pos,
+                                        const Eigen::Vector3d& leftEndEffectorPos,
+                                        const Eigen::Vector3d& rightEndEffectorPos,
+                                        const Eigen::Vector3d& leftVirtualThumbPos,
+                                        const Eigen::Vector3d& rightVirtualThumbPos);
+
+  /**
+   * @brief 发布机器人优化后的肘部位置可视化（墨绿色，不透明）
+   * @param leftElbowPos 机器人左肘优化位置
+   * @param rightElbowPos 机器人右肘优化位置
+   */
+  void publishRobotElbowPosVisualization(const Eigen::Vector3d& leftElbowPos, const Eigen::Vector3d& rightElbowPos);
+
+  /**
+   * @brief 发布优化前后的手部位置可视化对比
+   * @param leftHandPosBeforeOpt 优化前的左手位置
+   * @param leftHandPosAfterOpt 优化后的左手位置
+   * @param rightHandPosBeforeOpt 优化前的右手位置
+   * @param rightHandPosAfterOpt 优化后的右手位置
+   */
+  void publishHandPosOptimizationVisualization(const Eigen::Vector3d& leftHandPosBeforeOpt,
+                                               const Eigen::Vector3d& leftHandPosAfterOpt,
+                                               const Eigen::Vector3d& rightHandPosBeforeOpt,
+                                               const Eigen::Vector3d& rightHandPosAfterOpt);
+
+  /**
    * @brief 统一的可视化发布函数
    * @param leftShoulderPos 左肩位置
    * @param rightShoulderPos 右肩位置
-   * @param sphereRadius 球体半径
+   * @param sphereRadius 外部大球半径（sphereRadiusLimit）
+   * @param minReachableDistance 内部小球半径（最小可达距离）
    * @param incrementalResult 增量控制结果
    * @param poseConstraintList 位姿约束列表
    * @param boxMinBound Box最小边界
@@ -162,12 +208,15 @@ class KeyFramesVisualizer {
    * @param leftCylinderCenter 左手圆柱体中心位置
    * @param rightCylinderCenter 右手圆柱体中心位置
    * @param cylinderRadius 圆柱体半径
+   * @param leftElbowPos 左肘位置（通过FK实时计算）
+   * @param rightElbowPos 右肘位置（通过FK实时计算）
    * @param fkCallback FK计算回调函数
    */
   void publishAllVisualizations(
       const Eigen::Vector3d& leftShoulderPos,
       const Eigen::Vector3d& rightShoulderPos,
       double sphereRadius,
+      double minReachableDistance,
       const IncrementalPoseResult& incrementalResult,
       const std::vector<PoseData>& poseConstraintList,
       const Eigen::Vector3d& boxMinBound,
@@ -176,7 +225,15 @@ class KeyFramesVisualizer {
       const Eigen::Vector3d& leftCylinderCenter,
       const Eigen::Vector3d& rightCylinderCenter,
       double cylinderRadius,
-      std::function<void(Eigen::Vector3d&, Eigen::Quaterniond&, Eigen::Vector3d&, Eigen::Quaterniond&)> fkCallback);
+      const Eigen::Vector3d& leftElbowPos,
+      const Eigen::Vector3d& rightElbowPos,
+      std::function<void(Eigen::Vector3d&, Eigen::Quaterniond&, Eigen::Vector3d&, Eigen::Quaterniond&)> fkCallback,
+      const Eigen::Vector3d& leftLink6Pos = Eigen::Vector3d::Zero(),
+      const Eigen::Vector3d& rightLink6Pos = Eigen::Vector3d::Zero(),
+      const Eigen::Vector3d& leftEndEffectorPos = Eigen::Vector3d::Zero(),
+      const Eigen::Vector3d& rightEndEffectorPos = Eigen::Vector3d::Zero(),
+      const Eigen::Vector3d& leftVirtualThumbPos = Eigen::Vector3d::Zero(),
+      const Eigen::Vector3d& rightVirtualThumbPos = Eigen::Vector3d::Zero());
 
  private:
   // 左侧可视化发布器
@@ -232,6 +289,24 @@ class KeyFramesVisualizer {
   ros::Publisher scaledLeftHandPosPublisher_;   // 缩放后的左手位置可视化发布器
   ros::Publisher scaledRightHandPosPublisher_;  // 缩放后的右手位置可视化发布器
 
+  // 六个关键点可视化发布器（Marker类型）
+  ros::Publisher leftLink4PosPublisher_;          // 左臂Link4位置可视化发布器
+  ros::Publisher rightLink4PosPublisher_;         // 右臂Link4位置可视化发布器
+  ros::Publisher leftEndEffectorPosPublisher_;    // 左臂末端执行器位置可视化发布器
+  ros::Publisher rightEndEffectorPosPublisher_;   // 右臂末端执行器位置可视化发布器
+  ros::Publisher leftVirtualThumbPosPublisher_;   // 左虚拟拇指位置可视化发布器
+  ros::Publisher rightVirtualThumbPosPublisher_;  // 右虚拟拇指位置可视化发布器
+
+  // 机器人优化后的肘部位置可视化发布器（Marker类型，墨绿色，不透明）
+  ros::Publisher robotLeftElbowPosPublisher_;   // 机器人左肘优化位置可视化发布器
+  ros::Publisher robotRightElbowPosPublisher_;  // 机器人右肘优化位置可视化发布器
+
+  // 优化前后的手部位置可视化发布器（Marker类型）
+  ros::Publisher leftHandPosBeforeOptPublisher_;   // 优化前的左手位置可视化发布器
+  ros::Publisher leftHandPosAfterOptPublisher_;    // 优化后的左手位置可视化发布器
+  ros::Publisher rightHandPosBeforeOptPublisher_;  // 优化前的右手位置可视化发布器
+  ros::Publisher rightHandPosAfterOptPublisher_;   // 优化后的右手位置可视化发布器
+
   /**
    * @brief 初始化所有可视化发布器
    */
@@ -282,6 +357,10 @@ class KeyFramesVisualizer {
 
   // ROS节点句柄引用
   ros::NodeHandle& nodeHandle_;
+
+  // 手到肘距离约束参数
+  double elbowMinDistance_;  // 最小距离（默认0.18）
+  double elbowMaxDistance_;  // 最大距离（默认0.65）
 };
 
 }  // namespace HighlyDynamic

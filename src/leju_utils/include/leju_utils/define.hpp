@@ -2,6 +2,7 @@
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -82,7 +83,14 @@ inline EndEffectorType stringToEndEffectorType(const std::string& typeStr) {
 #define POSE_DATA_LIST_INDEX_LEFT_ELBOW 3   // 左肘
 #define POSE_DATA_LIST_INDEX_RIGHT_ELBOW 4  // 右肘
 #define POSE_DATA_LIST_SIZE 5
+#define POSE_DATA_LIST_SIZE_PLUS 11  // add [l_link6_pos, r_link6_pos, l_vir_thumb_pos, r_vir_thumb_pos]
 
+#define POSE_DATA_LIST_INDEX_LEFT_LINK6 5           // 左link6
+#define POSE_DATA_LIST_INDEX_RIGHT_LINK6 6          // 右link6
+#define POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB 7   // 左虚拟拇指
+#define POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB 8  // 右虚拟拇指
+#define POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR 9    // 左end_effector
+#define POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR 10  // 右end_effector
 struct TwoStageIKParameters {
   std::vector<std::string> ikConstraintFrameNames;
   double constraintTolerance = 1.0e-6;
@@ -258,10 +266,10 @@ struct IKSolverConfig {
   IKSolverConfig()
       : constraintTolerance(1e-8),
         solverTolerance(1e-6),
-        maxIterations(1000),
+        maxIterations(3000),
         controlArmIndex(ArmIdx::BOTH),
         isWeldBaseLink(true),
-        useJointLimits(false),  // Disabled by default (follow Python behavior)
+        useJointLimits(true),  // Disabled by default (follow Python behavior)
         jointLowerBounds(Eigen::VectorXd()),
         jointUpperBounds(Eigen::VectorXd()) {}
 
@@ -271,7 +279,7 @@ struct IKSolverConfig {
         maxIterations(maxIter),
         controlArmIndex(armIdx),
         isWeldBaseLink(weldBase),
-        useJointLimits(false),
+        useJointLimits(true),
         jointLowerBounds(Eigen::VectorXd()),
         jointUpperBounds(Eigen::VectorXd()) {}
 };
@@ -358,6 +366,180 @@ inline void setElbowPoseInfo(PoseInfoT& poseInfo, const ArmPose& armPose) {
   } else {
     poseInfo = PoseInfoT();
   }
+}
+
+inline Eigen::Quaterniond limitQuaternionAngleEulerZYX(const Eigen::Quaterniond& q_input,
+                                                       const Eigen::Vector3d& zyxLimits,
+                                                       const Eigen::Vector3d scale = Eigen::Vector3d::Ones()) {
+  // 1. 归一化并处理双倍覆盖 (Double Cover)
+  // 确保 w >= 0，保证我们在“最短路径”半球面上进行分解
+  Eigen::Quaterniond q = q_input.normalized();
+  if (q.w() < 0) {
+    q.coeffs() = -q.coeffs();
+  }
+
+  // 2. 手动分解欧拉角 (Z-Y-X 顺序)
+  // 使用 atan2 确保角度范围在 [-PI, PI]，这是限幅算法正常工作的基础
+  // 公式参考：Standard 3-2-1 Euler Angles extraction from Quaternion
+  double yaw_z = 0.0;
+  double pitch_y = 0.0;
+  double roll_x = 0.0;
+
+  // --- Roll (X-axis rotation) ---
+  double sinr_cosp = 2.0 * (q.w() * q.x() + q.y() * q.z());
+  double cosr_cosp = 1.0 - 2.0 * (q.x() * q.x() + q.y() * q.y());
+  roll_x = std::atan2(sinr_cosp, cosr_cosp);
+
+  // --- Pitch (Y-axis rotation) ---
+  // 警告：Pitch 接近 90 度时存在奇点 (Gimbal Lock)，但在你的 ±60 度限位下是安全的。
+  // 我们必须 clamp 输入值，因为浮点误差可能导致值略微超出 [-1, 1]，使 asin 返回 NaN。
+  double sinp = 2.0 * (q.w() * q.y() - q.z() * q.x());
+  if (std::abs(sinp) >= 1.0) {
+    // 极少见情况，直接根据符号给 PI/2
+    pitch_y = std::copysign(M_PI / 2.0, sinp);
+  } else {
+    pitch_y = std::asin(sinp);
+  }
+
+  // --- Yaw (Z-axis rotation) ---
+  double siny_cosp = 2.0 * (q.w() * q.z() + q.x() * q.y());
+  double cosy_cosp = 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z());
+  yaw_z = std::atan2(siny_cosp, cosy_cosp);
+
+  // 3. 核心限幅逻辑 (Box Limiting)
+  // 针对每个轴独立进行限幅
+  yaw_z = std::clamp(yaw_z * scale[0], -zyxLimits[0], zyxLimits[0]);
+  pitch_y = std::clamp(pitch_y * scale[1], -zyxLimits[1], zyxLimits[1]);
+  roll_x = std::clamp(roll_x * scale[2], -zyxLimits[2], zyxLimits[2]);
+  roll_x = std::clamp(roll_x, -zyxLimits[2], zyxLimits[2]);
+
+  // 4. 重构四元数
+  // 顺序必须与分解顺序一致：Yaw(Z) -> Pitch(Y) -> Roll(X)
+  // 在 Eigen 中，q = q_yaw * q_pitch * q_roll 代表先转 Roll，再 Pitch，再 Yaw (从局部坐标系看)
+  // 或者理解为 R_total = R_z * R_y * R_x
+  Eigen::AngleAxisd rollAngle(roll_x, Eigen::Vector3d::UnitX());
+  Eigen::AngleAxisd pitchAngle(pitch_y, Eigen::Vector3d::UnitY());
+  Eigen::AngleAxisd yawAngle(yaw_z, Eigen::Vector3d::UnitZ());
+
+  // 乘法顺序：Z * Y * X
+  return (yawAngle * pitchAngle * rollAngle).normalized();
+}
+
+/**
+ * @brief 四元数转欧拉角 (Z-Y-X 顺序)，不做限幅/clip
+ * @param q_input 输入四元数
+ * @return 欧拉角向量 (yaw_z, pitch_y, roll_x)，单位: rad
+ * @note 返回角度范围主要由 atan2/asin 决定：yaw/roll \in [-pi, pi]，pitch \in [-pi/2, pi/2]
+ */
+inline Eigen::Vector3d quaternionToEulerZYXNoClip(const Eigen::Quaterniond& q_input) {
+  // 1. 归一化并处理双倍覆盖 (Double Cover)：确保 w >= 0，使用“最短路径”半球面
+  Eigen::Quaterniond q = q_input.normalized();
+  if (q.w() < 0) {
+    q.coeffs() = -q.coeffs();
+  }
+
+  // 2. 手动分解欧拉角 (Z-Y-X / 3-2-1)
+  double yaw_z = 0.0;
+  double pitch_y = 0.0;
+  double roll_x = 0.0;
+
+  // --- Roll (X-axis rotation) ---
+  const double sinr_cosp = 2.0 * (q.w() * q.x() + q.y() * q.z());
+  const double cosr_cosp = 1.0 - 2.0 * (q.x() * q.x() + q.y() * q.y());
+  roll_x = std::atan2(sinr_cosp, cosr_cosp);
+
+  // --- Pitch (Y-axis rotation) ---
+  // 数值安全：浮点误差可能导致略微超出 [-1, 1]，使 asin 返回 NaN
+  const double sinp = 2.0 * (q.w() * q.y() - q.z() * q.x());
+  if (std::abs(sinp) >= 1.0) {
+    pitch_y = std::copysign(M_PI / 2.0, sinp);
+  } else {
+    pitch_y = std::asin(sinp);
+  }
+
+  // --- Yaw (Z-axis rotation) ---
+  const double siny_cosp = 2.0 * (q.w() * q.z() + q.x() * q.y());
+  const double cosy_cosp = 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z());
+  yaw_z = std::atan2(siny_cosp, cosy_cosp);
+
+  return Eigen::Vector3d(yaw_z, pitch_y, roll_x);
+}
+
+/**
+ * @brief 欧拉角转四元数 (Z-Y-X 顺序)，不做限幅/clip
+ * @param euler_zyx 欧拉角向量 (yaw_z, pitch_y, roll_x)，单位: rad
+ * @return 对应四元数（单位四元数，且做 double-cover 处理使 w >= 0）
+ * @note 约定与 quaternionToEulerZYXNoClip() 保持一致：R = Rz(yaw) * Ry(pitch) * Rx(roll)
+ */
+inline Eigen::Quaterniond eulerZYXToQuaternionNoClip(const Eigen::Vector3d& euler_zyx) {
+  const double yaw_z = euler_zyx[0];
+  const double pitch_y = euler_zyx[1];
+  const double roll_x = euler_zyx[2];
+
+  const Eigen::AngleAxisd rollAngle(roll_x, Eigen::Vector3d::UnitX());
+  const Eigen::AngleAxisd pitchAngle(pitch_y, Eigen::Vector3d::UnitY());
+  const Eigen::AngleAxisd yawAngle(yaw_z, Eigen::Vector3d::UnitZ());
+
+  Eigen::Quaterniond q = (yawAngle * pitchAngle * rollAngle).normalized();
+  if (q.w() < 0) {
+    q.coeffs() = -q.coeffs();
+  }
+  return q;
+}
+
+/**
+ * @brief 传入两个四元数，分别转欧拉角(ZYX)，逐轴选择“幅值更小”的欧拉角分量，重组为新四元数返回
+ * @param q_a 四元数 A
+ * @param q_b 四元数 B
+ * @return 新四元数（单位四元数，且做 double-cover 处理使 w >= 0）
+ * @note
+ * - 欧拉角定义与 quaternionToEulerZYXNoClip()/eulerZYXToQuaternionNoClip() 一致：返回/输入为 (yaw, pitch, roll)
+ * - “最小”按绝对值比较：对每个轴选择 abs(angle) 更小的那个分量
+ */
+inline Eigen::Quaterniond pickMinAbsEulerComponentsZYXToQuaternion(const Eigen::Quaterniond& q_a,
+                                                                   const Eigen::Quaterniond& q_b) {
+  const Eigen::Vector3d e_a = quaternionToEulerZYXNoClip(q_a);
+  const Eigen::Vector3d e_b = quaternionToEulerZYXNoClip(q_b);
+
+  Eigen::Vector3d e_out;
+  for (int i = 0; i < 3; ++i) {
+    e_out[i] = (std::abs(e_a[i]) <= std::abs(e_b[i])) ? e_a[i] : e_b[i];
+  }
+
+  return eulerZYXToQuaternionNoClip(e_out);
+}
+
+inline Eigen::Quaterniond limitQuaternionAngle(const Eigen::Quaterniond& q_input, double max_angle_rad) {
+  Eigen::Quaterniond q = q_input.normalized();
+
+  // 1. Shortest Path (双倍覆盖处理)
+  // 确保 w >= 0，这样旋转角度永远在 [-180, 180] 之间
+  // 如果 w < 0，说明这个四元数表示的是转了 > 180 度 (长路径)，
+  // 或者仅仅是符号翻转。取反不会改变旋转姿态，但能保证后续角度计算正确。
+  if (q.w() < 0) {
+    q.coeffs() = -q.coeffs();
+  }
+
+  // 2. 计算旋转角度
+  // q.w() = cos(theta / 2)  =>  theta = 2 * acos(w)
+  // 此时因为 w >= 0，所以 theta 在 [0, 180] 之间
+  double angle = 2.0 * std::acos(std::clamp(q.w(), -1.0, 1.0));
+
+  // 3. 避免极小角度除零风险
+  if (std::abs(angle) < 1e-6) {
+    return q;
+  }
+
+  // 4. 限幅 (Clamping)
+  // 如果角度超过限制，使用 Slerp 插值截断到边界
+  if (angle > max_angle_rad) {
+    // 计算截断比例： t * angle = max_angle  =>  t = max_angle / angle
+    double t = max_angle_rad / angle;
+    // 从 Identity (0度) 向 q (目标度) 插值 t
+    return Eigen::Quaterniond::Identity().slerp(t, q).normalized();
+  }
+
+  return q;
 }
 
 inline Eigen::Vector3d deepCopyVector3d(const Eigen::Vector3d& source) {
@@ -872,6 +1054,71 @@ inline void clipBoxBackCeiling(Eigen::Vector3d& position,
   if (position.z() > boxMaxBound.z()) position.z() = boxMaxBound.z();
 }
 
+inline void clipPositionByElbowDistance(Eigen::Vector3d& handPos,
+                                        const Eigen::Vector3d& elbowPos,
+                                        double minDistance,
+                                        double maxDistance) {
+  Eigen::Vector3d handToElbow = handPos - elbowPos;
+  double squaredDistance = handToElbow.squaredNorm();
+
+  // 使用更小的阈值，基于平方距离
+  const double epsilonSquared = 1e-12;  // 对应 epsilon = 1e-6 的平方
+
+  if (squaredDistance <= epsilonSquared) {
+    // 如果距离非常小（接近零），保持原位置不变，避免数值不稳定
+    return;
+  }
+
+  double distance = std::sqrt(squaredDistance);
+
+  // 定义平滑过渡区域的宽度（边界附近的百分比）
+  // 允许在过渡区域内轻微超出约束，但会平滑地拉回
+  const double transitionRatio = 0.1;                                 // 10% 的过渡区域
+  const double minSoftBound = minDistance * (1.0 - transitionRatio);  // 软下界
+  const double maxSoftBound = maxDistance * (1.0 + transitionRatio);  // 软上界
+
+  // 平滑插值函数：smoothstep (3t^2 - 2t^3)，在 [0,1] 区间内平滑过渡
+  // 提供 C1 连续性（一阶导数连续）
+  auto smoothstep = [](double t) {
+    t = std::max(0.0, std::min(1.0, t));  // 限制在 [0,1]
+    return t * t * (3.0 - 2.0 * t);
+  };
+
+  double targetDistance = distance;
+
+  if (distance < minDistance) {
+    if (distance <= minSoftBound) {
+      // 超出软下界：完全约束到最小值
+      targetDistance = minDistance;
+    } else {
+      // 在过渡区域内：平滑插值，允许轻微超出 minDistance
+      // t = 0 在 minSoftBound，t = 1 在 minDistance
+      double t = (distance - minSoftBound) / (minDistance - minSoftBound);
+      double smoothFactor = smoothstep(t);
+      targetDistance = minSoftBound + (minDistance - minSoftBound) * smoothFactor;
+    }
+  } else if (distance > maxDistance) {
+    if (distance >= maxSoftBound) {
+      // 超出软上界：完全约束到最大值
+      targetDistance = maxDistance;
+    } else {
+      // 在过渡区域内：平滑插值，允许轻微超出 maxDistance
+      // t = 0 在 maxDistance，t = 1 在 maxSoftBound
+      double t = (distance - maxDistance) / (maxSoftBound - maxDistance);
+      double smoothFactor = smoothstep(t);
+      // 反向插值：距离越大，越接近 maxDistance
+      targetDistance = maxDistance + (maxSoftBound - maxDistance) * (1.0 - smoothFactor);
+    }
+  } else {
+    // 在 [minDistance, maxDistance] 范围内：完全允许，不做调整
+    return;
+  }
+
+  // 使用稳定的缩放方法
+  double scale = targetDistance / distance;
+  handPos = elbowPos + handToElbow * scale;
+}
+
 // 位置约束函数：同时裁剪左右手位置的下边界（x轴下界和z轴上界）
 inline void clipBoxBackCeilingBothHands(Eigen::Vector3d& leftHandPos,
                                         Eigen::Vector3d& rightHandPos,
@@ -923,7 +1170,11 @@ inline void clipHandPositionsByAllConstraints(Eigen::Vector3d& leftHandPos,
                                               double cylinderMinReachableDistance,
                                               const Eigen::Vector3d& boxMinBound,
                                               const Eigen::Vector3d& boxMaxBound,
-                                              double chestOffsetY) {
+                                              double chestOffsetY,
+                                              const Eigen::Vector3d& currentLeftElbowPos,
+                                              const Eigen::Vector3d& currentRightElbowPos,
+                                              double elbowMinDistance,
+                                              double elbowMaxDistance) {
   // 1. 球体约束：限制手部位置在肩部球体范围内
   clipPositionBySphereBothHands(
       leftHandPos, rightHandPos, leftShoulderPos, rightShoulderPos, sphereRadiusLimit, minReachableDistance);
@@ -940,6 +1191,9 @@ inline void clipHandPositionsByAllConstraints(Eigen::Vector3d& leftHandPos,
 
   clipPositionByCylinderBothHands(
       leftHandPos, rightHandPos, leftCylinderCenter, rightCylinderCenter, cylinderMinReachableDistance);
+
+  //   clipPositionByElbowDistance(leftHandPos, currentLeftElbowPos, elbowMinDistance, elbowMaxDistance);
+  //   clipPositionByElbowDistance(rightHandPos, currentRightElbowPos, elbowMinDistance, elbowMaxDistance);
 }
 
 // ============== 指针检查宏函数 ==============

@@ -1,20 +1,23 @@
 #include "motion_capture_ik/Quest3IkIncrementalROS.h"
 
+#include <Eigen/src/Core/Matrix.h>
+#include <Eigen/src/Geometry/Quaternion.h>
 #include <drake/geometry/scene_graph.h>
 #include <drake/multibody/parsing/parser.h>
 #include <drake/multibody/plant/multibody_plant.h>
 #include <drake/systems/framework/context.h>
 #include <drake/systems/framework/diagram.h>
 #include <drake/systems/framework/diagram_builder.h>
-#include <kuavo_msgs/changeArmCtrlMode.h>  // 新增：手臂控制模式切换服务
+#include <kuavo_msgs/changeArmCtrlMode.h>
 #include <ros/package.h>
 #include <sensor_msgs/JointState.h>
-#include <geometry_msgs/PoseArray.h>
-#include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Pose.h>
-#include <visualization_msgs/Marker.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/Quaternion.h>
 #include <std_msgs/Int32.h>
-#include <iomanip>  // 用于格式化输出（std::setprecision, std::fixed）
+#include <std_msgs/Float32MultiArray.h>
+#include <iomanip>
+#include <cmath>
 
 #include <leju_utils/define.hpp>
 #include <leju_utils/math.hpp>
@@ -26,6 +29,8 @@
 #include "motion_capture_ik/IncrementalControlModule.h"
 #include "motion_capture_ik/KeyFramesVisualizer.h"
 #include "motion_capture_ik/JoyStickHandler.h"
+
+#include "DrakeElbowHandPointOpt.hpp"
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
@@ -50,22 +55,32 @@ void Quest3IkIncrementalROS::run() {
         "before calling run().");
     return;
   }
-  if (!twoStageTorsoIkPtr_) {
+  if (!oneStageIkEndEffectorPtr_) {
     ROS_ERROR(
-        "[Quest3IkIncrementalROS] twoStageTorsoIkPtr_ is not initialized. Please ensure it is properly created "
+        "[Quest3IkIncrementalROS] oneStageIkEndEffectorPtr_ is not initialized. Please ensure it is properly created "
         "before calling run().");
     return;
   }
 
-  ikSolveThread_ = std::thread(&Quest3IkIncrementalROS::solveIkHandElbowThreadFuntion, this);
+  ikSolveThread_ = std::thread(&Quest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
   ros::spin();
 }
 
-void Quest3IkIncrementalROS::solveIkHandElbowThreadFuntion() {
+void Quest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
   ros::Rate rate(publishRate_);
   while (!shouldStop() && ros::ok()) {
+    updateSensorArmJointMeanFromSensorData();
+
     if ((armControlMode_ == 0 && lastArmControlMode_ == 0) || (armControlMode_ == 1 && lastArmControlMode_ == 0)) {
       reset();  // 机器人未激活 (0→0 或 0→1)，持续重置各类状态，确保进入系统时正常
+
+      // 运行 DrakeVelocityIKSolver 测试套件
+      if (leftVelocityIkSolverPtr_) {
+        // 使用 left shoulder 位置作为 p0 (zarm_l2_joint 位置: -0.017500, 0.292700, 0.424500)
+        // static const Eigen::Vector3d leftShoulderP0(-0.017500, 0.292700, 0.424500);
+        // static DrakeVelocityIKTestSuite testSuite(leftShoulderP0, 0.2837, 0.2335);
+        // testSuite.test();
+      }
       rate.sleep();
       continue;  // 机器人未激活，不进行后续流程
     }
@@ -77,8 +92,135 @@ void Quest3IkIncrementalROS::solveIkHandElbowThreadFuntion() {
     publishSensorDataArmJoints();
     publishEndEffectorControlData();
 
+    processVisual();
+    publishHandPoseFromTransformer();
+    activateController();
+    publishJointStates();
+
     rate.sleep();
   }
+}
+
+void Quest3IkIncrementalROS::updateSensorArmJointMeanFromSensorData() {
+  // 从 sensorData 抽取 14 维双臂关节角（rad），并进行指数均值滤波：q = 0.99*q + 0.01*qnew
+  const auto currentSensorData = getSensorData();
+  if (!currentSensorData) {
+    return;
+  }
+
+  const size_t requiredSize = static_cast<size_t>(12 + SENSOR_ARM_JOINT_DIM);
+  if (currentSensorData->joint_data.joint_q.size() < requiredSize) {
+    return;
+  }
+
+  Eigen::VectorXd qNew = Eigen::VectorXd::Zero(SENSOR_ARM_JOINT_DIM);
+  for (int i = 0; i < SENSOR_ARM_JOINT_DIM; ++i) {
+    qNew(i) = currentSensorData->joint_data.joint_q[12 + i];
+  }
+
+  if (sensorArmJointQ_.size() != SENSOR_ARM_JOINT_DIM) {
+    sensorArmJointQ_ = Eigen::VectorXd::Zero(SENSOR_ARM_JOINT_DIM);
+  }
+
+  static constexpr double kKeep = 0.92;
+  static constexpr double kNew = 0.08;
+  sensorArmJointQ_ = kKeep * sensorArmJointQ_ + kNew * qNew;
+}
+
+void Quest3IkIncrementalROS::computeLeftEndEffectorFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut) {
+  // 默认值
+  pOut = Eigen::Vector3d::Zero();
+  qOut = Eigen::Quaterniond::Identity();
+
+  // 使用均值滤波后的关节数据
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    return;
+  }
+
+  Eigen::VectorXd armJoints = sensorArmJointQ_;
+  auto [l7Position, l7Quaternion] = oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_l7_end_effector", jointStateSize_);
+  pOut = l7Position;
+  qOut = l7Quaternion;
+}
+
+void Quest3IkIncrementalROS::computeRightEndEffectorFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut) {
+  // 默认值
+  pOut = Eigen::Vector3d::Zero();
+  qOut = Eigen::Quaterniond::Identity();
+
+  // 使用均值滤波后的关节数据
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    return;
+  }
+
+  Eigen::VectorXd armJoints = sensorArmJointQ_;
+  auto [r7Position, r7Quaternion] = oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_r7_end_effector", jointStateSize_);
+  pOut = r7Position;
+  qOut = r7Quaternion;
+}
+
+void Quest3IkIncrementalROS::computeLeftLink4FK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut) {
+  // 默认值
+  pOut = Eigen::Vector3d::Zero();
+  qOut = Eigen::Quaterniond::Identity();
+
+  // 使用均值滤波后的关节数据
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    return;
+  }
+
+  Eigen::VectorXd armJoints = sensorArmJointQ_;
+  auto [l4Position, l4Quaternion] = oneStageIkEndEffectorPtr_->FKElbow(armJoints, "zarm_l4_link", jointStateSize_);
+  pOut = l4Position;
+  qOut = l4Quaternion;
+}
+
+void Quest3IkIncrementalROS::computeRightLink4FK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut) {
+  // 默认值
+  pOut = Eigen::Vector3d::Zero();
+  qOut = Eigen::Quaterniond::Identity();
+
+  // 使用均值滤波后的关节数据
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    return;
+  }
+
+  Eigen::VectorXd armJoints = sensorArmJointQ_;
+  auto [r4Position, r4Quaternion] = oneStageIkEndEffectorPtr_->FKElbow(armJoints, "zarm_r4_link", jointStateSize_);
+  pOut = r4Position;
+  qOut = r4Quaternion;
+}
+
+void Quest3IkIncrementalROS::computeLeftLink6FK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut) {
+  // 默认值
+  pOut = Eigen::Vector3d::Zero();
+  qOut = Eigen::Quaterniond::Identity();
+
+  // 使用均值滤波后的关节数据
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    return;
+  }
+
+  Eigen::VectorXd armJoints = sensorArmJointQ_;
+  auto [l6Position, l6Quaternion] = oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_l6_link", jointStateSize_);
+  pOut = l6Position;
+  qOut = l6Quaternion;
+}
+
+void Quest3IkIncrementalROS::computeRightLink6FK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut) {
+  // 默认值
+  pOut = Eigen::Vector3d::Zero();
+  qOut = Eigen::Quaterniond::Identity();
+
+  // 使用均值滤波后的关节数据
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    return;
+  }
+
+  Eigen::VectorXd armJoints = sensorArmJointQ_;
+  auto [r6Position, r6Quaternion] = oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_r6_link", jointStateSize_);
+  pOut = r6Position;
+  qOut = r6Quaternion;
 }
 
 void Quest3IkIncrementalROS::fsmEnter() {
@@ -88,13 +230,33 @@ void Quest3IkIncrementalROS::fsmEnter() {
     if (exitMode2Counter_ < EXIT_MODE_2_EXECUTION_COUNT) {
       forceDeactivateAllArmCtrlMode();
 
+      // 进入增量模式时先用 FK 计算有效末端姿态，避免传入默认单位四元数
+      Eigen::Vector3d pLeft, pRight;
+      Eigen::Quaterniond qLeft, qRight;
+      computeLeftEndEffectorFK(pLeft, qLeft);
+      computeRightEndEffectorFK(pRight, qRight);
+      Eigen::Vector3d pLeftLink4, pRightLink4;
+      Eigen::Quaterniond qLeftLink4, qRightLink4;
+      computeLeftLink4FK(pLeftLink4, qLeftLink4);
+      computeRightLink4FK(pRightLink4, qRightLink4);
+      Eigen::Vector3d pLeftLink6, pRightLink6;
+      Eigen::Quaterniond qLeftLink6, qRightLink6;
+      computeLeftLink6FK(pLeftLink6, qLeftLink6);
+      computeRightLink6FK(pRightLink6, qRightLink6);
+
       std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-      incrementalController_->enterIncrementalMode(
-          quest3ArmInfoTransformerPtr_->getLeftHandPose(),
-          quest3ArmInfoTransformerPtr_->getRightHandPose(),
-          ArmPose(Eigen::Vector3d(-0.3, 0.5, 0.16), Eigen::Quaterniond::Identity()),
-          ArmPose(Eigen::Vector3d(-0.3, -0.5, 0.16), Eigen::Quaterniond::Identity()),
-          latestPoseConstraintList_);
+      // 【核心修复】在进入增量模式前，先更新 latestPoseConstraintList_ 为当前 FK 计算的 Link6 位置
+      // 避免使用上次退出时保存的旧位置，导致跳变
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = pLeftLink6;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = qLeftLink6.toRotationMatrix();
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = pRightLink6;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = qRightLink6.toRotationMatrix();
+
+      incrementalController_->enterIncrementalModeLeftArm(
+          quest3ArmInfoTransformerPtr_->getLeftHandPose(), latestPoseConstraintList_, pLeft, qLeft, qLeftLink4);
+
+      incrementalController_->enterIncrementalModeRightArm(
+          quest3ArmInfoTransformerPtr_->getRightHandPose(), latestPoseConstraintList_, pRight, qRight, qRightLink4);
       exitMode2Counter_++;
     }
     return;
@@ -126,13 +288,19 @@ void Quest3IkIncrementalROS::fsmEnter() {
 
       if (incrementalController_) {
         incrementalController_->reset();
-        incrementalController_->setHandQuatSeeds(currentLeftHandQuat, currentRightHandQuat);
+        incrementalController_->setHandQuatSeeds(
+            currentLeftHandQuat, currentRightHandQuat, useIncrementalHandOrientation_);
       }
 
       // 【核心修复】重置关节角度 fhan 滤波状态，避免从 t1 时刻的旧关节角度开始过渡
       if (q_.size() == jointStateSize_ && dq_.size() == jointStateSize_) {
         q_.setZero();
         dq_.setZero();
+      }
+      if (latest_q_.size() == jointStateSize_ && latest_dq_.size() == jointStateSize_) {
+        latest_q_.setZero();
+        latest_dq_.setZero();
+        lowpass_dq_.setZero();
       }
 
       {
@@ -157,17 +325,48 @@ void Quest3IkIncrementalROS::fsmEnter() {
     // 使用局部作用域加锁，保护 latestPoseConstraintList_ 的访问
     {
       std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-      if (incrementalController_->shouldEnterIncrementalModeLeftArm() && detectLeftGripPressed()) {
-        incrementalController_->enterIncrementalModeLeftArm(
-            quest3ArmInfoTransformerPtr_->getLeftHandPose(),
-            ArmPose(Eigen::Vector3d(-0.3, 0.5, 0.16), Eigen::Quaterniond::Identity()),
-            latestPoseConstraintList_);
-      }
-      if (incrementalController_->shouldEnterIncrementalModeRightArm() && detectRightGripPressed()) {
-        incrementalController_->enterIncrementalModeRightArm(
-            quest3ArmInfoTransformerPtr_->getRightHandPose(),
-            ArmPose(Eigen::Vector3d(-0.3, -0.5, 0.16), Eigen::Quaterniond::Identity()),
-            latestPoseConstraintList_);
+      const bool shouldEnterLeft =
+          incrementalController_->shouldEnterIncrementalModeLeftArm(joyStickHandlerPtr_->isLeftGrip());
+      const bool shouldEnterRight =
+          incrementalController_->shouldEnterIncrementalModeRightArm(joyStickHandlerPtr_->isRightGrip());
+
+      if (shouldEnterLeft || shouldEnterRight) {
+        Eigen::Vector3d pLeft, pRight;
+        Eigen::Quaterniond qLeft, qRight;
+        Eigen::Vector3d pLeftLink4, pRightLink4;
+        Eigen::Quaterniond qLeftLink4, qRightLink4;
+        Eigen::Vector3d pLeftLink6, pRightLink6;
+        Eigen::Quaterniond qLeftLink6, qRightLink6;
+        if (shouldEnterLeft) {
+          computeLeftEndEffectorFK(pLeft, qLeft);
+          computeLeftLink4FK(pLeftLink4, qLeftLink4);
+          computeLeftLink6FK(pLeftLink6, qLeftLink6);
+        }
+        if (shouldEnterRight) {
+          computeRightEndEffectorFK(pRight, qRight);
+          computeRightLink4FK(pRightLink4, qRightLink4);
+          computeRightLink6FK(pRightLink6, qRightLink6);
+        }
+
+        // 【核心修复】在进入增量模式前，先更新 latestPoseConstraintList_ 为当前 FK 计算的 Link6 位置
+        // 避免使用上次退出时保存的旧位置，导致跳变
+        if (shouldEnterLeft) {
+          latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = pLeftLink6;
+          latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = qLeftLink6.toRotationMatrix();
+        }
+        if (shouldEnterRight) {
+          latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = pRightLink6;
+          latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = qRightLink6.toRotationMatrix();
+        }
+
+        if (shouldEnterLeft) {
+          incrementalController_->enterIncrementalModeLeftArm(
+              quest3ArmInfoTransformerPtr_->getLeftHandPose(), latestPoseConstraintList_, pLeft, qLeft, qLeftLink4);
+        }
+        if (shouldEnterRight) {
+          incrementalController_->enterIncrementalModeRightArm(
+              quest3ArmInfoTransformerPtr_->getRightHandPose(), latestPoseConstraintList_, pRight, qRight, qRightLink4);
+        }
       }
     }
 
@@ -197,26 +396,19 @@ void Quest3IkIncrementalROS::fsmEnter() {
       // 在超时时间内，强制停用所有手臂控制模式，确保可以进入 fsmChange 流程
       forceDeactivateAllArmCtrlMode();
 
-      // 使用初始化时保存的全零关节角度位姿（Link6），避免运行时频繁调用 FK
-      Eigen::Vector3d currentLeftHandPos = initZeroLeftLink6Position_;
-      Eigen::Vector3d currentRightHandPos = initZeroRightLink6Position_;
-      Eigen::Quaterniond currentLeftHandQuat = Eigen::Quaterniond::Identity();
-      Eigen::Quaterniond currentRightHandQuat = Eigen::Quaterniond::Identity();
-
       {
         std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = currentLeftHandPos;
-        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix =
-            currentLeftHandQuat.toRotationMatrix();
-        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = currentRightHandPos;
-        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix =
-            currentRightHandQuat.toRotationMatrix();
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = initZeroLeftLink6Position_;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = Eigen::Matrix3d::Identity();
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = initZeroRightLink6Position_;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = Eigen::Matrix3d::Identity();
       }
 
       // 重置增量控制模块，清除可能被 fsmChange/fsmProcess 更新的 fhan 滤波状态
       if (incrementalController_) {
         incrementalController_->reset();
-        incrementalController_->setHandQuatSeeds(currentLeftHandQuat, currentRightHandQuat);
+        incrementalController_->setHandQuatSeeds(
+            Eigen::Quaterniond::Identity(), Eigen::Quaterniond::Identity(), useIncrementalHandOrientation_);
       }
 
       // 重置关节角度 fhan 滤波状态
@@ -224,16 +416,40 @@ void Quest3IkIncrementalROS::fsmEnter() {
         q_.setZero();
         dq_.setZero();
       }
+      if (latest_q_.size() == jointStateSize_ && latest_dq_.size() == jointStateSize_) {
+        latest_q_.setZero();
+        latest_dq_.setZero();
+        lowpass_dq_.setZero();
+      }
 
       // 在超时时间内，执行进入增量模式（0→2 和 1→2 都需要）
       {
+        Eigen::Vector3d pLeft, pRight;
+        Eigen::Quaterniond qLeft, qRight;
+        computeLeftEndEffectorFK(pLeft, qLeft);
+        computeRightEndEffectorFK(pRight, qRight);
+        Eigen::Vector3d pLeftLink4, pRightLink4;
+        Eigen::Quaterniond qLeftLink4, qRightLink4;
+        computeLeftLink4FK(pLeftLink4, qLeftLink4);
+        computeRightLink4FK(pRightLink4, qRightLink4);
+        Eigen::Vector3d pLeftLink6, pRightLink6;
+        Eigen::Quaterniond qLeftLink6, qRightLink6;
+        computeLeftLink6FK(pLeftLink6, qLeftLink6);
+        computeRightLink6FK(pRightLink6, qRightLink6);
+
         std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-        incrementalController_->enterIncrementalMode(
-            quest3ArmInfoTransformerPtr_->getLeftHandPose(),
-            quest3ArmInfoTransformerPtr_->getRightHandPose(),
-            ArmPose(Eigen::Vector3d(-0.3, 0.5, 0.16), Eigen::Quaterniond::Identity()),
-            ArmPose(Eigen::Vector3d(-0.3, -0.5, 0.16), Eigen::Quaterniond::Identity()),
-            latestPoseConstraintList_);
+        // 【核心修复】在进入增量模式前，先更新 latestPoseConstraintList_ 为当前 FK 计算的 Link6 位置
+        // 避免使用上次退出时保存的旧位置，导致跳变
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = pLeftLink6;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = qLeftLink6.toRotationMatrix();
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = pRightLink6;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = qRightLink6.toRotationMatrix();
+
+        incrementalController_->enterIncrementalModeLeftArm(
+            quest3ArmInfoTransformerPtr_->getLeftHandPose(), latestPoseConstraintList_, pLeft, qLeft, qLeftLink4);
+
+        incrementalController_->enterIncrementalModeRightArm(
+            quest3ArmInfoTransformerPtr_->getRightHandPose(), latestPoseConstraintList_, pRight, qRight, qRightLink4);
       }
     }
   }
@@ -254,7 +470,8 @@ void Quest3IkIncrementalROS::fsmChange() {
     if (activateAllArmCtrlModeCounter_ < ACTIVATE_ALL_ARM_CTRL_MODE_COUNT) {
       forceActivateAllArmCtrlMode();
       kuavo_msgs::changeArmCtrlMode srv3;
-      srv3.request.control_mode = static_cast<int>(1);
+      srv3.request.control_mode = static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
+      // srv3.request.control_mode = static_cast<int>(1);
       enableWbcArmTrajectoryControlClient_.call(srv3);
       activateAllArmCtrlModeCounter_++;
     }
@@ -266,11 +483,26 @@ void Quest3IkIncrementalROS::fsmChange() {
             << ", rightChangingMaintainUpdated: " << rightChangingMaintainUpdated << std::endl;
 
   if (!updateLatestIncrementalResult()) return;  // check update success
-  if (!processChangingData(leftChangingMaintainUpdated, rightChangingMaintainUpdated)) return;
+
+  // 独立处理左右臂模式切换
+  bool leftProcessed = false;
+  bool rightProcessed = false;
+
+  if (leftChangingMaintainUpdated) {
+    leftProcessed = processChangingDataLeftArm(leftHandCtrlModeChanged);
+  }
+
+  if (rightChangingMaintainUpdated) {
+    rightProcessed = processChangingDataRightArm(rightHandCtrlModeChanged);
+  }
+
+  // 只有当至少一个臂处理成功时才继续
+  if (!leftProcessed && !rightProcessed) return;
+
   solveIk();
-  processVisual();
-  activateController();
-  publishJointStates();
+  // processVisual();
+  // activateController();
+  // publishJointStates();
 
   updateLeftHandChangingMode(leftHandSmoother_->getDefaultPosOnExit());
   updateRightHandChangingMode(rightHandSmoother_->getDefaultPosOnExit());
@@ -279,14 +511,107 @@ void Quest3IkIncrementalROS::fsmChange() {
 }
 
 void Quest3IkIncrementalROS::fsmProcess() {
-  if (!incrementalController_->isIncrementalMode()) return;  // check enter success
+  if (!incrementalController_->isIncrementalMode()) return;
+
+  // latestHumanLeftElbowPos_ = quest3ArmInfoTransformerPtr_->getLeftElbowPose().position;
+  // latestHumanRightElbowPos_ = quest3ArmInfoTransformerPtr_->getRightElbowPose().position;
 
   auto [leftMaintainProcess, leftInstantProcess] = leftHandSmoother_->getModeChangingState();
   auto [rightMaintainProcess, rightInstantProcess] = rightHandSmoother_->getModeChangingState();
 
   // 获取当前 grip 状态
-  bool currentLeftGripPressed = detectLeftGripPressed();
-  bool currentRightGripPressed = detectRightGripPressed();
+  bool currentLeftGripPressed = joyStickHandlerPtr_->isLeftGrip();
+  bool currentRightGripPressed = joyStickHandlerPtr_->isRightGrip();
+
+  // 处理左手 grip 超时机制（结合移动检测）
+  {
+    ros::Time currentTime = ros::Time::now();
+    bool leftArmMoved = incrementalController_->hasLeftArmMoved();
+
+    if (currentLeftGripPressed) {
+      // 只有在检测到移动时才开始计时
+      if (leftArmMoved) {
+        ros::Time startTime;
+        {
+          std::lock_guard<std::mutex> lock(leftGripTimeMutex_);
+          // 如果还没有开始计时，则开始计时
+          if (leftGripStartTime_.isZero()) {
+            leftGripStartTime_ = currentTime;
+            leftGripTimeoutReached_.store(false);
+          }
+          startTime = leftGripStartTime_;
+        }
+
+        // 检查是否达到超时
+        if (!startTime.isZero()) {
+          double elapsedTime = (currentTime - startTime).toSec();
+          if (elapsedTime >= GRIP_TIMEOUT_DURATION && !leftGripTimeoutReached_.load()) {
+            leftGripTimeoutReached_.store(true);
+            ROS_INFO("[Quest3IkIncrementalROS] Left grip timeout reached (%.3f seconds)", elapsedTime);
+          }
+        }
+      } else {
+        // 未检测到移动，重置时间戳（不开始计时）
+        std::lock_guard<std::mutex> lock(leftGripTimeMutex_);
+        if (!leftGripStartTime_.isZero()) {
+          leftGripStartTime_ = ros::Time(0);
+          leftGripTimeoutReached_.store(false);
+        }
+      }
+    } else {
+      // grip 释放，重置时间戳和布尔值
+      if (lastLeftGripPressed_) {
+        std::lock_guard<std::mutex> lock(leftGripTimeMutex_);
+        leftGripStartTime_ = ros::Time(0);
+        leftGripTimeoutReached_.store(false);
+      }
+    }
+  }
+
+  // 处理右手 grip 超时机制（结合移动检测）
+  {
+    ros::Time currentTime = ros::Time::now();
+    bool rightArmMoved = incrementalController_->hasRightArmMoved();
+
+    if (currentRightGripPressed) {
+      // 只有在检测到移动时才开始计时
+      if (rightArmMoved) {
+        ros::Time startTime;
+        {
+          std::lock_guard<std::mutex> lock(rightGripTimeMutex_);
+          // 如果还没有开始计时，则开始计时
+          if (rightGripStartTime_.isZero()) {
+            rightGripStartTime_ = currentTime;
+            rightGripTimeoutReached_.store(false);
+          }
+          startTime = rightGripStartTime_;
+        }
+
+        // 检查是否达到超时
+        if (!startTime.isZero()) {
+          double elapsedTime = (currentTime - startTime).toSec();
+          if (elapsedTime >= GRIP_TIMEOUT_DURATION && !rightGripTimeoutReached_.load()) {
+            rightGripTimeoutReached_.store(true);
+            ROS_INFO("[Quest3IkIncrementalROS] Right grip timeout reached (%.3f seconds)", elapsedTime);
+          }
+        }
+      } else {
+        // 未检测到移动，重置时间戳（不开始计时）
+        std::lock_guard<std::mutex> lock(rightGripTimeMutex_);
+        if (!rightGripStartTime_.isZero()) {
+          rightGripStartTime_ = ros::Time(0);
+          rightGripTimeoutReached_.store(false);
+        }
+      }
+    } else {
+      // grip 释放，重置时间戳和布尔值
+      if (lastRightGripPressed_) {
+        std::lock_guard<std::mutex> lock(rightGripTimeMutex_);
+        rightGripStartTime_ = ros::Time(0);
+        rightGripTimeoutReached_.store(false);
+      }
+    }
+  }
 
   bool leftGripRisingEdge = currentLeftGripPressed && !lastLeftGripPressed_;
   bool rightGripRisingEdge = currentRightGripPressed && !lastRightGripPressed_;
@@ -297,29 +622,83 @@ void Quest3IkIncrementalROS::fsmProcess() {
 
   // 处理左臂 grip 上升沿：更新锚点，使增量归零
   if (leftGripRisingEdge && !leftMaintainProcess) {
-    Eigen::Vector3d currentRobotLeftHandPos;
+    // 【核心修复】在grip激活瞬间，先通过FK计算当前真实位置，然后通过速度IK求解器优化，
+    // 确保 latestPoseConstraintList_ 中的位置是当前真实位置，避免跳变
+    Eigen::Vector3d pLeftLink6;
+    Eigen::Quaterniond qLeftLink6;
+    computeLeftLink6FK(pLeftLink6, qLeftLink6);
+
+    // 通过FK计算末端执行器在世界系下的姿态
+    Eigen::Vector3d pEndEffector;
+    Eigen::Quaterniond qEndEffector;
+    computeLeftEndEffectorFK(pEndEffector, qEndEffector);
+    Eigen::Vector3d pLink4;
+    Eigen::Quaterniond qLink4;
+    computeLeftLink4FK(pLink4, qLink4);
+
+    // 调用速度IK求解器优化手部和肘部位置，确保位置一致性
+    const auto [p1Optimized, p2Optimized] =
+        leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
+                                        leftElbowFixedPoint_,      // p1Fixed: 肘部固定点
+                                        pLeftLink6  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
+        );
+
+    // 保存优化后的结果
+    latestRobotLeftElbowPos_ = p1Optimized;
+
+    // 更新 latestPoseConstraintList_ 为优化后的位置，确保锚点设置正确
     {
       std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-      currentRobotLeftHandPos = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = p2Optimized;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = qLeftLink6.toRotationMatrix();
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position = p1Optimized;
     }
-    incrementalController_->updateLeftArmAnchor(quest3ArmInfoTransformerPtr_->getLeftHandPose(),
-                                                currentRobotLeftHandPos);
-    // ROS_INFO("[Quest3IkIncrementalROS] Left grip rising edge detected, anchor updated");
+
+    incrementalController_->updateLeftArmPoseAnchor(
+        quest3ArmInfoTransformerPtr_->getLeftHandPose(), latestPoseConstraintList_, pEndEffector, qEndEffector, qLink4);
   }
 
   // 处理右臂 grip 上升沿：更新锚点，使增量归零
   if (rightGripRisingEdge && !rightMaintainProcess) {
-    Eigen::Vector3d currentRobotRightHandPos;
+    // 【核心修复】在grip激活瞬间，先通过FK计算当前真实位置，然后通过速度IK求解器优化，
+    // 确保 latestPoseConstraintList_ 中的位置是当前真实位置，避免跳变
+    Eigen::Vector3d pRightLink6;
+    Eigen::Quaterniond qRightLink6;
+    computeRightLink6FK(pRightLink6, qRightLink6);
+
+    // 通过FK计算末端执行器在世界系下的姿态
+    Eigen::Vector3d pEndEffector;
+    Eigen::Quaterniond qEndEffector;
+    computeRightEndEffectorFK(pEndEffector, qEndEffector);
+    Eigen::Vector3d pLink4;
+    Eigen::Quaterniond qLink4;
+    computeRightLink4FK(pLink4, qLink4);
+
+    // 调用速度IK求解器优化手部和肘部位置，确保位置一致性
+    const auto [p1Optimized, p2Optimized] =
+        rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
+                                         rightElbowFixedPoint_,      // p1Fixed: 肘部固定点
+                                         pRightLink6  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
+        );
+
+    // 保存优化后的结果
+    latestRobotRightElbowPos_ = p1Optimized;
+
+    // 更新 latestPoseConstraintList_ 为优化后的位置，确保锚点设置正确
     {
       std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-      currentRobotRightHandPos = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = p2Optimized;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = qRightLink6.toRotationMatrix();
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position = p1Optimized;
     }
-    incrementalController_->updateRightArmAnchor(quest3ArmInfoTransformerPtr_->getRightHandPose(),
-                                                 currentRobotRightHandPos);
-    // ROS_INFO("[Quest3IkIncrementalROS] Right grip rising edge detected, anchor updated");
+
+    incrementalController_->updateRightArmPoseAnchor(quest3ArmInfoTransformerPtr_->getRightHandPose(),
+                                                     latestPoseConstraintList_,
+                                                     pEndEffector,
+                                                     qEndEffector,
+                                                     qLink4);
   }
 
-  // 预先判断左右臂是否可以处理（不在模式切换中 && 检测到移动 && grip按下）
   bool leftCanProcess = !leftMaintainProcess && currentLeftGripPressed;
 
   if (leftCanProcess) {
@@ -341,161 +720,95 @@ void Quest3IkIncrementalROS::fsmProcess() {
   bool isLeftActive = joyStickHandlerPtr_->isLeftArmCtrlModeActive();
   bool isRightActive = joyStickHandlerPtr_->isRightArmCtrlModeActive();
 
+  // 计算ee的fk值用于实时更新
+  Eigen::Vector3d pLeftEndEffector, pRightEndEffector;
+  Eigen::Quaterniond qLeftEndEffector, qRightEndEffector;
+  if (leftCanProcess && isLeftActive) {
+    computeLeftEndEffectorFK(pLeftEndEffector, qLeftEndEffector);
+  }
+  if (rightCanProcess && isRightActive) {
+    computeRightEndEffectorFK(pRightEndEffector, qRightEndEffector);
+  }
+
   // 统一使用 computeIncrementalPose()，根据 leftCanProcess/rightCanProcess 决定激活哪只手臂
   // IncrementalControlModule 的 fhan 滤波已修复：未激活的手臂不会更新滤波状态
   if (leftCanProcess && isLeftActive) {
     latestIncrementalResult_ = incrementalController_->computeIncrementalPoseLeftArm(
-        quest3ArmInfoTransformerPtr_->getLeftHandPose(),
-        ArmPose(Eigen::Vector3d(-0.3, 0.5, 0.16), Eigen::Quaterniond::Identity()),
-        leftCanProcess && isLeftActive);
+        quest3ArmInfoTransformerPtr_->getLeftHandPose(), leftCanProcess && isLeftActive, qLeftEndEffector);
   }
   if (rightCanProcess && isRightActive) {
     latestIncrementalResult_ = incrementalController_->computeIncrementalPoseRightArm(
-        quest3ArmInfoTransformerPtr_->getRightHandPose(),
-        ArmPose(Eigen::Vector3d(-0.3, -0.5, 0.16), Eigen::Quaterniond::Identity()),
-        rightCanProcess && isRightActive);
+        quest3ArmInfoTransformerPtr_->getRightHandPose(), rightCanProcess && isRightActive, qRightEndEffector);
   }
 
   latestIncrementalResult_ = incrementalController_->getLatestIncrementalResult();
 
-  // 根据控制模式选择合适的数据处理函数
-  if (leftCanProcess && rightCanProcess) {
-    processData();  // 双臂同时控制
-  } else if (leftCanProcess) {
+  // 独立处理左右臂数据
+  bool leftProcessed = false;
+  bool rightProcessed = false;
+
+  if (leftCanProcess) {
     // print left only in green
     // std::cout << "\033[32m[Quest3IkIncrementalROS] Left arm only\033[0m" << std::endl;
-    processDataLeftArm();  // 只有左臂控制
-  } else if (rightCanProcess) {
+    leftProcessed = processDataLeftArm();  // 左臂控制
+  }
+
+  if (rightCanProcess) {
     // print right only in green
     // std::cout << "\033[32m[Quest3IkIncrementalROS] Right arm only\033[0m" << std::endl;
-    processDataRightArm();  // 只有右臂控制
+    rightProcessed = processDataRightArm();  // 右臂控制
+  }
+
+  // 只有当至少一个臂处理成功时才继续
+  if (!leftProcessed && !rightProcessed) {
+    return;
   }
 
   solveIk();
-  processVisual();
-  activateController();
-  publishJointStates();
+  // processVisual();
+  // activateController();
+  // publishJointStates();
 }
 
 void Quest3IkIncrementalROS::fsmExit() {
-  if (!incrementalController_->shouldExitIncrementalMode()) return;
-  deactivateController();
   std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-  incrementalController_->exitIncrementalMode(
-      quest3ArmInfoTransformerPtr_->getLeftHandPose(),
-      quest3ArmInfoTransformerPtr_->getRightHandPose(),
-      ArmPose(Eigen::Vector3d(-0.3, 0.5, 0.16), Eigen::Quaterniond::Identity()),
-      ArmPose(Eigen::Vector3d(-0.3, -0.5, 0.16), Eigen::Quaterniond::Identity()),
-      latestPoseConstraintList_);
-}
+  bool shouldExitIncrementalLeftArm =
+      incrementalController_->shouldExitIncrementalModeLeftArm(joyStickHandlerPtr_->isLeftGrip());
+  bool shouldExitIncrementalRightArm =
+      incrementalController_->shouldExitIncrementalModeRightArm(joyStickHandlerPtr_->isRightGrip());
 
-bool Quest3IkIncrementalROS::processChangingData(bool leftHandCtrlModeChanged, bool rightHandCtrlModeChanged) {
-  std::shared_ptr<noitom_hi5_hand_udp_python::PoseInfoList> bonePoseHandElbowPtr;
-  {
-    std::lock_guard<std::mutex> lock(bonePoseHandElbowMutex_);
-    bonePoseHandElbowPtr = HandPoseAndElbowPositonListPtr_;
+  if (shouldExitIncrementalLeftArm) {
+    Eigen::Vector3d pEndEffector;
+    Eigen::Quaterniond qEndEffector;
+    computeLeftEndEffectorFK(pEndEffector, qEndEffector);
+    Eigen::Vector3d pLink4;
+    Eigen::Quaterniond qLink4;
+    computeLeftLink4FK(pLink4, qLink4);
+    incrementalController_->exitIncrementalModeLeftArm(
+        quest3ArmInfoTransformerPtr_->getLeftHandPose(), latestPoseConstraintList_, pEndEffector, qEndEffector, qLink4);
+    dq_.head(7).setZero();
+    latest_dq_.head(7).setZero();
+    lowpass_dq_.head(7).setZero();
   }
 
-  if (bonePoseHandElbowPtr == nullptr) return false;
-  if (bonePoseHandElbowPtr->poses.size() < 4) return false;
-
-  auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-      latestIncrementalResult_.getLatestIncrementalHandPose();
-
-  // 修复：当只有一只手切换状态时，保持另一只手位置不变，避免状态同步不一致导致的异常移动
-  if (!leftHandCtrlModeChanged && rightHandCtrlModeChanged) {
-    std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-    scaledLeftHandPos = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
+  if (shouldExitIncrementalRightArm) {
+    Eigen::Vector3d pEndEffector;
+    Eigen::Quaterniond qEndEffector;
+    computeRightEndEffectorFK(pEndEffector, qEndEffector);
+    Eigen::Vector3d pLink4;
+    Eigen::Quaterniond qLink4;
+    computeRightLink4FK(pLink4, qLink4);
+    incrementalController_->exitIncrementalModeRightArm(quest3ArmInfoTransformerPtr_->getRightHandPose(),
+                                                        latestPoseConstraintList_,
+                                                        pEndEffector,
+                                                        qEndEffector,
+                                                        qLink4);
+    dq_.tail(7).setZero();
+    latest_dq_.tail(7).setZero();
+    lowpass_dq_.tail(7).setZero();
   }
-
-  if (leftHandCtrlModeChanged && !rightHandCtrlModeChanged) {
-    std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-    scaledRightHandPos = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
-  }
-
-  bool isLeftArmCtrlModeActive = joyStickHandlerPtr_->isLeftArmCtrlModeActive();
-  bool isRightArmCtrlModeActive = joyStickHandlerPtr_->isRightArmCtrlModeActive();
-
-  //#########################################################################################
-  // process left hand changing mode
-  //#########################################################################################
-  if (leftHandCtrlModeChanged && isLeftArmCtrlModeActive) {
-    auto [leftMaintain, leftInstant] = leftHandSmoother_->getModeChangingState();
-    if (leftInstant) {
-      Eigen::Vector3d leftHandPosOnExit;
-      {
-        std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-        leftHandPosOnExit = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
-      }
-      incrementalController_->updateLeftArmAnchor(quest3ArmInfoTransformerPtr_->getLeftHandPose(), leftHandPosOnExit);
-    }
-
-    bool leftInstantCopy = leftInstant;
-    leftHandSmoother_->processActiveModeInterpolation(
-        scaledLeftHandPos, leftInstantCopy, leftHandSmoother_->getDefaultPosOnExit(), "左臂");
-    leftHandSmoother_->setModeChangingState(leftMaintain, leftInstantCopy);
-  }
-
-  if (leftHandCtrlModeChanged && !isLeftArmCtrlModeActive) {
-    auto [leftMaintain, leftInstant] = leftHandSmoother_->getModeChangingState();
-    bool leftInstantCopy = leftInstant;
-    leftHandSmoother_->processInactiveModeInterpolation(
-        scaledLeftHandPos, leftInstantCopy, leftHandSmoother_->getDefaultPosOnExit(), "左臂");
-    leftHandSmoother_->setModeChangingState(leftMaintain, leftInstantCopy);
-  }
-
-  //#########################################################################################
-  // process right hand changing mode
-  //#########################################################################################
-  if (rightHandCtrlModeChanged && isRightArmCtrlModeActive) {
-    auto [rightMaintain, rightInstant] = rightHandSmoother_->getModeChangingState();
-    if (rightInstant) {
-      Eigen::Vector3d rightHandPosOnExit;
-      {
-        std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-        rightHandPosOnExit = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
-      }
-      incrementalController_->updateRightArmAnchor(quest3ArmInfoTransformerPtr_->getRightHandPose(),
-                                                   rightHandPosOnExit);
-    }
-
-    bool rightInstantCopy = rightInstant;
-    rightHandSmoother_->processActiveModeInterpolation(
-        scaledRightHandPos, rightInstantCopy, rightHandSmoother_->getDefaultPosOnExit(), "右臂");
-    rightHandSmoother_->setModeChangingState(rightMaintain, rightInstantCopy);
-  }
-
-  if (rightHandCtrlModeChanged && !isRightArmCtrlModeActive) {
-    auto [rightMaintain, rightInstant] = rightHandSmoother_->getModeChangingState();
-    bool rightInstantCopy = rightInstant;
-    rightHandSmoother_->processInactiveModeInterpolation(
-        scaledRightHandPos, rightInstantCopy, rightHandSmoother_->getDefaultPosOnExit(), "右臂");
-    rightHandSmoother_->setModeChangingState(rightMaintain, rightInstantCopy);
-  }
-
-  clipHandPositionsByAllConstraints(scaledLeftHandPos,
-                                    scaledRightHandPos,
-                                    robotLeftFixedShoulderPos_,
-                                    robotRightFixedShoulderPos_,
-                                    sphereRadiusLimit_,
-                                    minReachableDistance_,
-                                    leftCenter_,
-                                    rightCenter_,
-                                    0.2,
-                                    boxMinBound_,
-                                    boxMaxBound_,
-                                    chestOffsetY_);
-
-  updateConstraintList(scaledLeftHandPos,
-                       incrementalLeftQuat,
-                       //  Eigen::Quaterniond(0.975, 0, -0.225, 0).normalized(),
-                       scaledRightHandPos,
-                       incrementalRightQuat,
-                       //  Eigen::Quaterniond(0.975, 0, -0.225, 0).normalized(),
-                       Eigen::Vector3d(-0.3, 0.5, 0.16),
-                       Eigen::Vector3d(-0.3, -0.5, 0.16));
-
-  return true;
+  if (!shouldExitIncrementalLeftArm && !shouldExitIncrementalRightArm) return;
+  deactivateController();
 }
 
 bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeChanged) {
@@ -509,9 +822,9 @@ bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeCha
   if (bonePoseHandElbowPtr->poses.size() < 4) return false;
 
   auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-      latestIncrementalResult_.getLatestIncrementalHandPose();
+      latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
 
-  // 只处理左手，右手位置保持不变
+  // scaledLeftHandPos = scaledLeftHandPos.cwiseProduct(deltaScale_);
   {
     std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
     scaledRightHandPos = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
@@ -525,12 +838,43 @@ bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeCha
   if (leftHandCtrlModeChanged && isLeftArmCtrlModeActive) {
     auto [leftMaintain, leftInstant] = leftHandSmoother_->getModeChangingState();
     if (leftInstant) {
-      Eigen::Vector3d leftHandPosOnExit;
+      // 【核心修复】在模式切换瞬间，先通过FK计算当前真实位置，然后通过速度IK求解器优化，
+      // 确保 latestPoseConstraintList_ 中的位置是当前真实位置，避免跳变
+      Eigen::Vector3d pLeftLink6;
+      Eigen::Quaterniond qLeftLink6;
+      computeLeftLink6FK(pLeftLink6, qLeftLink6);
+
+      // 通过FK计算末端执行器在世界系下的姿态
+      Eigen::Vector3d pEndEffector;
+      Eigen::Quaterniond qEndEffector;
+      computeLeftEndEffectorFK(pEndEffector, qEndEffector);
+      Eigen::Vector3d pLink4;
+      Eigen::Quaterniond qLink4;
+      computeLeftLink4FK(pLink4, qLink4);
+
+      // 调用速度IK求解器优化手部和肘部位置，确保位置一致性
+      const auto [p1Optimized, p2Optimized] =
+          leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
+                                          leftElbowFixedPoint_,      // p1Fixed: 肘部固定点
+                                          pLeftLink6  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
+          );
+
+      // 保存优化后的结果
+      latestRobotLeftElbowPos_ = p1Optimized;
+
+      // 更新 latestPoseConstraintList_ 为优化后的位置，确保锚点设置正确
       {
         std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-        leftHandPosOnExit = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = p2Optimized;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = qLeftLink6.toRotationMatrix();
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position = p1Optimized;
       }
-      incrementalController_->updateLeftArmAnchor(quest3ArmInfoTransformerPtr_->getLeftHandPose(), leftHandPosOnExit);
+
+      incrementalController_->updateLeftArmPoseAnchor(quest3ArmInfoTransformerPtr_->getLeftHandPose(),
+                                                      latestPoseConstraintList_,
+                                                      pEndEffector,
+                                                      qEndEffector,
+                                                      qLink4);
     }
 
     bool leftInstantCopy = leftInstant;
@@ -547,27 +891,73 @@ bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeCha
     leftHandSmoother_->setModeChangingState(leftMaintain, leftInstantCopy);
   }
 
-  // 应用位置约束
-  clipHandPositionsByAllConstraints(scaledLeftHandPos,
-                                    scaledRightHandPos,
-                                    robotLeftFixedShoulderPos_,
-                                    robotRightFixedShoulderPos_,
-                                    sphereRadiusLimit_,
-                                    minReachableDistance_,
-                                    leftCenter_,
-                                    rightCenter_,
-                                    0.2,
-                                    boxMinBound_,
-                                    boxMaxBound_,
-                                    chestOffsetY_);
+  // 通过FK计算左右肘部实时位置
+  // CZJTODO ELBOW 需要平滑，否则容易导致震荡发散，因为目前hand pose 和 elbow pos的因果耦合
+  Eigen::Vector3d currentLeftElbowPos, currentRightElbowPos;
+  Eigen::Quaterniond qLeftElbow, qRightElbow;
+  computeLeftLink4FK(currentLeftElbowPos, qLeftElbow);
+  computeRightLink4FK(currentRightElbowPos, qRightElbow);
 
-  // 更新约束列表
-  updateConstraintList(scaledLeftHandPos,
-                       incrementalLeftQuat,
-                       scaledRightHandPos,
-                       incrementalRightQuat,
-                       Eigen::Vector3d(-0.3, 0.5, 0.16),
-                       Eigen::Vector3d(-0.3, -0.5, 0.16));
+  // 应用位置约束
+  // clipHandPositionsByAllConstraints(scaledLeftHandPos,
+  //                                   scaledRightHandPos,
+  //                                   robotLeftFixedShoulderPos_,
+  //                                   robotRightFixedShoulderPos_,
+  //                                   sphereRadiusLimit_,
+  //                                   minReachableDistance_,
+  //                                   leftCenter_,
+  //                                   rightCenter_,
+  //                                   0.23,
+  //                                   boxMinBound_,
+  //                                   boxMaxBound_,
+  //                                   chestOffsetY_,
+  //                                   currentLeftElbowPos,
+  //                                   currentRightElbowPos,
+  //                                   elbowMinDistance_,
+  //                                   elbowMaxDistance_);
+
+  // 保存优化前的手部位置（用于可视化对比）
+  latestLeftHandPosBeforeOpt_ = scaledLeftHandPos;
+
+  // 使用上一时刻的link6位置和ee位置计算期望的肘部位置
+  // 通过手腕-ee向量计算期望的肘部位置
+  // 向量方向：ee→手腕向量方向，长度为肘部到手腕的距离l2
+  // 肘点计算：肘点 = 手腕点+向量方向*长度l2
+  {
+    // 计算从ee到手腕的向量（ee→手腕方向）
+    Eigen::Vector3d eeToWristVec = leftLink6Position_ - leftEndEffectorPosition_;
+    double vecNorm = eeToWristVec.norm();
+
+    // 如果向量长度太小，使用默认方向（避免除零错误）
+    if (vecNorm > 1e-6) {
+      // 归一化向量并乘以l2_长度
+      Eigen::Vector3d direction = eeToWristVec.normalized() * l2_;
+      // 肘点 = 手腕点 + 向量方向*长度l2
+      latestHumanLeftElbowPos_ = leftLink6Position_ + direction;
+    } else {
+      // 如果向量为零，使用上一时刻的肘部位置（保持连续性）
+      // latestHumanLeftElbowPos_ 保持当前值不变
+    }
+  }
+
+  const auto [p1Optimized, p2Optimized] =
+      leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
+                                      leftElbowFixedPoint_,      // p1Fixed: 肘部固定点
+                                      scaledLeftHandPos          // p2Ref: 手部参考位置
+      );
+  // 保存优化后的结果
+  latestRobotLeftElbowPos_ = p1Optimized;
+  latestLeftHandPosAfterOpt_ = p2Optimized;
+
+  // 更新手部位置为优化后的结果（P2）
+  scaledLeftHandPos = p2Optimized;
+
+  leftLink6Position_ = scaledLeftHandPos;
+  leftEndEffectorPosition_ = scaledLeftHandPos + (incrementalLeftQuat * leftEE2Link6Offset_);
+  leftVirtualThumbPosition_ = scaledLeftHandPos + (incrementalLeftQuat * leftThumb2Link6Offset_);
+
+  // 更新约束列表 - 左臂独立处理
+  updateLeftConstraintList(scaledLeftHandPos, incrementalLeftQuat, p1Optimized);
 
   return true;
 }
@@ -583,9 +973,9 @@ bool Quest3IkIncrementalROS::processChangingDataRightArm(bool rightHandCtrlModeC
   if (bonePoseHandElbowPtr->poses.size() < 4) return false;
 
   auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-      latestIncrementalResult_.getLatestIncrementalHandPose();
+      latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
 
-  // 只处理右手，左手位置保持不变
+  // scaledRightHandPos = scaledRightHandPos.cwiseProduct(deltaScale_);
   {
     std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
     scaledLeftHandPos = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
@@ -599,13 +989,43 @@ bool Quest3IkIncrementalROS::processChangingDataRightArm(bool rightHandCtrlModeC
   if (rightHandCtrlModeChanged && isRightArmCtrlModeActive) {
     auto [rightMaintain, rightInstant] = rightHandSmoother_->getModeChangingState();
     if (rightInstant) {
-      Eigen::Vector3d rightHandPosOnExit;
+      // 【核心修复】在模式切换瞬间，先通过FK计算当前真实位置，然后通过速度IK求解器优化，
+      // 确保 latestPoseConstraintList_ 中的位置是当前真实位置，避免跳变
+      Eigen::Vector3d pRightLink6;
+      Eigen::Quaterniond qRightLink6;
+      computeRightLink6FK(pRightLink6, qRightLink6);
+
+      // 通过FK计算末端执行器在世界系下的姿态
+      Eigen::Vector3d pEndEffector;
+      Eigen::Quaterniond qEndEffector;
+      computeRightEndEffectorFK(pEndEffector, qEndEffector);
+      Eigen::Vector3d pLink4;
+      Eigen::Quaterniond qLink4;
+      computeRightLink4FK(pLink4, qLink4);
+
+      // 调用速度IK求解器优化手部和肘部位置，确保位置一致性
+      const auto [p1Optimized, p2Optimized] =
+          rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
+                                           rightElbowFixedPoint_,      // p1Fixed: 肘部固定点
+                                           pRightLink6  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
+          );
+
+      // 保存优化后的结果
+      latestRobotRightElbowPos_ = p1Optimized;
+
+      // 更新 latestPoseConstraintList_ 为优化后的位置，确保锚点设置正确
       {
         std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-        rightHandPosOnExit = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = p2Optimized;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = qRightLink6.toRotationMatrix();
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position = p1Optimized;
       }
-      incrementalController_->updateRightArmAnchor(quest3ArmInfoTransformerPtr_->getRightHandPose(),
-                                                   rightHandPosOnExit);
+
+      incrementalController_->updateRightArmPoseAnchor(quest3ArmInfoTransformerPtr_->getRightHandPose(),
+                                                       latestPoseConstraintList_,
+                                                       pEndEffector,
+                                                       qEndEffector,
+                                                       qLink4);
     }
 
     bool rightInstantCopy = rightInstant;
@@ -622,27 +1042,73 @@ bool Quest3IkIncrementalROS::processChangingDataRightArm(bool rightHandCtrlModeC
     rightHandSmoother_->setModeChangingState(rightMaintain, rightInstantCopy);
   }
 
-  // 应用位置约束
-  clipHandPositionsByAllConstraints(scaledLeftHandPos,
-                                    scaledRightHandPos,
-                                    robotLeftFixedShoulderPos_,
-                                    robotRightFixedShoulderPos_,
-                                    sphereRadiusLimit_,
-                                    minReachableDistance_,
-                                    leftCenter_,
-                                    rightCenter_,
-                                    0.2,
-                                    boxMinBound_,
-                                    boxMaxBound_,
-                                    chestOffsetY_);
+  // 通过FK计算左右肘部实时位置
+  // CZJTODO ELBOW 需要平滑，否则容易导致震荡发散，因为目前hand pose 和 elbow pos的因果耦合
+  Eigen::Vector3d currentLeftElbowPos, currentRightElbowPos;
+  Eigen::Quaterniond qLeftElbow, qRightElbow;
+  computeLeftLink4FK(currentLeftElbowPos, qLeftElbow);
+  computeRightLink4FK(currentRightElbowPos, qRightElbow);
 
-  // 更新约束列表
-  updateConstraintList(scaledLeftHandPos,
-                       incrementalLeftQuat,
-                       scaledRightHandPos,
-                       incrementalRightQuat,
-                       Eigen::Vector3d(-0.3, 0.5, 0.16),
-                       Eigen::Vector3d(-0.3, -0.5, 0.16));
+  // 应用位置约束
+  // clipHandPositionsByAllConstraints(scaledLeftHandPos,
+  //                                   scaledRightHandPos,
+  //                                   robotLeftFixedShoulderPos_,
+  //                                   robotRightFixedShoulderPos_,
+  //                                   sphereRadiusLimit_,
+  //                                   minReachableDistance_,
+  //                                   leftCenter_,
+  //                                   rightCenter_,
+  //                                   0.23,
+  //                                   boxMinBound_,
+  //                                   boxMaxBound_,
+  //                                   chestOffsetY_,
+  //                                   currentLeftElbowPos,
+  //                                   currentRightElbowPos,
+  //                                   elbowMinDistance_,
+  //                                   elbowMaxDistance_);
+
+  // 保存优化前的手部位置（用于可视化对比）
+  latestRightHandPosBeforeOpt_ = scaledRightHandPos;
+
+  // 使用上一时刻的link6位置和ee位置计算期望的肘部位置
+  // 通过手腕-ee向量计算期望的肘部位置
+  // 向量方向：ee→手腕向量方向，长度为肘部到手腕的距离l2
+  // 肘点计算：肘点 = 手腕点+向量方向*长度l2
+  {
+    // 计算从ee到手腕的向量（ee→手腕方向）
+    Eigen::Vector3d eeToWristVec = rightLink6Position_ - rightEndEffectorPosition_;
+    double vecNorm = eeToWristVec.norm();
+
+    // 如果向量长度太小，使用默认方向（避免除零错误）
+    if (vecNorm > 1e-6) {
+      // 归一化向量并乘以l2_长度
+      Eigen::Vector3d direction = eeToWristVec.normalized() * l2_;
+      // 肘点 = 手腕点 + 向量方向*长度l2
+      latestHumanRightElbowPos_ = rightLink6Position_ + direction;
+    } else {
+      // 如果向量为零，使用上一时刻的肘部位置（保持连续性）
+      // latestHumanRightElbowPos_ 保持当前值不变
+    }
+  }
+
+  const auto [p1Optimized, p2Optimized] =
+      rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
+                                       rightElbowFixedPoint_,      // p1Fixed: 肘部固定点
+                                       scaledRightHandPos          // p2Ref: 手部参考位置
+      );
+  // 保存优化后的结果
+  latestRobotRightElbowPos_ = p1Optimized;
+  latestRightHandPosAfterOpt_ = p2Optimized;
+
+  // 更新手部位置为优化后的结果（P2）
+  scaledRightHandPos = p2Optimized;
+
+  rightLink6Position_ = scaledRightHandPos;
+  rightEndEffectorPosition_ = scaledRightHandPos + (incrementalRightQuat * rightEE2Link6Offset_);
+  rightVirtualThumbPosition_ = scaledRightHandPos + (incrementalRightQuat * rightThumb2Link6Offset_);
+
+  // 更新约束列表 - 右臂独立处理
+  updateRightConstraintList(scaledRightHandPos, incrementalRightQuat, p1Optimized);
 
   return true;
 }
@@ -658,28 +1124,59 @@ bool Quest3IkIncrementalROS::processDataLeftArm() {
   if (bonePoseHandElbowPtr->poses.size() < 4) return false;
 
   auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-      latestIncrementalResult_.getLatestIncrementalHandPose();
-
+      latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
+  // scaledLeftHandPos = scaledLeftHandPos.cwiseProduct(deltaScale_);
+  // 右手位置保持不变
   {
     std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
     scaledRightHandPos = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
   }
 
-  clipHandPositionsByAllConstraints(scaledLeftHandPos,
-                                    scaledRightHandPos,
-                                    robotLeftFixedShoulderPos_,
-                                    robotRightFixedShoulderPos_,
-                                    sphereRadiusLimit_,
-                                    minReachableDistance_,
-                                    leftCenter_,
-                                    rightCenter_,
-                                    0.2,
-                                    boxMinBound_,
-                                    boxMaxBound_,
-                                    chestOffsetY_);
-  // 默认位置不要clip
+  // 通过FK计算左右肘部实时位置
+  // CZJTODO ELBOW 需要平滑，否则容易导致震荡发散，因为目前hand pose 和 elbow pos的因果耦合
+  Eigen::Vector3d currentLeftElbowPos, currentRightElbowPos;
+  Eigen::Quaterniond qLeftElbow, qRightElbow;
+  computeLeftLink4FK(currentLeftElbowPos, qLeftElbow);
+  computeRightLink4FK(currentRightElbowPos, qRightElbow);
+
+  // clipHandPositionsByAllConstraints(scaledLeftHandPos,
+  //                                   scaledRightHandPos,
+  //                                   robotLeftFixedShoulderPos_,
+  //                                   robotRightFixedShoulderPos_,
+  //                                   sphereRadiusLimit_,
+  //                                   minReachableDistance_,
+  //                                   leftCenter_,
+  //                                   rightCenter_,
+  //                                   0.23,
+  //                                   boxMinBound_,
+  //                                   boxMaxBound_,
+  //                                   chestOffsetY_,
+  //                                   currentLeftElbowPos,
+  //                                   currentRightElbowPos,
+  //                                   elbowMinDistance_,
+  //                                   elbowMaxDistance_);
   scaledLeftHandPos = joyStickHandlerPtr_->isLeftArmCtrlModeActive() ? scaledLeftHandPos : defaultLeftHandPosOnExit_;
-  updateLeftConstraintList(scaledLeftHandPos, incrementalLeftQuat, Eigen::Vector3d(-0.3, 0.5, 0.16));
+
+  // 保存优化前的手部位置（用于可视化对比）
+  latestLeftHandPosBeforeOpt_ = scaledLeftHandPos;
+
+  const auto [p1Optimized, p2Optimized] =
+      leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
+                                      leftElbowFixedPoint_,      // p1Fixed: 肘部固定点
+                                      scaledLeftHandPos          // p2Ref: 手部参考位置
+      );
+  // 保存优化后的结果
+  latestRobotLeftElbowPos_ = p1Optimized;
+  latestLeftHandPosAfterOpt_ = p2Optimized;
+
+  // 更新手部位置为优化后的结果（P2）
+  scaledLeftHandPos = p2Optimized;
+
+  leftLink6Position_ = scaledLeftHandPos;
+  leftEndEffectorPosition_ = scaledLeftHandPos + (incrementalLeftQuat * leftEE2Link6Offset_);
+  leftVirtualThumbPosition_ = scaledLeftHandPos + (incrementalLeftQuat * leftThumb2Link6Offset_);
+
+  updateLeftConstraintList(scaledLeftHandPos, incrementalLeftQuat, p1Optimized);
 
   return true;
 }
@@ -695,81 +1192,69 @@ bool Quest3IkIncrementalROS::processDataRightArm() {
   if (bonePoseHandElbowPtr->poses.size() < 4) return false;
 
   auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-      latestIncrementalResult_.getLatestIncrementalHandPose();
+      latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
 
+  // scaledRightHandPos = scaledRightHandPos.cwiseProduct(deltaScale_);
   // 左手位置保持不变
   {
     std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
     scaledLeftHandPos = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
   }
 
-  clipHandPositionsByAllConstraints(scaledLeftHandPos,
-                                    scaledRightHandPos,
-                                    robotLeftFixedShoulderPos_,
-                                    robotRightFixedShoulderPos_,
-                                    sphereRadiusLimit_,
-                                    minReachableDistance_,
-                                    leftCenter_,
-                                    rightCenter_,
-                                    0.2,
-                                    boxMinBound_,
-                                    boxMaxBound_,
-                                    chestOffsetY_);
+  // 通过FK计算左右肘部实时位置
+  // CZJTODO ELBOW 需要平滑，否则容易导致震荡发散，因为目前hand pose 和 elbow pos的因果耦合
+  Eigen::Vector3d currentLeftElbowPos, currentRightElbowPos;
+  Eigen::Quaterniond qLeftElbow, qRightElbow;
+  computeLeftLink4FK(currentLeftElbowPos, qLeftElbow);
+  computeRightLink4FK(currentRightElbowPos, qRightElbow);
+  // clipHandPositionsByAllConstraints(scaledLeftHandPos,
+  //                                   scaledRightHandPos,
+  //                                   robotLeftFixedShoulderPos_,
+  //                                   robotRightFixedShoulderPos_,
+  //                                   sphereRadiusLimit_,
+  //                                   minReachableDistance_,
+  //                                   leftCenter_,
+  //                                   rightCenter_,
+  //                                   0.23,
+  //                                   boxMinBound_,
+  //                                   boxMaxBound_,
+  //                                   chestOffsetY_,
+  //                                   currentLeftElbowPos,
+  //                                   currentRightElbowPos,
+  //                                   elbowMinDistance_,
+  //                                   elbowMaxDistance_);
 
   // 默认位置不要clip
   scaledRightHandPos =
       joyStickHandlerPtr_->isRightArmCtrlModeActive() ? scaledRightHandPos : defaultRightHandPosOnExit_;
-  updateRightConstraintList(scaledRightHandPos, incrementalRightQuat, Eigen::Vector3d(-0.3, -0.5, 0.16));
 
-  return true;
-}
+  // 保存优化前的手部位置（用于可视化对比）
+  latestRightHandPosBeforeOpt_ = scaledRightHandPos;
 
-bool Quest3IkIncrementalROS::processData() {
-  std::shared_ptr<noitom_hi5_hand_udp_python::PoseInfoList> bonePoseHandElbowPtr;
-  {
-    std::lock_guard<std::mutex> lock(bonePoseHandElbowMutex_);
-    bonePoseHandElbowPtr = HandPoseAndElbowPositonListPtr_;
-  }
+  const auto [p1Optimized, p2Optimized] =
+      rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
+                                       rightElbowFixedPoint_,      // p1Fixed: 肘部固定点
+                                       scaledRightHandPos          // p2Ref: 手部参考位置
+      );
+  // 保存优化后的结果
+  latestRobotRightElbowPos_ = p1Optimized;
+  latestRightHandPosAfterOpt_ = p2Optimized;
 
-  if (bonePoseHandElbowPtr == nullptr) return false;
-  if (bonePoseHandElbowPtr->poses.size() < 4) return false;
+  // 更新手部位置为优化后的结果（P2）
+  scaledRightHandPos = p2Optimized;
 
-  //[chest, l_hand, r_hand, l_elbow, r_elbow]
+  rightLink6Position_ = scaledRightHandPos;
+  rightEndEffectorPosition_ = scaledRightHandPos + (incrementalRightQuat * rightEE2Link6Offset_);
+  rightVirtualThumbPosition_ = scaledRightHandPos + (incrementalRightQuat * rightThumb2Link6Offset_);
 
-  auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-      latestIncrementalResult_.getLatestIncrementalHandPose();
-
-  clipHandPositionsByAllConstraints(scaledLeftHandPos,
-                                    scaledRightHandPos,
-                                    robotLeftFixedShoulderPos_,
-                                    robotRightFixedShoulderPos_,
-                                    sphereRadiusLimit_,
-                                    minReachableDistance_,
-                                    leftCenter_,
-                                    rightCenter_,
-                                    0.2,
-                                    boxMinBound_,
-                                    boxMaxBound_,
-                                    chestOffsetY_);
-
-  scaledLeftHandPos = joyStickHandlerPtr_->isLeftGrip() ? scaledLeftHandPos : leftHandSmoother_->getDefaultPosOnExit();
-
-  scaledRightHandPos =
-      joyStickHandlerPtr_->isRightGrip() ? scaledRightHandPos : rightHandSmoother_->getDefaultPosOnExit();
-
-  updateConstraintList(scaledLeftHandPos,
-                       incrementalLeftQuat,
-                       scaledRightHandPos,
-                       incrementalRightQuat,
-                       Eigen::Vector3d(-0.3, 0.5, 0.16),
-                       Eigen::Vector3d(-0.3, -0.5, 0.16));
+  updateRightConstraintList(scaledRightHandPos, incrementalRightQuat, p1Optimized);
 
   return true;
 }
 
 void Quest3IkIncrementalROS::solveIk() {
   std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-  auto ikResult = twoStageTorsoIkPtr_->solveIK(latestPoseConstraintList_, ctrlArmIdx_, jointMidValues_);
+  auto ikResult = oneStageIkEndEffectorPtr_->solveIK(latestPoseConstraintList_, ctrlArmIdx_, jointMidValues_);
 
   if (ikResult.isSuccess) {
     {
@@ -785,6 +1270,7 @@ void Quest3IkIncrementalROS::processVisual() {
                            Eigen::Quaterniond& leftQuat,
                            Eigen::Vector3d& rightPos,
                            Eigen::Quaterniond& rightQuat) {
+    // 可视化使用原始传感器数据
     std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
     if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= 12 + jointStateSize_) {
       Eigen::VectorXd armJoints(jointStateSize_);
@@ -793,9 +1279,9 @@ void Quest3IkIncrementalROS::processVisual() {
       }
 
       auto [leftMeasuredPosition, leftMeasuredQuaternion] =
-          twoStageTorsoIkPtr_->FK(armJoints, "zarm_l7_end_effector", jointStateSize_);
+          oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_l7_end_effector", jointStateSize_);
       auto [rightMeasuredPosition, rightMeasuredQuaternion] =
-          twoStageTorsoIkPtr_->FK(armJoints, "zarm_r7_end_effector", jointStateSize_);
+          oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_r7_end_effector", jointStateSize_);
 
       leftPos = leftMeasuredPosition;
       leftQuat = leftMeasuredQuaternion;
@@ -804,11 +1290,34 @@ void Quest3IkIncrementalROS::processVisual() {
     }
   };
 
+  // 通过FK计算左右肘部实时位置（用于可视化，使用原始传感器数据）
+  Eigen::Vector3d currentLeftElbowPos, currentRightElbowPos;
+  Eigen::Quaterniond qLeftElbow, qRightElbow;
+  std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
+  if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= 12 + jointStateSize_) {
+    Eigen::VectorXd armJoints(jointStateSize_);
+    for (int i = 0; i < jointStateSize_; ++i) {
+      armJoints(i) = currentSensorData->joint_data.joint_q[12 + i];
+    }
+    auto [l4Position, l4Quaternion] = oneStageIkEndEffectorPtr_->FKElbow(armJoints, "zarm_l4_link", jointStateSize_);
+    auto [r4Position, r4Quaternion] = oneStageIkEndEffectorPtr_->FKElbow(armJoints, "zarm_r4_link", jointStateSize_);
+    currentLeftElbowPos = l4Position;
+    qLeftElbow = l4Quaternion;
+    currentRightElbowPos = r4Position;
+    qRightElbow = r4Quaternion;
+  } else {
+    currentLeftElbowPos = Eigen::Vector3d::Zero();
+    currentRightElbowPos = Eigen::Vector3d::Zero();
+    qLeftElbow = Eigen::Quaterniond::Identity();
+    qRightElbow = Eigen::Quaterniond::Identity();
+  }
+  // CZJTODO ELBOW 需要平滑，否则容易导致震荡发散，因为目前hand pose 和 elbow pos的因果耦合
   {
     std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
     quest3KeyFramesVisualizerPtr_->publishAllVisualizations(robotLeftFixedShoulderPos_,
                                                             robotRightFixedShoulderPos_,
                                                             sphereRadiusLimit_,
+                                                            minReachableDistance_,
                                                             latestIncrementalResult_,
                                                             latestPoseConstraintList_,
                                                             boxMinBound_,
@@ -817,7 +1326,23 @@ void Quest3IkIncrementalROS::processVisual() {
                                                             leftCenter_,
                                                             rightCenter_,
                                                             0.2,
-                                                            fkCallback);
+                                                            currentLeftElbowPos,
+                                                            currentRightElbowPos,
+                                                            fkCallback,
+                                                            leftLink6Position_,
+                                                            rightLink6Position_,
+                                                            leftEndEffectorPosition_,
+                                                            rightEndEffectorPosition_,
+                                                            leftVirtualThumbPosition_,
+                                                            rightVirtualThumbPosition_);
+    // 发布机器人优化后的肘部位置可视化（墨绿色，不透明）
+    quest3KeyFramesVisualizerPtr_->publishRobotElbowPosVisualization(latestRobotLeftElbowPos_,
+                                                                     latestRobotRightElbowPos_);
+    // 发布优化前后的手部位置可视化对比（橙色=优化前，紫色=优化后）
+    quest3KeyFramesVisualizerPtr_->publishHandPosOptimizationVisualization(latestLeftHandPosBeforeOpt_,
+                                                                           latestLeftHandPosAfterOpt_,
+                                                                           latestRightHandPosBeforeOpt_,
+                                                                           latestRightHandPosAfterOpt_);
   }
 }
 
@@ -893,6 +1418,117 @@ void Quest3IkIncrementalROS::publishJointStates() {
     armAngleLimited = latestIkSolution_;  // 假设已经限制过角度
   }
 
+  // 使用armAngleLimited进行FK,获得左右手的ee_pose
+  // 计算左手末端执行器FK
+  auto [leftEePosition, leftEeQuaternion] =
+      oneStageIkEndEffectorPtr_->FK(armAngleLimited, "zarm_l7_end_effector", jointStateSize_);
+
+  // 计算右手末端执行器FK
+  auto [rightEePosition, rightEeQuaternion] =
+      oneStageIkEndEffectorPtr_->FK(armAngleLimited, "zarm_r7_end_effector", jointStateSize_);
+
+  // 发布左手末端执行器pose
+  geometry_msgs::PoseStamped leftEePoseMsg;
+  leftEePoseMsg.header.stamp = ros::Time::now();
+  leftEePoseMsg.header.frame_id = "base_link";  // 根据实际坐标系设置
+  leftEePoseMsg.pose.position.x = leftEePosition.x();
+  leftEePoseMsg.pose.position.y = leftEePosition.y();
+  leftEePoseMsg.pose.position.z = leftEePosition.z();
+  leftEePoseMsg.pose.orientation.w = leftEeQuaternion.w();
+  leftEePoseMsg.pose.orientation.x = leftEeQuaternion.x();
+  leftEePoseMsg.pose.orientation.y = leftEeQuaternion.y();
+  leftEePoseMsg.pose.orientation.z = leftEeQuaternion.z();
+  leftEePosePublisher_.publish(leftEePoseMsg);
+
+  // 发布右手末端执行器pose
+  geometry_msgs::PoseStamped rightEePoseMsg;
+  rightEePoseMsg.header.stamp = ros::Time::now();
+  rightEePoseMsg.header.frame_id = "base_link";  // 根据实际坐标系设置
+  rightEePoseMsg.pose.position.x = rightEePosition.x();
+  rightEePoseMsg.pose.position.y = rightEePosition.y();
+  rightEePoseMsg.pose.position.z = rightEePosition.z();
+  rightEePoseMsg.pose.orientation.w = rightEeQuaternion.w();
+  rightEePoseMsg.pose.orientation.x = rightEeQuaternion.x();
+  rightEePoseMsg.pose.orientation.y = rightEeQuaternion.y();
+  rightEePoseMsg.pose.orientation.z = rightEeQuaternion.z();
+  rightEePosePublisher_.publish(rightEePoseMsg);
+
+  // 使用armAngleLimited进行FK,获得左右手link6的pose
+  // 计算左手link6 FK
+  auto [leftLink6Position, leftLink6Quaternion] =
+      oneStageIkEndEffectorPtr_->FK(armAngleLimited, "zarm_l6_link", jointStateSize_);
+
+  // 计算右手link6 FK
+  auto [rightLink6Position, rightLink6Quaternion] =
+      oneStageIkEndEffectorPtr_->FK(armAngleLimited, "zarm_r6_link", jointStateSize_);
+
+  // 发布左手link6 pose
+  geometry_msgs::PoseStamped leftLink6PoseMsg;
+  leftLink6PoseMsg.header.stamp = ros::Time::now();
+  leftLink6PoseMsg.header.frame_id = "base_link";  // 根据实际坐标系设置
+  leftLink6PoseMsg.pose.position.x = leftLink6Position.x();
+  leftLink6PoseMsg.pose.position.y = leftLink6Position.y();
+  leftLink6PoseMsg.pose.position.z = leftLink6Position.z();
+  leftLink6PoseMsg.pose.orientation.w = leftLink6Quaternion.w();
+  leftLink6PoseMsg.pose.orientation.x = leftLink6Quaternion.x();
+  leftLink6PoseMsg.pose.orientation.y = leftLink6Quaternion.y();
+  leftLink6PoseMsg.pose.orientation.z = leftLink6Quaternion.z();
+  leftLink6PosePublisher_.publish(leftLink6PoseMsg);
+
+  // 发布右手link6 pose
+  geometry_msgs::PoseStamped rightLink6PoseMsg;
+  rightLink6PoseMsg.header.stamp = ros::Time::now();
+  rightLink6PoseMsg.header.frame_id = "base_link";  // 根据实际坐标系设置
+  rightLink6PoseMsg.pose.position.x = rightLink6Position.x();
+  rightLink6PoseMsg.pose.position.y = rightLink6Position.y();
+  rightLink6PoseMsg.pose.position.z = rightLink6Position.z();
+  rightLink6PoseMsg.pose.orientation.w = rightLink6Quaternion.w();
+  rightLink6PoseMsg.pose.orientation.x = rightLink6Quaternion.x();
+  rightLink6PoseMsg.pose.orientation.y = rightLink6Quaternion.y();
+  rightLink6PoseMsg.pose.orientation.z = rightLink6Quaternion.z();
+  rightLink6PosePublisher_.publish(rightLink6PoseMsg);
+
+  // 使用均值滤波后的关节数据进行FK,获得左右手ee的pose
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    // 如果滤波数据不可用，跳过measured pose发布
+  } else {
+    Eigen::VectorXd armJointsMeasured = sensorArmJointQ_;
+
+    // 计算左手末端执行器FK（基于滤波后的关节数据）
+    auto [leftEePositionMeasured, leftEeQuaternionMeasured] =
+        oneStageIkEndEffectorPtr_->FK(armJointsMeasured, "zarm_l7_end_effector", jointStateSize_);
+
+    // 计算右手末端执行器FK（基于滤波后的关节数据）
+    auto [rightEePositionMeasured, rightEeQuaternionMeasured] =
+        oneStageIkEndEffectorPtr_->FK(armJointsMeasured, "zarm_r7_end_effector", jointStateSize_);
+
+    // 发布左手末端执行器measured pose
+    geometry_msgs::PoseStamped leftEePoseMeasuredMsg;
+    leftEePoseMeasuredMsg.header.stamp = ros::Time::now();
+    leftEePoseMeasuredMsg.header.frame_id = "base_link";  // 根据实际坐标系设置
+    leftEePoseMeasuredMsg.pose.position.x = leftEePositionMeasured.x();
+    leftEePoseMeasuredMsg.pose.position.y = leftEePositionMeasured.y();
+    leftEePoseMeasuredMsg.pose.position.z = leftEePositionMeasured.z();
+    leftEePoseMeasuredMsg.pose.orientation.w = leftEeQuaternionMeasured.w();
+    leftEePoseMeasuredMsg.pose.orientation.x = leftEeQuaternionMeasured.x();
+    leftEePoseMeasuredMsg.pose.orientation.y = leftEeQuaternionMeasured.y();
+    leftEePoseMeasuredMsg.pose.orientation.z = leftEeQuaternionMeasured.z();
+    leftEePoseMeasuredPublisher_.publish(leftEePoseMeasuredMsg);
+
+    // 发布右手末端执行器measured pose
+    geometry_msgs::PoseStamped rightEePoseMeasuredMsg;
+    rightEePoseMeasuredMsg.header.stamp = ros::Time::now();
+    rightEePoseMeasuredMsg.header.frame_id = "base_link";  // 根据实际坐标系设置
+    rightEePoseMeasuredMsg.pose.position.x = rightEePositionMeasured.x();
+    rightEePoseMeasuredMsg.pose.position.y = rightEePositionMeasured.y();
+    rightEePoseMeasuredMsg.pose.position.z = rightEePositionMeasured.z();
+    rightEePoseMeasuredMsg.pose.orientation.w = rightEeQuaternionMeasured.w();
+    rightEePoseMeasuredMsg.pose.orientation.x = rightEeQuaternionMeasured.x();
+    rightEePoseMeasuredMsg.pose.orientation.y = rightEeQuaternionMeasured.y();
+    rightEePoseMeasuredMsg.pose.orientation.z = rightEeQuaternionMeasured.z();
+    rightEePoseMeasuredPublisher_.publish(rightEePoseMeasuredMsg);
+  }
+
   sensor_msgs::JointState jointStateMsg;
   jointStateMsg.header.stamp = ros::Time::now();
   jointStateMsg.position.resize(jointStateSize_);
@@ -906,72 +1542,236 @@ void Quest3IkIncrementalROS::publishJointStates() {
 
   Eigen::VectorXd finalArmAngles = armAngleLimited;  // 默认使用目标角度
 
-  double fhan_h = 1.0 / publishRate_;
-  double fhan_h0 = fhan_h * fhan_kh0_joint_;
+  double fhanH = 1.0 / publishRate_;
+  double fhanH0 = fhanH * fhanKh0Joint_;
 
   for (int i = 0; i < jointStateSize_; ++i) {
     double targetAngle = finalArmAngles(i);
     if (i == 5 || i == 6 || i == 12 || i == 13) {
       targetAngle = targetAngle * deltaScaleRPY_(1);
     }
-    if (i <= 6 && detectLeftGripPressed()) {
-      leju_utils::fhanStepForwardWithVelLimit(q_(i),                 // 滤波后的关节角度（输出）
-                                              dq_(i),                // 滤波后的关节角速度（输出）
-                                              targetAngle,           // 目标角度（输入）
-                                              fhan_r_joint_,         // 加速度约束
-                                              fhan_h,                // 时间步长
-                                              fhan_h0,               // 平滑系数
-                                              max_joint_velocity_);  // 最大速度限制
+    if (i <= 6 && joyStickHandlerPtr_->isLeftGrip()) {
+      leju_utils::fhanStepForwardWithVelLimit(q_(i),               // 滤波后的关节角度（输出）
+                                              dq_(i),              // 滤波后的关节角速度（输出）
+                                              targetAngle,         // 目标角度（输入）
+                                              fhanRJoint_,         // 加速度约束
+                                              fhanH,               // 时间步长
+                                              fhanH0,              // 平滑系数
+                                              maxJointVelocity_);  // 最大速度限制
     }
-    if (i > 6 && i <= 13 && detectRightGripPressed()) {
-      leju_utils::fhanStepForwardWithVelLimit(q_(i),                 // 滤波后的关节角度（输出）
-                                              dq_(i),                // 滤波后的关节角速度（输出）
-                                              targetAngle,           // 目标角度（输入）
-                                              fhan_r_joint_,         // 加速度约束
-                                              fhan_h,                // 时间步长
-                                              fhan_h0,               // 平滑系数
-                                              max_joint_velocity_);  // 最大速度限制
+    if (i > 6 && i <= 13 && joyStickHandlerPtr_->isRightGrip()) {
+      leju_utils::fhanStepForwardWithVelLimit(q_(i),               // 滤波后的关节角度（输出）
+                                              dq_(i),              // 滤波后的关节角速度（输出）
+                                              targetAngle,         // 目标角度（输入）
+                                              fhanRJoint_,         // 加速度约束
+                                              fhanH,               // 时间步长
+                                              fhanH0,              // 平滑系数
+                                              maxJointVelocity_);  // 最大速度限制
     }
+    dq_(i) = dq_(i) > 18.0 ? 18.0 : dq_(i);
+    dq_(i) = dq_(i) < -18.0 ? -18.0 : dq_(i);
   }
-  q_(5) = std::min(std::max(q_(5), 0.85 * mec_limit_lower_(5)), 0.85 * mec_limit_upper_(5));
-  q_(6) = std::min(std::max(q_(6), 0.85 * mec_limit_lower_(6)), 0.85 * mec_limit_upper_(6));
+  // Wrist joint limits (hard-coded from URDF):
+  //   src/kuavo_assets/models/biped_s49/urdf/biped_s49.urdf
+  // This avoids relying on MultibodyPlant joint indexing (mec_limit_*), which can drift when the URDF changes.
+  static constexpr double kZarmL5Lower = -1.5707963267949;
+  static constexpr double kZarmL5Upper = 1.5707963267949;
+  static constexpr double kZarmL6Lower = -1.30899693899575;
+  static constexpr double kZarmL6Upper = 0.698131700797732;
+  static constexpr double kZarmL7Lower = -0.698131700797732;
+  static constexpr double kZarmL7Upper = 0.698131700797732;
 
-  q_(12) = std::min(std::max(q_(12), 0.85 * mec_limit_lower_(13)), 0.85 * mec_limit_upper_(13));
-  q_(13) = std::min(std::max(q_(13), 0.85 * mec_limit_lower_(14)), 0.85 * mec_limit_upper_(14));
+  static constexpr double kZarmR5Lower = -1.5707963267949;
+  static constexpr double kZarmR5Upper = 1.5707963267949;
+  static constexpr double kZarmR6Lower = -0.698131700797732;
+  static constexpr double kZarmR6Upper = 1.30899693899575;
+  static constexpr double kZarmR7Lower = -0.698131700797732;
+  static constexpr double kZarmR7Upper = 0.698131700797732;
 
-  // {
-  //   for (int i = 0; i < jointStateSize_; ++i) {
-  //     double targetAngle = finalArmAngles(i);
-  //     if (i == 5 || i == 6) {  // 放大末端关节角度
-  //       targetAngle = targetAngle * deltaScaleRPY_(1);
-  //       targetAngle = std::min(std::max(targetAngle, 0.85 * mec_limit_lower_(i)), 0.85 * mec_limit_upper_(i));
-  //     }
+  q_(4) = std::min(std::max(q_(4), 0.95 * kZarmL5Lower), 0.95 * kZarmL5Upper);
+  q_(5) = std::min(std::max(q_(5), 0.85 * kZarmL6Lower), 0.85 * kZarmL6Upper);
+  q_(6) = std::min(std::max(q_(6), 0.85 * kZarmL7Lower), 0.85 * kZarmL7Upper);
 
-  //     if (i == 12 || i == 13) {
-  //       targetAngle = targetAngle * deltaScaleRPY_(1);
-  //       targetAngle = std::min(std::max(targetAngle, 0.85 * mec_limit_lower_(i + 1)), 0.85 * mec_limit_upper_(i +
-  //       1));
-  //     }
+  q_(11) = std::min(std::max(q_(11), kZarmR5Lower), kZarmR5Upper);
+  q_(12) = std::min(std::max(q_(12), 0.85 * kZarmR6Lower), 0.85 * kZarmR6Upper);
+  q_(13) = std::min(std::max(q_(13), 0.85 * kZarmR7Lower), 0.85 * kZarmR7Upper);
 
-  //     leju_utils::fhanStepForwardWithVelLimit(q_(i),                 // 滤波后的关节角度（输出）
-  //                                             dq_(i),                // 滤波后的关节角速度（输出）
-  //                                             targetAngle,           // 目标角度（输入）
-  //                                             fhan_r_joint_,         // 加速度约束
-  //                                             fhan_h,                // 时间步长
-  //                                             fhan_h0,               // 平滑系数
-  //                                             max_joint_velocity_);  // 最大速度限制
-  //   }
+  // 处理左手平滑过渡：根据超时时间进度逐步增大 alpha 值（仅在检测到移动时计算）
+  {
+    ros::Time currentTime = ros::Time::now();
+    ros::Time startTime;
+    bool leftArmMoved = incrementalController_->hasLeftArmMoved();
 
-  //   // 限制末端关节角度
-  //   // q_(5) = std::min(std::max(q_(5), 0.85 * mec_limit_lower_(5)), 0.85 * mec_limit_upper_(5));
-  //   // q_(6) = std::min(std::max(q_(6), 0.85 * mec_limit_lower_(6)), 0.85 * mec_limit_upper_(6));
-  //   // q_(12) = std::min(std::max(q_(12), 0.85 * mec_limit_lower_(12)), 0.85 * mec_limit_upper_(12));
-  //   // q_(13) = std::min(std::max(q_(13), 0.85 * mec_limit_lower_(14)), 0.85 * mec_limit_upper_(14));
-  // }
+    {
+      std::lock_guard<std::mutex> lock(leftGripTimeMutex_);
+      startTime = leftGripStartTime_;
+    }
+
+    double alpha = 0.01;  // 默认 alpha 值（未超时时的平滑系数）
+    // 只有在检测到移动且已开始计时时才计算 alpha
+    if (leftArmMoved && !startTime.isZero()) {
+      double elapsedTime = (currentTime - startTime).toSec();
+      if (elapsedTime > 0.0) {
+        // 根据超时进度计算 alpha：从 0.01 逐步增大到 1.0
+        double progress = std::min(elapsedTime / GRIP_TIMEOUT_DURATION, 1.0);
+        alpha = 0.01 + (1.0 - 0.01) * std::sin(progress * M_PI / 2.0);  // sin插值：0.01 -> 1.0
+      }
+    }
+
+    latest_q_.head(7) = (1.0 - alpha) * latest_q_.head(7) + alpha * q_.head(7);
+    latest_dq_.head(7) = (1.0 - alpha) * latest_dq_.head(7) + alpha * dq_.head(7);
+
+    // if (alpha < 1.0) {
+    //   std::cout << "[Quest3IkIncrementalROS] Left grip: normal (alpha=" << std::fixed << std::setprecision(3) <<
+    //   alpha
+    //             << ")" << std::endl;
+    // }
+  }
+
+  // 处理右手平滑过渡：根据超时时间进度逐步增大 alpha 值（仅在检测到移动时计算）
+  {
+    ros::Time currentTime = ros::Time::now();
+    ros::Time startTime;
+    bool rightArmMoved = incrementalController_->hasRightArmMoved();
+
+    {
+      std::lock_guard<std::mutex> lock(rightGripTimeMutex_);
+      startTime = rightGripStartTime_;
+    }
+
+    double alpha = 0.01;  // 默认 alpha 值（未超时时的平滑系数）
+    // 只有在检测到移动且已开始计时时才计算 alpha
+    if (rightArmMoved && !startTime.isZero()) {
+      double elapsedTime = (currentTime - startTime).toSec();
+      if (elapsedTime > 0.0) {
+        // 根据超时进度计算 alpha：从 0.01 逐步增大到 1.0
+        double progress = std::min(elapsedTime / GRIP_TIMEOUT_DURATION, 1.0);
+        alpha = 0.01 + (1.0 - 0.01) * std::sin(progress * M_PI / 2.0);  // sin插值：0.01 -> 1.0
+      }
+    }
+
+    latest_q_.tail(7) = (1.0 - alpha) * latest_q_.tail(7) + alpha * q_.tail(7);
+    latest_dq_.tail(7) = (1.0 - alpha) * latest_dq_.tail(7) + alpha * dq_.tail(7);
+
+    // if (alpha < 1.0) {
+    //   std::cout << "[Quest3IkIncrementalROS] Right grip: normal (alpha=" << std::fixed << std::setprecision(3) <<
+    //   alpha
+    //             << ")" << std::endl;
+    // }
+  }
+
+  lowpass_dq_ = lowpassDqAlpha_ * lowpass_dq_ + (1.0 - lowpassDqAlpha_) * latest_dq_;
+
   for (int i = 0; i < jointStateSize_; ++i) {
-    jointStateMsg.position[i] = q_(i) * 180.0 / M_PI;
-    jointStateMsg.velocity[i] = dq_(i) * 180.0 / M_PI;
+    jointStateMsg.position[i] = latest_q_(i) * 180.0 / M_PI;
+    jointStateMsg.velocity[i] = lowpass_dq_(i) * 180.0 / M_PI;
     jointStateMsg.effort[i] = 0.0;
+  }
+
+  // 在此处fk并计算filter后的fk结果
+  // 使用滤波后的关节角度 q_ 进行FK计算
+  Eigen::VectorXd qRadians = q_;  // q_ 已经是弧度单位
+  auto [leftEePositionFilter, leftEeQuaternionFilter] =
+      oneStageIkEndEffectorPtr_->FK(qRadians, "zarm_l7_end_effector", jointStateSize_);
+  auto [rightEePositionFilter, rightEeQuaternionFilter] =
+      oneStageIkEndEffectorPtr_->FK(qRadians, "zarm_r7_end_effector", jointStateSize_);
+
+  // 发布滤波后的左手末端执行器pose
+  geometry_msgs::PoseStamped leftEePoseFilterMsg;
+  leftEePoseFilterMsg.header.stamp = ros::Time::now();
+  leftEePoseFilterMsg.header.frame_id = "base_link";
+  leftEePoseFilterMsg.pose.position.x = leftEePositionFilter.x();
+  leftEePoseFilterMsg.pose.position.y = leftEePositionFilter.y();
+  leftEePoseFilterMsg.pose.position.z = leftEePositionFilter.z();
+  leftEePoseFilterMsg.pose.orientation.w = leftEeQuaternionFilter.w();
+  leftEePoseFilterMsg.pose.orientation.x = leftEeQuaternionFilter.x();
+  leftEePoseFilterMsg.pose.orientation.y = leftEeQuaternionFilter.y();
+  leftEePoseFilterMsg.pose.orientation.z = leftEeQuaternionFilter.z();
+  leftEePoseFilterPublisher_.publish(leftEePoseFilterMsg);
+
+  // 发布滤波后的右手末端执行器pose
+  geometry_msgs::PoseStamped rightEePoseFilterMsg;
+  rightEePoseFilterMsg.header.stamp = ros::Time::now();
+  rightEePoseFilterMsg.header.frame_id = "base_link";
+  rightEePoseFilterMsg.pose.position.x = rightEePositionFilter.x();
+  rightEePoseFilterMsg.pose.position.y = rightEePositionFilter.y();
+  rightEePoseFilterMsg.pose.position.z = rightEePositionFilter.z();
+  rightEePoseFilterMsg.pose.orientation.w = rightEeQuaternionFilter.w();
+  rightEePoseFilterMsg.pose.orientation.x = rightEeQuaternionFilter.x();
+  rightEePoseFilterMsg.pose.orientation.y = rightEeQuaternionFilter.y();
+  rightEePoseFilterMsg.pose.orientation.z = rightEeQuaternionFilter.z();
+  rightEePoseFilterPublisher_.publish(rightEePoseFilterMsg);
+
+  // 在此处fk并计算filter后的link6 fk结果
+  // 使用滤波后的关节角度 q_ 进行FK计算
+  auto [leftLink6PositionFilter, leftLink6QuaternionFilter] =
+      oneStageIkEndEffectorPtr_->FK(qRadians, "zarm_l6_link", jointStateSize_);
+  auto [rightLink6PositionFilter, rightLink6QuaternionFilter] =
+      oneStageIkEndEffectorPtr_->FK(qRadians, "zarm_r6_link", jointStateSize_);
+
+  // 发布滤波后的左手link6 pose
+  geometry_msgs::PoseStamped leftLink6PoseFilterMsg;
+  leftLink6PoseFilterMsg.header.stamp = ros::Time::now();
+  leftLink6PoseFilterMsg.header.frame_id = "base_link";
+  leftLink6PoseFilterMsg.pose.position.x = leftLink6PositionFilter.x();
+  leftLink6PoseFilterMsg.pose.position.y = leftLink6PositionFilter.y();
+  leftLink6PoseFilterMsg.pose.position.z = leftLink6PositionFilter.z();
+  leftLink6PoseFilterMsg.pose.orientation.w = leftLink6QuaternionFilter.w();
+  leftLink6PoseFilterMsg.pose.orientation.x = leftLink6QuaternionFilter.x();
+  leftLink6PoseFilterMsg.pose.orientation.y = leftLink6QuaternionFilter.y();
+  leftLink6PoseFilterMsg.pose.orientation.z = leftLink6QuaternionFilter.z();
+  leftLink6PoseFilterPublisher_.publish(leftLink6PoseFilterMsg);
+
+  // 发布滤波后的右手link6 pose
+  geometry_msgs::PoseStamped rightLink6PoseFilterMsg;
+  rightLink6PoseFilterMsg.header.stamp = ros::Time::now();
+  rightLink6PoseFilterMsg.header.frame_id = "base_link";
+  rightLink6PoseFilterMsg.pose.position.x = rightLink6PositionFilter.x();
+  rightLink6PoseFilterMsg.pose.position.y = rightLink6PositionFilter.y();
+  rightLink6PoseFilterMsg.pose.position.z = rightLink6PositionFilter.z();
+  rightLink6PoseFilterMsg.pose.orientation.w = rightLink6QuaternionFilter.w();
+  rightLink6PoseFilterMsg.pose.orientation.x = rightLink6QuaternionFilter.x();
+  rightLink6PoseFilterMsg.pose.orientation.y = rightLink6QuaternionFilter.y();
+  rightLink6PoseFilterMsg.pose.orientation.z = rightLink6QuaternionFilter.z();
+  rightLink6PoseFilterPublisher_.publish(rightLink6PoseFilterMsg);
+
+  // 在此处fk并计算measured后的link6 fk结果
+  // 使用均值滤波后的关节数据进行FK计算
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    // 如果滤波数据不可用，跳过measured link6 pose发布
+  } else {
+    Eigen::VectorXd armJointsMeasured = sensorArmJointQ_;
+
+    auto [leftLink6PositionMeasured, leftLink6QuaternionMeasured] =
+        oneStageIkEndEffectorPtr_->FK(armJointsMeasured, "zarm_l6_link", jointStateSize_);
+    auto [rightLink6PositionMeasured, rightLink6QuaternionMeasured] =
+        oneStageIkEndEffectorPtr_->FK(armJointsMeasured, "zarm_r6_link", jointStateSize_);
+
+    // 发布measured后的左手link6 pose
+    geometry_msgs::PoseStamped leftLink6PoseMeasuredMsg;
+    leftLink6PoseMeasuredMsg.header.stamp = ros::Time::now();
+    leftLink6PoseMeasuredMsg.header.frame_id = "base_link";
+    leftLink6PoseMeasuredMsg.pose.position.x = leftLink6PositionMeasured.x();
+    leftLink6PoseMeasuredMsg.pose.position.y = leftLink6PositionMeasured.y();
+    leftLink6PoseMeasuredMsg.pose.position.z = leftLink6PositionMeasured.z();
+    leftLink6PoseMeasuredMsg.pose.orientation.w = leftLink6QuaternionMeasured.w();
+    leftLink6PoseMeasuredMsg.pose.orientation.x = leftLink6QuaternionMeasured.x();
+    leftLink6PoseMeasuredMsg.pose.orientation.y = leftLink6QuaternionMeasured.y();
+    leftLink6PoseMeasuredMsg.pose.orientation.z = leftLink6QuaternionMeasured.z();
+    leftLink6PoseMeasuredPublisher_.publish(leftLink6PoseMeasuredMsg);
+
+    // 发布measured后的右手link6 pose
+    geometry_msgs::PoseStamped rightLink6PoseMeasuredMsg;
+    rightLink6PoseMeasuredMsg.header.stamp = ros::Time::now();
+    rightLink6PoseMeasuredMsg.header.frame_id = "base_link";
+    rightLink6PoseMeasuredMsg.pose.position.x = rightLink6PositionMeasured.x();
+    rightLink6PoseMeasuredMsg.pose.position.y = rightLink6PositionMeasured.y();
+    rightLink6PoseMeasuredMsg.pose.position.z = rightLink6PositionMeasured.z();
+    rightLink6PoseMeasuredMsg.pose.orientation.w = rightLink6QuaternionMeasured.w();
+    rightLink6PoseMeasuredMsg.pose.orientation.x = rightLink6QuaternionMeasured.x();
+    rightLink6PoseMeasuredMsg.pose.orientation.y = rightLink6QuaternionMeasured.y();
+    rightLink6PoseMeasuredMsg.pose.orientation.z = rightLink6QuaternionMeasured.z();
+    rightLink6PoseMeasuredPublisher_.publish(rightLink6PoseMeasuredMsg);
   }
 
   kuavoArmTrajCppPublisher_.publish(jointStateMsg);
@@ -995,6 +1795,22 @@ void Quest3IkIncrementalROS::publishJointStates() {
       leftHandPoseMsg.orientation.w = leftHandQuat.w();
 
       leftHandPosePublisher_.publish(leftHandPoseMsg);
+
+      // 发布左手旋转矩阵（9个浮点数，按行展开）
+      std_msgs::Float32MultiArray rotationMatrixMsg;
+      rotationMatrixMsg.data.resize(9);
+      const Eigen::Matrix3d& R = leftHandPose.rotation_matrix;
+      // 按行展开：R(0,0), R(0,1), R(0,2), R(1,0), R(1,1), R(1,2), R(2,0), R(2,1), R(2,2)
+      rotationMatrixMsg.data[0] = static_cast<float>(R(0, 0));
+      rotationMatrixMsg.data[1] = static_cast<float>(R(0, 1));
+      rotationMatrixMsg.data[2] = static_cast<float>(R(0, 2));
+      rotationMatrixMsg.data[3] = static_cast<float>(R(1, 0));
+      rotationMatrixMsg.data[4] = static_cast<float>(R(1, 1));
+      rotationMatrixMsg.data[5] = static_cast<float>(R(1, 2));
+      rotationMatrixMsg.data[6] = static_cast<float>(R(2, 0));
+      rotationMatrixMsg.data[7] = static_cast<float>(R(2, 1));
+      rotationMatrixMsg.data[8] = static_cast<float>(R(2, 2));
+      leftHandRotationMatrixPublisher_.publish(rotationMatrixMsg);
     }
 
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
@@ -1013,7 +1829,65 @@ void Quest3IkIncrementalROS::publishJointStates() {
       rightHandPoseMsg.orientation.w = rightHandQuat.w();
 
       rightHandPosePublisher_.publish(rightHandPoseMsg);
+
+      // 发布右手旋转矩阵（9个浮点数，按行展开）
+      std_msgs::Float32MultiArray rightRotationMatrixMsg;
+      rightRotationMatrixMsg.data.resize(9);
+      const Eigen::Matrix3d& R = rightHandPose.rotation_matrix;
+      // 按行展开：R(0,0), R(0,1), R(0,2), R(1,0), R(1,1), R(1,2), R(2,0), R(2,1), R(2,2)
+      rightRotationMatrixMsg.data[0] = static_cast<float>(R(0, 0));
+      rightRotationMatrixMsg.data[1] = static_cast<float>(R(0, 1));
+      rightRotationMatrixMsg.data[2] = static_cast<float>(R(0, 2));
+      rightRotationMatrixMsg.data[3] = static_cast<float>(R(1, 0));
+      rightRotationMatrixMsg.data[4] = static_cast<float>(R(1, 1));
+      rightRotationMatrixMsg.data[5] = static_cast<float>(R(1, 2));
+      rightRotationMatrixMsg.data[6] = static_cast<float>(R(2, 0));
+      rightRotationMatrixMsg.data[7] = static_cast<float>(R(2, 1));
+      rightRotationMatrixMsg.data[8] = static_cast<float>(R(2, 2));
+      rightHandRotationMatrixPublisher_.publish(rightRotationMatrixMsg);
     }
+  }
+
+  // 发布左右手 anchor 四元数
+  if (incrementalController_) {
+    geometry_msgs::Quaternion leftAnchorQuatMsg;
+    geometry_msgs::Quaternion rightAnchorQuatMsg;
+
+    Eigen::Quaterniond leftAnchorQuat = incrementalController_->getRobotLeftHandAnchorQuat();
+    Eigen::Quaterniond rightAnchorQuat = incrementalController_->getRobotRightHandAnchorQuat();
+
+    leftAnchorQuatMsg.x = leftAnchorQuat.x();
+    leftAnchorQuatMsg.y = leftAnchorQuat.y();
+    leftAnchorQuatMsg.z = leftAnchorQuat.z();
+    leftAnchorQuatMsg.w = leftAnchorQuat.w();
+
+    rightAnchorQuatMsg.x = rightAnchorQuat.x();
+    rightAnchorQuatMsg.y = rightAnchorQuat.y();
+    rightAnchorQuatMsg.z = rightAnchorQuat.z();
+    rightAnchorQuatMsg.w = rightAnchorQuat.w();
+
+    leftAnchorQuatPublisher_.publish(leftAnchorQuatMsg);
+    rightAnchorQuatPublisher_.publish(rightAnchorQuatMsg);
+
+    auto incResult = incrementalController_->getLatestIncrementalResult();
+    const Eigen::Quaterniond leftDeltaQuat = incResult.getLatestRobotLeftHandQuatInc().second;
+    const Eigen::Quaterniond rightDeltaQuat = incResult.getLatestRobotRightHandQuatInc().second;
+
+    geometry_msgs::Quaternion leftDeltaQuatMsg;
+    geometry_msgs::Quaternion rightDeltaQuatMsg;
+
+    leftDeltaQuatMsg.x = leftDeltaQuat.x();
+    leftDeltaQuatMsg.y = leftDeltaQuat.y();
+    leftDeltaQuatMsg.z = leftDeltaQuat.z();
+    leftDeltaQuatMsg.w = leftDeltaQuat.w();
+
+    rightDeltaQuatMsg.x = rightDeltaQuat.x();
+    rightDeltaQuatMsg.y = rightDeltaQuat.y();
+    rightDeltaQuatMsg.z = rightDeltaQuat.z();
+    rightDeltaQuatMsg.w = rightDeltaQuat.w();
+
+    leftHandDeltaQuatPublisher_.publish(leftDeltaQuatMsg);
+    rightHandDeltaQuatPublisher_.publish(rightDeltaQuatMsg);
   }
 }
 
@@ -1051,19 +1925,55 @@ void Quest3IkIncrementalROS::publishSensorDataArmJoints() {
   sensorDataArmJointsPublisher_.publish(jointStateMsg);
 }
 
+void Quest3IkIncrementalROS::publishHandPoseFromTransformer() {
+  if (!quest3ArmInfoTransformerPtr_) {
+    return;
+  }
+
+  // 发布来自Transformer的左手pose
+  const auto& leftHandPose = quest3ArmInfoTransformerPtr_->getLeftHandPose();
+  if (leftHandPose.isValid()) {
+    geometry_msgs::PoseStamped leftHandPoseMsg;
+    leftHandPoseMsg.header.stamp = ros::Time::now();
+    leftHandPoseMsg.header.frame_id = "base_link";
+    leftHandPoseMsg.pose.position.x = leftHandPose.position.x();
+    leftHandPoseMsg.pose.position.y = leftHandPose.position.y();
+    leftHandPoseMsg.pose.position.z = leftHandPose.position.z();
+    leftHandPoseMsg.pose.orientation.w = leftHandPose.quaternion.w();
+    leftHandPoseMsg.pose.orientation.x = leftHandPose.quaternion.x();
+    leftHandPoseMsg.pose.orientation.y = leftHandPose.quaternion.y();
+    leftHandPoseMsg.pose.orientation.z = leftHandPose.quaternion.z();
+    leftHandPoseFromTransformerPublisher_.publish(leftHandPoseMsg);
+  }
+
+  // 发布来自Transformer的右手pose
+  const auto& rightHandPose = quest3ArmInfoTransformerPtr_->getRightHandPose();
+  if (rightHandPose.isValid()) {
+    geometry_msgs::PoseStamped rightHandPoseMsg;
+    rightHandPoseMsg.header.stamp = ros::Time::now();
+    rightHandPoseMsg.header.frame_id = "base_link";
+    rightHandPoseMsg.pose.position.x = rightHandPose.position.x();
+    rightHandPoseMsg.pose.position.y = rightHandPose.position.y();
+    rightHandPoseMsg.pose.position.z = rightHandPose.position.z();
+    rightHandPoseMsg.pose.orientation.w = rightHandPose.quaternion.w();
+    rightHandPoseMsg.pose.orientation.x = rightHandPose.quaternion.x();
+    rightHandPoseMsg.pose.orientation.y = rightHandPose.quaternion.y();
+    rightHandPoseMsg.pose.orientation.z = rightHandPose.quaternion.z();
+    rightHandPoseFromTransformerPublisher_.publish(rightHandPoseMsg);
+  }
+}
+
 void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   initializeBase(configJson);
 
   // 初始化pose约束列表
-  latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE, PoseData());
+  latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
 
-  // 初始化机器人固定位置参数
-  robotRightFixedShoulderPos_ = Eigen::Vector3d(-0.017499853, -0.29269999999999996, 0.4245);
-  robotLeftFixedShoulderPos_ = Eigen::Vector3d(-0.017499853, 0.29269999999999996, 0.4245);
+  // 初始化机器人固定位置参数（从 JSON 加载或使用默认值）
+  loadDrakeVelocityIKGeometryFromJson(configJson);
 
-  // 初始化机器人手臂长度参数
-  upperArmLength_ = 0.2845;  // 机器人上臂长度
-  lowerArmLength_ = 0.23;    // 机器人下臂长度
+  leftElbowFixedPoint_ = Eigen::Vector3d(-0.3, 0.5, 0.32);
+  rightElbowFixedPoint_ = Eigen::Vector3d(-0.3, -0.5, 0.32);
 
   //从JSON配置读取手臂关节数量
   if (configJson.contains("NUM_ARM_JOINT")) {
@@ -1074,11 +1984,43 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
     throw std::runtime_error("Missing 'NUM_ARM_JOINT' field in JSON configuration");
   }
 
+  // 初始化 sensorData 双臂关节角（14维，rad）指数均值滤波状态
+  sensorArmJointQ_ = Eigen::VectorXd::Zero(SENSOR_ARM_JOINT_DIM);
+
   // 初始化关节角度fhan滤波状态
   q_.resize(jointStateSize_);
   dq_.resize(jointStateSize_);
   q_.setZero();
   dq_.setZero();
+
+  // 初始化最新的关节状态
+  latest_q_.resize(jointStateSize_);
+  latest_dq_.resize(jointStateSize_);
+  lowpass_dq_.resize(jointStateSize_);
+  latest_q_.setZero();
+  latest_dq_.setZero();
+  lowpass_dq_.setZero();
+
+  // 从JSON配置读取lowpass_dq_滤波因子
+  if (configJson.contains("lowpass_dq_filter")) {
+    const auto& filterConfig = configJson["lowpass_dq_filter"];
+    if (filterConfig.is_object()) {
+      if (filterConfig.contains("alpha")) {
+        lowpassDqAlpha_ = filterConfig["alpha"].get<double>();
+        ROS_INFO("✅ [Quest3IkIncrementalROS] Set lowpass_dq_ alpha from JSON: %.3f (beta=%.3f)",
+                 lowpassDqAlpha_,
+                 1.0 - lowpassDqAlpha_);
+      }
+    } else {
+      ROS_WARN("❌ [Quest3IkIncrementalROS] 'lowpass_dq_filter' is not an object, using default value (alpha=%.3f)",
+               lowpassDqAlpha_);
+    }
+  } else {
+    ROS_INFO(
+        "ℹ️  [Quest3IkIncrementalROS] 'lowpass_dq_filter' not found in JSON config, using default value "
+        "(alpha=%.3f)",
+        lowpassDqAlpha_);
+  }
 
   // TEST: 初始化关节限制中间值（硬编码，从URDF中提取）
   // 关节顺序：左臂7个(zarm_l1~l7) + 右臂7个(zarm_r1~r7) = 14个
@@ -1144,13 +2086,17 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
   // 修改关节限位
   try {
-    Eigen::VectorXd limit_lower = Eigen::VectorXd::Constant(1, -1.57);
-    Eigen::VectorXd limit_upper = Eigen::VectorXd::Constant(1, 1.57);
-    plant.GetMutableJointByName("zarm_l6_joint").set_position_limits(limit_lower, limit_upper);
-    plant.GetMutableJointByName("zarm_r6_joint").set_position_limits(limit_lower, limit_upper);
+    // Eigen::VectorXd limit_lower = Eigen::VectorXd::Constant(1, -1.57);
+    // Eigen::VectorXd limit_upper = Eigen::VectorXd::Constant(1, 1.57);
 
-    plant.GetMutableJointByName("zarm_l7_joint").set_position_limits(limit_lower, limit_upper);
-    plant.GetMutableJointByName("zarm_r7_joint").set_position_limits(limit_lower, limit_upper);
+    // plant.GetMutableJointByName("zarm_l5_joint").set_position_limits(1.36 * limit_lower, 1.36 * limit_upper);
+    // plant.GetMutableJointByName("zarm_r5_joint").set_position_limits(1.36 * limit_lower, 1.36 * limit_upper);
+
+    // plant.GetMutableJointByName("zarm_l6_joint").set_position_limits(limit_lower, limit_upper);
+    // plant.GetMutableJointByName("zarm_r6_joint").set_position_limits(limit_lower, limit_upper);
+
+    // plant.GetMutableJointByName("zarm_l7_joint").set_position_limits(limit_lower, limit_upper);
+    // plant.GetMutableJointByName("zarm_r7_joint").set_position_limits(limit_lower, limit_upper);
     ROS_INFO("✅ [Quest3IkIncrementalROS] Successfully updated joint limits for zarm_l7/r7_joint");
   } catch (const std::exception& e) {
     ROS_WARN("❌ [Quest3IkIncrementalROS] Failed to update joint limits: %s", e.what());
@@ -1176,34 +2122,52 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   diagram_ = diagramBuilder->Build();
   diagramContext_ = diagram_->CreateDefaultContext();
 
-  // TwoStageTorsoIK initialization
+  // OneStageIKEndEffector initialization
   std::vector<std::string> frameNames = loadFrameNamesFromConfig(configJson);
-  auto defaultIkSolverConfig = IKSolverConfig();
-  twoStageTorsoIkPtr_ = std::make_unique<HighlyDynamic::TwoStageTorsoIK>(&plant, frameNames, defaultIkSolverConfig);
+
+  // Load PointTrackIKSolverConfig from JSON
+  auto pointTrackConfig = loadPointTrackIKSolverConfigFromJson(configJson);
+  oneStageIkEndEffectorPtr_ =
+      std::make_unique<HighlyDynamic::OneStageIKEndEffector>(&plant, frameNames, pointTrackConfig);
 
   // 计算并保存 ArmJoint 为全零时的双手位姿，避免运行时频繁调用 FK
   Eigen::VectorXd armJoints = Eigen::VectorXd::Zero(jointStateSize_);
 
   // 计算 Link6 位姿（用于 IK 约束）
-  auto [leftLink6Position, leftLink6Quaternion] = twoStageTorsoIkPtr_->FK(armJoints, "zarm_l6_link", jointStateSize_);
-  auto [rightLink6Position, rightLink6Quaternion] = twoStageTorsoIkPtr_->FK(armJoints, "zarm_r6_link", jointStateSize_);
+  auto [leftLink6Position, leftLink6Quaternion] =
+      oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_l6_link", jointStateSize_);
+  auto [rightLink6Position, rightLink6Quaternion] =
+      oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_r6_link", jointStateSize_);
   initZeroLeftLink6Position_ = leftLink6Position;
-  initZeroLeftLink6Orientation_ = leftLink6Quaternion;
   initZeroRightLink6Position_ = rightLink6Position;
-  initZeroRightLink6Orientation_ = rightLink6Quaternion;
 
   // 计算 End Effector 位姿（用于可视化等）
   auto [leftEndEffectorPosition, leftEndEffectorQuaternion] =
-      twoStageTorsoIkPtr_->FK(armJoints, "zarm_l7_end_effector", jointStateSize_);
+      oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_l7_end_effector", jointStateSize_);
   auto [rightEndEffectorPosition, rightEndEffectorQuaternion] =
-      twoStageTorsoIkPtr_->FK(armJoints, "zarm_r7_end_effector", jointStateSize_);
+      oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_r7_end_effector", jointStateSize_);
   initZeroLeftEndEffectorPosition_ = leftEndEffectorPosition;
-  initZeroLeftEndEffectorOrientation_ = leftEndEffectorQuaternion;
   initZeroRightEndEffectorPosition_ = rightEndEffectorPosition;
-  initZeroRightEndEffectorOrientation_ = rightEndEffectorQuaternion;
 
+  // 初始化四个点的位置（从URDF关节位置数据）
+  leftLink6Position_ << -0.017300, 0.292700, -0.092700;
+  rightLink6Position_ << -0.017500, -0.292700, -0.092700;
+  leftEndEffectorPosition_ << -0.017300, 0.262700, -0.283700;
+  rightEndEffectorPosition_ << -0.017300, -0.262700, -0.283700;
+
+  // thumb位置待定，暂时初始化为零向量
+  leftVirtualThumbPosition_ << leftEndEffectorPosition_.x() + 0.15, leftEndEffectorPosition_.y(),
+      leftEndEffectorPosition_.z();
+  rightVirtualThumbPosition_ << rightEndEffectorPosition_.x() + 0.15, rightEndEffectorPosition_.y(),
+      rightEndEffectorPosition_.z();
+
+  leftEE2Link6Offset_ = leftEndEffectorPosition_ - leftLink6Position_;
+  rightEE2Link6Offset_ = rightEndEffectorPosition_ - rightLink6Position_;
+  leftThumb2Link6Offset_ = leftVirtualThumbPosition_ - leftLink6Position_;
+  rightThumb2Link6Offset_ = rightVirtualThumbPosition_ - rightLink6Position_;
   ROS_INFO(
-      "[Quest3IkIncrementalROS] Initialized zero joint pose - Link6: left=[%.4f, %.4f, %.4f], right=[%.4f, %.4f, %.4f]",
+      "[Quest3IkIncrementalROS] Initialized zero joint pose - Link6: left=[%.4f, %.4f, %.4f], right=[%.4f, %.4f, "
+      "%.4f]",
       initZeroLeftLink6Position_.x(),
       initZeroLeftLink6Position_.y(),
       initZeroLeftLink6Position_.z(),
@@ -1224,6 +2188,38 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   sensorDataArmJointsPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_sensor_data", 2);
   leftHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/left_hand_pose", 2);
   rightHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/right_hand_pose", 2);
+  leftHandRotationMatrixPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float32MultiArray>("/left_hand_rotation_matrix", 2);
+  rightHandRotationMatrixPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float32MultiArray>("/right_hand_rotation_matrix", 2);
+  leftAnchorQuatPublisher_ = nodeHandle_.advertise<geometry_msgs::Quaternion>("/ik_debug/left_anchor_quat", 2);
+  rightAnchorQuatPublisher_ = nodeHandle_.advertise<geometry_msgs::Quaternion>("/ik_debug/right_anchor_quat", 2);
+  leftHandDeltaQuatPublisher_ = nodeHandle_.advertise<geometry_msgs::Quaternion>("/ik_debug/left_hand_delta_quat", 2);
+  rightHandDeltaQuatPublisher_ = nodeHandle_.advertise<geometry_msgs::Quaternion>("/ik_debug/right_hand_delta_quat", 2);
+  leftEePosePublisher_ = nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/left_ee_pose", 2);
+  rightEePosePublisher_ = nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/right_ee_pose", 2);
+  leftEePoseFilterPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/left_ee_pose_filter", 2);
+  rightEePoseFilterPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/right_ee_pose_filter", 2);
+  leftLink6PosePublisher_ = nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/left_link6_pose", 2);
+  rightLink6PosePublisher_ = nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/right_link6_pose", 2);
+  leftLink6PoseFilterPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/left_link6_pose_filter", 2);
+  rightLink6PoseFilterPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/right_link6_pose_filter", 2);
+  leftLink6PoseMeasuredPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/left_link6_pose_measured", 2);
+  rightLink6PoseMeasuredPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/right_link6_pose_measured", 2);
+  leftEePoseMeasuredPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/left_ee_pose_measured", 2);
+  rightEePoseMeasuredPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_fk_result/right_ee_pose_measured", 2);
+  leftHandPoseFromTransformerPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_debug/left_hand_pose_from_transformer", 2);
+  rightHandPoseFromTransformerPublisher_ =
+      nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_debug/right_hand_pose_from_transformer", 2);
 
   // 初始化增量控制模块
   IncrementalControlConfig incrementalConfig;
@@ -1232,13 +2228,13 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
     ROS_WARN("[Quest3IkIncrementalROS] Waiting for /quest3/fhan_r parameter");
     ros::Duration(0.1).sleep();
   }
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_r", incrementalConfig.fhan_r, 900.0, 1);
+  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_r", incrementalConfig.fhanR, 900.0, 1);
 
   while (!nodeHandle_.hasParam("/ik_ros_uni_cpp_node/quest3/fhan_kh0")) {
     ROS_WARN("[Quest3IkIncrementalROS] Waiting for /quest3/fhan_kh0 parameter");
     ros::Duration(0.1).sleep();
   }
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_kh0", incrementalConfig.fhan_kh0, 6.0, 1);
+  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_kh0", incrementalConfig.fhanKh0, 6.0, 1);
 
   while (!nodeHandle_.hasParam("/ik_ros_uni_cpp_node/quest3/delta_scale_x")) {
     ROS_WARN("[Quest3IkIncrementalROS] Waiting for /quest3/delta_scale_x parameter");
@@ -1277,16 +2273,21 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   incrementalConfig.publishRate = publishRate_;
 
   // 读取关节角度fhan滤波参数
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_r_joint", fhan_r_joint_, 900.0, 1);
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_kh0_joint", fhan_kh0_joint_, 6.0, 1);
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", max_joint_velocity_, 1.0, 3);
+  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_r_joint", fhanRJoint_, 900.0, 1);
+  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_kh0_joint", fhanKh0Joint_, 6.0, 1);
+  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", maxJointVelocity_, 1.0, 3);
 
   // 读取手部位置约束参数
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/sphere_radius_limit", sphereRadiusLimit_, 0.5, 2);
   PARAM_AND_PRINT_FLOAT(
       nodeHandle_, "/ik_ros_uni_cpp_node/quest3/min_reachable_distance", minReachableDistance_, 0.08, 3);
   PARAM_AND_PRINT_FLOAT(
-      nodeHandle_, "/ik_ros_uni_cpp_node/quest3/hand_changing_mode_threshold", hand_changing_mode_threshold_, 0.055, 3);
+      nodeHandle_, "/ik_ros_uni_cpp_node/quest3/hand_changing_mode_threshold", handChangingModeThreshold_, 0.055, 3);
+  // 读取是否使用增量式手部姿态参数
+  nodeHandle_.param(
+      "/ik_ros_uni_cpp_node/quest3/use_incremental_hand_orientation", useIncrementalHandOrientation_, true);
+  std::cout << "/ik_ros_uni_cpp_node/quest3/use_incremental_hand_orientation="
+            << (useIncrementalHandOrientation_ ? "true" : "false") << std::endl;
 
   // 读取 box 边界参数（向量形式）
   PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
@@ -1309,15 +2310,19 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
                            "/quest3/left_center",  //
                            leftCenter_,
-                           Eigen::Vector3d(0, 0.02, 0),
+                           Eigen::Vector3d(0, 0.06, 0),
                            2,
                            "[Quest3IkIncrementalROS]");
   PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
                            "/quest3/right_center",  //
                            rightCenter_,
-                           Eigen::Vector3d(0, -0.02, 0),
+                           Eigen::Vector3d(0, -0.06, 0),
                            2,
                            "[Quest3IkIncrementalROS]");
+
+  // 读取手到肘距离约束参数
+  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/elbow_min_distance", elbowMinDistance_, 0.18, 3);
+  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/elbow_max_distance", elbowMaxDistance_, 0.65, 3);
 
   // 读取退出时默认手部位置参数
   PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
@@ -1333,38 +2338,29 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
                            2,
                            "[Quest3IkIncrementalROS]");
 
-  incrementalController_ = std::make_unique<IncrementalControlModule>(
-      std::shared_ptr<JoyStickHandler>(joyStickHandlerPtr_.get(), [](JoyStickHandler*) {}), incrementalConfig);
+  // 读取zyx限制参数
+  PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
+                           "/quest3/zyx_limits_final",
+                           incrementalConfig.zyxLimitsFinal,
+                           Eigen::Vector3d(0.95 * M_PI / 2.0, M_PI / 2.0, M_PI / 2.0),
+                           2,
+                           "[Quest3IkIncrementalROS]");
+  PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
+                           "/quest3/zyx_limits_ee",
+                           incrementalConfig.zyxLimitsEE,
+                           Eigen::Vector3d(M_PI / 2.0, M_PI / 2.0, M_PI / 2.0),
+                           2,
+                           "[Quest3IkIncrementalROS]");
+  PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
+                           "/quest3/zyx_limits_link4",
+                           incrementalConfig.zyxLimitsLink4,
+                           Eigen::Vector3d(M_PI / 2.0, 0.6, 0.6),
+                           2,
+                           "[Quest3IkIncrementalROS]");
+
+  incrementalController_ = std::make_unique<IncrementalControlModule>(incrementalConfig);
 
   quest3ArmInfoTransformerPtr_->setDeltaScale(deltaScale_);
-
-  double left_roll, left_pitch, left_yaw;
-  double right_roll, right_pitch, right_yaw;
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/left_hand_quat_offset_roll", left_roll, 0.0, 3);
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/left_hand_quat_offset_pitch", left_pitch, 0.0, 3);
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/left_hand_quat_offset_yaw", left_yaw, 0.0, 3);
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/right_hand_quat_offset_roll", right_roll, 0.0, 3);
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/right_hand_quat_offset_pitch", right_pitch, 0.0, 3);
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/right_hand_quat_offset_yaw", right_yaw, 0.0, 3);
-  leftHandOffsetRpy_ << left_roll, left_pitch, left_yaw;
-  rightHandOffsetRpy_ << right_roll, right_pitch, right_yaw;
-
-  // 将RPY角度转换为四元数（ZYX顺序：先绕Z轴旋转yaw，再绕Y轴旋转pitch，最后绕X轴旋转roll）
-  leftHandQuatOffset_ = Eigen::AngleAxisd(leftHandOffsetRpy_(2), Eigen::Vector3d::UnitZ()) *
-                        Eigen::AngleAxisd(leftHandOffsetRpy_(1), Eigen::Vector3d::UnitY()) *
-                        Eigen::AngleAxisd(leftHandOffsetRpy_(0), Eigen::Vector3d::UnitX());
-  rightHandQuatOffset_ = Eigen::AngleAxisd(rightHandOffsetRpy_(2), Eigen::Vector3d::UnitZ()) *
-                         Eigen::AngleAxisd(rightHandOffsetRpy_(1), Eigen::Vector3d::UnitY()) *
-                         Eigen::AngleAxisd(rightHandOffsetRpy_(0), Eigen::Vector3d::UnitX());
-
-  // clipPositionBySphere(
-  //     defaultLeftHandPosOnExit_, robotLeftFixedShoulderPos_, sphereRadiusLimit_, minReachableDistance_);
-  // clipPositionByBox(defaultLeftHandPosOnExit_, boxMinBound_, boxMaxBound_);
-  // clipPositionByChestMidline(defaultLeftHandPosOnExit_, true, chestOffsetY_);
-  // clipPositionBySphere(
-  //     defaultRightHandPosOnExit_, robotRightFixedShoulderPos_, sphereRadiusLimit_, minReachableDistance_);
-  // clipPositionByBox(defaultRightHandPosOnExit_, boxMinBound_, boxMaxBound_);
-  // clipPositionByChestMidline(defaultRightHandPosOnExit_, false, chestOffsetY_);
 
   // print clip result
   {
@@ -1392,41 +2388,95 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   leftHandSmoother_->setDefaultPosOnExit(defaultLeftHandPosOnExit_);
   rightHandSmoother_->setDefaultPosOnExit(defaultRightHandPosOnExit_);
 
+  // 初始化 Drake 二连杆肘手点优化求解器
+  {
+    // Load DrakeVelocityIKWeights from JSON
+    auto drakeVelocityWeights = loadDrakeVelocityIKWeightsFromJson(configJson);
+    auto drakeVelocityBounds = loadDrakeVelocityIKBoundsFromJson(configJson);
+
+    // 初始化 leftVelocityIkSolverPtr_
+    {
+      // 使用从 JSON 加载的 left shoulder 位置作为 p0
+      const Eigen::Vector3d& p0 = robotLeftFixedShoulderPos_;
+
+      Eigen::Vector3d leftLb(p0.x(),                          //
+                             drakeVelocityBounds.leftYLower,  //
+                             drakeVelocityBounds.zLower);
+
+      Eigen::Vector3d leftUb(p0.x() + drakeVelocityBounds.xUpperOffset,
+                             p0.y() + drakeVelocityBounds.leftYUpperOffset,
+                             p0.z() + drakeVelocityBounds.zUpperOffset);
+
+      leftVelocityIkSolverPtr_ = std::make_unique<DrakeVelocityIKSolver>(p0, l1_, l2_, leftLb, leftUb);
+      // 使用从 JSON 加载的权重配置
+      leftVelocityIkSolverPtr_->setWeights(drakeVelocityWeights);
+      ROS_INFO(
+          "[Quest3IkIncrementalROS] LeftVelocityIKSolver initialized (p0=[%.3f,%.3f,%.3f], l1=%.4f, l2=%.4f, "
+          "weights: q11=%.3f, q12=%.3f, q2=%.3f, qv1=%.3f, qv2=%.3f)",
+          p0.x(),
+          p0.y(),
+          p0.z(),
+          l1_,
+          l2_,
+          drakeVelocityWeights.q11,
+          drakeVelocityWeights.q12,
+          drakeVelocityWeights.q2,
+          drakeVelocityWeights.qv1,
+          drakeVelocityWeights.qv2);
+    }
+
+    // 初始化 rightVelocityIkSolverPtr_
+    {
+      // 使用从 JSON 加载的 right shoulder 位置作为 p0
+      const Eigen::Vector3d& p0 = robotRightFixedShoulderPos_;
+
+      Eigen::Vector3d rightLb(p0.x(),                                          //
+                              p0.y() + drakeVelocityBounds.rightYLowerOffset,  //
+                              drakeVelocityBounds.zLower);
+
+      Eigen::Vector3d rightUb(p0.x() + drakeVelocityBounds.xUpperOffset,
+                              drakeVelocityBounds.rightYUpper,
+                              p0.z() + drakeVelocityBounds.zUpperOffset);
+
+      rightVelocityIkSolverPtr_ = std::make_unique<DrakeVelocityIKSolver>(p0, l1_, l2_, rightLb, rightUb);
+      // 使用从 JSON 加载的权重配置
+      rightVelocityIkSolverPtr_->setWeights(drakeVelocityWeights);
+      ROS_INFO(
+          "[Quest3IkIncrementalROS] RightVelocityIKSolver initialized (p0=[%.3f,%.3f,%.3f], l1=%.4f, l2=%.4f, "
+          "weights: q11=%.3f, q12=%.3f, q2=%.3f, qv1=%.3f, qv2=%.3f)",
+          p0.x(),
+          p0.y(),
+          p0.z(),
+          l1_,
+          l2_,
+          drakeVelocityWeights.q11,
+          drakeVelocityWeights.q12,
+          drakeVelocityWeights.q2,
+          drakeVelocityWeights.qv1,
+          drakeVelocityWeights.qv2);
+    }
+  }
+
   // 初始化增量模块的手部姿态种子，避免首次进入增量模式时从单位四元数开始插值
   if (incrementalController_) {
-    incrementalController_->setHandQuatSeeds(defaultHandQuat, defaultHandQuat);
+    incrementalController_->setHandQuatSeeds(defaultHandQuat, defaultHandQuat, useIncrementalHandOrientation_);
   }
 
   ROS_INFO("[Quest3IkIncrementalROS] Interpolation system initialized successfully");
-}
-
-void Quest3IkIncrementalROS::updateConstraintList(const Eigen::Vector3d& leftHandPos,
-                                                  const Eigen::Quaterniond& leftHandQuat,
-                                                  const Eigen::Vector3d& rightHandPos,
-                                                  const Eigen::Quaterniond& rightHandQuat,
-                                                  const Eigen::Vector3d& leftElbowPos,
-                                                  const Eigen::Vector3d& rightElbowPos) {
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = leftHandPos;
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = leftHandQuat.toRotationMatrix();
-
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = rightHandPos;
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = rightHandQuat.toRotationMatrix();
-
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_ELBOW].rotation_matrix = Eigen::Matrix3d::Identity();
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position = leftElbowPos;
-
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].rotation_matrix = Eigen::Matrix3d::Identity();
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position = rightElbowPos;
 }
 
 void Quest3IkIncrementalROS::updateLeftConstraintList(const Eigen::Vector3d& leftHandPos,
                                                       const Eigen::Quaterniond& leftHandQuat,
                                                       const Eigen::Vector3d& leftElbowPos) {
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = leftHandPos;
+
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = leftHandQuat.toRotationMatrix();
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_ELBOW].rotation_matrix =
-      Eigen::AngleAxisd(-M_PI / 6.0, Eigen::Vector3d::UnitY()).toRotationMatrix();
+
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position = leftElbowPos;
+
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR].position = leftEndEffectorPosition_;
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_LINK6].position = leftLink6Position_;
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB].position = leftVirtualThumbPosition_;
 }
 
 void Quest3IkIncrementalROS::updateRightConstraintList(const Eigen::Vector3d& rightHandPos,
@@ -1434,18 +2484,12 @@ void Quest3IkIncrementalROS::updateRightConstraintList(const Eigen::Vector3d& ri
                                                        const Eigen::Vector3d& rightElbowPos) {
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = rightHandPos;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = rightHandQuat.toRotationMatrix();
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].rotation_matrix =
-      Eigen::AngleAxisd(-M_PI / 6.0, Eigen::Vector3d::UnitY()).toRotationMatrix();
+
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position = rightElbowPos;
-}
 
-bool Quest3IkIncrementalROS::detectHumanArmMove() {
-  if (incrementalController_->hasHumanArmMoved()) return true;
-
-  incrementalController_->detectHumanArmMove(quest3ArmInfoTransformerPtr_->getLeftHandPose().position,
-                                             quest3ArmInfoTransformerPtr_->getRightHandPose().position);
-
-  return incrementalController_->hasHumanArmMoved();
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR].position = rightEndEffectorPosition_;
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_LINK6].position = rightLink6Position_;
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB].position = rightVirtualThumbPosition_;
 }
 
 bool Quest3IkIncrementalROS::detectLeftArmMove() {
@@ -1472,80 +2516,58 @@ bool Quest3IkIncrementalROS::detectRightArmMove() {
   return incrementalController_->hasRightArmMoved();
 }
 
-bool Quest3IkIncrementalROS::detectLeftGripPressed() { return joyStickHandlerPtr_->isLeftGrip(); }
-
-bool Quest3IkIncrementalROS::detectRightGripPressed() { return joyStickHandlerPtr_->isRightGrip(); }
-
 bool Quest3IkIncrementalROS::updateLatestIncrementalResult() {
   bool isLeftActive = joyStickHandlerPtr_->isLeftArmCtrlModeActive();
   bool isRightActive = joyStickHandlerPtr_->isRightArmCtrlModeActive();
-  latestIncrementalResult_ = incrementalController_->computeIncrementalPose(
-      quest3ArmInfoTransformerPtr_->getLeftHandPose(),
-      quest3ArmInfoTransformerPtr_->getRightHandPose(),
-      ArmPose(Eigen::Vector3d(-0.3, 0.5, 0.16), Eigen::Quaterniond::Identity()),
-      ArmPose(Eigen::Vector3d(-0.3, -0.5, 0.16), Eigen::Quaterniond::Identity()),
-      isLeftActive,
-      isRightActive);
-  return latestIncrementalResult_.isValid;
-}
 
-void Quest3IkIncrementalROS::updateSmootheIntermidiateHandPos(const Eigen::Vector3d& leftHandPos,
-                                                              const Eigen::Vector3d& rightHandPos,
-                                                              bool leftHandCtrlModeChanged,
-                                                              bool rightHandCtrlModeChanged) {
-  // print leftHandPos and rightHandPos
-  std::cout << "[Quest3IkIncrementalROS] updateSmootheIntermidiateHandPos leftHandPos: " << leftHandPos.transpose()
-            << std::endl;
-  std::cout << "[Quest3IkIncrementalROS] updateSmootheIntermidiateHandPos   rightHandPos: " << rightHandPos.transpose()
-            << std::endl;
-
-  if (leftHandCtrlModeChanged) {
-    leftHandSmoother_->resetSmoothState(latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position);
-    // print reset left
-    std::cout << "\033[92m[Quest3IkIncrementalROS] Reset left hand position\033[0m" << std::endl;
+  // 计算ee的fk值用于实时更新
+  Eigen::Vector3d pLeftEndEffector, pRightEndEffector;
+  Eigen::Quaterniond qLeftEndEffector, qRightEndEffector;
+  if (isLeftActive) {
+    computeLeftEndEffectorFK(pLeftEndEffector, qLeftEndEffector);
+  }
+  if (isRightActive) {
+    computeRightEndEffectorFK(pRightEndEffector, qRightEndEffector);
   }
 
-  if (rightHandCtrlModeChanged) {
-    rightHandSmoother_->resetSmoothState(latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position);
-    // print reset right
-    std::cout << "\033[92m[Quest3IkIncrementalROS] Reset right hand position\033[0m" << std::endl;
-  }
-
-  // 使用fhan插值更新平滑状态
-  leftHandSmoother_->updateWithFhan(leftHandPos, 0.5, 0.01, 0.04);
-  rightHandSmoother_->updateWithFhan(rightHandPos, 0.5, 0.01, 0.04);
+  latestIncrementalResult_ =
+      incrementalController_->computeIncrementalPose(quest3ArmInfoTransformerPtr_->getLeftHandPose(),
+                                                     quest3ArmInfoTransformerPtr_->getRightHandPose(),
+                                                     isLeftActive,
+                                                     isRightActive,
+                                                     qLeftEndEffector,
+                                                     qRightEndEffector);
+  return latestIncrementalResult_.isValid();
 }
 
 bool Quest3IkIncrementalROS::updateLeftHandChangingMode(const Eigen::Vector3d& leftTargetPos) {
-  std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
-  if (!currentSensorData || currentSensorData->joint_data.joint_q.size() < 12 + jointStateSize_) {
-    ROS_WARN("[Quest3IkIncrementalROS] Sensor data not available or insufficient for FK calculation");
+  // 使用均值滤波后的关节数据
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    ROS_WARN("[Quest3IkIncrementalROS] Filtered joint data not available for FK calculation");
     return false;
   }
 
-  Eigen::VectorXd armJoints(jointStateSize_);
-  for (int i = 0; i < jointStateSize_; ++i) {
-    armJoints(i) = currentSensorData->joint_data.joint_q[12 + i];
-  }
-
-  return leftHandSmoother_->updateChangingMode(
-      leftTargetPos, twoStageTorsoIkPtr_.get(), armJoints, jointStateSize_, hand_changing_mode_threshold_);
+  Eigen::VectorXd armJoints = sensorArmJointQ_;
+  return leftHandSmoother_->updateChangingMode(leftTargetPos,
+                                               static_cast<BaseIKSolver*>(oneStageIkEndEffectorPtr_.get()),
+                                               armJoints,
+                                               jointStateSize_,
+                                               handChangingModeThreshold_);
 }
 
 bool Quest3IkIncrementalROS::updateRightHandChangingMode(const Eigen::Vector3d& rightTargetPos) {
-  std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
-  if (!currentSensorData || currentSensorData->joint_data.joint_q.size() < 12 + jointStateSize_) {
-    ROS_WARN("[Quest3IkIncrementalROS] Sensor data not available or insufficient for FK calculation");
+  // 使用均值滤波后的关节数据
+  if (sensorArmJointQ_.size() != jointStateSize_) {
+    ROS_WARN("[Quest3IkIncrementalROS] Filtered joint data not available for FK calculation");
     return false;
   }
 
-  Eigen::VectorXd armJoints(jointStateSize_);
-  for (int i = 0; i < jointStateSize_; ++i) {
-    armJoints(i) = currentSensorData->joint_data.joint_q[12 + i];
-  }
-
-  return rightHandSmoother_->updateChangingMode(
-      rightTargetPos, twoStageTorsoIkPtr_.get(), armJoints, jointStateSize_, hand_changing_mode_threshold_);
+  Eigen::VectorXd armJoints = sensorArmJointQ_;
+  return rightHandSmoother_->updateChangingMode(rightTargetPos,
+                                                static_cast<BaseIKSolver*>(oneStageIkEndEffectorPtr_.get()),
+                                                armJoints,
+                                                jointStateSize_,
+                                                handChangingModeThreshold_);
 }
 
 void Quest3IkIncrementalROS::forceDeactivateAllArmCtrlMode() {
@@ -1591,6 +2613,17 @@ void Quest3IkIncrementalROS::reset() {
   // 重置 grip 状态跟踪变量，避免系统重置后出现错误的上升沿检测
   lastLeftGripPressed_ = false;
   lastRightGripPressed_ = false;
+  // 重置 grip 超时机制状态
+  {
+    std::lock_guard<std::mutex> lock(leftGripTimeMutex_);
+    leftGripStartTime_ = ros::Time(0);
+    leftGripTimeoutReached_.store(false);
+  }
+  {
+    std::lock_guard<std::mutex> lock(rightGripTimeMutex_);
+    rightGripStartTime_ = ros::Time(0);
+    rightGripTimeoutReached_.store(false);
+  }
   // 重置激活所有手臂控制模式的计数器，确保下次进入增量模式时可以重新执行激活逻辑
   activateAllArmCtrlModeCounter_ = 0;
   // 重置退出 mode 2 的计数器，确保下次退出时可以重新执行过渡逻辑
@@ -1609,7 +2642,7 @@ void Quest3IkIncrementalROS::reset() {
   // 重置pose约束列表，使用默认手部位置初始化，确保进入增量模式时能正确初始化到默认位置
   {
     std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-    latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE, PoseData());
+    latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
     Eigen::Quaterniond defaultHandQuat = Eigen::Quaterniond::Identity();
     // 使用默认手部位置初始化，与 IncrementalControlModule 中的硬编码默认值保持一致
     latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = defaultLeftHandPosOnExit_;
@@ -1632,8 +2665,368 @@ void Quest3IkIncrementalROS::reset() {
   // 重置后同步增量控制模块的手部姿态种子
   if (incrementalController_) {
     Eigen::Quaterniond defaultHandQuat = Eigen::Quaterniond::Identity();
-    incrementalController_->setHandQuatSeeds(defaultHandQuat, defaultHandQuat);
+    incrementalController_->setHandQuatSeeds(defaultHandQuat, defaultHandQuat, useIncrementalHandOrientation_);
   }
 }
 
+PointTrackIKSolverConfig Quest3IkIncrementalROS::loadPointTrackIKSolverConfigFromJson(
+    const nlohmann::json& configJson) {
+  ROS_INFO("==================================================================================");
+  ROS_INFO("🔧 [Quest3IkIncrementalROS] Loading PointTrackIKSolverConfig from JSON configuration");
+  ROS_INFO("==================================================================================");
+
+  PointTrackIKSolverConfig config;
+
+  try {
+    if (configJson.contains("point_track_ik_solver_config") && configJson["point_track_ik_solver_config"].is_object()) {
+      const auto& ikConfig = configJson["point_track_ik_solver_config"];
+
+      // Load PointTrackIKSolverConfig specific fields
+      if (ikConfig.contains("historyBufferSize")) {
+        config.historyBufferSize = ikConfig["historyBufferSize"].get<int>();
+        ROS_INFO("  ✅ historyBufferSize: %d", config.historyBufferSize);
+      }
+
+      if (ikConfig.contains("eeTrackingWeight")) {
+        config.eeTrackingWeight = ikConfig["eeTrackingWeight"].get<double>();
+        ROS_INFO("  ✅ eeTrackingWeight: %.2e", config.eeTrackingWeight);
+      }
+
+      if (ikConfig.contains("elbowTrackingWeight")) {
+        config.elbowTrackingWeight = ikConfig["elbowTrackingWeight"].get<double>();
+        ROS_INFO("  ✅ elbowTrackingWeight: %.2e", config.elbowTrackingWeight);
+      }
+
+      if (ikConfig.contains("link6TrackingWeight")) {
+        config.link6TrackingWeight = ikConfig["link6TrackingWeight"].get<double>();
+        ROS_INFO("  ✅ link6TrackingWeight: %.2e", config.link6TrackingWeight);
+      }
+
+      if (ikConfig.contains("virtualThumbTrackingWeight")) {
+        config.virtualThumbTrackingWeight = ikConfig["virtualThumbTrackingWeight"].get<double>();
+        ROS_INFO("  ✅ virtualThumbTrackingWeight: %.2e", config.virtualThumbTrackingWeight);
+      }
+
+      // Load IKSolverConfig base class fields
+      if (ikConfig.contains("constraintTolerance")) {
+        config.constraintTolerance = ikConfig["constraintTolerance"].get<double>();
+        ROS_INFO("  ✅ constraintTolerance: %.2e", config.constraintTolerance);
+      }
+
+      if (ikConfig.contains("solverTolerance")) {
+        config.solverTolerance = ikConfig["solverTolerance"].get<double>();
+        ROS_INFO("  ✅ solverTolerance: %.2e", config.solverTolerance);
+      }
+
+      if (ikConfig.contains("maxIterations")) {
+        config.maxIterations = ikConfig["maxIterations"].get<int>();
+        ROS_INFO("  ✅ maxIterations: %d", config.maxIterations);
+      }
+
+      if (ikConfig.contains("controlArmIndex")) {
+        int armIdxInt = ikConfig["controlArmIndex"].get<int>();
+        if (armIdxInt == 0) {
+          config.controlArmIndex = ArmIdx::LEFT;
+        } else if (armIdxInt == 1) {
+          config.controlArmIndex = ArmIdx::RIGHT;
+        } else if (armIdxInt == 2) {
+          config.controlArmIndex = ArmIdx::BOTH;
+        } else {
+          ROS_WARN("  ⚠️ Invalid controlArmIndex: %d, using default BOTH", armIdxInt);
+          config.controlArmIndex = ArmIdx::BOTH;
+        }
+        ROS_INFO("  ✅ controlArmIndex: %d", armIdxInt);
+      }
+
+      if (ikConfig.contains("isWeldBaseLink")) {
+        config.isWeldBaseLink = ikConfig["isWeldBaseLink"].get<bool>();
+        ROS_INFO("  ✅ isWeldBaseLink: %s", config.isWeldBaseLink ? "true" : "false");
+      }
+
+      if (ikConfig.contains("useJointLimits")) {
+        config.useJointLimits = ikConfig["useJointLimits"].get<bool>();
+        ROS_INFO("  ✅ useJointLimits: %s", config.useJointLimits ? "true" : "false");
+      }
+
+      // Load joint smoothness weights (7 joints per arm, symmetric)
+      if (ikConfig.contains("jointSmoothWeightDefault")) {
+        config.jointSmoothWeightDefault = ikConfig["jointSmoothWeightDefault"].get<double>();
+        ROS_INFO("  ✅ jointSmoothWeightDefault: %.2e", config.jointSmoothWeightDefault);
+      }
+
+      if (ikConfig.contains("jointSmoothWeight0")) {
+        config.jointSmoothWeight0 = ikConfig["jointSmoothWeight0"].get<double>();
+        ROS_INFO("  ✅ jointSmoothWeight0: %.2e", config.jointSmoothWeight0);
+      }
+
+      if (ikConfig.contains("jointSmoothWeight1")) {
+        config.jointSmoothWeight1 = ikConfig["jointSmoothWeight1"].get<double>();
+        ROS_INFO("  ✅ jointSmoothWeight1: %.2e", config.jointSmoothWeight1);
+      }
+
+      if (ikConfig.contains("jointSmoothWeight2")) {
+        config.jointSmoothWeight2 = ikConfig["jointSmoothWeight2"].get<double>();
+        ROS_INFO("  ✅ jointSmoothWeight2: %.2e", config.jointSmoothWeight2);
+      }
+
+      if (ikConfig.contains("jointSmoothWeight3")) {
+        config.jointSmoothWeight3 = ikConfig["jointSmoothWeight3"].get<double>();
+        ROS_INFO("  ✅ jointSmoothWeight3: %.2e", config.jointSmoothWeight3);
+      }
+
+      if (ikConfig.contains("jointSmoothWeight4")) {
+        config.jointSmoothWeight4 = ikConfig["jointSmoothWeight4"].get<double>();
+        ROS_INFO("  ✅ jointSmoothWeight4: %.2e", config.jointSmoothWeight4);
+      }
+
+      if (ikConfig.contains("jointSmoothWeight5")) {
+        config.jointSmoothWeight5 = ikConfig["jointSmoothWeight5"].get<double>();
+        ROS_INFO("  ✅ jointSmoothWeight5: %.2e", config.jointSmoothWeight5);
+      }
+
+      if (ikConfig.contains("jointSmoothWeight6")) {
+        config.jointSmoothWeight6 = ikConfig["jointSmoothWeight6"].get<double>();
+        ROS_INFO("  ✅ jointSmoothWeight6: %.2e", config.jointSmoothWeight6);
+      }
+
+      ROS_INFO("✅ [Quest3IkIncrementalROS] Successfully loaded PointTrackIKSolverConfig from JSON");
+    } else {
+      ROS_WARN("❌ [Quest3IkIncrementalROS] 'point_track_ik_solver_config' not found in JSON config, using defaults");
+    }
+
+  } catch (const std::exception& e) {
+    ROS_ERROR("❌ [Quest3IkIncrementalROS] Exception while loading PointTrackIKSolverConfig: %s", e.what());
+    ROS_WARN("🔄 [Quest3IkIncrementalROS] Falling back to default configuration");
+  }
+
+  return config;
+}
+
+DrakeVelocityIKWeightConfig Quest3IkIncrementalROS::loadDrakeVelocityIKWeightsFromJson(
+    const nlohmann::json& configJson) {
+  ROS_INFO("==================================================================================");
+  ROS_INFO("🔧 [Quest3IkIncrementalROS] Loading DrakeVelocityIKWeights from JSON configuration");
+  ROS_INFO("==================================================================================");
+
+  // Default values matching HandPriority config
+  static const char* defaultName = "JSON_Loaded";
+  DrakeVelocityIKWeightConfig config;
+  config.name = defaultName;
+  config.q11 = 0.5;
+  config.q12 = 0.5;
+  config.q2 = 500.0;
+  config.qv1 = 0.05;
+  config.qv2 = 0.001;
+
+  try {
+    if (configJson.contains("drake_velocity_ik_weights") && configJson["drake_velocity_ik_weights"].is_object()) {
+      const auto& weightsConfig = configJson["drake_velocity_ik_weights"];
+
+      if (weightsConfig.contains("q11")) {
+        config.q11 = weightsConfig["q11"].get<double>();
+        ROS_INFO("  ✅ q11 (P1 fixed weight): %.6e", config.q11);
+      }
+
+      if (weightsConfig.contains("q12")) {
+        config.q12 = weightsConfig["q12"].get<double>();
+        ROS_INFO("  ✅ q12 (P1 ref weight): %.6e", config.q12);
+      }
+
+      if (weightsConfig.contains("q2")) {
+        config.q2 = weightsConfig["q2"].get<double>();
+        ROS_INFO("  ✅ q2 (P2 ref weight): %.6e", config.q2);
+      }
+
+      if (weightsConfig.contains("qv1")) {
+        config.qv1 = weightsConfig["qv1"].get<double>();
+        ROS_INFO("  ✅ qv1 (P1 smoothness weight): %.6e", config.qv1);
+      }
+
+      if (weightsConfig.contains("qv2")) {
+        config.qv2 = weightsConfig["qv2"].get<double>();
+        ROS_INFO("  ✅ qv2 (P2 smoothness weight): %.6e", config.qv2);
+      }
+
+      ROS_INFO("✅ [Quest3IkIncrementalROS] Successfully loaded DrakeVelocityIKWeights from JSON");
+      ROS_INFO("   Config: q11=%.6e, q12=%.6e, q2=%.6e, qv1=%.6e, qv2=%.6e",
+               config.q11,
+               config.q12,
+               config.q2,
+               config.qv1,
+               config.qv2);
+    } else {
+      ROS_WARN(
+          "❌ [Quest3IkIncrementalROS] 'drake_velocity_ik_weights' not found in JSON config, using defaults "
+          "(HandPriority)");
+    }
+
+  } catch (const std::exception& e) {
+    ROS_ERROR("❌ [Quest3IkIncrementalROS] Exception while loading DrakeVelocityIKWeights: %s", e.what());
+    ROS_WARN("🔄 [Quest3IkIncrementalROS] Falling back to default configuration (HandPriority)");
+  }
+
+  return config;
+}
+
+DrakeVelocityIKBoundsConfig Quest3IkIncrementalROS::loadDrakeVelocityIKBoundsFromJson(
+    const nlohmann::json& configJson) {
+  ROS_INFO("==================================================================================");
+  ROS_INFO("🔧 [Quest3IkIncrementalROS] Loading DrakeVelocityIKBounds from JSON configuration");
+  ROS_INFO("==================================================================================");
+
+  DrakeVelocityIKBoundsConfig config;
+
+  try {
+    if (configJson.contains("drake_velocity_ik_bounds") && configJson["drake_velocity_ik_bounds"].is_object()) {
+      const auto& boundsConfig = configJson["drake_velocity_ik_bounds"];
+
+      if (boundsConfig.contains("x_upper_offset")) {
+        config.xUpperOffset = boundsConfig["x_upper_offset"].get<double>();
+        ROS_INFO("  ✅ x_upper_offset: %.6f", config.xUpperOffset);
+      }
+
+      if (boundsConfig.contains("z_lower")) {
+        config.zLower = boundsConfig["z_lower"].get<double>();
+        ROS_INFO("  ✅ z_lower: %.6f", config.zLower);
+      }
+
+      if (boundsConfig.contains("z_upper_offset")) {
+        config.zUpperOffset = boundsConfig["z_upper_offset"].get<double>();
+        ROS_INFO("  ✅ z_upper_offset: %.6f", config.zUpperOffset);
+      }
+
+      if (boundsConfig.contains("left_y_lower")) {
+        config.leftYLower = boundsConfig["left_y_lower"].get<double>();
+        ROS_INFO("  ✅ left_y_lower: %.6f", config.leftYLower);
+      }
+
+      if (boundsConfig.contains("left_y_upper_offset")) {
+        config.leftYUpperOffset = boundsConfig["left_y_upper_offset"].get<double>();
+        ROS_INFO("  ✅ left_y_upper_offset: %.6f", config.leftYUpperOffset);
+      }
+
+      if (boundsConfig.contains("right_y_lower_offset")) {
+        config.rightYLowerOffset = boundsConfig["right_y_lower_offset"].get<double>();
+        ROS_INFO("  ✅ right_y_lower_offset: %.6f", config.rightYLowerOffset);
+      }
+
+      if (boundsConfig.contains("right_y_upper")) {
+        config.rightYUpper = boundsConfig["right_y_upper"].get<double>();
+        ROS_INFO("  ✅ right_y_upper: %.6f", config.rightYUpper);
+      }
+
+      ROS_INFO("✅ [Quest3IkIncrementalROS] Successfully loaded DrakeVelocityIKBounds from JSON");
+    } else {
+      ROS_WARN("❌ [Quest3IkIncrementalROS] 'drake_velocity_ik_bounds' not found in JSON config, using defaults");
+    }
+
+  } catch (const std::exception& e) {
+    ROS_ERROR("❌ [Quest3IkIncrementalROS] Exception while loading DrakeVelocityIKBounds: %s", e.what());
+    ROS_WARN("🔄 [Quest3IkIncrementalROS] Falling back to default configuration");
+  }
+
+  ROS_INFO(
+      "   Bounds constants: x_upper_offset=%.6f, z_lower=%.6f, z_upper_offset=%.6f, left_y_lower=%.6f, "
+      "left_y_upper_offset=%.6f, right_y_lower_offset=%.6f, right_y_upper=%.6f",
+      config.xUpperOffset,
+      config.zLower,
+      config.zUpperOffset,
+      config.leftYLower,
+      config.leftYUpperOffset,
+      config.rightYLowerOffset,
+      config.rightYUpper);
+
+  return config;
+}
+
+void Quest3IkIncrementalROS::loadDrakeVelocityIKGeometryFromJson(const nlohmann::json& configJson) {
+  ROS_INFO("==================================================================================");
+  ROS_INFO("🔧 [Quest3IkIncrementalROS] Loading DrakeVelocityIK Geometry from JSON configuration");
+  ROS_INFO("==================================================================================");
+
+  // Default values
+  double defaultL1 = 0.2837;  // ||j2_j4||
+  double defaultL2 = 0.2335;  // ||j4_j6||
+  Eigen::Vector3d defaultLeftP0(-0.017499853, 0.29269999999999996, 0.4245);
+  Eigen::Vector3d defaultRightP0(-0.017499853, -0.29269999999999996, 0.4245);
+
+  // Initialize with defaults
+  l1_ = defaultL1;
+  l2_ = defaultL2;
+  robotLeftFixedShoulderPos_ = defaultLeftP0;
+  robotRightFixedShoulderPos_ = defaultRightP0;
+
+  try {
+    if (configJson.contains("drake_velocity_ik_geometry") && configJson["drake_velocity_ik_geometry"].is_object()) {
+      const auto& geometryConfig = configJson["drake_velocity_ik_geometry"];
+
+      // Load link lengths
+      if (geometryConfig.contains("l1")) {
+        l1_ = geometryConfig["l1"].get<double>();
+        ROS_INFO("  ✅ l1 (link1 length): %.6f", l1_);
+      } else {
+        ROS_INFO("  ⚠️  l1 not found, using default: %.6f", defaultL1);
+      }
+
+      if (geometryConfig.contains("l2")) {
+        l2_ = geometryConfig["l2"].get<double>();
+        ROS_INFO("  ✅ l2 (link2 length): %.6f", l2_);
+      } else {
+        ROS_INFO("  ⚠️  l2 not found, using default: %.6f", defaultL2);
+      }
+
+      // Load left shoulder position (p0)
+      if (geometryConfig.contains("left_p0") && geometryConfig["left_p0"].is_array() &&
+          geometryConfig["left_p0"].size() == 3) {
+        std::vector<double> leftP0Vec = geometryConfig["left_p0"].get<std::vector<double>>();
+        robotLeftFixedShoulderPos_ = Eigen::Vector3d(leftP0Vec[0], leftP0Vec[1], leftP0Vec[2]);
+        ROS_INFO("  ✅ left_p0: [%.6f, %.6f, %.6f]",
+                 robotLeftFixedShoulderPos_.x(),
+                 robotLeftFixedShoulderPos_.y(),
+                 robotLeftFixedShoulderPos_.z());
+      } else {
+        ROS_INFO("  ⚠️  left_p0 not found or invalid, using default: [%.6f, %.6f, %.6f]",
+                 defaultLeftP0.x(),
+                 defaultLeftP0.y(),
+                 defaultLeftP0.z());
+      }
+
+      // Load right shoulder position (p0)
+      if (geometryConfig.contains("right_p0") && geometryConfig["right_p0"].is_array() &&
+          geometryConfig["right_p0"].size() == 3) {
+        std::vector<double> rightP0Vec = geometryConfig["right_p0"].get<std::vector<double>>();
+        robotRightFixedShoulderPos_ = Eigen::Vector3d(rightP0Vec[0], rightP0Vec[1], rightP0Vec[2]);
+        ROS_INFO("  ✅ right_p0: [%.6f, %.6f, %.6f]",
+                 robotRightFixedShoulderPos_.x(),
+                 robotRightFixedShoulderPos_.y(),
+                 robotRightFixedShoulderPos_.z());
+      } else {
+        ROS_INFO("  ⚠️  right_p0 not found or invalid, using default: [%.6f, %.6f, %.6f]",
+                 defaultRightP0.x(),
+                 defaultRightP0.y(),
+                 defaultRightP0.z());
+      }
+
+      ROS_INFO("✅ [Quest3IkIncrementalROS] Successfully loaded DrakeVelocityIK Geometry from JSON");
+      ROS_INFO("   Geometry: l1=%.6f, l2=%.6f", l1_, l2_);
+      ROS_INFO("   Left p0: [%.6f, %.6f, %.6f]",
+               robotLeftFixedShoulderPos_.x(),
+               robotLeftFixedShoulderPos_.y(),
+               robotLeftFixedShoulderPos_.z());
+      ROS_INFO("   Right p0: [%.6f, %.6f, %.6f]",
+               robotRightFixedShoulderPos_.x(),
+               robotRightFixedShoulderPos_.y(),
+               robotRightFixedShoulderPos_.z());
+    } else {
+      ROS_WARN("❌ [Quest3IkIncrementalROS] 'drake_velocity_ik_geometry' not found in JSON config, using defaults");
+      ROS_INFO("   Default geometry: l1=%.6f, l2=%.6f", defaultL1, defaultL2);
+      ROS_INFO("   Default left_p0: [%.6f, %.6f, %.6f]", defaultLeftP0.x(), defaultLeftP0.y(), defaultLeftP0.z());
+      ROS_INFO("   Default right_p0: [%.6f, %.6f, %.6f]", defaultRightP0.x(), defaultRightP0.y(), defaultRightP0.z());
+    }
+
+  } catch (const std::exception& e) {
+    ROS_ERROR("❌ [Quest3IkIncrementalROS] Exception while loading DrakeVelocityIK Geometry: %s", e.what());
+    ROS_WARN("🔄 [Quest3IkIncrementalROS] Falling back to default geometry");
+  }
+}
 }  // namespace HighlyDynamic

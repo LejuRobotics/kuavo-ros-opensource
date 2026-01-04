@@ -15,14 +15,14 @@
     <arg name="use_step_turning" default="false"/> <!-- 是否启用单步转向功能 -->
     <arg name="use_cpp_monitor" default="false"/> <!-- false: use Python Monitor (monitor_quest3.py), true: use C++ Monitor (monitor_quest3_cpp) -->
     <arg name="use_cpp_incremental_ik" default="false"/> <!-- false: use Python IK (ik_ros_uni.py), true: use C++ Incremental IK (ik_ros_uni_cpp_node) -->
-    <arg name="fhan_r" default="300.0" />
-    <arg name="fhan_kh0" default="6.0" />
-    <arg name="fhan_r_joint" default="300.0" />
+    <arg name="fhan_r" default="3000.0" />
+    <arg name="fhan_kh0" default="4.0" />
+    <arg name="fhan_r_joint" default="3000.0" />
     <arg name="fhan_kh0_joint" default="4.0" />
-    <arg name="max_joint_velocity" default="30.0" />
-    <arg name="delta_scale_x" default="1.0" />
-    <arg name="delta_scale_y" default="1.0" />
-    <arg name="delta_scale_z" default="1.0" />
+    <arg name="max_joint_velocity" default="300.0" />
+    <arg name="delta_scale_x" default="1.36" />
+    <arg name="delta_scale_y" default="1.36" />
+    <arg name="delta_scale_z" default="1.36" />
     <arg name="delta_scale_roll" default="1.0" />
     <arg name="delta_scale_pitch" default="1.0" />
     <arg name="delta_scale_yaw" default="1.0" />
@@ -38,6 +38,9 @@
     <!-- 手部位置约束参数 -->
     <arg name="sphere_radius_limit" default="0.6" /> <!-- 手部位置约束球体半径 -->
     <arg name="min_reachable_distance" default="0.08" /> <!-- 最小可达距离 -->
+    <arg name="elbow_min_distance" default="0.16" /> <!-- 手到肘最小距离约束 -->
+    <arg name="elbow_max_distance" default="0.24" /> <!-- 手到肘最大距离约束 -->
+    <arg name="use_incremental_hand_orientation" default="true" /> <!-- 是否使用增量式手部姿态 -->
     <arg name="box_min_bound" default="[0.00, -0.6, -0.19]" /> <!-- 手部位置约束边界框最小值 [x, y, z] -->
     <arg name="box_max_bound" default="[0.4, 0.6, 0.4]" /> <!-- 手部位置约束边界框最大值 [x, y, z] -->
     <arg name="chest_offset_y_ax" default="0.05" /> <!-- 胸部中线偏移量，用于防止左右手过中线 -->
@@ -46,6 +49,10 @@
     <arg name="default_left_hand_pos_on_exit" default="[0.00, 0.293, -0.16]" /> <!-- 退出时左手默认目标位置 [x, y, z] -->
     <arg name="default_right_hand_pos_on_exit" default="[0.00, -0.293, -0.16]" /> <!-- 退出时右手默认目标位置 [x, y, z] -->
     <arg name="hand_changing_mode_threshold" default="0.085" /> <!-- 手部模式切换时的阈值 -->
+    <!-- 四元数角度限制参数（ZYX欧拉角，单位：弧度） -->
+    <arg name="zyx_limits_final" default="[1.4923, 1.4923, 1.4923]" /> <!-- 最终四元数角度限制 [z, y, x] -->
+    <arg name="zyx_limits_ee" default="[1.4923, 1.4923, 1.4923]" /> <!-- 相对end-effector的四元数角度限制 [z, y, x] -->
+    <arg name="zyx_limits_link4" default="[1.5708, 0.6, 0.6]" /> <!-- 相对link4的四元数角度限制 [z, y, x] -->
     
     <!-- motion_capture_ik -->
     <!-- Python IK Node (启动当 use_cpp_incremental_ik=false 时) -->
@@ -81,6 +88,9 @@
         <!-- 手部位置约束参数 -->
         <param name="/quest3/sphere_radius_limit" value="$(arg sphere_radius_limit)" />
         <param name="/quest3/min_reachable_distance" value="$(arg min_reachable_distance)" />
+        <param name="/quest3/elbow_min_distance" value="$(arg elbow_min_distance)" />
+        <param name="/quest3/elbow_max_distance" value="$(arg elbow_max_distance)" />
+        <param name="/quest3/use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)" />
         <param name="/quest3/hand_changing_mode_threshold" value="$(arg hand_changing_mode_threshold)" />
         <rosparam param="/quest3/box_min_bound" subst_value="True">$(arg box_min_bound)</rosparam>
         <rosparam param="/quest3/box_max_bound" subst_value="True">$(arg box_max_bound)</rosparam>
@@ -89,6 +99,10 @@
         <rosparam param="/quest3/right_center" subst_value="True">$(arg right_center)</rosparam>
         <rosparam param="/quest3/default_left_hand_pos_on_exit" subst_value="True">$(arg default_left_hand_pos_on_exit)</rosparam>
         <rosparam param="/quest3/default_right_hand_pos_on_exit" subst_value="True">$(arg default_right_hand_pos_on_exit)</rosparam>
+        <!-- 四元数角度限制参数 -->
+        <rosparam param="/quest3/zyx_limits_final" subst_value="True">$(arg zyx_limits_final)</rosparam>
+        <rosparam param="/quest3/zyx_limits_ee" subst_value="True">$(arg zyx_limits_ee)</rosparam>
+        <rosparam param="/quest3/zyx_limits_link4" subst_value="True">$(arg zyx_limits_link4)</rosparam>
     </node>
 
     <!-- noitom_hi5_hand_udp_python -->

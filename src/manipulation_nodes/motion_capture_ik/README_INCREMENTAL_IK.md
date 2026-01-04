@@ -20,8 +20,9 @@
 ## 1.1 VR 软件端 (Quest 3)
 
 ### 1.1.1 版本要求
-目前测试稳定版本为：`0.0.1-181-g2b295f2`
+目前测试稳定版本为：`0.0.1-181-g2b295f2` （VR左手柄可查看版本）
 - **下载链接**：[leju_kuavo_hand-0.0.1-181-g2b295f2.apk](https://kuavo.lejurobot.com/Quest_apks/leju_kuavo_hand-0.0.1-181-g2b295f2.apk)
+- **备用来源**：[security.feishu.cn](https://security.feishu.cn/link/safety?target=https%3A%2F%2Fkuavo.lejurobot.com%2FQuest_apks%2Fleju_kuavo_hand-0.0.1-181-g2b295f2.apk&scene=ccm&logParams=%7B%22location%22%3A%22ccm_drive%22%7D&lang=zh-CN)
 
 ### 1.1.2 更新与安装
 请参考 [Quest3_VR_basic 操作说明](https://kuavo.lejurobot.com/beta_manual/basic_usage/kuavo-ros-control/docs/Quest3_VR_basic/index.html) 进行 APK 安装。
@@ -30,29 +31,51 @@
 ## 1.2 下位机环境配置
 
 ### 1.2.1 代码部署
-需使用特定的开发分支进行编译, 切换到如下分支的最新commit即可：
-- 分支名：chenzujian/dev/test_two_stage_ik_cpp_incremental_isolate_hand_ctrl_25-12-10
+需使用特定的开发分支进行编译：
+- **分支名**：最新`dev`
+- **Commit**：最新commit
+
 ```bash
 # 1. 克隆代码库
 git clone https://www.lejuhub.com/highlydynamic/kuavo-ros-control.git
 
 # 2. 切换到指定测试分支
 git checkout dev
+git reset --hard
 ```
 
-> **注意**：完成切换后，请确保处于稳定版本的 commit。按照标准流程编译 `humanoid_controllers` 节点即可。
+> **注意**：先正常佩戴完成标定，标定正确的判断标准为虚拟躯干位于视野正前方。
 
 ---
 
-## 1.2.2 `launch_quest3_ik.launch`文件适配
+## 1.2.2 启动参数与模式选择
 
-```xml
-<arg name="ip_address" default="Quest3的实际IP" />
-<arg name="use_cpp_incremental_ik" default="true"/>
-<!-- 末端类型： "qiangnao"或"lejuclaw"， 需与实物对应 -->
-<arg name="ee_type" default="lejuclaw"/> 
+### 参数组合速查表
+
+| use_cpp_incremental_ik | use_incremental_hand_orientation | 位置模式 | 姿态模式 | 说明 |
+| :---: | :---: | :---: | :---: | :--- |
+| `true` | `false` | **增量** | **绝对** | 位置增量 + 姿态绝对 |
+| `true` | `true` | **增量** | **增量** | 位置增量 + 姿态增量 (全增量) |
+| `false` | `false` | **绝对** | **绝对** | 启动旧版全绝对式遥操作 |
+| `false` | `true` | **绝对** | **增量** |  无效组合 |
+
+### 启动命令示例
+
+**模式 1：增量位置 + 绝对姿态**
+```bash
+roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch \
+ip_address:=<your_quest_ip> \
+use_cpp_incremental_ik:=true \
+use_incremental_hand_orientation:=false
 ```
 
+**模式 2：增量位置 + 增量姿态 (全增量)**
+```bash
+roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch \
+ip_address:=<your_quest_ip> \
+use_cpp_incremental_ik:=true \
+use_incremental_hand_orientation:=true
+```
 
 **备注**：`launch`文件路径：`src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch`
 
@@ -67,7 +90,6 @@ git checkout dev
 - [ ] 机器人是否正常进入缩腿下蹲状态？
 
 ## 2.2 启动 VR 算法节点
-
 确认**机器人版本号**与实物对应，使用H12标准操作完成节点启动。
 
 **✅ 检查清单：**
@@ -83,8 +105,7 @@ git checkout dev
 2.  **挂脖模式标定** (实际工作位)：
     *   将 VR 头显取下，改为挂脖佩戴（确保居中对称）。
     *   保持大臂自然下垂，小臂水平置于腰侧。
-    *   **再次长按 Meta 键** 进行标定。
-
+    *   **当出现漂移，操作不准等情况时**， 应重新头戴进行标定
 ## 2.4 激活增量控制
 1.  同时按下 **左手柄 `X`** + **右手柄 `A`**。
 2.  **状态确认**：
@@ -114,17 +135,23 @@ git checkout dev
 
 ---
 
-# 4. 操作Tips
+# 4. 操作注意事项
 
-1.  **空间受限处理**：
-    *   在直臂模式下向后收回手臂时，若感到活动空间受限，可先将手臂稍向外侧平移（**左手向左，右手向右**），然后再进行内收动作。
-2.  **分段操作**：
-    *   从“绝对式”切换到“增量式”需要适应过程。
-    *   进行长距离或精细操作时，推荐采用**"松开扳机 → 调整人手到舒适位置 → 重新按下扳机"**的策略，以找到最舒适的操作姿势并缓解疲劳。
-3.  **姿态调整**：
-    *   增量式不依赖于人体手臂的映射位置，但**保持与设备一致的姿态**能够获得更好的操作体验。建议在增量操作过程中保持与设备相对接近的姿态。
-    *   持续操作过程中，当设备姿态与人体不一致时，可**缓慢运动**找到对应的姿态映射点，再进行增量控制，避免出现非预期动作。
----
+1. **光电感应遮挡**：VR软件挂脖操作时需要遮挡光电感应器（通常在两目镜中间），且在挂脖操作时不能遮挡VR底部两端相机。
+2. **网络连接**：增量遥操作默认使用低延时模式进行遥操作，需要连接**网线**遥操，使用WIFI较卡顿。
+3. **标定要求**：进行挂脖之前需要进行VR虚拟躯干标定，头戴标定完成后进行挂脖，**标定正确的判断标准为虚拟躯干位于视野正前方**。
+4. **佩戴姿态**：VR挂脖佩戴时需要尽量保证VR佩戴**没有歪斜**，且操作过程中**底部两个摄像头不会被衣服遮挡**。
+5. **增量姿态控制**：增量姿态需要找到控制点，建议操作时对齐机器人姿态进行遥操作，若存在部分电机抵达限位应合理操控。
+6. **手柄遮挡/激活**：当VR手柄被遮挡或VR手柄未激活会无法控制机器，间断VR手柄被遮挡会导致轨迹异常，机器只会在手柄识别有效时运动。
+7. **手势设置**：存在VR摇操作过程中识别到手势操作会导致VR虚拟关节跟随手势运动，**需要在VR设置运动追踪功能中关闭自动切换控制器和手势**。
+8. **初始解锁手感**：现排查发现在设备第一次启动VR进行解锁手，手肘阻尼感较强，在场景抬手时可先**长按侧扳机**，手肘大臂电机会发生内旋，稍后即可进行抬手操作。
+9. **版本更新**：若上述操作均符合规范仍无法达到预期效果可检查更新VR软件版本。
+10. **传送带分拣**：执行传送带分拣操作时，可以先寻找姿态映射较为舒适的锚点进行遥操作，若操作感觉异常可以先调整姿态锚点。
 
-# 5. 常见问题排查
-*   *(待灰度测试后根据反馈补充)*
+## 备注
+
+**a. 空间操作范围**
+由于挂脖的VR摄像范围较为受限，操作过程中需要摒弃绝对式的操作习惯，**控制手柄尽量在正前方100度的空间范围内**。对于侧臂与部分动作一次无法完成建议**分段操作**，双手下垂时需要注意是否VR手柄存在遮挡，操作建议手部微抬控制手柄处于一个较为良好的视野范围内。
+
+**b. 锚点选择**
+增量式的核心便捷点是**寻找适合操作的锚点**进行相应的操作，而非在一个映射不正确的姿态上进行只考虑个人姿态的操作。

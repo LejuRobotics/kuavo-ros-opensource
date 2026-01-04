@@ -1,4 +1,6 @@
 #include "motion_capture_ik/HandSmoother.h"
+#include "motion_capture_ik/BaseIKSolver.h"
+#include "motion_capture_ik/OneStageIKEndEffector.h"
 #include "motion_capture_ik/TwoStageTorsoIKRec.h"
 #include <leju_utils/math.hpp>
 #include <ros/ros.h>
@@ -90,7 +92,7 @@ void HandSmoother::processInactiveModeInterpolation(Eigen::Vector3d& scaledHandP
 }
 
 bool HandSmoother::updateChangingMode(const Eigen::Vector3d& targetPos,
-                                      TwoStageTorsoIK* twoStageTorsoIkPtr,
+                                      BaseIKSolver* ikSolverPtr,
                                       const Eigen::VectorXd& armJoints,
                                       int jointStateSize,
                                       double threshold) {
@@ -98,25 +100,50 @@ bool HandSmoother::updateChangingMode(const Eigen::Vector3d& targetPos,
     return false;
   }
 
-  auto [posReached, quatTmp] = twoStageTorsoIkPtr->FK(armJoints, fkFrameName_, jointStateSize);
-
-  double err = (posReached - targetPos).norm();
-
-  if (err < threshold) {
-    if (ctrlModeChangingMaintain_) {
-      ROS_INFO(
-          "[Quest3IkIncrementalROS] %s target pose reached (err=%.3f), exit ctrlModeChanging", handName_.c_str(), err);
+  // Try to cast to OneStageIKEndEffector or TwoStageTorsoIK to call FK
+  auto* oneStageIk = dynamic_cast<OneStageIKEndEffector*>(ikSolverPtr);
+  if (oneStageIk) {
+    auto [posReached, quatTmp] = oneStageIk->FK(armJoints, fkFrameName_, jointStateSize);
+    double err = (posReached - targetPos).norm();
+    if (err < threshold) {
+      if (ctrlModeChangingMaintain_) {
+        ROS_INFO("[Quest3IkIncrementalROS] %s target pose reached (err=%.3f), exit ctrlModeChanging",
+                 handName_.c_str(),
+                 err);
+      }
+      ctrlModeChangingMaintain_ = false;
+      return true;
+    } else {
+      std::cout << handName_ << " err: " << err << std::endl;
+      std::cout << handName_ << " posReached: " << posReached.transpose() << std::endl;
+      std::cout << handName_ << " targetPos: " << targetPos.transpose() << std::endl;
+      return false;
     }
-    ctrlModeChangingMaintain_ = false;
-
-    return true;
-  } else {
-    // 可选的调试输出
-    std::cout << handName_ << " err: " << err << std::endl;
-    std::cout << handName_ << " posReached: " << posReached.transpose() << std::endl;
-    std::cout << handName_ << " targetPos: " << targetPos.transpose() << std::endl;
-    return false;
   }
+
+  // Fallback: try TwoStageTorsoIK (for backward compatibility)
+  auto* twoStageIk = dynamic_cast<TwoStageTorsoIK*>(ikSolverPtr);
+  if (twoStageIk) {
+    auto [posReached, quatTmp] = twoStageIk->FK(armJoints, fkFrameName_, jointStateSize);
+    double err = (posReached - targetPos).norm();
+    if (err < threshold) {
+      if (ctrlModeChangingMaintain_) {
+        ROS_INFO("[Quest3IkIncrementalROS] %s target pose reached (err=%.3f), exit ctrlModeChanging",
+                 handName_.c_str(),
+                 err);
+      }
+      ctrlModeChangingMaintain_ = false;
+      return true;
+    } else {
+      std::cout << handName_ << " err: " << err << std::endl;
+      std::cout << handName_ << " posReached: " << posReached.transpose() << std::endl;
+      std::cout << handName_ << " targetPos: " << targetPos.transpose() << std::endl;
+      return false;
+    }
+  }
+
+  ROS_WARN("[HandSmoother] Unknown IK solver type");
+  return false;
 }
 
 void HandSmoother::updateWithFhan(const Eigen::Vector3d& targetPos, double r, double h, double h0) {

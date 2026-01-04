@@ -835,6 +835,8 @@ namespace humanoid_controller
 
     bool use_ros_arm_joint_trajectory_ = false;
     bool use_mm_arm_joint_trajectory_ = false;
+    int ultra_fast_mode_;
+    bool last_ultra_fast_mode_ = false;
     
     // ==================== MPC-RL插值系统成员变量 ====================
     bool is_torso_interpolation_active_ = false;

@@ -119,8 +119,8 @@ void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySt
   rightJoystick_[0] = msg->right_trigger;
   rightJoystick_[1] = msg->right_grip;
 
-  leftGrip_ = msg->left_grip > 1.0 - 1e-3;
-  rightGrip_ = msg->right_grip > 1.0 - 1e-3;
+  leftGrip_ = msg->left_grip > 0.75;
+  rightGrip_ = msg->right_grip > 0.75;
 
   // 更新按钮状态
   leftSecondButtonPressed_ = msg->left_second_button_pressed;
