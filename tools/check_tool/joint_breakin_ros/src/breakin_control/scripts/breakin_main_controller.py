@@ -71,9 +71,42 @@ class BreakinMainController:
 
     def _ensure_workspace_built(self):
         """确保当前ROS工作空间已经catkin_make过
-        - 判断依据：workspace_root 下是否存在 build/CMakeCache.txt 和 devel/setup.bash
-        - 如果没有，则调用同目录下的 build_catkin_workspace.py 进行编译
+        - 优先检查 build_lib 目录：如果存在且包含必要的二进制文件，则认为已编译
+        - 其次检查 build/CMakeCache.txt 和 devel/setup.bash
+        - 如果都没有，则调用同目录下的 build_catkin_workspace.py 进行编译
         """
+        # 优先检查 build_lib 目录（用户预编译的二进制文件目录）
+        build_lib_dir = self.workspace_root / "build_lib"
+        if build_lib_dir.is_dir():
+            # 检查关键二进制文件是否存在
+            # 可能的路径：
+            # 1. build_lib/lib/arm_breakin/arm_breakin_node (标准 devel 结构)
+            # 2. build_lib/devel/lib/arm_breakin/arm_breakin_node (完整 devel 目录)
+            # 3. build_lib/arm_breakin/arm_breakin_node (简化结构)
+            # 4. build_lib/arm_breakin_node (最简结构)
+            arm_breakin_node_paths = [
+                build_lib_dir / "devel" / "lib" / "arm_breakin" / "arm_breakin_node",
+                build_lib_dir / "lib" / "arm_breakin" / "arm_breakin_node",
+                build_lib_dir / "arm_breakin" / "arm_breakin_node",
+                build_lib_dir / "arm_breakin_node",
+            ]
+            
+            # 如果找到 arm_breakin_node，就认为已编译
+            for node_path in arm_breakin_node_paths:
+                if node_path.exists() and node_path.is_file():
+                    self.print_colored(f"✓ 检测到 build_lib 目录中的二进制文件: {node_path}", Colors.GREEN)
+                    # 检查是否有 setup.bash（用于 ROS 环境配置）
+                    setup_bash_paths = [
+                        build_lib_dir / "devel" / "setup.bash",
+                        build_lib_dir / "setup.bash",
+                    ]
+                    for setup_path in setup_bash_paths:
+                        if setup_path.exists():
+                            self.print_colored(f"✓ 检测到 setup.bash: {setup_path}", Colors.GREEN)
+                            break
+                    return True
+        
+        # 其次检查标准的 build 和 devel 目录
         build_dir = self.workspace_root / "build"
         devel_setup = self.workspace_root / "devel" / "setup.bash"
 

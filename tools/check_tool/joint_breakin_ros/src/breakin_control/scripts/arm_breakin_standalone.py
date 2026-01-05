@@ -505,25 +505,84 @@ class ArmBreakinStandalone:
             local_setup = local_ws / "devel" / "setup.bash"
             global_setup = global_ws / "devel" / "setup.bash" if global_ws else None
 
+            # 优先检查 build_lib 目录中是否有预编译的二进制文件
+            build_lib_dir = local_ws / "build_lib"
+            arm_breakin_node_path = None
+            if build_lib_dir.is_dir():
+                # 检查可能的路径
+                possible_paths = [
+                    build_lib_dir / "devel" / "lib" / "arm_breakin" / self.arm_breakin_node_name,
+                    build_lib_dir / "lib" / "arm_breakin" / self.arm_breakin_node_name,
+                    build_lib_dir / "arm_breakin" / self.arm_breakin_node_name,
+                    build_lib_dir / self.arm_breakin_node_name,
+                ]
+                for path in possible_paths:
+                    if path.exists() and path.is_file():
+                        arm_breakin_node_path = path
+                        self.print_colored(f"✓ 在 build_lib 中找到二进制文件: {arm_breakin_node_path}", Colors.GREEN)
+                        break
+
             setup_cmd_parts = []
             if global_setup and global_setup.exists():
                 setup_cmd_parts.append(f"source {global_setup}")
             if local_setup.exists():
                 setup_cmd_parts.append(f"source {local_setup}")
 
+            # 如果 build_lib 中有 setup.bash，也 source 它
+            build_lib_setup_paths = [
+                build_lib_dir / "devel" / "setup.bash",
+                build_lib_dir / "setup.bash",
+            ]
+            for build_lib_setup in build_lib_setup_paths:
+                if build_lib_setup.exists():
+                    setup_cmd_parts.append(f"source {build_lib_setup}")
+                    self.print_colored(f"✓ 使用 build_lib 中的 setup.bash: {build_lib_setup}", Colors.GREEN)
+                    break
+
             if not setup_cmd_parts:
                 self.print_colored("错误：未找到可用的ROS工作空间，请先编译并source相应的devel/setup.bash", Colors.RED)
                 return 1
 
-            # 构建rosrun命令（按顺序 source 全局 + 本地工作空间，再运行节点）
-            setup_chain = " && ".join(setup_cmd_parts + [f"rosrun arm_breakin {self.arm_breakin_node_name}"])
-            cmd = ["bash", "-c", setup_chain]
+            # 如果找到 build_lib 中的二进制文件，直接运行它；否则使用 rosrun
+            if arm_breakin_node_path:
+                # 直接运行二进制文件
+                node_cmd = str(arm_breakin_node_path)
+                setup_chain = " && ".join(setup_cmd_parts + [node_cmd])
+                cmd = ["bash", "-c", setup_chain]
+                self.print_colored(f"使用 build_lib 中的二进制文件: {arm_breakin_node_path}", Colors.BLUE)
+            else:
+                # 使用 rosrun（需要完整的 ROS 包结构）
+                setup_chain = " && ".join(setup_cmd_parts + [f"rosrun arm_breakin {self.arm_breakin_node_name}"])
+                cmd = ["bash", "-c", setup_chain]
+                self.print_colored("使用 rosrun 启动节点（需要完整的 ROS 包结构）", Colors.BLUE)
             
             # 设置ROS环境变量
             env = dict(os.environ)
             # 确保ROS环境变量正确传递
             if 'ROS_MASTER_URI' not in env or not env['ROS_MASTER_URI']:
                 env['ROS_MASTER_URI'] = 'http://localhost:11311'
+            
+            # 如果使用 build_lib 中的二进制文件，需要设置库路径
+            if arm_breakin_node_path:
+                # 查找可能的库目录
+                lib_dirs = []
+                possible_lib_paths = [
+                    build_lib_dir / "devel" / "lib",
+                    build_lib_dir / "lib",
+                ]
+                for lib_path in possible_lib_paths:
+                    if lib_path.exists() and lib_path.is_dir():
+                        lib_dirs.append(str(lib_path))
+                
+                # 如果找到库目录，添加到 LD_LIBRARY_PATH
+                if lib_dirs:
+                    existing_ld_path = env.get('LD_LIBRARY_PATH', '')
+                    new_ld_path = ':'.join(lib_dirs)
+                    if existing_ld_path:
+                        env['LD_LIBRARY_PATH'] = f"{new_ld_path}:{existing_ld_path}"
+                    else:
+                        env['LD_LIBRARY_PATH'] = new_ld_path
+                    self.print_colored(f"设置 LD_LIBRARY_PATH: {env['LD_LIBRARY_PATH']}", Colors.BLUE)
             if 'ROS_IP' not in env:
                 # 尝试获取本机IP
                 try:
