@@ -107,6 +107,7 @@ def odometry_to_png(odom_x, odom_y, map_info=None):
 
         # 如果坐标被边界检查调整了，输出警告
         if (abs(png_x - original_png_x) > 0.1 or abs(png_y - original_png_y) > 0.1):
+            pass
             #print(f"警告: 坐标超出地图范围，已调整: 原始PNG({original_png_x:.1f}, {original_png_y:.1f}) -> 调整后PNG({png_x:.1f}, {png_y:.1f})")
 
         return round(png_x, 2), round(png_y, 2)
@@ -625,7 +626,7 @@ class KuavoRobotReal(KuavoRobot):
             # Call the service
 
             if client.call(req):
-                print(f"RealInitializeSrv service call successful")
+                #print(f"RealInitializeSrv service call successful")
                 return True, "Success"
             else:
                 print(f"Failed to callRealInitializeSrv service")
@@ -3310,14 +3311,16 @@ def check_and_publish_initial_position(event):
     检查是否有位置数据，如果有则发布初始位置
     """
     global latest_odometry_data
-    print("check_and_publish_initial_position: checking for initial position data...")
+    #print("check_and_publish_initial_position: checking for initial position data...")
 
     if latest_odometry_data:
-        print(f"Found cached odometry data, publishing initial position")
+        pass
+        #print(f"Found cached odometry data, publishing initial position")
         # 这里可以发布初始位置给客户端
         # 但由于odometry_callback已经在主动推送，这里不需要重复
     else:
-        print("No cached odometry data available yet")
+        pass
+        #print("No cached odometry data available yet")
 
 def init_map_publisher():
     """
@@ -3357,15 +3360,15 @@ def check_and_publish_map(event):
     """
     global latest_map_data
 
-    print("=== check_and_publish_map called ===")
+    #print("=== check_and_publish_map called ===")
 
     if latest_map_data:
-        print("Already have map data, forcing update...")
+        #print("Already have map data, forcing update...")
         # 如果已经有地图数据，强制触发一次更新
         map_callback(latest_map_data)
     else:
-        print("No map data available yet, will wait for /map topic updates...")
-
+        #print("No map data available yet, will wait for /map topic updates...")
+        pass
 
 def get_latest_map_data():
     """
