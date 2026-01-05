@@ -107,15 +107,15 @@
 
 ### 使用
 - 若您的机器末端执行器为夹爪
-  - 检查下位机本地的`<kuavo-ros-opensource>/src/kuavo_assets/config/kuavo_v$ROBOT_VERSION/kuavo.json`这个文件
+  - 检查下位机本地的`/home/lab/kuavo-ros-opensource/src/kuavo_assets/config/kuavo_v$ROBOT_VERSION/kuavo.json`这个文件
     - 找到`"EndEffectorType": ["qiangnao", "qiangnao"],`这一行
     - 将其修改为`"EndEffectorType": ["lejuclaw", "lejuclaw"],`(若已为"lejuclaw"则不需要修改)
 
-  - 检查下位机本地的`<kuavo-ros-opensource>/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch`这个文件
+  - 检查下位机本地的`/home/lab/kuavo-ros-opensource/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch`这个文件
     - 找到`<arg name="ee_type" default="qiangnao"/>`这一行
     - 将其修改为`<arg name="ee_type" default="lejuclaw"/>`(若已为"lejuclaw"则不需要修改)
 
-  - 检查下位机本地的`<kuavo-ros-opensource>/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch`这个文件
+  - 检查下位机本地的`/home/lab/kuavo-ros-opensource/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch`这个文件
     - 找到`<arg name="ee_type" default="qiangnao"/>`这一行
     - 将其修改为`<arg name="ee_type" default="lejuclaw"/>`(若已为"lejuclaw"则不需要修改)
 
@@ -175,7 +175,7 @@
 1. 在上位机（带有摄像头的设备）上安装依赖：
 - 需要克隆下位机kuavo-ros-opensource仓库，然后配置依赖：
   ```bash
-  cd <kuavo-ros-opensource>
+  cd /home/lab/kuavo-ros-opensource
   sudo apt install v4l-utils
   sudo su
   python3 -m pip install aiortc==1.9.0
@@ -190,7 +190,7 @@ sudo apt install libv4l-dev
 ```
 - 在上位机运行：
    ```bash
-   cd <kuavo_ros_application>/
+   cd ~/kuavo_ros_application/
    source devel/setup.bash
   # 打开摄像头
   # 旧版4代, 4Pro

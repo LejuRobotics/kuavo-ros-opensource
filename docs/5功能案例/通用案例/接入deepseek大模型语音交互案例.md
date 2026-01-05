@@ -4,7 +4,7 @@
 
   - 接入deepseek大模型，实现了一个语音交互系统，包括录音、语音转写、对话生成和语音播放功能。
   
-  - 示例代码路径:`<kuavo_ros_application>/src/kuavo_large_model/kuavo_deepseek_model/rtasr_python3_demo.py`
+  - 示例代码路径:`~/kuavo_ros_application/src/kuavo_large_model/kuavo_deepseek_model/rtasr_python3_demo.py`
 
 ## 程序逻辑
 
@@ -74,7 +74,7 @@
 
 1. 运行一键部署脚本
 ```bash
-cd <kuavo_ros_application>/src/ros_audio/kuavo_audio_player/scripts
+cd ~/kuavo_ros_application/src/ros_audio/kuavo_audio_player/scripts
 chmod +x deploy_autostart_h12pro.sh
 ./deploy_autostart_h12pro.sh
 ```
@@ -96,17 +96,17 @@ python3 -m pip install numpy==1.22.2 requests==2.31.0
    - 该案例所使用的语音，文字转换模型为讯飞的模型： https://www.xfyun.cn/
       - 讯飞实时语音转写（RTASR）模型 
         - 访问讯飞平台,选择语音识别-实时语音转写:https://console.xfyun.cn/services/rta，获取app_id和api_key
-        - 将程序`<kuavo_ros_application>/src/kuavo_large_model/kuavo_deepseek_model/rtasr_python3_demo.py`第298，299行的app_id和api_key替换成获取到的即可
+        - 将程序`~/kuavo_ros_application/src/kuavo_large_model/kuavo_deepseek_model/rtasr_python3_demo.py`第298，299行的app_id和api_key替换成获取到的即可
       
       - 讯飞语音合成（TTS）模型
         - 访问讯飞平台,选择语音合成-在线语音合成:https://console.xfyun.cn/services/tts，获取APPID，APISecret，APIKey
-        - 将程序`<kuavo_ros_application>/src/kuavo_large_model/kuavo_deepseek_model/tts_ws_python3_demo.py`第139，140行的APPID，APISecret，APIKey替换成获取到的即可
+        - 将程序`~/kuavo_ros_application/src/kuavo_large_model/kuavo_deepseek_model/tts_ws_python3_demo.py`第139，140行的APPID，APISecret，APIKey替换成获取到的即可
 
    - 该案例所使用的对话大模型为深度求索(deepseek)推出的deepseek-chat： https://www.deepseek.com/
      - 获取DeepSeek API Key：
        - https://platform.deepseek.com/usage
        - 充值，获取API Key    
-       - 将程序`<kuavo_ros_application>/src/kuavo_large_model/kuavo_deepseek_model/rtasr_python3_demo.py`第177行的api-key替换成获取到的即可
+       - 将程序`~/kuavo_ros_application/src/kuavo_large_model/kuavo_deepseek_model/rtasr_python3_demo.py`第177行的api-key替换成获取到的即可
 
 ## 执行
   ⚠️ **注意: 请保证上下位机ROS主从通信正常工作**

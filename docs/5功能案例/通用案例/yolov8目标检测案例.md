@@ -22,10 +22,10 @@
 
 ## 功能包与代码结构
 - 功能包：`yolo_box_object_detection` 用于箱子识别的 YOLO ROS 功能包
-  - 功能包路径：`<kuavo_ros_application>/src/ros_vision/detection_industrial_yolo/yolo_box_object_detection`
+  - 功能包路径：`~/kuavo_ros_application/src/ros_vision/detection_industrial_yolo/yolo_box_object_detection`
 
 - 示例代码
-  - 路径：`<kuavo-ros-opensource>/src/demo/examples_code/yolo_detect/yolo_detect_info.py`
+  - 路径：`/home/lab/kuavo-ros-opensource/src/demo/examples_code/yolo_detect/yolo_detect_info.py`
   - `yolo_detect_info.py`: 获取一次 `/object_yolo_box_tf2_torso_result` 检测结果基于机器人基座标系的位姿
 
 ## 📦 箱子识别
@@ -50,10 +50,10 @@ roslaunch dynamic_biped load_robot_head.launch use_orbbec:=true enable_wrist_cam
 ## 📁 模型路径及说明
 
 - 📂 路径：
-  - `<kuavo_ros_application>/src/ros_vision/detection_industrial_yolo/yolo_box_object_detection`
+  - `~/kuavo_ros_application/src/ros_vision/detection_industrial_yolo/yolo_box_object_detection`
 - 📄 模型格式：`.pt`
 - 🗂️ 模型路径：
-  - `<kuavo_ros_application>/src/ros_vision/detection_industrial_yolo/yolo_box_object_detection/scripts/models/`
+  - `~/kuavo_ros_application/src/ros_vision/detection_industrial_yolo/yolo_box_object_detection/scripts/models/`
 
 **打开检测程序**
 ```bash
