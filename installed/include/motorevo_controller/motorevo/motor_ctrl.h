@@ -185,6 +185,12 @@ public:
      */
     void setZeroTorqueMode(bool enable);
 
+    /** @brief 设置电机回零时的目标初始位置
+     *  @param target_positions 电机ID到目标位置的映射表(rad)，如果某个电机ID不在映射表中，则默认回零到0
+     *  @note 此函数用于设置moveToZero()函数中每个电机的目标位置，允许外部根据业务需求设置不同的初始位置
+     */
+    void setInitialTargetPositions(const std::map<MotorId, float>& target_positions);
+
     /** @brief 多圈编码器清零
      *  @param id 电机ID
      *  @param timeout_ms 等待超时时间(毫秒)，默认100ms
@@ -371,6 +377,8 @@ private:
 
     std::string canbus_name_;  // CAN总线名称
     std::map<MotorId, MotorCtrlData> motor_ctrl_datas_;
+    std::map<MotorId, float> initial_target_positions_;  // 电机回零时的目标初始位置(rad)，如果某个电机ID不在map中，则默认回零到0
+    mutable std::mutex initial_target_positions_mutex_;  // 保护initial_target_positions_的互斥锁
 
 };
 

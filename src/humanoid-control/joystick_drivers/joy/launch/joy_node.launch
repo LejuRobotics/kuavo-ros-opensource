@@ -12,6 +12,6 @@
         <param name="deadzone" type="double" value="0.18"/>
     </node>
 
-    <node pkg="joy" type="joy_customize_config.py" name="joy_customize_config" output="screen" />
+    <node pkg="joy" type="joy_customize_config.py" name="joy_customize_config" output="screen" respawn="$(arg respawn)" />
 
 </launch>

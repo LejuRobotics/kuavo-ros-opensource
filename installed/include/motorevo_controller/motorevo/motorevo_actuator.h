@@ -151,6 +151,14 @@ public:
      */
     bool disableAll();
 
+    /**
+     * @brief 设置电机回零时的目标初始位置
+     * @param target_positions 电机ID到目标位置的映射表(rad)，如果某个电机ID不在映射表中，则默认回零到0
+     * @note 此函数用于设置moveToZero()函数中每个电机的目标位置，允许外部根据业务需求设置不同的初始位置
+     * @note 可以在init()之前或之后调用。如果在init()之前调用，会在init()内部自动应用；如果在init()之后调用，会立即应用
+     */
+    void setInitialTargetPositions(const std::map<MotorId, float>& target_positions);
+
 private:
     struct MotorControlRef;
     /**
@@ -162,6 +170,12 @@ private:
      * @brief 构建索引与电机ID的映射关系
      */
     void buildIndexMappings(const std::vector<MotorControlRef>& motor_refs);
+
+    /**
+     * @brief 将目标位置应用到所有已初始化的CAN总线组（私有辅助函数）
+     * @param target_positions 目标位置映射表
+     */
+    void applyInitialTargetPositionsToAllGroups(const std::map<MotorId, float>& target_positions);
 
     // 控制线程管理
     bool startControlThread();
@@ -176,6 +190,8 @@ private:
     
     std::string config_file_;                 // 配置文件路径
     bool cali_;                               // 是否需要校准零点   
+    std::map<MotorId, float> pending_initial_target_positions_;  // 待设置的目标初始位置（在init()之前设置）
+    mutable std::mutex pending_target_positions_mutex_;  // 保护pending_initial_target_positions_的互斥锁
 
     // 多CAN总线管理
     struct CanBusGroup {

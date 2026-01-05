@@ -7,8 +7,12 @@
 #include <fstream>
 #include <ros/this_node.h>
 #include <cstdlib>
+#include <filesystem>
+#include <boost/filesystem.hpp>
+#include <sstream>
 
 #include "humanoid_controllers/humanoidController.h"
+#include "humanoid_controllers/rl/armController.h"
 #if defined(USE_DDS) || defined(USE_LEJU_DDS)
 #include "humanoid_controllers/CommonDDS.h"
 #endif
@@ -68,6 +72,35 @@ namespace humanoid_controller
   using Duration = std::chrono::duration<double>;
   using Clock = std::chrono::high_resolution_clock;
   std::mutex head_mtx;
+
+  
+  bool humanoidController::setFallDownStateCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res)
+  {
+    // 使用标准库 std_srvs/SetBool，将 bool 请求映射为内部的倒地状态枚举
+    if (req.data)
+    {
+      fall_down_state_ = FallStandState::FALL_DOWN;
+      res.message = "fall_down_state_ set to FALL_DOWN (1)";
+      // 检查控制器列表是否存在倒地起身控制器，自动切换过去
+      if (controller_manager_ && has_fall_stand_controller_)
+      {
+        std::cout << "[humanoid Controller]fall down detected, switch to fall down controller" << std::endl;
+        controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
+      }else
+      {
+        ROS_ERROR_STREAM("[humanoid Controller] No Fall Stand Controller");
+      }
+    }
+    else
+    {
+      fall_down_state_ = FallStandState::STANDING;
+      res.message = "fall_down_state_ set to STANDING (0)";
+    }
+
+    ROS_INFO("[HumanoidController] fall_down_state_ set to %d", fall_down_state_);
+    res.success = true;
+    return true;
+  }
 
   // 辅助函数：获取完整节点名
   static std::string fullyQualifiedNodeName(const std::string &name)
@@ -262,6 +295,20 @@ namespace humanoid_controller
     armNumReal_ = motor_info.num_arm_joints;
     jointNumReal_ = motor_info.num_joints - headNum_ - armNumReal_ - waistNum_;
     is_roban_ = (motor_info.robot_module == "ROBAN2") ? true: false;
+
+    if(is_roban_)
+    {
+      if (ros::param::has("/pull_up_force_threshold_roban"))
+      {
+        ros::param::get("/pull_up_force_threshold_roban", pull_up_force_threshold_);
+        std::cout << "pull_up_force_threshold_roban: " << pull_up_force_threshold_ << std::endl;
+      }
+      else
+      {
+        ROS_WARN_STREAM("Param '/pull_up_force_threshold_roban' not found, Using default value");
+      }
+    }
+
     std::string imu_type_str = motor_info.getIMUType(rb_version);
     if (imu_type_str == "xsens")
     {
@@ -314,6 +361,8 @@ namespace humanoid_controller
     {
       // waistNum_ = 0; // 仿真环境下, mujoco默认未设置 /real 变量
     }
+    ros::param::set("/is_real", is_real_);
+    ros::param::set("/is_roban", is_roban_);
     if (controllerNh_.hasParam("wbc_only"))
     {
       controllerNh_.getParam("/wbc_only", wbc_only_);
@@ -323,17 +372,7 @@ namespace humanoid_controller
       controllerNh_.getParam("/play_back", is_play_back_mode_);
 
     }
-    if (controllerNh_.hasParam("channel_map_path"))
-    {
-      std::string channel_map_path;
-      controllerNh_.getParam("channel_map_path", channel_map_path);
-      ROS_INFO_STREAM("Loading joystick mapping from " << channel_map_path);
-      loadJoyJsonConfig(channel_map_path);
-    }
-    else
-    {
-      ROS_WARN_STREAM("No channel_map_path parameter found, using default joystick mapping.");
-    }
+    
     if (controllerNh_.hasParam("joystick_sensitivity"))
     {
       controllerNh_.getParam("joystick_sensitivity", joystickSensitivity);
@@ -387,6 +426,26 @@ namespace humanoid_controller
       controllerNh_.getParam("/stand_up_protect", stand_up_protect_);
       std::cout << "get stand up protect param: " << stand_up_protect_ << std::endl;
     }
+    if (controllerNh_.hasParam("/init_fall_down_state"))
+    {
+      controllerNh_.getParam("/init_fall_down_state", init_fall_down_state_);
+      if (init_fall_down_state_)
+      {
+        fall_down_state_==FallStandState::FALL_DOWN;
+      }
+    }
+
+    // 检测is_rl_start参数，如果为true则绕过MPC控制器
+    if (controllerNh_.hasParam("/is_rl_start"))
+    {
+      controllerNh_.getParam("/is_rl_start", is_rl_start_);
+      if (is_rl_start_)
+      {
+        ROS_INFO("[HumanoidController] is_rl_start=true, will bypass MPC control loop and start directly with first RL controller");
+      }
+    }
+
+    
     // trajectory_publisher_ = new TrajectoryPublisher(controller_nh, 0.001);
 
     wheel_arm_robot_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
@@ -405,6 +464,8 @@ namespace humanoid_controller
 #endif
     setupHumanoidInterface(taskFile, urdfFile, referenceFile, gaitCommandFile, verbose, rb_version);
     ros::NodeHandle nh;
+    
+    // MPC需要初始化，但is_rl_start=true时在控制循环中不进入MPC流程
     setupMpc();
     setupMrt();
     // Visualization
@@ -453,42 +514,44 @@ namespace humanoid_controller
     waist_kd_.resize(waistNum_);
 
     jointArmNum_ = info.actuatedDofNum - jointNum_ - waistNum_;
-    jointTorqueCmdRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    jointTorqueCmdRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
     jointTorqueCmdRL_.setZero();
-    initialStateRL_.resize(12 + jointNumReal_ + waistNum_ + armNumReal_);
-    defalutJointPosRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    initialStateRL_.resize(12 + jointNumReal_ + armNumReal_ + waistNum_);
+    currentDefalutJointPosRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
     defalutArmPosMPC_.resize(armNumReal_);
-    JointControlModeRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    JointControlModeRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
     JointControlModeRL_.setZero();
-    JointPDModeRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    JointPDModeRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
     JointPDModeRL_.setZero();
-    jointKpRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
-    jointKdRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
-    torqueLimitsRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
-    actionScaleTestRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
-    jointCmdFilterStateRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    jointKpRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
+    jointKdRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
+    torqueLimitsRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
+    actionScaleTestRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
+    jointCmdFilterStateRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
     sensor_data_headRL_.resize_joint(headNum_);
     head_kpRL_.resize(headNum_);
     head_kdRL_.resize(headNum_);
-    output_tauRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
+    output_tauRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
     output_tauRL_.setZero();
-    jointPosRL_ = vector_t::Zero(jointNumReal_ + waistNum_ + armNumReal_);
-    jointVelRL_ = vector_t::Zero(jointNumReal_ + waistNum_ + armNumReal_);
-    jointAccRL_ = vector_t::Zero(jointNumReal_ + waistNum_ + armNumReal_);
+    jointPosRL_ = vector_t::Zero(jointNumReal_ + armNumReal_ + waistNum_);
+    jointVelRL_ = vector_t::Zero(jointNumReal_ + armNumReal_ + waistNum_);
+    jointAccRL_ = vector_t::Zero(jointNumReal_ + armNumReal_ + waistNum_);
+    default_state_.resize(12+actuatedDofNumReal_);
+    default_state_.setZero();
     
     // 检查RL参数文件是否存在，只有文件存在时才启用RL功能
-    std::ifstream rlParamFileCheck(rlParamFile);
-    if (rlParamFileCheck.good()) {
-      std::cout << "RL parameter file found: " << rlParamFile << ", enabling RL controller." << std::endl;
-      rl_available_ = true;
-      loadRLSettings(rlParamFile, verbose, dt_);
-      // 初始化RL步态接收器
-      rl_gait_receiver_ = std::make_unique<RlGaitReceiver>(controllerNh_, &initialCommandDataRL_);
-    } else {
-      std::cout << "RL parameter file not found: " << rlParamFile << ", RL controller disabled." << std::endl;
-      rl_available_ = false;
-    }
-    rlParamFileCheck.close();
+    // std::ifstream rlParamFileCheck(rlParamFile);
+    // if (rlParamFileCheck.good()) {
+    //   std::cout << "RL parameter file found: " << rlParamFile << ", enabling RL controller." << std::endl;
+    //   rl_available_ = true;
+    //   loadRLSettings(rlParamFile, verbose, dt_);
+    //   // 初始化RL步态接收器
+    //   rl_gait_receiver_ = std::make_unique<RlGaitReceiver>(controllerNh_, &initialCommandDataRL_);
+    // } else {
+    //   std::cout << "RL parameter file not found: " << rlParamFile << ", RL controller disabled." << std::endl;
+    //   rl_available_ = false;
+    // }
+    // rlParamFileCheck.close();
 
     joint_control_modes_ = Eigen::VectorXd::Constant(actuatedDofNumReal_, 2);
     output_tau_ = vector_t::Zero(actuatedDofNumReal_);
@@ -519,20 +582,26 @@ namespace humanoid_controller
     auto robot_config = drake_interface_->getRobotConfig();
     AnkleSolverType ankleSolverType = static_cast<AnkleSolverType>(robot_config->getValue<int>("ankle_solver_type"));
     ankleSolver.getconfig(ankleSolverType);
-    ros::param::set("robot_init_state_param", robot_init_state_param);
+    // 同步脚踝解算类型到 ROS 参数，供倒地起身等 RL 控制器使用
+    ros::param::set("/ankle_solver_type", static_cast<int>(ankleSolverType));
+    if (!init_fall_down_state_) // 初始倒地时不在这里设置初始状态
+    {
+      ros::param::set("robot_init_state_param", robot_init_state_param);
+    }
   
     ros::param::set("/humanoid/init_q", robot_init_state_param);
 
-    auto initial_state_ =  drake_interface_->getInitialState();
+    auto initial_state_ =  drake_interface_->getInitialState();// 里面不包含手臂和腰部
     auto squat_initial_state_ =  drake_interface_->getSquatInitialState();
-    default_state_ = initial_state_;
+    default_state_.head(12+12) = initial_state_.head(12+12);
     std::cout << "controller initial_state_:" << initial_state_.transpose() << std::endl;
     std::cout << "controller squat_initial_state_:" << squat_initial_state_.transpose() << std::endl;
     std::vector<double> initial_state_vector(initial_state_.data(), initial_state_.data() + initial_state_.size());
     std::vector<double> squat_initial_state_vector(squat_initial_state_.data(), squat_initial_state_.data() + squat_initial_state_.size());
     std::vector<double> default_joint_pos_vector(defalutJointPos_.data(), defalutJointPos_.data() + defalutJointPos_.size());
     controllerNh_.setParam("/initial_state", initial_state_vector);
-    controllerNh_.setParam("/squat_initial_state", squat_initial_state_vector);
+    if (!init_fall_down_state_) // 初始倒地时不在这里设置实物初始状态
+      controllerNh_.setParam("/squat_initial_state", squat_initial_state_vector);
     controllerNh_.setParam("/default_joint_pos", default_joint_pos_vector);
 
     joint_state_limit_.resize(actuatedDofNumReal_, 2);
@@ -768,12 +837,138 @@ namespace humanoid_controller
       rHandWrenchPub_ = controllerNh_.advertise<geometry_msgs::WrenchStamped>("/hand_wrench/right_hand", 10);
       currentGaitNameSrv_ = controllerNh_.advertiseService(robotName_ + "_get_current_gait_name", 
         &humanoidController::getCurrentGaitNameCallback, this);
-      switchControllerSrv_ = controllerNh_.advertiseService("/humanoid_controller/switch_controller", 
-        &humanoidController::switchControllerCallback, this);
-      getControllerListSrv_ = controllerNh_.advertiseService("/humanoid_controller/get_controller_list", 
-        &humanoidController::getControllerListCallback, this);
-      switchToNextControllerSrv_ = controllerNh_.advertiseService("/humanoid_controller/switch_to_next_controller", 
-        &humanoidController::switchToNextControllerCallback, this);
+      setFallDownStateSrv_ = controllerNh_.advertiseService("/humanoid_controller/set_fall_down_state",
+        &humanoidController::setFallDownStateCallback, this);
+
+        // 初始化 RL 控制器管理系统
+      controller_manager_ = std::make_unique<RLControllerManager>();
+      
+      // 初始化 ROS 服务（由 RLControllerManager 管理）
+      controller_manager_->initializeRosServices(controllerNh_);
+      
+      // 只有在 RL 可用时才初始化控制器（需要配置文件）
+      {
+        // 从 rlParamFile 路径推断版本配置目录
+        boost::filesystem::path rl_param_path(rlParamFile);
+        boost::filesystem::path version_config_dir = rl_param_path.parent_path().parent_path();
+        std::string controller_list_config = version_config_dir.string() + "/rl_controllers.yaml";
+        
+        // 尝试从配置文件加载控制器列表
+        if (boost::filesystem::exists(controller_list_config))
+        {
+          ROS_INFO("[HumanoidController] Loading RL controllers from config file: %s", controller_list_config.c_str());
+          if (controller_manager_->loadControllersFromConfig(controller_list_config, version_config_dir.string(), 
+                                                           controllerNh_, ros_logger_))
+          {
+            // 从 RLControllerManager 获取 WALK_CONTROLLER 列表（包括 BASE）
+            available_controllers_ = controller_manager_->getWalkControllerList();
+            
+            // 如果is_rl_start为true，直接切换到第一个BASE RL控制器（跳过MPC控制循环）
+            if (is_rl_start_)
+            {
+              // 找到第一个非MPC且非倒地起身的控制器
+              std::string first_rl_controller = "";
+              for (const auto& name : available_controllers_)
+              {
+                if (name != "mpc" && 
+                    controller_manager_->getControllerTypeByName(name) != RLControllerType::FALL_STAND_CONTROLLER)
+                {
+                  first_rl_controller = name;
+                  break;
+                }
+              }
+              
+              if (!first_rl_controller.empty())
+              {
+                // 仅设置初始参数和目标名称，不立即调用 switchController
+                // 这样系统会保持在 Base 状态启动，从而允许 preUpdate 正常执行
+                current_controller_ = first_rl_controller;
+                current_controller_index_ = std::find(available_controllers_.begin(), available_controllers_.end(), first_rl_controller) - available_controllers_.begin();
+                
+                // 提前获取一次控制器指针以读取默认姿态，供 preUpdate 对齐使用
+                auto* target_ptr = controller_manager_->getControllerByName(first_rl_controller);
+                if (target_ptr)
+                {
+                  currentDefalutJointPosRL_ = target_ptr->getDefaultJointPos();
+                  defaultBaseHeightControl_ = target_ptr->getDefaultBaseHeightControl();
+                  desire_arm_q_ = currentDefalutJointPosRL_.segment(jointNumReal_ + waistNum_, armNumReal_);
+                  desire_arm_v_ = Eigen::VectorXd::Zero(armNumReal_);
+                }
+
+                // 重置并暂停MPC节点
+                if (mrtRosInterface_)
+                {
+                  SystemObservation init_obs = currentObservation_;
+                  init_obs.state = initial_status_;
+                  init_obs.input.setZero(HumanoidInterface_->getCentroidalModelInfo().inputDim);
+                  mrtRosInterface_->resetMpcNode(TargetTrajectories({init_obs.time}, {init_obs.state}, {init_obs.input}));
+                  mrtRosInterface_->pauseResumeMpcNode(true);
+                  ROS_INFO("[HumanoidController] MPC node reset and paused (is_rl_start=true, waiting for standup)");
+                }
+                
+                inference_running_ = true;
+              }
+              else
+              {
+                ROS_WARN("[HumanoidController] No BASE RL controller available, falling back to MPC");
+                is_rl_start_ = false;
+              }
+            }
+            
+            // 默认使用MPC（如果is_rl_start失败或未设置）
+            if (!is_rl_start_)
+            {
+              current_controller_ = "mpc";
+              current_controller_index_ = 0;
+            }
+            
+            ROS_INFO("[HumanoidController] Successfully loaded controllers from config, total %zu controllers", 
+                     available_controllers_.size());
+            
+            
+          }
+          else
+          {
+            ROS_WARN("[HumanoidController] Failed to load controllers from config file");
+            if (is_rl_start_)
+            {
+              ROS_WARN("[HumanoidController] is_rl_start=true but failed to load RL controllers, falling back to MPC");
+              is_rl_start_ = false;
+            }
+          }
+          has_fall_stand_controller_ = controller_manager_->hasController(RLControllerType::FALL_STAND_CONTROLLER);
+        }
+        else
+        {
+          // 配置文件不存在，回退到MPC
+          if (is_rl_start_)
+          {
+            ROS_WARN("[HumanoidController] is_rl_start=true but config file not found: %s, falling back to MPC", 
+                     controller_list_config.c_str());
+            is_rl_start_ = false;
+          }
+          // 确保MPC节点被重置（即使没有RL控制器，也需要正常初始化MPC）
+          if (mrtRosInterface_ && !is_rl_start_)
+          {
+            SystemObservation init_obs = currentObservation_;
+            init_obs.state = initial_status_;
+            init_obs.input.setZero(HumanoidInterface_->getCentroidalModelInfo().inputDim);
+            mrtRosInterface_->resetMpcNode(TargetTrajectories({init_obs.time}, {init_obs.state}, {init_obs.input}));
+            ROS_INFO("[HumanoidController] MPC node reset (no RL config file)");
+          }
+        }
+
+          // 如果 init_fall_down_state_=true，初始切换到倒地起身控制器（但is_rl_start优先级更高）
+        if (init_fall_down_state_ && !is_rl_start_)
+        {
+          if (has_fall_stand_controller_)
+          {
+            std::cout << "[humanoid Controller]init_fall_down_state_, switch to fall down controller" << std::endl;
+            controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
+          }
+        }
+      }
+      
       arm_control_mode_sub_ = controllerNh_.subscribe<std_msgs::Float64MultiArray>("/humanoid/mpc/arm_control_mode", 10,[&](const std_msgs::Float64MultiArray::ConstPtr &msg)
       {
         if(msg->data.size() == 0)
@@ -790,6 +985,51 @@ namespace humanoid_controller
         {
           mpcArmControlMode_desired_ = static_cast<ArmControlMode>(msg->data[1]);
           std::cout << "[controller] mpc arm control mode desired changed to: " << mpcArmControlMode_desired_ << std::endl;
+          
+          // 如果当前是 RL 控制器，设置 arm_controller_ 的模式
+          if (controller_manager_)
+          {
+            auto* current_controller = controller_manager_->getCurrentController();
+            if (current_controller)
+            {
+              auto* arm_controller = current_controller->getArmController();
+              if (arm_controller)
+              {
+                // 获取当前关节位置和速度（用于模式切换）
+                // 优先从 jointPosWBC_ 和 jointVelWBC_ 获取（这些数据在 update 中会更新）
+                Eigen::VectorXd joint_pos, joint_vel;
+                int total_joints = jointNumReal_ + waistNum_ + armNumReal_;
+                
+                // 尝试从 jointPosWBC_ 和 jointVelWBC_ 获取（如果已初始化）
+                if (jointPosWBC_.size() >= total_joints && jointVelWBC_.size() >= total_joints)
+                {
+                  joint_pos = jointPosWBC_.head(total_joints);
+                  joint_vel = jointVelWBC_.head(total_joints);
+                }
+                // 否则从 measuredRbdStateReal_ 获取
+                else if (measuredRbdStateReal_.size() >= total_joints * 2)
+                {
+                  joint_pos = measuredRbdStateReal_.head(total_joints);
+                  joint_vel = measuredRbdStateReal_.segment(total_joints, total_joints);
+                }
+                // 如果都没有，使用零向量（不推荐，但可以避免崩溃）
+                else
+                {
+                  joint_pos = Eigen::VectorXd::Zero(total_joints);
+                  joint_vel = Eigen::VectorXd::Zero(total_joints);
+                  ROS_WARN("[controller] Cannot get joint pos/vel, using zero vectors for mode change");
+                }
+                
+                // 转换 ArmControlMode 到 ArmController 模式
+                // ArmControlMode: KEEP=0, AUTO_SWING=1, EXTERN_CONTROL=2
+                // ArmController: 0=固定到当前动作, 1=自动摆手, 2=外部控制
+                int arm_controller_mode = static_cast<int>(mpcArmControlMode_desired_);
+                arm_controller->changeMode(arm_controller_mode);
+                ROS_INFO("[controller] Set arm_controller mode to %d (from mpcArmControlMode_desired_=%d)", 
+                         arm_controller_mode, static_cast<int>(mpcArmControlMode_desired_));
+              }
+            }
+          }
         }
       });
       
@@ -848,250 +1088,102 @@ namespace humanoid_controller
         exit(1);
       }
 
+    singleInputDataRL_.resize(numSingleObsRL_);
+    networkInputDataRL_.resize(numSingleObsRL_ * frameStackRL_);
+    commandPhaseRL_.resize(2);
+    actionsRL_.resize(jointNumReal_ + armNumReal_ + waistNum_);
+    singleInputDataRL_.setZero();
+    networkInputDataRL_.setZero();
+    actionsRL_.setZero();
+    humanoidState_.resize(6 + jointArmNum_); // base + arm, for kmpc
+    for (int i = 0; i < frameStackRL_; i++)
+    {
+      input_deque.push_back(singleInputDataRL_);
+    }
+    if (rl_available_)
+    {  
+      compiled_model_ =
+          core_.compile_model(networkModelPath_, "CPU"); // 创建编译模型
+      std::string package_path = ros::package::getPath("kuavo_assets");
+      std::string version_str = "biped_s" + rb_version.to_string();
+      std::string urdf_path = package_path + "/models/" + version_str + "/urdf/" + version_str + ".urdf";
+      // arm_torque_controller_.reset(new ArmTorqueController(urdf_path, jointKpRL_.segment(jointNumReal_, armNumReal_), jointKdRL_.segment(jointNumReal_, armNumReal_))); // 使用智能指针初始化，只传入手臂关节参数
+    }
     
-      singleInputDataRL_.resize(numSingleObsRL_);
-      networkInputDataRL_.resize(numSingleObsRL_ * frameStackRL_);
-      commandPhaseRL_.resize(2);
-      actionsRL_.resize(jointNumReal_ + waistNum_ + armNumReal_);
-      singleInputDataRL_.setZero();
-      networkInputDataRL_.setZero();
-      actionsRL_.setZero();
-      humanoidState_.resize(6 + jointArmNum_); // base + arm, for kmpc
-      for (int i = 0; i < frameStackRL_; i++)
-      {
-        input_deque.push_back(singleInputDataRL_);
-      }
-      if (rl_available_)
-      {  
-        compiled_model_ =
-            core_.compile_model(networkModelPath_, "CPU"); // 创建编译模型
-        std::string package_path = ros::package::getPath("kuavo_assets");
-        std::string version_str = "biped_s" + rb_version.to_string();
-        std::string urdf_path = package_path + "/models/" + version_str + "/urdf/" + version_str + ".urdf";
-        arm_torque_controller_.reset(new ArmTorqueController(urdf_path, jointKpRL_.segment(jointNumReal_ + waistNum_, armNumReal_), jointKdRL_.segment(jointNumReal_ + waistNum_, armNumReal_))); // 使用智能指针初始化，只传入手臂关节参数
-      }
+    desire_arm_q_ = currentDefalutJointPosRL_.segment(jointNumReal_ + waistNum_, armNumReal_);
+    desire_arm_v_ = Eigen::VectorXd::Zero(armNumReal_);
+
+    // 初始化原地踏步系统
+    in_place_step_velocity_.linear.x = 0.0;
+    in_place_step_velocity_.linear.y = 0.0;
+    in_place_step_velocity_.linear.z = 0.0;
+    in_place_step_velocity_.angular.x = 0.0;
+    in_place_step_velocity_.angular.y = 0.0;
+    in_place_step_velocity_.angular.z = 0.0;
+
+    // 从参数服务器读取原地踏步参数
+    if (controllerNh_.hasParam("in_place_step_duration"))
+    {
+      controllerNh_.getParam("in_place_step_duration", in_place_step_duration_);
+      ROS_INFO_STREAM("[InPlaceStepping] 原地踏步持续时间: " << in_place_step_duration_ << "秒");
+    }
       
-      desire_arm_q_ = defalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
-      desire_arm_v_ = Eigen::VectorXd::Zero(armNumReal_);
-      // 初始化手臂插值相关变量
-      initArmInterpolation();
-      // 初始化速度平滑系统
-      initializeVelocitySmoothing();
-  
-      // 初始化原地踏步系统
-      in_place_step_velocity_.linear.x = 0.0;
-      in_place_step_velocity_.linear.y = 0.0;
-      in_place_step_velocity_.linear.z = 0.0;
-      in_place_step_velocity_.angular.x = 0.0;
-      in_place_step_velocity_.angular.y = 0.0;
-      in_place_step_velocity_.angular.z = 0.0;
-  
-      // 从参数服务器读取原地踏步参数
-      if (controllerNh_.hasParam("in_place_step_duration"))
+    if (controllerNh_.hasParam("enable_in_place_stepping"))
+    {
+      controllerNh_.getParam("enable_in_place_stepping", enable_in_place_stepping_);
+      ROS_INFO_STREAM("[InPlaceStepping] 原地踏步功能: " << (enable_in_place_stepping_ ? "启用" : "禁用"));
+    }
+      
+    if (controllerNh_.hasParam("stance_transition_duration"))
+    {
+      controllerNh_.getParam("stance_transition_duration", stance_transition_duration_);
+      ROS_INFO_STREAM("[StanceTransition] 站立过渡持续时间: " << stance_transition_duration_ << "秒");
+    }
+
+
+    // 初始化LB解锁保护系统
+    lb_just_unlocked_ = false;
+    lb_unlock_time_ = ros::Time::now();
+    ROS_INFO_STREAM("[LBProtection] LB解锁保护时间: " << lb_unlock_protection_duration_ << "秒");
+
+    auto jointStateCallback = [this](const sensor_msgs::JointState::ConstPtr& msg)
+    {
+      if( is_rl_controller_ == true)
       {
-        controllerNh_.getParam("in_place_step_duration", in_place_step_duration_);
-        ROS_INFO_STREAM("[InPlaceStepping] 原地踏步持续时间: " << in_place_step_duration_ << "秒");
-      }
-        
-      if (controllerNh_.hasParam("enable_in_place_stepping"))
-      {
-        controllerNh_.getParam("enable_in_place_stepping", enable_in_place_stepping_);
-        ROS_INFO_STREAM("[InPlaceStepping] 原地踏步功能: " << (enable_in_place_stepping_ ? "启用" : "禁用"));
-      }
-        
-      if (controllerNh_.hasParam("stance_transition_duration"))
-      {
-        controllerNh_.getParam("stance_transition_duration", stance_transition_duration_);
-        ROS_INFO_STREAM("[StanceTransition] 站立过渡持续时间: " << stance_transition_duration_ << "秒");
-      }
-  
-  
-      // 初始化LB解锁保护系统
-      lb_just_unlocked_ = false;
-      lb_unlock_time_ = ros::Time::now();
-      ROS_INFO_STREAM("[LBProtection] LB解锁保护时间: " << lb_unlock_protection_duration_ << "秒");
-  
-      auto jointStateCallback = [this](const sensor_msgs::JointState::ConstPtr& msg)
-      {
-        if( is_rl_controller_ == true)
+        // std::cout << "jointStateCallback" << std::endl;
+        for (size_t i = 0; i < msg->name.size(); ++i)
         {
-          // std::cout << "jointStateCallback" << std::endl;
-          for (size_t i = 0; i < msg->name.size(); ++i)
-          {
-            // std::cout << "joint name: " << msg->name[i] << " joint position: " << msg->position[i] << std::endl;
-            desire_arm_q_(i) = msg->position[i] * M_PI / 180.0;
-            if(msg->velocity.size() == armNumReal_)
-              desire_arm_v_(i) = 0;
-              // desire_arm_v_(i) = msg->velocity[i] * M_PI / 180.0;
-          }
-        } 
-      };
-      joint_sub_ = controllerNh_.subscribe<sensor_msgs::JointState>("/kuavo_arm_traj", 10, jointStateCallback); // 初始化订阅者
-  
-      // 设置CPU内核隔离
-      if (is_real_)
-      {
-        if (!setupCpuIsolation())
-        {
-          // 提示用户配置CPU内核隔离
-          std::cerr << "\033[1;31m"
-                    << "==============================\n"
-                    << "  错误：未检测到 CPU 内核隔离！\n"
-                    << "  请先配置 CPU 内核隔离且配置内核隔离参数 isolated_cpus\n"
-                    << "  建议使用脚本 isolate_cores.sh 进行设置。\n"
-                    << "  示例：sudo bash ./tools/check_tool/isolate_cores.sh\n"
-                    << "=============================="
-                    << "\033[0m" << std::endl;
-          exit(1);
+          // std::cout << "joint name: " << msg->name[i] << " joint position: " << msg->position[i] << std::endl;
+          desire_arm_q_(i) = msg->position[i] * M_PI / 180.0;
+          if(msg->velocity.size() == armNumReal_)
+            desire_arm_v_(i) = 0;
+            // desire_arm_v_(i) = msg->velocity[i] * M_PI / 180.0;
         }
+      } 
+    };
+    joint_sub_ = controllerNh_.subscribe<sensor_msgs::JointState>("/kuavo_arm_traj", 10, jointStateCallback); // 初始化订阅者
+
+    // 设置CPU内核隔离
+    if (is_real_)
+    {
+      if (!setupCpuIsolation())
+      {
+        // 提示用户配置CPU内核隔离
+        std::cerr << "\033[1;31m"
+                  << "==============================\n"
+                  << "  错误：未检测到 CPU 内核隔离！\n"
+                  << "  请先配置 CPU 内核隔离且配置内核隔离参数 isolated_cpus\n"
+                  << "  建议使用脚本 isolate_cores.sh 进行设置。\n"
+                  << "  示例：sudo bash ./tools/check_tool/isolate_cores.sh\n"
+                  << "=============================="
+                  << "\033[0m" << std::endl;
+        exit(1);
       }
-    
+    }
     return true;
   }
 
-  void humanoidController::loadRLSettings(const std::string &rlParamFile, bool verbose, double dt)
-  {
-    bool enable_ = false;
-    double index_ = 0, startIdx_ = 0, mumIdx_ = 0, obsScale_ = 0;
-    int num_ = 0;
-    std::string networkModelFile_;
-    Eigen::Vector3d accFilterCutoffFreqRL_, freeAccFilterCutoffFreqRL_, gyroFilterCutoffFreqRL_;
-    Eigen::VectorXd defaultBaseStateRL_(12), jointCmdFilterCutoffFreqRL_(jointNumReal_ + armNumReal_ + waistNum_);
-    CommandDataRL commandDataRL_;
-    boost::property_tree::ptree pt;
-    boost::property_tree::read_info(rlParamFile, pt);
-    // 使用新的 helper 函数来简化数据加载
-    auto loadEigenMatrix = [&](const std::string &key, auto &matrix)
-    {
-      loadData::loadEigenMatrix(rlParamFile, key, matrix);
-    };
-    loadEigenMatrix("defaultJointState", defalutJointPosRL_);
-    loadEigenMatrix("defaultBaseState", defaultBaseStateRL_);
-    loadEigenMatrix("JointControlMode", JointControlModeRL_);
-    loadEigenMatrix("JointPDMode", JointPDModeRL_);
-    loadEigenMatrix("jointKp", jointKpRL_);
-    loadEigenMatrix("jointKd", jointKdRL_);
-    loadEigenMatrix("torqueLimits", torqueLimitsRL_);
-    loadEigenMatrix("actionScaleTest", actionScaleTestRL_);
-    loadEigenMatrix("accFilterCutoffFreq", accFilterCutoffFreqRL_);
-    loadEigenMatrix("freeAccFilterCutoffFreq", freeAccFilterCutoffFreqRL_);
-    loadEigenMatrix("gyroFilterCutoffFreq", gyroFilterCutoffFreqRL_);
-    loadEigenMatrix("jointCmdFilterCutoffFreq", jointCmdFilterCutoffFreqRL_);
-    loadEigenMatrix("jointCmdFilterState", jointCmdFilterStateRL_);
-    loadEigenMatrix("accFilterState", accFilterStateRL_);
-    loadEigenMatrix("freeAccFilterState", freeAccFilterStateRL_);
-    loadEigenMatrix("gyroFilterState", gyroFilterStateRL_);
-    loadEigenMatrix("velocityLimits", velocityLimitsRL_);
-    ros::param::set("/humanoid_controller/velocityLimits", std::vector<double>(velocityLimitsRL_.data(), velocityLimitsRL_.data() + velocityLimitsRL_.size()));
-    // loadEigenMatrix("initalCommand", initalCommand_);
-    // loadEigenMatrix("commandScale", commandScale_);
-    loadData::loadCppDataType(rlParamFile, "actionScale", actionScaleRL_);
-    loadData::loadCppDataType(rlParamFile, "frameStack", frameStackRL_);
-    loadData::loadCppDataType(rlParamFile, "numSingleObs", numSingleObsRL_);
-    loadData::loadCppDataType(rlParamFile, "cycleTime", cycleTimeRL_);
-    loadData::loadCppDataType(rlParamFile, "cycleTime_short", cycleTime_shortRL_);  
-    loadData::loadCppDataType(rlParamFile, "switch_ratio", switch_ratioRL_); 
-    loadData::loadCppDataType(rlParamFile, "phase", phaseRL_);
-    loadData::loadCppDataType(rlParamFile, "episodeLength", episodeLengthRL_);
-    loadData::loadCppDataType(rlParamFile, "clipObservations", clipObservationsRL_);
-    loadData::loadCppDataType(rlParamFile, "clipActions", clipActionsRL_);
-    loadData::loadCppDataType(rlParamFile, "withArm", withArmRL_);
-    loadData::loadCppDataType(rlParamFile, "inferenceFrequency", inferenceFrequencyRL_);
-    loadData::loadCppDataType(rlParamFile, "networkModelFile", networkModelFile_);
-    loadData::loadCppDataType(rlParamFile, "defaultBaseHeightControl", defaultBaseHeightControl_);
-    std::cout << "defaultBaseHeightControl: " << defaultBaseHeightControl_ << std::endl;
-    // 加载手臂插值配置
-    if (pt.find("armInterpolationDuration") != pt.not_found()) {
-      loadData::loadCppDataType(rlParamFile, "armInterpolationDuration", interpolation_duration_);
-    } else {
-      interpolation_duration_ = 1.0; // 默认2秒，更平滑
-    }
-    // loadData::loadCppDataType(rlParamFile, "ankleSolverType", ankleSolverType_);
 
-    // ankleSolver.getconfig(ankleSolverType_);
-    initialStateRL_ << defaultBaseStateRL_, defalutJointPosRL_;
-    networkModelPath_ = networkModelPath_ + networkModelFile_;
-    accFilterRL_.setParams(dt, accFilterCutoffFreqRL_);
-    freeAccFilterRL_.setParams(dt, freeAccFilterCutoffFreqRL_);
-    gyroFilterRL_.setParams(dt, gyroFilterCutoffFreqRL_);
-    jointCmdFilterRL_.setParams(dt, jointCmdFilterCutoffFreqRL_);
-
-    // 加载命令数据
-    const std::string prefixCommandData_ = "commandData";
-    const std::vector<std::pair<std::string, double CommandDataRL::*>> cmdInitalList = {
-        {"cmdVelLineX", &CommandDataRL::cmdVelLineX_},
-        {"cmdVelLineY", &CommandDataRL::cmdVelLineY_},
-        {"cmdVelLineZ", &CommandDataRL::cmdVelLineZ_},
-        {"cmdVelAngularX", &CommandDataRL::cmdVelAngularX_},
-        {"cmdVelAngularY", &CommandDataRL::cmdVelAngularY_},
-        {"cmdVelAngularZ", &CommandDataRL::cmdVelAngularZ_},
-        {"cmdStance", &CommandDataRL::cmdStance_},
-    };
-    const std::vector<std::pair<std::string, double CommandDataRL::*>> cmdScaleList = {
-        {"cmdVelLineX", &CommandDataRL::cmdVelScaleLineX_},
-        {"cmdVelLineY", &CommandDataRL::cmdVelScaleLineY_},
-        {"cmdVelLineZ", &CommandDataRL::cmdVelScaleLineZ_},
-        {"cmdVelAngularX", &CommandDataRL::cmdVelScaleAngularX_},
-        {"cmdVelAngularY", &CommandDataRL::cmdVelScaleAngularY_},
-        {"cmdVelAngularZ", &CommandDataRL::cmdVelScaleAngularZ_},
-        {"cmdStance", &CommandDataRL::cmdScaleStance_}};
-    for (const auto &[cmdName, cmdMember] : cmdInitalList)
-    {
-      loadData::loadPtreeValue(pt, commandDataRL_.*cmdMember, prefixCommandData_ + ".inital." + cmdName, verbose);
-    }
-    for (const auto &[cmdName, cmdMember] : cmdScaleList)
-    {
-      loadData::loadPtreeValue(pt, commandDataRL_.*cmdMember, prefixCommandData_ + ".scale." + cmdName, verbose);
-    }
-    initialCommandDataRL_ = commandDataRL_;
-    setCommandDataRL(initialCommandDataRL_);
-    // 加载单输入数据
-    const std::string prefixSingleInputData_ = "singleInputData";
-    if (verbose)
-    {
-      std::cerr << "\n #### singleInputData:";
-      std::cerr << "\n #### =============================================================================\n";
-    }
-    for (const auto &pair : pt)
-    {
-      if (pair.first == prefixSingleInputData_)
-      {
-        for (const auto &pair2 : pair.second)
-        {
-          singleInputDataRLKeys.push_back(pair2.first);
-          loadData::loadPtreeValue(pt, startIdx_, prefixSingleInputData_ + "." + pair2.first + ".startIdx", verbose);
-          loadData::loadPtreeValue(pt, mumIdx_, prefixSingleInputData_ + "." + pair2.first + ".numIdx", verbose);
-          loadData::loadPtreeValue(pt, obsScale_, prefixSingleInputData_ + "." + pair2.first + ".obsScales", verbose);
-          num_ += mumIdx_;
-          singleInputDataRLID_[pair2.first] = {startIdx_, mumIdx_, obsScale_};
-        }
-      }
-    }
-    if (num_ != numSingleObsRL_)
-    {
-      std::cerr << "Error: singleInputData number is not equal to 'numSingleObsRL_'" << std::endl;
-      std::cerr << "Single Obs Number: " << num_ << std::endl;
-      std::cerr << "'numSingleObsRL_' Number: " << numSingleObsRL_ << std::endl;
-      exit(1);
-    }
-    
-    // Add RL model to controller list
-    if (!networkModelFile_.empty()) {
-      std::string rl_controller_name = "rl_" + networkModelFile_;
-      // Check if already exists to avoid duplicates
-      bool exists = false;
-      for (const auto& controller : available_controllers_) {
-        if (controller == rl_controller_name) {
-          exists = true;
-          break;
-        }
-      }
-      if (!exists) {
-        available_controllers_.push_back(rl_controller_name);
-        ROS_INFO("Added RL controller to list: %s", rl_controller_name.c_str());
-      }
-    }
-  }
   void humanoidController::headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg)
   {
       if (msg->joint_data.size() ==2)
@@ -1200,7 +1292,7 @@ namespace humanoid_controller
 
     // std::cout << "sensor_data.jointPos_.size()" << sensor_data.jointPos_.size() << std::endl;
     // std::cout << "jointNumReal_+armNumReal_ + headNum_" << jointNumReal_+armNumReal_ + headNum_ << std::endl;
-    if (headNum_ > 0 && sensor_data.jointPos_.size() == jointNumReal_+armNumReal_ + headNum_)
+    if (headNum_ > 0 && sensor_data.jointPos_.size() == jointNumReal_+armNumReal_ + waistNum_ + headNum_)
     {
       int head_start_index  =sensor_data.jointPos_.size() - headNum_;
       for (size_t i = 0; i < headNum_; ++i)
@@ -1225,10 +1317,10 @@ namespace humanoid_controller
   {
     SensorData sensor_data;
     sensor_msgs::Imu imu_msg;
-    sensor_data.resize_joint(jointNumReal_+armNumReal_+headNum_);
+    sensor_data.resize_joint(jointNumReal_+armNumReal_ + waistNum_+headNum_);
 
     // JOINT DATA - extract from leju::msgs::SensorsData
-    size_t joint_count = std::min(static_cast<size_t>(jointNumReal_+armNumReal_+headNum_),
+    size_t joint_count = std::min(static_cast<size_t>(jointNumReal_+armNumReal_ + waistNum_+headNum_),
                                   static_cast<size_t>(data.joint_data().joint_q().size()));
 
     for (size_t i = 0; i < joint_count; ++i)
@@ -1266,7 +1358,7 @@ namespace humanoid_controller
     sensors_data_buffer_ptr_->addData(sensor_data.timeStamp_.toSec(), sensor_data);
 
     // Handle head joint data if available
-    if (headNum_ > 0 && sensor_data.jointPos_.size() == jointNumReal_+armNumReal_ + headNum_)
+    if (headNum_ > 0 && sensor_data.jointPos_.size() == jointNumReal_+armNumReal_ + waistNum_ + headNum_)
     {
       int head_start_index = sensor_data.jointPos_.size() - headNum_;
       for (size_t i = 0; i < headNum_; ++i)
@@ -1292,9 +1384,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     auto &joint_data = msg->joint_data;
     auto &end_effector_data = msg->end_effector_data; // TODO: add end_effector_data to the observation
     SensorData sensor_data;
+    SensorData sensor_data_rl;
 
     sensor_msgs::Imu imu_msg;
     sensor_data.resize_joint(jointNumReal_+armNumReal_ + waistNum_);
+    sensor_data_rl.resize_joint(jointNumReal_+armNumReal_ + waistNum_);
     
     // JOINT DATA
    for(size_t i=0;i<jointNumReal_+waistNum_+armNumReal_;i++)
@@ -1303,6 +1397,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       sensor_data.jointVel_(i) = joint_data.joint_v[i];
       sensor_data.jointAcc_(i) = joint_data.joint_vd[i];
       sensor_data.jointTorque_(i) = joint_data.joint_torque[i];
+      sensor_data_rl.jointPos_(i) = joint_data.joint_q[i];
+      sensor_data_rl.jointVel_(i) = joint_data.joint_v[i];
+      sensor_data_rl.jointAcc_(i) = joint_data.joint_vd[i];
+      sensor_data_rl.jointTorque_(i) = joint_data.joint_torque[i];
     }
     // for (size_t i = 0; i < waistNum_; ++i)    //避开腰部自由度数据的输入
     // {
@@ -1336,6 +1434,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     }
     ros::Time ros_time = msg->header.stamp;
     sensor_data.timeStamp_ = msg->sensor_time;
+    sensor_data_rl.timeStamp_ = msg->sensor_time;
     double sensor_time_diff = (ros::Time::now() - ros_time).toSec() * 1000;
     ros_logger_->publishValue("/monitor/time_cost/sensor_to_controller", sensor_time_diff);
 
@@ -1354,11 +1453,14 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // 加速度转换
       Eigen::Vector3d base_imu_acc(imu_data.acc.x, imu_data.acc.y, imu_data.acc.z);
       Eigen::Vector3d waist_base_acc = waist_base_quat.conjugate() * base_imu_acc;
+      Eigen::Vector3d base_imu_free_acc(imu_data.free_acc.x, imu_data.free_acc.y, imu_data.free_acc.z);
+      Eigen::Vector3d waist_base_free_acc = waist_base_quat.conjugate() * base_imu_free_acc;
+
 
       // 角速度转换
       Eigen::Vector3d waist_gyro(0, 0, qd_waist);
       Eigen::Vector3d imu_gyro(imu_data.gyro.x, imu_data.gyro.y, imu_data.gyro.z);
-      Eigen::Vector3d waist_base_gyro = waist_base_quat.conjugate() * (imu_gyro - waist_gyro); 
+      Eigen::Vector3d waist_base_gyro = waist_base_quat.conjugate() * imu_gyro - waist_gyro; 
 
       // roban 版本需要转换 imu 数据
       sensor_data.quat_.coeffs().w() = waist_world_quat.coeffs().w();
@@ -1367,6 +1469,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       sensor_data.quat_.coeffs().z() = waist_world_quat.coeffs().z();
       sensor_data.angularVel_ << waist_base_gyro[0], waist_base_gyro[1], waist_base_gyro[2];
       sensor_data.linearAccel_ << waist_base_acc[0], waist_base_acc[1], waist_base_acc[2];
+      sensor_data.freeLinearAccel_ << waist_base_free_acc[0], waist_base_free_acc[1], waist_base_free_acc[2];
+      
+      
     }
     else
     {
@@ -1377,29 +1482,26 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       sensor_data.quat_.coeffs().z() = imu_data.quat.z;
       sensor_data.angularVel_ << imu_data.gyro.x, imu_data.gyro.y, imu_data.gyro.z;
       sensor_data.linearAccel_ << imu_data.acc.x, imu_data.acc.y, imu_data.acc.z;
+      sensor_data.freeLinearAccel_ << imu_data.free_acc.x, imu_data.free_acc.y, imu_data.free_acc.z;
     }
-    sensor_data.freeLinearAccel_ << imu_data.free_acc.x, imu_data.free_acc.y, imu_data.free_acc.z;
     sensor_data.orientationCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
     sensor_data.angularVelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
-    if (!rl_available_)
+    sensor_data.linearAccelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
+    sensor_data_rl.quat_.coeffs().w() = imu_data.quat.w;
+    sensor_data_rl.quat_.coeffs().x() = imu_data.quat.x;
+    sensor_data_rl.quat_.coeffs().y() = imu_data.quat.y;
+    sensor_data_rl.quat_.coeffs().z() = imu_data.quat.z;
+    sensor_data_rl.angularVel_ << imu_data.gyro.x, imu_data.gyro.y, imu_data.gyro.z;
+    sensor_data_rl.linearAccel_ << imu_data.acc.x, imu_data.acc.y, imu_data.acc.z;
+    sensor_data_rl.freeLinearAccel_ << imu_data.free_acc.x, imu_data.free_acc.y, imu_data.free_acc.z;
+    sensor_data_rl.orientationCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
+    sensor_data_rl.angularVelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
+    sensor_data_rl.linearAccelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
+
+    // if (!rl_available_)
     {
       sensor_data.linearAccel_ = acc_filter_.update(sensor_data.linearAccel_);
       sensor_data.angularVel_ = gyro_filter_.update(sensor_data.angularVel_);
-    }
-    else
-    {    
-      sensor_data.linearAccelCovariance_ << Eigen::Matrix<scalar_t, 3, 3>::Zero();
-      Eigen::Vector3d acc_filtered = accFilterRL_.update(sensor_data.linearAccel_);
-      Eigen::Vector3d free_acc_filtered = freeAccFilterRL_.update(sensor_data.freeLinearAccel_);
-      Eigen::Vector3d gyro_filtered = gyroFilterRL_.update(sensor_data.angularVel_);
-      
-
-      for (int i = 0; i < 3; i++)
-      {
-        sensor_data.linearAccel_(i) = accFilterStateRL_(i) * acc_filtered(i) + (1 - accFilterStateRL_(i)) * sensor_data.linearAccel_(i);
-        sensor_data.freeLinearAccel_(i) = freeAccFilterStateRL_(i) * free_acc_filtered(i) + (1 - freeAccFilterStateRL_(i)) * sensor_data.freeLinearAccel_(i);
-        sensor_data.angularVel_(i) = gyroFilterStateRL_(i) * gyro_filtered(i) + (1 - gyroFilterStateRL_(i)) * sensor_data.angularVel_(i);
-      }
     }
     
     ros_logger_->publishVector("/state_estimate/imu_data_filtered/linearAccel", sensor_data.linearAccel_);
@@ -1423,17 +1525,27 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         sensor_data_head_.jointTorque_(i) = joint_data.joint_torque[i + head_start_index];
       }
     }
+
+    applySensorDataRL(sensor_data_rl);
     if (!is_initialized_)
       is_initialized_ = true;
   }
   void humanoidController::updatakinematics(const SensorData &sensor_data, bool is_initialized_)
   {
+   
     SensorData sensor_data_new = sensor_data;
     ros::Time current_sensor_data_time = ros::Time::now();
-    if (!is_initialized_)
+    if (!is_initialized_ || last_fall_down_state_ != fall_down_state_)
     {
       last_sensor_data_time_ = current_sensor_data_time - ros::Duration(0.002);
     }
+
+    last_fall_down_state_ = fall_down_state_;
+    // if (fall_down_state_!=FallStandState::STANDING)
+    {
+      return;
+    }
+
     double diff_time = (current_sensor_data_time - last_sensor_data_time_).toSec();
     ros::Duration period = ros::Duration(diff_time);
     nav_msgs::Odometry kinematics_odom;
@@ -1666,26 +1778,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
     std::cout << "starting the controller" << std::endl;
     mpcRunning_ = true;
-    // 网络推理线程
-    if (rl_available_)
-    {
-      // 如果线程已存在且仍在运行，不重新创建，让现有线程继续运行
-      if (inferenceThread_.joinable())
-      {
-        ROS_INFO("Inference thread already exists and is running, skipping thread creation.");
-      }
-      else
-      {
-        // 线程不存在或已结束，创建新线程
-        inferenceThread_ = std::thread(&humanoidController::inference_thread_func, this);
-        std::cout << "inferenceThread_ is start" << std::endl;
-        if (!inferenceThread_.joinable())
-        {
-          ROS_ERROR_STREAM("Failed to start inference thread");
-          exit(1);
-        }
-      }
-    }
+   
   }
   
   void humanoidController::real_init_wait()
@@ -1707,6 +1800,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
   bool humanoidController::preUpdate(const ros::Time &time)
   {
+    // 同步 is_rl_start 参数，仅在有可用 RL 控制器时允许开启
+    bool requested_rl_start = false;
+    if (controllerNh_.getParam("/is_rl_start", requested_rl_start) && !available_controllers_.empty())
+      is_rl_start_ = requested_rl_start;
+    else
+      is_rl_start_ = false;
+
     // 半身模式下跳过起立过程，直接进入MPC初始化
     if (!only_half_up_body_)
     {
@@ -1716,6 +1816,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       squatState.head(12 + jointNum_) = drake_interface_->getSquatInitialState();
       vector_t standState = vector_t::Zero(infoWBC.stateDim);
       standState.head(12 + jointNum_) = drake_interface_->getInitialState();
+      // is_rl_start 模式下，直接起立到 RL 的默认姿态和高度，确保衔接平滑
+      if (is_rl_start_ && currentDefalutJointPosRL_.size() == (jointNumReal_ + waistNum_ + armNumReal_))
+      {
+        standState.segment(12, currentDefalutJointPosRL_.size()) = currentDefalutJointPosRL_;
+        standState(8) = defaultBaseHeightControl_;
+        ROS_INFO("[HumanoidController] is_rl_start=true, stand-up target set to RL default pose (height: %.3f)", standState(8));
+      }
       /*******采用 standUp_controller 从蹲姿运动到站姿*********/
       stateEstimate_->setFixFeetHeights(true);
       updateStateEstimation(time, false);
@@ -1813,7 +1920,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         jointCmdMsg.joint_kd.push_back(2);
       }
       // 发布控制命令
-      publishControlCommands(jointCmdMsg);
+    if (!init_fall_down_state_)
+        publishControlCommands(jointCmdMsg);
       
       // if (use_shm_communication_) 
       //     publishJointCmdToShm(jointCmdMsg);
@@ -1882,37 +1990,52 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       isInitStandUpStartTime_ = true;
       robotStandUpCompleteTime_ = time.toSec() - 1.0;
     }
-    if (time.toSec() > robotStandUpCompleteTime_ + 0.8 || !is_real_)
+    if (time.toSec() > robotStandUpCompleteTime_ + 0.8 || !is_real_ || init_fall_down_state_)
     {
-      SystemObservation initial_observation = currentObservation_;
-      initial_observation.state = initial_status_;
-      TargetTrajectories target_trajectories({initial_observation.time}, {initial_observation.state}, {initial_observation.input});
-      mpc_current_target_trajectories_ = target_trajectories;
-      // Set the first observation and command and wait for optimization to finish
-      ROS_INFO_STREAM("Waiting for the initial policy ...");
+      // 如果is_rl_start_=true，跳过MPC初始化等待，直接完成preUpdate
+      if (is_rl_start_)
       {
-        // Reset MPC node
-        mrtRosInterface_->resetMpcNode(target_trajectories);
-        std::cout << "reset MPC node\n";
-        // Wait for the initial policy
-        while (!mrtRosInterface_->initialPolicyReceived() && ros::ok() && ros::master::check())
-        {
-          mrtRosInterface_->spinMRT();
-          mrtRosInterface_->setCurrentObservation(initial_observation);
-          ros::Rate(HumanoidInterface_->mpcSettings().mrtDesiredFrequency_).sleep();
-        }
-        mrtRosInterface_->updatePolicy();
-        vector_t optimizedState_mrt, optimizedInput_mrt;
-        mrtRosInterface_->evaluatePolicy(currentObservation_.time, currentObservation_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
-      }
-      
-      stateEstimate_->setFixFeetHeights(false);
-      isPreUpdateComplete = true;
-      standupTime_ = currentObservation_.time;
+        ROS_INFO("[HumanoidController] is_rl_start=true, skipping MPC initialization in preUpdate");
+        stateEstimate_->setFixFeetHeights(false);
+        isPreUpdateComplete = true;
+        standupTime_ = currentObservation_.time;
 
-      std_msgs::Int8 bot_stand_up_complete;
-      bot_stand_up_complete.data = 1;
-      standUpCompletePub_.publish(bot_stand_up_complete);
+        std_msgs::Int8 bot_stand_up_complete;
+        bot_stand_up_complete.data = 1;
+        standUpCompletePub_.publish(bot_stand_up_complete);
+      }
+      else
+      {
+        SystemObservation initial_observation = currentObservation_;
+        initial_observation.state = initial_status_;
+        TargetTrajectories target_trajectories({initial_observation.time}, {initial_observation.state}, {initial_observation.input});
+        mpc_current_target_trajectories_ = target_trajectories;
+        // Set the first observation and command and wait for optimization to finish
+        ROS_INFO_STREAM("Waiting for the initial policy ...");
+        {
+          // Reset MPC node
+          mrtRosInterface_->resetMpcNode(target_trajectories);
+          std::cout << "reset MPC node\n";
+          // Wait for the initial policy
+          while (!mrtRosInterface_->initialPolicyReceived() && ros::ok() && ros::master::check())
+          {
+            mrtRosInterface_->spinMRT();
+            mrtRosInterface_->setCurrentObservation(initial_observation);
+            ros::Rate(HumanoidInterface_->mpcSettings().mrtDesiredFrequency_).sleep();
+          }
+          mrtRosInterface_->updatePolicy();
+          vector_t optimizedState_mrt, optimizedInput_mrt;
+          mrtRosInterface_->evaluatePolicy(currentObservation_.time, currentObservation_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
+        }
+        
+        stateEstimate_->setFixFeetHeights(false);
+        isPreUpdateComplete = true;
+        standupTime_ = currentObservation_.time;
+
+        std_msgs::Int8 bot_stand_up_complete;
+        bot_stand_up_complete.data = 1;
+        standUpCompletePub_.publish(bot_stand_up_complete);
+      }
     }
     return true;
   }
@@ -1946,17 +2069,59 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
   }
   void humanoidController::update(const ros::Time &time, const ros::Duration &dfd)
   {
-    is_rl_controller_buffer_.updateFromBuffer();// 使用buffer中的值更新is_rl_controller_,避免多线程更新
-    is_rl_controller_ = is_rl_controller_buffer_.get();
-    
-    // 如果RL不可用，强制设置 is_rl_controller_ 为 false
-    if (!rl_available_) {
-      is_rl_controller_ = false;
+    // 使用共享内存更新传感器数据
+    if (use_shm_communication_) {
+      updateSensorDataFromShm();
     }
-    
+    updateStateEstimation(time, false);
     ros_logger_->publishValue("/humanoid_controller/is_rl_controller_", is_rl_controller_);
     ros_logger_->publishValue("/humanoid_controller/resetting_mpc_state_", resetting_mpc_state_);
-    if (!last_is_rl_controller_ && is_rl_controller_)
+    ros_logger_->publishValue("/humanoid_controller/fall_down_state_", fall_down_state_);
+
+    // is_rl_controller_buffer_.updateFromBuffer();// 使用buffer中的值更新is_rl_controller_,避免多线程更新
+    is_rl_controller_ = !controller_manager_->isBaseControllerActive();
+    current_controller_ptr_ = controller_manager_->getCurrentController();
+
+    // 同步MPC stance状态到RLControllerManager
+    controller_manager_->setMpcStanceState(is_stance_mode_, current_gait_.name);
+
+    RLControllerType current_controller_type = controller_manager_->getCurrentControllerType();
+    bool is_fall_stand_controller_active = current_controller_type == RLControllerType::FALL_STAND_CONTROLLER;
+    if (is_rl_controller_)// 针对倒地起身控制器这种可以主动退出的控制器
+    {
+      if (current_controller_ptr_->isReadyToExit())
+      {
+        ROS_WARN("[HumanoidController] Current controller requests exit, switching to BASE controller");
+        controller_manager_->switchToBaseController();
+        fall_down_state_ = FallStandState::STANDING;
+      }
+    }
+    // 是否直接切换到RL控制器（true：直接切换；false：通过MPC插值过渡）
+    // 优先从当前RL控制器的配置文件中读取 use_interploate_from_mpc 参数
+    bool derect_switch_to_rl = controller_manager_->getDirectSwitchToRL();
+    if (is_rl_controller_ && current_controller_ptr_ != nullptr)
+    {
+      // 从当前控制器获取参数：use_interpolate_from_mpc = true 表示使用插值（derect_switch_to_rl = false）
+      // use_interpolate_from_mpc = false 表示直接切换（derect_switch_to_rl = true）
+      bool use_interpolate = current_controller_ptr_->getUseInterpolateFromMPC();
+      derect_switch_to_rl = !use_interpolate;
+      // 同时更新 controller_manager_ 中的设置，以便其他地方也能使用
+      controller_manager_->setDirectSwitchToRL(derect_switch_to_rl);
+    }
+
+    // is_rl_start 模式：在 preUpdate 中已经完成了 RL 姿态对齐，起立结束后物理切换并重置标志位
+    if (is_rl_start_ && isPreUpdateComplete && !is_rl_controller_)
+    {
+      if (controller_manager_->switchController(current_controller_))
+      {
+        current_controller_ptr_ = controller_manager_->getCurrentController();
+        is_rl_controller_ = last_is_rl_controller_ = true;
+        is_rl_start_ = false; 
+        ROS_INFO("[HumanoidController] is_rl_start: Stand-up complete, auto-switched to RL mode: %s", current_controller_.c_str());
+      }
+    }
+   
+    if (!derect_switch_to_rl && !last_is_rl_controller_ && is_rl_controller_)
     {
       // 进入 RL 前，先用 MPC 将躯干高度插值到 RL 默认高度
       inference_running_ = true;
@@ -1965,15 +2130,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       Eigen::VectorXd current_arm_vel = Eigen::VectorXd::Zero(armNumReal_);
       current_arm_pos = jointPosWBC_.segment(jointNumReal_+ waistNum_, armNumReal_);
       current_arm_vel = jointVelWBC_.segment(jointNumReal_+ waistNum_, armNumReal_);
-      Eigen::VectorXd target_arm_pos = defalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
+
+      currentDefalutJointPosRL_ = current_controller_ptr_->getDefaultJointPos();
+      defaultBaseHeightControl_ = current_controller_ptr_->getDefaultBaseHeightControl();
+      std::cout << "last_controller_ptr->getName(): " << current_controller_ptr_->getName() << std::endl;
+      std::cout << "New currentDefalutJointPosRL_: " << currentDefalutJointPosRL_.transpose() << std::endl;
+
+      Eigen::VectorXd target_arm_pos = currentDefalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
       Eigen::VectorXd target_arm_vel = Eigen::VectorXd::Zero(armNumReal_);
 
       // 初始化RL模式的手臂目标位置和速度（避免保留旧的外部控制值）
-      desire_arm_q_ = defalutJointPosRL_.segment(jointNumReal_ + waistNum_, armNumReal_);
+      desire_arm_q_ = currentDefalutJointPosRL_.segment(jointNumReal_ + waistNum_, armNumReal_);
       desire_arm_v_ = Eigen::VectorXd::Zero(armNumReal_);
-      
-      startArmInterpolation(time, current_arm_pos, current_arm_vel, target_arm_pos, target_arm_vel);
-      ROS_INFO("[MPC->RL] 触发手臂插值到RL默认位置");
 
       // 清理 kuavo_arm_traj 话题缓存（MPC->RL时也清理）
       // 避免RL模式下使用MPC遗留的外部控制数据
@@ -1997,18 +2165,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       startMPCRLInterpolation(currentObservation_.time, targetPose, target_arm_pos);
       resetting_mpc_state_ = ResettingMpcState::RESET_BASE;
 
-      // 同步启动RL原地踏步2秒（若启用）
-      if (enable_in_place_stepping_)
-      {
-        temp_in_place_duration_backup_ = in_place_step_duration_;
-        in_place_step_duration_ = 2.0;
-        temp_in_place_end_time_ = time + ros::Duration(2.0);
-        temp_in_place_duration_override_active_ = true;
-        startInPlaceStepping(time);
-        Walkenable_ = true;
-        ROS_INFO("[MPC->RL] 启动原地踏步2秒");
-      }
-
     }
     else if (last_is_rl_controller_ && !is_rl_controller_)
     {
@@ -2016,7 +2172,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       inference_running_ = false;
       stanceState_mrt_ = currentObservation_.state;
       stanceInput_mrt_ = initialInput2WBC_mrt_;
-      
       // 清理 kuavo_arm_traj 话题缓存，避免使用旧数据
       // 重置为当前实际手臂位置，确保切换平滑
       vector_t current_arm_pos = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
@@ -2031,19 +2186,67 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     last_is_rl_controller_ = is_rl_controller_;
     kuavo_msgs::jointCmd jointCmdMsg;
     jointCmdMsg.header.stamp = time;
-    // 使用共享内存更新传感器数据
-    if (use_shm_communication_) {
-      updateSensorDataFromShm();
+    
+    // 如果is_rl_start_且当前是RL控制器，跳过setCurrentObservation以避免MPC警告
+    // 因为MPC已经被暂停，不需要更新观测值
+    if (!(is_rl_start_ && is_rl_controller_))
+    {
+      mrtRosInterface_->setCurrentObservation(currentObservation_);
     }
-    updateStateEstimation(time, false);
-    mrtRosInterface_->setCurrentObservation(currentObservation_);
+    else if (is_rl_start_ && is_rl_controller_ && isPreUpdateComplete)
+    {
+      // 在 is_rl_start 模式下运行几帧后，重置标志位
+      // 这样可以恢复正常的观测值更新和后续的控制逻辑
+      static int startup_count = 0;
+      if (startup_count++ > 10)
+      {
+        is_rl_start_ = false;
+        ROS_INFO("[HumanoidController] is_rl_start mode transition complete, resuming normal observation updates.");
+      }
+    }
 
     // 非RL或躯干插值中，均走MPC流程
-    bool mpc_flow = (!is_rl_controller_) || is_torso_interpolation_active_;
-    if (mpc_flow){
+    // 如果is_rl_start_=true且当前是RL控制器，强制跳过MPC流程，直接使用RL控制器
+    // 但如果用户已经切换到MPC，则允许正常使用MPC
+    bool mpc_flow = !is_rl_controller_;
+    if (is_rl_start_ && is_rl_controller_)
+    {
+      // is_rl_start模式下，且当前是RL控制器时，强制使用RL控制器，不进入MPC控制循环
+      mpc_flow = false;
+    }
+    else if (!derect_switch_to_rl)
+    {
+      mpc_flow = (!is_rl_controller_) || is_torso_interpolation_active_;
+    }
+    if (mpc_flow && !is_fall_stand_controller_active)
+    {
       is_mpc_controller_ = true;
       if (reset_mpc_) // 重置mpc
       {
+        // Safety check, if failed, stop the controller
+        if (!safetyChecker_->check(currentObservation_, vector_t::Zero(currentObservation_.state.size()), vector_t::Zero(currentObservation_.input.size())))
+        {
+          ROS_ERROR_STREAM("[humanoid Controller] Safety check failed!");
+          fall_down_state_ = FallStandState::FALL_DOWN;
+          
+          // 检查控制器列表是否存在倒地起身控制器，自动切换过去
+          if (controller_manager_ && has_fall_stand_controller_)
+          {
+            std::cout << "[humanoid Controller]fall down detected, switch to fall down controller" << std::endl;
+            controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
+            current_controller_ptr_ = controller_manager_->getCurrentController();
+            current_controller_ptr_->reset();
+            mrtRosInterface_->pauseResumeMpcNode(true);
+            return;
+          }
+          ROS_ERROR_STREAM("[humanoid Controller] No Fall Stand Controller, stopping all controllers.");
+          std_msgs::Bool stop_msg;
+          stop_msg.data = true;
+          stop_pub_.publish(stop_msg);
+          usleep(100000);
+          return;
+        }
+
         mrtRosInterface_->pauseResumeMpcNode(false);
         std::cout << "resume MPC" << std::endl;
         // Trigger MRT callbacks
@@ -2059,7 +2262,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
         reset_mpc_ = false;
         resetting_mpc_state_ = ResettingMpcState::RESET_INITIAL_POLICY;
-        
+        standupTime_ = currentObservation_.time;
         std::cout << "reset MPC node at " << currentObservation_.time << "\n";
       }
       // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getNextData();
@@ -2102,7 +2305,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
               vector_t target_arm_pos = defalutArmPosMPC_;
               if (is_rl_controller_)
               {
-                target_arm_pos = defalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
+                target_arm_pos = currentDefalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
               }
 
               startMPCRLInterpolation(currentObservation_.time, targetTorsoPose, target_arm_pos);
@@ -2121,10 +2324,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             {// 插值阶段
               // 更新躯干插值
               updateMPCRLInterpolation(currentObservation_.time);
-
               // 检查插值是否完成
               if (!is_torso_interpolation_active_)
               {
+                standupTime_ = currentObservation_.time;
                 std::cout << "Torso interpolation completed, switching to NORMAL" << std::endl;
                 resetting_mpc_state_ = ResettingMpcState::NOMAL;
               }
@@ -2142,17 +2345,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
               publishFeetTrajectory(target_trajectories);
             }
-            if (mrtRosInterface_->isPolicyUpdated())
-            {
-              mrtRosInterface_->evaluatePolicy(currentObservation_.time, currentObservation_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
-            }
-
+            
+            
             if (is_torso_interpolation_active_)
             {
               optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
-              // optimizedState_mrt.segment<12>(12) = currentObservation_.state.segment<12>(12);
+              optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = default_state_.segment(12,jointNumReal_+ waistNum_);
               // optimizedInput_mrt = stanceInput_mrt_;
               plannedMode_ = ModeNumber::SS;
+
+            }else if (mrtRosInterface_->isPolicyUpdated())
+            {
+              mrtRosInterface_->evaluatePolicy(currentObservation_.time, currentObservation_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
             }
             // else
             // {
@@ -2362,7 +2566,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         low_latency_first_enter = true;
       }
 
-    // *************************** arm joint trajectory **********************************
+      // *************************** arm joint trajectory **********************************
 
       // optimizedInput2WBC_mrt_.segment(optimizedInput_mrt.size() - info.actuatedDofNum, jointNum_) = mrt_joint_vel_filter_.update(optimizedInput_mrt.segment(optimizedInput_mrt.size() - info.actuatedDofNum, jointNum_));
       // ros_logger_->publishVector("/humanoid_controller/optimizedInput_mrt_filtered", optimizedInput2WBC_mrt_);
@@ -2436,8 +2640,16 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // std::chrono::time_point<std::chrono::high_resolution_clock> t4;
       if (enable_wbc)
       {
-        vector_t x = wbc_->update(optimizedState2WBC_mrt_, optimizedInput2WBC_mrt_, measuredRbdStateReal_, plannedMode_, period.toSec(), is_mpc_updated);
+        static vector_t x;
 
+        if(is_roban_ && is_torso_interpolation_active_)
+        {
+          x = standUpWbc_->update(optimizedState2WBC_mrt_, optimizedInput2WBC_mrt_, measuredRbdStateReal_, ModeNumber::SS, period.toSec(), false);
+        }
+        else
+        {
+          x = wbc_->update(optimizedState2WBC_mrt_, optimizedInput2WBC_mrt_, measuredRbdStateReal_, plannedMode_, period.toSec(), is_mpc_updated);
+        }
         // wbc_->updateVd(jointAcc_);
         wbcTimer_.endTimer();
 
@@ -2481,7 +2693,21 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         // Safety check, if failed, stop the controller
         if (!safetyChecker_->check(currentObservation_, optimizedState_mrt, optimizedInput_mrt))
         {
-          ROS_ERROR_STREAM("[humanoid Controller] Safety check failed, stopping the controller.");
+          ROS_ERROR_STREAM("[humanoid Controller] Safety check failed!");
+          fall_down_state_ = FallStandState::FALL_DOWN;
+          
+          // 检查控制器列表是否存在倒地起身控制器，自动切换过去
+          if (controller_manager_ && has_fall_stand_controller_)
+          {
+            std::cout << "[humanoid Controller]fall down detected, switch to fall down controller" << std::endl;
+            controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
+            current_controller_ptr_ = controller_manager_->getCurrentController();
+            current_controller_ptr_->reset();
+            mrtRosInterface_->pauseResumeMpcNode(true);
+            return;
+          }
+          ROS_ERROR_STREAM("[humanoid Controller] No Fall Stand Controller, stopping all controllers.");
+          
           std_msgs::Bool stop_msg;
           stop_msg.data = true;
           stop_pub_.publish(stop_msg);
@@ -2673,108 +2899,24 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
 
     }
-    else{
-
-      vector_t measuredRbdStateRL_;
-      measuredRbdStateRL_ = getRobotState();
+    else
+    {
       if (is_mpc_controller_) // 处理一次从MPC切换的逻辑
       {
         std::cout << "HumanoidController::update: pause MPC" << std::endl;
         mrtRosInterface_->pauseResumeMpcNode(true);
       }
       is_mpc_controller_ = false;
+      if (!current_controller_ptr_) { is_rl_controller_ = last_is_rl_controller_ = false; return; }
 
-      // // 躯干插值已完成：开启 RL 推理并暂停 MPC
-      // if (!inference_running_)
-      // {
-      //   inference_running_ = true;
-      //   mrtRosInterface_->pauseResumeMpcNode(true);
-      //   std::cout << "[MPC->RL] torso alignment done, pause MPC and enable RL inference" << std::endl;
-      // }
-
-      // 更新RL步态接收器
-      if (rl_gait_receiver_) {
-        vector_t feetPositions = stateEstimate_->getEndEffectorPositions();
-        vector_t baseState = stateEstimate_->getTorsoState();  // 使用状态估计模块提供的接口
-        rl_gait_receiver_->update(time, baseState, feetPositions);
-      }
-
-      vector_t optimizedState_mrt, optimizedInput_mrt;
-      auto &info = centroidalModelInfoWBC_;
-      optimizedState_mrt_ = initial_statusRL_;
-      optimizedInput_mrt_ = intail_input_;
-      // optimized_mode_ = plannedMode_;
-      auto current_jointPos = measuredRbdStateRL_.segment(6, info.actuatedDofNum);
-      auto current_jointVel = measuredRbdStateRL_.segment(12 + jointNumReal_ + armNumReal_ + waistNum_, info.actuatedDofNum);
-       
-      Eigen::VectorXd actuation(jointNumReal_ + armNumReal_ + waistNum_);
-      actuation.setZero();
-      
-      // 获取当前RL命令数据并更新CommandDataRL_
-      if (rl_gait_receiver_) {
-        CommandDataRL rlCmd = rl_gait_receiver_->getCurrentCommand();
-        setCommandDataRL(rlCmd);
-      }
-      
-      actuation = updateRLcmd(measuredRbdStateRL_);
-      
-      if (!is_real_)
-      {
-        for (int i1 = 0; i1 < jointNumReal_ + armNumReal_+ waistNum_; ++i1)
-        {
-          jointCmdMsg.joint_q.push_back(0.0);
-          jointCmdMsg.joint_v.push_back(0.0);
-          jointCmdMsg.joint_kp.push_back(jointKpRL_[i1]);
-          jointCmdMsg.joint_kd.push_back(jointKdRL_[i1]);
-          jointCmdMsg.tau.push_back(actuation(i1));
-          jointCmdMsg.tau_ratio.push_back(1);
-          jointCmdMsg.tau_max.push_back(torqueLimitsRL_[i1]);
-          jointCmdMsg.control_modes.push_back(JointControlModeRL_(i1));
-          // std::cout << "joint_kp: " << jointKp_[i1] << " joint_kd: " << jointKd_[i1] << std::endl;
-        }
-      }
-      else
-      {
-        for (int i1 = 0; i1 < jointNumReal_ + armNumReal_ + waistNum_; ++i1)
-        {
-          if (JointControlModeRL_(i1) == 0)
-          {
-            if (JointPDModeRL_(i1) == 0)
-            {
-              jointCmdMsg.joint_q.push_back(0.0);
-              jointCmdMsg.joint_v.push_back(0.0);
-              jointCmdMsg.joint_kp.push_back(0);
-              jointCmdMsg.joint_kd.push_back(0);
-              jointCmdMsg.tau.push_back(actuation(i1));
-              jointCmdMsg.tau_ratio.push_back(1);
-              jointCmdMsg.tau_max.push_back(torqueLimitsRL_[i1]);
-              jointCmdMsg.control_modes.push_back(JointControlModeRL_(i1));
-            }
-            else
-            {
-              jointCmdMsg.joint_q.push_back(actuation(i1));
-              jointCmdMsg.joint_v.push_back(0.0);
-              jointCmdMsg.joint_kp.push_back(jointKpRL_[i1]);
-              jointCmdMsg.joint_kd.push_back(jointKdRL_[i1]);
-              jointCmdMsg.tau.push_back(0.0);
-              jointCmdMsg.tau_ratio.push_back(1);
-              jointCmdMsg.tau_max.push_back(torqueLimitsRL_[i1]);
-              jointCmdMsg.control_modes.push_back(JointControlModeRL_(i1));
-            }
-          }
-          else
-          {
-            jointCmdMsg.joint_q.push_back(current_jointPos(i1));
-            jointCmdMsg.joint_v.push_back(0.0);
-            jointCmdMsg.joint_kp.push_back(jointKpRL_[i1]);
-            jointCmdMsg.joint_kd.push_back(jointKdRL_[i1]);
-            jointCmdMsg.tau.push_back(actuation(i1));
-            jointCmdMsg.tau_ratio.push_back(1);
-            jointCmdMsg.tau_max.push_back(torqueLimitsRL_[i1]);
-            jointCmdMsg.control_modes.push_back(JointControlModeRL_(i1));
-          }
-        }
-      }
+      jointCmdMsg.header.stamp = time;
+      vector_t feetPositions = stateEstimate_->getEndEffectorPositions();
+      vector_t baseState = stateEstimate_->getTorsoState();
+      // 传入额外的估计量
+      current_controller_ptr_->applyFeetPositions(feetPositions);
+      current_controller_ptr_->applyBaseState(baseState);
+      // 更新控制器
+      current_controller_ptr_->update(time, getRobotSensorData(), getRobotState(), jointCmdMsg);
 
       // 补充头部维度
       // 计算头部反馈力
@@ -2796,21 +2938,17 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
           double head_limit_vel = hardware_settings.joint_velocity_limits[jointNumReal_ + waistNum_ + armNumReal_ + i3];
 
           vel = std::clamp(vel, -head_limit_vel, head_limit_vel) * TO_RADIAN;
-          jointCmdMsg.joint_q.push_back(get_head_pos(i3));
-          jointCmdMsg.joint_v.push_back(0);
-          jointCmdMsg.joint_kp.push_back(0);
-          jointCmdMsg.joint_kd.push_back(0);  
-          jointCmdMsg.tau.push_back(head_feedback_tau(i3));
-          jointCmdMsg.tau_ratio.push_back(1);
-          jointCmdMsg.tau_max.push_back(10);
-          jointCmdMsg.control_modes.push_back(2);
+          auto head_start_index = jointNumReal_ + waistNum_ + armNumReal_;
+          jointCmdMsg.joint_q[head_start_index + i3] = get_head_pos(i3);
+          jointCmdMsg.joint_v[head_start_index + i3] = 0;
+          jointCmdMsg.joint_kp[head_start_index + i3] = 0;
+          jointCmdMsg.joint_kd[head_start_index + i3] = 0;  
+          jointCmdMsg.tau[head_start_index + i3] = head_feedback_tau(i3);
+          jointCmdMsg.tau_ratio[head_start_index + i3] = 1;
+          jointCmdMsg.tau_max[head_start_index + i3] = 10;
+          jointCmdMsg.control_modes[head_start_index + i3] = 2;
         }
       }
-
-      // arm - 使用平滑插值控制//
-      updateArmInterpolation(time, jointCmdMsg); 
-
-
 
       // 规范化jointCmd尺寸，确保与硬件/仿真期望一致
       {
@@ -2832,15 +2970,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         adjust_double(jointCmdMsg.joint_kd, expected_size, 0.0);
         adjust_int(jointCmdMsg.control_modes, expected_size, 2);
       }
-
-      {
-        std::lock_guard<std::mutex> lock(joint_cmd_mutex_);
-        for (int i1 = 0; i1 < jointNumReal_ + armNumReal_ + waistNum_; ++i1)
-        {
-          jointTorqueCmdRL_(i1) = jointCmdMsg.tau[i1];
-        }
-      }
-      
     }
 
     // 发布控制命令
@@ -2852,7 +2981,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       robotVisualizer_->updateSimplifiedArmPositions(simplifiedJointPos_);
       if (mrtRosInterface_->isPolicyUpdated())
         robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
-
+      robotVisualizer_->updateHeadJointPositions(sensor_data_head_.jointPos_);
       // 更新灵巧手可视化
       robotVisualizer_->updateHandJointPositions(dexhand_joint_pos_);
     }
@@ -2931,8 +3060,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     // stateEstimate_->updateJointStates(jointPos_, jointVel_);
     stateEstimate_->updateImu(quat_, angularVel_, linearAccel_, orientationCovariance_, angularVelCovariance_, linearAccelCovariance_);
     // apply sensor data to rl
-    auto sensor_data_copy = data.copy();
-    applySensorDataRL(sensor_data_copy);
+    // auto sensor_data_copy = data.copy();
+    // applySensorDataRL(sensor_data_copy);
   }
 
   void humanoidController::applySensorDataRL(const SensorData &data)
@@ -2946,7 +3075,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     sensor_data_copy.angularVel_ = data.angularVel_;
     sensor_data_copy.linearAccel_ = data.linearAccel_;
     sensor_data_copy.freeLinearAccel_ = data.freeLinearAccel_;
-    sensor_data_copy.quat_offset_ = stateEstimate_->getImuOrientation();
+    sensor_data_copy.quat_offset_ = data.quat_;
     setRobotSensorData(sensor_data_copy);
   }
 
@@ -2980,6 +3109,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         applySensorData(sensors_data);
         stateEstimate_->set_intial_state(currentObservation_.state);
         measuredRbdState_ = stateEstimate_->getRbdState();
+        // auto mat = getRobotSensorData().quat_.toRotationMatrix();
+      
+        // // 计算yaw偏移
+        // double current_yaw = std::atan2(mat(1, 2), mat(0, 2)); 
+        // my_yaw_offset_ = current_yaw - motionTrajectory_.reference_yaw;
+        // std::cout << "sensors_data.quat_: [" << sensors_data.quat_.w() << ", " 
+        //           << sensors_data.quat_.x() << ", " << sensors_data.quat_.y() << ", " << sensors_data.quat_.z() << "]" << std::endl;
+        // std::cout << "Current yaw: " << current_yaw << std::endl;
+        // std::cout << "Reference yaw: " << motionTrajectory_.reference_yaw << std::endl;
+        // // 归一化到[-π, π]范围
+        // while (my_yaw_offset_ > M_PI) my_yaw_offset_ -= 2 * M_PI;
+        // while (my_yaw_offset_ < -M_PI) my_yaw_offset_ += 2 * M_PI;
 
       }
       double diff_time = (current_time_ - last_time_).toSec();
@@ -3043,17 +3184,29 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         isPullUp_ = true;
         setPullUpState_=true;
         pull_up_trigger_time_ = currentObservation_.time;  // 记录触发时间
+        ROS_WARN_STREAM("now Contact Force: " << contactForce_[2]+contactForce_[8] <<
+                        " desired Contact Force: " << pull_up_force_threshold_ * robotMass_ * 9.81);
       }
       else if (isPullUp_ && (currentObservation_.time - pull_up_trigger_time_ > 2.0))
       {
-        ROS_WARN_STREAM("Pull up protection triggered - publishing stop_robot message");
-        isPullUp_ = false;
-        
-        // 发布stop_robot话题
-        std_msgs::Bool stop_msg;
-        stop_msg.data = true;
-        stop_pub_.publish(stop_msg);
-        ROS_WARN_STREAM("stop_robot message published");
+        if (!has_fall_stand_controller_)
+        {
+          ROS_WARN_STREAM("Pull up protection triggered - publishing stop_robot message");
+          // 发布stop_robot话题
+          std_msgs::Bool stop_msg;
+          stop_msg.data = true;
+          stop_pub_.publish(stop_msg);
+          ROS_WARN_STREAM("stop_robot message published");
+        }else {
+          // 检查控制器列表是否存在倒地起身控制器，自动切换过去
+          ROS_WARN_STREAM("Pull up detected, switch to fall down controller");
+          controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
+          current_controller_ptr_ = controller_manager_->getCurrentController();
+          current_controller_ptr_->reset();
+          mrtRosInterface_->pauseResumeMpcNode(true);
+
+          isPullUp_ = false;
+        }
       }
       ros_logger_->publishVector("/state_estimate/measuredRbdState", measuredRbdState_);
       auto &info = HumanoidInterface_->getCentroidalModelInfo();
@@ -3132,6 +3285,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       }
       wbc_observation_publisher_.publish(ros_msg_conversions::createObservationMsg(currentObservationWBC_));
       setRobotState(measuredRbdStateReal_);
+      ros_logger_->publishVector("/state_estimate/measuredRbdStateReal", measuredRbdStateReal_);
 
       // std::cout << "jointPosWBC_:" << jointPosWBC_.transpose() << std::endl;
 
@@ -3367,6 +3521,159 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     std::cout << "InEkfBaseFilter stateEstimate_ initialized" << std::endl;
 #endif
   }
+
+/*****************************************倒地起身*****************************************************************/ 
+bool humanoidController::loadMotionTrajectory(const std::string& trajectoryFile) {
+  std::ifstream file(trajectoryFile);
+  if (!file.is_open()) {
+      std::cerr << "Failed to open trajectory file: " << trajectoryFile << std::endl;
+      return false;
+  }
+  
+  std::vector<std::vector<double>> csvData;
+  std::string line;
+  bool firstLine = true;
+  int lineNum = 0;
+  const int expectedCols = 3 + 4 + (jointNum_ + jointArmNum_ + waistNum_) * 2;
+  
+  while (std::getline(file, line)) {
+      lineNum++;
+      if (line.empty()) continue;
+      
+      std::vector<double> row;
+      std::stringstream ss(line);
+      std::string value;
+      bool parseError = false;
+      
+      while (std::getline(ss, value, '\t')) {
+          if (value.empty()) continue;
+          try {
+              row.push_back(std::stod(value));
+          } catch (const std::exception& e) {
+              // 解析失败，可能是表头
+              parseError = true;
+              break;
+          }
+      }        
+      // 如果是第一行且解析失败，认为是表头，跳过
+      if (firstLine && parseError) {
+          std::cout << "Detected header line, skipping: " << line.substr(0, std::min(80, (int)line.size())) << "..." << std::endl;
+          firstLine = false;
+          continue;
+      }
+      firstLine = false;
+      
+      if (row.size() == expectedCols) {
+          csvData.push_back(row);
+      } else if (row.size() > 0 && !parseError) {
+          std::cerr << "Warning: Line " << lineNum << " has " << row.size() 
+                   << " columns, expected " << expectedCols << " (49)" << std::endl;
+      }
+  }
+  file.close();
+  
+  int timeSteps = csvData.size();
+  if (timeSteps == 0) {
+      std::cerr << "No valid data found in CSV file" << std::endl;
+      return false;
+  }
+  
+  const int numJoints = jointNum_ + jointArmNum_ + waistNum_;
+  motionTrajectory_.time_step_total = timeSteps;
+  motionTrajectory_.current_time_step = 0;
+  
+  motionTrajectory_.body_pos_w.resize(timeSteps, 3);
+  motionTrajectory_.body_quat_w.resize(timeSteps, 4);
+  motionTrajectory_.joint_pos.resize(timeSteps, numJoints);
+  motionTrajectory_.joint_vel.resize(timeSteps, numJoints);
+  
+  for (int i = 0; i < timeSteps; ++i) {
+      const auto& row = csvData[i];
+      
+      motionTrajectory_.body_pos_w(i, 0) = row[0];
+      motionTrajectory_.body_pos_w(i, 1) = row[1];
+      motionTrajectory_.body_pos_w(i, 2) = row[2];
+      
+      motionTrajectory_.body_quat_w(i, 0) = row[3];  // w
+      motionTrajectory_.body_quat_w(i, 1) = row[4];  // x
+      motionTrajectory_.body_quat_w(i, 2) = row[5];  // y
+      motionTrajectory_.body_quat_w(i, 3) = row[6];  // z
+      
+      for (int j = 0; j < numJoints; ++j) {
+          motionTrajectory_.joint_pos(i, j) = row[7 + j];
+      }        
+      for (int j = 0; j < numJoints; ++j) {
+          motionTrajectory_.joint_vel(i, j) = row[7 + numJoints + j];
+      }
+  }
+  if (timeSteps > 0) {
+      Eigen::Quaterniond first_quat(
+          motionTrajectory_.body_quat_w(0, 0),  // w
+          motionTrajectory_.body_quat_w(0, 1),  // x
+          motionTrajectory_.body_quat_w(0, 2),  // y
+          motionTrajectory_.body_quat_w(0, 3)   // z
+      );
+      
+      Eigen::Matrix3d ref_mat = first_quat.toRotationMatrix();        
+      motionTrajectory_.reference_yaw = std::atan2(ref_mat(1, 2), ref_mat(0, 2));
+  }    
+  return true;
+}
+
+Eigen::VectorXd humanoidController::getTrajectoryCommand() {
+  if (!trajectoryLoaded_) {
+    return Eigen::VectorXd::Zero((jointNum_ + jointArmNum_ + waistNum_) * 2);
+  }
+  return motionTrajectory_.getCurrentCommand();
+}
+Eigen::VectorXd humanoidController::getTrajectoryAnchorPos() {
+  return motionTrajectory_.getTargetAnchorPos();
+}
+Eigen::Quaterniond humanoidController::getTrajectoryAnchorQuat() {
+  return motionTrajectory_.getTargetAnchorQuat();
+}
+
+
+
+// Get motion anchor position difference in body frame
+Eigen::Vector3d humanoidController::getMotionAnchorPosB(const Eigen::Vector3d& currentBasePos, const Eigen::Quaterniond& currentBaseQuat) {
+  if (!trajectoryLoaded_) {
+    return Eigen::Vector3d::Zero();
+  }
+  
+  // Get target anchor position and orientation from trajectory
+  Eigen::Vector3d targetAnchorPos = motionTrajectory_.getTargetAnchorPos();
+  
+  // Calculate position difference in body frame using subtract_frame_transforms logic
+  // T_12 = T_01^(-1) * T_02, where T_01 is current robot pose, T_02 is target pose
+  Eigen::Quaterniond currentQuatInv = currentBaseQuat.inverse();
+  Eigen::Vector3d positionDiff = currentQuatInv * (targetAnchorPos - currentBasePos);
+  return positionDiff;
+}
+
+// Get motion anchor orientation difference in body frame  
+Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond& currentBaseQuat) {
+  if (!trajectoryLoaded_) {
+    return Eigen::VectorXd::Zero(6);
+  }
+  
+  // Get target anchor orientation from trajectory
+  Eigen::Quaterniond targetAnchorQuat = motionTrajectory_.getTargetAnchorQuat();
+  // q12 = q10 * q02, where q10 = q01^(-1)
+  Eigen::Quaterniond currentQuatInv = currentBaseQuat.inverse();
+  Eigen::Quaterniond quatDiff = currentQuatInv * targetAnchorQuat;    
+  Eigen::Matrix3d rotMat = quatDiff.toRotationMatrix();    
+  // Extract first two columns and reshape row-wise (mat[..., :2].reshape(mat.shape[0], -1))
+  Eigen::VectorXd oriDiff(6);
+  oriDiff << 
+      rotMat(0, 0), rotMat(0, 1),
+      rotMat(1, 0), rotMat(1, 1),
+      rotMat(2, 0), rotMat(2, 1);
+  return oriDiff;
+}
+
+/*****************************************倒地起身*****************************************************************/ 
+
 
   bool humanoidController::updateSensorDataFromShm()
   {
@@ -3607,127 +3914,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     return true;
   }
 
-  bool humanoidController::switchControllerCallback(kuavo_msgs::switchController::Request &req, kuavo_msgs::switchController::Response &res)
-  {
-    ROS_INFO("Received controller switch request: %s", req.controller_name.c_str());
-    
-    // Check if requested controller is in available list
-    bool found = false;
-    int new_index = -1;
-    for (size_t i = 0; i < available_controllers_.size(); ++i) {
-      if (available_controllers_[i] == req.controller_name) {
-        found = true;
-        new_index = i;
-        break;
-      }
-    }
-    
-    if (found) {
-      // 检查是否尝试切换到RL控制器，以及RL是否可用
-      if (new_index != 0 && !rl_available_) {
-        res.success = false;
-        res.message = "RL controller is not available. RL parameter file not found.";
-        ROS_WARN("[HumanoidController] %s", res.message.c_str());
-        return true;
-      }
-      
-      // Update current controller state
-      current_controller_ = req.controller_name;
-      current_controller_index_ = new_index;
-      
-      res.success = true;
-      res.message = "Successfully switched to controller: " + req.controller_name + " (index: " + std::to_string(new_index) + ")";
-      // switch to rl controller
-      is_rl_controller_buffer_.setBuffer(!(current_controller_index_ == 0));
-      // Here you can implement specific controller switching logic
-      // e.g., stop current controller, start new controller, etc.
-    } else {
-      res.success = false;
-      res.message = "Unsupported controller type: " + req.controller_name + ". Available controllers: ";
-      for (size_t i = 0; i < available_controllers_.size(); ++i) {
-        res.message += available_controllers_[i];
-        if (i < available_controllers_.size() - 1) res.message += ", ";
-      }
-      ROS_WARN("[HumanoidController] %s", res.message.c_str());
-    }
-    
-    return true;
-  }
-
-  bool humanoidController::getControllerListCallback(kuavo_msgs::getControllerList::Request &req, kuavo_msgs::getControllerList::Response &res)
-  {
-    res.controller_names.clear();
-    res.controller_names = available_controllers_;
-    res.count = available_controllers_.size();
-    res.current_index = current_controller_index_;
-    res.current_controller = current_controller_;
-    res.success = true;
-    res.message = "Successfully retrieved controller list, total " + std::to_string(res.count) + " controllers, current: " + current_controller_ + " (index: " + std::to_string(current_controller_index_) + ")";
-    
-    ROS_INFO("[HumanoidController] current controller: %s (index: %d, total %d),", current_controller_.c_str(), current_controller_index_, res.count);
-    
-    return true;
-  }
-
-  bool humanoidController::switchToNextControllerCallback(kuavo_msgs::switchToNextController::Request &req, kuavo_msgs::switchToNextController::Response &res)
-  {
-    if (available_controllers_.empty()) {
-      res.success = false;
-      res.message = "No controllers available";
-      res.current_controller = "";
-      res.next_controller = "";
-      res.current_index = -1;
-      res.next_index = -1;
-      ROS_WARN("[HumanoidController] No controllers available for switching");
-      return true;
-    }
-
-    // 保存当前控制器信息
-    res.current_controller = current_controller_;
-    res.current_index = current_controller_index_;
-
-    // 计算下一个控制器的索引（循环切换），跳过不可用的RL控制器
-    int next_index = current_controller_index_;
-    int search_count = 0;
-    do {
-      next_index = (next_index + 1) % available_controllers_.size();
-      search_count++;
-      
-      // 如果是RL控制器且RL不可用，跳过
-      if (next_index != 0 && !rl_available_) {
-        continue;
-      }
-      
-      break;
-    } while (search_count < available_controllers_.size());
-    
-    // 如果找不到可用的控制器（应该不会发生，因为至少MPC可用）
-    if (search_count >= available_controllers_.size()) {
-      res.success = false;
-      res.message = "No available controllers to switch to";
-      res.next_controller = "";
-      res.next_index = -1;
-      ROS_WARN("[HumanoidController] %s", res.message.c_str());
-      return true;
-    }
-
-    std::string next_controller = available_controllers_[next_index];
-
-    // 更新当前控制器状态
-    current_controller_ = next_controller;
-    current_controller_index_ = next_index;
-    is_rl_controller_buffer_.setBuffer(!(current_controller_index_ == 0));
-    // 设置响应信息
-    res.next_controller = next_controller;
-    res.next_index = next_index;
-    res.success = true;
-    res.message = "Successfully switched from " + res.current_controller + " (index: " + std::to_string(res.current_index) + 
-                  ") to " + res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
-
-    ROS_INFO("[HumanoidController] %s", res.message.c_str());
-    
-    return true;
-  }
 
 
   void humanoidController::waistCmdCallback(const kuavo_msgs::robotWaistControl::ConstPtr &msg)
@@ -3973,1123 +4159,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       return false;
     }
   }
-  void humanoidController::loadJoyJsonConfig(const std::string &config_file)
-  {
-    std::ifstream ifs(config_file);
-    if (!ifs.is_open())
-    {
-      std::cerr << "Failed to open config file: " << config_file << std::endl;
-      return;
-    }
-    nlohmann::json data_;
-    ifs >> data_;
-    auto updateMap = [](auto &map, const auto &items)
-    {
-      for (const auto &[key, value] : items)
-      {
-        std::cout << "button:" << key << " value:" << value << std::endl;
-        map[key] = value;
-      }
-    };
-    updateMap(joyButtonMap, data_["JoyButton"].items());
-    updateMap(joyAxisMap, data_["JoyAxis"].items());
-  }
 
-  // ==================== 站立键平滑过渡系统函数实现 ====================
   
-  void humanoidController::startStanceTransition(const ros::Time& current_time)
-  {
-    is_stance_transition_ = true;
-    stance_transition_start_time_ = current_time;
-    
-    stance_transition_velocity_.linear.x = smoothed_cmd_vel_.linear.x;
-    stance_transition_velocity_.linear.y = smoothed_cmd_vel_.linear.y;
-    stance_transition_velocity_.linear.z = smoothed_cmd_vel_.linear.z;
-    stance_transition_velocity_.angular.x = smoothed_cmd_vel_.angular.x;
-    stance_transition_velocity_.angular.y = smoothed_cmd_vel_.angular.y;
-    stance_transition_velocity_.angular.z = smoothed_cmd_vel_.angular.z;
-    
-    // ROS_INFO("[StanceTransition] 开始站立过渡，持续时间: %.1f秒", stance_transition_duration_);
-    // ROS_INFO("[StanceTransition] 起始速度: lin(%.3f, %.3f, %.3f) ang(%.3f, %.3f, %.3f)", 
-    //          stance_transition_velocity_.linear.x, stance_transition_velocity_.linear.y, stance_transition_velocity_.linear.z,
-    //          stance_transition_velocity_.angular.x, stance_transition_velocity_.angular.y, stance_transition_velocity_.angular.z);
-  }
-  
-  void humanoidController::stopStanceTransition()
-  {
-    is_stance_transition_ = false;
-    // Walkenable_ = false;
-    ROS_INFO("[StanceTransition] 站立过渡结束，Walkenable设置为False");
-  }
-  
-  void humanoidController::updateStanceTransition(const ros::Time& current_time)
-  {
-    if (!is_stance_transition_)
-      return;
-    
-    double elapsed_time = (current_time - stance_transition_start_time_).toSec();
-    double alpha = elapsed_time / stance_transition_duration_;
-    
-    if (alpha >= 1.0)
-    {
-      stopStanceTransition();
-      return;
-    }
-    
-    double smooth_factor = 0.5 * (1.0 + cos(M_PI * alpha)); 
-    stance_transition_velocity_.linear.x *= smooth_factor;
-    stance_transition_velocity_.linear.y *= smooth_factor;
-    stance_transition_velocity_.linear.z *= smooth_factor;
-    stance_transition_velocity_.angular.x *= smooth_factor;
-    stance_transition_velocity_.angular.y *= smooth_factor;
-    stance_transition_velocity_.angular.z *= smooth_factor;
-    
-    ROS_DEBUG_STREAM("[StanceTransition] 过渡进度: " << (alpha * 100) << "%, 当前速度: lin(" 
-                     << stance_transition_velocity_.linear.x << ", " << stance_transition_velocity_.linear.y << ", " << stance_transition_velocity_.linear.z 
-                     << ") ang(" << stance_transition_velocity_.angular.x << ", " << stance_transition_velocity_.angular.y << ", " << stance_transition_velocity_.angular.z << ")");
-  }
-
-  // ==================== RL相关函数实现 ====================
-  
-  void humanoidController::printRLparam()
-  {
-    std::cout << "[RL param]:Inital Command: " << initialCommandDataRL_.getCommandRL().transpose() << std::endl;
-    std::cout << "[RL param]:Start Using RL: " << is_rl_controller_ << std::endl;
-    std::cout << "[RL param]:Joint Control Mode(0:CST, 1:CSV, 2:CSP):" << JointControlModeRL_.transpose() << std::endl;
-    std::cout << "[RL param]:Joint PD mode:" << JointPDModeRL_.transpose() << std::endl;
-    std::cout << "[RL param]:Joint Kp:" << jointKpRL_.transpose() << std::endl;
-    std::cout << "[RL param]:Joint Kd:" << jointKdRL_.transpose() << std::endl;
-    std::cout << "[RL param]:Initial State:" << initialStateRL_.transpose() << std::endl;
-    std::cout << "[RL param]:Torque Limits:" << torqueLimitsRL_.transpose() << std::endl;
-    std::cout << "[RL param]:Action Scale Test:" << actionScaleTestRL_.transpose() << std::endl;
-    std::cout << "=============================================================================" << std::endl;
-  }
-
-  std::vector<bool> humanoidController::commandLineToTargetTrajectories(const vector_t &joystick_origin_axis, geometry_msgs::Twist &cmdVel)
-  {
-    std::vector<bool> updated(6, false);
-    Eigen::Vector4d limit_vector;
-    limit_vector = velocityLimitsRL_;
-    limit_vector(0) *= 0.5;
-    double dead_zone = 0.05;
-    if (joystick_origin_axis.cwiseAbs().maxCoeff() < dead_zone)
-      return updated; // command line is zero, do nothing
-    if (abs(joystick_origin_axis(0)) > 0.5)
-    {
-      if (joystick_origin_axis(0) > 0)
-      {
-        limit_vector(0) *= 2;
-      }
-    }
-    commadLineTarget_.head(4) = joystick_origin_axis.head(4).cwiseProduct(limit_vector);
-    if (joystick_origin_axis.head(2).cwiseAbs().maxCoeff() > dead_zone)
-    {
-      cmdVel.linear.x = commadLineTarget_(0);
-      cmdVel.linear.y = commadLineTarget_(1);
-      updated[0] = true;
-      updated[1] = true;
-    }
-    if (std::abs(joystick_origin_axis(2)) > dead_zone)
-    {
-      updated[2] = true;
-      cmdVel.linear.z = commadLineTarget_(2);
-    }
-    else
-    {
-      cmdVel.linear.z = 0.0;
-    }
-    if (std::abs(commadLineTarget_(3)) > dead_zone)
-    {
-      updated[3] = true;
-      cmdVel.angular.z = commadLineTarget_(3);
-    }
-    return updated;
-  }
-
-  // ==================== 速度平滑系统函数实现 ====================
-  
-  void humanoidController::initializeVelocitySmoothing()
-  {
-    // 已禁用速度平滑，无需初始化
-  }
-  
-  geometry_msgs::Twist humanoidController::smoothVelocityCommand(const geometry_msgs::Twist& target_vel, const ros::Time& current_time)
-  {
-    geometry_msgs::Twist smoothed_vel = smoothed_cmd_vel_;
-    
-    // 计算时间差
-    double dt = (current_time - last_velocity_update_time_).toSec();
-    if (dt <= 0.0) dt = 0.001; // 避免除零错误
-    
-    // 各轴独立平滑，避免不同轴之间相互影响
-    auto apply_axis_smooth = [&](double target, double current) -> double {
-      double diff = target - current;
-      double abs_target = std::abs(target);
-      double factor = velocity_smooth_factor_;
-      // 目标接近零时更快收敛
-      if (abs_target < 0.01) {
-        factor = velocity_smooth_factor_;
-      } else if (std::abs(diff) > max_velocity_change_) {
-        // 单轴变化较大时，仅该轴降低平滑因子
-        factor = velocity_smooth_factor_ * 0.5;
-      }
-      return current + diff * factor;
-    };
-
-    smoothed_vel.linear.x = apply_axis_smooth(target_vel.linear.x, smoothed_vel.linear.x);
-    smoothed_vel.linear.y = apply_axis_smooth(target_vel.linear.y, smoothed_vel.linear.y);
-    smoothed_vel.linear.z = apply_axis_smooth(target_vel.linear.z, smoothed_vel.linear.z);
-    smoothed_vel.angular.x = apply_axis_smooth(target_vel.angular.x, smoothed_vel.angular.x);
-    smoothed_vel.angular.y = apply_axis_smooth(target_vel.angular.y, smoothed_vel.angular.y);
-    smoothed_vel.angular.z = apply_axis_smooth(target_vel.angular.z, smoothed_vel.angular.z);
-    
-    // 更新时间和保存当前值
-    last_velocity_update_time_ = current_time;
-    previous_cmd_vel_ = smoothed_cmd_vel_;
-    smoothed_cmd_vel_ = smoothed_vel;
-    
-    return smoothed_vel;
-  }
-  
-  double humanoidController::calculateVelocityMagnitude(const geometry_msgs::Twist& vel)
-  {
-    return std::sqrt(vel.linear.x * vel.linear.x + 
-                     vel.linear.y * vel.linear.y + 
-                     vel.linear.z * vel.linear.z +
-                     vel.angular.x * vel.angular.x + 
-                     vel.angular.y * vel.angular.y + 
-                     vel.angular.z * vel.angular.z);
-  }
-  
-  // ==================== 原地踏步系统函数实现 ====================
-  
-  void humanoidController::startInPlaceStepping(const ros::Time& current_time)
-  {
-    if (!enable_in_place_stepping_)
-    {
-      return;
-    }
-    
-    is_in_place_stepping_ = true;
-    in_place_step_start_time_ = current_time;
-    
-    in_place_step_velocity_.linear.x = -0.2;
-    in_place_step_velocity_.linear.y = 0.0;
-    in_place_step_velocity_.linear.z = 0.0;
-    in_place_step_velocity_.angular.x = 0.0;
-    in_place_step_velocity_.angular.y = 0.0;
-    in_place_step_velocity_.angular.z = 0.025;
-  }
-  
-  void humanoidController::updateInPlaceStepping(const ros::Time& current_time)
-  {
-    if (!is_in_place_stepping_)
-      return;
-    
-    double elapsed_time = (current_time - in_place_step_start_time_).toSec();
-    
-    if (elapsed_time >= in_place_step_duration_)
-    {
-      is_in_place_stepping_ = false;
-    }
-  }
-  
-  void humanoidController::stopInPlaceStepping()
-  {
-    is_in_place_stepping_ = false;
-  }
-  
-  // ==================== 持续原地踏步系统函数实现 ====================
-  
-  void humanoidController::startContinuousInPlaceStepping(const ros::Time& current_time)
-  {
-    is_continuous_in_place_stepping_ = true;
-    
-    // 设置持续原地踏步的速度命令（很小的速度，让机器人原地踏步）
-    continuous_in_place_step_velocity_.linear.x = -0.21;  // 很小的前进速度
-    continuous_in_place_step_velocity_.linear.y = 0.0;
-    continuous_in_place_step_velocity_.linear.z = 0.0;
-    continuous_in_place_step_velocity_.angular.x = 0.0;
-    continuous_in_place_step_velocity_.angular.y = 0.0;
-    continuous_in_place_step_velocity_.angular.z = 0.025;
-    
-    // ROS_INFO("[ContinuousInPlaceStepping] 开始持续原地踏步");
-  }
-  
-  void humanoidController::stopContinuousInPlaceStepping()
-  {
-    is_continuous_in_place_stepping_ = false;
-    // ROS_INFO("[ContinuousInPlaceStepping] 停止持续原地踏步");
-  }
-  
-  void humanoidController::updateContinuousInPlaceStepping(const ros::Time& current_time)
-  {
-    if (!is_continuous_in_place_stepping_)
-      return;
-    
-    // 持续原地踏步不需要时间限制，会一直进行直到手动停止
-    // ROS_DEBUG_STREAM("[ContinuousInPlaceStepping] 持续原地踏步中...");
-  }
-
-
-
-  // 手臂动作平滑插值相关函数实现
-  void humanoidController::initArmInterpolation()
-  {
-    arm_interpolation_start_pos_.resize(armNumReal_);
-    arm_interpolation_start_vel_.resize(armNumReal_);
-    arm_interpolation_target_pos_.resize(armNumReal_);
-    arm_interpolation_target_vel_.resize(armNumReal_);
-    
-    arm_interpolation_start_pos_.setZero();
-    arm_interpolation_start_vel_.setZero();
-    arm_interpolation_target_pos_.setZero();
-    arm_interpolation_target_vel_.setZero();
-    
-    last_cmdStance_ = -1;
-    is_arm_interpolating_ = false;
-    interpolation_start_time_ = 0.0;
-    
-    // 添加紧急停止标志
-    emergency_stop_interpolation_ = false;
-    
-    std::cout << "[ArmInterpolation] 手臂双向插值系统初始化完成" << std::endl;
-  }
-
-  void humanoidController::updateActionsForInterpolation(const ros::Time &time)
-  {
-    // 检查紧急停止标志
-    if (emergency_stop_interpolation_)
-    {
-      std::cout << "[ArmInterpolation] 检测到紧急停止标志，停止所有插值" << std::endl;
-      is_arm_interpolating_ = false;
-      emergency_stop_interpolation_ = false;
-      return;
-    }
-    
-    // 只在行走模式插值时修改actions_
-    if (is_arm_interpolating_)
-    {
-      CommandDataRL cmdData = getCommandDataRL();
-      if (cmdData.cmdStance_ == 0)  // 行走模式
-      {
-        // 使用传入的time参数，确保时间同步
-        double elapsed_time = time.toSec() - interpolation_start_time_;
-        
-        // 添加时间同步检查
-        double current_time_diff = std::abs(time.toSec() - ros::Time::now().toSec());
-        if (current_time_diff > 0.1) // 如果时间差异超过0.1秒
-        {
-          std::cout << "[ArmInterpolation] 警告：时间差异较大(" << current_time_diff 
-                    << "秒)，可能存在时间同步问题" << std::endl;
-        }
-        
-        // 添加安全检查：防止负值和除零错误
-        if (elapsed_time < 0.0)
-        {
-          std::cout << "[ArmInterpolation] 警告：检测到负的经过时间(" << elapsed_time 
-                    << ")，重置插值状态" << std::endl;
-          is_arm_interpolating_ = false;
-          return;
-        }
-        
-        if (interpolation_duration_ <= 0.0)
-        {
-          std::cout << "[ArmInterpolation] 错误：插值持续时间为0或负数(" << interpolation_duration_ 
-                    << ")，跳过插值" << std::endl;
-          is_arm_interpolating_ = false;
-          return;
-        }
-        
-        double alpha = elapsed_time / interpolation_duration_;
-        
-        if (alpha >= 1.0)
-        {
-          alpha = 1.0;
-          is_arm_interpolating_ = false;
-        }
-        
-        // 计算插值位置
-        Eigen::VectorXd interpolated_pos = getInterpolatedArmPos(alpha);
-        
-        // 添加NaN检查
-        bool has_nan = false;
-        for(int i = 0; i < interpolated_pos.size(); ++i)
-        {
-          if (std::isnan(interpolated_pos(i)))
-          {
-            has_nan = true;
-            break;
-          }
-        }
-        
-        if (has_nan)
-        {
-          std::cout << "[ArmInterpolation] 错误：插值结果包含NaN值，停止插值" << std::endl;
-          is_arm_interpolating_ = false;
-          emergency_stop_interpolation_ = true; // 设置紧急停止标志
-          return;
-        }
-        
-        // 修改actions_的手臂部分
-        {
-          std::lock_guard<std::mutex> lock(action_mtx_);
-          for(int arm_idx = 0; arm_idx < armNumReal_; ++arm_idx)
-          {
-            int global_idx = jointNumReal_ + waistNum_ + arm_idx;
-            double target_pos = interpolated_pos(arm_idx);
-            double default_pos = defalutJointPosRL_[global_idx];
-            
-            // 添加安全检查
-            if (std::isnan(target_pos) || std::isnan(default_pos) || 
-                std::isnan(actionScaleRL_) || std::isnan(actionScaleTestRL_[global_idx]))
-            {
-              std::cout << "[ArmInterpolation] 错误：计算action时检测到NaN值，跳过此关节" << std::endl;
-              continue;
-            }
-            
-            if (actionScaleRL_ * actionScaleTestRL_[global_idx] == 0.0)
-            {
-              std::cout << "[ArmInterpolation] 错误：actionScale为0，跳过此关节" << std::endl;
-              continue;
-            }
-            
-            double action_value = (target_pos - default_pos) / (actionScaleRL_ * actionScaleTestRL_[global_idx]);
-            actionsRL_[global_idx] = action_value;
-          }
-        }
-        
-        ros_logger_->publishValue("/arm_interpolation/updateActions_alpha", alpha);
-        ros_logger_->publishVector("/arm_interpolation/updateActions_interpolated_pos", interpolated_pos);
-      }
-    }
-  }
-
-  void humanoidController::startArmInterpolation(const ros::Time &time, 
-                                                const Eigen::VectorXd &current_pos, 
-                                                const Eigen::VectorXd &current_vel,
-                                                const Eigen::VectorXd &target_pos, 
-                                                const Eigen::VectorXd &target_vel)
-  {
-    // 添加输入参数有效性检查
-    if (current_pos.size() != target_pos.size())
-    {
-      std::cout << "[ArmInterpolation] 错误：当前位置和目标位置维度不匹配(" 
-                << current_pos.size() << " vs " << target_pos.size() << ")" << std::endl;
-      return;
-    }
-    
-    if (current_vel.size() != target_vel.size())
-    {
-      std::cout << "[ArmInterpolation] 错误：当前速度和目标速度维度不匹配(" 
-                << current_vel.size() << " vs " << target_vel.size() << ")" << std::endl;
-      return;
-    }
-    
-    // 检查输入是否包含NaN
-    bool has_nan = false;
-    for(int i = 0; i < current_pos.size(); ++i)
-    {
-      if (std::isnan(current_pos(i)) || std::isnan(target_pos(i)))
-      {
-        has_nan = true;
-        break;
-      }
-    }
-    for(int i = 0; i < current_vel.size(); ++i)
-    {
-      if (std::isnan(current_vel(i)) || std::isnan(target_vel(i)))
-      {
-        has_nan = true;
-        break;
-      }
-    }
-    
-    if (has_nan)
-    {
-      std::cout << "[ArmInterpolation] 错误：输入参数包含NaN值，跳过插值" << std::endl;
-      return;
-    }
-    
-    // 检查位置差异，如果差异很小就跳过插值
-    double position_diff = (target_pos - current_pos).norm();
-    const double min_interpolation_threshold = 0.05; // 0.05弧度 ≈ 3度
-    
-    if (position_diff < min_interpolation_threshold)
-    {
-      std::cout << "[ArmInterpolation] 位置差异很小(" << position_diff 
-                << " rad)，跳过插值直接切换" << std::endl;
-      is_arm_interpolating_ = false;
-      return;
-    }
-    
-    // 检查插值持续时间是否有效
-    if (interpolation_duration_ <= 0.0)
-    {
-      std::cout << "[ArmInterpolation] 错误：插值持续时间无效(" << interpolation_duration_ 
-                << ")，跳过插值" << std::endl;
-      return;
-    }
-    
-    arm_interpolation_start_pos_ = current_pos;
-    arm_interpolation_start_vel_ = current_vel;
-    arm_interpolation_target_pos_ = target_pos;
-    arm_interpolation_target_vel_ = target_vel;
-    
-    interpolation_start_time_ = time.toSec();
-    is_arm_interpolating_ = true;
-    
-    std::cout << "[ArmInterpolation] 开始手臂动作插值，持续时间: " << interpolation_duration_ << "秒" << std::endl;
-    std::cout << "[ArmInterpolation] 起始位置: " << arm_interpolation_start_pos_.transpose() << std::endl;
-    std::cout << "[ArmInterpolation] 目标位置: " << arm_interpolation_target_pos_.transpose() << std::endl;
-    std::cout << "[ArmInterpolation] 总位置变化: " << position_diff << " rad" << std::endl;
-  }
-
-  Eigen::VectorXd humanoidController::getInterpolatedArmPos(double alpha)
-  {
-    // 添加输入参数检查
-    if (std::isnan(alpha))
-    {
-      std::cout << "[ArmInterpolation] 错误：alpha参数为NaN，返回起始位置" << std::endl;
-      return arm_interpolation_start_pos_;
-    }
-    
-    // 限制alpha在[0,1]范围内
-    alpha = std::max(0.0, std::min(1.0, alpha));
-    
-    // 检查起始和目标位置是否有效
-    if (arm_interpolation_start_pos_.size() != arm_interpolation_target_pos_.size())
-    {
-      std::cout << "[ArmInterpolation] 错误：起始位置和目标位置维度不匹配" << std::endl;
-      return arm_interpolation_start_pos_;
-    }
-    
-    // 使用五次多项式插值，提供更平滑的过渡
-    // 5次函数: 6t⁵ - 15t⁴ + 10t³，在起点和终点的一阶和二阶导数都为0
-    double alpha_smooth = alpha * alpha * alpha * (6.0 * alpha * alpha - 15.0 * alpha + 10.0);
-    
-    // 限制alpha_smooth在[0,1]范围内
-    alpha_smooth = std::max(0.0, std::min(1.0, alpha_smooth));
-    
-    Eigen::VectorXd result = (1.0 - alpha_smooth) * arm_interpolation_start_pos_ + alpha_smooth * arm_interpolation_target_pos_;
-    
-    // 检查结果是否包含NaN
-    for(int i = 0; i < result.size(); ++i)
-    {
-      if (std::isnan(result(i)))
-      {
-        std::cout << "[ArmInterpolation] 错误：插值结果包含NaN，返回起始位置" << std::endl;
-        return arm_interpolation_start_pos_;
-      }
-    }
-    
-    return result;
-  }
-
-  Eigen::VectorXd humanoidController::getInterpolatedArmVel(double alpha)
-  {
-    // 添加输入参数检查
-    if (std::isnan(alpha))
-    {
-      std::cout << "[ArmInterpolation] 错误：alpha参数为NaN，返回起始速度" << std::endl;
-      return arm_interpolation_start_vel_;
-    }
-    
-    // 限制alpha在[0,1]范围内
-    alpha = std::max(0.0, std::min(1.0, alpha));
-    
-    // 检查起始和目标速度是否有效
-    if (arm_interpolation_start_vel_.size() != arm_interpolation_target_vel_.size())
-    {
-      std::cout << "[ArmInterpolation] 错误：起始速度和目标速度维度不匹配" << std::endl;
-      return arm_interpolation_start_vel_;
-    }
-    
-    // 对于速度，使用相同的五次多项式插值
-    double alpha_smooth = alpha * alpha * alpha * (6.0 * alpha * alpha - 15.0 * alpha + 10.0);
-    
-    // 限制alpha_smooth在[0,1]范围内
-    alpha_smooth = std::max(0.0, std::min(1.0, alpha_smooth));
-    
-    Eigen::VectorXd result = (1.0 - alpha_smooth) * arm_interpolation_start_vel_ + alpha_smooth * arm_interpolation_target_vel_;
-    
-    // 检查结果是否包含NaN
-    for(int i = 0; i < result.size(); ++i)
-    {
-      if (std::isnan(result(i)))
-      {
-        std::cout << "[ArmInterpolation] 错误：插值速度结果包含NaN，返回起始速度" << std::endl;
-        return arm_interpolation_start_vel_;
-      }
-    }
-    
-    return result;
-  }
-
-  void humanoidController::updateArmInterpolation(const ros::Time &time, kuavo_msgs::jointCmd &jointCmdMsg)
-  {
-    // 检查紧急停止标志
-    if (emergency_stop_interpolation_)
-    {
-      std::cout << "[ArmInterpolation] 检测到紧急停止标志，停止所有插值" << std::endl;
-      is_arm_interpolating_ = false;
-      emergency_stop_interpolation_ = false;
-      return;
-    }
-    
-    CommandDataRL armCommandData = getCommandDataRL();
-    
-    // 检测模式切换 - 支持双向插值
-    if (last_cmdStance_ != -1 && last_cmdStance_ != armCommandData.cmdStance_)
-    {
-      if (last_cmdStance_ == 0 && armCommandData.cmdStance_ == 1)
-      {
-        // 从行走模式切换到站立模式，开始插值
-        Eigen::VectorXd current_arm_pos = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
-        Eigen::VectorXd current_arm_vel = jointVelWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
-        desire_arm_q_ = defalutJointPosRL_.segment(jointNumReal_ + waistNum_, armNumReal_);
-        desire_arm_v_ = Eigen::VectorXd::Zero(armNumReal_);
-        Eigen::VectorXd target_arm_pos = desire_arm_q_;
-        Eigen::VectorXd target_arm_vel = desire_arm_v_;
-        
-        startArmInterpolation(time, current_arm_pos, current_arm_vel, target_arm_pos, target_arm_vel);
-        std::cout << "[ArmInterpolation] 模式切换: 行走 -> 站立，开始插值到VR第一个动作" << std::endl;
-        std::cout << "[ArmInterpolation] 当前手臂位置: " << current_arm_pos.transpose() << std::endl;
-        std::cout << "[ArmInterpolation] VR目标位置: " << target_arm_pos.transpose() << std::endl;
-        std::cout << "[ArmInterpolation] 位置差异幅度: " << (target_arm_pos - current_arm_pos).norm() << " rad" << std::endl;
-      }
-      else if (last_cmdStance_ == 1 && armCommandData.cmdStance_ == 0)
-      {
-        // 从站立模式切换到行走模式，开始插值
-        Eigen::VectorXd current_arm_pos = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
-        Eigen::VectorXd current_arm_vel = jointVelWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
-        
-        // 改进：使用默认手臂位置作为目标，而不是不稳定的RL输出
-        Eigen::VectorXd target_arm_pos = defalutJointPosRL_.segment(jointNumReal_ + waistNum_, armNumReal_);
-        Eigen::VectorXd target_arm_vel = Eigen::VectorXd::Zero(armNumReal_);
-        
-        startArmInterpolation(time, current_arm_pos, current_arm_vel, target_arm_pos, target_arm_vel);
-        std::cout << "[ArmInterpolation] 模式切换: 站立 -> 行走，开始插值到默认手臂位置" << std::endl;
-        std::cout << "[ArmInterpolation] 当前手臂位置: " << current_arm_pos.transpose() << std::endl;
-        std::cout << "[ArmInterpolation] 默认目标位置: " << target_arm_pos.transpose() << std::endl;
-        std::cout << "[ArmInterpolation] 位置差异幅度: " << (target_arm_pos - current_arm_pos).norm() << " rad" << std::endl;
-      }
-    }
-    
-    last_cmdStance_ = armCommandData.cmdStance_;
-    
-    // 处理插值（适用于两种模式）
-    if (is_arm_interpolating_)
-    {
-      double elapsed_time = time.toSec() - interpolation_start_time_;
-      
-      // 添加安全检查：防止负值和除零错误
-      if (elapsed_time < 0.0)
-      {
-        std::cout << "[ArmInterpolation] 警告：检测到负的经过时间(" << elapsed_time 
-                  << ")，重置插值状态" << std::endl;
-        is_arm_interpolating_ = false;
-        return;
-      }
-      
-      if (interpolation_duration_ <= 0.0)
-      {
-        std::cout << "[ArmInterpolation] 错误：插值持续时间为0或负数(" << interpolation_duration_ 
-                  << ")，跳过插值" << std::endl;
-        is_arm_interpolating_ = false;
-        return;
-      }
-      
-      double alpha = elapsed_time / interpolation_duration_;
-      
-      if (alpha >= 1.0)
-      {
-        // 插值完成
-        alpha = 1.0;
-        is_arm_interpolating_ = false;
-        if (armCommandData.cmdStance_ == 1)
-        {
-          std::cout << "[ArmInterpolation] 插值完成，切换到正常VR控制" << std::endl;
-        }
-        else
-        {
-          std::cout << "[ArmInterpolation] 插值完成，切换到正常RL控制" << std::endl;
-        }
-      }
-      
-      // 计算插值后的位置和速度
-      Eigen::VectorXd interpolated_pos = getInterpolatedArmPos(alpha);
-      Eigen::VectorXd interpolated_vel = getInterpolatedArmVel(alpha);
-      
-      // 添加NaN检查
-      bool has_nan_pos = false;
-      bool has_nan_vel = false;
-      for(int i = 0; i < interpolated_pos.size(); ++i)
-      {
-        if (std::isnan(interpolated_pos(i)))
-        {
-          has_nan_pos = true;
-          break;
-        }
-      }
-      for(int i = 0; i < interpolated_vel.size(); ++i)
-      {
-        if (std::isnan(interpolated_vel(i)))
-        {
-          has_nan_vel = true;
-          break;
-        }
-      }
-      
-      if (has_nan_pos || has_nan_vel)
-      {
-        std::cout << "[ArmInterpolation] 错误：插值结果包含NaN值，停止插值" << std::endl;
-        is_arm_interpolating_ = false;
-        emergency_stop_interpolation_ = true; // 设置紧急停止标志
-        return;
-      }
-      
-      // 添加手臂位置和速度的合理性检查
-      const double max_arm_position = 3.14; // 约180度
-      const double max_arm_velocity = 10.0; // 弧度/秒
-      
-      bool position_out_of_range = false;
-      bool velocity_out_of_range = false;
-      
-      for(int i = 0; i < interpolated_pos.size(); ++i)
-      {
-        if (std::abs(interpolated_pos(i)) > max_arm_position)
-        {
-          position_out_of_range = true;
-          std::cout << "[ArmInterpolation] 警告：手臂位置超出合理范围(" << interpolated_pos(i) 
-                    << ")，关节索引: " << i << std::endl;
-        }
-      }
-      
-      for(int i = 0; i < interpolated_vel.size(); ++i)
-      {
-        if (std::abs(interpolated_vel(i)) > max_arm_velocity)
-        {
-          velocity_out_of_range = true;
-          std::cout << "[ArmInterpolation] 警告：手臂速度超出合理范围(" << interpolated_vel(i) 
-                    << ")，关节索引: " << i << std::endl;
-        }
-      }
-      
-      if (position_out_of_range || velocity_out_of_range)
-      {
-        std::cout << "[ArmInterpolation] 错误：检测到异常的手臂位置或速度，停止插值" << std::endl;
-        is_arm_interpolating_ = false;
-        emergency_stop_interpolation_ = true; // 设置紧急停止标志
-        return;
-      }
-      
-      if (armCommandData.cmdStance_ == 1)
-      {
-        // 站立模式：使用插值结果直接控制手臂
-        arm_torque_controller_->setMeasuredState(jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_), jointVelWBC_.segment(jointNumReal_ + waistNum_, armNumReal_));
-        vector_t arm_tau_desired = arm_torque_controller_->computeTorque(interpolated_pos, interpolated_vel, vector_t::Zero(armNumReal_));
-        
-        for(int i = jointNumReal_ + waistNum_; i < jointNumReal_ + waistNum_ + armNumReal_; ++i)
-        {
-          int arm_idx = i - jointNumReal_ - waistNum_;
-          jointCmdMsg.joint_q[i] = interpolated_pos(arm_idx);
-          jointCmdMsg.joint_v[i] = interpolated_vel(arm_idx);
-          jointCmdMsg.joint_kp[i] = jointKpRL_[i];
-          jointCmdMsg.joint_kd[i] = jointKdRL_[i];
-          jointCmdMsg.tau[i] = arm_tau_desired(arm_idx);
-          jointCmdMsg.tau_ratio[i] = 1;
-          jointCmdMsg.tau_max[i] = torqueLimitsRL_[i];
-          jointCmdMsg.control_modes[i] = JointControlModeRL_(i);
-        }
-      }
-      else
-      {
-        std::cout << "[ArmInterpolation] 行走模式插值中" << std::endl;
-      }
-      
-      // 发布插值状态
-      ros_logger_->publishValue("/arm_interpolation/alpha", alpha);
-      ros_logger_->publishVector("/arm_interpolation/interpolated_pos", interpolated_pos);
-      ros_logger_->publishVector("/arm_interpolation/interpolated_vel", interpolated_vel);
-      
-      // 每隔0.1秒输出一次插值进度（避免过多日志）
-      static double last_debug_time = 0.0;
-      if (time.toSec() - last_debug_time > 0.1)
-      {
-        std::cout << "[ArmInterpolation] 插值进度: " << std::fixed << std::setprecision(1) 
-                  << (alpha * 100.0) << "%, 当前位置: " << interpolated_pos.transpose() << std::endl;
-        last_debug_time = time.toSec();
-      }
-    }
-    // else
-    // {
-    //   // 不在插值状态，按正常逻辑处理
-    //   if (armCommandData.cmdStance_ == 1)
-    //   {
-    //     // 站立模式：正常使用VR控制 jointNumReal_ + armNumReal_
-    //     arm_torque_controller_->setMeasuredState(jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_), jointVelWBC_.segment(jointNumReal_ + waistNum_, armNumReal_));
-    //     vector_t arm_tau_desired = arm_torque_controller_->computeTorque(desire_arm_q_, desire_arm_v_, vector_t::Zero(armNumReal_));
-        
-    //     for(int i = jointNumReal_ + waistNum_; i < jointNumReal_ + waistNum_ + armNumReal_; ++i)
-    //     {
-    //       int arm_idx = i - jointNumReal_ - waistNum_;/// 
-    //       jointCmdMsg.joint_q[i] = desire_arm_q_(arm_idx);
-    //       jointCmdMsg.joint_v[i] = desire_arm_v_(arm_idx);
-    //       jointCmdMsg.joint_kp[i] = jointKpRL_[i];
-    //       jointCmdMsg.joint_kd[i] = jointKdRL_[i];
-    //       jointCmdMsg.tau[i] = arm_tau_desired(arm_idx);
-    //       jointCmdMsg.tau_ratio[i] = 1;
-    //       jointCmdMsg.tau_max[i] = torqueLimitsRL_[i];
-    //       jointCmdMsg.control_modes[i] = JointControlModeRL_(i);
-    //     }
-    //   }
-    //   // 行走模式下不在插值时，完全由RL控制器处理，无需特殊处理
-    // }
-  }
-
-  void humanoidController::inference_thread_func()
-  {
-    
-    ros::Rate inference_rate(inferenceFrequencyRL_);
-    while (ros::ok())
-    {
-      if (!inference_running_)
-      {
-        inference_rate.sleep();
-        continue;
-      }
-      SensorData sensors_data = getRobotSensorData();
-      const auto measuredRbdStateRL_ = getRobotState();
-      Eigen::VectorXd local_measure_state = measuredRbdStateRL_;
-      updateObservation(local_measure_state, sensors_data);
-      inference();
-      inference_rate.sleep();
-    }
-  }
-  void humanoidController::inference()
-  {
-    infer_request_ = compiled_model_.create_infer_request();
-    const auto input_port = compiled_model_.input();
-    Eigen::VectorXf float_network_input = networkInputDataRL_.cast<float>();
-    ov::Tensor input_tensor(input_port.get_element_type(), input_port.get_shape(), float_network_input.data());
-    infer_request_.set_input_tensor(input_tensor);
-    infer_request_.start_async();
-    infer_request_.wait();
-    const auto output_tensor = infer_request_.get_output_tensor();
-    const size_t output_buf_length = output_tensor.get_size();
-    const auto output_buf = output_tensor.data<float>();
-    const size_t expected_output_length = withArmRL_ ? jointNumReal_ + waistNum_ + armNumReal_ : jointNumReal_ + waistNum_;
-    if (output_buf_length != expected_output_length)
-    {
-      std::cout << "神经网络输出维度错误！！维度等于： " << output_buf_length << std::endl;
-      return;
-    }
-    Eigen::VectorXd actionTargetPosRL_(output_buf_length);
-    {
-      std::lock_guard<std::mutex> lock(action_mtx_);
-      for (int i = 0; i < output_buf_length; ++i)
-      {
-        actionsRL_[i] = output_buf[i];
-        actionTargetPosRL_[i] = output_buf[i] * actionScaleRL_ + defalutJointPosRL_[i];
-      }
-      clip(actionsRL_, jointNumReal_ + waistNum_ + armNumReal_, clipActionsRL_);
-      ros_logger_->publishVector("/rl_controller/actions", actionsRL_);
-      ros_logger_->publishVector("/rl_controller/actionTargetPos", actionTargetPosRL_);
-    }
-  }
-  void humanoidController::updatePhase(const CommandDataRL &CommandDataRL_)
-  {
-    float ratio = CommandDataRL_.cmdVelLineX_ / velocityLimitsRL_(0);
-    // double nearest_int_phase = std::round(phaseRL_);
-    double targetCycleTimeRL = (ratio > switch_ratioRL_) ? cycleTime_shortRL_ : cycleTimeRL_;
-    if (targetCycleTimeRL != currentCycleTimeRL_)
-    {
-      float temp_phase = episodeLengthRL_ * dt_ / currentCycleTimeRL_;
-      episodeLengthRL_ = int((targetCycleTimeRL/dt_)*(temp_phase - int(temp_phase)));
-      // episodeLength_ = targetCycleTime / dt_ / 2;   //将周期置为0.5的位置
-    }
-    double alpha = 1;
-    currentCycleTimeRL_ = (1.0 - alpha) * currentCycleTimeRL_ + alpha * targetCycleTimeRL;
-    
-    // 基于 episode 进度计算 phase
-    // phaseRL_ = CommandDataRL_.cmdStance_ == 1 ? 0.0 : episodeLengthRL_ * dt_ / currentCycleTimeRL_;
-    phaseRL_ = CommandDataRL_.cmdStance_ == 1 ? 0.0 : episodeLengthRL_ * dt_ / currentCycleTimeRL_;
-
-    commandPhaseRL_(0) = sin(2 * M_PI * phaseRL_);
-    commandPhaseRL_(1) = cos(2 * M_PI * phaseRL_);
-    rl_plannedMode_ = (commandPhaseRL_(0) < 0) ? ModeNumber::SF : (commandPhaseRL_(0) > 0) ? ModeNumber::FS
-                                                                                       : ModeNumber::SS;
-  }
-
-   void humanoidController::clip(Eigen::VectorXd &a, int num, double limit)
-   {
-     a = a.cwiseMax(-limit).cwiseMin(limit);
-   }
-
-   void humanoidController::updateObservation(const Eigen::VectorXd &state_est, const SensorData &sensor_data)
-   {
-     CommandDataRL CommandDataRL_;
-     CommandDataRL_ = getCommandDataRL();
-     updatePhase(CommandDataRL_);
-     // Extract state data
-    //  std::cout << "[DEBUG] 进入 updateObservation" << std::endl;
-    //  std::cout << "[DEBUG] state_est: " << state_est << std::endl;
-     const Eigen::Vector3d baseEuler(state_est(2), state_est(1), state_est(0));
-     const Eigen::Vector3d baseAngVel(state_est(6 + jointNumReal_ + waistNum_ + armNumReal_ ),
-                                      state_est(6 + jointNumReal_ + waistNum_ + armNumReal_ + 1),
-                                      state_est(6 + jointNumReal_ + waistNum_ + armNumReal_ + 2));
-     const Eigen::Vector3d baseLineVel = state_est.segment(9 + jointNumReal_ + waistNum_ + armNumReal_, 3);
-     const Eigen::Vector3d basePos = state_est.segment(3, 3);
-     // Extract and process sensor data
-     Eigen::VectorXd jointPos = sensor_data.jointPos_ - defalutJointPosRL_;
-     const Eigen::VectorXd &jointVel = sensor_data.jointVel_;
-     Eigen::VectorXd jointTorque = sensor_data.jointCurrent_;
-     const Eigen::Vector3d &bodyAngVel = sensor_data.angularVel_;
-     const Eigen::Vector3d &bodyLineAcc = sensor_data.linearAccel_;
-     const Eigen::Vector3d &bodyLineFreeAcc = sensor_data.freeLinearAccel_;
-     // Normalize joint torques
-     for (int i = 0; i < jointNumReal_ + waistNum_ + armNumReal_; ++i)
-     {
-       jointTorque[i] /= torqueLimitsRL_[i];
-     }
-     // Transform base linear velocity
-     const Eigen::Matrix3d R = sensor_data.quat_offset_.matrix();
-     const Eigen::Vector3d bodyLineVel = R.transpose() * baseLineVel;
-     // Get local action
-     Eigen::VectorXd local_action;
-     {
-       std::lock_guard<std::mutex> lock(action_mtx_);
-       local_action = actionsRL_;
-       if(!is_rl_controller_)
-       {
-         local_action.setZero();
-       }
-     }
-     if (!withArmRL_)
-     {
-       local_action.tail(armNumReal_).setZero();
-     }
-    // Normalize command
-    CommandDataRL_.scale();
-    Eigen::VectorXd tempCommand_ = CommandDataRL_.getCommandRL();
-    
-    // 发布tempCommand数据
-    ros_logger_->publishVector("/rl_controller/tempCommand", tempCommand_);
-    
-    // Populate singleInputDataMap_
-     const std::map<std::string, Eigen::VectorXd> singleInputDataMap_ = {
-         {"baseEuler", baseEuler},
-         {"baseAngVel", baseAngVel},
-         {"baseLineVel", baseLineVel},
-         {"basePos", basePos},
-         {"jointPos", jointPos},
-         {"jointVel", jointVel},
-         {"jointTorque", jointTorque},
-         {"bodyAngVel", bodyAngVel},
-         {"bodyLineAcc", bodyLineAcc},
-         {"bodyLineFreeAcc", bodyLineFreeAcc},
-         {"bodyLineVel", bodyLineVel},
-         {"commandPhase", commandPhaseRL_},
-         {"command", tempCommand_},
-         {"action", local_action}};
-     // Fill singleInputData
-     int index = 0;
-     for (const auto &key : singleInputDataRLKeys)
-     {
-       const auto &value = singleInputDataRLID_[key];
-       singleInputDataRL_.segment(index, value[1]) = singleInputDataMap_.at(key).segment(value[0], value[1]) * value[2];
-       index += value[1];
-       ros_logger_->publishVector("/rl_controller/InputData/" + key, singleInputDataMap_.at(key).segment(value[0], value[1]) * value[2]);
-     }
-     // Clip and update input_deque
-     clip(singleInputDataRL_, numSingleObsRL_, clipObservationsRL_);
-     input_deque.push_back(singleInputDataRL_);
-     input_deque.pop_front();
-     // Update networkInputData_
-     for (int i = 0; i < frameStackRL_; ++i)
-     {
-       networkInputDataRL_.segment(i * numSingleObsRL_, numSingleObsRL_) = input_deque[i];
-     }
-     // Publish data
-    //  ros_logger_->publishVector("/rl_controller/singleInputData", singleInputDataRL_);
-   }
-  
-  
-  Eigen::VectorXd humanoidController::updateRLcmd(const vector_t &state)
-  {
-    // 在RL控制计算前检查并更新手臂插值状态
-    updateActionsForInterpolation(ros::Time::now());
-    
-    Eigen::VectorXd actuation(jointNumReal_ + waistNum_ + armNumReal_);
-    Eigen::VectorXd cmd_out(jointNumReal_ + waistNum_ + armNumReal_);
-    Eigen::VectorXd cmd(jointNumReal_ + waistNum_ + armNumReal_);
-    Eigen::VectorXd cmd_filter(jointNumReal_ + waistNum_ + armNumReal_);
-    Eigen::VectorXd torque(jointNumReal_ + waistNum_ + armNumReal_);
-    // std::cout << "state: " << state.size() << std::endl;
-    const Eigen::VectorXd jointPos_ = state.segment(6, jointNumReal_ + waistNum_ + armNumReal_);
-    const Eigen::VectorXd jointVel_ = state.tail(jointNumReal_ + waistNum_ + armNumReal_);
-    Eigen::VectorXd motorPos_ = jointPos_;
-    Eigen::VectorXd motorVel_ = jointVel_;
-    Eigen::VectorXd local_action;
-    {
-      std::lock_guard<std::mutex> lock(action_mtx_);
-      local_action = actionsRL_;
-    }
-    if (!withArmRL_)
-    {
-      local_action.tail(armNumReal_+ waistNum_).setZero();
-    }
-    motorPos_.head(jointNumReal_) = ankleSolver.joint_to_motor_position(jointPos_.head(jointNumReal_));
-    motorVel_.head(jointNumReal_) = ankleSolver.joint_to_motor_velocity(jointPos_.head(jointNumReal_), motorPos_, jointVel_.head(jointNumReal_));
-    Eigen::VectorXd jointTor_ = -(jointKdRL_.cwiseProduct(motorVel_));
-    jointTor_.head(jointNumReal_) = ankleSolver.motor_to_joint_torque(jointPos_.head(jointNumReal_), motorPos_, jointTor_.head(jointNumReal_));
-    for (int i = 0; i < jointNumReal_ + waistNum_ + armNumReal_; i++)
-    {
-      jointTor_(i) = jointTor_(i) + jointKpRL_(i) * (local_action[i] * actionScaleRL_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]);
-    }
-    if (is_real_)
-    {
-      for (int i = 0; i < jointNumReal_ + waistNum_ + armNumReal_; i++)
-      {
-        if (JointControlModeRL_(i) == 0)
-        {
-          if (JointPDModeRL_(i) == 0)
-          {
-            cmd[i] = jointKpRL_[i] * (local_action[i] * actionScaleRL_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel_[i];
-            cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
-            torque[i] = cmd[i];
-          }
-          else
-          {
-            cmd[i] = (local_action[i] * actionScaleRL_ * actionScaleTestRL_[i] + defalutJointPosRL_[i]);
-            torque[i] = jointKpRL_[i] * (local_action[i] * actionScaleRL_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel_[i];
-          }
-        }
-        else if (JointControlModeRL_(i) == 2)
-        {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScaleRL_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]);
-          torque[i] = jointTor_[i];
-        }
-      }
-    }
-    else
-    {
-      for (int i = 0; i < jointNumReal_ + waistNum_ + armNumReal_; i++)
-      {
-        if (JointControlModeRL_(i) == 0)
-        {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScaleRL_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel_[i];
-        }
-        else if (JointControlModeRL_(i) == 2)
-        {
-          cmd[i] = jointTor_[i];
-        }
-        cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
-        torque[i] = cmd[i];
-      }
-    }
-    cmd_filter = jointCmdFilterRL_.update(cmd);
-    cmd_out = cmd_filter.cwiseProduct(jointCmdFilterStateRL_) + cmd.cwiseProduct(Eigen::VectorXd::Ones(jointNumReal_ + waistNum_ + armNumReal_) - jointCmdFilterStateRL_);
-    actuation = cmd_out;
-
-    // actuation = cmd;// kuavo-RL仓库五代去掉了滤波
-    episodeLengthRL_++;
-    ros_logger_->publishVector("/rl_controller/cmd_out", cmd_out);
-    ros_logger_->publishVector("/rl_controller/torque", torque);
-    ros_logger_->publishVector("/rl_controller/cmd_filter", cmd_filter);
-    ros_logger_->publishVector("/rl_controller/cmd", cmd);
-    return actuation;
-  }
-
-  Eigen::VectorXd humanoidController::computeInterpolation(const InterpolationRequest& req, double alpha)
-  {
-    alpha = std::max(0.0, std::min(1.0, alpha));
-    
-    switch (req.interpolation_type)
-    {
-      case 0: // 线性插值
-      {
-        return (1.0 - alpha) * req.start_pos + alpha * req.target_pos;
-      }
-      
-      case 1: // 五次多项式插值（默认）
-      {
-        // 5次函数: 6t⁵ - 15t⁴ + 10t³，在起点和终点的一阶和二阶导数都为0
-        double alpha_smooth = alpha * alpha * alpha * (6.0 * alpha * alpha - 15.0 * alpha + 10.0);
-        return (1.0 - alpha_smooth) * req.start_pos + alpha_smooth * req.target_pos;
-      }
-      
-      case 2: // 三次样条插值（考虑速度）
-      {
-        // 三次Hermite插值
-        double t = alpha;
-        double t2 = t * t;
-        double t3 = t2 * t;
-        
-        double h00 = 2*t3 - 3*t2 + 1;
-        double h10 = t3 - 2*t2 + t;
-        double h01 = -2*t3 + 3*t2;
-        double h11 = t3 - t2;
-        
-        return h00 * req.start_pos + h10 * req.duration * req.start_vel + 
-               h01 * req.target_pos + h11 * req.duration * req.target_vel;
-      }
-      
-      default:
-        std::cerr << "[GeneralInterpolation] 警告：未知插值类型 " << req.interpolation_type 
-                  << "，使用五次多项式插值" << std::endl;
-        double alpha_smooth = alpha * alpha * alpha * (6.0 * alpha * alpha - 15.0 * alpha + 10.0);
-        return (1.0 - alpha_smooth) * req.start_pos + alpha_smooth * req.target_pos;
-    }
-  }
-  
-  Eigen::VectorXd humanoidController::computeInterpolationVelocity(const InterpolationRequest& req, double alpha)
-  {
-    alpha = std::max(0.0, std::min(1.0, alpha));
-    
-    switch (req.interpolation_type)
-    {
-      case 0: // 线性插值
-      {
-        return (req.target_pos - req.start_pos) / req.duration;
-      }
-      
-      case 1: // 五次多项式插值
-      {
-        // 五次多项式的导数: 30t⁴ - 60t³ + 30t²
-        double t = alpha;
-        double t2 = t * t;
-        double t3 = t2 * t;
-        double t4 = t3 * t;
-        double dt_dalpha = (30.0 * t4 - 60.0 * t3 + 30.0 * t2) / req.duration;
-        return dt_dalpha * (req.target_pos - req.start_pos);
-      }
-      
-      case 2: // 三次样条插值
-      {
-        double t = alpha;
-        double t2 = t * t;
-        
-        double dh00_dt = (6*t2 - 6*t) / req.duration;
-        double dh10_dt = (3*t2 - 4*t + 1) / req.duration;
-        double dh01_dt = (-6*t2 + 6*t) / req.duration;
-        double dh11_dt = (3*t2 - 2*t) / req.duration;
-        
-        return dh00_dt * req.start_pos + dh10_dt * req.duration * req.start_vel + 
-               dh01_dt * req.target_pos + dh11_dt * req.duration * req.target_vel;
-      }
-      
-      default:
-        double t = alpha;
-        double t2 = t * t;
-        double t3 = t2 * t;
-        double t4 = t3 * t;
-        double dt_dalpha = (30.0 * t4 - 60.0 * t3 + 30.0 * t2) / req.duration;
-        return dt_dalpha * (req.target_pos - req.start_pos);
-    }
-  }
-
   // ==================== MPC-RL插值系统实现 ====================
   void humanoidController::startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos)
   {
@@ -5112,6 +4183,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
     // 计算躯干位移距离（仅xyz用于限速）
     vector3_t target_position_torso = target_torso_pose.segment<3>(0);
+    target_position_torso.head(2) = current_torso_pose.head(2);
+
     vector3_t current_torso_pos = current_torso_pose.segment<3>(0);
     double torso_distance = (target_position_torso - current_torso_pos).norm();
 
@@ -5131,6 +4204,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     is_torso_interpolation_active_ = true;
     torso_interpolation_start_pose_ = current_torso_pose;
     torso_interpolation_target_pose_ = target_torso_pose;
+    torso_interpolation_target_pose_.head(2) = current_torso_pose.head(2);
     torso_interpolation_start_time_ = current_time;
     
     // 计算总期望插值时间（基于躯干和手臂的最大距离和最大速度）
@@ -5173,7 +4247,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     double distance_to_target = std::abs(pos_direction[2]);
     
     // 如果已经到达目标位置
-    if (distance_to_target < 0.003 || current_time - torso_interpolation_start_time_ > torso_interpolation_duration_*2)
+    if (distance_to_target < switch_distance_threshold_ || current_time - torso_interpolation_start_time_ > torso_interpolation_duration_*switch_timeout_multiplier_threshold_)
     {
       is_torso_interpolation_active_ = false;
       is_arm_interpolating_ = false;
@@ -5205,7 +4279,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     // 使用插值后的rpy
     twist_msg.angular.x = torso_interpolation_target_pose_(3); // roll
     twist_msg.angular.y = torso_interpolation_target_pose_(4); // pitch
-    twist_msg.angular.z = torso_interpolation_target_pose_(5); // yaw
+    twist_msg.angular.z = torso_interpolation_target_pose_(5); // yaw、、
     
     cmdPoseWorldPublisher_.publish(twist_msg);
     
@@ -5218,33 +4292,14 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       double z_diff = interpolated_pose(2) - default_state_[8];
       std::cout << "MPC-RL: TO "<< (is_rl_controller_ ? "RL" : "MPC") << ", elapsed_time: " 
                 << elapsed_time << "s, expected duration: " << torso_interpolation_duration_ 
-                << "s, z_diff: " << z_diff << "m" << std::endl;
+                << "s, distance_to_target: " << distance_to_target << "m" << std::endl;
       std::cout << "torso_interpolation_target_pose_: " << torso_interpolation_target_pose_.transpose() << std::endl;
       std::cout << "arm_interpolated_pos: " << arm_interpolation_result_.transpose() << std::endl;
       last_debug_time = current_time;
     }
   }
 
-  void humanoidController::stopTorsoInterpolation()
-  {
-    if (is_torso_interpolation_active_)
-    {
-      is_torso_interpolation_active_ = false;
-      std::cout << "Torso interpolation stopped" << std::endl;
-    }
-  }
 
-  double humanoidController::getTorsoInterpolationProgress() const
-  {
-    if (!is_torso_interpolation_active_)
-      return 0.0;
-    
-    // 基于时间计算进度
-    double elapsed_time = last_interpolation_time_ - torso_interpolation_start_time_;
-    double progress = (elapsed_time / torso_interpolation_duration_) * 100.0;
-    
-    return std::max(0.0, std::min(100.0, progress));
-  }
 
  } // namespace humanoid_controller
 // PLUGINLIB_EXPORT_CLASS(humanoid_controller::humanoidController)

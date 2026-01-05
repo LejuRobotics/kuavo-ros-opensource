@@ -16,7 +16,7 @@ from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 import argparse
 import time
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Bool
 import threading  # 添加线程支持
 import subprocess
 import sys
@@ -216,6 +216,14 @@ class ActionPlayer:
             self.gait_time_callback
         )
 
+        # 订阅手臂执行状态话题
+        self.is_arm_executing = False
+        self.is_arm_executing_sub = rospy.Subscriber(
+            '/humanoid/mpc/is_arm_executing',
+            Bool,
+            self.is_arm_executing_callback
+        )
+
         # mode_3 累积时间
         self.mode_3_t = 0
 
@@ -238,6 +246,10 @@ class ActionPlayer:
             self.gait_start_time = msg.start_time
             self.gait_start_time_received = True
             rospy.loginfo(f"收到步态开始时间: {self.gait_start_time}, MPC当前时间: {self.mpc_time}")
+
+    def is_arm_executing_callback(self, msg):
+        """手臂执行状态回调函数"""
+        self.is_arm_executing = msg.data
 
     def load_action_with_csv(self, csv_file):
         """从CSV文件加载手臂数据"""
@@ -694,21 +706,23 @@ class ActionPlayer:
             self.arm_target_pub.publish(arm_traj)
             rospy.loginfo(f"已发送手臂轨迹，起始时间: {self.gait_start_time}")
 
-        # 计算总持续时间
-        # 检查最后一步是否为恢复步骤（状态3）
-        last_step = self.step_control[-1] if self.step_control else None
-        if last_step and last_step['mode'] == 3:
-            # 最后一步是恢复，时间不缩放
-            total_arm_time = (len(self.step_control) - 1) * 0.1 * self.time_scale + 0.1 + 12
-        else:
-            # 正常缩放
-            total_arm_time = (len(self.step_control) * 0.1 + 12) * self.time_scale
+        # 等待动作开始执行（is_arm_executing 变为 True）
+        rospy.loginfo("等待手臂动作开始执行...")
+        start_wait_exec = rospy.Time.now()
+        while not self.is_arm_executing and not rospy.is_shutdown():
+            if (rospy.Time.now() - start_wait_exec).to_sec() > 5.0:
+                rospy.logwarn("等待手臂动作开始执行超时，可能已经开始或模式切换未成功")
+                break
+            rospy.sleep(0.01)
 
-        rospy.loginfo(f"等待动作完成，预计耗时: {total_arm_time}秒")
-        start_time = rospy.get_time()
-        while (rospy.get_time() - start_time) < total_arm_time and not rospy.is_shutdown():
-            rospy.sleep(0.1)  # 短间隔睡眠，保证响应中断
-        rospy.loginfo("动作序列执行完成")
+        # 等待动作序列执行完成（is_arm_executing 变为 False）
+        rospy.loginfo("手臂动作正在执行中，等待完成标识符结束...")
+        while self.is_arm_executing and not rospy.is_shutdown():
+            rospy.sleep(0.01)
+        # 动作执行完成后额外等待2秒
+        rospy.sleep(3.0)
+            
+        rospy.loginfo("动作序列执行完成 (基于标识符检测)")
 
         # 自动恢复摆臂模式
         self.restore_arm_swing_mode()

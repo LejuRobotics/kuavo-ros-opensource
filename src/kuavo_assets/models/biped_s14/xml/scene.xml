@@ -18,10 +18,23 @@
 
   <worldbody>
     <light pos="0 0 3.5" dir="0 0 -1" directional="true"/>
-    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" friction="0.4 0.005 0.0001"/>
   </worldbody>
 
   <keyframe>
+  
+    <key name="lie0"
+      qpos="
+      -0.166485 0.400412 0.079399 
+      0.507003 -0.53823 0.463297 0.48848 
+      0.028208 0.068658 0.136149 0.104593 -0.638424 0.128255 
+      -0.073492 0.026349 -0.090781 0.0 -0.848447 -0.064582 
+      0.065256 
+      0.027506 0.056497 -0.407626 -0.2389 
+      -0.12534 0.015466 0.86924 -0.03061
+      0.0 0.0
+    "/>
+    
     <key name="home"
       qpos="
     0 0 0.98

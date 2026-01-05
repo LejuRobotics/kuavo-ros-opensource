@@ -1250,14 +1250,14 @@ void motorGetData(const uint16_t *ids, const EcMasterType* driver, uint32_t num,
     { 
       data[index].position = (currentIn->selfd_slave_input[g_motor_id[index].pdo_id].position_actual_value * (360.0 / encoder_range[index]) - pos_offset[index]);
       data[index].velocity = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].velocity_actual_value * (360.0 / encoder_range[index]) ;
-      data[index].torque = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].torque_actual_value * (rated_current[index] / 1000.0) / 1000.0 * 1.414;
+      data[index].torque = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].torque_actual_value * (rated_current[index] / 1000.0) / 1000.0;
       data[index].acceleration = motorAcceleration[index] * (360.0 / encoder_range[index]);
       data[index].status = currentMotorStatus[index];
       
       // 驱动器控制环路底层数据
       data[index].error_code = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].error_code;
       data[index].status_word = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].status_word;
-      data[index].torque_demand_trans = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].torque_demand_raw * (rated_current[index] / 1000.0) / 1000.0 * 1.414;
+      data[index].torque_demand_trans = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].torque_demand_raw * (rated_current[index] / 1000.0) / 1000.0;
     }
   }
 }

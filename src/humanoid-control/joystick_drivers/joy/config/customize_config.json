@@ -154,7 +154,7 @@
   },
   "customize_action_RT_B": {
     "type": "shell",
-    "command": "python3 /home/lab/kuavo-ros-control/src/demo/csv2body_demo/step_player_csv_ocs2.py"
+    "command": "python3 /home/lab/kuavo-ros-opensource/src/demo/csv2body_demo/step_player_csv_ocs2.py"
   },
   "customize_action_RT_X": {
     "type": "action",

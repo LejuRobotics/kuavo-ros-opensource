@@ -38,6 +38,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <std_msgs/String.h>
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/Float32.h>
+#include <std_msgs/Float64.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <geometry_msgs/Twist.h>
 #include "kuavo_msgs/SetJoyTopic.h"
@@ -70,6 +71,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/robotHandPosition.h"
 #include <std_srvs/SetBool.h>
 #include <kuavo_msgs/ExecuteArmAction.h>
+#include <humanoid_plan_arm_trajectory/RobotActionState.h>
 
 // 命令执行相关头文件
 #include <cstdlib>
@@ -93,6 +95,7 @@ namespace ocs2
       {"BUTTON_RB", 5},
       {"BUTTON_BACK", 6},
       {"BUTTON_START", 7},
+      {"BUTTON_GUIDE", 8},
       {"BUTTON_M1", 9},
       {"BUTTON_M2", 10}
   };
@@ -117,6 +120,7 @@ namespace ocs2
       {"BUTTON_RB", 7},
       {"BUTTON_BACK", 10},
       {"BUTTON_START", 11},
+      {"BUTTON_GUIDE", 12},
       {"BUTTON_M1", 13},
       {"BUTTON_M2", 14}
   };
@@ -173,7 +177,13 @@ namespace ocs2
         repo_root_path_ = ".";
       }
       ROS_INFO_STREAM("Repository root path: " << repo_root_path_);
-      
+
+      if (nodeHandle.hasParam("/robot_version"))
+      {
+        int rb_version_int;
+        nodeHandle.getParam("/robot_version", rb_version_int);
+        rb_version_ = RobotVersion::create(rb_version_int);
+      }
 
       if (nodeHandle.hasParam("joy_node/dev"))
       {
@@ -238,7 +248,13 @@ namespace ocs2
       if (nodeHandle.hasParam("joy_execute_action"))
       {
         nodeHandle.getParam("joy_execute_action", joy_execute_action_);
-        ROS_INFO_STREAM("Loading joy_execute_action: " << joy_execute_action_);
+        // kuavo 不受 roban 按键需求影响
+        if(rb_version_.major() != 1)
+        {
+          joy_execute_action_ = false;
+          nodeHandle.setParam("joy_execute_action", false);
+        }
+        ROS_INFO_STREAM("Loading joy_execute_action_ value: " << joy_execute_action_);
       }
       else
       {
@@ -264,12 +280,6 @@ namespace ocs2
       }
 
       // loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
-      if (nodeHandle.hasParam("/robot_version"))
-      {
-        int rb_version_int;
-        nodeHandle.getParam("/robot_version", rb_version_int);
-        rb_version_ = RobotVersion::create(rb_version_int);
-      }
       auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version_, true, 2e-3);
       default_joint_state_ = drake_interface_->getDefaultJointState();
       com_height_ = drake_interface_->getIntialHeight();
@@ -321,6 +331,11 @@ namespace ocs2
       );
       gait_change_sub_ = nodeHandle_.subscribe<std_msgs::String>(
       "/humanoid_mpc_gait_change", 1, &JoyControl::gaitChangeCallback, this);
+      is_rl_controller_sub_ = nodeHandle_.subscribe<std_msgs::Float64>("/humanoid_controller/is_rl_controller_", 1, [this](const std_msgs::Float64::ConstPtr &msg) 
+      {is_rl_controller_ = (msg->data > 0.5);});
+      // 订阅动作执行状态话题，用于检测是否有动作正在执行
+      robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
+      "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
 
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       re_start_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/re_start_robot", 10);
@@ -333,6 +348,10 @@ namespace ocs2
       execute_arm_action_client_ = nodeHandle_.serviceClient<kuavo_msgs::ExecuteArmAction>("/execute_arm_action");
       // Launch status client (rate-limited checks in joy callback)
       real_launch_status_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_launch_status");
+      // Fall stand up trigger client
+      trigger_fall_stand_up_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/trigger_fall_stand_up");
+      // Fall down state client
+      set_fall_down_state_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_controller/set_fall_down_state");
       last_status_check_time_ = ros::Time(0);
 
       // 加载命令配置
@@ -689,6 +708,12 @@ namespace ocs2
     {
       feet_pos_measured_ = Eigen::Map<const Eigen::VectorXd>(feet_msg->data.data(), feet_msg->data.size());
     }
+    void robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr &msg)
+    {
+      // state: 0=失败/未执行, 1=执行中/成功
+      // 当state为1时，表示有动作正在执行
+      robot_action_executing_ = (msg->state == 1);
+    }
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
       vector_t joystickOriginAxisFilter_ = vector_t::Zero(6);
@@ -806,7 +831,7 @@ namespace ocs2
       }
 
       if(joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] < -0.5)
-      {
+      {        
         if(!joy_execute_action_)
         {
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
@@ -825,10 +850,29 @@ namespace ocs2
         else
         {
            // 组合键控制腰部
-          double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
-          waist_yaw = 120.0 * waist_yaw;   // +- 120deg
-          // std::cout << "waist_yaw: " << waist_yaw << std::endl;
-          controlWaist(waist_yaw);
+          // 检查是否有动作正在执行，如果有则禁用转腰控制以避免冲突
+          bool action_executing = false;
+          
+          // 检查ROS参数标志（用于某些动作执行场景，如太极动作）
+          if (nodeHandle_.hasParam("/taiji_executing"))
+          {
+            nodeHandle_.getParam("/taiji_executing", action_executing);
+          }
+          
+          // 检查动作状态话题（用于通过/execute_arm_action服务执行的动作）
+          if (!action_executing)
+          {
+            action_executing = robot_action_executing_;
+          }
+          
+          // 只有在没有动作执行时才允许转腰控制
+          if (!action_executing)
+          {
+            double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+            waist_yaw = 120.0 * waist_yaw;   // +- 120deg
+            // std::cout << "waist_yaw: " << waist_yaw << std::endl;
+            controlWaist(waist_yaw);
+          }
         }
         old_joy_msg_ = *joy_msg;
         return;
@@ -899,11 +943,25 @@ namespace ocs2
           std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
                     << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
         }
+        // RB + BUTTON_RL(X): 起身
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
+        {
+          callTriggerFallStandUpSrv();
+          old_joy_msg_ = *joy_msg;
+          return;
+        }
+        // RB + BUTTON_TROT(B): 触发倒地逻辑
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
+        {
+          callSetFallDownStateSrv();
+          old_joy_msg_ = *joy_msg;
+          return;
+        }
       }
       else
         checkGaitSwitchCommand(joy_msg);
 
-      vector_t button_trigger_axis = vector_t::Zero(6); 
+      vector_t button_trigger_axis = vector_t::Zero(6);
       if (axes_input_enabled_)
       {
         if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
@@ -970,7 +1028,12 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
       {
-        publishGaitTemplate("walk");
+        if (is_rl_controller_) {
+          ROS_WARN("[JoyControl] Current controller is RL, cannot switch gait to walk");
+        } 
+        else {
+          publishGaitTemplate("walk");
+        }
       }
       else
       {
@@ -1153,6 +1216,38 @@ namespace ocs2
         ::ros::Duration(0.1).sleep();
       }
     }
+    void callTriggerFallStandUpSrv()
+    {
+      std::cout << "trigger callTriggerFallStandUpSrv" << std::endl;
+      std_srvs::Trigger srv;
+
+      // 调用服务
+      if (trigger_fall_stand_up_client_.call(srv))
+      {
+        ROS_INFO("[JoyControl] Trigger fall stand up service call successful: %s", srv.response.message.c_str());
+      }
+      else
+      {
+        ROS_ERROR("[JoyControl] Failed to call trigger_fall_stand_up service");
+      }
+    }
+    
+    void callSetFallDownStateSrv()
+    {
+      std::cout << "trigger callSetFallDownStateSrv" << std::endl;
+      std_srvs::SetBool srv;
+      srv.request.data = true;  // true = FALL_DOWN, false = STANDING
+
+      // 调用服务
+      if (set_fall_down_state_client_.call(srv))
+      {
+        ROS_INFO("[JoyControl] Set fall down state service call successful: %s", srv.response.message.c_str());
+      }
+      else
+      {
+        ROS_ERROR("[JoyControl] Failed to call set_fall_down_state service");
+      }
+    }
 
     void controlHead(double head_yaw, double head_pitch)
     {
@@ -1227,6 +1322,27 @@ namespace ocs2
 
     bool callExecuteArmAction(const std::string &action_name)
     {
+      // 检查是否有动作正在执行，如果有则不允许触发新的手臂动作
+      bool action_executing = false;
+      
+      // 检查ROS参数标志（用于某些动作执行场景，如太极动作）
+      if (nodeHandle_.hasParam("/taiji_executing"))
+      {
+        nodeHandle_.getParam("/taiji_executing", action_executing);
+      }
+      
+      // 检查动作状态话题（用于通过/execute_arm_action服务执行的动作）
+      if (!action_executing)
+      {
+        action_executing = robot_action_executing_;
+      }
+      
+      if (action_executing)
+      {
+        ROS_WARN("[JoyControl] Cannot execute arm action '%s': another action is currently executing", action_name.c_str());
+        return false;
+      }
+      
       kuavo_msgs::ExecuteArmAction srv;
       srv.request.action_name = action_name;
       const std::string service_name = "/execute_arm_action";
@@ -1315,6 +1431,8 @@ namespace ocs2
     ros::Subscriber gait_scheduler_sub_;
     ros::Subscriber policy_sub_;
     ros::Subscriber gait_change_sub_;
+    ros::Subscriber is_rl_controller_sub_;
+    bool is_rl_controller_{false};  // 当前是否为RL控制器
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
     std::string current_desired_gait_ = "stance";
@@ -1375,10 +1493,18 @@ namespace ocs2
     ros::ServiceClient execute_arm_action_client_;
     // Launch status
     ros::ServiceClient real_launch_status_client_;
+    // Fall stand up trigger service
+    ros::ServiceClient trigger_fall_stand_up_client_;
+    // Fall down state service (SetBool)
+    ros::ServiceClient set_fall_down_state_client_;
     bool robot_launched_{false};
     ros::Time last_status_check_time_;
     bool real_{false};
     RobotVersion rb_version_{3, 4};
+    
+    // 动作执行状态相关
+    ros::Subscriber robot_action_state_sub_;
+    bool robot_action_executing_{false};  // 标记是否有动作正在执行
   };
 }
 

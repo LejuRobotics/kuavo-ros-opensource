@@ -18,8 +18,8 @@
     </include>
 
     <arg name="use_external_mpc"   default="true"/>
-    <arg name="wbc_frequency"      default="500"/>
-    <arg name="sensor_frequency"   default="500"/>
+    <arg name="wbc_frequency"      default="1000"/>
+    <arg name="sensor_frequency"   default="1000"/>
     <arg name="inference_frequency" default="100"/>
     <arg name="use_joystick"       default="true"/>
     <arg name="with_estimation"    default="true"/>
@@ -35,6 +35,7 @@
     <arg name="only_half_up_body" default="false"/>
     <arg name="waist_move_spd"     default="0.8"/>
     <arg name="deformation_flag"   default="false"/>
+    <arg name="init_fall_down_state" default="false"/>
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
@@ -49,6 +50,7 @@
     <!-- RL相关参数 -->
     <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
+    <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -78,11 +80,12 @@
     <!-- RL相关参数 -->
     <param name="network_model_file" value="$(arg network_model_file)"/>
     <param name="rl_param" value="$(arg rl_param)"/>
+    <param name="is_rl_start" value="$(arg is_rl_start)"/>
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
     <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
-    
+    <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     

@@ -72,3 +72,4 @@ topics:
   - /l515/color/image_raw
   - /livox/points
   - /rl_controller.*
+  - /arm_controller.*

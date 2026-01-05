@@ -47,6 +47,7 @@
   <depend>humanoid_interface</depend>
   <depend>ocs2_ros_interfaces</depend>
   <depend>humanoid_interface_drake</depend>
+  <depend>humanoid_plan_arm_trajectory</depend>
 
 
   <depend>pinocchio</depend>

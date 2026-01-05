@@ -212,6 +212,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   
   // Transition status query methods
   bool isHeightTransitionActive() const { return heightSmoothTransitionActive_; }
+  bool isArmExecuting() const { return isArmExecuting_; }
   scalar_t getHeightTransitionProgress() const {
     if (!heightSmoothTransitionActive_) return 1.0;
     scalar_t elapsedTime = ros::Time::now().toSec() - heightTransitionStartTime_;
@@ -364,6 +365,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::ServiceServer pitch_limit_status_service_;
   ros::ServiceServer vr_waist_control_service_;  // VR waist control service
   ros::ServiceServer load_dynamic_qr_service_;  // Service to load dynamic Q and R matrices based on gait name
+  ros::Publisher isArmExecutingPublisher_;
   ros::Publisher modeSchedulePublisher_;
 
   vector_t cmdVel_;
@@ -379,6 +381,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool velCmdUpdated_ = false;
   bool PoseCmdUpdated_ = false;
   bool PoseWorldCmdUpdated_ = false;
+  bool isArmExecuting_ = false;
   bool isCmdPoseCached = false;
   bool poseTargetUpdated_ = false;
   bool armTargetUpdated_ = false;
@@ -409,6 +412,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   TorsoControlMode torsoControlMode_ = TorsoControlMode::SIX_DOF;
   bool isArmControlModeChanged_ = false;
   bool isArmControlModeChangedTrigger_ = false;
+  bool isCalcArmControlModeChangedTime_ = false;
   scalar_t arm_mode_change_start_time_ = -1.0;  // 模式切换开始时间，-1表示未开始切换
   scalar_t min_arm_mode_change_time_ = 1.5;  // 最小模式切换时间（秒）
   bool update_stop_single_step_ = false;

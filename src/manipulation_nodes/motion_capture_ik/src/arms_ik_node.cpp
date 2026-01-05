@@ -1691,6 +1691,12 @@ int main(int argc, char* argv[])
     int robot_version_int=13;
     if (nh.hasParam("/robot_version"))
         nh.getParam("/robot_version", robot_version_int);
+
+    // Handle version 15 special case: use version 14 config
+    if (robot_version_int == 15) {
+        robot_version_int = 14;
+    }
+
     auto kuavo_assests_path = HighlyDynamic::getPackagePath("kuavo_assets");
     std::string model_config_file = kuavo_assests_path + "/config/kuavo_v"+std::to_string(robot_version_int)+"/kuavo.json";
     std::cout << "model_config_file: " << model_config_file << std::endl;

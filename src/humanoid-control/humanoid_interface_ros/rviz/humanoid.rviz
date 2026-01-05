@@ -7,12 +7,16 @@ Panels:
         - /Global Options1
         - /Status1
         - /RobotModel1
-        - /RobotModel1/Links1
         - /MarkerArray4
         - /MarkerArray5
         - /MarkerArray6
+        - /MarkerArray7
+        - /left_hand_bound_box1
+        - /Marker11
+        - /Marker12
+        - /Marker13
       Splitter Ratio: 0.5
-    Tree Height: 395
+    Tree Height: 533
   - Class: rviz/Selection
     Name: Selection
   - Class: rviz/Tool Properties
@@ -65,53 +69,13 @@ Visualization Manager:
         Expand Joint Details: false
         Expand Link Details: false
         Expand Tree: false
-        LB_wheel_pitch:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        LB_wheel_yaw:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        LF_wheel_pitch:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        LF_wheel_yaw:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         Link Tree Style: Links in Alphabetic Order
-        RB_wheel_pitch:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        RB_wheel_yaw:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        RF_wheel_pitch:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        RF_wheel_yaw:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         base_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        camera:
+        camera_base:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -120,27 +84,127 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        knee_link:
+        head_camera:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        leg_link:
+        l_foot_heel:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        radar:
+        l_foot_toe:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        waist_link:
+        leg_l1_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        waist_yaw_link:
+        leg_l2_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_l3_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_l4_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_l5_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_l6_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_r1_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_r2_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_r3_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_r4_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_r5_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        leg_r6_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ll_foot_heel:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        ll_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        lr_foot_heel:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        lr_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        r_foot_heel:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        r_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        rl_foot_heel:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        rl_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        rr_foot_heel:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        rr_foot_toe:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -248,102 +312,6 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
-        base_link:
-          Value: true
-        camera_base:
-          Value: true
-        dummy_link:
-          Value: false
-        l_foot_heel:
-          Value: false
-        l_foot_toe:
-          Value: false
-        leg_l1_link:
-          Value: false
-        leg_l2_link:
-          Value: false
-        leg_l3_link:
-          Value: false
-        leg_l4_link:
-          Value: false
-        leg_l5_link:
-          Value: false
-        leg_l6_link:
-          Value: false
-        leg_r1_link:
-          Value: false
-        leg_r2_link:
-          Value: false
-        leg_r3_link:
-          Value: false
-        leg_r4_link:
-          Value: false
-        leg_r5_link:
-          Value: false
-        leg_r6_link:
-          Value: false
-        ll_foot_heel:
-          Value: false
-        ll_foot_toe:
-          Value: false
-        lr_foot_heel:
-          Value: false
-        lr_foot_toe:
-          Value: false
-        odom:
-          Value: true
-        r_foot_heel:
-          Value: false
-        r_foot_toe:
-          Value: false
-        rl_foot_heel:
-          Value: false
-        rl_foot_toe:
-          Value: false
-        rr_foot_heel:
-          Value: false
-        rr_foot_toe:
-          Value: false
-        waist_camera:
-          Value: true
-        waist_yaw_link:
-          Value: true
-        zarm_l1_link:
-          Value: false
-        zarm_l2_link:
-          Value: false
-        zarm_l3_link:
-          Value: false
-        zarm_l4_link:
-          Value: false
-        zarm_l5_link:
-          Value: false
-        zarm_l6_link:
-          Value: false
-        zarm_l7_end_effector:
-          Value: false
-        zarm_l7_link:
-          Value: false
-        zarm_r1_link:
-          Value: false
-        zarm_r2_link:
-          Value: false
-        zarm_r3_link:
-          Value: false
-        zarm_r4_link:
-          Value: false
-        zarm_r5_link:
-          Value: false
-        zarm_r6_link:
-          Value: false
-        zarm_r7_end_effector:
-          Value: false
-        zarm_r7_link:
-          Value: false
-        zhead_1_link:
-          Value: true
-        zhead_2_link:
-          Value: true
       Marker Alpha: 1
       Marker Scale: 1
       Name: TF
@@ -351,71 +319,7 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        dummy_link:
-          {}
-        odom:
-          base_link:
-            leg_l1_link:
-              leg_l2_link:
-                leg_l3_link:
-                  leg_l4_link:
-                    leg_l5_link:
-                      leg_l6_link:
-                        l_foot_heel:
-                          {}
-                        l_foot_toe:
-                          {}
-                        ll_foot_heel:
-                          {}
-                        ll_foot_toe:
-                          {}
-                        lr_foot_heel:
-                          {}
-                        lr_foot_toe:
-                          {}
-            leg_r1_link:
-              leg_r2_link:
-                leg_r3_link:
-                  leg_r4_link:
-                    leg_r5_link:
-                      leg_r6_link:
-                        r_foot_heel:
-                          {}
-                        r_foot_toe:
-                          {}
-                        rl_foot_heel:
-                          {}
-                        rl_foot_toe:
-                          {}
-                        rr_foot_heel:
-                          {}
-                        rr_foot_toe:
-                          {}
-            waist_camera:
-              {}
-            waist_yaw_link:
-              zarm_l1_link:
-                zarm_l2_link:
-                  zarm_l3_link:
-                    zarm_l4_link:
-                      zarm_l5_link:
-                        zarm_l6_link:
-                          zarm_l7_link:
-                            zarm_l7_end_effector:
-                              {}
-              zarm_r1_link:
-                zarm_r2_link:
-                  zarm_r3_link:
-                    zarm_r4_link:
-                      zarm_r5_link:
-                        zarm_r6_link:
-                          zarm_r7_link:
-                            zarm_r7_end_effector:
-                              {}
-              zhead_1_link:
-                zhead_2_link:
-                  camera_base:
-                    {}
+        {}
       Update Interval: 0
       Value: false
     - Class: rviz/MarkerArray
@@ -423,7 +327,9 @@ Visualization Manager:
       Marker Topic: /humanoid/optimizedStateTrajectory
       Name: MarkerArray
       Namespaces:
-        {}
+        "": true
+        CoM Trajectory: true
+        Feet Trajectories: true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -431,7 +337,7 @@ Visualization Manager:
       Marker Topic: /humanoid/desiredBaseTrajectory
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -439,7 +345,10 @@ Visualization Manager:
       Marker Topic: /humanoid/currentState
       Name: MarkerArray
       Namespaces:
-        {}
+        Center of Pressure: true
+        EE Forces: true
+        EE Positions: true
+        Support Polygon: true
       Queue Size: 100
       Value: true
     - Class: rviz/InteractiveMarkers
@@ -465,7 +374,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -475,13 +384,13 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/elbow
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -491,7 +400,7 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
       Enabled: false
       Marker Topic: /humanoid/planedFootPositions
@@ -513,7 +422,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker/shoulder
       Name: Marker
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -523,7 +432,7 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/shoulder_quest3
@@ -539,7 +448,7 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Alpha: 1
       Arrow Width: 0.5
       Class: rviz/WrenchStamped
@@ -569,21 +478,18 @@ Visualization Manager:
       Torque Arrow Scale: 2
       Torque Color: 204; 204; 51
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Class: grid_map_rviz_plugin/GridMap
       Color: 200; 200; 200
       Color Layer: elevation
       Color Transformer: GridMapLayer
-      ColorMap: default
       Enabled: true
-      Grid Cell Decimation: 1
-      Grid Line Thickness: 0.10000000149011612
       Height Layer: elevation
       Height Transformer: GridMapLayer
       History Length: 1
-      Invert ColorMap: false
+      Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 10
       Min Color: 0; 0; 0
@@ -592,7 +498,7 @@ Visualization Manager:
       Show Grid Lines: true
       Topic: /elevation_mapping/elevation_map
       Unreliable: false
-      Use ColorMap: true
+      Use Rainbow: true
       Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
@@ -663,7 +569,9 @@ Visualization Manager:
       Marker Topic: /humanoid/optimizedStateTrajectory
       Name: MarkerArray
       Namespaces:
-        {}
+        "": true
+        CoM Trajectory: true
+        Feet Trajectories: true
       Queue Size: 100
       Value: true
     - Alpha: 1
@@ -705,16 +613,16 @@ Visualization Manager:
       Value: true
     - Alpha: 1
       Arrow Length: 0.9000000357627869
-      Axes Length: 0.30000000447034836
+      Axes Length: 0.30000001192092896
       Axes Radius: 0.029999999329447746
       Class: rviz/PoseArray
       Color: 255; 0; 255
       Enabled: true
-      Head Length: 0.21000000089406966
-      Head Radius: 0.08999999798834324
+      Head Length: 0.21000000834465027
+      Head Radius: 0.08999999612569809
       Name: left_hand_pose_visual
       Queue Size: 10
-      Shaft Length: 0.6900000125169754
+      Shaft Length: 0.6899999976158142
       Shaft Radius: 0.029999999329447746
       Shape: Axes
       Topic: /left_hand_pose_visual
@@ -722,33 +630,33 @@ Visualization Manager:
       Value: true
     - Alpha: 1
       Arrow Length: 0.9000000357627869
-      Axes Length: 0.30000000447034836
+      Axes Length: 0.30000001192092896
       Axes Radius: 0.029999999329447746
       Class: rviz/PoseArray
       Color: 255; 0; 255
-      Enabled: true
-      Head Length: 0.21000000089406966
-      Head Radius: 0.08999999798834324
+      Enabled: false
+      Head Length: 0.21000000834465027
+      Head Radius: 0.08999999612569809
       Name: right_hand_pose_visual
       Queue Size: 10
-      Shaft Length: 0.6900000125169754
+      Shaft Length: 0.6899999976158142
       Shaft Radius: 0.029999999329447746
       Shape: Axes
       Topic: /right_hand_pose_visual
       Unreliable: false
-      Value: true
+      Value: false
     - Alpha: 1
       Arrow Length: 0.9000000357627869
-      Axes Length: 0.30000000447034836
+      Axes Length: 0.30000001192092896
       Axes Radius: 0.029999999329447746
       Class: rviz/PoseArray
       Color: 0; 255; 0
       Enabled: true
-      Head Length: 0.21000000089406966
-      Head Radius: 0.08999999798834324
+      Head Length: 0.21000000834465027
+      Head Radius: 0.08999999612569809
       Name: left_hand_measured_pose_visual
       Queue Size: 10
-      Shaft Length: 0.6900000125169754
+      Shaft Length: 0.6899999976158142
       Shaft Radius: 0.029999999329447746
       Shape: Axes
       Topic: /left_hand_measured_pose_visual
@@ -756,27 +664,27 @@ Visualization Manager:
       Value: true
     - Alpha: 1
       Arrow Length: 0.9000000357627869
-      Axes Length: 0.30000000447034836
+      Axes Length: 0.30000001192092896
       Axes Radius: 0.029999999329447746
       Class: rviz/PoseArray
       Color: 0; 255; 0
-      Enabled: true
-      Head Length: 0.21000000089406966
-      Head Radius: 0.08999999798834324
+      Enabled: false
+      Head Length: 0.21000000834465027
+      Head Radius: 0.08999999612569809
       Name: right_hand_measured_pose_visual
       Queue Size: 10
-      Shaft Length: 0.6900000125169754
+      Shaft Length: 0.6899999976158142
       Shaft Radius: 0.029999999329447746
       Shape: Axes
       Topic: /right_hand_measured_pose_visual
       Unreliable: false
-      Value: true
+      Value: false
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/left_hand_x_axis_vector
       Name: left_hand_x_axis_vector
       Namespaces:
-        left_hand_x_axis: true
+        {}
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -784,15 +692,15 @@ Visualization Manager:
       Marker Topic: /visualization_marker/right_hand_x_axis_vector
       Name: right_hand_x_axis_vector
       Namespaces:
-        right_hand_x_axis: true
+        {}
       Queue Size: 10
-      Value: true
+      Value: false
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/incremental_left_shoulder
       Name: incremental_left_shoulder
       Namespaces:
-        incremental_left_shoulder: true
+        {}
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -800,15 +708,15 @@ Visualization Manager:
       Marker Topic: /visualization_marker/incremental_right_shoulder
       Name: incremental_right_shoulder
       Namespaces:
-        incremental_right_shoulder: true
+        {}
       Queue Size: 10
-      Value: true
+      Value: false
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/incremental_left_elbow
       Name: incremental_left_elbow
       Namespaces:
-        incremental_left_elbow: true
+        {}
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -816,17 +724,15 @@ Visualization Manager:
       Marker Topic: /visualization_marker/incremental_right_elbow
       Name: incremental_right_elbow
       Namespaces:
-        incremental_right_elbow: true
+        {}
       Queue Size: 10
-      Value: true
+      Value: false
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/left_hand_bound_box
       Name: left_hand_bound_box
       Namespaces:
-        left_hand_bound_box: true
-        left_hand_sphere_constraint: true
-        left_hand_cylinder_constraint: true
+        {}
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -834,9 +740,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker/right_hand_bound_box
       Name: right_hand_bound_box
       Namespaces:
-        right_hand_bound_box: true
-        right_hand_sphere_constraint: true
-        right_hand_cylinder_constraint: true
+        {}
       Queue Size: 10
       Value: true
     - Class: rviz/Marker
@@ -855,107 +759,43 @@ Visualization Manager:
         {}
       Queue Size: 10
       Value: true
-    - Class: rviz/Marker
+    - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /visualization_marker/left_link4_pos
-      Name: left_link4_pos
+      Marker Topic: /visualization_marker/human_array_left
+      Name: MarkerArray
       Namespaces:
         {}
-      Queue Size: 10
+      Queue Size: 100
       Value: true
     - Class: rviz/Marker
       Enabled: true
-      Marker Topic: /visualization_marker/right_link4_pos
-      Name: right_link4_pos
+      Marker Topic: /visualization_marker_right
+      Name: Marker
       Namespaces:
-        {}
-      Queue Size: 10
+        "": true
+      Queue Size: 100
       Value: true
     - Class: rviz/Marker
       Enabled: true
-      Marker Topic: /visualization_marker/left_end_effector_pos
-      Name: left_end_effector_pos
+      Marker Topic: /visualization_marker_right/elbow
+      Name: Marker
       Namespaces:
-        {}
-      Queue Size: 10
+        "": true
+      Queue Size: 100
       Value: true
     - Class: rviz/Marker
       Enabled: true
-      Marker Topic: /visualization_marker/right_end_effector_pos
-      Name: right_end_effector_pos
+      Marker Topic: /visualization_marker_right/shoulder
+      Name: Marker
       Namespaces:
-        {}
-      Queue Size: 10
-      Value: true
-    - Class: rviz/Marker
-      Enabled: true
-      Marker Topic: /visualization_marker/left_virtual_thumb_pos
-      Name: left_virtual_thumb_pos
-      Namespaces:
-        {}
-      Queue Size: 10
-      Value: true
-    - Class: rviz/Marker
-      Enabled: true
-      Marker Topic: /visualization_marker/right_virtual_thumb_pos
-      Name: right_virtual_thumb_pos
-      Namespaces:
-        {}
-      Queue Size: 10
-      Value: true
-    - Class: rviz/Marker
-      Enabled: true
-      Marker Topic: /visualization_marker/robot_left_elbow_optimized
-      Name: robot_left_elbow_optimized
-      Namespaces:
-        {}
-      Queue Size: 10
-      Value: true
-    - Class: rviz/Marker
-      Enabled: true
-      Marker Topic: /visualization_marker/robot_right_elbow_optimized
-      Name: robot_right_elbow_optimized
-      Namespaces:
-        {}
-      Queue Size: 10
-      Value: true
-    - Class: rviz/Marker
-      Enabled: true
-      Marker Topic: /visualization_marker/left_link6_pos_before_opt
-      Name: left_link6_pos_before_opt
-      Namespaces:
-        {}
-      Queue Size: 10
-      Value: true
-    - Class: rviz/Marker
-      Enabled: true
-      Marker Topic: /visualization_marker/left_link6_pos_after_opt
-      Name: left_link6_pos_after_opt
-      Namespaces:
-        {}
-      Queue Size: 10
-      Value: true
-    - Class: rviz/Marker
-      Enabled: true
-      Marker Topic: /visualization_marker/right_link6_pos_before_opt
-      Name: right_link6_pos_before_opt
-      Namespaces:
-        {}
-      Queue Size: 10
-      Value: true
-    - Class: rviz/Marker
-      Enabled: true
-      Marker Topic: /visualization_marker/right_link6_pos_after_opt
-      Name: right_link6_pos_after_opt
-      Namespaces:
-        {}
-      Queue Size: 10
+        "": true
+      Queue Size: 100
       Value: true
   Enabled: true
   Global Options:
     Background Color: 255; 253; 212
     Default Light: true
-    Fixed Frame: base_link
+    Fixed Frame: odom
     Frame Rate: 30
   Name: root
   Tools:
@@ -995,9 +835,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.4047985076904297
+      Pitch: 0.3847985565662384
       Target Frame: base_link
-      Yaw: 0.4099982976913452
+      Yaw: 0.5550013184547424
     Saved:
       - Class: rviz/Orbit
         Distance: 5.575319766998291
@@ -1025,9 +865,7 @@ Window Geometry:
   Height: 752
   Hide Left Dock: false
   Hide Right Dock: false
-  Image:
-    collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000400000000000001d700000256fc0200000009fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003b000001c6000000c700fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a0049006d00610067006501000002070000008a0000001600ffffff000000010000010f00000356fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003f00000356000000a000fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000007380000003efc0100000002fb0000000800540069006d00650100000000000007380000030700fffffffb0000000800540069006d006501000000000000045000000000000000000000055b0000025600000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000400000000000001d700000252fc0200000009fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d00000252000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a0049006d0061006700650100000206000000890000000000000000000000010000010f00000356fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003f00000356000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000004200000003efc0100000002fb0000000800540069006d0065010000000000000420000003bc00fffffffb0000000800540069006d00650100000000000004500000000000000000000002430000025200000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Time:
@@ -1036,6 +874,6 @@ Window Geometry:
     collapsed: false
   Views:
     collapsed: false
-  Width: 1848
-  X: 1968
-  Y: 147
+  Width: 1056
+  X: 2323
+  Y: 121

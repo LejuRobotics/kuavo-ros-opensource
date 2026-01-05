@@ -229,6 +229,8 @@ class RuiWoActuator():
             with open(zeros_path, 'r') as file:
                 zeros_config = yaml.safe_load(file)
             self.zero_position = zeros_config['arms_zero_position']
+
+            
             ret = self.enable()
             if ret != 0:
                 print(f"\033[31m[RUIWO motor]: 使能失败，错误码: {ret}，程序退出\033[0m")
@@ -477,6 +479,22 @@ class RuiWoActuator():
                 current_positions[i] = motor[1]
                 if address in self.unnecessary_go_zero_list:
                     pass
+
+        # 检查机器人版本，如果是Roban1系列则调整目标位置
+        robot_version = os.getenv("ROBOT_VERSION")
+        is_roban1_series = (robot_version is not None and robot_version[0] == '1')
+
+        if is_roban1_series:
+            # 在Roban1系列机器人中，为1号和5号电机（索引1和5）调整目标位置±10度（转换为弧度）
+            adjustment_rad = 10.0 * math.pi / 180.0
+
+            for i in range(len(target_positions)):
+                if i == 1:
+                    target_positions[i] = adjustment_rad  # 1号电机目标位置 = +10度
+                    print(f"[RUIWO motor]: Roban1 series detected, motor {i} target position set to +10 degrees (instead of 0)")
+                elif i == 5:
+                    target_positions[i] = -adjustment_rad  # 5号电机目标位置 = -10度
+                    print(f"[RUIWO motor]: Roban1 series detected, motor {i} target position set to -10 degrees (instead of 0)")
 
         self.interpolate_move(current_positions, target_positions,max_speed,dt)
     
@@ -1034,7 +1052,24 @@ class RuiWoActuator():
     # 保存当前的零点位置到文件中
     def save_zero_position(self):
         config_path = self.get_zero_path()
-        config = {"arms_zero_position": self.zero_position}
+
+        # 检查机器人版本
+        robot_version = os.getenv("ROBOT_VERSION")
+        is_version_15 = (robot_version == "15")
+
+        # 为1号和5号电机调整10度（转换为弧度），方向相反
+        zero_position_copy = self.zero_position.copy()
+        for i in range(len(zero_position_copy)):
+            # 仅在机器人版本为15时，为1号和5号电机（索引1和5）调整10度（转换为弧度），方向相反
+            if is_version_15:
+                if i == 1:
+                    zero_position_copy[i] -= 10.0 * math.pi / 180.0  # 左电机减少10度
+                    print(f"[RUIWO motor]: Robot version 15 detected, subtracting 10 degrees from left motor {i} zero offset: {self.zero_position[i]} -> {zero_position_copy[i]}")
+                elif i == 5:
+                    zero_position_copy[i] += 10.0 * math.pi / 180.0  # 右电机增加10度
+                    print(f"[RUIWO motor]: Robot version 15 detected, adding 10 degrees to right motor {i} zero offset: {self.zero_position[i]} -> {zero_position_copy[i]}")
+
+        config = {"arms_zero_position": zero_position_copy}
         backup_path = config_path + '.bak'
         if os.path.exists(config_path):
             shutil.copy(config_path, backup_path) # 备份配置文件

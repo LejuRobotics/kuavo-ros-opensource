@@ -1,6 +1,7 @@
 #include"kuavo_solver/ankle_solver.h"
 void AnkleSolver::getconfig(const int ankle_solver_type)
 {
+    std::cout << "ankle_solver_type: " << ankle_solver_type << std::endl;
     ankle_solver_type_ = ankle_solver_type;
     std::cout << "[AnkleSolver] ankle_solver_type: " << ankle_solver_type_ << std::endl;
     ankle_pitch_limits_ << -1.57, 1.57;
@@ -196,25 +197,25 @@ void AnkleSolver::getconfig(const int ankle_solver_type)
     {
         config.resize(37);
         double z_pitch = -0.235;
-        double x_lleq = -0.03919; double y_lleq = 0.028;  double z_lleq = 0.008;
-        double x_lreq = -0.03919; double y_lreq = -0.028; double z_lreq = 0.008;
-        double y_llbar = 0.028;   double z_llbar = -0.138;
-        double y_lrbar = -0.028;  double z_lrbar = -0.083;
+        double x_lleq = -0.03919; double y_lleq = 0.03;  double z_lleq = 0.008;
+        double x_lreq = -0.03919; double y_lreq = -0.03; double z_lreq = 0.008;
+        double y_llbar = 0.03;   double z_llbar = -0.138;
+        double y_lrbar = -0.03;  double z_lrbar = -0.083;
         double x_lltd = -0.0391918; double z_lltd = 0.008;
         double x_lrtd = -0.0391918; double z_lrtd = 0.008;
-        double l_lltd = 0.097000000016701;
-        double l_lrtd = 0.15200000001065786;
+        double l_lltd = 0.097;
+        double l_lrtd = 0.152;
         double l_llbar = 0.04;
         double l_lrbar = 0.04;
 
-        double x_rleq = -0.03919; double y_rleq = 0.028;  double z_rleq = 0.008;
-        double x_rreq = -0.03919; double y_rreq = -0.028; double z_rreq = 0.008;
-        double y_rlbar = 0.028;   double z_rlbar = -0.083;
-        double y_rrbar = -0.028;  double z_rrbar = -0.138;
+        double x_rleq = -0.03919; double y_rleq = 0.03;  double z_rleq = 0.008;
+        double x_rreq = -0.03919; double y_rreq = -0.03; double z_rreq = 0.008;
+        double y_rlbar = 0.03;   double z_rlbar = -0.083;
+        double y_rrbar = -0.03;  double z_rrbar = -0.138;
         double x_rltd = -0.0391918; double z_rltd = 0.008;
         double x_rrtd = -0.0391918; double z_rrtd = 0.008;
-        double l_rltd = 0.15200000001065786;
-        double l_rrtd = 0.097000000016701;
+        double l_rltd = 0.152;
+        double l_rrtd = 0.097;
         double l_rlbar = 0.04;
         double l_rrbar = 0.04;
         config << z_pitch, 
@@ -234,6 +235,8 @@ void AnkleSolver::getconfig(const int ankle_solver_type)
                   x_rrtd, z_rrtd, 
                   l_rltd, l_rrtd, 
                   l_rlbar, l_rrbar;
+        ankle_pitch_limits_ << -0.872664625997165, 0.523598775598299;
+        ankle_roll_limits_ << -0.261799387799149, 0.261799387799149;
     }
 }
 
@@ -275,6 +278,8 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_position(const Eigen::VectorXd& q)
     auto joint_q = q;
     joint_q[4] = std::max(std::min(joint_q[4], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);
     joint_q[10] = std::max(std::min(joint_q[10], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);
+    joint_q[5] = std::max(std::min(joint_q[5], ankle_roll_limits_[1]), ankle_roll_limits_[0]);
+    joint_q[11] = std::max(std::min(joint_q[11], ankle_roll_limits_[1]), ankle_roll_limits_[0]);
     
     if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_5GEN)
     {
@@ -295,7 +300,7 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_position(const Eigen::VectorXd& q)
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN)
     {
-        result = joint_to_motor_position_s2_(joint_q);
+        result = joint_to_motor_position_s2_(q);
     }
     return result;
 }

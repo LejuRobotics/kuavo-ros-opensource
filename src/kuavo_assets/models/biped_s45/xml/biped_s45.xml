@@ -59,7 +59,7 @@
     <body name="base_link" pos="0 0 0.82">
       <freejoint />
       <site name="imu" pos="0 0 0" />
-      <inertial pos="-0.0185005 0.00031952 0.192957" quat="0.998529 4.54328e-05 0.0542216 0.000512508" mass="26.1133" diaginertia="0.938886 0.825905 0.269012" />
+      <inertial pos="-0.00761 0.00182 0.21995" quat="0.998529 4.54328e-05 0.0542216 0.000512508" mass="26.1133" diaginertia="0.938886 0.825905 0.269012" />
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso" />
       <geom type="box" size="0.1 0.12 0.15" pos="0 0 0.15" class="collision"/>
       <geom type="ellipsoid" size="0.12 0.2 0.13" pos="-0.02 0 0.42" class="collision"/>

@@ -1,10 +1,16 @@
 #pragma once
 
+#include <memory>
+#include <map>
 #include <humanoid_interface/HumanoidInterface.h>
 #include "humanoid_controllers/armTorqueController.h"
 #include <controller_interface/controller.h>
 #include <hardware_interface/imu_sensor_interface.h>
 #include <humanoid_common/hardware_interface/ContactSensorInterface.h>
+#include "humanoid_controllers/sensor_data_types.h"
+#include "humanoid_controllers/rl/RLControllerBase.h"
+#include "humanoid_controllers/rl/FallStandController.h"
+#include "humanoid_controllers/rl/RLControllerManager.h"
 
 #include <ocs2_centroidal_model/CentroidalModelRbdConversions.h>
 #include <ocs2_core/misc/Benchmark.h>
@@ -17,7 +23,7 @@
 
 #include "humanoid_controllers/SafetyChecker.h"
 #include "humanoid_controllers/visualization/humanoidSelfCollisionVisualization.h"
-#include "humanoid_controllers/RlGaitReceiver.h"
+#include "humanoid_controllers/rl/RlGaitReceiver.h"
 #include <sensor_msgs/JointState.h>
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include "kuavo_msgs/gaitTimeName.h"
@@ -27,6 +33,7 @@
 #include "kuavo_msgs/robotWaistControl.h"
 
 #include "std_srvs/Trigger.h"
+#include "std_srvs/SetBool.h"
 
 #include "std_msgs/Float64.h"
 #include "std_msgs/Float32MultiArray.h"
@@ -69,87 +76,26 @@ namespace humanoid_controller
   using namespace ocs2;
   using namespace humanoid;
   
+  // MotionTrajectoryData 已移动到 FallStandController.h 中
 
   struct gaitTimeName
   {
     std::string name;
     double startTime;
   };
-  struct SensorData
-  {
-    ros::Time timeStamp_;
-    vector_t jointPos_;
-    vector_t jointVel_;
-    vector_t jointAcc_;
-    vector_t jointTorque_;
-    vector_t jointCurrent_;
-    vector3_t angularVel_;
-    vector3_t linearAccel_;
-    vector3_t freeLinearAccel_;
-    Eigen::Quaternion<scalar_t> quat_;
-    matrix3_t orientationCovariance_;
-    matrix3_t angularVelCovariance_;
-    matrix3_t linearAccelCovariance_;
-    Eigen::Quaternion<scalar_t> quat_offset_;
-    
-    // 默认构造函数
-    SensorData() = default;
-    
-    // 拷贝构造函数 - 深拷贝
-    SensorData(const SensorData& other)
-      : timeStamp_(other.timeStamp_),
-        jointPos_(other.jointPos_),
-        jointVel_(other.jointVel_),
-        jointAcc_(other.jointAcc_),
-        jointTorque_(other.jointTorque_),
-        jointCurrent_(other.jointCurrent_),
-        angularVel_(other.angularVel_),
-        linearAccel_(other.linearAccel_),
-        freeLinearAccel_(other.freeLinearAccel_),
-        quat_(other.quat_),
-        orientationCovariance_(other.orientationCovariance_),
-        angularVelCovariance_(other.angularVelCovariance_),
-        linearAccelCovariance_(other.linearAccelCovariance_),
-        quat_offset_(other.quat_offset_)
-    {
-    }
-    
-    // 深拷贝函数
-    SensorData copy() const
-    {
-      SensorData result;
-      result.timeStamp_ = timeStamp_;
-      result.jointPos_ = jointPos_;
-      result.jointVel_ = jointVel_;
-      result.jointAcc_ = jointAcc_;
-      result.jointTorque_ = jointTorque_;
-      result.jointCurrent_ = jointCurrent_;
-      result.angularVel_ = angularVel_;
-      result.linearAccel_ = linearAccel_;
-      result.freeLinearAccel_ = freeLinearAccel_;
-      result.quat_ = quat_;
-      result.orientationCovariance_ = orientationCovariance_;
-      result.angularVelCovariance_ = angularVelCovariance_;
-      result.linearAccelCovariance_ = linearAccelCovariance_;
-      result.quat_offset_ = quat_offset_;
-      return result;
-    }
-    
-    void resize_joint(size_t num)
-    {
-      jointPos_.resize(num);
-      jointVel_.resize(num);
-      jointAcc_.resize(num);
-      jointTorque_.resize(num);
-      jointCurrent_.resize(num);
-    }
-  };
+  // SensorData 已移动到 sensor_data_types.h 中，直接使用即可
 
   enum ResettingMpcState
   {
     NOMAL = 0,
     RESET_INITIAL_POLICY,
     RESET_BASE,
+  };
+
+  enum FallStandState
+  {
+    STANDING = 0,  // 正常状态
+    FALL_DOWN      // 倒地状态
   };
   
   // struct SensorDataRL
@@ -250,6 +196,7 @@ namespace humanoid_controller
       }
     }
   };
+
   struct ArmJointTrajectory
   {
     Eigen::VectorXd pos;
@@ -287,112 +234,11 @@ namespace humanoid_controller
     void applySensorData(const SensorData &data);
     void applySensorDataRL(const SensorData &data);
     void updatakinematics(const SensorData &sensor_data, bool is_initialized_);
-    void loadJoyJsonConfig(const std::string &config_file);
-    std::vector<bool> commandLineToTargetTrajectories(const vector_t &joystick_origin_axis, geometry_msgs::Twist &cmdVel);
-    void checkAndPublishCommandLine(const vector_t &joystick_origin_axis);
-    void inference_thread_func();
-    void inference();
-    void updatePhase(const CommandDataRL &CommandDataRL_);
-    void updateObservation(const Eigen::VectorXd &state_est, const SensorData &sensor_data);
-    void clip(Eigen::VectorXd &a, int num, double limit);
 
-    // ==================== RL推理功能函数声明 ====================
-    Eigen::VectorXd updateRLcmd(const vector_t &state);
-    void printRLparam();
-    void loadRLSettings(const std::string &rlParamFile, bool verbose, double dt);
-
-    // ==================== 手臂插值功能函数声明 ====================
-    void initArmInterpolation();
-    void updateArmInterpolation(const ros::Time &time, kuavo_msgs::jointCmd &jointCmdMsg);
-    void updateActionsForInterpolation(const ros::Time &time);
-    Eigen::VectorXd getInterpolatedArmPos(double alpha);
-    Eigen::VectorXd getInterpolatedArmVel(double alpha);
-    void startArmInterpolation(const ros::Time &time, const Eigen::VectorXd &current_pos, const Eigen::VectorXd &current_vel, 
-                              const Eigen::VectorXd &target_pos, const Eigen::VectorXd &target_vel);
-
-    // ==================== 通用插值系统 ====================
-    struct InterpolationRequest
-    {
-      std::string id;                           // 插值任务ID
-      Eigen::VectorXd start_pos;               // 起始位置
-      Eigen::VectorXd target_pos;              // 目标位置
-      Eigen::VectorXd start_vel;               // 起始速度（可选）
-      Eigen::VectorXd target_vel;              // 目标速度（可选）
-      double duration;                         // 插值持续时间（秒）
-      int interpolation_type;                  // 插值类型：0=线性，1=五次多项式，2=三次样条
-      double start_time;                       // 开始时间
-      bool is_active;                          // 是否激活
-      std::function<void(const Eigen::VectorXd&, const Eigen::VectorXd&, double)> callback; // 回调函数
-    };
-    
-    // 通用插值系统相关函数
-    void initGeneralInterpolation();
-    std::string startInterpolation(const Eigen::VectorXd& start_pos, 
-                                 const Eigen::VectorXd& target_pos,
-                                 double duration,
-                                 int interpolation_type = 1,
-                                 const Eigen::VectorXd& start_vel = Eigen::VectorXd(),
-                                 const Eigen::VectorXd& target_vel = Eigen::VectorXd(),
-                                 std::function<void(const Eigen::VectorXd&, const Eigen::VectorXd&, double)> callback = nullptr);
-    bool stopInterpolation(const std::string& id);
-    bool getInterpolationStatus(const std::string& id, double& progress, Eigen::VectorXd& current_pos, Eigen::VectorXd& current_vel);
-    Eigen::VectorXd computeInterpolation(const InterpolationRequest& req, double alpha);
-    Eigen::VectorXd computeInterpolationVelocity(const InterpolationRequest& req, double alpha);
-    
-    // ROS话题回调函数
-    void interpolationRequestCallback(const std_msgs::String::ConstPtr& msg);
-    void interpolationStatusRequestCallback(const std_msgs::String::ConstPtr& msg);
-    
-    // ==================== 速度平滑系统函数声明 ====================
-    geometry_msgs::Twist smoothVelocityCommand(const geometry_msgs::Twist& target_vel, const ros::Time& current_time);
-    void initializeVelocitySmoothing();
-    double calculateVelocityMagnitude(const geometry_msgs::Twist& vel);
-    
-    // ==================== 原地踏步系统函数声明 ====================
-    void startInPlaceStepping(const ros::Time& current_time);
-    void stopInPlaceStepping();
-    bool isInPlaceSteppingActive() const { return is_in_place_stepping_; }
-    void updateInPlaceStepping(const ros::Time& current_time);
-    
-    // ==================== 站立键平滑过渡系统函数声明 ====================
-    void startStanceTransition(const ros::Time& current_time);
-    void stopStanceTransition();
-    bool isStanceTransitionActive() const { return is_stance_transition_; }
-    
     // ==================== MPC-RL插值系统函数声明 ====================
     void startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos);
     void updateMPCRLInterpolation(double current_time);
-    void stopTorsoInterpolation();
-    bool isTorsoInterpolationActive() const { return is_torso_interpolation_active_; }
-    double getTorsoInterpolationProgress() const;
-    double getTorsoInterpolationMaxVelocity() const { return torso_interpolation_max_velocity_; }
 
-    void updateStanceTransition(const ros::Time& current_time);
-    
-    // ==================== 持续原地踏步系统函数声明 ====================
-    void startContinuousInPlaceStepping(const ros::Time& current_time);
-    void stopContinuousInPlaceStepping();
-    bool isContinuousInPlaceSteppingActive() const { return is_continuous_in_place_stepping_; }
-    void updateContinuousInPlaceStepping(const ros::Time& current_time);
-
-    std::map<std::string, int> joyButtonMap = {
-        {"BUTTON_STANCE", 0},
-        {"BUTTON_TROT", 1},
-        {"BUTTON_RL", 2},
-        {"BUTTON_WALK", 3},
-        {"BUTTON_LB", 4},
-        {"BUTTON_RB", 5},
-        {"BUTTON_BACK", 6},
-        {"BUTTON_START", 7}};
-    std::map<std::string, int> joyAxisMap = {
-        {"AXIS_LEFT_STICK_Y", 0},
-        {"AXIS_LEFT_STICK_X", 1},
-        {"AXIS_LEFT_LT", 2},
-        {"AXIS_RIGHT_STICK_YAW", 3},
-        {"AXIS_RIGHT_STICK_Z", 4},
-        {"AXIS_RIGHT_RT", 5},
-        {"AXIS_LEFT_RIGHT_TRIGGER", 6},
-        {"AXIS_FORWARD_BACK_TRIGGER", 7}};
     sensor_msgs::Joy oldJoyMsg_;
     vector_t joystickOriginAxis_ = vector_t::Zero(6);
     vector_t joystickOriginAxisPre_ = vector_t::Zero(6);
@@ -401,7 +247,7 @@ namespace humanoid_controller
     Eigen::VectorXd defalutArmPosMPC_;
 
     // param for RL
-    Eigen::VectorXd defalutJointPosRL_;
+    Eigen::VectorXd currentDefalutJointPosRL_;
     Eigen::VectorXd JointControlModeRL_;
     Eigen::VectorXd JointControlModeStandRL_;
     Eigen::VectorXd JointPDModeRL_;
@@ -455,7 +301,13 @@ namespace humanoid_controller
     std::thread inferenceThread_;
     Eigen::VectorXd joint_pos_limit; // 关节位置的限制
     Eigen::VectorXd joint_vel_limit; // 关节速度的限制
-  
+
+    
+    MotionTrajectoryData motionTrajectory_;
+    std::string trajectoryFilePath_;
+    bool trajectoryLoaded_;
+    bool residualAction_;
+
   protected:
     virtual void updateStateEstimation(const ros::Time &time, bool is_init = false);
 
@@ -475,6 +327,14 @@ namespace humanoid_controller
     bool getMmArmCtrlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     void real_init_wait();
     void publishHumanoidState(const vector_t& measuredRbdState);
+    bool loadMotionTrajectory(const std::string &trajectoryFile);
+    Eigen::VectorXd getTrajectoryCommand();
+    Eigen::VectorXd getTrajectoryAnchorPos();
+    Eigen::Quaterniond getTrajectoryAnchorQuat();
+    Eigen::Vector3d getMotionAnchorPosB(const Eigen::Vector3d& currentBasePos, const Eigen::Quaterniond& currentBaseQuat);
+    Eigen::VectorXd getMotionAnchorOriB(const Eigen::Quaterniond& currentBaseQuat);
+ 
+
     void swingArmPlanner(double st, double current_time, double stepDuration, Eigen::VectorXd &desire_arm_q, Eigen::VectorXd &desire_arm_v);
     void headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
     void waistCmdCallback(const kuavo_msgs::robotWaistControl::ConstPtr &msg);
@@ -483,9 +343,7 @@ namespace humanoid_controller
     // bool WalkenableCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
     void visualizeWrench(const Eigen::VectorXd &wrench, bool is_left);
     bool getCurrentGaitNameCallback(kuavo_msgs::getCurrentGaitName::Request &req, kuavo_msgs::getCurrentGaitName::Response &res);
-    bool switchControllerCallback(kuavo_msgs::switchController::Request &req, kuavo_msgs::switchController::Response &res);
-    bool getControllerListCallback(kuavo_msgs::getControllerList::Request &req, kuavo_msgs::getControllerList::Response &res);
-    bool switchToNextControllerCallback(kuavo_msgs::switchToNextController::Request &req, kuavo_msgs::switchToNextController::Response &res);
+    bool setFallDownStateCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
     void getEnableMpcFlagCallback(const std_msgs::Bool::ConstPtr &msg);
     
     void getEnableWbcFlagCallback(const std_msgs::Bool::ConstPtr &msg);
@@ -588,6 +446,7 @@ namespace humanoid_controller
     BufferedValue<bool> is_rl_controller_buffer_{false};
     bool is_mpc_controller_ = true;
     bool rl_available_ = false;  // RL参数文件是否存在，决定是否启用RL控制器功能
+    bool is_rl_start_ = false;  // 如果为true，绕过MPC控制器，直接从rl_controllers.yaml的第一个控制器启动
     std::atomic_bool inference_running_{false};
     bool Walkenable_ = false;
     bool contactTrotgait_ = false;
@@ -600,6 +459,8 @@ namespace humanoid_controller
     int hardware_status_ = 0;
     CommandDataRL initialCommandDataRL_;
     CommandDataRL CommandDataRL_;
+    bool traj_start = false;
+    double my_yaw_offset_;
 
     std::mutex disable_mpc_srv_mtx_;
     std::mutex disable_wbc_srv_mtx_;
@@ -691,9 +552,8 @@ namespace humanoid_controller
     ros::ServiceServer enableMmArmCtrlSrv_;
     ros::ServiceServer getMmArmCtrlSrv_;
     ros::ServiceServer currentGaitNameSrv_;
-    ros::ServiceServer switchControllerSrv_;
-    ros::ServiceServer getControllerListSrv_;
-    ros::ServiceServer switchToNextControllerSrv_;
+    ros::ServiceServer triggerFallStandUpSrv_;
+    ros::ServiceServer setFallDownStateSrv_;
     GaitManager *gaitManagerPtr_=nullptr;
 
     PinocchioInterface *pinocchioInterface_ptr_;
@@ -924,6 +784,16 @@ namespace humanoid_controller
     Eigen::VectorXd arm_interpolation_target_pos_; // 插值目标位置
     Eigen::VectorXd arm_interpolation_target_vel_; // 插值目标速度
     bool last_is_rl_controller_ = false;
+
+    // 倒地起身关节层插值相关成员变量
+    Eigen::VectorXd fall_stand_init_joints_;      // RL 轨迹中倒地起身的初始关节目标（腿+腰+臂）
+    Eigen::VectorXd fall_stand_start_pos_;        // 插值起始时的当前关节位置
+    bool is_fall_stand_interpolating_ = false;    // 是否正在进行倒地起身关节插值
+    bool is_fall_stand_interpolating_complete_ = false;    // 是否已完成倒地起身关节插值
+    double fall_stand_interp_start_time_ = 0.0;   // 插值开始时间
+    double fall_stand_required_time_ = 0.0;       // 根据最大关节速度计算得到的所需时长
+    double fall_stand_max_joint_velocity_ = 1.0;  // 倒地起身关节插值的最大关节速度(rad/s)
+    bool has_fall_stand_controller_{false};
     
     // ==================== 半身模式手臂插值相关成员变量 ====================
     bool is_half_body_arm_interpolating_ = false;
@@ -934,7 +804,6 @@ namespace humanoid_controller
     Eigen::VectorXd half_body_arm_interpolation_last_target_pos_;
     
     // ==================== 通用插值系统成员变量 ====================
-    std::map<std::string, InterpolationRequest> active_interpolations_;  // 活跃的插值任务
     std::mutex interpolation_mutex_;                                      // 插值任务的线程安全锁
     int interpolation_counter_;                                           // 插值任务计数器，用于生成唯一ID
     
@@ -996,6 +865,20 @@ namespace humanoid_controller
     ros::Subscriber interpolation_status_request_sub_;
     ros::Publisher interpolation_status_pub_;
     ros::Publisher interpolation_result_pub_;
+
+    bool init_fall_down_state_{false};
+    // 控制器管理系统：使用控制器管理类统一管理
+    std::unique_ptr<RLControllerManager> controller_manager_;  // 控制器管理类
+    RLControllerBase* current_controller_ptr_{nullptr};        // 当前控制器指针（从管理类获取）
+    
+    // 保留 fall_down_state_ 用于向后兼容，但实际逻辑改为控制器切换
+    FallStandState fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃，改为控制器切换）
+    FallStandState last_fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃）
+
+
+    bool has_fall_down_controller_{false};
+    double switch_distance_threshold_ = 0.003;// MPC-RL切换距离阈值
+    double switch_timeout_multiplier_threshold_ = 2.0;// MPC-RL切换超时时间倍率
 
   };
 

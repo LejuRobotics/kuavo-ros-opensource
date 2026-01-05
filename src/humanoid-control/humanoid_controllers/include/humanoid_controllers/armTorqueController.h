@@ -1,4 +1,6 @@
 #pragma once
+// Pinocchio must be included before Boost headers
+#include <pinocchio/fwd.hpp>
 #include <pinocchio/multibody/model.hpp>
 #include <pinocchio/multibody/data.hpp>
 #include <pinocchio/parsers/urdf.hpp>

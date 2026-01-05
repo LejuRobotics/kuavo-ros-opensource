@@ -15,7 +15,7 @@ Q_base_stance
   (7,7)   1200.0    ; p_base_y
   (8,8)   3000.0    ; p_base_z
   (9,9)   700.0    ; theta_base_z
-  (10,10) 1000.0    ; theta_base_y
+  (10,10) 2000.0    ; theta_base_y
   (11,11) 800.0    ; theta_base_x
 
   ;; Leg Joint Positions: [LF, LH, RF, RH] ;;
@@ -101,32 +101,32 @@ Q_base_walk
   ;; Normalized Centroidal Momentum: [linear, angular] ;;
   (0,0)   13.0     ; vcom_x
   (1,1)   13.0     ; vcom_y
-  (2,2)   60.0     ; vcom_z
-  (3,3)   50.0      ; L_x / robotMass
-  (4,4)   50.0     ; L_y / robotMass
+  (2,2)   50.0     ; vcom_z
+  (3,3)   13.0      ; L_x / robotMass
+  (4,4)   13.0     ; L_y / robotMass
   (5,5)   13.0     ; L_z / robotMass
 
   ;; Base Pose: [position, orientation] ;;
   (6,6)   500.0    ; p_base_x
   (7,7)   500.0    ; p_base_y
-  (8,8)   3000.0    ; p_base_z
+  (8,8)   2000.0    ; p_base_z
   (9,9)   700.0    ; theta_base_z
   (10,10) 1000.0    ; theta_base_y
   (11,11) 800.0    ; theta_base_x
 
   ;; Leg Joint Positions: [LF, LH, RF, RH] ;;
-  (12,12) 25.0    ; leg_l1_joint
-  (13,13) 120.0    ; leg_l2_joint
-  (14,14) 20.0    ; leg_l3_joint
-  (15,15) 5.0    ; leg_l4_joint
-  (16,16) 5.0    ; leg_l5_joint
-  (17,17) 5.0    ; leg_l6_joint
-  (18,18) 25.0    ; leg_r1_joint
-  (19,19) 120.0    ; leg_r2_joint
-  (20,20) 20.0    ; leg_r3_joint
-  (21,21) 5.0    ; leg_r4_joint
-  (22,22) 5.0    ; leg_r5_joint
-  (23,23) 5.0    ; leg_r6_joint
+  (12,12) 60.0    ; leg_l1_joint
+  (13,13) 80.0    ; leg_l2_joint
+  (14,14) 60.0    ; leg_l3_joint
+  (15,15) 10.0    ; leg_l4_joint
+  (16,16) 10.0    ; leg_l5_joint
+  (17,17) 10.0    ; leg_l6_joint
+  (18,18) 60.0    ; leg_r1_joint
+  (19,19) 80.0    ; leg_r2_joint
+  (20,20) 60.0    ; leg_r3_joint
+  (21,21) 10.0    ; leg_r4_joint
+  (22,22) 10.0    ; leg_r5_joint
+  (23,23) 10.0    ; leg_r6_joint
 
   ;; Waist Joint ;;
   (24,24) 100.0    ;waist_z

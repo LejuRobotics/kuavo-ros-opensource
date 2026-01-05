@@ -1,0 +1,9 @@
+# Stair alignment service request
+uint8 tag_id          # Target AprilTag ID to align to
+float64 offset_x      # Expected X offset from AprilTag (meters)
+float64 offset_y      # Expected Y offset from AprilTag (meters)  
+float64 offset_yaw    # Expected Yaw offset from AprilTag (radians)
+---
+# Stair alignment service response
+bool result           # true - success, false - failure
+string message
