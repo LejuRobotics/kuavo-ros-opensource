@@ -54,7 +54,7 @@ def load_dynamic_qr_service(gait_name="taiji"):
 
 def change_ruiwo_motor_param(param_name):
     try:
-        rospy.wait_for_service('/hardware/change_ruiwo_motor_param')
+        rospy.wait_for_service('/hardware/change_ruiwo_motor_param', timeout=5.0)
         service_proxy = rospy.ServiceProxy('/hardware/change_ruiwo_motor_param', ExecuteArmAction)
         response = service_proxy(action_name=param_name)
         
@@ -758,7 +758,16 @@ def main():
     rospy.sleep(1)
 
     load_dynamic_qr_service("taiji")
-    change_ruiwo_motor_param("taiji_kpkd")
+
+    # 只有在获取到 rosparam 并且 is_real 为 True 时，才修改电机参数为太极模式
+    is_real = False
+    if rospy.has_param('/is_real'):
+        try:
+            is_real = rospy.get_param('/is_real')
+        except Exception as e:
+            rospy.logwarn("获取 /is_real 参数失败: {}".format(e))
+    if is_real:
+        change_ruiwo_motor_param("taiji_kpkd")
     try:
         # 执行动作序列
         if music_player.speaker_available():
@@ -773,7 +782,8 @@ def main():
         # 确保清除太极执行状态标志
         rospy.set_param('/taiji_executing', False)
     load_dynamic_qr_service("stance")
-    change_ruiwo_motor_param("normal_kpkd")
+    if is_real:
+        change_ruiwo_motor_param("normal_kpkd")
 
 if __name__ == '__main__':
     main()
