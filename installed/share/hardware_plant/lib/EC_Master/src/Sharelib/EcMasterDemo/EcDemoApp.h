@@ -128,6 +128,8 @@ typedef struct
   int16_t target_torque;
   int32_t velocity_offset;
   int16_t torque_offset;
+  uint16_t position_kp;  //位置环P增益
+  uint16_t velocity_kp;  //速度环P增益
   int8_t mode_of_opration;//选模式，例：CSP、CSV等。。。
 } YD_SlaveWrite_t;
 

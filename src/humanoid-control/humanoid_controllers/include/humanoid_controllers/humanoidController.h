@@ -737,6 +737,7 @@ namespace humanoid_controller
     bool updateSensorDataFromShm();      // 从共享内存更新传感器数据
     void publishJointCmdToShm(const kuavo_msgs::jointCmd& jointCmdMsg);         // 发布关节命令到共享内存
     void publishControlCommands(const kuavo_msgs::jointCmd& jointCmdMsg);       // 发布控制命令的统一接口
+    void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);                // 替换EC_MASTER电机的kp/kd（从running_settings）
     
     // CPU内核隔离设置
     bool setupCpuIsolation();  // 从ROS参数获取隔离CPU索引并设置线程亲和性

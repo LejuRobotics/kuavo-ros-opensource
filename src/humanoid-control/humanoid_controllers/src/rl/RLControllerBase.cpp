@@ -92,6 +92,8 @@ using namespace ocs2;
     jointKdRL_.resize(total_joints);
     torqueLimitsRL_.resize(total_joints);
     actionScaleTestRL_.resize(total_joints);
+    motorPdoKp_.resize(total_joints);
+    motorPdoKd_.resize(total_joints);
     
     // 初始化为零
     defalutJointPosRL_.setZero();
@@ -102,6 +104,8 @@ using namespace ocs2;
     jointKdRL_.setZero();
     torqueLimitsRL_.setZero();
     actionScaleTestRL_.setZero();
+    motorPdoKp_.setZero();
+    motorPdoKd_.setZero();
     
     ROS_INFO("[%s] RL variables initialized: jointNum_=%d, jointArmNum_=%d, waistNum_=%d, headNum_=%d, num_actions_=%d", 
              name_.c_str(), jointNum_, jointArmNum_, waistNum_, headNum_, num_actions_);
@@ -191,11 +195,38 @@ using namespace ocs2;
     
     // 调用派生类的实现
     bool success = updateImpl(time, processed_sensor_data, measuredRbdState, joint_cmd);
-    
+        
     // 如果启用了手臂指令替换，调用updateArmCommand来替换手臂部分
     if (success && arm_command_replacement_enabled_)
     {
       updateArmCommand(time, processed_sensor_data, joint_cmd);
+    }
+    
+    // 如果 use_default_motor_csp_kpkd_ 为 false，使用从 info 文件加载的 motorPdoKp_ 和 motorPdoKd_ 替换所有 control_modes==2 的关节
+    if (success && !use_default_motor_csp_kpkd_)
+    {
+      const int total_joints = jointNum_ + jointArmNum_ + waistNum_;
+      const int cmd_size = static_cast<int>(joint_cmd.control_modes.size());
+      
+      // 确保 motorPdoKp_ 和 motorPdoKd_ 已正确初始化且大小匹配
+      if (motorPdoKp_.size() == total_joints && 
+          motorPdoKd_.size() == total_joints &&
+          cmd_size >= total_joints)
+      {
+        for (int i = 0; i < total_joints && i < cmd_size; ++i)
+        {
+          if (joint_cmd.control_modes[i] == 2)
+          {
+            // 确保 joint_kp 和 joint_kd 向量有足够的空间
+            if (i < static_cast<int>(joint_cmd.joint_kp.size()) && 
+                i < static_cast<int>(joint_cmd.joint_kd.size()))
+            {
+              joint_cmd.joint_kp[i] = motorPdoKp_[i];
+              joint_cmd.joint_kd[i] = motorPdoKd_[i];
+            }
+          }
+        }
+      }
     }
     
     return success;
@@ -248,6 +279,38 @@ using namespace ocs2;
                  name_.c_str(), config_file.c_str(), e.what());
         // 使用默认值 false（直接切换）
         use_interpolate_from_mpc_ = false;
+      }
+
+      // 加载 use_default_motor_csp_kpkd 参数
+      // true: 使用kuavo.json中的默认kp/kd，false: 使用info文件中的motor_kp/motor_kd
+      try
+      {
+        loadData::loadCppDataType(config_file, "use_default_motor_csp_kpkd", use_default_motor_csp_kpkd_);
+      }
+      catch (const std::exception& e)
+      {
+        ROS_WARN("[%s] Failed to load use_default_motor_csp_kpkd from %s: %s, using default (true)",
+                 name_.c_str(), config_file.c_str(), e.what());
+        // 使用默认值 true（使用默认kp/kd）
+        use_default_motor_csp_kpkd_ = true;
+      }
+
+      // 如果 use_default_motor_csp_kpkd_ 为 false，尝试加载 motor_pdo_kp 和 motor_pdo_kd
+      if (!use_default_motor_csp_kpkd_)
+      {
+        try
+        {
+          loadData::loadEigenMatrix(config_file, "motor_pdo_kp", motorPdoKp_);
+          loadData::loadEigenMatrix(config_file, "motor_pdo_kd", motorPdoKd_);
+          ROS_INFO("[%s] Loaded motor_pdo_kp and motor_pdo_kd from config file", name_.c_str());
+        }
+        catch (const std::exception& e)
+        {
+          ROS_WARN("[%s] Failed to load motor_pdo_kp/motor_pdo_kd from %s: %s, will use zero values",
+                   name_.c_str(), config_file.c_str(), e.what());
+          motorPdoKp_.setZero();
+          motorPdoKd_.setZero();
+        }
       }
       
       return true;

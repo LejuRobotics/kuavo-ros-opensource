@@ -1184,6 +1184,37 @@ namespace humanoid_controller
   }
 
 
+  void humanoidController::replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg)
+  {
+    // 对于 control_modes == 2 且 driver == EC_MASTER 的电机，使用 running_settings.joint_kp 和 joint_kd
+    // running_settings.joint_kp 和 joint_kd 只包含 EC_MASTER 电机的值，需要建立映射
+    const auto &hardware_settings = kuavo_settings_.hardware_settings;
+    const auto &running_settings = kuavo_settings_.running_settings;
+    
+    if (!running_settings.joint_kp.empty() && 
+        !running_settings.joint_kd.empty() &&
+        running_settings.joint_kp.size() == running_settings.joint_kd.size())
+    {
+      const int total_joints = jointNumReal_ + waistNum_ + armNumReal_;
+      const int ec_master_size = static_cast<int>(running_settings.joint_kp.size());
+      int ec_master_count = 0;
+      
+      for (int i = 0; i < total_joints && i < static_cast<int>(jointCmdMsg.control_modes.size()); ++i)
+      {
+        // 检查边界条件和控制模式
+        if (jointCmdMsg.control_modes[i] == 2 && 
+            i < static_cast<int>(hardware_settings.driver.size()) &&
+            hardware_settings.driver[i] == EC_MASTER &&
+            ec_master_count < ec_master_size)
+        {
+          jointCmdMsg.joint_kp[i] = static_cast<double>(running_settings.joint_kp[ec_master_count]);
+          jointCmdMsg.joint_kd[i] = static_cast<double>(running_settings.joint_kd[ec_master_count]);
+          ec_master_count++;
+        }
+      }
+    }
+  }
+
   void humanoidController::headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg)
   {
       if (msg->joint_data.size() ==2)
@@ -1875,14 +1906,17 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       is_robot_standup_complete_ = fabs(standState[8] - curTargetState_wbc[8]) < 0.002;
 
       kuavo_msgs::jointCmd jointCmdMsg;
+      
       for (int i1 = 0; i1 < jointNumReal_; ++i1)
       {
         jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + i1));
         jointCmdMsg.joint_v.push_back(0);
         jointCmdMsg.tau.push_back(torque(i1));
         jointCmdMsg.tau_ratio.push_back(1);
+        
         jointCmdMsg.joint_kp.push_back(joint_kp_[i1]);
         jointCmdMsg.joint_kd.push_back(joint_kd_[i1]);
+        
         jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
         jointCmdMsg.control_modes.push_back(2);
       }
@@ -2897,6 +2931,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         robotVisualizer_->updateHeadJointPositions(sensor_data_head_.jointPos_);
       }
 
+      // 对于 control_modes == 2 且 driver == EC_MASTER 的电机，使用 running_settings.joint_kp 和 joint_kd
+      // running_settings.joint_kp 和 joint_kd 只包含 EC_MASTER 电机的值，需要建立映射
+      replaceDefaultEcMotorPdoGait(jointCmdMsg);
 
     }
     else
@@ -2917,6 +2954,12 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       current_controller_ptr_->applyBaseState(baseState);
       // 更新控制器
       current_controller_ptr_->update(time, getRobotSensorData(), getRobotState(), jointCmdMsg);
+
+      // 如果 use_default_motor_csp_kpkd 为 true，使用 running_settings 中的 kp/kd 替换 EC_MASTER 电机的值
+      if (current_controller_ptr_->getUseDefaultMotorCspKpkd())
+      {
+        replaceDefaultEcMotorPdoGait(jointCmdMsg);
+      }
 
       // 补充头部维度
       // 计算头部反馈力

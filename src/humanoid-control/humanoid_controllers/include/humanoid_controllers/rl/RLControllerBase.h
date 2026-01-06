@@ -177,6 +177,12 @@ public:
   bool getUseInterpolateFromMPC() const { return use_interpolate_from_mpc_; }
 
   /**
+   * @brief 获取是否使用默认的电机CSP kp/kd（从kuavo.json）
+   * @return true表示使用默认的kp/kd，false表示使用info文件中定义的motor_kp/motor_kd
+   */
+  bool getUseDefaultMotorCspKpkd() const { return use_default_motor_csp_kpkd_; }
+
+  /**
    * @brief 重新加载配置文件
    * 自动调用派生类的loadConfig方法重新加载配置文件
    * @return 是否重新加载成功
@@ -431,6 +437,9 @@ protected:
   Eigen::VectorXd feetPositionsRL_;   ///< 脚位置
   Eigen::VectorXd baseStateRL_;       ///< 基座状态
   bool use_interpolate_from_mpc_ = false; ///< 从MPC切换时是否使用插值过渡（true:使用插值，false:直接切换）
+  bool use_default_motor_csp_kpkd_ = true; ///< 是否使用默认的电机CSP kp/kd（true:使用kuavo.json中的默认值，false:使用info文件中的motor_kp/motor_kd）
+  Eigen::VectorXd motorPdoKp_;         ///< 电机Kp参数（从info文件加载，用于替换control_modes==2的关节）
+  Eigen::VectorXd motorPdoKd_;         ///< 电机Kd参数（从info文件加载，用于替换control_modes==2的关节）
 
   // RL 相关 IMU 滤波参数与滤波器
   bool rl_filter_initialized_ = false; ///< RL IMU 滤波器是否已初始化

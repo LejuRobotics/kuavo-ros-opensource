@@ -15,6 +15,7 @@ ankleSolverType    1       ; 用于仿真中关节换算版本指定 0:旧版本
 use_jointcmd_filter true       ; 是否对输出使用关节指令滤波器 0:不使用 1:使用
 use_external_arm_controller  true ; 是否使用外部手臂控制器指令替代模型输出的手臂指令 0:不使用 1:使用
 use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
+use_default_motor_csp_kpkd   false      ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 
 networkModelFile          /policy_js2_2025-12-18_19-53-45_amp_torch_agent_319200.onnx       ; 
 commandData 
@@ -320,6 +321,68 @@ jointKd
     (23,0)  3       ; zarm_r5_joint
     (24,0)  3       ; zarm_r6_joint
     (25,0)  3       ; zarm_r7_joint
+}
+
+motor_pdo_kp
+{
+    ; 定义各关节的PDO Kp参数（从kuavo.json的joint_kp读取，主要用于EC_MASTER电机）
+    (0,0)   220     ; leg_l1_joint
+    (1,0)   100     ; leg_l2_joint
+    (2,0)   224     ; leg_l3_joint
+    (3,0)   224     ; leg_l4_joint
+    (4,0)   580     ; leg_l5_joint
+    (5,0)   580     ; leg_l6_joint
+    (6,0)   220     ; leg_r1_joint
+    (7,0)   100     ; leg_r2_joint
+    (8,0)   224     ; leg_r3_joint
+    (9,0)   224     ; leg_r4_joint
+    (10,0)  580     ; leg_r5_joint
+    (11,0)  580     ; leg_r6_joint
+    (12,0)  586     ; zarm_l1_joint (除了第一个ec电机之外其他手臂关节暂设为0，ruiwo暂不支持，可根据需要调整)
+    (13,0)  0       ; zarm_l2_joint
+    (14,0)  0       ; zarm_l3_joint
+    (15,0)  0       ; zarm_l4_joint
+    (16,0)  0       ; zarm_l5_joint
+    (17,0)  0       ; zarm_l6_joint
+    (18,0)  0       ; zarm_l7_joint
+    (19,0)  586     ; zarm_r1_joint
+    (20,0)  0       ; zarm_r2_joint
+    (21,0)  0       ; zarm_r3_joint
+    (22,0)  0       ; zarm_r4_joint
+    (23,0)  0       ; zarm_r5_joint
+    (24,0)  0       ; zarm_r6_joint
+    (25,0)  0       ; zarm_r7_joint
+}
+
+motor_pdo_kd
+{
+    ; 定义各关节的PDO Kd参数（从kuavo.json的joint_kd读取，主要用于EC_MASTER电机）
+    (0,0)   1200    ; leg_l1_joint
+    (1,0)   3616    ; leg_l2_joint
+    (2,0)   3616    ; leg_l3_joint
+    (3,0)   1200    ; leg_l4_joint
+    (4,0)   570     ; leg_l5_joint
+    (5,0)   570     ; leg_l6_joint
+    (6,0)   1200    ; leg_r1_joint
+    (7,0)   3616    ; leg_r2_joint
+    (8,0)   3616    ; leg_r3_joint
+    (9,0)   1200    ; leg_r4_joint
+    (10,0)  570     ; leg_r5_joint
+    (11,0)  570     ; leg_r6_joint
+    (12,0)  2880    ; zarm_l1_joint (除了第一个ec电机之外其他手臂关节暂设为0，ruiwo暂不支持，可根据需要调整)
+    (13,0)  0       ; zarm_l2_joint
+    (14,0)  0       ; zarm_l3_joint
+    (15,0)  0       ; zarm_l4_joint
+    (16,0)  0       ; zarm_l5_joint
+    (17,0)  0       ; zarm_l6_joint
+    (18,0)  0       ; zarm_l7_joint
+    (19,0)  2880    ; zarm_r1_joint
+    (20,0)  0       ; zarm_r2_joint
+    (21,0)  0       ; zarm_r3_joint
+    (22,0)  0       ; zarm_r4_joint
+    (23,0)  0       ; zarm_r5_joint
+    (24,0)  0       ; zarm_r6_joint
+    (25,0)  0       ; zarm_r7_joint
 }
 
 jointKdstance

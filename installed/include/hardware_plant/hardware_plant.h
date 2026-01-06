@@ -128,6 +128,8 @@ class HardwarePlant
     inline void SetMotorTorque(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
     inline void SetMotorPosition(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
     inline void GetMotorData(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
+    // 辅助函数：为 EC_MASTER 电机设置默认的 kp/kd（用于 CSP 模式）
+    inline void setDefaultKpKdForEcMaster(std::vector<MotorParam_t> &motor_data, const std::vector<uint8_t> &joint_ids);
     bool calibrateMotor(int motor_id, int direction, bool save_offset = false);
     void calibrateBipedLoop();
     void calibrateWheelLoop();

@@ -120,7 +120,7 @@ namespace humanoid_controller
     {
       loadData::loadEigenMatrix(rlParamFile, key, matrix);
     };
-    Eigen::VectorXd jointCmdFilterCutoffFreq_(jointNum_ + jointArmNum_);
+    Eigen::VectorXd jointCmdFilterCutoffFreq_(jointNum_ + jointArmNum_ + waistNum_);
 
     loadEigenMatrix("defaultJointState", defalutJointPosRL_);
     loadEigenMatrix("defaultBaseState", defaultBaseStateRL_);
@@ -672,14 +672,18 @@ namespace humanoid_controller
       }
 
     }
+    ros_logger_->publishVector("/rl_controller/cmd", cmd);
 
     // for 4pro AMP 
     Eigen::VectorXd actuation;
     if (use_jointcmd_filter_)
     {
       Eigen::VectorXd cmd_filter = jointCmdFilter_.update(cmd);
-      Eigen::VectorXd cmd_out = cmd_filter.cwiseProduct(jointCmdFilterState_) +
-                                cmd.cwiseProduct(Eigen::VectorXd::Ones(jointNum_ + jointArmNum_) - jointCmdFilterState_);
+      // 将滤波状态向量扩展到完整大小（包括腰部关节）
+      Eigen::VectorXd filterState_full = Eigen::VectorXd::Zero(jointNum_ + jointArmNum_ + waistNum_);
+      filterState_full.head(jointCmdFilterState_.size()) = jointCmdFilterState_;
+      Eigen::VectorXd cmd_out = cmd_filter.cwiseProduct(filterState_full) +
+                                cmd.cwiseProduct(Eigen::VectorXd::Ones(jointNum_ + jointArmNum_ + waistNum_) - filterState_full);
       actuation = cmd_out;
     }
     else
@@ -691,8 +695,8 @@ namespace humanoid_controller
     episodeLength_++;
     if (ros_logger_)
     {
-      ros_logger_->publishVector("/rl_controller/torque", torque);
-      ros_logger_->publishVector("/rl_controller/cmd", cmd);
+      // ros_logger_->publishVector("/rl_controller/torque", torque);
+      ros_logger_->publishVector("/rl_controller/actuation", actuation);
     }
 
 
