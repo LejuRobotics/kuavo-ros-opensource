@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 磨线主控制器节点 - 简化版本
-100Hz检查频率，持续发布start_together状态
+1Hz检查频率，持续发布start_together状态
 - 如果手和脚都ready，持续发布start_together=True
 - 如果有一个失败，发布start_together=False
 """
@@ -48,7 +48,7 @@ class BreakinController:
         self.pub_start.publish(initial_msg)
         
         rospy.loginfo("磨线主控制器节点已启动")
-        rospy.loginfo("检查频率: 100Hz")
+        rospy.loginfo("检查频率: 1Hz")
         rospy.loginfo("等待手臂和腿部准备完成...")
     
     def arm_ready_cb(self, msg):
@@ -74,8 +74,8 @@ class BreakinController:
             # 不打印False，因为正常退出时也会变为False，不是失败
     
     def run(self):
-        """主循环 - 100Hz检查频率"""
-        rate = rospy.Rate(100)  # 100Hz
+        """主循环 - 1Hz检查频率"""
+        rate = rospy.Rate(1)  # 1Hz
         
         last_start_together_state = None
         last_status_print_time = rospy.get_time()
@@ -92,15 +92,13 @@ class BreakinController:
                 if start_together_state:
                     rospy.loginfo("=" * 50)
                     rospy.loginfo("手臂和腿部都已准备完成！")
-                    rospy.loginfo("开始持续发布 start_together = True (100Hz)")
+                    rospy.loginfo("开始持续发布 start_together = True (1Hz)")
                     rospy.loginfo("=" * 50)
                 else:
-                    # 不打印"失败"信息，因为正常退出时也会变为False
-                    # rospy.logwarn("开始持续发布 start_together = False (100Hz)")
                     pass
                 last_start_together_state = start_together_state
             
-            # 持续发布当前状态（100Hz）
+            # 持续发布当前状态（1Hz）
             msg = Bool()
             msg.data = start_together_state
             self.pub_start.publish(msg)

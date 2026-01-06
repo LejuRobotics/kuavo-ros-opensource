@@ -288,7 +288,7 @@ class BreakinMainController:
         self.print_colored("请选择启动模式：", Colors.YELLOW)
         print("1. 仅启动手臂磨线")
         print("2. 仅启动腿部磨线")
-        print("3. 同时启动手臂和腿部磨线")
+        print("3. 同时启动手臂、腿部和头部磨线")
         print("q. 退出")
         print()
     
@@ -397,11 +397,13 @@ class BreakinMainController:
                 pub_standalone = rospy.Publisher('/breakin/standalone_mode', Bool, queue_size=10, latch=True)
                 self.ros_publishers['pub_standalone_mode'] = pub_standalone
                 
-                # 创建allow_run和can_start_new_round发布者（稍后在循环中使用）
+                # 创建allow_run、can_start_new_round和start_new_round_leg发布者（稍后在循环中使用）
                 pub_allow_run = rospy.Publisher('/breakin/allow_run', Bool, queue_size=10)
                 pub_can_start_new_round = rospy.Publisher('/breakin/can_start_new_round', Bool, queue_size=10)
+                pub_start_new_round_leg = rospy.Publisher('/breakin/start_new_round_leg', Bool, queue_size=10)
                 self.ros_publishers['pub_allow_run'] = pub_allow_run
                 self.ros_publishers['pub_can_start_new_round'] = pub_can_start_new_round
+                self.ros_publishers['pub_start_new_round_leg'] = pub_start_new_round_leg
                 self.ros_publishers['msg_type'] = Bool
                 
                 # 等待发布者注册
@@ -439,40 +441,30 @@ class BreakinMainController:
         self.print_colored("=" * 50, Colors.CYAN)
         print()
         
-        # 每轮动作时长（秒）
-        cycle_time = 12.0
-
         # 0. 清理残留进程
         self._kill_existing_processes()
         
-        # 1. 获取用户输入的测试时长
-        self.print_colored("手臂磨线测试时长：", Colors.YELLOW)
-        min_duration = 14.0
+        # 1. 获取用户输入的磨线轮数
+        self.print_colored("手臂磨线轮数：", Colors.YELLOW)
         while True:
             try:
-                duration_input = input(f"请输入磨线测试时长（秒），最少{min_duration}秒: ").strip()
-                if duration_input.lower() == 'q':
+                rounds_input = input(f"请输入要磨线的轮数（至少1轮）: ").strip()
+                if rounds_input.lower() == 'q':
                     self.print_colored("已取消操作", Colors.YELLOW)
                     return 0
-                arm_duration = float(duration_input)
-                if arm_duration <= 0:
-                    self.print_colored("测试时长必须大于0，请重新输入", Colors.RED)
-                    continue
-                if arm_duration < min_duration:
-                    self.print_colored(f"错误：测试时长必须至少{min_duration}秒才能完成一个完整的动作周期，请重新输入", Colors.RED)
+                target_rounds = int(rounds_input)
+                if target_rounds <= 0:
+                    self.print_colored("轮数必须大于0，请重新输入", Colors.RED)
                     continue
                 break
             except ValueError:
-                self.print_colored("输入无效，请输入一个有效的数字", Colors.RED)
+                self.print_colored("输入无效，请输入一个有效的整数", Colors.RED)
             except KeyboardInterrupt:
                 self.print_colored("\n已取消操作", Colors.YELLOW)
                 return 0
         
         print()
-        self.print_colored(f"磨线测试时长: {arm_duration} 秒", Colors.GREEN)
-        # 计算预计轮数（向下取整）
-        estimated_rounds = int(arm_duration // cycle_time)
-        self.print_colored(f"预计将进行约 {estimated_rounds} 轮磨线（每轮约 {cycle_time} 秒）", Colors.BLUE)
+        self.print_colored(f"磨线目标轮数: {target_rounds} 轮", Colors.GREEN)
         print()
         
         # 2. 启动roscore
@@ -500,9 +492,7 @@ class BreakinMainController:
             )
             self.processes.append(process)
             
-            # 订阅 arm_started / arm_running，用于起始时间和每轮结束检测
-            start_time = None   # 第一次真正开始执行动作的时间
-            min_round_duration = 14.0  # 最小一轮时间（秒）
+            # 订阅 arm_started / arm_running，用于每轮结束检测
             stop_publish_flag = threading.Event()
             arm_started = False
             arm_running = False
@@ -510,12 +500,10 @@ class BreakinMainController:
             published_rounds = 0
             
             def arm_started_callback(msg):
-                nonlocal arm_started, start_time
+                nonlocal arm_started
                 if msg.data and not arm_started:
                     arm_started = True
-                    # 以 arm_started 为基准开始计时
-                    start_time = time.time()
-                    self.print_colored("✓ 收到 arm_started = True，开始倒计时", Colors.GREEN)
+                    self.print_colored("✓ 收到 arm_started = True，开始磨线", Colors.GREEN)
             
             def arm_running_callback(msg):
                 nonlocal arm_running
@@ -529,10 +517,10 @@ class BreakinMainController:
             except Exception as e:
                 self.print_colored(f"订阅手臂状态话题失败: {e}", Colors.YELLOW)
             
-            # 100Hz 发布线程：发布 allow_run / can_start_new_round / start_new_round_arm
+            # 1Hz 发布线程：发布 allow_run / can_start_new_round / start_new_round_arm
             def publish_topics_loop():
-                nonlocal start_time, published_rounds
-                rate = rospy.Rate(100)
+                nonlocal published_rounds
+                rate = rospy.Rate(1)
                 last_arm_running_state = None
                 last_start_new_round_arm_state = False
                 while not stop_publish_flag.is_set() and not rospy.is_shutdown():
@@ -541,20 +529,18 @@ class BreakinMainController:
                     allow_msg.data = True
                     self.ros_publishers['pub_allow_run'].publish(allow_msg)
                     
-                    # 计算是否还能开始新一轮
-                    can_start_new_round_value = True
-                    if start_time is not None:
-                        elapsed_time = time.time() - start_time
-                        remaining_time = arm_duration - elapsed_time
-                        can_start_new_round_value = (remaining_time >= min_round_duration)
-                    # 在未开始前，允许第一轮
+                    # 计算是否还能开始新一轮（基于轮数判断）
+                    # 当前已完成的轮数 = 1（第一轮）+ published_rounds（后续轮数）
+                    current_completed_rounds = 1 + published_rounds if arm_started else 0
+                    can_start_new_round_value = (current_completed_rounds < target_rounds)
+                    
                     can_start_msg = Bool()
                     can_start_msg.data = can_start_new_round_value
                     self.ros_publishers['pub_can_start_new_round'].publish(can_start_msg)
                     
                     # 检测一轮是否刚刚完成（arm_running 从 True 变为 False）
                     should_start_new_round = False
-                    if start_time is not None:
+                    if arm_started:
                         both_ready = (not arm_running)  # 仅手臂
                         was_running = (last_arm_running_state is True)
                         just_finished = was_running and both_ready
@@ -573,10 +559,9 @@ class BreakinMainController:
                         last_start_new_round_arm_state = True
                         published_rounds += 1
                         
-                        elapsed_time = time.time() - start_time if start_time is not None else 0
-                        remaining_time = arm_duration - elapsed_time
+                        current_completed_rounds = 1 + published_rounds
                         self.print_colored(
-                            f"✓ [手臂单独] 发布 start_new_round_arm = True（第 {published_rounds} 轮，剩余时间: {remaining_time:.1f}秒）",
+                            f"✓ [手臂单独] 发布 start_new_round_arm = True（第 {published_rounds + 1} 轮 / 共 {target_rounds} 轮）",
                             Colors.GREEN
                         )
                     else:
@@ -594,9 +579,9 @@ class BreakinMainController:
             # 启动发布线程
             publish_thread = threading.Thread(target=publish_topics_loop, daemon=True)
             publish_thread.start()
-            self.print_colored("✓ 已启动手臂单独模式的100Hz话题发布线程", Colors.GREEN)
+            self.print_colored("✓ 已启动手臂单独模式的1Hz话题发布线程", Colors.GREEN)
             
-            # 监控进程和时间
+            # 监控进程和轮数
             return_code = 0
             try:
                 while True:
@@ -604,17 +589,16 @@ class BreakinMainController:
                         return_code = process.returncode
                         break
                     
-                    # 如果已经开始，并且时间用完，则停止
-                    if start_time is not None:
-                        elapsed_time = time.time() - start_time
-                        remaining_time = arm_duration - elapsed_time
-                        if remaining_time <= 0:
-                            self.print_colored("手臂磨线时间已用完", Colors.GREEN)
+                    # 如果已经开始，并且当前轮已完成，并且轮数已达到目标，则停止
+                    if arm_started:
+                        current_completed_rounds = 1 + published_rounds
+                        # 只有当当前轮已完成（arm_running = False）时，才检查是否达到目标
+                        if not arm_running and current_completed_rounds >= target_rounds:
+                            self.print_colored(f"手臂磨线轮数已达到目标（{current_completed_rounds} / {target_rounds} 轮）", Colors.GREEN)
                             stop_msg = Bool()
                             stop_msg.data = False
                             self.ros_publishers['pub_allow_run'].publish(stop_msg)
                             self.ros_publishers['pub_can_start_new_round'].publish(stop_msg)
-                            # 给手臂节点一点时间收尾
                             time.sleep(2.0)
                             break
                     
@@ -622,10 +606,10 @@ class BreakinMainController:
             finally:
                 # 在退出前输出实际运行轮数：第一轮本身也算一轮
                 # 统计方式：如果真正开始过动作，则总轮数 = 1（第一轮） + 后续通过 start_new_round_arm 触发的轮数
-                if start_time is not None:
+                if arm_started:
                     total_rounds = 1 + published_rounds
                     self.print_colored(
-                        f"实际运行磨线轮数： {total_rounds} 轮",
+                        f"实际运行磨线轮数: {total_rounds} 轮 / 目标轮数: {target_rounds} 轮",
                         Colors.GREEN
                     )
                 else:
@@ -640,6 +624,7 @@ class BreakinMainController:
                     stop_msg.data = False
                     self.ros_publishers['pub_allow_run'].publish(stop_msg)
                     self.ros_publishers['pub_can_start_new_round'].publish(stop_msg)
+                    self.ros_publishers['pub_start_new_round_leg'].publish(stop_msg)
                 except Exception:
                     pass
                 
@@ -679,9 +664,6 @@ class BreakinMainController:
         self.print_colored("=" * 50, Colors.CYAN)
         print()
 
-        # 每轮动作时长（秒）
-        cycle_time = 12.0
-
         # 0. 清理残留进程
         self._kill_existing_processes()
 
@@ -689,34 +671,27 @@ class BreakinMainController:
         if not self._ensure_leg_ec_log_dir():
             return 1
         
-        # 1. 获取用户输入的测试时长
-        self.print_colored("腿部磨线测试时长：", Colors.YELLOW)
-        min_duration = 14.0
+        # 1. 获取用户输入的磨线轮数
+        self.print_colored("腿部磨线轮数：", Colors.YELLOW)
         while True:
             try:
-                duration_input = input(f"请输入磨线测试时长（秒），最少{min_duration}秒: ").strip()
-                if duration_input.lower() == 'q':
+                rounds_input = input(f"请输入要磨线的轮数（至少1轮）: ").strip()
+                if rounds_input.lower() == 'q':
                     self.print_colored("已取消操作", Colors.YELLOW)
                     return 0
-                leg_duration = float(duration_input)
-                if leg_duration <= 0:
-                    self.print_colored("测试时长必须大于0，请重新输入", Colors.RED)
-                    continue
-                if leg_duration < min_duration:
-                    self.print_colored(f"错误：测试时长必须至少{min_duration}秒才能完成一个完整的动作周期，请重新输入", Colors.RED)
+                target_rounds = int(rounds_input)
+                if target_rounds <= 0:
+                    self.print_colored("轮数必须大于0，请重新输入", Colors.RED)
                     continue
                 break
             except ValueError:
-                self.print_colored("输入无效，请输入一个有效的数字", Colors.RED)
+                self.print_colored("输入无效，请输入一个有效的整数", Colors.RED)
             except KeyboardInterrupt:
                 self.print_colored("\n已取消操作", Colors.YELLOW)
                 return 0
         
         print()
-        self.print_colored(f"磨线测试时长: {leg_duration} 秒", Colors.GREEN)
-        # 计算预计轮数（向下取整）
-        estimated_rounds = int(leg_duration // cycle_time)
-        self.print_colored(f"预计将进行约 {estimated_rounds} 轮磨线（每轮约 {cycle_time} 秒）", Colors.BLUE)
+        self.print_colored(f"磨线目标轮数: {target_rounds} 轮", Colors.GREEN)
         print()
         
         # 2. 启动roscore
@@ -736,51 +711,96 @@ class BreakinMainController:
             import rospy
             from std_msgs.msg import Bool
             
-            # 启动100Hz发布线程（发布allow_run和can_start_new_round）
-            start_time = None  # 将在收到leg_started时设置
-            min_round_duration = 14.0  # 最小一轮时间（秒）
+            # 启动1Hz发布线程（发布allow_run和can_start_new_round）
             stop_publish_flag = threading.Event()
             leg_started = False
-            completed_rounds = 0  # 实际完成轮数（基于时间的估算）
+            leg_running = False
+            completed_rounds = 0  # 实际完成轮数（通过leg_running状态变化计数）
+            last_leg_running_state = None
             
             def leg_started_callback(msg):
-                nonlocal leg_started, start_time
+                nonlocal leg_started
                 if msg.data and not leg_started:
                     leg_started = True
-                    start_time = time.time()
-                    self.print_colored("✓ 收到 leg_started = True，开始倒计时", Colors.GREEN)
+                    self.print_colored("✓ 收到 leg_started = True，开始磨线", Colors.GREEN)
             
-            # 订阅leg_started话题
+            def leg_running_callback(msg):
+                nonlocal leg_running, completed_rounds, last_leg_running_state
+                was_running = (last_leg_running_state is True)
+                leg_running = msg.data
+                # 检测从运行状态变为完成状态（从True变为False），表示完成一轮
+                if was_running and not leg_running and leg_started:
+                    completed_rounds += 1
+                    self.print_colored(
+                        f"✓ 腿部完成第 {completed_rounds} 轮 / 共 {target_rounds} 轮",
+                        Colors.GREEN
+                    )
+                last_leg_running_state = leg_running
+            
+            # 订阅leg_started和leg_running话题
             sub_leg_started = rospy.Subscriber('/breakin/leg_started', Bool, leg_started_callback)
+            sub_leg_running = rospy.Subscriber('/breakin/leg_running', Bool, leg_running_callback)
             
             def publish_topics_loop():
-                """100Hz发布话题的循环"""
-                rate = rospy.Rate(100)  # 100Hz
+                """1Hz发布话题的循环"""
+                nonlocal completed_rounds
+                rate = rospy.Rate(1)  # 1Hz
+                last_start_new_round_leg_state = False
+                # 在发布循环中维护自己的last_leg_running_state，用于检测状态变化
+                publish_loop_last_leg_running = None
                 while not stop_publish_flag.is_set() and not rospy.is_shutdown():
                     # 发布allow_run = True（持续运行）
                     allow_msg = Bool()
                     allow_msg.data = True
                     self.ros_publishers['pub_allow_run'].publish(allow_msg)
                     
-                    # 计算can_start_new_round
-                    if start_time is not None:
-                        elapsed_time = time.time() - start_time
-                        remaining_time = leg_duration - elapsed_time
-                        can_start = (remaining_time >= min_round_duration)
-                    else:
-                        # 在等待leg_started期间，允许开始第一轮
-                        can_start = True
+                    # 计算can_start_new_round（基于轮数判断）
+                    # 当前已完成的轮数 = completed_rounds
+                    # 如果 completed_rounds < target_rounds，则允许开始新一轮
+                    can_start = (completed_rounds < target_rounds)
                     
                     # 发布can_start_new_round
                     can_start_msg = Bool()
                     can_start_msg.data = can_start
                     self.ros_publishers['pub_can_start_new_round'].publish(can_start_msg)
                     
+                    # 检测一轮是否刚刚完成（leg_running 从 True 变为 False）
+                    should_start_new_round = False
+                    if leg_started:
+                        # 使用发布循环中维护的状态来判断
+                        was_running = (publish_loop_last_leg_running is True)
+                        just_finished = was_running and not leg_running
+                        
+                        if just_finished and can_start and not last_start_new_round_leg_state:
+                            # 满足条件时，准备发布下一轮的触发信号
+                            should_start_new_round = True
+                    
+                    if should_start_new_round:
+                        # 发送一次脉冲，允许开始新一轮
+                        start_new_round_leg_msg = Bool()
+                        start_new_round_leg_msg.data = True
+                        self.ros_publishers['pub_start_new_round_leg'].publish(start_new_round_leg_msg)
+                        last_start_new_round_leg_state = True
+                        self.print_colored(
+                            f"✓ [腿部单独] 发布 start_new_round_leg = True（第 {completed_rounds + 1} 轮 / 共 {target_rounds} 轮）",
+                            Colors.GREEN
+                        )
+                    else:
+                        # 确保信号为False，不残留
+                        start_new_round_leg_msg = Bool()
+                        start_new_round_leg_msg.data = False
+                        self.ros_publishers['pub_start_new_round_leg'].publish(start_new_round_leg_msg)
+                        if leg_running and last_start_new_round_leg_state:
+                            last_start_new_round_leg_state = False
+                    
+                    # 更新发布循环中的状态（用于下次检测）
+                    publish_loop_last_leg_running = leg_running
+                    
                     rate.sleep()
             
             publish_thread = threading.Thread(target=publish_topics_loop, daemon=True)
             publish_thread.start()
-            self.print_colored("✓ 已启动100Hz话题发布线程", Colors.GREEN)
+            self.print_colored("✓ 已启动1Hz话题发布线程", Colors.GREEN)
             
             # 等待订阅者注册
             rospy.sleep(1.0)
@@ -793,25 +813,24 @@ class BreakinMainController:
             )
             self.processes.append(process)
             
-            # 监控进程和时间
+            # 监控进程和轮数
             while True:
                 # 检查进程是否还在运行
                 if process.poll() is not None:
                     return_code = process.returncode
                     break
                 
-                # 检查时间是否用完
-                if start_time is not None:
-                    elapsed_time = time.time() - start_time
-                    remaining_time = leg_duration - elapsed_time
-                    
-                    if remaining_time <= 0:
-                        self.print_colored("磨线时间已用完", Colors.GREEN)
+                # 检查轮数是否已达到目标（只有当当前轮已完成时才检查）
+                if leg_started:
+                    # 只有当当前轮已完成（leg_running = False）时，才检查是否达到目标
+                    if not leg_running and completed_rounds >= target_rounds:
+                        self.print_colored(f"磨线轮数已达到目标（{completed_rounds} / {target_rounds} 轮）", Colors.GREEN)
                         # 发布停止信号
                         stop_msg = Bool()
                         stop_msg.data = False
                         self.ros_publishers['pub_allow_run'].publish(stop_msg)
                         self.ros_publishers['pub_can_start_new_round'].publish(stop_msg)
+                        self.ros_publishers['pub_start_new_round_leg'].publish(stop_msg)
                         # 等待进程响应
                         time.sleep(2.0)
                         if process.poll() is None:
@@ -830,12 +849,9 @@ class BreakinMainController:
                 except:
                     time.sleep(0.1)
             
-            # 根据真实运行时间估算完成轮数
-            if start_time is not None:
-                total_elapsed = time.time() - start_time
-                effective_time = min(total_elapsed, leg_duration)
-                completed_rounds = int(effective_time // cycle_time)
-                self.print_colored(f"实际完成磨线轮数: {completed_rounds} 轮", Colors.GREEN)
+            # 输出实际完成轮数
+            if leg_started:
+                self.print_colored(f"实际完成磨线轮数: {completed_rounds} 轮 / 目标轮数: {target_rounds} 轮", Colors.GREEN)
             else:
                 self.print_colored("未开始执行动作，完成磨线轮数: 0 轮", Colors.YELLOW)
 
@@ -848,6 +864,17 @@ class BreakinMainController:
             stop_msg.data = False
             self.ros_publishers['pub_allow_run'].publish(stop_msg)
             self.ros_publishers['pub_can_start_new_round'].publish(stop_msg)
+            self.ros_publishers['pub_start_new_round_leg'].publish(stop_msg)
+            
+            # 清理订阅者
+            try:
+                if sub_leg_started is not None:
+                    sub_leg_started.unregister()
+                if sub_leg_running is not None:
+                    sub_leg_running.unregister()
+            except Exception:
+                pass
+            
             rospy.sleep(0.5)
             
             if return_code == 0:
@@ -867,14 +894,11 @@ class BreakinMainController:
             return 1
     
     def run_both(self):
-        """同时启动手臂和腿部磨线"""
+        """同时启动手臂、腿部和头部磨线"""
         self.print_colored("=" * 50, Colors.CYAN)
-        self.print_colored("      同时启动手臂和腿部磨线（ROS版本）", Colors.CYAN)
+        self.print_colored("      同时启动手臂、腿部和头部磨线（ROS版本）", Colors.CYAN)
         self.print_colored("=" * 50, Colors.CYAN)
         print()
-
-        # 每轮动作时长（秒）
-        cycle_time = 12.0
 
         # 0. 清理残留进程
         self._kill_existing_processes()
@@ -903,34 +927,28 @@ class BreakinMainController:
             return 1
         
         try:
-            # 4. 获取用户输入的测试时长（手臂和腿部使用相同的时长）
-            self.print_colored("同时磨线测试时长：", Colors.YELLOW)
-            min_duration = 14.0
+            # 4. 获取用户输入的磨线轮数
+            self.print_colored("请确认【手臂、腿部、头部】摆放到零点位置", Colors.YELLOW)
+            self.print_colored("同时磨线轮数：", Colors.YELLOW)
             while True:
                 try:
-                    duration_input = input(f"请输入磨线测试时长（秒），最少{min_duration}秒: ").strip()
-                    if duration_input.lower() == 'q':
+                    rounds_input = input(f"请输入要磨线的轮数（至少1轮）: ").strip()
+                    if rounds_input.lower() == 'q':
                         self.print_colored("已取消操作", Colors.YELLOW)
                         return 0
-                    duration = float(duration_input)
-                    if duration <= 0:
-                        self.print_colored("测试时长必须大于0，请重新输入", Colors.RED)
-                        continue
-                    if duration < min_duration:
-                        self.print_colored(f"错误：测试时长必须至少{min_duration}秒才能完成一个完整的动作周期，请重新输入", Colors.RED)
+                    target_rounds = int(rounds_input)
+                    if target_rounds <= 0:
+                        self.print_colored("轮数必须大于0，请重新输入", Colors.RED)
                         continue
                     break
                 except ValueError:
-                    self.print_colored("输入无效，请输入一个有效的数字", Colors.RED)
+                    self.print_colored("输入无效，请输入一个有效的整数", Colors.RED)
                 except KeyboardInterrupt:
                     self.print_colored("\n已取消操作", Colors.YELLOW)
                     return 0
             
             print()
-            self.print_colored(f"磨线测试时长: {duration} 秒", Colors.GREEN)
-            # 计算预计轮数（向下取整）
-            estimated_rounds = int(duration // cycle_time)
-            self.print_colored(f"预计手臂和腿部各将进行约 {estimated_rounds} 轮磨线（每轮约 {cycle_time} 秒）", Colors.BLUE)
+            self.print_colored(f"磨线目标轮数: {target_rounds} 轮", Colors.GREEN)
             print()
             
             # 5. 启动主控制器节点（用于发布start_together）
@@ -946,40 +964,30 @@ class BreakinMainController:
             # 等待主控制器节点启动
             time.sleep(2.0)
             
-            # 6. 同时启动手臂和腿部磨线脚本（通过stdin传递测试时长）
-            self.print_colored("正在启动手臂和腿部磨线脚本...", Colors.BLUE)
+            # 6. 同时启动手臂、腿部和头部磨线脚本
+            self.print_colored("正在启动手臂、腿部和头部磨线脚本...", Colors.BLUE)
             arm_cmd = ["python3", str(self.arm_breakin_standalone)]
             leg_cmd = ["python3", str(self.leg_breakin_standalone)]
             
-            # 启动手臂磨线进程（通过stdin传递时长）
+            # 启动手臂磨线进程
             arm_process = subprocess.Popen(
                 arm_cmd,
-                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 preexec_fn=os.setsid
             )
-            # 发送时长到stdin
-            arm_process.stdin.write(f"{int(duration)}\n")
-            arm_process.stdin.flush()
-            arm_process.stdin.close()
             
-            # 启动腿部磨线进程（通过stdin传递时长）
+            # 启动腿部磨线进程
             leg_process = subprocess.Popen(
                 leg_cmd,
-                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 preexec_fn=os.setsid
             )
-            # 发送时长到stdin
-            leg_process.stdin.write(f"{duration}\n")
-            leg_process.stdin.flush()
-            leg_process.stdin.close()
             
             self.processes.append(arm_process)
             self.processes.append(leg_process)
@@ -1022,7 +1030,7 @@ class BreakinMainController:
             
             self.print_colored("✓ 已启动输出读取线程", Colors.GREEN)
             
-            # 6. 初始化ROS节点并订阅话题，启动100Hz发布线程
+            # 6. 初始化ROS节点并订阅话题，启动1Hz发布线程
             try:
                 import rospy
                 from std_msgs.msg import Bool
@@ -1043,9 +1051,7 @@ class BreakinMainController:
                 arm_running = False
                 leg_running = False
                 should_stop = False
-                start_time = None  # 将在收到start_together时设置
                 start_together_received = False
-                min_round_duration = 14.0  # 最小一轮时间（秒）
                 stop_publish_flag = threading.Event()
                 last_arm_running_state = None
                 last_leg_running_state = None
@@ -1055,11 +1061,10 @@ class BreakinMainController:
                 published_rounds = 0
                 
                 def start_together_callback(msg):
-                    nonlocal start_time, start_together_received
+                    nonlocal start_together_received
                     if msg.data and not start_together_received:
                         start_together_received = True
-                        start_time = time.time()
-                        self.print_colored("✓ 收到 start_together = True，开始倒计时", Colors.GREEN)
+                        self.print_colored("✓ 收到 start_together = True，开始磨线", Colors.GREEN)
                 
                 def arm_running_cb(msg):
                     nonlocal arm_running
@@ -1074,27 +1079,23 @@ class BreakinMainController:
                 sub_arm_running = rospy.Subscriber('/breakin/arm_running', Bool, arm_running_cb)
                 sub_leg_running = rospy.Subscriber('/breakin/leg_running', Bool, leg_running_cb)
                 
-                # 启动100Hz发布线程（发布allow_run和start_new_round信号）
+                # 启动1Hz发布线程（发布allow_run和start_new_round信号）
                 def publish_topics_loop():
-                    """100Hz发布话题的循环"""
+                    """1Hz发布话题的循环"""
                     nonlocal last_start_new_round_arm_state, last_start_new_round_leg_state, last_arm_running_state, last_leg_running_state, published_rounds
-                    rate = rospy.Rate(100)  # 100Hz
+                    rate = rospy.Rate(1)  # 1Hz
                     while not stop_publish_flag.is_set() and not rospy.is_shutdown():
                         # 发布allow_run = True（持续运行）
                         allow_msg = Bool()
                         allow_msg.data = True
                         pub_allow_run.publish(allow_msg)
                         
-                        # 计算剩余时间和是否可以开始新一轮
-                        can_start_new_round_value = True  # 默认值
-                        if start_together_received and start_time is not None:
-                            # 检查时间是否足够
-                            elapsed_time = time.time() - start_time
-                            remaining_time = duration - elapsed_time
-                            can_start_new_round_value = (remaining_time >= min_round_duration)
-                        else:
-                            # 在等待start_together期间，允许开始第一轮
-                            can_start_new_round_value = True
+                        # 计算是否可以开始新一轮（基于轮数判断）
+                        # 当前已完成的轮数 = published_rounds（已发布的轮数）
+                        # 总轮数 = 1（第一轮）+ published_rounds（后续轮数）
+                        # 如果 1 + published_rounds < target_rounds，则可以开始新一轮
+                        current_completed_rounds = 1 + published_rounds if start_together_received else 0
+                        can_start_new_round_value = (current_completed_rounds < target_rounds)
                         
                         # 发布can_start_new_round（腿部磨线还在使用这个topic）
                         can_start_msg = Bool()
@@ -1103,13 +1104,13 @@ class BreakinMainController:
                         
                         # 检查是否可以开始新一轮（用于start_new_round_arm和start_new_round_leg）
                         # 条件：1. 手臂和腿部都完成本轮（arm_running=False, leg_running=False）
-                        #       2. 剩余时间足够（>= min_round_duration）
+                        #       2. 已完成的轮数 < 目标轮数
                         #       3. 已经收到start_together（第一轮已开始）
                         #       4. 之前都在运行（从运行状态变为完成状态）
                         
                         # 检查是否需要发布start_new_round信号
                         should_start_new_round = False
-                        if start_together_received and start_time is not None:
+                        if start_together_received:
                             # 检查手臂和腿部是否都完成本轮（都为False表示都完成）
                             both_ready = (not arm_running and not leg_running)
                             
@@ -1124,7 +1125,7 @@ class BreakinMainController:
                                 just_finished = False
                             
                             if just_finished and can_start_new_round_value and not last_start_new_round_arm_state and not last_start_new_round_leg_state:
-                                # 两个都准备好（从运行状态变为完成状态），且剩余时间足够，发布开始新一轮信号
+                                # 两个都准备好（从运行状态变为完成状态），且轮数未达到目标，发布开始新一轮信号
                                 should_start_new_round = True
                         
                         # 发布start_new_round_arm和start_new_round_leg（同时发布）
@@ -1140,10 +1141,9 @@ class BreakinMainController:
                             last_start_new_round_leg_state = True
                             published_rounds += 1
                             
-                            elapsed_time = time.time() - start_time if start_time is not None else 0
-                            remaining_time = duration - elapsed_time
+                            current_completed_rounds = 1 + published_rounds
                             self.print_colored(
-                                f"✓ 发布 start_new_round_arm = True 和 start_new_round_leg = True（第 {published_rounds} 轮，剩余时间: {remaining_time:.1f}秒）",
+                                f"✓ 发布 start_new_round_arm = True 和 start_new_round_leg = True（第 {published_rounds + 1} 轮 / 共 {target_rounds} 轮）",
                                 Colors.GREEN
                             )
                         else:
@@ -1170,7 +1170,7 @@ class BreakinMainController:
                 
                 publish_thread = threading.Thread(target=publish_topics_loop, daemon=True)
                 publish_thread.start()
-                self.print_colored("✓ 已启动100Hz话题发布线程", Colors.GREEN)
+                self.print_colored("✓ 已启动1Hz话题发布线程", Colors.GREEN)
                 
                 # 等待订阅者注册
                 rospy.sleep(1.0)
@@ -1181,7 +1181,6 @@ class BreakinMainController:
                 self.print_colored(f"警告：无法初始化ROS监控节点: {e}", Colors.YELLOW)
                 self.print_colored("将继续运行，但无法监控运行状态", Colors.YELLOW)
                 should_stop = False
-                start_time = None
                 stop_publish_flag = threading.Event()
             
             # 7. 等待所有进程结束或检测到停止信号
@@ -1198,13 +1197,15 @@ class BreakinMainController:
                     self.print_colored("检测到运行状态异常，正在停止所有子程序...", Colors.RED)
                     break
                 
-                # 检查时间是否用完（仅在收到start_together后检查）
-                if start_time is not None:
-                    elapsed_time = time.time() - start_time
-                    remaining_time = duration - elapsed_time
+                # 检查轮数是否已达到目标（仅在收到start_together后检查，且当前轮已完成时）
+                if start_together_received:
+                    # 当前已完成的轮数 = 1（第一轮）+ published_rounds（后续轮数）
+                    current_completed_rounds = 1 + published_rounds
+                    # 只有当当前轮已完成（arm_running = False 且 leg_running = False）时，才检查是否达到目标
+                    both_finished = (not arm_running and not leg_running)
                     
-                    if remaining_time <= 0:
-                        self.print_colored("磨线时间已用完", Colors.GREEN)
+                    if both_finished and current_completed_rounds >= target_rounds:
+                        self.print_colored(f"磨线轮数已达到目标（{current_completed_rounds} / {target_rounds} 轮）", Colors.GREEN)
                         # 发布停止信号
                         stop_msg = Bool()
                         stop_msg.data = False
@@ -1227,10 +1228,10 @@ class BreakinMainController:
             
             # 根据话题触发次数统计实际运行轮数
             # 第一轮本身也算一轮，因此总轮数 = 1（第一轮） + 后续通过 start_new_round_* 触发的轮数
-            if start_time is not None and start_together_received:
+            if start_together_received:
                 total_rounds = 1 + published_rounds
                 self.print_colored(
-                    f"实际运行磨线轮数: {total_rounds} 轮",
+                    f"实际运行磨线轮数: {total_rounds} 轮 / 目标轮数: {target_rounds} 轮",
                     Colors.GREEN
                 )
             else:

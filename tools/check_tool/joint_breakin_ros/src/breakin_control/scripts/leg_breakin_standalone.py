@@ -275,7 +275,7 @@ class LegBreakinStandalone:
             except:
                 pass
             
-            # 创建发布者（100Hz发布）
+            # 创建发布者（1Hz发布）
             pub_allow_run = rospy.Publisher('/breakin/allow_run', Bool, queue_size=10)
             pub_can_start_new_round = rospy.Publisher('/breakin/can_start_new_round', Bool, queue_size=10)
             pub_leg_ready = rospy.Publisher('/breakin/leg_ready', Bool, queue_size=10, latch=True)
@@ -338,15 +338,15 @@ class LegBreakinStandalone:
             
             self.print_colored(f"腿部磨线进程已启动，PID: {self.leg_process.pid}", Colors.GREEN)
             
-            # 先启动100Hz发布线程，持续发布allow_run和can_start_new_round
+            # 先启动1Hz发布线程，持续发布allow_run和can_start_new_round
             # 注意：can_start_new_round的值由主程序根据时长控制，这里暂时发布True
             # 实际应该由主程序（breakin_main_controller.py）发布
             stop_publish_flag = threading.Event()
             leg_started_detected = threading.Event()  # 用于线程间通信
             
             def publish_topics_loop():
-                """100Hz发布话题的循环"""
-                rate = rospy.Rate(100)  # 100Hz
+                """1Hz发布话题的循环"""
+                rate = rospy.Rate(1)  # 1Hz
                 while not stop_publish_flag.is_set() and not rospy.is_shutdown():
                     # 发布allow_run = True（持续运行）
                     allow_msg = Bool()
@@ -361,7 +361,7 @@ class LegBreakinStandalone:
             publish_thread = threading.Thread(target=publish_topics_loop, daemon=True)
             publish_thread.start()
             
-            self.print_colored("✓ 已启动100Hz话题发布线程", Colors.GREEN)
+            self.print_colored("✓ 已启动1Hz话题发布线程", Colors.GREEN)
             
             # 订阅leg_started话题（由C++层发布）
             leg_started = False

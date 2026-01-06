@@ -467,7 +467,7 @@ class ArmBreakinStandalone:
             except:
                 pass
             
-            # 创建发布者（100Hz发布allow_run，can_start_new_round由主程序发布）
+            # 创建发布者（1Hz发布allow_run，can_start_new_round由主程序发布）
             pub_allow_run = rospy.Publisher('/breakin/allow_run', Bool, queue_size=10)
             
             # 如果standalone_mode未发布，则发布它
@@ -497,7 +497,7 @@ class ArmBreakinStandalone:
             local_ws = script_dir.parent.parent.parent
             global_ws = None
 
-            # 通过 _find_project_root() 找到的项目根一般是 /home/lab/wang/kuavo-ros-control
+            # 通过 _find_project_root() 找到的项目根
             # 这里优先使用该根目录作为全局工作空间
             if self.project_root and (self.project_root / "devel" / "setup.bash").exists():
                 global_ws = self.project_root
@@ -645,12 +645,12 @@ class ArmBreakinStandalone:
                 self.print_colored("请检查上面的节点输出，查看错误信息", Colors.YELLOW)
                 return 1
             
-            # 启动100Hz发布allow_run线程（can_start_new_round由主程序发布）
+            # 启动1Hz发布allow_run线程（can_start_new_round由主程序发布）
             stop_publish_flag = threading.Event()
             
             def publish_allow_run_loop():
-                """100Hz发布allow_run话题的循环"""
-                rate = rospy.Rate(100)  # 100Hz
+                """1Hz发布allow_run话题的循环"""
+                rate = rospy.Rate(1)  # 1Hz
                 while not stop_publish_flag.is_set() and not rospy.is_shutdown():
                     # 持续发布allow_run = True
                     allow_msg = Bool()
@@ -661,7 +661,7 @@ class ArmBreakinStandalone:
             publish_thread = threading.Thread(target=publish_allow_run_loop, daemon=True)
             publish_thread.start()
             
-            self.print_colored("✓ 已启动100Hz allow_run话题发布线程", Colors.GREEN)
+            self.print_colored("✓ 已启动1Hz allow_run话题发布线程", Colors.GREEN)
             
             # 等待手臂节点开始运行（发布arm_started = True）
             self.print_colored("等待手臂节点开始运行...", Colors.BLUE)
