@@ -24,20 +24,20 @@ is_running_in_docker() {
 LAUNCH1="humanoid_plan_arm_trajectory.launch"
 LAUNCH2="plan_arm_action_websocket_server.launch"
 
-# 检查并杀掉已运行的 launch 进程
+# 检测 launch 进程是否已运行（避免重复启动）
+LAUNCH1_RUNNING=false
+LAUNCH2_RUNNING=false
+
 for LAUNCH in "$LAUNCH1" "$LAUNCH2"
 do
-    # 查找包含该 launch 文件名的进程
     PIDS=$(ps aux | grep "[r]oslaunch" | grep "$LAUNCH" | awk '{print $2}')
     if [[ -n "$PIDS" ]]; then
-        echo "检测到 $LAUNCH 正在运行，正在终止..."
-        for PID in $PIDS
-        do
-            kill $PID
-            echo "已终止进程 $PID"
-        done
-        # 可选：等待进程完全退出
-        sleep 2
+        echo "检测到 $LAUNCH 正在运行"
+        if [[ "$LAUNCH" == "$LAUNCH1" ]]; then
+            LAUNCH1_RUNNING=true
+        else
+            LAUNCH2_RUNNING=true
+        fi
     fi
 done
 
@@ -67,25 +67,39 @@ fi
 source /opt/ros/noetic/setup.bash --extend
 source $REPO_ROOT/devel/setup.bash
 
-# 启动 h12pro_controller_node
-echo "正在启动 h12pro_controller_node..."
-roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch &
-CONTROLLER_PID=$!
+# 根据 LAUNCH1_RUNNING 和 LAUNCH2_RUNNING 分别决定启动哪些节点
 
-# 检测 h12pro_controller_node 启动
-sleep 3
-echo "h12pro_controller_node 已启动。"
+# 启动 humanoid_plan_arm_trajectory（仅当 LAUNCH1 未运行时）
+if [ "$LAUNCH1_RUNNING" = "false" ]; then
+    echo "启动 humanoid_plan_arm_trajectory 节点"
+    roslaunch humanoid_plan_arm_trajectory humanoid_plan_arm_trajectory.launch &
+    PLAN_PID=$!
 
-# 启动 tact 动作文件执行节点
-roslaunch humanoid_plan_arm_trajectory humanoid_plan_arm_trajectory.launch &
-PLAN_PID=$!
+    # 检测动作执行节点启动
+    echo "正在启动动作执行节点..."
+    while ! rosnode list | grep -q "autostart_arm_trajectory_bezier_demo"; do
+        sleep 1
+    done
+    echo "动作执行节点已启动。"
+else
+    echo "humanoid_plan_arm_trajectory 已在运行，跳过启动"
+    PLAN_PID=""
+fi
 
-# 检测动作执行节点启动
-echo "正在启动动作执行节点..."
-while ! rosnode list | grep -q "autostart_arm_trajectory_bezier_demo"; do
-    sleep 1
-done
-echo "动作执行节点已启动。"
+# 启动 h12pro_controller_node（仅当 LAUNCH2 未运行时）
+if [ "$LAUNCH2_RUNNING" = "false" ]; then
+    echo "启动 h12pro_controller_node 节点"
+    roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch &
+    CONTROLLER_PID=$!
+
+    # 检测 h12pro_controller_node 启动
+    echo "正在启动 h12pro_controller_node..."
+    sleep 3
+    echo "h12pro_controller_node 已启动。"
+else
+    echo "h12pro_controller_node 相关服务已在运行，跳过启动"
+    CONTROLLER_PID=""
+fi
 
 # 检测运行环境
 if is_running_in_docker; then
@@ -123,8 +137,12 @@ echo "正在启动太极触发节点..."
 roslaunch taiji_trigger_node taiji_trigger.launch &
 
 # 启动 websocket 服务节点
-echo "正在启动 websocket 服务节点..."
-roslaunch planarmwebsocketservice plan_arm_action_websocket_server.launch robot_type:=ocs2 camera_type:=$CAMERA_TYPE
+if [ "$LAUNCH2_RUNNING" = "false" ]; then
+    echo "正在启动 websocket 服务节点..."
+    roslaunch planarmwebsocketservice plan_arm_action_websocket_server.launch robot_type:=ocs2 camera_type:=$CAMERA_TYPE
+else
+    echo "websocket 服务节点已在运行，跳过启动"
+fi
 
 # 定义退出时的清理操作
 cleanup() {
