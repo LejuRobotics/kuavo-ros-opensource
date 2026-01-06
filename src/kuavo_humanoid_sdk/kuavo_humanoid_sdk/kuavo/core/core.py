@@ -517,6 +517,18 @@ class KuavoRobotCore:
                 return False
         
         return self._control.control_robot_end_effector_pose(left_pose, right_pose, frame)
+    
+    def control_torso_pose(self, x, y, z, roll, pitch, yaw)->bool:
+        """
+        control wheel-robot torso pose
+        """
+        return self._control.control_torso_pose(x, y, z, roll, pitch, yaw)
+    
+    def control_wheel_lower_joint(self, joint_traj: list)->bool:
+        """
+        control wheel-robot lower joint
+        """
+        return self._control.control_wheel_lower_joint(joint_traj)
 
     def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
         return self._control.control_hand_wrench(left_wrench, right_wrench)

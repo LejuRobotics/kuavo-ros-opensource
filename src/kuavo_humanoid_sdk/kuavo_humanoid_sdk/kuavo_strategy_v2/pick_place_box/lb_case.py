@@ -1,8 +1,9 @@
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.data_type import Pose, Tag, Frame
 from kuavo_humanoid_sdk.kuavo_strategy_v2.utils.logger_setup import init_logging
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.mobile_manipulate import (
-    EventPercep, EventWalkToPose, EventHeadMoveKeyPoint)
-from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.mobile_manipulate.arm_events_lb import EventArmMoveKeyPoint  # 使用 tn 版本
+    EventPercep, EventHeadMoveKeyPoint)
+from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.mobile_manipulate.walk_events_lb import EventWalkToPose  # 使用轮臂版本
+from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.mobile_manipulate.arm_events_lb import EventArmMoveKeyPoint  # 使用轮臂版本
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.robot_sdk import RobotSDK
 from kuavo_msgs.srv import lbLegControlSrv, lbLegControlSrvRequest
 

@@ -10,6 +10,7 @@ from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.funcs import arm_generate_pi
     arm_generate_place_keypoints_new, arm_reset, arm_generate_pick_before
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoManipulationMpcFrame
 
+from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.black_board import BlackBoardManager
 import py_trees
 import time
@@ -352,6 +353,8 @@ def pause_for_next_step(step_name, enable_pause=None):
 
 if __name__ == '__main__':
     # robot_sdk.control.control_head(0, np.deg2rad(-10))
+
+    KuavoSDK.Init(log_level="INFO")
     # 用 Repeat 包裹，让它无限循环
     num_repeats = 10
     looping_root = py_trees.decorators.Repeat(name="RepeatRoot", child=root, num_success=num_repeats)

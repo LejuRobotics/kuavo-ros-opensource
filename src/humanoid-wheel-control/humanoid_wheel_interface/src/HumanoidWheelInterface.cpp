@@ -54,6 +54,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_wheel_interface/MobileManipulatorPreComputation.h"
 #include "humanoid_wheel_interface/constraint/TorsoTrackingConstraint.h"
 #include "humanoid_wheel_interface/constraint/EndEffectorConstraint.h"
+#include "humanoid_wheel_interface/constraint/EndEffectorLocalConstraint.h"
 #include "humanoid_wheel_interface/constraint/MobileManipulatorSelfCollisionConstraint.h"
 #include "humanoid_wheel_interface/cost/BaseStateInputCost.h"
 #include "humanoid_wheel_interface/dynamics/WheelBasedMobileManipulatorDynamics.h"
@@ -165,7 +166,7 @@ HumanoidWheelInterface::HumanoidWheelInterface(const std::string& taskFile, cons
 
   // Reference Manager
   referenceManagerPtr_ =
-      std::make_shared<MobileManipulatorReferenceManager>(manipulatorModelInfo_, *pinocchioInterfacePtr_);
+      std::make_shared<MobileManipulatorReferenceManager>(manipulatorModelInfo_, *pinocchioInterfacePtr_, taskFile);
 
   /*
    * Optimal control problem
@@ -184,6 +185,14 @@ HumanoidWheelInterface::HumanoidWheelInterface(const std::string& taskFile, cons
     problem_.stateSoftConstraintPtr->add("endEffector_" + std::to_string(eef_idx), getEndEffectorConstraint(*pinocchioInterfacePtr_, taskFile, "endEffector",
                                                                                  usePreComputation, libraryFolder, recompileLibraries, eef_idx));
     problem_.finalSoftConstraintPtr->add("finalEndEffector_" + std::to_string(eef_idx), getEndEffectorConstraint(*pinocchioInterfacePtr_, taskFile, "finalEndEffector",
+                                                                                        usePreComputation, libraryFolder, recompileLibraries, eef_idx));
+  }
+  // end-effector local state constraint
+  for(int eef_idx = 0; eef_idx < manipulatorModelInfo_.eeFrames.size(); eef_idx++)
+  {
+    problem_.stateSoftConstraintPtr->add("endEffectorLocal_" + std::to_string(eef_idx), getEndEffectorLocalConstraint(*pinocchioInterfacePtr_, taskFile, "endEffectorLocal",
+                                                                                 usePreComputation, libraryFolder, recompileLibraries, eef_idx));
+    problem_.finalSoftConstraintPtr->add("finalEndEffectorLocal_" + std::to_string(eef_idx), getEndEffectorLocalConstraint(*pinocchioInterfacePtr_, taskFile, "finalEndEffectorLocal",
                                                                                         usePreComputation, libraryFolder, recompileLibraries, eef_idx));
   }
   // self-collision avoidance constraint
@@ -326,6 +335,53 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorConstraint(cons
                                                      manipulatorModelInfo_.stateDim, manipulatorModelInfo_.inputDim,
                                                      "end_effector_kinematics", libraryFolder, recompileLibraries, false);
     constraint.reset(new EndEffectorConstraint(eeKinematics, *referenceManagerPtr_, manipulatorModelInfo_, eefIdx));
+  }
+
+  std::vector<std::unique_ptr<PenaltyBase>> penaltyArray(6);
+  std::generate_n(penaltyArray.begin(), 3, [&] { return std::make_unique<QuadraticPenalty>(muPosition); });
+  std::generate_n(penaltyArray.begin() + 3, 3, [&] { return std::make_unique<QuadraticPenalty>(muOrientation); });
+
+  return std::make_unique<StateSoftConstraint>(std::move(constraint), std::move(penaltyArray));
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorLocalConstraint(const PinocchioInterface& pinocchioInterface,
+                                                                                 const std::string& taskFile, const std::string& prefix,
+                                                                                 bool usePreComputation, const std::string& libraryFolder,
+                                                                                 bool recompileLibraries, int eefIdx) {
+  if(eefIdx >= manipulatorModelInfo_.eeFrames.size())
+  {
+    throw std::invalid_argument("[getEndEffectorLocalConstraint] eefIdx is out of range.");
+  }
+  scalar_t muPosition = 1.0;
+  scalar_t muOrientation = 1.0;
+  // const std::string name = "WRIST_2";
+
+  boost::property_tree::ptree pt;
+  boost::property_tree::read_info(taskFile, pt);
+  std::cerr << "\n #### " << prefix << " Settings: ";
+  std::cerr << "\n #### =============================================================================\n";
+  loadData::loadPtreeValue(pt, muPosition, prefix + ".muPosition", true);
+  loadData::loadPtreeValue(pt, muOrientation, prefix + ".muOrientation", true);
+  std::cerr << " #### =============================================================================\n";
+
+  if (referenceManagerPtr_ == nullptr) {
+    throw std::runtime_error("[getEndEffectorLocalConstraint] referenceManagerPtr_ should be set first!");
+  }
+
+  std::unique_ptr<StateConstraint> constraint;
+  if (usePreComputation) {
+    MobileManipulatorPinocchioMapping pinocchioMapping(manipulatorModelInfo_);
+    PinocchioEndEffectorKinematics eeKinematics(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.eeFrames[eefIdx]});
+    constraint.reset(new EndEffectorLocalConstraint(eeKinematics, *referenceManagerPtr_, manipulatorModelInfo_, eefIdx));
+  } else {
+    MobileManipulatorPinocchioMappingCppAd pinocchioMappingCppAd(manipulatorModelInfo_);
+    PinocchioEndEffectorKinematicsCppAd eeKinematics(pinocchioInterface, pinocchioMappingCppAd, {manipulatorModelInfo_.eeFrames[eefIdx]},
+                                                     manipulatorModelInfo_.stateDim, manipulatorModelInfo_.inputDim,
+                                                     "end_effector_kinematics", libraryFolder, recompileLibraries, false);
+    constraint.reset(new EndEffectorLocalConstraint(eeKinematics, *referenceManagerPtr_, manipulatorModelInfo_, eefIdx));
   }
 
   std::vector<std::unique_ptr<PenaltyBase>> penaltyArray(6);
@@ -507,9 +563,8 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getTorsoTrackingSoftConstrain
 
   MobileManipulatorPinocchioMapping pinocchioMapping(manipulatorModelInfo_);
   PinocchioEndEffectorKinematics eeKinematicTorso(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.torsoFrame});
-  PinocchioEndEffectorKinematics eeKinematicBase(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.baseFrame});
 
-  constraint.reset(new TorsoTrackingConstraint(eeKinematicTorso, eeKinematicBase, *referenceManagerPtr_, info));
+  constraint.reset(new TorsoTrackingConstraint(eeKinematicTorso, *referenceManagerPtr_, info));
 
   std::vector<std::unique_ptr<PenaltyBase>> penaltyArray(6);
   for (int i = 0; i < 6; ++i) {

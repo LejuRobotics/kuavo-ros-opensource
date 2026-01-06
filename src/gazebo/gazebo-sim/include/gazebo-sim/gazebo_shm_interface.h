@@ -113,6 +113,9 @@ private:
     std::mutex cmd_vel_mutex_;
     std::vector<physics::JointPtr> wheel_yaw_joints_;    // 4个yaw关节
     std::vector<physics::JointPtr> wheel_pitch_joints_;  // 4个pitch关节
+
+    // 机器人版本
+    int robotVersion_ = 60;
 };
 
 } 

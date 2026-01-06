@@ -24,7 +24,7 @@ def main():
     period_sec = rospy.get_param("~period_sec", 4.0)  # 一个完整往返周期，默认4秒
     half_period = max(1e-3, period_sec / 2.0)
 
-    rospy.loginfo("Publishing to /mm/two_arm_hand_pose_cmd with desire_mode=2")
+    rospy.loginfo("Publishing to /mm/two_arm_hand_pose_cmd with Frame=joint Space")
     rospy.loginfo("Sweeping joint %d from %.1f deg to %.1f deg", target_idx, start_deg, end_deg)
 
     t0 = rospy.Time.now().to_sec()
@@ -40,10 +40,9 @@ def main():
 
         # 构造消息
         msg = twoArmHandPoseCmd()
-        msg.frame = 3  # VR/本地坐标，按需要
+        msg.frame = 5  # 关节空间
         msg.use_custom_ik_param = False
         msg.joint_angles_as_q0 = False
-        msg.desire_mode = 2  # 关节角作为期望使用
 
         # 填充两臂末端位姿（可置零，关节角为主要控制输入）
         msg.hand_poses.left_pose.pos_xyz = [0.0, 0.0, 0.0]

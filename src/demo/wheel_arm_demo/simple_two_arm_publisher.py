@@ -50,10 +50,42 @@ def create_default_ik_param():
     param.pos_cost_weight = 1.0
     return param
 
+def slerp_quaternion(q1, q2, t):
+    """
+    四元数球面线性插值 (SLERP)
+    q1, q2: 四元数 [x, y, z, w]
+    t: 插值参数，范围 [0, 1]
+    """
+    # 计算点积
+    dot = np.dot(q1, q2)
+    
+    # 如果点积为负，取反一个四元数以获得最短路径
+    if dot < 0.0:
+        q2 = -q2
+        dot = -dot
+    
+    # 如果四元数非常接近，使用线性插值避免数值问题
+    if dot > 0.9995:
+        result = q1 + t * (q2 - q1)
+        return result / np.linalg.norm(result)
+    
+    # 计算夹角
+    theta_0 = np.arccos(np.abs(dot))
+    sin_theta_0 = np.sin(theta_0)
+    
+    # 计算插值权重
+    theta = theta_0 * t
+    s1 = np.sin(theta) / sin_theta_0
+    s0 = np.cos(theta) - dot * s1
+    
+    return s0 * q1 + s1 * q2
+
 def interpolate_pose(start_pose, target_pose, t):
     """
-    在起始位姿和目标位姿之间进行线性插值
+    在起始位姿和目标位姿之间进行插值
+    start_pose, target_pose: [x, y, z, roll, pitch, yaw] (角度制)
     t: 插值参数，范围 [0, 1]，0表示起始位姿，1表示目标位姿
+    返回: [x, y, z, roll, pitch, yaw]
     """
     # 位置插值
     pos = [
@@ -62,10 +94,21 @@ def interpolate_pose(start_pose, target_pose, t):
         start_pose[2] + (target_pose[2] - start_pose[2]) * t
     ]
     
-    # 姿态插值（简单线性插值，对于小角度变化是合理的）
-    yaw = start_pose[3] + (target_pose[3] - start_pose[3]) * t
+    # 姿态插值：转换为四元数进行SLERP插值
+    start_quat = tf_trans.quaternion_from_euler(
+        np.radians(start_pose[3]), np.radians(start_pose[4]), np.radians(start_pose[5])
+    )
+    target_quat = tf_trans.quaternion_from_euler(
+        np.radians(target_pose[3]), np.radians(target_pose[4]), np.radians(target_pose[5])
+    )
     
-    return pos + [yaw]
+    # 球面线性插值
+    interpolated_quat = slerp_quaternion(start_quat, target_quat, t)
+    
+    # 转换回欧拉角
+    roll, pitch, yaw = tf_trans.euler_from_quaternion(interpolated_quat)
+    
+    return pos + [np.degrees(roll), np.degrees(pitch), np.degrees(yaw)]
 
 def main():
     rospy.init_node('simple_two_arm_publisher', anonymous=True)
@@ -76,81 +119,47 @@ def main():
     # 等待连接
     rospy.sleep(1.0)
     
-    # 设置发布频率: 10Hz
-    rate = rospy.Rate(10)
+    # 定义目标位置（去掉起始位置，直接发送目标）
+    # 格式: [x, y, z, roll, pitch, yaw] (角度制)
+    left_target = [0.4, 0.150, 0.65, 0.0, -90.0, 0.0]   # 左手目标位置
+    right_target = [0.4, -0.150, 0.65, 0.0, -90.0, 0.0] # 右手目标位置
     
-    # 定义起始位置和目标位置
-    # 格式: [x, y, z, yaw]
-    left_start = [0.0, 0.0, 0.0, 0.0]    # 起始位置
-    left_target = [0.76, 2.0, 0.8, 30.0]  # 目标位置
+    rospy.loginfo("发送双臂目标位姿...")
+    rospy.loginfo(f"左手目标: {left_target[:3]}, RPY=[{left_target[3]:.1f}°, {left_target[4]:.1f}°, {left_target[5]:.1f}°]")
+    rospy.loginfo(f"右手目标: {right_target[:3]}, RPY=[{right_target[3]:.1f}°, {right_target[4]:.1f}°, {right_target[5]:.1f}°]")
     
-    right_start = [0.0, 0.0, 0.0, 0.0]   # 起始位置  
-    right_target = [1.24, 2.0, 0.8, 30.0] # 目标位置
+    # 创建消息
+    msg = twoArmHandPoseCmd()
     
-    # 插值步数（总时间约5秒）
-    total_steps = 50
-    step_duration = 0.1  # 每步100ms
+    # 设置消息头
+    msg.hand_poses.header = Header()
+    msg.hand_poses.header.stamp = rospy.Time.now()
+    msg.hand_poses.header.frame_id = "base_link"
     
-    rospy.loginfo("开始双臂位姿插值发布...")
-    rospy.loginfo(f"插值步数: {total_steps} 步")
-    rospy.loginfo(f"每步时长: {step_duration} 秒")
-    rospy.loginfo(f"总时长: {total_steps * step_duration} 秒")
-    rospy.loginfo("左手目标: [1.44, 2.0, 0.8], yaw=30°")
-    rospy.loginfo("右手目标: [0.56, 2.0, 0.8], yaw=30°")
+    # 直接设置目标位姿
+    msg.hand_poses.left_pose = create_simple_pose(
+        x=left_target[0], y=left_target[1], z=left_target[2],
+        roll=left_target[3], pitch=left_target[4], yaw=left_target[5]
+    )
     
-    # 执行插值发布
-    for step in range(total_steps + 1):
-        if rospy.is_shutdown():
-            break
-            
-        # 计算插值参数 (0 到 1)
-        t = step / total_steps
-        
-        # 插值计算当前位姿
-        left_current = interpolate_pose(left_start, left_target, t)
-        right_current = interpolate_pose(right_start, right_target, t)
-        
-        # 创建消息
-        msg = twoArmHandPoseCmd()
-        
-        # 设置消息头
-        msg.hand_poses.header = Header()
-        msg.hand_poses.header.stamp = rospy.Time.now()
-        msg.hand_poses.header.frame_id = "base_link"
-        
-        # 设置插值后的位姿
-        msg.hand_poses.left_pose = create_simple_pose(
-            x=left_current[0], y=left_current[1], z=left_current[2],
-            roll=0, pitch=0, yaw=left_current[3]
-        )
-        
-        msg.hand_poses.right_pose = create_simple_pose(
-            x=right_current[0], y=right_current[1], z=right_current[2],
-            roll=0, pitch=0, yaw=right_current[3]
-        )
-        
-        # 设置IK参数
-        msg.use_custom_ik_param = True
-        msg.joint_angles_as_q0 = False
-        msg.ik_param = create_default_ik_param()
-        
-        # 坐标系: 1 = world frame
-        msg.frame = 1
-        
-        # 发布消息
-        pub.publish(msg)
-        
-        # 显示进度
-        if step % 10 == 0 or step == total_steps:
-            rospy.loginfo(f"步骤 {step}/{total_steps} (t={t:.2f})")
-            rospy.loginfo(f"  左手: [{left_current[0]:.2f}, {left_current[1]:.2f}, {left_current[2]:.2f}], yaw={left_current[3]:.1f}°")
-            rospy.loginfo(f"  右手: [{right_current[0]:.2f}, {right_current[1]:.2f}, {right_current[2]:.2f}], yaw={right_current[3]:.1f}°")
-        
-        # 按设定频率等待
-        rate.sleep()
+    msg.hand_poses.right_pose = create_simple_pose(
+        x=right_target[0], y=right_target[1], z=right_target[2],
+        roll=right_target[3], pitch=right_target[4], yaw=right_target[5]
+    )
     
-    rospy.loginfo("插值发布完成！")
-    rospy.loginfo("机器人应该已经到达目标位置")
+    # 设置IK参数
+    msg.use_custom_ik_param = True
+    msg.joint_angles_as_q0 = False
+    msg.ik_param = create_default_ik_param()
+    
+    # 坐标系: 1 = world frame
+    msg.frame = 1
+    
+    # 发布消息（发送几次确保接收到）
+    pub.publish(msg)
+    
+    rospy.loginfo("目标位姿发送完成！")
+    rospy.loginfo("机器人双臂应该开始移动到目标位置")
 
 if __name__ == '__main__':
     try:

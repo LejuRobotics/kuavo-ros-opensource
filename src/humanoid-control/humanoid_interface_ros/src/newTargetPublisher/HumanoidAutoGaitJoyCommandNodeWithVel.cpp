@@ -170,6 +170,16 @@ namespace ocs2
         : nodeHandle_(nodeHandle),
           targetPoseCommand_(nodeHandle, robotName)
     {
+      if (nodeHandle.hasParam("/robot_type"))
+      {
+        nodeHandle.getParam("/robot_type", robot_type_);
+        ROS_INFO_STREAM("[JoyControl] Robot type: " << robot_type_ << " (1=wheel, 2=humanoid)");
+      }
+      else
+      {
+        ROS_INFO_STREAM("[JoyControl] Robot type not specified, defaulting to humanoid mode (2)");
+      }
+
       // 获取repo_root_path
       if (!nodeHandle.getParam("repo_root_path", repo_root_path_))
       {
@@ -279,58 +289,92 @@ namespace ocs2
         ROS_WARN_STREAM("No real parameter found, using default real.");
       }
 
-      // loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
-      auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version_, true, 2e-3);
-      default_joint_state_ = drake_interface_->getDefaultJointState();
-      com_height_ = drake_interface_->getIntialHeight();
-      loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
-      loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
-      loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
-      try {
-        loadData::loadCppDataType(referenceFile, "cmdvelLinearZLimit", c_relative_base_limit_[2]);
-      } catch (const std::exception &e) {
-        ROS_WARN_STREAM("cmdvelLinearZLimit not found, using default: " << c_relative_base_limit_[2]);
-      }
-      std::cout << "cmdvelLinearZLimit:" << c_relative_base_limit_[2] << std::endl;
-      loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
-
-
-      // gait
-      std::string gaitCommandFile;
-      nodeHandle.getParam("/gaitCommandFile", gaitCommandFile);
-      ROS_INFO_STREAM(robotName + "_mpc_mode_schedule node is setting up ...");
-      std::vector<std::string> gaitList;
-      loadData::loadStdVector(gaitCommandFile, "list", gaitList, verbose);
-      gait_map_.clear();
-      for (const auto &gaitName : gaitList)
+      if (robot_type_ == 2)
       {
-        gait_map_.insert({gaitName, humanoid::loadModeSequenceTemplate(gaitCommandFile, gaitName, verbose)});
+        // loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
+        auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version_, true, 2e-3);
+        default_joint_state_ = drake_interface_->getDefaultJointState();
+        com_height_ = drake_interface_->getIntialHeight();
+        loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
+        loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
+        loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
+        try {
+          loadData::loadCppDataType(referenceFile, "cmdvelLinearZLimit", c_relative_base_limit_[2]);
+        } catch (const std::exception &e) {
+          ROS_WARN_STREAM("cmdvelLinearZLimit not found, using default: " << c_relative_base_limit_[2]);
+        }
+        std::cout << "cmdvelLinearZLimit:" << c_relative_base_limit_[2] << std::endl;
+        loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
+
+        // gait
+        std::string gaitCommandFile;
+        nodeHandle.getParam("/gaitCommandFile", gaitCommandFile);
+        ROS_INFO_STREAM(robotName + "_mpc_mode_schedule node is setting up ...");
+        std::vector<std::string> gaitList;
+        loadData::loadStdVector(gaitCommandFile, "list", gaitList, verbose);
+        gait_map_.clear();
+        for (const auto &gaitName : gaitList)
+        {
+          gait_map_.insert({gaitName, humanoid::loadModeSequenceTemplate(gaitCommandFile, gaitName, verbose)});
+        }
+
+        mode_sequence_template_publisher_ = nodeHandle.advertise<ocs2_msgs::mode_schedule>(robotName + "_mpc_mode_schedule", 10, true);
+        mode_scale_publisher_ = nodeHandle.advertise<std_msgs::Float32>(robotName + "_mpc_mode_scale", 10, true);
+        gait_name_publisher_ = nodeHandle.advertise<std_msgs::String>("/humanoid_mpc_gait_name_request", 10, true);
+      }
+      else
+      {
+        // Wheel mode: initialize with default values
+        ROS_INFO_STREAM("[JoyControl] Wheel mode detected, skipping gait loading");
+        com_height_ = 0.0;
+        target_rotation_velocity_ = 1.0;
+        target_displacement_velocity_ = 1.0;
+        default_joint_state_ = vector_t::Zero(12);
+        // Use default limits for wheel mode
+        c_relative_base_limit_[0] = 0.8;  // linear x
+        c_relative_base_limit_[1] = 0.8;  // linear y
+        c_relative_base_limit_[2] = 0.0; // linear z (not used in wheel mode)
+        c_relative_base_limit_[3] = 1.2; // angular z
       }
 
-      mode_sequence_template_publisher_ = nodeHandle.advertise<ocs2_msgs::mode_schedule>(robotName + "_mpc_mode_schedule", 10, true);
-      mode_scale_publisher_ = nodeHandle.advertise<std_msgs::Float32>(robotName + "_mpc_mode_scale", 10, true);
       cmd_vel_publisher_ = nodeHandle.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
-      gait_name_publisher_ = nodeHandle.advertise<std_msgs::String>("/humanoid_mpc_gait_name_request", 10, true);
       current_joy_topic_ = "/joy";  // 默认话题
       joy_topic_service_ = nodeHandle_.advertiseService("/set_joy_topic", &JoyControl::setJoyTopicCallback, this);
       switch_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchController>("/humanoid_controller/switch_controller");
       get_controller_list_client_ = nodeHandle_.serviceClient<kuavo_msgs::getControllerList>("/humanoid_controller/get_controller_list");
       switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
       joy_sub_ = nodeHandle_.subscribe(current_joy_topic_, 10, &JoyControl::joyCallback, this);
-      feet_sub_ = nodeHandle_.subscribe("/humanoid_controller/swing_leg/pos_measured", 2, &JoyControl::feetCallback, this);
-      observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &JoyControl::observationCallback, this);
-      gait_scheduler_sub_ = nodeHandle_.subscribe<kuavo_msgs::gaitTimeName>(robotName + "_mpc_gait_time_name", 10, [this](const kuavo_msgs::gaitTimeName::ConstPtr &msg)
-                                                                            {
-                                                                              last_gait_rec_ = current_gait_rec_;
-                                                                              current_gait_rec_.name = msg->gait_name;
-                                                                              current_gait_rec_.startTime = msg->start_time; });
-      policy_sub_ = nodeHandle_.subscribe<ocs2_msgs::mpc_flattened_controller>(
-          robotName + "_mpc_policy",                            // topic name
-          1,                                                    // queue length
-          boost::bind(&JoyControl::mpcPolicyCallback, this, _1) // callback
-      );
-      gait_change_sub_ = nodeHandle_.subscribe<std_msgs::String>(
-      "/humanoid_mpc_gait_change", 1, &JoyControl::gaitChangeCallback, this);
+      
+      // 轮臂模式下初始化observation_（避免访问observation.state时发生段错误）
+      if (robot_type_ == 1)
+      {
+        // 为轮臂模式初始化一个虚拟的observation
+        // observation.state至少需要12个元素（6个base状态 + 6个pose状态）
+        observation_.state = vector_t::Zero(12);
+        observation_.input = vector_t::Zero(6);
+        observation_.time = 0.0;
+        observation_.mode = 0;
+        get_observation_ = true;  // 标记为已初始化，避免等待observation
+        ROS_INFO("[JoyControl] 轮臂模式: 已初始化虚拟observation");
+      }
+      
+      if (robot_type_ == 2)
+      {
+        feet_sub_ = nodeHandle_.subscribe("/humanoid_controller/swing_leg/pos_measured", 2, &JoyControl::feetCallback, this);
+        observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &JoyControl::observationCallback, this);
+        gait_scheduler_sub_ = nodeHandle_.subscribe<kuavo_msgs::gaitTimeName>(robotName + "_mpc_gait_time_name", 10, [this](const kuavo_msgs::gaitTimeName::ConstPtr &msg)
+                                                                              {
+                                                                                last_gait_rec_ = current_gait_rec_;
+                                                                                current_gait_rec_.name = msg->gait_name;
+                                                                                current_gait_rec_.startTime = msg->start_time; });
+        policy_sub_ = nodeHandle_.subscribe<ocs2_msgs::mpc_flattened_controller>(
+            robotName + "_mpc_policy",                            // topic name
+            1,                                                    // queue length
+            boost::bind(&JoyControl::mpcPolicyCallback, this, _1) // callback
+        );
+        gait_change_sub_ = nodeHandle_.subscribe<std_msgs::String>(
+        "/humanoid_mpc_gait_change", 1, &JoyControl::gaitChangeCallback, this);
+      }
       is_rl_controller_sub_ = nodeHandle_.subscribe<std_msgs::Float64>("/humanoid_controller/is_rl_controller_", 1, [this](const std_msgs::Float64::ConstPtr &msg) 
       {is_rl_controller_ = (msg->data > 0.5);});
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
@@ -523,12 +567,19 @@ namespace ocs2
         }
         
         rate.sleep();
-        if (!get_observation_)
+        if (robot_type_ == 1)
         {
-          // ROS_INFO_STREAM("Waiting for observation message...");
-          continue;
+          checkAndPublishCommandLine(joystick_origin_axis_);
         }
-        checkAndPublishCommandLine(joystick_origin_axis_);
+        else
+        {
+          if (!get_observation_)
+          {
+            // ROS_INFO_STREAM("Waiting for observation message...");
+            continue;
+          }
+          checkAndPublishCommandLine(joystick_origin_axis_);
+        }
       }
       return;
     }
@@ -959,7 +1010,12 @@ namespace ocs2
         }
       }
       else
-        checkGaitSwitchCommand(joy_msg);
+      {
+        if (robot_type_ == 2)
+        {
+          checkGaitSwitchCommand(joy_msg);
+        }
+      }
 
       vector_t button_trigger_axis = vector_t::Zero(6);
       if (axes_input_enabled_)
@@ -1047,6 +1103,13 @@ namespace ocs2
 
     void publishGaitTemplate(const std::string &gaitName)
     {
+      // Skip gait publishing in wheel mode
+      if (robot_type_ == 1)
+      {
+        ROS_WARN_STREAM("[JoyControl] Gait publishing not supported in wheel mode, ignoring gait: " << gaitName);
+        return;
+      }
+      
       // 发布对应的gait模板
       humanoid::ModeSequenceTemplate modeSequenceTemplate = gait_map_.at(gaitName);
       mode_sequence_template_publisher_.publish(createModeSequenceTemplateMsg(modeSequenceTemplate));
@@ -1061,6 +1124,13 @@ namespace ocs2
 
     void gaitChangeCallback(const std_msgs::String::ConstPtr& msg) 
     {
+      // Skip gait change in wheel mode
+      if (robot_type_ == 1)
+      {
+        ROS_WARN_STREAM("[JoyControl] Gait change not supported in wheel mode, ignoring request: " << msg->data);
+        return;
+      }
+      
       const std::string &req = msg->data;
       ROS_INFO_STREAM("[JoyControl] Gait change request: " << req);
 
@@ -1155,6 +1225,12 @@ namespace ocs2
 
     inline void pubModeGaitScale(float scale)
     {
+      // Skip gait scale publishing in wheel mode
+      if (robot_type_ == 1)
+      {
+        ROS_WARN_STREAM("[JoyControl] Gait scale publishing not supported in wheel mode, ignoring scale: " << scale);
+        return;
+      }
       total_mode_scale_ *= scale;
       ROS_INFO_STREAM("[JoyControl] Publish scale: " << scale << ", Total mode scale: " << total_mode_scale_);
       std_msgs::Float32 msg;
@@ -1500,6 +1576,9 @@ namespace ocs2
     bool robot_launched_{false};
     ros::Time last_status_check_time_;
     bool real_{false};
+    
+    // Robot type: 1 = wheel mode, 2 = humanoid mode
+    int robot_type_;
     RobotVersion rb_version_{3, 4};
     
     // 动作执行状态相关

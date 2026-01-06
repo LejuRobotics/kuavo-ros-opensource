@@ -8,7 +8,8 @@ enum AnkleSolverType {
     ANKLE_SOLVER_TYPE_4GEN_PRO = 1,
     ANKLE_SOLVER_TYPE_5GEN = 2,
     ANKLE_SOLVER_TYPE_S1GEN = 3, 
-    ANKLE_SOLVER_TYPE_S2GEN = 4
+    ANKLE_SOLVER_TYPE_S2GEN = 4,
+    ANKLE_SOLVER_TYPE_NONE = 5,
 };
 class AnkleSolver
 {

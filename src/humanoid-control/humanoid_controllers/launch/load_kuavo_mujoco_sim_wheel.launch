@@ -19,6 +19,7 @@
     <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
       <arg name="robot_version" value="$(arg robot_version)"/>
       <arg name="rviz" value="$(arg rviz)"/>
+      <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
     </include>
 
      <!-- The URDF model of the robot -->
@@ -26,10 +27,9 @@
     <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v45/command/gait.info"/>
     <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v45/command/reference.info"/>
     <!-- The task file for the mpc. -->
-    <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s60/task.info" />
+    <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
     <!-- The library folder to generate CppAD codegen into -->
     <arg name="libFolder"   value="/var/ocs2/kuavo_s$(arg robot_version)" />
-    <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
 
     <arg name="use_external_mpc"   default="true"/>
     <arg name="wbc_frequency"      default="500"/>
@@ -40,7 +40,7 @@
     <arg name="estimator_type"     default="1"/>
     <arg name="wbc_only"           default="false"/>
     <arg name="play_back"          default="false"/>  
-    <arg name="joystick_type"      default="bt2"/>
+    <arg name="joystick_type"      default="sim"/>
     <arg name="arm_move_spd"      default="1.2"/>
     <arg name="start_way"          default="manual"/>
     <arg name="use_estimator_contact"   default="false"/>
@@ -56,9 +56,6 @@
 
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
-
-    <arg name="wheel_move_spd" default="[0.5, 0.5, 0.5]"/>
-    <arg name="wheel_reach_threshold" default="[0.03, 0.03, 0.03]"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -93,8 +90,6 @@
     <param name="urdfFile"   value="$(arg urdfFile)" />
     <param name="libFolder"  value="$(arg libFolder)" />
     <param name="robot_description" textfile="$(arg urdfFile)"/>
-    <param name="wheel_move_spd" type="yaml" value="$(arg wheel_move_spd)" />
-    <param name="wheel_reach_threshold" type="yaml" value="$(arg wheel_reach_threshold)" />
 
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
@@ -148,7 +143,7 @@
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'sim')">
-        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
         </include>
       </group>
@@ -156,6 +151,7 @@
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
         </include>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
       </group>
     </group>    
 

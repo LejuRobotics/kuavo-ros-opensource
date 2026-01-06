@@ -1,9 +1,81 @@
 import numpy as np
+from typing import List, Optional, Any, Callable
 from kuavo_humanoid_sdk.interfaces.data_types import (
     KuavoPose,
     KuavoManipulationMpcCtrlMode,
     KuavoArmCtrlMode,
     KuavoManipulationMpcFrame)
+
+
+def calculate_elbow_y(target_y: float, is_left: bool) -> float:
+    """
+    计算手肘在Y方向上的偏置，防止双臂过于贴近身体。
+    """
+    if abs(target_y) < 0.4:
+        return 0.4 if is_left else -0.4
+    return target_y + 0.05 if is_left else target_y - 0.05
+
+
+def get_elbow_position(robot_sdk,
+                       link_name: str,
+                       default_y: float,
+                       is_left: bool,
+                       logger: Optional[Any] = None) -> List[float]:
+    """
+    获取手肘在逆解中的参考位置；当获取失败时返回默认值。
+    """
+    try:
+        link_pose = robot_sdk.tools.get_link_position(link_name)
+        if link_pose is not None:
+            x_offset = 0.05
+            z_offset = 0.0
+            y_offset = 0.3 if is_left else -0.3
+            return [x_offset, y_offset, z_offset]
+    except Exception as exc:
+        warn_fn: Optional[Callable[[str], None]] = None
+        if logger is not None:
+            warn_fn = getattr(logger, "warn", None) or getattr(logger, "warning", None)
+        if warn_fn is not None:
+            warn_fn(f"获取肘关节 {link_name} 失败，使用默认值: {exc}")
+        else:
+            print(f"[utils.get_elbow_position] 获取肘关节 {link_name} 失败，使用默认值: {exc}")
+    return [0.0, default_y, 0.0]
+
+
+def interpolate_joint_positions_bezier(start_joints, end_joints, num_points=20):
+    """
+    在两个关节位置之间进行贝塞尔曲线插值。
+
+    参数：
+        start_joints (list): 起始关节角度列表（14维）
+        end_joints (list): 目标关节角度列表（14维）
+        num_points (int): 插值点数量
+
+    返回：
+        List[list]: 插值后的关节角度列表
+    """
+    start_joints = np.array(start_joints)
+    end_joints = np.array(end_joints)
+
+    # 生成参数t
+    t = np.linspace(0, 1, num_points)
+
+    interp_joints = []
+    for i in range(num_points):
+        # 计算控制点（在起始点和终点之间，稍微偏移）
+        mid_point = (start_joints + end_joints) / 2
+        # 添加一些偏移以创建更平滑的曲线
+        offset = (end_joints - start_joints) * 0.1  # 10%的偏移
+        control_point = mid_point + offset
+
+        # 二次贝塞尔曲线插值
+        joint_pos = (1 - t[i])**2 * start_joints + \
+                    2 * (1 - t[i]) * t[i] * control_point + \
+                    t[i]**2 * end_joints
+
+        interp_joints.append(joint_pos.tolist())
+
+    return interp_joints
 
 
 def generate_bezier_control_points_c1_continuous(key_points, smoothness_factor=0.3):
@@ -256,6 +328,7 @@ def generate_full_bezier_trajectory(
         current_right_pose,
         left_keypoints_list,
         right_keypoints_list,
+        traj_point_num: int = 50,
 ):
     """
     生成完整的贝塞尔轨迹（包含所有关键点）
@@ -287,7 +360,7 @@ def generate_full_bezier_trajectory(
         ))
 
     # 生成完整的贝塞尔轨迹
-    total_points = len(left_keypoints_list) * 50  # 每个关键点段分配50个插值点
+    total_points = len(left_keypoints_list) * traj_point_num  # 每个关键点段分配50个插值点
     total_points = max(total_points, 100)  # 至少100个点
 
     left_full_trajectory = bezier_interpolate_poses_full_trajectory(

@@ -17,6 +17,7 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Int8.h>
 
 #include "humanoid_interface/common/Types.h"
 #include "kuavo_common/common/sensor_data.h"
@@ -132,9 +133,20 @@ public:
     
     // 手臂轨迹
     ArmJointTrajectory getArmExternalControlState() const;
+
+    // 下肢轨迹
+    ArmJointTrajectory getLegExternalControlState() const;
+
+    // 轮臂MPC控制模式
+    int8_t getLbMpcControlMode() const;
     
     // 从当前状态更新手臂外部控制状态
     void updateArmExternalControlState(const Eigen::VectorXd& current_pos,
+                                     const Eigen::VectorXd& current_vel,
+                                     const Eigen::VectorXd& current_tau);
+    
+    // 从当前状态更新下肢外部控制状态
+    void updateLegExternalControlState(const Eigen::VectorXd& current_pos,
                                      const Eigen::VectorXd& current_vel,
                                      const Eigen::VectorXd& current_tau);
     
@@ -189,6 +201,7 @@ private:
     ros::NodeHandle& nh_;
     bool is_real_;
     bool whole_torso_ctrl_{false};  // VR全身控制模式默认关闭
+    int8_t lb_mpc_control_mode_{2}; // 轮臂MPC控制模式，默认2（baseonly模式）
     bool use_shm_communication_{false};  // 是否使用共享内存通信
     int arm_num_{-1};
     int low_joint_num_{-1};
@@ -221,6 +234,8 @@ private:
     ros::Subscriber torso_pose_sub_;
     ros::Subscriber whole_torso_ctrl_sub_;
     ros::Subscriber arm_joint_traj_sub_;
+    ros::Subscriber leg_joint_traj_sub_;
+    ros::Subscriber lb_mpc_control_mode_sub_;
     
     // ========== 已注册的ROS服务列表 ==========
     std::vector<ros::ServiceServer> registered_services_;
@@ -243,6 +258,7 @@ private:
     TimestampedData<vector_t> waist_yaw_link_pose_;
     TimestampedData<vector_t> vr_torso_pose_;
     TimestampedData<ArmJointTrajectory> arm_external_control_state_;
+    TimestampedData<ArmJointTrajectory> leg_external_control_state_;
     
     // ========== 回调函数（私有，仅用于数据接收） ==========
     void sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr& msg);
@@ -254,6 +270,8 @@ private:
     void vrTorsoPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
     void wholeTorsoCtrlCallback(const std_msgs::Bool::ConstPtr& msg);
     void armJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg);
+    void legJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg);
+    void lbMpcControlModeCallback(const std_msgs::Int8::ConstPtr& msg);
     
     // ========== 辅助函数 ==========
     double rosQuaternionToYaw(const geometry_msgs::Quaternion& ros_quat) const;

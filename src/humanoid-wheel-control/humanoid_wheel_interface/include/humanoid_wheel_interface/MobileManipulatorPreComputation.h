@@ -63,6 +63,8 @@ class MobileManipulatorPreComputation : public PreComputation {
 
   PinocchioInterface& getPinocchioInterface() { return pinocchioInterface_; }
   const PinocchioInterface& getPinocchioInterface() const { return pinocchioInterface_; }
+
+  std::pair<vector_t, quaternion_t> getDesiredFramePose(const vector_t& x, const std::string& frameName) const;
  private:
   PinocchioInterface pinocchioInterface_;
   MobileManipulatorPinocchioMapping pinocchioMapping_;

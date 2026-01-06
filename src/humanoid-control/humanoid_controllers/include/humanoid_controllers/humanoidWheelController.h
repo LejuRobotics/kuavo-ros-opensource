@@ -16,7 +16,7 @@
 #include "ocs2_pinocchio_interface/PinocchioInterface.h"
 #include "humanoid_wheel_wbc/WeightedWbc.h"
 
-#include "humanoid_wheel_interface/common/VelocityLimiter.h"
+#include "humanoid_wheel_interface/motion_planner/VelocityLimiter.h"
 
 namespace humanoid_wheel_controller
 {

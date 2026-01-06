@@ -16,9 +16,8 @@
 
     <!-- 配置文件路径 -->
     <arg name="urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
-    <arg name="taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s60/task.info" />
+    <arg name="taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
     <arg name="libFolder"   value="/var/ocs2/kuavo_s$(arg robot_version)" />
-    <arg name="rvizconfig" default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
     <param name="gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v45/command/gait.info"/>
     <param name="referenceFile" value="$(find humanoid_controllers)/config/kuavo_v45/command/reference.info"/>
 
@@ -31,7 +30,7 @@
     <!-- 控制相关参数 -->
     <arg name="sensor_frequency" default="500"/>
     <arg name="use_joystick" default="true"/>
-    <arg name="joystick_type" default="bt2"/>
+    <arg name="joystick_type" default="sim"/>
     <arg name="arm_move_spd" default="1.2"/>
     <arg name="start_way" default="manual"/>
 
@@ -49,13 +48,11 @@
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="use_grab_box_scene" default="true"/>
 
-    <arg name="wheel_move_spd" default="[0.5, 0.5, 0.5]"/>
-    <arg name="wheel_reach_threshold" default="[0.03, 0.03, 0.03]"/>
-
     <!-- 加载机器人版本管理器 -->
     <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
         <arg name="robot_version" value="$(arg robot_version)"/>
         <arg name="rviz" value="$(arg rviz)"/>
+        <arg name="rvizconfig" default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
     </include>
 
     <!-- 参数设置 -->
@@ -77,8 +74,6 @@
     <param name="urdfFile" value="$(arg urdfFile)" />
     <param name="libFolder"  value="$(arg libFolder)" />
     <param name="robot_description" textfile="$(arg urdfFile)"/>
-    <param name="wheel_move_spd" type="yaml" value="$(arg wheel_move_spd)" />
-    <param name="wheel_reach_threshold" type="yaml" value="$(arg wheel_reach_threshold)" />
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
 
     <!-- 日志管理参数 -->
@@ -133,16 +128,22 @@
 
     <!-- 手柄控制 -->
     <group if="$(arg use_joystick)">
-        <group if="$(eval arg('joystick_type') == 'h12')">
-            <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
-                <arg name="start_way" value="$(arg start_way)"/>
-            </include>
-        </group>
-        <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
-            <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
-                <arg name="joystick_type" value="$(arg joystick_type)"/>
-            </include>
-        </group>
+      <group if="$(eval arg('joystick_type') == 'h12')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
+          <arg name="start_way" value="$(arg start_way)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'sim')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">
+          <arg name="joystick_type" value="$(arg joystick_type)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+          <arg name="joystick_type" value="$(arg joystick_type)"/>
+        </include>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
+      </group>
     </group>
 
     <!-- 系统状态发布 -->

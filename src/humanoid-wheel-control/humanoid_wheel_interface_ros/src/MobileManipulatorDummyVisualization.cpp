@@ -53,6 +53,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace ocs2 {
 namespace mobile_manipulator {
 
+static const double baseHeightOffset = 0.0;
 /******************************************************************************************************/
 /******************************************************************************************************/
 /******************************************************************************************************/
@@ -152,7 +153,6 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
   const auto r_world_base = getBasePosition(observation.state, modelInfo_);
   const Eigen::Quaternion<scalar_t> q_world_base = getBaseOrientation(observation.state, modelInfo_);
 
-  const double baseHeightOffset = 0.185;
   geometry_msgs::TransformStamped base_tf;
   base_tf.header.stamp = timeStamp;
   base_tf.header.frame_id = "odom";
@@ -193,9 +193,10 @@ void MobileManipulatorDummyVisualization::publishTargetTrajectories(const ros::T
   eeDesiredOrientation.coeffs() = targetTrajectories.stateTrajectory.back().tail(4);
   geometry_msgs::TransformStamped command_tf;
   command_tf.header.stamp = timeStamp;
-  command_tf.header.frame_id = "world";
+  command_tf.header.frame_id = "odom";
   command_tf.child_frame_id = "command";
   command_tf.transform.translation = ros_msg_helpers::getVectorMsg(eeDesiredPosition);
+  command_tf.transform.translation.z += baseHeightOffset;
   command_tf.transform.rotation = ros_msg_helpers::getOrientationMsg(eeDesiredOrientation);
   tfBroadcaster_.sendTransform(command_tf);
 }
@@ -232,7 +233,8 @@ void MobileManipulatorDummyVisualization::publishOptimizedTrajectory(const ros::
     // 处理多个末端执行器
     for (int eeIdx = 0; eeIdx < modelInfo_.eeFrames.size(); ++eeIdx) {
       const auto eeIndex = model.getBodyId(modelInfo_.eeFrames[eeIdx]);
-      const vector_t eePosition = data.oMf[eeIndex].translation();
+      vector_t eePosition = data.oMf[eeIndex].translation();
+      eePosition[2] += baseHeightOffset;
       endEffectorTrajectories[eeIdx].push_back(ros_msg_helpers::getPointMsg(eePosition));
     }
   });
@@ -252,7 +254,8 @@ void MobileManipulatorDummyVisualization::publishOptimizedTrajectory(const ros::
   // Extract base pose from state
   std::for_each(mpcStateTrajectory.begin(), mpcStateTrajectory.end(), [&](const vector_t& state) {
     // extract from observation
-    const auto r_world_base = getBasePosition(state, modelInfo_);
+    auto r_world_base = getBasePosition(state, modelInfo_);
+    r_world_base[2] += baseHeightOffset;
     const Eigen::Quaternion<scalar_t> q_world_base = getBaseOrientation(state, modelInfo_);
 
     // convert to ros message
@@ -266,9 +269,9 @@ void MobileManipulatorDummyVisualization::publishOptimizedTrajectory(const ros::
   markerArray.markers.emplace_back(ros_msg_helpers::getLineMsg(std::move(baseTrajectory), red, TRAJECTORYLINEWIDTH));
   markerArray.markers.back().ns = "Base Trajectory";
 
-  assignHeader(markerArray.markers.begin(), markerArray.markers.end(), ros_msg_helpers::getHeaderMsg("world", timeStamp));
+  assignHeader(markerArray.markers.begin(), markerArray.markers.end(), ros_msg_helpers::getHeaderMsg("odom", timeStamp));
   assignIncreasingId(markerArray.markers.begin(), markerArray.markers.end());
-  poseArray.header = ros_msg_helpers::getHeaderMsg("world", timeStamp);
+  poseArray.header = ros_msg_helpers::getHeaderMsg("odom", timeStamp);
 
   stateOptimizedPublisher_.publish(markerArray);
   stateOptimizedPosePublisher_.publish(poseArray);

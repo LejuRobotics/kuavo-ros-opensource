@@ -18,10 +18,17 @@
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+
+    <!-- load the robot version manager -->
+    <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+      <arg name="robot_version" value="$(arg robot_version)"/>
+      <arg name="rviz" value="$(arg rviz)"/>
+    </include>
+
      <!-- The URDF model of the robot -->
     <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
     <!-- The task file for the mpc. -->
-    <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s60/task.info" />
+    <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
     <!-- The library folder to generate CppAD codegen into -->
     <arg name="libFolder"   value="/var/ocs2/kuavo_s$(arg robot_version)" />
     <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
@@ -50,12 +57,13 @@
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
-
-    <arg name="wheel_move_spd" default="[0.5, 0.5, 0.5]"/>
-    <arg name="wheel_reach_threshold" default="[0.03, 0.03, 0.03]"/>
     
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
+    
+    <!-- wheel bridge -->
+    <arg name="use_wheel_bridge" default="true" if="$(eval arg('robot_version') == 60)"/>
+    <arg name="use_wheel_bridge" default="false" unless="$(eval arg('robot_version') == 60)"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -63,10 +71,10 @@
     </group>
 
     <!-- make the files into global parameters -->
-    <param name="real" value="$(arg real)" />
-    <param name="cali" value="$(arg cali)" />
-    <param name="cali_arm" value="$(arg cali_arm)" />
-    <param name="cali_leg" value="$(arg cali_leg)" />
+    <param name="real" type="bool" value="$(arg real)" />
+    <param name="cali" type="bool" value="$(arg cali)" />
+    <param name="cali_arm" type="bool" value="$(arg cali_arm)" />
+    <param name="cali_leg" type="bool" value="$(arg cali_leg)" />
     <param name="multiplot"         value="$(arg multiplot)"/>
     <param name="wbc_only"          value="$(arg wbc_only)"/>
     <param name="use_external_mpc"  value="$(arg use_external_mpc)"/>
@@ -108,9 +116,6 @@
     <param name="/mpc/schedule/start_time" value="-1.0"/>
     <param name="/timeout_warning_ms" value="20"/>
 
-    <param name="wheel_move_spd" type="yaml" value="$(arg wheel_move_spd)" />
-    <param name="wheel_reach_threshold" type="yaml" value="$(arg wheel_reach_threshold)" />
-
     <!-- 自动清理 .ros 文件夹参数 -->
     <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
     <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
@@ -118,7 +123,7 @@
     <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
 
     <!-- rviz -->
-    <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)"/>
+    <!-- <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)"/> -->
 
     <!-- mpc node -->
     <group if="$(arg use_sqp)">
@@ -141,7 +146,7 @@
     </node>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true">
       </node>
-    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 10">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>
 
@@ -168,14 +173,16 @@
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'sim')">
-        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
+          <arg name="real" value="$(arg real)"/>
         </include>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
       </group>
     </group>    
 
@@ -192,6 +199,12 @@
 
     <group if="$(arg with_ik)">
         <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
+    </group>
+
+    <!-- wheel bridge node -->
+    <group if="$(arg use_wheel_bridge)">
+        <node pkg="humanoid_controllers" type="auto_wheel_bridge.py" name="auto_wheel_bridge_node" 
+              output="screen" required="false"/>
     </group>
 
 </launch>

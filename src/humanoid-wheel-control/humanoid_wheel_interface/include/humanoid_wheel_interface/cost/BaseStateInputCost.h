@@ -55,27 +55,28 @@ class BaseStateInputCost final : public QuadraticStateInputCost {
                                                        const TargetTrajectories& targetTrajectories, const PreComputation& preComp) const override {
     vector_t stateDeviation = vector_t::Zero(state.size());
     vector_t inputDeviation = vector_t::Zero(input.size());
-    if(referenceManager_.getEnableArmJointTrack() && referenceManager_.getEnableBaseTrack())    // 启用关节和底盘跟踪
-    {
-      stateDeviation = state - referenceManager_.getStateInputTargetTrajectories().getDesiredState(time);
-      inputDeviation.head(info_.inputDim - info_.armDim) = input.head(info_.inputDim - info_.armDim) - 
-          referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).head(info_.inputDim - info_.armDim);
-    }
-    else if(referenceManager_.getEnableBaseTrack())   // 使能底盘跟踪
+
+    if(referenceManager_.getEnableBaseTrack())   // 使能底盘跟踪
     {
       stateDeviation.head(baseNums_) = state.head(baseNums_) - 
             referenceManager_.getStateInputTargetTrajectories().getDesiredState(time).head(baseNums_);
-      inputDeviation.head(info_.inputDim - info_.armDim) = input.head(info_.inputDim - info_.armDim) - 
-          referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).head(info_.inputDim - info_.armDim);
+      inputDeviation.head(baseNums_) = input.head(baseNums_) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).head(baseNums_);
     }
-    else if(referenceManager_.getEnableArmJointTrack()) // 使能手臂关节和下肢关节跟踪
+    if(referenceManager_.getEnableLegJointTrack()) // 使能下肢关节跟踪
     {
-      stateDeviation.tail(info_.armDim) = state.tail(info_.armDim) - 
-            referenceManager_.getStateInputTargetTrajectories().getDesiredState(time).tail(info_.armDim);
+      stateDeviation.segment(baseNums_, 4) = state.segment(baseNums_, 4) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredState(time).segment(baseNums_, 4);
+      inputDeviation.segment(baseNums_, 4) = input.segment(baseNums_, 4) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).segment(baseNums_, 4);
     }
-    
-    inputDeviation.tail(info_.armDim) = input.tail(info_.armDim) - 
-          referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).tail(info_.armDim);
+    if(referenceManager_.getEnableArmJointTrack()) // 使能手臂关节跟踪
+    {
+      stateDeviation.tail(info_.armDim - 4) = state.tail(info_.armDim - 4) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredState(time).tail(info_.armDim - 4);
+      inputDeviation.tail(info_.armDim - 4) = input.tail(info_.armDim - 4) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).tail(info_.armDim - 4);
+    }
 
     return {stateDeviation, inputDeviation};
   }

@@ -44,6 +44,9 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
     // 初始化手臂轨迹
     arm_external_control_state_.data.init(arm_num);
 
+    // 初始化下肢轨迹
+    leg_external_control_state_.data.init(low_joint_num);
+
     // 初始化重置旋转矩阵
     R_resetOrigin_ = Eigen::Matrix2d::Identity();
 
@@ -102,6 +105,14 @@ void ControlDataManager::initializeSubscribers() {
     arm_joint_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
         "/kuavo_arm_traj", 10, 
         &ControlDataManager::armJointTrajCallback, this);
+    
+    leg_joint_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
+        "/lb_leg_traj", 10, 
+        &ControlDataManager::legJointTrajCallback, this);
+    
+    lb_mpc_control_mode_sub_ = nh_.subscribe<std_msgs::Int8>(
+        "/mobile_manipulator/lb_mpc_control_mode", 10,
+        &ControlDataManager::lbMpcControlModeCallback, this);
     
     ROS_INFO("ControlDataManager: All subscribers initialized");
 }
@@ -299,6 +310,35 @@ void ControlDataManager::armJointTrajCallback(const sensor_msgs::JointState::Con
         std::lock_guard<std::mutex> lock(external_state_mutex_);
         arm_external_control_state_.update(traj);
     }
+}
+
+void ControlDataManager::legJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg) {
+    if(msg->name.size() != low_joint_num_) {
+        ROS_WARN_THROTTLE(1.0, "[ControlDataManager] Leg joint count mismatch: %lu vs %d", msg->name.size(), low_joint_num_);
+        return;
+    }
+    
+    // 在锁外处理数据
+    ArmJointTrajectory traj;
+    traj.init(low_joint_num_);
+    
+    for(int i = 0; i < low_joint_num_; i++) {
+        traj.pos[i] = msg->position[i] * M_PI / 180.0;  // 角度转弧度
+        if(msg->velocity.size() == low_joint_num_)
+            traj.vel[i] = msg->velocity[i] * M_PI / 180.0;
+        if(msg->effort.size() == low_joint_num_)
+            traj.tau[i] = msg->effort[i];
+    }
+    
+    {
+        std::lock_guard<std::mutex> lock(external_state_mutex_);
+        leg_external_control_state_.update(traj);
+    }
+}
+
+void ControlDataManager::lbMpcControlModeCallback(const std_msgs::Int8::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(external_state_mutex_);
+    lb_mpc_control_mode_ = msg->data;
 }
 
 // ========== 数据获取接口实现 ==========
@@ -524,6 +564,18 @@ ArmJointTrajectory ControlDataManager::getArmExternalControlState() const
     return arm_external_control_state_.data;
 }
 
+ArmJointTrajectory ControlDataManager::getLegExternalControlState() const 
+{
+    std::lock_guard<std::mutex> lock(external_state_mutex_);
+    return leg_external_control_state_.data;
+}
+
+int8_t ControlDataManager::getLbMpcControlMode() const 
+{
+    std::lock_guard<std::mutex> lock(external_state_mutex_);
+    return lb_mpc_control_mode_;
+}
+
 void ControlDataManager::updateArmExternalControlState(const Eigen::VectorXd& current_pos, const Eigen::VectorXd& current_vel, const Eigen::VectorXd& current_tau) 
 {
     if (current_pos.size() != arm_num_ || current_vel.size() != arm_num_ || current_tau.size() != arm_num_) 
@@ -542,6 +594,27 @@ void ControlDataManager::updateArmExternalControlState(const Eigen::VectorXd& cu
     {
         std::lock_guard<std::mutex> lock(external_state_mutex_);
         arm_external_control_state_.update(state);
+    }
+}
+
+void ControlDataManager::updateLegExternalControlState(const Eigen::VectorXd& current_pos, const Eigen::VectorXd& current_vel, const Eigen::VectorXd& current_tau) 
+{
+    if (current_pos.size() != low_joint_num_ || current_vel.size() != low_joint_num_ || current_tau.size() != low_joint_num_) 
+    {
+        ROS_WARN_THROTTLE(1.0, "[ControlDataManager] Invalid leg state dimensions");
+        return;
+    }
+    
+    // 在锁外准备数据
+    ArmJointTrajectory state;
+    state.init(low_joint_num_);
+    state.pos = current_pos;
+    state.vel = current_vel;
+    state.tau = current_tau;
+    
+    {
+        std::lock_guard<std::mutex> lock(external_state_mutex_);
+        leg_external_control_state_.update(state);
     }
 }
 

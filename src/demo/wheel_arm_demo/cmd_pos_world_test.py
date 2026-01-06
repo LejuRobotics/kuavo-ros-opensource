@@ -1,68 +1,18 @@
 #!/usr/bin/env python
 import rospy
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Bool
+from std_msgs.msg import Float32
 import time
 
-current_flag = False
-
-def flag_callback(msg):
-   global current_flag
-   current_flag = msg.data
-   print("current_flag is ", current_flag)
-
-def wait_until_false(timeout=None):
-    """循环等待直到 current_flag = false"""
-    global current_flag
-
-    rospy.loginfo("开始等待标志位变为 False...")
-    
-    rate = rospy.Rate(10)  # 10Hz检查频率
-    start_time = rospy.Time.now()
-    
-    while not rospy.is_shutdown():
-        # 检查超时
-        if timeout is not None:
-            if (rospy.Time.now() - start_time).to_sec() > timeout:
-                rospy.logwarn(f"等待超时 ({timeout}秒)")
-                return False
-        
-        # 检查条件
-        if not current_flag:
-            rospy.loginfo("标志位已变为 False, 跳出循环")
-            return True
-            
-        rate.sleep()
-    
-    return False
-
-def wait_until_true(timeout=None):
-    """循环等待直到 current_flag = true"""
-    global current_flag
-
-    rospy.loginfo("开始等待标志位变为 True...")
-    
-    rate = rospy.Rate(10)  # 10Hz检查频率
-    start_time = rospy.Time.now()
-    
-    while not rospy.is_shutdown():
-
-        # 检查超时
-        if timeout is not None:
-            if (rospy.Time.now() - start_time).to_sec() > timeout:
-                rospy.logwarn(f"等待超时 ({timeout}秒)")
-                return False
-        
-        # 检查条件
-        if current_flag:
-            rospy.loginfo("标志位已变为 True, 跳出循环")
-            return True
-            
-        rate.sleep()
-    
-    return False
+reachTime = 0.0
+def time_callback(msg):
+   global reachTime
+   reachTime = msg.data
+   print("reach_time is ", reachTime)
 
 def test_twist_callback():
+    global reachTime
+
     # 初始化ROS节点
     rospy.init_node('test_twist_publisher', anonymous=True)
     
@@ -70,7 +20,7 @@ def test_twist_callback():
     pub = rospy.Publisher('/cmd_pose_world', Twist, queue_size=10)
 
     # 创建标志位订阅
-    flag_sub = rospy.Subscriber('/cmd_pose_world_flag', Bool, flag_callback)
+    time_sub = rospy.Subscriber('/lb_cmd_pose_reach_time', Float32, time_callback)
 
     # 等待发布器建立连接
     time.sleep(1)
@@ -89,12 +39,14 @@ def test_twist_callback():
     print(f"  位置: ({twist_msg1.linear.x}, {twist_msg1.linear.y})")
     print(f"  偏航角: {twist_msg1.angular.z}")
     
+    reachTime = 0.0 # 重置时间
     pub.publish(twist_msg1)
-    
-    wait_until_false()
-    wait_until_true()
 
-    time.sleep(pubTime)
+    while reachTime == 0.0:
+        rospy.sleep(0.1)
+
+    # 短暂等待确保消息发送
+    rospy.sleep(reachTime + 0.5)
     
     # 测试数据2：不同数据
     twist_msg2 = Twist()
@@ -109,12 +61,14 @@ def test_twist_callback():
     print(f"  位置: ({twist_msg2.linear.x}, {twist_msg2.linear.y})")
     print(f"  偏航角: {twist_msg2.angular.z}")
     
+    reachTime = 0.0 # 重置时间
     pub.publish(twist_msg2)
-    
-    wait_until_false()
-    wait_until_true()
 
-    time.sleep(pubTime)
+    while reachTime == 0.0:
+        rospy.sleep(0.1)
+
+    # 短暂等待确保消息发送
+    rospy.sleep(reachTime + 0.5)
     
     # 测试数据3：零值
     twist_msg3 = Twist()
@@ -129,12 +83,14 @@ def test_twist_callback():
     print(f"  位置: ({twist_msg3.linear.x}, {twist_msg3.linear.y})")
     print(f"  偏航角: {twist_msg3.angular.z}")
     
+    reachTime = 0.0 # 重置时间
     pub.publish(twist_msg3)
-    
-    wait_until_false()
-    wait_until_true()
 
-    time.sleep(pubTime)
+    while reachTime == 0.0:
+        rospy.sleep(0.1)
+
+    # 短暂等待确保消息发送
+    rospy.sleep(reachTime + 0.5)
     
     print("\n测试数据发布完成！请检查C++程序的输出。")
 

@@ -45,6 +45,7 @@ int main(int argc, char** argv) {
   // Initialize ros node
   ros::init(argc, argv, robotName + "_mpc");
   ros::NodeHandle nodeHandle;
+
   // Get node parameters
   std::string taskFile, libFolder, urdfFile;
   nodeHandle.getParam("/taskFile", taskFile);

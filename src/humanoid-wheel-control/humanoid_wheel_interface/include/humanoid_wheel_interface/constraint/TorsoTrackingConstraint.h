@@ -48,14 +48,13 @@ class TorsoTrackingConstraint final : public StateConstraint {
   using quaternion_t = Eigen::Quaternion<scalar_t>;
   
   TorsoTrackingConstraint(const EndEffectorKinematics<scalar_t>& endEffectorKinematicsTorso,
-                          const EndEffectorKinematics<scalar_t>& endEffectorKinematicsBase,
                           const MobileManipulatorReferenceManager& referenceManager,
                           const ManipulatorModelInfo& info);
 
   ~TorsoTrackingConstraint() override = default;
-  TorsoTrackingConstraint* clone() const override { return new TorsoTrackingConstraint(*endEffectorKinematicsTorsoPtr_, *endEffectorKinematicsBasePtr_, 
+  TorsoTrackingConstraint* clone() const override { return new TorsoTrackingConstraint(*endEffectorKinematicsTorsoPtr_, 
                                                                                        referenceManager_, info_); }
-
+  bool isActive(scalar_t time) const override;
   size_t getNumConstraints(scalar_t time) const override;
 
   vector_t getValue(scalar_t time, const vector_t& state, const PreComputation& preComputation) const override;
@@ -65,13 +64,13 @@ class TorsoTrackingConstraint final : public StateConstraint {
  private:
   TorsoTrackingConstraint(const TorsoTrackingConstraint& other) = default;                                                   
   std::pair<vector_t, quaternion_t> interpolateEndEffectorPose(scalar_t time) const;
+  std::pair<vector_t, quaternion_t> targetBaseToWorld(const vector_t& state, 
+                              const std::pair<vector_t, quaternion_t>& targetBase) const;
 
   /** Cached pointer to the pinocchio end effector kinematics. Is set to nullptr if not used. */
   PinocchioEndEffectorKinematics* pinocchioEEKinTorsoPtr_ = nullptr;
-  PinocchioEndEffectorKinematics* pinocchioEEKinBasePtr_ = nullptr;
 
   std::unique_ptr<EndEffectorKinematics<scalar_t>> endEffectorKinematicsTorsoPtr_;
-  std::unique_ptr<EndEffectorKinematics<scalar_t>> endEffectorKinematicsBasePtr_;
   const MobileManipulatorReferenceManager& referenceManager_;
   const ManipulatorModelInfo& info_;
 };

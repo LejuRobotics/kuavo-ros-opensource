@@ -79,6 +79,9 @@ namespace
   namespace mju = ::mujoco::sample_util;
   std::shared_ptr<mj::Simulate> sim;
 
+  // 机器人版本号
+  int robotVersion_ = 60;
+
   // constants
   const double syncMisalign = 0.1;       // maximum mis-alignment before re-sync (simulation seconds)
   const double simRefreshFraction = 0.7; // fraction of refresh available for simulation
@@ -638,8 +641,8 @@ namespace
   void updateWheelVel_VectorContorl(Eigen::Vector3d& cmd_vel)
   {
     const double wheel_radius = 0.075;  // 底盘轮子半径
-    const double robot_x_dis = 0.3725; // 机器人中心到轮子的距离
-    const double robot_y_dis = 0.17856; // 机器人中心到轮子的距离
+    const double robot_x_dis = 0.253; // 机器人中心到轮子的距离
+    const double robot_y_dis = 0.1785; // 机器人中心到轮子的距离
 
     // 四个轮子的位置（相对于底盘中心）
     std::vector<Eigen::Vector2d> wheel_positions = {
@@ -669,6 +672,44 @@ namespace
       d->qpos[7 + i*2] = wheel_yaw;                    // 设置转向角度
       d->ctrl[i*2 + 1] = velocity_pid_func(i*2 + 1, wheel_speed / wheel_radius);
     }
+  }
+
+  void updateWheelVel_VectorContorl_omniWheel(Eigen::Vector3d& cmd_vel)
+  {
+    const double wheel_radius = 0.13035;  // 底盘轮子半径
+    const double robot_x_dis = 0.232489;  // 机器人中心到轮子的距离
+    const double robot_y_dis = 0.232489;  // 机器人中心到轮子的距离
+
+    // cmd_vel: [vx, vy, omega] - 机器人本体系速度和角速度
+    // 四个轮子的位置（相对于底盘中心）
+    std::vector<Eigen::Vector2d> wheel_positions = {
+        Eigen::Vector2d( robot_x_dis,  robot_y_dis), // 左前轮 (x+, y+)
+        Eigen::Vector2d( robot_x_dis, -robot_y_dis), // 右前轮 (x+, y-)
+        Eigen::Vector2d(-robot_x_dis,  robot_y_dis), // 左后轮 (x-, y+)
+        Eigen::Vector2d(-robot_x_dis, -robot_y_dis)  // 右后轮 (x-, y-)
+    };
+
+    for(int i = 0; i < 4; i++)
+    {
+      // 计算对应轮子的旋转速度，
+      Eigen::Vector2d rotational_vel(-wheel_positions[i].y() * cmd_vel[2], 
+                                      wheel_positions[i].x() * cmd_vel[2]);
+      
+      // 计算对应轮子的总速度矢量， x 总指向机器人的正前方
+      Eigen::Vector2d wheel_vel(cmd_vel[0] + rotational_vel.x(), 
+                                 cmd_vel[1] + rotational_vel.y());
+
+      // 3. 计算轮子的转向角度（yaw）
+      double wheel_yaw = std::atan2(wheel_vel.y(), wheel_vel.x());
+      
+      // 4. 计算轮子的转速（模长）
+      double wheel_speed = wheel_vel.norm();
+      
+      // 5. 设置电机控制
+      d->qpos[7 + i*2] = wheel_yaw;                    // 设置转向角度
+      d->ctrl[i*2 + 1] = velocity_pid_func(i*2 + 1, wheel_speed / wheel_radius);
+    }
+
   }
 
   // simulate in background thread (while rendering in main thread)
@@ -838,8 +879,16 @@ namespace
               }
               else if (robot_type == 1)
               {
-                updateWheelVel_VectorContorl(cmd_vel_chassis);
-                updateControl(LegJointsAddr, i);
+                if(robotVersion_ == 60)
+                {
+                  updateWheelVel_VectorContorl(cmd_vel_chassis);
+                  updateControl(LegJointsAddr, i);
+                }
+                else if(robotVersion_ == 61)
+                {
+                  updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
+                  updateControl(LegJointsAddr, i);
+                }
               }
               else
               {
@@ -1419,7 +1468,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
     std::cout << "\033[33m[MuJoCo LEJU DDS] LEJU DDS communication started\033[0m" << std::endl;
 #endif
   ros::Subscriber chassicPoseSub = g_nh_ptr->subscribe("/chassic_pose", 10, chassicPoseCallback);
-  ros::Subscriber cmdVelSub = g_nh_ptr->subscribe("/filter_cmd_vel", 10, cmdVelCallback);
+  ros::Subscriber cmdVelSub = g_nh_ptr->subscribe("/move_base/base_cmd_vel", 10, cmdVelCallback);
   ros::Subscriber chassicPoseForceSub = g_nh_ptr->subscribe("/chassic_pose_force", 10, chassicPoseForceCallback);
 
   // 初始化灵巧手ROS
@@ -1458,13 +1507,28 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
         //   }
         // }
         // waistNum = waist_num;
-
-        for (int i = 0; i < qpos_init_temp.size(); i++)
+        if(robot_type == 2)
         {
-          qpos_init[i] = qpos_init_temp[i];
-          std::cout << qpos_init_temp[i] << ", ";
+          for (int i = 0; i < qpos_init_temp.size(); i++)
+          {
+            qpos_init[i] = qpos_init_temp[i];
+            std::cout << qpos_init_temp[i] << ", ";
+          }
+          std::cout << std::endl;
         }
-        std::cout << std::endl;
+        else if (robot_type == 1)
+        {
+          for (int i = 0; i < 7; i++)
+          {
+            qpos_init[i] = qpos_init_temp[i];
+            std::cout << qpos_init[i] << ", ";
+          }
+          for (int i = 7 ; i < qpos_init_temp.size(); i++)
+          {
+            qpos_init[i + 8] = qpos_init_temp[i];
+            std::cout << qpos_init[i + 8] << ", ";
+          }
+        }
         
         // // 根据机器人类型调整初始高度
         // int robot_type = 2;
@@ -1560,6 +1624,11 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   {
     nh.getParam("robot_type", robot_type);
     std::cout << "[mujoco_node] robot_type param: " << robot_type << std::endl;
+  }
+
+  if(nh.hasParam("robot_version"))
+  {
+    nh.getParam("robot_version", robotVersion_);
   }
   
   // 获取配置文件

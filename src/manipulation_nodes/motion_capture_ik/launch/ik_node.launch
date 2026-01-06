@@ -17,10 +17,10 @@
     <node name="arms_ik_node" pkg="motion_capture_ik" type="arms_ik_node" output="screen"/>
 
     <!-- 轮臂腿部IK服务节点 -->
-    <node name="leg_ik_service_node" pkg="motion_capture_ik" type="leg_ik_service_node.py" 
+    <!-- <node name="leg_ik_service_node" pkg="motion_capture_ik" type="leg_ik_service_node.py" 
           args="$(find motion_capture_ik)/scripts/ik/leg_ik_service_node.py" output="screen">
         <param name="debug_mode" value="true"/>
-    </node>
+    </node> -->
 
     <!-- visualize the robot in rviz -->
     <group if="$(arg visualize)">    

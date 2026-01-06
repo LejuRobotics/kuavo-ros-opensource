@@ -93,7 +93,10 @@ class KuavoROSEnv:
         # Only check nodes exist when Init SDK, if not, tips user manually launch nodes.
         # self.launch_ik_node()
         # self.launch_gait_switch_node()
-        deps_nodes = ['/humanoid_gait_switch_by_name']
+        #
+        # NOTE: 轮臂(robot_type==1)不依赖双足步态切换节点 humanoid_gait_switch_by_name
+        robot_type = rospy.get_param('/robot_type', 0)
+        deps_nodes = [] if robot_type == 1 else ['/humanoid_gait_switch_by_name']
         for node in deps_nodes:
             if not KuavoROSEnv.check_rosnode_exists(node):
                 print(f"\033[31m\nError:Node {node} not found. Please launch it manuallly.\033[0m")

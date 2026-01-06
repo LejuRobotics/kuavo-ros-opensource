@@ -100,5 +100,18 @@ void MobileManipulatorPreComputation::requestFinal(RequestSet request, scalar_t 
 
 }
 
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+auto MobileManipulatorPreComputation::getDesiredFramePose(const vector_t& x, const std::string& frameName) const -> std::pair<vector_t, quaternion_t>
+{
+  const auto& model = pinocchioInterface_.getModel();
+  auto& data = pinocchioInterface_.getData();
+  pinocchio::FrameIndex frameId = model.getFrameId(frameName);
+  const pinocchio::SE3& framePose = data.oMf[frameId];
+
+  return {framePose.translation(), Eigen::Quaterniond(framePose.rotation())};
+}
+
 }  // namespace mobile_manipulator
 }  // namespace ocs2

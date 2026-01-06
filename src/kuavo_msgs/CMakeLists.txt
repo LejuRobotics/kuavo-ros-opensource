@@ -206,6 +206,9 @@ add_service_files(
   twoArmHandPoseCmdFreeSrv.srv
   goToZeroPoint.srv
   robotSwitchPose.srv
+
+  # Lb quick mode
+  changeLbQuickModeSrv.srv
 )
 
 ## Generate actions in the 'action' folder

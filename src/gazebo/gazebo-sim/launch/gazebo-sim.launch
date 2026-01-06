@@ -12,7 +12,7 @@
   <arg name="use_grab_box_new_scene" default="false"/>
   <arg name="world_name"  default="$(find gazebo_ros)/worlds/empty.world"/>
   <arg name="use_kuavo" value="$(eval int(arg('robot_version')) >= 40)"/>
-  <arg name="spawn_z"        default="$(eval '1.0' if int(arg('robot_type')) == 2 else '0.25')"/>
+  <arg name="spawn_z"        default="$(eval '1.0' if int(arg('robot_type')) == 2 else '0.0')"/>
 
   <!-- 楼梯参数（用于传递给load_stairs.launch） -->
   <!-- 第一段楼梯（上楼梯）参数 -->

@@ -134,10 +134,8 @@ def main():
         msg.joint_angles_as_q0 = False
         msg.ik_param = create_default_ik_param()
         
-        # 坐标系: 1 = world frame
-        msg.frame = 1
-        
-        msg.desire_mode = 1  # 控制模式为局部坐标系
+        # 坐标系: 2 = local frame
+        msg.frame = 2
         
         # 发布消息
         pub.publish(msg)

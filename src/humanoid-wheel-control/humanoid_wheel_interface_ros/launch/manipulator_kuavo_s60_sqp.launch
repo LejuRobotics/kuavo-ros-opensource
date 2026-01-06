@@ -5,7 +5,7 @@
       <!-- The URDF model of the robot -->
       <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
       <!-- The task file for the mpc. -->
-      <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s60/task.info" />
+      <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
       <!-- The library folder to generate CppAD codegen into -->
       <arg name="libFolder"   value="/var/ocs2/kuavo_s$(arg robot_version)" />
 
@@ -13,8 +13,8 @@
       <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
 
       <arg name="use_joystick"       default="true"/>
-      <arg name="joystick_type"      default="bt2"/>
-      
+      <arg name="joystick_type"      default="sim"/>
+
       <!-- make the files into global parameters -->
       <param name="taskFile"   value="$(arg taskFile)" />
       <param name="urdfFile"   value="$(arg urdfFile)" />
@@ -37,7 +37,7 @@
           </include>
         </group>
         <group if="$(eval arg('joystick_type') == 'sim')">
-          <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">
             <arg name="joystick_type" value="$(arg joystick_type)"/>
           </include>
         </group>
@@ -45,6 +45,7 @@
           <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
             <arg name="joystick_type" value="$(arg joystick_type)"/>
           </include>
+          <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
         </group>
       </group>
 

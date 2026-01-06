@@ -6,6 +6,7 @@
 #include <thread>
 #include <mutex>
 #include <iterator>
+#include <iostream> 
 #include "ruiwo_actuator_base.h"
 #include <iostream>
 
@@ -154,7 +155,6 @@ public:
      * 
      */
     void close() override;
-
     void saveAsZeroPosition() override;
     /**
      * @brief 将当前零点位置输出到零点文件
@@ -237,6 +237,25 @@ public:
      */
     std::vector<std::vector<double>> get_joint_gains(const std::vector<int> &joint_indices = {}) override;
 
+    void setInitPosition(std::vector<float> set_positions) override
+    {
+        size_t joint_size = ruiwo_mtr_config_.size();
+        if(joint_size != set_positions.size())
+        {
+            std::cout << "set init pos failed, ruiwo_mtr_config_.size() != set_positions.size()" << std::endl;
+            init_positions.assign(joint_size, 0);
+            return;
+        }
+        init_positions = set_positions;
+        std::cout << "set ruiwo motor init pos[ ";
+        for (float pos : init_positions) // 使用基于范围的 for 循环，更简洁
+        {
+            std::cout << pos << " ";
+        }
+        std::cout << "]" << std::endl;
+        is_set_init_pos_ = true;
+    }
+
 private:
     void go_to_zero();
     void set_zero();
@@ -298,6 +317,8 @@ private:
     // ptm:力控模式 servo:伺服模式
     static inline  std::string Control_mode_ = "ptm";
 
+    bool parse_config_flag_{false};
+    bool is_set_init_pos_{false};
     bool thread_running{false};
     bool thread_end{true};
     std::thread control_thread_;
@@ -312,6 +333,7 @@ private:
     std::mutex update_lock;
 
     bool target_update;
+    std::vector<float> init_positions;
     std::vector<float> target_positions;
     std::vector<float> target_velocity;
     std::vector<float> target_torque;

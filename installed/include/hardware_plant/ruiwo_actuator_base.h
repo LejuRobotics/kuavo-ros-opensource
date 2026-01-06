@@ -231,6 +231,17 @@ public:
      * @return std::vector<double> 速度值
      */
     virtual std::vector<double> get_velocity() = 0;
+
+    /**
+     * @brief 设置初始位置（可选接口，非必须实现）
+     *
+     * @param set_positions 初始位置向量
+     */
+    virtual void setInitPosition(std::vector<float> set_positions) 
+    {
+        std::cout << "setInitPosition interface not implemented" << std::endl;
+        return;
+    }
 };
 
 #endif // RUIWO_ACTUATOR_BASE_H

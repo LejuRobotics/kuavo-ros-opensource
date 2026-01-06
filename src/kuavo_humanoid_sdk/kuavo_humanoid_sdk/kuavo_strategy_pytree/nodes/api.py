@@ -16,6 +16,66 @@ import numpy as np
 import copy
 
 
+def resample_and_execute_traj(traj, total_time, publish_fn, publish_rate=100.0):
+    """
+    对轨迹进行重采样并以固定频率下发
+    
+    参数：
+        traj: 轨迹数据，每个元素是一个位置列表
+        total_time: 总执行时间（秒）
+        publish_fn: 下发函数，接受一个位置列表作为参数
+        publish_rate: 下发频率（Hz），默认100Hz
+    """
+    num_points_orig = len(traj)
+    if num_points_orig < 1:
+        return
+    
+    if num_points_orig == 1:
+        publish_fn(traj[0])
+        return
+    
+    # 根据总时间和固定频率计算需要的点数
+    num_points_target = int(total_time * publish_rate) + 1
+    dt = 1.0 / publish_rate
+    
+    # 对轨迹进行线性插值重采样
+    traj_np = np.array(traj)
+    t_orig = np.linspace(0, 1, num_points_orig)
+    t_target = np.linspace(0, 1, num_points_target)
+    
+    resampled_traj = []
+    for t in t_target:
+        idx = np.searchsorted(t_orig, t)
+        if idx == 0:
+            resampled_traj.append(traj_np[0].tolist())
+        elif idx >= num_points_orig:
+            resampled_traj.append(traj_np[-1].tolist())
+        else:
+            t0, t1 = t_orig[idx - 1], t_orig[idx]
+            alpha = (t - t0) / (t1 - t0)
+            interpolated = (1 - alpha) * traj_np[idx - 1] + alpha * traj_np[idx]
+            resampled_traj.append(interpolated.tolist())
+
+    # 以固定频率下发
+    for i, pos in enumerate(resampled_traj):
+        publish_fn(pos)
+        if i < len(resampled_traj) - 1:
+            time.sleep(dt)
+
+
+def pose_to_list(pose):
+    """
+    将KuavoPose对象转换为数值列表 [x, y, z, qx, qy, qz, qw]
+    如果已经是列表格式则直接返回
+    """
+    if hasattr(pose, 'position') and hasattr(pose, 'orientation'):
+        # KuavoPose 对象
+        return list(pose.position) + list(pose.orientation)
+    else:
+        # 已经是列表格式
+        return pose
+
+
 def transform_pose_from_tag_to_world(tag: Tag, pose: Pose) -> Pose:
     """
     将tag坐标系下的位姿转换到世界坐标系下。
@@ -112,6 +172,114 @@ class ArmAPI:
         self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.NoControl)
         self.robot_sdk.control.set_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.ThroughFullBodyMpc)
 
+    def _move_eef_traj_wheel_mpc(self,
+                            left_traj: List[List[float]],  # 末端6d位姿的轨迹，不带时间戳
+                            right_traj: List[List[float]],  # 末端6d位姿的轨迹，不带时间戳
+                            total_time: float,  # 轨迹总时间，单位秒
+                            direct_to_wbc: bool,  # 指令是否经过全身MPC的优化再到WBC
+                            back_default: bool,  # 是否返回默认模式
+                            frame: str,  # 坐标系
+                            mpc_ctrl_mode: KuavoManipulationMpcCtrlMode = KuavoManipulationMpcCtrlMode.ArmOnly  # MPC控制模式
+                            ):
+
+        # 切成外部控制模式
+        self.robot_sdk.control.set_external_control_arm_mode()
+        self.robot_sdk.control.set_manipulation_mpc_mode(mpc_ctrl_mode)
+        
+        if direct_to_wbc:
+            self.robot_sdk.control.set_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.DirectToWbc)
+
+        # 将轨迹转换为数值列表格式（兼容KuavoPose对象和List[float]）
+        left_traj_list = [pose_to_list(p) for p in left_traj]
+        right_traj_list = [pose_to_list(p) for p in right_traj]
+
+        # 将左右轨迹合并为一个轨迹（每个点包含左右位姿的数值列表）
+        num_points = min(len(left_traj_list), len(right_traj_list))
+        combined_traj = [[left_traj_list[i], right_traj_list[i]] for i in range(num_points)]
+        
+        # 定义下发函数：将数值列表转回KuavoPose对象
+        def publish_eef(pos):
+            left_list, right_list = pos
+            left_pose = KuavoPose(
+                position=tuple(left_list[:3]),
+                orientation=tuple(left_list[3:7])
+            )
+            right_pose = KuavoPose(
+                position=tuple(right_list[:3]),
+                orientation=tuple(right_list[3:7])
+            )
+            self.robot_sdk.control.control_robot_end_effector_pose(
+                left_pose=left_pose,
+                right_pose=right_pose,
+                frame=frame,
+            )
+        
+        # 使用通用函数进行重采样和下发
+        resample_and_execute_traj(combined_traj, total_time, publish_eef)
+
+        # 运动结束后，切回默认模式
+        if back_default:
+            self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.NoControl)
+            self.robot_sdk.control.set_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.ThroughFullBodyMpc)
+
+    def _move_joint_traj(self,
+                        joint_traj: List[List[float]],  # 关节角度轨迹，每个元素是14维关节角度列表
+                        total_time: float,  # 轨迹总时间，单位秒
+                        mpc_ctrl_mode: KuavoManipulationMpcCtrlMode = KuavoManipulationMpcCtrlMode.ArmOnly  # MPC控制模式
+                        ):
+        """
+        执行关节轨迹（私有方法，内部调用）
+        下发频率固定为 100Hz，根据 total_time 对轨迹进行重采样
+
+        参数：
+            joint_traj (List[List[float]]): 关节角度轨迹，每个元素是14维关节角度列表
+            total_time (float): 轨迹总时间，单位秒
+            mpc_ctrl_mode (KuavoManipulationMpcCtrlMode): MPC控制模式，默认为ArmOnly
+        """
+        
+        # 切换到外部控制模式
+        self.robot_sdk.control.set_external_control_arm_mode()
+        self.robot_sdk.control.set_manipulation_mpc_mode(mpc_ctrl_mode)
+
+        # 定义下发函数
+        def publish_joint(pos):
+            self.robot_sdk.control.control_arm_joint_positions(joint_positions=pos)
+        
+        # 使用通用函数进行重采样和下发
+        resample_and_execute_traj(joint_traj, total_time, publish_joint)
+
+    def move_joint_traj(self,
+                       joint_traj: List[List[float]],  # 关节角度轨迹，每个元素是14维关节角度列表
+                       asynchronous: bool = False,  # 布尔值，指定运动命令是否为异步。默认值为 false，表示函数会阻塞
+                       total_time: float = 5.0,  # 轨迹总时间，单位秒
+                       mpc_ctrl_mode: KuavoManipulationMpcCtrlMode = KuavoManipulationMpcCtrlMode.ArmOnly  # MPC控制模式
+                       ):
+        """
+        执行关节轨迹控制接口
+
+        参数：
+            joint_traj (List[List[float]]): 关节角度轨迹，每个元素是14维关节角度列表
+            asynchronous (bool): 布尔值，指定运动命令是否为异步。默认值为 false，表示函数会阻塞
+            total_time (float): 轨迹总时间，单位秒
+            mpc_ctrl_mode (KuavoManipulationMpcCtrlMode): MPC控制模式，默认为ArmOnly
+                - ArmOnly: 仅控制手臂
+                - BaseOnly: 仅控制底盘
+                - BaseArm: 同时控制底盘和手臂
+                - NoControl: 无控制
+
+        返回：
+            Future: 如果 asynchronous=True，返回 Future 对象；否则返回 None
+        """
+        if asynchronous:
+            # 多线程
+            fut = self._pool.submit(self._move_joint_traj, joint_traj, total_time, mpc_ctrl_mode)
+            return fut  # 外部拿到 Future
+
+        else:
+            # 本函数阻塞
+            self._move_joint_traj(joint_traj, total_time, mpc_ctrl_mode)
+            return None
+
     def move_eef_traj_kmpc(
             self,
             left_traj: List[List[float]],  # 末端6d位姿的轨迹，不带时间戳
@@ -136,6 +304,57 @@ class ArmAPI:
             )
 
             return None
+
+    def move_eef_traj_wheel_mpc(
+            self,
+            left_traj: List[List[float]],  # 末端6d位姿的轨迹，不带时间戳
+            right_traj: List[List[float]],  # 末端6d位姿的轨迹，不带时间戳
+            asynchronous: bool = False,  # 布尔值，指定运动命令是否为异步。默认值为 false，表示函数会阻塞
+            direct_to_wbc: bool = True,  # 指令是否经过全身MPC的优化再到WBC
+            total_time: float = 5.0,  # 轨迹总时间，单位秒
+            back_default: bool = True,  # 是否返回默认模式
+            frame: str = KuavoManipulationMpcFrame.WorldFrame,
+            # 指令位置所在的坐标系： 'base_link'： 在机器人base_link坐标系下； 'foot_print': 'base_link' 在地面的投影; 'world': 世界系
+            mpc_ctrl_mode: KuavoManipulationMpcCtrlMode = KuavoManipulationMpcCtrlMode.ArmOnly  # MPC控制模式
+    ):
+        if asynchronous:
+            # 多线程
+            fut = self._pool.submit(self._move_eef_traj_wheel_mpc,
+                                    left_traj, right_traj, total_time, direct_to_wbc, back_default, frame, mpc_ctrl_mode)
+            return fut  # 外部拿到 Future
+
+        else:
+            # 本函数阻塞
+            self._move_eef_traj_wheel_mpc(
+                left_traj, right_traj, total_time, direct_to_wbc, back_default, frame, mpc_ctrl_mode
+            )
+
+            return None
+
+    def get_eef_pose_world(self):
+        target_frame = Frame.ODOM
+
+        left_pose = self.robot_sdk.tools.get_link_pose(
+            link_name="zarm_l7_end_effector",
+            reference_frame=target_frame
+        )
+        right_pose: KuavoPose = self.robot_sdk.tools.get_link_pose(
+            link_name="zarm_r7_end_effector",
+            reference_frame=target_frame
+        )
+
+        current_left_pose = Pose(
+            pos=left_pose.position,
+            quat=left_pose.orientation,
+            frame=target_frame
+        )
+        current_right_pose = Pose(
+            pos=right_pose.position,
+            quat=right_pose.orientation,
+            frame=target_frame
+        )
+
+        return current_left_pose, current_right_pose
 
     def get_eef_pose_world(self):
         target_frame = Frame.ODOM
@@ -207,6 +426,152 @@ class TorsoAPI:
         self._target_lock = threading.Lock()
         self._current_target: Pose = None
 
+    def _move_wheel_lower_joint(self,
+                            joint_traj: list,
+                            total_time: float):
+        """
+        执行轮臂下关节轨迹控制
+        
+        参数：
+            joint_traj: 关节轨迹，可以是单个目标位置 [pos1, pos2, pos3, pos4] 
+                        或多点轨迹 [[pos1, pos2, pos3, pos4], ...]
+            total_time: 执行时间（秒）
+        """
+        self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.ArmOnly)
+
+        # 获取当前轮臂下关节位置（前4个关节），joint_state.position 是弧度，需要转为角度
+        try:
+            joint_state = self.robot_sdk.state.joint_state
+            if joint_state is not None and joint_state.position is not None and len(joint_state.position) >= 4:
+                # joint_state.position 是弧度，转换为角度（degrees）
+                current_pos = [np.degrees(pos) for pos in joint_state.position[:4]]
+            else:
+                raise RuntimeError("获取当前轮臂下关节位置失败，joint_state 无效")
+        except Exception as e:
+            raise RuntimeError(f"获取当前轮臂下关节位置异常: {e}")
+
+        # 判断是单个目标还是轨迹
+        if len(joint_traj) > 0 and not isinstance(joint_traj[0], (list, tuple)):
+            # 单个目标位置，生成从当前位置到目标位置的轨迹
+            target_pos = joint_traj
+            traj = [current_pos, target_pos]
+        else:
+            # 已经是多点轨迹，将当前位置作为起点
+            traj = [current_pos] + joint_traj
+
+        print(f"[TorsoAPI] 当前轮臂下关节位置: {current_pos}")
+        print(f"[TorsoAPI] 目标轮臂下关节位置: {traj[-1]}")
+
+        # 定义下发函数
+        def publish_wheel_joint(pos):
+            self.robot_sdk.control.control_wheel_lower_joint(pos)
+        
+        # 使用通用函数进行重采样和下发
+        resample_and_execute_traj(traj, total_time, publish_wheel_joint)
+        
+
+    def move_wheel_lower_joint(self,
+                            joint_traj: list,
+                            asynchronous: bool = False,
+                            total_time: float = 5.0):
+        if asynchronous:
+            return self._pool.submit(self._move_wheel_lower_joint, joint_traj, total_time)
+        else:
+            self._move_wheel_lower_joint(joint_traj, total_time)
+            return None
+
+    def _move_torso_pose(self,
+                         desir_torso_pose: Pose,
+                         total_time: float = 5.0):
+        """
+        执行躯干位姿控制，从当前位姿插值到目标位姿
+        
+        参数：
+            desir_torso_pose: 目标躯干位姿
+            total_time: 执行时间（秒）
+        """
+        if desir_torso_pose is None:
+            raise ValueError("desir_torso_pose must not be None")
+
+        self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.ArmOnly)
+
+        # 获取目标位姿 [x, y, z, roll, pitch, yaw]
+        target_x, target_y, target_z = desir_torso_pose.pos.tolist()
+        target_roll, target_pitch, target_yaw = desir_torso_pose.get_euler(degrees=False).tolist()
+        target_pose = [target_x, target_y, target_z, target_roll, target_pitch, target_yaw]
+
+        # 获取当前躯干位姿（通过 tf 树获取 base_link 的位置，会被映射为 waist_yaw_link）
+        try:
+            current_tf_pose = self.robot_sdk.tools.get_link_pose(
+                link_name="base_link",
+                reference_frame="odom"
+            )
+            if current_tf_pose is not None:
+                # 打印原始 tf 位姿
+                print(f"[TorsoAPI] base_link(->waist_yaw_link) tf position: {current_tf_pose.position}")
+                print(f"[TorsoAPI] base_link(->waist_yaw_link) tf orientation (quat): {current_tf_pose.orientation}")
+                
+                # 将四元数转换为欧拉角
+                current_pose_obj = Pose(
+                    pos=current_tf_pose.position,
+                    quat=current_tf_pose.orientation,
+                    frame=Frame.ODOM
+                )
+                current_euler = current_pose_obj.get_euler(degrees=False).tolist()
+                print(f"[TorsoAPI] base_link euler (rad): {current_euler}")
+                
+                current_pose = [
+                    current_tf_pose.position[0],
+                    current_tf_pose.position[1],
+                    current_tf_pose.position[2],
+                    current_euler[0],
+                    current_euler[1],
+                    current_euler[2]
+                ]
+            else:
+                # 如果获取失败，使用默认零位姿
+                print("[Warning] 获取当前躯干位姿失败，使用默认零位姿")
+                current_pose = [0.0, 0.0, 0.8, 0.0, 0.0, 0.0]
+        except Exception as e:
+            print(f"[Warning] 获取当前躯干位姿异常: {e}，使用默认零位姿")
+            current_pose = [0.0, 0.0, 0.8, 0.0, 0.0, 0.0]
+
+        print(f"[TorsoAPI] 当前位姿: {current_pose}")
+        print(f"[TorsoAPI] 目标位姿: {target_pose}")
+
+        # 生成从当前位姿到目标位姿的轨迹
+        traj = [current_pose, target_pose]
+
+        # 定义下发函数
+        def publish_torso_pose(pose):
+            x, y, z, roll, pitch, yaw = pose
+            self.robot_sdk.control.control_torso_pose(x, y, z, roll, pitch, yaw)
+        
+        # 使用通用函数进行重采样和下发
+        resample_and_execute_traj(traj, total_time, publish_torso_pose)
+
+    def move_torso_pose(self,
+                        desir_torso_pose: Pose,
+                        asynchronous: bool = False,
+                        total_time: float = 5.0):
+        """
+        执行躯干位姿控制，以 100Hz 频率持续下发目标位姿
+        
+        参数：
+            desir_torso_pose: 目标躯干位姿
+            asynchronous: 是否异步执行
+            total_time: 执行时间（秒）
+        """
+        if asynchronous:
+            return self._pool.submit(
+                self._move_torso_pose,
+                desir_torso_pose,
+                total_time,
+            )
+
+        self._move_torso_pose(desir_torso_pose, total_time)
+        return None
+
     def _check_success_walk(self,
                             target_in_odom,
                             yaw_threshold,
@@ -236,6 +601,104 @@ class TorsoAPI:
             return True
 
         return False
+
+    def _walk_to_pose_by_pose_world(self,
+                                    pos_threshold=0.05,
+                                    timeout=60):
+        """
+        躯干行走到某个点，通过世界位置控制
+        """
+        # 获取目标位姿
+        target = None
+        with self._target_lock:
+            if self._current_target is not None:
+                target = copy.deepcopy(self._current_target)
+                self._current_target = None  # 取走目标
+        
+        if target is None:
+            print("_walk_to_pose_by_pose_world: 没有目标位姿")
+            return False
+            
+        # 发送位置命令（只发送一次）
+        target_x = target.pos[0]
+        target_y = target.pos[1]
+        target_z = 0.0
+        target_yaw = target.get_euler(degrees=False)[2]
+        
+        self.robot_sdk.control.control_command_pose_world(target_x, target_y, target_z, target_yaw)
+        print(f"📤 cmd_pos_world 发送一次: 目标=[{target_x:.3f}, {target_y:.3f}, {target.get_euler(degrees=True)[2]:.1f}°]")
+        
+        # 等待到达目标（使用轮询方式）
+        tic = time.time()
+        while time.time() - tic < timeout:
+            success = self._check_success_walk(
+                target, 
+                yaw_threshold=np.deg2rad(5), 
+                pos_threshold=pos_threshold
+            )
+            if success:
+                return True
+            time.sleep(0.1)
+        
+        print(f"❌ cmd_pos_world 超时 {timeout}s，未到达目标")
+        return False
+
+    def _walk_to_pose_by_pose(self,
+                              pos_threshold=0.05,
+                              timeout=60):
+        """
+        躯干行走到某个点，通过相对位置控制
+        """
+        # 获取目标位姿
+        target = None
+        with self._target_lock:
+            if self._current_target is not None:
+                target = copy.deepcopy(self._current_target)
+                self._current_target = None  # 取走目标
+        
+        if target is None:
+            print("_walk_to_pose_by_pose: 没有目标位姿")
+            return False
+            
+        robot_pose_when_start = Pose(
+            pos=self.robot_sdk.state.robot_position(),
+            quat=self.robot_sdk.state.robot_orientation(),
+            frame=Frame.ODOM
+        )
+        
+        # 如果目标是base_link坐标系，需要转换到世界坐标系
+        if target.frame == Frame.BASE:
+            transform_base_to_world = Transform3D(
+                trans_pose=robot_pose_when_start,
+                source_frame=Frame.BASE,
+                target_frame=Frame.ODOM
+            )
+            target_in_world = transform_base_to_world.apply_to_pose(target)
+        else:
+            target_in_world = target
+        
+        # 发送相对位置命令
+        self.robot_sdk.control.control_command_pose(
+            target.pos[0], target.pos[1], target.pos[2],
+            target.get_euler(degrees=False)[2]
+        )
+        print(f"📤 cmd_pos 发送相对位移: Δx={target.pos[0]:.3f}, Δy={target.pos[1]:.3f}, yaw={target.get_euler(degrees=True)[2]:.1f}°")
+        
+        # 等待到达目标
+        tic = time.time()
+        while time.time() - tic < timeout:
+            success = self._check_success_walk(
+                target_in_world, 
+                yaw_threshold=np.deg2rad(5), 
+                pos_threshold=pos_threshold
+            )
+            if success:
+                return True
+            time.sleep(0.1)
+        
+        print(f"❌ cmd_pos 超时 {timeout}s，未到达目标")
+        return False
+
 
     def _walk_to_pose_by_vel(self,
                              # target: Pose,
@@ -428,13 +891,6 @@ class TorsoAPI:
                 break
         return None
 
-    def update_walk_goal(self, new_goal: Pose, backward_mode=False):
-        """线程安全：更新当前目标并唤醒控制线程；返回新的版本号。"""
-        print(f'接收到新的行走目标：{new_goal}')
-        with self._target_lock:
-            self._current_target = new_goal
-            self._backward_mode = backward_mode
-
     def walk_to_pose_by_vel(self,
                             # target: Pose,
                             pos_threshold=0.1,
@@ -453,6 +909,48 @@ class TorsoAPI:
 
         else:
             self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, backward_mode=backward_mode)
+
+            return None
+
+    def update_walk_goal(self, new_goal: Pose, backward_mode=False):
+        """线程安全：更新当前目标并唤醒控制线程；返回新的版本号。"""
+        print(f'接收到新的行走目标：{new_goal}')
+        with self._target_lock:
+            self._current_target = new_goal
+            self._backward_mode = backward_mode
+
+    def walk_to_pose(self,
+                            # target: Pose,
+                            pos_threshold=0.1,
+                            kp_pos=0.5,
+                            kp_yaw=0.5,
+                            max_vel_x=0.5,
+                            max_vel_yaw=0.4,
+                            timeout=60,
+                            walk_mode='cmd_vel',
+                            asynchronous: bool = True):
+        if asynchronous:
+            # 多线程，异步
+            if walk_mode == 'cmd_vel':
+                fut = self._pool.submit(self._walk_to_pose_by_vel, pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, timeout)
+            elif walk_mode == 'cmd_pos_world':
+                fut = self._pool.submit(self._walk_to_pose_by_pose_world, pos_threshold, timeout)
+            elif walk_mode == 'cmd_pos':
+                fut = self._pool.submit(self._walk_to_pose_by_pose, pos_threshold, timeout)
+            else:
+                raise ValueError(f"无效的行走模式: {walk_mode}")
+
+            return fut
+
+        else:
+            if walk_mode == 'cmd_vel':
+                self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, timeout)
+            elif walk_mode == 'cmd_pos_world':
+                self._walk_to_pose_by_pose_world(pos_threshold, timeout)
+            elif walk_mode == 'cmd_pos':
+                self._walk_to_pose_by_pose(pos_threshold, timeout)
+            else:
+                raise ValueError(f"无效的行走模式: {walk_mode}")
 
             return None
 

@@ -1,0 +1,5 @@
+int8 quickMode  # 0: 关闭快模式, 1: 启动下肢快模式, 2: 启动上肢快模式, 3:同时启动下肢和上肢快模式
+---
+bool success
+string message
+

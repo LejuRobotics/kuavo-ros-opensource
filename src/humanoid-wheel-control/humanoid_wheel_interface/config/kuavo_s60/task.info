@@ -5,8 +5,16 @@ model_information {
   
   ; motion joints in the URDF to consider fixed
   removeJoints {
-    [0] "zhead_1_joint"
-    [1] "zhead_2_joint"
+    [0] "LF_wheel_yaw_joint"
+    [1] "LF_wheel_pitch_joint"
+    [2] "RF_wheel_yaw_joint"
+    [3] "RF_wheel_pitch_joint"
+    [4] "LB_wheel_yaw_joint"
+    [5] "LB_wheel_pitch_joint"
+    [6] "RB_wheel_yaw_joint"
+    [7] "RB_wheel_pitch_joint"
+    [8] "zhead_1_joint"
+    [9] "zhead_2_joint"
   }
 
   ; base frame of the robot (from URDF)
@@ -108,13 +116,321 @@ rollout
 mpc
 {
   timeHorizon                     1.0   ; [s]
-  solutionTimeWindow              1.0   ; [s]
+  solutionTimeWindow              0.2   ; [s]
   coldStart                       false
   
   debugPrint                      false
 
   mpcDesiredFrequency             50   ; [Hz]
   mrtDesiredFrequency             500   ; [Hz]
+}
+
+
+; MPC 的 ReferenceManager 的运动学限制, 平移单位: m, 旋转单位: rad
+referencekinematicLimit  
+{
+  ; 每一维必须保证大于0
+  wheel_move
+  {
+    max_vel
+    {
+      (0,0)  1.2  ; base x
+      (1,0)  1.2  ; base y
+      (2,0)  1.2  ; base yaw 
+    }
+
+    max_acc
+    {
+      (0,0)  0.6  ; base x
+      (1,0)  0.6  ; base y
+      (2,0)  0.6  ; base yaw 
+    }
+
+    max_jerk
+    {
+      (0,0)  9.0  ; base x
+      (1,0)  9.0  ; base y
+      (2,0)  9.0  ; base yaw 
+    }
+  }
+
+  torsoPose_move    ; 轮臂躯干没有 y, roll 自由度
+  {
+    max_vel
+    {
+      (0,0)  0.9    ; x
+      (1,0)  0.9    ; z
+      (2,0)  2.08   ; yaw
+      (3,0)  2.08   ; pitch
+    }
+
+    max_acc
+    {
+      (0,0)  9.0   ; x
+      (1,0)  9.0   ; z
+      (2,0)  10.4   ; yaw
+      (3,0)  10.4   ; pitch
+    }
+
+    max_jerk
+    {
+      (0,0)  15.6   ; x
+      (1,0)  15.6   ; z
+      (2,0)  40.6   ; yaw
+      (3,0)  40.6   ; pitch
+    }
+  }
+
+  dualArm_move
+  {
+    max_vel
+    {
+      (0,0)  1.0   ; x
+      (1,0)  1.0   ; y
+      (2,0)  1.0   ; z
+      (3,0)  1.0   ; yaw
+      (4,0)  1.0   ; pitch
+      (5,0)  1.0   ; roll
+    }
+
+    max_acc
+    {
+      (0,0)  1.0   ; x
+      (1,0)  1.0   ; y
+      (2,0)  1.0   ; z
+      (3,0)  1.0   ; yaw
+      (4,0)  1.0   ; pitch
+      (5,0)  1.0   ; roll
+    }
+
+    max_jerk
+    {
+      (0,0)  1.0   ; x
+      (1,0)  1.0   ; y
+      (2,0)  1.0   ; z
+      (3,0)  1.0   ; yaw
+      (4,0)  1.0   ; pitch
+      (5,0)  1.0   ; roll
+    }
+  }
+
+  ; 下肢关节指令, 电机区别不大, 使用统一的限制
+  legJoint_move 
+  {
+    max_vel
+    {
+      (0,0) 3.14  ; 
+    }
+
+    max_acc
+    {
+      (0,0) 5.14  ; 
+    }
+
+    max_jerk
+    {
+      (0,0) 60.0  ;
+    }
+  }
+
+  ; 手臂关节指令, 使用统一的限制
+  armJoint_move 
+  {
+    max_vel
+    {
+      (0,0) 5.14  ; 
+    }
+
+    max_acc
+    {
+      (0,0) 25.0  ; 
+    }
+
+    max_jerk
+    {
+      (0,0) 100.0  ;
+    }
+  }
+}
+
+; MPC 输入的 observation 的运动学限制, 平移单位: m, 旋转单位: rad
+observationKinematicLimit
+{
+  activate  false
+
+  max_vel    
+  {
+    (0,0)   1.2    ; base_x
+    (1,0)   1.2    ; base_y
+    (2,0)   1.2    ; base_z
+
+    (3,0)   3.14  ; knee_pitch
+    (4,0)   3.14  ; leg_pitch
+    (5,0)   3.14  ; waist_pitch
+    (6,0)   3.14  ; waist_yaw_link
+
+    (7,0)   3.14  ; z_arm_l1 
+    (8,0)   3.14  ; z_arm_l2 
+    (9,0)   3.14  ; z_arm_l3 
+    (10,0)  3.14  ; z_arm_l4 
+    (11,0)  3.14  ; z_arm_l5 
+    (12,0)  3.14  ; z_arm_l6 
+    (13,0)  3.14  ; z_arm_l7 
+
+    (14,0)  3.14  ; z_arm_r1 
+    (15,0)  3.14  ; z_arm_r2 
+    (16,0)  3.14  ; z_arm_r3 
+    (17,0)  3.14  ; z_arm_r4 
+    (18,0)  3.14  ; z_arm_r5 
+    (19,0)  3.14  ; z_arm_r6 
+    (20,0)  3.14  ; z_arm_r7 
+  }
+
+  max_acc
+  {
+    (0,0)   99.0    ; base_x
+    (1,0)   99.0    ; base_y
+    (2,0)   99.0    ; base_z
+
+    (3,0)   99.0  ; knee_pitch
+    (4,0)   99.0  ; leg_pitch
+    (5,0)   99.0  ; waist_pitch
+    (6,0)   99.0  ; waist_yaw_link
+
+    (7,0)   99.0  ; z_arm_l1 
+    (8,0)   99.0  ; z_arm_l2 
+    (9,0)   99.0  ; z_arm_l3 
+    (10,0)  99.0  ; z_arm_l4 
+    (11,0)  99.0  ; z_arm_l5 
+    (12,0)  99.0  ; z_arm_l6 
+    (13,0)  99.0  ; z_arm_l7 
+
+    (14,0)  99.0  ; z_arm_r1 
+    (15,0)  99.0  ; z_arm_r2 
+    (16,0)  99.0  ; z_arm_r3 
+    (17,0)  99.0  ; z_arm_r4 
+    (18,0)  99.0  ; z_arm_r5 
+    (19,0)  99.0  ; z_arm_r6 
+    (20,0)  99.0  ; z_arm_r7 
+  }
+
+  max_jerk
+  {
+    (0,0)   99.0    ; base_x
+    (1,0)   99.0    ; base_y
+    (2,0)   99.0    ; base_z
+
+    (3,0)   99.0  ; knee_pitch
+    (4,0)   99.0  ; leg_pitch
+    (5,0)   99.0  ; waist_pitch
+    (6,0)   99.0  ; waist_yaw_link
+
+    (7,0)   99.0  ; z_arm_l1 
+    (8,0)   99.0  ; z_arm_l2 
+    (9,0)   99.0  ; z_arm_l3 
+    (10,0)  99.0  ; z_arm_l4 
+    (11,0)  99.0  ; z_arm_l5 
+    (12,0)  99.0  ; z_arm_l6 
+    (13,0)  99.0  ; z_arm_l7 
+
+    (14,0)  99.0  ; z_arm_r1 
+    (15,0)  99.0  ; z_arm_r2 
+    (16,0)  99.0  ; z_arm_r3 
+    (17,0)  99.0  ; z_arm_r4 
+    (18,0)  99.0  ; z_arm_r5 
+    (19,0)  99.0  ; z_arm_r6 
+    (20,0)  99.0  ; z_arm_r7 
+  }
+}
+
+; MPC 输出的 mrt轨迹 的运动学限制, 平移单位: m, 旋转单位: rad
+optimizedTrajKinematicLimit
+{
+  activate  false
+
+  max_vel    
+  {
+    (0,0)   1.2    ; base_x
+    (1,0)   1.2    ; base_y
+    (2,0)   1.2    ; base_z
+
+    (3,0)   3.14  ; knee_pitch
+    (4,0)   3.14  ; leg_pitch
+    (5,0)   3.14  ; waist_pitch
+    (6,0)   3.14  ; waist_yaw_link
+
+    (7,0)   3.14  ; z_arm_l1 
+    (8,0)   3.14  ; z_arm_l2 
+    (9,0)   3.14  ; z_arm_l3 
+    (10,0)  3.14  ; z_arm_l4 
+    (11,0)  3.14  ; z_arm_l5 
+    (12,0)  3.14  ; z_arm_l6 
+    (13,0)  3.14  ; z_arm_l7 
+
+    (14,0)  3.14  ; z_arm_r1 
+    (15,0)  3.14  ; z_arm_r2 
+    (16,0)  3.14  ; z_arm_r3 
+    (17,0)  3.14  ; z_arm_r4 
+    (18,0)  3.14  ; z_arm_r5 
+    (19,0)  3.14  ; z_arm_r6 
+    (20,0)  3.14  ; z_arm_r7 
+  }
+
+  max_acc
+  {
+    (0,0)   99.0    ; base_x
+    (1,0)   99.0    ; base_y
+    (2,0)   99.0    ; base_z
+
+    (3,0)   99.0  ; knee_pitch
+    (4,0)   99.0  ; leg_pitch
+    (5,0)   99.0  ; waist_pitch
+    (6,0)   99.0  ; waist_yaw_link
+
+    (7,0)   99.0  ; z_arm_l1 
+    (8,0)   99.0  ; z_arm_l2 
+    (9,0)   99.0  ; z_arm_l3 
+    (10,0)  99.0  ; z_arm_l4 
+    (11,0)  99.0  ; z_arm_l5 
+    (12,0)  99.0  ; z_arm_l6 
+    (13,0)  99.0  ; z_arm_l7 
+
+    (14,0)  99.0  ; z_arm_r1 
+    (15,0)  99.0  ; z_arm_r2 
+    (16,0)  99.0  ; z_arm_r3 
+    (17,0)  99.0  ; z_arm_r4 
+    (18,0)  99.0  ; z_arm_r5 
+    (19,0)  99.0  ; z_arm_r6 
+    (20,0)  99.0  ; z_arm_r7 
+  }
+
+  max_jerk
+  {
+    (0,0)   99.0    ; base_x
+    (1,0)   99.0    ; base_y
+    (2,0)   99.0    ; base_z
+
+    (3,0)   99.0  ; knee_pitch
+    (4,0)   99.0  ; leg_pitch
+    (5,0)   99.0  ; waist_pitch
+    (6,0)   99.0  ; waist_yaw_link
+
+    (7,0)   99.0  ; z_arm_l1 
+    (8,0)   99.0  ; z_arm_l2 
+    (9,0)   99.0  ; z_arm_l3 
+    (10,0)  99.0  ; z_arm_l4 
+    (11,0)  99.0  ; z_arm_l5 
+    (12,0)  99.0  ; z_arm_l6 
+    (13,0)  99.0  ; z_arm_l7 
+
+    (14,0)  99.0  ; z_arm_r1 
+    (15,0)  99.0  ; z_arm_r2 
+    (16,0)  99.0  ; z_arm_r3 
+    (17,0)  99.0  ; z_arm_r4 
+    (18,0)  99.0  ; z_arm_r5 
+    (19,0)  99.0  ; z_arm_r6 
+    (20,0)  99.0  ; z_arm_r7 
+  }
 }
 
 baseCost
@@ -148,26 +464,26 @@ baseCost
     {
       scaling 1e0
 
-      (0,0)    1.0  ; knee_pitch
-      (1,1)    1.0  ; leg_pitch
-      (2,2)    1.0  ; waist_pitch
-      (3,3)    1.0  ; waist_yaw_link
+      (0,0)    20.0  ; knee_pitch
+      (1,1)    20.0  ; leg_pitch
+      (2,2)    20.0  ; waist_pitch
+      (3,3)    20.0  ; waist_yaw_link
 
-      (4,4)    100.0  ; z_arm_l1 
-      (5,5)    100.0  ; z_arm_l2 
-      (6,6)    100.0  ; z_arm_l3 
-      (7,7)    100.0  ; z_arm_l4 
-      (8,8)    100.0  ; z_arm_l5 
-      (9,9)    100.0  ; z_arm_l6 
-      (10,10)  100.0  ; z_arm_l7 
+      (4,4)    20.0  ; z_arm_l1 
+      (5,5)    20.0  ; z_arm_l2 
+      (6,6)    20.0  ; z_arm_l3 
+      (7,7)    20.0  ; z_arm_l4 
+      (8,8)    20.0  ; z_arm_l5 
+      (9,9)    20.0  ; z_arm_l6 
+      (10,10)  20.0  ; z_arm_l7 
 
-      (11,11)  100.0  ; z_arm_r1 
-      (12,12)  100.0  ; z_arm_r2 
-      (13,13)  100.0  ; z_arm_r3 
-      (14,14)  100.0  ; z_arm_r4 
-      (15,15)  100.0  ; z_arm_r5 
-      (16,16)  100.0  ; z_arm_r6 
-      (17,17)  100.0  ; z_arm_r7 
+      (11,11)  20.0  ; z_arm_r1 
+      (12,12)  20.0  ; z_arm_r2 
+      (13,13)  20.0  ; z_arm_r3 
+      (14,14)  20.0  ; z_arm_r4 
+      (15,15)  20.0  ; z_arm_r5 
+      (16,16)  20.0  ; z_arm_r6 
+      (17,17)  20.0  ; z_arm_r7 
     }
   }
   ; control weight matrix
@@ -187,9 +503,9 @@ baseCost
       {
         scaling 1e-1
 
-        (0,0)  100.0  ; forward x velocity
-        (1,1)  100.0  ; forward y velocity
-        (2,2)  100.0  ; turning velocity
+        (0,0)  1000.0  ; forward x velocity
+        (1,1)  1000.0  ; forward y velocity
+        (2,2)  1000.0  ; turning velocity
       }
     }
 
@@ -198,10 +514,10 @@ baseCost
     {
       scaling 1e-2
 
-      (0,0)    30.0  ; SH_ROT velocity
-      (1,1)    30.0  ; SH_FLE velocity
-      (2,2)    30.0  ; EL_FLE velocity
-      (3,3)    30.0  ; EL_ROT velocity
+      (0,0)    100.0  ; SH_ROT velocity
+      (1,1)    100.0  ; SH_FLE velocity
+      (2,2)    100.0  ; EL_FLE velocity
+      (3,3)    100.0  ; EL_ROT velocity
 
       (4,4)    100.0  ; WR_FLE velocity
       (5,5)    100.0 ; WR_ROT velocity
@@ -228,12 +544,12 @@ torsoTracking
   {
     scaling 1e0
 
-    (0,0)    99.0   ; torso X
-    (1,0)    99.0   ; torso Y
-    (2,0)    30.0   ; torso Z
-    (3,0)    3.0   ; torso roll
-    (4,0)    99.0   ; torso pitch
-    (5,0)    0.0   ; torso yaw
+    (0,0)    50.0   ; torso X
+    (1,0)    20.0   ; torso Y
+    (2,0)    50.0   ; torso Z
+    (3,0)    10.0   ; torso roll
+    (4,0)    50.0   ; torso pitch
+    (5,0)    50.0   ; torso yaw
   }
 }
 
@@ -245,6 +561,19 @@ endEffector
 }
 
 finalEndEffector
+{
+  muPosition  3.0
+  muOrientation  4.0
+}
+
+endEffectorLocal
+{
+  ; end effector quadratic penalty scaling
+  muPosition  3.0
+  muOrientation  4.0
+}
+
+finalEndEffectorLocal
 {
   muPosition  3.0
   muOrientation  4.0
@@ -499,10 +828,10 @@ lowJointAccelTask
   }
   kd
   {
-    (0,0)   10.2     ; knee_pitch
-    (1,0)   10.2     ; leg_pitch
-    (2,0)   10.2     ; waist_pitch
-    (3,0)   10.2     ; waist_yaw_link
+    (0,0)   40.2     ; knee_pitch
+    (1,0)   40.2     ; leg_pitch
+    (2,0)   40.2     ; waist_pitch
+    (3,0)   40.2     ; waist_yaw_link
   }
 }
 

@@ -19,6 +19,8 @@
 #include "kuavo_msgs/robotHeadMotionData.h"
 #include "kuavo_msgs/changeArmCtrlMode.h"
 #include "kuavo_msgs/lbBaseLinkPoseCmdSrv.h"
+#include "kuavo_msgs/changeTorsoCtrlMode.h"
+#include "kuavo_msgs/changeLbQuickModeSrv.h"
 
 // Third Party
 #include <ocs2_core/misc/LoadData.h>
@@ -30,11 +32,12 @@
 #include "humanoid_interface/common/TopicLogger.h"
 #include "kuavo_common/common/sensor_data.h"
 #include "humanoid_wheel_interface/HumanoidWheelInterface.h"
-#include "humanoid_wheel_interface/common/VelocityLimiter.h"
+#include "humanoid_wheel_interface/motion_planner/VelocityLimiter.h"
 #include "humanoid_wheel_interface_ros/MobileManipulatorDummyVisualization.h"
 #include "humanoid_wheel_wbc/WeightedWbc.h"
 #include "humanoid_controllers/WaistKinematics.h"
 #include "humanoid_controllers/ControlDataManager.h"
+#include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 
 namespace humanoidController_wheel_wbc
 {
@@ -90,6 +93,8 @@ namespace humanoidController_wheel_wbc
     bool enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool changeArmCtrlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool handleWaistIkService(kuavo_msgs::lbBaseLinkPoseCmdSrv::Request &req, kuavo_msgs::lbBaseLinkPoseCmdSrv::Response &res);
+    bool enableLbArmQuickModeCallback(kuavo_msgs::changeLbQuickModeSrv::Request &req, 
+                                      kuavo_msgs::changeLbQuickModeSrv::Response &res);
 
     // ========== 工具函数 ==========
     /**
@@ -131,6 +136,7 @@ namespace humanoidController_wheel_wbc
     bool is_real_{false};
     bool isPreUpdateComplete{false};
     double dt_ = 0.001;
+    int robotVersion_ = 60;
 
     // ========== ROS通信相关 ==========
     // 控制数据管理器
@@ -140,11 +146,13 @@ namespace humanoidController_wheel_wbc
     ros::Publisher cmdVelPub_;
     ros::Publisher jointCmdPub_;
     ros::Publisher waistYawKinematicPublisher_;  // waist_yaw_link运动学计算位置发布器
+    ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
     
     // 日志
     humanoid::TopicLogger *ros_logger_{nullptr};
 
     // ========== 机器人参数 ==========
+    size_t baseDim_{0};
     size_t armNum_{0};
     size_t lowJointNum_{0};
     size_t headNum_{2};
@@ -171,6 +179,7 @@ namespace humanoidController_wheel_wbc
     // ========== VR控制相关 ==========
     bool use_vr_control_{false};  // 是否启用VR控制
     bool prev_whole_torso_ctrl_{false};  // 上一次的全身控制模式状态
+    ros::ServiceClient mpc_control_client_;  // MPC模式切换服务客户端
 
     // ========== 平滑过渡相关 ==========
     bool is_transitioning_{false};  // 是否正在过渡
@@ -188,13 +197,24 @@ namespace humanoidController_wheel_wbc
 
     // ========== 手臂轨迹控制 ==========
     bool use_arm_trajectory_control_{false};  // 是否使用轨迹控制
-    int arm_trajectory_mode_{0};  // 轨迹控制模式
+    int8_t quickMode_{0};  // 全身快速模式类型: 0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
+    int arm_trajectory_mode_{-1};  // 轨迹控制模式
     int prev_arm_trajectory_mode_{0};  // 上一次的轨迹控制模式
     bool isArmControlModeChanged_{false};  // 是否需要处理模式切换
     bool arm_mode_switch_hold_phase_{true};  // 是否处于200ms保持阶段
     double arm_move_spd_{15.0};  // 手臂移动速度
     double arm_mode_switch_start_time_{0.0};  // 模式切换开始时间
     vector_t init_arm_target_qpos_;
+
+    // ========== 运动学限制滤波相关 ==========
+    std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  obsStateLimitFilterPtr_;    // observation.state 限制滤波
+    std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  obsInputLimitFilterPtr_;    // observation.input 限制滤波
+    std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  mrtStateLimitFilterPtr_;    // mrtState 限制滤波
+    std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  mrtInputLimitFilterPtr_;    // mrtInput 限制滤波
+
+    vector_t observationMaxVel_, observationMaxAcc_, observationMaxJerk_;         //  限制参数
+    vector_t optimizedTrajMaxVel_, optimizedTrajMaxAcc_, optimizedTrajMaxJerk_;
+
   };
 
 } // namespace humanoidController_wheel_wbc

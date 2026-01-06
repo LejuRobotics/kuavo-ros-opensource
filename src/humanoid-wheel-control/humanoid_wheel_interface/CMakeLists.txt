@@ -14,6 +14,7 @@ set(CATKIN_PACKAGE_DEPENDENCIES
   ocs2_self_collision
   humanoid_interface
   kuavo_msgs
+  ruckig_catkin
 )
 
 find_package(catkin REQUIRED COMPONENTS
@@ -78,6 +79,8 @@ add_library(${PROJECT_NAME}
   src/MobileManipulatorPreComputation.cpp
   src/MobileManipulatorPinocchioMapping.cpp
   src/constraint/EndEffectorConstraint.cpp
+  src/constraint/EndEffectorLocalConstraint.cpp
+  src/constraint/EndEffectorTorsoConstraint.cpp
   src/constraint/TorsoTrackingConstraint.cpp
   src/dynamics/WheelBasedMobileManipulatorDynamics.cpp
   src/dynamics/WheelWorldBasedMobileManipulatorDynamics.cpp
@@ -86,8 +89,14 @@ add_library(${PROJECT_NAME}
   src/dynamics/FullyActuatedFloatingArmManipulatorDynamics.cpp
   src/HumanoidWheelInterface.cpp
   src/reference_manager/MobileManipulatorReferenceManager.cpp
-  src/common/VelocityLimiter.cpp
+  src/motion_planner/VelocityLimiter.cpp
+  src/motion_planner/cmdPosePlannerWithRuckig.cpp
+  src/motion_planner/cmdVelPlannerWithRuckig.cpp
+  src/filters/KinemicLimitFilter.cpp
 )
+
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
+
 add_dependencies(${PROJECT_NAME}
   ${catkin_EXPORTED_TARGETS}
 )

@@ -41,7 +41,7 @@ def main():
     # Defaults
     linear_axis_index_x = 1  # Left stick vertical
     linear_axis_index_y = 2  # Left stick vertical
-    angular_axis_index = 0  # Left stick horizontal
+    angular_axis_index = 3  # Left stick horizontal
     linear_scale_x = 0.8  # m/s
     linear_scale_y = 0.8  # m/s
     angular_scale = 1.2  # rad/s

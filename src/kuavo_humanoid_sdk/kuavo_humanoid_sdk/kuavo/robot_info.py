@@ -37,11 +37,13 @@ class KuavoRobotInfo(RobotInfoBase):
         
         # 根据版本计算手臂关节索引
         if self._robot_version_major == 6:
-            # 版本6（轮臂模型）：轮子关节（4个） + 手臂关节
-            wheel_joint_dof = 4  # 轮臂模型有4个轮子相关关节
+            print("\033[35m当前为轮臂模型\033[0m")
+            # 版本6（轮臂模型）：折叠臂关节（4个） + 手臂关节
+            wheel_joint_dof = 4  # 轮臂模型折叠臂关节
             arm_start_idx = wheel_joint_dof
             self._arm_joint_names = self._joint_names[arm_start_idx:arm_start_idx + self._arm_joint_dof]
         else:
+            print("\033[35m当前为双足模型\033[0m")
             arm_start_idx = self._leg_joint_dof + self._waist_joint_dof
             self._arm_joint_names = self._joint_names[arm_start_idx:arm_start_idx + self._arm_joint_dof]
         self._init_stand_height = kuavo_ros_param['init_stand_height']

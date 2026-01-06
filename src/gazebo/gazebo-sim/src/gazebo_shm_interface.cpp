@@ -136,7 +136,7 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
     nh_ = new ros::NodeHandle();
     
     stop_sub_ = nh_->subscribe("/stop_robot", 1, &GazeboShmInterface::stopCallback, this);
-    cmd_vel_sub_ = nh_->subscribe("/filter_cmd_vel", 10, &GazeboShmInterface::cmdVelCallback, this);
+    cmd_vel_sub_ = nh_->subscribe("/move_base/base_cmd_vel", 10, &GazeboShmInterface::cmdVelCallback, this);
     sim_start_srv_ = nh_->advertiseService("sim_start", &GazeboShmInterface::simStartCallback, this);
     
     // 初始化里程计发布器
@@ -191,6 +191,10 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
             dt = 1.0 / freq;
         }
     }
+    if(nh_->hasParam("/robot_version")) {
+        nh_->getParam("/robot_version", robotVersion_);
+    }
+    std::cout << "[GazeboShmInterface] robotVersion_: " << robotVersion_ << std::endl;
     
     // 设置Gazebo的更新频率
     auto physics = model_->GetWorld()->Physics();
@@ -750,9 +754,16 @@ void GazeboShmInterface::updateWheelControl()
     std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
     
     // 底盘参数（与MuJoCo保持一致）
-    const double wheel_radius = 0.075;     // 轮子半径
-    const double robot_x_dis = 0.3725;     // 机器人中心到轮子的x距离
-    const double robot_y_dis = 0.17856;    // 机器人中心到轮子的y距离
+    double wheel_radius = 0.075;     // 轮子半径
+    double robot_x_dis = 0.253;     // 机器人中心到轮子的x距离
+    double robot_y_dis = 0.1785;    // 机器人中心到轮子的y距离
+
+    if(robotVersion_ == 61)
+    {
+        wheel_radius = 0.13035;
+        robot_x_dis = 0.232489;
+        robot_y_dis = 0.232489;
+    }
     
     // 四个轮子的位置（相对于底盘中心）
     std::vector<ignition::math::Vector2d> wheel_positions = {

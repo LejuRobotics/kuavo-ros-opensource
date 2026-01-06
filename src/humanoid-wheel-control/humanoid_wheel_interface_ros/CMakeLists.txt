@@ -22,6 +22,8 @@ set(CATKIN_PACKAGE_DEPENDENCIES
   ocs2_self_collision
   ocs2_self_collision_visualization
   humanoid_wheel_interface
+  kuavo_common
+  kuavo_msgs
 )
 
 find_package(catkin REQUIRED COMPONENTS
@@ -142,6 +144,18 @@ target_link_libraries(mobile_manipulator_target
 )
 target_compile_options(mobile_manipulator_target PUBLIC ${FLAGS})
 
+# Mobile manipulator joy command node
+add_executable(mobile_manipulator_joy_command_node
+  src/MobileManipulatorJoyCommandNode.cpp
+)
+add_dependencies(mobile_manipulator_joy_command_node
+  ${catkin_EXPORTED_TARGETS}
+)
+target_link_libraries(mobile_manipulator_joy_command_node
+  ${catkin_LIBRARIES}
+)
+target_compile_options(mobile_manipulator_joy_command_node PUBLIC ${FLAGS})
+
 ####################
 ## Clang tooling ###
 ####################
@@ -170,8 +184,14 @@ install(
     mobile_manipulator_sqp_mpc_node
     mobile_manipulator_dummy_mrt_node 
     mobile_manipulator_target
+    mobile_manipulator_joy_command_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 install(DIRECTORY launch rviz
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
+
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
+target_compile_features(mobile_manipulator_mpc_node PUBLIC cxx_std_17)
+target_compile_features(mobile_manipulator_sqp_mpc_node PUBLIC cxx_std_17)
+target_compile_features(mobile_manipulator_joy_command_node PUBLIC cxx_std_17)

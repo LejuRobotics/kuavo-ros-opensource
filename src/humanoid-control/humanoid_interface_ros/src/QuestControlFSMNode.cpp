@@ -28,6 +28,7 @@
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
+#include <kuavo_msgs/changeTorsoCtrlMode.h>
 #include <kuavo_msgs/robotWaistControl.h>
 #include <kuavo_msgs/headBodyPose.h>
 #include <kuavo_msgs/footPose.h>
@@ -166,7 +167,7 @@ namespace ocs2
             {
                 gait_map_.insert({gaitName, humanoid::loadModeSequenceTemplate(gaitCommandFile, gaitName, verbose)});
             }
-
+            
             mode_sequence_template_publisher_ = nodeHandle_.advertise<ocs2_msgs::mode_schedule>(robotName + "_mpc_mode_schedule", 10, true);
             mode_scale_publisher_ = nodeHandle_.advertise<std_msgs::Float32>(robotName + "_mpc_mode_scale", 10, true);
             gait_name_publisher_ = nodeHandle_.advertise<std_msgs::String>("/humanoid_mpc_gait_name_request", 10, true);
@@ -177,7 +178,9 @@ namespace ocs2
             step_num_stop_pub_ = nodeHandle_.advertise<std_msgs::Int32>(robotName + "_mpc_stop_step_num", 10, true);
             vel_control_pub_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
 
-            change_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_change_arm_ctrl_mode");
+            std::string change_arm_mode_service_name = robot_type_ == 1 ? "/wheel_arm_change_arm_ctrl_mode" : "/humanoid_change_arm_ctrl_mode";
+            change_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(change_arm_mode_service_name);
+           
             change_arm_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
             
             get_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_get_arm_ctrl_mode");
@@ -193,6 +196,9 @@ namespace ocs2
             
             // GaitReceiver自动步态模式服务客户端
             auto_gait_mode_service_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>(robotName + "_auto_gait");
+
+            // MPC控制模式切换服务客户端
+            control_mode_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeTorsoCtrlMode>("/mobile_manipulator_mpc_control");
             
             // 腰部控制相关的订阅者和发布者
             head_body_pose_sub_ = nodeHandle_.subscribe("/kuavo_head_body_orientation_data", 1, &QuestControlFSM::headBodyPoseCallback, this);
@@ -370,6 +376,38 @@ namespace ocs2
             else
             {
                 ROS_ERROR("Failed to call VRWaistControlSrv");
+            }
+        }
+
+        void callWheelMpcControlMode(int control_mode)
+        {
+            kuavo_msgs::changeTorsoCtrlMode srv;
+            srv.request.control_mode = control_mode;
+
+            // 等待服务可用
+            if (!control_mode_client_.waitForExistence(ros::Duration(2.0)))
+            {
+                ROS_WARN("MPC control mode service not available, skipping call");
+                return;
+            }
+
+            // 调用服务
+            if (control_mode_client_.call(srv))
+            {
+                if (srv.response.result)
+                {
+                    ROS_INFO("WheelMpcControlMode call successful: control_mode=%d, mode=%d, response: %s", 
+                             control_mode, srv.response.mode, srv.response.message.c_str());
+                }
+                else
+                {
+                    ROS_WARN("WheelMpcControlMode returned failure: control_mode=%d, response: %s", 
+                             control_mode, srv.response.message.c_str());
+                }
+            }
+            else
+            {
+                ROS_ERROR("Failed to call WheelMpcControlMode with control_mode=%d", control_mode);
             }
         }
 
@@ -673,6 +711,11 @@ namespace ocs2
                 cmd_torso_pose.header.frame_id = "torso_link";
                 cmd_torso_pose_pub_.publish(cmd_torso_pose);
 
+                if(1 == robot_type_) // 轮臂机器人
+                {
+                    return; // 轮臂机器人不进行VR腰部控制
+                }
+
                 // 检查是否正在进行XY按键摇杆控制（高优先级），如果是则跳过VR腰部控制
                 bool joystick_torso_control_active = (joystick_data_.left_second_button_touched && joystick_data_.left_first_button_touched);
                 if(joystick_torso_control_active)
@@ -846,6 +889,11 @@ namespace ocs2
                             // 调用VR腰部控制服务，启用VR腰部控制动态Q矩阵
                             callVRWaistControlSrv(true);
                         }
+
+                        if(1 == robot_type_) // 轮臂机器人
+                        {
+                            callWheelMpcControlMode(1);  // ArmOnly mode
+                        }
                     }
                     else
                     {
@@ -874,6 +922,11 @@ namespace ocs2
                             callAutoGaitModeSrv(true);
                             // 调用VR腰部控制服务，禁用VR腰部控制动态Q矩阵
                             callVRWaistControlSrv(false);
+                        }
+
+                        if(1 == robot_type_) // 轮臂机器人
+                        {
+                            callWheelMpcControlMode(3);  // BaseArm mode
                         }
                         std::cout << "腰部控制模式已关闭，发送最后一帧 - 相对高度: " << last_relative_height_ 
                                   << ", body_pitch: " << last_body_pitch_ << std::endl;
@@ -1643,6 +1696,7 @@ namespace ocs2
         ros::ServiceClient enable_wbc_arm_trajectory_control_client_;
         ros::ServiceClient vr_waist_control_service_client_;  // VR腰部控制动态Q矩阵服务客户端
         ros::ServiceClient auto_gait_mode_service_client_;    // GaitReceiver自动步态模式服务客户端
+        ros::ServiceClient control_mode_client_;              // MPC控制模式切换服务客户端
         ros::ServiceClient switch_to_next_controller_client_; // 切换控制器服务客户端
         ros::ServiceServer arm_collision_control_service_;
 

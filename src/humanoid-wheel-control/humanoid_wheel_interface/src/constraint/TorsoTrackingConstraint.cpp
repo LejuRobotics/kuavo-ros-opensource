@@ -42,17 +42,14 @@ namespace mobile_manipulator {
 /******************************************************************************************************/
 /******************************************************************************************************/
 TorsoTrackingConstraint::TorsoTrackingConstraint(const EndEffectorKinematics<scalar_t>& endEffectorKinematicsTorso,
-                                                 const EndEffectorKinematics<scalar_t>& endEffectorKinematicsBase,
                                                  const MobileManipulatorReferenceManager& referenceManager,
                                                  const ManipulatorModelInfo& info)
     : StateConstraint(ConstraintOrder::Linear),
       endEffectorKinematicsTorsoPtr_(endEffectorKinematicsTorso.clone()),
-      endEffectorKinematicsBasePtr_(endEffectorKinematicsBase.clone()),
       referenceManager_(referenceManager),
       info_(info) 
 {
   pinocchioEEKinTorsoPtr_ = dynamic_cast<PinocchioEndEffectorKinematics*>(endEffectorKinematicsTorsoPtr_.get());
-  pinocchioEEKinBasePtr_ = dynamic_cast<PinocchioEndEffectorKinematics*>(endEffectorKinematicsBasePtr_.get());
 }
 
 /******************************************************************************************************/
@@ -62,24 +59,27 @@ size_t TorsoTrackingConstraint::getNumConstraints(scalar_t time) const {
   return 6;
 }
 
+bool TorsoTrackingConstraint::isActive(scalar_t time) const 
+{
+  return referenceManager_.getEnableTorsoPoseTargetTrajectories();
+}
+
 /******************************************************************************************************/
 /******************************************************************************************************/
 /******************************************************************************************************/
 vector_t TorsoTrackingConstraint::getValue(scalar_t time, const vector_t& state, const PreComputation& preComputation) const {
    // PinocchioEndEffectorKinematics requires pre-computation with shared PinocchioInterface.
-  if (pinocchioEEKinTorsoPtr_ != nullptr || pinocchioEEKinBasePtr_ != nullptr) {
+  if (pinocchioEEKinTorsoPtr_ != nullptr) {
     const auto& preCompMM = cast<MobileManipulatorPreComputation>(preComputation);
     pinocchioEEKinTorsoPtr_->setPinocchioInterface(preCompMM.getPinocchioInterface());
-    pinocchioEEKinBasePtr_->setPinocchioInterface(preCompMM.getPinocchioInterface());
   }
   // const auto& currentPositionOrientation = preCompMM.getTorsoPose();
   const auto& desiredPositionOrientation = interpolateEndEffectorPose(time);
+  auto desiredPositionOrientationWorld = targetBaseToWorld(state, desiredPositionOrientation);
 
   vector_t constraint(6);
-  constraint.head<3>() = (endEffectorKinematicsTorsoPtr_->getPosition(state).front() - desiredPositionOrientation.first)
-                         - endEffectorKinematicsBasePtr_->getPosition(state).front();
-  constraint.tail<3>() = endEffectorKinematicsTorsoPtr_->getOrientationError(state, {desiredPositionOrientation.second}).front()
-                        - endEffectorKinematicsTorsoPtr_->getOrientationError(state, {quaternion_t(1, 0, 0, 0)}).front();
+  constraint.head<3>() = endEffectorKinematicsTorsoPtr_->getPosition(state).front() - desiredPositionOrientationWorld.first;
+  constraint.tail<3>() = endEffectorKinematicsTorsoPtr_->getOrientationError(state, {desiredPositionOrientationWorld.second}).front();
   return constraint;
 }
 
@@ -89,27 +89,24 @@ vector_t TorsoTrackingConstraint::getValue(scalar_t time, const vector_t& state,
 VectorFunctionLinearApproximation TorsoTrackingConstraint::getLinearApproximation(scalar_t time, const vector_t& state,
                                                                                 const PreComputation& preComputation) const {
   // PinocchioEndEffectorKinematics requires pre-computation with shared PinocchioInterface.
-  if (pinocchioEEKinTorsoPtr_ != nullptr || pinocchioEEKinBasePtr_ != nullptr) {
+  if (pinocchioEEKinTorsoPtr_ != nullptr) {
     const auto& preCompMM = cast<MobileManipulatorPreComputation>(preComputation);
     pinocchioEEKinTorsoPtr_->setPinocchioInterface(preCompMM.getPinocchioInterface());
-    pinocchioEEKinBasePtr_->setPinocchioInterface(preCompMM.getPinocchioInterface());
   }
 
   const auto& desiredPositionOrientation = interpolateEndEffectorPose(time);
+  auto desiredPositionOrientationWorld = targetBaseToWorld(state, desiredPositionOrientation);
 
   auto approximation = VectorFunctionLinearApproximation(6, state.rows(), 0);
 
   const auto eePositionTorso = endEffectorKinematicsTorsoPtr_->getPositionLinearApproximation(state).front();
-  const auto eePositionBase = endEffectorKinematicsBasePtr_->getPositionLinearApproximation(state).front();
-  approximation.f.head<3>() = (eePositionTorso.f - desiredPositionOrientation.first) - eePositionBase.f;  // 本体系的torso期望
-  approximation.dfdx.topRows<3>() = eePositionTorso.dfdx - eePositionBase.dfdx;
+  approximation.f.head<3>() = eePositionTorso.f - desiredPositionOrientationWorld.first;  // 本体系的torso期望
+  approximation.dfdx.topRows<3>() = eePositionTorso.dfdx;
 
   const auto eeOrientationTorsoError =
-      endEffectorKinematicsTorsoPtr_->getOrientationErrorLinearApproximation(state, {desiredPositionOrientation.second}).front();
-  const auto eeOrientationBaseError =
-      endEffectorKinematicsBasePtr_->getOrientationErrorLinearApproximation(state, {quaternion_t(1, 0, 0, 0)}).front();
-  approximation.f.tail<3>() = eeOrientationTorsoError.f - eeOrientationBaseError.f;
-  approximation.dfdx.bottomRows<3>() = eeOrientationTorsoError.dfdx - eeOrientationBaseError.dfdx;
+      endEffectorKinematicsTorsoPtr_->getOrientationErrorLinearApproximation(state, {desiredPositionOrientationWorld.second}).front();
+  approximation.f.tail<3>() = eeOrientationTorsoError.f;
+  approximation.dfdx.bottomRows<3>() = eeOrientationTorsoError.dfdx;
 
   return approximation;
 }
@@ -142,6 +139,39 @@ auto TorsoTrackingConstraint::interpolateEndEffectorPose(scalar_t time) const ->
     position = stateTrajectory.front().head(7).head(3);
     orientation = quaternion_t(stateTrajectory.front().head(7).tail<4>());
   }
+
+  return {position, orientation};
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+auto TorsoTrackingConstraint::targetBaseToWorld(const vector_t& state, 
+              const std::pair<vector_t, quaternion_t>& targetBase) const -> std::pair<vector_t, quaternion_t> 
+{
+  vector_t position = vector_t::Zero(3);
+  quaternion_t orientation;
+
+  // 提取当前基座状态 [x, y, yaw]
+  Eigen::Vector2d basePos = state.head(2);  // 世界系位置 [x, y]
+  scalar_t baseYaw = state(2);              // 世界系偏航角
+
+  // 构建基座姿态的旋转矩阵 (2D)
+  Eigen::Matrix2d R_base = Eigen::Rotation2D<scalar_t>(baseYaw).toRotationMatrix();
+
+  // 位置转换：世界系位置 = 基座位置 + 旋转矩阵 * 本体系相对位置
+  Eigen::Vector2d bodyPosition = targetBase.first.head(2);
+  Eigen::Vector2d worldPosition = basePos + R_base * bodyPosition;
+
+  // 姿态转换：世界系姿态 = 基座姿态 * 本体系相对姿态
+  quaternion_t baseQuat(Eigen::AngleAxisd(baseYaw, Eigen::Vector3d::UnitZ()));
+  quaternion_t worldQuat = baseQuat * targetBase.second;
+  worldQuat.normalize();
+
+  // 设置世界系位姿
+  position.head(2) = worldPosition;
+  position(2) = targetBase.first(2);
+  orientation = worldQuat;
 
   return {position, orientation};
 }

@@ -70,7 +70,7 @@ TargetTrajectoriesInteractiveMarker::TargetTrajectoriesInteractiveMarker(::ros::
 /******************************************************************************************************/
 visualization_msgs::InteractiveMarker TargetTrajectoriesInteractiveMarker::createInteractiveMarker() const {
   visualization_msgs::InteractiveMarker interactiveMarker;
-  interactiveMarker.header.frame_id = "world";
+  interactiveMarker.header.frame_id = "odom";
   interactiveMarker.header.stamp = ros::Time::now();
   interactiveMarker.name = "Goal";
   interactiveMarker.scale = 0.2;

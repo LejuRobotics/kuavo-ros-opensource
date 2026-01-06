@@ -48,12 +48,12 @@ def kuavo_process(master_uri, shared_data, kuavo_slave_ip):
             with shared_data['cmd_vel_lock']:
                 shared_data['cmd_vel_data'] = copy.deepcopy(msg)
                 shared_data['cmd_vel_time'] = rospy.Time.now().to_sec()
-        rospy.Subscriber('/filter_cmd_vel', Twist, cmd_vel_callback)
-        print("[Kuavo Process] Subscribed to /filter_cmd_vel")
+        rospy.Subscriber('/move_base/base_cmd_vel', Twist, cmd_vel_callback)
+        print("[Kuavo Process] Subscribed to /move_base/base_cmd_vel")
         
         none_data_cnt = 0
         # 发布odom消息
-        rate = rospy.Rate(10)
+        rate = rospy.Rate(50)
         while not rospy.is_shutdown():
             try:
                 # 从共享数据获取odom消息并发布
@@ -118,7 +118,7 @@ def wheel_process(master_uri, shared_data, wheel_slave_ip):
         stopped = False
 
         # 发布cmd_vel消息
-        rate = rospy.Rate(10)
+        rate = rospy.Rate(50)
         while not rospy.is_shutdown():
             try:
                 msg_to_publish = None

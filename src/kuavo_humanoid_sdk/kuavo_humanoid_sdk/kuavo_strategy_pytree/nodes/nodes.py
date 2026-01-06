@@ -2,13 +2,16 @@ from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.api import transform_pose_from_tag_to_world, ArmAPI, TorsoAPI, \
     HeadAPI
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Tag, Frame, Transform3D
-from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.utils import generate_full_bezier_trajectory
+from kuavo_humanoid_sdk.interfaces.data_types import KuavoPose, KuavoManipulationMpcFrame, KuavoManipulationMpcCtrlMode
+from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.utils import generate_full_bezier_trajectory, \
+    interpolate_joint_positions_bezier, calculate_elbow_y, get_elbow_position
 
 import py_trees
 from py_trees.behaviour import Behaviour
 from py_trees.common import Status
 from typing import List
 import time
+import numpy as np
 import rospy
 from kuavo_msgs.msg import AprilTagDetectionArray, AprilTagDetection
 from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -121,7 +124,11 @@ class NodeTagToArmGoal(Behaviour):
                  tag_id: int,
                  left_arm_relative_keypoints,
                  right_arm_relative_keypoints,
+                 control_type: str = 'eef_world',  # joint 是关节轨迹，eef_world/eef_base是末端轨迹
+                 enable_joint_mirroring: bool = True,  # 是否启用关节镜像处理
+                 traj_point_num: int = 20,  # 轨迹点数
                  ):
+        assert control_type in ['eef_world', 'eef_base', 'joint'], "control_type must be 'eef_world' or 'eef_base' or 'joint'"
         super(NodeTagToArmGoal, self).__init__(name)
         self.bb = py_trees.blackboard.Client(name=self.name)
 
@@ -129,12 +136,16 @@ class NodeTagToArmGoal(Behaviour):
         for k in [f'latest_tag_{tag_id}', f'latest_tag_{tag_id}_version']:
             self.bb.register_key(key=k, access=py_trees.common.Access.READ)
         # 读写
-        for k in ['left_arm_eef_traj', 'right_arm_eef_traj']:
+        for k in ['left_arm_eef_traj', 'right_arm_eef_traj',
+                  'left_arm_joint_traj', 'right_arm_joint_traj']:
             self.bb.register_key(key=k, access=py_trees.common.Access.WRITE)
 
         self.arm_api = arm_api
         self.tag_id = tag_id
         self.tag_version = -1
+        self.control_type = control_type
+        self.enable_joint_mirroring = enable_joint_mirroring
+        self.traj_point_num = traj_point_num
 
         self.left_arm_relative_keypoints = left_arm_relative_keypoints
         self.right_arm_relative_keypoints = right_arm_relative_keypoints
@@ -189,17 +200,129 @@ class NodeTagToArmGoal(Behaviour):
                 left_targets.append(transform_source_to_target.apply_to_pose(left_key_pose))
                 right_targets.append(transform_source_to_target.apply_to_pose(right_key_pose))
 
-        # ===== 2. 根据关键点生成完整的贝塞尔轨迹 =====
-        left_eef_pose_world, right_eef_pose_world = self.arm_api.get_eef_pose_world()
-        left_bezier_trajectory, right_bezier_trajectory = generate_full_bezier_trajectory(
-            current_left_pose=left_eef_pose_world,
-            current_right_pose=right_eef_pose_world,
-            left_keypoints_list=left_targets,
-            right_keypoints_list=right_targets,
-        )
+        # ===== 2. 根据控制模式生成对应轨迹 =====
+        if self.control_type in ['eef_world', 'eef_base']:
+            left_eef_pose_world, right_eef_pose_world = self.arm_api.get_eef_pose_world()
+            left_bezier_trajectory, right_bezier_trajectory = generate_full_bezier_trajectory(
+                current_left_pose=left_eef_pose_world,
+                current_right_pose=right_eef_pose_world,
+                left_keypoints_list=left_targets,
+                right_keypoints_list=right_targets,
+            )
 
-        self.bb.left_arm_eef_traj = left_bezier_trajectory
-        self.bb.right_arm_eef_traj = right_bezier_trajectory
+            self.bb.left_arm_eef_traj = left_bezier_trajectory
+            self.bb.right_arm_eef_traj = right_bezier_trajectory
+            # 清空旧的关节轨迹，避免被其他节点误用
+            self.bb.left_arm_joint_traj = None
+            self.bb.right_arm_joint_traj = None
+
+        elif self.control_type == 'joint':
+            robot_sdk = self.arm_api.robot_sdk
+            start_joint_positions = np.array(robot_sdk.state.arm_joint_state().position, dtype=float)
+            current_joints = start_joint_positions.copy()
+
+            transform_odom_to_base = self.arm_api.get_current_transform(
+                source_frame=Frame.ODOM,
+                target_frame=Frame.BASE
+            )
+
+            left_joint_traj = []
+            right_joint_traj = []
+
+            for idx, (left_pose_world, right_pose_world) in enumerate(zip(left_targets, right_targets)):
+                if left_pose_world.frame == Frame.BASE:
+                    left_pose_in_base = left_pose_world
+                    right_pose_in_base = right_pose_world
+                else:
+                    left_pose_in_base = transform_odom_to_base.apply_to_pose(left_pose_world)
+                    right_pose_in_base = transform_odom_to_base.apply_to_pose(right_pose_world)
+
+                left_target_kuavo_pose = KuavoPose(
+                    position=list(left_pose_in_base.pos),
+                    orientation=list(left_pose_in_base.quat)
+                )
+                right_target_kuavo_pose = KuavoPose(
+                    position=list(right_pose_in_base.pos),
+                    orientation=list(right_pose_in_base.quat)
+                )
+
+                left_elbow_y = calculate_elbow_y(left_target_kuavo_pose.position[1], True)
+                right_elbow_y = calculate_elbow_y(right_target_kuavo_pose.position[1], False)
+
+                left_elbow = get_elbow_position(
+                    robot_sdk, "zarm_l4_link", left_elbow_y, True, logger=self.logger)
+                right_elbow = get_elbow_position(
+                    robot_sdk, "zarm_r4_link", right_elbow_y, False, logger=self.logger)
+
+                target_joint_positions = None
+                for retry in range(5):
+                    if retry > 0:
+                        left_elbow[1] -= 0.02
+                        right_elbow[1] += 0.02
+
+                    target_joint_positions = robot_sdk.arm.arm_ik(
+                        left_pose=left_target_kuavo_pose,
+                        right_pose=right_target_kuavo_pose,
+                        left_elbow_pos_xyz=left_elbow,
+                        right_elbow_pos_xyz=right_elbow,
+                        arm_q0=current_joints.tolist()
+                    )
+                    if target_joint_positions is not None:
+                        break
+
+                if target_joint_positions is None:
+                    self.logger.error(f"❌ 关键点 {idx + 1} 逆解失败，跳过关节轨迹生成")
+                    left_joint_traj.clear()
+                    right_joint_traj.clear()
+                    break
+
+                target_joint_positions = np.array(target_joint_positions, dtype=float)
+
+                # === 镜像处理逻辑 ===
+                if self.enable_joint_mirroring:
+                    left_joint_pose = target_joint_positions[:7]
+                    right_joint_pose = target_joint_positions[7:]
+                    
+                    self.logger.debug(f"IK求解结果 - 左臂: {left_joint_pose}")
+                    self.logger.debug(f"IK求解结果 - 右臂: {right_joint_pose}")
+
+                    if(left_joint_pose[1] > 0):
+                        self.logger.debug("镜像左->右")
+                        right_joint_pose = (left_joint_pose[0], -left_joint_pose[1],
+                                        -left_joint_pose[2], left_joint_pose[3],
+                                        -left_joint_pose[4], -left_joint_pose[5], left_joint_pose[6])
+                    else:
+                        self.logger.debug("镜像右->左")
+                        left_joint_pose = (right_joint_pose[0], -right_joint_pose[1],
+                                        -right_joint_pose[2], right_joint_pose[3],
+                                        -right_joint_pose[4], -right_joint_pose[5], right_joint_pose[6])
+                    
+                    # 重新组合14维关节角度数组
+                    target_joint_positions = np.array(list(left_joint_pose) + list(right_joint_pose))
+                    self.logger.debug(f"镜像后关节角度: {target_joint_positions}")
+                else:
+                    self.logger.debug("跳过关节镜像处理 - enable_joint_mirroring=False")
+                    self.logger.debug(f"使用原始IK求解结果: {target_joint_positions}")
+
+                segment_trajectory = interpolate_joint_positions_bezier(
+                    current_joints.tolist(),
+                    target_joint_positions.tolist(),
+                    num_points=self.traj_point_num
+                )
+
+                points_to_append = segment_trajectory if idx == 0 else segment_trajectory[1:]
+                for joint_point in points_to_append:
+                    left_joint_traj.append(joint_point[:7])
+                    right_joint_traj.append(joint_point[7:])
+
+                current_joints = target_joint_positions
+
+            if left_joint_traj and right_joint_traj:
+                self.bb.left_arm_joint_traj = left_joint_traj
+                self.bb.right_arm_joint_traj = right_joint_traj
+            # 清空旧的末端轨迹
+            self.bb.left_arm_eef_traj = None
+            self.bb.right_arm_eef_traj = None
 
         self.tag_version = getattr(self.bb, f"latest_tag_{self.tag_id}_version", 0)
         return Status.SUCCESS
@@ -376,6 +499,32 @@ class NodeFuntion(py_trees.behaviour.Behaviour):
             return Status.RUNNING
 
 
+class NodeDelay(py_trees.behaviour.Behaviour):
+    """
+    简单的延时节点，用于在行为树中插入可配置的等待时间
+    """
+
+    def __init__(self, duration: float, name: str = None):
+        super().__init__(name or f"Delay({duration:.2f}s)")
+        self.duration = max(0.0, duration)
+        self.start_t = None
+
+    def initialise(self):
+        self.start_t = None
+
+    def update(self):
+        if self.start_t is None:
+            self.start_t = time.time()
+            return Status.RUNNING
+
+        elapsed = time.time() - self.start_t
+        if elapsed >= self.duration:
+            return Status.SUCCESS
+
+        time.sleep(0.01)
+        return Status.RUNNING
+
+
 # ------------------ 动作节点 -------------------
 
 class NodePercep(Behaviour):
@@ -458,6 +607,91 @@ class NodePercep(Behaviour):
     def terminate(self, new_status):
         self.logger.debug(f"NodePercep::terminate {self.name} to {new_status}")
 
+
+class NodeWheelWalk(Behaviour):
+    """
+    支持cmd_vel,cmd_pos,cmd_pos_world三种行走模式
+    
+    Args:
+        name: 节点名称
+        torso_api: TorsoAPI 实例
+        walk_mode: 行走模式，可选 'cmd_vel', 'cmd_pos', 'cmd_pos_world'
+        mpc_ctrl_mode: MPC 控制模式，默认为 BaseOnly（仅控制底盘）
+            - BaseOnly: 仅控制底盘
+            - ArmOnly: 仅控制手臂
+            - BaseArm: 同时控制底盘和手臂
+            - NoControl: 无控制
+    """
+
+    def __init__(self, name,
+                 torso_api: TorsoAPI,
+                 walk_mode: str = 'cmd_vel',
+                 mpc_ctrl_mode: KuavoManipulationMpcCtrlMode = KuavoManipulationMpcCtrlMode.BaseOnly
+                 ):
+        assert walk_mode in ['cmd_vel', 'cmd_pos', 'cmd_pos_world'], "walk_mode must be 'cmd_vel', 'cmd_pos' or 'cmd_pos_world'"
+        super(NodeWheelWalk, self).__init__(name)
+        self.bb = py_trees.blackboard.Client(name=self.name)
+        for k in ['walk_goal', 'is_walk_goal_new']:
+            self.bb.register_key(key=k, access=py_trees.common.Access.READ)
+        for k in ['walk_goal', 'is_walk_goal_new']:
+            self.bb.register_key(key=k, access=py_trees.common.Access.WRITE)
+
+        self.torso_api = torso_api
+        self.walk_mode = walk_mode
+        self.mpc_ctrl_mode = mpc_ctrl_mode
+
+    def initialise(self):
+        self.logger.debug(f"NodeWheelWalk::initialise {self.name}")
+
+        # 设置 MPC 控制模式
+        self.torso_api.robot_sdk.control.set_manipulation_mpc_mode(self.mpc_ctrl_mode)
+        self.logger.info(f"NodeWheelWalk::initialise - Set MPC control mode to {self.mpc_ctrl_mode.name}")
+
+        target_pose = getattr(self.bb, "walk_goal", None)
+        is_walk_goal_new = getattr(self.bb, "is_walk_goal_new", True)
+        if target_pose is None:
+            self.logger.error(f"NodeWheelWalk::initialise {self.name} - No target_pose found on blackboard")
+            return Status.FAILURE
+
+        if is_walk_goal_new:
+            self.logger.info("New walk goal detected, updating torso_api")
+            self.bb.is_walk_goal_new = False
+            self.torso_api.update_walk_goal(target_pose)
+
+        self.fut = self.torso_api.walk_to_pose(
+            pos_threshold=0.1,
+            kp_pos=0.5,
+            kp_yaw=0.5,
+            max_vel_x=0.4,
+            max_vel_yaw=0.4,
+            walk_mode=self.walk_mode,
+            asynchronous=True
+        )
+        return None
+
+    def update(self):
+        self.logger.debug(f"NodeWheelWalk::update {self.name}")
+        target_pose = getattr(self.bb, "walk_goal", None)
+        is_walk_goal_new = getattr(self.bb, "is_walk_goal_new", True)
+        if target_pose is None:
+            self.logger.error(f"NodeWheelWalk::update {self.name} - No target_pose found on blackboard")
+            return Status.FAILURE
+
+        if is_walk_goal_new:
+            self.bb.is_walk_goal_new = False
+            self.torso_api.update_walk_goal(target_pose)
+
+        if not self.fut.done():
+            time.sleep(0.01)
+            return Status.RUNNING
+
+        return Status.SUCCESS
+
+    def terminate(self, new_status):
+        self.logger.debug(f"NodeWalk::terminate {self.name} to {new_status}")
+        self.torso_api.stop_walk()
+        self.bb.is_walk_goal_new = True
+        self.bb.walk_goal = None
 
 class NodeWalk(Behaviour):
     """
@@ -560,7 +794,6 @@ class NodeWalk(Behaviour):
         self.bb.is_walk_goal_new = True
         self.bb.walk_goal = None
 
-
 class NodeArm(Behaviour):
     def __init__(self, name, arm_api: ArmAPI, control_base: bool = False, total_time: float = 2.0, frame: str = None):
         super(NodeArm, self).__init__(name)
@@ -603,6 +836,117 @@ class NodeArm(Behaviour):
 
     def terminate(self, new_status):
         self.logger.debug(f"NodeArm::terminate {self.name} to {new_status}")
+
+class NodeWheelArm(Behaviour):
+    """
+    手臂控制节点
+    
+    Args:
+        name: 节点名称
+        arm_api: ArmAPI 实例
+        control_type: 控制类型，可选 'eef_world', 'eef_base', 'joint'
+        direct_to_wbc: 指令是否直接到 WBC
+        total_time: 轨迹执行总时间（秒）
+        back_default: 是否在执行完成后恢复默认模式
+        mpc_ctrl_mode: MPC 控制模式，默认为 ArmOnly（仅控制手臂）
+            - ArmOnly: 仅控制手臂
+            - BaseOnly: 仅控制底盘
+            - BaseArm: 同时控制底盘和手臂
+            - NoControl: 无控制
+    """
+    def __init__(self,
+                 name,
+                 arm_api: ArmAPI,
+                 control_type: str = 'eef_world',
+                 direct_to_wbc: bool = False,
+                 total_time: float = 5.0,
+                 back_default: bool = True,
+                 mpc_ctrl_mode: KuavoManipulationMpcCtrlMode = KuavoManipulationMpcCtrlMode.ArmOnly,
+                 ):
+        super(NodeWheelArm, self).__init__(name)
+        assert control_type in ['eef_world', 'eef_base', 'joint'], "control_type must be 'eef_world' or 'eef_base' or 'joint'"
+        self.control_type = control_type
+        self.direct_to_wbc = direct_to_wbc
+        self.back_default = back_default
+        self.mpc_ctrl_mode = mpc_ctrl_mode
+        self.bb = py_trees.blackboard.Client(name=name)
+        # 从白板拿到手臂目标轨迹
+        traj_keys = ['left_arm_eef_traj', 'right_arm_eef_traj'] \
+            if self.control_type in ['eef_world', 'eef_base'] else ['left_arm_joint_traj', 'right_arm_joint_traj']
+        for k in traj_keys:
+            self.bb.register_key(key=k, access=py_trees.common.Access.READ)
+
+        self.arm_api = arm_api
+        self.total_time = total_time
+
+    def initialise(self):
+        self.logger.debug(f"NodeWheelArm::initialise {self.name}")
+        
+        if self.control_type in ['eef_world', 'eef_base']:
+            left_traj = getattr(self.bb, "left_arm_eef_traj", None)
+            right_traj = getattr(self.bb, "right_arm_eef_traj", None)
+            if left_traj is None or right_traj is None:
+                self.logger.error(f"NodeWheelArm::initialise {self.name} - No eef traj on blackboard")
+                self.fut = None
+                return Status.FAILURE
+
+            self.fut = self.arm_api.move_eef_traj_wheel_mpc(
+                left_traj=left_traj,
+                right_traj=right_traj,
+                asynchronous=True,
+                direct_to_wbc=self.direct_to_wbc,
+                total_time=self.total_time,
+                back_default=self.back_default,
+                frame=KuavoManipulationMpcFrame.WorldFrame if self.control_type == 'eef_world' else KuavoManipulationMpcFrame.LocalFrame,
+                mpc_ctrl_mode=self.mpc_ctrl_mode,
+            )
+        else:
+            left_joint_traj = getattr(self.bb, "left_arm_joint_traj", None)
+            right_joint_traj = getattr(self.bb, "right_arm_joint_traj", None)
+            if not left_joint_traj or not right_joint_traj:
+                self.logger.error(f"NodeWheelArm::initialise {self.name} - No joint traj on blackboard")
+                self.fut = None
+                return Status.FAILURE
+
+            if len(left_joint_traj) != len(right_joint_traj):
+                self.logger.error(
+                    f"NodeWheelArm::initialise {self.name} - Joint traj length mismatch "
+                    f"{len(left_joint_traj)} vs {len(right_joint_traj)}")
+                self.fut = None
+                return Status.FAILURE
+
+            joint_traj = [
+                left_point + right_point
+                for left_point, right_point in zip(left_joint_traj, right_joint_traj)
+            ]
+
+            self.fut = self.arm_api.move_joint_traj(
+                joint_traj=joint_traj,
+                asynchronous=True,
+                total_time=self.total_time,
+                mpc_ctrl_mode=self.mpc_ctrl_mode,
+            )
+
+    def update(self):
+        self.logger.debug(f"NodeWheelArm::update {self.name}")
+
+        if self.fut is None:
+            return Status.FAILURE
+
+        if not self.fut.done():
+            time.sleep(0.01)
+            return Status.RUNNING
+
+        # Future 已结束：如果后台线程抛异常，这里必须暴露出来，否则会“半途失败但显示SUCCESS”
+        exc = self.fut.exception()
+        if exc is not None:
+            self.logger.error(f"NodeWheelArm::update {self.name} - 异步任务异常: {exc}")
+            return Status.FAILURE
+
+        return Status.SUCCESS
+
+    def terminate(self, new_status):
+        self.logger.debug(f"NodeWheelArm::terminate {self.name} to {new_status}")
 
 
 class NodeWaist(Behaviour):
@@ -720,3 +1064,91 @@ class NodeWalkWithDistanceMonitor(NodeWalk):
     def terminate(self, new_status):
         self.logger.debug(f"NodeWalkWithDistanceMonitor::terminate {self.name} to {new_status}")
         super(NodeWalkWithDistanceMonitor, self).terminate(new_status)
+
+
+class NodeTorsoPose(Behaviour):
+    """专门处理躯干位姿控制的节点"""
+    def __init__(
+            self,
+            name: str,
+            torso_api: TorsoAPI,
+            target_pose: Pose,
+            total_time: float = 5.0,
+    ):
+        super().__init__(name)
+        self.torso_api = torso_api
+        self.target_pose = target_pose
+        self.total_time = total_time
+        self.future = None
+
+    def initialise(self):
+        self.logger.debug(f"NodeTorsoPose::initialise {self.name}")
+        
+        self.future = self.torso_api.move_torso_pose(
+            desir_torso_pose=self.target_pose,
+            asynchronous=True,
+            total_time=self.total_time,
+        )
+
+    def update(self):
+        if self.future is None:
+            self.logger.error(f"NodeTorsoPose::update {self.name} - future is None in asynchronous mode")
+            return Status.FAILURE
+
+        if self.future.done():
+            try:
+                self.future.result()
+            except Exception as exc:
+                self.logger.error(f"NodeTorsoPose::update {self.name} failed: {exc}")
+                return Status.FAILURE
+            return Status.SUCCESS
+
+        time.sleep(0.01)
+        return Status.RUNNING
+
+    def terminate(self, new_status):
+        self.logger.debug(f"NodeTorsoPose::terminate {self.name} to {new_status}")
+
+
+class NodeTorsoJoint(Behaviour):
+    """专门处理躯干关节控制的节点"""
+    def __init__(
+            self,
+            name: str,
+            torso_api: TorsoAPI,
+            joint_trajectory: list,
+            total_time: float = 5.0,
+    ):
+        super().__init__(name)
+        self.torso_api = torso_api
+        self.joint_trajectory = joint_trajectory
+        self.total_time = total_time
+        self.future = None
+
+    def initialise(self):
+        self.logger.debug(f"NodeTorsoJoint::initialise {self.name}")
+        
+        self.future = self.torso_api.move_wheel_lower_joint(
+            joint_traj=self.joint_trajectory,
+            asynchronous=True,
+            total_time=self.total_time,
+        )
+
+    def update(self):
+        if self.future is None:
+            self.logger.error(f"NodeTorsoJoint::update {self.name} - future is None in asynchronous mode")
+            return Status.FAILURE
+
+        if self.future.done():
+            try:
+                self.future.result()
+            except Exception as exc:
+                self.logger.error(f"NodeTorsoJoint::update {self.name} failed: {exc}")
+                return Status.FAILURE
+            return Status.SUCCESS
+
+        time.sleep(0.01)
+        return Status.RUNNING
+
+    def terminate(self, new_status):
+        self.logger.debug(f"NodeTorsoJoint::terminate {self.name} to {new_status}")

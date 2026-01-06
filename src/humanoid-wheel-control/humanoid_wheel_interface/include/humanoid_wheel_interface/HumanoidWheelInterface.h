@@ -88,6 +88,9 @@ class HumanoidWheelInterface final : public RobotInterface {
   std::unique_ptr<StateCost> getEndEffectorConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                       const std::string& prefix, bool useCaching, const std::string& libraryFolder,
                                                       bool recompileLibraries, int eefIdx);
+  std::unique_ptr<StateCost> getEndEffectorLocalConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
+                                                           const std::string& prefix, bool useCaching, const std::string& libraryFolder,
+                                                           bool recompileLibraries, int eefIdx);
   std::unique_ptr<StateCost> getSelfCollisionConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                         const std::string& urdfFile, const std::string& prefix, bool useCaching,
                                                         const std::string& libraryFolder, bool recompileLibraries);

@@ -64,11 +64,15 @@ class KuavoRobotToolsCore:
 
             # #####################################
             # 坐标系转换映射
-            robot_type = rospy.get_param('/robot_type', 2)
-            if robot_type == 1:     # 轮臂机器人
+            # 仅在轮臂 (robot_type == 1) 时启用映射；双足等其他形态保持原坐标系不变
+            robot_type = rospy.get_param("/robot_type", 0)
+            is_wheel_arm = (robot_type == 1)
 
+            frame_mapping = {}
+            if is_wheel_arm:
                 frame_mapping = {
-                    "base_link": "waist_yaw_link"
+                    "base_link": "waist_yaw_link",      # 人形中的 base_link 对应轮臂的 waist_yaw_link,获取轮臂躯干位置时使用 waist_yaw_link 坐标系
+                    "odom": "base_link",                # 轮臂获取底盘位置时使用 base_link 坐标系
                 }
 
                 # 转换坐标系名称

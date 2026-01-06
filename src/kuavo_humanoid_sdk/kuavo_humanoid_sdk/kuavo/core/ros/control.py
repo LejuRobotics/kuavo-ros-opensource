@@ -207,6 +207,8 @@ class ControlRobotArm:
         self._pub_ctrl_arm_target_poses = rospy.Publisher('/kuavo_arm_target_poses', armTargetPoses, queue_size=10)
         self._pub_ctrl_hand_pose_cmd = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
         self._pub_hand_wrench = rospy.Publisher('/hand_wrench_cmd', Float64MultiArray, queue_size=10)
+        self._pub_torso_pose_cmd = rospy.Publisher('/cmd_lb_torso_pose', Twist, queue_size=10)
+        self._pub_wheel_lower_joint_cmd = rospy.Publisher('/lb_leg_traj', JointState, queue_size=10)
 
     def is_arm_collision(self)->bool:
         return self._is_collision
@@ -315,6 +317,42 @@ class ControlRobotArm:
             return True
         except Exception as e:
             SDKLogger.error(f"publish arm target poses: {e}")
+        return False
+    
+    def pub_torso_pose_cmd(self, x, y, z, roll, pitch, yaw)->bool:
+        try:
+            msg = Twist()
+            msg.linear.x = x
+            msg.linear.y = y
+            msg.linear.z = z
+            msg.angular.x = roll
+            msg.angular.y = pitch
+            msg.angular.z = yaw
+
+            # 发布消息
+            self._pub_torso_pose_cmd.publish(msg)
+            return True
+        except Exception as e:
+            SDKLogger.error(f"publish torso poses failed: {e}")
+        return False
+    
+    def pub_wheel_lower_joint_cmd(self, joint_traj: list)->bool:
+        try:
+            if len(joint_traj) != 4:
+                SDKLogger.error(f"Invalid joint trajectory length: {len(joint_traj)}")
+                return False
+
+            msg = JointState()
+            joint_names = ['joint1', 'joint2', 'joint3', 'joint4']
+            msg.header.stamp = rospy.Time.now()
+            msg.name = joint_names
+            msg.position = [q for q in joint_traj]
+
+            # 发布消息
+            self._pub_wheel_lower_joint_cmd.publish(msg)
+            return True
+        except Exception as e:
+            SDKLogger.error(f"publish torso poses failed: {e}")
         return False
 
     def srv_change_manipulation_mpc_frame(self, frame: KuavoManipulationMpcFrame)->bool:
@@ -446,8 +484,11 @@ class ControlRobotArm:
 
     def srv_change_arm_ctrl_mode(self, mode: KuavoArmCtrlMode)->bool:
         try:
-            rospy.wait_for_service('/change_arm_ctrl_mode', timeout=2.0)
-            change_arm_ctrl_mode_srv = rospy.ServiceProxy('/change_arm_ctrl_mode', changeArmCtrlMode)
+            # robot_type: 0=双足, 1=轮臂
+            robot_type = rospy.get_param('/robot_type', 0)
+            service_name = '/wheel_arm_change_arm_ctrl_mode' if robot_type == 1 else '/change_arm_ctrl_mode'
+            rospy.wait_for_service(service_name, timeout=2.0)
+            change_arm_ctrl_mode_srv = rospy.ServiceProxy(service_name, changeArmCtrlMode)
             req = changeArmCtrlModeRequest()
             req.control_mode = mode.value
             resp = change_arm_ctrl_mode_srv(req)
@@ -464,7 +505,8 @@ class ControlRobotArm:
             get_arm_ctrl_mode_srv = rospy.ServiceProxy('/humanoid_get_arm_ctrl_mode', changeArmCtrlMode)
             req = changeArmCtrlModeRequest()
             resp = get_arm_ctrl_mode_srv(req)
-            return KuavoArmCtrlMode(resp.control_mode)
+            # NOTE: kuavo_msgs/srv/changeArmCtrlMode.srv response field is `mode` (not `control_mode`)
+            return KuavoArmCtrlMode(resp.mode)
         except rospy.ServiceException as e:
             SDKLogger.error(f"Service call failed: {e}")
         except Exception as e:
@@ -1319,6 +1361,27 @@ class KuavoRobotControl:
         """
         return self.kuavo_arm_control.pub_end_effector_pose_cmd(left_pose, right_pose, frame)
     
+    def control_torso_pose(self, x, y, z, roll, pitch, yaw)->bool:
+        """
+            Control wheel-robot torso pose
+            Arguments:
+                - x: torso postion
+                - y: torso postion
+                - z: torso postion
+                - roll: torso euler angle
+                - pitch: torso euler angle
+                - yaw: torso euler angle
+        """
+        return self.kuavo_arm_control.pub_torso_pose_cmd(x, y, z, roll, pitch, yaw)
+    
+    def control_wheel_lower_joint(self, joint_traj: list)->bool:
+        """
+            Control wheel-robot torso lower joint
+            Arguments:
+                - joint_traj: list of joint data (degrees)
+        """
+        return self.kuavo_arm_control.pub_wheel_lower_joint_cmd(joint_traj)
+    
     def change_manipulation_mpc_frame(self, frame: KuavoManipulationMpcFrame)->bool:
         """
             Change manipulation mpc frame
@@ -1737,9 +1800,9 @@ class WheelArmROSControl:
     def _init_ros_interfaces(self):
         """初始化ROS接口"""
         try:
-            # 等待轮臂控制服务
-            rospy.wait_for_service('/lb_leg_control_srv', timeout=5.0)
-            self._leg_control_service = rospy.ServiceProxy('/lb_leg_control_srv', lbLegControlSrv)
+            # # 等待轮臂控制服务
+            # rospy.wait_for_service('/lb_leg_control_srv', timeout=5.0)
+            # self._leg_control_service = rospy.ServiceProxy('/lb_leg_control_srv', lbLegControlSrv)
             
             self._is_initialized = True
             SDKLogger.info("[WheelArmROSControl] ROS接口初始化成功")

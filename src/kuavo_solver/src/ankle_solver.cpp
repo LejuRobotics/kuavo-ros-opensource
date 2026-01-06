@@ -302,6 +302,10 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_position(const Eigen::VectorXd& q)
     {
         result = joint_to_motor_position_s2_(q);
     }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
+    {
+        result = joint_q;
+    }
     return result;
 }
 Eigen::VectorXd AnkleSolver::joint_to_motor_velocity(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& dp)
@@ -326,6 +330,10 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_velocity(const Eigen::VectorXd& q, c
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN)
     {
         result = joint_to_motor_velocity_s2_(q, p, dp);
+    }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
+    {
+        result = dp;
     }
     return result;
 }
@@ -352,6 +360,10 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_current(const Eigen::VectorXd& q, co
     {
         result = joint_to_motor_current_s2_(q, p, t);
     }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
+    {
+        result = t;
+    }
     return result;
 }
 Eigen::VectorXd AnkleSolver::motor_to_joint_position(const Eigen::VectorXd& q)
@@ -376,6 +388,10 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_position(const Eigen::VectorXd& q)
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN)
     {
         result = motor_to_joint_position_s2_(q);
+    }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
+    {
+        result = q;
     }
     return result;
 }
@@ -402,6 +418,10 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_velocity(const Eigen::VectorXd& q, c
     {
         result = motor_to_joint_velocity_s2_(q, p, v);
     }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
+    {
+        result = v;
+    }
     return result;
 }
 Eigen::VectorXd AnkleSolver::motor_to_joint_torque(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& c)
@@ -426,6 +446,10 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_torque(const Eigen::VectorXd& q, con
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN)
     {
         result = motor_to_joint_torque_s2_(q, p, c);
+    }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
+    {
+        result = c;
     }
     return result;
 }   

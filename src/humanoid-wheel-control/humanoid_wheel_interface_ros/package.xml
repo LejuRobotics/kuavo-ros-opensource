@@ -32,6 +32,8 @@
   <depend>ocs2_self_collision</depend>
   <depend>ocs2_self_collision_visualization</depend>
   <depend>humanoid_wheel_interface</depend>
+  <depend>kuavo_common</depend>
+  <depend>kuavo_msgs</depend>
   <depend>pinocchio</depend>
 
 </package>

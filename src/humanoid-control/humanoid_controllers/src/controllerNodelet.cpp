@@ -135,16 +135,22 @@ private:
     {
         // Choose the controller type with estimator based on the parameter
         int estimator_type = 1;
-        int nodelet_robot_type = 2;
-        int wheel_control_type = 0;
+        // 先设置默认值
+        int nodelet_robot_type = 2;     // 默认值：2表示双足人形机器人
+        // 从参数服务器读取参数（如果存在则覆盖默认值）
         if (nh.hasParam("/nodelet_robot_type"))
         {
             nh.getParam("/nodelet_robot_type", nodelet_robot_type);
+            std::cout << "[controllerNodelet] Found /nodelet_robot_type parameter: " << nodelet_robot_type << std::endl;
+            // 读取后删除旧参数，确保下次启动时使用launch文件设置的新值
+            nh.deleteParam("/nodelet_robot_type");
         }
         else
         {
-            nodelet_robot_type = 2;     // 没设置 nodelet_robot_type 一定是正常控制器
+            std::cout << "[controllerNodelet] /nodelet_robot_type not found, using default: " << nodelet_robot_type << std::endl;
         }
+        
+        int wheel_control_type = 0;
         if (nh.hasParam("/wheel_control_type"))
         {
             nh.getParam("/wheel_control_type", wheel_control_type);

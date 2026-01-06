@@ -162,6 +162,31 @@ class KuavoRobot(RobotBase):
             下蹲和起立不要变化过快，一次变化最大不要超过0.2米。
         """
         return self._kuavo_core.squat(height, pitch)
+
+    def control_torso_pose(self, x: float, y: float, z: float,
+                           roll: float, pitch: float, yaw: float) -> bool:
+        """直接控制轮臂机器人躯干的位姿
+
+        Args:
+            x, y, z (float): 目标位置（米）
+            roll, pitch, yaw (float): 目标欧拉角（弧度）
+
+        Returns:
+            bool: 控制命令是否发送成功
+        """
+        return self._kuavo_core.control_torso_pose(x, y, z, roll, pitch, yaw)
+    
+    def control_wheel_lower_joint(self, joint_traj: list) -> bool:
+        """控制轮臂机器人的下肢关节
+
+        Args:
+            joint_traj (list): 目标关节位置（弧度）
+
+        Returns:
+            bool: 控制命令是否发送成功
+        """
+        return self._kuavo_core.control_wheel_lower_joint(joint_traj)
+        
      
     def step_by_step(self, target_pose:list, dt:float=0.4, is_left_first_default:bool=True, collision_check:bool=True)->bool:
         """单步控制机器人运动。
@@ -370,17 +395,26 @@ class KuavoRobot(RobotBase):
         if len(joint_positions) != self._robot_info.arm_joint_dof:
             raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(joint_positions)))
 
-        # Check if joint positions are within the real physical joint limits
+        # Clip joint positions to the real physical joint limits (instead of raising)
         arm_min, arm_max = self._robot_info.get_arm_joint_limits()
+        clipped = []
+        clipped_info = []
         for i, pos in enumerate(joint_positions):
-            if pos < arm_min[i] or pos > arm_max[i]:
-                raise ValueError(
-                    f"Joint {i} position {pos:.3f} rad exceeds real physical limit "
-                    f"[{arm_min[i]:.3f}, {arm_max[i]:.3f}] rad. "
-                    f"This may cause motor stall."
-                )
+            new_pos = max(arm_min[i], min(pos, arm_max[i]))
+            clipped.append(new_pos)
+            if new_pos != pos:
+                clipped_info.append((i, pos, new_pos, arm_min[i], arm_max[i]))
 
-        return self._kuavo_core.control_robot_arm_joint_positions(joint_data=joint_positions)
+        if clipped_info:
+            SDKLogger.warn(
+                "[KuavoRobot] joint限位裁剪: "
+                + ", ".join(
+                    f"J{i} {old:.3f}->{new:.3f} (limit [{mn:.3f},{mx:.3f}])"
+                    for (i, old, new, mn, mx) in clipped_info
+                )
+            )
+
+        return self._kuavo_core.control_robot_arm_joint_positions(joint_data=clipped)
     
     def control_arm_joint_trajectory(self, times:list, q_frames:list)->bool:
         """控制机器人手臂的目标轨迹。
