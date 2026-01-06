@@ -54,9 +54,9 @@ debugHumanoidController.cpp
 debugQuestControlFSMNode.cpp
 # **/*.sh
 # merge_compile_commands.py
-**/*.bag
+# **/*.bag
 # **/*.dot
-**/*.png
+# **/*.png
 tmp_ws/
 # **/*test.cpp
 
@@ -65,9 +65,3 @@ bag/*
 src/Livox-SDK2
 src/legged_control
 src/legged_perceptive
-**/*.csv
-**/*.xml
-test_eigen_quat_cal.cpp
-**/*.py
-**/*.md
-**/*.sh
