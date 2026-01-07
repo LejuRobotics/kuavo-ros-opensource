@@ -37,13 +37,12 @@ sudo apt-get install libgeographic-dev ros-noetic-geographic* -y
 ```
 - python包安装
 ```bash
-pip install pytrees
+pip install py_trees
 ```
 
 - 编译相关功能包：
 ```bash
 cd ~/kuavo-ros-control
-git checkout cfl/dev/kuavo52-grabBox_pytree_withWaist_hefei
 sudo su
 catkin clean -y
 catkin build humanoid_controllers gazebo_sim ar_control mobile_manipulator_controllers kuavo_msgs
@@ -164,7 +163,6 @@ roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
 - 打开终端一，启动gazebo场景
 ```bash
 cd ~/kuavo-ros-control
-./docker/run_with_gpu.sh
 source devel/setup.zsh
 roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch
 ```
@@ -172,7 +170,6 @@ roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch
 - 打开终端二，启动ar_tag转换码操作和virtual操作
 ```bash
 cd ~/kuavo-ros-control
-./docker/run_with_gpu.sh
 source devel/setup.zsh
 roslaunch ar_control robot_strategies.launch
 ```
@@ -180,7 +177,6 @@ roslaunch ar_control robot_strategies.launch
 - 打开终端三，运行搬箱子示例：
 ```bash
 cd ~/kuavo-ros-control
-./docker/run_with_gpu.sh
 source devel/setup.zsh
 python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_new.py
 ```
@@ -251,17 +247,15 @@ roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
 
 ⚠️⚠️⚠️ **受imu飘移及机器人机况影响，若需要连续搬运，建议搬运三次后就关掉程序让机器人重新站立，这样在机况良好的情况下可以达到90%以上的搬箱子成功率**
 
-- 下位机打开终端一，让机器人站立(推荐使用tmux终端，防止网络问题导致终端断开)
+- 下位机打开终端一，让机器人站立
 ```bash
-cd ~/kuavo-ros-opensource
 sudo su
 source devel/setup.bash
-roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=bt2pro
+roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
 ```
 
 - 下位机打开终端二，启动Tag Tracker节点
 ```bash
-cd ~/kuavo-ros-opensource
 sudo su
 source devel/setup.bash
 roslaunch ar_control robot_strategies.launch real:=true
@@ -269,7 +263,6 @@ roslaunch ar_control robot_strategies.launch real:=true
 
 - 下位机打开终端三，运行搬箱子示例：
 ```bash
-cd ~/kuavo-ros-opensource
 sudo su
 source devel/setup.bash
 python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_new.py

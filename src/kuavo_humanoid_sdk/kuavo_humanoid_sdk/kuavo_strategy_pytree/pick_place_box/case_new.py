@@ -353,7 +353,6 @@ def pause_for_next_step(step_name, enable_pause=None):
 
 if __name__ == '__main__':
     # robot_sdk.control.control_head(0, np.deg2rad(-10))
-
     KuavoSDK.Init(log_level="INFO")
     # 用 Repeat 包裹，让它无限循环
     num_repeats = 10

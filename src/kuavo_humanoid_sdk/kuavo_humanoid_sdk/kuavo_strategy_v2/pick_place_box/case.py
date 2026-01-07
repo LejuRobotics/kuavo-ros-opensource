@@ -8,6 +8,8 @@ import math
 import numpy as np
 import os, sys
 import argparse
+from kuavo_humanoid_sdk import KuavoSDK
+
 mother_dir = os.path.dirname(os.path.abspath(__file__))
 
 log_path = init_logging(log_dir=os.path.join(mother_dir, "logs"), filename_prefix="grab_box_v2", enable=True)
@@ -392,6 +394,7 @@ def grab_one_box(user_input, use_vison=True):
 
 
 if __name__ == "__main__":
+    KuavoSDK.Init(log_level="INFO")
     user_input=False
     use_vison = True   # 原地搬框测试：False，不使用视觉，使用视觉搬框：True
     for eps in range(10):
