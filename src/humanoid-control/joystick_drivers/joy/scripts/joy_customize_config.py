@@ -170,7 +170,7 @@ class JoyCustomizeConfigNode:
         button_name_mapping = {
             "BUTTON_STANCE": "BUTTON_A",
             "BUTTON_TROT": "BUTTON_B", 
-            "BUTTON_JUMP": "BUTTON_X",
+            "BUTTON_RL": "BUTTON_X",
             "BUTTON_WALK": "BUTTON_Y"
         }
         

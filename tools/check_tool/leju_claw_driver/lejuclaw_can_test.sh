@@ -6,6 +6,10 @@ echo "current_script_dir: $current_script_dir"
 
 cd $current_script_dir
 
-export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${current_script_dir}/3rd_party/bin/unix64/release
+# 计算项目根目录
+project_root=$(cd "$current_script_dir/../../.." && pwd)
+echo "project_root: $project_root"
+
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${project_root}/installed/lib:${project_root}/devel/lib
 
 ./lejuclaw_can_test
