@@ -24,22 +24,22 @@ is_running_in_docker() {
 LAUNCH1="humanoid_plan_arm_trajectory.launch"
 LAUNCH2="plan_arm_action_websocket_server.launch"
 
-# 检测 launch 进程是否已运行（避免重复启动）
+# 检测 launch 相关节点是否已运行（避免重复启动）
+# 无论 launch 文件是直接启动还是被 include 到其他 launch 中，都能正确检测
 LAUNCH1_RUNNING=false
 LAUNCH2_RUNNING=false
 
-for LAUNCH in "$LAUNCH1" "$LAUNCH2"
-do
-    PIDS=$(ps aux | grep "[r]oslaunch" | grep "$LAUNCH" | awk '{print $2}')
-    if [[ -n "$PIDS" ]]; then
-        echo "检测到 $LAUNCH 正在运行"
-        if [[ "$LAUNCH" == "$LAUNCH1" ]]; then
-            LAUNCH1_RUNNING=true
-        else
-            LAUNCH2_RUNNING=true
-        fi
-    fi
-done
+# 检测 humanoid_plan_arm_trajectory 相关节点
+if rosnode list 2>/dev/null | grep -q "autostart_arm_trajectory_bezier_demo"; then
+    LAUNCH1_RUNNING=true
+    echo "检测到 humanoid_plan_arm_trajectory 相关节点正在运行"
+fi
+
+# 检测 plan_arm_action_websocket_server 节点
+if rosnode list 2>/dev/null | grep -q "plan_arm_action_websocket_server"; then
+    LAUNCH2_RUNNING=true
+    echo "检测到 plan_arm_action_websocket_server 节点正在运行"
+fi
 
 # 获取脚本自身所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

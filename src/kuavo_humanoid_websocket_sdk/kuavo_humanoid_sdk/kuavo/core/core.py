@@ -384,8 +384,8 @@ class KuavoRobotCore:
         Raises:
             RuntimeError: If robot is not in stance state
         """
-        if self.state != 'stance':
-            raise RuntimeError(f"[Core] control_command_pose failed: robot must be in stance state, current state: {self.state}")
+        # if self.state != 'stance':
+        #     raise RuntimeError(f"[Core] control_command_pose failed: robot must be in stance state, current state: {self.state}")
         
         # Add any parameter validation if needed
         # e.g., limit ranges for safety
@@ -394,6 +394,14 @@ class KuavoRobotCore:
         limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, target_pose_z))
         if target_pose_z > MAX_HEIGHT or target_pose_z < MIN_HEIGHT:
             SDKLogger.warn(f"[Core] target_pose_z {target_pose_z:.3f} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited")
+
+        # 结合当前高度做过滤，限制上升时的高度变化
+        target_height = self._rb_info['init_stand_height'] + limited_height
+        # 躯干上升运动变化不宜过大, 目标高度减去实时躯干高度大于阈值
+        HEIGHT_CHANGE_THRESHOLD = 0.25
+        if (self._rb_state.com_height < target_height) and (target_height - self._rb_state.com_height) >= HEIGHT_CHANGE_THRESHOLD:
+            limited_height = (self._rb_state.com_height + HEIGHT_CHANGE_THRESHOLD) - self._rb_info['init_stand_height']
+            SDKLogger.warn(f"[Core] Warning! Height change too large, limiting to safe range, reset height to {limited_height:.3f}")
 
         self.to_command_pose()
         return self._control.control_command_pose(target_pose_x, target_pose_y, limited_height, target_pose_yaw)
@@ -425,6 +433,14 @@ class KuavoRobotCore:
         limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, target_pose_z))
         if target_pose_z > MAX_HEIGHT or target_pose_z < MIN_HEIGHT:
             SDKLogger.warn(f"[Core] target_pose_z {target_pose_z:.3f} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited")
+
+        # 结合当前高度做过滤，限制上升时的高度变化
+        target_height = self._rb_info['init_stand_height'] + limited_height
+        # 躯干上升运动变化不宜过大, 目标高度减去实时躯干高度大于阈值
+        HEIGHT_CHANGE_THRESHOLD = 0.25
+        if (self._rb_state.com_height < target_height) and (target_height - self._rb_state.com_height) >= HEIGHT_CHANGE_THRESHOLD:
+            limited_height = (self._rb_state.com_height + HEIGHT_CHANGE_THRESHOLD) - self._rb_info['init_stand_height']
+            SDKLogger.warn(f"[Core] Warning! Height change too large, limiting to safe range, reset height to {limited_height:.3f}")
 
         self.to_command_pose_world()
         return self._control.control_command_pose_world(target_pose_x, target_pose_y, limited_height, target_pose_yaw)

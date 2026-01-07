@@ -90,6 +90,13 @@ class JoyCustomizeConfigNode:
         # LT/RT axis states for combination detection
         self._lt_pressed = False
         self._rt_pressed = False
+        
+        # 用于避免重复打印映射切换日志
+        self._last_mapping_type = None
+        self._last_mapping_path = None
+        # 用于限制映射切换频率（防止频繁切换）
+        self._last_mapping_switch_time = 0.0
+        self._mapping_switch_cooldown = 2.0  # 2秒内不允许再次切换
 
         # Default expected counts; will be adjusted by autodetect
         if self.joystick_type == "bt2pro":
@@ -113,7 +120,10 @@ class JoyCustomizeConfigNode:
         # Load mappings
         self.joy_button_map: Dict[str, int] = {}
         self.joy_axis_map: Dict[str, int] = {}
-        self._load_joy_channel_mapping(self.channel_map_path)
+        self._load_joy_channel_mapping(self.channel_map_path, verbose=True)  # 首次加载时打印详细信息
+        # 初始化时记录当前映射类型
+        self._last_mapping_type = self.joystick_type
+        self._last_mapping_path = self.channel_map_path
         
         # Try to autodetect joystick type and reload mapping safely
         try:
@@ -170,7 +180,7 @@ class JoyCustomizeConfigNode:
         button_name_mapping = {
             "BUTTON_STANCE": "BUTTON_A",
             "BUTTON_TROT": "BUTTON_B", 
-            "BUTTON_JUMP": "BUTTON_X",
+            "BUTTON_RL": "BUTTON_X",  # BUTTON_RL maps to BUTTON_X
             "BUTTON_WALK": "BUTTON_Y"
         }
         
@@ -182,7 +192,7 @@ class JoyCustomizeConfigNode:
             
         return converted_map
 
-    def _load_joy_channel_mapping(self, path: str) -> None:
+    def _load_joy_channel_mapping(self, path: str, verbose: bool = False) -> None:
         try:
             with open(path, "r") as f:
                 data = json.load(f)
@@ -194,9 +204,13 @@ class JoyCustomizeConfigNode:
             self.joy_axis_map = {str(k): int(v) for k, v in axis.items()}
             rospy.set_param("joystick_type", self.joystick_type)
             rospy.set_param("channel_map_path", path)
-            rospy.loginfo(f"Loaded joystick mapping from {path}")
-            rospy.loginfo(f"Buttons: {self.joy_button_map}")
-            rospy.loginfo(f"Axes: {self.joy_axis_map}")
+            # 只在verbose=True时打印详细信息，避免频繁打印
+            if verbose:
+                rospy.loginfo(f"Loaded joystick mapping from {path}")
+                rospy.loginfo(f"Buttons: {self.joy_button_map}")
+                rospy.loginfo(f"Axes: {self.joy_axis_map}")
+            else:
+                rospy.logdebug(f"Loaded joystick mapping from {path}")
         except Exception as e:
             rospy.logwarn(f"Failed to load joystick mapping from {path}: {e}")
 
@@ -222,6 +236,17 @@ class JoyCustomizeConfigNode:
     def _set_joystick_type_and_reload(self, new_type: str) -> None:
         if not new_type:
             return
+        
+        # 如果已经是目标类型，直接返回，避免不必要的切换
+        if self.joystick_type == new_type:
+            return
+        
+        # 检查冷却时间，防止频繁切换
+        now = time.time()
+        if now - self._last_mapping_switch_time < self._mapping_switch_cooldown:
+            rospy.logdebug(f"Mapping switch cooldown active, ignoring switch to {new_type}")
+            return
+        
         try:
             humanoid_controllers_path = rospkg.RosPack().get_path("humanoid_controllers")
             new_map_path = f"{humanoid_controllers_path}/launch/joy/{new_type}.json"
@@ -252,7 +277,14 @@ class JoyCustomizeConfigNode:
         else:
             self._prev_buttons = [0] * self.JOYSTICK_BUTTON_NUM
         self._prev_axes = [0.0] * self.JOYSTICK_AXIS_NUM
-        rospy.logwarn(f"Joystick mapping switched to {new_type} with safe state transfer")
+        
+        # 更新切换时间和记录
+        self._last_mapping_switch_time = now
+        # 只在映射真正改变时打印，避免重复日志
+        if self._last_mapping_type != new_type or self._last_mapping_path != new_map_path:
+            rospy.logwarn(f"Joystick mapping switched to {new_type} with safe state transfer")
+            self._last_mapping_type = new_type
+            self._last_mapping_path = new_map_path
 
     def _rebuild_prev_buttons_for_new_map(
         self,
@@ -296,14 +328,26 @@ class JoyCustomizeConfigNode:
             # Only consider expected axis count of 8; if not, just ignore
             if ax_len != self.JOYSTICK_AXIS_NUM:
                 return False
+            
+            # 检查冷却时间，防止频繁切换
+            now = time.time()
+            if now - self._last_mapping_switch_time < self._mapping_switch_cooldown:
+                return False
+            
             # If we currently expect bt2pro (16) but receive 11 -> switch to bt2
             if self.JOYSTICK_BUTTON_NUM == self.JOYSTICK_BUTTON_NUM_BT2PRO and btn_len == self.JOYSTICK_BUTTON_NUM_BT2:
-                self._set_joystick_type_and_reload("bt2")
-                return True
+                # 检查是否真的需要切换（避免重复切换）
+                if self.joystick_type != "bt2":
+                    self._set_joystick_type_and_reload("bt2")
+                    return True
+                return False
             # If we currently expect bt2 (11) but receive 16 -> switch to bt2pro
             if self.JOYSTICK_BUTTON_NUM == self.JOYSTICK_BUTTON_NUM_BT2 and btn_len == self.JOYSTICK_BUTTON_NUM_BT2PRO:
-                self._set_joystick_type_and_reload("bt2pro")
-                return True
+                # 检查是否真的需要切换（避免重复切换）
+                if self.joystick_type != "bt2pro":
+                    self._set_joystick_type_and_reload("bt2pro")
+                    return True
+                return False
         except Exception as e:
             rospy.logwarn(f"maybe_switch_mapping_by_msg_size failed: {e}")
         return False
@@ -396,10 +440,10 @@ class JoyCustomizeConfigNode:
         # 根据消息尺寸动态切换映射
         if len(joy_msg.buttons) != self.JOYSTICK_BUTTON_NUM or len(joy_msg.axes) != self.JOYSTICK_AXIS_NUM:
             switched = self._maybe_switch_mapping_by_msg_size(joy_msg)
-            rospy.logwarn(f"Invalid joy msg. Buttons: {len(joy_msg.buttons)}, Axes: {len(joy_msg.axes)}")
 
             if not switched:
-                rospy.logwarn(f"Invalid joy msg. Buttons: {len(joy_msg.buttons)}, Axes: {len(joy_msg.axes)}")
+                # 降低日志级别，避免频繁打印无效消息警告
+                rospy.logdebug(f"Invalid joy msg. Buttons: {len(joy_msg.buttons)}, Axes: {len(joy_msg.axes)}")
                 return
 
         # Initialize previous states on first message

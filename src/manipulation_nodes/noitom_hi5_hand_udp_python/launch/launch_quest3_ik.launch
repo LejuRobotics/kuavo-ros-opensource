@@ -53,6 +53,7 @@
     <arg name="zyx_limits_final" default="[1.4923, 1.4923, 1.4923]" /> <!-- 最终四元数角度限制 [z, y, x] -->
     <arg name="zyx_limits_ee" default="[1.4923, 1.4923, 1.4923]" /> <!-- 相对end-effector的四元数角度限制 [z, y, x] -->
     <arg name="zyx_limits_link4" default="[1.5708, 0.6, 0.6]" /> <!-- 相对link4的四元数角度限制 [z, y, x] -->
+    <param name="/quest3/use_step_turning" value="$(arg use_step_turning)" />
     
     <!-- motion_capture_ik -->
     <!-- Python IK Node (启动当 use_cpp_incremental_ik=false 时) -->
