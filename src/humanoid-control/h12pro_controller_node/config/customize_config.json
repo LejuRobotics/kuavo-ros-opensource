@@ -62,5 +62,37 @@
     "music_name": [
       ""
     ]
+  },
+  "vmp_action_RL_A": {
+    "action_name": [
+      "yc_126_spec"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "vmp_action_RL_B": {
+    "action_name": [
+      "yc_01_front_kick"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "vmp_action_RL_C": {
+    "action_name": [
+      "yc_02_side_kick"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "vmp_action_RL_D": {
+    "action_name": [
+      "yc_06_straight_punch"
+    ],
+    "music_name": [
+      ""
+    ]
   }
 }

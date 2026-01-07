@@ -4,6 +4,7 @@
 #include "humanoid_controllers/rl/RLControllerManager.h"
 #include "humanoid_controllers/rl/FallStandController.h"
 #include "humanoid_controllers/rl/AmpWalkController.h"
+#include "humanoid_controllers/rl/VMPController.h"
 #include <algorithm>
 #include <ros/ros.h>
 #include <yaml-cpp/yaml.h>
@@ -436,6 +437,11 @@ namespace humanoid_controller
           // AMP 走路控制器
           controller = std::make_unique<AmpWalkController>(name, config_file_abs, nh, ros_logger);
         }
+        else if (type == RLControllerType::VMP_CONTROLLER)
+        {
+          // VMP 控制器
+          controller = std::make_unique<VMPController>(name, config_file_abs, nh, ros_logger);
+        }
         else
         {
           ROS_WARN("[RLControllerManager] Controller type '%s' not yet implemented, skipping", type_str.c_str());
@@ -494,7 +500,9 @@ namespace humanoid_controller
                                                           &RLControllerManager::switchToNextControllerCallback, this);
     set_rl_switch_mode_srv_ = nh.advertiseService("/humanoid_controller/set_rl_switch_mode",
                                                   &RLControllerManager::setRLSwitchModeCallback, this);
-    
+    switch_to_vmp_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_vmp_controller",
+                                                        &RLControllerManager::switchToVMPControllerCallback, this);
+
     ROS_INFO("[RLControllerManager] ROS services initialized");
     return true;
   }
@@ -528,7 +536,7 @@ namespace humanoid_controller
         controllers_by_type_[type].push_back(name);
       }
       
-      // 如果是AMP_CONTROLLER类型，添加到walk_controllers_列表
+      // 如果是AMP_CONTROLLER/VMP_CONTROLLER类型，添加到walk_controllers_列表
       if (type == RLControllerType::AMP_CONTROLLER)
       {
         walk_controllers_.push_back(name);
@@ -752,6 +760,50 @@ namespace humanoid_controller
                   (req.data ? "direct" : "interpolated (via MPC)");
 
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());
+    return true;
+  }
+
+  bool RLControllerManager::switchToVMPControllerCallback(std_srvs::Trigger::Request &req,
+                                                          std_srvs::Trigger::Response &res)
+  {
+    ROS_INFO("[RLControllerManager] Received switch to VMP controller request");
+
+    // 查找VMP控制器
+    std::string vmp_controller_name;
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      for (const auto& pair : controllers_)
+      {
+        if (pair.second->getType() == RLControllerType::VMP_CONTROLLER)
+        {
+          vmp_controller_name = pair.first;
+          break;
+        }
+      }
+    }
+
+    if (vmp_controller_name.empty())
+    {
+      res.success = false;
+      res.message = "VMP controller not found. Please check if VMP controller is enabled in rl_controllers.yaml";
+      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+      return true;
+    }
+
+    // 执行控制器切换
+    bool switch_ok = switchController(vmp_controller_name);
+    if (!switch_ok)
+    {
+      res.success = false;
+      res.message = "Failed to switch to VMP controller: " + vmp_controller_name;
+      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+      return true;
+    }
+
+    res.success = true;
+    res.message = "Successfully switched to VMP controller: " + vmp_controller_name;
+    ROS_INFO("[RLControllerManager] %s", res.message.c_str());
+
     return true;
   }
 

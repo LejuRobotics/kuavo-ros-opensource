@@ -269,6 +269,7 @@ add_library(${PROJECT_NAME}
         src/rl/armController.cpp
         # src/AMPController.cpp
         # src/MinicController.cpp
+        src/rl/VMPController.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}

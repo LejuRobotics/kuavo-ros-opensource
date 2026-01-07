@@ -7,6 +7,7 @@
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
 #include "std_srvs/SetBool.h"
+#include "std_srvs/Trigger.h"
 #include <map>
 #include <vector>
 #include <string>
@@ -241,6 +242,12 @@ namespace humanoid_controller
                                  std_srvs::SetBool::Response &res);
 
     /**
+     * @brief ROS服务回调：切换到VMP控制器
+     */
+    bool switchToVMPControllerCallback(std_srvs::Trigger::Request &req,
+                                       std_srvs::Trigger::Response &res);
+
+    /**
      * @brief 更新按类型分组的控制器列表
      */
     void updateControllerListsByType();
@@ -261,6 +268,7 @@ namespace humanoid_controller
     ros::ServiceServer get_controller_list_srv_;     ///< 获取控制器列表服务
     ros::ServiceServer switch_to_next_controller_srv_;  ///< 切换到下一个控制器服务
     ros::ServiceServer set_rl_switch_mode_srv_;       ///< 设置RL切换模式服务
+    ros::ServiceServer switch_to_vmp_controller_srv_; ///< 切换到VMP控制器服务
     ros::NodeHandle* nh_ptr_;                       ///< ROS节点句柄指针
 
     // RL切换模式：true 直接切换到RL；false 使用MPC过渡

@@ -1,0 +1,6 @@
+# 通用字符串请求服务，类似 std_srvs/SetBool
+# 可复用于多种场景，避免重复定义相似的服务类型
+string data
+---
+bool success
+string message

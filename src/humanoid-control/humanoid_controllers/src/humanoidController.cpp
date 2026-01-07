@@ -2033,6 +2033,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         stateEstimate_->setFixFeetHeights(false);
         isPreUpdateComplete = true;
         standupTime_ = currentObservation_.time;
+        resetting_mpc_state_ = ResettingMpcState::NOMAL;  // 设置状态为非初始化状态，允许可视化更新
 
         std_msgs::Int8 bot_stand_up_complete;
         bot_stand_up_complete.data = 1;
@@ -3022,8 +3023,19 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     if (visualizeHumanoid_ && resetting_mpc_state_ != ResettingMpcState::RESET_INITIAL_POLICY)
     {
       robotVisualizer_->updateSimplifiedArmPositions(simplifiedJointPos_);
-      if (mrtRosInterface_->isPolicyUpdated())
-        robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+      // RL 模式下也允许更新可视化（即使 MPC policy 未更新）
+      if (mrtRosInterface_->isPolicyUpdated() || is_rl_controller_)
+      {
+        if (is_rl_controller_)
+        {
+          // RL 模式下，直接使用 publishObservation 发布 tf 树（不需要 MPC 的 policy 和 command）
+          robotVisualizer_->publishObservation(ros::Time::now(), currentObservation_);
+        }
+        else
+        {
+          robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+        }
+      }
       robotVisualizer_->updateHeadJointPositions(sensor_data_head_.jointPos_);
       // 更新灵巧手可视化
       robotVisualizer_->updateHandJointPositions(dexhand_joint_pos_);

@@ -142,6 +142,8 @@ add_message_files(
   mpc_input.msg
 
   robotWaistControl.msg
+  # VMP Controller
+  VMPTrajectoryState.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -209,6 +211,8 @@ add_service_files(
 
   # Lb quick mode
   changeLbQuickModeSrv.srv
+  SetString.srv
+  GetStringList.srv
 )
 
 ## Generate actions in the 'action' folder

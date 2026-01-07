@@ -79,7 +79,7 @@ class ArmTrajectoryBezierDemo:
                     self.INIT_ARM_POS = base_init
             self.current_arm_joint_state = [0] * tact_length
         elif self.robot_class == ROBAN:
-            self.INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]# task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+            self.INIT_ARM_POS = [22.91831, 10, 0, -45.83662, 22.91831, -10, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]# task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
             self.current_arm_joint_state = [0] * self.ROBAN_TACT_LENGTH
 
         # rospy.spin()
@@ -263,11 +263,200 @@ class ArmTrajectoryBezierDemo:
             rospy.logerr(f"Error reading file {file_path}: {e}")
             return None
 
+    def validate_tact_file(self, data):
+        """
+        验证tact文件的合法性，以抱拳.tact为标准
+        :param data: 加载的JSON数据
+        :return: (is_valid, error_message)
+        """
+        errors = []
+        
+        # 检查必需字段
+        required_fields = ["frames", "finish", "first", "robotType"]
+        for field in required_fields:
+            if field not in data:
+                return False, f"缺少必需字段: {field}"
+        
+        # 通过机器人版本判断机器人类型，确定servos数组的期望长度
+        if self.robot_class == ROBAN:
+            expected_servos_length = self.ROBAN_TACT_LENGTH
+            expected_attribute_keys = set(str(i) for i in range(1, self.ROBAN_TACT_LENGTH + 1))
+        else:  # KUAVO
+            tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
+            expected_servos_length = tact_length
+            expected_attribute_keys = set(str(i) for i in range(1, tact_length + 1))
+        
+        frames = data.get("frames", [])
+        if not frames:
+            return False, "frames数组为空"
+        
+        # 检查每个frame
+        for frame_idx, frame in enumerate(frames):
+            # 检查servos数组
+            if "servos" not in frame:
+                errors.append(f"frame[{frame_idx}]: 缺少servos字段")
+                continue
+            
+            servos = frame["servos"]
+            if not isinstance(servos, list):
+                errors.append(f"frame[{frame_idx}]: servos必须是数组")
+                continue
+            
+            # 检查servos数组长度
+            if len(servos) != expected_servos_length:
+                errors.append(f"frame[{frame_idx}]: servos数组长度应为{expected_servos_length}，实际为{len(servos)}")
+            
+            # 检查servos数组中的值（不能为null，必须是数字）
+            for servo_idx, servo_value in enumerate(servos):
+                if servo_value is None:
+                    errors.append(f"frame[{frame_idx}]: servos[{servo_idx}]不能为null")
+                elif not isinstance(servo_value, (int, float)):
+                    errors.append(f"frame[{frame_idx}]: servos[{servo_idx}]必须是数字，实际类型为{type(servo_value).__name__}")
+            
+            # 检查keyframe
+            if "keyframe" not in frame:
+                errors.append(f"frame[{frame_idx}]: 缺少keyframe字段")
+            else:
+                keyframe = frame["keyframe"]
+                if not isinstance(keyframe, (int, float)):
+                    errors.append(f"frame[{frame_idx}]: keyframe必须是数字")
+                elif keyframe < 0:
+                    errors.append(f"frame[{frame_idx}]: keyframe不能为负数")
+            
+            # 检查attribute
+            if "attribute" not in frame:
+                errors.append(f"frame[{frame_idx}]: 缺少attribute字段")
+                continue
+            
+            attribute = frame["attribute"]
+            if not isinstance(attribute, dict):
+                errors.append(f"frame[{frame_idx}]: attribute必须是对象-f")
+                continue
+            
+            # 检查attribute中的键
+            actual_keys = set(attribute.keys())
+            missing_keys = expected_attribute_keys - actual_keys
+            if missing_keys:
+                errors.append(f"frame[{frame_idx}]: attribute缺少键: {sorted(missing_keys)}")
+            
+            # 检查每个attribute项的结构
+            for key in sorted(expected_attribute_keys):
+                if key not in attribute:
+                    continue
+                
+                attr_item = attribute[key]
+                if not isinstance(attr_item, dict):
+                    errors.append(f"frame[{frame_idx}]: attribute['{key}']必须是对象")
+                    continue
+                
+                # 检查CP字段
+                if "CP" not in attr_item:
+                    errors.append(f"frame[{frame_idx}]: attribute['{key}']缺少CP字段")
+                else:
+                    CP = attr_item["CP"]
+                    if not isinstance(CP, list) or len(CP) != 2:
+                        errors.append(f"frame[{frame_idx}]: attribute['{key}'].CP必须是包含2个元素的数组")
+                    else:
+                        for cp_idx, cp_point in enumerate(CP):
+                            if not isinstance(cp_point, list) or len(cp_point) != 2:
+                                errors.append(f"frame[{frame_idx}]: attribute['{key}'].CP[{cp_idx}]必须是[x, y]格式的数组")
+                            else:
+                                if not all(isinstance(x, (int, float)) for x in cp_point):
+                                    errors.append(f"frame[{frame_idx}]: attribute['{key}'].CP[{cp_idx}]的元素必须是数字")
+                
+                # 检查CPType字段
+                if "CPType" not in attr_item:
+                    errors.append(f"frame[{frame_idx}]: attribute['{key}']缺少CPType字段")
+                else:
+                    CPType = attr_item["CPType"]
+                    if not isinstance(CPType, list) or len(CPType) != 2:
+                        errors.append(f"frame[{frame_idx}]: attribute['{key}'].CPType必须是包含2个元素的数组")
+                    else:
+                        if not all(isinstance(x, str) for x in CPType):
+                            errors.append(f"frame[{frame_idx}]: attribute['{key}'].CPType的元素必须是字符串")
+                        # 检查CPType的值（通常是"AUTO"）
+                        for cp_type_idx, cp_type_value in enumerate(CPType):
+                            if cp_type_value not in ["AUTO", "MANUAL"]:
+                                errors.append(f"frame[{frame_idx}]: attribute['{key}'].CPType[{cp_type_idx}]应为'AUTO'或'MANUAL'，实际为'{cp_type_value}'")
+        
+        # 检查finish和first字段
+        numeric_fields = ["finish", "first"]
+        for field in numeric_fields:
+            field_value = data.get(field)
+            if field_value is not None:
+                if not isinstance(field_value, (int, float)):
+                    errors.append(f"{field}字段必须是数字")
+                elif field_value < 0:
+                    errors.append(f"{field}字段不能为负数")
+        
+        if errors:
+            error_msg = "文件合法性检查失败:\n" + "\n".join(f"  - {err}" for err in errors)
+            return False, error_msg
+        
+        return True, None
+
+    def create_init_stand_frame(self, frames):
+        """
+        创建初始站立帧（0f处）
+        如果0f处没有动作帧，使用指定的初始站立姿态
+        :param frames: 现有的frames列表，用于获取servos长度和attribute结构
+        :return: 初始站立帧字典
+        """
+        # 根据机器人类型确定初始站立帧的servos值
+        if self.robot_class == KUAVO:
+            # KUAVO的初始站立帧值（前14个关节）
+            init_stand_servos = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0]
+            tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
+        else:  # ROBAN
+            # ROBAN的初始站立帧值（前8个关节），与抱拳.tact等标准动作文件保持一致
+            init_stand_servos = [22.6, 10, 0, -54.4, 22.6, -10, 0, -54.4]
+            tact_length = self.ROBAN_TACT_LENGTH
+        
+        # 如果frames不为空，使用第一个frame来确定servos长度和attribute结构
+        if frames and len(frames) > 0:
+            first_frame = frames[0]
+            expected_length = len(first_frame.get("servos", []))
+            # 使用第一个frame的attribute结构作为模板
+            template_attribute = first_frame.get("attribute", {})
+        else:
+            expected_length = tact_length
+            template_attribute = {}
+        
+        # 补全servos数组到期望长度
+        if len(init_stand_servos) < expected_length:
+            servos = init_stand_servos + [0] * (expected_length - len(init_stand_servos))
+        else:
+            servos = init_stand_servos[:expected_length]
+        
+        # 构造attribute，如果没有模板则创建默认结构
+        if template_attribute:
+            # 深拷贝模板attribute，保持与原始文件结构一致（包括是否有select字段）
+            import copy
+            attribute = copy.deepcopy(template_attribute)
+        else:
+            # 创建默认的attribute结构，与标准tact文件格式保持一致
+            attribute = {}
+            for i in range(1, expected_length + 1):
+                attribute[str(i)] = {
+                    "CP": [[0, 0], [0, 0]],  # 与标准tact文件格式一致
+                    "CPType": ["AUTO", "AUTO"]
+                    # 注意：不添加"select"字段，与第一个frame的格式保持一致
+                }
+        
+        # 创建初始站立帧
+        init_frame = {
+            "servos": servos,
+            "keyframe": 0,
+            "attribute": attribute
+        }
+
+        return init_frame
+
     def add_init_frame(self, frames):
         action_data = {}
 
         # rl 要在刚开始插入当前状态为初始值来平滑过渡，ocs2 不需要
-        if self.kuavo_control_scheme == "rl":
+        if self.kuavo_control_scheme == "rl" or self.kuavo_control_scheme == "multi":
             import copy
             for frame in frames:
                 frame["keyframe"] += 100
@@ -550,6 +739,14 @@ class ArmTrajectoryBezierDemo:
             return ExecuteArmActionResponse(success=False, message=msg)
 
         robot_type_raw = data.get("robotType", None)
+        
+        # 验证文件合法性（以抱拳.tact为标准）
+        is_valid, validation_error = self.validate_tact_file(data)
+        if not is_valid:
+            rospy.logerr(f"Tact file validation failed: {validation_error}")
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=f"文件合法性检查失败: {validation_error}")
+        
         if robot_type_raw is None:
             msg = "Action file missing required field: robotType"
             rospy.logerr(msg)
@@ -568,9 +765,10 @@ class ArmTrajectoryBezierDemo:
             41: [41],
             42: [42],
             45: [43, 45, 46, 48, 49],
-            11: [11, 13, 14],
-            13: [11, 13, 14],
-            14: [11, 13, 14],
+            11: [11, 13, 14, 15],
+            13: [11, 13, 14, 15],
+            14: [11, 13, 14, 15],
+            15: [11, 13, 14, 15],
         }
         allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
         # 使用 version_number() 获取版本号数字进行比较
@@ -593,11 +791,21 @@ class ArmTrajectoryBezierDemo:
 
         # 读取动作完成时间
         finish_time = data.get("finish", 0) * 0.01 # 转换为秒
-        if self.kuavo_control_scheme == "rl":
+        if self.kuavo_control_scheme == "rl" or self.kuavo_control_scheme == "multi":
             finish_time += 1.0
         self.END_FRAME_TIME = finish_time
 
-        action_data = self.add_init_frame(data["frames"])
+        # 检查0f处是否有动作帧，如果没有则添加初始站立帧
+        frames = data["frames"]
+        has_frame_at_0f = any(frame.get("keyframe", -1) == 0 for frame in frames)
+        
+        if not has_frame_at_0f:
+            # 创建初始站立帧
+            init_stand_frame = self.create_init_stand_frame(frames)
+            frames.insert(0, init_stand_frame)
+            rospy.loginfo("0f处没有动作帧，已添加初始站立帧")
+
+        action_data = self.add_init_frame(frames)
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 

@@ -249,7 +249,7 @@ class Quest3BoneFramePublisher:
             yaw = max(min(self.normalize_degree_in_180(round(rpy_deg[1], 2)), self.head_motion_range["yaw"][1]), self.head_motion_range["yaw"][0])
             
             msg = robotHeadMotionData()
-            msg.joint_data = [yaw, pitch]
+            msg.joint_data = [yaw, pitch] 
             self.head_data_pub.publish(msg)
             
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:

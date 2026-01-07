@@ -1,10 +1,16 @@
 # Pick & Place Box 测试脚本说明
 
-本目录包含了基于 PyTrees 行为树框架的机器人控制测试脚本，用于演示机器人的各个部位控制功能。所有脚本都使用 AprilTag 作为参考点进行定位和控制。
+## 文件夹路径
+
+src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box
+
+## 文件夹内容说明
+
+该目录包含了基于 PyTrees 行为树框架的机器人控制测试脚本，用于演示机器人的各个部位控制功能。所有脚本都使用 AprilTag 作为参考点进行定位和控制。
 
 ## 脚本概述
 
-### 1. case_test_arm.py - 手臂控制测试
+### 1. case_wheel_test_arm.py - 手臂控制测试
 
 **功能描述：**
 - 演示机器人手臂的精确控制
@@ -62,7 +68,7 @@ back_default = False                # 运动结束后是否返回默认控制模
 
 **使用方法：**
 ```bash
-python case_test_arm.py
+python case_wheel_test_arm.py
 ```
 
 **支持环境：**
@@ -71,7 +77,7 @@ python case_test_arm.py
 
 ---
 
-### 2. case_test_head.py - 头部搜索测试
+### 2. case_wheel_test_head.py - 头部搜索测试
 
 **功能描述：**
 - 演示机器人头部的智能搜索功能
@@ -93,7 +99,7 @@ HEAD_SEARCH_PITCHES = [-10°, 0°, 10°]                         # 头部搜索�
 
 **使用方法：**
 ```bash
-python case_test_head.py
+python case_wheel_test_head.py
 ```
 
 **环境要求：**
@@ -107,7 +113,7 @@ python case_test_head.py
 
 ---
 
-### 3. case_test_move.py - 移动控制测试
+### 3. case_wheel_test_move.py - 移动控制测试
 
 **功能描述：**
 - 演示机器人的导航和移动功能
@@ -127,11 +133,11 @@ python case_test_head.py
 **使用方法：**
 ```bash
 # 使用默认 cmd_pos 模式
-python case_test_move.py
+python case_wheel_test_move.py
 
 # 指定控制模式
-python case_test_move.py --control-mode cmd_pos_world
-python case_test_move.py --control-mode cmd_vel
+python case_wheel_test_move.py --control-mode cmd_pos_world
+python case_wheel_test_move.py --control-mode cmd_vel
 ```
 
 **支持环境：**
@@ -140,7 +146,7 @@ python case_test_move.py --control-mode cmd_vel
 
 ---
 
-### 4. case_test_torso.py - 躯干控制测试
+### 4. case_wheel_test_torso.py - 躯干控制测试
 
 **功能描述：**
 - 演示机器人躯干的位置和姿态控制
@@ -160,7 +166,7 @@ TORso_TARGET_EULER = (0.0, 10°, 90°)    # 目标姿态 (roll, pitch, yaw)
 
 **使用方法：**
 ```bash
-python case_test_torso.py
+python case_wheel_test_torso.py
 ```
 
 **支持环境：**
@@ -169,7 +175,7 @@ python case_test_torso.py
 
 ---
 
-### 5. case_test_torso_joint.py - 躯干关节控制测试
+### 5. case_wheel_test_torso_joint.py - 躯干关节控制测试
 
 **功能描述：**
 - 演示轮臂机器人下肢关节的精确控制
@@ -190,7 +196,7 @@ TOTAL_TIME = 8.0                                     # 执行时间（秒）
 
 **使用方法：**
 ```bash
-python case_test_torso_joint.py
+python case_wheel_test_torso_joint.py
 ```
 
 **支持环境：**
