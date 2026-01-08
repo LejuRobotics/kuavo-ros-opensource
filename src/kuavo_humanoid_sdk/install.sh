@@ -12,8 +12,17 @@ echo "🔄 Switching to faster pip source..."
 ORIGINAL_PIP_SOURCE=$(pip config get global.index-url 2>/dev/null || echo "")
 echo "Original pip source: ${ORIGINAL_PIP_SOURCE:-'default'}"
 
-# Switch to Tsinghua University mirror (faster for Chinese users)
-pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+# Define multiple pip mirrors (in order of preference)
+PIP_MIRRORS=(
+    "https://pypi.tuna.tsinghua.edu.cn/simple/"  # 清华大学镜像
+    "https://mirrors.aliyun.com/pypi/simple/"     # 阿里云镜像
+    "https://pypi.mirrors.ustc.edu.cn/simple/"   # 中科大镜像
+    "https://pypi.org/simple/"                    # 官方 PyPI (fallback)
+)
+
+# Switch to first mirror (Tsinghua University)
+CURRENT_MIRROR_INDEX=0
+pip config set global.index-url "${PIP_MIRRORS[$CURRENT_MIRROR_INDEX]}"
 echo "✅ Switched to Tsinghua University mirror"
 
 # Function to restore original pip source
@@ -30,6 +39,72 @@ restore_pip_source() {
 
 # Set trap to restore source on script exit
 trap restore_pip_source EXIT
+
+# Function to try installing with different mirrors
+install_with_fallback() {
+    local install_cmd="$1"
+    local max_retries=2
+    local retry_count=0
+    local temp_log=$(mktemp)
+    
+    # Clean up temp file on exit
+    trap "rm -f $temp_log" RETURN
+    
+    while [ $retry_count -lt $max_retries ]; do
+        # Try current mirror
+        echo -e "\033[33m尝试使用镜像源: ${PIP_MIRRORS[$CURRENT_MIRROR_INDEX]}\033[0m"
+        
+        # Execute command and capture output
+        if eval "$install_cmd" > "$temp_log" 2>&1; then
+            cat "$temp_log"
+            echo -e "\033[32m✅ 安装成功！\033[0m"
+            return 0
+        fi
+        
+        # Show error output
+        cat "$temp_log" >&2
+        
+        # Check if error is 403 Forbidden or connection issue
+        if grep -qiE "403|Forbidden|Connection.*refused|timeout|SSL.*error" "$temp_log"; then
+            echo -e "\033[33m⚠️  当前镜像源出现问题，尝试切换到下一个镜像源...\033[0m"
+            
+            # Try next mirror
+            CURRENT_MIRROR_INDEX=$((CURRENT_MIRROR_INDEX + 1))
+            
+            if [ $CURRENT_MIRROR_INDEX -ge ${#PIP_MIRRORS[@]} ]; then
+                echo -e "\033[31m❌ 所有镜像源都尝试失败，尝试使用官方 PyPI\033[0m"
+                # Last resort: try official PyPI
+                pip config set global.index-url "https://pypi.org/simple/"
+                pip config unset global.trusted-host 2>/dev/null || true
+                
+                if eval "$install_cmd"; then
+                    echo -e "\033[32m✅ 使用官方 PyPI 安装成功！\033[0m"
+                    return 0
+                else
+                    echo -e "\033[31m❌ 所有安装方式都失败了\033[0m"
+                    return 1
+                fi
+            fi
+            
+            # Switch to next mirror
+            pip config set global.index-url "${PIP_MIRRORS[$CURRENT_MIRROR_INDEX]}"
+            echo -e "\033[32m已切换到: ${PIP_MIRRORS[$CURRENT_MIRROR_INDEX]}\033[0m"
+            
+            # Reset retry count when switching mirror
+            retry_count=0
+        else
+            # Other errors, just retry
+            retry_count=$((retry_count + 1))
+            if [ $retry_count -lt $max_retries ]; then
+                echo -e "\033[33m⚠️  安装失败，${retry_count}/${max_retries} 次重试...\033[0m"
+                sleep 2
+            fi
+        fi
+    done
+    
+    echo -e "\033[31m❌ 安装失败，已尝试所有镜像源和重试次数\033[0m"
+    return 1
+}
 
 # echo "SCRIPT_DIR: $SCRIPT_DIR"
 # echo "PROJECT_DIR: $PROJECT_DIR"
@@ -271,11 +346,12 @@ pushd $SCRIPT_DIR
 # Upgrade conflicting dependencies first
 echo "🔧 Upgrading conflicting dependencies..."
 # Only upgrade requests, skip scikit-learn due to Python 3.8 compatibility
-pip install --upgrade "requests>=2.25.0" || echo "⚠️  Warning: requests could not be upgraded, continuing with installation..."
+install_with_fallback 'pip install --upgrade "requests>=2.25.0"' || echo "⚠️  Warning: requests could not be upgraded, continuing with installation..."
 # Note: scikit-learn 1.6+ requires Python 3.9+, keeping 1.3.2 for Python 3.8 compatibility
 
-# Install the package editably
-if KUAVO_HUMANOID_SDK_VERSION="$VERSION" pip install -e ./; then
+# Install the package editably with fallback mechanism
+echo "🔧 Installing kuavo_humanoid_sdk..."
+if install_with_fallback "KUAVO_HUMANOID_SDK_VERSION=\"$VERSION\" pip install -e ./"; then
     echo -e "\033[32m\n🎉🎉🎉 Installation successful! \033[0m"
     echo -e "\033[32m-------------------------------------------\033[0m"
     pip show kuavo_humanoid_sdk
@@ -289,5 +365,9 @@ if KUAVO_HUMANOID_SDK_VERSION="$VERSION" pip install -e ./; then
     echo -e "\033[33m🔧 Setting file permissions for all users...\033[0m"
     sudo chmod -R a+rwx "$SCRIPT_DIR"
     echo -e "\033[32m✅ File permissions set for all users\033[0m"
+else
+    echo -e "\033[31m❌ Installation failed after trying all available mirrors\033[0m"
+    echo -e "\033[33m💡 建议检查网络连接 \033[0m"
+    exit_with_failure
 fi
 popd
