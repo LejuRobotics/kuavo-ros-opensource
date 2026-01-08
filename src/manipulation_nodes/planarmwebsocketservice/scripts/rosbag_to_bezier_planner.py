@@ -117,16 +117,24 @@ class RosbagToBezierPlanner:
 
         try:
             bag = rosbag.Bag(bag_file_path)
-            sensors_start_time = None
-            hand_start_time = None
+            global_start_time = None  # 使用统一的全局起始时间
+
+            for topic, msg, t in bag.read_messages(topics=[sensors_topic_name,hand_topic_name]):
+                # 使用两个话题中最早的时间作为全局起始时间
+                if global_start_time is None:
+                    global_start_time = msg.header.stamp.to_sec()
+                else:
+                    global_start_time = min(global_start_time, msg.header.stamp.to_sec())
+
+            # 重新读取bag，使用统一的起始时间
+            bag.close()
+            bag = rosbag.Bag(bag_file_path)
+            rospy.loginfo(f"Global start time: {global_start_time:.3f}s")
 
             for topic, msg, t in bag.read_messages(topics=[sensors_topic_name,hand_topic_name]):
                 if topic == sensors_topic_name:
-                    if sensors_start_time is None:
-                        sensors_start_time = msg.header.stamp.to_sec()
-
-                    # 计算相对时间
-                    relative_time = msg.header.stamp.to_sec() - sensors_start_time
+                    # 计算相对时间（使用全局起始时间）
+                    relative_time = msg.header.stamp.to_sec() - global_start_time
 
                     # 提取手臂关节数据
                     arm_positions = []
@@ -198,11 +206,8 @@ class RosbagToBezierPlanner:
                     self.joint_data.append(control_positions)
                     self.arm_timestamp_data.append(relative_time)
                 elif topic == hand_topic_name:
-                    if hand_start_time is None:
-                        hand_start_time = msg.header.stamp.to_sec()
-
-                    # 计算相对时间
-                    relative_time = msg.header.stamp.to_sec() - hand_start_time
+                    # 计算相对时间（使用全局起始时间）
+                    relative_time = msg.header.stamp.to_sec() - global_start_time
                     # 确保 msg.position 是列表（可能是元组）
                     hand_position_list = list(msg.position) if hasattr(msg.position, '__iter__') else []
                     
@@ -241,6 +246,12 @@ class RosbagToBezierPlanner:
             
             rospy.loginfo(f"Loaded {sensors_count} data points from {sensors_topic_name}")
             rospy.loginfo(f"Loaded {hand_count} data points from {hand_topic_name}")
+
+            # 打印时间范围信息，帮助调试时间对齐问题
+            if self.arm_timestamp_data:
+                rospy.loginfo(f"  {sensors_topic_name} time range: {self.arm_timestamp_data[0]:.3f}s - {self.arm_timestamp_data[-1]:.3f}s")
+            if self.hand_timestamp_data:
+                rospy.loginfo(f"  {hand_topic_name} time range: {self.hand_timestamp_data[0]:.3f}s - {self.hand_timestamp_data[-1]:.3f}s")
             
             # 如果长度不一致，用较短话题的最后一个值填充
             if sensors_count != hand_count:
@@ -839,7 +850,7 @@ class RosbagToBezierPlanner:
             "finish": original_finish,
             "first": original_first,
             "version": "rosbag_to_act_frames",
-            "robotType": self.robot_version
+            "robotType": str(self.robot_version)
         }
 
         # 为每个轨迹点创建frame
@@ -964,7 +975,7 @@ class RosbagToBezierPlanner:
             "finish": finish_keyframe,
             "first": first_keyframe,
             "version": "rosbag_to_act",
-            "robotType": self.robot_version
+            "robotType": str(self.robot_version)
         }
         
         # 为每个时间点创建frame
@@ -1601,27 +1612,46 @@ class RosbagToBezierPlanner:
             rospy.logerr("Failed to load rosbag data")
             return False
 
-        # 步骤1.5: 合并手部数据到手臂数据中
+        # 步骤1.5: 合并手部数据到手臂数据中（按时间戳对齐）
         # 如果有手部数据，将手指部分（索引14-25）合并到joint_data中
         if len(self.hand_sensors_data) > 0 and len(self.joint_data) > 0:
-            min_len = min(len(self.joint_data), len(self.hand_sensors_data))
             finger_start_idx = 14  # 手指数据在joint_data中的起始索引
             finger_end_idx = 26    # 手指数据在joint_data中的结束索引（不包含）
-            
+
             merged_count = 0
-            for i in range(min_len):
-                # 检查数据长度：v40-需要28个，v50+需要29个（包含腰部）
-                expected_len = 29 if self.has_waist else 28
-                if len(self.joint_data[i]) >= finger_end_idx and len(self.hand_sensors_data[i]) >= finger_end_idx:
+            hand_idx = 0  # 手部数据的当前索引
+
+            for arm_idx in range(len(self.joint_data)):
+                arm_time = self.arm_timestamp_data[arm_idx]
+
+                # 找到时间最接近的手部数据点
+                # 向前搜索，直到找到时间戳大于或等于arm_time的手部数据
+                while hand_idx < len(self.hand_timestamp_data) - 1:
+                    current_hand_time = self.hand_timestamp_data[hand_idx]
+                    next_hand_time = self.hand_timestamp_data[hand_idx + 1]
+
+                    # 如果下一个手部时间点更接近arm_time，则移动到下一个
+                    if abs(next_hand_time - arm_time) < abs(current_hand_time - arm_time):
+                        hand_idx += 1
+                    else:
+                        break
+
+                # 检查时间差是否在合理范围内（例如100ms）
+                time_diff = abs(self.hand_timestamp_data[hand_idx] - arm_time)
+                if time_diff > 0.1:  # 时间差超过100ms，跳过
+                    continue
+
+                # 检查数据长度
+                if len(self.joint_data[arm_idx]) >= finger_end_idx and len(self.hand_sensors_data[hand_idx]) >= finger_end_idx:
                     # 将手部数据中的手指部分（索引14-25）复制到joint_data对应位置
                     for finger_idx in range(finger_start_idx, finger_end_idx):
-                        self.joint_data[i][finger_idx] = self.hand_sensors_data[i][finger_idx]
+                        self.joint_data[arm_idx][finger_idx] = self.hand_sensors_data[hand_idx][finger_idx]
                     merged_count += 1
-            
+
             if merged_count > 0:
-                rospy.loginfo(f"Merged finger data from hand_sensors_data into joint_data: {merged_count} points")
+                rospy.loginfo(f"Merged finger data by timestamp alignment: {merged_count}/{len(self.joint_data)} points")
             else:
-                rospy.logwarn("Hand sensors data exists but could not be merged (data length mismatch)")
+                rospy.logwarn("Hand sensors data exists but could not be merged (timestamp mismatch or data length mismatch)")
         elif len(self.hand_sensors_data) > 0:
             rospy.logwarn("Hand sensors data exists but no joint_data to merge into")
 

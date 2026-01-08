@@ -1,4 +1,38 @@
 #!/usr/bin/env python
+import subprocess
+import sys
+import os
+
+def check_and_install_dependencies():
+    """检查并安装必要的依赖包"""
+    import importlib.util
+
+    # 检查 prompt-toolkit 版本
+    try:
+        import prompt_toolkit
+        if prompt_toolkit.__version__ != "2.0.10":
+            print(f"prompt-toolkit 版本为 {prompt_toolkit.__version__}，需要安装 2.0.10 版本...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "prompt-toolkit==2.0.10"])
+            # 重新加载模块
+            importlib.invalidate_caches()
+    except ImportError:
+        print("prompt-toolkit 未安装，正在安装 2.0.10 版本...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "prompt-toolkit==2.0.10"])
+
+    # 检查 questionary
+    try:
+        import questionary
+        if questionary.__version__ != "2.1.0":
+            print(f"questionary 版本为 {questionary.__version__}，需要安装 2.1.0 版本...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "questionary==2.1.0"])
+            importlib.invalidate_caches()
+    except ImportError:
+        print("questionary 未安装，正在安装 2.1.0 版本...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "questionary==2.1.0"])
+
+# 在导入其他依赖之前检查并安装
+check_and_install_dependencies()
+
 import rosbag
 import argparse
 from collections import defaultdict
@@ -8,9 +42,6 @@ import math
 import json
 from dataclasses import dataclass
 import questionary
-import subprocess
-import os
-import sys
 import rospy
 from questionary import Choice, Separator
 import rich.console
