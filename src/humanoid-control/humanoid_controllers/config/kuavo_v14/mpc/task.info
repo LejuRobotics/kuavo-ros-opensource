@@ -131,7 +131,7 @@ swing_trajectory_config
   swing_shoulder_scale          0.3
   swing_elbow_center            -0.8
   swing_elbow_scale             0.3
-  swing_shoulder_roll_center    0.0
+  swing_shoulder_roll_center    0.1745
 }
 
 ; Multiple_Shooting SQP settings

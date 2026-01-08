@@ -46,6 +46,7 @@ private:
     PyObject *pSetTeachPendantModeMethod{nullptr};
     PyObject *pSetJointGainsMethod{nullptr};
     PyObject *pGetJointGainsMethod{nullptr};
+    PyObject *pSetZeroOffsetAdjustmentsMethod{nullptr};
     PyObject *pJoint_online_list;
     std::string pymodule_path;
     PyGILState_STATE gstate;
@@ -93,6 +94,7 @@ public:
     void changeEncoderZeroRound(int index, double direction) override;
     void adjustZeroPosition(int index, double offset) override;
     std::vector<double> getMotorZeroPoints() override;
+    void setZeroOffsetAdjustments(const std::map<size_t, double>& zero_offset_adjustments) override;
     void set_teach_pendant_mode(int mode_) override;
     bool check_motor_list_state();
     void set_joint_gains(const std::vector<int> &joint_indices, const std::vector<double> &kp_pos, const std::vector<double> &kd_pos) override;

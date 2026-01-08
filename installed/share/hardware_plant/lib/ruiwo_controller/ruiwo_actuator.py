@@ -224,6 +224,9 @@ class RuiWoActuator():
         self.target_update = False
         self.zero_position = [0.0] * 6 + [0.0] * 6 + [0.0] * 2
          # 零点位置
+        # 保存零点时的偏移调整参数（电机索引到偏移量的映射，弧度）
+        self.zero_offset_adjustments = {}
+        self.zero_offset_adjustments_lock = threading.Lock()
         zeros_path = self.get_zero_path()
         if os.path.exists(zeros_path) and not setZero:
             with open(zeros_path, 'r') as file:
@@ -1049,25 +1052,33 @@ class RuiWoActuator():
             
         return {'kp_pos': kp_values, 'kd_pos': kd_values}
 
+    # 设置保存零点时的偏移调整参数
+    def set_zero_offset_adjustments(self, zero_offset_adjustments):
+        """
+        设置保存零点时的偏移调整参数
+        :param zero_offset_adjustments: 电机索引到偏移量的字典（弧度），在保存零点时会应用到对应电机
+        """
+        with self.zero_offset_adjustments_lock:
+            self.zero_offset_adjustments = zero_offset_adjustments.copy()
+        print(f"[RUIWO motor]: Zero offset adjustments set for {len(zero_offset_adjustments)} motors")
+
     # 保存当前的零点位置到文件中
     def save_zero_position(self):
         config_path = self.get_zero_path()
 
-        # 检查机器人版本
-        robot_version = os.getenv("ROBOT_VERSION")
-        is_version_15 = (robot_version == "15")
+        # 获取零点偏移调整参数
+        with self.zero_offset_adjustments_lock:
+            adjustments = self.zero_offset_adjustments.copy()
 
-        # 为1号和5号电机调整10度（转换为弧度），方向相反
+        # 应用传入的偏移调整参数
         zero_position_copy = self.zero_position.copy()
         for i in range(len(zero_position_copy)):
-            # 仅在机器人版本为15时，为1号和5号电机（索引1和5）调整10度（转换为弧度），方向相反
-            if is_version_15:
-                if i == 1:
-                    zero_position_copy[i] -= 10.0 * math.pi / 180.0  # 左电机减少10度
-                    print(f"[RUIWO motor]: Robot version 15 detected, subtracting 10 degrees from left motor {i} zero offset: {self.zero_position[i]} -> {zero_position_copy[i]}")
-                elif i == 5:
-                    zero_position_copy[i] += 10.0 * math.pi / 180.0  # 右电机增加10度
-                    print(f"[RUIWO motor]: Robot version 15 detected, adding 10 degrees to right motor {i} zero offset: {self.zero_position[i]} -> {zero_position_copy[i]}")
+            if i in adjustments:
+                old_offset = zero_position_copy[i]
+                zero_position_copy[i] += adjustments[i]  # 应用调整
+                # 同时更新运行时使用的零点值
+                self.zero_position[i] = zero_position_copy[i]
+                print(f"[RUIWO motor]: Applying zero offset adjustment to motor {i}: {old_offset} -> {zero_position_copy[i]} (adjustment: {adjustments[i]})")
 
         config = {"arms_zero_position": zero_position_copy}
         backup_path = config_path + '.bak'

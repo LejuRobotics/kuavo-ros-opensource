@@ -5,6 +5,7 @@ from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Tag,
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoPose, KuavoManipulationMpcFrame, KuavoManipulationMpcCtrlMode
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.utils import generate_full_bezier_trajectory, \
     interpolate_joint_positions_bezier, calculate_elbow_y, get_elbow_position
+from kuavo_humanoid_sdk.interfaces.data_types import KuavoIKParams
 
 import py_trees
 from py_trees.behaviour import Behaviour
@@ -126,6 +127,7 @@ class NodeTagToArmGoal(Behaviour):
                  right_arm_relative_keypoints,
                  control_type: str = 'eef_world',  # joint 是关节轨迹，eef_world/eef_base是末端轨迹
                  enable_joint_mirroring: bool = True,  # 是否启用关节镜像处理
+                 enable_high_position_accuracy: bool = False,  # 是否启用高位置精度
                  traj_point_num: int = 20,  # 轨迹点数
                  ):
         assert control_type in ['eef_world', 'eef_base', 'joint'], "control_type must be 'eef_world' or 'eef_base' or 'joint'"
@@ -149,6 +151,7 @@ class NodeTagToArmGoal(Behaviour):
 
         self.left_arm_relative_keypoints = left_arm_relative_keypoints
         self.right_arm_relative_keypoints = right_arm_relative_keypoints
+        self.enable_high_position_accuracy = enable_high_position_accuracy
 
     def initialise(self):
         self.logger.debug(f"NodeTagToArmGoal::initialise {self.name}")
@@ -255,17 +258,41 @@ class NodeTagToArmGoal(Behaviour):
                     robot_sdk, "zarm_r4_link", right_elbow_y, False, logger=self.logger)
 
                 target_joint_positions = None
+                custom_param = None
                 for retry in range(5):
                     if retry > 0:
                         left_elbow[1] -= 0.02
                         right_elbow[1] += 0.02
 
+                    if self.enable_high_position_accuracy:
+                        custom_param = KuavoIKParams(
+                                                    major_optimality_tol=1e-3,
+                                                    major_feasibility_tol=1e-3,
+                                                    minor_feasibility_tol=3e-3,
+                                                    major_iterations_limit=100,
+                                                    oritation_constraint_tol=1e-3,
+                                                    pos_constraint_tol=1e-3,
+                                                    pos_cost_weight=10.0,
+                                                    constraint_mode=6
+                                                    )
+                    else:
+                        custom_param = KuavoIKParams(
+                                                    major_optimality_tol=9e-3,
+                                                    major_feasibility_tol=9e-3,
+                                                    minor_feasibility_tol=9e-3,
+                                                    major_iterations_limit=50,
+                                                    oritation_constraint_tol=19e-3,
+                                                    pos_constraint_tol=9e-3,
+                                                    pos_cost_weight=10.0,
+                                                    constraint_mode=0
+                                                    )
                     target_joint_positions = robot_sdk.arm.arm_ik(
                         left_pose=left_target_kuavo_pose,
                         right_pose=right_target_kuavo_pose,
                         left_elbow_pos_xyz=left_elbow,
                         right_elbow_pos_xyz=right_elbow,
-                        arm_q0=current_joints.tolist()
+                        arm_q0=current_joints.tolist(),
+                        params=custom_param
                     )
                     if target_joint_positions is not None:
                         break

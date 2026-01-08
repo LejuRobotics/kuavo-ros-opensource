@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <cstdint>
+#include <map>
 
 /// @brief Revo电机故障码
 /// 一旦驱动板检测到故障，将会从 Motor State 自动切回 Rest State 以保护驱动器和电机
@@ -242,6 +243,13 @@ public:
         std::cout << "setInitPosition interface not implemented" << std::endl;
         return;
     }
+
+    /**
+     * @brief 设置保存零点时的偏移调整参数
+     * @param zero_offset_adjustments 电机索引到偏移量的映射（弧度），在保存零点时会应用到对应电机
+     * @note 此接口用于在保存零点时对特定电机应用额外的偏移调整，例如v15版本机器人的特殊处理
+     */
+    virtual void setZeroOffsetAdjustments(const std::map<size_t, double>& zero_offset_adjustments) = 0;
 };
 
 #endif // RUIWO_ACTUATOR_BASE_H

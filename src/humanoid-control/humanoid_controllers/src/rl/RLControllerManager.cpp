@@ -498,8 +498,8 @@ namespace humanoid_controller
                                                      &RLControllerManager::getControllerListCallback, this);
     switch_to_next_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_next_controller", 
                                                           &RLControllerManager::switchToNextControllerCallback, this);
-    set_rl_switch_mode_srv_ = nh.advertiseService("/humanoid_controller/set_rl_switch_mode",
-                                                  &RLControllerManager::setRLSwitchModeCallback, this);
+    set_fall_down_state_srv_ = nh.advertiseService("/humanoid_controller/set_fall_down_state",
+                                                   &RLControllerManager::setFallDownStateCallback, this);
     switch_to_vmp_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_vmp_controller",
                                                         &RLControllerManager::switchToVMPControllerCallback, this);
 
@@ -747,18 +747,47 @@ namespace humanoid_controller
     return true;
   }
 
-  bool RLControllerManager::setRLSwitchModeCallback(std_srvs::SetBool::Request &req,
-                                                    std_srvs::SetBool::Response &res)
+  bool RLControllerManager::setFallDownStateCallback(std_srvs::SetBool::Request &req,
+                                                     std_srvs::SetBool::Response &res)
   {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    
+    // 调用回调函数设置倒地状态（如果已注册）
+    if (fall_down_state_callback_)
     {
-      std::lock_guard<std::recursive_mutex> lock(mutex_);
-      direct_switch_to_rl_ = req.data;
+      int state = req.data ? 1 : 0;  // 1=FALL_DOWN, 0=STANDING
+      fall_down_state_callback_(state);
     }
-
+    
+    // 如果设置为倒地状态，检查是否存在倒地起身控制器并自动切换
+    if (req.data)
+    {
+      res.message = "fall_down_state_ set to FALL_DOWN (1)";
+      // 检查控制器列表是否存在倒地起身控制器，自动切换过去
+      if (hasController(RLControllerType::FALL_STAND_CONTROLLER))
+      {
+        ROS_INFO("[RLControllerManager] Fall down detected, switching to fall stand controller");
+        bool switch_ok = switchController(RLControllerType::FALL_STAND_CONTROLLER);
+        if (!switch_ok)
+        {
+          ROS_ERROR("[RLControllerManager] Failed to switch to fall stand controller");
+          res.success = false;
+          res.message += " (but failed to switch to fall stand controller)";
+          return true;
+        }
+      }
+      else
+      {
+        ROS_WARN("[RLControllerManager] No fall stand controller available");
+        res.message += " (but no fall stand controller found)";
+      }
+    }
+    else
+    {
+      res.message = "fall_down_state_ set to STANDING (0)";
+    }
+    
     res.success = true;
-    res.message = std::string("Set RL switch mode to ") +
-                  (req.data ? "direct" : "interpolated (via MPC)");
-
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());
     return true;
   }
@@ -801,7 +830,7 @@ namespace humanoid_controller
     }
 
     res.success = true;
-    res.message = "Successfully switched to VMP controller: " + vmp_controller_name;
+    res.message = "Successfully switched to VMP controller: " + vmp_controller_name; 
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());
 
     return true;

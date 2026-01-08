@@ -81,10 +81,6 @@ RLControllerBase (基类)
     - 返回当前可用的行走控制器名称列表（包含 `"mpc"`），以及当前激活控制器名称与索引。
   - `/humanoid_controller/switch_to_next_controller` (`kuavo_msgs/switchToNextController`)  
     - 在行走控制器列表中按顺序循环切换（`mpc → 第一个 RL → ... → mpc`），适合作为手柄或键盘「一键切换模式」接口。
-  - `/humanoid_controller/set_rl_switch_mode` (`std_srvs/SetBool`)  
-    - 设置 RL 切换模式：  
-      - `true`：直接切换到 RL 控制（`direct_switch_to_rl_ = true`），不经过 MPC 插值过渡；  
-      - `false`：通过 MPC 躯干/手臂插值平滑过渡到 RL 默认站姿（推荐用于真实机器人）。
 
 - **倒地 / 起身相关服务**
   - `/humanoid_controller/set_fall_down_state` (`std_srvs/SetBool`，在 `humanoidController` 中实现)  
@@ -255,11 +251,12 @@ RLControllerBase* getCurrentController();
 
 - **MPC ⇨ RL：带插值的平滑切换**  
   - 切换时机：外部通过 `/humanoid_controller/switch_controller` 或内部事件（如倒地）将 `RLControllerManager` 从 BASE 切换到某个 RL 控制器，此时 `is_rl_controller_` 由 `false` 变为 `true`。  
-  - 若 `direct_switch_to_rl_ == false`（可通过 `/humanoid_controller/set_rl_switch_mode` 配置），则在第一次进入 RL 模式时执行：  
-    - 从当前 RL 控制器读取 `getDefaultJointPos()` 和 `getDefaultBaseHeightControl()`，作为 RL 模式下的期望姿态。  
-    - 通过 `startMPCRLInterpolation()` / `updateMPCRLInterpolation()` 使用 **MPC** 在一段时间内插值 torso 高度和手臂位置，使机器人从 MPC 当前状态平滑过渡到 RL 默认站姿。  
-    - 在插值期间：`mpc_flow` 仍为 `true`，MPC 继续运行，但其目标会被「插值结果」覆盖；插值完成后才完全切到 RL 控制器输出。
-  - 若 `direct_switch_to_rl_ == true`，则跳过插值，下一周期直接进入 RL 控制路径（适合仿真或对姿态跳变不敏感的场景）。
+  - 切换模式由 RL 控制器的配置文件中的 `use_interpolate_from_mpc` 参数决定：
+    - 若 `use_interpolate_from_mpc == true`（默认推荐），则在第一次进入 RL 模式时执行：  
+      - 从当前 RL 控制器读取 `getDefaultJointPos()` 和 `getDefaultBaseHeightControl()`，作为 RL 模式下的期望姿态。  
+      - 通过 `startMPCRLInterpolation()` / `updateMPCRLInterpolation()` 使用 **MPC** 在一段时间内插值 torso 高度和手臂位置，使机器人从 MPC 当前状态平滑过渡到 RL 默认站姿。  
+      - 在插值期间：`mpc_flow` 仍为 `true`，MPC 继续运行，但其目标会被「插值结果」覆盖；插值完成后才完全切到 RL 控制器输出。
+    - 若 `use_interpolate_from_mpc == false`，则跳过插值，下一周期直接进入 RL 控制路径（适合仿真或对姿态跳变不敏感的场景）。
 
 - **RL ⇨ MPC：回到基础控制**  
   - 当 RL 控制结束或被切回 MPC 时（`last_is_rl_controller_ && !is_rl_controller_`）：  
@@ -864,7 +861,6 @@ PAUSED/RUNNING → (stop()) → STOPPED
 - `/humanoid_controller/switch_controller`: 切换到指定控制器
 - `/humanoid_controller/get_controller_list`: 获取控制器列表
 - `/humanoid_controller/switch_to_next_controller`: 切换到下一个控制器
-- `/humanoid_controller/set_rl_switch_mode`: 设置切换模式
 
 ## 6. 配置文件格式
 

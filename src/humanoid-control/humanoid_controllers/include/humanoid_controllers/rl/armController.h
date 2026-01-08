@@ -307,7 +307,7 @@ private:
     // 手臂关节指令低通滤波相关
     LowPassFilter2ndOrder arm_joint_pos_filter_; // 手臂位置指令低通滤波器
     LowPassFilter2ndOrder arm_joint_vel_filter_; // 手臂速度指令低通滤波器
-    double mode2_cutoff_freq_{30.0};    // 滤波器截止频率（提高到30Hz以减少相位滞后）
+    double mode2_cutoff_freq_{10.0};    // 滤波器截止频率
     bool arm_filter_initialized_{false}; // 滤波器是否已初始化
     
     // 限速跟踪参数

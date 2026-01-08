@@ -114,6 +114,7 @@ def make_tree(robot_sdk, arm_api):
         left_arm_relative_keypoints=left_arm_relative_keypoints,
         right_arm_relative_keypoints=right_arm_relative_keypoints,
         enable_joint_mirroring=True,
+        enable_high_position_accuracy=False,
         traj_point_num=100
     )
     

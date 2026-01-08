@@ -307,6 +307,9 @@ private:
     /* only used in half-up body mode */
     std::unique_ptr<std::array<double, 12>> stance_leg_joint_pos_ = nullptr;
 
+    // 辅助函数：从配置文件读取反转电机地址列表
+    std::set<int> loadNegativeMotorAddresses() const;
+
 public:
     // Virtual methods for DDS functionality (implemented in derived classes)
     virtual void publishStateViaDDS(const SensorData_t& sensor_data, uint32_t timestamp_sec, uint32_t timestamp_nsec) {}

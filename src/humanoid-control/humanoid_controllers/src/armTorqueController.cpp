@@ -11,6 +11,27 @@
 #include <iostream> // 添加这个头文件用于 std::cout
 #include <set>      // 添加这个头文件用于 std::set
 
+// 静态辅助方法：获取机器人版本
+std::string ArmTorqueController::getRobotVersion() {
+    std::string robot_version = "46";
+    const char* robot_version_env = std::getenv("ROBOT_VERSION");
+    if (robot_version_env != nullptr && strlen(robot_version_env) > 0) {
+        robot_version = robot_version_env;
+    }
+    return robot_version;
+}
+
+// 静态辅助方法：计算手臂关节的起始索引（考虑waist关节）
+int ArmTorqueController::getArmStartIndex() {
+    static const std::set<std::string> versions_with_waist_yaw = {"50", "51", "52"};
+    std::string robot_version = getRobotVersion();
+    int arm_start_idx = 12; // n_leg_joints_
+    if (versions_with_waist_yaw.find(robot_version) != versions_with_waist_yaw.end()) {
+        arm_start_idx += 1; // 跳过waist关节
+    }
+    return arm_start_idx;
+}
+
 
 
 ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
@@ -25,24 +46,14 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
     pinocchio::urdf::buildModel(urdf_path, model_);
     data_ = pinocchio::Data(model_);
     // 获取机器人版本
-    std::string robot_version = "46";
-    const char* robot_version_env = std::getenv("ROBOT_VERSION");
-    
-    if (robot_version_env != nullptr && strlen(robot_version_env) > 0)
-    {
-        robot_version = robot_version_env;
-        std::cout << "从环境变量获取到机器人版本: " << robot_version << std::endl;
-    }
-    else
-    {
-        robot_version = "46"; // 默认值
-    }
+    std::string robot_version = getRobotVersion();
+    std::cout << "从环境变量获取到机器人版本: " << robot_version << std::endl;
     
     // 根据机器人版本决定固定关节列表
     std::vector<std::string> fixed_joint_names;
     
     // 定义包含 waist_yaw 关节的版本集合
-    std::set<std::string> versions_with_waist_yaw = {"50", "51", "52"};
+    static const std::set<std::string> versions_with_waist_yaw = {"50", "51", "52"};
     
     // 基础固定关节列表（所有版本都包含）
     fixed_joint_names = {
@@ -78,11 +89,8 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
         throw std::invalid_argument("KP/KD 矩阵维度与手臂关节数不匹配");
     }
     
-    // 计算手臂关节的起始索引
-    int arm_start_idx = n_leg_joints_;
-    if (robot_version == "50" || robot_version == "51") {
-        arm_start_idx += 1; // 跳过waist关节
-    }
+    // 计算手臂关节的起始索引（使用统一方法）
+    int arm_start_idx = getArmStartIndex();
     
     // kp kd - 只设置手臂关节的增益
     kp_ = Eigen::VectorXd::Zero(model_.nq);
@@ -96,17 +104,8 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
 
 void ArmTorqueController::setMeasuredState(const Eigen::VectorXd& q_measured,
                                             const Eigen::VectorXd& v_measured) {
-    // 获取机器人版本以确定手臂关节起始索引
-    std::string robot_version = "46";
-    const char* robot_version_env = std::getenv("ROBOT_VERSION");
-    if (robot_version_env != nullptr && strlen(robot_version_env) > 0) {
-        robot_version = robot_version_env;
-    }
-    
-    int arm_start_idx = n_leg_joints_;
-    if (robot_version == "50" || robot_version == "51") {
-        arm_start_idx += 1; // 跳过waist关节
-    }
+    // 使用统一方法获取手臂关节起始索引
+    int arm_start_idx = getArmStartIndex();
     
     int n_arm = q_measured.rows();
     assert(q_measured.rows() == n_arm && v_measured.rows() == n_arm);
@@ -120,17 +119,8 @@ Eigen::VectorXd ArmTorqueController::computeTorque(
     const Eigen::VectorXd& v_desired,
     const Eigen::VectorXd& a_desired) {
     
-    // 获取机器人版本以确定手臂关节起始索引
-    std::string robot_version = "46";
-    const char* robot_version_env = std::getenv("ROBOT_VERSION");
-    if (robot_version_env != nullptr && strlen(robot_version_env) > 0) {
-        robot_version = robot_version_env;
-    }
-    
-    int arm_start_idx = n_leg_joints_;
-    if (robot_version == "50" || robot_version == "51") {
-        arm_start_idx += 1; // 跳过waist关节
-    }
+    // 使用统一方法获取手臂关节起始索引
+    int arm_start_idx = getArmStartIndex();
     
     int n_arm = q_desired.rows();
     assert(q_desired.rows() == n_arm && v_desired.rows() == n_arm && a_desired.rows() == n_arm);

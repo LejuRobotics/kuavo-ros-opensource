@@ -159,6 +159,18 @@ public:
      */
     void setInitialTargetPositions(const std::map<MotorId, float>& target_positions);
 
+    /**
+     * @brief 设置保存零点时的偏移调整参数
+     * @param zero_offset_adjustments 电机索引到偏移量的映射（弧度），在保存零点时会应用到对应电机
+     */
+    virtual void setZeroOffsetAdjustments(const std::map<size_t, double>& zero_offset_adjustments) override;
+    
+    /**
+     * @brief 应用零点偏移调整到运行时电机配置（在按下'o'开始站立时调用）
+     * 此方法会将之前设置的调整参数应用到运行时的电机零点值
+     */
+    void applyZeroOffsetAdjustments();
+
 private:
     struct MotorControlRef;
     /**
@@ -192,6 +204,8 @@ private:
     bool cali_;                               // 是否需要校准零点   
     std::map<MotorId, float> pending_initial_target_positions_;  // 待设置的目标初始位置（在init()之前设置）
     mutable std::mutex pending_target_positions_mutex_;  // 保护pending_initial_target_positions_的互斥锁
+    std::map<size_t, double> zero_offset_adjustments_;  // 保存零点时的偏移调整参数（电机索引到偏移量的映射，弧度）
+    mutable std::mutex zero_offset_adjustments_mutex_;  // 保护zero_offset_adjustments_的互斥锁
 
     // 多CAN总线管理
     struct CanBusGroup {

@@ -681,12 +681,20 @@ class ArmsIKNode
                 applyIkParamsFromMsg(cmd.ik_param);
         }
 
-        template <typename CmdT>
-        Eigen::VectorXd buildUserQ0FromCmd(const CmdT& cmd, const Eigen::VectorXd& base_q0) const
+        Eigen::VectorXd buildUserQ0FromCmd(const Eigen::VectorXd& base_q0) const
         {
             Eigen::VectorXd user_q0 = base_q0;
-            if (cmd.joint_angles_as_q0)
-                user_q0 << ik_cmd_left_.joint_angles, ik_cmd_right_.joint_angles;
+            // 是否使用用户 q0 以成员标志位为准。
+            if (use_ik_cmd_q0_)
+            {
+                // 只覆盖手臂关节那一段，保留 torso/腰等其它关节的 q0
+                const int start_idx = static_cast<int>(user_q0.size()) - 2 * single_arm_num_;
+                if (start_idx >= 0 && user_q0.size() >= 2 * single_arm_num_)
+                {
+                    user_q0.segment(start_idx, single_arm_num_) = ik_cmd_left_.joint_angles;
+                    user_q0.segment(start_idx + single_arm_num_, single_arm_num_) = ik_cmd_right_.joint_angles;
+                }
+            }
             return user_q0;
         }
 
@@ -825,13 +833,8 @@ class ArmsIKNode
         {
             const auto &cmd = req.twoArmHandPoseCmdRequest;
             applyTwoArmCmdCommon(cmd);
-            //
-            if(use_ik_cmd_q0_)
-            {
-                q0_ = buildUserQ0FromCmd(cmd, q0_);
-                std::cout << std::fixed << std::setprecision(3) << "Left: " << q0_.head(single_arm_num_).transpose()
-                                        << ", Right: " << q0_.tail(single_arm_num_).transpose() << std::endl;
-            }
+            // q0 seed：默认用“上一帧 q0_”；如果用户显式提供 joint_angles_as_q0，则仅覆盖手臂段
+            const Eigen::VectorXd q0_seed = buildUserQ0FromCmd(q0_);
             auto start = std::chrono::high_resolution_clock::now();
             
             // 如果有腰部关节，对位姿进行变换
@@ -867,7 +870,7 @@ class ArmsIKNode
             Eigen::VectorXd q;
             checkInWorkspace(pose_vec[1].second, pose_vec[2].second);
             // bool result = ik_.solve(pose_vec, q0_, q, ik_solve_params_);
-            bool result = solveWithBinarySearch(pose_vec, q0_, q);
+            bool result = solveWithBinarySearch(pose_vec, q0_seed, q);
             std::chrono::duration<double, std::milli> elapsed = std::chrono::high_resolution_clock::now() - start;
             // std::cout << "Time elapsed: " << elapsed.count() << " ms" << std::endl;
             res.success = false;
@@ -912,7 +915,7 @@ class ArmsIKNode
             applyTwoArmCmdCommon(cmd);
 
             // 保存用户传入的 q0（如果有）
-            Eigen::VectorXd user_q0 = buildUserQ0FromCmd(cmd, q0_);
+            Eigen::VectorXd user_q0 = buildUserQ0FromCmd(q0_);
             
             // 构建位姿向量（包括腰部变换）
             auto start = std::chrono::high_resolution_clock::now();
@@ -945,6 +948,28 @@ class ArmsIKNode
             const int nq = plant_ptr_->num_positions();
             std::vector<Eigen::VectorXd> reference_q_list;
             std::vector<std::string> reference_names;
+
+            // 1. 用户传入的 q0：优先尝试
+            if (use_ik_cmd_q0_ && user_q0.size() == q0_.size() && !user_q0.hasNaN())
+            {
+                reference_q_list.push_back(user_q0);
+                reference_names.push_back("user_q0");
+            }
+
+            // 2. 上一次有效解：作为 fallback（q0_ 本身就是“上一次求解成功后的结果”容器）
+            if (q0_.size() > 0 && !q0_.hasNaN())
+            {
+                reference_q_list.push_back(q0_);
+                reference_names.push_back("last_valid(q0_)");
+            }
+
+            // 3. 限位中点
+            Eigen::VectorXd q_midpoint(nq);
+            Eigen::VectorXd q_lower = plant_ptr_->GetPositionLowerLimits();
+            Eigen::VectorXd q_upper = plant_ptr_->GetPositionUpperLimits();
+            q_midpoint = (q_lower + q_upper) / 2.0;
+            reference_q_list.push_back(q_midpoint);
+            reference_names.push_back("midpoint");
 
             // Seed 统一过滤阈值：位置误差超过该阈值的 seed 直接丢弃（避免把 drake 引到很差的局部解）
             constexpr double kMaxSeedPosError = 0.2;  // m（20cm）
@@ -985,7 +1010,7 @@ class ArmsIKNode
                 }
             };
             
-            // 1. 伪逆解
+            // 4. 伪逆解
             Eigen::VectorXd q0_pinv = solvePseudoInverseIK(pose_vec, user_q0);
             if (!q0_pinv.hasNaN() && q0_pinv.size() == user_q0.size())
             {
@@ -1000,15 +1025,7 @@ class ArmsIKNode
                 maybeAddSeed("pinv", q0_pinv, left_pos_error, right_pos_error, left_ori_error_deg, right_ori_error_deg);
             }
             
-            // 2. 限位中点
-            Eigen::VectorXd q_midpoint(nq);
-            Eigen::VectorXd q_lower = plant_ptr_->GetPositionLowerLimits();
-            Eigen::VectorXd q_upper = plant_ptr_->GetPositionUpperLimits();
-            q_midpoint = (q_lower + q_upper) / 2.0;
-            reference_q_list.push_back(q_midpoint);
-            reference_names.push_back("midpoint");
-
-            // 2.5 Analytic seed（总是启用）
+            // 5 Analytic seed
             // 解析求解器只返回手臂关节角，这里将其注入到 full-body q 容器中作为 seed
             if (single_arm_num_ == 7 && user_q0.size() == nq && user_q0.allFinite())
             {
@@ -1027,25 +1044,6 @@ class ArmsIKNode
                     const double a_right_ori_error_deg = quatAngleDeg(pose_vec[2].first, a_right_quat);
                     maybeAddSeed("analytic", q_seed, a_left_pos_error, a_right_pos_error, a_left_ori_error_deg, a_right_ori_error_deg);
                 }
-            }
-            
-            // 3. 用户传入的 q0
-            if (use_ik_cmd_q0_ && user_q0.size() == q0_.size() && !user_q0.hasNaN())
-            {
-                reference_q_list.push_back(user_q0);
-                reference_names.push_back("user_q0");
-            }
-            else if (!use_ik_cmd_q0_ && q0_.size() > 0 && !q0_.hasNaN())
-            {
-                reference_q_list.push_back(q0_);
-                reference_names.push_back("default_q0");
-            }
-            
-            // 4. 上一次有效解
-            if (has_last_valid_q_ && last_valid_q_.size() == q0_.size() && !last_valid_q_.hasNaN())
-            {
-                reference_q_list.push_back(last_valid_q_);
-                reference_names.push_back("last_valid");
             }
             
             // 尝试每个参考点进行IK求解
@@ -1120,9 +1118,6 @@ class ArmsIKNode
             if(success)
             {
                 res.error_reason = "ik is success (reference: " + success_reference + ")";
-                // 更新上一次有效解
-                last_valid_q_ = q;
-                has_last_valid_q_ = true;
                 q0_ = q;
                 
                 const int start_idx = q.size() - 2*single_arm_num_;
@@ -1166,13 +1161,8 @@ class ArmsIKNode
         {
             const auto &cmd = req.twoArmHandPoseCmdFreeRequest;
             applyTwoArmCmdCommon(cmd);
-            //
-            if(use_ik_cmd_q0_)
-            {
-                q0_ = buildUserQ0FromCmd(cmd, q0_);
-                std::cout << std::fixed << std::setprecision(3) << "Left: " << q0_.head(single_arm_num_).transpose()
-                                        << ", Left: " << q0_.tail(single_arm_num_).transpose() << std::endl;
-            }
+            // q0 seed：默认用“上一帧 q0_”；如果用户显式提供 joint_angles_as_q0，则仅覆盖手臂段
+            const Eigen::VectorXd q0_seed = buildUserQ0FromCmd(q0_);
             auto start = std::chrono::high_resolution_clock::now();
             
             // 如果有腰部关节，对位姿进行变换
@@ -1208,7 +1198,7 @@ class ArmsIKNode
             Eigen::VectorXd q;
             checkInWorkspace(pose_vec[1].second, pose_vec[2].second);
             // bool result = ik_.solve(pose_vec, q0_, q, ik_solve_params_);
-            bool result = solveWithBinarySearch(pose_vec, q0_, q);
+            bool result = solveWithBinarySearch(pose_vec, q0_seed, q);
             std::chrono::duration<double, std::milli> elapsed = std::chrono::high_resolution_clock::now() - start;
             // std::cout << "Time elapsed: " << elapsed.count() << " ms" << std::endl;
             res.success = false;
@@ -1650,9 +1640,6 @@ class ArmsIKNode
         int waist_joint_index_{-1};
         double current_waist_yaw_{0.0};
         std::mutex waist_yaw_mutex_;
-        // 上一次有效解（用于多参考点IK）
-        Eigen::VectorXd last_valid_q_;
-        bool has_last_valid_q_{false};
 };
 }
 

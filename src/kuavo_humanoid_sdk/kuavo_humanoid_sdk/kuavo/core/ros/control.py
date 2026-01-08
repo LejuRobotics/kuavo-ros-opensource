@@ -1018,6 +1018,7 @@ class KuavoRobotArmIKFK:
             eef_pose_msg.ik_param.oritation_constraint_tol= params.oritation_constraint_tol
             eef_pose_msg.ik_param.pos_constraint_tol = params.pos_constraint_tol 
             eef_pose_msg.ik_param.pos_cost_weight = params.pos_cost_weight
+            eef_pose_msg.ik_param.constraint_mode = params.constraint_mode
 
         # left hand
         eef_pose_msg.hand_poses.left_pose.pos_xyz =  left_pose.position
@@ -1029,7 +1030,10 @@ class KuavoRobotArmIKFK:
         eef_pose_msg.hand_poses.right_pose.quat_xyzw = right_pose.orientation
         eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = right_elbow_pos_xyz
 
-        return self._srv_arm_ik(eef_pose_msg)
+        if  6 != params.constraint_mode:
+            return self._srv_arm_ik(eef_pose_msg)
+        else:
+            return self._srv_arm_ik_high_position_accuracy(eef_pose_msg)
 
     def arm_ik_free(self,
                     left_pose: KuavoPose,
@@ -1078,6 +1082,23 @@ class KuavoRobotArmIKFK:
         try:
             rospy.wait_for_service('/ik/two_arm_hand_pose_cmd_srv',timeout=1.0)
             ik_srv = rospy.ServiceProxy('/ik/two_arm_hand_pose_cmd_srv', twoArmHandPoseCmdSrv)
+            res = ik_srv(eef_pose_msg)
+            # print(eef_pose_msg)
+            if res.success:
+                return res.hand_poses.left_pose.joint_angles + res.hand_poses.right_pose.joint_angles
+            else:
+                return None
+        except rospy.ServiceException as e:
+            print("Service call failed: %s"%e)
+            return None
+        except Exception as e:
+            print(f"Failed to call ik/fk_srv: {e}")
+            return None
+    
+    def _srv_arm_ik_high_position_accuracy(self, eef_pose_msg)->list:
+        try:
+            rospy.wait_for_service('/ik/two_arm_hand_pose_cmd_srv_muli_refer',timeout=1.0)
+            ik_srv = rospy.ServiceProxy('/ik/two_arm_hand_pose_cmd_srv_muli_refer', twoArmHandPoseCmdSrv)
             res = ik_srv(eef_pose_msg)
             # print(eef_pose_msg)
             if res.success:

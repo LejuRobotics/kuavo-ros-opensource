@@ -13,6 +13,7 @@
 #include <string>
 #include <memory>
 #include <mutex>
+#include <functional>
 #include <ros/ros.h>
 
 namespace humanoid_controller
@@ -186,24 +187,6 @@ namespace humanoid_controller
     bool initializeRosServices(ros::NodeHandle& nh);
 
     /**
-     * @brief 设置是否直接切换到RL控制器（跳过MPC过渡）
-     */
-    void setDirectSwitchToRL(bool direct)
-    {
-      std::lock_guard<std::recursive_mutex> lock(mutex_);
-      direct_switch_to_rl_ = direct;
-    }
-
-    /**
-     * @brief 获取当前是否直接切换到RL控制器（跳过MPC过渡）
-     */
-    bool getDirectSwitchToRL() const
-    {
-      std::lock_guard<std::recursive_mutex> lock(mutex_);
-      return direct_switch_to_rl_;
-    }
-
-    /**
      * @brief 更新MPC控制器的stance状态（由humanoidController调用）
      * @param is_stance 是否处于stance模式
      * @param gait_name 当前步态名称
@@ -215,6 +198,16 @@ namespace humanoid_controller
      * @return WALK_CONTROLLER类型的控制器名称列表
      */
     std::vector<std::string> getWalkControllerList();
+
+    /**
+     * @brief 注册倒地状态回调函数
+     * @param callback 回调函数，参数为FallStandState枚举值（0=STANDING, 1=FALL_DOWN）
+     */
+    void registerFallDownStateCallback(std::function<void(int)> callback)
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      fall_down_state_callback_ = callback;
+    }
 
   private:
     /**
@@ -236,10 +229,10 @@ namespace humanoid_controller
                                         kuavo_msgs::switchToNextController::Response &res);
 
     /**
-     * @brief ROS服务回调：设置RL切换模式（是否直接切换）
+     * @brief ROS服务回调：设置倒地状态
      */
-    bool setRLSwitchModeCallback(std_srvs::SetBool::Request &req,
-                                 std_srvs::SetBool::Response &res);
+    bool setFallDownStateCallback(std_srvs::SetBool::Request &req,
+                                  std_srvs::SetBool::Response &res);
 
     /**
      * @brief ROS服务回调：切换到VMP控制器
@@ -267,12 +260,12 @@ namespace humanoid_controller
     ros::ServiceServer switch_controller_srv_;      ///< 切换控制器服务
     ros::ServiceServer get_controller_list_srv_;     ///< 获取控制器列表服务
     ros::ServiceServer switch_to_next_controller_srv_;  ///< 切换到下一个控制器服务
-    ros::ServiceServer set_rl_switch_mode_srv_;       ///< 设置RL切换模式服务
+    ros::ServiceServer set_fall_down_state_srv_;     ///< 设置倒地状态服务
     ros::ServiceServer switch_to_vmp_controller_srv_; ///< 切换到VMP控制器服务
     ros::NodeHandle* nh_ptr_;                       ///< ROS节点句柄指针
 
-    // RL切换模式：true 直接切换到RL；false 使用MPC过渡
-    bool direct_switch_to_rl_ = true;
+    // 倒地状态回调函数
+    std::function<void(int)> fall_down_state_callback_;  ///< 设置倒地状态的回调函数
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称

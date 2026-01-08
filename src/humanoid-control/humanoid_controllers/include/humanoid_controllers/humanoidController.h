@@ -343,7 +343,6 @@ namespace humanoid_controller
     // bool WalkenableCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
     void visualizeWrench(const Eigen::VectorXd &wrench, bool is_left);
     bool getCurrentGaitNameCallback(kuavo_msgs::getCurrentGaitName::Request &req, kuavo_msgs::getCurrentGaitName::Response &res);
-    bool setFallDownStateCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
     void getEnableMpcFlagCallback(const std_msgs::Bool::ConstPtr &msg);
     
     void getEnableWbcFlagCallback(const std_msgs::Bool::ConstPtr &msg);
@@ -553,7 +552,6 @@ namespace humanoid_controller
     ros::ServiceServer getMmArmCtrlSrv_;
     ros::ServiceServer currentGaitNameSrv_;
     ros::ServiceServer triggerFallStandUpSrv_;
-    ros::ServiceServer setFallDownStateSrv_;
     GaitManager *gaitManagerPtr_=nullptr;
 
     PinocchioInterface *pinocchioInterface_ptr_;

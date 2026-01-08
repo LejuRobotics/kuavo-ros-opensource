@@ -33,8 +33,8 @@ using namespace ocs2;
 
   void RLControllerBase::initializeServices()
   {
-    // 服务命名空间以控制器名字开头
-    std::string service_ns = "/" + name_;
+    // 服务命名空间为 /humanoid_controllers/{controller_name}
+    std::string service_ns = "/humanoid_controllers/" + name_;
     
     reload_srv_ = nh_.advertiseService(service_ns + "/reload", 
                                         &RLControllerBase::reloadServiceCallback, this);

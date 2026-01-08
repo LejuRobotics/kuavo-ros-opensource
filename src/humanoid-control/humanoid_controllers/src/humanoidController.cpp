@@ -74,33 +74,6 @@ namespace humanoid_controller
   std::mutex head_mtx;
 
   
-  bool humanoidController::setFallDownStateCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res)
-  {
-    // 使用标准库 std_srvs/SetBool，将 bool 请求映射为内部的倒地状态枚举
-    if (req.data)
-    {
-      fall_down_state_ = FallStandState::FALL_DOWN;
-      res.message = "fall_down_state_ set to FALL_DOWN (1)";
-      // 检查控制器列表是否存在倒地起身控制器，自动切换过去
-      if (controller_manager_ && has_fall_stand_controller_)
-      {
-        std::cout << "[humanoid Controller]fall down detected, switch to fall down controller" << std::endl;
-        controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
-      }else
-      {
-        ROS_ERROR_STREAM("[humanoid Controller] No Fall Stand Controller");
-      }
-    }
-    else
-    {
-      fall_down_state_ = FallStandState::STANDING;
-      res.message = "fall_down_state_ set to STANDING (0)";
-    }
-
-    ROS_INFO("[HumanoidController] fall_down_state_ set to %d", fall_down_state_);
-    res.success = true;
-    return true;
-  }
 
   // 辅助函数：获取完整节点名
   static std::string fullyQualifiedNodeName(const std::string &name)
@@ -837,11 +810,14 @@ namespace humanoid_controller
       rHandWrenchPub_ = controllerNh_.advertise<geometry_msgs::WrenchStamped>("/hand_wrench/right_hand", 10);
       currentGaitNameSrv_ = controllerNh_.advertiseService(robotName_ + "_get_current_gait_name", 
         &humanoidController::getCurrentGaitNameCallback, this);
-      setFallDownStateSrv_ = controllerNh_.advertiseService("/humanoid_controller/set_fall_down_state",
-        &humanoidController::setFallDownStateCallback, this);
-
-        // 初始化 RL 控制器管理系统
+      // 初始化 RL 控制器管理系统
       controller_manager_ = std::make_unique<RLControllerManager>();
+      
+      // 注册倒地状态回调函数
+      controller_manager_->registerFallDownStateCallback([this](int state) {
+        fall_down_state_ = static_cast<FallStandState>(state);
+        ROS_INFO("[HumanoidController] fall_down_state_ set to %d via callback", fall_down_state_);
+      });
       
       // 初始化 ROS 服务（由 RLControllerManager 管理）
       controller_manager_->initializeRosServices(controllerNh_);
@@ -940,25 +916,11 @@ namespace humanoid_controller
         }
         else
         {
-          // 配置文件不存在，回退到MPC
-          if (is_rl_start_)
-          {
-            ROS_WARN("[HumanoidController] is_rl_start=true but config file not found: %s, falling back to MPC", 
-                     controller_list_config.c_str());
-            is_rl_start_ = false;
-          }
-          // 确保MPC节点被重置（即使没有RL控制器，也需要正常初始化MPC）
-          if (mrtRosInterface_ && !is_rl_start_)
-          {
-            SystemObservation init_obs = currentObservation_;
-            init_obs.state = initial_status_;
-            init_obs.input.setZero(HumanoidInterface_->getCentroidalModelInfo().inputDim);
-            mrtRosInterface_->resetMpcNode(TargetTrajectories({init_obs.time}, {init_obs.state}, {init_obs.input}));
-            ROS_INFO("[HumanoidController] MPC node reset (no RL config file)");
-          }
+          is_rl_start_=false;
+          init_fall_down_state_=false;
         }
 
-          // 如果 init_fall_down_state_=true，初始切换到倒地起身控制器（但is_rl_start优先级更高）
+        // 如果 init_fall_down_state_=true，初始切换到倒地起身控制器（但is_rl_start优先级更高）
         if (init_fall_down_state_ && !is_rl_start_)
         {
           if (has_fall_stand_controller_)
@@ -1831,13 +1793,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
   bool humanoidController::preUpdate(const ros::Time &time)
   {
-    // 同步 is_rl_start 参数，仅在有可用 RL 控制器时允许开启
-    bool requested_rl_start = false;
-    if (controllerNh_.getParam("/is_rl_start", requested_rl_start) && !available_controllers_.empty())
-      is_rl_start_ = requested_rl_start;
-    else
-      is_rl_start_ = false;
-
     // 半身模式下跳过起立过程，直接进入MPC初始化
     if (!only_half_up_body_)
     {
@@ -2132,16 +2087,14 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       }
     }
     // 是否直接切换到RL控制器（true：直接切换；false：通过MPC插值过渡）
-    // 优先从当前RL控制器的配置文件中读取 use_interploate_from_mpc 参数
-    bool derect_switch_to_rl = controller_manager_->getDirectSwitchToRL();
+    // 从当前RL控制器的配置文件中读取 use_interploate_from_mpc 参数
+    bool derect_switch_to_rl = true;  // 默认直接切换到RL控制器
     if (is_rl_controller_ && current_controller_ptr_ != nullptr)
     {
       // 从当前控制器获取参数：use_interpolate_from_mpc = true 表示使用插值（derect_switch_to_rl = false）
       // use_interpolate_from_mpc = false 表示直接切换（derect_switch_to_rl = true）
       bool use_interpolate = current_controller_ptr_->getUseInterpolateFromMPC();
       derect_switch_to_rl = !use_interpolate;
-      // 同时更新 controller_manager_ 中的设置，以便其他地方也能使用
-      controller_manager_->setDirectSwitchToRL(derect_switch_to_rl);
     }
 
     // is_rl_start 模式：在 preUpdate 中已经完成了 RL 姿态对齐，起立结束后物理切换并重置标志位

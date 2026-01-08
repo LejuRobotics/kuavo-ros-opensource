@@ -7,6 +7,7 @@
 #include <mutex>
 #include <iterator>
 #include <iostream> 
+#include <map>
 #include "ruiwo_actuator_base.h"
 #include <iostream>
 
@@ -165,6 +166,7 @@ public:
     void changeEncoderZeroRound(int index, double direction) override;
     void adjustZeroPosition(int index, double offset) override;
     std::vector<double> getMotorZeroPoints() override;
+    void setZeroOffsetAdjustments(const std::map<size_t, double>& zero_offset_adjustments) override;
     
     /**
      * @brief 设置电机目标位置
@@ -355,6 +357,10 @@ private:
 
     /** Data */
     std::vector<RuiwoMotorConfig_t> ruiwo_mtr_config_;
+    
+    // 保存零点时的偏移调整参数（电机索引到偏移量的映射，弧度）
+    std::map<size_t, double> zero_offset_adjustments_;
+    mutable std::mutex zero_offset_adjustments_mutex_;
 };
 
 /**
