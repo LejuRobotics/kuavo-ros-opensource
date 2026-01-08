@@ -1909,8 +1909,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         jointCmdMsg.joint_kd.push_back(2);
       }
       // 发布控制命令
-    if (!init_fall_down_state_)
+      if (!init_fall_down_state_)
+      { 
+        replaceDefaultEcMotorPdoGait(jointCmdMsg);
         publishControlCommands(jointCmdMsg);
+      }
       
       // if (use_shm_communication_) 
       //     publishJointCmdToShm(jointCmdMsg);
@@ -2335,14 +2338,15 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             }
             
             
-            if (is_torso_interpolation_active_)
-            {
-              optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
-              optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = default_state_.segment(12,jointNumReal_+ waistNum_);
-              // optimizedInput_mrt = stanceInput_mrt_;
-              plannedMode_ = ModeNumber::SS;
+            // if (is_torso_interpolation_active_)
+            // {
+            //   optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
+            //   optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = default_state_.segment(12,jointNumReal_+ waistNum_);
+            //   // optimizedInput_mrt = stanceInput_mrt_;
+            //   plannedMode_ = ModeNumber::SS;
 
-            }else if (mrtRosInterface_->isPolicyUpdated())
+            // }else 
+            if (mrtRosInterface_->isPolicyUpdated())
             {
               mrtRosInterface_->evaluatePolicy(currentObservation_.time, currentObservation_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
             }
@@ -4283,7 +4287,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     geometry_msgs::Twist twist_msg;
     twist_msg.linear.x = interpolated_pose(0);  // x位置
     twist_msg.linear.y = interpolated_pose(1);  // y位置
-    twist_msg.linear.z = interpolated_pose(2) - default_state_[8];  // z位置与基准高度的差值
+    twist_msg.linear.z = torso_interpolation_target_pose_(2) - default_state_[8];  // z位置与基准高度的差值
     // 使用插值后的rpy
     twist_msg.angular.x = torso_interpolation_target_pose_(3); // roll
     twist_msg.angular.y = torso_interpolation_target_pose_(4); // pitch
