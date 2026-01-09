@@ -268,9 +268,30 @@ check_conflicting_package() {
     fi
 }
 
+# Check if kuavo-humanoid-sdk-ws is already installed and update path if needed
+check_and_update_existing_sdk() {
+    if pip show kuavo-humanoid-sdk-ws >/dev/null 2>&1; then
+        local installed_version=$(pip show kuavo-humanoid-sdk-ws | grep "^Version:" | awk '{print $2}')
+        echo -e "\033[33m⚠️  检测到已安装 kuavo-humanoid-sdk-ws (版本: $installed_version)\033[0m"
+        echo -e "\033[33m正在卸载旧版本以更新SDK路径...\033[0m"
+        
+        pip uninstall kuavo-humanoid-sdk-ws -y
+        if [ $? -eq 0 ]; then
+            echo -e "\033[32m✅ kuavo-humanoid-sdk-ws 旧版本已成功卸载\033[0m"
+            # Clean easy-install.pth file after uninstall to remove old paths
+            clean_easy_install_pth "kuavo-humanoid-sdk-ws"
+        else
+            echo -e "\033[31m❌ 卸载 kuavo-humanoid-sdk-ws 失败，安装已取消\033[0m"
+            exit 1
+        fi
+    fi
+}
+
 # Check for conflicting package before installation
 check_conflicting_package
 
+# Check and update existing SDK installation
+check_and_update_existing_sdk
 
 check_and_format_version "$BRANCH" VERSION
 echo -e "\033[32mVersion: $VERSION\033[0m"

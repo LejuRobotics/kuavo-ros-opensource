@@ -102,12 +102,12 @@ select_wiring_type() {
 select_end_effector_type() {
     local -n result_ref=$2
     local side="$1"  # 左、右或具体描述
-    local end_effector_options=("revo2_hand -- 灵巧手" "lejuclaw -- 自研夹爪" "none -- 没有末端")
+    local end_effector_options=("revo1_hand -- 灵巧手" "revo2_hand -- 灵巧手" "lejuclaw -- 自研夹爪" "none -- 没有末端")
     show_menu "选择${side}末端执行器类型" "${end_effector_options[@]}"
     local eef_selection
-    get_user_selection 3 eef_selection
+    get_user_selection 4 eef_selection
 
-    local end_effector_types=("revo2_hand" "lejuclaw" "none")
+    local end_effector_types=("revo1_hand" "revo2_hand" "lejuclaw" "none")
     local selected_type="${end_effector_types[$((eef_selection-1))]}"
     local selected_description="${end_effector_options[$((eef_selection-1))]}"
 
@@ -123,6 +123,9 @@ get_end_effector_name() {
     local type="$2"  # revo2_hand, lejuclaw, none
 
     case "$type" in
+        "revo1_hand")
+            echo "${side}hand_revo1_hand"
+            ;;
         "revo2_hand")
             echo "${side}hand_revo2_hand"
             ;;
@@ -140,7 +143,7 @@ get_end_effector_class() {
     local type="$2"  # revo2_hand, lejuclaw, none
 
     case "$type" in
-        "revo2_hand"|"lejuclaw")
+        "revo1_hand"|"revo2_hand"|"lejuclaw")
             echo "$type"
             ;;
         "none")
@@ -155,6 +158,13 @@ get_end_effector_device_id() {
     local type="$2"  # revo2_hand, lejuclaw, none
 
     case "$type" in
+        "revo1_hand")
+            if [ "$side" = "L" ]; then
+                echo "0x01"
+            else
+                echo "0x02"
+            fi
+            ;;
         "revo2_hand")
             if [ "$side" = "L" ]; then
                 echo "0x01"

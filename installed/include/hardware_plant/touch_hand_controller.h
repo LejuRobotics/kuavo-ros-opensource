@@ -27,8 +27,8 @@ class DexhandController;
 using TouchDexhandControllerPtr = std::unique_ptr<DexhandController>;
 class DexhandController {
 public:    
-    static TouchDexhandControllerPtr Create(const std::string &action_sequences_path, bool is_touch_dexhand) {
-        return std::unique_ptr<DexhandController>(new DexhandController(action_sequences_path, is_touch_dexhand));
+    static TouchDexhandControllerPtr Create(const std::string &action_sequences_path, bool is_touch_dexhand, bool is_can_protocol) {
+        return std::unique_ptr<DexhandController>(new DexhandController(action_sequences_path, is_touch_dexhand, is_can_protocol));
     }
 
     ~DexhandController();
@@ -174,12 +174,14 @@ public:
     bool is_gesture_executing();
 
 private:
-    DexhandController(const std::string &action_sequences_path, bool is_touch_dexhand);
+    DexhandController(const std::string &action_sequences_path, bool is_touch_dexhand, bool is_can_protocol);
     DexhandController(DexhandController&&) = delete;
     DexhandController(const DexhandController&) = delete;
 
     bool init_touch_dexhand();
     bool init_normal_dexhand();
+    bool init_revo1_normal_can_customed();
+
 
     /**
      * @brief 解析手势配置文件
@@ -196,6 +198,7 @@ private:
     bool sleep_for_100ms(int ms_count);
 
     /* data */
+    bool is_can_protocol_{false};
     bool is_touch_dexhand_{false};
     std::atomic<bool> l_position_updated_{false};
     std::atomic<bool> r_position_updated_{false};
