@@ -1185,6 +1185,264 @@ response:
 | code | int    | 错误码 0: 状态切换成功,1:状态切换失败 |
 | msg  | string | 接口结果的描述                    |
 
+## 大模型相关功能
+### 1. 设置实时模型api_key
+用于设置实时模型的各项key,存入本地指定文件中
+
+注: `data`中的key可以不全部存在,如data中只有4个条目,未被设置的key将保持原值不变,设为空字符串的key会被覆盖为空值
+
+`request:`
+
+```json
+{
+    "cmd": "set_api_key",
+    "data":{
+        "ark_X-Api-App-ID":"123abc",
+        "ark_X-Api-Access-Key":"sk-1234567890abcdef1234567890abcdef",
+        "xfyun_APPID":"",
+        "xfyun_APISecret":"sk-1234567890abcdef1234567890abcdef",
+        "xfyun_APIKey":"sk-1234567890abcdef1234567890abcdef",
+        "ark_analysis_key":"sk-1234567890abcdef1234567890abcdef"
+    }
+}
+```
+
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| ark_X-Api-App-ID | string | 火山api app id |
+| ark_X-Api-Access-Key | string | 火山api secret key |
+|xfyun_APPID | string | 讯飞api app id |
+|xfyun_APISecret| string | 讯飞api secret key |
+|xfyun_APIKey| string | 讯飞api key |
+|ark_analysis_key| string | 火山非实时模型api key |
+
+
+`response:`
+
+```json
+{
+    "cmd": "set_api_key",
+    "data": {
+        "code": 0,
+        "msg": "API密钥存储成功"
+    }
+}
+```
+```json
+{
+    "cmd": "set_api_key",
+    "data": {
+        "code": 1,
+        "msg": "API密钥存储失败"
+    }
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| code | int    | 错误码 0: 设置成功,1:设置失败 |
+| msg  | string | 接口结果的描述                    |
+
+### 2. 获取api_key
+用于获取已设置的api_key
+
+注: 未设置的key将返回空字符串
+
+request:
+
+```json
+{
+    "cmd": "get_api_key",
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+
+
+
+response:
+
+```json
+{
+    "cmd": "get_api_key",
+    "data": {
+        "code": 0,
+        "ark_X-Api-App-ID":"",
+        "ark_X-Api-Access-Key":"",
+        "xfyun_APPID":"123abc",
+        "xfyun_APISecret":"sk-1234567890abcdef1234567890abcdef",
+        "xfyun_APIKey":"sk-1234567890abcdef1234567890abcdef",
+        "ark_analysis_key":"sk-1234567890abcdef1234567890abcdef",
+        "msg": "API密钥获取成功"
+    }
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| code | int    | 错误码 0: 获取成功,1:获取失败 |
+| msg  | string | 接口结果的描述                    |
+| ark_X-Api-App-ID | string | 火山api app id |
+| ark_X-Api-Access-Key | string | 火山api secret key |
+| xfyun_APPID | string | 讯飞api app id |
+| xfyun_APISecret| string | 讯飞api secret key |
+| xfyun_APIKey| string | 讯飞api key |
+| ark_analysis_key| string | 火山非实时模型api key |
+
+### 3. 获取模型key状态
+用于确认特定模型的key是否已经填充(只验证有无,不验证有效),特定模型包括:(火山,讯飞)
+
+request:
+
+```json
+{
+    "cmd": "get_api_key_status"
+    "data":{
+        "type":"realtime"|"non-realtime"
+    }
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| type | string | 模型类型,可选值:realtime\|non-realtime |
+
+
+
+response:
+
+```json
+{
+    "cmd": "get_api_key_status",
+    "data": {
+        "code": 0,
+        "type":"realtime"|"non-realtime",
+        "is_empty":[],
+        "message":"模型所需的key已经设置"
+    }
+}
+```
+```json
+{
+    "cmd": "get_api_key_status",
+    "data": {
+        "code": 1,
+        "type":"realtime"|"non-realtime",
+        "is_empty":["ark_X-Api-App-ID","ark_X-Api-Access-Key"],
+        "message":"存在缺失的key"
+    }
+}
+```
+
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| code | int    | 错误码 0: 所有值都已设置,1:存在缺失的key |
+| type | string | 模型类型,可选值:realtime\|non-realtime |
+| is_empty | array | 未被设置的key的列表 |
+| msg  | string | 接口结果的描述                    |
+### 4. 开启实时对话
+request:
+```json
+{
+    "cmd": "start_real_time_chat"
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+
+
+
+response:
+
+```json
+{
+    "cmd": "start_real_time_chat",
+    "data": {
+        "code": 0,
+        "msg": "实时对话已开启"
+    }
+}
+```
+```json
+{
+    "cmd": "start_real_time_chat",
+    "data": {
+        "code": 1,
+        "msg": "实时对话开启失败"
+    }
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| code | int    | 错误码 0: 开启成功,1:开启失败 |
+| msg  | string | 接口结果的描述                    |
+### 5. 关闭实时对话
+request:
+```json
+{
+    "cmd": "stop_real_time_chat"
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+
+
+
+response:
+
+```json
+{
+    "cmd": "stop_real_time_chat",
+    "data": {
+        "code": 0,
+        "msg": "实时对话已关闭"
+    }
+}
+```
+```json
+{
+    "cmd": "stop_real_time_chat",
+    "data": {
+        "code": 1,
+        "msg": "实时对话关闭失败"
+    }
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| code | int    | 错误码 0: 关闭成功,1:关闭失败 |
+| msg  | string | 接口结果的描述                    |
+### 6. 实时对话状态查询
+request:
+```json
+{
+    "cmd": "get_real_time_chat_status"
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+response:
+```json
+{
+    "cmd": "get_real_time_chat_status",
+    "data": {
+        "code": 1,
+        "msg": "实时对话正在进行"
+    }
+}
+```
+```json
+{
+    "cmd": "get_real_time_chat_status",
+    "data": {
+        "code": 1,
+        "msg": "实时对话未开启"
+    }
+}
+```
+| 名称 | 类型   | 描述                              |
+| ---- | ------ | ------- |
+| code | int    | 状态码: 1-实时对话正在进行,0-实时对话未开启 |
+| msg  | string | 接口结果的描述                    |
+
+
 ## YOLO目标检测
 
 `model_utils.py` 中 `YOLO_detection` 为 YOLO目标检测类，用于处理图像检测和结果发布。
@@ -1262,13 +1520,13 @@ response:
 
 这是一个用于将 ROS bag 文件转换为 Tact 文件格式的工具。它主要用于处理机器人手臂、头部和手指的运动数据，并生成可用于动画或其他目的的 Tact 文件。
 
-## 功能
+### 功能
 
 - 录制手臂、头部和手指的 rosbag 数据
 - 将 rosbag 数据转换为 tact 文件
 - 数据平滑处理和控制点生成
 
-## 使用方法
+### 使用方法
 
 1. 运行主程序：
 
@@ -1296,12 +1554,12 @@ rosbag to tact:
 
 ![rosbag_to_tact](./imgs/rosbag_to_tact.png)
 
-## 注意事项
+### 注意事项
 
 - 确保您有足够的磁盘空间来存储生成的 tact 文件。
 - 处理大型 rosbag 文件可能需要较长时间，请耐心等待。
 
-## 故障排除
+### 故障排除
 
 如果遇到问题，请检查以下几点：
 
@@ -1311,3 +1569,4 @@ rosbag to tact:
 ## 贡献
 
 欢迎提交 issues 和 pull requests 来帮助改进这个工具。
+
