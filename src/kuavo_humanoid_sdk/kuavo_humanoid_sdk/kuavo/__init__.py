@@ -14,3 +14,4 @@ from .robot_microphone import RobotMicrophone
 from .robot_navigation import RobotNavigation
 from .robot_speech import RobotSpeech
 from .dexterous_hand import DexterousHand
+from .robot_llm import KuavoRobotLLM
