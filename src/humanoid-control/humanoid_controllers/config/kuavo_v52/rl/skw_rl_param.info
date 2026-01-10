@@ -31,12 +31,12 @@ commandData
     }
     scale
     {
-        cmdVelLineX         3   ; cmd_vel的倍率，遥控器最大是0.4m/s
-        cmdVelLineY         2.2   ;
+        cmdVelLineX         2   ; cmd_vel的倍率，遥控器最大是0.4m/s
+        cmdVelLineY         1.6   ;
         cmdVelLineZ         1   ;
         cmdVelAngularX      1   ;
         cmdVelAngularY      1   ;
-        cmdVelAngularZ      2.5   ;
+        cmdVelAngularZ      1.5   ;
         cmdStance           1   ;
     }
 };预留完整的接口，当前只用到cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdWalkEnable，最大长度是4
