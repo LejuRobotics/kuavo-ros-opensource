@@ -1,5 +1,6 @@
 withArm            true        ; 是否使用手臂训练 1:使用手臂(26个关节)
 inferenceFrequency 100         ; 推理频率
+controlFrequency   1000        ; 控制频率（Hz），VMP需要1000Hz控制频率
 enableThetaNormalization true  ; 是否启用theta yaw角归一化功能
 
 ; 基础控制参数
@@ -57,7 +58,7 @@ trajectories
     [3]
     {
         name        "yc_06_straight_punch"
-        data_file   "yc_06_spec_data.bin"
+        data_file   "task_data_yc_06.bin"
     }
 }
 

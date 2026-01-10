@@ -345,17 +345,17 @@ private:
                     {
                         controller_wheel_real_ptr_->update(ros::Time::now(), elapsedTime);
                     }
-                    
+                    // 轮式机器人使用固定频率
+                    next_time.tv_sec += (next_time.tv_nsec + 1 / controlFrequency * 1e9) / 1e9;
+                    next_time.tv_nsec = (int)(next_time.tv_nsec + 1 / controlFrequency * 1e9) % (int)1e9;
+                    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_time, NULL);
                 }
                 else
                 {
                     controller_ptr_->update(ros::Time::now(), elapsedTime);
+                    // 双足机器人使用控制器自身的频率控制（支持不同控制器不同频率）
+                    controller_ptr_->waitForNextCycle();
                 }
-                
-                // Sleep
-                next_time.tv_sec += (next_time.tv_nsec + 1 / controlFrequency * 1e9) / 1e9;
-                next_time.tv_nsec = (int)(next_time.tv_nsec + 1 / controlFrequency * 1e9) % (int)1e9;
-                clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_time, NULL);
 
                 // Add print statement if the cycle time exceeds 1 second
                 const auto cycleTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - currentTime).count();
@@ -364,7 +364,11 @@ private:
                     ROS_ERROR_STREAM("WBC Cycle time exceeded 1 second: " << cycleTime << "ms");
                 }
             }
-            rate.sleep();
+            else
+            {
+                // 暂停状态：休眠避免 CPU 空转
+                usleep(10000);  // 10ms
+            }
         }
         std::cout << "controlLoop: Exiting control loop" << std::endl;
     }

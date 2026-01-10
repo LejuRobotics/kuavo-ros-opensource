@@ -1,6 +1,7 @@
 #include "humanoid_controllers/rl/VMPController.h"
 #include "vmp/vmp_rotation_utils.hpp"
 #include "vmp/vmp_trajectory_loader.hpp"
+#include "kuavo_common/common/common.h"
 
 #include <ros/ros.h>
 #include <sstream>
@@ -30,18 +31,24 @@ bool VMPController::initialize()
 {
   ROS_INFO("[VMPController] Initializing VMPController: %s", name_.c_str());
 
-  // 从 ROS 参数获取控制周期 dt_
-  double wbc_frequency = 500.0;
-  if (!nh_.getParam("/wbc_frequency", wbc_frequency))
+  // 检查机器人版本是否支持 VMP 控制器
+  int robot_version_int;
+  if (!nh_.getParam("/robot_version", robot_version_int))
   {
-    ROS_WARN("[%s] /wbc_frequency not found in ROS params, using default: %.1f Hz", name_.c_str(), wbc_frequency);
+    ROS_ERROR("[VMPController] /robot_version not found in ROS params! Cannot initialize VMPController.");
+    return false;
   }
-  if (wbc_frequency <= 0.0)
+  RobotVersion robot_version = RobotVersion::create(robot_version_int);
+
+  // 当前仅支持 Kuavo4 Pro 的版本
+  if (!IS_KUAVO4PRO_LEGGED(robot_version))
   {
-    ROS_WARN("[%s] Invalid /wbc_frequency (%.3f), fallback to 500 Hz", name_.c_str(), wbc_frequency);
-    wbc_frequency = 500.0;
+    ROS_ERROR("[VMPController] 机器人版本 %s 不支持! VMPController 仅支持 Kuavo4 Pro (v45+).",
+              robot_version.to_string().c_str());
+    ROS_ERROR("[VMPController] 支持的版本: 45, 46, 47, 48, 49 及其补丁版本 (如 100045, 100046, ...)");
+    return false;
   }
-  dt_ = 1.0 / wbc_frequency;
+  ROS_INFO("[VMPController] 机器人版本 %s 支持.", robot_version.to_string().c_str());
 
   // 从 ROS 参数获取是否为真实机器人
   if (!nh_.getParam("/is_real", is_real_))
@@ -66,9 +73,12 @@ bool VMPController::initialize()
   nh_.param<bool>("/with_arm", withArm_, true);
   ROS_INFO("[%s] withArm: %s", name_.c_str(), withArm_ ? "true" : "false");
 
-  // 初始化 RL IMU 滤波（内部用 accFilterRL_ 等）
+  // 初始化 RL IMU 滤波（内部用 accFilterRL_ 等），同时加载 control_frequency_
   loadRLFilterParams(config_file_);
-  
+
+  // 使用配置文件中的控制频率设置 dt_
+  dt_ = 1.0 / control_frequency_;
+
   try {
     // 加载配置文件
     if (!loadConfig(config_file_)) 
@@ -113,7 +123,7 @@ bool VMPController::loadConfig(const std::string& config_file)
   boost::property_tree::ptree pt;
   boost::property_tree::read_info(config_file, pt);
 
-  Eigen::VectorXd jointCmdFilterCutoffFreq(jointNum_ + jointArmNum_);
+  Eigen::VectorXd jointCmdFilterCutoffFreq(jointNum_ + jointArmNum_ + waistNum_);
 
   loadData::loadEigenMatrix(config_file, "jointControlMode", JointControlModeRL_);
   loadData::loadEigenMatrix(config_file, "jointPDMode", JointPDModeRL_);
@@ -600,7 +610,7 @@ void VMPController::actionToJointCmd(const Eigen::VectorXd& actuation,
     joint_cmd.tau_max.push_back(10.0);
     joint_cmd.joint_kp.push_back(0.0);
     joint_cmd.joint_kd.push_back(0.0);
-    joint_cmd.control_modes.push_back(0);
+    joint_cmd.control_modes.push_back(2);   // CSP 模式（与 kuavo-rl 一致）
   }
 }
 
@@ -685,7 +695,7 @@ Eigen::VectorXd VMPController::updateRLcmd(const Eigen::VectorXd& state)
   // 应用关节命令滤波器
   cmd_filter = jointCmdFilter_.update(cmd);
   cmd_out = cmd_filter.cwiseProduct(jointCmdFilterState_) +
-      cmd.cwiseProduct(Eigen::VectorXd::Ones(jointNum_ + jointArmNum_) - jointCmdFilterState_);
+      cmd.cwiseProduct(Eigen::VectorXd::Ones(jointNum_ + jointArmNum_ + waistNum_) - jointCmdFilterState_);
   actuation = cmd_out;
 
   // 发布调试数据
@@ -941,6 +951,14 @@ void VMPController::updateVMPReferenceMotion()
       vmp_ref_motion_buffer_.erase(vmp_ref_motion_buffer_.begin());
     }
     vmp_ref_motion_buffer_.push_back(current_ref_frame);
+
+    // 发布参考运动数据用于调试
+    if (ros_logger_) {
+      ros_logger_->publishVector("/vmp_controller/motion_ref_data", current_ref_frame);
+      Eigen::VectorXd trajectory_info(2);
+      trajectory_info << static_cast<double>(current_frame), static_cast<double>(total_frames);
+      ros_logger_->publishVector("/vmp_controller/trajectory_frame", trajectory_info);
+    }
 
   } catch (const std::exception& e) {
     ROS_ERROR("[VMPController] Error updating reference motion: %s", e.what());
@@ -1497,7 +1515,8 @@ void VMPController::printMultiTrajectoryStatus() const
 
 void VMPController::initROSServices()
 {
-  std::string service_ns = "/" + name_;
+  // 服务命名空间为 /humanoid_controllers/{controller_name}
+  std::string service_ns = "/humanoid_controllers/" + name_;
 
   // 初始化服务
   srv_get_trajectory_list_ = nh_.advertiseService(

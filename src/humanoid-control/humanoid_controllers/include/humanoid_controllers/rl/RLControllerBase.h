@@ -210,6 +210,18 @@ public:
   virtual void resume();
 
   /**
+   * @brief 等待下一个控制周期（用于控制频率管理）
+   * 派生类可重写此方法以实现自定义的频率控制
+   */
+  virtual void waitForNextCycle();
+
+  /**
+   * @brief 获取控制器的控制频率
+   * @return 控制频率（Hz）
+   */
+  double getControlFrequency() const { return control_frequency_; }
+
+  /**
    * @brief 获取手臂控制器（如果存在）
    * @return 手臂控制器指针，如果不存在则返回 nullptr
    */
@@ -413,6 +425,10 @@ protected:
   std::thread inference_thread_;                    ///< 推理线程
   std::atomic<bool> inference_thread_created_{false}; ///< 推理线程是否已创建
   double inference_frequency_{100.0};               ///< 推理频率（Hz）
+
+  // 控制频率相关
+  double control_frequency_{500.0};                 ///< 控制频率（Hz），从配置文件读取，默认使用 /wbc_frequency
+  std::unique_ptr<ros::Rate> control_rate_;         ///< 控制频率 Rate 对象
   Eigen::VectorXd
       networkInputDataRL_; ///< 将所有历史长度的数据接成一个向量（用于推理）
   int num_actions_ = 0; ///< 动作维度（用于基类inference的默认实现）

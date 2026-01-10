@@ -244,8 +244,8 @@ using namespace ocs2;
       loadData::loadEigenMatrix(config_file, "freeAccFilterState", freeAccFilterStateRL_);
       loadData::loadEigenMatrix(config_file, "gyroFilterState", gyroFilterStateRL_);
 
-      // 采样时间：优先从 ROS 参数 /wbc_frequency 获取控制频率，再换算为 dt
-      // 如果未设置 /wbc_frequency，则使用 500 Hz 作为默认值
+      // 控制频率：优先从配置文件加载 controlFrequency，否则使用 /wbc_frequency ROS 参数
+      // 控制频率同时决定滤波器的采样时间 dt
       double wbc_frequency = 500.0;
       if (!nh_.getParam("/wbc_frequency", wbc_frequency))
       {
@@ -257,14 +257,32 @@ using namespace ocs2;
         ROS_WARN("[%s] Invalid /wbc_frequency (%.3f), fallback to 500 Hz", name_.c_str(), wbc_frequency);
         wbc_frequency = 500.0;
       }
-      double dt = 1.0 / wbc_frequency;
+
+      // 尝试从配置文件加载 controlFrequency，如果没有则使用 wbc_frequency
+      try
+      {
+        loadData::loadCppDataType(config_file, "controlFrequency", control_frequency_);
+        ROS_INFO("[%s] Loaded controlFrequency from config: %.1f Hz", name_.c_str(), control_frequency_);
+      }
+      catch (const std::exception& e)
+      {
+        // 配置文件中没有 controlFrequency，使用 /wbc_frequency
+        control_frequency_ = wbc_frequency;
+        ROS_INFO("[%s] controlFrequency not in config, using /wbc_frequency: %.1f Hz", name_.c_str(), control_frequency_);
+      }
+
+      // 初始化控制频率 Rate 对象
+      control_rate_ = std::make_unique<ros::Rate>(control_frequency_);
+
+      // 使用控制频率计算滤波器采样时间 dt
+      double dt = 1.0 / control_frequency_;
 
       accFilterRL_.setParams(dt, accFilterCutoffFreqRL_);
       freeAccFilterRL_.setParams(dt, freeAccFilterCutoffFreqRL_);
       gyroFilterRL_.setParams(dt, gyroFilterCutoffFreqRL_);
 
       rl_filter_initialized_ = true;
-      ROS_INFO("[%s] RL IMU filters initialized (dt=%.6f)", name_.c_str(), dt);
+      ROS_INFO("[%s] Control frequency: %.1f Hz, dt: %.6f s", name_.c_str(), control_frequency_, dt);
       
       // 加载切换相关参数
       // use_interploate_from_mpc: 从MPC切换到这个模型时是否使用插值过渡
@@ -447,9 +465,14 @@ using namespace ocs2;
     }
     else
     {
-      ROS_WARN("[%s] Cannot resume controller: current state=%d (expected PAUSED)", 
+      ROS_WARN("[%s] Cannot resume controller: current state=%d (expected PAUSED)",
                name_.c_str(), static_cast<int>(state_));
     }
+  }
+
+  void RLControllerBase::waitForNextCycle()
+  {
+    control_rate_->sleep();
   }
 
   bool RLControllerBase::inference(const Eigen::VectorXd& observation, Eigen::VectorXd& action)

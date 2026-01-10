@@ -170,11 +170,11 @@ def call_execute_arm_action(action_name):
         return False, f"Service exception: {e}"
 
 def call_exec_vmp_action(action_name):
-    """Call the /vmp_controller/trajectory/execute service
+    """Call the /humanoid_controllers/vmp_controller/trajectory/execute service
     :param action_name 动作名字
     :return: bool， 服务调用结果
     """
-    service_name = "/vmp_controller/trajectory/execute"
+    service_name = "/humanoid_controllers/vmp_controller/trajectory/execute"
     try:
         # 确保 action_name 是字符串类型
         if not isinstance(action_name, str):
@@ -850,7 +850,7 @@ def vmp_action_callback(event):
             if action_names:
                 for action_name in action_names:
                     if action_name and action_name.strip():  # 检查非空
-                        rospy.loginfo(f"VMP Calling /vmp_controller/trajectory/execute service with action name: {action_name}")
+                        rospy.loginfo(f"VMP Calling /humanoid_controllers/vmp_controller/trajectory/execute service with action name: {action_name}")
                         success, message = call_exec_vmp_action(action_name)
                         if success:
                             rospy.loginfo(f"VMP Action '{action_name}' executed successfully: {message}")

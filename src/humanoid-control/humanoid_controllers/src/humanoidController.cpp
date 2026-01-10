@@ -323,6 +323,11 @@ namespace humanoid_controller
     if(controllerNh_.hasParam("/visualize_humanoid"))
       controllerNh_.getParam("/visualize_humanoid", visualizeHumanoid_);
     dt_ = 1.0 / controlFrequency;
+
+    // 存储并初始化 WBC 控制频率
+    wbc_frequency_ = controlFrequency;
+    wbc_rate_ = std::make_unique<ros::Rate>(wbc_frequency_);
+    ROS_INFO_STREAM("[humanoidController] WBC rate initialized at " << wbc_frequency_ << " Hz");
     if (controllerNh_.hasParam("/real"))
     {
       controllerNh_.getParam("/real", is_real_);
@@ -4311,7 +4316,35 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     }
   }
 
+  void humanoidController::waitForNextCycle()
+  {
+    // 根据当前控制模式选择对应的频率控制
+    if (is_rl_controller_ && current_controller_ptr_ != nullptr)
+    {
+      // RL 模式：委托给当前 RL 控制器的 waitForNextCycle
+      current_controller_ptr_->waitForNextCycle();
+    }
+    else
+    {
+      // MPC 模式：使用自身的 wbc_rate_
+      wbc_rate_->sleep();
+    }
+  }
 
+  double humanoidController::getControlFrequency() const
+  {
+    // 根据当前控制模式返回对应的控制频率
+    if (is_rl_controller_ && current_controller_ptr_ != nullptr)
+    {
+      // RL 模式：返回当前 RL 控制器的控制频率
+      return current_controller_ptr_->getControlFrequency();
+    }
+    else
+    {
+      // MPC 模式：返回 WBC 频率
+      return wbc_frequency_;
+    }
+  }
 
  } // namespace humanoid_controller
 // PLUGINLIB_EXPORT_CLASS(humanoid_controller::humanoidController)

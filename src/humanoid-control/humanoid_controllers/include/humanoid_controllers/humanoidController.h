@@ -230,6 +230,19 @@ namespace humanoid_controller
     void update(const ros::Time &time, const ros::Duration &period);
     void starting(const ros::Time &time);
     void stopping(const ros::Time & /*time*/) { mpcRunning_ = false; }
+
+    /**
+     * @brief 等待下一个控制周期（用于控制频率管理）
+     * MPC 模式使用自身的 wbc_rate_，RL 模式委托给当前 RL 控制器
+     */
+    void waitForNextCycle();
+
+    /**
+     * @brief 获取当前控制器的控制频率
+     * MPC 模式返回 wbc_frequency_，RL 模式返回当前 RL 控制器的频率
+     * @return 控制频率（Hz）
+     */
+    double getControlFrequency() const;
     void applySensorData();
     void applySensorData(const SensorData &data);
     void applySensorDataRL(const SensorData &data);
@@ -587,6 +600,10 @@ namespace humanoid_controller
     double dt_ = 0.001;
     std::thread mpcThread_;
     std::atomic_bool controllerRunning_{}, mpcRunning_{};
+
+    // 控制频率相关
+    double wbc_frequency_{500.0};                    // WBC 控制频率（Hz）
+    std::unique_ptr<ros::Rate> wbc_rate_;            // WBC 控制频率 Rate 对象
     benchmark::RepeatedTimer mpcTimer_;
     benchmark::RepeatedTimer wbcTimer_;
     size_t jointNum_ = 12;

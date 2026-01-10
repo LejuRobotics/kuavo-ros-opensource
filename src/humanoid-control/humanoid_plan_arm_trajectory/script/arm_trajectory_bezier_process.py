@@ -9,6 +9,7 @@ import numpy as np
 import os
 import sys
 import rospkg
+import subprocess
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
 
 # 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
@@ -698,6 +699,101 @@ class ArmTrajectoryBezierDemo:
             rospy.logerr(f"Service call failed: {e}")
             return False
 
+    def check_nodelet_manager_alive(self):
+        """检查 nodelet_manager 节点是否真正在线且可通信
+        
+        Returns:
+            bool: True 如果节点在线且可通信，False 否则
+        """
+        # 先快速检查：使用 get_num_connections 检查是否有订阅者
+        # 这是最快的检查方法，可以避免不必要的子进程调用
+        num_subscribers = self.kuavo_arm_traj_pub.get_num_connections()
+        if num_subscribers == 0:
+            rospy.logwarn("话题 /kuavo_arm_traj 没有订阅者")
+            return False
+        
+        # 有订阅者，进一步验证 nodelet_manager 节点是否真正可通信
+        # 方法1: 先检查节点是否在节点列表中
+        try:
+            node_result = subprocess.run(
+                ['rosnode', 'list'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=2
+            )
+            if node_result.returncode == 0:
+                node_list = node_result.stdout.decode('utf-8', errors='ignore')
+                # 检查 nodelet_manager 是否在节点列表中
+                if '/nodelet_manager' not in node_list:
+                    # 检查是否有包含 nodelet_manager 的节点名
+                    found_nodelet = False
+                    for line in node_list.split('\n'):
+                        if 'nodelet_manager' in line.strip():
+                            found_nodelet = True
+                            break
+                    if not found_nodelet:
+                        rospy.logwarn("nodelet_manager 节点不在节点列表中")
+                        return False
+            else:
+                # rosnode list 失败，继续尝试 ping
+                stderr_output = node_result.stderr.decode('utf-8', errors='ignore')
+                rospy.logwarn(f"rosnode list 命令失败: {stderr_output.strip()}")
+        except Exception as e:
+            rospy.logwarn(f"检查节点列表时出错: {e}，继续尝试 ping")
+        
+        # 方法2: 使用 rosnode ping 验证节点是否真正可通信（最可靠）
+        # 这会真正尝试与节点建立连接，即使节点在 master 中注册但已崩溃也会返回 False
+        # 注意：rosnode ping 即使失败也可能返回 0，需要检查输出内容
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                result = subprocess.run(
+                    ['rosnode', 'ping', '/nodelet_manager', '-c', '1'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,  # 将 stderr 合并到 stdout，因为错误信息可能在这里
+                    timeout=3,  # 增加超时时间，匹配 rosnode ping 的默认超时
+                    text=True  # 直接返回字符串而不是 bytes
+                )
+                
+                # 当 stderr=subprocess.STDOUT 时，所有输出都在 stdout 中
+                output = result.stdout or ""
+                
+                # 检查输出中是否包含错误信息
+                output_lower = output.lower()
+                has_error = 'error' in output_lower or 'connection refused' in output_lower or 'failed' in output_lower
+                has_success = 'xmlrpc reply from' in output_lower
+                
+                # rosnode ping 成功时会显示 "xmlrpc reply from" 或类似的成功信息
+                # 失败时会显示 "ERROR" 或 "connection refused"
+                if not has_error and (has_success or result.returncode == 0):
+                    # ping 成功，节点真正在线
+                    rospy.loginfo("nodelet_manager 节点正常运行")
+                    return True
+                else:
+                    # ping 失败，节点在 master 中注册但无法通信（可能已崩溃）
+                    error_msg = output.strip() if output.strip() else "未知错误"
+                    if attempt < max_retries - 1:
+                        # 不是最后一次尝试，稍等再试（可能是节点刚启动）
+                        rospy.logwarn(f"节点 nodelet_manager ping 失败（尝试 {attempt + 1}/{max_retries}），稍后重试: {error_msg}")
+                        time.sleep(0.5)
+                    else:
+                        # 最后一次尝试也失败
+                        rospy.logwarn(f"节点 nodelet_manager 无法通信（可能已崩溃）: {error_msg}")
+                        return False
+                        
+            except subprocess.TimeoutExpired:
+                if attempt < max_retries - 1:
+                    rospy.logwarn(f"检查 nodelet_manager 节点状态超时（尝试 {attempt + 1}/{max_retries}），稍后重试")
+                    time.sleep(0.5)
+                else:
+                    rospy.logwarn("检查 nodelet_manager 节点状态超时（最终失败）")
+                    return False
+            except Exception as e:
+                rospy.logwarn(f"检查 nodelet_manager 节点状态时出错: {e}")
+                return False
+        
+        return False
+
     def handle_interrupt(self, req):
         """处理中断请求的服务回调"""
         rospy.loginfo("[%s]  接收到机械臂中断指令", rospy.get_time())  
@@ -731,9 +827,8 @@ class ArmTrajectoryBezierDemo:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=f"Action file {action_name} not found")
 
-        num_subscribers = self.kuavo_arm_traj_pub.get_num_connections()
-        if num_subscribers == 0:
-            msg = "话题 /kuavo_arm_traj 没有订阅者，机器人可能未启动。请检查 nodelet_manager 节点是否正常运行。"
+        if not self.check_nodelet_manager_alive():
+            msg = "话题 /kuavo_arm_traj 的订阅者 nodelet_manager 节点无法通信或不存在。请检查 nodelet_manager 节点是否正常运行。"
             rospy.logerr(msg)
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)

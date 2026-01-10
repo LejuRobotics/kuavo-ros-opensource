@@ -73,3 +73,4 @@ topics:
   - /livox/points
   - /rl_controller.*
   - /arm_controller.*
+  - /vmp_controller/.*

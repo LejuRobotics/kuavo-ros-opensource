@@ -17,7 +17,7 @@
 
     <arg name="use_external_mpc"   default="true"/>
     <arg name="wbc_frequency"      default="500"/>
-    <arg name="sensor_frequency"   default="500"/>
+    <arg name="sensor_frequency"   default="1000"/>
     <arg name="use_joystick"       default="true"/>
     <arg name="with_estimation"    default="true"/>
     <arg name="estimator_type"     default="1"/>
