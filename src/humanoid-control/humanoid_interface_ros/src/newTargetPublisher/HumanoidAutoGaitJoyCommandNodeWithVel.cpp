@@ -162,6 +162,7 @@ namespace ocs2
 #define JOYSTICK_BEITONG_MAP_JSON "bt2pro"
 #define JOYSTICK_BEITONG_BUTTON_NUM 16
 #define JOYSTICK_AXIS_NUM 8
+#define WAIST_YAW_MAX_ANGLE_DEG 120.0  // 腰部最大旋转角度（度），±120度
 
   class JoyControl
   {
@@ -898,33 +899,32 @@ namespace ocs2
           executeCommand("stairclimb");
         }
         }
-        else
+
+        // 组合键控制腰部
+        // 检查是否有动作正在执行，如果有则禁用转腰控制以避免冲突
+        bool action_executing = false;
+        
+        // 检查ROS参数标志（用于某些动作执行场景，如太极动作）
+        if (nodeHandle_.hasParam("/taiji_executing"))
         {
-           // 组合键控制腰部
-          // 检查是否有动作正在执行，如果有则禁用转腰控制以避免冲突
-          bool action_executing = false;
-          
-          // 检查ROS参数标志（用于某些动作执行场景，如太极动作）
-          if (nodeHandle_.hasParam("/taiji_executing"))
-          {
-            nodeHandle_.getParam("/taiji_executing", action_executing);
-          }
-          
-          // 检查动作状态话题（用于通过/execute_arm_action服务执行的动作）
-          if (!action_executing)
-          {
-            action_executing = robot_action_executing_;
-          }
-          
-          // 只有在没有动作执行时才允许转腰控制
-          if (!action_executing)
-          {
-            double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
-            waist_yaw = 120.0 * waist_yaw;   // +- 120deg
-            // std::cout << "waist_yaw: " << waist_yaw << std::endl;
-            controlWaist(waist_yaw);
-          }
+          nodeHandle_.getParam("/taiji_executing", action_executing);
         }
+        
+        // 检查动作状态话题（用于通过/execute_arm_action服务执行的动作）
+        if (!action_executing)
+        {
+          action_executing = robot_action_executing_;
+        }
+        
+        // 只有在没有动作执行时才允许转腰控制
+        if (!action_executing)
+        {
+          double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+          waist_yaw = WAIST_YAW_MAX_ANGLE_DEG * waist_yaw;   // +- WAIST_YAW_MAX_ANGLE_DEG deg
+          // std::cout << "waist_yaw: " << waist_yaw << std::endl;
+          controlWaist(waist_yaw);
+        }
+        
         old_joy_msg_ = *joy_msg;
         return;
       }
