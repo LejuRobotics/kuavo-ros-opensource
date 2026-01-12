@@ -28,6 +28,7 @@ LAUNCH2="plan_arm_action_websocket_server.launch"
 # 无论 launch 文件是直接启动还是被 include 到其他 launch 中，都能正确检测
 LAUNCH1_RUNNING=false
 LAUNCH2_RUNNING=false
+SDK_RUNNING=false
 
 # 健康检测函数：检查节点是否真正活跃
 check_node_healthy() {
@@ -89,6 +90,16 @@ else
     echo "✗ plan_arm_action_websocket_server 节点不存在或已清理"
 fi
 
+# 检测 websocket_sdk_start_node (SDK) 节点
+echo "正在检测 websocket_sdk_start_node (SDK) 节点..."
+if check_node_healthy "websocket_sdk_start_node"; then
+    SDK_RUNNING=true
+    echo "✓ websocket_sdk_start_node (SDK) 节点运行正常"
+else
+    SDK_RUNNING=false
+    echo "✗ websocket_sdk_start_node (SDK) 节点不存在或已清理"
+fi
+
 # 获取脚本自身所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "SCRIPT_DIR: $SCRIPT_DIR"
@@ -134,8 +145,8 @@ else
     PLAN_PID=""
 fi
 
-# 启动 h12pro_controller_node（仅当 LAUNCH2 未运行时）
-if [ "$LAUNCH2_RUNNING" = "false" ]; then
+# 启动 h12pro_controller_node（仅当 SDK 未运行时）
+if [ "$SDK_RUNNING" = "false" ]; then
     echo "启动 h12pro_controller_node 节点"
     roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch &
     CONTROLLER_PID=$!
@@ -145,7 +156,7 @@ if [ "$LAUNCH2_RUNNING" = "false" ]; then
     sleep 3
     echo "h12pro_controller_node 已启动。"
 else
-    echo "h12pro_controller_node 相关服务已在运行，跳过启动"
+    echo "h12pro_controller_node (SDK) 相关服务已在运行，跳过启动"
     CONTROLLER_PID=""
 fi
 

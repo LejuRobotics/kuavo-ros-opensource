@@ -127,7 +127,6 @@
     },
     "stance":{
       "walk":["E_MIDDLE", "F_MIDDLE", "A_PRESS"],
-      "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
       "stance":["E_MIDDLE", "F_MIDDLE", "C_PRESS"],
       "toggle_head_control":["E_MIDDLE", "F_RIGHT", "B_PRESS"],
       "arm_pose1":["E_RIGHT", "F_LEFT", "A_PRESS"],
@@ -148,7 +147,6 @@
     },
     "walk":{
       "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
-      "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
       "stop":["C_LONG_PRESS","D_LONG_PRESS"]
     },
     "trot":{
@@ -204,7 +202,6 @@
     },
     "walk":{
       "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
-      "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
       "stop":["C_LONG_PRESS","D_LONG_PRESS"]
     },
     "trot":{
@@ -233,7 +230,6 @@
     },
     "stance":{
       "walk":["E_MIDDLE", "F_MIDDLE", "A_PRESS"],
-      "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
       "switch_controller":["E_MIDDLE", "F_MIDDLE", "C_PRESS"],
       "vmp_controller":["E_RIGHT", "F_LEFT", "A_LONG_PRESS"],
       "customize_action_RR_A":["E_RIGHT", "F_RIGHT", "A_PRESS"],
@@ -249,7 +245,6 @@
     },
     "walk":{
       "stance":["E_MIDDLE", "F_MIDDLE", "D_PRESS"],
-      "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
       "stop":["C_LONG_PRESS","D_LONG_PRESS"]
     },
     "trot":{

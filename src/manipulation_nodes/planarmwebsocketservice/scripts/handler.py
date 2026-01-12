@@ -10,6 +10,7 @@ from queue import Queue
 from dataclasses import dataclass
 import tf
 import geometry_msgs.msg
+import traceback
 
 # 全局变量存储地图信息，用于坐标系转换
 global_map_info = None
@@ -4639,6 +4640,135 @@ async def calibration_by_task_point_handler(
     response_queue.put(response)
 
 
+async def set_api_key_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    设置API密钥接口
+    用于设置大模型的API密钥
+    """
+    print('set key handler')
+    llm_api_storage_path = os.path.expanduser("~/.config/lejuconfig/llm_apis.json")
+    payload = Payload(cmd="set_api_key", data={"code": 0, "msg": "API密钥存储成功"})
+    data = data.get("data", {})
+
+    if not data:
+        payload.data["code"] = 1
+        payload.data["msg"] = "需要提供API密钥"
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+
+    try:
+        key_pairs = {}
+        if not os.path.exists(llm_api_storage_path):
+            os.makedirs(os.path.expanduser("~/.config/lejuconfig/"), exist_ok=True)
+            with open(llm_api_storage_path, "w") as f:
+                f.write("{}")
+        print('读取原有文件')
+        with open(llm_api_storage_path,'r') as f:
+            key_pairs = json.load(f)
+
+        for key, value in data.items():
+            key_pairs[key] = str(value) if value is not None else ""
 
 
+        with open(llm_api_storage_path, "w") as f:
+            json.dump(key_pairs, f, indent=4)
 
+        payload.data["code"] = 0
+        payload.data["msg"] = "API密钥存储成功"
+
+    except FileNotFoundError:
+        print(traceback.format_exc())
+        payload.data["code"] = 1
+        payload.data["msg"] = "API密钥文件路径不存在"
+
+    except json.JSONDecodeError:
+        print(traceback.format_exc())
+        # 做处理
+        with open(llm_api_storage_path, "w") as f:
+            json.dump(key_pairs, f, indent=4)
+        payload.data["code"] = 0
+        payload.data["msg"] = "原文件格式错误,已重置为默认格式"
+
+    except IOError as e:
+        print(traceback.format_exc())
+        payload.data["code"] = 1
+        payload.data["msg"] = f"API密钥存储失败: 文件操作错误 - {e}"
+
+    except Exception as e:
+        print(traceback.format_exc())
+        payload.data["code"] = 1
+        payload.data["msg"] = f"API密钥存储失败: {e}"+traceback.format_exc()
+
+    finally:
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+
+
+    print(payload.data['msg'])
+
+
+async def get_api_key_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    获取API密钥接口
+    用于获取大模型的API密钥
+    """
+    print("获取api密钥中")
+    llm_api_storage_path = os.path.expanduser("~/.config/lejuconfig/llm_apis.json")
+    payload = Payload(cmd="get_api_key", data={"code": 0, "msg": "API密钥获取成功"})
+    valid_params = [
+        "ark_X-Api-App-ID",
+        "ark_X-Api-Access-Key",
+        "xfyun_APPID",
+        "xfyun_APISecret",
+        "xfyun_APIKey",
+        "ark_analysis_key",
+    ]
+
+    try:
+        if not os.path.exists(llm_api_storage_path):
+            payload.data["code"] = 1
+            payload.data["msg"] = "API密钥文件不存在"
+            return
+
+        with open(llm_api_storage_path,'r') as f:
+            content = json.load(f)
+
+        if not content or content == {}:
+            payload.data["code"] = 1
+            payload.data["msg"] = "API密钥文件为空"
+            return
+
+        for key in valid_params:
+            payload.data[key] = content.get(key, "")
+
+        payload.data["code"] = 0
+        payload.data["msg"] = "API密钥获取成功"
+
+    except FileNotFoundError:
+        payload.data["code"] = 1
+        payload.data["msg"] = "API密钥文件不存在"
+
+    except json.JSONDecodeError:
+        print(traceback.format_exc())
+        payload.data["code"] = 1
+        payload.data["msg"] = "API密钥文件格式错误"
+
+    except IOError as e:
+        payload.data["code"] = 1
+        payload.data["msg"] = f"API密钥获取失败: 文件操作错误 - {e}"
+
+    except Exception as e:
+        print(traceback.format_exc())
+        payload.data["code"] = 1
+        payload.data["msg"] = f"API密钥获取失败: {e}"
+
+    finally:
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+
+        print(payload.data['msg'])
