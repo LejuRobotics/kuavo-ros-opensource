@@ -706,6 +706,9 @@ namespace humanoid_controller
     LowPassFilter2ndOrder gyro_filter_;
     LowPassFilter2ndOrder arm_joint_pos_filter_;
     LowPassFilter2ndOrder arm_joint_vel_filter_;
+
+    double sensor_frequency_{1000.0};   // 传感器数据频率
+    double sensor_dt_{0.001};           // 传感器数据采样周期，用于滤波器和数据缓冲区
     LowPassFilter2ndOrder mrt_joint_vel_filter_;
 
 
