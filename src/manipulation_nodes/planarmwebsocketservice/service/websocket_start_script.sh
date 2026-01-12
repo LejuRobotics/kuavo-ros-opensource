@@ -29,16 +29,64 @@ LAUNCH2="plan_arm_action_websocket_server.launch"
 LAUNCH1_RUNNING=false
 LAUNCH2_RUNNING=false
 
-# 检测 humanoid_plan_arm_trajectory 相关节点
-if rosnode list 2>/dev/null | grep -q "autostart_arm_trajectory_bezier_demo"; then
+# 健康检测函数：检查节点是否真正活跃
+check_node_healthy() {
+    local node_name=$1
+
+    # 检查节点是否在列表中
+    if ! rosnode list 2>/dev/null | grep -q "$node_name"; then
+        return 1
+    fi
+
+    # 检查节点是否响应 ping (发送一次请求，3秒超时)
+    if timeout 3 rosnode ping "$node_name" -c 1 >/dev/null 2>&1; then
+        return 0
+    else
+        echo "警告：发现僵尸节点 $node_name，正在清理..."
+        rosnode kill "$node_name" 2>/dev/null
+        return 1
+    fi
+}
+
+# 检测 humanoid_plan_arm_trajectory 相关节点（需要检测两个节点）
+NODE1="autostart_arm_trajectory_bezier_demo"
+NODE2="humanoid_plan_arm_trajectory_node"
+NODE1_HEALTHY=false
+NODE2_HEALTHY=false
+
+echo "正在检测 humanoid_plan_arm_trajectory 相关节点..."
+
+if check_node_healthy "$NODE1"; then
+    NODE1_HEALTHY=true
+    echo "✓ 节点 $NODE1 运行正常"
+else
+    echo "✗ 节点 $NODE1 不存在或已清理"
+fi
+
+if check_node_healthy "$NODE2"; then
+    NODE2_HEALTHY=true
+    echo "✓ 节点 $NODE2 运行正常"
+else
+    echo "✗ 节点 $NODE2 不存在或已清理"
+fi
+
+# 两个节点都健康才算运行中
+if [ "$NODE1_HEALTHY" = "true" ] && [ "$NODE2_HEALTHY" = "true" ]; then
     LAUNCH1_RUNNING=true
-    echo "检测到 humanoid_plan_arm_trajectory 相关节点正在运行"
+    echo "✓ humanoid_plan_arm_trajectory 所有节点均正常运行，跳过启动"
+else
+    LAUNCH1_RUNNING=false
+    echo "⚠ humanoid_plan_arm_trajectory 节点不完整或存在僵尸节点，需要重新启动"
 fi
 
 # 检测 plan_arm_action_websocket_server 节点
-if rosnode list 2>/dev/null | grep -q "plan_arm_action_websocket_server"; then
+echo "正在检测 plan_arm_action_websocket_server 节点..."
+if check_node_healthy "plan_arm_action_websocket_server"; then
     LAUNCH2_RUNNING=true
-    echo "检测到 plan_arm_action_websocket_server 节点正在运行"
+    echo "✓ plan_arm_action_websocket_server 节点运行正常"
+else
+    LAUNCH2_RUNNING=false
+    echo "✗ plan_arm_action_websocket_server 节点不存在或已清理"
 fi
 
 # 获取脚本自身所在目录
