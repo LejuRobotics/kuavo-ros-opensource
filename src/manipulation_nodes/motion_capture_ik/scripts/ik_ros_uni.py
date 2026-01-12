@@ -1016,7 +1016,7 @@ class IkRos:
         robot_hand_position.header.stamp = rospy.Time.now()
         if self.end_effector_type == QIANGNAO or self.end_effector_type == QIANGNAO_TOUCH or self.end_effector_type == REVO2:
             if joyStick_data is not None:
-                if joyStick_data.left_second_button_pressed and self.__button_y_last is False and joyStick_data.right_first_button_touched is False:
+                if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
                     print(f"\033[91mButton Y is pressed.\033[0m")
                     self.__freeze_finger = not self.__freeze_finger
                 self.__button_y_last = joyStick_data.left_second_button_pressed

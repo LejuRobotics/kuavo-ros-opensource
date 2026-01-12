@@ -413,15 +413,8 @@ namespace humanoid_controller
       }
     }
 
-    // 检测is_rl_start参数，如果为true则绕过MPC控制器
-    if (controllerNh_.hasParam("/is_rl_start"))
-    {
-      controllerNh_.getParam("/is_rl_start", is_rl_start_);
-      if (is_rl_start_)
-      {
-        ROS_INFO("[HumanoidController] is_rl_start=true, will bypass MPC control loop and start directly with first RL controller");
-      }
-    }
+    // 检测is_rl_start参数，如果为true则绕过MPC控制器，直接使用RL控制器
+    controllerNh_.param<bool>("/is_rl_start", is_rl_start_, false);
 
     
     // trajectory_publisher_ = new TrajectoryPublisher(controller_nh, 0.001);
@@ -442,8 +435,6 @@ namespace humanoid_controller
 #endif
     setupHumanoidInterface(taskFile, urdfFile, referenceFile, gaitCommandFile, verbose, rb_version);
     ros::NodeHandle nh;
-    
-    // MPC需要初始化，但is_rl_start=true时在控制循环中不进入MPC流程
     setupMpc();
     setupMrt();
     // Visualization
@@ -844,10 +835,9 @@ namespace humanoid_controller
             // 从 RLControllerManager 获取 WALK_CONTROLLER 列表（包括 BASE）
             available_controllers_ = controller_manager_->getWalkControllerList();
             
-            // 如果is_rl_start为true，直接切换到第一个BASE RL控制器（跳过MPC控制循环）
+            // is_rl_start模式：找到第一个BASE RL控制器并设置默认姿态
             if (is_rl_start_)
             {
-              // 找到第一个非MPC且非倒地起身的控制器
               std::string first_rl_controller = "";
               for (const auto& name : available_controllers_)
               {
@@ -861,12 +851,10 @@ namespace humanoid_controller
               
               if (!first_rl_controller.empty())
               {
-                // 仅设置初始参数和目标名称，不立即调用 switchController
-                // 这样系统会保持在 Base 状态启动，从而允许 preUpdate 正常执行
                 current_controller_ = first_rl_controller;
                 current_controller_index_ = std::find(available_controllers_.begin(), available_controllers_.end(), first_rl_controller) - available_controllers_.begin();
                 
-                // 提前获取一次控制器指针以读取默认姿态，供 preUpdate 对齐使用
+                // 获取RL控制器的默认姿态，供preUpdate起立使用
                 auto* target_ptr = controller_manager_->getControllerByName(first_rl_controller);
                 if (target_ptr)
                 {
@@ -875,28 +863,16 @@ namespace humanoid_controller
                   desire_arm_q_ = currentDefalutJointPosRL_.segment(jointNumReal_ + waistNum_, armNumReal_);
                   desire_arm_v_ = Eigen::VectorXd::Zero(armNumReal_);
                 }
-
-                // 重置并暂停MPC节点
-                if (mrtRosInterface_)
-                {
-                  SystemObservation init_obs = currentObservation_;
-                  init_obs.state = initial_status_;
-                  init_obs.input.setZero(HumanoidInterface_->getCentroidalModelInfo().inputDim);
-                  mrtRosInterface_->resetMpcNode(TargetTrajectories({init_obs.time}, {init_obs.state}, {init_obs.input}));
-                  mrtRosInterface_->pauseResumeMpcNode(true);
-                  ROS_INFO("[HumanoidController] MPC node reset and paused (is_rl_start=true, waiting for standup)");
-                }
-                
-                inference_running_ = true;
+                ROS_INFO("[HumanoidController] is_rl_start=true, target RL controller: %s", first_rl_controller.c_str());
               }
               else
               {
-                ROS_WARN("[HumanoidController] No BASE RL controller available, falling back to MPC");
+                ROS_WARN("[HumanoidController] is_rl_start=true but no BASE RL controller found, falling back to MPC");
                 is_rl_start_ = false;
               }
             }
             
-            // 默认使用MPC（如果is_rl_start失败或未设置）
+            // 默认使用MPC（is_rl_start失败或未设置时）
             if (!is_rl_start_)
             {
               current_controller_ = "mpc";
@@ -911,22 +887,16 @@ namespace humanoid_controller
           else
           {
             ROS_WARN("[HumanoidController] Failed to load controllers from config file");
-            if (is_rl_start_)
-            {
-              ROS_WARN("[HumanoidController] is_rl_start=true but failed to load RL controllers, falling back to MPC");
-              is_rl_start_ = false;
-            }
           }
           has_fall_stand_controller_ = controller_manager_->hasController(RLControllerType::FALL_STAND_CONTROLLER);
         }
         else
         {
-          is_rl_start_=false;
-          init_fall_down_state_=false;
+          ROS_WARN("[HumanoidController] RL not available, RL controllers will not be initialized");
         }
 
-        // 如果 init_fall_down_state_=true，初始切换到倒地起身控制器（但is_rl_start优先级更高）
-        if (init_fall_down_state_ && !is_rl_start_)
+          // 如果 init_fall_down_state_=true，初始切换到倒地起身控制器
+        if (init_fall_down_state_)
         {
           if (has_fall_stand_controller_)
           {
@@ -1812,7 +1782,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         standState.segment(12, currentDefalutJointPosRL_.size()) = currentDefalutJointPosRL_;
         standState(8) = defaultBaseHeightControl_;
-        ROS_INFO("[HumanoidController] is_rl_start=true, stand-up target set to RL default pose (height: %.3f)", standState(8));
       }
       /*******采用 standUp_controller 从蹲姿运动到站姿*********/
       stateEstimate_->setFixFeetHeights(true);
@@ -1989,51 +1958,42 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     }
     if (time.toSec() > robotStandUpCompleteTime_ + 0.8 || !is_real_ || init_fall_down_state_)
     {
-      // 如果is_rl_start_=true，跳过MPC初始化等待，直接完成preUpdate
-      if (is_rl_start_)
+      SystemObservation initial_observation = currentObservation_;
+      initial_observation.state = initial_status_;
+      TargetTrajectories target_trajectories({initial_observation.time}, {initial_observation.state}, {initial_observation.input});
+      mpc_current_target_trajectories_ = target_trajectories;
+      // Set the first observation and command and wait for optimization to finish
+      ROS_INFO_STREAM("Waiting for the initial policy ...");
+      // Reset MPC node
+      mrtRosInterface_->resetMpcNode(target_trajectories);
+      std::cout << "reset MPC node\n";
+      //暂时跳过MPC初始化
+      if (!is_rl_start_)
       {
-        ROS_INFO("[HumanoidController] is_rl_start=true, skipping MPC initialization in preUpdate");
-        stateEstimate_->setFixFeetHeights(false);
-        isPreUpdateComplete = true;
-        standupTime_ = currentObservation_.time;
-        resetting_mpc_state_ = ResettingMpcState::NOMAL;  // 设置状态为非初始化状态，允许可视化更新
-
-        std_msgs::Int8 bot_stand_up_complete;
-        bot_stand_up_complete.data = 1;
-        standUpCompletePub_.publish(bot_stand_up_complete);
+        // Wait for the initial policy
+        while (!mrtRosInterface_->initialPolicyReceived() && ros::ok() && ros::master::check())
+        {
+          mrtRosInterface_->spinMRT();
+          mrtRosInterface_->setCurrentObservation(initial_observation);
+          ros::Rate(HumanoidInterface_->mpcSettings().mrtDesiredFrequency_).sleep();
+        }
+        mrtRosInterface_->updatePolicy();
+        vector_t optimizedState_mrt, optimizedInput_mrt;
+        mrtRosInterface_->evaluatePolicy(currentObservation_.time, currentObservation_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
       }
       else
       {
-        SystemObservation initial_observation = currentObservation_;
-        initial_observation.state = initial_status_;
-        TargetTrajectories target_trajectories({initial_observation.time}, {initial_observation.state}, {initial_observation.input});
-        mpc_current_target_trajectories_ = target_trajectories;
-        // Set the first observation and command and wait for optimization to finish
-        ROS_INFO_STREAM("Waiting for the initial policy ...");
-        {
-          // Reset MPC node
-          mrtRosInterface_->resetMpcNode(target_trajectories);
-          std::cout << "reset MPC node\n";
-          // Wait for the initial policy
-          while (!mrtRosInterface_->initialPolicyReceived() && ros::ok() && ros::master::check())
-          {
-            mrtRosInterface_->spinMRT();
-            mrtRosInterface_->setCurrentObservation(initial_observation);
-            ros::Rate(HumanoidInterface_->mpcSettings().mrtDesiredFrequency_).sleep();
-          }
-          mrtRosInterface_->updatePolicy();
-          vector_t optimizedState_mrt, optimizedInput_mrt;
-          mrtRosInterface_->evaluatePolicy(currentObservation_.time, currentObservation_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
-        }
-        
-        stateEstimate_->setFixFeetHeights(false);
-        isPreUpdateComplete = true;
-        standupTime_ = currentObservation_.time;
-
-        std_msgs::Int8 bot_stand_up_complete;
-        bot_stand_up_complete.data = 1;
-        standUpCompletePub_.publish(bot_stand_up_complete);
+        mrtRosInterface_->pauseResumeMpcNode(true);
+        ROS_INFO("[HumanoidController] is_rl_start=true, skipping MPC initialization in preUpdate");
       }
+      
+      stateEstimate_->setFixFeetHeights(false);
+      isPreUpdateComplete = true;
+      standupTime_ = currentObservation_.time;
+
+      std_msgs::Int8 bot_stand_up_complete;
+      bot_stand_up_complete.data = 1;
+      standUpCompletePub_.publish(bot_stand_up_complete);
     }
     return true;
   }
@@ -2094,6 +2054,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         fall_down_state_ = FallStandState::STANDING;
       }
     }
+    // is_rl_start模式：MPC初始化完成后直接切换到RL控制器（不需要MPC插值）
+    if (is_rl_start_ && isPreUpdateComplete && !is_rl_controller_)
+    {
+      // 检查是否有有效的RL控制器
+      if (current_controller_ != "mpc" && controller_manager_->switchController(current_controller_))
+      {
+        current_controller_ptr_ = controller_manager_->getCurrentController();
+        is_rl_controller_ = last_is_rl_controller_ = true;
+        is_rl_start_ = false;
+        ROS_INFO("[HumanoidController] is_rl_start: MPC initialized, switched to RL controller: %s", current_controller_.c_str());
+      }
+    }
     // 是否直接切换到RL控制器（true：直接切换；false：通过MPC插值过渡）
     // 从当前RL控制器的配置文件中读取 use_interploate_from_mpc 参数
     bool derect_switch_to_rl = true;  // 默认直接切换到RL控制器
@@ -2104,19 +2076,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       bool use_interpolate = current_controller_ptr_->getUseInterpolateFromMPC();
       derect_switch_to_rl = !use_interpolate;
     }
-
-    // is_rl_start 模式：在 preUpdate 中已经完成了 RL 姿态对齐，起立结束后物理切换并重置标志位
-    if (is_rl_start_ && isPreUpdateComplete && !is_rl_controller_)
-    {
-      if (controller_manager_->switchController(current_controller_))
-      {
-        current_controller_ptr_ = controller_manager_->getCurrentController();
-        is_rl_controller_ = last_is_rl_controller_ = true;
-        is_rl_start_ = false; 
-        ROS_INFO("[HumanoidController] is_rl_start: Stand-up complete, auto-switched to RL mode: %s", current_controller_.c_str());
-      }
-    }
-   
     if (!derect_switch_to_rl && !last_is_rl_controller_ && is_rl_controller_)
     {
       // 进入 RL 前，先用 MPC 将躯干高度插值到 RL 默认高度
@@ -2183,34 +2142,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     kuavo_msgs::jointCmd jointCmdMsg;
     jointCmdMsg.header.stamp = time;
     
-    // 如果is_rl_start_且当前是RL控制器，跳过setCurrentObservation以避免MPC警告
-    // 因为MPC已经被暂停，不需要更新观测值
-    if (!(is_rl_start_ && is_rl_controller_))
-    {
-      mrtRosInterface_->setCurrentObservation(currentObservation_);
-    }
-    else if (is_rl_start_ && is_rl_controller_ && isPreUpdateComplete)
-    {
-      // 在 is_rl_start 模式下运行几帧后，重置标志位
-      // 这样可以恢复正常的观测值更新和后续的控制逻辑
-      static int startup_count = 0;
-      if (startup_count++ > 10)
-      {
-        is_rl_start_ = false;
-        ROS_INFO("[HumanoidController] is_rl_start mode transition complete, resuming normal observation updates.");
-      }
-    }
+    mrtRosInterface_->setCurrentObservation(currentObservation_);
 
     // 非RL或躯干插值中，均走MPC流程
-    // 如果is_rl_start_=true且当前是RL控制器，强制跳过MPC流程，直接使用RL控制器
-    // 但如果用户已经切换到MPC，则允许正常使用MPC
     bool mpc_flow = !is_rl_controller_;
-    if (is_rl_start_ && is_rl_controller_)
-    {
-      // is_rl_start模式下，且当前是RL控制器时，强制使用RL控制器，不进入MPC控制循环
-      mpc_flow = false;
-    }
-    else if (!derect_switch_to_rl)
+    if (!derect_switch_to_rl)
     {
       mpc_flow = (!is_rl_controller_) || is_torso_interpolation_active_;
     }
