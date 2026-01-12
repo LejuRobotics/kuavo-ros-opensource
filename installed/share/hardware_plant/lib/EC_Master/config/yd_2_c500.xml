@@ -167,7 +167,7 @@
             <ProcessData>
                 <Send>
                     <BitStart>0</BitStart>
-                    <BitLength>152</BitLength>
+                    <BitLength>184</BitLength>
                 </Send>
                 <Recv>
                     <BitStart>0</BitStart>
@@ -425,6 +425,20 @@
                         <BitLen>16</BitLen>
                         <Name>Torque Offset</Name>
                         <DataType>INT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3500</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>Position loop kp</Name>
+                        <DataType>UINT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3504</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>Veloctiy loop kp</Name>
+                        <DataType>UINT</DataType>
                     </Entry>
                     <Entry>
                         <Index>#x6060</Index>
@@ -973,6 +987,24 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>7</SubIndex>
+                            <Data>10000035</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>5632</Index>
+                            <SubIndex>8</SubIndex>
+                            <Data>10000435</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>5632</Index>
+                            <SubIndex>9</SubIndex>
                             <Data>08006060</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -982,7 +1014,7 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>07</Data>
+                            <Data>09</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -1562,7 +1594,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1001</Adp>
                     <Ado>2064</Ado>
-                    <Data>0011130024000100</Data>
+                    <Data>0011170024000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -1582,7 +1614,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1001</Adp>
                     <Ado>1536</Ado>
-                    <Data>00000010130000070011000201000000</Data>
+                    <Data>00000010170000070011000201000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -1864,8 +1896,8 @@
             </Info>
             <ProcessData>
                 <Send>
-                    <BitStart>152</BitStart>
-                    <BitLength>152</BitLength>
+                    <BitStart>184</BitStart>
+                    <BitLength>184</BitLength>
                 </Send>
                 <Recv>
                     <BitStart>184</BitStart>
@@ -2123,6 +2155,20 @@
                         <BitLen>16</BitLen>
                         <Name>Torque Offset</Name>
                         <DataType>INT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3500</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>Position loop kp</Name>
+                        <DataType>UINT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3504</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>Veloctiy loop kp</Name>
+                        <DataType>UINT</DataType>
                     </Entry>
                     <Entry>
                         <Index>#x6060</Index>
@@ -2671,6 +2717,24 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>7</SubIndex>
+                            <Data>10000035</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>5632</Index>
+                            <SubIndex>8</SubIndex>
+                            <Data>10000435</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>5632</Index>
+                            <SubIndex>9</SubIndex>
                             <Data>08006060</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -2680,7 +2744,7 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>07</Data>
+                            <Data>09</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -3260,7 +3324,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1002</Adp>
                     <Ado>2064</Ado>
-                    <Data>0011130024000100</Data>
+                    <Data>0011170024000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -3280,7 +3344,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1002</Adp>
                     <Ado>1536</Ado>
-                    <Data>13000010130000070011000201000000</Data>
+                    <Data>17000010170000070011000201000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -3596,24 +3660,12 @@
                     <State>PREOP</State>
                     <State>SAFEOP</State>
                     <State>OP</State>
-                    <Comment><![CDATA[DC; APWR; System Time Register (Bus-Shift)]]></Comment>
-                    <Cmd>2</Cmd>
-                    <Adp>0</Adp>
-                    <Ado>2320</Ado>
-                    <DataLength>4</DataLength>
-                    <InputOffs>56</InputOffs>
-                    <OutputOffs>56</OutputOffs>
-                </Cmd>
-                <Cmd>
-                    <State>PREOP</State>
-                    <State>SAFEOP</State>
-                    <State>OP</State>
                     <Comment><![CDATA[MISC; LRD; Poll Mailbox State]]></Comment>
                     <Cmd>10</Cmd>
                     <Addr>150994944</Addr>
                     <DataLength>2</DataLength>
-                    <InputOffs>60</InputOffs>
-                    <OutputOffs>60</OutputOffs>
+                    <InputOffs>56</InputOffs>
+                    <OutputOffs>56</OutputOffs>
                 </Cmd><!-- MSU Id 0: Task 0 -->
                 <Cmd>
                     <State>SAFEOP</State>
@@ -3621,7 +3673,7 @@
                     <Comment><![CDATA[PD; LWR;]]></Comment>
                     <Cmd>11</Cmd>
                     <Addr>268435456</Addr>
-                    <DataLength>38</DataLength>
+                    <DataLength>46</DataLength>
                     <Cnt>2</Cnt>
                     <InputOffs>0</InputOffs>
                     <OutputOffs>0</OutputOffs>
@@ -3641,7 +3693,7 @@
         </Cyclic>
         <ProcessImage>
             <Inputs>
-                <ByteSize>62</ByteSize>
+                <ByteSize>58</ByteSize>
                 <Variable>
                     <Name>Slave_1001 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Statusword</Name>
                     <DataType>UINT</DataType>
@@ -3766,7 +3818,7 @@
                 </Variable>
             </Inputs>
             <Outputs>
-                <ByteSize>62</ByteSize>
+                <ByteSize>58</ByteSize>
                 <Variable>
                     <Name>Slave_1001 [YD100 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
@@ -3804,54 +3856,82 @@
                     <BitOffs>128</BitOffs>
                 </Variable>
                 <Variable>
+                    <Name>Slave_1001 [YD100 Servo CoE Drive].1st Receive PDO mapping.Position loop
+                        kp</Name>
+                    <DataType>UINT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>144</BitOffs>
+                </Variable>
+                <Variable>
+                    <Name>Slave_1001 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
+                        kp</Name>
+                    <DataType>UINT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>160</BitOffs>
+                </Variable>
+                <Variable>
                     <Name>Slave_1001 [YD100 Servo CoE Drive].1st Receive PDO mapping.Mode of
                         Operation</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>144</BitOffs>
+                    <BitOffs>176</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD100 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>152</BitOffs>
+                    <BitOffs>184</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Position</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>168</BitOffs>
+                    <BitOffs>200</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Velocity</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>200</BitOffs>
+                    <BitOffs>232</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Torque</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>232</BitOffs>
+                    <BitOffs>264</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD100 Servo CoE Drive].1st Receive PDO mapping.Velocity Offset</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>248</BitOffs>
+                    <BitOffs>280</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD100 Servo CoE Drive].1st Receive PDO mapping.Torque Offset</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>280</BitOffs>
+                    <BitOffs>312</BitOffs>
+                </Variable>
+                <Variable>
+                    <Name>Slave_1002 [YD100 Servo CoE Drive].1st Receive PDO mapping.Position loop
+                        kp</Name>
+                    <DataType>UINT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>328</BitOffs>
+                </Variable>
+                <Variable>
+                    <Name>Slave_1002 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
+                        kp</Name>
+                    <DataType>UINT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>344</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD100 Servo CoE Drive].1st Receive PDO mapping.Mode of
                         Operation</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>296</BitOffs>
+                    <BitOffs>360</BitOffs>
                 </Variable>
             </Outputs>
         </ProcessImage>
