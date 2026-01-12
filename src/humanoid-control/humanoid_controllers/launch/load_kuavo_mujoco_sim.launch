@@ -33,7 +33,7 @@
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="visualize_humanoid" default="true"/>
     <arg name="only_half_up_body" default="false"/>
-    <arg name="waist_move_spd"     default="0.8"/>
+    <arg name="waist_move_spd"     default="2.3"/>
     <arg name="deformation_flag"   default="false"/>
     <arg name="init_fall_down_state" default="false"/>
     <!-- Set with_coredump parameter based on coredump value -->
