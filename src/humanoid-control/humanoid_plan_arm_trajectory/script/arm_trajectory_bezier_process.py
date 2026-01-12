@@ -11,7 +11,7 @@ import sys
 import rospkg
 import subprocess
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
-
+    
 # 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
 try:
     kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')

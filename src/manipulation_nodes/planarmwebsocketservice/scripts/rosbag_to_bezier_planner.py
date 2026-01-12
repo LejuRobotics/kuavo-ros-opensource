@@ -13,6 +13,28 @@ from trajectory_msgs.msg import JointTrajectory
 from scipy import interpolate
 import os
 
+
+def get_robot_type_for_dekstop_which_only_include_classify_robot_version(robot_version: int) -> str:
+    """
+    根据 robot_version 获取 robotType
+
+    映射规则：
+    - 4代标准版本: '41'
+    - 4pro短手: '42'
+    - 4pro长手: '45' (45 <= version < 50)
+    - 5代标准版本: '52' (50 <= version < 60)
+    - 鲁班2: '11' (10 <= version < 20)
+    """
+    if 45 <= robot_version < 50:
+        return '45'
+    elif 50 <= robot_version < 60:
+        return '52'
+    elif 10 <= robot_version < 20:
+        return '11'
+    else:
+        return str(robot_version)  # 41, 42 精确匹配
+
+
 class RosbagToBezierPlanner:
     """
     Rosbag到贝塞尔曲线轨迹规划器
@@ -34,6 +56,10 @@ class RosbagToBezierPlanner:
         # 读取robot_version参数
         self.robot_version = int(os.environ.get("ROBOT_VERSION", "45"))
         rospy.loginfo(f"Robot version: {self.robot_version}")
+
+        # 确定 robotType
+        self.robot_type = get_robot_type_for_dekstop_which_only_include_classify_robot_version(self.robot_version)
+        rospy.loginfo(f"Robot type: {self.robot_type}")
         
         # 判断是否需要处理腰部数据（版本 >= 50）
         self.has_waist = (self.robot_version // 10) >= 5  # major version >= 5
@@ -850,7 +876,7 @@ class RosbagToBezierPlanner:
             "finish": original_finish,
             "first": original_first,
             "version": "rosbag_to_act_frames",
-            "robotType": str(self.robot_version)
+            "robotType": self.robot_type
         }
 
         # 为每个轨迹点创建frame
@@ -975,7 +1001,7 @@ class RosbagToBezierPlanner:
             "finish": finish_keyframe,
             "first": first_keyframe,
             "version": "rosbag_to_act",
-            "robotType": str(self.robot_version)
+            "robotType": self.robot_type
         }
         
         # 为每个时间点创建frame

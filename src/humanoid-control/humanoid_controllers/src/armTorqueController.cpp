@@ -7,30 +7,9 @@
 #include "pinocchio/algorithm/crba.hpp"
 #include "pinocchio/algorithm/model.hpp"
 #include <functional>
-#include <cstdlib>  // 添加这个头文件用于 getenv
-#include <iostream> // 添加这个头文件用于 std::cout
-#include <set>      // 添加这个头文件用于 std::set
+#include <iostream>  // 用于 std::cout
 
-// 静态辅助方法：获取机器人版本
-std::string ArmTorqueController::getRobotVersion() {
-    std::string robot_version = "46";
-    const char* robot_version_env = std::getenv("ROBOT_VERSION");
-    if (robot_version_env != nullptr && strlen(robot_version_env) > 0) {
-        robot_version = robot_version_env;
-    }
-    return robot_version;
-}
 
-// 静态辅助方法：计算手臂关节的起始索引（考虑waist关节）
-int ArmTorqueController::getArmStartIndex() {
-    static const std::set<std::string> versions_with_waist_yaw = {"50", "51", "52"};
-    std::string robot_version = getRobotVersion();
-    int arm_start_idx = 12; // n_leg_joints_
-    if (versions_with_waist_yaw.find(robot_version) != versions_with_waist_yaw.end()) {
-        arm_start_idx += 1; // 跳过waist关节
-    }
-    return arm_start_idx;
-}
 
 
 
@@ -45,33 +24,13 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
     // 加载 URDF 模型
     pinocchio::urdf::buildModel(urdf_path, model_);
     data_ = pinocchio::Data(model_);
-    // 获取机器人版本
-    std::string robot_version = getRobotVersion();
-    std::cout << "从环境变量获取到机器人版本: " << robot_version << std::endl;
-    
-    // 根据机器人版本决定固定关节列表
-    std::vector<std::string> fixed_joint_names;
-    
-    // 定义包含 waist_yaw 关节的版本集合
-    static const std::set<std::string> versions_with_waist_yaw = {"50", "51", "52"};
-    
-    // 基础固定关节列表（所有版本都包含）
-    fixed_joint_names = {
-        "leg_l1_joint", "leg_l2_joint", "leg_l3_joint",
-        "leg_l4_joint", "leg_l5_joint", "leg_l6_joint",
-        "leg_r1_joint", "leg_r2_joint", "leg_r3_joint",
-        "leg_r4_joint", "leg_r5_joint", "leg_r6_joint",
-        "zhead_1_joint", "zhead_2_joint"
+    // 定义固定的14个手臂关节名称列表（所有版本都一样）
+    std::vector<std::string> arm_joint_names = {
+        "zarm_l1_joint", "zarm_l2_joint", "zarm_l3_joint", "zarm_l4_joint",
+        "zarm_l5_joint", "zarm_l6_joint", "zarm_l7_joint",
+        "zarm_r1_joint", "zarm_r2_joint", "zarm_r3_joint", "zarm_r4_joint",
+        "zarm_r5_joint", "zarm_r6_joint", "zarm_r7_joint"
     };
-    
-    // 如果版本包含 waist_yaw 关节，则在腿部关节后添加
-    if (versions_with_waist_yaw.find(robot_version) != versions_with_waist_yaw.end())
-    {
-        fixed_joint_names.push_back("waist_yaw_joint");
-    }
-
-    
-    // TODO: 固定关节修改
 
     std::cout << "[ArmTorqueController] model.nq: " << model_.nq << std::endl;
     std::cout << "[ArmTorqueController] model.nv: " << model_.nv << std::endl;
@@ -80,38 +39,100 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
     q_measured_ = Eigen::VectorXd::Zero(model_.nq);
     v_measured_ = Eigen::VectorXd::Zero(model_.nv);
 
-    const int n_fixed_joint = fixed_joint_names.size();
-    int n_arm = model_.nq - n_fixed_joint;
-    std::cout << "[ArmTorqueController] n_arm: " << n_arm << std::endl;
+    // 在URDF中查找手臂关节，统计数量并找到索引
+    left_arm_q_start_idx_ = -1;
+    left_arm_v_start_idx_ = -1;
+    right_arm_q_start_idx_ = -1;
+    right_arm_v_start_idx_ = -1;
+    n_arm_ = 0;
+    
+    int current_q_idx = 0;
+    int current_v_idx = 0;
+    
+    for (size_t i = 1; i < model_.names.size(); ++i) { // 从1开始，跳过root关节
+        const std::string& joint_name = model_.names[i];
+        
+        // 检查是否是手臂关节
+        for (const auto& arm_joint_name : arm_joint_names) {
+            if (joint_name == arm_joint_name) {
+                n_arm_++;
+                // 记录左、右手臂的起始索引
+                if (joint_name == "zarm_l1_joint") {
+                    left_arm_q_start_idx_ = current_q_idx;
+                    left_arm_v_start_idx_ = current_v_idx;
+                }
+                if (joint_name == "zarm_r1_joint") {
+                    right_arm_q_start_idx_ = current_q_idx;
+                    right_arm_v_start_idx_ = current_v_idx;
+                }
+                break;
+            }
+        }
+        
+        current_q_idx += model_.joints[i].nq();
+        current_v_idx += model_.joints[i].nv();
+    }
+    
+    std::cout << "[ArmTorqueController] 在URDF中找到的手臂关节数量: " << n_arm_ << std::endl;
     
     // 校验增益矩阵维度
-    if (kp.rows() != n_arm  || kd.rows() != n_arm ) {
+    if (kp.rows() != n_arm_  || kd.rows() != n_arm_ ) {
         throw std::invalid_argument("KP/KD 矩阵维度与手臂关节数不匹配");
     }
     
-    // 计算手臂关节的起始索引（使用统一方法）
-    int arm_start_idx = getArmStartIndex();
+    // 验证是否找到了左、右手臂关节
+    if (left_arm_q_start_idx_ == -1 || right_arm_q_start_idx_ == -1) {
+        std::cerr << "[ArmTorqueController] 错误：在URDF中未找到手臂关节！" << std::endl;
+        std::cerr << "[ArmTorqueController] left_arm_q_start_idx_: " << left_arm_q_start_idx_ << std::endl;
+        std::cerr << "[ArmTorqueController] right_arm_q_start_idx_: " << right_arm_q_start_idx_ << std::endl;
+        throw std::invalid_argument("在URDF中未找到手臂关节");
+    }
     
     // kp kd - 只设置手臂关节的增益
     kp_ = Eigen::VectorXd::Zero(model_.nq);
-    kp_.segment(arm_start_idx, n_arm) = kp;
-    kd_ = Eigen::VectorXd::Zero(model_.nq);
-    kd_.segment(arm_start_idx, n_arm) = kd;
+    kd_ = Eigen::VectorXd::Zero(model_.nv);
     
-    std::cout << "[ArmTorqueController] 手臂关节起始索引: " << arm_start_idx << std::endl;
-    std::cout << "[ArmTorqueController] 手臂关节数量: " << n_arm << std::endl;
+    // 设置左手臂的增益
+    kp_.segment(left_arm_q_start_idx_, n_left_arm_) = kp.segment(0, n_left_arm_);
+    kd_.segment(left_arm_v_start_idx_, n_left_arm_) = kd.segment(0, n_left_arm_);
+    
+    // 设置右手臂的增益
+    kp_.segment(right_arm_q_start_idx_, n_right_arm_) = kp.segment(n_left_arm_, n_right_arm_);
+    kd_.segment(right_arm_v_start_idx_, n_right_arm_) = kd.segment(n_left_arm_, n_right_arm_);
+    
+    std::cout << "[ArmTorqueController] 左手臂关节起始索引 (q/v): " << left_arm_q_start_idx_ << "/" << left_arm_v_start_idx_ << std::endl;
+    std::cout << "[ArmTorqueController] 右手臂关节起始索引 (q/v): " << right_arm_q_start_idx_ << "/" << right_arm_v_start_idx_ << std::endl;
+    std::cout << "[ArmTorqueController] 手臂关节数量: " << n_arm_ << std::endl;
 }
 
 void ArmTorqueController::setMeasuredState(const Eigen::VectorXd& q_measured,
                                             const Eigen::VectorXd& v_measured) {
-    // 使用统一方法获取手臂关节起始索引
-    int arm_start_idx = getArmStartIndex();
+    assert(q_measured.rows() == n_arm_ && v_measured.rows() == n_arm_);
+    setArmData(q_measured_, v_measured_, q_measured, v_measured);
+}
+
+void ArmTorqueController::setArmData(Eigen::VectorXd& target_q, Eigen::VectorXd& target_v,
+                                      const Eigen::VectorXd& source_q, const Eigen::VectorXd& source_v) const {
+    // 设置左手臂
+    target_q.segment(left_arm_q_start_idx_, n_left_arm_) = source_q.segment(0, n_left_arm_);
+    target_v.segment(left_arm_v_start_idx_, n_left_arm_) = source_v.segment(0, n_left_arm_);
     
-    int n_arm = q_measured.rows();
-    assert(q_measured.rows() == n_arm && v_measured.rows() == n_arm);
+    // 设置右手臂
+    target_q.segment(right_arm_q_start_idx_, n_right_arm_) = source_q.segment(n_left_arm_, n_right_arm_);
+    target_v.segment(right_arm_v_start_idx_, n_right_arm_) = source_v.segment(n_left_arm_, n_right_arm_);
+}
+
+void ArmTorqueController::setArmData(Eigen::VectorXd& target_q, Eigen::VectorXd& target_v, Eigen::VectorXd& target_a,
+                                      const Eigen::VectorXd& source_q, const Eigen::VectorXd& source_v, const Eigen::VectorXd& source_a) const {
+    // 设置左手臂
+    target_q.segment(left_arm_q_start_idx_, n_left_arm_) = source_q.segment(0, n_left_arm_);
+    target_v.segment(left_arm_v_start_idx_, n_left_arm_) = source_v.segment(0, n_left_arm_);
+    target_a.segment(left_arm_v_start_idx_, n_left_arm_) = source_a.segment(0, n_left_arm_);
     
-    q_measured_.segment(arm_start_idx, n_arm) = q_measured;
-    v_measured_.segment(arm_start_idx, n_arm) = v_measured;
+    // 设置右手臂
+    target_q.segment(right_arm_q_start_idx_, n_right_arm_) = source_q.segment(n_left_arm_, n_right_arm_);
+    target_v.segment(right_arm_v_start_idx_, n_right_arm_) = source_v.segment(n_left_arm_, n_right_arm_);
+    target_a.segment(right_arm_v_start_idx_, n_right_arm_) = source_a.segment(n_left_arm_, n_right_arm_);
 }
 
 Eigen::VectorXd ArmTorqueController::computeTorque(
@@ -119,11 +140,7 @@ Eigen::VectorXd ArmTorqueController::computeTorque(
     const Eigen::VectorXd& v_desired,
     const Eigen::VectorXd& a_desired) {
     
-    // 使用统一方法获取手臂关节起始索引
-    int arm_start_idx = getArmStartIndex();
-    
-    int n_arm = q_desired.rows();
-    assert(q_desired.rows() == n_arm && v_desired.rows() == n_arm && a_desired.rows() == n_arm);
+    assert(q_desired.rows() == n_arm_ && v_desired.rows() == n_arm_ && a_desired.rows() == n_arm_);
     
     // V51版本专用：输入数据NaN检查
     if (q_desired.hasNaN() || v_desired.hasNaN() || a_desired.hasNaN()) {
@@ -131,20 +148,19 @@ Eigen::VectorXd ArmTorqueController::computeTorque(
         std::cerr << "q_desired.hasNaN(): " << q_desired.hasNaN() << std::endl;
         std::cerr << "v_desired.hasNaN(): " << v_desired.hasNaN() << std::endl;
         std::cerr << "a_desired.hasNaN(): " << a_desired.hasNaN() << std::endl;
-        return Eigen::VectorXd::Zero(n_arm);
+        return Eigen::VectorXd::Zero(n_arm_);
     }
     
     if (q_measured_.hasNaN() || v_measured_.hasNaN()) {
         std::cerr << "[ArmTorqueController] 错误：测量数据包含NaN值" << std::endl;
-        return Eigen::VectorXd::Zero(n_arm);
+        return Eigen::VectorXd::Zero(n_arm_);
     }
     
     Eigen::VectorXd q_desired_full = Eigen::VectorXd::Zero(model_.nq);
-    q_desired_full.segment(arm_start_idx, n_arm) = q_desired;
     Eigen::VectorXd v_desired_full = Eigen::VectorXd::Zero(model_.nv);
-    v_desired_full.segment(arm_start_idx, n_arm) = v_desired;
     Eigen::VectorXd a_desired_full = Eigen::VectorXd::Zero(model_.nv);
-    a_desired_full.segment(arm_start_idx, n_arm) = a_desired;
+    
+    setArmData(q_desired_full, v_desired_full, a_desired_full, q_desired, v_desired, a_desired);
     
     // 计算完整动力学项
     pinocchio::computeAllTerms(model_, data_, q_measured_, v_measured_);
@@ -171,6 +187,10 @@ Eigen::VectorXd ArmTorqueController::computeTorque(
     // std::cout << "[ArmTorqueController] tau: " << tau.transpose() << std::endl;
     // std::cout << "[ArmTorqueController] tau.size(): " << tau.size() << std::endl;
 
-
-    return tau.segment(arm_start_idx, n_arm);
+    // 提取左、右手臂的扭矩
+    Eigen::VectorXd arm_tau = Eigen::VectorXd::Zero(n_arm_);
+    arm_tau.segment(0, n_left_arm_) = tau.segment(left_arm_v_start_idx_, n_left_arm_);
+    arm_tau.segment(n_left_arm_, n_right_arm_) = tau.segment(right_arm_v_start_idx_, n_right_arm_);
+    
+    return arm_tau;
 }

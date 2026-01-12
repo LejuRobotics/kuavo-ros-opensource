@@ -299,12 +299,15 @@ namespace ocs2
         loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
         loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
         loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
+        loadData::loadCppDataType(referenceFile, "vrSquatHeightMin", squatHeightMin_);
+        loadData::loadCppDataType(referenceFile, "vrSquatHeightMax", squatHeightMax_);
         try {
           loadData::loadCppDataType(referenceFile, "cmdvelLinearZLimit", c_relative_base_limit_[2]);
         } catch (const std::exception &e) {
           ROS_WARN_STREAM("cmdvelLinearZLimit not found, using default: " << c_relative_base_limit_[2]);
         }
         std::cout << "cmdvelLinearZLimit:" << c_relative_base_limit_[2] << std::endl;
+
         loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
 
         // gait
@@ -1177,12 +1180,22 @@ namespace ocs2
     std::vector<bool> commandLineToTargetTrajectories(const vector_t &joystick_origin_axis, const SystemObservation &observation, geometry_msgs::Twist &cmdVel)
     {
       std::vector<bool> updated(6, false);
-      Eigen::VectorXd limit_vector(4);
-      limit_vector << c_relative_base_limit_[0], c_relative_base_limit_[1], c_relative_base_limit_[2], c_relative_base_limit_[3];
+      Eigen::VectorXd limit_vector_negative(4);
+      limit_vector_negative << c_relative_base_limit_[0], c_relative_base_limit_[1], 
+                               std::fabs(squatHeightMin_), c_relative_base_limit_[3];
+      Eigen::VectorXd limit_vector_positive(4);
+      limit_vector_positive << c_relative_base_limit_[0], c_relative_base_limit_[1], 
+                               std::fabs(squatHeightMax_), c_relative_base_limit_[3];
       if (joystick_origin_axis.cwiseAbs().maxCoeff() < DEAD_ZONE)
         return updated; // command line is zero, do nothing
 
-      commad_line_target_.head(4) = joystick_origin_axis.head(4).cwiseProduct(limit_vector);
+      for (int i = 0; i < 4; i++) {
+        if (joystick_origin_axis[i] >= 0) {
+            commad_line_target_[i] = joystick_origin_axis[i] * limit_vector_positive[i];
+        } else {
+            commad_line_target_[i] = joystick_origin_axis[i] * limit_vector_negative[i];
+        }
+      }
 
       const vector_t currentPose = observation.state.segment<6>(6);
       // vector_t target(6);
@@ -1528,6 +1541,7 @@ namespace ocs2
     LowPassFilter5thOrder joystickFilter_;
 
     ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.2, 0.3, 0.4};
+    double squatHeightMin_ = 0.0, squatHeightMax_ = 0.0;
     ocs2::SystemObservation observation_;
     ros::Publisher mode_sequence_template_publisher_;
     ros::Publisher mode_scale_publisher_;
