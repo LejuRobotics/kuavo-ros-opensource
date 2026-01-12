@@ -149,6 +149,9 @@ class SwitchedModelReferenceManager : public ReferenceManager {
     endEffectorKinematicsPtr_->setPinocchioInterface(pinocchioInterface_);
   }
 
+  // VR waist control public getter
+  bool isVRWaistControlEnabled() const { return vrWaistControlEnabled_; }
+
  private:
   double calTerrainHeight(const contact_flag_t& contact_flags, const feet_array_t<vector3_t>& feet_pos);
   void processFullBodySchedule(const vector_t& initState, FullBodySchedule& fullBodySchedule);
@@ -197,7 +200,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   
   // VR waist control methods
   void setVRWaistControlEnabled(bool enabled) { vrWaistControlEnabled_ = enabled; }
-  bool isVRWaistControlEnabled() const { return vrWaistControlEnabled_; }
   bool vrWaistControlCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
   
   // Height smooth transition methods
