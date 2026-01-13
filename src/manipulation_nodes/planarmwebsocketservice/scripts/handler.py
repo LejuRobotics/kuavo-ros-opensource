@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import rospy
 import rospkg
 import os
@@ -2894,7 +2895,7 @@ async def create_map_handler(
             cmd = f"rosservice call {service_name} '{{map_name: \"{map_name}\", lidar_type: \"livox\"}}'"
             # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
             # 使用 lambda 包装以正确传递关键字参数
-            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30))
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=30))
 
             if result.returncode == 0:
                 payload.data["message"] = f"建图启动成功: {map_name}"
@@ -2949,11 +2950,16 @@ async def save_map_handler(
 
             # 使用rosservice命令调用保存地图服务
             # SaveMap服务需要一个map_name参数
+            # 确保使用 UTF-8 编码环境，支持中文地图名
+            env = os.environ.copy()
+            env['LC_ALL'] = 'C.UTF-8'
+            env['LANG'] = 'C.UTF-8'
             cmd = f'rosservice call {service_name} "map_name: \'{map_name}\'"'
             proc = await asyncio.create_subprocess_shell(
                 cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                env=env
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
             result_stdout = stdout.decode('utf-8') if stdout else ""
@@ -3040,7 +3046,7 @@ async def stop_mapping_handler(
             # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
             loop = asyncio.get_event_loop()
             cmd = f"rosservice call {service_name}"
-            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30))
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=30))
 
             if result.returncode == 0:
                 # 解析ROSService返回的YAML格式响应
@@ -3119,7 +3125,7 @@ async def rename_map_handler(
             # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
             loop = asyncio.get_event_loop()
             cmd = f"rosservice call {service_name} '{{old_name: \"{old_name}\", new_name: \"{new_name}\"}}'"
-            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30))
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=30))
 
             if result.returncode == 0:
                 # 解析ROSService返回的YAML格式响应
@@ -4263,7 +4269,7 @@ async def get_all_maps_handler(
             cmd = f"rosservice call {service_name}"
             # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10))
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=10))
 
             if result.returncode == 0:
                 # 解析服务返回结果
@@ -4317,7 +4323,18 @@ async def get_all_maps_handler(
                     if all_matches:
                         maps_list = all_matches
 
-                payload.data["maps"] = maps_list
+                # 解码 Unicode 转义序列 (如 \u4E2D -> 中)
+                decoded_maps = []
+                for s in maps_list:
+                    try:
+                        # 解码 Unicode 转义序列
+                        decoded = s.encode('utf-8').decode('unicode_escape')
+                        decoded_maps.append(decoded)
+                    except:
+                        # 如果解码失败，保留原字符串
+                        decoded_maps.append(s)
+
+                payload.data["maps"] = decoded_maps
                 payload.data["message"] = f"Found {len(maps_list)} maps"
                 print(f"Parsed maps list: {maps_list}")
                 print(f"Debug: Total lines: {len(output_lines)}, Content: {output_lines}")

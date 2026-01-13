@@ -14,7 +14,7 @@ from collections import deque
 from typing import Tuple
 import copy
 from kuavo_humanoid_sdk.common.logger import SDKLogger
-from kuavo_humanoid_sdk.kuavo.core.ros.param import make_robot_param, EndEffectorType
+from kuavo_humanoid_sdk.kuavo.core.ros.param import make_robot_param, EndEffectorType, kuavo_ros_param
 from kuavo_humanoid_sdk.interfaces.data_types import (KuavoImuData, KuavoJointData, KuavoOdometry, KuavoManipulationMpcFrame, 
                                                     KuavoArmCtrlMode, EndEffectorState, KuavoDexHandTouchState,
                                                     KuavoManipulationMpcCtrlMode, KuavoManipulationMpcControlFlow)
@@ -138,9 +138,7 @@ class KuavoRobotStateCore:
             ))
             
             # robot_type: 0=双足, 1=轮臂
-            robot_type = rospy.get_param('/robot_type', 0)
-            is_wheel_arm = (robot_type == 1)
-            if is_wheel_arm:
+            if kuavo_ros_param.is_wheel_arm_robot():
                 SDKLogger.debug("[State] Wheel-arm model detected, skipping MPC observation data check")
             else:
                 # gait manager
@@ -168,10 +166,17 @@ class KuavoRobotStateCore:
             self._arm_ctrl_mode = self._srv_get_arm_ctrl_mode()
             self._initialized = True
 
-            # 获取manipulation mpc 相关参数
-            self._manipulation_mpc_frame = self._srv_get_manipulation_mpc_frame()
-            self._manipulation_mpc_ctrl_mode = self._srv_get_manipulation_mpc_ctrl_mode()
-            self._manipulation_mpc_control_flow = self._srv_get_manipulation_mpc_control_flow()
+            # 优化：双足机器人跳过manipulation mpc服务调用（这些服务不存在）
+            if kuavo_ros_param.is_legged_robot():  # 0=双足, 1=轮臂
+                # 双足机器人直接设置默认值，避免调用不存在的服务
+                self._manipulation_mpc_frame = KuavoManipulationMpcFrame.ERROR
+                self._manipulation_mpc_ctrl_mode = KuavoManipulationMpcCtrlMode.ERROR
+                self._manipulation_mpc_control_flow = KuavoManipulationMpcControlFlow.ThroughFullBodyMpc
+            else:
+                # 轮臂机器人需要查询这些服务
+                self._manipulation_mpc_frame = self._srv_get_manipulation_mpc_frame()
+                self._manipulation_mpc_ctrl_mode = self._srv_get_manipulation_mpc_ctrl_mode()
+                self._manipulation_mpc_control_flow = self._srv_get_manipulation_mpc_control_flow()
 
     @property
     def com_height(self)->float:
@@ -192,30 +197,22 @@ class KuavoRobotStateCore:
 
     @property
     def arm_control_mode(self) -> KuavoArmCtrlMode:
-        mode = self._srv_get_arm_ctrl_mode()
-        if mode is not None:
-            self._arm_ctrl_mode = mode
+        # 优化：直接返回缓存值，避免重复查询服务
         return self._arm_ctrl_mode
     
     @property
     def manipulation_mpc_ctrl_mode(self)->KuavoManipulationMpcCtrlMode:
-        mode = self._srv_get_manipulation_mpc_ctrl_mode()
-        if mode is not None:
-            self._manipulation_mpc_ctrl_mode = mode
+        # 优化：直接返回缓存值，避免重复查询服务
         return self._manipulation_mpc_ctrl_mode
-    
+
     @property
     def manipulation_mpc_frame(self)->KuavoManipulationMpcFrame:
-        frame = self._srv_get_manipulation_mpc_frame()
-        if frame is not None:
-            self._manipulation_mpc_frame = frame
+        # 优化：直接返回缓存值，避免重复查询服务
         return self._manipulation_mpc_frame
-    
+
     @property
     def manipulation_mpc_control_flow(self)->KuavoManipulationMpcControlFlow:
-        flow = self._srv_get_manipulation_mpc_control_flow()
-        if flow is not None:
-            self._manipulation_mpc_control_flow = flow
+        # 优化：直接返回缓存值，避免重复查询服务
         return self._manipulation_mpc_control_flow
     
     @property
@@ -469,6 +466,9 @@ class KuavoRobotStateCore:
         return None
 
     def _srv_get_manipulation_mpc_ctrl_mode(self, )->KuavoManipulationMpcCtrlMode:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcCtrlMode.ERROR
+
         try:
             service_name = '/mobile_manipulator_get_mpc_control_mode'
             rospy.wait_for_service(service_name, timeout=2.0)
@@ -490,9 +490,10 @@ class KuavoRobotStateCore:
         return KuavoManipulationMpcCtrlMode.ERROR
 
     def _srv_get_manipulation_mpc_frame(self, )->KuavoManipulationMpcFrame:
-        # 轮臂模式直接返回
-        robot_type = rospy.get_param('/robot_type', 0)
-        if robot_type == 1:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcFrame.ERROR
+        # 轮臂模式也直接返回
+        if kuavo_ros_param.is_wheel_arm_robot():
             return KuavoManipulationMpcFrame.ERROR
         try:
             service_name = '/get_mm_ctrl_frame'
@@ -515,9 +516,11 @@ class KuavoRobotStateCore:
         return KuavoManipulationMpcFrame.ERROR
 
     def _srv_get_manipulation_mpc_control_flow(self, )->KuavoManipulationMpcControlFlow:
+        
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcControlFlow.ThroughFullBodyMpc
         # 轮臂模式直接返回
-        robot_type = rospy.get_param('/robot_type', 0)
-        if robot_type == 1:
+        if kuavo_ros_param.is_wheel_arm_robot():
             return KuavoManipulationMpcControlFlow.Error
         try:
             service_name = '/get_mm_wbc_arm_trajectory_control'
@@ -540,6 +543,9 @@ class KuavoRobotStateCore:
         return KuavoManipulationMpcControlFlow.Error
 
     def _srv_get_manipulation_mpc_ctrl_mode(self, )->KuavoManipulationMpcCtrlMode:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcCtrlMode.ERROR
+
         try:
             service_name = '/mobile_manipulator_get_mpc_control_mode'
             rospy.wait_for_service(service_name, timeout=2.0)
@@ -561,9 +567,10 @@ class KuavoRobotStateCore:
         return KuavoManipulationMpcCtrlMode.ERROR
 
     def _srv_get_manipulation_mpc_frame(self, )->KuavoManipulationMpcFrame:
-        # 轮臂模式直接返回
-        robot_type = rospy.get_param('/robot_type', 0)
-        if robot_type == 1:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcFrame.ERROR
+        # 轮臂模式也直接返回
+        if kuavo_ros_param.is_wheel_arm_robot():
             return KuavoManipulationMpcFrame.ERROR
         try:
             service_name = '/get_mm_ctrl_frame'
@@ -586,9 +593,11 @@ class KuavoRobotStateCore:
         return KuavoManipulationMpcFrame.ERROR
 
     def _srv_get_manipulation_mpc_control_flow(self, )->KuavoManipulationMpcControlFlow:
+        
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcControlFlow.ThroughFullBodyMpc
         # 轮臂模式直接返回
-        robot_type = rospy.get_param('/robot_type', 0)
-        if robot_type == 1:
+        if kuavo_ros_param.is_wheel_arm_robot():
             return KuavoManipulationMpcControlFlow.Error
         try:
             service_name = '/get_mm_wbc_arm_trajectory_control'
@@ -611,6 +620,9 @@ class KuavoRobotStateCore:
         return KuavoManipulationMpcControlFlow.Error
 
     def _srv_get_manipulation_mpc_ctrl_mode(self, )->KuavoManipulationMpcCtrlMode:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcCtrlMode.ERROR
+
         try:
             service_name = '/mobile_manipulator_get_mpc_control_mode'
             rospy.wait_for_service(service_name, timeout=2.0)
@@ -632,9 +644,10 @@ class KuavoRobotStateCore:
         return KuavoManipulationMpcCtrlMode.ERROR
 
     def _srv_get_manipulation_mpc_frame(self, )->KuavoManipulationMpcFrame:
-        # 轮臂模式直接返回
-        robot_type = rospy.get_param('/robot_type', 0)
-        if robot_type == 1:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcFrame.ERROR
+        # 轮臂模式也直接返回
+        if kuavo_ros_param.is_wheel_arm_robot():
             return KuavoManipulationMpcFrame.ERROR
         try:
             service_name = '/get_mm_ctrl_frame'
@@ -657,9 +670,11 @@ class KuavoRobotStateCore:
         return KuavoManipulationMpcFrame.ERROR
 
     def _srv_get_manipulation_mpc_control_flow(self, )->KuavoManipulationMpcControlFlow:
+        
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcControlFlow.ThroughFullBodyMpc
         # 轮臂模式直接返回
-        robot_type = rospy.get_param('/robot_type', 0)
-        if robot_type == 1:
+        if kuavo_ros_param.is_wheel_arm_robot():
             return KuavoManipulationMpcControlFlow.Error
         try:
             service_name = '/get_mm_wbc_arm_trajectory_control'

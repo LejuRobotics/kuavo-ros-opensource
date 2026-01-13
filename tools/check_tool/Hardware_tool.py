@@ -26,6 +26,15 @@ if sys.version_info[0] == 2:
 
 folder_path = os.path.dirname(os.path.abspath(__file__))    # check_tool/
 
+# 导入 robot_version 模块
+robot_version_path = os.path.join(os.path.dirname(os.path.dirname(folder_path)), 'src/kuavo_common/python')
+sys.path.insert(0, robot_version_path)
+try:
+    from robot_version import RobotVersion
+except ImportError:
+    RobotVersion = None
+    # 只在需要时打印警告，避免在导入时就打印
+
 sys.path.append('/home/lab/.local/lib/python3.8/site-packages/')
 sys.path.append(os.path.join(folder_path,"Ruierman"))
 
@@ -798,19 +807,58 @@ def qiangnao_hand():
             wiring_type = f.read().strip()
             if wiring_type == "dual_bus":
                 is_dual_bus = True
+
+    # 读取环境变量 ROBOT_VERSION，使用 robot_version.py 判断版本
+    robot_version_str = get_robot_version()
+    robot_major = None
     
-    # 根据CAN总线类型选择不同的命令
-    if is_dual_bus:
-        # 双CAN总线配置
-        command = "bash "+ folder_path +"/dexhand_test.sh --touch --test 1"
-        print(bcolors.OKGREEN + "检测到双CAN配置，使用双CAN测试命令" + bcolors.ENDC)
+    if robot_version_str:
+        if RobotVersion:
+            try:
+                # 将字符串转换为整数
+                robot_version_int = int(robot_version_str)
+                # 使用 RobotVersion.create 创建版本对象
+                robot_version = RobotVersion.create(robot_version_int)
+                robot_major = robot_version.major()
+                print(bcolors.OKCYAN + f"检测到机器人版本: {robot_version.version_name()} (major={robot_major})" + bcolors.ENDC)
+            except (ValueError, AttributeError) as e:
+                print(bcolors.WARNING + f"警告: 无法解析 ROBOT_VERSION '{robot_version_str}': {e}" + bcolors.ENDC)
+        else:
+            print(bcolors.WARNING + f"警告: robot_version 模块未导入，无法解析版本号 '{robot_version_str}'" + bcolors.ENDC)
+            return
     else:
-        # 单CAN总线配置
-        command = "bash "+ folder_path +"/hand_grab_test.sh"
-        print(bcolors.OKGREEN + "检测到单CAN配置，使用单CAN测试命令" + bcolors.ENDC)
+        print(bcolors.WARNING + "警告: 未找到 ROBOT_VERSION 环境变量" + bcolors.ENDC)
+        return
     
-    # 使用 subprocess.run() 运行命令
-    subprocess.run(command, shell=True)
+    # 根据机器人版本和CAN总线配置选择不同的命令
+    command = None
+    
+    if robot_major == 1:
+        # Roban2 (major == 1)
+        if is_dual_bus:
+            # 双CAN总线配置: 使用 revo2can
+            command = "bash " + folder_path + "/dexhand_test.sh --revo2can --test 3"
+            print(bcolors.OKGREEN + "检测到 Roban2 双CAN配置，使用 Revo2Can 测试命令" + bcolors.ENDC)
+        else:
+            # 单CAN总线配置: 使用 revo2
+            command = "bash " + folder_path + "/dexhand_test.sh --revo2 --test 3"
+            print(bcolors.OKGREEN + "检测到 Roban2 单CAN配置，使用 Revo2 测试命令" + bcolors.ENDC)
+    else:
+        # Kuavo (major != 1)
+        if is_dual_bus:
+            # 双CAN总线配置: 使用 revo1can
+            command = "bash " + folder_path + "/dexhand_test.sh --revo1can --test 3"
+            print(bcolors.OKGREEN + "检测到 Kuavo 双CAN配置，使用 Revo1Can 测试命令" + bcolors.ENDC)
+        else:
+            # 单CAN总线配置: 使用 normal
+            command = "bash " + folder_path + "/dexhand_test.sh --normal --test 3"
+            print(bcolors.OKGREEN + "检测到 Kuavo 单CAN配置，使用 normal 测试命令" + bcolors.ENDC)
+    
+    if command:
+        # 使用 subprocess.run() 运行命令
+        subprocess.run(command, shell=True)
+    else:
+        print(bcolors.FAIL + "错误: 无法确定测试命令" + bcolors.ENDC)
 
 
 def touch_dexhand():
