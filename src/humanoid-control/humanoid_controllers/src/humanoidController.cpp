@@ -328,6 +328,11 @@ namespace humanoid_controller
     wbc_frequency_ = controlFrequency;
     wbc_rate_ = std::make_unique<ros::Rate>(wbc_frequency_);
     ROS_INFO_STREAM("[humanoidController] WBC rate initialized at " << wbc_frequency_ << " Hz");
+
+    // 获取传感器频率参数
+    controllerNh_.param("/sensor_frequency", sensor_frequency_, 1000.0);
+    sensor_dt_ = 1.0 / sensor_frequency_;
+    ROS_INFO_STREAM("[humanoidController] Sensor frequency: " << sensor_frequency_ << " Hz, sensor_dt: " << sensor_dt_ << " s");
     if (controllerNh_.hasParam("/real"))
     {
       controllerNh_.getParam("/real", is_real_);
@@ -422,7 +427,7 @@ namespace humanoid_controller
     wheel_arm_robot_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
     
     // size_t buffer_size = (is_play_back_mode_) ? 20 + waistNum_ : 5;
-    sensors_data_buffer_ptr_ = new KuavoDataBuffer<SensorData>("humanoid_sensors_data_buffer", buffer_size, dt_);
+    sensors_data_buffer_ptr_ = new KuavoDataBuffer<SensorData>("humanoid_sensors_data_buffer", buffer_size, sensor_dt_);
     gaitManagerPtr_ = new GaitManager(20 + waistNum_);
     gaitManagerPtr_->add(0.0, "stance");
     bool verbose = false;
@@ -675,9 +680,11 @@ namespace humanoid_controller
     arm_joint_pos_filter_.setParams(dt_, Eigen::VectorXd::Constant(armNumReal_, arm_joint_pos_filter_cutoff_freq));
     arm_joint_vel_filter_.setParams(dt_, Eigen::VectorXd::Constant(armNumReal_, arm_joint_vel_filter_cutoff_freq));
     mrt_joint_vel_filter_.setParams(dt_, Eigen::VectorXd::Constant(info.actuatedDofNum-armNum_, mrt_joint_vel_filter_cutoff_freq));
-    acc_filter_.setParams(dt_, acc_filter_params);
-    // free_acc_filter_.setParams(dt_, acc_filter_params);
-    gyro_filter_.setParams(dt_, gyro_filter_params);
+
+    // 使用传感器频率对应的 dt 初始化滤波器，确保滤波器采样周期与实际回调频率匹配
+    acc_filter_.setParams(sensor_dt_, acc_filter_params);
+    // free_acc_filter_.setParams(sensor_dt_, acc_filter_params);
+    gyro_filter_.setParams(sensor_dt_, gyro_filter_params);
 #if !defined(USE_DDS) && !defined(USE_LEJU_DDS)
     // Only subscribe to sensor data via ROS when DDS is not enabled
     sensorsDataSub_ = controllerNh_.subscribe<kuavo_msgs::sensorsData>("/sensors_data_raw", 10, &humanoidController::sensorsDataCallback, this);
@@ -2279,15 +2286,14 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             }
             
             
-            // if (is_torso_interpolation_active_)
-            // {
-            //   optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
-            //   optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = default_state_.segment(12,jointNumReal_+ waistNum_);
-            //   // optimizedInput_mrt = stanceInput_mrt_;
-            //   plannedMode_ = ModeNumber::SS;
+            if (is_torso_interpolation_active_ && !is_rl_controller_) // 当前是从RL切换到MPC, 使用WBC插值防止MPC没有启动
+            {
+              optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
+              optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = default_state_.segment(12,jointNumReal_+ waistNum_);
+              // optimizedInput_mrt = stanceInput_mrt_;
+              plannedMode_ = ModeNumber::SS;
 
-            // }else 
-            if (mrtRosInterface_->isPolicyUpdated())
+            }else if (mrtRosInterface_->isPolicyUpdated())
             {
               mrtRosInterface_->evaluatePolicy(currentObservation_.time, currentObservation_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
             }
@@ -4115,6 +4121,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
 
   
   // ==================== MPC-RL插值系统实现 ====================
+  // target_torso_pose顺序：xyz+rpy
   void humanoidController::startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos)
   {
     // 获取当前躯干姿态（xyz+rpy）
@@ -4157,7 +4164,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     is_torso_interpolation_active_ = true;
     torso_interpolation_start_pose_ = current_torso_pose;
     torso_interpolation_target_pose_ = target_torso_pose;
-    torso_interpolation_target_pose_.head(2) = current_torso_pose.head(2);
+    // torso_interpolation_target_pose_.head(2) = current_torso_pose.head(2);
     torso_interpolation_start_time_ = current_time;
     
     // 计算总期望插值时间（基于躯干和手臂的最大距离和最大速度）

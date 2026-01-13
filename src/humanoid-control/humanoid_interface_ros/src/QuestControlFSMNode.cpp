@@ -684,7 +684,21 @@ namespace ocs2
             {
                 // 计算相对于零点的腰部位置
                 double current_yaw = current_head_body_pose_.body_yaw;
-                double relative_yaw = current_yaw - torso_yaw_zero_;
+                
+                // === 角度连续性处理：防止180°附近的跳变 ===
+                double yaw_diff = current_yaw - last_body_yaw_;
+                if (yaw_diff > M_PI) {
+                    // 从负值跳到正值（例如从-π跳到+π），说明实际是继续向负方向转
+                    accumulated_yaw_offset_ -= 2 * M_PI;
+                } else if (yaw_diff < -M_PI) {
+                    // 从正值跳到负值（例如从+π跳到-π），说明实际是继续向正方向转
+                    accumulated_yaw_offset_ += 2 * M_PI;
+                }
+                last_body_yaw_ = current_yaw;
+                
+                // 计算连续的yaw值（加上累计偏移）
+                double continuous_yaw = current_yaw + accumulated_yaw_offset_;
+                double relative_yaw = continuous_yaw - torso_yaw_zero_;
                 double current_height = current_head_body_pose_.body_height;
                 double relative_height = current_height - body_height_zero_;  // 计算相对于零点的高度
 
@@ -876,6 +890,11 @@ namespace ocs2
                         body_height_zero_ = current_head_body_pose_.body_height; // 记录当前高度作为零点
                         body_x_zero_ = current_head_body_pose_.body_x; // 记录当前x作为零点
                         torso_control_start_time_ = ros::Time::now();
+                        
+                        // 初始化角度连续性处理变量
+                        last_body_yaw_ = current_head_body_pose_.body_yaw;
+                        accumulated_yaw_offset_ = 0.0;
+                        
                         std::cout << "腰部控制模式已启用，腰部零点yaw: " << torso_yaw_zero_  << ", 腰部零点pitch: " << torso_pitch_zero_ 
                                 << "，高度零点: " << body_height_zero_ << ", x零点: " << body_x_zero_ << std::endl;
                         std_msgs::Bool whole_torso_ctrl_msg;
@@ -1002,7 +1021,7 @@ namespace ocs2
             if (std::abs(right_y) < deadzone) right_y = 0.0f;
             
             // 控制腰部yaw（左右转动）
-            float yaw_sensitivity = 110.0f; // 灵敏度，与遥控器节点保持一致
+            float yaw_sensitivity = 120.0f; // 灵敏度，与遥控器节点保持一致
             float target_yaw = -1 * right_x * yaw_sensitivity;
             std::cout << "controling torso_yaw: " << target_yaw << std::endl;
             controlWaist(target_yaw);
@@ -1010,13 +1029,13 @@ namespace ocs2
 
         void controlWaist(double waist_yaw)
         {
-            double max_angle = 110.0;
+            double max_angle = 120.0;
             waist_yaw = std::max(-max_angle, std::min(waist_yaw, max_angle));
             kuavo_msgs::robotWaistControl msg;
             msg.header.stamp = ros::Time::now();
             msg.data.data.resize(1);
             msg.data.data[0] =  waist_yaw;
-            std::cout << "waist_yaw" << waist_yaw <<std::endl;
+            std::cout << "waist_yaw:" << waist_yaw <<std::endl;
             waist_motion_pub_.publish(msg);
         }
         
@@ -1762,6 +1781,8 @@ namespace ocs2
         ros::Time torso_control_start_time_;
         double last_relative_height_{0.0};  // 记录最后一次的相对高度
         double last_body_pitch_{0.0};       // 记录最后一次的body_pitch
+        double last_body_yaw_{0.0};         // 记录上一次的body_yaw，用于角度连续性处理
+        double accumulated_yaw_offset_{0.0}; // 累计的yaw偏移，用于处理180°跳变
 
         kuavo_msgs::headBodyPose current_head_body_pose_;
         // 手臂碰撞控制，当前是否处于发生碰撞，手臂回归控制中
