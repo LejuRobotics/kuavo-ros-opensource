@@ -256,6 +256,41 @@ class ArmTrajectoryBezierDemo:
         finally:
             return result
 
+    def get_arm_ctrl_mode(self):
+        """获取当前手臂控制模式"""
+        service_name = "humanoid_get_arm_ctrl_mode"
+        try:
+            rospy.wait_for_service(service_name, timeout=0.5)
+            get_arm_ctrl_mode = rospy.ServiceProxy(service_name, changeArmCtrlMode)
+            req = changeArmCtrlModeRequest()
+            req.control_mode = 0  # 查询模式时此参数不使用
+            resp = get_arm_ctrl_mode(req)
+            return resp.mode
+        except rospy.ServiceException as e:
+            rospy.logwarn(f"Failed to get arm control mode: {e}")
+            return -1
+        except rospy.ROSException:
+            rospy.logerr(f"Service {service_name} not available")
+            return -1
+
+    def wait_for_arm_mode_change_complete(self, target_mode, timeout=2.0):
+        """等待手臂控制模式切换完成"""
+        start_time = rospy.Time.now()
+        while (rospy.Time.now() - start_time).to_sec() < timeout:
+            current_mode = self.get_arm_ctrl_mode()
+            if current_mode == target_mode:
+                rospy.loginfo(f"Arm control mode changed to {target_mode} successfully")
+                return True
+            # 如果获取模式失败（返回-1），继续等待
+            if current_mode == -1:
+                rospy.sleep(0.01)  # 10ms 检查间隔
+                continue
+            rospy.sleep(0.01)  # 10ms 检查间隔
+        
+        final_mode = self.get_arm_ctrl_mode()
+        rospy.logwarn(f"Arm control mode change timeout after {timeout} seconds, current mode: {final_mode}, target: {target_mode}")
+        return False
+
     def load_json_file(self, file_path):
         try:
             with open(file_path, "r") as f:
@@ -605,7 +640,7 @@ class ArmTrajectoryBezierDemo:
         finish_time = 2
         data = self.create_action_data(finish_time)
 
-        if self.kuavo_control_scheme == "rl":
+        if self.kuavo_control_scheme == "rl" or self.kuavo_control_scheme == "multi":
             finish_time += 1
         self.END_FRAME_TIME = finish_time
 
@@ -876,7 +911,13 @@ class ArmTrajectoryBezierDemo:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
-        self.call_change_arm_ctrl_mode_service(2)
+        # RL模式下不需要手臂模式切换，RL控制器直接控制手臂
+        if self.kuavo_control_scheme != "rl":
+            self.call_change_arm_ctrl_mode_service(2)
+
+            # 等待手臂控制模式切换完成
+            if not self.wait_for_arm_mode_change_complete(2, timeout=2.0):
+                rospy.logwarn("Arm control mode change may not be complete, but continuing...")
 
         # 获取初始帧时间
         self.arm_flag = True

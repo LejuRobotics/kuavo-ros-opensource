@@ -12,7 +12,7 @@ comHeight                           0.78
 vrSquatMinPitchDeg                  3.0;     ; min pitch (deg)
 vrSquatMaxPitchDeg                  20.0;    ; max pitch (deg)
 vrSquatHeightMin                    -0.20;   ; min height (m)
-vrSquatHeightMax                    0.05;    ; max height (m)
+vrSquatHeightMax                    0.03;    ; max height (m)
 
 targetTorsoDispalcementVelocity
 {
