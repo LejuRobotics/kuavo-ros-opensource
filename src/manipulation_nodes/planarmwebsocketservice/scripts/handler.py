@@ -4772,3 +4772,114 @@ async def get_api_key_handler(
         response_queue.put(response)
 
         print(payload.data['msg'])
+
+
+async def get_api_key_status_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    获取API密钥状态接口
+    用于检查特定类型模型的API密钥是否已设置
+    """
+    print("检查api密钥状态中")
+    llm_api_storage_path = os.path.expanduser("~/.config/lejuconfig/llm_apis.json")
+    payload = Payload(cmd="get_api_key_status", data={"code": 0, "msg": "模型所需的key已经设置"})
+    
+    # 获取type参数，默认值为realtime
+    api_type = data.get("data", {}).get("type", "realtime")
+    
+    # 根据type确定需要检查的key
+    if api_type == "realtime":
+        # 实时模型需要检查的key
+        required_keys = [
+            "ark_X-Api-App-ID",
+            "ark_X-Api-Access-Key"
+        ]
+    elif api_type == "non-realtime":
+        # 非实时模型需要检查的key
+        required_keys = [
+            "xfyun_APPID",
+            "xfyun_APISecret",
+            "xfyun_APIKey",
+            "ark_analysis_key"
+        ]
+    else:
+        # 不支持的类型
+        payload.data["code"] = 1
+        payload.data["type"] = api_type
+        payload.data["msg"] = "不支持的模型类型"
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+        return
+
+    try:
+        if not os.path.exists(llm_api_storage_path):
+            payload.data["code"] = 1
+            payload.data["type"] = api_type
+            payload.data["is_empty"] = required_keys
+            payload.data["msg"] = "API密钥文件不存在"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+            return
+
+        with open(llm_api_storage_path, 'r') as f:
+            content = json.load(f)
+
+        if not content or content == {}:
+            payload.data["code"] = 1
+            payload.data["type"] = api_type
+            payload.data["is_empty"] = required_keys
+            payload.data["msg"] = "API密钥文件为空"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+            return
+
+        # 检查需要的key是否存在且非空
+        empty_keys = []
+        for key in required_keys:
+            value = content.get(key, "")
+            if not value or value.strip() == "":
+                empty_keys.append(key)
+
+        payload.data["type"] = api_type
+        
+        if empty_keys:
+            payload.data["code"] = 1
+            payload.data["is_empty"] = empty_keys
+            payload.data["msg"] = "存在缺失的key"
+        else:
+            payload.data["code"] = 0
+            payload.data["is_empty"] = []
+            payload.data["msg"] = "模型所需的key已经设置"
+
+    except FileNotFoundError:
+        payload.data["code"] = 1
+        payload.data["type"] = api_type
+        payload.data["is_empty"] = required_keys
+        payload.data["msg"] = "API密钥文件不存在"
+
+    except json.JSONDecodeError:
+        print(traceback.format_exc())
+        payload.data["code"] = 1
+        payload.data["type"] = api_type
+        payload.data["is_empty"] = required_keys
+        payload.data["msg"] = "API密钥文件格式错误"
+
+    except IOError as e:
+        payload.data["code"] = 1
+        payload.data["type"] = api_type
+        payload.data["is_empty"] = required_keys
+        payload.data["msg"] = f"API密钥读取失败: 文件操作错误 - {e}"
+
+    except Exception as e:
+        print(traceback.format_exc())
+        payload.data["code"] = 1
+        payload.data["type"] = api_type
+        payload.data["is_empty"] = required_keys
+        payload.data["msg"] = f"API密钥检查失败: {e}"
+
+    finally:
+        response = Response(payload=payload, target=websocket)
+        response_queue.put(response)
+
+        print(payload.data['msg'])

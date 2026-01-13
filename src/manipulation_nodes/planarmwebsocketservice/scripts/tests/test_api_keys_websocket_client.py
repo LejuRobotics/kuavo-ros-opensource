@@ -181,6 +181,68 @@ class APIKeysWebSocketClient:
         else:
             print("✗ 没有正确处理空的API密钥设置")
 
+    async def test_get_api_key_status(self, api_type: str):
+        """测试获取API密钥状态接口"""
+        print("\n" + "=" * 60)
+        print(f"测试 get_api_key_status 接口 (type: {api_type})")
+        print("=" * 60)
+
+        response = await self.send_message("get_api_key_status", {"type": api_type})
+
+        if response:
+            data = response.get("data", {})
+            if data.get("code") == 0:
+                print(f"\n✓ API密钥状态获取成功: {data.get('msg')}")
+                print(f"    类型: {data.get('type')}")
+                print(f"    未设置的密钥: {data.get('is_empty', [])}")
+                return True
+            else:
+                print(f"\n✗ API密钥状态获取失败: {data.get('msg')}")
+                print(f"    类型: {data.get('type')}")
+                print(f"    未设置的密钥: {data.get('is_empty', [])}")
+                return False
+        return False
+
+    async def test_get_api_key_status_valid_types(self):
+        """测试有效类型的API密钥状态检查"""
+        print("\n" + "=" * 60)
+        print("测试有效类型的API密钥状态检查")
+        print("=" * 60)
+
+        # 测试实时模型
+        print("\n[测试1] 测试实时模型API密钥状态")
+        realtime_success = await self.test_get_api_key_status("realtime")
+
+        # 测试非实时模型
+        print("\n[测试2] 测试非实时模型API密钥状态")
+        non_realtime_success = await self.test_get_api_key_status("non-realtime")
+
+        return realtime_success and non_realtime_success
+
+    async def test_get_api_key_status_invalid_types(self):
+        """测试无效类型的API密钥状态检查"""
+        print("\n" + "=" * 60)
+        print("测试无效类型的API密钥状态检查")
+        print("=" * 60)
+
+        invalid_types = ["invalid", "test", "123", "", None]
+        all_failed = True
+
+        for api_type in invalid_types:
+            print(f"\n[测试] 测试无效类型: {api_type}")
+            response = await self.send_message("get_api_key_status", {"type": api_type})
+
+            if response:
+                data = response.get("data", {})
+                if data.get("code") == 1:
+                    print(f"✓ 成功拒绝无效类型: {api_type}")
+                else:
+                    print(f"✗ 没有正确拒绝无效类型: {api_type}")
+                    print(f"    响应: {json.dumps(response, ensure_ascii=False, indent=4)}")
+                    all_failed = False
+
+        return all_failed
+
     async def test_edge_cases(self):
         """测试边界情况"""
         print("\n" + "=" * 60)
@@ -391,9 +453,9 @@ async def main():
     parser.add_argument(
         "--test",
         type=str,
-        choices=["set", "get", "full", "comprehensive"],
+        choices=["set", "get", "full", "comprehensive", "status"],
         default="comprehensive",
-        help="测试类型: set(仅设置), get(仅获取), full(完整测试), comprehensive(全面测试) (默认: comprehensive)",
+        help="测试类型: set(仅设置), get(仅获取), full(完整测试), comprehensive(全面测试), status(仅状态检查) (默认: comprehensive)",
     )
     parser.add_argument(
         "--api-key",
@@ -414,6 +476,18 @@ async def main():
         elif args.test == "full":
             success = await client.run_full_test()
             sys.exit(0 if success else 1)
+        elif args.test == "status":
+            if not await client.connect():
+                sys.exit(1)
+
+            try:
+                # 测试所有类型的API密钥状态
+                success = await client.test_get_api_key_status_valid_types()
+                # 测试无效类型的API密钥状态检查
+                invalid_success = await client.test_get_api_key_status_invalid_types()
+                sys.exit(0 if success and invalid_success else 1)
+            finally:
+                await client.disconnect()
         else:
             if not await client.connect():
                 sys.exit(1)
