@@ -1318,10 +1318,20 @@ namespace ocs2
                 select_vector << 0, 1, 0, 0;
             }
             // std::cout << "joycmd: " << joystick_vector.transpose() << std::endl;
-            Eigen::VectorXd limit_vector(4);
-            limit_vector << c_relative_base_limit_[0], c_relative_base_limit_[1], c_relative_base_limit_[2], c_relative_base_limit_[3];
+            Eigen::VectorXd limit_vector_negative(4);
+            limit_vector_negative << c_relative_base_limit_[0], c_relative_base_limit_[1], 
+                                     std::fabs(vr_squat_height_min_), c_relative_base_limit_[3];
+            Eigen::VectorXd limit_vector_positive(4);
+            limit_vector_positive << c_relative_base_limit_[0], c_relative_base_limit_[1], 
+                                     std::fabs(vr_squat_height_max_), c_relative_base_limit_[3];
 
-            commad_line_target_.head(4) = joystick_vector.cwiseProduct(limit_vector).cwiseProduct(select_vector);
+            for (int i = 0; i < 4; i++) {
+              if (joystick_vector[i] >= 0) {
+                  commad_line_target_[i] = joystick_vector[i] * limit_vector_positive[i] * select_vector[i];
+              } else {
+                  commad_line_target_[i] = joystick_vector[i] * limit_vector_negative[i] * select_vector[i];
+              }
+            }
 
             cmdVel_.linear.x = commad_line_target_(0);
             cmdVel_.linear.y = commad_line_target_(1);
