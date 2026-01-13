@@ -1087,12 +1087,7 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
       {
-        if (is_rl_controller_) {
-          ROS_WARN("[JoyControl] Current controller is RL, cannot switch gait to walk");
-        } 
-        else {
-          publishGaitTemplate("walk");
-        }
+        publishGaitTemplate("walk");
       }
       else
       {
