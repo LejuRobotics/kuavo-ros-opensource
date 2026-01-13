@@ -19,16 +19,13 @@ WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME = "websocket_humanoid_robot"
 
 def check_real_kuavo():
     try:
-        # optimize: 简单通过检查零点文件来判断是否为实物, 可优化判断条件
-        offset_file = os.path.expanduser("~/.config/lejuconfig/offset.csv")
-        config_file = os.path.expanduser("~/.config/lejuconfig/config.yaml")
-        
-        offset_file_exists = os.path.exists(offset_file)    
-        config_file_exists = os.path.exists(config_file)
-        print(f"offset_file: {offset_file}, exists: {offset_file_exists}")
-        print(f"config_file: {config_file}, exists: {config_file_exists}")
-        return offset_file_exists and config_file_exists
+        # 通过 /real 参数来判断是否为实物机器人
+        # 实物模式: /real = true, 仿真模式: /real = false
+        real = rospy.get_param("/real", False)
+        print(f"Robot mode check: /real parameter = {real}")
+        return real
     except Exception as e:
+        print(f"Failed to get /real parameter: {e}")
         return False
 
 def tmux_run_cmd(session_name:str, cmd:str, sudo:bool=False)->Tuple[bool, str]:
