@@ -93,22 +93,17 @@ class SimulatorTask2():
         )
 
     def _on_start_service(self, req):
-        """等待外部代码发送 start 信号"""
         rospy.loginfo("[sim] Received external start signal, starting task execution")
         self.started = True
         self.start_evt.set()
         return TriggerResponse(success=True, message="Task started successfully")
 
     def _on_reset_service(self, req):
-        """等待外部代码发送 reset 信号"""
         rospy.loginfo("[sim] Received external reset signal, preparing to reset task")
         self.reset_evt.set()
         return TriggerResponse(success=True, message="Task reset triggered")
 
     def _sample_position(self, position_ranges: dict):
-        """
-        使用固定种子采样位置，返回 (x, y, z)
-        """
         x = float(self.np_rng.uniform(*position_ranges['x']))
         y = float(self.np_rng.uniform(*position_ranges['y']))
         z = float(self.np_rng.uniform(*position_ranges['z']))

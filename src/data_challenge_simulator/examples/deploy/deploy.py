@@ -465,7 +465,7 @@ def run_task(task_id: int, headless: bool, time_wait: float = 5):
                 print(
                     f"{CYAN}[RESULT]{RESET} "
                     f"Round {YELLOW}{cycle_idx}{RESET}: Score: {GREEN}{score}{RESET} | "
-                    f"Average score: {GREEN}{avg:.2f}{RESET} (valid {valid_cnt} rounds)"
+                    f"Average score: {GREEN}{avg:.2f}{RESET} (valid {YELLOW}{valid_cnt}{RESET} rounds)"
                 )
 
         except KeyboardInterrupt:
@@ -492,7 +492,7 @@ def main(headless,task_id,time_wait):
             print("Please select the task number (1-3):")
             print("1: Task 1 —— Toy arrangement")
             print("2: Task 2 —— Express parcel weighing")
-            print("3: Task 3 —— Conveyor belt sorting")
+            print("3: Task 3 —— Conveyor belt parts sorting")
             try:
                 task_id = int(input("Please enter the task number (1-3): ").strip())
             except Exception:

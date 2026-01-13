@@ -221,7 +221,7 @@ class SimulatorTask1():
 
                 if out["car_pos_added"]:
                     parts = []
-                    if out["car_pos_added"]: parts.append("+40( Car in the box!)")
+                    parts.append("+40( Car in the box!)")
                     rospy.loginfo(f"{YELLOW} 🟡 Points Added:{' '.join(parts)}| Total score: {out['total_score']}{RESET}")
 
                 if out["success_triggered"]:

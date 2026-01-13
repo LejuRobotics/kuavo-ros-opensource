@@ -100,24 +100,17 @@ class SimulatorTask3():
         self.timer_handle = {'timer': None}
 
     def _on_start_service(self, req):
-        """等待外部代码发送 start 信号"""
         rospy.loginfo("[sim] Received external start signal, starting task execution")
         self.started = True
         self.start_evt.set()
         return TriggerResponse(success=True, message="Task started successfully")
 
     def _on_reset_service(self, req):
-        """等待外部代码发送 reset 信号"""
         rospy.loginfo("[sim] Received external reset signal, preparing to reset task")
         self.reset_evt.set()
         return TriggerResponse(success=True, message="Task reset triggered")
 
-
-
-
-
     def _euler_to_quat(self,roll, pitch, yaw):
-        """ZYX 欧拉角转四元数"""
         cr, sr = math.cos(roll * 0.5), math.sin(roll * 0.5)
         cp, sp = math.cos(pitch * 0.5), math.sin(pitch * 0.5)
         cy, sy = math.cos(yaw * 0.5), math.sin(yaw * 0.5)
@@ -128,27 +121,18 @@ class SimulatorTask3():
         return {'x': qx, 'y': qy, 'z': qz, 'w': qw}
 
     def _sample_orientation_jitter(self, max_yaw_deg=20.0, max_pitch_deg=0.0, max_roll_deg=0.0):
-        """为每个生成物体添加轻量姿态扰动
-        """
         yaw = math.radians(self.np_rng.uniform(-max_yaw_deg, max_yaw_deg))
         pitch = math.radians(self.np_rng.uniform(-max_pitch_deg, max_pitch_deg))
         roll = math.radians(self.np_rng.uniform(-max_roll_deg, max_roll_deg))
         return self._euler_to_quat(roll, pitch, yaw)
 
     def _sample_spawn_position(self):
-        """每次生成时重新采样物体位置
-        """
         return {
             'x': 0.4 + self.np_rng.uniform(-0.02, 0.10),
             'y': -0.37 + self.np_rng.uniform(0, 0),
             'z': 0.85
         }
     def _generate_objects_callback(self, event):
-        """定时生成物体的回调函数，每次只生成一个物体
-        Args:
-            event: ROS Timer 传递的 TimerEvent 对象（可以忽略）
-        """
-
         current_idx = self.object_index[0]
         obj_name = self.objects[current_idx]
         
@@ -274,28 +258,28 @@ class SimulatorTask3():
 
                 if out["box_red1_pos_added"]:
                     parts = []
-                    if out["box_red1_pos_added"]: parts.append("+20( Red Box in the Place!)")
+                    if out["box_red1_pos_added"]: parts.append("+20 ( White Box in the Box! )")
                     rospy.loginfo(f"{YELLOW} 🟡 Points Added: {' '.join(parts)} | Total Score: {out['total_score']}{RESET}")
 
                 if out["box_red2_pos_added"]:
                     parts = []
-                    if out["box_red2_pos_added"]: parts.append("+20( Red Box in the Place!)")
+                    if out["box_red2_pos_added"]: parts.append("+20 ( White Box in the Box! )")
                     rospy.loginfo(f"{YELLOW} 🟡 Points Added: {' '.join(parts)} | Total Score: {out['total_score']}{RESET}")
 
                 if out["box_black1_pos_added"]:
                     parts = []
-                    if out["box_black1_pos_added"]: parts.append("+20( Black Box in the Place!)")
+                    if out["box_black1_pos_added"]: parts.append("+20 ( Black Box in the Box! )")
                     rospy.loginfo(f"{YELLOW} 🟡 Points Added: {' '.join(parts)} | Total Score: {out['total_score']}{RESET}")
 
                 if out["box_black2_pos_added"]:
                     parts = []
-                    if out["box_black2_pos_added"]: parts.append("+20( Black Box in the Place!)")
+                    if out["box_black2_pos_added"]: parts.append("+20 ( Black Box in the Box! )")
                     rospy.loginfo(f"{YELLOW} 🟡 Points Added: {' '.join(parts)} | Total Score: {out['total_score']}{RESET}")
                 
                 if out["success_triggered"]:
                     parts = []
                     parts.append(f"+{out['time_score_added']}(Time!)")
-                    parts.append("+10(Bonus!)")
+                    parts.append("+10 ( Bonus! )")
                     rospy.loginfo(f"{GREEN} ✅ Success Triggered: {' '.join(parts)} | Total Time: {out['elapsed_sec']:.2f}s | Total Score: {out['total_score']}{RESET}")
 
                     if out["need_stop_conveyor"]:

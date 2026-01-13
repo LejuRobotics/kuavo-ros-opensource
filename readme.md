@@ -7,7 +7,7 @@
 ```bash
 git clone https://github.com/LejuRobotics/kuavo-ros-opensource.git
 cd kuavo-ros-opensource
-git checkout opensource/kuavo-data-challenge/icra
+git checkout opensource/kuavo-data-challenge-icra
 ````
 
 ## 2. Docker Setup
