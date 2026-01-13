@@ -1,4 +1,38 @@
 #!/usr/bin/env python
+import subprocess
+import sys
+import os
+
+def check_and_install_dependencies():
+    """检查并安装必要的依赖包"""
+    import importlib.util
+
+    # 检查 prompt-toolkit 版本
+    try:
+        import prompt_toolkit
+        if prompt_toolkit.__version__ != "2.0.10":
+            print(f"prompt-toolkit 版本为 {prompt_toolkit.__version__}，需要安装 2.0.10 版本...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "prompt-toolkit==2.0.10"])
+            # 重新加载模块
+            importlib.invalidate_caches()
+    except ImportError:
+        print("prompt-toolkit 未安装，正在安装 2.0.10 版本...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "prompt-toolkit==2.0.10"])
+
+    # 检查 questionary
+    try:
+        import questionary
+        if questionary.__version__ != "2.1.0":
+            print(f"questionary 版本为 {questionary.__version__}，需要安装 2.1.0 版本...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "questionary==2.1.0"])
+            importlib.invalidate_caches()
+    except ImportError:
+        print("questionary 未安装，正在安装 2.1.0 版本...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "questionary==2.1.0"])
+
+# 在导入其他依赖之前检查并安装
+check_and_install_dependencies()
+
 import rosbag
 import argparse
 from collections import defaultdict
@@ -8,10 +42,24 @@ import math
 import json
 from dataclasses import dataclass
 import questionary
-import subprocess
-import os
+import rospy
 from questionary import Choice, Separator
 import rich.console
+
+# 初始化 console（需要在导入 RosbagToBezierPlanner 之前，因为错误处理中会用到）
+console = rich.console.Console()
+
+# 导入 RosbagToBezierPlanner 类
+# 假设两个脚本在同一目录下
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+try:
+    from rosbag_to_bezier_planner import RosbagToBezierPlanner
+except ImportError:
+    # 如果直接导入失败，提示错误
+    console.print("[red]错误：无法导入 RosbagToBezierPlanner 类[/red]")
+    console.print("[yellow]请确保 rosbag_to_bezier_planner.py 在同一目录下[/yellow]")
+    sys.exit(1)
 
 @dataclass
 class Point:
@@ -66,180 +114,8 @@ class CurveCalculator:
             [round(right_cp[0], 1), round(right_cp[1], 1)]
         ]
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Process rosbag and generate JSON for robot control")
-    parser.add_argument("--input_bag", "-i", required=True, type=str, help="Input bag file")
-    parser.add_argument("--robot_type", "-r", type=str, choices=["kuavo", "roban"], default="kuavo", 
-                       help="Robot type: kuavo (arm+hand+head) or roban (arm only)")
-    return parser.parse_args()
-
-def radians_to_degrees(radians):
-    return [math.degrees(rad) for rad in radians]
-
-def round_to_one_decimal(values):
-    return [round(value, 1) for value in values]
-
-def read_rosbag(input_bag, topics):
-    timestamps = defaultdict(list)
-    message_data = defaultdict(list)
-    message_counts = {topic: 0 for topic in topics}
-    
-    with rosbag.Bag(input_bag, "r") as bag:
-        for topic, msg, t in bag.read_messages(topics=topics):
-            timestamp = t.to_sec()
-            timestamps[topic].append(timestamp)
-            message_counts[topic] += 1
-            
-            if topic == "/sensors_data_raw":
-                q_degrees = radians_to_degrees(msg.joint_data.joint_q)
-                message_data[topic].append(round_to_one_decimal(q_degrees))
-            elif topic == "/dexhand/state":
-                hand_data = list(msg.position)
-                message_data[topic].append(round_to_one_decimal(hand_data))
-    
-    # 如果是 kuavo 型号但没有 dexhand/state 数据，创建与 sensors_data_raw 对齐的零数据
-    if "/dexhand/state" in topics and ("/dexhand/state" not in message_data or len(message_data["/dexhand/state"]) == 0):
-        if "/sensors_data_raw" in message_data and len(message_data["/sensors_data_raw"]) > 0:
-            # 创建与 sensors_data_raw 时间戳对齐的零数据
-            timestamps["/dexhand/state"] = timestamps["/sensors_data_raw"].copy()
-            message_data["/dexhand/state"] = [[0.0] * 12 for _ in range(len(message_data["/sensors_data_raw"]))]
-            message_counts["/dexhand/state"] = len(message_data["/sensors_data_raw"])
-    
-    return timestamps, message_counts, message_data, {topic: np.mean(np.diff(timestamps[topic])) if len(timestamps[topic]) > 1 else 0.1 for topic in topics}
-
-def check_timestamp_alignment(timestamps, topics, tolerance=0.01):
-    def find_start_indices(timestamps, topics, tolerance):
-        indices = {topic: 0 for topic in topics}
-        max_indices = {topic: len(timestamps[topic]) for topic in topics}
-        while all(indices[topic] < max_indices[topic] for topic in topics):
-            times = {topic: timestamps[topic][indices[topic]] for topic in topics}
-            if max(times.values()) - min(times.values()) <= tolerance:
-                return indices
-            min_time_topic = min(times, key=times.get)
-            indices[min_time_topic] += 1
-        return None
-
-    start_indices = find_start_indices(timestamps, topics, tolerance)
-    if start_indices is None:
-        return 0.0
-
-    aligned_count = 0
-    total_count = min(len(timestamps[topic]) - start_indices[topic] for topic in topics)
-
-    for i in range(total_count):
-        times = [timestamps[topic][start_indices[topic] + i] for topic in topics]
-        if max(times) - min(times) <= tolerance:
-            aligned_count += 1
-
-    return (aligned_count / total_count) * 100
-
-def reorganize_timestamps(timestamps, topics, message_data, interval_ms, robot_type):
-    interval_sec = interval_ms / 1000.0
-
-    if robot_type == "roban":
-        # roban 型号：只有一个话题
-        topic = topics[0]  # 只有 /sensors_data_raw
-        aligned_start_time = timestamps[topic][0]
-        aligned_end_time = timestamps[topic][-1]
-
-        new_timestamps = np.arange(aligned_start_time, aligned_end_time + interval_sec, interval_sec)
-
-        new_data_dict = {topic: []}
-        for new_time in new_timestamps:
-            closest_time = bisect.bisect_left(timestamps[topic], new_time)
-            if closest_time < len(timestamps[topic]) and abs(timestamps[topic][closest_time] - new_time) <= interval_sec / 2:
-                new_data_dict[topic].append(message_data[topic][closest_time])
-            else:
-                # 使用最近的数据点或默认值
-                if closest_time > 0:
-                    new_data_dict[topic].append(message_data[topic][closest_time-1])
-                else:
-                    new_data_dict[topic].append([0.0] * len(message_data[topic][0]))
-
-        organized_data = {}
-        for i, timestamp in enumerate(new_timestamps):
-            arm_data = new_data_dict["/sensors_data_raw"][i][13:21]  # roban 使用索引 13:21
-            organized_data[round(timestamp, 3)] = arm_data
-
-        return organized_data, 100.0  # 单话题时对齐百分比始终为100%
-    
-    else:  # kuavo 型号
-        aligned_start_time = max(timestamps[topic][0] for topic in topics)
-        aligned_end_time = min(timestamps[topic][-1] for topic in topics)
-
-        new_timestamps = np.arange(aligned_start_time, aligned_end_time + interval_sec, interval_sec)
-
-        new_data_dict = {topic: [] for topic in topics}
-        for topic in topics:
-            for new_time in new_timestamps:
-                closest_time = bisect.bisect_left(timestamps[topic], new_time)
-                if closest_time < len(timestamps[topic]) and abs(timestamps[topic][closest_time] - new_time) <= interval_sec / 2:
-                    new_data_dict[topic].append(message_data[topic][closest_time])
-                else:
-                    new_data_dict[topic].append([0.0] * len(message_data[topic][0]))
-
-        organized_data = {}
-        for i, timestamp in enumerate(new_timestamps):
-            arm_data = new_data_dict["/sensors_data_raw"][i][12:26]
-            hand_data = new_data_dict["/dexhand/state"][i][:12]
-            head_data = new_data_dict["/sensors_data_raw"][i][-2:]
-            organized_data[round(timestamp, 3)] = arm_data + hand_data + head_data
-
-        return organized_data, check_timestamp_alignment({topic: new_timestamps for topic in topics}, topics)
-
-def create_json_from_organized_data(organized_data, interval_ms, threshold=1.0):
-    frames = []
-    calculator = CurveCalculator()
-
-    data_list = list(organized_data.items())
-    
-    for i in range(len(data_list[0][1])):  # For each servo
-        prev_value = None
-        prev_point = None
-        for index, (timestamp, data) in enumerate(data_list):
-            current_value = data[i]
-            current_point = Point(int(index * interval_ms), current_value)
-            
-            if index >= len(frames):
-                frames.append({
-                    "servos": [None] * len(data),
-                    "keyframe": int(index * interval_ms),
-                    "attribute": {}
-                })
-            
-            if (index == 0 or index == len(data_list) - 1 or 
-                prev_value is None or abs(current_value - prev_value) >= threshold):
-                next_point = Point(int((index+1) * interval_ms), data_list[index+1][1][i]) if index < len(data_list) - 1 else None
-                cp = calculator.get_control_point(prev_point, current_point, next_point)
-                
-                frames[index]["servos"][i] = int(round(current_value))
-                frames[index]["attribute"][str(i+1)] = {
-                    "CP": cp,
-                    "CPType": ["AUTO", "AUTO"],
-                    "select": False
-                }
-                prev_value = current_value
-                prev_point = current_point
-            else:
-                frames[index]["servos"][i] = None
-
-    # Remove frames where all servos are None
-    frames = [frame for frame in frames if any(servo is not None for servo in frame["servos"])]
-
-    # Update keyframes
-    for index, frame in enumerate(frames):
-        frame["keyframe"] = int(index * interval_ms)
-
-    return {
-        "frames": frames,
-        "musics": [],
-        "finish": int((len(frames) - 1) * interval_ms),
-        "first": 0,
-        "version": "bagTOtact",
-        "robotType": os.getenv('ROBOT_VERSION', 'unknown')
-    }
-
-console = rich.console.Console()
+# 以下函数和类已不再使用，保留 CurveCalculator 以防其他地方需要
+# 转换逻辑已改为使用 RosbagToBezierPlanner
 
 class Menu:
     def __init__(self, title, previous_menu_name=None):
@@ -299,7 +175,7 @@ class RecordRosbagMenu(Menu):
 
     def handle_option(self, option):
         if option:
-            topics = ['/sensors_data_raw']
+            topics = ['/sensors_data_raw', '/dexhand/state']    # 新增默认监听录制手指的话题数据
             #topics = ["/robot_arm_q_v_tau", "/robot_head_motor_position", "/robot_hand_position"]
             topics_str = " ".join(topics)
             command = f"rosbag record -O {option}.bag {topics_str}"
@@ -347,83 +223,74 @@ class ConvertRosbagMenu(Menu):
             Menu.set_current_menu(self.back())
             return
 
-        # 添加机器人型号选择
-        robot_type = questionary.select(
-            "请选择机器人型号：",
-            choices=[
-                "kuavo - 使用手臂+手指+头部数据",
-                "roban - 仅使用手臂数据",
-                Separator(),
-                "返回上级菜单"
-            ]
-        ).ask()
-
-        if robot_type == "返回上级菜单" or robot_type is None:
-            Menu.set_current_menu(self.back())
-            return
-
-        # 提取型号名称
-        robot_model = robot_type.split(' - ')[0]
-
+        # 使用 RosbagToBezierPlanner 进行转换
         try:
-            args = argparse.Namespace(input_bag=option, robot_type=robot_model)
-            main(args)
-            console.print(f"[bold green]转换完成！tact文件已生成。[/bold green]")
+            console.print("[blue]开始使用贝塞尔曲线规划器转换 rosbag...[/blue]")
+            
+            
+            # 询问参数
+            sampling_rate = float(questionary.text(
+                "请输入数据预处理采样率（秒，默认0.1）:",
+                default="0.1"
+            ).ask() or "0.1")
+            
+            smoothing_factor = float(questionary.text(
+                "请输入贝塞尔曲线平滑因子（默认0.3）:",
+                default="0.3"
+            ).ask() or "0.3")
+            
+            output_dir = questionary.text(
+                "请输入输出目录（默认./bezier_results）:",
+                default="./bezier_results"
+            ).ask() or "./bezier_results"
+            
+            # 询问是否保存采样结果
+            save_sampling_tact = questionary.confirm(
+                "是否保存采样结果为TACT文件？",
+                default=True
+            ).ask()
+            
+            custom_sampling_rate = None
+            if save_sampling_tact:
+                custom_sampling_rate_str = questionary.text(
+                    "请输入自定义采样率（秒，默认0.5，留空则不采样）:",
+                    default="0.5"
+                ).ask() or "0.5"
+                if custom_sampling_rate_str:
+                    custom_sampling_rate = float(custom_sampling_rate_str)
+            
+            # 创建处理器实例
+            processor = RosbagToBezierPlanner()
+            
+            # 执行转换
+            success = processor.run(
+                bag_file_path=option,
+                sampling_rate=sampling_rate,
+                smoothing_factor=smoothing_factor,
+                output_dir=output_dir,
+                save_tact=True,
+                custom_sampling_rate=custom_sampling_rate,
+                get_raw_trajectory=False,
+                save_sampling_tact=save_sampling_tact
+            )
+            
+            if success:
+                console.print(f"[bold green]转换完成！TACT文件已保存到 {output_dir}[/bold green]")
+            else:
+                console.print("[red]转换过程中发生错误[/red]")
+                
+        except KeyboardInterrupt:
+            console.print("[yellow]转换被用户中断[/yellow]")
         except Exception as e:
             console.print(f"[red]转换过程中发生错误: {str(e)}[/red]")
+            import traceback
+            console.print(f"[red]{traceback.format_exc()}[/red]")
 
         Menu.set_current_menu(self.back())
 
-def main(args=None):
-    if args is None:
-        args = parse_args()
-    
-    # 根据机器人型号选择不同的话题
-    if args.robot_type == "roban":
-        topics = ['/sensors_data_raw']
-        console.print(f"[blue]选择机器人型号: {args.robot_type} (仅使用手臂数据)[/blue]")
-    else:  # kuavo
-        topics = ['/sensors_data_raw', '/dexhand/state']
-        console.print(f"[blue]选择机器人型号: {args.robot_type} (使用手臂+手指+头部数据)[/blue]")
-
-    timestamps, message_counts, message_data, topic_hz = read_rosbag(args.input_bag, topics)
-    
-    console.print("原始消息数量和频率：")
-    for topic, count in message_counts.items():
-        hz_value = 1/topic_hz[topic] if topic_hz[topic] > 0 else 0
-        console.print(f"  {topic}: {count} 条消息, {hz_value:.2f} Hz")
-
-    alignment_percentage = check_timestamp_alignment(timestamps, topics, 0.05)
-    console.print(f"\n原始对齐百分比: {alignment_percentage:.2f}%")
-
-    # 检查是否有必要的数据来生成文件
-    if "/sensors_data_raw" not in message_data or len(message_data["/sensors_data_raw"]) == 0:
-        console.print("[red]错误：没有找到 /sensors_data_raw 数据，无法生成 tact 文件[/red]")
-        return
-
-    # 计算合适的时间间隔
-    max_hz = math.ceil(max(1/hz for hz in topic_hz.values()))
-    min_allowed_interval = math.ceil(1000 / max_hz)
-    console.print(f"\n建议的最小时间间隔: {min_allowed_interval} 毫秒")
-    
-    while True:
-        try:
-            interval_ms = float(questionary.text(f"请输入所需的时间间隔（毫秒，建议 >= {min_allowed_interval}）: ").ask())
-            if interval_ms >= min_allowed_interval:
-                break
-            console.print(f"错误：间隔必须大于等于 {min_allowed_interval} 毫秒。")
-        except ValueError:
-            console.print("错误：请输入有效的数字。")
-    
-    organized_data, new_alignment_percentage = reorganize_timestamps(timestamps, topics, message_data, interval_ms, args.robot_type)
-
-    json_data = create_json_from_organized_data(organized_data, interval_ms)
-
-    output_file = args.input_bag.rsplit('.', 1)[0] + f'_{args.robot_type}_output.tact'
-    with open(output_file, 'w') as f:
-        json.dump(json_data, f, indent=4)
-
-    console.print(f"\nJSON数据已保存到 {output_file}")
+# main 函数已移除，转换逻辑已改为使用 RosbagToBezierPlanner
+# 所有转换相关的函数（read_rosbag, reorganize_timestamps, create_json_from_organized_data 等）
+# 已不再使用，转换功能现在由 RosbagToBezierPlanner 类提供
 
 
 if __name__ == "__main__":

@@ -190,7 +190,7 @@ void MobileManipulatorVisualization::publishTargetTrajectories(const ros::Time& 
   for (const auto& targetState : targetTrajectories.stateTrajectory) {
     // 假设目标状态结构：[base_pose, left_hand_pose(7), right_hand_pose(7)]
     // 这里需要根据实际的状态结构来调整索引
-    // const size_t baseDim = modelInfo_.stateDim - modelInfo_.armDim; // fix cpplint
+    // const size_t baseDim = modelInfo_.stateDim - modelInfo_.armDim - modelInfo_.waistDim;
     
     if (targetState.size() >= 14) {  // 至少包含基座和双手位置姿态
       // 左手目标位置 (假设在base维度之后)

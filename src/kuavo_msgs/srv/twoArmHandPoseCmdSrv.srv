@@ -6,5 +6,6 @@ float64[] q_arm
 float64[] q_torso
 
 float64   time_cost # unit: ms
+string    error_reason # 错误原因，成功时为空字符串
 # ik result
 twoArmHandPose  hand_poses

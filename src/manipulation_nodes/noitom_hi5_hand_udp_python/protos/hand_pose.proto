@@ -1,5 +1,7 @@
 syntax = "proto3";
+package protos;
 
+import "protos/hand_wrench_srv.proto";
 message LejuHandPoseEvent {
   int64 timestamp = 1; // The timestamp represented as an int64 value
 
@@ -40,4 +42,6 @@ message LejuHandPoseEvent {
 
   Joystick left_joystick = 5; // Data for the left joystick
   Joystick right_joystick = 6; // Data for the right joystick
+
+  optional ItemMassForceRequest item_mass_force_request = 7; // Data for hand wrench request
 }

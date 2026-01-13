@@ -53,28 +53,42 @@ class LoggerClient:
         except:
             pass
 
+    def _format_log(self, msg: str, level: str = "INFO"):
+        """格式化日志消息，获取模块和函数信息"""
+        frame = inspect.currentframe().f_back.f_back  # 跳过 _format_log 和 send_log 的帧，获取实际调用者
+        module = inspect.getmodule(frame)
+        module_name = module.__name__ if module else "unknown_module"
+        function_name = frame.f_code.co_name if frame else "unknown_function"
+        
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        
+        return {
+            "level": level,
+            "timestamp": timestamp,
+            "message": msg,
+            "module": module_name,
+            "function": function_name
+        }
+
+    def _print_log(self, log_data: dict):
+        print(f"[{log_data['timestamp']}] [{log_data['level']}] [{log_data['module']}.{log_data['function']}] {log_data['message']}")
+
     def send_log(self, msg: str, level: str = "INFO"):
+        # 如果连接失败，直接输出到终端
         if not self._loop or not self._ws:
-            print("[LoggerClient] 日志服务器未连接")
+            log_data = self._format_log(msg, level)
+            self._print_log(log_data)
             return
 
         async def _send():
             try:
-                frame = inspect.currentframe().f_back
-                module = inspect.getmodule(frame)
-                module_name = module.__name__ if module else "unknown_module"
-                function_name = frame.f_code.co_name if frame else "unknown_function"
-
-                log_data = {
-                    "level": level,
-                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-                    "message": msg,
-                    "module": module_name,
-                    "function": function_name
-                }
-
+                # 格式化日志数据
+                log_data = self._format_log(msg, level)
                 await self._ws.send(json.dumps(log_data, ensure_ascii=False))
             except Exception as e:
+                # 如果发送失败，也输出到终端
+                log_data = self._format_log(msg, level)
                 print(f"[LoggerClient] 发送日志失败: {e}")
+                self._print_log(log_data)
 
         asyncio.run_coroutine_threadsafe(_send(), self._loop)

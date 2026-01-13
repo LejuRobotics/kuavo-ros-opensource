@@ -90,11 +90,13 @@ class testEndEffectorConstraint : public ::testing::Test {
     ManipulatorModelType modelType = mobile_manipulator::loadManipulatorType(taskFile, "model_information.manipulatorModelType");
     // read the frame names
     std::string baseFrame, eeFrame;
+    int waistDof;
     std::vector<std::string> eeFrames;
     loadData::loadPtreeValue<std::string>(pt, baseFrame, "model_information.baseFrame", false);
     loadData::loadStdVector<std::string>(taskFile, "model_information.eeFrame", eeFrames, false);
+    loadData::loadPtreeValue<int>(pt, waistDof, "model_information.waistDof", false);
     // return model
-    return mobile_manipulator::createManipulatorModelInfo(pinocchioInterface, modelType, baseFrame, eeFrames);
+    return mobile_manipulator::createManipulatorModelInfo(pinocchioInterface, modelType, baseFrame, eeFrames, waistDof);
   }
 
   PinocchioInterface createMobileManipulatorPinocchioInterface() {

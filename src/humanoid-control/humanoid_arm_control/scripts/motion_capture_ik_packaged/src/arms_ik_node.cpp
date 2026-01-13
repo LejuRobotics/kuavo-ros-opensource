@@ -304,6 +304,12 @@ int main(int argc, char* argv[])
     if (nh.hasParam("/robot_version")) {
         int rb_version_int;
         nh.getParam("/robot_version", rb_version_int);
+
+        // Handle version 15 special case: use version 14 model
+        if (rb_version_int == 15) {
+            rb_version_int = 14;
+        }
+
         rb_version = RobotVersion::create(rb_version_int);
     }
     auto kuavo_assests_path = HighlyDynamic::getPackagePath("kuavo_assets");

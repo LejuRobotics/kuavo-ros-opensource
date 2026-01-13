@@ -1,0 +1,5 @@
+# 通用获取字符串列表服务，类似 std_srvs/Trigger
+---
+string[] data
+bool success
+string message

@@ -1,10 +1,17 @@
 <?xml version="1.0" ?>
 <launch>
+    <arg name="start_way" default="manual"/>
+    <param name="start_way" value="$(arg start_way)"/>
 
-    <node pkg="joy" type="joy_node" name="joy_node" output="screen" respawn="true">
+    <arg name="respawn" default="true"/>
+    <param name="respawn" value="$(arg respawn)"/>
+
+    <node pkg="joy" type="joy_node" name="joy_node" output="screen" respawn="$(arg respawn)" >
         <param name="dev" value="/dev/input/js0"/>
         <param name="autorepeat_rate" type="double" value="100.0"/>
         <param name="deadzone" type="double" value="0.18"/>
     </node>
+
+    <node pkg="joy" type="joy_customize_config.py" name="joy_customize_config" output="screen" respawn="$(arg respawn)" />
 
 </launch>

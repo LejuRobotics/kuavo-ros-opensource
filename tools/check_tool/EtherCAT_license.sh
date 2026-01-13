@@ -36,13 +36,14 @@ fi
 FILE="/home/lab/.config/lejuconfig/ec_master.key"
 # 检查文件是否存在
 if [ -f "$FILE" ]; then
-    echo "文件 $FILE 已存在。"
-    exit 1
+    echo "文件 $FILE 已存在，将覆盖写入新的license。"
 else
     # 如果文件不存在，创建文件
     touch "$FILE"
     echo "已创建文件 $FILE。"
 fi
 
+# 写入license到文件
 echo $1 > $FILE
+echo "已成功写入license: $1"
 

@@ -127,11 +127,12 @@ robot_control = RobotControlBlockly()
     - 备注：需将目标音频文件下载到 **/home/lab/.config/lejuconfig/music** 目录下  
 
 19. **机器人对准目标**  
-    - 函数：`robot_control.alignment_target(class_name, x, y, z)`
-    - 参数类型：string, float, float, float
+    - 函数：`robot_control.alignment_target(class_name, confidence, x, y, z)`
+    - 参数类型：string, float, float, float, float
     - 描述：使机器人对准指定类别到对象，并移动到目标前
     - 参数说明：（以图像中心建立二维坐标，向右为 x 的正方向，向下为 y 的正方向）
       - class_id 为 yolo 检测中需要检测的对象名称，和训练模型中的类别名称一致;
+      - confidence 为 yolo 检测中需要检测的概率阈值
       - x 为图像 x 方向的偏移值，物体中心的 x 小于该参数 -x 时，机器人左移，大于该参数 x 时，机器人右移
       - y 为图像 y 方向的偏移值，物体中心的 y 小于该参数 y 时，机器人前进，否则停止移动
       - z 为机器人上下蹲的高度控制
@@ -183,26 +184,33 @@ from kuavo_humanoid_sdk import RobotNavigationBlockly
     - 描述：令机器人按照所给的姿态进行初始化
     - 参数说明：(x, y, z, yaw, pitch, roll) 为目标姿态
 
-6. **通过任务点校准初始化**
+6. **前往指定坐标点并设置朝向**
+    - 函数：`robot_navigation.navigate_to_point_with_heading(x, y, heading)`
+    - 参数类型：float, float, float
+    - 描述：令机器人导航到指定的坐标点并设置朝向
+    - 参数说明：x为目标x坐标（米），y为目标y坐标（米），heading为目标朝向角度（度），0度为正东方向，90度为正北方向
+    - 返回值：bool，导航成功返回True，失败返回False
+
+7. **通过任务点校准初始化**
     - 函数：`robot_navigation.init_localization_by_task_point(task_name)`
     - 参数类型： string
     - 描述：令机器人按照所给的任务点的姿态进行初始化
     - 参数说明：task_name 为目标任务点,机器人应当处于该点且朝向一致.
 
-7. **加载地图**
+8. **加载地图**
     - 函数：`robot_navigation.load_map(map_name)`
     - 参数类型： string
     - 描述：令机器人加载所给的地图
     - 参数说明：map_name 为目标地图,机器人重新加载地图后,需要重新进行校准初始化.
 
-8. **获取所有地图**
+9. **获取所有地图**
     - 函数：`robot_navigation.get_all_maps()`
     - 参数类型： 无
     - 描述：获取机器人所拥有的地图
     - 参数说明：无
     - 返回说明：返回一个列表 maps[],包含所有的地图名.
 
-9. **获取当前地图**
+10. **获取当前地图**
     - 函数：`robot_navigation.get_current_map()`
     - 参数类型： 无
     - 描述：获取机器人当前所用的地图
@@ -463,3 +471,170 @@ side-pinch → 侧捏握持
    - 参数类型：l_gesture_name : str, r_gesture_name : str
    - 参数描述：令机器人的左手执行 l_gesture_name 手势，右手执行 r_gesture_name 手势。
    - 返回值：True: 控制成功并完成，False: 控制失败或超时.
+
+## 豆包相关工具类:
+
+如果使用此类下的函数,需要在生成的python代码中,main函数之前加入以下引入代码:
+
+```python
+from kuavo_humanoid_sdk import KuavoRobotLLM
+kuavo_llm = KuavoRobotLLM()
+```
+### 1. 导入动作到llm
+需求:将所有预制动作和编辑区内的自定义动作全部包含
+
+所有预制动作需要传入lejuconfig中,所有自定义动作按之前的逻辑传入项目中
+
+- 函数:`kuavo_llm.import_action_from_files(project_name:str)`
+- 作用:将action_files中所有动作注册到llm类中,使用文件名作为动作名称
+- args:
+  - project_name: str: 项目名称,用于指定知识库文件夹路径,由前端直接拼入
+- return:
+    None
+
+
+
+
+### 2. 导入自定义函数到llm
+需求:将自定义函数注册到llm的prompt中
+
+- 函数: `kuavo_llm.register_function(function_comment: str, function: str)`
+- 作用: 将自定义函数注册到llm中
+- args:
+  - function_comment: str: 函数的注释,需要拼接到prompt中供大模型理解函数作用
+  - function: str: 自定义函数的名称,将函数积木块拖入后使用引号进行包裹
+- return:
+  None
+
+例:
+```python
+kuavo_llm.register_function(
+    function_comment="自定义函数1,用于执行某些操作",
+    function='custom_func_1("abc",123)'
+)
+```
+
+**注意**:'action'参数的引号为单引号
+
+
+
+### 3. 增加实例样本:当用户说xxx时,llm应该yyy,并做zzz动作
+需求: 将函数实例注册给llm,使llm在返回时能正确执行zzz动作(返回做动作的要求)
+
+- 函数: `kuavo_llm.register_case(user_input: str, robot_response: str, action: str)
+- 作用: 将函数实例注册给llm,使llm在返回时能正确执行zzz动作(返回做动作的要求)
+- args:
+  - user_input: str: 用户输入的文本,作为触发条件
+  - robot_response: str: 机器人返回的文本,作为给llm的示例输出
+  - action: str: 自定义函数的名称,将函数积木块拖入后使用引号进行包裹,或传入包含动作名称的动作执行函数
+- return:
+  None
+
+示例1:
+```python
+kuavo_llm.register_case(
+    user_input="你好",
+    robot_response="你好,我是机器人",
+    action='custom_func_1("123")'
+)
+```
+示例2:
+```python
+kuavo_llm.register_case(
+    user_input="和我打个招呼",
+    robot_response="你好呀",
+    action='robot_control.execute_action_file("1.前伸双手")'
+)
+```
+
+示例3:
+```python
+kuavo_llm.register_case(
+    user_input="和我跳个舞",
+    robot_response="好的",
+    action='robot_control.execute_action_file("跳个舞","demo_project")'
+)
+```
+**注意**:'action'参数的引号为单引号
+
+
+### 4. 添加上传到知识库的接口
+需求:从知识库中读取对应文件,将文件内容拼接到prompt中
+
+知识库文件夹路径: (与.py文件同级):knowledge_base/
+
+- 函数:`kuavo_llm.add_file_to_prompt(file_name:str,project_name:str)`
+- 作用: 将知识库中文件内容拼接到prompt中
+- args:
+  - file_name: str: 文件名,需要包含文件扩展名(目前只接受.txt文件) 单个文件大小限制:300KB
+  - project_name: str: 项目名称,用于指定知识库文件夹路径,由前端直接拼入
+- return:
+  None
+
+注:如果拼接后超限,会报错到日志
+
+### 5. 触发asr(从麦克风接收输入后转为文本)
+- 函数:`kuavo_llm.trigger_asr()`
+- 作用: 触发asr,从麦克风接收输入后转为文本
+- args:无
+- return:
+  - str: 转换后的文本
+
+### 6. 与大模型展开会话
+需求:接收文字输入/接收语音输入后进行asr,将结果文本输出到大模型中,经过prompt组装,上下文拼接后传给大模型,大模型返回文本与函数调用信息(如果有)
+
+- 函数: `kuavo_llm.chat_with_llm(user_input: str)`
+- 作用: 与大模型展开会话
+- args:
+  - user_input: str: 用户输入的文本
+- return:
+  - 
+  ```
+  dict{
+        "success": 0, # 0:成功,1:失败
+        "text": "大模型返回的文本", # 大模型返回的文本
+        "intent": "意图", # 大模型返回的意图
+        "slot": ""|"动作函数名称"|"自定义动作名称"|"函数调用字符串",
+    }
+    ```
+
+
+### 7. 大模型返回并只播报语音
+需求: 大模型返回文本后,将文本转换为语音,并播放出来
+
+- 函数: `kuavo_llm.response_with_voice(llm_output: dict)`
+- 作用: 将文本转换为语音,并播放出来
+- args:
+  - llm_output: dict: 大模型返回的文本与函数调用信息
+- return:
+  - None
+
+
+
+### 8. 大模型返回播报语音并执行函数
+需求: 大模型返回文本后,将文本转换为语音,并播放出来,如果有函数调用,则执行函数
+
+- 函数: `response_with_voice_and_action(llm_output: dict)`
+- 作用: 将文本转换为语音,并播放出来,如果有函数调用,则执行函数
+- args:
+  - llm_output: dict: 大模型返回的文本与函数调用信息
+- return:
+  - None
+  
+注: 该功能需要在生成的python代码中通过字符串运行函数,所以需要类似aelos那样在生成的python代码中加入函数定义
+形如(在生成的python文件中,示例代码非完整代码):
+```python
+...
+def response_with_voice_and_action(llm_output: dict):
+    if not llm_output.get('success',False):
+        return
+    kuavo_llm.response_with_voice(llm_output)
+    if llm_output.get('slot','') == 'action':
+        eval(llm_output["function_call"])
+        ... # 具体的函数将在后续完成相应功能后提供最终版,此处只是示例
+...
+
+def main():
+    ...
+    response_with_voice_and_action(kuavo_llm.chat_with_llm())
+```

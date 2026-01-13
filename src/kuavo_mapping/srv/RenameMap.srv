@@ -1,0 +1,9 @@
+# 重命名地图服务请求
+string old_name      # 原地图名称
+string new_name      # 新地图名称
+---
+# 重命名地图服务响应
+bool success         # 是否成功重命名
+string message       # 状态消息
+string old_name      # 返回原地图名称
+string new_name      # 返回新地图名称

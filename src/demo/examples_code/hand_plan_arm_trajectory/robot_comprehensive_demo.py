@@ -17,6 +17,17 @@ class ComprehensiveRobotControl:
         # 初始化节点
         rospy.init_node('comprehensive_robot_control')
         
+        # 获取机器人版本
+        robot_version = self.get_version_parameter()
+        # 根据机器人版本 设定sensors_data_raw中手臂角度的索引
+        global joint_data_header, joint_data_footer  # 声明使用全局变量
+        if robot_version in [42, 45, 49]:
+            self.joint_data_header = 12
+            self.joint_data_footer = 26
+        elif robot_version == 52:
+            self.joint_data_header = 13
+            self.joint_data_footer = 27
+
         # 初始化状态变量
         self.joint_state = JointState()
         self.hand_state = robotHandPosition()
@@ -31,6 +42,28 @@ class ComprehensiveRobotControl:
         # 订阅者
         rospy.Subscriber('/bezier/arm_traj', JointTrajectory, self.traj_callback, queue_size=1, tcp_nodelay=True)
         rospy.Subscriber('/sensors_data_raw', sensorsData, self.sensors_data_callback, queue_size=1, tcp_nodelay=True)
+    
+    # 获取机器人版本
+    def get_version_parameter():
+        param_name = 'robot_version'
+        try:
+            # 获取参数值
+            param_value = rospy.get_param(param_name)
+            rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
+            # 适配1000xx版本号
+            valid_series = [42, 45, 49, 52]
+            MMMMN_MASK = 100000
+            series = param_value % MMMMN_MASK
+            if series not in valid_series:
+                rospy.logerr(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！程序退出。")
+                rospy.signal_shutdown("参数无效")
+            else:
+                rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
+            return param_value
+        except rospy.ROSException:
+            rospy.logerr(f"参数 {param_name} 不存在！程序退出。")
+            rospy.signal_shutdown("参数获取失败") 
+            return None
 
     def load_tact_file(self, file_path):
         """加载并解析.tact文件"""
@@ -64,7 +97,7 @@ class ComprehensiveRobotControl:
 
     def sensors_data_callback(self, msg):
         """处理传感器数据回调"""
-        self.current_arm_joint_state = msg.joint_data.joint_q[12:26]
+        self.current_arm_joint_state = msg.joint_data.joint_q[self.joint_data_header:self.joint_data_footer]
         self.current_arm_joint_state = [round(pos, 2) for pos in self.current_arm_joint_state]
         self.current_arm_joint_state.extend([0] * 14)
 

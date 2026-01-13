@@ -22,9 +22,10 @@ model_settings
   recompileLibrariesCppAd       false
   modelFolderCppAd              /var/ocs2/kuavo_v50 ; will save in <modelFolderCppAd>/md5_<urdf>/<centroidalModelType>/<dof>
 
-  modelDof                     26 ; total dof of the model, including the arms and legs
+  modelDof                     27 ; total dof of the model, including the arms and legs
   mpcArmsDof                   8 ; mpc dof of the arms, you can simplify the model by reducing this value(will automatically reduce the QR size)
   mpcLegsDof                   12 ; mpc dof of the legs
+  mpcWaistDof                  1; mpc dof of the waist
 
   jointNames
   {
@@ -40,20 +41,21 @@ model_settings
     [9]   "leg_r4_joint"
     [10]  "leg_r5_joint"
     [11]  "leg_r6_joint"
-    [12]  "zarm_l1_joint"
-    [13]  "zarm_l2_joint"
-    [14]  "zarm_l3_joint"
-    [15]  "zarm_l4_joint"
-    [16]  "zarm_l5_joint"
-    [17]  "zarm_l6_joint"
-    [18]  "zarm_l7_joint"
-    [19]  "zarm_r1_joint"
-    [20]  "zarm_r2_joint"
-    [21]  "zarm_r3_joint"
-    [22]  "zarm_r4_joint"
-    [23]  "zarm_r5_joint"
-    [24]  "zarm_r6_joint"
-    [25]  "zarm_r7_joint"
+    [12]  "waist_yaw_joint"
+    [13]  "zarm_l1_joint"
+    [14]  "zarm_l2_joint"
+    [15]  "zarm_l3_joint"
+    [16]  "zarm_l4_joint"
+    [17]  "zarm_l5_joint"
+    [18]  "zarm_l6_joint"
+    [19]  "zarm_l7_joint"
+    [20]  "zarm_r1_joint"
+    [21]  "zarm_r2_joint"
+    [22]  "zarm_r3_joint"
+    [23]  "zarm_r4_joint"
+    [24]  "zarm_r5_joint"
+    [25]  "zarm_r6_joint"
+    [26]  "zarm_r7_joint"
 
   };
 
@@ -71,20 +73,21 @@ jointNamesReal
     [9]   "leg_r4_joint"
     [10]  "leg_r5_joint"
     [11]  "leg_r6_joint"
-    [12]  "zarm_l1_joint"
-    [13]  "zarm_l2_joint"
-    [14]  "zarm_l3_joint"
-    [15]  "zarm_l4_joint"
-    [16]  "zarm_l5_joint"
-    [17]  "zarm_l6_joint"
-    [18]  "zarm_l7_joint"
-    [19]  "zarm_r1_joint"
-    [20]  "zarm_r2_joint"
-    [21]  "zarm_r3_joint"
-    [22]  "zarm_r4_joint"
-    [23]  "zarm_r5_joint"
-    [24]  "zarm_r6_joint"
-    [25]  "zarm_r7_joint"
+    [12]  "waist_yaw_joint"
+    [13]  "zarm_l1_joint"
+    [14]  "zarm_l2_joint"
+    [15]  "zarm_l3_joint"
+    [16]  "zarm_l4_joint"
+    [17]  "zarm_l5_joint"
+    [18]  "zarm_l6_joint"
+    [19]  "zarm_l7_joint"
+    [20]  "zarm_r1_joint"
+    [21]  "zarm_r2_joint"
+    [22]  "zarm_r3_joint"
+    [23]  "zarm_r4_joint"
+    [24]  "zarm_r5_joint"
+    [25]  "zarm_r6_joint"
+    [26]  "zarm_r7_joint"
   };
   
   contactNames6DoF
@@ -293,21 +296,24 @@ Q
   (22,22) 10.0     ; leg_r5_joint
   (23,23) 10.0     ; leg_r6_joint
 
+  ;; Waist Joint;;
+  (24,24) 200.0       ; waist_yaw
+
   ;; Arm Joint Positions: 
-  (24,24) 200.0      ; zarm_l1_joint
-  (25,25) 200.0      ; zarm_l2_joint
-  (26,26) 200.0      ; zarm_l3_joint
-  (27,27) 200.0      ; zarm_l4_joint
-  (28,28) 200.0      ; zarm_l5_joint
-  (29,29) 200.0      ; zarm_l6_joint
-  (30,30) 200.0      ; zarm_l7_joint
-  (31,31) 200.0      ; zarm_r1_joint
-  (32,32) 200.0      ; zarm_r2_joint
-  (33,33) 200.0      ; zarm_r3_joint
-  (34,34) 200.0      ; zarm_r4_joint
-  (35,35) 200.0      ; zarm_r5_joint
-  (36,36) 200.0      ; zarm_r6_joint
-  (37,37) 200.0      ; zarm_r7_joint
+  (25,25) 200.0      ; zarm_l1_joint
+  (26,26) 200.0      ; zarm_l2_joint
+  (27,27) 200.0      ; zarm_l3_joint
+  (28,28) 200.0      ; zarm_l4_joint
+  (29,29) 200.0      ; zarm_l5_joint
+  (30,30) 200.0      ; zarm_l6_joint
+  (31,31) 200.0      ; zarm_l7_joint
+  (32,32) 200.0      ; zarm_r1_joint
+  (33,33) 200.0      ; zarm_r2_joint
+  (34,34) 200.0      ; zarm_r3_joint
+  (35,35) 200.0      ; zarm_r4_joint
+  (36,36) 200.0      ; zarm_r5_joint
+  (37,37) 200.0      ; zarm_r6_joint
+  (38,38) 200.0      ; zarm_r7_joint
   
 }
 
@@ -348,21 +354,24 @@ P
   (22,22) 10.0     ; leg_r5_joint
   (23,23) 10.0     ; leg_r6_joint
 
+  ;; Waist Joint;;
+  (24,24) 200.0       ; waist_yaw
+
   ;; Arm Joint Positions: 
-  (24,24) 10.0     ; zarm_l1_joint
-  (25,25) 10.0     ; zarm_l2_joint
-  (26,26) 10.0     ; zarm_l3_joint
-  (27,27) 10.0     ; zarm_l4_joint
-  (28,28) 10.0     ; zarm_l5_joint
-  (29,29) 10.0     ; zarm_l6_joint
-  (30,30) 10.0     ; zarm_l7_joint
-  (31,31) 10.0     ; zarm_r1_joint
-  (32,32) 10.0     ; zarm_r2_joint
-  (33,33) 10.0     ; zarm_r3_joint
-  (34,34) 10.0     ; zarm_r4_joint
-  (35,35) 10.0     ; zarm_r5_joint
-  (36,36) 10.0     ; zarm_r6_joint
-  (37,37) 10.0     ; zarm_r7_joint
+  (25,25) 200.0      ; zarm_l1_joint
+  (26,26) 200.0      ; zarm_l2_joint
+  (27,27) 200.0      ; zarm_l3_joint
+  (28,28) 200.0      ; zarm_l4_joint
+  (29,29) 200.0      ; zarm_l5_joint
+  (30,30) 200.0      ; zarm_l6_joint
+  (31,31) 200.0      ; zarm_l7_joint
+  (32,32) 200.0      ; zarm_r1_joint
+  (33,33) 200.0      ; zarm_r2_joint
+  (34,34) 200.0      ; zarm_r3_joint
+  (35,35) 200.0      ; zarm_r4_joint
+  (36,36) 200.0      ; zarm_r5_joint
+  (37,37) 200.0      ; zarm_r6_joint
+  (38,38) 200.0      ; zarm_r7_joint
 }
 
 ; control weight matrix
@@ -438,21 +447,24 @@ R
   (58,58) 5000.0    ; y
   (59,59) 5000.0    ; z
 
+  ;; Waist Joint;;
+  (60,60) 2000.0       ; waist_yaw
+
   ;; arm Jovelocity: [1, 2, 3, 4, 5, 6, 7] (uses the Joint velocity) ;;
-  (60,60) 2000.0    ; zarm_l1_joint
-  (61,61) 2000.0    ; zarm_l2_joint
-  (62,62) 2000.0    ; zarm_l3_joint
-  (63,63) 2000.0    ; zarm_l4_joint
-  (64,64) 2000.0    ; zarm_l5_joint
-  (65,65) 2000.0    ; zarm_l6_joint
-  (66,66) 2000.0    ; zarm_l7_joint
-  (67,67) 2000.0    ; zarm_r1_joint
-  (68,68) 2000.0    ; zarm_r2_joint
-  (69,69) 2000.0    ; zarm_r3_joint
-  (70,70) 2000.0    ; zarm_r4_joint
-  (71,71) 2000.0    ; zarm_r5_joint
-  (72,72) 2000.0    ; zarm_r6_joint
-  (73,73) 2000.0    ; zarm_r7_joint
+  (61,61) 2000.0    ; zarm_l1_joint
+  (62,62) 2000.0    ; zarm_l2_joint
+  (63,63) 2000.0    ; zarm_l3_joint
+  (64,64) 2000.0    ; zarm_l4_joint
+  (65,65) 2000.0    ; zarm_l5_joint
+  (66,66) 2000.0    ; zarm_l6_joint
+  (67,67) 2000.0    ; zarm_l7_joint
+  (68,68) 2000.0    ; zarm_r1_joint
+  (69,69) 2000.0    ; zarm_r2_joint
+  (70,70) 2000.0    ; zarm_r3_joint
+  (71,71) 2000.0    ; zarm_r4_joint
+  (72,72) 2000.0    ; zarm_r5_joint
+  (73,73) 2000.0    ; zarm_r6_joint
+  (74,74) 2000.0    ; zarm_r7_joint
 }
 
 endEffector
@@ -542,14 +554,17 @@ torqueLimitsTask
    (4,0)  60.0     ; motor 5
    (5,0)  60.0     ; motor 6
 
+   ;; waist Limits
+   (6,0)  44.0     ; motor 1
+
    ;; arm Limits
-   (6,0)   60.0      ; motor 1
-   (7,0)   60.0      ; motor 2
-   (8,0)   60.0      ; motor 3
-   (9,0)   60.0      ; motor 4
-   (10,0)  60.0      ; motor 5
-   (11,0)  60.0      ; motor 6
-   (12,0)  60.0      ; motor 7
+   (7,0)   60.0      ; motor 1
+   (8,0)   60.0      ; motor 2
+   (9,0)   60.0      ; motor 3
+   (10,0)  60.0      ; motor 4
+   (11,0)  60.0      ; motor 5
+   (12,0)  60.0      ; motor 6
+   (13,0)  60.0      ; motor 7
 }
 
 Wbc_rdd_K_
@@ -686,6 +701,18 @@ armAccelTask
   }
 }
 
+waistAccelTask
+{
+  kp
+  {
+    (0,0)   80.00   ; waist_yaw
+  }
+  kd
+  {
+    (0,0)   10.0     ; waist_yaw
+  }
+}
+
 weight
 {
   stance
@@ -713,6 +740,11 @@ weight
 
 standUpJointAccelTask
 {
+  waist
+  {
+    kp    100
+    kd    10.2
+  }
   leg
   {
     kp    600

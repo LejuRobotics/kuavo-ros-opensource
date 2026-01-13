@@ -16,6 +16,8 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   geometry_msgs
   kuavo_msgs
+  noitom_hi5_hand_udp_python
+  leju_utils
 )
 find_package(BZip2 REQUIRED)
 
@@ -56,10 +58,10 @@ generate_messages(
 )
 
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES motion_capture_ik
- CATKIN_DEPENDS rospy std_msgs message_runtime
-#  DEPENDS system_lib
+  INCLUDE_DIRS include
+  # LIBRARIES motion_capture_ik_lib
+  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils
+  DEPENDS drake Eigen3
 )
 
 # Resolve for the package path at compile time.
@@ -93,6 +95,7 @@ endif()
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
 )
 
 add_subdirectory(test)
@@ -131,3 +134,25 @@ target_link_libraries(topic_logger
   ${Boost_LIBRARIES}
 )
 target_compile_options(topic_logger PRIVATE ${FLAGS})
+
+# ik_ros_uni_cpp_node
+add_executable(ik_ros_uni_cpp_node 
+  src/ik_ros_uni_cpp_node.cpp 
+  src/ArmControlBaseROS.cpp
+  src/Quest3IkIncrementalROS.cpp 
+  src/IncrementalControlModule.cpp
+  src/KeyFramesVisualizer.cpp
+  src/BaseIKSolver.cpp
+  src/TwoStageTorsoIKRec.cpp
+  src/OneStageIKEndEffector.cpp
+  src/Quest3ArmInfoTransformer.cpp
+  src/ArmLengthMeasurement.cpp
+  src/JoyStickHandler.cpp
+  src/Quest3Debugger.cpp
+  src/HandSmoother.cpp
+)
+add_dependencies(ik_ros_uni_cpp_node ${PROJECT_NAME}_generate_messages_cpp)
+target_include_directories(ik_ros_uni_cpp_node PRIVATE
+  ${PROJECT_BINARY_DIR}/include
+)
+target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)

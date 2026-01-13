@@ -13,9 +13,12 @@ def main():
     print("Total Joint DOF:", robot_info.joint_dof)
     print("Arm Joint DOF:", robot_info.arm_joint_dof)
     print("Arm Joint Names:", robot_info.arm_joint_names)
+    print("Waist Joint DOF:", robot_info.waist_joint_dof)
+    print("Waist Joint Names:", robot_info.waist_joint_names)
     print("Head Joint DOF:", robot_info.head_joint_dof)
     print("Head Joint Names:", robot_info.head_joint_names)
     print("End Effector Frame Names:", robot_info.eef_frame_names)
     print("Init Stand Height:", robot_info.init_stand_height)
+
 if __name__ == "__main__":
     main()

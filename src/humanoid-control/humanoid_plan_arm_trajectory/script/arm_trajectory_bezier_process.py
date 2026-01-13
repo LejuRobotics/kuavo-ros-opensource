@@ -7,12 +7,31 @@ import time
 import threading
 import numpy as np
 import os
+import sys
+import rospkg
+import subprocess
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
+    
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
+    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError) as e:
+    # 如果 rospkg 不可用或包未找到，回退到相对路径方式
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
-from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData
+from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
 from ocs2_msgs.msg import mpc_observation
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray
 from trajectory_msgs.msg import JointTrajectory
 from humanoid_plan_arm_trajectory.msg import RobotActionState
 from humanoid_plan_arm_trajectory.srv import ExecuteArmAction, ExecuteArmActionResponse  # Import new service type
@@ -25,6 +44,8 @@ ROBAN = "roban"
 class ArmTrajectoryBezierDemo:
     # START_FRAME_TIME = 0
     END_FRAME_TIME = 10000
+    KUAVO_TACT_LENGTH = 28
+    ROBAN_TACT_LENGTH = 23
 
     def __init__(self):
         self.START_FRAME_TIME = 0
@@ -32,18 +53,35 @@ class ArmTrajectoryBezierDemo:
         self.joint_state = JointState()
         self.hand_state = robotHandPosition()
         self.head_state = robotHeadMotionData()
-        self.current_arm_joint_state = []
+        self.waist_state = robotWaistControl()
         self.running_action = False
         self.arm_flag = False
         self._timer = None
         self.interrupt_flag  = False  
-        self.robot_version = rospy.get_param('/robot_version', 40)
-        self.robot_class = KUAVO if self.robot_version >= 40 else ROBAN
+        # 使用 RobotVersion 类创建版本号对象
+        robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
+        self.robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
+        self.robot_class = KUAVO if self.robot_version.major() >= 4 else ROBAN
+        self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
+        # KUAVO v50+ 有腰部关节
+        self.has_waist = (self.robot_version.major() == 5) if self.robot_class == KUAVO else False
         
         if self.robot_class == KUAVO:
-            self.INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            # 根据是否有腰部关节确定TACT长度
+            tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
+            if self.kuavo_control_scheme == "rl":
+                self.INIT_ARM_POS = [int(0)] * tact_length
+            else:
+                # 基础28个关节 + 可选的1个腰部关节
+                base_init = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                if self.has_waist:
+                    self.INIT_ARM_POS = base_init + [0]  # 添加腰部初始位置
+                else:
+                    self.INIT_ARM_POS = base_init
+            self.current_arm_joint_state = [0] * tact_length
         elif self.robot_class == ROBAN:
-            self.INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+            self.INIT_ARM_POS = [22.91831, 10, 0, -45.83662, 22.91831, -10, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]# task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+            self.current_arm_joint_state = [0] * self.ROBAN_TACT_LENGTH
 
         # rospy.spin()
 
@@ -61,19 +99,27 @@ class ArmTrajectoryBezierDemo:
                                                 tcp_nodelay=True)
         self.control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1,
                                                 tcp_nodelay=True)
+        self.control_waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=1, 
+                                                tcp_nodelay=True)
 
         self.sensor_data_sub = rospy.Subscriber('/sensors_data_raw', 
                                                 sensorsData,
                                                 self.sensors_data_raw_callback,   
                                                 queue_size=1, 
                                                 tcp_nodelay=True)
-         # 添加发布者
+
+        self.robot_hand_sub = rospy.Subscriber('/dexhand/state', 
+                                                JointState,
+                                                self.robot_hand_callback,   
+                                                queue_size=1, 
+                                                tcp_nodelay=True)
+
+        # 添加发布者
         self.robot_action_state_pub = rospy.Publisher('/robot_action_state', RobotActionState, queue_size=1)
 
         # Add service to execute arm actions
         self.execute_service = rospy.Service('/execute_arm_action', ExecuteArmAction, self.handle_execute_action)
         self._interrupt_service = rospy.Service('/interrupt_arm_traj', Trigger, self.handle_interrupt  )
-        self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
 
         # Store the file path base directory for actions
         # self.action_files_path = "/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_plan_arm_trajectory/script/action_files"
@@ -86,16 +132,48 @@ class ArmTrajectoryBezierDemo:
         rospy.spin()
 
 
-
     def sensors_data_raw_callback(self, msg):
+        """更新关节数据"""
+        self._last_joint_msg = msg
+
+        if not hasattr(self, "_last_hand_msg"):
+            dummy_hand = JointState()
+            dummy_hand.position = [0.0] * 12
+            self._last_hand_msg = dummy_hand
+
+        self._update_current_arm_joint_state(self._last_joint_msg, self._last_hand_msg)
+
+    def robot_hand_callback(self, msg):
+        """更新手部数据"""
+        left = msg.position[:6] if len(msg.position) >= 6 else [0] * 6
+        right = msg.position[6:12] if len(msg.position) >= 12 else [0] * 6
+
+        self._last_hand_msg = msg
+
+        if hasattr(self, "_last_joint_msg"):
+            self._update_current_arm_joint_state(self._last_joint_msg, self._last_hand_msg)
+
+    def _update_current_arm_joint_state(self, joint_msg, hand_msg):
+        """整合 joint_msg 和 hand_msg，更新 current_arm_joint_state"""
         if self.robot_class == KUAVO:
-            self.current_arm_joint_state = msg.joint_data.joint_q[12:26]
-            self.current_arm_joint_state = [round(pos, 2) for pos in self.current_arm_joint_state]
-            self.current_arm_joint_state.extend([0] * 14)
+            arm_part = list(joint_msg.joint_data.joint_q[12:26])
+            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+            head_part = list(joint_msg.joint_data.joint_q[-2:])
+            if self.has_waist:
+                # KUAVO v50+: 腰部关节在joint_q[12]位置
+                waist_part = [joint_msg.joint_data.joint_q[12]]
+                self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
+            else:
+                self.current_arm_joint_state = arm_part + hand_part + head_part
+
         elif self.robot_class == ROBAN:
-            self.current_arm_joint_state = msg.joint_data.joint_q[13:21]
-            self.current_arm_joint_state = [round(pos, 2) for pos in self.current_arm_joint_state]
-            self.current_arm_joint_state.extend([0] * 8)
+            arm_part = list(joint_msg.joint_data.joint_q[13:21])
+            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+            head_part = list(joint_msg.joint_data.joint_q[-2:])
+            waist_part = [joint_msg.joint_data.joint_q[0]]
+            self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
+
+        self.current_arm_joint_state = [round(v, 5) for v in self.current_arm_joint_state]
 
     def traj_callback(self, msg):
         if len(msg.points) == 0:
@@ -123,11 +201,16 @@ class ArmTrajectoryBezierDemo:
             self.joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
             self.joint_state.effort = [0] * 14
 
-            # 修复 hand 和 head 的数据类型
             self.hand_state.left_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[14:20]]  # 无符号整数
             self.hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
                                                 point.positions[20:26]]  # 无符号整数
-            self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:]]
+            
+            self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:28]]
+            if self.has_waist and len(point.positions) > 28:
+                # KUAVO v50+: 腰部关节在joint_q[12]位置
+                self.waist_state.header.stamp = rospy.Time.now()
+                self.waist_state.data.data = [math.degrees(pos) for pos in point.positions[28:29]]
+            
         elif self.robot_class == ROBAN:
             self.joint_state.name = [
                 "l_arm_pitch",
@@ -142,6 +225,17 @@ class ArmTrajectoryBezierDemo:
             self.joint_state.position = [math.degrees(pos) for pos in point.positions[:8]]
             self.joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:8]]
             self.joint_state.effort = [0] * 8
+
+            if len(point.positions) == self.ROBAN_TACT_LENGTH:
+
+                self.hand_state.left_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[8:14]]  # 无符号整数
+                self.hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
+                                                    point.positions[14:20]]  # 无符号整数
+                
+                self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
+
+                self.waist_state.header.stamp = rospy.Time.now()
+                self.waist_state.data.data = [math.degrees(pos) for pos in point.positions[22:]]
 
     def call_change_arm_ctrl_mode_service(self, arm_ctrl_mode):
         result = True
@@ -170,11 +264,200 @@ class ArmTrajectoryBezierDemo:
             rospy.logerr(f"Error reading file {file_path}: {e}")
             return None
 
+    def validate_tact_file(self, data):
+        """
+        验证tact文件的合法性，以抱拳.tact为标准
+        :param data: 加载的JSON数据
+        :return: (is_valid, error_message)
+        """
+        errors = []
+        
+        # 检查必需字段
+        required_fields = ["frames", "finish", "first", "robotType"]
+        for field in required_fields:
+            if field not in data:
+                return False, f"缺少必需字段: {field}"
+        
+        # 通过机器人版本判断机器人类型，确定servos数组的期望长度
+        if self.robot_class == ROBAN:
+            expected_servos_length = self.ROBAN_TACT_LENGTH
+            expected_attribute_keys = set(str(i) for i in range(1, self.ROBAN_TACT_LENGTH + 1))
+        else:  # KUAVO
+            tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
+            expected_servos_length = tact_length
+            expected_attribute_keys = set(str(i) for i in range(1, tact_length + 1))
+        
+        frames = data.get("frames", [])
+        if not frames:
+            return False, "frames数组为空"
+        
+        # 检查每个frame
+        for frame_idx, frame in enumerate(frames):
+            # 检查servos数组
+            if "servos" not in frame:
+                errors.append(f"frame[{frame_idx}]: 缺少servos字段")
+                continue
+            
+            servos = frame["servos"]
+            if not isinstance(servos, list):
+                errors.append(f"frame[{frame_idx}]: servos必须是数组")
+                continue
+            
+            # 检查servos数组长度
+            if len(servos) != expected_servos_length:
+                errors.append(f"frame[{frame_idx}]: servos数组长度应为{expected_servos_length}，实际为{len(servos)}")
+            
+            # 检查servos数组中的值（不能为null，必须是数字）
+            for servo_idx, servo_value in enumerate(servos):
+                if servo_value is None:
+                    errors.append(f"frame[{frame_idx}]: servos[{servo_idx}]不能为null")
+                elif not isinstance(servo_value, (int, float)):
+                    errors.append(f"frame[{frame_idx}]: servos[{servo_idx}]必须是数字，实际类型为{type(servo_value).__name__}")
+            
+            # 检查keyframe
+            if "keyframe" not in frame:
+                errors.append(f"frame[{frame_idx}]: 缺少keyframe字段")
+            else:
+                keyframe = frame["keyframe"]
+                if not isinstance(keyframe, (int, float)):
+                    errors.append(f"frame[{frame_idx}]: keyframe必须是数字")
+                elif keyframe < 0:
+                    errors.append(f"frame[{frame_idx}]: keyframe不能为负数")
+            
+            # 检查attribute
+            if "attribute" not in frame:
+                errors.append(f"frame[{frame_idx}]: 缺少attribute字段")
+                continue
+            
+            attribute = frame["attribute"]
+            if not isinstance(attribute, dict):
+                errors.append(f"frame[{frame_idx}]: attribute必须是对象-f")
+                continue
+            
+            # 检查attribute中的键
+            actual_keys = set(attribute.keys())
+            missing_keys = expected_attribute_keys - actual_keys
+            if missing_keys:
+                errors.append(f"frame[{frame_idx}]: attribute缺少键: {sorted(missing_keys)}")
+            
+            # 检查每个attribute项的结构
+            for key in sorted(expected_attribute_keys):
+                if key not in attribute:
+                    continue
+                
+                attr_item = attribute[key]
+                if not isinstance(attr_item, dict):
+                    errors.append(f"frame[{frame_idx}]: attribute['{key}']必须是对象")
+                    continue
+                
+                # 检查CP字段
+                if "CP" not in attr_item:
+                    errors.append(f"frame[{frame_idx}]: attribute['{key}']缺少CP字段")
+                else:
+                    CP = attr_item["CP"]
+                    if not isinstance(CP, list) or len(CP) != 2:
+                        errors.append(f"frame[{frame_idx}]: attribute['{key}'].CP必须是包含2个元素的数组")
+                    else:
+                        for cp_idx, cp_point in enumerate(CP):
+                            if not isinstance(cp_point, list) or len(cp_point) != 2:
+                                errors.append(f"frame[{frame_idx}]: attribute['{key}'].CP[{cp_idx}]必须是[x, y]格式的数组")
+                            else:
+                                if not all(isinstance(x, (int, float)) for x in cp_point):
+                                    errors.append(f"frame[{frame_idx}]: attribute['{key}'].CP[{cp_idx}]的元素必须是数字")
+                
+                # 检查CPType字段
+                if "CPType" not in attr_item:
+                    errors.append(f"frame[{frame_idx}]: attribute['{key}']缺少CPType字段")
+                else:
+                    CPType = attr_item["CPType"]
+                    if not isinstance(CPType, list) or len(CPType) != 2:
+                        errors.append(f"frame[{frame_idx}]: attribute['{key}'].CPType必须是包含2个元素的数组")
+                    else:
+                        if not all(isinstance(x, str) for x in CPType):
+                            errors.append(f"frame[{frame_idx}]: attribute['{key}'].CPType的元素必须是字符串")
+                        # 检查CPType的值（通常是"AUTO"）
+                        for cp_type_idx, cp_type_value in enumerate(CPType):
+                            if cp_type_value not in ["AUTO", "MANUAL"]:
+                                errors.append(f"frame[{frame_idx}]: attribute['{key}'].CPType[{cp_type_idx}]应为'AUTO'或'MANUAL'，实际为'{cp_type_value}'")
+        
+        # 检查finish和first字段
+        numeric_fields = ["finish", "first"]
+        for field in numeric_fields:
+            field_value = data.get(field)
+            if field_value is not None:
+                if not isinstance(field_value, (int, float)):
+                    errors.append(f"{field}字段必须是数字")
+                elif field_value < 0:
+                    errors.append(f"{field}字段不能为负数")
+        
+        if errors:
+            error_msg = "文件合法性检查失败:\n" + "\n".join(f"  - {err}" for err in errors)
+            return False, error_msg
+        
+        return True, None
+
+    def create_init_stand_frame(self, frames):
+        """
+        创建初始站立帧（0f处）
+        如果0f处没有动作帧，使用指定的初始站立姿态
+        :param frames: 现有的frames列表，用于获取servos长度和attribute结构
+        :return: 初始站立帧字典
+        """
+        # 根据机器人类型确定初始站立帧的servos值
+        if self.robot_class == KUAVO:
+            # KUAVO的初始站立帧值（前14个关节）
+            init_stand_servos = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0]
+            tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
+        else:  # ROBAN
+            # ROBAN的初始站立帧值（前8个关节），与抱拳.tact等标准动作文件保持一致
+            init_stand_servos = [22.6, 10, 0, -54.4, 22.6, -10, 0, -54.4]
+            tact_length = self.ROBAN_TACT_LENGTH
+        
+        # 如果frames不为空，使用第一个frame来确定servos长度和attribute结构
+        if frames and len(frames) > 0:
+            first_frame = frames[0]
+            expected_length = len(first_frame.get("servos", []))
+            # 使用第一个frame的attribute结构作为模板
+            template_attribute = first_frame.get("attribute", {})
+        else:
+            expected_length = tact_length
+            template_attribute = {}
+        
+        # 补全servos数组到期望长度
+        if len(init_stand_servos) < expected_length:
+            servos = init_stand_servos + [0] * (expected_length - len(init_stand_servos))
+        else:
+            servos = init_stand_servos[:expected_length]
+        
+        # 构造attribute，如果没有模板则创建默认结构
+        if template_attribute:
+            # 深拷贝模板attribute，保持与原始文件结构一致（包括是否有select字段）
+            import copy
+            attribute = copy.deepcopy(template_attribute)
+        else:
+            # 创建默认的attribute结构，与标准tact文件格式保持一致
+            attribute = {}
+            for i in range(1, expected_length + 1):
+                attribute[str(i)] = {
+                    "CP": [[0, 0], [0, 0]],  # 与标准tact文件格式一致
+                    "CPType": ["AUTO", "AUTO"]
+                    # 注意：不添加"select"字段，与第一个frame的格式保持一致
+                }
+        
+        # 创建初始站立帧
+        init_frame = {
+            "servos": servos,
+            "keyframe": 0,
+            "attribute": attribute
+        }
+
+        return init_frame
+
     def add_init_frame(self, frames):
         action_data = {}
 
         # rl 要在刚开始插入当前状态为初始值来平滑过渡，ocs2 不需要
-        if self.kuavo_control_scheme == "rl":
+        if self.kuavo_control_scheme == "rl" or self.kuavo_control_scheme == "multi":
             import copy
             for frame in frames:
                 frame["keyframe"] += 100
@@ -189,7 +472,11 @@ class ArmTrajectoryBezierDemo:
             frame0["keyframe"] = 0
             frames.insert(0, frame0)
 
-        end_key = 29 if self.robot_class == KUAVO else 24
+        # 计算结束键值：KUAVO根据是否有腰部关节调整
+        if self.robot_class == KUAVO:
+            end_key = (self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)) + 1
+        else:
+            end_key = self.ROBAN_TACT_LENGTH + 1
 
         for frame in frames:
             servos, keyframe, attribute = frame["servos"], frame["keyframe"], frame["attribute"]
@@ -210,9 +497,9 @@ class ArmTrajectoryBezierDemo:
                     CP = attribute[str(key)]["CP"]
                     left_CP, right_CP = CP
                     action_data[key].append([
-                        [round(keyframe / 100, 1), math.radians(value)],
-                        [round((keyframe + left_CP[0]) / 100, 1), math.radians(value + left_CP[1])],
-                        [round((keyframe + right_CP[0]) / 100, 1), math.radians(value + right_CP[1])],
+                        [round(keyframe / 100, 5), math.radians(value)],
+                        [round((keyframe + left_CP[0]) / 100, 5), math.radians(value + left_CP[1])],
+                        [round((keyframe + right_CP[0]) / 100, 5), math.radians(value + right_CP[1])],
                     ])
         return action_data
 
@@ -231,22 +518,24 @@ class ArmTrajectoryBezierDemo:
                 end_time = next_frame[0][0]
                 if not found_start and end_time >= self.START_FRAME_TIME:
                     found_start = True
-                    p0 = np.array([0, self.current_arm_joint_state[key - 15]])
+                    p0 = np.array([0, self.current_arm_joint_state[key - 1]])
                     p3 = np.array([next_frame[0][0] - self.x_shift, next_frame[0][1]])
 
-                    # Calculate control points for smooth transition
+                    # 计算控制点，但使用更保守的方法避免过度摆动
+                    # 使用较短的控制杆长度以减少过渡期间的运动幅度
                     curve_length = np.linalg.norm(p3 - p0)
                     p1 = p0 + curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the right
                     p2 = p3 - curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the left
 
-                    # Create new frame
+
+                    # 创建新帧
                     frame1 = [
                         p0.tolist(),
                         p0.tolist(),
                         p1.tolist()
                     ]
 
-                    # Modify next_frame's left control point
+                    # 修改下一帧的左控制点
                     next_frame[1] = p2.tolist()
 
                     filtered_frames.append(frame1)
@@ -256,9 +545,9 @@ class ArmTrajectoryBezierDemo:
                     if skip_next:
                         skip_next = False
                         continue
-                    end_point = [round(frame[0][0] - self.x_shift, 1), round(frame[0][1], 1)]
-                    left_control_point = [round(frame[1][0] - self.x_shift, 1), round(frame[1][1], 1)]
-                    right_control_point = [round(frame[2][0] - self.x_shift, 1), round(frame[2][1], 1)]
+                    end_point = [round(frame[0][0] - self.x_shift, 5), round(frame[0][1], 5)]
+                    left_control_point = [round(frame[1][0] - self.x_shift, 5), round(frame[1][1], 5)]
+                    right_control_point = [round(frame[2][0] - self.x_shift, 5), round(frame[2][1], 5)]
                     filtered_frames.append([end_point, left_control_point, right_control_point])
 
             filtered_action_data[key] = filtered_frames
@@ -272,19 +561,89 @@ class ArmTrajectoryBezierDemo:
         rospy.loginfo(f"Delaying action completion state for {delay} seconds...")
         self._timer = rospy.Timer(rospy.Duration(delay), self._on_timer_trigger, oneshot=True)
 
+    def reset_robot_state(self):
+        if self.kuavo_control_scheme == "rl":
+            self.rl_reset_robot_state()
+        else:
+            # 做完动作之后恢复自然摆臂状态，并且手、头、腰部关节归位
+            self.call_change_arm_ctrl_mode_service(1)
+            self.hand_state.left_hand_position = [0] * 6
+            self.hand_state.right_hand_position = [0] * 6
+            self.control_hand_pub.publish(self.hand_state)
+            self.head_state.joint_data = [0] * 2
+            self.control_head_pub.publish(self.head_state)
+            # 复位腰部（KUAVO v50+ 或 ROBAN）
+            if (self.robot_class == KUAVO and self.has_waist) or self.robot_class == ROBAN:
+                self.waist_state.header.stamp = rospy.Time.now()
+                self.waist_state.data.data = [0]
+                self.control_waist_pub.publish(self.waist_state)
+
+    def create_action_data(self, finish_time):
+        # 根据是否有腰部关节确定TACT长度
+        if self.robot_class == KUAVO:
+            tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
+        else:
+            tact_length = self.ROBAN_TACT_LENGTH
+        frames = [
+            {
+                "servos": [int(round(math.degrees(x))) for x in self.current_arm_joint_state],
+                "keyframe": 0,
+                "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(tact_length)}
+            },
+            {
+                "servos": self.INIT_ARM_POS,
+                "keyframe": finish_time * 100,
+                "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(tact_length)}
+            },
+        ]
+        return {"frames": frames}
+
+    def rl_reset_robot_state(self):
+        self.arm_flag = True
+        self.START_FRAME_TIME = 0
+        self.x_shift = self.START_FRAME_TIME  # 动态调整 x_shift
+        finish_time = 2
+        data = self.create_action_data(finish_time)
+
+        if self.kuavo_control_scheme == "rl":
+            finish_time += 1
+        self.END_FRAME_TIME = finish_time
+
+        action_data = self.add_init_frame(data["frames"])
+        filtered_data = self.filter_data(action_data)
+        bezier_request = self.create_bezier_request(filtered_data)
+
+        success = self.plan_arm_trajectory_bezier_curve_client(bezier_request)
+        if success:
+            rospy.loginfo("Arm trajectory planned successfully")
+            # 清除中断标志位，启动发布线程执行回归初始位的轨迹
+            self.interrupt_flag = False
+            threading.Thread(target=self.run).start()
+            # 在复位动作完成后，仅停止发布，不再触发再次复位
+            self._timer = rospy.Timer(
+                rospy.Duration(self.END_FRAME_TIME), self._on_reset_timer_trigger, oneshot=True
+            )
+            return ExecuteArmActionResponse(success=True, message="Action executed successfully")
+        else:
+            return ExecuteArmActionResponse(success=False, message="Failed to execute action")
+
     def _on_timer_trigger(self, event):
         self.running_action = False  # 结束 state=1 的发布
         self.publish_action_state(2)
         self.arm_flag = False
-        # 动作播放完成以后将动作模式归位
+        # 动作播放完成以后恢复机器人初始状态
         if self.arm_restore_flag:
-            self.call_change_arm_ctrl_mode_service(1)  # 做完动作之后恢复自然摆臂状态
-        # self.call_change_arm_ctrl_mode_service(1)
-        rospy.loginfo(f"After the action playback is complete, revert the action mode ")
+            self.reset_robot_state()
+        rospy.loginfo(f"After the action playback is complete, revert the robot initial state ")
 
     def stop_action(self):
         if self._timer:
             self._timer.shutdown()
+
+    def _on_reset_timer_trigger(self, event):
+        """复位动作结束后停止发布，避免递归复位。"""
+        self.arm_flag = False
+        rospy.loginfo("Reset trajectory finished. Stopping publishers.")
 
     def publish_running_action_state(self):
         """持续发布 state=1"""
@@ -315,12 +674,18 @@ class ArmTrajectoryBezierDemo:
             req.multi_joint_bezier_trajectory.append(msg)
         req.start_frame_time = self.START_FRAME_TIME
         req.end_frame_time = self.END_FRAME_TIME
-        req.joint_names = [
+        # 基础关节名称（14个手臂关节）
+        base_joint_names = [
             "l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch",
             "l_hand_yaw", "l_hand_pitch", "l_hand_roll",
             "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch",
             "r_hand_yaw", "r_hand_pitch", "r_hand_roll"
         ]
+        # KUAVO v50+: 添加腰部关节
+        if self.robot_class == KUAVO and self.has_waist:
+            req.joint_names = base_joint_names + ["waist_yaw_joint"]
+        else:
+            req.joint_names = base_joint_names
         return req
 
     def plan_arm_trajectory_bezier_curve_client(self, req):
@@ -334,6 +699,101 @@ class ArmTrajectoryBezierDemo:
             rospy.logerr(f"Service call failed: {e}")
             return False
 
+    def check_nodelet_manager_alive(self):
+        """检查 nodelet_manager 节点是否真正在线且可通信
+        
+        Returns:
+            bool: True 如果节点在线且可通信，False 否则
+        """
+        # 先快速检查：使用 get_num_connections 检查是否有订阅者
+        # 这是最快的检查方法，可以避免不必要的子进程调用
+        num_subscribers = self.kuavo_arm_traj_pub.get_num_connections()
+        if num_subscribers == 0:
+            rospy.logwarn("话题 /kuavo_arm_traj 没有订阅者")
+            return False
+        
+        # 有订阅者，进一步验证 nodelet_manager 节点是否真正可通信
+        # 方法1: 先检查节点是否在节点列表中
+        try:
+            node_result = subprocess.run(
+                ['rosnode', 'list'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=2
+            )
+            if node_result.returncode == 0:
+                node_list = node_result.stdout.decode('utf-8', errors='ignore')
+                # 检查 nodelet_manager 是否在节点列表中
+                if '/nodelet_manager' not in node_list:
+                    # 检查是否有包含 nodelet_manager 的节点名
+                    found_nodelet = False
+                    for line in node_list.split('\n'):
+                        if 'nodelet_manager' in line.strip():
+                            found_nodelet = True
+                            break
+                    if not found_nodelet:
+                        rospy.logwarn("nodelet_manager 节点不在节点列表中")
+                        return False
+            else:
+                # rosnode list 失败，继续尝试 ping
+                stderr_output = node_result.stderr.decode('utf-8', errors='ignore')
+                rospy.logwarn(f"rosnode list 命令失败: {stderr_output.strip()}")
+        except Exception as e:
+            rospy.logwarn(f"检查节点列表时出错: {e}，继续尝试 ping")
+        
+        # 方法2: 使用 rosnode ping 验证节点是否真正可通信（最可靠）
+        # 这会真正尝试与节点建立连接，即使节点在 master 中注册但已崩溃也会返回 False
+        # 注意：rosnode ping 即使失败也可能返回 0，需要检查输出内容
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                result = subprocess.run(
+                    ['rosnode', 'ping', '/nodelet_manager', '-c', '1'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,  # 将 stderr 合并到 stdout，因为错误信息可能在这里
+                    timeout=3,  # 增加超时时间，匹配 rosnode ping 的默认超时
+                    text=True  # 直接返回字符串而不是 bytes
+                )
+                
+                # 当 stderr=subprocess.STDOUT 时，所有输出都在 stdout 中
+                output = result.stdout or ""
+                
+                # 检查输出中是否包含错误信息
+                output_lower = output.lower()
+                has_error = 'error' in output_lower or 'connection refused' in output_lower or 'failed' in output_lower
+                has_success = 'xmlrpc reply from' in output_lower
+                
+                # rosnode ping 成功时会显示 "xmlrpc reply from" 或类似的成功信息
+                # 失败时会显示 "ERROR" 或 "connection refused"
+                if not has_error and (has_success or result.returncode == 0):
+                    # ping 成功，节点真正在线
+                    rospy.loginfo("nodelet_manager 节点正常运行")
+                    return True
+                else:
+                    # ping 失败，节点在 master 中注册但无法通信（可能已崩溃）
+                    error_msg = output.strip() if output.strip() else "未知错误"
+                    if attempt < max_retries - 1:
+                        # 不是最后一次尝试，稍等再试（可能是节点刚启动）
+                        rospy.logwarn(f"节点 nodelet_manager ping 失败（尝试 {attempt + 1}/{max_retries}），稍后重试: {error_msg}")
+                        time.sleep(0.5)
+                    else:
+                        # 最后一次尝试也失败
+                        rospy.logwarn(f"节点 nodelet_manager 无法通信（可能已崩溃）: {error_msg}")
+                        return False
+                        
+            except subprocess.TimeoutExpired:
+                if attempt < max_retries - 1:
+                    rospy.logwarn(f"检查 nodelet_manager 节点状态超时（尝试 {attempt + 1}/{max_retries}），稍后重试")
+                    time.sleep(0.5)
+                else:
+                    rospy.logwarn("检查 nodelet_manager 节点状态超时（最终失败）")
+                    return False
+            except Exception as e:
+                rospy.logwarn(f"检查 nodelet_manager 节点状态时出错: {e}")
+                return False
+        
+        return False
+
     def handle_interrupt(self, req):
         """处理中断请求的服务回调"""
         rospy.loginfo("[%s]  接收到机械臂中断指令", rospy.get_time())  
@@ -346,11 +806,11 @@ class ArmTrajectoryBezierDemo:
         # 发布动作完成状态
         self.publish_action_state(2)   
         
-        # 恢复默认控制模式 
-        self.call_change_arm_ctrl_mode_service(1)   
-
         # 停止等待动作的timer
         self.stop_action()
+
+        # 恢复机器人初始状态
+        self.reset_robot_state()
         
         # 返回标准Trigger响应 
         return TriggerResponse(
@@ -360,13 +820,63 @@ class ArmTrajectoryBezierDemo:
 
     def handle_execute_action(self, req):
         action_name = req.action_name
-        self.call_change_arm_ctrl_mode_service(2)
 
         file_path = f"{self.action_files_path}/{action_name}.tact"
         data = self.load_json_file(file_path)
         if not data:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=f"Action file {action_name} not found")
+
+        if not self.check_nodelet_manager_alive():
+            msg = "话题 /kuavo_arm_traj 的订阅者 nodelet_manager 节点无法通信或不存在。请检查 nodelet_manager 节点是否正常运行。"
+            rospy.logerr(msg)
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        robot_type_raw = data.get("robotType", None)
+        
+        # 验证文件合法性（以抱拳.tact为标准）
+        is_valid, validation_error = self.validate_tact_file(data)
+        if not is_valid:
+            rospy.logerr(f"Tact file validation failed: {validation_error}")
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=f"文件合法性检查失败: {validation_error}")
+        
+        if robot_type_raw is None:
+            msg = "Action file missing required field: robotType"
+            rospy.logerr(msg)
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
+        try:
+            tact_robot_version = int(robot_type_raw)
+        except (TypeError, ValueError):
+            msg = f"Invalid robotType in action file: {robot_type_raw}"
+            rospy.logerr(msg)
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        # 版本兼容关系映射
+        version_compat_map = {
+            41: [41],
+            42: [42],
+            45: [43, 45, 46, 48, 49],
+            11: [11, 13, 14, 15],
+            13: [11, 13, 14, 15],
+            14: [11, 13, 14, 15],
+            15: [11, 13, 14, 15],
+        }
+        allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
+        # 使用 version_number() 获取版本号数字进行比较
+        robot_version_number = self.robot_version.version_number()
+        if robot_version_number not in allowed_robot_versions:
+            msg = (
+                f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version_number} ({self.robot_version.version_name()})"
+            )
+            rospy.logerr(msg)
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        self.call_change_arm_ctrl_mode_service(2)
 
         # 获取初始帧时间
         self.arm_flag = True
@@ -376,11 +886,21 @@ class ArmTrajectoryBezierDemo:
 
         # 读取动作完成时间
         finish_time = data.get("finish", 0) * 0.01 # 转换为秒
-        if self.kuavo_control_scheme == "rl":
+        if self.kuavo_control_scheme == "rl" or self.kuavo_control_scheme == "multi":
             finish_time += 1.0
         self.END_FRAME_TIME = finish_time
 
-        action_data = self.add_init_frame(data["frames"])
+        # 检查0f处是否有动作帧，如果没有则添加初始站立帧
+        frames = data["frames"]
+        has_frame_at_0f = any(frame.get("keyframe", -1) == 0 for frame in frames)
+        
+        if not has_frame_at_0f:
+            # 创建初始站立帧
+            init_stand_frame = self.create_init_stand_frame(frames)
+            frames.insert(0, init_stand_frame)
+            rospy.loginfo("0f处没有动作帧，已添加初始站立帧")
+
+        action_data = self.add_init_frame(frames)
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
@@ -407,12 +927,16 @@ class ArmTrajectoryBezierDemo:
         # while not rospy.is_shutdown():
         while self.arm_flag and not self.interrupt_flag:
             try:
-                if len(self.joint_state.position) == 0:
-                    continue
-                # self.call_change_arm_ctrl_mode_service(2)
-                self.kuavo_arm_traj_pub.publish(self.joint_state)
-                self.control_hand_pub.publish(self.hand_state)
-                self.control_head_pub.publish(self.head_state)
+                if len(self.joint_state.position) != 0:
+                    self.kuavo_arm_traj_pub.publish(self.joint_state)
+                if len(self.hand_state.right_hand_position) != 0 or len(self.hand_state.left_hand_position) != 0:
+                    self.control_hand_pub.publish(self.hand_state)
+                if len(self.head_state.joint_data) != 0:
+                    self.control_head_pub.publish(self.head_state)
+                # 发布腰部数据（KUAVO v50+ 或 ROBAN）
+                if (self.robot_class == KUAVO and self.has_waist) or self.robot_class == ROBAN:
+                    if len(self.waist_state.data.data) != 0:
+                        self.control_waist_pub.publish(self.waist_state)
             except Exception as e:
                 rospy.logerr(f"Failed to publish arm trajectory: {e}")
             except KeyboardInterrupt:

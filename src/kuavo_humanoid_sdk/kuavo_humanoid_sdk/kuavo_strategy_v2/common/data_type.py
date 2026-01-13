@@ -146,6 +146,7 @@ class Pose:
         返回：
             float: L2范数。
         """
+        assert self.frame == other.frame, "计算l2_norm时候坐标系必须一致"
         return np.linalg.norm(self.pos - other.pos)
 
     def position_l2_norm_squared(self, other: "Pose"):
@@ -171,6 +172,8 @@ class Pose:
             float: 角度差。
         """
         # 确保四元数已归一化
+        assert self.frame == other.frame, "计算角度差时坐标系必须一致"
+
         quat1_norm = np.linalg.norm(self.quat)
         quat2_norm = np.linalg.norm(other.quat)
 

@@ -1,5 +1,6 @@
 #include "kuavo_common/common/kuavo_settings.h"
 #include "kuavo_common/common/utils.h"
+#include <fstream>
 
 namespace HighlyDynamic
 {
@@ -127,7 +128,7 @@ namespace HighlyDynamic
         getline(file, ecMasterType);
         file.close();
 
-        if (ecMasterType != "elmo" && ecMasterType != "youda1" && ecMasterType != "youda3" && ecMasterType != "youda" && ecMasterType != "leju") {
+        if (ecMasterType != "elmo" && ecMasterType != "youda" && ecMasterType != "lunbi1" && ecMasterType != "youda3" && ecMasterType != "youda" && ecMasterType != "leju") {
             std::cerr << "\033[33mwarning: ecmaster_type :" << ecMasterType 
                   << " error, 使用默认值 'elmo' 驱动器类型\033[0m" << std::endl;
             return "elmo"; 
@@ -158,6 +159,29 @@ namespace HighlyDynamic
         return imuType;
     }
 
+    CanbusWiringType HardwareSettings::getCanbusWiringType(RobotVersion rb_version) {
+
+        std::string filePath = getUserHomeDirectory() + "/.config/lejuconfig/CanbusWiringType.ini";
+        std::ifstream file(filePath);
+        std::string wiringType;
+
+        if (!file.is_open()) {
+            std::cerr << "\033[33mwarning: " << filePath << " 文件不存在, 未指定canbus接线方式, 使用默认值 'single_bus'\033[0m" << std::endl;
+            return CanbusWiringType::UNKNOWN;
+        }
+
+        getline(file, wiringType);
+        file.close();
+
+        if (wiringType != "single_bus" && wiringType != "dual_bus") {
+            std::cerr << "\033[33mwarning: canbus_wiring_type :" << wiringType
+                  << " error, 使用默认值 'single_bus'\033[0m" << std::endl;
+            return CanbusWiringType::SINGLE_BUS;
+        }
+
+        return wiringType == "single_bus" ? CanbusWiringType::SINGLE_BUS : CanbusWiringType::DUAL_BUS;
+    }
+
     void KuavoSettings::loadHardwareSettings(JSONConfigReader &robot_config)
     {
         std::map<std::string, motor_config>
@@ -174,13 +198,15 @@ namespace HighlyDynamic
                 {"ruiwoPA43", {BIT_17_10, CK_MC, PA43_C2T, RUIWO}},
                 {"PA100_18", {BIT_17_18, PA100_MC, PA100_18_C2T, EC_MASTER}},
                 {"PA100_20", {BIT_17_20, PA100_MC, PA100_20_C2T, EC_MASTER}},
+                {"PA115", {BIT_17_120, PA115_MC, PA115_C2T, EC_MASTER}},
                 {"PA4310_25", {BIT_17_25, PA4310_25_MC, PA4310_25_C2T, EC_MASTER}},
                 {"PA60", {BIT_17_36, PA100_MC, PA60_C2T, EC_MASTER}},
                 {"PA72_36", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
                 {"PA72_36_L", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
                 {"PA72_36_R", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
                 {"PA76_25", {BIT_17_25, PA76_25_MC, PA76_25_C2T, EC_MASTER}},
-                };
+                {"PA76_18", {BIT_17_18, PA76_18_MC, PA76_18_C2T, EC_MASTER}},
+                {"PA105_18", {BIT_17_18, PA105_18_MC, PA105_18_C2T, EC_MASTER}}};
         hardware_settings.num_joints = robot_config.getValue<uint8_t>("NUM_JOINT");
         hardware_settings.num_arm_joints = robot_config.getValue<uint8_t>("NUM_ARM_JOINT");
         hardware_settings.num_head_joints = robot_config.getValue<uint8_t>("NUM_HEAD_JOINT");

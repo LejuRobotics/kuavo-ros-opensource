@@ -1,0 +1,40 @@
+hand_wrench:
+  book:
+    description: 书本 - 1.0kg
+    itemMass: 1.0
+    lforceX: 0.0
+    lforceY: 0.0
+    lforceZ: -9.8
+  bottle:
+    default: false
+    description: 'Test case: bottle'
+    itemMass: 0.599999
+    lforceX: 0.0
+    lforceY: 0.0
+    lforceZ: -4.9
+  box:
+    description: 盒子 - 2.0kg
+    itemMass: 2.0
+    lforceX: 0.0
+    lforceY: 0.0
+    lforceZ: -19.6
+  cup:
+    description: 杯子 - 0.2kg
+    itemMass: 0.2
+    lforceX: 0.0
+    lforceY: 0.0
+    lforceZ: -1.96
+  default:
+    default: true
+    description: 默认配置 - 无物品
+    itemMass: 0.0
+    lforceX: 0.0
+    lforceY: 0.0
+    lforceZ: 0.0
+  test:
+    default: false
+    description: 'Test case: test'
+    itemMass: 0.599999
+    lforceX: 0.0
+    lforceY: 0.0
+    lforceZ: -4.9

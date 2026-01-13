@@ -1,0 +1,35 @@
+// 机器人状态协议: Robot send to VR
+syntax = "proto3";
+package protos;
+
+import "protos/hand_wrench_srv.proto";
+
+// 头文件，包含时间戳和消息ID
+message Header {
+  // 时间戳 (纳秒)
+  int64 timestamp = 1;
+  // 消息ID
+  int64 id = 2;
+}
+
+message EndEffectorState {
+  // none: 0
+  // lejuclaw: 夹爪 ==> X2
+  // qiangnao, revo2, qiangnao_touch: 灵巧手: ==> X12
+  repeated double position = 1;
+  repeated double velocity = 2;
+  repeated double effort = 3;
+}
+
+message JointState {
+  repeated double position = 1;
+  repeated double velocity = 2;
+  repeated double torque = 3;
+}
+
+message RobotState {
+  Header header = 1;
+  EndEffectorState ee_state = 2;
+  JointState joint_state = 3;
+  ItemMassForceResponse item_mass_force_response = 4;
+}

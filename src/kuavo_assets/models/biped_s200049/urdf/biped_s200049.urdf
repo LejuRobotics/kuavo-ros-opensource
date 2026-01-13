@@ -26,7 +26,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="dummy_to_base_link" type="floating">
+  <joint name="dummy_to_base_link" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="dummy_link" />
     <child link="base_link" />

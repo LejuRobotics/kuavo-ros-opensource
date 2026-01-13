@@ -1,0 +1,12 @@
+# 腿部IK服务请求消息
+bool with_chassis                    # 是否包含底盘信息
+int8 control_type                   # 控制类型：0-底盘优先，1-腰部优先
+float64[3] chassis_info             # 底盘信息 [x, y, yaw]
+float64[4] q_lb                     # 腿部关节角度 [knee, leg, waist_pitch, waist_yaw]
+float64[7] base_link                # 目标base_link位姿 [x, y, z, qw, qx, qy, qz]
+
+---
+# 腿部IK服务响应消息
+bool success                        # 求解是否成功
+float64[4] lb_leg                  # 腿部关节角度 [knee, leg, waist_pitch, waist_yaw]
+float64 time_cost                   # 计算耗时（毫秒） 

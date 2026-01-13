@@ -7,6 +7,13 @@
 #include <XmlRpcValue.h>
 #include <signal.h>
 #include <thread>
+#include <nav_msgs/Odometry.h>
+#include <tf/transform_broadcaster.h>
+#include <geometry_msgs/Twist.h>
+#include <kuavo_msgs/sensorsData.h>
+#include <kuavo_msgs/imuData.h>
+#include <kuavo_msgs/jointData.h>
+#include <kuavo_msgs/jointCmd.h>
 
 // 灵巧手关节名称定义
 static const std::vector<std::string> DEXHAND_JOINT_NAMES = {
@@ -129,7 +136,21 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
     nh_ = new ros::NodeHandle();
     
     stop_sub_ = nh_->subscribe("/stop_robot", 1, &GazeboShmInterface::stopCallback, this);
+    cmd_vel_sub_ = nh_->subscribe("/move_base/base_cmd_vel", 10, &GazeboShmInterface::cmdVelCallback, this);
     sim_start_srv_ = nh_->advertiseService("sim_start", &GazeboShmInterface::simStartCallback, this);
+    
+    // 初始化里程计发布器
+    odom_pub_ = nh_->advertise<nav_msgs::Odometry>("/odom", 50);
+    last_odom_time_ = ros::Time::now();
+    
+    // 初始化传感器数据发布器（从共享内存）
+    sensors_data_pub_ = nh_->advertise<kuavo_msgs::sensorsData>("/sensors_data_raw_shm", 10);
+    
+    // 初始化关节命令发布器（从共享内存）
+    joint_cmd_pub_ = nh_->advertise<kuavo_msgs::jointCmd>("/joint_cmd_shm", 10);
+    
+    // 初始化cmd_vel
+    cmd_vel_chassis_ = ignition::math::Vector3d::Zero;
 
     // 注册信号处理器
     signal(SIGTERM, [](int sig) {
@@ -170,6 +191,10 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
             dt = 1.0 / freq;
         }
     }
+    if(nh_->hasParam("/robot_version")) {
+        nh_->getParam("/robot_version", robotVersion_);
+    }
+    std::cout << "[GazeboShmInterface] robotVersion_: " << robotVersion_ << std::endl;
     
     // 设置Gazebo的更新频率
     auto physics = model_->GetWorld()->Physics();
@@ -186,10 +211,7 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
     }
     std::cout << "Shared memory initialized successfully" << std::endl;
 
-    // 等待并加载参数
-    waitForParams();
-
-    // 解析配置
+    // 先解析配置（必须先解析，才能填充 joints_ 等成员变量）
     if (!ParseImu(_sdf)) {
         gzerr << "Failed to parse IMU configuration" << std::endl;
         return;
@@ -200,12 +222,18 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
         gzerr << "Failed to parse joints configuration" << std::endl;
         return;
     }
-    std::cout << "Joints configuration parsed successfully" << std::endl;
-
+    std::cout << "Joints configuration parsed successfully, total joints: " << joints_.size() << std::endl;
+    
     if (!ParseContacts(_sdf)) {
         gzerr << "Failed to parse contacts configuration" << std::endl;
         return;
     }
+
+    // 等待并加载参数
+    waitForParams();
+    
+    // 设置初始状态（必须在 ParseJoints 之后调用，此时 joints_ 已填充）
+    setInitialState();
 
     // 获取接触管理器
     contact_manager_ = model_->GetWorld()->Physics()->GetContactManager();
@@ -270,21 +298,20 @@ void GazeboShmInterface::waitForParams()
                 }
             }
         } catch (const ros::Exception& e) {
-            std::cerr << "Exception: " << e.what() << std::endl;
+            std::cerr << "[GazeboShmInterface] Exception: " << e.what() << std::endl;
         } catch (const std::exception& e) {
-            std::cerr << "Exception: " << e.what() << std::endl;
+            std::cerr << "[GazeboShmInterface] Exception: " << e.what() << std::endl;
         }
         
         retry_count++;
         std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
     
-    if (!params_loaded_) {
+    if (!params_loaded_) 
+    {
         std::cerr << "Cannot load initial state: parameters not loaded" << std::endl;
         exit(1);
-    }else
-    {
-
+    }
 
         // 获取腰部自由度
         int waist_num = 0;
@@ -292,27 +319,27 @@ void GazeboShmInterface::waitForParams()
         std::cout << "GazeboShmInterface get waist_num: " << waist_num << std::endl;
         if (waist_num > 0) {
             for (int i = 0; i < waist_num; i++) {
-                robot_init_state_param_.insert(robot_init_state_param_.begin() + 7, 0.0);
+                robot_init_state_param_.insert(robot_init_state_param_.begin() + 7+12, 0.0);
             }
         }
 
-        // 打印参数值用于调试
-        std::cout << "robot_init_state_param: ";
-        for (size_t i = 0; i < robot_init_state_param_.size(); ++i) {
-            std::cout << robot_init_state_param_[i] << " ";
-        }
-        std::cout << std::endl;
+    // 打印参数值用于调试
+    std::cout << "robot_init_state_param: ";
+    for (size_t i = 0; i < robot_init_state_param_.size(); ++i) {
+        std::cout << robot_init_state_param_[i] << " ";
     }
+    std::cout << std::endl;
 }
 
 void GazeboShmInterface::setInitialState()
 {
-    if (!params_loaded_) {
+    if (!params_loaded_) 
+    {
         std::cerr << "Cannot set initial state: parameters not loaded" << std::endl;
         return;
     }
     std::cout << "[GazeboShmInterface] setInitialState: " << robot_init_state_param_.size() << std::endl;
-
+    
     // 自动暂停机制
     auto world = model_->GetWorld();
     bool was_paused = world->IsPaused();
@@ -325,7 +352,7 @@ void GazeboShmInterface::setInitialState()
     if (robot_init_state_param_.size() >= 7) {
         std::vector<double> base_pose(robot_init_state_param_.begin(), robot_init_state_param_.begin() + 7);
         ignition::math::Pose3d new_pose;
-        new_pose.Pos().Set(base_pose[0], base_pose[1], base_pose[2]);
+        new_pose.Pos().Set(base_pose[0], base_pose[1], base_pose[2] + 0.01);// 站立需要离地一点避免碰撞
         new_pose.Rot().Set(base_pose[3], base_pose[4], base_pose[5], base_pose[6]);  // w,x,y,z
         
         model_->SetWorldPose(new_pose);
@@ -335,6 +362,7 @@ void GazeboShmInterface::setInitialState()
                   << "rot[" << base_pose[3] << "," << base_pose[4] << "," << base_pose[5] << "," << base_pose[6] << "]" << std::endl;
     }
 
+    std::cout << "joints size: " << joints_.size() << std::endl;
     // 设置关节位置
     if (robot_init_state_param_.size() > 7) {
         std::vector<double> joint_positions(robot_init_state_param_.begin() + 7, robot_init_state_param_.end());
@@ -430,37 +458,79 @@ void GazeboShmInterface::setModelState(const std::vector<double>& pose)
 
 void GazeboShmInterface::OnUpdate(const common::UpdateInfo& _info)
 {
-    static bool first_update = true;
-    if (first_update) {
-        // 在第一次更新时设置初始状态
-        setInitialState();
-        first_update = false;
+    // 等待仿真启动信号
+    if (!sim_start_ && ros::ok()) {
+        ROS_WARN_THROTTLE(1.0, "[GazeboShmInterface] Simulation start signal not received yet");
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        updateSensorsData(_info);
+        return;  // 仿真未启动，跳过本次更新
     }
 
+    // 发布里程计数据
+    publishOdometry();
+    
     // 更新IMU数据
-    if (imu_link_) {
-        auto pose = imu_link_->WorldPose();
-        auto rot = pose.Rot();
-        
-        sensors_data_.imu_data.orientation[0] = rot.X();
-        sensors_data_.imu_data.orientation[1] = rot.Y();
-        sensors_data_.imu_data.orientation[2] = rot.Z();
-        sensors_data_.imu_data.orientation[3] = rot.W();
-
-        auto ang_vel = imu_link_->RelativeAngularVel();
-        sensors_data_.imu_data.angular_velocity[0] = ang_vel.X();
-        sensors_data_.imu_data.angular_velocity[1] = ang_vel.Y();
-        sensors_data_.imu_data.angular_velocity[2] = ang_vel.Z();
-
-        ignition::math::Vector3d gravity = { 0., 0., -9.81 };
-        ignition::math::Vector3d accel = imu_link_->RelativeLinearAccel() - pose.Rot().RotateVectorReverse(gravity);
-        sensors_data_.imu_data.linear_acceleration[0] = accel.X();
-        sensors_data_.imu_data.linear_acceleration[1] = accel.Y();
-        sensors_data_.imu_data.linear_acceleration[2] = accel.Z();
+    if (!imu_link_) 
+    {
+        ROS_WARN_THROTTLE(1.0, "[GazeboShmInterface] IMU link not found");
+        return;
     }
+
+    //更新共享内存
+    updateSensorsData(_info);
+
+    //将shm数据发布出去
+    publishSensorsData();
+
+    // 更新轮子控制（基于cmd_vel）
+    updateWheelControl();
+    
+    // 直接使用同步读取接口读取命令
+    gazebo_shm::JointCommand cmd;
+    auto bIsGetJointCmd = shm_manager_->readJointCommandSync(cmd, 100.0); // 100ms超时，快速检查是否有新命令
+    if (!bIsGetJointCmd) {
+        std::cout << "[GazeboShmInterface] Failed to get joint command from shared memory" << std::endl;
+        return;
+    }
+
+    // 应用新的关节命令
+    for (size_t i = 0; i < joints_.size() && i < cmd.num_joints; ++i) 
+    {
+        double effort = cmd.tau[i];
+        double q = cmd.joint_q[i];
+        joints_[i]->SetForce(0, effort);
+        // joints_[i]->SetPosition(0, q, true);
+    }
+    
+    // 发布消息
+    publishJointCmd(cmd);
+}
+
+void GazeboShmInterface::updateSensorsData(const common::UpdateInfo& _info)
+{
+    auto pose = imu_link_->WorldPose();
+    auto rot = pose.Rot();
+    
+    sensors_data_.imu_data.orientation[0] = rot.X();
+    sensors_data_.imu_data.orientation[1] = rot.Y();
+    sensors_data_.imu_data.orientation[2] = rot.Z();
+    sensors_data_.imu_data.orientation[3] = rot.W();
+
+    auto ang_vel = imu_link_->RelativeAngularVel();
+    sensors_data_.imu_data.angular_velocity[0] = ang_vel.X();
+    sensors_data_.imu_data.angular_velocity[1] = ang_vel.Y();
+    sensors_data_.imu_data.angular_velocity[2] = ang_vel.Z();
+
+    ignition::math::Vector3d gravity = { 0., 0., -9.81 };
+    ignition::math::Vector3d accel = imu_link_->RelativeLinearAccel() - pose.Rot().RotateVectorReverse(gravity);
+    sensors_data_.imu_data.linear_acceleration[0] = accel.X();
+    sensors_data_.imu_data.linear_acceleration[1] = accel.Y();
+    sensors_data_.imu_data.linear_acceleration[2] = accel.Z();
 
     // 更新关节数据
     sensors_data_.num_joints = joints_.size();
+
+    // 只更新实际使用的关节数据
     for (size_t i = 0; i < joints_.size(); ++i) {
         sensors_data_.joint_data[i].position = joints_[i]->Position(0);
         sensors_data_.joint_data[i].velocity = joints_[i]->GetVelocity(0);
@@ -477,20 +547,14 @@ void GazeboShmInterface::OnUpdate(const common::UpdateInfo& _info)
     // 更新仿真器时间
     sensors_data_.sensor_time = _info.simTime.Double();
     
+    // 设置更新标志（在写入前设置，确保 memcpy 时也是 true）
+    sensors_data_.is_updated = true;
+    
     // 写入共享内存
-    shm_manager_->writeSensorsData(sensors_data_);
-
-    // 应用关节命令
-
-    // 直接使用同步读取接口读取命令
-    gazebo_shm::JointCommand cmd;
-    if (shm_manager_->readJointCommandSync(cmd, 100.0)) {  // 100ms超时，快速检查是否有新命令
-        // 应用新的关节命令
-        for (size_t i = 0; i < joints_.size() && i < cmd.num_joints; ++i) {
-            double effort = cmd.tau[i];
-     
-            joints_[i]->SetForce(0, effort);
-        }
+    auto success = shm_manager_->writeSensorsData(sensors_data_);
+    if (!success) 
+    {
+        std::cerr << "[GazeboShmInterface] Failed to write sensors data to shared memory" << std::endl;
     }
 
     //控制灵巧手
@@ -502,11 +566,6 @@ void GazeboShmInterface::OnUpdate(const common::UpdateInfo& _info)
             joint->SetPosition(0, 0.0);
             }
         }
-    }
-
-    while (!sim_start_ && ros::ok()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        std::cout << "[GazeboShmInterface] Waiting for simulation to start..." << std::endl;
     }
 }
 
@@ -571,7 +630,38 @@ bool GazeboShmInterface::ParseJoints(const sdf::ElementPtr& _sdf)
         }
         joints_.push_back(joint);
         joint_names_.push_back(joint_name);
+        std::cout << "Parsed joint: " << joint_name << std::endl;
     }
+    std::cout << "Total joints parsed: " << joints_.size() << std::endl;
+    
+    // 识别轮子关节（用于底盘速度控制）
+    std::vector<std::string> wheel_yaw_names = {
+        "LF_wheel_yaw_joint", "RF_wheel_yaw_joint", 
+        "LB_wheel_yaw_joint", "RB_wheel_yaw_joint"
+    };
+    std::vector<std::string> wheel_pitch_names = {
+        "LF_wheel_pitch_joint", "RF_wheel_pitch_joint", 
+        "LB_wheel_pitch_joint", "RB_wheel_pitch_joint"
+    };
+    
+    for (const auto& name : wheel_yaw_names) {
+        auto joint = model_->GetJoint(name);
+        if (joint) {
+            wheel_yaw_joints_.push_back(joint);
+            std::cout << "Found wheel yaw joint: " << name << std::endl;
+        }
+    }
+    
+    for (const auto& name : wheel_pitch_names) {
+        auto joint = model_->GetJoint(name);
+        if (joint) {
+            wheel_pitch_joints_.push_back(joint);
+            std::cout << "Found wheel pitch joint: " << name << std::endl;
+        }
+    }
+    
+    std::cout << "Wheel yaw joints: " << wheel_yaw_joints_.size() << std::endl;
+    std::cout << "Wheel pitch joints: " << wheel_pitch_joints_.size() << std::endl;
 
     return true;
 }
@@ -636,6 +726,191 @@ void GazeboShmInterface::cleanupAndExit()
     // 方法5: 强制退出当前进程
     std::cout << "Force exiting current process..." << std::endl;
     exit(0);
+}
+
+void GazeboShmInterface::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
+{
+    std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
+    cmd_vel_chassis_.X() = msg->linear.x;   // 线速度 x
+    cmd_vel_chassis_.Y() = msg->linear.y;   // 线速度 y
+    cmd_vel_chassis_.Z() = msg->angular.z;  // 角速度 z
+}
+
+double GazeboShmInterface::velocityPidControl(physics::JointPtr joint, double target_vel)
+{
+    double cur_vel = joint->GetVelocity(0);
+    double error = target_vel - cur_vel;
+    double torque = 120.0 * error;  // 使用与MuJoCo相同的增益
+    return torque;
+}
+
+void GazeboShmInterface::updateWheelControl()
+{
+    // 检查是否有轮子关节
+    if (wheel_yaw_joints_.size() != 4 || wheel_pitch_joints_.size() != 4) {
+        return;
+    }
+    
+    std::lock_guard<std::mutex> lock(cmd_vel_mutex_);
+    
+    // 底盘参数（与MuJoCo保持一致）
+    double wheel_radius = 0.075;     // 轮子半径
+    double robot_x_dis = 0.253;     // 机器人中心到轮子的x距离
+    double robot_y_dis = 0.1785;    // 机器人中心到轮子的y距离
+
+    if(robotVersion_ == 61)
+    {
+        wheel_radius = 0.13035;
+        robot_x_dis = 0.232489;
+        robot_y_dis = 0.232489;
+    }
+    
+    // 四个轮子的位置（相对于底盘中心）
+    std::vector<ignition::math::Vector2d> wheel_positions = {
+        ignition::math::Vector2d( robot_x_dis,  robot_y_dis),  // 左前轮 (LF)
+        ignition::math::Vector2d( robot_x_dis, -robot_y_dis),  // 右前轮 (RF)
+        ignition::math::Vector2d(-robot_x_dis,  robot_y_dis),  // 左后轮 (LB)
+        ignition::math::Vector2d(-robot_x_dis, -robot_y_dis)   // 右后轮 (RB)
+    };
+    
+    for (size_t i = 0; i < 4; ++i) {
+        // 计算由于旋转产生的速度分量
+        ignition::math::Vector2d rotational_vel(
+            -wheel_positions[i].Y() * cmd_vel_chassis_.Z(),
+             wheel_positions[i].X() * cmd_vel_chassis_.Z()
+        );
+        
+        // 计算轮子的总速度矢量
+        ignition::math::Vector2d wheel_vel(
+            cmd_vel_chassis_.X() + rotational_vel.X(),
+            cmd_vel_chassis_.Y() + rotational_vel.Y()
+        );
+        
+        // 计算轮子的转向角度（yaw）
+        double wheel_yaw = std::atan2(wheel_vel.Y(), wheel_vel.X());
+        
+        // 计算轮子的转速（速度模长）
+        double wheel_speed = wheel_vel.Length();
+        
+        // 设置yaw关节位置（转向角度）
+        wheel_yaw_joints_[i]->SetPosition(0, wheel_yaw, true);
+        
+        // 设置pitch关节力矩（转速控制）
+        double target_angular_vel = wheel_speed / wheel_radius;
+        wheel_pitch_joints_[i]->SetVelocity(0, target_angular_vel);
+    }
+}
+
+void GazeboShmInterface::publishOdometry()
+{
+    auto current_time = ros::Time::now();
+    
+    // 获取当前位姿和速度
+    auto current_pose = model_->WorldPose();
+    auto linear_vel = model_->WorldLinearVel();
+    auto angular_vel = model_->WorldAngularVel();
+
+    // 创建里程计消息
+    nav_msgs::Odometry odom;
+    odom.header.stamp = current_time;
+    odom.header.frame_id = "odom";
+    odom.child_frame_id = "base_link";
+
+    // 设置位置
+    odom.pose.pose.position.x = current_pose.Pos().X();
+    odom.pose.pose.position.y = current_pose.Pos().Y();
+    odom.pose.pose.position.z = current_pose.Pos().Z();
+    odom.pose.pose.orientation.w = current_pose.Rot().W();
+    odom.pose.pose.orientation.x = current_pose.Rot().X();
+    odom.pose.pose.orientation.y = current_pose.Rot().Y();
+    odom.pose.pose.orientation.z = current_pose.Rot().Z();
+
+    // 设置速度
+    odom.twist.twist.linear.x = linear_vel.X();
+    odom.twist.twist.linear.y = linear_vel.Y();
+    odom.twist.twist.linear.z = linear_vel.Z();
+    odom.twist.twist.angular.x = angular_vel.X();
+    odom.twist.twist.angular.y = angular_vel.Y();
+    odom.twist.twist.angular.z = angular_vel.Z();
+
+    // 发布里程计消息
+    odom_pub_.publish(odom);
+}
+
+void GazeboShmInterface::publishSensorsData()
+{
+    kuavo_msgs::sensorsData sensors_msg;
+    sensors_msg.header.stamp = ros::Time::now();
+    sensors_msg.sensor_time = ros::Time(sensors_data_.sensor_time);
+    
+    // 填充 IMU 数据
+    sensors_msg.imu_data.quat.w = sensors_data_.imu_data.orientation[3];
+    sensors_msg.imu_data.quat.x = sensors_data_.imu_data.orientation[0];
+    sensors_msg.imu_data.quat.y = sensors_data_.imu_data.orientation[1];
+    sensors_msg.imu_data.quat.z = sensors_data_.imu_data.orientation[2];
+    
+    sensors_msg.imu_data.gyro.x = sensors_data_.imu_data.angular_velocity[0];
+    sensors_msg.imu_data.gyro.y = sensors_data_.imu_data.angular_velocity[1];
+    sensors_msg.imu_data.gyro.z = sensors_data_.imu_data.angular_velocity[2];
+    
+    sensors_msg.imu_data.acc.x = sensors_data_.imu_data.linear_acceleration[0];
+    sensors_msg.imu_data.acc.y = sensors_data_.imu_data.linear_acceleration[1];
+    sensors_msg.imu_data.acc.z = sensors_data_.imu_data.linear_acceleration[2];
+    
+    // // ========== 轮子关节数据 (索引0-7) ==========
+    // // 顺序：LF_yaw(0), LF_pitch(1), RF_yaw(2), RF_pitch(3), 
+    // //       LB_yaw(4), LB_pitch(5), RB_yaw(6), RB_pitch(7)
+    // for(size_t i = 0; i < 4; i++) 
+    // {
+    //     auto yaw_q = wheel_yaw_joints_[i]->Position(0);
+    //     auto yaw_v = wheel_yaw_joints_[i]->GetVelocity(0);
+    //     auto yaw_torque = wheel_yaw_joints_[i]->GetForce(0);
+    //     sensors_msg.joint_data.joint_q.push_back(yaw_q);
+    //     sensors_msg.joint_data.joint_v.push_back(yaw_v);
+    //     sensors_msg.joint_data.joint_vd.push_back(0.0);  // 加速度未提供
+    //     sensors_msg.joint_data.joint_torque.push_back(yaw_torque);
+
+
+    //     auto pitch_q = wheel_pitch_joints_[i]->Position(0);
+    //     auto pitch_v = wheel_pitch_joints_[i]->GetVelocity(0);
+    //     auto pitch_torque = wheel_pitch_joints_[i]->GetForce(0);
+    //     sensors_msg.joint_data.joint_q.push_back(pitch_q);
+    //     sensors_msg.joint_data.joint_v.push_back(pitch_v);
+    //     sensors_msg.joint_data.joint_vd.push_back(0.0);  // 加速度未提供
+    //     sensors_msg.joint_data.joint_torque.push_back(pitch_torque);
+    // }
+
+    // 填充关节数据
+    for (size_t i = 0; i < sensors_data_.num_joints; ++i) {
+        sensors_msg.joint_data.joint_q.push_back(sensors_data_.joint_data[i].position);
+        sensors_msg.joint_data.joint_v.push_back(sensors_data_.joint_data[i].velocity);
+        sensors_msg.joint_data.joint_vd.push_back(0.0);  // 加速度在共享内存中未提供
+        sensors_msg.joint_data.joint_torque.push_back(sensors_data_.joint_data[i].effort);
+    }
+    
+    // 发布消息
+    sensors_data_pub_.publish(sensors_msg);
+}
+
+void GazeboShmInterface::publishJointCmd(const gazebo_shm::JointCommand& cmd)
+{
+    kuavo_msgs::jointCmd joint_cmd_msg;
+    joint_cmd_msg.header.stamp = ros::Time::now();
+    
+    // 填充关节命令数据
+    for (size_t i = 0; i < cmd.num_joints; ++i) {
+        joint_cmd_msg.joint_q.push_back(cmd.joint_q[i]);
+        joint_cmd_msg.joint_v.push_back(cmd.joint_v[i]);
+        joint_cmd_msg.tau.push_back(cmd.tau[i]);
+        joint_cmd_msg.tau_max.push_back(cmd.tau_max[i]);
+        joint_cmd_msg.tau_ratio.push_back(cmd.tau_ratio[i]);
+        joint_cmd_msg.joint_kp.push_back(cmd.joint_kp[i]);
+        joint_cmd_msg.joint_kd.push_back(cmd.joint_kd[i]);
+        joint_cmd_msg.control_modes.push_back(cmd.control_modes[i]);
+    }
+    
+    // 发布消息
+    joint_cmd_pub_.publish(joint_cmd_msg);
 }
 
 } 

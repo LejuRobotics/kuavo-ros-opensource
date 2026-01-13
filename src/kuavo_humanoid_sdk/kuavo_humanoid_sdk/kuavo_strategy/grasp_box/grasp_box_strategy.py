@@ -1323,3 +1323,196 @@ class KuavoGraspBox(KuavoRobotStrategyBase):
             return True
         else:
             return False
+        
+    def move_to_target(self, target_position, target_orientation=None, distance_threshold=0.1, timeout=120.0):
+        """
+        Move the robot to a target position while monitoring position.
+        
+        Args:
+            target_position: Tuple (x, y, z) of the target position
+            target_orientation: Target orientation as a quaternion (x, y, z, w)
+            distance_threshold: Distance (meters) at which to consider target reached
+            timeout: Maximum time (seconds) to attempt reaching the target
+        
+        Returns:
+            bool: True if target reached, False if timeout occurred
+        """
+        start_time = time.time()
+        
+        # Get only x, y coordinates for 2D movement
+        target_x, target_y = target_position[0], target_position[1]
+        
+        print(f"Moving toward target at ({target_x:.2f}, {target_y:.2f})")
+        
+        # 新增: 初始定向阶段 - 如果目标在后方，先转向
+        initial_orient_complete = False
+        initial_orient_timeout = 15.0  # 初始定向的超时时间
+        initial_orient_start = time.time()
+        
+        while not initial_orient_complete and time.time() - initial_orient_start < initial_orient_timeout:
+            # 获取当前位置和朝向
+            current_odom = self.state.odometry
+            current_x, current_y = current_odom.position[0], current_odom.position[1]
+            
+            # 计算到目标的方向
+            dx = target_x - current_x
+            dy = target_y - current_y
+            desired_angle = np.arctan2(dy, dx)
+            
+            # 获取当前朝向
+            qx, qy, qz, qw = current_odom.orientation
+            current_yaw = np.arctan2(2*(qw*qz + qx*qy), qw**2 + qx**2 - qy**2 - qz**2)
+            
+            # 计算角度差（确保在-π到π范围内）
+            angle_diff = np.arctan2(np.sin(desired_angle - current_yaw), 
+                                  np.cos(desired_angle - current_yaw))
+            
+            print(f"初始定向: 当前角度差: {np.degrees(angle_diff):.1f}°")
+            
+            # 如果角度差很小，则初始定向完成
+            if abs(angle_diff) < 0.3:  # 约17度
+                initial_orient_complete = True
+                self.robot.walk(0, 0, 0)  # 停止旋转
+                print("初始定向完成，开始移动")
+                break
+                
+            # 计算旋转速度 - 使用自适应旋转速度
+            min_angular_speed = 0.2
+            max_angular_speed = 0.5
+            adaptive_gain = 0.8
+            
+            angular_speed = np.clip(
+                adaptive_gain * angle_diff,
+                -max_angular_speed,
+                max_angular_speed
+            )
+            
+            # 确保最小旋转速度
+            if abs(angular_speed) < min_angular_speed:
+                angular_speed = np.sign(angular_speed) * min_angular_speed
+            
+            # 原地旋转
+            self.robot.walk(0, 0, angular_speed)
+            time.sleep(0.1)
+        
+        # 如果初始定向超时，打印警告但继续执行
+        if not initial_orient_complete:
+            print("警告: 初始定向超时，目标可能在机器人后方，继续尝试移动")
+        
+        # 主移动循环
+        while time.time() - start_time < timeout:
+            # Get current robot position
+            current_odom = self.state.odometry
+            current_x, current_y = current_odom.position[0], current_odom.position[1]
+            
+            # Calculate distance to target
+            dx = target_x - current_x
+            dy = target_y - current_y
+            distance = np.sqrt(dx**2 + dy**2)
+            
+            # If we're close enough, stop and return success
+            if distance < distance_threshold:
+                # Stop the robot
+                self.robot.walk(0, 0, 0)
+                print(f"Target reached! Current position: ({current_x:.2f}, {current_y:.2f})")
+                
+                # 新增朝向调整逻辑
+                if target_orientation is not None:
+                    print("开始调整目标朝向...")
+                    print(f"Moving toward target_orientation at {target_orientation}")
+                    start_orient_time = time.time()
+                    orient_timeout = 30
+                    
+                    # 优化四元数到yaw的转换公式
+                    qx_t, qy_t, qz_t, qw_t = target_orientation
+                    # 使用更精确的yaw角计算方式
+                    target_yaw = np.arctan2(2*(qw_t*qz_t + qx_t*qy_t), 
+                                          qw_t**2 + qx_t**2 - qy_t**2 - qz_t**2)
+                    
+                    # 添加低通滤波器参数
+                    prev_angle_diff = 0.0
+                    filter_alpha = 0.2  # 滤波系数
+                    
+                    while time.time() - start_orient_time < orient_timeout:
+                        current_q = self.state.odometry.orientation
+                        # 使用相同的优化公式计算当前yaw
+                        current_yaw = np.arctan2(2*(current_q[3]*current_q[2] + current_q[0]*current_q[1]),
+                                              current_q[3]**2 + current_q[0]**2 - current_q[1]**2 - current_q[2]**2)
+                        
+                        angle_diff = target_yaw - current_yaw
+                        angle_diff = np.arctan2(np.sin(angle_diff), np.cos(angle_diff))
+                        
+                        # 添加角度差滤波
+                        filtered_angle_diff = filter_alpha * angle_diff + (1 - filter_alpha) * prev_angle_diff
+                        prev_angle_diff = filtered_angle_diff
+                        
+                        # 添加自适应控制参数
+                        min_angular_speed = 0.05  # 最小角速度
+                        max_angular_speed = 0.5   # 最大角速度
+                        adaptive_gain = 0.8 * (1 - np.exp(-2*abs(filtered_angle_diff)))  # 非线性增益
+                        
+                        if abs(filtered_angle_diff) < 0.0087:  # ~0.5度
+                            self.robot.walk(0, 0, 0)
+                            print(f"朝向精确调整完成，最终角度差: {np.degrees(filtered_angle_diff):.2f}°")
+                            return True
+                        
+                        # 计算带死区和速度限制的角速度
+                        angular_speed = np.clip(
+                            adaptive_gain * filtered_angle_diff,
+                            -max_angular_speed,
+                            max_angular_speed
+                        )
+                        if abs(angular_speed) < min_angular_speed:
+                            angular_speed = np.sign(angular_speed) * min_angular_speed
+                            
+                        self.robot.walk(0, 0, angular_speed)
+                        time.sleep(0.05)  # 缩短控制周期
+                
+                return True
+            
+            # 新增：初始化 linear_speed
+            max_linear_speed = 0.5
+            linear_speed = min(0.3 * distance, max_linear_speed)  # 提前计算
+            
+            # 改进后的角度差计算
+            desired_angle = np.arctan2(dy, dx)
+            
+            # 转换四元数到yaw时使用更健壮的公式
+            qx, qy, qz, qw = current_odom.orientation
+            current_yaw = np.arctan2(2*(qw*qz + qx*qy), qw**2 + qx**2 - qy**2 - qz**2)
+            
+            # 改进后的角度差计算（处理2π周期问题）
+            angle_diff = np.arctan2(np.sin(desired_angle - current_yaw), 
+                                  np.cos(desired_angle - current_yaw))
+            
+            # 新增：确保 angular_speed 在条件判断前被正确计算
+            angular_speed = 0.8 * angle_diff  # 基础角速度
+            
+            # 反向移动逻辑优化（现在可以安全使用 linear_speed）
+            if abs(angle_diff) > np.pi/2:
+                angle_diff = angle_diff - np.sign(angle_diff)*np.pi
+                linear_speed *= -1
+                angular_speed *= 1.2  # 反向时增加旋转速度
+            
+            # 新增：限制最大角速度
+            max_angular_speed = 0.5
+            angular_speed = np.clip(angular_speed, -max_angular_speed, max_angular_speed)
+            
+            # 修改后的运动控制逻辑
+            if abs(angle_diff) < 0.2:
+                body_linear_x = linear_speed * np.cos(angle_diff)
+                body_linear_y = linear_speed * np.sin(angle_diff)
+                self.robot.walk(body_linear_x, body_linear_y, angular_speed)
+            else:
+                self.robot.walk(0, 0, angular_speed)
+            
+            print(f"Current: ({current_x:.2f}, {current_y:.2f}), Distance: {distance:.2f}m, "
+                  f"Angle diff: {np.degrees(angle_diff):.1f}°")
+            
+            # Sleep a bit to avoid excessive CPU usage
+            time.sleep(0.1)
+        
+        # If we get here, timeout occurred
+        self.robot.walk(0, 0, 0)  # Stop the robot
+        print("Timeout reached without getting to target")
+        return False

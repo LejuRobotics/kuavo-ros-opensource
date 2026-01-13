@@ -21,11 +21,14 @@ class MusicPlayerNode:
     DEFAULT_SAMPLE_RATE = 16000
     DEFAULT_CHANNELS = 1
     SAMPLE_WIDTH_BYTES = 2  # 16-bit
-    
     # 播放控制
     PUBLISH_RATE_HZ = 10
     CHUNK_SIZE = 65536
     DEFAULT_GAIN = 1.0
+
+    # 音量控制
+    DEFAULT_VOLUME = 100  # 默认音量（不进行音量调整）
+
     
     # FFmpeg参数
     FFMPEG_FORMAT = 'wav'
@@ -157,22 +160,42 @@ class MusicPlayerNode:
             # 如果已经是WAV文件，检查格式是否符合要求
             if music_file.lower().endswith('.wav'):
                 with wave.open(music_file, 'rb') as wf:
-                    if (wf.getnchannels() == self.DEFAULT_CHANNELS and 
-                        wf.getsampwidth() == self.SAMPLE_WIDTH_BYTES and 
+                    if (wf.getnchannels() == self.DEFAULT_CHANNELS and
+                        wf.getsampwidth() == self.SAMPLE_WIDTH_BYTES and
                         wf.getframerate() == self.DEFAULT_SAMPLE_RATE):
+                        # 如果音量不是默认值，需要调整音量
+                        if volume != self.DEFAULT_VOLUME:
+                            temp_wav = os.path.join(self.temp_dir, f"temp_audio_{uuid.uuid4()}.wav")
+                            ffmpeg_cmd = [
+                                'ffmpeg', '-i', music_file,
+                                '-af', f'volume={volume/self.DEFAULT_VOLUME}',
+                                '-y', temp_wav
+                            ]
+                            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+                            if result.returncode != 0:
+                                rospy.logerr(f"音量调整失败: {result.stderr}")
+                                return None
+                            return temp_wav
                         return music_file  # 格式正确，直接使用
             
             # 需要转换，创建临时文件
             temp_wav = os.path.join(self.temp_dir, f"temp_audio_{uuid.uuid4()}.wav")
             
+            # 构建基础命令（不包含输出文件）
             ffmpeg_cmd = [
                 'ffmpeg', '-i', music_file,
                 '-f', self.FFMPEG_FORMAT,
                 '-acodec', self.FFMPEG_CODEC,
                 '-ar', str(self.DEFAULT_SAMPLE_RATE),
-                '-ac', str(self.DEFAULT_CHANNELS),
-                '-y', temp_wav
+                '-ac', str(self.DEFAULT_CHANNELS)
             ]
+
+            # 如果音量不是默认值，添加音量滤镜
+            if volume != self.DEFAULT_VOLUME:
+                ffmpeg_cmd.extend(['-af', f'volume={volume/self.DEFAULT_VOLUME}'])
+
+            # 最后添加输出文件参数
+            ffmpeg_cmd.extend(['-y', temp_wav])
             
             result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
             if result.returncode != 0:

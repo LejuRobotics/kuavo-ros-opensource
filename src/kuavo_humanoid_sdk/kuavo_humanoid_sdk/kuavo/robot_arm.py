@@ -69,14 +69,23 @@ class KuavoRobotArm:
         if len(times) != len(q_frames):
             raise ValueError("Invalid input. times and joint_q must have thesame length.")
 
-        # Check if joint positions are within ±180 degrees (±π radians)
+        # Check if joint positions are within the real physical joint limits
+        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
         q_degs = []
-        for q in q_frames:
-            if any(abs(pos) > math.pi for pos in q):
-                raise ValueError("Joint positions must be within ±π rad (±180 deg)")
+        for frame_idx, q in enumerate(q_frames):
             if len(q) != self._robot_info.arm_joint_dof:
                 raise ValueError(
                     "Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(q)))
+            
+            # Check each joint position against its real physical limits
+            for joint_idx, pos in enumerate(q):
+                if pos < arm_min[joint_idx] or pos > arm_max[joint_idx]:
+                    raise ValueError(
+                        f"Frame {frame_idx}, Joint {joint_idx} position {pos:.3f} rad exceeds "
+                        f"real physical limit [{arm_min[joint_idx]:.3f}, {arm_max[joint_idx]:.3f}] rad. "
+                        f"This may cause motor stall."
+                    )
+            
             # Convert joint positions from radians to degrees
             q_degs.append([(p * 180.0 / math.pi) for p in q])
 
@@ -94,21 +103,26 @@ class KuavoRobotArm:
 
         Raises:
             ValueError: 如果关节位置列表长度不正确
-            ValueError: 如果关节位置超出[-π, π]范围
             RuntimeError: 如果在控制手臂时机器人不在站立状态
 
         Returns:
             bool: 控制成功返回True,否则返回False
+        Note:
+            超出物理限制的关节位置将自动裁剪到限制值。
         """
         if len(joint_position) != self._robot_info.arm_joint_dof:
             raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(joint_position)))
         
-        # Check if joint positions are within ±180 degrees (±π radians)
-        for pos in joint_position:
-            if abs(pos) > math.pi:
-                raise ValueError(f"Joint position {pos} rad exceeds ±π rad (±180 deg) limit")
+        # Automatically clip joint positions to physical limits
+        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
+        joint_position_clipped = list(joint_position)  # Create a copy to avoid modifying the original list
+        
+        for i, pos in enumerate(joint_position):
+            if pos < arm_min[i] or pos > arm_max[i]:
+                # Automatically clip to limits
+                joint_position_clipped[i] = max(arm_min[i], min(pos, arm_max[i]))
 
-        return self._kuavo_core.control_robot_arm_joint_positions(joint_data=joint_position)
+        return self._kuavo_core.control_robot_arm_joint_positions(joint_data=joint_position_clipped)
 
     @sdk_deprecated(reason="接口废弃", version="1.2.2", replacement="KuavoRobot.control_arm_joint_trajectory", remove_date="2026-06-30")
     def control_arm_joint_trajectory(self, times:list, joint_q:list)->bool:
@@ -125,24 +139,34 @@ class KuavoRobotArm:
         Raises:
             ValueError: 如果times列表长度不正确
             ValueError: 如果关节位置列表长度不正确
-            ValueError: 如果关节位置超出[-π, π]范围
             RuntimeError: 如果在控制手臂时机器人不在站立状态
 
         Returns:
             bool: 控制成功返回True,否则返回False
+        Note:
+            超出物理限制的关节位置将自动裁剪到限制值。
         """
         if len(times) != len(joint_q):
             raise ValueError("Invalid input. times and joint_q must have thesame length.")
         
-        # Check if joint positions are within ±180 degrees (±π radians)
+        # Automatically clip joint positions to physical limits
+        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
         q_degs = []
-        for q in joint_q:
-            if any(abs(pos) > math.pi for pos in q):
-                raise ValueError("Joint positions must be within ±π rad (±180 deg)")
+        for frame_idx, q in enumerate(joint_q):
             if len(q) != self._robot_info.arm_joint_dof:
                 raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(q)))
+            
+            # Create a copy to avoid modifying the original list
+            q_clipped = list(q)
+            
+            # Automatically clip each joint position to physical limits
+            for joint_idx, pos in enumerate(q):
+                if pos < arm_min[joint_idx] or pos > arm_max[joint_idx]:
+                    # Automatically clip to limits
+                    q_clipped[joint_idx] = max(arm_min[joint_idx], min(pos, arm_max[joint_idx]))
+            
             # Convert joint positions from radians to degrees
-            q_degs.append([(p * 180.0 / math.pi) for p in q])
+            q_degs.append([(p * 180.0 / math.pi) for p in q_clipped])
 
         return self._kuavo_core.control_robot_arm_joint_trajectory(times=times, joint_q=q_degs)
 

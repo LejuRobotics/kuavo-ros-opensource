@@ -6,6 +6,7 @@
 #include <mobile_manipulator_controllers/mobileManipulatorControllerBase.h>
 #include <sensor_msgs/JointState.h>
 #include "kuavo_msgs/changeTorsoCtrlMode.h"
+#include "kuavo_msgs/robotWaistControl.h"
 
 using namespace ocs2;
 namespace mobile_manipulator_controller
@@ -34,6 +35,7 @@ namespace mobile_manipulator_controller
       ros::Subscriber humanoidStateSubscriber_;
       ros::Publisher armTrajPublisher_;
       ros::Publisher humanoidCmdPosPublisher_;
+      ros::Publisher waistTrajPublisher_;
       ros::ServiceServer kinematicMpcControlSrv_;
       ocs2::vector_t humanoidState_;
       bool recievedObservation_{false};

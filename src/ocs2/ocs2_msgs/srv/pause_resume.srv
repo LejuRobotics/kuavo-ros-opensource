@@ -1,0 +1,4 @@
+# Pause/Resume MPC service
+bool                      pause    # true to pause, false to resume
+---
+bool                      done     # true if operation successful

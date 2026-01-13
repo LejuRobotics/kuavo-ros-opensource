@@ -52,6 +52,29 @@ namespace ocs2
         mode_ = mode;
         contactFlag_ = modeNumber2StanceLeg(mode_);
       }
+      
+      // 获取足端位置接口
+      virtual vector_t getEndEffectorPositions() const { std::cout << "[StateEstimateBase] getEndEffectorPositions not implemented" << std::endl; return vector_t::Zero(0); }
+      
+      // 计算双脚支撑中心点
+      virtual vector3_t getFeetCenterPosition() const { std::cout << "[StateEstimateBase] getFeetCenterPosition not implemented" << std::endl; return vector3_t::Zero(); }
+      
+      // 获取躯干状态接口 (位置、姿态、线速度、角速度)
+      virtual vector_t getTorsoState() const
+      {
+        vector_t torsoState(12);
+        
+        // rbdState_ 结构: [x, y, z, yaw, pitch, roll, vx, vy, vz, angularVx, angularVy, angularVz]
+        // 前6个元素: 位置和姿态
+        torsoState.segment<3>(0) = rbdState_.segment<3>(3);  // x, y, z
+        torsoState.segment<3>(3) = rbdState_.head<3>();      // yaw, pitch, roll
+        
+        // 后6个元素: 线速度和角速度
+        torsoState.segment<3>(6) = rbdState_.segment<3>(info_.generalizedCoordinatesNum + 3);  // vx, vy, vz
+        torsoState.segment<3>(9) = rbdState_.segment<3>(info_.generalizedCoordinatesNum);      // angularVx, angularVy, angularVz
+        
+        return torsoState;
+      }
       virtual void updateGait(const std::string &gait)
       {
         prev_gait_ = gait_;
@@ -73,6 +96,10 @@ namespace ocs2
       virtual nav_msgs::Odometry updateKinematics(const ros::Time &time, const Eigen::Quaterniond &imu_quat, const ros::Duration &period)
       {
         return nav_msgs::Odometry();
+      }
+      virtual bool updateKinematicsRL(const ros::Time &time, const ros::Duration &period)
+      {
+        return false;
       }
 
       inline void updateFootPosDesired(const feet_array_t<vector3_t> &foot_pos_desired)
@@ -99,6 +126,19 @@ namespace ocs2
       {
         if (estContactforce_.size() < 12)
           return false;
+        
+        // 检查时间间隔，如果相邻两次调用时间>0.5s，则重置滤波器
+        ros::Time current_time = ros::Time::now();
+        if (last_pullup_check_time_.isValid()) {
+          ros::Duration time_diff = current_time - last_pullup_check_time_;
+          if (time_diff.toSec() > 0.5) {
+            total_est_contact_force_ = robotMass_ * 9.81;
+            last_pullup_state_ = false;
+            pullup_window_.clear();
+            std::cout << "[StateEstimateBase] checkPullUp reset filter" << std::endl;
+          }
+        }
+        last_pullup_check_time_ = current_time;
           
         double new_total_est_contact_force_ = std::max(estContactforce_[2], 0.0) + std::max(estContactforce_[8], 0.0);
         // ros_logger_->publishValue("/state_estimate/checkPullUp/new_total_est_contact_force_", new_total_est_contact_force_);
@@ -292,6 +332,8 @@ namespace ocs2
       std::deque<bool> pullup_window_;  // 滑动窗口用于存储历史判断结果
       const size_t pullup_window_size_ = 20;  // 滑动窗口大小
       bool last_pullup_state_ = false;  // 保存上一次的pullup状态
+      ros::Time last_pullup_check_time_;  // 上次调用checkPullUp的时间
+      int waistNum_ = 0;
       
     };
 

@@ -1,0 +1,87 @@
+<?xml version="1.0" ?>
+
+<launch>
+
+    <!-- 输出日志格式 -->
+    <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
+
+    <arg name="robot_version"      default="$(optenv ROBOT_VERSION 46)"/>
+    
+    <!-- load the robot version manager -->
+    <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+      <arg name="robot_version" value="$(arg robot_version)"/>
+      <arg name="rviz" value="false"/>
+    </include>
+
+    <!-- 基本参数设置 -->
+    <param name="use_external_mpc"  value="true"/>
+    <param name="wbc_frequency"     value="500"/>
+    <param name="sensor_frequency"  value="500"/>
+    <param name="with_estimation"   value="true"/>
+    <param name="use_joint_filter"  value="false"/>
+    <param name="estimator_type"    value="1"/>
+    <param name="wbc_only"          value="false"/>
+    <param name="play_back"         value="false"/>
+    <param name="joystick_type"     value="bt2"/>
+    <param name="start_way"         value="manual"/>
+    <param name="use_estimator_contact" value="false"/>
+    <param name="only_half_up_body" value="false"/>
+    <param name="build_cppad_state" value="0"/>
+    <param name="visualize_humanoid" value="false"/>
+    <param name="enable_pull_up_protect" value="true"/>
+    <param name="pull_up_force_threshold" value="0.70"/>
+    <param name="teach_pendant"     value="0"/>
+    <param name="/mpc/schedule/enable" value="false"/>
+    <param name="/mpc/schedule/start_time" value="-1.0"/>
+    <param name="/timeout_warning_ms" value="20"/>
+
+    <!-- RL相关参数 -->
+    <param name="network_model_file" value="$(find humanoid_controllers)/model/networks"/>
+    <param name="rl_param" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <rosparam param="isolated_cpus">[2, 3]</rosparam>
+
+    <!-- Launch script to collect kuavo-launch information -->
+    <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
+    
+    <!-- 自动清理 .ros 文件夹参数 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+
+    <!-- 只启动基本的MPC节点 -->
+    <node pkg="humanoid_interface_ros" type="humanoid_sqp_mpc" name="humanoid_sqp_mpc" output="screen" required="false"/>
+
+    <!-- 基本的gait command节点 -->
+    <node pkg="humanoid_interface_ros" type="humanoid_gait_command" name="humanoid_gait_command"
+          output="screen" launch-prefix="gnome-terminal --disable-factory --" required="false"/>
+
+    <!-- nodelet manager with error handling -->
+    <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="true" 
+       output="screen" required="false" clear_params="true">
+        <param name="num_worker_threads" type="int" value="10" />
+        <param name="bond_disable_heartbeat_timeout" value="0.0"/>
+        <param name="bond_heartbeat_period" value="0.5"/>
+    </node>
+    
+    <!-- 等待nodelet_manager启动后再启动其他nodelet -->
+    <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="true" output="screen" required="false">
+    </node>
+    
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="true" output="screen" required="false" launch-prefix="taskset -c 12">
+      <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
+    </node>
+    
+    <!-- 启动Mujoco仿真 -->
+    <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch"/>
+    
+    <!-- 启动rosbag记录 -->
+    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+    
+    <!-- 启动手柄控制 -->
+    <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+      <arg name="joystick_type" value="bt2"/>
+    </include>
+
+    <!-- 启动IK节点 -->
+    <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
+
+</launch> 

@@ -12,4 +12,24 @@
   <node pkg="planarmwebsocketservice" type="plan_arm_action_websocket_server.py" name="plan_arm_action_websocket_server" output="screen" args="--robot_type=$(arg robot_type)">
   
   </node>
+
+  <!--   添加相机模型参数 -->
+  <arg name="camera_type" default="none" />
+  <param name="camera_type" value="$(arg camera_type)" />
+  <!-- 根据 camera_type 参数值启动相应的相机 -->
+  <include if="$(eval arg('camera_type') == 'realsense')" file="$(find realsense2_camera)/launch/rs_camera.launch">
+  </include>
+  
+ <!-- 根据 camera_model 参数值启动 Orbbec 相机 -->
+  <include if="$(eval arg('camera_type') == 'orbbec')" file="$(find kuavo_camera)/launch/cameras.launch">
+    <arg name="head_camera_type" value="orbbec_camera"/>
+    <arg name="has_left_wrist" value="false"/>
+    <arg name="has_right_wrist" value="false"/>
+    <arg name="rviz" value="false"/>
+  </include>
+
+  <!--启动web_video_server launch节点 -->
+  <include file="$(find web_video_server)/launch/web_video_server.launch" />
+
+
 </launch>

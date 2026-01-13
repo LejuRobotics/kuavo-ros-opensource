@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="biped_s61_with_realsense">
+
+  <!-- 引入完整URDF（包含上半身与全部关节） -->
+  <xacro:include filename="$(find kuavo_assets)/models/biped_s61/urdf/biped_s61_gazebo.urdf"/>
+
+  <!-- 可选：深度相机（如不需要可移除本段） -->
+  <xacro:include filename="$(find realsense_ros_gazebo)/xacro/depthcam.xacro"/>
+  <xacro:realsense_d435 sensor_name="camera" parent_link="camera" rate="30">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+  </xacro:realsense_d435>
+
+</robot>

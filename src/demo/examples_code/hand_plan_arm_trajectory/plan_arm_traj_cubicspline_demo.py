@@ -11,6 +11,32 @@ from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
 from kuavo_msgs.msg import sensorsData
 # from ocs2_msgs.msg import mpc_observation
 
+# 声明全局变量 用于sensors_data_raw中手臂角度的索引
+joint_data_header = None
+joint_data_footer = None
+
+# 获取机器人版本
+def get_version_parameter():
+    param_name = 'robot_version'
+    try:
+        # 获取参数值
+        param_value = rospy.get_param(param_name)
+        rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
+        # 适配1000xx版本号
+        valid_series = [42, 45, 49, 52]
+        MMMMN_MASK = 100000
+        series = param_value % MMMMN_MASK
+        if series not in valid_series:
+            rospy.logerr(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！程序退出。")
+            rospy.signal_shutdown("参数无效")
+        else:
+            rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
+        return param_value
+    except rospy.ROSException:
+        rospy.logerr(f"参数 {param_name} 不存在！程序退出。")
+        rospy.signal_shutdown("参数获取失败") 
+        return None
+
 # 存储当前机器人手臂关节状态
 current_arm_joint_state = []
 
@@ -34,7 +60,7 @@ def sensors_data_callback(msg):
     """
     global current_arm_joint_state
     # 获取索引12到26的关节位置数据（对应手臂关节）
-    current_arm_joint_state = msg.joint_data.joint_q[12:26]
+    current_arm_joint_state = msg.joint_data.joint_q[joint_data_header:joint_data_footer]
     # 将关节位置数据四舍五入到小数点后两位
     current_arm_joint_state = [round(pos, 2) for pos in current_arm_joint_state]
 
@@ -159,6 +185,16 @@ def main():
     """
     # 初始化ROS节点
     rospy.init_node('arm_trajectory_cubicspline_demo')
+    # 获取机器人版本
+    robot_version = get_version_parameter()
+    # 根据机器人版本 设定sensors_data_raw中手臂角度的索引
+    global joint_data_header, joint_data_footer  # 声明使用全局变量
+    if robot_version in [42, 45, 49]:
+        joint_data_header = 12
+        joint_data_footer = 26
+    elif robot_version == 52:
+        joint_data_header = 13
+        joint_data_footer = 27
     # 订阅三次样条轨迹话题
     traj_sub = rospy.Subscriber('/cubic_spline/arm_traj', JointTrajectory, traj_callback, queue_size=1, tcp_nodelay=True)
     # 发布手臂轨迹话题

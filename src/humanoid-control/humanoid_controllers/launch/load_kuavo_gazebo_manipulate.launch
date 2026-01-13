@@ -7,7 +7,7 @@
 
     <arg name="output_system_info" default="true"/>
     <arg name="vr_remote_control" default="false"/>
-    <arg name="robot_type"         default="humanoid"/>
+    <arg name="robot_type"         default="2"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
@@ -28,16 +28,21 @@
     <arg name="play_back"          default="false"/>  
     <arg name="joystick_type"      default="sim"/>
     <arg name="arm_move_spd"      default="3.0"/>
+    <arg name="waist_move_spd"     default="2.6"/>
     <arg name="start_way"          default="manual"/>
     <arg name="use_shm_communication"  value="true"/>
     <arg name="end_effector_type"      default="qiangnao"/>
 
+    <!-- RL相关参数 -->
+    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="grab_box_ci_test" default="false"/>
-    <arg name="use_grab_box_scene" default="true"/>
+    <arg name="use_grab_box_scene" default="True"/>
+    <arg name="use_grab_box_new_scene" default="False"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -56,10 +61,13 @@
     <param name="play_back"         value="$(arg play_back)"/>
     <param name="joystick_type"  value="$(arg joystick_type)"/>
     <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
+    <param name="waist_move_spd"  value="$(arg waist_move_spd)"/>
     <param name="start_way"  value="$(arg start_way)"/>
     <param name="use_shm_communication"  value="true"/>
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
     <param name="end_effector_type"  value="$(arg end_effector_type)"/>
+    <param name="rl_param"             value="$(arg rl_param)"/>
+    <param name="network_model_file"   value="$(arg network_model_file)"/>
     
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
@@ -90,7 +98,7 @@
     </node>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true">
       </node>
-   <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
+   <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>
     <group unless="$(arg play_back)">
@@ -100,6 +108,7 @@
       <group unless="$(arg grab_box_ci_test)">
       <include file="$(find gazebo_sim)/launch/gazebo-sim.launch">
         <arg name="use_grab_box_scene" value="$(arg use_grab_box_scene)"/>
+        <arg name="use_grab_box_new_scene" value="$(arg use_grab_box_new_scene)"/>
         <arg name="world_name" value="$(find gazebo_sim)/worlds/grab_box.world"/>
       </include>
       </group>

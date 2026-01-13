@@ -134,8 +134,8 @@ namespace ocs2
       std::unique_ptr<StateCost> getEndEffectorConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                         const std::string& prefix, const std::string& eeName, const int eeIndex, bool verbose);
       
-      std::unique_ptr<StateCost> getCenterOfMassConstraint(const PinocchioInterface &pinocchioInterface, const std::string& taskFile, bool verbose);                             
-                                                        
+      std::unique_ptr<StateCost> getCenterOfMassConstraint(const PinocchioInterface &pinocchioInterface, const std::string& taskFile, bool verbose);
+      
       std::unique_ptr<EndEffectorKinematics<scalar_t>> getEeKinematicsPtr(const std::vector<std::string> &endEffectorIds, const std::string &modelName);
 
       ModelSettings modelSettings_;
@@ -158,6 +158,8 @@ namespace ocs2
 
       vector_t initialState_;
       int build_cppad_status_ {0};
+
+      void checkAndCleanCorruptedCppAdLibs();
 
       size_t joint_Num_ = 12;
       size_t waist_Num_ = 1;

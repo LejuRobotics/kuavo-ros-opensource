@@ -1,0 +1,3 @@
+<launch>
+    <node pkg="taiji_trigger_node" type="taiji_trigger.py" name="taiji_trigger_node" output="screen" />
+</launch>

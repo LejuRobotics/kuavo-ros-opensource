@@ -1,0 +1,7 @@
+---
+bool success           # 切换是否成功
+string message         # 返回消息
+string current_controller # 当前控制器名称
+string next_controller   # 下一个控制器名称
+int32 current_index      # 当前控制器索引
+int32 next_index         # 下一个控制器索引

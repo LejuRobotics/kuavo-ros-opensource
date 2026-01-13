@@ -1,0 +1,7 @@
+# 腿部控制服务请求消息
+float64[4] target_joints          # 目标关节角度 [knee_joint, leg_joint, waist_pitch_joint, waist_yaw_joint]
+float64 duration                  # 运动持续时间（秒）
+
+---
+# 腿部控制服务响应消息
+bool success                      # 设置是否成功

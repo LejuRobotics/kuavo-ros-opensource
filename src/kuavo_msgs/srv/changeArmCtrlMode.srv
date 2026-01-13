@@ -1,4 +1,5 @@
-int32 control_mode # 0: keep pose, 1: auto_swing_arm, 2: external_control 
+int32 ik_ultra_fast_mode=3
+int32 control_mode # 0: keep pose, 1: auto_swing_arm, 2: external_control, 3: ik_ultra_fast_mode 
 ---
 bool result
 int32 mode 

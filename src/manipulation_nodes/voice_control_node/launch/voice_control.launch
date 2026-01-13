@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- 启动 humanoid_controllers 包中的 load_kuavo_real.launch -->
+   <arg name="load_kuavo_real" default="true"/>"
+  <arg name="joystick_type" default="bt2"/>
+  <arg name="start_way" default="manual"/>
+  
+  <group if="$(arg load_kuavo_real)">
+    <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch">
+      <arg name="joystick_type" value="$(arg joystick_type)" />
+      <arg name="start_way" value="$(arg start_way)" />
+    </include>
+  </group>
+
+  <!-- 语音控制节点 -->
+  <node
+    pkg="voice_control_node" 
+    type="main.py" 
+    name="voice_control_node" 
+    output="screen">
+  </node>
+
+</launch>

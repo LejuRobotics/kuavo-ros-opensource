@@ -176,7 +176,7 @@ log "🔍 检查网卡信息..."
 # # 自动查找网段为 192.168.26.X 的网卡
 # INTERFACE=$(ifconfig | grep -B1 "192.168.26" | head -n1 | awk -F: '{print $1}' | xargs)
 # 查找所有以 enx0 开头的网卡设备
-ENX_INTERFACES=($(ip -o link show | awk -F': ' '{print $2}' | grep '^enx0'||true))
+ENX_INTERFACES=($(ip -o link show | awk -F': ' '{print $2}' | grep '^enp7'||true))
 if [ ${#ENX_INTERFACES[@]} -eq 1 ]; then
     INTERFACE="${ENX_INTERFACES[0]}"
 elif [ ${#ENX_INTERFACES[@]} -eq 0 ]; then

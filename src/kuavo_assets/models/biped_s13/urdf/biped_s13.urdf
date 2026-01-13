@@ -6,27 +6,6 @@
   <link name="dummy_link" />
   <link name="base_link">
     <inertial>
-      <origin xyz="0.00227055 0.0 0.1163574" rpy="0 0 0" />
-      <mass value="4.09458758" />
-      <inertia ixx="0.06356019" ixy="0.0" ixz="0.0" iyy="0.05314952" iyz="0.0" izz="0.03434989" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s13/meshes/torso.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="base_link_to_dummy_link" type="floating">
-    <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="base_link" />
-    <child link="dummy_link" />
-  </joint>
-  <link name="waist">
-    <inertial>
       <origin xyz="0.0016929 0.0 -0.11846153" rpy="0 0 0" />
       <mass value="5.17438719" />
       <inertia ixx="0.02255553" ixy="0.0" ixz="0.0" iyy="0.01532955" iyz="0.0" izz="0.01667096" />
@@ -41,10 +20,31 @@
       </material>
     </visual>
   </link>
-  <joint name="waist" type="revolute">
+  <joint name="base_link_to_dummy_link" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="base_link" />
-    <child link="waist" />
+    <child link="dummy_link" />
+  </joint>
+  <link name="waist_yaw_link">
+    <inertial>
+      <origin xyz="0.00227055 0.0 0.1163574" rpy="0 0 0" />
+      <mass value="4.09458758" />
+      <inertia ixx="0.06356019" ixy="0.0" ixz="0.0" iyy="0.05314952" iyz="0.0" izz="0.03434989" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s13/meshes/torso.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_yaw_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="waist_yaw_link" />
     <axis xyz="0 0 1" />
     <limit lower="-2.0943951023932" upper="2.0943951023932" effort="50" velocity="8.37333333333333" />
   </joint>
@@ -66,7 +66,7 @@
   </link>
   <joint name="leg_l1_joint" type="revolute">
     <origin xyz="0.0 0.1143350698 -0.21673502307" rpy="0 0 0" />
-    <parent link="waist" />
+    <parent link="base_link" />
     <child link="leg_l1_link" />
     <axis xyz="0 0.70711 -0.70711" />
     <limit lower="-1.65806278939461" upper="1.5707963267949" effort="180" velocity="23.55" />
@@ -183,6 +183,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+    	<origin xyz="0.015 0 0" rpy="0 0 0"/>
+	    <geometry>
+		    <box size="0.21 0.1 0.035"/>
+	    </geometry>
+    </collision>
   </link>
   <joint name="leg_l6_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -288,7 +294,7 @@
   </link>
   <joint name="leg_r1_joint" type="revolute">
     <origin xyz="0.0 -0.1143350698 -0.21673502307" rpy="0 0 0" />
-    <parent link="waist" />
+    <parent link="base_link" />
     <child link="leg_r1_link" />
     <axis xyz="0 -0.70711 -0.70711" />
     <limit lower="-1.65806278939461" upper="1.5707963267949" effort="180" velocity="23.55" />
@@ -405,6 +411,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+    	<origin xyz="0.015 0 0" rpy="0 0 0"/>
+	    <geometry>
+		    <box size="0.21 0.1 0.035"/>
+	    </geometry>
+    </collision>
   </link>
   <joint name="leg_r6_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -510,7 +522,7 @@
   </link>
   <joint name="zarm_l1_joint" type="revolute">
     <origin xyz="0.0073474151 0.16250437899999998 0.20242688398" rpy="0 0 0" />
-    <parent link="base_link" />
+    <parent link="waist_yaw_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="2.0943951023932" effort="12" velocity="7.32666666666667" />
@@ -619,7 +631,7 @@
   </link>
   <joint name="zarm_r1_joint" type="revolute">
     <origin xyz="0.0073474151 -0.16250437899999998 0.20242688398" rpy="0 0 0" />
-    <parent link="base_link" />
+    <parent link="waist_yaw_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="2.0943951023932" effort="12" velocity="7.32666666666667" />
@@ -728,7 +740,7 @@
   </link>
   <joint name="zhead_1_joint" type="revolute">
     <origin xyz="0.0 0.0 0.33128227967" rpy="0 0 0" />
-    <parent link="base_link" />
+    <parent link="waist_yaw_link" />
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="50" velocity="8.37333333333333" />

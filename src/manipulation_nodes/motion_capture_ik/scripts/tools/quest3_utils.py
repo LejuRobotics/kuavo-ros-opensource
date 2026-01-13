@@ -1471,8 +1471,8 @@ class Quest3ArmInfoTransformer:
         pitch_ratio = 0.8
         msg.body_pitch = max(3*np.pi/180.0, min(pitch_ratio*head_body_pose.body_pitch, 40*np.pi/180.0))
 
-        msg.body_x = 0.0
-        msg.body_y = 0.0
+        msg.body_x = head_body_pose.body_x
+        msg.body_y = head_body_pose.body_y
         # msg.body_height = max(-0.4, min(head_body_pose.body_height + 0.3, 0.2))
         msg.body_height = head_body_pose.body_height
         # self.head_body_pose_puber.publish(msg)

@@ -132,6 +132,16 @@
 
    # VR先和机器人连到同一局域网, VR 会广播 自身IP 到局域网中
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch
+
+   # 可选配置参数：use_cpp_ik
+   # 启动python版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=false
+
+   # 启动C++版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true
+
+   # 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true use_incremental_ik:=true
   ```
 
   > 如果手动输入VR的IP地址, 在启动命令后追加参数 `ip_address:=192.168.3.32`(替换成VR的实际IP地址)
@@ -248,3 +258,17 @@ sudo apt install libv4l-dev
 - ⚠️ 确保USB线支持数据传输（部分充电线不支持数据传输）
 - 💡 安装成功后会显示"Success"提示
 - 💡 如果adb一直显示"waiting for device"，检查VR设备是否已授权USB调试
+
+# CPP版本IK使用说明（测试版）
+## 仿真
+```bash
+roslaunch motion_capture_ik ik_ros_uni_cpp_vr_mujoco_sim.launch ip_address:="your_quest3_ip"
+# 例如
+# roslaunch motion_capture_ik ik_ros_uni_cpp_vr_mujoco_sim.launch ip_address:=10.10.20.234
+```
+## 实物
+```bash
+roslaunch motion_capture_ik ik_ros_uni_cpp_vr_real.launch ip_address:="your_quest3_ip"
+# 例如
+# roslaunch motion_capture_ik ik_ros_uni_cpp_vr_real.launch ip_address:=10.10.20.234
+```

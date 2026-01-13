@@ -3,6 +3,7 @@ from transitions import Machine
 from utils.utils import read_json_file
 import os
 import rospkg
+import rospy
 # 获取包路径
 rospack = rospkg.RosPack()
 pkg_path = rospack.get_path('h12pro_controller_node')
@@ -23,6 +24,12 @@ elif kuavo_control_scheme == "rl":
     states = robot_state_config["states"][kuavo_control_scheme]
     transitions = robot_state_config["transitions"][kuavo_control_scheme]
     import robot_state.rl_before_callback as before_callback
+elif kuavo_control_scheme == "multi":
+    states = robot_state_config["states"][kuavo_control_scheme]
+    transitions = robot_state_config["transitions"][kuavo_control_scheme]
+    import robot_state.multi_before_callback as before_callback
+else:
+    raise ValueError(f"Invalid kuavo_control_scheme: {kuavo_control_scheme}")
 
 class RobotStateMachine(object):
     def __init__(self, **kwargs):
@@ -38,13 +45,36 @@ class RobotStateMachine(object):
             dest = transition["dest"]
             trigger = transition["trigger"]
             callback = getattr(before_callback, transition["before"], None)
+            
+            # 支持 conditions 条件检查
+            conditions = []
+            if "conditions" in transition:
+                condition_names = transition["conditions"]
+                if isinstance(condition_names, str):
+                    condition_names = [condition_names]
+                for condition_name in condition_names:
+                    condition_func = getattr(before_callback, condition_name, None)
+                    if condition_func:
+                        conditions.append(condition_func)
+                    else:
+                        rospy.logwarn(f"Condition function '{condition_name}' not found in before_callback module")
+            
             if callback:
-                self.machine.add_transition(
-                    trigger=trigger,
-                    source=source,
-                    dest=dest,
-                    before=callback,
-                )
+                if conditions:
+                    self.machine.add_transition(
+                        trigger=trigger,
+                        source=source,
+                        dest=dest,
+                        before=callback,
+                        conditions=conditions,
+                    )
+                else:
+                    self.machine.add_transition(
+                        trigger=trigger,
+                        source=source,
+                        dest=dest,
+                        before=callback,
+                    )
     
     def update_customize_config(self):
         if robot_type == "ocs2":

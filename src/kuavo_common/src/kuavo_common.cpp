@@ -40,7 +40,13 @@ namespace HighlyDynamic{
         robot_config_ = new JSONConfigReader();
         std::cout << "Created JSONConfigReader" << std::endl;
         
-        auto robot_name = "kuavo_v" + rb_version.to_string();
+        // Handle version 15 special case: use version 14 config
+        std::string effective_version = rb_version.to_string();
+        if (rb_version.to_string() == "15") {
+            effective_version = "14";
+        }
+
+        auto robot_name = "kuavo_v" + effective_version;
         auto config_path = kuavo_assets_path + "/config/" + robot_name + "/kuavo.json";
         std::cout << "Will try to load config from: " << config_path << std::endl;
         

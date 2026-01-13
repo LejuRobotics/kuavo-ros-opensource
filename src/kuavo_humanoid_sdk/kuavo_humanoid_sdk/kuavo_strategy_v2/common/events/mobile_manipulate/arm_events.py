@@ -2,12 +2,15 @@ import time
 from typing import Any, Tuple, List
 
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoManipulationMpcControlFlow
+import rospy
+from kuavo_msgs.srv import changeArmCtrlMode
 
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.base_event import BaseEvent, EventStatus
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.data_type import Pose, Tag, Frame
 from kuavo_humanoid_sdk.interfaces.data_types import (
     KuavoPose,
     KuavoManipulationMpcCtrlMode,
+    KuavoArmCtrlMode,
     KuavoManipulationMpcFrame)
 
 import numpy as np
@@ -43,6 +46,7 @@ class EventArmMoveKeyPoint(BaseEvent):
         self.pre_pose_id = -1
         self.current_left_pose: Pose = None  # 目标位置
         self.current_right_pose: Pose = None  # 目标位置
+        self.control_frame = Frame.ODOM
 
         # params
         self.timeout = timeout  # 事件超时时间
@@ -66,6 +70,7 @@ class EventArmMoveKeyPoint(BaseEvent):
         self.current_left_pose: Pose = None  # 目标位置
         self.current_right_pose: Pose = None  # 目标位置
         self.target = None
+        self.control_frame = Frame.ODOM
 
     def get_current_transform(self, source_frame: Frame, target_frame: Frame) -> Transform3D:
         """
@@ -94,20 +99,31 @@ class EventArmMoveKeyPoint(BaseEvent):
 
         return transform_source_to_target
 
-    def open(self):
+    def open(self, control_frame=Frame.ODOM):
         """
         开始走到指定位置事件。
         """
         super().open()
         # 原有代码保持不变
+        # self.change_arm_ctrl_mode(2)  # ExternalControl
+        # self.change_mobile_ctrl_mode(1)  # ArmOnly
+        # self.change_mm_wbc_arm_ctrl_mode(1)  # DirectToWbc
 
         # self.robot_sdk.control.arm_reset()
+        self.robot_sdk.control.set_external_control_arm_mode()
+        print("Received service response of changing arm control mode.")
+
         if self.arm_control_mode == "manipulation_mpc":
             self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.BaseArm)
         elif self.arm_control_mode == "fixed_base":
             self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.ArmOnly)
         else:
             self.robot_sdk.control.set_fixed_arm_mode()
+        self.robot_sdk.control.set_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.DirectToWbc)
+
+        self.control_frame = control_frame
+        assert self.control_frame in [Frame.ODOM, Frame.BASE], \
+            self.logger.error("control_frame must be Frame.ODOM or Frame.BASE")
 
     def close(self):
         """
@@ -118,7 +134,7 @@ class EventArmMoveKeyPoint(BaseEvent):
         self.robot_sdk.control.set_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.ThroughFullBodyMpc)
         self.reset()
 
-    def interpolate_poses(self, start_pose, end_pose, num_points=20):
+    def interpolate_poses(self, start_pose, end_pose, num_points=10):
         """
         在两个笛卡尔空间姿态之间进行三次样条插值。
 
@@ -247,40 +263,55 @@ class EventArmMoveKeyPoint(BaseEvent):
 
             transform_base_to_world = self.get_current_transform(source_frame=Frame.BASE, target_frame=Frame.ODOM)
 
-            self.current_left_pose = transform_base_to_world.apply_to_pose(
-                Pose(
-                pos=left_pose.position,
-                quat=left_pose.orientation,
-                frame=Frame.BASE
-            ))
-            self.current_right_pose = transform_base_to_world.apply_to_pose(
-                Pose(
-                pos=right_pose.position,
-                quat=right_pose.orientation,
-                frame=Frame.BASE
-            ))
+            if self.control_frame == Frame.BASE:
+                self.current_left_pose = Pose(
+                        pos=left_pose.position,
+                        quat=left_pose.orientation,
+                        frame=Frame.BASE
+                    )
+                self.current_right_pose = Pose(
+                        pos=right_pose.position,
+                        quat=right_pose.orientation,
+                        frame=Frame.BASE
+                    )
+            else:
+                self.current_left_pose = transform_base_to_world.apply_to_pose(
+                    Pose(
+                    pos=left_pose.position,
+                    quat=left_pose.orientation,
+                    frame=Frame.BASE
+                ))
+                self.current_right_pose = transform_base_to_world.apply_to_pose(
+                    Pose(
+                    pos=right_pose.position,
+                    quat=right_pose.orientation,
+                    frame=Frame.BASE
+                ))
 
         elif mode == "tf":
             # ============ 另外一种获取末端位置方式 (gazebo) =================
             # 通过TF获取手臂末端位置
+
+            target_frame = Frame.BASE if self.control_frame == Frame.BASE else Frame.ODOM
+
             left_pose = self.robot_sdk.tools.get_link_pose(
                 link_name="zarm_l7_end_effector",
-                reference_frame=Frame.ODOM
+                reference_frame=target_frame
             )
             right_pose: KuavoPose = self.robot_sdk.tools.get_link_pose(
                 link_name="zarm_r7_end_effector",
-                reference_frame=Frame.ODOM
+                reference_frame=target_frame
             )
 
             self.current_left_pose = Pose(
                 pos=left_pose.position,
                 quat=left_pose.orientation,
-                frame=Frame.ODOM
+                frame=target_frame
             )
             self.current_right_pose = Pose(
                 pos=right_pose.position,
                 quat=right_pose.orientation,
-                frame=Frame.ODOM
+                frame=target_frame
             )
 
     def step(self):
@@ -299,8 +330,8 @@ class EventArmMoveKeyPoint(BaseEvent):
         current_left_target_pose = left_target_list[self.current_pose_id]
         current_right_target_pose = right_target_list[self.current_pose_id]
         # self.get_arm_pose_world()
-        current_meet = self.check_current_point_meet(current_left_target_pose, current_right_target_pose)
-        if not current_meet and self.current_pose_id != self.pre_pose_id:
+        # current_meet = self.check_current_point_meet(current_left_target_pose, current_right_target_pose)
+        if 1 and self.current_pose_id != self.pre_pose_id:
             if self.target_wrench is not None:
                 left_wrench_list, right_wrench_list = self.target_wrench
                 current_left_wrench = left_wrench_list[self.current_pose_id]
@@ -310,12 +341,13 @@ class EventArmMoveKeyPoint(BaseEvent):
                     current_left_wrench,
                     current_right_wrench,
                 )
-                time.sleep(1.0)
+                # time.sleep(1.0)
 
             self.logger.info(f"🔵 开始执行关键点{self.current_pose_id + 1}")
             self.pre_pose_id = self.current_pose_id
 
             # 将 Pose 转换为 KuavoPose 类型
+            self.get_arm_pose_world()
             left_start_kuavo_pose = KuavoPose(
                 position=self.current_left_pose.pos,
                 orientation=self.current_left_pose.quat.tolist()
@@ -336,20 +368,53 @@ class EventArmMoveKeyPoint(BaseEvent):
             left_arm_traj = self.interpolate_poses(left_start_kuavo_pose, left_target_kuavo_pose)
             right_arm_traj = self.interpolate_poses(right_start_kuavo_pose, right_target_kuavo_pose)
 
-            total_time = 2.0
+            total_time = 1.0
             num_points = min(len(left_arm_traj), len(right_arm_traj))
             time_per_point = total_time / (num_points - 1) if num_points > 1 else total_time
 
             for i in range(num_points):
+                control_frame = KuavoManipulationMpcFrame.VRFrame if self.control_frame==Frame.BASE else KuavoManipulationMpcFrame.WorldFrame
+                print(f'=================== control frame ============== {control_frame}， self.control_frame = {self.control_frame}')
                 self.robot_sdk.control.control_robot_end_effector_pose(
                     left_pose=left_arm_traj[i],
                     right_pose=right_arm_traj[i],
-                    frame=KuavoManipulationMpcFrame.WorldFrame,
+                    frame=control_frame,
                 )
                 if i < num_points - 1:  # 最后一个点不需要延时
                     time.sleep(time_per_point)
-
+        self.current_pose_id = self.current_pose_id + 1
         return status
+
+    def change_arm_ctrl_mode(self, mode: int):
+        service_name = "/change_arm_ctrl_mode"
+        try:
+            rospy.wait_for_service(service_name)
+            changeHandTrackingMode_srv = rospy.ServiceProxy(service_name, changeArmCtrlMode)
+            changeHandTrackingMode_srv(mode)
+        except rospy.ROSException:
+            rospy.logerr(f"Service {service_name} not available")
+
+    def change_mobile_ctrl_mode(self, mode: int):
+        """
+        ArmOnly
+        """
+        # print(f"change_mobile_ctrl_mode: {mode}")
+        mobile_manipulator_service_name = "/mobile_manipulator_mpc_control"
+        try:
+            rospy.wait_for_service(mobile_manipulator_service_name)
+            changeHandTrackingMode_srv = rospy.ServiceProxy(mobile_manipulator_service_name, changeArmCtrlMode)
+            changeHandTrackingMode_srv(mode)
+        except rospy.ROSException:
+            rospy.logerr(f"Service {mobile_manipulator_service_name} not available")
+    def change_mm_wbc_arm_ctrl_mode(self, mode: int):
+        # print(f"change_wbc_arm_ctrl_mode: {mode}")
+        service_name = "/enable_mm_wbc_arm_trajectory_control"
+        try:
+            rospy.wait_for_service(service_name)
+            changeHandTrackingMode_srv = rospy.ServiceProxy(service_name, changeArmCtrlMode)
+            changeHandTrackingMode_srv(mode)
+        except rospy.ROSException:
+            rospy.logerr(f"Service {service_name} not available")
 
     def arm_reset(self):
         """
@@ -375,33 +440,57 @@ class EventArmMoveKeyPoint(BaseEvent):
         # 直接检查整个 [left_target_list, right_target_list] 结构
         target_wrench = kwargs.get('arm_wrench', None)
 
-        left_target_world = []
-        right_target_world = []
+        left_targets = []
+        right_targets = []
+
+        # left_target_base = []
+        # right_target_base = []
+
         for left_key_pose, right_key_pose in zip(target[0], target[1]):
-            if Frame.BASE == left_key_pose.frame:
+            if self.control_frame == Frame.ODOM:
+                assert left_key_pose.frame in [Frame.ODOM, Frame.BASE, Frame.TAG], \
+                    self.logger.error("在全局控制模式下，left_key_pose.frame must be Frame.ODOM, Frame.BASE or Frame.TAG")
+                assert right_key_pose.frame in [Frame.ODOM, Frame.BASE, Frame.TAG], \
+                    self.logger.error("在全局控制模式下，right_key_pose.frame must be Frame.ODOM, Frame.BASE or Frame.TAG")
 
-                transform_base_to_world = self.get_current_transform(source_frame=Frame.BASE, target_frame=Frame.ODOM)
-                self.logger.info(f'此刻base在odom下的位置：{transform_base_to_world.trans_pose}')
-                left_target_world.append(transform_base_to_world.apply_to_pose(left_key_pose))
-                right_target_world.append(transform_base_to_world.apply_to_pose(right_key_pose))
+            elif self.control_frame == Frame.BASE:
+                assert left_key_pose.frame in [Frame.BASE], \
+                    self.logger.error("在局部控制模式下，left_key_pose.frame must be Frame.BASE")
+                assert right_key_pose.frame in [Frame.BASE], \
+                    self.logger.error("在局部控制模式下，right_key_pose.frame must be Frame.BASE")
 
-            elif Frame.ODOM == left_key_pose.frame:
-                left_target_world.append(left_key_pose)
-                right_target_world.append(right_key_pose)
+            if self.control_frame == Frame.BASE:
+                if Frame.BASE == left_key_pose.frame:
+                    left_targets.append(left_key_pose)
+                    right_targets.append(right_key_pose)
 
-            elif Frame.TAG == left_key_pose.frame:
-                tag = kwargs.get('tag', None)
-                assert tag is not None, "Tag must be provided when target frame is TAG"
-                transform_source_to_target = Transform3D(
-                    trans_pose=tag.pose,
-                    source_frame=Frame.TAG,  # 源坐标系为Tag坐标系
-                    target_frame=Frame.ODOM  # 目标坐标系为里程计坐标系
-                )
+                # res = super().set_target(target=[left_target_world, right_target_world], *args, **kwargs)
 
-                left_target_world.append(transform_source_to_target.apply_to_pose(left_key_pose))
-                right_target_world.append(transform_source_to_target.apply_to_pose(right_key_pose))
+            else:
+                if Frame.BASE == left_key_pose.frame:
 
-        res = super().set_target(target=[left_target_world, right_target_world], *args, **kwargs)
+                    transform_base_to_world = self.get_current_transform(source_frame=Frame.BASE, target_frame=Frame.ODOM)
+                    self.logger.info(f'此刻base在odom下的位置：{transform_base_to_world.trans_pose}')
+                    left_targets.append(transform_base_to_world.apply_to_pose(left_key_pose))
+                    right_targets.append(transform_base_to_world.apply_to_pose(right_key_pose))
+
+                elif Frame.ODOM == left_key_pose.frame:
+                    left_targets.append(left_key_pose)
+                    right_targets.append(right_key_pose)
+
+                elif Frame.TAG == left_key_pose.frame:
+                    tag = kwargs.get('tag', None)
+                    assert tag is not None, "Tag must be provided when target frame is TAG"
+                    transform_source_to_target = Transform3D(
+                        trans_pose=tag.pose,
+                        source_frame=Frame.TAG,  # 源坐标系为Tag坐标系
+                        target_frame=Frame.ODOM  # 目标坐标系为里程计坐标系
+                    )
+
+                    left_targets.append(transform_source_to_target.apply_to_pose(left_key_pose))
+                    right_targets.append(transform_source_to_target.apply_to_pose(right_key_pose))
+
+        res = super().set_target(target=[left_targets, right_targets], *args, **kwargs)
 
         if res:
             # 为了应对相对位置控制的情况，记录设置目标时机器人的位姿

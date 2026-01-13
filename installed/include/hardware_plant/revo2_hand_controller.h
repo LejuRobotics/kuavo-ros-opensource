@@ -2,6 +2,7 @@
 #define _REVO2_HAND_CONTROLLER_H_
 #include "dexhand_base.h"
 #include "dexhand_def.h"
+#include "canbus_sdk/canbus_sdk.h"
 
 #include <memory>
 #include <array>
@@ -28,8 +29,8 @@ class Revo2HandController;
 using Revo2HandControllerPtr = std::unique_ptr<Revo2HandController>;
 class Revo2HandController {
 public:    
-    static Revo2HandControllerPtr Create(const std::string &action_sequences_path, bool is_touch_dexhand) {
-        return std::unique_ptr<Revo2HandController>(new Revo2HandController(action_sequences_path, is_touch_dexhand));
+    static Revo2HandControllerPtr Create(const std::string &action_sequences_path, bool is_can_protocol) {
+        return std::unique_ptr<Revo2HandController>(new Revo2HandController(action_sequences_path, is_can_protocol));
     }
 
     ~Revo2HandController();
@@ -134,24 +135,6 @@ public:
     FingerTouchStatusArray get_touch_status();
 
     /**
-     * @brief 使能左手触摸传感器
-     * 
-     * @param mask 使能掩码
-     * @return true 成功
-     * @return false 失败或左手未连接
-     */
-    bool enable_left_hand_touch_sensor(uint8_t mask);
-    
-    /**
-     * @brief 使能右手触摸传感器
-     * 
-     * @param mask 使能掩码
-     * @return true 成功
-     * @return false 失败或右手未连接
-     */
-    bool enable_right_hand_touch_sensor(uint8_t mask);
-
-    /**
      * @brief 列出所有手势
      * 
      * @return std::vector<GestureInfoPtr> 手势信息指针列表
@@ -177,14 +160,13 @@ public:
     bool is_gesture_executing();
 
 private:
-    Revo2HandController(const std::string &action_sequences_path, bool is_touch_dexhand);
+    Revo2HandController(const std::string &action_sequences_path, bool is_can_protocol);
     Revo2HandController(Revo2HandController&&) = delete;
     Revo2HandController(const Revo2HandController&) = delete;
 
-    bool init_revo2hand();
-
     bool init_revo2_dexhand();
     bool init_normal_dexhand();
+    bool init_revo2_dexhand_can_customed();
 
     /**
      * @brief 解析手势配置文件
@@ -201,7 +183,7 @@ private:
     bool sleep_for_100ms(int ms_count);
 
     // 数据成员
-    bool is_touch_dexhand_{false};
+    bool is_can_protocol_{false};
     std::atomic<bool> l_position_updated_{false};
     std::atomic<bool> r_position_updated_{false};
     UnsignedFingerArray right_position_;

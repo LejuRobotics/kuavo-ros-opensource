@@ -1,0 +1,1451 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="biped_s60">
+  <mujoco>
+    <compiler meshdir="../meshes/" balanceinertia="true" discardvisual="false" />
+  </mujoco>
+  <link name="dummy_link" />
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0.000389910994978911 0.00140427472303049 0.059155398355868" rpy="0 0 0" />
+      <mass value="97.77291318" />
+      <inertia ixx="0.0019898467172166" ixy="-9.8e-05" ixz="5e-05" iyy="0.00328176736755805" iyz="0.000182260661996114" izz="0.00200808104859443" />
+    </inertial>
+    <visual>
+      <origin xyz="0.2265 0 0.1853" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s60/meshes/chassis.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="floating_base" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="dummy_link" />
+    <child link="base_link" />
+  </joint>
+  <link
+    name="LF_wheel_yaw">
+    <inertial>
+      <origin
+        xyz="-0.0011972644938924 -0.034761923206045 -0.0565346040051855"
+        rpy="0 0 0" />
+      <mass
+        value="0.234958546645441" />
+      <inertia
+        ixx="0.000156637647574779"
+        ixy="-7.89055997399309E-07"
+        ixz="-1.78080566401562E-05"
+        iyy="0.00025440120791798"
+        iyz="-3.09841751764832E-06"
+        izz="0.000277879080461698" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/LF_wheel_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="LF_wheel_yaw_joint" type="continuous">
+    <origin
+      xyz="0.253 0.1785 0.1853"
+      rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="LF_wheel_yaw" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" velocity="50" />
+    <dynamics damping="0.2" friction="0.1" />
+  </joint>
+  <link
+    name="LF_wheel_pitch">
+    <inertial>
+      <origin
+        xyz="-7.69835712344236E-07 0.0355138026690449 7.43470831433835E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.522591397526637" />
+      <inertia
+        ixx="0.00104460192339847"
+        ixy="-1.67403855473343E-08"
+        ixz="-1.60208365224359E-08"
+        iyy="0.0019310881225117"
+        iyz="1.61677254722675E-07"
+        izz="0.00104475782815018" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 -0.03595 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/LF_wheel_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.525490196078431 0.545098039215686 0.545098039215686 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="1.570796327 0 0" xyz="0 0 0" />
+      <geometry>
+        <cylinder radius="0.075" length="0.053" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LF_wheel_pitch_joint" type="continuous">
+    <origin
+      xyz="0.0 0.0 -0.1103"
+      rpy="0 0 0" />
+    <parent link="LF_wheel_yaw" />
+    <child link="LF_wheel_pitch" />
+    <axis xyz="0 1 0" />
+    <limit effort="10" velocity="100" />
+    <dynamics damping="0.1" friction="0.0" />
+  </joint>
+  <link
+    name="RF_wheel_yaw">
+    <inertial>
+      <origin
+        xyz="-0.000341355180661918 0.0201287602531735 -0.0220552261418914"
+        rpy="0 0 0" />
+      <mass
+        value="0.41751747204316" />
+      <inertia
+        ixx="0.000352393865612513"
+        ixy="8.17227812771387E-07"
+        ixz="-1.77348304129634E-05"
+        iyy="0.000458340232069379"
+        iyz="3.50162851754042E-06"
+        izz="0.000656304939842943" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/RF_wheel_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="RF_wheel_yaw_joint" type="continuous">
+    <origin
+      xyz="0.253 -0.1785 0.1853"
+      rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="RF_wheel_yaw" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" velocity="50" />
+    <dynamics damping="0.2" friction="0.1" />
+  </joint>
+  <link
+    name="RF_wheel_pitch">
+    <inertial>
+      <origin
+        xyz="7.69835712399747E-07 -0.035513802669045 7.43470831456039E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.522591397526634" />
+      <inertia
+        ixx="0.00104460192339846"
+        ixy="-1.67403855476662E-08"
+        ixz="1.60208365220845E-08"
+        iyy="0.0019310881225117"
+        iyz="-1.6167725472251E-07"
+        izz="0.00104475782815018" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0.03595 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/RF_wheel_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.525490196078431 0.545098039215686 0.545098039215686 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="1.570796327 0 0" xyz="0 0 0" />
+      <geometry>
+        <cylinder radius="0.075" length="0.053" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="RF_wheel_pitch_joint" type="continuous">
+    <origin xyz="0 0 -0.1103" rpy="0 0 0" />
+    <parent link="RF_wheel_yaw" />
+    <child link="RF_wheel_pitch" />
+    <axis xyz="0 1 0" />
+    <limit effort="10" velocity="100" />
+    <dynamics damping="0.1" friction="0.0" />
+  </joint>
+  <link
+    name="LB_wheel_yaw">
+    <inertial>
+      <origin
+        xyz="-0.0011972644938924 -0.0347619232060448 -0.0565346040051855"
+        rpy="0 0 0" />
+      <mass
+        value="0.234958546645441" />
+      <inertia
+        ixx="0.000156637647574779"
+        ixy="-7.89055997399323E-07"
+        ixz="-1.78080566401562E-05"
+        iyy="0.00025440120791798"
+        iyz="-3.0984175176483E-06"
+        izz="0.000277879080461698" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/LB_wheel_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="LB_wheel_yaw_joint" type="continuous">
+    <origin
+      xyz="-0.253 0.1785 0.1853"
+      rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="LB_wheel_yaw" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" velocity="50" />
+    <dynamics damping="0.2" friction="0.1" />
+  </joint>
+  <link
+    name="LB_wheel_pitch">
+    <inertial>
+      <origin
+        xyz="-7.69835712455258E-07 0.0355138026690449 7.43470831467141E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.522591397526637" />
+      <inertia
+        ixx="0.00104460192339847"
+        ixy="-1.67403855473986E-08"
+        ixz="-1.60208365224849E-08"
+        iyy="0.00193108812251171"
+        iyz="1.6167725472253E-07"
+        izz="0.00104475782815018" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 -0.03595 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/LB_wheel_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.525490196078431 0.545098039215686 0.545098039215686 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="1.570796327 0 0" xyz="0 0 0" />
+      <geometry>
+        <cylinder radius="0.075" length="0.053" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LB_wheel_pitch_joint" type="continuous">
+    <origin
+      xyz="0 0 -0.1103"
+      rpy="0 0 0" />
+    <parent link="LB_wheel_yaw" />
+    <child link="LB_wheel_pitch" />
+    <axis xyz="0 1 0" />
+    <limit effort="10" velocity="100" />
+    <dynamics damping="0.1" friction="0.0" />
+  </joint>
+  <link
+    name="RB_wheel_yaw">
+    <inertial>
+      <origin
+        xyz="-0.000341354945812666 0.0201287602901186 -0.0220552253560522"
+        rpy="0 0 0" />
+      <mass
+        value="0.417517483160237" />
+      <inertia
+        ixx="0.000352393871132534"
+        ixy="8.17225629461376E-07"
+        ixz="-1.77348305620961E-05"
+        iyy="0.00045834023311026"
+        iyz="3.50162813209095E-06"
+        izz="0.000656304946447071" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/RB_wheel_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="RB_wheel_yaw_joint" type="continuous">
+    <origin
+      xyz="-0.253 -0.1785 0.1853"
+      rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="RB_wheel_yaw" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" velocity="50" />
+    <dynamics damping="0.2" friction="0.1" />
+  </joint>
+  <link
+    name="RB_wheel_pitch">
+    <inertial>
+      <origin
+        xyz="7.69835712455258E-07 -0.0355138026690451 7.43470831442161E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.522591397526639" />
+      <inertia
+        ixx="0.00104460192339847"
+        ixy="-1.67403855477097E-08"
+        ixz="1.60208365224285E-08"
+        iyy="0.00193108812251171"
+        iyz="-1.6167725472336E-07"
+        izz="0.00104475782815018" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0.03595 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/RB_wheel_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.525490196078431 0.545098039215686 0.545098039215686 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="1.570796327 0 0" xyz="0 0 0" />
+      <geometry>
+        <cylinder radius="0.075" length="0.053" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RB_wheel_pitch_joint" type="continuous">
+    <origin
+      xyz="0 0 -0.1103"
+      rpy="0 0 0" />
+    <parent link="RB_wheel_yaw" />
+    <child link="RB_wheel_pitch" />
+    <axis xyz="0 1 0" />
+    <limit effort="10" velocity="100" />
+    <dynamics damping="0.1" friction="0.0" />
+  </joint>
+  <link name="knee_link">
+    <inertial>
+      <origin xyz="-0.23814509 0.06477318 0.05709786" rpy="0 0 0" />
+      <mass value="5.39660196" />
+      <inertia ixx="0.0181941" ixy="-3.368e-05" ixz="0.03867457" iyy="0.18698546" iyz="9.1e-05" izz="0.1696571" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s60/meshes/knee_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="knee_joint" type="revolute">
+    <origin xyz="0.2265 0.017 0.2658" rpy="0 0.0 0" />
+    <parent link="base_link" />
+    <child link="knee_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="1.448" effort="668" velocity="22.5" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link name="leg_link">
+    <inertial>
+      <origin xyz="0.23828732 -0.00731845 0.03851197" rpy="0 0 0" />
+      <mass value="12.35650958" />
+      <inertia ixx="0.04100244" ixy="-0.0044715" ixz="-0.09155463" iyy="0.62558367" iyz="-0.00089808" izz="0.60922308" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s60/meshes/leg_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_joint" type="revolute">
+    <origin xyz="-0.48618 0 0.11672" rpy="0 -0.251 0" />
+    <parent link="knee_link" />
+    <child link="leg_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.81" upper="0.0" effort="668" velocity="22.5" />
+  </joint>
+  <link name="waist_link">
+    <inertial>
+      <origin xyz="-0.00042629 -0.01633525 0.12667958" rpy="0 0 0" />
+      <mass value="5.4305643" />
+      <inertia ixx="0.03360578" ixy="-0.00023065" ixz="-0.00020076" iyy="0.02736911" iyz="0.00037584" izz="0.02207442" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s60/meshes/waist_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_pitch_joint" type="revolute">
+    <origin xyz="0.49384 0 0.078217" rpy="0 0.236 0" />
+    <parent link="leg_link" />
+    <child link="waist_link" />
+    <axis xyz=" 0 1 0" />
+    <limit lower="-0.157" upper="2.984" effort="267" velocity="22.5" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="waist_yaw_link">
+    <inertial>
+      <origin
+        xyz="0.00159298 -0.00027078 0.13187420"
+        rpy="0 0 0" />
+      <mass
+        value="11.56094002" />
+      <inertia
+        ixx="0.24663556"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.15937676"
+        iyz="0.0"
+        izz="0.15881326" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/torso.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="waist_yaw_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 -0.0165 0.209"
+      rpy="0 0 0" />
+    <parent
+      link="waist_link" />
+    <child
+      link="waist_yaw_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-3.238" upper="3.238" effort="267" velocity="22.5" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="zarm_l1_link">
+    <inertial>
+      <origin
+        xyz="0.00166796 0.07275896 0.00012987"
+        rpy="0 0 0" />
+      <mass
+        value="0.91653322" />
+      <inertia
+        ixx="0.00126587"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00086921"
+        iyz="0.0"
+        izz="0.00124337" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/l_arm_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l1_joint"
+    type="revolute">
+    <origin
+      xyz="0 0.1717 0.242"
+      rpy="0 0 0" />
+    <parent
+      link="waist_yaw_link" />
+    <child
+      link="zarm_l1_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="zarm_l2_link">
+    <inertial>
+      <origin
+        xyz="-0.00080994 0.00000486 -0.04651026"
+        rpy="0 0 0" />
+      <mass
+        value="0.38767390" />
+      <inertia
+        ixx="0.00080739"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00116144"
+        iyz="0.0"
+        izz="0.00070223" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/l_arm_roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l2_joint"
+    type="revolute">
+    <origin
+      xyz="0 0.081 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l1_link" />
+    <child
+      link="zarm_l2_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-0.349065850398866" upper="2.0943951023932" effort="50.0" velocity="19.154" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="zarm_l3_link">
+    <inertial>
+      <origin
+        xyz="0.00943019 0.00343988 -0.11304538"
+        rpy="0 0 0" />
+      <mass
+        value="1.77926875" />
+      <inertia
+        ixx="0.00992856"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.01004582"
+        iyz="0.0"
+        izz="0.00185422" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/l_arm_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l3_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l2_link" />
+    <child
+      link="zarm_l3_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="18.84" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="zarm_l4_link">
+    <inertial>
+      <origin
+        xyz="-0.01829932 0.00087167 -0.06936622"
+        rpy="0 0 0" />
+      <mass
+        value="0.58507821" />
+      <inertia
+        ixx="0.00143291"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00125018"
+        iyz="0.0"
+        izz="0.00068356" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/l_forearm.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l4_joint"
+    type="revolute">
+    <origin
+      xyz="0.02 0 -0.2837"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l3_link" />
+    <child
+      link="zarm_l4_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="50.0" velocity="18.84" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="zarm_l5_link">
+    <inertial>
+      <origin
+        xyz="0.00026090 0.00001322 -0.06083944"
+        rpy="0 0 0" />
+      <mass
+        value="0.68679955" />
+      <inertia
+        ixx="0.00086873"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00122518"
+        iyz="0.0"
+        izz="0.00066873" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/l_hand_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l5_joint"
+    type="revolute">
+    <origin
+      xyz="-0.02 0 -0.1195"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l4_link" />
+    <child
+      link="zarm_l5_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="12.0" velocity="21.666" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="zarm_l6_link">
+    <inertial>
+      <origin
+        xyz="0.00019162 0.0 -0.01747746"
+        rpy="0 0 0" />
+      <mass
+        value="0.39387181" />
+      <inertia
+        ixx="0.00018535"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00019853"
+        iyz="0.0"
+        izz="0.00020210" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/l_hand_roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l6_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 0 -0.114"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l5_link" />
+    <child
+      link="zarm_l6_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-1.30899693899575" upper="0.698131700797732" effort="12.0" velocity="21.666" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="zarm_l7_link">
+    <inertial>
+      <origin
+        xyz="0.0 0.0 -0.10230994"
+        rpy="0 0 0" />
+      <mass
+        value="0.71537800" />
+      <inertia
+        ixx="0.001060440"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.001064636"
+        iyz="0.0"
+        izz="0.001061427" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/l_hand_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l7_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 -0.021"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l6_link" />
+    <child
+      link="zarm_l7_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="12.0" velocity="21.666" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link name="zarm_l7_end_effector">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="1e-6" />
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6" />
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="zarm_l7_end_effector_joint" type="fixed">
+    <origin xyz="0 -0.03 -0.17" rpy="0 0 0" />
+    <parent link="zarm_l7_link" />
+    <child link="zarm_l7_end_effector" />
+  </joint>
+  <link
+    name="zarm_r1_link">
+    <inertial>
+      <origin
+        xyz="-0.00166796 -0.07260029 0.00012987"
+        rpy="0 0 0" />
+      <mass
+        value="0.91653322" />
+      <inertia
+        ixx="0.00126587"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00086921"
+        iyz="0.0"
+        izz="0.00124337" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/r_arm_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r1_joint"
+    type="revolute">
+    <origin
+      xyz="0 -0.1717 0.242"
+      rpy="0 0 0" />
+    <parent
+      link="waist_yaw_link" />
+    <child
+      link="zarm_r1_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="zarm_r2_link">
+    <inertial>
+      <origin
+        xyz="-0.00080994 -0.00000486 -0.04651026"
+        rpy="0 0 0" />
+      <mass
+        value="0.38767390" />
+      <inertia
+        ixx="0.00080739"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00116144"
+        iyz="0.0"
+        izz="0.00070223" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/r_arm_roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r2_joint"
+    type="revolute">
+    <origin
+      xyz="0 -0.081 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r1_link" />
+    <child
+      link="zarm_r2_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-2.0943951023932" upper="0.349065850398866" effort="50.0" velocity="19.154" />
+    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+  <link
+    name="zarm_r3_link">
+    <inertial>
+      <origin
+        xyz="0.00943019 -0.00343988 -0.11304538"
+        rpy="0 0 0" />
+      <mass
+        value="1.77926875" />
+      <inertia
+        ixx="0.00992856"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.01004582"
+        iyz="0.0"
+        izz="0.00185422" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/r_arm_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r3_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r2_link" />
+    <child
+      link="zarm_r3_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="18.84" />
+    <dynamics damping="0.2" friction="0.0" />
+    <initial_position>0.0</initial_position>
+  </joint>
+  <link
+    name="zarm_r4_link">
+    <inertial>
+      <origin
+        xyz="-0.01829932 -0.00087167 -0.06936622"
+        rpy="0 0 0" />
+      <mass
+        value="0.58507821" />
+      <inertia
+        ixx="0.00143291"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00125018"
+        iyz="0.0"
+        izz="0.00068356" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/r_forearm.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r4_joint"
+    type="revolute">
+    <origin
+      xyz="0.02 0 -0.2837"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r3_link" />
+    <child
+      link="zarm_r4_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="50.0" velocity="18.84" />
+    <dynamics damping="0.2" friction="0.0" />
+    <initial_position>0.0</initial_position>
+  </joint>
+  <link
+    name="zarm_r5_link">
+    <inertial>
+      <origin
+        xyz="-0.00026090 -0.00001322 -0.06083944"
+        rpy="0 0 0" />
+      <mass
+        value="0.68679955" />
+      <inertia
+        ixx="0.00086873"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00122518"
+        iyz="0.0"
+        izz="0.00066873" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/r_hand_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r5_joint"
+    type="revolute">
+    <origin
+      xyz="-0.02 0 -0.1195"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r4_link" />
+    <child
+      link="zarm_r5_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="12.0" velocity="21.666" />
+    <dynamics damping="0.2" friction="0.0" />
+    <initial_position>0.0</initial_position>
+  </joint>
+  <link
+    name="zarm_r6_link">
+    <inertial>
+      <origin
+        xyz="0.00019162 0.0 -0.01747746"
+        rpy="0 0 0" />
+      <mass
+        value="0.39387181" />
+      <inertia
+        ixx="0.00018535"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00019853"
+        iyz="0.0"
+        izz="0.00020210" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/r_hand_roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r6_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 0 -0.114"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r5_link" />
+    <child
+      link="zarm_r6_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-0.698131700797732" upper="1.30899693899575" effort="12.0" velocity="21.666" />
+    <dynamics damping="0.2" friction="0.0" />
+    <initial_position>0.0</initial_position>
+  </joint>
+  <link
+    name="zarm_r7_link">
+    <inertial>
+      <origin
+        xyz="0.0 0.0 -0.10230994"
+        rpy="0 0 0" />
+      <mass
+        value="0.71537800" />
+      <inertia
+        ixx="0.001060440"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.001064636"
+        iyz="0.0"
+        izz="0.001061427" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/r_hand_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r7_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 0 -0.021"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r6_link" />
+    <child
+      link="zarm_r7_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="12.0" velocity="21.666" />
+    <dynamics damping="0.2" friction="0.0" />
+    <initial_position>0.0</initial_position>
+  </joint>
+  <link name="zarm_r7_end_effector">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="zarm_r7_end_effector_joint" type="fixed">
+    <origin xyz="0 0.03 -0.17" rpy="0 0 0" />
+    <parent link="zarm_r7_link" />
+    <child link="zarm_r7_end_effector" />
+  </joint>
+  <link
+    name="zhead_1_link">
+    <inertial>
+      <origin
+        xyz="0.00173289 -0.00335491 0.09489286"
+        rpy="0 0 0" />
+      <mass
+        value="0.83597358" />
+      <inertia
+        ixx="0.00191700"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00184689"
+        iyz="0.0"
+        izz="0.00059064" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/head_yaw_new.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0.03 0 0.09" />
+      <geometry>
+        <sphere radius="0.1" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="zhead_1_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0.3164"
+      rpy="0 0 0" />
+    <parent
+      link="waist_yaw_link" />
+    <child
+      link="zhead_1_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.57" upper="1.57" effort="15.5" velocity="2.198" />
+    <dynamics damping="0.2" friction="0.0" />
+    <initial_position>0.0</initial_position>
+  </joint>
+  <link
+    name="zhead_2_link">
+    <inertial>
+      <origin
+        xyz="0.02233688 0.00050124 0.03714709"
+        rpy="0 0 0" />
+      <mass
+        value="0.75473516" />
+      <inertia
+        ixx="0.00366352"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00461321"
+        iyz="0.0"
+        izz="0.00483805" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/head_pitch_new.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zhead_2_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0.13795"
+      rpy="0 0 0" />
+    <parent
+      link="zhead_1_link" />
+    <child
+      link="zhead_2_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-0.526" upper="0.526" effort="14.5" velocity="2.198" />
+    <dynamics damping="0.2" friction="0.0" />
+    <initial_position>0.0</initial_position>
+  </joint>
+  <link
+    name="camera">
+    <inertial>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="0.001" />
+      <inertia
+        ixx="0.00001"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00001"
+        iyz="0.0"
+        izz="0.00001" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/camera.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="camera"
+    type="fixed">
+    <origin
+      xyz="0.099478 0 0.032897"
+      rpy="0 0.35805 0" />
+    <parent
+      link="zhead_2_link" />
+    <child
+      link="camera" />
+  </joint>
+  <link
+    name="radar">
+    <inertial>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="0.001" />
+      <inertia
+        ixx="0.00001"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00001"
+        iyz="0.0"
+        izz="0.00001" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s60/meshes/radar.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.611764705882353 0.658823529411765 0.670588235294118 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="radar"
+    type="fixed">
+    <origin
+      xyz="0 0 0.059701"
+      rpy="0 0 0" />
+    <parent
+      link="zhead_1_link" />
+    <child
+      link="radar" />
+  </joint>
+
+  <!-- 为4个轮子设置物理参数 -->
+  <gazebo reference="LF_wheel_pitch">
+    <mu1>1.0</mu1>  <!-- 增加静摩擦系数 -->
+    <mu2>1.0</mu2>  <!-- 增加动摩擦系数 -->
+    <kp>1000000.0</kp>
+    <kd>1.0</kd>
+    <minDepth>0.0</minDepth>
+  </gazebo>
+
+  <gazebo reference="RF_wheel_pitch">
+    <mu1>1.0</mu1>  <!-- 增加静摩擦系数 -->
+    <mu2>1.0</mu2>  <!-- 增加动摩擦系数 -->
+    <kp>1000000.0</kp>
+    <kd>1.0</kd>
+    <minDepth>0.0</minDepth>
+  </gazebo>
+
+  <gazebo reference="LB_wheel_pitch">
+    <mu1>1.0</mu1>  <!-- 增加静摩擦系数 -->
+    <mu2>1.0</mu2>  <!-- 增加动摩擦系数 -->
+    <kp>1000000.0</kp>
+    <kd>1.0</kd>
+    <minDepth>0.0</minDepth>
+  </gazebo>
+
+  <gazebo reference="RB_wheel_pitch">
+    <mu1>1.0</mu1>  <!-- 增加静摩擦系数 -->
+    <mu2>1.0</mu2>  <!-- 增加动摩擦系数 -->
+    <kp>1000000.0</kp>
+    <kd>1.0</kd>
+    <minDepth>0.0</minDepth>
+  </gazebo>
+
+  <gazebo>
+    <plugin name="gazebo_shm_interface" filename="libgazebo_sim_shm_interface.so">
+      <!-- IMU配置 -->
+      <imu>
+        <frame_id>dummy_link</frame_id>
+      </imu>
+      
+      <!-- 关节配置 -->
+      <joints>
+        <!-- 轮子关节（按照MuJoCo XML的body顺序：轮子在腿部之前） -->
+        <!-- <joint><name>LF_wheel_yaw_joint</name></joint>
+        <joint><name>LF_wheel_pitch_joint</name></joint>
+        <joint><name>RF_wheel_yaw_joint</name></joint>
+        <joint><name>RF_wheel_pitch_joint</name></joint>
+        <joint><name>LB_wheel_yaw_joint</name></joint>
+        <joint><name>LB_wheel_pitch_joint</name></joint>
+        <joint><name>RB_wheel_yaw_joint</name></joint>
+        <joint><name>RB_wheel_pitch_joint</name></joint> -->
+        
+        <!-- 腿部关节 -->
+        <joint><name>knee_joint</name></joint>
+        <joint><name>leg_joint</name></joint>
+        <joint><name>waist_pitch_joint</name></joint>
+        <joint><name>waist_yaw_joint</name></joint>
+        
+        <!-- 左臂关节 -->
+        <joint><name>zarm_l1_joint</name></joint>
+        <joint><name>zarm_l2_joint</name></joint>
+        <joint><name>zarm_l3_joint</name></joint>
+        <joint><name>zarm_l4_joint</name></joint>
+        <joint><name>zarm_l5_joint</name></joint>
+        <joint><name>zarm_l6_joint</name></joint>
+        <joint><name>zarm_l7_joint</name></joint>
+        
+        <!-- 右臂关节 -->
+        <joint><name>zarm_r1_joint</name></joint>
+        <joint><name>zarm_r2_joint</name></joint>
+        <joint><name>zarm_r3_joint</name></joint>
+        <joint><name>zarm_r4_joint</name></joint>
+        <joint><name>zarm_r5_joint</name></joint>
+        <joint><name>zarm_r6_joint</name></joint>
+        <joint><name>zarm_r7_joint</name></joint>
+        
+        <!-- 头部关节 -->
+        <joint><name>zhead_1_joint</name></joint>
+        <joint><name>zhead_2_joint</name></joint>
+      </joints>
+
+      </plugin>
+  </gazebo>
+
+</robot>

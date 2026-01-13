@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Launch Arguments -->
+  <arg name="arm_type" default="left" doc="Arm type to control: 'left' or 'right'" />
+  <arg name="cali_arm" default="false" doc="Enable calibration mode" />
+
+  <param name="cali_arm" value="$(arg cali_arm)" />
+  <param name="arm_type" value="$(arg arm_type)" />
+  <!-- RuiWo Controller Example Node -->
+  <node pkg="ruiwo_controller_example" name="motor_control_node" type="motor_control_node" output="screen">
+  </node>
+</launch>
