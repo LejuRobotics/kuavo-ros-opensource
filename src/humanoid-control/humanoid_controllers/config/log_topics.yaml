@@ -29,6 +29,7 @@ topics:
   - /route_plan_pose_array
   - /state_motion_control
   - /kuavo_arm_traj
+  - /lb_leg_traj
   - /gait_receiver/.*
   - /SwitchedModelReferenceManager/.*
   - /motor_cmd/.*
