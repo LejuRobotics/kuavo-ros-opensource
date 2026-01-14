@@ -651,8 +651,10 @@ class KuavoRobotCore:
         if self._rb_state.arm_control_mode != mode:
             while self._rb_state.arm_control_mode != mode:
                 SDKLogger.debug(f"[Core] Change robot arm control from {self._rb_state.arm_control_mode} to {mode}, retry: {count}")
-                self._control.change_robot_arm_ctrl_mode(mode)
-                if self._rb_state.arm_control_mode == mode:
+                if self._control.change_robot_arm_ctrl_mode(mode):
+                    # 服务调用成功后，手动更新状态缓存
+                    self._rb_state._arm_ctrl_mode = mode
+                    SDKLogger.debug(f"[Core] Successfully changed arm control mode to {mode}")
                     break
                 if timeout <= 0:
                     SDKLogger.warn("[Core] Change robot arm control mode timeout!")

@@ -781,6 +781,30 @@ def check_can_switch_to_vmp(event):
         rospy.logerr(f"Error in check_can_switch_to_vmp: {e}")
         return False
 
+def check_is_amp_controller(event):
+    """检查当前控制器是否为 amp_controller
+    用于限制某些状态转换只能在 amp_controller 下执行（mpc 不支持）
+    TODO：属于临时添加的回调函数，后续 mpc 支持 trot 之后删除此函数
+    :return: bool, True表示当前是 amp_controller，False表示不是
+    """
+    try:
+        current_controller = get_current_controller_name()
+        
+        if current_controller is None:
+            rospy.logwarn("[StanceTransition] Failed to get current controller name. Cannot switch to stance.")
+            return False
+        
+        current_controller_lower = current_controller.lower()
+        
+        if current_controller_lower == "amp_controller":
+            return True
+        else:
+            rospy.logwarn(f"[StanceTransition] Cannot switch to stance from '{current_controller}'. Only amp_controller is supported.")
+            return False
+    except Exception as e:
+        rospy.logerr(f"Error in check_is_amp_controller: {e}")
+        return False
+
 def vmp_controller_callback(event):
     """进入VMP控制模式回调函数
     从 amp_controller 切换到 vmp_controller

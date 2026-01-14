@@ -395,15 +395,7 @@ namespace humanoid_controller
     if (controllerNh_.hasParam("/only_half_up_body")) {
       controllerNh_.getParam("/only_half_up_body", only_half_up_body_);
     }
-    // 半身模式下初始化插值变量
-    if (only_half_up_body_) {
-      half_body_arm_interpolation_start_pos_.resize(armNumReal_);
-      half_body_arm_interpolation_target_pos_.resize(armNumReal_);
-      half_body_arm_interpolation_last_target_pos_.resize(armNumReal_);
-      half_body_arm_interpolation_start_pos_.setZero();
-      half_body_arm_interpolation_target_pos_.setZero();
-      half_body_arm_interpolation_last_target_pos_.setZero();
-    }
+
     if (controllerNh_.hasParam("/stand_up_protect"))
     {
       controllerNh_.getParam("/stand_up_protect", stand_up_protect_);
@@ -2365,51 +2357,15 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         auto target_arm_pos = currentArmTargetTrajectories_.getDesiredState(currentObservation_.time);
         if (target_arm_pos.size() == armNumReal_)
         {
-          // 只使用上半身模式, 此时 MPC 求解未开启, 需要进行插值处理
-          if (only_half_up_body_)
+          for (int i = 0; i < 2; i++)
           {
-            // 检测目标改变并启动插值
-            if ((half_body_arm_interpolation_last_target_pos_.size() != target_arm_pos.size()) ||
-                ((target_arm_pos - half_body_arm_interpolation_last_target_pos_).norm() > 0.01))
-            {
-              Eigen::VectorXd current_pos = is_half_body_arm_interpolating_ ? half_body_arm_interpolation_start_pos_ : jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
-              is_half_body_arm_interpolating_ = ((target_arm_pos - current_pos).norm() >= 0.05);
-              if (is_half_body_arm_interpolating_)
-              {
-                half_body_arm_interpolation_start_pos_ = current_pos;
-                half_body_arm_interpolation_target_pos_ = target_arm_pos;
-                half_body_interpolation_start_time_ = currentObservation_.time;
-              }
-              half_body_arm_interpolation_last_target_pos_ = target_arm_pos;
-            }
-            
-            // 使用LinearInterpolation计算插值位置
-            Eigen::VectorXd final_arm_pos = target_arm_pos;
-            if (is_half_body_arm_interpolating_ && half_body_interpolation_duration_ > 0.0)
-            {
-              double end_time = half_body_interpolation_start_time_ + half_body_interpolation_duration_;
-              if (currentObservation_.time < end_time)
-              {
-                scalar_array_t timeTrajectory = {half_body_interpolation_start_time_, end_time};
-                vector_array_t stateTrajectory = {half_body_arm_interpolation_start_pos_, half_body_arm_interpolation_target_pos_};
-                final_arm_pos = LinearInterpolation::interpolate(currentObservation_.time, timeTrajectory, stateTrajectory);
-              }
-              else
-              {
-                is_half_body_arm_interpolating_ = false;
-              }
-            }
-            
-            // 应用到WBC
-            for (int i = 0; i < 2; i++)
+            // 只使用上半身模式, 此时 MPC 求解未开启, 直接使用 target_arm_pos
+            if (only_half_up_body_)
             {
               optimizedState2WBC_mrt_.tail(armNumReal_).segment(i * armDofReal_, armDofReal_) =
-                  final_arm_pos.segment(i * armDofReal_, armDofReal_);
+                  target_arm_pos.segment(i * armDofReal_, armDofDiff_);
             }
-          }
-          else
-          {
-            for (int i = 0; i < 2; i++)
+            else
             {
               optimizedState2WBC_mrt_.tail(armNumReal_).segment(i * armDofReal_ + armDofMPC_, armDofDiff_) =
                   target_arm_pos.segment(i * armDofReal_ + armDofMPC_, armDofDiff_);

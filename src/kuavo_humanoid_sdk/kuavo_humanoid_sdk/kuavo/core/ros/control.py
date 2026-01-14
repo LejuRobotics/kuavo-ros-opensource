@@ -1,12 +1,13 @@
 import os
 import numpy as np
+import threading
 from typing import Tuple
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.interfaces.data_types import (KuavoArmCtrlMode, KuavoIKParams, KuavoPose, 
                                                       KuavoManipulationMpcControlFlow, KuavoManipulationMpcCtrlMode
                                                       ,KuavoManipulationMpcFrame, KuavoMotorParam)
 from kuavo_humanoid_sdk.kuavo.core.ros.sat_utils import RotatingRectangle
-from kuavo_humanoid_sdk.kuavo.core.ros.param import EndEffectorType
+from kuavo_humanoid_sdk.kuavo.core.ros.param import EndEffectorType, kuavo_ros_param
 from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCore
 
 import rospy
@@ -419,6 +420,9 @@ class ControlRobotArm:
         return False
 
     def srv_get_manipulation_mpc_ctrl_mode(self, )->KuavoManipulationMpcCtrlMode:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcCtrlMode.ERROR
+
         try:
             service_name = '/mobile_manipulator_get_mpc_control_mode'
             rospy.wait_for_service(service_name, timeout=2.0)
@@ -440,6 +444,9 @@ class ControlRobotArm:
         return KuavoManipulationMpcCtrlMode.ERROR
 
     def srv_get_manipulation_mpc_frame(self, )->KuavoManipulationMpcFrame:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcFrame.ERROR
+
         try:
             service_name = '/get_mm_ctrl_frame'
             rospy.wait_for_service(service_name, timeout=2.0)
@@ -461,6 +468,10 @@ class ControlRobotArm:
         return KuavoManipulationMpcFrame.ERROR
 
     def srv_get_manipulation_mpc_control_flow(self, )->KuavoManipulationMpcControlFlow:
+        
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcControlFlow.Error
+
         try:
             service_name = '/get_mm_wbc_arm_trajectory_control'
             rospy.wait_for_service(service_name, timeout=2.0)
@@ -484,9 +495,8 @@ class ControlRobotArm:
 
     def srv_change_arm_ctrl_mode(self, mode: KuavoArmCtrlMode)->bool:
         try:
-            # robot_type: 0=双足, 1=轮臂
-            robot_type = rospy.get_param('/robot_type', 0)
-            service_name = '/wheel_arm_change_arm_ctrl_mode' if robot_type == 1 else '/change_arm_ctrl_mode'
+            # robot_type: 2=双足, 1=轮臂
+            service_name = '/wheel_arm_change_arm_ctrl_mode' if kuavo_ros_param.is_wheel_arm_robot() else '/change_arm_ctrl_mode'
             rospy.wait_for_service(service_name, timeout=2.0)
             change_arm_ctrl_mode_srv = rospy.ServiceProxy(service_name, changeArmCtrlMode)
             req = changeArmCtrlModeRequest()
@@ -1177,22 +1187,37 @@ class KuavoRobotControl:
             self.kuavo_eef_control = None
         else:
             self.kuavo_eef_control = ControlEndEffector(eef_type=eef_type)
-        
-        connect_success = True
-        err_msg = ''
-        if not self.kuavo_arm_control.connect(timeout):
-            connect_success  = False
-            err_msg = "Failed to connect to arm control topics, \n"
-        if not self.kuavo_head_control.connect(timeout):
-            connect_success  = False
-            err_msg += "Failed to connect to head control topics, \n"
-        if not self.kuavo_motion_control.connect(timeout):
-            err_msg += "Failed to connect to motion control topics, \n"
-            connect_success  = False
 
-        if self.kuavo_eef_control is not None and not self.kuavo_eef_control.connect(timeout):
-            connect_success  = False
-            err_msg += "Failed to connect to end effector control topics."
+        # Parallel connection check using threads
+        results, errors, threads = {}, {}, []
+
+        connect_configs = [
+            ('arm', self.kuavo_arm_control, "arm control"),
+            ('head', self.kuavo_head_control, "head control"),
+            ('motion', self.kuavo_motion_control, "motion control"),
+            ('eef', self.kuavo_eef_control, "end effector control"),
+        ]
+
+        for name, control, desc in connect_configs:
+            def connect(n=name, c=control, d=desc):
+                if c is None:
+                    results[n] = True
+                    return
+                results[n] = c.connect(timeout)
+                if not results[n]:
+                    errors[n] = f"Failed to connect to {d} topics"
+
+            t = threading.Thread(target=connect)
+            threads.append(t)
+            t.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # Collect results
+        connect_success = all(results.values())
+        err_msg = '\n'.join(errors.values())
 
         if connect_success:
             err_msg = 'success'

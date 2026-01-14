@@ -774,6 +774,7 @@ class KeyBoardRobotController:
                         print("IK: rotation - Y - PITCH")
                         print("JL: rotation - Z - YAW")
                         print("Press N to Switch to another hand")
+                        print("Press V to Switch move control")
                         print("Press Ctrl-C to exit")
 
                     # 手臂移动 切换至 机器人运动 模式
@@ -791,6 +792,7 @@ class KeyBoardRobotController:
                         print("IKJL/QE: Right stick, up/down, turn left/right")
                         print("R: walk, C: stance")
                         print("<space>: Reset all axes to zero")
+                        print("Press V to Switch arm control")
                         print("Press Ctrl-C to exit")
 
                 key = self.getKey()

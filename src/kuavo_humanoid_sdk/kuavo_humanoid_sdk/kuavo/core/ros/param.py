@@ -75,6 +75,26 @@ class RosParameter:
             return 0.8328437523948975
         return rospy.get_param('/com_height')
 
+    def robot_type(self)->int:
+        """Get robot type: 2/rl/ocs2=legged, 1/wheel-arm=wheel-arm"""
+        return rospy.get_param('/robot_type', 2)
+
+    def is_legged_robot(self)->bool:
+        """Check if robot is legged (bipedal) type"""
+        rt = self.robot_type()
+        # 支持数字和字符串类型
+        if isinstance(rt, str):
+            return rt.lower() in ['2', 'rl', 'ocs2']
+        return rt == 2
+
+    def is_wheel_arm_robot(self)->bool:
+        """Check if robot is wheel-arm type"""
+        rt = self.robot_type()
+        # 支持数字和字符串类型
+        if isinstance(rt, str):
+            return rt.lower() in ['1']
+        return rt == 1
+
 kuavo_ros_param = RosParameter()
 
 def joint_names()->dict:
