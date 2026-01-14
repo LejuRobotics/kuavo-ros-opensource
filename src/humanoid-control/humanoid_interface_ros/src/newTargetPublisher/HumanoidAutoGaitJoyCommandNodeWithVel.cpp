@@ -299,6 +299,11 @@ namespace ocs2
         loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
         loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
         loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
+        try {
+          loadData::loadCppDataType(referenceFile, "cmdvelLinearYLimit", c_relative_base_limit_[1]);
+        } catch (const std::exception &e) {
+          ROS_WARN_STREAM("cmdvelLinearYLimit not found, using default: " << c_relative_base_limit_[1]);
+        }
         loadData::loadCppDataType(referenceFile, "vrSquatHeightMin", squatHeightMin_);
         loadData::loadCppDataType(referenceFile, "vrSquatHeightMax", squatHeightMax_);
         try {
