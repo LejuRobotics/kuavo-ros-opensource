@@ -645,7 +645,8 @@
         "trigger": "trot",
         "source": "stance",
         "dest": "trot",
-        "before": "trot_callback"
+        "before": "trot_callback",
+        "conditions": "check_is_amp_controller"
       },
       {
         "trigger": "switch_controller",
@@ -742,7 +743,8 @@
         "trigger": "trot",
         "source": "walk",
         "dest": "trot",
-        "before": "trot_callback"
+        "before": "trot_callback",
+        "conditions": "check_is_amp_controller"
       },
       {
         "trigger": "stance",

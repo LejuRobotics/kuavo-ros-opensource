@@ -652,7 +652,7 @@ class H12PROControllerNode:
             # 检查当前控制器是否为 mpc，只有 mpc 控制器支持缓慢下降
             current_controller = self._get_current_controller_name()
             if current_controller and current_controller.lower() == "mpc":
-                if current_state in ["stance", "walk", "trot"]:
+                if current_state in ["stance", "walk", "trot", "vr_remote_control"]:
                     self.h12_to_joy_node.is_stopping = True
                     self._gradually_move_right_stick_down()
                     self.h12_to_joy_node.is_stopping = False
@@ -748,7 +748,13 @@ class H12PROControllerNode:
                         #zsh
                     
                     # 如果是有效状态,更新消息
-                    if trigger in Config.VALID_STATES:
+                    current_controller_support = True
+                    current_controller = self._get_current_controller_name()
+                    if current_controller and current_controller.lower() == "mpc" and trigger in ["trot"]:
+                        current_controller_support = False
+                        print("mpc not support this trigger")
+
+                    if trigger in Config.VALID_STATES and current_controller_support:
                         new_msg = h12proRemoteControllerChannel()
                         channels = Config.get_default_channels()
 
