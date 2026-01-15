@@ -177,14 +177,14 @@ def get_canbus_wiring_type():
     """
     获取CAN总线接线类型
     返回: 'single_bus' 或 'dual_bus'
-    如果配置文件不存在或读取失败，将打印错误并退出程序
+    如果配置文件不存在或读取失败，将打印警告并返回 'single_bus'
     """
     canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
-    
+
     if not os.path.exists(canbus_wiring_file):
-        print(bcolors.FAIL + f"错误: CAN总线配置文件不存在: {canbus_wiring_file}" + bcolors.ENDC)
-        print(bcolors.FAIL + "请先配置CAN总线类型（single_bus 或 dual_bus）" + bcolors.ENDC)
-        exit(1)
+        print(bcolors.WARNING + f"警告: CAN总线配置文件不存在: {canbus_wiring_file}" + bcolors.ENDC)
+        print(bcolors.WARNING + "默认使用单CAN模式 (single_bus)" + bcolors.ENDC)
+        return "single_bus"
     
     try:
         with open(canbus_wiring_file, 'r') as f:

@@ -173,6 +173,10 @@ namespace ocs2
             mode_scale_publisher_ = nodeHandle_.advertise<std_msgs::Float32>(robotName + "_mpc_mode_scale", 10, true);
             gait_name_publisher_ = nodeHandle_.advertise<std_msgs::String>("/humanoid_mpc_gait_name_request", 10, true);
 
+            // 从主控制器实时订阅当前手臂控制模式
+            arm_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(
+            "/humanoid/mpc/arm_control_mode", 1, &QuestControlFSM::armCtrlModeCallback, this); 
+
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
             observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
             stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
@@ -491,7 +495,7 @@ namespace ocs2
             res.success = true;
             if (req.data) {
                 callSetArmModeSrv(0);
-                current_arm_mode_ = 0;
+                arm_ctrl_mode_ = 0;
             }
             res.message = "Arm collision control set to " + std::string(req.data ? "true" : "false");
             ROS_INFO("Arm collision control set to %s", req.data ? "true" : "false");
@@ -658,6 +662,14 @@ namespace ocs2
             })});
             
             std::cout << "Default turn zones loaded: " << turn_zones_.size() << std::endl;
+        }
+
+        void armCtrlModeCallback(const std_msgs::Float64MultiArray::ConstPtr &mode_msg)
+        {
+        if(mode_msg->data.size() == 2)
+        {
+            arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]); //获取手臂控制模式
+        }
         }
 
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
@@ -831,11 +843,11 @@ namespace ocs2
                     callEnableWbcArmTrajectorySrv(1);
                     return;
                 }
-                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
-                {
-                    callSwitchToNextControllerSrv();
-                    return;
-                }
+                // if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+                // {
+                //     callSwitchToNextControllerSrv();
+                //     return;
+                // }
             }
             if (joystick_data_.left_grip > 0.5)
             {
@@ -852,22 +864,20 @@ namespace ocs2
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 关闭手臂控制、自动摆手
                 {
                     callSetArmModeSrv(0);
-                    current_arm_mode_ = 0;
                 }
                 else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed) // 启用手臂控制
                 {
                     // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪 
                     if (arm_collision_control_) {
-                        current_arm_mode_ = 2;
                         arm_collision_control_ = false;
                     }
-                    else current_arm_mode_ = (current_arm_mode_!=1) ? 1 : 2;
-                    std::cout << "[QuestControlFSM] change arm mode to :" << current_arm_mode_ << std::endl;
+                    else arm_ctrl_mode_ = (arm_ctrl_mode_!=1) ? 1 : 2;
+                    std::cout << "[QuestControlFSM] change arm mode to :" << arm_ctrl_mode_ << std::endl;
                     if (only_half_up_body_) {
-                        callVRSetArmModeSrv(current_arm_mode_);
+                        callVRSetArmModeSrv(arm_ctrl_mode_);
                     }
                     else {
-                        callSetArmModeSrv(current_arm_mode_);
+                        callSetArmModeSrv(arm_ctrl_mode_);
                     }
                 }
 
@@ -876,9 +886,10 @@ namespace ocs2
             
             
             // 腰部控制逻辑
-            if (joystick_data_.left_trigger > 0.5) // 左边扳机按下，进入腰部控制模式
+            // if (joystick_data_.left_trigger > 0.5) // 左边扳机按下，进入腰部控制模式
+            if ((joystick_data_.left_first_button_touched && joystick_data_.left_second_button_touched))
             {
-                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 左边第二个按钮按下，切换腰部控制模式
+                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 右边第二个按钮按下，切换腰部控制模式
                 {
                     if (!torso_control_enabled_)
                     {
@@ -960,6 +971,16 @@ namespace ocs2
             {
                 updateTorsoControl();
                 return;
+            }
+
+            // 控制器切换：当手放在左边两个按钮上时，按下右边第一个按钮切换到下一个控制器
+            if ((joystick_data_.left_first_button_touched && joystick_data_.left_second_button_touched))
+            {
+                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+                {
+                    callSwitchToNextControllerSrv();
+                    return;
+                }
             }
             
             if (!only_half_up_body_) {
@@ -1736,11 +1757,13 @@ namespace ocs2
         ros::Publisher cmd_pose_pub_;  // 用于发布高度和位置控制指令
         ros::Publisher cmd_torso_pose_pub_;
 
-        int current_arm_mode_{2};
 
         float total_mode_scale_{1.0};
 
         std::map<std::string, humanoid::ModeSequenceTemplate> gait_map_;
+
+        ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
+        int arm_ctrl_mode_;
 
         ros::Subscriber joystick_sub_;
         std::string state_;
