@@ -389,6 +389,9 @@ namespace ocs2
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
       robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
       "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
+      // 从主控制器实时订阅当前手臂控制模式
+      arm_ctrl_mode_sub_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(
+      "/humanoid/mpc/arm_control_mode", 1, &JoyControl::armCtrlModeCallback, this); 
 
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       re_start_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/re_start_robot", 10);
@@ -768,6 +771,13 @@ namespace ocs2
     {
       feet_pos_measured_ = Eigen::Map<const Eigen::VectorXd>(feet_msg->data.data(), feet_msg->data.size());
     }
+    void armCtrlModeCallback(const std_msgs::Float64MultiArray::ConstPtr &mode_msg)
+    {
+      if(mode_msg->data.size() == 2)
+      {
+        arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]); //获取手臂控制模式
+      }
+    }
     void robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr &msg)
     {
       // state: 0=失败/未执行, 1=执行中/成功
@@ -962,8 +972,8 @@ namespace ocs2
         pubModeGaitScale(1.1);
         else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
         {
-          current_arm_mode_ = (current_arm_mode_ > 0)? 0 : 1;
-          callArmControlService(current_arm_mode_);
+          arm_ctrl_mode_ = (arm_ctrl_mode_ > 0)? 0 : 1;
+          callArmControlService(arm_ctrl_mode_);
         }
         else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_JUMP"]] && joy_msg->buttons[joyButtonMap["BUTTON_JUMP"]])
         {
@@ -1521,6 +1531,8 @@ namespace ocs2
     ros::Subscriber policy_sub_;
     ros::Subscriber gait_change_sub_;
     ros::Subscriber is_rl_controller_sub_;
+    ros::Subscriber arm_ctrl_mode_sub_;
+    int arm_ctrl_mode_;
     bool is_rl_controller_{false};  // 当前是否为RL控制器
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
@@ -1535,7 +1547,6 @@ namespace ocs2
     vector_t commad_line_target_ = vector_t::Zero(6);
     vector_t joystick_origin_axis_ = vector_t::Zero(6);
     sensor_msgs::Joy old_joy_msg_;
-    int current_arm_mode_{1};
     double joystickSensitivity = 100;
     bool joy_execute_action_ = true;
     LowPassFilter5thOrder joystickFilter_;
