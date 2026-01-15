@@ -21,7 +21,7 @@ ik_solve_param.minor_feasibility_tol = 1e-3
 ik_solve_param.major_iterations_limit = 100
 ik_solve_param.oritation_constraint_tol= 1e-3
 ik_solve_param.pos_constraint_tol = 1e-3 
-ik_solve_param.pos_cost_weight = 0.0 
+ik_solve_param.pos_cost_weight = 1.0 ##  0.0 是忽略位置的求解
 
 
 # IK 逆解服务

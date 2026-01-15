@@ -448,7 +448,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   vector_t joyWaist_ = vector_t::Zero(waistNums_);
   bool ismdPoseInWorldFrameCached_ = false;
 
-  ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.15, 0.3, 0.4, 0.4, 0.4};
+  ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.15, 0.2, 0.4, 0.3, 0.4};
   double cmd_threshold = 0.02;
 
   InverseKinematics inverseKinematics_;
