@@ -1513,7 +1513,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     bool last_was_mpc = !last_is_rl_controller_;
     bool current_is_mpc = !is_rl_controller_;
     
-     if (is_rl_controller_)
+     // 在RL模式下，如果不在MPC-RL插值期间，则只更新IMU并返回
+     // 如果正在插值（is_torso_interpolation_active_），MPC仍在运行，需要继续更新kinematics
+     if (is_rl_controller_ && !is_torso_interpolation_active_)
      {
        double diff_time = (current_sensor_data_time - last_sensor_data_time_).toSec();
        ros::Duration period = ros::Duration(diff_time);
