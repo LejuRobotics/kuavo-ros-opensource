@@ -34,6 +34,10 @@ add_message_files(
   JoySticks.msg
 )
 
+add_service_files(
+  FILES SetHeadControlMode.srv
+)
+
 generate_messages(
   DEPENDENCIES
   std_msgs
