@@ -96,7 +96,7 @@ class JoyCustomizeConfigNode:
         self._last_mapping_path = None
         # 用于限制映射切换频率（防止频繁切换）
         self._last_mapping_switch_time = 0.0
-        self._mapping_switch_cooldown = 2.0  # 2秒内不允许再次切换
+        self._mapping_switch_cooldown = 0.3  # 0.3秒内不允许再次切换
 
         # Default expected counts; will be adjusted by autodetect
         if self.joystick_type == "bt2pro":
@@ -282,7 +282,7 @@ class JoyCustomizeConfigNode:
         self._last_mapping_switch_time = now
         # 只在映射真正改变时打印，避免重复日志
         if self._last_mapping_type != new_type or self._last_mapping_path != new_map_path:
-            rospy.logwarn(f"Joystick mapping switched to {new_type} with safe state transfer")
+            # rospy.logwarn(f"Joystick mapping switched to {new_type} with safe state transfer")
             self._last_mapping_type = new_type
             self._last_mapping_path = new_map_path
 
@@ -356,19 +356,57 @@ class JoyCustomizeConfigNode:
         rospy.loginfo("Received update_joy_customize_config, reloading customize_config.json ...")
         self._load_customize_config()
 
-    def _execute_arm_poses(self, arm_pose_names):
+    def _execute_arm_poses(self, arm_pose_names, mode_switch_event=None):
         """执行手臂动作的线程函数"""
         for arm_pose in arm_pose_names:
             if arm_pose:  # 检查动作名称不为空
                 rospy.loginfo(f"Executing arm pose: {arm_pose}")
                 try:
-                    self._call_execute_arm_action(arm_pose)
-                    time.sleep(1.0)  # 等待动作完成
+                    success, message = self._call_execute_arm_action(arm_pose)
+                    if success:
+                        # 等待手臂模式切换完成（检测到动作开始执行）
+                        rospy.loginfo(f"Waiting for arm mode switch to complete for action: {arm_pose}")
+                        start_wait_time = time.time()
+                        timeout = 5.0  # 5秒超时
+                        
+                        while not self.robot_action_executing and not rospy.is_shutdown():
+                            if time.time() - start_wait_time > timeout:
+                                rospy.logwarn(f"Timeout waiting for arm mode switch to complete for action: {arm_pose}")
+                                # 超时未检测到模式切换完成，不通知音乐线程，音乐将不播放
+                                return
+                            time.sleep(0.01)
+                        
+                        if self.robot_action_executing:
+                            rospy.loginfo(f"Arm mode switch completed for action: {arm_pose}, action is now executing")
+                            # 只有在动作成功执行且模式切换完成后，才通知音乐线程可以开始播放
+                            if mode_switch_event and not mode_switch_event.is_set():
+                                mode_switch_event.set()
+                        else:
+                            rospy.logwarn(f"Arm mode switch not detected for action: {arm_pose}, music will not play")
+                            # 未检测到模式切换完成，不通知音乐线程，音乐将不播放
+                            return
+                        
+                        time.sleep(1.0)  # 等待动作完成
+                    else:
+                        rospy.logwarn(f"Failed to execute arm pose {arm_pose}: {message}")
+                        # 动作执行失败，不通知音乐线程，音乐将不播放
+                        return
                 except Exception as e:
                     rospy.logerr(f"Failed to execute arm pose {arm_pose}: {e}")
+                    # 发生异常，不通知音乐线程，音乐将不播放
+                    return
 
-    def _play_music(self, music_names):
+    def _play_music(self, music_names, mode_switch_event=None):
         """播放音乐的线程函数"""
+        # 如果有模式切换事件，等待模式切换完成后再播放音乐
+        if mode_switch_event:
+            rospy.loginfo("Waiting for arm mode switch to complete before playing music...")
+            if not mode_switch_event.wait(timeout=10.0):  # 最多等待10秒
+                rospy.logwarn("Timeout waiting for arm mode switch, action may have failed. Music will not play.")
+                # 动作执行失败或超时，不播放音乐
+                return
+        
+        # 只有在动作成功执行且模式切换完成后，才播放音乐
         for music in music_names:
             if music:  # 检查音乐名称不为空
                 rospy.loginfo(f"Playing music: {music}")
@@ -640,13 +678,18 @@ class JoyCustomizeConfigNode:
         rospy.loginfo(f"Arm poses: {arm_pose_names}")
         rospy.loginfo(f"Music: {music_names}")
 
+        # 如果同时有动作和音乐，创建事件用于同步（等待模式切换完成后再播放音乐）
+        mode_switch_event = None
+        if arm_pose_names and music_names:
+            mode_switch_event = threading.Event()
+
         # 创建线程执行动作和音乐
         if arm_pose_names:
-            arm_pose_thread = threading.Thread(target=self._execute_arm_poses, args=(arm_pose_names,))
+            arm_pose_thread = threading.Thread(target=self._execute_arm_poses, args=(arm_pose_names, mode_switch_event))
             arm_pose_thread.start()
 
         if music_names:
-            music_thread = threading.Thread(target=self._play_music, args=(music_names,))
+            music_thread = threading.Thread(target=self._play_music, args=(music_names, mode_switch_event))
             music_thread.start()
 
         # 等待线程完成
