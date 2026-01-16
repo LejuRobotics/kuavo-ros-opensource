@@ -19,13 +19,16 @@ WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME = "websocket_humanoid_robot"
 
 def check_real_kuavo():
     try:
-        # 通过 /real 参数来判断是否为实物机器人
-        # 实物模式: /real = true, 仿真模式: /real = false
-        real = rospy.get_param("/real", False)
-        print(f"Robot mode check: /real parameter = {real}")
-        return real
+        # optimize: 简单通过检查零点文件来判断是否为实物, 可优化判断条件
+        offset_file = os.path.expanduser("~/.config/lejuconfig/offset.csv")
+        config_file = os.path.expanduser("~/.config/lejuconfig/config.yaml")
+        
+        offset_file_exists = os.path.exists(offset_file)    
+        config_file_exists = os.path.exists(config_file)
+        print(f"offset_file: {offset_file}, exists: {offset_file_exists}")
+        print(f"config_file: {config_file}, exists: {config_file_exists}")
+        return offset_file_exists and config_file_exists
     except Exception as e:
-        print(f"Failed to get /real parameter: {e}")
         return False
 
 def tmux_run_cmd(session_name:str, cmd:str, sudo:bool=False)->Tuple[bool, str]:
@@ -284,12 +287,25 @@ class WebSocketSdkStartNode:
         )
 
     def _get_robot_launch_status_callback(self, req):
-        result, status = self.robot.get_robot_launch_status()
-        print(f"Get robot launch status: {status}")
-        if not result:
-            print(f"Get robot launch status failed: {status}")
-            status = "unknown"
-        return TriggerResponse(success=result, message=status)
+
+        is_real = rospy.get_param("/real", False)
+        print(f"Get robot launch status - Real mode: {is_real}")
+
+        if is_real:
+            result, status = self.robot.get_robot_launch_status()
+            print(f"Get robot launch status: {status}")
+            if not result:
+                print(f"Get robot launch status failed: {status}")
+                status = "unknown"
+            return TriggerResponse(success=result, message=status)
+        else:
+            if check_rosnode_exists("/humanoid_sqp_mpc") and check_rosnode_exists("/nodelet_controller"):
+                result = True
+                status = "launched"
+            else:
+                result = True
+                status = "unlaunch"
+            return TriggerResponse(success=result, message=status)
 
     def _stand_robot_callback(self, req):
         result, msg = self.robot.stand_robot()
