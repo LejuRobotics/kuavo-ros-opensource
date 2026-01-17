@@ -784,6 +784,20 @@ namespace ocs2
       // 当state为1时，表示有动作正在执行
       robot_action_executing_ = (msg->state == 1);
     }
+    bool isControllerSwitching()
+    {
+      bool switching = controller_switching_ && !last_controller_switch_time_.isZero();
+      if (switching)
+      {
+        const double elapsed = (ros::Time::now() - last_controller_switch_time_).toSec();
+        if (elapsed > controller_switch_time)
+        {
+          controller_switching_ = false;
+          switching = false;
+        }
+      }
+      return switching;
+    }
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
       vector_t joystickOriginAxisFilter_ = vector_t::Zero(6);
@@ -850,6 +864,14 @@ namespace ocs2
             }
           }
         }
+        old_joy_msg_ = *joy_msg;
+        return;
+      }
+
+      // 控制器切换过程中禁用遥控输入，并return返回
+      if (isControllerSwitching())
+      {
+        joystick_origin_axis_.setZero();
         old_joy_msg_ = *joy_msg;
         return;
       }
@@ -1503,7 +1525,9 @@ namespace ocs2
     bool switchToNextController()
     {
       kuavo_msgs::switchToNextController srv;
-      
+
+      last_controller_switch_time_ = ros::Time::now();
+      controller_switching_ = true;
       if (switch_to_next_controller_client_.call(srv)) {
         if (srv.response.success) {
           ROS_INFO("Switch to next controller successful: %s", srv.response.message.c_str());
@@ -1601,6 +1625,9 @@ namespace ocs2
     bool robot_launched_{false};
     ros::Time last_status_check_time_;
     bool real_{false};
+    double controller_switch_time{2.5};
+    ros::Time last_controller_switch_time_{0};
+    bool controller_switching_{false};
     
     // Robot type: 1 = wheel mode, 2 = humanoid mode
     int robot_type_;

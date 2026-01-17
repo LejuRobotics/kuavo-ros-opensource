@@ -28,7 +28,7 @@ except (rospkg.ResourceNotFound, ImportError) as e:
     from robot_version import RobotVersion
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
 from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl
-from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
+from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getControllerList
 from ocs2_msgs.msg import mpc_observation
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
@@ -57,7 +57,8 @@ class ArmTrajectoryBezierDemo:
         self.running_action = False
         self.arm_flag = False
         self._timer = None
-        self.interrupt_flag  = False  
+        self.interrupt_flag  = False
+        self.last_published_state = None  # 记录上一次发布的状态，用于减少日志打印  
         # 使用 RobotVersion 类创建版本号对象
         robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
         self.robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
@@ -291,6 +292,54 @@ class ArmTrajectoryBezierDemo:
         rospy.logwarn(f"Arm control mode change timeout after {timeout} seconds, current mode: {final_mode}, target: {target_mode}")
         return False
 
+    def get_current_controller_name(self):
+        """获取当前控制器名称（用于 multi 模式判断）
+        :return: str, 当前控制器名称，如果获取失败返回 None
+        """
+        if self.kuavo_control_scheme != "multi":
+            return None
+        
+        service_name = "/humanoid_controller/get_controller_list"
+        try:
+            rospy.wait_for_service(service_name, timeout=0.5)
+            get_controller_client = rospy.ServiceProxy(service_name, getControllerList)
+            response = get_controller_client()
+            if response.success:
+                rospy.loginfo(f"Current controller in multi mode: {response.current_controller}")
+                return response.current_controller
+            else:
+                rospy.logwarn(f"Get controller list failed: {response.message}")
+        except (rospy.ServiceException, rospy.ROSException) as e:
+            rospy.logwarn(f"Service '{service_name}' call failed: {e}, assuming ocs2 behavior")
+        return None
+
+    def get_current_control_mode(self):
+        """获取当前实际控制模式
+        :return: str, 当前控制模式 ("rl" 或 "ocs2")，如果获取失败返回 "ocs2"（保守策略）
+        """
+        # 控制模式到控制器名称集合的映射
+        mode_controllers = {
+            "rl": {"amp_controller"},
+            "ocs2": {"mpc"},
+        }
+        
+        # 直接映射的控制方案
+        control_scheme_list = ["ocs2","rl"]
+        if self.kuavo_control_scheme in control_scheme_list:
+            return self.kuavo_control_scheme
+        
+        # multi 模式需要查询当前控制器
+        if self.kuavo_control_scheme == "multi":
+            controller = self.get_current_controller_name()
+            if controller:
+                for mode, controllers in mode_controllers.items():
+                    if controller.lower() in controllers:
+                        return mode
+                rospy.logwarn(f"Unknown controller '{controller}' in multi mode")
+        
+        # 默认返回 ocs2（保守策略）
+        return "ocs2"
+
     def load_json_file(self, file_path):
         try:
             with open(file_path, "r") as f:
@@ -492,7 +541,7 @@ class ArmTrajectoryBezierDemo:
         action_data = {}
 
         # rl 要在刚开始插入当前状态为初始值来平滑过渡，ocs2 不需要
-        if self.kuavo_control_scheme == "rl" or self.kuavo_control_scheme == "multi":
+        if self.get_current_control_mode() == "rl":
             import copy
             for frame in frames:
                 frame["keyframe"] += 100
@@ -640,7 +689,7 @@ class ArmTrajectoryBezierDemo:
         finish_time = 2
         data = self.create_action_data(finish_time)
 
-        if self.kuavo_control_scheme == "rl" or self.kuavo_control_scheme == "multi":
+        if self.get_current_control_mode() == "rl":
             finish_time += 1
         self.END_FRAME_TIME = finish_time
 
@@ -682,7 +731,7 @@ class ArmTrajectoryBezierDemo:
 
     def publish_running_action_state(self):
         """持续发布 state=1"""
-        rate = rospy.Rate(1)  # 每秒发布 2 次
+        rate = rospy.Rate(10)  # 每秒发布 2 次
         while self.running_action:
             self.publish_action_state(1)
             rate.sleep()
@@ -696,7 +745,10 @@ class ArmTrajectoryBezierDemo:
         state_msg = RobotActionState()
         state_msg.state = state
         self.robot_action_state_pub.publish(state_msg)
-        rospy.loginfo(f"Robot action state published: state={state}")
+        # 只在状态变化时打印日志，减少重复打印
+        if self.last_published_state != state:
+            rospy.loginfo(f"Robot action state published: state={state}")
+            self.last_published_state = state
 
     def create_bezier_request(self, action_data):
         req = planArmTrajectoryBezierCurveRequest()
@@ -928,15 +980,18 @@ class ArmTrajectoryBezierDemo:
 
         # 读取动作完成时间
         finish_time = data.get("finish", 0) * 0.01 # 转换为秒
-        if self.kuavo_control_scheme == "rl" or self.kuavo_control_scheme == "multi":
+        if self.get_current_control_mode() == "rl":
             finish_time += 1.0
         self.END_FRAME_TIME = finish_time
 
         # 检查0f处是否有动作帧，如果没有则添加初始站立帧
+        # 注意：RL模式下即使没有0f帧，也不需要插入站立帧（会插入当前帧）
         frames = data["frames"]
         has_frame_at_0f = any(frame.get("keyframe", -1) == 0 for frame in frames)
         
-        if not has_frame_at_0f:
+        
+        # 只有在非RL模式下，且没有0f帧时，才插入站立帧
+        if not has_frame_at_0f and self.get_current_control_mode() == "ocs2":
             # 创建初始站立帧
             init_stand_frame = self.create_init_stand_frame(frames)
             frames.insert(0, init_stand_frame)

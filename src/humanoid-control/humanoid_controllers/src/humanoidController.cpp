@@ -1584,9 +1584,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       else
       {
         // 如果队列为空，根据上一次和当前的控制器模式决定策略
-        if (last_was_mpc && current_is_mpc)
+        // 插值期间：即使current_is_mpc=false，也要保持yaw连续性，避免姿态跳变导致估计器不稳定
+        if ((last_was_mpc && current_is_mpc) || is_torso_interpolation_active_)
         {
           // 上一次是MPC，当前也是MPC：保持上一次融合的yaw值，避免yaw跳变
+          // 插值期间：同样保持yaw连续性，确保状态估计器稳定
           // 只更新roll和pitch，保持yaw连续性
           Eigen::Vector3d sensor_euler = quatToZyx(sensor_data_new.quat_);
           Eigen::Vector3d last_robot_euler = quatToZyx(robot_quat_state_update_);
