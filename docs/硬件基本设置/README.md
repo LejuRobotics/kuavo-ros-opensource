@@ -370,6 +370,24 @@ sudo journalctl -u ocs2_h12pro_monitor.service -f
 
 结束程序：长按 C + D(假如在站立状态下触发停止，机器人会先下蹲再停止)
 
+## 北通手柄按键映射修改方式 
+
+鲲鹏20 M1 和 M2 的默认映射为 A 和 B，需要对映射进行修改。
+
+新按键映射：M1->LS M2->RS
+
+北通游戏厅官网： https://www.betop-cn.com/support 
+
+进入北通游戏厅----外设助手----按键----拓展按键----选择拓展按键，进行按键映射修改。
+
+
+![bt_map](./imgs/bt_map.png)  
+
+
+
+
+
+
 ### VR 遥操作测试
 
 请确保 QUEST 3 设备与机器人在同一个局域网下，并且已经安装了 KUAVO_HAND_TRACK APP

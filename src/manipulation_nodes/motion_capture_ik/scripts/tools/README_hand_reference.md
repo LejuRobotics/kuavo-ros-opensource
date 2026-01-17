@@ -37,6 +37,16 @@ python ik_ros_uni.py --hand_reference_mode fingertips
 #### launch_quest3_ik.launch
 ```bash
 roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch hand_reference_mode:=thumb_index
+
+# 可选配置参数：use_cpp_ik
+# 启动python版本的ik
+roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=false
+
+# 启动C++版本的ik
+roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true
+
+# 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
+roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true use_incremental_ik:=true
 ```
 
 #### launch_quest3_ik_videostream.launch  

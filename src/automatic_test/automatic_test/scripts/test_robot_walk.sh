@@ -47,16 +47,13 @@ export ROBOT_SERIAL_NUMBER=$ROBOT_SERIAL_NUMBER
 
 # 构建 pytest 命令
 TEST_PATH="$(rospack find automatic_test)/scripts/automatic_test"
-CMD="pytest -v -s --log-cli-level=$LOG_LEVEL -m walk $TEST_PATH"
+FULL_CMD=("pytest" "-v" "-s" "--log-cli-level=$LOG_LEVEL" "-m" "walk" "$TEST_PATH")
 
-# 添加额外的 pytest 参数
 if [ ${#PYTEST_ARGS[@]} -gt 0 ]; then
-    CMD="$CMD ${PYTEST_ARGS[@]}"
+    FULL_CMD+=("${PYTEST_ARGS[@]}")
 fi
 
-# 输出执行信息
-echo "Executing: $CMD"
-
-# 执行命令
-eval $CMD
-exit $?
+"${FULL_CMD[@]}"
+EXIT_CODE=$?
+sudo pkill ros
+exit $EXIT_CODE

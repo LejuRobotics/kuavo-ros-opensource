@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>voice_control_node</name>
+  <version>0.0.0</version>
+  <description>语音控制ROS包，提供基于关键词识别的语音控制功能</description>
+
+  <maintainer email="todo@todo.todo">todo</maintainer>
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  
+  <build_depend>rospy</build_depend>
+  <build_depend>kuavo_msgs</build_depend>
+  <build_depend>std_srvs</build_depend>
+  
+  <build_export_depend>rospy</build_export_depend>
+  <build_export_depend>kuavo_msgs</build_export_depend>
+  <build_export_depend>std_srvs</build_export_depend>
+  
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>kuavo_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+
+  <export>
+  </export>
+</package>

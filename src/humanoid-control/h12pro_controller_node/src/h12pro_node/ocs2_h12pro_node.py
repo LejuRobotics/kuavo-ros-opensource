@@ -16,6 +16,7 @@ import sys
 from ocs2_msgs.msg import mpc_observation
 from kuavo_msgs.msg import sensorsData
 from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData
+from kuavo_msgs.srv import getControllerList
 from sensor_msgs.msg import JointState
 import math
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory, planArmState
@@ -70,7 +71,7 @@ class Config:
     LONG_PRESS_THRESHOLD = 1.0
 
     SCALE_RIGHT_STICK_Z = 0.2  # 右摇杆上下（上站下蹲）缩放比例
-    SCALE_LEFT_STICK_Y = 0.25  # 左摇杆左右（左右平移）缩放比例
+    SCALE_LEFT_STICK_Y = 1.0  # 左摇杆左右（左右平移）缩放比例
     
     @staticmethod
     def get_default_channels() -> List[int]:
@@ -161,7 +162,7 @@ class H12ToJoyControllerNode:
                 10: ChannelMapping(10, button_index=Config.BUTTON_MAPPING['A'], 
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
             }
-        elif kuavo_control_scheme == "ocs2":
+        elif kuavo_control_scheme == "ocs2" or kuavo_control_scheme == "multi":
             return {
                 1: ChannelMapping(1, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_YAW'], reverse=True),
                 2: ChannelMapping(2, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_Z'], reverse=True, scale=Config.SCALE_RIGHT_STICK_Z),
@@ -173,8 +174,8 @@ class H12ToJoyControllerNode:
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
                 8: ChannelMapping(8, button_index=Config.BUTTON_MAPPING['B'], 
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
-                9: ChannelMapping(9, button_index=Config.BUTTON_MAPPING['BACK'], 
-                                is_button=True, trigger_value=-Config.H12_AXIS_RANGE_MAX),
+                9: ChannelMapping(9, button_index=Config.BUTTON_MAPPING['X'], 
+                                is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
                 10: ChannelMapping(10, button_index=Config.BUTTON_MAPPING['A'], 
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
             }
@@ -422,11 +423,14 @@ class H12PROControllerNode:
             config = read_json_file(h12pro_remote_controller_path)
             
             # Determine which state transition configuration to use based on control scheme
-            kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
-            if kuavo_control_scheme == "rl":
-                state_transition_key = "rl_robot_state_transition_keycombination"
-            else:
+            if kuavo_control_scheme == "ocs2":
                 state_transition_key = "ocs2_robot_state_transition_keycombination"
+            elif kuavo_control_scheme == "rl":
+                state_transition_key = "rl_robot_state_transition_keycombination"
+            elif kuavo_control_scheme == "multi":
+                state_transition_key = "multi_robot_state_transition_keycombination"
+            else:
+                raise ConfigError(f"Invalid control scheme: {kuavo_control_scheme}")
             
             required_fields = [
                 "channel_to_key_name",
@@ -611,6 +615,31 @@ class H12PROControllerNode:
             rospy.sleep(time)
             times -= 1
 
+    def _get_current_controller_name(self) -> Optional[str]:
+        """获取当前控制器名称
+        
+        Returns:
+            当前控制器名称，如果获取失败返回 None
+        """
+        service_name = "/humanoid_controller/get_controller_list"
+        try:
+            rospy.wait_for_service(service_name, timeout=1.0)
+            get_controller_client = rospy.ServiceProxy(service_name, getControllerList)
+            response = get_controller_client()
+            if response.success:
+                current_controller = response.current_controller
+                rospy.loginfo(f"Current controller: {current_controller} (index: {response.current_index})")
+                return current_controller
+            else:
+                rospy.logwarn(f"Get controller list failed: {response.message}")
+                return None
+        except rospy.ServiceException as e:
+            rospy.logerr(f"Service call to '{service_name}' failed: {e}")
+            return None
+        except rospy.ROSException as e:
+            rospy.logerr(f"Service '{service_name}' not available: {e}")
+            return None
+
     def _handle_emergency_stop(self, current_state: str, 
                              msg: h12proRemoteControllerChannel) -> None:
         """Handle emergency stop condition.
@@ -620,9 +649,10 @@ class H12PROControllerNode:
             msg: Channel message for response.
         """
         try:
-            # rl 暂不支持缓慢下降
-            if kuavo_control_scheme == "ocs2":
-                if current_state in ["stance", "walk", "trot"]:
+            # 检查当前控制器是否为 mpc，只有 mpc 控制器支持缓慢下降
+            current_controller = self._get_current_controller_name()
+            if current_controller and current_controller.lower() == "mpc":
+                if current_state in ["stance", "walk", "trot", "vr_remote_control"]:
                     self.h12_to_joy_node.is_stopping = True
                     self._gradually_move_right_stick_down()
                     self.h12_to_joy_node.is_stopping = False
@@ -718,9 +748,16 @@ class H12PROControllerNode:
                         #zsh
                     
                     # 如果是有效状态,更新消息
-                    if trigger in Config.VALID_STATES:
+                    current_controller_support = True
+                    current_controller = self._get_current_controller_name()
+                    if current_controller and current_controller.lower() == "mpc" and trigger in ["trot"]:
+                        current_controller_support = False
+                        print("mpc not support this trigger")
+
+                    if trigger in Config.VALID_STATES and current_controller_support:
                         new_msg = h12proRemoteControllerChannel()
                         channels = Config.get_default_channels()
+
                         channels[Config.TRIGGER_CHANNEL_MAP[trigger]] = Config.H12_AXIS_RANGE_MAX
                         new_msg.channels = tuple(channels)
                         
@@ -851,7 +888,8 @@ def main():
         rospy.loginfo("H12PRO Controller Node started successfully")
         
         while not rospy.is_shutdown():
-            if kuavo_control_scheme == "ocs2":
+            # ocs2 和 multi 模式都需要处理 channels
+            if kuavo_control_scheme == "ocs2" or kuavo_control_scheme == "multi":
                 node.h12_to_joy_node.process_channels()
             node.publish_arm_joint_state()
             rate.sleep()

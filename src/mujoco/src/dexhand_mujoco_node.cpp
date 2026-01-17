@@ -206,7 +206,7 @@ void DexHandMujocoRosNode::controlHandCallback(const kuavo_msgs::robotHandPositi
     }
 
     constexpr int finger_count = std::tuple_size<UnsignedFingerArray>::value;
-    constexpr int hand_count = std::tuple_size<UnsignedDualHandsArray>::value;
+    // constexpr int hand_count = std::tuple_size<UnsignedDualHandsArray>::value;
 
     if (msg->left_hand_position.size() != finger_count || msg->right_hand_position.size() != finger_count) 
     {
@@ -296,7 +296,7 @@ bool DexHandMujocoRosNode::gestureExecuteStateCallback(kuavo_msgs::gestureExecut
         return false;
     }
 
-    // res.is_executing = controller_->is_gesture_executing();        
+    res.is_executing = controller_->is_gesture_executing();        
     res.message = "success";
     
     return true;

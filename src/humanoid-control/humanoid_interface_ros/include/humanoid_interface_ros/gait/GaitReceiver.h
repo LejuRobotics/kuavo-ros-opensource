@@ -32,6 +32,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_interface/foot_planner/SwingTrajectoryPlanner.h"
 
 #include <mutex>
+#include <atomic>
 
 #include <ros/ros.h>
 
@@ -39,6 +40,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ocs2_msgs/mode_schedule.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Int32.h>
+#include <std_msgs/Float64.h>
 #include <sensor_msgs/Joy.h>
 #include "std_srvs/SetBool.h"
 
@@ -55,7 +57,6 @@ namespace ocs2
 {
   namespace humanoid
   {
-
     class GaitReceiver : public SolverSynchronizedModule
     {
     public:
@@ -87,6 +88,29 @@ namespace ocs2
         return true;
       }
 
+      // 形参： MPC重置所处模式 0: 正常MPC, 1: 等待初始策略, 2: 插值更新躯干位置
+      // 输出： autoGait 应设置行为，true 时 autoGait 应该关闭
+      bool checkResetMpcState(scalar_t initTime, int resetting_mpc_state)
+      {
+        static int lastMpcResetState = resetting_mpc_state;
+        static double checkPointTime = 0.0;
+        bool returnFlag = false;
+
+        if(resetting_mpc_state == 1 || resetting_mpc_state == 2) returnFlag = true;  // 1 和 2 模式应该关闭
+        if(lastMpcResetState == 2 && resetting_mpc_state == 0)  // 2 模式切换 0 模式记录切换时间
+        {
+          checkPointTime = initTime;
+        }
+        if(resetting_mpc_state == 0 && initTime - checkPointTime < 1.0)  // 2 模式且切换时间小于 1 秒时不允许切换
+        {
+          returnFlag = true;
+        }
+
+        lastMpcResetState = resetting_mpc_state;
+
+        return returnFlag;
+      }
+
       inline double normalizedYaw(double yaw)
       {
         while (yaw > M_PI)
@@ -112,6 +136,8 @@ namespace ocs2
 
       ::ros::Subscriber feet_sub_ ;
       ::ros::Subscriber policy_sub_;
+      ::ros::Subscriber resetting_mpc_state_sub_;
+      ::ros::Subscriber is_rl_controller_sub_;
       
       vector_t feet_pos_measured_ = vector_t::Zero(24);
 
@@ -143,6 +169,8 @@ namespace ocs2
       bool waitting_for_walk_ = false;
       bool single_step_yaw_computed_ = false;
       double single_step_yaw_threshold_ = 0.5; // rad
+      std::atomic<int> resetting_mpc_state_{0};
+      std::atomic_bool is_rl_controller_{false};
     };
 
   } // namespace humanoid

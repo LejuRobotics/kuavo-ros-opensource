@@ -1,0 +1,35 @@
+address:
+  Right_joint_arm_1: 0x07
+  Right_joint_arm_2: 0x08
+  Right_joint_arm_3: 0x09 
+  Right_joint_arm_4: 0x0A
+  Right_joint_arm_5: 0x0B
+  Right_joint_arm_6: 0x0C
+# 减速比
+ratio:
+  - [36, 36, 36, 10, 10, 10]
+online:
+  Right_joint_arm_1: False
+  Right_joint_arm_2: False
+  Right_joint_arm_3: False 
+  Right_joint_arm_4: False
+  Right_joint_arm_5: False
+  Right_joint_arm_6: False
+parameter:
+  # 关节参数[vel, kp_pos, kd_pos, tor, kp_vel, kd_vel, ki_vel]
+  Right_joint_arm_1: [0, 30, 2, 0, 0, 0, 0]
+  Right_joint_arm_2: [0, 30, 4, 0, 0, 0, 0]
+  Right_joint_arm_3: [0, 40, 4, 0, 0, 0, 0] 
+  Right_joint_arm_4: [0, 38, 5, 0, 0, 0, 0]
+  Right_joint_arm_5: [0, 40, 5, 0, 0, 0, 0]
+  Right_joint_arm_6: [0, 35, 5, 0, 0, 0, 0]
+negtive_address:
+ - [0x08, 0x0A, 0x0B, 0x09,0x0C]
+low_arm_address:
+ - [0x0A, 0x0B, 0x0C] # 小臂电机ID
+#  ptm:力控模式 servo:伺服模式
+control_mode: ptm
+Multi-turn_Encoder_mode: False
+zero_position:
+  Right_joint_arm: 
+  - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

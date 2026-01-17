@@ -216,9 +216,10 @@ int RuiWoActuator::initialize()
     pSetTeachPendantModeMethod = PyObject_GetAttrString(ActuatorInstance, "set_teach_pendant_mode");
     pSetJointGainsMethod = PyObject_GetAttrString(ActuatorInstance, "set_joint_gains");
     pGetJointGainsMethod = PyObject_GetAttrString(ActuatorInstance, "get_joint_gains");
+    pSetZeroOffsetAdjustmentsMethod = PyObject_GetAttrString(ActuatorInstance, "set_zero_offset_adjustments");
     pJoint_online_list = PyObject_GetAttrString(ActuatorInstance, "joint_online_list");
 
-    // 检查获取方法是否成功
+    // 检查获取方法是否成功（pSetZeroOffsetAdjustmentsMethod是可选的，不检查）
     if (!pEnableMethod || !pCloseMethod || !pDisableMethod || !pSetPositionMethod || !pSetTorqueMethod || !pSetVelocityMethod ||
         !pGetPositionMethod || !pGetTorqueMethod|| !pGetVelocityMethod || !pGetJointStateMethod || !RuiWo_pJoinMethod ||
         !pCheckStateMethod || !pSetZeroMethod || !pChangEncoderMethod || !pSaveZerosMethod || !pAdjustZeroMethod || !pGetZeroPointsMethod ||
@@ -275,27 +276,51 @@ void RuiWoActuator::adjustZeroPosition(int index, double offset)
     PyGILState_Release(gstate);
 }
 
-std::vector<double> RuiWoActuator::getMotorZeroPoints()
+void RuiWoActuator::setZeroOffsetAdjustments(const std::map<size_t, double>& zero_offset_adjustments)
 {
     gstate = PyGILState_Ensure();
-    PyObject *result = PyObject_CallObject(pGetZeroPointsMethod, nullptr);
-    if (!result)
+    if (pSetZeroOffsetAdjustmentsMethod)
+    {
+        // 创建Python字典
+        PyObject *py_dict = PyDict_New();
+        for (const auto& pair : zero_offset_adjustments) {
+            PyObject *py_key = PyLong_FromSize_t(pair.first);
+            PyObject *py_value = PyFloat_FromDouble(pair.second);
+            PyDict_SetItem(py_dict, py_key, py_value);
+            Py_DECREF(py_key);
+            Py_DECREF(py_value);
+        }
+        
+        PyObject *args = Py_BuildValue("(O)", py_dict);
+        PyObject_CallObject(pSetZeroOffsetAdjustmentsMethod, args);
+        Py_DECREF(args);
+        Py_DECREF(py_dict);
+    }
+    else
     {
         PyErr_Print();
-        PyGILState_Release(gstate);
-        return std::vector<double>();
     }
-    std::vector<double> zero_points;
+    PyGILState_Release(gstate);
+}
+
+std::vector<double> RuiWoActuator::getMotorZeroPoints()
+{
+    std::cout << "[RUIWO motor C++ wrapper]: getMotorZeroPoints() called" << std::endl;
+    gstate = PyGILState_Ensure();
     PyObject *py_zero_points = PyObject_CallObject(pGetZeroPointsMethod, nullptr);
     if (!py_zero_points)
     {
         PyErr_Print();
-        Py_DECREF(py_zero_points);
         PyGILState_Release(gstate);
+        std::cerr << "[RUIWO motor C++ wrapper]: Failed to call Python get_motor_zero_points()" << std::endl;
         return std::vector<double>();
     }
     
-    for (int i = 0; i < PyList_Size(py_zero_points); i++)
+    std::vector<double> zero_points;
+    int list_size = PyList_Size(py_zero_points);
+    std::cout << "[RUIWO motor C++ wrapper]: Python returned " << list_size << " zero points" << std::endl;
+    
+    for (int i = 0; i < list_size; i++)
     {
         PyObject *py_zero_point = PyList_GetItem(py_zero_points, i);
         if (py_zero_point)
@@ -308,7 +333,8 @@ std::vector<double> RuiWoActuator::getMotorZeroPoints()
             PyErr_Print();
         }
     }
-
+    
+    Py_DECREF(py_zero_points);
     PyGILState_Release(gstate);
     return zero_points;
 }

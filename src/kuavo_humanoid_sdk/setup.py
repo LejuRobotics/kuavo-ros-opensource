@@ -77,7 +77,8 @@ setup(
         "funasr",
         "torchaudio",
         "websockets",
-        "ultralytics"
+        "ultralytics",
+        "openai==1.3.8",
     ],
     python_requires=">=3.8",
     classifiers=[

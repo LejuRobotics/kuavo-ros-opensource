@@ -12,8 +12,8 @@ using namespace GrabBox;
 int main(int argc, char** argv) {
     ros::init(argc, argv, "foot_pose_publisher");
     ros::NodeHandle nh;
-    ros::Publisher pub = nh.advertise<kuavo_msgs::footPoseTargetTrajectories>(
-        "/humanoid_mpc_foot_pose_target_trajectories", 10);
+    // ros::Publisher pub = nh.advertise<kuavo_msgs::footPoseTargetTrajectories>(
+    //     "/humanoid_mpc_foot_pose_target_trajectories", 10);
 
     ros::Duration(2).sleep(); // 等待一定时间以确保订阅者已经准备好
 

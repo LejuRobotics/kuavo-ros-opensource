@@ -13,6 +13,11 @@ def control_arm_traj():
     global robot
      # reset arm
     robot.arm_reset()
+    time.sleep(0.5)  # Wait for arm reset to complete
+    
+    # Switch to external control mode before controlling arm
+    robot.set_external_control_arm_mode()
+    time.sleep(0.5)  # Wait for mode switch to complete
     
     q_list = []
     q0 = [0.0]*14
@@ -36,6 +41,10 @@ def control_arm_traj():
     robot.set_fixed_arm_mode()
     time.sleep(1.0)
 
+    # Switch back to external control mode before controlling arm again
+    robot.set_external_control_arm_mode()
+    time.sleep(0.5)  # Wait for mode switch to complete
+    
     # back to q0
     for i in range(num):
         q_tmp = [0.0]*14
@@ -54,6 +63,10 @@ def control_arm_traj():
 
 def control_arm_joint_trajectory():
     global robot
+    # Switch to external control mode before controlling arm trajectory
+    robot.set_external_control_arm_mode()
+    time.sleep(0.5)  # Wait for mode switch to complete
+    
     target_poses = [
         [1.0, [20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
         [2.5, [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0]],
@@ -92,8 +105,24 @@ if __name__ == "__main__":
     control_arm_joint_trajectory()
     time.sleep(12)  # !!! Wait for the arm to reach the target pose
     
+    print("正在执行: robot.arm_reset() - 手臂复位")
     robot.arm_reset() # !!! after the arm reaches the target pose, reset the arm position.
+    time.sleep(2.0)  # Wait for arm reset to complete (arm_reset switches to AutoSwing mode)
+    
+    # Switch to external control mode before controlling end effector pose
+    print("正在切换到外部控制模式...")
+    robot.set_external_control_arm_mode()
+    time.sleep(0.5)  # Wait for mode switch to complete
+    
+    print("正在执行: control_arm_end_effector_pose() - 手臂末端执行器位姿控制")
     control_arm_end_effector_pose()
     time.sleep(3)
+    print("正在执行: robot.manipulation_mpc_reset() - 操作MPC复位")
+    robot.manipulation_mpc_reset()
+    time.sleep(0.5)  # Wait for MPC reset to complete
+    
+    print("正在执行: robot.arm_reset() - 手臂复位")
+    robot.arm_reset()  # Reset arm position after MPC reset
+    time.sleep(2.0)  # Wait for arm reset to complete
     robot.manipulation_mpc_reset()
     robot.arm_reset()

@@ -67,6 +67,7 @@ class SwingTrajectoryPlanner {
     scalar_t heelToeMaxHeightVelocity = 0.5;
     scalar_t next_position_z = 0.0;
 
+    scalar_t swing_shoulder_roll_center = 0.0;
     scalar_t swing_shoulder_center = 0.2;
     scalar_t swing_shoulder_scale = 0.2;
     scalar_t swing_elbow_center = 0.0;
@@ -76,7 +77,6 @@ class SwingTrajectoryPlanner {
     bool enable_dynamic_q = false;
     bool enable_dynamic_r = false;
     double slope_planning_threshold = 5.0;
-    bool enable_dynamic_qr = false; // 使能动态QR
 
   };
 

@@ -121,6 +121,10 @@ void MRT_BASE::evaluatePolicy(scalar_t currentTime, const vector_t& currentState
 /**********/
 ModeSchedule MRT_BASE::getCurrentModeSchedule() const {
 
+  if (activePrimalSolutionPtr_ == nullptr) {
+    std::cerr << "[MRT_BASE::getCurrentModeSchedule] activePrimalSolutionPtr_ is nullptr" << std::endl;
+    return ModeSchedule({0}, {15, 15});
+  }
   return activePrimalSolutionPtr_->modeSchedule_;
 }
 

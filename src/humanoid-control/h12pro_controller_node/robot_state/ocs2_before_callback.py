@@ -69,9 +69,14 @@ def update_h12_customize_config():
 
 # 手臂状态定义
 ROBOT_ACTION_STATUS = 0 # 手臂完成状态 | 0 没开始 | 1 执行中 |  2 完成
+robot_action_executing = False  # 用于检测动作是否正在执行（手臂模式切换完成）
 def robot_action_state_callback(msg):
     global ROBOT_ACTION_STATUS
+    global robot_action_executing
     ROBOT_ACTION_STATUS = msg.state
+    # state: 0=失败/未执行, 1=执行中, 2=完成
+    # 当state为1时，表示有动作正在执行（手臂模式切换完成）
+    robot_action_executing = (msg.state == 1)
     # rospy.loginfo(f" ---------- ROBOT_ACTION_STATUS ---------- : {ROBOT_ACTION_STATUS}")
 rospy.Subscriber('/robot_action_state', RobotActionState, robot_action_state_callback)
 
@@ -321,6 +326,15 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
     if only_half_up_body:
         launch_cmd += " only_half_up_body:=true"
 
+    if rospy.has_param("h12_log_channel"):
+        log_channel_status = rospy.get_param("h12_log_channel")
+        if log_channel_status is True:
+            if os.path.exists("/dev/H12_log_channel"):
+                log_channel_cmd_start = "stdbuf -oL -eL"
+                log_channel_cmd_end = "2>&1 | sed -u -e 's/\\x1b\\[[0-9;]*[mK]//g' -e 's/$/\\r/' | stdbuf -oL tee /dev/H12_log_channel"
+                launch_cmd = f"{log_channel_cmd_start} {launch_cmd} {log_channel_cmd_end}"
+            rospy.logerr("未检测到 /dev/H12_log_channel 设备文件，请确认已加载遥控器串口 udev 规则并连接设备。")
+
     print(f"launch_cmd: {launch_cmd}")
     print("If you want to check the session, please run 'tmux attach -t humanoid_robot'")
     tmux_cmd = [
@@ -485,17 +499,64 @@ def wait_for_action_completion(timeout=10.0):
         rospy.sleep(0.1)  # 等待0.1秒后再检查状态
 
 # 执行动作的线程函数
-def execute_arm_poses(arm_pose_names):
+def execute_arm_poses(arm_pose_names, mode_switch_event=None):
+    global robot_action_executing
     for arm_pose in arm_pose_names:
-        rospy.loginfo(f"Executing arm pose: {arm_pose}")
-        call_execute_arm_action(arm_pose)
-        wait_for_action_completion(timeout=10.0)  # 设置超时时间为10秒 | 等待动作完成
+        if arm_pose:  # 检查动作名称不为空
+            rospy.loginfo(f"Executing arm pose: {arm_pose}")
+            try:
+                success, message = call_execute_arm_action(arm_pose)
+                if success:
+                    # 等待手臂模式切换完成（检测到动作开始执行）
+                    rospy.loginfo(f"Waiting for arm mode switch to complete for action: {arm_pose}")
+                    start_wait_time = time.time()
+                    timeout = 5.0  # 5秒超时
+                    
+                    while not robot_action_executing and not rospy.is_shutdown():
+                        if time.time() - start_wait_time > timeout:
+                            rospy.logwarn(f"Timeout waiting for arm mode switch to complete for action: {arm_pose}")
+                            # 超时未检测到模式切换完成，不通知音乐线程，音乐将不播放
+                            return
+                        rospy.sleep(0.01)
+                    
+                    if robot_action_executing:
+                        rospy.loginfo(f"Arm mode switch completed for action: {arm_pose}, action is now executing")
+                        # 只有在动作成功执行且模式切换完成后，才通知音乐线程可以开始播放
+                        if mode_switch_event and not mode_switch_event.is_set():
+                            mode_switch_event.set()
+                    else:
+                        rospy.logwarn(f"Arm mode switch not detected for action: {arm_pose}, music will not play")
+                        # 未检测到模式切换完成，不通知音乐线程，音乐将不播放
+                        return
+                    
+                    wait_for_action_completion(timeout=10.0)  # 等待动作完成
+                else:
+                    rospy.logwarn(f"Failed to execute arm pose {arm_pose}: {message}")
+                    # 动作执行失败，不通知音乐线程，音乐将不播放
+                    return
+            except Exception as e:
+                rospy.logerr(f"Failed to execute arm pose {arm_pose}: {e}")
+                # 发生异常，不通知音乐线程，音乐将不播放
+                return
 
 # 播放音乐的线程函数
-def play_music(music_names):
+def play_music(music_names, mode_switch_event=None):
+    # 如果有模式切换事件，等待模式切换完成后再播放音乐
+    if mode_switch_event:
+        rospy.loginfo("Waiting for arm mode switch to complete before playing music...")
+        if not mode_switch_event.wait(timeout=10.0):  # 最多等待10秒
+            rospy.logwarn("Timeout waiting for arm mode switch, action may have failed. Music will not play.")
+            # 动作执行失败或超时，不播放音乐
+            return
+    
+    # 只有在动作成功执行且模式切换完成后，才播放音乐
     for music in music_names:
-        rospy.loginfo(f"Playing music: {music}")
-        set_robot_play_music(music, 100)
+        if music:  # 检查音乐名称不为空
+            rospy.loginfo(f"Playing music: {music}")
+            try:
+                set_robot_play_music(music, 100)
+            except Exception as e:
+                rospy.logerr(f"Failed to play music {music}: {e}")
 
 def customize_action_callback(event):
     global customize_config_data
@@ -546,12 +607,18 @@ def customize_action_callback(event):
                     for action_name in matched_com_interfaces:
                         call_robot_mpc_target_action(action_name)
 
-                # 创建线程
+                # 创建模式切换事件（用于同步动作执行和音乐播放）
+                mode_switch_event = None
+                if arm_pose_names and music_names:
+                    mode_switch_event = threading.Event()
+
+                # 创建线程执行动作和音乐
                 if arm_pose_names:
-                    arm_pose_thread = threading.Thread(target=execute_arm_poses, args=(arm_pose_names,))
+                    arm_pose_thread = threading.Thread(target=execute_arm_poses, args=(arm_pose_names, mode_switch_event))
                     arm_pose_thread.start()
+
                 if music_names:
-                    music_thread = threading.Thread(target=play_music, args=(music_names,))
+                    music_thread = threading.Thread(target=play_music, args=(music_names, mode_switch_event))
                     music_thread.start()
 
                 # 等待线程完成

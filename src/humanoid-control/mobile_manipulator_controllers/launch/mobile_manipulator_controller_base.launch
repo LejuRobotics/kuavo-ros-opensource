@@ -14,7 +14,14 @@
   <!-- <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s42/urdf/biped_s42_l.urdf" /> -->
   <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
   <!-- The task file for the mpc. -->
-  <arg name="taskFile"    value="$(find ocs2_mobile_manipulator)/config/kuavo/task.info" />
+  <!-- <arg name="taskFile"    value="$(find ocs2_mobile_manipulator)/config/kuavo/task.info" /> -->
+  <arg name="taskFile"
+      default="$(eval find('ocs2_mobile_manipulator') +(
+        '/config/kuavo5/task.info'  if arg('robot_version') >= 50 else
+        '/config/kuavo/task.info'   if arg('robot_version') >= 40 else
+        '/config/roban2/task.info'  if arg('robot_version') >= 10 else
+        '/config/kuavo/task.info'
+        ))" />
   <!-- The library folder to generate CppAD codegen into -->
   <arg name="libFolder"   value="$(find ocs2_mobile_manipulator)/auto_generated/kuavo" />
 

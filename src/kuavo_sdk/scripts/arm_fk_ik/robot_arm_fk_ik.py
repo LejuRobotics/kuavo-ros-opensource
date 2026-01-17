@@ -13,6 +13,24 @@ import math
 import argparse
 import numpy as np
 import time
+import os
+import sys
+import rospkg
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
+    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError) as e:
+    # 如果 rospkg 不可用或包未找到，回退到相对路径方式
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
 
 
 # 自定义ik参数
@@ -120,40 +138,53 @@ if __name__ == "__main__":
     # 初始化ROS节点
     rospy.init_node("robot_arm_fk_ik_node", anonymous=True)
 
-    # 获取机器人版本
-    robot_version = get_parameter('robot_version')
+    robot_version_int = get_parameter('robot_version')
+    robot_version = RobotVersion.create(robot_version_int)
+    major = robot_version.major()
+    minor = robot_version.minor()
+    
+    rospy.loginfo(f"机器人版本: {robot_version.version_name()} (major={major}, minor={minor})")
+    
     # 设置手臂运动模式为外部控制
     set_arm_control_mode(2)
 
-    # 创建请求对象（单位：弧度）
-    def start_with_version(version_number:int, series:int):
-        """判断版本号是否属于某系列"""
-        # PPPPMMMMN
-        MMMMN_MASK = 100000
-        return (version_number % MMMMN_MASK) == series
-    # 42
-    if start_with_version(robot_version, 42):
-        joint_angles_optiops = {
-        1: [-1.0, 0.3, -1.0, 0.19, 1.0, -0.5, -0.3,
-        -1.38, -1.39, -0.29, -0.43, -0.5, -0.17, 0.75],
-        2: [-1.7, 0.8, -1.57, -1.4, 0.0, -0.8, 0.0,
-         -1.6, -0.8, 1.57, -1.4, 0.0, -0.8, 0.0],
-        3: [-1.1, -0.25, -1.0, -0.12, 0.59, 1.2, -0.5,
-         -1.25, 0.3, 1.0, -0.15, 0.37, -1.0, -1.0],
-        }
+    joint_angles_optiops = None
     
-    # 45 or 49
-    if start_with_version(robot_version, 45) or start_with_version(robot_version, 49):
+    if major == 4 and minor <= 2:
+        joint_angles_optiops = {
+            1: [-1.0, 0.3, -1.0, 0.19, 1.0, -0.5, -0.3,
+                -1.38, -1.39, -0.29, -0.43, -0.5, -0.17, 0.75],
+            2: [-1.7, 0.8, -1.57, -1.4, 0.0, -0.8, 0.0,
+                -1.6, -0.8, 1.57, -1.4, 0.0, -0.8, 0.0],
+            3: [-1.1, -0.25, -1.0, -0.12, 0.59, 1.2, -0.5,
+                -1.25, 0.3, 1.0, -0.15, 0.37, -1.0, -1.0],
+        }
+    elif (major == 4 and minor >= 3):
+        joint_angles_optiops = {
+            1: [-1.0, 1.0, -0.3, -1.2, 0.0, -0.5, -0.2,
+                -1.9, -0.5, -0.0, -1.0, -0.0, 0.5, 0.65],
+            2: [-1.8, 1.0, -1.5, -1.8, 0.0, -0.0, -0.8,
+                -1.8, -1.0, 1.5, -1.8, 0.0, -0.0, -0.8],
+            3: [0.4, 1.0, 1.2, -1.5, 1.0, 0.4, -0.75,
+                0.4, -0.5, -1.3, -1.5, -1.0, -0.7, -0.5],
+        }
+    elif major == 5:
         joint_angles_optiops = {
         1: [-1.0, 1.0, -0.3, -1.2, 0.0, -0.5, -0.2,
             -1.9, -0.5, -0.0, -1.0, -0.0, 0.5, 0.65],
         2: [-1.8, 1.0, -1.5, -1.8, 0.0, -0.0, -0.8,
             -1.8, -1.0, 1.5, -1.8, 0.0, -0.0, -0.8],
-        3: [0.4, 1.0, 1.2, -1.5, 1.0, 0.4, -0.75,
-            0.4, -0.5, -1.3, -1.5, -1.0, -0.7, -0.5],
+        # 3: [0.4, 1.0, 1.2, -1.5, 1.0, 0.4, -0.75,
+        #     0.4, -0.5, -1.3, -1.5, -1.0, -0.7, -0.5],
+        3: [-0.12404927166595045, 0.5207316843701423, -0.7438398355748528, -1.6878711580314953, 0.5882163232478015, 0.6960587737022195, -0.1833288094691406,
+            0.06531010122606275, 0.2915284371448789, -0.27502683875196365, -1.6756463742815109, 0.27429680674163065, 0.29221918357765564, -0.040906271746990595]
         }
-#0.6, 1.0, 1.2, -1.0, 1.0, 0.4, -0.75,
-#0.6, -0.5, -1.3, -1.0, -1.0, -0.7, -0.5
+
+    if joint_angles_optiops is None:
+        rospy.logerr(f"不支持的机器人版本: {robot_version.version_name()} (major={major}, minor={minor})，程序退出。")
+        rospy.signal_shutdown("不支持的机器人版本")
+        exit(1)
+    
     # 解析命令行参数  
     parser = argparse.ArgumentParser(description="选择不同的 joint_angles")
     parser.add_argument("--joint_angles_id", type=int, choices=[1, 2, 3], required=True, help="选择 joint_angles 的 ID (1-3)")
@@ -180,14 +211,14 @@ if __name__ == "__main__":
     publish_arm_target_poses([3], degrees_list)
     print("已到达正解给定位置，正解结束")
     
-    time.sleep(10)
+    time.sleep(6)
 
     # 回到初始位置
     publish_arm_target_poses([3], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     print("回到初始位置，开始逆解")
 
-    time.sleep(10)
+    time.sleep(6)
 
     # 创建请求对象
     eef_pose_msg = twoArmHandPoseCmd()
@@ -196,8 +227,8 @@ if __name__ == "__main__":
     eef_pose_msg.use_custom_ik_param = use_custom_ik_param
     eef_pose_msg.joint_angles_as_q0 = joint_angles_as_q0
     # joint_angles_as_q0 为 False 时，这两个参数不会被使用（单位：弧度）
-    eef_pose_msg.hand_poses.left_pose.joint_angles = np.zeros(7)
-    eef_pose_msg.hand_poses.right_pose.joint_angles = np.zeros(7)
+    eef_pose_msg.hand_poses.left_pose.joint_angles = joint_angles[:7]  # 左臂关节角度
+    eef_pose_msg.hand_poses.right_pose.joint_angles = joint_angles[7:]  # 右臂关节角度
 
 
     # 设置左手末端执行器的位置和姿态
@@ -212,7 +243,12 @@ if __name__ == "__main__":
 
     # 调用 IK 逆解服务
     res = call_ik_srv(eef_pose_msg)
-
+    print("eef_pose_msg:", eef_pose_msg)
+    if res.success:
+        print("ik success")
+    else:
+        print("ik fail")
+        
     # 逆解成功
     if(res.success):
         l_pos = res.hand_poses.left_pose.pos_xyz
@@ -231,11 +267,12 @@ if __name__ == "__main__":
         # 调用函数并传入times和values
         publish_arm_target_poses([3], degrees_list)
         print("完成逆解并根据逆解结果到达定位置")
-        time.sleep(15)
+        time.sleep(6)
+        input("Press Enter to continue...")
         # 回到初始位置
         publish_arm_target_poses([3], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        time.sleep(8)
+        time.sleep(6)
         set_arm_control_mode(1)
         print("测试程序结束")
 

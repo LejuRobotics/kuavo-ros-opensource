@@ -20,7 +20,49 @@ new-docs
 src/manipulation_nodes/planarmwebsocketservice/models/*.pt
 .claude/
 src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs/**
-bag/*
+src/manipulation_nodes/motion_capture_ik/lib/*.so
 src/legged_control
 src/legged_perceptive
 src/Livox-SDK2
+bag/*
+# **/*.bag
+.cursor
+**/cursor/*
+**/ws_config/*
+**/docker/*
+**/plot*.xml
+mm_two_hand_pose.xml
+tmp_ik/**
+# **/*.cursormd
+compile_commands.json
+**/debug_ik/
+**/*_debug.py
+ik_factory.py
+**/*.rej
+.clang-format
+**/*.code-search
+kuavo-ros-control-fd/
+# docker_commit.sh
+# run_my_gpu.sh
+# math.hpp
+**/*.patch
+# **/*.md
+# **/*.sh
+**/*.devmd
+**/*copy1027.*
+debugHumanoidController.cpp
+# ik_ros_uni_cpp_vr_mujoco_sim.launch
+debugQuestControlFSMNode.cpp
+# **/*.sh
+# merge_compile_commands.py
+# **/*.bag
+# **/*.dot
+# **/*.png
+tmp_ws/
+# **/*test.cpp
+
+src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs/**
+bag/*
+src/Livox-SDK2
+src/legged_control
+src/legged_perceptive

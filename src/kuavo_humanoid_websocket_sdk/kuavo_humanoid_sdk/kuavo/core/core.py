@@ -121,8 +121,10 @@ class KuavoRobotCore:
             raise RuntimeError(f"[Core] initialize failed: \n"
                              f"{e}, please check the robot is launched, "
                              f"e.g. `roslaunch humanoid_controllers load_kuavo_real.launch`")
-        rb_info = make_robot_param()
-        success, err_msg = self._control.initialize(eef_type=rb_info["end_effector_type"], debug=debug)
+        self._rb_info = make_robot_param()
+        self._robot_version_major = (int(self._rb_info['robot_version']) // 10) % 10000
+        success, err_msg = self._control.initialize(eef_type=self._rb_info["end_effector_type"], debug=debug)
+
         if not success:
             raise RuntimeError(f"[Core] initialize failed: \n{err_msg}, please check the robot is launched, "
                              f"e.g. `roslaunch humanoid_controllers load_kuavo_real.launch`")
@@ -200,10 +202,21 @@ class KuavoRobotCore:
         if self.state != 'walk':
             self.to_walk()
         
-        # +-0.4, +-0.2, +-0.4 => linear_x, linear_y, angular_z
-        limited_linear_x = min(0.4, abs(linear_x)) * (1 if linear_x >= 0 else -1)
-        limited_linear_y = min(0.2, abs(linear_y)) * (1 if linear_y >= 0 else -1)
-        limited_angular_z = min(0.4, abs(angular_z)) * (1 if angular_z >= 0 else -1)
+        if self._robot_version_major == 1:
+            MAX_LINEAR_X = 0.3
+            MAX_LINEAR_Y = 0.2
+            MAX_ANGULAR_Z = 0.3
+        elif self._robot_version_major == 4 or self._robot_version_major == 5:
+            MAX_LINEAR_X = 0.4
+            MAX_LINEAR_Y = 0.2
+            MAX_ANGULAR_Z = 0.4
+        else:
+            SDKLogger.warn("[Core] walk failed: robot version is not supported, current version major: {self._robot_version_major}")
+            return False
+
+        limited_linear_x = min(MAX_LINEAR_X, abs(linear_x)) * (1 if linear_x >= 0 else -1)
+        limited_linear_y = min(MAX_LINEAR_Y, abs(linear_y)) * (1 if linear_y >= 0 else -1)
+        limited_angular_z = min(MAX_ANGULAR_Z, abs(angular_z)) * (1 if angular_z >= 0 else -1)
         return self._control.robot_walk(limited_linear_x, limited_linear_y, limited_angular_z)
     
     def squat(self, height:float, pitch:float)->bool:
@@ -211,10 +224,22 @@ class KuavoRobotCore:
             SDKLogger.warn(f"[Core] control torso height failed, robot is not in stance state({self.state})!")
             return False
         
-        MIN_HEIGHT = -0.35
-        MAX_HEIGHT = 0.0
-        MIN_PITCH = -0.4
-        MAX_PITCH = 0.4
+        if self._robot_version_major == 1:
+            MIN_HEIGHT = -0.35
+            MAX_HEIGHT = 0.1
+            MIN_PITCH = 0
+            MAX_PITCH = 0
+            if pitch != 0:
+                SDKLogger.warn("[Core] roban2 pitch is not supported, will be set to 0")
+                pitch = 0
+        elif self._robot_version_major == 4 or self._robot_version_major == 5:
+            MIN_HEIGHT = -0.35
+            MAX_HEIGHT = 0.1
+            MIN_PITCH = 0
+            MAX_PITCH = 0.4
+        else:
+            SDKLogger.warn("[Core] control torso height failed: robot version is not supported, current version major: {self._robot_version_major}")
+            return False
         
         # Limit height range
         limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, height))
@@ -225,6 +250,16 @@ class KuavoRobotCore:
         limited_pitch = min(MAX_PITCH, max(MIN_PITCH, pitch))
         if abs(pitch) > MAX_PITCH:
             SDKLogger.warn(f"[Core] pitch {pitch} exceeds limit [{MIN_PITCH}, {MAX_PITCH}], will be limited")
+
+        # 结合当前高度做过滤
+        target_height = self._rb_info['init_stand_height'] + limited_height
+        # 躯干上升运动变化不宜过大, 目标高度减去实时躯干高度大于阈值
+        HEIGHT_CHANGE_THRESHOLD = 0.25
+        if (self._rb_state.com_height < target_height) and (target_height - self._rb_state.com_height) >= HEIGHT_CHANGE_THRESHOLD:
+            limited_height = (self._rb_state.com_height + HEIGHT_CHANGE_THRESHOLD)
+            print(f"\033[33mWarning! Height change too large, limiting to safe range,reset height to {limited_height}\033[0m")
+        else:
+            limited_height = target_height
 
         return self._control.control_torso_height(limited_height, limited_pitch)
 
@@ -253,17 +288,23 @@ class KuavoRobotCore:
         com_height = self._rb_state.com_height
         # print(f"[Core] Current COM height: {com_height:.2f}m")
         # Check height limits based on current COM height
-        MIN_COM_HEIGHT = 0.66  # Minimum allowed COM height in meters
-        MAX_COM_HEIGHT = 0.86  # Maximum allowed COM height in meters
+        MIN_COM_HEIGHT = self._rb_info['init_stand_height'] - 0.15  # Minimum allowed COM height in meters
+        MAX_COM_HEIGHT = self._rb_info['init_stand_height'] + 0.02 # Maximum allowed COM height in meters
+
+        if com_height < MIN_COM_HEIGHT:
+            print(f"\033[31m[Core] Torso height too low, control failed: current COM height {com_height:.2f}m is below the minimum allowed height {MIN_COM_HEIGHT}m\033[0m")
+            return  False
 
         # Validate COM height constraints
         if target_pose[2] < 0 and com_height < MIN_COM_HEIGHT:
-            SDKLogger.warn(f"[Core] Cannot squat lower: COM height {com_height:.2f}m below minimum {MIN_COM_HEIGHT}m")
-            return None
+            print(f"\033[33mWarning! Cannot squat lower: COM height {com_height:.2f}m below minimum {MIN_COM_HEIGHT}m\033[0m")
+            return False
+
         
         if target_pose[2] > 0 and com_height > MAX_COM_HEIGHT:
-            SDKLogger.warn(f"[Core] Cannot stand higher: COM height {com_height:.2f}m above maximum {MAX_COM_HEIGHT}m")
-            return None
+            print(f"\033[33mWarning! Cannot stand higher: COM height {com_height:.2f}m above maximum {MAX_COM_HEIGHT}m\033[0m")
+            return False
+
 
         # Ensure target height is within allowed range if height change requested
         if target_pose[2] != 0:
@@ -275,11 +316,10 @@ class KuavoRobotCore:
                 SDKLogger.warn(f"[Core] Target height {target_height:.2f}m above maximum {MAX_COM_HEIGHT}m, limiting") 
                 target_pose[2] = MAX_COM_HEIGHT - com_height
         
-        # TODO(kuavo): 根据实物测试来调整....
-        if com_height > 0.82:
-            max_x_step = 0.20
-            max_y_step = 0.20
-            max_yaw_step = 90
+        if com_height > (self._rb_info['init_stand_height']-0.03):
+            max_x_step = 0.17
+            max_y_step = 0.17
+            max_yaw_step = 60
         else:
             max_x_step = 0.15
             max_y_step = 0.15
@@ -344,13 +384,27 @@ class KuavoRobotCore:
         Raises:
             RuntimeError: If robot is not in stance state
         """
-        if self.state != 'stance':
-            raise RuntimeError(f"[Core] control_command_pose failed: robot must be in stance state, current state: {self.state}")
+        # if self.state != 'stance':
+        #     raise RuntimeError(f"[Core] control_command_pose failed: robot must be in stance state, current state: {self.state}")
         
         # Add any parameter validation if needed
         # e.g., limit ranges for safety
+        MAX_HEIGHT = 0.1
+        MIN_HEIGHT = -0.35
+        limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, target_pose_z))
+        if target_pose_z > MAX_HEIGHT or target_pose_z < MIN_HEIGHT:
+            SDKLogger.warn(f"[Core] target_pose_z {target_pose_z:.3f} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited")
+
+        # 结合当前高度做过滤，限制上升时的高度变化
+        target_height = self._rb_info['init_stand_height'] + limited_height
+        # 躯干上升运动变化不宜过大, 目标高度减去实时躯干高度大于阈值
+        HEIGHT_CHANGE_THRESHOLD = 0.25
+        if (self._rb_state.com_height < target_height) and (target_height - self._rb_state.com_height) >= HEIGHT_CHANGE_THRESHOLD:
+            limited_height = (self._rb_state.com_height + HEIGHT_CHANGE_THRESHOLD) - self._rb_info['init_stand_height']
+            SDKLogger.warn(f"[Core] Warning! Height change too large, limiting to safe range, reset height to {limited_height:.3f}")
+
         self.to_command_pose()
-        return self._control.control_command_pose(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
+        return self._control.control_command_pose(target_pose_x, target_pose_y, limited_height, target_pose_yaw)
 
     def control_command_pose_world(self, target_pose_x:float, target_pose_y:float, target_pose_z:float, target_pose_yaw:float)->bool:
         """
@@ -373,8 +427,23 @@ class KuavoRobotCore:
         
         # Add any parameter validation if needed
         # e.g., limit ranges for safety
+        MAX_HEIGHT = 0.1
+        MIN_HEIGHT = -0.35
+        # Limit height range
+        limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, target_pose_z))
+        if target_pose_z > MAX_HEIGHT or target_pose_z < MIN_HEIGHT:
+            SDKLogger.warn(f"[Core] target_pose_z {target_pose_z:.3f} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited")
+
+        # 结合当前高度做过滤，限制上升时的高度变化
+        target_height = self._rb_info['init_stand_height'] + limited_height
+        # 躯干上升运动变化不宜过大, 目标高度减去实时躯干高度大于阈值
+        HEIGHT_CHANGE_THRESHOLD = 0.25
+        if (self._rb_state.com_height < target_height) and (target_height - self._rb_state.com_height) >= HEIGHT_CHANGE_THRESHOLD:
+            limited_height = (self._rb_state.com_height + HEIGHT_CHANGE_THRESHOLD) - self._rb_info['init_stand_height']
+            SDKLogger.warn(f"[Core] Warning! Height change too large, limiting to safe range, reset height to {limited_height:.3f}")
+
         self.to_command_pose_world()
-        return self._control.control_command_pose_world(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
+        return self._control.control_command_pose_world(target_pose_x, target_pose_y, limited_height, target_pose_yaw)
     
     def execute_gesture(self, gestures:list)->bool:
         return self._control.execute_gesture(gestures)
@@ -398,6 +467,9 @@ class KuavoRobotCore:
         pitch_deg = pitch * 180 / math.pi
         return self._control.control_robot_head(yaw_deg, pitch_deg)
     
+    def control_robot_waist(self, target_pos:list):
+        return self._control.control_robot_waist(target_pos)
+    
     def enable_head_tracking(self, target_id: int)->bool:
         return self._control.enable_head_tracking(target_id)
     
@@ -408,6 +480,9 @@ class KuavoRobotCore:
         if self.state != 'stance':
             raise RuntimeError(f"[Core] control_robot_arm_joint_positions failed: robot must be in stance state, current state: {self.state}")
         
+        if self._control.is_arm_collision_mode() and self._control.is_arm_collision():
+            SDKLogger.error(f"Arm collision detected, cannot publish arm trajectory")
+            return False
         # change to external control mode  
         if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
             SDKLogger.debug("[Core] control_robot_arm_joint_positions, current arm mode != ExternalControl, change it.")
@@ -419,6 +494,10 @@ class KuavoRobotCore:
     def control_robot_arm_joint_trajectory(self, times:list, joint_q:list)->bool:
         if self.state != 'stance':
             raise RuntimeError("[Core] control_robot_arm_joint_trajectory failed: robot must be in stance state")
+
+        if self._control.is_arm_collision_mode() and self._control.is_arm_collision():
+            SDKLogger.error(f"Arm collision detected, cannot publish arm trajectory")
+            return False
         
         if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
             SDKLogger.debug("[Core] control_robot_arm_joint_trajectory, current arm mode != ExternalControl, change it.")
@@ -444,6 +523,16 @@ class KuavoRobotCore:
         return self._control.control_robot_end_effector_pose(left_pose, right_pose, frame)
 
     def change_manipulation_mpc_frame(self, frame: KuavoManipulationMpcFrame)->bool:
+        # Check if service is available (if current state is ERROR, service is not available)
+        current_frame = self._rb_state.manipulation_mpc_frame
+        if current_frame == KuavoManipulationMpcFrame.ERROR:
+            SDKLogger.warn("[Core] Manipulation MPC frame service not available, updating local state only")
+            if not hasattr(self, '_manipulation_mpc_frame_lock'):
+                self._manipulation_mpc_frame_lock = threading.Lock()
+            with self._manipulation_mpc_frame_lock:
+                self._manipulation_mpc_frame = frame
+            return True
+        
         timeout = 1.0
         count = 0
         while self._rb_state.manipulation_mpc_frame != frame:
@@ -464,6 +553,16 @@ class KuavoRobotCore:
         return True
     
     def change_manipulation_mpc_ctrl_mode(self, control_mode: KuavoManipulationMpcCtrlMode)->bool:
+        # Check if service is available (if current state is ERROR, service is not available)
+        current_mode = self._rb_state.manipulation_mpc_ctrl_mode
+        if current_mode == KuavoManipulationMpcCtrlMode.ERROR:
+            SDKLogger.warn("[Core] Manipulation MPC control mode service not available, updating local state only")
+            if not hasattr(self, '_manipulation_mpc_ctrl_mode_lock'):
+                self._manipulation_mpc_ctrl_mode_lock = threading.Lock()
+            with self._manipulation_mpc_ctrl_mode_lock:
+                self._manipulation_mpc_ctrl_mode = control_mode
+            return True
+        
         timeout = 1.0
         count = 0
         while self._rb_state.manipulation_mpc_ctrl_mode != control_mode:
@@ -484,6 +583,16 @@ class KuavoRobotCore:
         return True
     
     def change_manipulation_mpc_control_flow(self, control_flow: KuavoManipulationMpcControlFlow)->bool:
+        # Check if service is available (if current state is ERROR, service is not available)
+        current_flow = self._rb_state.manipulation_mpc_control_flow
+        if current_flow == KuavoManipulationMpcControlFlow.Error:
+            SDKLogger.warn("[Core] Manipulation MPC control flow service not available, updating local state only")
+            if not hasattr(self, '_manipulation_mpc_control_flow_lock'):
+                self._manipulation_mpc_control_flow_lock = threading.Lock()
+            with self._manipulation_mpc_control_flow_lock:
+                self._manipulation_mpc_control_flow = control_flow
+            return True
+        
         timeout = 1.0
         count = 0
         while self._rb_state.manipulation_mpc_control_flow != control_flow:
@@ -504,19 +613,26 @@ class KuavoRobotCore:
         return True
     
     def change_robot_arm_ctrl_mode(self, mode:KuavoArmCtrlMode)->bool:
+
+        if self._control.is_arm_collision_mode() and self.is_arm_collision():
+            SDKLogger.warn("[Core] change_robot_arm_ctrl_mode failed, arm collision detected!")
+            return False
+
+        # Wait for state update to complete, similar to change_manipulation_mpc_ctrl_mode
         timeout = 1.0
         count = 0
-        while self._rb_state.arm_control_mode != mode:
-            SDKLogger.debug(f"[Core] Change robot arm control  from {self._rb_state.arm_control_mode} to {mode}, retry: {count}")
-            self._control.change_robot_arm_ctrl_mode(mode)
-            if self._rb_state.arm_control_mode == mode:
-                break
-            if timeout <= 0:
-                SDKLogger.warn("[Core] Change robot arm control mode timeout!")
-                return False
-            timeout -= 0.1
-            time.sleep(0.1)
-            count += 1
+        if self._rb_state.arm_control_mode != mode:
+            while self._rb_state.arm_control_mode != mode:
+                SDKLogger.debug(f"[Core] Change robot arm control from {self._rb_state.arm_control_mode} to {mode}, retry: {count}")
+                self._control.change_robot_arm_ctrl_mode(mode)
+                if self._rb_state.arm_control_mode == mode:
+                    break
+                if timeout <= 0:
+                    SDKLogger.warn("[Core] Change robot arm control mode timeout!")
+                    return False
+                timeout -= 0.1
+                time.sleep(0.1)
+                count += 1
         
         if not hasattr(self, '_arm_ctrl_mode_lock'):
             self._arm_ctrl_mode_lock = threading.Lock()
@@ -539,16 +655,27 @@ class KuavoRobotCore:
         return self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.AutoSwing)
         
     def robot_manipulation_mpc_reset(self)->bool:
+        SDKLogger.info("[Core] Starting manipulation MPC reset...")
+        
         if self._manipulation_mpc_ctrl_mode != KuavoManipulationMpcCtrlMode.NoControl:
-            SDKLogger.debug("[Core] robot manipulation mpc reset, current manipulation mpc ctrl mode != NoControl, change it.")
+            SDKLogger.info("[Core] Resetting manipulation MPC control mode to NoControl...")
             if not self.change_manipulation_mpc_ctrl_mode(KuavoManipulationMpcCtrlMode.NoControl):
                 SDKLogger.warn("[Core] robot manipulation mpc reset failed, change manipulation mpc ctrl mode failed!")
                 return False
+            SDKLogger.info("[Core] Manipulation MPC control mode reset to NoControl successfully")
+        else:
+            SDKLogger.info("[Core] Manipulation MPC control mode is already NoControl")
+        
         if self._manipulation_mpc_control_flow != KuavoManipulationMpcControlFlow.ThroughFullBodyMpc:
-            SDKLogger.debug("[Core] robot manipulation mpc reset, current manipulation mpc control flow != ThroughFullBodyMpc, change it.")
+            SDKLogger.info("[Core] Resetting manipulation MPC control flow to ThroughFullBodyMpc...")
             if not self.change_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.ThroughFullBodyMpc):
                 SDKLogger.warn("[Core] robot manipulation mpc reset failed, change manipulation mpc control flow failed!")
                 return False
+            SDKLogger.info("[Core] Manipulation MPC control flow reset to ThroughFullBodyMpc successfully")
+        else:
+            SDKLogger.info("[Core] Manipulation MPC control flow is already ThroughFullBodyMpc")
+        
+        SDKLogger.info("[Core] Manipulation MPC reset completed successfully")
         return True
         
     """ ------------------------------------------------------------------------"""
@@ -575,6 +702,32 @@ class KuavoRobotCore:
                 SDKLogger.debug(f"[Core] Received gait change notification: {gait_name} at time {current_time}")
                 # Call the transition method if it exists
                 getattr(self, to_method)()
+
+    def is_arm_collision(self)->bool:
+        return self._control.is_arm_collision()
+    
+    def is_arm_collision_mode(self)->bool:
+        """Check if arm collision mode is enabled.
+        
+        Returns:
+            bool: True if collision mode is enabled, False otherwise.
+        """
+        return self._control.is_arm_collision_mode()
+    
+    def release_arm_collision_mode(self):
+
+        self._control.release_arm_collision_mode()
+        # if not self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.ExternalControl):
+        #     SDKLogger.warn("[Core] control_robot_arm_joint_positions failed, change robot arm ctrl mode failed!")
+        #     return False
+        
+
+    def wait_arm_collision_complete(self):
+        self._control.wait_arm_collision_complete()
+
+    
+    def set_arm_collision_mode(self, enable: bool):
+        self._control.set_arm_collision_mode(enable)
 
 
 if __name__ == "__main__":

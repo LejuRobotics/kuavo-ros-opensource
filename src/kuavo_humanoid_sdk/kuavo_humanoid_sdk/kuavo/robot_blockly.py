@@ -7,7 +7,7 @@ from kuavo_humanoid_sdk.kuavo.robot_audio import KuavoRobotAudio
 from kuavo_humanoid_sdk.kuavo.robot_climbstair import KuavoRobotClimbStair, set_pitch_limit
 from kuavo_humanoid_sdk.interfaces.data_types  import KuavoPose
 from kuavo_msgs.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
-from kuavo_msgs.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHandPosition, robotHeadMotionData, sensorsData
+from kuavo_msgs.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl
 from geometry_msgs.msg import Twist
 import asyncio
 import math
@@ -38,10 +38,15 @@ robot_version = int(os.environ.get("ROBOT_VERSION", "45"))
 ocs2_joint_state = JointState()
 ocs2_hand_state = robotHandPosition()
 ocs2_head_state = robotHeadMotionData()
+ocs2_waist_state = robotWaistControl()
+KUAVO_TACT_LENGTH = 28
+ROBAN_TACT_LENGTH = 23
 if robot_version >= 40:
     INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    current_arm_joint_state = [0] * KUAVO_TACT_LENGTH
 else:
-    INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+    INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
+    current_arm_joint_state = [0] * ROBAN_TACT_LENGTH
 
 
 def signal_handler(sig, frame):
@@ -54,6 +59,8 @@ def signal_handler(sig, frame):
     global running
     print('\nCtrl+C pressed. Stopping robot...')
     running = False
+    rospy.signal_shutdown("Ctrl+C pressed")
+    exit(0)
 
 def frames_to_custom_action_data(file_path: str):
     """Parse action file and convert frames to custom action data.
@@ -90,6 +97,42 @@ def frames_to_custom_action_data(file_path: str):
                     [round((keyframe+right_CP[0])/100, 1), int(value+right_CP[1])],
                 ])
     return action_data
+
+def verify_robot_version(file_path: str):
+    with open(file_path, "r") as f:
+        data = json.load(f)
+    
+    robot_type_raw = data.get("robotType", None)
+    if robot_type_raw is None:
+        msg = "Action file missing required field: robotType"
+        rospy.logerr(msg)
+        return False, msg
+    try:
+        tact_robot_version = int(robot_type_raw)
+    except (TypeError, ValueError):
+        msg = f"Invalid robotType in action file: {robot_type_raw}"
+        rospy.logerr(msg)
+        return False, msg
+
+    # 版本兼容关系映射
+    version_compat_map = {
+        41: [41],
+        42: [42],
+        45: [43, 45, 46, 48, 49],
+        11: [11, 13, 14],
+        13: [11, 13, 14],
+        14: [11, 13, 14]
+    }
+    allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
+    if robot_version not in allowed_robot_versions:
+        msg = (
+            f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version}"
+        )
+        rospy.logerr(msg)
+        return False, msg
+    
+    rospy.loginfo(f"Version match: tact {tact_robot_version} is compatible with robot {robot_version}")
+    return True, None
 
 def get_start_end_frame_time(file_path: str):
     """Get the start and end frame time from the action file.
@@ -298,9 +341,8 @@ class RobotControlBlockly:
         kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
         control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1, tcp_nodelay=True)
         control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1, tcp_nodelay=True)
-
-        control_waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=1, tcp_nodelay=True)
-
+        control_waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=1, tcp_nodelay=True)
+        rospy.Subscriber('/dexhand/state', JointState, self.robot_hand_callback, queue_size=1, tcp_nodelay=True)
         rospy.Subscriber('/sensors_data_raw', sensorsData, self.sensors_data_callback, queue_size=1, tcp_nodelay=True)
         rospy.Timer(rospy.Duration(0.01), self.timer_callback)
         rospy.Subscriber(robot_settings[g_robot_type]["arm_traj_state_topic_name"], planArmState, self.plan_arm_state_callback)
@@ -313,29 +355,57 @@ class RobotControlBlockly:
         """
         global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, g_robot_type
         if g_robot_type == "ocs2" and len(ocs2_joint_state.position) > 0 and self.plan_arm_state_status is False:
-            kuavo_arm_traj_pub.publish(ocs2_joint_state)
-            control_hand_pub.publish(ocs2_hand_state)
-            # control_head_pub.publish(ocs2_head_state)
+            if len(ocs2_joint_state.position) != 0:
+                kuavo_arm_traj_pub.publish(ocs2_joint_state)
+            if len(ocs2_hand_state.left_hand_position) != 0 or len(ocs2_hand_state.right_hand_position) != 0:
+                control_hand_pub.publish(ocs2_hand_state)
+            if len(ocs2_head_state.joint_data) != 0:
+                control_head_pub.publish(ocs2_head_state)
+            if len(ocs2_waist_state.data.data) != 0:
+                control_waist_pub.publish(ocs2_waist_state)
 
     def sensors_data_callback(self, msg):
-        """Callback for sensor data, extracts current arm joint state and saves to global variables.
+        """更新关节数据"""
+        self._last_joint_msg = msg
 
-        Args:
-            msg (sensorsData): Sensor data message.
-        """
-        global current_arm_joint_state, robot_version, current_head_joint_state
+        global current_head_joint_state
+        current_head_joint_state = msg.joint_data.joint_q[-2:]
+        current_head_joint_state = [round(pos, 4) for pos in current_head_joint_state]
+
+        if not hasattr(self, "_last_hand_msg"):
+            dummy_hand = JointState()
+            dummy_hand.position = [0.0] * 12
+            self._last_hand_msg = dummy_hand
+
+        self._update_current_arm_joint_state(self._last_joint_msg, self._last_hand_msg)
+
+    def robot_hand_callback(self, msg):
+        """更新手部数据"""
+        left = msg.position[:6] if len(msg.position) >= 6 else [0] * 6
+        right = msg.position[6:12] if len(msg.position) >= 12 else [0] * 6
+
+        self._last_hand_msg = msg
+
+        if hasattr(self, "_last_joint_msg"):
+            self._update_current_arm_joint_state(self._last_joint_msg, self._last_hand_msg)
+
+    def _update_current_arm_joint_state(self, joint_msg, hand_msg):
+        """整合 joint_msg 和 hand_msg，更新 current_arm_joint_state"""
+        global robot_version, current_arm_joint_state
         if robot_version >= 40:
-            current_arm_joint_state = msg.joint_data.joint_q[12:26]
-            current_arm_joint_state = [round(pos, 2) for pos in current_arm_joint_state]
-            current_arm_joint_state.extend([0] * 14)
-            current_head_joint_state = msg.joint_data.joint_q[-2:]
-            current_head_joint_state = [round(pos, 4) for pos in current_head_joint_state]
+            arm_part = list(joint_msg.joint_data.joint_q[12:26])
+            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+            head_part = list(joint_msg.joint_data.joint_q[-2:])
+            current_arm_joint_state = arm_part + hand_part + head_part
+
         elif robot_version >= 10 and robot_version < 30:
-            current_arm_joint_state = msg.joint_data.joint_q[13:21]
-            current_arm_joint_state = [round(pos, 5) for pos in current_arm_joint_state]
-            current_arm_joint_state.extend([0] * 14)
-            current_head_joint_state = msg.joint_data.joint_q[-2:]
-            current_head_joint_state = [round(pos, 4) for pos in current_head_joint_state]
+            arm_part = list(joint_msg.joint_data.joint_q[13:21])
+            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+            head_part = list(joint_msg.joint_data.joint_q[-2:])
+            waist_part = [joint_msg.joint_data.joint_q[0]]
+            current_arm_joint_state = arm_part + hand_part + head_part + waist_part
+
+        current_arm_joint_state = [round(v, 2) for v in current_arm_joint_state]
 
     def plan_arm_state_callback(self, msg: planArmState):
         """Callback for arm trajectory state, updates global variables for progress and completion.
@@ -352,8 +422,7 @@ class RobotControlBlockly:
         Args:
             msg (JointTrajectory): Trajectory message.
         """
-        global ocs2_joint_state
-        global robot_version
+        global ocs2_joint_state, ocs2_hand_state, ocs2_head_state, ocs2_waist_state, robot_version
         if len(msg.points) == 0:
             return
         point = msg.points[0]
@@ -372,6 +441,12 @@ class RobotControlBlockly:
             ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:8]]
             ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:8]]
             ocs2_joint_state.effort = [0] * 8
+            if len(point.positions) == ROBAN_TACT_LENGTH:
+                ocs2_hand_state.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[8:14]]
+                ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
+                ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
+                ocs2_waist_state.header.stamp = rospy.Time.now()
+                ocs2_waist_state.data.data = [math.degrees(pos) for pos in point.positions[22:]]
 
     def arm_reset(self):
         """Reset the arm position to the initial state."""
@@ -601,6 +676,11 @@ class RobotControlBlockly:
             print(f"Action file not found: {action_file_path}")
             return
 
+        is_compatible, msg = verify_robot_version(action_file_path)
+        if not is_compatible:
+            print(msg)
+            return
+
         start_frame_time, end_frame_time = get_start_end_frame_time(action_file_path)
 
         if g_robot_type == "ocs2":
@@ -742,6 +822,12 @@ class RobotControlBlockly:
         try:
             self.arm_reset()
             self.control_robot_head(0, 0)
+            self.control_waist_rotation(0)
+            init_hand_state = robotHandPosition()
+            init_hand_state.left_hand_position = [0] * 6
+            init_hand_state.right_hand_position = [0] * 6
+            global control_hand_pub
+            control_hand_pub.publish(init_hand_state)
             self.robot._kuavo_core._control.robot_stance()
             global com_height
             while True:
@@ -1051,17 +1137,19 @@ class RobotControlBlockly:
         """
         try:
             global control_waist_pub
-            msg = Float64MultiArray()
-            msg.data = [degree]
+            msg = robotWaistControl()
+            msg.header.stamp = rospy.Time.now()
+            msg.data.data = [degree]
             control_waist_pub.publish(msg)
 
         except Exception as e:
             print(f"Robot waist control failed: {str(e)}")
 
-    def alignment_target(self, class_name: str, x: float, y: float, z: float):
+    def alignment_target(self, class_name: str, confidence: float = 0.5, x: float = 0.0, y: float = 0.0, z: float = 0.0):
         """
         使机器人对准指定类别到对象，并移动到目标前
         :param class_name: yolo 检测中需要检测的对象名称，和训练模型中的类别名称一致
+        :param confidence: yolo 检测置信度，默认 0.5
         :param x: 图像 x 方向的偏移值，物体中心的 x 小于该参数 -x 时，机器人左移，大于该参数 x 时，机器人右移
         :param y: 图像 y 方向的偏移值，物体中心的 y 小于该参数 y 时，机器人前进，否则停止移动
         :param z: 机器人上下蹲的高度控制
@@ -1084,6 +1172,7 @@ class RobotControlBlockly:
                 if result is None:
                     print("No head camera image...")
                     return
+            yolo_detection.set_conf( confidence)
 
             IMAGE_CENTER_X = yolo_detection.camera_interface.cv_image_shape[1] / 2.0
             IMAGE_CENTER_Y = yolo_detection.camera_interface.cv_image_shape[0] / 2.0

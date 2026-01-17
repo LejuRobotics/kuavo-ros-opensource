@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>humanoid_wheel_interface</name>
+  <version>0.0.0</version>
+  <description>The humanoid_wheel_interface package</description>
+
+  <maintainer email="mspieler@ethz.ch">Michael Spieler</maintainer>
+  <maintainer email="fperry@ethz.ch">Perry Franklin</maintainer>
+  <maintainer email="mittalma@ethz.ch">Mayank Mittal</maintainer>
+
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>cmake_clang_tools</build_depend>
+
+  <depend>ocs2_core</depend>
+  <depend>ocs2_ddp</depend>
+  <depend>ocs2_sqp</depend>
+  <depend>ocs2_mpc</depend>
+  <depend>ocs2_robotic_tools</depend>
+  <depend>ocs2_robotic_assets</depend>
+  <depend>ocs2_pinocchio_interface</depend>
+  <depend>ocs2_centroidal_model</depend>
+  <depend>humanoid_interface</depend>
+  <depend>ocs2_self_collision</depend>
+  <depend>pinocchio</depend>
+  <depend>kuavo_msgs</depend>
+  <depend>ruckig_catkin</depend>
+
+</package>

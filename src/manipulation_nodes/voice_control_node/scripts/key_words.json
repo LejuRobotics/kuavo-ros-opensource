@@ -1,0 +1,193 @@
+{
+  "前进一步": {
+    "type": "SINGLE_STEP",
+    "keywords": [
+      "往前走",
+      "往前走一步",
+      "前进一步"
+    ],
+    "data": {
+      "direction": "前",
+      "step": 1
+    }
+  },
+  "后退一步": {
+    "type": "SINGLE_STEP",
+    "keywords": [
+      "往后走",
+      "往后走一步",
+      "后退一步"
+    ],
+    "data": {
+      "direction": "后",
+      "step": 1
+    }
+  },
+  "左转一步": {
+    "type": "SINGLE_STEP",
+    "keywords": [
+      "左转",
+      "左转一步"
+    ],
+    "data": {
+      "direction": "左转",
+      "step": 1
+    }
+  },
+  "右转一步": {
+    "type": "SINGLE_STEP",
+    "keywords": [
+      "右转",
+      "右转一步"
+      ],
+    "data": {
+      "direction": "右转",
+      "step": 1
+    }
+  },
+  "左移一步": {
+    "type": "SINGLE_STEP",
+    "keywords": [
+      "左移",
+      "往左走",
+      "左边走"
+    ],
+    "data": {
+      "direction": "左",
+      "step": 1
+    }
+  },
+  "右移一步": {
+    "type": "SINGLE_STEP",
+    "keywords": [
+      "右移",
+      "往右走",
+      "右边走"
+    ],
+    "data": {
+      "direction": "右",
+      "step": 1
+    }
+  },
+  "抱拳": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "抱拳",
+      "抱拳致意",
+      "作揖"
+    ],
+    "data": "抱拳"
+  },
+  "飞吻": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "飞吻",
+      "送个吻",
+      "表达一下爱意"
+    ],
+    "data": "飞吻"
+  },
+  "欢呼": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "欢呼",
+      "表现开心",
+      "开心一点"
+    ],
+    "data": "欢呼"
+  },
+  "加油": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "加油",
+      "鼓励"
+    ],
+    "data": "加油"
+  },
+  "敬少先队队礼": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "敬礼",
+      "敬少先队礼",
+      "敬队礼"
+    ],
+    "data": "敬少先队队礼"
+  },
+  "举右手": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "举右手",
+      "右手举起来"
+    ],
+    "data": "举右手"
+  },
+  "举左手": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "举左手",
+      "左手举起来"
+    ],
+    "data": "举左手"
+  },
+  "碰拳": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "碰拳",
+      "击拳",
+      "来个拳碰拳"
+    ],
+    "data": "碰拳"
+  },
+  "双手叉腰": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "叉腰",
+      "摆个造型",
+      "双手叉腰"
+    ],
+    "data": "双手叉腰"
+  },
+  "右手打招呼": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "打招呼",
+      "挥挥手",
+      "打个招呼"
+    ],
+    "data": "右手打招呼"
+  },
+  "右手握手": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "握手",
+      "和我握个手",
+      "来握手"
+    ],
+    "data": "右手握手"
+  },
+  "右转腰打招呼": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "向右边打个招呼",
+      "和右边的人问好"
+    ],
+    "data": "右转腰打招呼"
+  },
+  "左转腰打招呼": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "向左边打个招呼",
+      "和左边的人问好"
+    ],
+    "data": "左转腰打招呼"
+  },
+  "抬右手致意": {
+    "type": "ARM_ACTION",
+    "keywords": [
+      "致敬",
+      "耍酷",
+      "抬手致意"
+    ],
+    "data": "抬右手致意"
+  }
+}

@@ -2,12 +2,15 @@
     "JoyButton": {
         "BUTTON_STANCE": 0,
         "BUTTON_TROT": 1,
-        "BUTTON_JUMP": 3,
+        "BUTTON_RL": 3,
         "BUTTON_WALK": 4,
         "BUTTON_LB": 6,
         "BUTTON_RB": 7,
         "BUTTON_BACK": 10,
-        "BUTTON_START": 11
+        "BUTTON_START": 11,
+        "BUTTON_GUIDE": 12,
+        "BUTTON_M1": 13,
+        "BUTTON_M2": 14
     },
     "JoyAxis": {
         "AXIS_LEFT_STICK_Y": 0,

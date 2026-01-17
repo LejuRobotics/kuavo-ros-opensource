@@ -15,6 +15,15 @@ else()
     message(STATUS "DDS communication disabled (compile with -DUSE_DDS=ON to enable)")
 endif()
 
+# Add USE_LEJU_DDS option
+option(USE_LEJU_DDS "Enable Leju DDS communication" OFF)
+if(USE_LEJU_DDS)
+    add_definitions(-DUSE_LEJU_DDS)
+    message(STATUS "Leju DDS communication enabled")
+else()
+    message(STATUS "Leju DDS communication disabled (compile with -DUSE_LEJU_DDS=ON to enable)")
+endif()
+
 ## Find catkin macros and libraries
 find_package(catkin REQUIRED
         COMPONENTS
@@ -23,7 +32,10 @@ find_package(catkin REQUIRED
         humanoid_common
         humanoid_interface
         humanoid_interface_ros
+        humanoid_wheel_interface
+        humanoid_wheel_interface_ros
         humanoid_wbc
+        humanoid_wheel_wbc
         humanoid_estimation
         ocs2_self_collision_visualization
         # ocs2_biped_robot_ros
@@ -31,14 +43,29 @@ find_package(catkin REQUIRED
         kuavo_msgs
         humanoid_interface_drake
         kuavo_common
+        kuavo_solver
         )
 find_package(drake REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(OpenVINO REQUIRED)
+find_package(yaml-cpp REQUIRED)
 pkg_check_modules(pinocchio REQUIRED pinocchio)
 
-if (USE_DDS)
+if (USE_DDS OR USE_LEJU_DDS)
         # Find CycloneDDS-CXX (correct package name based on reference)
         find_package(CycloneDDS-CXX REQUIRED)
+
+        # Set up leju IDL files paths and variables (always available in DDS mode)
+        set(LEJU_GENERATED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo-ros-control-lejulib/hardware_dds_plant/include/leju/idl)
+
+        # leju IDL generated source files (from hardware_dds_plant build)
+        set(LEJU_DDS_SOURCES
+            ${LEJU_GENERATED_DIR}/JointCmd.cpp
+            ${LEJU_GENERATED_DIR}/SensorsData.cpp
+            ${LEJU_GENERATED_DIR}/ImuData.cpp
+            ${LEJU_GENERATED_DIR}/JointData.cpp
+            ${LEJU_GENERATED_DIR}/EndEffectorData.cpp
+        )
 
         set(UNITREE_SDK_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo-ros-control-lejulib/hardware_dds_plant/include)
         set(UNITREE_SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo-ros-control-lejulib/hardware_dds_plant/unitree_sdk2/x86_64)
@@ -65,9 +92,9 @@ if (USE_DDS)
         # Set up Unitree SDK library path based on reference
         set(UNITREE_SDK_LIB_PATH ${UNITREE_SDK_LIB_DIR}/libunitree_sdk2.a)
         if(EXISTS ${UNITREE_SDK_LIB_PATH})
-        message(STATUS "Found Unitree SDK library at: ${UNITREE_SDK_LIB_PATH}")
+            message(STATUS "Found Unitree SDK library at: ${UNITREE_SDK_LIB_PATH}")
         else()
-        message(WARNING "Unitree SDK library not found at: ${UNITREE_SDK_LIB_PATH}")
+            message(WARNING "Unitree SDK library not found at: ${UNITREE_SDK_LIB_PATH}")
         endif()
 endif()
 
@@ -92,8 +119,11 @@ catkin_package(
                 humanoid_common
                 humanoid_interface
                 humanoid_interface_ros
+                humanoid_wheel_interface
+                humanoid_wheel_interface_ros
                 # mujoco_sim
                 humanoid_wbc
+                humanoid_wheel_wbc
                 humanoid_estimation
                 kuavo_estimation
                 ocs2_self_collision_visualization
@@ -101,6 +131,7 @@ catkin_package(
                 # ocs2_biped_robot_ros
                 angles
                 kuavo_common
+                kuavo_solver
 )
 
 ###########
@@ -118,6 +149,13 @@ if(EXISTS ${UNITREE_SDK_INCLUDE_PATH})
     include_directories(${UNITREE_SDK_INCLUDE_PATH})
 endif()
 
+# Add DDS include directories
+if(USE_DDS OR USE_LEJU_DDS)
+    include_directories(${LEJU_GENERATED_DIR})  # For leju IDL generated headers
+    include_directories(/usr/local/include/ddscxx)
+    message(STATUS "DDS include directories configured for humanoid_controllers")
+endif()
+
 # CycloneDDS include directories will be handled by the target_link_libraries with CycloneDDS-CXX::ddscxx
 if (kuavo_estimation_FOUND)
 message(STATUS "add kuavo_estimation include")
@@ -128,6 +166,17 @@ link_directories(
         ${pinocchio_LIBRARY_DIRS}
 )
 
+# arm torque controller
+add_library(arm_torque_controller SHARED
+  src/armTorqueController.cpp
+)
+target_link_libraries(arm_torque_controller
+  ${catkin_LIBRARIES}
+  ${pinocchio_LIBRARIES}
+)
+install(TARGETS arm_torque_controller
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+)
 
 # 添加共享内存管理库
 add_library(humanoid_interface_shm SHARED
@@ -160,9 +209,10 @@ install(TARGETS humanoid_interface_shm
 )
 
 # 添加CommonDDS库
-if (USE_DDS)
+if (USE_DDS OR USE_LEJU_DDS)
         add_library(common_dds_lib SHARED
         src/CommonDDS.cpp
+        ${LEJU_DDS_SOURCES}
         )
 
         # 设置C++标准
@@ -179,6 +229,7 @@ if (USE_DDS)
         target_include_directories(common_dds_lib PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:/usr/local/include/ddscxx>
+        $<BUILD_INTERFACE:${LEJU_GENERATED_DIR}>
         $<INSTALL_INTERFACE:include>
         )
 
@@ -206,15 +257,31 @@ endif()
 ## Declare a cpp library
 add_library(${PROJECT_NAME}
         src/humanoidController.cpp
+        src/humanoidWheelController.cpp
+        src/humanoidController_wheel_wbc.cpp
+        src/ControlDataManager.cpp
+        src/WaistKinematics.cpp
+        src/rl/RlGaitReceiver.cpp
+        src/rl/RLControllerBase.cpp
+        src/rl/FallStandController.cpp
+        src/rl/RLControllerManager.cpp
+        src/rl/AmpWalkController.cpp
+        src/rl/armController.cpp
+        # src/AMPController.cpp
+        # src/MinicController.cpp
+        src/rl/VMPController.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}
         ${catkin_LIBRARIES}
         ${pinocchio_LIBRARIES}
         humanoid_interface_shm
-        drake::drake 
+        drake::drake
+        openvino::runtime
+        arm_torque_controller
+        yaml-cpp
         )
-if (USE_DDS)
+if (USE_DDS OR USE_LEJU_DDS)
         target_link_libraries(${PROJECT_NAME}
                 common_dds_lib
         )

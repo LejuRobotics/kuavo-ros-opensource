@@ -167,6 +167,16 @@ class IkRos:
         if rospy.has_param('/only_half_up_body'):
             self.only_half_up_body = rospy.get_param('/only_half_up_body')
 
+        if rospy.has_param('/robot_type'):
+            self.robot_type = rospy.get_param('/robot_type')
+            if self.robot_type == 1:
+                self.only_half_up_body = False
+                print("[IkRos] 机器人类型为轮臂")
+            else:
+                print("[IkRos] 机器人类型为双足")
+                if self.only_half_up_body:
+                     print("✅采用用半身模式")
+
         self.use_arm_collision = rospy.get_param('~use_arm_collision', False)
         # 添加服务
         self.arm_mode_service = rospy.Service('/quest3/set_arm_mode_changing', Trigger, self.set_arm_mode_changing_callback)
@@ -272,6 +282,12 @@ class IkRos:
         self.leju_claw_command_pub = rospy.Publisher(
             "leju_claw_command", lejuClawCommand, queue_size=10
         )
+        
+        if self.robot_type == 1:
+            # 添加发布/mm/two_arm_hand_pose_cmd话题的发布器
+            self.pub_mm_two_arm_hand_pose_cmd = rospy.Publisher(
+                "/mm/two_arm_hand_pose_cmd", twoArmHandPoseCmd, queue_size=10
+            )
         
         # 添加可视化marker发布器
         self.ik_visualization_pub = rospy.Publisher(
@@ -610,8 +626,6 @@ class IkRos:
                 # q0_tmp_msg.data = q0_tmp * 180.0 / np.pi  # 转换为角度
                 # self.pub_q0_tmp.publish(q0_tmp_msg)
                 
-                # print(f"l_hand_pose: {l_hand_pose}, l_elbow_pos: {l_elbow_pos}")
-                # print(f"r_hand_pose: {r_hand_pose}, r_elbow_pos: {r_elbow_pos}")
                 
                 q_now = arm_ik.computeIK(
                     q0_tmp, l_hand_pose, r_hand_pose, l_hand_RPY, r_hand_RPY, l_elbow_pos, r_elbow_pos, left_shoulder_rpy_in_robot, right_shoulder_rpy_in_robot
@@ -673,13 +687,17 @@ class IkRos:
         msg.name = ["arm_joint_" + str(i) for i in range(1, self.__arm_dof+1)]
         msg.header.stamp = rospy.Time.now()
         
-        if self.only_half_up_body and self.optimized_state is None:
+        if self.only_half_up_body and self.optimized_state is None and self.sensor_data_raw is None:
             print(f"[ik_ros_uni]: optimized_state is None")
             return
 
         if self.only_half_up_body and self.arm_mode_changing:
             # 获取当前关节角度（从MPC优化后的状态中提取手臂部分，索引24:38）
-            arm_current_state = np.array(self.optimized_state[24:38]).copy()
+            arm_current_state = None
+            if self.optimized_state is not None:
+                arm_current_state = np.array(self.optimized_state[24:38]).copy()
+            else:
+                arm_current_state = np.array(self.sensor_data_raw.joint_data.joint_q[-16:-2]).copy()
             
             # 计算状态差
             delta_state = np.array(arm_agl_limited) - np.array(arm_current_state)
@@ -737,6 +755,23 @@ class IkRos:
         left_finger_joints = self.quest3_arm_info_transformer.get_finger_joints("Left")
         right_finger_joints = self.quest3_arm_info_transformer.get_finger_joints("Right")
         self.hand_finger_data = [left_finger_joints, right_finger_joints]
+        
+        # 发布/mm/two_arm_hand_pose_cmd话题 - 直接使用获取到的pose数据
+        if self.robot_type == 1 and self.quest3_arm_info_transformer.is_runing and self.__target_pose is not None and self.__target_pose_right is not None:
+            eef_pose_msg = twoArmHandPoseCmd()
+            eef_pose_msg.frame = 3
+            # self.__target_pose 是 (hand_pos, hand_quat) 元组
+            eef_pose_msg.hand_poses.left_pose.pos_xyz = self.__target_pose[0]  # hand_pos [x, y, z]
+            eef_pose_msg.hand_poses.left_pose.quat_xyzw = self.__target_pose[1]  # hand_quat [x, y, z, w]
+            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = self.__left_elbow_pos if self.__left_elbow_pos is not None else [0.0, 0.0, 0.0]
+
+            # self.__target_pose_right 是 (hand_pos, hand_quat) 元组
+            eef_pose_msg.hand_poses.right_pose.pos_xyz = self.__target_pose_right[0]  # hand_pos [x, y, z]
+            eef_pose_msg.hand_poses.right_pose.quat_xyzw = self.__target_pose_right[1]  # hand_quat [x, y, z, w]
+            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = self.__right_elbow_pos if self.__right_elbow_pos is not None else [0.0, 0.0, 0.0]
+            
+            self.pub_mm_two_arm_hand_pose_cmd.publish(eef_pose_msg)
+        
         # self.pub_robot_end_hand(left_finger_joints, right_finger_joints)
 
     def two_arm_hand_pose_target_callback(self, msg_ori):
@@ -1004,6 +1039,15 @@ class IkRos:
                         right_hand_position[i] = limit_value(right_hand_position[i], 0, 100)
                     left_hand_position[1] = 100 if joyStick_data.left_first_button_touched else 0
                     right_hand_position[1] = 100 if joyStick_data.right_first_button_touched else 0
+
+                    if joyStick_data.left_first_button_touched and joyStick_data.right_first_button_pressed:
+                        for i in range(0, 6):
+                            left_hand_position[i] = 100 
+                        left_hand_position[2] = 0
+                    if joyStick_data.left_first_button_touched and joyStick_data.right_second_button_pressed:
+                        for i in range(0, 6):
+                            right_hand_position[i] = 100 
+                        right_hand_position[2] = 0
                     # Store current values for freezing
                     self.__frozen_left_hand_position = left_hand_position.copy()
                     self.__frozen_right_hand_position = right_hand_position.copy()
@@ -1031,7 +1075,7 @@ class IkRos:
             self.control_robot_hand_position_pub.publish(robot_hand_position)
         elif self.end_effector_type == LEJUCLAW:
             if joyStick_data is not None:
-                if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
+                if joyStick_data.left_second_button_pressed and self.__button_y_last is False and joyStick_data.left_trigger < 0.1:
                     print(f"\033[91mButton Y is pressed.\033[0m")
                     self.__freeze_finger = not self.__freeze_finger
                 self.__button_y_last = joyStick_data.left_second_button_pressed
@@ -1164,11 +1208,16 @@ class IkRos:
         if self.only_half_up_body:
             # 发送当前手臂的关节状态到kuavo_arm_traj来清空mpc节点话题接收队列
             # 防止半身手臂切换时刻mpc执行旧的kuavo_arm_tarj
-            if self.optimized_state is None:
-                print(f"[ik_ros_uni]: optimized_state is None")
+            if self.optimized_state is None and self.sensor_data_raw is None:
+                print(f"[ik_ros_uni]: optimized_state and sensor_data_raw are None")
+                return
             else:
                 rate = rospy.Rate(1 / self.controller_dt)
-                arm_current_state = np.array(self.optimized_state[24:38]).copy()
+                arm_current_state = None
+                if self.optimized_state is not None:
+                    arm_current_state = np.array(self.optimized_state[24:38]).copy()
+                else:
+                    arm_current_state = np.array(self.sensor_data_raw.joint_data.joint_q[-16:-2]).copy()
                 msg = JointState()
                 msg.name = ["arm_joint_" + str(i) for i in range(1, 15)]
                 msg.header.stamp = rospy.Time.now()
@@ -1252,6 +1301,10 @@ if __name__ == "__main__":
     current_pkg_path = get_package_path("motion_capture_ik")
     kuavo_assests_path = get_package_path("kuavo_assets")
     robot_version = os.environ.get('ROBOT_VERSION', '40')
+
+    # Handle version 15 special case: use version 14 assets
+    if robot_version == '15':
+        robot_version = '14'
 
     model_file = kuavo_assests_path + f"/models/biped_s{robot_version}/urdf/drake/biped_v3_arm.urdf"
     model_config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"

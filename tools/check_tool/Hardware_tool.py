@@ -26,6 +26,15 @@ if sys.version_info[0] == 2:
 
 folder_path = os.path.dirname(os.path.abspath(__file__))    # check_tool/
 
+# 导入 robot_version 模块
+robot_version_path = os.path.join(os.path.dirname(os.path.dirname(folder_path)), 'src/kuavo_common/python')
+sys.path.insert(0, robot_version_path)
+try:
+    from robot_version import RobotVersion
+except ImportError:
+    RobotVersion = None
+    # 只在需要时打印警告，避免在导入时就打印
+
 sys.path.append('/home/lab/.local/lib/python3.8/site-packages/')
 sys.path.append(os.path.join(folder_path,"Ruierman"))
 
@@ -164,6 +173,53 @@ def imu_test():
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
+def get_canbus_wiring_type():
+    """
+    获取CAN总线接线类型
+    返回: 'single_bus' 或 'dual_bus'
+    如果配置文件不存在或读取失败，将打印警告并返回 'single_bus'
+    """
+    canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
+
+    if not os.path.exists(canbus_wiring_file):
+        print(bcolors.WARNING + f"警告: CAN总线配置文件不存在: {canbus_wiring_file}" + bcolors.ENDC)
+        print(bcolors.WARNING + "默认使用单CAN模式 (single_bus)" + bcolors.ENDC)
+        return "single_bus"
+    
+    try:
+        with open(canbus_wiring_file, 'r') as f:
+            wiring_type = f.read().strip()
+            if wiring_type == "dual_bus":
+                return "dual_bus"
+            elif wiring_type == "single_bus":
+                return "single_bus"
+            else:
+                print(bcolors.FAIL + f"错误: CAN总线配置值无效: '{wiring_type}'" + bcolors.ENDC)
+                print(bcolors.FAIL + f"配置文件: {canbus_wiring_file}" + bcolors.ENDC)
+                print(bcolors.FAIL + "有效值应为: 'single_bus' 或 'dual_bus'" + bcolors.ENDC)
+                exit(1)
+    except Exception as e:
+        print(bcolors.FAIL + f"错误: 读取CAN总线配置文件失败: {e}" + bcolors.ENDC)
+        print(bcolors.FAIL + f"配置文件: {canbus_wiring_file}" + bcolors.ENDC)
+        exit(1)
+
+
+def get_leju_claw_script_path():
+    """
+    根据CAN总线配置类型返回对应的夹爪测试脚本路径
+    返回: 脚本的完整路径
+    """
+    wiring_type = get_canbus_wiring_type()
+    
+    if wiring_type == "dual_bus":
+        script_name = "lejuclaw_can_test.sh"
+    else:
+        script_name = "lejuclaw_test.sh"
+    
+    script_path = os.path.join(folder_path, "leju_claw_driver", script_name)
+    return script_path
+
+
 def leju_claw_test():
     """
     主菜单使用的简单测试函数
@@ -218,7 +274,12 @@ def leju_claw_test():
             print("操作已取消，文件未更新")
             exit(0)
 
-    command = "sudo bash "+ folder_path +"/leju_claw_driver/lejuclaw_test.sh"  
+    # 根据CAN总线配置选择脚本
+    script_path = get_leju_claw_script_path()
+    wiring_type = get_canbus_wiring_type()
+    print(bcolors.OKCYAN + f"检测到CAN总线配置: {wiring_type}，使用脚本: {os.path.basename(script_path)}" + bcolors.ENDC)
+    
+    command = "sudo bash " + script_path
 
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
@@ -278,7 +339,21 @@ def leju_claw_test_with_menu():
             print("操作已取消，文件未更新")
             exit(0)
 
-    # 显示测试模式选择菜单
+    # 先判断CAN总线配置类型
+    wiring_type = get_canbus_wiring_type()
+    
+    if wiring_type == "dual_bus":
+        # dual_bus 直接执行 lejuclaw_can_test.sh，不显示菜单
+        script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_can_test.sh")
+        print(bcolors.OKCYAN + f"检测到CAN总线配置: {wiring_type}，直接执行测试脚本" + bcolors.ENDC)
+        if not os.path.exists(script_path):
+            print(bcolors.FAIL + f"未找到脚本: {script_path}" + bcolors.ENDC)
+            return
+        command = "sudo bash " + script_path
+        subprocess.run(command, shell=True)
+        return
+    
+    # single_bus 显示测试模式选择菜单
     while True:
         print("\n*------------二指夹爪测试模式------------*")
         print(bcolors.BOLD + "请选择测试模式（q回车退出）：" + bcolors.ENDC)
@@ -312,16 +387,17 @@ def leju_claw_test_with_menu():
 
 def leju_claw_continuous_test():
     """
-    夹爪持续发布0、100位置开合测试
+    夹爪持续发布0、100位置开合测试（仅用于single_bus配置）
     """
-    command = "sudo bash " + os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh") + " --continuous"
+    script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh")
+    command = "sudo bash " + script_path + " --continuous"
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
 
 def leju_claw_start_server():
     """
-    启动夹爪服务器
+    启动夹爪服务器（仅用于single_bus配置）
     """
     script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh")
     
@@ -332,14 +408,13 @@ def leju_claw_start_server():
     print(bcolors.OKCYAN + "正在启动夹爪服务器..." + bcolors.ENDC)
     print(bcolors.WARNING + "提示：服务器启动后，请在另一个终端运行选项3来发布目标位置" + bcolors.ENDC)
     
-    # 通过 lejuclaw_test.sh 启动服务器
     command = "sudo bash " + script_path + " --start-server"
     subprocess.run(command, shell=True)
 
 
 def leju_claw_send_position():
     """
-    发布单次目标位置控制夹爪运动
+    发布单次目标位置控制夹爪运动（仅用于single_bus配置）
     """
     script_path = os.path.join(folder_path, "leju_claw_driver", "lejuclaw_test.sh")
     
@@ -359,7 +434,6 @@ def leju_claw_send_position():
             print(bcolors.FAIL + "位置值必须在0-100之间！" + bcolors.ENDC)
             return
         
-        # 通过 lejuclaw_test.sh 发送位置命令
         command = "bash " + script_path + " --send-position " + str(left_pos) + " " + str(right_pos)
         print(bcolors.OKCYAN + f"正在控制夹爪移动到位置: 左={left_pos}%, 右={right_pos}%" + bcolors.ENDC)
         # 使用 subprocess.run() 运行命令
@@ -618,37 +692,173 @@ def handTouch_usb():
 
 
 def ruiwo_zero():
-        
-    kuavo_ros_file_path = folder_path +"/ruiwo_zero_set.sh" 
-    kuavo_open_file_path = folder_path +"../../installed/share/hardware_plant/lib/ruiwo_controller/setZero.sh" 
+    # 检查CAN总线接线方式
+    canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
     
+    use_motorevo_tool = False
+    if os.path.exists(canbus_wiring_file):
+        with open(canbus_wiring_file, 'r') as f:
+            wiring_type = f.read().strip()
+            if wiring_type == "dual_bus":
+                use_motorevo_tool = True
+    
+    if use_motorevo_tool:
+        print(bcolors.OKGREEN + "检测到 Roban2 双CAN配置，使用 motorevo_tool.sh 工具" + bcolors.ENDC)
+        # 使用新的双CAN工具
+        command = "bash " + folder_path + "/motorevo_tool.sh --cali"
 
-    if os.path.exists(kuavo_ros_file_path):
-        command = "bash "+ kuavo_ros_file_path
-    elif os.path.exists(kuavo_open_file_path):
-        command = "bash "+ kuavo_open_file_path
     else:
-        print(f"The file {file_path} does not exist.")
-        return
+        kuavo_ros_file_path = folder_path +"/ruiwo_zero_set.sh" 
+        kuavo_open_file_path = folder_path +"../../installed/share/hardware_plant/lib/ruiwo_controller/setZero.sh" 
         
+
+        if os.path.exists(kuavo_ros_file_path):
+            command = "bash "+ kuavo_ros_file_path
+        elif os.path.exists(kuavo_open_file_path):
+            command = "bash "+ kuavo_open_file_path
+        else:
+            print(f"The file {file_path} does not exist.")
+            return
+            
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
 def ruiwo_negtive():
+    while True:
+        print("请选择手臂总线类型：")
+        print("1. 单CAN")
+        print("2. 双CAN（ROBAN2.1）")
+        choice = input("请输入选择 (1 或 2): ").strip()
 
-    # 定义要运行的命令
-    command = "bash "+ folder_path +"/ruiwo_negtive_set.sh" 
+        if choice == "1":
+            kuavo_ros_file_path = folder_path + "/ruiwo_zero_set.sh"
+            kuavo_open_file_path = folder_path + "../../installed/share/hardware_plant/lib/ruiwo_controller/setZero.sh"
 
-    # 使用 subprocess.run() 运行命令
-    subprocess.run(command, shell=True)
+            if os.path.exists(kuavo_ros_file_path):
+                command = "bash " + kuavo_ros_file_path
+            elif os.path.exists(kuavo_open_file_path):
+                command = "bash " + kuavo_open_file_path
+            else:
+                print(f"The file {file_path} does not exist.")
+                return
+
+            subprocess.run(command, shell=True)
+            break
+
+        elif choice == "2":
+            motorevo_tool = os.path.join(folder_path, "motorevo_tool.sh")
+            if os.path.exists(motorevo_tool):
+                command = f"bash {motorevo_tool} --cali"
+                subprocess.run(command, shell=True)
+            else:
+                print(bcolors.FAIL + f"错误：未找到 {motorevo_tool}" + bcolors.ENDC)
+            break
+
+        else:
+            print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
+
+def ruiwo_negtive():
+    while True:
+        print("请选择手臂总线类型：")
+        print("1. 单CAN")
+        print("2. 双CAN（ROBAN2.1）")
+        can_choice = input("请输入选择 (1 或 2): ").strip()
+
+        if can_choice == "2":
+            motorevo_tool = os.path.join(folder_path, "motorevo_tool.sh")
+            if os.path.exists(motorevo_tool):
+                command = f"bash {motorevo_tool} --negative"
+                subprocess.run(command, shell=True)
+            else:
+                print(bcolors.FAIL + f"错误：未找到 {motorevo_tool}" + bcolors.ENDC)
+            break
+
+        elif can_choice == "1":
+            while True:
+                print("请选择机器人类型：")
+                print("1. 4Pro型（14个电机）")
+                print("2. Roban2型（10个电机）")
+                choice = input("请输入选择 (1 或 2): ").strip()
+                if choice == "1":
+                    robot_type = "4pro"
+                    break
+                elif choice == "2":
+                    robot_type = "roban2"
+                    break
+                else:
+                    print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
+                    continue
+
+            command = "bash " + folder_path + "/ruiwo_negtive_set.sh " + robot_type
+            subprocess.run(command, shell=True)
+            break
+        else:
+            print(bcolors.FAIL + "无效选择，请重新选择！" + bcolors.ENDC)
+            continue
 
 
 def qiangnao_hand():
-    # 定义要运行的命令
-    command = "bash "+ folder_path +"/hand_grab_test.sh" 
+    # 检查CAN总线配置类型
+    canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
+    
+    is_dual_bus = False
+    if os.path.exists(canbus_wiring_file):
+        with open(canbus_wiring_file, 'r') as f:
+            wiring_type = f.read().strip()
+            if wiring_type == "dual_bus":
+                is_dual_bus = True
 
-    # 使用 subprocess.run() 运行命令
-    subprocess.run(command, shell=True)
+    # 读取环境变量 ROBOT_VERSION，使用 robot_version.py 判断版本
+    robot_version_str = get_robot_version()
+    robot_major = None
+    
+    if robot_version_str:
+        if RobotVersion:
+            try:
+                # 将字符串转换为整数
+                robot_version_int = int(robot_version_str)
+                # 使用 RobotVersion.create 创建版本对象
+                robot_version = RobotVersion.create(robot_version_int)
+                robot_major = robot_version.major()
+                print(bcolors.OKCYAN + f"检测到机器人版本: {robot_version.version_name()} (major={robot_major})" + bcolors.ENDC)
+            except (ValueError, AttributeError) as e:
+                print(bcolors.WARNING + f"警告: 无法解析 ROBOT_VERSION '{robot_version_str}': {e}" + bcolors.ENDC)
+        else:
+            print(bcolors.WARNING + f"警告: robot_version 模块未导入，无法解析版本号 '{robot_version_str}'" + bcolors.ENDC)
+            return
+    else:
+        print(bcolors.WARNING + "警告: 未找到 ROBOT_VERSION 环境变量" + bcolors.ENDC)
+        return
+    
+    # 根据机器人版本和CAN总线配置选择不同的命令
+    command = None
+    
+    if robot_major == 1:
+        # Roban2 (major == 1)
+        if is_dual_bus:
+            # 双CAN总线配置: 使用 revo2can
+            command = "bash " + folder_path + "/dexhand_test.sh --revo2can --test 3"
+            print(bcolors.OKGREEN + "检测到 Roban2 双CAN配置，使用 Revo2Can 测试命令" + bcolors.ENDC)
+        else:
+            # 单CAN总线配置: 使用 revo2
+            command = "bash " + folder_path + "/dexhand_test.sh --revo2 --test 3"
+            print(bcolors.OKGREEN + "检测到 Roban2 单CAN配置，使用 Revo2 测试命令" + bcolors.ENDC)
+    else:
+        # Kuavo (major != 1)
+        if is_dual_bus:
+            # 双CAN总线配置: 使用 revo1can
+            command = "bash " + folder_path + "/dexhand_test.sh --revo1can --test 3"
+            print(bcolors.OKGREEN + "检测到 Kuavo 双CAN配置，使用 Revo1Can 测试命令" + bcolors.ENDC)
+        else:
+            # 单CAN总线配置: 使用 normal
+            command = "bash " + folder_path + "/dexhand_test.sh --normal --test 3"
+            print(bcolors.OKGREEN + "检测到 Kuavo 单CAN配置，使用 normal 测试命令" + bcolors.ENDC)
+    
+    if command:
+        # 使用 subprocess.run() 运行命令
+        subprocess.run(command, shell=True)
+    else:
+        print(bcolors.FAIL + "错误: 无法确定测试命令" + bcolors.ENDC)
 
 
 def touch_dexhand():
@@ -883,6 +1093,30 @@ def reset_folder():
     else:
         print("您输入的字符不符，请重试。")
 
+def roban2_joint_breakin():
+    """Roban2机器人手臂和腿部统一磨线功能"""
+    roban2_script_path = folder_path + "/roban2_joint_breakin/roban2_joint_breakin.py"
+    
+    if not os.path.exists(roban2_script_path):
+        print(bcolors.FAIL + f"错误：Roban2磨线脚本不存在: {roban2_script_path}" + bcolors.ENDC)
+        return
+    
+    print(bcolors.OKCYAN + "启动Roban2机器人统一磨线程序..." + bcolors.ENDC)
+    print(bcolors.WARNING + "注意：此功能需要root权限运行" + bcolors.ENDC)
+    
+    # 检查是否有root权限
+    if os.geteuid() != 0:
+        print(bcolors.FAIL + "错误：请使用root权限运行此功能" + bcolors.ENDC)
+        print(bcolors.WARNING + "请使用: sudo python3 " + os.path.abspath(__file__) + bcolors.ENDC)
+        return
+    
+    try:
+        # 运行Roban2磨线脚本
+        command = f"python3 {roban2_script_path}"
+        subprocess.run(command, shell=True)
+    except Exception as e:
+        print(bcolors.FAIL + f"运行Roban2磨线脚本时出错: {e}" + bcolors.ENDC)
+
 def read_and_edit_env_file(file_path, target_variable, new_value):
     try:
         # 读取 .env 文件内容
@@ -1067,7 +1301,7 @@ def secondary_menu():
         print("k. 更新当前目录程序(注意：会重置文件内容，建议备份文件)")
         # print("m. MAC 地址")
         print("l. license导入")
-        print("m. 执行手臂磨线")
+        print("m. 执行机器人磨线")
         print("n. 更新ros密钥")
         print("o. 国产IMU配置udev规则")
         print("p. 国产IMU测试")
@@ -1166,25 +1400,42 @@ def secondary_menu():
             print(bcolors.HEADER + "###结束，license已导入，请确认验证###" + bcolors.ENDC)   
             break  
         elif option == "m":
-            print(bcolors.HEADER + "###在执行手臂磨线之前，请先确保完成手臂电机零点设置###" + bcolors.ENDC)
-            print("请摆正手臂，按 d 执行电机零点校准，并执行手臂磨线。")
-            print("按 q 退出程序")
-            while True:
-                option = input("请输入你的选择：")
-                if option == 'q':
-                    print("\n*-------------退出程序-------------*")
-                    exit()
-                elif option == 'd':
-                    print(bcolors.HEADER + "###开始，执行手臂零点校准###" + bcolors.ENDC)
-                    arm_setzero()
-                    ruiwo_zero()
-                    print(bcolors.HEADER + "###结束，执行手臂零点校准###" + bcolors.ENDC)
-                    print(bcolors.HEADER + "###开始，执行手臂磨线###" + bcolors.ENDC)
-                    arm_breakin()
-                    print(bcolors.HEADER + "###结束，执行手臂磨线###" + bcolors.ENDC)
-                    break
-                else:
-                    print(bcolors.FAIL + "无效的选项编号，请重新输入！\n" + bcolors.ENDC)
+            print(bcolors.HEADER + "###开始，执行机器人磨线###" + bcolors.ENDC)
+            
+            # 获取机器人版本
+            robot_version = get_robot_version()
+            kuavo_breakin_script = None
+            script_description = ""
+            
+            if robot_version:
+                try:
+                    version_num = int(robot_version)
+                    # 版本 50-52 使用 kuavo5 脚本
+                    if 50 <= version_num <= 52:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "kuavo5", "joint_breakin.py")
+                        script_description = f"Kuavo5磨线脚本 (版本 {robot_version})"
+                    # 版本 14-49 使用 dual_can_leju_ec 脚本
+                    elif 14 <= version_num <= 49:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts",  "breakin_main_controller.py")
+                        script_description = f"双CAN leju磨线脚本 (版本 {robot_version})"
+                    else:
+                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（14-49 或 50-52）" + bcolors.ENDC)
+                except (ValueError, TypeError):
+                    print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，将使用默认脚本" + bcolors.ENDC)
+                    # 默认使用 dual_can_leju_ec
+                    kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "dual_can_leju_ec", "joint_breakin.py")
+                    script_description = "默认双CAN leju磨线脚本"
+            else:
+                print(bcolors.WARNING + "警告：未找到 ROBOT_VERSION" + bcolors.ENDC)
+            
+            if kuavo_breakin_script and os.path.exists(kuavo_breakin_script):
+                print(bcolors.OKGREEN + f"\n使用{script_description}" + bcolors.ENDC)
+                # 如果需要以 root 运行，请直接使用 root 终端启动本工具
+                command = "python3 " + kuavo_breakin_script
+                subprocess.run(command, shell=True)
+            else:
+                print(bcolors.FAIL + f"错误：磨线脚本不存在: {kuavo_breakin_script}" + bcolors.ENDC)
+            print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)
             break
         elif option == "n":
             print(bcolors.HEADER + "###开始，更新ros密钥###" + bcolors.ENDC)
@@ -1344,6 +1595,3 @@ if __name__ == '__main__':
 
         else:
             print(bcolors.FAIL + "无效的选项编号，请重新输入！\n" + bcolors.ENDC)
-            
-
-

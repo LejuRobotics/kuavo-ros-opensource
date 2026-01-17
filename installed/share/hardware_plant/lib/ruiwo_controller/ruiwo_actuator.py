@@ -224,11 +224,16 @@ class RuiWoActuator():
         self.target_update = False
         self.zero_position = [0.0] * 6 + [0.0] * 6 + [0.0] * 2
          # 零点位置
+        # 保存零点时的偏移调整参数（电机索引到偏移量的映射，弧度）
+        self.zero_offset_adjustments = {}
+        self.zero_offset_adjustments_lock = threading.Lock()
         zeros_path = self.get_zero_path()
         if os.path.exists(zeros_path) and not setZero:
             with open(zeros_path, 'r') as file:
                 zeros_config = yaml.safe_load(file)
             self.zero_position = zeros_config['arms_zero_position']
+
+            
             ret = self.enable()
             if ret != 0:
                 print(f"\033[31m[RUIWO motor]: 使能失败，错误码: {ret}，程序退出\033[0m")
@@ -477,6 +482,22 @@ class RuiWoActuator():
                 current_positions[i] = motor[1]
                 if address in self.unnecessary_go_zero_list:
                     pass
+
+        # 检查机器人版本，如果是Roban1系列则调整目标位置
+        robot_version = os.getenv("ROBOT_VERSION")
+        is_roban1_series = (robot_version is not None and robot_version[0] == '1')
+
+        if is_roban1_series:
+            # 在Roban1系列机器人中，为1号和5号电机（索引1和5）调整目标位置±10度（转换为弧度）
+            adjustment_rad = 10.0 * math.pi / 180.0
+
+            for i in range(len(target_positions)):
+                if i == 1:
+                    target_positions[i] = adjustment_rad  # 1号电机目标位置 = +10度
+                    print(f"[RUIWO motor]: Roban1 series detected, motor {i} target position set to +10 degrees (instead of 0)")
+                elif i == 5:
+                    target_positions[i] = -adjustment_rad  # 5号电机目标位置 = -10度
+                    print(f"[RUIWO motor]: Roban1 series detected, motor {i} target position set to -10 degrees (instead of 0)")
 
         self.interpolate_move(current_positions, target_positions,max_speed,dt)
     
@@ -1031,10 +1052,35 @@ class RuiWoActuator():
             
         return {'kp_pos': kp_values, 'kd_pos': kd_values}
 
+    # 设置保存零点时的偏移调整参数
+    def set_zero_offset_adjustments(self, zero_offset_adjustments):
+        """
+        设置保存零点时的偏移调整参数
+        :param zero_offset_adjustments: 电机索引到偏移量的字典（弧度），在保存零点时会应用到对应电机
+        """
+        with self.zero_offset_adjustments_lock:
+            self.zero_offset_adjustments = zero_offset_adjustments.copy()
+        print(f"[RUIWO motor]: Zero offset adjustments set for {len(zero_offset_adjustments)} motors")
+
     # 保存当前的零点位置到文件中
     def save_zero_position(self):
         config_path = self.get_zero_path()
-        config = {"arms_zero_position": self.zero_position}
+
+        # 获取零点偏移调整参数
+        with self.zero_offset_adjustments_lock:
+            adjustments = self.zero_offset_adjustments.copy()
+
+        # 应用传入的偏移调整参数
+        zero_position_copy = self.zero_position.copy()
+        for i in range(len(zero_position_copy)):
+            if i in adjustments:
+                old_offset = zero_position_copy[i]
+                zero_position_copy[i] += adjustments[i]  # 应用调整
+                # 同时更新运行时使用的零点值
+                self.zero_position[i] = zero_position_copy[i]
+                print(f"[RUIWO motor]: Applying zero offset adjustment to motor {i}: {old_offset} -> {zero_position_copy[i]} (adjustment: {adjustments[i]})")
+
+        config = {"arms_zero_position": zero_position_copy}
         backup_path = config_path + '.bak'
         if os.path.exists(config_path):
             shutil.copy(config_path, backup_path) # 备份配置文件

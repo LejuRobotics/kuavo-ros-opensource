@@ -53,6 +53,12 @@ int serial_port;
  */
 void handle_signal(int sig) {
     printf("Caught signal %d\n", sig);
+#ifdef SBUS_MODE
+    // 取消独占模式
+    if (serial_port >= 0) {
+        ioctl(serial_port, TIOCNXCL);
+    }
+#endif
     close(serial_port);
     printf("Seria port closed successfully due to Ctrl C\n");
     exit(0); // 正常退出程序
@@ -70,6 +76,17 @@ int initSbus(void)
         perror("Error in opening serial port");
         return -1;
     }
+    
+#ifdef SBUS_MODE
+    // 设置串口为独占模式，防止其他程序修改波特率
+    if (ioctl(serial_port, TIOCEXCL) != 0) {
+        perror("Error in setting exclusive mode");
+        close(serial_port);
+        serial_port = -1;
+        return -1;
+    }
+#endif
+
     signal(SIGINT,handle_signal);
     signal(SIGALRM,timer_Hander);
     struct itimerval timer;
@@ -106,6 +123,7 @@ int initSbus(void)
 #ifdef SBUS_MODE
     struct termios2 tio = {};
      if (0 != ioctl(serial_port, TCGETS2, &tio)) {
+         ioctl(serial_port, TIOCNXCL);  // 取消独占模式
          close(serial_port);
          serial_port= -1;
          return -1;
@@ -242,6 +260,24 @@ uint8_t recSbusData(void)
     int n = read(serial_port, buf, sizeof(buf));
     if (n > 0)
     {
+#ifdef DEUG_BAUD_RATE
+/* ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←← */
+        /*打印当前真实波特率 */
+        {
+            struct termios2 tio_now = {};
+            if (ioctl(serial_port, TCGETS2, &tio_now) == 0) {
+                printf("\033[33m[SBUS] 当前串口波特率 (BOTHER): 输入=%u 输出=%u (真实值)\033[0m\n",
+                        tio_now.c_ispeed, tio_now.c_ospeed);
+            } else {
+                struct termios tty_now;
+                tcgetattr(serial_port, &tty_now);
+                printf("\033[33m[SBUS] 当前串口波特率 (标准): 输入=%lu 输出=%lu\033[0m\n",
+                        (unsigned long)cfgetispeed(&tty_now),
+                        (unsigned long)cfgetospeed(&tty_now));
+            }
+        }
+        /* ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←← */
+#endif
 #ifdef DEUG_SERIAL
         printf("Received %d bytes from serial port:\n", n);
         for (int i = 0; i < n; i++)

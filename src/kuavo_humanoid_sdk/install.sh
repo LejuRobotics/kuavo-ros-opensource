@@ -7,6 +7,30 @@ INSTALLED_DIR="$PROJECT_DIR/installed/lib/python3/dist-packages"
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 VERSION=$(git -C "$PROJECT_DIR" describe --tags --always 2>/dev/null)
 
+# Backup current pip source and switch to faster source
+echo "🔄 Switching to faster pip source..."
+ORIGINAL_PIP_SOURCE=$(pip config get global.index-url 2>/dev/null || echo "")
+echo "Original pip source: ${ORIGINAL_PIP_SOURCE:-'default'}"
+
+# Switch to Tsinghua University mirror (faster for Chinese users)
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+echo "✅ Switched to Tsinghua University mirror"
+
+# Function to restore original pip source
+restore_pip_source() {
+    echo "🔄 Restoring original pip source..."
+    if [ -n "$ORIGINAL_PIP_SOURCE" ]; then
+        pip config set global.index-url "$ORIGINAL_PIP_SOURCE"
+        echo "✅ Restored to original source: $ORIGINAL_PIP_SOURCE"
+    else
+        pip config unset global.index-url 2>/dev/null || true
+        echo "✅ Restored to default source"
+    fi
+}
+
+# Set trap to restore source on script exit
+trap restore_pip_source EXIT
+
 # echo "SCRIPT_DIR: $SCRIPT_DIR"
 # echo "PROJECT_DIR: $PROJECT_DIR"
 # echo "DEVEL_DIR: $DEVEL_DIR"
@@ -129,6 +153,137 @@ exit_with_failure() {
     exit 1
 }
 
+# Function to clean easy-install.pth file
+clean_easy_install_pth() {
+    local package_name=$1
+    echo -e "\033[33m🔍 检查并清理 easy-install.pth 文件...\033[0m"
+    
+    # Map package names to directory path patterns
+    # Convert package name to directory name pattern (e.g., kuavo-humanoid-sdk-ws -> kuavo_humanoid_websocket_sdk)
+    local path_patterns=()
+    case "$package_name" in
+        "kuavo-humanoid-sdk-ws")
+            path_patterns=("kuavo_humanoid_websocket_sdk")
+            ;;
+        "kuavo-humanoid-sdk")
+            path_patterns=("kuavo_humanoid_sdk")
+            ;;
+        *)
+            # If no mapping, try converting hyphens to underscores
+            path_patterns=("$(echo "$package_name" | sed 's/-/_/g')")
+            ;;
+    esac
+    
+    # Find all easy-install.pth files in Python site-packages directories
+    local python_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "")
+    
+    # Common locations for easy-install.pth
+    local pth_files=()
+    
+    # Get site-packages directories
+    local site_packages=$(python3 -c "import site; print('\n'.join(site.getsitepackages()))" 2>/dev/null || echo "")
+    
+    # Also check common system locations
+    if [ -n "$python_version" ]; then
+        # root用户使用系统路径，普通用户使用用户路径
+        if [ "$EUID" -eq 0 ]; then
+            pth_files+=("/usr/local/lib/python${python_version}/dist-packages/easy-install.pth")
+        else
+            pth_files+=("$HOME/.local/lib/python${python_version}/site-packages/easy-install.pth")
+        fi
+    fi
+    
+    # Add site-packages directories
+    # root用户添加所有路径，普通用户只添加用户路径
+    while IFS= read -r dir; do
+        if [ -n "$dir" ] && [ -d "$dir" ]; then
+            if [ "$EUID" -eq 0 ]; then
+                # root用户：添加所有路径
+                pth_files+=("$dir/easy-install.pth")
+            else
+                # 普通用户：只添加用户路径（$HOME/.local 开头的路径）
+                if [[ "$dir" == "$HOME/.local"* ]]; then
+                    pth_files+=("$dir/easy-install.pth")
+                fi
+            fi
+        fi
+    done <<< "$site_packages"
+    
+    local cleaned=false
+    for pth_file in "${pth_files[@]}"; do
+        if [ -f "$pth_file" ]; then
+            echo "检查文件: $pth_file"
+            
+            # Check if file contains any of the patterns
+            local has_pattern=false
+            for pattern in "${path_patterns[@]}"; do
+                if grep -qi "$pattern" "$pth_file" 2>/dev/null; then
+                    has_pattern=true
+                    break
+                fi
+            done
+            
+            if [ "$has_pattern" = true ]; then
+                # Create backup (use sudo if needed)
+                if [ ! -w "$pth_file" ]; then
+                    sudo cp "$pth_file" "${pth_file}.bak" 2>/dev/null || true
+                else
+                    cp "$pth_file" "${pth_file}.bak" 2>/dev/null || true
+                fi
+                
+                # Use temp file in /tmp to avoid permission issues
+                local temp_file="/tmp/easy-install-$$.tmp"
+                local temp_file2="/tmp/easy-install-$$-2.tmp"
+                
+                # Read original file and filter out matching lines
+                > "$temp_file"  # Clear temp file
+                while IFS= read -r line || [ -n "$line" ]; do
+                    local should_remove=false
+                    for pattern in "${path_patterns[@]}"; do
+                        if echo "$line" | grep -qi "$pattern" 2>/dev/null; then
+                            should_remove=true
+                            echo -e "\033[33m  发现并删除路径: $line\033[0m"
+                            break
+                        fi
+                    done
+                    if [ "$should_remove" != true ]; then
+                        echo "$line" >> "$temp_file"
+                    fi
+                done < "$pth_file"
+                
+                # Replace original file (use sudo if needed)
+                if [ ! -w "$pth_file" ]; then
+                    if sudo cp "$temp_file" "$pth_file" 2>/dev/null; then
+                        cleaned=true
+                        echo -e "\033[32m  ✅ 已清理 $pth_file\033[0m"
+                    else
+                        echo -e "\033[33m  ⚠️  清理 $pth_file 时出现问题（需要 sudo 权限）\033[0m"
+                    fi
+                else
+                    if cp "$temp_file" "$pth_file" 2>/dev/null; then
+                        cleaned=true
+                        echo -e "\033[32m  ✅ 已清理 $pth_file\033[0m"
+                    else
+                        echo -e "\033[33m  ⚠️  清理 $pth_file 时出现问题\033[0m"
+                    fi
+                fi
+                
+                # Clean up temp files
+                rm -f "$temp_file" "$temp_file2" 2>/dev/null || true
+            else
+                echo -e "\033[32m  ✅ 未发现需要清理的路径: $pth_file\033[0m"
+            fi
+        fi
+    done
+    
+    if [ "$cleaned" = true ]; then
+        echo -e "\033[32m✅ easy-install.pth 文件清理完成\033[0m"
+    else
+        echo -e "\033[33mℹ️  未找到需要清理的 easy-install.pth 文件\033[0m"
+    fi
+}
+
+
 # SCRIPT BEGIN
 # Check if kuavo-humanoid-sdk-ws is installed
 check_conflicting_package() {
@@ -144,52 +299,8 @@ check_conflicting_package() {
             pip uninstall kuavo-humanoid-sdk-ws -y
             if [ $? -eq 0 ]; then
                 echo -e "\033[32m✅ kuavo-humanoid-sdk-ws 已成功卸载\033[0m"
-                
-                # Clean up easy-install.pth file if it contains references to kuavo-humanoid-sdk-ws
-                cleanup_easy_install_pth() {
-                    local python_version=$(python3 --version 2>/dev/null | cut -d ' ' -f 2 | cut -d '.' -f 1-2)
-                    # Check multiple possible locations: current user and system-wide
-                    local easy_install_paths=(
-                        "$HOME/.local/lib/python${python_version}/dist-packages/easy-install.pth"
-                        "/usr/local/lib/python${python_version}/dist-packages/easy-install.pth"
-                    )
-                    
-                    local cleaned_count=0
-                    for easy_install_path in "${easy_install_paths[@]}"; do
-                        if [ -f "$easy_install_path" ]; then
-                            echo -e "\033[33m🔧 检查并清理: $easy_install_path\033[0m"
-                            # Create backup
-                            if [ -w "$easy_install_path" ]; then
-                                cp "$easy_install_path" "${easy_install_path}.bak" 2>/dev/null || true
-                            else
-                                sudo cp "$easy_install_path" "${easy_install_path}.bak" 2>/dev/null || true
-                            fi
-                            
-                            # Remove lines containing kuavo-humanoid-sdk-ws or kuavo_humanoid_sdk_ws
-                            if grep -q "kuavo.*humanoid.*sdk.*ws" "$easy_install_path" 2>/dev/null; then
-                                # Use sed to remove lines containing the conflicting package
-                                # Try with sudo if file is not writable
-                                if [ -w "$easy_install_path" ]; then
-                                    sed -i '/kuavo.*humanoid.*sdk.*ws/d' "$easy_install_path" 2>/dev/null || \
-                                    sed -i.bak '/kuavo.*humanoid.*sdk.*ws/d' "$easy_install_path" 2>/dev/null || true
-                                else
-                                    sudo sed -i '/kuavo.*humanoid.*sdk.*ws/d' "$easy_install_path" 2>/dev/null || \
-                                    sudo sed -i.bak '/kuavo.*humanoid.*sdk.*ws/d' "$easy_install_path" 2>/dev/null || true
-                                fi
-                                echo -e "\033[32m✅ 已清理: $easy_install_path\033[0m"
-                                cleaned_count=$((cleaned_count + 1))
-                            else
-                                echo -e "\033[32m✅ 未发现残留条目: $easy_install_path\033[0m"
-                            fi
-                        fi
-                    done
-                    
-                    if [ $cleaned_count -eq 0 ]; then
-                        echo -e "\033[32m✅ 所有 easy-install.pth 文件中均未发现残留条目\033[0m"
-                    fi
-                }
-                
-                cleanup_easy_install_pth
+                # Clean easy-install.pth file after uninstall
+                clean_easy_install_pth "kuavo-humanoid-sdk-ws"
             else
                 echo -e "\033[31m❌ 卸载 kuavo-humanoid-sdk-ws 失败，安装已取消\033[0m"
                 exit 1
@@ -201,8 +312,30 @@ check_conflicting_package() {
     fi
 }
 
+# Check if kuavo-humanoid-sdk is already installed and update path if needed
+check_and_update_existing_sdk() {
+    if pip show kuavo-humanoid-sdk >/dev/null 2>&1; then
+        local installed_version=$(pip show kuavo-humanoid-sdk | grep "^Version:" | awk '{print $2}')
+        echo -e "\033[33m⚠️  检测到已安装 kuavo-humanoid-sdk (版本: $installed_version)\033[0m"
+        echo -e "\033[33m正在卸载旧版本以更新SDK路径...\033[0m"
+        
+        pip uninstall kuavo-humanoid-sdk -y
+        if [ $? -eq 0 ]; then
+            echo -e "\033[32m✅ kuavo-humanoid-sdk 旧版本已成功卸载\033[0m"
+            # Clean easy-install.pth file after uninstall to remove old paths
+            clean_easy_install_pth "kuavo-humanoid-sdk"
+        else
+            echo -e "\033[31m❌ 卸载 kuavo-humanoid-sdk 失败，安装已取消\033[0m"
+            exit 1
+        fi
+    fi
+}
+
 # Check for conflicting package before installation
 check_conflicting_package
+
+# Check and update existing SDK installation
+check_and_update_existing_sdk
 
 # Check if VERSION follows the expected format (e.g., 0.0.1)
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
@@ -243,11 +376,27 @@ else
 fi
 # pip install
 pushd $SCRIPT_DIR
+
+# Upgrade conflicting dependencies first
+echo "🔧 Upgrading conflicting dependencies..."
+# Only upgrade requests, skip scikit-learn due to Python 3.8 compatibility
+pip install --upgrade "requests>=2.25.0" || echo "⚠️  Warning: requests could not be upgraded, continuing with installation..."
+# Note: scikit-learn 1.6+ requires Python 3.9+, keeping 1.3.2 for Python 3.8 compatibility
+
 # Install the package editably
 if KUAVO_HUMANOID_SDK_VERSION="$VERSION" pip install -e ./; then
     echo -e "\033[32m\n🎉🎉🎉 Installation successful! \033[0m"
     echo -e "\033[32m-------------------------------------------\033[0m"
     pip show kuavo_humanoid_sdk
     echo -e "\033[32m-------------------------------------------\033[0m"
+    
+    # Check for remaining conflicts
+    echo -e "\033[33m🔍 Checking for remaining version conflicts...\033[0m"
+    pip check || echo -e "\033[33m⚠️  Some version conflicts remain. The SDK should still work, but some features may be limited.\033[0m"
+    
+    # Ensure all files are accessible by all users
+    echo -e "\033[33m🔧 Setting file permissions for all users...\033[0m"
+    sudo chmod -R a+rwx "$SCRIPT_DIR"
+    echo -e "\033[32m✅ File permissions set for all users\033[0m"
 fi
 popd

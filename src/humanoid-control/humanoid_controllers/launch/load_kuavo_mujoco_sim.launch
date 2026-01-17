@@ -7,7 +7,7 @@
 
     <arg name="output_system_info" default="true"/>
     <arg name="vr_remote_control" default="false"/>
-    <arg name="robot_type"         default="humanoid"/>
+    <arg name="robot_type"         default="2"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
@@ -18,8 +18,9 @@
     </include>
 
     <arg name="use_external_mpc"   default="true"/>
-    <arg name="wbc_frequency"      default="500"/>
-    <arg name="sensor_frequency"   default="500"/>
+    <arg name="wbc_frequency"      default="1000"/>
+    <arg name="sensor_frequency"   default="1000"/>
+    <arg name="inference_frequency" default="100"/>
     <arg name="use_joystick"       default="true"/>
     <arg name="with_estimation"    default="true"/>
     <arg name="use_joint_filter"   default="false"/>
@@ -32,16 +33,24 @@
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="visualize_humanoid" default="true"/>
     <arg name="only_half_up_body" default="false"/>
-    <arg name="waist_move_spd"     default="0.8"/>
+    <arg name="waist_move_spd"     default="2.3"/>
+    <arg name="deformation_flag"   default="false"/>
+    <arg name="init_fall_down_state" default="false"/>
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="false"/>
+    <arg name="joy_execute_action" default="true"/>
 
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
+
+    <!-- RL相关参数 -->
+    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
+    <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -54,6 +63,7 @@
     <param name="use_external_mpc"  value="$(arg use_external_mpc)"/>
     <param name="wbc_frequency"     value="$(arg wbc_frequency)"/>
     <param name="sensor_frequency"  value="$(arg sensor_frequency)"/>
+    <param name="inference_frequency" value="$(arg inference_frequency)"/>
     <param name="with_estimation"   value="$(arg with_estimation)"/>
     <param name="use_joint_filter"  value="$(arg use_joint_filter)"/>
     <param name="estimator_type"    value="$(arg estimator_type)"/>
@@ -66,10 +76,16 @@
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
     <param name="visualize_humanoid" value="$(arg visualize_humanoid)" />
     <param name="waist_move_spd"  value="$(arg waist_move_spd)"/>
+    <param name="deformation_flag" value="$(arg deformation_flag)"/>
+    <!-- RL相关参数 -->
+    <param name="network_model_file" value="$(arg network_model_file)"/>
+    <param name="rl_param" value="$(arg rl_param)"/>
+    <param name="is_rl_start" value="$(arg is_rl_start)"/>
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
-
+    <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
+    <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     
@@ -109,9 +125,9 @@
        launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
         <param name="num_worker_threads" type="int" value="10" />
     </node>
-    <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true">
+    <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
       </node>
-    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>
     <group unless="$(arg play_back)">
@@ -130,9 +146,14 @@
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
-        <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
-          <arg name="joystick_type" value="$(arg joystick_type)"/>
-        </include>
+        <group if="$(eval arg('start_way') == 'manual')">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+            <arg name="joystick_type" value="$(arg joystick_type)"/>
+            <arg name="real" value="false"/>
+          </include>
+        </group>
+        <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen"/>
+        <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
       </group>
     </group>    
 

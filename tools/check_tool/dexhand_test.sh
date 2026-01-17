@@ -1,42 +1,129 @@
 #!/bin/bash
+SCRIPT_DIR=$(dirname "$(realpath "$0")")
+PROJECT_DIR=$(realpath "$SCRIPT_DIR/../../") # project: kuavo-ros-control/kuavo-ros-opensource
 
-# 获取当前脚本所在文件夹的绝对路径
-current_script_dir=$(dirname "$(realpath "$0")")
-cd $current_script_dir
-export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:"$current_script_dir/dexhand/"
+# 可执行文件路径列表（按优先级排序）
+EXECUTABLE_PATHS=(
+    "$PROJECT_DIR/devel/lib/hardware_node/dexhand_test"
+    "$PROJECT_DIR/installed/bin/dexhand_test"
+)
 
-usage() {
-    echo "Usage: $0 [--touch|--normal] [--scan] [--test <test_rounds>]"
-    echo "example: $0 --normal --test 3"
+# 打印带颜色的信息
+echo_success() {
+    echo -e "\033[0;32m$1\033[0m"
 }
 
-# 解析参数
-test_rounds=3
-opt1=""
-opt2=""
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --touch|--normal) 
-            opt1=$1
-            case $2 in
-                --test) opt2="--test";test_rounds="${3:-5}"; shift 2 ;;
-                --scan) opt2="--scan"; shift ;;
-                *) usage; exit 1 ;;
-            esac
-            ;;
-        *) usage; exit 1 ;;
-    esac
-    shift
-done
+# 打印帮助信息
+show_help() {
+    local exec_path=""
 
-# echo "opt1: $opt1"
-# echo "opt2: $opt2"
-# echo "test_rounds: $test_rounds"
+    # 查找到的可执行文件路径
+    for path in "${EXECUTABLE_PATHS[@]}"; do
+        if [ -f "$path" ] && [ -x "$path" ]; then
+            exec_path="$path"
+            break
+        fi
+    done
 
-if [ "$opt2" = "--scan" ]; then
-    ./dexhand/dexhand_test $opt1 $opt2
-elif [ "$opt2" = "--test" ]; then
-    ./dexhand/dexhand_test $opt1 $opt2 "$test_rounds"
-else 
-    usage
-fi
+    echo_success "使用方法: $exec_path [选项]"
+    echo ""
+    echo "选项:"
+    echo "  --touch      Kuavo Revo1 触觉手测试模式"
+    echo "  --normal     Kuavo Revo1 普通手测试模式"
+    echo "  --revo1can   Kuavo Revo1 Can协议灵巧手测试模式"
+    echo "  --revo2      Roban2 Revo2 普通灵巧手测试模式"
+    echo "  --revo2can   Roban2 Revo2 Can协议灵巧手测试模式"
+    echo "  --scan       扫描设备(revo2can不支持), 识别 ttyUSB 设备"
+    echo "  --test [round] 测试灵巧手运动, round 为测试次数，默认为 5 次"
+    echo "  --help       显示此帮助信息"
+    echo ""
+    echo "示例:"
+    echo "  $exec_path --touch --scan      # Kuavo Revo1 触觉手扫描"
+    echo "  $exec_path --touch --test      # Kuavo Revo1 触觉手测试"
+    echo "  $exec_path --normal --test     # Kuavo Revo1 普通手测试"
+    echo "  $exec_path --revo1can --test   # Kuavo Revo1 Can协议灵巧手测试"
+    echo "  $exec_path --revo2 --test      # Roban2 Revo2 普通手测试"
+    echo "  $exec_path --revo2can --test   # Roban2 Revo2 Can协议灵巧手测试"
+}
+
+# 查找并执行 dexhand_test
+execute_dexhand_test() {
+    local extra_args="$@"
+
+    for exec_path in "${EXECUTABLE_PATHS[@]}"; do
+        if [ -f "$exec_path" ] && [ -x "$exec_path" ]; then
+            echo "执行: $exec_path $extra_args"
+
+            # 根据可执行文件位置选择对应的 setup.bash
+            if [[ "$exec_path" == *"/devel/"* ]]; then
+                # devel 版本
+                if [ -f "$PROJECT_DIR/devel/setup.bash" ]; then
+                    source "$PROJECT_DIR/devel/setup.bash"
+                fi
+            else
+                # installed 版本
+                if [ -f "$PROJECT_DIR/installed/setup.bash" ]; then
+                    source "$PROJECT_DIR/installed/setup.bash"
+                fi
+            fi
+
+            "$exec_path" $extra_args
+            return 0
+        fi
+    done
+
+    echo "错误: 未找到 dexhand_test 可执行文件"
+    echo "尝试了以下路径:"
+    for path in "${EXECUTABLE_PATHS[@]}"; do
+        echo "  - $path"
+    done
+    return 1
+}
+
+# 主函数
+main() {
+    local extra_args=""
+
+    # 如果没有参数，显示帮助信息
+    if [[ $# -eq 0 ]]; then
+        show_help
+        exit 0
+    fi
+
+    # 解析命令行参数
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --touch|--normal|--revo2|--revo2can)
+                extra_args="$extra_args $1"
+                shift
+                ;;
+            --scan)
+                extra_args="$extra_args $1"
+                shift
+                ;;
+            --test)
+                extra_args="$extra_args $1"
+                if [[ $# -gt 1 && "$2" =~ ^[0-9]+$ ]]; then
+                    extra_args="$extra_args $2"
+                    shift
+                fi
+                shift
+                ;;
+            --help)
+                show_help
+                exit 0
+                ;;
+            *)
+                echo "错误: 未知参数 '$1'"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+
+    # 执行 dexhand_test
+    execute_dexhand_test $extra_args
+}
+
+# 运行主函数
+main "$@"

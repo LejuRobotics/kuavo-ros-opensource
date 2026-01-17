@@ -67,7 +67,7 @@ if __name__ == "__main__":
     gesture_name = sys.argv[1] if len(sys.argv) > 1 else "ok"
     
     # 定义手部位置
-    hand_side = 0  # 左手
+    hand_side = 2  # 双手
     
     # 调用服务
     gesture_client(gesture_name, hand_side)

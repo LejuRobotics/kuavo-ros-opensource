@@ -80,7 +80,10 @@ class KuavoROSEnvWebsocket:
             exit(1)
         
         # Only check nodes exist when Init SDK, if not, tips user manually launch nodes.
-        deps_nodes = ['/humanoid_gait_switch_by_name']
+        #
+        # NOTE: 轮臂(robot_type==1)不依赖双足步态切换节点 humanoid_gait_switch_by_name
+        robot_type = int(os.environ.get('ROBOT_TYPE', '0'))
+        deps_nodes = [] if robot_type == 1 else ['/humanoid_gait_switch_by_name']
         for node in deps_nodes:
             if not self.check_rosnode_exists(node):
                 print(f"\033[31m\nError: Node {node} not found. Please launch it manually.\033[0m")

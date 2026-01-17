@@ -18,6 +18,7 @@ namespace mobile_manipulator_controller
     armTrajPublisher_ = nh_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 10);
     kinematicMpcControlSrv_ = nh_.advertiseService("mobile_manipulator_mpc_control", &MobileManipulatorControllerGeneral::controlService, this);
     humanoidCmdPosPublisher_ = nh_.advertise<geometry_msgs::Twist>("/cmd_pose", 10, true);
+    waistTrajPublisher_ = nh_.advertise<kuavo_msgs::robotWaistControl>("/robot_waist_motion_data", 10);
     humanoidState_ = vector_t::Zero(info_.stateDim);
     ROS_INFO("MobileManipulatorControllerGeneral is initialized, waiting for /humanoid/state is available.");
     return true;
@@ -30,8 +31,8 @@ namespace mobile_manipulator_controller
     {
       mmState(i) = msg->data[i];
     }
-    // arm state
-    humanoidState_.tail(info_.armDim) = mmState.tail(info_.armDim);
+    // arm state + waist state
+    humanoidState_.tail(info_.armDim + info_.waistDim) = mmState.tail(info_.armDim + info_.waistDim);
     // base state
     switch(info_.manipulatorModelType)
     {
@@ -139,6 +140,7 @@ namespace mobile_manipulator_controller
   void MobileManipulatorControllerGeneral::controlBasePos(const vector_t& mmState)
   {
     geometry_msgs::Twist msg;
+    ocs2::vector_t desiredWaistState = mmState.tail(info_.waistDim + info_.armDim).head(info_.waistDim);
     switch(info_.manipulatorModelType)
     {
       case ManipulatorModelType::DefaultManipulator:
@@ -162,6 +164,17 @@ namespace mobile_manipulator_controller
       default:
         return;
     }
+    auto getWaistStatesMsg = [&](const vector_t& q_waist)
+    {
+      kuavo_msgs::robotWaistControl msg;
+      msg.header.stamp = ros::Time::now();
+      msg.data.data.resize(q_waist.size());
+      for (int i = 0; i < q_waist.size(); ++i) {
+        msg.data.data[i] = 180.0 / M_PI * q_waist[i]; // 转换为度
+      }
+      return std::move(msg);
+    };
+    waistTrajPublisher_.publish(getWaistStatesMsg(desiredWaistState));
     humanoidCmdPosPublisher_.publish(msg);
   }
 } // namespace mobile_manipulator_controller

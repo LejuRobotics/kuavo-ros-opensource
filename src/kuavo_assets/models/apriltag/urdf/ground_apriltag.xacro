@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="ground_apriltag">
+
+  <!-- 引入apriltag宏定义 -->
+  <xacro:include filename="$(find kuavo_assets)/models/apriltag/urdf/apriltag.xacro"/>
+  
+  <!-- 添加一个世界链接作为根链接 -->
+  <link name="world"/>
+  
+  <!-- 创建地面 AprilTag 基础链接 -->
+  <link name="ground_apriltag_base">
+    <visual>
+      <geometry>
+        <box size="0.11 0.11 0.001"/>
+      </geometry>
+      <material>
+        <color rgba="0.8 0.8 0.8 0.5"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.11 0.11 0.001"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.001"/>
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001"/>
+    </inertial>
+  </link>
+
+  <!-- 将地面 AprilTag 基础链接连接到世界坐标系 -->
+  <joint name="world_to_ground_apriltag_joint" type="fixed">
+    <parent link="world"/>
+    <child link="ground_apriltag_base"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 地面 AprilTag 标记宏 - 创建8个标签 -->
+  <xacro:macro name="ground_apriltags" params="parent_link enable_collision:=false">
+    <!-- 标签 0: 第一象限 (1, 1) -->
+    <xacro:apriltag_marker parent_link="${parent_link}" id="0" enable_collision="${enable_collision}">
+      <origin xyz="1.0 1.0 0" rpy="0 0 0"/>
+    </xacro:apriltag_marker>
+    
+    <!-- 标签 1: 上边 (0, 1) -->
+    <xacro:apriltag_marker parent_link="${parent_link}" id="1" enable_collision="${enable_collision}">
+      <origin xyz="0.0 1.0 0" rpy="0 0 0"/>
+    </xacro:apriltag_marker>
+    
+    <!-- 标签 2: 第二象限 (-1, 1) -->
+    <xacro:apriltag_marker parent_link="${parent_link}" id="2" enable_collision="${enable_collision}">
+      <origin xyz="-1.0 1.0 0" rpy="0 0 0"/>
+    </xacro:apriltag_marker>
+    
+    <!-- 标签 3: 左边 (-1, 0) -->
+    <xacro:apriltag_marker parent_link="${parent_link}" id="3" enable_collision="${enable_collision}">
+      <origin xyz="-1.0 0.0 0" rpy="0 0 0"/>
+    </xacro:apriltag_marker>
+    
+    <!-- 标签 4: 第三象限 (-1, -1) -->
+    <xacro:apriltag_marker parent_link="${parent_link}" id="4" enable_collision="${enable_collision}">
+      <origin xyz="-1.0 -1.0 0" rpy="0 0 0"/>
+    </xacro:apriltag_marker>
+    
+    <!-- 标签 5: 下边 (0, -1) -->
+    <xacro:apriltag_marker parent_link="${parent_link}" id="5" enable_collision="${enable_collision}">
+      <origin xyz="0.0 -1.0 0" rpy="0 0 0"/>
+    </xacro:apriltag_marker>
+    
+    <!-- 标签 6: 第四象限 (1, -1) -->
+    <xacro:apriltag_marker parent_link="${parent_link}" id="6" enable_collision="${enable_collision}">
+      <origin xyz="1.0 -1.0 0" rpy="0 0 0"/>
+    </xacro:apriltag_marker>
+    
+    <!-- 标签 7: 右边 (1, 0) -->
+    <xacro:apriltag_marker parent_link="${parent_link}" id="7" enable_collision="${enable_collision}">
+      <origin xyz="1.0 0.0 0" rpy="0 0 0"/>
+    </xacro:apriltag_marker>
+  </xacro:macro>
+
+  <!-- 使用宏创建所有地面 AprilTag -->
+  <!-- 默认禁用碰撞以避免与机器人发生接触 -->
+  <xacro:ground_apriltags parent_link="ground_apriltag_base" enable_collision="false"/>
+
+</robot>

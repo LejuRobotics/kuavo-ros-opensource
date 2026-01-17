@@ -153,6 +153,7 @@ class KuavoIKParams:
     oritation_constraint_tol: float = 1e-3
     pos_constraint_tol: float = 1e-3 # 0.001m，当pos_cost_weight==0.0时生效
     pos_cost_weight: float = 0.0 # 如果需要高精度，请将此值设为0.0！！！
+    constraint_mode: int = 0  # 具体作用，参考ik api的constraint_mode
 
 @dataclass
 class KuavoDexHandTouchState:

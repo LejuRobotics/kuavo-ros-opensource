@@ -31,11 +31,36 @@ def get_test_traj_msg():
     torso_traj = [[0.1, 0.0, 0, 0], [0.1, 0.0, 0, 0], [0.2, 0.0, 0, 0], [0.2, 0.0, 0, 0]]
     time_traj = [0.5, 1.0, 1.5, 2]# 时间序列，递增
     foot_idx_traj = [0, 2, 1, 2]
+    
+    # foot_traj = [[0.2, -0.1, -0.2, 0], [0.2, -0.1, -0.2, 0], [0.2, -0.1, -0.2, 0]]
+    # torso_traj = [[0.1, 0.0, -0.2, 0], [0.1, 0.0, -0.2, 0], [0.1, 0.0, -0.2, 0]]
+    # time_traj = [0.1, 0.5, 0.6]# 时间序列，递增
+    # foot_idx_traj = [5, 1, 5]
+    # 创建消息实例
+    msg = footPoseTargetTrajectories()
+    msg.timeTrajectory = []  # 设置时间轨迹
+    msg.footIndexTrajectory = []         # 设置脚索引
+    msg.footPoseTrajectory = []  # 初始化脚姿态轨迹
+    num = len(foot_traj)
 
-    # foot_traj = [[0.2, 0.1, 0, 0.2], [0.2, 0.1, 0, 0.2]]
-    # torso_traj = [[0.1, 0.0, 0, 0.1], [0.1, 0.0, 0.0, 0.1]]
-    # time_traj = [0.5, 1.0]# 时间序列，递增
-    # foot_idx_traj = [0, 2]
+    for i in range(3):
+        # 创建脚姿态信息
+        msg.timeTrajectory.append(time_traj[i])
+        msg.footIndexTrajectory.append(foot_idx_traj[i])
+        foot_pose_msg = footPose()
+        foot_pose_msg.footPose = foot_traj[i]      # 设置脚姿态
+        foot_pose_msg.torsoPose = torso_traj[i]    # 设置躯干姿态
+
+        # 将脚姿态添加到消息中
+        msg.footPoseTrajectory.append(foot_pose_msg)
+    print(msg)
+    return msg
+
+def get_test_traj_msg2():
+    foot_traj = [[0.4, 0.1, 0, 0], [0.4, 0.1, 0, 0], [0.4, -0.1, 0, 0], [0.4, -0.1, 0, 0]]
+    torso_traj = [[0.3, 0.0, 0, 0], [0.3, 0.0, 0, 0], [0.4, 0.0, 0, 0], [0.4, 0.0, 0, 0]]
+    time_traj = [0.5, 1.0, 1.5, 2]# 时间序列，递增
+    foot_idx_traj = [0, 2, 1, 2]
     
     # foot_traj = [[0.2, -0.1, -0.2, 0], [0.2, -0.1, -0.2, 0], [0.2, -0.1, -0.2, 0]]
     # torso_traj = [[0.1, 0.0, -0.2, 0], [0.1, 0.0, -0.2, 0], [0.1, 0.0, -0.2, 0]]

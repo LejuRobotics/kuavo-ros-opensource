@@ -31,15 +31,15 @@ mpc_path_tracer_node:
 
     # S形路径参数
     scurve:
-      length: 1.5      # m
-      amplitude: 0.5    # m
+      length: 10.0      # m
+      amplitude: 1.5    # m
 
     line:
-      length: 2.0       
+      length: 5.0       
       yaw_offset: 0.0
     
     triangle:
-      length: 1.0       
+      length: 3.0      
       yaw_offset: -30.0
 
 robot_manager_node:
@@ -47,7 +47,7 @@ robot_manager_node:
   robot_ready: false
 
 test_robot_walk:
-  round: 1
+  round: 2
   path_types: [triangle, line, circle, square, scurve]
   test_cmd_vel: true
   test_cmd_pose: true
@@ -63,3 +63,41 @@ test_single_step_control:
   right_move_step_size: -0.05
   rotate_left_step_size: 45
   rotate_right_step_size: -45
+
+# AprilTag识别配置
+april_tag_recognition:
+  # 识别超时时间（秒）
+  recognition_timeout: 10.0
+  
+  # 机器人低头动作持续时间（秒）
+  head_down_duration: 3.0
+  
+  # 识别重试次数
+  recognition_retries: 3
+  
+  # 机器人头部控制参数
+  head_down_pitch: 20      # 低头角度（度，负值表示低头）
+  head_up_pitch: 0         # 抬头角度（度，正值表示抬头）
+  head_motion_timeout: 3.0  # 头部动作超时时间（秒）
+  
+  # AprilTag识别参数
+  required_frames: 5         # 需要的检测帧数
+  frame_timeout: 1.0        # 帧获取超时时间（秒）
+  
+  # AprilTag标签真值位置（在tag_x坐标系下，只包含x和y坐标）
+  tag_ground_truth:
+    "0": [1, -1]
+    "1": [1, 0]
+    "2": [1, 1]
+    "3": [0, 1]
+    "4": [-1, 1]
+    "5": [-1, 0]
+    "6": [-1, -1]
+    "7": [0, -1]
+  
+  # 位置偏差评估参数
+  position_evaluation:
+    max_position_error: 0.1      # 最大位置误差（米）
+    min_detection_frames: 3      # 最少检测帧数要求
+    position_std_threshold: 0.05 # 位置标准差阈值（米）
+  

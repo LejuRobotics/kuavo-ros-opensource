@@ -56,6 +56,45 @@ class PathGenerator:
     def get_robot_pose(self):
         """Get current robot pose from TF"""
         try:
+            # 检查 robot_manager_node/sim 参数
+            use_sim = False
+            try:
+                if rospy.has_param("robot_manager_node/sim"):
+                    use_sim = rospy.get_param("robot_manager_node/sim")
+                else:
+                    rospy.logwarn("参数 'robot_manager_node/sim' 未找到，默认使用TF方式获取机器人位姿")
+            except Exception as e:
+                rospy.logwarn(f"获取参数 'robot_manager_node/sim' 时出错: {e}，默认使用TF方式获取机器人位姿")
+
+            if use_sim is True:
+                # 通过环境变量获取ROBOT_VERSION
+                import os
+                robot_version = os.environ.get("ROBOT_VERSION", "45")
+                model_name = f"biped_s{robot_version}"
+                try:
+                    rospy.wait_for_service('/gazebo/get_model_state', timeout=2.0)
+                    from gazebo_msgs.srv import GetModelState
+                    get_model_state = rospy.ServiceProxy('/gazebo/get_model_state', GetModelState)
+                    resp = get_model_state(model_name=model_name)
+                    if resp.success:
+                        trans = [
+                            resp.pose.position.x,
+                            resp.pose.position.y,
+                            resp.pose.position.z
+                        ]
+                        rot = [
+                            resp.pose.orientation.x,
+                            resp.pose.orientation.y,
+                            resp.pose.orientation.z,
+                            resp.pose.orientation.w
+                        ]
+                        rospy.loginfo(f"通过gazebo服务获取机器人位姿，model_name: {model_name}, trans: {trans}, rot: {rot}")
+                        return trans, rot
+                    else:
+                        rospy.logwarn(f"调用 /gazebo/get_model_state 失败，使用TF方式获取机器人位姿，model_name: {model_name}")
+                except Exception as e:
+                    rospy.logwarn(f"调用 /gazebo/get_model_state 服务异常: {e}，使用TF方式获取机器人位姿")
+
             self.tf_listener.waitForTransform(self.world_frame, self.robot_frame, rospy.Time(0), rospy.Duration(1.0))
             (trans, rot) = self.tf_listener.lookupTransform(self.world_frame, self.robot_frame, rospy.Time(0))
             return trans, rot

@@ -49,6 +49,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ocs2_msgs/mpc_target_trajectories.h>
 #include <ocs2_msgs/mpc_solver_data.h>
 #include <ocs2_msgs/reset.h>
+#include <ocs2_msgs/pause_resume.h>
 
 #include <ocs2_core/control/FeedforwardController.h>
 #include <ocs2_core/control/LinearController.h>
@@ -90,6 +91,13 @@ namespace ocs2
     void resetMpcNode(TargetTrajectories &&initTargetTrajectories);
 
     /**
+     * Pauses or resumes the MPC.
+     *
+     * @param [in] pause: true to pause, false to resume.
+     */
+    void pauseResumeMpcNode(bool pause);
+
+    /**
      * Shutdowns the ROS node.
      */
     void shutdownNode();
@@ -114,6 +122,14 @@ namespace ocs2
      * @param res: Service response.
      */
     bool resetMpcCallback(ocs2_msgs::reset::Request &req, ocs2_msgs::reset::Response &res);
+
+    /**
+     * Callback to pause/resume MPC.
+     *
+     * @param req: Service request.
+     * @param res: Service response.
+     */
+    bool pauseResumeMpcCallback(ocs2_msgs::pause_resume::Request &req, ocs2_msgs::pause_resume::Response &res);
 
     /**
      * Creates MPC Policy message.
@@ -184,6 +200,7 @@ namespace ocs2
     ::ros::Publisher mpcFrequencyPublisher_;
     ::ros::Publisher mpcTimeCostPublisher_;
     ::ros::ServiceServer mpcResetServiceServer_;
+    ::ros::ServiceServer mpcPauseResumeServiceServer_;
 
     std::unique_ptr<CommandData> bufferCommandPtr_;
     std::unique_ptr<CommandData> publisherCommandPtr_;
@@ -206,6 +223,9 @@ namespace ocs2
     // MPC reset
     std::mutex resetMutex_;
     std::atomic_bool resetRequestedEver_{false};
+    
+    // MPC pause/resume
+    std::atomic_bool mpcPaused_{false};
   };
 
 } // namespace ocs2

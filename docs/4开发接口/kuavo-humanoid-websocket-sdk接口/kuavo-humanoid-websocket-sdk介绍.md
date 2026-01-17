@@ -1,3 +1,7 @@
+---
+title: "SDK介绍"
+---
+
 # KUAVO Humanoid WebSocket SDK
 
 [![Version](https://img.shields.io/pypi/v/kuavo-humanoid-sdk.svg)](https://pypi.org/project/kuavo-humanoid-sdk/) [![License](https://img.shields.io/pypi/l/kuavo-humanoid-sdk.svg)](#) [![Supported Python Versions](https://img.shields.io/pypi/pyversions/kuavo-humanoid-sdk.svg)](https://pypi.python.org/pypi/kuavo-humanoid-sdk)
@@ -166,7 +170,7 @@ pip install --upgrade --pre kuavo-humanoid-sdk-ws
 
 生成文档：
 ```bash
-cd <kuavo-ros-opensource>/src/kuavo_humanoid_websocket_sdk
+cd /home/lab/kuavo-ros-opensource/src/kuavo_humanoid_websocket_sdk
 chmod +x gen_docs.sh
 ./gen_docs.sh
 ```

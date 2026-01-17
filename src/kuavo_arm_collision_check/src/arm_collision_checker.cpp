@@ -18,6 +18,7 @@
 #include "kuavo_common/common/json_config_reader.hpp"
 #include "kuavo_msgs/changeArmCtrlMode.h"
 #include <kuavo_msgs/fkSrv.h>
+#include <kuavo_msgs/twoArmHandPoseCmd.h>
 
 #include <OpenMesh/Core/IO/MeshIO.hh>
 #include <OpenMesh/Core/Mesh/TriMesh_ArrayKernelT.hh>
@@ -29,6 +30,12 @@ typedef OpenMesh::TriMesh_ArrayKernelT<> KuavoMesh;
 using BVHModel = fcl::BVHModel<fcl::OBBRSSd>;
 
 namespace kuavo_arm_collision_check {
+
+// 全局存储配置数据
+std::map<std::string, double> g_inflation_map;
+std::vector<std::pair<std::string, std::string>> g_collision_filter_pairs;
+std::unordered_set<std::string> g_collision_filter_links;
+
 
 ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh) 
     : nh_(nh), tf_listener_(tf_buffer_) {
@@ -53,9 +60,19 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
 
     robot_version = std::string(robot_version_);
 
-    if(robot_version != "45"){
+    // if(robot_version != "45"){
+    //     ROS_ERROR("current ROBOT_VERSION != 45, might cause stl model mismatch!");
+    // }
 
-        ROS_ERROR("current ROBOT_VERSION != 45, might cause stl model mismatch!");
+    // 如果版本是 49，增加额外 link
+    if(robot_version == "49") {
+        std::vector<std::string> extra_links_49 = {
+            "r_palm", "r_thumb_dist", "r_index_dist", "r_middle_dist", "r_ring_dist", "r_little_dist",
+            "l_palm", "l_thumb_dist", "l_index_dist", "l_middle_dist", "l_ring_dist", "l_little_dist"
+        };
+        // 将 extra_links_49 加入 enable_link_list
+        enable_link_list.insert(enable_link_list.end(), extra_links_49.begin(), extra_links_49.end());
+        ROS_INFO_STREAM("Added extra links for ROBOT_VERSION 49, enable_link_list size: " << enable_link_list.size());
     }
 
     // Read parameter for publishing markers
@@ -106,6 +123,7 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
     arm_pose_pub_ = nh_.advertise<kuavo_msgs::armTargetPoses>("/kuavo_arm_target_poses", 1);
     arm_traj_forward_pub_ = nh_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 1);
     arm_traj_debug_pub_ = nh_.advertise<sensor_msgs::JointState>("/arm_collision/debug_kuavo_arm_traj", 1);
+    mm_two_arm_hand_pose_cmd_forward_pub_ = nh_.advertise<kuavo_msgs::twoArmHandPoseCmd>("/mm/two_arm_hand_pose_cmd", 1);
     arm_mode_sub_ = nh_.subscribe("/quest3/triger_arm_mode", 1, 
         &ArmCollisionChecker::armModeCallback, this);
 
@@ -131,6 +149,8 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
         &ArmCollisionChecker::kuavoArmTrajCallback, this);
     kuavo_arm_target_poses_sub_ = nh_.subscribe("/arm_collision/kuavo_arm_target_poses", 1, 
         &ArmCollisionChecker::kuavoArmTargetPosesCallback, this);
+    kuavo_mm_two_arm_hand_pose_cmd_sub_ = nh_.subscribe("/arm_collision/mm/two_arm_hand_pose_cmd", 1, 
+        &ArmCollisionChecker::kuavoMmTwoArmHandPoseCmdCallback, this);
     kuavo_sensors_data_sub_ = nh_.subscribe("/sensors_data_raw", 10, 
         &ArmCollisionChecker::sensorsDataCallback, this);
 
@@ -147,6 +167,54 @@ ArmCollisionChecker::~ArmCollisionChecker() {
 }
 
 bool ArmCollisionChecker::loadSTL(const std::string& filename, std::vector<Triangle>& triangles) {
+
+    // =================== 读取配置文件参数 ===================
+    static std::map<std::string, double> inflation_map;
+    static std::vector<std::pair<std::string, std::string>> collision_filter_pairs;
+    static bool config_loaded = false;
+
+    if (!config_loaded) {
+        XmlRpc::XmlRpcValue inflation_param, filter_param, ignore_param;
+
+        if (ros::param::get("~inflation", inflation_param) && inflation_param.getType() == XmlRpc::XmlRpcValue::TypeStruct) {
+            for (auto it = inflation_param.begin(); it != inflation_param.end(); ++it) {
+                std::string key = it->first;
+                double val = 0.0;
+                if (it->second.getType() == XmlRpc::XmlRpcValue::TypeDouble)
+                    val = static_cast<double>(it->second);
+                else if (it->second.getType() == XmlRpc::XmlRpcValue::TypeInt)
+                    val = static_cast<int>(it->second);
+                g_inflation_map[key] = val;
+            }
+            ROS_INFO("[CollisionCheck] Loaded %zu inflation entries", g_inflation_map.size());
+        }
+
+        if (ros::param::get("~collision_filter", filter_param) && filter_param.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+            for (int i = 0; i < filter_param.size(); ++i) {
+                if (filter_param[i].getType() == XmlRpc::XmlRpcValue::TypeArray && filter_param[i].size() == 2) {
+                    std::string a = static_cast<std::string>(filter_param[i][0]);
+                    std::string b = static_cast<std::string>(filter_param[i][1]);
+                    g_collision_filter_pairs.emplace_back(a, b);
+                }
+            }
+            ROS_INFO("[CollisionCheck] Loaded %zu collision filter pairs", g_collision_filter_pairs.size());
+        }
+
+        if (ros::param::get("~ignore_links", ignore_param) && ignore_param.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+            for (int i = 0; i < ignore_param.size(); ++i) {
+                if (ignore_param[i].getType() == XmlRpc::XmlRpcValue::TypeString) {
+                    std::string name = static_cast<std::string>(ignore_param[i]);
+                    g_collision_filter_links.insert(name);
+                }
+            }
+            ROS_INFO("[CollisionCheck] Loaded %zu ignore-links", g_collision_filter_links.size());
+        }
+
+        config_loaded = true;
+    }
+
+    // =======================================================
+
 
     // 构造缓存文件路径
     std::string cache_dir = ros::package::getPath("kuavo_arm_collision_check") + "/cache";
@@ -199,7 +267,7 @@ bool ArmCollisionChecker::loadSTL(const std::string& filename, std::vector<Trian
     std::ifstream mesh_file(path.c_str());
     if(!mesh_file.good()){
 
-        ROS_ERROR("Failed to load STL mesh: %s", path.c_str());
+        ROS_INFO("Failed to load STL mesh: %s", path.c_str());
 
         std::string mesh_kuavo_assets_path = kuavo_asset_path + "/models/biped_s" + robot_version + "/meshes/" + filename;
         
@@ -212,6 +280,7 @@ bool ArmCollisionChecker::loadSTL(const std::string& filename, std::vector<Trian
             return false;
         }
         else path = mesh_kuavo_assets_path;
+        ROS_INFO_STREAM("Success to load STL mesh: " << mesh_kuavo_assets_path);
     }
 
     KuavoMesh mesh;
@@ -266,7 +335,27 @@ bool ArmCollisionChecker::loadSTL(const std::string& filename, std::vector<Trian
     }
 
     // 顶点膨胀，先缓存所有新坐标，最后统一写回
-    double offset = 0.02; 
+    double offset = 0.01; 
+    // 只保留文件名，不带路径
+    
+    std::string key = filename;
+    auto pos = key.find_last_of("/\\");
+    if (pos != std::string::npos)
+        key = key.substr(pos + 1);
+
+    // **替换点号为下划线**，保证 ROS 参数合法
+    std::replace(key.begin(), key.end(), '.', '_');
+    std::replace(key.begin(), key.end(), '-', '_');
+    // 从 ROS 参数读取膨胀值，优先用参数 server 中的
+    double param_val = 0.0;
+    ros::NodeHandle nh("~");  // "~" 对应节点 namespace
+    
+    if (nh.getParam("inflation/" + key, param_val)) {
+        offset = param_val;
+        ROS_INFO("[CollisionCheck] Using inflation %.3f for mesh: %s", offset, filename.c_str());
+    } else {
+        ROS_WARN("[CollisionCheck] No inflation config for %s, using default %.3f", filename.c_str(), offset);
+    }
     int vaild_count = 0;
     std::vector<OpenMesh::Vec3f> new_points(mesh.n_vertices());
     for (auto v_it = mesh.vertices_begin(); v_it != mesh.vertices_end(); ++v_it) {
@@ -627,16 +716,51 @@ bool ArmCollisionChecker::checkCollision(std::vector<CollisionPair>& collision_p
         CollisionCheckUserData* user_data1 = static_cast<CollisionCheckUserData*>(o1->getUserData());
         CollisionCheckUserData* user_data2 = static_cast<CollisionCheckUserData*>(o2->getUserData());
         
-        // 去掉相邻关节的碰撞
+        // 去掉"父-子"关节的碰撞
         if(user_data1->parent_link_name_ == user_data2->link_name || user_data2->parent_link_name_ == user_data1->link_name) {
             return false;
         }
-        // 去掉相邻两个关节的碰撞
+        // 去掉"祖父-子"关节的碰撞
         if(user_data1->parent_parent_link_name_ == user_data2->link_name || user_data2->parent_parent_link_name_ == user_data1->link_name) {
             return false;
         }
         // 去掉碰撞检测关闭的关节
         if(!user_data1->is_collision_enabled_ && !user_data2->is_collision_enabled_) {
+            return false;
+        }
+        // 全局单边 link 屏蔽检查
+        extern std::unordered_set<std::string> g_collision_filter_links;
+        if (g_collision_filter_links.count(user_data1->link_name) ||
+            g_collision_filter_links.count(user_data2->link_name)) 
+        {
+            ROS_DEBUG("[CollisionCheck] Skip ignored link: %s or %s",
+                    user_data1->link_name.c_str(),
+                    user_data2->link_name.c_str());
+            return false;
+        }
+        // 全局碰撞过滤对检查 
+        extern std::vector<std::pair<std::string, std::string>> g_collision_filter_pairs;
+        for (const auto& pair : g_collision_filter_pairs) {
+            const auto& a = pair.first;
+            const auto& b = pair.second;
+
+            if ((user_data1->link_name == a && user_data2->link_name == b) ||
+                (user_data1->link_name == b && user_data2->link_name == a)) {
+                ROS_DEBUG("[CollisionCheck] Skip filtered pair: %s - %s",
+                        user_data1->link_name.c_str(), user_data2->link_name.c_str());
+                return false;
+            }
+        }
+        // 针对精细灵巧手结构, 屏蔽同属于 r_palm 或 l_palm 的手指 link 间的碰撞
+        if ((user_data1->parent_parent_link_name_ == user_data2->parent_parent_link_name_) &&
+            (user_data1->parent_parent_link_name_ == "r_palm" || user_data1->parent_parent_link_name_ == "l_palm")) {
+            return false;
+        }
+        // 针对精细灵巧手结构, 屏蔽同属于 r_palm 或 l_palm 的手指和指节 link 的碰撞
+        if (((user_data1->parent_parent_link_name_ == user_data2->parent_link_name_) ||
+            (user_data2->parent_parent_link_name_ == user_data1->parent_link_name_)) &&
+            (user_data1->parent_parent_link_name_ == "r_palm" || user_data1->parent_parent_link_name_ == "l_palm" ||
+            user_data2->parent_parent_link_name_ == "r_palm" || user_data2->parent_parent_link_name_ == "l_palm")) {
             return false;
         }
 
@@ -900,6 +1024,14 @@ void ArmCollisionChecker::kuavoArmTargetPosesCallback(const kuavo_msgs::armTarge
     }
 }
 
+void ArmCollisionChecker::kuavoMmTwoArmHandPoseCmdCallback(const kuavo_msgs::twoArmHandPoseCmd::ConstPtr& msg) {
+    
+    if(!is_collision_moving_) {
+        // 转发到原有的 /mm/two_arm_hand_pose_cmd 话题
+        mm_two_arm_hand_pose_cmd_forward_pub_.publish(*msg);
+    }
+}
+
 void ArmCollisionChecker::sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr& msg) {
     
     if(!is_collision_moving_) {
@@ -953,7 +1085,7 @@ void ArmCollisionChecker::playArmTrajBack() {
                 it->joint_data.joint_q.end() - arm_joint_num - head_joint_num,
                 it->joint_data.joint_q.end() - head_joint_num
             );
-
+        
         for (int i = 0; i < js_msg.position.size(); ++i) {
             js_msg.position[i] = js_msg.position[i] * 180.0 / M_PI;
         }
@@ -1016,4 +1148,3 @@ int main(int argc, char** argv) {
     ros::spin();
     return 0;
 } 
- 

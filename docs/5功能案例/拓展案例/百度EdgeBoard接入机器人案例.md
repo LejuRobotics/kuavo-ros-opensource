@@ -114,7 +114,7 @@ https://ai.baidu.com/ai-doc/HWCE/3lpxo3ayu#%E7%B3%BB%E7%BB%9F%E9%95%9C%E5%83%8F%
 
 上位机代码仓库中, 本案例ROS功能包位置:
 
-`~/<kuavo_ros_application>/src/edgeboard_service`
+`~/~/kuavo_ros_application/src/edgeboard_service`
 
 将`edgeboard_service`功能包复制到自己的ROS工作空间的`src`目录下即可
 
@@ -230,7 +230,7 @@ https://ai.baidu.com/ai-doc/HWCE/Olq3rvysr#%E6%A8%A1%E5%9E%8B%E6%8E%A8%E7%90%86
 
 - 该案例所使用的语音合成模型为讯飞语音合成（TTS）模型
   - 访问:`https://console.xfyun.cn/services/tts`,获取APPID,APISecret,APIKey
-  - 将程序`<kuavo_ros_application>/src/edgeboard_service/scripts/tts_ws_python3_demo.py/tts_ws_python3_demo.py`第139,140行的APPID,APISecret,APIKey替换成获取到的即可
+  - 将程序`~/kuavo_ros_application/src/edgeboard_service/scripts/tts_ws_python3_demo.py/tts_ws_python3_demo.py`第139,140行的APPID,APISecret,APIKey替换成获取到的即可
 
 ### launch启动文件参数说明
 - `mode`：选择启动哪一个文件

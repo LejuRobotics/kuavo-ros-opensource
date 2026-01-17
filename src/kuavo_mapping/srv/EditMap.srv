@@ -1,0 +1,9 @@
+# 编辑地图服务请求
+string map_name      # 地图名称
+float64[] points     # 三个点的坐标 [x1,y1, x2,y2, x3,y3]
+string operation     # 操作类型："fill" 或 "clear"
+---
+# 编辑地图服务响应
+bool success         # 是否成功
+string message       # 状态信息
+string image_data    # 编辑后地图图片的base64数据

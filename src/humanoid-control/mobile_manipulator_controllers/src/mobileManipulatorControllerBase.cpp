@@ -153,7 +153,7 @@ namespace mobile_manipulator_controller
   ocs2::vector_t MobileManipulatorControllerBase::getTargetFromState(const vector_t& state)
   {
     // initial command
-    const size_t baseDim = info_.stateDim - info_.armDim;
+    const size_t baseDim = info_.stateDim - info_.armDim - info_.waistDim;
     const size_t hand_dim = 7;
     ocs2::vector_t initTarget(baseDim + 2*hand_dim);
     initTarget.head(baseDim) = state.head(baseDim);
@@ -171,7 +171,7 @@ namespace mobile_manipulator_controller
     initial_observation.state.setZero(info_.stateDim);
     initial_observation.input.setZero(info_.inputDim);
 
-    const size_t baseDim = info_.stateDim - info_.armDim;
+    const size_t baseDim = info_.stateDim - info_.armDim - info_.waistDim;
     const size_t hand_dim = 7;
     mmObservationDummy_ = initial_observation;
     // Reset observation publishing flag at start
@@ -219,7 +219,7 @@ namespace mobile_manipulator_controller
     }
     if(!updateRunning_)
       return -1;
-    const size_t baseDim = info_.stateDim - info_.armDim;
+    const size_t baseDim = info_.stateDim - info_.armDim - info_.waistDim;
     // Update the current state of the system
     SystemObservation obs = mmObservationDummy_;
     obs.time = mmObservationDummy_.time;
@@ -240,7 +240,7 @@ namespace mobile_manipulator_controller
         break;
     }
     if(dummySimArm_)
-      obs.state.tail(info_.armDim) = mmObservationDummy_.state.tail(info_.armDim);
+      obs.state.tail(info_.armDim + info_.waistDim) = mmObservationDummy_.state.tail(info_.armDim + info_.waistDim);
 
     // ros_logger_->publishVector("/mm/state_before_mpc", obs.state);
     mpcMrtInterface_->setCurrentObservation(obs);
@@ -368,7 +368,7 @@ namespace mobile_manipulator_controller
       for (size_t i = 0; i < policy.inputTrajectory_.size(); ++i)
       {
         const vector_t& inputVector = policy.inputTrajectory_[i];
-        vector_t jointVelocities = inputVector.tail(info_.armDim);
+        vector_t jointVelocities = inputVector.tail(info_.armDim + info_.waistDim);
 
         // std::cout << "inputVector get" << i << std::endl;
         policyVelocities.push_back(jointVelocities);
@@ -507,7 +507,8 @@ namespace mobile_manipulator_controller
     const auto& model = pinocchioInterface_ptr_->getModel();
     auto& data = pinocchioInterface_ptr_->getData();
     const auto q = pinocchioMappingPtr_->getPinocchioJointPosition(state);
-
+    // std::cout << "state.size():" << state.size() << std::endl;//21
+    // std::cout << "q.size():" << q.size() << std::endl;//21
     pinocchio::forwardKinematics(model, data, q);
     pinocchio::updateFramePlacements(model, data);
 

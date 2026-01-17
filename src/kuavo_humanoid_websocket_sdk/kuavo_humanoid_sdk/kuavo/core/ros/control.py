@@ -150,12 +150,21 @@ class ControlEndEffectorWebsocket:
 class ControlRobotArmWebsocket:
     def __init__(self):
         websocket = WebSocketKuavoSDK()
+        self._pub_ctrl_arm_traj_arm_collision =  roslibpy.Topic(websocket.client,'/arm_collision/kuavo_arm_traj', 'sensor_msgs/JointState')
+        self._pub_ctrl_arm_target_poses_arm_collision = roslibpy.Topic(websocket.client, '/arm_collision/kuavo_arm_target_poses', 'kuavo_msgs/armTargetPoses')
+        self._pub_ctrl_hand_pose_cmd_arm_collision = roslibpy.Topic(websocket.client, '/arm_collision/mm/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
+        self._sub_arm_collision_info = roslibpy.Topic(websocket.client, '/arm_collision/info', 'kuavo_msgs/armCollisionCheckInfo')
+        self._sub_arm_collision_info.subscribe(self.callback_arm_collision_info)
+        self._is_collision = False
+        self.arm_collision_enable = False
+        #正常轨迹发布
         self._pub_ctrl_arm_traj = roslibpy.Topic(websocket.client, '/kuavo_arm_traj', 'sensor_msgs/JointState')
         self._pub_ctrl_arm_target_poses = roslibpy.Topic(websocket.client, '/kuavo_arm_target_poses', 'kuavo_msgs/armTargetPoses')
         self._pub_ctrl_hand_pose_cmd = roslibpy.Topic(websocket.client, '/mm/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
         self._pub_ctrl_arm_traj.advertise()
         self._pub_ctrl_arm_target_poses.advertise()
         self._pub_ctrl_hand_pose_cmd.advertise()
+        self._pub_ctrl_hand_pose_cmd_arm_collision.advertise()
 
     def connect(self, timeout:float=1.0)-> bool:
         return True
@@ -166,13 +175,54 @@ class ControlRobotArmWebsocket:
                 "name": ["arm_joint_" + str(i) for i in range(0, 14)],
                 "position": [float(180.0 / np.pi * q) for q in joint_q]  # convert to degree
             }
-            self._pub_ctrl_arm_traj.publish(roslibpy.Message(msg))
+            if self.arm_collision_enable:
+                self._pub_ctrl_arm_traj_arm_collision.publish(roslibpy.Message(msg))
+            else:
+                self._pub_ctrl_arm_traj.publish(roslibpy.Message(msg))
             return True
         except Exception as e:
             SDKLogger.error(f"publish robot arm traj: {e}")
         return False
-        
-    def pub_arm_target_poses(self, times:list, joint_q:list):
+
+    def is_arm_collision_mode(self)->bool:
+        return self.arm_collision_enable
+
+    def set_arm_collision_mode(self, enable: bool):
+        """
+            Set arm collision mode
+        """
+        self.arm_collision_enable = enable
+        websocket = WebSocketKuavoSDK()
+        srv_set_arm_collision_mode_srv = roslibpy.Service(websocket.client, '/arm_collision/set_arm_moving_enable', 'std_srvs/SetBool')
+        req = {
+            "data": enable
+        }
+        resp = srv_set_arm_collision_mode_srv.call(req)
+        if not resp.get('success', False):
+            SDKLogger.error(f"Failed to set arm collision mode: {resp.get('message', '')}")
+
+    def is_arm_collision(self)->bool:
+        return self._is_collision
+
+    def callback_arm_collision_info(self, msg):
+        self._is_collision = True
+        SDKLogger.info(f"Arm collision detected")
+
+    def release_arm_collision_mode(self):
+        self._is_collision = False
+    
+    def wait_arm_collision_complete(self):
+        if self._is_collision:
+            websocket = WebSocketKuavoSDK()
+            srv_wait_arm_collision_complete_srv = roslibpy.Service(websocket.client, '/arm_collision/wait_complete', 'std_srvs/SetBool')
+            req = {
+                "data": True
+            }
+            resp = srv_wait_arm_collision_complete_srv.call(req)
+            if not resp.get('success', False):
+                SDKLogger.error(f"Failed to wait arm collision complete: {resp.get('message', '')}")
+
+    def pub_arm_target_poses(self, times:list, joint_q:list)->bool:
         try:
             msg_values = []
             for i in range(len(joint_q)):
@@ -182,7 +232,10 @@ class ControlRobotArmWebsocket:
                 "times": [float(q) for q in times],
                 "values": msg_values
             }
-            self._pub_ctrl_arm_target_poses.publish(roslibpy.Message(msg))
+            if self.arm_collision_enable:
+                self._pub_ctrl_arm_target_poses_arm_collision.publish(roslibpy.Message(msg))
+            else:
+                self._pub_ctrl_arm_target_poses.publish(roslibpy.Message(msg))
             return True
         except Exception as e:
             SDKLogger.error(f"publish arm target poses: {e}")
@@ -207,7 +260,10 @@ class ControlRobotArmWebsocket:
             if frame.value not in [0, 1, 2, 3, 4]:
                 SDKLogger.error(f"Invalid frame: {frame}")
                 return False
-            self._pub_ctrl_hand_pose_cmd.publish(roslibpy.Message(msg))
+            if self.arm_collision_enable:
+                self._pub_ctrl_hand_pose_cmd_arm_collision.publish(roslibpy.Message(msg))
+            else:
+                self._pub_ctrl_hand_pose_cmd.publish(roslibpy.Message(msg))
             return True
         except Exception as e:
             SDKLogger.error(f"publish arm target poses: {e}")
@@ -294,11 +350,11 @@ class ControlRobotArmWebsocket:
             response = service.call(request)
             if not response.get('result', False):
                 SDKLogger.error(f"Failed to get manipulation mpc wbc arm trajectory control mode: {response.get('message', '')}")
-                return KuavoManipulationMpcControlFlow.ERROR
+                return KuavoManipulationMpcControlFlow.Error
             return KuavoManipulationMpcControlFlow(response.get('mode', 0))
         except Exception as e:
             SDKLogger.error(f"Service call failed: {e}")
-        return KuavoManipulationMpcControlFlow.ERROR
+        return KuavoManipulationMpcControlFlow.Error
 
     def srv_change_arm_ctrl_mode(self, mode: KuavoArmCtrlMode)->bool:
         try:
@@ -323,6 +379,63 @@ class ControlRobotArmWebsocket:
         except Exception as e:
             SDKLogger.error(f"Service call failed: {e}")
         return None
+
+""" Control Robot Waist """
+
+class ControlRobotWaistWebsocket:
+    def __init__(self):
+        # 创建 WebSocket 客户端
+        websocket = WebSocketKuavoSDK()
+
+        # Publisher：发布到 /robot_waist_motion_data，消息类型 kuavo_msgs/robotWaistControl
+        self._pub_ctrl_robot_waist = roslibpy.Topic(
+            websocket.client,
+            '/robot_waist_motion_data',
+            'kuavo_msgs/robotWaistControl'
+        )
+        self._pub_ctrl_robot_waist.advertise()
+
+    def connect(self, timeout: float = 1.0) -> bool:
+        return True
+
+    def pub_control_robot_waist(self, waistPos: list) -> bool:
+        """
+        发布腰部位置控制命令 (WebSocket)
+        参数:
+            waistPos: 长度为 1 的数组，例如 [30.0]
+        """
+        # 检查输入维度
+        if len(waistPos) != 1:
+            SDKLogger.error("Waist data must be 1-dimensional")
+            return False
+
+        try:
+            # 获取当前时间戳（秒和纳秒）
+            import time
+            now = time.time()
+            secs = int(now)
+            nsecs = int((now - secs) * 1e9)
+            
+            # roslibpy 方式构建消息
+            msg = {
+                'header': {
+                    'stamp': {
+                        'secs': secs,
+                        'nsecs': nsecs
+                    }
+                },
+                'data': {
+                    'data': [float(waistPos[0])]
+                }
+            }
+
+            # 发布
+            self._pub_ctrl_robot_waist.publish(roslibpy.Message(msg))
+            return True
+
+        except Exception as e:
+            SDKLogger.error(f"Publish waist pos failed: {e}")
+            return False
 
 
 """ Control Robot Head """
@@ -442,12 +555,14 @@ class ControlRobotMotionWebsocket:
         self._pub_joy = roslibpy.Topic(websocket.client, '/joy', 'sensor_msgs/Joy')
         self._pub_switch_gait = roslibpy.Topic(websocket.client, '/humanoid_switch_gait_by_name', 'kuavo_msgs/switchGaitByName')
         self._pub_step_ctrl = roslibpy.Topic(websocket.client, '/humanoid_mpc_foot_pose_target_trajectories', 'kuavo_msgs/footPoseTargetTrajectories')
+        self._pub_mpc_target_pose = roslibpy.Topic(websocket.client, '/humanoid_mpc_target_pose', 'kuavo_msgs/mpc_target_trajectories')
         self._pub_cmd_vel.advertise()
         self._pub_cmd_pose.advertise()
         self._pub_cmd_pose_world.advertise()
         self._pub_joy.advertise()
         self._pub_switch_gait.advertise()
         self._pub_step_ctrl.advertise()
+        self._pub_mpc_target_pose.advertise()
 
     def connect(self, timeout:float=2.0)-> bool:
         return True
@@ -518,6 +633,98 @@ class ControlRobotMotionWebsocket:
 
     def pub_trot_command(self) -> bool:
         return self._pub_switch_gait_by_name("walk")
+    
+    def pub_mpc_target_pose(self, target_pose: list, initial_pose: list = None, time_horizon: float = 2.0)->bool:
+        """
+        发布6DOF躯干姿态目标轨迹到MPC
+        
+        参数:
+            target_pose: 6DOF目标姿态 [x, y, z, yaw, pitch, roll]
+            initial_pose: 6DOF初始姿态 [x, y, z, yaw, pitch, roll]，如果为None则从当前observation获取
+            time_horizon: 目标时间（相对于当前MPC时间），单位秒
+        返回:
+            bool: 发布成功返回True，否则返回False
+        
+        注意:
+            - 如果initial_pose为None，必须能够从MPC observation中获取当前状态，否则返回False
+            - 必须能够获取MPC observation中的时间，否则返回False
+            - 时间使用MPC observation中的时间，而不是系统时间
+        """
+        try:
+            if len(target_pose) != 6:
+                SDKLogger.error(f"[Error] target_pose must have 6 elements, got {len(target_pose)}")
+                return False
+            
+            # 获取MPC observation数据（用于获取当前时间和状态）
+            from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCoreWebsocket
+            state_core = KuavoRobotStateCoreWebsocket()
+            current_time = None
+            current_state = None
+            
+            # 检查是否能够获取MPC observation数据
+            if not hasattr(state_core, '_mpc_observation_data') or state_core._mpc_observation_data is None:
+                SDKLogger.error("[Error] Cannot get MPC observation data. Please ensure the MPC controller is running and publishing observation data.")
+                return False
+            
+            obs = state_core._mpc_observation_data
+            
+            # 获取MPC时间（websocket版本中obs是字典）
+            if 'time' not in obs:
+                SDKLogger.error("[Error] MPC observation data does not have 'time' field.")
+                return False
+            current_time = obs['time']
+            
+            # 如果需要从observation获取初始状态
+            if initial_pose is None:
+                # 检查observation中是否有state数据
+                if 'state' not in obs or 'value' not in obs['state']:
+                    SDKLogger.error("[Error] MPC observation data does not have 'state.value' field.")
+                    return False
+                
+                # MPC状态向量索引说明：
+                # 0-5: 质心动量 (vcom_x, vcom_y, vcom_z, L_x/m, L_y/m, L_z/m)
+                # 6-11: 躯干姿态 (p_base_x, p_base_y, p_base_z, theta_base_z/yaw, theta_base_y/pitch, theta_base_x/roll)
+                if len(obs['state']['value']) < 12:
+                    SDKLogger.error(f"[Error] MPC observation state value length ({len(obs['state']['value'])}) is less than 12. Cannot extract current pose.")
+                    return False
+                
+                # 从observation的state中提取索引6-11的元素作为当前姿态 [x, y, z, yaw, pitch, roll]
+                current_state = [
+                    obs['state']['value'][6],   # p_base_x
+                    obs['state']['value'][7],   # p_base_y
+                    obs['state']['value'][8],   # p_base_z
+                    obs['state']['value'][9],   # theta_base_z (yaw)
+                    obs['state']['value'][10],  # theta_base_y (pitch)
+                    obs['state']['value'][11]   # theta_base_x (roll)
+                ]
+                initial_pose = current_state
+            elif len(initial_pose) != 6:
+                SDKLogger.error(f"[Error] initial_pose must have 6 elements, got {len(initial_pose)}")
+                return False
+            
+            # 验证时间是否有效
+            if current_time is None or current_time <= 0:
+                SDKLogger.error(f"[Error] Invalid MPC time: {current_time}. Cannot publish trajectory.")
+                return False
+            
+            # 创建mpc_target_trajectories消息（websocket版本使用字典格式）
+            msg = {
+                "timeTrajectory": [current_time, current_time + time_horizon],
+                "stateTrajectory": [
+                    {"value": [float(x) for x in initial_pose]},
+                    {"value": [float(x) for x in target_pose]}
+                ],
+                "inputTrajectory": [
+                    {"value": []},
+                    {"value": []}
+                ]
+            }
+            
+            self._pub_mpc_target_pose.publish(roslibpy.Message(msg))
+            return True
+        except Exception as e:
+            SDKLogger.error(f"[Error] publish mpc target pose: {e}")
+            return False
     
     def pub_step_ctrl(self, msg)->bool:
         try:
@@ -641,6 +848,7 @@ class KuavoRobotControlWebsocket:
                 self.kuavo_arm_control = ControlRobotArmWebsocket()
                 self.kuavo_motion_control = ControlRobotMotionWebsocket()
                 self.kuavo_arm_ik_fk = KuavoRobotArmIKFKWebsocket()
+                self.kuavo_waist_control = ControlRobotWaistWebsocket()
             except Exception as e:
                 SDKLogger.error(f"Failed to initialize KuavoRobotControlWebsocket: {e}")
                 raise
@@ -747,6 +955,15 @@ class KuavoRobotControlWebsocket:
         if len(postions) != 2 or len(velocities) != 2 or len(torques) != 2:
                 raise ValueError("Position, velocity, and torque lists must have a length of 2.")
         return self.kuavo_eef_control.srv_control_leju_claw(postions, velocities, torques)
+    
+    def control_robot_waist(self, yaw: float) -> bool:
+        """
+            Control robot waist
+            Arguments:
+                - yaw:   waist yaw angle, radian
+        """
+        SDKLogger.debug(f"Control robot waist: {yaw}")
+        return self.kuavo_waist_control.pub_control_robot_waist(yaw)
 
     def control_robot_head(self, yaw:float, pitch:float)->bool:
         """
@@ -765,6 +982,32 @@ class KuavoRobotControlWebsocket:
                 - joint_data: list of joint data (degrees)
         """
         return self.kuavo_arm_control.pub_control_robot_arm_traj(joint_data)
+
+    def is_arm_collision(self)->bool:
+        return self.kuavo_arm_control.is_arm_collision()
+    
+    def is_arm_collision_mode(self)->bool:
+        """
+            Check if arm collision mode is enabled
+            Returns:
+                bool: True if collision mode is enabled, False otherwise
+        """
+        return self.kuavo_arm_control.is_arm_collision_mode()
+
+
+
+    def release_arm_collision_mode(self):
+        return self.kuavo_arm_control.release_arm_collision_mode()
+    
+    def wait_arm_collision_complete(self):
+        return self.kuavo_arm_control.wait_arm_collision_complete()
+
+    def set_arm_collision_mode(self, enable: bool):
+        """
+            Set arm collision mode
+        """
+        return self.kuavo_arm_control.set_arm_collision_mode(enable)
+
     
     def control_robot_arm_joint_trajectory(self, times:list, joint_q:list)->bool:
         """
@@ -867,11 +1110,48 @@ class KuavoRobotControlWebsocket:
         return self.kuavo_motion_control.pub_cmd_vel(linear_x, linear_y, angular_z)
     
     def control_torso_height(self, height:float, pitch:float=0.0)->bool:
-        msg = {
-            "linear": {"x": 0.0, "y": 0.0, "z": float(height)},
-            "angular": {"x": 0.0, "y": float(pitch), "z": 0.0}
-        }
-        return self.kuavo_motion_control.pub_cmd_pose(roslibpy.Message(msg))
+        """
+        控制躯干高度和俯仰角（使用MPC目标轨迹接口）
+        参数:
+            height: 相对于当前高度的变化量（米），负值表示下蹲，正值表示上升
+            pitch: 相对于当前俯仰角的变化量（弧度），默认0.0
+        返回:
+            bool: 控制成功返回True，否则返回False
+        """
+        # 获取当前状态
+        from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCoreWebsocket
+        state_core = KuavoRobotStateCoreWebsocket()
+        if not hasattr(state_core, '_mpc_observation_data') or state_core._mpc_observation_data is None:
+            SDKLogger.error("[Error] Cannot get MPC observation data for control_torso_height")
+            return False
+        
+        obs = state_core._mpc_observation_data
+        if 'state' not in obs or 'value' not in obs['state'] or len(obs['state']['value']) < 12:
+            SDKLogger.error("[Error] Cannot get current state from observation for control_torso_height")
+            return False
+        
+        # 从observation获取当前姿态 [x, y, z, yaw, pitch, roll]
+        current_pose = [
+            obs['state']['value'][6],   # p_base_x
+            obs['state']['value'][7],   # p_base_y
+            obs['state']['value'][8],   # p_base_z
+            obs['state']['value'][9],   # theta_base_z (yaw)
+            obs['state']['value'][10],  # theta_base_y (pitch)
+            obs['state']['value'][11]   # theta_base_x (roll)
+        ]
+        
+        # 计算目标姿态：当前姿态 + 变化量
+        target_pose = [
+            current_pose[0],           # x: 保持不变
+            current_pose[1],           # y: 保持不变
+            height,                    # z: 目标高度
+            current_pose[3],           # yaw: 保持不变
+            pitch,                     # pitch: 目标俯仰角
+            current_pose[5]            # roll: 保持不变
+        ]
+        
+        # 使用当前姿态作为初始姿态，目标姿态 = 当前姿态 + 变化量
+        return self.kuavo_motion_control.pub_mpc_target_pose(target_pose, initial_pose=current_pose, time_horizon=3.0)
 
     def control_command_pose_world(self, target_pose_x:float, target_pose_y:float, target_pose_z:float, target_pose_yaw:float)->bool:
         """

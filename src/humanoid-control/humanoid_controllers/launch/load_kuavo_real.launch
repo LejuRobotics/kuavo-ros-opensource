@@ -5,7 +5,7 @@
     <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
 
     <arg name="vr_remote_control" default="false"/>
-    <arg name="robot_type"         default="humanoid"/>
+    <arg name="robot_type"         default="2"/>
     <arg name="rviz"                default="false" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
@@ -17,7 +17,7 @@
 
     <arg name="use_external_mpc"   default="true"/>
     <arg name="wbc_frequency"      default="500"/>
-    <arg name="sensor_frequency"   default="500"/>
+    <arg name="sensor_frequency"   default="1000"/>
     <arg name="use_joystick"       default="true"/>
     <arg name="with_estimation"    default="true"/>
     <arg name="estimator_type"     default="1"/>
@@ -28,14 +28,17 @@
     <arg name="start_way"         default="manual"/>
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="only_half_up_body" default="false"/>
-    <arg name="waist_move_spd"     default="1.0"/>
-    <arg name="stand_up_protect" default="true"/>
+    <arg name="stand_up_protect" default="false"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
     <arg name="leg_disable_mode" default="true" doc="If true, when any leg joint fails, all leg joints (1-12) will be disabled" />
     <arg name="ruiwo_cxx_sdk" default="true"/>
-    <arg name="arm_move_spd"      default="1.2"/>
+    <arg name="arm_move_spd"      default="2.4"/>
+    <arg name="waist_move_spd"      default="1.8"/>
+
+    <!-- 如需使用手柄搬箱子和走楼梯，需要设置为 false -->
+    <arg name="joy_execute_action" default="true"/>
 
     <!-- 半身控制手臂模式切换插值相关参数 -->
     <arg name="arm_move_spd_half_up_body" default="0.15"/>
@@ -53,6 +56,11 @@
     <!-- -->
     <arg name="teach_pendant" default="0"/>
     
+    <!-- RL相关参数 -->
+    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
+    <arg name="init_fall_down_state" default="false"/>
+    <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -68,12 +76,16 @@
     <param name="with_estimation"    value="$(arg with_estimation)"/>
     <param name="estimator_type"     value="$(arg estimator_type)"/>
     <param name="use_joint_filter"     value="$(arg use_joint_filter)"/>
+    <param name="network_model_file"   value="$(arg network_model_file)"/>
+    <param name="rl_param"             value="$(arg rl_param)"/>
+    <param name="is_rl_start"           value="$(arg is_rl_start)"/>
     <param name="joystick_type"  value="$(arg joystick_type)"/>
     <param name="only_half_up_body"   value="$(arg only_half_up_body)"/>
     <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
     <param name="start_way"  value="$(arg start_way)"/>
     <param name="use_estimator_contact"  value="$(arg use_estimator_contact)"/>
     <param name="waist_move_spd"     value="$(arg waist_move_spd)"/>
+    <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
 
     <param name="stand_up_protect" value="$(arg stand_up_protect)"/>
     <param name="redundant_imu" value="$(arg redundant_imu)"/>
@@ -84,8 +96,12 @@
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
+    <param name="pull_up_force_threshold_roban" value="0.50"/>
+    <param name="torso_interpolation_max_velocity" value="0.1"/>
+    <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
+    <param name="robot_type"      value="$(arg robot_type)"/>
     
     <!-- teach_pendant=1, teach pendant mode -->
     <param name="teach_pendant"  value="$(arg teach_pendant)"/>
@@ -111,10 +127,8 @@
     </group>
 
     <group unless="$(eval arg('robot_version') >= 30)">
-        <param name="enable_pull_up_protect" value="false"/>
+        <!-- <param name="enable_pull_up_protect" value="false"/> -->
         <param name="stand_up_protect" value="false"/>
-        <param name="joint_protect_enable" value="false" />
-        <param name="cmd_truncation_enable" value="false" />
     </group>
     
     <!-- mpc node -->
@@ -163,7 +177,7 @@
 
     <param name="hardware/is_ready" value="0"/>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" />
-    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>    
     <group unless="$(arg ruiwo_cxx_sdk)">
@@ -213,9 +227,13 @@
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
-        <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
-          <arg name="joystick_type" value="$(arg joystick_type)"/>
-        </include>
+        <group if="$(eval arg('start_way') == 'manual')">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+            <arg name="joystick_type" value="$(arg joystick_type)"/>
+            <arg name="real" value="$(arg real)"/>
+          </include>
+        </group>
+        <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen"/>
       </group>
     </group>
 
@@ -255,7 +273,7 @@
       <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
         <arg name="sqp_mpc" value="1"/>
         <arg name="rviz"    value="false"/>
-        <arg name="visualize_mm"   value="true"/>
+        <arg name="visualize_mm"   value="false"/>
         <arg name="coredump" value="$(arg coredump)"/>
       </include>
       </group>

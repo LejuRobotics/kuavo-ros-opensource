@@ -9,8 +9,11 @@ from kuavo_humanoid_sdk.kuavo.core.core import KuavoRobotCore
 from kuavo_humanoid_sdk.kuavo.core.sdk_deprecated import sdk_deprecated
 
 from typing import Tuple
+from geometry_msgs.msg import TwistStamped
 from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
-
+from kuavo_humanoid_sdk.kuavo.robot_arm import KuavoRobotArm 
+from kuavo_humanoid_sdk.kuavo.robot_head import KuavoRobotHead
+from kuavo_humanoid_sdk.kuavo.robot_waist import KuavoRobotWaist
 """
 Kuavo SDK - Kuavo机器人控制的Python接口
 
@@ -93,6 +96,10 @@ class KuavoRobot(RobotBase):
         super().__init__(robot_type="kuavo")
         
         self._robot_info = KuavoRobotInfo()
+
+        self._robot_arm  = KuavoRobotArm()
+        self._robot_head = KuavoRobotHead()
+        self._robot_waist = KuavoRobotWaist()
         self._kuavo_core = KuavoRobotCore()
     def stance(self)->bool:
         """使机器人进入'stance'站立模式。
@@ -130,19 +137,7 @@ class KuavoRobot(RobotBase):
         Note:
             你可以调用 :meth:`KuavoRobotState.wait_for_walk` 来等待机器人进入行走模式。
         """
-        # Limit velocity ranges
-        limited_linear_x = min(0.4, max(-0.4, linear_x))
-        limited_linear_y = min(0.2, max(-0.2, linear_y)) 
-        limited_angular_z = min(0.4, max(-0.4, angular_z))
-        
-        # Check if any velocity exceeds limits.
-        if abs(linear_x) > 0.4:
-            SDKLogger.warn(f"[Robot] linear_x velocity {linear_x} exceeds limit [-0.4, 0.4], will be limited")
-        if abs(linear_y) > 0.2:
-            SDKLogger.warn(f"[Robot] linear_y velocity {linear_y} exceeds limit [-0.2, 0.2], will be limited")
-        if abs(angular_z) > 0.4:
-            SDKLogger.warn(f"[Robot] angular_z velocity {angular_z} exceeds limit [-0.4, 0.4], will be limited")
-        return self._kuavo_core.walk(limited_linear_x, limited_linear_y, limited_angular_z)
+        return self._kuavo_core.walk(linear_x, linear_y, angular_z)
 
     def jump(self):
         """使机器人跳跃。
@@ -156,9 +151,9 @@ class KuavoRobot(RobotBase):
         """控制机器人的蹲姿高度和俯仰角。
 
         Args:
-            height (float): 相对于正常站立高度的高度偏移量,单位米,范围[-0.35, 0.0],负值表示下蹲。
+            height (float): 相对于正常站立高度的高度偏移量,单位米,范围[-0.35, 0.1],负值表示下蹲。
                             正常站立高度参考 :attr:`KuavoRobotInfo.init_stand_height`
-            pitch (float): 机器人躯干的俯仰角,单位弧度,范围[-0.4, 0.4]。
+            pitch (float): 机器人躯干的俯仰角,单位弧度,范围[0, 0.4]。
             
         Returns:
             bool: 如果蹲姿控制成功返回True,否则返回False。
@@ -166,25 +161,32 @@ class KuavoRobot(RobotBase):
         Note:
             下蹲和起立不要变化过快，一次变化最大不要超过0.2米。
         """
-        # Limit height range
-        MAX_HEIGHT = 0.0
-        MIN_HEIGHT = -0.35
-        MAX_PITCH = 0.4
-        MIN_PITCH = -0.4
+        return self._kuavo_core.squat(height, pitch)
+
+    def control_torso_pose(self, x: float, y: float, z: float,
+                           roll: float, pitch: float, yaw: float) -> bool:
+        """直接控制轮臂机器人躯干的位姿
+
+        Args:
+            x, y, z (float): 目标位置（米）
+            roll, pitch, yaw (float): 目标欧拉角（弧度）
+
+        Returns:
+            bool: 控制命令是否发送成功
+        """
+        return self._kuavo_core.control_torso_pose(x, y, z, roll, pitch, yaw)
+    
+    def control_wheel_lower_joint(self, joint_traj: list) -> bool:
+        """控制轮臂机器人的下肢关节
+
+        Args:
+            joint_traj (list): 目标关节位置（弧度）
+
+        Returns:
+            bool: 控制命令是否发送成功
+        """
+        return self._kuavo_core.control_wheel_lower_joint(joint_traj)
         
-        limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, height))
-        
-        # Check if height exceeds limits
-        if height > MAX_HEIGHT or height < MIN_HEIGHT:
-            print(f"\033[33m[Robot] height {height} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited\033[0m")
-        # Limit pitch range
-        limited_pitch = min(MAX_PITCH, max(MIN_PITCH, pitch))
-        
-        # Check if pitch exceeds limits
-        if abs(pitch) > MAX_PITCH:
-            print(f"\033[33m[Robot] pitch {pitch} exceeds limit [{MIN_PITCH}, {MAX_PITCH}], will be limited\033[0m")
-        
-        return self._kuavo_core.squat(limited_height, limited_pitch)
      
     def step_by_step(self, target_pose:list, dt:float=0.4, is_left_first_default:bool=True, collision_check:bool=True)->bool:
         """单步控制机器人运动。
@@ -267,6 +269,23 @@ class KuavoRobot(RobotBase):
         """
         return self._kuavo_core.control_command_pose_world(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
     
+    def control_command_pose_world_stamped(self, pos_world: TwistStamped) -> bool:
+        """在odom(世界)坐标系下控制机器人姿态(使用TwistStamped消息)。
+        
+        Args:
+            pos_world (TwistStamped): TwistStamped消息，包含目标位姿和时间戳。
+            
+        Returns:
+            bool: 如果命令发送成功返回True,否则返回False。
+            
+        Raises:
+            RuntimeError: 如果在尝试控制姿态时机器人不在stance状态。
+            
+        Note:
+            此命令会将机器人状态改变为'command_pose_world'。
+        """
+        return self._kuavo_core.control_command_pose_world_stamped(pos_world)
+    
     def control_head(self, yaw: float, pitch: float)->bool:
         """控制机器人的头部关节运动。
 
@@ -323,6 +342,10 @@ class KuavoRobot(RobotBase):
         """
         return self._kuavo_core.disable_head_tracking()
     
+    def control_waist_pos(self, joint_positions: list)->bool:
+        """控制机器人的腰部关节位置。"""
+        return self._robot_waist.control_waist(joint_positions)
+
     """ Robot Arm Control """
     def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
         """控制机器人末端力/力矩
@@ -366,18 +389,32 @@ class KuavoRobot(RobotBase):
 
         Raises:
             ValueError: 如果关节位置列表长度不正确。
-            ValueError: 如果关节位置超出[-π, π]范围。
+            ValueError: 如果关节位置超出真实物理关节限制范围。
             RuntimeError: 如果在尝试控制手臂时机器人不在stance状态。
         """
         if len(joint_positions) != self._robot_info.arm_joint_dof:
             raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(joint_positions)))
 
-        # Check if joint positions are within ±180 degrees (±π radians)
-        for pos in joint_positions:
-            if abs(pos) > math.pi:
-                raise ValueError(f"Joint position {pos} rad exceeds ±π rad (±180 deg) limit")
+        # Clip joint positions to the real physical joint limits (instead of raising)
+        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
+        clipped = []
+        clipped_info = []
+        for i, pos in enumerate(joint_positions):
+            new_pos = max(arm_min[i], min(pos, arm_max[i]))
+            clipped.append(new_pos)
+            if new_pos != pos:
+                clipped_info.append((i, pos, new_pos, arm_min[i], arm_max[i]))
 
-        return self._kuavo_core.control_robot_arm_joint_positions(joint_data=joint_positions)
+        if clipped_info:
+            SDKLogger.warn(
+                "[KuavoRobot] joint限位裁剪: "
+                + ", ".join(
+                    f"J{i} {old:.3f}->{new:.3f} (limit [{mn:.3f},{mx:.3f}])"
+                    for (i, old, new, mn, mx) in clipped_info
+                )
+            )
+
+        return self._kuavo_core.control_robot_arm_joint_positions(joint_data=clipped)
     
     def control_arm_joint_trajectory(self, times:list, q_frames:list)->bool:
         """控制机器人手臂的目标轨迹。
@@ -392,7 +429,7 @@ class KuavoRobot(RobotBase):
         Raises:
             ValueError: 如果times列表长度不正确。
             ValueError: 如果关节位置列表长度不正确。
-            ValueError: 如果关节位置超出[-π, π]范围。
+            ValueError: 如果关节位置超出真实物理关节限制范围。
             RuntimeError: 如果在尝试控制手臂时机器人不在stance状态。
 
         Warning:
@@ -401,13 +438,22 @@ class KuavoRobot(RobotBase):
         if len(times) != len(q_frames):
             raise ValueError("Invalid input. times and joint_q must have thesame length.")
 
-        # Check if joint positions are within ±180 degrees (±π radians)
+        # Check if joint positions are within the real physical joint limits
+        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
         q_degs = []
-        for q in q_frames:
-            if any(abs(pos) > math.pi for pos in q):
-                raise ValueError("Joint positions must be within ±π rad (±180 deg)")
+        for frame_idx, q in enumerate(q_frames):
             if len(q) != self._robot_info.arm_joint_dof:
                 raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(q)))
+            
+            # Check each joint position against its real physical limits
+            for joint_idx, pos in enumerate(q):
+                if pos < arm_min[joint_idx] or pos > arm_max[joint_idx]:
+                    raise ValueError(
+                        f"Frame {frame_idx}, Joint {joint_idx} position {pos:.3f} rad exceeds "
+                        f"real physical limit [{arm_min[joint_idx]:.3f}, {arm_max[joint_idx]:.3f}] rad. "
+                        f"This may cause motor stall."
+                    )
+            
             # Convert joint positions from radians to degrees
             q_degs.append([(p * 180.0 / math.pi) for p in q])
 
@@ -433,13 +479,22 @@ class KuavoRobot(RobotBase):
         if len(times) != len(q_frames):
             raise ValueError("Invalid input. times and joint_q must have thesame length.")
 
-        # Check if joint positions are within ±180 degrees (±π radians)
+        # Check if joint positions are within the real physical joint limits
+        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
         q_degs = []
-        for q in q_frames:
-            if any(abs(pos) > math.pi for pos in q):
-                raise ValueError("Joint positions must be within ±π rad (±180 deg)")
+        for frame_idx, q in enumerate(q_frames):
             if len(q) != self._robot_info.arm_joint_dof:
                 raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(q)))
+            
+            # Check each joint position against its real physical limits
+            for joint_idx, pos in enumerate(q):
+                if pos < arm_min[joint_idx] or pos > arm_max[joint_idx]:
+                    raise ValueError(
+                        f"Frame {frame_idx}, Joint {joint_idx} position {pos:.3f} rad exceeds "
+                        f"real physical limit [{arm_min[joint_idx]:.3f}, {arm_max[joint_idx]:.3f}] rad. "
+                        f"This may cause motor stall."
+                    )
+            
             # Convert joint positions from radians to degrees
             q_degs.append([(p * 180.0 / math.pi) for p in q])
 

@@ -111,14 +111,9 @@ if __name__ == '__main__':
     # 一次完整的步态Mode序列为:[SS FS SS SF SS]或者[SS SF SS FS SS]
     # body_pose： [x(m), y(m), z(m), yaw(deg)]
     body_poses = [
-        [0.1, 0.1, 0, -60],
-        [0.1, 0.1, 0, -90],
-        # [0.1, 0.0, 0, -180],
-        # [0.1, 0.1, 0, -180],
-        # [0.2, -0.1, 0, -30],
-        # [0.3, 0.0, 0, -0],
-        # [0.4, 0.0, 0, -30],
-        # [0.5, 0.0, 0, 0],
+        [0.0, -0.0, 0.0, -30],
+        [0.0, -0.0, 0.0, -60],
+        [0.0, -0.0, 0.0, -90],
     ]
     msg = get_multiple_steps_msg(body_poses, dt, is_left_first_default, collision_check)
     pub.publish(msg)

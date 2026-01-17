@@ -1,0 +1,54 @@
+<?xml version="1.0" ?>
+
+<launch>
+      <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+      <!-- The URDF model of the robot -->
+      <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
+      <!-- The task file for the mpc. -->
+      <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
+      <!-- The library folder to generate CppAD codegen into -->
+      <arg name="libFolder"   value="/var/ocs2/kuavo_s$(arg robot_version)" />
+
+      <arg name="rviz"   default="true"/>
+      <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
+
+      <arg name="use_joystick"       default="true"/>
+      <arg name="joystick_type"      default="sim"/>
+
+      <!-- make the files into global parameters -->
+      <param name="taskFile"   value="$(arg taskFile)" />
+      <param name="urdfFile"   value="$(arg urdfFile)" />
+      <param name="libFolder"  value="$(arg libFolder)" />
+      <param name="robot_description" textfile="$(arg urdfFile)"/>
+
+      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_mpc_node" name="mobile_manipulator_mpc_node" 
+            output="screen" launch-prefix="" />
+      
+      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_dummy_mrt_node" name="mobile_manipulator_dummy_mrt_node" 
+            output="screen" launch-prefix="gnome-terminal --" />
+      
+      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_target" name="mobile_manipulator_target" 
+            output="screen" launch-prefix="" />
+      
+      <group if="$(arg use_joystick)">
+        <group if="$(eval arg('joystick_type') == 'h12')">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
+            <arg name="start_way" value="$(arg start_way)"/>
+          </include>
+        </group>
+        <group if="$(eval arg('joystick_type') == 'sim')">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">
+            <arg name="joystick_type" value="$(arg joystick_type)"/>
+          </include>
+        </group>
+        <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+            <arg name="joystick_type" value="$(arg joystick_type)"/>
+          </include>
+          <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
+        </group>
+      </group>
+  
+      <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+      <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)"/>
+</launch>

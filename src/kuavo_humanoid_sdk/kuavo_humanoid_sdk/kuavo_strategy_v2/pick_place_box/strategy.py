@@ -131,6 +131,7 @@ def walk_approach_target_with_perception_loop(
         stand_pose_in_tag: Pose,  # 最終站立位置在目标标签中的位姿
         enable_percep_when_walking: bool,  # 是否在走路时启用感知闭环（边走边看）
         walk_use_cmd_vel: bool = False,  # 是否使用cmd_vel控制走路
+        use_vison = True  # 是否使用视觉闭环
 ):
     """
     走路接近目标，同时视觉闭环。
@@ -145,8 +146,8 @@ def walk_approach_target_with_perception_loop(
     返回：
         Tuple[bool, Tag]: 是否成功接近目标和目标Tag。
     """
-
-    percep_event.open()
+    if use_vison == True:
+        percep_event.open()
     walk_event.open()
 
     walk_event.utils_enable_base_pitch_limit(True)
@@ -159,24 +160,24 @@ def walk_approach_target_with_perception_loop(
     print(f'🔵 目标位置在世界坐标系中的位置: {stand_pose_in_world}')
     walk_event.set_target(stand_pose_in_world)
 
-    percep_event.set_timeout(np.inf)
-    percep_event.set_target(tag.id)
+    if use_vison == True:
+        percep_event.set_timeout(np.inf)
+        percep_event.set_target(tag.id)
 
     # 事件之间的交互逻辑
     while True:
         walk_status = walk_event.step()
-        _ = percep_event.step()  # 更新感知事件状态
-
         if walk_status != EventStatus.RUNNING:
             print("走路事件未在运行状态，退出接近目标位置。")
             break
-
-        if enable_percep_when_walking:
-            if percep_event.new_tag_pose_came():  # 检查是否有新的Tag
-                tag = percep_event.get_tag_in_world()  # 获取目标位置
-                # 转换stand_pose_in_tag到世界坐标系。注意、需要搞清楚tag的坐标定义和机器人的坐标定义
-                stand_pose_in_world = percep_event.transform_pose_from_tag_to_world(tag, stand_pose_in_tag)
-                walk_event.set_target(stand_pose_in_world)
+        if use_vison == True:
+            _ = percep_event.step()  # 更新感知事件状态
+            if enable_percep_when_walking:
+                if percep_event.new_tag_pose_came():  # 检查是否有新的Tag
+                    tag = percep_event.get_tag_in_world()  # 获取目标位置
+                    # 转换stand_pose_in_tag到世界坐标系。注意、需要搞清楚tag的坐标定义和机器人的坐标定义
+                    stand_pose_in_world = percep_event.transform_pose_from_tag_to_world(tag, stand_pose_in_tag)
+                    walk_event.set_target(stand_pose_in_world)
 
         time.sleep(0.1)
 
@@ -218,7 +219,11 @@ def move_arm_and_backward(
         bool: 是否成功完成操作。
     """
     arm_event.open()  # 打开手臂事件
-    if not arm_event.set_target(arm_traj, arm_wrench=arm_wrench, tag=tag):
+    arm_traj1 = [arm_traj[0][0:3], arm_traj[1][0:3]]
+    arm_wrench1 = [arm_wrench[0][0:3], arm_wrench[1][0:3]]
+    arm_traj2 = [arm_traj[0][3:], arm_traj[1][3:]]
+    arm_wrench2 = [arm_wrench[0][3:], arm_wrench[1][3:]]
+    if not arm_event.set_target(arm_traj1, arm_wrench=arm_wrench1, tag=tag):
         print("❌ 设置手臂key point失败")
         return False
 
@@ -234,7 +239,11 @@ def move_arm_and_backward(
 
     print("✅ 已成功移动手臂，开始向后平移...")
     arm_event.close()
-
+    
+    arm_event.open()  # 打开手臂事件
+    if not arm_event.set_target(arm_traj2, arm_wrench=arm_wrench2, tag=tag):
+        print("❌ 设置手臂key point失败")
+        return False
     walk_event.open()
 
     walk_event.utils_enable_base_pitch_limit(False)
@@ -254,7 +263,9 @@ def move_arm_and_backward(
 
     while True:
         walk_status = walk_event.step()
-        if walk_status != EventStatus.RUNNING:
+        arm_status = arm_event.step()  # 同时更新手臂状态
+
+        if walk_status != EventStatus.RUNNING and arm_status != EventStatus.RUNNING:
             break
 
     if walk_status != EventStatus.SUCCESS:
@@ -262,8 +273,76 @@ def move_arm_and_backward(
         walk_event.close()
         return False
 
+    if arm_status != EventStatus.SUCCESS:
+        print("❌ 手臂移动失败，退出策略。")
+        arm_event.close()
+        return False
+
     print("✅ 已成功向后平移，策略完成。")
     walk_event.close()
+    arm_event.close()
+    return True
+
+
+def walk_and_move_arm_together(
+        walk_event: EventWalkToPose,
+        arm_event: EventArmMoveKeyPoint
+        ) -> bool:
+    arm_event.open(control_frame=Frame.BASE)  # 打开手臂事件，设置局部控制
+    # while True:
+    #     print(f'=------ loop opened ------=')
+    left_arm_poses = [
+        Pose.from_euler(pos=(0.0, 0.4, -0.1), euler=(0, 0, 0), degrees=True, frame=Frame.BASE),
+        Pose.from_euler(pos=(0.4, 0.4, 0.1), euler=(0, -90, 0), degrees=True, frame=Frame.BASE),
+    ]
+    right_arm_poses = [
+        Pose.from_euler(pos=(0.0, -0.4, -0.1), euler=(0, 0, 0), degrees=True, frame=Frame.BASE),
+        Pose.from_euler(pos=(0.4, -0.4, 0.1), euler=(0, -90, 0), degrees=True, frame=Frame.BASE),
+    ]
+
+    arm_traj = (left_arm_poses, right_arm_poses)
+
+    if not arm_event.set_target(arm_traj):
+        print("❌ 设置手臂key point失败")
+        return False
+
+    walk_event.open()
+    #
+    walk_event.utils_enable_base_pitch_limit(True)
+
+    walk_event.set_control_mode('cmd_pos_world')  # 使用相对位置控制模式
+    #
+    walk_event.set_target(
+        Pose.from_euler(pos=(3.0, 0., 0.), euler=(0, 0, 0), degrees=True, frame=Frame.ODOM)
+        # Pose(
+        #     pos=(3.0, 0., 0.),  # 向后平移
+        #     quat=(0, 0, 0, 1),  # 保持姿态不变
+        #     frame=Frame.ODOM  # 使用基座坐标系
+        # )
+    )
+
+    while True:
+        walk_status = walk_event.step()
+        arm_status = arm_event.step()  # 同时更新手臂状态
+
+        if walk_status != EventStatus.RUNNING and arm_status != EventStatus.RUNNING:
+            break
+
+    if walk_status != EventStatus.SUCCESS:
+        print("❌ 向后平移失败，退出策略。")
+        # walk_event.close()
+        arm_event.close()
+        return False
+
+    if arm_status != EventStatus.SUCCESS:
+        print("❌ 手臂移动失败，退出策略。")
+        # walk_event.close()
+        arm_event.close()
+        return False
+
+    print("✅ 已成功向后平移，策略完成。")
+    # walk_event.close()
+    arm_event.close()
     return True
 
 
@@ -282,6 +361,7 @@ def grab_box_and_backward(
         force_ratio_z: float,  # 经验系数（根据1.5kg对应5N得出：5/(1.5*9.8)≈0.34
         lateral_force: float,  # 侧向夹持力，单位N
 
+        hand_pitch_degree: float = 0.0,  # 手臂pitch角度（相比水平, 下倾是正），单位度
         walk_use_cmd_vel: bool = False,  # 是否使用cmd_vel控制走路
 ) -> bool:
     """
@@ -313,10 +393,10 @@ def grab_box_and_backward(
         Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
                         frame=Frame.TAG),
         # 3. 抬升点位
-        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag + 0.2, -box_behind_tag), euler=(0, 0, 90),
+        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag + 0.3, -box_behind_tag), euler=(0, 0, 90),
                         degrees=True, frame=Frame.TAG),
         # 4. 收臂点位
-        Pose.from_euler(pos=(0.5, box_width / 2, 0.3), euler=(0, -90, 0), degrees=True, frame=Frame.BASE)]
+        Pose.from_euler(pos=(0.5, box_width / 2, 0.4), euler=(0, -90 + hand_pitch_degree , 0), degrees=True, frame=Frame.BASE)]
 
     pick_right_arm_poses = [
         Pose.from_euler(pos=(box_width*3/2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
@@ -325,10 +405,36 @@ def grab_box_and_backward(
         Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
                         frame=Frame.TAG),
         # 3. 抬升点位
-        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag + 0.2, -box_behind_tag), euler=(0, 0, 90),
+        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag + 0.3, -box_behind_tag), euler=(0, 0, 90),
                         degrees=True, frame=Frame.TAG),
         # 4. 收臂点位
-        Pose.from_euler(pos=(0.5, -box_width / 2, 0.3), euler=(0, -90, 0), degrees=True, frame=Frame.BASE),
+        Pose.from_euler(pos=(0.5, -box_width / 2, 0.4), euler=(0, -90 + hand_pitch_degree , 0), degrees=True, frame=Frame.BASE),
+        ]
+    
+    pickWithWaist_left_arm_poses = [
+        # # 1. 预抓取点位
+        Pose.from_euler(pos=(-box_left_tag, -box_beneath_tag, -box_behind_tag - box_width*3/2), euler=(-90, 0, 90), degrees=True,
+                        frame=Frame.TAG),
+        # 2. 并拢点位
+        Pose.from_euler(pos=(- box_left_tag, -box_beneath_tag, -box_behind_tag - box_width/2), euler=(-90, 0, 90), degrees=True,
+                        frame=Frame.TAG),
+        # 3. 抬升点位
+        Pose.from_euler(pos=(- box_left_tag, -box_beneath_tag + 0.3, -box_behind_tag - box_width/2), euler=(-90, 0, 90),
+                        degrees=True, frame=Frame.TAG),
+        # 4. 收臂点位
+        Pose.from_euler(pos=(0.5, box_width / 2, 0.4), euler=(0, -90 + hand_pitch_degree , 0), degrees=True, frame=Frame.BASE)]
+
+    pickWithWaist_right_arm_poses = [
+        Pose.from_euler(pos=(- box_left_tag, -box_beneath_tag, -box_behind_tag + box_width*3/2), euler=(-90, 0, 90), degrees=True,
+                        frame=Frame.TAG),
+        # 2. 并拢点位
+        Pose.from_euler(pos=(- box_left_tag, -box_beneath_tag, -box_behind_tag + box_width/2), euler=(-90, 0, 90), degrees=True,
+                        frame=Frame.TAG),
+        # 3. 抬升点位
+        Pose.from_euler(pos=(- box_left_tag, -box_beneath_tag + 0.3, -box_behind_tag + box_width/2), euler=(-90, 0, 90),
+                        degrees=True, frame=Frame.TAG),
+        # 4. 收臂点位
+        Pose.from_euler(pos=(0.5, -box_width / 2, 0.4), euler=(0, -90 + hand_pitch_degree , 0), degrees=True, frame=Frame.BASE),
         ]
 
     # ================ 计算每个关键点的力控目标（wrench） ================ #
@@ -404,32 +510,32 @@ def place_box_and_backward(
     # 生成放下箱子的手臂轨迹
     place_left_arm_poses = [
         # 1. 上方点位
-        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag + 0.2, -box_behind_tag), euler=(0, 0, 90),
+        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag + 0.1, -box_behind_tag), euler=(0, 0, 90),
                         degrees=True, frame=Frame.TAG),
         # 2. 并拢点位
-        Pose.from_euler(pos=(-box_width / 2 - box_left_tag + 0.03, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
+        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
                         frame=Frame.TAG),
         # 3. 打开点位
-        Pose.from_euler(pos=(-box_width*3/2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
+        Pose.from_euler(pos=(-box_width*3/2 - 0.1 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
                         frame=Frame.TAG),
 
         # 4. 收臂点位
-        Pose.from_euler(pos=(0.4, 0.4, 0.1), euler=(0, -90, 0), degrees=True, frame=Frame.BASE),
+        Pose.from_euler(pos=(0.4, 0.4, 0.15), euler=(0, -90, 0), degrees=True, frame=Frame.BASE),
     ]
     place_right_arm_poses = [
         # 1. 上方点位
-        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag + 0.2, -box_behind_tag), euler=(0, 0, 90),
+        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag + 0.1, -box_behind_tag), euler=(0, 0, 90),
                         degrees=True,
                         frame=Frame.TAG),
         # 2. 并拢点位
-        Pose.from_euler(pos=(box_width / 2 - box_left_tag - 0.03, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
+        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
                         frame=Frame.TAG),
         # 3. 打开点位
-        Pose.from_euler(pos=(box_width*3/2 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
+        Pose.from_euler(pos=(box_width*3/2 + 0.1 - box_left_tag, -box_beneath_tag, -box_behind_tag), euler=(0, 0, 90), degrees=True,
                         frame=Frame.TAG),
 
         # 4. 收臂点位
-        Pose.from_euler(pos=(0.4, -0.4, 0.1), euler=(0, -90, 0), degrees=True, frame=Frame.BASE),
+        Pose.from_euler(pos=(0.4, -0.4, 0.15), euler=(0, -90, 0), degrees=True, frame=Frame.BASE),
     ]  # 手臂关键点数据，假设为空列表
 
 

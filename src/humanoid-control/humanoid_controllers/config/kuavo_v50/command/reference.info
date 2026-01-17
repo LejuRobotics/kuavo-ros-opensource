@@ -1,12 +1,19 @@
 targetDisplacementVelocity          0.5;
 targetRotationVelocity              0.3;
 cmdvelLinearXLimit                  0.4;
+cmdvelLinearYLimit                  0.2;
 cmdvelAngularYAWLimit               0.4;
 armMode                             true; 
 
 targetArmDisplacementVelocity       1.2;
 
 comHeight                           0.78
+
+; VR control limits
+vrSquatMinPitchDeg                  3.0;     ; min pitch (deg)
+vrSquatMaxPitchDeg                  35.0;    ; max pitch (deg)
+vrSquatHeightMin                    -0.25;   ; min height (m)
+vrSquatHeightMax                    0.1;     ; max height (m)
 
 targetTorsoDispalcementVelocity
 {
@@ -102,21 +109,23 @@ defaultCotrolMode
    (10,0)   0     ; leg_r5_joint
    (11,0)   0     ; leg_r6_joint
 
-   (12,0)   2    ; zarm_l1_joint
-   (13,0)   2    ; zarm_l2_joint
-   (14,0)   2    ; zarm_l3_joint
-   (15,0)   2    ; zarm_l4_joint
-   (16,0)   2    ; zarm_l5_joint
-   (17,0)   2    ; zarm_l6_joint
-   (18,0)   2    ; zarm_l7_joint
+   (12,0)   2     ; waist_yaw
 
-   (19,0)   2    ; zarm_r1_joint
-   (20,0)   2    ; zarm_r2_joint
-   (21,0)   2    ; zarm_r3_joint
-   (22,0)   2    ; zarm_r4_joint
-   (23,0)   2    ; zarm_r5_joint
-   (24,0)   2    ; zarm_r6_joint
-   (25,0)   2    ; zarm_r7_joint
+   (13,0)   2     ; zarm_l1_joint
+   (14,0)   2     ; zarm_l2_joint
+   (15,0)   2     ; zarm_l3_joint
+   (16,0)   2     ; zarm_l4_joint
+   (17,0)   2     ; zarm_l5_joint
+   (18,0)   2     ; zarm_l6_joint
+   (19,0)   2     ; zarm_l7_joint
+
+   (20,0)   2     ; zarm_r1_joint
+   (21,0)   2     ; zarm_r2_joint
+   (22,0)   2     ; zarm_r3_joint
+   (23,0)   2     ; zarm_r4_joint
+   (24,0)   2     ; zarm_r5_joint
+   (25,0)   2     ; zarm_r6_joint
+   (26,0)   2     ; zarm_r7_joint
   
 };
 
@@ -135,20 +144,22 @@ joint_kp_
    (10,0)  7.71   ; leg_r5_joint
    (11,0)  7.71   ; leg_r6_joint
 
-   (12,0)  0.0   ; zarm_l1_joint
-   (13,0)  0.0   ; zarm_l2_joint
-   (14,0)  0.0   ; zarm_l3_joint
-   (15,0)  0.0   ; zarm_l4_joint
-   (16,0)  0.0   ; zarm_l5_joint
-   (17,0)  0.0   ; zarm_l6_joint
-   (18,0)  0.0   ; zarm_l7_joint
-   (19,0)  0.0   ; zarm_r1_joint
-   (20,0)  0.0   ; zarm_r2_joint
-   (21,0)  0.0   ; zarm_r3_joint
-   (22,0)  0.0   ; zarm_r4_joint
-   (23,0)  0.0   ; zarm_r5_joint
-   (24,0)  0.0   ; zarm_r6_joint
-   (25,0)  0.0   ; zarm_r7_joint
+   (12,0)  4.3     ; waist_yaw
+
+   (13,0)  0.0   ; zarm_l1_joint
+   (14,0)  0.0   ; zarm_l2_joint
+   (15,0)  0.0   ; zarm_l3_joint
+   (16,0)  0.0   ; zarm_l4_joint
+   (17,0)  0.0   ; zarm_l5_joint
+   (18,0)  0.0   ; zarm_l6_joint
+   (19,0)  0.0   ; zarm_l7_joint
+   (20,0)  0.0   ; zarm_r1_joint
+   (21,0)  0.0   ; zarm_r2_joint
+   (22,0)  0.0   ; zarm_r3_joint
+   (23,0)  0.0   ; zarm_r4_joint
+   (24,0)  0.0   ; zarm_r5_joint
+   (25,0)  0.0   ; zarm_r6_joint
+   (26,0)  0.0   ; zarm_r7_joint
     
 };350.0, 350.0, 300.0, 400.0, 1.0, 10.0, 350.0, 350.0, 300.0, 400.0, 1.0, 10.0
 
@@ -167,20 +178,22 @@ joint_kd_
    (10,0)  1.53   ; leg_r5_joint
    (11,0)  1.53   ; leg_r6_joint
 
-   (12,0)  0.0   ; zarm_l1_joint
-   (13,0)  0.0   ; zarm_l2_joint
-   (14,0)  0.0   ; zarm_l3_joint
-   (15,0)  0.0   ; zarm_l4_joint
-   (16,0)  0.0   ; zarm_l5_joint
-   (17,0)  0.0   ; zarm_l6_joint
-   (18,0)  0.0   ; zarm_l7_joint
-   (19,0)  0.0   ; zarm_r1_joint
-   (20,0)  0.0   ; zarm_r2_joint
-   (21,0)  0.0   ; zarm_r3_joint
-   (22,0)  0.0   ; zarm_r4_joint
-   (23,0)  0.0   ; zarm_r5_joint
-   (24,0)  0.0   ; zarm_r6_joint
-   (25,0)  0.0   ; zarm_r7_joint
+   (12,0)  3.0     ; waist_yaw
+
+   (13,0)  0.0   ; zarm_l1_joint
+   (14,0)  0.0   ; zarm_l2_joint
+   (15,0)  0.0   ; zarm_l3_joint
+   (16,0)  0.0   ; zarm_l4_joint
+   (17,0)  0.0   ; zarm_l5_joint
+   (18,0)  0.0   ; zarm_l6_joint
+   (19,0)  0.0   ; zarm_l7_joint
+   (20,0)  0.0   ; zarm_r1_joint
+   (21,0)  0.0   ; zarm_r2_joint
+   (22,0)  0.0   ; zarm_r3_joint
+   (23,0)  0.0   ; zarm_r4_joint
+   (24,0)  0.0   ; zarm_r5_joint
+   (25,0)  0.0   ; zarm_r6_joint
+   (26,0)  0.0   ; zarm_r7_joint
     
 };10.0, 10.0, 10.0, 10.0, 0.1, 1, 10.0, 10.0, 10.0, 10.0, 0.1, 1
 
@@ -211,20 +224,22 @@ joint_kp_walking_
    (10,0)  7.71   ; leg_r5_joint
    (11,0)  7.71   ; leg_r6_joint
 
-   (12,0)  0.0   ; zarm_l1_joint
-   (13,0)  0.0   ; zarm_l2_joint
-   (14,0)  0.0   ; zarm_l3_joint
-   (15,0)  0.0   ; zarm_l4_joint
-   (16,0)  0.0   ; zarm_l5_joint
-   (17,0)  0.0   ; zarm_l6_joint
-   (18,0)  0.0   ; zarm_l7_joint
-   (19,0)  0.0   ; zarm_r1_joint
-   (20,0)  0.0   ; zarm_r2_joint
-   (21,0)  0.0   ; zarm_r3_joint
-   (22,0)  0.0   ; zarm_r4_joint
-   (23,0)  0.0   ; zarm_r5_joint
-   (24,0)  0.0   ; zarm_r6_joint
-   (25,0)  0.0   ; zarm_r7_joint
+   (12,0)  4.3     ; waist_yaw
+
+   (13,0)  0.0   ; zarm_l1_joint
+   (14,0)  0.0   ; zarm_l2_joint
+   (15,0)  0.0   ; zarm_l3_joint
+   (16,0)  0.0   ; zarm_l4_joint
+   (17,0)  0.0   ; zarm_l5_joint
+   (18,0)  0.0   ; zarm_l6_joint
+   (19,0)  0.0   ; zarm_l7_joint
+   (20,0)  0.0   ; zarm_r1_joint
+   (21,0)  0.0   ; zarm_r2_joint
+   (22,0)  0.0   ; zarm_r3_joint
+   (23,0)  0.0   ; zarm_r4_joint
+   (24,0)  0.0   ; zarm_r5_joint
+   (25,0)  0.0   ; zarm_r6_joint
+   (26,0)  0.0   ; zarm_r7_joint
     
 };{120.0, 120.0, 120.0, 120.0, 1.5, 1.5, 120.0, 120.0, 120.0, 120.0, 1.5, 1.5};
 
@@ -243,20 +258,22 @@ joint_kd_walking_
    (10,0)  1.53   ; leg_r5_joint
    (11,0)  1.53   ; leg_r6_joint
 
-   (12,0)  0.2   ; zarm_l1_joint
-   (13,0)  0.2   ; zarm_l2_joint
-   (14,0)  0.2   ; zarm_l3_joint
-   (15,0)  0.2   ; zarm_l4_joint
-   (16,0)  0.2   ; zarm_l5_joint
-   (17,0)  0.2   ; zarm_l6_joint
-   (18,0)  0.2   ; zarm_l7_joint
-   (19,0)  0.2   ; zarm_r1_joint
-   (20,0)  0.2   ; zarm_r2_joint
-   (21,0)  0.2   ; zarm_r3_joint
-   (22,0)  0.2   ; zarm_r4_joint
-   (23,0)  0.2   ; zarm_r5_joint
-   (24,0)  0.2   ; zarm_r6_joint
-   (25,0)  0.2   ; zarm_r7_joint
+   (12,0)  3.0     ; waist_yaw
+
+   (13,0)  0.2   ; zarm_l1_joint
+   (14,0)  0.2   ; zarm_l2_joint
+   (15,0)  0.2   ; zarm_l3_joint
+   (16,0)  0.2   ; zarm_l4_joint
+   (17,0)  0.2   ; zarm_l5_joint
+   (18,0)  0.2   ; zarm_l6_joint
+   (19,0)  0.2   ; zarm_l7_joint
+   (20,0)  0.2   ; zarm_r1_joint
+   (21,0)  0.2   ; zarm_r2_joint
+   (22,0)  0.2   ; zarm_r3_joint
+   (23,0)  0.2   ; zarm_r4_joint
+   (24,0)  0.2   ; zarm_r5_joint
+   (25,0)  0.2   ; zarm_r6_joint
+   (26,0)  0.2   ; zarm_r7_joint
     
 };{4.0, 4.0, 4.0, 4.0, 0.1, 0.1, 4.0, 4.0, 4.0, 4.0, 0.1, 0.1};
 
@@ -273,21 +290,21 @@ standBaseState
 standJointState
 {
    ;; Arm Joint Positions:  ;;
-   (0,0)   -0.29374    ; zarm_l1_joint
-   (1,0)   0.0089      ; zarm_l2_joint
-   (2,0)   -0.0008     ; zarm_l3_joint
-   (3,0)   -0.1157     ; zarm_l4_joint
-   (4,0)   -0.0005     ; zarm_l5_joint
-   (5,0)   -0.0002     ; zarm_l6_joint
-   (6,0)   -0.0002     ; zarm_l7_joint
+   (0,0)   0.075    ; zarm_l1_joint
+   (1,0)   0.0      ; zarm_l2_joint
+   (2,0)   0.0      ; zarm_l3_joint
+   (3,0)   -0.4     ; zarm_l4_joint
+   (4,0)   0.0      ; zarm_l5_joint
+   (5,0)   0.0      ; zarm_l6_joint
+   (6,0)   0.0      ; zarm_l7_joint
 
-   (7,0)   -0.29376    ; zarm_r1_joint
-   (8,0)    0.0389     ; zarm_r2_joint
-   (9,0)   -0.0027     ; zarm_r3_joint
-   (10,0)  -0.1156     ; zarm_r4_joint
-   (11,0)   0.0008     ; zarm_r5_joint
-   (12,0)   0.0004     ; zarm_r6_joint
-   (13,0)   0.0061     ; zarm_r7_joint
+   (7,0)   0.075    ; zarm_r1_joint
+   (8,0)   0.0      ; zarm_r2_joint
+   (9,0)   0.0      ; zarm_r3_joint
+   (10,0)  -0.4     ; zarm_r4_joint
+   (11,0)  0.0      ; zarm_r5_joint
+   (12,0)  0.0      ; zarm_r6_joint
+   (13,0)  0.0      ; zarm_r7_joint
 }
 
 squatBaseState

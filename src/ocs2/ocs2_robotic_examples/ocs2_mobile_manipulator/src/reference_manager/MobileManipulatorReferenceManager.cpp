@@ -7,7 +7,7 @@ namespace mobile_manipulator {
   : ReferenceManager(TargetTrajectories(), ModeSchedule())
   , info_(info)
   {
-    baseStateDim_ = info_.stateDim - info_.armDim;
+    baseStateDim_ = info_.stateDim - info_.armDim - info_.waistDim;
     Q_ = matrix_t::Zero(info_.stateDim, info_.stateDim);
     // std::cout << "Q matrix is: \n" << Q_ << std::endl;
     R_ = matrix_t::Zero(info_.inputDim, info_.inputDim);

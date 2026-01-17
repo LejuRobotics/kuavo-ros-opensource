@@ -8,7 +8,7 @@
 
 import rospy
 import math
-from std_msgs.msg import Float64MultiArray
+from kuavo_msgs.msg import robotWaistControl
 import time
 from kuavo_msgs.msg import footPose, footPoseTargetTrajectories, switchGaitByName  # 导入自定义消息类型
 from sat import RotatingRectangle  # 导入用于碰撞检测的工具类
@@ -199,7 +199,7 @@ class WaistRotationWhileWalking:
 
         self.single_step_control = SingleStepControl()
         # 创建腰部控制发布者
-        self.waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=10)
+        self.waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=10)
 
         # 等待节点初始化
         rospy.sleep(1.0)
@@ -216,8 +216,9 @@ class WaistRotationWhileWalking:
         waist_angle = 45
 
         # 腰部恢复为 0
-        waist_msg = Float64MultiArray()
-        waist_msg.data = [0]
+        waist_msg = robotWaistControl()
+        waist_msg.header.stamp = rospy.Time.now()
+        waist_msg.data.data = [0]
         self.waist_pub.publish(waist_msg)
 
         # 等待3秒
@@ -244,14 +245,16 @@ class WaistRotationWhileWalking:
 
                 waist_angle = -waist_angle
                 # 发布腰部控制消息
-                waist_msg.data = [waist_angle]
+                waist_msg.header.stamp = rospy.Time.now()
+                waist_msg.data.data = [waist_angle]
                 self.waist_pub.publish(waist_msg)
 
             rate.sleep()
 
         # 重置腰部到中间位置
-        waist_msg = Float64MultiArray()
-        waist_msg.data = [0.0]
+        waist_msg = robotWaistControl()
+        waist_msg.header.stamp = rospy.Time.now()
+        waist_msg.data.data = [0.0]
         self.waist_pub.publish(waist_msg)
 
         rospy.loginfo("演示完成！")

@@ -56,6 +56,13 @@ Examples demonstrating how to use forward kinematics (FK) to compute end-effecto
 .. literalinclude:: ../../examples/atomic_skills/arm_ik_example.py
   :language: python
 
+Arm Control (Protected)
+======================
+Examples showing how to control the robot's arm movements with collision protection.
+
+.. literalinclude:: ../../examples/atomic_skills/ctrl_arm_example_protected.py
+  :language: python
+
 Head Control
 =============
 Examples showing how to control the robot's head movements, including nodding (pitch) and shaking (yaw) motions.

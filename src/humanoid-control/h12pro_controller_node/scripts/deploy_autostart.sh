@@ -29,7 +29,7 @@ else
 fi
 
 while true; do
-    echo "请选择控制方案 (1: ocs2, 2: rl)。若为 rl，请先修改 ROBOT_VERSION=46，并将正确的仓库路径修改在脚本中，再运行该脚本:"
+    echo "请选择控制方案 (1: ocs2, 2: rl, 3: multi)。若为 rl，请先修改 ROBOT_VERSION=46，并将正确的仓库路径修改在脚本中，再运行该脚本:"
     read -r user_input
     if [ "$user_input" = "1" ]; then
         KUAVO_CONTROL_SCHEME=ocs2
@@ -39,8 +39,12 @@ while true; do
         KUAVO_CONTROL_SCHEME=rl
         echo "已选择: rl"
         break
+    elif [ "$user_input" = "3" ]; then
+        KUAVO_CONTROL_SCHEME=multi
+        echo "已选择: multi"
+        break
     else
-        echo "输入无效，请输入1或2。"
+        echo "输入无效，请输入1、2或3。"
     fi
 done
 
@@ -56,6 +60,7 @@ NOITOM_HI5_HAND_UDP_PYTHON=$KUAVO_ROS_CONTROL_WS_PATH/src/manipulation_nodes/noi
 KUAVO_REMOTE_PATH=$(dirname $SCRIPT_DIR)/lib/kuavo_remote
 ROBOT_VERSION=$ROBOT_VERSION
 INSTALLED_DIR=$KUAVO_ROS_CONTROL_WS_PATH/installed
+RL_INSTALLED_DIR=$KUAVO_RL_WS_PATH/installed
 cd $H12PRO_CONTROLLER_NODE_DIR
 pip3 install -r requirements.txt
 pip3 install -r $NOITOM_HI5_HAND_UDP_PYTHON/requirements.txt
@@ -67,10 +72,16 @@ echo "KUAVO_REMOTE_PATH: $KUAVO_REMOTE_PATH"
 
 if [ "$KUAVO_CONTROL_SCHEME" = "rl" ]; then
     cd $KUAVO_RL_WS_PATH
+    catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release
+    if [ -d "$RL_INSTALLED_DIR" ] && [ -f "$RL_INSTALLED_DIR/setup.bash" ]; then
+        echo "Sourcing existing installation..."
+        source $RL_INSTALLED_DIR/setup.bash
+    fi
     catkin build humanoid_controllers
 fi
 
 cd $KUAVO_ROS_CONTROL_WS_PATH
+catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release
 if [ -d "$INSTALLED_DIR" ] && [ -f "$INSTALLED_DIR/setup.bash" ]; then
     echo "Sourcing existing installation..."
     source $INSTALLED_DIR/setup.bash
@@ -88,6 +99,27 @@ else
   sudo chmod +x creat_remote_udev_rule.sh
   sudo ./creat_remote_udev_rule.sh
 fi
+
+while true; do
+    echo "是否需要加载遥控器查看 log 使用串口的 udev 规则？确认有接线才可以使用。(y/n): "
+    read -r load_h12_log_channel
+    if [[ "$load_h12_log_channel" == "y" || "$load_h12_log_channel" == "Y" ]]; then
+        if ls /dev | grep H12_log_channel; then
+            echo "遥控器设备文件已存在，无需加载规则。"
+        else
+            echo "正在加载遥控器 udev 规则..."
+            cd $SCRIPT_DIR
+            sudo chmod +x load_h12_log_serial_rule.sh
+            sudo ./load_h12_log_serial_rule.sh                        
+        fi
+        break
+    elif [[ "$load_h12_log_channel" == "n" || "$load_h12_log_channel" == "N" ]]; then
+        echo "跳过加载遥控器 udev 规则。"
+        break
+    else
+        echo "输入无效，请输入 y 或 n。"
+    fi
+done
 
 echo "Current robot version: $ROBOT_VERSION"
 

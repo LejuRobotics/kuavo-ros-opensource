@@ -83,3 +83,28 @@ public:
     bool operator<(const RobotVersion &other) const;
     friend std::ostream &operator<<(std::ostream &os, const RobotVersion &version);
 };
+
+
+/************************************************/
+/* Leju Legged Humanoid​ Robots                 */
+/***********************************************/
+// Kuavo
+#define IS_KUAVO_LEGGED(rb) (rb.major() == 4 || rb.major() == 5)
+#define IS_KUAVO4_LEGGED(rb) (rb.major() == 4) 
+#define IS_KUAVO5_LEGGED(rb) (rb.major() == 5)
+#define IS_KUAVO4PRO_LEGGED(rb) (rb.major() == 4 && (rb.minor() >= 5)) /* 45^, 46^, 47^, 48^, 49^ */
+
+// Roban
+#define IS_ROBAN_LEGGED(rb) (rb.major() == 1)
+#define IS_ROBAN2_LEGGED(rb) (rb.major() == 1)
+
+////////////////////////////////////////////////////
+
+/************************************************/
+/* Leju Wheeled Humanoid​ Robots                 */
+/***********************************************/
+#define IS_KUAVO_WHEELED(rb) (rb.major() == 6)
+
+
+#define IS_KUAVO(rb) (IS_KUAVO_LEGGED(rb) || IS_KUAVO_WHEELED(rb))
+#define IS_ROBAN(rb) (IS_ROBAN_LEGGED(rb))

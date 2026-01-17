@@ -130,6 +130,20 @@ add_message_files(
 
   MmDetectionMsg.msg
   AudioReceiverData.msg
+
+  Color.msg
+
+  # Face detection bounding box
+  FaceBoundingBox.msg
+  AudioPlaybackStatus.msg
+
+  mpc_target_trajectories.msg
+  mpc_state.msg
+  mpc_input.msg
+
+  robotWaistControl.msg
+  # VMP Controller
+  VMPTrajectoryState.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -138,6 +152,9 @@ add_service_files(
   jointMoveTo.srv
   setHwIntialState.srv
   changeArmCtrlMode.srv
+  switchController.srv
+  getControllerList.srv
+  switchToNextController.srv
   singleStepControl.srv
   changeTorsoCtrlMode.srv
   setMotorEncoderRoundService.srv
@@ -171,6 +188,9 @@ add_service_files(
   twoArmHandPoseCmdFreeSrv.srv
   changeArmCtrlModeKuavo.srv
   fkSrv.srv
+  lbBaseLinkPoseCmdSrv.srv
+  lbLegControlSrv.srv
+  chassisPoseCmdSrv.srv
 
   SpeechSynthesis.srv
   setMmCtrlFrame.srv
@@ -183,8 +203,16 @@ add_service_files(
   SetLEDMode_free.srv
   # kuavo_tf2_web_republisher
   RepublishTFs.srv
+  stairAlignmentSrv.srv
 
   twoArmHandPoseCmdFreeSrv.srv
+  goToZeroPoint.srv
+  robotSwitchPose.srv
+
+  # Lb quick mode
+  changeLbQuickModeSrv.srv
+  SetString.srv
+  GetStringList.srv
 )
 
 ## Generate actions in the 'action' folder

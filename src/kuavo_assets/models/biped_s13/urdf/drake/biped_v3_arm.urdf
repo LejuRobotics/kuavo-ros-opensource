@@ -6,22 +6,6 @@
 <robot name="biped_v3_arm" xmlns:drake="https://drake.mit.edu">
   <link name="torso">
     <inertial>
-      <origin xyz="0.00227055 6.536e-05 0.1163574" rpy="0 0 0" />
-      <mass value="7.34228758" />
-      <inertia ixx="0.06356019" ixy="-4.28e-05" ixz="0.00087983" iyy="0.05314952" iyz="1.365e-05" izz="0.03434989" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/torso.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <link name="waist">
-    <inertial>
       <origin xyz="0.0016929 2.043e-05 -0.11846153" rpy="0 0 0" />
       <mass value="5.17438719" />
       <inertia ixx="0.02255479" ixy="4.3e-05" ixz="-6.6e-05" iyy="0.01532956" iyz="1.7e-05" izz="0.0166717" />
@@ -36,10 +20,26 @@
       </material>
     </visual>
   </link>
-  <joint name="waist" type="fixed">
+  <link name="waist_yaw_link">
+    <inertial>
+      <origin xyz="0.00227055 6.536e-05 0.1163574" rpy="0 0 0" />
+      <mass value="7.34228758" />
+      <inertia ixx="0.06356019" ixy="-4.28e-05" ixz="0.00087983" iyy="0.05314952" iyz="1.365e-05" izz="0.03434989" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../meshes/torso.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_yaw_joint" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="torso" />
-    <child link="waist" />
+    <child link="waist_yaw_link" />
     <axis xyz="0 0 1" />
     <limit lower="-2.0943951023932" upper="2.0943951023932" effort="50" velocity="8.37333333333333" />
   </joint>
@@ -62,7 +62,7 @@
   </link>
   <joint name="zarm_l1_joint" type="revolute">
     <origin xyz="0.0073474151 0.16250437899999998 0.20242688398" rpy="0 0 0" />
-    <parent link="torso" />
+    <parent link="waist_yaw_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="0.0" effort="12" velocity="7.32666666666667" />
@@ -170,7 +170,7 @@
   </link>
   <joint name="zarm_r1_joint" type="revolute">
     <origin xyz="0.0073474151 -0.16250437899999998 0.20242688398" rpy="0 0 0" />
-    <parent link="torso" />
+    <parent link="waist_yaw_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="0.0" effort="12" velocity="7.32666666666667" />

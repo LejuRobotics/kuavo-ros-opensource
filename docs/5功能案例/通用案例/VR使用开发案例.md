@@ -107,15 +107,15 @@
 
 ### 使用
 - 若您的机器末端执行器为夹爪
-  - 检查下位机本地的`<kuavo-ros-opensource>/src/kuavo_assets/config/kuavo_v$ROBOT_VERSION/kuavo.json`这个文件
+  - 检查下位机本地的`/home/lab/kuavo-ros-opensource/src/kuavo_assets/config/kuavo_v$ROBOT_VERSION/kuavo.json`这个文件
     - 找到`"EndEffectorType": ["qiangnao", "qiangnao"],`这一行
     - 将其修改为`"EndEffectorType": ["lejuclaw", "lejuclaw"],`(若已为"lejuclaw"则不需要修改)
 
-  - 检查下位机本地的`<kuavo-ros-opensource>/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch`这个文件
+  - 检查下位机本地的`/home/lab/kuavo-ros-opensource/src/manipulation_nodes/noitom_hi5_hand_udp_python/launch/launch_quest3_ik.launch`这个文件
     - 找到`<arg name="ee_type" default="qiangnao"/>`这一行
     - 将其修改为`<arg name="ee_type" default="lejuclaw"/>`(若已为"lejuclaw"则不需要修改)
 
-  - 检查下位机本地的`<kuavo-ros-opensource>/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch`这个文件
+  - 检查下位机本地的`/home/lab/kuavo-ros-opensource/src/humanoid-control/humanoid_controllers/launch/load_kuavo_real_with_vr.launch`这个文件
     - 找到`<arg name="ee_type" default="qiangnao"/>`这一行
     - 将其修改为`<arg name="ee_type" default="lejuclaw"/>`(若已为"lejuclaw"则不需要修改)
 
@@ -129,17 +129,24 @@
   
   ```bash
    source devel/setup.bash
-
+  
    # VR先和机器人连到同一局域网, VR 会广播 自身IP 到局域网中
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch
+
+   # 可选配置参数：use_cpp_ik
+   # 启动python版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=false
+
+   # 启动C++版本的ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true
+
+   # 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true use_incremental_ik:=true
   ```
 
   > 如果手动输入VR的IP地址, 在启动命令后追加参数 `ip_address:=192.168.3.32`(替换成VR的实际IP地址)
 
   > 现在 VR 头盔中的 APP 会自动广播自身IP，启动节点不需要手动输入 ip，但是假如 VR 节点程序关掉了，你需要在 VR 头盔中重新打开 VR 程序，才会重新广播IP
-
-
-  > 如果希望同时映射躯干的运动（上下蹲和弯腰），可以增加选项`control_torso:=1`，使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度。**注意：不能长时间执行蹲下和弯腰动作，且在执行躯干运动时幅度不宜过大**
 
   > 启动程序之后，将手柄放置视野外，会触发启动VR中的手势识别功能，手臂跟随模式下可以控制机器人手臂和手指跟随运动，这时要注意避免视角中出现多个检测目标（多双手），手势检测效果如下图：
 
@@ -147,7 +154,7 @@
 
   > 默认控制双手，如果需要控制单手，可以增加选项`ctrl_arm_idx:=0`, 其中0，1，2分别对应左手，右手，双手
   - 参考[参考机器人VR控制教程](../../2快速开始/快速开始.md)
-  
+
   > 开启手势识别，可以增加选项 `predict_gesture:=true`，利用神经网络预测手势，灵巧手会直接根据手势预测结果进行运动，目前支持的手势有（只有当预测结果同时满足：高置信度（>80%）明显优于第二预测（差值>0.3）预测分布集中（熵值<0.8）才会返回具体的手势类别。否则会认为预测失败，灵巧手会采用原来的方式控制）
   - 参考[灵巧手手势使用案例](灵巧手手势使用案例.md)
 - 同时启动VR节点和机器人
@@ -158,6 +165,34 @@
   roslaunch humanoid_controllers load_kuavo_real_with_vr.launch
   ```
 
+- 躯干映射  
+
+  - 运行  
+
+  >  首先需要在launch文件启动时增加参数`control_torso:=true`
+
+  ```bash
+    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_adress:=填入VRip control_torso:=true
+  ```
+
+  > vr程序启动后，按下A键站立，长按左右前扳机将手部解锁，随后按下左前扳机+B进入躯干映射模式，此时操控人员可以进行下蹲和前后倾斜鞠躬。使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度。**注意：不能长时间执行蹲下和弯腰动作，且在执行躯干运动时幅度不宜过大**
+
+- 低延迟模式  
+
+  > 在有线模式下建议使用建议使用低时延模式，可以实现更快速的动作  
+
+  - 使用前准备
+
+  > 参考[有线vr使用教程](../../6常用工具/有线VR方案使用指南.md)，**注意网线和vr的转接线头如果是usb口的话必须使用usb3.0的转接口，否则路由器可能会识别不到VR设备**，随后在路由器的后台查看VR设备的ip地址- 运行 
+
+  - 运行 
+
+  ```bash
+  roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=vr有线ip 
+  ```
+
+  > vr程序启动后，同时按下左边前扳机+X，开启低时延模式；按下左边侧扳机+X，关闭低时延模式
+
 ### QUEST3 视频流
 
 本程序可以将上位机的摄像头画面传输到 VR 设备中显示。具体设置步骤如下：
@@ -165,7 +200,7 @@
 1. 在上位机（带有摄像头的设备）上安装依赖：
 - 需要克隆下位机kuavo-ros-opensource仓库，然后配置依赖：
   ```bash
-  cd <kuavo-ros-opensource>
+  cd /home/lab/kuavo-ros-opensource
   sudo apt install v4l-utils
   sudo su
   python3 -m pip install aiortc==1.9.0
@@ -180,7 +215,7 @@ sudo apt install libv4l-dev
 ```
 - 在上位机运行：
    ```bash
-   cd <kuavo_ros_application>/
+   cd ~/kuavo_ros_application/
    source devel/setup.bash
   # 打开摄像头
   # 旧版4代, 4Pro
@@ -189,9 +224,9 @@ sudo apt install libv4l-dev
   roslaunch dynamic_biped load_robot_head.launch use_orbbec:=true
   # Max版
   roslaunch dynamic_biped load_robot_head.launch use_orbbec:=true enable_wrist_camera:=true
-    ```
-   
-- 在下位机运行：
+  ```
+  
+- 在下位机运行(下位机仓库版本>1.2.1)：
    ```bash
    # 下面程序已经启动了VR控制程序，请勿重复遥控器启动
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_robot_camera.launch # ip_adress:=填入VR IP地址
@@ -248,3 +283,17 @@ sudo apt install libv4l-dev
 - ⚠️ 确保USB线支持数据传输（部分充电线不支持数据传输）
 - 💡 安装成功后会显示"Success"提示
 - 💡 如果adb一直显示"waiting for device"，检查VR设备是否已授权USB调试
+
+# CPP版本IK使用说明（测试版）
+## 仿真
+```bash
+roslaunch motion_capture_ik ik_ros_uni_cpp_vr_mujoco_sim.launch ip_address:="your_quest3_ip"
+# 例如
+# roslaunch motion_capture_ik ik_ros_uni_cpp_vr_mujoco_sim.launch ip_address:=10.10.20.234
+```
+## 实物
+```bash
+roslaunch motion_capture_ik ik_ros_uni_cpp_vr_real.launch ip_address:="your_quest3_ip"
+# 例如
+# roslaunch motion_capture_ik ik_ros_uni_cpp_vr_real.launch ip_address:=10.10.20.234
+```

@@ -2,7 +2,7 @@
 import numpy as np
 import rospy
 from ocs2_msgs.msg import mpc_observation
-from std_msgs.msg import Float64MultiArray
+from kuavo_msgs.msg import robotWaistControl
 from ocs2_msgs.msg import mpc_target_trajectories, mpc_state, mpc_input  #发布的消息类型
 import time
 
@@ -19,10 +19,11 @@ class MPCObservationSubscriber:
         self.target_angle_rad = value
         
         # 创建目标轨迹消息
-        self.msg = Float64MultiArray()
+        self.msg = robotWaistControl()
+        self.msg.header.stamp = rospy.Time.now()
 
         # 设置时间轨迹（基于观测时间）
-        self.msg.data = [self.target_angle_rad]
+        self.msg.data.data = [self.target_angle_rad]
 
         self.pub.publish(self.msg)
         time.sleep(2)   #等待运动结束
@@ -33,7 +34,7 @@ class MPCObservationSubscriber:
         except ValueError:
             return False
     def waist_publish(self):
-        self.pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=10)
+        self.pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=10)
         user_input = 0
         print("按q退出") 
         while not rospy.is_shutdown():

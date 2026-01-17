@@ -1,8 +1,11 @@
 <launch>
     <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
     <arg name="visualize" default="false"/>
-    <arg name="model_path" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/drake/biped_v3_arm.urdf"/>
-    <arg name="model_path_vis" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
+    <!-- Handle version 15 special case: use version 14 model -->
+    <arg name="model_path" default="$(find kuavo_assets)/models/biped_s14/urdf/drake/biped_v3_arm.urdf" if="$(eval arg('robot_version') == 15)"/>
+    <arg name="model_path" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/drake/biped_v3_arm.urdf" unless="$(eval arg('robot_version') == 15)"/>
+    <arg name="model_path_vis" default="$(find kuavo_assets)/models/biped_s14/urdf/biped_s14.urdf" if="$(eval arg('robot_version') == 15)"/>
+    <arg name="model_path_vis" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" unless="$(eval arg('robot_version') == 15)"/>
     <arg name="control_hand_side" default="2"/> <!-- 0: left, 1: right, 2: both -->
     <arg name="print_ik_info"     default="false"/>
     <param name="model_path" value="$(arg model_path)"/>
@@ -10,13 +13,20 @@
     <param name="control_hand_side" value="$(arg control_hand_side)"/>
     <param name="print_ik_info"     value="$(arg print_ik_info)"/>
 
+    <!-- 手臂IK节点 -->
     <node name="arms_ik_node" pkg="motion_capture_ik" type="arms_ik_node" output="screen"/>
+
+    <!-- 轮臂腿部IK服务节点 -->
+    <!-- <node name="leg_ik_service_node" pkg="motion_capture_ik" type="leg_ik_service_node.py" 
+          args="$(find motion_capture_ik)/scripts/ik/leg_ik_service_node.py" output="screen">
+        <param name="debug_mode" value="true"/>
+    </node> -->
 
     <!-- visualize the robot in rviz -->
     <group if="$(arg visualize)">    
         <node name="visulize_traj_node" pkg="motion_capture_ik" type="visulize_traj.py" output="screen"/>
         <arg name="model" />
-        <param name="robot_description" textfile="$(arg model_path_vis)" />
+        <param name="robot_description" textfile="$(arg model_path)" />
         <!-- <node name="joint_state_publisher_gui" pkg="joint_state_publisher_gui" type="joint_state_publisher_gui" /> -->
         <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
         <node name="rviz" pkg="rviz" type="rviz" args="-d $(find motion_capture_ik)/rviz/mc_robot_state.rviz" />    

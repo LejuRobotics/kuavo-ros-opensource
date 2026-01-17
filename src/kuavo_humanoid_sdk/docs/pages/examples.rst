@@ -262,3 +262,11 @@ Qiangnao 灵巧手
 
 .. literalinclude:: ../../examples/atomic_skills/observation_example.py
   :language: python
+
+轮臂控制
+========
+这个示例展示了如何控制轮臂运动，包括获取当前关节位置和设置目标关节位置。
+
+.. literalinclude:: ../../examples/atomic_skills/wheel_arm_control_example.py
+  :language: python
+

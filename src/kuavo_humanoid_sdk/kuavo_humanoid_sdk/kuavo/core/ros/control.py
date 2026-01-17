@@ -1,18 +1,21 @@
 import os
 import numpy as np
+import threading
 from typing import Tuple
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.interfaces.data_types import (KuavoArmCtrlMode, KuavoIKParams, KuavoPose, 
                                                       KuavoManipulationMpcControlFlow, KuavoManipulationMpcCtrlMode
                                                       ,KuavoManipulationMpcFrame, KuavoMotorParam)
 from kuavo_humanoid_sdk.kuavo.core.ros.sat_utils import RotatingRectangle
-from kuavo_humanoid_sdk.kuavo.core.ros.param import EndEffectorType
+from kuavo_humanoid_sdk.kuavo.core.ros.param import EndEffectorType, kuavo_ros_param
+from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCore
 
 import rospy
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState, Joy
+from kuavo_msgs.msg import mpc_target_trajectories, mpc_state, mpc_input
 from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import (gestureTask,robotHandPosition, robotHeadMotionData, armTargetPoses, switchGaitByName,
-                                footPose, footPoseTargetTrajectories, dexhandCommand, motorParam,twoArmHandPoseCmdFree)
+                                footPose, footPoseTargetTrajectories, dexhandCommand, motorParam,twoArmHandPoseCmdFree, robotWaistControl)
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import (gestureExecute, gestureExecuteRequest,gestureList, gestureListRequest,
                         controlLejuClaw, controlLejuClawRequest, changeArmCtrlMode, changeArmCtrlModeRequest,
                         changeTorsoCtrlMode, changeTorsoCtrlModeRequest, setMmCtrlFrame, setMmCtrlFrameRequest,
@@ -22,6 +25,7 @@ from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import twoArmHandPoseCmd, ikSolvePara
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import twoArmHandPoseCmdSrv, fkSrv, twoArmHandPoseCmdFreeSrv
 from std_srvs.srv import SetBool, SetBoolRequest
 from std_msgs.msg import Float64MultiArray
+from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import lbLegControlSrv
 
 
 
@@ -192,6 +196,7 @@ class ControlRobotArm:
         # 带有碰撞检查的轨迹发布
         self._pub_ctrl_arm_traj_arm_collision = rospy.Publisher('/arm_collision/kuavo_arm_traj', JointState, queue_size=10)
         self._pub_ctrl_arm_target_poses_arm_collision = rospy.Publisher('/arm_collision/kuavo_arm_target_poses', armTargetPoses, queue_size=10)
+        self._pub_ctrl_hand_pose_cmd_arm_collision = rospy.Publisher('/arm_collision/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
 
         # 判断当前是否发生碰撞
         self._sub_arm_collision_info = rospy.Subscriber('/arm_collision/info', armCollisionCheckInfo, self.callback_arm_collision_info, queue_size=10)
@@ -203,6 +208,8 @@ class ControlRobotArm:
         self._pub_ctrl_arm_target_poses = rospy.Publisher('/kuavo_arm_target_poses', armTargetPoses, queue_size=10)
         self._pub_ctrl_hand_pose_cmd = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
         self._pub_hand_wrench = rospy.Publisher('/hand_wrench_cmd', Float64MultiArray, queue_size=10)
+        self._pub_torso_pose_cmd = rospy.Publisher('/cmd_lb_torso_pose', Twist, queue_size=10)
+        self._pub_wheel_lower_joint_cmd = rospy.Publisher('/lb_leg_traj', JointState, queue_size=10)
 
     def is_arm_collision(self)->bool:
         return self._is_collision
@@ -304,10 +311,49 @@ class ControlRobotArm:
                 SDKLogger.error(f"Invalid frame: {frame}")
                 return False
             msg.frame = frame.value
-            self._pub_ctrl_hand_pose_cmd.publish(msg)
+            if self.arm_collision_enable:
+                self._pub_ctrl_hand_pose_cmd_arm_collision.publish(msg)
+            else:
+                self._pub_ctrl_hand_pose_cmd.publish(msg)
             return True
         except Exception as e:
             SDKLogger.error(f"publish arm target poses: {e}")
+        return False
+    
+    def pub_torso_pose_cmd(self, x, y, z, roll, pitch, yaw)->bool:
+        try:
+            msg = Twist()
+            msg.linear.x = x
+            msg.linear.y = y
+            msg.linear.z = z
+            msg.angular.x = roll
+            msg.angular.y = pitch
+            msg.angular.z = yaw
+
+            # 发布消息
+            self._pub_torso_pose_cmd.publish(msg)
+            return True
+        except Exception as e:
+            SDKLogger.error(f"publish torso poses failed: {e}")
+        return False
+    
+    def pub_wheel_lower_joint_cmd(self, joint_traj: list)->bool:
+        try:
+            if len(joint_traj) != 4:
+                SDKLogger.error(f"Invalid joint trajectory length: {len(joint_traj)}")
+                return False
+
+            msg = JointState()
+            joint_names = ['joint1', 'joint2', 'joint3', 'joint4']
+            msg.header.stamp = rospy.Time.now()
+            msg.name = joint_names
+            msg.position = [q for q in joint_traj]
+
+            # 发布消息
+            self._pub_wheel_lower_joint_cmd.publish(msg)
+            return True
+        except Exception as e:
+            SDKLogger.error(f"publish torso poses failed: {e}")
         return False
 
     def srv_change_manipulation_mpc_frame(self, frame: KuavoManipulationMpcFrame)->bool:
@@ -374,6 +420,9 @@ class ControlRobotArm:
         return False
 
     def srv_get_manipulation_mpc_ctrl_mode(self, )->KuavoManipulationMpcCtrlMode:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcCtrlMode.ERROR
+
         try:
             service_name = '/mobile_manipulator_get_mpc_control_mode'
             rospy.wait_for_service(service_name, timeout=2.0)
@@ -395,6 +444,9 @@ class ControlRobotArm:
         return KuavoManipulationMpcCtrlMode.ERROR
 
     def srv_get_manipulation_mpc_frame(self, )->KuavoManipulationMpcFrame:
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcFrame.ERROR
+
         try:
             service_name = '/get_mm_ctrl_frame'
             rospy.wait_for_service(service_name, timeout=2.0)
@@ -416,6 +468,10 @@ class ControlRobotArm:
         return KuavoManipulationMpcFrame.ERROR
 
     def srv_get_manipulation_mpc_control_flow(self, )->KuavoManipulationMpcControlFlow:
+        
+        if kuavo_ros_param.is_legged_robot():
+            return KuavoManipulationMpcControlFlow.Error
+
         try:
             service_name = '/get_mm_wbc_arm_trajectory_control'
             rospy.wait_for_service(service_name, timeout=2.0)
@@ -426,7 +482,7 @@ class ControlRobotArm:
             resp = get_mode_srv(req)
             if not resp.result:
                 SDKLogger.error(f"Failed to get manipulation mpc wbc arm trajectory control mode: {resp.message}")
-                return KuavoManipulationMpcControlFlow.ERROR
+                return KuavoManipulationMpcControlFlow.Error
             return KuavoManipulationMpcControlFlow(resp.mode)
         except rospy.ServiceException as e:
             SDKLogger.error(f"Service call to {service_name} failed: {e}")
@@ -434,13 +490,15 @@ class ControlRobotArm:
             SDKLogger.error(f"Failed to connect to service {service_name}: {e}")
         except Exception as e:
             SDKLogger.error(f"Failed to get manipulation mpc wbc arm trajectory control mode: {e}")
-        return KuavoManipulationMpcControlFlow.ERROR
+        return KuavoManipulationMpcControlFlow.Error
 
 
     def srv_change_arm_ctrl_mode(self, mode: KuavoArmCtrlMode)->bool:
         try:
-            rospy.wait_for_service('/change_arm_ctrl_mode', timeout=2.0)
-            change_arm_ctrl_mode_srv = rospy.ServiceProxy('/change_arm_ctrl_mode', changeArmCtrlMode)
+            # robot_type: 2=双足, 1=轮臂
+            service_name = '/wheel_arm_change_arm_ctrl_mode' if kuavo_ros_param.is_wheel_arm_robot() else '/change_arm_ctrl_mode'
+            rospy.wait_for_service(service_name, timeout=2.0)
+            change_arm_ctrl_mode_srv = rospy.ServiceProxy(service_name, changeArmCtrlMode)
             req = changeArmCtrlModeRequest()
             req.control_mode = mode.value
             resp = change_arm_ctrl_mode_srv(req)
@@ -457,7 +515,8 @@ class ControlRobotArm:
             get_arm_ctrl_mode_srv = rospy.ServiceProxy('/humanoid_get_arm_ctrl_mode', changeArmCtrlMode)
             req = changeArmCtrlModeRequest()
             resp = get_arm_ctrl_mode_srv(req)
-            return KuavoArmCtrlMode(resp.control_mode)
+            # NOTE: kuavo_msgs/srv/changeArmCtrlMode.srv response field is `mode` (not `control_mode`)
+            return KuavoArmCtrlMode(resp.mode)
         except rospy.ServiceException as e:
             SDKLogger.error(f"Service call failed: {e}")
         except Exception as e:
@@ -491,6 +550,30 @@ class ControlRobotArm:
             return False
         
 """ Control Robot Head """
+
+class ControlRobotWaist:
+    def __init__(self):
+        self._pub_ctrl_robot_waist = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=10)
+
+    def pub_waist_pos_cmd(self, waistPos: list)->bool:
+        """
+        发布腰部位置控制命令
+        参数:
+            waistPos: 腰关节角度
+        """
+        if len(waistPos) != 1:
+            SDKLogger.error("Waist data must be 1-dimensional")
+            return False
+            
+        try:
+            msg = robotWaistControl()
+            msg.header.stamp = rospy.Time.now()
+            msg.data.data = list(waistPos)
+            self._pub_ctrl_robot_waist.publish(msg)
+            return True
+        except Exception as e:
+            SDKLogger.error(f"Publish waist pos failed: {e}")
+            return False
 class ControlRobotHead:
     def __init__(self):
         self._pub_ctrl_robot_head = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
@@ -712,6 +795,7 @@ class ControlRobotMotion:
         self._pub_joy = rospy.Publisher('/joy', Joy, queue_size=10)
         self._pub_switch_gait = rospy.Publisher('/humanoid_switch_gait_by_name', switchGaitByName, queue_size=10)
         self._pub_step_ctrl = rospy.Publisher('/humanoid_mpc_foot_pose_target_trajectories', footPoseTargetTrajectories, queue_size=10)
+        self._pub_mpc_target_pose = rospy.Publisher('/humanoid_mpc_target_pose', mpc_target_trajectories, queue_size=10)
 
     def connect(self, timeout:float=3.0)-> bool:
         start_time = rospy.Time.now()
@@ -817,6 +901,104 @@ class ControlRobotMotion:
         except Exception as e:
             SDKLogger.error(f"[Error] publish step ctrl: {e}")
             return False
+    
+    def pub_mpc_target_pose(self, target_pose: list, initial_pose: list = None, time_horizon: float = 2.0)->bool:
+        """
+        发布6DOF躯干姿态目标轨迹到MPC
+        
+        参数:
+            target_pose: 6DOF目标姿态 [x, y, z, yaw, pitch, roll]
+            initial_pose: 6DOF初始姿态 [x, y, z, yaw, pitch, roll]，如果为None则从当前observation获取
+            time_horizon: 目标时间（相对于当前MPC时间），单位秒
+        返回:
+            bool: 发布成功返回True，否则返回False
+        
+        注意:
+            - 如果initial_pose为None，必须能够从MPC observation中获取当前状态，否则返回False
+            - 必须能够获取MPC observation中的时间，否则返回False
+            - 时间使用MPC observation中的时间，而不是系统时间
+        """
+        try:
+            if len(target_pose) != 6:
+                SDKLogger.error(f"[Error] target_pose must have 6 elements, got {len(target_pose)}")
+                return False
+            
+            # 获取MPC observation数据（用于获取当前时间和状态）
+            state_core = KuavoRobotStateCore()
+            current_time = None
+            current_state = None
+            
+            # 检查是否能够获取MPC observation数据
+            if not hasattr(state_core, '_mpc_observation_data') or state_core._mpc_observation_data is None:
+                SDKLogger.error("[Error] Cannot get MPC observation data. Please ensure the MPC controller is running and publishing observation data.")
+                return False
+            
+            obs = state_core._mpc_observation_data
+            
+            # 获取MPC时间
+            if not hasattr(obs, 'time'):
+                SDKLogger.error("[Error] MPC observation data does not have 'time' field.")
+                return False
+            current_time = obs.time
+            
+            # 如果需要从observation获取初始状态
+            if initial_pose is None:
+                # 检查observation中是否有state数据
+                if not hasattr(obs, 'state') or not hasattr(obs.state, 'value'):
+                    SDKLogger.error("[Error] MPC observation data does not have 'state.value' field.")
+                    return False
+                
+                # MPC状态向量索引说明：
+                # 0-5: 质心动量 (vcom_x, vcom_y, vcom_z, L_x/m, L_y/m, L_z/m)
+                # 6-11: 躯干姿态 (p_base_x, p_base_y, p_base_z, theta_base_z/yaw, theta_base_y/pitch, theta_base_x/roll)
+                if len(obs.state.value) < 12:
+                    SDKLogger.error(f"[Error] MPC observation state value length ({len(obs.state.value)}) is less than 12. Cannot extract current pose.")
+                    return False
+                
+                # 从observation的state中提取索引6-11的元素作为当前姿态 [x, y, z, yaw, pitch, roll]
+                current_state = [
+                    obs.state.value[6],   # p_base_x
+                    obs.state.value[7],   # p_base_y
+                    obs.state.value[8],   # p_base_z
+                    obs.state.value[9],   # theta_base_z (yaw)
+                    obs.state.value[10],  # theta_base_y (pitch)
+                    obs.state.value[11]   # theta_base_x (roll)
+                ]
+                initial_pose = current_state
+            elif len(initial_pose) != 6:
+                SDKLogger.error(f"[Error] initial_pose must have 6 elements, got {len(initial_pose)}")
+                return False
+            
+            # 验证时间是否有效
+            if current_time is None or current_time <= 0:
+                SDKLogger.error(f"[Error] Invalid MPC time: {current_time}. Cannot publish trajectory.")
+                return False
+            
+            # 创建mpc_target_trajectories消息
+            msg = mpc_target_trajectories()
+            
+            # 设置时间轨迹（当前时间和目标时间）
+            msg.timeTrajectory = [current_time, current_time + time_horizon]
+            
+            # 设置状态轨迹（6DOF姿态）
+            initial_state = mpc_state()
+            initial_state.value = [float(x) for x in initial_pose]
+            
+            target_state = mpc_state()
+            target_state.value = [float(x) for x in target_pose]
+            
+            msg.stateTrajectory = [initial_state, target_state]
+            
+            # 设置输入轨迹（通常为空或零）
+            zero_input = mpc_input()
+            zero_input.value = []
+            msg.inputTrajectory = [zero_input, zero_input]
+
+            self._pub_mpc_target_pose.publish(msg)
+            return True
+        except Exception as e:
+            SDKLogger.error(f"[Error] publish mpc target pose: {e}")
+            return False
 class KuavoRobotArmIKFK:
     def __init__(self):
         pass
@@ -832,7 +1014,8 @@ class KuavoRobotArmIKFK:
             eef_pose_msg.joint_angles_as_q0 = False
         else:
             eef_pose_msg.joint_angles_as_q0 = True
-            eef_pose_msg.joint_angles = arm_q0
+            eef_pose_msg.hand_poses.left_pose.joint_angles = arm_q0[:7]    # 前7个关节
+            eef_pose_msg.hand_poses.right_pose.joint_angles = arm_q0[7:]   # 后7个关节  
         
         if params is None:
             eef_pose_msg.use_custom_ik_param = False
@@ -845,6 +1028,7 @@ class KuavoRobotArmIKFK:
             eef_pose_msg.ik_param.oritation_constraint_tol= params.oritation_constraint_tol
             eef_pose_msg.ik_param.pos_constraint_tol = params.pos_constraint_tol 
             eef_pose_msg.ik_param.pos_cost_weight = params.pos_cost_weight
+            eef_pose_msg.ik_param.constraint_mode = params.constraint_mode
 
         # left hand
         eef_pose_msg.hand_poses.left_pose.pos_xyz =  left_pose.position
@@ -856,7 +1040,10 @@ class KuavoRobotArmIKFK:
         eef_pose_msg.hand_poses.right_pose.quat_xyzw = right_pose.orientation
         eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = right_elbow_pos_xyz
 
-        return self._srv_arm_ik(eef_pose_msg)
+        if  6 != params.constraint_mode:
+            return self._srv_arm_ik(eef_pose_msg)
+        else:
+            return self._srv_arm_ik_high_position_accuracy(eef_pose_msg)
 
     def arm_ik_free(self,
                     left_pose: KuavoPose,
@@ -905,6 +1092,23 @@ class KuavoRobotArmIKFK:
         try:
             rospy.wait_for_service('/ik/two_arm_hand_pose_cmd_srv',timeout=1.0)
             ik_srv = rospy.ServiceProxy('/ik/two_arm_hand_pose_cmd_srv', twoArmHandPoseCmdSrv)
+            res = ik_srv(eef_pose_msg)
+            # print(eef_pose_msg)
+            if res.success:
+                return res.hand_poses.left_pose.joint_angles + res.hand_poses.right_pose.joint_angles
+            else:
+                return None
+        except rospy.ServiceException as e:
+            print("Service call failed: %s"%e)
+            return None
+        except Exception as e:
+            print(f"Failed to call ik/fk_srv: {e}")
+            return None
+    
+    def _srv_arm_ik_high_position_accuracy(self, eef_pose_msg)->list:
+        try:
+            rospy.wait_for_service('/ik/two_arm_hand_pose_cmd_srv_muli_refer',timeout=1.0)
+            ik_srv = rospy.ServiceProxy('/ik/two_arm_hand_pose_cmd_srv_muli_refer', twoArmHandPoseCmdSrv)
             res = ik_srv(eef_pose_msg)
             # print(eef_pose_msg)
             if res.success:
@@ -972,6 +1176,9 @@ class KuavoRobotControl:
             self.kuavo_arm_control = ControlRobotArm()
             self.kuavo_motion_control = ControlRobotMotion()
             self.kuavo_arm_ik_fk = KuavoRobotArmIKFK()
+            self.kuavo_waist_control = ControlRobotWaist()
+            # 初始化轮臂控制
+            self.kuavo_wheel_arm_control = WheelArmROSControl()
             # SDKLogger.debug("KuavoRobotControl initialized.")
 
     def initialize(self, eef_type:str=None, debug:bool=False, timeout:float=1.0)-> Tuple[bool, str]:
@@ -980,22 +1187,37 @@ class KuavoRobotControl:
             self.kuavo_eef_control = None
         else:
             self.kuavo_eef_control = ControlEndEffector(eef_type=eef_type)
-        
-        connect_success = True
-        err_msg = ''
-        if not self.kuavo_arm_control.connect(timeout):
-            connect_success  = False
-            err_msg = "Failed to connect to arm control topics, \n"
-        if not self.kuavo_head_control.connect(timeout):
-            connect_success  = False
-            err_msg += "Failed to connect to head control topics, \n"
-        if not self.kuavo_motion_control.connect(timeout):
-            err_msg += "Failed to connect to motion control topics, \n"
-            connect_success  = False
 
-        if self.kuavo_eef_control is not None and not self.kuavo_eef_control.connect(timeout):
-            connect_success  = False
-            err_msg += "Failed to connect to end effector control topics."
+        # Parallel connection check using threads
+        results, errors, threads = {}, {}, []
+
+        connect_configs = [
+            ('arm', self.kuavo_arm_control, "arm control"),
+            ('head', self.kuavo_head_control, "head control"),
+            ('motion', self.kuavo_motion_control, "motion control"),
+            ('eef', self.kuavo_eef_control, "end effector control"),
+        ]
+
+        for name, control, desc in connect_configs:
+            def connect(n=name, c=control, d=desc):
+                if c is None:
+                    results[n] = True
+                    return
+                results[n] = c.connect(timeout)
+                if not results[n]:
+                    errors[n] = f"Failed to connect to {d} topics"
+
+            t = threading.Thread(target=connect)
+            threads.append(t)
+            t.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # Collect results
+        connect_success = all(results.values())
+        err_msg = '\n'.join(errors.values())
 
         if connect_success:
             err_msg = 'success'
@@ -1185,6 +1407,27 @@ class KuavoRobotControl:
         """
         return self.kuavo_arm_control.pub_end_effector_pose_cmd(left_pose, right_pose, frame)
     
+    def control_torso_pose(self, x, y, z, roll, pitch, yaw)->bool:
+        """
+            Control wheel-robot torso pose
+            Arguments:
+                - x: torso postion
+                - y: torso postion
+                - z: torso postion
+                - roll: torso euler angle
+                - pitch: torso euler angle
+                - yaw: torso euler angle
+        """
+        return self.kuavo_arm_control.pub_torso_pose_cmd(x, y, z, roll, pitch, yaw)
+    
+    def control_wheel_lower_joint(self, joint_traj: list)->bool:
+        """
+            Control wheel-robot torso lower joint
+            Arguments:
+                - joint_traj: list of joint data (degrees)
+        """
+        return self.kuavo_arm_control.pub_wheel_lower_joint_cmd(joint_traj)
+    
     def change_manipulation_mpc_frame(self, frame: KuavoManipulationMpcFrame)->bool:
         """
             Change manipulation mpc frame
@@ -1268,10 +1511,46 @@ class KuavoRobotControl:
         return self.kuavo_motion_control.pub_cmd_vel(linear_x, linear_y, angular_z)
     
     def control_torso_height(self, height:float, pitch:float=0.0)->bool:
-        com_msg = Twist()
-        com_msg.linear.z = height
-        com_msg.angular.y = pitch
-        return self.kuavo_motion_control.pub_cmd_pose(com_msg)
+        """
+        控制躯干高度和俯仰角（使用MPC目标轨迹接口）
+        参数:
+            height: 相对于当前高度的变化量（米），负值表示下蹲，正值表示上升
+            pitch: 相对于当前俯仰角的变化量（弧度），默认0.0
+        返回:
+            bool: 控制成功返回True，否则返回False
+        """
+        # 获取当前状态
+        state_core = KuavoRobotStateCore()
+        if not hasattr(state_core, '_mpc_observation_data') or state_core._mpc_observation_data is None:
+            SDKLogger.error("[Error] Cannot get MPC observation data for control_torso_height")
+            return False
+        
+        obs = state_core._mpc_observation_data
+        if not hasattr(obs, 'state') or not hasattr(obs.state, 'value') or len(obs.state.value) < 12:
+            SDKLogger.error("[Error] Cannot get current state from observation for control_torso_height")
+            return False
+        
+        # 从observation获取当前姿态 [x, y, z, yaw, pitch, roll]
+        current_pose = [
+            obs.state.value[6],   # p_base_x
+            obs.state.value[7],   # p_base_y
+            obs.state.value[8],   # p_base_z
+            obs.state.value[9],   # theta_base_z (yaw)
+            obs.state.value[10],  # theta_base_y (pitch)
+            obs.state.value[11]   # theta_base_x (roll)
+        ]
+        
+        # 计算目标姿态：当前姿态 + 变化量
+        target_pose = [
+            current_pose[0],           # x: 保持不变
+            current_pose[1],           # y: 保持不变
+            height,  # z: 目标高度
+            current_pose[3],           # yaw: 保持不变
+            pitch,   # pitch: 目标俯仰角
+            current_pose[5]            # roll: 保持不变
+        ]
+        
+        return self.kuavo_motion_control.pub_mpc_target_pose(target_pose, initial_pose=current_pose, time_horizon=3.0)
 
     def control_command_pose_world(self, target_pose_x:float, target_pose_y:float, target_pose_z:float, target_pose_yaw:float)->bool:
         """
@@ -1370,6 +1649,9 @@ class KuavoRobotControl:
     def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
         return self.kuavo_arm_control.pub_hand_wrench_cmd(left_wrench, right_wrench)
     
+    def control_robot_waist(self, target_pos: list) -> bool:
+        return self.kuavo_waist_control.pub_waist_pos_cmd(target_pos)
+    
     def enable_base_pitch_limit(self, enable: bool) -> Tuple[bool, str]:
         res_msg = 'failed'
         try:
@@ -1395,6 +1677,39 @@ class KuavoRobotControl:
             SDKLogger.error(f"Service call failed: {e}")
             res_msg = str(e)
         return False, res_msg
+
+    def change_torso_ctrl_mode(self, mode: KuavoManipulationMpcCtrlMode) -> bool:
+        return self.kuavo_motion_control.srv_change_torso_ctrl_mode(mode)
+
+    """--------------------------------------------------------------------------------------------"""
+    """ 轮臂控制方法 """
+    
+    def control_wheel_arm_joint_positions(self, positions: list) -> bool:
+        """控制轮臂关节位置
+
+        Args:
+            positions: 关节位置列表，4个关节的角度值（弧度）
+
+        Returns:
+            bool: 是否成功发送命令
+        """
+        if not hasattr(self, 'kuavo_wheel_arm_control') or self.kuavo_wheel_arm_control is None:
+            SDKLogger.error("[KuavoRobotControl] 轮臂控制模块未初始化")
+            return False
+        
+        return self.kuavo_wheel_arm_control.control_wheel_arm_joint_positions(positions)
+
+    def is_wheel_arm_initialized(self) -> bool:
+        """检查轮臂控制模块是否已初始化
+
+        Returns:
+            bool: 是否已初始化
+        """
+        if not hasattr(self, 'kuavo_wheel_arm_control') or self.kuavo_wheel_arm_control is None:
+            return False
+        
+        return self.kuavo_wheel_arm_control.is_initialized()
+
 
 def euler_to_rotation_matrix(yaw, pitch, roll):
     # 计算各轴的旋转矩阵
@@ -1509,6 +1824,76 @@ def get_multiple_steps_msg(body_poses:list, dt:float, is_left_first:bool=True, c
     # print("torso_traj:", torso_traj)
     return get_foot_pose_traj_msg(time_traj, foot_idx_traj, foot_traj, torso_traj)
 """ ------------------------------------------------------------------------------"""
+
+
+class WheelArmROSControl:
+    """轮臂ROS控制类。
+    
+    提供轮臂控制的ROS接口，基于实际的lbLegControlSrv服务。
+    轮臂控制只有一种方法：通过target_joints设置4个关节的目标角度。
+    """
+    
+    def __init__(self):
+        """初始化轮臂ROS控制"""
+        self._wheel_arm_joint_dof = 4
+        self._is_initialized = False
+        
+        # 初始化ROS接口
+        self._init_ros_interfaces()
+        
+        SDKLogger.info("[WheelArmROSControl] 轮臂ROS控制模块初始化完成")
+    
+    def _init_ros_interfaces(self):
+        """初始化ROS接口"""
+        try:
+            # # 等待轮臂控制服务
+            # rospy.wait_for_service('/lb_leg_control_srv', timeout=5.0)
+            # self._leg_control_service = rospy.ServiceProxy('/lb_leg_control_srv', lbLegControlSrv)
+            
+            self._is_initialized = True
+            SDKLogger.info("[WheelArmROSControl] ROS接口初始化成功")
+            
+        except Exception as e:
+            SDKLogger.error(f"[WheelArmROSControl] ROS接口初始化失败: {e}")
+            self._is_initialized = False
+    
+    def is_initialized(self) -> bool:
+        """检查ROS接口是否已初始化"""
+        return self._is_initialized
+    
+    def control_wheel_arm_joint_positions(self, joint_positions: list) -> bool:
+        """通过ROS服务控制轮臂关节位置
+        
+        Args:
+            joint_positions (list): 轮臂关节位置列表，长度为4，单位为弧度
+            
+        Returns:
+            bool: 控制成功返回True,否则返回False
+        """
+        if not self._is_initialized:
+            SDKLogger.error("[WheelArmROSControl] ROS接口未初始化")
+            return False
+        
+        try:
+            # 验证输入参数
+            if len(joint_positions) != self._wheel_arm_joint_dof:
+                SDKLogger.error(f"[WheelArmROSControl] 关节位置数量错误: 期望{self._wheel_arm_joint_dof}, 实际{len(joint_positions)}")
+                return False
+            
+            # 调用轮臂控制服务
+            response = self._leg_control_service(joint_positions)
+            
+            if response.success:
+                SDKLogger.debug(f"[WheelArmROSControl] 关节位置控制成功: {joint_positions}")
+            else:
+                SDKLogger.error("[WheelArmROSControl] 关节位置控制失败")
+            
+            return response.success
+            
+        except Exception as e:
+            SDKLogger.error(f"[WheelArmROSControl] 控制关节位置失败: {e}")
+            return False
+    
 
 
 # if __name__ == "__main__":
