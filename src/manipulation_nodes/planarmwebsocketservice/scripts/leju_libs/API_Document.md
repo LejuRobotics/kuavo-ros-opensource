@@ -622,16 +622,23 @@ kuavo_llm.register_case(
   - None
   
 注: 该功能需要在生成的python代码中通过字符串运行函数,所以需要类似aelos那样在生成的python代码中加入函数定义
-形如(在生成的python文件中,示例代码非完整代码):
+形如(在生成的python文件中):
 ```python
 ...
 def response_with_voice_and_action(llm_output: dict):
-    if not llm_output.get('success',False):
+    if not llm_output.get("success", 1) == 0:
         return
-    kuavo_llm.response_with_voice(llm_output)
-    if llm_output.get('slot','') == 'action':
-        eval(llm_output["function_call"])
-        ... # 具体的函数将在后续完成相应功能后提供最终版,此处只是示例
+    kuavo_llm.response_with_voice(llm_output) 
+    if llm_output.get("intent", "") == "function_call":
+        try:
+            eval(llm_output.get("slot"))
+        except:
+            print(f"【函数调用】执行失败:{llm_output.get('slot','')}")
+    if llm_output.get("intent", "") == "action":
+        robot_control.excute_action_file(llm_output["slot"][:-5])
+
+    if llm_output.get("intent", "") == "action_custom":
+        robot_control.excute_action_file(llm_output['slot'][:-5],"demo_project") # 拼接项目信息
 ...
 
 def main():

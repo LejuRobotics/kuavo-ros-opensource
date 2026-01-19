@@ -52,6 +52,7 @@
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="false"/>
     <arg name="with_led" default="true"/>
+    <arg name="with_battery" default="false"/>
     
     <!-- -->
     <arg name="teach_pendant" default="0"/>
@@ -284,6 +285,13 @@
         <arg name="LED" value="enable"/>
       </include>
     </group>
+
+    <group if="$(arg with_battery)">
+      <include file="$(find kuavo_led_controller)/launch/battery_info.launch">
+        <arg name="BATTERY" value="enable"/>
+      </include>
+    </group>
+
     <arg name="microphone" default="true" />
 
     <group if="$(arg microphone)">

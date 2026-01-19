@@ -82,3 +82,141 @@ bool success
 ```
 ```
 - 现象为：常亮的彩虹状灯持续 5 秒，然后熄灭。
+
+## 电池信息接口
+
+本包同时集成了电池信息读取功能，通过 `battery_info_node.py` 节点实现。
+
+### 话题列表
+| 话题名 | 消息类型 | 说明 |
+|--------|----------|------|
+| `/battery_info_1` | `kuavo_led_controller/BatteryInfo` | BAT1（左电池）信息 |
+| `/battery_info_2` | `kuavo_led_controller/BatteryInfo` | BAT2（右电池）信息 |
+
+### BatteryInfo 消息定义
+```msg
+uint8 battery_id            # 电池ID (0:左电池, 1:右电池)
+uint32 voltage              # 电压 (mV)
+int32 current               # 电流 (mA，正数充电，负数放电)
+uint32 remaining_capacity   # 剩余容量 (mAh)
+uint32 full_capacity        # 满充容量 (mAh)
+uint8 percentage            # 剩余电量百分比 (0-100)
+uint16 cycle_count          # 放电循环次数
+uint32 protection_flags     # 保护状态标志位
+int16[6] temperatures       # 6个NTC温度 (摄氏度)
+time timestamp              # 时间戳
+```
+
+### 电池功能使用示例
+```bash
+# 查看电池信息（话题订阅）
+rostopic echo /battery_info_1
+
+# 只查看电压和百分比
+rostopic echo /battery_info_1 | grep -E 'voltage|percentage'
+
+# 查看温度
+rostopic echo /battery_info_1 | grep temperatures
+
+# 查询电池信息（服务调用）
+rosservice call /get_battery_info "battery_id: 0"
+
+# 查询BAT2（右电池）
+rosservice call /get_battery_info "battery_id: 1"
+```
+
+### 电池信息查询服务
+
+**服务名**: `/get_battery_info`
+
+**请求**:
+```msg
+# 电池ID (0:左电池/BAT1, 1:右电池/BAT2)
+uint8 battery_id
+```
+
+**响应**:
+```msg
+# 电池ID
+uint8 battery_id
+# 电压 (mV)
+uint32 voltage
+# 电流 (mA)
+int32 current
+# 剩余容量 (mAh)
+uint32 remaining_capacity
+# 满充容量 (mAh)
+uint32 full_capacity
+# 剩余电量百分比 (0-100)
+uint8 percentage
+# 放电循环次数
+uint16 cycle_count
+# 保护状态标志位
+uint32 protection_flags
+# 温度传感器数据 (6个NTC, 摄氏度)
+int16[6] temperatures
+# 是否成功
+bool success
+# 消息
+string message
+```
+
+**使用示例**：
+```bash
+# 查询BAT1信息
+rosservice call /get_battery_info "battery_id: 0"
+# 返回示例：
+# battery_id: 0
+# voltage: 59940
+# current: -510
+# percentage: 59
+# success: True
+# message: "电池0信息读取成功"
+
+# 查询BAT2信息
+rosservice call /get_battery_info "battery_id: 1"
+```
+
+### 启动参数
+在 `set_led_mode.launch` 中可配置以下参数：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `LED` | `enable` | 是否启动LED节点 |
+| `BATTERY` | `enable` | 是否启动电池节点 |
+| `port` | `/dev/ttyLED0` | 串口设备路径（电池节点） |
+| `baudrate` | `115200` | 波特率（电池节点） |
+| `publish_rate` | `1.0` | 电池信息发布频率 (Hz) |
+
+**灵活启动方式**：
+```bash
+# 同时启动LED和电池（默认）
+roslaunch kuavo_led_controller set_led_mode.launch
+
+# 只启动LED
+roslaunch kuavo_led_controller set_led_mode.launch BATTERY:=disable
+
+# 只启动电池
+roslaunch kuavo_led_controller set_led_mode.launch LED:=disable
+
+# 启动机器人时启动
+roslaunch humanoid_controllers load_kuavo_real.launch with_battery:=true（默认关闭）
+```
+
+
+## 硬件说明
+
+### 电源板通信协议
+| 指令 | 功能 | 说明 |
+|------|------|------|
+| 0x02 | LED灯条设置 | 控制10个LED灯的颜色和模式 |
+| 0x03 | BAT1电池信息读取 | 读取左电池电压、电流、容量等 |
+| 0x04 | BAT2电池信息读取 | 读取右电池电压、电流、容量等 |
+
+### 注意事项
+1. **硬件兼容性**：
+   - 本包适用于Kuavo机器人的电源板（CH340, ID: `1a86:7523`）
+   - 该电源板同时支持LED控制和电池读取功能
+   - 不适用于Roban机器人的独立LED板（ID: `1a86:55d3`）
+
+2. **串口共享**：LED和电池节点共用同一个串口设备 `/dev/ttyLED0`，实测多进程访问无冲突
