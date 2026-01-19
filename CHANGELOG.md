@@ -15,6 +15,11 @@
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- 4PRO机器人新增 VMP 控制器支持咏春动作，支持机器人类型45，46，[文档链接](./src/humanoid-control/humanoid_controllers/docs/VMP咏春使用说明.md)
+- Kuavo Humanoid SDK 新增 llm 工具类基础
+- H12 遥控器支持多控制器切换功能，[文档链接](./src/humanoid-control/h12pro_controller_node/多控制器H12操作说明.md)
+- 新增多控制器切换功能，支持 MPC,使用该功能之前需联系技术支持升级驱动固件
+- 新增全增量式 VR 遥操作功能，[文档链接](./src/manipulation_nodes/motion_capture_ik/README_INCREMENTAL_IK.md)
 - IK 逆解模块适配带转腰功能，示例可参考[robot_arm_fk_ik.py](src/kuavo_sdk/scripts/arm_fk_ik/robot_arm_fk_ik.py)
 - VR 增加单步和连续转向切换功能，正常站立时，左手摇杆左右控制单步转身，VR按 B 进入踏步状态后，左手摇杆左右控制踏步转身
 - WebSocket 接口新增导航相关接口，建图、保存地图、地图列表等
@@ -64,6 +69,17 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复 kuavo.json 配置末端类型为`lejuclaw`与实物实际不一致时程序启动报错退出问题
+- 修复半身模式轮臂无法使用VR问题
+- 修复G12遥控器AMP无法切换踏步功能
+- 修复G12遥控器执行默认抱拳动作还未做完手臂就复位问题
+- 修复手柄不能控制五代转腰
+- 修复不合法tact动作文件播放时机器人动作异常问题
+- Kuavo Humanoid SDK 上下蹲接口优化高度安全保护限制
+- Kuavo Humanoid SDK 修复本地安装由于镜像失效导致无法安装的问题
+- 修复腰部控制话题消息无时间戳 header 字段问题
+- 修复 Roban 机器人容易触发pullup拉起保护问题
+- Kuavo Humanoid SDK Websocket 修复调用单步接口真机容易摔倒问题
 - Kuavo Humanoid SDK Websocket 修复5代机器人获取手臂的角度错误问题
 - Kuavo Humanoid SDK 修复从pypi安装1.3.0 版本SDK无法正常运行问题
 - Kuavo Humanoid SDK 修复本地多版本安装冲突问题
@@ -146,6 +162,7 @@
 - 修复 Quest3 打开`control_torso`控制躯干模式时躯干会下蹲到最低问题
 
 ## 其他改进
+- Kuavo Humanoid SDK 优化 SDK `Init` 初始化时间过长问题
 - 增加 motorevo_tool.sh 用于 Roban2 手臂电机方向辨识和零点标定， [工具链接](./tools/check_tool/motorevo_tool.sh)
 - 新增硬件工具: canbus_config.sh 用于配置 Roban2 Can 总线配置，[工具链接](./tools/check_tool/canbus_config.sh)
 - 调整灵巧手 SDK 日志级别避免终端过多打印刷屏

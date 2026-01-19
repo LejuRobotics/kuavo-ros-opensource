@@ -6,6 +6,7 @@ topics:
   - /cmd.*
   - /sensors_data_raw
   - /sensor_data/.*
+  - /h12pro_channel
   - /joy
   - /joy/set_feedback
   - /kuavo_.*
