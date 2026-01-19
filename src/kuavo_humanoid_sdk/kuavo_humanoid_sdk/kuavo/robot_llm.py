@@ -3,13 +3,21 @@
 import openai
 from openai import OpenAI
 import os
+from kuavo_humanoid_sdk.kuavo.core.llm_rtasr_lib.rtasr_llm_client import RTASRClient
+from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import AudioReceiverData
 import asyncio
 import re
 import json
 import rospkg
+import queue
+from queue import Queue
+import rospy
+import threading
+import time
+import signal
 
 from kuavo_humanoid_sdk.kuavo.logger_client import get_logger
-
+from std_msgs.msg import Int16MultiArray, Bool
 logger = get_logger()
 
 
@@ -21,13 +29,15 @@ class KuavoRobotLLM:
     也需要调用对asr和tts的接口,将语音输入处理成文本,将文本回复处理成语音
     """
 
-    # TODO: 接收到stop时候要stop
-
     def __init__(self):
         """初始化大模型系统。"""
         self.llm_end = None
         self.asr_end = None
         self.tts_end = None
+
+        self.asr_audio_queue = Queue(maxsize=100)
+        self._send_asr_audio_running = False  # 控制发送音频线程的运行状态
+        self._asr_completed = False  # 标志ASR是否完成
 
         package_name = "planarmwebsocketservice"
         self.package_path = rospkg.RosPack().get_path(package_name)
@@ -178,19 +188,114 @@ class KuavoRobotLLM:
         if len(self.chat_history) > self.max_chat_history_length:
             self.chat_history.pop(0)
 
-        
+    def trigger_asr(self) -> str:
+        """从讯飞语音识别服务将语音输入转为文本"""
+
+        # 连接到讯飞ASR服务
+        if not self.asr_end.is_connected:
+            if not self.asr_end.connect():
+                print("【ASR错误】无法连接到讯飞语音识别服务")
+                return ""
+
+        # 清空之前的识别结果
+        self.asr_end.clear_recognized_text()
+        # 重置完成标志
+        self._asr_completed = False
+        # 启动音频接收和发送线程
+        self.audio_sub = rospy.Subscriber(
+            "/micphone_data",
+            AudioReceiverData,
+            self._audio_receiver_callback,
+            queue_size=10,
+        )
+        print("订阅成功")
+        self._send_asr_audio_running = True
+        send_thread = threading.Thread(target=self._send_asr_audio, daemon=True)
+        send_thread.start()
+        # 启动响应处理线程
+        recv_thread = threading.Thread(target=self._process_asr_response, daemon=True)
+        recv_thread.start()
+
+        # 等待ASR完成（完全依赖于服务端的last标志位）
+        self.start_wait_time = time.time()
+        timeout = 5  # 最大等待时间
+        while (
+            not self._asr_completed
+            and (time.time() - self.start_wait_time) < timeout
+        ):
+            time.sleep(0.1)
+
+        # ASR完成后停止音频接收和发送
+        self.audio_sub.unregister()
+        self._send_asr_audio_running = False
+        # self.asr_end.close()
+
+        # 获取识别结果
+        recognized_text = self.asr_end.get_recognized_text()
+        print(f"【ASR识别完成】识别结果：{recognized_text}")
+        return recognized_text
+
+    def _audio_receiver_callback(self, msg: AudioReceiverData):
+        """ROS麦克风数据回调函数"""
+        try:
+            # 播放状态：直接使用真实音频数据
+            audio_data = bytes(msg.data)
+            self.asr_audio_queue.put(audio_data)
+        except Exception as e:
+            print(f"处理麦克风数据时出错: {e}")
+
+    def _send_asr_audio(self):
+        """发送ASR音频数据"""
+        frame_index = 0
+        start_time = None
+        try:
+            while self._send_asr_audio_running:
+                # 检查队列是否有数据
+                if not self.asr_audio_queue.empty():
+                    print(f"{self.asr_audio_queue.qsize()} left in queue")
+                    audio_frame = self.asr_audio_queue.get()
+
+                    # 发送音频帧
+                    self.asr_end.send_audio_frame(audio_frame)
+                    frame_index += 1
+                    time.sleep(0.001)
+                else:
+                    # 队列空时休眠一小段时间
+                    time.sleep(0.001)
+            print("【发送音频线程】已停止")
+        except Exception as e:
+            print(f"【发送音频异常】{str(e)}")
+
+    def _process_asr_response(self):
+        """处理ASR服务端返回的消息"""
+        while self.asr_end.is_connected:
+            res = self.asr_end._recv_msg()
+            if res:
+                self.start_wait_time = time.time()  # 重置等待时间
+                # 检查是否为最终结果
+                if (
+                    res.get("data", {}).get("cn", {}).get("st", {}).get("type", None)
+                    == "0"
+                ):
+                    print("【ASR结束】已收到最终识别结果，停止处理")
+                    self._asr_completed = True
+                    break
+            time.sleep(0.01)  # 添加小延迟，避免CPU占用过高
 
     def _init_models(self):
         """初始化大模型"""
-        # TODO: 初始化大模型
-        self.asr_end = None # TODO
+        # 初始化ASR模型（完全同步实现）
+        self.asr_end = RTASRClient(
+            app_id=self.apis["xfyun_APPID"],
+            access_key_secret=self.apis["xfyun_APISecret"],
+            access_key_id=self.apis["xfyun_APIKey"],
+            base_url="wss://office-api-ast-dx.iflyaisol.com/ast/communicate/v1",
+        )
 
-        self.tts_end = None  # TODO
         self.llm_end = OpenAI(
             base_url="https://ark.cn-beijing.volces.com/api/v3",
             api_key=self.apis["ark_analysis_key"],
         )
-
 
     def import_action_from_files(self, project_name: str):
         """将action_files中所有动作注册到llm类中,使用文件名作为动作名称
