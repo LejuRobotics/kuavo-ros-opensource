@@ -1,17 +1,17 @@
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.nodes import NodeWalk, NodePercep, NodeTagToNavGoal, \
     NodeWaitForBlackboard, NodeFuntion, NodeArm, NodeTagToArmGoal, NodeWaist, NodeHead, NodeDirectToArmGoal, \
     NodeWalkWithDistanceMonitor
+from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.api import ArmAPI, TorsoAPI, HeadAPI
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
-# 根据实际环境选择配置，仿真使用：config_sim，实机使用：config_real
-from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_real import config
+# 根据实际环境选择配置，仿真使用：config_boxes_sim，实机使用：config_boxes_real
+from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_real import config
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Frame
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.funcs import update_walk_goal, update_tag_guess
-from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.funcs import arm_generate_pick_keypoints, \
-    arm_generate_place_keypoints_new, arm_reset, arm_generate_pick_before, get_current_pick_tag_id, update_round_and_tag_id_fn
+from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.funcs import arm_generate_pick_boxes_keypoints, \
+    arm_generate_place_boxes_keypoints, arm_reset, arm_generate_pick_boxes_before, get_current_pick_tag_id, update_round_and_tag_id_fn
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoManipulationMpcFrame
 
-from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.black_board import BlackBoardManager
 import py_trees
 import time
@@ -40,7 +40,7 @@ if isinstance(config.pick.tag_id, list):
 else:
     pick_tag_id = config.pick.tag_id
 
-search_pick_tag_WALK = NodeWalk(name='search_pick_tag_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold)
+search_pick_tag_WALK = NodeWalk(name='search_pick_tag_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold,backward_mode=False)
 search_pick_tag_TAG2GOAL = NodeTagToNavGoal(name='search_pick_tag_TAG2GOAL',
                                             tag_id=pick_tag_id,
                                             stand_in_tag_pos=config.pick.stand_in_tag_pos,
@@ -52,6 +52,11 @@ root = py_trees.composites.Parallel(name="root", policy=py_trees.common.Parallel
 root.add_children([ACTION, PERCEP])
 
 # 1. 寻找箱子
+# 转腰180度，使头部面向要搬的箱子
+turn_waist_180_first = NodeWaist(name='turn_waist_180_first',
+                           robot_sdk=robot_sdk,
+                           waist_pos=config.common.waist_degree)
+                           
 search_pick_tag_GUESS = NodeFuntion(name="search_pick_tag_GUESS",
                                     fn=lambda: update_tag_guess(tag_id=get_current_pick_tag_id(config),
                                                                 tag_pos_world=config.pick.tag_pos_world,
@@ -79,17 +84,17 @@ search_pick_tag_HEAD_AND_WAIT.add_children([search_pick_tag_HEAD, search_pick_ta
 
 search_pick_tag = py_trees.composites.Sequence(name="search_pick_tag", memory=True)
 search_pick_tag.add_children(
-    [search_pick_tag_GUESS, search_pick_tag_WALK, search_pick_tag_HEAD_AND_WAIT, search_pick_tag_TAG2GOAL])
+    [search_pick_tag_GUESS, search_pick_tag_WALK, turn_waist_180_first, search_pick_tag_HEAD_AND_WAIT, search_pick_tag_TAG2GOAL])
 
 # 2. 走到箱子位置，中途持续识别并执行手臂预动作
-walk_to_pick_WALk = NodeWalk(name='walk_to_pick_WALk', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold)
+walk_to_pick_WALk = NodeWalk(name='walk_to_pick_WALk', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold,backward_mode=config.pick.backward_mode)
 walk_to_pick_TAG2GOAL = py_trees.decorators.SuccessIsRunning(name="walk_to_pick_TAG2GOAL",
                                                              child=NodeTagToNavGoal(name='walk_to_pick_TAG2GOAL_',
                                                                                     tag_id=pick_tag_id,
                                                                                     stand_in_tag_pos=config.pick.stand_in_tag_pos,
                                                                                     stand_in_tag_euler=config.pick.stand_in_tag_euler))
 
-left_arm_preaction_poses, right_arm_preaction_poses = arm_generate_pick_before()
+left_arm_preaction_poses, right_arm_preaction_poses = arm_generate_pick_boxes_before()
 walk_to_pick_ARM_GOAL = NodeDirectToArmGoal(
     name='walk_to_pick_ARM_GOAL',
     arm_api=arm_api,
@@ -118,9 +123,8 @@ walk_to_pick = py_trees.composites.Parallel(name="walk_to_pick",
                                                 children=[walk_to_pick_WALk]))
 
 walk_to_pick.add_children([walk_to_pick_WALk, walk_to_pick_TAG2GOAL, pre_pick_arm])
-
 # 3. 拿起箱子
-left_arm_relative_keypoints, right_arm_relative_keypoints = arm_generate_pick_keypoints(
+left_arm_relative_keypoints, right_arm_relative_keypoints = arm_generate_pick_boxes_keypoints(
     box_width=config.common.box_width,
     box_behind_tag=config.pick.box_behind_tag,  # 箱子在tag后面的距离，单位米
     box_beneath_tag=config.pick.box_beneath_tag,  # 箱子在tag下方的距离，单位米
@@ -189,14 +193,14 @@ search_place_tag_TAG2GOAL = NodeTagToNavGoal(name='search_place_tag_TAG2GOAL',
                                              tag_id=config.place.tag_id,
                                              stand_in_tag_pos=config.place.stand_in_tag_pos,
                                              stand_in_tag_euler=config.place.stand_in_tag_euler)
-search_place_tag_WALK = NodeWalk(name='search_place_tag_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, backward_mode=True)
+search_place_tag_WALK = NodeWalk(name='search_place_tag_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold)
 
 search_place_tag = py_trees.composites.Sequence(name="search_place_tag", memory=True)
 search_place_tag.add_children(
     [search_place_tag_GUESS, search_place_tag_WALK, search_place_tag_HEAD_AND_WAIT, search_place_tag_TAG2GOAL])
 
 # 6. 走去放置点，同时中途持续识别
-walk_to_place_WALk = NodeWalk(name='walk_to_place_WALk', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, backward_mode=True)
+walk_to_place_WALk = NodeWalk(name='walk_to_place_WALk', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, backward_mode=config.place.backward_mode)
 walk_to_place_TAG2GOAL = py_trees.decorators.SuccessIsRunning(name="walk_to_place_TAG2GOAL",
                                                               child=NodeTagToNavGoal(name='walk_to_place_TAG2GOAL_',
                                                                                      tag_id=config.place.tag_id,
@@ -209,7 +213,7 @@ walk_to_place = py_trees.composites.Parallel(name="walk_to_place",
 walk_to_place.add_children([walk_to_place_WALk, walk_to_place_TAG2GOAL])
 
 # 7. 放置箱子并恢复状态
-left_arm_relative_keypoints, right_arm_relative_keypoints = arm_generate_place_keypoints_new(
+left_arm_relative_keypoints, right_arm_relative_keypoints = arm_generate_place_boxes_keypoints(
     box_width=config.common.box_width,
     box_behind_tag=config.place.box_behind_tag,  # 箱子在tag后面的距离，单位米
     box_beneath_tag=config.place.box_beneath_tag,  # 箱子在tag下方的距离，单位米
@@ -236,7 +240,7 @@ place_box.add_children([place_box_TAG2GOAL, place_box_ARM])
 back_to_origin_ARM_RESET1 = NodeFuntion(name="back_to_origin_ARM_RESET",
                                        fn=lambda: arm_reset())
 
-# 后退动作（带距离监控，用于触发转腰）
+# 后退动作
 place_box_SETWALKGOAL = NodeFuntion(name="place_box_SETWALKGOAL",
                                     fn=lambda: update_walk_goal(target_pose=Pose(
                                         pos=(-config.place.step_back_distance, 0., 0.),  # 向后平移
@@ -244,31 +248,20 @@ place_box_SETWALKGOAL = NodeFuntion(name="place_box_SETWALKGOAL",
                                         frame=Frame.BASE  # 使用基座坐标系
                                     )))
 
-# 行走距离检测，后退trigger_distance距离后得到key=“walk_distance_trigger_reached”
-place_box_WALK = NodeWalkWithDistanceMonitor(
-    trigger_distance=0.1,  # 后退0.1m后触发转腰
+place_box_WALK = NodeWalk(
     name='place_box_WALK',
     torso_api=torso_api,
     control_mode=WALK_CONTROL_MODE,
-    pos_threshold=config.common.walk_pos_threshold
+    pos_threshold=config.common.walk_pos_threshold,
+    backward_mode=config.place.step_back_mode
 )
 
-turn_waist_0 = NodeWaist(name='turn_waist_0',
+turn_waist_initial = NodeWaist(name='turn_waist_initial',
                          robot_sdk=robot_sdk,
                          waist_pos=config.place.waist_degree)
 
-# 等待后退达到0.1m触发条件
-wait_for_distance_trigger = NodeWaitForBlackboard(key='walk_distance_trigger_reached')
-
-# 创建Sequence：等待触发后开始转腰（memory=False确保每次都重新执行）
-turn_waist_after_trigger = py_trees.composites.Sequence(name="turn_waist_after_trigger", memory=False)
-turn_waist_after_trigger.add_children([wait_for_distance_trigger, turn_waist_0])
-
-# 后退、手臂重置和转腰并行执行，后退完成时整体完成
-walk_and_turn = py_trees.composites.Parallel(name="walk_and_turn",
-                                              policy=py_trees.common.ParallelPolicy.SuccessOnSelected(
-                                                  children=[place_box_WALK, turn_waist_after_trigger]))
-walk_and_turn.add_children([back_to_origin_ARM_RESET1, place_box_SETWALKGOAL, place_box_WALK, turn_waist_after_trigger])
+walk_and_turn = py_trees.composites.Sequence(name="walk_and_turn", memory=True)
+walk_and_turn.add_children([back_to_origin_ARM_RESET1, place_box_SETWALKGOAL, place_box_WALK, turn_waist_initial])
 
 # 9. 回到初始位置
 back_to_origin_SETGOAL = NodeFuntion(name="back_to_origin_SETGOAL",
@@ -372,8 +365,9 @@ def pause_for_next_step(step_name, enable_pause=None):
     return True
 
 if __name__ == '__main__':
-    # robot_sdk.control.control_head(0, np.deg2rad(-10))
+    # 初始化底层 SDK，确保 Core 被正确 initialize
     KuavoSDK.Init(log_level="INFO")
+    # robot_sdk.control.control_head(0, np.deg2rad(-10))
     # 用 Repeat 包裹，让它无限循环
     num_repeats = config.common.grab_box_num
     looping_root = py_trees.decorators.Repeat(name="RepeatRoot", child=root, num_success=num_repeats)

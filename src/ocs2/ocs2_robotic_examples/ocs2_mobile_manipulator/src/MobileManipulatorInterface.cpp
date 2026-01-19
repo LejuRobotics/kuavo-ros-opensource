@@ -289,16 +289,20 @@ std::unique_ptr<StateCost> MobileManipulatorInterface::getEndEffectorConstraint(
   {
     throw std::invalid_argument("[getEndEffectorConstraint] eefIdx is out of range.");
   }
-  scalar_t muPosition = 1.0;
-  scalar_t muOrientation = 1.0;
+  scalar_t muPositionX = 1.0, muPositionY = 1.0, muPositionZ = 1.0;
+  scalar_t muOrientationRoll = 1.0, muOrientationPitch = 1.0, muOrientationYaw = 1.0;
   const std::string name = "WRIST_2";
 
   boost::property_tree::ptree pt;
   boost::property_tree::read_info(taskFile, pt);
   std::cerr << "\n #### " << prefix << " Settings: ";
   std::cerr << "\n #### =============================================================================\n";
-  loadData::loadPtreeValue(pt, muPosition, prefix + ".muPosition", true);
-  loadData::loadPtreeValue(pt, muOrientation, prefix + ".muOrientation", true);
+  loadData::loadPtreeValue(pt, muPositionX, prefix + ".muPositionX", true);
+  loadData::loadPtreeValue(pt, muPositionY, prefix + ".muPositionY", true);
+  loadData::loadPtreeValue(pt, muPositionZ, prefix + ".muPositionZ", true);
+  loadData::loadPtreeValue(pt, muOrientationRoll, prefix + ".muOrientationRoll", true);
+  loadData::loadPtreeValue(pt, muOrientationPitch, prefix + ".muOrientationPitch", true);
+  loadData::loadPtreeValue(pt, muOrientationYaw, prefix + ".muOrientationYaw", true);
   std::cerr << " #### =============================================================================\n";
 
   if (referenceManagerPtr_ == nullptr) {
@@ -319,8 +323,12 @@ std::unique_ptr<StateCost> MobileManipulatorInterface::getEndEffectorConstraint(
   }
 
   std::vector<std::unique_ptr<PenaltyBase>> penaltyArray(6);
-  std::generate_n(penaltyArray.begin(), 3, [&] { return std::make_unique<QuadraticPenalty>(muPosition); });
-  std::generate_n(penaltyArray.begin() + 3, 3, [&] { return std::make_unique<QuadraticPenalty>(muOrientation); });
+  penaltyArray[0] = std::make_unique<QuadraticPenalty>(muPositionX);
+  penaltyArray[1] = std::make_unique<QuadraticPenalty>(muPositionY);
+  penaltyArray[2] = std::make_unique<QuadraticPenalty>(muPositionZ);
+  penaltyArray[3] = std::make_unique<QuadraticPenalty>(muOrientationRoll);
+  penaltyArray[4] = std::make_unique<QuadraticPenalty>(muOrientationPitch);
+  penaltyArray[5] = std::make_unique<QuadraticPenalty>(muOrientationYaw);
 
   return std::make_unique<StateSoftConstraint>(std::move(constraint), std::move(penaltyArray));
 }

@@ -50,7 +50,7 @@
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
-    <arg name="with_mm_ik" default="false"/>
+    <arg name="with_mm_ik" default="true"/>
     <arg name="with_led" default="true"/>
     <arg name="with_battery" default="false"/>
     
