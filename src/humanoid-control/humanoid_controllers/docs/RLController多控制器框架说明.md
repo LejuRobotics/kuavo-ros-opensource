@@ -60,16 +60,16 @@ RLControllerBase (基类)
 
 ### 2.2 与 RL / 控制器切换相关的 ROS 接口
 
-- **控制器级服务（由每个 RL 控制器自动提供，命名空间为 `/{controller_name}`）**
-  - `/{controller_name}/reload` (`std_srvs/Trigger`)  
+- **控制器级服务（由每个 RL 控制器自动提供，命名空间为 `/humanoid_controllers/{controller_name}`）**
+  - `/humanoid_controllers/{controller_name}/reload` (`std_srvs/Trigger`)  
     - 重新加载该控制器的配置文件（内部调用派生类的 `loadConfig`），常用于在线调参后热更新。
-  - `/{controller_name}/isActive` (`std_srvs/Trigger`)  
+  - `/humanoid_controllers/{controller_name}/isActive` (`std_srvs/Trigger`)  
     - 返回当前控制器是否处于 **RUNNING** 状态（即是否被 `RLControllerManager` 选为当前控制器并允许推理）。
-  - `/{controller_name}/getState` (`std_srvs/Trigger`)  
+  - `/humanoid_controllers/{controller_name}/getState` (`std_srvs/Trigger`)  
     - 返回控制器内部状态枚举 `ControllerState` 的整数值（INITIALIZING/RUNNING/PAUSED/ERROR/STOPPED）。
-  - `/{controller_name}/getType` (`std_srvs/Trigger`)  
+  - `/humanoid_controllers/{controller_name}/getType` (`std_srvs/Trigger`)  
     - 返回该控制器的 `RLControllerType` 枚举值（MPC/AMP_CONTROLLER/FALL_STAND_CONTROLLER 等）的整数编码。
-  - `/{controller_name}/reset` (`std_srvs/Trigger`)  
+  - `/humanoid_controllers/{controller_name}/reset` (`std_srvs/Trigger`)  
     - 调用派生类的 `reset()`，用于清理内部状态（相位、轨迹时间步、动作缓存等）。
 
 - **控制器管理与切换服务（由 `RLControllerManager` 提供，命名空间 `humanoid_controller`）**
@@ -96,6 +96,13 @@ RLControllerBase (基类)
       - `actions`：当前网络输出动作；  
       - `singleInputData`：拼接后的单帧观测向量；  
       - `InputData/<key>`：按配置分块的观测子向量（例如 `joint_pos`、`base_ang_vel` 等），用于可视化和调试 RL 观测。
+  - `/humanoid_controller/resetting_mpc_state_` (`std_msgs/Float64` / 通过 `TopicLogger` 发布)  
+    - 实时发布 MPC 重置状态，用于监控从 RL 切换到 MPC 时的重置过程：  
+      - `0` (`NOMAL`)：正常状态，MPC 正常运行；  
+      - `1` (`RESET_INITIAL_POLICY`)：重置 MPC 状态1，等待初始策略；  
+      - `2` (`RESET_BASE`)：重置 MPC 状态2，更新躯干位置（插值阶段）。  
+    - 当从 RL 切回 MPC 时，状态会依次经历 `RESET_INITIAL_POLICY` → `RESET_BASE` → `NOMAL`，便于监控 MPC 重置进度。
+  - 
  - **遥控器集成**
    - 目前北通遥控器集成了多控制器切换、倒地起身等功能
      - 
@@ -850,11 +857,11 @@ PAUSED/RUNNING → (stop()) → STOPPED
 
 每个控制器自动提供以下服务（命名空间为 `/{controller_name}/`）:
 
-- `/{controller_name}/reload`: 重新加载配置
-- `/{controller_name}/isActive`: 检查是否激活
-- `/{controller_name}/getState`: 获取状态
-- `/{controller_name}/getType`: 获取类型
-- `/{controller_name}/reset`: 重置控制器
+- `/humanoid_controllers/{controller_name}/reload`: 重新加载配置
+- `/humanoid_controllers/{controller_name}/isActive`: 检查是否激活
+- `/humanoid_controllers/{controller_name}/getState`: 获取状态
+- `/humanoid_controllers/{controller_name}/getType`: 获取类型
+- `/humanoid_controllers/{controller_name}/reset`: 重置控制器
 
 ### 5.2 管理器级别的服务
 
