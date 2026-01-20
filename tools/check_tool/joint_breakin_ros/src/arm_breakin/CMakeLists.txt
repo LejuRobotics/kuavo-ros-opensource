@@ -15,6 +15,9 @@ find_package(catkin REQUIRED COMPONENTS
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
+## Find yaml-cpp for YAML configuration parsing
+find_package(yaml-cpp REQUIRED)
+
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -159,10 +162,15 @@ include_directories(
     ${MOTOREVO_CONTROLLER_DIR}/include
     ${MOTOREVO_CONTROLLER_DIR}/../../include
     ${CANBUS_SDK_DIR}/include
+    ${yaml-cpp_INCLUDE_DIRS}
 )
 
-## Declare a C++ executable
+## Declare C++ executables
+# roban_v14_dual 机型节点
 add_executable(arm_breakin_node src/arm_breakin_node.cpp)
+
+# kuavo_v52_dual 机型节点
+add_executable(arm_breakin_kuavo_v52_dual_node src/arm_breakin_kuavo_v52_dual_node.cpp)
 
 ## Add cmake target dependencies
 # 确保在构建arm_breakin_node之前先构建motorevo_controller和canbus_sdk
@@ -172,12 +180,32 @@ add_dependencies(arm_breakin_node
     canbus_sdk
 )
 
+# 确保在构建arm_breakin_kuavo_v52_dual_node之前先构建motorevo_controller和canbus_sdk
+add_dependencies(arm_breakin_kuavo_v52_dual_node 
+    ${catkin_EXPORTED_TARGETS}
+    motorevo_controller
+    canbus_sdk
+)
+
 ## Specify libraries to link
 # 直接链接到通过add_subdirectory添加的库目标
+# roban_v14_dual 节点
 target_link_libraries(arm_breakin_node
     ${catkin_LIBRARIES}
     motorevo_controller
     canbus_sdk
+    yaml-cpp
+    pthread
+    m
+    stdc++
+)
+
+# kuavo_v52_dual 节点
+target_link_libraries(arm_breakin_kuavo_v52_dual_node
+    ${catkin_LIBRARIES}
+    motorevo_controller
+    canbus_sdk
+    yaml-cpp
     pthread
     m
     stdc++
@@ -198,7 +226,7 @@ target_link_libraries(arm_breakin_node
 # )
 
 ## Mark executables for installation
-install(TARGETS arm_breakin_node
+install(TARGETS arm_breakin_node arm_breakin_kuavo_v52_dual_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

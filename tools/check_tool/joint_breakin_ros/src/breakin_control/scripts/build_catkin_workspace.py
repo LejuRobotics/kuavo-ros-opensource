@@ -99,17 +99,31 @@ def ensure_workspace_built(workspace_root: Path) -> int:
         0  成功（已编译或本次编译成功）
         非0  失败
     """
+    build_lib_dir = workspace_root / "build_lib" / "lib"
     build_dir = workspace_root / "build"
     devel_setup = workspace_root / "devel" / "setup.bash"
 
     print(f"检测到 ROS 工作空间路径: {workspace_root}")
 
-    # 已经编译过
+    # 检查 build_lib 中是否存在预编译的库文件（优先检查）
+    if build_lib_dir.exists():
+        # 检查关键库文件是否存在
+        key_files = [
+            build_lib_dir / "libcanbus_sdk.so",
+            build_lib_dir / "libmotorevo_controller.so",
+            build_lib_dir / "arm_breakin" / "arm_breakin_node",
+        ]
+        found_files = [f for f in key_files if f.exists()]
+        if len(found_files) > 0:
+            print(f"✓ 检测到 build_lib/lib 目录及其中的编译产物（找到 {len(found_files)} 个关键文件），认为已经编译完成。")
+            return 0
+
+    # 如果 build_lib 不存在，检查编译标志
     if build_dir.is_dir() and devel_setup.exists():
         print("✓ 检测到 build/ 和 devel/setup.bash，认为已经编译完成，无需再次编译。")
         return 0
 
-    print("⚠ 未检测到完整的编译产物，准备执行 catkin_make ...")
+    print("⚠ 未检测到编译产物（build_lib/lib 或 build/ 目录），准备执行 catkin_make ...")
     print(f"Base path (catkin 工作空间根): {workspace_root}")
 
     try:

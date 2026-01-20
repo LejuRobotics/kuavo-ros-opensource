@@ -242,11 +242,11 @@ class ArmTrajectoryBezierDemo:
 
     def call_change_arm_ctrl_mode_service(self, arm_ctrl_mode):
         result = True
-        service_name = "humanoid_change_arm_ctrl_mode"
+        service_name = "arm_traj_change_mode"
         try:
             rospy.wait_for_service(service_name, timeout=0.5)
             change_arm_ctrl_mode = rospy.ServiceProxy(
-                "humanoid_change_arm_ctrl_mode", changeArmCtrlMode
+                "arm_traj_change_mode", changeArmCtrlMode
             )
             change_arm_ctrl_mode(control_mode=arm_ctrl_mode)
             rospy.loginfo("Service call successful")

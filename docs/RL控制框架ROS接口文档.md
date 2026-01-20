@@ -1,6 +1,6 @@
 # RL控制框架ROS接口文档
 
-本文档整理了RL控制框架中提供的所有ROS服务接口，包括控制器管理、控制器状态查询、以及特定控制器的功能服务。
+本文档整理了RL控制框架中提供的所有ROS服务接口和监控话题，包括控制器管理、控制器状态查询、以及特定控制器的功能服务和监控调试话题。
 - 其他关联文档：
   - [倒地起身说明](../src/humanoid-control/humanoid_controllers/docs/倒地起身操作说明.md)
   - [RLController多控制器框架说明（初期版本）](../src/humanoid-control/humanoid_controllers/docs/RLController多控制器框架说明.md)
@@ -11,6 +11,7 @@
 2. [控制器基础服务（RLControllerBase）](#2-控制器基础服务rlcontrollerbase) - 5个服务
 3. [倒地起身控制器服务（FallStandController）](#3-倒地起身控制器服务fallstandcontroller) - 1个服务
 4. [主控制器服务（humanoidController）](#4-主控制器服务humanoidcontroller) - 5个服务
+5. [监控与调试话题](#5-监控与调试话题) - 2个话题
 
 ---
 
@@ -306,6 +307,73 @@ rosservice call /humanoid_controller/trigger_fall_stand_up
 
 ---
 
+## 5. 监控与调试话题
+
+这些话题由 `humanoidController` 通过 `TopicLogger` 实时发布，用于监控控制器状态和调试MPC↔RL模式切换过程。
+
+### 5.1 `/humanoid_controller/is_rl_controller_`
+
+**话题类型**: `std_msgs/Float64`
+
+**发布频率**: 与控制循环频率相同（通常为100Hz或更高）
+
+**功能**: 实时发布当前是否处于RL控制模式
+
+**消息内容**:
+- `data` (float64): 
+  - `1.0`: 当前处于RL控制模式
+  - `0.0`: 当前处于MPC控制模式
+
+**使用说明**:
+- 状态由 `!controller_manager_->isBaseControllerActive()` 决定
+- 便于监控MPC↔RL模式切换
+- 可用于外部系统（如可视化工具、日志记录）判断当前控制模式
+
+**订阅示例**:
+```bash
+# 使用rostopic查看
+rostopic echo /humanoid_controller/is_rl_controller_
+
+# 使用rqt_plot可视化
+rqt_plot /humanoid_controller/is_rl_controller_/data
+```
+
+---
+
+### 5.2 `/humanoid_controller/resetting_mpc_state_`
+
+**话题类型**: `std_msgs/Float64`
+
+**发布频率**: 与控制循环频率相同（通常为100Hz或更高）
+
+**功能**: 实时发布MPC重置状态，用于监控从RL切换到MPC时的重置过程
+
+**消息内容**:
+- `data` (float64): MPC重置状态码
+  - `0` (`NOMAL`): 正常状态，MPC正常运行
+  - `1` (`RESET_INITIAL_POLICY`): 重置MPC状态1，等待初始策略
+  - `2` (`RESET_BASE`): 重置MPC状态2，更新躯干位置（插值阶段）
+
+**状态转换流程**:
+- 当从RL切回MPC时，状态会依次经历：
+  - `RESET_INITIAL_POLICY` (1) → `RESET_BASE` (2) → `NOMAL` (0)
+- 便于监控MPC重置进度和调试切换过程
+
+**使用说明**:
+- 在RL→MPC切换过程中，可以通过此话题监控重置进度
+- 当状态为 `NOMAL` (0) 时，表示MPC已完全重置并正常运行
+- 可用于外部系统判断MPC是否已完成重置，避免在重置过程中执行其他操作
+
+**订阅示例**:
+```bash
+# 使用rostopic查看
+rostopic echo /humanoid_controller/resetting_mpc_state_
+
+# 使用rqt_plot可视化
+rqt_plot /humanoid_controller/resetting_mpc_state_/data
+```
+
+---
 
 ## 服务调用示例
 

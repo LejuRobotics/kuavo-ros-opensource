@@ -3,7 +3,7 @@
 """
 Roban2机器人腿部磨线启动脚本
 仅启动腿部磨线（EC_Master电机，自研CAN）
-支持Roban2机器人（版本13-14）和Kuavo4（版本40-49）
+支持Roban2机器人（版本13-14）
 """
 
 import os
@@ -29,18 +29,12 @@ class KuavoUnifiedBreakin:
         self.current_dir = Path(__file__).parent.absolute()
         
         # 腿部磨线脚本路径（根据版本动态选择）
-        self.leg_breakin_script_roban2 = self.current_dir / "leg_breakin_tools" / "roban2_leg_breakin.py"
-        self.leg_breakin_script_kuavo4 = self.current_dir / "leg_breakin_tools" / "kuavo4_leg_breakin.py"
+        self.leg_breakin_script_roban2 = self.current_dir / "leg_breakin_roban2_v14" / "roban2_leg_breakin.py"
         self.leg_breakin_script = None  # 将在检测版本后设置
         
         self.leg_process = None
-        self.log_dir = Path("/tmp/kuavo_breakin_logs")
         self.robot_version = None
         self.robot_type = None
-        
-        # 心跳监控相关
-        self.leg_heartbeat_file = "/tmp/leg_heartbeat"
-        self.emergency_stop_file = "/tmp/emergency_stop"
         
         # 全局停止标志
         self.stop_all_processes = threading.Event()
@@ -69,14 +63,6 @@ class KuavoUnifiedBreakin:
                     except Exception as e2:
                         self.print_colored(f"备用终止方案也失败: {e2}", Colors.RED)
             
-            # 清理信号文件
-            try:
-                if os.path.exists("/tmp/leg_stop_signal"):
-                    os.remove("/tmp/leg_stop_signal")
-                self.print_colored("✓ 已清理所有信号文件", Colors.GREEN)
-            except Exception as e:
-                self.print_colored(f"清理信号文件失败: {e}", Colors.YELLOW)
-            
             self.print_colored("腿部磨线程序已停止，程序退出", Colors.GREEN)
             sys.exit(0)
         
@@ -85,7 +71,7 @@ class KuavoUnifiedBreakin:
         signal.signal(signal.SIGTERM, global_signal_handler)
         
     def get_robot_type_from_version(self, version):
-        """根据版本号获取机器人类型（支持roban2和kuavo4）"""
+        """根据版本号获取机器人类型（支持roban2）"""
         if version is None:
             return None
             
@@ -93,8 +79,6 @@ class KuavoUnifiedBreakin:
             version_num = int(version)
             if 13 <= version_num <= 14:
                 return "roban2"
-            elif 40 <= version_num <= 49:
-                return "kuavo4"
             else:
                 return None
         except (ValueError, TypeError):
@@ -104,29 +88,6 @@ class KuavoUnifiedBreakin:
         """打印带颜色的消息"""
         print(f"{color}{message}{Colors.NC}")
         
-    def cleanup_logs(self):
-        """清理日志目录"""
-        try:
-            if self.log_dir.exists():
-                shutil.rmtree(self.log_dir)
-        except Exception as e:
-            self.print_colored(f"清理日志目录失败: {e}", Colors.RED)
-    
-    def cleanup_heartbeat_files(self):
-        """清理心跳文件和信号文件"""
-        heartbeat_files = [
-            self.leg_heartbeat_file,
-            self.emergency_stop_file,
-            "/tmp/leg_stop_signal"
-        ]
-        
-        for file_path in heartbeat_files:
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception as e:
-                self.print_colored(f"清理心跳/信号文件失败 {file_path}: {e}", Colors.YELLOW)
-    
     def get_robot_version(self):
         """读取机器人的版本号"""
         home_dir = os.path.expanduser('/home/lab/')
@@ -145,7 +106,7 @@ class KuavoUnifiedBreakin:
         return None
     
     def detect_leg_script_version(self):
-        """检测机器人版本并设置腿部磨线脚本（支持roban2和kuavo4）"""
+        """检测机器人版本并设置腿部磨线脚本（支持roban2）"""
         self.robot_version = self.get_robot_version()
         
         # 根据版本号自动选择
@@ -155,15 +116,11 @@ class KuavoUnifiedBreakin:
             self.leg_breakin_script = self.leg_breakin_script_roban2
             self.print_colored("腿部磨线：使用 Roban2 腿部磨线脚本（适用于版本13-14）", Colors.BLUE)
             return True
-        elif self.robot_type == "kuavo4":
-            self.leg_breakin_script = self.leg_breakin_script_kuavo4
-            self.print_colored("腿部磨线：使用 Kuavo4 腿部磨线脚本（适用于版本40-49）", Colors.BLUE)
-            return True
         else:
             if self.robot_version:
-                self.print_colored(f"错误：版本 {self.robot_version} 不在支持范围内（支持版本13-14的Roban2或版本40-49的Kuavo4）", Colors.RED)
+                self.print_colored(f"错误：版本 {self.robot_version} 不在支持范围内（支持版本13-14的Roban2）", Colors.RED)
             else:
-                self.print_colored("错误：无法检测到机器人版本，且仅支持Roban2（版本13-14）或Kuavo4（版本40-49）", Colors.RED)
+                self.print_colored("错误：无法检测到机器人版本，且仅支持Roban2（版本13-14）", Colors.RED)
             return False
         
     def check_root_permission(self):
@@ -181,12 +138,12 @@ class KuavoUnifiedBreakin:
             sys.exit(1)
         
     def check_and_compile_leg_breakin(self):
-        """检查腿部磨线编译产物是否存在（支持roban2和kuavo4）"""
+        """检查腿部磨线编译产物是否存在（支持roban2）"""
         if not self.leg_breakin_script or not self.leg_breakin_script.exists():
             self.print_colored(f"错误：腿部磨线脚本不存在: {self.leg_breakin_script}", Colors.RED)
             return False
         
-        # Roban2和Kuavo4都使用自研腿ec_master_tools目录下的编译产物
+        # Roban2使用自研腿ec_master_tools目录下的编译产物
         ec_master_dir = self.leg_breakin_script.parent
         build_dir = ec_master_dir / "build_lib" / "roban2"
         ec_master_so = build_dir / "ec_master_wrap.so"
@@ -249,8 +206,7 @@ class KuavoUnifiedBreakin:
         try:
             leg_script_dir = self.leg_breakin_script.parent
             # leg_breakin_tools现在直接执行磨线功能，只需要输入时间
-            # 单独腿部磨线时，不需要检查手臂心跳
-            env = dict(os.environ, PYTHONUNBUFFERED='1', CHECK_ARM_HEARTBEAT='false')
+            env = dict(os.environ, PYTHONUNBUFFERED='1')
             # 将ROBOT_VERSION传递给子进程，避免EcMasterConfig警告
             if self.robot_version:
                 env['ROBOT_VERSION'] = str(self.robot_version)
@@ -270,9 +226,6 @@ class KuavoUnifiedBreakin:
         """主运行函数"""
         print()
         
-        # 在程序开始时清理之前的日志和心跳文件
-        self.cleanup_logs()
-        self.cleanup_heartbeat_files()
         
         self.check_root_permission()
         

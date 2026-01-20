@@ -1,3 +1,8 @@
-devel
-build
-src/leg_breakin/src/leg_breakin_tools/EC_log/*
+devel/
+build/
+src/leg_breakin/src/leg_breakin_roban2_v14/EC_log/*
+src/leg_breakin/src/leg_breakin_roban2_v14/src/
+src/leg_breakin/src/leg_breakin_kuavo5_v52/EC_log/*
+src/leg_breakin/src/leg_breakin_kuavo5_v52/src/
+kuavo5/
+__pycache__/

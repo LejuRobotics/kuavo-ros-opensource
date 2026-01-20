@@ -276,6 +276,10 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_position(const Eigen::VectorXd& q)
 {
     Eigen::VectorXd result(12);
     auto joint_q = q;
+    // 膝关节输入限制：膝关节位置必须 >= 0，小于 0 进行截断到 0
+    // joint_q 索引约定：左膝 joint_q[3]，右膝 joint_q[9]
+    joint_q[3] = std::max(joint_q[3], 0.0);
+    joint_q[9] = std::max(joint_q[9], 0.0);
     joint_q[4] = std::max(std::min(joint_q[4], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);
     joint_q[10] = std::max(std::min(joint_q[10], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);
     joint_q[5] = std::max(std::min(joint_q[5], ankle_roll_limits_[1]), ankle_roll_limits_[0]);

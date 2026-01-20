@@ -30,6 +30,7 @@ add_service_files(
   RenameMap.srv
   EditMap.srv
   InitialPoseWithTaskPoint.srv
+  DeleteMap.srv
 )
 
 generate_messages(

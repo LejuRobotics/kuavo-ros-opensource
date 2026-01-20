@@ -356,7 +356,67 @@
 
 ---
 
-### 12. 标记任务点 (task_point)
+### 12. 删除地图 (delete_map)
+
+**请求格式：**
+```json
+{
+    "cmd": "delete_map",
+    "data": {
+        "map_name": "living_room_map"
+    }
+}
+```
+
+**响应格式：**
+```json
+{
+    "cmd": "delete_map",
+    "data": {
+        "code": 0,
+        "message": "地图删除成功: living_room_map",
+        "map_name": "living_room_map"
+    }
+}
+```
+
+**错误响应示例：**
+```json
+{
+    "cmd": "delete_map",
+    "data": {
+        "code": 1,
+        "message": "无法删除当前正在建图的地图",
+        "map_name": "living_room_map"
+    }
+}
+```
+
+```json
+{
+    "cmd": "delete_map",
+    "data": {
+        "code": 1,
+        "message": "无法删除当前正在使用的导航地图",
+        "map_name": "living_room_map"
+    }
+}
+```
+
+```json
+{
+    "cmd": "delete_map",
+    "data": {
+        "code": 1,
+        "message": "地图名称不能为空",
+        "map_name": ""
+    }
+}
+```
+
+---
+
+### 13. 标记任务点 (task_point)
 
 **请求格式：**
 ```json
@@ -412,7 +472,7 @@
 
 ---
 
-### 13. 获取任务点列表 (get_task_points)
+### 14. 获取任务点列表 (get_task_points)
 
 **请求格式：**
 ```json
@@ -465,7 +525,7 @@
 
 ---
 
-### 14. 导航到任务点 (navigate_to_task_point)
+### 15. 导航到任务点 (navigate_to_task_point)
 
 **请求格式：**
 ```json
@@ -506,7 +566,7 @@
 
 ---
 
-### 15. 获取机器人当前位置 (get_robot_position)
+### 16. 获取机器人当前位置 (get_robot_position)
 
 **请求格式：**
 ```json
@@ -564,7 +624,7 @@
 
 ---
 
-### 16. 基于任务点的校准 (calibration_by_task_point)
+### 17. 基于任务点的校准 (calibration_by_task_point)
 
 **请求格式：**
 ```json
@@ -600,7 +660,7 @@
 ```
 ---
 
-### 17. 加载地图 (load_map)
+### 18. 加载地图 (load_map)
 
 **请求格式：**
 ```json

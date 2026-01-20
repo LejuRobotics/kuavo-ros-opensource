@@ -3178,6 +3178,101 @@ async def rename_map_handler(
     response_queue.put(response)
 
 
+async def delete_map_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    删除地图功能
+    """
+    payload = Payload(
+        cmd="delete_map",
+        data={"code": 0, "message": "删除地图命令发送成功"}
+    )
+
+    try:
+        # 获取要删除的地图名称
+        map_name = data.get("data", {}).get("map_name", "")
+
+        if not map_name:
+            payload.data["code"] = 1
+            payload.data["message"] = "地图名称不能为空"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+            return
+
+        print(f"Deleting map: {map_name}")
+
+        # 调用上位机的删除地图服务
+        import asyncio
+        try:
+            # 调用上位机的删除地图服务
+            service_name = '/delete_map_service'
+            rospy.wait_for_service(service_name, timeout=5.0)
+
+            # 使用rosservice命令调用删除地图服务
+            # 使用 asyncio 在后台线程执行，避免阻塞 WebSocket 事件循环
+            loop = asyncio.get_event_loop()
+            cmd = f"rosservice call {service_name} '{{map_name: \"{map_name}\"}}'"
+            result = await loop.run_in_executor(None, lambda: subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=30))
+
+            if result.returncode == 0:
+                # 解析ROSService返回的YAML格式响应
+                output_lines = result.stdout.strip().split('\n')
+                success = False
+                message = f"地图删除成功: {map_name}"
+
+                for line in output_lines:
+                    if "success: True" in line:
+                        success = True
+                    elif "success: False" in line:
+                        success = False
+                    elif "message:" in line:
+                        english_message = line.split("message:", 1)[1].strip()
+                        if "Map name cannot be empty" in english_message:
+                            message = "地图名称不能为空"
+                        elif "Cannot delete map currently being mapped" in english_message:
+                            message = "无法删除当前正在建图的地图"
+                        elif "Cannot delete map currently in use for navigation" in english_message:
+                            message = "无法删除当前正在使用的导航地图"
+                        elif "Map deleted successfully" in english_message:
+                            message = f"地图删除成功: {map_name}"
+                        elif "Failed to delete map" in english_message:
+                            message = f"地图删除失败: {map_name}"
+                        elif "Error deleting map" in english_message:
+                            message = "删除地图时发生错误"
+                        else:
+                            message = english_message
+
+                if success:
+                    payload.data["message"] = message
+                    payload.data["map_name"] = map_name
+                    print(f"Delete map service call successful: {message}")
+                else:
+                    payload.data["code"] = 1
+                    payload.data["message"] = message
+                    payload.data["map_name"] = map_name
+                    print(f"Delete map service call failed: {message}")
+            else:
+                payload.data["code"] = 1
+                payload.data["message"] = f"地图删除失败: {result.stderr}"
+                payload.data["map_name"] = map_name
+                print(f"Delete map service call failed: {result.stderr}")
+
+        except (rospy.ServiceException, subprocess.TimeoutExpired, asyncio.TimeoutError) as e:
+            payload.data["code"] = 1
+            payload.data["message"] = f"无法连接到删除地图服务: {str(e)}"
+            payload.data["map_name"] = map_name
+            print(f"Failed to connect to delete map service: {str(e)}")
+
+
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to delete map: {str(e)}"
+
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+
 # ==================== 2D地图显示功能 
 
 # 全局变量存储地图数据
