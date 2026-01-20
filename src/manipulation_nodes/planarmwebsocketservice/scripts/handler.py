@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*- 
 import rospy
 import rospkg
 import os
@@ -4924,6 +4924,38 @@ async def get_vr_status_handler(websocket: websockets.WebSocketServerProtocol, d
         print(traceback.format_exc())
         payload.data["code"] = 1
         payload.data["message"] = f"Failed to get VR status: {str(e)}"
+
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+
+async def start_vr_record_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """
+    开始VR录制接口
+    录制机器人的bag数据（文件名自动生成）
+    """
+    payload = Payload(cmd="start_vr_record", data={"code": 0, "message": "Recording started"})
+
+    try:
+        # 导入VR录制模块
+        import vr_manager
+
+        # 调用录制函数（自动生成文件名）
+        success, message = vr_manager.start_recording()
+
+        if success:
+            payload.data["code"] = 0
+            payload.data["message"] = message
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = message
+
+    except Exception as e:
+        print(f"Start VR recording error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        payload.data["code"] = 2
+        payload.data["message"] = f"Start recording failed: {str(e)}"
 
     response = Response(payload=payload, target=websocket)
     response_queue.put(response)

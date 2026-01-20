@@ -99,29 +99,6 @@
 
 ---
 
-### 5. 断开VR - `disconnect_vr` 
-
-**请求**：
-```json
-{
-  "cmd": "disconnect_vr",
-  "data": {}
-}
-```
-
-**响应**：
-```json
-{
-  "cmd": "disconnect_vr",
-  "data": {
-    "code": 0,
-    "message": "VR disconnected successfully"
-  }
-}
-```
-
----
-
 ## 辅助接口
 
 ### 获取机器人信息 - `get_robot_info`
