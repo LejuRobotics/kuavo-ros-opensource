@@ -660,6 +660,9 @@ class RobotControlBlockly:
             action_file (str): Action file name.
             proj_name (str, optional): Project name.
         """
+
+        print("⚠️ 警告: 此接口(excute_action_file)即将废弃，请使用新接口execute_action_file")
+
         global g_robot_type
         g_robot_type = "ocs2"
         self.plan_arm_state_status = False
@@ -695,6 +698,51 @@ class RobotControlBlockly:
         while self.plan_arm_state_status is False:
             time.sleep(0.01)
         print("action file executed")
+
+    def execute_action_file(self, action_file: str, proj_name: str = None, music_file: str = None):
+        """Execute an action file, parse action frames, and send Bezier trajectory request to the robot.
+
+        Args:
+            action_file (str): Action file name.
+            proj_name (str, optional): Project name.
+        """
+
+        global g_robot_type
+        g_robot_type = "ocs2"
+        self.plan_arm_state_status = False
+
+        action_filename = action_file + ".tact"
+        if proj_name is None:
+            action_file_path = os.path.expanduser(f"{self.ACTION_FILE_FOLDER}/{action_filename}")
+        else:
+            action_file_path = self.package_path + "/upload_files/" + proj_name + "/action_files/" + action_filename
+        if not os.path.exists(action_file_path):
+            print(f"Action file not found: {action_file_path}")
+            return
+
+        is_compatible, msg = verify_robot_version(action_file_path)
+        if not is_compatible:
+            print(msg)
+            return
+
+        start_frame_time, end_frame_time = get_start_end_frame_time(action_file_path)
+
+        if g_robot_type == "ocs2":
+            action_frames = frames_to_custom_action_data_ocs2(action_file_path, start_frame_time, current_arm_joint_state)
+            end_frame_time += 1
+            self.set_arm_control_mode(2)
+        else:
+            action_frames = frames_to_custom_action_data(action_file_path)
+
+        req = self.create_bezier_request(action_frames, start_frame_time, end_frame_time)
+        if music_file is not None:
+            self.play_music(music_file)
+        self.plan_arm_trajectory_bezier_curve_client(req)
+        time.sleep(0.5)
+        while self.plan_arm_state_status is False:
+            time.sleep(0.01)
+        print("action file executed")
+
 
     def control_robot_head(self, yaw: float, pitch: float):
         """Control the robot head rotation.
