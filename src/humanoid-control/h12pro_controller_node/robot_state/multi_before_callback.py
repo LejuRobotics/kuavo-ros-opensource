@@ -26,6 +26,11 @@ from sensor_msgs.msg import Joy
 from geometry_msgs.msg import Twist
 
 console = console.Console()
+
+# switch_controller 冷却期机制
+_switch_controller_lock = threading.Lock()
+_switch_controller_cooling_until = 0.0  # 冷却期结束时间戳
+SWITCH_CONTROLLER_COOLDOWN = 2.0  # 冷却期时长（秒）
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_dir = os.path.join(os.path.dirname(current_dir), "config")
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
@@ -784,11 +789,43 @@ def get_current_controller_name():
         rospy.logerr(f"Service '{service_name}' not available: {e}")
         return None
 
+def _release_switch_controller_cooldown():
+    """释放 switch_controller 冷却期（在后台线程中调用）"""
+    global _switch_controller_cooling_until
+    time.sleep(SWITCH_CONTROLLER_COOLDOWN)
+    with _switch_controller_lock:
+        _switch_controller_cooling_until = 0.0
+        rospy.loginfo("[SwitchController] Cooldown period ended. State transitions are now allowed.")
+
+def is_switch_controller_in_cooldown():
+    """检查 switch_controller 是否在冷却期内
+    
+    Returns:
+        bool: True 表示在冷却期内，False 表示不在冷却期
+    """
+    global _switch_controller_cooling_until
+    with _switch_controller_lock:
+        current_time = time.time()
+        if _switch_controller_cooling_until > current_time:
+            return True
+        return False
+
+def clear_switch_controller_cooldown():
+    """清除 switch_controller 的冷却期
+    用于紧急停止等需要立即执行的状态转换
+    """
+    global _switch_controller_cooling_until
+    with _switch_controller_lock:
+        _switch_controller_cooling_until = 0.0
+        rospy.loginfo("[SwitchController] Cooldown cleared by emergency stop or other critical operation.")
+
 def switch_controller_callback(event):
     """切换控制器回调函数
     - 如果当前是 mpc，切换到 amp_controller
     - 如果当前是 amp_controller，切换回 mpc
+    - 执行后设置冷却期，期间不允许其他状态转换
     """
+    global _switch_controller_cooling_until
     source = event.kwargs.get("source")
     trigger = event.kwargs.get("trigger")
     print_state_transition(trigger, source, "stance")
@@ -801,6 +838,7 @@ def switch_controller_callback(event):
         
         current_controller_lower = current_controller.lower()
         
+        success = False
         if current_controller_lower == "mpc":
             rospy.loginfo("[SwitchController] Current controller is MPC, switching to amp_controller")
             success = call_switch_controller_service("amp_controller")
@@ -813,6 +851,18 @@ def switch_controller_callback(event):
                 rospy.logwarn("[SwitchController] Failed to switch from amp_controller to MPC. Current controller remains amp_controller.")
         else:
             rospy.logwarn(f"[SwitchController] Unknown controller type: {current_controller}. Cannot switch.")
+
+        with _switch_controller_lock:
+            _switch_controller_cooling_until = time.time() + SWITCH_CONTROLLER_COOLDOWN
+            if success:
+                rospy.loginfo(f"[SwitchController] Controller switched successfully. Cooldown period started. State transitions will be blocked for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
+            else:
+                rospy.loginfo(f"[SwitchController] Cooldown period started (service call failed). State transitions will be blocked for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
+        
+        # 在后台线程中等待冷却期结束
+        cooldown_thread = threading.Thread(target=_release_switch_controller_cooldown, daemon=True)
+        cooldown_thread.start()
+        
     except Exception as e:
         rospy.logerr(f"Error in switch_controller_callback: {e}")
 

@@ -7,6 +7,7 @@ from sensor_msgs.msg import Joy
 from h12pro_controller_node.msg import h12proRemoteControllerChannel
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
 from robot_state.robot_state_machine import robot_state_machine, RobotStateMachine, states
+from robot_state.multi_before_callback import is_switch_controller_in_cooldown, clear_switch_controller_cooldown
 from transitions.core import MachineError
 from utils.utils import read_json_file
 import rospkg
@@ -649,6 +650,11 @@ class H12PROControllerNode:
             msg: Channel message for response.
         """
         try:
+            # 紧急停止时，清除 switch_controller 的冷却期，确保可以立即停止
+            if kuavo_control_scheme == "multi":
+                clear_switch_controller_cooldown()
+                rospy.loginfo("[EmergencyStop] Cleared switch_controller cooldown to allow immediate stop.")
+
             # 检查当前控制器是否为 mpc，只有 mpc 控制器支持缓慢下降
             current_controller = self._get_current_controller_name()
             if current_controller and current_controller.lower() == "mpc":
@@ -674,6 +680,12 @@ class H12PROControllerNode:
                                 key_combination: Set[str],
                                 msg: h12proRemoteControllerChannel) -> None:
         """Handle normal state transitions."""
+        # 检查是否在 switch_controller 冷却期内
+        if kuavo_control_scheme == "multi":
+            if is_switch_controller_in_cooldown():
+                rospy.logdebug("[StateTransition] Blocked: switch_controller is in cooldown period.")
+                return
+
         triggers = self.robot_state_machine.machine.get_triggers(current_state)
         
         for trigger in self._config["state_transitions"].get(current_state, {}):

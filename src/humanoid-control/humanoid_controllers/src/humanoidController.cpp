@@ -1124,6 +1124,7 @@ namespace humanoid_controller
   {
     // 对于 control_modes == 2 且 driver == EC_MASTER 的电机，使用 running_settings.joint_kp 和 joint_kd
     // running_settings.joint_kp 和 joint_kd 只包含 EC_MASTER 电机的值，需要建立映射
+    // 注意：ec_master_count 应该是所有 EC_MASTER 驱动器中的索引，而不是 control_modes == 2 的索引
     const auto &hardware_settings = kuavo_settings_.hardware_settings;
     const auto &running_settings = kuavo_settings_.running_settings;
     
@@ -1137,14 +1138,19 @@ namespace humanoid_controller
       
       for (int i = 0; i < total_joints && i < static_cast<int>(jointCmdMsg.control_modes.size()); ++i)
       {
-        // 检查边界条件和控制模式
-        if (jointCmdMsg.control_modes[i] == 2 && 
-            i < static_cast<int>(hardware_settings.driver.size()) &&
-            hardware_settings.driver[i] == EC_MASTER &&
-            ec_master_count < ec_master_size)
+        // 检查是否为 EC_MASTER 驱动器
+        if (i < static_cast<int>(hardware_settings.driver.size()) &&
+            hardware_settings.driver[i] == EC_MASTER)
         {
-          jointCmdMsg.joint_kp[i] = static_cast<double>(running_settings.joint_kp[ec_master_count]);
-          jointCmdMsg.joint_kd[i] = static_cast<double>(running_settings.joint_kd[ec_master_count]);
+          // 只有当 control_modes == 2 时才更新 joint_kp 和 joint_kd
+          if (jointCmdMsg.control_modes[i] == 2 && 
+              ec_master_count < ec_master_size)
+          {
+            jointCmdMsg.joint_kp[i] = static_cast<double>(running_settings.joint_kp[ec_master_count]);
+            jointCmdMsg.joint_kd[i] = static_cast<double>(running_settings.joint_kd[ec_master_count]);
+          }
+          // 无论 control_modes 是 0 还是 2，都要递增 ec_master_count
+          // 因为 running_settings.joint_kp/kd 的索引对应所有 EC_MASTER 驱动器
           ec_master_count++;
         }
       }

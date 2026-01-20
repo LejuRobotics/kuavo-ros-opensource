@@ -2,7 +2,7 @@
 
 <launch>
     <!-- VR控制相关参数 -->
-    <arg name="control_torso" default="1"/>  <!-- 启用躯干控制 -->
+    <arg name="control_torso" default="true"/>  <!-- 启用躯干控制 -->
     <arg name="ctrl_arm_idx" default="2"/>
     <arg name="predict_gesture" default="false"/>
     <arg name="ee_type" default="qiangnao"/>
@@ -12,6 +12,7 @@
 
     <!-- 设置VR控制参数 -->
     <param name="use_vr_control" value="$(arg use_vr_control)"/>
+    <param name="control_torso" value="$(arg control_torso)" type="bool"/>
     
     <!-- 包含基础的轮臂仿真launch文件 -->
     <include file="$(find humanoid_controllers)/launch/load_kuavo_real_wheel.launch">

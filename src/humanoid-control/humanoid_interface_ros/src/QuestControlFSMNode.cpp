@@ -801,6 +801,12 @@ namespace ocs2
 
         void updateState()
         {
+            // 动态读取control_torso参数，支持后续启动的launch文件设置参数
+            if(nodeHandle_.hasParam("/control_torso"))
+            {
+                nodeHandle_.getParam("/control_torso", control_torso_);
+            }
+
             if (!rec_joystick_data_)
             {
                 joystick_data_prev_ = joystick_data_;
@@ -891,7 +897,7 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 右边第二个按钮按下，切换腰部控制模式
                 {
-                    if (!torso_control_enabled_)
+                    if (!torso_control_enabled_ && control_torso_)
                     {
                         // 启用腰部控制模式
                         torso_control_enabled_ = true;
@@ -1798,6 +1804,7 @@ namespace ocs2
 
         // 腰部控制相关变量
         bool torso_control_enabled_;
+        bool control_torso_{false};  // 是否允许启动腰部控制
         
         // 末端力控制相关变量
         bool hand_wrench_enabled_;  // 末端力施加状态

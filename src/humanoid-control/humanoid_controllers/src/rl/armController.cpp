@@ -318,15 +318,15 @@ void ArmController::fillJointCmdMessage(kuavo_msgs::jointCmd& joint_cmd_msg,
 bool ArmController::changeMode(int target_mode)
 {
   // 检查是否处于插值过程中
-  if (is_interpolating_ && target_mode != arm_control_mode_)
-  {
-    // 缓存指令，待插值完成后执行
-    pending_arm_mode_ = target_mode;
-    has_pending_mode_change_ = true;
-    ROS_INFO("[ArmController] Interpolation in progress, mode change command cached (current: %d -> target: %d)",
-             arm_control_mode_, target_mode);
-    return false;  // 返回false表示指令已缓存，未立即执行
-  }
+  // if (is_interpolating_ && target_mode != arm_control_mode_)
+  // {
+  //   // 缓存指令，待插值完成后执行
+  //   pending_arm_mode_ = target_mode;
+  //   has_pending_mode_change_ = true;
+  //   ROS_INFO("[ArmController] Interpolation in progress, mode change command cached (current: %d -> target: %d)",
+  //            arm_control_mode_, target_mode);
+  //   return false;  // 返回false表示指令已缓存，未立即执行
+  // }
   
   // 验证模式有效性
   if (target_mode < 0 || target_mode > 2)
