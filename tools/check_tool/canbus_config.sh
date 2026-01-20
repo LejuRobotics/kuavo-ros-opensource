@@ -5,6 +5,7 @@ PROJECT_DIR=$(realpath "$SCRIPT_DIR/../../") # project: kuavo-ros-control/kuavo-
 # 配置文件路径定义
 CONFIG_DIR="$HOME/.config/lejuconfig"
 CANBUS_WIRING_TYPE_FILE="$CONFIG_DIR/CanbusWiringType.ini"
+HAND_PROTOCOL_TYPE_FILE="$CONFIG_DIR/HandProtocolType.ini"
 CANBUS_CONFIG_FILE="$CONFIG_DIR/canbus_device_cofig.yaml"
 
 # Roban2-0
@@ -92,6 +93,21 @@ select_wiring_type() {
     local wiring_types=("dual_bus" "single_bus")
     local selected_type="${wiring_types[$((wiring_selection-1))]}"
     local selected_description="${wiring_options[$((wiring_selection-1))]}"
+
+    echo_success "✓ 选择: $selected_description"
+
+    result_ref="$selected_type"
+}
+
+select_hand_protocol_type() {
+    local -n result_ref=$1
+    local hand_protocol_options=("proto_buf -- 485协议" "proto_can -- CAN协议")
+    show_menu "选择手部协议类型" "${hand_protocol_options[@]}"
+    get_user_selection 2 hand_protocol_selection
+
+    local hand_protocol_types=("proto_buf" "proto_can")
+    local selected_type="${hand_protocol_types[$((hand_protocol_selection-1))]}"
+    local selected_description="${hand_protocol_options[$((hand_protocol_selection-1))]}"
 
     echo_success "✓ 选择: $selected_description"
 
@@ -204,11 +220,19 @@ select_canbus_type() {
 write_config_files() {
     local wiring_type="$1"
     local config_file="$2"
-
+    local hand_protocol_type="$3"
+    
     # 写入CAN总线接线类型
     mkdir -p "$CONFIG_DIR"
     echo "$wiring_type" > "$CANBUS_WIRING_TYPE_FILE"
     echo_success "✓ CAN总线接线类型已保存到: $CANBUS_WIRING_TYPE_FILE"
+
+    # 写入手部协议类型
+    if [ -n "$hand_protocol_type" ]; then
+        mkdir -p "$CONFIG_DIR"
+        echo "$hand_protocol_type" > "$HAND_PROTOCOL_TYPE_FILE"
+        echo_success "✓ 手部协议类型已保存到: $HAND_PROTOCOL_TYPE_FILE"
+    fi
 
     # 拷贝最终CANBUS配置文件
     if [ -n "$config_file" ] && [ -f "$config_file" ]; then
@@ -411,7 +435,8 @@ configure_roban2() {
     fi
 
     # 统一写入所有配置文件
-    write_config_files "$wiring_type" "$config_file"
+    # 对于 roban 系列，目前不需要写入 HandProtocolType.ini，因此第三个参数传空字符串
+    write_config_files "$wiring_type" "$config_file" ""
 }
 
 # 配置kuavo机器人函数
@@ -422,6 +447,10 @@ configure_kuavo() {
     # 选择CAN总线接线类型
     local wiring_type
     select_wiring_type wiring_type
+
+    # 选择手部协议类型
+    local hand_protocol_type
+    select_hand_protocol_type hand_protocol_type
 
     # 根据robot_type选择配置文件路径
     local dual_config_file=""
@@ -503,7 +532,7 @@ configure_kuavo() {
     fi
 
     # 统一写入所有配置文件
-    write_config_files "$wiring_type" "$config_file"
+    write_config_files "$wiring_type" "$config_file" "$hand_protocol_type"
 }
 
 
@@ -513,10 +542,11 @@ main() {
     echo ""
 
     # 检查接线和canbus配置文件是否存在，如果存在则提示用户是否覆盖
-    if [ -f "$CANBUS_WIRING_TYPE_FILE" ] || [ -f "$CANBUS_CONFIG_FILE" ]; then
+    if [ -f "$CANBUS_WIRING_TYPE_FILE" ] || [ -f "$CANBUS_CONFIG_FILE" ] || [ -f "$HAND_PROTOCOL_TYPE_FILE" ]; then
         echo_warning "⚠️  检测到已存在的配置文件:"
         [ -f "$CANBUS_WIRING_TYPE_FILE" ] && echo_info "  - $CANBUS_WIRING_TYPE_FILE"
         [ -f "$CANBUS_CONFIG_FILE" ] && echo_info "  - $CANBUS_CONFIG_FILE"
+        [ -f "$HAND_PROTOCOL_TYPE_FILE" ] && echo_info "  - $HAND_PROTOCOL_TYPE_FILE"
         echo ""
 
         local overwrite_options=("是 -- 覆盖现有配置" "否 -- 保留现有配置")

@@ -64,6 +64,11 @@ namespace HighlyDynamic
         DUAL_BUS,    // 双总线 左右手臂各接一个CAN模块
         UNKNOWN      // 未知
     };
+    enum class HandProtocolType {
+        PROTO_BUF,  // 485协议
+        PROTO_CAN,  // CAN协议
+        UNKNOWN  // 未知
+    };
     inline auto vectorToEigen(std::vector<double> v) -> Eigen::VectorXd
     {
         return Eigen::Map<Eigen::VectorXd, Eigen::Unaligned>(v.data(), v.size());
@@ -209,6 +214,12 @@ namespace HighlyDynamic
          */
         CanbusWiringType getCanbusWiringType(RobotVersion rb_version);
 
+        /**
+         * @brief 获取手部协议类型: Protobuf、CAN
+         * 
+         * @return HandProtocolType 
+         */
+        HandProtocolType getHandProtocolType();
     };
     struct MotorC2TSettings
     {

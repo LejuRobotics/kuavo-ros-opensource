@@ -244,9 +244,9 @@ int main() {
     // 在这里指定要测试的类型，可以添加或删除类型名称
     // ============================================
     std::vector<std::string> selected_types = {
-        "ANKLE_SOLVER_TYPE_4GEN",
-        "ANKLE_SOLVER_TYPE_4GEN_PRO",
-        // "ANKLE_SOLVER_TYPE_5GEN",
+        // "ANKLE_SOLVER_TYPE_4GEN",
+        // "ANKLE_SOLVER_TYPE_4GEN_PRO",
+        "ANKLE_SOLVER_TYPE_5GEN",
         // "ANKLE_SOLVER_TYPE_S1GEN",
         // "ANKLE_SOLVER_TYPE_S2GEN"
     };
@@ -305,8 +305,8 @@ int main() {
             
             // 测试3: 典型关节角度
             Eigen::VectorXd typical_pos(12);
-            typical_pos << 0.380897,   -0.533011,     -0.5136,    0.999182,    0.0,  0.8,  // 左腿: 髋关节、膝关节、踝关节
-                        0.000307898,   0.0514311,    0.800887,    -1.01664,    0.254749,    0.410439;  // 右腿
+            typical_pos << -0.16,  -0.10,  -0.67 ,  0.60 , -0.20   ,0.05,  // 左腿: 髋关节、膝关节、踝关节
+            -0.09,  -0.02,   0.45,  -0.17,  -0.36,  -0.05;  // 右腿
             total_tests++;
             if (testJointToMotorPosition(solver, typical_pos, "典型关节角度测试")) {
                 passed_tests++;

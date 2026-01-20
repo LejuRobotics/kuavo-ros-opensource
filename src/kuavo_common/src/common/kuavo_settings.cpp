@@ -182,6 +182,29 @@ namespace HighlyDynamic
         return wiringType == "single_bus" ? CanbusWiringType::SINGLE_BUS : CanbusWiringType::DUAL_BUS;
     }
 
+    HandProtocolType HardwareSettings::getHandProtocolType() {
+
+        std::string filePath = getUserHomeDirectory() + "/.config/lejuconfig/HandProtocolType.ini";
+        std::ifstream file(filePath);
+        std::string handProtocolType;
+
+        if (!file.is_open()) {
+            std::cerr << "\033[33mwarning: " << filePath << " 文件不存在, 未指定手部协议类型, 使用默认值 'proto_buf'\033[0m" << std::endl;
+            return HandProtocolType::PROTO_BUF;
+        }
+
+        getline(file, handProtocolType);
+        file.close();
+
+        if (handProtocolType != "proto_buf" && handProtocolType != "proto_can") {
+            std::cerr << "\033[33mwarning: hand_protocol_type :" << handProtocolType
+                  << " error, 使用默认值 'proto_buf'\033[0m" << std::endl;
+            return HandProtocolType::PROTO_BUF;
+        }
+
+        return handProtocolType == "proto_buf" ? HandProtocolType::PROTO_BUF : HandProtocolType::PROTO_CAN;
+    }
+
     void KuavoSettings::loadHardwareSettings(JSONConfigReader &robot_config)
     {
         std::map<std::string, motor_config>

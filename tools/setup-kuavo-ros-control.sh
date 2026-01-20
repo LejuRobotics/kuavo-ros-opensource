@@ -106,6 +106,10 @@ setup_robot_version() {
         print_info "49 (pro max版本)"
         print_info "45.1 (假手版)"
         print_info "49.1 (展厅版)"
+        print_info "52 (普通kuavo5)"
+        print_info "53 (kuavo5，手臂pitch电机改ruiwo)"
+        print_info "60 (悟时底盘轮臂)"
+        print_info "61 (玖物底盘轮臂)"
         print_info "13 (roban2.0版本)"
         print_info "14 (roban2.1版本)"
         print_info "15 (roban2.2版本)"
@@ -114,6 +118,8 @@ setup_robot_version() {
         # 验证输入的版本是否有效
         if [[ "$version" != "42" && "$version" != "45" && "$version" != "49" &&
               "$version" != "45.1" && "$version" != "49.1" &&
+              "$version" != "52" && "$version" != "53" &&
+              "$version" != "60" && "$version" != "61" &&
               "$version" != "13" && "$version" != "14" && "$version" != "15" ]]; then
             print_error "无效的版本号: $version"
             print_info "请选择上述列出的有效版本号"
@@ -592,7 +598,14 @@ setup_preset_files() {
 
     # Use the absolute path for kuavo-ros-opensource
     KUAVO_ROS_CONTROL_DIR="/home/lab/kuavo-ros-opensource"
-    RESOURCES_DIR="$KUAVO_ROS_CONTROL_DIR/resources"
+
+    # For kuavo5 versions (52, 53), use resources/kuavo5 directory
+    if [[ "$version" == "52" || "$version" == "53" ]]; then
+        RESOURCES_DIR="$KUAVO_ROS_CONTROL_DIR/resources/kuavo5"
+        print_info "使用 kuavo5 资源目录: $RESOURCES_DIR"
+    else
+        RESOURCES_DIR="$KUAVO_ROS_CONTROL_DIR/resources"
+    fi
 
     # Check if resources directory exists
     if [ ! -d "$RESOURCES_DIR" ]; then
