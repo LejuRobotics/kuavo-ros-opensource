@@ -80,8 +80,115 @@ bool success
     cd ~/kuavo_ros_application/src/kuavo_led/kuavo_led_controller/test
     python3 kuavo_led_client.py
 ```
-```
 - 现象为：常亮的彩虹状灯持续 5 秒，然后熄灭。
+
+## LED服务使用指南
+
+### 服务列表
+
+| 服务名 | 类型 | 说明 |
+|--------|------|------|
+| `/control_led` | SetLEDMode | 控制10个LED灯的颜色和模式 |
+| `/control_led_free` | SetLEDMode_free | 使用Color消息数组的LED控制服务（推荐） |
+| `/close_led` | Trigger | 关闭所有LED灯 |
+
+### 显示模式说明
+
+| mode值 | 模式名称 | 效果说明 |
+|--------|----------|----------|
+| 0 | 常亮 | LED保持指定颜色不变 |
+| 1 | 呼吸 | LED颜色从暗到亮循环变化 |
+| 2 | 闪烁 | LED快速闪烁 |
+| 3 | 律动 | LED产生波浪律动效果 |
+
+### 颜色设置说明
+
+每个LED灯的颜色使用RGB格式，取值范围为0-255：
+- `color1` 到 `color10` 分别对应第1到第10颗LED灯
+- 颜色格式为 `[R, G, B]`，例如 `[255, 0, 0]` 表示红色
+- 靠近FPC连接接口的为第1颗灯
+
+### 常用颜色参考
+
+| 颜色 | RGB值 |
+|------|-------|
+| 红色 | [255, 0, 0] |
+| 绿色 | [0, 255, 0] |
+| 蓝色 | [0, 0, 255] |
+| 黄色 | [255, 255, 0] |
+| 青色 | [0, 255, 255] |
+| 紫色 | [128, 0, 128] |
+| 白色 | [255, 255, 255] |
+| 橙色 | [255, 165, 0] |
+| 粉色 | [255, 192, 203] |
+| 熄灭 | [0, 0, 0] |
+
+### 命令行使用示例
+
+#### 1. 设置所有LED为红色常亮
+```bash
+rosservice call /control_led "mode: 0
+color1: [255, 0, 0]
+color2: [255, 0, 0]
+color3: [255, 0, 0]
+color4: [255, 0, 0]
+color5: [255, 0, 0]
+color6: [255, 0, 0]
+color7: [255, 0, 0]
+color8: [255, 0, 0]
+color9: [255, 0, 0]
+color10: [255, 0, 0]"
+```
+
+#### 2. 设置所有LED为绿色呼吸
+```bash
+rosservice call /control_led "mode: 1
+color1: [0, 255, 0]
+color2: [0, 255, 0]
+color3: [0, 255, 0]
+color4: [0, 255, 0]
+color5: [0, 255, 0]
+color6: [0, 255, 0]
+color7: [0, 255, 0]
+color8: [0, 255, 0]
+color9: [0, 255, 0]
+color10: [0, 255, 0]"
+```
+
+#### 3. 设置所有LED为蓝色闪烁
+```bash
+rosservice call /control_led "mode: 2
+color1: [0, 0, 255]
+color2: [0, 0, 255]
+color3: [0, 0, 255]
+color4: [0, 0, 255]
+color5: [0, 0, 255]
+color6: [0, 0, 255]
+color7: [0, 0, 255]
+color8: [0, 0, 255]
+color9: [0, 0, 255]
+color10: [0, 0, 255]"
+```
+
+#### 4. 设置彩虹渐变律动效果
+```bash
+rosservice call /control_led "mode: 3
+color1: [255, 0, 0]
+color2: [255, 127, 0]
+color3: [255, 255, 0]
+color4: [0, 255, 0]
+color5: [0, 255, 255]
+color6: [0, 0, 255]
+color7: [75, 0, 130]
+color8: [148, 0, 211]
+color9: [255, 0, 127]
+color10: [255, 255, 255]"
+```
+
+#### 5. 关闭所有LED
+```bash
+rosservice call /close_led
+```
 
 ## 电池信息接口
 
@@ -190,14 +297,12 @@ rosservice call /get_battery_info "battery_id: 1"
 
 **灵活启动方式**：
 ```bash
-# 同时启动LED和电池（默认）
+
+# 启动LED
 roslaunch kuavo_led_controller set_led_mode.launch
 
-# 只启动LED
-roslaunch kuavo_led_controller set_led_mode.launch BATTERY:=disable
-
-# 只启动电池
-roslaunch kuavo_led_controller set_led_mode.launch LED:=disable
+# 启动电池
+roslaunch kuavo_led_controller battery_info.launch
 
 # 启动机器人时启动
 roslaunch humanoid_controllers load_kuavo_real.launch with_battery:=true（默认关闭）

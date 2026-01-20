@@ -168,10 +168,12 @@ class ArmTrajectoryBezierDemo:
                 self.current_arm_joint_state = arm_part + hand_part + head_part
 
         elif self.robot_class == ROBAN:
-            arm_part = list(joint_msg.joint_data.joint_q[13:21])
-            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
-            head_part = list(joint_msg.joint_data.joint_q[-2:])
-            waist_part = [joint_msg.joint_data.joint_q[0]]
+            # 按照 joint_q 索引顺序定义变量
+            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12  # 对应 joint_q[0:12]
+            waist_part = [joint_msg.joint_data.joint_q[12]]  # 对应 joint_q[12]
+            arm_part = list(joint_msg.joint_data.joint_q[13:21])  # 对应 joint_q[13:21]
+            head_part = list(joint_msg.joint_data.joint_q[21:23])  # 对应 joint_q[21:23]
+            # 保持最终组合顺序不变：arm_part + hand_part + head_part + waist_part
             self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
 
         self.current_arm_joint_state = [round(v, 5) for v in self.current_arm_joint_state]

@@ -14,4 +14,4 @@ controllers:
     class: "BASE_CONTROLLER"  
     type: "VMP_CONTROLLER"    # VMP控制器类型
     config_file: "rl/vmp_param.info"
-    enabled: true  
+    enabled: false  # 非45/46版本仿真都存在问题，暂时关闭支持  

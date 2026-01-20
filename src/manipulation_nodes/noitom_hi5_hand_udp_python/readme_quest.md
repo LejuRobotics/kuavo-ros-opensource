@@ -35,7 +35,7 @@ md5 c287aeb8a1df0f152fdc164d29ceb2fe https://kuavo.lejurobot.com/Quest_apks/leju
 - 系统会自动从TF树获取头部和手部的实时位置进行计算，确保坐标系一致性
 - **运行时动态切换模式（ROS服务）**：
   - 服务名称：`/quest3/set_head_control_mode`
-  - 服务类型：`noitom_hi5_hand_udp_python/SetHeadControlMode`
+  - 服务类型：`kuavo_msgs/SetHeadControlMode`
   - 调用方式：
     ```bash
     # 固定模式（将头部移动到正前方）

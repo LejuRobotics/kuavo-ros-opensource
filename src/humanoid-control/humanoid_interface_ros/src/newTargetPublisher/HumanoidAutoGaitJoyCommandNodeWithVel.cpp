@@ -385,7 +385,18 @@ namespace ocs2
         "/humanoid_mpc_gait_change", 1, &JoyControl::gaitChangeCallback, this);
       }
       is_rl_controller_sub_ = nodeHandle_.subscribe<std_msgs::Float64>("/humanoid_controller/is_rl_controller_", 1, [this](const std_msgs::Float64::ConstPtr &msg) 
-      {is_rl_controller_ = (msg->data > 0.5);});
+      {
+        bool new_is_rl = (msg->data > 0.5);
+        // 检测控制器状态变化，设置切换标志
+        if (is_rl_controller_ != new_is_rl)
+        {
+          is_rl_controller_ = new_is_rl;
+          last_controller_switch_time_ = ros::Time::now();
+          controller_switching_ = true;
+          ROS_WARN_STREAM("[JoyControl] Controller switched to " << (is_rl_controller_ ? "RL" : "MPC")
+                          << ", disable joystick input for " << controller_switch_time << "s");
+        }
+      });
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
       robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
       "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
@@ -1526,8 +1537,6 @@ namespace ocs2
     {
       kuavo_msgs::switchToNextController srv;
 
-      last_controller_switch_time_ = ros::Time::now();
-      controller_switching_ = true;
       if (switch_to_next_controller_client_.call(srv)) {
         if (srv.response.success) {
           ROS_INFO("Switch to next controller successful: %s", srv.response.message.c_str());

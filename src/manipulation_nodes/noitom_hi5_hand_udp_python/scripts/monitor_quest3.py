@@ -32,7 +32,7 @@ import protos.hand_wrench_srv_pb2 as hand_wrench_srv_pb2
 from robot_state_server import RobotStateServer
 from quest_vr_config import Quest3VrConfig, HandWrenchConfig
 from head_control_manager import HeadControlManager, HeadControlMode
-from noitom_hi5_hand_udp_python.srv import SetHeadControlMode, SetHeadControlModeResponse
+from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeResponse
 
 class Quest3BoneFramePublisher:
     def __init__(self):

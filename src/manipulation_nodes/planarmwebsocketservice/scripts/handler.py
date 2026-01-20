@@ -937,10 +937,12 @@ def _update_current_arm_joint_state(joint_msg, hand_msg):
         current_arm_joint_state = arm_part + hand_part + head_part
 
     elif robot_version.major() == 1:
-        arm_part = list(joint_msg.joint_data.joint_q[13:21])
-        hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
-        head_part = list(joint_msg.joint_data.joint_q[-2:])
-        waist_part = [joint_msg.joint_data.joint_q[0]]
+        # 按照 joint_q 索引顺序定义变量
+        hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12  # 对应 joint_q[0:12]
+        waist_part = [joint_msg.joint_data.joint_q[12]]  # 对应 joint_q[12]
+        arm_part = list(joint_msg.joint_data.joint_q[13:21])  # 对应 joint_q[13:21]
+        head_part = list(joint_msg.joint_data.joint_q[21:23])  # 对应 joint_q[21:23]
+        # 保持最终组合顺序不变：arm_part + hand_part + head_part + waist_part
         current_arm_joint_state = arm_part + hand_part + head_part + waist_part
 
     current_arm_joint_state = [round(v, 2) for v in current_arm_joint_state]
@@ -4900,3 +4902,28 @@ async def get_api_key_status_handler(
         response_queue.put(response)
 
         print(payload.data['msg'])
+
+async def get_vr_status_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """
+    获取VR状态接口
+    返回VR连接状态、节点状态、录制状态等信息
+    """
+    payload = Payload(cmd="get_vr_status", data={"code": 0})
+
+    try:
+        # 导入VR状态模块
+        import vr_manager
+
+        # 获取VR状态信息
+        status_info = vr_manager.get_vr_status()
+        payload.data.update(status_info)
+
+    except Exception as e:
+        print(f"Get VR status error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to get VR status: {str(e)}"
+
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)

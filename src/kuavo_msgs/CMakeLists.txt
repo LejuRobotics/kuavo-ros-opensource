@@ -216,9 +216,12 @@ add_service_files(
   changeLbQuickModeSrv.srv
   SetString.srv
   GetStringList.srv
+  # VR head control
+  SetHeadControlMode.srv
 
   # Battery service
   GetBatteryInfo.srv
+
 )
 
 ## Generate actions in the 'action' folder

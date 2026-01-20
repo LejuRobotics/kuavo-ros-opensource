@@ -30,5 +30,42 @@ class RecordingState(Enum):
 # 全局状态变量
 vr_state = VRState.DISCONNECTED
 recording_state = RecordingState.IDLE
-current_bag_file = None
 recording_start_time = None
+
+
+def set_vr_state(state):
+    """设置VR连接状态"""
+    global vr_state
+    vr_state = state
+
+
+def set_recording_state(state):
+    """设置录制状态"""
+    global recording_state
+    recording_state = state
+
+
+def set_recording_start_time(start_time):
+    """设置录制开始时间"""
+    global recording_start_time
+    recording_start_time = start_time
+
+
+def get_vr_status():
+    """
+    获取VR状态信息
+    返回完整的VR状态字典
+    """
+    import time
+
+    # 计算录制时长
+    recording_duration = None
+    if recording_state == RecordingState.RECORDING and recording_start_time:
+        recording_duration = time.time() - recording_start_time
+
+    return {
+        "vr_connected": vr_state == VRState.CONNECTED,
+        "vr_state": vr_state.value,
+        "recording_state": recording_state.value,
+        "recording_duration": recording_duration
+    }
