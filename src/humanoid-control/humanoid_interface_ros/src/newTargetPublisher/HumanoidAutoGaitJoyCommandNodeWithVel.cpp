@@ -1129,8 +1129,10 @@ namespace ocs2
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
         ROS_INFO("[JoyControl] switch to next controller");
-        // Get controller list and switch to next
-        switchToNextController();
+        // // Get controller list and switch to next
+        // switchToNextController();
+        // 1.3.2版本，因暂时禁用amp,只剩mpc切换会有短时间无法响应按键,需禁用X按键.
+        ROS_WARN("[JoyControl] [version 1.3.2] switch to next controller is disabled");
         return;
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])

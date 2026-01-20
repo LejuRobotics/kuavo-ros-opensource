@@ -1,3 +1,5 @@
+# roban_v14_dual
+
 #include "motorevo/motorevo_actuator.h"
 #include "motorevo/motor_ctrl.h"
 #include "motorevo/motor_def.h"
@@ -17,9 +19,15 @@
 #include <vector>
 #include <atomic>
 #include <csignal>
-#include <filesystem>
 #include <cmath>
 #include <algorithm>
+#include <yaml-cpp/yaml.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <sstream>
+#include <libgen.h>
+#include <limits.h>
+#include <cstring>
 
 // 全局时间戳工具函数（[HH:MM:SS.mmm]）
 static std::string get_timestamp() {
@@ -43,7 +51,7 @@ private:
     ros::NodeHandle* nh_;
     ros::Publisher pub_arm_ready_;
     ros::Publisher pub_arm_started_;  // 发布手臂已开始运行
-    ros::Publisher pub_arm_running_;  // 发布手臂正在运行状态（100Hz）：正在执行动作帧时为True，等待下一轮时为False
+    ros::Publisher pub_arm_running_;  // 发布手臂正在运行状态（1Hz）：正在执行动作帧时为True，等待下一轮时为False
     ros::Subscriber sub_start_together_;
     ros::Subscriber sub_allow_run_;
     ros::Subscriber sub_start_new_round_arm_;  // 订阅主程序发布的"开始新一轮"信号
@@ -61,6 +69,7 @@ private:
     
     motorevo::MotorevoActuator* actuator_;
     std::string config_file_path_;
+    std::string action_config_file_path_;  // 动作配置文件路径
     
     std::thread publish_thread_;
     std::thread publish_running_thread_;  // 发布arm_running的线程
@@ -98,14 +107,126 @@ public:
             config_file_path_ = canbus_sdk::ConfigParser::getDefaultConfigFilePath();
         }
         
+        // 从ROS参数服务器获取动作配置文件路径
+        nh_->param<std::string>("action_config_file", action_config_file_path_, "");
+        if (action_config_file_path_.empty()) {
+            // 辅助函数：检查文件是否存在
+            auto file_exists = [](const std::string& path) -> bool {
+                struct stat buffer;
+                return (stat(path.c_str(), &buffer) == 0);
+            };
+            
+            // 辅助函数：拼接路径
+            auto join_path = [](const std::string& base, const std::vector<std::string>& parts) -> std::string {
+                std::ostringstream oss;
+                oss << base;
+                for (const auto& part : parts) {
+                    if (!oss.str().empty() && oss.str().back() != '/') {
+                        oss << "/";
+                    }
+                    oss << part;
+                }
+                return oss.str();
+            };
+            
+            // 尝试多个可能的路径：优先使用可执行文件路径，其次使用当前工作目录
+            std::vector<std::string> search_paths;
+            
+            // 1. 尝试使用可执行文件路径（最可靠的方法）
+            char exe_path[PATH_MAX];
+            ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+            if (len != -1) {
+                exe_path[len] = '\0';
+                // dirname可能会修改字符串，所以需要先复制
+                char exe_path_copy[PATH_MAX];
+                strncpy(exe_path_copy, exe_path, sizeof(exe_path_copy) - 1);
+                exe_path_copy[sizeof(exe_path_copy) - 1] = '\0';
+                char* exe_dir = dirname(exe_path_copy);
+                std::string workspace_root = exe_dir;
+                // 可执行文件可能在以下位置：
+                // - .../joint_breakin_ros/devel/lib/arm_breakin/
+                // - .../joint_breakin_ros/build/lib/arm_breakin/
+                // - .../joint_breakin_ros/build_lib/lib/arm_breakin/  (新增)
+                // 需要向上找到工作空间根目录
+                size_t pos1 = workspace_root.find("/devel/lib/arm_breakin");
+                size_t pos2 = workspace_root.find("/build/lib/arm_breakin");
+                size_t pos3 = workspace_root.find("/build_lib/lib/arm_breakin");
+                if (pos1 != std::string::npos) {
+                    workspace_root = workspace_root.substr(0, pos1);
+                    search_paths.push_back(join_path(workspace_root, {"config", "arm_breakin", "arm_breakin_node_config.yaml"}));
+                } else if (pos2 != std::string::npos) {
+                    workspace_root = workspace_root.substr(0, pos2);
+                    search_paths.push_back(join_path(workspace_root, {"config", "arm_breakin", "arm_breakin_node_config.yaml"}));
+                } else if (pos3 != std::string::npos) {
+                    workspace_root = workspace_root.substr(0, pos3);
+                    search_paths.push_back(join_path(workspace_root, {"config", "arm_breakin", "arm_breakin_node_config.yaml"}));
+                } else {
+                    // 如果无法从路径模式匹配，尝试向上遍历目录树查找包含 config/arm_breakin 的目录
+                    std::string current_path = exe_dir;
+                    for (int i = 0; i < 10; ++i) {  // 最多向上10级
+                        std::string test_path = join_path(current_path, {"config", "arm_breakin", "arm_breakin_node_config.yaml"});
+                        if (file_exists(test_path)) {
+                            search_paths.push_back(test_path);
+                            break;
+                        }
+                        // 向上移动一级
+                        size_t last_slash = current_path.find_last_of('/');
+                        if (last_slash == std::string::npos || last_slash == 0) {
+                            break;
+                        }
+                        current_path = current_path.substr(0, last_slash);
+                    }
+                }
+            }
+            
+            // 2. 尝试使用环境变量（如果设置了ROS_WORKSPACE环境变量）
+            const char* ros_workspace = getenv("ROS_WORKSPACE");
+            if (ros_workspace != nullptr) {
+                search_paths.push_back(join_path(ros_workspace, {"config", "arm_breakin", "arm_breakin_node_config.yaml"}));
+            }
+            
+            // 3. 尝试使用当前工作目录（作为备选）
+            char cwd[PATH_MAX];
+            if (getcwd(cwd, sizeof(cwd)) != nullptr) {
+                std::string workspace_path = cwd;
+                search_paths.push_back(join_path(workspace_path, {"config", "arm_breakin", "arm_breakin_node_config.yaml"}));
+                search_paths.push_back(join_path(workspace_path, {"..", "config", "arm_breakin", "arm_breakin_node_config.yaml"}));
+                // 如果在src目录下
+                size_t src_pos = workspace_path.find("/src/");
+                if (src_pos != std::string::npos) {
+                    std::string workspace_root = workspace_path.substr(0, src_pos);
+                    search_paths.push_back(join_path(workspace_root, {"config", "arm_breakin", "arm_breakin_node_config.yaml"}));
+                }
+            }
+            
+            // 遍历所有可能的路径
+            std::cout << get_timestamp() << " [信息] 正在查找动作配置文件，搜索路径：" << std::endl;
+            for (const auto& path : search_paths) {
+                std::cout << get_timestamp() << "  - " << path;
+                if (file_exists(path)) {
+                    action_config_file_path_ = path;
+                    std::cout << " [找到]" << std::endl;
+                    break;
+                } else {
+                    std::cout << " [不存在]" << std::endl;
+                }
+            }
+            if (action_config_file_path_.empty()) {
+                std::cout << get_timestamp() << " [警告] 未找到动作配置文件，将使用默认硬编码配置" << std::endl;
+            }
+        }
+        
         std::cout << get_timestamp() << " 手臂磨线ROS节点已启动" << std::endl;
         std::cout << get_timestamp() << " 使用配置文件: " << config_file_path_ << std::endl;
+        if (!action_config_file_path_.empty()) {
+            std::cout << get_timestamp() << " 使用动作配置文件: " << action_config_file_path_ << std::endl;
+        }
         
-        // 启动100Hz发布线程
+        // 启动1Hz发布线程
         stop_publish_thread_ = false;
         publish_thread_ = std::thread(&ArmBreakinNode::publishArmReadyLoop, this);
         
-        // 启动100Hz发布arm_running线程
+        // 启动1Hz发布arm_running线程
         stop_publish_running_thread_ = false;
         publish_running_thread_ = std::thread(&ArmBreakinNode::publishArmRunningLoop, this);
         
@@ -115,6 +236,11 @@ public:
         publishArmRunning(false);  // 初始状态为False
         std::cout << get_timestamp() << " 手臂磨线节点已启动，arm_ready = False（等待初始化）" << std::endl;
     }
+    
+    ArmBreakinNode(const ArmBreakinNode&) = delete;
+    ArmBreakinNode& operator=(const ArmBreakinNode&) = delete;
+    ArmBreakinNode(ArmBreakinNode&&) = delete;
+    ArmBreakinNode& operator=(ArmBreakinNode&&) = delete;
     
     ~ArmBreakinNode() {
         // 停止发布线程
@@ -143,8 +269,8 @@ public:
     }
     
     void publishArmReadyLoop() {
-        // 100Hz发布arm_ready状态
-        ros::Rate rate(100);
+        // 1Hz发布arm_ready状态
+        ros::Rate rate(1);
         while (!stop_publish_thread_) {
             if (!ros::ok()) {
                 break;
@@ -162,8 +288,8 @@ public:
     }
     
     void publishArmRunningLoop() {
-        // 100Hz发布arm_running状态
-        ros::Rate rate(100);
+        // 1Hz发布arm_running状态
+        ros::Rate rate(1);
         while (!stop_publish_running_thread_) {
             if (!ros::ok()) {
                 break;
@@ -324,6 +450,69 @@ public:
         return false;
     }
     
+    // 从YAML文件读取动作配置
+    bool loadActionConfig(std::vector<std::array<double,4>>& left_arm_actions,
+                         std::vector<std::array<double,2>>& head_actions,
+                         int& frame_duration_ms) {
+        if (action_config_file_path_.empty()) {
+            std::cout << get_timestamp() << " [信息] 未指定动作配置文件，使用默认配置" << std::endl;
+            return false;
+        }
+        
+        try {
+            YAML::Node config = YAML::LoadFile(action_config_file_path_);
+            
+            if (!config["action"]) {
+                std::cout << get_timestamp() << " [警告] YAML文件中未找到'action'节点" << std::endl;
+                return false;
+            }
+            
+            auto action_node = config["action"];
+            
+            // 读取frame_duration_ms
+            if (action_node["frame_duration_ms"]) {
+                frame_duration_ms = action_node["frame_duration_ms"].as<int>();
+            }
+            
+            // 读取左臂动作序列
+            if (action_node["left_arm_actions"]) {
+                left_arm_actions.clear();
+                for (const auto& frame : action_node["left_arm_actions"]) {
+                    std::array<double, 4> frame_data;
+                    for (size_t i = 0; i < frame.size() && i < 4; ++i) {
+                        frame_data[i] = frame[i].as<double>();
+                    }
+                    left_arm_actions.push_back(frame_data);
+                }
+            }
+            
+            // 读取头部动作序列
+            if (action_node["head_actions"]) {
+                head_actions.clear();
+                for (const auto& frame : action_node["head_actions"]) {
+                    std::array<double, 2> frame_data;
+                    for (size_t i = 0; i < frame.size() && i < 2; ++i) {
+                        frame_data[i] = frame[i].as<double>();
+                    }
+                    head_actions.push_back(frame_data);
+                }
+            }
+            
+            std::cout << get_timestamp() << " [信息] 成功从YAML文件加载动作配置" << std::endl;
+            std::cout << get_timestamp() << " [信息] 左臂动作帧数: " << left_arm_actions.size() << std::endl;
+            std::cout << get_timestamp() << " [信息] 头部动作帧数: " << head_actions.size() << std::endl;
+            std::cout << get_timestamp() << " [信息] 每帧时长: " << frame_duration_ms << " 毫秒" << std::endl;
+            
+            return true;
+        } catch (const YAML::Exception& e) {
+            std::cout << get_timestamp() << " [错误] 读取YAML配置文件失败: " << e.what() << std::endl;
+            return false;
+        } catch (const std::exception& e) {
+            std::cout << get_timestamp() << " [错误] 读取配置文件异常: " << e.what() << std::endl;
+            return false;
+        }
+    }
+    
     bool initActuator() {
         try {
             std::cout << get_timestamp() << " 正在创建MotorevoActuator实例..." << std::endl;
@@ -354,27 +543,27 @@ public:
         // 等待actuator初始化完成
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         
-        // 获取所有电机状态，找到ID 1-8对应的索引
+        // 获取所有电机状态，找到ID 1-10对应的索引（手臂1-8 + 头部9-10）
         auto motor_states = actuator_->get_motor_state();
         std::vector<uint8_t> target_indices;
         std::vector<uint8_t> target_motor_ids;
         
         for (size_t idx = 0; idx < motor_states.size(); ++idx) {
             auto [motor_id, motor_state] = motor_states[idx];
-            if (motor_id >= 0x1 && motor_id <= 0x8) {
+            if (motor_id >= 0x1 && motor_id <= 0xA) {  // ID 1-10 (0xA = 10)
                 target_indices.push_back(static_cast<uint8_t>(idx));
                 target_motor_ids.push_back(motor_id);
             }
         }
         
         if (target_indices.empty()) {
-            std::cout << get_timestamp() << " [错误] 未找到目标电机（ID 1-8）" << std::endl;
+            std::cout << get_timestamp() << " [错误] 未找到目标电机（ID 1-10）" << std::endl;
             publishArmReady(false);
             publishArmRunning(false);  // 错误时也发布False
             return;
         }
         
-        std::cout << get_timestamp() << " 找到 " << target_indices.size() << " 个目标电机" << std::endl;
+        std::cout << get_timestamp() << " 找到 " << target_indices.size() << " 个目标电机（手臂1-8 + 头部9-10）" << std::endl;
         
         // 记录零点位置
         auto current_positions = actuator_->get_positions();
@@ -388,16 +577,34 @@ public:
             }
         }
         
-        // 定义动作序列
-        const std::vector<std::array<double,4>> left_arm_actions = {
-            {  0.00,  0.00,  0.00,  0.00 },
-            {  -1.00,  1.00,  1.00,  -1.50 },
-            {  -1.40,  1.80,  1.35,  -0.20 },
-            {  0.00,  2.50,  0.00,  -1.60 },
-            {  0.60,  1.50,  -1.35,  -2.00 },
-            {  1.40,  0.50,  -1.00,  -1.00 },
-            {  0.00,  0.00,  0.00,  0.00 }
-        };
+        // 从YAML文件读取动作序列配置
+        std::vector<std::array<double,4>> left_arm_actions;
+        std::vector<std::array<double,2>> head_actions;
+        int frame_duration_ms = 2000;  // 默认值
+        
+        // 尝试从YAML文件读取配置
+        if (!loadActionConfig(left_arm_actions, head_actions, frame_duration_ms)) {
+            // 如果读取失败，使用默认硬编码配置
+            std::cout << get_timestamp() << " [信息] 使用默认硬编码动作配置" << std::endl;
+            left_arm_actions = {
+                {  0.00,  0.00,  0.00,  0.00 },
+                {  -1.00,  1.00,  1.00,  -1.50 },
+                {  -1.40,  1.80,  1.35,  -0.20 },
+                {  0.00,  2.50,  0.00,  -1.60 },
+                {  0.60,  1.50,  -1.35,  -2.00 },
+                {  1.40,  0.50,  -1.00,  -1.00 },
+                {  0.00,  0.00,  0.00,  0.00 }
+            };
+            head_actions = {
+                {  0.00,  0.00 },
+                {  1.00,  0.60 },
+                { -1.00,  0.00 },
+                {  0.00,  0.00 },
+                {  1.00,  0.60 },
+                { -1.00,  0.00 },
+                {  0.00,  0.00 }
+            };
+        }
         
         // const std::vector<std::array<double,4>> left_arm_actions = {
         //     {  0.00,  0.00,  0.00,  0.00 },
@@ -417,7 +624,7 @@ public:
         if (!standalone_mode_) {
             std::cout << get_timestamp() << " 等待 start_together 信号..." << std::endl;
             std::cout << get_timestamp() << " 同时运行模式：需要同时满足 start_together=True 和 allow_run=True" << std::endl;
-            ros::Rate wait_rate(100);  // 100Hz检查
+            ros::Rate wait_rate(50);
             while (ros::ok() && !start_received_ && !should_exit_ && !standalone_mode_) {
                 ros::spinOnce();
                 // 检查是否同时满足start_together和allow_run
@@ -442,9 +649,9 @@ public:
         }
         
         // 执行动作序列
-        const int frame_ms = 2000;  // 每帧2秒
+        const int frame_ms = frame_duration_ms;  // 从配置文件读取的每帧时长
         
-        auto send_offsets = [&](const std::array<double,4>& left_offsets) {
+        auto send_offsets = [&](const std::array<double,4>& left_offsets, const std::array<double,2>& head_offsets = {0.0, 0.0}) {
             std::vector<uint8_t> indices;
             std::vector<double> positions_deg;
             std::vector<double> torques;
@@ -464,6 +671,10 @@ public:
                     off = -left_offsets[2];
                 } else if (motor_id == 8) {
                     off = left_offsets[3];
+                } else if (motor_id == 9) {
+                    off = head_offsets[0];
+                } else if (motor_id == 10) {
+                    off = head_offsets[1];
                 } else {
                     continue;
                 }
@@ -484,20 +695,22 @@ public:
         
         auto do_frame_pair = [&](const std::array<double,4>& start_left,
                                   const std::array<double,4>& end_left,
+                                  const std::array<double,2>& start_head,
+                                  const std::array<double,2>& end_head,
                                   int duration_ms) -> bool {
             auto t0 = std::chrono::steady_clock::now();
-            ros::Rate frame_rate(100);  // 100Hz检查频率
-            int check_counter = 0;  // 用于降低电机状态检查频率（每10次检查一次，即10Hz）
+            ros::Rate frame_rate(50);  // 50Hz运动控制频率
+            int check_counter = 0;  // 用于降低电机状态检查频率（每50次检查一次，即1Hz）
             while (true) {
-                // 持续检查allow_run状态（100Hz）
+                // 持续检查allow_run状态（50Hz）
                 ros::spinOnce();
                 if (should_exit_ || !allow_run_ || !ros::ok()) {
                     return false;
                 }
                 
-                // 每10次循环检查一次电机状态（10Hz检查频率）
+                // 每50次循环检查一次电机状态（1Hz检查频率）
                 check_counter++;
-                if (check_counter >= 10) {
+                if (check_counter >= 50) {
                     check_counter = 0;
                     if (checkMotorDisabled(target_motor_ids)) {
                         std::cout << get_timestamp() << " [错误] 检测到电机失能，立即停止运动" << std::endl;
@@ -512,17 +725,22 @@ public:
                 if (elapsed >= duration_ms) break;
                 
                 double alpha = static_cast<double>(elapsed) / duration_ms;
-                std::array<double,4> cur{};
+                std::array<double,4> cur_arm{};
                 for (int i = 0; i < 4; ++i) {
-                    cur[i] = start_left[i] + (end_left[i] - start_left[i]) * alpha;
+                    cur_arm[i] = start_left[i] + (end_left[i] - start_left[i]) * alpha;
                 }
-                send_offsets(cur);
+                
+                std::array<double,2> cur_head{};
+                cur_head[0] = start_head[0] + (end_head[0] - start_head[0]) * alpha;
+                cur_head[1] = start_head[1] + (end_head[1] - start_head[1]) * alpha;
+                
+                send_offsets(cur_arm, cur_head);
                 
                 frame_rate.sleep();
             }
             
             if (!should_exit_ && allow_run_ && ros::ok()) {
-                send_offsets(end_left);
+                send_offsets(end_left, end_head);
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
             return true;
@@ -533,23 +751,23 @@ public:
         std::cout << get_timestamp() << " 节点已准备好，arm_started = True" << std::endl;
         
         // 初始状态：发布第一帧位置，arm_running = False（等待开始第一轮）
-        send_offsets(left_arm_actions[0]);
+        send_offsets(left_arm_actions[0], head_actions[0]);
         publishArmRunning(false);
         std::cout << get_timestamp() << " 已发布第一帧位置，arm_running = False（等待开始第一轮）" << std::endl;
         
         // 等待开始第一轮的信号（同时运行模式等待start_together，单独运行模式直接开始）
         if (!standalone_mode_) {
             std::cout << get_timestamp() << " 同时运行模式：等待 start_together 信号..." << std::endl;
-            ros::Rate wait_rate(100);  // 100Hz检查
-            int check_counter = 0;  // 用于降低电机状态检查频率（每10次检查一次，即10Hz）
-            while (ros::ok() && !start_received_ && !should_exit_ && allow_run_) {
+            ros::Rate wait_rate(50);  // 50Hz检查
+            int check_counter = 0;  // 用于降低电机状态检查频率（每50次检查一次，即1Hz）
+                while (ros::ok() && !start_received_ && !should_exit_ && allow_run_) {
                 // 持续发布第一帧位置
-                send_offsets(left_arm_actions[0]);
+                send_offsets(left_arm_actions[0], head_actions[0]);
                 ros::spinOnce();
                 
-                // 每10次循环检查一次电机状态（10Hz检查频率）
+                // 每50次循环检查一次电机状态（1Hz检查频率）
                 check_counter++;
-                if (check_counter >= 10) {
+                if (check_counter >= 50) {
                     check_counter = 0;
                     if (checkMotorDisabled(target_motor_ids)) {
                         std::cout << get_timestamp() << " [错误] 检测到电机失能，立即停止运动" << std::endl;
@@ -580,7 +798,7 @@ public:
         // 执行动作循环
         int completed_rounds = 0;
         bool is_first_round = true;
-        ros::Rate loop_rate(100);  // 100Hz主循环
+        ros::Rate loop_rate(50);  // 50Hz主循环
         
         while (ros::ok() && allow_run_ && !should_exit_) {
             // 等待开始新一轮的信号
@@ -594,15 +812,15 @@ public:
                           << " 轮完成，arm_running = False，等待 start_new_round_arm 信号..."
                           << (standalone_mode_ ? "（单独运行模式）" : "（同时运行模式）") << std::endl;
                 
-                int check_counter = 0;  // 用于降低电机状态检查频率（每10次检查一次，即10Hz）
+                int check_counter = 0;  // 用于降低电机状态检查频率（每50次检查一次，即1Hz）
                 while (ros::ok() && allow_run_ && !should_exit_ && !start_new_round_arm_.load()) {
                     // 持续发布第一帧位置
-                    send_offsets(left_arm_actions[0]);
+                    send_offsets(left_arm_actions[0], head_actions[0]);
                     ros::spinOnce();
                     
-                    // 每10次循环检查一次电机状态（10Hz检查频率）
+                    // 每50次循环检查一次电机状态（1Hz检查频率）
                     check_counter++;
-                    if (check_counter >= 10) {
+                    if (check_counter >= 50) {
                         check_counter = 0;
                         if (checkMotorDisabled(target_motor_ids)) {
                             std::cout << get_timestamp() << " [错误] 检测到电机失能，立即停止运动" << std::endl;
@@ -632,6 +850,7 @@ public:
             
             // 执行一轮动作（一旦开始，必须完成整轮）
             bool round_completed = true;
+            size_t head_action_index = 0;
             for (size_t i = 0; i + 1 < left_arm_actions.size(); ++i) {
                 ros::spinOnce();
                 if (should_exit_ || !allow_run_ || !ros::ok()) {
@@ -650,13 +869,19 @@ public:
                     break;
                 }
                 
-                if (!do_frame_pair(left_arm_actions[i], left_arm_actions[i + 1], frame_ms)) {
+                // 计算头部动作索引
+                size_t head_start_idx = head_action_index % head_actions.size();
+                size_t head_end_idx = (head_action_index + 1) % head_actions.size();
+                
+                if (!do_frame_pair(left_arm_actions[i], left_arm_actions[i + 1], 
+                                   head_actions[head_start_idx], head_actions[head_end_idx], frame_ms)) {
                     std::cout << get_timestamp() << " 执行动作帧失败" << std::endl;
                     publishArmRunning(false);
                     round_completed = false;
                     break;
                 }
                 
+                head_action_index++;
                 std::cout << get_timestamp() << " 动作帧 " << (i + 1) << " 执行完成" << std::endl;
             }
             

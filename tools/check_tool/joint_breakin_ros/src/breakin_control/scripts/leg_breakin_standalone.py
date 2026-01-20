@@ -34,11 +34,11 @@ class LegBreakinStandalone:
         self.project_root = self._find_project_root()
         
         # 腿部磨线脚本路径
-        # 脚本位置：joint_breakin_ros/src/breakin_control/scripts/
-        # joint_breakin.py 位置：joint_breakin_ros/src/leg_breakin/src/joint_breakin.py
-        # 从 scripts/ 向上到 src/，然后进入 leg_breakin/src/
+        # scripts/ -> src/leg_breakin/src/
         leg_breakin_src = self.current_dir.parent.parent / "leg_breakin" / "src"
-        self.joint_breakin_script = leg_breakin_src / "joint_breakin.py"
+        self.leg_breakin_src = leg_breakin_src
+        self.joint_breakin_script = leg_breakin_src / "joint_breakin.py"  # roban2 统一入口（ROS控时长）
+        self.kuavo5_leg_breakin_script = leg_breakin_src / "leg_breakin_kuavo5_v52" / "kuavo5_leg_breakin.py"  # kuavo5_v52（ROS控时长）
         
         # 进程管理
         self.leg_process = None
@@ -48,7 +48,42 @@ class LegBreakinStandalone:
         # 注册信号处理器
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
-    
+
+    def _get_robot_version(self):
+        """获取 ROBOT_VERSION：优先环境变量，其次读取 /home/lab/.bashrc"""
+        rv = os.environ.get("ROBOT_VERSION")
+        if rv:
+            return str(rv).strip()
+
+        try:
+            bashrc_path = os.path.join(os.path.expanduser('/home/lab/'), '.bashrc')
+            if os.path.exists(bashrc_path):
+                with open(bashrc_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()
+                for line in reversed(lines):
+                    s = line.strip()
+                    if s.startswith("export ROBOT_VERSION=") and "#" not in s:
+                        return s.split("=", 1)[1].strip()
+        except Exception:
+            pass
+
+        return ""
+
+    def _is_kuavo5(self, robot_version: str):
+        rv_raw = str(robot_version or "").strip()
+        rv = rv_raw.lower()
+
+        # 明确字符串标识
+        if ("kuavo5_v52" in rv) or ("kuavo5" in rv) or rv.startswith("v5") or rv.startswith("kuavo5_v5"):
+            return True
+
+        # 兼容 ROBOT_VERSION=52 这种纯数字写法：Kuavo5V52 版本 50+
+        try:
+            v = int(rv_raw)
+            return v >= 50
+        except Exception:
+            return False
+
     def _find_project_root(self):
         """查找项目根目录（包含 tools/check_tool 的目录）"""
         current = self.current_dir
@@ -163,24 +198,25 @@ class LegBreakinStandalone:
             self.print_colored("请使用: sudo python3 leg_breakin_standalone.py", Colors.YELLOW)
             return 1
         
-        # 检查脚本是否存在
-        self.print_colored(f"调试：查找腿部磨线脚本路径: {self.joint_breakin_script}", Colors.BLUE)
-        self.print_colored(f"调试：脚本是否存在: {self.joint_breakin_script.exists()}", Colors.BLUE)
-        if not self.joint_breakin_script.exists():
-            self.print_colored(f"错误：未找到腿部磨线脚本 {self.joint_breakin_script}", Colors.RED)
-            # 尝试查找可能的路径
-            possible_paths = [
-                self.current_dir.parent.parent / "leg_breakin" / "src" / "joint_breakin.py",
-                self.project_root / "tools" / "check_tool" / "joint_breakin_ros" / "src" / "leg_breakin" / "src" / "joint_breakin.py",
-            ]
-            self.print_colored("尝试查找其他可能路径：", Colors.YELLOW)
-            for path in possible_paths:
-                if path.exists():
-                    self.print_colored(f"  找到: {path}", Colors.GREEN)
-                    self.joint_breakin_script = path
-                    break
-            else:
-                return 1
+        robot_version = self._get_robot_version()
+        if robot_version:
+            os.environ["ROBOT_VERSION"] = robot_version
+
+        is_kuavo5 = self._is_kuavo5(robot_version)
+
+        # 选择腿部磨线脚本
+        if is_kuavo5:
+            target_script = self.kuavo5_leg_breakin_script
+        else:
+            target_script = self.joint_breakin_script
+
+        self.print_colored(f"调试：ROBOT_VERSION = {robot_version or '(unknown)'}", Colors.BLUE)
+        self.print_colored(f"调试：选择腿部磨线脚本: {target_script}", Colors.BLUE)
+        self.print_colored(f"调试：脚本是否存在: {target_script.exists()}", Colors.BLUE)
+
+        if not target_script.exists():
+            self.print_colored(f"错误：未找到腿部磨线脚本 {target_script}", Colors.RED)
+            return 1
         
         print()
         self.print_colored("=" * 50, Colors.CYAN)
@@ -301,32 +337,21 @@ class LegBreakinStandalone:
             
             # 启动腿部磨线脚本
             leg_script_dir = self.joint_breakin_script.parent
-            # CHECK_ARM_HEARTBEAT=false: 不检查手臂心跳
-            # ROS_BREAKIN_CONTROL_TIME=true: 告诉 joint_breakin.py “时长由ROS主控制器管理，不要再询问并读取时长”
-            env = dict(os.environ, PYTHONUNBUFFERED='1', CHECK_ARM_HEARTBEAT='false', ROS_BREAKIN_CONTROL_TIME='true')
-            
-            # 获取机器人版本
-            robot_version = None
-            home_dir = os.path.expanduser('/home/lab/')
-            bashrc_path = os.path.join(home_dir, '.bashrc')
-            if os.path.exists(bashrc_path):
-                with open(bashrc_path, 'r') as file:
-                    lines = file.readlines()
-                for line in reversed(lines):
-                    line = line.strip()
-                    if line.startswith("export ROBOT_VERSION=") and "#" not in line:
-                        robot_version = line.split("=")[1].strip()
-                        break
-            
-            if robot_version:
-                env['ROBOT_VERSION'] = str(robot_version)
+            # ROS_BREAKIN_CONTROL_TIME=true: 告诉 joint_breakin.py "时长由ROS主控制器管理，不要再询问并读取时长"
+            env = dict(os.environ, PYTHONUNBUFFERED='1', ROS_BREAKIN_CONTROL_TIME='true')
             
             self.print_colored("正在启动腿部磨线脚本...", Colors.BLUE)
-            self.print_colored(f"脚本路径: {self.joint_breakin_script}", Colors.BLUE)
+            self.print_colored(f"脚本路径: {target_script}", Colors.BLUE)
+
+            # 启动进程（ROS控时长）
+            # Kuavo5V52 和 Roban2 都使用 ROS 话题控制
+            if is_kuavo5:
+                leg_script_dir = target_script.parent
+            else:
+                leg_script_dir = self.joint_breakin_script.parent
             
-            # 启动进程（不再通过stdin传递时间）
             self.leg_process = subprocess.Popen(
-                ["python3", str(self.joint_breakin_script)],
+                ["python3", str(target_script)],
                 cwd=str(leg_script_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -348,15 +373,29 @@ class LegBreakinStandalone:
                 """100Hz发布话题的循环"""
                 rate = rospy.Rate(100)  # 100Hz
                 while not stop_publish_flag.is_set() and not rospy.is_shutdown():
-                    # 发布allow_run = True（持续运行）
-                    allow_msg = Bool()
-                    allow_msg.data = True
-                    pub_allow_run.publish(allow_msg)
+                    try:
+                        # 发布allow_run = True（持续运行）
+                        allow_msg = Bool()
+                        allow_msg.data = True
+                        pub_allow_run.publish(allow_msg)
+                    except rospy.exceptions.ROSException:
+                        # ROS节点已关闭，退出循环
+                        break
+                    except Exception as e:
+                        # 其他异常，记录但继续运行
+                        pass
                     
                     # 注意：can_start_new_round应该由主程序发布，这里不发布
                     # 如果主程序未发布，C++层会使用默认值False
                     
-                    rate.sleep()
+                    try:
+                        rate.sleep()
+                    except rospy.exceptions.ROSException:
+                        # ROS节点已关闭，退出循环
+                        break
+                    except Exception:
+                        # 其他异常，退出循环
+                        break
             
             publish_thread = threading.Thread(target=publish_topics_loop, daemon=True)
             publish_thread.start()
@@ -365,13 +404,13 @@ class LegBreakinStandalone:
             
             # 订阅leg_started话题（由C++层发布）
             leg_started = False
+            sub_leg_started = None
             def leg_started_callback(msg):
                 nonlocal leg_started
                 if msg.data and not leg_started:
                     leg_started = True
                     leg_started_detected.set()
                     self.print_colored("✓ 腿部磨线已开始运行", Colors.GREEN)
-            
             sub_leg_started = rospy.Subscriber('/breakin/leg_started', Bool, leg_started_callback)
             
             # 启动输出读取线程（仅用于显示输出）
@@ -400,14 +439,10 @@ class LegBreakinStandalone:
             self.print_colored("等待腿部磨线开始运行...", Colors.BLUE)
             start_wait_timeout = 30.0
             start_wait_start = time.time()
-            
             while not leg_started and (time.time() - start_wait_start) < start_wait_timeout:
-                # 检查进程是否还在运行
                 if self.leg_process.poll() is not None:
                     return 1
-                # rospy的回调在后台线程自动处理，只需要sleep即可
                 rospy.sleep(0.1)
-            
             if not leg_started:
                 self.print_colored("错误：等待腿部磨线开始运行超时", Colors.RED)
                 if self.leg_process.poll() is None:
@@ -428,14 +463,22 @@ class LegBreakinStandalone:
             stop_publish_flag.set()
             publish_thread.join(timeout=1.0)
             
-            # 发布停止信号
-            stop_msg = Bool()
-            stop_msg.data = False
-            pub_allow_run.publish(stop_msg)
-            pub_leg_ready.publish(stop_msg)
-            # 注意：leg_started由C++层发布，这里不需要发布
-            # 注意：can_start_new_round由主程序发布，这里不需要发布
-            rospy.sleep(0.5)
+            # 发布停止信号（如果ROS节点还在运行）
+            try:
+                if not rospy.is_shutdown():
+                    stop_msg = Bool()
+                    stop_msg.data = False
+                    pub_allow_run.publish(stop_msg)
+                    pub_leg_ready.publish(stop_msg)
+                    # 注意：leg_started由C++层发布，这里不需要发布
+                    # 注意：can_start_new_round由主程序发布，这里不需要发布
+                    rospy.sleep(0.5)
+            except rospy.exceptions.ROSException:
+                # ROS节点已关闭，忽略
+                pass
+            except Exception:
+                # 其他异常，忽略
+                pass
             
             if return_code == 0:
                 self.print_colored("✓ 腿部磨线完成", Colors.GREEN)

@@ -48,8 +48,9 @@ class ArmBreakinStandalone:
         self.ruiwo_zero_script = self.project_root / "src" / "kuavo-ros-control-lejulib" / "hardware_plant" / "lib" / "ruiwo_controller" / "setMotorZero.sh"
         self.ruiwo_zero_script_alt = self.project_root / "installed" / "share" / "hardware_plant" / "lib" / "ruiwo_controller" / "setMotorZero.sh"
         
-        # ROS节点名称
-        self.arm_breakin_node_name = "arm_breakin_node"
+        # ROS节点名称（默认，将根据机器人版本和CAN总线类型动态选择）
+        self.arm_breakin_node_name = "arm_breakin_node"  # roban_v14_dual
+        self.arm_breakin_kuavo_v52_dual_node_name = "arm_breakin_kuavo_v52_dual_node"  # kuavo_v52_dual
         
         # 进程管理
         self.arm_process = None
@@ -308,8 +309,12 @@ class ArmBreakinStandalone:
             self.print_colored(f"手臂零点设置出错: {e}", Colors.RED)
             return False
     
-    def run_arm_breakin(self):
-        """运行手臂磨线"""
+    def run_arm_breakin(self, skip_calibration=False):
+        """运行手臂磨线
+        
+        Args:
+            skip_calibration: 是否跳过零点校准（默认False，进行校准）
+        """
         self.print_colored("=" * 50, Colors.CYAN)
         self.print_colored("      手臂磨线独立启动（ROS版本）", Colors.CYAN)
         self.print_colored("=" * 50, Colors.CYAN)
@@ -325,8 +330,41 @@ class ArmBreakinStandalone:
         can_bus_type = self.check_can_bus_config()
         use_motorevo_cali = (can_bus_type == "dual_bus")
         
-        # 根据CAN总线配置选择零点校准方式
-        if use_motorevo_cali:
+        # 根据机器人版本和CAN总线类型选择节点
+        robot_version = self.get_robot_version()
+        selected_node_name = None
+        
+        if robot_version:
+            try:
+                version_num = int(robot_version)
+                if version_num == 14 and can_bus_type == "dual_bus":
+                    # roban_v14_dual 机型
+                    selected_node_name = self.arm_breakin_node_name
+                    self.print_colored(f"检测到机型：roban_v14_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
+                elif version_num == 52 and can_bus_type == "dual_bus":
+                    # kuavo_v52_dual 机型
+                    selected_node_name = self.arm_breakin_kuavo_v52_dual_node_name
+                    self.print_colored(f"检测到机型：kuavo_v52_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
+                else:
+                    # 默认使用 roban_v14_dual 节点
+                    selected_node_name = self.arm_breakin_node_name
+                    self.print_colored(f"警告：版本 {version_num} 和 CAN 总线类型 {can_bus_type} 的组合未明确配置，使用默认节点 {selected_node_name}", Colors.YELLOW)
+            except (ValueError, TypeError):
+                # 无法解析版本号，使用默认节点
+                selected_node_name = self.arm_breakin_node_name
+                self.print_colored(f"警告：无法解析版本号 {robot_version}，使用默认节点 {selected_node_name}", Colors.YELLOW)
+        else:
+            # 未找到版本号，使用默认节点
+            selected_node_name = self.arm_breakin_node_name
+            self.print_colored(f"警告：未找到 ROBOT_VERSION，使用默认节点 {selected_node_name}", Colors.YELLOW)
+        
+        if not selected_node_name:
+            selected_node_name = self.arm_breakin_node_name  # 最终兜底
+        
+        # 根据用户选择决定是否进行零点校准
+        if skip_calibration:
+            self.print_colored("跳过零点校准", Colors.CYAN)
+        elif use_motorevo_cali:
             # 双CAN配置：使用 motorevo_tool.sh --cali
             self.print_colored("双CAN配置：使用电机校准 (motorevo_tool.sh --cali)", Colors.CYAN)
             self.print_colored(f"查找 motorevo_tool.sh: {self.motorevo_tool_sh}", Colors.BLUE)
@@ -361,10 +399,13 @@ class ArmBreakinStandalone:
                 return 1
         else:
             # 单CAN配置：使用 run_arm_zero_setup
-            self.print_colored("单CAN配置：在执行手臂磨线之前，需要先完成零点设置", Colors.YELLOW)
-            if not self.run_arm_zero_setup():
-                self.print_colored("零点设置失败，无法继续执行手臂磨线", Colors.RED)
-                return 1
+            if not skip_calibration:
+                self.print_colored("单CAN配置：在执行手臂磨线之前，需要先完成零点设置", Colors.YELLOW)
+                if not self.run_arm_zero_setup():
+                    self.print_colored("零点设置失败，无法继续执行手臂磨线", Colors.RED)
+                    return 1
+            else:
+                self.print_colored("单CAN配置：跳过零点设置", Colors.CYAN)
         
         print()
         self.print_colored("开始执行手臂磨线！", Colors.GREEN)
@@ -467,7 +508,7 @@ class ArmBreakinStandalone:
             except:
                 pass
             
-            # 创建发布者（100Hz发布allow_run，can_start_new_round由主程序发布）
+            # 创建发布者（1Hz发布allow_run，can_start_new_round由主程序发布）
             pub_allow_run = rospy.Publisher('/breakin/allow_run', Bool, queue_size=10)
             
             # 如果standalone_mode未发布，则发布它
@@ -497,7 +538,7 @@ class ArmBreakinStandalone:
             local_ws = script_dir.parent.parent.parent
             global_ws = None
 
-            # 通过 _find_project_root() 找到的项目根一般是 /home/lab/wang/kuavo-ros-control
+            # 通过 _find_project_root() 找到的项目根
             # 这里优先使用该根目录作为全局工作空间
             if self.project_root and (self.project_root / "devel" / "setup.bash").exists():
                 global_ws = self.project_root
@@ -505,25 +546,84 @@ class ArmBreakinStandalone:
             local_setup = local_ws / "devel" / "setup.bash"
             global_setup = global_ws / "devel" / "setup.bash" if global_ws else None
 
+            # 优先检查 build_lib 目录中是否有预编译的二进制文件
+            build_lib_dir = local_ws / "build_lib"
+            arm_breakin_node_path = None
+            if build_lib_dir.is_dir():
+                # 检查可能的路径（使用选定的节点名称）
+                possible_paths = [
+                    build_lib_dir / "devel" / "lib" / "arm_breakin" / selected_node_name,
+                    build_lib_dir / "lib" / "arm_breakin" / selected_node_name,
+                    build_lib_dir / "arm_breakin" / selected_node_name,
+                    build_lib_dir / selected_node_name,
+                ]
+                for path in possible_paths:
+                    if path.exists() and path.is_file():
+                        arm_breakin_node_path = path
+                        self.print_colored(f"✓ 在 build_lib 中找到二进制文件: {arm_breakin_node_path}", Colors.GREEN)
+                        break
+
             setup_cmd_parts = []
             if global_setup and global_setup.exists():
                 setup_cmd_parts.append(f"source {global_setup}")
             if local_setup.exists():
                 setup_cmd_parts.append(f"source {local_setup}")
 
+            # 如果 build_lib 中有 setup.bash，也 source 它
+            build_lib_setup_paths = [
+                build_lib_dir / "devel" / "setup.bash",
+                build_lib_dir / "setup.bash",
+            ]
+            for build_lib_setup in build_lib_setup_paths:
+                if build_lib_setup.exists():
+                    setup_cmd_parts.append(f"source {build_lib_setup}")
+                    self.print_colored(f"✓ 使用 build_lib 中的 setup.bash: {build_lib_setup}", Colors.GREEN)
+                    break
+
             if not setup_cmd_parts:
                 self.print_colored("错误：未找到可用的ROS工作空间，请先编译并source相应的devel/setup.bash", Colors.RED)
                 return 1
 
-            # 构建rosrun命令（按顺序 source 全局 + 本地工作空间，再运行节点）
-            setup_chain = " && ".join(setup_cmd_parts + [f"rosrun arm_breakin {self.arm_breakin_node_name}"])
-            cmd = ["bash", "-c", setup_chain]
+            # 如果找到 build_lib 中的二进制文件，直接运行它；否则使用 rosrun
+            if arm_breakin_node_path:
+                # 直接运行二进制文件
+                node_cmd = str(arm_breakin_node_path)
+                setup_chain = " && ".join(setup_cmd_parts + [node_cmd])
+                cmd = ["bash", "-c", setup_chain]
+                self.print_colored(f"使用 build_lib 中的二进制文件: {arm_breakin_node_path}", Colors.BLUE)
+            else:
+                # 使用 rosrun（需要完整的 ROS 包结构）
+                setup_chain = " && ".join(setup_cmd_parts + [f"rosrun arm_breakin {selected_node_name}"])
+                cmd = ["bash", "-c", setup_chain]
+                self.print_colored(f"使用 rosrun 启动节点 {selected_node_name}（需要完整的 ROS 包结构）", Colors.BLUE)
             
             # 设置ROS环境变量
             env = dict(os.environ)
             # 确保ROS环境变量正确传递
             if 'ROS_MASTER_URI' not in env or not env['ROS_MASTER_URI']:
                 env['ROS_MASTER_URI'] = 'http://localhost:11311'
+            
+            # 如果使用 build_lib 中的二进制文件，需要设置库路径
+            if arm_breakin_node_path:
+                # 查找可能的库目录
+                lib_dirs = []
+                possible_lib_paths = [
+                    build_lib_dir / "devel" / "lib",
+                    build_lib_dir / "lib",
+                ]
+                for lib_path in possible_lib_paths:
+                    if lib_path.exists() and lib_path.is_dir():
+                        lib_dirs.append(str(lib_path))
+                
+                # 如果找到库目录，添加到 LD_LIBRARY_PATH
+                if lib_dirs:
+                    existing_ld_path = env.get('LD_LIBRARY_PATH', '')
+                    new_ld_path = ':'.join(lib_dirs)
+                    if existing_ld_path:
+                        env['LD_LIBRARY_PATH'] = f"{new_ld_path}:{existing_ld_path}"
+                    else:
+                        env['LD_LIBRARY_PATH'] = new_ld_path
+                    self.print_colored(f"设置 LD_LIBRARY_PATH: {env['LD_LIBRARY_PATH']}", Colors.BLUE)
             if 'ROS_IP' not in env:
                 # 尝试获取本机IP
                 try:
@@ -586,12 +686,12 @@ class ArmBreakinStandalone:
                 self.print_colored("请检查上面的节点输出，查看错误信息", Colors.YELLOW)
                 return 1
             
-            # 启动100Hz发布allow_run线程（can_start_new_round由主程序发布）
+            # 启动1Hz发布allow_run线程（can_start_new_round由主程序发布）
             stop_publish_flag = threading.Event()
             
             def publish_allow_run_loop():
-                """100Hz发布allow_run话题的循环"""
-                rate = rospy.Rate(100)  # 100Hz
+                """1Hz发布allow_run话题的循环"""
+                rate = rospy.Rate(1)  # 1Hz
                 while not stop_publish_flag.is_set() and not rospy.is_shutdown():
                     # 持续发布allow_run = True
                     allow_msg = Bool()
@@ -602,7 +702,7 @@ class ArmBreakinStandalone:
             publish_thread = threading.Thread(target=publish_allow_run_loop, daemon=True)
             publish_thread.start()
             
-            self.print_colored("✓ 已启动100Hz allow_run话题发布线程", Colors.GREEN)
+            self.print_colored("✓ 已启动1Hz allow_run话题发布线程", Colors.GREEN)
             
             # 等待手臂节点开始运行（发布arm_started = True）
             self.print_colored("等待手臂节点开始运行...", Colors.BLUE)
@@ -673,8 +773,20 @@ class ArmBreakinStandalone:
 
 def main():
     try:
+        # 检查环境变量或命令行参数，决定是否跳过校准
+        skip_calibration = False
+        
+        # 方式1：环境变量（主控制器传递）
+        if os.environ.get('SKIP_ARM_CALIBRATION', '').lower() in ('true', '1', 'yes'):
+            skip_calibration = True
+        
+        # 方式2：命令行参数（直接运行时）
+        if len(sys.argv) > 1:
+            if sys.argv[1] in ('--skip-calibration', '--skip-cali', '-s'):
+                skip_calibration = True
+        
         app = ArmBreakinStandalone()
-        exit_code = app.run_arm_breakin()
+        exit_code = app.run_arm_breakin(skip_calibration=skip_calibration)
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}程序被用户中断{Colors.NC}")

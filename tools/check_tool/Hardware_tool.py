@@ -1093,30 +1093,6 @@ def reset_folder():
     else:
         print("您输入的字符不符，请重试。")
 
-def roban2_joint_breakin():
-    """Roban2机器人手臂和腿部统一磨线功能"""
-    roban2_script_path = folder_path + "/roban2_joint_breakin/roban2_joint_breakin.py"
-    
-    if not os.path.exists(roban2_script_path):
-        print(bcolors.FAIL + f"错误：Roban2磨线脚本不存在: {roban2_script_path}" + bcolors.ENDC)
-        return
-    
-    print(bcolors.OKCYAN + "启动Roban2机器人统一磨线程序..." + bcolors.ENDC)
-    print(bcolors.WARNING + "注意：此功能需要root权限运行" + bcolors.ENDC)
-    
-    # 检查是否有root权限
-    if os.geteuid() != 0:
-        print(bcolors.FAIL + "错误：请使用root权限运行此功能" + bcolors.ENDC)
-        print(bcolors.WARNING + "请使用: sudo python3 " + os.path.abspath(__file__) + bcolors.ENDC)
-        return
-    
-    try:
-        # 运行Roban2磨线脚本
-        command = f"python3 {roban2_script_path}"
-        subprocess.run(command, shell=True)
-    except Exception as e:
-        print(bcolors.FAIL + f"运行Roban2磨线脚本时出错: {e}" + bcolors.ENDC)
-
 def read_and_edit_env_file(file_path, target_variable, new_value):
     try:
         # 读取 .env 文件内容
@@ -1410,31 +1386,34 @@ def secondary_menu():
             if robot_version:
                 try:
                     version_num = int(robot_version)
-                    # 版本 50-52 使用 kuavo5 脚本
-                    if 50 <= version_num <= 52:
-                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "kuavo5", "joint_breakin.py")
-                        script_description = f"Kuavo5磨线脚本 (版本 {robot_version})"
-                    # 版本 14-49 使用 dual_can_leju_ec 脚本
-                    elif 14 <= version_num <= 49:
-                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts",  "breakin_main_controller.py")
-                        script_description = f"双CAN leju磨线脚本 (版本 {robot_version})"
+
+                    if 13 <= version_num <= 14:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
+                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+
+                    elif 40 <= version_num <= 49:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "joint_breakin.py")
+                        script_description = f"Kuavo4磨线脚本 joint_breakin/joint_breakin.py (版本 {robot_version})"
+
+                    elif 50 <= version_num <= 52:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
+                        script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+
                     else:
-                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（14-49 或 50-52）" + bcolors.ENDC)
+                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、40-49、50-52），当前不支持自动选择磨线脚本" + bcolors.ENDC)
                 except (ValueError, TypeError):
-                    print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，将使用默认脚本" + bcolors.ENDC)
-                    # 默认使用 dual_can_leju_ec
-                    kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "dual_can_leju_ec", "joint_breakin.py")
-                    script_description = "默认双CAN leju磨线脚本"
+                    print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，请检查 ~/.bashrc 中的 ROBOT_VERSION 设置" + bcolors.ENDC)
             else:
-                print(bcolors.WARNING + "警告：未找到 ROBOT_VERSION" + bcolors.ENDC)
+                print(bcolors.WARNING + "警告：未找到 ROBOT_VERSION，无法自动选择磨线脚本" + bcolors.ENDC)
             
-            if kuavo_breakin_script and os.path.exists(kuavo_breakin_script):
-                print(bcolors.OKGREEN + f"\n使用{script_description}" + bcolors.ENDC)
-                # 如果需要以 root 运行，请直接使用 root 终端启动本工具
-                command = "python3 " + kuavo_breakin_script
-                subprocess.run(command, shell=True)
-            else:
-                print(bcolors.FAIL + f"错误：磨线脚本不存在: {kuavo_breakin_script}" + bcolors.ENDC)
+            if kuavo_breakin_script:
+                if os.path.exists(kuavo_breakin_script):
+                    print(bcolors.OKGREEN + f"\n使用{script_description}" + bcolors.ENDC)
+                    # 如果需要以 root 运行，请直接使用 root 终端启动本工具
+                    command = "python3 " + kuavo_breakin_script
+                    subprocess.run(command, shell=True)
+                else:
+                    print(bcolors.FAIL + f"错误：磨线脚本不存在: {kuavo_breakin_script}" + bcolors.ENDC)
             print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)
             break
         elif option == "n":
