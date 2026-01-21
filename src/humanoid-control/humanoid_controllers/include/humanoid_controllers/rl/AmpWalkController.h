@@ -7,6 +7,7 @@
 #include "humanoid_controllers/rl/RlGaitReceiver.h"
 #include "humanoid_controllers/LowPassFilter.h"
 #include "humanoid_controllers/rl/armController.h"
+#include "humanoid_controllers/rl/waistController.h"
 #include "kuavo_solver/ankle_solver.h"
 #include <openvino/openvino.hpp>
 #include <memory>
@@ -73,6 +74,11 @@ namespace humanoid_controller
                          const SensorData& sensor_data,
                          kuavo_msgs::jointCmd& joint_cmd) override;
 
+    // 更新腰部指令（可选功能，用于替换jointCmdMsg中的腰部部分）
+    bool updateWaistCommand(const ros::Time& time,
+                         const SensorData& sensor_data,
+                         kuavo_msgs::jointCmd& joint_cmd) override;
+
   private:
     // === 来自 humanoidController_rl.cpp::loadSettings 的关键参数 ===
     double dt_{0.002};                    // 控制周期，和 /wbc_frequency 一致
@@ -131,11 +137,18 @@ namespace humanoid_controller
     double arm_tracking_error_threshold_{0.05}; ///< 手臂跟踪误差阈值 (rad)，从配置文件加载
     double arm_mode_interpolation_velocity_{1.0}; ///< 模式2的插值速度 (rad/s)，从配置文件加载
 
+    // 腰部控制相关（可选功能）
+    double waist_mode_interpolation_velocity_{1.0}; ///< 腰部模式切换时的插值速度 (rad/s)，从配置文件加载，用于三次多项式插值
+    std::unique_ptr<WaistController> waist_controller_; ///< 腰部控制器
+
   private:
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
     
     // 手臂控制辅助函数
     void initArmControl(const std::string& urdf_path);
+    
+    // 腰部控制辅助函数
+    void initWaistControl();
   };
 }

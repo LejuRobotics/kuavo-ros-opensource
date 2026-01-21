@@ -100,6 +100,7 @@ namespace humanoid_controller
     }
     
     initArmControl(urdf_path);
+    initWaistControl();
 
     initialized_ = true;
 
@@ -154,6 +155,15 @@ namespace humanoid_controller
     loadData::loadCppDataType(rlParamFile, "withArm", withArm_);
     loadData::loadCppDataType(rlParamFile, "inferenceFrequency", inference_frequency_);
     loadData::loadCppDataType(rlParamFile, "defaultBaseHeightControl", defaultBaseHeightControl_);
+    // 可选: RL 站立时 base 在 x 方向相对于足端中心(0)的偏移, 若配置文件未提供则保持默认 0
+    try
+    {
+      loadData::loadCppDataType(rlParamFile, "defaultBaseXOffsetControl", defaultBaseXOffsetControl_);
+    }
+    catch (const std::exception& e)
+    {
+      ROS_WARN("[%s] defaultBaseXOffsetControl not found in ROS params, using default: %f", name_.c_str(), defaultBaseXOffsetControl_);
+    }
 
     // 是否使用关节指令滤波（对应 skw_rl_param.info 中 use_jointcmd_filter）
     loadData::loadPtreeValue(pt, use_jointcmd_filter_, "use_jointcmd_filter", true);
@@ -173,6 +183,21 @@ namespace humanoid_controller
       
       ROS_INFO("[%s] Arm control parameters loaded: max_velocity=%.3f rad/s, error_threshold=%.3f rad, mode_interpolation_velocity=%.3f rad/s",
                name_.c_str(), arm_max_tracking_velocity_, arm_tracking_error_threshold_, arm_mode_interpolation_velocity_);
+    }
+
+    // 是否启用腰部控制覆盖功能（对应 skw_rl_param.info 中 use_external_waist_controller）
+    bool waist_command_replacement_enabled = false;
+    loadData::loadPtreeValue(pt, waist_command_replacement_enabled, "use_external_waist_controller", false);
+    use_external_waist_controller(waist_command_replacement_enabled);
+    ROS_INFO("[%s] Waist command replacement enabled: %s", name_.c_str(), waist_command_replacement_enabled ? "true" : "false");
+    
+    // 加载腰部控制参数（用于 WaistController）
+    if (waist_command_replacement_enabled && waistNum_ > 0)
+    {
+      loadData::loadPtreeValue(pt, waist_mode_interpolation_velocity_, "waistVelocityLimit.modeInterpolationVelocity", false);
+      
+      ROS_INFO("[%s] Waist control parameters loaded: mode_interpolation_velocity=%.3f rad/s",
+               name_.c_str(), waist_mode_interpolation_velocity_);
     }
 
     std::string networkModelFile;
@@ -997,6 +1022,157 @@ namespace humanoid_controller
     }
 
     // 模式0或2：已使用外部手臂指令替换，返回true
+    return true;
+  }
+
+  void AmpWalkController::initWaistControl()
+  {
+    // 初始化腰部控制器（如果启用了腰部控制功能）
+    if (waist_command_replacement_enabled_ && waistNum_ > 0)
+    {
+      try
+      {
+        // 创建 WaistController 实例
+        waist_controller_ = std::make_unique<WaistController>(
+          nh_,
+          waistNum_,
+          ros_logger_
+        );
+        
+        // 提取腰部部分的 kp 和 kd 参数
+        Eigen::VectorXd waist_kp, waist_kd;
+        if (is_roban_)
+        {
+          // roban 机型：腰部在索引 0 到 waistNum_-1
+          waist_kp = jointKpRL_.segment(0, waistNum_);
+          waist_kd = jointKdRL_.segment(0, waistNum_);
+        }
+        else
+        {
+          // 非 roban 机型：腰部在 jointNum_ 到 jointNum_+waistNum_-1
+          waist_kp = jointKpRL_.segment(jointNum_, waistNum_);
+          waist_kd = jointKdRL_.segment(jointNum_, waistNum_);
+        }
+        
+        // 获取默认腰部位置
+        Eigen::VectorXd default_waist_pos;
+        if (defalutJointPosRL_.size() >= jointNum_ + waistNum_)
+        {
+          if (is_roban_)
+          {
+            default_waist_pos = defalutJointPosRL_.segment(0, waistNum_);
+          }
+          else
+          {
+            default_waist_pos = defalutJointPosRL_.segment(jointNum_, waistNum_);
+          }
+        }
+        else
+        {
+          default_waist_pos = Eigen::VectorXd::Zero(waistNum_);
+          ROS_WARN("[%s] Cannot get default waist position, using zero vector", name_.c_str());
+        }
+        
+        // 加载配置参数
+        waist_controller_->loadSettings(
+          waist_kp,
+          waist_kd,
+          default_waist_pos,
+          waist_mode_interpolation_velocity_
+        );
+        
+        // 启用腰部控制
+        waist_controller_->enable(waist_command_replacement_enabled_);
+        
+        ROS_INFO("[%s] Waist controller initialized (waist_command_replacement_enabled=%s, waist_joints=%zu)", 
+                 name_.c_str(), waist_command_replacement_enabled_ ? "true" : "false", waistNum_);
+      }
+      catch (const std::exception& e)
+      {
+        ROS_ERROR("[%s] Failed to initialize waist controller: %s", name_.c_str(), e.what());
+        waist_command_replacement_enabled_ = false;
+        waist_controller_.reset();
+      }
+    }
+    else
+    {
+      ROS_INFO("[%s] Waist command replacement disabled or no waist joints", name_.c_str());
+    }
+  }
+
+  // 更新腰部指令（可选功能，用于替换jointCmdMsg中的腰部部分）
+  bool AmpWalkController::updateWaistCommand(const ros::Time& time,
+                                             const SensorData& sensor_data,
+                                             kuavo_msgs::jointCmd& joint_cmd)
+  {
+    // 如果未启用腰部控制或没有腰部关节，直接返回false
+    if (!waist_command_replacement_enabled_ || waistNum_ == 0 || !waist_controller_)
+    {
+      ROS_WARN_THROTTLE(1.0, "[%s] updateWaistCommand: disabled or no controller (enabled=%d, waistNum_=%zu, controller=%p)",
+                          name_.c_str(), waist_command_replacement_enabled_, waistNum_, waist_controller_.get());
+      return false;
+    }
+    
+    // 获取控制周期
+    double dt = dt_;
+    if (dt <= 0.0 || dt > 0.1) dt = 0.002;  // 默认2ms
+
+    // 获取当前命令数据
+    CommandDataRL cmdData;
+    if (gait_receiver_)
+    {
+      cmdData = gait_receiver_->getCurrentCommand();
+    }
+
+    // 构建完整的关节位置和速度向量（腿 + 腰 + 手）
+    // 注意：WaistController 期望的顺序是：腿 + 腰 + 手
+    // 对于 roban 机型，preprocessSensorData 已将顺序调整为：腰 + 腿 + 手
+    // 所以需要重新排列为：腿 + 腰 + 手
+    Eigen::VectorXd full_joint_pos(jointNum_ + waistNum_ + jointArmNum_);
+    Eigen::VectorXd full_joint_vel(jointNum_ + waistNum_ + jointArmNum_);
+
+    if (is_roban_)
+    {
+      // roban 机型：sensor_data 顺序是 腰 + 腿 + 手，需要调整为 腿 + 腰 + 手
+      Eigen::VectorXd waist_pos = sensor_data.jointPos_.segment(0, waistNum_);
+      Eigen::VectorXd leg_pos = sensor_data.jointPos_.segment(waistNum_, jointNum_);
+      Eigen::VectorXd arm_pos = sensor_data.jointPos_.segment(waistNum_ + jointNum_, jointArmNum_);
+      
+      Eigen::VectorXd waist_vel = sensor_data.jointVel_.segment(0, waistNum_);
+      Eigen::VectorXd leg_vel = sensor_data.jointVel_.segment(waistNum_, jointNum_);
+      Eigen::VectorXd arm_vel = sensor_data.jointVel_.segment(waistNum_ + jointNum_, jointArmNum_);
+      
+      // 重新排列为：腿 + 腰 + 手
+      full_joint_pos << leg_pos, waist_pos, arm_pos;
+      full_joint_vel << leg_vel, waist_vel, arm_vel;
+    }
+    else
+    {
+      // 非 roban 机型：顺序已经是 腿 + 腰 + 手
+      full_joint_pos = sensor_data.jointPos_.head(jointNum_ + waistNum_ + jointArmNum_);
+      full_joint_vel = sensor_data.jointVel_.head(jointNum_ + waistNum_ + jointArmNum_);
+    }
+
+    // 调用 WaistController::update 进行腰部控制
+    // 注意：WaistController 内部会根据模式自动处理，模式1（RL控制）不会更新命令消息
+    waist_controller_->update(
+      time,
+      dt,
+      full_joint_pos,
+      full_joint_vel,
+      static_cast<int>(cmdData.cmdStance_),  // cmd_stance: 0=行走, 1=站立
+      joint_cmd,
+      jointNum_  // 腰部在joint_cmd中的起始索引（即腿部关节数）
+    );
+
+    // 检查当前模式，如果模式1（RL控制）则返回false，否则返回true
+    if (waist_controller_->getMode() == 1)
+    {
+      // 模式1：RL控制，不替换腰部指令，返回false表示未使用外部腰部指令替换
+      return false;
+    }
+
+    // 模式0或2：已使用外部腰部指令替换，返回true
     return true;
   }
 

@@ -22,7 +22,7 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   , enabled_(true)
   , smart_stop_enabled_(true)
   , torso_velocity_threshold_(0.05)
-  , feet_alignment_threshold_(0.08)
+  , feet_alignment_threshold_(0.05)
   , velocity_smooth_factor_(0.1)
   , max_velocity_change_(0.5)
   , velocity_smooth_time_(0.1)

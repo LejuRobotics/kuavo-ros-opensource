@@ -452,6 +452,9 @@ namespace humanoid_controller
     centroidalModelInfo_ = HumanoidInterface_->getCentroidalModelInfo();
     eeKinematicsPtr_->setPinocchioInterface(*pinocchioInterface_ptr_);
 
+    torso_position_interpolator_ptr_ = std::make_shared<FloatInterpolation>(HumanoidInterface_->getPinocchioInterface(),
+                                                            HumanoidInterface_->getCentroidalModelInfo());
+
     auto &info = HumanoidInterface_->getCentroidalModelInfo();
     jointNum_ = HumanoidInterface_->modelSettings().mpcLegsDof;
     armNum_ = info.actuatedDofNum - jointNum_ - waistNum_;
@@ -2154,9 +2157,19 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       arm_joint_trajectory_.tau = Eigen::VectorXd::Zero(armNumReal_);
       ROS_INFO("[MPC->RL] 清理手臂轨迹缓存");
 
-      // 启动躯干插值，XY 对齐双脚中心，Z 对齐 RL 默认高度
-      // 使用已有的躯干插值系统，并覆盖目标高度为 initialStateRL_(8)
-      vector3_t feet_center = currentObservation_.state.segment<3>(6);
+      // 启动躯干插值，XY 基于当前双脚中心 + RL 控制器配置的 base X 偏移，Z 对齐 RL 默认高度
+      // 使用已有的躯干插值系统，并覆盖目标高度为 RL 默认高度
+      vector3_t feet_center = stateEstimate_->getFeetCenterPosition();
+      // RL 控制器配置的站立时 base 在 x 方向相对于足端中心(0)的偏移（机器人前向）
+      double base_x_offset = 0.0;
+      if (current_controller_ptr_)
+      {
+        base_x_offset = current_controller_ptr_->getDefaultBaseXOffsetControl();
+      }
+      // 将机体前向的 X 偏移旋转到世界坐标系，并叠加到双脚中心位置
+      const double yaw = currentObservation_.state(9);
+      feet_center(0) += std::cos(yaw) * base_x_offset;
+      feet_center(1) += std::sin(yaw) * base_x_offset;
       feet_center(2) = defaultBaseHeightControl_;
       vector6_t targetPose = vector6_t::Zero();
       targetPose.segment<3>(0) = feet_center;                  // xyz
@@ -2452,10 +2465,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             }
             
             
-            if (is_torso_interpolation_active_ && !is_rl_controller_) // 当前是从RL切换到MPC, 使用WBC插值防止MPC没有启动
+            if (is_torso_interpolation_active_ /* && !is_rl_controller_ */) // 当前是从RL切换到MPC, 使用WBC插值防止MPC没有启动
             {
               optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
-              optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = default_state_.segment(12,jointNumReal_+ waistNum_);
+              optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = leg_interpolation_result_.head(jointNumReal_+ waistNum_);
+              // optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = default_state_.segment(12,jointNumReal_+ waistNum_);
               // optimizedInput_mrt = stanceInput_mrt_;
               plannedMode_ = ModeNumber::SS;
 
@@ -2711,7 +2725,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         static vector_t x;
 
-        if(is_roban_ && is_torso_interpolation_active_)
+        if(/*is_roban_ && */ is_torso_interpolation_active_)
         {
           x = standUpWbc_->update(optimizedState2WBC_mrt_, optimizedInput2WBC_mrt_, measuredRbdStateReal_, ModeNumber::SS, period.toSec(), false);
         }
@@ -2811,6 +2825,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         jointCmdMsg.joint_kp.push_back(joint_kp_[i1]);
         jointCmdMsg.joint_kd.push_back(joint_kd_[i1]);
         jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
+        if(!is_roban_ && is_torso_interpolation_active_ && i1 < jointNumReal_)
+        {
+          jointCmdMsg.control_modes.push_back(2); // 躯干插值阶段，腿部全部位置控制
+          continue;
+        }
         jointCmdMsg.control_modes.push_back(joint_control_modes_[i1]);
 
         // jointCurrentWBC_(i1) = output_tau_(i1);
@@ -4294,6 +4313,24 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     is_torso_interpolation_active_ = true;
     torso_interpolation_start_pose_ = current_torso_pose;
     torso_interpolation_target_pose_ = target_torso_pose;
+
+    leg_interpolation_start_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, current_torso_pose);
+    leg_interpolation_target_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, target_torso_pose);
+
+    leg_interpolation_result_.setZero(waistNum_ + jointNumReal_);
+    leg_interpolation_result_.head(jointNumReal_) = leg_interpolation_start_pose_;
+
+    double leg_distance = 0.0;
+    if (leg_interpolation_start_pose_.size() == leg_interpolation_target_pose_.size())
+    {
+      leg_distance = (leg_interpolation_target_pose_ - leg_interpolation_start_pose_).norm();
+    }
+    else
+    {
+      std::cout << "[MPCRLInterpolation] 错误：下肢位置维度不匹配(" 
+                << leg_interpolation_start_pose_.size() << " vs " << leg_interpolation_target_pose_.size() << ")" << std::endl;
+    }
+
     // torso_interpolation_target_pose_.head(2) = current_torso_pose.head(2);
     torso_interpolation_start_time_ = current_time;
     
@@ -4313,6 +4350,8 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     std::cout << "Starting MPC-RL interpolation:" << std::endl;
     std::cout << "  Torso from [" << current_torso_pose.transpose() 
               << "] to [" << target_torso_pose.transpose() << "] (distance: " << torso_distance << "m)" << std::endl;
+    std::cout << "  Leg from [" << leg_interpolation_start_pose_.transpose() 
+              << "] to [" << leg_interpolation_target_pose_.transpose() << "] (distance: " << leg_distance << "rad)" << std::endl;
     std::cout << "  Arm from [" << current_arm_pos.transpose() 
               << "] to [" << target_arm_pos.transpose() << "] (distance: " << arm_distance << "rad)" << std::endl;
     std::cout << "  Max velocity: " << torso_interpolation_max_velocity_ 
@@ -4351,7 +4390,8 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     
     // 使用线性插值计算当前躯干位姿
     vector6_t interpolated_pose = torso_interpolation_start_pose_ + alpha * (torso_interpolation_target_pose_ - torso_interpolation_start_pose_);
-    
+    leg_interpolation_result_.head(jointNumReal_) = leg_interpolation_start_pose_ + alpha * (leg_interpolation_target_pose_ - leg_interpolation_start_pose_);
+
     // 计算手臂插值
     arm_interpolation_result_ = arm_interpolation_start_pos_ + alpha * (arm_interpolation_target_pos_ - arm_interpolation_start_pos_);
     // 更新位姿和时间
