@@ -1101,7 +1101,7 @@ class IkRos:
             self.control_robot_hand_position_pub.publish(robot_hand_position)
         elif self.end_effector_type == LEJUCLAW:
             if joyStick_data is not None:
-                if joyStick_data.left_second_button_pressed and self.__button_y_last is False and joyStick_data.left_trigger < 0.1:
+                if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
                     print(f"\033[91mButton Y is pressed.\033[0m")
                     self.__freeze_finger = not self.__freeze_finger
                 self.__button_y_last = joyStick_data.left_second_button_pressed

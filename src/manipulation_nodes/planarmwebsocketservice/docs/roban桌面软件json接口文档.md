@@ -380,18 +380,6 @@
 }
 ```
 
-**错误响应示例：**
-```json
-{
-    "cmd": "delete_map",
-    "data": {
-        "code": 1,
-        "message": "无法删除当前正在建图的地图",
-        "map_name": "living_room_map"
-    }
-}
-```
-
 ```json
 {
     "cmd": "delete_map",
@@ -407,9 +395,20 @@
 {
     "cmd": "delete_map",
     "data": {
-        "code": 1,
+        "code": 2,
         "message": "地图名称不能为空",
         "map_name": ""
+    }
+}
+```
+
+```json
+{
+    "cmd": "delete_map",
+    "data": {
+        "code": 3,
+        "message": "地图删除失败: living_room_map",
+        "map_name": "living_room_map"
     }
 }
 ```

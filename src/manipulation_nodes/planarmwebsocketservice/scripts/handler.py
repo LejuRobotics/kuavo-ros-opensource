@@ -189,7 +189,7 @@ def map_to_png(map_x, map_y, map_info=None):
         map_info = global_map_info
 
     if not map_info:
-        print("警告: 地图信息不可用，无法进行坐标转换")
+        #print("警告: 地图信息不可用，无法进行坐标转换")
         return None, None
 
     try:
@@ -3192,7 +3192,7 @@ async def delete_map_handler(
         map_name = data.get("data", {}).get("map_name", "")
 
         if not map_name:
-            payload.data["code"] = 1
+            payload.data["code"] = 2
             payload.data["message"] = "地图名称不能为空"
             response = Response(payload=payload, target=websocket)
             response_queue.put(response)
@@ -3218,6 +3218,7 @@ async def delete_map_handler(
                 output_lines = result.stdout.strip().split('\n')
                 success = False
                 message = f"地图删除成功: {map_name}"
+                error_code = 0  # 0=成功, 1=正在使用, 2=名称为空, 3=其他错误
 
                 for line in output_lines:
                     if "success: True" in line:
@@ -3228,43 +3229,50 @@ async def delete_map_handler(
                         english_message = line.split("message:", 1)[1].strip()
                         if "Map name cannot be empty" in english_message:
                             message = "地图名称不能为空"
+                            error_code = 2
                         elif "Cannot delete map currently being mapped" in english_message:
                             message = "无法删除当前正在建图的地图"
+                            error_code = 1
                         elif "Cannot delete map currently in use for navigation" in english_message:
                             message = "无法删除当前正在使用的导航地图"
+                            error_code = 1
                         elif "Map deleted successfully" in english_message:
                             message = f"地图删除成功: {map_name}"
+                            error_code = 0
                         elif "Failed to delete map" in english_message:
                             message = f"地图删除失败: {map_name}"
+                            error_code = 3
                         elif "Error deleting map" in english_message:
                             message = "删除地图时发生错误"
+                            error_code = 3
                         else:
                             message = english_message
+                            error_code = 3
 
                 if success:
                     payload.data["message"] = message
                     payload.data["map_name"] = map_name
                     print(f"Delete map service call successful: {message}")
                 else:
-                    payload.data["code"] = 1
+                    payload.data["code"] = error_code
                     payload.data["message"] = message
                     payload.data["map_name"] = map_name
                     print(f"Delete map service call failed: {message}")
             else:
-                payload.data["code"] = 1
+                payload.data["code"] = 3
                 payload.data["message"] = f"地图删除失败: {result.stderr}"
                 payload.data["map_name"] = map_name
                 print(f"Delete map service call failed: {result.stderr}")
 
         except (rospy.ServiceException, subprocess.TimeoutExpired, asyncio.TimeoutError) as e:
-            payload.data["code"] = 1
+            payload.data["code"] = 3
             payload.data["message"] = f"无法连接到删除地图服务: {str(e)}"
             payload.data["map_name"] = map_name
             print(f"Failed to connect to delete map service: {str(e)}")
 
 
     except Exception as e:
-        payload.data["code"] = 1
+        payload.data["code"] = 3
         payload.data["message"] = f"Failed to delete map: {str(e)}"
 
     response = Response(payload=payload, target=websocket)
@@ -4462,17 +4470,27 @@ async def get_all_maps_handler(
 latest_odometry_data = None
 odometry_subscriber = None
 tf_listener = None
+last_robot_position_publish_time = 0  # 上次推送机器人位置的时间
+ROBOT_POSITION_PUBLISH_INTERVAL = 0.1  # 机器人位置推送间隔（秒），降低频率到原来的一半
 
 
 def odometry_callback(msg):
     """
     /Odometry话题的回调函数，接收机器人位置数据并主动推送给客户端
     """
-    global latest_odometry_data, tf_listener
+    global latest_odometry_data, tf_listener, last_robot_position_publish_time
 
     try:
         # 保存最新的里程计数据
         latest_odometry_data = msg
+
+        # 限制机器人位置推送频率，降低到原来的一半
+        current_time = time.time()
+        if current_time - last_robot_position_publish_time < ROBOT_POSITION_PUBLISH_INTERVAL:
+            return  # 未到推送时间，直接返回
+
+        # 更新上次推送时间
+        last_robot_position_publish_time = current_time
 
         pose = msg.pose.pose
         twist = msg.twist.twist
