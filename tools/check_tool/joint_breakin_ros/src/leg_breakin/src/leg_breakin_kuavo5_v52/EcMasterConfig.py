@@ -199,8 +199,8 @@ class EcMasterConfig:
     def build_command(self, eni_config_path):
         base_command = [
             "main",
-            "-i8254x", "1", "1",
             "-i8254x", "2", "1",
+            "-i8254x", "3", "1",
             "-a", "7",
             "-v", "2",
             "-auxclk", "500",
