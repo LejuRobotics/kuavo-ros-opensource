@@ -676,7 +676,11 @@ namespace ocs2
             auto it = std::find_if(joyButtonMap.begin(), joyButtonMap.end(),
                 [&button](const auto& pair) { return pair.first == button.first; });
             if (it != joyButtonMap.end()) {
-                old_joy_msg_backup.buttons[button.second] = old_joy_msg_.buttons[it->second];
+                int old_idx = it->second;
+                int new_idx = button.second;
+                if (old_idx < old_joy_msg_.buttons.size()) {
+                    old_joy_msg_backup.buttons[new_idx] = old_joy_msg_.buttons[old_idx];
+                }
             }
         }
         for (const auto& axis : joyAxisMap_backup) {
@@ -838,16 +842,41 @@ namespace ocs2
         nodeHandle_.setParam("channel_map_path", channel_map_path);
         ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
         reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
+        // 更新old_joy_msg并跳过本次处理，避免状态混乱
+        old_joy_msg_ = *joy_msg;
+        return;
       }
 
       if (rb_version_.major() != 1)
       {
-        if (joy_msg->buttons[joyButtonMap["BUTTON_BACK"]]){
+        int back_idx = joyButtonMap["BUTTON_BACK"];
+        int start_idx = joyButtonMap["BUTTON_START"];
+
+        bool back_pressed = false;
+        bool start_pressed = false;
+
+        if (back_idx < joy_msg->buttons.size()) {
+            back_pressed = joy_msg->buttons[back_idx];
+        }
+
+        if (start_idx < joy_msg->buttons.size()) {
+            start_pressed = joy_msg->buttons[start_idx];
+        }
+
+        if (back_pressed){
           callTerminateSrv();
+          old_joy_msg_ = *joy_msg;  // 更新旧状态，避免重复触发
           return;
         }
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_START"]] && joy_msg->buttons[joyButtonMap["BUTTON_START"]]){
+
+        bool old_start_pressed = false;
+        if (start_idx < old_joy_msg_.buttons.size()) {
+            old_start_pressed = old_joy_msg_.buttons[start_idx];
+        }
+
+        if (!old_start_pressed && start_pressed){
           callRealInitializeSrv();
+          old_joy_msg_ = *joy_msg;  // 更新旧状态，避免重复触发
           return;
         }
       }
@@ -1329,11 +1358,11 @@ namespace ocs2
       // 调用服务
       if (client.call(srv))
       {
-        ROS_INFO("[JoyControl] Service call successful");
+        ROS_INFO("[JoyControl] Real initialize service call SUCCESS");
       }
       else
       {
-        ROS_ERROR("Failed to callRealInitializeSrv service, use publish topic.");
+        ROS_ERROR("[JoyControl] Real initialize service FAILED, using topic /re_start_robot");
         std_msgs::Bool msg;
         msg.data = true;
         re_start_pub_.publish(msg);
@@ -1341,7 +1370,6 @@ namespace ocs2
     }
     void callTerminateSrv()
     {
-      std::cout << "tigger callTerminateSrv" << std::endl;
       for (int i = 0; i < 5; i++)
       {
         std_msgs::Bool msg;
