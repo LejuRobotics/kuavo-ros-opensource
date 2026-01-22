@@ -756,29 +756,6 @@ namespace ocs2
                     controlWaist(relative_yaw * 180.0 / M_PI); // 转换为角度
                 }
                 
-                //计算相对于0点的roll,yaw位置
-                double current_roll = current_head_body_pose_.body_roll;
-                double relative_roll = current_roll - torso_roll_zero_;
-                double current_yaw_torso = current_head_body_pose_.body_yaw;
-                double relative_yaw_torso = current_yaw_torso - torso_yaw_zero_;
-
-                //std::cout << "相对roll: " << relative_roll << std::endl;
-                if(waist_dof_ == 0)
-                {
-                    // std::cout << "相对roll: " << relative_roll * 180.0 / M_PI << std::endl;
-                    // 对relative_roll限幅5度
-                    relative_roll = std::max(-15.0*M_PI/180.0, std::min(relative_roll, 15.0*M_PI/180.0));
-                    relative_yaw_torso = std::max(-30.0*M_PI/180.0, std::min(relative_yaw_torso, 30.0*M_PI/180.0));
-                    //std::cout << "相对roll: " << relative_roll * 180.0 / M_PI << std::endl;
-                    //std::cout << "相对yaw: " << relative_yaw_torso * 180.0 / M_PI << std::endl;
-                }
-                else
-                {
-                    // 对relative_roll限幅0度
-                    relative_roll = 0;
-                    relative_yaw_torso = 0;
-                }
-                
                 // Height control - apply limits from config
                 relative_height = std::max(vr_squat_height_min_, std::min(relative_height, vr_squat_height_max_));
                 geometry_msgs::Twist cmd_pose;
@@ -786,7 +763,7 @@ namespace ocs2
                 cmd_pose.linear.y = 0.0;  // 基于当前位置的 y 方向值 (m)
                 cmd_pose.linear.z = relative_height;  // 相对高度
                 cmd_pose.angular.x = 0.0;  // roll
-                cmd_pose.angular.z = relative_yaw_torso;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
+                cmd_pose.angular.z = 0.0;  // # 基于当前位置旋转（偏航）的角度，单位为弧度 (radian)
                 cmd_pose.angular.y = current_head_body_pose_.body_pitch;  // pitch
 
                 cmd_pose_pub_.publish(cmd_pose);
