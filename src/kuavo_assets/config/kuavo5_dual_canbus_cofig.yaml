@@ -82,7 +82,7 @@ canbus0_devices:
     device_id: 0x0D
     params: [0, 35, 2, 0, 0, 0, 0]
     ratio: 36                       # 减速比
-    negtive: true
+    negtive: false
     ignore: false                   # 是否忽略/禁用
   # ///////////////
   - name: Head_pitch
@@ -90,7 +90,7 @@ canbus0_devices:
     device_id: 0x0E
     params: [0, 35, 2, 0, 0, 0, 0]
     ratio: 36                       # 减速比
-    negtive: false
+    negtive: true
     ignore: false                   # 是否忽略/禁用
   # ///////////////
   - name: Lhand_revo2_hand        # ANCHOR_L_NAME
