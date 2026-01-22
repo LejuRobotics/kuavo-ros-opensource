@@ -325,6 +325,14 @@ class IkRos:
         
         # 订阅手臂模式topic
         self.arm_mode_sub = rospy.Subscriber('/quest3/triger_arm_mode', Int32, self.arm_mode_callback)
+        
+        # 订阅手臂控制模式变化话题，用于检测退出复位模式
+        self.arm_control_mode_sub = rospy.Subscriber(
+            "/humanoid/mpc/arm_control_mode",
+            Float64MultiArray,
+            self.arm_control_mode_callback
+        )
+        self.__need_reset_ik_guess = False  # 标志是否需要重置IK初始猜测
 
         self.run()
         self.ik_thread.join()
@@ -503,6 +511,22 @@ class IkRos:
         arm_q_filtered = [0.0] * self.__arm_dof
         is_runing = False
         while not rospy.is_shutdown():
+            # 检测是否需要重置IK初始猜测（模式切换时）
+            if self.__need_reset_ik_guess:
+                # 重置q_last和arm_ik内部的last_solution
+                # 将q_last设置为全0，避免内翻
+                q0_ref = self.arm_ik.q0() if self.external_q0 is None else self.external_q0
+                q_last = np.zeros(len(q0_ref))
+                pre_q_first = q_last.copy()
+                q_now = q_last.copy()
+                # 重置IK求解器内部的last_solution为默认初始状态
+                if hasattr(self.arm_ik, 'reset_last_solution'):
+                    self.arm_ik.reset_last_solution(self.arm_ik.q0())
+                
+                # 重置arm_q_filtered为当前q_last的手臂部分
+                arm_q_filtered = q_last[-self.__arm_dof:].copy()
+                
+                self.__need_reset_ik_guess = False
             self.hand_finger_data_process(0)
             # print(f"q_now: {q_now}")
             is_runing_last = is_runing
@@ -638,8 +662,10 @@ class IkRos:
                     msg = Float32MultiArray()
                     msg.data = q_now[-self.__arm_dof:] * 180.0 / np.pi
                     self.pub_origin_joint.publish(msg)
+                    
                     arm_q_filtered = self.limit_angle(q_now[-self.__arm_dof:])
                     arm_q_filtered = self.limit_angle_by_velocity(q_last[-self.__arm_dof:], arm_q_filtered, vel_limit=720.0)
+                    
                     msg.data = arm_q_filtered * 180.0 / np.pi
                     self.pub_filtered_joint.publish(msg)
                     self.publish_joint_states(q_now=arm_q_filtered, q_last=q_last)
@@ -1075,7 +1101,7 @@ class IkRos:
             self.control_robot_hand_position_pub.publish(robot_hand_position)
         elif self.end_effector_type == LEJUCLAW:
             if joyStick_data is not None:
-                if joyStick_data.left_second_button_pressed and self.__button_y_last is False and joyStick_data.left_trigger < 0.1:
+                if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
                     print(f"\033[91mButton Y is pressed.\033[0m")
                     self.__freeze_finger = not self.__freeze_finger
                 self.__button_y_last = joyStick_data.left_second_button_pressed
@@ -1158,6 +1184,17 @@ class IkRos:
                 self.hold_arm_timer = None
                 self.frozen_arm_state = None
                 print(f"\033[93m[IK]Half body mode: Stopped holding arm position.\033[0m")
+    
+    def arm_control_mode_callback(self, msg):
+        """监听手臂控制模式变化，检测切换模式时重置IK初始猜测"""
+        if len(msg.data) >= 2:
+            current_mode = int(msg.data[0])  # 当前模式
+            new_mode = int(msg.data[1])      # 新模式
+            
+            # 检测模式切换：当data[0] != data[1]时表示正在切换，重置IK初始猜测
+            if current_mode != new_mode:
+                self.__need_reset_ik_guess = True
+                
             
     def sensor_data_raw_callback(self, msg):
         self.sensor_data_raw = msg

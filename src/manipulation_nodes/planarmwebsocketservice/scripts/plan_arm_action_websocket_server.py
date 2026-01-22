@@ -210,8 +210,8 @@ async def send_to_websockets(response: Response):
         try:
             payload_dict = json.loads(payload)
             cmd = payload_dict.get('cmd', 'unknown')
-            # 只在非地图更新消息时打印，或者简化地图更新消息的打印
-            if cmd != 'map_update':
+            # 只在非地图更新、非机器人位置更新消息时打印
+            if cmd != 'map_update' and cmd != 'robot_position_update':
                 print(f"Broadcasting message to all clients: cmd={cmd}")
             else:
                 # 对于地图更新，只打印基本信息，不包含base64数据

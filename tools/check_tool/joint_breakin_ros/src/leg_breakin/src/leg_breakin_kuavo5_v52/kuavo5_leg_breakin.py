@@ -201,6 +201,26 @@ relative_path = "build_lib"
 target_path = os.path.join(script_dir, relative_path)
 sys.path.append(target_path)
 
+# 设置 LD_LIBRARY_PATH，确保运行时能找到 libemllI8254x.so
+lib_path = os.path.join(script_dir, "lib")
+if os.path.exists(lib_path):
+    # 获取当前的 LD_LIBRARY_PATH（如果存在）
+    current_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+    # 将 lib 目录添加到 LD_LIBRARY_PATH
+    if current_ld_path:
+        new_ld_path = f"{lib_path}:{current_ld_path}"
+    else:
+        new_ld_path = lib_path
+    os.environ["LD_LIBRARY_PATH"] = new_ld_path
+    # 对于 Linux，还需要设置 ctypes 的库搜索路径
+    if sys.platform == "linux":
+        import ctypes
+        try:
+            # 使用 ctypes 设置库搜索路径
+            ctypes.CDLL("libdl.so.2").dlopen.restype = ctypes.c_void_p
+        except:
+            pass
+
 import ec_master_wrap
 g_EcMasterConfig = EcMasterConfig()
 
