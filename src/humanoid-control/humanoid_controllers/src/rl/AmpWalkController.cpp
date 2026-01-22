@@ -194,10 +194,21 @@ namespace humanoid_controller
     // 加载腰部控制参数（用于 WaistController）
     if (waist_command_replacement_enabled && waistNum_ > 0)
     {
-      loadData::loadPtreeValue(pt, waist_mode_interpolation_velocity_, "waistVelocityLimit.modeInterpolationVelocity", false);
+      loadData::loadPtreeValue(pt, waist_mode_interpolation_velocity_, "waistControllerParam.modeInterpolationVelocity", false);
+      loadData::loadPtreeValue(pt, waist_mode2_cutoff_freq_, "waistControllerParam.mode2CutoffFreq", false);
       
-      ROS_INFO("[%s] Waist control parameters loaded: mode_interpolation_velocity=%.3f rad/s",
-               name_.c_str(), waist_mode_interpolation_velocity_);
+      // 读取 kp 和 kd，如果未指定则使用默认值
+      double waist_kp_default = 10.0;
+      double waist_kd_default = 2.0;
+      loadData::loadPtreeValue(pt, waist_kp_default, "waistControllerParam.kp", false);
+      loadData::loadPtreeValue(pt, waist_kd_default, "waistControllerParam.kd", false);
+      
+      // 将标量值转换为向量（所有腰部关节使用相同的 kp 和 kd）
+      waist_kp_from_config_ = Eigen::VectorXd::Constant(waistNum_, waist_kp_default);
+      waist_kd_from_config_ = Eigen::VectorXd::Constant(waistNum_, waist_kd_default);
+      
+      ROS_INFO("[%s] Waist control parameters loaded: mode_interpolation_velocity=%.3f rad/s, mode2_cutoff_freq=%.1f Hz, kp=%.1f, kd=%.1f",
+               name_.c_str(), waist_mode_interpolation_velocity_, waist_mode2_cutoff_freq_, waist_kp_default, waist_kd_default);
     }
 
     std::string networkModelFile;
@@ -1036,22 +1047,24 @@ namespace humanoid_controller
         waist_controller_ = std::make_unique<WaistController>(
           nh_,
           waistNum_,
-          ros_logger_
+          ros_logger_,
+          is_real_
         );
         
-        // 提取腰部部分的 kp 和 kd 参数
+        // 使用从配置文件读取的 kp 和 kd 参数（如果已加载），否则使用默认值
         Eigen::VectorXd waist_kp, waist_kd;
-        if (is_roban_)
+        if (waist_kp_from_config_.size() == waistNum_ && waist_kd_from_config_.size() == waistNum_)
         {
-          // roban 机型：腰部在索引 0 到 waistNum_-1
-          waist_kp = jointKpRL_.segment(0, waistNum_);
-          waist_kd = jointKdRL_.segment(0, waistNum_);
+          // 使用从配置文件读取的参数
+          waist_kp = waist_kp_from_config_;
+          waist_kd = waist_kd_from_config_;
         }
         else
         {
-          // 非 roban 机型：腰部在 jointNum_ 到 jointNum_+waistNum_-1
-          waist_kp = jointKpRL_.segment(jointNum_, waistNum_);
-          waist_kd = jointKdRL_.segment(jointNum_, waistNum_);
+          // 如果未从配置文件加载，使用默认值
+          waist_kp = Eigen::VectorXd::Constant(waistNum_, 10.0);
+          waist_kd = Eigen::VectorXd::Constant(waistNum_, 2.0);
+          ROS_WARN("[%s] Waist kp/kd not loaded from config, using default values (kp=10.0, kd=2.0)", name_.c_str());
         }
         
         // 获取默认腰部位置
@@ -1078,14 +1091,16 @@ namespace humanoid_controller
           waist_kp,
           waist_kd,
           default_waist_pos,
-          waist_mode_interpolation_velocity_
+          waist_mode_interpolation_velocity_,
+          waist_mode2_cutoff_freq_
         );
         
-        // 启用腰部控制
-        waist_controller_->enable(waist_command_replacement_enabled_);
+        // 默认不启用腰部控制覆盖，保持RL控制模式（模式1）
+        // 腰部控制模式切换通过 /humanoid_change_waist_ctrl_mode 服务进行
+        waist_controller_->enable(false);
         
-        ROS_INFO("[%s] Waist controller initialized (waist_command_replacement_enabled=%s, waist_joints=%zu)", 
-                 name_.c_str(), waist_command_replacement_enabled_ ? "true" : "false", waistNum_);
+        ROS_INFO("[%s] Waist controller initialized (default mode=1 RL control, waist_joints=%zu)", 
+                 name_.c_str(), waistNum_);
       }
       catch (const std::exception& e)
       {

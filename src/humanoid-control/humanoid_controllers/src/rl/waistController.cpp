@@ -6,13 +6,14 @@ namespace humanoid_controller
 {
 
 WaistController::WaistController(ros::NodeHandle& nh, size_t joint_waist_num,
-                                 ocs2::humanoid::TopicLogger* ros_logger)
+                                 ocs2::humanoid::TopicLogger* ros_logger,
+                                 bool is_real)
   : nh_(nh)
   , ros_logger_(ros_logger)
   , joint_waist_num_(joint_waist_num)
+  , is_real_(is_real)
   , waist_control_mode_(1)
   , waist_control_enabled_(false)
-  , waist_mode_interpolation_velocity_(1.0)
   , waist_is_interpolating_(false)
 {
   // 初始化当前状态
@@ -27,11 +28,6 @@ WaistController::WaistController(ros::NodeHandle& nh, size_t joint_waist_num,
   desire_waist_q_.setZero();
   desire_waist_v_.setZero();
   
-  // 模式0相关
-  mode0_fixed_waist_pos_.resize(joint_waist_num_);
-  mode0_fixed_waist_pos_.setZero();
-  mode0_fixed_waist_pos_set_ = false;
-  
   // 模式1相关
   default_waist_pos_.resize(joint_waist_num_);
   default_waist_pos_.setZero();
@@ -39,17 +35,11 @@ WaistController::WaistController(ros::NodeHandle& nh, size_t joint_waist_num,
   // 模式2相关
   raw_mode2_waist_target_q_.resize(joint_waist_num_);
   raw_mode2_waist_target_q_.setZero();
-  mode2_waist_target_q_.resize(joint_waist_num_);
-  mode2_waist_target_q_.setZero();
   mode2_waist_target_received_ = false;
   
   // 控制参数
   waist_kp_.resize(joint_waist_num_);
   waist_kd_.resize(joint_waist_num_);
-  
-  // 平滑插值相关
-  waist_interpolation_start_pos_.resize(joint_waist_num_);
-  waist_interpolation_start_pos_.setZero();
   
   // 初始化订阅者（订阅/robot_waist_motion_data话题）
   if (joint_waist_num_ > 0)
@@ -57,6 +47,13 @@ WaistController::WaistController(ros::NodeHandle& nh, size_t joint_waist_num,
     waist_traj_sub_ = nh_.subscribe<kuavo_msgs::robotWaistControl>(
       "/robot_waist_motion_data", 10,
       boost::bind(&WaistController::waistTrajectoryCallback, this, _1));
+    
+    // 订阅腰部控制使能话题
+    enable_waist_control_sub_ = nh_.subscribe<std_msgs::Bool>(
+      "/humanoid_controller/enable_waist_control", 10,
+      boost::bind(&WaistController::enableWaistControlCallback, this, _1));
+    
+    ROS_INFO("[WaistController] Subscribed to /humanoid_controller/enable_waist_control (is_real=%d)", is_real_);
   }
 }
 
@@ -73,17 +70,22 @@ void WaistController::reset()
   desire_waist_q_ = current_waist_pos_;
   desire_waist_v_ = current_waist_vel_;
   
-  // 重置模式0的固定位置
-  mode0_fixed_waist_pos_set_ = false;
-  
   // 重置模式2的目标
   mode2_waist_target_received_ = false;
+  
+  // 重置滤波器状态到当前位置
+  if (waist_filter_initialized_)
+  {
+    waist_joint_pos_filter_.reset(desire_waist_q_);
+    waist_joint_vel_filter_.reset(desire_waist_v_);
+  }
 }
 
 void WaistController::loadSettings(const Eigen::VectorXd& waist_kp,
                                    const Eigen::VectorXd& waist_kd,
                                    const Eigen::VectorXd& default_waist_pos,
-                                   double waist_mode_interpolation_velocity)
+                                   double waist_mode_interpolation_velocity,
+                                   double mode2_cutoff_freq)
 {
   // PD控制参数
   if (waist_kp.size() != joint_waist_num_ || waist_kd.size() != joint_waist_num_)
@@ -108,8 +110,23 @@ void WaistController::loadSettings(const Eigen::VectorXd& waist_kp,
     default_waist_pos_.setZero();
   }
   
-  // 模式切换时的插值速度（用于三次多项式插值）
-  waist_mode_interpolation_velocity_ = waist_mode_interpolation_velocity;
+  // 模式2外部输入的截止频率：如果传入的值无效（<=0），使用默认值5Hz
+  if (mode2_cutoff_freq > 0.0)
+  {
+    mode2_cutoff_freq_ = mode2_cutoff_freq;
+  }
+  else
+  {
+    mode2_cutoff_freq_ = 5.0;  // 默认值5Hz
+    ROS_INFO("[WaistController] Invalid or missing mode2_cutoff_freq, using default: %.1f Hz", mode2_cutoff_freq_);
+  }
+  
+  // 如果滤波器已初始化，需要重新设置以应用新的截止频率
+  if (waist_filter_initialized_ && joint_waist_num_ > 0)
+  {
+    waist_filter_initialized_ = false;
+    ROS_INFO("[WaistController] Filter cutoff frequency updated to %.1f Hz, will re-initialize in next update()", mode2_cutoff_freq_);
+  }
 }
 
 void WaistController::update(const ros::Time& time,
@@ -120,27 +137,31 @@ void WaistController::update(const ros::Time& time,
                              kuavo_msgs::jointCmd& joint_cmd_msg,
                              size_t jointNumReal)
 {
-  if (!waist_control_enabled_ || joint_waist_num_ == 0)
-  {
-    ROS_WARN_THROTTLE(1.0, "[WaistController] update called but disabled: enabled=%d, joint_waist_num_=%zu", 
-                      waist_control_enabled_, joint_waist_num_);
-    return;
-  }
+  // if ((!waist_control_enabled_ && !waist_is_interpolating_) || joint_waist_num_ == 0)
+  // {
+  //   return;
+  // }
   
   // 保存当前腰部位置和速度
   size_t waist_start_idx = jointNumReal;  // 腰部起始索引
   current_waist_pos_ = joint_pos.segment(waist_start_idx, joint_waist_num_);
   current_waist_vel_ = joint_vel.segment(waist_start_idx, joint_waist_num_);
   
-  // 根据当前模式更新期望状态
-  if (waist_control_mode_ == 0)
+  // 确保滤波器参数与实际控制频率匹配（仅在未初始化时使用传入的 dt 初始化）
+  // 模式1和模式2共用同一组滤波器
+  if (joint_waist_num_ > 0 && !waist_filter_initialized_)
   {
-    updateMode0(dt);
+    Eigen::VectorXd cutoff = Eigen::VectorXd::Constant(joint_waist_num_, mode2_cutoff_freq_);
+    waist_joint_pos_filter_.setParams(dt, cutoff);
+    waist_joint_vel_filter_.setParams(dt, cutoff);
+    waist_filter_initialized_ = true;
+    ROS_INFO("[WaistController] First-order filter initialized: dt=%.4f s, cutoff=%.1f Hz", dt, mode2_cutoff_freq_);
   }
-  else if (waist_control_mode_ == 1)
+  
+  // 根据当前模式更新期望状态
+  if (waist_control_mode_ == 1)
   {
-    // 模式1：RL控制，完全不处理，让RL控制器自己控制腰部
-    waist_is_interpolating_ = false;
+    updateMode1(dt);
   }
   else if (waist_control_mode_ == 2)
   {
@@ -148,8 +169,8 @@ void WaistController::update(const ros::Time& time,
   }
   
   // 填充命令消息（根据模式决定是否填充）
-  // 模式0或2：总是填充；模式1：不填充，让RL控制器自己控制
-  if (waist_control_mode_ == 0 || waist_control_mode_ == 2)
+  // 模式2：总是填充；模式1：只有在插值阶段填充，插值完成后让RL控制器自己控制
+  if (waist_control_mode_ == 2 || waist_is_interpolating_)
   {
     // 更新jointCmdMsg中的腰部部分
     // 注意：jointCmdMsg的顺序是：腿(jointNumReal) + 腰(waistNum_) + 手(armNumReal_) + 头
@@ -164,11 +185,6 @@ void WaistController::update(const ros::Time& time,
       return;
     }
     
-    // 计算PD控制力矩：tau = kp * (desire_q - current_q) + kd * (desire_v - current_v)
-    Eigen::VectorXd pos_error = desire_waist_q_ - current_waist_pos_;
-    Eigen::VectorXd vel_error = desire_waist_v_ - current_waist_vel_;
-    Eigen::VectorXd tau_cmd = waist_kp_.cwiseProduct(pos_error) + waist_kd_.cwiseProduct(vel_error);
-    
     // 只修改腰部关节的命令（从cmd_waist_start_idx开始，共joint_waist_num_个关节）
     for (size_t i = 0; i < joint_waist_num_; ++i)
     {
@@ -182,21 +198,33 @@ void WaistController::update(const ros::Time& time,
         continue;
       }
       
-      // 更新力矩命令（PD控制计算出的力矩）
-      joint_cmd_msg.tau[cmd_idx] = tau_cmd(i);
+      // 如果是仿真，计算前馈扭矩（PD控制）；实物不计算
+      if (!is_real_)
+      {
+        // 计算PD控制力矩：tau = kp * (desire_q - current_q) + kd * (desire_v - current_v)
+        Eigen::VectorXd pos_error = desire_waist_q_ - current_waist_pos_;
+        Eigen::VectorXd vel_error = desire_waist_v_ - current_waist_vel_;
+        Eigen::VectorXd tau_cmd = waist_kp_.cwiseProduct(pos_error) + waist_kd_.cwiseProduct(vel_error);
+        
+        // 更新力矩命令（PD控制计算出的力矩）
+        joint_cmd_msg.tau[cmd_idx] = tau_cmd(i);
+      }
+      // 实物不计算前馈扭矩，保持原有tau值
       
-      // 更新control_modes为CST模式（力矩控制模式）
-      joint_cmd_msg.control_modes[cmd_idx] = 0;  // 0 = CST (力矩控制)
+      joint_cmd_msg.control_modes[cmd_idx] = 2; 
+      joint_cmd_msg.joint_q[cmd_idx] = desire_waist_q_(i);
+      joint_cmd_msg.joint_v[cmd_idx] = 0;
+  
     }
   }
 }
 
 bool WaistController::changeMode(int target_mode)
 {
-  // 验证模式有效性
-  if (target_mode < 0 || target_mode > 2)
+  // 验证模式有效性（只支持模式1和2）
+  if (target_mode != 1 && target_mode != 2)
   {
-    ROS_WARN("[WaistController] Invalid waist control mode: %d", target_mode);
+    ROS_WARN("[WaistController] Invalid waist control mode: %d (only mode 1 and 2 are supported)", target_mode);
     return false;
   }
   
@@ -212,104 +240,148 @@ void WaistController::applyModeChange(int target_mode)
     return;
   }
   
-  int previous_mode = waist_control_mode_;
   waist_control_mode_ = target_mode;
   
-  if (target_mode == 0)
-  {
-    // 模式0：固定到当前动作
-    if (!mode0_fixed_waist_pos_set_)
-    {
-      mode0_fixed_waist_pos_ = current_waist_pos_;
-      mode0_fixed_waist_pos_set_ = true;
-    }
-    if (previous_mode != 0)
-    {
-      resetInterpolationState(ros::Time::now(), current_waist_pos_, mode0_fixed_waist_pos_);
-      waist_is_interpolating_ = true;
-    }
-  }
-  else if (target_mode == 1)
+  if (target_mode == 1)
   {
     // 模式1：RL控制
-    waist_is_interpolating_ = false;  // 重置插值状态，让RL控制器完全接管
-  }
-  else if (target_mode == 2)
-  {
-    // 模式2：外部控制
-    // 初始化期望位置为当前实际位置，确保插值从实际位置开始
-    if (current_waist_pos_.size() == joint_waist_num_ && current_waist_pos_.norm() > 1e-6)
+    // 目标设置为默认腰部位置，通过低通滤波器平滑过渡
+    // 不重置滤波器，让滤波器从当前状态平滑过渡到默认位置
+    
+    // 检查当前位置和默认位置的差异
+    Eigen::VectorXd error = default_waist_pos_ - current_waist_pos_;
+    double error_norm = error.norm();
+    std::cout << "error_norm" << error_norm << std::endl;
+    std::cout << "default_waist_pos_" << default_waist_pos_.transpose() << std::endl;
+    std::cout << "current_waist_pos_" << current_waist_pos_.transpose() << std::endl;
+    // 使用阈值（0.05 rad，约3度）来判断是否需要插值
+    const double waist_tracking_error_threshold = 0.02;
+    
+    if (error_norm > waist_tracking_error_threshold)
     {
-      // 如果当前位置有效（非零），使用当前位置初始化
-      desire_waist_q_ = current_waist_pos_;
-      desire_waist_v_ = current_waist_vel_;
+      // 差异较大，标记为插值状态，使用低通滤波器平滑过渡到默认位置
+      waist_is_interpolating_ = true;
+      ROS_INFO("[WaistController] Switching to Mode 1: will use low-pass filter to transition to default position (error=%.4f rad, cutoff=%.1f Hz)", 
+               error_norm, mode2_cutoff_freq_);
     }
     else
     {
-      // 如果当前位置无效（零向量或未初始化），保持 desire_waist_q_ 不变
-      // 它将在第一次 update 时从 current_waist_pos_ 初始化
+      // 差异较小，直接设置为默认位置，不需要插值
+      desire_waist_q_ = default_waist_pos_;
+      desire_waist_v_ = Eigen::VectorXd::Zero(joint_waist_num_);
+      waist_is_interpolating_ = false;
+      ROS_INFO("[WaistController] Switching to Mode 1: already at default position");
     }
-    waist_is_interpolating_ = true;
     mode2_waist_target_received_ = false;
+    
+    ROS_INFO("[WaistController] Switching to Mode 1: RL control");
+  }
+  else if (target_mode == 2)
+  {
+    mode2_waist_target_received_ = false;
+    {
+      desire_waist_q_.setZero();
+      desire_waist_v_.setZero();
+      raw_mode2_waist_target_q_.setZero();
+      waist_is_interpolating_ = true;  // 模式2始终填充命令消息
+    }
+    ROS_INFO("[WaistController] Switching to Mode 2: external control (cutoff=%.1f Hz, target_received=%d)", 
+             mode2_cutoff_freq_, mode2_waist_target_received_);
   }
 }
 
-void WaistController::updateMode0(double dt)
+void WaistController::updateMode1(double dt)
 {
-  // 模式0：固定到当前位置
+  // 模式1：RL控制
+  // 如果正在插值到默认位置，使用低通滤波器平滑过渡
   if (waist_is_interpolating_)
   {
-    // 如果正在插值（切换瞬间），执行平滑插值回到固定位置
-    applySmoothInterpolation(ros::Time::now(), mode0_fixed_waist_pos_, Eigen::VectorXd::Zero(joint_waist_num_));
+    // 使用低通滤波器从当前位置平滑过渡到默认位置
+    desire_waist_q_ = waist_joint_pos_filter_.update(default_waist_pos_);
+    
+    // 通过位置差分计算速度
+    static Eigen::VectorXd prev_filtered_pos_mode1;
+    static bool first_call_mode1 = true;
+    
+    if (first_call_mode1)
+    {
+      prev_filtered_pos_mode1 = desire_waist_q_;
+      first_call_mode1 = false;
+    }
+    
+    if (prev_filtered_pos_mode1.size() != joint_waist_num_)
+    {
+      prev_filtered_pos_mode1 = desire_waist_q_;
+    }
+    
+    // 计算速度：v = (q_current - q_prev) / dt
+    Eigen::VectorXd computed_vel = (desire_waist_q_ - prev_filtered_pos_mode1) / dt;
+    
+    // 对计算出的速度进行低通滤波
+    desire_waist_v_ = waist_joint_vel_filter_.update(computed_vel);
+    
+    prev_filtered_pos_mode1 = desire_waist_q_;
+    
+    // 检查误差，如果小于阈值则结束插值，让RL控制器完全接管
+    Eigen::VectorXd error = default_waist_pos_ - desire_waist_q_;
+    double error_norm = error.norm();
+    const double waist_tracking_error_threshold = 0.02;
+    
+    if (error_norm <= waist_tracking_error_threshold)
+    {
+      // 误差小于阈值，结束插值
+      waist_joint_pos_filter_.reset(default_waist_pos_);
+      desire_waist_q_ = default_waist_pos_;
+      desire_waist_v_ = Eigen::VectorXd::Zero(joint_waist_num_);
+      waist_is_interpolating_ = false;
+      first_call_mode1 = true;  // 重置静态变量，为下次插值做准备
+      ROS_INFO("[WaistController] Mode 1 interpolation completed, RL controller takes over (error=%.4f rad)", error_norm);
+    }
   }
-  else if (mode0_fixed_waist_pos_set_)
-  {
-    desire_waist_q_ = mode0_fixed_waist_pos_;
-    desire_waist_v_.setZero();
-  }
+  // 插值完成后，不更新命令消息，让RL控制器完全接管
 }
 
 void WaistController::updateMode2(double dt)
 {
   // 模式2：外部控制模式
-  // 使用三次多项式插值，插值结果自带速度
+  // 使用低通滤波平滑外部输入，先滤波位置，然后通过位置差分计算速度，再滤波速度
   
-  // 1. 如果收到新目标且目标改变，重置插值状态
+  // 静态变量：用于速度计算
+  static Eigen::VectorXd prev_filtered_pos_mode2;
+  static bool first_call_mode2 = true;
+  
+  // 初始化静态变量
+  if (first_call_mode2 && mode2_waist_target_received_)
+  {
+    prev_filtered_pos_mode2 = raw_mode2_waist_target_q_;
+    first_call_mode2 = false;
+  }
+  
   if (mode2_waist_target_received_)
   {
-    double target_diff = (mode2_waist_target_q_ - raw_mode2_waist_target_q_).norm();
-    if (target_diff > 1e-6 || !waist_is_interpolating_)
+    // 1. 先对位置进行低通滤波
+    desire_waist_q_ = waist_joint_pos_filter_.update(raw_mode2_waist_target_q_);
+    
+    // 2. 通过位置差分计算速度
+    // 确保prev_filtered_pos_mode2已初始化
+    if (prev_filtered_pos_mode2.size() != joint_waist_num_)
     {
-      // 确保 desire_waist_q_ 已初始化（如果还是零向量或未初始化，使用当前位置）
-      if (desire_waist_q_.norm() < 1e-6 && current_waist_pos_.norm() > 1e-6)
-      {
-        desire_waist_q_ = current_waist_pos_;
-        desire_waist_v_ = current_waist_vel_;
-      }
-      
-      // 更新目标位置
-      mode2_waist_target_q_ = raw_mode2_waist_target_q_;
-      
-      // 重置插值状态，开始新的插值（从当前的 desire_waist_q_ 插值到新的目标）
-      resetInterpolationState(ros::Time::now(), desire_waist_q_, mode2_waist_target_q_);
-      waist_is_interpolating_ = true;
+      prev_filtered_pos_mode2 = desire_waist_q_;
     }
+    
+    // 计算速度：v = (q_current - q_prev) / dt
+    // Eigen::VectorXd computed_vel = (desire_waist_q_ - prev_filtered_pos_mode2) / dt;
+    
+    // 3. 对计算出的速度进行低通滤波
+    desire_waist_v_.setZero();
+    
+    // 更新prev_filtered_pos_mode2用于下次计算
+    prev_filtered_pos_mode2 = desire_waist_q_;
   }
-  
-  // 2. 执行三次多项式插值（自动计算速度和位置）
-  if (waist_is_interpolating_ && mode2_waist_target_received_)
+  else
   {
-    // 使用三次多项式插值，目标速度为0（插值结束后保持静止）
-    applySmoothInterpolation(ros::Time::now(), mode2_waist_target_q_, 
-                            Eigen::VectorXd::Zero(joint_waist_num_));
-  }
-  else if (!mode2_waist_target_received_)
-  {
-    // 如果还没有收到目标，保持当前位置和零速度
-    if (desire_waist_q_.norm() < 1e-6 && current_waist_pos_.norm() > 1e-6)
-    {
-      desire_waist_q_ = current_waist_pos_;
-    }
+
+    desire_waist_q_.setZero();
     desire_waist_v_.setZero();
   }
 }
@@ -363,62 +435,34 @@ void WaistController::waistTrajectoryCallback(const kuavo_msgs::robotWaistContro
   mode2_waist_target_received_ = true;
 }
 
-void WaistController::applySmoothInterpolation(const ros::Time& current_time,
-                                               const Eigen::VectorXd& target_pos,
-                                               const Eigen::VectorXd& target_vel)
+void WaistController::enableWaistControlCallback(const std_msgs::Bool::ConstPtr& msg)
 {
-  // 使用三次多项式插值（与手臂控制一致）
-  double elapsed = (current_time - waist_interpolation_start_time_).toSec();
-  double duration = waist_interpolation_duration_;
+  bool enable = msg->data;
   
-  if (elapsed >= duration)
+  if (enable != waist_control_enabled_)
   {
-    desire_waist_q_ = target_pos;
-    desire_waist_v_ = target_vel;
-    waist_is_interpolating_ = false;
-    return;
+    waist_control_enabled_ = enable;
+    
+    if (enable)
+    {
+      // 启用时：切换到外部控制模式（模式2）
+      if (waist_control_mode_ == 1)
+      {
+        changeMode(2);
+      }
+      ROS_INFO("[WaistController] Waist control enabled, switched to mode 2 (external control)");
+    }
+    else
+    {
+      // 禁用时：切换回RL控制模式（模式1）
+      if (waist_control_mode_ != 1)
+      {
+        changeMode(1);
+      }
+      ROS_INFO("[WaistController] Waist control disabled, switched to mode 1 (RL control)");
+    }
   }
-  
-  // 归一化时间 [0, 1]
-  double tau = elapsed / duration;
-  
-  // 三次多项式插值：s = 3τ² - 2τ³（与手臂控制一致）
-  double tau2 = tau * tau;
-  double s = tau2 * (3.0 - 2.0 * tau);
-  
-  // 解析计算速度指令：ds/dt = (ds/dτ) * (dτ/dt)
-  // ds/dτ = 6τ - 6τ²
-  double ds_dtau = 6.0 * tau * (1.0 - tau);
-  double ds_dt = ds_dtau / duration;
-  
-  // 插值位置和速度
-  desire_waist_q_ = waist_interpolation_start_pos_ + s * (target_pos - waist_interpolation_start_pos_);
-  desire_waist_v_ = ds_dt * (target_pos - waist_interpolation_start_pos_);
 }
 
-void WaistController::resetInterpolationState(const ros::Time& time,
-                                             const Eigen::VectorXd& start_pos,
-                                             const Eigen::VectorXd& target_pos)
-{
-  waist_interpolation_start_time_ = time;
-  waist_interpolation_start_pos_ = start_pos;
-  
-  // 根据最大关节位移和插值速度动态计算时长
-  double max_displacement = (target_pos - start_pos).cwiseAbs().maxCoeff();
-  
-  // 如果位移非常小（接近0），直接设置目标值，不需要插值
-  if (max_displacement < 1e-6)
-  {
-    waist_interpolation_duration_ = 0.0;  // 设置为0，applySmoothInterpolation会立即设置目标值
-    return;
-  }
-  
-  waist_interpolation_duration_ = max_displacement / waist_mode_interpolation_velocity_;
-  
-  // 限制最小和最大插值时间
-  const double min_duration = 0.1;  // 最小插值时间 100ms
-  const double max_duration = 2.0;  // 最大插值时间 2s
-  waist_interpolation_duration_ = std::clamp(waist_interpolation_duration_, min_duration, max_duration);
-}
 
 } // namespace humanoid_controller

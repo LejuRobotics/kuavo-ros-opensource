@@ -4,7 +4,9 @@
 #include <ros/ros.h>
 #include <kuavo_msgs/jointCmd.h>
 #include <kuavo_msgs/robotWaistControl.h>
+#include <std_msgs/Bool.h>
 #include "humanoid_interface/common/TopicLogger.h"
+#include "humanoid_controllers/LowPassFilter.h"
 #include <Eigen/Dense>
 #include <memory>
 #include <mutex>
@@ -19,9 +21,9 @@ namespace humanoid_controller
  * 提供统一的更新接口，内部处理所有逻辑。
  * 
  * 功能包括：
- * - 模式切换（0=固定位置, 1=RL控制, 2=外部控制）
- * - 外部输入处理和限速跟踪
- * - PD控制
+ * - 模式切换（1=RL控制, 2=外部控制）
+ * - 外部输入处理和低通滤波
+ * - PD控制（仿真时）
  * - 期望状态更新
  * - 命令生成
  */
@@ -33,9 +35,11 @@ public:
      * @param nh ROS节点句柄
      * @param joint_waist_num 腰部关节数量
      * @param ros_logger ROS日志发布器（可选，用于发布状态信息）
+     * @param is_real 是否为实物机器人（true=实物，false=仿真）
      */
     WaistController(ros::NodeHandle& nh, size_t joint_waist_num,
-                    ocs2::humanoid::TopicLogger* ros_logger = nullptr);
+                    ocs2::humanoid::TopicLogger* ros_logger = nullptr,
+                    bool is_real = true);
     
     /**
      * @brief 析构函数
@@ -49,12 +53,14 @@ public:
      * @param waist_kp PD控制位置增益
      * @param waist_kd PD控制速度增益
      * @param default_waist_pos 模式1的默认位置
-     * @param waist_mode_interpolation_velocity 腰部模式切换时的插值速度 (rad/s)，用于三次多项式插值
+     * @param waist_mode_interpolation_velocity 已废弃，保留用于兼容
+     * @param mode2_cutoff_freq 低通滤波器截止频率 (Hz)，用于模式1和模式2，如果<=0则使用默认值5Hz
      */
     void loadSettings(const Eigen::VectorXd& waist_kp = Eigen::VectorXd(),
                      const Eigen::VectorXd& waist_kd = Eigen::VectorXd(),
                      const Eigen::VectorXd& default_waist_pos = Eigen::VectorXd(),
-                     double waist_mode_interpolation_velocity = 1.0);
+                     double waist_mode_interpolation_velocity = 1.0,
+                     double mode2_cutoff_freq = 0.0);
 
     // ==================== 主要更新函数 ====================
     
@@ -64,16 +70,16 @@ public:
      * 此函数整合了以下功能：
      * 1. 期望状态更新（根据当前模式）
      * 2. 限速跟踪和指令缓存处理
-     * 3. 命令消息填充（仅在模式0和2时，只更新joint_q、joint_v和joint_kp、joint_kd）
+     * 3. 命令消息填充（模式2或模式1插值阶段时，更新joint_q、joint_v和tau）
      * 
      * @param time 当前时间
      * @param dt 控制周期（秒）
      * @param joint_pos 当前关节位置（完整，包括腿+腰+手）
      * @param joint_vel 当前关节速度（完整，包括腿+腰+手）
      * @param cmd_stance 命令姿态（0=行走, 1=站立）
-     * @param joint_cmd_msg 输出：关节命令消息（仅在模式0和2时更新腰部的joint_q、joint_v和joint_kp、joint_kd）
+     * @param joint_cmd_msg 输出：关节命令消息（模式2或模式1插值阶段时更新腰部的joint_q、joint_v和tau）
      * @param jointNumReal 腿部关节数量（用于正确索引jointCmdMsg中的腰部部分）
-     * @note 模式1（RL控制）不更新命令消息，由RL控制器处理
+     * @note 模式1（RL控制）插值完成后不更新命令消息，由RL控制器处理
      */
     void update(const ros::Time& time,
                 double dt,
@@ -87,14 +93,14 @@ public:
     
     /**
      * @brief 切换腰部控制模式
-     * @param target_mode 目标模式：0=固定位置, 1=RL控制, 2=外部控制
+     * @param target_mode 目标模式：1=RL控制, 2=外部控制
      * @return 是否切换成功
      */
     bool changeMode(int target_mode);
     
     /**
      * @brief 获取当前控制模式
-     * @return 当前模式：0, 1, 或 2
+     * @return 当前模式：1 或 2
      */
     int getMode() const { return waist_control_mode_; }
     
@@ -165,9 +171,15 @@ private:
     void waistTrajectoryCallback(const kuavo_msgs::robotWaistControl::ConstPtr& msg);
     
     /**
-     * @brief 更新模式0（固定位置）的期望腰部状态
+     * @brief 腰部控制使能回调函数（处理/humanoid_controller/enable_waist_control话题）
      */
-    void updateMode0(double dt);
+    void enableWaistControlCallback(const std_msgs::Bool::ConstPtr& msg);
+    
+    /**
+     * @brief 更新模式1（RL控制）的期望腰部状态
+     * 使用低通滤波器从当前位置平滑过渡到默认位置，直到误差小于阈值
+     */
+    void updateMode1(double dt);
     
     /**
      * @brief 更新模式2（外部控制）的期望腰部状态
@@ -178,36 +190,21 @@ private:
      * @brief 应用模式切换的核心逻辑
      */
     void applyModeChange(int target_mode);
-    
-    /**
-     * @brief 平滑插值函数（三次多项式，用于模式切换）
-     * @param current_time 当前时间
-     * @param target_pos 目标位置
-     * @param target_vel 目标速度
-     */
-    void applySmoothInterpolation(const ros::Time& current_time,
-                                 const Eigen::VectorXd& target_pos,
-                                 const Eigen::VectorXd& target_vel);
-    
-    /**
-     * @brief 重置插值起始状态
-     */
-    void resetInterpolationState(const ros::Time& time, 
-                                const Eigen::VectorXd& start_pos, 
-                                const Eigen::VectorXd& target_pos);
 
     // ==================== 成员变量 ====================
     
     // ROS相关
     ros::NodeHandle nh_;
     ros::Subscriber waist_traj_sub_;  // 订阅/robot_waist_motion_data话题
+    ros::Subscriber enable_waist_control_sub_;  // 订阅/humanoid_controller/enable_waist_control话题
     ocs2::humanoid::TopicLogger* ros_logger_;  // ROS日志发布器（可选）
     
     // 关节信息
     size_t joint_waist_num_;  // 腰部关节数量
+    bool is_real_;  // 是否为实物机器人（true=实物，false=仿真）
     
     // 控制模式
-    int waist_control_mode_{1};  // 0=固定位置, 1=RL控制, 2=外部控制
+    int waist_control_mode_{1};  // 1=RL控制, 2=外部控制
     bool waist_control_enabled_{false};  // 是否启用腰部控制覆盖
     
     // 当前状态（从update中保存）
@@ -218,30 +215,23 @@ private:
     Eigen::VectorXd desire_waist_q_;  // 期望腰部位置
     Eigen::VectorXd desire_waist_v_;  // 期望腰部速度
     
-    // 模式0相关
-    Eigen::VectorXd mode0_fixed_waist_pos_;  // 模式0固定位置
-    bool mode0_fixed_waist_pos_set_;         // 模式0固定位置是否已设置
-    
     // 模式1相关
-    Eigen::VectorXd default_waist_pos_;  // 默认腰部位置（用于模式1站立时）
+    Eigen::VectorXd default_waist_pos_;  // 默认腰部位置（用于模式1）
+    bool waist_is_interpolating_;  // 是否正在插值到默认位置（模式1使用低通滤波器插值）
     
     // 模式2相关（外部控制）
     Eigen::VectorXd raw_mode2_waist_target_q_;  // 模式2原始目标位置
-    Eigen::VectorXd mode2_waist_target_q_;  // 模式2目标位置（用于插值）
     bool mode2_waist_target_received_;  // 是否已收到模式2的目标
-    
-    // 限速跟踪参数
-    double waist_mode_interpolation_velocity_;  // 模式切换时的平滑插值速度 (rad/s)，用于三次多项式插值
-    
-    // 平滑插值相关
-    ros::Time waist_interpolation_start_time_;  // 插值起始时间
-    Eigen::VectorXd waist_interpolation_start_pos_;  // 插值起始位置
-    double waist_interpolation_duration_;  // 插值总持续时间
-    bool waist_is_interpolating_;  // 是否正在插值
     
     // 控制参数（从外部传入）
     Eigen::VectorXd waist_kp_;  // 位置增益（腰部部分）
     Eigen::VectorXd waist_kd_;  // 速度增益（腰部部分）
+    
+    // 低通滤波器（用于模式2外部控制）
+    LowPassFilter waist_joint_pos_filter_;  // 腰部位置指令低通滤波器（一阶）
+    LowPassFilter waist_joint_vel_filter_;   // 腰部速度指令低通滤波器（一阶）
+    bool waist_filter_initialized_{false};          // 滤波器是否已初始化
+    double mode2_cutoff_freq_{1.0};                 // 模式2外部输入的截止频率 (Hz)，默认5Hz
     
     // 线程安全
     mutable std::mutex state_mutex_;    // 状态访问互斥锁

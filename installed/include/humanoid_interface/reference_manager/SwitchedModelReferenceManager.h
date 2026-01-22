@@ -348,7 +348,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::Publisher footContactPointPublisher_;
   ros::Publisher footDesiredPointPublisher_;
   ros::Publisher gaitTimeNamePublisher_;
-  ros::Publisher waistTargetCommandedPublisher_;
   ros::Publisher armTargetCommandedPublisher_;
   ros::Publisher isCustomGaitPublisher_;
   ros::Publisher singleStepModePublisher_;

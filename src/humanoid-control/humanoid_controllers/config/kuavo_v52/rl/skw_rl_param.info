@@ -121,10 +121,12 @@ armVelocityLimit
     modeInterpolationVelocity   1.0     ; 手臂插值的速度
 }
 
-; ==================== 外部接管腰部轨迹速度限制配置====================
-waistVelocityLimit
+; ==================== 外部接管腰部控制器参数配置====================
+waistControllerParam
 {
-    modeInterpolationVelocity   1.5     ; 腰部模式切换时的插值速度 (rad/s)，用于三次多项式插值
+    mode2CutoffFreq             0.8     ;截止频率
+    kp                          5      ;PD控制位置增益
+    kd                          1       ;PD控制速度增益
 }
 
 defaultBaseState

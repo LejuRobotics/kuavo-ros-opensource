@@ -155,6 +155,7 @@ add_service_files(
   jointMoveTo.srv
   setHwIntialState.srv
   changeArmCtrlMode.srv
+  changeWaistCtrlMode.srv
   switchController.srv
   getControllerList.srv
   switchToNextController.srv

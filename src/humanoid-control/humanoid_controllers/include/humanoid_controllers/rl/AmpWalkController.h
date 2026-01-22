@@ -139,6 +139,9 @@ namespace humanoid_controller
 
     // 腰部控制相关（可选功能）
     double waist_mode_interpolation_velocity_{1.0}; ///< 腰部模式切换时的插值速度 (rad/s)，从配置文件加载，用于三次多项式插值
+    double waist_mode2_cutoff_freq_{1.0}; ///< 腰部模式2外部输入的截止频率 (Hz)，从配置文件加载，默认5Hz
+    Eigen::VectorXd waist_kp_from_config_; ///< 从配置文件读取的腰部 kp 参数
+    Eigen::VectorXd waist_kd_from_config_; ///< 从配置文件读取的腰部 kd 参数
     std::unique_ptr<WaistController> waist_controller_; ///< 腰部控制器
 
   private:

@@ -18,6 +18,7 @@
 #include <atomic>
 #include <Eigen/Dense>
 #include "humanoid_controllers/rl/armController.h"
+#include "humanoid_controllers/rl/waistController.h"
 
 namespace humanoid_controller
 {
