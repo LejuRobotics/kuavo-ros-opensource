@@ -22,7 +22,7 @@ AUDIO_FRAME_SIZE = 1280  # 每帧音频字节数（16k采样率、16bit位深、
 FRAME_INTERVAL_MS = 40  # 每帧发送间隔（毫秒）
 
 
-class RTASRClient:
+class XFYunRTASRClient:
     def __init__(self, app_id, access_key_id, access_key_secret, base_url=None):
         self.app_id = app_id
         self.access_key_id = access_key_id

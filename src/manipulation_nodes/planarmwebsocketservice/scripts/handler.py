@@ -536,8 +536,10 @@ def tmux_run_cmd(session_name:str, cmd:str, sudo:bool=False)->Tuple[bool, str]:
     time.sleep(3.0)
 
     # 检查session是否成功创建
-    check_result = subprocess.run(["sudo", "tmux", "has-session", "-t", session_name],
-                            capture_output=True)
+    check_cmd = ["tmux", "has-session", "-t", session_name]
+    if sudo:
+        check_cmd.insert(0, "sudo")
+    check_result = subprocess.run(check_cmd, capture_output=True)
     ret = False
     if check_result.returncode == 0:
         ret = True
@@ -5041,6 +5043,140 @@ async def get_vr_status_handler(websocket: websockets.WebSocketServerProtocol, d
         payload.data["code"] = 1
         payload.data["message"] = f"Failed to get VR status: {str(e)}"
 
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+async def start_real_time_chat_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """开启实时对话"""
+    payload = Payload(
+        cmd="start_real_time_chat", 
+        data={"code": 0, "message": "实时对话启动成功"}
+    )
+
+    try:
+        # 获取当前脚本所在目录，用于定位realtime_client.py
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        realtime_client_path = os.path.join(current_dir, "realtime_client.py")
+        
+        # 检查文件是否存在
+        if not os.path.exists(realtime_client_path):
+            payload.data["code"] = 1
+            payload.data["message"] = f"找不到实时对话客户端脚本: {realtime_client_path}"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+            return
+        
+        # 使用tmux启动实时对话客户端
+        session_name = "realtime_session"
+        cmd = f"source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash && python3 {realtime_client_path}"
+
+        # 检查当前是否存在名为realtime_session的会话
+        check_result = subprocess.run(
+            ["tmux", "has-session", "-t", session_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        if check_result.returncode == 0:
+            payload.data["code"] = 1
+            payload.data["message"] = "实时对话会话已存在"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+            return
+        
+        # 使用tmux_run_cmd函数启动会话
+        success, msg = tmux_run_cmd(session_name, cmd, sudo=False)
+        
+        if success:
+            payload.data["code"] = 0
+            payload.data["message"] = msg
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = msg
+            
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"启动实时对话失败: {str(e)}"
+        print(f"启动实时对话失败: {str(e)}")
+        
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+
+async def stop_real_time_chat_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """停止实时对话"""
+    payload = Payload(
+        cmd="stop_real_time_chat", 
+        data={"code": 0, "message": "实时对话停止成功"}
+    )
+
+    try:
+        session_name = "realtime_session"
+        
+        # 发送kill-session命令关闭对应session
+        result = subprocess.run(
+            ["tmux", "kill-session", "-t", session_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            payload.data["code"] = 0
+            payload.data["message"] = "实时对话会话已停止"
+        else:
+            # 检查session是否已经不存在
+            check_result = subprocess.run(
+                ["tmux", "has-session", "-t", session_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            if check_result.returncode != 0:
+                payload.data["code"] = 0
+                payload.data["message"] = "实时对话会话已不存在"
+            else:
+                payload.data["code"] = 1
+                payload.data["message"] = f"停止实时对话失败: {result.stderr}"
+                
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"停止实时对话失败: {str(e)}"
+        print(f"停止实时对话失败: {str(e)}")
+        
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+
+async def get_real_time_chat_status_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """获取实时对话状态"""
+    payload = Payload(
+        cmd="get_real_time_chat_status", 
+        data={"code": 0, "status": False, "message": "实时对话未运行"}
+    )
+
+    try:
+        session_name = "realtime_session"
+        
+        # 检查session是否存在
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", session_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        if result.returncode == 0:
+            payload.data["status"] = True
+            payload.data["message"] = "实时对话正在运行"
+        else:
+            payload.data["status"] = False
+            payload.data["message"] = "实时对话未运行"
+            
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"获取实时对话状态失败: {str(e)}"
+        print(f"获取实时对话状态失败: {str(e)}")
+        
     response = Response(payload=payload, target=websocket)
     response_queue.put(response)
 
