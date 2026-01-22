@@ -278,7 +278,23 @@ from kuavo_humanoid_sdk import RobotControlBlockly
    - 描述：执行完整的累积爬楼梯轨迹
    - 返回值：bool，成功返回True，失败返回False
 
-**爬楼梯功能使用示例：**
+6. **运动并对齐楼梯朝向**
+   - 函数：`robot_control.align_stair()`
+   - 参数类型：无
+   - 描述：基于视觉 tag 识别控制机器人单步运动到楼梯前方固定的点和朝向（具体坐标可事先标定，否则使用默认值： offset_x:0.80,offset_y: 0.30,offset_yaw:0.00）
+   - 返回值：bool,成功返回 True，失败返回 False
+
+7. **一键上楼梯**
+   - 函数：`robot_control.simple_up_stair(stair_height = 0.25,stair_length = 0.08,stair_num = 4)`
+   - 参数类型：float,float,int,float
+   - 描述：采取新的规划方式进行爬楼梯，经过测试较为稳定
+   - 参数说明：
+     - stair_height：楼梯的高度（米），默认 0.08
+     - stair_length：单阶楼梯的长度（米），默认 0.25
+     - stair_num：上楼梯的阶数，默认 4 阶
+   - 返回值：bool，成功返回 True，失败返回False
+
+**爬楼梯功能使用示例（old）：**
 ```python
 # 设置爬楼梯参数
 robot_control.set_stair_parameters(step_height=0.15, step_length=0.30)
@@ -317,6 +333,24 @@ robot_control.execute_stair_trajectory()
 - 建议在执行前先用 `set_stair_parameters()` 设置合适的参数
 - 如果出现碰撞或不稳定，可能需要调整腾空相轨迹参数
 - 直接修改参数能够适合大部分情况，具体参数需要根据实际楼梯尺寸调整
+
+**爬楼梯功能使用示例（new）：**
+```python
+# 根据本地配置进行楼梯对齐
+robot_control.align_stair()
+
+# 对齐成功后一键上楼梯
+robot_control.simple_up_stair(stair_height = 0.25,stair_length = 0.08,stair_num = 4)
+```
+**使用要求**
+- 需要上位机的对齐节点以及 aplirtag 相机识别节点启动。
+- 需要提前对机器人对齐的位置进行标定，否则将使用默认的参数，自动寻找 tag 进行对齐。
+- 对齐成功后机器人将自动根据参数上楼梯。
+
+**注意事项**
+- 建议在运行前先对机器人在楼梯前的位置进行标定，以确保上楼梯正常。
+- 爬楼梯功能需要机器人处于站立状态。
+- 如果出现爬楼梯不稳定的情况，请及时调整相关参数，或者联系开发人员进行调试。
 
 ## 语音类模块定义
 

@@ -370,6 +370,7 @@ from std_srvs.srv import Trigger
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.msg import sensorsData
+from kuavo_msgs.msg import AprilTagDetectionArray
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
 from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest, robotSwitchPose, robotSwitchPoseRequest
 
@@ -2394,6 +2395,98 @@ async def start_robot_handler(
     )
     response_queue.put(response)
 
+async def set_align_stair_param_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    通过识别 tag 码设置当前的偏置参数
+    """
+    payload = Payload(
+        cmd="set_align_stair_param",
+        data={"code": 0, "message": "Align stair param set successfully"}
+    )
+    
+    try:    
+        target_tag_id = 66     # 固定使用 tag_id=10 的 tag 码进行识别
+        timeout_duration = 30  # 总超时时间：30秒
+        start_time = time.time()
+        tag_found = False
+        
+        while True:
+            # 检查是否超时
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout_duration:
+                payload.data["code"] = 1
+                payload.data["message"] = f"timeout: {timeout_duration} seconds, tag_id: {target_tag_id}"
+                break
+            
+            try:
+                # 等待从话题 "/robot_tag_info" 接收到 AprilTagDetectionArray 消息
+                msg = rospy.wait_for_message("/robot_tag_info", AprilTagDetectionArray, timeout=2)
+                
+                if not msg.detections:
+                    continue
+                
+                # 查找目标tag
+                target_detection = None
+                for detection in msg.detections:
+                    if detection.id[0] == target_tag_id:
+                        target_detection = detection
+                        break
+                
+                if target_detection is None:
+                    continue
+                
+                # 找到目标tag
+                pos = target_detection.pose.pose.pose.position
+                offset_x = -pos.x
+                offset_y = -pos.y
+                
+                # 将识别结果保存到文件（参考 simple-singleStepStairs-roban-21.py 的保存逻辑）
+                try:
+                    from datetime import datetime
+                    
+                    # 确保上传文件夹存在
+                    global UPLOAD_FILES_FOLDER
+                    if not os.path.exists(UPLOAD_FILES_FOLDER):
+                        os.makedirs(UPLOAD_FILES_FOLDER)
+                    
+                    # 构建配置数据（与参考文件保持一致的数据结构）
+                    config = {
+                        'tag_id': target_tag_id,
+                        'offset_x': float(offset_x),
+                        'offset_y': float(offset_y),
+                        'offset_yaw': 0.0,
+                        'offset_set': True
+                    }
+                    
+                    # 1. 保存到固定文件名（用于后续程序读取的最新配置）
+                    config_filename = 'stair_alignment_config.json'
+                    config_filepath = os.path.join(UPLOAD_FILES_FOLDER, config_filename)
+                    with open(config_filepath, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, indent=4, ensure_ascii=False)
+                    
+                    payload.data["code"] = 0
+                    payload.data["message"] = "Align stair param set successfully"
+                    
+                except Exception as save_error:
+                    payload.data["code"] = 1
+                    payload.data["message"] = f"Failed to set align stair param: {save_error}"
+                break
+            except rospy.ROSException:
+                continue
+            except Exception as e:
+                payload.data["code"] = 1
+                payload.data["message"] = f"Failed to set align stair param: {e}"
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to set align stair param: {e}"
+
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
 
 async def robot_switch_pose_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict

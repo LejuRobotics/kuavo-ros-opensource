@@ -1178,6 +1178,37 @@ class RobotControlBlockly:
         except Exception as e:
             print(f"Execute stair trajectory failed: {str(e)}")
             return False
+
+    def simple_up_stair(self, stair_height = 0.25,stair_length = 0.08,stair_num = 4):
+        """
+        生成简单的上楼梯轨迹
+        Args:
+            stair_height: 楼梯高度
+            stair_length: 楼梯长度
+            stair_num: 楼梯级数
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        try:
+            return self.climb_stair.simple_up_stairs(stair_height, stair_length, stair_num)
+        except Exception as e:
+            print(f"Simple up stair failed: {str(e)}")
+            return False
+
+    def align_stair(self) -> bool:
+        """对齐楼梯，基于视觉 tag 识别控制机器人单步运动到楼梯前方固定的点和朝向。
+
+        从配置文件读取对齐参数（offset_x, offset_y, offset_yaw, tag_id），
+        如果配置文件不存在，使用默认值：offset_x=0.80, offset_y=0.30, offset_yaw=0.00
+
+        Returns:
+            bool: True if alignment was successful, False otherwise.
+        """
+        try:
+            return self.climb_stair.simple_align_stair()
+        except Exception as e:
+            print(f"Align stair failed: {str(e)}")
+            return False
         
     def control_waist_rotation(self, degree: float = 0):
         """Control the robot's waist rotation.
