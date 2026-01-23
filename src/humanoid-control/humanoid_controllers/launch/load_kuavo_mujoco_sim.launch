@@ -26,7 +26,8 @@
     <arg name="use_joint_filter"   default="false"/>
     <arg name="estimator_type"     default="1"/>
     <arg name="wbc_only"           default="false"/>
-    <arg name="play_back"          default="false"/>  
+    <arg name="play_back"          default="false"/>
+    <arg name="real"               default="false"/>
     <arg name="joystick_type"      default="sim"/>
     <arg name="arm_move_spd"      default="1.2"/>
     <arg name="start_way"          default="manual"/>
@@ -68,7 +69,8 @@
     <param name="use_joint_filter"  value="$(arg use_joint_filter)"/>
     <param name="estimator_type"    value="$(arg estimator_type)"/>
     <param name="play_back"         value="$(arg play_back)"/>
-    <param name="joystick_type"  value="$(arg joystick_type)"/>
+    <param name="real"              value="$(arg real)"/>
+    <param name="joystick_type"     value="$(arg joystick_type)"/>
     <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
     <param name="start_way"  value="$(arg start_way)"/>
     <param name="use_estimator_contact"  value="$(arg use_estimator_contact)"/>

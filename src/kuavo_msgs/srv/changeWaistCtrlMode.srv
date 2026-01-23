@@ -1,0 +1,6 @@
+int32 control_mode # 0: fixed_pose, 1: rl_control, 2: external_control
+---
+bool result
+int32 mode
+string message
+

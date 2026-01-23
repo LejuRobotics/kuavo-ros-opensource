@@ -202,6 +202,12 @@ using namespace ocs2;
       updateArmCommand(time, processed_sensor_data, joint_cmd);
     }
     
+    // 如果启用了腰部指令替换，调用updateWaistCommand来替换腰部部分
+    if (success && waist_command_replacement_enabled_)
+    {
+      updateWaistCommand(time, processed_sensor_data, joint_cmd);
+    }
+    
     // 如果 use_default_motor_csp_kpkd_ 为 false，使用从 info 文件加载的 motorPdoKp_ 和 motorPdoKd_ 替换所有 control_modes==2 的关节
     if (success && !use_default_motor_csp_kpkd_)
     {
@@ -508,6 +514,15 @@ using namespace ocs2;
   {
     // 基础实现：空实现，返回false表示未使用外部手臂指令替换
     // 派生类可以重写此方法以实现自定义的手臂控制逻辑
+    return false;
+  }
+
+  bool RLControllerBase::updateWaistCommand(const ros::Time& time,
+                                           const SensorData& sensor_data,
+                                           kuavo_msgs::jointCmd& joint_cmd)
+  {
+    // 基础实现：空实现，返回false表示未使用外部腰部指令替换
+    // 派生类可以重写此方法以实现自定义的腰部控制逻辑
     return false;
   }
 

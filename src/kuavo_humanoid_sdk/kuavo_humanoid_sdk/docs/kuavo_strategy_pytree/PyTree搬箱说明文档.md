@@ -1,6 +1,6 @@
-# Kuavo Strategy PyTree 技术文档
+# PyTree搬箱 说明文档
 
-本文档介绍基于 PyTrees 行为树的 Kuavo 人形机器人策略控制框架，包括环境部署和代码详细说明。
+本文档介绍基于 PyTrees 行为树的 Kuavo 人形机器人策略搬箱，包括环境部署和代码详细说明。
 
 ---
 
@@ -13,6 +13,10 @@
 **上位机仓库配置**
 
 - 一般用dev分支，若有问题，可使用分支：`cfl/dev/ros_application/kuavo5-grabBox`，该分支可用
+```bash
+git fetch
+git checkout cfl/dev/ros_application/kuavo5-grabBox
+```
 
 **上位机代码编译**
 
@@ -32,12 +36,9 @@ catkin build kuavo_camera dynamic_biped kuavo_tf2_web_republisher ar_control
 # 更新软件源
 sudo apt-get update
 # grab_box功能包相关依赖
-sudo apt-get install ros-noetic-behaviortree-cpp-v3 ros-noetic-roslint ros-noetic-eigen-conversions -y
-sudo apt-get install libgeographic-dev ros-noetic-geographic* -y
-```
-- python包安装
-```bash
-pip install py_trees
+sudo apt-get install ros-noetic-geographic-msgs -y
+# humanoid_controller包编译依赖
+sudo apt-get install libudev-dev -y
 ```
 
 - 编译相关功能包：
@@ -45,7 +46,7 @@ pip install py_trees
 cd ~/kuavo-ros-control
 sudo su
 catkin clean -y
-catkin build humanoid_controllers gazebo_sim ar_control mobile_manipulator_controllers kuavo_msgs
+catkin build humanoid_controllers gazebo_sim ar_control mobile_manipulator_controllers kuavo_msgs grab_box
 source devel/setup.bash 
 ```
 
@@ -55,13 +56,22 @@ source devel/setup.bash
 cd src/kuavo_humanoid_sdk
 chmod +x install.sh
 ./install.sh
+cd ../../
+```
+	安装完sdk，通过终端指令查看版本：
+	```bash
+	pip show kuavo_humanoid_sdk | grep Version            
+	```
+	若版本为1.3及以上，则正确
+
+**下位机py_trees安装**
+```bash
+pip install py_trees
 ```
 
 ### (二) 预设参数调整
 
 ⚠️⚠️⚠️ **注意： 调整参数后建议先在gazebo仿真中进行测试，确认效果无误后再在实物上运行**
-
-**文件位置: src/kuavo_humanoid_sdk/examples/strategies/grasp_box_example.py**
 
 - 用户使用时需将AprilTag ID和标签尺寸修改为与实际一致
 - 1、本地电脑仿真
@@ -93,55 +103,15 @@ standalone_tags:
 
 **箱子信息设定**
 
-- 这里以示例中的箱子参数为例，用户使用时需根据实际情况填写
-```python
-box_width = 0.3 # 箱子长度：如果没有施加末端夹持力2，为了夹紧箱子，可把箱子长度减小7cm左右，让手臂夹紧
-box_mass = 1.5  # 箱子重量 (单位是kg)
-```
+- 这里以示例中的箱子参数为例，用户使用时需根据实际情况填写，实机运行：需在配置文件`config_real.py`或`config_boxes_real.py`中`tag_id`参数填入箱码id，如修改config_real.py文件：
+- ![修改搬运箱tag码id](./修改搬运箱tag码id.png)
+- ![修改放置tag码id](./修改放置tag码id.png)
 
 ### (三) 仿真运行
-
-**注意事项**
-
-- **gazebo对GPU有一定要求，需要用户使用自己电脑在本地docker环境中运行**
-- **建议先运行仿真，依此了解程序流程后再运行实物**
-- **若只想运行实物，可略过此章节**
-- **以下为在用户电脑本地ubuntu20.04的本地docker环境运行的说明**
-
-**docker环境**
-
-- 下载已经编译好的镜像：
-`wget https://kuavo.lejurobot.com/docker_images/kuavo_opensource_mpc_wbc_img_v0.6.1.tar.gz`
-
-- 执行以下命令导入容器镜像：
-`docker load -i kuavo_opensource_mpc_wbc_img_v0.6.1.tar.gz`
-
-- 以下命令二选一执行，推荐使用带GPU版本，后续文档以带GPU版本为例进行说明
-	- 运行不带GPU版本：
-	`./docker/run.sh`
-	- 运行GPU版本，需要配置好nvidia-container-toolkit和nvidia-runtime等环境变量，可以在带GPU的宿主机上mujoco、gazebo等仿真更流畅
-	`./docker/run_with_gpu.sh`
 
 **环境配置**
 
 - 仿真使用时，需确认机器人版本 `ROBOT_VERSION=52`
-
-- 修改tag尺寸：在用户电脑本地的 `/opt/ros/noetic/share/apriltag_ros/config/tags.yaml` 文件中将 tag 的 size 尺寸修改为与 gazebo 中tag码的尺寸一致
-```yaml
-standalone_tags:
-  [
-    {id: 0, size: 0.088, name: 'tag_0'},
-    {id: 1, size: 0.088, name: 'tag_1'},
-    {id: 2, size: 0.088, name: 'tag_2'},
-    {id: 3, size: 0.088, name: 'tag_3'},
-    {id: 4, size: 0.088, name: 'tag_4'},
-    {id: 5, size: 0.088, name: 'tag_5'},
-    {id: 6, size: 0.088, name: 'tag_6'},
-    {id: 7, size: 0.088, name: 'tag_7'},
-    {id: 8, size: 0.088, name: 'tag_8'},
-    {id: 9, size: 0.088, name: 'tag_9'}
-  ]
-```
 
 **上位机运行**
 
@@ -149,43 +119,78 @@ standalone_tags:
 - 若以自己电脑为ROS主机，需要先运行roscore，再在上位机执行如下操作
 
 
-- 上位机打开终端，运行
+- 上位机：打开终端，运行
 ```bash
 cd ~/kuavo_ros_application
 source devel/setup.bash
 roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
 ```
 
-**用户电脑运行**
-
 **确保已阅读[(二) 预设参数调整](#二-预设参数调整)部分，并完成相应配置内容的检查**
 
-- 打开终端一，启动gazebo场景
+- 下位机：打开终端一，启动gazebo场景
 ```bash
 cd ~/kuavo-ros-control
 source devel/setup.zsh
 roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch
 ```
 
-- 打开终端二，启动ar_tag转换码操作和virtual操作
+- 下位机：打开终端二，启动ar_tag转换码操作
 ```bash
 cd ~/kuavo-ros-control
 source devel/setup.zsh
 roslaunch ar_control robot_strategies.launch
 ```
 
-- 打开终端三，运行搬箱子示例：
+- 下位机：打开终端三，运行搬箱子示例：
+
+**注意**：搬箱子有两个案例case_new.py和case_boxes.py，两个案例都支持搬多层箱子，运行前请确认配置文件中已正确修改参数：
+
+案例一："case_new.py"，机器人初始站立姿态面向搬运箱子位置:
+- **仿真运行**：在该文件中第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config`
+- **实机运行**：在该文件中第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_real import config`
+
 ```bash
 cd ~/kuavo-ros-control
 source devel/setup.zsh
 python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_new.py
+```
+案例二："case_boxes.py"，机器人初始站立姿态面向放置箱子位置:
+- **仿真运行**：在该文件中第七行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_sim import config`
+- **实机运行**：在该文件中第七行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_real import config`
+```bash
+cd ~/kuavo-ros-control
+source devel/setup.zsh
+python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_boxes.py
 ```
 
 ### (四) 实物运行
 
 **环境配置**
 
-- 上位机需要先修改 `~/kuavo_ros_application/src/ros_vision/detection_apriltag/apriltag_ros/config/tags.yaml` 文件，将 tag 的 size 尺寸修改为实际大小，比如 0.1 米
+- 机器人会以站立时的位置作为其坐标系原点，若跑案例一（case_new.py程序）,机器人需面向要搬运的箱子，若跑案例二(case_boxes.py)，机器人面向要放置箱子的位置
+
+**下位机运行**
+
+⚠️⚠️⚠️ **确保已阅读[(二) 预设参数调整](#二-预设参数调整)部分，并完成相应配置内容的检查**
+
+- 1.下位机打开终端一，让机器人站立
+```bash
+sudo su
+source devel/setup.bash
+roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
+```
+
+- 2.下位机打开终端二，启动Tag Tracker节点
+```bash
+sudo su
+source devel/setup.bash
+roslaunch ar_control robot_strategies.launch real:=true
+```
+
+**上位机运行**
+
+- 3.上位机需要先修改 `~/kuavo_ros_application/src/ros_vision/detection_apriltag/apriltag_ros/config/tags.yaml` 文件，将 tag 的 size 尺寸修改为实际大小，比如 0.1 米，并将要识别的箱码id填入tags.yaml文件中，如下所示：
 ```yaml
 standalone_tags:
     [
@@ -202,29 +207,7 @@ standalone_tags:
     ]
 ```
 
-- 机器人会以站立时的位置作为其坐标系原点，而箱子在坐标系原点的右侧(y负方向)，货架在坐标系原点的左侧(y正方向)
-
-**启动场景说明**
-
-**我们已经在gazebo仿真中模拟了搬箱子的场景，实物场景可以参考仿真场景进行布置**
-
-- 机器人会以站立时的位置作为其坐标系原点
-
-- 而箱子在坐标系原点的y负方向(机器人右侧)，货架在坐标系原点的y正方向(机器人左侧)
-
-- 机器人站立时，需要保证站立位置在箱子和货架中间，且机器人左手边为货架，右手边为箱子
-
-- 摆放箱子和货架的详细位置参数
-
-	- 以机器人站立位置为参照，箱子需在机器人站立点右手边150cm处，箱子上二维码中心点距地高度约为80cm
-
-	- 以机器人站立位置为参照，货架需在机器人站立点左手边150cm处，放置层高度约为70cm，货架上二维码中心点距地高度约为180cm
-
-- 若用户的使用场景与案例中完全一致，可先按照[实物运行参数调整](#实物运行参数调整)预先调整好参数，再在实物上运行
-
-**上位机运行**
-
-- 上位机打开终端，运行
+- 4.上位机打开终端，运行
 ```bash
 cd ~/kuavo_ros_application
 source devel/setup.bash
@@ -232,7 +215,7 @@ source devel/setup.bash
 roslaunch dynamic_biped load_robot_head.launch use_orbbec:=true
 ```
 
-- 另启一个新终端，运行
+- 5.上位机另启新终端，运行
 ```bash
 cd ~/kuavo_ros_application
 source devel/setup.bash
@@ -241,31 +224,25 @@ roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
 
 **下位机运行**
 
-**注意：**
+- 6.下位机打开终端三，运行搬箱子示例：
 
-⚠️⚠️⚠️ **确保已阅读[(二) 预设参数调整](#二-预设参数调整)部分，并完成相应配置内容的检查**
+**注意**：搬箱子有两个案例case_new.py和case_boxes.py，两个案例都支持搬多层箱子，运行前请确认配置文件中已正确修改参数：
+案例一："case_new.py"，机器人初始站立姿态面向搬运箱子位置:
+- **仿真**：在文件第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config`
+- **实机**：在文件第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_real import config`
 
-⚠️⚠️⚠️ **受imu飘移及机器人机况影响，若需要连续搬运，建议搬运三次后就关掉程序让机器人重新站立，这样在机况良好的情况下可以达到90%以上的搬箱子成功率**
-
-- 下位机打开终端一，让机器人站立
 ```bash
-sudo su
-source devel/setup.bash
-roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
-```
-
-- 下位机打开终端二，启动Tag Tracker节点
-```bash
-sudo su
-source devel/setup.bash
-roslaunch ar_control robot_strategies.launch real:=true
-```
-
-- 下位机打开终端三，运行搬箱子示例：
-```bash
-sudo su
-source devel/setup.bash
+cd ~/kuavo-ros-control
+source devel/setup.zsh
 python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_new.py
+```
+案例二："case_boxes.py"，机器人初始站立姿态面向放置箱子位置:
+- **仿真**：在文件第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_sim import config`
+- **实机**：在文件第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_real import config`
+```bash
+cd ~/kuavo-ros-control
+source devel/setup.zsh
+python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_boxes.py
 ```
 
 **实物运行参数调整**
@@ -273,12 +250,11 @@ python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_p
 - 因为每台机的机况不同，箱子也可能不同，因此用户可能需要根据实际情况调整抓取或放置的参数，以下为两个调参示例
 
 - 若箱子抓取点偏前(机器人的x正方向)、偏上(机器人的z正方向)、偏右(机器人的y正方向)
-	- 调整文件`src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/configs/config_sim.py`的参数分别如下：
+	- 调整文件`src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/configs/config_real.py`的参数分别如下：
 	```python
 	box_behind_tag = 0.17  # 箱子在tag后面的距离，单位米
     box_beneath_tag = 0.1  # 箱子在tag下方的距离，单位米
     box_left_tag = -0.0  # 箱子在tag左侧的距离，单位米
-	)
 	```
 ---
 
@@ -302,6 +278,63 @@ python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_p
 8. 手臂腰部复位并后退
 9. 回到初始位置
 10. 重复执行
+```
+行为树结构（2025.12.22）
+注：⇉ Parallel表示并行， → Sequence表示顺序， δ Decorator表示装饰器
+root (⇉)
+├── PERCEP (感知节点，持续运行)
+│
+└── ACTION (→ Sequence) ─────────────────────────────────
+    ├── 1. search_pick_tag (→) - 寻找箱子
+    │   ├── search_pick_tag_GUESS (猜测位置)
+    │   ├── search_pick_tag_WALK (行走)
+    │   ├── ⇉ search_pick_tag_HEAD_AND_WAIT (头部搜索||等待识别)
+    │   │   ├── search_pick_tag_HEAD
+    │   │   └── search_pick_tag_CONDITION
+    │   └── search_pick_tag_TAG2GOAL (转换导航目标)
+    │
+    ├── 2. walk_to_pick (⇉) - 走向箱子
+    │   ├── walk_to_pick_WALk
+    │   ├── δ walk_to_pick_TAG2GOAL (SuccessIsRunning)
+    │   │   └── walk_to_pick_TAG2GOAL_
+    │   └── → pre_pick_arm (手臂预动作)
+    │       ├── walk_to_pick_ARM_GOAL
+    │       └── walk_to_pick_ARM
+    │
+    ├── 3. pick_box (→) - 拿起箱子
+    │   ├── pick_box_TAG2GOAL
+    │   └── pick_box_ARM
+    │
+    ├── 4. walk_and_turn_waist (⇉) - 后退转腰180°
+    │   ├── pick_box_SETWALKGOAL
+    │   ├── pick_box_WALK
+    │   └── turn_waist_180
+    │
+    ├── 5. search_place_tag (→) - 寻找放置点
+    │   ├── search_place_tag_GUESS
+    │   ├── search_place_tag_WALK
+    │   ├── ⇉ search_place_tag_HEAD_AND_WAIT
+    │   │   ├── search_place_tag_HEAD
+    │   │   └── search_place_tag_CONDITION
+    │   └── search_place_tag_TAG2GOAL
+    │
+    ├── 6. walk_to_place (⇉) - 走向放置点
+    │   ├── walk_to_place_WALk
+    │   └── δ walk_to_place_TAG2GOAL (SuccessIsRunning)
+    │       └── walk_to_place_TAG2GOAL_
+    │
+    ├── 7. place_box (→) - 放置箱子
+    │   ├── place_box_TAG2GOAL
+    │   └── place_box_ARM
+    │
+    └── 8. walk_and_turn (⇉) - 复位后退
+        ├── back_to_origin_ARM_RESET
+        ├── place_box_SETWALKGOAL
+        ├── place_box_WALK
+        └── → turn_waist_after_trigger (触发后转腰)
+            ├── wait_for_distance_trigger
+            └── turn_waist_0
+```
 
 **行为树根节点结构**
 
@@ -392,6 +425,23 @@ python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_p
 - **children**：
 	- `back_to_origin_SETGOAL`（NodeFuntion）：设置回到初始位置的目标（ODOM 坐标系下的原点）
 	- `back_to_origin_WALK`（NodeWalk）：行走回到初始位置
+
+**多轮搬箱实现机制**
+
+程序支持多轮搬箱，每轮可以使用不同的 tag_id。实现机制如下：
+
+1. **轮次管理**：使用 BlackBoard 存储当前轮次计数器 `current_round`，从 -1 开始，每轮 +1。
+
+2. **动态 tag_id 选择**：在每轮开始时，`update_round_node` 节点会：
+	- 读取当前轮次
+	- 根据轮次从 `config.pick.tag_id` 列表中选择对应的 tag_id（使用取余数确保循环使用）
+	- 更新所有相关节点的 `tag_id` 属性（`search_pick_tag_TAG2GOAL`、`search_pick_tag_HEAD`、`pick_box_TAG2GOAL` 等）
+	- 更新 `PERCEP` 节点的 `tag_ids` 列表
+	- 重新创建 `search_pick_tag_CONDITION` 节点（因为 `NodeWaitForBlackboard` 的 key 无法动态修改）
+
+3. **节点权限管理**：相关节点（`NodeTagToNavGoal`、`NodeTagToArmGoal`、`NodeHead`、`NodePercep`）在 `initialise()` 方法中会自动为新 tag_id 注册 BlackBoard 访问权限，确保能正确读取和写入数据。
+
+4. **循环执行**：使用 `Repeat` 装饰器包裹根节点，设置 `num_success=config.common.grab_box_num`，实现指定次数的循环执行。
 
 **关键设计说明**
 
@@ -649,6 +699,8 @@ python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_p
 - `box_mass`：箱子质量
 - `walk_use_cmd_vel`：是否使用速度控制模式走路
 - `enable_step_pause`：是否启用步骤间暂停（用于调试）
+- `grab_box_num`：**搬箱次数**，程序会循环执行指定次数的搬箱任务，默认值为 5
+- `enable_round_stop`：**每轮完成后是否暂停**，设置为 `True` 时，每完成一轮搬箱任务后会在终端暂停，等待用户按 Enter 键继续下一轮，用于调试和观察，默认值为 `True`
 
 #### config.pick - 拾取箱子配置参数
 
@@ -680,6 +732,26 @@ python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_p
 - `box_left_tag`：箱子放置点在 AprilTag 左侧的距离
 - `waist_degree`：放箱子后转腰角度（通常为0度，恢复到正前方）
 - `arm_total_time`：放箱子时手臂运动总时间
+
+**多轮搬箱机制说明**
+
+程序支持多轮搬箱功能，通过以下配置实现：
+
+1. **搬箱次数配置**：在 `config.common.grab_box_num` 中设置搬箱次数，例如 `grab_box_num = 5` 表示执行 5 轮搬箱任务。
+
+2. **动态 tag_id 配置**：在 `config.pick.tag_id` 中可以配置单个 tag_id 或 tag_id 列表：
+	- **单个 tag_id**：`tag_id = 1`，所有轮次都使用同一个 tag_id
+	- **tag_id 列表**：`tag_id = [1, 2, 1, 2, 1]`，每轮使用不同的 tag_id
+		- 第 1 轮使用 `tag_id[0] = 1`
+		- 第 2 轮使用 `tag_id[1] = 2`
+		- 第 3 轮使用 `tag_id[2] = 1`
+		- 以此类推
+
+3. **循环使用机制**：如果 `tag_id` 列表长度小于 `grab_box_num`，系统会自动循环使用列表中的值。例如：
+	- `tag_id = [1, 2]`，`grab_box_num = 10`
+	- 实际使用顺序：`[1, 2, 1, 2, 1, 2, 1, 2, 1, 2]`
+
+4. **动态更新机制**：程序在每轮开始时自动更新所有相关节点的 `tag_id`，确保每轮使用正确的 tag_id 进行识别和操作。
 
 **注意**：仿真和实物使用不同的配置文件（config_sim.py 和 config_real.py），主要差异在于 tag ID、箱子尺寸、站立位置、抓取/放置点的相对位置等参数。用户需要根据实际环境调整这些参数。
 

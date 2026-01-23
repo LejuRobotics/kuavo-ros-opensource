@@ -287,12 +287,25 @@ class WebSocketSdkStartNode:
         )
 
     def _get_robot_launch_status_callback(self, req):
-        result, status = self.robot.get_robot_launch_status()
-        print(f"Get robot launch status: {status}")
-        if not result:
-            print(f"Get robot launch status failed: {status}")
-            status = "unknown"
-        return TriggerResponse(success=result, message=status)
+
+        is_real = rospy.get_param("/real", False)
+        print(f"Get robot launch status - Real mode: {is_real}")
+
+        if is_real:
+            result, status = self.robot.get_robot_launch_status()
+            print(f"Get robot launch status: {status}")
+            if not result:
+                print(f"Get robot launch status failed: {status}")
+                status = "unknown"
+            return TriggerResponse(success=result, message=status)
+        else:
+            if check_rosnode_exists("/humanoid_sqp_mpc") and check_rosnode_exists("/nodelet_controller"):
+                result = True
+                status = "launched"
+            else:
+                result = True
+                status = "unlaunch"
+            return TriggerResponse(success=result, message=status)
 
     def _stand_robot_callback(self, req):
         result, msg = self.robot.stand_robot()

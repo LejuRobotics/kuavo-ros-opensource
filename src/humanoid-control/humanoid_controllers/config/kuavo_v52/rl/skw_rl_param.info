@@ -13,6 +13,7 @@ clipObservations   18.0    ; 用于对输入进行clip
 clipActions        18.0    ; 用于对actions进行clip
 use_jointcmd_filter true       ; 是否对输出使用关节指令滤波器 0:不使用 1:使用
 use_external_arm_controller true ; 是否使用外部手臂控制器指令替代模型输出的手臂指令 0:不使用 1:使用
+use_external_waist_controller true ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
 use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 
@@ -50,6 +51,7 @@ velocityLimits
     (3,0)  0.3      ; cmdVelAngularZ
 }
 defaultBaseHeightControl    0.95 ; Actual standing height when using RL controller
+defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
 
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity
@@ -117,6 +119,14 @@ armVelocityLimit
     maxTrackingVelocity         2.5     ; 手臂跟踪的最大速度 (rad/s)
     trackingErrorThreshold      0.1     ; 手臂跟踪误差阈值 (rad)，小于此值后完全接管
     modeInterpolationVelocity   1.0     ; 手臂插值的速度
+}
+
+; ==================== 外部接管腰部控制器参数配置====================
+waistControllerParam
+{
+    mode2CutoffFreq             0.8     ;截止频率
+    kp                          5      ;PD控制位置增益
+    kd                          1       ;PD控制速度增益
 }
 
 defaultBaseState

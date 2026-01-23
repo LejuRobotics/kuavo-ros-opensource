@@ -70,6 +70,7 @@
 #include <sensor_msgs/JointState.h>
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
 #include "kuavo_solver/ankle_solver.h"
+#include "humanoid_interface/foot_planner/floatInterpolation.h"
 
 namespace humanoid_controller
 {
@@ -718,10 +719,13 @@ namespace humanoid_controller
     bool last_ultra_fast_mode_ = false;
     
     // ==================== MPC-RL插值系统成员变量 ====================
+    std::shared_ptr<FloatInterpolation> torso_position_interpolator_ptr_; // 躯干位置插值器
     bool is_torso_interpolation_active_ = false;
     // 6D位姿插值的起点/目标/当前（xyz+rpy）
     vector6_t torso_interpolation_start_pose_;
     vector6_t torso_interpolation_target_pose_;
+    vector_t leg_interpolation_start_pose_;
+    vector_t leg_interpolation_target_pose_;
     double torso_interpolation_start_time_;
     double torso_interpolation_duration_; // 总期望插值时间 (s)
     double torso_interpolation_max_velocity_ = 0.1; // 最大插值速度 (m/s)
@@ -869,6 +873,7 @@ namespace humanoid_controller
     // std::string rl_config_file_;                                         // RL配置文件路径
     // double dt_ = 0.001;                                                  // 控制周期
     vector6_t torso_interpolation_result_;
+    vector_t leg_interpolation_result_;
     vector_t arm_interpolation_result_;
 
     // ROS 发布者和订阅者
