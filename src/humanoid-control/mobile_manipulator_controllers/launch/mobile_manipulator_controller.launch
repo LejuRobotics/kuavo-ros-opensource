@@ -36,6 +36,8 @@
   <param name="dummy_sim_arm" value="$(arg dummy_sim_arm)" />
   <param name="visualize_humanoid" value="$(arg visualize_humanoid)" />
   <param name="visualize_mm"  value="$(arg visualize_mm)" />
+  <!-- Enable manipulation mpc services (default: true for wheel arm robots) -->
+  <param name="enable_manipulation_mpc" value="true" />
 
   <!-- <group if="$(arg rviz)"> -->
   <include file="$(find ocs2_mobile_manipulator_ros)/launch/include/visualize.launch">
