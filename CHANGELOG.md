@@ -5,6 +5,7 @@
 ## Breaking Changes
 
 ## 文档相关
+- 更新 Kuavo5和Roban2 VR 遥操作控制腰部yaw文档说明，[文档链接](./readme.md) 
 - 优化运动控制 API 文档，补充revo2灵巧手以及末端相关话题/服务的约束条件，[文档链接](./docs/运动控制API.md)
 - PICO VR 全身遥操作补充使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
 - 补充桌面端节点服务开机自启动使用说明，[文档链接](./src/manipulation_nodes/planarmwebsocketservice/README.md)
@@ -69,6 +70,9 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 修复RL/MPC步态相互切换的过程中按下A键行走时，机身会出现震动、行走姿态异常问题
+- 修复 Mujoco 和 Gazebo 仿真无法运行 100045 等版本机器人问题
+- 修复Kuavo5 VR控制下蹲弯腰解锁手臂时跟随倒下问题
 - 修复 kuavo.json 配置末端类型为`lejuclaw`与实物实际不一致时程序启动报错退出问题
 - 修复半身模式轮臂无法使用VR问题
 - 修复G12遥控器AMP无法切换踏步功能
@@ -250,6 +254,9 @@
 - Kuavo Humanoid SDK 新增搬箱子策略模块以及 gazebo 仿真策略使用示例
 
 ## 修复问题
+- 修复 VR 遥操作手臂内翻以及无法锁定夹爪等问题
+- 修复 Kuavo5 在 cali 状态下北通遥控器按 start 缩腿时程序退出问题
+- 修复H12 遥控器触发机器人做动作需要等待2~3秒才开始的问题
 - 补充100045和100049版本缺失的参数
 - 修复Roban2-EDU软件-”S形曲线行走“案例执行走完S弯后不会站立，会一直原地踏步
 - 修复灵巧手获取状态lock作用域太宽导致其他线程读取等待过长导致频率下降
