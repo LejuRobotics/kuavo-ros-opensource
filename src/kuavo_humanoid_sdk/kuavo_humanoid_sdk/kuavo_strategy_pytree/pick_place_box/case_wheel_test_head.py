@@ -13,8 +13,9 @@ from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config
 
 # === Demo 配置 ===
 TAG_ID = config.pick.tag_id  # 要寻找的 tag ID
-HEAD_SEARCH_YAWS = [np.deg2rad(85), 0, np.deg2rad(-85)]  # 头部搜索的偏航角度
+HEAD_SEARCH_YAWS = [np.deg2rad(85), 0, np.deg2rad(-85), 0]  # 头部搜索的偏航角度
 HEAD_SEARCH_PITCHES = [np.deg2rad(-10), np.deg2rad(0), np.deg2rad(10)]  # 头部搜索的俯仰角度
+TIMEOUT_SECONDS = 5.0  # 超时时间（秒）
 
 
 def make_tree(robot_sdk):
@@ -68,7 +69,15 @@ if __name__ == '__main__':
     tree = py_trees.trees.BehaviourTree(root)
 
     print("开始头部搜索 tag...")
+    start_time = time.time()  # 记录开始时间
+
     while True:
+        # 检查超时
+        elapsed_time = time.time() - start_time
+        if elapsed_time >= TIMEOUT_SECONDS:
+            print(f"⏰ 超时退出：在 {TIMEOUT_SECONDS} 秒内未找到 tag {TAG_ID}")
+            break
+
         tree.tick()
         status = root.status
         print(py_trees.display.unicode_tree(root, show_status=True))

@@ -1,0 +1,9 @@
+# 头部控制模式设置服务
+# 请求部分
+string mode          # 控制模式: "fixed", "auto_track_active", "fixed_main_hand", "vr_follow"
+string fixed_hand    # 固定主手模式时的手: "left" 或 "right" (仅在mode为"fixed_main_hand"时必需，其他模式可传入空字符串"")
+---
+# 响应部分
+bool success         # 是否成功
+string message       # 响应消息
+string current_mode  # 当前模式

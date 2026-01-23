@@ -11,7 +11,8 @@
 2. [控制器基础服务（RLControllerBase）](#2-控制器基础服务rlcontrollerbase) - 5个服务
 3. [倒地起身控制器服务（FallStandController）](#3-倒地起身控制器服务fallstandcontroller) - 1个服务
 4. [主控制器服务（humanoidController）](#4-主控制器服务humanoidcontroller) - 5个服务
-5. [监控与调试话题](#5-监控与调试话题) - 2个话题
+5. [腰部控制器接口（WaistController）](#5-腰部控制器接口waistcontroller) - 2个话题
+6. [监控与调试话题](#6-监控与调试话题) - 2个话题
 
 ---
 
@@ -307,11 +308,35 @@ rosservice call /humanoid_controller/trigger_fall_stand_up
 
 ---
 
-## 5. 监控与调试话题
+## 5. 腰部控制器接口（WaistController）
+
+`WaistController` 是集成在RL控制器中的腰部控制模块，提供外部控制腰部关节的功能。支持两种控制模式：模式1（RL控制）和模式2（外部控制）。
+
+**话题接口**:
+- `/humanoid_controller/enable_waist_control` (`std_msgs/Bool`): 启用/禁用腰部外部控制
+  - `true`: 切换到模式2（外部控制）
+  - `false`: 切换回模式1（RL控制），使用低通滤波器平滑过渡到默认位置
+- `/robot_waist_motion_data` (`kuavo_msgs/robotWaistControl`): 发送外部腰部控制指令（仅在模式2时生效）
+  - `data.data[]`: 腰部关节目标角度（度），超出范围的值会被自动限制
+
+**控制模式**:
+- **模式1（RL控制）**: 默认模式，由RL控制器完全控制。从模式2切换回时，如果误差大于阈值（0.02 rad），会使用低通滤波器平滑过渡到默认位置
+- **模式2（外部控制）**: 通过 `/robot_waist_motion_data` 接收外部指令，经过低通滤波处理。仿真环境会计算PD前馈扭矩，实物环境不计算
+
+**配置参数** (`waistControllerParam`):
+- `mode2CutoffFreq`: 低通滤波器截止频率（Hz，默认0.8）
+- `kp`: PD控制位置增益（默认10.0）
+- `kd`: PD控制速度增益（默认2.0）
+
+**启用条件**: 需在配置文件中设置 `use_external_waist_controller = true`，且机器人有腰部关节（`waist_dof_ > 0`）
+
+---
+
+## 6. 监控与调试话题
 
 这些话题由 `humanoidController` 通过 `TopicLogger` 实时发布，用于监控控制器状态和调试MPC↔RL模式切换过程。
 
-### 5.1 `/humanoid_controller/is_rl_controller_`
+### 6.1 `/humanoid_controller/is_rl_controller_`
 
 **话题类型**: `std_msgs/Float64`
 
@@ -340,7 +365,7 @@ rqt_plot /humanoid_controller/is_rl_controller_/data
 
 ---
 
-### 5.2 `/humanoid_controller/resetting_mpc_state_`
+### 6.2 `/humanoid_controller/resetting_mpc_state_`
 
 **话题类型**: `std_msgs/Float64`
 

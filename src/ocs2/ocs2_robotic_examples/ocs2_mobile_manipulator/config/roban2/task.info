@@ -377,14 +377,22 @@ inputCost
 endEffector
 {
   ; end effector quadratic penalty scaling
-  muPosition      10.0
-  muOrientation    5.0
+  muPositionX       10.0
+  muPositionY       10.0
+  muPositionZ       10.0
+  muOrientationRoll   5.0
+  muOrientationPitch  5.0
+  muOrientationYaw    5.0
 }
 
 finalEndEffector
 {
-  muPosition      10.0
-  muOrientation    5.0
+  muPositionX       10.0
+  muPositionY       10.0
+  muPositionZ       10.0
+  muOrientationRoll   5.0
+  muOrientationPitch  5.0
+  muOrientationYaw    5.0
 }
 
 selfCollision

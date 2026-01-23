@@ -906,7 +906,7 @@ namespace ocs2
 
                         if(1 == robot_type_) // 轮臂机器人
                         {
-                            callWheelMpcControlMode(1);  // ArmOnly mode
+                            callWheelMpcControlMode(3);  // BaseArm mode
                         }
                     }
                     else
@@ -1342,7 +1342,7 @@ namespace ocs2
             cmdVel_.linear.y = commad_line_target_(1);
             cmdVel_.linear.z = commad_line_target_(2);
             cmdVel_.angular.z = commad_line_target_(3);
-            if(!torso_control_enabled_)
+            if(!torso_control_enabled_ || robot_type_ == 1)  // 轮臂支持动腰和行走同时下发
                 vel_control_pub_.publish(cmdVel_);
         }
 

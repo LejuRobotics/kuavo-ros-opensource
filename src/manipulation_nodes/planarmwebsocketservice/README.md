@@ -1516,6 +1516,42 @@ response:
 }
 ```
 
+## 对齐楼梯坐标标定
+### 在上楼梯之前，需要先对齐楼梯，获取目标点相较于 tag 码的偏移，在对齐时走到标定的位置
+**使用注意**
+- 请提前将 tag 码按照规定的方式贴在楼梯第三阶的左方，将机器人置于楼梯前，脚尖距离楼梯 `2cm` 处.
+- 请使用我们提供的 tag 码进行印贴：[下载TAG](https://kuavo.lejurobot.com/assets/target_tag_id_66.pdf)
+
+request:
+
+```json
+{
+    "cmd": "set_align_stair_param",
+}
+```
+
+response:
+
+```json
+{
+    "cmd": "set_align_stair_param",
+    "data": {
+        "code": 0,
+        "msg": "align stair set successfully"
+    }
+}
+```
+
+```json
+{
+    "cmd": "set_align_stair_param",
+    "data": {
+        "code": 1,
+        "msg": "align stair set failed"
+    }
+}
+```
+
 ## Rosbag 到 Tact 文件转换工具
 
 这是一个用于将 ROS bag 文件转换为 Tact 文件格式的工具。它主要用于处理机器人手臂、头部和手指的运动数据，并生成可用于动画或其他目的的 Tact 文件。

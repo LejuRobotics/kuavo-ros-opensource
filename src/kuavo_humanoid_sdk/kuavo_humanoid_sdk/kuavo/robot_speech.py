@@ -15,9 +15,14 @@ class RobotSpeech:
         """Establish a connection to the Doubao service."""
         return self.doubao_speech_core.verify_connection(app_id, access_key)
 
-    def start_speech(self):
-        """Start the speech system."""
-        self.doubao_speech_core.start_speech_system()
+    def start_speech(self, block: bool = False):
+        """Start the speech system.
+        
+        Args:
+            block: If True, the function will block and keep the program running.
+                  If False, the function will return immediately (default).
+        """
+        self.doubao_speech_core.start_speech_system(block)
 
     def stop_speech(self):
         """Stop the speech system."""

@@ -144,8 +144,10 @@ class ArmAPI:
                             total_time: float,  # 轨迹总时间，单位秒
                             control_base: bool,  # 是否连带base一起控制
                             direct_to_wbc: bool,  # 指令是否经过全身MPC的优化再到WBC
-                            frame: str
-
+                            frame: str,
+                            arm_pos_threshold: float = 0.1,  # 位置误差阈值（米）
+                            arm_angle_threshold: float = 0.174,  # 角度误差阈值（弧度）
+                            arm_error_detect: bool = True  # 是否开启手臂误差检测
                             ):
 
         # 切成外部控制模式
@@ -167,6 +169,73 @@ class ArmAPI:
             )
             if i < num_points - 1:  # 最后一个点不需要延时
                 time.sleep(time_per_point)
+
+        # 获取轨迹的最后一个点作为期望位置
+        left_target_point = left_traj[-1]  # KuavoPose 对象，有 position 和 orientation 属性
+        right_target_point = right_traj[-1]
+        # 误差检测逻辑（可选）
+        success = True
+        if arm_error_detect:
+            timeout = 2.0  # 超时时间（秒）
+            start_time = time.time()
+            success = False
+            while (time.time() - start_time) < timeout:
+                # 获取当前末端位置（世界坐标系）
+                left_current_pose, right_current_pose = self.get_eef_pose_world()
+                # 构造目标位姿
+                # 注意：如果 frame 是 LocalFrame，需要将目标转换到世界坐标系进行比较
+                if frame == KuavoManipulationMpcFrame.LocalFrame:
+                    # 获取当前 base 到 odom 的变换
+                    transform_base_to_world = self.get_current_transform(
+                        source_frame=Frame.BASE,
+                        target_frame=Frame.ODOM
+                    )
+                    # 将目标从 LocalFrame 转换到世界坐标系
+                    left_target_pose_local = Pose(pos=left_target_point.position, quat=left_target_point.orientation, frame=Frame.BASE)
+                    right_target_pose_local = Pose(pos=right_target_point.position, quat=right_target_point.orientation, frame=Frame.BASE)
+                    # LocalFrame: x,y 使用 BASE 坐标系，z 使用绝对高度
+                    left_target_pose_world = transform_base_to_world.apply_to_pose(left_target_pose_local)
+                    left_target_pose_world.pos = np.array([
+                        left_target_pose_world.pos[0], 
+                        left_target_pose_world.pos[1], 
+                        left_target_point.position[2]  # 使用原始的 z 值（绝对高度）
+                    ])
+                    left_target_pose_world.frame = Frame.ODOM
+                    right_target_pose_world = transform_base_to_world.apply_to_pose(right_target_pose_local)
+                    right_target_pose_world.pos = np.array([
+                        right_target_pose_world.pos[0], 
+                        right_target_pose_world.pos[1], 
+                        right_target_point.position[2]
+                    ])
+                    right_target_pose_world.frame = Frame.ODOM
+                else:
+                    # WorldFrame：直接使用目标点
+                    left_target_pose_world = Pose(pos=left_target_point.position, quat=left_target_point.orientation, frame=Frame.ODOM)
+                    right_target_pose_world = Pose(pos=right_target_point.position, quat=right_target_point.orientation, frame=Frame.ODOM)
+                
+                # 计算位置误差
+                left_pos_error = left_current_pose.position_l2_norm(left_target_pose_world)
+                right_pos_error = right_current_pose.position_l2_norm(right_target_pose_world)
+                
+                # 计算角度误差
+                left_angle_error = left_current_pose.angle(left_target_pose_world)
+                right_angle_error = right_current_pose.angle(right_target_pose_world)
+
+                print(f"手臂动作执行中，位置误差={left_pos_error:.4f}m (阈值={arm_pos_threshold}m), 角度误差={left_angle_error:.4f}rad (阈值={arm_angle_threshold}rad)")
+                # 检查是否满足阈值
+                if (left_pos_error <= arm_pos_threshold and right_pos_error <= arm_pos_threshold and
+                    left_angle_error <= arm_angle_threshold and right_angle_error <= arm_angle_threshold):
+                    success = True
+                    break
+                time.sleep(0.1)  # 误差检测间隔0.1s一次
+            
+            # 如果超时，打印错误信息
+            if not success:
+                print(f"[NodeArm] 手臂轨迹执行超时（{timeout}秒）！")
+                print(f"  左臂: 位置误差={left_pos_error:.4f}m (阈值={arm_pos_threshold}m), "
+                      f"角度误差={left_angle_error:.4f}rad (阈值={arm_angle_threshold}rad)")
+                print(f"  右臂: 位置误差={right_pos_error:.4f}m (阈值={arm_pos_threshold}m), "
+                      f"角度误差={right_angle_error:.4f}rad (阈值={arm_angle_threshold}rad)")
 
         # 运动结束后，切回默认模式
         self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.NoControl)
@@ -288,19 +357,22 @@ class ArmAPI:
             control_base: bool = False,  # 是否连带base一起控制
             direct_to_wbc: bool = True,  # 指令是否经过全身MPC的优化再到WBC
             total_time: float = 2.0,  # 轨迹总时间，单位秒
-            frame: str = KuavoManipulationMpcFrame.WorldFrame
+            frame: str = KuavoManipulationMpcFrame.WorldFrame,
             # 指令位置所在的坐标系： 'base_link'： 在机器人base_link坐标系下； 'foot_print': 'base_link' 在地面的投影; 'world': 世界系
+            arm_pos_threshold: float = 0.15,  # 位置误差阈值（米）
+            arm_angle_threshold: float = np.deg2rad(15),  # 角度误差阈值（弧度）
+            arm_error_detect: bool = True  # 是否开启手臂误差检测
     ):
         if asynchronous:
             # 多线程
             fut = self._pool.submit(self._move_eef_traj_kmpc,
-                                    left_traj, right_traj, total_time, control_base, direct_to_wbc, frame)
+                                    left_traj, right_traj, total_time, control_base, direct_to_wbc, frame, arm_pos_threshold, arm_angle_threshold, arm_error_detect)
             return fut  # 外部拿到 Future
 
         else:
             # 本函数阻塞
             self._move_eef_traj_kmpc(
-                left_traj, right_traj, total_time, control_base, direct_to_wbc, frame
+                left_traj, right_traj, total_time, control_base, direct_to_wbc, frame, arm_pos_threshold, arm_angle_threshold, arm_error_detect
             )
 
             return None
@@ -771,8 +843,8 @@ class TorsoAPI:
             euler[1] = 0.0
             robot_pose_2d = Pose.from_euler(
                 pos=robot_pose.pos,  # 只取x, y坐标
-                euler=euler,  # 只取x, y朝向
-                frame=Frame.ODOM,  # 使用base_link坐标系
+                euler=euler,  # 只取yaw朝向
+                frame=Frame.ODOM,  
                 degrees=False
             )
 
@@ -782,8 +854,8 @@ class TorsoAPI:
 
             target_in_odom_2d = Pose.from_euler(
                 pos=target_in_odom.pos,  # 只取x, y坐标
-                euler=euler,  # 只取x, y朝向
-                frame=Frame.ODOM,  # 使用base_link坐标系
+                euler=euler,  # 只取yaw朝向
+                frame=Frame.ODOM, 
                 degrees=False
             )
 
@@ -824,9 +896,12 @@ class TorsoAPI:
                     linear_y=vel_y,
                     angular_z=0.0
                 )
+                print("vel_x:",vel_x)
+                print("vel_y:",vel_y)
                 # 检查是否到达
                 if dis_diff < pos_threshold:
-                    return True
+                    self.stop_walk()
+                    break
 
             # 1. if dis too small， then use holonomic fine tune
             else:
@@ -881,14 +956,16 @@ class TorsoAPI:
                         angular_z=vel_yaw  # 不转动
                     )
 
-            # time.sleep(0.1)  # 控制频率
-            time.sleep(0.1)
+            time.sleep(0.01)    # 控制频率,不能太低，太低的話行走會出現行走站立來回切換的現象
 
             success = self._check_success_walk(
-                target_in_odom, yaw_threshold=np.deg2rad(5), pos_threshold=0.1)
+                target_in_odom, yaw_threshold=np.deg2rad(10), pos_threshold=pos_threshold)
             if success:
+                print("success:stop_walk")
                 self.stop_walk()
                 break
+            else:
+                print("not_success")
         return None
 
     def walk_to_pose_by_vel(self,
@@ -1047,3 +1124,6 @@ class TorsoAPI:
     def stop_walk(self):
         for _ in range(10):
             self.robot_sdk.control.walk(0.0, 0.0, 0.0)
+            print("stop_walk:停止行走")
+            time.sleep(0.02)
+        self.robot_sdk.control.stance()

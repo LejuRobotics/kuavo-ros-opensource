@@ -1,5 +1,6 @@
 import numpy as np
 import rospy
+import signal  # 提到最前面引入signal模块
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.kuavo.core.ros.microphone import Microphone
 from kuavo_humanoid_sdk.kuavo.core.ros.audio import Audio
@@ -58,6 +59,7 @@ class ROSDialogSession(DialogSession):
             try:
                 import signal
                 signal.signal(signal.SIGINT, self._keyboard_signal)
+                signal.signal(signal.SIGTERM, self._keyboard_signal)  # 也处理 SIGTERM 信号
             except ValueError as e:
                 SDKLogger.warning(f"Warning: Cannot set signal handler (not in main thread): {e}")
 
@@ -78,11 +80,17 @@ class ROSDialogSession(DialogSession):
         # No audio device cleanup needed since we're using ROS
 
     def _keyboard_signal(self, sig, frame):
-        """Handle keyboard interrupt signal"""
-        SDKLogger.info(f"receive keyboard Ctrl+C")
+        """Handle keyboard interrupt and SIGTERM signals"""
+        if sig == signal.SIGINT:
+            SDKLogger.info(f"[Speech] Received SIGINT signal (Ctrl+C)")
+        elif sig == signal.SIGTERM:
+            SDKLogger.info(f"[Speech] Received SIGTERM signal (tmux kill-session)")
+        
         self.is_recording = False
         self.is_playing = False
         self.is_running = False
+        self.stop_speech_system()
+        exit(0)
 
     def _process_audio_chunks(self):
         """Process buffered audio chunks in a separate thread"""
@@ -508,7 +516,7 @@ class RobotLLMDoubaoCore:
         # Setup WebSocket configuration
         self._setup_websocket_config(app_id, access_key)
         # Use custom ROS-integrated DialogSession with Audio interface
-        self.dialog_session = ROSDialogSession(self.ws_config, self.ros_audio, enable_signal_handler=False)
+        self.dialog_session = ROSDialogSession(self.ws_config, self.ros_audio, enable_signal_handler=True)
 
         # Test connection using event loop
         try:
@@ -535,13 +543,20 @@ class RobotLLMDoubaoCore:
             self.dialog_session = None  # Clear failed session
             return False
 
-    def start_speech_system(self):
-        """Start the speech dialog system with Doubao service."""
+    def start_speech_system(self, block: bool = False):
+        """Start the speech dialog system with Doubao service.
+        
+        Args:
+            block: If True, the function will block and keep the program running.
+                  If False, the function will return immediately (default).
+        """
         if self.is_running:
             SDKLogger.warn("[Speech] Speech system is already running")
+            return
             
         if self.dialog_session is None:
             SDKLogger.error("[Speech] Dialog session not initialized. Please call verify_connection() first with valid credentials.")
+            return
             
         try:
             SDKLogger.info(f"[Speech] Starting speech system")
@@ -557,6 +572,21 @@ class RobotLLMDoubaoCore:
             
             SDKLogger.info("[Speech] Speech system started successfully")
             
+            # If block is True, keep the program running
+            if block:
+                SDKLogger.info("[Speech] Speech system is running. Press Ctrl+C to stop.")
+                try:
+                    # 使用 rospy.spin() 来保持程序运行（如果是 ROS 节点）
+                    if rospy.get_node_uri():
+                        rospy.spin()
+                    else:
+                        # 如果不是 ROS 节点，使用 while 循环保持运行
+                        while self.is_running:
+                            time.sleep(0.5)
+                except KeyboardInterrupt:
+                    SDKLogger.info("[Speech] Received Ctrl+C, stopping speech system")
+                    self.stop_speech_system()
+                    
         except Exception as e:
             SDKLogger.error(f"[Speech] Failed to start speech system: {e}")
             self.is_running = False

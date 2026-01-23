@@ -25,12 +25,13 @@ public:
     qr_.setThreshold(0.01);
   }
 
-  vector6_t computeTranslationIK(vector_t init_q, int leg, vector3_t des_foot_linear_xyz);
-  vector6_t computeRotationIK(vector_t init_q, int leg, matrix3_t des_foot_R_des);
-  vector6_t computeRotationIK(vector_t init_q, int leg, vector3_t des_foot_eular_zyx);
+  vector6_t computeTranslationIK(vector_t init_q, int leg, vector3_t des_foot_linear_xyz, size_t frameId);
+  vector6_t computeRotationIK(vector_t init_q, int leg, matrix3_t des_foot_R_des, size_t frameId);
+  vector6_t computeRotationIK(vector_t init_q, int leg, vector3_t des_foot_eular_zyx, size_t frameId);
 
   vector6_t computeIK(vector_t init_q, int leg, vector3_t des_foot_linear_xyz, matrix3_t des_foot_R_des);
   vector6_t computeIK(vector_t init_q, int leg, vector3_t des_foot_linear_xyz, vector3_t des_foot_eular_zyx);
+  vector6_t computeIkWithDesiredFrame(vector_t init_q, int leg, vector3_t des_foot_linear_xyz, matrix3_t des_foot_R_des, size_t frameId);
 
   vector6_t computeDIK(vector_t q, int leg, vector3_t foot_linear_vel, vector3_t foot_angular_vel);
 

@@ -251,9 +251,9 @@ stateCost
 
         (0,0)  5.0  ; position x
         (1,1)  5.0  ; position y
-        (2,2)  5.0  ; position z
+        (2,2)  300.0  ; position z (increased to reduce squatting)
         (3,3)  5.0  ; euler angle z
-        (4,4)  10000.0  ; euler angle y
+        (4,4)  200.0  ; euler angle y
         (5,5)  5.0  ; euler angle x
       }
 
@@ -332,13 +332,13 @@ inputCost
 
       fullyActuatedFloatingArmManipulator
       {
-        scaling 1e-2
+        scaling 1e-1
 
         (0,0)  50.0  ; position x
         (1,1)  50.0  ; position y
-        (2,2)  50.0  ; position z
+        (2,2)  1000.0  ; position z (increased to penalize fast z-velocity changes)
         (3,3)  50.0  ; euler angle z
-        (4,4)  50.0  ; euler angle y
+        (4,4)  500.0  ; euler angle y
         (5,5)  50.0  ; euler angle x
       }
 
@@ -373,7 +373,7 @@ inputCost
     ; input costs for the arm DOFs
     arm
     {
-      scaling 1e-1
+      scaling 1e-2
 
       (0,0)  5.0  ; waist_yaw velocity
       (1,1)  5.0  ; z_arm_l1 velocity
@@ -397,14 +397,22 @@ inputCost
 endEffector
 {
   ; end effector quadratic penalty scaling
-  muPosition      10.0
-  muOrientation    5.0
+  muPositionX       10.0
+  muPositionY       10.0
+  muPositionZ       30.0
+  muOrientationRoll   5.0
+  muOrientationPitch  5.0
+  muOrientationYaw    5.0
 }
 
 finalEndEffector
 {
-  muPosition      10.0
-  muOrientation    5.0
+  muPositionX       10.0
+  muPositionY       10.0
+  muPositionZ       30.0
+  muOrientationRoll   5.0
+  muOrientationPitch  5.0
+  muOrientationYaw    5.0
 }
 
 selfCollision
@@ -496,7 +504,7 @@ basePositionLimits
     {
       (0,0)  -100  ; position x
       (1,0)  -100  ; position y
-      (2,0)  -0.4  ; position z
+      (2,0)  -0.3  ; position z
       (3,0)  -1e9  ; euler angle position z
       (4,0)  -0.0  ; euler angle position y
       (5,0)  -0.1  ; euler angle position x
@@ -607,7 +615,7 @@ jointVelocityLimits
       {
         (0,0)  -0.1  ; linear velocity x
         (1,0)  -0.1  ; linear velocity y
-        (2,0)  -5.0  ; linear velocity z
+        (2,0)  -3.0  ; linear velocity z (reduced to slow down squatting)
         (3,0)  -0.3  ; euler angle velocity z
         (4,0)  -0.3  ; euler angle velocity y
         (5,0)  -0.3  ; euler angle velocity x
@@ -673,7 +681,7 @@ jointVelocityLimits
       {
         (0,0)  0.1  ; linear velocity x
         (1,0)  0.1  ; linear velocity y
-        (2,0)  5.0  ; linear velocity z
+        (2,0)  2.0  ; linear velocity z (reduced to slow down squatting)
         (3,0)  0.3  ; euler angle velocity z
         (4,0)  0.3  ; euler angle velocity y
         (5,0)  0.3  ; euler angle velocity x
