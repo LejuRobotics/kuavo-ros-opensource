@@ -117,12 +117,11 @@ class EcMasterConfig:
         self.command_args = None
         self.robot_version = None
         self.slave2joint = {}
+
         self.initialize()
 
     def get_encoder_range(self, joint_id):
         robot_table = ENCODER_RANGE_TABLE.get(self.robot_version)
-        if robot_table is None and 40 <= self.robot_version <= 49:
-            robot_table = ENCODER_RANGE_TABLE.get(45)
         if robot_table is None:
             print(f"\033[33mwarning: 未找到ROBOT_VERSION={self.robot_version}的编码器映射表\033[0m")
             return None
@@ -152,7 +151,6 @@ class EcMasterConfig:
         for joint_id, slave_id in joint2slave_table.items():
             self.slave2joint[slave_id] = joint_id
 
-
     def get_ecmaster_driver_type(self, ini_path):
         file_path = os.path.expanduser(ini_path)
         ec_master_type = None
@@ -174,38 +172,39 @@ class EcMasterConfig:
                 return int(value)
             except ValueError:
                 print("\033[33mwarning: 环境变量ROBOT_VERSION不是有效的整数\033[0m", file=sys.stderr)
-                return 13
+                return 52
         else:
             print("\033[33mwarning: 未设置环境变量ROBOT_VERSION\033[0m", file=sys.stderr)
-            return 13
+            return 52
 
     def get_robot_type_and_slave_num(self, robot_version):
         if robot_version == 13 or robot_version == 14:
             return "roban2", 13
+        elif robot_version == 42 or robot_version == 45 or robot_version == 49 or robot_version == 10045 or robot_version == 10049:
+            return "kuavo", 14
+        elif robot_version == 51 or robot_version == 52:
+            return "kuavo5_v52", 15
         else:
-            print(f"\033[31merror: 机器人版本 {robot_version} 不在支持范围内\033[0m", file=sys.stderr)
-            print(f"\033[31m支持的版本: Roban2 (13-14)\033[0m", file=sys.stderr)
-            sys.exit(1)
+            print(f"\033[33mwarning: 机器人版本不存在, 使用默认值 'kuavo' 机器人类型\033[0m", file=sys.stderr)
+            return "kuavo", 14
 
     def get_ec_eni_config(self, driver_type, slave_num):
         if driver_type == "elmo":
             return f"./config/ENI_config/elmo_{slave_num}_c500.xml"
         elif driver_type == "youda":
-            return f"./config/ENI_config/yd_{slave_num}_c501.xml"
+            return f"./config/ENI_config/Kuavo5_T25_kpkd.xml"
+            # return f"./config/ENI_config/yd_{slave_num}_c501.xml"
         elif driver_type == "youda3":
             return f"./config/ENI_config/yd300_{slave_num}_c501.xml"
-        elif driver_type == "leju":
-            return f"./config/ENI_config/selfd_{slave_num}_c500.xml"
 
     def build_command(self, eni_config_path):
         base_command = [
             "main",
-            "-i8254x", "1", "1",
             "-i8254x", "2", "1",
+            "-i8254x", "3", "1",
             "-a", "7",
             "-v", "2",
             "-auxclk", "500",
-            # "-dcmmode", "busshift",
             "-dcmmode", "mastershift",
             "-t", "0",
             "-log", "./EC_log/EC_log"
@@ -220,11 +219,11 @@ class EcMasterConfig:
         eni_config_path = self.get_ec_eni_config(self.driver_type, self.slave_num)
         self.command_args = self.build_command(eni_config_path)
         self.initialize_slave2joint_mapping()
-        # 美化打印信息
+
         print("\033[1;34m====== EC Master 配置参数 ======\033[0m")
-        print(f"\033[1;33m机器人类型:\033[0m {robot_type}")
-        print(f"\033[1;33m驱动器类型:\033[0m {self.driver_type}")
         print(f"\033[1;33m驱动器类型 ENI 文件路径:\033[0m {eni_config_path}")
         print(f"\033[1;33mROBOT_VERSION:\033[0m {self.robot_version}")
+        print(f"\033[1;33mROBOT_TYPE:\033[0m {robot_type}")
         print(f"\033[1;33m从站数量:\033[0m {self.slave_num}")
+        print(f"\033[1;33m驱动器类型:\033[0m {self.driver_type}")
         # print(f"\033[1;33mEC_Master 命令:\033[0m {self.command_args}")

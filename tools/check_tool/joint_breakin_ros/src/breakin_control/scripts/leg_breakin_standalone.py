@@ -38,7 +38,8 @@ class LegBreakinStandalone:
         leg_breakin_src = self.current_dir.parent.parent / "leg_breakin" / "src"
         self.leg_breakin_src = leg_breakin_src
         self.joint_breakin_script = leg_breakin_src / "joint_breakin.py"  # roban2 统一入口（ROS控时长）
-        self.kuavo5_leg_breakin_script = leg_breakin_src / "leg_breakin_kuavo5_v52" / "kuavo5_leg_breakin.py"  # kuavo5_v52（ROS控时长）
+        self.kuavo5_leg_breakin_script_v52_80A = leg_breakin_src / "leg_breakin_kuavo5_v52_80A" / "kuavo5_leg_breakin.py"  # kuavo5_v52_80A（ROS控时长，龙华25台版本）
+        self.kuavo5_leg_breakin_script_v52 = leg_breakin_src / "leg_breakin_kuavo5_v52" / "kuavo5_leg_breakin.py"  # kuavo5_v52（ROS控时长，普通v52版本）
         
         # 进程管理
         self.leg_process = None
@@ -205,10 +206,26 @@ class LegBreakinStandalone:
         is_kuavo5 = self._is_kuavo5(robot_version)
 
         # 选择腿部磨线脚本
-        if is_kuavo5:
-            target_script = self.kuavo5_leg_breakin_script
+        # 优先读取环境变量 LEG_BREAKIN_DIR（由主控制器传递）
+        leg_breakin_dir = os.environ.get("LEG_BREAKIN_DIR")
+        if leg_breakin_dir:
+            # 根据环境变量选择对应的脚本
+            if leg_breakin_dir == "leg_breakin_kuavo5_v52_80A":
+                target_script = self.kuavo5_leg_breakin_script_v52_80A
+            elif leg_breakin_dir == "leg_breakin_kuavo5_v52":
+                target_script = self.kuavo5_leg_breakin_script_v52
+            elif leg_breakin_dir == "leg_breakin_roban2_v14":
+                target_script = self.joint_breakin_script
+            else:
+                if is_kuavo5:
+                    target_script = self.kuavo5_leg_breakin_script_v52_80A
+                else:
+                    target_script = self.joint_breakin_script
         else:
-            target_script = self.joint_breakin_script
+            if is_kuavo5:
+                target_script = self.kuavo5_leg_breakin_script_v52_80A
+            else:
+                target_script = self.joint_breakin_script
 
         self.print_colored(f"调试：ROBOT_VERSION = {robot_version or '(unknown)'}", Colors.BLUE)
         self.print_colored(f"调试：选择腿部磨线脚本: {target_script}", Colors.BLUE)

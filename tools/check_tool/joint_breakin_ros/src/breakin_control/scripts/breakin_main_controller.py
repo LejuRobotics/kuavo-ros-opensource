@@ -29,15 +29,9 @@ class BreakinMainController:
         self.current_dir = Path(__file__).parent.absolute()
         # 自动向上查找 ROS 工作空间根目录（包含 src 子目录的那个目录）
         self.workspace_root = self._detect_workspace_root()
-        # leg_breakin EC_log 路径
-        self.leg_ec_log_dir = (
-            self.workspace_root
-            / "src"
-            / "leg_breakin"
-            / "src"
-            / "leg_breakin_roban2_v14"
-            / "EC_log"
-        )
+        # leg_breakin 目录和 EC_log 路径
+        self.leg_breakin_dir = None
+        self.leg_ec_log_dir = None
         
         # 脚本路径
         self.arm_breakin_standalone = self.current_dir / "arm_breakin_standalone.py"
@@ -98,6 +92,82 @@ class BreakinMainController:
             return 50 <= v <= 52
         except (ValueError, TypeError):
             return False
+    
+    def _is_robot_version_52(self):
+        """判断 ROBOT_VERSION 是否为 52"""
+        robot_version = self._get_robot_version()
+        if not robot_version:
+            return False
+        
+        rv_raw = str(robot_version).strip()
+        rv = rv_raw.lower()
+        
+        # 字符串匹配：包含 v52 或 kuavo5_v52
+        if "v52" in rv or "kuavo5_v52" in rv:
+            return True
+        
+        # 数字版本判断：52
+        try:
+            v = int(rv_raw)
+            return v == 52
+        except (ValueError, TypeError):
+            return False
+    
+    def _select_leg_breakin_dir(self):
+        """根据 ROBOT_VERSION 选择腿部磨线目录
+        如果是版本52，询问用户选择机型
+        如果是版本50-51，使用普通v52版本
+        否则使用 roban2_v14
+        返回选择的目录名称
+        """
+        # 如果不是 Kuavo5，使用 roban2_v14
+        if not self._is_kuavo5():
+            return "leg_breakin_roban2_v14"
+        
+        # 如果是版本52，询问用户选择机型
+        if self._is_robot_version_52():
+            self.print_colored("=" * 50, Colors.CYAN)
+            self.print_colored("      检测到 ROBOT_VERSION = 52", Colors.CYAN)
+            self.print_colored("=" * 50, Colors.CYAN)
+            print()
+            self.print_colored("请选择机型：", Colors.YELLOW)
+            print("1. 龙华25台版本（腿部80A）")
+            print("2. 普通v52版本")
+            print()
+            
+            while True:
+                try:
+                    choice = input("请输入选项 (1 或 2): ").strip()
+                    if choice == "1":
+                        self.print_colored("已选择：龙华25台版本（腿部80A）", Colors.GREEN)
+                        return "leg_breakin_kuavo5_v52_80A"
+                    elif choice == "2":
+                        self.print_colored("已选择：普通v52版本", Colors.GREEN)
+                        return "leg_breakin_kuavo5_v52"
+                    elif choice.lower() == 'q':
+                        self.print_colored("已取消操作", Colors.YELLOW)
+                        sys.exit(0)
+                    else:
+                        self.print_colored("无效选项，请输入 1 或 2", Colors.RED)
+                except KeyboardInterrupt:
+                    self.print_colored("\n已取消操作", Colors.YELLOW)
+                    sys.exit(0)
+        
+        # 如果是版本50-51，使用普通v52版本
+        return "leg_breakin_kuavo5_v52"
+    
+    def _ensure_leg_breakin_dir_selected(self):
+        """确保腿部磨线目录已选择（如果尚未选择，则进行选择）"""
+        if self.leg_breakin_dir is None:
+            self.leg_breakin_dir = self._select_leg_breakin_dir()
+            self.leg_ec_log_dir = (
+                self.workspace_root
+                / "src"
+                / "leg_breakin"
+                / "src"
+                / self.leg_breakin_dir
+                / "EC_log"
+            )
 
     def _detect_workspace_root(self):
         """从当前脚本目录向上查找，找到包含 src 目录的 ROS 工作空间根目录"""
@@ -239,6 +309,9 @@ class BreakinMainController:
 
     def _ensure_leg_ec_log_dir(self):
         """确保腿部磨线的 EC_log 目录存在"""
+        # 确保已选择腿部磨线目录
+        self._ensure_leg_breakin_dir_selected()
+        
         try:
             if not self.leg_ec_log_dir.exists():
                 self.leg_ec_log_dir.mkdir(parents=True, exist_ok=True)
@@ -909,8 +982,11 @@ class BreakinMainController:
             rospy.sleep(1.0)
             
             # 启动腿部磨线脚本（ROS控时长）
+            # 通过环境变量传递选择的腿部磨线目录
+            env = dict(os.environ)
+            env['LEG_BREAKIN_DIR'] = self.leg_breakin_dir
             cmd = ["python3", str(self.leg_breakin_standalone)]
-            process = subprocess.Popen(cmd, preexec_fn=os.setsid)
+            process = subprocess.Popen(cmd, preexec_fn=os.setsid, env=env)
             self.processes.append(process)
 
             # 等待腿部磨线开始运行（通过订阅leg_started话题）
@@ -1117,11 +1193,11 @@ class BreakinMainController:
             leg_cmd = ["python3", str(self.leg_breakin_standalone)]
             
             # 启动手臂磨线进程（ROS控时长，通过环境变量传递是否跳过校准）
-            env = dict(os.environ)
+            env_arm = dict(os.environ)
             if skip_calibration:
-                env['SKIP_ARM_CALIBRATION'] = 'true'
+                env_arm['SKIP_ARM_CALIBRATION'] = 'true'
             else:
-                env.pop('SKIP_ARM_CALIBRATION', None)  # 确保清除之前的值
+                env_arm.pop('SKIP_ARM_CALIBRATION', None)  # 确保清除之前的值
             
             arm_process = subprocess.Popen(
                 arm_cmd,
@@ -1130,17 +1206,20 @@ class BreakinMainController:
                 text=True,
                 bufsize=1,
                 preexec_fn=os.setsid,
-                env=env
+                env=env_arm
             )
             
-            # 启动腿部磨线进程（ROS控时长）
+            # 启动腿部磨线进程（ROS控时长，通过环境变量传递选择的目录）
+            env_leg = dict(os.environ)
+            env_leg['LEG_BREAKIN_DIR'] = self.leg_breakin_dir
             leg_process = subprocess.Popen(
                 leg_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                preexec_fn=os.setsid
+                preexec_fn=os.setsid,
+                env=env_leg
             )
             
             self.processes.append(arm_process)
