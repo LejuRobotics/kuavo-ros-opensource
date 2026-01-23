@@ -27,8 +27,8 @@ class DexhandController;
 using TouchDexhandControllerPtr = std::unique_ptr<DexhandController>;
 class DexhandController {
 public:    
-    static TouchDexhandControllerPtr Create(const std::string &action_sequences_path, bool is_touch_dexhand, bool is_can_protocol, bool is_hand_proto_buf) {
-        return std::unique_ptr<DexhandController>(new DexhandController(action_sequences_path, is_touch_dexhand, is_can_protocol, is_hand_proto_buf));
+    static TouchDexhandControllerPtr Create(const std::string &action_sequences_path, bool is_touch_dexhand, bool is_can_protocol) {
+        return std::unique_ptr<DexhandController>(new DexhandController(action_sequences_path, is_touch_dexhand, is_can_protocol));
     }
 
     ~DexhandController();
@@ -176,8 +176,7 @@ public:
 private:
     DexhandController(const std::string &action_sequences_path,
                       bool is_touch_dexhand,
-                      bool is_can_protocol,
-                      bool is_hand_proto_buf);
+                      bool is_can_protocol);
     DexhandController(DexhandController&&) = delete;
     DexhandController(const DexhandController&) = delete;
 
@@ -202,7 +201,6 @@ private:
 
     /* data */
     bool is_can_protocol_{false};
-    bool is_hand_proto_buf_{true};
     bool is_touch_dexhand_{false};
     std::atomic<bool> l_position_updated_{false};
     std::atomic<bool> r_position_updated_{false};
