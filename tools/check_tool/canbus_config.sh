@@ -175,6 +175,7 @@ get_end_effector_class() {
 get_end_effector_device_id() {
     local side="$1"  # L 或 R
     local type="$2"  # revo2_hand, lejuclaw, none
+    local robot_type="$3"  # 机器人类型，用于判断版本
 
     case "$type" in
         "revo1_hand")
@@ -192,10 +193,19 @@ get_end_effector_device_id() {
             fi
             ;;
         "lejuclaw")
-            if [ "$side" = "L" ]; then
-                echo "0x0F"
+            # 肩膀换为ruiwo的机型，手臂多了两个ID，夹爪设备ID需要后延
+            if [ "$robot_type" = "kuavo5w_v62" ]; then
+                if [ "$side" = "L" ]; then
+                    echo "0x11"
+                else
+                    echo "0x12"
+                fi
             else
-                echo "0x10"
+                if [ "$side" = "L" ]; then
+                    echo "0x0F"
+                else
+                    echo "0x10"
+                fi
             fi
             ;;
         "none")
@@ -289,11 +299,12 @@ replace_single_end_effector() {
     local config_file="$1"
     local side="$2"  # L 或 R
     local type="$3"
+    local robot_type="$4"  # 机器人类型
 
     if [ "$type" != "none" ]; then
         local name=$(get_end_effector_name "$side" "$type")
         local class=$(get_end_effector_class "$side" "$type")
-        local device_id=$(get_end_effector_device_id "$side" "$type")
+        local device_id=$(get_end_effector_device_id "$side" "$type" "$robot_type")
 
         if [ "$side" = "L" ]; then
             sed -i "/# ANCHOR_L_NAME/c\  - name: $name        # ANCHOR_L_NAME" "$config_file"
@@ -340,11 +351,12 @@ replace_end_effector_config() {
     local config_file="$1"
     local left_type="$2"
     local right_type="$3"
+    local robot_type="$4"  # 机器人类型
 
     echo "开始更新末端执行器配置..."
 
-    replace_single_end_effector "$config_file" "L" "$left_type"
-    replace_single_end_effector "$config_file" "R" "$right_type"
+    replace_single_end_effector "$config_file" "L" "$left_type" "$robot_type"
+    replace_single_end_effector "$config_file" "R" "$right_type" "$robot_type"
 
     echo "末端执行器配置更新完成"
 }
@@ -411,7 +423,7 @@ configure_roban2() {
             update_canbus_type_config "$temp_file" "$left_canbus_type" "$right_canbus_type"
 
             # 替换末端执行器配置
-            replace_end_effector_config "$temp_file" "$left_type" "$right_type"
+            replace_end_effector_config "$temp_file" "$left_type" "$right_type" "$robot_type"
             echo_success "✓ 配置文件已更新: $temp_file"
             config_file="$temp_file"
         else
@@ -518,7 +530,7 @@ configure_kuavo() {
             update_canbus_type_config "$temp_file" "$left_canbus_type" "$right_canbus_type"
 
             # 替换末端执行器配置
-            replace_end_effector_config "$temp_file" "$left_type" "$right_type"
+            replace_end_effector_config "$temp_file" "$left_type" "$right_type" "$robot_type"
             echo_success "✓ 配置文件已更新: $temp_file"
             config_file="$temp_file"
         else
