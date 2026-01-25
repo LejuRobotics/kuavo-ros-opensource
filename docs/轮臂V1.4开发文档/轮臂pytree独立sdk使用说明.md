@@ -24,7 +24,7 @@ src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box
   - **关节控制模式 (`joint`)**：关节轨迹控制，直接控制各关节角度
   - **世界坐标系末端控制 (`eef_world`)**：基于世界坐标系的末端轨迹控制
   - **基坐标系末端控制 (`eef_base`)**：基于机器人基坐标系的末端轨迹控制
-- 使用行为树序列执行：设置标签 → 计算轨迹 → 执行运动
+- 使用行为树序列执行：设置标签 → 计算轨迹 → 执行运动 → 手臂归位
 - 实时状态反馈和可视化
 
 **配置参数：**
@@ -32,10 +32,13 @@ src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box
 TAG_ID = config.pick.tag_id          # AprilTag ID
 FAKE_TAG_POS = (0.50, 0.0, 0.75)    # 虚假标签位置 (x, y, z 米)
 FAKE_TAG_EULER = (90, 0, -90)       # 虚假标签姿态 (roll, pitch, yaw 度)
-control_type = 'eef_world'           # 控制模式：'joint'、'eef_world' 或 'eef_base'
-control_base = False                 # 是否联合控制底盘
+control_type = 'joint'               # 控制模式：'joint'（默认）、'eef_world' 或 'eef_base'
 direct_to_wbc = False               # 是否直接发送到WBC（跳过MPC）⚠️轮臂必须设为False
 back_default = False                # 运动结束后是否返回默认控制模式⚠️轮臂必须设为False
+total_time = 3.0                    # 手臂执行时间（秒）
+traj_point_num = 100                # 轨迹点数量
+enable_joint_mirroring = True       # 是否启用关节镜像（仅在joint模式下有效）
+enable_high_position_accuracy = False  # 是否启用位置约束优先,默认False是优先姿态约束
 ```
 
 **控制模式说明：**
@@ -89,12 +92,14 @@ python case_wheel_test_arm.py
 - 并行执行感知和头部搜索
 - 实时 AprilTag 检测和位置反馈
 - 成功检测后自动停止搜索
+- 超时保护机制（默认5秒）
 
 **配置参数：**
 ```python
 TAG_ID = config.pick.tag_id                                    # 目标 AprilTag ID
-HEAD_SEARCH_YAWS = [85°, 0°, -85°]                            # 头部搜索偏航角
-HEAD_SEARCH_PITCHES = [-10°, 0°, 10°]                         # 头部搜索俯仰角
+HEAD_SEARCH_YAWS = [np.deg2rad(85), 0, np.deg2rad(-85), 0]       # 头部搜索偏航角（弧度）
+HEAD_SEARCH_PITCHES = [np.deg2rad(-10), np.deg2rad(0), np.deg2rad(10)]  # 头部搜索俯仰角（弧度）
+TIMEOUT_SECONDS = 5.0                                           # 超时时间（秒）
 ```
 
 **使用方法：**
@@ -121,24 +126,29 @@ python case_wheel_test_head.py
 - 支持多种移动控制模式
 
 **主要特性：**
-- 三种控制模式：`cmd_pos_world`、`cmd_pos`、`cmd_vel`
+- 三种控制模式：`cmd_pos_world`（默认）、`cmd_pos`、`cmd_vel`
 - 坐标系转换（tag坐标系 → 世界坐标系）
 - 可使用真实或模拟的 AprilTag 数据
 - 自动路径规划和执行
 
 **配置参数：**
-- 使用配置文件中的站立位置参数
+- 使用配置文件中的站立位置参数（`config.pick.stand_in_tag_pos`, `config.pick.stand_in_tag_euler`）
 - 支持实时 tag 数据或预设测试数据
 
 **使用方法：**
 ```bash
-# 使用默认 cmd_pos 模式
+# 使用默认 cmd_pos_world 模式
 python case_wheel_test_move.py
 
 # 指定控制模式
 python case_wheel_test_move.py --control-mode cmd_pos_world
+python case_wheel_test_move.py --control-mode cmd_pos
 python case_wheel_test_move.py --control-mode cmd_vel
 ```
+
+**重要提示：**
+- 运行前需要初始化 SDK：`KuavoSDK.Init(log_level="INFO")`
+- 否则 `cmd_vel` 或 `walk` 模式可能因缺少 `_robot_version_major` 而崩溃
 
 **支持环境：**
 - **MuJoCo 仿真环境**：精确的移动动力学仿真
@@ -157,11 +167,13 @@ python case_wheel_test_move.py --control-mode cmd_vel
 - 异步执行模式
 - 基于 BASE 坐标系的控制
 - 实时运动状态监控
+- 可配置执行时间
 
 **配置参数：**
 ```python
-TORso_TARGET_POS = (0.2, 0.0, 0.5)      # 目标位置 (x, y, z 米)
-TORso_TARGET_EULER = (0.0, 10°, 90°)    # 目标姿态 (roll, pitch, yaw)
+TORso_TARGET_POS = (0.0, 0.0, 1.2)      # 目标位置 (x, y, z 米) - 默认配置
+TORso_TARGET_EULER = (0.0, 0.0, 90.0)   # 目标姿态 (roll, pitch, yaw 度) - 默认配置
+total_time = 3.0                        # 执行时间（秒）
 ```
 
 **使用方法：**
@@ -190,8 +202,8 @@ python case_wheel_test_torso.py
 
 **配置参数：**
 ```python
-TARGET_JOINT_ANGLES = [14.90, -32.01, 18.03, 90.0]  # 目标关节角度（度）
-TOTAL_TIME = 8.0                                     # 执行时间（秒）
+TARGET_JOINT_ANGLES = [14.90, -32.01, 18.03, -90.0]  # 目标关节角度（度）
+TOTAL_TIME = 3.0                                      # 执行时间（秒）- 默认3秒
 ```
 
 **使用方法：**

@@ -20,6 +20,9 @@ ROBAN2_1_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-
 KUAVO5_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5_dual_canbus_cofig.yaml"
 KUAVO5_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5_single_canbus_cofig.yaml"
 
+# Kuavo5w v62
+KUAVO5w_V62_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5w_v62_dual_canbus_cofig.yaml"
+
 # Kuavo4pro
 KUAVO4PRO_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_single_canbus_cofig.yaml"
 KUAVO4PRO_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_dual_canbus_cofig.yaml"
@@ -355,6 +358,10 @@ configure_roban2() {
     local wiring_type
     select_wiring_type wiring_type
 
+    # 选择手部协议类型
+    local hand_protocol_type
+    select_hand_protocol_type hand_protocol_type
+
     # 根据robot_type选择配置文件路径
     local dual_config_file=""
     local single_config_file=""
@@ -435,8 +442,7 @@ configure_roban2() {
     fi
 
     # 统一写入所有配置文件
-    # 对于 roban 系列，目前不需要写入 HandProtocolType.ini，因此第三个参数传空字符串
-    write_config_files "$wiring_type" "$config_file" ""
+    write_config_files "$wiring_type" "$config_file" "$hand_protocol_type"
 }
 
 # 配置kuavo机器人函数
@@ -446,7 +452,13 @@ configure_kuavo() {
 
     # 选择CAN总线接线类型
     local wiring_type
-    select_wiring_type wiring_type
+    # kuavo5w_v62版本只支持双总线
+    if [ "$robot_type" = "kuavo5w_v62" ]; then
+        wiring_type="dual_bus"
+        echo_success "✓ kuavo5w_v62版本仅支持双总线模式"
+    else
+        select_wiring_type wiring_type
+    fi
 
     # 选择手部协议类型
     local hand_protocol_type
@@ -463,6 +475,11 @@ configure_kuavo() {
         "kuavo5")
             dual_config_file="$KUAVO5_DUAL_SOURCE_CONFIG_FILE"
             single_config_file="$KUAVO5_SINGLE_SOURCE_CONFIG_FILE"
+            ;;
+        "kuavo5w_v62")
+            dual_config_file="$KUAVO5w_V62_DUAL_SOURCE_CONFIG_FILE"
+            # kuavo5w_v62版本不支持单总线，不需要single_config_file
+            single_config_file=""
             ;;
     esac
 
@@ -509,6 +526,11 @@ configure_kuavo() {
             config_file=""
         fi
     else
+        # kuavo5w_v62版本不支持单总线
+        if [ "$robot_type" = "kuavo5w_v62" ]; then
+            echo_error "✗ 错误: kuavo5w_v62版本不支持单总线模式"
+            return 1
+        fi
 
         echo ""
         echo_title "配置单总线CANBUS类型"
@@ -561,9 +583,9 @@ main() {
     fi
 
     # 选择机器人类型
-    local robot_options=("roban2.0" "roban2.1" "kuavo4pro" "kuavo5")
+    local robot_options=("roban2.0" "roban2.1" "kuavo4pro" "kuavo5" "kuavo5w_v62")
     show_menu "选择机器人类型" "${robot_options[@]}"
-    get_user_selection 4 robot_selection
+    get_user_selection 5 robot_selection
 
     local robot_type="${robot_options[$((robot_selection-1))]}"
     echo_success "选择机器人类型: $robot_type"
@@ -574,7 +596,7 @@ main() {
         "roban2.0"|"roban2.1")
             configure_roban2 "$robot_type"
             ;;
-        "kuavo4pro"|"kuavo5")
+        "kuavo4pro"|"kuavo5"|"kuavo5w_v62")
             configure_kuavo "$robot_type"
             ;;
     esac
@@ -584,6 +606,3 @@ main() {
 
 # 运行主函数
 main "$@"
-
-
-

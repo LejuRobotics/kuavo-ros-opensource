@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import tf
 import geometry_msgs.msg
 import traceback
+import vr_manager
 
 # 全局变量存储地图信息，用于坐标系转换
 global_map_info = None
@@ -369,6 +370,7 @@ from std_srvs.srv import Trigger
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.msg import sensorsData
+from kuavo_msgs.msg import AprilTagDetectionArray
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
 from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest, robotSwitchPose, robotSwitchPoseRequest
 
@@ -535,8 +537,10 @@ def tmux_run_cmd(session_name:str, cmd:str, sudo:bool=False)->Tuple[bool, str]:
     time.sleep(3.0)
 
     # 检查session是否成功创建
-    check_result = subprocess.run(["sudo", "tmux", "has-session", "-t", session_name],
-                            capture_output=True)
+    check_cmd = ["tmux", "has-session", "-t", session_name]
+    if sudo:
+        check_cmd.insert(0, "sudo")
+    check_result = subprocess.run(check_cmd, capture_output=True)
     ret = False
     if check_result.returncode == 0:
         ret = True
@@ -937,10 +941,12 @@ def _update_current_arm_joint_state(joint_msg, hand_msg):
         current_arm_joint_state = arm_part + hand_part + head_part
 
     elif robot_version.major() == 1:
-        arm_part = list(joint_msg.joint_data.joint_q[13:21])
-        hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
-        head_part = list(joint_msg.joint_data.joint_q[-2:])
-        waist_part = [joint_msg.joint_data.joint_q[0]]
+        # 按照 joint_q 索引顺序定义变量
+        hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12  # 对应 joint_q[0:12]
+        waist_part = [joint_msg.joint_data.joint_q[12]]  # 对应 joint_q[12]
+        arm_part = list(joint_msg.joint_data.joint_q[13:21])  # 对应 joint_q[13:21]
+        head_part = list(joint_msg.joint_data.joint_q[21:23])  # 对应 joint_q[21:23]
+        # 保持最终组合顺序不变：arm_part + hand_part + head_part + waist_part
         current_arm_joint_state = arm_part + hand_part + head_part + waist_part
 
     current_arm_joint_state = [round(v, 2) for v in current_arm_joint_state]
@@ -1571,16 +1577,18 @@ async def get_robot_info_handler(
             robot_version_info = robot_version
     except:
         robot_version_info = robot_version
-    
+    # 获取VR录制保存路径
+    vr_recording_path = os.path.expanduser(vr_manager.RECORDING_SAVE_PATH)
     payload = Payload(
-        cmd="get_robot_info", 
+        cmd="get_robot_info",
         data={
-            "code": 0, 
+            "code": 0,
             "robot_type": robot_version_info.version_number(),
             "music_folder_path": MUSIC_FILE_FOLDER,
             "maps_folder_path": MAP_FILE_FOLDER,
             "h12_config_path": H12_CONFIG_PATH,
-            "repo_path": REPO_PATH
+            "repo_path": REPO_PATH,
+            "vr_recording_path": vr_recording_path
         }
     )
 
@@ -2387,6 +2395,98 @@ async def start_robot_handler(
     )
     response_queue.put(response)
 
+async def set_align_stair_param_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """
+    通过识别 tag 码设置当前的偏置参数
+    """
+    payload = Payload(
+        cmd="set_align_stair_param",
+        data={"code": 0, "message": "Align stair param set successfully"}
+    )
+    
+    try:    
+        target_tag_id = 66     # 固定使用 tag_id=10 的 tag 码进行识别
+        timeout_duration = 30  # 总超时时间：30秒
+        start_time = time.time()
+        tag_found = False
+        
+        while True:
+            # 检查是否超时
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout_duration:
+                payload.data["code"] = 1
+                payload.data["message"] = f"timeout: {timeout_duration} seconds, tag_id: {target_tag_id}"
+                break
+            
+            try:
+                # 等待从话题 "/robot_tag_info" 接收到 AprilTagDetectionArray 消息
+                msg = rospy.wait_for_message("/robot_tag_info", AprilTagDetectionArray, timeout=2)
+                
+                if not msg.detections:
+                    continue
+                
+                # 查找目标tag
+                target_detection = None
+                for detection in msg.detections:
+                    if detection.id[0] == target_tag_id:
+                        target_detection = detection
+                        break
+                
+                if target_detection is None:
+                    continue
+                
+                # 找到目标tag
+                pos = target_detection.pose.pose.pose.position
+                offset_x = -pos.x
+                offset_y = -pos.y
+                
+                # 将识别结果保存到文件（参考 simple-singleStepStairs-roban-21.py 的保存逻辑）
+                try:
+                    from datetime import datetime
+                    
+                    # 确保上传文件夹存在
+                    global UPLOAD_FILES_FOLDER
+                    if not os.path.exists(UPLOAD_FILES_FOLDER):
+                        os.makedirs(UPLOAD_FILES_FOLDER)
+                    
+                    # 构建配置数据（与参考文件保持一致的数据结构）
+                    config = {
+                        'tag_id': target_tag_id,
+                        'offset_x': float(offset_x),
+                        'offset_y': float(offset_y),
+                        'offset_yaw': 0.0,
+                        'offset_set': True
+                    }
+                    
+                    # 1. 保存到固定文件名（用于后续程序读取的最新配置）
+                    config_filename = 'stair_alignment_config.json'
+                    config_filepath = os.path.join(UPLOAD_FILES_FOLDER, config_filename)
+                    with open(config_filepath, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, indent=4, ensure_ascii=False)
+                    
+                    payload.data["code"] = 0
+                    payload.data["message"] = "Align stair param set successfully"
+                    
+                except Exception as save_error:
+                    payload.data["code"] = 1
+                    payload.data["message"] = f"Failed to set align stair param: {save_error}"
+                break
+            except rospy.ROSException:
+                continue
+            except Exception as e:
+                payload.data["code"] = 1
+                payload.data["message"] = f"Failed to set align stair param: {e}"
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to set align stair param: {e}"
+
+    response = Response(
+        payload=payload,
+        target=websocket,
+    )
+    response_queue.put(response)
 
 async def robot_switch_pose_handler(
     websocket: websockets.WebSocketServerProtocol, data: dict
@@ -5013,3 +5113,194 @@ async def get_api_key_status_handler(
         response_queue.put(response)
 
         print(payload.data['msg'])
+
+async def get_vr_status_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """
+    获取VR状态接口
+    返回VR连接状态、节点状态、录制状态等信息
+    """
+    payload = Payload(cmd="get_vr_status", data={"code": 0})
+
+    try:
+        # 导入VR状态模块
+        import vr_manager
+
+        # 获取VR状态信息
+        status_info = vr_manager.get_vr_status()
+        payload.data.update(status_info)
+
+    except Exception as e:
+        print(f"Get VR status error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        payload.data["code"] = 1
+        payload.data["message"] = f"Failed to get VR status: {str(e)}"
+
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+async def start_real_time_chat_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """开启实时对话"""
+    payload = Payload(
+        cmd="start_real_time_chat", 
+        data={"code": 0, "message": "实时对话启动成功"}
+    )
+
+    try:
+        # 获取当前脚本所在目录，用于定位realtime_client.py
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        realtime_client_path = os.path.join(current_dir, "realtime_client.py")
+        
+        # 检查文件是否存在
+        if not os.path.exists(realtime_client_path):
+            payload.data["code"] = 1
+            payload.data["message"] = f"找不到实时对话客户端脚本: {realtime_client_path}"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+            return
+        
+        # 使用tmux启动实时对话客户端
+        session_name = "realtime_session"
+        cmd = f"source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash && python3 {realtime_client_path}"
+
+        # 检查当前是否存在名为realtime_session的会话
+        check_result = subprocess.run(
+            ["tmux", "has-session", "-t", session_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        if check_result.returncode == 0:
+            payload.data["code"] = 1
+            payload.data["message"] = "实时对话会话已存在"
+            response = Response(payload=payload, target=websocket)
+            response_queue.put(response)
+            return
+        
+        # 使用tmux_run_cmd函数启动会话
+        success, msg = tmux_run_cmd(session_name, cmd, sudo=False)
+        
+        if success:
+            payload.data["code"] = 0
+            payload.data["message"] = msg
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = msg
+            
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"启动实时对话失败: {str(e)}"
+        print(f"启动实时对话失败: {str(e)}")
+        
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+
+async def stop_real_time_chat_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """停止实时对话"""
+    payload = Payload(
+        cmd="stop_real_time_chat", 
+        data={"code": 0, "message": "实时对话停止成功"}
+    )
+
+    try:
+        session_name = "realtime_session"
+        
+        # 发送kill-session命令关闭对应session
+        result = subprocess.run(
+            ["tmux", "kill-session", "-t", session_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            payload.data["code"] = 0
+            payload.data["message"] = "实时对话会话已停止"
+        else:
+            # 检查session是否已经不存在
+            check_result = subprocess.run(
+                ["tmux", "has-session", "-t", session_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            if check_result.returncode != 0:
+                payload.data["code"] = 0
+                payload.data["message"] = "实时对话会话已不存在"
+            else:
+                payload.data["code"] = 1
+                payload.data["message"] = f"停止实时对话失败: {result.stderr}"
+                
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"停止实时对话失败: {str(e)}"
+        print(f"停止实时对话失败: {str(e)}")
+        
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+
+async def get_real_time_chat_status_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """获取实时对话状态"""
+    payload = Payload(
+        cmd="get_real_time_chat_status", 
+        data={"code": 0, "status": False, "message": "实时对话未运行"}
+    )
+
+    try:
+        session_name = "realtime_session"
+        
+        # 检查session是否存在
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", session_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        if result.returncode == 0:
+            payload.data["status"] = True
+            payload.data["message"] = "实时对话正在运行"
+        else:
+            payload.data["status"] = False
+            payload.data["message"] = "实时对话未运行"
+            
+    except Exception as e:
+        payload.data["code"] = 1
+        payload.data["message"] = f"获取实时对话状态失败: {str(e)}"
+        print(f"获取实时对话状态失败: {str(e)}")
+        
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+
+async def start_vr_record_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """
+    开始VR录制接口
+    录制机器人的bag数据（文件名自动生成）
+    """
+    payload = Payload(cmd="start_vr_record", data={"code": 0, "message": "Recording started"})
+
+    try:
+        # 导入VR录制模块
+        import vr_manager
+
+        # 调用录制函数（自动生成文件名）
+        success, message = vr_manager.start_recording()
+
+        if success:
+            payload.data["code"] = 0
+            payload.data["message"] = message
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = message
+
+    except Exception as e:
+        print(f"Start VR recording error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        payload.data["code"] = 2
+        payload.data["message"] = f"Start recording failed: {str(e)}"
+
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)

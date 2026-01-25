@@ -1,2 +1,4 @@
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", SYMLINK+="ttyLED0"
+# 电源板 (CH340 USB-Serial, ID 1a86:7523)
+# 该设备同时支持电池信息读取和LED灯条控制
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="ttyLED0", MODE="0666"
 

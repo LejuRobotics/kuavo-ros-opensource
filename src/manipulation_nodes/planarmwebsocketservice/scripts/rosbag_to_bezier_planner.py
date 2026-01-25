@@ -574,6 +574,13 @@ class RosbagToBezierPlanner:
                         if len(point) != len(control_data[0]):
                             rospy.logerr(f"  Point[{i}] has {len(point)} elements (expected {len(control_data[0])})")
                 return False
+
+            # 如果是手指关节（索引14-25），将百分比（0-100）转换为弧度（0-1.7453）
+            # C++ 贝塞尔规划器期望手指数据是弧度格式
+            if is_finger_joint and has_finger_data:
+                finger_max_radians = 1.7453
+                joint_positions = [(pos / 100.0) * finger_max_radians for pos in joint_positions]
+
             joint_times = timestamp_data
 
             curve_points = []
@@ -698,18 +705,18 @@ class RosbagToBezierPlanner:
             start_time = msg.header.stamp.to_sec()
             finger_start_idx = 14  # 手指关节起始索引
             finger_end_idx = 26    # 手指关节结束索引（不包含）
-            # 手指关节的弧度范围：0~100 映射到 0~1.7 弧度（根据代码中的 1.7*x/100.0）
-            finger_max_radians = 1.7
-            
+            # 手指关节的弧度范围：0~100 映射到 0~1.7453 弧度
+            finger_max_radians = 1.7453
+
             for i, point in enumerate(msg.points):
                 t = start_time + point.time_from_start.to_sec()
                 positions = list(point.positions)
-                
+
                 # 将手指关节（索引14-25）从弧度映射回0~100范围
                 for finger_idx in range(finger_start_idx, min(finger_end_idx, len(positions))):
                     if positions[finger_idx] is not None:
                         # 反向映射：radians -> 0~100
-                        # 如果弧度值在合理范围内（0~1.7），映射回0~100
+                        # 如果弧度值在合理范围内（0~1.7453），映射回0~100
                         if 0 <= positions[finger_idx] <= finger_max_radians:
                             positions[finger_idx] = (positions[finger_idx] / finger_max_radians) * 100.0
                         elif positions[finger_idx] < 0:
@@ -718,7 +725,7 @@ class RosbagToBezierPlanner:
                         elif positions[finger_idx] > finger_max_radians:
                             # 如果大于最大值，映射为100
                             positions[finger_idx] = 100.0
-                
+
                 trajectory_point = {
                     'time': t,
                     'positions': positions,

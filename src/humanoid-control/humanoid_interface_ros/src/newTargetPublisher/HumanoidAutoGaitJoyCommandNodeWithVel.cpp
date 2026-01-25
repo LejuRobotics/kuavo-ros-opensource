@@ -296,6 +296,8 @@ namespace ocs2
         auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version_, true, 2e-3);
         default_joint_state_ = drake_interface_->getDefaultJointState();
         com_height_ = drake_interface_->getIntialHeight();
+        auto kuavo_settings = drake_interface_->getKuavoSettings();
+        waist_dof_ = kuavo_settings.hardware_settings.num_waist_joints;
         loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
         loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
         loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
@@ -408,6 +410,7 @@ namespace ocs2
       re_start_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/re_start_robot", 10);
       head_motion_pub_ = nodeHandle_.advertise<kuavo_msgs::robotHeadMotionData>("/robot_head_motion_data", 10);
       waist_motion_pub_ = nodeHandle_.advertise<kuavo_msgs::robotWaistControl>("/robot_waist_motion_data", 10);
+      enable_waist_control_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/humanoid_controller/enable_waist_control", 10);
       slope_planning_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/humanoid/mpc/enable_slope_planning", 10);
       hand_position_pub_ = nodeHandle_.advertise<kuavo_msgs::robotHandPosition>("/control_robot_hand_position", 10);
 
@@ -962,6 +965,20 @@ namespace ocs2
         return;
       }
 
+      // 检测退出腰部控制状态（从腰部控制状态退出到非腰部控制状态）
+      if (waist_control_active_ && joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] >= -0.5)
+      {
+        // 发布 false，禁用腰部控制（只有腰部dof>0时才发布）
+        if (waist_dof_ > 0)
+        {
+          std_msgs::Bool enable_msg;
+          enable_msg.data = false;
+          enable_waist_control_pub_.publish(enable_msg);
+          waist_control_active_ = false;
+          ROS_INFO("[JoyControl] Exited waist control mode, disabled waist control");
+        }
+      }
+      
       if(joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] < -0.5)
       {        
         if(!joy_execute_action_)
@@ -996,9 +1013,20 @@ namespace ocs2
           action_executing = robot_action_executing_;
         }
         
-        // 只有在没有动作执行时才允许转腰控制
-        if (!action_executing)
+        // 只有在没有动作执行时才允许转腰控制，且只有腰部dof>0时才进行腰部控制
+        if (!action_executing && waist_dof_ > 0)
         {
+          // 检测进入腰部控制状态（从非腰部控制状态进入）
+          if (!waist_control_active_)
+          {
+            // 发布 true，启用腰部控制
+            std_msgs::Bool enable_msg;
+            enable_msg.data = true;
+            enable_waist_control_pub_.publish(enable_msg);
+            waist_control_active_ = true;
+            ROS_INFO("[JoyControl] Entered waist control mode, enabled waist control");
+          }
+          
           double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
           waist_yaw = WAIST_YAW_MAX_ANGLE_DEG * waist_yaw;   // +- WAIST_YAW_MAX_ANGLE_DEG deg
           // std::cout << "waist_yaw: " << waist_yaw << std::endl;
@@ -1158,10 +1186,8 @@ namespace ocs2
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
         ROS_INFO("[JoyControl] switch to next controller");
-        // // Get controller list and switch to next
-        // switchToNextController();
-        // 1.3.2版本，因暂时禁用amp,只剩mpc切换会有短时间无法响应按键,需禁用X按键.
-        ROS_WARN("[JoyControl] [version 1.3.2] switch to next controller is disabled");
+        // Get controller list and switch to next
+        switchToNextController();
         return;
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
@@ -1350,6 +1376,7 @@ namespace ocs2
         return false;
       }
     }
+
     void callRealInitializeSrv()
     {
       ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_initial_start");
@@ -1626,6 +1653,7 @@ namespace ocs2
     ros::Publisher head_motion_pub_;
     ros::Publisher hand_position_pub_;
     ros::Publisher waist_motion_pub_;
+    ros::Publisher enable_waist_control_pub_;
     ros::Publisher slope_planning_pub_;
     float total_mode_scale_{1.0};
     bool button_start_released_{true};
@@ -1675,6 +1703,10 @@ namespace ocs2
     // 动作执行状态相关
     ros::Subscriber robot_action_state_sub_;
     bool robot_action_executing_{false};  // 标记是否有动作正在执行
+    
+    // 腰部控制状态跟踪
+    bool waist_control_active_{false};  // 标记是否正在控制腰部（模式2）
+    int waist_dof_{0};  // 腰部自由度，只有>0时才进行腰部控制
   };
 }
 

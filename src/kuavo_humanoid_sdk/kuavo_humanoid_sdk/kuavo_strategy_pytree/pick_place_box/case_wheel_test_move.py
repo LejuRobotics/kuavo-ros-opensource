@@ -33,8 +33,8 @@ def set_walk_goal_from_tag(tag_id: int = 1, use_real_data: bool = False):
         tag = Tag(
             id=tag_id,
             pose=Pose(
-                pos=[1.0, -1.0, 0.89368],
-                quat=[0.0, 0.57765, 0.81626, 0.0049414],
+                pos=[0.5, 0.0, 0.89368],
+                quat=[0.0, 0.0, 0.0, 1.0],
                 frame=Frame.ODOM
             )
         )

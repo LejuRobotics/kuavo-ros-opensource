@@ -74,32 +74,7 @@ class ArmTrajectoryBezierDemo:
                 self.INIT_ARM_POS = [int(0)] * tact_length
             else:
                 # 基础28个关节 + 可选的1个腰部关节
-                # 默认值（如果 ROS 参数不存在时使用）
-                default_base_init = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-                
-                # 从 ROS 参数读取 standJointState（手臂关节，14个）
-                try:
-                    stand_joint_state = None
-                    while stand_joint_state is None and not rospy.is_shutdown():
-                        stand_joint_state = rospy.get_param("/standJointState", None)
-                        if stand_joint_state is None:
-                            rospy.logwarn("ROS 参数 /standJointState 不存在，每隔 1s 检查一次，启动机器人时会自动加载")
-                            rospy.sleep(1.0)
-                    if stand_joint_state is not None and len(stand_joint_state) >= 14:
-                        # 将弧度转换为度，并只取前14个手臂关节
-                        self.arm_joints_deg = [math.degrees(rad) for rad in stand_joint_state[:14]]
-                        # 构建完整的 base_init：前14个手臂关节 + 后14个默认值（手部、头部等）
-                        base_init = self.arm_joints_deg + default_base_init[14:]
-                        rospy.loginfo("从 ROS 参数 /standJointState 读取手臂初始位置: %s", self.arm_joints_deg)
-                    else:
-                        self.arm_joints_deg = default_base_init[:14]
-                        base_init = default_base_init
-                        rospy.logwarn("ROS 参数 /standJointState 不存在或数据不足，使用默认值")
-                except Exception as e:
-                    self.arm_joints_deg = default_base_init[:14]
-                    base_init = default_base_init
-                    rospy.logwarn("读取 ROS 参数 /standJointState 失败: %s，使用默认值", str(e))
-                
+                base_init = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
                 if self.has_waist:
                     self.INIT_ARM_POS = base_init + [0]  # 添加腰部初始位置
                 else:
@@ -193,10 +168,12 @@ class ArmTrajectoryBezierDemo:
                 self.current_arm_joint_state = arm_part + hand_part + head_part
 
         elif self.robot_class == ROBAN:
-            arm_part = list(joint_msg.joint_data.joint_q[13:21])
-            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
-            head_part = list(joint_msg.joint_data.joint_q[-2:])
-            waist_part = [joint_msg.joint_data.joint_q[0]]
+            # 按照 joint_q 索引顺序定义变量
+            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12  # 对应 joint_q[0:12]
+            waist_part = [joint_msg.joint_data.joint_q[12]]  # 对应 joint_q[12]
+            arm_part = list(joint_msg.joint_data.joint_q[13:21])  # 对应 joint_q[13:21]
+            head_part = list(joint_msg.joint_data.joint_q[21:23])  # 对应 joint_q[21:23]
+            # 保持最终组合顺序不变：arm_part + hand_part + head_part + waist_part
             self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
 
         self.current_arm_joint_state = [round(v, 5) for v in self.current_arm_joint_state]
@@ -505,7 +482,7 @@ class ArmTrajectoryBezierDemo:
         
         return True, None
 
-    def create_init_stand_frame(self, frames, is_rl=False):
+    def create_init_stand_frame(self, frames):
         """
         创建初始站立帧（0f处）
         如果0f处没有动作帧，使用指定的初始站立姿态
@@ -515,7 +492,7 @@ class ArmTrajectoryBezierDemo:
         # 根据机器人类型确定初始站立帧的servos值
         if self.robot_class == KUAVO:
             # KUAVO的初始站立帧值（前14个关节）
-            init_stand_servos = [0] * len(self.arm_joints_deg) if is_rl else self.arm_joints_deg
+            init_stand_servos = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0]
             tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
         else:  # ROBAN
             # ROBAN的初始站立帧值（前8个关节），与抱拳.tact等标准动作文件保持一致
@@ -562,11 +539,11 @@ class ArmTrajectoryBezierDemo:
 
         return init_frame
 
-    def add_init_frame(self, frames, is_rl=False):
+    def add_init_frame(self, frames):
         action_data = {}
 
         # rl 要在刚开始插入当前状态为初始值来平滑过渡，ocs2 不需要
-        if is_rl:
+        if self.get_current_control_mode() == "rl":
             import copy
             for frame in frames:
                 frame["keyframe"] += 100
@@ -687,16 +664,12 @@ class ArmTrajectoryBezierDemo:
                 self.waist_state.data.data = [0]
                 self.control_waist_pub.publish(self.waist_state)
 
-    def create_action_data(self, finish_time, is_rl=False):
+    def create_action_data(self, finish_time):
         # 根据是否有腰部关节确定TACT长度
         if self.robot_class == KUAVO:
             tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
         else:
             tact_length = self.ROBAN_TACT_LENGTH
-        if is_rl:
-            servos_end = [0] * tact_length
-        else:
-            servos_end = self.INIT_ARM_POS
         frames = [
             {
                 "servos": [int(round(math.degrees(x))) for x in self.current_arm_joint_state],
@@ -704,7 +677,7 @@ class ArmTrajectoryBezierDemo:
                 "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(tact_length)}
             },
             {
-                "servos": servos_end,
+                "servos": self.INIT_ARM_POS,
                 "keyframe": finish_time * 100,
                 "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(tact_length)}
             },
@@ -716,13 +689,13 @@ class ArmTrajectoryBezierDemo:
         self.START_FRAME_TIME = 0
         self.x_shift = self.START_FRAME_TIME  # 动态调整 x_shift
         finish_time = 2
-        data = self.create_action_data(finish_time, is_rl=True)
+        data = self.create_action_data(finish_time)
 
         if self.get_current_control_mode() == "rl":
             finish_time += 1
         self.END_FRAME_TIME = finish_time
 
-        action_data = self.add_init_frame(data["frames"], is_rl=True)
+        action_data = self.add_init_frame(data["frames"])
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
@@ -975,11 +948,12 @@ class ArmTrajectoryBezierDemo:
         version_compat_map = {
             41: [41],
             42: [42],
-            45: [43, 45, 46, 48, 49, 100045, 100049, 200049],
-            11: [11, 13, 14, 15],
-            13: [11, 13, 14, 15],
-            14: [11, 13, 14, 15],
-            15: [11, 13, 14, 15],
+            45: [43, 45, 46, 48, 49],
+            11: [11, 13, 14, 15, 16],
+            13: [11, 13, 14, 15, 16],
+            14: [11, 13, 14, 15, 16],
+            15: [11, 13, 14, 15, 16],
+            16: [11, 13, 14, 15, 16],
         }
         allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
         # 使用 version_number() 获取版本号数字进行比较
@@ -1008,8 +982,7 @@ class ArmTrajectoryBezierDemo:
 
         # 读取动作完成时间
         finish_time = data.get("finish", 0) * 0.01 # 转换为秒
-        current_control_mode = self.get_current_control_mode()
-        if current_control_mode == "rl":
+        if self.get_current_control_mode() == "rl":
             finish_time += 1.0
         self.END_FRAME_TIME = finish_time
 
@@ -1020,13 +993,13 @@ class ArmTrajectoryBezierDemo:
         
         
         # 只有在非RL模式下，且没有0f帧时，才插入站立帧
-        if not has_frame_at_0f and current_control_mode == "ocs2":
+        if not has_frame_at_0f and self.get_current_control_mode() == "ocs2":
             # 创建初始站立帧
-            init_stand_frame = self.create_init_stand_frame(frames, is_rl=current_control_mode == "rl")
+            init_stand_frame = self.create_init_stand_frame(frames)
             frames.insert(0, init_stand_frame)
             rospy.loginfo("0f处没有动作帧，已添加初始站立帧")
 
-        action_data = self.add_init_frame(frames, is_rl=current_control_mode == "rl")
+        action_data = self.add_init_frame(frames)
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 

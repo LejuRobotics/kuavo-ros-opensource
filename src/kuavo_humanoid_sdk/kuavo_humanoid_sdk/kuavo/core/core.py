@@ -159,7 +159,7 @@ class KuavoRobotCore:
             self._control.robot_stance()
         else:
             self._control.robot_stance() 
-        time.sleep(0.5)
+        # time.sleep(0.5)
 
     def _on_enter_walk(self, event):
         previous_state = event.transition.source
