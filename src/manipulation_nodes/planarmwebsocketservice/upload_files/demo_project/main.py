@@ -1,0 +1,1 @@
+../../../../kuavo_humanoid_sdk/examples/demo/llm_demo/llm_demo.py
