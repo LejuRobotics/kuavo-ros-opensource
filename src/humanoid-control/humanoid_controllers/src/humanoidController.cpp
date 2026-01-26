@@ -586,6 +586,8 @@ namespace humanoid_controller
     loadData::loadEigenMatrix(referenceFile, "joint_kp_walking_", joint_kp_walking_);
     loadData::loadEigenMatrix(referenceFile, "joint_kd_walking_", joint_kd_walking_);
     loadData::loadEigenMatrix(referenceFile, "standJointState", defalutArmPosMPC_);
+    std::vector<double> stand_joint_state_vector(defalutArmPosMPC_.data(), defalutArmPosMPC_.data() + defalutArmPosMPC_.size());
+    controllerNh_.setParam("/standJointState", stand_joint_state_vector);
     std::cout << "defalutArmPosMPC_: " << defalutArmPosMPC_.transpose() << std::endl;
     if (headNum_ > 0)
     {
