@@ -28,7 +28,7 @@
     <arg name="start_way"         default="manual"/>
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="only_half_up_body" default="false"/>
-    <arg name="stand_up_protect" default="false"/>
+    <arg name="stand_up_protect" default="true"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
@@ -129,6 +129,11 @@
 
     <group unless="$(eval arg('robot_version') >= 30)">
         <!-- <param name="enable_pull_up_protect" value="false"/> -->
+        <param name="stand_up_protect" value="false"/>
+    </group>
+
+    <!-- 初始倒地起身模式下，禁用站立保护以确保兼容 -->
+    <group if="$(arg init_fall_down_state)">
         <param name="stand_up_protect" value="false"/>
     </group>
     
