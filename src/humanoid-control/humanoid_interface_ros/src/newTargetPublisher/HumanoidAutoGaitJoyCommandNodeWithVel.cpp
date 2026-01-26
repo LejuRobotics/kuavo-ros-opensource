@@ -911,13 +911,6 @@ namespace ocs2
         return;
       }
 
-      // 控制器切换过程中禁用遥控输入，并return返回
-      if (isControllerSwitching())
-      {
-        joystick_origin_axis_.setZero();
-        old_joy_msg_ = *joy_msg;
-        return;
-      }
 
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
       {
@@ -1142,10 +1135,39 @@ namespace ocs2
         }
       }
       old_joy_msg_ = *joy_msg;
+
+      // 控制器切换阶段，禁用摇杆输入和除了BUTTON_RL外的button
+      if (isControllerSwitching())
+      {
+        joystick_origin_axis_.setZero();
+
+        sensor_msgs::Joy modified_joy_msg = *joy_msg;
+        int button_rl_index = joyButtonMap["BUTTON_RL"];
+        for (size_t i = 0; i < modified_joy_msg.buttons.size(); i++)
+        {
+          if (i != static_cast<size_t>(button_rl_index))
+          {
+            modified_joy_msg.buttons[i] = 0;
+          }
+        }
+        old_joy_msg_ = modified_joy_msg;
+      }
     }
 
     void checkGaitSwitchCommand(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
+      // 控制器切换阶段，只允许BUTTON_RL用于切换控制器，其他按钮禁用
+      if (isControllerSwitching())
+      {
+        // 只检查BUTTON_RL用于切换控制器
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
+        {
+          ROS_INFO("[JoyControl] switch to next controller");
+          switchToNextController();
+        }
+        return;
+      }
+
       // 有摇杆数据不可以步态切换
       if (
         std::abs(joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]]) > DEAD_ZONE ||
