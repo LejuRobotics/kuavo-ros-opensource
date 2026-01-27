@@ -5337,3 +5337,31 @@ async def stop_vr_record_handler(websocket: websockets.WebSocketServerProtocol, 
 
     response = Response(payload=payload, target=websocket)
     response_queue.put(response)
+
+
+async def cancel_vr_record_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """
+    取消VR录制接口
+    """
+    payload = Payload(cmd="cancel_vr_record", data={"code": 0, "message": "Recording cancelled"})
+
+    try:
+        # 调用取消录制函数
+        success, message = vr_manager.cancel_recording()
+
+        if success:
+            payload.data["code"] = 0
+            payload.data["message"] = message
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = message
+
+    except Exception as e:
+        print(f"Cancel VR recording error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        payload.data["code"] = 2
+        payload.data["message"] = f"Cancel recording failed: {str(e)}"
+
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)

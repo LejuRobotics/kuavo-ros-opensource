@@ -19,6 +19,7 @@
   "data": {
     "code": 0,
     "vr_connected": true,
+    "vr_nodes_running": true,
     "vr_state": "connected",
     "recording_state": "idle",
     "recording_duration": null

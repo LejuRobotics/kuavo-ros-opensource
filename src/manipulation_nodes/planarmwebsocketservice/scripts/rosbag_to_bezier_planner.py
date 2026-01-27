@@ -51,8 +51,9 @@ class RosbagToBezierPlanner:
     6. 保存结果为TACT文件格式
     """
     def __init__(self):
-        rospy.init_node('rosbag_to_bezier_planner')
-
+        # 检查是否已经有节点初始化，避免重复初始化
+        if rospy.get_node_uri() is None:
+            rospy.init_node('rosbag_to_bezier_planner')
         # 读取robot_version参数
         self.robot_version = int(os.environ.get("ROBOT_VERSION", "45"))
         rospy.loginfo(f"Robot version: {self.robot_version}")
