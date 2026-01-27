@@ -109,6 +109,7 @@ https://kuavo.lejurobot.com/H12SerialLogApks/kuavo_h12_controller.apk
 | cmd | string | 命令标识，固定为 `rc/send_robot_info` |
 | data.wifi_name | string | WiFi 名称，使用 **Base64 编码**（UTF-8） |
 | data.robot_ip | string | 机器人 IP 地址 |
+| data.wifi_password | string | WiFi 密码，使用 **Base64 编码**（UTF-8），需要 root 权限 |
 
 ### WiFi 名称解码
 

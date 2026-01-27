@@ -57,12 +57,39 @@ def encode_wifi_name_base64(name):
         print(f"WiFi 名称 base64 编码失败: {e}")
         return None
 
-def get_wifi_info():
-    """获取当前 WiFi 连接信息（SSID 和 IP 地址）
-    :return: dict, 包含 wifi_name 和 robot_ip 的字典
+def get_wifi_password(ssid):
+    """获取指定 WiFi 的密码
+    :param ssid: WiFi 名称（原始名称，非 base64）
+    :return: base64 编码的密码，如果获取失败返回 None
     """
-    wifi_info = {"wifi_name": None, "robot_ip": None}
+    if ssid is None:
+        return None
+
+    try:
+        import base64
+        # 使用 nmcli 获取已保存的 WiFi 密码（需要 root 权限）
+        result = subprocess.run(
+            ["nmcli", "-s", "-g", "802-11-wireless-security.psk", "connection", "show", ssid],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            password = result.stdout.strip()
+            # 使用 base64 编码
+            return base64.b64encode(password.encode('utf-8')).decode('ascii')
+    except Exception as e:
+        print(f"获取 WiFi 密码失败: {e}")
+
+    return None
+
+def get_wifi_info():
+    """获取当前 WiFi 连接信息（SSID、IP 地址和密码）
+    :return: dict, 包含 wifi_name、robot_ip 和 wifi_password 的字典
+    """
+    wifi_info = {"wifi_name": None, "robot_ip": None, "wifi_password": None}
     wifi_interface = None
+    raw_ssid = None  # 保存原始 SSID 用于获取密码
 
     # 获取 WiFi 接口名称和 SSID
     try:
@@ -74,7 +101,8 @@ def get_wifi_info():
             timeout=5
         )
         if result.returncode == 0 and result.stdout.strip():
-            wifi_info["wifi_name"] = encode_wifi_name_base64(result.stdout.strip())
+            raw_ssid = result.stdout.strip()
+            wifi_info["wifi_name"] = encode_wifi_name_base64(raw_ssid)
             # 获取无线接口名
             iface_result = subprocess.run(
                 ["iwgetid"],
@@ -110,10 +138,15 @@ def get_wifi_info():
                     parts = [p.replace('\\:', ':') for p in parts]
                     if len(parts) >= 4 and parts[1] == 'wifi' and parts[2] == 'connected':
                         wifi_interface = parts[0]
-                        wifi_info["wifi_name"] = encode_wifi_name_base64(parts[3])
+                        raw_ssid = parts[3]
+                        wifi_info["wifi_name"] = encode_wifi_name_base64(raw_ssid)
                         break
         except Exception as e:
             print(f"使用 nmcli 获取 WiFi 信息失败: {e}")
+
+    # 获取 WiFi 密码
+    if raw_ssid:
+        wifi_info["wifi_password"] = get_wifi_password(raw_ssid)
 
     # 获取 WiFi 接口的 IP 地址
     if wifi_interface:
@@ -201,7 +234,8 @@ def _wifi_report_loop(serial_device, baudrate, interval=1.0):
                     "cmd": "rc/send_robot_info",
                     "data": {
                         "wifi_name": wifi_info["wifi_name"],
-                        "robot_ip": wifi_info["robot_ip"]
+                        "robot_ip": wifi_info["robot_ip"],
+                        "wifi_password": wifi_info["wifi_password"]
                     }
                 }
                 json_data = json.dumps(data, ensure_ascii=False) + "\r\n"
