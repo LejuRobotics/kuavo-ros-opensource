@@ -197,6 +197,12 @@ namespace ocs2
         rb_version_ = RobotVersion::create(rb_version_int);
       }
 
+      if(rb_version_.major() <= 2)  // 判断小于等于2的主版本号为鲁班
+      {
+        controller_switch_time = roban_controller_switch_time;
+        std::cout << "[JoyControl] controller_switch_time change to roban's time !!!" << std::endl;
+      }
+
       if (nodeHandle.hasParam("joy_node/dev"))
       {
         std::string joystick_device;
@@ -1162,11 +1168,11 @@ namespace ocs2
       if (isControllerSwitching())
       {
         // 只检查BUTTON_RL用于切换控制器
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
-        {
-          ROS_INFO("[JoyControl] switch to next controller");
-          switchToNextController();
-        }
+        // if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
+        // {
+        //   ROS_INFO("[JoyControl] switch to next controller");
+        //   switchToNextController();
+        // }
         return;
       }
 
@@ -1760,6 +1766,7 @@ namespace ocs2
     ros::Time last_status_check_time_;
     bool real_{false};
     double controller_switch_time{2.5};
+    const double roban_controller_switch_time{1.0};
     ros::Time last_controller_switch_time_{0};
     bool controller_switching_{false};
     
