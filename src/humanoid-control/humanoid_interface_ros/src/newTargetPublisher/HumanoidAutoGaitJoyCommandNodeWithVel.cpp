@@ -46,6 +46,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
 #include <kuavo_msgs/robotWaistControl.h>
+#include <std_srvs/SetBool.h>
 
 #include <ocs2_core/Types.h>
 #include <ocs2_core/misc/LoadData.h>
@@ -354,6 +355,7 @@ namespace ocs2
       switch_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchController>("/humanoid_controller/switch_controller");
       get_controller_list_client_ = nodeHandle_.serviceClient<kuavo_msgs::getControllerList>("/humanoid_controller/get_controller_list");
       switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
+      auto_gait_change_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_auto_gait");
       joy_sub_ = nodeHandle_.subscribe(current_joy_topic_, 10, &JoyControl::joyCallback, this);
       
       // 轮臂模式下初始化observation_（避免访问observation.state时发生段错误）
@@ -1347,6 +1349,28 @@ namespace ocs2
         cmdVel.linear.z = 0.0;
       }
 
+      /*******************下蹲超过阈值则不允许踏步***********************/
+      static bool last_auto_gait_state = false;
+      const double height_diff_max = 0.1;  // 10厘米
+
+      if (std::fabs(cmdVel.linear.z) > height_diff_max)
+      {
+        if(last_auto_gait_state == true)
+        {
+          changeAutoGaitStatus(false);
+          last_auto_gait_state = false;
+        }
+      }
+      else
+      {
+        if(last_auto_gait_state == false)
+        {
+          changeAutoGaitStatus(true);
+          last_auto_gait_state = true;
+        }
+      }
+      /**************************************************************/
+
       // theta_z relative to current
       if (std::abs(joystick_origin_axis(3)) > DEAD_ZONE)
       {
@@ -1633,6 +1657,26 @@ namespace ocs2
       }
     }
 
+    bool changeAutoGaitStatus(bool flag)
+    {
+      std_srvs::SetBool srv;
+
+      srv.request.data = flag;  // true开启，false关闭
+
+      if (auto_gait_change_client_.call(srv))
+      {
+          return true;
+      }
+      else
+      {
+          ROS_ERROR("触发失败");
+          return false;
+      }
+
+      return true;
+
+    }
+
   private:
     ros::NodeHandle nodeHandle_;
     TargetTrajectoriesRosPublisher targetPoseCommand_;
@@ -1689,6 +1733,7 @@ namespace ocs2
     ros::ServiceClient switch_controller_client_;
     ros::ServiceClient get_controller_list_client_;
     ros::ServiceClient switch_to_next_controller_client_;
+    ros::ServiceClient auto_gait_change_client_;
     
     // 楼梯检测相关
     bool stair_detection_enabled_ = false;
