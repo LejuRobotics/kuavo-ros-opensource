@@ -1095,9 +1095,8 @@ namespace humanoid_controller
           waist_mode2_cutoff_freq_
         );
         
-        // 默认不启用腰部控制覆盖，保持RL控制模式（模式1）
-        // 腰部控制模式切换通过 /humanoid_change_waist_ctrl_mode 服务进行
-        waist_controller_->enable(false);
+        // 腰部控制模式切换通过 /humanoid_controller/enable_waist_control 服务进行
+        waist_controller_->enable(true);
         
         ROS_INFO("[%s] Waist controller initialized (default mode=1 RL control, waist_joints=%zu)", 
                  name_.c_str(), waistNum_);

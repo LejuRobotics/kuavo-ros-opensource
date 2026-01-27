@@ -162,7 +162,7 @@ namespace ocs2
 #define JOYSTICK_BEITONG_MAP_JSON "bt2pro"
 #define JOYSTICK_BEITONG_BUTTON_NUM 16
 #define JOYSTICK_AXIS_NUM 8
-#define WAIST_YAW_MAX_ANGLE_DEG 120.0  // 腰部最大旋转角度（度），±120度
+#define WAIST_YAW_MAX_ANGLE_DEG 180.0  // 腰部最大旋转角度（度），±180度
 
   class JoyControl
   {
@@ -966,7 +966,7 @@ namespace ocs2
         {
           std_msgs::Bool enable_msg;
           enable_msg.data = false;
-          enable_waist_control_pub_.publish(enable_msg);
+          // enable_waist_control_pub_.publish(enable_msg);
           waist_control_active_ = false;
           ROS_INFO("[JoyControl] Exited waist control mode, disabled waist control");
         }
@@ -1015,7 +1015,7 @@ namespace ocs2
             // 发布 true，启用腰部控制
             std_msgs::Bool enable_msg;
             enable_msg.data = true;
-            enable_waist_control_pub_.publish(enable_msg);
+            // enable_waist_control_pub_.publish(enable_msg);
             waist_control_active_ = true;
             ROS_INFO("[JoyControl] Entered waist control mode, enabled waist control");
           }

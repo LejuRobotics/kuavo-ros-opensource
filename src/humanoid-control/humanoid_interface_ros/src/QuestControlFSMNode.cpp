@@ -458,6 +458,12 @@ namespace ocs2
                 return;
             }
 
+            // 设置控制器切换保护标志
+            controller_switching_ = true;
+            controller_switch_start_time_ = ros::Time::now();
+            ROS_WARN("[QuestControlFSM] Controller switching started. VR joystick and button inputs will be disabled for %.1f seconds.", 
+                     CONTROLLER_SWITCH_PROTECTION_TIME);
+
             // 调用服务
             if (switch_to_next_controller_client_.call(srv))
             {
@@ -778,6 +784,17 @@ namespace ocs2
 
         void updateState()
         {
+            // 检查并清除控制器切换保护标志
+            if (controller_switching_)
+            {
+                double elapsed_time = (ros::Time::now() - controller_switch_start_time_).toSec();
+                if (elapsed_time >= CONTROLLER_SWITCH_PROTECTION_TIME)
+                {
+                    controller_switching_ = false;
+                    ROS_INFO("[QuestControlFSM] Controller switching protection ended. VR joystick and button inputs are now enabled.");
+                }
+            }
+            
             // 动态读取control_torso参数，支持后续启动的launch文件设置参数
             if(nodeHandle_.hasParam("/control_torso"))
             {
@@ -788,6 +805,19 @@ namespace ocs2
             {
                 joystick_data_prev_ = joystick_data_;
                 rec_joystick_data_ = true;
+                return;
+            }
+            
+            // 如果正在切换控制器，禁用所有按键输入，仅允许按X和Y关闭机器人
+            if (controller_switching_)
+            {
+                // 只允许安全相关的操作（如关闭机器人），其他操作都被禁用
+                if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
+                {
+                    callTerminateSrv();
+                    return;
+                }
+                // 其他所有按键和摇杆输入都被忽略
                 return;
             }
 
@@ -1147,8 +1177,17 @@ namespace ocs2
             float left_x = joystick_data_.left_x;
             float left_y = joystick_data_.left_y;
 
+            // 检查左摇杆是否在死区
+            bool left_joystick_in_deadzone = (std::abs(left_x) < kDeadzone && std::abs(left_y) < kDeadzone);
+
+            // 单步转向开关已关，且左摇杆有输入，则执行正常运动控制（RL控制器在stance模式下不支持单步转向）
+            if (!turn_step_single_step_switch_ && !left_joystick_in_deadzone) {
+                updateCommandLine();
+                return;
+            }
+
             // 检查是否在死区内
-            bool in_deadzone = turn_step_single_step_switch_||torso_control_enabled_||std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone || std::abs(left_y) >= kDeadzone)||std::abs(right_y) > (std::abs(right_x) + kDeadzone);
+            bool in_deadzone = torso_control_enabled_||std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone || std::abs(left_y) >= kDeadzone)||std::abs(right_y) > (std::abs(right_x) + kDeadzone);
             
             if (in_deadzone) {
                 // 进入死区
@@ -1826,6 +1865,11 @@ namespace ocs2
         
         ros::ServiceClient get_current_gait_service_client_;
         ros::ServiceClient get_current_gait_name_service_client_;
+        
+        // 控制器切换保护相关变量
+        bool controller_switching_{false};              // 标志控制器是否正在切换
+        ros::Time controller_switch_start_time_;        // 切换开始时间
+        const double CONTROLLER_SWITCH_PROTECTION_TIME = 2.5;  // 保护时间窗口（秒）
     };
 }
 

@@ -209,6 +209,10 @@ void WaistController::update(const ros::Time& time,
         // 更新力矩命令（PD控制计算出的力矩）
         joint_cmd_msg.tau[cmd_idx] = tau_cmd(i);
       }
+      else
+      {
+        joint_cmd_msg.tau[cmd_idx] = 0;
+      }      
       // 实物不计算前馈扭矩，保持原有tau值
       
       joint_cmd_msg.control_modes[cmd_idx] = 2; 
