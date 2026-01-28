@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from typing import Tuple
 import rospy
 import sys
 import os
@@ -10,6 +11,7 @@ from motion_executor import MotionExecutor
 import traceback
 import json
 from queue import Empty 
+from std_srvs.srv import Trigger, TriggerRequest
 
 # ==========================================
 # 1. 加载动作配置文件
@@ -63,6 +65,10 @@ def execute_action(motion_executor, action_key):
             motion_executor.trigger_move_callback(slot)
         elif action_type == "ARM_ACTION":
             # 对于手臂动作，data 就是字符串
+            success,status =get_robot_launch_status()
+            if not success or not status == "launched":
+                rospy.logwarn(f"警告: 机器人未启动，无法执行手臂动作:'{action_key}' ,当前status:{status}")
+                return
             motion_executor.trigger_action_callback(action_data)
         else:
             rospy.logwarn(f"警告: 未知的动作类型 '{action_type}'，无法执行 '{action_key}'。")
@@ -120,6 +126,29 @@ def main():
             break
 
     rospy.loginfo("程序已正常停止")
-
+def get_robot_launch_status()->Tuple[bool, str]:
+        status_client = rospy.ServiceProxy('/websocket_sdk_srv/get_robot_launch_status', Trigger)
+        try:
+            status_client.wait_for_service(timeout=2.0)
+        except rospy.ROSException as e:
+            # 等待服务超时（服务不存在）
+            print(f"Service does not exist: {e}")
+            return True, "unknown"  # 关键修改：服务不存在时返回(True, "unknown")
+    
+        try:
+            req = TriggerRequest()
+            status_client.wait_for_service(timeout=1.5)
+            # Call the service
+            response = status_client.call(req)
+            if response.success:
+                print(f"RealInitializeSrv service call successful")
+                return True, response.message
+            else:
+                print(f"Failed to callRealInitializeSrv service")
+                return False, "unknown"
+        except rospy.ServiceException as e:
+            print(f"Service call failed: {e}")
+            return False, f"unknown"
+        
 if __name__ == "__main__":
     main()
