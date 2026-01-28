@@ -355,7 +355,11 @@ namespace ocs2
         c_relative_base_limit_[3] = 1.2; // angular z
       }
 
+      // 保存MPC默认速度限制）
+      mpc_default_velocity_limits_ = c_relative_base_limit_;
+
       cmd_vel_publisher_ = nodeHandle.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
+      
       current_joy_topic_ = "/joy";  // 默认话题
       joy_topic_service_ = nodeHandle_.advertiseService("/set_joy_topic", &JoyControl::setJoyTopicCallback, this);
       switch_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchController>("/humanoid_controller/switch_controller");
@@ -405,6 +409,21 @@ namespace ocs2
           controller_switching_ = true;
           ROS_WARN_STREAM("[JoyControl] Controller switched to " << (is_rl_controller_ ? "RL" : "MPC")
                           << ", disable joystick input for " << controller_switch_time << "s");
+          
+          // 根据控制器类型更新速度限制
+          if (is_rl_controller_)
+          {
+            // RL控制器：从rosparam读取速度限制
+            updateVelocityLimitsFromParam(true);
+          }
+          else
+          {
+            // MPC控制器：恢复MPC默认速度限制
+            c_relative_base_limit_ = mpc_default_velocity_limits_;
+            ROS_INFO("[JoyControl] Restored MPC default velocity limits: [%.2f, %.2f, %.2f, %.2f]",
+                     c_relative_base_limit_[0], c_relative_base_limit_[1], 
+                     c_relative_base_limit_[2], c_relative_base_limit_[3]);
+          }
         }
       });
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
@@ -649,6 +668,38 @@ namespace ocs2
       }
       return true;
     }
+
+    /**
+     * @brief 从rosparam读取速度限制并更新c_relative_base_limit_
+     * rosparam格式: [linear_x, linear_y, linear_z, angular_x, angular_y, angular_z] (6维)
+     * c_relative_base_limit_格式: [linear_x, linear_y, linear_z, angular_z] (4维)
+     */
+    void updateVelocityLimitsFromParam(bool log_changes = true)
+    {
+      std::vector<double> velocity_limits;
+      if (nodeHandle_.getParam("/velocity_limits", velocity_limits) && velocity_limits.size() == 6)
+      {
+        // 检查值是否有变化，避免重复设置和打印日志
+        bool changed = (std::abs(c_relative_base_limit_[0] - velocity_limits[0]) > 1e-6) ||
+                       (std::abs(c_relative_base_limit_[1] - velocity_limits[1]) > 1e-6) ||
+                       (std::abs(c_relative_base_limit_[2] - velocity_limits[2]) > 1e-6) ||
+                       (std::abs(c_relative_base_limit_[3] - velocity_limits[5]) > 1e-6);
+        
+        // 将6维速度限制转换为4维格式
+        c_relative_base_limit_[0] = velocity_limits[0];  // linear_x
+        c_relative_base_limit_[1] = velocity_limits[1];  // linear_y
+        c_relative_base_limit_[2] = velocity_limits[2];  // linear_z
+        c_relative_base_limit_[3] = velocity_limits[5];  // angular_z
+        
+        if (changed && log_changes)
+        {
+          ROS_INFO("[JoyControl] Updated velocity limits from rosparam: [%.2f, %.2f, %.2f, %.2f]",
+                   c_relative_base_limit_[0], c_relative_base_limit_[1], 
+                   c_relative_base_limit_[2], c_relative_base_limit_[3]);
+        }
+      }
+    }
+    
 
     void checkAndPublishCommandLine(const vector_t &joystick_origin_axis)
     {
@@ -1696,6 +1747,7 @@ namespace ocs2
     ros::Subscriber arm_ctrl_mode_sub_;
     int arm_ctrl_mode_;
     bool is_rl_controller_{false};  // 当前是否为RL控制器
+    ocs2::scalar_array_t mpc_default_velocity_limits_{0.4, 0.2, 0.3, 0.4};  // 保存MPC默认速度限制
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
     std::string current_desired_gait_ = "stance";

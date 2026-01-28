@@ -599,6 +599,39 @@ using namespace ocs2;
     ROS_INFO("[%s] Inference thread exiting", name_.c_str());
   }
 
+  void RLControllerBase::updateVelocityLimitsParam(ros::NodeHandle& nh)
+  {
+    // 初始化默认值: [linear_x, linear_y, linear_z, angular_x, angular_y, angular_z]
+    Eigen::VectorXd mpc_limits(6);
+    mpc_limits << 0.4, 0.2, 0.3, 0.0, 0.0, 0.4;
+    
+    // 从referenceFile配置文件读取，如果存在则覆盖默认值
+    std::string referenceFile;
+    if (nh.getParam("/referenceFile", referenceFile))
+    {
+      try
+      {
+        loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", mpc_limits(0));
+        loadData::loadCppDataType(referenceFile, "cmdvelLinearYLimit", mpc_limits(1));
+        loadData::loadCppDataType(referenceFile, "cmdvelLinearZLimit", mpc_limits(2));
+        loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", mpc_limits(5));
+      }
+      catch (const std::exception& e)
+      {
+        // 读取失败时使用默认值，不打印警告（某些参数可能不存在是正常的）
+      }
+    }
+    
+    // 设置到rosparam
+    std::vector<double> limits_vec(mpc_limits.data(), mpc_limits.data() + mpc_limits.size());
+    nh.setParam("/velocity_limits", limits_vec);
+    
+    ROS_INFO("[%s] Updated /velocity_limits with MPC default: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+             name_.c_str(),
+             mpc_limits(0), mpc_limits(1), mpc_limits(2),
+             mpc_limits(3), mpc_limits(4), mpc_limits(5));
+  }
+
 } // namespace humanoid_controller
 
 
