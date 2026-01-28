@@ -25,6 +25,7 @@ at www.bridgedp.com.
 #include <ocs2_core/reference/ModeSchedule.h>
 #include "std_msgs/Float64MultiArray.h"
 #include "humanoid_interface/common/TopicLogger.h"
+#include "humanoid_estimation/ArmContactForceKalmanFilter.h"
 
 namespace ocs2
 {
@@ -191,9 +192,41 @@ namespace ocs2
       {
         cmdTorque_ = cmd_torque;
       }
-      void estContactForce(const ros::Duration &period);
 
-      vector_t getEstArmContactForce(vector_t &jointPosWBC, vector_t &jointVelWBC, vector_t &cmd_torque_wbc, const ros::Duration &period);
+      /**
+       * 设置“手臂接触力估计”使用的完整模型（real/WBC）。
+       * 用途：主估计器模型为简化维度时（如手臂DOF降维），末端frame/动力学不匹配，需要用完整模型计算手臂末端力。
+       */
+      void setFullArmForceModel(const PinocchioInterface& pinocchioInterface, const CentroidalModelInfo& info)
+      {
+        armForcePinocchioInterfacePtr_.reset(new PinocchioInterface(pinocchioInterface));
+        armForceInfoPtr_.reset(new CentroidalModelInfo(info));
+        use_full_arm_model_ = true;
+      }
+
+      /** 清空“手臂接触力估计”的完整模型配置（切回非简化模型/切换URDF等场景可用）。 */
+      void clearArmForceModel()
+      {
+        armForcePinocchioInterfacePtr_.reset();
+        armForceInfoPtr_.reset();
+        armForceRbdState_.resize(0);
+        armForceCmdTorque_.resize(0);
+        use_full_arm_model_ = false;
+      }
+
+      /**
+       * 更新“手臂接触力估计”的输入（完整维度）。
+       * 维度要求：rbdStateReal.size = 2 * info_real.generalizedCoordinatesNum，cmdTorqueReal.size = info_real.actuatedDofNum。
+       */
+      void setArmForceInputs(const vector_t& rbdStateReal, const vector_t& cmdTorqueReal)
+      {
+        armForceRbdState_ = rbdStateReal;
+        armForceCmdTorque_ = cmdTorqueReal;
+      }
+      
+      void estContactForce(const ros::Duration &period);
+      void estArmContactForce(const ros::Duration &period);
+      bool checkArmLoad(double force_threshold = 30.0);
 
       contact_flag_t estContactState(const scalar_t &time);
       void loadSettings(const std::string &taskFile, bool verbose);
@@ -205,6 +238,10 @@ namespace ocs2
       const vector_t &getEstDisturbanceTorque()
       {
         return estDisturbancetorque_;
+      }
+      const vector_t &getEstArmContactForce()
+      {
+        return estArmContactforce_;
       }
 
       const std::array<contact_flag_t, 2> &getEarlyLateContact()
@@ -222,7 +259,6 @@ namespace ocs2
 
       }
 
-      void initializeEstArmContactForce(PinocchioInterface &pinocchioInterfaceWBC, CentroidalModelInfo &infoWBC);
       Eigen::VectorXd lowPassFilter(const Eigen::VectorXd& currentFrame, Eigen::VectorXd& previousOutput, double alpha);
 
     protected:
@@ -236,7 +272,12 @@ namespace ocs2
       CentroidalModelInfo info_;
       std::unique_ptr<PinocchioEndEffectorKinematics> eeKinematics_;
 
-
+      // 主模型简化时启用，用于手臂接触力估计的完整模型
+      bool use_full_arm_model_{false};
+      std::unique_ptr<PinocchioInterface> armForcePinocchioInterfacePtr_;
+      std::unique_ptr<CentroidalModelInfo> armForceInfoPtr_;
+      vector_t armForceRbdState_;
+      vector_t armForceCmdTorque_;
 
       vector3_t zyxOffset_ = vector3_t::Zero();
       vector_t rbdState_;
@@ -262,6 +303,7 @@ namespace ocs2
       feet_array_t<vector3_t> latestStanceposition_;
 
       vector_t pSCgZinvlast_;
+      vector_t pSCgArmZinvlast_;  // 手臂接触力估计的低通滤波状态
       vector_t vMeasuredLast_;
       vector_t estContactforce_;
       vector_t estDisturbancetorque_;
@@ -332,8 +374,22 @@ namespace ocs2
       std::deque<bool> pullup_window_;  // 滑动窗口用于存储历史判断结果
       const size_t pullup_window_size_ = 20;  // 滑动窗口大小
       bool last_pullup_state_ = false;  // 保存上一次的pullup状态
-      ros::Time last_pullup_check_time_;  // 上次调用checkPullUp的时间
+      ros::Time last_pullup_check_time_;
       int waistNum_ = 0;
+      
+      vector_t estArmContactforceLast_;
+      std::deque<double> armForceWindow_;
+      size_t armForceWindowSize_ = 50;
+      size_t armDofPerSide_ = 7;
+      
+      // 卡尔曼滤波器（手臂接触力估计）
+      bool useArmForceKalmanFilter_ = true;  // 是否使用卡尔曼滤波（默认开启，基于奇异性自适应）
+      std::unique_ptr<ArmContactForceKalmanFilter> armForceKF_;
+      
+      // 动力学补偿相关
+      vector_t jointVelLast_;
+      vector_t jointAccel_;
+      bool dynamicsCompensationInitialized_ = false;
       
     };
 
