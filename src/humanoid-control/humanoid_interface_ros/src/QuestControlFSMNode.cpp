@@ -10,6 +10,7 @@
 #include <ros/package.h>
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/Float32.h>
+#include <std_msgs/Float64.h>
 #include <std_msgs/Int32.h>
 #include <std_msgs/String.h>
 #include <geometry_msgs/Twist.h>
@@ -231,6 +232,9 @@ namespace ocs2
             
             // 添加切换控制器服务客户端
             switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
+            
+            // 订阅RL控制器状态话题
+            is_rl_controller_sub_ = nodeHandle_.subscribe<std_msgs::Float64>("/humanoid_controller/is_rl_controller_", 1, &QuestControlFSM::isRlControllerCallback, this);
         }
 
         void run()
@@ -1007,7 +1011,8 @@ namespace ocs2
                 }
 
                 // 添加单步转向控制
-                if (step_turning_enabled) {
+                // VR模式下，如果为RL控制器，禁止执行单步
+                if (step_turning_enabled && !is_rl_controller_) {
                     updateSingleStepTurning();
                 }
                 else {
@@ -1089,6 +1094,11 @@ namespace ocs2
                      current_hand_wrench_item_mass_,
                      current_hand_wrench_left_force_[0], current_hand_wrench_left_force_[1], current_hand_wrench_left_force_[2],
                      current_hand_wrench_right_force_[0], current_hand_wrench_right_force_[1], current_hand_wrench_right_force_[2]);
+        }
+        
+        void isRlControllerCallback(const std_msgs::Float64::ConstPtr& msg)
+        {
+            is_rl_controller_ = (std::abs(msg->data) > 0.5);
         }
         
         void publishHandWrenchCmd(double item_mass, const std::vector<double>& left_force, const std::vector<double>& right_force)
@@ -1179,6 +1189,16 @@ namespace ocs2
 
             // 检查左摇杆是否在死区
             bool left_joystick_in_deadzone = (std::abs(left_x) < kDeadzone && std::abs(left_y) < kDeadzone);
+
+            // 检查右摇杆是否有输入（用于转向）
+            bool right_joystick_has_input = std::abs(right_x) >= kDeadzone;
+
+            // 如果是walk状态，且右摇杆有输入，则执行正常运动控制（支持cmd_vel转向）
+            std::string current_gait = getCurrentGaitName();
+            if (current_gait == "walk" && right_joystick_has_input) {
+                updateCommandLine();
+                return;
+            }
 
             // 单步转向开关已关，且左摇杆有输入，则执行正常运动控制（RL控制器在stance模式下不支持单步转向）
             if (!turn_step_single_step_switch_ && !left_joystick_in_deadzone) {
@@ -1870,6 +1890,10 @@ namespace ocs2
         bool controller_switching_{false};              // 标志控制器是否正在切换
         ros::Time controller_switch_start_time_;        // 切换开始时间
         const double CONTROLLER_SWITCH_PROTECTION_TIME = 2.5;  // 保护时间窗口（秒）
+        
+        // RL控制器状态相关变量
+        ros::Subscriber is_rl_controller_sub_;          // RL控制器状态订阅者
+        bool is_rl_controller_{false};                 // 当前是否为RL控制器
     };
 }
 

@@ -205,15 +205,23 @@ namespace ocs2
     void GaitReceiver::preSolverRun(scalar_t initTime, scalar_t finalTime, const vector_t &currentState,
                                     const ReferenceManagerInterface &referenceManager)
     {
-      // bool checkResetFlag = checkResetMpcState(initTime, resetting_mpc_state_.load());
-      // if(checkResetFlag == true)
-      // {
-      //   gaitSchedulePtr_->setAutoGaitEnabled(false);
-      // }
-      // else
-      // {
-      //   gaitSchedulePtr_->setAutoGaitEnabled(true);
-      // }
+      bool checkResetFlag = checkResetMpcState(initTime, resetting_mpc_state_.load());
+      static bool last_normal_auto_gait_state = false;
+      if(checkResetFlag == true)
+      {
+        gaitSchedulePtr_->setAutoGaitEnabled(false);
+        last_normal_auto_gait_state = false;
+        // std::cout << "[GaitReceiver]: MPC reset中，关闭自动步态模式" << std::endl;
+      }
+      else
+      {
+        if(last_normal_auto_gait_state == false)
+        {
+          gaitSchedulePtr_->setAutoGaitEnabled(true);
+          // std::cout << "[GaitReceiver]: MPC reset结束，恢复自动步态模式" << std::endl;
+          last_normal_auto_gait_state = true;
+        }
+      }
       bool autoGaitMode = gaitSchedulePtr_->isAutoGaitEnabled();
       // std::cout << "autoGaitMode : " << autoGaitMode << std::endl;
       const auto timeHorizon = finalTime - initTime;

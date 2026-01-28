@@ -819,6 +819,19 @@ namespace humanoid_controller
         ROS_INFO("[HumanoidController] fall_down_state_ set to %d via callback", fall_down_state_);
       });
       
+      // 注册躯干速度回调函数（用于控制器切换时的速度检查）
+      controller_manager_->registerTorsoVelocityCallback([this]() -> vector_t {
+        if (stateEstimate_)
+        {
+          return stateEstimate_->getTorsoState();
+        }
+        else
+        {
+          // 如果状态估计器未初始化，返回零向量
+          return vector_t::Zero(12);
+        }
+      });
+      
       // 初始化 ROS 服务（由 RLControllerManager 管理）
       controller_manager_->initializeRosServices(controllerNh_);
       

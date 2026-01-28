@@ -101,7 +101,7 @@ namespace ocs2
         {
           checkPointTime = initTime;
         }
-        if(resetting_mpc_state == 0 && initTime - checkPointTime < 1.0)  // 2 模式且切换时间小于 1 秒时不允许切换
+        if(resetting_mpc_state == 0 && initTime - checkPointTime < 0.1)  // 2 模式且切换时间小于 0.4 秒时不允许切换
         {
           returnFlag = true;
         }
