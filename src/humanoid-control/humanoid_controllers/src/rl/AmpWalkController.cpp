@@ -1095,9 +1095,8 @@ namespace humanoid_controller
           waist_mode2_cutoff_freq_
         );
         
-        // 默认不启用腰部控制覆盖，保持RL控制模式（模式1）
-        // 腰部控制模式切换通过 /humanoid_change_waist_ctrl_mode 服务进行
-        waist_controller_->enable(false);
+        // 腰部控制模式切换通过 /humanoid_controller/enable_waist_control 服务进行
+        waist_controller_->enable(true);
         
         ROS_INFO("[%s] Waist controller initialized (default mode=1 RL control, waist_joints=%zu)", 
                  name_.c_str(), waistNum_);
@@ -1189,6 +1188,27 @@ namespace humanoid_controller
 
     // 模式0或2：已使用外部腰部指令替换，返回true
     return true;
+  }
+
+  void AmpWalkController::updateVelocityLimitsParam(ros::NodeHandle& nh)
+  {
+    // 将4维velocityLimits_转换为6维rosparam格式
+    // velocityLimits_格式: [linear_x, linear_y, linear_z, angular_z] (从配置文件读取)
+    // rosparam格式: [linear_x, linear_y, linear_z, angular_x, angular_y, angular_z]
+    std::vector<double> limits_vec(6);
+    limits_vec[0] = velocityLimits_(0);  // linear_x
+    limits_vec[1] = velocityLimits_(1);  // linear_y
+    limits_vec[2] = velocityLimits_(2);  // linear_z
+    limits_vec[3] = 0.0;                  // angular_x (通常为0)
+    limits_vec[4] = 0.0;                  // angular_y (通常为0)
+    limits_vec[5] = velocityLimits_(3);  // angular_z (修复：从索引2改为索引3)
+    
+    nh.setParam("/velocity_limits", limits_vec);
+    
+    ROS_INFO("[%s] Updated /velocity_limits from controller config: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+             name_.c_str(),
+             limits_vec[0], limits_vec[1], limits_vec[2],
+             limits_vec[3], limits_vec[4], limits_vec[5]);
   }
 
 } // namespace humanoid_controller

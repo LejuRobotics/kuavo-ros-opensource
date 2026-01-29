@@ -185,6 +185,14 @@ public:
   bool getUseDefaultMotorCspKpkd() const { return use_default_motor_csp_kpkd_; }
 
   /**
+   * @brief 更新速度限制到rosparam（虚函数，派生类可重写）
+   * 基类默认实现：使用MPC默认速度限制
+   * 派生类可以重写此方法以设置自己的速度限制
+   * @param nh ROS节点句柄
+   */
+  virtual void updateVelocityLimitsParam(ros::NodeHandle& nh);
+
+  /**
    * @brief 重新加载配置文件
    * 自动调用派生类的loadConfig方法重新加载配置文件
    * @return 是否重新加载成功

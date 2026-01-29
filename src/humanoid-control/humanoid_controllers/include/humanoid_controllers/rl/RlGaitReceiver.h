@@ -116,6 +116,7 @@ private:
   
   // Velocity processing
   double calculateVelocityMagnitude(const geometry_msgs::Twist& cmd_vel);
+  geometry_msgs::Twist applyMixedMotionLimits(const geometry_msgs::Twist& cmd_vel) const;
   geometry_msgs::Twist smoothVelocityCommand(const geometry_msgs::Twist& cmd_vel, const ros::Time& current_time);
   
   // In-place stepping functions
@@ -152,6 +153,15 @@ private:
   double angular_velocity_smooth_factor_;      // 角速度平滑因子（默认0.5，更强的平滑）
   double angular_velocity_change_threshold_;   // 角速度变化阈值（默认0.2 rad/s）
   double angular_velocity_max_rate_;           // 最大角速度变化率（默认2.0 rad/s²）
+  
+  // Mixed motion limits parameters
+  bool enable_mixed_mode_;                    // 是否启用混合运动模式
+  double angular_vel_threshold_;              // 角速度阈值 (rad/s)
+  double max_linear_vel_with_angular_;        // 有角速度时最大线速度 (m/s)
+  double linear_vel_threshold_;               // 线速度阈值 (m/s)
+  double max_angular_vel_with_linear_;        // 有线速度时最大角速度 (rad/s)
+  bool smooth_transition_;                    // 是否启用平滑过渡
+  double transition_factor_;                  // 过渡因子
   
   // In-place stepping parameters
   geometry_msgs::Twist in_place_step_velocity_;

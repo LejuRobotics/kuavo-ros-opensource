@@ -44,6 +44,12 @@ namespace humanoid_controller
      */
     bool isInStanceMode() const override;
 
+    /**
+     * @brief 更新速度限制到rosparam（重写基类方法）
+     * 使用从配置文件加载的velocityLimits_设置速度限制
+     */
+    void updateVelocityLimitsParam(ros::NodeHandle& nh) override;
+
   protected:
     // 主循环：从 RLControllerBase::update 调用
     bool updateImpl(const ros::Time& time,
