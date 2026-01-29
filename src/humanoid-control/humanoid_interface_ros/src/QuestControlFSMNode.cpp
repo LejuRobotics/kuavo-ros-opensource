@@ -924,7 +924,7 @@ namespace ocs2
                         whole_torso_ctrl_msg.data = true;
                         whole_torso_ctrl_pub_.publish(whole_torso_ctrl_msg);
 
-                        if(0 == waist_dof_ && 1 != robot_type_)
+                        if(1 != robot_type_)
                         {
                             // 失能GaitReceiver的自动步态模式
                             callAutoGaitModeSrv(false);
@@ -947,7 +947,7 @@ namespace ocs2
                         whole_torso_ctrl_pub_.publish(whole_torso_ctrl_msg);
                         std::cout << "腰部控制模式已关闭" << std::endl;
 
-                        if(0 == waist_dof_ && 1 != robot_type_)
+                        if(1 != robot_type_)
                         {
                             // 发送最后一帧，使用记录的relative_height和body_pitch
                             geometry_msgs::Twist cmd_pose;

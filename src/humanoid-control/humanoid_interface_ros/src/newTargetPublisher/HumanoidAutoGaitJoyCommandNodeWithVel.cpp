@@ -282,8 +282,8 @@ namespace ocs2
       Eigen::Vector4d joystickFilterCutoffFreq_(joystickSensitivity, joystickSensitivity, 
                                                   joystickSensitivity, joystickSensitivity);
       joystickFilter_.setParams(0.01,joystickFilterCutoffFreq_);
-      old_joy_msg_.axes = std::vector<float>(8, 0.0);     // 假设有 8 个轴，默认值为 0.0
-      old_joy_msg_.buttons = std::vector<int32_t>(12, 0);
+      old_joy_msg_.axes = std::vector<float>(JOYSTICK_AXIS_NUM, 0.0);     // 假设有 8 个轴，默认值为 0.0
+      old_joy_msg_.buttons = std::vector<int32_t>(JOYSTICK_XBOX_BUTTON_NUM, 0);
       // Get node parameters
       std::string referenceFile;
       nodeHandle.getParam("/referenceFile", referenceFile);
@@ -881,6 +881,9 @@ namespace ocs2
       vector_t joystickOriginAxisTemp_ = vector_t::Zero(6);
       double alpha_ = joystickSensitivity / 1000;
 
+      if (joy_msg->axes.size() != JOYSTICK_AXIS_NUM || (joy_msg->buttons.size() != JOYSTICK_BEITONG_BUTTON_NUM && joy_msg->buttons.size() != JOYSTICK_XBOX_BUTTON_NUM)) {
+        return;
+      }
       if (std::any_of(joy_msg->buttons.begin(), joy_msg->buttons.end(), [](float button) {
               return std::abs(button) > 1;
           }))
