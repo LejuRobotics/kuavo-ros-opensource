@@ -372,9 +372,7 @@ from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.msg import sensorsData
 from kuavo_msgs.msg import AprilTagDetectionArray
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
-from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest, robotSwitchPose, robotSwitchPoseRequest
-
-from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest
+from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest, robotSwitchPose, robotSwitchPoseRequest,from kuavo_msgs.srv import changeArmCtrlModeRequest, changeArmCtrlMode
 from std_msgs.msg import Bool, Float64MultiArray
 from nav_msgs.msg import OccupancyGrid, Odometry
 import cv2
@@ -887,7 +885,7 @@ def call_change_arm_ctrl_mode_service(arm_ctrl_mode):
     try:
         rospy.wait_for_service(service_name, timeout=0.5)
         change_arm_ctrl_mode = rospy.ServiceProxy(
-            "humanoid_change_arm_ctrl_mode", ocs2ChangeArmCtrlMode
+            "humanoid_change_arm_ctrl_mode", changeArmCtrlMode
         )
         change_arm_ctrl_mode(control_mode=arm_ctrl_mode)
         rospy.loginfo("Service call successful")

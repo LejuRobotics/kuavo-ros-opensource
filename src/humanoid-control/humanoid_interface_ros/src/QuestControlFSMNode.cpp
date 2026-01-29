@@ -753,12 +753,6 @@ namespace ocs2
                     return; // 轮臂机器人不进行VR腰部控制
                 }
 
-                // 检查是否正在进行XY按键摇杆控制（高优先级），如果是则跳过VR腰部控制
-                bool joystick_torso_control_active = (joystick_data_.left_second_button_touched && joystick_data_.left_first_button_touched);
-                if(joystick_torso_control_active)
-                {
-                    return;
-                }
                 // 腰部yaw控制（如果支持腰部自由度）
                 if (waist_dof_ > 0)
                 {
