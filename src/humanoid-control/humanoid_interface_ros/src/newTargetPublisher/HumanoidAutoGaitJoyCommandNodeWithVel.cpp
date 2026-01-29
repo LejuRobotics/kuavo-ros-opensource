@@ -163,7 +163,6 @@ namespace ocs2
 #define JOYSTICK_BEITONG_MAP_JSON "bt2pro"
 #define JOYSTICK_BEITONG_BUTTON_NUM 16
 #define JOYSTICK_AXIS_NUM 8
-#define WAIST_YAW_MAX_ANGLE_DEG 180.0  // 腰部最大旋转角度（度），±180度
 
   class JoyControl
   {
@@ -323,6 +322,13 @@ namespace ocs2
         std::cout << "cmdvelLinearZLimit:" << c_relative_base_limit_[2] << std::endl;
 
         loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
+        
+        // 加载腰部最大旋转角度
+        try {
+          loadData::loadCppDataType(referenceFile, "waist_yaw_max", waist_yaw_max_angle_deg_);
+        } catch (const std::exception &e) {
+          ROS_WARN_STREAM("waist_yaw_max not found, using default: " << waist_yaw_max_angle_deg_);
+        }
 
         // gait
         std::string gaitCommandFile;
@@ -1083,7 +1089,7 @@ namespace ocs2
           }
           
           double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
-          waist_yaw = WAIST_YAW_MAX_ANGLE_DEG * waist_yaw;   // +- WAIST_YAW_MAX_ANGLE_DEG deg
+          waist_yaw = waist_yaw_max_angle_deg_ * waist_yaw;   // +- waist_yaw_max_angle_deg_ deg
           // std::cout << "waist_yaw: " << waist_yaw << std::endl;
           controlWaist(waist_yaw);
         }
@@ -1845,6 +1851,7 @@ namespace ocs2
     // 腰部控制状态跟踪
     bool waist_control_active_{false};  // 标记是否正在控制腰部（模式2）
     int waist_dof_{0};  // 腰部自由度，只有>0时才进行腰部控制
+    double waist_yaw_max_angle_deg_{0.0};  // 腰部最大旋转角度（度），从配置文件加载
   };
 }
 

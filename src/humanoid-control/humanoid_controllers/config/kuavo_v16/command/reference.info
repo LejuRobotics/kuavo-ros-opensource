@@ -3,6 +3,7 @@ targetRotationVelocity              0.3;
 cmdvelLinearXLimit                  0.30;
 cmdvelLinearZLimit                  0.1;
 cmdvelAngularYAWLimit               0.3;
+waist_yaw_max                       150.0;
 armMode                             true; 
 
 targetArmDisplacementVelocity       1.2;
