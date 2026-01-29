@@ -203,7 +203,13 @@ sys.path.append(target_path)
 
 # 动态查找 libemllI8254x.so 并设置 LD_LIBRARY_PATH
 def find_libemllI8254x_so_path():
-    """从脚本目录向上查找，找到包含 tools/check_tool 的项目根目录，然后查找 libemllI8254x.so"""
+    """
+    从脚本目录向上查找，找到包含 tools/check_tool 的项目根目录，然后按以下顺序查找 libemllI8254x.so：
+    1. project_root/installed/lib/libemllI8254x.so
+    2. project_root/../installed/lib/libemllI8254x.so
+    3. project_root/src/kuavo-ros-control-lejulib/hardware_plant/lib/EC_Master/lib/libemllI8254x.so
+    返回库所在的目录路径（Path 对象），找不到则返回 None。
+    """
     current_path = Path(script_dir).resolve()
     
     # 向上查找项目根目录（包含 tools/check_tool 的目录）
@@ -211,22 +217,22 @@ def find_libemllI8254x_so_path():
         test_path = current_path / "tools" / "check_tool"
         if test_path.exists():
             project_root = current_path
-            
-            # 尝试 control 仓库路径
+
+            # 1. 优先尝试 opensource 安装目录：project_root/installed/lib/libemllI8254x.so
+            opensource_path1 = project_root / "installed" / "lib" / "libemllI8254x.so"
+            if opensource_path1.exists():
+                return opensource_path1.parent  # 返回目录路径
+
+            # 2. 其次尝试：project_root/../installed/lib/libemllI8254x.so
+            opensource_path2 = project_root.parent / "installed" / "lib" / "libemllI8254x.so"
+            if opensource_path2.exists():
+                return opensource_path2.parent  # 返回目录路径
+
+            # 3. 最后回退到 control 仓库路径
             control_path = project_root / "src" / "kuavo-ros-control-lejulib" / "hardware_plant" / "lib" / "EC_Master" / "lib" / "libemllI8254x.so"
             if control_path.exists():
                 return control_path.parent  # 返回目录路径
-            
-            # 尝试 opensource 仓库路径（相对路径 ../kuavo-ros-opensource）
-            opensource_path1 = project_root.parent / "kuavo-ros-opensource" / "installed" / "lib" / "libemllI8254x.so"
-            if opensource_path1.exists():
-                return opensource_path1.parent  # 返回目录路径
-            
-            # 尝试 opensource 仓库路径（相对路径 ../../kuavo-ros-opensource）
-            opensource_path2 = project_root.parent.parent / "kuavo-ros-opensource" / "installed" / "lib" / "libemllI8254x.so"
-            if opensource_path2.exists():
-                return opensource_path2.parent  # 返回目录路径
-            
+
             break
         
         parent = current_path.parent
