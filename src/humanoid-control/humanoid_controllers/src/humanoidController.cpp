@@ -1551,8 +1551,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
        last_sensor_data_time_ = current_sensor_data_time;
        return;
      }
- 
-
     double diff_time = (current_sensor_data_time - last_sensor_data_time_).toSec();
     ros::Duration period = ros::Duration(diff_time);
     nav_msgs::Odometry kinematics_odom;
@@ -1641,6 +1639,124 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     stateEstimate_->updateImu(sensor_data_new.quat_, sensor_data_new.angularVel_, sensor_data_new.linearAccel_, 
                               sensor_data_new.orientationCovariance_, sensor_data_new.angularVelCovariance_, 
                               sensor_data_new.linearAccelCovariance_);
+  }
+
+  void humanoidController::resetKinematicsEstimation()
+  {
+    // 获取当前传感器数据
+    SensorData sensors_data = sensors_data_buffer_ptr_->getLastData();
+    
+    // 清空robotlocalization队列中的旧数据
+    {
+      std::lock_guard<std::mutex> lock(robotlocalization_data_mutex_);
+      size_t queue_size_before = robotlocalizationDataQueue.size();
+      while(!robotlocalizationDataQueue.empty())
+      {
+        robotlocalizationDataQueue.pop();
+      }
+      ROS_INFO("[ResetKinematics] 清空robotlocalizationDataQueue，清空前大小: %zu", queue_size_before);
+      // robot_quat_state_update_会在第一次updatakinematics调用时自动更新为当前传感器值
+    }
+    
+    // 重置状态估计器
+    ROS_INFO("[ResetKinematics] 重置状态估计器...");
+    stateEstimate_->reset();
+    
+    // 重置时间戳，确保第一次更新的period很小
+    last_sensor_data_time_ = sensors_data.timeStamp_ - ros::Duration(0.002);
+    ROS_INFO("[ResetKinematics] 重置时间戳: last_sensor_data_time_ = %.6f", last_sensor_data_time_.toSec());
+    
+    // 更新关节状态
+    ROS_INFO("[ResetKinematics] 更新关节状态...");
+    stateEstimate_->updateJointStates(jointPosWBC_, jointVelWBC_);
+    
+    // 使用当前IMU值更新初始欧拉角
+    ROS_INFO("[ResetKinematics] 调用updateIntialEulerAngles...");
+    quat_init = stateEstimate_->updateIntialEulerAngles(sensors_data.quat_);
+    
+    // 更新IMU数据
+    ROS_INFO("[ResetKinematics] 更新IMU数据...");
+    stateEstimate_->updateImu(sensors_data.quat_, sensors_data.angularVel_, 
+                            sensors_data.linearAccel_, 
+                            sensors_data.orientationCovariance_, 
+                            sensors_data.angularVelCovariance_, 
+                            sensors_data.linearAccelCovariance_);
+    
+    // 获取更新后的RBD状态并构建初始centroidal状态
+    ROS_INFO("[ResetKinematics] 获取RBD状态并构建初始centroidal状态...");
+    measuredRbdState_ = stateEstimate_->getRbdState();
+    vector_t initial_centroidal_state = rbdConversions_->computeCentroidalStateFromRbdModel(measuredRbdState_);
+    ROS_INFO("[ResetKinematics] initial_centroidal_state前12个值: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f]",
+             initial_centroidal_state(0), initial_centroidal_state(1), initial_centroidal_state(2),
+             initial_centroidal_state(3), initial_centroidal_state(4), initial_centroidal_state(5),
+             initial_centroidal_state(6), initial_centroidal_state(7), initial_centroidal_state(8),
+             initial_centroidal_state(9), initial_centroidal_state(10), initial_centroidal_state(11));
+    
+    // 保持yaw的连续性，避免切换时跳变
+    // 从传感器数据获取当前yaw值
+    Eigen::Vector3d sensor_euler = quatToZyx(sensors_data.quat_);
+    scalar_t sensor_yaw = sensor_euler(0);
+    
+    ROS_INFO("[ResetKinematics] ====== Yaw连续性处理 ======");
+    ROS_INFO("[ResetKinematics] 传感器yaw (sensor_euler(0)): %.6f", sensor_yaw);
+    ROS_INFO("[ResetKinematics] initial_centroidal_state(9) (从RBD状态计算): %.6f", initial_centroidal_state(9));
+    
+    // 确定使用哪个yaw值作为参考
+    scalar_t yawLast = sensor_yaw;  // 默认使用传感器yaw
+    bool use_sensor_yaw = true;
+    
+    if (currentObservation_.state.size() > 9 && std::abs(currentObservation_.state(9)) > 1e-6)
+    {
+      scalar_t current_yaw = currentObservation_.state(9);
+      scalar_t yaw_diff = std::abs(angles::shortest_angular_distance(current_yaw, sensor_yaw));
+      
+      ROS_INFO("[ResetKinematics] currentObservation_.state(9): %.6f", current_yaw);
+      ROS_INFO("[ResetKinematics] yaw差异检查: |current_yaw - sensor_yaw| = %.6f", yaw_diff);
+      
+      // 如果currentObservation_中的yaw与传感器yaw差异小于0.5弧度，使用currentObservation_的yaw
+      // 否则说明currentObservation_中的yaw可能已过时，使用传感器yaw
+      if (yaw_diff < 0.5)
+      {
+        yawLast = current_yaw;
+        use_sensor_yaw = false;
+        ROS_INFO("[ResetKinematics] ✓ 使用currentObservation_.state(9)作为yaw参考: %.6f (与传感器差异: %.6f < 0.5)", 
+                 yawLast, yaw_diff);
+      }
+      else
+      {
+        ROS_WARN("[ResetKinematics] ✗ currentObservation_.state(9)=%.6f与传感器yaw=%.6f差异过大(%.6f >= 0.5)，使用传感器yaw", 
+                 current_yaw, sensor_yaw, yaw_diff);
+      }
+    }
+    else
+    {
+      ROS_INFO("[ResetKinematics] currentObservation_.state(9)无效(size=%zu或值=%.6f)，使用传感器yaw: %.6f", 
+               currentObservation_.state.size(), 
+               (currentObservation_.state.size() > 9) ? currentObservation_.state(9) : 0.0,
+               sensor_yaw);
+    }
+    
+    // 计算yaw连续性保持
+    scalar_t newYaw = initial_centroidal_state(9);
+    scalar_t yawDiff = angles::shortest_angular_distance(yawLast, newYaw);
+    scalar_t yaw_before = initial_centroidal_state(9);
+    initial_centroidal_state(9) = yawLast + yawDiff;
+    
+    // 设置状态估计器的初始状态
+    ROS_INFO("[ResetKinematics] 调用set_intial_state设置状态估计器初始状态...");
+    ROS_INFO("[ResetKinematics] 设置前initial_centroidal_state(9): %.6f", initial_centroidal_state(9));
+    stateEstimate_->set_intial_state(initial_centroidal_state);
+    
+    // 重要：更新currentObservation_.state为新的初始状态，确保resetMpcNode使用正确的yaw值
+    // 这样MPC的参考轨迹会基于正确的yaw值进行校准
+    scalar_t currentObs_yaw_before = (currentObservation_.state.size() > 9) ? currentObservation_.state(9) : 0.0;
+    currentObservation_.state = initial_centroidal_state;
+    
+    // 更新stanceState_mrt_为重置后的状态，确保后续使用正确的yaw值
+    stanceState_mrt_ = initial_centroidal_state;
+    ROS_INFO("[ResetKinematics] 更新stanceState_mrt_为重置后的状态，yaw=%.6f", stanceState_mrt_(9));
+    
+    ROS_INFO("[ResetKinematics] ====== 重置完成 ======");
   }
   
   bool humanoidController::enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
@@ -1865,6 +1981,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       
       if (!isInitStandUpStartTime_)
       {
+        resetKinematicsEstimation();
+        initial_status_(9) = currentObservation_.state(9);
+        
         isInitStandUpStartTime_ = true;
         robotStartStandTime_ = time.toSec();
         // 站立的结束时间是依据开始时间确定的
@@ -2215,125 +2334,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       ROS_INFO("[RL->MPC] 清理手臂轨迹缓存，重置为当前位置: [%.3f, %.3f, ...]", 
                current_arm_pos(0), current_arm_pos(1));
       
-      // 从RL切换到MPC时，需要更新IMU并重置状态估计器
-      SensorData sensors_data = sensors_data_buffer_ptr_->getLastData();
-      
-  
-      
-      // 从RL切换到MPC时，清空robotlocalization队列中的旧数据（RL模式下估计器不更新，数据已过时）
-      {
-        std::lock_guard<std::mutex> lock(robotlocalization_data_mutex_);
-        size_t queue_size_before = robotlocalizationDataQueue.size();
-        // 清空队列中所有旧数据
-        while(!robotlocalizationDataQueue.empty())
-        {
-          robotlocalizationDataQueue.pop();
-        }
-        ROS_INFO("[RL->MPC] 清空robotlocalizationDataQueue，清空前大小: %zu", queue_size_before);
-        // robot_quat_state_update_会在第一次updatakinematics调用时自动更新为当前传感器值
-      }
-      
-      // 重置状态估计器
-      ROS_INFO("[RL->MPC] 重置状态估计器...");
-      stateEstimate_->reset();
-      
-      // 重置时间戳，确保第一次更新的period很小
-      last_sensor_data_time_ = sensors_data.timeStamp_ - ros::Duration(0.002);
-      ROS_INFO("[RL->MPC] 重置时间戳: last_sensor_data_time_ = %.6f", last_sensor_data_time_.toSec());
-      
-      // 更新关节状态
-      ROS_INFO("[RL->MPC] 更新关节状态...");
-      stateEstimate_->updateJointStates(jointPosWBC_, jointVelWBC_);
-      
-      // 使用当前IMU值更新初始欧拉角
-      ROS_INFO("[RL->MPC] 调用updateIntialEulerAngles...");
-      quat_init = stateEstimate_->updateIntialEulerAngles(sensors_data.quat_);
-      
-      // 更新IMU数据
-      ROS_INFO("[RL->MPC] 更新IMU数据...");
-      stateEstimate_->updateImu(sensors_data.quat_, sensors_data.angularVel_, 
-                                sensors_data.linearAccel_, 
-                                sensors_data.orientationCovariance_, 
-                                sensors_data.angularVelCovariance_, 
-                                sensors_data.linearAccelCovariance_);
-      
-      // 获取更新后的RBD状态并构建初始centroidal状态
-      ROS_INFO("[RL->MPC] 获取RBD状态并构建初始centroidal状态...");
-      measuredRbdState_ = stateEstimate_->getRbdState();
-      vector_t initial_centroidal_state = rbdConversions_->computeCentroidalStateFromRbdModel(measuredRbdState_);
-      ROS_INFO("[RL->MPC] initial_centroidal_state前12个值: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f]",
-               initial_centroidal_state(0), initial_centroidal_state(1), initial_centroidal_state(2),
-               initial_centroidal_state(3), initial_centroidal_state(4), initial_centroidal_state(5),
-               initial_centroidal_state(6), initial_centroidal_state(7), initial_centroidal_state(8),
-               initial_centroidal_state(9), initial_centroidal_state(10), initial_centroidal_state(11));
-      
-      // 保持yaw的连续性，避免切换时跳变
-      // 从传感器数据获取当前yaw值
-      Eigen::Vector3d sensor_euler = quatToZyx(sensors_data.quat_);
-      scalar_t sensor_yaw = sensor_euler(0);
-      
-      ROS_INFO("[RL->MPC] ====== Yaw连续性处理 ======");
-      ROS_INFO("[RL->MPC] 传感器yaw (sensor_euler(0)): %.6f", sensor_yaw);
-      ROS_INFO("[RL->MPC] initial_centroidal_state(9) (从RBD状态计算): %.6f", initial_centroidal_state(9));
-      
-      // 确定使用哪个yaw值作为参考
-      scalar_t yawLast = sensor_yaw;  // 默认使用传感器yaw
-      bool use_sensor_yaw = true;
-      
-      if (currentObservation_.state.size() > 9 && std::abs(currentObservation_.state(9)) > 1e-6)
-      {
-        scalar_t current_yaw = currentObservation_.state(9);
-        scalar_t yaw_diff = std::abs(angles::shortest_angular_distance(current_yaw, sensor_yaw));
-        
-        ROS_INFO("[RL->MPC] currentObservation_.state(9): %.6f", current_yaw);
-        ROS_INFO("[RL->MPC] yaw差异检查: |current_yaw - sensor_yaw| = %.6f", yaw_diff);
-        
-        // 如果currentObservation_中的yaw与传感器yaw差异小于0.5弧度，使用currentObservation_的yaw
-        // 否则说明currentObservation_中的yaw可能已过时（RL模式下未更新），使用传感器yaw
-        if (yaw_diff < 0.5)
-        {
-          yawLast = current_yaw;
-          use_sensor_yaw = false;
-          ROS_INFO("[RL->MPC] ✓ 使用currentObservation_.state(9)作为yaw参考: %.6f (与传感器差异: %.6f < 0.5)", 
-                   yawLast, yaw_diff);
-        }
-        else
-        {
-          ROS_WARN("[RL->MPC] ✗ currentObservation_.state(9)=%.6f与传感器yaw=%.6f差异过大(%.6f >= 0.5)，使用传感器yaw", 
-                   current_yaw, sensor_yaw, yaw_diff);
-        }
-      }
-      else
-      {
-        ROS_INFO("[RL->MPC] currentObservation_.state(9)无效(size=%zu或值=%.6f)，使用传感器yaw: %.6f", 
-                 currentObservation_.state.size(), 
-                 (currentObservation_.state.size() > 9) ? currentObservation_.state(9) : 0.0,
-                 sensor_yaw);
-      }
-      
-      // 计算yaw连续性保持
-      scalar_t newYaw = initial_centroidal_state(9);
-      scalar_t yawDiff = angles::shortest_angular_distance(yawLast, newYaw);
-      scalar_t yaw_before = initial_centroidal_state(9);
-      initial_centroidal_state(9) = yawLast + yawDiff;
-      
-      
-      // 设置状态估计器的初始状态
-      ROS_INFO("[RL->MPC] 调用set_intial_state设置状态估计器初始状态...");
-      ROS_INFO("[RL->MPC] 设置前initial_centroidal_state(9): %.6f", initial_centroidal_state(9));
-      stateEstimate_->set_intial_state(initial_centroidal_state);
-      
-      // 重要：更新currentObservation_.state为新的初始状态，确保resetMpcNode使用正确的yaw值
-      // 这样MPC的参考轨迹会基于正确的yaw值进行校准
-      scalar_t currentObs_yaw_before = (currentObservation_.state.size() > 9) ? currentObservation_.state(9) : 0.0;
-      currentObservation_.state = initial_centroidal_state;
-      
-      // 更新stanceState_mrt_为重置后的状态，确保后续使用正确的yaw值
-      stanceState_mrt_ = initial_centroidal_state;
-      ROS_INFO("[RL->MPC] 更新stanceState_mrt_为重置后的状态，yaw=%.6f", stanceState_mrt_(9));
-      
-      ROS_INFO("[RL->MPC] ====== 切换完成 ======");
-      ROS_INFO("==========================================");
+      // 从RL切换到MPC时，重置运动学估计（包括状态估计器、时间戳、yaw连续性等）
+      resetKinematicsEstimation();
     }
     last_is_rl_controller_ = is_rl_controller_;
     kuavo_msgs::jointCmd jointCmdMsg;

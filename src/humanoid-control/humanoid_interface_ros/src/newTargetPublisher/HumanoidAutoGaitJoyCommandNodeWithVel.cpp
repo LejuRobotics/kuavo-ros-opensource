@@ -1304,6 +1304,7 @@ namespace ocs2
       gait_name_msg.data = gaitName;
       gait_name_publisher_.publish(gait_name_msg);
       ROS_INFO_STREAM("[JoyControl] Published gait name request: " << gaitName);
+      cur_gait_name_ = gaitName;
     }
 
     void gaitChangeCallback(const std_msgs::String::ConstPtr& msg) 
@@ -1410,7 +1411,7 @@ namespace ocs2
       static bool last_auto_gait_state = false;
       const double height_diff_max = 0.1;  // 10厘米
 
-      if (std::fabs(cmdVel.linear.z) > height_diff_max)
+      if (std::fabs(cmdVel.linear.z) > height_diff_max && cur_gait_name_ == "stance")
       {
         if(last_auto_gait_state == true)
         {
@@ -1784,6 +1785,8 @@ namespace ocs2
     // TargetTrajectories current_target_traj_;
     std::mutex target_mutex_;
     vector_t feet_pos_measured_ = vector_t::Zero(24);
+
+    std::string cur_gait_name_{"stance"};
 
     std::map<std::string, humanoid::ModeSequenceTemplate> gait_map_;
     ros::ServiceServer joy_topic_service_;

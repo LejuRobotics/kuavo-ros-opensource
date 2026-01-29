@@ -248,6 +248,7 @@ namespace humanoid_controller
     void applySensorData(const SensorData &data);
     void applySensorDataRL(const SensorData &data);
     void updatakinematics(const SensorData &sensor_data, bool is_initialized_);
+    void resetKinematicsEstimation();
 
     // ==================== MPC-RL插值系统函数声明 ====================
     void startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos);
