@@ -258,7 +258,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   void checkSingleStepControlAndStop();
 
   void generateTargetwithTorsoMove(scalar_t initTime, const vector_t &initState, const vector_t &torsoDisplacement,
-                                    const TargetTrajectories &targetTrajectories, vector_t &finalState, double &torso_max_time, double velocity_scale = 2.0);
+                                    const TargetTrajectories &targetTrajectories, vector_t &finalState, double &torso_max_time, const vector6_t &velocity_scale);
 
   std::shared_ptr<GaitSchedule> gaitSchedulePtr_;
   std::shared_ptr<SwingTrajectoryPlanner> swingTrajectoryPtr_;
@@ -448,6 +448,8 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool ismdPoseInWorldFrameCached_ = false;
 
   ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.15, 0.2, 0.4, 0.3, 0.4};
+  // velocity_scale: x, z, pitch, yaw用0.35，y用0.15
+  vector6_t torso_velocity_scale_;
   double cmd_threshold = 0.02;
 
   InverseKinematics inverseKinematics_;
