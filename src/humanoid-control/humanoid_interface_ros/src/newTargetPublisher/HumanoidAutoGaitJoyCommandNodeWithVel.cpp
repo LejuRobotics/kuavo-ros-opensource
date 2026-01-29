@@ -1273,6 +1273,12 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
       {
+        // RL控制器下，ROBAN2禁用按Y进入踏步
+        if (is_rl_controller_ && rb_version_.major() == 1)
+        {
+          ROS_WARN("[JoyControl] Walk gait is disabled for ROBAN2 under RL controller");
+          return;
+        }
         publishGaitTemplate("walk");
       }
       else
