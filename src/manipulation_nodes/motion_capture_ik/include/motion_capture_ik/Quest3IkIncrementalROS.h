@@ -109,6 +109,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   bool detectLeftArmMove();
   bool detectRightArmMove();
 
+  // 【数据校验】3点跳变检测
+  bool validateVrPose(const ArmPose& currentPose, ArmPose& validatedPose, const std::string& side, bool isArmActive);
+
   bool updateLatestIncrementalResult();
 
   void updateLeftConstraintList(const Eigen::Vector3d& leftHandPos,
@@ -163,6 +166,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   std::mutex bonePoseHandElbowMutex_;
   std::mutex poseConstraintListMutex_;  // 保护 latestPoseConstraintList_ 的互斥锁
   std::mutex ikResultMutex_;
+  std::mutex transformerMutex_;  // 【新增】专门保护 Transformer 的更新和读取，避免竞态条件
 
   int jointStateSize_;
   ArmIdx ctrlArmIdx_;  // 控制哪个手臂：LEFT, RIGHT, 或 BOTH
@@ -293,6 +297,22 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
   Eigen::Vector3d leftThumb2Link6Offset_;
   Eigen::Vector3d rightThumb2Link6Offset_;
+
+  // 【3点跳变检测】只存储前两个点
+  static constexpr double SPIKE_THRESHOLD = 0.50;  // 跳变阈值（50cm）
+  static constexpr int SPIKE_RECOVERY_COUNT = 2;   // 连续跳变恢复阈值：连续N帧跳变后恢复（可能是快速正常运动）
+  static constexpr double SPIKE_TIMEOUT_DURATION = 0.2;  // 超时恢复时间（秒）：如果跳变持续超过0.2秒，强制恢复
+  // 左右手分别存储前两个点的位置
+  Eigen::Vector3d leftHandPrev2_;   // 左手前两个点
+  Eigen::Vector3d leftHandPrev1_;   // 左手前一个点
+  Eigen::Vector3d rightHandPrev2_;  // 右手前两个点
+  Eigen::Vector3d rightHandPrev1_;  // 右手前一个点
+  int leftHandCount_ = 0;   // 左手数据计数
+  int rightHandCount_ = 0;  // 右手数据计数
+  int leftHandSpikeCount_ = 0;   // 左手连续跳变计数
+  int rightHandSpikeCount_ = 0;  // 右手连续跳变计数
+  ros::Time leftHandSpikeStartTime_;   // 左手跳变开始时间
+  ros::Time rightHandSpikeStartTime_;  // 右手跳变开始时间
 };
 
 }  // namespace HighlyDynamic

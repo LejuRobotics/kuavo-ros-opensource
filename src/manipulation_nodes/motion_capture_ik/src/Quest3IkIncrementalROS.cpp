@@ -516,12 +516,26 @@ void Quest3IkIncrementalROS::fsmProcess() {
   // latestHumanLeftElbowPos_ = quest3ArmInfoTransformerPtr_->getLeftElbowPose().position;
   // latestHumanRightElbowPos_ = quest3ArmInfoTransformerPtr_->getRightElbowPose().position;
 
+  // 【关键修复】使用专门的 transformerMutex_ 加锁保护，避免在获取时 bonePosesCallback 正在更新 Transformer
+  ArmPose vrLeftPose;
+  ArmPose vrRightPose;
+  {
+    std::lock_guard<std::mutex> lock(transformerMutex_);
+    vrLeftPose = quest3ArmInfoTransformerPtr_->getLeftHandPose();  // 值拷贝，不是引用
+    vrRightPose = quest3ArmInfoTransformerPtr_->getRightHandPose(); // 值拷贝，不是引用
+  }
+
   auto [leftMaintainProcess, leftInstantProcess] = leftHandSmoother_->getModeChangingState();
   auto [rightMaintainProcess, rightInstantProcess] = rightHandSmoother_->getModeChangingState();
 
   // 获取当前 grip 状态
   bool currentLeftGripPressed = joyStickHandlerPtr_->isLeftGrip();
   bool currentRightGripPressed = joyStickHandlerPtr_->isRightGrip();
+
+
+  // 【数据校验】3点跳变检测（仅在手臂激活时应用）
+  validateVrPose(vrLeftPose, vrLeftPose, "Left", currentLeftGripPressed);
+  validateVrPose(vrRightPose, vrRightPose, "Right", currentRightGripPressed);
 
   // 处理左手 grip 超时机制（结合移动检测）
   {
@@ -655,7 +669,7 @@ void Quest3IkIncrementalROS::fsmProcess() {
     }
 
     incrementalController_->updateLeftArmPoseAnchor(
-        quest3ArmInfoTransformerPtr_->getLeftHandPose(), latestPoseConstraintList_, pEndEffector, qEndEffector, qLink4);
+        vrLeftPose, latestPoseConstraintList_, pEndEffector, qEndEffector, qLink4);
   }
 
   // 处理右臂 grip 上升沿：更新锚点，使增量归零
@@ -692,7 +706,8 @@ void Quest3IkIncrementalROS::fsmProcess() {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position = p1Optimized;
     }
 
-    incrementalController_->updateRightArmPoseAnchor(quest3ArmInfoTransformerPtr_->getRightHandPose(),
+    // 【统一更新入口】使用 fsmProcess 开始时获取的 vrRightPose，而不是再次调用 getRightHandPose()
+    incrementalController_->updateRightArmPoseAnchor(vrRightPose,
                                                      latestPoseConstraintList_,
                                                      pEndEffector,
                                                      qEndEffector,
@@ -731,14 +746,13 @@ void Quest3IkIncrementalROS::fsmProcess() {
   }
 
   // 统一使用 computeIncrementalPose()，根据 leftCanProcess/rightCanProcess 决定激活哪只手臂
-  // IncrementalControlModule 的 fhan 滤波已修复：未激活的手臂不会更新滤波状态
   if (leftCanProcess && isLeftActive) {
     latestIncrementalResult_ = incrementalController_->computeIncrementalPoseLeftArm(
-        quest3ArmInfoTransformerPtr_->getLeftHandPose(), leftCanProcess && isLeftActive, qLeftEndEffector);
+        vrLeftPose, leftCanProcess && isLeftActive, qLeftEndEffector);
   }
   if (rightCanProcess && isRightActive) {
     latestIncrementalResult_ = incrementalController_->computeIncrementalPoseRightArm(
-        quest3ArmInfoTransformerPtr_->getRightHandPose(), rightCanProcess && isRightActive, qRightEndEffector);
+        vrRightPose, rightCanProcess && isRightActive, qRightEndEffector);
   }
 
   latestIncrementalResult_ = incrementalController_->getLatestIncrementalResult();
@@ -1257,9 +1271,30 @@ void Quest3IkIncrementalROS::solveIk() {
   auto ikResult = oneStageIkEndEffectorPtr_->solveIK(latestPoseConstraintList_, ctrlArmIdx_, jointMidValues_);
 
   if (ikResult.isSuccess) {
+    // 在写入最新 IK 解之前，基于上一帧解做一个“跳变限制”，
+    // 确保本帧解不会离上一帧解过远（IK 通道防抖/滤波）
+    Eigen::VectorXd filteredSolution = ikResult.solution;
+
     {
       std::lock_guard<std::mutex> lock(ikResultMutex_);
-      latestIkSolution_ = ikResult.solution;
+
+      // 仅当已经存在上一帧有效解，且尺寸一致时才做跳变限制
+      if (hasValidIkSolution_ && latestIkSolution_.size() == filteredSolution.size()) {
+        // 单关节最大允许跳变量（单位：rad），约 20 度
+        static constexpr double kMaxJointJump = 0.35;
+
+        for (int i = 0; i < filteredSolution.size(); ++i) {
+          double delta = filteredSolution[i] - latestIkSolution_[i];
+          if (delta > kMaxJointJump) {
+            delta = kMaxJointJump;
+          } else if (delta < -kMaxJointJump) {
+            delta = -kMaxJointJump;
+          }
+          filteredSolution[i] = latestIkSolution_[i] + delta;
+        }
+      }
+
+      latestIkSolution_ = filteredSolution;
       hasValidIkSolution_ = true;
     }
   }
@@ -2655,6 +2690,9 @@ void Quest3IkIncrementalROS::reset() {
     std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
     mode2EnterTime_ = ros::Time(0);
   }
+  // 重置跳变检测时间戳
+  leftHandSpikeStartTime_ = ros::Time(0);
+  rightHandSpikeStartTime_ = ros::Time(0);
   // 重置后同步增量控制模块的手部姿态种子
   if (incrementalController_) {
     Eigen::Quaterniond defaultHandQuat = Eigen::Quaterniond::Identity();
@@ -3021,5 +3059,130 @@ void Quest3IkIncrementalROS::loadDrakeVelocityIKGeometryFromJson(const nlohmann:
     ROS_ERROR("❌ [Quest3IkIncrementalROS] Exception while loading DrakeVelocityIK Geometry: %s", e.what());
     ROS_WARN("🔄 [Quest3IkIncrementalROS] Falling back to default geometry");
   }
+}
+
+bool Quest3IkIncrementalROS::validateVrPose(const ArmPose& currentPose, ArmPose& validatedPose, const std::string& side, bool isArmActive) {
+  Eigen::Vector3d currentPos = currentPose.position;
+  
+  // 【关键修改】如果手臂未激活，直接通过，不进行跳变检测
+  if (!isArmActive) {
+    validatedPose = currentPose;
+    return true;
+  }
+  
+  // 选择对应的缓冲区和计数器
+  Eigen::Vector3d* prev1 = nullptr;
+  Eigen::Vector3d* prev2 = nullptr;
+  int* count = nullptr;
+  int* spikeCount = nullptr;
+  ros::Time* spikeStartTime = nullptr;
+  
+  if (side == "Left") {
+    prev1 = &leftHandPrev1_;
+    prev2 = &leftHandPrev2_;
+    count = &leftHandCount_;
+    spikeCount = &leftHandSpikeCount_;
+    spikeStartTime = &leftHandSpikeStartTime_;
+  } else if (side == "Right") {
+    prev1 = &rightHandPrev1_;
+    prev2 = &rightHandPrev2_;
+    count = &rightHandCount_;
+    spikeCount = &rightHandSpikeCount_;
+    spikeStartTime = &rightHandSpikeStartTime_;
+  } else {
+    ROS_ERROR("[Quest3IkIncrementalROS] Invalid side parameter: %s", side.c_str());
+    validatedPose = currentPose;
+    return false;
+  }
+  
+  (*count)++;
+  
+  // 初始化阶段：前3个点直接通过
+  if (*count < 3) {
+    if (*count == 1) {
+      *prev1 = currentPos;
+    } else if (*count == 2) {
+      *prev2 = *prev1;
+      *prev1 = currentPos;
+    }
+    validatedPose = currentPose;
+    *spikeCount = 0;  // 重置跳变计数
+    return true;
+  }
+  
+  // 核心检测逻辑：检查当前点是否异常跳变
+  // 规则：如果当前点同时偏离前两点（使用欧几里得距离），且前两点相近，则认为是异常跳变
+  Eigen::Vector3d diff_prev1_vec = currentPos - *prev1;
+  Eigen::Vector3d diff_prev2_vec = currentPos - *prev2;
+  Eigen::Vector3d diff_prev_prev_vec = *prev1 - *prev2;
+  
+  // 使用欧几里得距离（3D空间距离）来判断跳变
+  double dist_prev1 = diff_prev1_vec.norm();
+  double dist_prev2 = diff_prev2_vec.norm();
+  double dist_prev_prev = diff_prev_prev_vec.norm();
+  
+  // 如果当前点同时偏离前两点，且前两点相近，则认为是跳变
+  bool isSpike = (dist_prev1 > SPIKE_THRESHOLD && 
+                  dist_prev2 > SPIKE_THRESHOLD &&
+                  dist_prev_prev < SPIKE_THRESHOLD * 0.2);
+  
+  ros::Time currentTime = ros::Time::now();
+  
+  // 【超时检测】如果跳变持续超过阈值时间，强制恢复
+  bool forceRecover = false;
+  if (isSpike) {
+    if (spikeStartTime->isZero()) {
+      // 第一次检测到跳变，记录开始时间
+      *spikeStartTime = currentTime;
+    } else {
+      // 检查是否超时
+      double elapsedTime = (currentTime - *spikeStartTime).toSec();
+      if (elapsedTime > SPIKE_TIMEOUT_DURATION) {
+        forceRecover = true;
+        ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] %s hand VR pose: timeout recovery triggered (%.3f seconds)",
+                          side.c_str(), elapsedTime);
+      }
+    }
+  } else {
+    // 数据正常，重置跳变开始时间
+    *spikeStartTime = ros::Time(0);
+  }
+  
+  // 恢复机制：如果连续N帧都被判定为跳变，可能是快速正常运动，应该恢复
+  // 或者超时恢复机制触发
+  if (isSpike && !forceRecover) {
+    (*spikeCount)++;
+    if (*spikeCount >= SPIKE_RECOVERY_COUNT) {
+      // 连续跳变次数达到阈值，认为是快速正常运动，恢复使用当前数据
+      isSpike = false;
+      *spikeCount = 0;  // 重置计数
+      *spikeStartTime = ros::Time(0);  // 重置时间戳
+      ROS_INFO_THROTTLE(1.0, "[Quest3IkIncrementalROS] %s hand VR pose: continuous spikes detected, recovering (likely fast normal motion)",
+                        side.c_str());
+    } else {
+      // 检测到跳变，使用前一个点替代
+      validatedPose.position = *prev1;
+      validatedPose.quaternion = currentPose.quaternion;  // 保持当前姿态
+      ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] %s hand VR pose spike detected (%d/%d), using previous position",
+                        side.c_str(), *spikeCount, SPIKE_RECOVERY_COUNT);
+    }
+  } else {
+    // 数据正常，或者超时恢复触发，使用当前数据
+    if (forceRecover) {
+      isSpike = false;
+      *spikeCount = 0;  // 重置计数
+      *spikeStartTime = ros::Time(0);  // 重置时间戳
+    } else {
+      // 数据正常，重置跳变计数
+      *spikeCount = 0;
+    }
+    validatedPose = currentPose;
+  }
+  
+  // 更新缓冲区
+  *prev2 = *prev1;
+  *prev1 = validatedPose.position;
+  
+  return !isSpike;
 }
 }  // namespace HighlyDynamic
