@@ -30,7 +30,7 @@ console = console.Console()
 # switch_controller 冷却期机制
 _switch_controller_lock = threading.Lock()
 _switch_controller_cooling_until = 0.0  # 冷却期结束时间戳
-SWITCH_CONTROLLER_COOLDOWN = 2.0  # 冷却期时长（秒）
+SWITCH_CONTROLLER_COOLDOWN = 3.0  # 冷却期时长（秒）
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_dir = os.path.join(os.path.dirname(current_dir), "config")
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"

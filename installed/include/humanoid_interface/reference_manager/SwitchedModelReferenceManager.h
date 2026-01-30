@@ -58,6 +58,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ros/ros.h>
 #include "humanoid_interface/common/TopicLogger.h"
 #include <std_srvs/Empty.h>
+#include <std_msgs/Float64.h>
 #include <ocs2_centroidal_model/CentroidalModelRbdConversions.h>
 #include <map>
 
@@ -225,7 +226,12 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool getArmControlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
   {
     res.result = true;
-    res.mode = currentArmControlMode_;
+    // 如果是RL控制模式下，使用newArmControlMode_，否则使用currentArmControlMode_
+    if (is_rl_controller_ != 0.0) {
+      res.mode = newArmControlMode_;
+    } else {
+      res.mode = currentArmControlMode_;
+    }
     return true;
   };
 
@@ -345,6 +351,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::Subscriber fullBodyTargetTrajectoriesSubscriber_;
   ros::Subscriber estContactStateSubscriber_;
   ros::Subscriber slope_planning_sub_;
+  ros::Subscriber is_rl_controller_sub_;
   ros::Publisher footContactPointPublisher_;
   ros::Publisher footDesiredPointPublisher_;
   ros::Publisher gaitTimeNamePublisher_;
@@ -411,6 +418,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ArmControlMode currentArmControlMode_ = ArmControlMode::AUTO_SWING;
   ArmControlMode newArmControlMode_ = ArmControlMode::AUTO_SWING;
   TorsoControlMode torsoControlMode_ = TorsoControlMode::SIX_DOF;
+  double is_rl_controller_ = 0.0;  // RL控制器标志
   bool isArmControlModeChanged_ = false;
   bool isArmControlModeChangedTrigger_ = false;
   bool isCalcArmControlModeChangedTime_ = false;
