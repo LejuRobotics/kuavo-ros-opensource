@@ -194,3 +194,7 @@ sudo systemctl start ocs2_h12pro_monitor.service
 sudo systemctl enable ocs2_h12pro_monitor.service
 
 echo "h12pro monitor service deploy successfully"
+
+echo "stop all ros node"
+sudo pkill ros -f
+echo "stop all ros node successfully"
