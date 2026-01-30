@@ -1423,7 +1423,7 @@ namespace ocs2
       }
 
       /*******************下蹲超过阈值则不允许踏步***********************/
-      static bool last_auto_gait_state = false;
+      static bool last_auto_gait_state = true;
       const double height_diff_max = 0.1;  // 10厘米
 
       if (std::fabs(cmdVel.linear.z) > height_diff_max && cur_gait_name_ == "stance")
