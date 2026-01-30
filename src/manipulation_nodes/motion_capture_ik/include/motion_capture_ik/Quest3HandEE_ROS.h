@@ -27,7 +27,6 @@ class Quest3HandEE_ROS final : public ArmControlBaseROS {
 
  private:
   ros::Publisher kuavoHandPosePublisher_;
-  ros::ServiceClient changeMobileCtrlModeClient_;
   ros::ServiceClient fkServiceClient_;
 
   std::thread processThread_;

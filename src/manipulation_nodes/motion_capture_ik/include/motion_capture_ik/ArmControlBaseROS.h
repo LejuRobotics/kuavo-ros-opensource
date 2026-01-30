@@ -57,8 +57,6 @@ class ArmControlBaseROS {
   ros::ServiceClient changeArmCtrlModeClient_;
   ros::ServiceServer setArmModeChangingServer_;
 
-  //[CZJ]TODO: 确保这些服务在不同子类中被正确初始化，调用
-  ros::ServiceClient changeMobileCtrlModeClient_;
   ros::ServiceClient humanoidArmCtrlModeClient_;
   ros::ServiceClient enableWbcArmTrajectoryControlClient_;
 

@@ -38,9 +38,6 @@ void ArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
 
   // Initialize service client for arm control mode
   changeArmCtrlModeClient_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
-
-  changeMobileCtrlModeClient_ =
-      nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/mobile_manipulator_mpc_control");
   humanoidArmCtrlModeClient_ =
       nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_change_arm_ctrl_mode");
   enableWbcArmTrajectoryControlClient_ =

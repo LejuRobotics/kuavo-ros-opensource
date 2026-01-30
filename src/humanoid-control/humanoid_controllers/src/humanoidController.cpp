@@ -3413,9 +3413,12 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       ros_logger_->publishVector("/state_estimate/measuredRbdStateReal", measuredRbdStateReal_);
 
       // std::cout << "jointPosWBC_:" << jointPosWBC_.transpose() << std::endl;
-
-      auto est_arm_contact_force = stateEstimate_->getEstArmContactForce(jointPosWBC_, jointVelWBC_, activeTorqueWBC_, period);
-      ros_logger_->publishVector("/state_estimate/est_arm_contact_force", est_arm_contact_force);
+      if (!is_roban_) {
+        auto est_arm_contact_force = stateEstimate_->getEstArmContactForce(
+            jointPosWBC_, jointVelWBC_, activeTorqueWBC_, period);
+        ros_logger_->publishVector("/state_estimate/est_arm_contact_force",
+                                   est_arm_contact_force);
+      }
     }
   }
 
@@ -3624,7 +3627,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     dynamic_cast<KalmanFilterEstimate &>(*stateEstimate_).loadSettings(taskFile, verbose);
 
     currentObservation_.time = 0;
-    stateEstimate_->initializeEstArmContactForce(*pinocchioInterfaceEstimatePtr_, centroidalModelInfoEstimate_);
+    if (!is_roban_) {
+      stateEstimate_->initializeEstArmContactForce(*pinocchioInterfaceEstimatePtr_, centroidalModelInfoEstimate_);
+    }
   }
 
   void humanoidCheaterController::setupStateEstimate(const std::string & /*taskFile*/, bool /*verbose*/)

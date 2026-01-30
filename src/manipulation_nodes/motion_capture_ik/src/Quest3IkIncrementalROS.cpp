@@ -1348,38 +1348,31 @@ void Quest3IkIncrementalROS::processVisual() {
 
 void Quest3IkIncrementalROS::activateController() {
   if (controllerActivated_.load()) return;
-
-  if (!changeMobileCtrlModeClient_.exists()) return;
   if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
 
   ROS_INFO("[Quest3IkIncrementalROS] Activating controller");
-  kuavo_msgs::changeArmCtrlMode srv1, srv2;
-
-  srv1.request.control_mode = static_cast<int>(MpcRefUpdateMode::ENABLED_ARM);
+  kuavo_msgs::changeArmCtrlMode srv2;
   srv2.request.control_mode = static_cast<int>(KuavoArmCtrlMode::EXTERNAL_CONTROL);
 
-  controllerActivated_.store(changeMobileCtrlModeClient_.call(srv1) && srv1.response.result &&  //
-                             humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&   //
-                             changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&     //
-                             true);
+  controllerActivated_.store(
+      humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&  //
+      changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&    //
+      true);
 }
 
 void Quest3IkIncrementalROS::deactivateController() {
   if (!controllerActivated_.load()) return;
-  if (!changeMobileCtrlModeClient_.exists()) return;
   if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
 
-  kuavo_msgs::changeArmCtrlMode srv1, srv2;
-
-  srv1.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
+  kuavo_msgs::changeArmCtrlMode srv2;
   srv2.request.control_mode = static_cast<int>(KuavoArmCtrlMode::ARM_FIXED);
 
-  controllerActivated_.store(!(changeMobileCtrlModeClient_.call(srv1) && srv1.response.result &&  //
-                               humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&   //
-                               changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&     //
-                               true));
+  controllerActivated_.store(!(
+      humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&  //
+      changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&    //
+      true));
 }
 
 void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
