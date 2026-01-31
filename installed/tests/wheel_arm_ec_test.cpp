@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <cstdlib>  // for getenv
 #include <unistd.h> // for read, STDIN_FILENO
+#include <sys/stat.h>  // for stat
+#include <sys/types.h> // for stat
 
 #include "hardware_plant.h"
 #include "joint_test_poses.h"
@@ -23,6 +25,65 @@ std::vector<double> test_arm_joints_q;
 std::vector<double> test_head_joints_q;
 
 using namespace HighlyDynamic;
+
+// 检查路径是否存在且包含config目录
+bool checkAssetsPath(const std::string& path) {
+    struct stat info;
+    if (stat(path.c_str(), &info) != 0) {
+        return false;  // 路径不存在
+    }
+    if (!(info.st_mode & S_IFDIR)) {
+        return false;  // 不是目录
+    }
+    
+    // 检查是否存在config子目录
+    std::string config_path = path + "/config";
+    if (stat(config_path.c_str(), &info) != 0) {
+        return false;  // config目录不存在
+    }
+    if (!(info.st_mode & S_IFDIR)) {
+        return false;  // config不是目录
+    }
+    
+    return true;
+}
+
+// 查找可能的kuavo_assets路径
+std::string findKuavoAssetsPath() {
+    // 可能的路径列表（按优先级排序）
+    std::vector<std::string> possible_paths = {
+        "/home/lab/kuavo-ros-control/src/kuavo_assets",
+        "/home/lab/kuavo-ros-opensource/src/kuavo_assets",
+        // 可以添加更多可能的路径
+    };
+    
+    std::cout << "正在查找 kuavo_assets 路径..." << std::endl;
+    
+    // 遍历可能的路径
+    for (const auto& path : possible_paths) {
+        std::cout << "  检查路径: " << path << std::endl;
+        if (checkAssetsPath(path)) {
+            std::cout << "  ✓ 找到有效路径: " << path << std::endl;
+            return path;
+        } else {
+            std::cout << "  ✗ 路径不存在或无效" << std::endl;
+        }
+    }
+    
+    // 如果都找不到，尝试使用编译时的路径
+    std::string compile_time_path = KUAVO_ASSETS_PATH;
+    std::cout << "  检查编译时路径: " << compile_time_path << std::endl;
+    if (checkAssetsPath(compile_time_path)) {
+        std::cout << "  ✓ 使用编译时路径: " << compile_time_path << std::endl;
+        return compile_time_path;
+    } else {
+        std::cout << "  ✗ 编译时路径也无效" << std::endl;
+    }
+    
+    // 如果都找不到，返回编译时的路径作为后备（即使可能无效）
+    std::cerr << "警告: 未找到有效的 kuavo_assets 路径，使用编译时路径: " << compile_time_path << std::endl;
+    return compile_time_path;
+}
 
 void initializeTestPoses() {
     auto test_poses = joint_test_poses::test_pos_list();
@@ -54,7 +115,20 @@ class WheelArmECTest
 {
 public:
     WheelArmECTest() {
-
+        // 关节运动速度参数（度/秒）
+        // 建议值：1.0-10.0，越小越慢越平滑
+        // 1.0 = 很慢，适合精细调试
+        // 3.0 = 较慢，适合安全测试
+        // 5.0 = 中等速度（默认）
+        // 10.0 = 较快
+        joint_move_speed_ = 6.0;  // 默认速度：3度/秒（可调整，越小越慢）
+        
+        // 插值时间步长（秒）
+        // 建议值：0.01-0.05，越小插值越平滑但计算频率越高
+        // 0.01 = 10ms，非常平滑但计算量大
+        // 0.02 = 20ms，平衡（默认）
+        // 0.05 = 50ms，较快但可能不够平滑
+        joint_move_dt_ = 0.001;
     }
     std::vector<uint8_t> joint_ids;
     std::vector<JointParam_t> joint_data;
@@ -73,8 +147,9 @@ public:
             std::cerr << "使用默认版本 42" << std::endl;
         }
         else{
-            this->robot_version_int = 60; // std::atoi(robot_version_env);
-            std::cout << "使用环境变量 ROBOT_VERSION: " << this->robot_version_int << std::endl;
+            std::cout << "检测到环境变量 ROBOT_VERSION: \"" << robot_version_env << "\"" << std::endl;
+            this->robot_version_int = std::atoi(robot_version_env);
+            std::cout << "解析后的机器人版本: " << this->robot_version_int << std::endl;
         }
         
         hardware_param = HardwareParam();
@@ -88,13 +163,16 @@ public:
             std::exit(EXIT_FAILURE);
         }
         if (kuavo_assets_path == ""){
-            hardware_param.kuavo_assets_path = KUAVO_ASSETS_PATH; // 使用编译时定义的 KUAVO_ASSETS_PATH
+            // 自动查找可能的路径
+            hardware_param.kuavo_assets_path = findKuavoAssetsPath();
         }
         else{
+            // 使用用户指定的路径
+            std::cout << "使用用户指定的路径: " << kuavo_assets_path << std::endl;
             hardware_param.kuavo_assets_path = kuavo_assets_path;
         }
         
-        std::cout << "kuavo_assets_path: " << hardware_param.kuavo_assets_path << std::endl;
+        std::cout << "最终使用的 kuavo_assets_path: " << hardware_param.kuavo_assets_path << std::endl;
         std::cout << "准备初始化轮臂硬件..." << std::endl;
         
         hardware_plant_ = std::make_unique<HardwarePlant>(dt_, hardware_param, std::string(PROJECT_SOURCE_DIR));
@@ -165,8 +243,9 @@ public:
             std::cout << joint_values[i] << " ";
         }
         std::cout << std::endl;
-        // 发送关节运动命令
-        hardware_plant_->jointMoveTo(joint_values, 30.0, 0.02);
+        // 发送关节运动命令（使用配置的速度和插值步长）
+        std::cout << "运动速度: " << joint_move_speed_ << " 度/秒, 插值步长: " << joint_move_dt_ << " 秒" << std::endl;
+        hardware_plant_->jointMoveTo(joint_values, joint_move_speed_, joint_move_dt_);
         
         std::this_thread::sleep_for(std::chrono::seconds(2));
         
@@ -184,6 +263,28 @@ public:
         if (joint_id < 1 || joint_id > TOTAL_JOINT_NUM) {
             std::cout << "无效的关节ID" << std::endl;
             return;
+        }
+        
+        // 检查关节状态
+        auto allJointsStatus = hardware_plant_->getAllJointsStatus();
+        auto it = allJointsStatus.find(joint_id);
+        if (it != allJointsStatus.end()) {
+            std::string status_str;
+            switch (it->second) {
+                case MotorStatus::ENABLE: status_str = "已启用"; break;
+                case MotorStatus::DISABLED: status_str = "已禁用"; break;
+                case MotorStatus::ERROR: status_str = "错误"; break;
+                default: status_str = "未知"; break;
+            }
+            std::cout << "关节 " << joint_id << " 当前状态: " << status_str << std::endl;
+            
+            if (it->second == MotorStatus::DISABLED || it->second == MotorStatus::ERROR) {
+                std::cerr << "警告: 关节 " << joint_id << " 处于 " << status_str << " 状态，可能无法控制！" << std::endl;
+                std::cerr << "建议: 请先检查硬件连接和EC状态，或使用 'c' 命令查看详细状态" << std::endl;
+                return;
+            }
+        } else {
+            std::cout << "警告: 未找到关节 " << joint_id << " 的状态信息" << std::endl;
         }
         
         std::cout << "请输入目标角度 (度): ";
@@ -235,6 +336,10 @@ private:
     int robot_version_int = 42;
     HardwareParam hardware_param;
     std::unique_ptr<HardwarePlant> hardware_plant_;
+    
+    // 关节运动参数
+    double joint_move_speed_;  // 关节运动速度（度/秒），越小越慢
+    double joint_move_dt_;      // 插值时间步长（秒），影响插值平滑度
 };
 
 int main(int argc, char const *argv[])
@@ -254,6 +359,9 @@ int main(int argc, char const *argv[])
     wheel_arm_test->init(kuavo_assets_path);
     
     std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // 打印当前关节角度
+    wheel_arm_test->printCurrentJointAngles();
 
     auto output_test_menu = [](){
         std::cout << "\n[WheelArmECTest] 测试菜单:" << std::endl;
