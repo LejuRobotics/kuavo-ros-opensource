@@ -3265,6 +3265,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         ros_logger_->publishValue("/rl_controller/rl_optimized_mode_", static_cast<double>(plannedMode_));
       }
 
+      if(!is_simplified_model_)
+      {
+        stateEstimate_->estArmContactForce(period);
+        auto arm_force_simple = stateEstimate_->getEstArmContactForce();
+        ros_logger_->publishVector("/state_estimate/arm_contact_force", arm_force_simple);
+      }
+      
       auto est_mode = stateEstimate_->ContactDetection(nextMode_, is_stance_mode_, plannedMode_, robotMass_, est_contact_force(2), est_contact_force(8), diff_time);
       ros_logger_->publishValue("/state_estimate/Contact_Detection/mode", static_cast<double>(est_mode));
       if (!use_estimator_contact_)
@@ -3410,9 +3417,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       wbc_observation_publisher_.publish(ros_msg_conversions::createObservationMsg(currentObservationWBC_));
      
       // 手臂末端接触力估计，完整模型计算
-      stateEstimate_->setArmForceInputs(measuredRbdStateReal_, activeTorqueWBC);
-      stateEstimate_->estArmContactForce(period);
-      ros_logger_->publishVector("/state_estimate/arm_contact_force", stateEstimate_->getEstArmContactForce());
+      if(is_simplified_model_)
+      {
+        stateEstimate_->setArmForceInputs(measuredRbdStateReal_, activeTorqueWBC);
+        stateEstimate_->estArmContactForce(period);
+        ros_logger_->publishVector("/state_estimate/arm_contact_force", stateEstimate_->getEstArmContactForce());
+      }
+
       setRobotState(measuredRbdStateReal_);
       ros_logger_->publishVector("/state_estimate/measuredRbdStateReal", measuredRbdStateReal_);
 

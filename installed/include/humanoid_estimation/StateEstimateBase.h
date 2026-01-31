@@ -7,6 +7,9 @@ at www.bridgedp.com.
 
 #pragma once
 
+// Use OCS2's PinocchioInterface aliases to avoid pinocchio::Model/Data compatibility issues across Pinocchio versions.
+#include <ocs2_pinocchio_interface/PinocchioInterface.h>
+
 #include <ros/ros.h>
 
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
@@ -108,7 +111,6 @@ namespace ocs2
         if(!update_foot_pos_desired_)
           update_foot_pos_desired_ = true;
         foot_pos_desired_ = foot_pos_desired;
-        // std::cout << "[StateEstimateBase] Foot pos desired[0]: " << foot_pos_desired_[0].transpose() << std::endl;
       }
 
       size_t ContactDetection(const size_t nextMode_, const bool stanceMode_, const size_t plannedMode_, double robotMass, const double fzLeft, const double fzRight, double dt);
@@ -142,7 +144,6 @@ namespace ocs2
         last_pullup_check_time_ = current_time;
           
         double new_total_est_contact_force_ = std::max(estContactforce_[2], 0.0) + std::max(estContactforce_[8], 0.0);
-        // ros_logger_->publishValue("/state_estimate/checkPullUp/new_total_est_contact_force_", new_total_est_contact_force_);
         total_est_contact_force_ = total_est_contact_force_ * (1 - alpha) + new_total_est_contact_force_ * alpha;
         ros_logger_->publishValue("/state_estimate/checkPullUp/total_est_contact_force_", total_est_contact_force_);
 
@@ -332,12 +333,9 @@ namespace ocs2
       double preFzFilterLeft_{0};
       double preDFzFilterLeft_{0};
       double preDFzFilterRight_{0};
-      // size_t contact_state_ = ModeNumber::SS;
       size_t prePlannedMode_ = ModeNumber::SS;
       size_t preContactState_ = ModeNumber::SS;
-      // double preContactProbability_ = 0;
       size_t mode_ = ModeNumber::SS;
-      // bool contact_updata_check_{true};
       double contactHoldTime_{0};
       double leftCountHoldTime_{0};
       double rightCountHoldTime_{0};
@@ -355,7 +353,6 @@ namespace ocs2
       feet_array_t<vector3_t> foot_pos_desired_;
       bool update_foot_pos_desired_{false};
       bool usePlannedMode_{true};
-      // bool delayContact_{false};
       bool upChangeLeftContact_{true};
       bool upChangeRightContact_{true};
       bool downChangeLeftContact_{true};
@@ -390,7 +387,18 @@ namespace ocs2
       vector_t jointVelLast_;
       vector_t jointAccel_;
       bool dynamicsCompensationInitialized_ = false;
-      
+
+      // -------------------------- 新增：7自由度手臂近奇异处理核心参数 --------------------------
+      double armNullSpaceGain_{0.3};            // 零空间运动增益（0.2~0.5，轻量调整无末端影响）
+      double armJacMinSingularThresh_{0.02};     // 雅克比最小奇异值近奇异阈值（0.005）
+      double armJacCondThresh_{800.0};            // 雅克比条件数近奇异阈值（2000）
+      double armDampingLambda0_{0.01};           // 非奇异基础阻尼（0.002）
+      double armDampingGain_{0.4};              // 阻尼非线性增长系数（0.08）
+      double armForceMax_{1000.0};                 // 末端最大力限幅（80N，物理特性适配）
+      double armMomentMax_{60.0};                // 末端最大力矩限幅（15N·m，物理特性适配）
+      const int pSCgSmoothWindowSize_{1};     // 动力学项pSCg滑窗平滑窗口大小（固定3）
+      std::deque<Eigen::VectorXd> pSCgArmSmoothWindow_; // pSCg滑窗缓存
+      // ----------------------------------------------------------------------------------------
     };
 
     template <typename T>
