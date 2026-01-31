@@ -1,0 +1,17 @@
+<launch>
+    <arg name="BATTERY" default="enable" />
+
+    <!-- 当 BATTERY 不为 disable 时启动电池信息节点 -->
+    <group unless="$(eval arg('BATTERY') == 'disable')">
+        <!-- 启动电池信息节点 -->
+        <node pkg="kuavo_led_controller" type="battery_info_node.py" name="battery_info_node" output="screen">
+            <!-- 串口设备路径 (与LED共用) -->
+            <param name="port" value="/dev/ttyLED0" />
+            <!-- 波特率 -->
+            <param name="baudrate" value="115200" />
+            <!-- 发布频率 (Hz) -->
+            <param name="publish_rate" value="1.0" />
+        </node>
+    </group>
+
+</launch>

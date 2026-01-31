@@ -20,6 +20,48 @@ md5 c287aeb8a1df0f152fdc164d29ceb2fe https://kuavo.lejurobot.com/Quest_apks/leju
 已经打包好：
 [使用方法](https://www.lejuhub.com/highlydynamic/motion_capture_ik_packaged/-/blob/develop/README.md)
 
+# VR头部控制系统
+
+- 配置文件位置：`src/manipulation_nodes/noitom_hi5_hand_udp_python/scripts/config.json`
+- 支持四种控制模式：
+  - `fixed`：固定模式，将头部yaw和pitch设置为0（正前方），平滑移动到目标位置
+  - `auto_track_active`：自动跟踪主动手模式，自动检测并跟踪移动的手
+  - `fixed_main_hand`：固定主手模式，跟踪指定的手（left/right）
+  - `vr_follow`：VR随动模式，由VR设备直接控制
+- 可配置参数：
+  - `joint_limits`：头部关节角度限制（yaw/pitch，单位：度）
+  - `smoothing_factor`：平滑滤波系数（0-1，越大越平滑）
+  - `active_hand_threshold`：主动手检测阈值（单位：米，越小越敏感）
+- 系统会自动从TF树获取头部和手部的实时位置进行计算，确保坐标系一致性
+- **运行时动态切换模式（ROS服务）**：
+  - 服务名称：`/quest3/set_head_control_mode`
+  - 服务类型：`kuavo_msgs/SetHeadControlMode`
+  - 调用方式：
+    ```bash
+    # 固定模式（将头部移动到正前方）
+    rosservice call /quest3/set_head_control_mode "{mode: 'fixed', fixed_hand: ''}"
+    
+    # 自动跟踪主动手模式
+    rosservice call /quest3/set_head_control_mode "{mode: 'auto_track_active', fixed_hand: ''}"
+    
+    # 固定主手模式（跟踪左手）- fixed_hand参数必需
+    rosservice call /quest3/set_head_control_mode "{mode: 'fixed_main_hand', fixed_hand: 'left'}"
+    
+    # 固定主手模式（跟踪右手）- fixed_hand参数必需
+    rosservice call /quest3/set_head_control_mode "{mode: 'fixed_main_hand', fixed_hand: 'right'}"
+    
+    # VR随动模式
+    rosservice call /quest3/set_head_control_mode "{mode: 'vr_follow', fixed_hand: ''}"
+    ```
+  - 参数说明：
+    - `mode`：控制模式字符串，必需参数
+    - `fixed_hand`：固定主手模式时的手（"left" 或 "right"），仅在 `mode` 为 `"fixed_main_hand"` 时必需，其他模式可传入空字符串 `""`
+  - 响应说明：
+    - `success`：是否成功设置模式
+    - `message`：操作结果消息
+    - `current_mode`：当前生效的模式
+
+
 # ROSBAG 工具
 
 添加工具用于录制和回放VR手臂数据和相机数据。

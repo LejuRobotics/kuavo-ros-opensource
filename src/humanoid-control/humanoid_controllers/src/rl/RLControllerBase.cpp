@@ -202,6 +202,12 @@ using namespace ocs2;
       updateArmCommand(time, processed_sensor_data, joint_cmd);
     }
     
+    // 如果启用了腰部指令替换，调用updateWaistCommand来替换腰部部分
+    if (success && waist_command_replacement_enabled_)
+    {
+      updateWaistCommand(time, processed_sensor_data, joint_cmd);
+    }
+    
     // 如果 use_default_motor_csp_kpkd_ 为 false，使用从 info 文件加载的 motorPdoKp_ 和 motorPdoKd_ 替换所有 control_modes==2 的关节
     if (success && !use_default_motor_csp_kpkd_)
     {
@@ -511,6 +517,15 @@ using namespace ocs2;
     return false;
   }
 
+  bool RLControllerBase::updateWaistCommand(const ros::Time& time,
+                                           const SensorData& sensor_data,
+                                           kuavo_msgs::jointCmd& joint_cmd)
+  {
+    // 基础实现：空实现，返回false表示未使用外部腰部指令替换
+    // 派生类可以重写此方法以实现自定义的腰部控制逻辑
+    return false;
+  }
+
   bool RLControllerBase::reload()
   {
     // 自动调用派生类的loadConfig方法重新加载配置文件
@@ -582,6 +597,39 @@ using namespace ocs2;
     }
     
     ROS_INFO("[%s] Inference thread exiting", name_.c_str());
+  }
+
+  void RLControllerBase::updateVelocityLimitsParam(ros::NodeHandle& nh)
+  {
+    // 初始化默认值: [linear_x, linear_y, linear_z, angular_x, angular_y, angular_z]
+    Eigen::VectorXd mpc_limits(6);
+    mpc_limits << 0.4, 0.2, 0.3, 0.0, 0.0, 0.4;
+    
+    // 从referenceFile配置文件读取，如果存在则覆盖默认值
+    std::string referenceFile;
+    if (nh.getParam("/referenceFile", referenceFile))
+    {
+      try
+      {
+        loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", mpc_limits(0));
+        loadData::loadCppDataType(referenceFile, "cmdvelLinearYLimit", mpc_limits(1));
+        loadData::loadCppDataType(referenceFile, "cmdvelLinearZLimit", mpc_limits(2));
+        loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", mpc_limits(5));
+      }
+      catch (const std::exception& e)
+      {
+        // 读取失败时使用默认值，不打印警告（某些参数可能不存在是正常的）
+      }
+    }
+    
+    // 设置到rosparam
+    std::vector<double> limits_vec(mpc_limits.data(), mpc_limits.data() + mpc_limits.size());
+    nh.setParam("/velocity_limits", limits_vec);
+    
+    ROS_INFO("[%s] Updated /velocity_limits with MPC default: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+             name_.c_str(),
+             mpc_limits(0), mpc_limits(1), mpc_limits(2),
+             mpc_limits(3), mpc_limits(4), mpc_limits(5));
   }
 
 } // namespace humanoid_controller

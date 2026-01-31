@@ -10,6 +10,7 @@
 #include <ros/package.h>
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/Float32.h>
+#include <std_msgs/Float64.h>
 #include <std_msgs/Int32.h>
 #include <std_msgs/String.h>
 #include <geometry_msgs/Twist.h>
@@ -231,6 +232,9 @@ namespace ocs2
             
             // 添加切换控制器服务客户端
             switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
+            
+            // 订阅RL控制器状态话题
+            is_rl_controller_sub_ = nodeHandle_.subscribe<std_msgs::Float64>("/humanoid_controller/is_rl_controller_", 1, &QuestControlFSM::isRlControllerCallback, this);
         }
 
         void run()
@@ -457,6 +461,12 @@ namespace ocs2
                 ROS_WARN("Switch to next controller service not available, skipping call");
                 return;
             }
+
+            // 设置控制器切换保护标志
+            controller_switching_ = true;
+            controller_switch_start_time_ = ros::Time::now();
+            ROS_WARN("[QuestControlFSM] Controller switching started. VR joystick and button inputs will be disabled for %.1f seconds.", 
+                     CONTROLLER_SWITCH_PROTECTION_TIME);
 
             // 调用服务
             if (switch_to_next_controller_client_.call(srv))
@@ -743,12 +753,6 @@ namespace ocs2
                     return; // 轮臂机器人不进行VR腰部控制
                 }
 
-                // 检查是否正在进行XY按键摇杆控制（高优先级），如果是则跳过VR腰部控制
-                bool joystick_torso_control_active = (joystick_data_.left_second_button_touched && joystick_data_.left_first_button_touched);
-                if(joystick_torso_control_active)
-                {
-                    return;
-                }
                 // 腰部yaw控制（如果支持腰部自由度）
                 if (waist_dof_ > 0)
                 {
@@ -778,6 +782,17 @@ namespace ocs2
 
         void updateState()
         {
+            // 检查并清除控制器切换保护标志
+            if (controller_switching_)
+            {
+                double elapsed_time = (ros::Time::now() - controller_switch_start_time_).toSec();
+                if (elapsed_time >= CONTROLLER_SWITCH_PROTECTION_TIME)
+                {
+                    controller_switching_ = false;
+                    ROS_INFO("[QuestControlFSM] Controller switching protection ended. VR joystick and button inputs are now enabled.");
+                }
+            }
+            
             // 动态读取control_torso参数，支持后续启动的launch文件设置参数
             if(nodeHandle_.hasParam("/control_torso"))
             {
@@ -788,6 +803,19 @@ namespace ocs2
             {
                 joystick_data_prev_ = joystick_data_;
                 rec_joystick_data_ = true;
+                return;
+            }
+            
+            // 如果正在切换控制器，禁用所有按键输入，仅允许按X和Y关闭机器人
+            if (controller_switching_)
+            {
+                // 只允许安全相关的操作（如关闭机器人），其他操作都被禁用
+                if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
+                {
+                    callTerminateSrv();
+                    return;
+                }
+                // 其他所有按键和摇杆输入都被忽略
                 return;
             }
 
@@ -906,7 +934,7 @@ namespace ocs2
 
                         if(1 == robot_type_) // 轮臂机器人
                         {
-                            callWheelMpcControlMode(1);  // ArmOnly mode
+                            callWheelMpcControlMode(3);  // BaseArm mode
                         }
                     }
                     else
@@ -977,7 +1005,8 @@ namespace ocs2
                 }
 
                 // 添加单步转向控制
-                if (step_turning_enabled) {
+                // VR模式下，如果为RL控制器，禁止执行单步
+                if (step_turning_enabled && !is_rl_controller_) {
                     updateSingleStepTurning();
                 }
                 else {
@@ -1059,6 +1088,11 @@ namespace ocs2
                      current_hand_wrench_item_mass_,
                      current_hand_wrench_left_force_[0], current_hand_wrench_left_force_[1], current_hand_wrench_left_force_[2],
                      current_hand_wrench_right_force_[0], current_hand_wrench_right_force_[1], current_hand_wrench_right_force_[2]);
+        }
+        
+        void isRlControllerCallback(const std_msgs::Float64::ConstPtr& msg)
+        {
+            is_rl_controller_ = (std::abs(msg->data) > 0.5);
         }
         
         void publishHandWrenchCmd(double item_mass, const std::vector<double>& left_force, const std::vector<double>& right_force)
@@ -1147,8 +1181,27 @@ namespace ocs2
             float left_x = joystick_data_.left_x;
             float left_y = joystick_data_.left_y;
 
+            // 检查左摇杆是否在死区
+            bool left_joystick_in_deadzone = (std::abs(left_x) < kDeadzone && std::abs(left_y) < kDeadzone);
+
+            // 检查右摇杆是否有输入（用于转向）
+            bool right_joystick_has_input = std::abs(right_x) >= kDeadzone;
+
+            // 如果是walk状态，且右摇杆有输入，则执行正常运动控制（支持cmd_vel转向）
+            std::string current_gait = getCurrentGaitName();
+            if (current_gait == "walk" && right_joystick_has_input) {
+                updateCommandLine();
+                return;
+            }
+
+            // 单步转向开关已关，且左摇杆有输入，则执行正常运动控制（RL控制器在stance模式下不支持单步转向）
+            if (!turn_step_single_step_switch_ && !left_joystick_in_deadzone) {
+                updateCommandLine();
+                return;
+            }
+
             // 检查是否在死区内
-            bool in_deadzone = turn_step_single_step_switch_||torso_control_enabled_||std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone || std::abs(left_y) >= kDeadzone)||std::abs(right_y) > (std::abs(right_x) + kDeadzone);
+            bool in_deadzone = torso_control_enabled_||std::abs(right_x) < kDeadzone || (std::abs(left_x) >= kDeadzone || std::abs(left_y) >= kDeadzone)||std::abs(right_y) > (std::abs(right_x) + kDeadzone);
             
             if (in_deadzone) {
                 // 进入死区
@@ -1342,7 +1395,7 @@ namespace ocs2
             cmdVel_.linear.y = commad_line_target_(1);
             cmdVel_.linear.z = commad_line_target_(2);
             cmdVel_.angular.z = commad_line_target_(3);
-            if(!torso_control_enabled_)
+            if(!torso_control_enabled_ || robot_type_ == 1)  // 轮臂支持动腰和行走同时下发
                 vel_control_pub_.publish(cmdVel_);
         }
 
@@ -1826,6 +1879,15 @@ namespace ocs2
         
         ros::ServiceClient get_current_gait_service_client_;
         ros::ServiceClient get_current_gait_name_service_client_;
+        
+        // 控制器切换保护相关变量
+        bool controller_switching_{false};              // 标志控制器是否正在切换
+        ros::Time controller_switch_start_time_;        // 切换开始时间
+        const double CONTROLLER_SWITCH_PROTECTION_TIME = 2.5;  // 保护时间窗口（秒）
+        
+        // RL控制器状态相关变量
+        ros::Subscriber is_rl_controller_sub_;          // RL控制器状态订阅者
+        bool is_rl_controller_{false};                 // 当前是否为RL控制器
     };
 }
 

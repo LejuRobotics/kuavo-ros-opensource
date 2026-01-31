@@ -8,7 +8,7 @@ import time
 import os
 from typing import Dict, Any, Tuple, Optional
 from sensor_msgs.msg import Joy
-from std_msgs.msg import String, Bool
+from std_msgs.msg import String, Bool, Float64
 from geometry_msgs.msg import Twist
 from kuavo_msgs.srv import playmusic, playmusicRequest
 from kuavo_msgs.srv import ExecuteArmAction, ExecuteArmActionRequest
@@ -150,9 +150,14 @@ class JoyCustomizeConfigNode:
         self.update_sub = rospy.Subscriber("/update_joy_customize_config", String, self._update_config_callback, queue_size=1)
         # 订阅动作执行状态话题，用于检测是否有动作正在执行
         self.robot_action_state_sub = rospy.Subscriber("/robot_action_state", RobotActionState, self._robot_action_state_callback, queue_size=1)
+        # 订阅RL控制器状态话题，用于判断当前是否处于RL控制器模式
+        self.is_rl_controller_sub = rospy.Subscriber("/humanoid_controller/is_rl_controller_", Float64, self._is_rl_controller_callback, queue_size=1)
         
         # 动作执行状态标志
         self.robot_action_executing = False
+        
+        # RL控制器状态标志（用于判断是否处于RL控制器模式）
+        self._is_rl_controller = False
 
         # Publishers for robot control (align with C++ behavior)
         self.stop_pub = rospy.Publisher("/stop_robot", Bool, queue_size=10)
@@ -435,6 +440,12 @@ class JoyCustomizeConfigNode:
         # 当state为1时，表示有动作正在执行
         self.robot_action_executing = (msg.state == 1)
     
+    def _is_rl_controller_callback(self, msg):
+        """RL控制器状态回调函数"""
+        # data: 0.0=MPC模式, 1.0=RL控制器模式
+        # 当data > 0.5时，表示当前处于RL控制器模式
+        self._is_rl_controller = (msg.data > 0.5)
+    
     def _call_execute_arm_action(self, action_name):
         """调用手臂动作执行服务"""
         # 检查是否有动作正在执行，如果有则不允许触发新的手臂动作
@@ -629,6 +640,11 @@ class JoyCustomizeConfigNode:
                     button_prev = self._prev_buttons[button_idx] if button_idx < len(self._prev_buttons) else 0
 
                     if button_prev == 1 and button_current == 0:
+
+                        # 如果当前处于RL控制器模式，跳过组合按键动作
+                        if self._is_rl_controller:
+                            rospy.loginfo(f"Skipping customize action: currently in RL controller mode (is_rl_controller={self._is_rl_controller})")
+                            continue
 
                         # 每次按钮释放时重新加载配置文件
                         self._load_customize_config()

@@ -112,6 +112,7 @@ class ArmAPI:
         # 运动结束后，切回默认模式
         self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.NoControl)
         # self.robot_sdk.control.set_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.ThroughFullBodyMpc)
+        time.sleep(0.5)
 
     def move_eef_traj_kmpc(
             self,

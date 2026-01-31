@@ -420,8 +420,6 @@ class ControlRobotArm:
         return False
 
     def srv_get_manipulation_mpc_ctrl_mode(self, )->KuavoManipulationMpcCtrlMode:
-        if kuavo_ros_param.is_legged_robot():
-            return KuavoManipulationMpcCtrlMode.ERROR
 
         try:
             service_name = '/mobile_manipulator_get_mpc_control_mode'
@@ -444,8 +442,7 @@ class ControlRobotArm:
         return KuavoManipulationMpcCtrlMode.ERROR
 
     def srv_get_manipulation_mpc_frame(self, )->KuavoManipulationMpcFrame:
-        if kuavo_ros_param.is_legged_robot():
-            return KuavoManipulationMpcFrame.ERROR
+
 
         try:
             service_name = '/get_mm_ctrl_frame'
@@ -469,8 +466,6 @@ class ControlRobotArm:
 
     def srv_get_manipulation_mpc_control_flow(self, )->KuavoManipulationMpcControlFlow:
         
-        if kuavo_ros_param.is_legged_robot():
-            return KuavoManipulationMpcControlFlow.Error
 
         try:
             service_name = '/get_mm_wbc_arm_trajectory_control'

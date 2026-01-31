@@ -22,13 +22,20 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   , enabled_(true)
   , smart_stop_enabled_(true)
   , torso_velocity_threshold_(0.05)
-  , feet_alignment_threshold_(0.08)
+  , feet_alignment_threshold_(0.05)
   , velocity_smooth_factor_(0.1)
   , max_velocity_change_(0.5)
   , velocity_smooth_time_(0.1)
   , angular_velocity_smooth_factor_(0.5)      // 默认更强的角速度平滑
   , angular_velocity_change_threshold_(0.2)   // 默认角速度变化阈值 0.2 rad/s
   , angular_velocity_max_rate_(2.0)           // 默认最大角速度变化率 2.0 rad/s²
+  , enable_mixed_mode_(false)                // 默认不启用混合运动模式
+  , angular_vel_threshold_(0.05)             // 角速度阈值默认0.05 rad/s
+  , max_linear_vel_with_angular_(0.5)         // 有角速度时最大线速度默认0.5 m/s
+  , linear_vel_threshold_(0.05)              // 线速度阈值默认0.05 m/s
+  , max_angular_vel_with_linear_(0.5)         // 有线速度时最大角速度默认0.5 rad/s
+  , smooth_transition_(true)                 // 默认启用平滑过渡
+  , transition_factor_(0.8)                   // 默认过渡因子为0.8
   , in_place_step_duration_(2.0)
   , enable_in_place_stepping_(true)
   , is_in_place_stepping_(false)
@@ -316,6 +323,52 @@ double RlGaitReceiver::calculateVelocityMagnitude(const geometry_msgs::Twist& cm
   return linear_magnitude + 0.1 * angular_magnitude;
 }
 
+geometry_msgs::Twist RlGaitReceiver::applyMixedMotionLimits(const geometry_msgs::Twist& cmd_vel) const
+{
+  if (!enable_mixed_mode_) {
+    // If mixed mode is disabled, return original command
+    return cmd_vel;
+  }
+  
+  geometry_msgs::Twist limited_vel = cmd_vel;
+  
+  // Calculate magnitudes
+  double angular_z_mag = std::abs(limited_vel.angular.z);
+  double linear_xy_mag = std::sqrt(limited_vel.linear.x * limited_vel.linear.x + 
+                                  limited_vel.linear.y * limited_vel.linear.y);
+  
+  // Check if we need to limit linear velocity due to angular velocity
+  if (angular_z_mag > angular_vel_threshold_)
+  {
+    // When there's angular velocity, limit linear velocity to maxLinearVelWithAngular
+    if (linear_xy_mag > max_linear_vel_with_angular_)
+    {
+      double scale_factor = max_linear_vel_with_angular_ / linear_xy_mag;
+      limited_vel.linear.x *= scale_factor;
+      limited_vel.linear.y *= scale_factor;
+      
+      ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Applied linear velocity limit due to turning: scale=%.2f, angularZ=%.2f, linearXY=%.2f", 
+                         scale_factor, angular_z_mag, linear_xy_mag);
+    }
+  }
+  
+  // Check if we need to limit angular velocity due to linear velocity
+  if (linear_xy_mag > linear_vel_threshold_)
+  {
+    // When there's linear velocity, limit angular velocity to maxAngularVelWithLinear
+    if (angular_z_mag > max_angular_vel_with_linear_)
+    {
+      double scale_factor = max_angular_vel_with_linear_ / angular_z_mag;
+      limited_vel.angular.z *= scale_factor;
+      
+      ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Applied angular velocity limit due to forward movement: scale=%.2f, linearXY=%.2f, angularZ=%.2f", 
+                         scale_factor, linear_xy_mag, angular_z_mag);
+    }
+  }
+  
+  return limited_vel;
+}
+
 geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::Twist& cmd_vel, const ros::Time& current_time)
 {
   geometry_msgs::Twist smoothed_vel = smoothed_cmd_vel_;  // 从当前平滑速度开始
@@ -377,6 +430,9 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
     smoothed_vel.linear.z = smoothed_cmd_vel_.linear.z + scale * vel_diff_z;
   }
   
+  // Apply mixed motion limits to velocity commands
+  smoothed_vel = applyMixedMotionLimits(smoothed_vel);
+  
   // Update previous command and time
   previous_cmd_vel_ = smoothed_vel;
   last_velocity_update_time_ = current_time;
@@ -390,37 +446,37 @@ void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool 
   boost::property_tree::ptree pt;
   boost::property_tree::read_info(config_file, pt);
   
-  // Only load in-place stepping velocity configuration for real robot
-  // Keep zero for simulation
-  if (is_real_)
-  {
-    // Load in-place stepping velocity configuration
-    if (pt.find("inPlaceStepVelocity") != pt.not_found()) {
-      loadData::loadPtreeValue(pt, in_place_step_velocity_.linear.x, "inPlaceStepVelocity.linearX", verbose);
-      loadData::loadPtreeValue(pt, in_place_step_velocity_.linear.y, "inPlaceStepVelocity.linearY", verbose);
-      loadData::loadPtreeValue(pt, in_place_step_velocity_.linear.z, "inPlaceStepVelocity.linearZ", verbose);
-      loadData::loadPtreeValue(pt, in_place_step_velocity_.angular.x, "inPlaceStepVelocity.angularX", verbose);
-      loadData::loadPtreeValue(pt, in_place_step_velocity_.angular.y, "inPlaceStepVelocity.angularY", verbose);
-      loadData::loadPtreeValue(pt, in_place_step_velocity_.angular.z, "inPlaceStepVelocity.angularZ", verbose);
-      
-      std::cout << "[RlGaitReceiver] inPlaceStepVelocity (real robot mode):" << std::endl;
-      std::cout << "  linearX: " << in_place_step_velocity_.linear.x << std::endl;
-      std::cout << "  linearY: " << in_place_step_velocity_.linear.y << std::endl;
-      std::cout << "  angularZ: " << in_place_step_velocity_.angular.z << std::endl;
-    } else {
-      std::cout << "[RlGaitReceiver] Warning: inPlaceStepVelocity not found in config file, using default values" << std::endl;
-    }
+  // Load in-place stepping velocity configuration
+  if (pt.find("inPlaceStepVelocity") != pt.not_found()) {
+    loadData::loadPtreeValue(pt, in_place_step_velocity_.linear.x, "inPlaceStepVelocity.linearX", verbose);
+    loadData::loadPtreeValue(pt, in_place_step_velocity_.linear.y, "inPlaceStepVelocity.linearY", verbose);
+    loadData::loadPtreeValue(pt, in_place_step_velocity_.linear.z, "inPlaceStepVelocity.linearZ", verbose);
+    loadData::loadPtreeValue(pt, in_place_step_velocity_.angular.x, "inPlaceStepVelocity.angularX", verbose);
+    loadData::loadPtreeValue(pt, in_place_step_velocity_.angular.y, "inPlaceStepVelocity.angularY", verbose);
+    loadData::loadPtreeValue(pt, in_place_step_velocity_.angular.z, "inPlaceStepVelocity.angularZ", verbose);
+    
+    std::cout << "[RlGaitReceiver] inPlaceStepVelocity loaded (" << (is_real_ ? "real robot" : "simulation") << " mode):" << std::endl;
+    std::cout << "  linearX: " << in_place_step_velocity_.linear.x << std::endl;
+    std::cout << "  linearY: " << in_place_step_velocity_.linear.y << std::endl;
+    std::cout << "  angularZ: " << in_place_step_velocity_.angular.z << std::endl;
+  } else {
+    std::cout << "[RlGaitReceiver] Warning: inPlaceStepVelocity not found in config file, using default values" << std::endl;
   }
-  else
-  {
-    // Simulation mode: keep in_place_step_velocity_ as zero
-    in_place_step_velocity_.linear.x = 0.0;
-    in_place_step_velocity_.linear.y = 0.0;
-    in_place_step_velocity_.linear.z = 0.0;
-    in_place_step_velocity_.angular.x = 0.0;
-    in_place_step_velocity_.angular.y = 0.0;
-    in_place_step_velocity_.angular.z = 0.0;
-    std::cout << "[RlGaitReceiver] Simulation mode: inPlaceStepVelocity kept as zero" << std::endl;
+  
+  // Load mixed motion limits parameters
+  if (pt.find("mixedMotionLimits") != pt.not_found()) {
+    loadData::loadPtreeValue(pt, enable_mixed_mode_, "mixedMotionLimits.enableMixedMode", verbose);
+    loadData::loadPtreeValue(pt, angular_vel_threshold_, "mixedMotionLimits.angularVelThreshold", verbose);
+    loadData::loadPtreeValue(pt, max_linear_vel_with_angular_, "mixedMotionLimits.maxLinearVelWithAngular", verbose);
+    loadData::loadPtreeValue(pt, linear_vel_threshold_, "mixedMotionLimits.linearVelThreshold", verbose);
+    loadData::loadPtreeValue(pt, max_angular_vel_with_linear_, "mixedMotionLimits.maxAngularVelWithLinear", verbose);
+    loadData::loadPtreeValue(pt, smooth_transition_, "mixedMotionLimits.smoothTransition", verbose);
+    loadData::loadPtreeValue(pt, transition_factor_, "mixedMotionLimits.transitionFactor", verbose);
+    
+    ROS_INFO("[RlGaitReceiver] Mixed motion limits loaded: enableMixedMode=%s, maxLinearVelWithAngular=%.2f, maxAngularVelWithLinear=%.2f",
+             enable_mixed_mode_ ? "true" : "false", max_linear_vel_with_angular_, max_angular_vel_with_linear_);
+  } else {
+    ROS_WARN("[RlGaitReceiver] No mixedMotionLimits section found in config file, using default values");
   }
 }
 

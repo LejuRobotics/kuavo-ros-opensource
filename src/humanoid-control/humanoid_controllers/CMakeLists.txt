@@ -267,6 +267,7 @@ add_library(${PROJECT_NAME}
         src/rl/RLControllerManager.cpp
         src/rl/AmpWalkController.cpp
         src/rl/armController.cpp
+        src/rl/waistController.cpp
         # src/AMPController.cpp
         # src/MinicController.cpp
         src/rl/VMPController.cpp

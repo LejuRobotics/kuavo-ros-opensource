@@ -18,6 +18,7 @@
 #include <atomic>
 #include <Eigen/Dense>
 #include "humanoid_controllers/rl/armController.h"
+#include "humanoid_controllers/rl/waistController.h"
 
 namespace humanoid_controller
 {
@@ -169,6 +170,7 @@ public:
   Eigen::VectorXd getDefaultJointPos() const { return defalutJointPosRL_; }
   Eigen::VectorXd getDefaultBaseState() const { return defaultBaseStateRL_; }
   double getDefaultBaseHeightControl() const { return defaultBaseHeightControl_; }
+  double getDefaultBaseXOffsetControl() const { return defaultBaseXOffsetControl_; }
   
   /**
    * @brief 获取是否从MPC切换时使用插值过渡
@@ -181,6 +183,14 @@ public:
    * @return true表示使用默认的kp/kd，false表示使用info文件中定义的motor_kp/motor_kd
    */
   bool getUseDefaultMotorCspKpkd() const { return use_default_motor_csp_kpkd_; }
+
+  /**
+   * @brief 更新速度限制到rosparam（虚函数，派生类可重写）
+   * 基类默认实现：使用MPC默认速度限制
+   * 派生类可以重写此方法以设置自己的速度限制
+   * @param nh ROS节点句柄
+   */
+  virtual void updateVelocityLimitsParam(ros::NodeHandle& nh);
 
   /**
    * @brief 重新加载配置文件
@@ -370,6 +380,32 @@ protected:
   bool isArmCommandReplacementEnabled() const { return arm_command_replacement_enabled_; }
 
   /**
+   * @brief 更新腰部指令（可选功能，用于替换jointCmdMsg中的腰部部分）
+   * @param time 当前时间
+   * @param sensor_data 传感器数据
+   * @param joint_cmd 关节命令（输入输出参数，腰部部分将被替换）
+   * @return 如果使用了外部腰部指令替换，返回true；否则返回false
+   * 
+   * 此函数在actionToJointCmd之后调用，用于可选地替换腰部部分的指令。
+   * 派生类可以重写此函数以实现自定义的腰部控制逻辑。
+   */
+  virtual bool updateWaistCommand(const ros::Time &time,
+                                  const SensorData &sensor_data,
+                                  kuavo_msgs::jointCmd &joint_cmd);
+
+  /**
+   * @brief 设置是否启用外部腰部指令替换
+   * @param enabled 是否启用
+   */
+  void use_external_waist_controller(bool enabled) { waist_command_replacement_enabled_ = enabled; }
+
+  /**
+   * @brief 获取是否启用外部腰部指令替换
+   * @return 是否启用
+   */
+  bool isWaistCommandReplacementEnabled() const { return waist_command_replacement_enabled_; }
+
+  /**
    * @brief 初始化ROS服务（在构造函数中自动调用）
    * 同时初始化关节数量和RL相关变量
    */
@@ -449,6 +485,7 @@ protected:
   Eigen::VectorXd actionScaleTestRL_;  ///< 动作缩放测试
   Eigen::VectorXd defaultBaseStateRL_; ///< 默认基座状态 [vel(6) + pos(3) + angular(3)] = 12维
   double defaultBaseHeightControl_ = 0.64; // 使用该控制器站立时的高度
+  double defaultBaseXOffsetControl_ = 0.0; // 使用该控制器站立时, base 在 x 方向相对于足端中心(0)的偏移
   Eigen::VectorXd initialStateRL_;    ///< 初始状态 [defaultBaseStateRL_(12) + defalutJointPosRL_]
   Eigen::VectorXd feetPositionsRL_;   ///< 脚位置
   Eigen::VectorXd baseStateRL_;       ///< 基座状态
@@ -485,6 +522,9 @@ protected:
   // 手臂指令替换相关（可选功能）
   bool arm_command_replacement_enabled_{false}; ///< 是否启用外部手臂指令替换
   std::unique_ptr<ArmController> arm_controller_; ///< 手臂控制器（可选，统一管理手臂插值和控制）
+
+  // 腰部指令替换相关（可选功能）
+  bool waist_command_replacement_enabled_{false}; ///< 是否启用外部腰部指令替换
 };
 
 } // namespace humanoid_controller

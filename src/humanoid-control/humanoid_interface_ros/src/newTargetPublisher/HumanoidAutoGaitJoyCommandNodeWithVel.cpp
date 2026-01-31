@@ -46,6 +46,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
 #include <kuavo_msgs/robotWaistControl.h>
+#include <std_srvs/SetBool.h>
 
 #include <ocs2_core/Types.h>
 #include <ocs2_core/misc/LoadData.h>
@@ -162,7 +163,7 @@ namespace ocs2
 #define JOYSTICK_BEITONG_MAP_JSON "bt2pro"
 #define JOYSTICK_BEITONG_BUTTON_NUM 16
 #define JOYSTICK_AXIS_NUM 8
-#define WAIST_YAW_MAX_ANGLE_DEG 120.0  // 腰部最大旋转角度（度），±120度
+#define WAIST_YAW_MAX_ANGLE_DEG 180.0  // 腰部最大旋转角度（度），±180度
 
   class JoyControl
   {
@@ -194,6 +195,12 @@ namespace ocs2
         int rb_version_int;
         nodeHandle.getParam("/robot_version", rb_version_int);
         rb_version_ = RobotVersion::create(rb_version_int);
+      }
+
+      if(rb_version_.major() <= 2)  // 判断小于等于2的主版本号为鲁班
+      {
+        controller_switch_time = roban_controller_switch_time;
+        std::cout << "[JoyControl] controller_switch_time change to roban's time !!!" << std::endl;
       }
 
       if (nodeHandle.hasParam("joy_node/dev"))
@@ -296,6 +303,8 @@ namespace ocs2
         auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version_, true, 2e-3);
         default_joint_state_ = drake_interface_->getDefaultJointState();
         com_height_ = drake_interface_->getIntialHeight();
+        auto kuavo_settings = drake_interface_->getKuavoSettings();
+        waist_dof_ = kuavo_settings.hardware_settings.num_waist_joints;
         loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
         loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
         loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
@@ -346,12 +355,17 @@ namespace ocs2
         c_relative_base_limit_[3] = 1.2; // angular z
       }
 
+      // 保存MPC默认速度限制）
+      mpc_default_velocity_limits_ = c_relative_base_limit_;
+
       cmd_vel_publisher_ = nodeHandle.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
+      
       current_joy_topic_ = "/joy";  // 默认话题
       joy_topic_service_ = nodeHandle_.advertiseService("/set_joy_topic", &JoyControl::setJoyTopicCallback, this);
       switch_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchController>("/humanoid_controller/switch_controller");
       get_controller_list_client_ = nodeHandle_.serviceClient<kuavo_msgs::getControllerList>("/humanoid_controller/get_controller_list");
       switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
+      auto_gait_change_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_auto_gait");
       joy_sub_ = nodeHandle_.subscribe(current_joy_topic_, 10, &JoyControl::joyCallback, this);
       
       // 轮臂模式下初始化observation_（避免访问observation.state时发生段错误）
@@ -395,6 +409,21 @@ namespace ocs2
           controller_switching_ = true;
           ROS_WARN_STREAM("[JoyControl] Controller switched to " << (is_rl_controller_ ? "RL" : "MPC")
                           << ", disable joystick input for " << controller_switch_time << "s");
+          
+          // 根据控制器类型更新速度限制
+          if (is_rl_controller_)
+          {
+            // RL控制器：从rosparam读取速度限制
+            updateVelocityLimitsFromParam(true);
+          }
+          else
+          {
+            // MPC控制器：恢复MPC默认速度限制
+            c_relative_base_limit_ = mpc_default_velocity_limits_;
+            ROS_INFO("[JoyControl] Restored MPC default velocity limits: [%.2f, %.2f, %.2f, %.2f]",
+                     c_relative_base_limit_[0], c_relative_base_limit_[1], 
+                     c_relative_base_limit_[2], c_relative_base_limit_[3]);
+          }
         }
       });
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
@@ -408,6 +437,7 @@ namespace ocs2
       re_start_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/re_start_robot", 10);
       head_motion_pub_ = nodeHandle_.advertise<kuavo_msgs::robotHeadMotionData>("/robot_head_motion_data", 10);
       waist_motion_pub_ = nodeHandle_.advertise<kuavo_msgs::robotWaistControl>("/robot_waist_motion_data", 10);
+      enable_waist_control_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/humanoid_controller/enable_waist_control", 10);
       slope_planning_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/humanoid/mpc/enable_slope_planning", 10);
       hand_position_pub_ = nodeHandle_.advertise<kuavo_msgs::robotHandPosition>("/control_robot_hand_position", 10);
 
@@ -638,6 +668,38 @@ namespace ocs2
       }
       return true;
     }
+
+    /**
+     * @brief 从rosparam读取速度限制并更新c_relative_base_limit_
+     * rosparam格式: [linear_x, linear_y, linear_z, angular_x, angular_y, angular_z] (6维)
+     * c_relative_base_limit_格式: [linear_x, linear_y, linear_z, angular_z] (4维)
+     */
+    void updateVelocityLimitsFromParam(bool log_changes = true)
+    {
+      std::vector<double> velocity_limits;
+      if (nodeHandle_.getParam("/velocity_limits", velocity_limits) && velocity_limits.size() == 6)
+      {
+        // 检查值是否有变化，避免重复设置和打印日志
+        bool changed = (std::abs(c_relative_base_limit_[0] - velocity_limits[0]) > 1e-6) ||
+                       (std::abs(c_relative_base_limit_[1] - velocity_limits[1]) > 1e-6) ||
+                       (std::abs(c_relative_base_limit_[2] - velocity_limits[2]) > 1e-6) ||
+                       (std::abs(c_relative_base_limit_[3] - velocity_limits[5]) > 1e-6);
+        
+        // 将6维速度限制转换为4维格式
+        c_relative_base_limit_[0] = velocity_limits[0];  // linear_x
+        c_relative_base_limit_[1] = velocity_limits[1];  // linear_y
+        c_relative_base_limit_[2] = velocity_limits[2];  // linear_z
+        c_relative_base_limit_[3] = velocity_limits[5];  // angular_z
+        
+        if (changed && log_changes)
+        {
+          ROS_INFO("[JoyControl] Updated velocity limits from rosparam: [%.2f, %.2f, %.2f, %.2f]",
+                   c_relative_base_limit_[0], c_relative_base_limit_[1], 
+                   c_relative_base_limit_[2], c_relative_base_limit_[3]);
+        }
+      }
+    }
+    
 
     void checkAndPublishCommandLine(const vector_t &joystick_origin_axis)
     {
@@ -908,13 +970,6 @@ namespace ocs2
         return;
       }
 
-      // 控制器切换过程中禁用遥控输入，并return返回
-      if (isControllerSwitching())
-      {
-        joystick_origin_axis_.setZero();
-        old_joy_msg_ = *joy_msg;
-        return;
-      }
 
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
       {
@@ -962,6 +1017,20 @@ namespace ocs2
         return;
       }
 
+      // 检测退出腰部控制状态（从腰部控制状态退出到非腰部控制状态）
+      if (waist_control_active_ && joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] >= -0.5)
+      {
+        // 发布 false，禁用腰部控制（只有腰部dof>0时才发布）
+        if (waist_dof_ > 0)
+        {
+          std_msgs::Bool enable_msg;
+          enable_msg.data = false;
+          // enable_waist_control_pub_.publish(enable_msg);
+          waist_control_active_ = false;
+          ROS_INFO("[JoyControl] Exited waist control mode, disabled waist control");
+        }
+      }
+      
       if(joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] < -0.5)
       {        
         if(!joy_execute_action_)
@@ -996,9 +1065,20 @@ namespace ocs2
           action_executing = robot_action_executing_;
         }
         
-        // 只有在没有动作执行时才允许转腰控制
-        if (!action_executing)
+        // 只有在没有动作执行时才允许转腰控制，且只有腰部dof>0时才进行腰部控制
+        if (!action_executing && waist_dof_ > 0)
         {
+          // 检测进入腰部控制状态（从非腰部控制状态进入）
+          if (!waist_control_active_)
+          {
+            // 发布 true，启用腰部控制
+            std_msgs::Bool enable_msg;
+            enable_msg.data = true;
+            // enable_waist_control_pub_.publish(enable_msg);
+            waist_control_active_ = true;
+            ROS_INFO("[JoyControl] Entered waist control mode, enabled waist control");
+          }
+          
           double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
           waist_yaw = WAIST_YAW_MAX_ANGLE_DEG * waist_yaw;   // +- WAIST_YAW_MAX_ANGLE_DEG deg
           // std::cout << "waist_yaw: " << waist_yaw << std::endl;
@@ -1114,10 +1194,39 @@ namespace ocs2
         }
       }
       old_joy_msg_ = *joy_msg;
+
+      // 控制器切换阶段，禁用摇杆输入和除了BUTTON_RL外的button
+      if (isControllerSwitching())
+      {
+        joystick_origin_axis_.setZero();
+
+        sensor_msgs::Joy modified_joy_msg = *joy_msg;
+        int button_rl_index = joyButtonMap["BUTTON_RL"];
+        for (size_t i = 0; i < modified_joy_msg.buttons.size(); i++)
+        {
+          if (i != static_cast<size_t>(button_rl_index))
+          {
+            modified_joy_msg.buttons[i] = 0;
+          }
+        }
+        old_joy_msg_ = modified_joy_msg;
+      }
     }
 
     void checkGaitSwitchCommand(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
+      // 控制器切换阶段，只允许BUTTON_RL用于切换控制器，其他按钮禁用
+      if (isControllerSwitching())
+      {
+        // 只检查BUTTON_RL用于切换控制器
+        // if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
+        // {
+        //   ROS_INFO("[JoyControl] switch to next controller");
+        //   switchToNextController();
+        // }
+        return;
+      }
+
       // 有摇杆数据不可以步态切换
       if (
         std::abs(joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]]) > DEAD_ZONE ||
@@ -1158,10 +1267,8 @@ namespace ocs2
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
         ROS_INFO("[JoyControl] switch to next controller");
-        // // Get controller list and switch to next
-        // switchToNextController();
-        // 1.3.2版本，因暂时禁用amp,只剩mpc切换会有短时间无法响应按键,需禁用X按键.
-        ROS_WARN("[JoyControl] [version 1.3.2] switch to next controller is disabled");
+        // Get controller list and switch to next
+        switchToNextController();
         return;
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
@@ -1197,6 +1304,7 @@ namespace ocs2
       gait_name_msg.data = gaitName;
       gait_name_publisher_.publish(gait_name_msg);
       ROS_INFO_STREAM("[JoyControl] Published gait name request: " << gaitName);
+      cur_gait_name_ = gaitName;
     }
 
     void gaitChangeCallback(const std_msgs::String::ConstPtr& msg) 
@@ -1299,6 +1407,28 @@ namespace ocs2
         cmdVel.linear.z = 0.0;
       }
 
+      /*******************下蹲超过阈值则不允许踏步***********************/
+      static bool last_auto_gait_state = false;
+      const double height_diff_max = 0.1;  // 10厘米
+
+      if (std::fabs(cmdVel.linear.z) > height_diff_max && cur_gait_name_ == "stance")
+      {
+        if(last_auto_gait_state == true)
+        {
+          changeAutoGaitStatus(false);
+          last_auto_gait_state = false;
+        }
+      }
+      else
+      {
+        if(last_auto_gait_state == false)
+        {
+          changeAutoGaitStatus(true);
+          last_auto_gait_state = true;
+        }
+      }
+      /**************************************************************/
+
       // theta_z relative to current
       if (std::abs(joystick_origin_axis(3)) > DEAD_ZONE)
       {
@@ -1350,6 +1480,7 @@ namespace ocs2
         return false;
       }
     }
+
     void callRealInitializeSrv()
     {
       ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_initial_start");
@@ -1584,6 +1715,26 @@ namespace ocs2
       }
     }
 
+    bool changeAutoGaitStatus(bool flag)
+    {
+      std_srvs::SetBool srv;
+
+      srv.request.data = flag;  // true开启，false关闭
+
+      if (auto_gait_change_client_.call(srv))
+      {
+          return true;
+      }
+      else
+      {
+          ROS_ERROR("触发失败");
+          return false;
+      }
+
+      return true;
+
+    }
+
   private:
     ros::NodeHandle nodeHandle_;
     TargetTrajectoriesRosPublisher targetPoseCommand_;
@@ -1597,6 +1748,7 @@ namespace ocs2
     ros::Subscriber arm_ctrl_mode_sub_;
     int arm_ctrl_mode_;
     bool is_rl_controller_{false};  // 当前是否为RL控制器
+    ocs2::scalar_array_t mpc_default_velocity_limits_{0.4, 0.2, 0.3, 0.4};  // 保存MPC默认速度限制
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
     std::string current_desired_gait_ = "stance";
@@ -1626,6 +1778,7 @@ namespace ocs2
     ros::Publisher head_motion_pub_;
     ros::Publisher hand_position_pub_;
     ros::Publisher waist_motion_pub_;
+    ros::Publisher enable_waist_control_pub_;
     ros::Publisher slope_planning_pub_;
     float total_mode_scale_{1.0};
     bool button_start_released_{true};
@@ -1633,12 +1786,15 @@ namespace ocs2
     std::mutex target_mutex_;
     vector_t feet_pos_measured_ = vector_t::Zero(24);
 
+    std::string cur_gait_name_{"stance"};
+
     std::map<std::string, humanoid::ModeSequenceTemplate> gait_map_;
     ros::ServiceServer joy_topic_service_;
     std::string current_joy_topic_;
     ros::ServiceClient switch_controller_client_;
     ros::ServiceClient get_controller_list_client_;
     ros::ServiceClient switch_to_next_controller_client_;
+    ros::ServiceClient auto_gait_change_client_;
     
     // 楼梯检测相关
     bool stair_detection_enabled_ = false;
@@ -1665,6 +1821,7 @@ namespace ocs2
     ros::Time last_status_check_time_;
     bool real_{false};
     double controller_switch_time{2.5};
+    const double roban_controller_switch_time{1.0};
     ros::Time last_controller_switch_time_{0};
     bool controller_switching_{false};
     
@@ -1675,6 +1832,10 @@ namespace ocs2
     // 动作执行状态相关
     ros::Subscriber robot_action_state_sub_;
     bool robot_action_executing_{false};  // 标记是否有动作正在执行
+    
+    // 腰部控制状态跟踪
+    bool waist_control_active_{false};  // 标记是否正在控制腰部（模式2）
+    int waist_dof_{0};  // 腰部自由度，只有>0时才进行腰部控制
   };
 }
 
