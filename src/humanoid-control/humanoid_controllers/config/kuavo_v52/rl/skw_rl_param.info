@@ -52,7 +52,7 @@ velocityLimits
     (3,0)  0.3      ; cmdVelAngularZ
 }
 defaultBaseHeightControl    0.95 ; Actual standing height when using RL controller
-defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
+defaultBaseXOffsetControl     -0.03    ; Base offset when using RL controller
 
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity
