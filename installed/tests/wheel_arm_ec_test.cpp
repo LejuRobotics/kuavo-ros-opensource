@@ -236,12 +236,10 @@ class WheelArmECTest
 public:
     WheelArmECTest() {
         // 关节运动速度参数（度/秒）
-        // 建议值：1.0-10.0，越小越慢越平滑
-        // 1.0 = 很慢，适合精细调试
-        // 3.0 = 较慢，适合安全测试
-        // 5.0 = 中等速度（默认）
-        // 10.0 = 较快
-        joint_move_speed_ = 20.0;  // 默认速度
+        // 磨线功能速度：20.0（较快，适合批量磨线）
+        breakin_speed_ = 20.0;
+        // 单关节控制速度：10.0（较慢，适合精细调试）
+        individual_joint_speed_ = 6.0;
         
         // 插值时间步长（秒）
         // 建议值：0.01-0.05，越小插值越平滑但计算频率越高
@@ -355,7 +353,7 @@ public:
         std::cout << std::endl;
     }
 
-    void sendJointMoveToRequest(const std::vector<double>& joint_values, const std::string& joint_type) {
+    void sendJointMoveToRequest(const std::vector<double>& joint_values, const std::string& joint_type, double speed) {
         std::cout << "发送 " << joint_type << " 关节运动请求" << std::endl;
         
         for(int i = 0; i < joint_values.size(); ++i){
@@ -363,9 +361,9 @@ public:
             std::cout << joint_values[i] << " ";
         }
         std::cout << std::endl;
-        // 发送关节运动命令（使用配置的速度和插值步长）
-        std::cout << "运动速度: " << joint_move_speed_ << " 度/秒, 插值步长: " << joint_move_dt_ << " 秒" << std::endl;
-        hardware_plant_->jointMoveTo(joint_values, joint_move_speed_, joint_move_dt_);
+        // 发送关节运动命令（使用指定的速度和插值步长）
+        std::cout << "运动速度: " << speed << " 度/秒, 插值步长: " << joint_move_dt_ << " 秒" << std::endl;
+        hardware_plant_->jointMoveTo(joint_values, speed, joint_move_dt_);
         
         std::this_thread::sleep_for(std::chrono::seconds(2));
         
@@ -422,7 +420,7 @@ public:
         joint_command[joint_id - 1] = target_angle_deg;
         
         std::cout << "移动关节 " << joint_id << " 到 " << target_angle_deg << "°" << std::endl;
-        sendJointMoveToRequest(joint_command, "单个关节");
+        sendJointMoveToRequest(joint_command, "单个关节", individual_joint_speed_);
     }
 
     void testECStatus() {
@@ -571,8 +569,8 @@ public:
                 std::cout << "  [动作帧 " << (current_frame_index + 1) << " / " << action_sequence.size() 
                           << "] 时间: " << std::fixed << std::setprecision(1) << elapsed_sec << "秒" << std::endl;
                 
-                // 发送关节运动命令（静默模式，不输出详细信息）
-                jointMoveToSilent(target_all_joints, joint_move_speed_, joint_move_dt_);
+                // 发送关节运动命令（静默模式，不输出详细信息，使用磨线速度）
+                jointMoveToSilent(target_all_joints, breakin_speed_, joint_move_dt_);
                 
                 // 更新当前所有关节位置（用于下一次命令）
                 for (int i = 0; i < TOTAL_JOINT_NUM; ++i) {
@@ -702,8 +700,9 @@ private:
     std::unique_ptr<HardwarePlant> hardware_plant_;
     
     // 关节运动参数
-    double joint_move_speed_;  // 关节运动速度（度/秒），越小越慢
-    double joint_move_dt_;      // 插值时间步长（秒），影响插值平滑度
+    double breakin_speed_;           // 磨线功能速度（度/秒），默认20.0
+    double individual_joint_speed_;  // 单关节控制速度（度/秒），默认10.0
+    double joint_move_dt_;           // 插值时间步长（秒），影响插值平滑度
 };
 
 int main(int argc, char const *argv[])

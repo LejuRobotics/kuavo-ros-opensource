@@ -128,7 +128,7 @@ namespace HighlyDynamic
         getline(file, ecMasterType);
         file.close();
 
-        if (ecMasterType != "elmo" && ecMasterType != "youda" && ecMasterType != "lunbi1" && ecMasterType != "lunbi_v62" && ecMasterType != "youda3" && ecMasterType != "youda" && ecMasterType != "leju") {
+        if (ecMasterType != "elmo" && ecMasterType != "youda" && ecMasterType != "lunbi1" && ecMasterType != "youda3" && ecMasterType != "youda" && ecMasterType != "leju") {
             std::cerr << "\033[33mwarning: ecmaster_type :" << ecMasterType 
                   << " error, 使用默认值 'elmo' 驱动器类型\033[0m" << std::endl;
             return "elmo"; 
