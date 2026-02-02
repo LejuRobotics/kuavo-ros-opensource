@@ -53,47 +53,69 @@ using namespace HighlyDynamic;
 // ============================================
 
 // 每帧动作的时长（秒）
-const double BREAKIN_FRAME_DURATION_SEC = 2.0;
+const double BREAKIN_FRAME_DURATION_SEC = 3.0;
 
 // 腿部动作关键帧数组（4个关节，单位：度）
-// 电机ID：1, 2, 3, 4
-// 共7组动作，最前和最后都是0
+// 电机ID：1, 2, 3, 4（下肢3个和腰部）
+// 共10组动作，最前和最后都是0
 const std::vector<std::vector<double>> BREAKIN_LEG_ACTIONS = {
     {0.0, 0.0, 0.0, 0.0},      // 帧0：第0秒（起始位置）
-    {5.0, -5.0, 5.0, 5.0},     // 帧1：第2秒
-    {10.0, -10.0, 10.0, 10.0}, // 帧2：第4秒
-    {15.0, -15.0, 15.0, 15.0}, // 帧3：第6秒
-    {10.0, -10.0, 10.0, 10.0}, // 帧4：第8秒
-    {5.0, -5.0, 5.0, 5.0},     // 帧5：第10秒
-    {0.0, 0.0, 0.0, 0.0}       // 帧6：第12秒（结束位置）
+    {20.0, -30.0, 0.0, 0.0},    // 帧1：第2秒
+    {30.0, -80.0, 40.0, 0.0},    // 帧2：第4秒
+    {30.0, -80.0, 40.0, 165.0}, // 帧3：第6秒
+    {30.0, -80.0, 40.0, 0.0}, // 帧4：第8秒
+    {30.0, -80.0, 40.0, -165.0}, // 帧5：第10秒
+    {20.0, -80.0, 160.0, 0.0}, // 帧6：第12秒
+    {20.0, -80.0, 55.0, 0.0}, // 帧7：第14秒
+    {20.0, -40.0, 20.0, 0.0},    // 帧8：第16秒   # shoubu
+    {0.0, 0.0, 0.0, 0.0}       // 帧9：第18秒（结束位置）
 };
+
+// const std::vector<std::vector<double>> BREAKIN_LEG_ACTIONS = {
+//     {0.0, 0.0, 0.0, 0.0},      // 帧0：第0秒（起始位置）
+//     {0.0, 0.0, 0.0, 0.0},    // 帧1：第2秒
+//     {0.0, 0.0, 0.0, 0.0},    // 帧2：第4秒
+//     {0.0, 0.0, 0.0, 0.0}, // 帧3：第6秒
+//     {0.0, 0.0, 0.0, 0.0}, // 帧4：第8秒
+//     {0.0, 0.0, 0.0, 0.0}, // 帧5：第10秒
+//     {0.0, 0.0, 0.0, 0.0}, // 帧6：第12秒
+//     {0.0, 0.0, 0.0, 0.0}, // 帧7：第14秒
+//     {0.0, 0.0, 0.0, 0.0},    // 帧8：第16秒   # shoubu
+//     {0.0, 0.0, 0.0, 0.0}       // 帧9：第18秒（结束位置）
+// };
 
 // 左臂动作关键帧数组（7个关节，单位：度）
 // 电机ID：5, 6, 7, 8, 9, 10, 11
-// 注意：ID 8（索引3）必须为负值（小于0）
-// 共7组动作，最前和最后都是0
+// 注意：ID 8 肘部（索引3）必须为负值（小于0）
+// 共10组动作，最前和最后都是0
 const std::vector<std::vector<double>> BREAKIN_LEFT_ARM_ACTIONS = {
     {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},              // 帧0：第0秒（起始位置）
-    {10.0, 10.0, 10.0, -10.0, 10.0, 10.0, 10.0},     // 帧1：第2秒（ID 8为-10）
-    {20.0, 20.0, 20.0, -20.0, 20.0, 20.0, 20.0},     // 帧2：第4秒（ID 8为-20）
-    {30.0, 30.0, 30.0, -30.0, 30.0, 30.0, 30.0},     // 帧3：第6秒（ID 8为-30）
-    {20.0, 20.0, 20.0, -20.0, 20.0, 20.0, 20.0},     // 帧4：第8秒（ID 8为-20）
-    {10.0, 10.0, 10.0, -10.0, 10.0, 10.0, 10.0},     // 帧5：第10秒（ID 8为-10）
-    {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}               // 帧6：第12秒（结束位置）
+    {10.0, 15.0, 15.0, -60.0, 6.0, 6.0, 6.0},            // 帧1：第2秒
+    {45.0, 45.0, 30.0, -100.0, 55.0, 15.0, 15.0},     // 帧2：第4秒
+    {85.0, 60.0, 45.0, -110.0, 80.0, 25.0, 25.0},     // 帧3：第6秒
+    {20.0, 120.0, 70.0, -100.0, 0.0, 25.0, 25.0},     // 帧4：第8秒
+    {0.0, 60.0, 0.0, -90.0, -50.0, 25.0, 25.0},     // 帧5：第10秒
+    {-50.0, 25.0, -35.0, -90.0, -80.0, 25.0, 25.0},     // 帧6：第12秒   ///保持
+    {-145.0, 15.0, -15.0, -50.0, -40.0, 15.0, 15.0},     // 帧7：第14秒
+    {-50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},             // 帧8：第16秒
+    {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}               // 帧9：第18秒（结束位置）
 };
 
 // 头部动作关键帧数组（2个关节，单位：度）
 // 电机ID：19, 20
 // 注意：ID 19 可以正负值，ID 20 只能是正值（大于等于0）
-// 共7组动作，最前和最后都是0
+// 共10组动作，最前和最后都是0
 const std::vector<std::vector<double>> BREAKIN_HEAD_ACTIONS = {
     {0.0, 0.0},      // 帧0：第0秒（起始位置）
-    {10.0, 10.0},    // 帧1：第2秒
-    {-10.0, 20.0},   // 帧2：第4秒（ID 19为-10，ID 20为20）
-    {15.0, 25.0},    // 帧3：第6秒（ID 19为15，ID 20为25）
-    {-10.0, 20.0},   // 帧4：第8秒（ID 19为-10，ID 20为20）
-    {10.0, 10.0},    // 帧5：第10秒
-    {0.0, 0.0}       // 帧6：第12秒（结束位置）
+    {6.0, 6.0},      // 帧1：第2秒
+    {-8.0, 15.0},    // 帧2：第4秒
+    {12.0, 22.0},    // 帧3：第6秒
+    {15.0, 25.0},    // 帧4：第8秒
+    {15.0, 25.0},    // 帧5：第10秒
+    {12.0, 22.0},    // 帧6：第12秒
+    {-8.0, 15.0},    // 帧7：第14秒
+    {6.0, 6.0},      // 帧8：第16秒
+    {0.0, 0.0}       // 帧9：第18秒（结束位置）
 };
 
 // 动作组结构：定义在特定时间点的目标位置
@@ -237,9 +259,9 @@ public:
     WheelArmECTest() {
         // 关节运动速度参数（度/秒）
         // 磨线功能速度：20.0（较快，适合批量磨线）
-        breakin_speed_ = 20.0;
+        breakin_speed_ = 35.0;
         // 单关节控制速度：10.0（较慢，适合精细调试）
-        individual_joint_speed_ = 6.0;
+        individual_joint_speed_ = 10.0;
         
         // 插值时间步长（秒）
         // 建议值：0.01-0.05，越小插值越平滑但计算频率越高
@@ -488,108 +510,143 @@ public:
         #endif
     }
 
-    // 执行一轮动作序列（所有动作帧）
+    // 根据动作帧构建完整的关节命令
+    std::vector<double> buildJointCommandFromFrame(const BreakinActionFrame& frame, 
+                                                    const std::vector<double>& current_all_joints) {
+        std::vector<double> target_all_joints = current_all_joints;
+        
+        // 设置腿部电机（ID 1-4，索引0-3）
+        for (int i = 0; i < LB_LEG_JOINT_NUM && i < frame.leg_positions.size(); ++i) {
+            target_all_joints[i] = frame.leg_positions[i];
+        }
+        
+        // 设置左臂电机（ID 5,6,7,8,9,10,11，索引4-10）
+        // 注意：ID 8（索引7）必须确保是负值
+        if (frame.left_arm_positions.size() >= 7) {
+            target_all_joints[4] = frame.left_arm_positions[0];  // ID 5
+            target_all_joints[5] = frame.left_arm_positions[1];  // ID 6
+            target_all_joints[6] = frame.left_arm_positions[2];  // ID 7
+            // ID 8：确保是负值（小于0）
+            double motor8_value = frame.left_arm_positions[3];
+            target_all_joints[7] = (motor8_value > 0) ? -motor8_value : motor8_value;  // ID 8（强制为负值）
+            target_all_joints[8] = frame.left_arm_positions[4];  // ID 9
+            target_all_joints[9] = frame.left_arm_positions[5];  // ID 10
+            target_all_joints[10] = frame.left_arm_positions[6]; // ID 11
+        }
+        
+        // 设置右臂电机（ID 12,13,14,15,16,17,18，索引11-17）
+        // 根据对称关系映射：
+        //   ID 12 = ID 5（相同方向）
+        //   ID 13 = -ID 6（相反方向）
+        //   ID 14 = -ID 7（相反方向）
+        //   ID 15 = ID 8（相同方向，但必须是负值）
+        //   ID 16 = -ID 9（相反方向）
+        //   ID 17 = -ID 10（相反方向）
+        //   ID 18 = ID 11（相同方向）
+        if (frame.left_arm_positions.size() >= 7 && TOTAL_JOINT_NUM > 17) {
+            target_all_joints[11] = frame.left_arm_positions[0];  // ID 12 = ID 5（相同）
+            target_all_joints[12] = -frame.left_arm_positions[1]; // ID 13 = -ID 6（相反）
+            target_all_joints[13] = -frame.left_arm_positions[2]; // ID 14 = -ID 7（相反）
+            // ID 15：与ID 8相同方向，但必须确保是负值
+            double motor15_value = target_all_joints[7];  // 使用ID 8的值（已经是负值）
+            target_all_joints[14] = motor15_value;  // ID 15 = ID 8（相同，确保为负值）
+            target_all_joints[15] = -frame.left_arm_positions[4]; // ID 16 = -ID 9（相反）
+            target_all_joints[16] = -frame.left_arm_positions[5]; // ID 17 = -ID 10（相反）
+            target_all_joints[17] = frame.left_arm_positions[6];  // ID 18 = ID 11（相同）
+        }
+        
+        // 设置头部电机（ID 19,20，索引18-19）
+        // 注意：ID 19 可以正负值，ID 20 只能是正值（大于等于0）
+        if (frame.head_positions.size() >= 2 && TOTAL_JOINT_NUM > 19) {
+            // ID 19：可以正负值，直接使用配置值
+            target_all_joints[18] = frame.head_positions[0];  // ID 19
+            
+            // ID 20：只能是正值（大于等于0），如果配置值为负则强制为0
+            double motor20_value = frame.head_positions[1];
+            target_all_joints[19] = (motor20_value < 0) ? 0.0 : motor20_value;  // ID 20（强制为非负值）
+        }
+        
+        return target_all_joints;
+    }
+
+    // 执行一轮动作序列（所有动作帧，按关键帧顺序逐帧执行，不做额外插值）
     void executeOneRound(const std::vector<BreakinActionFrame>& action_sequence) {
+        if (action_sequence.empty()) {
+            return;
+        }
+        
         // 获取当前所有关节位置
         hardware_plant_->GetMotorData(joint_ids, joint_data);
         std::vector<double> current_all_joints(TOTAL_JOINT_NUM);
         for (int i = 0; i < TOTAL_JOINT_NUM; ++i) {
             current_all_joints[i] = joint_data[i].position;
         }
-        
-        // 记录开始时间
-        auto start_time = std::chrono::steady_clock::now();
-        int current_frame_index = 0;
-        
-        // 主循环：在指定时间点发送目标位置
-        while (current_frame_index < action_sequence.size()) {
-            // 计算当前时间（秒）
-            auto current_time = std::chrono::steady_clock::now();
-            double elapsed_sec = std::chrono::duration<double>(current_time - start_time).count();
-            
-            // 检查是否到了下一个动作帧的时间
-            if (elapsed_sec >= action_sequence[current_frame_index].time_sec) {
-                const auto& frame = action_sequence[current_frame_index];
-                
-                // 构建完整的关节命令（保持其他关节当前位置）
-                std::vector<double> target_all_joints = current_all_joints;
-                
-                // 设置腿部电机（ID 1-4，索引0-3）
-                for (int i = 0; i < LB_LEG_JOINT_NUM && i < frame.leg_positions.size(); ++i) {
-                    target_all_joints[i] = frame.leg_positions[i];
-                }
-                
-                // 设置左臂电机（ID 5,6,7,8,9,10,11，索引4-10）
-                // 注意：ID 8（索引7）必须确保是负值
-                if (frame.left_arm_positions.size() >= 7) {
-                    target_all_joints[4] = frame.left_arm_positions[0];  // ID 5
-                    target_all_joints[5] = frame.left_arm_positions[1];  // ID 6
-                    target_all_joints[6] = frame.left_arm_positions[2];  // ID 7
-                    // ID 8：确保是负值（小于0）
-                    double motor8_value = frame.left_arm_positions[3];
-                    target_all_joints[7] = (motor8_value > 0) ? -motor8_value : motor8_value;  // ID 8（强制为负值）
-                    target_all_joints[8] = frame.left_arm_positions[4];  // ID 9
-                    target_all_joints[9] = frame.left_arm_positions[5];  // ID 10
-                    target_all_joints[10] = frame.left_arm_positions[6]; // ID 11
-                }
-                
-                // 设置右臂电机（ID 12,13,14,15,16,17,18，索引11-17）
-                // 根据对称关系映射：
-                //   ID 12 = ID 5（相同方向）
-                //   ID 13 = -ID 6（相反方向）
-                //   ID 14 = -ID 7（相反方向）
-                //   ID 15 = ID 8（相同方向，但必须是负值）
-                //   ID 16 = -ID 9（相反方向）
-                //   ID 17 = -ID 10（相反方向）
-                //   ID 18 = ID 11（相同方向）
-                if (frame.left_arm_positions.size() >= 7 && TOTAL_JOINT_NUM > 17) {
-                    target_all_joints[11] = frame.left_arm_positions[0];  // ID 12 = ID 5（相同）
-                    target_all_joints[12] = -frame.left_arm_positions[1]; // ID 13 = -ID 6（相反）
-                    target_all_joints[13] = -frame.left_arm_positions[2]; // ID 14 = -ID 7（相反）
-                    // ID 15：与ID 8相同方向，但必须确保是负值
-                    double motor15_value = target_all_joints[7];  // 使用ID 8的值（已经是负值）
-                    target_all_joints[14] = motor15_value;  // ID 15 = ID 8（相同，确保为负值）
-                    target_all_joints[15] = -frame.left_arm_positions[4]; // ID 16 = -ID 9（相反）
-                    target_all_joints[16] = -frame.left_arm_positions[5]; // ID 17 = -ID 10（相反）
-                    target_all_joints[17] = frame.left_arm_positions[6];  // ID 18 = ID 11（相同）
-                }
-                
-                // 设置头部电机（ID 19,20，索引18-19）
-                // 注意：ID 19 可以正负值，ID 20 只能是正值（大于等于0）
-                if (frame.head_positions.size() >= 2 && TOTAL_JOINT_NUM > 19) {
-                    // ID 19：可以正负值，直接使用配置值
-                    target_all_joints[18] = frame.head_positions[0];  // ID 19
-                    
-                    // ID 20：只能是正值（大于等于0），如果配置值为负则强制为0
-                    double motor20_value = frame.head_positions[1];
-                    target_all_joints[19] = (motor20_value < 0) ? 0.0 : motor20_value;  // ID 20（强制为非负值）
-                }
-                
-                // 输出当前执行的动作帧信息
-                std::cout << "  [动作帧 " << (current_frame_index + 1) << " / " << action_sequence.size() 
-                          << "] 时间: " << std::fixed << std::setprecision(1) << elapsed_sec << "秒" << std::endl;
-                
-                // 发送关节运动命令（静默模式，不输出详细信息，使用磨线速度）
-                jointMoveToSilent(target_all_joints, breakin_speed_, joint_move_dt_);
-                
-                // 更新当前所有关节位置（用于下一次命令）
-                for (int i = 0; i < TOTAL_JOINT_NUM; ++i) {
-                    current_all_joints[i] = target_all_joints[i];
-                }
-                
-                current_frame_index++;
+        // 逐帧执行：每一帧调用一次 jointMoveTo（内部包含平滑插值），并等待腿部4个关节到位
+        const double LEG_REACH_TOL_DEG = 5;        // 腿部关节到位容差（度）
+        const int    LEG_REACH_MAX_WAIT_MS = 5000;   // 最长等待时间（毫秒）
+
+        for (size_t frame_index = 0; frame_index < action_sequence.size(); ++frame_index) {
+            const auto& frame = action_sequence[frame_index];
+
+            // 基于当前姿态构建这一帧的完整目标关节命令
+            std::vector<double> target_all_joints = buildJointCommandFromFrame(frame, current_all_joints);
+
+            std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" << std::endl;
+            std::cout << "  [关键帧] 帧 " << (frame_index + 1) << " / " << action_sequence.size()
+                      << ", 计划时间戳: " << std::fixed << std::setprecision(1)
+                      << frame.time_sec << " 秒" << std::endl;
+            std::cout << "  目标腿部关节 (ID 1-4): ";
+            for (int i = 0; i < LB_LEG_JOINT_NUM; ++i) {
+                std::cout << std::fixed << std::setprecision(2) << target_all_joints[i] << " ";
             }
-            
-            // 如果所有动作帧都执行完毕，退出
-            if (current_frame_index >= action_sequence.size()) {
-                break;
+            std::cout << " (单位: 度)" << std::endl;
+
+            // 调用底层 jointMoveTo（内部会做平滑插值并阻塞，直到动作完成）
+            jointMoveToSilent(target_all_joints, breakin_speed_, joint_move_dt_);
+
+            // 额外等待：确认腿部4个关节已经到位（在一定容差内）
+            bool leg_reached = false;
+            auto wait_start = std::chrono::steady_clock::now();
+            while (true) {
+                hardware_plant_->GetMotorData(joint_ids, joint_data);
+
+                double max_leg_error = 0.0;
+                for (int i = 0; i < LB_LEG_JOINT_NUM; ++i) {
+                    double err = std::fabs(joint_data[i].position - target_all_joints[i]);
+                    if (err > max_leg_error) {
+                        max_leg_error = err;
+                    }
+                }
+
+                if (max_leg_error <= LEG_REACH_TOL_DEG) {
+                    leg_reached = true;
+                    std::cout << "  腿部关节已到位，最大误差: "
+                              << std::fixed << std::setprecision(3) << max_leg_error << " 度" << std::endl;
+                    break;
+                }
+
+                auto now = std::chrono::steady_clock::now();
+                double wait_ms = std::chrono::duration<double, std::milli>(now - wait_start).count();
+                if (wait_ms >= LEG_REACH_MAX_WAIT_MS) {
+                    std::cout << "  警告: 腿部关节未在期望时间内完全到位，最大误差: "
+                              << std::fixed << std::setprecision(3) << max_leg_error << " 度" << std::endl;
+                    break;
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            
-            // 短暂休眠，避免CPU占用过高
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+            if (!leg_reached) {
+                std::cout << "  提示: 即使腿部误差稍大，也将继续执行后续关键帧。" << std::endl;
+            }
+
+            // 更新当前关节位置为实际读取到的位置
+            for (int i = 0; i < TOTAL_JOINT_NUM; ++i) {
+                current_all_joints[i] = joint_data[i].position;
+            }
         }
-        
-        // 等待最后一段动作完成
+
+        // 最后一帧完成后，稍作停顿
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
