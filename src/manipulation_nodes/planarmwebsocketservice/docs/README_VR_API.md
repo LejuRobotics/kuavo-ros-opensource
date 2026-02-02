@@ -112,7 +112,7 @@
     "code": 0,
     "robot_type": "45",
     "vr_recording_path": "~/.config/lejuconfig/vr_recordings",
-    ...
+    "workspace_setup_path": "/kuavo-ros-control/devel/setup.bash"
   }
 }
 ```

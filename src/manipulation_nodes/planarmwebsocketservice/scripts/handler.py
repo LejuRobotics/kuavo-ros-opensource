@@ -1586,7 +1586,8 @@ async def get_robot_info_handler(
             "maps_folder_path": MAP_FILE_FOLDER,
             "h12_config_path": H12_CONFIG_PATH,
             "repo_path": REPO_PATH,
-            "vr_recording_path": vr_recording_path
+            "vr_recording_path": vr_recording_path,
+            "workspace_setup_path": os.path.join(KUAVO_ROS_CONTROL_WS_PATH, "devel", "setup.bash")
         }
     )
 
