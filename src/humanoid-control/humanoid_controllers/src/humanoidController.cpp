@@ -2624,7 +2624,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             prev_filtered_pos = filtered_pos;
             low_latency_first_enter = false;
           }
-          vector_t computed_vel = (filtered_pos - prev_filtered_pos) / dt_;
+          // vector_t computed_vel = (filtered_pos - prev_filtered_pos) / dt_;
+          vector_t computed_vel = vector_t::Zero(armNumReal_);
             
             // 3. 对计算出的速度再次滤波
           optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(computed_vel);
