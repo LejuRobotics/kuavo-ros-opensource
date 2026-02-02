@@ -224,10 +224,14 @@ def stop_recording_and_convert(tact_filename):
         # 转换函数（在单独线程中运行）
         def convert_bag_to_tact():
             try:
+                # 从系统环境变量获取机器人版本（必须有）
+                if 'ROBOT_VERSION' not in os.environ:
+                    raise ValueError("ROBOT_VERSION environment variable is not set")
+
                 # 导入转换器
                 from rosbag_to_bezier_planner import RosbagToBezierPlanner
 
-                # 创建处理器实例
+                # 创建处理器实例（会自动读取ROBOT_VERSION环境变量）
                 processor = RosbagToBezierPlanner()
 
                 # 执行转换（使用固定参数）
