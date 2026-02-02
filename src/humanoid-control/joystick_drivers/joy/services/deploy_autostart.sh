@@ -139,3 +139,7 @@ sudo systemctl start roban_joy_monitor.service
 sudo systemctl enable roban_joy_monitor.service
 
 echo "joy monitor service deploy successfully"
+
+echo "stop all ros node"
+sudo pkill ros -f
+echo "stop all ros node successfully"

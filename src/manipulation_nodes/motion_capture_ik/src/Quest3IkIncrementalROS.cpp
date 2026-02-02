@@ -108,14 +108,15 @@ void Quest3IkIncrementalROS::updateSensorArmJointMeanFromSensorData() {
     return;
   }
 
-  const size_t requiredSize = static_cast<size_t>(12 + SENSOR_ARM_JOINT_DIM);
+  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+  const size_t requiredSize = static_cast<size_t>(armJointStartIndex + SENSOR_ARM_JOINT_DIM);
   if (currentSensorData->joint_data.joint_q.size() < requiredSize) {
     return;
   }
 
   Eigen::VectorXd qNew = Eigen::VectorXd::Zero(SENSOR_ARM_JOINT_DIM);
   for (int i = 0; i < SENSOR_ARM_JOINT_DIM; ++i) {
-    qNew(i) = currentSensorData->joint_data.joint_q[12 + i];
+    qNew(i) = currentSensorData->joint_data.joint_q[armJointStartIndex + i];
   }
 
   if (sensorArmJointQ_.size() != SENSOR_ARM_JOINT_DIM) {
@@ -1307,10 +1308,11 @@ void Quest3IkIncrementalROS::processVisual() {
                            Eigen::Quaterniond& rightQuat) {
     // 可视化使用原始传感器数据
     std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
-    if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= 12 + jointStateSize_) {
+    const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+    if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= armJointStartIndex + jointStateSize_) {
       Eigen::VectorXd armJoints(jointStateSize_);
       for (int i = 0; i < jointStateSize_; ++i) {
-        armJoints(i) = currentSensorData->joint_data.joint_q[12 + i];
+        armJoints(i) = currentSensorData->joint_data.joint_q[armJointStartIndex + i];
       }
 
       auto [leftMeasuredPosition, leftMeasuredQuaternion] =
@@ -1329,10 +1331,11 @@ void Quest3IkIncrementalROS::processVisual() {
   Eigen::Vector3d currentLeftElbowPos, currentRightElbowPos;
   Eigen::Quaterniond qLeftElbow, qRightElbow;
   std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
-  if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= 12 + jointStateSize_) {
+  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+  if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= armJointStartIndex + jointStateSize_) {
     Eigen::VectorXd armJoints(jointStateSize_);
     for (int i = 0; i < jointStateSize_; ++i) {
-      armJoints(i) = currentSensorData->joint_data.joint_q[12 + i];
+      armJoints(i) = currentSensorData->joint_data.joint_q[armJointStartIndex + i];
     }
     auto [l4Position, l4Quaternion] = oneStageIkEndEffectorPtr_->FKElbow(armJoints, "zarm_l4_link", jointStateSize_);
     auto [r4Position, r4Quaternion] = oneStageIkEndEffectorPtr_->FKElbow(armJoints, "zarm_r4_link", jointStateSize_);
@@ -1397,14 +1400,17 @@ void Quest3IkIncrementalROS::activateController() {
 }
 
 void Quest3IkIncrementalROS::deactivateController() {
+  if (!changeArmModeClient_.exists()) return;
   if (!controllerActivated_.load()) return;
   if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
 
-  kuavo_msgs::changeArmCtrlMode srv2;
+  kuavo_msgs::changeArmCtrlMode srv1, srv2;
+  srv1.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
   srv2.request.control_mode = static_cast<int>(KuavoArmCtrlMode::ARM_FIXED);
 
   controllerActivated_.store(!(
+    changeArmModeClient_.call(srv1) && srv1.response.result &&
       humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&  //
       changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&    //
       true));
@@ -1944,9 +1950,10 @@ void Quest3IkIncrementalROS::publishSensorDataArmJoints() {
     jointStateMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
   }
 
-  // 从传感器数据提取手臂关节角（从索引12开始），并转换为角度单位
+  // 从传感器数据提取手臂关节角（从索引12+腰部自由度开始），并转换为角度单位
+  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
   for (int i = 0; i < jointStateSize_; ++i) {
-    double jointAngleRad = currentSensorData->joint_data.joint_q[12 + i];
+    double jointAngleRad = currentSensorData->joint_data.joint_q[armJointStartIndex + i];
     jointStateMsg.position[i] = jointAngleRad * 180.0 / M_PI;  // 转换为角度
   }
 
@@ -2010,6 +2017,15 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   } else {
     ROS_ERROR("❌ [Quest3IkIncrementalROS] 'NUM_ARM_JOINT' field not found in JSON configuration");
     throw std::runtime_error("Missing 'NUM_ARM_JOINT' field in JSON configuration");
+  }
+
+  //从JSON配置读取腰部自由度数量
+  if (configJson.contains("NUM_WAIST_JOINT")) {
+    waist_dof_ = configJson["NUM_WAIST_JOINT"].get<int>();
+    ROS_INFO("✅ [Quest3IkIncrementalROS] Set waist DOF from JSON: %d", waist_dof_);
+  } else {
+    ROS_WARN("⚠️  [Quest3IkIncrementalROS] 'NUM_WAIST_JOINT' field not found in JSON configuration, using default value: 0");
+    waist_dof_ = 0;
   }
 
   // 初始化 sensorData 双臂关节角（14维，rad）指数均值滤波状态

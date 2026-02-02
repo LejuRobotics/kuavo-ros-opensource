@@ -169,6 +169,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   std::mutex transformerMutex_;  // 【新增】专门保护 Transformer 的更新和读取，避免竞态条件
 
   int jointStateSize_;
+  int waist_dof_;      // 腰部自由度数量（从JSON配置读取NUM_WAIST_JOINT）
   ArmIdx ctrlArmIdx_;  // 控制哪个手臂：LEFT, RIGHT, 或 BOTH
 
   std::unique_ptr<OneStageIKEndEffector> oneStageIkEndEffectorPtr_;
