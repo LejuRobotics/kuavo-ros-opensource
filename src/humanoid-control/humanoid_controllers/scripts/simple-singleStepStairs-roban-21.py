@@ -62,7 +62,7 @@ class EnhancedSlopeController:
     
     def __init__(self):
         # 全局高度管理
-        self.swing_height = 0.12
+        self.swing_height = 0.15
         self.torso_height = 0.0
 
         # 楼梯参数
@@ -285,7 +285,7 @@ class EnhancedSlopeController:
         step_z_increment = stair_height
         
         # 躯干位置偏置
-        torso_offset_x = 0.03
+        torso_offset_x = -0.00
 
         torso_offset_z = 0.03  # 仅第一步和最后一步生效
         

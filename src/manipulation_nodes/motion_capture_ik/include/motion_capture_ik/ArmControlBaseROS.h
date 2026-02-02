@@ -56,7 +56,6 @@ class ArmControlBaseROS {
   // Service clients and servers
   ros::ServiceClient changeArmCtrlModeClient_;
   ros::ServiceServer setArmModeChangingServer_;
-  ros::ServiceClient changeArmModeClient_;
 
   ros::ServiceClient humanoidArmCtrlModeClient_;
   ros::ServiceClient enableWbcArmTrajectoryControlClient_;

@@ -419,7 +419,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ArmControlMode newArmControlMode_ = ArmControlMode::AUTO_SWING;
   TorsoControlMode torsoControlMode_ = TorsoControlMode::SIX_DOF;
   double is_rl_controller_ = 0.0;  // RL控制器标志
-  double prev_is_rl_controller_ = 0.0;  // 上一次的RL控制器标志，用于检测切换
   bool isArmControlModeChanged_ = false;
   bool isArmControlModeChangedTrigger_ = false;
   bool isCalcArmControlModeChangedTime_ = false;

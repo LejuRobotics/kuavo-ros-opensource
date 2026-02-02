@@ -1397,17 +1397,14 @@ void Quest3IkIncrementalROS::activateController() {
 }
 
 void Quest3IkIncrementalROS::deactivateController() {
-  if (!changeArmModeClient_.exists()) return;
   if (!controllerActivated_.load()) return;
   if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
 
-  kuavo_msgs::changeArmCtrlMode srv1, srv2;
-  srv1.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
+  kuavo_msgs::changeArmCtrlMode srv2;
   srv2.request.control_mode = static_cast<int>(KuavoArmCtrlMode::ARM_FIXED);
 
   controllerActivated_.store(!(
-    changeArmModeClient_.call(srv1) && srv1.response.result &&
       humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&  //
       changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&    //
       true));
