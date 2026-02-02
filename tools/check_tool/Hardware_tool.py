@@ -727,7 +727,7 @@ def ruiwo_negtive():
     while True:
         print("请选择手臂总线类型：")
         print("1. 单CAN")
-        print("2. 双CAN（ROBAN2.1）")
+        print("2. 双CAN")
         choice = input("请输入选择 (1 或 2): ").strip()
 
         if choice == "1":
@@ -761,7 +761,7 @@ def ruiwo_negtive():
     while True:
         print("请选择手臂总线类型：")
         print("1. 单CAN")
-        print("2. 双CAN（ROBAN2.1）")
+        print("2. 双CAN")
         can_choice = input("请输入选择 (1 或 2): ").strip()
 
         if can_choice == "2":
