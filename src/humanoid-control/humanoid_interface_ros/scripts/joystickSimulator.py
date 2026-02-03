@@ -63,9 +63,9 @@ class SimulatedJoystick:
         elif key == 's':
             self.joy_msg.axes[AXIS_LEFT_STICK_X] = round(max(-1.0, self.joy_msg.axes[AXIS_LEFT_STICK_X] - 0.1), 3)
         elif key == 'a':
-            self.joy_msg.axes[AXIS_LEFT_STICK_Y] = round(min(1.0, self.joy_msg.axes[AXIS_LEFT_STICK_Y] + 0.1), 3)
+            self.joy_msg.axes[AXIS_LEFT_STICK_Y] = round(min(1.0, self.joy_msg.axes[AXIS_LEFT_STICK_Y] + 0.4), 3)
         elif key == 'd':
-            self.joy_msg.axes[AXIS_LEFT_STICK_Y] = round(max(-1.0, self.joy_msg.axes[AXIS_LEFT_STICK_Y] - 0.1), 3)
+            self.joy_msg.axes[AXIS_LEFT_STICK_Y] = round(max(-1.0, self.joy_msg.axes[AXIS_LEFT_STICK_Y] - 0.4), 3)
         elif key == 'i':
             self.joy_msg.axes[AXIS_RIGHT_STICK_Z] = round(min(1.0, self.joy_msg.axes[AXIS_RIGHT_STICK_Z] + 0.1), 3)
         elif key == 'k':
