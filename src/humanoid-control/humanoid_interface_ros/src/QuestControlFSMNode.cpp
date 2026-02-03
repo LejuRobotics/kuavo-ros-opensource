@@ -78,6 +78,7 @@ namespace ocs2
             arm_control_enabled_(false),
             arm_control_previous_(false),
             mode_changed_(false),
+            vr_torso_arm_locked_(false),
             last_execution_time_(ros::Time(0)),
             last_height_change_time_(ros::Time(0)),
             update_interval_(0.1),
@@ -874,7 +875,24 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 关闭手臂控制、自动摆手
                 {
-                    callSetArmModeSrv(0);
+                    if (robot_type_ == 2) // 人形机器人
+                    {
+                        callSetArmModeSrv(0);
+                    }
+                    else if (robot_type_ == 1) // 轮臂机器人,通过奇偶按键次数锁定/解锁
+                    {
+                        if (!vr_torso_arm_locked_) {
+                            // 第一次按：锁定手臂
+                            callSetArmModeSrv(0);
+                            vr_torso_arm_locked_ = true;
+                            ROS_INFO("[QuestControlFSM] VR torso mode: arm locked");
+                        } else {
+                            // 第二次按：解锁手臂，切换到BaseArm模式，允许底盘移动
+                            callSetArmModeSrv(2);
+                            vr_torso_arm_locked_ = false;
+                            ROS_INFO("[QuestControlFSM] VR torso mode: arm unlocked");
+                        }
+                    }
                 }
                 else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed) // 启用手臂控制
                 {
@@ -889,6 +907,11 @@ namespace ocs2
                     }
                     else {
                         callSetArmModeSrv(arm_ctrl_mode_);
+                    }
+
+                    if(1 == robot_type_) // 轮臂机器人
+                    {
+                        callWheelMpcControlMode(3);  // BaseArm mode
                     }
                 }
 
@@ -932,10 +955,6 @@ namespace ocs2
                             callVRWaistControlSrv(true);
                         }
 
-                        if(1 == robot_type_) // 轮臂机器人
-                        {
-                            callWheelMpcControlMode(3);  // BaseArm mode
-                        }
                     }
                     else
                     {
@@ -966,10 +985,6 @@ namespace ocs2
                             callVRWaistControlSrv(false);
                         }
 
-                        if(1 == robot_type_) // 轮臂机器人
-                        {
-                            callWheelMpcControlMode(3);  // BaseArm mode
-                        }
                         std::cout << "腰部控制模式已关闭，发送最后一帧 - 相对高度: " << last_relative_height_ 
                                   << ", body_pitch: " << last_body_pitch_ << std::endl;
                     }
@@ -1888,6 +1903,8 @@ namespace ocs2
         // RL控制器状态相关变量
         ros::Subscriber is_rl_controller_sub_;          // RL控制器状态订阅者
         bool is_rl_controller_{false};                 // 当前是否为RL控制器
+        
+        bool vr_torso_arm_locked_{false};              // 手臂是否被锁定（用于X+B奇偶判断）
     };
 }
 
