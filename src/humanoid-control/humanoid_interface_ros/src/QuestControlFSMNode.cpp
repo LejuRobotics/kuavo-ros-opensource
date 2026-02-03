@@ -149,6 +149,13 @@ namespace ocs2
             loadData::loadCppDataType(referenceFile, "vrSquatHeightMin", vr_squat_height_min_);
             loadData::loadCppDataType(referenceFile, "vrSquatHeightMax", vr_squat_height_max_);
             
+            // 加载腰部最大旋转角度
+            try {
+                loadData::loadCppDataType(referenceFile, "waist_yaw_max", waist_yaw_max_angle_deg_);
+            } catch (const std::exception &e) {
+                ROS_WARN_STREAM("waist_yaw_max not found, using default: " << waist_yaw_max_angle_deg_);
+            }
+            
             loadData::loadEigenMatrix(referenceFile, "standBaseState", stand_base_state_);
             loadData::loadEigenMatrix(referenceFile, "standJointState", stand_arm_state_);
 
@@ -947,7 +954,7 @@ namespace ocs2
                         whole_torso_ctrl_msg.data = true;
                         whole_torso_ctrl_pub_.publish(whole_torso_ctrl_msg);
 
-                        if(0 == waist_dof_ && 1 != robot_type_)
+                        if(1 != robot_type_)
                         {
                             // 失能GaitReceiver的自动步态模式
                             callAutoGaitModeSrv(false);
@@ -966,7 +973,7 @@ namespace ocs2
                         whole_torso_ctrl_pub_.publish(whole_torso_ctrl_msg);
                         std::cout << "腰部控制模式已关闭" << std::endl;
 
-                        if(0 == waist_dof_ && 1 != robot_type_)
+                        if(1 != robot_type_)
                         {
                             // 发送最后一帧，使用记录的relative_height和body_pitch
                             geometry_msgs::Twist cmd_pose;
@@ -1070,7 +1077,7 @@ namespace ocs2
             if (std::abs(right_y) < deadzone) right_y = 0.0f;
             
             // 控制腰部yaw（左右转动）
-            float yaw_sensitivity = 120.0f; // 灵敏度，与遥控器节点保持一致
+            float yaw_sensitivity = static_cast<float>(waist_yaw_max_angle_deg_); // 灵敏度，从配置文件读取
             float target_yaw = -1 * right_x * yaw_sensitivity;
             std::cout << "controling torso_yaw: " << target_yaw << std::endl;
             controlWaist(target_yaw);
@@ -1078,7 +1085,7 @@ namespace ocs2
 
         void controlWaist(double waist_yaw)
         {
-            double max_angle = 120.0;
+            double max_angle = waist_yaw_max_angle_deg_; // 从配置文件读取
             waist_yaw = std::max(-max_angle, std::min(waist_yaw, max_angle));
             kuavo_msgs::robotWaistControl msg;
             msg.header.stamp = ros::Time::now();
@@ -1858,6 +1865,7 @@ namespace ocs2
         std::vector<double> current_hand_wrench_right_force_;
         
         int waist_dof_{0};
+        double waist_yaw_max_angle_deg_{0.0};  // 腰部最大旋转角度（度），从配置文件加载
         double torso_pitch_zero_;
         double torso_yaw_zero_;
         double body_height_zero_;  // 记录进入控制模式时的高度零点

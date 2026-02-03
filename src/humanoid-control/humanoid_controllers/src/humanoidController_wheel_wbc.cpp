@@ -113,6 +113,9 @@ namespace humanoidController_wheel_wbc
     {
       controllerNh_.getParam("/use_external_mpc", enable_mpc_);
       std::cout << "enable_mpc: " << enable_mpc_ << std::endl;
+      // 设置 enable_manipulation_mpc 参数为 true
+      controllerNh_.setParam("/enable_manipulation_mpc", true);
+      std::cout << "enable_manipulation_mpc: true" << std::endl;
     }
     
     double controlFrequency = 500.0; // 1000Hz

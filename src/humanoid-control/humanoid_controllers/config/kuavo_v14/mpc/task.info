@@ -13,8 +13,10 @@ model_settings
   positionErrorGain_xy          0.0 ; 20.0
   velocityErrorGain_xy          0.3;
   positionErrorGain_zero        0.0; // positionErrorGain for zero velocity constraint
-  positionErrorGainXYStepControl     70 ;
+  positionErrorGainXYStepControl     30 ;
   velocityErrorGainXYStepControl     1.0 ;
+
+  positionErrorGainZStepControl  10.0 ; 20.0
 
   phaseTransitionStanceTime     0.4
 
@@ -593,7 +595,7 @@ stanceLegTask
 {
   real
   {
-    kp                   15  
+    kp                   30  
     kd                   8    
   }
   
@@ -715,7 +717,7 @@ weight
     accXY           0
     height          0
     angular         10
-    comPos          1.0
+    comPos          4.0
     contactForce    1.0
     stanceLeg       1000;0.05
     accArm          3.0

@@ -152,7 +152,7 @@
               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_arm_yaw"/>
               <geom size="0.035 0.025" pos="0 0 -0.125" type="capsule" group="3" class="collision"/>
               <body name="zarm_l4_link" pos="0 0 -0.188">
-                <inertial pos="-0.000535726 -0.000995834 -0.0951666" quat="0.988021 0.0163256 -0.0404651 -0.148024" mass="0.163218" diaginertia="0.000871953 0.000808373 0.000116187" />
+                <inertial pos="-0.00053695 -0.000929541 -0.134958" quat="0.988063 0.0167967 -0.040532 -0.14767" mass="0.563218" diaginertia="0.000869641 0.000806131 0.000116147" />
                 <joint name="zarm_l4_joint" pos="0 0 0" axis="0 1 0" range="-2.26893 0" damping="0.01" frictionloss="0.01"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_forearm"/>
                 <geom size="0.03 0.015" quat="0.707388 0.706825 0 0" type="capsule" group="3" class="collision"/>
@@ -178,7 +178,7 @@
               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_yaw"/>
               <geom size="0.035 0.025" pos="0 0 -0.125" type="capsule" group="3" class="collision"/>
               <body name="zarm_r4_link" pos="0 0 -0.188">
-                <inertial pos="-0.000535726 0.000995834 -0.0951666" quat="0.988021 -0.0163256 -0.0404651 0.148024" mass="0.163218" diaginertia="0.000871953 0.000808373 0.000116187" />
+                <inertial pos="-0.00053695 0.000929541 -0.134958" quat="0.988063 -0.0167967 -0.040532 0.14767" mass="0.563218" diaginertia="0.000869641 0.000806131 0.000116147" />
                 <joint name="zarm_r4_joint" pos="0 0 0" axis="0 1 0" range="-2.26893 0" damping="0.01" frictionloss="0.01"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_forearm"/>
                 <geom size="0.03 0.015" quat="0.707388 0.706825 0 0" type="capsule" group="3" class="collision"/>

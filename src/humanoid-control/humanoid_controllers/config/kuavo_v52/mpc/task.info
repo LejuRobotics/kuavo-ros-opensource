@@ -16,6 +16,8 @@ model_settings
   positionErrorGainXYStepControl     50 ;
   velocityErrorGainXYStepControl     1.0 ;
 
+  positionErrorGainZStepControl  20.0 ; 20.0
+
   phaseTransitionStanceTime     0.4
 
   verboseCppAd                  false
@@ -555,7 +557,7 @@ centerOfMass
   useRelaxedBarrier  true
   
   ; For relaxed barrier penalty
-  mu      10     ; barrier parameter (smaller = tighter constraint)
+  mu      100    ; barrier parameter (smaller = tighter constraint)
   delta   1e-5     ; relaxation parameter
   
   ; For quadratic penalty (only used if useRelaxedBarrier = false)

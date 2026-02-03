@@ -5,6 +5,7 @@ umap-learn<=0.5.5 # funasr的依赖，过高版本会依赖不存在的scikit-le
 funasr # 1.2.7可用
 torch # 1.13.1+cpu可用
 torchaudio
+pandas==2.0.3
 
 # 数据处理
 numpy<=1.24 # 过高版本可能引起np.bool错误

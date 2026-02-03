@@ -9,12 +9,14 @@ humanoid_interface
 
 model_settings
 {
-  positionErrorGain             10.0 ; 20.0
+  positionErrorGain             5.0 ; 20.0
   positionErrorGain_xy          0.0 ; 20.0
-  velocityErrorGain_xy          1.0;
-  positionErrorGain_zero        5.0; // positionErrorGain for zero velocity constraint
+  velocityErrorGain_xy          0.3;
+  positionErrorGain_zero        0.0; // positionErrorGain for zero velocity constraint
   positionErrorGainXYStepControl     70 ;
   velocityErrorGainXYStepControl     1.0 ;
+
+  positionErrorGainZStepControl  10.0 ; 20.0
 
   phaseTransitionStanceTime     0.4
 
@@ -553,11 +555,11 @@ Wbc_rdd_K_
   {
   (0,0)   30.72136   ; r_x
   (1,1)   10.0   ; r_y
-  (2,2)   20.32456   ; r_z
+  (2,2)   44.32456   ; r_z
 
   (0,3)   5.92899   ; rd_x 
   (1,4)   5.47723   ; rd_y
-  (2,5)   1.25597  ; rd_z 
+  (2,5)   5.25597  ; rd_z 
   }
 }
 ;44.72136, 0.00000, -0.00000, 10.92899, 0.00000, -0.00000,
@@ -593,8 +595,8 @@ stanceLegTask
 {
   real
   {
-    kp                   0  
-    kd                   0    
+    kp                   15  
+    kd                   8    
   }
   
   sim
@@ -620,8 +622,8 @@ baseAngularTask
 {
     kp                   
     {
-      (0,0)               120                ; x
-      (1,0)               120                ; y
+      (0,0)               60                ; x
+      (1,0)               60                ; y
       (2,0)               70                ; z
     }
     kd                  
@@ -695,11 +697,11 @@ waistAccelTask
 {
   kp
   {
-    (0,0)   100.00   ; waist_yaw
+    (0,0)   80.00   ; waist_yaw
   }
   kd
   {
-    (0,0)   10.0     ; waist_yaw
+    (0,0)   60.0     ; waist_yaw
   }
 }
 
@@ -715,7 +717,7 @@ weight
     accXY           0
     height          0
     angular         10
-    comPos          10.0
+    comPos          1.0
     contactForce    1.0
     stanceLeg       1000;0.05
     accArm          3.0
@@ -723,7 +725,7 @@ weight
   }
   walk
   {
-    swingLeg        100
+    swingLeg        500
     accXY           0
     height          0
     angular         10

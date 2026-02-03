@@ -163,7 +163,6 @@ namespace ocs2
 #define JOYSTICK_BEITONG_MAP_JSON "bt2pro"
 #define JOYSTICK_BEITONG_BUTTON_NUM 16
 #define JOYSTICK_AXIS_NUM 8
-#define WAIST_YAW_MAX_ANGLE_DEG 180.0  // 腰部最大旋转角度（度），±180度
 
   class JoyControl
   {
@@ -282,8 +281,8 @@ namespace ocs2
       Eigen::Vector4d joystickFilterCutoffFreq_(joystickSensitivity, joystickSensitivity, 
                                                   joystickSensitivity, joystickSensitivity);
       joystickFilter_.setParams(0.01,joystickFilterCutoffFreq_);
-      old_joy_msg_.axes = std::vector<float>(8, 0.0);     // 假设有 8 个轴，默认值为 0.0
-      old_joy_msg_.buttons = std::vector<int32_t>(12, 0);
+      old_joy_msg_.axes = std::vector<float>(JOYSTICK_AXIS_NUM, 0.0);     // 假设有 8 个轴，默认值为 0.0
+      old_joy_msg_.buttons = std::vector<int32_t>(JOYSTICK_XBOX_BUTTON_NUM, 0);
       // Get node parameters
       std::string referenceFile;
       nodeHandle.getParam("/referenceFile", referenceFile);
@@ -323,6 +322,13 @@ namespace ocs2
         std::cout << "cmdvelLinearZLimit:" << c_relative_base_limit_[2] << std::endl;
 
         loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
+        
+        // 加载腰部最大旋转角度
+        try {
+          loadData::loadCppDataType(referenceFile, "waist_yaw_max", waist_yaw_max_angle_deg_);
+        } catch (const std::exception &e) {
+          ROS_WARN_STREAM("waist_yaw_max not found, using default: " << waist_yaw_max_angle_deg_);
+        }
 
         // gait
         std::string gaitCommandFile;
@@ -881,6 +887,9 @@ namespace ocs2
       vector_t joystickOriginAxisTemp_ = vector_t::Zero(6);
       double alpha_ = joystickSensitivity / 1000;
 
+      if (joy_msg->axes.size() != JOYSTICK_AXIS_NUM || (joy_msg->buttons.size() != JOYSTICK_BEITONG_BUTTON_NUM && joy_msg->buttons.size() != JOYSTICK_XBOX_BUTTON_NUM)) {
+        return;
+      }
       if (std::any_of(joy_msg->buttons.begin(), joy_msg->buttons.end(), [](float button) {
               return std::abs(button) > 1;
           }))
@@ -1080,7 +1089,7 @@ namespace ocs2
           }
           
           double waist_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
-          waist_yaw = WAIST_YAW_MAX_ANGLE_DEG * waist_yaw;   // +- WAIST_YAW_MAX_ANGLE_DEG deg
+          waist_yaw = waist_yaw_max_angle_deg_ * waist_yaw;   // +- waist_yaw_max_angle_deg_ deg
           // std::cout << "waist_yaw: " << waist_yaw << std::endl;
           controlWaist(waist_yaw);
         }
@@ -1273,6 +1282,12 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
       {
+        // RL控制器下，ROBAN2禁用按Y进入踏步
+        if (is_rl_controller_ && rb_version_.major() == 1)
+        {
+          ROS_WARN("[JoyControl] Walk gait is disabled for ROBAN2 under RL controller");
+          return;
+        }
         publishGaitTemplate("walk");
       }
       else
@@ -1408,7 +1423,7 @@ namespace ocs2
       }
 
       /*******************下蹲超过阈值则不允许踏步***********************/
-      static bool last_auto_gait_state = false;
+      static bool last_auto_gait_state = true;
       const double height_diff_max = 0.1;  // 10厘米
 
       if (std::fabs(cmdVel.linear.z) > height_diff_max && cur_gait_name_ == "stance")
@@ -1836,6 +1851,7 @@ namespace ocs2
     // 腰部控制状态跟踪
     bool waist_control_active_{false};  // 标记是否正在控制腰部（模式2）
     int waist_dof_{0};  // 腰部自由度，只有>0时才进行腰部控制
+    double waist_yaw_max_angle_deg_{0.0};  // 腰部最大旋转角度（度），从配置文件加载
   };
 }
 

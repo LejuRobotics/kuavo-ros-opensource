@@ -12,6 +12,8 @@
 #include "kuavo_msgs/armTargetPoses.h"
 #include "kuavo_msgs/changeArmCtrlMode.h"
 #include "humanoid_interface/command/HumanoidHandTarget.h"
+#include <std_msgs/Float64.h>
+#include <std_msgs/Float64MultiArray.h>
 
 using namespace ocs2;
 
@@ -29,6 +31,8 @@ public:
         observationSub_ = nh_.subscribe(robotName_ + "_wbc_observation", 10, &ArmTrajectoryCommandNode::observationCallback, this);
         arm_traj_mode_service_server_ = nh_.advertiseService("/arm_traj_change_mode",  &ArmTrajectoryCommandNode::changeArmCtlModeCallback, this);
         get_arm_mode_service_client_ = nh_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_get_arm_ctrl_mode");
+        is_rl_controller_sub_ = nh_.subscribe("/humanoid_controller/is_rl_controller_", 10, &ArmTrajectoryCommandNode::isRlControllerCallback, this);
+        arm_control_mode_sub_ = nh_.subscribe("/humanoid/mpc/arm_control_mode", 10, &ArmTrajectoryCommandNode::armControlModeCallback, this);
 
     }
 
@@ -63,6 +67,7 @@ private:
         nh_.param("/defaultJointState", defaultJointState_, std::vector<double>(12, 0.0));
 
         control_mode_ = 0;   // Set default control mode
+        is_rl_controller_ = 0.0;  // Initialize RL controller flag
     }
 
     void commandCallback(const kuavo_msgs::armTargetPoses::ConstPtr& msg) {
@@ -159,6 +164,32 @@ private:
         return {timeTrajectory, stateTrajectory, inputTrajectory};
     }
 
+    void isRlControllerCallback(const std_msgs::Float64::ConstPtr& msg) {
+        is_rl_controller_ = msg->data;
+    }
+
+    void armControlModeCallback(const std_msgs::Float64MultiArray::ConstPtr& msg) {
+        if(msg->data.size() == 0)
+        {
+            ROS_ERROR("[ArmTrajNode]: The dimension of arm control mode is 0!!");
+            return;
+        }
+        
+        // 根据RL模式选择使用哪个值来更新control_mode_
+        if (is_rl_controller_) {
+            // RL模式下使用mpcArmControlMode_desired_ (msg->data[1])
+            if(msg->data.size() > 1) {
+                control_mode_ = static_cast<int>(msg->data[1]);
+            } else {
+                ROS_WARN("[ArmTrajNode]: RL mode but arm_control_mode data size < 2, using data[0]");
+                control_mode_ = static_cast<int>(msg->data[0]);
+            }
+        } else {
+            // 非RL模式下使用mpcArmControlMode_ (msg->data[0])
+            control_mode_ = static_cast<int>(msg->data[0]);
+        }
+    }
+
     bool getArmCtlModeSrv(){
         // 创建获取control_mode的服务请求
         kuavo_msgs::changeArmCtrlMode get_mode_srv;
@@ -183,11 +214,11 @@ private:
         std::cout << "[ArmTrajNode]: Arm control mode changed to " << control_mode << "\n";
 
         // 当前control mode与目标相同时
-        if(getArmCtlModeSrv())
+        // if(getArmCtlModeSrv())
         {
             if (control_mode == control_mode_) return true;
         }
-        else return false;
+        // else return false;
 
         callSetArmModeSrv(control_mode);
         // 等待OCS2 轨迹初始点同步
@@ -217,11 +248,15 @@ private:
                 ROS_ERROR("[ArmTrajNode]: Change mode timeout exceeded 2 seconds");
                 break;
             }
+            
+            // 处理其他ROS回调，让armControlModeCallback等能够更新
+            ros::spinOnce();
+            
             trajectoryPublisher_.publish(mpczeroTrajectoriesMsg);
 
-            if (getArmCtlModeSrv())
+            // if (getArmCtlModeSrv())
             {
-                // std::cout << "mode_srv control mode : " << control_mode_ << std::endl;
+                std::cout << "mode_srv control mode : " << control_mode_ << std::endl;
                 if (control_mode_ == control_mode) is_mode_change_success = true;
             }
 
@@ -264,6 +299,8 @@ private:
     std::unique_ptr<TargetTrajectoriesRosPublisher> targetTrajectoriesPublisherPtr_;
     ros::Subscriber commandSub_;
     ros::Subscriber observationSub_;
+    ros::Subscriber is_rl_controller_sub_;
+    ros::Subscriber arm_control_mode_sub_;
     ros::Publisher trajectoryPublisher_;
     ros::Publisher ArmTargetTrajectoriesPublisher_;
 
@@ -281,6 +318,7 @@ private:
     int half_num_mpc_arm_joints_;
     int control_mode_;
     bool enable_ctrl_{false};
+    double is_rl_controller_;  // RL控制器标志
 
     bool isFistTrajAfterChangeMode = true;
     vector_t initstate_;
