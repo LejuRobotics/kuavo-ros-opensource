@@ -372,7 +372,7 @@ from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.msg import sensorsData
 from kuavo_msgs.msg import AprilTagDetectionArray
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
-from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest, robotSwitchPose, robotSwitchPoseRequest,from kuavo_msgs.srv import changeArmCtrlModeRequest, changeArmCtrlMode
+from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest, robotSwitchPose, robotSwitchPoseRequest,changeArmCtrlModeRequest, changeArmCtrlMode
 from std_msgs.msg import Bool, Float64MultiArray
 from nav_msgs.msg import OccupancyGrid, Odometry
 import cv2
