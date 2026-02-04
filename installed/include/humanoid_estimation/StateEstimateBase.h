@@ -171,6 +171,15 @@ namespace ocs2
         return first_value;
       }
 
+      void resetPullUpFilter()
+      {
+        total_est_contact_force_ = robotMass_ * 9.81;
+        last_pullup_state_ = false;
+        pullup_window_.clear();
+        last_pullup_check_time_ = ros::Time(); // 重置时间戳，让下次调用时重新初始化
+        std::cout << "[StateEstimateBase] resetPullUpFilter called" << std::endl;
+      }
+
       vector_t getBodyVelWorld()
       {
         vector_t body_vel(6);

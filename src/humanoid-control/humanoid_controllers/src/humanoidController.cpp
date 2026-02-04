@@ -934,6 +934,14 @@ namespace humanoid_controller
         {
           mpcArmControlMode_ = static_cast<ArmControlMode>(msg->data[0]);
           std::cout << "[controller] mpc arm control mode changed to: " << mpcArmControlMode_ << std::endl;
+          
+          // 模式切换时重置拉起保护滤波器（避免模式切换时的接触力变化导致误触发）
+          if (stateEstimate_)
+          {
+            stateEstimate_->resetPullUpFilter();
+            ROS_INFO("[HumanoidController] Reset pullup filter due to mode switch (from %d to %d)", 
+                     static_cast<int>(mpcArmControlMode_));
+          }
         }
         if (msg->data[1] != mpcArmControlMode_desired_)
         {
