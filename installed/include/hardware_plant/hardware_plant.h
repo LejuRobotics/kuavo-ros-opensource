@@ -308,7 +308,8 @@ private:
     std::unique_ptr<std::array<double, 12>> stance_leg_joint_pos_ = nullptr;
 
     // 辅助函数：从配置文件读取反转电机地址列表
-    std::set<int> loadNegativeMotorAddresses() const;
+    // 根据CAN总线模式选择配置文件：单/双CAN使用canbus_device_cofig.yaml，否则使用config.yaml
+    std::set<int> loadNegativeMotorAddresses(HighlyDynamic::CanbusWiringType canbus_mode) const;
 
 public:
     // Virtual methods for DDS functionality (implemented in derived classes)
