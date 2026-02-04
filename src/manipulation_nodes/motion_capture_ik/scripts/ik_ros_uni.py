@@ -689,7 +689,9 @@ class IkRos:
                         # 正常情况，使用正常速度限制
                         shoulder_vel_limit = 120.0  # deg/s
                     # print(f"shoulder_vel_limit: {shoulder_vel_limit}")
-                    arm_q_filtered = self.limit_angle_by_velocity(q_last[-self.__arm_dof:], arm_q_filtered, vel_limit=720, shoulder_vel_limit=shoulder_vel_limit)
+                    # 手臂模式切换时不进行关节速度限制
+                    if not self.arm_mode_changing:
+                        arm_q_filtered = self.limit_angle_by_velocity(q_last[-self.__arm_dof:], arm_q_filtered, vel_limit=720, shoulder_vel_limit=shoulder_vel_limit)
                     
                     msg.data = arm_q_filtered * 180.0 / np.pi
                     self.pub_filtered_joint.publish(msg)
@@ -1219,6 +1221,11 @@ class IkRos:
             # 检测模式切换：当data[0] != data[1]时表示正在切换，重置IK初始猜测
             if current_mode != new_mode:
                 self.__need_reset_ik_guess = True
+                self.arm_mode_changing = True
+            else:
+                # 模式切换完成，关闭arm_mode_changing标志
+                if not self.only_half_up_body:
+                    self.arm_mode_changing = False
                 
             
     def sensor_data_raw_callback(self, msg):

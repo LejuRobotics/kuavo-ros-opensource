@@ -372,7 +372,7 @@ from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.msg import sensorsData
 from kuavo_msgs.msg import AprilTagDetectionArray
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
-from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest, robotSwitchPose, robotSwitchPoseRequest,from kuavo_msgs.srv import changeArmCtrlModeRequest, changeArmCtrlMode
+from kuavo_msgs.srv import adjustZeroPoint, adjustZeroPointRequest, LoadMap, LoadMapRequest, GetAllMaps, GetAllMapsRequest,SetInitialPose, SetInitialPoseRequest, robotSwitchPose, robotSwitchPoseRequest,changeArmCtrlModeRequest, changeArmCtrlMode
 from std_msgs.msg import Bool, Float64MultiArray
 from nav_msgs.msg import OccupancyGrid, Odometry
 import cv2
@@ -1586,7 +1586,8 @@ async def get_robot_info_handler(
             "maps_folder_path": MAP_FILE_FOLDER,
             "h12_config_path": H12_CONFIG_PATH,
             "repo_path": REPO_PATH,
-            "vr_recording_path": vr_recording_path
+            "vr_recording_path": vr_recording_path,
+            "workspace_setup_path": os.path.join(KUAVO_ROS_CONTROL_WS_PATH, "devel", "setup.bash")
         }
     )
 

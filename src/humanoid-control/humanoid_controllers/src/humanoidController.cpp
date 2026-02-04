@@ -2624,7 +2624,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             prev_filtered_pos = filtered_pos;
             low_latency_first_enter = false;
           }
-          vector_t computed_vel = (filtered_pos - prev_filtered_pos) / dt_;
+          // vector_t computed_vel = (filtered_pos - prev_filtered_pos) / dt_;
+          vector_t computed_vel = vector_t::Zero(armNumReal_);
             
             // 3. 对计算出的速度再次滤波
           optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(computed_vel);
@@ -3265,6 +3266,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         ros_logger_->publishValue("/rl_controller/rl_optimized_mode_", static_cast<double>(plannedMode_));
       }
 
+      if(!is_simplified_model_)
+      {
+        stateEstimate_->estArmContactForce(period);
+        auto arm_force_simple = stateEstimate_->getEstArmContactForce();
+        ros_logger_->publishVector("/state_estimate/arm_contact_force", arm_force_simple);
+      }
+      
       auto est_mode = stateEstimate_->ContactDetection(nextMode_, is_stance_mode_, plannedMode_, robotMass_, est_contact_force(2), est_contact_force(8), diff_time);
       ros_logger_->publishValue("/state_estimate/Contact_Detection/mode", static_cast<double>(est_mode));
       if (!use_estimator_contact_)
@@ -3410,9 +3418,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       wbc_observation_publisher_.publish(ros_msg_conversions::createObservationMsg(currentObservationWBC_));
      
       // 手臂末端接触力估计，完整模型计算
-      stateEstimate_->setArmForceInputs(measuredRbdStateReal_, activeTorqueWBC);
-      stateEstimate_->estArmContactForce(period);
-      ros_logger_->publishVector("/state_estimate/arm_contact_force", stateEstimate_->getEstArmContactForce());
+      if(is_simplified_model_ && !is_roban_)
+      {
+        stateEstimate_->setArmForceInputs(measuredRbdStateReal_, activeTorqueWBC);
+        stateEstimate_->estArmContactForce(period);
+        ros_logger_->publishVector("/state_estimate/arm_contact_force", stateEstimate_->getEstArmContactForce());
+      }
+
       setRobotState(measuredRbdStateReal_);
       ros_logger_->publishVector("/state_estimate/measuredRbdStateReal", measuredRbdStateReal_);
 
@@ -3626,7 +3638,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     currentObservation_.time = 0;
 
     // 若 MPC 使用简化模型（例如手臂DOF从14降到8），则在估计器内部再配置一套 WBC/full Pinocchio 模型，仅用于手臂末端接触力估计（保持 MPC 估计主链路维度不变）
-    if (is_simplified_model_ && pinocchioInterfaceWBCPtr_) 
+    if (is_simplified_model_ && pinocchioInterfaceWBCPtr_ && !is_roban_) 
     {
       std::cout << "set Full Arm Force Model." << std::endl;
       stateEstimate_->setFullArmForceModel(*pinocchioInterfaceWBCPtr_, centroidalModelInfoWBC_);

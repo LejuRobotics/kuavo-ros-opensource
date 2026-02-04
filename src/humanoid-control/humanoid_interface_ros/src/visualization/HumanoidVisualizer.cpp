@@ -290,6 +290,12 @@ namespace ocs2
 
         const auto timeStamp = ros::Time::now();
         publishObservation(timeStamp, observation);
+        if (primalSolution.inputTrajectory_.empty() || primalSolution.inputTrajectory_[0].size() > 2048 ||
+          primalSolution.timeTrajectory_.size() == 0 || primalSolution.stateTrajectory_.size() == 0)
+        {
+          lastTime_ = observation.time;
+          return;
+        }
         publishDesiredTrajectory(timeStamp, command.mpcTargetTrajectories_);
         publishOptimizedStateTrajectory(timeStamp, primalSolution.timeTrajectory_, primalSolution.stateTrajectory_,
                                         primalSolution.modeSchedule_);
