@@ -49,7 +49,7 @@
     <arg name="visualize_humanoid" default="true"/>
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <!-- 根据机器人类型设置only_half_up_body参数 -->
-    <arg name="only_half_up_body" default="true" if="$(eval arg('robot_type') == 1)"/>    <!-- 轮臂机器人 -->
+    <arg name="only_half_up_body" default="false" if="$(eval arg('robot_type') == 1)"/>    <!-- 轮臂机器人 -->
     <arg name="only_half_up_body" default="false" unless="$(eval arg('robot_type') == 1)"/> <!-- 双足机器人 -->
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
