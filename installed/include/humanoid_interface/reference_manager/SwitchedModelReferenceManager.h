@@ -58,6 +58,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ros/ros.h>
 #include "humanoid_interface/common/TopicLogger.h"
 #include <std_srvs/Empty.h>
+#include <std_msgs/Float64.h>
 #include <ocs2_centroidal_model/CentroidalModelRbdConversions.h>
 #include <map>
 
@@ -225,7 +226,12 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool getArmControlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
   {
     res.result = true;
-    res.mode = currentArmControlMode_;
+    // 如果是RL控制模式下，使用newArmControlMode_，否则使用currentArmControlMode_
+    if (is_rl_controller_ != 0.0) {
+      res.mode = newArmControlMode_;
+    } else {
+      res.mode = currentArmControlMode_;
+    }
     return true;
   };
 
@@ -258,7 +264,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   void checkSingleStepControlAndStop();
 
   void generateTargetwithTorsoMove(scalar_t initTime, const vector_t &initState, const vector_t &torsoDisplacement,
-                                    const TargetTrajectories &targetTrajectories, vector_t &finalState, double &torso_max_time, double velocity_scale = 2.0);
+                                    const TargetTrajectories &targetTrajectories, vector_t &finalState, double &torso_max_time, const vector6_t &velocity_scale);
 
   std::shared_ptr<GaitSchedule> gaitSchedulePtr_;
   std::shared_ptr<SwingTrajectoryPlanner> swingTrajectoryPtr_;
@@ -345,10 +351,10 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::Subscriber fullBodyTargetTrajectoriesSubscriber_;
   ros::Subscriber estContactStateSubscriber_;
   ros::Subscriber slope_planning_sub_;
+  ros::Subscriber is_rl_controller_sub_;
   ros::Publisher footContactPointPublisher_;
   ros::Publisher footDesiredPointPublisher_;
   ros::Publisher gaitTimeNamePublisher_;
-  ros::Publisher waistTargetCommandedPublisher_;
   ros::Publisher armTargetCommandedPublisher_;
   ros::Publisher isCustomGaitPublisher_;
   ros::Publisher singleStepModePublisher_;
@@ -412,11 +418,13 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ArmControlMode currentArmControlMode_ = ArmControlMode::AUTO_SWING;
   ArmControlMode newArmControlMode_ = ArmControlMode::AUTO_SWING;
   TorsoControlMode torsoControlMode_ = TorsoControlMode::SIX_DOF;
+  double is_rl_controller_ = 0.0;  // RL控制器标志
+  double prev_is_rl_controller_ = 0.0;  // 上一次的RL控制器标志，用于检测切换
   bool isArmControlModeChanged_ = false;
   bool isArmControlModeChangedTrigger_ = false;
   bool isCalcArmControlModeChangedTime_ = false;
   scalar_t arm_mode_change_start_time_ = -1.0;  // 模式切换开始时间，-1表示未开始切换
-  scalar_t min_arm_mode_change_time_ = 1.5;  // 最小模式切换时间（秒）
+  scalar_t min_arm_mode_change_time_ = 0.5;  // 最小模式切换时间（秒）
   bool update_stop_single_step_ = false;
 
   bool begin_step_gait = false;
@@ -449,6 +457,8 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool ismdPoseInWorldFrameCached_ = false;
 
   ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.15, 0.2, 0.4, 0.3, 0.4};
+  // velocity_scale: x, z, pitch, yaw用0.35，y用0.15
+  vector6_t torso_velocity_scale_;
   double cmd_threshold = 0.02;
 
   InverseKinematics inverseKinematics_;

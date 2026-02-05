@@ -39,6 +39,26 @@ public:
         return y_;
     }
 
+    void reset()
+    {
+        y_prev_.setZero();
+        y_.setZero();
+    }
+
+    // 将滤波器内部状态重置到指定输出位置，使得在输入与该值一致时无瞬态
+    void reset(const Eigen::VectorXd &value)
+    {
+        if (value.size() != y_prev_.size())
+        {
+            // 尺寸不匹配则退化为清零
+            y_prev_.setZero();
+            y_.setZero();
+            return;
+        }
+        y_prev_ = value;
+        y_ = value;
+    }
+
 private:
     Eigen::VectorXd alpha_;
     Eigen::VectorXd y_prev_;

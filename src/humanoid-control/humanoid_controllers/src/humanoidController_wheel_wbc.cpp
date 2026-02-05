@@ -113,6 +113,9 @@ namespace humanoidController_wheel_wbc
     {
       controllerNh_.getParam("/use_external_mpc", enable_mpc_);
       std::cout << "enable_mpc: " << enable_mpc_ << std::endl;
+      // 设置 enable_manipulation_mpc 参数为 true
+      controllerNh_.setParam("/enable_manipulation_mpc", true);
+      std::cout << "enable_manipulation_mpc: true" << std::endl;
     }
     
     double controlFrequency = 500.0; // 1000Hz
@@ -1109,11 +1112,29 @@ namespace humanoidController_wheel_wbc
         // 使用滤波后的关节角度（转换为度）
         for(int i = 0; i < lowJointNum_; ++i)
         {
+          leg_traj_msg.name[i] = "leg_joint_" + std::to_string(i+1);
           leg_traj_msg.position[i] = target_qpos[i] * 180.0 / M_PI;  // 弧度转角度
         }
         
         lbLegTrajPub_.publish(leg_traj_msg);
       }
+      // 如果当前躯干模式为false，上一躯干模式为true，则下发一次 0 指令作为终止
+      static bool pre_torso_ctrl = whole_torso_ctrl;
+
+      if(whole_torso_ctrl == false && pre_torso_ctrl == true)
+      {
+        sensor_msgs::JointState leg_traj_msg;
+        leg_traj_msg.header.stamp = ros::Time::now();
+        leg_traj_msg.name.resize(lowJointNum_);
+        leg_traj_msg.position.resize(lowJointNum_, 0.0);
+        leg_traj_msg.velocity.resize(lowJointNum_, 0.0);
+        for(int i = 0; i < lowJointNum_; ++i)
+        {
+          leg_traj_msg.name[i] = "leg_joint_" + std::to_string(i+1);
+        }
+        lbLegTrajPub_.publish(leg_traj_msg);
+      }
+      pre_torso_ctrl = whole_torso_ctrl;
     }
 
     if(use_arm_trajectory_control_)

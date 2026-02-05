@@ -56,9 +56,8 @@ class ArmControlBaseROS {
   // Service clients and servers
   ros::ServiceClient changeArmCtrlModeClient_;
   ros::ServiceServer setArmModeChangingServer_;
+  ros::ServiceClient changeArmModeClient_;
 
-  //[CZJ]TODO: 确保这些服务在不同子类中被正确初始化，调用
-  ros::ServiceClient changeMobileCtrlModeClient_;
   ros::ServiceClient humanoidArmCtrlModeClient_;
   ros::ServiceClient enableWbcArmTrajectoryControlClient_;
 
@@ -92,6 +91,7 @@ class ArmControlBaseROS {
   double thresholdArmDiffHalfUpBody_rad_;
   bool controlTorso_;
   bool enableWbcArmTrajectory_;
+  int waist_dof_;  // 腰部自由度数量（从JSON配置读取NUM_WAIST_JOINT）
 
   std::mutex sensorDataRawMutex_;
   std::shared_ptr<kuavo_msgs::sensorsData> sensorDataRaw_;

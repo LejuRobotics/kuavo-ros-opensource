@@ -1,4 +1,12 @@
 #include"kuavo_solver/ankle_solver.h"
+#include"kuavo_solver/roban_ankle_solver.h"
+#include <memory>
+
+void kuavo_solver::Roban_ankle_solver_deleter::operator()(Roban_ankle_solver* p) const {
+    delete p;
+}
+AnkleSolver::~AnkleSolver() = default;
+
 void AnkleSolver::getconfig(const int ankle_solver_type)
 {
     std::cout << "ankle_solver_type: " << ankle_solver_type << std::endl;
@@ -238,6 +246,86 @@ void AnkleSolver::getconfig(const int ankle_solver_type)
         ankle_pitch_limits_ << -0.872664625997165, 0.523598775598299;
         ankle_roll_limits_ << -0.261799387799149, 0.261799387799149;
     }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN_2)
+    {
+        // S2GEN_2 使用硬编码参数配置
+        config.resize(37);
+        // 硬编码参数
+        double z_pitch = -0.346;
+        // 左脚踝左肌腱等效力点
+        double x_lleq = 0.0385; double y_lleq = 0.0207;  double z_lleq = -0.01;
+        // 左脚踝右肌腱等效力点
+        double x_lreq = 0.0385; double y_lreq = -0.0207; double z_lreq = -0.01;
+        // 左脚踝执行器杆位置（y 坐标从等效力点推断，z 坐标从配置读取）
+        double y_llbar = 0.0206743;   double z_llbar = -0.153;  // 使用 l_l_tendon 的 y 坐标
+        double y_lrbar = -0.0206743;  double z_lrbar = -0.09;   // 使用 l_r_tendon 的 y 坐标
+        // 左脚踝肌腱附着点
+        double x_lltd = 0.044; double y_lltd = 0.0206743; double z_lltd = -0.0100784;
+        double x_lrtd = 0.044; double y_lrtd = -0.0206743; double z_lrtd = -0.0100784;
+        // 左脚踝初始肌腱长度
+        double l0_ll_eqtd = 0.19299998551049166;
+        double l0_lr_eqtd = 0.25599998937207;
+        // 左脚踝执行器杆长度（从 sqrt(y_lltd^2 + z_lltd^2) 计算得出）
+        double l_llbar = 0.023000017979341;  // sqrt(0.0206743^2 + 0.0100784^2)
+        double l_lrbar = 0.023000017979341;  // sqrt(0.0206743^2 + 0.0100784^2)
+
+        // 右脚踝参数（与左脚踝对称）
+        double x_rleq = 0.0385; double y_rleq = 0.0207;  double z_rleq = -0.01;
+        double x_rreq = 0.0385; double y_rreq = -0.0207; double z_rreq = -0.01;
+        double y_rlbar = 0.0206743;   double z_rlbar = -0.09;   // 使用 r_l_tendon 的 y 坐标
+        double y_rrbar = -0.0206743;  double z_rrbar = -0.153; // 使用 r_r_tendon 的 y 坐标
+        double x_rltd = 0.044; double y_rltd = 0.0206743; double z_rltd = -0.0100784;
+        double x_rrtd = 0.044; double y_rrtd = -0.0206743; double z_rrtd = -0.0100784;
+        double l0_rl_eqtd = 0.25599998937207;
+        double l0_rr_eqtd = 0.19299998551049166;
+        // 右脚踝执行器杆长度（从 sqrt(y_rltd^2 + z_rltd^2) 计算得出）
+        double l_rlbar = 0.023000017979341;  // sqrt(0.0206743^2 + 0.0100784^2)
+        double l_rrbar = 0.023000017979341;  // sqrt(0.0206743^2 + 0.0100784^2)
+        config << z_pitch, 
+                  x_lleq, y_lleq, z_lleq, 
+                  x_lreq, y_lreq, z_lreq, 
+                  y_llbar, z_llbar, 
+                  y_lrbar, z_lrbar, 
+                  x_lltd, z_lltd, 
+                  x_lrtd, z_lrtd, 
+                  l0_ll_eqtd, l0_lr_eqtd, 
+                  l_llbar, l_lrbar, 
+                  x_rleq, y_rleq, z_rleq, 
+                  x_rreq, y_rreq, z_rreq, 
+                  y_rlbar, z_rlbar, 
+                  y_rrbar, z_rrbar, 
+                  x_rltd, z_rltd, 
+                  x_rrtd, z_rrtd, 
+                  l0_rl_eqtd, l0_rr_eqtd, 
+                  l_rlbar, l_rrbar;
+        // 左脚pitch限位
+        ankle_pitch_limits_ << -0.38397, 0.73304;
+        ankle_roll_limits_ << -0.261799387799149, 0.261799387799149;
+        
+        // 初始化 roban_ankle_solver（使用自定义删除器）
+        kuavo_solver::RobanAnkleParams params;
+        params.z_pitch = z_pitch;
+        // 左脚踝参数
+        params.x_lleq = x_lleq; params.y_lleq = y_lleq; params.z_lleq = z_lleq;
+        params.x_lreq = x_lreq; params.y_lreq = y_lreq; params.z_lreq = z_lreq;
+        params.z_llbar = z_llbar; params.z_lrbar = z_lrbar;
+        params.x_lltd = x_lltd; params.y_lltd = y_lltd; params.z_lltd = z_lltd;
+        params.x_lrtd = x_lrtd; params.y_lrtd = y_lrtd; params.z_lrtd = z_lrtd;
+        params.l0_ll_eqtd = l0_ll_eqtd; params.l0_lr_eqtd = l0_lr_eqtd;
+        // 右脚踝参数
+        params.x_rleq = x_rleq; params.y_rleq = y_rleq; params.z_rleq = z_rleq;
+        params.x_rreq = x_rreq; params.y_rreq = y_rreq; params.z_rreq = z_rreq;
+        params.z_rlbar = z_rlbar; params.z_rrbar = z_rrbar;
+        params.x_rltd = x_rltd; params.y_rltd = y_rltd; params.z_rltd = z_rltd;
+        params.x_rrtd = x_rrtd; params.y_rrtd = y_rrtd; params.z_rrtd = z_rrtd;
+        params.l0_rl_eqtd = l0_rl_eqtd; params.l0_rr_eqtd = l0_rr_eqtd;
+        // 求解器参数
+        params.default_tolerance = 1e-8;
+        params.max_iterations = 10;
+        
+        roban_solver_ = std::unique_ptr<kuavo_solver::Roban_ankle_solver, kuavo_solver::Roban_ankle_solver_deleter>(
+            new kuavo_solver::Roban_ankle_solver(params));
+    }
 }
 
 void AnkleSolver::applyRollLimitBasedOnPitch(Eigen::VectorXd& joint_q)
@@ -306,6 +394,10 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_position(const Eigen::VectorXd& q)
     {
         result = joint_to_motor_position_s2_(q);
     }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN_2)
+    {
+        result = joint_to_motor_position_s2_2_(q);
+    }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
     {
         result = joint_q;
@@ -334,6 +426,10 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_velocity(const Eigen::VectorXd& q, c
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN)
     {
         result = joint_to_motor_velocity_s2_(q, p, dp);
+    }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN_2)
+    {
+        result = joint_to_motor_velocity_s2_2_(q, p, dp);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
     {
@@ -364,6 +460,10 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_current(const Eigen::VectorXd& q, co
     {
         result = joint_to_motor_current_s2_(q, p, t);
     }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN_2)
+    {
+        result = joint_to_motor_current_s2_2_(q, p, t);
+    }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
     {
         result = t;
@@ -392,6 +492,10 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_position(const Eigen::VectorXd& q)
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN)
     {
         result = motor_to_joint_position_s2_(q);
+    }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN_2)
+    {
+        result = motor_to_joint_position_s2_2_(q);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
     {
@@ -422,6 +526,10 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_velocity(const Eigen::VectorXd& q, c
     {
         result = motor_to_joint_velocity_s2_(q, p, v);
     }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN_2)
+    {
+        result = motor_to_joint_velocity_s2_2_(q, p, v);
+    }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
     {
         result = v;
@@ -450,6 +558,10 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_torque(const Eigen::VectorXd& q, con
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN)
     {
         result = motor_to_joint_torque_s2_(q, p, c);
+    }
+    else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN_2)
+    {
+        result = motor_to_joint_torque_s2_2_(q, p, c);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
     {
@@ -3154,4 +3266,223 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_position_s2_(const Eigen::VectorXd& 
 Eigen::VectorXd result(12);
 result << q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12;
 return result;
+}
+
+// ============================================================================
+// S2GEN_2 版本实现：使用 roban_ankle_solver 的方法
+// ============================================================================
+
+Eigen::VectorXd AnkleSolver::joint_to_motor_position_s2_2_(const Eigen::VectorXd& q)
+{
+    Eigen::VectorXd result(12);
+    
+    // 提取非脚踝关节（直接传递）
+    result[0] = q[0];  // 左髋
+    result[1] = q[1];
+    result[2] = q[2];
+    result[3] = q[3];  // 左膝
+    result[6] = q[6];  // 右髋
+    result[7] = q[7];
+    result[8] = q[8];
+    result[9] = q[9];  // 右膝
+    
+    // 提取脚踝关节角度：左 [q4, q5]，右 [q10, q11]
+    Eigen::Vector4d q_ankle;
+    q_ankle << q[4], q[5], q[10], q[11];
+    
+    // 使用 roban_ankle_solver 进行转换
+    if (!roban_solver_) {
+        throw std::runtime_error("roban_solver_ not initialized");
+    }
+    Eigen::Vector4d p_ankle = roban_solver_->joint_to_motor_position(q_ankle);
+    
+    result[4] = p_ankle[1];
+    result[5] = p_ankle[0];
+    result[10] = p_ankle[2];
+    result[11] = p_ankle[3];
+    
+    return result;
+}
+
+Eigen::VectorXd AnkleSolver::motor_to_joint_position_s2_2_(const Eigen::VectorXd& p)
+{
+    Eigen::VectorXd result(12);
+    
+    // 提取非脚踝关节（直接传递）
+    result[0] = p[0];  // 左髋
+    result[1] = p[1];
+    result[2] = p[2];
+    result[3] = p[3];  // 左膝
+    result[6] = p[6];  // 右髋
+    result[7] = p[7];
+    result[8] = p[8];
+    result[9] = p[9];  // 右膝
+    
+    Eigen::Vector4d p_ankle;
+    p_ankle << p[5], p[4], p[10], p[11];
+    
+    // 使用 roban_ankle_solver 进行转换
+    if (!roban_solver_) {
+        throw std::runtime_error("roban_solver_ not initialized");
+    }
+    Eigen::Vector4d q_ankle = roban_solver_->motor_to_joint_position(p_ankle);
+    // q_ankle 格式: [左pitch, 左roll, 右pitch, 右roll]
+    
+    // 将结果放回 12 维向量，并应用限位
+    // 左脚pitch限位
+    result[4] = std::max(std::min(q_ankle[0], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);   // 左 pitch
+    result[5] = std::max(std::min(q_ankle[1], ankle_roll_limits_[1]), ankle_roll_limits_[0]);   // 左 roll
+    // 右脚pitch限位
+    result[10] = std::max(std::min(q_ankle[2], -ankle_pitch_limits_[0]), -ankle_pitch_limits_[1]);  // 右 pitch
+    result[11] = std::max(std::min(q_ankle[3], ankle_roll_limits_[1]), ankle_roll_limits_[0]);  // 右 roll
+    
+    return result;
+}
+
+Eigen::VectorXd AnkleSolver::joint_to_motor_velocity_s2_2_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& dp)
+{
+    Eigen::VectorXd result(12);
+    
+    // 提取非脚踝关节（直接传递）
+    result[0] = dp[0];
+    result[1] = dp[1];
+    result[2] = dp[2];
+    result[3] = dp[3];
+    result[6] = dp[6];
+    result[7] = dp[7];
+    result[8] = dp[8];
+    result[9] = dp[9];
+    
+    // 提取脚踝关节角度和速度
+    Eigen::Vector4d q_ankle;
+    q_ankle << q[4], q[5], q[10], q[11];
+    Eigen::Vector4d p_ankle;
+    p_ankle << p[5], p[4], p[10], p[11];
+    Eigen::Vector4d dq_ankle;
+    dq_ankle << dp[4], dp[5], dp[10], dp[11];
+    
+    // 使用 roban_ankle_solver 进行转换
+    if (!roban_solver_) {
+        throw std::runtime_error("roban_solver_ not initialized");
+    }
+    Eigen::Vector4d dp_ankle = roban_solver_->joint_to_motor_velocity(q_ankle, p_ankle, dq_ankle);
+    
+    result[4] = dp_ankle[1];
+    result[5] = dp_ankle[0];
+    result[10] = dp_ankle[2];
+    result[11] = dp_ankle[3];
+    
+    return result;
+}
+
+Eigen::VectorXd AnkleSolver::motor_to_joint_velocity_s2_2_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& v)
+{
+    Eigen::VectorXd result(12);
+    
+    // 提取非脚踝关节（直接传递）
+    result[0] = v[0];
+    result[1] = v[1];
+    result[2] = v[2];
+    result[3] = v[3];
+    result[6] = v[6];
+    result[7] = v[7];
+    result[8] = v[8];
+    result[9] = v[9];
+    
+    // 提取脚踝关节角度和执行器速度
+    Eigen::Vector4d q_ankle;
+    q_ankle << q[4], q[5], q[10], q[11];
+    Eigen::Vector4d p_ankle;
+    p_ankle << p[5], p[4], p[10], p[11];
+    Eigen::Vector4d dp_ankle;
+    dp_ankle << v[5], v[4], v[10], v[11];
+    
+    // 使用 roban_ankle_solver 进行转换
+    if (!roban_solver_) {
+        throw std::runtime_error("roban_solver_ not initialized");
+    }
+    Eigen::Vector4d dq_ankle = roban_solver_->motor_to_joint_velocity(q_ankle, p_ankle, dp_ankle);
+    // dq_ankle 格式: [左pitch速度, 左roll速度, 右pitch速度, 右roll速度]
+    
+    // 将结果放回 12 维向量
+    result[4] = dq_ankle[0];   // 左 pitch
+    result[5] = dq_ankle[1];   // 左 roll
+    result[10] = dq_ankle[2];  // 右 pitch
+    result[11] = dq_ankle[3];  // 右 roll
+    
+    return result;
+}
+
+Eigen::VectorXd AnkleSolver::joint_to_motor_current_s2_2_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& t)
+{
+    Eigen::VectorXd result(12);
+    
+    // 提取非脚踝关节（直接传递）
+    result[0] = t[0];
+    result[1] = t[1];
+    result[2] = t[2];
+    result[3] = t[3];
+    result[6] = t[6];
+    result[7] = t[7];
+    result[8] = t[8];
+    result[9] = t[9];
+    
+    // 提取脚踝关节角度和力矩
+    Eigen::Vector4d q_ankle;
+    q_ankle << q[4], q[5], q[10], q[11];
+    // S2GEN 格式：p[4]=左lrbar, p[5]=左llbar, p[10]=右rlbar, p[11]=右rrbar
+    Eigen::Vector4d p_ankle;
+    p_ankle << p[5], p[4], p[10], p[11];  // [左llbar, 左lrbar, 右llbar(rlbar), 右lrbar(rrbar)]
+    Eigen::Vector4d tau_ankle;
+    tau_ankle << t[4], t[5], t[10], t[11];
+    
+    // 使用 roban_ankle_solver 进行转换
+    if (!roban_solver_) {
+        throw std::runtime_error("roban_solver_ not initialized");
+    }
+    Eigen::Vector4d i_ankle = roban_solver_->joint_to_motor_current(q_ankle, p_ankle, tau_ankle);
+    result[4] = i_ankle[1];
+    result[5] = i_ankle[0];
+    result[10] = i_ankle[2];
+    result[11] = i_ankle[3];
+    
+    return result;
+}
+
+Eigen::VectorXd AnkleSolver::motor_to_joint_torque_s2_2_(const Eigen::VectorXd& q, const Eigen::VectorXd& p, const Eigen::VectorXd& c)
+{
+    Eigen::VectorXd result(12);
+    
+    // 提取非脚踝关节（直接传递）
+    result[0] = c[0];
+    result[1] = c[1];
+    result[2] = c[2];
+    result[3] = c[3];
+    result[6] = c[6];
+    result[7] = c[7];
+    result[8] = c[8];
+    result[9] = c[9];
+    
+    // 提取脚踝关节角度和执行器电流
+    Eigen::Vector4d q_ankle;
+    q_ankle << q[4], q[5], q[10], q[11];
+    Eigen::Vector4d p_ankle;
+    p_ankle << p[5], p[4], p[10], p[11];
+    Eigen::Vector4d i_ankle;
+    i_ankle << c[5], c[4], c[10], c[11];
+    
+    // 使用 roban_ankle_solver 进行转换
+    if (!roban_solver_) {
+        throw std::runtime_error("roban_solver_ not initialized");
+    }
+    Eigen::Vector4d tau_ankle = roban_solver_->motor_to_joint_torque(q_ankle, p_ankle, i_ankle);
+    // tau_ankle 格式: [左pitch力矩, 左roll力矩, 右pitch力矩, 右roll力矩]
+    
+    // 将结果放回 12 维向量
+    result[4] = tau_ankle[0];   // 左 pitch
+    result[5] = tau_ankle[1];   // 左 roll
+    result[10] = tau_ankle[2];  // 右 pitch
+    result[11] = tau_ankle[3];  // 右 roll
+    
+    return result;
 }

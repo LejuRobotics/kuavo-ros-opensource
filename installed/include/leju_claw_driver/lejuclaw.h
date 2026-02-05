@@ -112,11 +112,12 @@ private:
     static constexpr float VR_TARGET_POSITION_THRESHOLD = 0.5f;    // VR模式下目标位置差值阈值，当目标位置与当前位置差值大于此值时才进行卡死检测，单位 rad
     static constexpr float VR_GRIP_POSITION_THRESHOLD = 99.5f;     // VR模式下夹持位置阈值，当目标位置>=此值时判断为夹持状态，跳过PD控制，将持续发送夹持电流，单位 %
     static constexpr float VR_GRIP_HOLDING_CURRENT = 0.4f;         // VR模式下夹持状态维持电流，当持续发送100位置时使用此电流进行夹持，单位 A
-    // 限位刹车参数
-    static constexpr float LIMIT_BRAKE_RANGE_PERCENT = 10.0f;      // 限位刹车范围百分比，在行程两端此范围内进行猛刹车（减小kp、增大kd），单位 %
-    static constexpr float LIMIT_BRAKE_KP_FACTOR = 0.8f;           // 限位刹车时kp的缩放系数（减小kp）
-    static constexpr float LIMIT_BRAKE_KD_FACTOR = 6.0f;           // 限位刹车时kd的缩放系数（增大kd）
-    static constexpr float TARGET_BRAKE_RANGE_PERCENT = 2.0f;      // 目标位置周围启用限位刹车逻辑的范围百分比，单位 %
+    // 刹车参数（恢复1.2.2的渐变刹车机制）
+    static constexpr float BRAKE_RANGE_PERCENT = 35.0f;            // 刹车范围百分比，在行程两端刹车范围内减速，单位 %
+    static constexpr float BRAKE_MIN_SPEED_FACTOR = 0.01f;         // 刹车最小速度系数，在限位处速度降至最小值
+    static constexpr float BRAKE_CURVE_EXPONENT = 40.0f;           // 刹车曲线指数，控制减速曲线形状
+    static constexpr float TARGET_PROXIMITY_BRAKE_PERCENT = 10.0f; // 目标位置附近刹车范围，单位 %
+    static constexpr float TARGET_PROXIMITY_MIN_FACTOR = 0.05f;    // 目标位置附近最小速度系数
     
     // 初始化寻找零点参数
     static constexpr float ZERO_CONTROL_KP = 0.0f;                  // 零点控制比例增益，零点寻找时使用
@@ -169,10 +170,12 @@ private:
     bool  cfg_ENABLE_100_POSITION_HOLDING_CURRENT = ENABLE_100_POSITION_HOLDING_CURRENT;
     int   cfg_MOVE_PAW_TIMEOUT_MS = MOVE_PAW_TIMEOUT_MS;
 
-    float cfg_LIMIT_BRAKE_RANGE_PERCENT = LIMIT_BRAKE_RANGE_PERCENT;
-    float cfg_LIMIT_BRAKE_KP_FACTOR = LIMIT_BRAKE_KP_FACTOR;
-    float cfg_LIMIT_BRAKE_KD_FACTOR = LIMIT_BRAKE_KD_FACTOR;
-    float cfg_TARGET_BRAKE_RANGE_PERCENT = TARGET_BRAKE_RANGE_PERCENT;
+    // 刹车参数（使用1.2.2的渐变刹车机制）
+    float cfg_BRAKE_RANGE_PERCENT = BRAKE_RANGE_PERCENT;
+    float cfg_BRAKE_MIN_SPEED_FACTOR = BRAKE_MIN_SPEED_FACTOR;
+    float cfg_BRAKE_CURVE_EXPONENT = BRAKE_CURVE_EXPONENT;
+    float cfg_TARGET_PROXIMITY_BRAKE_PERCENT = TARGET_PROXIMITY_BRAKE_PERCENT;
+    float cfg_TARGET_PROXIMITY_MIN_FACTOR = TARGET_PROXIMITY_MIN_FACTOR;
 
     // VR
     int   cfg_VR_CONTROL_TIMEOUT_MS = VR_CONTROL_TIMEOUT_MS;
@@ -209,7 +212,11 @@ private:
     void send_claw_torque_only(const std::vector<float>& torques);  // 发送夹爪电流，左右独立控
     void send_torque_direct(const std::vector<float>& torques);     // 直接发送电流指令，使用run_torque_mode
     void send_velocity_direct(const std::vector<float>& velocities); // 直接发送速度指令，使用run_vel_mode
-        
+
+    // 刹车相关函数（恢复1.2.2的渐变刹车机制）
+    float calculate_brake_speed_factor(float current_position_percent, float target_position_percent,
+                                      float start_position, float end_position); // 计算刹车速度系数
+
     private:
     void control_thread();
     // void get_parameter();

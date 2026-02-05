@@ -52,6 +52,8 @@ struct ModelSettings {
   scalar_t velocityErrorGainXYStepControl = 0.0;
   scalar_t positionErrorGainXYStepControl = 0.0;
 
+  scalar_t positionErrorGainZStepControl = 0.0;
+
   int mpcArmsDof = 14;
   int mpcLegsDof = 12;
   int mpcWaistDof = 1;

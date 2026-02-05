@@ -355,6 +355,10 @@ configure_roban2() {
     local wiring_type
     select_wiring_type wiring_type
 
+    # 选择手部协议类型
+    local hand_protocol_type
+    select_hand_protocol_type hand_protocol_type
+
     # 根据robot_type选择配置文件路径
     local dual_config_file=""
     local single_config_file=""
@@ -435,8 +439,7 @@ configure_roban2() {
     fi
 
     # 统一写入所有配置文件
-    # 对于 roban 系列，目前不需要写入 HandProtocolType.ini，因此第三个参数传空字符串
-    write_config_files "$wiring_type" "$config_file" ""
+    write_config_files "$wiring_type" "$config_file" "$hand_protocol_type"
 }
 
 # 配置kuavo机器人函数

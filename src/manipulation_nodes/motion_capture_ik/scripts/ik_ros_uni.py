@@ -375,7 +375,7 @@ class IkRos:
         else:
             return q
 
-    def limit_angle_by_velocity(self, q_last, q_now, vel_limit=50.0):
+    def limit_angle_by_velocity(self, q_last, q_now, vel_limit=50.0, shoulder_vel_limit=600.0):
         """
         limit the angle change by velocity, default 50 deg/s
         对左右手臂的第一个关节(肩膀俯仰)进行120度限制
@@ -385,7 +385,7 @@ class IkRos:
         agl_limit = self.controller_dt * vel_limit * np.pi / 180.0  # deg/s to rad/s
         
         # 120度限制转换为弧度
-        angle_limit_120_deg = self.controller_dt * 600.0 * np.pi / 180.0  # 约2.09弧度
+        angle_limit_120_deg = self.controller_dt * shoulder_vel_limit * np.pi / 180.0  # 约2.09弧度
         
         for i in range(size):
             # 速度限制
@@ -664,7 +664,34 @@ class IkRos:
                     self.pub_origin_joint.publish(msg)
                     
                     arm_q_filtered = self.limit_angle(q_now[-self.__arm_dof:])
-                    arm_q_filtered = self.limit_angle_by_velocity(q_last[-self.__arm_dof:], arm_q_filtered, vel_limit=720.0)
+                    
+                    # 判断手臂往上抬的高度，如果高度超过肩部则限制速度
+                    # 检查左右手相对于（肩膀处）的高度差，取较大的那个
+                    hand_heights = []
+                    shoulder_base_offset = 0.0  # 肩膀下0.0米作为基准点
+
+                    # 计算左手相对于肩部的高度差
+                    left_shoulder_pos = self.get_shoulder_position(q0_tmp, "left")
+                    shoulder_base_z = left_shoulder_pos[2] - shoulder_base_offset
+                    hand_height_relative = l_hand_pose[2] - shoulder_base_z
+                    hand_heights.append(hand_height_relative)
+                    # 计算右手相对于肩部的高度差
+                    right_shoulder_pos = self.get_shoulder_position(q0_tmp, "right")
+                    shoulder_base_z = right_shoulder_pos[2] - shoulder_base_offset
+                    hand_height_relative = r_hand_pose[2] - shoulder_base_z
+                    hand_heights.append(hand_height_relative)
+                    
+                    # 如果手部高度大于基准点（肩膀下0.2米处），使用较小的速度限制（30 deg/s），否则使用正常速度（120 deg/s）
+                    if hand_heights and max(hand_heights) > 0:
+                        # 手臂往上抬的高度超过基准点，使用较小的速度限制
+                        shoulder_vel_limit = 20.0  # deg/s
+                    else:
+                        # 正常情况，使用正常速度限制
+                        shoulder_vel_limit = 120.0  # deg/s
+                    # print(f"shoulder_vel_limit: {shoulder_vel_limit}")
+                    # 手臂模式切换时不进行关节速度限制
+                    if not self.arm_mode_changing:
+                        arm_q_filtered = self.limit_angle_by_velocity(q_last[-self.__arm_dof:], arm_q_filtered, vel_limit=720, shoulder_vel_limit=shoulder_vel_limit)
                     
                     msg.data = arm_q_filtered * 180.0 / np.pi
                     self.pub_filtered_joint.publish(msg)
@@ -1194,6 +1221,11 @@ class IkRos:
             # 检测模式切换：当data[0] != data[1]时表示正在切换，重置IK初始猜测
             if current_mode != new_mode:
                 self.__need_reset_ik_guess = True
+                self.arm_mode_changing = True
+            else:
+                # 模式切换完成，关闭arm_mode_changing标志
+                if not self.only_half_up_body:
+                    self.arm_mode_changing = False
                 
             
     def sensor_data_raw_callback(self, msg):
