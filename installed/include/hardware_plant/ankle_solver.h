@@ -45,6 +45,9 @@ public:
         return  static_cast<AnkleSolverType>(ankle_solver_type_);
     };
 private:
+
+    void applyRollLimitBasedOnPitch(Eigen::VectorXd& joint_q);
+private:
     Eigen::VectorXd config;
     int N_ITER = 10;
     int ankle_solver_type_ = AnkleSolverType::ANKLE_SOLVER_TYPE_4GEN;
