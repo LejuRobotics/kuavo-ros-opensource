@@ -51,7 +51,7 @@ public:
   // 计算双脚支撑中心点
   vector3_t getFeetCenterPosition() const override;
 
-  void loadSettings(const std::string& taskFile, bool verbose);
+  void loadSettings(const std::string& taskFile, bool verbose, const std::string &referenceFile);
   void reset() override;
 protected:
   void updateFromTopic();

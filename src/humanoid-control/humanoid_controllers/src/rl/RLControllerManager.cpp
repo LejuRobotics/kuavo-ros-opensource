@@ -591,11 +591,7 @@ namespace humanoid_controller
     if (!isTorsoVelocityStable())
     {
       res.success = false;
-      std::ostringstream msg_stream;
-      msg_stream << std::fixed << std::setprecision(2); // 保留2位小数
-      msg_stream << "Torso velocity is not stable. velocity must be below " << torso_velocity_threshold_ << " m/s for " 
-                 << torso_velocity_stable_duration_ << " seconds";
-      res.message = msg_stream.str();
+      res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
       ROS_WARN("[RLControllerManager] Controller switch blocked: %s", res.message.c_str());
       return true;
     }
@@ -679,65 +675,15 @@ namespace humanoid_controller
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
-    vector_t torso_state = torso_velocity_callback_();  // 获取躯干状态
-    
-    // 提取线速度和角速度
-    vector3_t linear_vel = torso_state.segment<3>(6);   // vx, vy, vz
-    vector3_t angular_vel = torso_state.segment<3>(9); // angularVx, angularVy, angularVz
-    
-    // 计算速度模长
-    double linear_vel_magnitude = linear_vel.norm();
-    double angular_vel_magnitude = angular_vel.norm();
-    
-    // 检查速度是否在阈值内
-    bool velocity_stable = (linear_vel_magnitude < torso_velocity_threshold_) && 
-                           (angular_vel_magnitude < torso_velocity_threshold_);
-    
-    ros::Time current_time = ros::Time::now();
-    
-    if (velocity_stable)
+    // 使用状态估计器提供的稳定性状态
+    if (torso_stability_callback_)
     {
-      // 如果速度稳定，检查是否已经开始跟踪
-      if (!torso_velocity_stable_tracking_)
-      {
-        // 第一次检测到稳定，开始跟踪
-        torso_velocity_stable_start_time_ = current_time;
-        torso_velocity_stable_tracking_ = true;
-        ROS_INFO("[RLControllerManager] Torso velocity stable, starting tracking (linear: %.4f m/s, angular: %.4f rad/s)", 
-                 linear_vel_magnitude, angular_vel_magnitude);
-      }
-      else
-      {
-        // 已经在跟踪，检查持续时间
-        double stable_duration = (current_time - torso_velocity_stable_start_time_).toSec();
-        if (stable_duration >= torso_velocity_stable_duration_)
-        {
-          // 已经稳定足够长时间
-          ROS_INFO("[RLControllerManager] Torso velocity stable for %.2f seconds, allowing switch", stable_duration);
-          return true;
-        }
-        else
-        {
-          // 还在等待稳定时间
-          ROS_INFO_THROTTLE(0.5, "[RLControllerManager] Torso velocity stable, waiting... (%.2f/%.2f seconds)", 
-                           stable_duration, torso_velocity_stable_duration_);
-          return false;
-        }
-      }
-    }
-    else
-    {
-      // 速度不稳定，重置跟踪状态
-      if (torso_velocity_stable_tracking_)
-      {
-        ROS_WARN("[RLControllerManager] Torso velocity unstable, resetting tracking (linear: %.4f m/s, angular: %.4f rad/s, threshold: %.4f)", 
-                 linear_vel_magnitude, angular_vel_magnitude, torso_velocity_threshold_);
-        torso_velocity_stable_tracking_ = false;
-      }
-      return false;
+      return torso_stability_callback_();
     }
     
-    return false;
+    // 如果没有注册稳定性回调，返回true（允许切换）
+    ROS_INFO_THROTTLE(1.0, "[RLControllerManager] No torso stability callback registered, allowing switch");
+    return true;
   }
 
   bool RLControllerManager::switchToNextControllerCallback(kuavo_msgs::switchToNextController::Request &req, 
@@ -793,11 +739,7 @@ namespace humanoid_controller
     if (!isTorsoVelocityStable())
     {
       res.success = false;
-      std::ostringstream msg_stream;
-      msg_stream << std::fixed << std::setprecision(2); // 保留2位小数
-      msg_stream << "Torso velocity is not stable. velocity must be below " << torso_velocity_threshold_ << " m/s for " 
-                 << torso_velocity_stable_duration_ << " seconds";
-      res.message = msg_stream.str();
+      res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
       res.next_controller = "";
       res.next_index = -1;
       ROS_WARN("[RLControllerManager] Controller switch blocked: %s", res.message.c_str());

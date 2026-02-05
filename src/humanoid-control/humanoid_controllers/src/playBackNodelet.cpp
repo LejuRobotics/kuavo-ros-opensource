@@ -280,7 +280,7 @@ namespace humanoid_controller
                                                                               std::lock_guard<std::mutex> lock(g_obs_mutex);
                                                                               currentObservation_ = ros_msg_conversions::readObservationMsg(*msg); });
     // State estimation
-    setupStateEstimate(taskFile, verbose);
+    setupStateEstimate(taskFile, verbose, referenceFile);
     std::cout << "waiting for msg, please use rosbag play to replay the data" << std::endl;
     sensors_data_buffer_ptr_->waitForReady();
     // std::cout << "waitForReady estimate ready" << std::endl;
@@ -875,15 +875,15 @@ namespace humanoid_controller
     return mpcPolicyMsg;
   }
 
-  void humanoidController::setupStateEstimate(const std::string &taskFile, bool verbose)
+  void humanoidController::setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile)
   {
     stateEstimate_ = std::make_shared<KalmanFilterEstimate>(HumanoidInterface_->getPinocchioInterface(),
                                                             HumanoidInterface_->getCentroidalModelInfo(), *eeKinematicsPtr_);
-    dynamic_cast<KalmanFilterEstimate &>(*stateEstimate_).loadSettings(taskFile, verbose);
+    dynamic_cast<KalmanFilterEstimate &>(*stateEstimate_).loadSettings(taskFile, verbose, referenceFile);
     currentObservation_.time = 0;
   }
 
-  void humanoidCheaterController::setupStateEstimate(const std::string & /*taskFile*/, bool /*verbose*/)
+  void humanoidCheaterController::setupStateEstimate(const std::string & /*taskFile*/, bool /*verbose*/, const std::string & /*referenceFile*/)
   {
     stateEstimate_ = std::make_shared<FromTopicStateEstimate>(HumanoidInterface_->getPinocchioInterface(),
                                                               HumanoidInterface_->getCentroidalModelInfo(), *eeKinematicsPtr_, controllerNh_);
