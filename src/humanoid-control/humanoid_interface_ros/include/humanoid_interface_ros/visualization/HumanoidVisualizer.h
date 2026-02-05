@@ -66,16 +66,6 @@ namespace ocs2
       std::vector<Color> feetColorMap_ = {Color::blue, Color::orange, Color::green, Color::red,
                                           Color::blue, Color::orange, Color::green, Color::red}; // Colors for markers per feet
       std::vector<Color> handColorMap_ = {Color::red, Color::blue};  // Colors for markers per hand
-      // std::vector<Eigen::Block< 6, 1>> basePoseTraj;
-      std::vector<vector_t> feetInputTraj;
-      std::vector<scalar_t> timeTraj;
-      std::vector<vector3_t> basePosTraj;
-      std::vector<vector3_t> baseOriTraj;
-      std::vector<std::vector<vector3_t>> feetPosTraj;
-      std::vector<std::vector<vector3_t>> feetOriTraj;
-      std::vector<std::vector<vector3_t>> feetForce;
-      scalar_t timecount = 0;
-
       /**
        *
        * @param pinocchioInterface

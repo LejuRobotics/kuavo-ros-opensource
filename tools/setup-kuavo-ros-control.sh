@@ -716,6 +716,30 @@ setup_audio_config() {
     fi
 }
 
+setup_canbus_config() {
+    print_info "配置CANBUS配置..."
+
+    canbus_config_script_path="$HOME/kuavo-ros-opensource/tools/check_tool/canbus_config.sh"
+
+    if [ ! -f "$canbus_config_script_path" ]; then
+        print_error "未找到CANBUS配置脚本: $canbus_config_script_path"
+        return 1
+    fi
+
+    if [ ! -x "$canbus_config_script_path" ]; then
+        print_info "设置脚本执行权限..."
+        chmod +x "$canbus_config_script_path"
+    fi
+
+    print_info "执行CANBUS配置脚本..."
+    if sudo bash "$canbus_config_script_path"; then
+        print_success "CANBUS配置完成"
+    else
+        print_error "CANBUS配置失败，请检查日志"
+        return 1
+    fi
+}
+
 
 # Main execution
 main() {
@@ -736,6 +760,7 @@ main() {
     setup_preset_files
     setup_config_file
     setup_audio_config
+    setup_canbus_config
     build_project
     check_ip
     modify_hosts_mapping

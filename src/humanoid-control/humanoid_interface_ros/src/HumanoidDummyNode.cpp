@@ -105,12 +105,6 @@ int main(int argc, char **argv)
   humanoidDummySimulator.run(initObservation, initTargetTrajectories);
 
   std::cout << "!!!!!!!!!!!!!!!!!!!dummy node end!!!!!!!!!!!!!!" << std::endl;
-  std::cout << humanoidVisualizer->timeTraj.size() << std::endl;
-  std::cout << humanoidVisualizer->basePosTraj.size() << std::endl;
-  std::cout << humanoidVisualizer->baseOriTraj.size() << std::endl;
-  std::cout << humanoidVisualizer->feetPosTraj.size() << std::endl;
-  std::cout << humanoidVisualizer->feetOriTraj.size() << std::endl;
-  std::cout << humanoidVisualizer->feetInputTraj.size() << std::endl;
 
   // const char *fileName = "~/ocs2_ws/src/ocs2/ocs2_robotic_examples/ocs2_humanoid_ros/test.csv";
   // const char *fileName = "../ocs2_ws/src/ocs2/ocs2_robotic_examples/ocs2_humanoid_ros/data/test.csv";
