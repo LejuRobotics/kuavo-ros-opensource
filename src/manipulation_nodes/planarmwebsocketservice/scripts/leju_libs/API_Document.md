@@ -285,7 +285,7 @@ from kuavo_humanoid_sdk import RobotControlBlockly
    - 返回值：bool,成功返回 True，失败返回 False
 
 7. **一键上楼梯**
-   - 函数：`robot_control.simple_up_stair(stair_height = 0.25,stair_length = 0.08,stair_num = 4)`
+   - 函数：`robot_control.simple_up_stair(stair_height = 0.08,stair_length = 0.25,stair_num = 4)`
    - 参数类型：float,float,int,float
    - 描述：采取新的规划方式进行爬楼梯，经过测试较为稳定
    - 参数说明：
@@ -340,10 +340,15 @@ robot_control.execute_stair_trajectory()
 robot_control.align_stair()
 
 # 对齐成功后一键上楼梯
-robot_control.simple_up_stair(stair_height = 0.25,stair_length = 0.08,stair_num = 4)
+robot_control.simple_up_stair(stair_height = 0.08,stair_length = 0.25,stair_num = 4)
 ```
 **使用要求**
 - 需要上位机的对齐节点以及 aplirtag 相机识别节点启动。
+    ```
+    roslaunch dynamic_biped sensor_apriltag_only_enable.launch
+    roslaunch stair_alignment stair_alignment.launch
+    ```
+
 - 需要提前对机器人对齐的位置进行标定，否则将使用默认的参数，自动寻找 tag 进行对齐。
 - 对齐成功后机器人将自动根据参数上楼梯。
 
