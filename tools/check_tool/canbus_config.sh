@@ -105,7 +105,7 @@ select_wiring_type() {
 select_hand_protocol_type() {
     local -n result_ref=$1
     local hand_protocol_options=("proto_buf -- 485协议" "proto_can -- CAN协议")
-    show_menu "选择手部协议类型" "${hand_protocol_options[@]}"
+    show_menu "选择手部协议类型 (若无末端，请任意选择)" "${hand_protocol_options[@]}"
     get_user_selection 2 hand_protocol_selection
 
     local hand_protocol_types=("proto_buf" "proto_can")
@@ -175,6 +175,7 @@ get_end_effector_class() {
 get_end_effector_device_id() {
     local side="$1"  # L 或 R
     local type="$2"  # revo2_hand, lejuclaw, none
+    local robot_type="$3"  # 机器人型号（例如 kuavo5w）
 
     case "$type" in
         "revo1_hand")
@@ -192,10 +193,19 @@ get_end_effector_device_id() {
             fi
             ;;
         "lejuclaw")
-            if [ "$side" = "L" ]; then
-                echo "0x0F"
+            # 手臂全为 CAN 的机型下，lejuclaw 的 ID 为 0x11 / 0x12，其它机型保持 0x0F / 0x10
+            if [ "$robot_type" = "kuavo5w" ]; then
+                if [ "$side" = "L" ]; then
+                    echo "0x11"
+                else
+                    echo "0x12"
+                fi
             else
-                echo "0x10"
+                if [ "$side" = "L" ]; then
+                    echo "0x0F"
+                else
+                    echo "0x10"
+                fi
             fi
             ;;
         "none")
@@ -289,11 +299,12 @@ replace_single_end_effector() {
     local config_file="$1"
     local side="$2"  # L 或 R
     local type="$3"
+    local robot_type="$4"  # 机器人型号
 
     if [ "$type" != "none" ]; then
         local name=$(get_end_effector_name "$side" "$type")
         local class=$(get_end_effector_class "$side" "$type")
-        local device_id=$(get_end_effector_device_id "$side" "$type")
+        local device_id=$(get_end_effector_device_id "$side" "$type" "$robot_type")
 
         if [ "$side" = "L" ]; then
             sed -i "/# ANCHOR_L_NAME/c\  - name: $name        # ANCHOR_L_NAME" "$config_file"
@@ -340,11 +351,12 @@ replace_end_effector_config() {
     local config_file="$1"
     local left_type="$2"
     local right_type="$3"
+    local robot_type="$4"  # 机器人型号
 
     echo "开始更新末端执行器配置..."
 
-    replace_single_end_effector "$config_file" "L" "$left_type"
-    replace_single_end_effector "$config_file" "R" "$right_type"
+    replace_single_end_effector "$config_file" "L" "$left_type" "$robot_type"
+    replace_single_end_effector "$config_file" "R" "$right_type" "$robot_type"
 
     echo "末端执行器配置更新完成"
 }
@@ -357,6 +369,11 @@ configure_roban2() {
     # 选择CAN总线接线类型
     local wiring_type
     select_wiring_type wiring_type
+
+    # 手部协议类型（CAN/485）：
+    # - 双总线：始终询问
+    # - 单总线：不询问
+    local hand_protocol_type=""
 
     # 根据robot_type选择配置文件路径
     local dual_config_file=""
@@ -386,6 +403,9 @@ configure_roban2() {
         select_canbus_type "右" right_canbus_type
 
         echo ""
+        # 先选择手部协议类型（CAN/485）
+        select_hand_protocol_type hand_protocol_type
+        echo ""
         echo_title "配置末端执行器类型"
 
         # 选择左末端执行器
@@ -395,16 +415,6 @@ configure_roban2() {
         # 选择右末端执行器
         local right_type
         select_end_effector_type "右" right_type
-
-        # 选择手部协议类型（只有在至少有一个末端执行器不是 none 时才选择）
-        local hand_protocol_type=""
-        if [ "$left_type" != "none" ] || [ "$right_type" != "none" ]; then
-            echo ""
-            select_hand_protocol_type hand_protocol_type
-        else
-            hand_protocol_type="none"
-            echo_success "✓ 左右末端执行器均为 none，手部协议类型设置为 none"
-        fi
 
         # 拷贝并修改配置文件
         local temp_file="/tmp/roban2_canbus_device_cofig.yaml"
@@ -417,7 +427,7 @@ configure_roban2() {
             update_canbus_type_config "$temp_file" "$left_canbus_type" "$right_canbus_type"
 
             # 替换末端执行器配置
-            replace_end_effector_config "$temp_file" "$left_type" "$right_type"
+            replace_end_effector_config "$temp_file" "$left_type" "$right_type" "$robot_type"
             echo_success "✓ 配置文件已更新: $temp_file"
             config_file="$temp_file"
         else
@@ -425,9 +435,6 @@ configure_roban2() {
             config_file=""
         fi
     else
-        # 单总线情况下，初始化手部协议类型为空（单总线通常没有末端执行器）
-        local hand_protocol_type=""
-
         echo ""
         echo_title "配置单总线CANBUS类型"
         local single_bus_canbus_type
@@ -468,6 +475,11 @@ configure_kuavo() {
         select_wiring_type wiring_type
     fi
 
+    # 手部协议类型（CAN/485）：
+    # - 双总线：始终询问
+    # - 单总线：不询问
+    local hand_protocol_type=""
+
     # 根据robot_type选择配置文件路径
     local dual_config_file=""
     local single_config_file=""
@@ -500,6 +512,9 @@ configure_kuavo() {
         select_canbus_type "右" right_canbus_type
 
         echo ""
+        # 先选择手部协议类型（CAN/485）
+        select_hand_protocol_type hand_protocol_type
+        echo ""
         echo_title "配置末端执行器类型"
 
         # 选择左末端执行器
@@ -509,16 +524,6 @@ configure_kuavo() {
         # 选择右末端执行器
         local right_type
         select_end_effector_type "右" right_type
-
-        # 选择手部协议类型（只有在至少有一个末端执行器不是 none 时才选择）
-        local hand_protocol_type=""
-        if [ "$left_type" != "none" ] || [ "$right_type" != "none" ]; then
-            echo ""
-            select_hand_protocol_type hand_protocol_type
-        else
-            hand_protocol_type="none"
-            echo_success "✓ 左右末端执行器均为 none，手部协议类型设置为 none"
-        fi
 
         # 拷贝并修改配置文件
         local temp_file="/tmp/kuavo_canbus_device_cofig.yaml"
@@ -531,7 +536,7 @@ configure_kuavo() {
             update_canbus_type_config "$temp_file" "$left_canbus_type" "$right_canbus_type"
 
             # 替换末端执行器配置
-            replace_end_effector_config "$temp_file" "$left_type" "$right_type"
+            replace_end_effector_config "$temp_file" "$left_type" "$right_type" "$robot_type"
             echo_success "✓ 配置文件已更新: $temp_file"
             config_file="$temp_file"
         else
@@ -539,9 +544,6 @@ configure_kuavo() {
             config_file=""
         fi
     else
-        # 单总线情况下，初始化手部协议类型为空（单总线通常没有末端执行器）
-        local hand_protocol_type=""
-
         echo ""
         echo_title "配置单总线CANBUS类型"
         local single_bus_canbus_type
