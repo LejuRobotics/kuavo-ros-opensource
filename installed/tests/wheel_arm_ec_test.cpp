@@ -4,8 +4,9 @@
 #include <chrono>
 #include <string>
 #include <unordered_map>
-#include <cstdlib>  // for getenv
+#include <cstdlib>  // for getenv, system, free
 #include <unistd.h> // for read, STDIN_FILENO
+#include <cstdio>   // for popen, pclose, getline
 
 #include "hardware_plant.h"
 #include "joint_test_poses.h"
@@ -23,6 +24,49 @@ std::vector<double> test_arm_joints_q;
 std::vector<double> test_head_joints_q;
 
 using namespace HighlyDynamic;
+
+/**
+ * @brief 通过 rospack 动态获取 kuavo_assets 包的路径
+ * @return 返回 kuavo_assets 的路径，如果失败返回空字符串
+ */
+std::string getKuavoAssetsPathViaRospack() {
+    // 首先检查环境变量 KUAVO_ASSETS_PATH
+    const char* env_path = std::getenv("KUAVO_ASSETS_PATH");
+    if (env_path != nullptr && std::string(env_path) != "") {
+        std::cout << "使用环境变量 KUAVO_ASSETS_PATH: " << env_path << std::endl;
+        return std::string(env_path);
+    }
+
+    // 使用 rospack 查找 kuavo_assets 路径
+    FILE* pipe = popen("rospack find kuavo_assets 2>/dev/null", "r");
+    if (pipe == nullptr) {
+        std::cerr << "警告：无法执行 rospack 命令" << std::endl;
+        return "";
+    }
+
+    char* buffer = nullptr;
+    size_t buffer_size = 0;
+    ssize_t bytes_read = getline(&buffer, &buffer_size, pipe);
+    pclose(pipe);
+
+    if (bytes_read <= 0 || buffer == nullptr) {
+        std::cerr << "警告：无法通过 rospack 找到 kuavo_assets 包" << std::endl;
+        if (buffer != nullptr) {
+            std::free(buffer);
+        }
+        return "";
+    }
+
+    std::string path(buffer);
+    std::free(buffer);
+    // 移除末尾的换行符
+    if (!path.empty() && path.back() == '\n') {
+        path.pop_back();
+    }
+
+    std::cout << "通过 rospack 找到 kuavo_assets 路径: " << path << std::endl;
+    return path;
+}
 
 void initializeTestPoses() {
     auto test_poses = joint_test_poses::test_pos_list();
@@ -88,7 +132,13 @@ public:
             std::exit(EXIT_FAILURE);
         }
         if (kuavo_assets_path == ""){
-            hardware_param.kuavo_assets_path = KUAVO_ASSETS_PATH; // 使用编译时定义的 KUAVO_ASSETS_PATH
+            // 动态获取 kuavo_assets 路径
+            hardware_param.kuavo_assets_path = getKuavoAssetsPathViaRospack();
+            if (hardware_param.kuavo_assets_path.empty()) {
+                std::cerr << "错误：无法获取 kuavo_assets 路径" << std::endl;
+                std::cerr << "请通过命令行参数指定路径，或设置环境变量 KUAVO_ASSETS_PATH" << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
         }
         else{
             hardware_param.kuavo_assets_path = kuavo_assets_path;
@@ -243,8 +293,17 @@ int main(int argc, char const *argv[])
     if (argc > 1 && argv[1] != nullptr) {
         kuavo_assets_path = std::string(argv[1]);
     }
-    
+
+    std::cout << "========================================" << std::endl;
     std::cout << "轮臂EC测试程序" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "kuavo_assets 路径获取方式：" << std::endl;
+    if (kuavo_assets_path != "") {
+        std::cout << "  命令行参数: " << kuavo_assets_path << std::endl;
+    } else {
+        std::cout << "  自动检测 (rospack/环境变量)" << std::endl;
+    }
+    std::cout << "========================================" << std::endl;
     using namespace HighlyDynamic;
     
     initializeTestPoses();
