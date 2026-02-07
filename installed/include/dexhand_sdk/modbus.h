@@ -54,7 +54,9 @@ public:
 
     // See DexHandBase::setActionSequence for details
     bool setActionSequence(ActionSequenceId_t seq_id, const ActionSeqDataTypeVec &sequences) override;
-    
+
+    virtual bool usesRevo2MotorApi() const { return false; }
+
 protected:
     explicit ModbusDexhand(DeviceHandler* handle, uint8_t slave_id_);
 
