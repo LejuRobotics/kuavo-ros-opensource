@@ -9,6 +9,8 @@
 - STRING: PPPPMMMMN  Patch 为 0 时，不显示 Patch 部分, 比如 M(4), N(5),P(0) 表示为 45 而非 000000045 (0000,0004,5)
 """
 
+import warnings
+
 
 class RobotVersion:
     """机器人版本号类，用于表示机器人版本号"""
@@ -25,9 +27,9 @@ class RobotVersion:
         Raises:
             ValueError: 如果版本号超出有效范围
         """
-        if major > 9999 or minor > 9 or patch > 9999:
+        if major < 0 or major > 9999 or minor < 0 or minor > 9 or patch < 0 or patch > 9999:
             raise ValueError(
-                f"RobotVersion: Invalid version numbers: {major}.{minor}.{patch}"
+                f"RobotVersion: Invalid version numbers: {major}.{minor}.{patch} (must be non-negative and within valid ranges)"
             )
         self._major = major
         self._minor = minor
@@ -66,7 +68,7 @@ class RobotVersion:
         """
         if not RobotVersion.is_valid(big_number):
             raise ValueError(
-                f"RobotVersion.create: Invalid version string: {big_number}"
+                f"RobotVersion.create: Invalid version number: {big_number} (extracted values out of valid range)"
             )
         major, minor, patch = RobotVersion._extract_major_minor_patch(big_number)
         return RobotVersion(major, minor, patch)
@@ -77,13 +79,24 @@ class RobotVersion:
         判断版本号是否合法
 
         Args:
-            big_number: 版本号数字
+            big_number: 版本号数字 (应为 int，非 int 时会 warn 并尝试转为 int)
 
         Returns:
-            是否合法
+            是否合法（无法转为 int 或超出范围时返回 False）
         """
+        if not isinstance(big_number, int):
+            warnings.warn(
+                f"RobotVersion.is_valid: big_number should be int, got {type(big_number).__name__}, converting to int",
+                stacklevel=2,
+            )
+            try:
+                big_number = int(big_number)
+            except (TypeError, ValueError):
+                return False
+        if big_number < 0:
+            return False
         major, minor, patch = RobotVersion._extract_major_minor_patch(big_number)
-        if major > 9999 or minor > 9 or patch > 9999:
+        if major < 0 or major > 9999 or minor < 0 or minor > 9 or patch < 0 or patch > 9999:
             return False
         return True
 
