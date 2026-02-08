@@ -120,7 +120,7 @@ add_library(hardware_plant::dexhand_sdk STATIC IMPORTED)
 set_target_properties(hardware_plant::dexhand_sdk PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/dexhand_sdk;${_IMPORT_PREFIX}/include"
   INTERFACE_LINK_DIRECTORIES "${_IMPORT_PREFIX}/lib"
-  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;serialport;m;pthread;rt;dl;hardware_plant::canbus_sdk"
+  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;m;pthread;rt;dl;hardware_plant::canbus_sdk"
 )
 
 # Create imported target hardware_plant::canbus_sdk

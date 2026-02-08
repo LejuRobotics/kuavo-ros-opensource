@@ -31,7 +31,7 @@ class RobotNavigation:
         Returns:
             bool: 导航是否成功。
         """
-        orientation = tf.transformations.quaternion_from_euler(yaw, pitch, roll)
+        orientation = tf.transformations.quaternion_from_euler(roll, pitch, yaw)
         goal = Pose(position=Point(x=x, y=y, z=z), orientation=Quaternion(x=orientation[0], y=orientation[1], z=orientation[2], w=orientation[3]))
         self.robot_navigation.navigate_to_goal(goal)
         while self.get_current_status() is not NavigationStatus.ACTIVE:
@@ -92,7 +92,7 @@ class RobotNavigation:
         Returns:
             bool: 定位初始化是否成功。
         """
-        orientation = tf.transformations.quaternion_from_euler(yaw, pitch, roll)
+        orientation = tf.transformations.quaternion_from_euler(roll, pitch, yaw)
         pose = Pose(position=Point(x=x, y=y, z=z), orientation=Quaternion(x=orientation[0], y=orientation[1], z=orientation[2], w=orientation[3]))
         return self.robot_navigation.init_localization_by_pose(pose)
     

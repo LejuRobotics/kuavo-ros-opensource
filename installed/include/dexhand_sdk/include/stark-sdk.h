@@ -9,9 +9,10 @@
 #include <ostream>
 #include <new>
 
-/// 内置手势1~6：张开、握拳、两只捏、三只捏、侧边捏、单指点
-/// 一代手最多支持6个自定义动作序列: 10~15
-/// 二代手最多支持24个定义动作序列: 7~30
+/// Built‑in gestures 1~6: open hand, fist, two‑finger pinch, three‑finger pinch,
+/// side pinch, single‑finger point.
+/// Revo1 supports up to 6 custom action sequences: IDs 10~15.
+/// Revo2 supports up to 24 custom action sequences: IDs 7~30.
 enum ActionSequenceId : uint8_t {
   ACTION_SEQUENCE_ID_DEFAULT_GESTURE_OPEN = 1,
   ACTION_SEQUENCE_ID_DEFAULT_GESTURE_FIST = 2,
@@ -45,29 +46,50 @@ enum ActionSequenceId : uint8_t {
   ACTION_SEQUENCE_ID_CUSTOM_GESTURE21 = 30,
 };
 
-enum ContactState : uint8_t {
-  CONTACT_STATE_NO_CONTACT = 0,
-  CONTACT_STATE_CONTACT = 1,
-  CONTACT_STATE_CONTACT_SLIDING = 2,
+/// DFU (Device Firmware Update) state
+/// Used in DFU state callback to indicate current upgrade status
+enum DfuState : uint8_t {
+  /// DFU not started
+  DFU_STATE_IDLE = 0,
+  /// Preparing to start DFU
+  DFU_STATE_STARTING = 1,
+  /// DFU started, ready to transfer
+  DFU_STATE_STARTED = 2,
+  /// Transferring firmware data
+  DFU_STATE_TRANSFER = 3,
+  /// DFU completed successfully
+  DFU_STATE_COMPLETED = 4,
+  /// DFU aborted or failed
+  DFU_STATE_ABORTED = 5,
 };
 
+/// EtherCAT FoE (File over EtherCAT) firmware type
+/// Used for firmware upgrade over EtherCAT
 enum EtherCATFoeType : uint8_t {
+  /// Wrist module firmware
   ETHER_CAT_FOE_TYPE_WRIST = 1,
+  /// Main controller firmware
   ETHER_CAT_FOE_TYPE_CONTROL = 2,
 };
 
+/// Finger control unit mode
+/// Determines how position/speed/current values are interpreted
 enum FingerUnitMode : uint8_t {
+  /// Normalized mode: values in range 0-1000 (default)
   FINGER_UNIT_MODE_NORMALIZED = 0,
+  /// Physical mode: values in physical units (degrees, °/s, mA)
   FINGER_UNIT_MODE_PHYSICAL = 1,
 };
 
-enum ForceLevel : uint8_t {
+enum ForceLevel : int32_t {
+  FORCE_LEVEL_UNUSED = 0,
   FORCE_LEVEL_SMALL = 1,
   FORCE_LEVEL_NORMAL = 2,
   FORCE_LEVEL_FULL = 3,
 };
 
-enum LedColor : uint8_t {
+enum LedColor : int32_t {
+  /// not equal to OFF, since majorly use LedMode to turn-off LED.
   LED_COLOR_UNCHANGED = 0,
   LED_COLOR_R = 1,
   LED_COLOR_G = 2,
@@ -78,14 +100,18 @@ enum LedColor : uint8_t {
   LED_COLOR_RGB = 7,
 };
 
-enum LedMode : uint8_t {
-  LED_MODE_NONE = 0,
+enum LedMode : int32_t {
+  LED_MODE_UNUSED = 0,
   LED_MODE_SHUTDOWN = 1,
   LED_MODE_KEEP = 2,
+  /// 1Hz freq on-off cycle, 50% duty cycle
   LED_MODE_BLINK = 3,
+  /// on-100ms, then off, no repeat, if repeatedly receive this, time counter will be reset at each time received (e.g., repeatedly receive interval <= 100ms equal always on)
   LED_MODE_ONE_SHOT = 4,
-  LED_MODE_BLINK0_5HZ = 5,
-  LED_MODE_BLINK2_HZ = 6,
+  /// 0.5Hz freq on-off cycle, 50% duty cycle
+  LED_MODE_BLINK05HZ = 5,
+  /// 2Hz freq on-off cycle, 50% duty cycle
+  LED_MODE_BLINK2HZ = 6,
 };
 
 enum LogLevel : uint8_t {
@@ -96,99 +122,152 @@ enum LogLevel : uint8_t {
   LOG_LEVEL_TRACE = 4,
 };
 
+/// Motor state
+/// Indicates the current operating state of a finger motor
 enum MotorState : uint8_t {
+  /// Motor is idle (not moving)
   MOTOR_STATE_IDLE = 0,
+  /// Motor is running (moving)
   MOTOR_STATE_RUNNING = 1,
+  /// Motor is stalled (blocked or reached limit)
   MOTOR_STATE_STALL = 2,
+  /// Motor is in turbo mode (continuous force)
   MOTOR_STATE_TURBO = 3,
+  /// Unknown state
   MOTOR_STATE_UNKNOWN = 255,
 };
 
+/// Button press state
+/// Used in button event callbacks
 enum PressState : uint8_t {
+  /// No button event
   PRESS_STATE_NONE = 0,
+  /// Button pressed down
   PRESS_STATE_DOWN = 1,
+  /// Button released
   PRESS_STATE_UP = 2,
 };
 
+/// SKU type (device hand type)
+/// Identifies the hand side (left/right). Size is determined by hardware_type.
+/// Note: Currently only Medium size is available. Small size values are reserved.
 enum SkuType : uint8_t {
+  /// Medium size, right hand
   SKU_TYPE_MEDIUM_RIGHT = 1,
+  /// Medium size, left hand
   SKU_TYPE_MEDIUM_LEFT = 2,
+  /// Small size, right hand (reserved, not currently used)
   SKU_TYPE_SMALL_RIGHT = 3,
+  /// Small size, left hand (reserved, not currently used)
   SKU_TYPE_SMALL_LEFT = 4,
 };
 
+/// Finger identifier
+/// Used to specify which finger to control or query
 enum StarkFingerId : uint8_t {
+  /// Thumb (main joint)
   STARK_FINGER_ID_THUMB = 1,
+  /// Thumb auxiliary (rotation joint, Revo2 only)
   STARK_FINGER_ID_THUMB_AUX = 2,
+  /// Index finger
   STARK_FINGER_ID_INDEX = 3,
+  /// Middle finger
   STARK_FINGER_ID_MIDDLE = 4,
+  /// Ring finger
   STARK_FINGER_ID_RING = 5,
+  /// Pinky finger
   STARK_FINGER_ID_PINKY = 6,
 };
 
+/// Stark hardware type
+/// Identifies the device generation and capabilities
 enum StarkHardwareType : uint8_t {
-  STARK_HARDWARE_TYPE_RS485_PROTOBUF = 0,
+  /// Revo1 with legacy Protobuf protocol
+  STARK_HARDWARE_TYPE_REVO1_PROTOBUF = 0,
+  /// Revo1 Basic (no touch sensor)
   STARK_HARDWARE_TYPE_REVO1_BASIC = 1,
+  /// Revo1 with capacitive touch sensor
   STARK_HARDWARE_TYPE_REVO1_TOUCH = 2,
-  STARK_HARDWARE_TYPE_REVO2_BASIC = 3,
-  STARK_HARDWARE_TYPE_REVO2_TOUCH = 4,
+  /// Revo1 Advanced: wide voltage, multi-interface support
+  STARK_HARDWARE_TYPE_REVO1_ADVANCED = 3,
+  /// Revo1 Advanced with capacitive touch sensor
+  STARK_HARDWARE_TYPE_REVO1_ADVANCED_TOUCH = 4,
+  /// Revo2 Basic (no touch sensor)
+  STARK_HARDWARE_TYPE_REVO2_BASIC = 5,
+  /// Revo2 with capacitive touch sensor
+  STARK_HARDWARE_TYPE_REVO2_TOUCH = 6,
+  /// Revo2 with pressure/modulus touch sensor
+  STARK_HARDWARE_TYPE_REVO2_TOUCH_PRESSURE = 7,
 };
 
+/// Communication protocol type
+/// Determines how the SDK communicates with the device
 enum StarkProtocolType : uint8_t {
+  /// Modbus RTU over RS485 serial
   STARK_PROTOCOL_TYPE_MODBUS = 1,
+  /// CAN 2.0 protocol (1Mbps)
   STARK_PROTOCOL_TYPE_CAN = 2,
+  /// CAN FD protocol (1Mbps arbitration, 5Mbps data)
   STARK_PROTOCOL_TYPE_CAN_FD = 3,
+  /// EtherCAT protocol (Linux only)
   STARK_PROTOCOL_TYPE_ETHER_CAT = 4,
+  /// Legacy Protobuf protocol (Revo1 only)
   STARK_PROTOCOL_TYPE_PROTOBUF = 5,
 };
 
+/// Touch sensor status
+/// Indicates the health status of a touch sensor
 enum TouchSensorStatus : uint8_t {
+  /// Sensor data is valid
   TOUCH_SENSOR_STATUS_NORMAL = 0,
+  /// Sensor data is abnormal
   TOUCH_SENSOR_STATUS_ABNORMAL = 1,
+  /// Communication error with sensor
   TOUCH_SENSOR_STATUS_COMMUNICATION_ERROR = 2,
+  /// Unknown state
   TOUCH_SENSOR_STATUS_UNKNOWN = 255,
 };
 
+/// Opaque handle for DataCollector
+struct CDataCollector;
+
+/// Opaque handle for MotorStatusBuffer
+struct CMotorStatusBuffer;
+
+/// Opaque handle for PressureDetailedBuffer
+struct CPressureDetailedBuffer;
+
+/// Opaque handle for PressureSummaryBuffer
+struct CPressureSummaryBuffer;
+
+/// Opaque handle for TouchStatusBuffer
+struct CTouchStatusBuffer;
+
+/// Device handler for C API
+/// This is an opaque handle that wraps the internal device context.
+/// Use `modbus_open` or `init_device_handler` to create, and `modbus_close`
+/// or `close_device_handler` to release.
 struct DeviceHandler;
 
-/// 设备配置
-struct DeviceConfig {
-  StarkProtocolType protocol;
-  const char *port_name;
-  uint32_t baudrate;
-  uint8_t slave_id;
-};
-
-/// 设备信息
-/// sku_type: 设备类型，1: 右手 2: 左手
-/// serial_number: 序列号
-/// firmware_version: 固件版本
-struct DeviceInfo {
-  StarkHardwareType hardware_type;
-  SkuType sku_type;
-  const char *serial_number;
-  const char *firmware_version;
-};
-
-struct MotorStatusData {
+/// Motor status data for all 6 finger joints.
+/// Returned by `stark_get_motor_status`. Call `free_motor_status_data` to release.
+/// Array order: [Thumb, ThumbAux, Index, Middle, Ring, Pinky]
+struct CMotorStatusData {
+  /// Position values in unified range 0-1000 (0=open, 1000=closed)
   uint16_t positions[6];
+  /// Speed values in unified range -1000 to +1000 (positive=closing)
   int16_t speeds[6];
+  /// Current values in unified range -1000 to +1000 (positive=closing)
   int16_t currents[6];
+  /// Motor states (see MotorState enum)
   uint8_t states[6];
 };
 
-struct TouchRawData {
-  uint32_t thumb[7];
-  uint32_t index[11];
-  uint32_t middle[11];
-  uint32_t ring[11];
-  uint32_t pinky[7];
-};
-
-/// 触觉传感器数据
-/// 三维力数值、自接近、互接近电容值，以及传感器状态
-/// 二代触觉手只有法向力，切向力，切向力方向，接近值，四个值，其他值为0
-struct TouchFingerItem {
+/// Tactile sensor data (C API)
+/// 3D force values, self-capacitance, mutual-capacitance values, and sensor status.
+/// Revo2 touch hand only has normal force, tangential force, tangential force
+/// direction, and proximity; other fields are zero.
+struct CTouchFingerItem {
   uint16_t normal_force1;
   uint16_t normal_force2;
   uint16_t normal_force3;
@@ -204,152 +283,812 @@ struct TouchFingerItem {
   uint16_t status;
 };
 
-struct TouchFingerData {
-  TouchFingerItem items[5];
+/// Pressure sensor detailed data (Detailed mode)
+///
+/// For Modulus pressure touch sensor detailed sensor point data
+/// - Fingers: 9 sensor points
+/// - Palm: 46 sensor points
+struct PressureDetailedItem {
+  /// Number of sensor points (thumb/index/middle/ring/pinky: 9, palm: 46)
+  uint8_t sensor_count;
+  /// Sensor data (up to 46 sensor points)
+  uint16_t sensors_data[46];
 };
 
-struct TurboConfig {
+/// Device configuration returned by auto-detect functions.
+/// Contains the detected protocol, port, baudrate, and slave ID.
+/// Call `free_device_config` to release memory.
+struct CDeviceConfig {
+  /// Communication protocol type
+  StarkProtocolType protocol;
+  /// Serial port name (e.g., "/dev/ttyUSB0" or "COM3")
+  const char *port_name;
+  /// Baud rate in bps
+  uint32_t baudrate;
+  /// Slave ID on the bus
+  uint8_t slave_id;
+};
+
+/// ZQWL device info struct (C interface)
+struct CZqwlDeviceInfo {
+  /// Device type (0x0100=dual-channel CANFD, 0x0101=single-channel CANFD, 0x0102=dual-channel CAN, etc.)
+  uint16_t device_type;
+  /// Serial port name
+  char *port_name;
+  /// USB VID
+  uint16_t vid;
+  /// USB PID
+  uint16_t pid;
+  /// Whether CANFD is supported
+  bool supports_canfd;
+  /// Number of channels
+  uint8_t channel_count;
+};
+
+/// ZQWL device list struct (C interface)
+struct ZqwlDeviceList {
+  /// Device array pointer
+  CZqwlDeviceInfo *devices;
+  /// Device count
+  uintptr_t count;
+};
+
+/// SocketCAN device info struct (C interface)
+struct CSocketCanDeviceInfo {
+  /// Interface name (e.g. "can0")
+  char *iface;
+  /// Whether CANFD is supported
+  bool supports_canfd;
+  /// Whether interface is up
+  bool is_up;
+};
+
+/// SocketCAN device list struct (C interface)
+struct SocketCanDeviceList {
+  /// Device array pointer
+  CSocketCanDeviceInfo *devices;
+  /// Device count
+  uintptr_t count;
+};
+
+/// Detected device information (C interface)
+struct CDetectedDevice {
+  /// Protocol type
+  StarkProtocolType protocol;
+  /// Port name (serial port or CAN adapter port)
+  char *port_name;
+  /// Slave ID on the bus
+  uint8_t slave_id;
+  /// Baudrate (for Modbus/serial protocols, or CAN arbitration baudrate)
+  uint32_t baudrate;
+  /// Data baudrate (for CANFD only, 0 for other protocols)
+  uint32_t data_baudrate;
+  /// Hardware type
+  StarkHardwareType hardware_type;
+  /// SKU type
+  SkuType sku_type;
+  /// Serial number (NULL if not detected)
+  char *serial_number;
+  /// Firmware version (NULL if not detected)
+  char *firmware_version;
+};
+
+/// Detected device list (C interface)
+struct CDetectedDeviceList {
+  /// Device array pointer
+  CDetectedDevice *devices;
+  /// Device count
+  uintptr_t count;
+};
+
+/// Device information returned by `stark_get_device_info`.
+/// Contains device identification and version information.
+/// Call `free_device_info` to release memory.
+struct CDeviceInfo {
+  /// Device SKU (hand side: left/right)
+  SkuType sku_type;
+  /// Hardware type (device generation and capabilities)
+  StarkHardwareType hardware_type;
+  /// Serial number string (null-terminated)
+  const char *serial_number;
+  /// Firmware version string (null-terminated)
+  const char *firmware_version;
+};
+
+/// Raw capacitance data from touch sensors.
+/// Contains raw ADC values for each sensor channel.
+/// Call `free_touch_raw_data` to release.
+struct CTouchRawData {
+  /// Thumb sensor channels (7 channels)
+  uint32_t thumb[7];
+  /// Index finger sensor channels (11 channels)
+  uint32_t index[11];
+  /// Middle finger sensor channels (11 channels)
+  uint32_t middle[11];
+  /// Ring finger sensor channels (11 channels)
+  uint32_t ring[11];
+  /// Pinky finger sensor channels (7 channels)
+  uint32_t pinky[7];
+};
+
+/// Touch data for all 5 fingers.
+/// Returned by `stark_get_touch_status`. Call `free_touch_finger_data` to release.
+/// Array order: [Thumb, Index, Middle, Ring, Pinky]
+struct CTouchFingerData {
+  /// Touch data for each finger
+  CTouchFingerItem items[5];
+};
+
+/// Turbo mode configuration.
+/// Turbo mode enables continuous gripping force.
+/// Call `free_turbo_config` to release.
+struct CTurboConfig {
+  /// Interval between turbo pulses in milliseconds
   uint16_t interval;
+  /// Duration of each turbo pulse in milliseconds
   uint16_t duration;
 };
 
-struct LedInfo {
+/// LED information returned by `stark_get_led_info`.
+/// Call `free_led_info` to release.
+struct CLedInfo {
+  /// Current LED color
   LedColor color;
+  /// Current LED mode (blinking pattern)
   LedMode mode;
 };
 
-struct ButtonPressEvent {
+/// Button press event returned by `stark_get_button_event`.
+/// Call `free_button_event` to release.
+struct CButtonPressEvent {
+  /// Event timestamp in milliseconds
   int32_t timestamp;
+  /// Button identifier
   int32_t button_id;
+  /// Press state (down/up)
   PressState press_state;
 };
 
-/// Modbus异步读写回调
-/// 该回调函数用于处理Modbus异步操作的结果。
-/// 返回值为 0 成功，其他值失败
+/// Modbus async read/write result callback.
+/// This callback processes results of asynchronous Modbus operations.
+/// Return value: 0 on success, non‑zero on failure.
 using ModbusOperationResultCallback = void(*)(uint8_t*, int, int, void*);
 
-/// Modbus异步读写回调
-/// 返回值为 0 成功，其他值失败
+/// Modbus async read/write callback type.
+/// Return value: 0 on success, non‑zero on failure.
 using ModbusOperationCallback = int32_t(*)(const uint8_t *values,
                                            int len,
                                            ModbusOperationResultCallback callback,
                                            void *user_data);
 
-/// 自定义Modbus接收回调
-/// 返回值为 0 成功，其他值失败
+/// Custom Modbus RX callback.
+/// Return value: 0 on success, non‑zero on failure.
 using ModbusRxCallback = int32_t(*)(uint8_t slave_id,
                                     uint16_t register_address,
                                     uint16_t *data_out,
                                     uint16_t count);
 
-/// 自定义Modbus发送回调
-/// 返回值为 0 成功，其他值失败
+/// Custom Modbus TX callback.
+/// Return value: 0 on success, non‑zero on failure.
 using ModbusTxCallback = int32_t(*)(uint8_t slave_id,
                                     uint16_t register_address,
                                     const uint16_t *data,
                                     uint16_t count);
 
-/// CAN/CANFD 接收回调
-/// 注意data_out 长度最多为 64
-/// 返回值为 0 成功，其他值失败
+/// CAN/CANFD RX callback.
+///
+/// # Parameters
+/// - `slave_id`: Slave ID
+/// - `expected_can_id`: Expected CAN ID to filter responses
+///   - CAN 2.0: `= 0` for DFU mode (accept any), `> 0` for normal filtering
+///   - CANFD: Always `> 0`, matches by slave_id and master_id
+/// - `expected_frames`: `0` = auto-detect multi-frame, `> 0` = specific frame count
+/// - `can_id_out`: Output CAN ID
+/// - `data_out`: Output data buffer (at least 512 bytes for multi-frame)
+/// - `data_len_out`: Output data length
+///
+/// # Return value
+/// 0 on success, non‑zero on failure.
 using CanRxCallback = int32_t(*)(uint8_t slave_id,
+                                 uint32_t expected_can_id,
+                                 uint8_t expected_frames,
                                  uint32_t *can_id_out,
                                  uint8_t *data_out,
                                  uintptr_t *data_len_out);
 
-/// CAN/CANFD 发送回调
-/// 返回值为 0 成功，其他值失败
+/// CAN/CANFD TX callback.
+/// Return value: 0 on success, non‑zero on failure.
 using CanTxCallback = int32_t(*)(uint8_t slave_id,
                                  uint32_t can_id,
                                  const uint8_t *data,
                                  uintptr_t data_len);
 
-/// DFU状态回调, state: DfuState
+/// DFU state callback, `state` corresponds to `DfuState`.
 using DfuStateCallback = void(*)(uint8_t slave_id, uint8_t state);
 
-/// DFU进度回调
+/// DFU progress callback.
 using DfuProgressCallback = void(*)(uint8_t slave_id, float progress);
 
 extern "C" {
 
-/// 初始化选项
-/// protocol_type: 协议类型，默认为 Modbus
-/// log_level: 日志级别，默认为 Info
-void init_cfg(StarkProtocolType protocol_type, LogLevel log_level);
+/// Create a new motor status buffer
+///
+/// @param max_size Maximum buffer capacity (default 1000)
+/// @return Pointer to CMotorStatusBuffer, or NULL on failure
+CMotorStatusBuffer *motor_buffer_new(uintptr_t max_size);
 
-/// 列出可用的串口
-/// 用于列出所有的 Stark 串口
+/// Free a motor status buffer
+///
+/// @param buffer Pointer to CMotorStatusBuffer
+void motor_buffer_free(CMotorStatusBuffer *buffer);
+
+/// Get all motor status data from buffer
+///
+/// @param buffer Pointer to CMotorStatusBuffer
+/// @param out_data Pointer to array to store data (caller must allocate, no need to free returned data)
+/// @param max_count Maximum number of items to return (size of out_data array)
+/// @param out_count Pointer to store the number of items actually returned
+/// @return 0 on success, -1 on failure
+///
+/// @note Data is copied to caller-allocated buffer. Caller is responsible for
+///       allocating out_data array before calling, but does NOT need to free
+///       the returned data (it's stack/heap memory owned by caller).
+int motor_buffer_pop_all(CMotorStatusBuffer *buffer,
+                         CMotorStatusData *out_data,
+                         uintptr_t max_count,
+                         uintptr_t *out_count);
+
+/// Get the number of items in the buffer
+///
+/// @param buffer Pointer to CMotorStatusBuffer
+/// @return Number of items, or 0 if buffer is NULL
+uintptr_t motor_buffer_len(const CMotorStatusBuffer *buffer);
+
+/// Check if buffer is empty
+///
+/// @param buffer Pointer to CMotorStatusBuffer
+/// @return 1 if empty, 0 if not empty, -1 if buffer is NULL
+int motor_buffer_is_empty(const CMotorStatusBuffer *buffer);
+
+/// Clear all data from buffer
+///
+/// @param buffer Pointer to CMotorStatusBuffer
+void motor_buffer_clear(CMotorStatusBuffer *buffer);
+
+/// Create a new touch status buffer
+///
+/// @param max_size Maximum buffer capacity per finger (default 1000)
+/// @return Pointer to CTouchStatusBuffer, or NULL on failure
+CTouchStatusBuffer *touch_buffer_new(uintptr_t max_size);
+
+/// Free a touch status buffer
+///
+/// @param buffer Pointer to CTouchStatusBuffer
+void touch_buffer_free(CTouchStatusBuffer *buffer);
+
+/// Get all touch data for all fingers
+///
+/// @param buffer Pointer to CTouchStatusBuffer
+/// @param out_data Pointer to array of 5 arrays to store data (caller must allocate, no need to free returned data)
+/// @param max_counts Pointer to array of 5 max sizes (capacity of each out_data array)
+/// @param out_counts Pointer to array of 5 sizes to store actual counts per finger
+/// @return 0 on success, -1 on failure
+///
+/// @note Data is copied to caller-allocated buffers. Caller is responsible for
+///       allocating out_data arrays before calling, but does NOT need to free
+///       the returned data (it's stack/heap memory owned by caller).
+int touch_buffer_pop_all(CTouchStatusBuffer *buffer,
+                         CTouchFingerItem **out_data,
+                         const uintptr_t *max_counts,
+                         uintptr_t *out_counts);
+
+/// Get touch data for a single finger
+///
+/// @param buffer Pointer to CTouchStatusBuffer
+/// @param finger_index Finger index (0-4)
+/// @param out_data Pointer to array to store data (caller must allocate, no need to free returned data)
+/// @param max_count Maximum number of items to return (size of out_data array)
+/// @param out_count Pointer to store the number of items actually returned
+/// @return 0 on success, -1 on failure
+///
+/// @note Data is copied to caller-allocated buffer. Caller is responsible for
+///       allocating out_data array before calling, but does NOT need to free
+///       the returned data (it's stack/heap memory owned by caller).
+int touch_buffer_pop_finger(CTouchStatusBuffer *buffer,
+                            uintptr_t finger_index,
+                            CTouchFingerItem *out_data,
+                            uintptr_t max_count,
+                            uintptr_t *out_count);
+
+/// Get buffer lengths for all fingers
+///
+/// @param buffer Pointer to CTouchStatusBuffer
+/// @param out_lengths Pointer to array of 5 sizes
+/// @return 0 on success, -1 on failure
+int touch_buffer_len_all(const CTouchStatusBuffer *buffer, uintptr_t *out_lengths);
+
+/// Clear all touch buffers
+///
+/// @param buffer Pointer to CTouchStatusBuffer
+void touch_buffer_clear(CTouchStatusBuffer *buffer);
+
+/// Create a new pressure summary buffer
+///
+/// @param max_size Maximum buffer capacity per finger (default 1000)
+/// @return Pointer to CPressureSummaryBuffer, or NULL on failure
+CPressureSummaryBuffer *pressure_summary_buffer_new(uintptr_t max_size);
+
+/// Free a pressure summary buffer
+///
+/// @param buffer Pointer to CPressureSummaryBuffer
+void pressure_summary_buffer_free(CPressureSummaryBuffer *buffer);
+
+/// Get all pressure summary data for all fingers
+///
+/// @param buffer Pointer to CPressureSummaryBuffer
+/// @param out_data Pointer to array of 6 arrays to store data (caller must allocate, no need to free returned data)
+/// @param max_counts Pointer to array of 6 max sizes (capacity of each out_data array)
+/// @param out_counts Pointer to array of 6 sizes to store actual counts per finger
+/// @return 0 on success, -1 on failure
+///
+/// @note Data is copied to caller-allocated buffers. Caller is responsible for
+///       allocating out_data arrays before calling, but does NOT need to free
+///       the returned data (it's stack/heap memory owned by caller).
+int pressure_summary_buffer_pop_all(CPressureSummaryBuffer *buffer,
+                                    uint16_t **out_data,
+                                    const uintptr_t *max_counts,
+                                    uintptr_t *out_counts);
+
+/// Get pressure summary data for a single part (finger or palm)
+///
+/// @param buffer Pointer to CPressureSummaryBuffer
+/// @param finger_index Part index (0-5: 0-4=fingers, 5=palm)
+/// @param out_data Pointer to array to store data (caller must allocate, no need to free returned data)
+/// @param max_count Maximum number of items to return (size of out_data array)
+/// @param out_count Pointer to store the number of items actually returned
+/// @return 0 on success, -1 on failure
+///
+/// @note Data is copied to caller-allocated buffer. Caller is responsible for
+///       allocating out_data array before calling, but does NOT need to free
+///       the returned data (it's stack/heap memory owned by caller).
+int pressure_summary_buffer_pop_finger(CPressureSummaryBuffer *buffer,
+                                       uintptr_t finger_index,
+                                       uint16_t *out_data,
+                                       uintptr_t max_count,
+                                       uintptr_t *out_count);
+
+/// Clear all pressure summary buffers
+///
+/// @param buffer Pointer to CPressureSummaryBuffer
+void pressure_summary_buffer_clear(CPressureSummaryBuffer *buffer);
+
+/// Create a new pressure detailed buffer
+///
+/// @param max_size Maximum buffer capacity per finger (default 1000)
+/// @return Pointer to CPressureDetailedBuffer, or NULL on failure
+CPressureDetailedBuffer *pressure_detailed_buffer_new(uintptr_t max_size);
+
+/// Free a pressure detailed buffer
+///
+/// @param buffer Pointer to CPressureDetailedBuffer
+void pressure_detailed_buffer_free(CPressureDetailedBuffer *buffer);
+
+/// Get all pressure detailed data for all fingers
+///
+/// @param buffer Pointer to CPressureDetailedBuffer
+/// @param out_data Pointer to array of 6 arrays to store data (caller must allocate, no need to free returned data)
+/// @param max_counts Pointer to array of 6 max sizes (capacity of each out_data array)
+/// @param out_counts Pointer to array of 6 sizes to store actual counts per finger
+/// @return 0 on success, -1 on failure
+///
+/// @note Data is copied to caller-allocated buffers. Caller is responsible for
+///       allocating out_data arrays before calling, but does NOT need to free
+///       the returned data (it's stack/heap memory owned by caller).
+int pressure_detailed_buffer_pop_all(CPressureDetailedBuffer *buffer,
+                                     PressureDetailedItem **out_data,
+                                     const uintptr_t *max_counts,
+                                     uintptr_t *out_counts);
+
+/// Get pressure detailed data for a single part (finger or palm)
+///
+/// @param buffer Pointer to CPressureDetailedBuffer
+/// @param finger_index Part index (0-5: 0-4=fingers, 5=palm)
+/// @param out_data Pointer to array to store data (caller must allocate, no need to free returned data)
+/// @param max_count Maximum number of items to return (size of out_data array)
+/// @param out_count Pointer to store the number of items actually returned
+/// @return 0 on success, -1 on failure
+///
+/// @note Data is copied to caller-allocated buffer. Caller is responsible for
+///       allocating out_data array before calling, but does NOT need to free
+///       the returned data (it's stack/heap memory owned by caller).
+int pressure_detailed_buffer_pop_finger(CPressureDetailedBuffer *buffer,
+                                        uintptr_t finger_index,
+                                        PressureDetailedItem *out_data,
+                                        uintptr_t max_count,
+                                        uintptr_t *out_count);
+
+/// Clear all pressure detailed buffers
+///
+/// @param buffer Pointer to CPressureDetailedBuffer
+void pressure_detailed_buffer_clear(CPressureDetailedBuffer *buffer);
+
+/// Create a new data collector - Basic version (motor only)
+///
+/// @param handle Device handler
+/// @param motor_buffer Motor status buffer
+/// @param slave_id Slave ID (default 1)
+/// @param motor_frequency Motor sampling frequency in Hz (default 1000)
+/// @param enable_stats Whether to print statistics (1=true, 0=false)
+/// @return Pointer to CDataCollector, or NULL on failure
+CDataCollector *data_collector_new_basic(DeviceHandler *handle,
+                                         CMotorStatusBuffer *motor_buffer,
+                                         unsigned char slave_id,
+                                         uint32_t motor_frequency,
+                                         int enable_stats);
+
+/// Create a new data collector - Capacitive touch version
+///
+/// @param handle Device handler
+/// @param motor_buffer Motor status buffer
+/// @param touch_buffer Touch status buffer
+/// @param slave_id Slave ID (default 1)
+/// @param motor_frequency Motor sampling frequency in Hz (default 1000)
+/// @param touch_frequency Touch sampling frequency in Hz (default 100)
+/// @param enable_stats Whether to print statistics (1=true, 0=false)
+/// @return Pointer to CDataCollector, or NULL on failure
+CDataCollector *data_collector_new_capacitive(DeviceHandler *handle,
+                                              CMotorStatusBuffer *motor_buffer,
+                                              CTouchStatusBuffer *touch_buffer,
+                                              unsigned char slave_id,
+                                              uint32_t motor_frequency,
+                                              uint32_t touch_frequency,
+                                              int enable_stats);
+
+/// Create a new data collector - Pressure Summary version
+///
+/// @param handle Device handler
+/// @param motor_buffer Motor status buffer
+/// @param pressure_summary_buffer Pressure summary buffer
+/// @param slave_id Slave ID (default 1)
+/// @param motor_frequency Motor sampling frequency in Hz (default 1000)
+/// @param touch_frequency Touch sampling frequency in Hz (default 100)
+/// @param enable_stats Whether to print statistics (1=true, 0=false)
+/// @return Pointer to CDataCollector, or NULL on failure
+CDataCollector *data_collector_new_pressure_summary(DeviceHandler *handle,
+                                                    CMotorStatusBuffer *motor_buffer,
+                                                    CPressureSummaryBuffer *pressure_summary_buffer,
+                                                    unsigned char slave_id,
+                                                    uint32_t motor_frequency,
+                                                    uint32_t touch_frequency,
+                                                    int enable_stats);
+
+/// Create a new data collector - Pressure Detailed version
+///
+/// @param handle Device handler
+/// @param motor_buffer Motor status buffer
+/// @param pressure_detailed_buffer Pressure detailed buffer
+/// @param slave_id Slave ID (default 1)
+/// @param motor_frequency Motor sampling frequency in Hz (default 1000)
+/// @param touch_frequency Touch sampling frequency in Hz (default 10)
+/// @param enable_stats Whether to print statistics (1=true, 0=false)
+/// @return Pointer to CDataCollector, or NULL on failure
+CDataCollector *data_collector_new_pressure_detailed(DeviceHandler *handle,
+                                                     CMotorStatusBuffer *motor_buffer,
+                                                     CPressureDetailedBuffer *pressure_detailed_buffer,
+                                                     unsigned char slave_id,
+                                                     uint32_t motor_frequency,
+                                                     uint32_t touch_frequency,
+                                                     int enable_stats);
+
+/// Create a new data collector - Pressure Hybrid version (Summary + Detailed)
+///
+/// @param handle Device handler
+/// @param motor_buffer Motor status buffer
+/// @param pressure_summary_buffer Pressure summary buffer
+/// @param pressure_detailed_buffer Pressure detailed buffer
+/// @param slave_id Slave ID (default 1)
+/// @param motor_frequency Motor sampling frequency in Hz (default 1000)
+/// @param summary_frequency Summary sampling frequency in Hz (default 100)
+/// @param detailed_frequency Detailed sampling frequency in Hz (default 10)
+/// @param enable_stats Whether to print statistics (1=true, 0=false)
+/// @return Pointer to CDataCollector, or NULL on failure
+CDataCollector *data_collector_new_pressure_hybrid(DeviceHandler *handle,
+                                                   CMotorStatusBuffer *motor_buffer,
+                                                   CPressureSummaryBuffer *pressure_summary_buffer,
+                                                   CPressureDetailedBuffer *pressure_detailed_buffer,
+                                                   unsigned char slave_id,
+                                                   uint32_t motor_frequency,
+                                                   uint32_t summary_frequency,
+                                                   uint32_t detailed_frequency,
+                                                   int enable_stats);
+
+/// Start data collection
+///
+/// @param collector Pointer to CDataCollector
+/// @return 0 on success, -1 on failure
+int data_collector_start(CDataCollector *collector);
+
+/// Stop data collection (non-blocking)
+///
+/// Sends stop signal but returns immediately.
+/// Use data_collector_wait() to ensure thread has finished.
+///
+/// @param collector Pointer to CDataCollector
+/// @return 0 on success, -1 on failure
+int data_collector_stop(CDataCollector *collector);
+
+/// Wait for data collection thread to finish
+///
+/// Blocks until the collection thread exits.
+/// Should be called after data_collector_stop() if cleanup is needed.
+///
+/// @param collector Pointer to CDataCollector
+/// @return 0 on success, -1 on failure
+int data_collector_wait(CDataCollector *collector);
+
+/// Check if data collector is running
+///
+/// @param collector Pointer to CDataCollector
+/// @return 1 if running, 0 if not running, -1 if collector is NULL
+int data_collector_is_running(const CDataCollector *collector);
+
+/// Free a data collector
+///
+/// @param collector Pointer to CDataCollector
+void data_collector_free(CDataCollector *collector);
+
+/// Initialize SDK logging.
+/// log_level: Log level (Debug, Info, Warn, Error). Default is Info.
+void init_logging(LogLevel log_level);
+
+/// List all available Stark serial ports.
 void list_available_ports();
 
-/// 自动检测串口设备，先检测二代灵巧手，再检测一代灵巧手
-/// port: 串口名称，传入 None 时自动检测
-/// quick: 是否快速检测，默认为 true, 默认只检测集中特定波特率及设备ID
-/// 返回 DeviceConfig 结构体指针，包含协议类型、端口名称、波特率和设备ID，关闭时需要调用 free_device_config 释放内存
-/// 如果失败，返回 NULL
-/// 注意：quick传false时，此函数会自动检测设备ID范围1~247，可能需要较长时间
-DeviceConfig *auto_detect_device(const char *port,
-                                 bool quick);
+/// Automatically detect a Stark device on a serial port.
+/// It first tries Revo2 hands and then Revo1 hands.
+/// port: Serial port name; when NULL, the function will auto‑detect ports.
+/// quick: Whether to use quick detection. Default is true, which only checks
+///        a subset of baudrates and slave IDs.
+/// Returns a pointer to `DeviceConfig` (protocol, port, baudrate, slave ID);
+/// call `free_device_config` to free the memory.
+/// On failure, returns NULL.
+/// Note: When `quick` is false, this function scans slave IDs in [1, 247],
+///       which may take a long time.
+///
+/// @deprecated Use `stark_auto_detect` + `init_from_detected` instead for better
+///             multi-protocol support (Modbus, CAN, CANFD).
+CDeviceConfig *auto_detect_device(const char *port, bool quick);
 
-/// 自动检测一代灵巧手设备
-/// port: 串口名称，传入 None 时自动检测
-/// quick: 是否快速检测，默认为 true, 默认只检测集中特定波特率及设备ID
-/// 返回 DeviceConfig 结构体指针，包含协议类型、端口名称、波特率和设备ID，，关闭时需要调用 free_device_config 释放内存
-/// 如果失败，返回 NULL
-/// 注意：quick传false时，此函数会自动检测设备ID范围1~247，可能需要较长时间
-DeviceConfig *auto_detect_modbus_revo1(const char *port,
-                                       bool quick);
+/// Automatically detect a Revo1 hand over Modbus.
+/// port: Serial port name; when NULL, the function will auto‑detect ports.
+/// quick: Whether to use quick detection. Default is true, which only checks
+///        a subset of baudrates and slave IDs.
+/// Returns a pointer to `DeviceConfig` (protocol, port, baudrate, slave ID);
+/// call `free_device_config` to free the memory.
+/// On failure, returns NULL.
+/// Note: When `quick` is false, this function scans slave IDs in [1, 247],
+///       which may take a long time.
+///
+/// @deprecated Use `stark_auto_detect` + `init_from_detected` instead for better
+///             multi-protocol support (Modbus, CAN, CANFD).
+CDeviceConfig *auto_detect_modbus_revo1(const char *port, bool quick);
 
-/// 自动检测二代灵巧手设备
-/// port: 串口名称，传入 None 时自动检测
-/// quick: 是否快速检测，默认为 true, 默认只检测集中特定波特率及设备ID
-/// 返回 DeviceConfig 结构体指针，包含协议类型、端口名称、波特率和设备ID，，关闭时需要调用 free_device_config 释放内存
-/// 如果失败，返回 NULL
-/// 注意：quick传false时，此函数会自动检测设备ID范围1~247，可能需要较长时间
-DeviceConfig *auto_detect_modbus_revo2(const char *port,
-                                       bool quick);
+/// Automatically detect a Revo2 hand over Modbus.
+/// port: Serial port name; when NULL, the function will auto‑detect ports.
+/// quick: Whether to use quick detection. Default is true, which only checks
+///        a subset of baudrates and slave IDs.
+/// Returns a pointer to `DeviceConfig` (protocol, port, baudrate, slave ID);
+/// call `free_device_config` to free the memory.
+/// On failure, returns NULL.
+/// Note: When `quick` is false, this function scans slave IDs in [1, 247],
+///       which may take a long time.
+///
+/// @deprecated Use `stark_auto_detect` + `init_from_detected` instead for better
+///             multi-protocol support (Modbus, CAN, CANFD).
+CDeviceConfig *auto_detect_modbus_revo2(const char *port, bool quick);
 
-/// 打开串口
-/// port: 串口名称，例如："/dev/ttyUSB0", "COM1"
-/// baudrate: 波特率，115200, 57600, 19200, 460800，一代手默认为115200，二代手默认为460800, 二代手支持1M, 2M, 5M
-/// 返回 DeviceHandler 结构体指针，关闭时需要调用 modbus_close 释放内存
-/// 如果失败，返回 NULL
-DeviceHandler *modbus_open(const char *port,
-                           uint32_t baudrate);
+/// Open a serial port.
+/// port: Serial port name, for example "/dev/ttyUSB0" or "COM1".
+/// baudrate: Baud rate, one of 115200, 57600, 19200, 460800.
+///           Revo1 default is 115200; Revo2 default is 460800, and Revo2 also
+///           supports 1M, 2M, 5M.
+/// Returns a pointer to `DeviceHandler`; call `modbus_close` to free it.
+/// On failure, returns NULL.
+DeviceHandler *modbus_open(const char *port, uint32_t baudrate);
 
-/// 关闭串口
+/// Close serial port
 void modbus_close(DeviceHandler *handle);
 
-/// @brief  创建一个新的 DeviceHandler 结构体
-/// @return  返回指向新创建的 DeviceHandler 结构体的指针，关闭时需要调用 free_device_handler 释放内存
-DeviceHandler *create_device_handler();
+/// Open a Protobuf protocol serial port.
+///
+/// Protobuf protocol uses default baudrate 115200 and default slave_id 10.
+/// Position range is 0-100 (not 0-1000 like Modbus/CAN).
+///
+/// @param port Serial port name, for example "/dev/ttyUSB0" or "COM1".
+/// @param slave_id Device slave ID (default is 10)
+/// @param baudrate Baudrate (pass 0 to use default 115200)
+/// @return Pointer to `DeviceHandler`; call `protobuf_close` to free it.
+///         On failure, returns NULL.
+DeviceHandler *protobuf_open(const char *port, uint8_t slave_id, uint32_t baudrate);
 
-/// @brief  释放 DeviceHandler 结构体
-/// @param handle  DeviceHandler 结构体指针
-void free_device_handler(DeviceHandler *handle);
+/// Close Protobuf serial port
+void protobuf_close(DeviceHandler *handle);
 
-/// @brief  创建一个新的 DeviceHandler 结构体
-/// @param master_id: 主设备ID，范围为1~255
-/// @return  返回指向新创建的 DeviceHandler 结构体的指针，关闭时需要调用 free_device_handler 释放内存
-DeviceHandler *canfd_init(uint8_t master_id);
+/// @brief  Create a device handler with specified protocol and optional master ID.
+/// @param protocol_type Protocol type (Modbus, CAN, CanFd, EtherCAT, Protobuf)
+/// @param master_id Master ID (required for CanFd and EtherCAT, 0 for others)
+/// @return Pointer to the newly created `DeviceHandler`. Call
+///         `close_device_handler` to release it.
+DeviceHandler *init_device_handler(StarkProtocolType protocol_type, uint8_t master_id);
 
-/// 打开EtherCAT igH Master主站
-DeviceHandler *ethercat_open_master(uint32_t master_pos);
+/// @brief  Create a device handler with hardware type pre-set.
+///
+/// This is useful when you already know the hardware type (e.g., from auto_detect)
+/// and want to avoid an extra get_device_info call.
+///
+/// @param protocol_type Protocol type (Modbus, CAN, CanFd, EtherCAT, Protobuf)
+/// @param master_id Master ID (required for CanFd and EtherCAT, 0 for others)
+/// @param slave_id Slave ID to set hardware type for
+/// @param hw_type Hardware type (StarkHardwareType enum value)
+/// @return Pointer to the newly created `DeviceHandler`. Call
+///         `close_device_handler` to release it.
+DeviceHandler *init_device_handler_with_hw_type(StarkProtocolType protocol_type,
+                                                uint8_t master_id,
+                                                uint8_t slave_id,
+                                                StarkHardwareType hw_type);
 
-/// 关闭EtherCAT igH Master主站
-void ethercat_close(DeviceHandler *handle);
+/// List all ZQWL USB CAN/CANFD devices
+///
+/// Returns device list pointer. Call `free_zqwl_device_list` to free memory after use.
+/// Returns list with count=0 if no devices found.
+///
+/// @note This is a low-level API. Recommend using high-level API `stark_auto_detect` + `init_from_detected`
+///       for automatic device detection and initialization. Low-level API is for advanced users
+///       who need manual control of CAN adapter.
+ZqwlDeviceList *list_zqwl_devices();
 
-/// 设置EtherCAT设备的SDO
+/// Free ZQWL device list memory
+void free_zqwl_device_list(ZqwlDeviceList *list);
+
+/// Initialize ZQWL CAN device (CAN 2.0 mode)
+///
+/// For Revo1 devices, baudrate is typically 1Mbps
+///
+/// @param port_name Serial port name, e.g. "/dev/cu.usbmodem*" (macOS) or "COM3" (Windows)
+/// @param arb_baudrate Arbitration baudrate (bps), typically 1000000
+/// @return 0: success, -1: failure
+///
+/// @note This is a low-level API. Recommend using high-level API `stark_auto_detect` + `init_from_detected`
+///       for automatic device detection and initialization. Low-level API is for advanced users
+///       who need manual control of CAN adapter.
+int init_zqwl_can(const char *port_name,
+                  uint32_t arb_baudrate);
+
+/// Initialize ZQWL CANFD device
+///
+/// For Revo2 devices, arbitration baudrate is typically 1Mbps, data baudrate is typically 5Mbps
+///
+/// @param port_name Serial port name
+/// @param arb_baudrate Arbitration baudrate (bps), typically 1000000
+/// @param data_baudrate Data baudrate (bps), typically 5000000
+/// @return 0: success, -1: failure
+///
+/// @note This is a low-level API. Recommend using high-level API `stark_auto_detect` + `init_from_detected`
+///       for automatic device detection and initialization. Low-level API is for advanced users
+///       who need manual control of CAN adapter.
+int init_zqwl_canfd(const char *port_name,
+                    uint32_t arb_baudrate,
+                    uint32_t data_baudrate);
+
+/// Close ZQWL CAN/CANFD device
+///
+/// @note This is a low-level API. If device was initialized with `init_from_detected`,
+///       use `close_device_handler` instead, which automatically handles ZQWL resource cleanup.
+void close_zqwl();
+
+/// List all SocketCAN interfaces (Linux only)
+///
+/// Scans /sys/class/net/ for CAN interfaces.
+/// Returns device list pointer. Call `free_socketcan_device_list` to free memory.
+/// Returns list with count=0 on non-Linux platforms or if no interfaces found.
+SocketCanDeviceList *list_socketcan_devices();
+
+/// Free SocketCAN device list memory
+void free_socketcan_device_list(SocketCanDeviceList *list);
+
+/// Initialize SocketCAN CAN 2.0 device (Linux only)
+///
+/// @param iface Interface name (e.g. "can0"). If NULL, uses STARK_SOCKETCAN_IFACE env var or "can0"
+/// @return 0: success, -1: failure (or non-Linux platform)
+int init_socketcan_can(const char *iface);
+
+/// Initialize SocketCAN CANFD device (Linux only)
+///
+/// @param iface Interface name (e.g. "can0"). If NULL, uses STARK_SOCKETCAN_IFACE env var or "can0"
+/// @return 0: success, -1: failure (or non-Linux platform)
+int init_socketcan_canfd(const char *iface);
+
+/// Close SocketCAN device (Linux only)
+void close_socketcan();
+
+/// Check if a SocketCAN interface is available and up (Linux only)
+///
+/// @param iface Interface name (e.g. "can0")
+/// @return true if interface exists and is up, false otherwise
+bool is_socketcan_available(const char *iface);
+
+/// Scan CAN bus for devices (simple version)
+///
+/// Uses get_can_params to read SkuType for device detection
+///
+/// @param candidate_ids Pointer to array of candidate device IDs
+/// @param candidate_count Number of candidate device IDs
+/// @param timeout_ms Timeout in milliseconds
+/// @return Found device ID (1-255), or 0 if no device found
+uint8_t scan_can_devices(const uint8_t *candidate_ids,
+                         uintptr_t candidate_count,
+                         uint64_t timeout_ms);
+
+/// Auto-detect Stark devices across all protocols
+///
+/// Scans for devices in priority order:
+/// 1. ZQWL CANFD (Revo2: IDs 0x7E, 0x7F)
+/// 2. ZQWL CAN 2.0 (Revo1/Revo2: IDs 1, 2)
+/// 3. Modbus/RS485 (IDs 0x7E, 0x7F, 1, 2, 10)
+///
+/// # Parameters
+/// - scan_all: If true, scan for all devices. If false, stop at first found.
+/// - port: Optional port name to scan. If NULL, scans all available ports.
+/// - protocol: Protocol to use (0=auto, 1=Modbus, 2=Can, 3=CanFd)
+///
+/// # Returns
+/// Pointer to CDetectedDeviceList. Call `free_detected_device_list` to free.
+/// Returns empty list (count=0) if no devices found.
+CDetectedDeviceList *stark_auto_detect(bool scan_all, const char *port, uint8_t protocol);
+
+/// Free detected device list memory
+void free_detected_device_list(CDetectedDeviceList *list);
+
+/// Initialize device handler from detected device info.
+///
+/// This function initializes the appropriate transport (Modbus, CAN, CANFD)
+/// based on the detected device's protocol and returns a ready-to-use handler.
+///
+/// # Parameters
+/// - device: Pointer to CDetectedDevice from stark_auto_detect()
+///
+/// # Returns
+/// - Pointer to DeviceHandler on success
+/// - NULL on failure
+///
+/// # Notes
+/// - For CAN/CANFD: Initializes ZQWL adapter automatically
+/// - For Modbus: Opens serial port with detected baudrate
+/// - Call `close_from_detected` to cleanup
+DeviceHandler *init_from_detected(const CDetectedDevice *device);
+
+/// Close device handler based on protocol type.
+///
+/// Convenience function that handles cleanup for any protocol type.
+/// Automatically closes ZQWL adapter for CAN/CANFD protocols.
+///
+/// # Parameters
+/// - handle: Device handler to close
+/// - protocol: Protocol type (from CDetectedDevice.protocol)
+void close_device_handler(DeviceHandler *handle, uint8_t protocol);
+
+/// Configure SDO for an EtherCAT slave device.
 void ethercat_setup_sdo(DeviceHandler *handle, uint16_t slave_pos);
 
 void ethercat_reserve_master(DeviceHandler *handle);
 
-/// 开始EtherCAT循环, PDO通信控制&读取
-/// dc_assign_activate: DC标志，0x0000表示不设置DC
-/// sync0_cycle_time: SYNC0周期时间，单位为纳秒, loop循环周期和 SYNC0周期时间一致
-/// sync0_shift_time: SYNC0相位偏移时间，单位为纳秒
-/// sync1_cycle_time: SYNC1周期时间，单位为纳秒
-/// sync1_shift_time: SYNC1相位偏移时间，单位为纳秒
+/// Start EtherCAT cyclic loop with PDO communication (control & read).
+/// dc_assign_activate: DC flags; 0x0000 means DC is not enabled.
+/// sync0_cycle_time: SYNC0 cycle time in nanoseconds. The loop period matches
+///                   SYNC0 cycle time.
+/// sync0_shift_time: SYNC0 phase shift in nanoseconds.
+/// sync1_cycle_time: SYNC1 cycle time in nanoseconds.
+/// sync1_shift_time: SYNC1 phase shift in nanoseconds.
 void ethercat_start_loop(DeviceHandler *handle,
                          const uint16_t *slave_positions,
                          int count,
@@ -359,485 +1098,646 @@ void ethercat_start_loop(DeviceHandler *handle,
                          uint32_t sync1_cycle_time,
                          int32_t sync1_shift_time);
 
-/// 停止EtherCAT循环
+/// Stop the EtherCAT cyclic loop.
 void ethercat_stop_loop(DeviceHandler *handle);
 
-/// EtherCAT DFU, 通过Foe协议进行固件升级
-/// slave_pos: 从站位置
-/// dfu_type: DFU类型，Control或Wrist
-/// file_path: 固件文件路径
+/// EtherCAT DFU: upgrade firmware via FoE protocol.
+/// slave_pos: Slave position.
+/// dfu_type: DFU type, Control or Wrist.
+/// file_path: Firmware file path.
 void ethercat_start_dfu(DeviceHandler *handle,
                         uint16_t slave_pos,
                         EtherCATFoeType dfu_type,
                         const char *file_path);
 
-/// 获取设备信息
-/// 返回 DeviceInfo 结构体指针，需要调用 free_device_info 释放内存
-/// 如果失败，返回 NULL
-DeviceInfo *stark_get_device_info(DeviceHandler *handle, uint8_t slave_id);
+/// Get device information.
+/// Returns a pointer to `DeviceInfo`; you must call `free_device_info` to free
+/// it. Returns NULL on failure.
+CDeviceInfo *stark_get_device_info(DeviceHandler *handle, uint8_t slave_id);
 
-/// 根据序列号判断是否为触觉版灵巧手
-bool is_touch_hand_by_sn(const char *sn_ptr);
+/// Get touch sensor vendor type by reading register 970.
+/// Returns: 0=Unknown, 1=Capacitive, 2=Pressure
+/// This should be called for Revo2 Touch devices to determine the actual touch sensor type.
+uint8_t stark_get_touch_vendor(DeviceHandler *handle, uint8_t slave_id);
 
-/// 根据序列号判断是否为二代灵巧手
-bool is_revo2_hand_by_sn(const char *sn_ptr);
+/// Get touch sensor type from hardware type.
+/// Returns: 0=None, 1=Capacitive, 2=Pressure
+/// This is a pure function based on hardware type classification.
+uint8_t stark_get_touch_sensor_type(uint8_t hw_type);
 
-/// 获取RS485串口设备波特率
-/// 115200, 57600, 19200, 460800
+/// Check if hardware type has touch sensor.
+/// Returns: true if device has touch sensor, false otherwise.
+bool stark_is_touch_device(uint8_t hw_type);
+
+/// Check if hardware type is Revo1 device (motor API perspective).
+/// Check if hardware type uses Revo1 Motor API.
+/// Revo1 Basic/Touch use Revo1 Motor API.
+/// Revo1 Advanced/AdvancedTouch and all Revo2 use Revo2 Motor API.
+/// Note: Revo1Protobuf is legacy firmware, also uses Revo1 Motor API.
+/// Returns: true if uses Revo1 Motor API, false if uses Revo2 Motor API.
+bool stark_uses_revo1_motor_api(uint8_t hw_type);
+
+/// Check if hardware type uses Revo1 Touch API.
+/// Revo1 Touch API has different sensor counts per finger (capacitive).
+/// Returns: true if uses Revo1 Touch API, false otherwise.
+bool stark_uses_revo1_touch_api(uint8_t hw_type);
+
+/// Check if hardware type uses Revo2 Touch API.
+/// Revo2 Touch API has uniform sensor counts per finger (capacitive).
+/// Returns: true if uses Revo2 Touch API, false otherwise.
+bool stark_uses_revo2_touch_api(uint8_t hw_type);
+
+/// Check if hardware type uses Pressure/Modulus Touch API.
+/// Pressure Touch API uses completely different data structure (pressure sensors).
+/// Returns: true if uses Pressure Touch API, false otherwise.
+bool stark_uses_pressure_touch_api(uint8_t hw_type);
+
+/// Get RS485 serial baud rate.
+/// Valid values: 115200, 57600, 19200, 460800.
 uint32_t stark_get_rs485_baudrate(DeviceHandler *handle, uint8_t slave_id);
 
-/// 设置RS485串口设备波特率
-/// 115200, 57600, 19200, 460800
+/// Set RS485 serial baud rate.
+/// Supported values: 115200, 57600, 19200, 460800.
 void stark_set_rs485_baudrate(DeviceHandler *handle, uint8_t slave_id, uint32_t baudrate);
 
-/// 获取CANFD设备波特率
-/// 1M, 2M, 4M, 5M
+/// Get CANFD baud rate.
+/// Supported values: 1M, 2M, 4M, 5M.
 uint32_t stark_get_canfd_baudrate(DeviceHandler *handle, uint8_t slave_id);
 
-/// 设置CANFD设备波特率
-/// 1M, 2M, 4M, 5M
+/// Set CANFD baud rate.
+/// Supported values: 1M, 2M, 4M, 5M.
 void stark_set_canfd_baudrate(DeviceHandler *handle, uint8_t slave_id, uint32_t baudrate);
 
-/// 设置设备ID，默认为1，范围为1~247, 0 为广播地址，一代手默认为1，二代手左手默认ID为0x7e，右手默认ID为0x7f
-/// 当需要在一条总线上同时控制多只设备时，需要将设备ID设置为不同的值
-/// 例如：设置左手ID为1，右手ID为2
-/// 通过广播地址0，可以同时控制总线上的所有设备，Mobbus协议规定广播地址的设备不会回复
-void stark_set_slave_id(DeviceHandler *handle,
-                        uint8_t slave_id,
-                        uint8_t new_id);
+/// Set device slave ID.
+/// Default is 1, valid range 1~247; 0 is the broadcast address.
+/// Revo1 default ID is 1; Revo2 default left/right IDs are 0x7E and 0x7F.
+/// When controlling multiple devices on the same bus, assign different IDs,
+/// e.g. left=1, right=2.
+/// Using broadcast ID 0 controls all devices on the bus; per Modbus spec,
+/// broadcast commands do not receive responses.
+void stark_set_slave_id(DeviceHandler *handle, uint8_t slave_id, uint8_t new_id);
 
-/// Deprecated
-/// 设置力量等级，仅支持标准版一代手
+/// Set force level (only supported on Revo1 Basic).
+///
+/// @deprecated This function is deprecated and only works on Revo1 Basic devices.
+/// Use `stark_set_finger_current` or `stark_set_finger_currents` instead for
+/// more precise force control on all device types.
 void stark_set_force_level(DeviceHandler *handle, uint8_t slave_id, ForceLevel level);
 
-/// Deprecated
-/// 获取力量等级，仅支持标准版一代手
+/// Get force level (only supported on Revo1 Basic).
+///
+/// @deprecated This function is deprecated and only works on Revo1 Basic devices.
+/// Use `stark_get_motor_status` instead to get current values for all device types.
 uint8_t stark_get_force_level(DeviceHandler *handle, uint8_t slave_id);
 
-/// 获取电压值，单位mV
+/// Get device supply voltage in mV.
 uint16_t stark_get_voltage(DeviceHandler *handle, uint8_t slave_id);
 
-/// 获取LED开关
+/// Get LED enabled state.
 bool get_led_enabled(DeviceHandler *handle, uint8_t slave_id);
 
-/// 获取蜂鸣器开关
+/// Get buzzer enabled state.
 bool get_buzzer_enabled(DeviceHandler *handle, uint8_t slave_id);
 
-/// 获取震动开关
+/// Get vibration enabled state.
 bool get_vibration_enabled(DeviceHandler *handle, uint8_t slave_id);
 
-/// 设置LED开关
+/// Set LED enabled state.
 void set_led_enabled(DeviceHandler *handle, uint8_t slave_id, bool enabled);
 
-/// 设置蜂鸣器开关
+/// Set buzzer enabled state.
 void set_buzzer_enabled(DeviceHandler *handle, uint8_t slave_id, bool enabled);
 
-/// 设置震动开关
+/// Set vibration enabled state.
 void set_vibration_enabled(DeviceHandler *handle, uint8_t slave_id, bool enabled);
 
-/// 二代手设置单位模式，手指参数，上电后重置
-/// 参数范围详见文档
+/// Configure unit mode and finger parameters for Revo2.
+/// This setting is reset after power‑cycle.
+/// Parameter ranges are documented here:
 /// https://brainco.yuque.com/tykrbo/hws0nr/pynh5qnmfa1bgamc
-/// 设置控制的单位模式
-/// 无极模式，物理量模式
+/// Sets the control unit mode:
+/// normalized mode or physical‑quantity mode.
 void stark_set_finger_unit_mode(DeviceHandler *handle, uint8_t slave_id, FingerUnitMode mode);
 
-/// 获取控制的单位模式
-/// 返回 FingerUnitMode
-/// 如果失败，返回 FingerUnitMode::Normalized
+/// Get the current control unit mode.
+/// Returns `FingerUnitMode`; on failure returns `FingerUnitMode::Normalized`.
 FingerUnitMode stark_get_finger_unit_mode(DeviceHandler *handle, uint8_t slave_id);
 
-/// 设置最大角度
-/// max_pos: 最大角度值，默认为 60 87 84 84 84 84
+/// Set maximum angle for a finger.
+/// max_pos: Maximum angle value; default is 60 87 84 84 84 84.
 void stark_set_finger_max_position(DeviceHandler *handle,
                                    uint8_t slave_id,
                                    StarkFingerId finger_id,
                                    uint16_t max_pos);
 
-/// 设置最小角度
-/// min_pos: 最小角度值，单位(°)，默认为 0 0 0 0 0 0
+/// Set minimum angle for a finger.
+/// min_pos: Minimum angle in degrees; default is 0 0 0 0 0 0.
 void stark_set_finger_min_position(DeviceHandler *handle,
                                    uint8_t slave_id,
                                    StarkFingerId finger_id,
                                    uint16_t min_pos);
 
-/// 设置最大速度
-/// max_speed: 最大速度值，单位(°/s)，默认值为 145 150 130 130 130 130
+/// Set maximum speed for a finger.
+/// max_speed: Maximum speed in °/s; default is 145 150 130 130 130 130.
 void stark_set_finger_max_speed(DeviceHandler *handle,
                                 uint8_t slave_id,
                                 StarkFingerId finger_id,
                                 uint16_t max_speed);
 
-/// 设置最大电流
-/// max_current: 最大电流值，单位(mA)，默认值为 1000
+/// Set maximum current for a finger.
+/// max_current: Maximum current in mA; default is 1000.
 void stark_set_finger_max_current(DeviceHandler *handle,
                                   uint8_t slave_id,
                                   StarkFingerId finger_id,
                                   uint16_t max_current);
 
-/// 设置保护电流
-/// protected_current: 保护电流值，单位(mA), 范围为 100~1500，默认值为 500 500 500 500 500 500
+/// Set protection current for a finger.
+/// protected_current: Protection current in mA, range 100~1500, default
+///                    500 500 500 500 500 500.
 void stark_set_finger_protected_current(DeviceHandler *handle,
                                         uint8_t slave_id,
                                         StarkFingerId finger_id,
                                         uint16_t protected_current);
 
-/// 读取最大角度
-/// 读取失败时返回0
+/// Read maximum angle for a finger.
+/// Returns 0 on failure.
 uint16_t stark_get_finger_max_position(DeviceHandler *handle,
                                        uint8_t slave_id,
                                        StarkFingerId finger_id);
 
-/// 读取最小角度
-/// min_pos: 最小角度值，单位(°)，默认为 0 0 0 0 0 0
+/// Read minimum angle for a finger.
+/// min_pos: Minimum angle in degrees; default is 0 0 0 0 0 0.
 uint16_t stark_get_finger_min_position(DeviceHandler *handle,
                                        uint8_t slave_id,
                                        StarkFingerId finger_id);
 
-/// 读取最大速度
-/// max_speed: 最大速度值，单位(°/s)，默认值为 145 150 130 130 130 130
-/// 读取失败时返回0
+/// Read maximum speed for a finger.
+/// max_speed: Maximum speed in °/s; default is 145 150 130 130 130 130.
+/// Returns 0 on failure.
 uint16_t stark_get_finger_max_speed(DeviceHandler *handle,
                                     uint8_t slave_id,
                                     StarkFingerId finger_id);
 
-/// 读取最大电流
-/// max_current: 最大电流值，单位(mA)，默认值为 1000
-/// 读取失败时返回0
+/// Read maximum current for a finger.
+/// max_current: Maximum current in mA; default is 1000.
+/// Returns 0 on failure.
 uint16_t stark_get_finger_max_current(DeviceHandler *handle,
                                       uint8_t slave_id,
                                       StarkFingerId finger_id);
 
-/// 读取保护电流
-/// protected_current: 保护电流值，单位(mA), 范围为 100~1500，默认值为 500 500 500 500 500 500
-/// 读取失败时返回0
+/// Read protection current for a finger.
+/// protected_current: Protection current in mA, range 100~1500, default
+///                    500 500 500 500 500 500.
+/// Returns 0 on failure.
 uint16_t stark_get_finger_protected_current(DeviceHandler *handle,
                                             uint8_t slave_id,
                                             StarkFingerId finger_id);
 
-/// 拇指 AUX 锁定电流设置
-/// aux_lock_current: 单位(mA), 范围为 100~500，默认值为 200
-/// 仅支持二代手
+/// Configure thumb AUX lock current.
+/// aux_lock_current: in mA, range 100~500, default 200.
+/// Only supported on Revo2.
 void stark_set_thumb_aux_lock_current(DeviceHandler *handle,
                                       uint8_t slave_id,
                                       uint16_t aux_lock_current);
 
-/// 读取拇指 AUX 锁定电流设置
-/// 仅支持二代手
+/// Read thumb AUX lock current.
+/// Only supported on Revo2.
 uint16_t stark_get_thumb_aux_lock_current(DeviceHandler *handle, uint8_t slave_id);
 
-/// 设置单个手指位置
-/// position: 位置值，一代手范围为0~100
-/// 二代手范围为0~1000或最小-最大位置（°）
+/// Set the position of a single finger.
+///
+/// # Parameters
+/// - `position`: Position in the unified range **0~1000** (all devices,
+///   all protocols).
+///   - The SDK converts this internally based on device type and protocol.
+///   - 0 means fully open, 1000 means fully closed.
+///
+/// # Unified range
+/// For both Revo1 and Revo2, and for Modbus, CAN 2.0, and CANFD, the public
+/// API always uses the 0~1000 range; the SDK handles conversion internally.
 void stark_set_finger_position(DeviceHandler *handle,
                                uint8_t slave_id,
                                StarkFingerId finger_id,
                                uint16_t position);
 
-/// 设置单个手指速度
-/// speed: 速度值，一代手范围为-100~100
-/// 二代手范围为-1000~1000或-最大速度~最大速度°/s
-/// 其中符号表示方向，正表示为握紧方向，负表示为松开方向。
+/// Set the speed of a single finger.
+///
+/// # Parameters
+/// - `speed`: Speed in the unified range **-1000~+1000** (all devices,
+///   all protocols).
+///   - The SDK converts this internally based on device type and protocol.
+///   - Positive: closing direction; negative: opening direction.
+///   - 0: stop.
+///
+/// # Unified range
+/// For both Revo1 and Revo2, and for Modbus, CAN 2.0, and CANFD, the public
+/// API always uses the -1000~+1000 range; the SDK handles conversion internally.
 void stark_set_finger_speed(DeviceHandler *handle,
                             uint8_t slave_id,
                             StarkFingerId finger_id,
                             int16_t speed);
 
-/// 设置单个手指电流
-/// 二代基础版，参数范围为-1000~1000或-最大电流~最大电流mA
-/// 一代触觉版，参数范围为-100~-20, 20~100，单位mA
-/// 其中符号表示方向，正表示为握紧方向，负表示为松开方向。
+/// Set the current of a single finger.
+///
+/// # Parameters
+/// - `current`: Current in the unified range **-1000~+1000** (all devices,
+///   all protocols).
+///   - The SDK converts this internally based on device type and protocol.
+///   - Positive: closing direction; negative: opening direction.
+///
+/// # Unified range
+/// For both Revo1 and Revo2, and for Modbus, CAN 2.0, and CANFD, the public
+/// API always uses the -1000~+1000 range; the SDK handles conversion internally.
 void stark_set_finger_current(DeviceHandler *handle,
                               uint8_t slave_id,
                               StarkFingerId finger_id,
                               int16_t current);
 
-/// 设置单个手指PWM
-/// 仅支持二代手
-/// 范围为-1000~1000
-/// 其中符号表示方向，正表示为握紧方向，负表示为松开方向。
+/// Set the PWM of a single finger (Revo2 only).
+///
+/// # Parameters
+/// - `pwm`: PWM value in the unified range **-1000~+1000** (all protocols).
+///   - The SDK converts this internally based on protocol.
+///   - Positive: closing direction; negative: opening direction.
+///
+/// # Unified range
+/// For Modbus, CAN 2.0, and CANFD, the public API always uses the
+/// -1000~+1000 range; the SDK handles conversion internally.
 void stark_set_finger_pwm(DeviceHandler *handle,
                           uint8_t slave_id,
                           StarkFingerId finger_id,
                           int16_t pwm);
 
-/// 设置单个手指位置+期望时间
-/// 仅支持二代手
-/// 位置范围为0~1000或最小-最大位置（°）
-/// 期望时间范围为1~2000ms
+/// Set position + desired time for a single finger (Revo2 only).
+///
+/// # Parameters
+/// - `position`: Position in the unified range **0~1000** (all protocols).
+/// - `millis`: Desired time in milliseconds, range 1~2000.
+///
+/// # Unified range
+/// Position always uses the 0~1000 range; the SDK handles conversion internally.
 void stark_set_finger_position_with_millis(DeviceHandler *handle,
                                            uint8_t slave_id,
                                            StarkFingerId finger_id,
                                            uint16_t position,
                                            uint16_t millis);
 
-/// 设置单个手指位置+期望速度
-/// 仅支持二代手
-/// 位置范围为0~1000或最小最大位置（°）
-/// 速度范围为1~1000或最小~最大速度(°/s）
+/// Set position + desired speed for a single finger (Revo2 only).
+///
+/// # Parameters
+/// - `position`: Position in the unified range **0~1000** (all protocols).
+/// - `speed`: Speed value, range 1~1000.
+///
+/// # Unified range
+/// Position always uses the 0~1000 range; the SDK handles conversion internally.
 void stark_set_finger_position_with_speed(DeviceHandler *handle,
                                           uint8_t slave_id,
                                           StarkFingerId finger_id,
                                           uint16_t position,
                                           uint16_t speed);
 
-/// 设置多个手指位置
-/// positions: 位置值数组，长度为6，范围为0~100, 对应百分比位置
+/// Set positions for multiple fingers.
+///
+/// # Parameters
+/// - `positions`: Array of length 6, positions in the unified range
+///   **0~1000** (all devices, all protocols).
+///   - The SDK converts this internally based on device type and protocol.
+///   - 0 means fully open, 1000 means fully closed.
+///
+/// # Unified range
+/// For both Revo1 and Revo2, and for Modbus, CAN 2.0, and CANFD, the public
+/// API always uses the 0~1000 range; the SDK handles conversion internally.
 void stark_set_finger_positions(DeviceHandler *handle,
                                 uint8_t slave_id,
                                 const uint16_t *positions,
                                 uintptr_t len);
 
-/// 设置多个手指速度
-/// speeds: 速度值数组，长度为6，一代手范围为-100~100
-/// 二代手范围为-1000~1000或-最大速度~最大速度°/s
-/// 其中符号表示方向，正表示为握紧方向，负表示为松开方向。
+/// Set speeds for multiple fingers.
+///
+/// # Parameters
+/// - `speeds`: Array of length 6, speeds in the unified range **-1000~+1000**
+///   (all devices, all protocols).
+///   - The SDK converts this internally based on device type and protocol.
+///   - Positive: closing direction; negative: opening direction.
+///   - 0: stop.
+///
+/// # Unified range
+/// For both Revo1 and Revo2, and for Modbus, CAN 2.0, and CANFD, the public
+/// API always uses the -1000~+1000 range; the SDK handles conversion internally.
 void stark_set_finger_speeds(DeviceHandler *handle,
                              uint8_t slave_id,
                              const int16_t *speeds,
                              uintptr_t len);
 
-/// 设置多个手指电流
-/// 二代基础版，参数范围为-1000~1000或-最大电流~最大电流mA
-/// 一代触觉版，参数范围为-100~-20, 20~100，单位mA
-/// 其中符号表示方向，正表示为握紧方向，负表示为松开方向。
+/// Set currents for multiple fingers.
+///
+/// # Parameters
+/// - `currents`: Array of length 6, currents in the unified range
+///   **-1000~+1000** (all devices, all protocols).
+///   - The SDK converts this internally based on device type and protocol.
+///   - Positive: closing direction; negative: opening direction.
+///
+/// # Unified range
+/// For both Revo1 and Revo2, and for Modbus, CAN 2.0, and CANFD, the public
+/// API always uses the -1000~+1000 range; the SDK handles conversion internally.
 void stark_set_finger_currents(DeviceHandler *handle,
                                uint8_t slave_id,
                                const int16_t *currents,
                                uintptr_t len);
 
-/// 设置多个手指PWM
-/// 仅支持二代手
-/// pwms: PWM值数组，长度为6，范围为-1000~1000
-/// 其中符号表示方向，正表示为握紧方向，负表示为松开方向。
+/// Set PWM values for multiple fingers (Revo2 only).
+///
+/// # Parameters
+/// - `pwms`: Array of length 6, PWM values in the unified range
+///   **-1000~+1000** (all protocols).
+///   - The SDK converts this internally based on protocol.
+///   - Positive: closing direction; negative: opening direction.
+///
+/// # Unified range
+/// For Modbus, CAN 2.0, and CANFD, the public API always uses the
+/// -1000~+1000 range; the SDK handles conversion internally.
 void stark_set_finger_pwms(DeviceHandler *handle,
                            uint8_t slave_id,
                            const int16_t *pwms,
                            uintptr_t len);
 
-/// 设置多个手指位置+期望时间
-/// 仅支持二代手
-/// positions: 位置值数组，长度为6，范围为0~1000或最小~最大位置（°）
-/// millis: 期望时间值数组，长度为6，范围为1~2000ms
-/// 其中位置值和期望时间值一一对应
+/// Set positions + desired times for multiple fingers (Revo2 only).
+///
+/// # Parameters
+/// - `positions`: Array of length 6, positions in the unified range
+///   **0~1000** (all protocols).
+/// - `millis`: Array of length 6, desired times in milliseconds, range 1~2000.
+///
+/// # Unified range
+/// Position always uses the 0~1000 range; the SDK handles conversion internally.
 void stark_set_finger_positions_and_durations(DeviceHandler *handle,
                                               uint8_t slave_id,
                                               const uint16_t *positions,
                                               const uint16_t *millis,
                                               uintptr_t len);
 
-/// 设置多个手指位置+期望速度
-/// 仅支持二代手
-/// positions: 位置值数组，长度为6，范围为0~1000或最小最大位置（°）
-/// speeds: 速度值数组，长度为6，范围为1~1000或最小~最大速度(°/s)
-/// 其中位置值和速度值一一对应
+/// Set positions + desired speeds for multiple fingers (Revo2 only).
+///
+/// # Parameters
+/// - `positions`: Array of length 6, positions in the unified range
+///   **0~1000** (all protocols).
+/// - `speeds`: Array of length 6, speeds in the range 1~1000.
+///
+/// # Unified range
+/// Position always uses the 0~1000 range; the SDK handles conversion internally.
 void stark_set_finger_positions_and_speeds(DeviceHandler *handle,
                                            uint8_t slave_id,
                                            const uint16_t *positions,
                                            const uint16_t *speeds,
                                            uintptr_t len);
 
-/// 获取手指状态
-/// 位置、速度、电流、马达运行状态
-/// 返回 MotorStatusData 结构体指针，需要调用 free_motor_status_data 释放内存
-/// 如果失败，返回 NULL
-MotorStatusData *stark_get_motor_status(DeviceHandler *handle, uint8_t slave_id);
+/// Get finger motor status.
+///
+/// # Return value
+/// Returns a pointer to `MotorStatusData`, which contains:
+/// - `positions`: Position array, unified range **0~1000** (all devices,
+///   all protocols).
+/// - `speeds`: Speed array, unified range **-1000~+1000** (all devices,
+///   all protocols).
+/// - `currents`: Current array, unified range **-1000~+1000** (all devices,
+///   all protocols).
+/// - `states`: Motor state array.
+///
+/// # Unified range
+/// For both Revo1 and Revo2, and for Modbus, CAN 2.0, and CANFD, the returned
+/// data is always converted to the unified ranges above; the SDK handles
+/// conversion internally.
+///
+/// # Memory management
+/// You must call `free_motor_status_data` to free the result.
+/// Returns NULL on failure.
+CMotorStatusData *stark_get_motor_status(DeviceHandler *handle, uint8_t slave_id);
 
-/// 运行动作序列
-/// action_id: 动作序列ID
+/// Run an action sequence.
+/// action_id: Action sequence ID.
 void stark_run_action_sequence(DeviceHandler *handle, uint8_t slave_id, ActionSequenceId action_id);
 
-/// 传输动作序列
+/// Transfer action sequences to the device.
 ///
-/// 该函数用于传输多个动作序列。每个动作序列包含 20 个元素，依次为：
+/// This function sends multiple action sequences. Each sequence is represented
+/// by a fixed‑length array of `u16` parameters.
 ///
-/// - action_id: 动作序列的 ID，用于唯一标识该动作序列
-/// - sequences: 动作序列参数数组，包含多个动作序列
+/// - `slave_id`: Slave device ID.
+/// - `uses_revo2_motor_api`: Whether the device uses Revo2 Motor API.
+///   (Revo1 Advanced/AdvancedTouch and all Revo2 use Revo2 Motor API)
+/// - `action_id`: ID that uniquely identifies the action sequence.
+/// - `sequences`: Flattened parameter array containing multiple sequences.
 ///
-/// 一代灵巧手每个动作序列包含 20 个 u16 元素。每个序列包括以下信息：
-///   - 动作序列索引 (u16)：动作序列的索引，用于标识该动作序列在队列中的位置
-///   - 持续时间 (u16)：该动作序列的执行时间，单位为毫秒
-///   - 手指位置 (u16): 6 个手指位置的值，范围为 0~100
-///   - 手指速度 (u16): 6 个手指速度的值，范围为 0~100
-///   - 手指力量 (u16): 6 个手指力量的值，范围为 0~100
+/// For Revo1, each action sequence contains 20 `u16` elements:
+///   - Sequence index (u16): index of the sequence in the queue.
+///   - Duration (u16): execution time in milliseconds.
+///   - Finger positions (6 × u16): values in range 0~100.
+///   - Finger speeds   (6 × u16): values in range 0~100.
+///   - Finger forces   (6 × u16): values in range 0~100.
 ///
-/// 示例：
-/// 假设我们有以下动作序列数组：
+/// Example sequence array:
 /// [0, 2000, 0, 0, 100, 100, 100, 100, 10, 20, 30, 40, 50, 60, 5, 10, 15, 20, 25, 30]
 ///
-/// 解释：
-/// - `0`: 动作序列索引
-/// - `2000`: 动作序列持续时间，单位毫秒
-/// - `0, 0, 100, 100, 100, 100`: 6 个手指位置
-/// - `10, 20, 30, 40, 50, 60`: 6 个手指速度
-/// - `5, 10, 15, 20, 25, 30`: 6 个手指力量
+/// Meaning:
+/// - `0`: sequence index.
+/// - `2000`: duration in milliseconds.
+/// - `0, 0, 100, 100, 100, 100`: 6 finger positions.
+/// - `10, 20, 30, 40, 50, 60`: 6 finger speeds.
+/// - `5, 10, 15, 20, 25, 30`: 6 finger forces.
 ///
-/// 二代灵巧手每个动作序列包含 27 个 u16 元素。每个序列包括以下信息：
-///   - 动作序列索引 (u16)：动作序列的索引，用于标识该动作序列在队列中的位置
-///   - 持续时间 (u16)：该动作序列的执行时间，单位为毫秒
-///   - 控制模式 (u16), 位置时间控制：1，位置速度控制：2，电流控制：3，速度控制：4
-///   - 手指位置 (u16): 6 个手指位置的物理量（°）, 值为 65535 (0xFFFF) 表示手指保持原来角度
-///   - 手指速度 (u16): 6 个手指速度的物理量，值为手指转动速度（°/s）
-///   - 手指电流 (u16): 6 个手指电流的物理量，值为电流(mA)
+/// For Revo2, each action sequence contains 27 `u16` elements:
+///   - Sequence index (u16): index of the sequence in the queue.
+///   - Duration (u16): execution time in milliseconds.
+///   - Control mode (u16): 1=position+time, 2=position+speed,
+///     3=current, 4=speed.
+///   - Finger positions (6 × u16): physical angle in degrees; 65535 (0xFFFF)
+///     means keep current angle.
+///   - Finger speeds   (6 × u16): physical rotational speed in °/s.
+///   - Finger currents (6 × u16): physical current in mA.
 ///
-/// - len: 动作序列的数量，指定 sequences 数组的行数，即动作序列的数量
+/// - `len`: Number of sequences, i.e. number of rows in the flattened array.
 ///
-/// # 参数说明
-/// - `action_id`: 动作序列的 ID，唯一标识该序列
-/// - `sequences`: 一个指向动作序列的指针，表示多个动作序列的二维数组
-/// - `len`: 动作序列的数量，表示二维数组的行数
+/// # Parameters
+/// - `action_id`: Action sequence ID.
+/// - `sequences`: Pointer to the flattened sequence array.
+/// - `len`: Number of sequences.
 ///
-/// # 错误处理
-/// - 如果 `handle` 或 `sequences` 为 NULL，将直接返回，不进行处理
-/// - 如果 `len` 大于最大限制（一代灵巧手为32，二代灵巧手为8），会输出警告并提前返回
+/// # Error handling
+/// - If `handle` or `sequences` is NULL, the function returns immediately.
+/// - If `len` exceeds the maximum allowed steps (Revo1: 32, Revo2: 8), a
+///   warning is logged and the function returns.
 void stark_set_action_sequence(DeviceHandler *handle,
                                uint8_t slave_id,
+                               bool uses_revo2_motor_api,
                                ActionSequenceId action_id,
                                const uint16_t *sequences,
                                uintptr_t len);
 
-/// 启用触觉传感器
-/// bits: 启用的触觉传感器位，范围为0~31
-/// 例如：0b00000001 表示仅启用大拇指位置的触觉传感器
+/// Enable tactile sensors.
+/// bits: Bitmask of sensors to enable, range 0~31.
+/// For example: 0b00000001 enables only the thumb sensor.
 void stark_enable_touch_sensor(DeviceHandler *handle, uint8_t slave_id, uint8_t bits);
 
-/// 获取触觉传感器通道数据
-/// 返回 TouchRawData 结构体指针，需要调用 free_touch_raw_data 释放内存
-/// 如果失败，返回 NULL
-TouchRawData *stark_get_touch_raw_data(DeviceHandler *handle, uint8_t slave_id);
+/// Get raw channel data from the tactile sensors.
+/// Returns a pointer to `TouchRawData`; call `free_touch_raw_data` to free it.
+/// Returns NULL on failure.
+CTouchRawData *stark_get_touch_raw_data(DeviceHandler *handle, uint8_t slave_id);
 
-/// 读取单个手指三维力、接近值、触觉传感器状态
-/// 返回单个手指三维力、接近值、触觉传感器状态
-/// index: 0~4，分别对应大拇指、食指、中指、无名指、小拇指
-/// 使用完毕后需要调用 free_touch_finger_item 释放内存
-/// 如果失败，返回 NULL
-TouchFingerItem *stark_get_single_touch_status(DeviceHandler *handle,
-                                               uint8_t slave_id,
-                                               uint8_t index);
+/// Read 3D force, proximity and status for a single finger.
+/// Returns a pointer to `TouchFingerItem`.
+/// index: 0~4 for thumb, index, middle, ring, pinky.
+/// Call `free_touch_finger_item` to free the result. Returns NULL on failure.
+CTouchFingerItem *stark_get_single_touch_status(DeviceHandler *handle,
+                                                uint8_t slave_id,
+                                                uint8_t index);
 
-/// 读取五指触觉传感器三维力、接近值、触觉传感器状态
-/// 返回五指的触觉三维力数据、接近值、触觉传感器状态
-/// 使用完毕后需要调用 free_touch_finger_data 释放内存
-/// 如果失败，返回 NULL
-TouchFingerData *stark_get_touch_status(DeviceHandler *handle, uint8_t slave_id);
+/// Read 3D force, proximity and status for all five fingers.
+/// Returns a pointer to `TouchFingerData` containing all fingers.
+/// Call `free_touch_finger_data` to free the result. Returns NULL on failure.
+CTouchFingerData *stark_get_touch_status(DeviceHandler *handle, uint8_t slave_id);
 
-/// 重置触觉传感器采集通道
-/// 在执行该指令时，手指传感器尽量不要受力。
-/// bits: 重置的触觉传感器位，范围为0~31
-/// 例如：0b00000001 表示重置第一个传感器
+/// Reset tactile sensor measurement channels.
+/// Try to keep the fingers unloaded (no force) when executing this command.
+/// bits: Bitmask of sensors to reset, range 0~31.
+/// For example: 0b00000001 resets the first sensor.
 void stark_reset_touch_sensor(DeviceHandler *handle, uint8_t slave_id, uint8_t bits);
 
-/// 触觉传感器参数校准
-/// bits: 校准的触觉传感器位，范围为0~31
-/// 例如：0b00000001 表示校准第一个传感器
-/// 当空闲状态下的三维力数值不为0时，可通过该方法进行校准
+/// Calibrate tactile sensor parameters.
+/// bits: Bitmask of sensors to calibrate, range 0~31.
+/// For example: 0b00000001 calibrates the first sensor.
+/// Use this when 3D force values are non‑zero in idle state.
 /// https://www.brainco-hz.com/docs/revolimb-hand/protocol/stark_protocol_touch.html#_5-3-%E5%8F%82%E6%95%B0%E6%A0%A1%E5%87%864105
 void stark_calibrate_touch_sensor(DeviceHandler *handle,
                                   uint8_t slave_id,
                                   uint8_t bits);
 
-/// 在设备上电时，启用/禁用 位置自动校准
+/// Query whether automatic position calibration on power‑up is enabled.
 bool stark_get_auto_calibration(DeviceHandler *handle, uint8_t slave_id);
 
-/// 在设备上电时，启用/禁用 位置自动校准
+/// Enable or disable automatic position calibration on power‑up.
 void stark_set_auto_calibration(DeviceHandler *handle, uint8_t slave_id, bool enabled);
 
-/// 发送校准位置指令
-/// 用于手动校准位置
+/// Send manual position‑calibration command.
 void stark_send_calibrate_position(DeviceHandler *handle, uint8_t slave_id);
 
-/// 重置默认手势
-/// 该指令会将所有手势恢复为出厂默认值
+/// Reset default gestures to factory settings.
 void stark_reset_default_gesture(DeviceHandler *handle, uint8_t slave_id);
 
-/// 重置默认设置
-/// 该指令会将所有设置恢复为出厂默认值
-/// ● 默认ID：左手 → 恢复为 0x7E（126）；右手 → 恢复为 0x7F（127）
-/// ● RS485 波特率：恢复为 460800 bps。
-/// ● CAN FD 波特率：恢复为 5 Mbps
+/// Reset all settings to factory defaults.
+/// ● Default IDs: left hand → 0x7E (126); right hand → 0x7F (127).
+/// ● RS485 baud rate: 460800 bps.
+/// ● CAN FD baud rate: 5 Mbps.
 void stark_reset_default_settings(DeviceHandler *handle, uint8_t slave_id);
 
-/// 是否开启了 Turbo 模式
-/// 开启之后会持续握紧
+/// Check whether Turbo mode is enabled.
+/// When enabled, the hand will keep squeezing continuously.
 bool stark_get_turbo_mode_enabled(DeviceHandler *handle, uint8_t slave_id);
 
-/// 设置 Turbo 模式
+/// Enable or disable Turbo mode.
 void stark_set_turbo_mode_enabled(DeviceHandler *handle, uint8_t slave_id, bool enabled);
 
-/// 获取 Turbo 模式配置
-/// 返回 TurboConfig 结构体指针，需要调用 free_turbo_config 释放内存
-/// 如果失败，返回 NULL
-TurboConfig *stark_get_turbo_config(DeviceHandler *handle, uint8_t slave_id);
+/// Get Turbo mode configuration.
+/// Returns a pointer to `TurboConfig`; call `free_turbo_config` to free it.
+/// Returns NULL on failure.
+CTurboConfig *stark_get_turbo_config(DeviceHandler *handle, uint8_t slave_id);
 
-/// 获取 LED 灯信息
-/// 返回 LedInfo 结构体指针，需要调用 free_led_info 释放内存
-/// 如果失败，返回 NULL
-LedInfo *stark_get_led_info(DeviceHandler *handle, uint8_t slave_id);
+/// Get LED information.
+/// Returns a pointer to `LedInfo`; call `free_led_info` to free it.
+/// Returns NULL on failure.
+CLedInfo *stark_get_led_info(DeviceHandler *handle, uint8_t slave_id);
 
-/// 获取按键事件
-/// 返回 ButtonPressEvent 结构体指针，需要调用 free_button_event 释放内存
-/// 如果失败，返回 NULL
-ButtonPressEvent *stark_get_button_event(DeviceHandler *handle, uint8_t slave_id);
+/// Get button press event.
+/// Returns a pointer to `ButtonPressEvent`; call `free_button_event` to free it.
+/// Returns NULL on failure.
+CButtonPressEvent *stark_get_button_event(DeviceHandler *handle, uint8_t slave_id);
 
-/// 该函数用于启动 DFU（Device Firmware Update）过程。
-/// - `handle`: 设备处理器指针
-/// - `slave_id`: 从设备 ID
-/// - `dfu_file_path`: DFU 文件路径，C 字符串格式
-/// - `wait_secs`: 等待进入DFU模式时间，单位为秒，默认为5秒
+/// Start the DFU (Device Firmware Update) process.
+/// - `handle`: Device handler pointer.
+/// - `slave_id`: Slave device ID.
+/// - `dfu_file_path`: DFU file path, as a C string.
+/// - `wait_secs`: Timeout for entering DFU mode, in seconds (default 5).
 void start_dfu(DeviceHandler *handle,
                uint8_t slave_id,
                const char *dfu_file_path,
                uintptr_t wait_secs);
 
-/// 停止 DFU 过程
-/// - `slave_id`: 从设备 ID
-/// 该函数用于停止 DFU 过程。
-/// 注意：在调用此函数之前，请确保 DFU 过程已经开始。
-/// 如果 DFU 过程未开始或已经完成，此函数将不会有任何效果。
+/// Stop the DFU process.
+///
+/// - `slave_id`: Slave device ID.
+///
+/// This stops an ongoing DFU session.
+///
+/// Note: If DFU has not started or has already completed, this function has no effect.
 void stop_dfu(uint8_t slave_id);
 
-void free_device_config(DeviceConfig *config);
+void free_device_config(CDeviceConfig *config);
 
-void free_device_info(DeviceInfo *info);
+void free_device_info(CDeviceInfo *info);
 
-void free_motor_status_data(MotorStatusData *data);
+/// Check if device uses Revo1 Motor API.
+///
+/// Revo1 Basic/Touch use Revo1 Motor API.
+/// Revo1 Advanced/AdvancedTouch and all Revo2 use Revo2 Motor API.
+bool device_info_uses_revo1_motor_api(const CDeviceInfo *info);
 
-void free_touch_raw_data(TouchRawData *data);
+/// Check if device uses Revo1 Touch API.
+///
+/// Revo1 Touch API has different sensor counts per finger (4 sensors per finger).
+/// Includes Revo1Touch and Revo1AdvancedTouch.
+bool device_info_uses_revo1_touch_api(const CDeviceInfo *info);
 
-void free_touch_finger_data(TouchFingerData *status);
+/// Check if device uses Revo2 Motor API.
+///
+/// Revo1 Advanced/AdvancedTouch and all Revo2 use Revo2 Motor API.
+/// Revo1 Basic/Touch use Revo1 Motor API.
+bool device_info_uses_revo2_motor_api(const CDeviceInfo *info);
 
-void free_touch_finger_item(TouchFingerItem *item);
+/// Check if device uses Revo2 Touch API.
+///
+/// Includes both capacitive (Revo2Touch) and pressure (Revo2TouchPressure) sensors.
+bool device_info_uses_revo2_touch_api(const CDeviceInfo *info);
 
-void free_turbo_config(TurboConfig *config);
+/// Check if device has any touch sensor
+bool device_info_is_touch(const CDeviceInfo *info);
 
-void free_led_info(LedInfo *info);
+void free_motor_status_data(CMotorStatusData *data);
 
-void free_button_event(ButtonPressEvent *event);
+void free_touch_raw_data(CTouchRawData *data);
+
+void free_touch_finger_data(CTouchFingerData *status);
+
+void free_touch_finger_item(CTouchFingerItem *item);
+
+void free_turbo_config(CTurboConfig *config);
+
+void free_led_info(CLedInfo *info);
+
+void free_button_event(CButtonPressEvent *event);
 
 void free_string(const char *s);
 
-/// 设置Modbus异步读写回调
+/// Set Modbus async read/write callback.
 void set_modbus_operation_callback(ModbusOperationCallback cb);
 
-/// 设置Modbus读回调, input_registers
+/// Set Modbus read callback for input registers.
 void set_modbus_read_input_callback(ModbusRxCallback cb);
 
-/// 设置Modbus读回调, holding_registers
+/// Set Modbus read callback for holding registers.
 void set_modbus_read_holding_callback(ModbusRxCallback cb);
 
-/// 设置Modbus写回调
+/// Set Modbus write callback.
 void set_modbus_write_callback(ModbusTxCallback cb);
 
-/// 设置CAN/CANFD 读回调
+/// Set CAN/CANFD RX callback.
 void set_can_rx_callback(CanRxCallback cb);
 
-/// 设置CAN/CANFD 写回调
+/// Set CAN/CANFD TX callback.
 void set_can_tx_callback(CanTxCallback cb);
 
-/// 设置DFU状态回调
+/// Set DFU state callback.
 void set_dfu_state_callback(DfuStateCallback cb);
 
-/// 设置DFU进度回调
+/// Set DFU progress callback.
 void set_dfu_progress_callback(DfuProgressCallback cb);
 
 }  // extern "C"

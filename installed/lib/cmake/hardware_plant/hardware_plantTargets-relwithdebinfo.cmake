@@ -88,7 +88,7 @@ list(APPEND _IMPORT_CHECK_FILES_FOR_hardware_plant::hipnuc_imu_receiver "${_IMPO
 # Import target "hardware_plant::dexhand_sdk" for configuration "RelWithDebInfo"
 set_property(TARGET hardware_plant::dexhand_sdk APPEND PROPERTY IMPORTED_CONFIGURATIONS RELWITHDEBINFO)
 set_target_properties(hardware_plant::dexhand_sdk PROPERTIES
-  IMPORTED_LINK_INTERFACE_LANGUAGES_RELWITHDEBINFO "C;CXX"
+  IMPORTED_LINK_INTERFACE_LANGUAGES_RELWITHDEBINFO "CXX"
   IMPORTED_LOCATION_RELWITHDEBINFO "${_IMPORT_PREFIX}/lib/libdexhand_sdk.a"
   )
 

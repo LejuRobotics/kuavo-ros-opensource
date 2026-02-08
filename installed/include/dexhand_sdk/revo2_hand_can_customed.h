@@ -74,6 +74,8 @@ public:
      */
     GripForce getGripForce() override final;
 
+    bool usesRevo2MotorApi() const override { return true; }
+
 private:
     /**
      * @brief 私有构造函数，用于Connect方法创建实例
