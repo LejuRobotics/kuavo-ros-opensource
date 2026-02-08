@@ -943,6 +943,17 @@ namespace humanoid_controller
             ROS_INFO("[HumanoidController] Reset pullup filter due to mode switch (from %d to %d)", 
                      static_cast<int>(mpcArmControlMode_));
           }
+          
+          // 检查模式是否已同步，如果同步则记录时间
+          if (mpcArmControlMode_ == mpcArmControlMode_desired_)
+          {
+            arm_mode_sync_time_ = ros::Time::now().toSec();
+          }
+          else
+          {
+            // 模式未同步，重置同步时间
+            arm_mode_sync_time_ = 0.0;
+          }
         }
         if (msg->data[1] != mpcArmControlMode_desired_)
         {
@@ -3307,9 +3318,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         currentObservation_.time += period.toSec();
       }
       // 只有非半身轮臂模式站立状态&&站起来稳定之后进行保护, 并且手臂不是外部遥操作模式才可触发拉起保护
+      // 确保当前模式已切换到期望模式后才启用拉起保护，模式同步后还需要等待1.5秒才能触发拉起保护
+      double current_time = ros::Time::now().toSec();
+      bool mode_sync_ready = (mpcArmControlMode_ == mpcArmControlMode_desired_) && 
+                             (arm_mode_sync_time_ > 0.0) && 
+                             (current_time - arm_mode_sync_time_ >= 1.5);
       bool enable_pull_up = enable_pull_up_protect_ &&  !is_rl_controller_ && isPreUpdateComplete && is_stance_mode_ && 
         !only_half_up_body_ && currentObservation_.time - standupTime_ > 4 
-        && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL && resetting_mpc_state_ == ResettingMpcState::NOMAL;
+        && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL && resetting_mpc_state_ == ResettingMpcState::NOMAL
+        && mode_sync_ready;  // 确保当前模式已切换到期望模式，且已等待1.5秒
+
+      // 发布拉起保护启用状态
+      ros_logger_->publishValue("/state_estimate/enable_pull_up", enable_pull_up);
 
       bool new_pull_up_state = false;
       if (enable_pull_up)

@@ -202,10 +202,10 @@ namespace ocs2
         std::cout << "[JoyControl] controller_switch_time change to roban's time !!!" << std::endl;
       }
 
-      if (nodeHandle.hasParam("joy_node/dev"))
+      if (nodeHandle.hasParam("/joy_node/dev"))
       {
         std::string joystick_device;
-        nodeHandle.getParam("joy_node/dev", joystick_device);
+        nodeHandle.getParam("/joy_node/dev", joystick_device);
 
         int fd = -1;
         const char *device_path = joystick_device.c_str();
@@ -241,12 +241,18 @@ namespace ocs2
         }
       }
 
+      std::string channel_map_path_loaded;
       if (nodeHandle.hasParam("channel_map_path"))
       {
-        std::string channel_map_path;
-        nodeHandle.getParam("channel_map_path", channel_map_path);
-        ROS_INFO_STREAM("Loading joystick mapping from " << channel_map_path);
-        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
+        nodeHandle.getParam("channel_map_path", channel_map_path_loaded);
+        ROS_INFO_STREAM("Loading joystick mapping from " << channel_map_path_loaded);
+        loadJoyJsonConfig(channel_map_path_loaded, joyButtonMap, joyAxisMap);
+        if (joyButtonMap_backup.empty()) {
+          if (channel_map_path_loaded.find(JOYSTICK_BEITONG_MAP_JSON) != std::string::npos)
+            loadJoyJsonConfig(ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_XBOX_MAP_JSON + ".json", joyButtonMap_backup, joyAxisMap_backup);
+          else
+            loadJoyJsonConfig(ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_BEITONG_MAP_JSON + ".json", joyButtonMap_backup, joyAxisMap_backup);
+        }
       }
       else
       {
@@ -281,8 +287,11 @@ namespace ocs2
       Eigen::Vector4d joystickFilterCutoffFreq_(joystickSensitivity, joystickSensitivity, 
                                                   joystickSensitivity, joystickSensitivity);
       joystickFilter_.setParams(0.01,joystickFilterCutoffFreq_);
-      old_joy_msg_.axes = std::vector<float>(JOYSTICK_AXIS_NUM, 0.0);     // 假设有 8 个轴，默认值为 0.0
-      old_joy_msg_.buttons = std::vector<int32_t>(JOYSTICK_XBOX_BUTTON_NUM, 0);
+      old_joy_msg_.axes = std::vector<float>(JOYSTICK_AXIS_NUM, 0.0);
+      if (!channel_map_path_loaded.empty() && channel_map_path_loaded.find(JOYSTICK_BEITONG_MAP_JSON) != std::string::npos)
+        old_joy_msg_.buttons = std::vector<int32_t>(JOYSTICK_BEITONG_BUTTON_NUM, 0);
+      else
+        old_joy_msg_.buttons = std::vector<int32_t>(JOYSTICK_XBOX_BUTTON_NUM, 0);
       // Get node parameters
       std::string referenceFile;
       nodeHandle.getParam("/referenceFile", referenceFile);
@@ -746,7 +755,8 @@ namespace ocs2
             if (it != joyButtonMap.end()) {
                 int old_idx = it->second;
                 int new_idx = button.second;
-                if (old_idx < old_joy_msg_.buttons.size()) {
+                if (old_idx >= 0 && old_idx < static_cast<int>(old_joy_msg_.buttons.size()) &&
+                    new_idx >= 0 && new_idx < static_cast<int>(old_joy_msg_backup.buttons.size())) {
                     old_joy_msg_backup.buttons[new_idx] = old_joy_msg_.buttons[old_idx];
                 }
             }
@@ -755,7 +765,12 @@ namespace ocs2
             auto it = std::find_if(joyAxisMap.begin(), joyAxisMap.end(),
                 [&axis](const auto& pair) { return pair.first == axis.first; });
             if (it != joyAxisMap.end()) {
-                old_joy_msg_backup.axes[axis.second] = old_joy_msg_.axes[it->second];
+                int old_ax = it->second;
+                int new_ax = axis.second;
+                if (old_ax >= 0 && old_ax < static_cast<int>(old_joy_msg_.axes.size()) &&
+                    new_ax >= 0 && new_ax < static_cast<int>(old_joy_msg_backup.axes.size())) {
+                    old_joy_msg_backup.axes[new_ax] = old_joy_msg_.axes[old_ax];
+                }
             }
         }
 
@@ -905,6 +920,9 @@ namespace ocs2
         nodeHandle_.setParam("channel_map_path", channel_map_path);
         ROS_WARN("[JoyController]: Joystick data mapping has changed from BEITONG to X-Box");
         reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_XBOX_BUTTON_NUM);
+        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
+        old_joy_msg_ = *joy_msg;
+        return;
       }
       if(old_joy_msg_.buttons.size() == JOYSTICK_XBOX_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM)
       {
@@ -913,7 +931,7 @@ namespace ocs2
         nodeHandle_.setParam("channel_map_path", channel_map_path);
         ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
         reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
-        // 更新old_joy_msg并跳过本次处理，避免状态混乱
+        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
         old_joy_msg_ = *joy_msg;
         return;
       }

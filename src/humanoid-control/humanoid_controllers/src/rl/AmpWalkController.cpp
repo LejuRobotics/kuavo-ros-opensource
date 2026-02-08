@@ -210,6 +210,42 @@ namespace humanoid_controller
       ROS_INFO("[%s] Waist control parameters loaded: mode_interpolation_velocity=%.3f rad/s, mode2_cutoff_freq=%.1f Hz, kp=%.1f, kd=%.1f",
                name_.c_str(), waist_mode_interpolation_velocity_, waist_mode2_cutoff_freq_, waist_kp_default, waist_kd_default);
     }
+    
+    // 是否启用行走时腰部0位跟踪功能（忽略RL输出的腰部action，直接跟踪默认位置）
+    loadData::loadPtreeValue(pt, waist_zero_tracking_enabled_, "waistZeroTrackingEnabled", false);
+    ROS_INFO("[%s] Waist zero tracking in walking enabled: %s", name_.c_str(), waist_zero_tracking_enabled_ ? "true" : "false");
+
+    // 加载站立切换到行走时的支撑腿髋关节roll偏置参数
+    loadData::loadPtreeValue(pt, stanceToWalkHipRollBias_, "stanceToWalkHipRollBias", false);
+    loadData::loadPtreeValue(pt, stanceToWalkBiasDuration_, "stanceToWalkBiasDuration", false);
+    
+    ROS_INFO("[%s] Stance-to-walk hip roll bias parameters: bias=%.4f rad, duration=%.4f s",
+             name_.c_str(), stanceToWalkHipRollBias_, stanceToWalkBiasDuration_);
+
+    // 加载YAW补偿参数
+    if (pt.find("yawCompensation") != pt.not_found()) {
+      loadData::loadPtreeValue(pt, yaw_compensation_enabled_, "yawCompensation.enabled", false);
+      loadData::loadPtreeValue(pt, yaw_compensation_x_bias_, "yawCompensation.xBias", false);
+      loadData::loadPtreeValue(pt, yaw_compensation_threshold_, "yawCompensation.threshold", false);
+      loadData::loadPtreeValue(pt, yaw_compensation_x_velocity_threshold_, "yawCompensation.xVelocityThreshold", false);
+      loadData::loadPtreeValue(pt, yaw_compensation_separate_enabled_, "yawCompensation.enableSeparateCompensation", false);
+      loadData::loadPtreeValue(pt, yaw_compensation_x_bias_clockwise_, "yawCompensation.xBiasClockwise", false);
+      loadData::loadPtreeValue(pt, yaw_compensation_x_bias_counterclockwise_, "yawCompensation.xBiasCounterclockwise", false);
+      
+      ROS_INFO("[%s] YAW compensation loaded: enabled=%s, xBias=%.4f, threshold=%.4f, xVelThreshold=%.4f, separate=%s",
+               name_.c_str(), 
+               yaw_compensation_enabled_ ? "true" : "false",
+               yaw_compensation_x_bias_,
+               yaw_compensation_threshold_,
+               yaw_compensation_x_velocity_threshold_,
+               yaw_compensation_separate_enabled_ ? "true" : "false");
+      if (yaw_compensation_enabled_ && yaw_compensation_separate_enabled_) {
+        ROS_INFO("[%s] YAW separate compensation: clockwise=%.4f, counterclockwise=%.4f",
+                 name_.c_str(), yaw_compensation_x_bias_clockwise_, yaw_compensation_x_bias_counterclockwise_);
+      }
+    } else {
+      ROS_INFO("[%s] YAW compensation not found in config, using defaults (disabled)", name_.c_str());
+    }
 
     std::string networkModelFile;
     loadData::loadCppDataType(rlParamFile, "networkModelFile", networkModelFile);
@@ -265,6 +301,12 @@ namespace humanoid_controller
     // 动作维度
     num_actions_ = jointNum_ + jointArmNum_ + waistNum_;
     setCurrentAction(Eigen::VectorXd::Zero(num_actions_));
+
+    // 初始化髋关节pitch角度索引
+    // 对于非roban机型：leg_l3_joint=2, leg_r3_joint=8
+    // 对于roban机型：leg_l3_joint=waistNum_+2, leg_r3_joint=waistNum_+8
+    leftHipPitchIdx_ = is_roban_ ? (waistNum_ + 2) : 2;
+    rightHipPitchIdx_ = is_roban_ ? (waistNum_ + 8) : 8;
 
     const std::string prefixCommandData_ = "commandData";
     const std::vector<std::pair<std::string, double CommandDataRL::*>> cmdInitalList = {
@@ -447,6 +489,40 @@ namespace humanoid_controller
     velocity_commands << cmd.cmdVelLineX_,
                          cmd.cmdVelLineY_,
                          cmd.cmdVelAngularZ_;
+    
+    // 应用YAW补偿（当旋转时给X方向速度添加偏置）
+    if (yaw_compensation_enabled_) {
+      double angular_z = velocity_commands(2);  // YAW角速度
+      double linear_x = velocity_commands(0);   // X方向线速度
+      
+      // 检查是否满足补偿条件：|角速度| > 阈值 且 |线速度| < 阈值
+      if (std::abs(angular_z) > yaw_compensation_threshold_ && 
+          std::abs(linear_x) < yaw_compensation_x_velocity_threshold_) {
+        
+        double x_bias = 0.0;
+        if (yaw_compensation_separate_enabled_) {
+          // 根据旋转方向使用不同的偏置值
+          // angular_z > 0: 逆时针旋转（CCW），angular_z < 0: 顺时针旋转（CW）
+          if (angular_z > 0) {
+            x_bias = yaw_compensation_x_bias_counterclockwise_;
+          } else {
+            x_bias = yaw_compensation_x_bias_clockwise_;
+          }
+        } else {
+          // 使用通用偏置值
+          x_bias = yaw_compensation_x_bias_;
+        }
+        
+        // 应用偏置到X方向速度（同时修改velocity_commands和cmd，确保一致性）
+        velocity_commands(0) += x_bias;
+        cmd.cmdVelLineX_ += x_bias;  // 关键：修改cmd对象，确保getCommandRL()返回补偿后的值
+        
+        std::cout << "[" << name_ << "] YAW compensation applied: angular_z=" << angular_z
+                  << ", linear_x=" << linear_x << " -> " << velocity_commands(0)
+                  << " (bias=" << x_bias << ")" << std::endl;
+      }
+    }
+    
     Eigen::VectorXd tempCommand_ = cmd.getCommandRL();
 
 
@@ -595,6 +671,103 @@ namespace humanoid_controller
         action[i] = output_buf[i];
 
       clip(action, clipActions_);
+
+      // ==================== 站立切换到行走时的支撑腿髋关节roll偏置 ====================
+      // 计算并应用支撑腿髋关节roll偏置
+      if (isStanceToWalkBiasActive_)
+      {
+        double elapsed = (ros::Time::now() - stanceToWalkBiasStartTime_).toSec();
+        if (elapsed >= stanceToWalkBiasDuration_)
+        {
+          isStanceToWalkBiasActive_ = false;
+        }
+        else
+        {
+          double decay_factor = 1.0 - (elapsed / stanceToWalkBiasDuration_);
+          double current_bias = stanceToWalkHipRollBias_ * decay_factor;
+          
+          // 左腿支撑(-1)：施加正偏置到左腿髋关节roll(索引0)
+          // 右腿支撑(1)：施加负偏置到右腿髋关节roll(索引6)
+          if (stanceToWalkBiasSupportLeg_ == -1)
+          {
+            action[0] += current_bias;
+          }
+          else if (stanceToWalkBiasSupportLeg_ == 1)
+          {
+            action[6] -= current_bias;
+          }
+        }
+      }
+      
+      // 获取当前命令数据判断是否从站立切换到行走
+      CommandDataRL currentCmdData = gait_receiver_->getCurrentCommand();
+      bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
+      
+      // 当从站立切换到行走时（站立->行走），记录初始髋关节pitch角速度并开始数据收集
+      if (lastStanceState_ && !is_standing)
+      {
+        leftHipPitchVelIntegral_ = 0.0;
+        rightHipPitchVelIntegral_ = 0.0;
+        stanceToWalkHipPitchCollectionStartTime_ = ros::Time::now();
+        isHipPitchDataCollected_ = false;
+      }
+            
+      // 在站立切换到行走后的累积时间窗口内收集髋关节pitch角速度数据并进行积分比较
+      if (!lastStanceState_ && !is_standing && !isHipPitchDataCollected_)
+      {
+        SensorData current_sensor_data = getRobotSensorData();
+        double elapsed = (ros::Time::now() - stanceToWalkHipPitchCollectionStartTime_).toSec();
+        double currentLeftHipPitchVel = current_sensor_data.jointVel_[leftHipPitchIdx_];
+        double currentRightHipPitchVel = current_sensor_data.jointVel_[rightHipPitchIdx_];
+              
+        if (elapsed < kHipPitchCollectionDuration_)
+        {
+          // 积分累加：累加pitch角速度
+          leftHipPitchVelIntegral_ += currentLeftHipPitchVel;
+          rightHipPitchVelIntegral_ += currentRightHipPitchVel;
+        }
+        else
+        {
+          // 累积时间结束，比较积分结果判断支撑腿
+          // 计算左右髋pitch角速度积分差值：左腿-右腿
+          // 差值 > 0：左腿角速度积分更正（抬得少/踩得多）→ 右腿抬起 → 右腿支撑
+          // 差值 < 0：右腿角速度积分更负（抬得多/踩得少）→ 左腿抬起 → 左腿支撑
+          double hipPitchVelIntegralDiff = - leftHipPitchVelIntegral_ + rightHipPitchVelIntegral_;
+                
+          ROS_INFO("[SupportLegBias] Hip pitch velocity integral: L=%.6f, R=%.6f, diff=%.6f",
+                   leftHipPitchVelIntegral_, rightHipPitchVelIntegral_, hipPitchVelIntegralDiff);
+                
+          if (hipPitchVelIntegralDiff > 0)
+          {
+            // 左腿角速度积分 > 右腿 → 右腿抬起 → 右腿支撑
+            ROS_INFO("[SupportLegBias] -> Right leg lifting, using RIGHT support");
+            stanceToWalkBiasStartTime_ = ros::Time::now();
+            isStanceToWalkBiasActive_ = true;
+            stanceToWalkBiasSupportLeg_ = 1;
+          }
+          else if (hipPitchVelIntegralDiff < 0)
+          {
+            // 右腿角速度积分 < 左腿 → 左腿抬起 → 左腿支撑
+            ROS_INFO("[SupportLegBias] -> Left leg lifting, using LEFT support");
+            stanceToWalkBiasStartTime_ = ros::Time::now();
+            isStanceToWalkBiasActive_ = true;
+            stanceToWalkBiasSupportLeg_ = -1;
+          }
+          else
+          {
+            // 积分相等 → 默认右腿支撑
+            ROS_INFO("[SupportLegBias] -> Equal integral, using default RIGHT support");
+            stanceToWalkBiasStartTime_ = ros::Time::now();
+            isStanceToWalkBiasActive_ = true;
+            stanceToWalkBiasSupportLeg_ = 1;
+          }
+                
+          isHipPitchDataCollected_ = true;
+        }
+      }
+      
+      // 更新上一帧状态
+      lastStanceState_ = is_standing;
 
       return true;
     }

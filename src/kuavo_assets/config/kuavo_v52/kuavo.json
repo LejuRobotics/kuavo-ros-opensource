@@ -52,7 +52,7 @@
         "PA100", "ruiwoPA72", "ruiwoPA60", "ruiwoPA72", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43",
         "PA100", "ruiwoPA72", "ruiwoPA60", "ruiwoPA72", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43"],
     "ruiwo_kp": [30, 15, 30, 15, 15, 15, 30, 15, 30, 15, 15, 15, 4, 10],
-    "ruiwo_kd": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
+    "ruiwo_kd": [3, 3, 0.95, 3, 3, 3, 3, 3, 0.95, 3, 3, 3, 3, 3],
     "EndEffectorType": ["qiangnao", "qiangnao"],
     "min_joint_position_limits":[
         -40, -60, -140, -8, -100, -100,
