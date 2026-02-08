@@ -1179,7 +1179,7 @@ class RobotControlBlockly:
             print(f"Execute stair trajectory failed: {str(e)}")
             return False
 
-    def simple_up_stair(self, stair_height = 0.25,stair_length = 0.08,stair_num = 4):
+    def simple_up_stair(self, stair_height = 0.08,stair_length = 0.25,stair_num = 4):
         """
         生成简单的上楼梯轨迹
         Args:

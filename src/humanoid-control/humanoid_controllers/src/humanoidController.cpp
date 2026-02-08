@@ -819,21 +819,22 @@ namespace humanoid_controller
         ROS_INFO("[HumanoidController] fall_down_state_ set to %d via callback", fall_down_state_);
       });
       
-      // 注册躯干速度回调函数（用于控制器切换时的速度检查）
-      controller_manager_->registerTorsoVelocityCallback([this]() -> vector_t {
+      // 注册躯干稳定性状态回调函数（从状态估计器获取）
+      controller_manager_->registerTorsoStabilityCallback([this]() -> bool {
         if (stateEstimate_)
         {
-          return stateEstimate_->getTorsoState();
+          return stateEstimate_->isTorsoVelocityStable();
         }
         else
         {
-          // 如果状态估计器未初始化，返回零向量
-          return vector_t::Zero(12);
+          // 如果状态估计器未初始化，返回true（允许切换）
+          return true;
         }
       });
       
       // 初始化 ROS 服务（由 RLControllerManager 管理）
       controller_manager_->initializeRosServices(controllerNh_);
+      
       
       // 只有在 RL 可用时才初始化控制器（需要配置文件）
       {
@@ -1005,7 +1006,7 @@ namespace humanoid_controller
       enable_wbc_sub_ = controllerNh_.subscribe("/enable_wbc_flag", 10, &humanoidController::getEnableWbcFlagCallback, this);
 
       // State estimation
-      setupStateEstimate(taskFile, verbose);
+      setupStateEstimate(taskFile, verbose, referenceFile);
       if (use_shm_communication_)
       {
         while (!sensors_data_buffer_ptr_->isReady())
@@ -3305,6 +3306,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         // stateEstimate_->updateKinematics(period);
         updatakinematics(sensors_data, is_initialized_);
         measuredRbdState_ = stateEstimate_->update(time, period);                // angle(zyx),pos(xyz),jointPos[info_.actuatedDofNum],angularVel(zyx),linervel(xyz),jointVel[info_.actuatedDofNum]
+        
+        // 更新躯干稳定性状态（用于控制器切换检测）
+        stateEstimate_->updateTorsoStability(time, period);
+        
         currentObservation_.time += period.toSec();
       }
       // 只有非半身轮臂模式站立状态&&站起来稳定之后进行保护, 并且手臂不是外部遥操作模式才可触发拉起保护
@@ -3637,12 +3642,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     return mpcPolicyMsg;
   }
 
-  void humanoidController::setupStateEstimate(const std::string &taskFile, bool verbose)
+  void humanoidController::setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile)
   {
     // 这部分只有下肢，可能需要修改。
     stateEstimate_ = std::make_shared<KalmanFilterEstimate>(HumanoidInterface_->getPinocchioInterface(),
                                                             HumanoidInterface_->getCentroidalModelInfo(), *eeKinematicsPtr_);
-    dynamic_cast<KalmanFilterEstimate &>(*stateEstimate_).loadSettings(taskFile, verbose);
+    dynamic_cast<KalmanFilterEstimate &>(*stateEstimate_).loadSettings(taskFile, verbose, referenceFile);
+
     currentObservation_.time = 0;
 
     // 若 MPC 使用简化模型（例如手臂DOF从14降到8），则在估计器内部再配置一套 WBC/full Pinocchio 模型，仅用于手臂末端接触力估计（保持 MPC 估计主链路维度不变）
@@ -3653,13 +3659,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     }
   }
 
-  void humanoidCheaterController::setupStateEstimate(const std::string & /*taskFile*/, bool /*verbose*/)
+  void humanoidCheaterController::setupStateEstimate(const std::string & /*taskFile*/, bool /*verbose*/, const std::string & /*referenceFile*/)
   {
     stateEstimate_ = std::make_shared<FromTopicStateEstimate>(HumanoidInterface_->getPinocchioInterface(),
                                                               HumanoidInterface_->getCentroidalModelInfo(), *eeKinematicsPtr_, controllerNh_);
   }
 
-  void humanoidKuavoController::setupStateEstimate(const std::string &taskFile, bool verbose)
+  void humanoidKuavoController::setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile)
   {
 #ifdef KUAVO_CONTROL_LIB_FOUND
     // auto [plant, context] = drake_interface_->getPlantAndContext();

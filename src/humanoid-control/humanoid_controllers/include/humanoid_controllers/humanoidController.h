@@ -330,7 +330,7 @@ namespace humanoid_controller
                                         bool verbose, RobotVersion rb_version);
     virtual void setupMpc();
     virtual void setupMrt();
-    virtual void setupStateEstimate(const std::string &taskFile, bool verbose);
+    virtual void setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile);
     void sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr &msg);
     void startMpccallback(const std_msgs::Bool::ConstPtr &msg);
     // void checkArmControlModeAndUpdateArmJoint();
@@ -895,13 +895,13 @@ namespace humanoid_controller
   class humanoidCheaterController : public humanoidController
   {
   protected:
-    void setupStateEstimate(const std::string &taskFile, bool verbose) override;
+    void setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile) override;
   };
 
   class humanoidKuavoController : public humanoidController
   {
   protected:
-    void setupStateEstimate(const std::string &taskFile, bool verbose) override;
+    void setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile) override;
   };
 
 } // namespace humanoid_controller
