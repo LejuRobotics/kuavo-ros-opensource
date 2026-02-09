@@ -13,10 +13,11 @@ clipObservations   18.0    ; 用于对输入进行clip
 clipActions        18.0    ; 用于对actions进行clip
 use_jointcmd_filter true       ; 是否对输出使用关节指令滤波器 0:不使用 1:使用
 use_external_arm_controller true ; 是否使用外部手臂控制器指令替代模型输出的手臂指令 0:不使用 1:使用
+use_external_waist_controller true ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
 use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 
-networkModelFile          /ampjzx250105_7.onnx; 
+networkModelFile          /ampjzx250126_27.onnx; 
 commandData 
 {
     inital
@@ -31,12 +32,13 @@ commandData
     }
     scale
     {
-        cmdVelLineX         2   ; cmd_vel的倍率，遥控器最大是0.4m/s
-        cmdVelLineY         1.6   ;
-        cmdVelLineZ         1   ;
+        ; cmd_vel的倍率
+        cmdVelLineX         1.6     ; 输入模型的最大cmdVelLineX = scale[0] * velocityLimits[0]
+        cmdVelLineY         1.06    ; 输入模型的最大cmdVelLineY = scale[1] * velocityLimits[1]
+        cmdVelLineZ         1       ; 输入模型的最大cmdVelLineZ = scale[2] * velocityLimits[2]
         cmdVelAngularX      1   ;
         cmdVelAngularY      1   ;
-        cmdVelAngularZ      1.5   ;
+        cmdVelAngularZ      2       ; 输入模型的最大cmdVelAngularZ = scale[5] * velocityLimits[3]
         cmdStance           1   ;
     }
 };预留完整的接口，当前只用到cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdWalkEnable，最大长度是4
@@ -50,11 +52,12 @@ velocityLimits
     (3,0)  0.3      ; cmdVelAngularZ
 }
 defaultBaseHeightControl    0.95 ; Actual standing height when using RL controller
+defaultBaseXOffsetControl     -0.03    ; Base offset when using RL controller
 
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity
 {
-    linearX        -0.0     ; 原地踏步线速度X
+    linearX        -0.01     ; 原地踏步线速度X
     linearY         0.0       ; 原地踏步线速度Y
     linearZ         0.0       ; 接口留用
     angularX        0.0       ; 接口留用
@@ -102,13 +105,13 @@ yDirectionCompensation
 ; ==================== 混合运动速度限制配置====================
 mixedMotionLimits
 {
-    enableMixedMode             false    ; 是否启用混合运动模式(true/false)
-    angularVelThreshold         0.05    ; 角速度阈值 (rad/s)
-    maxLinearVelWithAngular     0.5     ; 有角速度时最大线速度 (m/s)
-    linearVelThreshold          0.05    ; 线速度阈值 (m/s)
+    enableMixedMode             true    ; 是否启用混合运动模式(true/false)
+    angularVelThreshold         0.03    ; 角速度阈值 (rad/s)
+    maxLinearVelWithAngular     0.1     ; 有角速度时最大线速度 (m/s)
+    linearVelThreshold          0.4     ; 线速度阈值 (m/s)
     maxAngularVelWithLinear     0.5     ; 有线速度时最大角速度 (rad/s)
     smoothTransition            true    ; 是否启用平滑过渡(true/false)
-    transitionFactor            0.8     ; 过渡因子
+    transitionFactor            0.9     ; 过渡因子
 }
 
 ; ==================== 外部接管手臂轨迹速度限制配置====================
@@ -117,6 +120,14 @@ armVelocityLimit
     maxTrackingVelocity         2.5     ; 手臂跟踪的最大速度 (rad/s)
     trackingErrorThreshold      0.1     ; 手臂跟踪误差阈值 (rad)，小于此值后完全接管
     modeInterpolationVelocity   1.0     ; 手臂插值的速度
+}
+
+; ==================== 外部接管腰部控制器参数配置====================
+waistControllerParam
+{
+    mode2CutoffFreq             0.8     ;截止频率
+    kp                          10      ;PD控制位置增益
+    kd                          5       ;PD控制速度增益
 }
 
 defaultBaseState
@@ -141,15 +152,15 @@ defaultJointState
     ; 定义各关节的默认状态
     (0,0)  -0.       ; leg_l1_joint
     (1,0)  -0.       ; leg_l2_joint
-    (2,0)  -0.24     ; leg_l3_joint
+    (2,0)  -0.25     ; leg_l3_joint
     (3,0)   0.5     ; leg_l4_joint
-    (4,0)  -0.26     ; leg_l5_joint
+    (4,0)  -0.25     ; leg_l5_joint
     (5,0)   0.       ; leg_l6_joint
     (6,0)   0.       ; leg_r1_joint
     (7,0)   0.       ; leg_r2_joint
-    (8,0)  -0.24     ; leg_r3_joint
+    (8,0)  -0.25     ; leg_r3_joint
     (9,0)   0.5     ; leg_r4_joint
-    (10,0) -0.26     ; leg_r5_joint
+    (10,0) -0.25     ; leg_r5_joint
     (11,0) -0.       ; leg_r6_joint
     (12,0)  0        ; waist_joint
     (13,0)  0        ; zarm_l1_joint
@@ -279,7 +290,7 @@ jointKd
     (9,0)   6.0   ; leg_r4_joint
     (10,0)  7.5   ; leg_r5_joint
     (11,0)  7.5  ; leg_r6_joint
-    (12,0)  9.0   ; waist_joint
+    (12,0)  3.0   ; waist_joint
     (13,0)  3       ; zarm_l1_joint
     (14,0)  3       ; zarm_l2_joint
     (15,0)  3       ; zarm_l3_joint

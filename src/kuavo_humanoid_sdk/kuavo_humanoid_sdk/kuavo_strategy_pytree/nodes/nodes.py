@@ -56,6 +56,17 @@ class NodeHead(Behaviour):
     def initialise(self):
         self.logger.debug(f"NodeHead::initialise {self.name}")
         
+        # 确保为新 tag_id 注册 BlackBoard 访问权限（支持动态更新 tag_id）
+        if self.tag_id is not None:
+            # 如果 self.bb 不存在，创建它
+            if not hasattr(self, 'bb') or self.bb is None:
+                self.bb = py_trees.blackboard.Client(name=self.name)
+            try:
+                self.bb.register_key(key=f'latest_tag_{self.tag_id}', access=py_trees.common.Access.READ)
+            except Exception:
+                # 如果已经注册过，忽略错误
+                pass
+        
         # 生成头部搜索轨迹
         import numpy as np
         self.head_traj = []
@@ -156,6 +167,13 @@ class NodeTagToArmGoal(Behaviour):
     def initialise(self):
         self.logger.debug(f"NodeTagToArmGoal::initialise {self.name}")
         print(f'===== Initializing NodeTagToArmGoal for tag {self.tag_id}')
+        # 确保为新 tag_id 注册 BlackBoard 访问权限（支持动态更新 tag_id）
+        for k in [f'latest_tag_{self.tag_id}', f'latest_tag_{self.tag_id}_version']:
+            try:
+                self.bb.register_key(key=k, access=py_trees.common.Access.READ)
+            except Exception:
+                # 如果已经注册过，忽略错误
+                pass
         self.tag_version = -1
 
     def update(self):
@@ -443,6 +461,13 @@ class NodeTagToNavGoal(Behaviour):
 
     def initialise(self):
         self.logger.debug(f"NodeTagToNavGoal::initialise {self.name}")
+        # 确保为新 tag_id 注册 BlackBoard 访问权限（支持动态更新 tag_id）
+        for k in [f'latest_tag_{self.tag_id}', f'latest_tag_{self.tag_id}_version']:
+            try:
+                self.bb.register_key(key=k, access=py_trees.common.Access.READ)
+            except Exception:
+                # 如果已经注册过，忽略错误
+                pass
         self.tag_version = -1
 
     def update(self):
@@ -576,6 +601,15 @@ class NodePercep(Behaviour):
     def initialise(self):
         self.logger.debug(f"NodePercep::initialise {self.name}")
         for tag_id in self.tag_ids:
+            # 确保权限已注册（支持动态更新 tag_id）
+            for k in [f'latest_tag_{tag_id}', f'latest_tag_{tag_id}_version']:
+                try:
+                    # 尝试注册权限（如果已经注册过，py_trees 会忽略）
+                    self.bb.register_key(key=k, access=py_trees.common.Access.WRITE)
+                    self.bb.register_key(key=k, access=py_trees.common.Access.READ)
+                except Exception:
+                    # 如果注册失败，继续执行（可能已经注册过了）
+                    pass
             setattr(self.bb, f"latest_tag_{tag_id}_version", 0)
 
     def update(self):
@@ -761,10 +795,10 @@ class NodeWalk(Behaviour):
 
             self.fut = self.torso_api.walk_to_pose_by_vel(
                 pos_threshold=self.pos_threshold,
-                kp_pos=1.2,
-                kp_yaw=1.0,
+                kp_pos=1.0,
+                kp_yaw=0.6,
                 max_vel_x=0.4,
-                max_vel_yaw=1.0,
+                max_vel_yaw=0.5,
                 backward_mode=self.backward_mode,
                 asynchronous=True
             )
@@ -822,7 +856,7 @@ class NodeWalk(Behaviour):
         self.bb.walk_goal = None
 
 class NodeArm(Behaviour):
-    def __init__(self, name, arm_api: ArmAPI, control_base: bool = False, total_time: float = 2.0, frame: str = None):
+    def __init__(self, name, arm_api: ArmAPI, control_base: bool = False, total_time: float = 2.0, frame: str = None, arm_pos_threshold: float = 0.2, arm_angle_threshold: float = 0.35, arm_error_detect: bool = True):
         super(NodeArm, self).__init__(name)
         self.bb = py_trees.blackboard.Client(name=name)
         # 从白板拿到手臂目标轨迹
@@ -833,6 +867,9 @@ class NodeArm(Behaviour):
         self.control_base = control_base
         self.total_time = total_time
         self.frame = frame
+        self.arm_pos_threshold = arm_pos_threshold  # 位置误差阈值（米）
+        self.arm_angle_threshold = arm_angle_threshold  # 角度误差阈值（弧度）
+        self.arm_error_detect = arm_error_detect  # 是否开启手臂误差检测
 
     def initialise(self):
         self.logger.debug(f"NodeArm::initialise {self.name}")
@@ -850,6 +887,9 @@ class NodeArm(Behaviour):
             direct_to_wbc=True,
             total_time=self.total_time,
             frame=self.frame,
+            arm_pos_threshold=self.arm_pos_threshold,
+            arm_angle_threshold=self.arm_angle_threshold,
+            arm_error_detect=self.arm_error_detect,
         )
 
     def update(self):
@@ -1004,7 +1044,7 @@ class NodeWaist(Behaviour):
             waist_state = self.robot_sdk.state.waist_joint_state(waist_dof=self.waist_dof)
             current_angle = np.rad2deg(waist_state.position[0])
             angle_error = abs(self.waist_pos - current_angle)
-            print(f'===== Waist: target={self.waist_pos:.1f}°, current={current_angle:.1f}°, error={angle_error:.1f}°')
+            # print(f'===== Waist: target={self.waist_pos:.1f}°, current={current_angle:.1f}°, error={angle_error:.1f}°')
             
             if angle_error < self.angle_threshold:
                 return Status.SUCCESS

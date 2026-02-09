@@ -1870,7 +1870,7 @@ namespace mobile_manipulator {
         }
         calcRuckigTrajWithArmJoint(initTime, armJointTarget);
 
-        resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
+        // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
       }
     }
     else if(currentArmControlMode_  == LbArmControlServiceMode::KEEP)
@@ -1880,7 +1880,7 @@ namespace mobile_manipulator {
       setEnableArmJointTrack(true); // 开启手臂跟踪
 
       calcRuckigTrajWithArmJoint(initTime, armJointTarget);
-      resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
+      // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
     }
     else if(currentArmControlMode_ == LbArmControlServiceMode::AUTO_SWING)
     {
@@ -1889,7 +1889,7 @@ namespace mobile_manipulator {
       setEnableArmJointTrack(true); // 开启手臂跟踪
 
       calcRuckigTrajWithArmJoint(initTime, arm_init_joint_traj_);
-      resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
+      // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
 
       arm_joint_traj_ = arm_init_joint_traj_;
       left_arm_joint_traj_ = armJointTarget.head((info_.armDim - 4)/2);

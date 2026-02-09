@@ -25,7 +25,8 @@ ArmControlBaseROS::ArmControlBaseROS(ros::NodeHandle& nodeHandle, double publish
       debugPrint_(debugPrint),
       maxSpeed_(0.21),
       thresholdArmDiffHalfUpBody_rad_(0.2),
-      controlTorso_(false) {
+      controlTorso_(false),
+      waist_dof_(0) {
   ROS_INFO("[ArmControlBaseROS] Base class initialized with publishRate=%.2f, debugPrint=%s",
            publishRate_,
            debugPrint_ ? "true" : "false");
@@ -36,11 +37,17 @@ ArmControlBaseROS::~ArmControlBaseROS() { ROS_INFO("[ArmControlBaseROS] Base cla
 void ArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
   ROS_INFO("[ArmControlBaseROS] Initializing base ROS components...");
 
+  // 从JSON配置读取腰部自由度数量
+  if (configJson.contains("NUM_WAIST_JOINT")) {
+    waist_dof_ = configJson["NUM_WAIST_JOINT"].get<int>();
+    ROS_INFO("✅ [ArmControlBaseROS] Set waist DOF from JSON: %d", waist_dof_);
+  } else {
+    ROS_WARN("⚠️  [ArmControlBaseROS] 'NUM_WAIST_JOINT' field not found in JSON configuration, using default value: 0");
+    waist_dof_ = 0;
+  }
+
   // Initialize service client for arm control mode
   changeArmCtrlModeClient_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
-
-  changeMobileCtrlModeClient_ =
-      nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/mobile_manipulator_mpc_control");
   humanoidArmCtrlModeClient_ =
       nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_change_arm_ctrl_mode");
   enableWbcArmTrajectoryControlClient_ =
@@ -159,10 +166,11 @@ bool ArmControlBaseROS::initializeArmJointsSafety() {
   }
 
   const size_t jointQSize = currentSensorData->joint_data.joint_q.size();
-  const int armJointStartIndex = 12;
+  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
   const int numArmJoints = 14;
 
-  ROS_INFO("[ArmControlBaseROS] joint_q array size: %zu, required: %d", jointQSize, armJointStartIndex + numArmJoints);
+  ROS_INFO("[ArmControlBaseROS] joint_q array size: %zu, required: %d (waist_dof: %d)", 
+           jointQSize, armJointStartIndex + numArmJoints, waist_dof_);
 
   if (jointQSize < armJointStartIndex + numArmJoints) {
     std::string errorMsg = "joint_q array too small! Size: " + std::to_string(jointQSize) +

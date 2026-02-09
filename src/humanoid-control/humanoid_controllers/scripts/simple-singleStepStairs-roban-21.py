@@ -285,9 +285,9 @@ class EnhancedSlopeController:
         step_z_increment = stair_height
         
         # 躯干位置偏置
-        torso_offset_x = -0.03
+        torso_offset_x = 0.03
 
-        torso_offset_z = 0.08  # 仅第一步和最后一步生效
+        torso_offset_z = 0.03  # 仅第一步和最后一步生效
         
         # 生成每一步的轨迹
         step_x_init = foot_distance_initial + foot_toe + stair_length/2 - foot_offset

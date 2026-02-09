@@ -255,7 +255,7 @@ void Quest3IkROS::publishJointStates(const Eigen::VectorXd& jointPositions) {
   if (onlyHalfUpBody_ && armModeChanging_) {
     std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
 
-    const int ARM_JOINT_START = 12;
+    const int ARM_JOINT_START = 12 + waist_dof_;  // 考虑腰部自由度
 
     Eigen::VectorXd armCurrentAngle_rad(jointStateSize_);
 

@@ -12,9 +12,10 @@ from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config
 
 # === Demo 配置 ===
-TAG_ID = config.pick.tag_id  # 要寻找的 tag ID
+TAG_ID = 0  # 要寻找的 tag ID
 HEAD_SEARCH_YAWS = [np.deg2rad(85), 0, np.deg2rad(-85)]  # 头部搜索的偏航角度
 HEAD_SEARCH_PITCHES = [np.deg2rad(-10), np.deg2rad(0), np.deg2rad(10)]  # 头部搜索的俯仰角度
+TIMEOUT_SECONDS = 5.0  # 超时时间（秒）
 
 
 def make_tree(robot_sdk):
@@ -60,15 +61,31 @@ def make_tree(robot_sdk):
 
 
 if __name__ == '__main__':
-    # 初始化头部位置
+    # 初始化头部位置（保存为初始位置，用于后续回位）
+    INITIAL_HEAD_YAW = 0
+    INITIAL_HEAD_PITCH = np.deg2rad(-10)
+    
     robot_sdk = RobotSDK()
-    robot_sdk.control.control_head(0, np.deg2rad(-10))
+    robot_sdk.control.control_head(INITIAL_HEAD_YAW, INITIAL_HEAD_PITCH)
 
     root = make_tree(robot_sdk)
     tree = py_trees.trees.BehaviourTree(root)
 
     print("开始头部搜索 tag...")
+    start_time = time.time()  # 记录开始时间
+
     while True:
+        # 检查超时
+        elapsed_time = time.time() - start_time
+        if elapsed_time >= TIMEOUT_SECONDS:
+            print(f"⏰ 超时退出：在 {TIMEOUT_SECONDS} 秒内未找到 tag {TAG_ID}")
+            # 超时时也回到初始位置
+            print("🔄 头部回到初始位置...")
+            robot_sdk.control.control_head(INITIAL_HEAD_YAW, INITIAL_HEAD_PITCH)
+            time.sleep(0.5)  # 等待头部移动完成
+            print("✅ 头部已回到初始位置")
+            break
+
         tree.tick()
         status = root.status
         print(py_trees.display.unicode_tree(root, show_status=True))
@@ -86,9 +103,20 @@ if __name__ == '__main__':
                     print(f"   姿态(quat): {quat}")
             else:
                 print(f"⚠️ 无法在黑板上读取 latest_tag_{TAG_ID}")
+            
+            # 找到 tag 后，头部回到初始位置
+            print("🔄 头部回到初始位置...")
+            robot_sdk.control.control_head(INITIAL_HEAD_YAW, INITIAL_HEAD_PITCH)
+            time.sleep(0.5)  # 等待头部移动完成
+            print("✅ 头部已回到初始位置")
             break
         if status == py_trees.common.Status.FAILURE:
             print("❌ 头部搜索失败.")
+            # 失败时也回到初始位置
+            print("🔄 头部回到初始位置...")
+            robot_sdk.control.control_head(INITIAL_HEAD_YAW, INITIAL_HEAD_PITCH)
+            time.sleep(0.5)  # 等待头部移动完成
+            print("✅ 头部已回到初始位置")
             break
 
         time.sleep(0.1)

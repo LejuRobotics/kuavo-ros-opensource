@@ -106,7 +106,7 @@ class EnhancedSlopeController:
         
         # 迈步时间间隔
         swing_time = 0.6  # 基础时间间隔
-        contact_time = 1.2
+        contact_time = 0.6  # 接触时间间隔
         
         # 上斜坡轨迹
         step_x_init = foot_x + foot_distance_initial + foot_length_x
@@ -206,7 +206,7 @@ class EnhancedSlopeController:
         step_z_init = step_z_last - foot_length_z
         torso_x_init = torso_x_last + foot_length_x
         torso_z_init = torso_z_last - foot_length_z
-        torso_z_offset = 0.06
+        torso_z_offset = 0.03
         for step in range(step_num+1):  # 生成第一步和上斜坡的步态
             # 左右脚交替
             foot_index = step % 2  # 0:左脚, 1:右脚
@@ -227,9 +227,9 @@ class EnhancedSlopeController:
                 y_pos = foot_width if foot_index == 0 else -foot_width
                 # 更新最后一步的位置
                 step_x_last = step_x_init + step_x_increment * (step_num-2) + foot_length_x
-                step_z_last = step_z_init - step_z_increment * (step_num-2) - foot_length_z
+                step_z_last = step_z_init - step_z_increment * (step_num-2) - foot_length_z/2
                 torso_x_last = torso_x_init + step_x_increment * (step_num-2) + foot_length_x
-                torso_z_last = torso_z_init - step_z_increment * (step_num-2) - foot_length_z
+                torso_z_last = torso_z_init - step_z_increment * (step_num-2) - foot_length_z/2
                 # 足部姿态：保持水平
                 foot_poses_6d.append([
                     step_x_last, y_pos, step_z_last, 0.0, 0.0, 0.0
@@ -355,10 +355,10 @@ def main():
     # 斜坡参数
     SLOPE_X_DISTANCE = 0.85    # x方向长度
     UP_SLOPE_ANGLE = 6.0    #斜坡斜度，单位：度
-    DOWN_SLOPE_ANGLE = 7.3
+    DOWN_SLOPE_ANGLE = 7.8
     
     # 机器人参数
-    STEP_NUM = 6    # 迈步次数
+    STEP_NUM = 8    # 迈步次数
     STEP_LENGTH = 0.205     # 机器人脚掌长度
     
     msg_6d_slope = None

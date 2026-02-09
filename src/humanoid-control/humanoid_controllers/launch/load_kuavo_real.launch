@@ -28,13 +28,13 @@
     <arg name="start_way"         default="manual"/>
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="only_half_up_body" default="false"/>
-    <arg name="stand_up_protect" default="false"/>
+    <arg name="stand_up_protect" default="true"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
     <arg name="leg_disable_mode" default="true" doc="If true, when any leg joint fails, all leg joints (1-12) will be disabled" />
     <arg name="ruiwo_cxx_sdk" default="true"/>
-    <arg name="arm_move_spd"      default="2.4"/>
+    <arg name="arm_move_spd"      default="1.2"/>
     <arg name="waist_move_spd"      default="1.8"/>
 
     <!-- 如需使用手柄搬箱子和走楼梯，需要设置为 false -->
@@ -50,8 +50,9 @@
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
-    <arg name="with_mm_ik" default="false"/>
+    <arg name="with_mm_ik" default="true"/>
     <arg name="with_led" default="true"/>
+    <arg name="with_battery" default="false"/>
     
     <!-- -->
     <arg name="teach_pendant" default="0"/>
@@ -128,6 +129,11 @@
 
     <group unless="$(eval arg('robot_version') >= 30)">
         <!-- <param name="enable_pull_up_protect" value="false"/> -->
+        <param name="stand_up_protect" value="false"/>
+    </group>
+
+    <!-- 初始倒地起身模式下，禁用站立保护以确保兼容 -->
+    <group if="$(arg init_fall_down_state)">
         <param name="stand_up_protect" value="false"/>
     </group>
     
@@ -284,6 +290,13 @@
         <arg name="LED" value="enable"/>
       </include>
     </group>
+
+    <group if="$(arg with_battery)">
+      <include file="$(find kuavo_led_controller)/launch/battery_info.launch">
+        <arg name="BATTERY" value="enable"/>
+      </include>
+    </group>
+
     <arg name="microphone" default="true" />
 
     <group if="$(arg microphone)">

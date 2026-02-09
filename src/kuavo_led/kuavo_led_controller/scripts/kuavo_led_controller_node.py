@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import rospy
-from kuavo_led_controller.srv import SetLEDMode, SetLEDModeResponse, SetLEDMode_free, SetLEDMode_freeResponse
+from kuavo_msgs.srv import SetLEDMode, SetLEDModeResponse, SetLEDMode_free, SetLEDMode_freeResponse
 from std_srvs.srv import Trigger, TriggerResponse
 import os
 try:

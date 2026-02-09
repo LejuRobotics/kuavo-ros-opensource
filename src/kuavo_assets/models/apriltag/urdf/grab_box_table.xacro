@@ -219,6 +219,44 @@
       <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
     </inertial>
   </link>
+  <link name="apriltag_box_tag2_base">
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <material>
+        <color rgba="0.8 0.8 0.8 0.5"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+  <link name="apriltag_box_tag3_base">
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <material>
+        <color rgba="0.8 0.8 0.8 0.5"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
   <link name="apriltag_shelf_base">
     <visual>
       <geometry>
@@ -245,7 +283,16 @@
     <child link="apriltag_box_base"/>
     <origin xyz="0.0 -1.7 1.05" rpy="0 0 0"/>
   </joint>
-
+  <joint name="world_to_box_tag2_joint" type="fixed">
+    <parent link="world"/>
+    <child link="apriltag_box_tag2_base"/>
+    <origin xyz="0.5 -1.7 1.3" rpy="0 0 0"/>
+  </joint>
+  <joint name="world_to_box_tag3_joint" type="fixed">
+    <parent link="world"/>
+    <child link="apriltag_box_tag3_base"/>
+    <origin xyz="-0.5 -1.7 0.75" rpy="0 0 0"/>
+  </joint>
   <joint name="world_to_table_joint" type="fixed">
     <parent link="world"/>
     <child link="apriltag_shelf_base"/>
@@ -253,6 +300,14 @@
   </joint>
 
   <xacro:apriltag_marker parent_link="apriltag_box_base" id="1">
+    <origin xyz="0 -0.055 -0.165" rpy="1.5708 1.5708 0"/>
+  </xacro:apriltag_marker>
+  
+  <xacro:apriltag_marker parent_link="apriltag_box_tag2_base" id="2">
+    <origin xyz="0 -0.055 -0.165" rpy="1.5708 1.5708 0"/>
+  </xacro:apriltag_marker>
+
+  <xacro:apriltag_marker parent_link="apriltag_box_tag3_base" id="3">
     <origin xyz="0 -0.055 -0.165" rpy="1.5708 1.5708 0"/>
   </xacro:apriltag_marker>
   

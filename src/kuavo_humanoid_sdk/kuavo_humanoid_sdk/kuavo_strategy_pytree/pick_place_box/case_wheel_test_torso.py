@@ -13,13 +13,20 @@ from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Frame
 
 # === Demo 配置 ===
-TORso_TARGET_POS = (0.0, 0.0, 1.2)  # x = 0.0m, z = 0.8m
+TORso_TARGET_POS = (0.0, 0.0, 1.2)  # x = 0.0m, z = 1.2m
 TORso_TARGET_EULER = (
     0.0,  # roll
     np.deg2rad(0.0),  # pitch
     np.deg2rad(90.0),  # yaw
 )
 
+# 躯干归位
+# TORso_TARGET_POS = (0.0, 0.0, 0.789919)  # x = 0.0m, z = 0.8m
+# TORso_TARGET_EULER = (
+#     0.0,  # roll
+#     np.deg2rad(0.0),  # pitch
+#     np.deg2rad(0.0),  # yaw
+# )
 
 def make_tree():
     robot_sdk = RobotSDK()

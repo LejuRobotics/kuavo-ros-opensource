@@ -216,6 +216,7 @@ namespace HighlyDynamic
                 {"dynamixel", {BIT_17_36, CK_MC, CK_C2T, DYNAMIXEL}},
                 {"realman", {BIT_17_36, CK_MC, CK_C2T, REALMAN}},
                 {"ruiwo", {BIT_17_36, CK_MC, CK_C2T, RUIWO}},
+                {"ruiwoPA81", {BIT_17_25, CK_MC, PA81_C2T, RUIWO}},
                 {"ruiwoPA72", {BIT_17_36, CK_MC, PA72_C2T, RUIWO}},
                 {"ruiwoPA60", {BIT_17_36, CK_MC, PA60_C2T, RUIWO}},
                 {"ruiwoPA43", {BIT_17_10, CK_MC, PA43_C2T, RUIWO}},

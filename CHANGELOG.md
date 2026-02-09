@@ -5,6 +5,7 @@
 ## Breaking Changes
 
 ## 文档相关
+- 更新 Kuavo5和Roban2 VR 遥操作控制腰部yaw文档说明，[文档链接](./readme.md) 
 - 优化运动控制 API 文档，补充revo2灵巧手以及末端相关话题/服务的约束条件，[文档链接](./docs/运动控制API.md)
 - PICO VR 全身遥操作补充使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
 - 补充桌面端节点服务开机自启动使用说明，[文档链接](./src/manipulation_nodes/planarmwebsocketservice/README.md)
@@ -15,6 +16,7 @@
 - 新增 Roban 斜坡使用说明文档 [文档链接](./src/humanoid-control/humanoid_controllers/scripts/Roban斜坡交互脚本说明.md)
 
 ## 新增功能
+- 新增Roban2.2版本机器人型号，版本号为 17
 - 4PRO机器人新增 VMP 控制器支持咏春动作，支持机器人类型45，46，[文档链接](./src/humanoid-control/humanoid_controllers/docs/VMP咏春使用说明.md)
 - Kuavo Humanoid SDK 新增 llm 工具类基础
 - H12 遥控器支持多控制器切换功能，[文档链接](./src/humanoid-control/h12pro_controller_node/多控制器H12操作说明.md)
@@ -69,6 +71,15 @@
 - 改进 PICO 节点与 VR App 端末端力接口数据定义，本地默认提供数组预设参考值
 
 ## 修复问题
+- 完善VR和遥控器切换控制器保护逻辑：切换过程允许再次切换，禁用遥控器摇杆和其余按钮输入
+- 修复机器人行走时可以控制下蹲和上蹲问题，限制为非行走状态下才允许下蹲
+- Kuavo Humanoid SDK 修复双足机器人 MPC控制手臂接口调用不生效问题
+- 修复 Kuavo 系列机器人执行 tact 动作文件时，手臂会向后摆问题
+- 修正 Kuavo5 代关节保护的速度峰值阈值
+- 修复Kuavo4 Pro系列机器人VR遥操转动腰部未加限制问题，修复为仅在 Kuavo5有腰的机器人才可正常转腰
+- 修复RL/MPC步态相互切换的过程中按下A键行走时，机身会出现震动、行走姿态异常问题
+- 修复 Mujoco 和 Gazebo 仿真无法运行 100045 等版本机器人问题
+- 修复Kuavo5 VR控制下蹲弯腰解锁手臂时跟随倒下问题
 - 修复 kuavo.json 配置末端类型为`lejuclaw`与实物实际不一致时程序启动报错退出问题
 - 修复半身模式轮臂无法使用VR问题
 - 修复G12遥控器AMP无法切换踏步功能
@@ -162,6 +173,7 @@
 - 修复 Quest3 打开`control_torso`控制躯干模式时躯干会下蹲到最低问题
 
 ## 其他改进
+- 优化URDF惯性参数，更新双臂参数和质量配置
 - Kuavo Humanoid SDK 优化 SDK `Init` 初始化时间过长问题
 - 增加 motorevo_tool.sh 用于 Roban2 手臂电机方向辨识和零点标定， [工具链接](./tools/check_tool/motorevo_tool.sh)
 - 新增硬件工具: canbus_config.sh 用于配置 Roban2 Can 总线配置，[工具链接](./tools/check_tool/canbus_config.sh)
@@ -250,6 +262,9 @@
 - Kuavo Humanoid SDK 新增搬箱子策略模块以及 gazebo 仿真策略使用示例
 
 ## 修复问题
+- 修复 VR 遥操作手臂内翻以及无法锁定夹爪等问题
+- 修复 Kuavo5 在 cali 状态下北通遥控器按 start 缩腿时程序退出问题
+- 修复H12 遥控器触发机器人做动作需要等待2~3秒才开始的问题
 - 补充100045和100049版本缺失的参数
 - 修复Roban2-EDU软件-”S形曲线行走“案例执行走完S弯后不会站立，会一直原地踏步
 - 修复灵巧手获取状态lock作用域太宽导致其他线程读取等待过长导致频率下降

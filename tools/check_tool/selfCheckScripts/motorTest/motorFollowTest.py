@@ -34,7 +34,7 @@ class MotorFollowTest:
             "电机对进度:",
             "当前测试对:",
             "测试完成标记",
-            "开始保存测试对",
+            "保存测试对",
             "数据保存完成",
             "所有关节对测试完成",
             "测试对数量:",
@@ -47,7 +47,11 @@ class MotorFollowTest:
             "开始实物电机跟随测试主循环",
             "实物电机跟随测试结束",
             "测试进度:",
-            "当前测试的关节"
+            "当前测试的关节",
+            "电机测试对",
+            "统计结果",
+            "详细结果",
+            "测试对"
         ]
         
         # 设置信号处理器
@@ -188,7 +192,7 @@ class MotorFollowTest:
                 return 1
             
             full_command = (
-                f"source {kuavo_ros_control_path}/devel/setup.zsh && "
+                f"source {kuavo_ros_control_path}/devel/setup.bash && "
                 f"echo '检查ROS环境...' && "
                 f"echo '开始启动launch文件...' && "
                 f"roslaunch hardware_node motor_follow_test.launch "
@@ -215,6 +219,7 @@ class MotorFollowTest:
             
             # 初始化显示标记
             self.test_started_shown = False
+            in_detail_result = False
             
             print_colored_text("=== 电机跟随性测试开始 ===", color="green", bold=True)
             print_colored_text(f"测试区域: {self.region_name}", color="blue", bold=True)
@@ -229,7 +234,7 @@ class MotorFollowTest:
             with open(self.output_file_path, 'w') as output_file:
                 # 启动进程
                 self.process = subprocess.Popen(
-                    ['zsh', '-c', full_command],
+                    ['bash', '-c', full_command],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -332,11 +337,10 @@ class MotorFollowTest:
                                 elif "当前测试对:" in line_stripped:
                                     # 这是测试开始的信号，清除当前进度条并更新进度
                                     print()  # 换行，结束当前进度条
-                                    current_pair += 1
                                     progress = ((current_pair - 1) / self.total_pairs) * 100 if self.total_pairs > 0 else 0  # 修改：保持一致的进度计算
                                     progress_bar = "█" * int(progress / 2) + "░" * (50 - int(progress / 2)) if 2 > 0 else "░" * 50
-                                    print_colored_text(f"🔄 开始测试第 {current_pair} 对电机", color="purple", bold=True)
-                                    print_colored_text(f"总进度: [{progress_bar}] {progress:.1f}% ({current_pair}/{self.total_pairs})", color="cyan")
+                                    print_colored_text(f"🔄 开始测试第 {(current_pair-1)} 对电机", color="purple", bold=True)
+                                    print_colored_text(f"总进度: [{progress_bar}] {progress:.1f}% ({current_pair-1}/{self.total_pairs})", color="cyan")
                                     # 重置当前电机对进度
                                     current_pair_progress = {"left": 0, "right": 0}
                                     # 重新启用进度条显示
@@ -348,15 +352,19 @@ class MotorFollowTest:
                                 
                                 elif "电机跟随测试开始" in line_stripped:
                                     print_colored_text(f"🚀 {line_stripped}", color="green", bold=True)
+                                    current_pair = 1
+                                    test_count = 0
                                 
                                 elif "电机跟随测试停止" in line_stripped:
                                     print_colored_text(f"🛑 {line_stripped}", color="yellow", bold=True)
                                 
-                                elif "开始保存测试对" in line_stripped:
+                                elif "保存测试对" in line_stripped:
                                     print_colored_text(f"💾 {line_stripped}", color="blue")
                                 
                                 elif "数据保存完成" in line_stripped:
                                     print_colored_text(f"✅ {line_stripped}", color="green")
+                                    current_pair += 1
+
                                 
                                 elif "所有关节对测试完成" in line_stripped:
                                     print()  # 确保换行
@@ -366,26 +374,38 @@ class MotorFollowTest:
                                     print_colored_text(f"总进度: [{progress_bar}] {progress:.1f}% ({self.total_pairs}/{self.total_pairs})", color="cyan")
                                     print_colored_text(f"🎉 {line_stripped}", color="green", bold=True)
                                     print_colored_text("=" * 50, color="blue")
+                                    normal_count = 0
+                                    abnormal_count = 0
                                     
+
+                                elif "详细结果" in line_stripped:
+                                    in_detail_result = True
+                                    continue
+
+                                elif in_detail_result and line_stripped.startswith("测试对"):
+                                    test_count += 1
+                                    # 统计测试结果正常/异常的电机对数
+                                    try:
+                                        result = line_stripped.split(":")[-1].strip()
+                                        if result == "正常":
+                                            normal_count += 1
+                                        elif result == "异常":
+                                            abnormal_count += 1
+                                    except:
+                                        pass 
+
+                                elif "统计结果" in line_stripped:
                                     # 显示测试总结
                                     print_colored_text("=== 电机跟随性测试总结 ===", color="green", bold=True)
-                                    normal_count = test_results.count("正常")
-                                    abnormal_count = test_results.count("异常")
-                                    print_colored_text(f"总测试对数: {len(test_results)}", color="blue")
+                                    print_colored_text(f"总测试对数: {test_count}", color="blue")
                                     print_colored_text(f"正常: {normal_count} 对", color="green")
                                     print_colored_text(f"异常: {abnormal_count} 对", color="red")
                                     
                                     if abnormal_count == 0:
                                         print_colored_text("🎉 所有电机对测试通过！", color="green", bold=True)
                                     else:
-                                        print_colored_text(f"⚠️  有 {abnormal_count} 对电机测试异常，请检查相关电机", color="red", bold=True)
+                                        print_colored_text(f"⚠️  有 {abnormal_count} 对电机测试异常，请根据输出日志，检查相关电机", color="red", bold=True)
                                         
-                                        # 显示异常电机组的详细信息
-                                        print_colored_text("\n📋 异常电机组详情:", color="yellow", bold=True)
-                                        abnormal_pairs = [detail for detail in test_details if detail["result"] == "异常"]
-                                        for i, detail in enumerate(abnormal_pairs, 1):
-                                            print_colored_text(f"  {i}. 电机组 {detail['pair']}: 电机 {detail['motors']}", color="red")
-                                    
                                     # 提示用户测试完成
                                     print_colored_text("=" * 50, color="blue")
                                     print_colored_text("📊 测试数据已保存并自动分析完成！", color="purple", bold=True)

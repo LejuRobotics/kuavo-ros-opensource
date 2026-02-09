@@ -104,10 +104,16 @@ CentroidalModelInfo createCentroidalModelInfo(const PinocchioInterface& interfac
   info.robotMass = pinocchio::computeTotalMass(model);
 
   for (const auto& name : threeDofContactNames) {
+    if (!model.existBodyName(name)) {
+      throw std::runtime_error("[CentroidalModelInfo] Body '" + name + "' does not exist in the model!");
+    }
     info.endEffectorFrameIndices.push_back(model.getBodyId(name));
   }
 
   for (const auto& name : sixDofContactNames) {
+    if (!model.existBodyName(name)) {
+      throw std::runtime_error("[CentroidalModelInfo] Body '" + name + "' does not exist in the model!");
+    }
     info.endEffectorFrameIndices.push_back(model.getBodyId(name));
   }
 

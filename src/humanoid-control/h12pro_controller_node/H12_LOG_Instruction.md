@@ -74,3 +74,50 @@ https://kuavo.lejurobot.com/H12SerialLogApks/kuavo_h12_controller.apk
 - 右上角有 `清除` 和 `暂停`
 
 ![H12日志软件](./images/H12_log_use.jpg)
+
+## G12 波特率设置
+1. 进入设备助手，![H12日志软件](./images/设备助手.jpg)
+
+2. 进入高级选项，![H12日志软件](./images/高级选项.jpg)
+
+3. 进入波特率设置，设置波特率为 `57600`,![H12日志软件](./images/波特率设置.jpg)
+
+## WiFi 信息上报功能
+
+### 功能说明
+
+当机器人启动时，会自动通过日志串口以 1 秒的频率持续上报当前连接的 WiFi 信息，方便用户在遥控器上查看机器人的网络状态。
+
+### 数据格式
+
+上报数据为 JSON 格式：
+
+```json
+{
+    "cmd": "rc/send_robot_info",
+    "data": {
+        "wifi_name": "<base64编码的WiFi名称>",
+        "robot_ip": "192.168.1.100"
+    }
+}
+```
+
+### 字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| cmd | string | 命令标识，固定为 `rc/send_robot_info` |
+| data.wifi_name | string | WiFi 名称，使用 **Base64 编码**（UTF-8） |
+| data.robot_ip | string | 机器人 IP 地址 |
+| data.wifi_password | string | WiFi 密码，使用 **Base64 编码**（UTF-8），需要 root 权限 |
+
+### WiFi 名称解码
+
+- 由于 WiFi 名称可能包含中文或特殊字符，为避免 JSON 解析问题，`wifi_name` 字段使用 Base64 编码,接收端请使用相应的方法进行解析。
+
+### 注意事项
+
+- WiFi 信息上报功能依赖于 `/dev/H12_log_channel` 设备文件存在
+- 需要正确配置 udev 规则并连接硬件
+- 上报频率为每秒 1 次
+- 机器人停止时会自动停止上报

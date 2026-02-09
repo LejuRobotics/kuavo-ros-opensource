@@ -7,6 +7,7 @@
 #include "humanoid_controllers/rl/RlGaitReceiver.h"
 #include "humanoid_controllers/LowPassFilter.h"
 #include "humanoid_controllers/rl/armController.h"
+#include "humanoid_controllers/rl/waistController.h"
 #include "kuavo_solver/ankle_solver.h"
 #include <openvino/openvino.hpp>
 #include <memory>
@@ -43,6 +44,12 @@ namespace humanoid_controller
      */
     bool isInStanceMode() const override;
 
+    /**
+     * @brief 更新速度限制到rosparam（重写基类方法）
+     * 使用从配置文件加载的velocityLimits_设置速度限制
+     */
+    void updateVelocityLimitsParam(ros::NodeHandle& nh) override;
+
   protected:
     // 主循环：从 RLControllerBase::update 调用
     bool updateImpl(const ros::Time& time,
@@ -70,6 +77,11 @@ namespace humanoid_controller
 
     // 更新手臂指令（可选功能，用于替换jointCmdMsg中的手臂部分）
     bool updateArmCommand(const ros::Time& time,
+                         const SensorData& sensor_data,
+                         kuavo_msgs::jointCmd& joint_cmd) override;
+
+    // 更新腰部指令（可选功能，用于替换jointCmdMsg中的腰部部分）
+    bool updateWaistCommand(const ros::Time& time,
                          const SensorData& sensor_data,
                          kuavo_msgs::jointCmd& joint_cmd) override;
 
@@ -131,11 +143,21 @@ namespace humanoid_controller
     double arm_tracking_error_threshold_{0.05}; ///< 手臂跟踪误差阈值 (rad)，从配置文件加载
     double arm_mode_interpolation_velocity_{1.0}; ///< 模式2的插值速度 (rad/s)，从配置文件加载
 
+    // 腰部控制相关（可选功能）
+    double waist_mode_interpolation_velocity_{1.0}; ///< 腰部模式切换时的插值速度 (rad/s)，从配置文件加载，用于三次多项式插值
+    double waist_mode2_cutoff_freq_{1.0}; ///< 腰部模式2外部输入的截止频率 (Hz)，从配置文件加载，默认5Hz
+    Eigen::VectorXd waist_kp_from_config_; ///< 从配置文件读取的腰部 kp 参数
+    Eigen::VectorXd waist_kd_from_config_; ///< 从配置文件读取的腰部 kd 参数
+    std::unique_ptr<WaistController> waist_controller_; ///< 腰部控制器
+
   private:
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
     
     // 手臂控制辅助函数
     void initArmControl(const std::string& urdf_path);
+    
+    // 腰部控制辅助函数
+    void initWaistControl();
   };
 }

@@ -79,6 +79,8 @@ setup(
         "websockets",
         "ultralytics",
         "openai==1.3.8",
+        "websocket-client==0.58.0",
+        "httpx==0.25.2"
     ],
     python_requires=">=3.8",
     classifiers=[

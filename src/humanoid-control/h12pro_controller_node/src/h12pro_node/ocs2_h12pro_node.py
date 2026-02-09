@@ -20,7 +20,7 @@ from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData
 from kuavo_msgs.srv import getControllerList
 from sensor_msgs.msg import JointState
 import math
-from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory, planArmState
+from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory, planArmState, RobotActionState
 from trajectory_msgs.msg import JointTrajectory
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -249,6 +249,7 @@ class H12PROControllerNode:
         self.should_pub_head_motion_data = robotHeadMotionData()
         self.start_way = rospy.get_param("start_way", "auto")
         self.real_robot = rospy.get_param("real_robot", False)
+        self.only_half_up_body = rospy.get_param("only_half_up_body", False)
         #zsh
         # 头部控制模式
        # 头部控制参数 (重新调整)
@@ -267,6 +268,9 @@ class H12PROControllerNode:
         #zsh
 
         self.is_navigation_mode = False # 导航状态变量
+        
+        # 动作执行状态跟踪（用于屏蔽摇杆输入）
+        self.robot_action_executing = False  # True表示有tact动作正在执行
 
         # 添加线程池
         self.executor = ThreadPoolExecutor(max_workers=2)
@@ -323,6 +327,16 @@ class H12PROControllerNode:
             queue_size=1,
             tcp_nodelay=True 
         )
+        
+        # 订阅手臂动作执行状态，用于在tact执行期间屏蔽摇杆输入
+        self.robot_action_state_sub = rospy.Subscriber(
+            "/robot_action_state",
+            RobotActionState,
+            self._robot_action_state_callback,
+            queue_size=1,
+            tcp_nodelay=True
+        )
+        
         self.control_hand_pub = rospy.Publisher(
             '/control_robot_hand_position', 
             robotHandPosition, 
@@ -410,6 +424,15 @@ class H12PROControllerNode:
         self.current_arm_joint_state = msg.joint_data.joint_q[12:26]
         self.current_arm_joint_state = [round(pos, 2) for pos in self.current_arm_joint_state]
         self.current_arm_joint_state.extend([0] * 14)
+    
+    def _robot_action_state_callback(self, msg: RobotActionState) -> None:
+        """处理手臂动作状态回调
+        state: 0=失败, 1=执行中, 2=成功
+        当state==1时，表示tact动作正在执行，需要屏蔽摇杆输入
+        """
+        self.robot_action_executing = (msg.state == 1)
+        if self.robot_action_executing:
+            rospy.logdebug("[RobotActionState] Tact action executing, joystick input will be blocked.")
 
     def _load_configuration(self) -> Dict[str, Any]:
         """Load and validate configuration from JSON file.
@@ -461,6 +484,7 @@ class H12PROControllerNode:
     def _timer_callback(self, event: rospy.Timer) -> None:
         """Update has_joy_node parameter periodically."""
         self.start_way = rospy.get_param("start_way", "auto")
+        self.only_half_up_body = rospy.get_param("only_half_up_body", False)
 
     def _channel_callback(self, msg: h12proRemoteControllerChannel) -> None:
         """Process incoming channel messages.
@@ -793,6 +817,21 @@ class H12PROControllerNode:
 
         # self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
         # self.h12_to_joy_node.process_channels()
+
+        if self.only_half_up_body or is_switch_controller_in_cooldown() or self.robot_action_executing:
+            neutral_msg = h12proRemoteControllerChannel()
+            channels = Config.get_default_channels()
+            neutral_msg.channels = tuple(channels)
+            self.h12_to_joy_node.update_channels_msg(msg=neutral_msg)
+            self.h12_to_joy_node.process_channels()
+
+            reasons = []
+            if is_switch_controller_in_cooldown():
+                reasons.append("switch_controller cooldown")
+            if self.robot_action_executing:
+                reasons.append("tact action executing")
+            rospy.logdebug(f"[JoystickInput] Blocked: {' and '.join(reasons)}. Publishing neutral joystick values.")
+            return
 
         # 头部控制模式下处理摇杆控制
         if not self.head_control_mode:
