@@ -1390,9 +1390,27 @@ def secondary_menu():
 
                     if version_num == 62:
                         # 版本62：执行可执行脚本
-                        kuavo_breakin_script = os.path.join(folder_path, "kuavo_wheel_test", "hardware_plant_wheel_arm_test")
-                        script_description = f"Kuavo轮臂磨线脚本 tools/check_tool/kuavo_wheel_test/hardware_plant_wheel_arm_test (版本 {robot_version})"
-                        is_executable_script = True
+                        # 检查是开源仓库还是闭源仓库
+                        # 开源仓库：installed/lib/hardware_node/hardware_plant_wheel_arm_test
+                        # 闭源仓库：devel/lib/hardware_node/hardware_plant_wheel_arm_test
+
+                        workspace_root = os.path.abspath(os.path.join(folder_path, "..", ".."))
+                        installed_script = os.path.join(workspace_root, "installed", "lib", "hardware_node", "hardware_plant_wheel_arm_test")
+                        devel_script = os.path.join(workspace_root, "devel", "lib", "hardware_node", "hardware_plant_wheel_arm_test")
+
+                        if os.path.exists(installed_script):
+                            kuavo_breakin_script = installed_script
+                            script_description = f"开源仓库磨线脚本 installed/lib/hardware_node/hardware_plant_wheel_arm_test (版本 {robot_version})"
+                            is_executable_script = True
+                        elif os.path.exists(devel_script):
+                            kuavo_breakin_script = devel_script
+                            script_description = f"闭源仓库磨线脚本 devel/lib/hardware_node/hardware_plant_wheel_arm_test (版本 {robot_version})"
+                            is_executable_script = True
+                        else:
+                            print(bcolors.FAIL + f"错误：找不到 hardware_plant_wheel_arm_test 可执行文件" + bcolors.ENDC)
+                            print(f"  开源路径：{installed_script}")
+                            print(f"  闭源路径：{devel_script}")
+                            break
 
                     elif 13 <= version_num <= 14:
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
