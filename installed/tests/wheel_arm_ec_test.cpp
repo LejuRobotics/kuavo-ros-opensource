@@ -190,29 +190,42 @@ bool checkAssetsPath(const std::string& path) {
     return true;
 }
 
-// 查找可能的kuavo_assets路径
+// 查找可能的kuavo_assets路径（使用rospack）
 std::string findKuavoAssetsPath() {
-    // 可能的路径列表（按优先级排序）
-    std::vector<std::string> possible_paths = {
-        "/home/lab/kuavo-ros-control/src/kuavo_assets",
-        "/home/lab/kuavo-ros-opensource/src/kuavo_assets",
-        // 可以添加更多可能的路径
-    };
-    
-    std::cout << "正在查找 kuavo_assets 路径..." << std::endl;
-    
-    // 遍历可能的路径
-    for (const auto& path : possible_paths) {
-        std::cout << "  检查路径: " << path << std::endl;
-        if (checkAssetsPath(path)) {
-            std::cout << "  ✓ 找到有效路径: " << path << std::endl;
-            return path;
+    std::cout << "正在使用 rospack 查找 kuavo_assets 路径..." << std::endl;
+
+    // 使用 rospack find 命令查找 kuavo_assets 包路径
+    FILE* pipe = popen("rospack find kuavo_assets 2>/dev/null", "r");
+    if (pipe == nullptr) {
+        std::cerr << "  ✗ 无法执行 rospack 命令" << std::endl;
+    } else {
+        char buffer[512];
+        if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            // 移除末尾的换行符
+            std::string path(buffer);
+            if (!path.empty() && path.back() == '\n') {
+                path.pop_back();
+            }
+
+            int status = pclose(pipe);
+            if (status == 0) {
+                std::cout << "  rospack 返回路径: " << path << std::endl;
+                if (checkAssetsPath(path)) {
+                    std::cout << "  ✓ 找到有效路径: " << path << std::endl;
+                    return path;
+                } else {
+                    std::cout << "  ✗ rospack 返回的路径不存在或无效" << std::endl;
+                }
+            } else {
+                std::cout << "  ✗ rospack find kuavo_assets 失败" << std::endl;
+            }
         } else {
-            std::cout << "  ✗ 路径不存在或无效" << std::endl;
+            pclose(pipe);
+            std::cout << "  ✗ rospack 未返回结果" << std::endl;
         }
     }
-    
-    // 如果都找不到，尝试使用编译时的路径
+
+    // 如果 rospack 找不到，尝试使用编译时的路径
     std::string compile_time_path = KUAVO_ASSETS_PATH;
     std::cout << "  检查编译时路径: " << compile_time_path << std::endl;
     if (checkAssetsPath(compile_time_path)) {
@@ -221,7 +234,7 @@ std::string findKuavoAssetsPath() {
     } else {
         std::cout << "  ✗ 编译时路径也无效" << std::endl;
     }
-    
+
     // 如果都找不到，返回编译时的路径作为后备（即使可能无效）
     std::cerr << "警告: 未找到有效的 kuavo_assets 路径，使用编译时路径: " << compile_time_path << std::endl;
     return compile_time_path;
