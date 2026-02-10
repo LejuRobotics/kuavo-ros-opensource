@@ -12,7 +12,7 @@
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
     <arg name="rviz"   default="true"/>
     <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
-    <arg name="use_sqp"   default="false" doc="Use SQP if true, DDP if false"/>
+    <arg name="use_sqp"   default="true" doc="Use SQP if true, DDP if false"/>
 
     <!-- The URDF model of the robot -->
     <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>

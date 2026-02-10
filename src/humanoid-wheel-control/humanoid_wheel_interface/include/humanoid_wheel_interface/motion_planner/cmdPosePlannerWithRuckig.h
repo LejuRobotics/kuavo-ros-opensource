@@ -14,7 +14,7 @@ namespace mobile_manipulator {
 
 class cmdPosePlannerWithRuckig {
 public:
-    cmdPosePlannerWithRuckig(int dofNum = 3);
+    cmdPosePlannerWithRuckig(int dofNum, bool isSync = false);
 
     ~cmdPosePlannerWithRuckig() = default;
 
@@ -34,13 +34,33 @@ public:
     void setJerkLimits(const Eigen::VectorXd& max_jerk);
 
     // 计算轨迹, 返回预计运动时间
-    double calcTrajectory(void);
+    double calcTrajectory(double desiredTime = 0.0);
+
+    // 非同步的预设时间规划
+    double calcTrajectoryNonSync(double desiredTime);
 
     // 获取规划结果，返回是否成功
     void getTrajectoryAtTime(double time,
                              Eigen::VectorXd& position,
                              Eigen::VectorXd& velocity,
                              Eigen::VectorXd& acceleration);
+    
+    void getTrajectoryAtTimeNonSync(double time,
+                                    Eigen::VectorXd& position,
+                                    Eigen::VectorXd& velocity,
+                                    Eigen::VectorXd& acceleration);
+    
+    int getDofNum() const { return dofNum_; }
+
+    void setPlannerSyncMode(bool isSync)
+    {
+        isSync_ = isSync;
+        if (isSync) {
+            inputPtr_->synchronization = ruckig::Synchronization::Time;
+        } else {
+            inputPtr_->synchronization = ruckig::Synchronization::None;
+        }
+    }
 
 private:
     // 常规成员 
@@ -51,14 +71,24 @@ private:
     Eigen::VectorXd current_acceleration_;  // 当前加速度
 
     Eigen::VectorXd target_pose_;           // 目标位姿
-
-    double maxDuration_{0.0};               // 轨迹最大持续时间
     
     // ruckig 相关成员
-    std::vector<ruckig::InputParameter<1>> inputVec_;
-    std::vector<ruckig::Ruckig<1>> ruckigPlannerVec_;
-    std::vector<ruckig::Trajectory<1>> trajectoryVec_;
+    std::unique_ptr<ruckig::InputParameter<0>> inputPtr_;
+    std::unique_ptr<ruckig::Ruckig<0>> ruckigPlannerPtr_;
+    std::unique_ptr<ruckig::Trajectory<0>> trajectoryPtr_;
+    
+    bool isSync_{false};
+    bool isVecMode_{false};
 
+    // 用于非同步的预设时间功能，相关的成员变量
+    std::vector<ruckig::InputParameter<2>> inputVec_;
+    std::vector<ruckig::Ruckig<2>> ruckigPlannerVec_;
+    std::vector<ruckig::Trajectory<2>> trajectoryVec_;
+
+    // 保存最大最小值
+    Eigen::VectorXd minVelocity_, maxVelocity_;
+    Eigen::VectorXd minAcceleration_, maxAcceleration_;
+    Eigen::VectorXd minJerk_, maxJerk_;
 };
 
 }  // namespace mobile_manipulator

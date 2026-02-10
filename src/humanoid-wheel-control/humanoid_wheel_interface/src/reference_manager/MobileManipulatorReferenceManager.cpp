@@ -9,6 +9,7 @@
 
 #include <ocs2_core/misc/LoadData.h>
 #include <ocs2_core/misc/LinearInterpolation.h>
+#include <chrono>
 
 namespace ocs2 {
 namespace mobile_manipulator {
@@ -66,128 +67,170 @@ namespace mobile_manipulator {
     ros_logger_ = new humanoid::TopicLogger(nodeHandle_);
 
     /****************************ruckig位置规划器初始化*********************************/ 
-    int dofPose = baseDim_;
-    cmdPosePlannerRuckigPtr_ = std::make_shared<cmdPosePlannerWithRuckig>(dofPose);
-    prevTargetPose_.setZero(dofPose);
-    prevTargetVel_.setZero(dofPose);
-    prevTargetAcc_.setZero(dofPose);
-
-    Eigen::VectorXd max_velocity_ruckig, max_acceleration_ruckig, max_jerk_ruckig;
-    max_velocity_ruckig.setZero(dofPose);
-    max_acceleration_ruckig.setZero(dofPose);
-    max_jerk_ruckig.setZero(dofPose);
-    for(int i = 0; i < dofPose; i++)
+    auto createCmdPosePlanner = [&]() -> std::shared_ptr<cmdPosePlannerWithRuckig>
     {
-      max_velocity_ruckig[i] = wheel_move_spd_[i];
-      max_acceleration_ruckig[i] = wheel_move_acc_[i];
-      max_jerk_ruckig[i] = wheel_move_jerk_[i];
-    }
-    cmdPosePlannerRuckigPtr_->setVelocityLimits(max_velocity_ruckig, -max_velocity_ruckig);
-    cmdPosePlannerRuckigPtr_->setAccelerationLimits(max_acceleration_ruckig, -max_acceleration_ruckig);
-    cmdPosePlannerRuckigPtr_->setJerkLimits(max_jerk_ruckig);
+      int dofPose = baseDim_;
+      auto plannerPtr = std::make_shared<cmdPosePlannerWithRuckig>(dofPose);
+      Eigen::VectorXd max_velocity_ruckig, max_acceleration_ruckig, max_jerk_ruckig;
+      max_velocity_ruckig.setZero(dofPose);
+      max_acceleration_ruckig.setZero(dofPose);
+      max_jerk_ruckig.setZero(dofPose);
+      for(int i = 0; i < dofPose; i++)
+      {
+        max_velocity_ruckig[i] = wheel_move_spd_[i];
+        max_acceleration_ruckig[i] = wheel_move_acc_[i];
+        max_jerk_ruckig[i] = wheel_move_jerk_[i];
+      }
+      plannerPtr->setVelocityLimits(max_velocity_ruckig, -max_velocity_ruckig);
+      plannerPtr->setAccelerationLimits(max_acceleration_ruckig, -max_acceleration_ruckig);
+      plannerPtr->setJerkLimits(max_jerk_ruckig);
+      return plannerPtr;
+    };
+    cmdPosePlannerRuckigPtr_ = createCmdPosePlanner();
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createCmdPosePlanner());  // 一个世界系
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createCmdPosePlanner());  // 一个局部系
+    prevTargetPose_.setZero(baseDim_);
+    prevTargetVel_.setZero(baseDim_);
+    prevTargetAcc_.setZero(baseDim_);
     /*********************************************************************************/ 
 
     /****************************ruckig速度规划器初始化**********************************/ 
-    cmdVelPlannerRuckigPtr_ = std::make_shared<cmdVelPlannerWithRuckig>(dofPose);
-    cmdVel_prevTargetPose_.setZero(dofPose);
-    cmdVel_prevTargetVel_.setZero(dofPose);
-    cmdVel_prevTargetAcc_.setZero(dofPose);
+    Eigen::VectorXd max_acceleration_ruckig, max_jerk_ruckig;
+    max_acceleration_ruckig.setZero(baseDim_);
+    max_jerk_ruckig.setZero(baseDim_);
+    for(int i = 0; i < baseDim_; i++)
+    {
+      max_acceleration_ruckig[i] = wheel_move_acc_[i];
+      max_jerk_ruckig[i] = wheel_move_jerk_[i];
+    }
+    cmdVelPlannerRuckigPtr_ = std::make_shared<cmdVelPlannerWithRuckig>(baseDim_);
+    cmdVel_prevTargetPose_.setZero(baseDim_);
+    cmdVel_prevTargetVel_.setZero(baseDim_);
+    cmdVel_prevTargetAcc_.setZero(baseDim_);
 
     cmdVelPlannerRuckigPtr_->setAccelerationLimits(max_acceleration_ruckig, -max_acceleration_ruckig);
     cmdVelPlannerRuckigPtr_->setJerkLimits(max_jerk_ruckig);
     /*********************************************************************************/
 
-    /*******************ruckig双臂笛卡尔规划器初始化 (Zyx欧拉角)***************************/ 
-    cmdDualArmEePlannerRuckigPtr_ = std::make_shared<cmdPosePlannerWithRuckig>(info_.eeFrames.size() * 6);
-    cmdDualArm_prevTargetPose_.setZero(info_.eeFrames.size() * 6);
-    cmdDualArm_prevTargetVel_.setZero(info_.eeFrames.size() * 6);
-    cmdDualArm_prevTargetAcc_.setZero(info_.eeFrames.size() * 6);
-
-    Eigen::VectorXd max_velocity_dualArm_ruckig, max_acceleration_dualArm_ruckig, max_jerk_dualArm_ruckig;
-    max_velocity_dualArm_ruckig.setZero(info_.eeFrames.size() * 6);
-    max_acceleration_dualArm_ruckig.setZero(info_.eeFrames.size() * 6);
-    max_jerk_dualArm_ruckig.setZero(info_.eeFrames.size() * 6);
-
-    for(int i=0; i<info_.eeFrames.size(); i++)
-    {
-      max_velocity_dualArm_ruckig.segment(i*6, 6) = dualArm_move_spd_.head<6>();
-      max_acceleration_dualArm_ruckig.segment(i*6, 6) = dualArm_move_acc_.head<6>();
-      max_jerk_dualArm_ruckig.segment(i*6, 6) = dualArm_move_jerk_.head<6>();
-    }
-
-    cmdDualArmEePlannerRuckigPtr_->setVelocityLimits(max_velocity_dualArm_ruckig, -max_velocity_dualArm_ruckig);
-    cmdDualArmEePlannerRuckigPtr_->setAccelerationLimits(max_acceleration_dualArm_ruckig, -max_acceleration_dualArm_ruckig);
-    cmdDualArmEePlannerRuckigPtr_->setJerkLimits(max_jerk_dualArm_ruckig);
-    /*********************************************************************************/
-
     /*******************ruckig躯干笛卡尔规划器初始化 (自由度:x, z, yaw, pitch)***************************/ 
-    torsoPosePlannerRuckigPtr_ = std::make_shared<cmdPosePlannerWithRuckig>(4);
+    auto createTorsoPosePlanner = [&]() -> std::shared_ptr<cmdPosePlannerWithRuckig> 
+    {
+      auto plannerPtr = std::make_shared<cmdPosePlannerWithRuckig>(4, true);
+      Eigen::VectorXd max_velocity_torsoPose_ruckig, max_acceleration_torsoPose_ruckig, max_jerk_torsoPose_ruckig;
+      max_velocity_torsoPose_ruckig.setZero(4);
+      max_acceleration_torsoPose_ruckig.setZero(4);
+      max_jerk_torsoPose_ruckig.setZero(4);
+      for(int i=0; i<4; i++)
+      {
+        max_velocity_torsoPose_ruckig[i] = torsoPose_move_spd_[i];
+        max_acceleration_torsoPose_ruckig[i] = torsoPose_move_acc_[i];
+        max_jerk_torsoPose_ruckig[i] = torsoPose_move_jerk_[i];
+      }
+      plannerPtr->setVelocityLimits(max_velocity_torsoPose_ruckig, -max_velocity_torsoPose_ruckig);
+      plannerPtr->setAccelerationLimits(max_acceleration_torsoPose_ruckig, -max_acceleration_torsoPose_ruckig);
+      plannerPtr->setJerkLimits(max_jerk_torsoPose_ruckig);
+      return plannerPtr;
+    };
+    torsoPosePlannerRuckigPtr_ = createTorsoPosePlanner();
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createTorsoPosePlanner());
     torsoPose_prevTargetPose_.setZero(4);
     torsoPose_prevTargetVel_.setZero(4);
     torsoPose_prevTargetAcc_.setZero(4);
-
-    Eigen::VectorXd max_velocity_torsoPose_ruckig, max_acceleration_torsoPose_ruckig, max_jerk_torsoPose_ruckig;
-    max_velocity_torsoPose_ruckig.setZero(4);
-    max_acceleration_torsoPose_ruckig.setZero(4);
-    max_jerk_torsoPose_ruckig.setZero(4);
-
-    for(int i=0; i<4; i++)
-    {
-      max_velocity_torsoPose_ruckig[i] = torsoPose_move_spd_[i];
-      max_acceleration_torsoPose_ruckig[i] = torsoPose_move_acc_[i];
-      max_jerk_torsoPose_ruckig[i] = torsoPose_move_jerk_[i];
-    }
-
-    torsoPosePlannerRuckigPtr_->setVelocityLimits(max_velocity_torsoPose_ruckig, -max_velocity_torsoPose_ruckig);
-    torsoPosePlannerRuckigPtr_->setAccelerationLimits(max_acceleration_torsoPose_ruckig, -max_acceleration_torsoPose_ruckig);
-    torsoPosePlannerRuckigPtr_->setJerkLimits(max_jerk_torsoPose_ruckig);
     /*********************************************************************************/
 
     /********************ruckig下肢关节规划器初始化 (单位: 弧度)***************************/
-    legJointPlannerRuckigPtr_ = std::make_shared<cmdPosePlannerWithRuckig>(4);
+    auto createLegJointPlanner = [&]() -> std::shared_ptr<cmdPosePlannerWithRuckig> 
+    {
+      auto plannerPtr = std::make_shared<cmdPosePlannerWithRuckig>(4, true);
+      Eigen::VectorXd max_velocity_legJoint_ruckig, max_acceleration_legJoint_ruckig, max_jerk_legJoint_ruckig;
+      max_velocity_legJoint_ruckig.setZero(4);
+      max_acceleration_legJoint_ruckig.setZero(4);
+      max_jerk_legJoint_ruckig.setZero(4);
+      for(int i=0; i<4; i++)
+      {
+        max_velocity_legJoint_ruckig.segment(i, 1) = legJoint_move_spd_.head<1>();
+        max_acceleration_legJoint_ruckig.segment(i, 1) = legJoint_move_acc_.head<1>();
+        max_jerk_legJoint_ruckig.segment(i, 1) = legJoint_move_jerk_.head<1>();
+      }
+      plannerPtr->setVelocityLimits(max_velocity_legJoint_ruckig, -max_velocity_legJoint_ruckig);
+      plannerPtr->setAccelerationLimits(max_acceleration_legJoint_ruckig, -max_acceleration_legJoint_ruckig);
+      plannerPtr->setJerkLimits(max_jerk_legJoint_ruckig);
+      return plannerPtr;
+    };
+    legJointPlannerRuckigPtr_ = createLegJointPlanner();
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createLegJointPlanner());
     legJoint_prevTargetPose_.setZero(4);
     legJoint_prevTargetVel_.setZero(4);
     legJoint_prevTargetAcc_.setZero(4);
+    /*********************************************************************************/
 
-    Eigen::VectorXd max_velocity_legJoint_ruckig, max_acceleration_legJoint_ruckig, max_jerk_legJoint_ruckig;
-    max_velocity_legJoint_ruckig.setZero(4);
-    max_acceleration_legJoint_ruckig.setZero(4);
-    max_jerk_legJoint_ruckig.setZero(4);
-
-    for(int i=0; i<4; i++)
+    /*******************ruckig双臂笛卡尔规划器初始化 (Zyx欧拉角)***************************/ 
+    auto createDualArmEePlanner = [&]() -> std::shared_ptr<cmdPosePlannerWithRuckig> 
     {
-      max_velocity_legJoint_ruckig.segment(i, 1) = legJoint_move_spd_.head<1>();
-      max_acceleration_legJoint_ruckig.segment(i, 1) = legJoint_move_acc_.head<1>();
-      max_jerk_legJoint_ruckig.segment(i, 1) = legJoint_move_jerk_.head<1>();
-    }
-
-    legJointPlannerRuckigPtr_->setVelocityLimits(max_velocity_legJoint_ruckig, -max_velocity_legJoint_ruckig);
-    legJointPlannerRuckigPtr_->setAccelerationLimits(max_acceleration_legJoint_ruckig, -max_acceleration_legJoint_ruckig);
-    legJointPlannerRuckigPtr_->setJerkLimits(max_jerk_legJoint_ruckig);
+      auto plannerPtr = std::make_shared<cmdPosePlannerWithRuckig>(info_.eeFrames.size() * 6, true);
+      Eigen::VectorXd max_velocity_dualArm_ruckig, max_acceleration_dualArm_ruckig, max_jerk_dualArm_ruckig;
+      max_velocity_dualArm_ruckig.setZero(info_.eeFrames.size() * 6);
+      max_acceleration_dualArm_ruckig.setZero(info_.eeFrames.size() * 6);
+      max_jerk_dualArm_ruckig.setZero(info_.eeFrames.size() * 6);
+      for(int i=0; i<info_.eeFrames.size(); i++)
+      {
+        max_velocity_dualArm_ruckig.segment(i*6, 6) = dualArm_move_spd_.head<6>();
+        max_acceleration_dualArm_ruckig.segment(i*6, 6) = dualArm_move_acc_.head<6>();
+        max_jerk_dualArm_ruckig.segment(i*6, 6) = dualArm_move_jerk_.head<6>();
+      }
+      plannerPtr->setVelocityLimits(max_velocity_dualArm_ruckig, -max_velocity_dualArm_ruckig);
+      plannerPtr->setAccelerationLimits(max_acceleration_dualArm_ruckig, -max_acceleration_dualArm_ruckig);
+      plannerPtr->setJerkLimits(max_jerk_dualArm_ruckig);
+      return plannerPtr;
+    };
+    cmdDualArmEePlannerRuckigPtr_ = createDualArmEePlanner();
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createDualArmEePlanner());  // 一个世界系
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createDualArmEePlanner());  // 一个局部系
+    cmdDualArm_prevTargetPose_.setZero(info_.eeFrames.size() * 6);
+    cmdDualArm_prevTargetVel_.setZero(info_.eeFrames.size() * 6);
+    cmdDualArm_prevTargetAcc_.setZero(info_.eeFrames.size() * 6);
     /*********************************************************************************/
 
     /********************ruckig上肢关节规划器初始化 (单位: 弧度)***************************/
-    armJointPlannerRuckigPtr_ = std::make_shared<cmdPosePlannerWithRuckig>(info_.armDim - 4);
-    armJoint_prevTargetPose_.setZero(info_.armDim - 4);
-    armJoint_prevTargetPose_.setZero(info_.armDim - 4);
-    armJoint_prevTargetPose_.setZero(info_.armDim - 4);
-
-    Eigen::VectorXd max_velocity_armJoint_ruckig, max_acceleration_armJoint_ruckig, max_jerk_armJoint_ruckig;
-    max_velocity_armJoint_ruckig.setZero(info_.armDim - 4);
-    max_acceleration_armJoint_ruckig.setZero(info_.armDim - 4);
-    max_jerk_armJoint_ruckig.setZero(info_.armDim - 4);
-
-    for(int i=0; i<info_.armDim - 4; i++)
+    auto createArmJointPlanner = [&]() -> std::shared_ptr<cmdPosePlannerWithRuckig> 
     {
-      max_velocity_armJoint_ruckig.segment(i, 1) = armJoint_move_spd_.head<1>();
-      max_acceleration_armJoint_ruckig.segment(i, 1) = armJoint_move_acc_.head<1>();
-      max_jerk_armJoint_ruckig.segment(i, 1) = armJoint_move_jerk_.head<1>();
-    }
-
-    armJointPlannerRuckigPtr_->setVelocityLimits(max_velocity_armJoint_ruckig, -max_velocity_armJoint_ruckig);
-    armJointPlannerRuckigPtr_->setAccelerationLimits(max_acceleration_armJoint_ruckig, -max_acceleration_armJoint_ruckig);
-    armJointPlannerRuckigPtr_->setJerkLimits(max_jerk_armJoint_ruckig);
+      auto plannerPtr = std::make_shared<cmdPosePlannerWithRuckig>(info_.armDim - 4, true);
+      Eigen::VectorXd max_velocity_armJoint_ruckig, max_acceleration_armJoint_ruckig, max_jerk_armJoint_ruckig;
+      max_velocity_armJoint_ruckig.setZero(info_.armDim - 4);
+      max_acceleration_armJoint_ruckig.setZero(info_.armDim - 4);
+      max_jerk_armJoint_ruckig.setZero(info_.armDim - 4);
+      for(int i=0; i<info_.armDim - 4; i++)
+      {
+        max_velocity_armJoint_ruckig.segment(i, 1) = armJoint_move_spd_.head<1>();
+        max_acceleration_armJoint_ruckig.segment(i, 1) = armJoint_move_acc_.head<1>();
+        max_jerk_armJoint_ruckig.segment(i, 1) = armJoint_move_jerk_.head<1>();
+      }
+      plannerPtr->setVelocityLimits(max_velocity_armJoint_ruckig, -max_velocity_armJoint_ruckig);
+      plannerPtr->setAccelerationLimits(max_acceleration_armJoint_ruckig, -max_acceleration_armJoint_ruckig);
+      plannerPtr->setJerkLimits(max_jerk_armJoint_ruckig);
+      return plannerPtr;
+    };
+    armJointPlannerRuckigPtr_ = createArmJointPlanner();
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createArmJointPlanner());
+    armJoint_prevTargetPose_.setZero(info_.armDim - 4);
+    armJoint_prevTargetPose_.setZero(info_.armDim - 4);
+    armJoint_prevTargetPose_.setZero(info_.armDim - 4);
     /*********************************************************************************/
+
+    /******************** 时间调度器初始化相关 ***************************/
+    isTimedPlannerUpdated_.resize(timedPlannerScheduler_.getPlannersNum(), false);
+    desireTime_.resize(timedPlannerScheduler_.getPlannersNum(), 0.0);
+    timedCmdVec_.resize(timedPlannerScheduler_.getPlannersNum());
+    for (size_t i = 0; i < timedPlannerScheduler_.getPlannersNum(); ++i) {
+        timedCmdVecMtx_.push_back(std::make_unique<std::mutex>());
+    }
+    timedPlannerScheduler_.setDiffDt(ruckigDt_);
+    /******************************************************************/
+
+    /************************躯干重置的参数相关*******************************/
+    torsoResetMaxVel_.setZero(6);
+    torsoResetMaxVel_ << 0.2, 0.2, 0.2, 1.047, 1.047, 1.047;
+    /**********************************************************************/
   }
 
   void MobileManipulatorReferenceManager::loadParamFromTaskFile(void)
@@ -270,16 +313,24 @@ namespace mobile_manipulator {
     std::vector<double> initialStateVector;
     while (!input_nh.hasParam("/robot_init_state_param"))
     {
-        ROS_INFO("Waiting for '/robot_init_state_param' parameter to be set...");
+        static bool first = true;
+        if(first)
+        {
+          ROS_INFO("Waiting for '/robot_init_state_param' parameter to be set...");
+          first = false;
+        } 
         ros::Duration(0.2).sleep(); // 等待1秒后再次尝试
     }
     input_nh.getParam("/robot_init_state_param", initialStateVector);
+    ROS_INFO("Set '/robot_init_state_param' parameter success !!!");
 
     Eigen::VectorXd initialState(initialStateVector.size());
     for (size_t i = 0; i < initialStateVector.size(); ++i)
     {
         initialState(i) = initialStateVector[i];
     }
+
+    std::cout << "[MobileManipulatorReferenceManager] robot_init_state_param: " << initialState.transpose() << std::endl;
 
     arm_init_joint_traj_ = initialState.segment(7 + 4, info_.armDim - 4);   // 从初始获取手臂期望
 
@@ -299,6 +350,21 @@ namespace mobile_manipulator {
                                                            &MobileManipulatorReferenceManager::armControlModeSrvCallback, this);
     get_arm_control_mode_service_ = nodeHandle_.advertiseService("/humanoid_get_arm_ctrl_mode", 
                                                            &MobileManipulatorReferenceManager::getArmControlModeCallback, this);
+    // 设置各 ruckigPlanner 的参数的服务
+    setRuckigPlannerParamsServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_set_ruckig_planner_params", 
+                                                           &MobileManipulatorReferenceManager::setRuckigPlannerParamsService, this);
+    // 设置获取躯干初始位姿服务
+    getLbTorsoInitialPoseServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_get_torso_initial_pose", 
+                                                           &MobileManipulatorReferenceManager::getLbTorsoInitialPoseService, this);
+    
+    // 设置基于时间的指令服务
+    setLbTimedPosCmdServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_timed_single_cmd", 
+                                                           &MobileManipulatorReferenceManager::setLbTimedPosCmdService, this);
+    
+    // 设置重置躯干指令
+    resetTorsoStatusServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_reset_torso", 
+                                                           &MobileManipulatorReferenceManager::setLbResetTorsoService, this);
+
 
     auto targetVelocityCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
@@ -330,6 +396,7 @@ namespace mobile_manipulator {
     {
       cmdTorsoPose_mtx_.lock();
       isCmdTorsoPoseUpdated_ = true;
+      cmdTorsoPoseDesiredTime_ = 0.0;
       cmdTorsoPose_[0] = msg->linear.x;
       cmdTorsoPose_[1] = msg->linear.y;
       cmdTorsoPose_[2] = msg->linear.z;
@@ -348,6 +415,7 @@ namespace mobile_manipulator {
     {
       cmdPose_mtx_.lock();
       isCmdPoseUpdated_ = true;
+      cmdPoseDesiredTime_ = 0.0;
       cmdPose_[0] = msg->linear.x;
       cmdPose_[1] = msg->linear.y;
       cmdPose_[2] = msg->angular.z;
@@ -361,6 +429,7 @@ namespace mobile_manipulator {
     {
       cmdPoseWorld_mtx_.lock();
       isCmdPoseWorldUpdated_ = true;
+      cmdPoseDesiredTime_ = 0.0;
       cmdPoseWorld_[0] = msg->linear.x;
       cmdPoseWorld_[1] = msg->linear.y;
       cmdPoseWorld_[2] = msg->angular.z;
@@ -384,42 +453,50 @@ namespace mobile_manipulator {
 
       armPose_mtx_.lock();
       
-      isCmdDualArmPoseUpdated_ = true;
-      // 解析左臂位姿 (x,y,z,qx,qy,qz,qw)
-      left_arm_traj_pose_ = vector_t::Zero(7);
-      left_arm_traj_pose_[0] = msg->hand_poses.left_pose.pos_xyz[0];  // x
-      left_arm_traj_pose_[1] = msg->hand_poses.left_pose.pos_xyz[1];  // y
-      left_arm_traj_pose_[2] = msg->hand_poses.left_pose.pos_xyz[2];  // z
-      left_arm_traj_pose_[3] = msg->hand_poses.left_pose.quat_xyzw[0]; // qx
-      left_arm_traj_pose_[4] = msg->hand_poses.left_pose.quat_xyzw[1]; // qy
-      left_arm_traj_pose_[5] = msg->hand_poses.left_pose.quat_xyzw[2]; // qz
-      left_arm_traj_pose_[6] = msg->hand_poses.left_pose.quat_xyzw[3]; // qw
-      
-      // 解析右臂位姿 (x,y,z,qx,qy,qz,qw)
-      right_arm_traj_pose_ = vector_t::Zero(7);
-      right_arm_traj_pose_[0] = msg->hand_poses.right_pose.pos_xyz[0];  // x
-      right_arm_traj_pose_[1] = msg->hand_poses.right_pose.pos_xyz[1];  // y
-      right_arm_traj_pose_[2] = msg->hand_poses.right_pose.pos_xyz[2];  // z
-      right_arm_traj_pose_[3] = msg->hand_poses.right_pose.quat_xyzw[0]; // qx
-      right_arm_traj_pose_[4] = msg->hand_poses.right_pose.quat_xyzw[1]; // qy
-      right_arm_traj_pose_[5] = msg->hand_poses.right_pose.quat_xyzw[2]; // qz
-      right_arm_traj_pose_[6] = msg->hand_poses.right_pose.quat_xyzw[3]; // qw
-
-      if(msg->hand_poses.left_pose.joint_angles.size() != 7 || msg->hand_poses.right_pose.joint_angles.size() != 7)
+      if(desireMode_ == LbArmControlMode::WorldFrame || desireMode_ == LbArmControlMode::LocalFrame)
       {
-        ROS_ERROR("Left or right arm joint angles size is not 7");
-        return;
-      }
+        isCmdDualArmPoseUpdated_ = true;
+        cmdDualArmPoseDesiredTime_ = 0.0;
+        
+        if(msg->hand_poses.left_pose.joint_angles.size() != 7 || msg->hand_poses.right_pose.joint_angles.size() != 7)
+        {
+          ROS_ERROR("Left or right arm joint angles size is not 7");
+          armPose_mtx_.unlock();
+          return;
+        }
 
-      for (size_t i = 0; i < msg->hand_poses.left_pose.joint_angles.size(); ++i)
-      {
-        left_arm_joint_traj_[i] = msg->hand_poses.left_pose.joint_angles[i] * M_PI / 180.0; // 转换为弧度
-        right_arm_joint_traj_[i] = msg->hand_poses.right_pose.joint_angles[i] * M_PI / 180.0; // 转换为弧度
+        // 解析左臂位姿 (x,y,z,qx,qy,qz,qw)
+        left_arm_traj_pose_ = vector_t::Zero(7);
+        left_arm_traj_pose_[0] = msg->hand_poses.left_pose.pos_xyz[0];  // x
+        left_arm_traj_pose_[1] = msg->hand_poses.left_pose.pos_xyz[1];  // y
+        left_arm_traj_pose_[2] = msg->hand_poses.left_pose.pos_xyz[2];  // z
+        left_arm_traj_pose_[3] = msg->hand_poses.left_pose.quat_xyzw[0]; // qx
+        left_arm_traj_pose_[4] = msg->hand_poses.left_pose.quat_xyzw[1]; // qy
+        left_arm_traj_pose_[5] = msg->hand_poses.left_pose.quat_xyzw[2]; // qz
+        left_arm_traj_pose_[6] = msg->hand_poses.left_pose.quat_xyzw[3]; // qw
+        
+        // 解析右臂位姿 (x,y,z,qx,qy,qz,qw)
+        right_arm_traj_pose_ = vector_t::Zero(7);
+        right_arm_traj_pose_[0] = msg->hand_poses.right_pose.pos_xyz[0];  // x
+        right_arm_traj_pose_[1] = msg->hand_poses.right_pose.pos_xyz[1];  // y
+        right_arm_traj_pose_[2] = msg->hand_poses.right_pose.pos_xyz[2];  // z
+        right_arm_traj_pose_[3] = msg->hand_poses.right_pose.quat_xyzw[0]; // qx
+        right_arm_traj_pose_[4] = msg->hand_poses.right_pose.quat_xyzw[1]; // qy
+        right_arm_traj_pose_[5] = msg->hand_poses.right_pose.quat_xyzw[2]; // qz
+        right_arm_traj_pose_[6] = msg->hand_poses.right_pose.quat_xyzw[3]; // qw
       }
 
       if(desireMode_ == LbArmControlMode::JointSpace) //进行关节控制时, 进行慢速稳定控制
       {
+        for (size_t i = 0; i < msg->hand_poses.left_pose.joint_angles.size(); ++i)
+        {
+          left_arm_joint_traj_[i] = msg->hand_poses.left_pose.joint_angles[i] * M_PI / 180.0; // 转换为弧度
+          right_arm_joint_traj_[i] = msg->hand_poses.right_pose.joint_angles[i] * M_PI / 180.0; // 转换为弧度
+        }
+
         enableQuickJointControl_ = false;
+        isCmdArmJointUpdated_ = true;   // 触发关节指令规划
+        cmdArmJointDesiredTime_ = 0.0;
       }
       
       armPose_mtx_.unlock();
@@ -445,6 +522,9 @@ namespace mobile_manipulator {
       enableQuickJointControl_ = true;  // 使用该话题时，可以选择触发wbc独立控制的服务
       
       armJoint_mtx_.unlock();
+
+      cmdArmJointDesiredTime_ = 0.0;
+      isCmdArmJointUpdated_ = true;   // 触发关节指令规划
     };
     arm_joint_traj_sub_ = nodeHandle_.subscribe<sensor_msgs::JointState>("/kuavo_arm_traj", 10, armJointTrajCallback);
 
@@ -467,12 +547,21 @@ namespace mobile_manipulator {
       {
         lb_leg_traj_[i] = msg->position[i] * M_PI / 180.0; // 转换为弧度
       }
-      
+      cmdLegJointDesiredTime_ = 0.0;
       lbLegJoint_mtx_.unlock();
 
       isCmdLegJointUpdated_ = true;
     };
     lb_leg_joint_traj_sub_ = nodeHandle_.subscribe<sensor_msgs::JointState>("/lb_leg_traj", 10, lbLegJointTrajCallback);
+
+    // 设置笛卡尔跟踪 focus 躯干还是末端
+    auto setFocusEeCallback = [this](const std_msgs::Bool::ConstPtr &msg)
+    {
+      bool flag = msg->data;
+      setIsFocusEeStatus(flag);
+      ROS_INFO_STREAM("[setFocusEeCallback] focus_ee: [ " << flag << " ]");
+    };
+    set_focus_ee_sub_ = nodeHandle_.subscribe<std_msgs::Bool>("/mobile_manipulator_focus_ee", 10, setFocusEeCallback);
 
     targetLegJointReachTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/lb_leg_joint_reach_time", 10, false);
 
@@ -481,6 +570,9 @@ namespace mobile_manipulator {
 
     // 发布轮臂MPC的约束使用情况
     mpcConstraintUsagePub_ = nodeHandle_.advertise<std_msgs::Int8MultiArray>("/mobile_manipulator/lb_mpc_constraint_usage", 10, false);
+
+    // 发布在modifyReference函数消耗的时间
+    modifyReferenceTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/mobile_manipulator/lb_mpc_modify_ref_use_time", 10, false);
   }
 
   // 获取第一次的目标轨迹，并分配到不同的约束轨迹，后续添加额外约束, 也需要在此初始化
@@ -585,12 +677,84 @@ namespace mobile_manipulator {
     return pose6D;
   }
 
+  vector_t MobileManipulatorReferenceManager::targetTorsoTrajToPose6DContinous(const TargetTrajectories& Traj, scalar_t initTime)
+  {
+    const auto& timeTraj = Traj.timeTrajectory;
+    const auto& stateTraj = Traj.stateTrajectory;
+
+    vector_t position;
+    Eigen::Quaterniond orientation;
+
+    if (stateTraj.size() > 1) {
+      // Normal interpolation case
+      int index;
+      scalar_t alpha;
+      std::tie(index, alpha) = LinearInterpolation::timeSegment(initTime, timeTraj);
+
+      const auto& lhs = stateTraj[index].head(7);
+      const auto& rhs = stateTraj[index + 1].head(7);
+      const Eigen::Quaterniond q_lhs(lhs.tail<4>());
+      const Eigen::Quaterniond q_rhs(rhs.tail<4>());
+
+      position = alpha * lhs.head(3) + (1.0 - alpha) * rhs.head(3);
+      orientation = q_lhs.slerp((1.0 - alpha), q_rhs);
+    } else {  // stateTrajectory.size() == 1
+      position = stateTraj.front().head(7).head(3);
+      orientation = Eigen::Quaterniond(stateTraj.front().head(7).tail<4>());
+    }
+
+    // 使用连续欧拉角跟踪器获取无跳变的ZYX欧拉角
+    static ContinuousEulerAnglesFromMatrix eulerUnwrapper;
+    Eigen::Vector3d zyx = eulerUnwrapper.update(orientation);
+    
+    vector_t torsoPose6D = vector_t::Zero(6);
+    torsoPose6D << position, zyx;
+
+    return torsoPose6D;
+  }
+
+  vector_t MobileManipulatorReferenceManager::targetEeTrajToPose6DContinous(const TargetTrajectories& Traj, scalar_t initTime, int eeInx)
+  {
+    const auto& timeTraj = Traj.timeTrajectory;
+    const auto& stateTraj = Traj.stateTrajectory;
+
+    vector_t position;
+    Eigen::Quaterniond orientation;
+
+    if (stateTraj.size() > 1) {
+      // Normal interpolation case
+      int index;
+      scalar_t alpha;
+      std::tie(index, alpha) = LinearInterpolation::timeSegment(initTime, timeTraj);
+
+      const auto& lhs = stateTraj[index].head(7);
+      const auto& rhs = stateTraj[index + 1].head(7);
+      const Eigen::Quaterniond q_lhs(lhs.tail<4>());
+      const Eigen::Quaterniond q_rhs(rhs.tail<4>());
+
+      position = alpha * lhs.head(3) + (1.0 - alpha) * rhs.head(3);
+      orientation = q_lhs.slerp((1.0 - alpha), q_rhs);
+    } else {  // stateTrajectory.size() == 1
+      position = stateTraj.front().head(7).head(3);
+      orientation = Eigen::Quaterniond(stateTraj.front().head(7).tail<4>());
+    }
+
+    // 使用连续欧拉角跟踪器获取无跳变的ZYX欧拉角
+    static std::vector<ContinuousEulerAnglesFromMatrix> eulerUnwrapper(info_.eeFrames.size());
+    Eigen::Vector3d zyx = eulerUnwrapper[eeInx].update(orientation);
+
+    vector_t pose6D = vector_t::Zero(6);
+    pose6D << position, zyx;
+
+    return pose6D;
+  }
+
   void MobileManipulatorReferenceManager::publishTargetTrajectoriesNear(scalar_t initTime)
   {
     ros_logger_->publishVector("mobile_manipulator/currentMpcTarget/state", stateInputTargetTrajectories_.getDesiredState(initTime));
     ros_logger_->publishVector("mobile_manipulator/currentMpcTarget/input", stateInputTargetTrajectories_.getDesiredInput(initTime));
 
-    vector_t torsoTraj = targetTrajToPose6D(torsoTargetTrajectories_, initTime);
+    vector_t torsoTraj = targetTorsoTrajToPose6DContinous(torsoTargetTrajectories_, initTime);
     ros_logger_->publishVector("mobile_manipulator/torso_target_6D", torsoTraj);
  
     std::vector<TargetTrajectories> dualArmEeTraj;
@@ -603,7 +767,7 @@ namespace mobile_manipulator {
       {
         dualArmEeTraj[i].stateTrajectory[j] = eeTargetTrajectories_.stateTrajectory[j].segment<7>(i*7);
       }
-      vector_t armEeTraj = targetTrajToPose6D(dualArmEeTraj[i], initTime);
+      vector_t armEeTraj = targetEeTrajToPose6DContinous(dualArmEeTraj[i], initTime, i);
       ros_logger_->publishVector("mobile_manipulator/ee_target_6D/point" + std::to_string(i), armEeTraj);
     }
   }
@@ -611,6 +775,24 @@ namespace mobile_manipulator {
   void MobileManipulatorReferenceManager::modifyReferences(scalar_t initTime, scalar_t finalTime, const vector_t& initState, TargetTrajectories& targetTrajectories,
                                 ModeSchedule& modeSchedule)
   {
+    // 更新形参作为全局变量
+    initTime_ = initTime;
+    finalTime_ = finalTime;
+    initState_ = initState;
+    // 底盘状态采用期望, 避免模式切换时滑动
+    initState_.head(baseDim_) = stateInputTargetTrajectories_.getDesiredState(initTime).head(baseDim_); 
+    
+    /************************************ 更新状态差分 **************************************/
+    Eigen::VectorXd dState, ddState;
+    static CentralDifferenceDifferentiator stateDiff;
+    static double stateDiffTime;
+    stateDiffTime += ruckigDt_;   // 采用稳定的时间步长进行差分
+    stateDiff.differentiate(initState_, stateDiffTime, dState, ddState);
+    /**************************************************************************************/
+
+    // 获取开始时间点
+    auto startTime = std::chrono::system_clock::now();
+
     // 第一次进入，需要对原始轨迹数据进行初始化
     static bool firstRun{true};
     if(firstRun)
@@ -621,34 +803,46 @@ namespace mobile_manipulator {
       getFirstTargetTrajectories(targetTrajectories);
       firstRun = false;
     }
+
+    // 更新当前状态
+    updateTimedSchedulerCurrentState(initTime_, initState_);
+
+    // 更新当前期望
+    updateTimedSchedulerTargetTraj();
     
     // 获取当前控制模式
-    controlMode_mtx_.lock();
-    int currentMode = currentMpcControlMode_;
-    controlMode_mtx_.unlock();
+    // controlMode_mtx_.lock();
+    // int currentMode = currentMpcControlMode_;
+    // controlMode_mtx_.unlock();
 
     // 判断模式是否发生切换，切换则使能切换标志
-    bool isChange = getControlModeIsChange(currentMode);
+    static bool isChange{false}; // = getControlModeIsChange(currentMode);
 
-    switch(currentMode) // 0: NoControl, 1: ArmOnly, 2: BaseOnly, 3: BaseArm
-    {
-      case MpcControlMode::NoControl: 
-        updateNoControl(initTime, targetTrajectories, isChange); break;           // 模式0: 使用上层下发的 targetTrajectories, 
+    // switch(currentMode) // 0: NoControl, 1: ArmOnly, 2: BaseOnly, 3: BaseArm
+    // {
+    //   case MpcControlMode::NoControl: 
+    //     // updateNoControl(initTime, targetTrajectories, isChange); break;           // 模式0: 使用上层下发的 targetTrajectories, 
 
-      case MpcControlMode::ArmOnly:   
-        updateArmOnlyControl(initTime, finalTime, initState, isChange); break;               // 模式1: 关节可动, 底盘锁住
+    //   case MpcControlMode::ArmOnly:   
+    //     // updateArmOnlyControl(initTime, finalTime, initState, isChange); break;               // 模式1: 关节可动, 底盘锁住
 
-      case MpcControlMode::BaseOnly:  
-        updateBaseOnlyControl(initTime, finalTime, initState, isChange); break;   // 模式2: 底盘可动, 下肢和手臂锁住
+    //   case MpcControlMode::BaseOnly:  
+    //     // updateBaseOnlyControl(initTime, finalTime, initState, isChange); break;   // 模式2: 底盘可动, 下肢和手臂锁住
 
-      case MpcControlMode::BaseArm:   
-        updateBaseArmControl(initTime, finalTime, initState, isChange); break;    // 模式3: 必须控制底盘, 手臂支持局部系和世界系笛卡尔和关节两种轨迹
+      // 确认是否需要重置
+      if(isResetTorso_)
+      {
+        resetAllMpcTrajAndTarget(initTime, initState_);
+        isResetTorso_ = false;
+      }
+      // case MpcControlMode::BaseArm:   
+      updateBaseArmControl(initTime, finalTime, initState_, isChange);   // 模式3: 必须控制底盘, 手臂支持局部系和世界系笛卡尔和关节两种轨迹
         
-      case MpcControlMode::ArmEeOnly: 
-        updateArmEeOnlyControl(initTime, finalTime, initState, isChange); break;             // 模式4: 底盘随末端移动, 不可控制, 手臂支持世界系笛卡尔轨迹
+      // case MpcControlMode::ArmEeOnly: 
+      //   updateArmEeOnlyControl(initTime, finalTime, initState, isChange); break;             // 模式4: 底盘随末端移动, 不可控制, 手臂支持世界系笛卡尔轨迹
         
-      default: std::cout << "设置了错误的控制模式, 请检查!!" << std::endl;
-    }
+    //   default: std::cout << "设置了错误的控制模式, 请检查!!" << std::endl;
+    // }
 
     // 对多个轨迹进行裁剪, 删除之前无效的轨迹
     trimTargetTrajectoriesBeforeTime(initTime);
@@ -658,7 +852,7 @@ namespace mobile_manipulator {
 
     // 发布当前MPC控制模式
     std_msgs::Int8 modeMsg;
-    modeMsg.data = currentMode;
+    modeMsg.data = MpcControlMode::BaseArm;
     mpcControlModePub_.publish(modeMsg);
 
     // 发布mpc使能各约束的标志, 按底盘, 下肢关节, 躯干, 手臂关节, 手臂末端轨迹顺序
@@ -672,10 +866,26 @@ namespace mobile_manipulator {
     constraintUsageVec.push_back(getEnableEeTargetLocalTrajectories() ? 1 : 0);
     constraintUsageMsg.data = constraintUsageVec;
     mpcConstraintUsagePub_.publish(constraintUsageMsg);
+
+    // 获取结束时间点
+    auto endTime = std::chrono::system_clock::now();
+
+    // state
+    ros_logger_->publishVector("/mobile_manipulator/initState_state", initState_);
+    ros_logger_->publishVector("/mobile_manipulator/initState_dState", dState);
+    ros_logger_->publishVector("/mobile_manipulator/initState_ddState", ddState);
+
+    publishMultiPointPose_World(initState_);
+    publishMultiPointPose_Local(initState_);
+
+    // 发布 modifyReference 消耗时间，单位: 毫秒
+    std_msgs::Float32 cntTimeMsg;
+    cntTimeMsg.data = std::chrono::duration<double, std::milli>(endTime - startTime).count();
+    modifyReferenceTimePub_.publish(cntTimeMsg);
   }
 
   // 本体系的末端ruckig轨迹生成
-  void MobileManipulatorReferenceManager::calcRuckigTrajWithEePose(double initTime, const vector_t &targetArmEePose)
+  void MobileManipulatorReferenceManager::calcRuckigTrajWithEePose(double initTime, const vector_t &targetArmEePose, double desiredTime)
   {
     assert(targetArmEePose.size() == info_.eeFrames.size() * 7 && "dualArmPose dimension must be info_.eeFrames.size() * 7!");
 
@@ -693,7 +903,7 @@ namespace mobile_manipulator {
     cmdDualArmEePlannerRuckigPtr_->setCurrentAcceleration(cmdDualArm_prevTargetAcc_);
 
     cmdDualArmEePlannerRuckigPtr_->setTargetPose(target6DEePose);
-    double durationTime = cmdDualArmEePlannerRuckigPtr_->calcTrajectory();
+    double durationTime = cmdDualArmEePlannerRuckigPtr_->calcTrajectory(desiredTime);
    
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
@@ -719,7 +929,7 @@ namespace mobile_manipulator {
     for(int i=0; i<timeIncrement; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度（双臂轨迹）
-      double currentTime = initTime + i * dt;
+      double currentTime = initTime + (i+1) * dt;
 
       cmdDualArmEePlannerRuckigPtr_->getTrajectoryAtTime(currentTime - cmdDualArm_plannerInitialTime_, 
                                                          currentTargetPose, currentTargetVel, currentTargetAcc);
@@ -755,29 +965,27 @@ namespace mobile_manipulator {
   // 重置双臂末端Zyx插值器的初值
   void MobileManipulatorReferenceManager::resetDualArmRuckig(double initTime, const vector_t& initState, bool rePlanning, LbArmControlMode desireMode)
   {
-    vector_t currentEePose = vector_t::Zero(info_.eeFrames.size() * 7);
+    Eigen::VectorXd currentEePose, currentEeVel, currentEeAcc;
 
     switch (desireMode)
     {
-      case LbArmControlMode::WorldFrame: getCurrentEeWorldPose(currentEePose, initState); break;
-      case LbArmControlMode::LocalFrame: getCurrentEeBasePose(currentEePose, initState); break;
+      case LbArmControlMode::WorldFrame: 
+        timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD, 
+                                                     currentEePose, currentEeVel, currentEeAcc);
+        break;
+      case LbArmControlMode::LocalFrame: 
+        timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD, 
+                                                     currentEePose, currentEeVel, currentEeAcc);
+        break;
       case LbArmControlMode::JointSpace: return;
       default:
         std::cerr << "[resetDualArmRuckig] 不支持该模式的末端轨迹生成, 返回" << std::endl;
         return;
     }
 
-    vector_t cur6DEePose = vector_t::Zero(info_.eeFrames.size() * 6);
-    for(int i=0; i<info_.eeFrames.size(); i++)
-    {
-      // 当前末端执行器位姿转换为6D表示
-      cur6DEePose.segment(i*6, 3) = currentEePose.segment(i*7, 3);
-      cur6DEePose.segment(i*6 + 3, 3) = quatToZyx(Eigen::Quaterniond(currentEePose.segment<4>(i*7 + 3)));
-    }
-
-    cmdDualArm_prevTargetPose_ = cur6DEePose;
-    cmdDualArm_prevTargetVel_.setZero(info_.eeFrames.size() * 6);
-    cmdDualArm_prevTargetAcc_.setZero(info_.eeFrames.size() * 6);
+    cmdDualArm_prevTargetPose_ = currentEePose;
+    cmdDualArm_prevTargetVel_ = currentEeVel;
+    cmdDualArm_prevTargetAcc_ = currentEeAcc;
 
     if(rePlanning)
     {
@@ -791,7 +999,7 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose)
+  void MobileManipulatorReferenceManager::calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose, double desiredTime)
   {
     assert(targetTorsoPose.size() == 4 && "torsoPose dimension must be 4!");
 
@@ -801,7 +1009,7 @@ namespace mobile_manipulator {
     torsoPosePlannerRuckigPtr_->setCurrentAcceleration(torsoPose_prevTargetAcc_);
 
     torsoPosePlannerRuckigPtr_->setTargetPose(targetTorsoPose);
-    double durationTime = torsoPosePlannerRuckigPtr_->calcTrajectory();
+    double durationTime = torsoPosePlannerRuckigPtr_->calcTrajectory(desiredTime);
 
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
@@ -826,7 +1034,7 @@ namespace mobile_manipulator {
     for(int i=0; i<timeIncrement; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度
-      double currentTime = initTime + i * dt;
+      double currentTime = initTime + (i+1) * dt;
 
       torsoPosePlannerRuckigPtr_->getTrajectoryAtTime(currentTime - torsoPose_plannerInitialTime_, 
                                                       currentTargetPose_torso, 
@@ -868,16 +1076,10 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::resetTorsoPoseRuckig(double initTime, const vector_t& initState, bool rePlanning)
   {
-    vector_t currentTorsoPose = vector_t::Zero(7);
-    getCurrentTorsoPoseInBase(currentTorsoPose, initState);
-    Eigen::Quaterniond torsoQuat(currentTorsoPose.tail<4>());
-    Eigen::Vector3d torsoZyx = quatToZyx(torsoQuat);
-    torsoPose_prevTargetPose_ << currentTorsoPose[0],   // x
-                                 currentTorsoPose[2],   // z
-                                 torsoZyx[0],           // yaw
-                                 torsoZyx[1];           // pitch
-    torsoPose_prevTargetVel_.setZero(4);
-    torsoPose_prevTargetAcc_.setZero(4);
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::TORSO_POSE_CMD, 
+                                                 torsoPose_prevTargetPose_, 
+                                                 torsoPose_prevTargetVel_, 
+                                                 torsoPose_prevTargetAcc_);
 
     if(rePlanning)
     {
@@ -892,7 +1094,7 @@ namespace mobile_manipulator {
 
   }
 
-  void MobileManipulatorReferenceManager::calcRuckigTrajWithCmdPose(double initTime, const vector_t &targetBasePose)
+  void MobileManipulatorReferenceManager::calcRuckigTrajWithCmdPose(double initTime, const vector_t &targetBasePose, double desiredTime)
   {
     assert(targetBasePose.size() == baseDim_ && "cmdPose dimension must be baseDim_!");
 
@@ -902,7 +1104,7 @@ namespace mobile_manipulator {
     cmdPosePlannerRuckigPtr_->setCurrentAcceleration(prevTargetAcc_);
 
     cmdPosePlannerRuckigPtr_->setTargetPose(targetBasePose);
-    double durationTime = cmdPosePlannerRuckigPtr_->calcTrajectory();
+    double durationTime = cmdPosePlannerRuckigPtr_->calcTrajectory(desiredTime);
 
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
@@ -929,7 +1131,7 @@ namespace mobile_manipulator {
     for(int i=0; i<timeIncrement; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度
-      double currentTime = initTime + i * dt;
+      double currentTime = initTime + (i+1) * dt;
 
       cmdPosePlannerRuckigPtr_->getTrajectoryAtTime(currentTime - plannerInitialTime_, currentTargetPose, currentTargetVel, currentTargetAcc);
       legJointPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - legJoint_plannerInitialTime_, currentTargetPose_legJoint, currentTargetVel_legJoint, currentTargetAcc_legJoint);
@@ -972,9 +1174,8 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::resetCmdPoseRuckig(double initTime, const vector_t& initState, bool rePlanning)
   {
-    prevTargetPose_ = initState.head(baseDim_);
-    prevTargetVel_.setZero(baseDim_);
-    prevTargetAcc_.setZero(baseDim_);
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::BASE_POS_WORLD_CMD, 
+                                                 prevTargetPose_, prevTargetVel_, prevTargetAcc_);
 
     if(rePlanning)
     {
@@ -1026,7 +1227,7 @@ namespace mobile_manipulator {
     for(int i=1; i<timeIncrement; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度
-      double currentTime = initTime + i * dt;
+      double currentTime = initTime + (i+1) * dt;
 
       cmdVelPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - cmdVel_plannerInitialTime_, 
                                                    currentTargetPose, 
@@ -1120,7 +1321,7 @@ namespace mobile_manipulator {
     for(int i=0; i<timeIncrement; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度
-      double currentTime = initTime + i * dt;
+      double currentTime = initTime + (i+1) * dt;
 
       cmdVelPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - cmdVel_plannerInitialTime_, 
                                                    currentTargetPose, 
@@ -1171,9 +1372,8 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::resetCmdVelRuckig(double initTime, const vector_t& initState, bool rePlanning)
   {
-    cmdVel_prevTargetPose_ = initState.head(baseDim_);  // 无速度指令时, 重置初始状态
-    cmdVel_prevTargetVel_.setZero(baseDim_);
-    cmdVel_prevTargetAcc_.setZero(baseDim_);
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::BASE_POS_WORLD_CMD, 
+                                                 cmdVel_prevTargetPose_, cmdVel_prevTargetVel_, cmdVel_prevTargetAcc_);
 
     if(rePlanning)
     {
@@ -1187,7 +1387,7 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint)
+  void MobileManipulatorReferenceManager::calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime)
   {
     assert(targetLegJoint.size() == 4 && "armJoint dimension must be 4!");
 
@@ -1197,7 +1397,7 @@ namespace mobile_manipulator {
     legJointPlannerRuckigPtr_->setCurrentAcceleration(legJoint_prevTargetAcc_);
 
     legJointPlannerRuckigPtr_->setTargetPose(targetLegJoint);
-    double durationTime = legJointPlannerRuckigPtr_->calcTrajectory();
+    double durationTime = legJointPlannerRuckigPtr_->calcTrajectory(desiredTime);
 
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
@@ -1206,9 +1406,10 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning)
   {
-    legJoint_prevTargetPose_ = initState.segment(baseDim_, 4);
-    legJoint_prevTargetVel_.setZero(4);
-    legJoint_prevTargetAcc_.setZero(4);
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::LEG_JOINT_CMD, 
+                                                 legJoint_prevTargetPose_, 
+                                                 legJoint_prevTargetVel_, 
+                                                 legJoint_prevTargetAcc_);
 
     if(rePlanning)
     {
@@ -1222,7 +1423,7 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::calcRuckigTrajWithArmJoint(double initTime, const vector_t &targetArmJoint)
+  void MobileManipulatorReferenceManager::calcRuckigTrajWithArmJoint(double initTime, const vector_t &targetArmJoint, double desiredTime)
   {
     assert(targetArmJoint.size() == 4 && "armJoint dimension must be 4!");
 
@@ -1232,7 +1433,7 @@ namespace mobile_manipulator {
     armJointPlannerRuckigPtr_->setCurrentAcceleration(armJoint_prevTargetAcc_);
 
     armJointPlannerRuckigPtr_->setTargetPose(targetArmJoint);
-    double durationTime = armJointPlannerRuckigPtr_->calcTrajectory();
+    double durationTime = armJointPlannerRuckigPtr_->calcTrajectory(desiredTime);
 
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
@@ -1241,9 +1442,10 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::resetArmJointRuckig(double initTime, const vector_t& initState, bool rePlanning)
   {
-    armJoint_prevTargetPose_ = initState.tail(info_.armDim - 4);
-    armJoint_prevTargetVel_.setZero(info_.armDim - 4);
-    armJoint_prevTargetAcc_.setZero(info_.armDim - 4);
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::ARM_JOINT_CMD, 
+                                                 armJoint_prevTargetPose_, 
+                                                 armJoint_prevTargetVel_, 
+                                                 armJoint_prevTargetAcc_);
 
     if(rePlanning)
     {
@@ -1369,6 +1571,9 @@ namespace mobile_manipulator {
       vector_t arm_control_mode_vec(1);
       arm_control_mode_vec << currentArmControlMode_;
       ros_logger_->publishVector("/humanoid/mpc/arm_control_mode", arm_control_mode_vec);
+
+      isCmdArmJointUpdated_ = true; // 触发关节指令规划
+      desireMode_ = LbArmControlMode::JointSpace;
     }
     else
     {
@@ -1384,6 +1589,362 @@ namespace mobile_manipulator {
     res.mode = currentArmControlMode_;
     return true;
   };
+
+  bool MobileManipulatorReferenceManager::setRuckigPlannerParamsService(kuavo_msgs::setRuckigPlannerParams::Request &req, 
+                                                                        kuavo_msgs::setRuckigPlannerParams::Response &res)
+  {
+    res.result = true;
+    res.message = "Set Ruckig Planner Limits Success";
+
+    // 确认规划器类型
+    std::shared_ptr<cmdPosePlannerWithRuckig> plannerPosePtr;
+    std::shared_ptr<cmdVelPlannerWithRuckig> plannerVelPtr;
+    bool is_pos_planner = true; // true: pos planner, false: vel planner
+    switch(req.planner_index)
+    {
+      case 0: // Base Pose Planner
+        plannerPosePtr = cmdPosePlannerRuckigPtr_;
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Base Pose Planner Params.");
+        break;
+      case 1: // Base Velocity Planner
+        plannerVelPtr = cmdVelPlannerRuckigPtr_;
+        is_pos_planner = false;
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Base Velocity Planner Params.");
+        break;
+      case 2: // Torso Pose Planner
+        plannerPosePtr = torsoPosePlannerRuckigPtr_;
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Torso Pose Planner Params.");
+        break;
+      case 3: // Leg Joint Planner
+        plannerPosePtr = legJointPlannerRuckigPtr_;
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Leg Joint Planner Params.");
+        break;
+      case 4: // Dual Arm EE Pose Planner
+        plannerPosePtr = cmdDualArmEePlannerRuckigPtr_;
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Dual Arm EE Pose Planner Params.");
+        break;
+      case 5: // Arm Joint Planner
+        plannerPosePtr = armJointPlannerRuckigPtr_;
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Arm Joint Pose Planner Params.");
+        break;
+      default:
+        res.result = false;
+        res.message = "Invalid planner index: " + std::to_string(req.planner_index);
+        ROS_ERROR_STREAM(res.message);
+        break;
+    }
+
+    // 设置同步模式
+    if (is_pos_planner)
+    {
+      plannerPosePtr->setPlannerSyncMode(req.is_sync);
+
+      int cmdType = SrvRequestIndexToCmdType(req.planner_index);
+      if(cmdType != -1)
+      {
+        timedPlannerScheduler_.setTimedPlannerSyncMode(cmdType, req.is_sync);
+      }
+      if(cmdType == static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD) || 
+         cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+      {
+        timedPlannerScheduler_.setTimedPlannerSyncMode(cmdType+1, req.is_sync);
+      }
+
+      ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Planner to " 
+                   << (req.is_sync ? "Sync" : "Async") << " Mode.");
+    }
+    
+    // 转换数据到Eigen::VectorXd并处理可选的负向限制
+    Eigen::VectorXd vel_max, vel_min, acc_max, acc_min, jerk_max;
+    bool has_velocity_limits = false;
+    bool has_acceleration_limits = false;
+    bool has_jerk_limits = false;
+    
+    if (!req.velocity_max.empty())
+    {
+      vel_max = Eigen::Map<Eigen::VectorXd>(req.velocity_max.data(), req.velocity_max.size());
+      if (!req.velocity_min.empty() && 
+          req.velocity_min.size() == req.velocity_max.size())
+      {
+        vel_min = Eigen::Map<Eigen::VectorXd>(req.velocity_min.data(), req.velocity_min.size());
+      } 
+      else 
+      {
+        ROS_WARN_STREAM("[setRuckigPlannerParamsService] velocity_min size mismatch, using -velocity_max");
+        vel_min = -vel_max;
+      }
+      has_velocity_limits = true;
+    }
+
+    if (!req.acceleration_max.empty())
+    {
+      acc_max = Eigen::Map<Eigen::VectorXd>(req.acceleration_max.data(), req.acceleration_max.size());
+      if (!req.acceleration_min.empty() && 
+          req.acceleration_min.size() == req.acceleration_max.size())
+      {
+        acc_min = Eigen::Map<Eigen::VectorXd>(req.acceleration_min.data(), req.acceleration_min.size());
+      } 
+      else 
+      {
+        ROS_WARN_STREAM("[setRuckigPlannerParamsService] acceleration_min size mismatch, using -acceleration_max");
+        acc_min = -acc_max;
+      }
+      has_acceleration_limits = true;
+    }
+
+    if (!req.jerk_max.empty())
+    {
+      jerk_max = Eigen::Map<Eigen::VectorXd>(req.jerk_max.data(), req.jerk_max.size());
+      has_jerk_limits = true;
+    }
+    
+    if (is_pos_planner)
+    {
+      if (has_velocity_limits && vel_max.size() != plannerPosePtr->getDofNum()) 
+      {
+        res.result = false;
+        res.message = "Pose Planner's velocity DOF size mismatch! input size: " + std::to_string(vel_max.size()) + 
+                      ", required size: " + std::to_string(plannerPosePtr->getDofNum());
+        ROS_ERROR_STREAM("[setRuckigPlannerParamsService]  " + res.message);
+        return true;
+      }
+      if (has_acceleration_limits && acc_max.size() != plannerPosePtr->getDofNum()) 
+      {
+        res.result = false;
+        res.message = "Pose Planner's acceleration DOF size mismatch! input size: " + std::to_string(acc_max.size()) + 
+                      ", required size: " + std::to_string(plannerPosePtr->getDofNum());
+        ROS_ERROR_STREAM("[setRuckigPlannerParamsService]  " + res.message);
+        return true;
+      }
+      if (has_jerk_limits && jerk_max.size() != plannerPosePtr->getDofNum()) 
+      {
+        res.result = false;
+        res.message = "Pose Planner's jerk DOF size mismatch! input size: " + std::to_string(jerk_max.size()) + 
+                      ", required size: " + std::to_string(plannerPosePtr->getDofNum());
+        ROS_ERROR_STREAM("[setRuckigPlannerParamsService]  " + res.message);
+        return true;
+      }
+      if (has_velocity_limits)
+      {
+        plannerPosePtr->setVelocityLimits(vel_max, vel_min);
+        int cmdType = SrvRequestIndexToCmdType(req.planner_index);
+        if(cmdType != -1)
+        {
+          timedPlannerScheduler_.updateTimedPlannerVelocityLimits(cmdType, vel_max, vel_min);
+        }
+        if(cmdType == static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD) || 
+           cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+        {
+          timedPlannerScheduler_.updateTimedPlannerVelocityLimits(cmdType+1, vel_max, vel_min);
+        }
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Pose Planner Velocity Limits.");
+        ROS_INFO_STREAM("  vel_max: [" << vel_max.transpose() << "]");
+        ROS_INFO_STREAM("  vel_min: [" << vel_min.transpose() << "]");
+      }
+      if (has_acceleration_limits)
+      {
+        plannerPosePtr->setAccelerationLimits(acc_max, acc_min);
+        int cmdType = SrvRequestIndexToCmdType(req.planner_index);
+        if(cmdType != -1)
+        {
+          timedPlannerScheduler_.updateTimedPlannerAccelerationLimits(cmdType, acc_max, acc_min);
+        }
+        if(cmdType == static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD) || 
+           cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+        {
+          timedPlannerScheduler_.updateTimedPlannerAccelerationLimits(cmdType+1, acc_max, acc_min);
+        }
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Pose Planner Acceleration Limits.");
+        ROS_INFO_STREAM("  acc_max: [" << acc_max.transpose() << "]");
+        ROS_INFO_STREAM("  acc_min: [" << acc_min.transpose() << "]");
+      }
+      if (has_jerk_limits)
+      {
+        plannerPosePtr->setJerkLimits(jerk_max);
+        int cmdType = SrvRequestIndexToCmdType(req.planner_index);
+        if(cmdType != -1)
+        {
+          timedPlannerScheduler_.updateTimedPlannerJerkLimits(cmdType, jerk_max);
+        }
+        if(cmdType == static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD)|| 
+           cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+        {
+          timedPlannerScheduler_.updateTimedPlannerJerkLimits(cmdType+1, jerk_max);
+        }
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Pose Planner Jerk Limits.");
+        ROS_INFO_STREAM("  jerk_max: [" << jerk_max.transpose() << "]");
+      }
+    }
+    else
+    {
+      if (has_acceleration_limits && acc_max.size() != plannerPosePtr->getDofNum()) 
+      {
+        res.result = false;
+        res.message = "Vel Planner's acceleration DOF size mismatch! input size: " + std::to_string(acc_max.size()) + 
+                      ", required size: " + std::to_string(plannerPosePtr->getDofNum());
+        ROS_ERROR_STREAM("[setRuckigPlannerParamsService]  " + res.message);
+        return true;
+      }
+      if (has_jerk_limits && jerk_max.size() != plannerPosePtr->getDofNum()) 
+      {
+        res.result = false;
+        res.message = "Vel Planner's jerk DOF size mismatch! input size: " + std::to_string(jerk_max.size()) + 
+                      ", required size: " + std::to_string(plannerPosePtr->getDofNum());
+        ROS_ERROR_STREAM("[setRuckigPlannerParamsService]  " + res.message);
+        return true;
+      }
+
+      if (has_acceleration_limits)
+      {
+        plannerVelPtr->setAccelerationLimits(acc_max, acc_min);
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Vel Planner Acceleration Limits.");
+        ROS_INFO_STREAM("  acc_max: [" << acc_max.transpose() << "]");
+        ROS_INFO_STREAM("  acc_min: [" << acc_min.transpose() << "]");
+      }
+      if (has_jerk_limits)
+      {
+        plannerVelPtr->setJerkLimits(jerk_max);
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Vel Planner Jerk Limits.");
+        ROS_INFO_STREAM("  jerk_max: [" << jerk_max.transpose() << "]");
+      }
+    }
+
+    return true;
+  }
+
+  bool MobileManipulatorReferenceManager::getLbTorsoInitialPoseService(kuavo_msgs::getLbTorsoInitialPose::Request &req, 
+                                                                       kuavo_msgs::getLbTorsoInitialPose::Response &res)
+  {
+    if (req.isNeed)
+    {
+      Eigen::Vector3d zyx = quatToZyx(Eigen::Quaterniond(initialTorsoQuat_.head<4>()));
+
+      res.linear.x = initialTorsoPos_(0);
+      res.linear.y = initialTorsoPos_(1);
+      res.linear.z = initialTorsoPos_(2);
+      res.angular.z = zyx(0);
+      res.angular.y = zyx(1);
+      res.angular.x = zyx(2);
+      
+      res.result = true;
+      res.message = "Get torso initial pose success.";
+      ROS_INFO_STREAM("[MobileManipulatorReferenceManager] Get torso initial pose: "
+                      << "Position [" << initialTorsoPos_.transpose() << "], "
+                      << "Orientation (ZYX) [" << zyx.transpose() << "]");
+    }
+    else
+    {
+      res.result = false;
+      res.message = "No need to get torso initial pose.";
+    }
+
+    return true;
+  }
+
+  bool MobileManipulatorReferenceManager::setLbTimedPosCmdService(kuavo_msgs::lbTimedPosCmd::Request &req, 
+                                                                  kuavo_msgs::lbTimedPosCmd::Response &res)
+  {
+    res.isSuccess = true;
+    res.message = "Set Lb Timed Position Command Success.";
+
+    Eigen::VectorXd eigenCmdVec = Eigen::Map<Eigen::VectorXd>(req.cmdVec.data(), req.cmdVec.size());
+    // 1. 处理不同的 planner_index
+    switch (static_cast<LbTimedPosCmdType>(req.planner_index)) 
+    {
+      case LbTimedPosCmdType::BASE_POS_WORLD_CMD:
+        eigenCmdVec[2] = targetYawPreProcess(initState_[2], eigenCmdVec[2]);
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Base World Pose Command.");
+        break;
+      case LbTimedPosCmdType::BASE_POS_LOCAL_CMD:
+      {
+        // 1. 获取当前的位姿
+        Eigen::Vector2d currentPos = initState_.head(2);  // 当前世界系位置 [x, y]
+        scalar_t currentYaw = initState_[2];              // 当前世界系偏航角
+        // 2. 构建世界系的位姿增量
+        Eigen::Matrix2d currentRot = Eigen::Rotation2D<scalar_t>(initState_[2]).toRotationMatrix();
+        Eigen::Vector2d displacementWorld = currentRot * eigenCmdVec.head(2);
+        // 3. 进行增量处理
+        eigenCmdVec[0] = currentPos[0] + displacementWorld[0];
+        eigenCmdVec[1] = currentPos[1] + displacementWorld[1];
+        eigenCmdVec[2] = currentYaw + eigenCmdVec[2];
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Base Local Pose Command.");
+        break;
+      }
+      case LbTimedPosCmdType::TORSO_POSE_CMD:
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Torso Pose Command.");
+        break;
+      case LbTimedPosCmdType::LEG_JOINT_CMD:
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Leg Joint Command.");
+        break;
+      case LbTimedPosCmdType::DUAL_ARM_WORLD_CMD:
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Dual Arm World Frame EE Command.");
+        break;
+      case LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD:
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Dual Arm Local Frame EE Command.");
+        break;
+      case LbTimedPosCmdType::ARM_JOINT_CMD:
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Arm Joint Command.");
+        break;
+      default:
+        res.isSuccess = false;
+        res.message = "Invalid planner index.";
+        ROS_ERROR_STREAM("[setLbTimedPosCmdService] " + res.message);
+        return true;
+    }
+    
+    // 调用对应的轨迹规划器计算所需时间
+    double desiredTime = timedPlannerScheduler_.calcTimedTrajectory(req.planner_index, eigenCmdVec, req.desireTime);
+
+    if(desiredTime == -1)
+    {
+      int desiredSize = timedPlannerScheduler_.getTimedPlannerDofNum(req.planner_index);
+      res.isSuccess = false;
+      std::string strReturn = "Command vector size mismatch. Input size: " 
+                              + std::to_string(eigenCmdVec.size()) + 
+                              ", required size: " + std::to_string(desiredSize) + ".";
+      res.message = strReturn;
+      ROS_ERROR_STREAM("[setLbTimedPosCmdService] " + res.message);
+      return true;
+    }
+  
+    // 保存对应轨迹和时间
+    res.actualTime = desiredTime;
+    desireTime_[req.planner_index] = desiredTime;
+
+    timedCmdVecMtx_[req.planner_index]->lock();
+    timedCmdVec_[req.planner_index] = Eigen::Map<Eigen::VectorXd>(req.cmdVec.data(), req.cmdVec.size());
+    timedCmdVecMtx_[req.planner_index]->unlock();
+
+    isTimedPlannerUpdated_[req.planner_index] = true;
+
+    return true;
+  }
+
+  bool MobileManipulatorReferenceManager::setLbResetTorsoService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res)
+  {
+    if(req.data)
+    {
+      /***********************根据期望速度, 设置切换时间************************/
+      vector_t torsoPose = vector_t::Zero(6);
+      getCurrentTorsoPoseInBaseContinuous(torsoPose, initState_);
+      Eigen::VectorXd err = Eigen::VectorXd::Zero(6);
+      err[0] = std::fabs(initialTorsoPos_[0] - torsoPose[0]);
+      err[2] = std::fabs(initialTorsoPos_[2] - torsoPose[2]);
+      err[3] = std::fabs(torsoPose[3] - 0.0);
+      err[4] = std::fabs(torsoPose[4] - 0.0);
+      Eigen::ArrayXd validTimes = err.array() / torsoResetMaxVel_.array();
+      double actualTime = validTimes.maxCoeff();
+      /*********************************************************************/
+      res.success = true;
+      res.message = std::to_string(actualTime);  // 直接转换
+      isResetTorso_ = true;
+      return true;
+    }
+
+    res.success = false;
+    res.message = "0.0";
+    return true;
+  }
 
   void MobileManipulatorReferenceManager::getCurrentTorsoPoseInBase(vector_t& torsoPose, const vector_t& initState)
   {
@@ -1409,6 +1970,135 @@ namespace mobile_manipulator {
 
     torsoPose.segment<3>(0) = baseToTorso.translation();
     torsoPose.segment<4>(3) = Eigen::Quaterniond(baseToTorso.rotation()).coeffs();
+  }
+
+  void MobileManipulatorReferenceManager::getCurrentEeWorldPoseContinuous(vector_t& EeState, const vector_t& initState)
+  {
+    // 输出6D位姿: [x, y, z, yaw, pitch, roll] (ZYX顺序)
+    assert(EeState.size() == info_.eeFrames.size() * 6 && "EeState dimension must be info_.eeFrames.size()*6!");
+
+    const auto& model = pinocchioInterface_.getModel();
+    auto& data = pinocchioInterface_.getData();
+    pinocchio::forwardKinematics(model, data, initState.head(model.nq));
+    pinocchio::updateFramePlacements(model, data);
+
+    // 初始化连续欧拉角跟踪器
+    static std::vector<ContinuousEulerAnglesFromMatrix> eeUnwrappers(info_.eeFrames.size());
+
+    // 遍历每个末端执行器
+    for (size_t ee_idx = 0; ee_idx < info_.eeFrames.size(); ++ee_idx) 
+    {
+      // 获取末端执行器帧ID（这里需要您根据实际情况获取）
+      pinocchio::FrameIndex frameId = model.getFrameId(info_.eeFrames[ee_idx]);
+      // 获取末端在世界坐标系中的位姿
+      const pinocchio::SE3& ee_pose = data.oMf[frameId];
+
+      EeState.segment<3>(ee_idx*6) = ee_pose.translation();
+
+      // 使用连续欧拉角跟踪器获取无跳变的ZYX欧拉角
+      Eigen::Vector3d eulerZyx = eeUnwrappers[ee_idx].update(ee_pose.rotation());
+      EeState.segment<3>(ee_idx*6+3) = eulerZyx;
+    }
+  }
+
+  void MobileManipulatorReferenceManager::getCurrentEeBasePoseContinuous(vector_t& EeState, const vector_t& initState)
+  {
+    // 输出6D位姿: [x, y, z, yaw, pitch, roll] (ZYX顺序，基座坐标系下)
+    assert(EeState.size() == info_.eeFrames.size() * 6 && "EeState dimension must be info_.eeFrames.size()*6!");
+
+    const auto& model = pinocchioInterface_.getModel();
+    auto& data = pinocchioInterface_.getData();
+    pinocchio::forwardKinematics(model, data, initState.head(model.nq));
+    pinocchio::updateFramePlacements(model, data);
+
+    // 获取基座的世界系位姿
+    pinocchio::FrameIndex baseFrameId = model.getFrameId(info_.baseFrame);
+    const pinocchio::SE3& base_pose_world = data.oMf[baseFrameId];
+
+    // 计算世界到基座的变换矩阵
+    pinocchio::SE3 world_to_base = base_pose_world.inverse();
+
+    // 初始化连续欧拉角跟踪器
+    static std::vector<ContinuousEulerAnglesFromMatrix> eeBaseUnwrappers(info_.eeFrames.size());
+
+    // 遍历每个末端执行器
+    for (size_t ee_idx = 0; ee_idx < info_.eeFrames.size(); ++ee_idx) 
+    {
+      // 获取末端执行器帧ID（这里需要您根据实际情况获取）
+      pinocchio::FrameIndex frameId = model.getFrameId(info_.eeFrames[ee_idx]);
+      // 获取末端在世界坐标系中的位姿
+      const pinocchio::SE3& ee_pose_world = data.oMf[frameId];
+
+      // 将末端位姿从世界坐标系转换到基座坐标系
+      pinocchio::SE3 ee_pose_base = world_to_base * ee_pose_world;
+
+      EeState.segment<3>(ee_idx*6) = ee_pose_base.translation();
+
+      // 使用连续欧拉角跟踪器获取无跳变的ZYX欧拉角
+      Eigen::Vector3d eulerZyx = eeBaseUnwrappers[ee_idx].update(ee_pose_base.rotation());
+      EeState.segment<3>(ee_idx*6+3) = eulerZyx;
+    }
+  }
+
+  void MobileManipulatorReferenceManager::getCurrentTorsoPoseInBaseContinuous(vector_t& torsoPose, const vector_t& initState)
+  {
+    assert(torsoPose.size() == 6 && "torsoPose dimension must be 6!");
+
+    const auto& model = pinocchioInterface_.getModel();
+    auto& data = pinocchioInterface_.getData();
+    pinocchio::forwardKinematics(model, data, initState.head(model.nq));
+    pinocchio::updateFramePlacements(model, data);
+
+    // 获取躯干坐标系帧ID
+    pinocchio::FrameIndex torsoFrameId = model.getFrameId(info_.torsoFrame);
+    // 获取躯干在世界坐标系中的位姿
+    const pinocchio::SE3& worldToTorso = data.oMf[torsoFrameId];
+
+    // 获取基坐标系帧ID
+    pinocchio::FrameIndex baseFrameId = model.getFrameId(info_.baseFrame);
+    // 获取基座在世界坐标系中的位姿
+    const pinocchio::SE3& worldToBase = data.oMf[baseFrameId];
+
+    // 计算躯干在基坐标系中的位姿: baseToTorso = worldToBase.inverse() * worldToTorso
+    pinocchio::SE3 baseToTorso = worldToBase.actInv(worldToTorso);
+
+    torsoPose.segment<3>(0) = baseToTorso.translation();
+    
+    // 姿态：使用连续欧拉角跟踪器获取无跳变的ZYX欧拉角
+    static ContinuousEulerAnglesFromMatrix torsoUnwrapper;
+    Eigen::Vector3d eulerZyx = torsoUnwrapper.update(baseToTorso.rotation());
+    torsoPose.segment<3>(3) = eulerZyx;  // yaw, pitch, roll
+  }
+
+  void MobileManipulatorReferenceManager::publishMultiPointPose_World(const vector_t& initState)
+  {
+    Eigen::VectorXd eeState_world, d_eeState_world, dd_eeState_world;
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD, 
+                                                 eeState_world, d_eeState_world, dd_eeState_world);
+
+    ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState", eeState_world);
+    ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState", d_eeState_world);
+    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState", dd_eeState_world);
+  }
+
+  void MobileManipulatorReferenceManager::publishMultiPointPose_Local(const vector_t& initState)
+  {
+    vector_t eeState_local, d_eeState_local, dd_eeState_local;
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD, 
+                                                 eeState_local, d_eeState_local, dd_eeState_local);
+
+    ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState", eeState_local);
+    ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState", d_eeState_local);
+    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState", dd_eeState_local);
+    /********************************************************************************************************************/
+    
+    vector_t torsoState_local, d_torsoState_local, dd_torsoState_local;
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::TORSO_POSE_CMD, 
+                              torsoState_local, d_torsoState_local, dd_torsoState_local);
+    
+    ros_logger_->publishVector("/mobile_manipulator/torsoStateLocal_initState", torsoState_local);
+    ros_logger_->publishVector("/mobile_manipulator/d_torsoStateLocal_initState", d_torsoState_local);
+    ros_logger_->publishVector("/mobile_manipulator/dd_torsoStateLocal_initState", dd_torsoState_local);
   }
 
   void MobileManipulatorReferenceManager::getCurrentEeWorldPose(vector_t& EeState, const vector_t& initState)
@@ -1476,7 +2166,7 @@ namespace mobile_manipulator {
       setEnableBaseTrack(false);   // 关闭底盘跟踪
 
       firstRun = false;
-      return;
+      // return;
     }
 
     getAllTargetTrajectories(targetTrajectories);
@@ -1496,13 +2186,16 @@ namespace mobile_manipulator {
       left_arm_joint_traj_ = initState.tail(info_.armDim - 4).head((info_.armDim - 4)/2);
       right_arm_joint_traj_ = initState.tail(info_.armDim - 4).tail((info_.armDim - 4)/2);
 
-      resetAllMpcTraj(initTime, initState);
+      resetAllMpcTraj(initTime_, initState_);
 
-      return;
+      // return;
     }
 
-    setTorsoControl(initTime, finalTime, initState);
-    setArmControl(initTime, finalTime, initState);
+    if(initTime >= resetTorsoTime_ + resetTorsoInitTime_)
+    {
+      setArmControl(initTime, finalTime, initState);
+      setTorsoControl(initTime, finalTime, initState);
+    }
 
     generatePoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
   }
@@ -1511,8 +2204,8 @@ namespace mobile_manipulator {
   {
     if(isChange)
     {
-      resetAllMpcTraj(initTime, initState);
-      return;
+      resetAllMpcTraj(initTime_, initState_);
+      // return;
     }
 
     setChassisControl(initTime, finalTime, initState);
@@ -1520,25 +2213,20 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::updateBaseArmControl(double initTime, double finalTime, const vector_t& initState, bool isChange)
   {
-    if(isChange)
+    static bool isFirstRun = true;
+    if(isFirstRun)
     {
-      vector_t eeState = vector_t::Zero(info_.eeFrames.size() * 7);
-      getCurrentEeWorldPose(eeState, initState);
-      left_arm_traj_pose_ = eeState.head(7);
-      right_arm_traj_pose_ = eeState.tail(7);
+      resetAllMpcTrajAndTarget(initTime_, initState_);
 
-      lb_leg_traj_ = initState.segment(baseDim_, 4);
-      arm_joint_traj_ = initState.tail(info_.armDim - 4);
-      left_arm_joint_traj_ = initState.tail(info_.armDim - 4).head((info_.armDim - 4)/2);
-      right_arm_joint_traj_ = initState.tail(info_.armDim - 4).tail((info_.armDim - 4)/2);
-
-      resetAllMpcTraj(initTime, initState);
-
-      return;
+      isFirstRun = false;
+      // return;
     }
 
-    setArmControl(initTime, finalTime, initState);
-    setTorsoControl(initTime, finalTime, initState);
+    if(initTime >= resetTorsoTime_ + resetTorsoInitTime_)
+    {
+      setArmControl(initTime, finalTime, initState);
+      setTorsoControl(initTime, finalTime, initState);
+    }
     setChassisControl(initTime, finalTime, initState);
   }
 
@@ -1553,7 +2241,7 @@ namespace mobile_manipulator {
 
       resetAllMpcTraj(initTime, initState);
 
-      return;
+      // return;
     }
 
     static vector_t armEeTarget = vector_t::Zero(info_.eeFrames.size() * 7); // 双臂末端轨迹
@@ -1678,7 +2366,7 @@ namespace mobile_manipulator {
     if(isCmdPoseUpdated_ || isCmdPoseWorldUpdated_)
     {
       /*****************************更新ruckig规划器所需实时数据************************************/
-      calcRuckigTrajWithCmdPose(initTime, currentCmdPose_);
+      calcRuckigTrajWithCmdPose(initTime, currentCmdPose_, cmdPoseDesiredTime_);
       /*****************************************************************************************/
 
       // 清空位置指令更新标志
@@ -1816,15 +2504,20 @@ namespace mobile_manipulator {
       {
         armPose_mtx_.lock();
         armEeTarget << left_arm_traj_pose_, right_arm_traj_pose_;
-        calcRuckigTrajWithEePose(initTime, armEeTarget);
+        calcRuckigTrajWithEePose(initTime, armEeTarget, cmdDualArmPoseDesiredTime_);
         armPose_mtx_.unlock();
       }
       isCmdDualArmPoseUpdated_ = false;
     }
-    // else
-    // {
-    //   resetDualArmRuckig(initTime, initState, false, desireMode_);
-    // }
+
+    if(isCmdArmJointUpdated_)
+    {
+      bool isChange = getLbArmControlModeIsChange(desireMode_);
+      if(isChange && desireMode_ == LbArmControlMode::JointSpace)
+      {
+        resetArmJointRuckig(initTime, initState, false);
+      }
+    }
     
     if(currentArmControlMode_  == LbArmControlServiceMode::EXTERN_CONTROL)
     {
@@ -1837,7 +2530,6 @@ namespace mobile_manipulator {
         generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
 
         resetArmJointRuckig(initTime, initState, false);  // 笛卡尔控制影响手臂关节, 重置关节轨迹初值
-        resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
       }
       else if(desireMode_ == LbArmControlMode::LocalFrame)  // 局部系的笛卡尔末端控制
       {
@@ -1848,7 +2540,6 @@ namespace mobile_manipulator {
         generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
 
         resetArmJointRuckig(initTime, initState, false);  // 笛卡尔控制影响手臂关节, 重置关节轨迹初值
-        resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
       }
       else if(desireMode_ == LbArmControlMode::JointSpace)  // 关节控制
       {
@@ -1868,7 +2559,11 @@ namespace mobile_manipulator {
           armJointTarget << left_arm_joint_traj_, right_arm_joint_traj_;
           armPose_mtx_.unlock();
         }
-        calcRuckigTrajWithArmJoint(initTime, armJointTarget);
+        if(isCmdArmJointUpdated_)
+        {
+          calcRuckigTrajWithArmJoint(initTime, armJointTarget, cmdArmJointDesiredTime_);
+          isCmdArmJointUpdated_ = false;
+        }
 
         // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
       }
@@ -1879,8 +2574,11 @@ namespace mobile_manipulator {
       setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
       setEnableArmJointTrack(true); // 开启手臂跟踪
 
-      calcRuckigTrajWithArmJoint(initTime, armJointTarget);
-      // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
+      if(isCmdArmJointUpdated_)
+      {
+        calcRuckigTrajWithArmJoint(initTime, armJointTarget);
+        isCmdArmJointUpdated_ = false;
+      }
     }
     else if(currentArmControlMode_ == LbArmControlServiceMode::AUTO_SWING)
     {
@@ -1888,12 +2586,16 @@ namespace mobile_manipulator {
       setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
       setEnableArmJointTrack(true); // 开启手臂跟踪
 
-      calcRuckigTrajWithArmJoint(initTime, arm_init_joint_traj_);
-      // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
+      if(isCmdArmJointUpdated_)
+      {
+        calcRuckigTrajWithArmJoint(initTime, arm_init_joint_traj_, 1.0);
+        isCmdArmJointUpdated_ = false;
+      }
 
+      armJointTarget = arm_init_joint_traj_;
       arm_joint_traj_ = arm_init_joint_traj_;
-      left_arm_joint_traj_ = armJointTarget.head((info_.armDim - 4)/2);
-      right_arm_joint_traj_ = armJointTarget.tail((info_.armDim - 4)/2);
+      left_arm_joint_traj_ = arm_init_joint_traj_.head((info_.armDim - 4)/2);
+      right_arm_joint_traj_ = arm_init_joint_traj_.tail((info_.armDim - 4)/2);
     }
     else
     {
@@ -1911,7 +2613,23 @@ namespace mobile_manipulator {
     resetPose[0] = initialTorsoPos_[0];
     resetPose[1] = initialTorsoPos_[2];
     resetTorsoPoseRuckig(initTime, initState, false);
-    calcRuckigTrajWithTorsoPose(initTime, resetPose);
+
+    /*************************根据期望速度, 设置切换时间*******************************/
+    vector_t torsoPose = vector_t::Zero(6);
+    getCurrentTorsoPoseInBaseContinuous(torsoPose, initState);
+    Eigen::VectorXd err = Eigen::VectorXd::Zero(6);
+    err[0] = std::fabs(initialTorsoPos_[0] - torsoPose[0]);
+    err[2] = std::fabs(initialTorsoPos_[2] - torsoPose[2]);
+    err[3] = std::fabs(torsoPose[3] - 0.0);
+    err[4] = std::fabs(torsoPose[4] - 0.0);
+
+    Eigen::ArrayXd validTimes = err.array() / torsoResetMaxVel_.array();
+    resetTorsoTime_ = validTimes.maxCoeff();
+    resetTorsoInitTime_ = initTime;
+    ROS_INFO_STREAM("[MobileManipulatorReferenceManager] reset torso require time: " << resetTorsoTime_ << " s, err: " << err.transpose());
+    /*****************************************************************************/
+
+    calcRuckigTrajWithTorsoPose(initTime, resetPose, resetTorsoTime_);
 
     cmdTorsoPose_.setZero();
     cmdTorsoPose_[0] = initialTorsoPos_[0];
@@ -1920,13 +2638,15 @@ namespace mobile_manipulator {
     cmdTorsoPose_[3] = 0;
     cmdTorsoPose_[4] = 0;
 
-    generateTorsoPoseTargetWithRuckig(initTime, initTime + 5.0, ruckigDt_);
+    generateTorsoPoseTargetWithRuckig(initTime, initTime + resetTorsoTime_ + 0.5, ruckigDt_);
   }
   
   void MobileManipulatorReferenceManager::setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState)
   {
     if(isCmdTorsoPoseUpdated_)
     {
+      resetTorsoPoseRuckig(initTime, initState, false);
+
       std::cout << "[MobileManipulatorReferenceManager] 进入躯干笛卡尔控制 " << std::endl;
 
       cmdTorsoPose_mtx_.lock();
@@ -1939,7 +2659,7 @@ namespace mobile_manipulator {
                        currentTorsoPose_[3], 
                        currentTorsoPose_[4];
 
-      calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof);
+      calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, cmdTorsoPoseDesiredTime_);
 
       isCmdTorsoPoseUpdated_ = false;
       torsoModeFlag_ = true;
@@ -1956,7 +2676,7 @@ namespace mobile_manipulator {
       legJointTarget = lb_leg_traj_;
       lbLegJoint_mtx_.unlock();
 
-      calcRuckigTrajWithLegJoint(initTime, legJointTarget);
+      calcRuckigTrajWithLegJoint(initTime, legJointTarget, cmdLegJointDesiredTime_);
 
       isCmdLegJointUpdated_ = false;
       torsoModeFlag_ = false;
@@ -1992,6 +2712,199 @@ namespace mobile_manipulator {
       resetArmJointRuckig(initTime, initState, true);   // 重置上肢关节轨迹
       resetDualArmRuckig(initTime, initState, true, desireMode_);
       desireMode_ = LbArmControlMode::JointSpace;
+  }
+
+  void MobileManipulatorReferenceManager::resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState)
+  {
+    vector_t eeState = vector_t::Zero(info_.eeFrames.size() * 7);
+    getCurrentEeWorldPose(eeState, initState);
+    left_arm_traj_pose_ = eeState.head(7);
+    right_arm_traj_pose_ = eeState.tail(7);
+
+    lb_leg_traj_ = initState.segment(baseDim_, 4);
+    arm_joint_traj_ = initState.tail(info_.armDim - 4);
+    left_arm_joint_traj_ = initState.tail(info_.armDim - 4).head((info_.armDim - 4)/2);
+    right_arm_joint_traj_ = initState.tail(info_.armDim - 4).tail((info_.armDim - 4)/2);
+      
+    resetAllMpcTraj(initTime, initState);
+  }
+
+  void MobileManipulatorReferenceManager::updateTimedSchedulerCurrentState(scalar_t initTime, const vector_t& initState)
+  {
+    std::vector<Eigen::VectorXd> currentPos;
+
+    Eigen::VectorXd tmpPos;
+
+    tmpPos.setZero(baseDim_);                                       // 底盘世界系, 自由度3: x, y, yaw
+    tmpPos = initState.head(baseDim_);
+    currentPos.push_back(tmpPos);
+
+    tmpPos.setZero(baseDim_);                                       // 底盘局部系, 采用世界系做反馈, 自由度3: x, y, yaw
+    tmpPos = initState.head(baseDim_);
+    currentPos.push_back(tmpPos);
+
+    vector_t torsoPose = vector_t::Zero(6);                         // 躯干, 自由度4: x, z, yaw, pitch
+    getCurrentTorsoPoseInBaseContinuous(torsoPose, initState);
+    tmpPos.setZero(4);   
+    if(torsoModeFlag_ == false)   // 关节控制反馈当前实际位姿, 躯干控制反馈指令位姿
+    {
+      vector_t torsoState = vector_t::Zero(7);
+      getCurrentTorsoPoseInBase(torsoState, initState);
+      torsoTargetTrajectories_.stateTrajectory = {torsoState};
+      tmpPos << torsoPose[0], torsoPose[2], torsoPose[3], torsoPose[4];
+    }
+    else
+    {
+      vector_t torsoTargetPose = targetTorsoTrajToPose6DContinous(torsoTargetTrajectories_, initTime);
+      tmpPos << torsoTargetPose[0], torsoTargetPose[2], torsoTargetPose[3], torsoTargetPose[4];
+    }
+    
+    currentPos.push_back(tmpPos);
+
+    tmpPos.setZero(4);                                              // 下肢, 自由度4
+    tmpPos = initState.segment(baseDim_, 4);
+    currentPos.push_back(tmpPos);
+    
+    vector_t eePose = vector_t::Zero(info_.eeFrames.size() * 6);    // 双臂世界系, 自由度(末端数*6)
+    getCurrentEeWorldPoseContinuous(eePose, initState);
+    tmpPos.setZero(info_.eeFrames.size() * 6);
+    for(int i=0; i<info_.eeFrames.size(); i++)
+    {
+      tmpPos.segment(i*6, 3) = eePose.segment(i*6, 3);
+      tmpPos.segment(i*6 + 3, 3) = eePose.segment(i*6 + 3, 3);
+    }
+    currentPos.push_back(tmpPos);
+
+    getCurrentEeBasePoseContinuous(eePose, initState);                        // 双臂局部系, 自由度(末端数*6)
+    tmpPos.setZero(info_.eeFrames.size() * 6);
+    for(int i=0; i<info_.eeFrames.size(); i++)
+    {
+      tmpPos.segment(i*6, 3) = eePose.segment(i*6, 3);
+      tmpPos.segment(i*6 + 3, 3) = eePose.segment(i*6 + 3, 3);
+    }
+    currentPos.push_back(tmpPos);
+
+    tmpPos.setZero(info_.armDim - 4);                               // 上肢, 自由度(全身关节数-4)
+    tmpPos = initState.tail(info_.armDim - 4);
+    currentPos.push_back(tmpPos);
+
+    timedPlannerScheduler_.setTimedPlannerStates(currentPos);
+  }
+
+  void MobileManipulatorReferenceManager::updateTimedSchedulerTargetTraj(void)
+  {
+    for(int i = 0; i < timedPlannerScheduler_.getPlannersNum(); i++)
+    {
+      if(isTimedPlannerUpdated_[i])
+      {
+        timedCmdVecMtx_[i]->lock();
+        Eigen::VectorXd targetPos = timedCmdVec_[i];
+        timedCmdVecMtx_[i]->unlock();
+
+        double duration = timedPlannerScheduler_.calcTimedTrajectory(i, targetPos, desireTime_[i]);
+        updateIndexRuckigPlanner(i, desireTime_[i], targetPos);
+
+        std::cout << "planner " << i << " duration: " << duration << std::endl;
+        isTimedPlannerUpdated_[i] = false;
+      }
+    }
+  }
+
+  void MobileManipulatorReferenceManager::updateIndexRuckigPlanner(int plannerIndex, double desireTime, 
+                                                                   const Eigen::VectorXd& cmd_vec)
+  {
+    int desiredSize = timedPlannerScheduler_.getTimedPlannerDofNum(plannerIndex);
+  
+    switch(static_cast<LbTimedPosCmdType>(plannerIndex))
+    {
+      case LbTimedPosCmdType::BASE_POS_WORLD_CMD:
+      {
+        isCmdPoseWorldUpdated_ = true;
+        cmdPoseDesiredTime_ = desireTime;
+        cmdPoseWorld_ = cmd_vec.head(desiredSize);
+        std::cout << "Received cmdPoseWorld: " << cmdPoseWorld_.transpose() << std::endl;
+        break;
+      }
+      case LbTimedPosCmdType::BASE_POS_LOCAL_CMD:
+      {
+        isCmdPoseUpdated_ = true;
+        cmdPoseDesiredTime_ = desireTime;
+        cmdPose_ = cmd_vec.head(desiredSize);
+        std::cout << "Received cmdPose: " << cmdPose_.transpose() << std::endl;
+        break;
+      }
+      case LbTimedPosCmdType::TORSO_POSE_CMD:
+      {
+        isCmdTorsoPoseUpdated_ = true;
+        cmdTorsoPoseDesiredTime_ = desireTime;
+        /*******************************赋值躯干指令********************************/
+        vector_t tmpCmdTorsoPose = cmd_vec.head(desiredSize);
+        cmdTorsoPose_[0] = tmpCmdTorsoPose[0];
+        cmdTorsoPose_[2] = tmpCmdTorsoPose[1];
+        cmdTorsoPose_[3] = tmpCmdTorsoPose[2];
+        cmdTorsoPose_[4] = tmpCmdTorsoPose[3];
+        /*************************************************************************/
+        std::cout << "desiredSize: "<< desiredSize << std::endl;
+        std::cout << "Received cmdTorsoPose: "<< cmdTorsoPose_.transpose() << std::endl;
+        break;
+      }
+      case LbTimedPosCmdType::LEG_JOINT_CMD:
+      {
+        isCmdLegJointUpdated_ = true;
+        cmdLegJointDesiredTime_ = desireTime;
+        lb_leg_traj_ = cmd_vec.head(desiredSize);
+        break;
+      }
+      case LbTimedPosCmdType::DUAL_ARM_WORLD_CMD:
+      {
+        isCmdDualArmPoseUpdated_ = true;
+        desireMode_ = LbArmControlMode::WorldFrame;
+        cmdDualArmPoseDesiredTime_ = desireTime;
+        /*******************************赋值双臂指令********************************/
+        Eigen::VectorXd tmpDualArmCmd = cmd_vec.head(desiredSize);
+        left_arm_traj_pose_.head(3) = tmpDualArmCmd.head(3);
+        Eigen::Quaterniond leftQuat = Eigen::AngleAxisd(tmpDualArmCmd(3), Eigen::Vector3d::UnitZ())   // yaw (Z)
+                                    * Eigen::AngleAxisd(tmpDualArmCmd(4), Eigen::Vector3d::UnitY()) // pitch (Y)
+                                    * Eigen::AngleAxisd(tmpDualArmCmd(5), Eigen::Vector3d::UnitX()); // roll (X)
+        left_arm_traj_pose_.tail(4) = leftQuat.coeffs();
+        right_arm_traj_pose_.head(3) = tmpDualArmCmd.tail(desiredSize/2).head(3);
+        Eigen::Quaterniond rightQuat = Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(3), Eigen::Vector3d::UnitZ())   // yaw (Z)
+                                     * Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(4), Eigen::Vector3d::UnitY()) // pitch (Y)
+                                     * Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(5), Eigen::Vector3d::UnitX()); // roll (X)
+        right_arm_traj_pose_.tail(4) = rightQuat.coeffs();
+        /*************************************************************************/
+        break;
+      }
+      case LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD:
+      {
+        isCmdDualArmPoseUpdated_ = true;
+        desireMode_ = LbArmControlMode::LocalFrame;
+        cmdDualArmPoseDesiredTime_ = desireTime;
+        /*******************************赋值双臂指令********************************/
+        Eigen::VectorXd tmpDualArmCmd = cmd_vec.head(desiredSize);
+        left_arm_traj_pose_.head(3) = tmpDualArmCmd.head(3);
+        Eigen::Quaterniond leftQuat = Eigen::AngleAxisd(tmpDualArmCmd(3), Eigen::Vector3d::UnitZ())   // yaw (Z)
+                                    * Eigen::AngleAxisd(tmpDualArmCmd(4), Eigen::Vector3d::UnitY()) // pitch (Y)
+                                    * Eigen::AngleAxisd(tmpDualArmCmd(5), Eigen::Vector3d::UnitX()); // roll (X)
+        left_arm_traj_pose_.tail(4) = leftQuat.coeffs();
+        right_arm_traj_pose_.head(3) = tmpDualArmCmd.tail(desiredSize/2).head(3);
+        Eigen::Quaterniond rightQuat = Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(3), Eigen::Vector3d::UnitZ())   // yaw (Z)
+                                     * Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(4), Eigen::Vector3d::UnitY()) // pitch (Y)
+                                     * Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(5), Eigen::Vector3d::UnitX()); // roll (X)
+        right_arm_traj_pose_.tail(4) = rightQuat.coeffs();
+        /*************************************************************************/
+        break;
+      }
+      case LbTimedPosCmdType::ARM_JOINT_CMD:
+      {
+        isCmdArmJointUpdated_ = true;
+        desireMode_ = LbArmControlMode::JointSpace;  // 切换模式
+        cmdArmJointDesiredTime_ = desireTime;
+        enableQuickJointControl_ = true;  // 采用 kuavo_arm_traj 一样的发送方式
+        arm_joint_traj_ = cmd_vec.head(desiredSize);
+        break;
+      }
+    }
   }
 
 }  // namespace mobile_manipulator

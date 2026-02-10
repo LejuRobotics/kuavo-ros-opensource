@@ -10,24 +10,37 @@ namespace kuavo_solver {
 
 
 struct RobanAnkleParams {
-    double z_pitch;
+    // 关节偏移参数（pitch和roll关节不同轴）
+    double z_pitch;          // foot_roll 原点相对于 knee 的 z 偏移（= z_pitch_raw + z_roll）
+    double z_roll;           // roll 关节相对于 pitch 关节的 z 偏移
+    double x_pitch;          // pitch 关节相对于 knee 的 x 偏移
+    
     // 左脚踝参数
-    double x_lleq, y_lleq, z_lleq;
-    double x_lreq, y_lreq, z_lreq;
-    double z_llbar, z_lrbar;
-    double x_lltd, y_lltd, z_lltd;
-    double x_lrtd, y_lrtd, z_lrtd;
-    double l0_ll_eqtd, l0_lr_eqtd;
+    double x_lleq, y_lleq, z_lleq;    // ll 等效力点（相对于 roll 关节）
+    double x_lreq, y_lreq, z_lreq;    // lr 等效力点（相对于 roll 关节）
+    double x_llbar, z_llbar;          // ll bar 位置（相对于 knee）
+    double x_lrbar, z_lrbar;          // lr bar 位置（相对于 knee）
+    double x_lltd, y_lltd, z_lltd;    // ll 肌腱附着点（相对于 bar）
+    double x_lrtd, y_lrtd, z_lrtd;    // lr 肌腱附着点（相对于 bar）
+    double l0_ll_eqtd, l0_lr_eqtd;    // 初始肌腱长度
+    
     // 右脚踝参数
-    double x_rleq, y_rleq, z_rleq;
-    double x_rreq, y_rreq, z_rreq;
-    double z_rlbar, z_rrbar;
-    double x_rltd, y_rltd, z_rltd;
-    double x_rrtd, y_rrtd, z_rrtd;
-    double l0_rl_eqtd, l0_rr_eqtd;
+    double x_rleq, y_rleq, z_rleq;    // rl 等效力点（相对于 roll 关节）
+    double x_rreq, y_rreq, z_rreq;    // rr 等效力点（相对于 roll 关节）
+    double x_rlbar, z_rlbar;          // rl bar 位置（相对于 knee）
+    double x_rrbar, z_rrbar;          // rr bar 位置（相对于 knee）
+    double x_rltd, y_rltd, z_rltd;    // rl 肌腱附着点（相对于 bar）
+    double x_rrtd, y_rrtd, z_rrtd;    // rr 肌腱附着点（相对于 bar）
+    double l0_rl_eqtd, l0_rr_eqtd;    // 初始肌腱长度
+    
     // 求解器参数
     double default_tolerance;
     int max_iterations;
+    
+    // 默认构造函数，初始化新参数为0
+    RobanAnkleParams() : z_roll(0.0), x_pitch(0.0),
+                         x_llbar(0.0), x_lrbar(0.0),
+                         x_rlbar(0.0), x_rrbar(0.0) {}
 };
 
 enum class AnkleSide {
@@ -41,9 +54,9 @@ enum class TendonSide {
 };
 
 struct TendonParams {
-    double x_eq, y_eq, z_eq;         // 等效力点位置
-    double x_td, y_td, z_td;         // 肌腱附着点位置
-    double z_bar;                    // 杆的 z 位置
+    double x_eq, y_eq, z_eq;         // 等效力点位置（相对于 roll 关节）
+    double x_td, y_td, z_td;         // 肌腱附着点位置（相对于 bar 关节）
+    double x_bar, z_bar;             // bar 的位置（相对于 knee）
     double l_bar;                    // 辅助长度
     double l0_eqtd;                  // 初始肌腱长度
 };
@@ -122,21 +135,31 @@ private:
         double pitch, double roll, double lbar, double rbar,
         double i_lbar, double i_rbar, AnkleSide ankle_side) const;
 
-    double z_pitch_;
+    // 关节偏移参数
+    double z_pitch_;         // foot_roll 原点相对于 knee 的 z 偏移
+    double z_roll_;          // roll 关节相对于 pitch 关节的 z 偏移
+    double x_pitch_;         // pitch 关节相对于 knee 的 x 偏移
+    
+    // 左脚踝参数
     double x_lleq_, y_lleq_, z_lleq_;
     double x_lreq_, y_lreq_, z_lreq_;
-    double z_llbar_, z_lrbar_;
+    double x_llbar_, z_llbar_;
+    double x_lrbar_, z_lrbar_;
     double x_lltd_, y_lltd_, z_lltd_;
     double x_lrtd_, y_lrtd_, z_lrtd_;
     double l_llbar_, l_lrbar_;
     double l0_ll_eqtd_, l0_lr_eqtd_;
+    
+    // 右脚踝参数
     double x_rleq_, y_rleq_, z_rleq_;
     double x_rreq_, y_rreq_, z_rreq_;
-    double z_rlbar_, z_rrbar_;
+    double x_rlbar_, z_rlbar_;
+    double x_rrbar_, z_rrbar_;
     double x_rltd_, y_rltd_, z_rltd_;
     double x_rrtd_, y_rrtd_, z_rrtd_;
     double l_rlbar_, l_rrbar_;
     double l0_rl_eqtd_, l0_rr_eqtd_;
+    
     double default_tolerance_;
     int max_iterations_;
 };

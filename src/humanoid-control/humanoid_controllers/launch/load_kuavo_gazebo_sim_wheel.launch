@@ -23,7 +23,7 @@
 
     <!-- MPC相关参数 -->
     <arg name="use_external_mpc" default="true"/>
-    <arg name="use_sqp" default="false" doc="Use SQP if true, DDP if false"/>
+    <arg name="use_sqp" default="true" doc="Use SQP if true, DDP if false"/>
     <arg name="wbc_frequency" default="500"/>
     <arg name="wbc_only" default="false"/>
 

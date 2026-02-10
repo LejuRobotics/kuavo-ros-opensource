@@ -223,6 +223,18 @@ add_service_files(
   # Battery service
   GetBatteryInfo.srv
 
+
+  # Lb obs update mode
+  changeLbMpcObsUpdateModeSrv.srv
+
+  # Lb ruckig planner params
+  setRuckigPlannerParams.srv
+
+  # Lb Torso Initial Pose
+  getLbTorsoInitialPose.srv
+
+  # Lb Timed Cmd 
+  lbTimedPosCmd.srv
 )
 
 ## Generate actions in the 'action' folder

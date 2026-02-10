@@ -112,7 +112,7 @@ jointNamesReal
 swing_trajectory_config
 {
   liftOffVelocity               0.00
-  touchDownVelocity            -0.04
+  touchDownVelocity            -0.02
   swingHeight                   0.06
   climbStageSwingHeight         0.06
   swingTimeScale                0.15
@@ -524,7 +524,7 @@ torqueLimitsTask
    (2,0)  47.0     ; motor 3
    (3,0)  48.0     ; motor 4
    (4,0)  20.0     ; motor 5
-   (5,0)  30.0     ; motor 6
+   (5,0)  20.0     ; motor 6
 
    ;; waist Limits
    (6,0)  44.0     ; motor 1
@@ -573,10 +573,10 @@ swingLegTask
 {
     real
     {
-      kp                   30  
-      kd                   15    
-      kp_xy                30  
-      kd_xy                15    
+      kp                   20  
+      kd                   10    
+      kp_xy                20  
+      kd_xy                10    
     }
     
     sim
@@ -593,8 +593,8 @@ stanceLegTask
 {
   real
   {
-    kp                   15  
-    kd                   8    
+    kp                   10  
+    kd                   5    
   }
   
   sim
@@ -622,13 +622,13 @@ baseAngularTask
     {
       (0,0)               60                ; x
       (1,0)               60                ; y
-      (2,0)               70                ; z
+      (2,0)               40                ; z 
     }
     kd                  
     {
       (0,0)               40                 ; x
       (1,0)               40                 ; y
-      (2,0)               10                 ; z
+      (2,0)               8                  ; z 
     }
 }
 
@@ -661,33 +661,33 @@ feetJointAccelTask
 {
   kp
   {
-    (0,0)   50   ; leg_l1_joint
-    (1,0)   50   ; leg_l2_joint
-    (2,0)   50   ; leg_l3_joint
-    (3,0)   50   ; leg_l4_joint
-    (4,0)   50   ; leg_l5_joint
-    (5,0)   50   ; leg_l6_joint
-    (6,0)   50   ; leg_r1_joint
-    (7,0)   50   ; leg_r2_joint
-    (8,0)   50   ; leg_r3_joint
-    (9,0)   50   ; leg_r4_joint
-    (10,0)  50   ; leg_r5_joint
-    (11,0)  50   ; leg_r6_joint
+    (0,0)   30   ; leg_l1_joint
+    (1,0)   30   ; leg_l2_joint
+    (2,0)   30   ; leg_l3_joint
+    (3,0)   30   ; leg_l4_joint
+    (4,0)   20   ; leg_l5_joint
+    (5,0)   20   ; leg_l6_joint
+    (6,0)   30   ; leg_r1_joint
+    (7,0)   30   ; leg_r2_joint
+    (8,0)   30   ; leg_r3_joint
+    (9,0)   30   ; leg_r4_joint
+    (10,0)  20   ; leg_r5_joint
+    (11,0)  20   ; leg_r6_joint
   }
   kd
   {
-    (0,0)   20     ; leg_l1_joint
-    (1,0)   20     ; leg_l2_joint
-    (2,0)   20     ; leg_l3_joint
-    (3,0)   20     ; leg_l4_joint
-    (4,0)   20     ; leg_l5_joint
-    (5,0)   20     ; leg_l6_joint
-    (6,0)   20     ; leg_r1_joint
-    (7,0)   20     ; leg_r2_joint
-    (8,0)   20     ; leg_r3_joint
-    (9,0)   20     ; leg_r4_joint
-    (10,0)   20     ; leg_r5_joint
-    (11,0)   20     ; leg_r6_joint
+    (0,0)   12     ; leg_l1_joint
+    (1,0)   12     ; leg_l2_joint
+    (2,0)   12     ; leg_l3_joint
+    (3,0)   12     ; leg_l4_joint
+    (4,0)   10     ; leg_l5_joint
+    (5,0)   10     ; leg_l6_joint
+    (6,0)   12     ; leg_r1_joint
+    (7,0)   12     ; leg_r2_joint
+    (8,0)   12     ; leg_r3_joint
+    (9,0)   12     ; leg_r4_joint
+    (10,0)   10    ; leg_r5_joint
+    (11,0)   10    ; leg_r6_joint
   }
 }
 

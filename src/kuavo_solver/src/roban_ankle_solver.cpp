@@ -7,22 +7,30 @@
 namespace kuavo_solver {
 
 Roban_ankle_solver::Roban_ankle_solver(const RobanAnkleParams& params) {
+    // 关节偏移参数
     z_pitch_ = params.z_pitch;
+    z_roll_ = params.z_roll;
+    x_pitch_ = params.x_pitch;
     
+    // 左脚踝参数
     x_lleq_ = params.x_lleq; y_lleq_ = params.y_lleq; z_lleq_ = params.z_lleq;
     x_lreq_ = params.x_lreq; y_lreq_ = params.y_lreq; z_lreq_ = params.z_lreq;
-    z_llbar_ = params.z_llbar; z_lrbar_ = params.z_lrbar;
+    x_llbar_ = params.x_llbar; z_llbar_ = params.z_llbar;
+    x_lrbar_ = params.x_lrbar; z_lrbar_ = params.z_lrbar;
     x_lltd_ = params.x_lltd; y_lltd_ = params.y_lltd; z_lltd_ = params.z_lltd;
     x_lrtd_ = params.x_lrtd; y_lrtd_ = params.y_lrtd; z_lrtd_ = params.z_lrtd;
     l0_ll_eqtd_ = params.l0_ll_eqtd; l0_lr_eqtd_ = params.l0_lr_eqtd;
     
+    // 右脚踝参数
     x_rleq_ = params.x_rleq; y_rleq_ = params.y_rleq; z_rleq_ = params.z_rleq;
     x_rreq_ = params.x_rreq; y_rreq_ = params.y_rreq; z_rreq_ = params.z_rreq;
-    z_rlbar_ = params.z_rlbar; z_rrbar_ = params.z_rrbar;
+    x_rlbar_ = params.x_rlbar; z_rlbar_ = params.z_rlbar;
+    x_rrbar_ = params.x_rrbar; z_rrbar_ = params.z_rrbar;
     x_rltd_ = params.x_rltd; y_rltd_ = params.y_rltd; z_rltd_ = params.z_rltd;
     x_rrtd_ = params.x_rrtd; y_rrtd_ = params.y_rrtd; z_rrtd_ = params.z_rrtd;
     l0_rl_eqtd_ = params.l0_rl_eqtd; l0_rr_eqtd_ = params.l0_rr_eqtd;
     
+    // 计算 bar 长度
     l_llbar_ = std::sqrt(y_lltd_ * y_lltd_ + z_lltd_ * z_lltd_);
     l_lrbar_ = std::sqrt(y_lrtd_ * y_lrtd_ + z_lrtd_ * z_lrtd_);
     l_rlbar_ = std::sqrt(y_rltd_ * y_rltd_ + z_rltd_ * z_rltd_);
@@ -44,12 +52,25 @@ Eigen::Vector3d Roban_ankle_solver::compute_tendon_vector(
     double c_act = std::cos(actuator_angle);
     double s_act = std::sin(actuator_angle);
     
+    // 正确的运动学：考虑 pitch 和 roll 关节之间的偏移
+    // z_pitch_raw = z_pitch_ - z_roll_（z_pitch_ 是 roll 关节相对于 knee 的 z 偏移）
+    double z_pitch_raw = z_pitch_ - z_roll_;
+    
+    // eq 点在 knee 坐标系中的位置（考虑关节偏移）
+    // p_eq_knee = T_pitch + R_pitch * (T_roll + R_roll * p_eq_roll)
+    double p_eq_x = x_pitch_ + z_roll_ * s1 + c1 * p.x_eq + s1 * s2 * p.y_eq + s1 * c2 * p.z_eq;
+    double p_eq_y = c2 * p.y_eq - s2 * p.z_eq;
+    double p_eq_z = z_pitch_raw + z_roll_ * c1 - s1 * p.x_eq + c1 * s2 * p.y_eq + c1 * c2 * p.z_eq;
+    
+    // td 点在 knee 坐标系中的位置
+    // p_td_knee = T_bar + R_actuator * p_td_bar
+    double p_td_x = p.x_bar + p.x_td;
+    double p_td_y = c_act * p.y_td - s_act * p.z_td;
+    double p_td_z = p.z_bar + s_act * p.y_td + c_act * p.z_td;
+    
+    // 肌腱向量 = td - eq
     Eigen::Vector3d p_eqtd;
-    p_eqtd << 
-        -(p.x_eq * c1 - p.x_td + p.y_eq * s1 * s2 + p.z_eq * s1 * c2),
-        -(p.y_eq * c2 - p.y_td * c_act - p.z_eq * s2 + p.z_td * s_act),
-        -(-p.x_eq * s1 + p.y_eq * s2 * c1 - p.y_td * s_act - p.z_bar + 
-          p.z_eq * c1 * c2 - p.z_td * c_act + z_pitch_);
+    p_eqtd << p_td_x - p_eq_x, p_td_y - p_eq_y, p_td_z - p_eq_z;
     
     return p_eqtd;
 }
@@ -64,18 +85,28 @@ Eigen::Matrix<double, 3, 2> Roban_ankle_solver::compute_jacobian_ankle(
     double c2 = std::cos(roll);
     double s2 = std::sin(roll);
     
-    Eigen::Matrix<double, 3, 2> jacp_ankle;
-    double col1_row1 = -p.x_eq * s1 + p.y_eq * s2 * c1 + p.z_eq * c1 * c2;
-    double col1_row2 = 0.0;
-    double col1_row3 = -p.x_eq * c1 - p.y_eq * s1 * s2 - p.z_eq * s1 * c2;
-    double col2_row1 = p.y_eq * s1 * c2 - p.z_eq * s1 * s2;
-    double col2_row2 = -p.y_eq * s2 - p.z_eq * c2;
-    double col2_row3 = p.y_eq * c1 * c2 - p.z_eq * s2 * c1;
+    // 计算 eq 点位置相对于 [pitch, roll] 的雅可比
+    // p_eq_x = x_pitch_ + z_roll_*s1 + c1*x_eq + s1*s2*y_eq + s1*c2*z_eq
+    // p_eq_y = c2*y_eq - s2*z_eq
+    // p_eq_z = z_pitch_raw + z_roll_*c1 - s1*x_eq + c1*s2*y_eq + c1*c2*z_eq
     
+    // ∂p_eq/∂pitch
+    double dp_eq_x_dpitch = z_roll_ * c1 - s1 * p.x_eq + c1 * s2 * p.y_eq + c1 * c2 * p.z_eq;
+    double dp_eq_y_dpitch = 0.0;
+    double dp_eq_z_dpitch = -z_roll_ * s1 - c1 * p.x_eq - s1 * s2 * p.y_eq - s1 * c2 * p.z_eq;
+    
+    // ∂p_eq/∂roll
+    double dp_eq_x_droll = s1 * c2 * p.y_eq - s1 * s2 * p.z_eq;
+    double dp_eq_y_droll = -s2 * p.y_eq - c2 * p.z_eq;
+    double dp_eq_z_droll = c1 * c2 * p.y_eq - c1 * s2 * p.z_eq;
+    
+    // p_eqtd = p_td - p_eq，p_td 不依赖于 pitch/roll
+    // ∂p_eqtd/∂[pitch, roll] = -∂p_eq/∂[pitch, roll]
+    Eigen::Matrix<double, 3, 2> jacp_ankle;
     jacp_ankle << 
-        col1_row1, col2_row1,
-        col1_row2, col2_row2,
-        col1_row3, col2_row3;
+        -dp_eq_x_dpitch, -dp_eq_x_droll,
+        -dp_eq_y_dpitch, -dp_eq_y_droll,
+        -dp_eq_z_dpitch, -dp_eq_z_droll;
     
     return jacp_ankle;
 }
@@ -121,14 +152,15 @@ TendonParams Roban_ankle_solver::get_tendon_params(
     struct ParamRefs {
         const double* x_eq, *y_eq, *z_eq;
         const double* x_td, *y_td, *z_td;
-        const double* z_bar, *l_bar, *l0_eqtd;
+        const double* x_bar, *z_bar, *l_bar, *l0_eqtd;
     };
     
-    static const ParamRefs refs[] = {
-        {&x_lleq_, &y_lleq_, &z_lleq_, &x_lltd_, &y_lltd_, &z_lltd_, &z_llbar_, &l_llbar_, &l0_ll_eqtd_},
-        {&x_lreq_, &y_lreq_, &z_lreq_, &x_lrtd_, &y_lrtd_, &z_lrtd_, &z_lrbar_, &l_lrbar_, &l0_lr_eqtd_},
-        {&x_rleq_, &y_rleq_, &z_rleq_, &x_rltd_, &y_rltd_, &z_rltd_, &z_rlbar_, &l_rlbar_, &l0_rl_eqtd_},
-        {&x_rreq_, &y_rreq_, &z_rreq_, &x_rrtd_, &y_rrtd_, &z_rrtd_, &z_rrbar_, &l_rrbar_, &l0_rr_eqtd_}
+    // 注意：使用 this 指针来访问成员变量
+    const ParamRefs refs[] = {
+        {&x_lleq_, &y_lleq_, &z_lleq_, &x_lltd_, &y_lltd_, &z_lltd_, &x_llbar_, &z_llbar_, &l_llbar_, &l0_ll_eqtd_},
+        {&x_lreq_, &y_lreq_, &z_lreq_, &x_lrtd_, &y_lrtd_, &z_lrtd_, &x_lrbar_, &z_lrbar_, &l_lrbar_, &l0_lr_eqtd_},
+        {&x_rleq_, &y_rleq_, &z_rleq_, &x_rltd_, &y_rltd_, &z_rltd_, &x_rlbar_, &z_rlbar_, &l_rlbar_, &l0_rl_eqtd_},
+        {&x_rreq_, &y_rreq_, &z_rreq_, &x_rrtd_, &y_rrtd_, &z_rrtd_, &x_rrbar_, &z_rrbar_, &l_rrbar_, &l0_rr_eqtd_}
     };
     
     TendonParams params;
@@ -138,6 +170,7 @@ TendonParams Roban_ankle_solver::get_tendon_params(
     params.x_td = *refs[idx].x_td;
     params.y_td = *refs[idx].y_td;
     params.z_td = *refs[idx].z_td;
+    params.x_bar = *refs[idx].x_bar;
     params.z_bar = *refs[idx].z_bar;
     params.l_bar = *refs[idx].l_bar;
     params.l0_eqtd = *refs[idx].l0_eqtd;
@@ -190,7 +223,9 @@ Eigen::Vector2d Roban_ankle_solver::joint_to_motor_velocity_single_(
         pitch, roll, lbar, rbar, ankle_side);
     
     Eigen::Vector2d dq(dpitch, droll);
-    Eigen::Vector2d dp = jac_sys.J_actuator.colPivHouseholderQr().solve(jac_sys.J_constraint * dq);
+    // 约束方程：dl/dt = J_constraint * dq + J_actuator * dp = 0
+    // 所以：dp = -J_actuator^(-1) * J_constraint * dq
+    Eigen::Vector2d dp = -jac_sys.J_actuator.colPivHouseholderQr().solve(jac_sys.J_constraint * dq);
     
     return dp;
 }
@@ -204,8 +239,9 @@ Eigen::Vector2d Roban_ankle_solver::motor_to_joint_velocity_single_(
     Eigen::Vector2d dp;
     dp << dllbar, dlrbar;
     
-    // dq = J_constraint^(-1) * J_actuator * dp
-    Eigen::Vector2d dq = jac_sys.J_constraint.colPivHouseholderQr().solve(
+    // 约束方程：dl/dt = J_constraint * dq + J_actuator * dp = 0
+    // 所以：dq = -J_constraint^(-1) * J_actuator * dp
+    Eigen::Vector2d dq = -jac_sys.J_constraint.colPivHouseholderQr().solve(
         jac_sys.J_actuator * dp);
     
     return dq;
@@ -215,9 +251,13 @@ Eigen::Vector2d Roban_ankle_solver::joint_to_motor_current_single_(
     double pitch, double roll, double llbar, double lrbar,
     double tau_pitch, double tau_roll, AnkleSide ankle_side) const {
     AnkleJacobianSystem jac_sys = compute_ankle_jacobian_system_(pitch, roll, llbar, lrbar, ankle_side);
+    // 虚功原理: τ_joint^T * dq = τ_motor^T * dp
+    // 由于 dp = -J_actuator^{-1} * J_constraint * dq
+    // 所以 τ_motor = -(J_constraint^{-1} * J_actuator)^T * τ_joint
     Eigen::Matrix2d J_actuator_to_ankle = jac_sys.J_actuator.colPivHouseholderQr().solve(jac_sys.J_constraint);
+    Eigen::Matrix2d J_ankle_to_actuator = J_actuator_to_ankle.inverse();
     Eigen::Vector2d tau(tau_pitch, tau_roll);
-    return J_actuator_to_ankle.transpose() * tau;
+    return -J_ankle_to_actuator.transpose() * tau;
 }
 
 Eigen::Vector2d Roban_ankle_solver::motor_to_joint_torque_single_(
@@ -226,7 +266,10 @@ Eigen::Vector2d Roban_ankle_solver::motor_to_joint_torque_single_(
     AnkleJacobianSystem jac_sys = compute_ankle_jacobian_system_(pitch, roll, llbar, lrbar, ankle_side);
     Eigen::Matrix2d J_actuator_to_ankle = jac_sys.J_actuator.colPivHouseholderQr().solve(jac_sys.J_constraint);
     Eigen::Vector2d i(i_llbar, i_lrbar);
-    return J_actuator_to_ankle.transpose().colPivHouseholderQr().solve(i);
+    // 虚功原理: τ_joint^T * dq = τ_motor^T * dp
+    // 由于 dq = -J_constraint^{-1} * J_actuator * dp
+    // 所以 τ_joint = -(J_actuator^{-1} * J_constraint)^T * τ_motor
+    return -J_actuator_to_ankle.transpose() * i;
 }
 
 
@@ -241,7 +284,7 @@ std::pair<double, double> Roban_ankle_solver::forward_kinematics_jacobian_(
     TendonParams p_l = get_tendon_params(ankle_side, TendonSide::LEFT);
     TendonParams p_r = get_tendon_params(ankle_side, TendonSide::RIGHT);
     
-    double pitch_phys = (ankle_side == AnkleSide::RIGHT) ? -pitch : pitch;
+    double pitch_phys = pitch;
     double roll_phys = roll;
     
     auto safe_acos = [](double x) {
@@ -253,29 +296,48 @@ std::pair<double, double> Roban_ankle_solver::forward_kinematics_jacobian_(
     double c2 = std::cos(roll_phys);
     double s2 = std::sin(roll_phys);
     
-    double y_LlbarEq_W = p_l.y_eq * c2 - p_l.z_eq * s2;
-    double z_LlbarEq_W = -p_l.x_eq * s1 + p_l.y_eq * s2 * c1 - p_l.z_bar + p_l.z_eq * c1 * c2 + z_pitch_;
-    double y_LrbarEq_W = p_r.y_eq * c2 - p_r.z_eq * s2;
-    double z_LrbarEq_W = -p_r.x_eq * s1 + p_r.y_eq * s2 * c1 - p_r.z_bar + p_r.z_eq * c1 * c2 + z_pitch_;
-    double x_LltdEq_W = p_l.x_eq * c1 - p_l.x_td + p_l.y_eq * s1 * s2 + p_l.z_eq * s1 * c2;
-    double x_LrtdEq_W = p_r.x_eq * c1 - p_r.x_td + p_r.y_eq * s1 * s2 + p_r.z_eq * s1 * c2;
+    // 正确的运动学：考虑关节偏移
+    double z_pitch_raw = z_pitch_ - z_roll_;
     
-    double b_ll = std::sqrt(y_LlbarEq_W * y_LlbarEq_W + z_LlbarEq_W * z_LlbarEq_W);
+    // eq 点在 knee 坐标系中的位置（考虑关节偏移）
+    double p_eq_l_x = x_pitch_ + z_roll_ * s1 + c1 * p_l.x_eq + s1 * s2 * p_l.y_eq + s1 * c2 * p_l.z_eq;
+    double p_eq_l_y = c2 * p_l.y_eq - s2 * p_l.z_eq;
+    double p_eq_l_z = z_pitch_raw + z_roll_ * c1 - s1 * p_l.x_eq + c1 * s2 * p_l.y_eq + c1 * c2 * p_l.z_eq;
+    
+    double p_eq_r_x = x_pitch_ + z_roll_ * s1 + c1 * p_r.x_eq + s1 * s2 * p_r.y_eq + s1 * c2 * p_r.z_eq;
+    double p_eq_r_y = c2 * p_r.y_eq - s2 * p_r.z_eq;
+    double p_eq_r_z = z_pitch_raw + z_roll_ * c1 - s1 * p_r.x_eq + c1 * s2 * p_r.y_eq + c1 * c2 * p_r.z_eq;
+    
+    // eq 点相对于 bar 的位置（在 yz 平面上的投影）
+    double y_LlbarEq = p_eq_l_y;  // bar 的 y 为 0
+    double z_LlbarEq = p_eq_l_z - p_l.z_bar;  // 相对于 bar 的 z 位置
+    
+    double y_LrbarEq = p_eq_r_y;
+    double z_LrbarEq = p_eq_r_z - p_r.z_bar;
+    
+    // x 方向的差值（td - eq）
+    double x_LltdEq = (p_l.x_bar + p_l.x_td) - p_eq_l_x;
+    double x_LrtdEq = (p_r.x_bar + p_r.x_td) - p_eq_r_x;
+    
+    // 使用余弦定理求解 actuator angle
+    double b_ll = std::sqrt(y_LlbarEq * y_LlbarEq + z_LlbarEq * z_LlbarEq);
     double a_ll = p_l.l_bar;
-    double c_ll = std::sqrt(p_l.l0_eqtd * p_l.l0_eqtd - x_LltdEq_W * x_LltdEq_W);
-    double theta_llbar_phys = std::atan2(z_LlbarEq_W, y_LlbarEq_W) + 
+    double c_ll_sq = p_l.l0_eqtd * p_l.l0_eqtd - x_LltdEq * x_LltdEq;
+    double c_ll = c_ll_sq > 0 ? std::sqrt(c_ll_sq) : 0.0;
+    double theta_llbar_phys = std::atan2(z_LlbarEq, y_LlbarEq) + 
                                safe_acos((a_ll * a_ll + b_ll * b_ll - c_ll * c_ll) / (2.0 * a_ll * b_ll)) - 
                                std::atan2(p_l.z_td, p_l.y_td);
     
-    double b_lr = std::sqrt(y_LrbarEq_W * y_LrbarEq_W + z_LrbarEq_W * z_LrbarEq_W);
+    double b_lr = std::sqrt(y_LrbarEq * y_LrbarEq + z_LrbarEq * z_LrbarEq);
     double a_lr = p_r.l_bar;
-    double c_lr = std::sqrt(p_r.l0_eqtd * p_r.l0_eqtd - x_LrtdEq_W * x_LrtdEq_W);
-    double theta_lrbar_phys = std::atan2(z_LrbarEq_W, y_LrbarEq_W) - 
+    double c_lr_sq = p_r.l0_eqtd * p_r.l0_eqtd - x_LrtdEq * x_LrtdEq;
+    double c_lr = c_lr_sq > 0 ? std::sqrt(c_lr_sq) : 0.0;
+    double theta_lrbar_phys = std::atan2(z_LrbarEq, y_LrbarEq) - 
                                safe_acos((a_lr * a_lr + b_lr * b_lr - c_lr * c_lr) / (2.0 * a_lr * b_lr)) - 
                                std::atan2(p_r.z_td, p_r.y_td);
     
-    double llbar = (ankle_side == AnkleSide::RIGHT) ? -theta_llbar_phys : theta_llbar_phys;
-    double lrbar = (ankle_side == AnkleSide::RIGHT) ? -theta_lrbar_phys : theta_lrbar_phys;
+    double llbar = theta_llbar_phys;
+    double lrbar = theta_lrbar_phys;
     
     return std::make_pair(llbar, lrbar);
 }
@@ -379,8 +441,8 @@ std::pair<double, double> Roban_ankle_solver::inverse_kinematics_jacobian_(
     TendonParams p_l = get_tendon_params(ankle_side, TendonSide::LEFT);
     TendonParams p_r = get_tendon_params(ankle_side, TendonSide::RIGHT);
     
-    double llbar_phys = (ankle_side == AnkleSide::RIGHT) ? -llbar : llbar;
-    double lrbar_phys = (ankle_side == AnkleSide::RIGHT) ? -lrbar : lrbar;
+    double llbar_phys = llbar;
+    double lrbar_phys = lrbar;
     double pitch_phys = 0.0;
     double roll_phys = 0.0;
     
@@ -414,15 +476,15 @@ std::pair<double, double> Roban_ankle_solver::inverse_kinematics_jacobian_(
         J_constraint << J_l_ankle_ll(0), J_l_ankle_ll(1), J_l_ankle_lr(0), J_l_ankle_lr(1);
         
         Eigen::Vector2d delta = J_constraint.colPivHouseholderQr().solve(residual);
-        pitch_phys += delta(0);
-        roll_phys += delta(1);
+        pitch_phys -= delta(0);
+        roll_phys -= delta(1);
         
         if (delta.norm() < tol) {
             break;
         }
     }
     
-    double pitch = (ankle_side == AnkleSide::RIGHT) ? -pitch_phys : pitch_phys;
+    double pitch = pitch_phys;
     double roll = roll_phys;
     
     return std::make_pair(pitch, roll);

@@ -14,7 +14,7 @@
     <arg name="robot_type"         default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="nodelet_robot_type"  default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="wheel_control_type"  default="1"/>    <!-- 0表示轮臂的仿真测试版mpc，1表示实际部署mpc -->
-    <arg name="use_sqp"   default="false" doc="Use SQP if true, DDP if false"/>
+    <arg name="use_sqp"   default="true" doc="Use SQP if true, DDP if false"/>
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>

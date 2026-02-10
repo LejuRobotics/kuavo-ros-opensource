@@ -19,6 +19,8 @@ namespace HighlyDynamic
 #define BIT_17_18 (BIT_17 * 18)
 #define BIT_17_20 (BIT_17 * 20)
 #define BIT_17_25 (BIT_17 * 25)
+//电机减速比25.775，乘2e17后为3378380
+#define BIT_17_251 (3378380) 
 #define BIT_17_36 (BIT_17 * 36)
 #define BIT_17_120 (BIT_17 * 120)
 
@@ -33,6 +35,8 @@ namespace HighlyDynamic
 #define PA76_18_MC (31.5)
 #define PA105_18_MC (70)
 #define PA115_MC (40)
+#define PA81_25_MC (40)
+#define PA4315_36_MC (22.5)
 
 
 #define AK10_9_C2T (1.26)
@@ -41,6 +45,8 @@ namespace HighlyDynamic
 #define PA100_C2T (1.2) // 1.2
 #define PA100_18_C2T (2.0)
 #define PA100_20_C2T (2.4)
+#define PA81_25_C2T (2.9)
+#define PA4315_36_C2T (1.6)
 
 
 #define CK_C2T (2.1) // 1.4

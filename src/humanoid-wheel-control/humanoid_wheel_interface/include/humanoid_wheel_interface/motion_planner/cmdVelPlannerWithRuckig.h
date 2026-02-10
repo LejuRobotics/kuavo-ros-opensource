@@ -38,7 +38,8 @@ public:
                              Eigen::VectorXd& position,
                              Eigen::VectorXd& velocity,
                              Eigen::VectorXd& acceleration);
-
+    
+    int getDofNum() const { return dofNum_; }
 private:
     // 常规成员 
     size_t dofNum_{3};                     // 自由度数量

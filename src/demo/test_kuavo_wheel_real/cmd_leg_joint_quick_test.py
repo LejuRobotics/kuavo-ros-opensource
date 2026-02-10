@@ -3,9 +3,7 @@ import rospy
 import time
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float32
-from std_srvs.srv import SetBool, SetBoolRequest
 import lb_ctrl_api as ct
-from kuavo_msgs.srv import changeLbQuickModeSrv, changeLbQuickModeSrvRequest
 
 # -------------- 全局变量 --------------
 reach_time = 0.0
@@ -26,27 +24,6 @@ def build_joint_state(positions):
     js.position = positions
     return js
 
-def set_arm_quick_mode(quickMode):
-    """
-    设置手臂快速模式
-    Args:
-        全身快速模式类型: 0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
-    """
-    print(f"call set_arm_quick_mode:{quickMode}")
-    rospy.wait_for_service('/enable_lb_arm_quick_mode')
-    try:
-        set_arm_quick_mode_service = rospy.ServiceProxy('/enable_lb_arm_quick_mode', changeLbQuickModeSrv)
-        req = changeLbQuickModeSrvRequest()
-        req.quickMode = quickMode
-        resp = set_arm_quick_mode_service(req)
-        if resp.success:
-            rospy.loginfo(f"Successfully enabled {quickMode} quick mode")
-        else:
-            rospy.logwarn(f"Failed to enable {quickMode} quick mode")
-    except rospy.ServiceException as e:
-        rospy.logerr(f"Service call failed: {e}")
-        return False
-
 def execute_leg_tests():
     """依次发布若干组 4 关节角度，并等待每次运动结束"""
     global reach_time
@@ -61,14 +38,13 @@ def execute_leg_tests():
     # 等待连接
     rospy.sleep(1.0)
 
-    ct.set_control_mode(1)
-
     # 测试用例列表： (名称, 关节角度)
     test_cases = [
         ("测试数据1", [14.90, -32.01, 18.03,  0.0]),
         ("测试数据2", [14.90, -32.01, 18.03, 30.0]),
         ("测试数据3", [14.90, -32.01, 18.03, -30.0]),
         ("测试数据4", [14.90, -32.01, 18.03,  0.0]),
+        ("测试数据4", [0.0, 0.0, 0.0, 0.0]),
     ]
 
     rospy.loginfo("开始发布下肢关节测试数据...")
@@ -90,16 +66,14 @@ def execute_leg_tests():
 
     rospy.loginfo("\n所有上肢关节测试数据发布完成！")
 
-    ct.set_control_mode(2)
-
 # -------------- 主入口 --------------
 def main():
     try:
         # 根据需要开关快速模式
         # set_arm_quick_mode(True)
-        set_arm_quick_mode(1)
+        ct.set_arm_quick_mode(1)
         execute_leg_tests()
-        set_arm_quick_mode(0)
+        ct.set_arm_quick_mode(0)
     except rospy.ROSInterruptException:
         rospy.logwarn("ROS 中断异常")
     except Exception as e:

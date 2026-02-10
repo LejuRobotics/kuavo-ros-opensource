@@ -248,74 +248,87 @@ void AnkleSolver::getconfig(const int ankle_solver_type)
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN_2)
     {
-        // S2GEN_2 使用硬编码参数配置
+        // S2GEN_2 
+        // 右腿: rl=长肌腱(内侧y>0), rr=短肌腱(外侧y<0)
+        // 左腿: lr=长肌腱(内侧y<0), ll=短肌腱(外侧y>0) 
         config.resize(37);
-        // 硬编码参数
-        double z_pitch = -0.346;
-        // 左脚踝左肌腱等效力点
-        double x_lleq = 0.0385; double y_lleq = 0.0207;  double z_lleq = -0.01;
-        // 左脚踝右肌腱等效力点
-        double x_lreq = 0.0385; double y_lreq = -0.0207; double z_lreq = -0.01;
-        // 左脚踝执行器杆位置（y 坐标从等效力点推断，z 坐标从配置读取）
-        double y_llbar = 0.0206743;   double z_llbar = -0.153;  // 使用 l_l_tendon 的 y 坐标
-        double y_lrbar = -0.0206743;  double z_lrbar = -0.09;   // 使用 l_r_tendon 的 y 坐标
-        // 左脚踝肌腱附着点
-        double x_lltd = 0.044; double y_lltd = 0.0206743; double z_lltd = -0.0100784;
-        double x_lrtd = 0.044; double y_lrtd = -0.0206743; double z_lrtd = -0.0100784;
-        // 左脚踝初始肌腱长度
-        double l0_ll_eqtd = 0.19299998551049166;
-        double l0_lr_eqtd = 0.25599998937207;
-        // 左脚踝执行器杆长度（从 sqrt(y_lltd^2 + z_lltd^2) 计算得出）
-        double l_llbar = 0.023000017979341;  // sqrt(0.0206743^2 + 0.0100784^2)
-        double l_lrbar = 0.023000017979341;  // sqrt(0.0206743^2 + 0.0100784^2)
+        
+        // 硬编码参数 
+        // 关节偏移参数
+        double z_pitch = -0.294;      // foot_roll 相对于 knee 的 z 偏移 (-0.276 - 0.018)
+        double z_roll = -0.018;       // roll 关节相对于 pitch 关节的 z 偏移
+        double x_pitch = 0.03;        // pitch 关节相对于 knee 的 x 偏移
+        
+        // ===== 左脚踝参数  =====
+        // ll = 短肌腱 (外侧, y>0)
+        double x_lleq = 0.02780675; double y_lleq = 0.0207;  double z_lleq = 0.00367032;
+        double x_llbar = 0.047123;    double z_llbar = -0.1595;   // 短肌腱侧 bar (rr镜像)
+        double x_lltd = 0.014; double y_lltd = 0.023428; double z_lltd = -0.0039472;   // 短肌腱附着点 (rr镜像)
+        double l0_ll_eqtd = 0.12695512289393013;  // 短肌腱初始长度
+        double l_llbar = 0.02375818957412370;     // 短肌腱侧 bar 长度
+        
+        // lr = 长肌腱 (内侧, y<0)
+        double x_lreq = 0.02780675; double y_lreq = -0.0186; double z_lreq = 0.00367032;
+        double x_lrbar = 0.05117;     double z_lrbar = -0.10163;  // 长肌腱侧 bar (rl镜像)
+        double x_lrtd = 0.014; double y_lrtd = -0.023357; double z_lrtd = -0.0044851;  // 长肌腱附着点 (rl镜像)
+        double l0_lr_eqtd = 0.18442304081686461;  // 长肌腱初始长度
+        double l_lrbar = 0.02378372491873382;     // 长肌腱侧 bar 长度
 
-        // 右脚踝参数（与左脚踝对称）
-        double x_rleq = 0.0385; double y_rleq = 0.0207;  double z_rleq = -0.01;
-        double x_rreq = 0.0385; double y_rreq = -0.0207; double z_rreq = -0.01;
-        double y_rlbar = 0.0206743;   double z_rlbar = -0.09;   // 使用 r_l_tendon 的 y 坐标
-        double y_rrbar = -0.0206743;  double z_rrbar = -0.153; // 使用 r_r_tendon 的 y 坐标
-        double x_rltd = 0.044; double y_rltd = 0.0206743; double z_rltd = -0.0100784;
-        double x_rrtd = 0.044; double y_rrtd = -0.0206743; double z_rrtd = -0.0100784;
-        double l0_rl_eqtd = 0.25599998937207;
-        double l0_rr_eqtd = 0.19299998551049166;
-        // 右脚踝执行器杆长度（从 sqrt(y_rltd^2 + z_rltd^2) 计算得出）
-        double l_rlbar = 0.023000017979341;  // sqrt(0.0206743^2 + 0.0100784^2)
-        double l_rrbar = 0.023000017979341;  // sqrt(0.0206743^2 + 0.0100784^2)
+        // ===== 右脚踝参数  =====
+        // rl = 内侧长肌腱 (y > 0)
+        double x_rleq = 0.02780675; double y_rleq = 0.0186;  double z_rleq = 0.00367032;  
+        double x_rlbar = 0.05117;     double z_rlbar = -0.10163;  // 长肌腱侧 bar
+        double x_rltd = 0.014; double y_rltd = 0.023357; double z_rltd = -0.0044851;
+        double l0_rl_eqtd = 0.18442304081686461;  // 长肌腱初始长度
+        double l_rlbar = 0.02378372491873382;     // 长肌腱侧 bar 长度
+        
+        // rr = 外侧短肌腱 (y < 0)
+        double x_rreq = 0.02780675; double y_rreq = -0.0207; double z_rreq = 0.00367032;  // 与 XML r_r_eq 一致
+        double x_rrbar = 0.047123;    double z_rrbar = -0.1595;   // 短肌腱侧 bar
+        double x_rrtd = 0.014; double y_rrtd = -0.023428; double z_rrtd = -0.0039472;
+        double l0_rr_eqtd = 0.12695512289393013;  // 短肌腱初始长度
+        double l_rrbar = 0.02375818957412370;     // 短肌腱侧 bar 长度
+
         config << z_pitch, 
                   x_lleq, y_lleq, z_lleq, 
                   x_lreq, y_lreq, z_lreq, 
-                  y_llbar, z_llbar, 
-                  y_lrbar, z_lrbar, 
+                  x_llbar, z_llbar,       // 更新为 x_bar
+                  x_lrbar, z_lrbar,       // 更新为 x_bar
                   x_lltd, z_lltd, 
                   x_lrtd, z_lrtd, 
                   l0_ll_eqtd, l0_lr_eqtd, 
                   l_llbar, l_lrbar, 
                   x_rleq, y_rleq, z_rleq, 
                   x_rreq, y_rreq, z_rreq, 
-                  y_rlbar, z_rlbar, 
-                  y_rrbar, z_rrbar, 
+                  x_rlbar, z_rlbar,       // 更新为 x_bar
+                  x_rrbar, z_rrbar,       // 更新为 x_bar
                   x_rltd, z_rltd, 
                   x_rrtd, z_rrtd, 
                   l0_rl_eqtd, l0_rr_eqtd, 
                   l_rlbar, l_rrbar;
         // 左脚pitch限位
-        ankle_pitch_limits_ << -0.38397, 0.73304;
+        ankle_pitch_limits_ << -0.872664625997165, 0.523598775598299;
         ankle_roll_limits_ << -0.261799387799149, 0.261799387799149;
         
         // 初始化 roban_ankle_solver（使用自定义删除器）
         kuavo_solver::RobanAnkleParams params;
+        // 关节偏移参数
         params.z_pitch = z_pitch;
+        params.z_roll = z_roll;
+        params.x_pitch = x_pitch;
         // 左脚踝参数
         params.x_lleq = x_lleq; params.y_lleq = y_lleq; params.z_lleq = z_lleq;
         params.x_lreq = x_lreq; params.y_lreq = y_lreq; params.z_lreq = z_lreq;
-        params.z_llbar = z_llbar; params.z_lrbar = z_lrbar;
+        params.x_llbar = x_llbar; params.z_llbar = z_llbar;
+        params.x_lrbar = x_lrbar; params.z_lrbar = z_lrbar;
         params.x_lltd = x_lltd; params.y_lltd = y_lltd; params.z_lltd = z_lltd;
         params.x_lrtd = x_lrtd; params.y_lrtd = y_lrtd; params.z_lrtd = z_lrtd;
         params.l0_ll_eqtd = l0_ll_eqtd; params.l0_lr_eqtd = l0_lr_eqtd;
         // 右脚踝参数
         params.x_rleq = x_rleq; params.y_rleq = y_rleq; params.z_rleq = z_rleq;
         params.x_rreq = x_rreq; params.y_rreq = y_rreq; params.z_rreq = z_rreq;
-        params.z_rlbar = z_rlbar; params.z_rrbar = z_rrbar;
+        params.x_rlbar = x_rlbar; params.z_rlbar = z_rlbar;
+        params.x_rrbar = x_rrbar; params.z_rrbar = z_rrbar;
         params.x_rltd = x_rltd; params.y_rltd = y_rltd; params.z_rltd = z_rltd;
         params.x_rrtd = x_rrtd; params.y_rrtd = y_rrtd; params.z_rrtd = z_rrtd;
         params.l0_rl_eqtd = l0_rl_eqtd; params.l0_rr_eqtd = l0_rr_eqtd;
@@ -396,7 +409,7 @@ Eigen::VectorXd AnkleSolver::joint_to_motor_position(const Eigen::VectorXd& q)
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_S2GEN_2)
     {
-        result = joint_to_motor_position_s2_2_(q);
+        result = joint_to_motor_position_s2_2_(joint_q);
     }
     else if (ankle_solver_type_ == AnkleSolverType::ANKLE_SOLVER_TYPE_NONE)
     {
@@ -3332,8 +3345,8 @@ Eigen::VectorXd AnkleSolver::motor_to_joint_position_s2_2_(const Eigen::VectorXd
     // 左脚pitch限位
     result[4] = std::max(std::min(q_ankle[0], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);   // 左 pitch
     result[5] = std::max(std::min(q_ankle[1], ankle_roll_limits_[1]), ankle_roll_limits_[0]);   // 左 roll
-    // 右脚pitch限位
-    result[10] = std::max(std::min(q_ankle[2], -ankle_pitch_limits_[0]), -ankle_pitch_limits_[1]);  // 右 pitch
+    // 右脚pitch限位（与左脚使用相同限位，因为现在使用全部正向坐标系）
+    result[10] = std::max(std::min(q_ankle[2], ankle_pitch_limits_[1]), ankle_pitch_limits_[0]);  // 右 pitch
     result[11] = std::max(std::min(q_ankle[3], ankle_roll_limits_[1]), ankle_roll_limits_[0]);  // 右 roll
     
     return result;

@@ -40,7 +40,7 @@
   <link name="waist_yaw_link">
     <inertial>
       <origin xyz="0.001 0.0 -0.122" rpy="0 0 0" />
-      <mass value="4.8567" />
+      <mass value="6.9767" />
       <inertia ixx="0.023" ixy="0.0" ixz="0.0" iyy="0.015" iyz="0.0" izz="0.017" />
     </inertial>
     <visual>

@@ -1,6 +1,6 @@
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.api import transform_pose_from_tag_to_world, ArmAPI, TorsoAPI, \
-    HeadAPI
+    HeadAPI, TimedCmdAPI
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Tag, Frame, Transform3D
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoPose, KuavoManipulationMpcFrame, KuavoManipulationMpcCtrlMode
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.utils import generate_full_bezier_trajectory, \
@@ -1014,6 +1014,272 @@ class NodeWheelArm(Behaviour):
 
     def terminate(self, new_status):
         self.logger.debug(f"NodeWheelArm::terminate {self.name} to {new_status}")
+
+
+class NodeWheelMoveTimedCmd(Behaviour):
+    """
+    通用定时命令节点（支持底盘、下肢、上肢等）
+    
+    通过 /mobile_manipulator_timed_single_cmd 服务逐点发送命令，
+    直接执行关键点序列。
+    
+    根据 cmd_type 参数选择控制模式：
+        - 'chassis_world': 底盘世界系位姿（planner_index=0，3维：x, y, yaw）
+        - 'chassis_local': 底盘局部系位姿（planner_index=1，3维：x, y, yaw）
+        - 'torso': 躯干位姿（planner_index=2，4维：x, z, yaw, pitch）
+        - 'leg': 下肢关节（planner_index=3，4个关节）
+        - 'arm': 上肢关节（planner_index=6，14个关节）
+    
+    从黑板读取（根据 cmd_type 自动选择键名）：
+        - cmd_type='chassis_world': chassis_world_keypoints, chassis_world_keypoint_times
+        - cmd_type='chassis_local': chassis_local_keypoints, chassis_local_keypoint_times
+        - cmd_type='torso': torso_keypoints, torso_keypoint_times
+        - cmd_type='leg': leg_keypoints, leg_keypoint_times
+        - cmd_type='arm': arm_joint_keypoints, arm_joint_keypoint_times
+    
+    Args:
+        name: 节点名称
+        timed_cmd_api: TimedCmdAPI 实例
+        cmd_type: 命令类型，默认 'leg'
+        time_per_point: 每个关键点的默认执行时间（秒），当黑板无时间列表时使用
+    """
+    
+    # 黑板键名映射
+    BLACKBOARD_KEYS = {
+        'chassis_world': {'keypoints': 'chassis_world_keypoints', 'times': 'chassis_world_keypoint_times'},
+        'chassis_local': {'keypoints': 'chassis_local_keypoints', 'times': 'chassis_local_keypoint_times'},
+        'torso': {'keypoints': 'torso_keypoints', 'times': 'torso_keypoint_times'},
+        'leg': {'keypoints': 'leg_keypoints', 'times': 'leg_keypoint_times'},
+        'arm_ee_world': {'keypoints': 'arm_ee_world_keypoints', 'times': 'arm_ee_keypoint_times'},
+        'arm_ee_local': {'keypoints': 'arm_ee_local_keypoints', 'times': 'arm_ee_keypoint_times'},
+        'arm': {'keypoints': 'arm_joint_keypoints', 'times': 'arm_joint_keypoint_times'},
+    }
+    
+    # 显示名称映射
+    DISPLAY_NAMES = {
+        'chassis_world': '底盘世界系',
+        'chassis_local': '底盘局部系',
+        'torso': '躯干',
+        'arm_ee_world': '双臂末端世界系',
+        'arm_ee_local': '双臂末端局部系',
+        'leg': '下肢',
+        'arm': '上肢',
+    }
+    
+    def __init__(self,
+                 name,
+                 timed_cmd_api: TimedCmdAPI = None,
+                 cmd_type: str = 'leg',
+                 time_per_point: float = 2.0,
+                 # 向后兼容参数
+                 joint_api: TimedCmdAPI = None,
+                 joint_type: str = None,
+                 ):
+        super(NodeWheelMoveTimedCmd, self).__init__(name)
+        
+        # 向后兼容：支持旧参数名
+        if joint_api is not None:
+            timed_cmd_api = joint_api
+        if joint_type is not None:
+            cmd_type = joint_type
+        
+        # 验证必需参数
+        if timed_cmd_api is None:
+            raise ValueError("必须提供 timed_cmd_api 或 joint_api 参数")
+        
+        if cmd_type not in self.BLACKBOARD_KEYS:
+            supported = ', '.join(self.BLACKBOARD_KEYS.keys())
+            raise ValueError(f"无效的 cmd_type: {cmd_type}，支持: {supported}")
+        
+        self.timed_cmd_api = timed_cmd_api
+        self.cmd_type = cmd_type
+        self.time_per_point = time_per_point
+        
+        # 向后兼容属性
+        self.joint_api = timed_cmd_api
+        self.joint_type = cmd_type
+        
+        # 获取黑板键名
+        keys = self.BLACKBOARD_KEYS[cmd_type]
+        self.keypoints_key = keys['keypoints']
+        self.times_key = keys['times']
+        
+        # 从黑板读取关键点列表和时间列表
+        self.bb = py_trees.blackboard.Client(name=name)
+        for k in [self.keypoints_key, self.times_key]:
+            self.bb.register_key(key=k, access=py_trees.common.Access.READ)
+        
+        self.current_idx = 0
+        self.keypoints = []
+        self.keypoint_times = []
+        self.is_waiting = False
+        self.wait_until = 0.0
+        
+        # 显示名称
+        self.display_name = self.DISPLAY_NAMES.get(cmd_type, cmd_type)
+
+    def initialise(self):
+        self.logger.debug(f"NodeWheelMoveTimedCmd::initialise {self.name}")
+        
+        # 从黑板获取关键点
+        self.keypoints = getattr(self.bb, self.keypoints_key, None)
+        self.keypoint_times = getattr(self.bb, self.times_key, None)
+        
+        if self.keypoints is None:
+            self.logger.error(f"NodeWheelMoveTimedCmd::initialise {self.name} - 黑板中无关键点数据 ({self.keypoints_key})")
+            return
+        
+        # 如果没有时间列表，使用默认时间
+        if self.keypoint_times is None:
+            self.keypoint_times = [self.time_per_point] * len(self.keypoints)
+            
+        self.current_idx = 0
+        self.is_waiting = False
+        self.wait_until = 0.0
+        print(f"===== NodeWheelMoveTimedCmd({self.display_name}): 共 {len(self.keypoints)} 个关键点待执行")
+
+    def update(self):
+        self.logger.debug(f"NodeWheelMoveTimedCmd::update {self.name}")
+        
+        # 检查数据有效性
+        if self.keypoints is None:
+            return Status.FAILURE
+            
+        if len(self.keypoints) == 0:
+            return Status.SUCCESS
+            
+        # 如果正在等待当前点执行完成
+        if self.is_waiting:
+            if time.time() >= self.wait_until:
+                self.is_waiting = False
+                self.current_idx += 1
+            else:
+                time.sleep(0.01)
+                return Status.RUNNING
+        
+        # 检查是否已执行完所有关键点
+        if self.current_idx >= len(self.keypoints):
+            print(f"===== NodeWheelMoveTimedCmd({self.display_name}): 所有关键点执行完成")
+            return Status.SUCCESS
+        
+        # 发送当前关键点
+        cmd_vec = self.keypoints[self.current_idx]
+        desire_time = self.keypoint_times[self.current_idx]
+        
+        print(f"===== NodeWheelMoveTimedCmd({self.display_name}): 执行第 {self.current_idx + 1}/{len(self.keypoints)} 个关键点, 时间={desire_time}s")
+        
+        success, actual_time = self.timed_cmd_api.send_timed_cmd(
+            cmd_type=self.cmd_type,
+            cmd_vec=cmd_vec,
+            desire_time=desire_time
+        )
+        
+        if not success:
+            self.logger.error(f"NodeWheelMoveTimedCmd::update {self.name} - 关键点 {self.current_idx + 1} 执行失败")
+            return Status.FAILURE
+        
+        # 设置等待时间
+        self.is_waiting = True
+        self.wait_until = time.time() + actual_time + 0.01
+        
+        return Status.RUNNING
+
+    def terminate(self, new_status):
+        self.logger.debug(f"NodeWheelMoveTimedCmd::terminate {self.name} to {new_status}")
+
+
+class NodeSetRuckigParams(Behaviour):
+    """
+    设置Ruckig规划器参数节点
+    
+    用于在行为树中设置不同规划器的运动参数（速度、加速度、急动度等）。
+    
+    Args:
+        name: 节点名称
+        timed_cmd_api: TimedCmdAPI 实例
+        planner_index: 规划器索引
+            - 0: 底盘世界系
+            - 1: 底盘局部系
+            - 2: 躯干
+            - 3: 下肢
+            - 4: 双臂末端世界系
+            - 5: 双臂末端局部系
+            - 6: 上肢
+        is_sync: 是否同步模式
+        velocity_max: 最大速度列表
+        acceleration_max: 最大加速度列表
+        jerk_max: 最大急动度列表
+        velocity_min: 最小速度列表（可选）
+        acceleration_min: 最小加速度列表（可选）
+    """
+    
+    def __init__(self,
+                 name,
+                 timed_cmd_api: TimedCmdAPI,
+                 planner_index: int,
+                 is_sync: bool,
+                 velocity_max: List[float],
+                 acceleration_max: List[float],
+                 jerk_max: List[float],
+                 velocity_min: List[float] = None,
+                 acceleration_min: List[float] = None):
+        super(NodeSetRuckigParams, self).__init__(name)
+        
+        if timed_cmd_api is None:
+            raise ValueError("必须提供 timed_cmd_api 参数")
+        
+        self.timed_cmd_api = timed_cmd_api
+        self.planner_index = planner_index
+        self.is_sync = is_sync
+        self.velocity_max = velocity_max
+        self.acceleration_max = acceleration_max
+        self.jerk_max = jerk_max
+        self.velocity_min = velocity_min
+        self.acceleration_min = acceleration_min
+        self.executed = False
+
+    def initialise(self):
+        self.logger.debug(f"NodeSetRuckigParams::initialise {self.name}")
+        self.executed = False
+
+    def update(self):
+        self.logger.debug(f"NodeSetRuckigParams::update {self.name}")
+        
+        if self.executed:
+            return Status.SUCCESS
+        
+        # 调用API，可选参数只在不为None时传递
+        if self.velocity_min is not None and self.acceleration_min is not None:
+            success = self.timed_cmd_api.set_ruckig_params(
+                planner_index=self.planner_index,
+                is_sync=self.is_sync,
+                velocity_max=self.velocity_max,
+                acceleration_max=self.acceleration_max,
+                jerk_max=self.jerk_max,
+                velocity_min=self.velocity_min,
+                acceleration_min=self.acceleration_min
+            )
+        else:
+            success = self.timed_cmd_api.set_ruckig_params(
+                planner_index=self.planner_index,
+                is_sync=self.is_sync,
+                velocity_max=self.velocity_max,
+                acceleration_max=self.acceleration_max,
+                jerk_max=self.jerk_max
+            )
+        
+        self.executed = True
+        
+        if success:
+            print(f"===== NodeSetRuckigParams({self.name}): 规划器参数设置成功 (planner_index={self.planner_index})")
+            return Status.SUCCESS
+        else:
+            self.logger.error(f"NodeSetRuckigParams::update {self.name} - 规划器参数设置失败")
+            return Status.FAILURE
+
+    def terminate(self, new_status):
+        self.logger.debug(f"NodeSetRuckigParams::terminate {self.name} to {new_status}")
+
 
 
 class NodeWaist(Behaviour):

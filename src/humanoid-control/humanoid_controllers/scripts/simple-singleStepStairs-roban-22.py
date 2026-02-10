@@ -183,7 +183,7 @@ class EnhancedSlopeController:
         # 0.5时刻：x和y移动50%，z保持最高点
 
         # 一阶段最高点的scale
-        phase1_height_scale = 1.4
+        phase1_height_scale = 1.6
         # 计算第二阶段起点和终点的z值
         phase2_start_z = prev_foot_pose[2] + self.stair_height * phase1_height_scale  # 第一阶段结束高度
         phase2_end_z = prev_foot_pose[2] + self.stair_height * stairNum * 1.0 + self.swing_height * 1.0  # 最高点
@@ -264,10 +264,11 @@ class EnhancedSlopeController:
         # 脚掌距离斜坡的初始距离
         foot_distance_initial = distance_initial
         
-        # 脚末端到脚掌中心的 x 方向距离
-        foot_offset = 0.05475
-        foot_toe = 0.151
-        foot_heel = -0.0415
+        # 脚掌参数（来自 URDF: l_foot_toe / l_foot_heel 相对于 leg_l6_link 的 x 坐标）
+        foot_toe = 0.1510
+        foot_heel = -0.0538
+        # 脚掌几何中心相对于 foot_sole(ankle投影) 的 x 偏移
+        foot_offset = (foot_toe + foot_heel) / 2  # = 0.0486
         
         # 数据结构初始化
         time_traj = []

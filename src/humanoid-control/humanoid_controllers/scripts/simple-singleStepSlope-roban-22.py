@@ -87,7 +87,7 @@ class EnhancedSlopeController:
         step_z_increment = (slope_height - foot_length_z) / (step_num-2)
         
         # 两脚之间的宽度
-        foot_width = 0.1175175  # 脚宽度
+        foot_width = 0.12441237  # 脚宽度
         
         # 初始位置
         foot_x = 0.0
