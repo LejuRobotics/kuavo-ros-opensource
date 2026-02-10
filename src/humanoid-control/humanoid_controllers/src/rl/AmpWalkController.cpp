@@ -541,9 +541,9 @@ namespace humanoid_controller
         velocity_commands(0) += x_bias;
         cmd.cmdVelLineX_ += x_bias;  // 关键：修改cmd对象，确保getCommandRL()返回补偿后的值
         
-        std::cout << "[" << name_ << "] YAW compensation applied: angular_z=" << angular_z
-                  << ", linear_x=" << linear_x << " -> " << velocity_commands(0)
-                  << " (bias=" << x_bias << ")" << std::endl;
+        // std::cout << "[" << name_ << "] YAW compensation applied: angular_z=" << angular_z
+        //           << ", linear_x=" << linear_x << " -> " << velocity_commands(0)
+        //           << " (bias=" << x_bias << ")" << std::endl;
       }
     }
     

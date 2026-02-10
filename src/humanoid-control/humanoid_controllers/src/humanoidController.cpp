@@ -507,6 +507,7 @@ namespace humanoid_controller
     jointAccRL_ = vector_t::Zero(jointNumReal_ + armNumReal_ + waistNum_);
     default_state_.resize(12+actuatedDofNumReal_);
     default_state_.setZero();
+    arm_mode_sync_time_ = ros::Time::now().toSec();
     
     // 检查RL参数文件是否存在，只有文件存在时才启用RL功能
     // std::ifstream rlParamFileCheck(rlParamFile);
@@ -945,15 +946,8 @@ namespace humanoid_controller
           }
           
           // 检查模式是否已同步，如果同步则记录时间
-          if (mpcArmControlMode_ == mpcArmControlMode_desired_)
-          {
-            arm_mode_sync_time_ = ros::Time::now().toSec();
-          }
-          else
-          {
-            // 模式未同步，重置同步时间
-            arm_mode_sync_time_ = 0.0;
-          }
+          arm_mode_sync_time_ = ros::Time::now().toSec();
+          
         }
         if (msg->data[1] != mpcArmControlMode_desired_)
         {
@@ -3321,7 +3315,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // 确保当前模式已切换到期望模式后才启用拉起保护，模式同步后还需要等待1.5秒才能触发拉起保护
       double current_time = ros::Time::now().toSec();
       bool mode_sync_ready = (mpcArmControlMode_ == mpcArmControlMode_desired_) && 
-                             (arm_mode_sync_time_ > 0.0) && 
                              (current_time - arm_mode_sync_time_ >= 1.5);
       bool enable_pull_up = enable_pull_up_protect_ &&  !is_rl_controller_ && isPreUpdateComplete && is_stance_mode_ && 
         !only_half_up_body_ && currentObservation_.time - standupTime_ > 4 
