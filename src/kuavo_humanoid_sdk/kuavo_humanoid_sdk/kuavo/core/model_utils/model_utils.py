@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 import os
 import argparse
-import cv2
-import torch
-from ultralytics import YOLO
-import numpy
-
 from kuavo_humanoid_sdk.kuavo.core.ros.camera import CameraROSInterface
+from kuavo_humanoid_sdk.common.optional_deps import require_optional
 
 is_yolo_init = False
 yolo_detection = None
 model = None
+
+def _require_vision_deps():
+    require_optional(["ultralytics", "torch"], "vision", "Vision")
+    from ultralytics import YOLO
+    return YOLO
 
 class YOLO_detection:
     def __init__(self):
@@ -22,6 +23,7 @@ class YOLO_detection:
 
     def load_model(self, model_path):
         try:
+            YOLO = _require_vision_deps()
             model = YOLO(model_path)
             print(f"Model loaded successfully from {model_path}")
             return model

@@ -19,6 +19,18 @@ PyPI 项目地址: https://pypi.org/project/kuavo-humanoid-sdk/
 pip install kuavo-humanoid-sdk
 ```
 
+可选功能依赖（按需安装）：
+```bash
+# 仅语音/ASR相关功能
+pip install kuavo-humanoid-sdk[audio]
+
+# 仅视觉/YOLO相关功能
+pip install kuavo-humanoid-sdk[vision]
+
+# 全量功能（包含音频 + 视觉依赖）
+pip install kuavo-humanoid-sdk[full]
+```
+
 安装最新的 **beta版** Kuavo Humanoid SDK，可以使用 pip：
 ```bash
 pip install --pre kuavo-humanoid-sdk
@@ -29,6 +41,11 @@ pip install --pre kuavo-humanoid-sdk
 cd src/kuavo_humanoid_sdk
 chmod +x install.sh
 ./install.sh
+
+# 如需安装可选功能依赖：
+# ./install.sh --extras audio
+# ./install.sh --extras vision
+# ./install.sh --extras full
 ```
 
 ## 升级更新

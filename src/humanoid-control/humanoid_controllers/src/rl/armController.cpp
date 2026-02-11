@@ -86,6 +86,8 @@ ArmController::~ArmController()
 void ArmController::reset()
 {
   // 重置插值状态
+  arm_control_mode_ = 1;
+  arm_vr_enabled_ = false;
   is_interpolating_ = false;
   is_interpolating_to_default_ = false;
   

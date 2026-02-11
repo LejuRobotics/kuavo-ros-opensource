@@ -4,8 +4,12 @@ import rospy
 from kuavo_humanoid_sdk.kuavo.core.ros.microphone import Microphone
 import contextlib, sys
 from kuavo_humanoid_sdk.common.logger import SDKLogger
+from kuavo_humanoid_sdk.common.optional_deps import require_optional
 
-from funasr import AutoModel
+def _require_audio_deps():
+    require_optional(["funasr"], "audio", "Audio")
+    from funasr import AutoModel
+    return AutoModel
 
 
 
@@ -17,8 +21,9 @@ class RobotMicrophoneCore:
         self.microphone = Microphone(subscribe_topic)
     
         # 创建VAD和ASR两个模型
+        AutoModel = _require_audio_deps()
         self.vad_model = AutoModel(model="fsmn-vad", model_revision="v2.0.4", disable_update=True)
-        self.asr_model = AutoModel(model="paraformer-zh-streaming", model_revision="v2.0.4",disable_update=True)
+        self.asr_model = AutoModel(model="paraformer-zh-streaming", model_revision="v2.0.4", disable_update=True)
         
         # 配置参数
         self.CHUNK = 1024  # 每个缓冲区的帧数

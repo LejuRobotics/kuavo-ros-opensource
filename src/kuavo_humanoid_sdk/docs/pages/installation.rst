@@ -27,6 +27,19 @@
 
       pip install kuavo-humanoid-sdk
 
+   可选功能依赖（按需安装）:
+
+   .. code-block:: bash
+
+      # 仅语音/ASR相关功能
+      pip install kuavo-humanoid-sdk[audio]
+
+      # 仅视觉/YOLO相关功能
+      pip install kuavo-humanoid-sdk[vision]
+
+      # 全量功能（包含音频 + 视觉依赖）
+      pip install kuavo-humanoid-sdk[full]
+
    使用 pip 安装最新的 **测试版** Kuavo Humanoid SDK:
 
    .. code-block:: bash
@@ -43,6 +56,11 @@
       cd kuavo-ros-opensource/src/kuavo_humanoid_sdk
       chmod +x install.sh  
       ./install.sh
+
+      # 如需安装可选功能依赖：
+      # ./install.sh --extras audio
+      # ./install.sh --extras vision
+      # ./install.sh --extras full
 
    这种方式允许你修改源代码,修改后无需重新安装即可生效。
 

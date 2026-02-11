@@ -202,10 +202,10 @@ namespace ocs2
         std::cout << "[JoyControl] controller_switch_time change to roban's time !!!" << std::endl;
       }
 
-      if (nodeHandle.hasParam("joy_node/dev"))
+      if (nodeHandle.hasParam("/joy_node/dev"))
       {
         std::string joystick_device;
-        nodeHandle.getParam("joy_node/dev", joystick_device);
+        nodeHandle.getParam("/joy_node/dev", joystick_device);
 
         int fd = -1;
         const char *device_path = joystick_device.c_str();
@@ -241,12 +241,18 @@ namespace ocs2
         }
       }
 
+      std::string channel_map_path_loaded;
       if (nodeHandle.hasParam("channel_map_path"))
       {
-        std::string channel_map_path;
-        nodeHandle.getParam("channel_map_path", channel_map_path);
-        ROS_INFO_STREAM("Loading joystick mapping from " << channel_map_path);
-        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
+        nodeHandle.getParam("channel_map_path", channel_map_path_loaded);
+        ROS_INFO_STREAM("Loading joystick mapping from " << channel_map_path_loaded);
+        loadJoyJsonConfig(channel_map_path_loaded, joyButtonMap, joyAxisMap);
+        if (joyButtonMap_backup.empty()) {
+          if (channel_map_path_loaded.find(JOYSTICK_BEITONG_MAP_JSON) != std::string::npos)
+            loadJoyJsonConfig(ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_XBOX_MAP_JSON + ".json", joyButtonMap_backup, joyAxisMap_backup);
+          else
+            loadJoyJsonConfig(ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_BEITONG_MAP_JSON + ".json", joyButtonMap_backup, joyAxisMap_backup);
+        }
       }
       else
       {
@@ -281,8 +287,11 @@ namespace ocs2
       Eigen::Vector4d joystickFilterCutoffFreq_(joystickSensitivity, joystickSensitivity, 
                                                   joystickSensitivity, joystickSensitivity);
       joystickFilter_.setParams(0.01,joystickFilterCutoffFreq_);
-      old_joy_msg_.axes = std::vector<float>(JOYSTICK_AXIS_NUM, 0.0);     // 假设有 8 个轴，默认值为 0.0
-      old_joy_msg_.buttons = std::vector<int32_t>(JOYSTICK_XBOX_BUTTON_NUM, 0);
+      old_joy_msg_.axes = std::vector<float>(JOYSTICK_AXIS_NUM, 0.0);
+      if (!channel_map_path_loaded.empty() && channel_map_path_loaded.find(JOYSTICK_BEITONG_MAP_JSON) != std::string::npos)
+        old_joy_msg_.buttons = std::vector<int32_t>(JOYSTICK_BEITONG_BUTTON_NUM, 0);
+      else
+        old_joy_msg_.buttons = std::vector<int32_t>(JOYSTICK_XBOX_BUTTON_NUM, 0);
       // Get node parameters
       std::string referenceFile;
       nodeHandle.getParam("/referenceFile", referenceFile);
@@ -746,7 +755,8 @@ namespace ocs2
             if (it != joyButtonMap.end()) {
                 int old_idx = it->second;
                 int new_idx = button.second;
-                if (old_idx < old_joy_msg_.buttons.size()) {
+                if (old_idx >= 0 && old_idx < static_cast<int>(old_joy_msg_.buttons.size()) &&
+                    new_idx >= 0 && new_idx < static_cast<int>(old_joy_msg_backup.buttons.size())) {
                     old_joy_msg_backup.buttons[new_idx] = old_joy_msg_.buttons[old_idx];
                 }
             }
@@ -755,7 +765,12 @@ namespace ocs2
             auto it = std::find_if(joyAxisMap.begin(), joyAxisMap.end(),
                 [&axis](const auto& pair) { return pair.first == axis.first; });
             if (it != joyAxisMap.end()) {
-                old_joy_msg_backup.axes[axis.second] = old_joy_msg_.axes[it->second];
+                int old_ax = it->second;
+                int new_ax = axis.second;
+                if (old_ax >= 0 && old_ax < static_cast<int>(old_joy_msg_.axes.size()) &&
+                    new_ax >= 0 && new_ax < static_cast<int>(old_joy_msg_backup.axes.size())) {
+                    old_joy_msg_backup.axes[new_ax] = old_joy_msg_.axes[old_ax];
+                }
             }
         }
 
@@ -905,6 +920,9 @@ namespace ocs2
         nodeHandle_.setParam("channel_map_path", channel_map_path);
         ROS_WARN("[JoyController]: Joystick data mapping has changed from BEITONG to X-Box");
         reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_XBOX_BUTTON_NUM);
+        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
+        old_joy_msg_ = *joy_msg;
+        return;
       }
       if(old_joy_msg_.buttons.size() == JOYSTICK_XBOX_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM)
       {
@@ -913,7 +931,7 @@ namespace ocs2
         nodeHandle_.setParam("channel_map_path", channel_map_path);
         ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
         reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
-        // 更新old_joy_msg并跳过本次处理，避免状态混乱
+        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
         old_joy_msg_ = *joy_msg;
         return;
       }
@@ -982,13 +1000,21 @@ namespace ocs2
 
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
       {
-        // 组合键
-        double head_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
-        double head_pitch = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]];
-        head_yaw = 80.0 * head_yaw;     // +- 60deg
-        head_pitch = -25.0 * head_pitch;// +- 25deg 
-        // std::cout << "head_yaw: " << head_yaw << " head_pitch: " << head_pitch << std::endl;
-        controlHead(head_yaw, head_pitch);
+        head_control_active_ = true;  // 标记进入头部控制模式
+        // 组合键控制头部，使用通用平滑控制函数
+        double head_yaw_raw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+        double head_pitch_raw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]];
+        
+        // 使用通用平滑控制函数处理yaw和pitch（各自独立的时间戳）
+        smoothAngleControl(head_yaw_raw, current_head_yaw_, 80.0, 
+                          HEAD_MAX_VELOCITY_DEG_PER_SEC_, HEAD_DEAD_ZONE_, 
+                          last_head_yaw_control_time_);
+        smoothAngleControl(-head_pitch_raw, current_head_pitch_, 25.0, 
+                          HEAD_MAX_VELOCITY_DEG_PER_SEC_, HEAD_DEAD_ZONE_, 
+                          last_head_pitch_control_time_);
+        
+        // 发布头部控制命令
+        controlHead(current_head_yaw_, current_head_pitch_);
         // return;
 
         if(!joy_execute_action_)
@@ -1024,6 +1050,35 @@ namespace ocs2
         }
         old_joy_msg_ = *joy_msg;
         return;
+      }
+
+      // 检测退出头部控制状态（从头部控制状态退出到非头部控制状态），平滑回正
+      if (head_control_active_ && joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] >= -0.5)
+      {
+        // 使用通用平滑控制函数回正到0度（输入为0表示回正，各自独立的时间戳）
+        smoothAngleControl(0.0, current_head_yaw_, 80.0, 
+                          HEAD_MAX_VELOCITY_DEG_PER_SEC_, HEAD_DEAD_ZONE_, 
+                          last_head_yaw_control_time_);
+        smoothAngleControl(0.0, current_head_pitch_, 25.0, 
+                          HEAD_MAX_VELOCITY_DEG_PER_SEC_, HEAD_DEAD_ZONE_, 
+                          last_head_pitch_control_time_);
+        
+        // 如果已经接近0度（小于1度），直接设为0
+        if (std::abs(current_head_yaw_) < 1.0 && std::abs(current_head_pitch_) < 1.0)
+        {
+          current_head_yaw_ = 0.0;
+          current_head_pitch_ = 0.0;
+          head_control_active_ = false;
+        }
+        else
+        {
+          // 继续发布回正命令
+          controlHead(current_head_yaw_, current_head_pitch_);
+        }
+      }
+      else if (joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
+      {
+        head_control_active_ = true;
       }
 
       // 检测退出腰部控制状态（从腰部控制状态退出到非腰部控制状态）
@@ -1557,6 +1612,53 @@ namespace ocs2
       }
     }
 
+    /**
+     * @brief 通用的平滑角度控制函数，包含死区处理、速度限制和平滑更新
+     * @param raw_input 原始摇杆输入值 [-1.0, 1.0]
+     * @param current_angle 当前角度（度），会被更新
+     * @param max_angle 最大角度范围（度）
+     * @param max_velocity 最大角速度（度/秒）
+     * @param dead_zone 死区阈值
+     * @param last_control_time 上次控制时间，会被更新
+     * @return 更新后的角度（度）
+     */
+    double smoothAngleControl(double raw_input, double& current_angle, 
+                              double max_angle, double max_velocity, 
+                              double dead_zone, ros::Time& last_control_time)
+    {
+      // 计算目标角度
+      double target_angle = max_angle * raw_input;
+      
+      // 应用死区处理
+      if (std::abs(raw_input) < dead_zone)
+      {
+        target_angle = 0.0;  // 回正
+      }
+      
+      // 速度限制和平滑处理
+      ros::Time current_time = ros::Time::now();
+      double dt = 0.01;  // 默认时间步长（100Hz）
+      if (!last_control_time.isZero())
+      {
+        dt = (current_time - last_control_time).toSec();
+        dt = std::max(0.001, std::min(0.1, dt));  // 限制dt在合理范围内
+      }
+      last_control_time = current_time;
+      
+      // 计算最大允许变化量（度）
+      double max_delta = max_velocity * dt;
+      
+      // 平滑更新角度
+      double angle_delta = target_angle - current_angle;
+      if (std::abs(angle_delta) > max_delta)
+      {
+        angle_delta = (angle_delta > 0) ? max_delta : -max_delta;
+      }
+      current_angle += angle_delta;
+      
+      return current_angle;
+    }
+
     void controlHead(double head_yaw, double head_pitch)
     {
       kuavo_msgs::robotHeadMotionData msg;
@@ -1852,6 +1954,16 @@ namespace ocs2
     bool waist_control_active_{false};  // 标记是否正在控制腰部（模式2）
     int waist_dof_{0};  // 腰部自由度，只有>0时才进行腰部控制
     double waist_yaw_max_angle_deg_{0.0};  // 腰部最大旋转角度（度），从配置文件加载
+    
+    // 头部控制状态跟踪
+    double current_head_yaw_{0.0};      // 当前头部yaw角度
+    double current_head_pitch_{0.0};    // 当前头部pitch角度
+    ros::Time last_head_yaw_control_time_{0};   // 上次头部yaw控制时间
+    ros::Time last_head_pitch_control_time_{0}; // 上次头部pitch控制时间
+    bool head_control_active_{false};   // 标记是否正在控制头部
+    const double HEAD_MAX_VELOCITY_DEG_PER_SEC_{150.0};  // 头部最大角速度（度/秒）
+    const double HEAD_DEAD_ZONE_{0.15};  // 头部控制死区（摇杆值）
+
   };
 }
 

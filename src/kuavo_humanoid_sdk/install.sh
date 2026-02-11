@@ -6,6 +6,36 @@ DEVEL_DIR="$PROJECT_DIR/devel/"
 INSTALLED_DIR="$PROJECT_DIR/installed/lib/python3/dist-packages"
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 VERSION=$(git -C "$PROJECT_DIR" describe --tags --always 2>/dev/null)
+EXTRAS=""
+
+usage() {
+    echo "Usage: $0 [--extras <audio|vision|full|audio,vision>]"
+    echo "  --extras    Optional extras to install (comma-separated)"
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --extras)
+            if [[ -n "$2" ]]; then
+                EXTRAS="$2"
+                shift 2
+            else
+                echo -e "\033[31mError: --extras requires an argument\033[0m"
+                usage
+                exit 1
+            fi
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo -e "\033[31mError: Unknown argument: $1\033[0m"
+            usage
+            exit 1
+            ;;
+    esac
+done
 
 # Backup current pip source and switch to faster source
 echo "🔄 Switching to faster pip source..."
@@ -383,8 +413,14 @@ echo "🔧 Upgrading conflicting dependencies..."
 pip install --upgrade "requests>=2.25.0" || echo "⚠️  Warning: requests could not be upgraded, continuing with installation..."
 # Note: scikit-learn 1.6+ requires Python 3.9+, keeping 1.3.2 for Python 3.8 compatibility
 
+PIP_TARGET="./"
+if [ -n "$EXTRAS" ]; then
+    PIP_TARGET=".[${EXTRAS}]"
+    echo -e "\033[33m🔧 Installing extras: ${EXTRAS}\033[0m"
+fi
+
 # Install the package editably
-if KUAVO_HUMANOID_SDK_VERSION="$VERSION" pip install -e ./; then
+if KUAVO_HUMANOID_SDK_VERSION="$VERSION" pip install -e "$PIP_TARGET"; then
     echo -e "\033[32m\n🎉🎉🎉 Installation successful! \033[0m"
     echo -e "\033[32m-------------------------------------------\033[0m"
     pip show kuavo_humanoid_sdk

@@ -228,6 +228,12 @@ namespace humanoid_controller
 
   private:
     /**
+     * @brief 异步切换手臂控制模式
+     * @param mode 目标手臂控制模式
+     */
+    void changeArmCtrlModeAsync(int mode);
+
+    /**
      * @brief ROS服务回调：切换控制器
      */
     bool switchControllerCallback(kuavo_msgs::switchController::Request &req, 

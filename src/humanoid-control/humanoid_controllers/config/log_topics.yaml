@@ -76,3 +76,4 @@ topics:
   - /rl_controller.*
   - /arm_controller.*
   - /vmp_controller/.*
+  - /ik_fk_result/.*
