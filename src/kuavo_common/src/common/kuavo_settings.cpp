@@ -229,6 +229,7 @@ namespace HighlyDynamic
                 {"PA72_36_R", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
                 {"PA76_25", {BIT_17_25, PA76_25_MC, PA76_25_C2T, EC_MASTER}},
                 {"PA76_18", {BIT_17_18, PA76_18_MC, PA76_18_C2T, EC_MASTER}},
+                {"PA81_18_25", {BIT_17_25, PA81_18_25_MC, PA81_18_25_C2T, EC_MASTER}},
                 {"PA105_18", {BIT_17_18, PA105_18_MC, PA105_18_C2T, EC_MASTER}},
                 {"PA81_25", {BIT_17_251, PA81_25_MC, PA81_25_C2T, EC_MASTER}},
                 {"PA4315_36", {BIT_17_36, PA4315_36_MC, PA4315_36_C2T, EC_MASTER}}};

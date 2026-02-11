@@ -117,6 +117,7 @@ typedef struct
   int16_t torque_demand_raw;
   uint16_t error_code;
   uint16_t igbt_temperature;
+  int16_t ntc_temperature;
   int8_t mode_of_opration_display;
 } YD_SlaveRead_t;
 
@@ -210,6 +211,7 @@ typedef struct
   double torque_demand_trans = 0.0;
   double velocity_demand_raw = 0.0;
   double igbt_temperature = 0.0; 
+  double ntc_temperature = 0.0; 
 } MotorParam_t;
 
 extern enum EcMasterType driver_type[30];

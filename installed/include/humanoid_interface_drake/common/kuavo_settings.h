@@ -25,6 +25,7 @@ namespace HighlyDynamic
 #define PA81_MC (60)
 #define PA100_MC (110)
 #define CK_MC (18)
+#define PA81_18_25_MC (18)
 
 #define AK10_9_C2T (1.26)
 #define AK70_10_C2T (1.23)
@@ -37,6 +38,7 @@ namespace HighlyDynamic
 #define PA60_C2T (2.0)
 #define PA43_C2T (1.45)
 #define PA105_18_C2T (4.1)
+#define PA81_18_25_C2T (2.9)
 
 #define LEG_DOF 6
 #define LEGS_TOTEL_JOINT 12

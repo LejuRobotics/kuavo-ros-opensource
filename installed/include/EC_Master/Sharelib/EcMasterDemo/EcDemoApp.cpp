@@ -166,8 +166,8 @@ static uint8_t physical2logical_[ROBOT_MODEL_NUM][NUM_SLAVE_MAX] = {
   {0, 1, 2, 3, 4, 5,                  //左腿
    6, 7, 8, 9, 10, 11,                //右腿
    12,                                //腰
-   13,                                //左肩
-   14,                                //右肩
+   13,                                //左肩（53版本变为冗余，不再作为肩膀使用）
+   14,                                //右肩（53版本变为冗余，不再作为肩膀使用）
    15, 16, 17, 18, 19, 20,            //冗余
    21, 22, 23, 24, 25, 26,
    27, 28, 29},
@@ -178,8 +178,7 @@ static uint8_t physical2logical_[ROBOT_MODEL_NUM][NUM_SLAVE_MAX] = {
     6, 7, 8, 9, 10, 11,               // 冗余
     12, 13, 14, 15, 16, 17,
     18, 19, 20, 21, 22, 23,
-    24, 25, 26, 27, 28, 29,
-   }
+    24, 25, 26, 27, 28, 29}
 };
 
 uint8_t physicalToLogical(uint8_t physical)
@@ -1256,6 +1255,10 @@ void motorGetData(const uint16_t *ids, const EcMasterType* driver, uint32_t num,
       data[index].torque_demand_trans = currentIn->yd_slave_input[g_motor_id[index].pdo_id].torque_demand_raw * (rated_current[index] / 1000.0) / 1000.0 * 1.414;
       data[index].velocity_demand_raw = currentIn->yd_slave_input[g_motor_id[index].pdo_id].velocity_demand_raw;
       data[index].igbt_temperature = currentIn->yd_slave_input[g_motor_id[index].pdo_id].igbt_temperature;
+
+      data[index].ntc_temperature =
+          currentIn->yd_slave_input[g_motor_id[index].pdo_id].ntc_temperature;
+
     }
     else if(driver[index] == LEJU)
     { 
