@@ -69,8 +69,7 @@ if __name__ == '__main__':
         {'time': 2.0, 'joints': [0.0] * 14},
     ]
 
-    robot_sdk = RobotSDK()
-    timed_cmd_api = TimedCmdAPI(robot_sdk=robot_sdk)
+    timed_cmd_api = TimedCmdAPI()
     root = make_tree(timed_cmd_api)
     tree = py_trees.trees.BehaviourTree(root)
     

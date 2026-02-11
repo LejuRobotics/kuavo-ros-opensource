@@ -12,9 +12,29 @@
 
 ### 环境准备
 
-1. 确保已安装相关依赖和ROS环境（如已安装kuavo_humanoid_sdk和py_trees等）
-2. 确保机器人仿真或实机程序已启动
-3. 进入工作空间目录，另起终端
+1. 安装kuavo_humanoid_sdk
+```bash
+cd src/kuavo_humanoid_sdk
+chmod +x install.sh
+./install.sh
+cd ../../
+```
+
+2. 安装py_trees
+```bash
+pip install py_trees
+```
+
+3. 启动主程序
+
+仿真：
+```bash
+roslaunch humanoid_controllers load_kuavo_mujoco_sim_wheel.launch joystick_type:=bt2
+```
+实机：
+```bash
+roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=bt2
+```
 
 ### 启动方式
 

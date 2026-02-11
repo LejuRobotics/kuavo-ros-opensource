@@ -573,9 +573,6 @@ class TimedCmdAPI:
     
     # 向后兼容：旧的配置名
     JOINT_CONFIG = CMD_CONFIG
-    
-    def __init__(self, robot_sdk: RobotSDK):
-        self.robot_sdk = robot_sdk
 
     def send_timed_cmd(self, cmd_type: str, cmd_vec: List[float], 
                        desire_time: float) -> Tuple[bool, float]:

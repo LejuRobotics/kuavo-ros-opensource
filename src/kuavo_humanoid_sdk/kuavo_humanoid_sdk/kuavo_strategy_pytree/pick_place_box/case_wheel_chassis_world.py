@@ -70,8 +70,7 @@ if __name__ == '__main__':
     ]
     CMD_TYPE = 'chassis_world'  # 或 'chassis_world'
 
-    robot_sdk = RobotSDK()
-    timed_cmd_api = TimedCmdAPI(robot_sdk=robot_sdk)
+    timed_cmd_api = TimedCmdAPI()
     root = make_tree(timed_cmd_api, cmd_type=CMD_TYPE)
     tree = py_trees.trees.BehaviourTree(root)
     

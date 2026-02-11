@@ -71,8 +71,8 @@ def make_tree(timed_cmd_api, chassis_poses: Optional[List[dict]] = None, cmd_typ
         timed_cmd_api=timed_cmd_api,
         planner_index=planner_index,
         is_sync=True,  # 同步模式
-        velocity_max=[0.2, 0.2, 0.8],  # 底盘x, y, yaw 3个自由度的最大速度 (m/s, m/s, rad/s)
-        acceleration_max=[5.0, 5.0, 4],  # 最大加速度 (m/s², m/s², rad/s²)
+        velocity_max=[0.2, 0.2, 0.6],  # 底盘x, y, yaw 3个自由度的最大速度 (m/s, m/s, rad/s)
+        acceleration_max=[4.0, 4.0, 4],  # 最大加速度 (m/s², m/s², rad/s²)
         jerk_max=[20.0, 15.0, 12.0],  # 最大急动度 (m/s³, m/s³, rad/s³)
     )
     
@@ -88,15 +88,14 @@ def make_tree(timed_cmd_api, chassis_poses: Optional[List[dict]] = None, cmd_typ
 if __name__ == '__main__':
     # 底盘关键点：time, pose([x, y, yaw]，米/弧度)
     CHASSIS_POSES = [
-        {'time': 1.0, 'pose': [0.3, 0.0, 0.0]},   # 前进0.3米
-        {'time': 1.0, 'pose': [0.0, 0.3, 1.57]},  # 右移0.3米 + 旋转90度
-        {'time': 1.0, 'pose': [0.0, 0.0, 1.57]},  # 继续旋转90度
-        {'time': 1.0, 'pose': [0.0, 0.0, 1.57]},  # 回原点方向
+        {'time': 2.0, 'pose': [0.3, 0.0, 0.0]},   # 前进0.3米
+        {'time': 2.0, 'pose': [0.0, 0.3, 1.57]},  # 右移0.3米 + 旋转90度
+        {'time': 2.0, 'pose': [0.0, 0.0, 1.57]},  # 继续旋转90度
+        {'time': 2.0, 'pose': [0.0, 0.0, 0.0]},  # 回原点方向
     ]
     CMD_TYPE = 'chassis_world'  # 或 'chassis_local'
 
-    robot_sdk = RobotSDK()
-    timed_cmd_api = TimedCmdAPI(robot_sdk=robot_sdk)
+    timed_cmd_api = TimedCmdAPI()
     root = make_tree(timed_cmd_api, cmd_type=CMD_TYPE)
     tree = py_trees.trees.BehaviourTree(root)
     

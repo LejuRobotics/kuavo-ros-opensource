@@ -92,8 +92,7 @@ if __name__ == '__main__':
     ]
     FRAME_ARM = WheelArmFrame.BASE  # 局部坐标系
 
-    robot_sdk = RobotSDK()
-    timed_cmd_api = TimedCmdAPI(robot_sdk=robot_sdk)
+    timed_cmd_api = TimedCmdAPI()
     root = make_tree(timed_cmd_api)
     tree = py_trees.trees.BehaviourTree(root)
     
