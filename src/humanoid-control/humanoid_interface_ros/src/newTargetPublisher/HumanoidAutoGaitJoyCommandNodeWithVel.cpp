@@ -1000,13 +1000,21 @@ namespace ocs2
 
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
       {
-        // 组合键
-        double head_yaw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
-        double head_pitch = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]];
-        head_yaw = 80.0 * head_yaw;     // +- 60deg
-        head_pitch = -25.0 * head_pitch;// +- 25deg 
-        // std::cout << "head_yaw: " << head_yaw << " head_pitch: " << head_pitch << std::endl;
-        controlHead(head_yaw, head_pitch);
+        head_control_active_ = true;  // 标记进入头部控制模式
+        // 组合键控制头部，使用通用平滑控制函数
+        double head_yaw_raw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+        double head_pitch_raw = joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]];
+        
+        // 使用通用平滑控制函数处理yaw和pitch（各自独立的时间戳）
+        smoothAngleControl(head_yaw_raw, current_head_yaw_, 80.0, 
+                          HEAD_MAX_VELOCITY_DEG_PER_SEC_, HEAD_DEAD_ZONE_, 
+                          last_head_yaw_control_time_);
+        smoothAngleControl(-head_pitch_raw, current_head_pitch_, 25.0, 
+                          HEAD_MAX_VELOCITY_DEG_PER_SEC_, HEAD_DEAD_ZONE_, 
+                          last_head_pitch_control_time_);
+        
+        // 发布头部控制命令
+        controlHead(current_head_yaw_, current_head_pitch_);
         // return;
 
         if(!joy_execute_action_)
@@ -1042,6 +1050,35 @@ namespace ocs2
         }
         old_joy_msg_ = *joy_msg;
         return;
+      }
+
+      // 检测退出头部控制状态（从头部控制状态退出到非头部控制状态），平滑回正
+      if (head_control_active_ && joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] >= -0.5)
+      {
+        // 使用通用平滑控制函数回正到0度（输入为0表示回正，各自独立的时间戳）
+        smoothAngleControl(0.0, current_head_yaw_, 80.0, 
+                          HEAD_MAX_VELOCITY_DEG_PER_SEC_, HEAD_DEAD_ZONE_, 
+                          last_head_yaw_control_time_);
+        smoothAngleControl(0.0, current_head_pitch_, 25.0, 
+                          HEAD_MAX_VELOCITY_DEG_PER_SEC_, HEAD_DEAD_ZONE_, 
+                          last_head_pitch_control_time_);
+        
+        // 如果已经接近0度（小于1度），直接设为0
+        if (std::abs(current_head_yaw_) < 1.0 && std::abs(current_head_pitch_) < 1.0)
+        {
+          current_head_yaw_ = 0.0;
+          current_head_pitch_ = 0.0;
+          head_control_active_ = false;
+        }
+        else
+        {
+          // 继续发布回正命令
+          controlHead(current_head_yaw_, current_head_pitch_);
+        }
+      }
+      else if (joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
+      {
+        head_control_active_ = true;
       }
 
       // 检测退出腰部控制状态（从腰部控制状态退出到非腰部控制状态）
@@ -1575,6 +1612,53 @@ namespace ocs2
       }
     }
 
+    /**
+     * @brief 通用的平滑角度控制函数，包含死区处理、速度限制和平滑更新
+     * @param raw_input 原始摇杆输入值 [-1.0, 1.0]
+     * @param current_angle 当前角度（度），会被更新
+     * @param max_angle 最大角度范围（度）
+     * @param max_velocity 最大角速度（度/秒）
+     * @param dead_zone 死区阈值
+     * @param last_control_time 上次控制时间，会被更新
+     * @return 更新后的角度（度）
+     */
+    double smoothAngleControl(double raw_input, double& current_angle, 
+                              double max_angle, double max_velocity, 
+                              double dead_zone, ros::Time& last_control_time)
+    {
+      // 计算目标角度
+      double target_angle = max_angle * raw_input;
+      
+      // 应用死区处理
+      if (std::abs(raw_input) < dead_zone)
+      {
+        target_angle = 0.0;  // 回正
+      }
+      
+      // 速度限制和平滑处理
+      ros::Time current_time = ros::Time::now();
+      double dt = 0.01;  // 默认时间步长（100Hz）
+      if (!last_control_time.isZero())
+      {
+        dt = (current_time - last_control_time).toSec();
+        dt = std::max(0.001, std::min(0.1, dt));  // 限制dt在合理范围内
+      }
+      last_control_time = current_time;
+      
+      // 计算最大允许变化量（度）
+      double max_delta = max_velocity * dt;
+      
+      // 平滑更新角度
+      double angle_delta = target_angle - current_angle;
+      if (std::abs(angle_delta) > max_delta)
+      {
+        angle_delta = (angle_delta > 0) ? max_delta : -max_delta;
+      }
+      current_angle += angle_delta;
+      
+      return current_angle;
+    }
+
     void controlHead(double head_yaw, double head_pitch)
     {
       kuavo_msgs::robotHeadMotionData msg;
@@ -1870,6 +1954,16 @@ namespace ocs2
     bool waist_control_active_{false};  // 标记是否正在控制腰部（模式2）
     int waist_dof_{0};  // 腰部自由度，只有>0时才进行腰部控制
     double waist_yaw_max_angle_deg_{0.0};  // 腰部最大旋转角度（度），从配置文件加载
+    
+    // 头部控制状态跟踪
+    double current_head_yaw_{0.0};      // 当前头部yaw角度
+    double current_head_pitch_{0.0};    // 当前头部pitch角度
+    ros::Time last_head_yaw_control_time_{0};   // 上次头部yaw控制时间
+    ros::Time last_head_pitch_control_time_{0}; // 上次头部pitch控制时间
+    bool head_control_active_{false};   // 标记是否正在控制头部
+    const double HEAD_MAX_VELOCITY_DEG_PER_SEC_{150.0};  // 头部最大角速度（度/秒）
+    const double HEAD_DEAD_ZONE_{0.15};  // 头部控制死区（摇杆值）
+
   };
 }
 
