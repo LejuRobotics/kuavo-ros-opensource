@@ -5,12 +5,12 @@
         "fixed_main_hand": "right",
         "joint_limits": {
             "yaw": [-85, 85],
-            "pitch": [-30, 30]
+            "pitch": [-25, 25]
         },
         "smoothing_factor_comment": "平滑滤波系数，范围0-1，越大越平滑",
-        "smoothing_factor": 0.3,
+        "smoothing_factor": 0.2,
         "active_hand_threshold_comment": "主动手阈值(cm)，超过该阈值则认为手部在移动，越小越敏感",
-        "active_hand_threshold": 0.01
+        "active_hand_threshold": 0.0005
     },
     "head_motion_range": {
         "yaw": [-90, 90],

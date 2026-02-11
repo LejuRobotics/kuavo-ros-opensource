@@ -30,7 +30,7 @@ function modify_link_mass() {
     N
     $!ba
     # 替换指定link中的mass值
-    s/(<link[[:space:]]*name="'"$link_name"'"[[:space:]]*>.*?<mass[[:space:]]*value=")[0-9.]+(".*?(base_link.obj|torso.obj|base_link.STL|torso.STL).*?<\/link>)/\1'"$new_mass_value"'\2/
+    s/(<link[[:space:]]*name="'"$link_name"'"[[:space:]]*>.*?<mass[[:space:]]*value=")[0-9.]+(".*?(base_link.obj|torso.obj|base_link.STL|torso.STL|waist_yaw.STL).*?<\/link>)/\1'"$new_mass_value"'\2/
     ' "$urdf_file" > "$temp_file"
     # s/(<link[[:space:]]*name="base_link"[[:space:]]*>.*?<mass[[:space:]]*value=")[0-9.]+(".*?<\/link>)/\1'"$new_mass_value"'\2/
     # 检查替换是否成功
@@ -57,6 +57,12 @@ original_total_mass=$(get_urdf_total_mass "$urdf_file")
 base_link_mass=$(get_link_mass "$urdf_file" "$link_name")
 echo "原始总质量: $original_total_mass kg"
 echo "原始 $link_name 的质量: $base_link_mass kg"
+
+# 若指定 link 在 URDF 中不存在，get_link_mass 为空，会导致 bc 报 (standard_in) 1: syntax error
+if [ -z "$base_link_mass" ]; then
+    echo -e "\033[31mError: link '$link_name' not found or has no mass in $urdf_file\033[0m" >&2
+    exit 1
+fi
 
 # 检查 bc 是否已安装
 if ! command -v bc &> /dev/null; then

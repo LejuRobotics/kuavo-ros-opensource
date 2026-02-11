@@ -136,7 +136,7 @@
         </body>
       </body>
       <body name="waist_yaw" pos="0 0 0.107">
-        <inertial pos="0.00089444 -0.00069446 0.167783" quat="0.999931 0.00712897 -0.00930965 0.000280164" mass="18.0142" diaginertia="0.36264 0.278005 0.215855"/>
+        <inertial pos="0.00089444 -0.00069446 0.167783" quat="0.999931 0.00712897 -0.00930965 0.000280164" mass="22.0142" diaginertia="0.36264 0.278005 0.215855"/>
         <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" range="-3.14 3.14" actuatorfrcrange="-180 180"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_yaw"/>
         <body name="zarm_l1_link" pos="-0.003 0.1737 0.2831">
