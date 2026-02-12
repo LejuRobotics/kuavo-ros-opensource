@@ -32,7 +32,7 @@ enum class EndEffectorType { QIANGNAO = 0, QIANGNAO_TOUCH = 1, REVO2 = 2, LEJUCL
 
 // 判断是否为手部末端执行器类型
 inline bool isHandEndEffectorType(EndEffectorType type) {
-  bool isHandEndEffectorType = (type == EndEffectorType::QIANGNAO);
+  bool isHandEndEffectorType = (type == EndEffectorType::QIANGNAO || type == EndEffectorType::QIANGNAO_TOUCH || type == EndEffectorType::REVO2);
   // if (isHandEndEffectorType) {
   //   std::cout << "isHandEndEffectorType: " << static_cast<int>(type) << std::endl;
   //   std::cout << "QIANGNAO: " << static_cast<int>(EndEffectorType::QIANGNAO) << std::endl;
