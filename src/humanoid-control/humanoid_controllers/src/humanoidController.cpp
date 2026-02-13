@@ -4363,8 +4363,10 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     torso_interpolation_start_pose_ = current_torso_pose;
     torso_interpolation_target_pose_ = target_torso_pose;
 
+    vector_t obsStateGuess = currentObservation_.state;
+    obsStateGuess.segment<12>(12) = initial_status_.segment<12>(12); 
     leg_interpolation_start_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, current_torso_pose);
-    leg_interpolation_target_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, target_torso_pose);
+    leg_interpolation_target_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(obsStateGuess, target_torso_pose);
 
     leg_interpolation_result_.setZero(waistNum_ + jointNumReal_);
     leg_interpolation_result_.head(jointNumReal_) = leg_interpolation_start_pose_;
