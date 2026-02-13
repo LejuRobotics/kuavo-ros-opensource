@@ -6,17 +6,26 @@
   <link name="dummy_link" />
   <link name="base_link">
     <inertial>
-      <origin xyz="-0.05051209 1.42e-06 -0.01248997" rpy="0 0 0" />
-      <mass value="6.50123928" />
-      <inertia ixx="0.06836878" ixy="1.858e-05" ixz="-0.0165872" iyy="0.04966552" iyz="-1.2e-05" izz="0.06645264" />
+      <!-- 质心：( -0.05495950, -0.00028705, -0.01468007 ) -->
+      <origin xyz="-0.05495950 -0.00028705 -0.01468007" rpy="0 0 0" />
+      <!-- 质量：7.06404632 kg -->
+      <mass value="7.06405" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自torso Lxx/Lyy/Lzz -->
+      <inertia
+        ixx="0.07432439"
+        ixy="0.0"
+        ixz="-0.01900645"
+        iyy="0.05497594"
+        iyz="0.0"
+        izz="0.07548789" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s52/meshes/base_link.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s52/meshes/torso.STL" />
       </geometry>
       <material name="">
-        <color rgba="1 1 1 1" />
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
       </material>
     </visual>
   </link>
@@ -27,9 +36,18 @@
   </joint>
   <link name="waist_yaw_link">
     <inertial>
-      <origin xyz="0.00089444 -0.00069446 0.16778314" rpy="0 0 0" />
-      <mass value="21.01415568" />
-      <inertia ixx="0.36258863" ixy="1.968e-05" ixz="0.00273234" iyy="0.27799251" iyz="0.00088683" izz="0.21591828" />
+      <!-- 质心：( -0.00044187, -0.00068282, 0.16674017 ) -->
+      <origin xyz="0.04044187 -0.00068282 0.16674017" rpy="0 0 0" />
+      <!-- 质量：17.11065787 kg -->
+      <mass value="20.63616" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自waist_yaw Lxx/Lyy/Lzz -->
+      <inertia
+        ixx="0.34143343"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.25757527"
+        iyz="0.0"
+        izz="0.20167280" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -47,12 +65,25 @@
     <child link="waist_yaw_link" />
     <axis xyz="0 0 1" />
     <limit lower="-3.14159" upper="3.14159" effort="102.0" velocity="8.7" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+  <!-- ============ l_leg_roll ============ -->
+  <!-- 坐标系：l_leg_yaw_roll -->
+  <!-- 对称源：r_leg_roll (X-Z平面对称) -->
   <link name="leg_l1_link">
     <inertial>
-      <origin xyz="-0.00558741 0.0001005 0.00069219" rpy="0 0 0" />
-      <mass value="1.63858534" />
-      <inertia ixx="0.00162115" ixy="-1.138e-05" ixz="-1.192e-05" iyy="0.00214632" iyz="1.03e-05" izz="0.0022122" />
+      <!-- 质心：右腿(-0.00560896, -0.00032862, -0.00212773) -> 左腿(-0.00560896, +0.00032862, -0.00212773) -->
+      <origin xyz="-0.00560896 0.00032862 -0.00212773" rpy="0 0 0" />
+      <!-- 质量：1.55641268 kg -->
+      <mass value="1.55641" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.00191127"
+        ixy="-0.00001633"      
+        ixz="-0.00000320"     
+        iyy="0.00254335"
+        iyz="0.00000055"     
+        izz="0.00260594" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -70,13 +101,25 @@
     <child link="leg_l1_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.314159265358979" upper="0.663225115757845" effort="127.0" velocity="10.4" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+  <!-- ============ l_leg_yaw ============ -->
+  <!-- 坐标系：l_leg_yaw_roll -->
+  <!-- 对称源：r_leg_yaw (X-Z平面对称) -->
   <link name="leg_l2_link">
     <inertial>
-      <origin xyz="0.00013508 -0.00098545 -0.09149892" rpy="0 0 0" />
-      <mass value="0.70575545" />
-      <inertia ixx="0.00323862" ixy="-7.7e-05" ixz="3.2e-05" iyy="0.00183633" iyz="-6.472e-05" izz="0.00219531" />
+      <!-- 质心：右腿(0.00006341, 0.00960017, -0.09308949) -> 左腿(0.00006341, -0.00960017, -0.09308949) -->
+      <origin xyz="0.00006341 -0.00960017 -0.09308949" rpy="0 0 0" />
+      <!-- 质量：0.75872512 kg -->
+      <mass value="0.75873" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.00348980"
+        ixy="0.00000617"     
+        ixz="-0.00000543"      
+        iyy="0.00201021"
+        iyz="-0.00030265"      
+        izz="0.00236363" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -94,13 +137,26 @@
     <child link="leg_l2_link" />
     <axis xyz="0 0 1" />
     <limit lower="-0.785398163397448" upper="1.91986217719376" effort="71.0" velocity="8.7" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ l_leg_pitch ============ -->
+  <!-- 坐标系：l_leg_pitch -->
+  <!-- 对称源：r_leg_pitch (X-Z平面对称) -->
   <link name="leg_l3_link">
     <inertial>
-      <origin xyz="0.00306476 0.00954886 -0.0778944" rpy="0 0 0" />
-      <mass value="5.93791258" />
-      <inertia ixx="0.05198316" ixy="2.637e-05" ixz="0.00155235" iyy="0.0492486" iyz="0.00371169" izz="0.01606721" />
+      <!-- 质心：右腿(0.00273544, -0.01478421, -0.09011501) -> 左腿(0.00273544, +0.01478421, -0.09011501) -->
+      <origin xyz="0.00273544 0.01478421 -0.09011501" rpy="0 0 0" />
+      <!-- 质量：6.68074305 kg -->
+      <mass value="6.68074" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.06155086"
+        ixy="0.00016595"      
+        ixz="-0.00169943"      
+        iyy="0.05999156"
+        iyz="0.00073898"     
+        izz="0.01575336" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -118,13 +174,26 @@
     <child link="leg_l3_link" />
     <axis xyz="0 1 0" />
     <limit lower="-1.91986217719376" upper="1.5707963267949" effort="132" velocity="12.7" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ l_knee ============ -->
+  <!-- 坐标系：l_knee -->
+  <!-- 对称源：r_knee (X-Z平面对称) -->
   <link name="leg_l4_link">
     <inertial>
-      <origin xyz="0.00501956 -0.00014918 -0.16578654" rpy="0 0 0" />
-      <mass value="4.02498548" />
-      <inertia ixx="0.046032" ixy="1.89e-05" ixz="-0.00054405" iyy="0.04550638" iyz="0.00026629" izz="0.00356532" />
+      <!-- 质心：右腿(0.00684787, -0.00006281, -0.16262733) -> 左腿(0.00684787, +0.00006281, -0.16262733) -->
+      <origin xyz="0.00684787 0.00006281 -0.16262733" rpy="0 0 0" />
+      <!-- 质量：3.64665831 kg -->
+      <mass value="3.64666" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.04372691"
+        ixy="0.00000494"     
+        ixz="0.00053020"      
+        iyy="0.04357016"
+        iyz="-0.00006946"      
+        izz="0.00246985" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -137,18 +206,31 @@
     </visual>
   </link>
   <joint name="leg_l4_joint" type="revolute">
-    <origin xyz="0 0 -0.284" rpy="0 0 0" />
+    <origin xyz="-0.0011639 0 -0.284" rpy="0 0 0" />
     <parent link="leg_l3_link" />
     <child link="leg_l4_link" />
     <axis xyz="0 1 0" />
     <limit lower="0.0" upper="2.53072741539178" effort="280.0" velocity="10.4" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ l_foot_pitch ============ -->
+  <!-- 坐标系：l_foot_pitch_roll -->
+  <!-- 对称源：r_foot_pitch (完全对称) -->
   <link name="leg_l5_link">
     <inertial>
-      <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
-      <mass value="0.07848005" />
-      <inertia ixx="7.6e-04" ixy="0.0" ixz="0.0" iyy="7.6e-04" iyz="0.0" izz="1.318e-04" />
+      <!-- 质心：( 0, 0, 0 ) -->
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <!-- 质量：0.07848005 kg -->
+      <mass value="0.07848" />
+      <!-- ✅ 惯性张量：完全对称，与右腿完全相同 -->
+      <inertia
+        ixx="0.0000757"
+        ixy="0.00000000"
+        ixz="0.00000000"
+        iyy="0.0000757"
+        iyz="0.00000000"
+        izz="0.0001318" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -161,18 +243,30 @@
     </visual>
   </link>
   <joint name="leg_l5_joint" type="revolute">
-    <origin xyz="0.002 0.0003 -0.416" rpy="0 0 0" />
+    <origin xyz="0.002 0 -0.416" rpy="0 0 0" />
     <parent link="leg_l4_link" />
     <child link="leg_l5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="57.0" velocity="17.8" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="102.6" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+  <!-- ============ l_foot_roll ============ -->
+  <!-- 坐标系：l_foot_pitch_roll -->
+  <!-- 对称源：r_foot_roll (完全对称，用户覆盖值相同) -->
   <link name="leg_l6_link">
     <inertial>
-      <origin xyz="0.03128029 -2.11e-06 -0.03618572" rpy="0 0 0" />
-      <mass value="0.58491513" />
-      <inertia ixx="0.00046778" ixy="2e-05" ixz="0.00010442" iyy="0.00176376" iyz="0.0" izz="0.00188181" />
+      <!-- 质心（用户覆盖）：( 0.02655895, -0.00004538, -0.03373024 ) -->
+      <origin xyz="0.02655895 -0.00004538 -0.03373024" rpy="0 0 0" />
+      <!-- 质量（用户覆盖）：0.69242441 kg -->
+      <mass value="0.69242" />
+      <!-- ✅ 惯性张量：完全对称，与右腿完全相同（质心Y为负，无需镜像） -->
+      <inertia
+        ixx="0.00051423"
+        ixy="-0.00000078"
+        ixz="0.00014745"
+        iyy="0.00189913"
+        iyz="0.00000033"
+        izz="0.00199352" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -195,8 +289,8 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="57.0" velocity="17.8" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="102.6" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <link name="ll_foot_toe">
     <collision>
@@ -276,11 +370,22 @@
     <parent link="leg_l6_link" />
     <child link="l_foot_heel" />
   </joint>
+  <!-- ============ r_leg_roll ============ -->
+  <!-- 坐标系：r_leg_roll_yaw -->
   <link name="leg_r1_link">
     <inertial>
-      <origin xyz="-0.00553677 -0.00034203 0.0007206" rpy="0 0 0" />
-      <mass value="1.63861324" />
-      <inertia ixx="0.00163303" ixy="1.362e-05" ixz="-1.571e-05" iyy="0.00215111" iyz="7.4e-05" izz="0.00222063" />
+      <!-- 质心：( -0.00560896, -0.00032862, -0.00212773 ) -->
+      <origin xyz="-0.00560896 -0.00032862 -0.00212773" rpy="0 0 0" />
+      <!-- 质量：1.55641268 kg -->
+      <mass value="1.55641" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00191127"
+        ixy="0.00001633"
+        ixz="0.00000320"
+        iyy="0.00254335"
+        iyz="-0.00000055"
+        izz="0.00260594" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -298,13 +403,24 @@
     <child link="leg_r1_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.663225115757845" upper="0.314159265358979" effort="127.0" velocity="10.4" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+  <!-- ============ r_leg_yaw ============ -->
+  <!-- 坐标系：r_leg_roll_yaw -->
   <link name="leg_r2_link">
     <inertial>
-      <origin xyz="-0.00013508 0.00098545 -0.09149892" rpy="0 0 0" />
-      <mass value="0.70575545" />
-      <inertia ixx="0.00323862" ixy="-7.7e-05" ixz="-3.2e-05" iyy="0.00183633" iyz="6.472e-05" izz="0.00219531" />
+      <!-- 质心：( 0.00006341, 0.00960017, -0.09308949 ) -->
+      <origin xyz="0.00006341 0.00960017 -0.09308949" rpy="0 0 0" />
+      <!-- 质量：0.75872512 kg -->
+      <mass value="0.75873" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00348980"
+        ixy="-0.00000617"
+        ixz="0.00000543"
+        iyy="0.00201021"
+        iyz="0.00030265"
+        izz="0.00236363" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -322,13 +438,24 @@
     <child link="leg_r2_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.91986217719376" upper="0.785398163397448" effort="71.0" velocity="8.7" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+  <!-- ============ r_leg_pitch ============ -->
+  <!-- 坐标系：r_leg_pitch -->
   <link name="leg_r3_link">
     <inertial>
-      <origin xyz="0.00305583 -0.0095594 -0.0778079" rpy="0 0 0" />
-      <mass value="5.93791831" />
-      <inertia ixx="0.05201926" ixy="-3.06e-05" ixz="0.00155202" iyy="0.049279" iyz="-0.00368824" izz="0.01607353" />
+      <!-- 质心：( 0.00273544, -0.01478421, -0.09011501 ) -->
+      <origin xyz="0.00273544 -0.01478421 -0.09011501" rpy="0 0 0" />
+      <!-- 质量：6.68074305 kg -->
+      <mass value="6.68074" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.06155086"
+        ixy="-0.00016595"
+        ixz="0.00169943"
+        iyy="0.05999156"
+        iyz="-0.00073898"
+        izz="0.01575336" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -346,13 +473,25 @@
     <child link="leg_r3_link" />
     <axis xyz="0 1 0" />
     <limit lower="-1.91986217719376" upper="1.5707963267949" effort="132.0" velocity="12.7" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ r_knee ============ -->
+  <!-- 坐标系：r_knee -->
   <link name="leg_r4_link">
     <inertial>
-      <origin xyz="0.00501956 0.00014918 -0.16578654" rpy="0 0 0" />
-      <mass value="4.02498548" />
-      <inertia ixx="0.046032" ixy="1.89e-05" ixz="-0.00054405" iyy="0.04550638" iyz="0.00026629" izz="0.00356532" />
+      <!-- 质心：( 0.00684787, -0.00006281, -0.16262733 ) -->
+      <origin xyz="0.00684787 -0.00006281 -0.16262733" rpy="0 0 0" />
+      <!-- 质量：3.64665831 kg -->
+      <mass value="3.64666" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.04372691"
+        ixy="-0.00000494"
+        ixz="-0.00053020"
+        iyy="0.04357016"
+        iyz="0.00006946"
+        izz="0.00246985" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -365,18 +504,30 @@
     </visual>
   </link>
   <joint name="leg_r4_joint" type="revolute">
-    <origin xyz="0 0 -0.284" rpy="0 0 0" />
+    <origin xyz="-0.0011639 0 -0.284" rpy="0 0 0" />
     <parent link="leg_r3_link" />
     <child link="leg_r4_link" />
     <axis xyz="0 1 0" />
     <limit lower="0.0" upper="2.53072741539178" effort="280.0" velocity="10.4" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ r_foot_pitch ============ -->
+  <!-- 坐标系：r_foot_pitch_roll -->
   <link name="leg_r5_link">
     <inertial>
-      <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
-      <mass value="0.07848005" />
-      <inertia ixx="7.6e-04" ixy="0.0" ixz="0.0" iyy="7.6e-04" iyz="0.0" izz="1.318e-04" />
+      <!-- 质心：( 0, 0, 0 ) -->
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <!-- 质量：0.07848005 kg -->
+      <mass value="0.07848" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 与输出坐标系相同因为质心在原点 -->
+      <inertia
+        ixx="0.0000757"
+        ixy="0.00000000"
+        ixz="0.00000000"
+        iyy="0.0000757"
+        iyz="0.00000000"
+        izz="0.0001318" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -389,18 +540,30 @@
     </visual>
   </link>
   <joint name="leg_r5_joint" type="revolute">
-    <origin xyz="0.00199999999983541 -0.000300000028212572 -0.415999999987417" rpy="0 0 0" />
+    <origin xyz="0.002 0 -0.416" rpy="0 0 0" />
     <parent link="leg_r4_link" />
     <child link="leg_r5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="57.0" velocity="17.8" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="102.6" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ r_foot_roll ============ -->
+  <!-- 坐标系：r_foot_pitch_roll -->
   <link name="leg_r6_link">
     <inertial>
-      <origin xyz="0.03128029 -2.11e-06 -0.03618572" rpy="0 0 0" />
-      <mass value="0.58491513" />
-      <inertia ixx="0.00046778" ixy="2e-05" ixz="0.00010442" iyy="0.00176376" iyz="0.0" izz="0.00188181" />
+      <!-- 质心（用户覆盖）：( 0.02655895, -0.00004538, -0.03373024 ) -->
+      <origin xyz="0.02655895 -0.00004538 -0.03373024" rpy="0 0 0" />
+      <!-- 质量（用户覆盖）：0.69242441 kg -->
+      <mass value="0.69242" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00051423"
+        ixy="-0.00000078"
+        ixz="0.00014745"
+        iyy="0.00189913"
+        iyz="0.00000033"
+        izz="0.00199352" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -423,8 +586,8 @@
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="57.0" velocity="17.8" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="102.6" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <link name="rl_foot_toe">
     <collision>
@@ -504,26 +667,26 @@
     <parent link="leg_r6_link" />
     <child link="r_foot_heel" />
   </joint>
+  <!-- ============ l_arm_pitch ============ -->
+  <!-- 坐标系：l_arm_pitch_roll_yaw -->
   <link
     name="zarm_l1_link">
     <inertial>
-      <origin
-        xyz="0.00166796 -0.008241 0.00012987"
-        rpy="0 0 0" />
-      <mass
-        value="0.91653322" />
+      <!-- 质心：( 0.00080154, -0.00930333, 0.00031203 ) -->
+      <origin xyz="0.00080154 -0.00930333 0.00031203" rpy="0 0 0" />
+      <!-- 质量：0.94520767 kg -->
+      <mass value="0.94521" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00126587"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00086921"
-        iyz="0.0"
-        izz="0.00124337" />
+        ixx="0.00133347"
+        ixy="-0.00000676"
+        ixz="0.00000067"
+        iyy="0.00088618"
+        iyz="-0.00000295"
+        izz="0.00133859" />
     </inertial>
     <visual>
-      <origin
-        xyz="0 -0.081 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh
           filename="package://kuavo_assets/models/biped_s52/meshes/l_arm_pitch.STL" />
@@ -539,7 +702,7 @@
     name="zarm_l1_joint"
     type="revolute">
     <origin
-      xyz="0 0.2527 0.2831"
+      xyz="-0.003 0.2527 0.283"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -548,23 +711,25 @@
     <axis
       xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+  <!-- ============ l_arm_roll ============ -->
+  <!-- 坐标系：l_arm_pitch_roll_yaw -->
   <link
     name="zarm_l2_link">
     <inertial>
-      <origin
-        xyz="-0.00080994 0.00000486 -0.04651026"
-        rpy="0 0 0" />
-      <mass
-        value="0.38767390" />
+      <!-- 质心：( -0.00087383, -0.00000389, -0.04690210 ) -->
+      <origin xyz="-0.00087383 -0.00000389 -0.04690210" rpy="0 0 0" />
+      <!-- 质量：0.41921257 kg -->
+      <mass value="0.41921" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00080739"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00116144"
-        iyz="0.0"
-        izz="0.00070223" />
+        ixx="0.00084950"
+        ixy="0.00000011"
+        ixz="-0.00002039"
+        iyy="0.00123033"
+        iyz="0.00000014"
+        izz="0.00074285" />
     </inertial>
     <visual>
       <origin
@@ -594,23 +759,26 @@
     <axis
       xyz="1 0 0" />
     <limit lower="-0.349065850398866" upper="3.49065850398866" effort="75.0" velocity="8.0" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ l_arm_yaw ============ -->
+  <!-- 坐标系：l_arm_pitch_roll_yaw -->
   <link
     name="zarm_l3_link">
     <inertial>
-      <origin
-        xyz="0.00943019 0.00343988 -0.11304538"
-        rpy="0 0 0" />
-      <mass
-        value="1.77926875" />
+      <!-- 质心：( 0.00961457, 0.00303320, -0.22991934 ) -->
+      <origin xyz="0.00961457 0.00303320 -0.22991934" rpy="0 0 0" />
+      <!-- 质量：1.78857489 kg -->
+      <mass value="1.78857" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00992856"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.01004582"
-        iyz="0.0"
-        izz="0.00185422" />
+        ixx="0.00709279"
+        ixy="-0.00006786"
+        ixz="0.00082655"
+        iyy="0.00718506"
+        iyz="0.00029056"
+        izz="0.00191640" />
     </inertial>
     <visual>
       <origin
@@ -640,23 +808,26 @@
     <axis
       xyz="0 0 1" />
     <limit lower="-1.48352986419518" upper="1.48352986419518" effort="57.0" velocity="7.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ l_foream ============ -->
+  <!-- 坐标系：l_foream -->
   <link
     name="zarm_l4_link">
     <inertial>
-      <origin
-        xyz="-0.01829932 0.00087167 -0.06936622"
-        rpy="0 0 0" />
-      <mass
-        value="0.58507821" />
+      <!-- 质心：( -0.01815271, 0.00143762, -0.06748280 ) -->
+      <origin xyz="-0.01815271 0.00143762 -0.06748280" rpy="0 0 0" />
+      <!-- 质量：0.63148736 kg -->
+      <mass value="0.63149" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00143291"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00125018"
-        iyz="0.0"
-        izz="0.00068356" />
+        ixx="0.00152253"
+        ixy="-0.00000788"
+        ixz="-0.00012859"
+        iyy="0.00131180"
+        iyz="-0.00003238"
+        izz="0.00069075" />
     </inertial>
     <visual>
       <origin
@@ -686,23 +857,26 @@
     <axis
       xyz="0 1 0" />
     <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ l_hand_yaw ============ -->
+  <!-- 坐标系：l_hand_yaw -->
   <link
     name="zarm_l5_link">
     <inertial>
-      <origin
-        xyz="0.00026090 0.00001322 -0.06083944"
-        rpy="0 0 0" />
-      <mass
-        value="0.68679955" />
+      <!-- 质心：( -0.00516386, 0.00001560, -0.05589705 ) -->
+      <origin xyz="-0.00516386 0.00001560 -0.05589705" rpy="0 0 0" />
+      <!-- 质量：0.60827684 kg -->
+      <mass value="0.60828" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00086873"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00122518"
-        iyz="0.0"
-        izz="0.00066873" />
+        ixx="0.00065900"
+        ixy="0.00000008"
+        ixz="-0.00002661"
+        iyy="0.00092404"
+        iyz="0.00000000"
+        izz="0.00049898" />
     </inertial>
     <visual>
       <origin
@@ -722,9 +896,7 @@
   <joint
     name="zarm_l5_joint"
     type="revolute">
-    <origin
-      xyz="-0.02 0 -0.1195"
-      rpy="0 0 0" />
+    <origin xyz="-0.02 0 -0.1201" rpy="0 0 0" />
     <parent
       link="zarm_l4_link" />
     <child
@@ -732,23 +904,26 @@
     <axis
       xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ l_hand_roll ============ -->
+  <!-- 坐标系：l_hand_roll -->
   <link
     name="zarm_l6_link">
     <inertial>
-      <origin
-        xyz="0.00019162 0.0 -0.01747746"
-        rpy="0 0 0" />
-      <mass
-        value="0.39387181" />
+      <!-- 质心：( -0.00674799, 0.00638282, -0.00862654 ) -->
+      <origin xyz="-0.00674799 0.00638282 -0.00862654" rpy="0 0 0" />
+      <!-- 质量：0.50616416 kg -->
+      <mass value="0.50616" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 第一个张量 -->
       <inertia
-        ixx="0.00018535"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00019853"
-        iyz="0.0"
-        izz="0.00020210" />
+        ixx="0.00038064"
+        ixy="-0.00002132"
+        ixz="0.00013787"
+        iyy="0.00052077"
+        iyz="0.00003086"
+        izz="0.00032724" />
     </inertial>
     <visual>
       <origin
@@ -778,23 +953,26 @@
     <axis
       xyz="1 0 0" />
     <limit lower="-1.30899693899575" upper="0.698131700797732" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ l_hand_pitch ============ -->
+  <!-- 坐标系：l_hand_pitch -->
   <link
     name="zarm_l7_link">
     <inertial>
-      <origin
-        xyz="0.0 0.0 -0.10230994"
-        rpy="0 0 0" />
-      <mass
-        value="0.71537800" />
+      <!-- 质心：( 0.03810742, 0.00267575, -0.05086389 ) -->
+      <origin xyz="0.03810742 0.00267575 -0.05086389" rpy="0 0 0" />
+      <!-- 质量：0.18939501 kg -->
+      <mass value="0.18940" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.001060440"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.001064636"
-        iyz="0.0"
-        izz="0.001061427" />
+        ixx="0.00033691"
+        ixy="0.00009767"
+        ixz="0.00028631"
+        iyy="0.00081922"
+        iyz="-0.00007808"
+        izz="0.00071752" />
     </inertial>
     <visual>
       <origin
@@ -802,7 +980,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s52/meshes/l_hand_pitch_noHand.STL" />
+          filename="package://kuavo_assets/models/biped_s52/meshes/l_hand_pitch.STL" />
       </geometry>
       <material
         name="">
@@ -824,7 +1002,7 @@
     <axis
       xyz="0 1 0" />
     <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <link name="zarm_l7_end_effector">
     <collision>
@@ -839,25 +1017,27 @@
     <parent link="zarm_l7_link" />
     <child link="zarm_l7_end_effector" />
   </joint>
+  <!-- ============ r_arm_pitch ============ -->
+  <!-- 坐标系：r_arm_pitch_roll_yaw -->
   <link
     name="zarm_r1_link">
     <inertial>
-      <origin
-        xyz="-0.00166796 0.00839971 0.00012987"
-        rpy="0 0 0" />
-      <mass
-        value="0.91653322" />
+      <!-- 质心：( 0.00162594, 0.00950442, -0.00031733 ) -->
+      <origin xyz="0.00162594 0.00950442 -0.00031733" rpy="0 0 0" />
+      <!-- 质量：0.92946504 kg -->
+      <mass value="0.92947" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00126587"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00086921"
-        iyz="0.0"
-        izz="0.00124337" />
+        ixx="0.00132776"
+        ixy="0.00001398"
+        ixz="-0.00000091"
+        iyy="0.00084780"
+        iyz="-0.00000301"
+        izz="0.00130062" />
     </inertial>
     <visual>
       <origin
-        xyz="0 0.081 0"
+        xyz="0 0 0"
         rpy="0 0 0" />
       <geometry>
         <mesh
@@ -874,7 +1054,7 @@
     name="zarm_r1_joint"
     type="revolute">
     <origin
-      xyz="0 -0.2527 0.2831"
+      xyz="-0.003 -0.2527 0.283"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -883,23 +1063,26 @@
     <axis
       xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ r_arm_roll ============ -->
+  <!-- 坐标系：r_arm_pitch_roll_yaw -->
   <link
     name="zarm_r2_link">
     <inertial>
-      <origin
-        xyz="-0.00080994 -0.00000486 -0.04651026"
-        rpy="0 0 0" />
-      <mass
-        value="0.38767390" />
+      <!-- 质心：( -0.00082502, -0.00000618, -0.04699917 ) -->
+      <origin xyz="-0.00082502 -0.00000618 -0.04699917" rpy="0 0 0" />
+      <!-- 质量：0.41522857 kg -->
+      <mass value="0.41523" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00080739"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00116144"
-        iyz="0.0"
-        izz="0.00070223" />
+        ixx="0.00084475"
+        ixy="0.00000011"
+        ixz="-0.00002054"
+        iyy="0.00122057"
+        iyz="0.00000014"
+        izz="0.00073617" />
     </inertial>
     <visual>
       <origin
@@ -929,23 +1112,26 @@
     <axis
       xyz="1 0 0" />
     <limit lower="-3.49065850398866" upper="0.349065850398866" effort="75.0" velocity="8.0" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ r_arm_yaw ============ -->
+  <!-- 坐标系：r_arm_pitch_roll_yaw -->
   <link
     name="zarm_r3_link">
     <inertial>
-      <origin
-        xyz="0.00943019 -0.00343988 -0.11304538"
-        rpy="0 0 0" />
-      <mass
-        value="1.77926875" />
+      <!-- 质心：( 0.00936686, -0.00338228, -0.22947022 ) -->
+      <origin xyz="0.00936686 -0.00338228 -0.22947022" rpy="0 0 0" />
+      <!-- 质量：1.78472650 kg -->
+      <mass value="1.78473" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00992856"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.01004582"
-        iyz="0.0"
-        izz="0.00185422" />
+        ixx="0.00706267"
+        ixy="0.00007037"
+        ixz="0.00081612"
+        iyy="0.00715549"
+        iyz="-0.00033921"
+        izz="0.00187467" />
     </inertial>
     <visual>
       <origin
@@ -975,23 +1161,26 @@
     <axis
       xyz="0 0 1" />
     <limit lower="-1.48352986419518" upper="1.48352986419518" effort="57.0" velocity="7.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ r_foream ============ -->
+  <!-- 坐标系：r_foream -->
   <link
     name="zarm_r4_link">
     <inertial>
-      <origin
-        xyz="-0.01829932 -0.00087167 -0.06936622"
-        rpy="0 0 0" />
-      <mass
-        value="0.58507821" />
+      <!-- 质心：( -0.01808595, -0.00140005, -0.06722746 ) -->
+      <origin xyz="-0.01808595 -0.00140005 -0.06722746" rpy="0 0 0" />
+      <!-- 质量：0.63548283 kg -->
+      <mass value="0.63548" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00143291"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00125018"
-        iyz="0.0"
-        izz="0.00068356" />
+        ixx="0.00154594"
+        ixy="0.00000786"
+        ixz="-0.00013011"
+        iyy="0.00133341"
+        iyz="0.00003163"
+        izz="0.00070186" />
     </inertial>
     <visual>
       <origin
@@ -1021,23 +1210,26 @@
     <axis
       xyz="0 1 0" />
     <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ r_hand_yaw ============ -->
+  <!-- 坐标系：r_hand_yaw -->
   <link
     name="zarm_r5_link">
     <inertial>
-      <origin
-        xyz="-0.00026090 0.00001322 -0.06083944"
-        rpy="0 0 0" />
-      <mass
-        value="0.68679955" />
+      <!-- 质心：( -0.00505317, 0.00001432, -0.05619135 ) -->
+      <origin xyz="-0.00505317 0.00001432 -0.05619135" rpy="0 0 0" />
+      <!-- 质量：0.61020748 kg -->
+      <mass value="0.61021" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00086873"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00122518"
-        iyz="0.0"
-        izz="0.00066873" />
+        ixx="0.00065686"
+        ixy="0.00000010"
+        ixz="-0.00002535"
+        iyy="0.00092519"
+        iyz="0.00000000"
+        izz="0.00050244" />
     </inertial>
     <visual>
       <origin
@@ -1057,9 +1249,7 @@
   <joint
     name="zarm_r5_joint"
     type="revolute">
-    <origin
-      xyz="-0.02 0 -0.1195"
-      rpy="0 0 0" />
+    <origin xyz="-0.02 0 -0.1201" rpy="0 0 0" />
     <parent
       link="zarm_r4_link" />
     <child
@@ -1067,23 +1257,26 @@
     <axis
       xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ r_hand_roll ============ -->
+  <!-- 坐标系：r_hand_roll -->
   <link
     name="zarm_r6_link">
     <inertial>
-      <origin
-        xyz="0.00019162 0.0 -0.01747746"
-        rpy="0 0 0" />
-      <mass
-        value="0.39387181" />
+      <!-- 质心：( -0.00633080, -0.00581708, -0.00833296 ) -->
+      <origin xyz="-0.00633080 -0.00581708 -0.00833296" rpy="0 0 0" />
+      <!-- 质量：0.53821377 kg -->
+      <mass value="0.53821" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.00018535"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00019853"
-        iyz="0.0"
-        izz="0.00020210" />
+        ixx="0.00039845"
+        ixy="0.00001950"
+        ixz="0.00013771"
+        iyy="0.00056523"
+        iyz="-0.00003046"
+        izz="0.00037323" />
     </inertial>
     <visual>
       <origin
@@ -1113,23 +1306,26 @@
     <axis
       xyz="1 0 0" />
     <limit lower="-0.698131700797732" upper="1.30899693899575" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ r_hand_pitch ============ -->
+  <!-- 坐标系：r_hand_pitch -->
   <link
     name="zarm_r7_link">
     <inertial>
-      <origin
-        xyz="0.0 0.0 -0.10230994"
-        rpy="0 0 0" />
-      <mass
-        value="0.71537800" />
+      <!-- 质心：( 0.03616769, -0.00232464, -0.04975256 ) -->
+      <origin xyz="0.03616769 -0.00232464 -0.04975256" rpy="0 0 0" />
+      <!-- 质量：0.19960270 kg -->
+      <mass value="0.19960" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
       <inertia
-        ixx="0.001060440"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.001064636"
-        iyz="0.0"
-        izz="0.001061427" />
+        ixx="0.00035005"
+        ixy="-0.00009519"
+        ixz="0.00029432"
+        iyy="0.00084147"
+        iyz="0.00007632"
+        izz="0.00073834" />
     </inertial>
     <visual>
       <origin
@@ -1137,7 +1333,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s52/meshes/r_hand_pitch_noHand.STL" />
+          filename="package://kuavo_assets/models/biped_s52/meshes/r_hand_pitch.STL" />
       </geometry>
       <material
         name="">
@@ -1159,15 +1355,9 @@
     <axis
       xyz="0 1 0" />
     <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <link name="zarm_r7_end_effector">
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <sphere radius="0.005" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zarm_r7_end_effector_joint" type="fixed">
     <origin xyz="0 0.0 -0.17" rpy="0 0 0" />
@@ -1176,9 +1366,18 @@
   </joint>
   <link name="zhead_1_link">
     <inertial>
-      <origin xyz="0.00031003 -0.00324665 0.0949507" rpy="0 0 0" />
-      <mass value="0.87117795" />
-      <inertia ixx="0.00204799" ixy="0" ixz="0" iyy="0.00196073" iyz="0" izz="0.0006154" />
+      <!-- 质心：( -0.00023727, -0.00370647, -0.03459039 ) -->
+      <origin xyz="-0.00023727 -0.00370647 -0.03459039" rpy="0 0 0" />
+      <!-- 质量：0.57249607 kg -->
+      <mass value="0.57250" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自head_yaw Lxx/Lxy/Lxz... -->
+      <inertia
+        ixx="0.00158340"
+        ixy="0.00000121"
+        ixz="-0.00000972"
+        iyy="0.00149398"
+        iyz="0.00007274"
+        izz="0.00035213" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -1191,18 +1390,27 @@
     </visual>
   </link>
   <joint name="zhead_1_joint" type="revolute">
-    <origin xyz="-0.003 0.0 0.3715" rpy="0 0 0" />
+    <origin xyz="-0.003 0.0 0.49535" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="1.5" velocity="5.23" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <link name="zhead_2_link">
     <inertial>
-      <origin xyz="0.01886384 0.0 0.03217966" rpy="0 0 0" />
-      <mass value="0.80529305" />
-      <inertia ixx="0.0038885" ixy="0" ixz="0" iyy="0.00477347" iyz="0" izz="0.00489027" />
+      <!-- 质心：( 0.02805157, 0.00056300, 0.03552405 ) -->
+      <origin xyz="0.02805157 0.00056300 0.03552405" rpy="0 0 0" />
+      <!-- 质量（用户覆盖）：0.73448153 kg -->
+      <mass value="0.73448" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自head_pitch Lxx/Lxy/Lxz... -->
+      <inertia
+        ixx="0.00411867"
+        ixy="0.0"
+        ixz="0.00042644"
+        iyy="0.00457039"
+        iyz="0.0"
+        izz="0.00467067" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -1215,18 +1423,29 @@
     </visual>
   </link>
   <joint name="zhead_2_joint" type="revolute">
-    <origin xyz="0 0 0.137954074182872" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zhead_1_link" />
     <child link="zhead_2_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.349065850398866" upper="0.785398163397448" effort="12.0" velocity="5.23" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.523598775598299" upper="0.523598775598299" effort="12.0" velocity="5.23" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+
+  <!-- ============ head_camera - 完全按照txt文件 ============ -->
   <link name="camera_base">
     <inertial>
-      <origin xyz="-0.0109467295615343 -0.00025332024893314 0.000333522154238597" rpy="0 0 0" />
-      <mass value="0.0482361371130408" />
-      <inertia ixx="5.97804649866973E-05" ixy="0" ixz="0" iyy="5.8e-05" iyz="0" izz="5.92932584785117E-05" />
+      <!-- 质心：( 0.01583173, -0.04712613, -0.00019589 ) 完全按照txt -->
+      <origin xyz="0.01583173 -0.04712613 -0.00019589" rpy="0 0 0" />
+      <!-- 质量（用户覆盖）= 0.00000000 千克，完全按照txt -->
+      <mass value="0.00000000" />
+      <!-- txt中没有惯性张量数据，设置为0 -->
+      <inertia
+        ixx="0.0"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.0"
+        iyz="0.0"
+        izz="0.0" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -1239,25 +1458,58 @@
     </visual>
   </link>
   <joint name="camera_base" type="fixed">
-    <origin xyz="0.119717018973535 0.0237514612535074 0.0262044145991832" rpy="0 0.480224871300295 0" />
+    <origin xyz="0.093839 0.0475 0.050077" rpy="0 0.3406 0" />
     <parent link="zhead_2_link" />
     <child link="camera_base" />
+  </joint>
+
+  <link name="head_rader">
+    <inertial>
+      <!-- 质心：( 0.00018505, -0.00000652, 0.01776962 ) -->
+      <origin xyz="0.00018505 -0.00000652 0.01776962" rpy="0 0 0" />
+      <!-- 质量（用户覆盖）：0.26500000 kg -->
+      <mass value="0.26500" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自head_radar Lxx/Lxy/Lxz... -->
+      <inertia
+        ixx="0.00012489"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00013451"
+        iyz="0.0"
+        izz="0.00013326" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s52/meshes/head_rader.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.61176 0.65882 0.67059 1" />
+      </material>
+    </visual>
+  </link>
+  
+  <joint name="head_rader_joint" type="fixed">
+    <origin xyz="0 0 -0.078253" rpy="0 0 0" />
+    <parent link="zhead_1_link" />
+    <child link="head_rader" />
+    <axis xyz="0 0 0" />
   </joint>
   <link
     name="waist_camera">
     <inertial>
       <origin
-        xyz="-0.0352747720086005 5.11279030860874E-05 -0.00154687630407949"
+        xyz="0.0048485 0.00025646 0.013977"
         rpy="0 0 0" />
       <mass
-        value="0.237986769607677" />
+        value="0.048238" />
       <inertia
-        ixx="0.000666718805832595"
-        ixy="1.39974366569124E-07"
-        ixz="-1.47166626554892E-05"
-        iyy="8.36219161597965E-05"
-        iyz="-3.58024687826506E-07"
-        izz="0.000699018993000803" />
+        ixx="5.9781E-05"
+        ixy="-2.4765E-07"
+        ixz="1.0778E-07"
+        iyy="5.8328E-06"
+        iyz="-1.0739E-07"
+        izz="5.9293E-05" />
     </inertial>
     <visual>
       <origin
@@ -1265,32 +1517,23 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/waist_camera.STL" />
+          filename="package://kuavo_assets/models/biped_s52/meshes/waist_camera.STL" />
       </geometry>
       <material
         name="">
         <color
-          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+          rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/waist_camera.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
     name="waist_camera"
     type="fixed">
     <origin
-      xyz="0 0 0"
-      rpy="0 0 0" />
+      xyz="0.0787 0 -0.028449"
+      rpy="0 0.59341 0" />
     <parent
-      link="base_link" />
+      link="waist_yaw_link" />
     <child
       link="waist_camera" />
     <axis
