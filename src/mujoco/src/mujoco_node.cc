@@ -91,6 +91,7 @@ namespace
   ros::Publisher pubGroundTruth;  // 重命名原来的pubOdom
   ros::Publisher pubOdom;          // 新增odom发布者
   ros::Publisher pubTimeDiff;
+  bool pure_sim = false;
 
 #ifdef USE_DDS
   std::unique_ptr<MujocoDdsClient<unitree_hg::msg::dds_::LowCmd_, unitree_hg::msg::dds_::LowState_>> dds_client;
@@ -836,7 +837,7 @@ namespace
           bool updated = false;
           bool claw_updated = false;
           queueMutex.lock();
-          if (cmd_updated || is_chassic_cmd_changed || is_chassic_cmd_vel_changed || claw_cmd_updated)
+          if (cmd_updated || is_chassic_cmd_changed || is_chassic_cmd_vel_changed || claw_cmd_updated || pure_sim)
           {
             updated = true;
           }
@@ -1629,6 +1630,12 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   if(nh.hasParam("robot_version"))
   {
     nh.getParam("robot_version", robotVersion_);
+  }
+
+  if(nh.hasParam("pure_sim"))
+  {
+    nh.getParam("pure_sim", pure_sim);
+    std::cout << "[mujoco_node] pure_sim param: " << pure_sim << std::endl;
   }
   
   // 获取配置文件
