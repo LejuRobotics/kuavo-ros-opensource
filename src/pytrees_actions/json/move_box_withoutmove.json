@@ -1,0 +1,106 @@
+{
+    "tree": {
+        "name": "Sequence",
+        "label": "root",
+        "params": {},
+        "childs": [
+            {
+                "name": "Sequence",
+                "label": "seq1",
+                "params": {
+                    "memory": "True"
+                },
+                "childs": [
+                    {
+                        "name": "look_for_tag.json",
+                        "label": "find_box_tag",
+                        "params": {
+                        },
+                        "childs": []
+                    },
+                    {
+						"name": "SelectTagByID",
+						"label": "select_tag_by_ID",
+						"params": {
+							"target_id": "0, 1, 2, 7, 8, 39"
+						}
+					},
+                    {
+                        "name": "grasp_box.json"
+                    },
+                    {
+                        "name": "MoveToTarget",
+                        "label": "turn_around",
+                        "params": {
+                            "move_mode": "relative_pose",
+                            "x": "-1.5",
+                            "y": "0.0",
+                            "yaw": "0.0"
+                        },
+						"inparams":
+						{
+							"walk":
+							{
+								"value": "walk",
+								"source": "read_board"
+							}
+						},
+                        "childs": []
+                    },
+                    {
+                        "name": "look_for_tag.json",
+                        "label": "find_box_tag",
+                        "params": {
+                        },
+                        "childs": []
+                    },
+                    {
+						"name": "SelectTagByID",
+						"label": "select_tag_by_ID",
+						"params": {
+							"target_id": "0, 1, 2, 7, 8, 39"
+						}
+					},
+                    {
+                        "name": "CalcRobotParkPose",
+                        "label": "cal",
+                        "params": {
+                            "mode": "place"
+                        },
+						"inparams": {
+							"head":
+								{
+									"value": "head",
+									"source": "read_board"
+								},
+							"grasp_box":
+								{
+									"value": "grasp_box",
+									"source": "read_board"
+								}
+						}
+                    },
+                    {
+                        "name": "MoveToTarget",
+                        "label": "go_to_tag",
+                        "params": {
+                            "move_mode": "tag_target"
+                        },
+						"inparams":
+						{
+							"walk":
+							{
+								"value": "walk",
+								"source": "read_board"
+							}
+						},
+                        "childs": []
+                    },
+                    {
+                        "name": "place_box.json"
+                    }
+                ]
+            }
+        ]
+    }
+}

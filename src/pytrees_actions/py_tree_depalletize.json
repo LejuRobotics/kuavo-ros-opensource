@@ -1,0 +1,179 @@
+{
+    "tree": {
+        "name": "Selector",
+        "label": "root",
+        "params": {},
+        "childs": [
+            {
+                "name": "Sequence",
+                "label": "move_box_seq",
+                "params": {
+                    "memory": {
+                        "value": "True",
+                        "source": "CUSTOM"
+                    }
+                },
+                "childs": [
+	            {
+			"name": "MoveArmBaseJointValue",
+			"label": "prepare_arm_for_depalletize",
+			"params": {
+				 "left_positions": "0, 1, 0, -2, 0, 0, 0",
+				 "right_positions": "0, -1, 0, -2, 0, 0, 0"
+                          }
+		    },
+                    {
+                        "name": "Parallel",
+                        "label": "find_tag",
+                        "childs": [
+                            {
+                                "name": "MoveHead",
+                                "label": "mvHead",
+                                "params":
+                                {
+                                    "mode": {"value": "manual", "source": "CUSTOM"},
+                                    "head_search_yaws": { "value": "1, 0, 0, 0, 0, 0, 0", "source": "CUSTOM"},
+                                    "head_search_pitchs": {	"value": "20, 0, -20, 0, 0, 0, 0", "source": "CUSTOM"}
+                                }
+                            },
+                            {
+                                "name": "FindAllTag",
+                                "label": "find_all_tag",
+                                "params":
+                                {
+                                    "max_percep_time": { "value": "7", "source": "CUSTOM"}
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "name": "FilterTagInROI",
+                        "label": "filter_tag_by_ROI",
+                        "params":
+                        {
+                            "x_min": { "value": "-6", "source": "CUSTOM"},
+                            "x_max": { "value": "6", "source": "CUSTOM"},
+                            "y_min": {"value": "-6", "source": "CUSTOM"},
+                            "y_max": {"value": "6", "source": "CUSTOM"},
+                            "z_min": {"value": "0", "source": "CUSTOM"},
+                            "z_max": {"value": "2", "source": "CUSTOM"}
+                            }
+                    },
+                    {
+                        "name": "SelectTagBaseSortForDepalletize",
+                        "label": "select_tag_base_sort_for_depalletize",
+                        "params": {}
+                    },
+                    {
+                        "name": "CalcMoveDest",
+                        "label": "cal",
+                        "params": {
+                            "mode": {
+                                "value": "box_pick",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "MoveToTarget",
+                        "label": "go_to_tag",
+                        "params": {
+                            "mode": {
+                                "value": "tag_target",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "depalletize_grasp_box.json",
+                        "label": "depalletize_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name": "MoveToTarget",
+                        "label": "turn_around",
+                        "params": {
+                            "mode": {
+                                "value": "relative_pose",
+                                "source": "CUSTOM"
+                            },
+                            "x": {
+                                "value": "0",
+                                "source": "CUSTOM"
+                            },
+                            "y": {
+                                "value": "0",
+                                "source": "CUSTOM"
+                            },
+                            "yaw": {
+                                "value": "180",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "look_for_tag.json",
+                        "label": "find_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name": "CalcMoveDest",
+                        "label": "cal",
+                        "params": {
+                            "mode": {
+                                "value": "box_place",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "MoveToTarget",
+                        "label": "go_to_tag",
+                        "params": {
+                            "mode": {
+                                "value": "tag_target",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "depalletize_place_box.json",
+                        "label": "place_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name": "MoveToTarget",
+                        "label": "turn_around",
+                        "params": {
+                            "mode": {
+                                "value": "relative_pose",
+                                "source": "CUSTOM"
+                            },
+                            "x": {
+                                "value": "0",
+                                "source": "CUSTOM"
+                            },
+                            "y": {
+                                "value": "0",
+                                "source": "CUSTOM"
+                            },
+                            "yaw": {
+                                "value": "180",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    }
+                ]
+            }
+        ]
+    }
+}

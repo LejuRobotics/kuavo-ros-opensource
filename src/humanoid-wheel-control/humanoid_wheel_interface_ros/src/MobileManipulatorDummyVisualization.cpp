@@ -160,7 +160,7 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
   base_tf.transform.translation = ros_msg_helpers::getVectorMsg(r_world_base);
   base_tf.transform.translation.z += baseHeightOffset;
   base_tf.transform.rotation = ros_msg_helpers::getOrientationMsg(q_world_base);
-  tfBroadcaster_.sendTransform(base_tf);
+  // tfBroadcaster_.sendTransform(base_tf);
 
   // publish joints transforms
   const auto j_arm = getArmJointAngles(observation.state, modelInfo_);

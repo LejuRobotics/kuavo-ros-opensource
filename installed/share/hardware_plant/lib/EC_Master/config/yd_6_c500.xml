@@ -167,7 +167,7 @@
             <ProcessData>
                 <Send>
                     <BitStart>0</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitLength>152</BitLength>
                 </Send>
                 <Recv>
                     <BitStart>0</BitStart>
@@ -427,20 +427,6 @@
                         <DataType>INT</DataType>
                     </Entry>
                     <Entry>
-                        <Index>#x3500</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Position loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
-                        <Index>#x3504</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
                         <Index>#x6060</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>8</BitLen>
@@ -606,16 +592,6 @@
                     <Length>128</Length>
                     <StatusBitAddr>0</StatusBitAddr>
                 </Recv>
-                <BootStrap>
-                    <Send>
-                        <Start>4096</Start>
-                        <Length>128</Length>
-                    </Send>
-                    <Recv>
-                        <Start>4224</Start>
-                        <Length>128</Length>
-                    </Recv>
-                </BootStrap>
                 <Protocol>CoE</Protocol>
                 <Protocol>FoE</Protocol>
                 <CoE>
@@ -987,24 +963,6 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>7</SubIndex>
-                            <Data>10000035</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>8</SubIndex>
-                            <Data>10000435</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>9</SubIndex>
                             <Data>08006060</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -1014,7 +972,7 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>07</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -1471,6 +1429,7 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 0 (mailbox out)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1001</Adp>
@@ -1481,27 +1440,8 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 1 (mailbox in)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1001</Adp>
-                    <Ado>2056</Ado>
-                    <Data>8010800022000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 0 (bootstrap out)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1001</Adp>
-                    <Ado>2048</Ado>
-                    <Data>0010800026000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 1 (bootstrap in)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1001</Adp>
                     <Ado>2056</Ado>
@@ -1594,7 +1534,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1001</Adp>
                     <Ado>2064</Ado>
-                    <Data>0011170024000100</Data>
+                    <Data>0011130024000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -1614,7 +1554,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1001</Adp>
                     <Ado>1536</Ado>
-                    <Data>00000010170000070011000201000000</Data>
+                    <Data>00000010130000070011000201000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -1896,8 +1836,8 @@
             </Info>
             <ProcessData>
                 <Send>
-                    <BitStart>184</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>152</BitStart>
+                    <BitLength>152</BitLength>
                 </Send>
                 <Recv>
                     <BitStart>184</BitStart>
@@ -2157,20 +2097,6 @@
                         <DataType>INT</DataType>
                     </Entry>
                     <Entry>
-                        <Index>#x3500</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Position loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
-                        <Index>#x3504</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
                         <Index>#x6060</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>8</BitLen>
@@ -2336,16 +2262,6 @@
                     <Length>128</Length>
                     <StatusBitAddr>1</StatusBitAddr>
                 </Recv>
-                <BootStrap>
-                    <Send>
-                        <Start>4096</Start>
-                        <Length>128</Length>
-                    </Send>
-                    <Recv>
-                        <Start>4224</Start>
-                        <Length>128</Length>
-                    </Recv>
-                </BootStrap>
                 <Protocol>CoE</Protocol>
                 <Protocol>FoE</Protocol>
                 <CoE>
@@ -2717,24 +2633,6 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>7</SubIndex>
-                            <Data>10000035</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>8</SubIndex>
-                            <Data>10000435</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>9</SubIndex>
                             <Data>08006060</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -2744,7 +2642,7 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>07</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -3201,6 +3099,7 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 0 (mailbox out)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1002</Adp>
@@ -3211,27 +3110,8 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 1 (mailbox in)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1002</Adp>
-                    <Ado>2056</Ado>
-                    <Data>8010800022000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 0 (bootstrap out)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1002</Adp>
-                    <Ado>2048</Ado>
-                    <Data>0010800026000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 1 (bootstrap in)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1002</Adp>
                     <Ado>2056</Ado>
@@ -3324,7 +3204,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1002</Adp>
                     <Ado>2064</Ado>
-                    <Data>0011170024000100</Data>
+                    <Data>0011130024000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -3344,7 +3224,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1002</Adp>
                     <Ado>1536</Ado>
-                    <Data>17000010170000070011000201000000</Data>
+                    <Data>13000010130000070011000201000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -3630,8 +3510,8 @@
             </Info>
             <ProcessData>
                 <Send>
-                    <BitStart>368</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>304</BitStart>
+                    <BitLength>152</BitLength>
                 </Send>
                 <Recv>
                     <BitStart>368</BitStart>
@@ -3891,20 +3771,6 @@
                         <DataType>INT</DataType>
                     </Entry>
                     <Entry>
-                        <Index>#x3500</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Position loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
-                        <Index>#x3504</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
                         <Index>#x6060</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>8</BitLen>
@@ -4070,16 +3936,6 @@
                     <Length>128</Length>
                     <StatusBitAddr>2</StatusBitAddr>
                 </Recv>
-                <BootStrap>
-                    <Send>
-                        <Start>4096</Start>
-                        <Length>128</Length>
-                    </Send>
-                    <Recv>
-                        <Start>4224</Start>
-                        <Length>128</Length>
-                    </Recv>
-                </BootStrap>
                 <Protocol>CoE</Protocol>
                 <Protocol>FoE</Protocol>
                 <CoE>
@@ -4451,24 +4307,6 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>7</SubIndex>
-                            <Data>10000035</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>8</SubIndex>
-                            <Data>10000435</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>9</SubIndex>
                             <Data>08006060</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -4478,7 +4316,7 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>07</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -4935,6 +4773,7 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 0 (mailbox out)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1003</Adp>
@@ -4945,27 +4784,8 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 1 (mailbox in)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1003</Adp>
-                    <Ado>2056</Ado>
-                    <Data>8010800022000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 0 (bootstrap out)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1003</Adp>
-                    <Ado>2048</Ado>
-                    <Data>0010800026000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 1 (bootstrap in)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1003</Adp>
                     <Ado>2056</Ado>
@@ -5058,7 +4878,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1003</Adp>
                     <Ado>2064</Ado>
-                    <Data>0011170024000100</Data>
+                    <Data>0011130024000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -5078,7 +4898,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1003</Adp>
                     <Ado>1536</Ado>
-                    <Data>2e000010170000070011000201000000</Data>
+                    <Data>26000010130000070011000201000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -5364,8 +5184,8 @@
             </Info>
             <ProcessData>
                 <Send>
-                    <BitStart>552</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>456</BitStart>
+                    <BitLength>152</BitLength>
                 </Send>
                 <Recv>
                     <BitStart>552</BitStart>
@@ -5625,20 +5445,6 @@
                         <DataType>INT</DataType>
                     </Entry>
                     <Entry>
-                        <Index>#x3500</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Position loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
-                        <Index>#x3504</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
                         <Index>#x6060</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>8</BitLen>
@@ -5804,16 +5610,6 @@
                     <Length>128</Length>
                     <StatusBitAddr>3</StatusBitAddr>
                 </Recv>
-                <BootStrap>
-                    <Send>
-                        <Start>4096</Start>
-                        <Length>128</Length>
-                    </Send>
-                    <Recv>
-                        <Start>4224</Start>
-                        <Length>128</Length>
-                    </Recv>
-                </BootStrap>
                 <Protocol>CoE</Protocol>
                 <Protocol>FoE</Protocol>
                 <CoE>
@@ -6185,24 +5981,6 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>7</SubIndex>
-                            <Data>10000035</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>8</SubIndex>
-                            <Data>10000435</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>9</SubIndex>
                             <Data>08006060</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -6212,7 +5990,7 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>07</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -6669,6 +6447,7 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 0 (mailbox out)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1004</Adp>
@@ -6679,27 +6458,8 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 1 (mailbox in)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1004</Adp>
-                    <Ado>2056</Ado>
-                    <Data>8010800022000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 0 (bootstrap out)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1004</Adp>
-                    <Ado>2048</Ado>
-                    <Data>0010800026000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 1 (bootstrap in)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1004</Adp>
                     <Ado>2056</Ado>
@@ -6792,7 +6552,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1004</Adp>
                     <Ado>2064</Ado>
-                    <Data>0011170024000100</Data>
+                    <Data>0011130024000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -6812,7 +6572,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1004</Adp>
                     <Ado>1536</Ado>
-                    <Data>45000010170000070011000201000000</Data>
+                    <Data>39000010130000070011000201000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -7098,8 +6858,8 @@
             </Info>
             <ProcessData>
                 <Send>
-                    <BitStart>736</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>608</BitStart>
+                    <BitLength>152</BitLength>
                 </Send>
                 <Recv>
                     <BitStart>736</BitStart>
@@ -7359,20 +7119,6 @@
                         <DataType>INT</DataType>
                     </Entry>
                     <Entry>
-                        <Index>#x3500</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Position loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
-                        <Index>#x3504</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
                         <Index>#x6060</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>8</BitLen>
@@ -7538,16 +7284,6 @@
                     <Length>128</Length>
                     <StatusBitAddr>4</StatusBitAddr>
                 </Recv>
-                <BootStrap>
-                    <Send>
-                        <Start>4096</Start>
-                        <Length>128</Length>
-                    </Send>
-                    <Recv>
-                        <Start>4224</Start>
-                        <Length>128</Length>
-                    </Recv>
-                </BootStrap>
                 <Protocol>CoE</Protocol>
                 <Protocol>FoE</Protocol>
                 <CoE>
@@ -7919,24 +7655,6 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>7</SubIndex>
-                            <Data>10000035</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>8</SubIndex>
-                            <Data>10000435</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>9</SubIndex>
                             <Data>08006060</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -7946,7 +7664,7 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>07</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -8403,6 +8121,7 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 0 (mailbox out)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1005</Adp>
@@ -8413,27 +8132,8 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 1 (mailbox in)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1005</Adp>
-                    <Ado>2056</Ado>
-                    <Data>8010800022000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 0 (bootstrap out)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1005</Adp>
-                    <Ado>2048</Ado>
-                    <Data>0010800026000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 1 (bootstrap in)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1005</Adp>
                     <Ado>2056</Ado>
@@ -8526,7 +8226,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1005</Adp>
                     <Ado>2064</Ado>
-                    <Data>0011170024000100</Data>
+                    <Data>0011130024000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -8546,7 +8246,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1005</Adp>
                     <Ado>1536</Ado>
-                    <Data>5c000010170000070011000201000000</Data>
+                    <Data>4c000010130000070011000201000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -8832,8 +8532,8 @@
             </Info>
             <ProcessData>
                 <Send>
-                    <BitStart>920</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>760</BitStart>
+                    <BitLength>152</BitLength>
                 </Send>
                 <Recv>
                     <BitStart>920</BitStart>
@@ -9093,20 +8793,6 @@
                         <DataType>INT</DataType>
                     </Entry>
                     <Entry>
-                        <Index>#x3500</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Position loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
-                        <Index>#x3504</Index>
-                        <SubIndex>0</SubIndex>
-                        <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
-                        <DataType>UINT</DataType>
-                    </Entry>
-                    <Entry>
                         <Index>#x6060</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>8</BitLen>
@@ -9272,16 +8958,6 @@
                     <Length>128</Length>
                     <StatusBitAddr>5</StatusBitAddr>
                 </Recv>
-                <BootStrap>
-                    <Send>
-                        <Start>4096</Start>
-                        <Length>128</Length>
-                    </Send>
-                    <Recv>
-                        <Start>4224</Start>
-                        <Length>128</Length>
-                    </Recv>
-                </BootStrap>
                 <Protocol>CoE</Protocol>
                 <Protocol>FoE</Protocol>
                 <CoE>
@@ -9653,24 +9329,6 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>7</SubIndex>
-                            <Data>10000035</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>8</SubIndex>
-                            <Data>10000435</Data>
-                        </InitCmd>
-                        <InitCmd Fixed="1">
-                            <Transition>PS</Transition>
-                            <Comment><![CDATA[download pdo 0x1600 entry]]></Comment>
-                            <Timeout>0</Timeout>
-                            <Ccs>1</Ccs>
-                            <Index>5632</Index>
-                            <SubIndex>9</SubIndex>
                             <Data>08006060</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -9680,7 +9338,7 @@
                             <Ccs>1</Ccs>
                             <Index>5632</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>07</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -10137,6 +9795,7 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 0 (mailbox out)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1006</Adp>
@@ -10147,27 +9806,8 @@
                 </InitCmd>
                 <InitCmd>
                     <Transition>IP</Transition>
+                    <Transition>IB</Transition>
                     <Comment><![CDATA[set sm 1 (mailbox in)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1006</Adp>
-                    <Ado>2056</Ado>
-                    <Data>8010800022000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 0 (bootstrap out)]]></Comment>
-                    <Cmd>5</Cmd>
-                    <Adp>1006</Adp>
-                    <Ado>2048</Ado>
-                    <Data>0010800026000100</Data>
-                    <Cnt>1</Cnt>
-                    <Retries>3</Retries>
-                </InitCmd>
-                <InitCmd>
-                    <Transition>IB</Transition>
-                    <Comment><![CDATA[set sm 1 (bootstrap in)]]></Comment>
                     <Cmd>5</Cmd>
                     <Adp>1006</Adp>
                     <Ado>2056</Ado>
@@ -10260,7 +9900,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1006</Adp>
                     <Ado>2064</Ado>
-                    <Data>0011170024000100</Data>
+                    <Data>0011130024000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -10280,7 +9920,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1006</Adp>
                     <Ado>1536</Ado>
-                    <Data>73000010170000070011000201000000</Data>
+                    <Data>5f000010130000070011000201000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -10596,12 +10236,24 @@
                     <State>PREOP</State>
                     <State>SAFEOP</State>
                     <State>OP</State>
+                    <Comment><![CDATA[DC; APWR; System Time Register (Bus-Shift)]]></Comment>
+                    <Cmd>2</Cmd>
+                    <Adp>0</Adp>
+                    <Ado>2320</Ado>
+                    <DataLength>4</DataLength>
+                    <InputOffs>148</InputOffs>
+                    <OutputOffs>148</OutputOffs>
+                </Cmd>
+                <Cmd>
+                    <State>PREOP</State>
+                    <State>SAFEOP</State>
+                    <State>OP</State>
                     <Comment><![CDATA[MISC; LRD; Poll Mailbox State]]></Comment>
                     <Cmd>10</Cmd>
                     <Addr>150994944</Addr>
                     <DataLength>2</DataLength>
-                    <InputOffs>148</InputOffs>
-                    <OutputOffs>148</OutputOffs>
+                    <InputOffs>152</InputOffs>
+                    <OutputOffs>152</OutputOffs>
                 </Cmd><!-- MSU Id 0: Task 0 -->
                 <Cmd>
                     <State>SAFEOP</State>
@@ -10609,7 +10261,7 @@
                     <Comment><![CDATA[PD; LWR;]]></Comment>
                     <Cmd>11</Cmd>
                     <Addr>268435456</Addr>
-                    <DataLength>138</DataLength>
+                    <DataLength>114</DataLength>
                     <Cnt>6</Cnt>
                     <InputOffs>0</InputOffs>
                     <OutputOffs>0</OutputOffs>
@@ -10629,7 +10281,7 @@
         </Cyclic>
         <ProcessImage>
             <Inputs>
-                <ByteSize>150</ByteSize>
+                <ByteSize>154</ByteSize>
                 <Variable>
                     <Name>Slave_1001 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Statusword</Name>
                     <DataType>UINT</DataType>
@@ -10998,7 +10650,7 @@
                 </Variable>
             </Inputs>
             <Outputs>
-                <ByteSize>150</ByteSize>
+                <ByteSize>154</ByteSize>
                 <Variable>
                     <Name>Slave_1001 [YD300 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
@@ -11036,310 +10688,226 @@
                     <BitOffs>128</BitOffs>
                 </Variable>
                 <Variable>
-                    <Name>Slave_1001 [YD300 Servo CoE Drive].1st Receive PDO mapping.Position loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>144</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1001 [YD300 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>160</BitOffs>
-                </Variable>
-                <Variable>
                     <Name>Slave_1001 [YD300 Servo CoE Drive].1st Receive PDO mapping.Mode of
                         Operation</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>176</BitOffs>
+                    <BitOffs>144</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>184</BitOffs>
+                    <BitOffs>152</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Target Position</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>200</BitOffs>
+                    <BitOffs>168</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Target Velocity</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>232</BitOffs>
+                    <BitOffs>200</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Target Torque</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>264</BitOffs>
+                    <BitOffs>232</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Velocity Offset</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>280</BitOffs>
+                    <BitOffs>248</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Torque Offset</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>312</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Position loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>328</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>344</BitOffs>
+                    <BitOffs>280</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Mode of
                         Operation</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>360</BitOffs>
+                    <BitOffs>296</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>368</BitOffs>
+                    <BitOffs>304</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Position</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>384</BitOffs>
+                    <BitOffs>320</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Velocity</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>416</BitOffs>
+                    <BitOffs>352</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Torque</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>448</BitOffs>
+                    <BitOffs>384</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Velocity Offset</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>464</BitOffs>
+                    <BitOffs>400</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Torque Offset</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>496</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Position loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>512</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>528</BitOffs>
+                    <BitOffs>432</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Mode of
                         Operation</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>544</BitOffs>
+                    <BitOffs>448</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>552</BitOffs>
+                    <BitOffs>456</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Position</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>568</BitOffs>
+                    <BitOffs>472</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Velocity</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>600</BitOffs>
+                    <BitOffs>504</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Torque</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>632</BitOffs>
+                    <BitOffs>536</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Velocity Offset</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>648</BitOffs>
+                    <BitOffs>552</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Torque Offset</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>680</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Position loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>696</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>712</BitOffs>
+                    <BitOffs>584</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Mode of
                         Operation</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>728</BitOffs>
+                    <BitOffs>600</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>736</BitOffs>
+                    <BitOffs>608</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Position</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>752</BitOffs>
+                    <BitOffs>624</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Velocity</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>784</BitOffs>
+                    <BitOffs>656</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Torque</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>816</BitOffs>
+                    <BitOffs>688</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Velocity Offset</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>832</BitOffs>
+                    <BitOffs>704</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Torque Offset</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>864</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Position loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>880</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>896</BitOffs>
+                    <BitOffs>736</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Mode of
                         Operation</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>912</BitOffs>
+                    <BitOffs>752</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>920</BitOffs>
+                    <BitOffs>760</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Position</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>936</BitOffs>
+                    <BitOffs>776</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Velocity</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>968</BitOffs>
+                    <BitOffs>808</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Target Torque</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>1000</BitOffs>
+                    <BitOffs>840</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Velocity Offset</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>1016</BitOffs>
+                    <BitOffs>856</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Torque Offset</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>1048</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Position loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>1064</BitOffs>
-                </Variable>
-                <Variable>
-                    <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
-                        kp</Name>
-                    <DataType>UINT</DataType>
-                    <BitSize>16</BitSize>
-                    <BitOffs>1080</BitOffs>
+                    <BitOffs>888</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Mode of
                         Operation</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>1096</BitOffs>
+                    <BitOffs>904</BitOffs>
                 </Variable>
             </Outputs>
         </ProcessImage>

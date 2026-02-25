@@ -9,33 +9,27 @@
 
 namespace HighlyDynamic {
 
-Quest3ArmInfoTransformer::Quest3ArmInfoTransformer(const std::string &robotModel, const Eigen::Vector3d &deltaScale)
+Quest3ArmInfoTransformer::Quest3ArmInfoTransformer(const std::string &robotModel, const double deltaScale)
     : qInitChest_(0.5, 0.5, 0.5, 0.5),  // 等效于绕x，绕z分别旋转pi/2
       chest_axis_agl_(Eigen::Vector3d::Zero()),
       isInitialized_(true),
-      leftHandPose_(robotModel, true),    // 使用带机器人型号参数的构造函数初始化左手位姿
-      rightHandPose_(robotModel, false),  // 使用带机器人型号参数的构造函数初始化右手位姿
-      leftShoulderPose_(),
-      rightShoulderPose_(),
       leftShoulderRpyInRobot_(Eigen::Vector3d::Zero()),
       rightShoulderRpyInRobot_(Eigen::Vector3d::Zero()),
       shoulderWidth_(0.15),  // 肩宽参数，与Python版本一致
-      biasChestToBaseLink_(0.0, 0.0, 0.4245),
+      biasChestToBaseLink_(0.0, 0.0, 0.23),
       armLengthMeasurement_(),
-      robotUpperArmLength_(0.2844),
-      robotLowerArmLength_(0.45),
+      robotUpperArmLength_(0.1646),
+      robotLowerArmLength_(0.36229),
       okPressedCounts_(0),
       stopPressedCounts_(0),
       deltaScale_(deltaScale) {
   // [CZJ]TODO:  后续需要从ros param获得所有硬编码数据
   armLengthMeasurement_.setMeasureArmLength(true);
-  // print robot model
-  ROS_INFO("[Quest3ArmInfoTransformer] Robot model: %s", robotModel.c_str());
 }
 
 bool Quest3ArmInfoTransformer::updateHandPoseAndElbowPosition(const noitom_hi5_hand_udp_python::PoseInfoList &input,
                                                               noitom_hi5_hand_udp_python::PoseInfoList &output) {
-  if (!validateInput(input)) {
+  if (!validateInput(input)) {  //[CZJ]TODO: 需要优化,目前是效率很低的安全检查
     ROS_WARN("[Quest3ArmInfoTransformer] Invalid input data");
     return false;
   }
@@ -104,6 +98,8 @@ bool Quest3ArmInfoTransformer::computeHandPose(const noitom_hi5_hand_udp_python:
       chestPose.orientation.w, chestPose.orientation.x, chestPose.orientation.y, chestPose.orientation.z);
   const Eigen::Quaterniond qRelativeChest = (qInitChest_.inverse() * qCurrentChest).normalized();
 
+  // [CZJ]TODO:
+  // 复现Python版本的航向角修正逻辑。直接用Eigen轴角计算的结果不一样，有待核实
   Eigen::Vector3d axis;
   double angle;
   quatToAxisAngle(qRelativeChest, axis, angle);
@@ -141,6 +137,7 @@ bool Quest3ArmInfoTransformer::computeHandPose(const noitom_hi5_hand_udp_python:
   handQuatInW = yawOnlyQuat_.inverse() * handQuatInW;
 
   // -------------------- handPos 坐标系转换 --------------------
+  // auto handPos = extractScaledPosition(handPose);
   auto handPos = extractPosition(handPose);
   handPos -= chestPosition_;
   handPos = yawOnlyQuat_.inverse() * handPos;
@@ -148,11 +145,13 @@ bool Quest3ArmInfoTransformer::computeHandPose(const noitom_hi5_hand_udp_python:
 
   // -------------------- elbowPos 坐标系转换 --------------------
   auto elbowPos = extractPosition(elbowPose);
+  // auto elbowPos = extractScaledPosition(elbowPose);
   elbowPos -= chestPosition_;
   elbowPos = yawOnlyQuat_.inverse() * elbowPos;
 
   // -------------------- shoulderPos 坐标系转换 --------------------
   auto shoulderPos = extractPosition(shoulderPose);
+  // auto shoulderPos = extractScaledPosition(shoulderPose);
   shoulderPos -= chestPosition_;
   shoulderPos = yawOnlyQuat_.inverse() * shoulderPos;
 
@@ -192,34 +191,13 @@ bool Quest3ArmInfoTransformer::computeHandPose(const noitom_hi5_hand_udp_python:
   armData.handPose = ArmPose(handPos, handQuatInW);
   armData.elbowPose = ArmPose(elbowPos, Eigen::Quaterniond::Identity());
 
-  // 更新肩部位姿信息：将旋转矩阵转换为四元数
-  Eigen::Quaterniond shoulderQuat(R_wS);
-  shoulderQuat.normalize();
-  if (side == "Left") {
-    leftShoulderPose_ = ArmPose(shoulderPos, shoulderQuat);
-  } else if (side == "Right") {
-    rightShoulderPose_ = ArmPose(shoulderPos, shoulderQuat);
-  }
-
   // 验证位姿有效性
   if (!armData.handPose.isValid() || !armData.elbowPose.isValid()) {
     ROS_WARN("[Quest3ArmInfoTransformer] Invalid %s hand poses", side.c_str());
     return false;
   }
 
-  updateVisualizationDataForSide(input, side, handPos, handQuatInW, elbowPos, shoulderPos, R_wS);
-
-  if (side == "Left") {
-    leftHandPose_.position.x() = input.poses[armData.handIndex].position.x;
-    leftHandPose_.position.y() = input.poses[armData.handIndex].position.y;
-    leftHandPose_.position.z() = input.poses[armData.handIndex].position.z;
-  }
-
-  if (side == "Right") {
-    rightHandPose_.position.x() = input.poses[armData.handIndex].position.x;
-    rightHandPose_.position.y() = input.poses[armData.handIndex].position.y;
-    rightHandPose_.position.z() = input.poses[armData.handIndex].position.z;
-  }
+  updateVisualizationDataForSide(input, side, handPos, elbowPos, shoulderPos);
 
   return true;
 }
@@ -228,13 +206,19 @@ Eigen::Vector3d Quest3ArmInfoTransformer::extractPosition(const noitom_hi5_hand_
   return Eigen::Vector3d(poseInfo.position.x, poseInfo.position.y, poseInfo.position.z);
 }
 
+Eigen::Vector3d Quest3ArmInfoTransformer::extractScaledPosition(
+    const noitom_hi5_hand_udp_python::PoseInfo &poseInfo) const {
+  return Eigen::Vector3d(
+      poseInfo.position.x * deltaScale_, poseInfo.position.y * deltaScale_, poseInfo.position.z * deltaScale_);
+}
+
 void Quest3ArmInfoTransformer::updateHandElbowPoseInfoList(noitom_hi5_hand_udp_python::PoseInfoList &output) {
   output.timestamp_ms = ros::Time::now().toNSec() / 1000000;  // 转换为毫秒
   output.is_high_confidence = true;
   output.is_hand_tracking = false;  // 参考Python版本设置为false
 
   // 参考Python的调试版本：[l_hand, l_elbow, r_hand, r_elbow]
-  output.poses.resize(4);
+  output.poses.resize(4);  //[CZJ]TODO: 优先实现功能，后续需要优化效率，内存等
   setHandPoseInfo(output.poses[0], leftHandPose_);     // 左手
   setElbowPoseInfo(output.poses[1], leftElbowPose_);   // 左肘
   setHandPoseInfo(output.poses[2], rightHandPose_);    // 右手
@@ -248,6 +232,7 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> Quest3ArmInfoTransformer::scaleArmPo
     const Eigen::Vector3d &handPos,
     const Eigen::Vector3d &humanShoulderOriginPos,
     const std::string &side) {
+  // 计算人体上臂长度（从肩部到肘部）
   double humanUpperArmLength = (elbowPos - humanShoulderOriginPos).norm();
 
   // 计算人体下臂长度（从肘部到手部）
@@ -356,6 +341,7 @@ Eigen::Quaterniond Quest3ArmInfoTransformer::vrQuat2RobotQuat(const Eigen::Quate
   double xAxisBias = -M_PI / 2;
   double zAxisBias = side == "Right" ? 0.0 : -M_PI;
 
+  //[CZJ]NOTES: 注意旋转顺序，必须时先z后x
   Eigen::Quaterniond qZX =
       Eigen::AngleAxisd(zAxisBias, Eigen::Vector3d::UnitZ()) * Eigen::AngleAxisd(xAxisBias, Eigen::Vector3d::UnitX());
 
@@ -578,10 +564,8 @@ Eigen::Vector3d Quest3ArmInfoTransformer::matrixToRPY(const Eigen::Matrix3d &R) 
 void Quest3ArmInfoTransformer::updateVisualizationDataForSide(const noitom_hi5_hand_udp_python::PoseInfoList &input,
                                                               const std::string &side,
                                                               const Eigen::Vector3d &handPos,
-                                                              const Eigen::Quaterniond &handQuat,
                                                               const Eigen::Vector3d &elbowPos,
-                                                              const Eigen::Vector3d &shoulderPos,
-                                                              const Eigen::Matrix3d &shoulderRot) {
+                                                              const Eigen::Vector3d &shoulderPos) {
   // 复现Python版本的分别处理逻辑：每个手臂处理时单独更新对应数据
   if (side == "Left") {
     visualizationData_.leftHandPos = handPos;
@@ -598,26 +582,15 @@ void Quest3ArmInfoTransformer::updateVisualizationDataForSide(const noitom_hi5_h
   }
 
   Eigen::Vector3d originalChestPos;
-  Eigen::Matrix3d chestRot = Eigen::Matrix3d::Identity();
   if (input.poses.size() > POSE_INDEX_CHEST) {
     auto chestPose = input.poses[POSE_INDEX_CHEST];
     originalChestPos = Eigen::Vector3d(chestPose.position.x, chestPose.position.y, chestPose.position.z);
     visualizationData_.chestPos = originalChestPos;
-    // 提取胸部旋转矩阵
-    Eigen::Quaterniond chestQuat(
-        chestPose.orientation.w, chestPose.orientation.x, chestPose.orientation.y, chestPose.orientation.z);
-    chestRot = chestQuat.toRotationMatrix();
   }
 
   visualizationData_.isValid = visualizationData_.leftSideReady || visualizationData_.rightSideReady;
   if (visPub_ && visualizationCallback_) {
-    // 构建PoseData向量: [handPose, elbowPose, shoulderPose, chestPose]
-    std::vector<PoseData> poses;
-    poses.push_back(PoseData(handQuat.toRotationMatrix(), handPos));   // hand
-    poses.push_back(PoseData(Eigen::Matrix3d::Identity(), elbowPos));  // elbow
-    poses.push_back(PoseData(shoulderRot, shoulderPos));               // shoulder
-    poses.push_back(PoseData(chestRot, originalChestPos));             // chest
-    visualizationCallback_(side, poses);
+    visualizationCallback_(side, handPos, elbowPos, shoulderPos, originalChestPos);
   }
 }
 

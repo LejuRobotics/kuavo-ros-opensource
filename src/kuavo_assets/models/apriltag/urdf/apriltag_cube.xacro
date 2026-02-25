@@ -9,43 +9,7 @@
     <xacro:apriltag_marker parent_link="${parent_link}" id="0">
       <origin xyz="0.055 0 -0.165" rpy="0 1.5708 0"/>
     </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="1">
-      <origin xyz="-0.055 0 -0.165" rpy="0 1.5708 3.1415"/>
-    </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="2">
-      <origin xyz="0 0.055 -0.165" rpy="0 1.5708 1.5708"/>
-    </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="3">
-      <origin xyz="0 -0.055 -0.165" rpy="0 1.5708 -1.5708"/>
-    </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="4">
-      <origin xyz="0 0 -0.22" rpy="0 3.1416 0"/>
-    </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="111">
-      <origin xyz="0 0 -0.11" rpy="0 3.1416 0"/>
-    </xacro:apriltag_marker>
   </xacro:macro>
 
   <!-- 右臂AprilTag标记 -->
-  <xacro:macro name="right_arm_apriltags" params="parent_link">
-    <xacro:apriltag_marker parent_link="${parent_link}" id="5">
-      <origin xyz="0.055 0 -0.165" rpy="0 1.5708 0"/>
-    </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="6">
-      <origin xyz="-0.055 0 -0.165" rpy="0 1.5708 3.1415"/>
-    </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="7">
-      <origin xyz="0 0.055 -0.165" rpy="0 1.5708 1.5708"/>
-    </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="8">
-      <origin xyz="0 -0.055 -0.165" rpy="0 1.5708 -1.5708"/>
-    </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="9">
-      <origin xyz="0 0 -0.22" rpy="0 3.1416 0"/>
-    </xacro:apriltag_marker>
-    <xacro:apriltag_marker parent_link="${parent_link}" id="999">
-      <origin xyz="0 0 -0.11" rpy="0 3.1416 0"/>
-    </xacro:apriltag_marker>
-  </xacro:macro>
-
 </robot>

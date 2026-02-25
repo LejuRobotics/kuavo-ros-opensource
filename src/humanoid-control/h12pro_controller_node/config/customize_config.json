@@ -1,98 +1,48 @@
 {
   "customize_action_RR_A": {
-    "arm_pose_name": [
-      "抱拳_45"
-    ],
-    "music_name": [
-      "2_抱拳.wav"
-    ]
+    "type": "action",
+    "arm_pose_name": ["抱拳_45"],
+    "music_name": ["2_抱拳.mp3"]
   },
+  
   "customize_action_RR_B": {
-    "arm_pose_name": [
-      "打招呼_45"
-    ],
-    "music_name": [
-      "1_挥手.wav"
-    ]
+    "type": "action",
+    "arm_pose_name": ["打招呼_45"],
+    "music_name": ["1_挥手.mp3"]
   },
+
   "customize_action_RR_C": {
-    "arm_pose_name": [
-      "点赞_45"
-    ],
-    "music_name": [
-      "3_点赞.wav"
-    ]
+    "type": "action",
+    "arm_pose_name": ["点赞_45"],
+    "music_name": ["3_点赞.mp3"]
   },
+
   "customize_action_RR_D": {
-    "arm_pose_name": [
-      ""
-    ],
-    "music_name": [
-      ""
-    ]
+    "type": "shell",
+    "command": "python3 /home/lab/kuavo-ros-control/src/demo/full_body_demo/scripts/timed_action_executor.py > /home/lab/action_output.txt 2>&1"
   },
+
   "customize_action_LL_A": {
-    "arm_pose_name": [
-      ""
-    ],
-    "music_name": [
-      ""
-    ]
+    "type": "action",
+    "arm_pose_name": ["start_marching"],
+    "music_name": ["let_me_run_with_you.wav"]
   },
+
   "customize_action_LL_B": {
-    "arm_pose_name": [
-      ""
-    ],
-    "music_name": [
-      ""
-    ]
+    "type": "action",
+    "arm_pose_name": ["end_marching"],
+    "music_name": [""]
   },
+
   "customize_action_LL_C": {
-    "arm_pose_name": [
-      ""
-    ],
-    "music_name": [
-      ""
-    ]
+    "type": "action",
+    "arm_pose_name": ["左手邀请"],
+    "music_name": ["Let_me_check_it_for_you.wav"]
   },
+
   "customize_action_LL_D": {
-    "arm_pose_name": [
-      ""
-    ],
-    "music_name": [
-      ""
-    ]
-  },
-  "vmp_action_RL_A": {
-    "action_name": [
-      "yc_126_spec"
-    ],
-    "music_name": [
-      ""
-    ]
-  },
-  "vmp_action_RL_B": {
-    "action_name": [
-      "yc_01_front_kick"
-    ],
-    "music_name": [
-      ""
-    ]
-  },
-  "vmp_action_RL_C": {
-    "action_name": [
-      "yc_02_side_kick"
-    ],
-    "music_name": [
-      ""
-    ]
-  },
-  "vmp_action_RL_D": {
-    "action_name": [
-      "yc_06_straight_punch"
-    ],
-    "music_name": [
-      ""
-    ]
+    "type": "action",
+    "arm_pose_name": ["左手向上肘弯曲"],
+    "music_name": ["Are_you_feeling_better_now.wav"]
   }
 }

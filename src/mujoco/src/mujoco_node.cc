@@ -899,13 +899,7 @@ namespace
             else
             {
               // 跳过腿部关节的控制输入，但需要更新索引
-              // 在半身模式下，对于人形机器人版本，还需跳过腰部关节
               i += LLegJointsAddr.ctrladr().size() + RLegJointsAddr.ctrladr().size();
-              if (robot_type == 2)
-              {
-                // 跳过腰部关节
-                i += WaistJointsAddr.ctrladr().size();
-              }
             }
 
             updateControl(LArmJointsAddr, i);
@@ -1360,14 +1354,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
       init_cmd(d);
       qpos_init.resize(m->nq);
       std::fill(qpos_init.begin(), qpos_init.end(), 0);
-      if (robot_type == 1)
-      {
-        qpos_init[2] = 0.0;// 初始化轮臂位置 - 设置在地面
-      }
-      else
-      {
-        qpos_init[2] = 0.99;// 初始化双足位置
-      }
+      qpos_init[2] = 0.0;// 初始化位置 - 设置在地面
       InitRobotState(d);
       // ********************************
       sim->Load(m, d, filename);

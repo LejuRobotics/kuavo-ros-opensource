@@ -6,7 +6,7 @@
 #include <std_msgs/Float32.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Int8.h>
-#include <std_msgs/Int8MultiArray.h>
+#include <std_srvs/SetBool.h>
 #include <kuavo_msgs/twoArmHandPoseCmd.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
 #include <kuavo_msgs/changeArmCtrlMode.h>
@@ -64,7 +64,7 @@ public:
   bool controlModeService(kuavo_msgs::changeTorsoCtrlMode::Request& req, kuavo_msgs::changeTorsoCtrlMode::Response& res);
   bool getMpcControlModeService(kuavo_msgs::changeTorsoCtrlMode::Request& req, kuavo_msgs::changeTorsoCtrlMode::Response& res);
   bool armControlModeSrvCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
-  bool getArmControlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
+  bool resetCmdVelRuckigService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
 
   // 多个约束轨迹的操作函数
   void getFirstTargetTrajectories(const TargetTrajectories& targetTrajectories);
@@ -255,9 +255,8 @@ private:
   ros::ServiceServer controlModeServiceServer_;
   ros::ServiceServer getMpcControlModeServiceServer_;
   ros::ServiceServer changeArmControlService_;
-  ros::ServiceServer get_arm_control_mode_service_;
+  ros::ServiceServer resetCmdVelRuckigServiceServer_;
   ros::Publisher mpcControlModePub_;
-  ros::Publisher mpcConstraintUsagePub_;
 
   // 关节控制默认为外部控制模式
   LbArmControlServiceMode currentArmControlMode_ = LbArmControlServiceMode::EXTERN_CONTROL; 
@@ -291,6 +290,10 @@ private:
   Eigen::VectorXd cmdVel_prevTargetPose_;
   Eigen::VectorXd cmdVel_prevTargetVel_;
   Eigen::VectorXd cmdVel_prevTargetAcc_;
+
+  // 当前实际机器人状态（从modifyReferences中更新）
+  vector_t currentActualState_;
+  std::mutex currentActualState_mtx_;
 
   vector_t wheel_move_spd_;  // x, y, yaw
   vector_t wheel_move_acc_;  // x, y, yaw

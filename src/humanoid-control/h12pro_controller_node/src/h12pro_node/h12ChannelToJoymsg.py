@@ -76,7 +76,7 @@ class H12ToJoyControllerNode:
         # 定义 channel 映射
         self.channel_mapping = {
             1: ChannelMapping(channel=1, axis_index=AXIS_RIGHT_STICK_YAW, reverse=True),
-            2: ChannelMapping(channel=2, axis_index=AXIS_RIGHT_STICK_Z,reverse=True), 
+            2: ChannelMapping(channel=2, axis_index=AXIS_RIGHT_STICK_Z,reverse=True),
             3: ChannelMapping(channel=3, axis_index=AXIS_LEFT_STICK_X),
             4: ChannelMapping(channel=4, axis_index=AXIS_LEFT_STICK_Y,reverse=True),
             5: ChannelMapping(channel=5, button_index=BUTTON_BACK, is_button=True, trigger_value=H12_AXIS_RANGE_MAX),#E
@@ -108,7 +108,7 @@ class H12ToJoyControllerNode:
     def h12pro_controller_channels_callback(self, msg):
         channels = msg.channels
         self.channels_msg = channels
-        
+
 
     def run(self):
         rate = rospy.Rate(self.callback_frequency)

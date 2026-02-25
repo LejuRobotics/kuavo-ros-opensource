@@ -8,59 +8,25 @@ import time
 import os
 from typing import Dict, Any, Tuple, Optional
 from sensor_msgs.msg import Joy
-from std_msgs.msg import String, Bool, Float64
+from std_msgs.msg import String, Bool
 from geometry_msgs.msg import Twist
 from kuavo_msgs.srv import playmusic, playmusicRequest
 from kuavo_msgs.srv import ExecuteArmAction, ExecuteArmActionRequest
 from std_srvs.srv import Trigger
-from humanoid_plan_arm_trajectory.msg import RobotActionState
 
 HUMANOID_ROBOT_SESSION_NAME = "humanoid_robot"
 LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch start_way:=auto"
-LAUNCH_VOICE_CONTROL_REAL_CMD = os.getenv('LAUNCH_VOICE_CONTROL_REAL_CMD', "roslaunch voice_control_node voice_control.launch start_way:=auto")
+LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch start_way:=auto"
 ROBOT_VERSION = os.getenv('ROBOT_VERSION', "")
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI", "")
 ROS_IP = os.getenv("ROS_IP", "")
 ROS_HOSTNAME = os.getenv("ROS_HOSTNAME", "")
+KUAVO_ROS_CONTROL_WS_PATH = os.getenv("KUAVO_ROS_CONTROL_WS_PATH", "")
 
-try:
-    # 使用 rospack.get_path 获取 joy 包的路径，正确处理 deb 包安装到 /opt/ros 的情况
-    rospack = rospkg.RosPack()
-    joy_pkg_path = rospack.get_path("joy")
-
-    print(f"joy_pkg_path: {joy_pkg_path}")
-    # 对于 deb 包安装：/opt/ros/<distro>/share/joy -> /opt/ros/<distro>
-    if '/opt/ros' in joy_pkg_path:
-        parts = joy_pkg_path.split('/')
-        # 检查路径格式：/opt/ros/<distro>/share/joy
-        if parts[1] == 'opt' and parts[2] == 'ros':
-            KUAVO_ROS_CONTROL_WS_PATH = '/opt/ros/leju'
-
-    else:
-        # 对于开发工作空间，从包路径向上查找包含 devel 或 install 的目录
-        current_dir = joy_pkg_path
-        while current_dir != '/':
-            if os.path.exists(os.path.join(current_dir, 'devel')) or \
-                os.path.exists(os.path.join(current_dir, 'install')):
-                KUAVO_ROS_CONTROL_WS_PATH = current_dir
-                break
-            parent_dir = os.path.dirname(current_dir)
-            if parent_dir == current_dir:
-                break
-            current_dir = parent_dir
-        else:
-            KUAVO_ROS_CONTROL_WS_PATH = "/home/lab/kuavo-ros-opensource"
-except Exception:
-    # 降级方案：使用默认值
-    KUAVO_ROS_CONTROL_WS_PATH = "/home/lab/kuavo-ros-opensource"
-TAIJI_ACTION_SESSION_NAME = "taiji_action"
 
 class JoyCustomizeConfigNode:
     def __init__(self) -> None:
         rospy.init_node("joy_customize_config")
-
-        # 打印KUAVO_ROS_CONTROL_WS_PATH
-        rospy.loginfo(f"KUAVO_ROS_CONTROL_WS_PATH: {KUAVO_ROS_CONTROL_WS_PATH}")
 
         # Params
         self.joystick_type = rospy.get_param("/joystick_type", "bt2")
@@ -90,23 +56,12 @@ class JoyCustomizeConfigNode:
         # LT/RT axis states for combination detection
         self._lt_pressed = False
         self._rt_pressed = False
-        
-        # 用于避免重复打印映射切换日志
-        self._last_mapping_type = None
-        self._last_mapping_path = None
-        # 用于限制映射切换频率（防止频繁切换）
-        self._last_mapping_switch_time = 0.0
-        self._mapping_switch_cooldown = 0.3  # 0.3秒内不允许再次切换
 
         # Default expected counts; will be adjusted by autodetect
         if self.joystick_type == "bt2pro":
             self.JOYSTICK_BUTTON_NUM = self.JOYSTICK_BUTTON_NUM_BT2PRO
         elif self.joystick_type == "bt2":
             self.JOYSTICK_BUTTON_NUM = self.JOYSTICK_BUTTON_NUM_BT2
-        else:
-            # Default to bt2 if joystick_type is unknown
-            self.JOYSTICK_BUTTON_NUM = self.JOYSTICK_BUTTON_NUM_BT2
-            rospy.logwarn(f"Unknown joystick_type '{self.joystick_type}', defaulting to bt2")
         self.JOYSTICK_AXIS_NUM = 8
 
         # Resolve default channel_map_path if empty
@@ -120,10 +75,7 @@ class JoyCustomizeConfigNode:
         # Load mappings
         self.joy_button_map: Dict[str, int] = {}
         self.joy_axis_map: Dict[str, int] = {}
-        self._load_joy_channel_mapping(self.channel_map_path, verbose=True)  # 首次加载时打印详细信息
-        # 初始化时记录当前映射类型
-        self._last_mapping_type = self.joystick_type
-        self._last_mapping_path = self.channel_map_path
+        self._load_joy_channel_mapping(self.channel_map_path)
         
         # Try to autodetect joystick type and reload mapping safely
         try:
@@ -148,16 +100,6 @@ class JoyCustomizeConfigNode:
         # Subscribers
         self.joy_sub = rospy.Subscriber("/joy", Joy, self._joy_callback, queue_size=10)
         self.update_sub = rospy.Subscriber("/update_joy_customize_config", String, self._update_config_callback, queue_size=1)
-        # 订阅动作执行状态话题，用于检测是否有动作正在执行
-        self.robot_action_state_sub = rospy.Subscriber("/robot_action_state", RobotActionState, self._robot_action_state_callback, queue_size=1)
-        # 订阅RL控制器状态话题，用于判断当前是否处于RL控制器模式
-        self.is_rl_controller_sub = rospy.Subscriber("/humanoid_controller/is_rl_controller_", Float64, self._is_rl_controller_callback, queue_size=1)
-        
-        # 动作执行状态标志
-        self.robot_action_executing = False
-        
-        # RL控制器状态标志（用于判断是否处于RL控制器模式）
-        self._is_rl_controller = False
 
         # Publishers for robot control (align with C++ behavior)
         self.stop_pub = rospy.Publisher("/stop_robot", Bool, queue_size=10)
@@ -185,7 +127,7 @@ class JoyCustomizeConfigNode:
         button_name_mapping = {
             "BUTTON_STANCE": "BUTTON_A",
             "BUTTON_TROT": "BUTTON_B", 
-            "BUTTON_RL": "BUTTON_X",  # BUTTON_RL maps to BUTTON_X
+            "BUTTON_JUMP": "BUTTON_X",
             "BUTTON_WALK": "BUTTON_Y"
         }
         
@@ -197,7 +139,7 @@ class JoyCustomizeConfigNode:
             
         return converted_map
 
-    def _load_joy_channel_mapping(self, path: str, verbose: bool = False) -> None:
+    def _load_joy_channel_mapping(self, path: str) -> None:
         try:
             with open(path, "r") as f:
                 data = json.load(f)
@@ -209,13 +151,9 @@ class JoyCustomizeConfigNode:
             self.joy_axis_map = {str(k): int(v) for k, v in axis.items()}
             rospy.set_param("joystick_type", self.joystick_type)
             rospy.set_param("channel_map_path", path)
-            # 只在verbose=True时打印详细信息，避免频繁打印
-            if verbose:
-                rospy.loginfo(f"Loaded joystick mapping from {path}")
-                rospy.loginfo(f"Buttons: {self.joy_button_map}")
-                rospy.loginfo(f"Axes: {self.joy_axis_map}")
-            else:
-                rospy.logdebug(f"Loaded joystick mapping from {path}")
+            rospy.loginfo(f"Loaded joystick mapping from {path}")
+            rospy.loginfo(f"Buttons: {self.joy_button_map}")
+            rospy.loginfo(f"Axes: {self.joy_axis_map}")
         except Exception as e:
             rospy.logwarn(f"Failed to load joystick mapping from {path}: {e}")
 
@@ -241,17 +179,6 @@ class JoyCustomizeConfigNode:
     def _set_joystick_type_and_reload(self, new_type: str) -> None:
         if not new_type:
             return
-        
-        # 如果已经是目标类型，直接返回，避免不必要的切换
-        if self.joystick_type == new_type:
-            return
-        
-        # 检查冷却时间，防止频繁切换
-        now = time.time()
-        if now - self._last_mapping_switch_time < self._mapping_switch_cooldown:
-            rospy.logdebug(f"Mapping switch cooldown active, ignoring switch to {new_type}")
-            return
-        
         try:
             humanoid_controllers_path = rospkg.RosPack().get_path("humanoid_controllers")
             new_map_path = f"{humanoid_controllers_path}/launch/joy/{new_type}.json"
@@ -282,14 +209,7 @@ class JoyCustomizeConfigNode:
         else:
             self._prev_buttons = [0] * self.JOYSTICK_BUTTON_NUM
         self._prev_axes = [0.0] * self.JOYSTICK_AXIS_NUM
-        
-        # 更新切换时间和记录
-        self._last_mapping_switch_time = now
-        # 只在映射真正改变时打印，避免重复日志
-        if self._last_mapping_type != new_type or self._last_mapping_path != new_map_path:
-            # rospy.logwarn(f"Joystick mapping switched to {new_type} with safe state transfer")
-            self._last_mapping_type = new_type
-            self._last_mapping_path = new_map_path
+        rospy.logwarn(f"Joystick mapping switched to {new_type} with safe state transfer")
 
     def _rebuild_prev_buttons_for_new_map(
         self,
@@ -333,26 +253,14 @@ class JoyCustomizeConfigNode:
             # Only consider expected axis count of 8; if not, just ignore
             if ax_len != self.JOYSTICK_AXIS_NUM:
                 return False
-            
-            # 检查冷却时间，防止频繁切换
-            now = time.time()
-            if now - self._last_mapping_switch_time < self._mapping_switch_cooldown:
-                return False
-            
             # If we currently expect bt2pro (16) but receive 11 -> switch to bt2
             if self.JOYSTICK_BUTTON_NUM == self.JOYSTICK_BUTTON_NUM_BT2PRO and btn_len == self.JOYSTICK_BUTTON_NUM_BT2:
-                # 检查是否真的需要切换（避免重复切换）
-                if self.joystick_type != "bt2":
-                    self._set_joystick_type_and_reload("bt2")
-                    return True
-                return False
+                self._set_joystick_type_and_reload("bt2")
+                return True
             # If we currently expect bt2 (11) but receive 16 -> switch to bt2pro
             if self.JOYSTICK_BUTTON_NUM == self.JOYSTICK_BUTTON_NUM_BT2 and btn_len == self.JOYSTICK_BUTTON_NUM_BT2PRO:
-                # 检查是否真的需要切换（避免重复切换）
-                if self.joystick_type != "bt2pro":
-                    self._set_joystick_type_and_reload("bt2pro")
-                    return True
-                return False
+                self._set_joystick_type_and_reload("bt2pro")
+                return True
         except Exception as e:
             rospy.logwarn(f"maybe_switch_mapping_by_msg_size failed: {e}")
         return False
@@ -361,57 +269,19 @@ class JoyCustomizeConfigNode:
         rospy.loginfo("Received update_joy_customize_config, reloading customize_config.json ...")
         self._load_customize_config()
 
-    def _execute_arm_poses(self, arm_pose_names, mode_switch_event=None):
+    def _execute_arm_poses(self, arm_pose_names):
         """执行手臂动作的线程函数"""
         for arm_pose in arm_pose_names:
             if arm_pose:  # 检查动作名称不为空
                 rospy.loginfo(f"Executing arm pose: {arm_pose}")
                 try:
-                    success, message = self._call_execute_arm_action(arm_pose)
-                    if success:
-                        # 等待手臂模式切换完成（检测到动作开始执行）
-                        rospy.loginfo(f"Waiting for arm mode switch to complete for action: {arm_pose}")
-                        start_wait_time = time.time()
-                        timeout = 5.0  # 5秒超时
-                        
-                        while not self.robot_action_executing and not rospy.is_shutdown():
-                            if time.time() - start_wait_time > timeout:
-                                rospy.logwarn(f"Timeout waiting for arm mode switch to complete for action: {arm_pose}")
-                                # 超时未检测到模式切换完成，不通知音乐线程，音乐将不播放
-                                return
-                            time.sleep(0.01)
-                        
-                        if self.robot_action_executing:
-                            rospy.loginfo(f"Arm mode switch completed for action: {arm_pose}, action is now executing")
-                            # 只有在动作成功执行且模式切换完成后，才通知音乐线程可以开始播放
-                            if mode_switch_event and not mode_switch_event.is_set():
-                                mode_switch_event.set()
-                        else:
-                            rospy.logwarn(f"Arm mode switch not detected for action: {arm_pose}, music will not play")
-                            # 未检测到模式切换完成，不通知音乐线程，音乐将不播放
-                            return
-                        
-                        time.sleep(1.0)  # 等待动作完成
-                    else:
-                        rospy.logwarn(f"Failed to execute arm pose {arm_pose}: {message}")
-                        # 动作执行失败，不通知音乐线程，音乐将不播放
-                        return
+                    self._call_execute_arm_action(arm_pose)
+                    time.sleep(1.0)  # 等待动作完成
                 except Exception as e:
                     rospy.logerr(f"Failed to execute arm pose {arm_pose}: {e}")
-                    # 发生异常，不通知音乐线程，音乐将不播放
-                    return
 
-    def _play_music(self, music_names, mode_switch_event=None):
+    def _play_music(self, music_names):
         """播放音乐的线程函数"""
-        # 如果有模式切换事件，等待模式切换完成后再播放音乐
-        if mode_switch_event:
-            rospy.loginfo("Waiting for arm mode switch to complete before playing music...")
-            if not mode_switch_event.wait(timeout=10.0):  # 最多等待10秒
-                rospy.logwarn("Timeout waiting for arm mode switch, action may have failed. Music will not play.")
-                # 动作执行失败或超时，不播放音乐
-                return
-        
-        # 只有在动作成功执行且模式切换完成后，才播放音乐
         for music in music_names:
             if music:  # 检查音乐名称不为空
                 rospy.loginfo(f"Playing music: {music}")
@@ -434,35 +304,8 @@ class JoyCustomizeConfigNode:
             rospy.logerr(f"Service /play_music call failed: {e}")
             return False
 
-    def _robot_action_state_callback(self, msg):
-        """动作执行状态回调函数"""
-        # state: 0=失败/未执行, 1=执行中/成功
-        # 当state为1时，表示有动作正在执行
-        self.robot_action_executing = (msg.state == 1)
-    
-    def _is_rl_controller_callback(self, msg):
-        """RL控制器状态回调函数"""
-        # data: 0.0=MPC模式, 1.0=RL控制器模式
-        # 当data > 0.5时，表示当前处于RL控制器模式
-        self._is_rl_controller = (msg.data > 0.5)
-    
     def _call_execute_arm_action(self, action_name):
         """调用手臂动作执行服务"""
-        # 检查是否有动作正在执行，如果有则不允许触发新的手臂动作
-        action_executing = False
-        
-        # 检查ROS参数标志（用于某些动作执行场景，如太极动作）
-        if rospy.has_param("/taiji_executing"):
-            action_executing = rospy.get_param("/taiji_executing", False)
-        
-        # 检查动作状态话题（用于通过/execute_arm_action服务执行的动作）
-        if not action_executing:
-            action_executing = self.robot_action_executing
-        
-        if action_executing:
-            rospy.logwarn(f"Cannot execute arm action '{action_name}': another action is currently executing")
-            return False, "Another action is currently executing"
-        
         try:
             _execute_arm_action_client = rospy.ServiceProxy('/execute_arm_action', ExecuteArmAction)
             request = ExecuteArmActionRequest()
@@ -475,24 +318,13 @@ class JoyCustomizeConfigNode:
             return False, f"Service exception: {e}"
 
     def _joy_callback(self, joy_msg: Joy) -> None:
-        # 仅给 roban 使用：ROBOT_VERSION 来自环境变量，是字符串，这里做一次安全解析
-        robot_version_str = ROBOT_VERSION or ""
-        try:
-            robot_version = int(robot_version_str)
-        except (TypeError, ValueError):
-            rospy.logwarn(f"Invalid ROBOT_VERSION '{robot_version_str}', joy_customize_config disabled for this robot")
-            return
-
-        if robot_version < 10 or robot_version > 20:
-            return
-
         # 根据消息尺寸动态切换映射
         if len(joy_msg.buttons) != self.JOYSTICK_BUTTON_NUM or len(joy_msg.axes) != self.JOYSTICK_AXIS_NUM:
             switched = self._maybe_switch_mapping_by_msg_size(joy_msg)
+            rospy.logwarn(f"Invalid joy msg. Buttons: {len(joy_msg.buttons)}, Axes: {len(joy_msg.axes)}")
 
             if not switched:
-                # 降低日志级别，避免频繁打印无效消息警告
-                rospy.logdebug(f"Invalid joy msg. Buttons: {len(joy_msg.buttons)}, Axes: {len(joy_msg.axes)}")
+                rospy.logwarn(f"Invalid joy msg. Buttons: {len(joy_msg.buttons)}, Axes: {len(joy_msg.axes)}")
                 return
 
         # Initialize previous states on first message
@@ -536,7 +368,7 @@ class JoyCustomizeConfigNode:
                     return
 
             # 检查 START 按键边沿：第一次用于启动，之后用于初始化
-            if 0 <= start_idx < len(joy_msg.buttons) and self.real:
+            if 0 <= start_idx < len(joy_msg.buttons):
                 start_current = joy_msg.buttons[start_idx]
                 start_prev = self._prev_buttons[start_idx] if start_idx < len(self._prev_buttons) else 0
                 if start_prev == 0 and start_current == 1:
@@ -589,15 +421,6 @@ class JoyCustomizeConfigNode:
                     self._prev_buttons = list(joy_msg.buttons)
                     self._prev_axes = list(joy_msg.axes)
                     return
-                
-                # 处理站立失败回退到 ready_stance 的情况（硬件节点站立失败会回到下蹲状态）
-                if self._launch_phase == "waiting_launched" and self._last_launch_status == "ready_stance":
-                    rospy.logwarn("[JoyCustomize] Stand up failed or interrupted, falling back to ready state. Press START again to retry.")
-                    self._launch_phase = "ready"
-                    self._prev_buttons = list(joy_msg.buttons)
-                    self._prev_axes = list(joy_msg.axes)
-                    return
-                
                 if self._launch_phase in ["waiting_launched", "launched"] and self._last_launch_status == "launched":
                     self._robot_launched = True
                     self._launch_phase = "launched"
@@ -640,11 +463,6 @@ class JoyCustomizeConfigNode:
                     button_prev = self._prev_buttons[button_idx] if button_idx < len(self._prev_buttons) else 0
 
                     if button_prev == 1 and button_current == 0:
-
-                        # 如果当前处于RL控制器模式，跳过组合按键动作
-                        if self._is_rl_controller:
-                            rospy.loginfo(f"Skipping customize action: currently in RL controller mode (is_rl_controller={self._is_rl_controller})")
-                            continue
 
                         # 每次按钮释放时重新加载配置文件
                         self._load_customize_config()
@@ -694,18 +512,13 @@ class JoyCustomizeConfigNode:
         rospy.loginfo(f"Arm poses: {arm_pose_names}")
         rospy.loginfo(f"Music: {music_names}")
 
-        # 如果同时有动作和音乐，创建事件用于同步（等待模式切换完成后再播放音乐）
-        mode_switch_event = None
-        if arm_pose_names and music_names:
-            mode_switch_event = threading.Event()
-
         # 创建线程执行动作和音乐
         if arm_pose_names:
-            arm_pose_thread = threading.Thread(target=self._execute_arm_poses, args=(arm_pose_names, mode_switch_event))
+            arm_pose_thread = threading.Thread(target=self._execute_arm_poses, args=(arm_pose_names,))
             arm_pose_thread.start()
 
         if music_names:
-            music_thread = threading.Thread(target=self._play_music, args=(music_names, mode_switch_event))
+            music_thread = threading.Thread(target=self._play_music, args=(music_names,))
             music_thread.start()
 
         # 等待线程完成
@@ -851,12 +664,12 @@ class JoyCustomizeConfigNode:
         try:
             msg = Bool()
             msg.data = True
-
             for _ in range(5):
                 self.stop_pub.publish(msg)
                 rospy.sleep(0.1)
         except Exception as e:
             rospy.logerr(f"[JoyCustomize] publish /stop_robot failed: {e}")
+        
 
     def launch_humanoid_robot(self):
         
@@ -864,7 +677,7 @@ class JoyCustomizeConfigNode:
                         stderr=subprocess.DEVNULL) 
         
         if self.real:
-            launch_cmd = f"{LAUNCH_VOICE_CONTROL_REAL_CMD} joystick_type:={self.joystick_type}"
+            launch_cmd = f"{LAUNCH_HUMANOID_ROBOT_REAL_CMD} joystick_type:={self.joystick_type}"
         else:
             launch_cmd = f"{LAUNCH_HUMANOID_ROBOT_SIM_CMD} joystick_type:={self.joystick_type}"
 
@@ -876,7 +689,6 @@ class JoyCustomizeConfigNode:
             f"export ROS_MASTER_URI={ROS_MASTER_URI}" if ROS_MASTER_URI else "",
             f"export ROS_IP={ROS_IP}" if ROS_IP else "",
             f"export ROS_HOSTNAME={ROS_HOSTNAME}" if ROS_HOSTNAME else "",
-
         ]
         export_lines = [line for line in export_lines if line]
 
@@ -923,10 +735,6 @@ class JoyCustomizeConfigNode:
 
     def _check_and_update_launch_status_nonblocking(self) -> None:
         """Rate-limited single status check without blocking loops or sleeps."""
-        # 仿真模式下不需要查询真实机器人启动状态服务，直接返回以避免刷屏
-        if not self.real:
-            return
-
         if self._robot_launched or self._launch_phase == "idle":
             return
         now = time.time()

@@ -1,0 +1,245 @@
+{
+    "tree": {
+        "name": "Selector",
+        "label": "root",
+        "params": {},
+        "childs": [
+            {
+                "name": "Sequence",
+                "label": "move_box_seq",
+                "params": {
+                    "memory": {
+                        "value": "True",
+                        "source": "CUSTOM"
+                    }
+                },
+                "childs": [
+                    {
+                        "name": "JiBotWaitAndMoveToTarget",
+                        "label": "wait_and_move",
+                        "params": {
+                            "service_name": "/move_base/move_to_target",
+                            "move_service_name": "/jibot_set_move_target",
+                            "linear_velocity": "0.5",
+                            "angular_velocity": "0.5",
+                            "position_threshold": "0.05",
+                            "angle_threshold": "0.0175",
+                            "avoid_enabled": "false",
+                            "allow_rotation": "true"
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "JiBotCheckArrived",
+                        "label": "检查是否到达",
+                        "params": {}
+                    },
+                    {
+                        "name": "look_for_tag_grasp.json",
+                        "label": "find_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name": "CalcMoveDest",
+                        "label": "cal",
+                        "params": {
+                            "mode": {
+                                "value": "box_pick",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "Parallel",
+                        "label": "prepare_and_move",
+                        "params": {
+                            "policy": {
+                                "value": "success_on_all",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": [
+                            {
+                                "name": "PrepareArmForGrasp",
+                                "label": "prepare_arm_for_grasp",
+                                "params": {
+                                    "arm_control_mode": {
+                                        "value": "fixed_base",
+                                        "source": "CUSTOM"
+                                    }
+                                },
+                                "childs": []
+                            },
+                            {
+                                "name": "MoveToTarget",
+                                "label": "go_to_tag",
+                                "params": {
+                                    "mode": {
+                                        "value": "tag_target",
+                                        "source": "CUSTOM"
+                                    }
+                                },
+                                "childs": []
+                            },
+                            {
+                                "name" : "PrepareCalcLeg",
+                                "label" : "prepare_calc_leg",
+                                "params" : {
+                                  "offset_x" : {
+                                    "value" : "0.0",
+                                    "source" : "CUSTOM"
+                                  },
+                                  "offset_y" : {
+                                    "value" : "0.0",
+                                    "source" : "CUSTOM"
+                                  },
+                                  "offset_z" : {
+                                    "value" : "0.15",
+                                    "source" : "CUSTOM"
+                                  },
+                                  "control_base" : {
+                                    "value" : "false",
+                                    "source" : "CUSTOM"
+                                  },
+                                  "face_tag" : {
+                                    "value" : "true",
+                                    "source" : "CUSTOM"
+                                  }
+                                },
+                                "childs" : [ ]
+                            }
+                        ]
+                    },
+                    {
+                        "name": "grasp_box_lb.json",
+                        "label": "grasp_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name": "SetTaskStatus",
+                        "label": "set_grab_success",
+                        "params": {
+                            "param_name": "/task_status",
+                            "status_value": "success"
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "JiBotWaitAndMoveToTarget",
+                        "label": "wait_and_move",
+                        "params": {
+                            "service_name": "/move_base/move_to_target",
+                            "move_service_name": "/jibot_set_move_target",
+                            "linear_velocity": "0.5",
+                            "angular_velocity": "0.5",
+                            "position_threshold": "0.0",
+                            "angle_threshold": "0.0",
+                            "avoid_enabled": "false",
+                            "allow_rotation": "true"
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "JiBotCheckArrived",
+                        "label": "检查是否到达",
+                        "params": {}
+                    },
+                    {
+                        "name": "look_for_tag.json",
+                        "label": "find_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name": "CalcMoveDest",
+                        "label": "cal",
+                        "params": {
+                            "mode": {
+                                "value": "box_place",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "Parallel",
+                        "label": "prepare_and_move",
+                        "params": {
+                            "policy": {
+                                "value": "success_on_all",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": [
+                            {
+                                "name": "MoveToTarget",
+                                "label": "go_to_tag",
+                                "params": {
+                                    "mode": {
+                                        "value": "tag_target",
+                                        "source": "CUSTOM"
+                                    }
+                                },
+                                "childs": []
+                            },
+                            {
+                                "name" : "PrepareCalcLeg",
+                                "label" : "prepare_calc_leg",
+                                "params" : {
+                                  "offset_x" : {
+                                    "value" : "0.0",
+                                    "source" : "CUSTOM"
+                                  },
+                                  "offset_y" : {
+                                    "value" : "0.0",
+                                    "source" : "CUSTOM"
+                                  },
+                                  "offset_z" : {
+                                    "value" : "0.15",
+                                    "source" : "CUSTOM"
+                                  },
+                                  "control_base" : {
+                                    "value" : "false",
+                                    "source" : "CUSTOM"
+                                  },
+                                  "face_tag" : {
+                                    "value" : "true",
+                                    "source" : "CUSTOM"
+                                  }
+                                },
+                                "childs" : [ ]
+                            }
+                        ]
+                    },
+                    {
+                        "name": "place_box_lb.json",
+                        "label": "place_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name": "SetTaskStatus",
+                        "label": "set_place_success",
+                        "params": {
+                            "param_name": "/task_status",
+                            "status_value": "success"
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "SetTaskStatus",
+                        "label": "set_place_success",
+                        "params": {
+                            "param_name": "/task_status",
+                            "status_value": "none"
+                        },
+                        "childs": []
+                    }
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,370 @@
+{
+  "states": {
+    "kuavo": [
+      "initial",
+      "calibrate",
+      "squat",
+      "stand",
+      "jump",
+      "walk"
+    ],
+    "ocs2": [
+      "initial",
+      "calibrate",
+      "ready_stance",
+      "stance",
+      "vr_remote_control",
+      "walk",
+      "grab",
+      "trot"
+    ]
+  },
+  "transitions": {
+    "kuavo": [
+      {
+        "trigger": "calibrate",
+        "source": "initial",
+        "dest": "calibrate",
+        "before": "calibrate_callback"
+      },
+      {
+        "trigger": "start",
+        "source": "initial",
+        "dest": "squat",
+        "before": "start_callback"
+      },
+      {
+        "trigger": "set_zero",
+        "source": "initial",
+        "dest": "initial",
+        "before": "set_zero_callback"
+      },
+      {
+        "trigger": "calibrate_finished",
+        "source": "calibrate",
+        "dest": "initial",
+        "before": "calibrate_finished_callback"
+      },
+      {
+        "trigger": "stop",
+        "source": "squat",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "stand",
+        "source": "squat",
+        "dest": "stand",
+        "before": "squat_to_stand_callback"
+      },
+      {
+        "trigger": "squat",
+        "source": "stand",
+        "dest": "squat",
+        "before": "squat_callback"
+      },
+      {
+        "trigger": "jump_pre",
+        "source": "stand",
+        "dest": "jump",
+        "before": "jump_pre_callback"
+      },
+      {
+        "trigger": "jump_take_off",
+        "source": "jump",
+        "dest": "jump",
+        "before": "jump_take_off_callback"
+      },
+      {
+        "trigger": "walk",
+        "source": "stand",
+        "dest": "walk",
+        "before": "grab_box_callback"
+      },
+      {
+        "trigger": "stand",
+        "source": "jump",
+        "dest": "stand",
+        "before": "stand_callback"
+      },
+      {
+        "trigger": "stand",
+        "source": "walk",
+        "dest": "stand",
+        "before": "stand_callback"
+      },
+      {
+        "trigger": "emergency_stop",
+        "source": "calibrate",
+        "dest": "initial",
+        "before": "emergency_stop_callback"
+      },
+      {
+        "trigger": "emergency_stop",
+        "source": "squat",
+        "dest": "initial",
+        "before": "emergency_stop_callback"
+      },
+      {
+        "trigger": "emergency_stop",
+        "source": "stand",
+        "dest": "initial",
+        "before": "emergency_stop_callback"
+      },
+      {
+        "trigger": "emergency_stop",
+        "source": "jump",
+        "dest": "initial",
+        "before": "emergency_stop_callback"
+      },
+      {
+        "trigger": "emergency_stop",
+        "source": "walk",
+        "dest": "initial",
+        "before": "emergency_stop_callback"
+      },
+      {
+        "trigger": "arm_pose1",
+        "source": "stand",
+        "dest": "stand",
+        "before": "arm_pose_callback"
+      },
+      {
+        "trigger": "arm_pose2",
+        "source": "stand",
+        "dest": "stand",
+        "before": "arm_pose_callback"
+      },
+      {
+        "trigger": "arm_pose3",
+        "source": "stand",
+        "dest": "stand",
+        "before": "arm_pose_callback"
+      },
+      {
+        "trigger": "arm_pose4",
+        "source": "stand",
+        "dest": "stand",
+        "before": "arm_pose_callback"
+      }
+    ],
+    "ocs2": [
+      {
+        "trigger": "initial_pre",
+        "source": "initial",
+        "dest": "ready_stance",
+        "before": "initial_pre_callback"
+      },
+      {
+        "trigger": "calibrate",
+        "source": "initial",
+        "dest": "calibrate",
+        "before": "calibrate_callback"
+      },
+      {
+        "trigger": "cali_to_ready_stance",
+        "source": "calibrate",
+        "dest": "ready_stance",
+        "before": "cali_to_ready_stance_callback"
+      },
+      {
+        "trigger": "ready_stance",
+        "source": "ready_stance",
+        "dest": "stance",
+        "before": "ready_stance_callback"
+      },
+      {
+        "trigger": "stance",
+        "source": "stance",
+        "dest": "stance",
+        "before": "stance_callback"
+      },
+      {
+        "trigger": "walk",
+        "source": "stance",
+        "dest": "walk",
+        "before": "grab_box_callback"
+      },
+      {
+        "trigger": "stance",
+        "source": "walk",
+        "dest": "stance",
+        "before": "grab_box_stop_callback"
+      },
+      {
+        "trigger": "arm_pose1",
+        "source": "stance",
+        "dest": "stance",
+        "before": "arm_pose_callback"
+      },
+      {
+        "trigger": "arm_pose2",
+        "source": "stance",
+        "dest": "stance",
+        "before": "arm_pose_callback"
+      },
+      {
+        "trigger": "arm_pose3",
+        "source": "stance",
+        "dest": "stance",
+        "before": "arm_pose_callback"
+      },
+      {
+        "trigger": "arm_pose4",
+        "source": "stance",
+        "dest": "stance",
+        "before": "arm_pose_callback"
+      },
+      {
+        "trigger": "customize_action_RR_A",
+        "source": "stance",
+        "dest": "stance",
+        "before": "customize_action_callback"
+      },
+      {
+        "trigger": "customize_action_RR_B",
+        "source": "stance",
+        "dest": "stance",
+        "before": "customize_action_callback"
+      },
+      {
+        "trigger": "customize_action_RR_C",
+        "source": "stance",
+        "dest": "stance",
+        "before": "customize_action_callback"
+      },
+      {
+        "trigger": "customize_action_RR_D",
+        "source": "stance",
+        "dest": "stance",
+        "before": "customize_action_callback"
+      },
+      {
+        "trigger": "customize_action_LL_A",
+        "source": "stance",
+        "dest": "stance",
+        "before": "customize_action_callback"
+      },
+      {
+        "trigger": "customize_action_LL_B",
+        "source": "stance",
+        "dest": "stance",
+        "before": "customize_action_callback"
+      },
+      {
+        "trigger": "customize_action_LL_C",
+        "source": "stance",
+        "dest": "stance",
+        "before": "customize_action_callback"
+      },
+      {
+        "trigger": "customize_action_LL_D",
+        "source": "stance",
+        "dest": "stance",
+        "before": "customize_action_callback"
+      },
+      {
+        "trigger": "stop",
+        "source": "ready_stance",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "stop",
+        "source": "stance",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "stop",
+        "source": "walk",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "stop",
+        "source": "trot",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "stop",
+        "source": "calibrate",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "trot",
+        "source": "stance",
+        "dest": "trot",
+        "before": "trot_callback"
+      },
+      {
+        "trigger": "trot",
+        "source": "walk",
+        "dest": "trot",
+        "before": "trot_callback"
+      },
+      {
+        "trigger": "stance",
+        "source": "trot",
+        "dest": "stance",
+        "before": "stance_callback"
+      },
+      {
+        "trigger": "walk",
+        "source": "trot",
+        "dest": "walk",
+        "before": "walk_callback"
+      },
+      {
+        "trigger": "start_vr_remote_control",
+        "source": "stance",
+        "dest": "vr_remote_control",
+        "before": "start_vr_remote_control_callback"
+      },
+      {
+        "trigger": "stop_vr_remote_control",
+        "source": "vr_remote_control",
+        "dest": "stance",
+        "before": "stop_vr_remote_control_callback"
+      },
+      {
+        "trigger": "stop",
+        "source": "vr_remote_control",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "record_vr_rosbag",
+        "source": "vr_remote_control",
+        "dest": "vr_remote_control",
+        "before": "record_vr_rosbag_callback"
+      },
+      {
+        "trigger": "stop_record_vr_rosbag",
+        "source": "vr_remote_control",
+        "dest": "vr_remote_control",
+        "before": "stop_record_vr_rosbag_callback"
+      },
+      {
+        "trigger": "grab",
+        "source": "stance",
+        "dest": "grab",
+        "before": "grab_box_callback"
+      },
+      {
+        "trigger": "stance",
+        "source": "grab",
+        "dest": "stance",
+        "before": "grab_box_stop_callback"
+      },
+      {
+        "trigger": "call_sensor",
+        "source": "stance",
+        "dest": "stance",
+        "before": "call_sensor_callback"
+      }
+    ]
+  }
+}

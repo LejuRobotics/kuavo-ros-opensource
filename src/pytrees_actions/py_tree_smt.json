@@ -1,0 +1,95 @@
+{
+  "tree": {
+    "name": "Selector",
+    "label": "root",
+    "params": {},
+    "childs": [
+      {
+        "name": "Sequence",
+        "label": "smt_seq",
+        "params": {
+          "memory": {
+            "value": "True",
+            "source": "CUSTOM"
+          }
+        },
+        "childs": [
+          {
+            "name": "BeginSMTWork",
+            "label": "begin_smt_work",
+            "params": {
+              "target_id_list": {
+                "value": "0, 1, 2",
+                "source": "CUSTOM"
+              }
+            },
+            "childs": []
+          },
+          {
+            "name": "CalcMoveDest",
+            "label": "cal_move_dest",
+            "params": {
+              "mode": {
+                "value": "smt_pick",
+                "source": "CUSTOM"
+              }
+            },
+            "childs": []
+          },
+          {
+            "name": "MoveToTarget",
+            "label": "smt_slam_move_to_grab_pose",
+            "params": {
+              "mode": {
+                "value": "slam",
+                "source": "CUSTOM"
+              }
+            },
+            "childs": []
+          },
+          {
+            "name": "smt_grasp_tray.json",
+            "label": "smt_grab_a_object",
+            "params": {},
+            "childs": []
+          },
+          {
+            "name": "MoveToTarget",
+            "label": "move_back",
+            "params": {
+              "mode": {
+                "value": "relative_pose",
+                "source": ""
+              },
+              "x": {
+                "value": "-0.2",
+                "source": ""
+              },
+              "y": {
+                "value": "0",
+                "source": ""
+              },
+              "yaw": {
+                "value": "0",
+                "source": ""
+              }
+            },
+            "childs": []
+          },
+          {
+            "name": "smt_move_to_place.json",
+            "label": "move_to_place_and_drop_detection",
+            "params": {},
+            "childs": []
+          },
+          {
+            "name": "smt_place_tray.json",
+            "label": "smt_place_a_tray",
+            "params": {},
+            "childs": []
+          }
+        ]
+      }
+    ]
+  }
+}

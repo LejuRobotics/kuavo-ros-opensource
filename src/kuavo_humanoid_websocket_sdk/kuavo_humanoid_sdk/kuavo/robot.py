@@ -10,7 +10,6 @@ from typing import Tuple
 from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
 from kuavo_humanoid_sdk.kuavo.robot_arm import KuavoRobotArm 
 from kuavo_humanoid_sdk.kuavo.robot_head import KuavoRobotHead
-from kuavo_humanoid_sdk.kuavo.robot_waist import KuavoRobotWaist
 from kuavo_humanoid_sdk.common.websocket_kuavo_sdk import WebSocketKuavoSDK
 from kuavo_humanoid_sdk.common.launch_robot_tool import LaunchRobotTool
 
@@ -179,7 +178,6 @@ class KuavoRobot(RobotBase):
         self._robot_info = KuavoRobotInfo()
         self._robot_arm  = KuavoRobotArm()
         self._robot_head = KuavoRobotHead()
-        self._robot_waist = KuavoRobotWaist()
         self._kuavo_core = KuavoRobotCore()
     def stance(self)->bool:
         """Put the robot into 'stance' mode.
@@ -217,7 +215,19 @@ class KuavoRobot(RobotBase):
         Note:
             You can call :meth:`KuavoRobotState.wait_for_walk` to wait until the robot enters walk mode.
         """
-        return self._kuavo_core.walk(linear_x, linear_y, angular_z)
+        # Limit velocity ranges
+        limited_linear_x = min(0.4, max(-0.4, linear_x))
+        limited_linear_y = min(0.2, max(-0.2, linear_y)) 
+        limited_angular_z = min(0.4, max(-0.4, angular_z))
+        
+        # Check if any velocity exceeds limits.
+        if abs(linear_x) > 0.4:
+            SDKLogger.warn(f"[Robot] linear_x velocity {linear_x} exceeds limit [-0.4, 0.4], will be limited")
+        if abs(linear_y) > 0.2:
+            SDKLogger.warn(f"[Robot] linear_y velocity {linear_y} exceeds limit [-0.2, 0.2], will be limited")
+        if abs(angular_z) > 0.4:
+            SDKLogger.warn(f"[Robot] angular_z velocity {angular_z} exceeds limit [-0.4, 0.4], will be limited")
+        return self._kuavo_core.walk(limited_linear_x, limited_linear_y, limited_angular_z)
 
     def jump(self):
         """Jump the robot."""
@@ -226,9 +236,9 @@ class KuavoRobot(RobotBase):
     def squat(self, height: float, pitch: float=0.0)->bool:
         """Control the robot's squat height and pitch.
         Args:
-                height (float): The height offset from normal standing height in meters, range [-0.35, 0.1],Negative values indicate squatting down.
+                height (float): The height offset from normal standing height in meters, range [-0.35, 0.0],Negative values indicate squatting down.
                                 Normal standing height reference: :attr:KuavoRobotInfo.init_stand_height
-                pitch (float): The pitch angle of the robot's torso in radians, range [0.0, 0.4].
+                pitch (float): The pitch angle of the robot's torso in radians, range [-0.4, 0.4].
             
         Returns:
             bool: True if the squat is controlled successfully, False otherwise.
@@ -236,7 +246,25 @@ class KuavoRobot(RobotBase):
         Note:
             Down squat and stand up should not change too fast, the maximum change should not exceed 0.2 meters.
         """
-        return self._kuavo_core.squat(height, pitch)
+        # Limit height range
+        MAX_HEIGHT = 0.0
+        MIN_HEIGHT = -0.35
+        MAX_PITCH = 0.4
+        MIN_PITCH = -0.4
+        
+        limited_height = min(MAX_HEIGHT, max(MIN_HEIGHT, height))
+        
+        # Check if height exceeds limits
+        if height > MAX_HEIGHT or height < MIN_HEIGHT:
+            print(f"\033[33m[Robot] height {height} exceeds limit [{MIN_HEIGHT}, {MAX_HEIGHT}], will be limited\033[0m")
+        # Limit pitch range
+        limited_pitch = min(MAX_PITCH, max(MIN_PITCH, pitch))
+        
+        # Check if pitch exceeds limits
+        if abs(pitch) > MAX_PITCH:
+            print(f"\033[33m[Robot] pitch {pitch} exceeds limit [{MIN_PITCH}, {MAX_PITCH}], will be limited\033[0m")
+        
+        return self._kuavo_core.squat(limited_height, limited_pitch)
      
     def step_by_step(self, target_pose:list, dt:float=0.4, is_left_first_default:bool=True, collision_check:bool=True)->bool:
         """Control the robot's motion by step.
@@ -328,19 +356,6 @@ class KuavoRobot(RobotBase):
         """Disable the head tracking.
         """
         return self._robot_head.disable_head_tracking()
-    
-    def control_waist(self, yaw: float) -> bool:
-        """Control the waist of the robot.
-
-        Args:
-            yaw (float): The yaw angle of the waist in **degrees**.
-                        Recommended range [-180, 180] degrees.
-                        Values outside this range will be automatically limited.
-
-        Returns:
-            bool: True if the waist is controlled successfully, False otherwise.
-        """
-        return self._robot_waist.control_waist(yaw=yaw)
     
     """ Robot Arm Control """
     def arm_reset(self)->bool:
@@ -518,14 +533,6 @@ class KuavoRobot(RobotBase):
             bool: True if the arm is in collision, False otherwise.
         """
         return self._robot_arm.is_arm_collision()
-    
-    def is_arm_collision_mode(self)->bool:
-        """Check if arm collision mode is enabled.
-        
-        Returns:
-            bool: True if collision mode is enabled, False otherwise.
-        """
-        return self._robot_arm.is_arm_collision_mode()
     
     def wait_arm_collision_complete(self):
         """Wait for the arm collision to complete.

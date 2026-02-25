@@ -279,10 +279,6 @@ std::mutex mtx_joint_kd_read_vec;
 static std::vector<int32_t> joint_kp_read_vec;
 static std::vector<int32_t> joint_kd_read_vec;
 
-static double g_motor_position_kp[NUM_SLAVE_MAX] = {0.0};
-static double g_motor_velocity_kp[NUM_SLAVE_MAX] = {0.0};
-
-
 #define IS_MOTOR_DISABLED(id) (g_motor_disabled[id])
 
 /*-FUNCTION DECLARATIONS-----------------------------------------------------*/
@@ -953,9 +949,6 @@ static bool motorGetConfig(T_EC_DEMO_APP_CONTEXT *pAppContext)
 
       EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Read Joint %d, Slave %d init kp value %d, and set kp value %d successfully\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id, init_kp, act_kp));
       EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Read Joint %d, Slave %d init kd value %d, and set kd value %d successfully\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id, init_kd, act_kd));
-      
-      g_motor_position_kp[g_motor_id[i].logical_id] = static_cast<double>(init_kp);
-      g_motor_velocity_kp[g_motor_id[i].logical_id] = static_cast<double>(init_kd);
 
       // //判断是否开启拟人步态，如果是的话在本次运行阶段将膝关节速度P增益调小，否则写为原来的值,这里的写入没有开启断电保存
       // if(use_anthropomorphic_gait == true && (i == 3||i == 9))
@@ -1164,10 +1157,6 @@ static bool motorEnable(const uint16_t id_logical)
       nextOut->yd_slave_output[g_motor_id[id_logical].pdo_id].target_position = currentIn->yd_slave_input[g_motor_id[id_logical].pdo_id].position_actual_value;
       nextOut->yd_slave_output[g_motor_id[id_logical].pdo_id].velocity_offset = 0;
       nextOut->yd_slave_output[g_motor_id[id_logical].pdo_id].torque_offset = 0;
-
-      nextOut->yd_slave_output[g_motor_id[id_logical].pdo_id].position_kp = static_cast<uint16_t>(g_motor_position_kp[id_logical]);
-      nextOut->yd_slave_output[g_motor_id[id_logical].pdo_id].velocity_kp = static_cast<uint16_t>(g_motor_velocity_kp[id_logical]);
-      
       nextOut->yd_slave_output[g_motor_id[id_logical].pdo_id].mode_of_opration = MODE_CSP;
       nextOut->yd_slave_output[g_motor_id[id_logical].pdo_id].control_word = sw2cw(sw);
       torque_feedback_targetA[id_logical].target_position = currentIn->yd_slave_input[g_motor_id[id_logical].pdo_id].position_actual_value * (360.0 / encoder_range[id_logical]);
@@ -1261,14 +1250,14 @@ void motorGetData(const uint16_t *ids, const EcMasterType* driver, uint32_t num,
     { 
       data[index].position = (currentIn->selfd_slave_input[g_motor_id[index].pdo_id].position_actual_value * (360.0 / encoder_range[index]) - pos_offset[index]);
       data[index].velocity = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].velocity_actual_value * (360.0 / encoder_range[index]) ;
-      data[index].torque = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].torque_actual_value * (rated_current[index] / 1000.0) / 1000.0;
+      data[index].torque = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].torque_actual_value * (rated_current[index] / 1000.0) / 1000.0 * 1.414;
       data[index].acceleration = motorAcceleration[index] * (360.0 / encoder_range[index]);
       data[index].status = currentMotorStatus[index];
       
       // 驱动器控制环路底层数据
       data[index].error_code = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].error_code;
       data[index].status_word = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].status_word;
-      data[index].torque_demand_trans = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].torque_demand_raw * (rated_current[index] / 1000.0) / 1000.0;
+      data[index].torque_demand_trans = currentIn->selfd_slave_input[g_motor_id[index].pdo_id].torque_demand_raw * (rated_current[index] / 1000.0) / 1000.0 * 1.414;
     }
   }
 }
@@ -1418,10 +1407,6 @@ void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->yd_slave_output[g_motor_id[index].pdo_id].target_position = (params[i].position+ pos_offset[index]) * (encoder_range[index] / 360.0);
         nextOut->yd_slave_output[g_motor_id[index].pdo_id].velocity_offset = params[i].velocityOffset * (encoder_range[index] / 360.0)  ;
         nextOut->yd_slave_output[g_motor_id[index].pdo_id].torque_offset = (params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000.0 )  / 1.414;
-
-        nextOut->yd_slave_output[g_motor_id[index].pdo_id].position_kp = static_cast<uint16_t>(params[i].kp);
-        nextOut->yd_slave_output[g_motor_id[index].pdo_id].velocity_kp = static_cast<uint16_t>(params[i].kd);
-        
         nextOut->yd_slave_output[g_motor_id[index].pdo_id].mode_of_opration = MODE_CSP;
         nextOut->yd_slave_output[g_motor_id[index].pdo_id].control_word = sw2cw(currentIn->yd_slave_input[g_motor_id[index].pdo_id].status_word & 0x6f);
         currentMode[index].store(MODE_CSP, std::memory_order_release);
@@ -3747,14 +3732,6 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
           currentOut->yd_slave_output[g_motor_id[i].pdo_id].target_position = currentPositionOut->yd_slave_output[g_motor_id[i].pdo_id].target_position;
           currentOut->yd_slave_output[g_motor_id[i].pdo_id].velocity_offset = currentPositionOut->yd_slave_output[g_motor_id[i].pdo_id].velocity_offset;
           currentOut->yd_slave_output[g_motor_id[i].pdo_id].torque_offset = currentPositionOut->yd_slave_output[g_motor_id[i].pdo_id].torque_offset;
-
-          currentOut->yd_slave_output[g_motor_id[i].pdo_id].position_kp =
-              currentPositionOut->yd_slave_output[g_motor_id[i].pdo_id]
-                  .position_kp;
-          currentOut->yd_slave_output[g_motor_id[i].pdo_id].velocity_kp =
-              currentPositionOut->yd_slave_output[g_motor_id[i].pdo_id]
-                  .velocity_kp;
-
           currentOut->yd_slave_output[g_motor_id[i].pdo_id].mode_of_opration = currentPositionOut->yd_slave_output[g_motor_id[i].pdo_id].mode_of_opration;
           currentOut->yd_slave_output[g_motor_id[i].pdo_id].control_word = currentPositionOut->yd_slave_output[g_motor_id[i].pdo_id].control_word;
         }

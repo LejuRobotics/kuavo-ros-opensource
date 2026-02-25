@@ -1,0 +1,5 @@
+---
+# 响应：使用标准服务响应
+std_msgs/Int8 TargetSMTIDRow  # 返回目标SMTID
+bool success         # 标识请求是否成功
+string message

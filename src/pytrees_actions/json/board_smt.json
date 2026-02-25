@@ -1,0 +1,98 @@
+{
+    "SMT_nav_pos": [
+        {
+            "key": "pick_position_of_column_0",
+            "value": "-5.895, 7.37, 1.57"
+        },
+        {
+            "key": "pick_position_of_column_1",
+            "value": "-5.775, 7.37, 1.57"
+        },
+        {
+            "key": "pick_position_of_column_2",
+            "value": "-5.655, 7.37, 1.57"
+        },
+        {
+            "key": "place_position",
+            "value": "-5.367, 6.309, -1.57"
+        }
+    ],
+    "SMT_squat_stand_control": [
+        {"key": "second_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "second_row.place_squat_mode", "value": "0, 0, 1"},
+        {"key": "third_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "third_row.place_squat_mode", "value": "0, 0, 1"},
+        {"key": "fourth_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "fourth_row.place_squat_mode", "value": "0, 0, 1"},
+        {"key": "fifth_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "fifth_row.place_squat_mode", "value": "0, 0, 1"},
+        {"key": "sixth_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "sixth_row.place_squat_mode", "value": "0, 0, 1"}
+    ],
+    "SMT_move_head_control": [
+        {"key": "second_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "second_row.pick_stand_mode", "value": "0, 0, 1"},
+        {"key": "second_row.tray_monitor_mode", "value": "0, 0, 1"},
+        {"key": "second_row.place_stand_mode", "value": "0, 0, 1"},
+        {"key": "third_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "third_row.pick_stand_mode", "value": "0, 0, 1"},
+        {"key": "third_row.tray_monitor_mode", "value": "0, 0, 1"},
+        {"key": "third_row.place_stand_mode", "value": "0, 0, 1"},
+        {"key": "fourth_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "fourth_row.pick_stand_mode", "value": "0, 0, 1"},
+        {"key": "fourth_row.tray_monitor_mode", "value": "0, 0, 1"},
+        {"key": "fourth_row.place_stand_mode", "value": "0, 0, 1"},
+        {"key": "fifth_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "fifth_row.pick_stand_mode", "value": "0, 0, 1"},
+        {"key": "fifth_row.tray_monitor_mode", "value": "0, 0, 1"},
+        {"key": "fifth_row.place_stand_mode", "value": "0, 0, 1"},
+        {"key": "sixth_row.pick_squat_mode", "value": "0, 0, 1"},
+        {"key": "sixth_row.pick_stand_mode", "value": "0, 0, 1"},
+        {"key": "sixth_row.tray_monitor_mode", "value": "0, 0, 1"},
+        {"key": "sixth_row.place_stand_mode", "value": "0, 0, 1"}
+    ],
+    "SMT_pick_pose_offsets": [
+        {"key": "second_row.pre_pos", "value": "-0.15, -0.03, 0.29"},
+        {"key": "second_row.pre_euler_deg", "value": "100, 0.0, -90"},
+        {"key": "second_row.grasp_pos", "value": "0.156, 0.1, 0.25"},
+        {"key": "second_row.grasp_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "third_row.pre_pos", "value": "-0.02, -0.03, 0.07"},
+        {"key": "third_row.pre_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "third_row.grasp_pos", "value": "0.11, -0.01, -0.10"},
+        {"key": "third_row.grasp_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "fourth_row.pre_pos", "value": "-0.2, -0.03, -0.28"},
+        {"key": "fourth_row.pre_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "fourth_row.grasp_pos", "value": "0.16, -0.03, -0.2"},
+        {"key": "fourth_row.grasp_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "fifth_row.pre_pos", "value": "-0.15, -0.01, -0.35"},
+        {"key": "fifth_row.pre_euler_deg", "value": "85, 0.0, -90"},
+        {"key": "fifth_row.grasp_pos", "value": "0.13, -0.02, -0.48"},
+        {"key": "fifth_row.grasp_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "sixth_row.pre_pos", "value": "-0.15, -0.05, -0.5"},
+        {"key": "sixth_row.pre_euler_deg", "value": "80, 0.0, -90"},
+        {"key": "sixth_row.grasp_pos", "value": "0.15, -0.08, -0.9"},
+        {"key": "sixth_row.grasp_euler_deg", "value": "80, 0.0, -90"}
+    ],
+    "SMT_post_grasp_offsets": [
+        {"key": "second_row.withdraw_pos_offset", "value": "-0.45, 0.0, 0.17"},
+        {"key": "second_row.withdraw_euler_deg", "value": "130, 0.0, -90"},
+        {"key": "second_row.observe_pos_abs", "value": "0.4, 0.12, 0.4"},
+        {"key": "second_row.observe_euler_deg", "value": "90, -60.0, -160"},
+        {"key": "third_row.withdraw_pos_offset", "value": "-0.4, -0.02, 0.08"},
+        {"key": "third_row.withdraw_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "third_row.observe_pos_abs", "value": "0.41, 0.12, 0.4"},
+        {"key": "third_row.observe_euler_deg", "value": "90, -60.0, -160"},
+        {"key": "fourth_row.withdraw_pos_offset", "value": "-0.4, -0.03, -0.04"},
+        {"key": "fourth_row.withdraw_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "fourth_row.observe_pos_abs", "value": "0.43, 0.14, 0.4"},
+        {"key": "fourth_row.observe_euler_deg", "value": "90, -60.0, -160"},
+        {"key": "fifth_row.withdraw_pos_offset", "value": "-0.45, -0.0, -0.16"},
+        {"key": "fifth_row.withdraw_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "fifth_row.observe_pos_abs", "value": "0.35, 0.12, 0.4"},
+        {"key": "fifth_row.observe_euler_deg", "value": "90, -60.0, -160"},
+        {"key": "sixth_row.withdraw_pos_offset", "value": "-0.35, -0.0, -0.35"},
+        {"key": "sixth_row.withdraw_euler_deg", "value": "90, 0.0, -90"},
+        {"key": "sixth_row.observe_pos_abs", "value": "0.35, 0.12, 0.4"},
+        {"key": "sixth_row.observe_euler_deg", "value": "90, -60.0, -160"}
+    ]
+}

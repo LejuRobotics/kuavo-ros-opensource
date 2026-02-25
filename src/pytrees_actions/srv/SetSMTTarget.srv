@@ -1,0 +1,7 @@
+# 请求：使用标准消息类型传递smt_id, smt_id_row
+std_msgs/Int32MultiArray smt_target  # [smt_id, smt_id_row]
+---
+# 响应：使用标准服务响应
+bool success
+string message
+

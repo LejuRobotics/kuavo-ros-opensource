@@ -1,0 +1,5 @@
+---
+string mac_address
+string robot_type
+string version
+string end_effector_type

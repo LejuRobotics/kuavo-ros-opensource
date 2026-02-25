@@ -1,0 +1,16 @@
+# 1. 目标（Goal）：外部查询请求的参数
+string query_type          # 查询类型："single"（单次查询）、"realtime_feedback"（实时反馈）
+string target_node_label   # 目标节点标签（空表示查询整棵树）
+float32 timeout            # 超时时间（秒，0 表示不超时）
+---
+# 2. 结果（Result）：查询结束后返回的汇总信息
+bool success               # 是否成功
+string message             # 结果描述
+int32 total_node_count     # 总节点数
+string root_node_status    # 根节点状态（如 "RUNNING"）
+string all_nodes_state     # 所有节点状态（JSON 字符串，便于解析）
+---
+# 3. 反馈（Feedback）：实时查询时的中间进度
+string root_node_status    # 根节点实时状态
+int32 updated_node_count   # 已更新状态的节点数
+string latest_node_state   # 最新变化节点的状态（如 "NodeA: SUCCESS"）

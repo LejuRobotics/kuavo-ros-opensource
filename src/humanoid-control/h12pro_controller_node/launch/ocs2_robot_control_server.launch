@@ -1,0 +1,8 @@
+<launch>
+  <!-- OCS2机器人控制服务端 -->
+  <node name="ocs2_robot_control_server" pkg="h12pro_controller_node" type="ocs2_before_callback.py" output="screen">
+    <!-- 可选参数 -->
+    <param name="robot_version" value="$(env ROBOT_VERSION)" />
+    <param name="kuavo_ros_control_ws_path" value="/home/lab/lpf/kuavo-ros-control" />
+  </node>
+</launch>

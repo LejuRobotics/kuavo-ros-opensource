@@ -1,24 +1,13 @@
 targetDisplacementVelocity          0.5;
 targetRotationVelocity              0.3;
 cmdvelLinearXLimit                  0.30;
-cmdvelLinearYLimit                  0.1;
 cmdvelLinearZLimit                  0.1;
 cmdvelAngularYAWLimit               0.3;
-waist_yaw_max                       150.0;
 armMode                             true; 
 
 targetArmDisplacementVelocity       1.2;
 
-torsoVelocityThreshold              0.08;     ; m/s
-torsoVelocityDuration               0.5;      ; s
-
 comHeight                           0.78
-
-; VR control limits
-vrSquatMinPitchDeg                  3.0;     ; min pitch (deg)
-vrSquatMaxPitchDeg                  35.0;    ; max pitch (deg)
-vrSquatHeightMin                    -0.25;   ; min height (m)
-vrSquatHeightMax                    0.03;     ; max height (m)
 
 targetTorsoDispalcementVelocity
 {
@@ -83,41 +72,6 @@ jointStateLimit ; 26x2 matrix, for 4.0 version.
    (18,1)   1.570       ; zarm_r3_joint
    (19,1)   0.000       ; zarm_r4_joint
 };
-defaultJointState
-{
-  
-   (0,0)    -0.01867     ; leg_l1_joint
-   (1,0)    -0.00196     ; leg_l2_joint
-   (2,0)    -0.65815     ; leg_l3_joint
-   (3,0)    0.86691      ; leg_l4_joint
-   (4,0)    -0.31346     ; leg_l5_joint
-   (5,0)    0.01878      ; leg_l6_joint
-
-   (6,0)     0.01868      ; leg_r1_joint
-   (7,0)     0.00197      ; leg_r2_joint
-   (8,0)     -0.65815     ; leg_r3_joint
-   (9,0)    0.86692       ; leg_r4_joint
-   (10,0)   -0.31347      ; leg_r5_joint
-   (11,0)   -0.01878      ; leg_r6_joint
-
-   (12,0)   -0.01        ; zarm_l1_joint
-   (13,0)   -0.01        ; zarm_l2_joint
-   (14,0)   0.001        ; zarm_l3_joint
-   (15,0)   -0.1         ; zarm_l4_joint
-   (16,0)   -0.001       ; zarm_l5_joint
-   (17,0)   -0.001       ; zarm_l6_joint
-   (18,0)   -0.001       ; zarm_l7_joint
-
-   (19,0)   -0.01        ; zarm_r1_joint
-   (20,0)   -0.01        ; zarm_r2_joint
-   (21,0)   0.001        ; zarm_r3_joint
-   (22,0)   -0.1         ; zarm_r4_joint
-   (23,0)   0.001        ; zarm_r5_joint
-   (24,0)   0.001        ; zarm_r6_joint
-   (25,0)   0.001        ; zarm_r7_joint
-  
-}; [-0.01867, -0.00196, -0.65815,  0.86691, -0.31346,  0.01878,  0.01868,  0.00197, -0.65815,  0.86692, -0.31347, -0.01878]
-
 
 ; defaultCotrolMode of motors, 2: position control, 1: velocity control, 0: torque control
 defaultCotrolMode
@@ -184,14 +138,14 @@ joint_kd_
    (1,0)   2.0   ; leg_l2_joint
    (2,0)   2.0   ; leg_l3_joint
    (3,0)   3.0   ; leg_l4_joint
-   (4,0)   0.5   ; leg_l5_joint
-   (5,0)   0.5   ; leg_l6_joint
+   (4,0)   2.0   ; leg_l5_joint
+   (5,0)   2.0   ; leg_l6_joint
    (6,0)   1.0   ; leg_r1_joint
    (7,0)   2.0   ; leg_r2_joint
    (8,0)   2.0   ; leg_r3_joint
    (9,0)   3.0   ; leg_r4_joint
-   (10,0)  0.5    ; leg_r5_joint
-   (11,0)  0.5    ; leg_r6_joint
+   (10,0)  2.0    ; leg_r5_joint
+   (11,0)  2.0    ; leg_r6_joint
 
    (12,0)   3.0   ; waist_z
 
@@ -262,14 +216,14 @@ joint_kd_walking_
    (1,0)   2.0   ; leg_l2_joint
    (2,0)   2.0   ; leg_l3_joint
    (3,0)   3.0   ; leg_l4_joint
-   (4,0)   0.5   ; leg_l5_joint
-   (5,0)   0.5   ; leg_l6_joint
+   (4,0)   2.0   ; leg_l5_joint
+   (5,0)   2.0   ; leg_l6_joint
    (6,0)   1.0   ; leg_r1_joint
    (7,0)   2.0   ; leg_r2_joint
    (8,0)   2.0   ; leg_r3_joint
    (9,0)   3.0   ; leg_r4_joint
-   (10,0)  0.5    ; leg_r5_joint
-   (11,0)  0.5    ; leg_r6_joint
+   (10,0)  2.0    ; leg_r5_joint
+   (11,0)  2.0    ; leg_r6_joint
 
    (12,0)  3.0   ;  waist_z
 
@@ -297,15 +251,15 @@ standBaseState
 standJointState
 {
    ;; Arm Joint Positions:  ;;
-   (0,0)   0.37     ; zarm_l1_joint
-   (1,0)   0.0      ; zarm_l2_joint
-   (2,0)   -0.0     ; zarm_l3_joint
-   (3,0)   -0.85    ; zarm_l4_joint
+   (0,0)   -0.29374    ; zarm_l1_joint
+   (1,0)   0.0089      ; zarm_l2_joint
+   (2,0)   -0.0008     ; zarm_l3_joint
+   (3,0)   -0.1157     ; zarm_l4_joint
 
-   (4,0)   0.37     ; zarm_r1_joint
-   (5,0)   0.0      ; zarm_r2_joint
-   (6,0)   -0.0     ; zarm_r3_joint
-   (7,0)   -0.85    ; zarm_r4_joint
+   (4,0)   -0.29376    ; zarm_r1_joint
+   (5,0)    0.0389     ; zarm_r2_joint
+   (6,0)   -0.0027     ; zarm_r3_joint
+   (7,0)  -0.1156     ; zarm_r4_joint
 }
 
 squatBaseState
@@ -334,16 +288,16 @@ squatJointState
 
 acc_filter_cutoff_freq
 {
-   (0,0)   90.0   ; x
-   (1,0)   90.0   ; y
-   (2,0)   90.0   ; z
+   (0,0)   12.0   ; x
+   (1,0)   12.0   ; y
+   (2,0)   12.0   ; z
 }
 
 gyro_filter_cutoff_freq
 {
-   (0,0)   120.0   ; x
-   (1,0)   120.0   ; y
-   (2,0)   120.0   ; z
+   (0,0)   20.0   ; x
+   (1,0)   20.0   ; y
+   (2,0)   20.0   ; z
 }
 
 arm_joint_pos_filter_cutoff_freq       100 ;

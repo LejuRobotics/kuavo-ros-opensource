@@ -1,0 +1,7 @@
+---
+# 响应：使用标准服务响应
+float32 x            # 位置x坐标
+float32 y            # 位置y坐标
+float32 yaw          # 航向角（弧度/角度，按需定义）
+bool success
+string message

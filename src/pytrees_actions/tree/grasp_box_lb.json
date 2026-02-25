@@ -1,0 +1,65 @@
+{
+	"tree": {
+		"name": "Sequence",
+		"label": "grasp_box_seq",
+		"params": {
+			"memory": "True"
+		},
+		"childs": [
+			{
+				"name": "CalcLeg",
+				"label": "calc_leg_torso",
+				"params": {
+					"offset_x": {"value": "0.0", "source": "custom"},
+					"offset_y": {"value": "0.0", "source": "custom"},
+					"offset_z": {"value": "0.0", "source": "custom"},
+					"control_base": {"value": "false", "source": "custom"},
+					"face_tag": {"value": "true", "source": "custom"}
+				}
+			},
+			{
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose",
+				"params": {
+					"mode": { "value": "box_grasp_step1", "source": "custom"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+				"params":
+				{
+					"arm_control_mode": {"value": "fixed_base", "source": "custom"}
+				}
+			},
+			{
+				"name": "MoveToTarget",
+				"label": "back",
+				"params":
+				{
+					"mode": {"value": "relative_pose", "source": "custom"},
+					"x": {"value": "-0.3", "source": "custom"},
+					"y": {"value": "0", "source": "custom"},
+					"yaw": {"value": "0", "source": "custom"}
+				},
+				"childs": []
+			},
+			{
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose",
+				"params": {
+					"mode": {"value": "box_grasp_step2", "source": "custom"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+				"params":
+				{
+					"arm_control_mode": {"value": "fixed_base", "source": "custom"}
+				}
+			}
+		]
+	}
+}
+

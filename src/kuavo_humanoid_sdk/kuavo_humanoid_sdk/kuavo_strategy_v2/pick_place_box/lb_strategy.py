@@ -31,13 +31,13 @@ def reset_head_pos(head_event: EventHeadMoveKeyPoint):
     print("🔵 头部回零...")
     head_event.open()
     head_event.set_target([(0.0, 0.0)])  # 设置头部目标为零位
-    
+
     # 循环执行直到完成
     while True:
         head_status = head_event.step()
         if head_status != EventStatus.RUNNING:
             break
-    
+
     head_event.close()
     print("✅ 头部已回零")
 
@@ -229,7 +229,7 @@ def arm_reset(arm_event: EventArmMoveKeyPoint):
     print("🔵 手臂回到设定的初始位姿")
     arm_event.open()
     arm_event.set_arm_control_mode('fixed_base')
-    init_joint_pos = [-0.0, 0.4, 0.2, -1.5, -0.0, -0.0, -0.0, 
+    init_joint_pos = [-0.0, 0.4, 0.2, -1.5, -0.0, -0.0, -0.0,
                         -0.0, -0.4, -0.2, -1.5, 0.0, -0.0, -0.0]
     arm_event.robot_sdk.control.control_arm_joint_positions(joint_positions=init_joint_pos)
     time.sleep(1.0)
@@ -272,7 +272,7 @@ def move_arm_and_backward(
     if traj_result is None:
         print("❌ 生成手臂轨迹失败（逆解失败）")
         return False
-        
+
     if pick_or_place:
         arm_delay_time = [0.5, 0.5, 0.2]
         arm_event.set_delay_time(arm_delay_time)
@@ -426,11 +426,11 @@ def grab_box_and_backward(
     arm_traj = (pick_left_arm_poses, pick_right_arm_poses)
     arm_wrench = (pick_left_arm_wrench, pick_right_arm_wrench)  # 手臂扭矩数据
     success = move_arm_and_backward(walk_event, arm_event, arm_traj, step_back_distance, back_direction, arm_control_type='joint', tag=tag, arm_wrench=arm_wrench, walk_use_cmd_vel=walk_use_cmd_vel,user_input=user_input,leg_control_time=2.0, pick_or_place=True)
-    
+
     if not success:
         print("❌ 抓取和后退失败")
         return False
-    
+
     return success
 
 
@@ -570,41 +570,41 @@ def return_to_idle(
 def execute_leg_control(target_joints, duration=3.0):
     """
     执行腿部控制服务
-    
+
     参数：
         target_joints: 目标关节角度列表
-        
+
     返回：
         bool: 控制服务是否成功
     """
-    try:
-        # 等待腿部控制服务可用
-        rospy.loginfo("等待腿部控制服务...")
-        rospy.wait_for_service('/lb_leg_control_srv', timeout=10.0)
-        
-        # 创建服务代理
-        control_service = rospy.ServiceProxy('/lb_leg_control_srv', lbLegControlSrv)
-        
-        # 创建控制服务请求
-        control_request = lbLegControlSrvRequest()
-        control_request.target_joints = target_joints
-        control_request.duration = duration
-        
-        rospy.loginfo(f"发送控制请求，目标关节角度: {control_request.target_joints}")
-        
-        # 调用控制服务
-        control_response = control_service(control_request)
-        
-        if control_response.success:
-            rospy.loginfo("控制服务调用成功！机器人开始执行目标关节角度")
-            return True
-        else:
-            rospy.logwarn("控制服务调用失败")
-            return False
-            
-    except rospy.ServiceException as e:
-        rospy.logerr(f"控制服务调用失败: {e}")
-        return False
+    # try:
+    #     # 等待腿部控制服务可用
+    #     rospy.loginfo("等待腿部控制服务...")
+    #     rospy.wait_for_service('/lb_leg_control_srv', timeout=10.0)
+
+    #     # 创建服务代理
+    #     control_service = rospy.ServiceProxy('/lb_leg_control_srv', lbLegControlSrv)
+
+    #     # 创建控制服务请求
+    #     control_request = lbLegControlSrvRequest()
+    #     control_request.target_joints = target_joints
+    #     control_request.duration = duration
+
+    #     rospy.loginfo(f"发送控制请求，目标关节角度: {control_request.target_joints}")
+
+    #     # 调用控制服务
+    #     control_response = control_service(control_request)
+
+    #     if control_response.success:
+    #         rospy.loginfo("控制服务调用成功！机器人开始执行目标关节角度")
+    #         return True
+    #     else:
+    #         rospy.logwarn("控制服务调用失败")
+    #         return False
+
+    # except rospy.ServiceException as e:
+    #     rospy.logerr(f"控制服务调用失败: {e}")
+    #     return False
 
 
 def base_link_leg_ik_service(arm_event: EventArmMoveKeyPoint,
@@ -620,7 +620,7 @@ def base_link_leg_ik_service(arm_event: EventArmMoveKeyPoint,
     """测试腿部IK服务"""
 
     if refer_pose is None:
-        print("🔴 未提供refer_pose") 
+        print("🔴 未提供refer_pose")
         return False
 
     # 根据use_relative_control配置决定底盘信息来源
@@ -635,10 +635,10 @@ def base_link_leg_ik_service(arm_event: EventArmMoveKeyPoint,
             # 如果没有传入chassis_info，从robot_sdk获取
             chassis_pos = arm_event.robot_sdk.state.robot_position()
             chassis_quat = arm_event.robot_sdk.state.robot_orientation()
-            
+
             # 四元数格式: (x, y, z, w)
             roll, pitch, yaw = tf.transformations.euler_from_quaternion(chassis_quat)
-            
+
             # 将odom的姿态组成[x, y, yaw]数据赋值给chassis_info
             chassis_info = [chassis_pos[0], chassis_pos[1], yaw]
             print(f"🔵 从robot_sdk中获取chassis_info [x, y, yaw]: {chassis_info}")
@@ -651,13 +651,13 @@ def base_link_leg_ik_service(arm_event: EventArmMoveKeyPoint,
         print(f"🔵 从robot_sdk中获取q_lb: {q_lb}")
 
     rospy.wait_for_service('/lb_optimization_ik_service', timeout=10.0)
-    
+
     # 创建服务代理
     ik_service = rospy.ServiceProxy('/lb_optimization_ik_service', lbBaseLinkPoseCmdSrv)
-    
+
     # 创建测试请求
     request = lbBaseLinkPoseCmdSrvRequest()
-    
+
     # 设置请求参数
     request.with_chassis = with_chassis
     request.chassis_info = chassis_info  # [x, y, yaw]
@@ -693,7 +693,7 @@ def base_link_leg_ik_service(arm_event: EventArmMoveKeyPoint,
         torse_pose_in_world = transform.apply_to_pose(torso_pose_in_refer)
     q = torse_pose_in_world.quat  # [w,x,y,z]
     yaw = R.from_quat(q).as_euler('zyx')[0]
-    x, y, z, w = R.from_euler('z', yaw).as_quat(); 
+    x, y, z, w = R.from_euler('z', yaw).as_quat();
     if torse_pose_in_world.pos[0] < 0.05:
         base_link = [0.0480578, 0.000463839, torse_pose_in_world.pos[2], w, x, y, z]
         print(f"🔵 torso初始化位置")
@@ -703,31 +703,31 @@ def base_link_leg_ik_service(arm_event: EventArmMoveKeyPoint,
 
     # 设置目标base_link位姿 [x, y, z, qw, qx, qy, qz]
     request.base_link = base_link
-    
+
     rospy.loginfo("发送IK请求...")
     rospy.loginfo(f"with_chassis: {request.with_chassis}")
     rospy.loginfo(f"chassis_info: {request.chassis_info}")
     rospy.loginfo(f"q_lb: {request.q_lb}")
     rospy.loginfo(f"control_type: {request.control_type}")
     rospy.loginfo(f"base_link: {request.base_link}")
-    
+
     for attempt in range(3):
         try:
             rospy.loginfo(f"尝试IK求解 (第{attempt + 1}次)")
             # 调用IK服务
             ik_response = ik_service(request)
-            
+
             if ik_response.success:
                 rospy.loginfo("IK求解成功！")
                 rospy.loginfo(f"腿部关节角度: {ik_response.lb_leg}")
                 rospy.loginfo(f"求解耗时: {ik_response.time_cost:.2f} ms")
-                
+
                 # 获得逆解结果后，调用控制服务执行这些关节角度
                 rospy.loginfo("开始执行控制服务...")
-                
+
                 # 调用新提取的执行函数
                 control_success = execute_leg_control(ik_response.lb_leg, duration)
-                
+
                 if control_success:
                     rospy.loginfo("腿部控制执行完成")
                     return True

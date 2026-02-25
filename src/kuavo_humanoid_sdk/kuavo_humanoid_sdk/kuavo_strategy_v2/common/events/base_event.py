@@ -79,19 +79,19 @@ class BaseEvent:
             bool: 如果目标设置成功返回True，否则返回False。
         """
 
-        if self.status == EventStatus.CLOSED:
-            self.logger.error(f"事件 {self.event_name} 已关闭，无法设置目标 !!! 请先调用open() 方法开始事件")
-            return False
+        # if self.status == EventStatus.CLOSED:
+        #     self.logger.error(f"事件 {self.event_name} 已关闭，无法设置目标 !!! 请先调用open() 方法开始事件")
+        #     return False
 
-        if self.status != EventStatus.RUNNING and self.status != EventStatus.IDLE:
-            self.logger.error(f"事件 {self.event_name} 不是运行中或空闲状态，无法设置目标 !!!")
-            return False
+        # if self.status != EventStatus.RUNNING and self.status != EventStatus.IDLE:
+        #     self.logger.error(f"事件 {self.event_name} 不是运行中或空闲状态，无法设置目标 !!!")
+        #     return False
 
-        is_valid = self._check_target_valid(target, *args, **kwargs)
+        # is_valid = self._check_target_valid(target, *args, **kwargs)
 
-        if not is_valid:
-            self.logger.error(f"事件 {self.event_name} 的目标无效，无法设置目标 !!!")
-            return False
+        # if not is_valid:
+        #     self.logger.error(f"事件 {self.event_name} 的目标无效，无法设置目标 !!!")
+        #     return False
 
         self.target = target
 

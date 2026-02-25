@@ -1,0 +1,25 @@
+# Task execution service
+
+# Request
+string task_id                    # Unique task identifier
+uint8 task_type                   # Task type code
+string task_name                  # Task name/description
+geometry_msgs/PoseStamped[] waypoints  # Waypoints for navigation tasks
+string[] parameters               # Task-specific parameters
+float32 priority                  # Task priority (0-100)
+float32 timeout                   # Task timeout in seconds (0 for no timeout)
+
+# Task types
+uint8 TASK_TYPE_NAVIGATION = 0
+uint8 TASK_TYPE_DOCKING = 1
+uint8 TASK_TYPE_CHARGING = 2
+uint8 TASK_TYPE_DELIVERY = 3
+uint8 TASK_TYPE_CUSTOM = 99
+
+---
+
+# Response
+bool success                      # Whether task was accepted
+string message                    # Status message
+uint32 error_code                 # Error code (0 if success)
+string assigned_task_id           # Assigned task ID (may differ from requested)

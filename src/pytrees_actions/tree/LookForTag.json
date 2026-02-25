@@ -1,0 +1,72 @@
+{
+	"tree": {
+		"name": "FindTagSubTree",
+		"label": "find_tag_subtree",
+		"params": {
+			"Selected-labels": "1"
+		},
+		"childs": [
+				{
+				"name": "Sequence",
+				"label": "find_tag_seq",
+				"params": {
+					"memory": "True"
+				},
+				"childs": [
+					{
+						"name": "Parallel",
+						"label": "find_tag",
+						"childs": [
+							{
+								"name": "MoveHead",
+								"label": "mvHead",
+								"params": {
+									"count": "7",
+									"head_search_yaws": "-5, 0, -5, 0, 5, 0, 0",
+									"head_search_pitchs": "-15, -5, 0, 5, 15, 5, 0"
+								},
+								"inparams":
+								{
+									"head_event_timeout":
+									{
+										"value": "head_event_timeout",
+										"source": "read_board"
+									}
+								}
+							},
+							{
+								"name": "FindAllTag",
+								"label": "find_all_tag",
+								"params": {
+									"percep_time": "7"
+								},
+								"inparams":
+								{
+									"percep_half_fov":
+									{
+										"value": "percep_half_fov",
+										"source": "read_board"
+									}
+								}
+							}
+						]
+					},
+					{
+						"name": "FilterTagInROI",
+						"label": "filter_tag_by_ROI",
+						"params": {
+							"x_min": "-6",
+							"x_max": "6",
+							"y_min": "-6",
+							"y_max": "6",
+							"z_min": "0",
+							"z_max": "2"
+						}
+					}
+				]
+			}
+		]
+	}
+}
+
+

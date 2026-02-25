@@ -4,7 +4,6 @@ import numpy as np
 from sensor_msgs.msg import JointState
 from scipy.interpolate import CubicSpline
 from std_srvs.srv import SetBool, SetBoolRequest
-from kuavo_msgs.srv import changeLbQuickModeSrv, changeLbQuickModeSrvRequest
 
 class SimpleArmTrajectory:
     def __init__(self):
@@ -50,23 +49,23 @@ class SimpleArmTrajectory:
             self.pub.publish(msg)
             rate.sleep()
 
-def set_arm_quick_mode(quickMode):
+def set_arm_quick_mode(enable):
     """
     设置手臂快速模式
     Args:
-        全身快速模式类型: 0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
+        enable: bool, True表示启用快速模式, False表示禁用快速模式
     """
-    print(f"call set_arm_quick_mode:{quickMode}")
+    print(f"call set_arm_quick_mode:{enable}")
     rospy.wait_for_service('/enable_lb_arm_quick_mode')
     try:
-        set_arm_quick_mode_service = rospy.ServiceProxy('/enable_lb_arm_quick_mode', changeLbQuickModeSrv)
-        req = changeLbQuickModeSrvRequest()
-        req.quickMode = quickMode
+        set_arm_quick_mode_service = rospy.ServiceProxy('/enable_lb_arm_quick_mode', SetBool)
+        req = SetBoolRequest()
+        req.data = enable
         resp = set_arm_quick_mode_service(req)
         if resp.success:
-            rospy.loginfo(f"Successfully enabled {quickMode} quick mode")
+            rospy.loginfo(f"Successfully {'enabled' if enable else 'disabled'} arm quick mode")
         else:
-            rospy.logwarn(f"Failed to enable {quickMode} quick mode")
+            rospy.logwarn(f"Failed to {'enable' if enable else 'disable'} arm quick mode")
     except rospy.ServiceException as e:
         rospy.logerr(f"Service call failed: {e}")
 
@@ -75,7 +74,7 @@ if __name__ == '__main__':
     try:
 
         # 启用手臂快速模式
-        set_arm_quick_mode(2)
+        set_arm_quick_mode(True)
 
         traj = SimpleArmTrajectory()
         
@@ -105,7 +104,7 @@ if __name__ == '__main__':
         print("轨迹执行完成")
         
         # 禁用手臂快速模式
-        set_arm_quick_mode(0)
+        set_arm_quick_mode(False)
         
     except rospy.ROSInterruptException:
         pass

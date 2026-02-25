@@ -1,0 +1,63 @@
+{
+	"tree": {
+		"name": "Sequence",
+		"label": "move_to_place_and_drop_detection",
+		"params": {
+			"memory": "True"
+		},
+		"childs": [
+			{
+				"name": "Parallel",
+				"label": "find_tag",
+				"childs": [
+					{
+						"name": "Sequence",
+						"label": "smt_move_to_place",
+						"params": {"memory": "True"},
+						"childs": [
+							{
+								"name": "CalcMoveDest",
+								"label": "cal_move_dest",
+								"params": {
+									"mode": {"value": "smt_place", "source": "custom"},
+									"TargetSMTID": {"value": "", "source": "read_board"},
+									"TargetSMTIDRow": {"value": "", "source": "read_board"},
+									"SLAMNavDest": {"value": "", "source": "write_board"},
+									"SMTNavPos_PickPositionOfColumn0": {"value": "", "source": "read_board"},
+									"SMTNavPos_PickPositionOfColumn1": {"value": "", "source": "read_board"},
+									"SMTNavPos_PickPositionOfColumn2": {"value": "", "source": "read_board"},
+									"SMTNavPos_PickPositionOfColumn3": {"value": "", "source": "read_board"},
+									"SMTNavPos_PickPositionOfColumn4": {"value": "", "source": "read_board"},
+									"SMTNavPos_PickPositionOfColumn5": {"value": "", "source": "read_board"},
+									"SMTNavPos_PickPositionOfColumn6": {"value": "", "source": "read_board"}
+								}
+							},
+							{
+								"name": "MoveToTarget",
+								"label": "smt_slam_move_to_grab_pose",
+								"params": {
+									"mode": {"value": "slam", "source": "read_board"},
+									"SLAMNavDest": {"value": "", "source": "read_board"},
+									"Walk_WalkEventYawThreshold": {"value": "", "source": "read_board"},
+									"Walk_WalkEventDistanceThreshold": {"value": "", "source": "read_board"},
+									"Walk_WalkEventTimeout": {"value": "", "source": "read_board"}
+								}
+							}
+						]
+					},
+					{
+						"name": "DropDetection",
+						"label": "drop_detection",
+						"params":
+						{
+							"current_threshold": {"value": "0.1", "source": "custom"},
+							"time_threshold": {"value": "0.5", "source": "custom"},
+							"count": {"value": "3", "source": "custom"},
+							"DropDetectResult": {"value": "", "source": "write_board"}
+						}
+					}
+				]
+			}
+		]
+	}
+}

@@ -1,0 +1,134 @@
+{
+	"tree": {
+		"name": "DepalletizeBoxTree",
+		"label": "depalletize_box_tree",
+		"params": {
+			"Selected-labels": "1"
+		},
+		"childs": [
+				{
+				"name": "Sequence",
+				"label": "depalletize_box_seq",
+				"params": {
+					"memory": "True"
+				},
+				"childs": [
+					{
+                        "name": "CalcArmPoseForDepalletize",
+                        "label": "calc_arm_pose_for_depalletize",
+                        "params": {
+                            "mode": "depalletize_step1"
+                        },
+						"inparams": {
+							"common":
+							{
+								"value": "common",
+								"source": "read_board"
+							},
+							"depalletize":
+							{
+								"value": "depalletize",
+								"source": "read_board"
+							}
+						}
+					},
+					{
+						"name": "MoveArmBaseTargetPose",
+						"label": "move_arm_base_target_pose",
+                        "params": {
+                            "arm_reset": "False"
+                        },
+						"inparams":
+						{
+							"arm":
+							{
+								"value": "arm",
+								"source": "read_board"
+							}
+						}
+					},
+					{
+						"name": "PickBoxByClaw",
+						"label": "pick_box_by_claw",
+						"params": {
+							"target_positions": "[100.0, 0.0]",
+							"velocity": "[90, 90]",
+							"torque": "[1.0, 1.0]"
+						}
+					},
+					{
+                        "name": "CalcArmPoseForDepalletize",
+                        "label": "calc_arm_pose_for_depalletize",
+                        "params": {
+                            "mode": "depalletize_step2"
+                        },
+						"inparams": {
+							"common":{
+								"value": "common",
+								"source": "read_board"
+							}
+						}
+					},
+					{
+						"name": "MoveArmBaseTargetPose",
+						"label": "move_arm_base_target_pose",
+                        "params": {
+                            "arm_reset": "False"
+                        },
+						"inparams":
+						{
+							"arm":
+							{
+								"value": "arm",
+								"source": "read_board"
+							}
+						}
+					},
+					{
+						"name": "PickBoxByClaw",
+						"label": "pick_box_by_claw",
+						"params": {
+							"target_positions": "[100.0, 100.0]",
+							"velocity": "[90, 90]",
+							"torque": "[1.0, 1.0]"
+						}
+					},
+					{
+                        "name": "CalcArmPoseForDepalletize",
+                        "label": "calc_arm_pose_for_depalletize",
+                        "params": {
+                            "mode": "depalletize_step3"
+                        },
+						"inparams": {
+							"common":
+							{
+								"value": "common",
+								"source": "read_board"
+							},
+							"depalletize":
+							{
+								"value": "depalletize",
+								"source": "read_board"
+							}
+						}
+					},
+					{
+						"name": "MoveArmBaseTargetPose",
+						"label": "move_arm_base_target_pose",
+                        "params": {
+                            "arm_reset": "False"
+                        },
+						"inparams":
+						{
+							"arm":
+							{
+								"value": "arm",
+								"source": "read_board"
+							}
+						}
+					}
+				]
+			}
+		]
+	}
+}

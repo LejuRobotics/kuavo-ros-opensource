@@ -1,0 +1,605 @@
+[ {
+  "name" : "look_for_tag.json",
+  "label" : "寻找箱子",
+  "flow" : {
+    "edges" : [ {
+      "cells" : "edge",
+      "data" : { },
+      "id" : "bd02af46-e7d0-40ba-a874-560bcbdf31e9",
+      "label" : "null",
+      "source" : {
+        "cell" : "9bfa8eb3-6648-40e6-acb8-991f8bb7d5ea",
+        "port" : "bottom"
+      },
+      "target" : {
+        "cell" : "721f1cca-a03e-4520-ac0b-b0e018f51876",
+        "port" : "top"
+      },
+      "tools" : {
+        "items" : [ ]
+      }
+    }, {
+      "cells" : "edge",
+      "data" : { },
+      "id" : "87ec23f5-a6d3-4f4d-a4a8-6e281709d0ba",
+      "label" : "null",
+      "source" : {
+        "cell" : "9bfa8eb3-6648-40e6-acb8-991f8bb7d5ea",
+        "port" : "bottom"
+      },
+      "target" : {
+        "cell" : "247ef424-c133-4ac8-a286-83e0ebacadbe",
+        "port" : "top"
+      },
+      "tools" : {
+        "items" : [ ]
+      }
+    }, {
+      "cells" : "edge",
+      "data" : { },
+      "id" : "451ce814-9b4c-47a7-b162-dab5caa5cfdd",
+      "label" : "null",
+      "source" : {
+        "cell" : "9bfa8eb3-6648-40e6-acb8-991f8bb7d5ea",
+        "port" : "bottom"
+      },
+      "target" : {
+        "cell" : "858a3230-a89a-4ebd-8d45-88fc8a46b4eb",
+        "port" : "top"
+      },
+      "tools" : {
+        "items" : [ ]
+      }
+    }, {
+      "cells" : "edge",
+      "data" : { },
+      "id" : "19cb2501-3686-499d-9ae5-75595faafab3",
+      "label" : "null",
+      "source" : {
+        "cell" : "9bfa8eb3-6648-40e6-acb8-991f8bb7d5ea",
+        "port" : "bottom"
+      },
+      "target" : {
+        "cell" : "dd7bf263-465e-4a24-9019-30cf9e53d866",
+        "port" : "top"
+      },
+      "tools" : {
+        "items" : [ ]
+      }
+    }, {
+      "cells" : "edge",
+      "data" : { },
+      "id" : "26a68460-7f06-4927-8f42-ed3457a838b2",
+      "label" : "null",
+      "source" : {
+        "cell" : "721f1cca-a03e-4520-ac0b-b0e018f51876",
+        "port" : "bottom"
+      },
+      "target" : {
+        "cell" : "663df4d3-0d71-4074-9e0a-966b60ab9fb1",
+        "port" : "top"
+      },
+      "tools" : {
+        "items" : [ ]
+      }
+    }, {
+      "cells" : "edge",
+      "data" : { },
+      "id" : "8e60a162-2b10-447c-b4aa-cf4c289690e3",
+      "label" : "null",
+      "source" : {
+        "cell" : "721f1cca-a03e-4520-ac0b-b0e018f51876",
+        "port" : "bottom"
+      },
+      "target" : {
+        "cell" : "61cd2d7f-0c06-4650-afa1-f020cd95e8cc",
+        "port" : "top"
+      },
+      "tools" : {
+        "items" : [ ]
+      }
+    } ],
+    "nodes" : [ {
+      "cells" : "node",
+      "data" : {
+        "fetchData" : {
+          "label" : "Sequence",
+          "shape" : "CUSTOM_RECT",
+          "data" : { },
+          "key" : "Sequence",
+          "parentSource" : [ {
+            "key" : "assembly",
+            "title" : "组合节点组件",
+            "level" : 0
+          }, {
+            "key" : "serial",
+            "title" : "序列节点",
+            "level" : 1
+          }, {
+            "key" : "Sequence",
+            "title" : "Sequence",
+            "level" : 2
+          } ],
+          "isFillAll" : true,
+          "inputs" : [ {
+            "key" : "memory",
+            "label" : "memory",
+            "purpose" : "CUSTOM",
+            "type" : "string",
+            "order" : 1
+          } ]
+        },
+        "handleData" : {
+          "name" : "Sequence",
+          "description" : "find_tag_seq",
+          "inparams" : {
+            "memory" : {
+              "value" : "True",
+              "source" : ""
+            }
+          }
+        }
+      },
+      "id" : "9bfa8eb3-6648-40e6-acb8-991f8bb7d5ea",
+      "position" : {
+        "x" : -420,
+        "y" : -390
+      },
+      "shape" : "CUSTOM_RECT",
+      "size" : {
+        "width" : 120,
+        "height" : 40
+      },
+      "label" : "Sequence"
+    }, {
+      "cells" : "node",
+      "data" : {
+        "fetchData" : {
+          "label" : "Parallel",
+          "shape" : "CUSTOM_PARALLELOGRAM",
+          "data" : { },
+          "key" : "Parallel",
+          "parentSource" : [ {
+            "key" : "assembly",
+            "title" : "组合节点组件",
+            "level" : 0
+          }, {
+            "key" : "concurrency",
+            "title" : "并列节点",
+            "level" : 1
+          }, {
+            "key" : "Parallel",
+            "title" : "Parallel",
+            "level" : 2
+          } ],
+          "isFillAll" : false,
+          "inputs" : [ {
+            "key" : "policy",
+            "label" : "policy",
+            "purpose" : "CUSTOM",
+            "type" : "string",
+            "order" : 1
+          }, {
+            "key" : "Selected-labels",
+            "label" : "Selected-labels",
+            "purpose" : "CUSTOM",
+            "type" : "string",
+            "order" : 2
+          } ]
+        },
+        "handleData" : {
+          "name" : "Parallel",
+          "description" : "find_tag",
+          "inparams" : { }
+        }
+      },
+      "id" : "721f1cca-a03e-4520-ac0b-b0e018f51876",
+      "position" : {
+        "x" : -610,
+        "y" : -270
+      },
+      "shape" : "CUSTOM_PARALLELOGRAM",
+      "size" : {
+        "width" : 120,
+        "height" : 40
+      },
+      "label" : "Parallel"
+    }, {
+      "cells" : "node",
+      "data" : {
+        "fetchData" : {
+          "label" : "ROI筛选二维码节点",
+          "shape" : "CUSTOM_RECTCOMP",
+          "data" : { },
+          "key" : "FilterTagInROI",
+          "parentSource" : [ {
+            "key" : "skill",
+            "title" : "技能节点组件",
+            "level" : 0
+          }, {
+            "key" : "box",
+            "title" : "搬箱子",
+            "level" : 1
+          }, {
+            "key" : "FilterTagInROI",
+            "title" : "ROI筛选二维码节点",
+            "level" : 2
+          } ],
+          "isFillAll" : true,
+          "inputs" : [ {
+            "key" : "x_min",
+            "label" : "ROI区域内x轴方向的最小值",
+            "purpose" : "CUSTOM",
+            "type" : "float",
+            "order" : 1
+          }, {
+            "key" : "x_max",
+            "label" : "ROI区域内x轴方向的最大值",
+            "purpose" : "CUSTOM",
+            "type" : "float",
+            "order" : 2
+          }, {
+            "key" : "y_min",
+            "label" : "ROI区域内y轴方向的最小值",
+            "purpose" : "CUSTOM",
+            "type" : "float",
+            "order" : 3
+          }, {
+            "key" : "y_max",
+            "label" : "ROI区域内y轴方向的最大值",
+            "purpose" : "CUSTOM",
+            "type" : "float",
+            "order" : 4
+          }, {
+            "key" : "z_min",
+            "label" : "ROI区域内z轴方向的最小值",
+            "purpose" : "CUSTOM",
+            "type" : "float",
+            "order" : 5
+          }, {
+            "key" : "z_max",
+            "label" : "ROI区域内z轴方向的最大值",
+            "purpose" : "CUSTOM",
+            "type" : "float",
+            "order" : 6
+          } ]
+        },
+        "handleData" : {
+          "name" : "FilterTagInROI",
+          "description" : "filter_tag_by_ROI",
+          "inparams" : {
+            "x_min" : {
+              "value" : "-6",
+              "source" : "CUSTOM"
+            },
+            "x_max" : {
+              "value" : "6",
+              "source" : "CUSTOM"
+            },
+            "y_min" : {
+              "value" : "-6",
+              "source" : "CUSTOM"
+            },
+            "y_max" : {
+              "value" : "6",
+              "source" : "CUSTOM"
+            },
+            "z_min" : {
+              "value" : "0",
+              "source" : "CUSTOM"
+            },
+            "z_max" : {
+              "value" : "2",
+              "source" : "CUSTOM"
+            }
+          }
+        }
+      },
+      "id" : "247ef424-c133-4ac8-a286-83e0ebacadbe",
+      "position" : {
+        "x" : -425,
+        "y" : -275
+      },
+      "shape" : "CUSTOM_RECTCOMP",
+      "size" : {
+        "width" : 130,
+        "height" : 50
+      },
+      "label" : "ROI筛选二维码节点"
+    }, {
+      "cells" : "node",
+      "data" : {
+        "fetchData" : {
+          "label" : "ID筛选节点",
+          "shape" : "CUSTOM_RECTCOMP",
+          "data" : { },
+          "key" : "SelectTagByID",
+          "parentSource" : [ {
+            "key" : "skill",
+            "title" : "技能节点组件",
+            "level" : 0
+          }, {
+            "key" : "box",
+            "title" : "搬箱子",
+            "level" : 1
+          }, {
+            "key" : "SelectTagByID",
+            "title" : "ID筛选节点",
+            "level" : 2
+          } ],
+          "isFillAll" : true,
+          "inputs" : [ {
+            "key" : "target_id",
+            "label" : "二维码列表",
+            "purpose" : "CUSTOM",
+            "type" : "intArr",
+            "order" : 1
+          } ]
+        },
+        "handleData" : {
+          "name" : "SelectTagByID",
+          "description" : "select_tag_by_ID",
+          "inparams" : {
+            "target_id" : {
+              "value" : "0, 1, 2, 7, 8, 39",
+              "source" : "CUSTOM"
+            }
+          }
+        }
+      },
+      "id" : "858a3230-a89a-4ebd-8d45-88fc8a46b4eb",
+      "position" : {
+        "x" : -240,
+        "y" : -280
+      },
+      "shape" : "CUSTOM_RECTCOMP",
+      "size" : {
+        "width" : 130,
+        "height" : 50
+      },
+      "label" : "ID筛选节点"
+    }, {
+      "cells" : "node",
+      "data" : {
+        "fetchData" : {
+          "label" : "顺序筛选节点",
+          "shape" : "CUSTOM_RECTCOMP",
+          "data" : { },
+          "key" : "SelectTagByOrder",
+          "parentSource" : [ {
+            "key" : "skill",
+            "title" : "技能节点组件",
+            "level" : 0
+          }, {
+            "key" : "box",
+            "title" : "搬箱子",
+            "level" : 1
+          }, {
+            "key" : "SelectTagByOrder",
+            "title" : "顺序筛选节点",
+            "level" : 2
+          } ],
+          "isFillAll" : true,
+          "inputs" : [ {
+            "key" : "axis",
+            "label" : "按照哪个轴去排序, 用户需要输入x, y, z中的一个",
+            "purpose" : "CUSTOM",
+            "type" : "string",
+            "order" : 1
+          }, {
+            "key" : "order",
+            "label" : "按照最大值还是最小值去排序，用户需要输入max和min中的一个",
+            "purpose" : "CUSTOM",
+            "type" : "string",
+            "order" : 2
+          } ]
+        },
+        "handleData" : {
+          "name" : "SelectTagByOrder",
+          "description" : "select_tag_by_order",
+          "inparams" : {
+            "axis" : {
+              "value" : "z",
+              "source" : "CUSTOM"
+            },
+            "order" : {
+              "value" : "max",
+              "source" : "CUSTOM"
+            }
+          }
+        }
+      },
+      "id" : "dd7bf263-465e-4a24-9019-30cf9e53d866",
+      "position" : {
+        "x" : -58,
+        "y" : -275
+      },
+      "shape" : "CUSTOM_RECTCOMP",
+      "size" : {
+        "width" : 130,
+        "height" : 50
+      },
+      "label" : "顺序筛选节点"
+    }, {
+      "cells" : "node",
+      "data" : {
+        "fetchData" : {
+          "label" : "头部移动节点",
+          "shape" : "CUSTOM_RECTCOMP",
+          "data" : { },
+          "key" : "MoveHead",
+          "parentSource" : [ {
+            "key" : "skill",
+            "title" : "技能节点组件",
+            "level" : 0
+          }, {
+            "key" : "box",
+            "title" : "搬箱子",
+            "level" : 1
+          }, {
+            "key" : "MoveHead",
+            "title" : "头部移动节点",
+            "level" : 2
+          } ],
+          "isFillAll" : true,
+          "inputs" : [ {
+            "key" : "mode",
+            "label" : "模式，用户需要输入以下两种中的一种，一是manual, 二是from_board, manual使用用户输入的head_search_yaws，from_board则是从黑板上的HeadMoveValues",
+            "purpose" : "CUSTOM",
+            "type" : "string",
+            "order" : 1
+          }, {
+            "key" : "head_search_yaws",
+            "label" : "用户输入的头部移动的偏航角",
+            "purpose" : "CUSTOM",
+            "type" : "floatArr",
+            "order" : 2
+          }, {
+            "key" : "head_search_pitchs",
+            "label" : "用户输入的头部移动的俯仰角",
+            "purpose" : "CUSTOM",
+            "type" : "floatArr",
+            "order" : 3
+          } ]
+        },
+        "handleData" : {
+          "name" : "MoveHead",
+          "description" : "mvHead",
+          "inparams" : {
+            "mode" : {
+              "value" : "manual",
+              "source" : "CUSTOM"
+            },
+            "head_search_yaws" : {
+              "value" : "0, 0, 0",
+              "source" : "CUSTOM"
+            },
+            "head_search_pitchs" : {
+              "value" : "10, -10, 0",
+              "source" : "CUSTOM"
+            }
+          }
+        }
+      },
+      "id" : "663df4d3-0d71-4074-9e0a-966b60ab9fb1",
+      "position" : {
+        "x" : -760,
+        "y" : -100
+      },
+      "shape" : "CUSTOM_RECTCOMP",
+      "size" : {
+        "width" : 130,
+        "height" : 50
+      },
+      "label" : "头部移动节点"
+    }, {
+      "cells" : "node",
+      "data" : {
+        "fetchData" : {
+          "label" : "感知二维码节点",
+          "shape" : "CUSTOM_RECTCOMP",
+          "data" : { },
+          "key" : "FindAllTag",
+          "parentSource" : [ {
+            "key" : "skill",
+            "title" : "技能节点组件",
+            "level" : 0
+          }, {
+            "key" : "box",
+            "title" : "搬箱子",
+            "level" : 1
+          }, {
+            "key" : "FindAllTag",
+            "title" : "感知二维码节点",
+            "level" : 2
+          } ],
+          "isFillAll" : true,
+          "inputs" : [ {
+            "key" : "max_percep_time",
+            "label" : "最大感知次数",
+            "purpose" : "CUSTOM",
+            "type" : "int",
+            "order" : 1
+          } ]
+        },
+        "handleData" : {
+          "name" : "FindAllTag",
+          "description" : "find_all_tag",
+          "inparams" : {
+            "max_percep_time" : {
+              "value" : "7",
+              "source" : "CUSTOM"
+            }
+          }
+        }
+      },
+      "id" : "61cd2d7f-0c06-4650-afa1-f020cd95e8cc",
+      "position" : {
+        "x" : -570,
+        "y" : -100
+      },
+      "shape" : "CUSTOM_RECTCOMP",
+      "size" : {
+        "width" : 130,
+        "height" : 50
+      },
+      "label" : "感知二维码节点"
+    } ],
+    "root" : {
+      "cells" : "node",
+      "data" : {
+        "fetchData" : {
+          "label" : "Sequence",
+          "shape" : "CUSTOM_RECT",
+          "data" : { },
+          "key" : "Sequence",
+          "parentSource" : [ {
+            "key" : "assembly",
+            "title" : "组合节点组件",
+            "level" : 0
+          }, {
+            "key" : "serial",
+            "title" : "序列节点",
+            "level" : 1
+          }, {
+            "key" : "Sequence",
+            "title" : "Sequence",
+            "level" : 2
+          } ],
+          "isFillAll" : true,
+          "inputs" : [ {
+            "key" : "memory",
+            "label" : "memory",
+            "purpose" : "CUSTOM",
+            "type" : "string",
+            "order" : 1
+          } ]
+        },
+        "handleData" : {
+          "name" : "Sequence",
+          "description" : "find_tag_seq",
+          "inparams" : {
+            "memory" : {
+              "value" : "True",
+              "source" : ""
+            }
+          }
+        }
+      },
+      "id" : "9bfa8eb3-6648-40e6-acb8-991f8bb7d5ea",
+      "position" : {
+        "x" : -420,
+        "y" : -390
+      },
+      "shape" : "CUSTOM_RECT",
+      "size" : {
+        "width" : 120,
+        "height" : 40
+      },
+      "label" : "Sequence"
+    }
+  },
+  "inputs" : [ ],
+  "childBoard" : [ ],
+  "modifyDate" : "2025-12-10T12:53:46.749+00:00"
+} ]

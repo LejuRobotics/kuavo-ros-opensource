@@ -1,0 +1,6 @@
+string action_type    # 动作类型: "start", "stop", "restart"
+string launch_file    # launch文件名称，如 "play_music", "record_audio" 等
+string session_name   # tmux会话名称
+---
+bool success         # 操作是否成功
+string message       # 返回消息

@@ -1,0 +1,48 @@
+<launch>
+  <!-- OCS2机器人控制客户端 -->
+  
+  <!-- 定义参数，允许从命令行覆盖 -->
+  <arg name="function_name" default="call_sensor" />
+  <!-- <arg name="param1" default="0.7" />
+  <arg name="param2" default="0.0" />
+  <arg name="param3" default="0.0" />
+  <arg name="param4" default="0.0" />
+  <arg name="param5" default="0.0" /> -->
+  <!-- 新增参数用于case_sps.py命令 -->
+  <arg name="id" default="task_001" />
+  <arg name="start_x" default="-1.2" />
+  <arg name="start_y" default="0.19" />
+  <arg name="start_z" default="0.0" />
+  <arg name="pick_x" default="-0.25" />
+  <arg name="pick_y" default="0.24" />
+  <arg name="pick_z" default="0.0" />
+  <arg name="loop_count" default="2" />
+  <arg name="service_timeout" default="10" />
+  <arg name="auto_execute" default="true" />
+  
+  <node name="ocs2_robot_control_client" pkg="h12pro_controller_node" type="ocs2_robot_control_client.py" output="screen">
+    <!-- 使用arg值设置参数 -->
+    <param name="function_name" value="$(arg function_name)" />
+    
+    <!-- call_sensor服务的额外参数
+    <param name="param1" value="$(arg param1)" />
+    <param name="param2" value="$(arg param2)" />
+    <param name="param3" value="$(arg param3)" />
+    <param name="param4" value="$(arg param4)" />
+    <param name="param5" value="$(arg param5)" /> -->
+    
+    <!-- 新增参数用于case_sps.py命令 -->
+    <param name="id" value="$(arg id)" />
+    <param name="start_x" value="$(arg start_x)" />
+    <param name="start_y" value="$(arg start_y)" />
+    <param name="start_z" value="$(arg start_z)" />
+    <param name="pick_x" value="$(arg pick_x)" />
+    <param name="pick_y" value="$(arg pick_y)" />
+    <param name="pick_z" value="$(arg pick_z)" />
+    <param name="loop_count" value="$(arg loop_count)" />
+    
+    <!-- 可选参数 -->
+    <param name="service_timeout" value="10" />
+    <param name="auto_execute" value="True" />
+  </node>
+</launch>

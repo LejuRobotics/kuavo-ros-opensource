@@ -56,14 +56,14 @@ def publish_channel_msg(states, long_press=False):
     # 初始化 ROS 节点
     rospy.init_node('publish_channel_msg', anonymous=True)
     pub = rospy.Publisher('/h12pro_channel', h12proRemoteControllerChannel, queue_size=10)
-    
+
     while pub.get_num_connections() == 0:
         rospy.loginfo("Waiting for subscribers to connect...")
         rospy.sleep(0.5)
 
     # 创建一个新的消息
     msg = h12proRemoteControllerChannel()
-    
+
     # 发布默认值
     msg.channels = DEFAULT_CHANNELS.copy()  # 使用默认值
     msg.sbus_state = 1

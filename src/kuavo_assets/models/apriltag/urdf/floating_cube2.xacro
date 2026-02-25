@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="floating_apriltag_cube">
+
+  <!-- 创建一个基础链接作为立方体的中心 -->
+  <link name="world"/>
+
+  <link name="apriltag_cube_base2">
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <material>
+        <color rgba="0.8 0.8 0.8 0.5"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <!-- 使用 floating joint 使立方体可以自由移动 -->
+  <joint name="world_to_cube_joint" type="floating">
+    <parent link="world"/>
+    <child link="apriltag_cube_base2"/>
+    <origin xyz="0.0 0.0 2.0" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:include filename="$(find kuavo_assets)/models/apriltag/urdf/apriltag_cube2.xacro"/>
+  <xacro:left_arm_apriltags parent_link="apriltag_cube_base2"/>
+
+  <!-- Gazebo物理属性配置 -->
+  <gazebo reference="apriltag_cube_base2">
+    <gravity>false</gravity>
+    <mu1>0.8</mu1>
+    <mu2>0.8</mu2>
+    <kp>1000000.0</kp>
+    <kd>100.0</kd>
+    <minDepth>0.001</minDepth>
+    <maxVel>1.0</maxVel>
+    <maxContacts>20</maxContacts>
+  </gazebo>
+</robot>
+

@@ -48,7 +48,6 @@ find_package(catkin REQUIRED
 find_package(drake REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(OpenVINO REQUIRED)
-find_package(yaml-cpp REQUIRED)
 pkg_check_modules(pinocchio REQUIRED pinocchio)
 
 if (USE_DDS OR USE_LEJU_DDS)
@@ -261,16 +260,7 @@ add_library(${PROJECT_NAME}
         src/humanoidController_wheel_wbc.cpp
         src/ControlDataManager.cpp
         src/WaistKinematics.cpp
-        src/rl/RlGaitReceiver.cpp
-        src/rl/RLControllerBase.cpp
-        src/rl/FallStandController.cpp
-        src/rl/RLControllerManager.cpp
-        src/rl/AmpWalkController.cpp
-        src/rl/armController.cpp
-        src/rl/waistController.cpp
-        # src/AMPController.cpp
-        # src/MinicController.cpp
-        src/rl/VMPController.cpp
+        src/RlGaitReceiver.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}
@@ -279,8 +269,7 @@ target_link_libraries(${PROJECT_NAME}
         humanoid_interface_shm
         drake::drake
         openvino::runtime
-        arm_torque_controller
-        yaml-cpp
+        arm_torque_controller 
         )
 if (USE_DDS OR USE_LEJU_DDS)
         target_link_libraries(${PROJECT_NAME}

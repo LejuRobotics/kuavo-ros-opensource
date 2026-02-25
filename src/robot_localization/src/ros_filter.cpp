@@ -144,7 +144,7 @@ namespace RobotLocalization
         10));
 
     // Publisher
-    positionPub_ = nh_.advertise<nav_msgs::Odometry>("odometry/filtered", 20);
+    // positionPub_ = nh_.advertise<nav_msgs::Odometry>("odometry/filtered", 20);
 
     // Optional acceleration publisher
     if (publishAcceleration_)

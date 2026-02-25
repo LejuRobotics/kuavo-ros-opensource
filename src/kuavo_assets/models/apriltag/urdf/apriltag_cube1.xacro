@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- 引入apriltag -->
+  <xacro:include filename="$(find kuavo_assets)/models/apriltag/urdf/apriltag.xacro"/>
+
+  <!-- 左臂AprilTag标记 -->
+  <xacro:macro name="left_arm_apriltags" params="parent_link">
+    <xacro:apriltag_marker parent_link="${parent_link}" id="1">
+      <origin xyz="0.055 0 -0.165" rpy="0 1.5708 0"/>
+    </xacro:apriltag_marker>
+  </xacro:macro>
+
+  <!-- 右臂AprilTag标记 -->
+</robot>

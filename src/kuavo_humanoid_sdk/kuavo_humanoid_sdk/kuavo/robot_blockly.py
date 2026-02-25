@@ -7,7 +7,7 @@ from kuavo_humanoid_sdk.kuavo.robot_audio import KuavoRobotAudio
 from kuavo_humanoid_sdk.kuavo.robot_climbstair import KuavoRobotClimbStair, set_pitch_limit
 from kuavo_humanoid_sdk.interfaces.data_types  import KuavoPose
 from kuavo_msgs.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
-from kuavo_msgs.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl
+from kuavo_msgs.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHandPosition, robotHeadMotionData, sensorsData
 from geometry_msgs.msg import Twist
 import asyncio
 import math
@@ -38,7 +38,7 @@ robot_version = int(os.environ.get("ROBOT_VERSION", "45"))
 ocs2_joint_state = JointState()
 ocs2_hand_state = robotHandPosition()
 ocs2_head_state = robotHeadMotionData()
-ocs2_waist_state = robotWaistControl()
+ocs2_waist_state = Float64MultiArray()
 KUAVO_TACT_LENGTH = 28
 ROBAN_TACT_LENGTH = 23
 if robot_version >= 40:
@@ -59,8 +59,6 @@ def signal_handler(sig, frame):
     global running
     print('\nCtrl+C pressed. Stopping robot...')
     running = False
-    rospy.signal_shutdown("Ctrl+C pressed")
-    exit(0)
 
 def frames_to_custom_action_data(file_path: str):
     """Parse action file and convert frames to custom action data.
@@ -341,7 +339,7 @@ class RobotControlBlockly:
         kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
         control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1, tcp_nodelay=True)
         control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1, tcp_nodelay=True)
-        control_waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=1, tcp_nodelay=True)
+        control_waist_pub = rospy.Publisher('/robot_waist_motion_data', Float64MultiArray, queue_size=1, tcp_nodelay=True)
         rospy.Subscriber('/dexhand/state', JointState, self.robot_hand_callback, queue_size=1, tcp_nodelay=True)
         rospy.Subscriber('/sensors_data_raw', sensorsData, self.sensors_data_callback, queue_size=1, tcp_nodelay=True)
         rospy.Timer(rospy.Duration(0.01), self.timer_callback)
@@ -361,7 +359,7 @@ class RobotControlBlockly:
                 control_hand_pub.publish(ocs2_hand_state)
             if len(ocs2_head_state.joint_data) != 0:
                 control_head_pub.publish(ocs2_head_state)
-            if len(ocs2_waist_state.data.data) != 0:
+            if len(ocs2_waist_state.data) != 0:
                 control_waist_pub.publish(ocs2_waist_state)
 
     def sensors_data_callback(self, msg):
@@ -399,12 +397,10 @@ class RobotControlBlockly:
             current_arm_joint_state = arm_part + hand_part + head_part
 
         elif robot_version >= 10 and robot_version < 30:
-            # 按照 joint_q 索引顺序定义变量
-            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12  # 对应 joint_q[0:12]
-            waist_part = [joint_msg.joint_data.joint_q[12]]  # 对应 joint_q[12]
-            arm_part = list(joint_msg.joint_data.joint_q[13:21])  # 对应 joint_q[13:21]
-            head_part = list(joint_msg.joint_data.joint_q[21:23])  # 对应 joint_q[21:23]
-            # 保持最终组合顺序不变：arm_part + hand_part + head_part + waist_part
+            arm_part = list(joint_msg.joint_data.joint_q[13:21])
+            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+            head_part = list(joint_msg.joint_data.joint_q[-2:])
+            waist_part = [joint_msg.joint_data.joint_q[0]]
             current_arm_joint_state = arm_part + hand_part + head_part + waist_part
 
         current_arm_joint_state = [round(v, 2) for v in current_arm_joint_state]
@@ -447,8 +443,7 @@ class RobotControlBlockly:
                 ocs2_hand_state.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[8:14]]
                 ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
                 ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
-                ocs2_waist_state.header.stamp = rospy.Time.now()
-                ocs2_waist_state.data.data = [math.degrees(pos) for pos in point.positions[22:]]
+                ocs2_waist_state.data = [math.degrees(pos) for pos in point.positions[22:]]
 
     def arm_reset(self):
         """Reset the arm position to the initial state."""
@@ -665,9 +660,6 @@ class RobotControlBlockly:
             action_file (str): Action file name.
             proj_name (str, optional): Project name.
         """
-
-        print("⚠️ 警告: 此接口(excute_action_file)即将废弃，请使用新接口execute_action_file")
-
         global g_robot_type
         g_robot_type = "ocs2"
         self.plan_arm_state_status = False
@@ -703,51 +695,6 @@ class RobotControlBlockly:
         while self.plan_arm_state_status is False:
             time.sleep(0.01)
         print("action file executed")
-
-    def execute_action_file(self, action_file: str, proj_name: str = None, music_file: str = None):
-        """Execute an action file, parse action frames, and send Bezier trajectory request to the robot.
-
-        Args:
-            action_file (str): Action file name.
-            proj_name (str, optional): Project name.
-        """
-
-        global g_robot_type
-        g_robot_type = "ocs2"
-        self.plan_arm_state_status = False
-
-        action_filename = action_file + ".tact"
-        if proj_name is None:
-            action_file_path = os.path.expanduser(f"{self.ACTION_FILE_FOLDER}/{action_filename}")
-        else:
-            action_file_path = self.package_path + "/upload_files/" + proj_name + "/action_files/" + action_filename
-        if not os.path.exists(action_file_path):
-            print(f"Action file not found: {action_file_path}")
-            return
-
-        is_compatible, msg = verify_robot_version(action_file_path)
-        if not is_compatible:
-            print(msg)
-            return
-
-        start_frame_time, end_frame_time = get_start_end_frame_time(action_file_path)
-
-        if g_robot_type == "ocs2":
-            action_frames = frames_to_custom_action_data_ocs2(action_file_path, start_frame_time, current_arm_joint_state)
-            end_frame_time += 1
-            self.set_arm_control_mode(2)
-        else:
-            action_frames = frames_to_custom_action_data(action_file_path)
-
-        req = self.create_bezier_request(action_frames, start_frame_time, end_frame_time)
-        if music_file is not None:
-            self.play_music(music_file)
-        self.plan_arm_trajectory_bezier_curve_client(req)
-        time.sleep(0.5)
-        while self.plan_arm_state_status is False:
-            time.sleep(0.01)
-        print("action file executed")
-
 
     def control_robot_head(self, yaw: float, pitch: float):
         """Control the robot head rotation.
@@ -1178,37 +1125,6 @@ class RobotControlBlockly:
         except Exception as e:
             print(f"Execute stair trajectory failed: {str(e)}")
             return False
-
-    def simple_up_stair(self, stair_height = 0.08,stair_length = 0.25,stair_num = 4):
-        """
-        生成简单的上楼梯轨迹
-        Args:
-            stair_height: 楼梯高度
-            stair_length: 楼梯长度
-            stair_num: 楼梯级数
-        Returns:
-            bool: True if successful, False otherwise.
-        """
-        try:
-            return self.climb_stair.simple_up_stairs(stair_height, stair_length, stair_num)
-        except Exception as e:
-            print(f"Simple up stair failed: {str(e)}")
-            return False
-
-    def align_stair(self) -> bool:
-        """对齐楼梯，基于视觉 tag 识别控制机器人单步运动到楼梯前方固定的点和朝向。
-
-        从配置文件读取对齐参数（offset_x, offset_y, offset_yaw, tag_id），
-        如果配置文件不存在，使用默认值：offset_x=0.80, offset_y=0.30, offset_yaw=0.00
-
-        Returns:
-            bool: True if alignment was successful, False otherwise.
-        """
-        try:
-            return self.climb_stair.simple_align_stair()
-        except Exception as e:
-            print(f"Align stair failed: {str(e)}")
-            return False
         
     def control_waist_rotation(self, degree: float = 0):
         """Control the robot's waist rotation.
@@ -1218,9 +1134,8 @@ class RobotControlBlockly:
         """
         try:
             global control_waist_pub
-            msg = robotWaistControl()
-            msg.header.stamp = rospy.Time.now()
-            msg.data.data = [degree]
+            msg = Float64MultiArray()
+            msg.data = [degree]
             control_waist_pub.publish(msg)
 
         except Exception as e:

@@ -20,7 +20,6 @@ new-docs
 src/manipulation_nodes/planarmwebsocketservice/models/*.pt
 .claude/
 src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs/**
-src/manipulation_nodes/motion_capture_ik/lib/*.so
 src/legged_control
 src/legged_perceptive
 src/Livox-SDK2
@@ -36,8 +35,12 @@ tmp_ik/**
 # **/*.cursormd
 compile_commands.json
 **/debug_ik/
+** copy
 **/*_debug.py
 ik_factory.py
+config.py
+utils.py
+**/*copy.*
 **/*.rej
 .clang-format
 **/*.code-search
@@ -61,8 +64,11 @@ debugQuestControlFSMNode.cpp
 tmp_ws/
 # **/*test.cpp
 
-src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs/**
-bag/*
-src/Livox-SDK2
-src/legged_control
-src/legged_perceptive
+
+# **/*.md
+
+# **/settings.json
+
+# **/*.bak
+
+# **/Quest3ArmInfoTransformer.*

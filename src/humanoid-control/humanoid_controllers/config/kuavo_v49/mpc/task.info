@@ -16,8 +16,6 @@ model_settings
   positionErrorGainXYStepControl     50 ;
   velocityErrorGainXYStepControl     1.0 ;
 
-  positionErrorGainZStepControl  20.0 ; 20.0
-
   phaseTransitionStanceTime     0.4
 
   verboseCppAd                  false
@@ -743,16 +741,16 @@ standUpJointAccelTask
   }
   arm
   {
-    kp    20
-    kd    1.2
+    kp    200
+    kd    10.2
   }
 }
 
 standUpWeight
 {
     Linear          3
-    Angular         6
-    JointAcc        30
+    Angular         10
+    JointAcc        20
     contactForce    0.1 
 }
 

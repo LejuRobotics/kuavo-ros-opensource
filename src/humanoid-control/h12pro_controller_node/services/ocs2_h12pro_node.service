@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 ExecStop=/bin/kill -SIGINT $MAINPID
 Environment=KUAVO_ROS_CONTROL_WS_PATH=/root/kuavo_ws
-Environment=ROBOT_VERSION=40
+Environment=ROBOT_VERSION=45
 ExecStart=/root/kuavo_ws/src/humanoid-control/h12pro_controller_node/scripts/start_ocs2_h12pro_node.sh
 User=root
 

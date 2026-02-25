@@ -1,0 +1,12 @@
+{
+	"ACTION_FILE_FOLDER": "~/.config/lejuconfig/action_files",
+	"ROS_BAG_LOG_SAVE_PATH": "~/.log/vr_remote_control/rosbag",
+	"HUMANOID_ROBOT_SESSION_NAME": "humanoid_robot",
+	"VR_REMOTE_CONTROL_SESSION_NAME": "vr_remote_control",
+	"LAUNCH_HUMANOID_ROBOT_SIM_CMD": "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12 start_way:=auto",
+	"LAUNCH_HUMANOID_ROBOT_REAL_CMD": "roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=bt2pro",
+	"LAUNCH_VR_REMOTE_CONTROL_CMD": "roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch",
+	"ROS_MASTER_URI": "http://192.168.26.1:11311",
+	"ROS_IP": "192.168.26.1",
+	"KUAVO_ROS_CONTROL_WS_PATH": "/home/lab/lpf/kuavo-ros-control"
+}

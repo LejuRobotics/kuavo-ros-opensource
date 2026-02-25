@@ -1,54 +1,6 @@
 #! /bin/bash
 set -e
 
-if systemctl is-active --quiet roban_joy_monitor.service; then
-    echo "服务 roban_joy_monitor.service 已开启，正在停止..."
-    sudo systemctl stop roban_joy_monitor.service
-    sudo systemctl disable roban_joy_monitor.service
-    echo "服务 roban_joy_monitor.service 已停止。"
-else
-    echo "服务 roban_joy_monitor.service 未开启。"
-fi
-
-if systemctl is-active --quiet h12pro_monitor.service; then
-    echo "服务 h12pro_monitor.service 已开启，正在停止..."
-    sudo systemctl stop h12pro_monitor.service
-    sudo systemctl disable h12pro_monitor.service
-    echo "服务 h12pro_monitor.service 已停止。"
-else
-    echo "服务 h12pro_monitor.service 未开启。"
-fi
-
-if systemctl is-active --quiet ocs2_h12pro_monitor.service; then
-    echo "服务 ocs2_h12pro_monitor.service 已开启，正在停止..."
-    sudo systemctl stop ocs2_h12pro_monitor.service
-    sudo systemctl disable ocs2_h12pro_monitor.service
-    echo "服务 ocs2_h12pro_monitor.service 已停止。"
-else
-    echo "服务 ocs2_h12pro_monitor.service 未开启。"
-fi
-
-while true; do
-    echo "请选择控制方案 (1: ocs2, 2: rl, 3: multi)。若为 rl，请先修改 ROBOT_VERSION=46，并将正确的仓库路径修改在脚本中，再运行该脚本:"
-    read -r user_input
-    if [ "$user_input" = "1" ]; then
-        KUAVO_CONTROL_SCHEME=ocs2
-        echo "已选择: ocs2"
-        break
-    elif [ "$user_input" = "2" ]; then
-        KUAVO_CONTROL_SCHEME=rl
-        echo "已选择: rl"
-        break
-    elif [ "$user_input" = "3" ]; then
-        KUAVO_CONTROL_SCHEME=multi
-        echo "已选择: multi"
-        break
-    else
-        echo "输入无效，请输入1、2或3。"
-    fi
-done
-
-KUAVO_RL_WS_PATH="/home/lab/kuavo-RL/kuavo-robot-deploy" # 在没合并到 kuavo-ros-control 的之前，先固定路径或手动修改
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 H12PRO_CONTROLLER_NODE_DIR=$(dirname $SCRIPT_DIR)
 SERVICE_DIR=$(dirname $SCRIPT_DIR)/services
@@ -60,7 +12,6 @@ NOITOM_HI5_HAND_UDP_PYTHON=$KUAVO_ROS_CONTROL_WS_PATH/src/manipulation_nodes/noi
 KUAVO_REMOTE_PATH=$(dirname $SCRIPT_DIR)/lib/kuavo_remote
 ROBOT_VERSION=$ROBOT_VERSION
 INSTALLED_DIR=$KUAVO_ROS_CONTROL_WS_PATH/installed
-RL_INSTALLED_DIR=$KUAVO_RL_WS_PATH/installed
 cd $H12PRO_CONTROLLER_NODE_DIR
 pip3 install -r requirements.txt
 pip3 install -r $NOITOM_HI5_HAND_UDP_PYTHON/requirements.txt
@@ -70,21 +21,10 @@ echo "SERVICE_DIR: $SERVICE_DIR"
 echo "MONITOR_OCS2_H12PRO: $MONITOR_OCS2_H12PRO"
 echo "KUAVO_REMOTE_PATH: $KUAVO_REMOTE_PATH"
 
-if [ "$KUAVO_CONTROL_SCHEME" = "rl" ]; then
-    cd $KUAVO_RL_WS_PATH
-    catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release
-    if [ -d "$RL_INSTALLED_DIR" ] && [ -f "$RL_INSTALLED_DIR/setup.bash" ]; then
-        echo "Sourcing existing installation..."
-        source $RL_INSTALLED_DIR/setup.bash
-    fi
-    catkin build humanoid_controllers
-fi
-
 cd $KUAVO_ROS_CONTROL_WS_PATH
-catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release
-if [ -d "$INSTALLED_DIR" ] && [ -f "$INSTALLED_DIR/setup.bash" ]; then
+if [ -d "$INSTALLED_DIR" ] && [ -f "$INSTALLED_DIR/devel/setup.bash" ]; then
     echo "Sourcing existing installation..."
-    source $INSTALLED_DIR/setup.bash
+    source $INSTALLED_DIR/devel/setup.bash
 fi
 catkin build humanoid_controllers
 catkin build h12pro_controller_node
@@ -99,27 +39,6 @@ else
   sudo chmod +x creat_remote_udev_rule.sh
   sudo ./creat_remote_udev_rule.sh
 fi
-
-while true; do
-    echo "是否需要加载遥控器查看 log 使用串口的 udev 规则？确认有接线才可以使用。(y/n): "
-    read -r load_h12_log_channel
-    if [[ "$load_h12_log_channel" == "y" || "$load_h12_log_channel" == "Y" ]]; then
-        if ls /dev | grep H12_log_channel; then
-            echo "遥控器设备文件已存在，无需加载规则。"
-        else
-            echo "正在加载遥控器 udev 规则..."
-            cd $SCRIPT_DIR
-            sudo chmod +x load_h12_log_serial_rule.sh
-            sudo ./load_h12_log_serial_rule.sh                        
-        fi
-        break
-    elif [[ "$load_h12_log_channel" == "n" || "$load_h12_log_channel" == "N" ]]; then
-        echo "跳过加载遥控器 udev 规则。"
-        break
-    else
-        echo "输入无效，请输入 y 或 n。"
-    fi
-done
 
 echo "Current robot version: $ROBOT_VERSION"
 
@@ -143,36 +62,12 @@ fi
 echo "Current ROS_MASTER_URI: $ROS_MASTER_URI"
 echo "Current ROS_IP: $ROS_IP"
 echo "Current ROS_HOSTNAME:$ROS_HOSTNAME"
-
-# 询问用户选择楼梯建图相机类型
-echo "请问机器人楼梯建图的相机类型为："
-echo "1. 奥比中光"
-echo "2. D435"
-echo -n "请选择 (默认为奥比中光，直接回车选择默认): "
-read -r camera_choice
-
-case $camera_choice in
-    2)
-        STAIR_DETECTION_CAMERA="d435"
-        echo "已选择: D435"
-        ;;
-    1|""|*)
-        STAIR_DETECTION_CAMERA="orbbec"
-        echo "已选择: 奥比中光"
-        ;;
-esac
-
-echo "楼梯建图相机类型: $STAIR_DETECTION_CAMERA"
-
 sed -i "s|^Environment=ROS_MASTER_URI=.*|Environment=ROS_MASTER_URI=$ROS_MASTER_URI|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=ROS_IP=.*|Environment=ROS_IP=$ROS_IP|" $OCS2_H12PRO_MONITOR_SERVICE
-sed -i "s|^Environment=KUAVO_CONTROL_SCHEME=.*|Environment=KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=ROS_HOSTNAME=.*|Environment=ROS_HOSTNAME=$ROS_HOSTNAME|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=KUAVO_ROS_CONTROL_WS_PATH=.*|Environment=KUAVO_ROS_CONTROL_WS_PATH=$KUAVO_ROS_CONTROL_WS_PATH|" $OCS2_H12PRO_MONITOR_SERVICE
-sed -i "s|^Environment=KUAVO_RL_WS_PATH=.*|Environment=KUAVO_RL_WS_PATH=$KUAVO_RL_WS_PATH|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=ROBOT_VERSION=.*|Environment=ROBOT_VERSION=$ROBOT_VERSION|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=NODE_SCRIPT=.*|Environment=NODE_SCRIPT=$START_OCS2_H12PRO_NODE|" $OCS2_H12PRO_MONITOR_SERVICE
-sed -i "s|^Environment=STAIR_DETECTION_CAMERA=.*|Environment=STAIR_DETECTION_CAMERA=$STAIR_DETECTION_CAMERA|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^ExecStart=.*|ExecStart=$MONITOR_OCS2_H12PRO|" $OCS2_H12PRO_MONITOR_SERVICE
 
 sudo cp $OCS2_H12PRO_MONITOR_SERVICE /etc/systemd/system/
@@ -194,7 +89,3 @@ sudo systemctl start ocs2_h12pro_monitor.service
 sudo systemctl enable ocs2_h12pro_monitor.service
 
 echo "h12pro monitor service deploy successfully"
-
-echo "stop all ros node"
-sudo pkill ros -f
-echo "stop all ros node successfully"

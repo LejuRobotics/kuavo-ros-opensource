@@ -1,11 +1,18 @@
 import time
+import rospy
 from typing import Any, Tuple, List
 import numpy as np
+from std_msgs.msg import Bool
 
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.base_event import BaseEvent, EventStatus
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.data_type import Pose, Tag, Frame, Transform3D
 from kuavo_humanoid_sdk.kuavo_strategy_v2.utils.utils import normalize_angle
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.robot_sdk import RobotSDK
+
+from kuavo_humanoid_sdk.interfaces.data_types import (
+    KuavoPose,
+    KuavoManipulationMpcCtrlMode,
+    KuavoManipulationMpcFrame)
 
 
 class EventWalkToPose(BaseEvent):
@@ -40,6 +47,44 @@ class EventWalkToPose(BaseEvent):
         self.yaw_threshold = yaw_threshold  # 偏航角阈值，单位弧度
         self.pos_threshold = pos_threshold  # 位置阈值，单位米
         self.control_mode = control_mode  # 控制模式，默认为相对位置控制
+        self.x_direction_locked = False  # 是否已经锁定方向
+        self.locked_x_direction = 0      # 锁定的方向：1为正向，-1为负向，0为未锁定
+        self.min_x_velocity = 0.01       # 最小x方向速度
+
+        self.filtered_vel_x = 0.0
+        self.filtered_vel_y = 0.0
+        self.filtered_vel_yaw = 0.0
+
+        # cmd_pos_world 模式相关（延迟初始化，只在使用该模式时才创建订阅器）
+        self.cmd_pos_world_reached = False  # 是否到达目标标志
+        self._cmd_pose_world_flag_sub = None  # 订阅器（延迟创建）
+
+    def _cmd_pose_world_flag_callback(self, msg):
+        """cmd_pose_world_flag 话题的回调函数"""
+        self.cmd_pos_world_reached = msg.data
+        if msg.data:
+            print("✅ 收到到达信号: cmd_pose_world_flag = True")
+        else:
+            print("🚀 收到开始执行信号: cmd_pose_world_flag = False")
+
+    def _setup_cmd_pos_world_subscriber(self):
+        """设置 cmd_pose_world_flag 话题的订阅器"""
+        self._cmd_pose_world_flag_sub = rospy.Subscriber(
+            "/cmd_pose_world_flag",
+            Bool,
+            self._cmd_pose_world_flag_callback,  # 使用类方法
+            queue_size=1
+        )
+
+    def open(self):
+        """
+        开始走到指定位置事件。
+        """
+        super().open()
+        # 重置状态，确保每次open都能正确执行轨迹
+        self.reset()
+
+        self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.BaseArm)
 
     def reset(self):
         """
@@ -50,6 +95,13 @@ class EventWalkToPose(BaseEvent):
         self.target_executed = False  # 标记目标位置未执行
 
         self.control_mode = 'cmd_pos_world'
+
+        # 重置 cmd_pos_world 模式相关标志
+        self.cmd_pos_world_reached = False
+
+        # 重置x轴速度死区状态
+        if hasattr(self, 'last_vel_x_sign'):
+            self.last_vel_x_sign = 0
 
     def close(self):
         """
@@ -65,8 +117,11 @@ class EventWalkToPose(BaseEvent):
                 linear_y=0.0,  # 不侧移
                 angular_z=0.0  # 只转动
             )
-        self.robot_sdk.control.stance()
+        # self.robot_sdk.control.stance()
         # self.robot_sdk.control.walk(linear_x=0, linear_y=0, angular_z=0)
+        self.filtered_vel_x = 0.0
+        self.filtered_vel_y = 0.0
+        self.filtered_vel_yaw = 0.0
 
     def set_control_mode(self, control_mode: str):
         """
@@ -79,7 +134,7 @@ class EventWalkToPose(BaseEvent):
         if control_mode not in valid_modes:
             raise ValueError(f"无效的控制模式: {control_mode}，支持的模式有: {valid_modes}")
         self.control_mode = control_mode
-        self.logger.info(f"🔵 控制模式已设置为: {self.control_mode}")
+        self.logger.info(f"�� 控制模式已设置为: {self.control_mode}")
 
     def utils_enable_base_pitch_limit(self, enable: bool):
         """
@@ -88,26 +143,140 @@ class EventWalkToPose(BaseEvent):
         参数：
             enable (bool): 是否启用俯仰角限制。
         """
-        self.robot_sdk.control.enable_base_pitch_limit(enable)
-        self.logger.info(f"🔵 base_link俯仰角限制已{'启用' if enable else '禁用'}")
+        # self.robot_sdk.control.enable_base_pitch_limit(enable)
+        # self.logger.info(f"�� base_link俯仰角限制已{'启用' if enable else '禁用'}")
 
-    def step(self):
+    def stop(self):
+        """
+        停止事件。
+        """
+        self.robot_sdk.control.walk(
+            linear_x=0.0,  # 不前进
+            linear_y=0.0,  # 不侧移
+            angular_z=0.0  # 只转动
+        )
+
+    def change_control_mode(self, control_mode: str):
+        """
+        切换控制模式。
+        """
+
+        # if control_mode == "BaseArm":
+        #     self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.BaseArm)
+        # elif control_mode == "BaseOnly":
+        #     self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.BaseOnly)
+        # else:
+        #     self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.NoControl)
+
+        print(f"切换控制模式为: {control_mode}")
+
+    def _cmd_vel_compute_linear_velocity(self, dx: float, dy: float) -> Tuple[float, float]:
+        """
+        计算纯线性速度（用于cmd_vel模式）
+        只计算线性速度，不管角度
+
+        参数：
+            dx: x方向位置误差（米），在机器人坐标系下
+            dy: y方向位置误差（米），在机器人坐标系下
+
+        返回：
+            Tuple[float, float]: (linear_x, linear_y) 线性速度命令
+        """
+        # 控制参数
+        kp_pos_x = 0.5  # x方向位置比例系数
+        kp_pos_y = 1.0  # y方向位置比例系数
+        max_vel_x = 0.3  # 最大x方向速度
+        max_vel_y = 0.3  # 最大y方向速度
+        filter_alpha = 0.15  # 低通滤波系数
+        deadzone = 0.01  # 死区：距离小于此值时不输出速度（米）
+
+        # 初始化滤波器状态
+        if not hasattr(self, 'filtered_linear_x'):
+            self.filtered_linear_x = 0.0
+            self.filtered_linear_y = 0.0
+
+        # 分别判断 x 方向死区
+        if abs(dx) < deadzone:
+            vel_x = 0.0
+            self.filtered_linear_x = 0.0  # 立即归零
+        else:
+            vel_x = kp_pos_x * dx
+            vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)
+            self.filtered_linear_x = filter_alpha * vel_x + (1 - filter_alpha) * self.filtered_linear_x
+
+        # 分别判断 y 方向死区
+        if abs(dy) < deadzone:
+            vel_y = 0.0
+            self.filtered_linear_y = 0.0  # 立即归零
+        else:
+            vel_y = kp_pos_y * dy
+            vel_y = np.clip(vel_y, -max_vel_y, max_vel_y)
+            self.filtered_linear_y = filter_alpha * vel_y + (1 - filter_alpha) * self.filtered_linear_y
+
+        return self.filtered_linear_x, self.filtered_linear_y
+
+    def _cmd_vel_compute_angular_velocity(self, dyaw: float) -> float:
+        """
+        计算纯角速度（用于cmd_vel模式）
+        只计算角速度，不管位置
+
+        参数：
+            dyaw: 角度误差（弧度），已经过 normalize_angle 处理
+
+        返回：
+            float: angular_z 角速度命令
+        """
+        # 控制参数
+        kp_yaw = 1.0  # 角度比例系数
+        max_vel_yaw = 0.399  # 最大转动速度（rad/s）
+        filter_alpha = 0.2  # 低通滤波系数（角度可以快一点）
+        deadzone = np.deg2rad(0.5)  # 死区：角度小于此值时不输出速度（约0.5°）
+
+        # 如果角度误差很小，直接返回0并重置滤波状态
+        if abs(dyaw) < deadzone:
+            self.filtered_angular_z = 0.0
+            return 0.0
+
+        # 计算期望角速度
+        vel_yaw = kp_yaw * dyaw
+        vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)
+
+        # 低通滤波（避免抖动）
+        if not hasattr(self, 'filtered_angular_z'):
+            self.filtered_angular_z = 0.0
+
+        self.filtered_angular_z = filter_alpha * vel_yaw + (1 - filter_alpha) * self.filtered_angular_z
+
+        return self.filtered_angular_z
+
+    def step(self, walk_time: float = 3.0):
         """
         执行事件的每一步操作。
         """
         if self.control_mode == "cmd_pos_world":
-            # 使用世界坐标控制模式
-            # if not self.target_executed:
-            if True:  # 这个可以连续发
-                self.robot_sdk.control.control_command_pose_world(
-                    target_pose_x=self.target.pos[0],
-                    target_pose_y=self.target.pos[1],
-                    # target_pose_z=self.target.pos[2],
-                    target_pose_z=0.0,
-                    target_pose_yaw=self.target.get_euler(degrees=False)[2]
-                )
-                time.sleep(0.2)
+            # 使用世界坐标控制模式（发送一次命令，等待到达信号）
+
+            # 延迟初始化：第一次使用时才创建订阅器
+            if self._cmd_pose_world_flag_sub is None:
+                self._setup_cmd_pos_world_subscriber()
+
+            # 第一次调用时发送命令
+            if not self.target_executed:
+                # # 发送命令前重置标志位，避免被 latched 的旧值影响
+                # self.cmd_pos_world_reached = False
+
+                # 发送位置命令（只发送一次）
+                target_x = self.target.pos[0]
+                target_y = self.target.pos[1]
+                target_z = 0.0
+                target_yaw = self.target.get_euler(degrees=False)[2]
+
+                self.robot_sdk.control.control_command_pose_world(target_x, target_y, target_z, target_yaw)
+                print(f"📤 cmd_pos_world 发送一次: 目标=[{target_x:.3f}, {target_y:.3f}, {self.target.get_euler(degrees=True)[2]:.1f}°]")
                 self.target_executed = True
+
+            # 使用基类的 get_status() 来判断超时和成功
+            return self.get_status()
 
         elif self.control_mode == "cmd_pos":
             # 使用相对位置控制模
@@ -118,499 +287,612 @@ class EventWalkToPose(BaseEvent):
                 self.target_executed = True
 
         elif self.control_mode == "cmd_vel":
-            self.kp_pos = 0.5  # 前进速度比例系数
-            self.kp_yaw = 0.5  # 转动速度比例系数
-            self.max_vel_x = 0.5  # 最大前进速度
-            self.max_vel_yaw = 0.4  # 最大转动速度
+            # 简化的cmd_vel控制：根据set_target时确定的模式执行控制
 
+            # 1. 将目标位姿转换到odom坐标系
             if Frame.BASE == self.target.frame:
                 transform_init_to_world = Transform3D(
                     trans_pose=self.robot_pose_when_target_set,
-                    source_frame=Frame.BASE,  # 源坐标系为base_link
-                    target_frame=Frame.ODOM  # 目标坐标系为odom
+                    source_frame=Frame.BASE,
+                    target_frame=Frame.ODOM
                 )
                 target_in_odom = transform_init_to_world.apply_to_pose(self.target)
             else:
                 target_in_odom = self.target
 
-            # raise NotImplementedError("cmd_vel控制模式尚未实现")
-            # 如果是cmd_vel，则需要外部每次调用step()，来实现闭环控制
-            # 逻辑是，先原地转到目标朝向，然后边走边调整朝向（确保朝向和机器人与目标间连线的朝向align）
-
-            # 1. 获取当前世界系下位姿
+            # 2. 获取当前机器人位姿（2D简化）
             robot_pose = Pose(
                 pos=self.robot_sdk.state.robot_position(),
                 quat=self.robot_sdk.state.robot_orientation(),
                 frame=Frame.ODOM
             )
-            # 2. 目标位姿，默认只能是世界系
-            assert Frame.ODOM == target_in_odom.frame, "目标位姿必须是世界坐标系（odom）"
-            # 算目标朝向
-            # angle_diff = robot_pose.angle_yaw(self.target)
-            # 目标朝向是机器人与目标位置连线的朝向
-            # compute target in frame of base
-
-            euler = robot_pose.get_euler(degrees=False)
-            euler[0] = 0.0
-            euler[1] = 0.0
+            robot_euler = robot_pose.get_euler(degrees=False)
             robot_pose_2d = Pose.from_euler(
-                pos=robot_pose.pos,  # 只取x, y坐标
-                euler= euler,  # 只取x, y朝向
-                frame=Frame.ODOM,  # 使用base_link坐标系
+                pos=robot_pose.pos,
+                euler=[0, 0, robot_euler[2]],
+                frame=Frame.ODOM,
                 degrees=False
             )
 
-            euler = target_in_odom.get_euler(degrees=False)
-            euler[0] = 0.0
-            euler[1] = 0.0
-
+            # 3. 目标位姿2D简化
+            target_euler = target_in_odom.get_euler(degrees=False)
             target_in_odom_2d = Pose.from_euler(
-                pos=target_in_odom.pos,  # 只取x, y坐标
-                euler=euler,  # 只取x, y朝向
-                frame=Frame.ODOM,  # 使用base_link坐标系
+                pos=target_in_odom.pos,
+                euler=[0, 0, target_euler[2]],
+                frame=Frame.ODOM,
                 degrees=False
             )
 
-            transform_basa_to_odom = Transform3D(
+            # 4. 计算目标在机器人基坐标系下的位姿
+            transform_base_to_odom = Transform3D(
                 trans_pose=robot_pose_2d,
-                source_frame=Frame.BASE,  # 源坐标系为base_link
-                target_frame=Frame.ODOM  # 目标坐标系为odom
+                source_frame=Frame.BASE,
+                target_frame=Frame.ODOM
             )
-            target_in_base = transform_basa_to_odom.apply_to_pose_inverse(target_in_odom_2d)
-            print(f"目标在base_link坐标系下的位置：{target_in_base}")
-            print(f"base in odom pose: {robot_pose_2d}")
-            print(f"target in odom pose: {target_in_odom_2d}")
+            target_in_base = transform_base_to_odom.apply_to_pose_inverse(target_in_odom_2d)
 
+            # 5. 提取误差值
+            dx = target_in_base.pos[0]  # x方向位置误差
+            dy = target_in_base.pos[1]  # y方向位置误差
+            dyaw = normalize_angle(target_in_base.get_euler(degrees=False)[2])  # 角度误差
 
-            angle_diff_line = np.arctan2(
-                target_in_base.pos[1],
-                target_in_base.pos[0]
-            )
-            angle_diff_line = normalize_angle(angle_diff_line)  # 归一化角度
-            angle_diff_frame = target_in_base.get_euler(degrees=False)[2]  ## 两个坐标系间的角度差
-            dis_diff = np.linalg.norm(target_in_base.pos[:2])
+            # 降低打印频率（每2秒打印一次）
+            if not hasattr(self, '_last_debug_print_time'):
+                self._last_debug_print_time = 0
+            current_time = time.time()
+            if current_time - self._last_debug_print_time > 0.3:
+                print(f"dx: {dx:.4f}, dy: {dy:.4f}, dyaw: {np.rad2deg(dyaw):.2f}°")
+                self._last_debug_print_time = current_time
 
-            print(f"当前坐标系间角度差：{np.rad2deg(angle_diff_frame):.2f}°，距离差：{dis_diff:.2f}米， 连线角度差：{np.rad2deg(angle_diff_line):.2f}°")
-            # 如果朝向大于某个值，先转不走
-            max_yaw_to_walk = np.deg2rad(10)  # 超过这个值就不走只转
-            max_dis_to_rotate = self.pos_threshold  # 小于这个距离就转到angle_diff_frame
+            # 6. 根据预先确定的模式执行控制（带权重分配）
+            if not hasattr(self, '_cmd_vel_mode'):
+                self._cmd_vel_mode = "mixed"  # 默认混合模式（向后兼容）
 
-            # 1. if dis too small， then use holonomic fine tune
+            # 定义模式权重
+            MAIN_WEIGHT = 0.8      # 主要控制方向的权重
+            ASSIST_WEIGHT = 0.2    # 辅助方向的权重（保持一定的耦合）
 
-            if dis_diff < max_dis_to_rotate:
-                vel_yaw = self.kp_yaw * angle_diff_frame
-                vel_yaw = np.clip(vel_yaw, -self.max_vel_yaw, self.max_vel_yaw)  # 限制转速
-                print(f"转向target frame朝向，转动速度：{vel_yaw:.2f} rad/s")
-                self.robot_sdk.control.walk(
-                    linear_x=0.0,  # 不前进
-                    linear_y=0.0,  # 不侧移
-                    angular_z=vel_yaw  # 只转动
+            linear_x = 0.0
+            linear_y = 0.0
+            angular_z = 0.0
+
+            if self._cmd_vel_mode == "angular_only":
+                # 纯旋转模式：主要输出角速度，辅助线性速度
+                angular_z = MAIN_WEIGHT * self._cmd_vel_compute_angular_velocity(dyaw)
+                lin_x, lin_y = self._cmd_vel_compute_linear_velocity(dx, dy)
+                linear_x = ASSIST_WEIGHT * lin_x
+                linear_y = ASSIST_WEIGHT * lin_y
+            elif self._cmd_vel_mode == "linear_only":
+                # 纯线性模式：主要输出线性速度，辅助角速度
+                linear_x, linear_y = self._cmd_vel_compute_linear_velocity(dx, dy)
+                # angular_z = ASSIST_WEIGHT * self._cmd_vel_compute_angular_velocity(dyaw)
+            elif self._cmd_vel_mode == "mixed":
+                # 混合模式：同时输出线性和角速度（全权重）
+                linear_x, linear_y = self._cmd_vel_compute_linear_velocity(dx, dy)
+                angular_z = self._cmd_vel_compute_angular_velocity(dyaw)
+            # 如果是 "none" 模式，所有速度保持为0
+
+            # 7. 获取当前机器人yaw角，将机器人坐标系速度转换到世界坐标系
+            robot_pose_data = self.robot_sdk.tools.get_link_pose(link_name="base_link", reference_frame=Frame.ODOM)
+            if robot_pose_data is not None:
+                robot_pose = Pose(
+                    pos=robot_pose_data.position,
+                    quat=robot_pose_data.orientation,
+                    frame=Frame.ODOM,
                 )
+                robot_yaw = robot_pose.get_euler(degrees=False)[2]
 
-            elif dis_diff < (max_dis_to_rotate + 0.1) or (abs(target_in_base.pos[1]) < 0.1 and abs(angle_diff_frame) < np.deg2rad(10)):
-                # 如果距离小于阈值，使用holonomic控制
-                x_diff = target_in_base.pos[0]
-                y_diff = target_in_base.pos[1]
-                vel_x = self.kp_pos * x_diff
-                vel_x = np.clip(vel_x, -self.max_vel_x, self.max_vel_x)
-                vel_y = self.kp_pos * y_diff
-                vel_y = np.clip(vel_y, -self.max_vel_x, self.max_vel_x)
-                print(f'holonomic控制，前进速度：{vel_x:.2f} m/s, 侧移速度：{vel_y:.2f} m/s')
-                self.robot_sdk.control.walk(
-                    linear_x=vel_x,  # 前进
-                    linear_y=vel_y,  # 侧移
-                    angular_z=0.0  # 不转动
-                )
+                # 坐标系转换：机器人系 -> 世界系
+                cos_yaw = np.cos(robot_yaw)
+                sin_yaw = np.sin(robot_yaw)
+                linear_x_world = linear_x * cos_yaw - linear_y * sin_yaw
+                linear_y_world = linear_x * sin_yaw + linear_y * cos_yaw
 
-            elif abs(angle_diff_line) > max_yaw_to_walk:
-                vel_yaw = self.kp_yaw * angle_diff_line
-                vel_yaw = np.clip(vel_yaw, -self.max_vel_yaw, self.max_vel_yaw)  # 限制转速
-                print(f"dis_diff {dis_diff}; 转向连线方向，转动速度：{vel_yaw:.2f} rad/s")
-                self.robot_sdk.control.walk(
-                    linear_x=0.0,  # 不前进
-                    linear_y=0.0,  # 不侧移
-                    angular_z=vel_yaw  # 只转动
-                )
-            elif dis_diff >= max_dis_to_rotate:
-                # 如果连线朝向小于某个值，开始前进
-                # dis_sign = (abs(angle_diff_line) > np.pi)
-
-                vel_x = self.kp_pos * dis_diff
-                vel_x = np.clip(vel_x, -self.max_vel_x, self.max_vel_x)  # 限制前进速度
-
-                vel_yaw = self.kp_yaw * angle_diff_line
-                vel_yaw = np.clip(vel_yaw, -self.max_vel_yaw, self.max_vel_yaw)  # 限制转速
-                print(f"dis_diff {dis_diff}, 前进速度：{vel_x:.2f} m/s, 转动速度：{vel_yaw:.2f} rad/s")
-                self.robot_sdk.control.walk(
-                    linear_x=vel_x,  # 前进
-                    linear_y=0.0,  # 不侧移
-                    angular_z=vel_yaw  # 不转动
-                )
-
-            time.sleep(0.1)  # 控制频率
-            # time.sleep(0.05)
-
-
-        elif self.control_mode == "cmd_vel_good":
-
-            # FIXME: 改成config设置的时间
-            self.kp_pos = 0.5  # 前进速度比例系数
-            self.kp_yaw = 0.5  # 转动速度比例系数
-            self.max_vel_x = 0.5  # 最大前进速度
-            self.max_vel_yaw = 0.4  # 最大转动速度
-
-
-            if Frame.BASE == self.target.frame:
-                transform_init_to_world = Transform3D(
-                    trans_pose=self.robot_pose_when_target_set,
-                    source_frame=Frame.BASE,  # 源坐标系为base_link
-                    target_frame=Frame.ODOM  # 目标坐标系为odom
-                )
-                target_in_odom = transform_init_to_world.apply_to_pose(self.target)
+                # 调试：打印转换信息（降低频率）
+                if not hasattr(self, '_last_transform_print_time'):
+                    self._last_transform_print_time = 0
+                current_time = time.time()
+                if current_time - self._last_transform_print_time > 1.0:
+                    self.logger.debug(f"[CMD_VEL坐标转换] yaw={np.rad2deg(robot_yaw):.1f}° | "
+                                    f"机器人系: vx={linear_x:.3f}, vy={linear_y:.3f} -> "
+                                    f"世界系: vx={linear_x_world:.3f}, vy={linear_y_world:.3f}")
+                    self._last_transform_print_time = current_time
             else:
-                target_in_odom = self.target
+                # 获取位姿失败，使用原始速度（可能不准确）
+                self.logger.warning("[CMD_VEL] 无法获取机器人位姿，使用未转换的速度")
+                linear_x_world = linear_x
+                linear_y_world = linear_y
 
-            # raise NotImplementedError("cmd_vel控制模式尚未实现")
-            # 如果是cmd_vel，则需要外部每次调用step()，来实现闭环控制
-            # 逻辑是，先原地转到目标朝向，然后边走边调整朝向（确保朝向和机器人与目标间连线的朝向align）
-
-            # 1. 获取当前世界系下位姿
-            robot_pose = Pose(
-                pos=self.robot_sdk.state.robot_position(),
-                quat=self.robot_sdk.state.robot_orientation(),
-                frame=Frame.ODOM
-            )
-            # 2. 目标位姿，默认只能是世界系
-            assert Frame.ODOM == target_in_odom.frame, "目标位姿必须是世界坐标系（odom）"
-            # 算目标朝向
-            # angle_diff = robot_pose.angle_yaw(self.target)
-            # 目标朝向是机器人与目标位置连线的朝向
-            # compute target in frame of base
-
-            euler = robot_pose.get_euler(degrees=False)
-            euler[0] = 0.0
-            euler[1] = 0.0
-            robot_pose_2d = Pose.from_euler(
-                pos=robot_pose.pos,  # 只取x, y坐标
-                euler= euler,  # 只取x, y朝向
-                frame=Frame.ODOM,  # 使用base_link坐标系
-                degrees=False
+            # 8. 发送世界坐标系的速度命令
+            self.robot_sdk.control.walk(
+                linear_x=linear_x_world,
+                linear_y=linear_y_world,
+                angular_z=angular_z
             )
 
-            euler = target_in_odom.get_euler(degrees=False)
-            euler[0] = 0.0
-            euler[1] = 0.0
+        return self.get_status()
 
-            target_in_odom_2d = Pose.from_euler(
-                pos=target_in_odom.pos,  # 只取x, y坐标
-                euler=euler,  # 只取x, y朝向
-                frame=Frame.ODOM,  # 使用base_link坐标系
-                degrees=False
+    def plan_velocity_sequence_to_target(self,
+                                         dt: float = 0.05,
+                                         v_max: float = 0.8,
+                                         accel_time: float = 1.0,
+                                         decel_time: float = 1.0) -> List[tuple]:
+        """
+        生成到当前 target 的直线路径速度序列（机体系cmd_vel），采用梯形速度曲线：线性加速-匀速-线性减速。
+        返回值为 [(vx, vy, wz), ...]，其中wz恒为0。
+
+        参数：
+            dt (float): 采样周期，单位秒
+            v_max (float): 最高线速度，单位m/s
+            accel_time (float): 加速时间（从0到v_max），单位秒
+            decel_time (float): 减速时间（从v_max到0），单位秒
+
+        返回：
+            List[tuple]: 速度三元组序列
+        """
+        if self.target is None:
+            return []
+
+        # 将目标位姿转换到 ODOM 坐标系
+        if Frame.BASE == self.target.frame:
+            transform_init_to_world = Transform3D(
+                trans_pose=self.robot_pose_when_target_set,
+                source_frame=Frame.BASE,
+                target_frame=Frame.ODOM
             )
+            target_in_odom = transform_init_to_world.apply_to_pose(self.target)
+        else:
+            target_in_odom = self.target
 
-            transform_basa_to_odom = Transform3D(
-                trans_pose=robot_pose_2d,
-                source_frame=Frame.BASE,  # 源坐标系为base_link
-                target_frame=Frame.ODOM  # 目标坐标系为odom
+        # 当前真实位姿（仅获取初始yaw用于系转换）
+        robot_pose_now = Pose(
+            pos=self.robot_sdk.state.robot_position(),
+            quat=self.robot_sdk.state.robot_orientation(),
+            frame=Frame.ODOM
+        )
+        yaw = robot_pose_now.get_euler(degrees=False)[2]
+
+        # 规划直线段（ODOM）
+        start_xy = np.array(robot_pose_now.pos[:2], dtype=float)
+        goal_xy = np.array(target_in_odom.pos[:2], dtype=float)
+        delta = goal_xy - start_xy
+        distance = float(np.linalg.norm(delta))
+        if distance < 1e-6:
+            return []
+
+        direction_world = delta / distance  # 世界坐标下单位方向
+
+        # 梯形速度曲线参数
+        accel_time = max(1e-6, float(accel_time))
+        decel_time = max(1e-6, float(decel_time))
+        v_max = max(0.0, float(v_max))
+
+        # 若距离不足以跑到v_max，退化为三角形曲线，计算可达峰值速度
+        v_peak_limit = 2.0 * distance / (accel_time + decel_time)
+        v_peak = min(v_max, v_peak_limit)
+
+        # 计算巡航时长（可能为0）
+        t_acc = accel_time
+        t_dec = decel_time
+        d_acc = 0.5 * v_peak * t_acc
+        d_dec = 0.5 * v_peak * t_dec
+        d_cruise = max(0.0, distance - d_acc - d_dec)
+        t_cruise = d_cruise / v_peak if v_peak > 0 else 0.0
+        t_total = t_acc + t_cruise + t_dec
+
+        # 采样生成速度序列（机体系）
+        c, s = np.cos(yaw), np.sin(yaw)
+        R_world_to_body = np.array([[ c,  s],
+                                    [-s,  c]])
+
+        seq: List[tuple] = []
+        t = 0.0
+        while t < t_total + 1e-9:
+            if t < t_acc:
+                speed = v_peak * (t / t_acc)
+            elif t < t_acc + t_cruise:
+                speed = v_peak
+            else:
+                t_into_dec = t - (t_acc + t_cruise)
+                speed = v_peak * max(0.0, 1.0 - t_into_dec / t_dec)
+
+            v_world = direction_world * speed
+            v_body = R_world_to_body @ v_world
+            vx, vy = float(v_body[0]), float(v_body[1])
+
+            seq.append((vx, vy, 0.0))
+            t += dt
+
+        return seq
+
+    def plan_velocity_sequence_to_target_power4(self,
+                                                dt: float = 0.01,
+                                                v_max: float = 0.8,
+                                                accel_time: float = 1.0,
+                                                decel_time: float = 1.0) -> List[tuple]:
+        """
+        使用 power4_ultra_smooth 的曲线生成到当前 target 的直线路径速度序列（机体系cmd_vel）。
+        返回值为 [(vx, vy, wz), ...]，其中wz恒为0。输入输出与 plan_velocity_sequence_to_target 一致。
+        """
+        if self.target is None:
+            return []
+
+        # 目标位姿 -> ODOM
+        if Frame.BASE == self.target.frame:
+            transform_init_to_world = Transform3D(
+                trans_pose=self.robot_pose_when_target_set,
+                source_frame=Frame.BASE,
+                target_frame=Frame.ODOM
             )
-            target_in_base = transform_basa_to_odom.apply_to_pose_inverse(target_in_odom_2d)
-            print(f"目标在base_link坐标系下的位置：{target_in_base}")
-            print(f"base in odom pose: {robot_pose_2d}")
-            print(f"target in odom pose: {target_in_odom_2d}")
+            target_in_odom = transform_init_to_world.apply_to_pose(self.target)
+        else:
+            target_in_odom = self.target
 
+        # 当前姿态与直线方向
+        robot_pose_now = Pose(
+            pos=self.robot_sdk.state.robot_position(),
+            quat=self.robot_sdk.state.robot_orientation(),
+            frame=Frame.ODOM
+        )
+        yaw = robot_pose_now.get_euler(degrees=False)[2]
+        start_xy = np.array(robot_pose_now.pos[:2], dtype=float)
+        goal_xy = np.array(target_in_odom.pos[:2], dtype=float)
+        delta = goal_xy - start_xy
+        distance = float(np.linalg.norm(delta))
+        if distance < 1e-6:
+            return []
 
-            angle_diff_line = np.arctan2(
-                target_in_base.pos[1],
-                target_in_base.pos[0]
-            )
-            angle_diff_line = normalize_angle(angle_diff_line)  # 归一化角度
-            angle_diff_frame = target_in_base.get_euler(degrees=False)[2]  ## 两个坐标系间的角度差
-            dis_diff = np.linalg.norm(target_in_base.pos[:2])
+        direction_world = delta / distance
 
-            print(f"当前坐标系间角度差：{np.rad2deg(angle_diff_frame):.2f}°，距离差：{dis_diff:.2f}米， 连线角度差：{np.rad2deg(angle_diff_line):.2f}°")
-            # ======= 1. 初始定向阶段 ========
-            if not self.initial_orient_complete:
-                # 只转不走
-                if abs(angle_diff_line) < 0.3:
-                    self.robot_sdk.control.walk(0, 0, 0)
-                    self.logger.info("🔵 初始定向阶段完成，转到目标连线方向")
-                    self.initial_orient_complete = True
+        # 峰值速度限制（与原方法一致）
+        accel_time = max(1e-6, float(accel_time))
+        decel_time = max(1e-6, float(decel_time))
+        v_max = max(0.0, float(v_max))
+        v_peak_limit = 2.0 * distance / (accel_time + decel_time)
+        v_peak = min(v_max, v_peak_limit)
 
-                # ==== 正在进行初始定向 =====
-                min_vel_yaw = 0.2
-                max_vel_yaw = 0.5
+        # 计算巡航与总时长
+        d_acc = 0.5 * v_peak * accel_time
+        d_dec = 0.5 * v_peak * decel_time
+        d_cruise = max(0.0, distance - d_acc - d_dec)
+        t_cruise = d_cruise / v_peak if v_peak > 0 else 0.0
+        t_total = accel_time + t_cruise + decel_time
 
-                kp_yaw = 0.8
+        # world->body 旋转
+        c, s = np.cos(yaw), np.sin(yaw)
+        R_world_to_body = np.array([[ c,  s],
+                                    [-s,  c]])
 
-                vel_yaw = kp_yaw * angle_diff_line
-                vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)
-
-                if abs(vel_yaw) < min_vel_yaw:
-                    vel_yaw = np.sign(vel_yaw) * min_vel_yaw
-
-                # 原地旋转
-                self.robot_sdk.control.walk(
-                    linear_x=0.0,  # 不前进
-                    linear_y=0.0,  # 不侧移
-                    angular_z=vel_yaw  # 只转动
-                )
-
-            # ======= 2. 进入目标位置附近阶段 ========
-            # distance_threshold = 0.1  # 进入目标位置附近的距离阈值
-
-            # ======= 3. 前进阶段（既不在初始定向阶段，也不在终局转向阶段） ========
-            elif not self.walk_enter_pos_threshold:
-                if dis_diff < np.max([0, self.pos_threshold - 0.05]):
-                    # 停止机器人
-                    self.robot_sdk.control.walk(0, 0, 0)
-                    self.logger.info("🔵 进入目标位置附近，停止机器人")
-
-                    # 开始调整朝向至目标frame朝向
-                    # 一旦进入到这个状态，就不再出来，直到转向调整完毕
-                    self.walk_enter_pos_threshold = True
-
-                max_lin_vel = 0.5
-                max_vel_yaw = 0.5
-                kp_pos = 0.3 # 前进速度比例系数
-                kp_yaw = 0.8  # 转动速度比例系数
-
-                lin_vel = kp_pos * dis_diff
-                lin_vel = np.clip(lin_vel, -max_lin_vel, max_lin_vel)  # 限制前进速度
-                vel_x = lin_vel * np.cos(angle_diff_line)  # 前进速度
-                vel_y = lin_vel * np.sin(angle_diff_line)  # 侧移速度
-
-                vel_yaw = kp_yaw * angle_diff_line
-                ## FIXME: 优化反向移动的逻辑
-                vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)
-
-                # 如果连线朝向小于某个值，开始前进
-                if abs(angle_diff_line) < 0.2:
-                    self.robot_sdk.control.walk(
-                        linear_x=vel_x,  # 前进
-                        linear_y=vel_y,  # 侧移
-                        angular_z=vel_yaw  # 转动
-                    )
-                    self.logger.info(f"🔵 前进阶段，前进速度：{vel_x:.2f} m/s, 侧移速度：{vel_y:.2f} m/s, 转动速度：{vel_yaw:.2f} rad/s")
+        # 生成曲线速度序列（沿标量速度，再投影到body系x/y）
+        seq: List[tuple] = []
+        t = 0.0
+        while t < t_total + 1e-9:
+            if t < accel_time:
+                progress = t / accel_time
+                # 凸加速：1 - (1-progress)^2
+                speed_ratio = 1.0 - (1.0 - progress)**2
+                speed = v_peak * speed_ratio
+            elif t < accel_time + t_cruise:
+                speed = v_peak
+            else:
+                t_into_dec = t - (accel_time + t_cruise)
+                progress = t_into_dec / decel_time
+                # 使用 power4_ultra_smooth.py 中当前实现的 decel 曲线：
+                # 三段式（0.6, 0.8）并在末段凹向x轴（1 - (1-p)^alpha）
+                if progress < 0.6:
+                    curve_val = progress**4
+                elif progress < 0.8:
+                    blend_p = (progress - 0.6) / 0.2
+                    concave_val = progress**4
+                    rem = (progress - 0.6) / 0.4
+                    convex_val = 1.0 - (1.0 - rem)**3
+                    at60 = 0.6**4
+                    target_val = at60 + (1.0 - at60) * convex_val
+                    smooth_blend = 6 * blend_p**5 - 15 * blend_p**4 + 10 * blend_p**3
+                    curve_val = concave_val * (1 - smooth_blend) + target_val * smooth_blend
                 else:
-                    self.robot_sdk.control.walk(
-                        linear_x=0.0,  # 不前进
-                        linear_y=0.0,  # 不侧移
-                        angular_z=vel_yaw  # 只转动
-                    )
-                    self.logger.info(f"🔵 前进阶段，转向连线方向，转动速度：{vel_yaw:.2f} rad/s")
+                    rem = (progress - 0.8) / 0.2
+                    alpha = 1.8
+                    convex_decel = 1.0 - (1.0 - rem)**alpha
+                    # 与80%处的目标值对齐
+                    blend_p80 = 1.0
+                    smooth_blend_80 = 6 * blend_p80**5 - 15 * blend_p80**4 + 10 * blend_p80**3
+                    concave_80 = 0.8**4
+                    rem80 = 0.5
+                    convex_val_80 = 1.0 - (1.0 - rem80)**3
+                    at60 = 0.6**4
+                    target_80 = concave_80 * (1 - smooth_blend_80) + (at60 + (1.0 - at60) * convex_val_80) * smooth_blend_80
+                    curve_val = target_80 + (1.0 - target_80) * convex_decel
 
+                speed_ratio = max(0.0, 1.0 - curve_val)
+                speed = v_peak * speed_ratio
+
+            v_world = direction_world * speed
+            v_body = R_world_to_body @ v_world
+            vx, vy = float(v_body[0]), float(v_body[1])
+            seq.append((vx, vy, 0.0))
+            t += dt
+
+        return seq
+
+    def plan_yaw_velocity_sequence_by_delta(self,
+                                            yaw_delta: float,
+                                            dt: float = 0.02,
+                                            w_max: float = 1.0,
+                                            accel_time: float = 0.5,
+                                            decel_time: float = 0.5) -> List[tuple]:
+        """
+        仅根据给定的旋转角增量 yaw_delta（弧度，正为逆时针）生成角速度序列（梯形/三角曲线）。
+
+        返回：[(vx, vy, wz), ...]，其中 vx=vy=0，仅下发 wz。
+        """
+        total_angle = float(yaw_delta)
+        if abs(total_angle) < 1e-6:
+            return []
+
+        sign = 1.0 if total_angle >= 0.0 else -1.0
+        distance = abs(total_angle)
+
+        accel_time = max(1e-6, float(accel_time))
+        decel_time = max(1e-6, float(decel_time))
+        w_max = max(0.0, float(w_max))
+
+        # 若角度不足以跑到 w_max，退化为三角速度曲线，计算可达峰值角速度
+        w_peak_limit = 2.0 * distance / (accel_time + decel_time)
+        w_peak = min(w_max, w_peak_limit)
+
+        t_acc = accel_time
+        t_dec = decel_time
+        d_acc = 0.5 * w_peak * t_acc
+        d_dec = 0.5 * w_peak * t_dec
+        d_cruise = max(0.0, distance - d_acc - d_dec)
+        t_cruise = d_cruise / w_peak if w_peak > 0 else 0.0
+        t_total = t_acc + t_cruise + t_dec
+
+        seq: List[tuple] = []
+        t = 0.0
+        while t < t_total + 1e-9:
+            if t < t_acc:
+                w = w_peak * (t / t_acc)
+            elif t < t_acc + t_cruise:
+                w = w_peak
             else:
-                # 一旦进入到这个状态，就不再出来，直到转向调整完毕
-                # 开始只转向
-                # FIXME：添加角度差滤波
-                min_vel_yaw = 0.05
-                max_vel_yaw = 0.5
-                kp_yaw = 0.8 * (1 - np.exp(-2*abs(angle_diff_frame)))  # 非线性增益
+                t_into_dec = t - (t_acc + t_cruise)
+                w = w_peak * max(0.0, 1.0 - t_into_dec / t_dec)
 
-                if abs(angle_diff_frame) < np.max([0, self.yaw_threshold - np.deg2rad(2)]):  # ~ 0.5°，认为已经到达目标朝向
-                    # 不再转动
-                    self.robot_sdk.control.walk(0, 0, 0)
-                    self.logger.info("🔵 已经到达目标朝向，停止转动")
+            seq.append((0.0, 0.0, float(sign * w)))
+            t += dt
 
-                vel_yaw = kp_yaw * angle_diff_frame
-                vel_yaw = np.clip(vel_yaw, -max_vel_yaw, max_vel_yaw)
-                if abs(vel_yaw) < min_vel_yaw:
-                    vel_yaw = np.sign(vel_yaw) * min_vel_yaw
+        return seq
 
-                self.robot_sdk.control.walk(
-                    linear_x=0.0,  # 不前进
-                    linear_y=0.0,  # 不侧移
-                    angular_z=vel_yaw  # 只转动
-                )
+    def plan_yaw_velocity_sequence_to_yaw(self,
+                                          target_yaw: float,
+                                          dt: float = 0.02,
+                                          w_max: float = 1.0,
+                                          accel_time: float = 0.5,
+                                          decel_time: float = 0.5) -> List[tuple]:
+        """
+        根据目标绝对 yaw（ODOM系，弧度）生成角速度序列。内部读取当前 yaw 并计算最短角差。
+        返回：[(0,0,wz), ...]
+        """
+        robot_pose_now = Pose(
+            pos=self.robot_sdk.state.robot_position(),
+            quat=self.robot_sdk.state.robot_orientation(),
+            frame=Frame.ODOM
+        )
+        cur_yaw = robot_pose_now.get_euler(degrees=False)[2]
+        yaw_delta = normalize_angle(float(target_yaw) - float(cur_yaw))
+        return self.plan_yaw_velocity_sequence_by_delta(
+            yaw_delta=yaw_delta,
+            dt=dt,
+            w_max=w_max,
+            accel_time=accel_time,
+            decel_time=decel_time,
+        )
 
-        if self.control_mode == "cmd_vel_loop":
-            if self.target_executed:
-                return self.get_status()
-            self.target_executed = True
+    def plan_combined_velocity_sequence(self,
+                                       yaw_delta: float,
+                                       distance: float,
+                                       dt: float = 0.02,
+                                       v_max: float = 0.8,
+                                       w_max: float = 1.0,
+                                       v_accel_time: float = 1.0,
+                                       v_decel_time: float = 1.0,
+                                       w_accel_time: float = 0.5,
+                                       w_decel_time: float = 0.5) -> List[tuple]:
+        """
+        同时控制yaw角和线速度，生成组合速度序列。
 
-            start_time = time.time()
+        参数：
+            yaw_delta (float): 旋转角增量（弧度，正为逆时针）
+            distance (float): 直线距离（米，正为前进）
+            dt (float): 采样周期，单位秒
+            v_max (float): 最高线速度，单位m/s
+            w_max (float): 最高角速度，单位rad/s
+            v_accel_time (float): 线速度加速时间，单位秒
+            v_decel_time (float): 线速度减速时间，单位秒
+            w_accel_time (float): 角速度加速时间，单位秒
+            w_decel_time (float): 角速度减速时间，单位秒
 
-            # Get only x, y coordinates for 2D movement
-            target_x, target_y = self.target.pos[0], self.target.pos[1]
+        返回：
+            List[tuple]: [(vx, vy, wz), ...] 速度序列
+        """
+        # 生成线速度序列（仅x方向）
+        v_seq = self._plan_linear_velocity_sequence(
+            distance=distance,
+            dt=dt,
+            v_max=v_max,
+            accel_time=v_accel_time,
+            decel_time=v_decel_time
+        )
 
-            print(f"Moving toward target at ({target_x:.2f}, {target_y:.2f})")
+        # 生成角速度序列
+        w_seq = self.plan_yaw_velocity_sequence_by_delta(
+            yaw_delta=yaw_delta,
+            dt=dt,
+            w_max=w_max,
+            accel_time=w_accel_time,
+            decel_time=w_decel_time
+        )
 
-            # 新增: 初始定向阶段 - 如果目标在后方，先转向
-            initial_orient_complete = False
-            initial_orient_timeout = 15.0  # 初始定向的超时时间
-            initial_orient_start = time.time()
+        # 合并序列，取较长序列的长度
+        max_len = max(len(v_seq), len(w_seq))
+        combined_seq = []
 
-            while not initial_orient_complete and time.time() - initial_orient_start < initial_orient_timeout:
-                # 获取当前位置和朝向
-                current_odom = self.robot_sdk.state.odometry
-                current_x, current_y = current_odom.position[0], current_odom.position[1]
+        for i in range(max_len):
+            vx = v_seq[i][0] if i < len(v_seq) else 0.0
+            vy = 0.0  # 只沿x方向移动
+            wz = w_seq[i][2] if i < len(w_seq) else 0.0
+            combined_seq.append((vx, vy, wz))
 
-                # 计算到目标的方向
-                dx = target_x - current_x
-                dy = target_y - current_y
-                desired_angle = np.arctan2(dy, dx)
+        return combined_seq
 
-                # 获取当前朝向
-                qx, qy, qz, qw = current_odom.orientation
-                current_yaw = np.arctan2(2 * (qw * qz + qx * qy), qw ** 2 + qx ** 2 - qy ** 2 - qz ** 2)
+    def _plan_linear_velocity_sequence(self,
+                                      distance: float,
+                                      dt: float = 0.02,
+                                      v_max: float = 0.8,
+                                      accel_time: float = 1.0,
+                                      decel_time: float = 1.0) -> List[tuple]:
+        """
+        生成纯线速度序列（仅x方向）。
 
-                # 计算角度差（确保在-π到π范围内）
-                angle_diff = np.arctan2(np.sin(desired_angle - current_yaw),
-                                        np.cos(desired_angle - current_yaw))
+        参数：
+            distance (float): 直线距离（米，正为前进）
+            dt (float): 采样周期，单位秒
+            v_max (float): 最高线速度，单位m/s
+            accel_time (float): 加速时间，单位秒
+            decel_time (float): 减速时间，单位秒
 
-                print(f"初始定向: 当前角度差: {np.degrees(angle_diff):.1f}°")
+        返回：
+            List[tuple]: [(vx, 0, 0), ...] 线速度序列
+        """
+        total_distance = abs(distance)
+        if total_distance < 1e-6:
+            return []
 
-                # 如果角度差很小，则初始定向完成
-                if abs(angle_diff) < 0.3:  # 约17度
-                    initial_orient_complete = True
-                    self.robot_sdk.control.walk(0, 0, 0)  # 停止旋转
-                    print("初始定向完成，开始移动")
+        sign = 1.0 if distance >= 0.0 else -1.0
+
+        accel_time = max(1e-6, float(accel_time))
+        decel_time = max(1e-6, float(decel_time))
+        v_max = max(0.0, float(v_max))
+
+        # 若距离不足以跑到v_max，退化为三角形曲线
+        v_peak_limit = 2.0 * total_distance / (accel_time + decel_time)
+        v_peak = min(v_max, v_peak_limit)
+
+        t_acc = accel_time
+        t_dec = decel_time
+        d_acc = 0.5 * v_peak * t_acc
+        d_dec = 0.5 * v_peak * t_dec
+        d_cruise = max(0.0, total_distance - d_acc - d_dec)
+        t_cruise = d_cruise / v_peak if v_peak > 0 else 0.0
+        t_total = t_acc + t_cruise + t_dec
+
+        seq: List[tuple] = []
+        t = 0.0
+        while t < t_total + 1e-9:
+            if t < t_acc:
+                speed = v_peak * (t / t_acc)
+            elif t < t_acc + t_cruise:
+                speed = v_peak
+            else:
+                t_into_dec = t - (t_acc + t_cruise)
+                speed = v_peak * max(0.0, 1.0 - t_into_dec / t_dec)
+
+            seq.append((float(sign * speed), 0.0, 0.0))
+            t += dt
+
+        return seq
+
+    def execute_velocity_sequence(self, velocity_sequence: List[tuple], dt: float = 0.05):
+        """
+        顺序下发速度序列到底盘。
+
+        参数：
+            velocity_sequence (List[tuple]): [(vx, vy, wz), ...]
+            dt (float): 下发周期
+        """
+        if not velocity_sequence:
+            return
+        # x轴死区限制，避免小抖动。与cmd_vel控制保持一致的默认阈值
+        if not hasattr(self, 'x_velocity_deadzone'):
+            self.x_velocity_deadzone = 0.02
+        # 正负方向限制：尽量与cmd_vel运行时保持一致
+        # 优先使用已有的方向锁定；若不存在，则根据序列中首个非零vx推断
+        x_dir = None
+        if hasattr(self, 'x_direction_locked') and getattr(self, 'x_direction_locked') and hasattr(self, 'locked_x_direction'):
+            x_dir = 1 if getattr(self, 'locked_x_direction') > 0 else -1
+        else:
+            for _vx, _vy, _wz in velocity_sequence:
+                if abs(_vx) >= self.x_velocity_deadzone:
+                    x_dir = 1 if _vx > 0 else -1
                     break
 
-                # 计算旋转速度 - 使用自适应旋转速度
-                min_angular_speed = 0.2
-                max_angular_speed = 0.5
-                adaptive_gain = 0.8
-
-                angular_speed = np.clip(
-                    adaptive_gain * angle_diff,
-                    -max_angular_speed,
-                    max_angular_speed
-                )
-
-                # 确保最小旋转速度
-                if abs(angular_speed) < min_angular_speed:
-                    angular_speed = np.sign(angular_speed) * min_angular_speed
-
-                # 原地旋转
-                self.robot_sdk.control.walk(0, 0, angular_speed)
-                time.sleep(0.1)
-
-            # 如果初始定向超时，打印警告但继续执行
-            if not initial_orient_complete:
-                print("警告: 初始定向超时，目标可能在机器人后方，继续尝试移动")
-
-            # 主移动循环
-            while time.time() - start_time < 50:
-                # Get current robot position
-                current_odom = self.robot_sdk.state.odometry
-                current_x, current_y = current_odom.position[0], current_odom.position[1]
-
-                # Calculate distance to target
-                dx = target_x - current_x
-                dy = target_y - current_y
-                distance = np.sqrt(dx ** 2 + dy ** 2)
-
-                # If we're close enough, stop and return success
-                if distance < 0.15:
-                    # Stop the robot
-                    self.robot_sdk.control.walk(0, 0, 0)
-                    print(f"Target reached! Current position: ({current_x:.2f}, {current_y:.2f})")
-
-                    target_orientation = self.target.quat
-                    # 新增朝向调整逻辑
-                    if target_orientation is not None:
-                        print("开始调整目标朝向...")
-                        print(f"Moving toward target_orientation at {target_orientation}")
-                        start_orient_time = time.time()
-                        orient_timeout = 30
-
-                        # 优化四元数到yaw的转换公式
-                        qx_t, qy_t, qz_t, qw_t = target_orientation
-                        # 使用更精确的yaw角计算方式
-                        target_yaw = np.arctan2(2 * (qw_t * qz_t + qx_t * qy_t),
-                                                qw_t ** 2 + qx_t ** 2 - qy_t ** 2 - qz_t ** 2)
-
-                        # 添加低通滤波器参数
-                        prev_angle_diff = 0.0
-                        filter_alpha = 0.2  # 滤波系数
-
-                        while time.time() - start_orient_time < orient_timeout:
-                            current_q = self.robot_sdk.state.odometry.orientation
-                            # 使用相同的优化公式计算当前yaw
-                            current_yaw = np.arctan2(2 * (current_q[3] * current_q[2] + current_q[0] * current_q[1]),
-                                                     current_q[3] ** 2 + current_q[0] ** 2 - current_q[1] ** 2 -
-                                                     current_q[2] ** 2)
-
-                            angle_diff = target_yaw - current_yaw
-                            angle_diff = np.arctan2(np.sin(angle_diff), np.cos(angle_diff))
-
-                            # 添加角度差滤波
-                            filtered_angle_diff = filter_alpha * angle_diff + (1 - filter_alpha) * prev_angle_diff
-                            prev_angle_diff = filtered_angle_diff
-
-                            # 添加自适应控制参数
-                            min_angular_speed = 0.05  # 最小角速度
-                            max_angular_speed = 0.5  # 最大角速度
-                            adaptive_gain = 0.8 * (1 - np.exp(-2 * abs(filtered_angle_diff)))  # 非线性增益
-
-                            if abs(filtered_angle_diff) < 0.0087:  # ~0.5度
-                                self.robot_sdk.control.walk(0, 0, 0)
-                                print(f"朝向精确调整完成，最终角度差: {np.degrees(filtered_angle_diff):.2f}°")
-                                return self.get_status()
-
-                            # 计算带死区和速度限制的角速度
-                            angular_speed = np.clip(
-                                adaptive_gain * filtered_angle_diff,
-                                -max_angular_speed,
-                                max_angular_speed
-                            )
-                            if abs(angular_speed) < min_angular_speed:
-                                angular_speed = np.sign(angular_speed) * min_angular_speed
-
-                            self.robot_sdk.control.walk(0, 0, angular_speed)
-                            time.sleep(0.05)  # 缩短控制周期
-
-                    return self.get_status()
-
-                # 新增：初始化 linear_speed
-                max_linear_speed = 0.5
-                linear_speed = min(0.3 * distance, max_linear_speed)  # 提前计算
-
-                # 改进后的角度差计算
-                desired_angle = np.arctan2(dy, dx)
-
-                # 转换四元数到yaw时使用更健壮的公式
-                qx, qy, qz, qw = current_odom.orientation
-                current_yaw = np.arctan2(2 * (qw * qz + qx * qy), qw ** 2 + qx ** 2 - qy ** 2 - qz ** 2)
-
-                # 改进后的角度差计算（处理2π周期问题）
-                angle_diff = np.arctan2(np.sin(desired_angle - current_yaw),
-                                        np.cos(desired_angle - current_yaw))
-
-                # 新增：确保 angular_speed 在条件判断前被正确计算
-                angular_speed = 0.8 * angle_diff  # 基础角速度
-
-                # 反向移动逻辑优化（现在可以安全使用 linear_speed）
-                if abs(angle_diff) > np.pi / 2:
-                    angle_diff = angle_diff - np.sign(angle_diff) * np.pi
-                    linear_speed *= -1
-                    angular_speed *= 1.2  # 反向时增加旋转速度
-
-                # 新增：限制最大角速度
-                max_angular_speed = 0.5
-                angular_speed = np.clip(angular_speed, -max_angular_speed, max_angular_speed)
-
-                # 修改后的运动控制逻辑
-                if abs(angle_diff) < 0.2:
-                    body_linear_x = linear_speed * np.cos(angle_diff)
-                    body_linear_y = linear_speed * np.sin(angle_diff)
-                    self.robot_sdk.control.walk(body_linear_x, body_linear_y, angular_speed)
+        for vx, vy, wz in velocity_sequence:
+            # 应用x轴死区与正负方向限制
+            if x_dir is None:
+                # 未确定方向时，单纯应用死区
+                if abs(vx) < self.x_velocity_deadzone:
+                    vx = 0.01 if vx >= 0 else -0.01
+            else:
+                # 已锁定方向：禁止反向，且保证最小幅值
+                if x_dir > 0:
+                    # 只允许正向
+                    if vx < 0:
+                        vx = 0.01
+                    elif abs(vx) < self.x_velocity_deadzone:
+                        vx = 0.01
                 else:
-                    self.robot_sdk.control.walk(0, 0, angular_speed)
+                    # 只允许负向
+                    if vx > 0:
+                        vx = -0.01
+                    elif abs(vx) < self.x_velocity_deadzone:
+                        vx = -0.01
+            if abs(vy) <= 0.02:
+                vx = 0.0
+            self.robot_sdk.control.walk(
+                linear_x=vx,
+                linear_y=vy,
+                angular_z=wz
+            )
+            time.sleep(dt)
 
-                print(f"Current: ({current_x:.2f}, {current_y:.2f}), Distance: {distance:.2f}m, "
-                      f"Angle diff: {np.degrees(angle_diff):.1f}°")
+    def plan_and_execute_velocity_to_target(self,
+                                            dt: float = 0.05,
+                                            max_duration: float = 10.0) -> bool:
+        """
+        先规划速度序列，再按序执行。
 
-                # Sleep a bit to avoid excessive CPU usage
-                time.sleep(0.1)
-
-            # If we get here, timeout occurred
-            self.robot_sdk.control.walk(0, 0, 0)  # Stop the robot
-            print("Timeout reached without getting to target")
-
-        # time.sleep(0.05)
-        return self.get_status()
+        返回：
+            bool: 是否已规划并执行（序列可能为空则返回 False）
+        """
+        seq = self.plan_velocity_sequence_to_target(dt=0.01, v_max=0.3, accel_time=0.3, decel_time=0.3)
+        print("t(s), vx(m/s), vy(m/s), wz(rad/s)")
+        for i, (vx, vy, wz) in enumerate(seq):
+            print(f"{i*dt:.4f}, {vx:.4f}, {vy:.4f}, {wz:.4f}")
+        if not seq:
+            return False
+        self.execute_velocity_sequence(seq, dt=dt)
+        # 结束后同时输出当前与目标位置（odom）
+        cur_pos = self.robot_sdk.state.robot_position()
+        cur_quat = self.robot_sdk.state.robot_orientation()
+        cur_yaw = Pose(pos=cur_pos, quat=cur_quat, frame=Frame.ODOM).get_euler(degrees=False)[2]
+        # 目标统一转ODOM
+        if Frame.BASE == self.target.frame:
+            transform_init_to_world = Transform3D(
+                trans_pose=self.robot_pose_when_target_set,
+                source_frame=Frame.BASE,
+                target_frame=Frame.ODOM
+            )
+            target_in_odom = transform_init_to_world.apply_to_pose(self.target)
+        else:
+            target_in_odom = self.target
+        tyaw = target_in_odom.get_euler(degrees=False)[2]
+        print(
+            f"[final] current@odom pos=({cur_pos[0]:.3f}, {cur_pos[1]:.3f}, {cur_pos[2]:.3f}), yaw={cur_yaw:.3f} | "
+            f"target@odom pos=({target_in_odom.pos[0]:.3f}, {target_in_odom.pos[1]:.3f}, {target_in_odom.pos[2]:.3f}), yaw={tyaw:.3f}"
+        )
+        return True
 
     def set_target(self, target: Any, *args, **kwargs):
         """
@@ -624,7 +906,10 @@ class EventWalkToPose(BaseEvent):
         返回：
             bool: 如果目标设置成功返回True，否则返回False。
         """
+        # self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.BaseOnly)
         res = super().set_target(target, *args, **kwargs)
+        self.x_direction_locked = False
+        self.locked_x_direction = 0
         if res:
             # 为了应对相对位置控制的情况，记录设置目标时机器人的位姿
             self.robot_pose_when_target_set = Pose(
@@ -635,11 +920,85 @@ class EventWalkToPose(BaseEvent):
             self.target = target  # 设置目标位置
             self.target_executed = False  # 标记目标位置未执行
 
-            if self.control_mode == "cmd_vel":
-                self.initial_orient_complete = False  # 标记初始定向阶段
-                self.walk_enter_pos_threshold = False
+            # 为cmd_pos_world模式重置到达标志
+            self.cmd_pos_world_reached = False
 
+            # 对于cmd_vel模式，在设置目标时就决定控制模式
+            if self.control_mode == "cmd_vel":
+                self._determine_cmd_vel_control_mode()
         return res
+
+    def _determine_cmd_vel_control_mode(self):
+        """
+        根据目标确定cmd_vel的控制模式（纯旋转/纯线性/混合）
+        只在set_target时调用一次
+        """
+        # 将目标位姿转换到odom坐标系
+        if Frame.BASE == self.target.frame:
+            transform_init_to_world = Transform3D(
+                trans_pose=self.robot_pose_when_target_set,
+                source_frame=Frame.BASE,
+                target_frame=Frame.ODOM
+            )
+            target_in_odom = transform_init_to_world.apply_to_pose(self.target)
+        else:
+            target_in_odom = self.target
+
+        # 获取当前机器人位姿
+        robot_pose = Pose(
+            pos=self.robot_sdk.state.robot_position(),
+            quat=self.robot_sdk.state.robot_orientation(),
+            frame=Frame.ODOM
+        )
+
+        # 计算初始误差
+        robot_euler = robot_pose.get_euler(degrees=False)
+        robot_pose_2d = Pose.from_euler(
+            pos=robot_pose.pos,
+            euler=[0, 0, robot_euler[2]],
+            frame=Frame.ODOM,
+            degrees=False
+        )
+
+        target_euler = target_in_odom.get_euler(degrees=False)
+        target_in_odom_2d = Pose.from_euler(
+            pos=target_in_odom.pos,
+            euler=[0, 0, target_euler[2]],
+            frame=Frame.ODOM,
+            degrees=False
+        )
+
+        transform_base_to_odom = Transform3D(
+            trans_pose=robot_pose_2d,
+            source_frame=Frame.BASE,
+            target_frame=Frame.ODOM
+        )
+        target_in_base = transform_base_to_odom.apply_to_pose_inverse(target_in_odom_2d)
+
+        # 计算初始误差
+        dx = target_in_base.pos[0]
+        dy = target_in_base.pos[1]
+        dyaw = normalize_angle(target_in_base.get_euler(degrees=False)[2])
+        distance = np.linalg.norm([dx, dy])
+
+        # 根据初始误差决定控制模式
+        has_pos_error = distance > self.pos_threshold
+        has_yaw_error = abs(dyaw) > self.yaw_threshold
+
+        if has_pos_error and has_yaw_error:
+            self._cmd_vel_mode = "mixed"
+            self.logger.info(f"🔄➡️ [CMD_VEL] 混合控制模式: 初始distance={distance:.3f}m, dyaw={np.rad2deg(dyaw):.1f}°")
+        elif has_yaw_error:
+            self._cmd_vel_mode = "angular_only"
+            self.logger.info(f"🔄 [CMD_VEL] 纯旋转模式: 初始dyaw={np.rad2deg(dyaw):.1f}°")
+            self.pos_threshold = 0.35
+        elif has_pos_error:
+            self._cmd_vel_mode = "linear_only"
+            self.logger.info(f"➡️ [CMD_VEL] 纯线性模式: 初始distance={distance:.3f}m")
+            self.yaw_threshold = np.deg2rad(5)  # 放宽到10°，避免运动过程中的角度漂移导致无法到达
+        else:
+            self._cmd_vel_mode = "none"
+            self.logger.info("✅ [CMD_VEL] 已在目标位置")
 
     def _check_target_valid(self, target: Pose):
         """
@@ -699,15 +1058,51 @@ class EventWalkToPose(BaseEvent):
             bool: 如果事件成功返回True，否则返回False。
         """
         if self.control_mode == "cmd_pos_world":
-            target_yaw = self.target.get_euler(degrees=False)[2]  # 获取目标偏航角
-            yaw_reached, yaw_diff = self._check_yaw(target_yaw)
+            # self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.BaseOnly)
+            # cmd_pos_world 模式：通过订阅 /cmd_pose_world_flag 话题判断是否到达
+            # if self.cmd_pos_world_reached:
+            #     self.logger.info(f'✅ cmd_pos_world 成功到达目标位置!')
+            #     return True
+            # return False
 
-            pos_reached, pos_diff = self._check_position_2d(self.target.pos[0], self.target.pos[1])
+            # 将目标位姿转换到odom坐标系
+            if self.target is None:
+                return False
+
+            if Frame.BASE == self.target.frame:
+                transform_init_to_world = Transform3D(
+                    trans_pose=self.robot_pose_when_target_set,
+                    source_frame=Frame.BASE,
+                    target_frame=Frame.ODOM
+                )
+                target_in_odom = transform_init_to_world.apply_to_pose(self.target)
+            else:
+                target_in_odom = self.target
+
+            target_yaw = target_in_odom.get_euler(degrees=False)[2]  # 获取目标偏航角
+
+            # === check_yaw ===
+            robot_pose = Pose(
+                pos=self.robot_sdk.state.robot_position(),
+                quat=self.robot_sdk.state.robot_orientation()
+            )
+            robot_yaw = robot_pose.get_euler(degrees=False)[2]  # 获取机器人的偏航角
+            yaw_diff = normalize_angle(target_yaw - robot_yaw)
+            yaw_reached = abs(yaw_diff) <= self.yaw_threshold
+
+            robot_pos = self.robot_sdk.state.robot_position()
+            pos_diff = np.linalg.norm(np.array(robot_pos[:2]) - np.array(target_in_odom.pos[:2]))
+            pos_reached = pos_diff <= self.pos_threshold
+
+            # print(
+            # f'目标未到达: {target_in_odom.pos}, 偏航角未到达: {target_yaw:.2f} rad, diff: {yaw_diff:.2f} rad | {pos_diff}')
 
             if yaw_reached and pos_reached:
-                self.logger.info(
-                    f'目标位置已到达: {self.target.pos}, 偏航角已到达: {target_yaw:.2f} rad, diff: {yaw_diff:.2f} rad | {pos_diff}')
+                print(
+                    f'目标位置已到达: {target_in_odom.pos}, 偏航角已到达: {target_yaw:.2f} rad, diff: {yaw_diff:.2f} rad | {pos_diff}')
                 return True
+
+            # return False
 
         elif self.control_mode == "cmd_pos":
             # 相对位置控制模式
@@ -758,13 +1153,29 @@ class EventWalkToPose(BaseEvent):
         返回：
             bool: 如果在阈值范围内返回True，否则返回False。
         """
+        robot_pose_data = self.robot_sdk.tools.get_link_pose(link_name="base_link_lb", reference_frame=Frame.ODOM)
+        if robot_pose_data is None:
+            self.logger.warning("无法获取 base_link 在 odom 下的位姿，跳过偏航角检查")
+            return False, float('inf')
+
         robot_pose = Pose(
-            pos=self.robot_sdk.state.robot_position(),
-            quat=self.robot_sdk.state.robot_orientation()
+            pos=robot_pose_data.position,
+            quat=robot_pose_data.orientation,
+            frame=Frame.ODOM,
         )
+
         robot_yaw = robot_pose.get_euler(degrees=False)[2]  # 获取机器人的偏航角
         yaw_diff = normalize_angle(target_yaw - robot_yaw)
-        self.logger.info(f"偏航角差: {yaw_diff}, 阈值: {self.yaw_threshold}")
+
+        # 时间控制打印，每0.2秒打印一次
+        current_time = time.time()
+        if not hasattr(self, '_last_yaw_print_time'):
+            self._last_yaw_print_time = 0.0
+
+        if current_time - self._last_yaw_print_time >= 0.2:
+            self.logger.info(f"偏航角差: {yaw_diff:.4f}, 阈值: {self.yaw_threshold:.4f}")
+            self._last_yaw_print_time = current_time
+
         return abs(yaw_diff) <= self.yaw_threshold, yaw_diff
 
     def _check_position_2d(self, target_x, target_y) -> bool:
@@ -778,8 +1189,22 @@ class EventWalkToPose(BaseEvent):
         返回：
             bool: 如果在阈值范围内返回True，否则返回False。
         """
-        robot_pos = self.robot_sdk.state.robot_position()
-        pos_diff = np.linalg.norm(np.array(robot_pos[:2]) - np.array([target_x, target_y]))
-        self.logger.info(f"位置差: {pos_diff}, 阈值: {self.pos_threshold}")
+        robot_pose = self.robot_sdk.tools.get_link_pose(link_name="base_link_lb", reference_frame=Frame.ODOM)
+        if robot_pose is None:
+            self.logger.warning("无法获取 base_link 在 odom 下的位置，跳过位置检查")
+            return False, float('inf')
+
+        robot_pos = np.array(robot_pose.position)
+        pos_diff = np.linalg.norm(robot_pos[:2] - np.array([target_x, target_y]))
+
+        # 时间控制打印，每0.2秒打印一次
+        current_time = time.time()
+        if not hasattr(self, '_last_pos_print_time'):
+            self._last_pos_print_time = 0.0
+
+        if current_time - self._last_pos_print_time >= 0.2:
+            self.logger.info(f"位置差: {pos_diff:.4f}, 阈值: {self.pos_threshold:.4f}")
+            self._last_pos_print_time = current_time
+
         return pos_diff <= self.pos_threshold, pos_diff
 

@@ -1,0 +1,74 @@
+{
+	"tree": {
+        "name": "Sequence",
+        "label": "place_a_tray_seq",
+        "params": {
+            "memory": "True"
+        },
+        "childs": [
+            {
+                "name": "CalcArmPose",
+                "label": "place_arm_execute",
+                "params": {
+                    "mode": {"value": "smt_arm_place_execute", "source": "custom"}
+                }
+            },
+            {
+                "name": "MoveArmBaseJointTrajectories",
+                "label": "move_arm_base_joint_trajectories",
+                "params": {
+                }
+            },
+            {
+                "name": "CtrlHeightPitch",
+                "label": "Ctrl_Height_Pitch",
+                "params": {
+                    "mode": {"value": "manual", "source": "custom"},
+                    "height": {"value": "-0.12", "source": "custom"},
+                    "pitch": {"value": "0.35", "source": "custom"}
+                }
+            },
+            {
+                "name": "MoveClaw",
+                "label": "open_claw",
+                "params": {
+                    "target_positions": "[0, 100]",
+                    "velocity": "[90, 90]",
+                    "torque": "[1.0, 1.0]"
+                }
+            },
+            {
+                "name": "CalcArmPose",
+                "label": "arm_backward_after_place",
+                "params": {
+                    "mode": {"value": "smt_arm_backward_after_place", "source": "custom"}
+                }
+            },
+            {
+                "name": "MoveArmBaseJointTrajectories",
+                "label": "move_arm_base_joint_trajectories",
+                "params": {
+                    "ArmJointTrajectories": {"value": "", "source": "read_board"}
+                }
+            },
+            {
+                "name": "CtrlHeightPitch",
+                "label": "Ctrl_Height_Pitch",
+                "params": {
+                    "mode": {"value": "manual", "source": "custom"},
+                    "height": {"value": "-0.12", "source": "custom"},
+                    "pitch": {"value": "0.35", "source": "custom"}
+                }
+            },
+            {
+                "name": "MoveClaw",
+                "label": "close_claw",
+                "params": {
+                    "target_positions": "[100, 100]",
+                    "velocity": "[90, 90]",
+                    "torque": "[1.0, 1.0]"
+                }
+            }
+        ]
+	}
+}

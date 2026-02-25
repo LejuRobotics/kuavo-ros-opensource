@@ -150,7 +150,7 @@ void MobileManipulatorVisualization::publishObservation(const ros::Time& timeSta
   base_tf.child_frame_id = prefix_name + "/" + modelInfo_.baseFrame;
   base_tf.transform.translation = ros_msg_helpers::getVectorMsg(r_world_base);
   base_tf.transform.rotation = ros_msg_helpers::getOrientationMsg(q_world_base);
-  tfBroadcaster_.sendTransform(base_tf);
+  // tfBroadcaster_.sendTransform(base_tf);
 
   // publish joints transforms
   const auto j_arm = getArmJointAngles(observation.state, modelInfo_);
@@ -190,7 +190,7 @@ void MobileManipulatorVisualization::publishTargetTrajectories(const ros::Time& 
   for (const auto& targetState : targetTrajectories.stateTrajectory) {
     // 假设目标状态结构：[base_pose, left_hand_pose(7), right_hand_pose(7)]
     // 这里需要根据实际的状态结构来调整索引
-    // const size_t baseDim = modelInfo_.stateDim - modelInfo_.armDim - modelInfo_.waistDim;
+    // const size_t baseDim = modelInfo_.stateDim - modelInfo_.armDim; // fix cpplint
     
     if (targetState.size() >= 14) {  // 至少包含基座和双手位置姿态
       // 左手目标位置 (假设在base维度之后)

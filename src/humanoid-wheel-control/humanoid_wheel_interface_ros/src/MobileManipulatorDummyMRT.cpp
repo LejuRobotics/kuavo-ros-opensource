@@ -56,14 +56,12 @@ int main(int argc, char** argv) {
   {
     robot_init_state_param.push_back(mujoco_q(i));
   }
-  // ros::param::set("robot_init_state_param", robot_init_state_param);
+  ros::param::set("robot_init_state_param", robot_init_state_param);
   /*******************************************************************************/
 
   // Initialize ros node
   ros::init(argc, argv, robotName + "_mrt");
   ros::NodeHandle nodeHandle;
-
-  nodeHandle.setParam("/robot_init_state_param", robot_init_state_param);
   // Get node parameters
   std::string taskFile, libFolder, urdfFile;
   nodeHandle.getParam("/taskFile", taskFile);

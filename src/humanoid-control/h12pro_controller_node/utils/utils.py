@@ -66,28 +66,28 @@ def frames_to_custom_action_data_ocs2(file_path: str, start_frame_time: float, c
 
                 if not found_start and end_time >= start_frame_time:
                     found_start = True
-                    
+
                     p0 = np.array([0, current_arm_joint_state[key-1]])
                     p3 = np.array([next_frame[0][0] - x_shift, next_frame[0][1]])
-                    
+
                     # Calculate control points for smooth transition
                     curve_length = np.linalg.norm(p3 - p0)
                     p1 = p0 + curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the right
                     p2 = p3 - curve_length * 0.25 * np.array([1, 0])  # Move 1/4 curve length to the left
-                    
+
                     # Create new frame
                     frame1 = [
                         p0.tolist(),
                         p0.tolist(),
                         p1.tolist()
                     ]
-                    
+
                     # Modify next_frame's left control point
                     next_frame[1] = p2.tolist()
-                    
+
                     filtered_frames.append(frame1)
                     skip_next = True
-                
+
                 if found_start:
                     if skip_next:
                         skip_next = False
@@ -98,7 +98,7 @@ def frames_to_custom_action_data_ocs2(file_path: str, start_frame_time: float, c
                     filtered_frames.append([end_point, left_control_point, right_control_point])
 
             filtered_action_data[key] = filtered_frames
-        return filtered_action_data 
+        return filtered_action_data
 
     with open(file_path, "r") as f:
         data = json.load(f)

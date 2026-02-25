@@ -42,14 +42,24 @@ def get_elbow_position(robot_sdk,
     return [0.0, default_y, 0.0]
 
 
-def interpolate_joint_positions_bezier(start_joints, end_joints, num_points=20):
+def interpolate_joint_positions_bezier(
+    start_joints,
+    end_joints,
+    num_points=None,
+    max_step=0.05,
+    min_points=10,
+    max_points=200,
+):
     """
     在两个关节位置之间进行贝塞尔曲线插值。
 
     参数：
         start_joints (list): 起始关节角度列表（14维）
         end_joints (list): 目标关节角度列表（14维）
-        num_points (int): 插值点数量
+        num_points (int|None): 插值点数量。如果为 None，则根据关节最大变化量和 max_step 自动计算。
+        max_step (float): 自动计算时，每个插值步允许的关节最大变化（弧度）。
+        min_points (int): 自动计算时的最少插值点数量。
+        max_points (int): 自动计算时的最多插值点数量。
 
     返回：
         List[list]: 插值后的关节角度列表
@@ -57,7 +67,14 @@ def interpolate_joint_positions_bezier(start_joints, end_joints, num_points=20):
     start_joints = np.array(start_joints)
     end_joints = np.array(end_joints)
 
-    # 生成参数t
+    # 自动确定插值点数量：根据最大关节变化量限制每步的变化
+    if num_points is None:
+        max_delta = np.max(np.abs(end_joints - start_joints))
+        # 至少包含首尾两个点，所以 +1
+        num_points = int(np.ceil(max_delta / max_step)) + 1
+        num_points = max(min_points, min(num_points, max_points))
+
+    # 生成参数 t
     t = np.linspace(0, 1, num_points)
 
     interp_joints = []
@@ -77,6 +94,83 @@ def interpolate_joint_positions_bezier(start_joints, end_joints, num_points=20):
 
     return interp_joints
 
+def interpolate_joint_positions_cubic_spline(start_joints, end_joints, num_points=20, start_velocity=None, end_velocity=None):
+    """
+    在两个关节位置之间进行三次样条插值（使用Hermite插值方法）。
+
+    参数：
+        start_joints (list): 起始关节角度列表（14维）
+        end_joints (list): 目标关节角度列表（14维）
+        num_points (int): 插值点数量
+        start_velocity (list, optional): 起始关节速度列表（14维），如果为None则自动计算
+        end_velocity (list, optional): 终点关节速度列表（14维），如果为None则自动计算
+
+    返回：
+        List[list]: 插值后的关节角度列表
+    """
+    start_joints = np.array(start_joints)
+    end_joints = np.array(end_joints)
+
+    # 计算关节变化量
+    joint_delta = end_joints - start_joints
+
+    # 如果没有提供速度，根据转动幅度自动计算速度
+    # 转动幅度越大的关节速度越快
+    if start_velocity is None:
+        # 计算每个关节的转动幅度（绝对值）
+        abs_delta = np.abs(joint_delta)
+        # 找到最大转动幅度（用于归一化）
+        max_delta = np.max(abs_delta) if np.max(abs_delta) > 1e-6 else 1.0
+
+        # 根据转动幅度设置速度权重（转动幅度越大，速度越快）
+        # 速度因子可以根据需要调整（0.1-0.3之间比较合理）
+        speed_factor = 0.15
+
+        # 速度计算：速度大小与转动幅度成正比，方向与变化方向一致
+        # 速度 = sign(变化量) * (转动幅度 / 最大转动幅度) * 速度因子 * 最大转动幅度
+        # 这样转动幅度大的关节速度更快，且速度比例与转动幅度比例一致
+        # 例如：如果关节A转动90度，关节B转动10度，则关节A的速度是关节B的9倍
+        velocity_weights = abs_delta / max_delta
+        start_velocity = np.sign(joint_delta) * velocity_weights * speed_factor * max_delta
+    else:
+        start_velocity = np.array(start_velocity)
+
+    if end_velocity is None:
+        # 终点速度与起点速度相同（保证连续性）
+        end_velocity = start_velocity.copy()
+    else:
+        end_velocity = np.array(end_velocity)
+
+    # 生成参数t，范围[0, 1]
+    t = np.linspace(0, 1, num_points)
+
+    # 三次Hermite插值公式：
+    # P(t) = h00(t)*P0 + h10(t)*P0' + h01(t)*P1 + h11(t)*P1'
+    # 其中：
+    # h00(t) = 2t³ - 3t² + 1
+    # h10(t) = t³ - 2t² + t
+    # h01(t) = -2t³ + 3t²
+    # h11(t) = t³ - t²
+
+    interp_joints = []
+    for i in range(num_points):
+        ti = t[i]
+
+        # Hermite基函数
+        h00 = 2 * ti**3 - 3 * ti**2 + 1
+        h10 = ti**3 - 2 * ti**2 + ti
+        h01 = -2 * ti**3 + 3 * ti**2
+        h11 = ti**3 - ti**2
+
+        # 三次Hermite插值
+        joint_pos = h00 * start_joints + \
+                   h10 * start_velocity + \
+                   h01 * end_joints + \
+                   h11 * end_velocity
+
+        interp_joints.append(joint_pos.tolist())
+
+    return interp_joints
 
 def generate_bezier_control_points_c1_continuous(key_points, smoothness_factor=0.3):
     """
@@ -328,7 +422,6 @@ def generate_full_bezier_trajectory(
         current_right_pose,
         left_keypoints_list,
         right_keypoints_list,
-        traj_point_num: int = 50,
 ):
     """
     生成完整的贝塞尔轨迹（包含所有关键点）
@@ -360,7 +453,7 @@ def generate_full_bezier_trajectory(
         ))
 
     # 生成完整的贝塞尔轨迹
-    total_points = len(left_keypoints_list) * traj_point_num  # 每个关键点段分配50个插值点
+    total_points = len(left_keypoints_list) * 50  # 每个关键点段分配50个插值点
     total_points = max(total_points, 100)  # 至少100个点
 
     left_full_trajectory = bezier_interpolate_poses_full_trajectory(

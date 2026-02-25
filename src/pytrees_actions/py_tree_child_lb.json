@@ -1,0 +1,1322 @@
+{
+  "look_for_tag.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "find_tag_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "Parallel",
+        "label" : "find_tag",
+        "params": {
+            "policy": {
+                "value": "success_on_all",
+                "source": "CUSTOM"
+            }
+        },
+        "childs" : [ {
+          "name" : "MoveHead",
+          "label" : "mvHead",
+          "params" : {
+            "mode" : {
+              "value" : "manual",
+              "source" : "CUSTOM"
+            },
+            "head_search_yaws" : {
+              "value" : "0",
+              "source" : "CUSTOM"
+            },
+            "head_search_pitchs" : {
+              "value" : "0",
+              "source" : "CUSTOM"
+            }
+          },
+          "childs" : [ ]
+        }, {
+          "name" : "FindAllTag",
+          "label" : "find_all_tag",
+          "params" : {
+            "max_percep_time" : {
+              "value" : "6",
+              "source" : "CUSTOM"
+            }
+          },
+          "childs" : [ ]
+        } ]
+      }, {
+        "name" : "FilterTagInROI",
+        "label" : "filter_tag_by_ROI",
+        "params" : {
+          "y_min" : {
+            "value" : "-6",
+            "source" : "CUSTOM"
+          },
+          "z_min" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          },
+          "x_max" : {
+            "value" : "6",
+            "source" : "CUSTOM"
+          },
+          "y_max" : {
+            "value" : "6",
+            "source" : "CUSTOM"
+          },
+          "z_max" : {
+            "value" : "2",
+            "source" : "CUSTOM"
+          },
+          "x_min" : {
+            "value" : "-6",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "SelectTagByID",
+        "label" : "select_tag_by_ID",
+        "params" : {
+          "target_id" : {
+            "value" : "1",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "SelectTagByOrder",
+        "label" : "select_tag_by_order",
+        "params" : {
+          "axis" : {
+            "value" : "z",
+            "source" : "CUSTOM"
+          },
+          "order" : {
+            "value" : "max",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      } ]
+    }
+  },
+  "look_for_tag_grasp.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "find_tag_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "Parallel",
+        "label" : "find_tag",
+        "params": {
+            "policy": {
+                "value": "success_on_all",
+                "source": "CUSTOM"
+            }
+        },
+        "childs" : [ {
+          "name" : "MoveHead",
+          "label" : "mvHead",
+          "params" : {
+            "mode" : {
+              "value" : "manual",
+              "source" : "CUSTOM"
+            },
+            "head_search_yaws" : {
+              "value" : "0",
+              "source" : "CUSTOM"
+            },
+            "head_search_pitchs" : {
+              "value" : "0",
+              "source" : "CUSTOM"
+            }
+          },
+          "childs" : [ ]
+        }, {
+          "name" : "FindAllTag",
+          "label" : "find_all_tag",
+          "params" : {
+            "max_percep_time" : {
+              "value" : "6",
+              "source" : "CUSTOM"
+            }
+          },
+          "childs" : [ ]
+        } ]
+      }, {
+        "name" : "FilterTagInROI",
+        "label" : "filter_tag_by_ROI",
+        "params" : {
+          "y_min" : {
+            "value" : "-6",
+            "source" : "CUSTOM"
+          },
+          "z_min" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          },
+          "x_max" : {
+            "value" : "6",
+            "source" : "CUSTOM"
+          },
+          "y_max" : {
+            "value" : "6",
+            "source" : "CUSTOM"
+          },
+          "z_max" : {
+            "value" : "2",
+            "source" : "CUSTOM"
+          },
+          "x_min" : {
+            "value" : "-6",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "SelectTagByID",
+        "label" : "select_tag_by_ID",
+        "params" : {
+          "target_id" : {
+            "value" : "2,23",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "SelectTagByOrder",
+        "label" : "select_tag_by_order",
+        "params" : {
+          "axis" : {
+            "value" : "z",
+            "source" : "CUSTOM"
+          },
+          "order" : {
+            "value" : "max",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      } ]
+    }
+  },
+  "depalletize_place_box.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "place_box_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "CalcArmPose",
+        "label" : "calc_arm_pose",
+        "params" : {
+          "mode" : {
+            "value" : "depalletize_place",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, 
+      {
+        "name" : "MoveClaw",
+        "label" : "open_claw",
+        "params" : {
+          "torque" : {
+            "value" : "1.0, 1.0",
+            "source" : "CUSTOM"
+          },
+          "target_positions" : {
+            "value" : "0, 0",
+            "source" : "CUSTOM"
+          },
+          "velocity" : {
+            "value" : "90, 90",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+        },
+        {
+          "name": "Parallel",
+          "label": "prepare_and_move",
+          "params": {
+              "policy": {
+                  "value": "success_on_all",
+                  "source": "CUSTOM"
+              }
+          },
+          "childs": [
+            {
+              "name" : "MoveToTarget",
+              "label" : "back",
+              "params" : {
+                "mode" : {
+                  "value" : "relative_pose",
+                  "source" : "CUSTOM"
+                },
+                "x" : {
+                  "value" : "0.5",
+                  "source" : "CUSTOM"
+                },
+                "y" : {
+                  "value" : "0",
+                  "source" : "CUSTOM"
+                },
+                "yaw" : {
+                  "value" : "0",
+                  "source" : "CUSTOM"
+                }
+              },
+              "childs" : [ ]
+              },
+              {
+                "name" : "CalcLeg",
+                "label" : "calc_leg_torso",
+                "params" : {
+                "offset_x" : {
+                    "value" : "0.0",
+                    "source" : "CUSTOM"
+                },
+                "offset_y" : {
+                    "value" : "0.0",
+                    "source" : "CUSTOM"
+                },
+                "offset_z" : {
+                    "value" : "0.8",
+                    "source" : "CUSTOM"
+                },
+                "control_base" : {
+                    "value" : "false",
+                    "source" : "CUSTOM"
+                },
+                "face_tag" : {
+                    "value" : "true",
+                    "source" : "CUSTOM"
+                },
+                "leg_mode" : {
+                    "value" : "leg",
+                    "source" : "CUSTOM"
+                },
+                "offset_yaw" : {
+                    "value" : "0.0",
+                    "source" : "CUSTOM"
+                },
+                "asynchronous" : {
+                    "value" : "False",
+                    "source" : "CUSTOM"
+                }
+                },
+                "childs" : [ ]
+            }
+          ]
+        }
+     ]
+    }
+  },
+  "place_box.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "place_box_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "CalcArmPose",
+        "label" : "calc_arm_pose",
+        "params" : {
+          "mode" : {
+            "value" : "box_place",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveToTarget",
+        "label" : "back",
+        "params" : {
+          "mode" : {
+            "value" : "relative_pose",
+            "source" : "CUSTOM"
+          },
+          "x" : {
+            "value" : "-0.8",
+            "source" : "CUSTOM"
+          },
+          "y" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          },
+          "yaw" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      } ]
+    }
+  },
+  "place_box_lb.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "place_box_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "CalcArmPose",
+        "label" : "calc_arm_pose",
+        "params" : {
+          "mode" : {
+            "value" : "box_place",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name": "Parallel",
+        "label": "prepare_and_move",
+        "params": {
+            "policy": {
+                "value": "success_on_all",
+                "source": "CUSTOM"
+            }
+        },
+        "childs": [
+          {
+            "name" : "MoveToTarget",
+            "label" : "back",
+            "params" : {
+              "mode" : {
+                "value" : "relative_pose",
+                "source" : "CUSTOM"
+              },
+              "x" : {
+                "value" : "-0.4",
+                "source" : "CUSTOM"
+              },
+              "y" : {
+                "value" : "0",
+                "source" : "CUSTOM"
+              },
+              "yaw" : {
+                "value" : "0",
+                "source" : "CUSTOM"
+              }
+            },
+            "childs" : [ ]
+            },
+            {
+              "name" : "CalcLeg",
+              "label" : "calc_leg_torso",
+              "params" : {
+              "offset_x" : {
+                  "value" : "0.0",
+                  "source" : "CUSTOM"
+              },
+              "offset_y" : {
+                  "value" : "0.0",
+                  "source" : "CUSTOM"
+              },
+              "offset_z" : {
+                  "value" : "1.0",
+                  "source" : "CUSTOM"
+              },
+              "control_base" : {
+                  "value" : "false",
+                  "source" : "CUSTOM"
+              },
+              "face_tag" : {
+                  "value" : "true",
+                  "source" : "CUSTOM"
+              },
+              "leg_mode" : {
+                  "value" : "leg",
+                  "source" : "CUSTOM"
+              },
+              "offset_yaw" : {
+                  "value" : "0.0",
+                  "source" : "CUSTOM"
+              },
+              "asynchronous" : {
+                  "value" : "False",
+                  "source" : "CUSTOM"
+              }
+              },
+              "childs" : [ ]
+          }
+        ]
+      } ]
+    }
+  },
+  "grasp_box.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "grasp_box_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "CalcArmPose",
+        "label" : "calc_arm_pose",
+        "params" : {
+          "mode" : {
+            "value" : "box_grasp_step1",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "manipulate_mpc",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "CtrlHeightPitch",
+        "label" : "ctrl_height_pitch",
+        "params" : {
+          "mode" : {
+            "value" : "manual",
+            "source" : "CUSTOM"
+          },
+          "height" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          },
+          "pitch" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveToTarget",
+        "label" : "back",
+        "params" : {
+          "mode" : {
+            "value" : "relative_pose",
+            "source" : "CUSTOM"
+          },
+          "x" : {
+            "value" : "-0.3",
+            "source" : "CUSTOM"
+          },
+          "y" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          },
+          "yaw" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "CalcArmPose",
+        "label" : "calc_arm_pose",
+        "params" : {
+          "mode" : {
+            "value" : "box_grasp_step2",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      } ]
+    }
+  },
+  "grasp_box_lb.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "grasp_box_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "CalcArmPose",
+        "label" : "calc_arm_pose",
+        "params" : {
+          "mode" : {
+            "value" : "box_grasp_step1",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "CalcLeg",
+        "label" : "calc_leg_torso",
+        "params" : {
+        "offset_x" : {
+            "value" : "0.0",
+            "source" : "CUSTOM"
+        },
+        "offset_y" : {
+            "value" : "0.0",
+            "source" : "CUSTOM"
+        },
+        "offset_z" : {
+            "value" : "1.2",
+            "source" : "CUSTOM"
+        },
+        "control_base" : {
+            "value" : "false",
+            "source" : "CUSTOM"
+        },
+        "face_tag" : {
+            "value" : "true",
+            "source" : "CUSTOM"
+        },
+        "leg_mode" : {
+            "value" : "leg",
+            "source" : "CUSTOM"
+        },
+        "offset_yaw" : {
+            "value" : "0.0",
+            "source" : "CUSTOM"
+        }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveToTarget",
+        "label" : "back",
+        "params" : {
+          "mode" : {
+            "value" : "relative_pose",
+            "source" : "CUSTOM"
+          },
+          "x" : {
+            "value" : "-0.5",
+            "source" : "CUSTOM"
+          },
+          "y" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          },
+          "yaw" : {
+            "value" : "180",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      } ]
+    }
+  },
+  "smt_move_to_place.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "move_to_place_and_drop_detection",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "Parallel",
+        "label" : "find_tag",
+        "params" : { },
+        "childs" : [ {
+          "name" : "Sequence",
+          "label" : "smt_move_to_place",
+          "params" : {
+            "memory" : {
+              "value" : "True",
+              "source" : "CUSTOM"
+            }
+          },
+          "childs" : [ {
+            "name" : "CalcMoveDest",
+            "label" : "cal_move_dest",
+            "params" : {
+              "mode" : {
+                "value" : "smt_place",
+                "source" : "CUSTOM"
+              }
+            },
+            "childs" : [ ]
+          }, {
+            "name" : "MoveToTarget",
+            "label" : "smt_slam_move_to_grab_pose",
+            "params" : {
+              "mode" : {
+                "value" : "slam",
+                "source" : "CUSTOM"
+              }
+            },
+            "childs" : [ ]
+          } ]
+        }, {
+          "name" : "DropDetection",
+          "label" : "drop_detection",
+          "params" : { },
+          "childs" : [ ]
+        } ]
+      } ]
+    }
+  },
+  "smt_grasp_tray.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "grab_one_object_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "CalcHeadMove",
+        "label" : "smt_calc_head_move",
+        "params" : {
+          "mode" : {
+            "value" : "smt_pick_squat_mode",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveHead",
+        "label" : "smt_move_head",
+        "params" : {
+          "mode" : {
+            "value" : "from_board",
+            "source" : "CUSTOM"
+          },
+          "head_search_yaws" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          },
+          "head_search_pitchs" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "FindAllTag",
+        "label" : "find_grab_tag",
+        "params" : {
+          "max_percep_time" : {
+            "value" : "1",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      },  {
+        "name" : "CalcArmPose",
+        "label" : "calc_arm_pose_forSMT",
+        "params" : {
+          "mode" : {
+            "value" : "smt_pick_pre_pose",
+            "source" : "CUSTOM"
+          }
+          },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      },{
+        "name" : "CalcArmPose",
+        "label" : "calc_arm_pose_forSMT",
+        "params" : {
+          "mode" : {
+            "value" : "smt_pick_post_pose",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveClaw",
+        "label" : "close_claw",
+        "params" : {
+          "torque" : {
+            "value" : "1.0, 1.0",
+            "source" : "CUSTOM"
+          },
+          "target_positions" : {
+            "value" : "100, 100",
+            "source" : "CUSTOM"
+          },
+          "velocity" : {
+            "value" : "90, 90",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveToTarget",
+        "label" : "back",
+        "params" : {
+          "mode" : {
+            "value" : "relative_pose",
+            "source" : "CUSTOM"
+          },
+          "x" : {
+            "value" : "-0.5",
+            "source" : "CUSTOM"
+          },
+          "y" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          },
+          "yaw" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "CalcArmPose",
+        "label" : "smt_post_pose",
+        "params" : {
+          "mode" : {
+            "value" : "smt_post_pose",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveHead",
+        "label" : "smt_move_head",
+        "params" : {
+          "mode" : {
+            "value" : "manual",
+            "source" : "CUSTOM"
+          },
+          "head_search_yaws" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          },
+          "head_search_pitchs" : {
+            "value" : "0",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      } ]
+    }
+  },
+  "smt_place_tray.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "place_a_tray_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "CalcArmPose",
+        "label" : "place_arm_execute",
+        "params" : {
+          "mode" : {
+            "value" : "smt_place_pre_pose",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveClaw",
+        "label" : "open_claw",
+        "params" : {
+          "torque" : {
+            "value" : "1.0,1.0",
+            "source" : "CUSTOM"
+          },
+          "target_positions" : {
+            "value" : "0,100",
+            "source" : "CUSTOM"
+          },
+          "velocity" : {
+            "value" : "90,90",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "CalcArmPose",
+        "label" : "arm_backward_after_place",
+        "params" : {
+          "mode" : {
+            "value" : "smt_place_post_pose",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseTargetPose",
+        "label" : "move_arm_base_target_pose",
+        "params" : {
+          "arm_control_mode" : {
+            "value" : "fixed_base",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveClaw",
+        "label" : "close_claw",
+        "params" : {
+          "torque" : {
+            "value" : "1.0,1.0",
+            "source" : "CUSTOM"
+          },
+          "target_positions" : {
+            "value" : "100,100",
+            "source" : "CUSTOM"
+          },
+          "velocity" : {
+            "value" : "90,90",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      } ]
+    }
+  },
+  "smt_bar_code.json" : {
+    "tree" : {
+      "name" : "Sequence",
+      "label" : "barcode_scanner_seq",
+      "params" : {
+        "memory" : {
+          "value" : "True",
+          "source" : "CUSTOM"
+        }
+      },
+      "childs" : [ {
+        "name" : "BarcodeScannerSMT",
+        "label" : "barcode_scanner_smt",
+        "params" : {
+          "reelid_topic" : {
+            "value" : "/reelid_detector/reelid",
+            "source" : "CUSTOM"
+          },
+          "barcode_parameter" : {
+            "value" : "/barcode_value",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "CalcArmPose",
+        "label" : "calc_arm_pose_forSMT",
+        "params" : {
+          "mode" : {
+            "value" : "smt_move_to_head",
+            "source" : "CUSTOM"
+          }
+        },
+        "childs" : [ ]
+      }, {
+        "name" : "MoveArmBaseJointTrajectories",
+        "label" : "move_arm_base_joint_trajectories",
+        "params" : { },
+        "childs" : [ ]
+      } ]
+    }
+  },
+  "depalletize_grasp_box.json" : {
+    "tree": {
+		"name": "Sequence",
+		"label": "depalletize_box_seq",
+		"params": {
+			"memory": "True"
+		},
+		"childs": [
+			{
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose_for_depalletize",
+				"params": {
+					"mode": {"value": "depalletize_grasp_step1", "source": "CUSTOM"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+					"params" : { 
+						"arm_control_mode" : { "value" : "fixed_base", "source" : "CUSTOM"}
+					}
+        	},
+			{
+				"name": "MoveClaw",
+				"label": "pick_box_by_claw",
+				"params": {
+					"target_positions": "0.0, 0.0",
+					"velocity": "90, 90",
+					"torque": "1.0, 1.0"
+				}
+			},
+			{
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose_for_depalletize",
+				"params": {
+					"mode": {"value": "depalletize_grasp_step2", "source": "CUSTOM"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+					"params" : { 
+						"arm_control_mode" : { "value" : "fixed_base", "source" : "CUSTOM"}
+					}
+			},
+			{
+				"name": "MoveClaw",
+				"label": "pick_box_by_claw",
+				"params": {
+					"target_positions": "85.0, 0.0",
+					"velocity": "90, 90",
+					"torque": "1.0, 1.0"
+				}
+			},
+			{
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose_for_depalletize",
+				"params": {
+					"mode": {"value": "depalletize_grasp_step3", "source": "CUSTOM"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+				"params":
+				{
+					"arm_control_mode" : { "value" : "fixed_base", "source" : "CUSTOM"}
+				}
+			},
+      {
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose_for_depalletize",
+				"params": {
+					"mode": {"value": "depalletize_grasp_step4", "source": "CUSTOM"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+				"params":
+				{
+					"arm_control_mode" : { "value" : "fixed_base", "source" : "CUSTOM"}
+				}
+      },
+      {
+				"name": "MoveClaw",
+				"label": "pick_box_by_claw",
+				"params": {
+					"target_positions": "85.0, 85.0",
+					"velocity": "90, 90",
+					"torque": "1.0, 1.0"
+				}
+			},
+      {
+        "name" : "CalcLeg",
+        "label" : "calc_leg_torso",
+        "params" : {
+        "offset_x" : {
+            "value" : "0.0",
+            "source" : "CUSTOM"
+        },
+        "offset_y" : {
+            "value" : "0.35",
+            "source" : "CUSTOM"
+        },
+        "offset_z" : {
+            "value" : "0.15",
+            "source" : "CUSTOM"
+        },
+        "control_base" : {
+            "value" : "false",
+            "source" : "CUSTOM"
+        },
+        "face_tag" : {
+            "value" : "true",
+            "source" : "CUSTOM"
+        }
+        },
+        "childs" : [ ]
+      },
+      {
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose_for_depalletize",
+				"params": {
+					"mode": {"value": "depalletize_grasp_step5", "source": "CUSTOM"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+				"params":
+				{
+					"arm_control_mode" : { "value" : "fixed_base", "source" : "CUSTOM"}
+				}
+			},
+      {
+          "name" : "CalcLeg",
+          "label" : "calc_leg_torso",
+          "params" : {
+          "offset_x" : {
+              "value" : "0.0",
+              "source" : "CUSTOM"
+          },
+          "offset_y" : {
+              "value" : "0.0",
+              "source" : "CUSTOM"
+          },
+          "offset_z" : {
+              "value" : "1.2",
+              "source" : "CUSTOM"
+          },
+          "control_base" : {
+              "value" : "false",
+              "source" : "CUSTOM"
+          },
+          "face_tag" : {
+              "value" : "true",
+              "source" : "CUSTOM"
+          },
+          "leg_mode" : {
+              "value" : "leg",
+              "source" : "CUSTOM"
+          },
+          "offset_yaw" : {
+              "value" : "170.0",
+              "source" : "CUSTOM"
+          }
+          },
+          "childs" : [ ]
+      },
+      {
+				"name": "MoveToTarget",
+				"label": "back",
+				"params":
+				{
+					"mode": {"value": "relative_pose", "source": "CUSTOM"},
+					"x": {"value": "-0.5", "source": "CUSTOM"},
+					"y": {"value": "0.0", "source": "CUSTOM"},
+					"yaw": {"value": "0", "source": "CUSTOM"}
+				}
+      }
+		]
+	}
+  },
+  "depservo.json" : {
+    "tree": {
+		"name": "Sequence",
+		"label": "depalletize_box_seq",
+		"params": {
+			"memory": "True"
+		},
+		"childs": [
+			{
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose_for_depalletize",
+				"params": {
+					"mode": {"value": "depservo_step1", "source": "CUSTOM"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+					"params" : {
+						"arm_control_mode" : { "value" : "fixed_base", "source" : "CUSTOM"}
+					}
+      },
+      {
+				"name": "MoveToTarget",
+				"label": "back",
+				"params":
+				{
+					"mode": {"value": "relative_pose", "source": "CUSTOM"},
+					"x": {"value": "0.0", "source": "CUSTOM"},
+					"y": {"value": "0.2", "source": "CUSTOM"},
+					"yaw": {"value": "0.0", "source": "CUSTOM"}
+				}
+      },
+			{
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose_for_depalletize",
+				"params": {
+					"mode": {"value": "depservo_step2", "source": "CUSTOM"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+					"params" : {
+						"arm_control_mode" : { "value" : "fixed_base", "source" : "CUSTOM"}
+					}
+			},
+      {
+        "name" : "CalcLeg",
+        "label" : "calc_leg_torso",
+        "params" : {
+        "offset_x" : {
+            "value" : "0.0",
+            "source" : "CUSTOM"
+        },
+        "offset_y" : {
+            "value" : "0.35",
+            "source" : "CUSTOM"
+        },
+        "offset_z" : {
+            "value" : "0.15",
+            "source" : "CUSTOM"
+        },
+        "control_base" : {
+            "value" : "false",
+            "source" : "CUSTOM"
+        },
+        "face_tag" : {
+            "value" : "true",
+            "source" : "CUSTOM"
+        }
+        },
+        "childs" : [ ]
+      },
+      {
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose_for_depalletize",
+				"params": {
+					"mode": {"value": "depservo_step3", "source": "CUSTOM"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+				"params":
+				{
+					"arm_control_mode" : { "value" : "fixed_base", "source" : "CUSTOM"}
+				}
+			},
+      {
+				"name": "MoveToTarget",
+				"label": "back",
+				"params":
+				{
+					"mode": {"value": "relative_pose", "source": "CUSTOM"},
+					"x": {"value": "-0.5", "source": "CUSTOM"},
+					"y": {"value": "0.0", "source": "CUSTOM"},
+					"yaw": {"value": "180", "source": "CUSTOM"}
+				}
+      }
+		]
+	}
+  }
+}

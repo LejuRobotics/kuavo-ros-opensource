@@ -1,0 +1,57 @@
+{
+	"tree": {
+		"name": "Sequence",
+		"label": "place_box_seq",
+		"params": {
+			"memory": "True"
+		},
+		"childs": [
+			{
+				"name": "CalcLeg",
+				"label": "calc_leg_torso",
+				"params": {
+					"offset_x": {"value": "0.0", "source": "custom"},
+					"offset_y": {"value": "0.0", "source": "custom"},
+					"offset_z": {"value": "0.0", "source": "custom"},
+					"control_base": {"value": "false", "source": "custom"},
+					"face_tag": {"value": "true", "source": "custom"}
+				}
+			},
+			{
+				"name": "CalcArmPose",
+				"label": "calc_arm_pose",
+				"params": {
+					"mode": { "value": "box_place", "source": "custom"}
+				}
+			},
+			{
+				"name": "MoveArmBaseTargetPose",
+				"label": "move_arm_base_target_pose",
+				"params":
+				{
+					"arm_control_mode": {"value": "fixed_base", "source": "custom"}
+				}
+			},
+			{
+				"name": "MoveArmBaseJointValue",
+				"label": "arm_back_to_origin",
+				"params":
+				{
+					"left_positions": {"value": "0, 0, 0, 0, 0, 0, 0", "source": "custom"},
+					"right_positions": {"value": "0, 0, 0, 0, 0, 0, 0", "source": "custom"}
+				}
+			},
+			{
+				"name": "MoveToTarget",
+				"label": "back",
+				"params":
+				{
+					"mode": {"value": "relative_pose", "source": "custom"},
+					"x": {"value": "-0.3", "source": "custom"},
+					"y": {"value": "0", "source": "custom"},
+					"yaw": {"value": "0", "source": "custom"}
+				}
+			}
+		]
+	}
+}

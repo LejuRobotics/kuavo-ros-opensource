@@ -18,8 +18,10 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   roscpp
   std_msgs
+  std_srvs
   message_generation
   geometry_msgs
+  pytrees_actions
 )
 
 catkin_python_setup()
@@ -44,16 +46,21 @@ add_service_files(
   changeHandArmPosesByConfigName.srv
   playmusic.srv
   ExecuteArmAction.srv
+  audio_control.srv
+  OCS2RobotControl.srv
+  GetBarcode.srv
 )
 
 generate_messages(
   DEPENDENCIES
   std_msgs
+  std_srvs
   geometry_msgs
+  pytrees_actions
 )
 
 catkin_package(
-  CATKIN_DEPENDS rospy roscpp std_msgs message_runtime
+  CATKIN_DEPENDS rospy roscpp std_msgs message_runtime pytrees_actions
 )
 
 ## System dependencies are found with CMake's conventions
@@ -219,7 +226,6 @@ target_link_libraries(h12pro_channel_publisher
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
   src/h12pro_node/ocs2_h12pro_node.py
-  src/h12pro_node/websocket_sdk_start_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

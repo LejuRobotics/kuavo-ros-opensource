@@ -43,19 +43,16 @@ class BaseIKSolver {
   virtual ~BaseIKSolver() = default;
 
   virtual IKSolveResult solveIK(const std::vector<PoseData>& PoseConstraintList,
-                                ArmIdx controlArmIndex = ArmIdx::LEFT,
-                                const Eigen::VectorXd& jointMidValues = Eigen::VectorXd()) = 0;
+                                ArmIdx controlArmIndex = ArmIdx::LEFT) = 0;
 
  protected:
   virtual void initializeFrames(const std::vector<std::string>& ikConstraintFrameNames);
-  virtual void initializeJointIndices() {}
-  virtual void initializeJointLimits(){};
+  virtual void initializeJointIndices() = 0;
+  virtual void initializeJointLimits() = 0;
 
   virtual bool setConstraints(const std::vector<drake::multibody::InverseKinematics*>& ikList,
                               const std::vector<const std::vector<PoseData>*>& PoseConstraintLists,
-                              const std::vector<ArmIdx>& controlArmIndices) const {
-    return false;
-  };
+                              const std::vector<ArmIdx>& controlArmIndices) const = 0;
 
   void initInverseKinematicsSolver(drake::multibody::InverseKinematics& ik, SolverType solverType) const;
 
@@ -66,9 +63,7 @@ class BaseIKSolver {
 
   // common interface
   Eigen::VectorXd getWarmStartSolution() const;
-  virtual Eigen::VectorXd postProcessSolution(const Eigen::VectorXd& rawSolution, const ParameterMap& params) const {
-    return rawSolution;
-  };
+  virtual Eigen::VectorXd postProcessSolution(const Eigen::VectorXd& rawSolution, const ParameterMap& params) const = 0;
   void updateLatestSolution(const Eigen::VectorXd& solution);
   bool preSolveCheck(const std::vector<PoseData>& PoseConstraintList) const;
 

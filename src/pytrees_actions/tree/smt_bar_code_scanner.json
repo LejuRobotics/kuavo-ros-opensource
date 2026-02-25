@@ -1,0 +1,34 @@
+{
+	"tree": {
+        "name": "Sequence",
+        "label": "barcode_scanner_seq",
+        "params": {
+            "memory": "True"
+        },
+        "childs": [
+            {
+                "name": "BarcodeScannerSMT",
+                "label": "barcode_scanner_smt"
+            },
+            {
+                "name": "CalcArmPose",
+                "label": "calc_arm_pose_forSMT",
+                "params": {
+                    "mode": {"value": "smt_move_to_head", "source": "custom"},
+                    "TargetSMTIDRow": {"value": "", "source": "read_board"},
+                    "TargetSMTID": {"value": "", "source": "read_board"},
+                    "AllTagInfoOfBase": {"value": "", "source": "read_board"},
+                    "ArmPoseAndWrench": {"value": "", "source": "write_board"},
+                    "TargetTag": {"value": "", "source": "write_board"}
+                }
+            },
+            {
+                "name": "MoveArmBaseJointTrajectories",
+                "label": "move_arm_base_joint_trajectories",
+                "params": {
+                    "ArmJointTrajectories": {"value": "", "source": "read_board"}
+                }
+            }
+		]
+	}
+}

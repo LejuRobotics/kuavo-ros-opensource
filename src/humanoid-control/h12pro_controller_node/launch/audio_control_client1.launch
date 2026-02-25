@@ -1,0 +1,15 @@
+<launch>
+    <!-- 全局参数设置 -->
+    <param name="default_action" value="relocalize"/>
+    <param name="default_launch_file" value="load_robot_head_sps"/>
+    <param name="default_session_name" value="relocalize"/>
+    
+    <!-- Audio Control Client -->
+    <node pkg="h12pro_controller_node" type="audio_control_client.py" name="audio_control_client" output="screen">
+        <!-- 环境变量设置 -->
+        <env name="KUAVO_ROS_CONTROL_WS_PATH" value="/home/lab/grab_box/kuavo-ros-control"/>
+        <env name="ROS_DISTRO" value="noetic"/>
+        <env name="ROS_MASTER_URI" value="http://kuavo_master:11311"/>
+        <env name="ROS_IP" value="kuavo_master"/>
+    </node>
+</launch>

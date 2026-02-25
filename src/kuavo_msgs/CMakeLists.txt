@@ -137,16 +137,6 @@ add_message_files(
   FaceBoundingBox.msg
   AudioPlaybackStatus.msg
 
-  mpc_target_trajectories.msg
-  mpc_state.msg
-  mpc_input.msg
-
-  robotWaistControl.msg
-  # VMP Controller
-  VMPTrajectoryState.msg
-
-  # Battery info
-  BatteryInfo.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -155,7 +145,6 @@ add_service_files(
   jointMoveTo.srv
   setHwIntialState.srv
   changeArmCtrlMode.srv
-  changeWaistCtrlMode.srv
   switchController.srv
   getControllerList.srv
   switchToNextController.srv
@@ -207,22 +196,10 @@ add_service_files(
   SetLEDMode_free.srv
   # kuavo_tf2_web_republisher
   RepublishTFs.srv
-  stairAlignmentSrv.srv
 
   twoArmHandPoseCmdFreeSrv.srv
   goToZeroPoint.srv
   robotSwitchPose.srv
-
-  # Lb quick mode
-  changeLbQuickModeSrv.srv
-  SetString.srv
-  GetStringList.srv
-  # VR head control
-  SetHeadControlMode.srv
-
-  # Battery service
-  GetBatteryInfo.srv
-
 )
 
 ## Generate actions in the 'action' folder

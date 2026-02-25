@@ -1,53 +1,38 @@
 #!/usr/bin/env python3
 import os
-import sys
 import netifaces
 import json
 import hashlib
 import math
 import numpy as np
 import rospy
-import rospkg
-
-# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
-try:
-    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
-    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
-    if kuavo_common_python_path not in sys.path:
-        sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion
-except (rospkg.ResourceNotFound, ImportError) as e:
-    # 如果 rospkg 不可用或包未找到，回退到相对路径方式
-    current_file_dir = os.path.dirname(os.path.abspath(__file__))
-    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
-    if kuavo_common_python_path not in sys.path:
-        sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion
 
 def get_wifi_ip():
+    try:
+        # 获取所有网络接口
+        interfaces = netifaces.interfaces()
 
-    # 获取所有网络接口
-    interfaces = netifaces.interfaces()
+        # 尝试先找以 'wl' 开头的接口（通常是 WiFi）
+        wifi_interface = next((iface for iface in interfaces if iface.startswith("wl")), None)
 
-    # 尝试先找以 'wl' 开头的接口（通常是 WiFi）
-    wifi_interface = next((iface for iface in interfaces if iface.startswith("wl")), None)
+        if wifi_interface:
+            addresses = netifaces.ifaddresses(wifi_interface)
+            if netifaces.AF_INET in addresses:
+                return addresses[netifaces.AF_INET][0]["addr"]
 
-    if wifi_interface:
-        addresses = netifaces.ifaddresses(wifi_interface)
-        if netifaces.AF_INET in addresses:
-            return addresses[netifaces.AF_INET][0]["addr"]
+        # 如果找不到 wl 开头的，再尝试找 enp 开头的（有线网络）
+        ethernet_interface = next((iface for iface in interfaces if iface.startswith("enp")), None)
 
-    # 如果找不到 wl 开头的，再尝试找 enp 开头的（有线网络）
-    ethernet_interface = next((iface for iface in interfaces if iface.startswith("enp")), None)
+        if ethernet_interface:
+            addresses = netifaces.ifaddresses(ethernet_interface)
+            if netifaces.AF_INET in addresses:
+                return addresses[netifaces.AF_INET][0]["addr"]
 
-    if ethernet_interface:
-        addresses = netifaces.ifaddresses(ethernet_interface)
-        if netifaces.AF_INET in addresses:
-            return addresses[netifaces.AF_INET][0]["addr"]
+        # 若两个都找不到，抛出异常
+        raise RuntimeError("无法获取有效 IP 地址，未找到以 'wl' 或 'enp' 开头的网络接口，或接口无 IPv4 地址")
 
-    # 若两个都找不到，抛出异常
-    rospy.logwarn("未找到有效网络接口，返回 None")
-    return None
+    except Exception as e:
+        raise RuntimeError(f"获取 IP 地址时出错: {e}")
 
 
 
@@ -121,11 +106,8 @@ def get_hotspot():
         logger.error(f"Unexpected error getting hotspot: {e}")
         return f"Error: {e}"
 
-# 使用 RobotVersion 类创建版本号对象
-robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
-robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
-
-if robot_version.version_number() >= 40:
+robot_version = (int)(os.environ.get("ROBOT_VERSION", "45"))
+if robot_version >= 40:
     INIT_ARM_POS = [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 else:
     INIT_ARM_POS = [22.91831, 0, 0, -45.83662, 22.91831, 0, 0, -45.83662, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # task.info: shoudler_center: 0.4rad, elbow_center: -0.8rad
@@ -263,15 +245,14 @@ def verify_robot_version(file_path: str):
         14: [11, 13, 14]
     }
     allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
-    robot_version_number = robot_version.version_number()
-    if robot_version_number not in allowed_robot_versions:
+    if robot_version not in allowed_robot_versions:
         msg = (
-            f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version_number}"
+            f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version}"
         )
         rospy.logerr(msg)
         return False, msg
     
-    rospy.loginfo(f"Version match: tact {tact_robot_version} is compatible with robot {robot_version_number}")
+    rospy.loginfo(f"Version match: tact {tact_robot_version} is compatible with robot {robot_version}")
     return True, None
 
 def get_start_end_frame_time(file_path: str):

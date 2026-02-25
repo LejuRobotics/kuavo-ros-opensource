@@ -6,6 +6,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CATKIN_PACKAGE_DEPENDENCIES
   ocs2_core
+  ocs2_centroidal_model  # 添加这一行
   ocs2_ddp
   ocs2_sqp
   ocs2_mpc

@@ -5,7 +5,7 @@
       "双手叉腰"
     ],
     "music_name": [
-      "双手叉腰.wav"
+      ""
     ]
   },
   "customize_action_M1_B": {
@@ -14,7 +14,7 @@
       "举右手"
     ],
     "music_name": [
-      "举右手.wav"
+      ""
     ]
   },
   "customize_action_M1_X": {
@@ -23,7 +23,7 @@
       "举左手"
     ],
     "music_name": [
-      "举左手.wav"
+      ""
     ]
   },
   "customize_action_M1_Y": {
@@ -32,7 +32,7 @@
       "敬少先队队礼"
     ],
     "music_name": [
-      "敬少先队队礼.wav"
+      ""
     ]
   },
   "customize_action_M2_A": {
@@ -41,7 +41,7 @@
       "放箱子"
     ],
     "music_name": [
-      "放箱子.wav"
+      ""
     ]
   },
   "customize_action_M2_B": {
@@ -59,7 +59,7 @@
       "飞吻"
     ],
     "music_name": [
-      "飞吻.wav"
+      ""
     ]
   },
   "customize_action_M2_Y": {
@@ -68,7 +68,7 @@
       "抱箱子"
     ],
     "music_name": [
-      "抱箱子.wav"
+      ""
     ]
   },
   "customize_action_M1M2_A": {
@@ -113,7 +113,7 @@
       "抱拳"
     ],
     "music_name": [
-      "抱拳.wav"
+      ""
     ]
   },
   "customize_action_LT_B": {
@@ -122,25 +122,25 @@
       "右手打招呼"
     ],
     "music_name": [
-      "右手打招呼.wav"
+      ""
     ]
   },
   "customize_action_LT_X": {
     "type": "action",
     "arm_pose_name": [
-      "左转腰打招呼"
+      "左手打招呼"
     ],
     "music_name": [
-      "左转腰打招呼.wav"
+      ""
     ]
   },
   "customize_action_LT_Y": {
     "type": "action",
     "arm_pose_name": [
-      "右手握手"
+      "握手"
     ],
     "music_name": [
-      "右手握手.wav"
+      ""
     ]
   },
   "customize_action_RT_A": {
@@ -149,12 +149,12 @@
       "碰拳"
     ],
     "music_name": [
-      "碰拳.wav"
+      ""
     ]
   },
   "customize_action_RT_B": {
     "type": "shell",
-    "command": "python3 /home/lab/kuavo-ros-opensource/src/demo/csv2body_demo/step_player_csv_ocs2.py"
+    "command": "python3 /home/lab/kuavo-ros-control/src/demo/csv2body_demo/step_player_csv_ocs2.py"
   },
   "customize_action_RT_X": {
     "type": "action",
@@ -162,7 +162,7 @@
       "欢呼"
     ],
     "music_name": [
-      "欢呼.wav"
+      ""
     ]
   },
   "customize_action_RT_Y": {
@@ -171,7 +171,7 @@
       "抬右手致意"
     ],
     "music_name": [
-      "抬右手致意.wav"
+      ""
     ]
   }
 }

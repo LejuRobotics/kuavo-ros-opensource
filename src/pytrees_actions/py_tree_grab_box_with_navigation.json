@@ -1,0 +1,244 @@
+{
+    "tree": {
+        "name": "Selector",
+        "label": "root",
+        "params": {},
+        "childs": [
+            {
+                "name": "Sequence",
+                "label": "move_box_seq",
+                "params": {
+                    "memory": {
+                        "value": "True",
+                        "source": "CUSTOM"
+                    }
+                },
+                "childs": [
+                    {
+                        "name": "PrepareArmForGrasp",
+                        "label": "prepare_arm_for_grasp",
+                        "params": {
+                            "arm_control_mode": {
+                                "value": "fixed_base",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "MoveToTargetslam",
+                        "label": "test_slam_move_forward",
+                        "params": {
+                            "mode": {
+                                "value": "slam",
+                                "source": "CUSTOM"
+                            },
+                            "x": {
+                                "value": "-0.807",
+                                "source": "CUSTOM"
+                            },
+                            "y": {
+                                "value": "0.115",
+                                "source": "CUSTOM"
+                            },
+                            "yaw": {
+                                "value": "-66.0",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "look_for_tag.json",
+                        "label": "find_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name": "CalcMoveDest",
+                        "label": "cal",
+                        "params": {
+                            "mode": {
+                                "value": "box_pick",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "MoveToTarget",
+                        "label": "go_to_tag",
+                        "params": {
+                            "mode": {
+                                "value": "tag_target",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "grasp_box_lb.json",
+                        "label": "grasp_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name" : "CalcLeg",
+                        "label" : "calc_leg_torso",
+                        "params" : {
+                        "offset_x" : {
+                            "value" : "0.0",
+                            "source" : "CUSTOM"
+                        },
+                        "offset_y" : {
+                            "value" : "0.0",
+                            "source" : "CUSTOM"
+                        },
+                        "offset_z" : {
+                            "value" : "1.2",
+                            "source" : "CUSTOM"
+                        },
+                        "control_base" : {
+                            "value" : "false",
+                            "source" : "CUSTOM"
+                        },
+                        "face_tag" : {
+                            "value" : "true",
+                            "source" : "CUSTOM"
+                        },
+                        "leg_mode" : {
+                            "value" : "leg",
+                            "source" : "CUSTOM"
+                        },
+                        "offset_yaw" : {
+                            "value" : "170.0",
+                            "source" : "CUSTOM"
+                        }
+                        },
+                        "childs" : [ ]
+                    },
+                    {
+                        "name": "look_for_tag.json",
+                        "label": "find_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name": "CalcMoveDest",
+                        "label": "cal",
+                        "params": {
+                            "mode": {
+                                "value": "box_place",
+                                "source": "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name": "MoveToTarget",
+                        "label": "go_to_tag",
+                        "params": {
+                            "mode": {
+                                "value": "tag_target",
+                                "source": "CUSTOM"
+                            },
+                            "x": {
+                                "value": "-837",
+                                "source": "CUSTOM"
+                            },
+                            "y": {
+                                "value": "11",
+                                "source": "CUSTOM"
+                            },
+                            "yaw": {
+                                "value": "2.8972",
+                                "source": "CUSTOM"
+                            },
+                            "leg_mode" : {
+                                "value" : "leg",
+                                "source" : "CUSTOM"
+                            }
+                        },
+                        "childs": []
+                    },
+                    {
+                        "name" : "CalcLeg",
+                        "label" : "calc_leg_torso",
+                        "params" : {
+                        "offset_x" : {
+                            "value" : "-0.3",
+                            "source" : "CUSTOM"
+                        },
+                        "offset_y" : {
+                            "value" : "0.0",
+                            "source" : "CUSTOM"
+                        },
+                        "offset_z" : {
+                            "value" : "1.25",
+                            "source" : "CUSTOM"
+                        },
+                        "control_base" : {
+                            "value" : "false",
+                            "source" : "CUSTOM"
+                        },
+                        "face_tag" : {
+                            "value" : "true",
+                            "source" : "CUSTOM"
+                        },
+                        "leg_mode" : {
+                            "value" : "leg",
+                            "source" : "CUSTOM"
+                        },
+                        "offset_yaw" : {
+                            "value" : "170.0",
+                            "source" : "CUSTOM"
+                        }
+                        },
+                        "childs" : [ ]
+                    },
+                    {
+                        "name": "place_box_lb.json",
+                        "label": "place_box_subtree",
+                        "params": {},
+                        "childs": []
+                    },
+                    {
+                        "name" : "CalcLeg",
+                        "label" : "calc_leg_torso",
+                        "params" : {
+                        "offset_x" : {
+                            "value" : "0.0",
+                            "source" : "CUSTOM"
+                        },
+                        "offset_y" : {
+                            "value" : "0.0",
+                            "source" : "CUSTOM"
+                        },
+                        "offset_z" : {
+                            "value" : "1.0",
+                            "source" : "CUSTOM"
+                        },
+                        "control_base" : {
+                            "value" : "false",
+                            "source" : "CUSTOM"
+                        },
+                        "face_tag" : {
+                            "value" : "true",
+                            "source" : "CUSTOM"
+                        },
+                        "leg_mode" : {
+                            "value" : "leg",
+                            "source" : "CUSTOM"
+                        },
+                        "offset_yaw" : {
+                            "value" : "0.0",
+                            "source" : "CUSTOM"
+                        }
+                        },
+                        "childs" : [ ]
+                    }
+                ]
+            }
+        ]
+    }
+}

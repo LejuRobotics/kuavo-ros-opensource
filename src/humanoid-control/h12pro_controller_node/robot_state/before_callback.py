@@ -202,6 +202,7 @@ def walk_callback(event) -> None:
     source = event.kwargs.get("source")
     call_change_phase("P_walk", "sub_phase_none")
     time.sleep(1)
+    rospy.loginfo("befo_walk_callbackl----------------------")
     print_state_transition("walk", source, "walk")
 
 

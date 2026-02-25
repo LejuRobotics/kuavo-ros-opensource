@@ -3,19 +3,16 @@
   <param name="robot_version"    value="$(arg robot_version)"/>
   <arg name="use_xacro" value="$(eval int(arg('robot_version')) >= 40)"/>
 
-  <!-- robot_type: 1=轮臂, 2=双足
-       版本号规则: major=(version%100)/10, minor=version%10
-       判断方法: major==6 为轮臂，即 version%100 在[60,70)范围
-       例如: 45(major=4)->双足, 60(major=6)->轮臂, 100045(major=4)->双足, 100060(major=6)->轮臂 -->
+  <!-- 根据robot_type选择模型版本 -->
     <arg name="robot_type"
-         default="$(eval '1' if 60 &lt;= int(arg('robot_version')) % 100 &lt; 70 else '2')"/>
+         default="$(eval '1' if int(arg('robot_version')) >= 60 else '2')"/>
     <param name="robot_type" value="$(arg robot_type)"/>
 
   <arg name="use_grab_box_scene" default="false"/>
-  <arg name="use_grab_box_new_scene" default="false"/>
+  <arg name="load_table_apriltag" default="false" doc="是否加载table_apriltag模型（包含两个桌子和apriltag）"/>
   <arg name="world_name"  default="$(find gazebo_ros)/worlds/empty.world"/>
   <arg name="use_kuavo" value="$(eval int(arg('robot_version')) >= 40)"/>
-  <arg name="spawn_z"        default="$(eval '1.0' if int(arg('robot_type')) == 2 else '0.0')"/>
+  <arg name="spawn_z"        default="$(eval '1.0' if int(arg('robot_type')) == 2 else '0.25')"/>
 
   <!-- 楼梯参数（用于传递给load_stairs.launch） -->
   <!-- 第一段楼梯（上楼梯）参数 -->
@@ -80,48 +77,52 @@
   <node name="spawn_robot" pkg="gazebo_ros" type="spawn_model" 
         args="-urdf -model biped_s$(arg robot_version) -param robot_description -x 0 -y 0 -z $(arg spawn_z)"/>
 
-  <group if="$(arg use_grab_box_new_scene)">
-    <param name="table_apriltag_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/grab_box_table_new.xacro"/>
+  <group unless="$(arg use_grab_box_scene)">
+    <!-- 加载独立的 AprilTag Cube -->
+    <param name="apriltag_cube_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/standalone_cube.xacro"/>
+    <!-- 生成 AprilTag Cube 模型 -->
+    <node name="spawn_apriltag_cube" pkg="gazebo_ros" type="spawn_model" 
+          args="-urdf -model apriltag_cube -param apriltag_cube_description"/>
+    <!-- 加载block -->
+    <param name="block_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/block.urdf.xacro"/>
+    <!-- 生成block模型，使用floating joint -->
+    <node name="spawn_block" pkg="gazebo_ros" type="spawn_model" 
+          args="-urdf -model block -param block_description -x 0.0 -y -1.0 -z 1.2 -R 0 -P 0 -Y 0"
+          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>
+    <param name="apriltag_cube_floating_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/floating_cube.xacro"/>
+    <node name="spawn_apriltag_cube_floating" pkg="gazebo_ros" type="spawn_model"
+          args="-urdf -model apriltag_cube_floating -param apriltag_cube_floating_description -x 0.0 -y 1.0 -z 2.0 -R 0 -P 0 -Y 0"
+          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>
 
-    <!-- 生成table_apriltag模型 -->
-    <node name="spawn_table_apriltag" pkg="gazebo_ros" type="spawn_model" 
-          args="-urdf -model table_apriltag -param table_apriltag_description -x 0.0 -y 0.0 -z 0.0"/>
+  </group>
+  <group if="$(arg use_grab_box_scene)">
+    <!-- 加载table_apriltag模型描述（包含两个桌子和apriltag） -->
+    <group if="$(arg load_table_apriltag)">
+      <param name="table_apriltag_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/grab_box_table.xacro"/>
+      <!-- 生成table_apriltag模型 -->
+      <node name="spawn_table_apriltag" pkg="gazebo_ros" type="spawn_model"
+            args="-urdf -model table_apriltag -param table_apriltag_description -x 0.0 -y 0.0 -z 0.0"/>
+    </group>
 
     <!-- 加载block -->
     <param name="block_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/block.urdf.xacro"/>
     <!-- 生成block模型，使用floating joint -->
     <node name="spawn_block" pkg="gazebo_ros" type="spawn_model" 
-          args="-urdf -model block -param block_description -x 1.5 -y -0.7 -z 2.0 -R 0 -P 0 -Y 0"
-          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>     
-  </group>
-  <group unless="$(arg use_grab_box_new_scene)">
-    <group unless="$(arg use_grab_box_scene)">
-      <!-- 加载独立的 AprilTag Cube -->
-      <param name="apriltag_cube_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/standalone_cube.xacro"/>
-      <!-- 生成 AprilTag Cube 模型 -->
-      <node name="spawn_apriltag_cube" pkg="gazebo_ros" type="spawn_model" 
-            args="-urdf -model apriltag_cube -param apriltag_cube_description"/>
-      <!-- 加载block -->
-      <param name="block_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/block.urdf.xacro"/>
-      <!-- 生成block模型，使用floating joint -->
-      <node name="spawn_block" pkg="gazebo_ros" type="spawn_model" 
-            args="-urdf -model block -param block_description -x 0.0 -y -1.0 -z 2.0 -R 0 -P 0 -Y 0"
-            launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>
-    </group>
-    <group if="$(arg use_grab_box_scene)">
-      <param name="table_apriltag_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/grab_box_table.xacro"/>
+          args="-urdf -model block -param block_description -x 0.0 -y -1.9 -z 1.2 -R 0 -P 0 -Y 0"
+          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>
+    <param name="apriltag_cube_floating_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/floating_cube.xacro"/>
+    <node name="spawn_apriltag_cube_floating" pkg="gazebo_ros" type="spawn_model"
+          args="-urdf -model apriltag_cube_floating -param apriltag_cube_floating_description -x 1.0 -y -0.5 -z 1.2 -R 0 -P 0 -Y 0"
+          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>
+    <param name="apriltag_cube_floating_description2" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/floating_cube1.xacro"/>
+    <node name="spawn_apriltag_cube_floating2" pkg="gazebo_ros" type="spawn_model"
+          args="-urdf -model apriltag_cube_floating2 -param apriltag_cube_floating_description2 -x -1.0 -y 0.0 -z 1.6 -R 0 -P 0 -Y 3.14"
+          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>
+    <param name="apriltag_cube_floating_description3" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/floating_cube2.xacro"/>
+    <node name="spawn_apriltag_cube_floating3" pkg="gazebo_ros" type="spawn_model"
+          args="-urdf -model apriltag_cube_floating3 -param apriltag_cube_floating_description3 -x 1.0 -y 0.0 -z 1.2 -R 0 -P 0 -Y 0"
+          launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>
 
-      <!-- 生成table_apriltag模型 -->
-      <node name="spawn_table_apriltag" pkg="gazebo_ros" type="spawn_model" 
-            args="-urdf -model table_apriltag -param table_apriltag_description -x 0.0 -y 0.0 -z 0.0"/>
-
-      <!-- 加载block -->
-      <param name="block_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/apriltag/urdf/block.urdf.xacro"/>
-      <!-- 生成block模型，使用floating joint -->
-      <node name="spawn_block" pkg="gazebo_ros" type="spawn_model" 
-            args="-urdf -model block -param block_description -x 0.0 -y -1.9 -z 2.0 -R 0 -P 0 -Y 0"
-            launch-prefix="bash -c 'sleep 1.5; $0 $@' "/>      
-    </group>
   </group>
 
   <!-- Start robot state publisher to publish TF -->

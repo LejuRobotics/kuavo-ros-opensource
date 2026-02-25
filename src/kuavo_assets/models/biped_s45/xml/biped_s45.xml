@@ -59,11 +59,10 @@
     <body name="base_link" pos="0 0 0.82">
       <freejoint />
       <site name="imu" pos="0 0 0" />
-      <inertial pos="-0.00761 0.00182 0.21995" quat="0.998529 4.54328e-05 0.0542216 0.000512508" mass="26.1133" diaginertia="0.938886 0.825905 0.269012" />
+      <inertial pos="-0.0185005 0.00031952 0.192957" quat="0.998529 4.54328e-05 0.0542216 0.000512508" mass="20.3279" diaginertia="0.938886 0.825905 0.269012" />
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso" />
       <geom type="box" size="0.1 0.12 0.15" pos="0 0 0.15" class="collision"/>
       <geom type="ellipsoid" size="0.12 0.2 0.13" pos="-0.02 0 0.42" class="collision"/>
-
       <body name="leg_l1_link" pos="-0.0024999 0.087 -0.066">
         <inertial pos="-0.00402302 0.00013568 -0.00908713" quat="-0.00566884 0.723807 0.00605909 0.689952" mass="1.75436" diaginertia="0.00377365 0.00281073 0.002133" />
         <joint name="leg_l1_joint" pos="0 0 0" axis="1 0 0" range="-0.314159 0.663225" actuatorfrcrange="-180 180" damping="2" frictionloss="0.5" armature="0.12" />
@@ -232,26 +231,6 @@
           <geom pos="0.117357 0.0176534 0.152372" quat="0.970296 0 0.241922 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="camera" />
         </body>
       </body>
-
-      <!-- 新增：红色右手工作空间方框（无碰撞） -->
-      <!-- <geom type="box" 
-            size="0.2 0.285 0.3"        
-            pos="0.4 -0.335 0.3"          
-            rgba="1 0 0 0.5"         
-            contype="0"              
-            conaffinity="0"          
-            group="0"                
-            density="0"/>           -->
-
-      <!-- 新增：黄色左手工作空间方框（无碰撞） -->
-      <!-- <geom type="box" 
-            size="0.2 0.285 0.3"        
-            pos="0.4 0.335 0.3"          
-            rgba="0 1 1 0.5"         
-            contype="0"              
-            conaffinity="0"          
-            group="0"                
-            density="0"/>     -->
     </body>
   </worldbody>
   <actuator>

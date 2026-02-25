@@ -1,0 +1,842 @@
+{
+  "Walk" : [ {
+    "key" : "WalkEventTimeout",
+    "remark" : "走路事件超时时间",
+    "type" : "int",
+    "unit" : "s",
+    "value" : "50",
+    "defaultValue" : "50",
+    "example" : "50"
+  }, {
+    "key" : "WalkEventYawThreshold",
+    "remark" : "走路事件角度阈值",
+    "type" : "float",
+    "unit" : "rad",
+    "value" : "0.3",
+    "defaultValue" : "0.3",
+    "example" : "0.3"
+  }, {
+    "key" : "WalkEventPosThreshold",
+    "remark" : "走路事件位置阈值",
+    "type" : "float",
+    "unit" : "m",
+    "value" : "0.20",
+    "defaultValue" : "0.20",
+    "example" : "0.20"
+  } ],
+  "GraspBox" : [ {
+    "key" : "ForceRatioZ",
+    "remark" : "垂直方向力比",
+    "type" : "float",
+    "unit" : "比例",
+    "value" : "0.0",
+    "defaultValue" : "0.0",
+    "example" : "0.0"
+  }, {
+    "key" : "LateralForce",
+    "remark" : "侧向力",
+    "type" : "float",
+    "unit" : "N",
+    "value" : "0.0",
+    "defaultValue" : "0.0",
+    "example" : "0.0"
+  }, {
+    "key" : "PickPoseStandPositionInTag",
+    "remark" : "搬箱子时站在箱子前的位置",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "0, 0, 0.6",
+    "defaultValue" : "0, 0, 0.6",
+    "example" : "0, 0, 0.6",
+    "length" : 3
+  }, {
+    "key" : "PickPoseStandEulerInTag",
+    "remark" : "搬箱子时站在箱子前的角度",
+    "type" : "floatArr",
+    "unit" : "rad",
+    "value" : "-1.5708, 1.5708, 0",
+    "defaultValue" : "-1.5708, 1.5708, 0",
+    "example" : "-1.5708, 1.5708, 0",
+    "length" : 3
+  }, {
+    "key" : "PlacePoseStandPositionInTag",
+    "remark" : "放箱子时站在二维码前的位置",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "0, 0, 0.8",
+    "defaultValue" : "0, 0, 1.5",
+    "example" : "0, 0, 1.5",
+    "length" : 3
+  }, {
+    "key" : "PlacePoseStandEulerInTag",
+    "remark" : "放箱子时站在二维码前的角度",
+    "type" : "floatArr",
+    "unit" : "rad",
+    "value" : "-1.5708, 1.5708, 0",
+    "defaultValue" : "-1.5708, 1.5708, 0",
+    "example" : "-1.5708, 1.5708, 0",
+    "length" : 3
+  } ],
+  "SMTIdRowMapping" : [ {
+    "key" : "TagIDRow2",
+    "remark" : "料架第二行二维码 ID",
+    "type" : "intArr",
+    "unit" : "",
+    "value" : "20,21,22,23,24,25,26,27,28",
+    "defaultValue" : "20,21,22,23,24,25,26,27,28",
+    "example" : "20,21,22,23,24,25,26,27,28",
+    "length" : 9
+  }, {
+    "key" : "TagIDRow3",
+    "remark" : "料架第三行二维码 ID",
+    "type" : "intArr",
+    "unit" : "",
+    "value" : "0,1,2,3,4,5,6,7,8",
+    "defaultValue" : "0,1,2,3,4,5,6,7,8",
+    "example" : "0,1,2,3,4,5,6,7,8",
+    "length" : 9
+  }, {
+    "key" : "TagIDRow4",
+    "remark" : "料架第四行二维码 ID",
+    "type" : "intArr",
+    "unit" : "",
+    "value" : "10,11,12,13,14,15,16,17,18",
+    "defaultValue" : "10,11,12,13,14,15,16,17,18",
+    "example" : "10,11,12,13,14,15,16,17,18",
+    "length" : 9
+  }, {
+    "key" : "TagIDRow5",
+    "remark" : "料架第五行二维码 ID",
+    "type" : "intArr",
+    "unit" : "",
+    "value" : "30,31,32,33,34,35,36,37,38",
+    "defaultValue" : "30,31,32,33,34,35,36,37,38",
+    "example" : "30,31,32,33,34,35,36,37,38",
+    "length" : 9
+  }, {
+    "key" : "TagIDRow6",
+    "remark" : "料架第六行二维码 ID",
+    "type" : "intArr",
+    "unit" : "",
+    "value" : "40,41,42,43,44,45,46,47,48",
+    "defaultValue" : "40,41,42,43,44,45,46,47,48",
+    "example" : "40,41,42,43,44,45,46,47,48",
+    "length" : 9
+  } ],
+  "SMTSquatStandControl" : [ {
+    "key" : "SecondRowPickSquatMode",
+    "remark" : "抓取第二排机器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "SecondRowPickStandMode",
+    "remark" : "抓取第二排机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "SecondRowPlaceSquatMode",
+    "remark" : "放置时机器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "SecondRowPlaceStandMode",
+    "remark" : "放置时机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowPickSquatMode",
+    "remark" : "抓取第三排机器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowPickStandMode",
+    "remark" : "抓取第三排机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowPlaceSquatMode",
+    "remark" : "放置时器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowPlaceStandMode",
+    "remark" : "放置时机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FourthRowPickSquatMode",
+    "remark" : "抓取第四排机器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FourthRowPickStandMode",
+    "remark" : "抓取第四排机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FourthRowPlaceSquatMode",
+    "remark" : "放置时机器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FourthRowPlaceStandMode",
+    "remark" : "放置时机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FifthRowPickSquatMode",
+    "remark" : "抓取第五排机器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FifthRowPickStandMode",
+    "remark" : "抓取第五排机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FifthRowPlaceSquatMode",
+    "remark" : "放置时机器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FifthRowPlaceStandMode",
+    "remark" : "放置时机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "SixthRowPickSquatMode",
+    "remark" : "抓取第六排机器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "SixthRowPickStandMode",
+    "remark" : "抓取第六排机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "SixthRowPlaceSquatMode",
+    "remark" : "放置时机器人预备姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "SixthRowPlaceStandMode",
+    "remark" : "放置时机器人完成姿态",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  } ],
+  "Head" : [ {
+    "key" : "PercepHalfFov",
+    "remark" : "视场角",
+    "type" : "int",
+    "unit" : "deg",
+    "value" : "60",
+    "defaultValue" : "60",
+    "example" : "60"
+  }, {
+    "key" : "HeadEventTimeout",
+    "remark" : "头部事件超时时间",
+    "type" : "int",
+    "unit" : "s",
+    "value" : "3000",
+    "defaultValue" : "3000",
+    "example" : "3000"
+  }, {
+    "key" : "HeadDt",
+    "remark" : "头部运动间隔时间",
+    "type" : "float",
+    "unit" : "s",
+    "value" : "0.1",
+    "defaultValue" : "0.1",
+    "example" : "0.1"
+  } ],
+  "SMTPickPoseOffsets" : [ {
+    "key" : "SecondRowPrePos",
+    "remark" : "第二行预抓取位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "-0.15, -0.03, 0.29",
+    "defaultValue" : "-0.15, -0.03, 0.29",
+    "example" : "-0.15, -0.03, 0.29",
+    "length" : 3
+  }, {
+    "key" : "SecondRowPreEulerDeg",
+    "remark" : "第二行预抓取角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "100, 0.0, -90",
+    "defaultValue" : "100, 0.0, -90",
+    "example" : "100, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "SecondRowGraspPos",
+    "remark" : "第二行抓取的位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0.156, 0.1, 0.25",
+    "defaultValue" : "0.156, 0.1, 0.25",
+    "example" : "0.156, 0.1, 0.25",
+    "length" : 3
+  }, {
+    "key" : "SecondRowGraspEulerDeg",
+    "remark" : "第二行抓取的角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowPrePos",
+    "remark" : "第三行预抓取位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "-0.02, -0.03, 0.07",
+    "defaultValue" : "-0.02, -0.03, 0.07",
+    "example" : "-0.02, -0.03, 0.07",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowPreEulerDeg",
+    "remark" : "第三行预抓取角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowGraspPos",
+    "remark" : "第三行抓取的位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0.11, -0.01, -0.10",
+    "defaultValue" : "0.11, -0.01, -0.10",
+    "example" : "0.11, -0.01, -0.10",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowGraspEulerDeg",
+    "remark" : "第三行抓取的角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "FourthRowPrePos",
+    "remark" : "第四行预抓取位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "-0.2, -0.03, -0.28",
+    "defaultValue" : "-0.2, -0.03, -0.28",
+    "example" : "-0.2, -0.03, -0.28",
+    "length" : 3
+  }, {
+    "key" : "FourthRowPreEulerDeg",
+    "remark" : "第四行预抓取角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "FourthRowGraspPos",
+    "remark" : "第四行抓取的位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0.16, -0.03, -0.2",
+    "defaultValue" : "0.16, -0.03, -0.2",
+    "example" : "0.16, -0.03, -0.2",
+    "length" : 3
+  }, {
+    "key" : "FourthRowGraspEulerDeg",
+    "remark" : "第四行抓取的角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "FifthRowPrePos",
+    "remark" : "第五行预抓取位置",
+    "type" : "floatArr",
+    "value" : "-0.15, -0.01, -0.35",
+    "defaultValue" : "-0.15, -0.01, -0.35",
+    "example" : "-0.15, -0.01, -0.35",
+    "length" : 3
+  }, {
+    "key" : "FifthRowPreEulerDeg",
+    "remark" : "第五行预抓取角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "85, 0.0, -90",
+    "defaultValue" : "85, 0.0, -90",
+    "example" : "85, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "FifthRowGraspPos",
+    "remark" : "第五行抓取的位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0.13, -0.02, -0.48",
+    "defaultValue" : "0.13, -0.02, -0.48",
+    "example" : "0.13, -0.02, -0.48",
+    "length" : 3
+  }, {
+    "key" : "FifthRowGraspEulerDeg",
+    "remark" : "第五行抓取的角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "SixthRowPrePos",
+    "remark" : "第六行预抓取位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "-0.15, -0.05, -0.5",
+    "defaultValue" : "-0.15, -0.05, -0.5",
+    "example" : "-0.15, -0.05, -0.5",
+    "length" : 3
+  }, {
+    "key" : "SixthRowPreEulerDeg",
+    "remark" : "第六行预抓取角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "80, 0.0, -90",
+    "defaultValue" : "80, 0.0, -90",
+    "example" : "80, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "SixthRowGraspPos",
+    "remark" : "第六行抓取的位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0.15, -0.08, -0.9",
+    "defaultValue" : "0.15, -0.08, -0.9",
+    "example" : "0.15, -0.08, -0.9",
+    "length" : 3
+  }, {
+    "key" : "SixthRowGraspEulerDeg",
+    "remark" : "第六行抓取的角度",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "80, 0.0, -90",
+    "defaultValue" : "80, 0.0, -90",
+    "example" : "80, 0.0, -90",
+    "length" : 3
+  } ],
+  "SMTPostGraspOffsets" : [ {
+    "key" : "SecondRowWithdrawPosOffset",
+    "remark" : "第二行缩手时手臂位置偏移",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "-0.45, 0.0, 0.17",
+    "defaultValue" : "-0.45, 0.0, 0.17",
+    "example" : "-0.45, 0.0, 0.17",
+    "length" : 3
+  }, {
+    "key" : "SecondRowWithdrawEulerDeg",
+    "remark" : "第二行缩手时手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "130, 0.0, -90",
+    "defaultValue" : "130, 0.0, -90",
+    "example" : "130, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "SecondRowObservePosAbs",
+    "remark" : "第二行观察时手臂位置绝对值",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "0.4, 0.12, 0.4",
+    "defaultValue" : "0.4, 0.12, 0.4",
+    "example" : "0.4, 0.12, 0.4",
+    "length" : 3
+  }, {
+    "key" : "SecondRowObserveEulerDeg",
+    "remark" : "第二行观察时手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "90, -60.0, -160",
+    "defaultValue" : "90, -60.0, -160",
+    "example" : "90, -60.0, -160",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowWithdrawPosOffset",
+    "remark" : "第三行缩手时手臂位置偏移",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "-0.4, -0.02, 0.08",
+    "defaultValue" : "-0.4, -0.02, 0.08",
+    "example" : "-0.4, -0.02, 0.08",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowWithdrawEulerDeg",
+    "remark" : "第三行缩手时手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowObservePosAbs",
+    "remark" : "第三行观察时手臂位置绝对值",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "0.41, 0.12, 0.4",
+    "defaultValue" : "0.41, 0.12, 0.4",
+    "example" : "0.41, 0.12, 0.4",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowObserveEulerDeg",
+    "remark" : "第三行观察时手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "90, -60.0, -160",
+    "defaultValue" : "90, -60.0, -160",
+    "example" : "90, -60.0, -160",
+    "length" : 3
+  }, {
+    "key" : "FourthRowWithdrawPosOffset",
+    "remark" : "第四行缩手时手臂位置偏移",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "-0.4, -0.03, -0.04",
+    "defaultValue" : "-0.4, -0.03, -0.04",
+    "example" : "-0.4, -0.03, -0.04",
+    "length" : 3
+  }, {
+    "key" : "FourthRowWithdrawEulerDeg",
+    "remark" : "第四行缩手时角手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "FourthRowObservePosAbs",
+    "remark" : "第四行观察时手臂位置绝对值",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "0.43, 0.14, 0.4",
+    "defaultValue" : "0.43, 0.14, 0.4",
+    "example" : "0.43, 0.14, 0.4",
+    "length" : 3
+  }, {
+    "key" : "FourthRowObserveEulerDeg",
+    "remark" : "第四行观察时手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "90, -60.0, -160",
+    "defaultValue" : "90, -60.0, -160",
+    "example" : "90, -60.0, -160",
+    "length" : 3
+  }, {
+    "key" : "FifthRowWithdrawPosOffset",
+    "remark" : "第五行缩手时手臂位置偏移量",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "-0.45, -0.0, -0.16",
+    "defaultValue" : "-0.45, -0.0, -0.16",
+    "example" : "-0.45, -0.0, -0.16",
+    "length" : 3
+  }, {
+    "key" : "FifthRowWithdrawEulerDeg",
+    "remark" : "第五行缩手时手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "FifthRowObservePosAbs",
+    "remark" : "第五行观察时手臂位置绝对值",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "0.35, 0.12, 0.4",
+    "defaultValue" : "0.35, 0.12, 0.4",
+    "example" : "0.35, 0.12, 0.4",
+    "length" : 3
+  }, {
+    "key" : "FifthRowObserveEulerDeg",
+    "remark" : "第五行观察时手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "90, -60.0, -160",
+    "defaultValue" : "90, -60.0, -160",
+    "example" : "90, -60.0, -160",
+    "length" : 3
+  }, {
+    "key" : "SixthRowWithdrawPosOffset",
+    "remark" : "第六行缩手时手臂位置偏移",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "-0.35, -0.0, -0.35",
+    "defaultValue" : "-0.35, -0.0, -0.35",
+    "example" : "-0.35, -0.0, -0.35",
+    "length" : 3
+  }, {
+    "key" : "SixthRowWithdrawEulerDeg",
+    "remark" : "第六行缩手时手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "90, 0.0, -90",
+    "defaultValue" : "90, 0.0, -90",
+    "example" : "90, 0.0, -90",
+    "length" : 3
+  }, {
+    "key" : "SixthRowObservePosAbs",
+    "remark" : "第六行观察时手臂位置绝对值",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "0.35, 0.12, 0.4",
+    "defaultValue" : "0.35, 0.12, 0.4",
+    "example" : "0.35, 0.12, 0.4",
+    "length" : 3
+  }, {
+    "key" : "SixthRowObserveEulerDeg",
+    "remark" : "第六行观察时手臂欧拉角",
+    "type" : "floatArr",
+    "unit" : "deg",
+    "value" : "90, -60.0, -160",
+    "defaultValue" : "90, -60.0, -160",
+    "example" : "90, -60.0, -160",
+    "length" : 3
+  } ],
+  "SMTNavPos" : [ {
+    "key" : "PickPositionOfColumn0",
+    "remark" : "抓取第1列导航位置",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "-7.355, 7.77, 1.57",
+    "defaultValue" : "-5.895, 7.37, 1.57",
+    "example" : "-5.895, 7.37, 1.57",
+    "length" : 3
+  }, {
+    "key" : "PickPositionOfColumn1",
+    "remark" : "抓取第2列导航位置",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "-5.775, 7.37, 1.57",
+    "defaultValue" : "-5.775, 7.37, 1.57",
+    "example" : "-5.775, 7.37, 1.57",
+    "length" : 3
+  }, {
+    "key" : "PickPositionOfColumn2",
+    "remark" : "抓取第3列导航位置",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "-5.655, 7.37, 1.57",
+    "defaultValue" : "-5.655, 7.37, 1.57",
+    "example" : "-5.655, 7.37, 1.57",
+    "length" : 3
+  }, {
+    "key" : "PlacePosition",
+    "remark" : "放置料盘导航位置",
+    "type" : "floatArr",
+    "unit" : "m",
+    "value" : "-6.367, 6.309, -1.57",
+    "defaultValue" : "-5.367, 6.309, -1.57",
+    "example" : "-5.367, 6.309, -1.57",
+    "length" : 3
+  } ],
+  "SMTMoveHeadControl" : [ {
+    "key" : "SecondRowPickSquatMode",
+    "remark" : "第二行抓取的头部位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "ThirdRowPickSquatMode",
+    "remark" : "第三行抓取的头部位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FourthRowPickSquatMode",
+    "remark" : "第四行抓取的头部位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "FifthRowPickSquatMode",
+    "remark" : "第五行抓取的头部位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  }, {
+    "key" : "SixthRowPickSquatMode",
+    "remark" : "第六行抓取的头部位置",
+    "type" : "floatArr",
+    "unit" : "",
+    "value" : "0, 0, 1",
+    "defaultValue" : "0, 0, 1",
+    "example" : "0, 0, 1",
+    "length" : 3
+  } ],
+  "Arm" : [ {
+    "key" : "ArmEventTimeout",
+    "remark" : "手臂事件超时时间",
+    "type" : "int",
+    "unit" : "s",
+    "value" : "30",
+    "defaultValue" : "30",
+    "example" : "30"
+  }, {
+    "key" : "PoseThreshold",
+    "remark" : "手臂事件位置阈值",
+    "type" : "float",
+    "unit" : "m",
+    "value" : "0.14",
+    "defaultValue" : "0.14",
+    "example" : "0.14"
+  }, {
+    "key" : "AngleThreshold",
+    "remark" : "手臂事件角度阈值",
+    "type" : "float",
+    "unit" : "rad",
+    "value" : "0.5",
+    "defaultValue" : "0.5",
+    "example" : "0.5"
+  } ],
+  "Common" : [ {
+    "key" : "BoxMass",
+    "remark" : "箱子质量",
+    "type" : "float",
+    "unit" : "kg",
+    "value" : "1.5",
+    "defaultValue" : "1.5",
+    "example" : "1.5"
+  }, {
+    "key" : "BoxLength",
+    "remark" : "箱子长度",
+    "type" : "float",
+    "unit" : "m",
+    "value" : "0.35",
+    "defaultValue" : "0.35",
+    "example" : "0.35"
+  }, {
+    "key" : "BoxWidth",
+    "remark" : "箱子宽度",
+    "type" : "float",
+    "unit" : "m",
+    "value" : "0.3",
+    "defaultValue" : "0.3",
+    "example" : "0.3"
+  }, {
+    "key" : "BoxHeight",
+    "remark" : "箱子高度",
+    "type" : "float",
+    "unit" : "m",
+    "value" : "0.22",
+    "defaultValue" : "0.22",
+    "example" : "0.22"
+  }, {
+    "key" : "robot_type",
+    "remark" : "机器人类型",
+    "type" : "string",
+    "unit" : "",
+    "value" : "kuavo_lb",
+    "defaultValue" : "kuavo_lb",
+    "example" : "kuavo_lb"
+  } ]
+}

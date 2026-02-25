@@ -1,0 +1,139 @@
+{
+	"tree": {
+        "name": "Sequence",
+        "label": "grab_one_object_seq",
+        "params": {
+            "memory": "True"
+        },
+        "childs": [
+            {
+                "name": "CalcArmPose",
+                "label": "calc_arm_pose_forSMT",
+                "params": {
+                    "mode": {"value": "smt_arm_prepare_pose", "source": "custom"},
+                    "TargetSMTIDRow": {"value": "", "source": "read_board"},
+                    "TargetSMTID": {"value": "", "source": "read_board"},
+                    "AllTagInfoOfBase": {"value": "", "source": "read_board"},
+                    "ArmPoseAndWrench": {"value": "", "source": "write_board"},
+                    "TargetTag": {"value": "", "source": "write_board"}
+                }
+            },
+            {
+                "name": "MoveArmBaseJointTrajectories",
+                "label": "move_arm_base_joint_trajectories",
+                "params": {
+                    "ArmJointTrajectories": {"value": "", "source": "read_board"}
+                }
+            },
+            {
+                "name": "CalcHeadMove",
+                "label": "smt_calc_head_move",
+                "params": {
+                    "TargetSMTIDRow": {"value": "", "source": "read_board"},
+                    "mode": {"value": "smt_pick_squat_mode", "source": "custom"},
+                    "HeadMoveValues": {"value": "", "source": "write_board"},
+                    "SMTMoveHeadControl_SecondRowPickSquatMode": {"value": "", "source": "read_board"},
+                    "SMTMoveHeadControl_ThirdRowPickSquatMode": {"value": "", "source": "read_board"},
+                    "SMTMoveHeadControl_FourthRowPickSquatMode": {"value": "", "source": "read_board"},
+                    "SMTMoveHeadControl_FifthRowPickSquatMode": {"value": "", "source": "read_board"},
+                    "SMTMoveHeadControl_SixRowPickSquatMode": {"value": "", "source": "read_board"}
+                }
+            },
+            {
+                "name": "MoveHead",
+                "label": "smt_move_head",
+                "params": {
+                    "mode": {"value": "from_board", "source": "custom"},
+                    "HeadMoveValues": {"value": "", "source": "read_board"}
+                }
+            },
+            {
+                "name": "FindAllTag",
+                "label": "find_grab_tag",
+                "params":{
+                    "max_percep_time": {"value": "10", "source": "custom"},
+                    "Head_PercepHalfFov": {"value": "", "source": "read_board"},
+                    "Head_HeadEventTimeout": {"value": "", "source": "read_board"},
+                    "AllTagInfoOfBase": {"value": "", "source": "write_board"}
+                }
+            },
+            {
+                "name": "MoveClaw",
+                "label": "open_claw",
+                "params": {
+                    "target_positions": "[0, 100]",
+                    "velocity": "[90, 90]",
+                    "torque": "[1.0, 1.0]"
+                }
+            },
+            {
+                "name": "CalcArmPose",
+                "label": "calc_arm_pose_forSMT",
+                "params": {
+                    "mode": {"value": "smt_pick_pose", "source": "custom"},
+                    "TargetSMTIDRow": {"value": "", "source": "read_board"},
+                    "TargetSMTID": {"value": "", "source": "read_board"},
+                    "AllTagInfoOfBase": {"value": "", "source": "read_board"},
+                    "ArmPoseAndWrench": {"value": "", "source": "write_board"},
+                    "TargetTag": {"value": "", "source": "write_board"}
+                }
+            },
+            {
+                "name": "MoveArmBaseTargetPose",
+                "label": "move_arm_base_target_pose",
+                "param":
+                {
+                    "mode": {"value": "fixed_base", "source": "custom"},
+                    "ArmPoseAndWrench": {"value": "", "source": "read_board"},
+                    "TargetTag": {"value": "", "source": "read_board"},
+                    "Arm_PosThreshold": {"value": "", "source": "read_board"},
+                    "Arm_AngleThreshold": {"value": "", "source": "read_board"},
+                    "Arm_ArmEventTimeout": {"value": "", "source": "read_board"}
+                }
+            },
+            {
+                "name": "MoveClaw",
+                "label": "close_claw",
+                "params": {
+                    "target_positions": "[100, 100]",
+                    "velocity": "[90, 90]",
+                    "torque": "[1.0, 1.0]"
+                }
+            },
+            {
+                "name": "CalcArmPose",
+                "label": "smt_place_pose",
+                "params": {
+                    "mode": {"value": "smt_place_pose", "source": "custom"},
+                    "TargetSMTIDRow": {"value": "", "source": "read_board"},
+                    "TargetSMTID": {"value": "", "source": "read_board"},
+                    "AllTagInfoOfBase": {"value": "", "source": "read_board"},
+                    "ArmPoseAndWrench": {"value": "", "source": "write_board"},
+                    "TargetTag": {"value": "", "source": "write_board"}
+                }
+            },
+            {
+                "name": "MoveArmBaseTargetPose",
+                "label": "move_arm_base_target_pose",
+                "param":
+                {
+                    "mode": {"value": "fixed_base", "source": "custom"},
+                    "ArmPoseAndWrench": {"value": "", "source": "read_board"},
+                    "TargetTag": {"value": "", "source": "read_board"},
+                    "Arm_PosThreshold": {"value": "", "source": "read_board"},
+                    "Arm_AngleThreshold": {"value": "", "source": "read_board"},
+                    "Arm_ArmEventTimeout": {"value": "", "source": "read_board"}
+                }
+            },
+            {
+                "name": "MoveHead",
+                "label": "smt_move_head",
+                "params": {
+                    "mode": {"value": "manual", "source": "custom"},
+                    "head_search_yaws": {"value": "0", "source": "custom"},
+                    "head_search_pitchs": {"value": "0", "source": "custom"}
+                }
+            }
+		]
+	}
+}

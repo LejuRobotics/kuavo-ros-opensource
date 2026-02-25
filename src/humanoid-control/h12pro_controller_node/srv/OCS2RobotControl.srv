@@ -1,0 +1,20 @@
+# 请求消息
+string function_name  # 要执行的函数名称
+# float64 param1        # 参数1（用于call_sensor等服务的z坐标）
+# float64 param2        # 参数2（用于call_sensor等服务的x坐标）
+# float64 param3        # 参数3（用于call_sensor等服务的y坐标）
+# float64 param4        # 参数4（预留参数）
+# float64 param5        # 参数5（预留参数）
+# 新增参数用于case_sps.py命令
+string id             # ID号（字符串格式）
+float64 start_x       # start_position的x坐标
+float64 start_y       # start_position的y坐标
+float64 start_z       # start_position的z坐标
+float64 pick_x        # pick_position的x坐标
+float64 pick_y        # pick_position的y坐标
+float64 pick_z        # pick_position的z坐标
+int32 loop_count      # 循环次数（用于start_case等服务的循环次数）
+---
+# 响应消息
+bool success         # 执行是否成功
+string message       # 执行结果消息

@@ -11,12 +11,10 @@ model_settings
 {
   positionErrorGain             5.0 ; 20.0
   positionErrorGain_xy          0.0 ; 20.0
-  velocityErrorGain_xy          0.3;
-  positionErrorGain_zero        0.0; // positionErrorGain for zero velocity constraint
-  positionErrorGainXYStepControl     30 ;
+  velocityErrorGain_xy          1.0;
+  positionErrorGain_zero        5.0; // positionErrorGain for zero velocity constraint
+  positionErrorGainXYStepControl     50 ;
   velocityErrorGainXYStepControl     1.0 ;
-
-  positionErrorGainZStepControl  10.0 ; 20.0
 
   phaseTransitionStanceTime     0.4
 
@@ -133,7 +131,6 @@ swing_trajectory_config
   swing_shoulder_scale          0.3
   swing_elbow_center            -0.8
   swing_elbow_scale             0.3
-  swing_shoulder_roll_center    0.1745
 }
 
 ; Multiple_Shooting SQP settings
@@ -495,7 +492,7 @@ zeroVelocityConstraint
 ; Soft Constraint
 softSwingTrajConstraint
 {
-  weight      100
+  weight      10
 }
 
 selfCollision
@@ -544,22 +541,22 @@ Wbc_rdd_K_
   {
   (0,0)   30.72136   ; r_x
   (1,1)   10.0   ; r_y
-  (2,2)   44.32456   ; r_z
+  (2,2)   20.32456   ; r_z
 
   (0,3)   5.92899   ; rd_x 
   (1,4)   5.47723   ; rd_y
-  (2,5)   5.25597  ; rd_z 
+  (2,5)   1.25597  ; rd_z 
   }
 
   walk
   {
   (0,0)   30.72136   ; r_x
   (1,1)   10.0   ; r_y
-  (2,2)   44.32456   ; r_z
+  (2,2)   20.32456   ; r_z
 
   (0,3)   5.92899   ; rd_x 
   (1,4)   5.47723   ; rd_y
-  (2,5)   5.25597  ; rd_z 
+  (2,5)   1.25597  ; rd_z 
   }
 }
 ;44.72136, 0.00000, -0.00000, 10.92899, 0.00000, -0.00000,
@@ -595,8 +592,8 @@ stanceLegTask
 {
   real
   {
-    kp                   30  
-    kd                   8    
+    kp                   0  
+    kd                   0    
   }
   
   sim
@@ -622,8 +619,8 @@ baseAngularTask
 {
     kp                   
     {
-      (0,0)               60                ; x
-      (1,0)               60                ; y
+      (0,0)               120                ; x
+      (1,0)               120                ; y
       (2,0)               70                ; z
     }
     kd                  
@@ -659,49 +656,16 @@ armAccelTask
     (7,0)   10.2     ; zarm_r4_joint
   }
 }
-feetJointAccelTask
-{
-  kp
-  {
-    (0,0)   50   ; leg_l1_joint
-    (1,0)   50   ; leg_l2_joint
-    (2,0)   50   ; leg_l3_joint
-    (3,0)   50   ; leg_l4_joint
-    (4,0)   50   ; leg_l5_joint
-    (5,0)   50   ; leg_l6_joint
-    (6,0)   50   ; leg_r1_joint
-    (7,0)   50   ; leg_r2_joint
-    (8,0)   50   ; leg_r3_joint
-    (9,0)   50   ; leg_r4_joint
-    (10,0)  50   ; leg_r5_joint
-    (11,0)  50   ; leg_r6_joint
-  }
-  kd
-  {
-    (0,0)   20     ; leg_l1_joint
-    (1,0)   20     ; leg_l2_joint
-    (2,0)   20     ; leg_l3_joint
-    (3,0)   20     ; leg_l4_joint
-    (4,0)   20     ; leg_l5_joint
-    (5,0)   20     ; leg_l6_joint
-    (6,0)   20     ; leg_r1_joint
-    (7,0)   20     ; leg_r2_joint
-    (8,0)   20     ; leg_r3_joint
-    (9,0)   20     ; leg_r4_joint
-    (10,0)   20     ; leg_r5_joint
-    (11,0)   20     ; leg_r6_joint
-  }
-}
 
 waistAccelTask
 {
   kp
   {
-    (0,0)   80.00   ; waist_yaw
+    (0,0)   200.00   ; waist_yaw
   }
   kd
   {
-    (0,0)   60.0     ; waist_yaw
+    (0,0)   10.0     ; waist_yaw
   }
 }
 
@@ -717,15 +681,14 @@ weight
     accXY           0
     height          0
     angular         10
-    comPos          4.0
+    comPos          10.0
     contactForce    1.0
     stanceLeg       1000;0.05
     accArm          3.0
-    accFeet         0.0; only enable for MPC-RL switch
   }
   walk
   {
-    swingLeg        500
+    swingLeg        100
     accXY           0
     height          0
     angular         10
@@ -733,7 +696,6 @@ weight
     contactForce    1.0
     stanceLeg       1000;0.05
     accArm          3.0
-    accFeet         0.0
   }
 }
 

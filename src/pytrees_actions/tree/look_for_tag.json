@@ -1,0 +1,64 @@
+{
+	"tree": {
+		"name": "Sequence",
+		"label": "find_tag_seq",
+		"params": {
+			"memory": "True"
+		},
+		"childs": [
+			{
+				"name": "Parallel",
+				"label": "find_tag",
+				"childs": [
+					{
+						"name": "MoveHead",
+						"label": "mvHead",
+						"params":
+						{
+							"mode": {"value": "manual", "source": "custom"},
+							"head_search_yaws": { "value": "0, 0, 0", "source": "custom"},
+							"head_search_pitchs": {	"value": "10, -10, 0", "source": "custom"}
+						}
+					},
+					{
+						"name": "FindAllTag",
+						"label": "find_all_tag",
+						"params":
+						{
+							"max_percep_time": { "value": "7", "source": "custom"}
+						}
+					}
+				]
+			},
+			{
+				"name": "FilterTagInROI",
+				"label": "filter_tag_by_ROI",
+				"params":
+				{
+					"x_min": { "value": "-6", "source": "custom"},
+					"x_max": { "value": "6", "source": "custom"},
+					"y_min": {"value": "-6", "source": "custom"},
+					"y_max": {"value": "6", "source": "custom"},
+					"z_min": {"value": "0", "source": "custom"},
+					"z_max": {"value": "2", "source": "custom"}
+				}
+			},
+			{
+				"name": "SelectTagByID",
+				"label": "select_tag_by_ID",
+				"params": {
+					"target_id": {"value": "0, 1, 2, 7, 8, 39", "source": "custom"}
+				}
+			},
+			{
+				"name": "SelectTagByOrder",
+				"label": "select_tag_by_order",
+				"params": {
+					"axis": {"value": "z", "source": "custom"},
+					"order": {"value": "max", "source": "custom"}
+				}
+			}
+		]
+	}
+}
+

@@ -61,7 +61,7 @@ void Quest3IkROS::solveIkHandElbowThreadFuntion() {
   bool hasStarted = false;
 
   while (!shouldStop() && ros::ok()) {
-    publishEndEffectorControlData();
+    handleEndEffectorControlData();
 
     // 仅在启动阶段检查手柄状态（复现Python版本的行为）
     if (!hasStarted && quest3ArmInfoTransformerPtr_) {
@@ -255,7 +255,7 @@ void Quest3IkROS::publishJointStates(const Eigen::VectorXd& jointPositions) {
   if (onlyHalfUpBody_ && armModeChanging_) {
     std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
 
-    const int ARM_JOINT_START = 12 + waist_dof_;  // 考虑腰部自由度
+    const int ARM_JOINT_START = 12;
 
     Eigen::VectorXd armCurrentAngle_rad(jointStateSize_);
 
@@ -363,19 +363,13 @@ void Quest3IkROS::initialize(const nlohmann::json& configJson) {
   quest3DebuggerPtr_->initialize();
 
   // 设置可视化回调函数（复现Python版本的即时发布逻辑）
-  quest3ArmInfoTransformerPtr_->setVisualizationCallback(
-      [this](const std::string& side, const std::vector<PoseData>& poses) {
-        // poses 顺序: [handPose, elbowPose, shoulderPose, chestPose]
-        if (poses.size() < 4) {
-          ROS_WARN("[Quest3IkROS] Invalid poses vector size: %zu, expected 4", poses.size());
-          return;
-        }
-        const Eigen::Vector3d& handPos = poses[0].position;
-        const Eigen::Vector3d& elbowPos = poses[1].position;
-        const Eigen::Vector3d& shoulderPos = poses[2].position;
-        const Eigen::Vector3d& chestPos = poses[3].position;
-        publishVisualizationMarkersForSide(side, handPos, elbowPos, shoulderPos, chestPos);
-      });
+  quest3ArmInfoTransformerPtr_->setVisualizationCallback([this](const std::string& side,
+                                                                const Eigen::Vector3d& handPos,
+                                                                const Eigen::Vector3d& elbowPos,
+                                                                const Eigen::Vector3d& shoulderPos,
+                                                                const Eigen::Vector3d& chestPos) {
+    publishVisualizationMarkersForSide(side, handPos, elbowPos, shoulderPos, chestPos);
+  });
 
   ROS_INFO("[Quest3IkROS] Interpolation system initialized successfully");
 }

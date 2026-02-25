@@ -1,9 +1,8 @@
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.data_type import Pose, Tag, Frame
 from kuavo_humanoid_sdk.kuavo_strategy_v2.utils.logger_setup import init_logging
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.mobile_manipulate import (
-    EventPercep, EventHeadMoveKeyPoint)
-from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.mobile_manipulate.walk_events_lb import EventWalkToPose  # 使用轮臂版本
-from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.mobile_manipulate.arm_events_lb import EventArmMoveKeyPoint  # 使用轮臂版本
+    EventPercep, EventWalkToPose, EventHeadMoveKeyPoint)
+from kuavo_humanoid_sdk.kuavo_strategy_v2.common.events.mobile_manipulate.arm_events_lb import EventArmMoveKeyPoint  # 使用 tn 版本
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.robot_sdk import RobotSDK
 from kuavo_msgs.srv import lbLegControlSrv, lbLegControlSrvRequest
 
@@ -179,11 +178,11 @@ def test_arm_pick(user_input=True, use_faker=True):
     ## 在这里添加键盘事件，按特定按键才能继续
     print("======================================================")
     print(f"找到目标Tag，ID: {target_tag.id}, 位置: {target_tag.pose}")
-    
+
     # rospy.sleep(2)
 
     # if user_input:
-    #     input("准备搬起目标箱子，按回车键继续... \n")    
+    #     input("准备搬起目标箱子，按回车键继续... \n")
 
     success = grab_box_and_backward(
         walk_event=walk_event,
@@ -208,7 +207,7 @@ def test_arm_pick(user_input=True, use_faker=True):
         print("未能搬起目标箱子，退出策略。")
         return False
 
-    
+
     ## 在这里添加键盘事件，按特定按键才能继续
     print("======================================================")
 
@@ -216,7 +215,7 @@ def test_arm_pick(user_input=True, use_faker=True):
 
 
 def return_init_pos(walk_event: EventWalkToPose, percep_event: EventPercep):
-    
+
     init_target_tag = Tag(
         id=config.pick.tag_id,  # 假设目标箱子的ID为1
         pose=Pose.from_euler(
@@ -399,7 +398,7 @@ def grab_box_case(user_input=True, use_faker=True, should_return_init_pos=True):
         return False
 
     if user_input:
-        input("准备搬起目标箱子，按回车键继续... \n")    
+        input("准备搬起目标箱子，按回车键继续... \n")
 
     success = grab_box_and_backward(
         walk_event=walk_event,

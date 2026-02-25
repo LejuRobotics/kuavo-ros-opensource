@@ -1,0 +1,7 @@
+# 请求：使用标准消息类型传递x, y, theta
+std_msgs/Float64MultiArray target_pose  # [x, y, theta]
+---
+# 响应：使用标准服务响应
+bool success
+string message
+

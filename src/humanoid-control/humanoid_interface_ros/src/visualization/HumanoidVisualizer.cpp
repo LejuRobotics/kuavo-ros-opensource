@@ -290,16 +290,27 @@ namespace ocs2
 
         const auto timeStamp = ros::Time::now();
         publishObservation(timeStamp, observation);
-        if (primalSolution.inputTrajectory_.empty() || primalSolution.inputTrajectory_[0].size() > 2048 ||
-          primalSolution.timeTrajectory_.size() == 0 || primalSolution.stateTrajectory_.size() == 0)
-        {
-          lastTime_ = observation.time;
-          return;
-        }
         publishDesiredTrajectory(timeStamp, command.mpcTargetTrajectories_);
         publishOptimizedStateTrajectory(timeStamp, primalSolution.timeTrajectory_, primalSolution.stateTrajectory_,
                                         primalSolution.modeSchedule_);
         lastTime_ = observation.time;
+
+        // record feet force input data !!!!!!!!!!!!!!!!!!
+        feetInputTraj.push_back(primalSolution.inputTrajectory_[0]);
+
+        // record time stamp data !!!!!!!!!!!!!!!!!!
+        timeTraj.push_back(timecount++);
+
+        // record feet position data!!!!!!!!!!!!!!!!!!!
+        // pinocchio::forwardKinematics(pinocchioInterface_.getModel(), pinocchioInterface_.getData(), observation.state.tail(18));
+        // const auto feetPositions = endEffectorSpatialKinematicsPtr_->getPosition(observation.state);
+        quaternion_t quat(1, 0, 0, 0);
+        // const auto feetOrientations = endEffectorSpatialKinematicsPtr_->getOrientationError(primalSolution.inputTrajectory_[0], {quat});
+        // const auto feetOrientations = endEffectorSpatialKinematicsPtr_->getVelocity(primalSolution.inputTrajectory_[0], primalSolution.inputTrajectory_[0]);
+
+        const auto feetPositions = endEffectorKinematicsPtr_->getPosition(observation.state);
+        feetPosTraj.push_back(feetPositions);
+        // feetOriTraj.push_back(feetOrientations);
       }
     }
 
@@ -323,6 +334,9 @@ namespace ocs2
       {
         feetForces[i] = centroidal_model::getContactForces(observation.input, i, centroidalModelInfo_);
       }
+
+      // record feet force data!!!!!!!!!!!!!!!!!!!
+      feetForce.push_back(feetForces);
 
       // Publish
       vector_t handState(14);
@@ -408,6 +422,10 @@ namespace ocs2
         baseToWorldTransform.transform.rotation = getOrientationMsg(q_world_base);
         baseToWorldTransform.transform.translation = getVectorMsg(basePose.head<3>());
                 tfBroadcaster_.sendTransform(baseToWorldTransform);
+
+        // record base position & orientation data !!!!!!!!!!!!!!!!!!!!!1
+        basePosTraj.push_back(basePose.head<3>());
+        baseOriTraj.push_back(basePose.tail<3>());
       }
     }
 

@@ -1,0 +1,104 @@
+{
+    "tree": {
+        "name": "Sequence",
+        "label": "root",
+        "childs": [
+            {
+                "name": "Sequence",
+                "label": "move_box_seq",
+                "params": {
+                    "memory": "True"
+                },
+                "childs": [
+                    {
+                        "name": "MoveToTarget",
+                        "label": "back_to_origin",
+						"params":
+						{
+							"mode": {"value": "relative_pose", "source": "custom"},
+							"x": {"value": "0", "source": "custom"},
+							"y": {"value": "0", "source": "custom"},
+							"yaw": {"value": "-90", "source": "custom"}
+						}
+                    },
+                    {
+                        "name": "look_for_tag.json",
+                        "label": "find_box_subtree",
+                        "params":
+                        {
+                            "ROI": {"value": "-6, 6, -6, 6, -1, 1", "source": "custom"},
+                            "target_id_list": {"value": "0, 1, 2, 3, 7, 9", "source": "custom"},
+                            "order": {"value": "z_max", "source": "custom"}
+                        }
+                    },
+                    {
+                        "name": "CalcMoveDest",
+                        "label": "cal",
+						"params": {
+                            "mode": {"value": "box_pick", "source": "custom"}
+                        }
+					},
+                    {
+                        "name": "MoveToTarget",
+                        "label": "go_to_tag",
+						"params":
+						{
+                            "mode": {"value": "tag_target", "source": "custom"}
+						}
+                    },
+                    {
+                        "name": "grasp_box.json",
+                        "label": "grasp_box_subtree",
+                        "params":
+                        {
+                            "box_type": {"value": "normal_box", "source": "custom"}
+                        }
+                    },
+                    {
+                        "name": "MoveToTarget",
+                        "label": "turn_around",
+						"params":
+						{
+                            "mode": {"value": "step_by_step", "source": "custom"},
+                            "yaw": {"value": "180", "source": "custom"}
+						}
+                    },
+                    {
+                        "name": "look_for_tag.json",
+                        "label": "find_box_subtree",
+                        "params":
+                        {
+                            "ROI": {"value": "-6, 6, -6, 6, 0, 2", "source": "custom"},
+                            "target_id_list": {"value": "0,1", "source": "custom"},
+                            "order": {"value": "z_max", "source": "custom"}
+                        }
+                    },
+                    {
+                        "name": "CalcMoveDest",
+                        "label": "cal",
+						"params": {
+                            "mode": {"value": "box_place", "source": "custom"}
+                        }
+					},
+                    {
+                        "name": "MoveToTarget",
+                        "label": "go_to_tag",
+						"params":
+						{
+                            "mode": {"value": "tag_target", "source": "custom"}
+						}
+                    },
+                    {
+                        "name": "place_box.json",
+                        "label": "place_box_subtree",
+                        "params":
+                        {
+                            "box_type": {"value": "normal_box", "source": "custom"},
+                            "place_height": {"value": "0.5", "source": "custom"}
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+}

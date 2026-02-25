@@ -1,0 +1,35 @@
+{
+    "tree": {
+        "name": "Sequence",
+        "label": "root",
+        "params": {},
+        "childs": [
+            {
+                "name": "Sequence",
+                "label": "seq1",
+                "params": {
+                    "memory": "True"
+                },
+                "childs": [
+                    {
+                        "name": "IMUTargetMove",
+                        "label": "turn_around",
+                        "params": {
+				"move_mode": "step_by_step",
+				"yaw": "180"
+                        },
+			"inparams":
+			{
+				"walk":
+				{
+					"value":"walk",
+					"source":"read_board"
+				}
+			},
+                        "childs": []
+		    }
+                ]
+            }
+        ]
+    }
+}

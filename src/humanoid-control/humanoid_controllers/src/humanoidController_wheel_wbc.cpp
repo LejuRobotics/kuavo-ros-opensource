@@ -80,7 +80,6 @@ namespace humanoidController_wheel_wbc
     loadData::loadCppDataType(taskFile, "model_settings.verbose", verbose);
     loadData::loadCppDataType(taskFile, "model_settings.mpcArmsDof", armNum_);
     lowJointNum_ = manipulatorModelInfo_.armDim - armNum_;
-    baseDim_ = manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim;
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
     /****************************************************/
@@ -113,9 +112,6 @@ namespace humanoidController_wheel_wbc
     {
       controllerNh_.getParam("/use_external_mpc", enable_mpc_);
       std::cout << "enable_mpc: " << enable_mpc_ << std::endl;
-      // 设置 enable_manipulation_mpc 参数为 true
-      controllerNh_.setParam("/enable_manipulation_mpc", true);
-      std::cout << "enable_manipulation_mpc: true" << std::endl;
     }
     
     double controlFrequency = 500.0; // 1000Hz
@@ -186,7 +182,6 @@ namespace humanoidController_wheel_wbc
     ros::param::set("/armRealDof",  static_cast<int>(armNum_));
     ros::param::set("/legRealDof",  static_cast<int>(lowJointNum_));
     ros::param::set("/headRealDof",  2);
-    ros::param::set("/waistRealDof",  0);
     vector_t mujoco_q = vector_t::Zero(7 + 4 + 7*2 + 2);
     if(robotVersion_ == 60)
     {
@@ -231,6 +226,7 @@ namespace humanoidController_wheel_wbc
     jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
+    cmdPosWorldPub_ = controllerNh_.advertise<geometry_msgs::Twist>("/cmd_pose_world", 1, true);
 
     // 创建控制数据管理器（替代所有订阅者和服务）
     control_data_manager_ = std::make_unique<ControlDataManager>(
@@ -290,6 +286,11 @@ namespace humanoidController_wheel_wbc
       }
     }
     
+    // 初始化重置cmdVel Ruckig规划器服务客户端
+    reset_cmd_vel_ruckig_client_ = controllerNh_.serviceClient<std_srvs::SetBool>("/mobile_manipulator_reset_cmd_vel_ruckig");
+    reset_cmd_vel_ruckig_srv_.request.data = true;  // 重新规划
+    last_reset_cmd_vel_ruckig_time_ = ros::Time::now();  // 初始化重置时间
+
     return true;
   }
 
@@ -323,10 +324,25 @@ namespace humanoidController_wheel_wbc
     );
 
     // 4. 轮臂MPC, 手臂快慢运动模式切换服务
-    control_data_manager_->registerService<kuavo_msgs::changeLbQuickModeSrv>(
+    control_data_manager_->registerService<std_srvs::SetBool>(
         "/enable_lb_arm_quick_mode",
         [this](auto& req, auto& res) { 
             return enableLbArmQuickModeCallback(req, res); 
+        }
+    );
+
+    control_data_manager_->registerService<std_srvs::SetBool>(
+        "/enable_vel_control",
+        [this](auto& req, auto& res) {
+            return enableVelControlCallback(req, res);
+        }
+    );
+
+    // 5. 重置MPC服务（用于手动推动后清除旧轨迹）
+    control_data_manager_->registerService<std_srvs::SetBool>(
+        "/reset_mpc",
+        [this](auto& req, auto& res) {
+            return resetMpcCallback(req, res);
         }
     );
     
@@ -452,6 +468,20 @@ namespace humanoidController_wheel_wbc
                                                     {initTarget}, 
                                                     {observation_wheel_.input});
       mrtRosInterface_->resetMpcNode(target_trajectories);
+
+      // 清除MPC中的旧轨迹状态
+      if(enable_mpc_)
+      {
+        geometry_msgs::Twist cmdPosWorldMsg;
+        cmdPosWorldMsg.linear.x = observation_wheel_.state[0];  // 当前位置x
+        cmdPosWorldMsg.linear.y = observation_wheel_.state[1];  // 当前位置y
+        cmdPosWorldMsg.angular.z = observation_wheel_.state[2];  // 当前yaw角度
+        // 发布一次，清除旧的轨迹目标
+        cmdPosWorldPub_.publish(cmdPosWorldMsg);
+        ROS_INFO("[reset_mpc_] 已清除旧的轨迹目标，目标位置设置为当前位置: [%.3f, %.3f, %.3f]",
+                 observation_wheel_.state[0], observation_wheel_.state[1], observation_wheel_.state[2]);
+      }
+
       reset_mpc_ = false;
       std::cout << "reset MPC node at " << observation_wheel_.time << "\n";
 
@@ -460,6 +490,24 @@ namespace humanoidController_wheel_wbc
       obsInputLimitFilterPtr_->reset(observation_wheel_.input);
       mrtStateLimitFilterPtr_->reset(observation_wheel_.state);
       mrtInputLimitFilterPtr_->reset(observation_wheel_.input);
+
+      // 重置后需要先更新策略，确保策略准备好后再调用evaluatePolicy
+      // 设置当前观测并触发MRT回调来更新策略
+      SystemObservation kinemicLimitObs = observation_wheel_;
+      kinemicLimitObs.state = obsStateLimitFilterPtr_->update(observation_wheel_.state);
+      kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
+      mrtRosInterface_->setCurrentObservation(kinemicLimitObs);
+      mrtRosInterface_->spinMRT();
+      // 尝试更新策略，如果未准备好，跳过本次evaluatePolicy调用
+      if (!mrtRosInterface_->updatePolicy())
+      {
+        skip_evaluate_policy_ = true;
+        ROS_WARN("[reset_mpc_] 未准备好，跳过本次evaluatePolicy调用");
+      }
+      else
+      {
+        skip_evaluate_policy_ = false;
+      }
 
     }
     // 获取关节数据，并更新 Observation
@@ -492,11 +540,24 @@ namespace humanoidController_wheel_wbc
       // Trigger MRT callbacks
       mrtRosInterface_->spinMRT();
       // Update the policy if a new on was received
-      if (mrtRosInterface_->updatePolicy())
+      bool policy_updated = mrtRosInterface_->updatePolicy();
+      if (policy_updated)
       {
+        skip_evaluate_policy_ = false;  // 策略已更新，可以正常调用evaluatePolicy
       }
 
-      mrtRosInterface_->evaluatePolicy(observation_wheel_.time, observation_wheel_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
+      // 跳过本次evaluatePolicy调用
+      if (skip_evaluate_policy_)
+      {
+        ROS_WARN_THROTTLE(1.0, "[update] 跳过evaluatePolicy调用，等待策略准备好");
+        // 使用上一次的值
+        optimizedState_mrt = optimizedState_mrt_;
+        optimizedInput_mrt = optimizedInput_mrt_;
+      }
+      else
+      {
+        mrtRosInterface_->evaluatePolicy(observation_wheel_.time, observation_wheel_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
+      }
       if(enable_mpc_)
       {
         optimizedState_mrt_ = optimizedState_mrt;
@@ -508,7 +569,11 @@ namespace humanoidController_wheel_wbc
     }
     // 更新可视化数据
     // robotVisualizer_->update_obs(observation_wheel_);
-    robotVisualizer_->update(observation_wheel_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+    // 如果策略未准备好，跳过可视化更新
+    if (!skip_evaluate_policy_)
+    {
+      robotVisualizer_->update(observation_wheel_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+    }
 
     /******************  用户修改部分  ***********************/
     vector_t target_qpos, target_qvel;
@@ -526,30 +591,14 @@ namespace humanoidController_wheel_wbc
     else  // 轮臂MPC模式下的特殊处理
     {
       // 手臂跟踪快模式: 直接从 kuavo_arm_traj 话题获取手臂关节指令
-      if (quickMode_ != 0 && (lbMpcMode == 1 || lbMpcMode == 3))  // 设置仅在armOnly和baseArm模式下生效
+      if (use_lb_arm_quick_mode_ && lbMpcMode == 1)  // 设置仅在armOnly模式下生效
       {
-        vector_t arm_target_qpos = vector_t::Zero(armNum_);
-        vector_t arm_target_qvel = vector_t::Zero(armNum_);
-        vector_t leg_target_qpos = vector_t::Zero(lowJointNum_);
-        vector_t leg_target_qvel = vector_t::Zero(lowJointNum_);
+        vector_t arm_target_qpos = control_data_manager_->getArmExternalControlState().pos;
+        vector_t arm_target_qvel = control_data_manager_->getArmExternalControlState().vel;
+        optimizedState_mrt_.tail(armNum_) = arm_target_qpos;
+        optimizedInput_mrt_.tail(armNum_) = arm_target_qvel;
 
-        if(quickMode_ == 1 || quickMode_ == 3)
-        {
-          leg_target_qpos = control_data_manager_->getLegExternalControlState().pos;
-          leg_target_qvel = control_data_manager_->getLegExternalControlState().vel;
-          optimizedState_mrt_.segment(baseDim_, lowJointNum_) = leg_target_qpos;
-          optimizedInput_mrt_.segment(baseDim_, lowJointNum_) = leg_target_qvel;
-          ros_logger_->publishVector("/humanoid_wheel/leg_target_qpos_quick_mode", leg_target_qpos);
-        }
-        if(quickMode_ == 2 || quickMode_ == 3)
-        {
-          arm_target_qpos = control_data_manager_->getArmExternalControlState().pos;
-          arm_target_qvel = control_data_manager_->getArmExternalControlState().vel;
-          optimizedState_mrt_.tail(armNum_) = arm_target_qpos;
-          optimizedInput_mrt_.tail(armNum_) = arm_target_qvel;
-          ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_quick_mode", arm_target_qpos);
-        }
-
+        ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_quick_mode", arm_target_qpos);
       }
     }
     /*******************************************************/
@@ -660,8 +709,47 @@ namespace humanoidController_wheel_wbc
       velCmdMsg.linear.y = desiredVelBody[1];
       velCmdMsg.angular.z = desiredVelBody[2];
     }
-    
-    cmdVelPub_.publish(velCmdMsg);
+    if(use_vel_control_)
+    {
+      cmdVelPub_.publish(velCmdMsg);
+    }else{
+        ros::Time current_time = ros::Time::now();
+        bool should_reset = false;
+
+        // 立即重置
+        if(prev_use_vel_control_ != use_vel_control_)
+        {
+          should_reset = true;
+          ROS_INFO("[vel_control] 检测到速度控制模式切换，重置cmdVel Ruckig规划器");
+        }
+        // 检测时间间隔：超过设定间隔时重置
+        else if((current_time - last_reset_cmd_vel_ruckig_time_).toSec() >= RESET_CMD_VEL_RUCKIG_INTERVAL)
+        {
+          should_reset = true;
+        }
+
+        if(should_reset)
+        {
+          if(reset_cmd_vel_ruckig_client_.call(reset_cmd_vel_ruckig_srv_))
+          {
+            if(reset_cmd_vel_ruckig_srv_.response.success)
+            {
+              last_reset_cmd_vel_ruckig_time_ = current_time;  // 更新重置时间
+              // ROS_INFO("[vel_control] Successfully reset cmdVel Ruckig planner: %s", reset_cmd_vel_ruckig_srv_.response.message.c_str());
+            }
+            else
+            {
+              ROS_WARN("[vel_control] Failed to reset cmdVel Ruckig planner: %s", reset_cmd_vel_ruckig_srv_.response.message.c_str());
+            }
+          }
+          else
+          {
+            ROS_WARN("[vel_control] Failed to call reset_cmd_vel_ruckig service");
+          }
+        }
+    }
+    // 更新上一次的速度控制状态
+    prev_use_vel_control_ = use_vel_control_;
     cnt++;
   }
 
@@ -1112,29 +1200,11 @@ namespace humanoidController_wheel_wbc
         // 使用滤波后的关节角度（转换为度）
         for(int i = 0; i < lowJointNum_; ++i)
         {
-          leg_traj_msg.name[i] = "leg_joint_" + std::to_string(i+1);
           leg_traj_msg.position[i] = target_qpos[i] * 180.0 / M_PI;  // 弧度转角度
         }
         
         lbLegTrajPub_.publish(leg_traj_msg);
       }
-      // 如果当前躯干模式为false，上一躯干模式为true，则下发一次 0 指令作为终止
-      static bool pre_torso_ctrl = whole_torso_ctrl;
-
-      if(whole_torso_ctrl == false && pre_torso_ctrl == true)
-      {
-        sensor_msgs::JointState leg_traj_msg;
-        leg_traj_msg.header.stamp = ros::Time::now();
-        leg_traj_msg.name.resize(lowJointNum_);
-        leg_traj_msg.position.resize(lowJointNum_, 0.0);
-        leg_traj_msg.velocity.resize(lowJointNum_, 0.0);
-        for(int i = 0; i < lowJointNum_; ++i)
-        {
-          leg_traj_msg.name[i] = "leg_joint_" + std::to_string(i+1);
-        }
-        lbLegTrajPub_.publish(leg_traj_msg);
-      }
-      pre_torso_ctrl = whole_torso_ctrl;
     }
 
     if(use_arm_trajectory_control_)
@@ -1184,13 +1254,39 @@ namespace humanoidController_wheel_wbc
     return true;
   }
 
-  bool humanoidControllerWheelWbc::enableLbArmQuickModeCallback(kuavo_msgs::changeLbQuickModeSrv::Request &req, 
-                                                                kuavo_msgs::changeLbQuickModeSrv::Response &res)
+  bool humanoidControllerWheelWbc::enableLbArmQuickModeCallback(std_srvs::SetBool::Request &req, 
+                                                                std_srvs::SetBool::Response &res)
   {
-    std::cout << "[ArmControl] 快速模式切换请求, 请求模式为: " << int(req.quickMode) << std::endl;
-    quickMode_ = req.quickMode;
+    std::cout << "[ArmControl] 快速模式切换请求: " << (req.data ? "启用" : "禁用") << std::endl;
+    use_lb_arm_quick_mode_ = req.data;
     res.success = true;
-    res.message = "success change quick ctrl mode to " + std::to_string(req.quickMode);
+    res.message = "success change arm ctrl mode to " + std::to_string(req.data);
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::enableVelControlCallback(std_srvs::SetBool::Request &req,
+                                                            std_srvs::SetBool::Response &res)
+  {
+    std::cout << "[vel_control] 速度控制切换请求: " << (req.data ? "启用" : "禁用") << std::endl;
+    use_vel_control_ = req.data;
+    res.success = true;
+    res.message = "success change vel control to " + std::to_string(req.data);
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::resetMpcCallback(std_srvs::SetBool::Request &req,
+                                                    std_srvs::SetBool::Response &res)
+  {
+    if (req.data) {
+      std::cout << "[reset_mpc] 重置MPC请求，将清除旧的轨迹目标" << std::endl;
+      reset_mpc_ = true;
+      res.success = true;
+      res.message = "MPC reset flag has been set. The MPC will be reset in the next update cycle, and old trajectory targets will be cleared.";
+    } else {
+      std::cout << "[reset_mpc] 取消重置MPC请求（忽略）" << std::endl;
+      res.success = false;
+      res.message = "To reset MPC, set data to true";
+    }
     return true;
   }
 

@@ -25,25 +25,20 @@ class KuavoRobotArm:
                 joint_position (list): List of joint positions in radians
             Raises:
                 ValueError: If the joint position list is not of the correct length.
+                ValueError: If the joint position is outside the range of [-π, π].
                 RuntimeError: If the robot is not in stance state when trying to control the arm.
             Returns:
                 True if the control was successful, False otherwise.
-            Note:
-                Joint positions that exceed physical limits will be automatically clipped to the limit values.
         """
         if len(joint_position) != self._robot_info.arm_joint_dof:
             raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(joint_position)))
         
-        # Automatically clip joint positions to physical limits
-        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
-        joint_position_clipped = list(joint_position)  # Create a copy to avoid modifying the original list
-        
-        for i, pos in enumerate(joint_position):
-            if pos < arm_min[i] or pos > arm_max[i]:
-                # Automatically clip to limits
-                joint_position_clipped[i] = max(arm_min[i], min(pos, arm_max[i]))
+        # Check if joint positions are within ±180 degrees (±π radians)
+        for pos in joint_position:
+            if abs(pos) > math.pi:
+                raise ValueError(f"Joint position {pos} rad exceeds ±π rad (±180 deg) limit")
 
-        return self._kuavo_core.control_robot_arm_joint_positions(joint_data=joint_position_clipped)
+        return self._kuavo_core.control_robot_arm_joint_positions(joint_data=joint_position)
 
     def control_arm_joint_trajectory(self, times:list, joint_q:list)->bool:
         """
@@ -54,33 +49,23 @@ class KuavoRobotArm:
             Raises:
                 ValueError: If the times list is not of the correct length.
                 ValueError: If the joint position list is not of the correct length.
+                ValueError: If the joint position is outside the range of [-π, π].
                 RuntimeError: If the robot is not in stance state when trying to control the arm.
             Returns:
-                bool: True if the control was successful, False otherwise.
-            Note:
-                Joint positions that exceed physical limits will be automatically clipped to the limit values.
+                bool: True if the control was successful, False otherwise.    
         """
         if len(times) != len(joint_q):
             raise ValueError("Invalid input. times and joint_q must have thesame length.")
         
-        # Automatically clip joint positions to physical limits
-        arm_min, arm_max = self._robot_info.get_arm_joint_limits()
+        # Check if joint positions are within ±180 degrees (±π radians)
         q_degs = []
-        for frame_idx, q in enumerate(joint_q):
+        for q in joint_q:
+            if any(abs(pos) > math.pi for pos in q):
+                raise ValueError("Joint positions must be within ±π rad (±180 deg)")
             if len(q) != self._robot_info.arm_joint_dof:
                 raise ValueError("Invalid position length. Expected {}, got {}".format(self._robot_info.arm_joint_dof, len(q)))
-            
-            # Create a copy to avoid modifying the original list
-            q_clipped = list(q)
-            
-            # Automatically clip each joint position to physical limits
-            for joint_idx, pos in enumerate(q):
-                if pos < arm_min[joint_idx] or pos > arm_max[joint_idx]:
-                    # Automatically clip to limits
-                    q_clipped[joint_idx] = max(arm_min[joint_idx], min(pos, arm_max[joint_idx]))
-            
             # Convert joint positions from radians to degrees
-            q_degs.append([(p * 180.0 / math.pi) for p in q_clipped])
+            q_degs.append([(p * 180.0 / math.pi) for p in q])
 
         return self._kuavo_core.control_robot_arm_joint_trajectory(times=times, joint_q=q_degs)
 
@@ -100,14 +85,6 @@ class KuavoRobotArm:
         """Check if the arm is in collision.
         """
         return self._kuavo_core.is_arm_collision()
-    
-    def is_arm_collision_mode(self)->bool:
-        """Check if arm collision mode is enabled.
-        
-        Returns:
-            bool: True if collision mode is enabled, False otherwise.
-        """
-        return self._kuavo_core.is_arm_collision_mode()
     
     def wait_arm_collision_complete(self):
         """Wait for the arm collision to complete.

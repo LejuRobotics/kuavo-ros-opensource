@@ -1,0 +1,7 @@
+# 请求消息（可以为空）
+---
+# 响应消息
+bool success         # 执行是否成功
+string barcode_value # 条形码值
+string message       # 执行结果消息
+

@@ -20,7 +20,7 @@ model_settings
 
   verboseCppAd                  false
   recompileLibrariesCppAd       false
-  modelFolderCppAd              /var/ocs2/kuavo_v61 ; will save in <modelFolderCppAd>/md5_<urdf>/<centroidalModelType>/<dof>
+  modelFolderCppAd              /var/ocs2/kuavo_v49 ; will save in <modelFolderCppAd>/md5_<urdf>/<centroidalModelType>/<dof>
 
   modelDof                     18 ; total dof of the model, including the arms and legs
   mpcArmsDof                   8 ; mpc dof of the arms

@@ -1,0 +1,98 @@
+{
+    "tree": {
+        "name": "Sequence",
+        "label": "smt_seq",
+        "params": {
+            "memory": "True"
+        },
+        "childs": [
+            {
+                "name": "BeginSMTWork",
+                "label": "begin_smt_work",
+                "params": {
+                    "target_id_list": { "value": "0, 1, 2", "source": "custom"},
+                    "SMTIdRowMapping_TagIDRow2": { "value": "", "source": "read_board"},
+                    "SMTIdRowMapping_TagIDRow3": { "value": "", "source": "read_board"},
+                    "SMTIdRowMapping_TagIDRow4": { "value": "", "source": "read_board"},
+                    "SMTIdRowMapping_TagIDRow5": { "value": "", "source": "read_board"},
+                    "SMTIdRowMapping_TagIDRow6": { "value": "", "source": "read_board"},
+                    "TargetSMTID": {"value": "", "source": "write_board"},
+                    "TargetSMTIDRow": {"value": "", "source": "write_board"}
+                }
+            },
+            {
+                "name": "CalcMoveDest",
+                "label": "cal_move_dest",
+                "params": {
+                    "mode": {"value": "smt_pick", "source": "custom"},
+                    "TargetSMTID": {"value": "", "source": "read_board"},
+                    "TargetSMTIDRow": {"value": "", "source": "read_board"},
+                    "SLAMNavDest": {"value": "", "source": "write_board"},
+                    "SMTNavPos_PickPositionOfColumn0": {"value": "", "source": "read_board"},
+                    "SMTNavPos_PickPositionOfColumn1": {"value": "", "source": "read_board"},
+                    "SMTNavPos_PickPositionOfColumn2": {"value": "", "source": "read_board"},
+                    "SMTNavPos_PickPositionOfColumn3": {"value": "", "source": "read_board"},
+                    "SMTNavPos_PickPositionOfColumn4": {"value": "", "source": "read_board"},
+                    "SMTNavPos_PickPositionOfColumn5": {"value": "", "source": "read_board"},
+                    "SMTNavPos_PickPositionOfColumn6": {"value": "", "source": "read_board"}
+                }
+            },
+            {
+                "name": "MoveToTarget",
+                "label": "smt_slam_move_to_grab_pose",
+                "params": {
+                    "mode": {"value": "slam", "source": "read_board"},
+                    "SLAMNavDest": {"value": "", "source": "read_board"},
+                    "Walk_WalkEventYawThreshold": {"value": "", "source": "read_board"},
+                    "Walk_WalkEventDistanceThreshold": {"value": "", "source": "read_board"},
+                    "Walk_WalkEventTimeout": {"value": "", "source": "read_board"}
+                }
+            },
+            {
+                "name": "smt_grasp_a_tray.json",
+                "label": "smt_grab_a_object",
+                "type": {"value": "7_inches", "source": "custom"},
+                "Scenario": {"value": "NormalTray", "source": "custom"},
+                "ID": {"value": "from_board", "source": "custom"},
+                "TargetSMTID": {"value": "", "source": "read_board"},
+                "TargetSMTIDRow": {"value": "", "source": "read_board"}
+            },
+            {
+                "name": "MoveToTarget",
+                "label": "move_back",
+                "params": {
+                    "mode": {"value": "relative_pose", "source": "custom"},
+                    "x": {"value": "-0.2", "source": "custom"},
+                    "y": {"value": "0", "source": "custom"},
+                    "z": {"value": "0", "source": "custom"},
+                    "Walk_WalkEventYawThreshold": {"value": "", "source": "read_board"},
+                    "Walk_WalkEventTimeout": {"value": "", "source": "read_board"},
+                    "Walk_WalkEventPosThreshold": {"value": "", "source": "read_board"}
+                }
+            },
+            {
+                "name": "smt_bar_code_scanner.json",
+                "label": "barcode_scanner",
+                "params": {
+                    "type": {"value": "7_inches", "source": "custom"}
+                }
+            },
+            {
+                "name": "smt_move_to_place_and_drop_detection.json",
+                "label": "move_to_place_and_drop_detection",
+                "params":{
+                    "type": {"value": "7_inches", "source": "custom"}
+                }
+            },
+            {
+                "name": "smt_place_a_tray.json",
+                "label": "smt_place_a_tray",
+                "params":
+                {
+                    "type": {"value": "7_inches", "source": "custom"},
+                    "height": {"value": "0.2", "source": "custom"}
+                }
+            }
+        ]
+    }
+}
