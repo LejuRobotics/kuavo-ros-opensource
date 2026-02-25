@@ -95,6 +95,7 @@ void MRT_ROS_Interface::pauseResumeMpcNode(bool pause) {
     } else {
       ROS_INFO_STREAM("MPC node has been resumed.");
     }
+    this->reset();
   }).detach();
 }
 

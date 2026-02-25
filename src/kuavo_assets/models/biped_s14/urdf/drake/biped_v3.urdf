@@ -41,7 +41,7 @@
     <parent link="torso" />
     <child link="waist" />
     <axis xyz="0 0 1" />
-    <limit lower="-2.0943951023932" upper="2.0943951023932" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-2.61799387799149" upper="2.61799387799149" effort="80.0" velocity="7.0" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="leg_l1_link">
@@ -65,7 +65,7 @@
     <parent link="waist" />
     <child link="leg_l1_link" />
     <axis xyz="0 0.70711 -0.70711" />
-    <limit lower="-1.65806278939461" upper="1.5707963267949" effort="180.0" velocity="23.55" />
+    <limit lower="-3.228" upper="2.44346" effort="80.0" velocity="7.0" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -93,7 +93,7 @@
     <parent link="leg_l1_link" />
     <child link="leg_l2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-1.0471975511966" upper="0.847008285992848" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-0.847008285992848" upper="2.41413942135856" effort="63.0" velocity="10.8" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -121,7 +121,7 @@
     <parent link="leg_l2_link" />
     <child link="leg_l3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.91986217719376" upper="0.878424212528746" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-1.66" upper="1.66" effort="80.0" velocity="7.0" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -149,7 +149,7 @@
     <parent link="leg_l3_link" />
     <child link="leg_l4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.61799387799149" effort="180.0" velocity="23.55" />
+    <limit lower="0.0" upper="2.61799387799149" effort="63.0" velocity="10.8" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -177,7 +177,7 @@
     <parent link="leg_l4_link" />
     <child link="leg_l5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="27.0" velocity="10.2" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -205,7 +205,7 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="15.0" velocity="10.2" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -236,7 +236,7 @@
     <parent link="waist" />
     <child link="leg_r1_link" />
     <axis xyz="0 -0.70711 -0.70711" />
-    <limit lower="-1.65806278939461" upper="1.5707963267949" effort="180.0" velocity="23.55" />
+    <limit lower="-2.44" upper="3.23" effort="80.0" velocity="7.0" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -264,7 +264,7 @@
     <parent link="leg_r1_link" />
     <child link="leg_r2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-1.0471975511966" upper="0.847008285992848" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-2.41" upper="0.845961088441652" effort="63.0" velocity="10.8" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -292,7 +292,7 @@
     <parent link="leg_r2_link" />
     <child link="leg_r3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.91986217719376" upper="0.878424212528746" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-1.66" upper="1.66" effort="80.0" velocity="7.0" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -320,7 +320,7 @@
     <parent link="leg_r3_link" />
     <child link="leg_r4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.61799387799149" effort="180.0" velocity="23.55" />
+    <limit lower="0.0" upper="2.61799387799149" effort="63.0" velocity="10.8" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -348,7 +348,7 @@
     <parent link="leg_r4_link" />
     <child link="leg_r5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="27.0" velocity="10.2" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -376,7 +376,7 @@
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="15.0" velocity="10.2" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
