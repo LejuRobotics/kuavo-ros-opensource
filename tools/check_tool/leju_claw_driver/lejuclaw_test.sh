@@ -18,7 +18,7 @@ elif [ "$1" == "--single" ] && [ -n "$2" ]; then
 elif [ "$1" == "--start-server" ]; then
     # 启动夹爪服务器
     if [ -f "./lejuclaw_server" ]; then
-        sudo env HARDWARE_TOOL_STARTED=1 ./lejuclaw_server
+        sudo env HARDWARE_TOOL_STARTED=1 LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ./lejuclaw_server
     else
         echo "错误: 未找到 lejuclaw_server 可执行文件"
         exit 1
