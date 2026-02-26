@@ -1,5 +1,4 @@
 import os
-import time
 import roslibpy
 import numpy as np
 from typing import Tuple

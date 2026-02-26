@@ -70,8 +70,7 @@ class ArmTrajectoryBezierDemo:
         if self.robot_class == KUAVO:
             # 根据是否有腰部关节确定TACT长度
             tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
-            current_control_mode = self.get_current_control_mode()
-            if current_control_mode == "rl":
+            if self.kuavo_control_scheme == "rl":
                 self.INIT_ARM_POS = [int(0)] * tact_length
             else:
                 # 基础28个关节 + 可选的1个腰部关节
@@ -846,8 +845,7 @@ class ArmTrajectoryBezierDemo:
         self._timer = rospy.Timer(rospy.Duration(delay), self._on_timer_trigger, oneshot=True)
 
     def reset_robot_state(self):
-        current_control_mode = self.get_current_control_mode()
-        if current_control_mode == "rl":
+        if self.kuavo_control_scheme == "rl":
             self.rl_reset_robot_state()
         else:
             # 做完动作之后恢复自然摆臂状态，并且手、头、腰部关节归位
@@ -894,8 +892,7 @@ class ArmTrajectoryBezierDemo:
         finish_time = 2
         data = self.create_action_data(finish_time, is_rl=True)
 
-        current_control_mode = self.get_current_control_mode()
-        if current_control_mode == "rl":
+        if self.get_current_control_mode() == "rl":
             finish_time += 1
         self.END_FRAME_TIME = finish_time
 
@@ -1170,13 +1167,13 @@ class ArmTrajectoryBezierDemo:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
+        # RL模式下不需要手臂模式切换，RL控制器直接控制手臂
+        if self.kuavo_control_scheme != "rl":
+            self.call_change_arm_ctrl_mode_service(2)
 
-        self.call_change_arm_ctrl_mode_service(2)
-
-        # 等待手臂控制模式切换完成
-        if not self.wait_for_arm_mode_change_complete(2, timeout=2.0):
-            rospy.logwarn("Arm control mode change may not be complete, but continuing...")
-
+            # 等待手臂控制模式切换完成
+            if not self.wait_for_arm_mode_change_complete(2, timeout=2.0):
+                rospy.logwarn("Arm control mode change may not be complete, but continuing...")
 
         # 获取初始帧时间
         self.arm_flag = True
