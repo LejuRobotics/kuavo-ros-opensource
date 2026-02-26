@@ -107,6 +107,10 @@ namespace HighlyDynamic
         double arm_calibration_position_variance_time;
         double arm_calibration_position_variance_threshold;
         std::vector<Eigen::VectorXd> arm_poses;
+        // 腿部校准参数
+        Eigen::VectorXd leg_calibration_safe_pose;      // 安全姿态
+        Eigen::VectorXd leg_calibration_limits;        // 目标限位位置
+        Eigen::VectorXd leg_calibration_directions;    // 运动方向
     };
     struct ModelSettings
     {

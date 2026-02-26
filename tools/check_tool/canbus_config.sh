@@ -621,6 +621,12 @@ main() {
     esac
 
     echo_success "\n🎉 配置完成!"
+    echo ""
+    echo_warning "╔════════════════════════════════════════════════╗"
+    echo_warning "║  ⚠️  请执行以下命令进行电机方向辨识更新"
+    echo_warning "║  "
+    echo_warning "║  $SCRIPT_DIR/motorevo_tool.sh --negative"
+    echo_warning "╚════════════════════════════════════════════════╝"
 }
 
 # 运行主函数

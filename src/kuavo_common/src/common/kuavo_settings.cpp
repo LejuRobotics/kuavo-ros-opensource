@@ -56,6 +56,21 @@ namespace HighlyDynamic
         predefined_arm_pose.arm_calibration_position_variance_threshold = robot_config.getValue<double>("arm_calibration_position_variance_threshold");
         predefined_arm_pose.arm_poses.push_back(robot_config.getValue<Eigen::VectorXd>("arm_pose0"));
         predefined_arm_pose.arm_poses.push_back(robot_config.getValue<Eigen::VectorXd>("arm_pose1"));
+        
+        // 读取腿部校准参数（如果存在）
+        if (robot_config["leg_calibration_safe_pose"].is_array())
+        {
+            predefined_arm_pose.leg_calibration_safe_pose = robot_config.getValue<Eigen::VectorXd>("leg_calibration_safe_pose");
+            predefined_arm_pose.leg_calibration_limits = robot_config.getValue<Eigen::VectorXd>("leg_calibration_limits");
+            predefined_arm_pose.leg_calibration_directions = robot_config.getValue<Eigen::VectorXd>("leg_calibration_directions");
+        }
+        else
+        {
+            // 如果不存在，初始化为空向量
+            predefined_arm_pose.leg_calibration_safe_pose = Eigen::VectorXd();
+            predefined_arm_pose.leg_calibration_limits = Eigen::VectorXd();
+            predefined_arm_pose.leg_calibration_directions = Eigen::VectorXd();
+        }
     }
 
     void KuavoSettings::loadModelSettings(JSONConfigReader &robot_config)

@@ -1391,6 +1391,10 @@ def secondary_menu():
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
+                    elif version_num == 17:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
+                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+
                     elif 40 <= version_num <= 49:
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "joint_breakin.py")
                         script_description = f"Kuavo4磨线脚本 joint_breakin/joint_breakin.py (版本 {robot_version})"
@@ -1400,7 +1404,7 @@ def secondary_menu():
                         script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
                     else:
-                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、40-49、50-52），当前不支持自动选择磨线脚本" + bcolors.ENDC)
+                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、17、40-49、50-52），当前不支持自动选择磨线脚本" + bcolors.ENDC)
                 except (ValueError, TypeError):
                     print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，请检查 ~/.bashrc 中的 ROBOT_VERSION 设置" + bcolors.ENDC)
             else:

@@ -50,7 +50,9 @@ class ArmBreakinStandalone:
         
         # ROS节点名称（默认，将根据机器人版本和CAN总线类型动态选择）
         self.arm_breakin_node_name = "arm_breakin_node"  # roban_v14_dual
+        self.arm_breakin_roban_v17_dual_node_name = "arm_breakin_roban_v17_dual_node"  # roban_v17_dual
         self.arm_breakin_kuavo_v52_dual_node_name = "arm_breakin_kuavo_v52_dual_node"  # kuavo_v52_dual
+        self.arm_breakin_kuavo_v53_dual_node_name = "arm_breakin_kuavo_v53_dual_node"  # kuavo_v53_dual
         
         # 进程管理
         self.arm_process = None
@@ -341,10 +343,18 @@ class ArmBreakinStandalone:
                     # roban_v14_dual 机型
                     selected_node_name = self.arm_breakin_node_name
                     self.print_colored(f"检测到机型：roban_v14_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
+                elif version_num == 17 and can_bus_type == "dual_bus":
+                    # roban_v17_dual 机型
+                    selected_node_name = self.arm_breakin_roban_v17_dual_node_name
+                    self.print_colored(f"检测到机型：roban_v17_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
                 elif version_num == 52 and can_bus_type == "dual_bus":
                     # kuavo_v52_dual 机型
                     selected_node_name = self.arm_breakin_kuavo_v52_dual_node_name
                     self.print_colored(f"检测到机型：kuavo_v52_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
+                elif version_num == 53 and can_bus_type == "dual_bus":
+                    # kuavo_v53_dual 机型
+                    selected_node_name = self.arm_breakin_kuavo_v53_dual_node_name
+                    self.print_colored(f"检测到机型：kuavo_v53_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
                 else:
                     # 默认使用 roban_v14_dual 节点
                     selected_node_name = self.arm_breakin_node_name
