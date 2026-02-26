@@ -317,10 +317,15 @@ class RosbagToBezierPlanner:
                         rospy.logwarn(f"hand_position_list has {len(hand_position_list)} elements, truncating to {expected_finger_count}")
                         hand_position_list = hand_position_list[:expected_finger_count]
                     
-                    # 组合控制关节数据：手臂(14) + 手指(12) + 头部(2) [+ 腰部(1)]
-                    control_positions = [0.0] * 14 + hand_position_list + [0.0] * 2
-                    if self.has_waist:
-                        control_positions.append(0.0)  # 手部数据中没有腰部，填充0
+                    # 组合控制关节数据：根据机器人类型构建
+                    if self.is_roban:
+                        # ROBAN: 手臂(8) + 手指(12) + 头部(2) + 腰部(1) = 23
+                        control_positions = [0.0] * 8 + hand_position_list + [0.0] * 2 + [0.0]
+                    else:
+                        # KUAVO: 手臂(14) + 手指(12) + 头部(2) [+ 腰部(1)]
+                        control_positions = [0.0] * 14 + hand_position_list + [0.0] * 2
+                        if self.has_waist:
+                            control_positions.append(0.0)  # 手部数据中没有腰部，填充0
                     
                     # 验证最终长度
                     expected_total = len(self.control_joint_names)
@@ -592,8 +597,11 @@ class RosbagToBezierPlanner:
         self.bezier_control_points = []
 
         for joint_idx in range(len(self.control_joint_names)):
-            # 检查是否为手指关节（索引14-25）
-            is_finger_joint = 14 <= joint_idx < 26
+            # 检查是否为手指关节（根据机器人类型判断索引范围）
+            if self.is_roban:
+                is_finger_joint = 8 <= joint_idx < 20   # ROBAN: 手指索引8-19
+            else:
+                is_finger_joint = 14 <= joint_idx < 26  # KUAVO: 手指索引14-25
             
             # 如果没有手指数据且当前是手指关节，生成全0的控制点
             # 注意：腰部关节的数据来自sensors_data_raw话题，已经包含在control_data中，应该正常处理
@@ -774,8 +782,13 @@ class RosbagToBezierPlanner:
 
         def trajectory_callback(msg):
             start_time = msg.header.stamp.to_sec()
-            finger_start_idx = 14  # 手指关节起始索引
-            finger_end_idx = 26    # 手指关节结束索引（不包含）
+            # 根据机器人类型确定手指索引范围
+            if self.is_roban:
+                finger_start_idx = 8   # ROBAN: 手指索引8-19
+                finger_end_idx = 20
+            else:
+                finger_start_idx = 14  # KUAVO: 手指索引14-25
+                finger_end_idx = 26
             # 手指关节的弧度范围：0~100 映射到 0~1.7453 弧度
             finger_max_radians = 1.7453
 
@@ -970,15 +983,21 @@ class RosbagToBezierPlanner:
             servos = [0] * num_joints
 
             # 填充所有关节数据
-            # v40-: 手臂14个 + 手指12个 + 头部2个 = 28个
-            # v50+: 手臂14个 + 手指12个 + 头部2个 + 腰部1个 = 29个
+            # ROBAN: 手臂8个 + 手指12个 + 头部2个 + 腰部1个 = 23个
+            # KUAVO v40-: 手臂14个 + 手指12个 + 头部2个 = 28个
+            # KUAVO v50+: 手臂14个 + 手指12个 + 头部2个 + 腰部1个 = 29个
             positions = point.get('positions', [])
-            finger_start_idx = 14  # 手指关节起始索引
-            finger_end_idx = 26    # 手指关节结束索引（不包含）
-            
+            # 根据机器人类型确定手指索引范围
+            if self.is_roban:
+                finger_start_idx = 8   # ROBAN: 手指索引8-19
+                finger_end_idx = 20
+            else:
+                finger_start_idx = 14  # KUAVO: 手指索引14-25
+                finger_end_idx = 26
+
             for joint_idx in range(num_joints):  # 扩展到所有关节
                 if joint_idx < len(positions):
-                    # 手指关节（索引14-25）来自/dexhand/state，已经是0-100的百分比值，不需要转换
+                    # 手指关节来自/dexhand/state，已经是0-100的百分比值，不需要转换
                     # 手臂和头部关节来自/sensors_data_raw，是弧度值，需要转换为角度
                     if finger_start_idx <= joint_idx < finger_end_idx:
                         # 手指关节：直接使用原值（已经是0-100范围）
@@ -1156,10 +1175,15 @@ class RosbagToBezierPlanner:
                             current_position = p0_value if current_time <= p0_time else p3_value
                         
                         # 计算控制点（转换为TACT格式：相对于当前帧的偏移）
-                        # 手指关节（索引14-25）已经是0-100范围，不需要弧度转换
+                        # 手指关节已经是0-100范围，不需要弧度转换
                         # 其他关节是弧度值，需要转换为度
-                        finger_start_idx = 14
-                        finger_end_idx = 26
+                        # 根据机器人类型确定手指索引范围
+                        if self.is_roban:
+                            finger_start_idx = 8   # ROBAN: 手指索引8-19
+                            finger_end_idx = 20
+                        else:
+                            finger_start_idx = 14  # KUAVO: 手指索引14-25
+                            finger_end_idx = 26
                         is_finger_joint = finger_start_idx <= joint_idx < finger_end_idx
                         
                         # 左控制点：从当前时间到P1的时间偏移和角度偏移
@@ -1184,10 +1208,15 @@ class RosbagToBezierPlanner:
                         
                         break
                 
-                # 手指关节（索引14-25）已经是0-100范围，不需要弧度转换
+                # 手指关节已经是0-100范围，不需要弧度转换
                 # 其他关节是弧度值，需要转换为角度
-                finger_start_idx = 14
-                finger_end_idx = 26
+                # 根据机器人类型确定手指索引范围
+                if self.is_roban:
+                    finger_start_idx = 8   # ROBAN: 手指索引8-19
+                    finger_end_idx = 20
+                else:
+                    finger_start_idx = 14  # KUAVO: 手指索引14-25
+                    finger_end_idx = 26
                 is_finger_joint = finger_start_idx <= joint_idx < finger_end_idx
                 
                 if is_finger_joint:
@@ -1747,10 +1776,15 @@ class RosbagToBezierPlanner:
             return False
 
         # 步骤1.5: 合并手部数据到手臂数据中（按时间戳对齐）
-        # 如果有手部数据，将手指部分（索引14-25）合并到joint_data中
+        # 如果有手部数据，将手指部分合并到joint_data中
         if len(self.hand_sensors_data) > 0 and len(self.joint_data) > 0:
-            finger_start_idx = 14  # 手指数据在joint_data中的起始索引
-            finger_end_idx = 26    # 手指数据在joint_data中的结束索引（不包含）
+            # 根据机器人类型确定手指索引范围
+            if self.is_roban:
+                finger_start_idx = 8   # ROBAN: 手指索引8-19
+                finger_end_idx = 20
+            else:
+                finger_start_idx = 14  # KUAVO: 手指索引14-25
+                finger_end_idx = 26
 
             merged_count = 0
             hand_idx = 0  # 手部数据的当前索引

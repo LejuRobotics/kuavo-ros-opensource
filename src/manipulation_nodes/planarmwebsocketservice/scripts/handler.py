@@ -1003,7 +1003,7 @@ update_joy_config_pub = None
 
 def timer_callback(event):
     global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub
-    if g_robot_type == "ocs2" and len(ocs2_joint_state.position) > 0 and plan_arm_state_status is False:
+    if g_robot_type == "ocs2" and len(ocs2_joint_state.position) > 0 and plan_arm_state_status is False and vr_manager.recording_state != vr_manager.RecordingState.CONVERTING:
         if len(ocs2_joint_state.position) != 0:
             kuavo_arm_traj_pub.publish(ocs2_joint_state)
         if len(ocs2_hand_state.left_hand_position) != 0 or len(ocs2_hand_state.right_hand_position) != 0:
