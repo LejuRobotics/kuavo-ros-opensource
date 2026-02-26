@@ -51,7 +51,15 @@ ROBOT_TRANSITIONS = [
 
 class KuavoRobotCore:
     _instance = None
-    
+
+    # SDK states that are sub-states of robot gaits.
+    # When the robot reports these gaits, the gait callback should NOT override these SDK states.
+    # e.g. command_pose/command_pose_world are SDK-level sub-states of the 'stance' gait.
+    _GAIT_COMPATIBLE_STATES = {
+        'command_pose': 'stance',
+        'command_pose_world': 'stance',
+    }
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(KuavoRobotCore, cls).__new__(cls)
@@ -69,7 +77,11 @@ class KuavoRobotCore:
             # robot control
             self._control = KuavoRobotControlWebsocket()
             self._rb_state = KuavoRobotStateCoreWebsocket()
-    
+
+            # thread lock for state machine transitions (protects against
+            # concurrent access from main thread and roslibpy reactor thread)
+            self._state_lock = threading.RLock()
+
             # manipulation mpc
             self._manipulation_mpc_frame = KuavoManipulationMpcFrame.KeepCurrentFrame
             self._manipulation_mpc_ctrl_mode = KuavoManipulationMpcCtrlMode.NoControl
@@ -130,6 +142,17 @@ class KuavoRobotCore:
                              f"e.g. `roslaunch humanoid_controllers load_kuavo_real.launch`")
         return True
 
+    """ ------------------- Thread-safe transitions ----------------"""
+    def safe_to_stance(self):
+        """Thread-safe wrapper for to_stance()."""
+        with self._state_lock:
+            return self.to_stance()
+
+    def safe_to_trot(self):
+        """Thread-safe wrapper for to_trot()."""
+        with self._state_lock:
+            return self.to_trot()
+
     """ ----------------------- Machine State -----------------------"""
     def _on_enter_stance(self, event):
         previous_state = event.transition.source
@@ -137,7 +160,7 @@ class KuavoRobotCore:
             SDKLogger.debug(f"[Core] [StateMachine] State unchanged: already in stance state")
             return
         
-        SDKLogger.debug(f"[Core] [StateMachine] Entering stance state, from {previous_state}")
+        SDKLogger.info(f"[Core] [DEBUG] _on_enter_stance: from '{previous_state}', sending robot_stance()...")
         if previous_state == 'walk':
             self._control.robot_walk(0.0, 0.0, 0.0) # stop walk state
             start_time = time.time()
@@ -156,8 +179,23 @@ class KuavoRobotCore:
                 pass
             self._control.robot_stance()
         else:
-            self._control.robot_stance() 
-        time.sleep(0.5)
+            self._control.robot_stance()
+        # Wait for robot to confirm stance gait, with minimum settle time
+        # (command_pose/command_pose_world share the 'stance' gait, so is_gait('stance')
+        #  may already be True; the minimum settle time ensures the robot has actually
+        #  processed the stance command before we proceed)
+        _WAIT_TIMEOUT = 2.0
+        _MIN_SETTLE_TIME = 1.0
+        start_time = time.time()
+        while time.time() - start_time < _WAIT_TIMEOUT:
+            if self._rb_state.is_gait('stance') and (time.time() - start_time) >= _MIN_SETTLE_TIME:
+                break
+            time.sleep(0.1)
+        elapsed = time.time() - start_time
+        if not self._rb_state.is_gait('stance'):
+            SDKLogger.warn(f"[Core] [DEBUG] _on_enter_stance: Timeout ({_WAIT_TIMEOUT}s) waiting for stance gait")
+        else:
+            SDKLogger.info(f"[Core] [DEBUG] _on_enter_stance: stance confirmed, waited {elapsed:.2f}s, gait='{self._rb_state.gait_name()}'")
 
     def _on_enter_walk(self, event):
         previous_state = event.transition.source
@@ -403,8 +441,17 @@ class KuavoRobotCore:
             limited_height = (self._rb_state.com_height + HEIGHT_CHANGE_THRESHOLD) - self._rb_info['init_stand_height']
             SDKLogger.warn(f"[Core] Warning! Height change too large, limiting to safe range, reset height to {limited_height:.3f}")
 
-        self.to_command_pose()
-        return self._control.control_command_pose(target_pose_x, target_pose_y, limited_height, target_pose_yaw)
+        with self._state_lock:
+            SDKLogger.info(f"[Core] [DEBUG] control_command_pose: current state='{self.state}', transitioning to command_pose")
+            try:
+                self.to_command_pose()
+            except Exception as e:
+                SDKLogger.error(f"[Core] [DEBUG] to_command_pose FAILED from state '{self.state}': {e}")
+                raise
+            SDKLogger.info(f"[Core] [DEBUG] control_command_pose: state transition OK, now state='{self.state}', publishing msg...")
+            result = self._control.control_command_pose(target_pose_x, target_pose_y, limited_height, target_pose_yaw)
+            SDKLogger.info(f"[Core] [DEBUG] control_command_pose: publish result={result}")
+            return result
 
     def control_command_pose_world(self, target_pose_x:float, target_pose_y:float, target_pose_z:float, target_pose_yaw:float)->bool:
         """
@@ -442,8 +489,17 @@ class KuavoRobotCore:
             limited_height = (self._rb_state.com_height + HEIGHT_CHANGE_THRESHOLD) - self._rb_info['init_stand_height']
             SDKLogger.warn(f"[Core] Warning! Height change too large, limiting to safe range, reset height to {limited_height:.3f}")
 
-        self.to_command_pose_world()
-        return self._control.control_command_pose_world(target_pose_x, target_pose_y, limited_height, target_pose_yaw)
+        with self._state_lock:
+            SDKLogger.info(f"[Core] [DEBUG] control_command_pose_world: current state='{self.state}', transitioning to command_pose_world")
+            try:
+                self.to_command_pose_world()
+            except Exception as e:
+                SDKLogger.error(f"[Core] [DEBUG] to_command_pose_world FAILED from state '{self.state}': {e}")
+                raise
+            SDKLogger.info(f"[Core] [DEBUG] control_command_pose_world: state transition OK, now state='{self.state}', publishing msg...")
+            result = self._control.control_command_pose_world(target_pose_x, target_pose_y, limited_height, target_pose_yaw)
+            SDKLogger.info(f"[Core] [DEBUG] control_command_pose_world: publish result={result}")
+            return result
     
     def execute_gesture(self, gestures:list)->bool:
         return self._control.execute_gesture(gestures)
@@ -695,13 +751,33 @@ class KuavoRobotCore:
     
     """ Callbacks """
     def _humanoid_gait_changed(self, current_time: float, gait_name: str):
+        # command_pose/command_pose_world are SDK sub-states of 'stance' gait,
+        # the robot still reports 'stance' gait when the SDK is in these states.
+        # Do NOT override user-initiated command_pose transitions.
+        if self._GAIT_COMPATIBLE_STATES.get(self.state) == gait_name:
+            SDKLogger.debug(f"[Core] Gait callback: SDK state '{self.state}' compatible with gait '{gait_name}', skip")
+            return
+
         if self.state != gait_name:
-            # Check if to_$gait_name method exists
             to_method = f'to_{gait_name}'
             if hasattr(self, to_method):
                 SDKLogger.debug(f"[Core] Received gait change notification: {gait_name} at time {current_time}")
-                # Call the transition method if it exists
+                # Run off reactor thread to avoid blocking websocket I/O
+                # (_on_enter_stance has time.sleep which would freeze all websocket communication)
+                threading.Thread(target=self._do_gait_transition, args=(to_method, gait_name), daemon=True).start()
+
+    def _do_gait_transition(self, to_method: str, gait_name: str):
+        """Execute gait transition in a separate thread with lock protection."""
+        with self._state_lock:
+            # Re-check after acquiring lock (state may have changed while waiting)
+            if self._GAIT_COMPATIBLE_STATES.get(self.state) == gait_name:
+                return
+            if self.state == gait_name:
+                return
+            try:
                 getattr(self, to_method)()
+            except Exception as e:
+                SDKLogger.error(f"[Core] Gait transition '{to_method}' failed: {e}")
 
     def is_arm_collision(self)->bool:
         return self._control.is_arm_collision()

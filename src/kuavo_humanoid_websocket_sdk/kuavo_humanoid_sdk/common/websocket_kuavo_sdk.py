@@ -1,3 +1,5 @@
+import time
+import atexit
 import roslibpy
 
 class WebSocketKuavoSDK:
@@ -19,7 +21,19 @@ class WebSocketKuavoSDK:
             self._initialized = True
             self.client = roslibpy.Ros(host=WebSocketKuavoSDK.websocket_host, port=WebSocketKuavoSDK.websocket_port)
             self.client.run(timeout=WebSocketKuavoSDK.websocket_timeout)
-            
+            atexit.register(self._shutdown)
+
+    def _shutdown(self):
+        """Flush pending messages and close connection on process exit."""
+        try:
+            # Give the Twisted reactor time to flush pending WebSocket writes
+            # before terminating. roslibpy.publish() is async (via
+            # reactor.callFromThread), so messages may still be in the
+            # reactor's event queue or transport write buffer at exit time.
+            time.sleep(0.1)
+            self.client.terminate()
+        except Exception:
+            pass
 
     def __del__(self):
         self.client.terminate()
