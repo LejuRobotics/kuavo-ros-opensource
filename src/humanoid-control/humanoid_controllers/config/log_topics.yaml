@@ -18,6 +18,7 @@ topics:
   - /quest_joystick_data
   - /rosout
   - /rosout_agg
+  - /stop_robot
   - /tf
   - /tf_static
   - /state_estimate/.*

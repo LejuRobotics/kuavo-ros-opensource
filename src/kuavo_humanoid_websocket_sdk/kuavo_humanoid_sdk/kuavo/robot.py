@@ -190,18 +190,18 @@ class KuavoRobot(RobotBase):
         Note:
             You can call :meth:`KuavoRobotState.wait_for_stance` to wait until the robot enters stance mode.
         """
-        return self._kuavo_core.to_stance()
-        
+        return self._kuavo_core.safe_to_stance()
+
     def trot(self)->bool:
         """Put the robot into 'trot' mode.
-        
+
         Returns:
             bool: True if the robot is put into trot mode successfully, False otherwise.
-            
+
         Note:
             You can call :meth:`KuavoRobotState.wait_for_walk` to wait until the robot enters trot mode.
         """
-        return self._kuavo_core.to_trot()
+        return self._kuavo_core.safe_to_trot()
 
     def walk(self, linear_x:float, linear_y:float, angular_z:float)->bool:
         """Control the robot's motion.

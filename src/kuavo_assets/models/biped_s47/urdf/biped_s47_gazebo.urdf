@@ -24,13 +24,13 @@
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="dummy_link" />
     <child link="base_link" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l1_link">
     <inertial>
       <origin xyz="-0.00430148 -2.708e-05 -0.00851195" rpy="0 0 0" />
       <mass value="1.71093115" />
-      <inertia ixx="0.00206092" ixy="2e-05" ixz="6.944e-05" iyy="0.00277274" iyz="-5.1e-05" izz="0.00370826" />
+      <inertia ixx="0.00206092" ixy="1.97e-06" ixz="6.944e-05" iyy="0.00277274" iyz="-5.1e-06" izz="0.00370826" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -47,14 +47,14 @@
     <parent link="base_link" />
     <child link="leg_l1_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="180.0" velocity="23.55" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="127.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l2_link">
     <inertial>
       <origin xyz="0.0 -0.00231118 -0.09062539" rpy="0 0 0" />
       <mass value="0.58029165" />
-      <inertia ixx="0.00223984" ixy="0.0" ixz="3e-05" iyy="0.00123175" iyz="-7e-05" izz="0.00146391" />
+      <inertia ixx="0.00223984" ixy="0.0" ixz="3e-08" iyy="0.00123175" iyz="-6.98e-06" izz="0.00146391" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -71,8 +71,8 @@
     <parent link="leg_l1_link" />
     <child link="leg_l2_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-0.872664625997165" upper="0.785398163397448" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.872664625997165" upper="0.785398163397448" effort="22.2" velocity="10.46" />
+    <dynamics damping="0.5" friction="0.0" />
   </joint>
   <link name="leg_l3_link">
     <inertial>
@@ -95,14 +95,14 @@
     <parent link="leg_l2_link" />
     <child link="leg_l3_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="72.0" velocity="20.93" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l4_link">
     <inertial>
       <origin xyz="0.00696242 5.314e-05 -0.11549851" rpy="0 0 0" />
       <mass value="1.62776815" />
-      <inertia ixx="0.01243912" ixy="-2.3e-05" ixz="5.881e-05" iyy="0.01229563" iyz="-2.895e-05" izz="0.00097937" />
+      <inertia ixx="0.01243912" ixy="-2.29e-06" ixz="5.881e-05" iyy="0.01229563" iyz="-2.895e-05" izz="0.00097937" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -119,14 +119,14 @@
     <parent link="leg_l3_link" />
     <child link="leg_l4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.53072741539178" effort="180.0" velocity="23.55" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="0.0" upper="2.53072741539178" effort="135.0" velocity="11.62" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l5_link">
     <inertial>
       <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
       <mass value="0.07193524" />
-      <inertia ixx="6.9e-05" ixy="0.0" ixz="0.0" iyy="6.9e-05" iyz="0.0" izz="1.218e-05" />
+      <inertia ixx="6.92e-04" ixy="0.0" ixz="0.0" iyy="6.92e-04" iyz="0.0" izz="1.218e-04" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -143,14 +143,14 @@
     <parent link="leg_l4_link" />
     <child link="leg_l5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="36.0" velocity="23.0266666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="46.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l6_link">
     <inertial>
       <origin xyz="0.03732754 -2.22e-06 -0.03883977" rpy="0 0 0" />
       <mass value="0.49861272" />
-      <inertia ixx="0.00039242" ixy="3e-05" ixz="4.664e-05" iyy="0.00158655" iyz="0.0" izz="0.00172576" />
+      <inertia ixx="0.00039242" ixy="3e-08" ixz="4.664e-05" iyy="0.00158655" iyz="0.0" izz="0.00172576" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -167,8 +167,8 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="ll_foot_toe">
     <collision>
@@ -182,6 +182,7 @@
     <origin xyz="0.17084 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="ll_foot_toe" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="ll_foot_heel">
     <collision>
@@ -195,6 +196,7 @@
     <origin xyz="-0.073164 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="ll_foot_heel" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="lr_foot_toe">
     <collision>
@@ -208,6 +210,7 @@
     <origin xyz="0.17084 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="lr_foot_toe" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="lr_foot_heel">
     <collision>
@@ -221,6 +224,7 @@
     <origin xyz="-0.073164 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="lr_foot_heel" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="l_foot_toe">
     <collision>
@@ -231,9 +235,10 @@
     </collision>
   </link>
   <joint name="l_foot_toe_joint" type="fixed">
-    <origin xyz="0.17084 0.0 -0.0595" rpy="0 0 0" />
+    <origin xyz="0.0 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="l_foot_toe" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="l_foot_heel">
     <collision>
@@ -244,15 +249,16 @@
     </collision>
   </link>
   <joint name="l_foot_heel_joint" type="fixed">
-    <origin xyz="-0.073164 0.0 -0.0595" rpy="0 0 0" />
+    <origin xyz="-0.0 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="l_foot_heel" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r1_link">
     <inertial>
       <origin xyz="-0.00430146 2.709e-05 -0.00851195" rpy="0 0 0" />
       <mass value="1.71093008" />
-      <inertia ixx="0.00206092" ixy="-2e-05" ixz="6.944e-05" iyy="0.00277274" iyz="5.1e-05" izz="0.00370826" />
+      <inertia ixx="0.00206092" ixy="-1.97e-06" ixz="6.944e-05" iyy="0.00277274" iyz="5.1e-06" izz="0.00370826" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -269,14 +275,14 @@
     <parent link="base_link" />
     <child link="leg_r1_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.663225115757845" upper="0.314159265358979" effort="180.0" velocity="23.55" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.663225115757845" upper="0.314159265358979" effort="127.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r2_link">
     <inertial>
       <origin xyz="0.0 0.00231118 -0.09062539" rpy="0 0 0" />
       <mass value="0.58029165" />
-      <inertia ixx="0.00223984" ixy="0.0" ixz="-3e-05" iyy="0.00123175" iyz="7e-05" izz="0.00146391" />
+      <inertia ixx="0.00223984" ixy="0.0" ixz="-3e-08" iyy="0.00123175" iyz="6.98e-06" izz="0.00146391" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -293,8 +299,8 @@
     <parent link="leg_r1_link" />
     <child link="leg_r2_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-0.785398163397448" upper="0.872664625997165" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.785398163397448" upper="0.872664625997165" effort="22.2" velocity="10.46" />
+    <dynamics damping="0.5" friction="0.0" />
   </joint>
   <link name="leg_r3_link">
     <inertial>
@@ -317,14 +323,14 @@
     <parent link="leg_r2_link" />
     <child link="leg_r3_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="72.0" velocity="20.93" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r4_link">
     <inertial>
       <origin xyz="0.00743231 -5.343e-05 -0.11558701" rpy="0 0 0" />
       <mass value="1.62655699" />
-      <inertia ixx="0.01241258" ixy="2.3e-05" ixz="6.289e-05" iyy="0.0122692" iyz="2.902e-05" izz="0.00097927" />
+      <inertia ixx="0.01241258" ixy="2.28e-06" ixz="6.289e-05" iyy="0.0122692" iyz="2.902e-05" izz="0.00097927" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -341,14 +347,14 @@
     <parent link="leg_r3_link" />
     <child link="leg_r4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.53072741539178" effort="180.0" velocity="23.55" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="0.0" upper="2.53072741539178" effort="135.0" velocity="11.62" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r5_link">
     <inertial>
       <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
       <mass value="0.07193524" />
-      <inertia ixx="6.9e-05" ixy="0.0" ixz="0.0" iyy="6.9e-05" iyz="0.0" izz="1.218e-05" />
+      <inertia ixx="6.92e-04" ixy="0.0" ixz="0.0" iyy="6.92e-04" iyz="0.0" izz="1.218e-04" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -365,14 +371,14 @@
     <parent link="leg_r4_link" />
     <child link="leg_r5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="36.0" velocity="23.0266666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="46.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r6_link">
     <inertial>
       <origin xyz="0.03734098 -2.22e-06 -0.03882684" rpy="0 0 0" />
       <mass value="0.49861272" />
-      <inertia ixx="0.00039238" ixy="3e-05" ixz="4.618e-05" iyy="0.00158655" iyz="0.0" izz="0.00172579" />
+      <inertia ixx="0.00039238" ixy="3e-08" ixz="4.618e-05" iyy="0.00158655" iyz="0.0" izz="0.00172579" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -389,8 +395,8 @@
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="rl_foot_toe">
     <collision>
@@ -404,6 +410,7 @@
     <origin xyz="0.17084 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="rl_foot_toe" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="rl_foot_heel">
     <collision>
@@ -417,6 +424,7 @@
     <origin xyz="-0.073164 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="rl_foot_heel" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="rr_foot_toe">
     <collision>
@@ -430,6 +438,7 @@
     <origin xyz="0.17084 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="rr_foot_toe" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="rr_foot_heel">
     <collision>
@@ -443,6 +452,7 @@
     <origin xyz="-0.073164 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="rr_foot_heel" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="r_foot_toe">
     <collision>
@@ -453,9 +463,10 @@
     </collision>
   </link>
   <joint name="r_foot_toe_joint" type="fixed">
-    <origin xyz="0.17084 0.0 -0.0595" rpy="0 0 0" />
+    <origin xyz="0.0 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="r_foot_toe" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="r_foot_heel">
     <collision>
@@ -466,9 +477,10 @@
     </collision>
   </link>
   <joint name="r_foot_heel_joint" type="fixed">
-    <origin xyz="-0.073164 0.0 -0.0595" rpy="0 0 0" />
+    <origin xyz="-0.0 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="r_foot_heel" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l1_link">
     <inertial>
@@ -491,8 +503,8 @@
     <parent link="base_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.67" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l2_link">
     <inertial>
@@ -515,8 +527,8 @@
     <parent link="zarm_l1_link" />
     <child link="zarm_l2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.349065850398866" upper="2.0943951023932" effort="50.0" velocity="8.37333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.349065850398866" upper="2.0943951023932" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l3_link">
     <inertial>
@@ -539,8 +551,8 @@
     <parent link="zarm_l2_link" />
     <child link="zarm_l3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="19.3633333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l4_link">
     <inertial>
@@ -559,12 +571,12 @@
     </visual>
   </link>
   <joint name="zarm_l4_joint" type="revolute">
-    <origin xyz="0.0199999999999998 0 -0.2837" rpy="0 0 0" />
+    <origin xyz="0.0200000000000006 0 -0.283699999999996" rpy="0 0 0" />
     <parent link="zarm_l3_link" />
     <child link="zarm_l4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.61799387799149" upper="0.0" effort="50.0" velocity="8.37333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l5_link">
     <inertial>
@@ -583,12 +595,12 @@
     </visual>
   </link>
   <joint name="zarm_l5_joint" type="revolute">
-    <origin xyz="-0.0200000000000001 0 -0.127037274261587" rpy="0 0 0" />
+    <origin xyz="-0.0200000000000025 0 -0.127037274261591" rpy="0 0 0" />
     <parent link="zarm_l4_link" />
     <child link="zarm_l5_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l6_link">
     <inertial>
@@ -607,18 +619,18 @@
     </visual>
   </link>
   <joint name="zarm_l6_joint" type="revolute">
-    <origin xyz="0 0 -0.106462725738415" rpy="0 0 0" />
+    <origin xyz="0.000199999999999079 0 -0.106462725738415" rpy="0 0 0" />
     <parent link="zarm_l5_link" />
     <child link="zarm_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-1.30899693899575" upper="0.698131700797732" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-1.30899693899575" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l7_link">
     <inertial>
-      <origin xyz="3e-05 0.00038 -0.07987" rpy="0 0 0" />
-      <mass value="0.36" />
-      <inertia ixx="0.00023" ixy="0.0" ixz="0.0" iyy="0.00023" iyz="-2e-05" izz="9e-05" />
+      <origin xyz="0.00186 0.01014 -0.09044" rpy="0 0 0" />
+      <mass value="0.64" />
+      <inertia ixx="0.00071" ixy="1e-05" ixz="2e-05" iyy="0.0007" iyz="-4e-05" izz="0.00012" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -631,12 +643,12 @@
     </visual>
   </link>
   <joint name="zarm_l7_joint" type="revolute">
-    <origin xyz="0 0 -0.0209999999999998" rpy="0 0 0" />
+    <origin xyz="0 0 -0.0210004653879916" rpy="0 0 0" />
     <parent link="zarm_l6_link" />
     <child link="zarm_l7_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l7_end_effector">
     <collision>
@@ -849,8 +861,8 @@
     <parent link="base_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.67" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r2_link">
     <inertial>
@@ -873,8 +885,8 @@
     <parent link="zarm_r1_link" />
     <child link="zarm_r2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-2.0943951023932" upper="0.349065850398866" effort="50.0" velocity="8.37333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-2.0943951023932" upper="0.349065850398866" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r3_link">
     <inertial>
@@ -897,8 +909,8 @@
     <parent link="zarm_r2_link" />
     <child link="zarm_r3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="18.84" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r4_link">
     <inertial>
@@ -917,12 +929,12 @@
     </visual>
   </link>
   <joint name="zarm_r4_joint" type="revolute">
-    <origin xyz="0.0199999999999998 0 -0.2837" rpy="0 0 0" />
+    <origin xyz="0.0200000000000024 0 -0.2837" rpy="0 0 0" />
     <parent link="zarm_r3_link" />
     <child link="zarm_r4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.61799387799149" upper="0.0" effort="50.0" velocity="8.37333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r5_link">
     <inertial>
@@ -945,8 +957,8 @@
     <parent link="zarm_r4_link" />
     <child link="zarm_r5_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r6_link">
     <inertial>
@@ -969,14 +981,14 @@
     <parent link="zarm_r5_link" />
     <child link="zarm_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.698131700797732" upper="1.30899693899575" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.698131700797732" upper="1.30899693899575" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r7_link">
     <inertial>
-      <origin xyz="-3e-05 -0.00038 -0.07987" rpy="0 0 0" />
-      <mass value="0.36" />
-      <inertia ixx="0.00023" ixy="0.0" ixz="0.0" iyy="0.00023" iyz="2e-05" izz="9e-05" />
+      <origin xyz="0.00186 -0.01014 -0.09044" rpy="0 0 0" />
+      <mass value="0.64" />
+      <inertia ixx="0.00069" ixy="-1e-05" ixz="2e-05" iyy="0.00068" iyz="5e-05" izz="0.00012" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -989,12 +1001,12 @@
     </visual>
   </link>
   <joint name="zarm_r7_joint" type="revolute">
-    <origin xyz="0.000199999999999235 0 -0.0209999999999998" rpy="0 0 0" />
+    <origin xyz="0 0 -0.0209999999999999" rpy="0 0 0" />
     <parent link="zarm_r6_link" />
     <child link="zarm_r7_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r7_end_effector">
     <collision>
@@ -1207,7 +1219,7 @@
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="1.5" velocity="5.23333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zhead_2_link">
     <inertial>
@@ -1231,7 +1243,7 @@
     <child link="zhead_2_link" />
     <axis xyz="0 1 0" />
     <limit lower="-0.523598775598299" upper="0.523598775598299" effort="12.0" velocity="5.23333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="camera">
     <inertial>
@@ -1253,7 +1265,7 @@
     <origin xyz="0.0967509784707853 0.0175003248712456 0.125953265112721" rpy="0 0.488692190558413 0" />
     <parent link="zhead_2_link" />
     <child link="camera" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
 
   <link name="camera_base">
@@ -1304,7 +1316,7 @@
     <origin xyz="0.0217799337881943 0 0.105417258037133" rpy="0 0.229686043245049 0" />
     <parent link="zhead_2_link" />
     <child link="radar" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
 
   

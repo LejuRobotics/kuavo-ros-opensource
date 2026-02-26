@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-from ast import Tuple
-from re import T
 import rospy
 import cv2
 import time
@@ -13,7 +11,7 @@ from cv_bridge import CvBridge
 from ultralytics import YOLO
 from openvino.runtime import Core
 
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from geometry_msgs.msg import Point
 from kuavo_msgs.msg import robotHeadMotionData, sensorsData
 # 导入新的消息类型
@@ -85,6 +83,15 @@ class FaceTrack:
         rospy.loginfo("开始加载OpenVINO人脸识别模型: %s", model_path)
         self.ov_core = Core()
         self.device = rospy.get_param("~openvino_device", "CPU")
+        
+        # 限制OpenVINO线程数以降低CPU占用（必须在编译模型之前设置）
+        try:
+            num_threads = rospy.get_param("~openvino_num_threads", 2)  # 默认2线程
+            self.ov_core.set_property("CPU", {"INFERENCE_NUM_THREADS": num_threads})
+            rospy.loginfo("OpenVINO线程数设置为: %d", num_threads)
+        except Exception as e:
+            rospy.logwarn("无法设置OpenVINO线程数: %s", e)
+        
         try:
             self.compiled_model = self.ov_core.compile_model(model_path, self.device)
         except Exception as exc:
@@ -96,7 +103,7 @@ class FaceTrack:
         input_shape = self.input_tensor.shape
         self.input_height = int(input_shape[2])
         self.input_width = int(input_shape[3])
-        self.conf_threshold = rospy.get_param("~confidence_threshold", 0.35)
+        self.conf_threshold = rospy.get_param("~confidence_threshold", 0.6)
 
         self.bridge = CvBridge()
         rospy.loginfo("OpenVINO人脸识别模型加载完毕")
@@ -113,52 +120,114 @@ class FaceTrack:
         self.prev_time = time.time()
         self.fps = 0
 
-        # CPU资源控制相关变量
-        self.last_process_time = time.time()
-        self.process_interval = 0.05  # 处理间隔（秒），限制为每秒最多处理20帧
-        self.frame_count = 0
-        self.process_every_n_frames = 2  # 每处理1帧就跳过2帧
+        # 获取最大处理帧率参数（用于控制CPU占用率）
+        self.max_processing_fps = rospy.get_param("~max_processing_fps", 15.0)  # 默认15fps（降低默认值）
+        if self.max_processing_fps <= 0:
+            rospy.logwarn("max_processing_fps参数无效，使用默认值15.0")
+            self.max_processing_fps = 15.0
+        self.min_processing_interval = 1.0 / self.max_processing_fps  # 最小处理间隔（秒）
+        rospy.loginfo("最大处理帧率设置为: %.1f fps (处理间隔: %.3f秒)", 
+                     self.max_processing_fps, self.min_processing_interval)
 
-        # yaw 左右转动，pitch 上下转动
-        self.yaw_pid = PID(kp=0.15, ki=0.00, kd=0.001, output_limits=(-90, 90))
-        self.pitch_pid = PID(kp=0.1, ki=0.00, kd=0.001, output_limits=(-20, 30))
+        # 异步处理相关变量 - 使用线程安全的队列实现实时处理
+        self.latest_image_lock = threading.Lock()
+        self.latest_image = None
+        self.latest_image_msg = None  # 保存原始消息，延迟转换
+        self.latest_image_header = None
+        self.latest_image_timestamp = None
+        self.processing_thread = None
+        self.stop_processing = False
+
         self.head_yaw = 0.0
         self.head_pitch = 0.0
-        self.head_yaw_limit = (-90, 90)
-        self.head_pitch_limit = (-20, 30)
+
+        # 从ROS参数服务器获取机器人版本号
+        try:
+            self.robot_version = rospy.get_param('robot_version', None)
+        except rospy.ROSException:
+            rospy.logwarn("无法从参数服务器获取robot_version参数")
+            self.robot_version = None
+
+        if self.robot_version is not None:
+
+            robot_type = "roban" if (self.robot_version // 10) % 10 == 1 else "kuavo"
+
+            if robot_type == "roban":
+                # roban
+                yaw_kp, yaw_ki, yaw_kd = 0.045, 0.00, 0.001
+                pitch_kp, pitch_ki, pitch_kd = 0.01, 0.00, 0.001
+                self.head_yaw_limit = (-90, 90)
+                self.head_pitch_limit = (-20, 45)
+            else:
+                # kuavo
+                yaw_kp, yaw_ki, yaw_kd = 0.15, 0.00, 0.001
+                pitch_kp, pitch_ki, pitch_kd = 0.1, 0.00, 0.001
+                self.head_yaw_limit = (-90, 90)
+                self.head_pitch_limit = (-30, 30)
+        else:
+            # 无法获取版本号时使用默认参数
+            yaw_kp, yaw_ki, yaw_kd = 0.055, 0.00, 0.001
+            pitch_kp, pitch_ki, pitch_kd = 0.01, 0.00, 0.001
+            self.head_yaw_limit = (-90, 90)
+            self.head_pitch_limit = (-20, 45)
+        
+        # 使用获取到的限位值和PID参数初始化PID控制器
+        self.yaw_pid = PID(kp=yaw_kp, ki=yaw_ki, kd=yaw_kd, output_limits=self.head_yaw_limit)
+        self.pitch_pid = PID(kp=pitch_kp, ki=pitch_ki, kd=pitch_kd, output_limits=self.head_pitch_limit)
+
 
         self.motor_lock = threading.Lock()
 
         # 检测指定话题是否存在
         self.image_sub = None
+        self.use_compressed = False
         self.check_and_subscribe_to_camera()
 
         self.head_state_sub = rospy.Subscriber("/sensors_data_raw", sensorsData, self.update_head_state)
         self.head_motion_pub = rospy.Publisher("/robot_head_motion_data", robotHeadMotionData, queue_size=10)
 
-        self.image_pub = rospy.Publisher("/camera/detected_face", Image, queue_size=30)
+        self.image_pub = rospy.Publisher("/camera/detected_face", Image, queue_size=1)  # 只发布最新结果
         # 修改发布器，使用新的FaceBoundingBox消息类型
-        self.face_position_pub = rospy.Publisher("/face_detection/bounding_box", FaceBoundingBox, queue_size=10)
+        self.face_position_pub = rospy.Publisher("/face_detection/bounding_box", FaceBoundingBox, queue_size=1)  # 只发布最新结果
         
         self.cv_image = None
+        
+        # 启动后台处理线程
+        self.stop_processing = False
+        self.processing_thread = threading.Thread(target=self._processing_loop, daemon=True)
+        self.processing_thread.start()
+        rospy.loginfo("后台图像处理线程已启动")
 
     def check_and_subscribe_to_camera(self):
         """检查摄像头话题是否存在，并订阅第一个找到的话题"""
         # 获取当前发布的所有话题
         published_topics = rospy.get_published_topics()
-        camera_topics = [topic for topic, _ in published_topics if 'image_raw' in topic and ('camera' in topic or 'cam_h' in topic)]
+        camera_topics = [topic for topic, _ in published_topics if ('image_raw' in topic or 'compressed' in topic) and ('camera' in topic or 'cam_h' in topic)]
         
         rospy.loginfo("发现的摄像头相关话题: %s", camera_topics)
         
-        # 定义优先级话题列表
-        priority_topics = ["/camera/color/image_raw", "/cam_h/color/image_raw"]
+        # 定义优先级话题列表（优先使用压缩话题）
+        priority_topics = [
+            "/camera/color/image_raw/compressed", 
+            "/cam_h/color/image_raw/compressed",
+            "/camera/color/image_raw", 
+            "/cam_h/color/image_raw"
+        ]
         
         # 根据优先级订阅第一个可用的话题
         subscribed = False
         for topic in priority_topics:
             if topic in camera_topics:
-                self.image_sub = rospy.Subscriber(topic, Image, self.image_callback)
-                rospy.loginfo("已订阅话题: %s", topic)
+                # 判断是否为压缩话题
+                if "/compressed" in topic:
+                    # 设置 queue_size=1 确保只处理最新消息，丢弃旧消息，提高实时性
+                    self.image_sub = rospy.Subscriber(topic, CompressedImage, self.compressed_image_callback, queue_size=1)
+                    self.use_compressed = True
+                else:
+                    # 设置 queue_size=1 确保只处理最新消息，丢弃旧消息，提高实时性
+                    self.image_sub = rospy.Subscriber(topic, Image, self.image_callback, queue_size=1)
+                    self.use_compressed = False
+                rospy.loginfo("已订阅话题: %s (压缩: %s, queue_size=1)", topic, self.use_compressed)
                 subscribed = True
                 break
         
@@ -166,50 +235,114 @@ class FaceTrack:
             rospy.logwarn("未找到任何可用的摄像头话题")
 
     def image_callback(self, msg):
+        """快速回调函数，只保存最新图像，不进行耗时处理"""
         try:
-            # 帧计数器增加
-            self.frame_count += 1
-            
-            # 控制处理频率 - 跳帧处理
-            if self.frame_count % self.process_every_n_frames != 0:
-                return
-            
-            # 控制处理间隔 - 时间间隔控制
-            current_time = time.time()
-            if current_time - self.last_process_time < self.process_interval:
-                return
-            self.last_process_time = current_time
-            
-            # 计算帧率
-            self.fps = 1.0 / (current_time - self.prev_time)
-            self.prev_time = current_time
-            
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-            self.cv_image = cv_image
-
-            # 打印图像大小
-            # rospy.loginfo("图像大小: %s", cv_image.shape)
-            # 判断图像大小，不是指定分辨率帧resize的图片
-            if cv_image.shape != (480, 640, 3):
-                cv_image = cv2.resize(cv_image, (640, 480))
-
-            # 在图像上显示帧率
-            cv2.putText(cv_image, f"FPS: {self.fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-            detections = self.run_openvino_inference(cv_image)
-
-            if detections.size > 0:
-                # 检测到人脸
-                self.is_face_detected = True
-                self.find_face_in_picture(cv_image, detections, msg.header)
-            else:
-                # 未检测到人脸
-                self.is_face_detected = False
-
-            self.image_pub.publish(self.bridge.cv2_to_imgmsg(self.cv_image, "bgr8"))
+            # 只在锁内进行最小操作，避免长时间持有锁
+            with self.latest_image_lock:
+                # 直接保存消息，延迟转换以减少回调时间
+                self.latest_image_msg = msg
+                self.latest_image_timestamp = time.time()
         except Exception as e:
-            rospy.logerr("图像处理失败: %s", e)
-            self.is_face_detected = False
+            rospy.logerr("图像回调失败: %s", e)
+    
+    def compressed_image_callback(self, msg):
+        """快速回调函数，只保存最新压缩图像，不进行耗时处理"""
+        try:
+            # 只在锁内进行最小操作，延迟转换以减少回调时间
+            with self.latest_image_lock:
+                self.latest_image_msg = msg
+                # 压缩图像消息没有header，创建一个默认的
+                header = Header()
+                header.stamp = rospy.Time.now()
+                self.latest_image_header = header
+                self.latest_image_timestamp = time.time()
+        except Exception as e:
+            rospy.logerr("压缩图像回调失败: %s", e)
+    
+    def _processing_loop(self):
+        """后台处理循环，持续处理最新图像"""
+        last_process_time = time.time()
+        prev_time = time.time()
+        last_image_timestamp = None  # 跟踪最后处理的图像时间戳
+        
+        while not self.stop_processing and not rospy.is_shutdown():
+            try:
+                current_time = time.time()
+                
+                # 控制处理频率：检查是否达到最小处理间隔
+                time_since_last_process = current_time - last_process_time
+                if time_since_last_process < self.min_processing_interval:
+                    # 还没到处理时间，休眠剩余时间（避免CPU空转）
+                    sleep_time = self.min_processing_interval - time_since_last_process
+                    time.sleep(sleep_time)
+                    continue
+                
+                # 获取最新图像消息（线程安全，快速操作）
+                image_msg = None
+                header = None
+                image_timestamp = None
+                with self.latest_image_lock:
+                    if self.latest_image_msg is not None:
+                        image_timestamp = self.latest_image_timestamp
+                        # 只处理新图像，避免重复处理同一帧
+                        if image_timestamp != last_image_timestamp:
+                            image_msg = self.latest_image_msg
+                            header = self.latest_image_header
+                            last_image_timestamp = image_timestamp
+                            # 清除消息，避免重复处理
+                            self.latest_image_msg = None
+                
+                if image_msg is not None:
+                    # 更新最后处理时间
+                    last_process_time = time.time()
+                    
+                    # 转换图像（在锁外进行，避免长时间持有锁）
+                    try:
+                        if self.use_compressed:
+                            cv_image = self.bridge.compressed_imgmsg_to_cv2(image_msg, desired_encoding="bgr8")
+                        else:
+                            cv_image = self.bridge.imgmsg_to_cv2(image_msg, desired_encoding="bgr8")
+                    except Exception as e:
+                        rospy.logerr("图像转换失败: %s", e)
+                        time.sleep(self.min_processing_interval)
+                        continue
+                    
+                    # 计算实际处理帧率
+                    self.fps = 1.0 / (current_time - prev_time) if (current_time - prev_time) > 0 else 0
+                    prev_time = current_time
+                    
+                    # 判断图像大小，不是指定分辨率帧resize的图片
+                    if cv_image.shape != (480, 640, 3):
+                        cv_image = cv2.resize(cv_image, (640, 480))
+                    
+                    # 保存用于显示（避免不必要的复制）
+                    self.cv_image = cv_image
+                    
+                    # 在图像上显示帧率和最大帧率限制
+                    cv2.putText(cv_image, f"FPS: {self.fps:.1f}/{self.max_processing_fps:.1f}", 
+                               (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    
+                    # 执行推理
+                    detections = self.run_openvino_inference(cv_image)
+                    
+                    if detections.size > 0:
+                        # 检测到人脸
+                        self.is_face_detected = True
+                        self.find_face_in_picture(cv_image, detections, header)
+                    else:
+                        # 未检测到人脸
+                        self.is_face_detected = False
+                    
+                    # 发布处理后的图像
+                    self.image_pub.publish(self.bridge.cv2_to_imgmsg(cv_image, "bgr8"))
+                else:
+                    # 没有新图像，休眠较长时间以减少CPU占用
+                    # 休眠时间设为最小处理间隔，确保能及时响应新图像
+                    time.sleep(self.min_processing_interval)
+                    
+            except Exception as e:
+                rospy.logerr("后台处理循环错误: %s", e)
+                time.sleep(self.min_processing_interval)
     
     def run_openvino_inference(self, image):
         blob, scale, dwdh, original_size = self.preprocess_image(image)
@@ -223,7 +356,8 @@ class FaceTrack:
 
     def preprocess_image(self, image):
         h0, w0 = image.shape[:2]
-        input_image = image.copy()
+        # 避免不必要的复制，直接使用原图像（resize会创建新图像）
+        input_image = image
         r = min(self.input_width / w0, self.input_height / h0)
         new_unpad = (int(round(w0 * r)), int(round(h0 * r)))
         dw = (self.input_width - new_unpad[0]) / 2
@@ -358,13 +492,17 @@ class FaceTrack:
         self.head_motion_pub.publish(msg)
 
     def run(self):
-        rate = rospy.Rate(30)  # 降低主循环频率
+        # 获取主循环频率参数（用于控制CPU占用率）
+        main_loop_rate = rospy.get_param("~main_loop_rate", 20.0)  # 默认20Hz
+        rate = rospy.Rate(main_loop_rate)
+        rospy.loginfo("主循环频率设置为: %.1f Hz", main_loop_rate)
+        
         while not rospy.is_shutdown():
             if self.is_face_detected:
                 next_yaw = self.head_yaw
                 next_pitch = self.head_pitch
                 
-                if self.face_position_x  < 256 or self.face_position_x > 280:
+                if self.face_position_x  < 300 or self.face_position_x > 340:
                     # 人脸在图像中水平方向上超出中心点，需要转动头部
                     print("人脸在图像中水平方向上超出中心点，需要转动头部: ", self.face_position_x)
                     cur_error_x = self.target_point_x - self.face_position_x
@@ -373,7 +511,7 @@ class FaceTrack:
                 else:
                     self.yaw_pid.reset()
 
-                if self.face_position_y < 150 or self.face_position_y > 330:
+                if self.face_position_y < 200 or self.face_position_y > 280:
                     print("人脸在图像中垂直方向上超出中心点，需要转动头部: ", self.face_position_y)
                     cur_error_y = self.face_position_y - self.target_point_y
                     move_size_y = self.pitch_pid(cur_error_y)
@@ -382,9 +520,26 @@ class FaceTrack:
                     self.pitch_pid.reset()
                 
                 self.send_head_motion_data([next_yaw, next_pitch])
+            else:
+                # 没有检测到人脸时，降低循环频率以减少CPU占用
+                time.sleep(0.1)  # 休眠100ms，降低CPU占用
 
             rate.sleep()
+    
+    def __del__(self):
+        """析构函数，确保线程正确关闭"""
+        self.stop_processing = True
+        if self.processing_thread is not None and self.processing_thread.is_alive():
+            self.processing_thread.join(timeout=1.0)
 
 if __name__ == '__main__':
-    face_tracker = FaceTrack()
-    face_tracker.run()
+    try:
+        face_tracker = FaceTrack()
+        face_tracker.run()
+    except KeyboardInterrupt:
+        rospy.loginfo("正在关闭...")
+    finally:
+        if 'face_tracker' in locals():
+            face_tracker.stop_processing = True
+            if face_tracker.processing_thread is not None and face_tracker.processing_thread.is_alive():
+                face_tracker.processing_thread.join(timeout=1.0)

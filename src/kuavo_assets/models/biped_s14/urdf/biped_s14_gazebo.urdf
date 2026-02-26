@@ -26,30 +26,6 @@
     <child link="base_link" />
     <dynamics damping="0.2" friction="0.0"/>
   </joint>
-  <link name="waist_yaw_link">
-    <inertial>
-      <origin xyz="-0.00602072 0.0 0.14657555" rpy="0 0 0" />
-      <mass value="8.620776" />
-      <inertia ixx="0.08597904" ixy="0" ixz="0" iyy="0.06733076" iyz="0" izz="0.0420581" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s14/meshes/torso.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="waist_yaw_joint" type="revolute">
-    <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="base_link" />
-    <child link="waist_yaw_link" />
-    <axis xyz="0 0 1" />
-    <limit lower="-2.61799387799149" upper="2.61799387799149" effort="80.0" velocity="7.0" />
-    <dynamics damping="0.2" friction="0.0" />
-  </joint>
   <link name="leg_l1_link">
     <inertial>
       <origin xyz="-0.00211304 -0.02890487 0.0293713" rpy="0 0 0" />
@@ -167,7 +143,7 @@
     <parent link="leg_l4_link" />
     <child link="leg_l5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="19.0" velocity="10.2" />
+    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="27.0" velocity="10.2" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="leg_l6_link">
@@ -191,7 +167,7 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="19.0" velocity="10.2" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="15.0" velocity="10.2" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="ll_foot_toe">
@@ -389,7 +365,7 @@
     <parent link="leg_r4_link" />
     <child link="leg_r5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="19.0" velocity="10.2" />
+    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="27.0" velocity="10.2" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="leg_r6_link">
@@ -413,7 +389,7 @@
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="19.0" velocity="10.2" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="15.0" velocity="10.2" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="rl_foot_toe">
@@ -493,6 +469,30 @@
     <origin xyz="-0.04 -0.03824834 -0.0435" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="r_foot_heel" />
+  </joint>
+  <link name="waist_yaw_link">
+    <inertial>
+      <origin xyz="-0.00602072 0.0 0.14657555" rpy="0 0 0" />
+      <mass value="8.620776" />
+      <inertia ixx="0.08597904" ixy="0" ixz="0" iyy="0.06733076" iyz="0" izz="0.0420581" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s14/meshes/torso.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_yaw_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="waist_yaw_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.61799387799149" upper="2.61799387799149" effort="80.0" velocity="7.0" />
+    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="zarm_l1_link">
     <inertial>

@@ -57,6 +57,9 @@
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
 
+    <!-- 仿真关闭mpc，直接使用mujoco仿真 -->
+    <arg name="pure_sim" default="false"/>
+
     <!-- multiplot -->
     <group if="$(arg multiplot)">
       <include file="$(find humanoid_interface_ros)/launch/multiplot.launch"/>
@@ -91,6 +94,9 @@
     <param name="libFolder"  value="$(arg libFolder)" />
     <param name="robot_description" textfile="$(arg urdfFile)"/>
 
+    <!-- 仿真关闭mpc，直接使用mujoco仿真 -->
+    <param name="pure_sim" value="$(arg pure_sim)"/>
+
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     
@@ -107,13 +113,15 @@
     <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
 
     <!-- mpc node -->
-    <group if="$(arg use_sqp)">
-      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_sqp_mpc_node" name="mobile_manipulator_sqp_mpc_node" 
-          output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
-    </group>
-    <group unless="$(arg use_sqp)">
-      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_mpc_node" name="mobile_manipulator_mpc_node" 
-          output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <group unless="$(arg pure_sim)">
+      <group if="$(arg use_sqp)">
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_sqp_mpc_node" name="mobile_manipulator_sqp_mpc_node" 
+            output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+      </group>
+      <group unless="$(arg use_sqp)">
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_mpc_node" name="mobile_manipulator_mpc_node" 
+            output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+      </group>
     </group>
 
     <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_target" name="mobile_manipulator_target" 

@@ -7,7 +7,7 @@
   <link name="base_link">
     <inertial>
       <origin xyz="-0.0185005 0.00031952 0.1929569" rpy="0 0 0" />
-      <mass value="27.89833803" />
+      <mass value="27.41553803" />
       <inertia ixx="0.93103133" ixy="0.00011763" ixz="-0.07210993" iyy="0.82590532" iyz="6.88e-06" izz="0.27686612" />
     </inertial>
     <visual>
@@ -47,8 +47,8 @@
     <parent link="base_link" />
     <child link="leg_l1_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="127.0" velocity="10.46" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="180.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l2_link">
     <inertial>
@@ -72,7 +72,7 @@
     <child link="leg_l2_link" />
     <axis xyz="0 0 1" />
     <limit lower="-0.872664625997165" upper="0.785398163397448" effort="22.2" velocity="10.46" />
-    <dynamics damping="0.5" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l3_link">
     <inertial>
@@ -96,7 +96,7 @@
     <child link="leg_l3_link" />
     <axis xyz="0 1 0" />
     <limit lower="-2.00712863979348" upper="1.5707963267949" effort="72.0" velocity="20.93" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l4_link">
     <inertial>
@@ -120,7 +120,7 @@
     <child link="leg_l4_link" />
     <axis xyz="0 1 0" />
     <limit lower="0.0" upper="2.53072741539178" effort="135.0" velocity="11.62" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l5_link">
     <inertial>
@@ -143,8 +143,8 @@
     <parent link="leg_l4_link" />
     <child link="leg_l5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="27.0" velocity="10.46" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="46.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l6_link">
     <inertial>
@@ -167,8 +167,8 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="27.0" velocity="10.46" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="ll_foot_toe">
     <collision>
@@ -182,7 +182,6 @@
     <origin xyz="0.17084 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="ll_foot_toe" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="ll_foot_heel">
     <collision>
@@ -196,7 +195,6 @@
     <origin xyz="-0.073164 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="ll_foot_heel" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="lr_foot_toe">
     <collision>
@@ -210,7 +208,6 @@
     <origin xyz="0.17084 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="lr_foot_toe" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="lr_foot_heel">
     <collision>
@@ -224,7 +221,6 @@
     <origin xyz="-0.073164 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="lr_foot_heel" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="l_foot_toe">
     <collision>
@@ -235,10 +231,9 @@
     </collision>
   </link>
   <joint name="l_foot_toe_joint" type="fixed">
-    <origin xyz="0.0 -0.04773 -0.0595" rpy="0 0 0" />
+    <origin xyz="0.17084 0.0 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="l_foot_toe" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="l_foot_heel">
     <collision>
@@ -249,10 +244,9 @@
     </collision>
   </link>
   <joint name="l_foot_heel_joint" type="fixed">
-    <origin xyz="-0.0 0.04773 -0.0595" rpy="0 0 0" />
+    <origin xyz="-0.073164 0.0 -0.0595" rpy="0 0 0" />
     <parent link="leg_l6_link" />
     <child link="l_foot_heel" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="leg_r1_link">
     <inertial>
@@ -269,6 +263,10 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="-0.105 0 0" rpy="0 -1.5708 0" />
+      <geometry><cylinder radius="0.06" length="0.07" /></geometry>
+    </collision>
   </link>
   <joint name="leg_r1_joint" type="revolute">
     <origin xyz="-0.0024999 -0.087 -0.066" rpy="0 0 0" />
@@ -276,7 +274,7 @@
     <child link="leg_r1_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.663225115757845" upper="0.314159265358979" effort="127.0" velocity="10.46" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r2_link">
     <inertial>
@@ -300,7 +298,7 @@
     <child link="leg_r2_link" />
     <axis xyz="0 0 1" />
     <limit lower="-0.785398163397448" upper="0.872664625997165" effort="22.2" velocity="10.46" />
-    <dynamics damping="0.5" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r3_link">
     <inertial>
@@ -324,7 +322,7 @@
     <child link="leg_r3_link" />
     <axis xyz="0 1 0" />
     <limit lower="-2.00712863979348" upper="1.5707963267949" effort="72.0" velocity="20.93" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r4_link">
     <inertial>
@@ -348,7 +346,7 @@
     <child link="leg_r4_link" />
     <axis xyz="0 1 0" />
     <limit lower="0.0" upper="2.53072741539178" effort="135.0" velocity="11.62" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r5_link">
     <inertial>
@@ -371,8 +369,8 @@
     <parent link="leg_r4_link" />
     <child link="leg_r5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="27.0" velocity="10.46" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="46.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r6_link">
     <inertial>
@@ -395,8 +393,8 @@
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="27.0" velocity="10.46" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="rl_foot_toe">
     <collision>
@@ -410,7 +408,6 @@
     <origin xyz="0.17084 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="rl_foot_toe" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="rl_foot_heel">
     <collision>
@@ -424,7 +421,6 @@
     <origin xyz="-0.073164 0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="rl_foot_heel" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="rr_foot_toe">
     <collision>
@@ -438,7 +434,6 @@
     <origin xyz="0.17084 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="rr_foot_toe" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="rr_foot_heel">
     <collision>
@@ -452,7 +447,6 @@
     <origin xyz="-0.073164 -0.04773 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="rr_foot_heel" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="r_foot_toe">
     <collision>
@@ -463,10 +457,9 @@
     </collision>
   </link>
   <joint name="r_foot_toe_joint" type="fixed">
-    <origin xyz="0.0 -0.04773 -0.0595" rpy="0 0 0" />
+    <origin xyz="0.17084 0.0 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="r_foot_toe" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="r_foot_heel">
     <collision>
@@ -477,10 +470,9 @@
     </collision>
   </link>
   <joint name="r_foot_heel_joint" type="fixed">
-    <origin xyz="-0.0 0.04773 -0.0595" rpy="0 0 0" />
+    <origin xyz="-0.073164 0.0 -0.0595" rpy="0 0 0" />
     <parent link="leg_r6_link" />
     <child link="r_foot_heel" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="zarm_l1_link">
     <inertial>
@@ -504,7 +496,7 @@
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.67" velocity="18.8" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l2_link">
     <inertial>
@@ -528,7 +520,7 @@
     <child link="zarm_l2_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.349065850398866" upper="2.0943951023932" effort="75.0" velocity="8.0" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l3_link">
     <inertial>
@@ -552,7 +544,7 @@
     <child link="zarm_l3_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l4_link">
     <inertial>
@@ -576,7 +568,7 @@
     <child link="zarm_l4_link" />
     <axis xyz="0 1 0" />
     <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l5_link">
     <inertial>
@@ -600,7 +592,7 @@
     <child link="zarm_l5_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l6_link">
     <inertial>
@@ -624,7 +616,7 @@
     <child link="zarm_l6_link" />
     <axis xyz="1 0 0" />
     <limit lower="-1.30899693899575" upper="0.698131700797732" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l7_link">
     <inertial>
@@ -656,21 +648,14 @@
     <child link="zarm_l7_link" />
     <axis xyz="0 1 0" />
     <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l7_end_effector">
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <sphere radius="0.005" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zarm_l7_end_effector_joint" type="fixed">
     <origin xyz="0 -0.03 -0.17" rpy="0 0 0" />
     <parent link="zarm_l7_link" />
     <child link="zarm_l7_end_effector" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="zarm_r1_link">
     <inertial>
@@ -694,7 +679,7 @@
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.67" velocity="18.8" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r2_link">
     <inertial>
@@ -718,7 +703,7 @@
     <child link="zarm_r2_link" />
     <axis xyz="1 0 0" />
     <limit lower="-2.0943951023932" upper="0.349065850398866" effort="75.0" velocity="8.0" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r3_link">
     <inertial>
@@ -742,7 +727,7 @@
     <child link="zarm_r3_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r4_link">
     <inertial>
@@ -766,7 +751,7 @@
     <child link="zarm_r4_link" />
     <axis xyz="0 1 0" />
     <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r5_link">
     <inertial>
@@ -790,7 +775,7 @@
     <child link="zarm_r5_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r6_link">
     <inertial>
@@ -814,7 +799,7 @@
     <child link="zarm_r6_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.698131700797732" upper="1.30899693899575" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r7_link">
     <inertial>
@@ -846,21 +831,14 @@
     <child link="zarm_r7_link" />
     <axis xyz="0 1 0" />
     <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r7_end_effector">
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <sphere radius="0.005" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zarm_r7_end_effector_joint" type="fixed">
     <origin xyz="0 0.03 -0.17" rpy="0 0 0" />
     <parent link="zarm_r7_link" />
     <child link="zarm_r7_end_effector" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
   <link name="zhead_1_link">
     <inertial>
@@ -884,7 +862,7 @@
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="1.5" velocity="5.23333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zhead_2_link">
     <inertial>
@@ -908,7 +886,7 @@
     <child link="zhead_2_link" />
     <axis xyz="0 1 0" />
     <limit lower="-0.523598775598299" upper="0.523598775598299" effort="12.0" velocity="5.23333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="camera">
     <inertial>
@@ -930,7 +908,6 @@
     <origin xyz="0.0967509784707853 0.0175003248712456 0.125953265112721" rpy="0 0.488692190558413 0" />
     <parent link="zhead_2_link" />
     <child link="camera" />
-    <dynamics damping="0.2" friction="0.0" />
   </joint>
 
   <link name="camera_base">
@@ -948,12 +925,6 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/camera_base.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint name="camera_base" type="fixed">
     <origin xyz="0.0828919080642966 0 0.119165137551254" rpy="0 0.488692190558416 0" />
@@ -981,7 +952,144 @@
     <origin xyz="0.0217799337881943 0 0.105417258037133" rpy="0 0.229686043245049 0" />
     <parent link="zhead_2_link" />
     <child link="radar" />
-    <dynamics damping="0.2" friction="0.0" />
+  </joint>
+
+  <link name="torso-camera">
+    <inertial>
+      <origin xyz="0.00156932606101622 0.0665388104781718 -0.00701167672575201" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.45922222140768" ixy="0.00116938454009796" ixz="5.81050583006598E-05" iyy="0.0772067428906068" iyz="0.0105506548802549" izz="0.499312253423526" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/torso-camera.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="torso-camera" type="fixed">
+    <origin xyz="0.115535332475413 0.0175000000005085 0.2883441440894" rpy="0 0.732666 0" />
+    <parent link="base_link" />
+    <child link="torso-camera" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="waist_camera">
+    <inertial>
+      <origin xyz="-0.0352747720086005 5.11279030860874E-05 -0.00154687630407949" rpy="0 0 0" />
+      <mass value="0.237986769607677" />
+      <inertia ixx="0.000666718805832595" ixy="1.39974366569124E-07" ixz="-1.47166626554892E-05" iyy="8.36219161597965E-05" iyz="-3.58024687826506E-07" izz="0.000699018993000803" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/waist_camera.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_camera" type="fixed">
+    <origin xyz="0.168717483101422 0 0.01355599662743" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="waist_camera" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="l_hand_tripod">
+    <inertial>
+      <origin xyz="0.0653430919091347 -0.00776026775236038 -0.0648805742218587" rpy="0 0 0" />
+      <mass value="0.0342669089979502" />
+      <inertia ixx="1.59850149176395E-05" ixy="-5.29139847447712E-06" ixz="1.78131910236665E-05" iyy="9.8758759051122E-05" iyz="-2.71719747666022E-07" izz="9.75721402715185E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_tripod.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="l_hand_tripod_joint" type="fixed">
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+    <parent link="zarm_l7_link" />
+    <child link="l_hand_tripod" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="l_hand_camera">
+    <inertial>
+      <origin xyz="-5.55111512312578E-17 -5.55111512312578E-17 0.0114631923429834" rpy="0 0 0" />
+      <mass value="0.038145442577304" />
+      <inertia ixx="6.90025820370885E-06" ixy="2.08889460021576E-21" ixz="-6.35274710440725E-22" iyy="6.86774271974419E-06" iyz="-4.21980924697416E-22" izz="1.04248094301688E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -1.57 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_camera.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="l_hand_camera_joint" type="fixed">
+    <origin xyz="0.11540559159102 -0.0145586110669961 -0.110123491595499" rpy="1.919862177193763 0.753528063917894 -2.897246568680842" />
+    <parent link="l_hand_tripod" />
+    <child link="l_hand_camera" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="r_hand_tripod">
+    <inertial>
+      <origin xyz="0.0653431459436017 0.00833186007885223 -0.0625275130281983" rpy="0 0 0" />
+      <mass value="0.034266881719861" />
+      <inertia ixx="1.5985004453075E-05" ixy="5.17271984897294E-06" ixz="1.78480505198324E-05" iyy="9.87551311174154E-05" iyz="2.79574204670866E-07" izz="9.75758243581943E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_tripod.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="r_hand_tripod_joint" type="fixed">
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+    <parent link="zarm_r7_link" />
+    <child link="r_hand_tripod" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="r_hand_camera">
+    <inertial>
+      <origin xyz="0 5.55111512312578E-17 0.0114631923429834" rpy="0 0 0" />
+      <mass value="0.038145442577304" />
+      <inertia ixx="6.90025820370885E-06" ixy="-5.73053564581591E-21" ixz="-1.27054942088145E-21" iyy="6.8677427197442E-06" iyz="7.56979586483243E-22" izz="1.04248094301688E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -1.57 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_camera.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="r_hand_camera_joint" type="fixed">
+    <origin xyz="0.115405591590931 0.0154312352120435 -0.107724128430896" rpy="1.208853693239594  0.751879414295006 2.888346587751982" />
+    <parent link="r_hand_tripod" />
+    <child link="r_hand_camera" />
+    <axis xyz="0 0 0" />
   </joint>
 
   

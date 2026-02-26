@@ -41,7 +41,7 @@
     <parent link="torso" />
     <child link="waist" />
     <axis xyz="0 0 1" />
-    <limit lower="-2.0943951023932" upper="2.0943951023932" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-2.61799387799149" upper="2.61799387799149" effort="80.0" velocity="7.0" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <!-- =========================================================== Arms ================================================================= -->
@@ -66,7 +66,7 @@
     <parent link="torso" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="2.0943951023932" effort="100.0" velocity="41.34" />
+    <limit lower="-3.14159265358979" upper="2.0943951023932" effort="14.1" velocity="10.5" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -94,7 +94,7 @@
     <parent link="zarm_l1_link" />
     <child link="zarm_l2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.349065850398866" upper="3.49065850398866" effort="50.0" velocity="8.37" />
+    <limit lower="-0.349065850398866" upper="3.49065850398866" effort="14.1" velocity="10.5" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -122,7 +122,7 @@
     <parent link="zarm_l2_link" />
     <child link="zarm_l3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="19.36" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="10.5" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -131,8 +131,8 @@
   </transmission>
   <link name="zarm_l4_link">
     <inertial>
-      <origin xyz="-0.00053745 -0.00090249 -0.09492575" rpy="0 0 0" />
-      <mass value="0.16269441" />
+      <origin xyz="-0.00053745 -0.00090249 -0.13492575" rpy="0 0 0" />
+      <mass value="0.56269441" />
       <inertia ixx="0.00085774" ixy="-1.9e-05" ixz="6.3e-05" iyy="0.00081063" iyz="1.372e-05" izz="0.00012136" />
     </inertial>
     <visual>
@@ -150,7 +150,7 @@
     <parent link="zarm_l3_link" />
     <child link="zarm_l4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.26892802759263" upper="0.0" effort="50.0" velocity="8.37" />
+    <limit lower="-2.26892802759263" upper="0.0" effort="14.1" velocity="10.5" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -159,8 +159,8 @@
   </transmission>
   <link name="zarm_r1_link">
     <inertial>
-      <origin xyz="0.00337618 0.00107075 2.211e-05" rpy="0 0 0" />
-      <mass value="0.37301773" />
+      <origin xyz="0.00360552 0.00144553 1.956e-05" rpy="0 0 0" />
+      <mass value="0.3730157" />
       <inertia ixx="0.00020228" ixy="0" ixz="0" iyy="0.00020881" iyz="0" izz="0.00022776" />
     </inertial>
     <visual>
@@ -178,7 +178,7 @@
     <parent link="torso" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="2.0943951023932" effort="100.0" velocity="41.34" />
+    <limit lower="-3.14159265358979" upper="2.0943951023932" effort="14.1" velocity="10.5" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -187,8 +187,8 @@
   </transmission>
   <link name="zarm_r2_link">
     <inertial>
-      <origin xyz="0.00089406 0.0 -0.04238933" rpy="0 0 0" />
-      <mass value="0.15112665" />
+      <origin xyz="0.00089424 0.0 -0.04238937" rpy="0 0 0" />
+      <mass value="0.15112869" />
       <inertia ixx="0.00017363" ixy="0.0" ixz="0.0" iyy="0.00022693" iyz="0.0" izz="0.00015667" />
     </inertial>
     <visual>
@@ -206,7 +206,7 @@
     <parent link="zarm_r1_link" />
     <child link="zarm_r2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-3.49065850398866" upper="0.349065850398866" effort="50.0" velocity="8.37333333333333" />
+    <limit lower="-3.49065850398866" upper="0.349065850398866" effort="14.1" velocity="10.5" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -215,9 +215,9 @@
   </transmission>
   <link name="zarm_r3_link">
     <inertial>
-      <origin xyz="-0.0001113 0.00359377 -0.1441574" rpy="0 0 0" />
+      <origin xyz="-0.00011141 0.00359387 -0.14417629" rpy="0 0 0" />
       <mass value="0.66922057" />
-      <inertia ixx="0.00172479" ixy="8e-05" ixz="-1.2e-05" iyy="0.00169354" iyz="0.00010423" izz="0.00031787" />
+      <inertia ixx="0.00172455" ixy="8e-05" ixz="-3e-05" iyy="0.0016933" iyz="0.00010419" izz="0.00031788" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -234,7 +234,7 @@
     <parent link="zarm_r2_link" />
     <child link="zarm_r3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="18.84" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="10.5" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -243,9 +243,9 @@
   </transmission>
   <link name="zarm_r4_link">
     <inertial>
-      <origin xyz="-0.00053666 0.00090267 -0.09492695" rpy="0 0 0" />
-      <mass value="0.16269033" />
-      <inertia ixx="0.00085773" ixy="1.9e-05" ixz="6.3e-05" iyy="0.00081062" iyz="-1.372e-05" izz="0.00012136" />
+      <origin xyz="-0.00053745 0.00090249 -0.13492575" rpy="0 0 0" />
+      <mass value="0.56269441" />
+      <inertia ixx="0.00085774" ixy="1.9e-05" ixz="6.3e-05" iyy="0.00081063" iyz="-1.372e-05" izz="0.00012136" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -258,11 +258,11 @@
     </visual>
   </link>
   <joint name="zarm_r4_joint" type="revolute">
-    <origin xyz="0 0 -0.187999999999989" rpy="0 0 0" />
+    <origin xyz="0 0 -0.187999999999999" rpy="0 0 0" />
     <parent link="zarm_r3_link" />
     <child link="zarm_r4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.26892802759263" upper="0.0" effort="50.0" velocity="8.37" />
+    <limit lower="-2.26892802759263" upper="0.0" effort="14.1" velocity="10.5" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
