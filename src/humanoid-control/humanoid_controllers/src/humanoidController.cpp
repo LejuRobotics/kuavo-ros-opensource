@@ -3108,18 +3108,15 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     if (visualizeHumanoid_ && resetting_mpc_state_ != ResettingMpcState::RESET_INITIAL_POLICY)
     {
       robotVisualizer_->updateSimplifiedArmPositions(simplifiedJointPos_);
-      // RL 模式下也允许更新可视化（即使 MPC policy 未更新）
-      if (mrtRosInterface_->isPolicyUpdated() || is_rl_controller_)
+      if (is_rl_controller_ || resetting_mpc_state_ != ResettingMpcState::NOMAL)
       {
-        if (is_rl_controller_)
-        {
-          // RL 模式下，直接使用 publishObservation 发布 tf 树（不需要 MPC 的 policy 和 command）
-          robotVisualizer_->publishObservation(ros::Time::now(), currentObservation_);
-        }
-        else
-        {
-          robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
-        }
+        // RL 模式下，直接使用 publishObservation 发布 tf 树（不需要 MPC 的 policy 和 command）
+        robotVisualizer_->publishObservation(ros::Time::now(), currentObservation_);
+      }
+      // 仅在 MPC 正常工作且 policy 已更新时，才使用 MPC 轨迹进行可视化
+      else if (mrtRosInterface_->isPolicyUpdated())
+      {
+        robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
       }
       robotVisualizer_->updateHeadJointPositions(sensor_data_head_.jointPos_);
       // 更新灵巧手可视化

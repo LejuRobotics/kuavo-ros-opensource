@@ -660,8 +660,25 @@ class ArmTrajectoryBezierDemo:
         # rl 要在刚开始插入当前状态为初始值来平滑过渡，ocs2 不需要
         if is_rl:
             import copy
+
+            # 检查当前状态和第一帧的差异
+            first_frame = frames[0]
+            current_angles_deg = [math.degrees(pos) for pos in self.current_arm_joint_state[:len(first_frame["servos"])]]
+
+            # 使用 calculate_transition_time 精确计算过渡时间
+            # 考虑每个关节的实际差异和速度限制，比简单的平均差异更准确
+            transition_keyframes = self.calculate_transition_time(
+                current_angles_deg,
+                first_frame["servos"],
+                min_keyframe=10,   # 最小0.1秒（姿态几乎一致）
+                max_keyframe=100,  # 最大1秒（姿态差异大）
+                default_keyframe=50  # 默认0.5秒
+            )
+
+            rospy.loginfo(f"RL模式过渡时间：{transition_keyframes} keyframes ({transition_keyframes * 0.01:.2f}秒)")
+
             for frame in frames:
-                frame["keyframe"] += 100
+                frame["keyframe"] += transition_keyframes
             frame0 = copy.deepcopy(frames[0])
             # 如果原来的长度长则补全，否则就需要裁剪
             if len(self.current_arm_joint_state) > len(frame0["servos"]):
@@ -894,12 +911,20 @@ class ArmTrajectoryBezierDemo:
         finish_time = 2
         data = self.create_action_data(finish_time, is_rl=True)
 
-        current_control_mode = self.get_current_control_mode()
-        if current_control_mode == "rl":
-            finish_time += 1
+        # 不需要额外增加时间，add_init_frame会根据实际差异动态添加过渡帧
         self.END_FRAME_TIME = finish_time
 
         action_data = self.add_init_frame(data["frames"], is_rl=True)
+
+        # RL模式下，add_init_frame可能插入了过渡帧，需要更新END_FRAME_TIME
+        current_control_mode = self.get_current_control_mode()
+        if current_control_mode == "rl":
+            frames = data["frames"]
+            if frames:
+                last_keyframe = max(f.get("keyframe", 0) for f in frames)
+                # 将 keyframe 转换为秒并更新 END_FRAME_TIME
+                self.END_FRAME_TIME = last_keyframe * 0.01
+
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
@@ -1187,8 +1212,7 @@ class ArmTrajectoryBezierDemo:
         # 读取动作完成时间
         finish_time = data.get("finish", 0) * 0.01 # 转换为秒
         current_control_mode = self.get_current_control_mode()
-        if current_control_mode == "rl":
-            finish_time += 1.0
+        # RL模式和OCS2模式的过渡时间都会在 add_init_frame 中动态添加，这里不需要额外增加时间
         # ocs2 模式的过渡时间将在 add_init_frame 中动态计算并更新
         self.END_FRAME_TIME = finish_time
 
@@ -1210,9 +1234,10 @@ class ArmTrajectoryBezierDemo:
                 rospy.loginfo("0f处没有动作帧，已添加初始站立帧")
 
         action_data = self.add_init_frame(frames, is_rl=current_control_mode == "rl")
-        
-        # ocs2 模式和半身模式下，根据实际计算的过渡时间更新结束时间
-        if current_control_mode == "ocs2" and self.only_half_up_body:
+
+        # 根据实际计算的过渡时间更新结束时间
+        # RL模式和OCS2半身模式都需要更新，因为add_init_frame可能插入了过渡帧
+        if current_control_mode == "rl" or (current_control_mode == "ocs2" and self.only_half_up_body):
             # 找到最后一帧的 keyframe（包括新添加的过渡帧）
             if frames:
                 last_keyframe = max(f.get("keyframe", 0) for f in frames)
@@ -1231,8 +1256,9 @@ class ArmTrajectoryBezierDemo:
         if success:
             rospy.loginfo("Arm trajectory planned successfully")
             threading.Thread(target=self.run).start()
-            # 半身模式下使用更新后的 END_FRAME_TIME（包含过渡帧时间），其他模式使用原始的 finish_time
-            if current_control_mode == "ocs2" and self.only_half_up_body:
+            # 使用更新后的 END_FRAME_TIME（包含过渡帧时间）
+            # RL模式和OCS2半身模式都会在add_init_frame中添加过渡帧并更新END_FRAME_TIME
+            if current_control_mode == "rl" or (current_control_mode == "ocs2" and self.only_half_up_body):
                 self.delayed_publish_action_state(self.END_FRAME_TIME)
             else:
                 self.delayed_publish_action_state(finish_time)
