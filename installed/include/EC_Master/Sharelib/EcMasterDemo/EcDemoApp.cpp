@@ -1256,6 +1256,10 @@ void motorGetData(const uint16_t *ids, const EcMasterType* driver, uint32_t num,
       data[index].torque_demand_trans = currentIn->yd_slave_input[g_motor_id[index].pdo_id].torque_demand_raw * (rated_current[index] / 1000.0) / 1000.0 * 1.414;
       data[index].velocity_demand_raw = currentIn->yd_slave_input[g_motor_id[index].pdo_id].velocity_demand_raw;
       data[index].igbt_temperature = currentIn->yd_slave_input[g_motor_id[index].pdo_id].igbt_temperature;
+
+      data[index].ntc_temperature =
+          currentIn->yd_slave_input[g_motor_id[index].pdo_id].ntc_temperature;
+
     }
     else if(driver[index] == LEJU)
     { 
