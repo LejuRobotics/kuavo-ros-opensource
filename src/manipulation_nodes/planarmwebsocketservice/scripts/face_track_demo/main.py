@@ -6,6 +6,8 @@ import time
 import threading
 import numpy as np
 import os
+import math
+import xml.etree.ElementTree as ET
 
 from cv_bridge import CvBridge
 from ultralytics import YOLO
@@ -69,7 +71,43 @@ class PID:
             out = min(self.max_out, out)
 
         return out
-        
+
+
+def get_head_limits_from_urdf():
+    """从 ROS 参数服务器的 URDF 中解析头部关节（zhead_1_joint=yaw, zhead_2_joint=pitch）限位。
+    URDF 中 limit 单位为弧度，返回 (yaw_limit_deg, pitch_limit_deg)，单位为度。
+    若解析失败返回 None。"""
+    urdf_param_names = ['/humanoid_description', '/robot_description']
+    urdf_str = None
+    for name in urdf_param_names:
+        try:
+            if rospy.has_param(name):
+                urdf_str = rospy.get_param(name)
+                break
+        except (rospy.ROSException, KeyError):
+            continue
+    if not urdf_str or not isinstance(urdf_str, str):
+        return None
+    try:
+        root = ET.fromstring(urdf_str)
+    except ET.ParseError:
+        return None
+    head_joint_names = ('zhead_1_joint', 'zhead_2_joint')  # yaw, pitch
+    limits_rad = []
+    for jname in head_joint_names:
+        joint_elem = root.find(f".//joint[@name='{jname}']")
+        if joint_elem is None:
+            return None
+        limit_elem = joint_elem.find('limit')
+        if limit_elem is None:
+            return None
+        lower = float(limit_elem.get('lower', str(-math.pi)))
+        upper = float(limit_elem.get('upper', str(math.pi)))
+        limits_rad.append((lower, upper))
+    yaw_deg = (math.degrees(limits_rad[0][0]), math.degrees(limits_rad[0][1]))
+    pitch_deg = (math.degrees(limits_rad[1][0]), math.degrees(limits_rad[1][1]))
+    return (yaw_deg, pitch_deg)
+
 
 class FaceTrack:
     def __init__(self):
@@ -149,28 +187,36 @@ class FaceTrack:
             self.robot_version = None
 
         if self.robot_version is not None:
-
             robot_type = "roban" if (self.robot_version // 10) % 10 == 1 else "kuavo"
-
             if robot_type == "roban":
-                # roban
                 yaw_kp, yaw_ki, yaw_kd = 0.045, 0.00, 0.001
-                pitch_kp, pitch_ki, pitch_kd = 0.01, 0.00, 0.001
-                self.head_yaw_limit = (-90, 90)
-                self.head_pitch_limit = (-20, 45)
+                pitch_kp, pitch_ki, pitch_kd = 0.04, 0.00, 0.001
+                default_yaw = (-90, 90)
+                default_pitch = (-20, 45)
             else:
-                # kuavo
                 yaw_kp, yaw_ki, yaw_kd = 0.15, 0.00, 0.001
                 pitch_kp, pitch_ki, pitch_kd = 0.1, 0.00, 0.001
-                self.head_yaw_limit = (-90, 90)
-                self.head_pitch_limit = (-30, 30)
+                default_yaw = (-90, 90)
+                default_pitch = (-30, 30)
         else:
-            # 无法获取版本号时使用默认参数
             yaw_kp, yaw_ki, yaw_kd = 0.055, 0.00, 0.001
             pitch_kp, pitch_ki, pitch_kd = 0.01, 0.00, 0.001
-            self.head_yaw_limit = (-90, 90)
-            self.head_pitch_limit = (-20, 45)
-        
+            default_yaw = (-90, 90)
+            default_pitch = (-20, 45)
+
+        # 优先从 URDF 获取头部限位（zhead_1_joint, zhead_2_joint），否则使用上述默认值
+        head_limits = get_head_limits_from_urdf()
+        if head_limits is not None:
+            self.head_yaw_limit = head_limits[0]
+            self.head_pitch_limit = head_limits[1]
+            rospy.loginfo("头部限位已从 URDF 加载: yaw=%s deg, pitch=%s deg",
+                          self.head_yaw_limit, self.head_pitch_limit)
+        else:
+            self.head_yaw_limit = default_yaw
+            self.head_pitch_limit = default_pitch
+            rospy.logwarn("无法从 URDF 获取头部限位，使用默认: yaw=%s deg, pitch=%s deg",
+                          self.head_yaw_limit, self.head_pitch_limit)
+
         # 使用获取到的限位值和PID参数初始化PID控制器
         self.yaw_pid = PID(kp=yaw_kp, ki=yaw_ki, kd=yaw_kd, output_limits=self.head_yaw_limit)
         self.pitch_pid = PID(kp=pitch_kp, ki=pitch_ki, kd=pitch_kd, output_limits=self.head_pitch_limit)
