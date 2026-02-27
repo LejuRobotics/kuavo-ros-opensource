@@ -895,6 +895,7 @@ namespace humanoid_controller
 
 
     bool has_fall_down_controller_{false};
+    bool condition_pull_up_mpc_height_{true};
     double switch_distance_threshold_ = 0.003;// MPC-RL切换距离阈值
     double switch_timeout_multiplier_threshold_ = 2.0;// MPC-RL切换超时时间倍率
 
