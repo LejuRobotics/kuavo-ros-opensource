@@ -10,6 +10,8 @@ from kuavo_msgs.srv import setRuckigPlannerParams, setRuckigPlannerParamsRequest
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
 from kuavo_msgs.srv import changeLbMpcObsUpdateModeSrv, changeLbMpcObsUpdateModeSrvRequest
 from kuavo_msgs.srv import lbTimedPosCmd, lbTimedPosCmdRequest
+from kuavo_msgs.srv import lbMultiTimedPosCmd, lbMultiTimedPosCmdRequest
+from kuavo_msgs.msg import timedSingleCmd
 from std_srvs.srv import SetBool, SetBoolRequest
 from std_msgs.msg import Bool
 
@@ -361,6 +363,75 @@ def send_timed_single_command(planner_index: int,
         rospy.logerr(f"❌ {error_msg}")
         return False, 0.0, error_msg
 
+def send_timed_multi_commands(timed_cmd_vec: list, is_sync: bool = False) -> tuple:
+    """
+    发送多条定时指令到移动机械臂
+    
+    :param timed_cmd_vec: 定时指令列表，每个元素为字典格式：
+        {
+            'planner_index': int,    # 规划器索引
+            'desire_time': float,     # 期望执行时间（秒）
+            'cmd_vec': list           # 命令向量列表
+        }
+    :param is_sync: 多个规划器是否做时间同步
+                    True: 做同步, 按同步时间执行
+                    False: 不做同步, 按各自预设执行
+    :return: (success, actual_time, message)
+             success: 是否成功执行
+             actual_time: 实际执行需要的时间
+             message: 详细信息
+    """
+    
+    # 验证指令列表
+    if not timed_cmd_vec:
+        rospy.logerr(f"❌ 指令列表为空")
+        return False, 0.0, "指令列表为空"
+    
+    try:
+        # 等待服务
+        rospy.wait_for_service('/mobile_manipulator_timed_multi_cmd', timeout=5.0)
+        client = rospy.ServiceProxy('/mobile_manipulator_timed_multi_cmd', lbMultiTimedPosCmd)
+        
+        # 准备请求
+        req = lbMultiTimedPosCmdRequest()
+        req.isSync = is_sync
+        
+        # 构建指令列表
+        for cmd in timed_cmd_vec:
+            single_cmd = timedSingleCmd()
+            single_cmd.planner_index = cmd['planner_index']
+            single_cmd.desireTime = cmd['desire_time']
+            single_cmd.cmdVec = cmd['cmd_vec']
+            req.timedCmdVec.append(single_cmd)
+        
+        # 调用服务
+        resp = client(req)
+        
+        if resp.isSuccess:
+            rospy.loginfo(f"✅ 多指令执行成功")
+            rospy.loginfo(f"   实际时间: {resp.actualTime}s")
+            rospy.loginfo(f"   消息: {resp.message}")
+            rospy.loginfo(f"   同步模式: {'同步' if is_sync else '异步'}")
+            rospy.loginfo(f"   指令数量: {len(timed_cmd_vec)}")
+            return True, resp.actualTime, resp.message
+        else:
+            rospy.logerr(f"❌ 多指令执行失败")
+            rospy.logerr(f"   消息: {resp.message}")
+            return False, resp.actualTime, resp.message
+            
+    except rospy.ROSException as e:
+        error_msg = f"服务等待超时: {e}"
+        rospy.logerr(f"❌ {error_msg}")
+        return False, 0.0, error_msg
+    except rospy.ServiceException as e:
+        error_msg = f"服务调用失败: {e}"
+        rospy.logerr(f"❌ {error_msg}")
+        return False, 0.0, error_msg
+    except Exception as e:
+        error_msg = f"未知错误: {e}"
+        rospy.logerr(f"❌ {error_msg}")
+        return False, 0.0, error_msg
+    
 def reset_torso_to_initial():
     """
     重置躯干到初始位姿

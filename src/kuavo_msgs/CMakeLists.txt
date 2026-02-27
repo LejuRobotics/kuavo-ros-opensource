@@ -147,6 +147,9 @@ add_message_files(
 
   # Battery info
   BatteryInfo.msg
+
+  # Lb single timed cmd
+  timedSingleCmd.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -235,6 +238,9 @@ add_service_files(
 
   # Lb Timed Cmd 
   lbTimedPosCmd.srv
+
+  # Lb Multi Timed Cmd
+  lbMultiTimedPosCmd.srv
 )
 
 ## Generate actions in the 'action' folder

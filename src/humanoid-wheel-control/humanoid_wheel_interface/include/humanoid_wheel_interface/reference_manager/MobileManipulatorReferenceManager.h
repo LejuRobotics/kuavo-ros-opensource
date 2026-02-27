@@ -13,6 +13,7 @@
 #include <kuavo_msgs/setRuckigPlannerParams.h>
 #include <kuavo_msgs/getLbTorsoInitialPose.h>
 #include <kuavo_msgs/lbTimedPosCmd.h>
+#include <kuavo_msgs/lbMultiTimedPosCmd.h>
 #include <std_srvs/SetBool.h>
 
 #include <ocs2_oc/synchronized_module/ReferenceManager.h>
@@ -87,6 +88,7 @@ public:
   bool setRuckigPlannerParamsService(kuavo_msgs::setRuckigPlannerParams::Request &req, kuavo_msgs::setRuckigPlannerParams::Response &res);
   bool getLbTorsoInitialPoseService(kuavo_msgs::getLbTorsoInitialPose::Request &req, kuavo_msgs::getLbTorsoInitialPose::Response &res);
   bool setLbTimedPosCmdService(kuavo_msgs::lbTimedPosCmd::Request &req, kuavo_msgs::lbTimedPosCmd::Response &res);
+  bool setLbMultiTimedPosCmdService(kuavo_msgs::lbMultiTimedPosCmd::Request &req, kuavo_msgs::lbMultiTimedPosCmd::Response &res);
   bool setLbResetTorsoService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
 
   // 多个约束轨迹的操作函数
@@ -319,6 +321,7 @@ private:
   ros::ServiceServer getLbTorsoInitialPoseServiceServer_;
 
   // 双臂末端执行器位姿指令 (x,y,z,qx,qy,qz,qw)
+  vector_t cmd_arm_zyx_;
   vector_t left_arm_traj_pose_;
   vector_t right_arm_traj_pose_;
   std::mutex armPose_mtx_;
@@ -390,11 +393,13 @@ private:
 
   // 多规划器时间同步相关
   ros::ServiceServer setLbTimedPosCmdServiceServer_;
+  ros::ServiceServer setLbMultiTimedPosCmdServiceServer_;
   posePlannerTimedScheduler timedPlannerScheduler_;
   std::vector<bool> isTimedPlannerUpdated_;
   std::vector<double> desireTime_;
   std::vector<Eigen::VectorXd> timedCmdVec_;
   std::vector<std::unique_ptr<std::mutex>> timedCmdVecMtx_;
+  bool isUpdateTimedTarget_{false};
   
   // cmdPose规划器
   std::shared_ptr<cmdPosePlannerWithRuckig> cmdPosePlannerRuckigPtr_;

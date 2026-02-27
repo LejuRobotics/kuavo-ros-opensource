@@ -1,4 +1,5 @@
 #include "humanoid_wheel_interface/motion_planner/posePlannerTimedScheduler.h"
+#include <cmath>
 
 namespace ocs2 {
 namespace mobile_manipulator {
@@ -42,10 +43,13 @@ void posePlannerTimedScheduler::setTimedPlannerStates(
 
     for (size_t i = 0; i < numPlanners; ++i) {
         int dofNum = timedPlannerPosePtrVec_[i]->getDofNum();
-
+        currentPos_[i] = currentPos_[i].unaryExpr([](double x) {    // 只保留4位小数，避免数值误差过大导致的差分计算问题
+            return std::round(x * 10000.0) / 10000.0;
+        });
         /******************************** 计算差分 ************************************/
         stateDiffVec_[i].differentiate(currentPos_[i], currentTime, currentVel_[i], currentAcc_[i]);
         /*****************************************************************************/
+        currentAcc_[i] = Eigen::VectorXd::Zero(dofNum);
 
         timedPlannerPosePtrVec_[i]->setCurrentPose(currentPose[i]);
         timedPlannerPosePtrVec_[i]->setCurrentVelocity(currentVel_[i]);

@@ -108,7 +108,7 @@ public:
         accumulated_euler_ += delta_euler;
         
         // 规范化到[-π, π]范围
-        accumulated_euler_ = normalizeEulerAngles(accumulated_euler_);
+        // accumulated_euler_ = normalizeEulerAngles(accumulated_euler_);
         
         // 更新保存的旋转矩阵
         prev_rotation_ = current_rotation;
@@ -204,7 +204,8 @@ public:
         
         if (initial_euler.norm() > 1e-6) {
             // 如果提供了初始欧拉角，使用它
-            accumulated_euler_ = normalizeEulerAngles(initial_euler);
+            // accumulated_euler_ = normalizeEulerAngles(initial_euler);
+            accumulated_euler_ = initial_euler;
         } else {
             // 否则从旋转矩阵计算
             accumulated_euler_ = rotationMatrixToZyx(initial_rotation);
