@@ -1181,7 +1181,7 @@ namespace ocs2
           arm_ctrl_mode_ = (arm_ctrl_mode_ > 0)? 0 : 1;
           callArmControlService(arm_ctrl_mode_);
         }
-        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_JUMP"]] && joy_msg->buttons[joyButtonMap["BUTTON_JUMP"]])
+        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
         {
           kuavo_msgs::robotHandPosition msg;
           const int fingers = 6;
