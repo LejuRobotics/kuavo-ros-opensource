@@ -2493,6 +2493,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
               TargetTrajectories target_trajectories(policy.timeTrajectory_, policy.stateTrajectory_, policy.inputTrajectory_);
 
               publishFeetTrajectory(target_trajectories);
+              double height_tol = 0.002;
+              auto& check_state_traj = mpc_current_target_trajectories_.stateTrajectory;
+              // 鲁班检查是否是摇杆上下拉起
+              if (is_roban_ && check_state_traj.size() >= 1 && check_state_traj.front().size() > 8 && check_state_traj.back().size() > 8)
+              {
+                double first_height = check_state_traj.front()(8);
+                double last_height = check_state_traj.back()(8);
+                condition_pull_up_mpc_height_ = (std::abs(first_height - default_state_[8]) < height_tol &&
+                                        std::abs(last_height - default_state_[8]) < height_tol);
+              }
+              else
+                condition_pull_up_mpc_height_ = true; 
             }
             
             
@@ -3322,7 +3334,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       bool enable_pull_up = enable_pull_up_protect_ &&  !is_rl_controller_ && isPreUpdateComplete && is_stance_mode_ && 
         !only_half_up_body_ && currentObservation_.time - standupTime_ > 4 
         && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL && resetting_mpc_state_ == ResettingMpcState::NOMAL
-        && mode_sync_ready;  // 确保当前模式已切换到期望模式，且已等待1.5秒
+        && mode_sync_ready  // 确保当前模式已切换到期望模式，且已等待1.5秒
+        && (!is_roban_ || condition_pull_up_mpc_height_);  // roban 时要求 MPC 规划高度接近站立高度时才进行触发
 
       // 发布拉起保护启用状态
       ros_logger_->publishValue("/state_estimate/enable_pull_up", enable_pull_up);
