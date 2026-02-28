@@ -17,12 +17,6 @@
 namespace web_video_server
 {
 
-// 图像缓存结构体
-struct CachedImage {
-  cv::Mat image;
-  ros::Time timestamp;
-};
-
 class ImageStreamer
 {
 public:
@@ -61,17 +55,34 @@ protected:
   // 添加人脸检测边界框订阅者和相关变量
   ros::Subscriber face_bounding_box_sub_;
   kuavo_msgs::FaceBoundingBox face_bounding_box_;
+  kuavo_msgs::FaceBoundingBox last_valid_face_box_;  // 保存最近的有效人脸框（用于保留显示）
   bool face_detected_ = false;
   ros::Time last_face_box_time_;
-  double face_box_timeout_ = 1; // 0.05秒超时
+  double face_box_timeout_ = 0.1; // 0.1秒超时，超过此时间未收到新的人脸框消息则认为检测不到人脸，清除显示
+  double face_box_retention_time_ = 0.1; // 0.1秒保留时间，即使没有新的人脸框消息，也继续显示之前的人脸框
   
-  // 图像缓存队列和相关参数
-  std::deque<CachedImage> image_cache_;
-  size_t cache_max_size_;
-  double time_tolerance_;
+  // 图像队列结构
+  struct QueuedImage {
+    cv::Mat image;
+    ros::Time timestamp;
+    bool processed;  // 是否已处理（已匹配人脸框或确认无需处理）
+    std::chrono::steady_clock::time_point queue_time;
+    int original_width;   // 原始图像宽度（用于坐标转换）
+    int original_height;  // 原始图像高度（用于坐标转换）
+    
+    QueuedImage() : processed(false), original_width(0), original_height(0) {}
+  };
+  
+  // 图像队列，最多存储10帧
+  std::deque<QueuedImage> image_queue_;
+  static const size_t MAX_QUEUE_SIZE = 10;
+  boost::mutex queue_mutex_;  // 保护图像队列的互斥锁
   
   // 人脸边界框回调函数
   void faceBoundingBoxCallback(const kuavo_msgs::FaceBoundingBox::ConstPtr& msg);
+  
+  // 根据时间戳在队列中查找并处理匹配的图像
+  void processFaceBoxInQueue(const kuavo_msgs::FaceBoundingBox& face_box, const ros::Time& face_box_time);
 
 };
 
@@ -104,6 +115,12 @@ private:
   bool initialized_;
 
   void imageCallback(const sensor_msgs::ImageConstPtr &msg);
+  
+  // 从队列中发送已处理的图像
+  void sendProcessedImagesFromQueue();
+  
+  // 处理队列中等待时间过长的图像（即使未匹配到人脸框也发送）
+  void processTimeoutImagesInQueue();
 };
 
 class ImageStreamerType

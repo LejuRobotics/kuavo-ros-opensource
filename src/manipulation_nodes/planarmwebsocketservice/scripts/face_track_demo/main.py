@@ -159,10 +159,10 @@ class FaceTrack:
         self.fps = 0
 
         # 获取最大处理帧率参数（用于控制CPU占用率）
-        self.max_processing_fps = rospy.get_param("~max_processing_fps", 15.0)  # 默认15fps（降低默认值）
+        self.max_processing_fps = rospy.get_param("~max_processing_fps", 30.0)  # 默认30fps
         if self.max_processing_fps <= 0:
-            rospy.logwarn("max_processing_fps参数无效，使用默认值15.0")
-            self.max_processing_fps = 15.0
+            rospy.logwarn("max_processing_fps参数无效，使用默认值30.0")
+            self.max_processing_fps = 30.0
         self.min_processing_interval = 1.0 / self.max_processing_fps  # 最小处理间隔（秒）
         rospy.loginfo("最大处理帧率设置为: %.1f fps (处理间隔: %.3f秒)", 
                      self.max_processing_fps, self.min_processing_interval)
@@ -287,6 +287,8 @@ class FaceTrack:
             with self.latest_image_lock:
                 # 直接保存消息，延迟转换以减少回调时间
                 self.latest_image_msg = msg
+                # 保存原始图像的时间戳
+                self.latest_image_header = msg.header
                 self.latest_image_timestamp = time.time()
         except Exception as e:
             rospy.logerr("图像回调失败: %s", e)
@@ -297,10 +299,9 @@ class FaceTrack:
             # 只在锁内进行最小操作，延迟转换以减少回调时间
             with self.latest_image_lock:
                 self.latest_image_msg = msg
-                # 压缩图像消息没有header，创建一个默认的
-                header = Header()
-                header.stamp = rospy.Time.now()
-                self.latest_image_header = header
+                # 压缩图像消息有header字段，使用原始header的时间戳
+                # sensor_msgs/CompressedImage 有 header 字段
+                self.latest_image_header = msg.header
                 self.latest_image_timestamp = time.time()
         except Exception as e:
             rospy.logerr("压缩图像回调失败: %s", e)
@@ -342,6 +343,12 @@ class FaceTrack:
                     # 更新最后处理时间
                     last_process_time = time.time()
                     
+                    # 确保header有效，如果为None则创建
+                    if header is None:
+                        header = Header()
+                        header.stamp = rospy.Time.now()
+                        rospy.logwarn("图像消息没有header，使用当前时间作为时间戳")
+                    
                     # 转换图像（在锁外进行，避免长时间持有锁）
                     try:
                         if self.use_compressed:
@@ -357,9 +364,12 @@ class FaceTrack:
                     self.fps = 1.0 / (current_time - prev_time) if (current_time - prev_time) > 0 else 0
                     prev_time = current_time
                     
+                    # 记录原图尺寸（用于将检测框坐标映射回原图再发布）
+                    orig_h, orig_w = cv_image.shape[:2]
                     # 判断图像大小，不是指定分辨率帧resize的图片
                     if cv_image.shape != (480, 640, 3):
                         cv_image = cv2.resize(cv_image, (640, 480))
+                    orig_size = (orig_w, orig_h)  # (width, height)
                     
                     # 保存用于显示（避免不必要的复制）
                     self.cv_image = cv_image
@@ -374,9 +384,17 @@ class FaceTrack:
                     if detections.size > 0:
                         # 检测到人脸
                         self.is_face_detected = True
-                        self.find_face_in_picture(cv_image, detections, header)
+                        self.find_face_in_picture(cv_image, detections, header, orig_size)
                     else:
-                        # 未检测到人脸
+                        # 未检测到人脸，发布空的人脸框消息（标记为无效）
+                        face_bbox = FaceBoundingBox()
+                        face_bbox.header = header
+                        face_bbox.x1 = 0
+                        face_bbox.y1 = 0
+                        face_bbox.x2 = 0
+                        face_bbox.y2 = 0
+                        face_bbox.confidence = 0.0
+                        self.face_position_pub.publish(face_bbox)
                         self.is_face_detected = False
                     
                     # 发布处理后的图像
@@ -454,7 +472,7 @@ class FaceTrack:
             return np.empty((0, 6), dtype=np.float32)
         return np.array(processed, dtype=np.float32)
 
-    def find_face_in_picture(self, cv_image, detections, header):
+    def find_face_in_picture(self, cv_image, detections, header, orig_size=None):
         xyxy = detections[:, :4]
         confs = detections[:, 4]
 
@@ -473,12 +491,12 @@ class FaceTrack:
         valid_confs = confs[valid_faces]
         max_idx = np.argmax(valid_areas)
 
-        # 获取最大人脸框的坐标
+        # 获取最大人脸框的坐标（当前为处理图坐标系，如 640x480）
         x1, y1, x2, y2 = valid_xyxy[max_idx]
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
         confidence = valid_confs[max_idx]
 
-        # 计算人脸框中心点
+        # 计算人脸框中心点（用于 PID 控制，保持在处理图坐标系）
         center_x = (x1 + x2) / 2
         center_y = (y1 + y2) / 2
 
@@ -486,13 +504,26 @@ class FaceTrack:
         self.face_position_x = center_x
         self.face_position_y = center_y
 
-        # 发布人脸检测框位置 (发布x1, y1, x2, y2所有四个坐标)
+        # 将坐标映射回原图再发布
+        if orig_size is not None:
+            orig_w, orig_h = orig_size
+            cur_h, cur_w = cv_image.shape[:2]
+            scale_x = orig_w / float(cur_w)
+            scale_y = orig_h / float(cur_h)
+            x1_pub = int(round(x1 * scale_x))
+            y1_pub = int(round(y1 * scale_y))
+            x2_pub = int(round(x2 * scale_x))
+            y2_pub = int(round(y2 * scale_y))
+        else:
+            x1_pub, y1_pub, x2_pub, y2_pub = x1, y1, x2, y2
+
+        # 发布人脸检测框位置（原图坐标系下的 x1, y1, x2, y2）
         face_bbox = FaceBoundingBox()
         face_bbox.header = header  # 添加时间戳信息
-        face_bbox.x1 = x1
-        face_bbox.y1 = y1
-        face_bbox.x2 = x2
-        face_bbox.y2 = y2
+        face_bbox.x1 = x1_pub
+        face_bbox.y1 = y1_pub
+        face_bbox.x2 = x2_pub
+        face_bbox.y2 = y2_pub
         face_bbox.confidence = confidence
         self.face_position_pub.publish(face_bbox)
 
@@ -538,8 +569,18 @@ class FaceTrack:
         self.head_motion_pub.publish(msg)
 
     def run(self):
+        # 头部回中再开始运行
+        rospy.loginfo("正在将头部回中...")
+        # 持续发送复位命令1秒，确保头部能够到达中心位置
+        reset_rate = rospy.Rate(10.0)  # 10Hz频率发送复位命令
+        start_time = rospy.Time.now()
+        while (rospy.Time.now() - start_time).to_sec() < 1.0:
+            self.reset_head_position()
+            reset_rate.sleep()
+        rospy.loginfo("头部已回中，开始运行面部跟踪")
+        
         # 获取主循环频率参数（用于控制CPU占用率）
-        main_loop_rate = rospy.get_param("~main_loop_rate", 20.0)  # 默认20Hz
+        main_loop_rate = rospy.get_param("~main_loop_rate", 30.0)  # 默认30Hz
         rate = rospy.Rate(main_loop_rate)
         rospy.loginfo("主循环频率设置为: %.1f Hz", main_loop_rate)
         
