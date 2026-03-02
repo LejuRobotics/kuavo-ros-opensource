@@ -54,6 +54,7 @@ namespace ocs2
               const PinocchioEndEffectorKinematics &eeKinematics);
 
       virtual void loadTasksSetting(const std::string &taskFile, bool verbose, bool is_real);
+      virtual void loadSwitchParamsSetting(const std::string &taskFile, bool verbose, bool is_real);
 
       virtual vector_t update(const vector_t &stateDesired, const vector_t &inputDesired, const vector_t &rbdStateMeasured,
                               size_t mode, scalar_t period, bool mpc_update = false);

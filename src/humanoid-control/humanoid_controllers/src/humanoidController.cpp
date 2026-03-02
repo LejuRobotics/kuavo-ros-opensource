@@ -1038,6 +1038,7 @@ namespace humanoid_controller
         wbc_->setHalfBodyMode(true);
       }
 
+      taskFile_switchParams_ = taskFile;
       standUpWbc_ = std::make_shared<StandUpWbc>(*pinocchioInterfaceWBCPtr_, centroidalModelInfoWBC_,
                                                  *eeKinematicsWBCPtr_);
       standUpWbc_->setArmNums(armNumReal_);
@@ -2190,6 +2191,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       stateEstimate_->setFixFeetHeights(false);
       isPreUpdateComplete = true;
       standupTime_ = currentObservation_.time;
+
+      standUpWbc_->loadSwitchParamsSetting(taskFile_switchParams_, true, is_real_);
 
       std_msgs::Int8 bot_stand_up_complete;
       bot_stand_up_complete.data = 1;
@@ -4373,8 +4376,13 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     torso_interpolation_start_pose_ = current_torso_pose;
     torso_interpolation_target_pose_ = target_torso_pose;
 
+    vector_t targetStateGuess = initial_status_;
+    targetStateGuess[6] = currentObservation_.state[6];
+    targetStateGuess[7] = currentObservation_.state[7];
+    targetStateGuess[9] = currentObservation_.state[9];
+
     leg_interpolation_start_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, current_torso_pose);
-    leg_interpolation_target_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, target_torso_pose);
+    leg_interpolation_target_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(targetStateGuess, target_torso_pose);
 
     leg_interpolation_result_.setZero(waistNum_ + jointNumReal_);
     leg_interpolation_result_.head(jointNumReal_) = leg_interpolation_start_pose_;

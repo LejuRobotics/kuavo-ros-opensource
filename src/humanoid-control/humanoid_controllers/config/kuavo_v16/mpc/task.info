@@ -766,6 +766,35 @@ standUpWeight
     contactForce    0.1 
 }
 
+switchJointAccelTask
+{
+  waist
+  {
+    kp    100
+    kd    10.2
+  }
+  leg
+  {
+    kp    100
+    kd    10.2
+    kp_sim    500
+    kd_sim    10.2
+  }
+  arm
+  {
+    kp    200
+    kd    10.2
+  }
+}
+
+switchWeight
+{
+    Linear          3
+    Angular         10
+    JointAcc        20
+    contactForce    0.1
+}
+
 ; State Estimation
 kalmanFilter
 {

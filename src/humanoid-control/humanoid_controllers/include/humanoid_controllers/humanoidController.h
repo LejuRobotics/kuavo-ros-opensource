@@ -505,6 +505,7 @@ namespace humanoid_controller
     double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
     double arm_mode_sync_time_{0.0};  // 手臂模式同步完成的时间（当前模式切换到期望模式的时间）
     std::shared_ptr<WbcBase> standUpWbc_;
+    std::string taskFile_switchParams_;
     vector_t curRobotLegState_;
 
     // Visualization
