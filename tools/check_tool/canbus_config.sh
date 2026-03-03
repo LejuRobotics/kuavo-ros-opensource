@@ -535,13 +535,19 @@ main() {
     fi
 
     # 选择机器人类型
-    local robot_options=("roban2.0" "roban2.1" "kuavo5")
+    local robot_options=("roban2.0" "roban2.1" "kuavo5" "kuavo4pro")
     show_menu "选择机器人类型" "${robot_options[@]}"
-    get_user_selection 3 robot_selection
+    get_user_selection 4 robot_selection
 
     local robot_type="${robot_options[$((robot_selection-1))]}"
     echo_success "选择机器人类型: $robot_type"
     echo ""
+
+    # kuavo4pro 暂不需要该配置，直接跳过并退出
+    if [ "$robot_type" = "kuavo4pro" ]; then
+        echo_warning "kuavo4pro 暂不需要该配置，已跳过。"
+        exit 0
+    fi
 
     # 根据机器人类型进行配置
     case "$robot_type" in
