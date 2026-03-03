@@ -776,9 +776,9 @@ switchJointAccelTask
 switchWeight
 {
     Linear          3
-    Angular         15
+    Angular         6
     JointAcc        30
-    contactForce    0.01
+    contactForce    0.07
 }
 
 ; State Estimation

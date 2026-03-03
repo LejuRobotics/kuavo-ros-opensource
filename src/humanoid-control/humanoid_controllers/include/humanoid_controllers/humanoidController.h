@@ -899,6 +899,7 @@ namespace humanoid_controller
     bool condition_pull_up_mpc_height_{true};
     double switch_distance_threshold_ = 0.003;// MPC-RL切换距离阈值
     double switch_timeout_multiplier_threshold_ = 2.0;// MPC-RL切换超时时间倍率
+    double switch_timeout_base_threshold_ = 0.5;// MPC-RL切换基础超时时间（秒）
 
   };
 
