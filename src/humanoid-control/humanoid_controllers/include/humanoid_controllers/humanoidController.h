@@ -503,7 +503,6 @@ namespace humanoid_controller
     bool setPullUpState_{false};
     double standupTime_{0.0};
     double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
-    double arm_mode_sync_time_{0.0};  // 手臂模式同步完成的时间（当前模式切换到期望模式的时间）
     std::shared_ptr<WbcBase> standUpWbc_;
     vector_t curRobotLegState_;
 
@@ -638,17 +637,10 @@ namespace humanoid_controller
     vector_t desire_head_pos_ = vector_t::Zero(2);
     vector_t desire_waist_pos_ = vector_t::Zero(1);  // 腰部目标位置
     vector_t desire_arm_q_prev_;
-    vector_t jointPos_, jointVel_;
-    vector_t jointPosRL_, jointVelRL_;
-    vector_t jointAcc_;
-    vector_t jointAccRL_;
-    vector_t jointTorque_;
-    vector_t jointTorqueRL_;
+    vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;
+    vector_t jointPosWBC_, jointVelWBC_, jointAccWBC_, jointCurrentWBC_;
+    vector_t jointPosRL_, jointVelRL_, jointAccRL_, jointTorqueRL_;
     vector_t dexhand_joint_pos_ = vector_t::Zero(12);
-
-    vector_t jointPosWBC_, jointVelWBC_;
-    vector_t jointAccWBC_;
-    vector_t jointCurrentWBC_;
 
     vector_t motor_c2t_;
     std::vector<std::vector<double>> motor_cul;
@@ -895,7 +887,6 @@ namespace humanoid_controller
 
 
     bool has_fall_down_controller_{false};
-    bool condition_pull_up_mpc_height_{true};
     double switch_distance_threshold_ = 0.003;// MPC-RL切换距离阈值
     double switch_timeout_multiplier_threshold_ = 2.0;// MPC-RL切换超时时间倍率
 

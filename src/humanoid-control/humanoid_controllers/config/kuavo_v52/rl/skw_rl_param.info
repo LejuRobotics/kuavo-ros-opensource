@@ -16,9 +16,8 @@ use_external_arm_controller true ; 是否使用外部手臂控制器指令替代
 use_external_waist_controller true ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
 use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
-use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 
-networkModelFile          /ampjzx250207_3_22.onnx; 
+networkModelFile          /ampjzx250207_3_5.onnx; 
 commandData 
 {
     inital
@@ -52,8 +51,8 @@ velocityLimits
     (2,0)  0.3      ; cmdVelLineZ
     (3,0)  0.3      ; cmdVelAngularZ
 }
-defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
-defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
+defaultBaseHeightControl    0.95 ; Actual standing height when using RL controller
+defaultBaseXOffsetControl     -0.03    ; Base offset when using RL controller
 
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity

@@ -11,8 +11,6 @@
 #include <fstream>
 #include <boost/filesystem.hpp>
 #include <ocs2_core/misc/LoadData.h>
-#include "kuavo_msgs/changeArmCtrlMode.h"
-#include <thread>
 
 namespace humanoid_controller
 {
@@ -158,8 +156,6 @@ namespace humanoid_controller
       }
       current_controller_name_ = "";
       ROS_INFO("[RLControllerManager] Switched to BASE controller");
-      // 切换到 MPC 控制器时也异步切换手臂模式到 1
-      changeArmCtrlModeAsync(1);
       return true;
     }
 
@@ -217,11 +213,6 @@ namespace humanoid_controller
     if (nh_ptr_) {
       new_controller->updateVelocityLimitsParam(*nh_ptr_);
     }
-    // 切换到非 MPC 控制器后，异步切换手臂模式到 1
-    if (new_controller && new_controller->getType() != RLControllerType::MPC)
-    {
-      changeArmCtrlModeAsync(1);
-    }
     return true;
   }
 
@@ -246,63 +237,6 @@ namespace humanoid_controller
 
     ROS_ERROR("[RLControllerManager] Controller with type %d not found", static_cast<int>(type));
     return false;
-  }
-
-  void RLControllerManager::changeArmCtrlModeAsync(int mode)
-  {
-    // 如果还没有初始化 NodeHandle，则无法调用服务
-    if (!nh_ptr_)
-    {
-      ROS_WARN("[RLControllerManager] nh_ptr_ is null, cannot change arm control mode");
-      return;
-    }
-
-    std::thread([this, mode]()
-    {
-      try
-      {
-        ros::NodeHandle nh = *nh_ptr_;
-        kuavo_msgs::changeArmCtrlMode srv;
-        srv.request.control_mode = mode;
-
-        ros::ServiceClient client =
-            nh.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_change_arm_ctrl_mode");
-
-        const ros::Duration timeout(2.0);
-        if (!client.waitForExistence(timeout))
-        {
-          ROS_WARN_THROTTLE(1.0,
-                            "[RLControllerManager] Arm ctrl mode service '/humanoid_change_arm_ctrl_mode' "
-                            "not available (timeout: 2s)");
-          return;
-        }
-
-        if (client.call(srv))
-        {
-          if (srv.response.result)
-          {
-            ROS_INFO("[RLControllerManager] Successfully changed arm control mode to %d", mode);
-          }
-          else
-          {
-            ROS_WARN("[RLControllerManager] Failed to change arm control mode to %d, current mode: %d",
-                     mode, srv.response.mode);
-          }
-        }
-        else
-        {
-          ROS_WARN("[RLControllerManager] Failed to call arm ctrl mode service '/humanoid_change_arm_ctrl_mode'");
-        }
-      }
-      catch (const ros::Exception& e)
-      {
-        ROS_ERROR("[RLControllerManager] ROS exception in changeArmCtrlModeAsync: %s", e.what());
-      }
-      catch (const std::exception& e)
-      {
-        ROS_ERROR("[RLControllerManager] Exception in changeArmCtrlModeAsync: %s", e.what());
-      }
-    }).detach();
   }
 
   RLControllerBase* RLControllerManager::getCurrentController()

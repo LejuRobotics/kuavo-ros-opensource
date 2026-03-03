@@ -157,6 +157,19 @@
     <joint name="zarm_l4_joint" />
     <actuator name="zarm_l4_joint_motor" />
   </transmission>
+  <link name="zarm_l7_end_effector">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="zarm_l7_end_effector_joint" type="fixed">
+    <origin xyz="0 -0.03 -0.17" rpy="0 0 0" />
+    <parent link="zarm_l4_link" />
+    <child link="zarm_l7_end_effector" />
+  </joint>
   <link name="zarm_r1_link">
     <inertial>
       <origin xyz="0.00337618 0.00107075 2.211e-05" rpy="0 0 0" />
@@ -269,6 +282,19 @@
     <joint name="zarm_r4_joint" />
     <actuator name="zarm_r4_joint_motor" />
   </transmission>
+  <link name="zarm_r7_end_effector">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="zarm_r7_end_effector_joint" type="fixed">
+    <origin xyz="0 0.03 -0.17" rpy="0 0 0" />
+    <parent link="zarm_r4_link" />
+    <child link="zarm_r7_end_effector" />
+  </joint>
   <!-- end frame -->
   <!-- <frame link="l_hand_pitch" name="l_hand_sole" xyz="0 0 -0.1" /> -->
   <!-- end frame -->

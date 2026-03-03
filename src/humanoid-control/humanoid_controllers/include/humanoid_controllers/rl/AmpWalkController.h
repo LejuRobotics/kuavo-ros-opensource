@@ -9,7 +9,6 @@
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
 #include "kuavo_solver/ankle_solver.h"
-#include "kuavo_msgs/ExecuteArmAction.h"
 #include <openvino/openvino.hpp>
 #include <memory>
 #include <map>
@@ -135,9 +134,6 @@ namespace humanoid_controller
     bool is_roban_{false};
     AnkleSolver ankleSolver_;
 
-    // 是否使用 AMP 专用 Ruiwo 手臂增益（由 skw_rl_param.info 中 use_amp_ruiwo_kpkd 配置）
-    bool use_amp_ruiwo_kpkd_{false};
-
     // AMP
     LowPassFilter2ndOrder jointCmdFilter_;
     Eigen::VectorXd jointCmdFilterState_;
@@ -197,9 +193,6 @@ namespace humanoid_controller
     double yaw_compensation_x_bias_clockwise_{0.0};     ///< 顺时针旋转时X轴偏置
     double yaw_compensation_x_bias_counterclockwise_{0.0}; ///< 逆时针旋转时X轴偏置
 
-    // Ruiwo 电机参数切换服务客户端（用于 AMP 手臂增益切换）
-    ros::ServiceClient srv_change_motor_param_;
-
   private:
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
@@ -209,8 +202,5 @@ namespace humanoid_controller
     
     // 腰部控制辅助函数
     void initWaistControl();
-
-    // 异步切换 Ruiwo 电机参数，避免在控制循环中阻塞
-    void changeRuiwoMotorParamAsync(const std::string& param_name);
   };
 }
