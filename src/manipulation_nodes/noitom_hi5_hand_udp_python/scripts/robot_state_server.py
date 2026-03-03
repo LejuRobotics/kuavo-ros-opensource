@@ -65,6 +65,10 @@ def get_end_effector_type():
 class RobotSubscriber:
     """机器人数据订阅器类"""
 
+    # 力反馈归一化常量
+    MAX_FORCE_NEWTONS = 19.6  # 最大力值（牛顿），对应2kg重量
+    VR_VIBRATION_MAX = 255    # VR振动强度最大值
+
     def __init__(self, ee_type="none", subscribe_sensor_data=False):
         self.ee_type = ee_type.lower()
         self.subscribe_sensor_data = subscribe_sensor_data
@@ -163,6 +167,18 @@ class RobotSubscriber:
         except Exception as e:
             print(f"Error processing dexhand data: {e}")
 
+    def _normalize_force(self, value):
+        """将力值归一化到 VR 振动强度范围
+
+        Args:
+            value: 力值（牛顿）
+
+        Returns:
+            float: 归一化后的振动强度 (0-255)
+        """
+        normalized = (value / self.MAX_FORCE_NEWTONS) * self.VR_VIBRATION_MAX
+        return min(self.VR_VIBRATION_MAX, max(0.0, normalized))
+
     def _arm_force_callback(self, msg):
         """手臂接触力反馈回调函数"""
         try:
@@ -176,13 +192,13 @@ class RobotSubscriber:
             # 创建 ArmForceFeedback 消息
             arm_force = robot_state_pb2.ArmForceFeedback()
 
-            # 计算左臂 xyz 中最大的力（取绝对值）
+            # 计算左臂 xyz 中最大的力（取绝对值）并归一化
             left_max_force = max(abs(data[0]), abs(data[1]), abs(data[2]))
-            arm_force.max_force.append(left_max_force)
+            arm_force.max_force.append(self._normalize_force(left_max_force))
 
-            # 计算右臂 xyz 中最大的力（取绝对值）
+            # 计算右臂 xyz 中最大的力（取绝对值）并归一化
             right_max_force = max(abs(data[3]), abs(data[4]), abs(data[5]))
-            arm_force.max_force.append(right_max_force)
+            arm_force.max_force.append(self._normalize_force(right_max_force))
 
             # 放入队列，如果队列满了则丢弃最旧的数据
             if self.arm_force_queue.full():
