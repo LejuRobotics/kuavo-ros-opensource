@@ -665,7 +665,13 @@ setup_preset_files() {
 }
 # Replace config file with resources version
 setup_config_file() {
-    print_info "替换配置文件..."
+    # Only run for roban versions (version starts with '1': 13, 14, 15)
+    if [[ "$ROBOT_VERSION" != 1* ]]; then
+        print_info "非roban版本机器，跳过配置文件替换"
+        return 0
+    fi
+
+    print_info "替换配置文件（roban版本）..."
     source_config_file="/home/lab/kuavo-ros-opensource/resources/config.yaml"
     dest_config_file="$HOME/.config/lejuconfig/config.yaml"
 
