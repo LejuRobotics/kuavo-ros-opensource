@@ -294,6 +294,7 @@ VR_REMOTE_CONTROL_SESSION_NAME = "vr_remote_control"
 LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12 start_way:=auto"
 # LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12"
 LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 start_way:=auto"
+LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD = "roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=h12 start_way:=auto"
 LAUNCH_VR_REMOTE_CONTROL_CMD = "roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch"
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
@@ -579,8 +580,25 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
     subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME], 
                     stderr=subprocess.DEVNULL) 
     
+    # 通过读取kuavo.json文件，获取ROBOT_MODULE和only_half_up_body参数
+    kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
+    if not os.path.exists(kuavo_json):
+        print(f"Error: Could not find {kuavo_json}")
+        raise Exception(f"Error: Could not find {kuavo_json}")
+    with open(kuavo_json, "r") as f:    
+        kuavo_json_data = json.load(f)
+    
+    # 获取机器人模块类型
+    robot_module = kuavo_json_data.get("ROBOT_MODULE", "")
+    only_half_up_body = kuavo_json_data["only_half_up_body"]
+    
+    # 根据机器人模块类型选择启动命令
     if real_robot:
-        launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_CMD
+        # 如果是LUNBI或LUNBI_V62，使用轮臂启动命令
+        if robot_module == "LUNBI" or robot_module == "LUNBI_V62":
+            launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD
+        else:
+            launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_CMD
     else:
         launch_cmd = LAUNCH_HUMANOID_ROBOT_SIM_CMD
     

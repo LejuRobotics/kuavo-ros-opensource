@@ -92,15 +92,15 @@ target_compile_definitions(kuavo_imu_test
         PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../"
 )
 
+# Hardware plant wheel arm test executable 
+add_executable(hardware_plant_wheel_arm_test
+    wheel_arm_ec_test.cpp
+)
+
 # Add dependencies to ensure message headers are generated
 add_dependencies(kuavo_imu_test hardware_plant_wheel_arm_test
     kuavo_msgs_generate_messages_cpp
     ${catkin_EXPORTED_TARGETS}
-)
-
-# Hardware plant wheel arm test executable
-add_executable(hardware_plant_wheel_arm_test
-    wheel_arm_ec_test.cpp
 )
 
 # Link libraries

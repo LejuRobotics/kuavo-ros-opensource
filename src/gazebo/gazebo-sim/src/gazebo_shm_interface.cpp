@@ -758,7 +758,7 @@ void GazeboShmInterface::updateWheelControl()
     double robot_x_dis = 0.253;     // 机器人中心到轮子的x距离
     double robot_y_dis = 0.1785;    // 机器人中心到轮子的y距离
 
-    if(robotVersion_ == 61)
+    if(robotVersion_ == 61 || robotVersion_ == 62)
     {
         wheel_radius = 0.13035;
         robot_x_dis = 0.232489;

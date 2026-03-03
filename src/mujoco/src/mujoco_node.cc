@@ -893,7 +893,7 @@ namespace
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61)
+                else if(robotVersion_ == 61 || robotVersion_ == 62)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);

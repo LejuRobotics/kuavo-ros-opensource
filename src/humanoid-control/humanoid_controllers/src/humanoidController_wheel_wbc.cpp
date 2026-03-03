@@ -199,7 +199,7 @@ namespace humanoidController_wheel_wbc
     {
       mujoco_q[2] = 0.0;
     }
-    else if(robotVersion_ == 61)
+    else if(robotVersion_ == 61 || robotVersion_ == 62)
     {
       mujoco_q[2] = 0.0;
     }

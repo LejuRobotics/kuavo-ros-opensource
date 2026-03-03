@@ -171,6 +171,7 @@
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
           <arg name="start_way" value="$(arg start_way)"/>
         </include>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
       </group>
       <group if="$(eval arg('joystick_type') == 'sim')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">
