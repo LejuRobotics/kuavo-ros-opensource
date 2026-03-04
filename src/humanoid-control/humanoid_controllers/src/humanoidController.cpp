@@ -1969,6 +1969,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       squatState.head(12 + jointNum_) = drake_interface_->getSquatInitialState();
       vector_t standState = vector_t::Zero(infoWBC.stateDim);
       standState.head(12 + jointNum_) = drake_interface_->getInitialState();
+      standState.tail(armNumReal_) = defalutArmPosMPC_;
       // is_rl_start 模式下，直接起立到 RL 的默认姿态和高度，确保衔接平滑
       if (is_rl_start_ && currentDefalutJointPosRL_.size() == (jointNumReal_ + waistNum_ + armNumReal_))
       {
