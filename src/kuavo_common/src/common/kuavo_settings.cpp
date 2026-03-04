@@ -216,6 +216,7 @@ namespace HighlyDynamic
                 {"dynamixel", {BIT_17_36, CK_MC, CK_C2T, DYNAMIXEL}},
                 {"realman", {BIT_17_36, CK_MC, CK_C2T, REALMAN}},
                 {"ruiwo", {BIT_17_36, CK_MC, CK_C2T, RUIWO}},
+                {"ruiwoPA81", {BIT_17_25, CK_MC, PA81_C2T, RUIWO}},
                 {"ruiwoPA72", {BIT_17_36, CK_MC, PA72_C2T, RUIWO}},
                 {"ruiwoPA60", {BIT_17_36, CK_MC, PA60_C2T, RUIWO}},
                 {"ruiwoPA43", {BIT_17_10, CK_MC, PA43_C2T, RUIWO}},
@@ -229,6 +230,7 @@ namespace HighlyDynamic
                 {"PA72_36_R", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
                 {"PA76_25", {BIT_17_25, PA76_25_MC, PA76_25_C2T, EC_MASTER}},
                 {"PA76_18", {BIT_17_18, PA76_18_MC, PA76_18_C2T, EC_MASTER}},
+                {"PA81_18_25", {BIT_17_25, PA81_18_25_MC, PA81_18_25_C2T, EC_MASTER}},
                 {"PA105_18", {BIT_17_18, PA105_18_MC, PA105_18_C2T, EC_MASTER}}};
         hardware_settings.num_joints = robot_config.getValue<uint8_t>("NUM_JOINT");
         hardware_settings.num_arm_joints = robot_config.getValue<uint8_t>("NUM_ARM_JOINT");

@@ -27,6 +27,7 @@ namespace HighlyDynamic
 #define PA81_MC (60)
 #define PA100_MC (70)
 #define PA76_25_MC (18)
+#define PA81_18_25_MC (18)
 #define CK_MC (18)
 #define PA4310_25_MC (8)
 #define PA72_36_MC (15)
@@ -53,6 +54,7 @@ namespace HighlyDynamic
 #define PA105_18_C2T (4.1)
 #define PA4310_25_C2T (2.6)
 #define PA72_36_C2T (4.8)
+#define PA81_18_25_C2T (2.9)
 #define PA115_C2T (11.5)
 
 
