@@ -115,8 +115,10 @@ namespace humanoid_controller
     Eigen::VectorXd singleInputData_;
     // networkInputDataRL_ 已在 RLControllerBase 里定义
 
-    // 速度命令限制
-    Eigen::Vector4d velocityLimits_{Eigen::Vector4d::Zero()};
+    // 速度命令限制（正负方向独立设置）
+    // 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
+    //        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
+    Eigen::Matrix<double, 8, 1> velocityLimits_{Eigen::Matrix<double, 8, 1>::Zero()};
 
     // yaw 对齐
     double my_yaw_offset_{0.0};
