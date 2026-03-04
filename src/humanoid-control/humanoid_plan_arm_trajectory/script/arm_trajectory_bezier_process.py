@@ -993,9 +993,14 @@ class ArmTrajectoryBezierDemo:
             self._timer.shutdown()
 
     def _on_reset_timer_trigger(self, event):
-        """复位动作结束后停止发布，避免递归复位。"""
+        """复位动作结束后停止发布，并恢复手臂模式为自动摆臂（AMP/RL 下行走时摆手）。"""
         self.arm_flag = False
         rospy.loginfo("Reset trajectory finished. Stopping publishers.")
+        # AMP/RL 下做完动作会切到 mode 2，复位轨迹播完后需切回 mode 1，否则拨动摇杆行走时不摆手
+        current_control_mode = self.get_current_control_mode()
+        if current_control_mode == "rl":
+            self.call_change_arm_ctrl_mode_service(1)
+            # rospy.loginfo("RL reset done: arm mode switched back to 1 (auto swing) for walking.")
 
     def publish_running_action_state(self):
         """持续发布 state=1"""
