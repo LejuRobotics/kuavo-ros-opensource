@@ -58,14 +58,14 @@
         "ruiwo", "ruiwo", "ruiwo", "ruiwo",
         "ruiwo", "ruiwo"],
     "ruiwo_kp": [20, 20, 20, 20, 20, 20, 20, 20, 20, 10],
-    "ruiwo_kd": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    "ruiwo_kd": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
     "taiji_kpkd": {
         "ruiwo_kp": [5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
         "ruiwo_kd": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
     },
     "normal_kpkd": {
         "ruiwo_kp": [20, 20, 20, 20, 20, 20, 20, 20, 20, 10],
-        "ruiwo_kd": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        "ruiwo_kd": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
     },
     "EndEffectorType": ["none", "none"],
     "min_joint_position_limits":[
