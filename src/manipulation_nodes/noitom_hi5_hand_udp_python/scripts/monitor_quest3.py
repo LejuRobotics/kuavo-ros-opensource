@@ -22,7 +22,7 @@ from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
 from std_msgs.msg import Float64MultiArray
 # Add the parent directory to the system path to allow relative imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../protos/')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 # Import the hand_pose_pb2 module
 import protos.hand_pose_pb2 as event_pb2

@@ -197,7 +197,7 @@ class RobotSubscriber:
             arm_force.max_force.append(self._normalize_force(left_max_force))
 
             # 计算右臂 xyz 中最大的力（取绝对值）并归一化
-            right_max_force = max(abs(data[3]), abs(data[4]), abs(data[5]))
+            right_max_force = max(abs(data[6]), abs(data[7]), abs(data[8]))
             arm_force.max_force.append(self._normalize_force(right_max_force))
 
             # 放入队列，如果队列满了则丢弃最旧的数据
