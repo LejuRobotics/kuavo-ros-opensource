@@ -505,6 +505,11 @@ configure_kuavo() {
             dual_config_file="$KUAVO5W_V62_DUAL_SOURCE_CONFIG_FILE"
             single_config_file=""
             ;;
+        "kuavo5_v53")
+            dual_config_file="$KUAVO5_V53_DUAL_SOURCE_CONFIG_FILE"
+            # kuavo5_v53版本不支持单总线，不需要single_config_file
+            single_config_file=""
+            ;;
     esac
 
     # 初始化配置文件变量
@@ -551,6 +556,11 @@ configure_kuavo() {
             config_file=""
         fi
     else
+        # kuavo5_v53版本不支持单总线
+        if [ "$robot_type" = "kuavo5_v53" ]; then
+            echo_error "✗ 错误: kuavo5_v53版本不支持单总线模式"
+            return 1
+        fi
 
         echo ""
         echo_title "配置单总线CANBUS类型"
@@ -610,6 +620,12 @@ main() {
     local robot_type="${robot_options[$((robot_selection-1))]}"
     echo_success "选择机器人类型: $robot_type"
     echo ""
+
+    # kuavo4pro 暂不需要该配置，直接跳过并退出
+    if [ "$robot_type" = "kuavo4pro" ]; then
+        echo_warning "kuavo4pro 暂不需要该配置，已跳过。"
+        exit 0
+    fi
 
     # 根据机器人类型进行配置
     case "$robot_type" in

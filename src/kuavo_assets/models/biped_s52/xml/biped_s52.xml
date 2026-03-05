@@ -216,7 +216,7 @@
         <body name="zarm_r1_link" pos="-0.003 -0.2527 0.283">
           <inertial pos="0.00162594 0.00950442 -0.00031733" quat="0.704772 0.709052 0.0231382 -0.00249502" mass="0.92947" diaginertia="0.0013282 0.0013006 0.000847374"/>
           <joint name="zarm_r1_joint" pos="0 0 0" axis="0 1 0" range="-3.14159 1.5708" actuatorfrcrange="-66 66" damping="0.02"/>
-          <geom pos="0 0.081 0" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_pitch"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_pitch"/>
           <geom type="capsule" size="0.05 0.02" quat="0.707105 0 0.707108 0" class="collision-right"/>
           <body name="zarm_r2_link">
             <inertial pos="-0.00082502 -6.18e-06 -0.0469992" quat="0.704307 0.0639585 0.0637456 0.704129" mass="0.41523" diaginertia="0.00122057 0.000848506 0.000732414"/>

@@ -47,8 +47,10 @@ const sidebars = {
           type: 'category',
           label: '轮臂产品',
           items: [
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W 产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/轮臂产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W_进阶版产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W_MaxA版产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W_MaxB版产品介绍',
           ],
         },
       ],

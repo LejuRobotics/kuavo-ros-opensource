@@ -46,11 +46,17 @@ commandData
 
 velocityLimits
 {
-    ; 定义速度命令的限制
-    (0,0)  0.55      ; cmdVelLineX
-    (1,0)  0.3      ; cmdVelLineY
-    (2,0)  0.3      ; cmdVelLineZ
-    (3,0)  0.3      ; cmdVelAngularZ
+    ; 定义速度命令的限制（正负方向独立设置）
+    ; 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
+    ;        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
+    (0,0)  0.65      ; cmdVelLineX positive
+    (1,0)  -0.3     ; cmdVelLineX negative
+    (2,0)  0.4      ; cmdVelLineY positive
+    (3,0)  -0.4     ; cmdVelLineY negative
+    (4,0)  0.3      ; cmdVelLineZ positive
+    (5,0)  -0.3     ; cmdVelLineZ negative
+    (6,0)  0.4     ; cmdVelAngularZ positive
+    (7,0)  -0.4    ; cmdVelAngularZ negative
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
@@ -107,8 +113,8 @@ yDirectionCompensation
 mixedMotionLimits
 {
     enableMixedMode             true    ; 是否启用混合运动模式(true/false)
-    angularVelThreshold         0.03    ; 角速度阈值 (rad/s)
-    maxLinearVelWithAngular     0.4     ; 有角速度时最大线速度 (m/s)
+    angularVelThreshold         0.25    ; 角速度阈值 (rad/s)
+    maxLinearVelWithAngular     0.2     ; 有角速度时最大线速度 (m/s)
     linearVelThreshold          0.4     ; 线速度阈值 (m/s)
     maxAngularVelWithLinear     0.4     ; 有线速度时最大角速度 (rad/s)
     smoothTransition            true    ; 是否启用平滑过渡(true/false)

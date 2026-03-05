@@ -505,6 +505,7 @@ namespace humanoid_controller
     double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
     double arm_mode_sync_time_{0.0};  // 手臂模式同步完成的时间（当前模式切换到期望模式的时间）
     std::shared_ptr<WbcBase> standUpWbc_;
+    std::string taskFile_switchParams_;
     vector_t curRobotLegState_;
 
     // Visualization
@@ -891,6 +892,7 @@ namespace humanoid_controller
     bool condition_pull_up_mpc_height_{true};
     double switch_distance_threshold_ = 0.003;// MPC-RL切换距离阈值
     double switch_timeout_multiplier_threshold_ = 2.0;// MPC-RL切换超时时间倍率
+    double switch_timeout_base_threshold_ = 0.5;// MPC-RL切换基础超时时间（秒）
 
   };
 

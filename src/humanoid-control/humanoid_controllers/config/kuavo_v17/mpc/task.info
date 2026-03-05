@@ -519,12 +519,12 @@ selfCollision
 ; Whole body control
 torqueLimitsTask
 {
-   (0,0)  48.0     ; motor 1
+   (0,0)  63.0     ; motor 1
    (1,0)  63.0     ; motor 2
-   (2,0)  47.0     ; motor 3
-   (3,0)  48.0     ; motor 4
-   (4,0)  20.0     ; motor 5
-   (5,0)  20.0     ; motor 6
+   (2,0)  50.0     ; motor 3
+   (3,0)  58.0     ; motor 4
+   (4,0)  40.0     ; motor 5
+   (5,0)  40.0     ; motor 6
 
    ;; waist Limits
    (6,0)  44.0     ; motor 1

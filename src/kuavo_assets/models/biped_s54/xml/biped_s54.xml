@@ -167,7 +167,7 @@
         </body>
       </body>
       <body name="waist_yaw" pos="0 0 0.1114">
-        <inertial pos="-0.00142396 -0.000608409 0.170535" quat="0.999626 0.00937051 -0.0256998 -0.000364493" mass="20.8448" diaginertia="0.353595 0.27201 0.213389"/>
+        <inertial pos="0.04204947 -0.000608409 0.170535" quat="0.999626 0.00937051 -0.0256998 -0.000364493" mass="20.8448" diaginertia="0.353595 0.27201 0.213389"/>
         <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" range="-3.14 3.14" actuatorfrcrange="-102 102"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_yaw"/>
         <!-- waist_yaw碰撞体 -->
@@ -216,7 +216,7 @@
         <body name="zarm_r1_link" pos="-0.003 -0.2527 0.283">
           <inertial pos="0.00158747 0.0104318 0.00030593" quat="0.70897 0.704785 -0.00683753 0.0243375" mass="0.96332" diaginertia="0.00140594 0.00138364 0.00087978"/>
           <joint name="zarm_r1_joint" pos="0 0 0" axis="0 1 0" range="-3.14159 1.5708" actuatorfrcrange="-66 66" damping="0.02"/>
-          <geom pos="0 0.081 0" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_pitch"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_pitch"/>
           <geom type="capsule" size="0.05 0.02" quat="0.707105 0 0.707108 0" class="collision-right"/>
           <body name="zarm_r2_link">
             <inertial pos="-0.00184339 3.48e-06 -0.0470817" quat="0.70479 0.0560596 0.0562594 0.704956" mass="0.44946" diaginertia="0.0013023 0.000893422 0.000784048"/>

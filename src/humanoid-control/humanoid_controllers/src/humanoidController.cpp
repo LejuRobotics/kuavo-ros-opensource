@@ -1038,6 +1038,7 @@ namespace humanoid_controller
         wbc_->setHalfBodyMode(true);
       }
 
+      taskFile_switchParams_ = taskFile;
       standUpWbc_ = std::make_shared<StandUpWbc>(*pinocchioInterfaceWBCPtr_, centroidalModelInfoWBC_,
                                                  *eeKinematicsWBCPtr_);
       standUpWbc_->setArmNums(armNumReal_);
@@ -1974,6 +1975,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       squatState.head(12 + jointNum_) = drake_interface_->getSquatInitialState();
       vector_t standState = vector_t::Zero(infoWBC.stateDim);
       standState.head(12 + jointNum_) = drake_interface_->getInitialState();
+      standState.tail(armNumReal_) = defalutArmPosMPC_;
       // is_rl_start 模式下，直接起立到 RL 的默认姿态和高度，确保衔接平滑
       if (is_rl_start_ && currentDefalutJointPosRL_.size() == (jointNumReal_ + waistNum_ + armNumReal_))
       {
@@ -2190,6 +2192,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       stateEstimate_->setFixFeetHeights(false);
       isPreUpdateComplete = true;
       standupTime_ = currentObservation_.time;
+
+      standUpWbc_->loadSwitchParamsSetting(taskFile_switchParams_, true, is_real_);
 
       std_msgs::Int8 bot_stand_up_complete;
       bot_stand_up_complete.data = 1;
@@ -4386,8 +4390,13 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     torso_interpolation_start_pose_ = current_torso_pose;
     torso_interpolation_target_pose_ = target_torso_pose;
 
+    vector_t targetStateGuess = initial_status_;
+    targetStateGuess[6] = currentObservation_.state[6];
+    targetStateGuess[7] = currentObservation_.state[7];
+    targetStateGuess[9] = currentObservation_.state[9];
+
     leg_interpolation_start_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, current_torso_pose);
-    leg_interpolation_target_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, target_torso_pose);
+    leg_interpolation_target_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(targetStateGuess, target_torso_pose);
 
     leg_interpolation_result_.setZero(waistNum_ + jointNumReal_);
     leg_interpolation_result_.head(jointNumReal_) = leg_interpolation_start_pose_;
@@ -4448,7 +4457,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     double distance_to_target = std::abs(pos_direction[2]);
     
     // 如果已经到达目标位置
-    if (distance_to_target < switch_distance_threshold_ || current_time - torso_interpolation_start_time_ > torso_interpolation_duration_*switch_timeout_multiplier_threshold_)
+    if (distance_to_target < switch_distance_threshold_ || current_time - torso_interpolation_start_time_ > torso_interpolation_duration_ + switch_timeout_base_threshold_)
     {
       is_torso_interpolation_active_ = false;
       is_arm_interpolating_ = false;

@@ -46,11 +46,17 @@ commandData
 
 velocityLimits
 {
-    ; 定义速度命令的限制
-    (0,0)  0.55      ; cmdVelLineX
-    (1,0)  0.3      ; cmdVelLineY
-    (2,0)  0.3      ; cmdVelLineZ
-    (3,0)  0.3      ; cmdVelAngularZ
+    ; 定义速度命令的限制（正负方向独立设置）
+    ; 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
+    ;        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
+    (0,0)  0.65      ; cmdVelLineX positive
+    (1,0)  -0.3     ; cmdVelLineX negative
+    (2,0)  0.4      ; cmdVelLineY positive
+    (3,0)  -0.4     ; cmdVelLineY negative
+    (4,0)  0.3      ; cmdVelLineZ positive
+    (5,0)  -0.3     ; cmdVelLineZ negative
+    (6,0)  0.4     ; cmdVelAngularZ positive
+    (7,0)  -0.4    ; cmdVelAngularZ negative
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
@@ -107,8 +113,8 @@ yDirectionCompensation
 mixedMotionLimits
 {
     enableMixedMode             true    ; 是否启用混合运动模式(true/false)
-    angularVelThreshold         0.03    ; 角速度阈值 (rad/s)
-    maxLinearVelWithAngular     0.4     ; 有角速度时最大线速度 (m/s)
+    angularVelThreshold         0.25    ; 角速度阈值 (rad/s)
+    maxLinearVelWithAngular     0.2     ; 有角速度时最大线速度 (m/s)
     linearVelThreshold          0.4     ; 线速度阈值 (m/s)
     maxAngularVelWithLinear     0.4     ; 有线速度时最大角速度 (rad/s)
     smoothTransition            true    ; 是否启用平滑过渡(true/false)
@@ -157,14 +163,14 @@ defaultJointState
     ; 定义各关节的默认状态
     (0,0)  -0.       ; leg_l1_joint
     (1,0)  -0.       ; leg_l2_joint
-    (2,0)  -0.1     ; leg_l3_joint
-    (3,0)   0.25     ; leg_l4_joint
+    (2,0)  -0.08     ; leg_l3_joint
+    (3,0)   0.21     ; leg_l4_joint
     (4,0)  -0.15     ; leg_l5_joint
     (5,0)   0.       ; leg_l6_joint
     (6,0)   -0.0       ; leg_r1_joint
     (7,0)   0.       ; leg_r2_joint
-    (8,0)  -0.1     ; leg_r3_joint
-    (9,0)   0.25     ; leg_r4_joint
+    (8,0)  -0.08     ; leg_r3_joint
+    (9,0)   0.21     ; leg_r4_joint
     (10,0) -0.15     ; leg_r5_joint
     (11,0) -0.       ; leg_r6_joint
     (12,0)  0        ; waist_joint
@@ -349,14 +355,14 @@ motor_pdo_kd
     ; 定义各关节的PDO Kd参数（从kuavo.json的joint_kd读取，主要用于EC_MASTER电机）
     (0,0)   1506    ; leg_l1_joint
     (1,0)   516     ; leg_l2_joint
-    (2,0)   1506    ; leg_l3_joint
-    (3,0)   881     ; leg_l4_joint
+    (2,0)   941    ; leg_l3_joint
+    (3,0)   551     ; leg_l4_joint
     (4,0)   2260    ; leg_l5_joint
     (5,0)   2260    ; leg_l6_joint
     (6,0)   1506    ; leg_r1_joint
     (7,0)   516     ; leg_r2_joint
-    (8,0)   1506    ; leg_r3_joint
-    (9,0)   881     ; leg_r4_joint
+    (8,0)   941    ; leg_r3_joint
+    (9,0)   551     ; leg_r4_joint
     (10,0)  2260    ; leg_r5_joint
     (11,0)  2260    ; leg_r6_joint
     (12,0)  929     ; waist_joint
@@ -413,13 +419,13 @@ actionScaleTest
     ; 定义各关节的控制增益
     (0,0)   1       ; leg_l1_joint
     (1,0)   1       ; leg_l2_joint
-    (2,0)   1       ; leg_l3_joint
+    (2,0)   1.05       ; leg_l3_joint
     (3,0)   1       ; leg_l4_joint
     (4,0)   1       ; leg_l5_joint
     (5,0)   1       ; leg_l6_joint
     (6,0)   1       ; leg_r1_joint
     (7,0)   1       ; leg_r2_joint
-    (8,0)   1       ; leg_r3_joint
+    (8,0)   1.05       ; leg_r3_joint
     (9,0)   1       ; leg_r4_joint
     (10,0)  1       ; leg_r5_joint
     (11,0)  1       ; leg_r6_joint
