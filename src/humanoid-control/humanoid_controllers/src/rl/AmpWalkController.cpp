@@ -142,9 +142,7 @@ namespace humanoid_controller
     // 速度限制（8 维：正负方向独立设置）
     // 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
     //        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
-    Eigen::Matrix<double, 8, 1> velocityLimits_8D;
-    loadEigenMatrix("velocityLimits", velocityLimits_8D);
-    velocityLimits_ = velocityLimits_8D;
+    loadEigenMatrix("velocityLimits", velocityLimits_);
     loadEigenMatrix("jointCmdFilterCutoffFreq", jointCmdFilterCutoffFreq_);
 
     jointCmdFilter_.setParams(dt_, jointCmdFilterCutoffFreq_);
@@ -351,6 +349,8 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, initial_cmd_.*cmdMember, prefixCommandData_ + ".scale." + cmdName, false);
     }
 
+    // 加载 X 负向单独缩放系数（用于不对称速度限制）
+    loadData::loadPtreeValue(pt, cmdVelLineXNegScale_, "commandData.scale.cmdVelLineXNegScale", false);
 
     ROS_INFO("[%s] loadConfig done. num_actions_=%d, numSingleObs_=%d, frameStack_=%d",
              name_.c_str(), num_actions_, numSingleObs_, frameStack_);
@@ -515,31 +515,12 @@ namespace humanoid_controller
     }
 
     // 速度命令 [vx, vy, omega_z]
-    // 根据方向应用不同的速度限制（实现正负向不对称控制）
-    // 不再使用 cmd.scale()，而是直接计算目标速度并限制在对应方向的 velocityLimits 范围内
-    double targetVelX, targetVelY, targetVelZ, targetAngZ;
+    cmd.scale();
     
-    // 计算各轴的目标速度（考虑方向和限制）
-    // 正向：使用正向限制，负向：使用负向限制的绝对值
-    double maxVelX = (cmd.cmdVelLineX_ >= 0) ? velocityLimits_(0) : std::abs(velocityLimits_(1));
-    double maxVelY = (cmd.cmdVelLineY_ >= 0) ? velocityLimits_(2) : std::abs(velocityLimits_(3));
-    double maxVelZ = (cmd.cmdVelLineZ_ >= 0) ? velocityLimits_(4) : std::abs(velocityLimits_(5));
-    double maxAngZ = (cmd.cmdVelAngularZ_ >= 0) ? velocityLimits_(6) : std::abs(velocityLimits_(7));
-    
-    // 应用缩放系数并限制在最大范围内
-    targetVelX = std::clamp(cmd.cmdVelLineX_ * cmd.cmdVelScaleLineX_, -maxVelX, maxVelX);
-    targetVelY = std::clamp(cmd.cmdVelLineY_ * cmd.cmdVelScaleLineY_, -maxVelY, maxVelY);
-    targetVelZ = std::clamp(cmd.cmdVelLineZ_ * cmd.cmdVelScaleLineZ_, -maxVelZ, maxVelZ);
-    targetAngZ = std::clamp(cmd.cmdVelAngularZ_ * cmd.cmdVelScaleAngularZ_, -maxAngZ, maxAngZ);
-    
-    // 更新命令数据
-    cmd.cmdVelLineX_ = targetVelX;
-    cmd.cmdVelLineY_ = targetVelY;
-    cmd.cmdVelLineZ_ = targetVelZ;
-    cmd.cmdVelAngularX_ = cmd.cmdVelAngularX_ * cmd.cmdVelScaleAngularX_;  // 这两个轴保持原逻辑
-    cmd.cmdVelAngularY_ = cmd.cmdVelAngularY_ * cmd.cmdVelScaleAngularY_;
-    cmd.cmdVelAngularZ_ = targetAngZ;
-    cmd.cmdStance_ *= cmd.cmdScaleStance_;
+    // 应用 X 负向单独缩放系数（实现不对称速度限制）
+    if (cmd.cmdVelLineX_ < 0.0) {
+      cmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
+    }
     
     Eigen::Vector3d velocity_commands;
     velocity_commands << cmd.cmdVelLineX_,
@@ -1471,18 +1452,16 @@ namespace humanoid_controller
 
   void AmpWalkController::updateVelocityLimitsParam(ros::NodeHandle& nh)
   {
-    // 将 8 维 velocityLimits_转换为 6 维 rosparam 格式（取正负限制的最大值作为统一限制）
-    // velocityLimits_格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
-    //                      linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
+    // 将 4 维 velocityLimits_转换为 6 维 rosparam 格式
+    // velocityLimits_格式：[linear_x, linear_y, linear_z, angular_z] （统一上限）
     // rosparam 格式：[linear_x, linear_y, linear_z, angular_x, angular_y, angular_z]
     std::vector<double> limits_vec(6);
-    // 取正负方向的最大值作为该轴的统一速度限制
-    limits_vec[0] = std::max(std::abs(velocityLimits_(0)), std::abs(velocityLimits_(1)));  // linear_x
-    limits_vec[1] = std::max(std::abs(velocityLimits_(2)), std::abs(velocityLimits_(3)));  // linear_y
-    limits_vec[2] = std::max(std::abs(velocityLimits_(4)), std::abs(velocityLimits_(5)));  // linear_z
-    limits_vec[3] = 0.0;                  // angular_x (通常为 0)
-    limits_vec[4] = 0.0;                  // angular_y (通常为 0)
-    limits_vec[5] = std::max(std::abs(velocityLimits_(6)), std::abs(velocityLimits_(7)));  // angular_z
+    limits_vec[0] = velocityLimits_(0);  // linear_x (positive limit)
+    limits_vec[1] = velocityLimits_(1);  // linear_y
+    limits_vec[2] = velocityLimits_(2);  // linear_z
+    limits_vec[3] = 0.0;                 // angular_x (通常为 0)
+    limits_vec[4] = 0.0;                 // angular_y (通常为 0)
+    limits_vec[5] = velocityLimits_(3);  // angular_z
     
     nh.setParam("/velocity_limits", limits_vec);
     

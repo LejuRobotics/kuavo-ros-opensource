@@ -37,6 +37,7 @@ commandData
         cmdVelAngularY      1   ;
         cmdVelAngularZ      0.498  ; 输入模型的最大cmdVelAngularZ = scale[5] * velocityLimits[3]
         cmdStance           1   ;
+        cmdVelLineXNegScale 1    ; X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）         
     }
 };预留完整的接口，当前只用到cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdStance，最大长度是4
 

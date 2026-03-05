@@ -172,6 +172,7 @@ class MRT_BASE {
  protected:
   void moveToBuffer(std::unique_ptr<CommandData> commandDataPtr, std::unique_ptr<PrimalSolution> primalSolutionPtr,
                     std::unique_ptr<PerformanceIndex> performanceIndicesPtr);
+  std::atomic_bool pause_flag_{false};
 
  private:
   /** Calls modifyActiveSolution on all mrt observers. This function is called while holding a policyBufferMutex lock */

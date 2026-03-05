@@ -510,6 +510,11 @@ configure_kuavo() {
             # kuavo5_v53版本不支持单总线，不需要single_config_file
             single_config_file=""
             ;;
+        "kuavo5_v53")
+            dual_config_file="$KUAVO5_V53_DUAL_SOURCE_CONFIG_FILE"
+            # kuavo5_v53版本不支持单总线，不需要single_config_file
+            single_config_file=""
+            ;;
     esac
 
     # 初始化配置文件变量
