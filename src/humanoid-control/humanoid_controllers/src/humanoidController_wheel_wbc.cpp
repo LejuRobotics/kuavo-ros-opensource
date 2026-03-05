@@ -535,9 +535,9 @@ namespace humanoidController_wheel_wbc
         optimizedState_mrt_ = optimizedState_mrt;
         optimizedInput_mrt_ = optimizedInput_mrt;
       }
-      if(std::fabs(optimizedInput_mrt_[0]) < 0.01) optimizedInput_mrt_[0] = 0;
-      if(std::fabs(optimizedInput_mrt_[1]) < 0.01) optimizedInput_mrt_[1] = 0;
-      if(std::fabs(optimizedInput_mrt_[2]) < 0.01) optimizedInput_mrt_[2] = 0;
+      if(std::fabs(optimizedInput_mrt_[0]) < 0.05) optimizedInput_mrt_[0] = 0;
+      if(std::fabs(optimizedInput_mrt_[1]) < 0.05) optimizedInput_mrt_[1] = 0;
+      if(std::fabs(optimizedInput_mrt_[2]) < 0.05) optimizedInput_mrt_[2] = 0;
     }
     // 更新可视化数据
     // robotVisualizer_->update_obs(observation_wheel_);

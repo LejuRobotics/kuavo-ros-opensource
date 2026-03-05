@@ -207,5 +207,4 @@
         <node pkg="humanoid_controllers" type="auto_wheel_bridge.py" name="auto_wheel_bridge_node" 
               output="screen" required="false"/>
     </group>
-
 </launch>

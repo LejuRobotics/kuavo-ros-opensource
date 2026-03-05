@@ -56,6 +56,7 @@ class Quest3BoneFramePublisher:
         self.calibrated_head_quat_matrix_inv = None
         self.head_motion_range = self.get_head_motion_range()
         self.chest_motion_range = self.get_chest_motion_range()
+        self.chest_motion_range = self.get_chest_motion_range()
         
         self.sock = None
         self.server_address = None
@@ -400,6 +401,19 @@ class Quest3BoneFramePublisher:
             rospy.logerr(f"TF lookup failed for torso->Chest transform: {e}")
             return
     
+    def pub_chest_pose_in_torso_frame(self, chest_position, chest_quat, root_offset, time_now):
+        chest_pose_msg = PoseStamped()
+        chest_pose_msg.header.stamp = time_now
+        chest_pose_msg.header.frame_id = "torso"
+        chest_pose_msg.pose.position.x = chest_position["x"] - root_offset["x"]
+        chest_pose_msg.pose.position.y = chest_position["y"] - root_offset["y"]
+        chest_pose_msg.pose.position.z = chest_position["z"]
+        chest_pose_msg.pose.orientation.x = chest_quat[0]
+        chest_pose_msg.pose.orientation.y = chest_quat[1]
+        chest_pose_msg.pose.orientation.z = chest_quat[2]
+        chest_pose_msg.pose.orientation.w = chest_quat[3]
+        self.chest_pose_pub.publish(chest_pose_msg)
+
     def _get_robot_hand_tcp_positions(self):
         """
         获取机器人本体左右手末端TCP位置（相对于base_link）
@@ -725,6 +739,12 @@ class Quest3BoneFramePublisher:
         scale_factor = {"x": 3.0, "y": 3.0, "z": 3.0}
         # 创建TFMessage用于批量发布所有骨骼的TF变换
         tf_msg = TFMessage()
+        root_offset = {"x": 0.0, "y": 0.0, "z": 0.0}
+        root_index = self.bone_name_to_index.get("Root", None)
+        if root_index is not None and root_index < len(event.poses):
+            root_pose = event.poses[root_index]
+            root_position = {"x": root_pose.position.x, "y": root_pose.position.y, "z": root_pose.position.z}
+            root_offset = self.convert_position_to_right_hand(root_position)
         
         for i, pose in enumerate(event.poses):
             bone_name = self.index_to_bone_name[i]
@@ -751,7 +771,7 @@ class Quest3BoneFramePublisher:
                 self.pub_head_motion_data(right_hand_quat)
             
             if bone_name == "Chest":
-                self.pub_chest_motion_data(right_hand_quat)
+                self.pub_chest_pose_in_torso_frame(right_hand_position, right_hand_quat, root_offset, time_now)
         
         # 批量发布所有骨骼的TF变换（一次性发布，而不是循环中逐个发布）
         if len(tf_msg.transforms) > 0:

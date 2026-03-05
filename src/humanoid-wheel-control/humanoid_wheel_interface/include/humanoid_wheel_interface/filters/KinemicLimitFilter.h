@@ -21,6 +21,10 @@ public:
     // 更新数值
     Eigen::VectorXd update(const Eigen::VectorXd& data);
 
+    // 获取一阶/二阶导数
+    const Eigen::VectorXd& getFirstOrderDerivative() const;
+    const Eigen::VectorXd& getSecondOrderDerivative() const;
+
     // 设置运动学约束
     void setFirstOrderDerivativeLimit(const Eigen::VectorXd& limit);
     void setSecondOrderDerivativeLimit(const Eigen::VectorXd& limit);

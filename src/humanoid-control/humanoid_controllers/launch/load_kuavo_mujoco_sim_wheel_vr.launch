@@ -9,6 +9,12 @@
     <arg name="enable_head_control" default="true"/>
     <arg name="use_vr_control" default="true"/>
     <arg name="ip_address" default=""/>
+    
+    <!-- 增量VR遥操作控制相关参数 -->
+    <arg name="use_cpp_incremental_ik" default="false"/>
+    <arg name="use_incremental_hand_orientation" default="false"/>
+    <arg name="wheel_ik" default="false"/>
+    <arg name="quest3_startup_delay" default="5.0"/>
 
     <!-- 设置VR控制参数 -->
     <param name="use_vr_control" value="$(arg use_vr_control)"/>
@@ -31,6 +37,10 @@
       <arg name="ee_type" default="$(arg ee_type)"/>
       <arg name="enable_head_control" value="true"/>
       <arg name="ip_address" value="$(arg ip_address)"/>
+      <arg name="startup_delay" value="$(arg quest3_startup_delay)"/>
+      <arg name="use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)"/>
+      <arg name="use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)"/>
+      <arg name="wheel_ik" value="$(arg wheel_ik)"/>
     </include>
 
 </launch>
