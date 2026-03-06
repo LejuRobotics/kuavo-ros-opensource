@@ -1674,23 +1674,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     }
     
     // 重置状态估计器
-    ROS_INFO("[ResetKinematics] 重置状态估计器...");
     stateEstimate_->reset();
     
     // 重置时间戳，确保第一次更新的period很小
     last_sensor_data_time_ = sensors_data.timeStamp_ - ros::Duration(0.002);
-    ROS_INFO("[ResetKinematics] 重置时间戳: last_sensor_data_time_ = %.6f", last_sensor_data_time_.toSec());
     
     // 更新关节状态
-    ROS_INFO("[ResetKinematics] 更新关节状态...");
-    stateEstimate_->updateJointStates(jointPosWBC_, jointVelWBC_);
+    stateEstimate_->updateJointStates(jointPos_, jointVel_);
     
     // 使用当前IMU值更新初始欧拉角
-    ROS_INFO("[ResetKinematics] 调用updateIntialEulerAngles...");
     quat_init = stateEstimate_->updateIntialEulerAngles(sensors_data.quat_);
     
     // 更新IMU数据
-    ROS_INFO("[ResetKinematics] 更新IMU数据...");
     stateEstimate_->updateImu(sensors_data.quat_, sensors_data.angularVel_, 
                             sensors_data.linearAccel_, 
                             sensors_data.orientationCovariance_, 
@@ -1698,23 +1693,14 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
                             sensors_data.linearAccelCovariance_);
     
     // 获取更新后的RBD状态并构建初始centroidal状态
-    ROS_INFO("[ResetKinematics] 获取RBD状态并构建初始centroidal状态...");
     measuredRbdState_ = stateEstimate_->getRbdState();
     vector_t initial_centroidal_state = rbdConversions_->computeCentroidalStateFromRbdModel(measuredRbdState_);
-    ROS_INFO("[ResetKinematics] initial_centroidal_state前12个值: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f]",
-             initial_centroidal_state(0), initial_centroidal_state(1), initial_centroidal_state(2),
-             initial_centroidal_state(3), initial_centroidal_state(4), initial_centroidal_state(5),
-             initial_centroidal_state(6), initial_centroidal_state(7), initial_centroidal_state(8),
-             initial_centroidal_state(9), initial_centroidal_state(10), initial_centroidal_state(11));
+
     
     // 保持yaw的连续性，避免切换时跳变
     // 从传感器数据获取当前yaw值
     Eigen::Vector3d sensor_euler = quatToZyx(sensors_data.quat_);
     scalar_t sensor_yaw = sensor_euler(0);
-    
-    ROS_INFO("[ResetKinematics] ====== Yaw连续性处理 ======");
-    ROS_INFO("[ResetKinematics] 传感器yaw (sensor_euler(0)): %.6f", sensor_yaw);
-    ROS_INFO("[ResetKinematics] initial_centroidal_state(9) (从RBD状态计算): %.6f", initial_centroidal_state(9));
     
     // 确定使用哪个yaw值作为参考
     scalar_t yawLast = sensor_yaw;  // 默认使用传感器yaw
@@ -1769,9 +1755,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     
     // 更新stanceState_mrt_为重置后的状态，确保后续使用正确的yaw值
     stanceState_mrt_ = initial_centroidal_state;
-    ROS_INFO("[ResetKinematics] 更新stanceState_mrt_为重置后的状态，yaw=%.6f", stanceState_mrt_(9));
+    ROS_INFO("[ResetKinematics] stanceState_mrt_.yaw=%.6f", stanceState_mrt_(9));
     
-    ROS_INFO("[ResetKinematics] ====== 重置完成 ======");
   }
   
   bool humanoidController::enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
@@ -2432,7 +2417,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         // Only use halfup_body doesn't work well.
         if (!only_half_up_body_) {
           // Update the current state of the system
-          mrtRosInterface_->setCurrentObservation(currentObservation_);
+          // mrtRosInterface_->setCurrentObservation(currentObservation_);
           
           // Trigger MRT callbacks
           mrtRosInterface_->spinMRT();
