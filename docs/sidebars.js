@@ -60,6 +60,20 @@ const sidebars = {
       label: '快速开始',
       items: [
         'basic_usage/kuavo-ros-control/docs/2快速开始/快速开始',
+        {
+          type: 'category',
+          label: '5w轮臂手柄控制说明文档',
+          items: [
+            'basic_usage/kuavo-ros-control/docs/2快速开始/5w轮臂手柄控制说明文档/轮臂手柄控制说明',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'VR操作',
+          items: [
+            'basic_usage/kuavo-ros-control/docs/2快速开始/VR操作/5w_VR操作',
+          ],
+        },
       ],
     },
     {

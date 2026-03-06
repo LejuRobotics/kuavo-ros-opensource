@@ -798,9 +798,21 @@ def ruiwo_negtive():
 
 
 def qiangnao_hand():
+    """
+    测试灵巧手（一代手/二代手）
+    """
+    # 让用户选择手类型
+    print(bcolors.BOLD + "请选择手类型：" + bcolors.ENDC)
+    print("1. 一代手 (Revo1)")
+    print("2. 二代手 (Revo2) 注：灵心巧手属于二代手")
+    hand_type = input("请输入选项：")
+    if hand_type not in ["1", "2"]:
+        print(bcolors.FAIL + "无效选项" + bcolors.ENDC)
+        return
+
     # 检查CAN总线配置类型
     canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
-    
+
     is_dual_bus = False
     if os.path.exists(canbus_wiring_file):
         with open(canbus_wiring_file, 'r') as f:
@@ -808,54 +820,27 @@ def qiangnao_hand():
             if wiring_type == "dual_bus":
                 is_dual_bus = True
 
-    # 读取环境变量 ROBOT_VERSION，使用 robot_version.py 判断版本
-    robot_version_str = get_robot_version()
-    robot_major = None
-    
-    if robot_version_str:
-        if RobotVersion:
-            try:
-                # 将字符串转换为整数
-                robot_version_int = int(robot_version_str)
-                # 使用 RobotVersion.create 创建版本对象
-                robot_version = RobotVersion.create(robot_version_int)
-                robot_major = robot_version.major()
-                print(bcolors.OKCYAN + f"检测到机器人版本: {robot_version.version_name()} (major={robot_major})" + bcolors.ENDC)
-            except (ValueError, AttributeError) as e:
-                print(bcolors.WARNING + f"警告: 无法解析 ROBOT_VERSION '{robot_version_str}': {e}" + bcolors.ENDC)
-        else:
-            print(bcolors.WARNING + f"警告: robot_version 模块未导入，无法解析版本号 '{robot_version_str}'" + bcolors.ENDC)
-            return
-    else:
-        print(bcolors.WARNING + "警告: 未找到 ROBOT_VERSION 环境变量" + bcolors.ENDC)
-        return
-    
-    # 根据机器人版本和CAN总线配置选择不同的命令
+    # 根据手类型和CAN总线配置选择不同的命令
     command = None
-    
-    if robot_major == 1:
-        # Roban2 (major == 1)
+
+    if hand_type == "2":
+        # 二代手 (Revo2)
         if is_dual_bus:
-            # 双CAN总线配置: 使用 revo2can
             command = "bash " + folder_path + "/dexhand_test.sh --revo2can --test 3"
-            print(bcolors.OKGREEN + "检测到 Roban2 双CAN配置，使用 Revo2Can 测试命令" + bcolors.ENDC)
+            print(bcolors.OKGREEN + "检测到二代手双CAN配置，使用 Revo2Can 测试命令" + bcolors.ENDC)
         else:
-            # 单CAN总线配置: 使用 revo2
             command = "bash " + folder_path + "/dexhand_test.sh --revo2 --test 3"
-            print(bcolors.OKGREEN + "检测到 Roban2 单CAN配置，使用 Revo2 测试命令" + bcolors.ENDC)
+            print(bcolors.OKGREEN + "检测到二代手单CAN配置，使用 Revo2 测试命令" + bcolors.ENDC)
     else:
-        # Kuavo (major != 1)
+        # 一代手 (Revo1)
         if is_dual_bus:
-            # 双CAN总线配置: 使用 revo1can
             command = "bash " + folder_path + "/dexhand_test.sh --revo1can --test 3"
-            print(bcolors.OKGREEN + "检测到 Kuavo 双CAN配置，使用 Revo1Can 测试命令" + bcolors.ENDC)
+            print(bcolors.OKGREEN + "检测到一代手双CAN配置，使用 Revo1Can 测试命令" + bcolors.ENDC)
         else:
-            # 单CAN总线配置: 使用 normal
             command = "bash " + folder_path + "/dexhand_test.sh --normal --test 3"
-            print(bcolors.OKGREEN + "检测到 Kuavo 单CAN配置，使用 normal 测试命令" + bcolors.ENDC)
-    
+            print(bcolors.OKGREEN + "检测到一代手单CAN配置，使用 normal 测试命令" + bcolors.ENDC)
+
     if command:
-        # 使用 subprocess.run() 运行命令
         subprocess.run(command, shell=True)
     else:
         print(bcolors.FAIL + "错误: 无法确定测试命令" + bcolors.ENDC)
@@ -1266,7 +1251,7 @@ def secondary_menu():
         print("3. 测试imu(先编译)")
         print("a. 测试二指夹爪（Ctrl + C 退出）")
         print("b. 配置灵巧手（普通）usb")
-        print("c. 测试灵巧手（普通）")
+        print("c. 测试灵巧手")
         print("d. 手臂电机设置零点")
         print("e. 手臂电机辨识方向(注意电机限位不要堵转)")    
         print("f. 零点文件备份")
@@ -1320,10 +1305,10 @@ def secondary_menu():
             print(bcolors.HEADER + "###结束，配置灵巧手（普通）usb###" + bcolors.ENDC)
             break
         elif option == "c":
-            print(bcolors.HEADER + "###开始，测试灵巧手（普通）###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###开始，测试灵巧手###" + bcolors.ENDC)
             print(bcolors.OKCYAN + "先左右手一起握，然后依次握左手，握右手" + bcolors.ENDC)
             qiangnao_hand()
-            print(bcolors.HEADER + "###结束，测试灵巧手（普通）###" + bcolors.ENDC)  
+            print(bcolors.HEADER + "###结束，测试灵巧手###" + bcolors.ENDC)
             break
         elif option == "d":
             print(bcolors.HEADER + "###开始，手臂电机设置零点###" + bcolors.ENDC)
@@ -1554,7 +1539,7 @@ if __name__ == '__main__':
         print("2. 打开imu上位机软件(接屏幕)")
         print("3. 测试imu(先编译)")
         print("a. 测试二指夹爪（Ctrl + C 退出）")
-        print("c. 测试灵巧手（普通）") 
+        print("c. 测试灵巧手") 
         print("f. 零点文件备份")
         print("k. 更新当前目录程序(注意：会重置文件内容，建议备份文件)")
         print("o. 打开开发者工具")
@@ -1601,10 +1586,10 @@ if __name__ == '__main__':
             print(bcolors.HEADER + "###结束，测试夹爪###" + bcolors.ENDC)
             break
         elif option == "c":
-            print(bcolors.HEADER + "###开始，测试灵巧手（普通）###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###开始，测试灵巧手###" + bcolors.ENDC)
             print(bcolors.OKCYAN + "先左右手一起握，然后依次握左手，握右手" + bcolors.ENDC)
             qiangnao_hand()
-            print(bcolors.HEADER + "###结束，测试灵巧手（普通）###" + bcolors.ENDC)  
+            print(bcolors.HEADER + "###结束，测试灵巧手###" + bcolors.ENDC)
             break
         elif option == "f":
             print(bcolors.HEADER + "###开始，文件备份###" + bcolors.ENDC)
