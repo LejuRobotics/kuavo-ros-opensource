@@ -8,7 +8,7 @@ controllers:
     class: "BASE_CONTROLLER"  # 基础行走控制器
     type: "AMP_CONTROLLER"    # 具体控制器类型
     config_file: "rl/skw_rl_param.info" 
-    enabled: false  
+    enabled: true  
 
   - name: "vmp_controller"
     class: "BASE_CONTROLLER"  

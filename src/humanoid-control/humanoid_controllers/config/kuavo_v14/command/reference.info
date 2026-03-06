@@ -9,9 +9,6 @@ armMode                             true;
 
 targetArmDisplacementVelocity       1.2;
 
-torsoVelocityThreshold              0.08;     ; m/s
-torsoVelocityDuration               0.5;      ; s
-
 comHeight                           0.78
 
 ; VR control limits

@@ -36,26 +36,26 @@ robot_control = RobotControlBlockly()
     - 描述：令机器人停止移动
 
 5. **执行机器人动作**
-    - 函数：`robot_control.excute_action_file("roban2")`
+    - 函数：`robot_control.execute_action_file("roban2")`
     - 参数类型：string
     - 描述：机器人执行默认目录下的目标 .tact 动作
     - 备注：需将目标 .tact 文件下载到 **/home/lab/.config/lejuconfig/action_files** 目录下
 
 6. **执行机器人目标目录下的动作**
-    - 函数：`robot_control.excute_action_file("roban2", proj_name="proj_name")`
+    - 函数：`robot_control.execute_action_file("roban2", proj_name="proj_name")`
     - 参数类型：string, string
     - 描述：机器人执行 proj_name/action_files 目录下的目标 .tact 动作
     - 备注：需将目标 .tact 文件下载到 **upload_files/proj_name/action_files** 目录下
 
 7. **执行机器人动作并同步播放音频**
-    - 函数：`robot_control.excute_action_file("roban2", music_file="music_name.wav")`
+    - 函数：`robot_control.execute_action_file("roban2", music_file="music_name.wav")`
     - 参数类型：string, string
     - 描述：机器人执行默认目录下的目标 .tact 动作并且播放 music_name.wav 音频
     - 备注：需将目标 .tact 文件下载到 **/home/lab/.config/lejuconfig/action_files** 目录下，音频文件下载到 *
       */home/lab/.config/lejuconfig/music** 目录下
 
 8. **执行机器人目标目录下动作并同步播放音频**
-    - 函数：`robot_control.excute_action_file("roban2", proj_name="roban2", music_file="music_name.wav")`
+    - 函数：`robot_control.execute_action_file("roban2", proj_name="roban2", music_file="music_name.wav")`
     - 参数类型：string, string, string
     - 描述：机器人执行目标目录下的目标 .tact 动作并且播放 music_name.wav 音频
     - 备注：需将目标 .tact 文件下载到 **upload_files/proj_name/action_files** 目录下，音频文件下载到 *
@@ -285,7 +285,7 @@ from kuavo_humanoid_sdk import RobotControlBlockly
    - 返回值：bool,成功返回 True，失败返回 False
 
 7. **一键上楼梯**
-   - 函数：`robot_control.simple_up_stair(stair_height = 0.08,stair_length = 0.25,stair_num = 4)`
+   - 函数：`robot_control.simple_up_stair(stair_height = 0.25,stair_length = 0.08,stair_num = 4)`
    - 参数类型：float,float,int,float
    - 描述：采取新的规划方式进行爬楼梯，经过测试较为稳定
    - 参数说明：
@@ -340,15 +340,10 @@ robot_control.execute_stair_trajectory()
 robot_control.align_stair()
 
 # 对齐成功后一键上楼梯
-robot_control.simple_up_stair(stair_height = 0.08,stair_length = 0.25,stair_num = 4)
+robot_control.simple_up_stair(stair_height = 0.25,stair_length = 0.08,stair_num = 4)
 ```
 **使用要求**
 - 需要上位机的对齐节点以及 aplirtag 相机识别节点启动。
-    ```
-    roslaunch dynamic_biped sensor_apriltag_only_enable.launch
-    roslaunch stair_alignment stair_alignment.launch
-    ```
-
 - 需要提前对机器人对齐的位置进行标定，否则将使用默认的参数，自动寻找 tag 进行对齐。
 - 对齐成功后机器人将自动根据参数上楼梯。
 
@@ -641,46 +636,73 @@ kuavo_llm.register_case(
 ### 7. 大模型返回并只播报语音
 需求: 大模型返回文本后,将文本转换为语音,并播放出来
 
-- 函数: `kuavo_llm.response_with_voice(llm_output: dict)`
+- 函数: `response_from_llm(llm_output: dict, action_flag = False)`
 - 作用: 将文本转换为语音,并播放出来
 - args:
   - llm_output: dict: 大模型返回的文本与函数调用信息
+  - action_flag: bool = False: 是否执行函数调用,需要由前端拼入
 - return:
   - None
-
+def main():
+    ...
+    response_from_llm(kuavo_llm.chat_with_llm(),False)
+```
+注:该功能需要在生成的python代码中通过字符串运行函数,所以需要类似aelos那样在生成的python代码中加入函数定义,见9. 语音播报函数定义
 
 
 ### 8. 大模型返回播报语音并执行函数
 需求: 大模型返回文本后,将文本转换为语音,并播放出来,如果有函数调用,则执行函数
 
-- 函数: `response_with_voice_and_action(llm_output: dict)`
+- 函数: `response_from_llm(llm_output, action_flag = True)`
 - 作用: 将文本转换为语音,并播放出来,如果有函数调用,则执行函数
 - args:
   - llm_output: dict: 大模型返回的文本与函数调用信息
+  - action_flag: bool = True: 是否执行函数调用,需要由前端拼入
 - return:
   - None
   
 注: 该功能需要在生成的python代码中通过字符串运行函数,所以需要类似aelos那样在生成的python代码中加入函数定义
-形如(在生成的python文件中):
+```python
+def main():
+    ...
+    response_from_llm(kuavo_llm.chat_with_llm(),True)
+```
+
+### 9. 语音播报函数定义
+函数定义如下:
 ```python
 ...
-def response_with_voice_and_action(llm_output: dict):
+def response_from_llm(llm_output: dict, action_flag: bool = False):
     if not llm_output.get("success", 1) == 0:
         return
     kuavo_llm.response_with_voice(llm_output) 
-    if llm_output.get("intent", "") == "function_call":
-        try:
-            eval(llm_output.get("slot"))
-        except:
-            print(f"【函数调用】执行失败:{llm_output.get('slot','')}")
-    if llm_output.get("intent", "") == "action":
-        robot_control.excute_action_file(llm_output["slot"][:-5])
+    if action_flag:
+        if llm_output.get("intent", "") == "function_call":
+            try:
+                eval(llm_output.get("slot"))
+            except:
+                print(f"【函数调用】执行失败:{llm_output.get('slot','')}")
+        if llm_output.get("intent", "") == "action":
+            robot_control.execute_action_file(llm_output["slot"])
 
-    if llm_output.get("intent", "") == "action_custom":
-        robot_control.excute_action_file(llm_output['slot'][:-5],"demo_project") # 拼接项目信息
+        if llm_output.get("intent", "") == "action_custom":
+            robot_control.execute_action_file(llm_output['slot'],"demo_project") # 拼接项目信息
+    while not kuavo_llm.tts_end.is_synthesis_finished() or kuavo_llm.playing_status:
+        time.sleep(0.1)
 ...
 
-def main():
-    ...
-    response_with_voice_and_action(kuavo_llm.chat_with_llm())
 ```
+### 9. 播放提示音
+如果需要播放预制提示音,可以使用"播放音乐"接口:`kuavo_llm.play_music(music_name: str)`(见本文档111行:`17. **播放音乐**`)
+
+需要用到的音效需要提前(也可以点击运行时)放入`~/.config/lejuconfig/music/`中
+
+### 10. 播放自定义文本作为提示音
+与 [大模型播放语音](#7.-大模型返回并只播报语音) 功能类似,只是将文本转换为语音后,播放出来的是自定义的文本,而不是大模型返回的文本
+
+在使用时,需要将`9. 语音播报函数定义`中的函数预先定义,然后在积木块对应位置拼入以下函数调用:
+```python
+response_from_llm(text:str,False)
+```
+
+其中text为需要播放的自定义文本

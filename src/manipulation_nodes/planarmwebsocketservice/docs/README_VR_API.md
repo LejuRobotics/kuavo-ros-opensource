@@ -19,6 +19,7 @@
   "data": {
     "code": 0,
     "vr_connected": true,
+    "vr_nodes_running": true,
     "vr_state": "connected",
     "recording_state": "idle",
     "recording_duration": null
@@ -111,7 +112,7 @@
     "code": 0,
     "robot_type": "45",
     "vr_recording_path": "~/.config/lejuconfig/vr_recordings",
-    ...
+    "workspace_setup_path": "/kuavo-ros-control/devel/setup.bash"
   }
 }
 ```

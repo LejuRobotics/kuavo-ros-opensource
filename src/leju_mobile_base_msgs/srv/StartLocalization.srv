@@ -1,0 +1,13 @@
+# Localization control service
+
+# Request
+bool enable         # true: start localization, false: stop localization
+float64 x           # Robot position x in map (m), only used when enable=true
+float64 y           # Robot position y in map (m), only used when enable=true
+float64 theta       # Robot orientation in map (rad), only used when enable=true
+
+---
+
+# Response
+bool success        # Whether operation succeeded
+string message      # Status or error message

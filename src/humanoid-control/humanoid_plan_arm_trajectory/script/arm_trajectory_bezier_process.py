@@ -114,13 +114,6 @@ class ArmTrajectoryBezierDemo:
         # Initialize ROS node
         rospy.init_node('autostart_arm_trajectory_bezier_demo')
         self.arm_restore_flag = rospy.get_param('~arm_restore_flag', True)
-        
-        # 检查是否是半身模式
-        self.only_half_up_body = rospy.get_param('/only_half_up_body', False)
-        if self.only_half_up_body:
-            rospy.loginfo("检测到半身模式（only_half_up_body=True）")
-        else:
-            rospy.loginfo("全身体模式（only_half_up_body=False）")
 
         # Subscribers and Publishers
         rospy.loginfo(
@@ -571,88 +564,6 @@ class ArmTrajectoryBezierDemo:
 
         return init_frame
 
-    def calculate_transition_time(self, source_angles, target_angles, min_keyframe=50, max_keyframe=400, default_keyframe=200):
-        """
-        根据两个角度数组的差值动态计算过渡时间（优化版本）
-        
-        优化点：
-        1. 考虑不同关节的速度限制（肩膀关节速度更快）
-        2. 计算每个关节所需时间，取最大值（更精确）
-        3. 使用更合理的速度限制值（基于实际硬件参数）
-        
-        :param source_angles: 源角度数组（度）
-        :param target_angles: 目标角度数组（度）
-        :param min_keyframe: 最小过渡时间（keyframe单位，默认50，即0.5秒）
-        :param max_keyframe: 最大过渡时间（keyframe单位，默认400，即4.0秒）
-        :param default_keyframe: 默认过渡时间（keyframe单位，默认200，即2.0秒）
-        :return: 过渡时间（keyframe单位）
-        """
-        # 整条手臂关节索引：14个手臂关节（索引0-13）
-        arm_joint_indices = list(range(14))
-        
-        # 关节速度限制配置（度/秒）
-        # 肩膀关节（索引0和7，左右臂第一个关节）速度更快，其他关节较慢
-        # 基于实际硬件参数：普通关节约50度/秒，肩膀关节约120度/秒（每步限制）
-        # 为安全起见，使用保守值：普通关节40度/秒，肩膀关节100度/秒
-        SHOULDER_JOINT_INDICES = [0, 7]  # 左右臂肩膀关节索引
-        NORMAL_JOINT_VELOCITY = 40.0  # 普通关节速度限制（度/秒）
-        SHOULDER_JOINT_VELOCITY = 100.0  # 肩膀关节速度限制（度/秒）
-        
-        # 计算每个关节所需的时间，取最大值
-        max_required_time = 0.0
-        total_angle_diff = 0.0
-        valid_joint_count = 0
-        
-        for idx in arm_joint_indices:
-            if idx < len(source_angles) and idx < len(target_angles):
-                source_angle = source_angles[idx]
-                target_angle = target_angles[idx]
-                angle_diff = abs(source_angle - target_angle)
-                
-                # 根据关节类型选择速度限制
-                if idx in SHOULDER_JOINT_INDICES:
-                    joint_velocity = SHOULDER_JOINT_VELOCITY
-                else:
-                    joint_velocity = NORMAL_JOINT_VELOCITY
-                
-                # 计算该关节所需的时间（秒）
-                # 时间 = 角度差 / 速度限制
-                if joint_velocity > 0:
-                    required_time = angle_diff / joint_velocity
-                    # 转换为keyframe（1 keyframe = 0.01秒）
-                    required_keyframe = required_time * 100.0
-                    if required_keyframe > max_required_time:
-                        max_required_time = required_keyframe
-                
-                total_angle_diff += angle_diff
-                valid_joint_count += 1
-        
-        # 根据计算结果确定过渡时间
-        if valid_joint_count > 0:
-            # 使用最大所需时间，并添加安全余量（20%）
-            # 这样可以确保所有关节都能平滑过渡
-            transition_keyframe_raw = max_required_time * 1.2
-            
-            # 如果最大所需时间很小，考虑平均角度差值作为补充``
-            # 避免单个关节的小幅移动导致时间过短
-            if max_required_time < 50:  # 如果最大时间小于0.5秒
-                avg_angle_diff = total_angle_diff / valid_joint_count
-                # 使用平均速度限制计算平均时间
-                avg_velocity = (NORMAL_JOINT_VELOCITY * (valid_joint_count - 2) + 
-                               SHOULDER_JOINT_VELOCITY * 2) / valid_joint_count if valid_joint_count > 2 else NORMAL_JOINT_VELOCITY
-                avg_required_time = (avg_angle_diff / avg_velocity) * 100.0 if avg_velocity > 0 else 0
-                # 取最大值和平均值的较大者
-                transition_keyframe_raw = max(transition_keyframe_raw, avg_required_time * 0.8)
-            
-            transition_keyframe = int(transition_keyframe_raw)
-            # 限制在合理范围内
-            transition_keyframe = max(min_keyframe, min(max_keyframe, transition_keyframe))
-        else:
-            # 如果没有有效的关节数据，使用默认值
-            transition_keyframe = default_keyframe
-        
-        return transition_keyframe
-
     def add_init_frame(self, frames, is_rl=False):
         action_data = {}
 
@@ -671,89 +582,6 @@ class ArmTrajectoryBezierDemo:
                 frame0["servos"] = [math.degrees(pos) for pos in self.current_arm_joint_state] + [0] * (len(frame0["servos"]) - len(self.current_arm_joint_state))
             frame0["keyframe"] = 0
             frames.insert(0, frame0)
-        
-        # ocs2 模式和半身模式：在第一帧之前插入当前手臂姿态作为第一帧
-        if not is_rl and self.robot_class == KUAVO and self.only_half_up_body and len(frames) > 0:
-            import copy
-            
-            # 获取第一帧
-            first_frame = frames[0]
-            
-            # 检查当前姿态是否可用
-            if hasattr(self, 'current_arm_joint_state') and len(self.current_arm_joint_state) > 0:
-                # 将当前姿态转换为度
-                current_angles_deg = [math.degrees(pos) for pos in self.current_arm_joint_state]
-                # 确保 standJointState 数据可用
-                if hasattr(self, 'arm_joints_deg') and len(self.arm_joints_deg) >= 14:
-                    # 计算过渡时间：从当前姿态到站立帧（standJointState），最小0.5秒，最大4.0秒
-                    # 这样更合理：当前位置先过渡到站立帧，然后再从站立帧过渡到第一帧
-                    transition_keyframe = self.calculate_transition_time(
-                        current_angles_deg, 
-                        self.arm_joints_deg,
-                        min_keyframe=50,  # 0.5秒
-                        max_keyframe=400,  # 4.0秒
-                        default_keyframe=200  # 2.0秒
-                    )
-                else:
-                    # 如果没有站立帧数据，则使用默认值
-                    transition_keyframe = 100  # 1.0秒
-                
-                # 先将所有现有帧的keyframe向后偏移
-                for frame in frames:
-                    frame["keyframe"] += transition_keyframe
-                
-                # 创建过渡帧，使用当前姿态
-                current_frame = copy.deepcopy(first_frame)
-                current_frame["keyframe"] = 0
-                
-                # 更新过渡帧的servos：使用当前实际姿态
-                # 如果当前状态长度更长，需要裁剪到原始长度
-                if len(self.current_arm_joint_state) > len(current_frame["servos"]):
-                    current_frame["servos"] = [math.degrees(pos) for pos in self.current_arm_joint_state[:len(current_frame["servos"])]]
-                else:
-                    # 当前状态长度更短或相等，需要补全到原始长度
-                    current_frame["servos"] = [math.degrees(pos) for pos in self.current_arm_joint_state] + [0] * (len(current_frame["servos"]) - len(self.current_arm_joint_state))
-                
-                # 将当前姿态帧插入到第一帧位置
-                frames.insert(0, current_frame)
-        
-        # ocs2 模式和半身模式：在最后一帧后面添加一帧，整条手臂平滑过渡到 standJointState
-        if not is_rl and self.robot_class == KUAVO and self.only_half_up_body:
-            import copy
-            
-            # 找到最后一帧（keyframe 最大的帧）
-            last_frame = max(frames, key=lambda f: f.get("keyframe", 0))
-            last_keyframe = last_frame.get("keyframe", 0)
-            
-            # 确保 standJointState 数据可用
-            if hasattr(self, 'arm_joints_deg') and len(self.arm_joints_deg) >= 14:
-                # 计算过渡时间：从最后一帧到standJointState，最小1.0秒，最大4.0秒
-                transition_keyframe = self.calculate_transition_time(
-                    last_frame["servos"],
-                    self.arm_joints_deg,
-                    min_keyframe=100,  # 1.0秒
-                    max_keyframe=400,  # 4.0秒
-                    default_keyframe=200  # 2.0秒
-                )
-                
-                # 创建新的一帧，基于最后一帧
-                smooth_frame = copy.deepcopy(last_frame)
-                smooth_frame["keyframe"] = last_keyframe + transition_keyframe
-                
-                # 更新整条手臂关节角度：从最后一帧过渡到 standJointState
-                # 整条手臂关节索引：14个手臂关节（索引0-13）
-                for idx in range(14):
-                    if idx < len(smooth_frame["servos"]) and idx < len(self.arm_joints_deg):
-                        # 使用 standJointState 的手臂关节角度
-                        smooth_frame["servos"][idx] = self.arm_joints_deg[idx]
-                
-                # 将新帧添加到 frames 列表
-                frames.append(smooth_frame)
-            else:
-                # 即使没有 standJointState，也创建一个默认的过渡帧（2秒），保持最后一帧的角度不变
-                smooth_frame = copy.deepcopy(last_frame)
-                smooth_frame["keyframe"] = last_keyframe + 200
-                frames.append(smooth_frame)
 
         # 计算结束键值：KUAVO根据是否有腰部关节调整
         if self.robot_class == KUAVO:
@@ -1186,35 +1014,22 @@ class ArmTrajectoryBezierDemo:
         current_control_mode = self.get_current_control_mode()
         if current_control_mode == "rl":
             finish_time += 1.0
-        # ocs2 模式的过渡时间将在 add_init_frame 中动态计算并更新
         self.END_FRAME_TIME = finish_time
 
         # 检查0f处是否有动作帧，如果没有则添加初始站立帧
         # 注意：RL模式下即使没有0f帧，也不需要插入站立帧（会插入当前帧）
-        # 注意：半身模式下即使没有0f帧，也不需要插入站立帧（会插入当前姿态帧）
         frames = data["frames"]
         has_frame_at_0f = any(frame.get("keyframe", -1) == 0 for frame in frames)
         
         
         # 只有在非RL模式下，且没有0f帧时，才插入站立帧
-        # 半身模式下会在 add_init_frame 中插入当前姿态帧，所以这里不需要插入站立帧
         if not has_frame_at_0f and current_control_mode == "ocs2":
-            # 半身模式下不插入站立帧，因为会在 add_init_frame 中插入当前姿态帧
-            if not (self.robot_class == KUAVO and self.only_half_up_body):
-                # 创建初始站立帧
-                init_stand_frame = self.create_init_stand_frame(frames, is_rl=current_control_mode == "rl")
-                frames.insert(0, init_stand_frame)
-                rospy.loginfo("0f处没有动作帧，已添加初始站立帧")
+            # 创建初始站立帧
+            init_stand_frame = self.create_init_stand_frame(frames, is_rl=current_control_mode == "rl")
+            frames.insert(0, init_stand_frame)
+            rospy.loginfo("0f处没有动作帧，已添加初始站立帧")
 
         action_data = self.add_init_frame(frames, is_rl=current_control_mode == "rl")
-        
-        # ocs2 模式和半身模式下，根据实际计算的过渡时间更新结束时间
-        if current_control_mode == "ocs2" and self.only_half_up_body:
-            # 找到最后一帧的 keyframe（包括新添加的过渡帧）
-            if frames:
-                last_keyframe = max(f.get("keyframe", 0) for f in frames)
-                # 将 keyframe 转换为秒并更新 END_FRAME_TIME
-                self.END_FRAME_TIME = last_keyframe * 0.01
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
@@ -1228,11 +1043,8 @@ class ArmTrajectoryBezierDemo:
         if success:
             rospy.loginfo("Arm trajectory planned successfully")
             threading.Thread(target=self.run).start()
-            # 半身模式下使用更新后的 END_FRAME_TIME（包含过渡帧时间），其他模式使用原始的 finish_time
-            if current_control_mode == "ocs2" and self.only_half_up_body:
-                self.delayed_publish_action_state(self.END_FRAME_TIME)
-            else:
-                self.delayed_publish_action_state(finish_time)
+            # threading.Thread(target=self.delayed_publish_action_state, args=(finish_time,)).start()
+            self.delayed_publish_action_state(finish_time)
             return ExecuteArmActionResponse(success=True, message="Action executed successfully")
         else:
             rospy.logerr("Failed to plan arm trajectory")

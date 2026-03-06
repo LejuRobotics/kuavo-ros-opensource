@@ -107,6 +107,9 @@ class Quest3BoneFramePublisher:
         )
         rospy.loginfo("Head control mode service started at /quest3/set_head_control_mode")
 
+        # 初始化VR连接状态参数
+        rospy.set_param('/quest3/connected', False)
+
     def set_robot_state_server(self, robot_state_server):
         """设置 RobotStateServer 引用
         
@@ -236,6 +239,9 @@ class Quest3BoneFramePublisher:
                 self.sock.sendto(message, self.server_address)
                 self.sock.recvfrom(1024)
                 print(f"\033[92mAcknowledgment From Quest3 received on attempt {attempt + 1}, start to receiving data...\033[0m")
+                # 连接成功后设置参数服务器参数
+                rospy.set_param('/quest3/connected', True)
+                rospy.loginfo("VR连接成功！已设置参数: /quest3/connected=True")
                 return True
             except socket.timeout:
                 print(f"\033[91mQuest3_timeout: Attempt {attempt + 1} timed out. Retrying...\033[0m")
@@ -659,10 +665,14 @@ class Quest3BoneFramePublisher:
                 self.rate.sleep()
             except socket.timeout:
                 print('Timeout occurred, no data received. Restarting socket...')
+                rospy.set_param('/quest3/connected', False)
+                rospy.logwarn("VR连接断开！已设置参数: /quest3/connected=False")
                 if not self.restart_socket():
                     break
             except Exception as e:
                 print(f'An error occurred: {e}')
+                rospy.set_param('/quest3/connected', False)
+                rospy.logwarn("VR连接异常！已设置参数: /quest3/connected=False")
                 if not self.restart_socket():
                     break
 
@@ -764,6 +774,7 @@ class Quest3BoneFramePublisher:
             print("Failed to restart socket connection.")
             return False
         print("Socket connection restarted successfully.")
+        # send_initial_message() 成功时已设置 /quest3/connected=True
         return True
 
     def _periodic_robot_info_broadcaster(self):

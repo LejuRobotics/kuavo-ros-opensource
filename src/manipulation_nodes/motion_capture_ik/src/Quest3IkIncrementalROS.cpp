@@ -9,7 +9,6 @@
 #include <drake/systems/framework/diagram.h>
 #include <drake/systems/framework/diagram_builder.h>
 #include <kuavo_msgs/changeArmCtrlMode.h>
-#include <kuavo_msgs/twoArmHandPose.h>
 #include <ros/package.h>
 #include <sensor_msgs/JointState.h>
 #include <geometry_msgs/Pose.h>
@@ -1811,81 +1810,6 @@ void Quest3IkIncrementalROS::publishJointStates() {
 
   kuavoArmTrajCppPublisher_.publish(jointStateMsg);
 
-  // 发布 /drake_ik/eef_pose（与Python版 pub_solved_arm_eef_pose 一致）
-  // 使用滤波后的 latest_q_（弧度）进行FK计算，保证与实际发送给机器人的关节角度一致
-  {
-    auto [latestLeftEePosition, latestLeftEeQuaternion] =
-        oneStageIkEndEffectorPtr_->FK(latest_q_, "zarm_l7_end_effector", jointStateSize_);
-    auto [latestRightEePosition, latestRightEeQuaternion] =
-        oneStageIkEndEffectorPtr_->FK(latest_q_, "zarm_r7_end_effector", jointStateSize_);
-
-    kuavo_msgs::twoArmHandPose eefPoseMsg;
-    eefPoseMsg.header.frame_id = "torso";
-    eefPoseMsg.header.stamp = ros::Time::now();
-
-    // 左手位姿
-    eefPoseMsg.left_pose.pos_xyz[0] = latestLeftEePosition.x();
-    eefPoseMsg.left_pose.pos_xyz[1] = latestLeftEePosition.y();
-    eefPoseMsg.left_pose.pos_xyz[2] = latestLeftEePosition.z();
-    eefPoseMsg.left_pose.quat_xyzw[0] = latestLeftEeQuaternion.x();
-    eefPoseMsg.left_pose.quat_xyzw[1] = latestLeftEeQuaternion.y();
-    eefPoseMsg.left_pose.quat_xyzw[2] = latestLeftEeQuaternion.z();
-    eefPoseMsg.left_pose.quat_xyzw[3] = latestLeftEeQuaternion.w();
-    // 左臂关节角度（弧度，与Python版一致）
-    const int singleArmDof = jointStateSize_ / 2;
-    for (int i = 0; i < 7 && i < singleArmDof; ++i) {
-      eefPoseMsg.left_pose.joint_angles[i] = latest_q_(i);
-    }
-
-    // 右手位姿
-    eefPoseMsg.right_pose.pos_xyz[0] = latestRightEePosition.x();
-    eefPoseMsg.right_pose.pos_xyz[1] = latestRightEePosition.y();
-    eefPoseMsg.right_pose.pos_xyz[2] = latestRightEePosition.z();
-    eefPoseMsg.right_pose.quat_xyzw[0] = latestRightEeQuaternion.x();
-    eefPoseMsg.right_pose.quat_xyzw[1] = latestRightEeQuaternion.y();
-    eefPoseMsg.right_pose.quat_xyzw[2] = latestRightEeQuaternion.z();
-    eefPoseMsg.right_pose.quat_xyzw[3] = latestRightEeQuaternion.w();
-    // 右臂关节角度（弧度，与Python版一致）
-    for (int i = 0; i < 7 && i < singleArmDof; ++i) {
-      eefPoseMsg.right_pose.joint_angles[i] = latest_q_(singleArmDof + i);
-    }
-
-    ikSolvedEefPosePublisher_.publish(eefPoseMsg);
-  }
-
-  // 发布 /drake_ik/input_pos（与Python版一致）
-  // 数据格式：14个float [左手pos_xyz(3), 左手quat_xyzw(4), 右手pos_xyz(3), 右手quat_xyzw(4)]
-  // C++版本使用优化后的 leftEndEffectorPosition_ / rightEndEffectorPosition_ 和对应四元数
-  {
-    std_msgs::Float32MultiArray inputPosMsg;
-    inputPosMsg.data.resize(14);
-
-    // 左手：优化后的末端执行器位置 + 约束列表中的四元数
-    inputPosMsg.data[0] = static_cast<float>(leftEndEffectorPosition_.x());
-    inputPosMsg.data[1] = static_cast<float>(leftEndEffectorPosition_.y());
-    inputPosMsg.data[2] = static_cast<float>(leftEndEffectorPosition_.z());
-    {
-      std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
-      Eigen::Quaterniond leftQuat(latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix);
-      inputPosMsg.data[3] = static_cast<float>(leftQuat.x());
-      inputPosMsg.data[4] = static_cast<float>(leftQuat.y());
-      inputPosMsg.data[5] = static_cast<float>(leftQuat.z());
-      inputPosMsg.data[6] = static_cast<float>(leftQuat.w());
-
-      // 右手：优化后的末端执行器位置 + 约束列表中的四元数
-      inputPosMsg.data[7] = static_cast<float>(rightEndEffectorPosition_.x());
-      inputPosMsg.data[8] = static_cast<float>(rightEndEffectorPosition_.y());
-      inputPosMsg.data[9] = static_cast<float>(rightEndEffectorPosition_.z());
-      Eigen::Quaterniond rightQuat(latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix);
-      inputPosMsg.data[10] = static_cast<float>(rightQuat.x());
-      inputPosMsg.data[11] = static_cast<float>(rightQuat.y());
-      inputPosMsg.data[12] = static_cast<float>(rightQuat.z());
-      inputPosMsg.data[13] = static_cast<float>(rightQuat.w());
-    }
-
-    ikInputPosPublisher_.publish(inputPosMsg);
-  }
-
   // 同步发布左右手pose
   {
     std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
@@ -2340,8 +2264,6 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_debug/left_hand_pose_from_transformer", 2);
   rightHandPoseFromTransformerPublisher_ =
       nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_debug/right_hand_pose_from_transformer", 2);
-  ikSolvedEefPosePublisher_ = nodeHandle_.advertise<kuavo_msgs::twoArmHandPose>("/ik_fk_result/eef_pose", 10);
-  ikInputPosPublisher_ = nodeHandle_.advertise<std_msgs::Float32MultiArray>("/ik_fk_result/input_pos", 10);
 
   // 初始化增量控制模块
   IncrementalControlConfig incrementalConfig;

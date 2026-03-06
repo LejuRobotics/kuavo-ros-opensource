@@ -1,0 +1,12 @@
+# RelativeBaseMove.srv
+# 请求部分
+float32 x           # 目标点X坐标（自身坐标系）
+float32 y           # 目标点Y坐标（自身坐标系）
+float32 theta       # 目标点角度（弧度，自身坐标系）
+MoveToTargetOptions options  # 导航选项
+
+---
+# 响应部分
+bool success        # 导航是否成功
+string message      # 状态信息
+string task_id    # 分配的任务ID

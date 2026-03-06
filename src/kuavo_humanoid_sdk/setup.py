@@ -70,31 +70,18 @@ setup(
     'kuavo_humanoid_sdk.kuavo',
     ] + core_packages + strategy_packages + strategy_v2_packages + find_msg_subpackages("kuavo_humanoid_sdk/msg"),
     install_requires=[
-        "numpy",
+        "numpy", 
         "transitions",
         "pyOpenSSL>=22.1.0",
         "scikit-learn",
+        "funasr",
+        "torchaudio",
         "websockets",
+        "ultralytics",
         "openai==1.3.8",
         "websocket-client==0.58.0",
-        "httpx>=0.25.2"
+        "httpx==0.25.2"
     ],
-    extras_require={
-        "audio": [
-            "funasr",
-            "torchaudio",
-        ],
-        "vision": [
-            "torch",
-            "ultralytics",
-        ],
-        "full": [
-            "funasr",
-            "torchaudio",
-            "torch",
-            "ultralytics",
-        ],
-    },
     python_requires=">=3.8",
     classifiers=[
         "Development Status :: 4 - Beta", 

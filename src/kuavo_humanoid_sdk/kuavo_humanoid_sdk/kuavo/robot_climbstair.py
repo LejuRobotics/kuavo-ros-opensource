@@ -449,7 +449,7 @@ class KuavoRobotClimbStair:
         t = np.linspace(0, 1, num_points)
 
         # 根据落足点高度差计算台阶数量
-        stairNum = int(np.round((next_foot_pose[2] - prev_foot_pose[2]) / self.stair_height))
+        stairNum = int(np.round((next_foot_pose[2] - prev_foot_pose[2]) / self.stair_height)) if self.stair_height > 0 else 1
         print("stairNum: ", stairNum)
 
         # 一阶段最高点的scale
@@ -529,7 +529,6 @@ class KuavoRobotClimbStair:
         # 脚末端到脚掌中心的 x 方向距离
         foot_offset = 0.0185
         foot_toe = 0.121
-        foot_heel = -0.084
 
         # 数据结构初始化
         time_traj = []
@@ -547,8 +546,8 @@ class KuavoRobotClimbStair:
         step_z_increment = stair_height
 
         # 躯干位置偏置
-        torso_offset_x = 0.03
-        torso_offset_z = 0.03
+        torso_offset_x = -0.03
+        torso_offset_z = 0.08
 
         # 生成每一步的轨迹
         step_x_init = foot_distance_initial + foot_toe + stair_length/2 - foot_offset
@@ -557,10 +556,9 @@ class KuavoRobotClimbStair:
         torso_z_init = stair_height - torso_offset_z
         step_swing_time = swing_time
 
-        # 存储上一摆动相的足端高度，用于接触相
+        # 存储上一摆动相的足端高度
         last_step_x = step_x_init
         last_step_z = step_z_init
-        
         last_step_x_left = last_step_x
         last_step_z_left = last_step_z
         last_step_x_right = 0
@@ -574,7 +572,6 @@ class KuavoRobotClimbStair:
         total_phases = stair_num * 2 + 1
 
         for step in range(total_phases):
-            print("step_swing_time: ", step_swing_time)
             if step < stair_num * 2:
                 if step % 2 == 0:  # 摆动相
                     step_index = step // 2
@@ -672,7 +669,7 @@ class KuavoRobotClimbStair:
                 step_z_last = step_z_init + step_z_increment * (stair_num-1)
                 torso_x_last = torso_x_init + step_x_increment * (stair_num-1)
                 torso_z_last = torso_z_init + step_z_increment * (stair_num-1) + torso_offset_z
-                
+
                 time_traj.append(step_swing_time)
                 foot_idx_traj.append(foot_index)
                 foot_poses_6d.append([
@@ -692,7 +689,6 @@ class KuavoRobotClimbStair:
                 new_foot = [step_x_last, y_pos, step_z_last, 0.0]
                 FootPoseTrajectory = self.plan_swing_phase_by_stair_6d(prev_foot, new_foot, 8)
                 swing_trajectories_array.append(FootPoseTrajectory)
-                
 
         return self.get_foot_pose_6d_traj_msg(time_traj, foot_idx_traj, foot_poses_6d, torso_poses_6d, swing_trajectories_array)
 
@@ -768,7 +764,7 @@ class KuavoRobotClimbStair:
         self.swing_height = swing_height
         rospy.loginfo(f"[ClimbStair] 6D swing height set: {swing_height}")
     
-    def simple_up_stairs(self, stair_height = 0.08,stair_length = 0.25,stair_num = 4):
+    def simple_up_stairs(self, stair_height = 0.25,stair_length = 0.08,stair_num = 4):
         """
         生成简单的上楼梯轨迹
         Args:

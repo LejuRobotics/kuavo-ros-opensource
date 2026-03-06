@@ -141,24 +141,7 @@ void WaistController::update(const ros::Time& time,
   // {
   //   return;
   // }
-  static int pre_cmd_stance = cmd_stance;
-  if (pre_cmd_stance != cmd_stance)
-  {
-    switch (cmd_stance)
-    {
-      case 0:
-        applyModeChange(1);
-        ROS_INFO("[WaistController] Switching to Mode 1: RL control");
-        break;
-      case 1:
-        applyModeChange(2);
-        ROS_INFO("[WaistController] Switching to Mode 2: external control");
-        break;
-      default:
-        break;
-    }
-    pre_cmd_stance = cmd_stance;
-  }
+  
   // 保存当前腰部位置和速度
   size_t waist_start_idx = jointNumReal;  // 腰部起始索引
   current_waist_pos_ = joint_pos.segment(waist_start_idx, joint_waist_num_);
@@ -433,8 +416,8 @@ void WaistController::waistTrajectoryCallback(const kuavo_msgs::robotWaistContro
   
   // 腰部关节角度限制（与WaistKinematics和Python SDK保持一致）
   // waist_yaw_joint: [-180°, 180°] = [-π, π]
-  static constexpr double WAIST_YAW_MIN_DEG = -30.0;
-  static constexpr double WAIST_YAW_MAX_DEG = 30.0;
+  static constexpr double WAIST_YAW_MIN_DEG = -180.0;
+  static constexpr double WAIST_YAW_MAX_DEG = 180.0;
   
   // 提取目标位置（从度转换为弧度，添加角度限制）
   for (size_t i = 0; i < joint_waist_num_; ++i)
