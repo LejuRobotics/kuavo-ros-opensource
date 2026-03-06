@@ -86,6 +86,7 @@
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
+    <param name="torso_interpolation_max_velocity" value="0.06"/>
     <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
     <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
     <!-- Launch script to collect kuavo-launch information -->

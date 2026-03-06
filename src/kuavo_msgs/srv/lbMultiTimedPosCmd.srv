@@ -1,0 +1,9 @@
+kuavo_msgs/timedSingleCmd[] timedCmdVec
+
+bool isSync   ## 多个规划器是否做时间同步, false 则表示不做同步, 按各自预设执行
+
+---
+
+bool isSuccess          # 是否能成功执行
+float32 actualTime      # 实际执行需要的时间
+string message          # 详细信息

@@ -144,6 +144,7 @@ swing_trajectory_config
 
   swing_shoulder_center         0.15
   swing_shoulder_scale          0.3
+  swing_elbow_center            0.0
   swing_elbow_scale             0.8
 }
 
@@ -540,7 +541,7 @@ selfCollision
     [0] "leg_l6_link, leg_r6_link"
   }
 
-  minimumDistance  0.05
+  minimumDistance  0.03
 
   ; relaxed log barrier parameters
   mu      1e-2
@@ -645,8 +646,8 @@ stanceLegTask
 {
   real
   {
-    kp                   0  
-    kd                   0   
+    kp                   10  
+    kd                   2    
   }
   
   sim
@@ -790,6 +791,35 @@ standUpWeight
     Angular         6
     JointAcc        30
     contactForce    0.1 
+}
+
+switchJointAccelTask
+{
+  waist
+  {
+    kp    100
+    kd    10.2
+  }
+  leg
+  {
+    kp    600
+    kd    10.2
+    kp_sim    500
+    kd_sim    10.2
+  }
+  arm
+  {
+    kp    20
+    kd    1.2
+  }
+}
+
+switchWeight
+{
+    Linear          3
+    Angular         6
+    JointAcc        30
+    contactForce    0.1
 }
 
 ; State Estimation

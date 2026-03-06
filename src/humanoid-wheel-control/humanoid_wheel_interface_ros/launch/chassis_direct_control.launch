@@ -1,0 +1,72 @@
+<!--
+底盘直接控制 Launch 文件
+
+功能：直接通过底层接口 /move_base/base_cmd_vel 控制底盘运动
+     不依赖轮臂上层控制器，可用于：
+     - 硬件故障时移动底盘
+     - 维修时移动底盘
+
+使用方法：
+    1. 使用 bt2 手柄控制：
+       roslaunch humanoid_wheel_interface_ros chassis_direct_control.launch joystick_type:=bt2
+    
+    2. 使用 bt2pro 手柄控制：
+       roslaunch humanoid_wheel_interface_ros chassis_direct_control.launch joystick_type:=bt2pro
+    
+    3. 使用键盘控制：
+       roslaunch humanoid_wheel_interface_ros chassis_direct_control.launch joystick_type:=keyboard
+
+注意：
+    - 【重要】使用前必须停止主控制器，否则速度命令会冲突！
+      停止方法: rosnode kill /nodelet_manager
+-->
+
+<launch>
+    <!-- 控制类型: bt2, bt2pro, keyboard -->
+    <arg name="joystick_type" default="bt2"/>
+    
+    <!-- 手柄设备路径 -->
+    <arg name="joy_dev" default="/dev/input/js0"/>
+    
+    <!-- 速度参数 -->
+    <arg name="linear_scale_x" default="0.3"/>
+    <arg name="linear_scale_y" default="0.3"/>
+    <arg name="angular_scale_z" default="0.3"/>
+    <arg name="deadzone" default="0.1"/>
+    
+    <!-- 实机控制：是否使用 wheel bridge (用于连接底盘硬件) -->
+    <arg name="use_wheel_bridge" default="true"/>
+
+    <!-- ========== 手柄控制 (bt2/bt2pro) ========== -->
+    <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
+        <!-- 手柄驱动节点 -->
+        <node name="joy_node" pkg="joy" type="joy_node" output="screen">
+            <param name="dev" value="$(arg joy_dev)"/>
+            <param name="deadzone" value="$(arg deadzone)"/>
+            <param name="autorepeat_rate" value="50"/>
+        </node>
+        
+        <!-- 底盘直接控制节点 -->
+        <node name="chassis_direct_joy_control" pkg="humanoid_wheel_interface_ros" 
+              type="chassis_direct_joy_control_node" output="screen">
+            <param name="linear_scale_x" value="$(arg linear_scale_x)"/>
+            <param name="linear_scale_y" value="$(arg linear_scale_y)"/>
+            <param name="angular_scale_z" value="$(arg angular_scale_z)"/>
+            <param name="deadzone" value="$(arg deadzone)"/>
+            <param name="channel_map_path" value="$(find humanoid_controllers)/launch/joy/$(arg joystick_type).json"/>
+        </node>
+    </group>
+
+    <!-- ========== 键盘控制 ========== -->
+    <group if="$(eval arg('joystick_type') == 'keyboard')">
+        <node name="chassis_keyboard_control" pkg="humanoid_wheel_interface_ros" 
+              type="chassis_keyboard_control.py" output="screen"/>
+    </group>
+
+    <!-- ========== Wheel Bridge (实机控制) ========== -->
+    <group if="$(arg use_wheel_bridge)">
+        <node pkg="humanoid_controllers" type="auto_wheel_bridge.py" name="auto_wheel_bridge_node" 
+              output="screen" required="false"/>
+    </group>
+
+</launch>

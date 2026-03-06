@@ -156,6 +156,18 @@ target_link_libraries(mobile_manipulator_joy_command_node
 )
 target_compile_options(mobile_manipulator_joy_command_node PUBLIC ${FLAGS})
 
+# Chassis direct joy control node (底盘直接控制节点)
+add_executable(chassis_direct_joy_control_node
+  src/ChassisDirectJoyControl.cpp
+)
+add_dependencies(chassis_direct_joy_control_node
+  ${catkin_EXPORTED_TARGETS}
+)
+target_link_libraries(chassis_direct_joy_control_node
+  ${catkin_LIBRARIES}
+)
+target_compile_options(chassis_direct_joy_control_node PUBLIC ${FLAGS})
+
 ####################
 ## Clang tooling ###
 ####################
@@ -185,7 +197,14 @@ install(
     mobile_manipulator_dummy_mrt_node 
     mobile_manipulator_target
     mobile_manipulator_joy_command_node
+    chassis_direct_joy_control_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+# Install scripts
+catkin_install_python(PROGRAMS
+  scripts/chassis_keyboard_control.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 install(DIRECTORY launch rviz
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
@@ -195,3 +214,4 @@ target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 target_compile_features(mobile_manipulator_mpc_node PUBLIC cxx_std_17)
 target_compile_features(mobile_manipulator_sqp_mpc_node PUBLIC cxx_std_17)
 target_compile_features(mobile_manipulator_joy_command_node PUBLIC cxx_std_17)
+target_compile_features(chassis_direct_joy_control_node PUBLIC cxx_std_17)

@@ -20,9 +20,15 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0.2" rpy="0 0 0" />
+      <origin xyz="-0.01 0 0.40" rpy="1.57 0 0" />
       <geometry>
-        <cylinder radius="0.15" length="0.6" />
+        <capsule radius="0.14" length="0.12" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0.13" rpy="0 0 0" />
+      <geometry>
+        <capsule radius="0.13" length="0.08" />
       </geometry>
     </collision>
   </link>
@@ -46,13 +52,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="-0.105 0 0" rpy="0 -1.5708 0" />
+      <geometry><cylinder radius="0.06" length="0.07" /></geometry>
+    </collision>
   </link>
   <joint name="leg_l1_joint" type="revolute">
     <origin xyz="-0.0024999 0.087 -0.066" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="leg_l1_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="180.0" velocity="23.55" />
+    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="180.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l2_link">
     <inertial>
@@ -75,7 +86,8 @@
     <parent link="leg_l1_link" />
     <child link="leg_l2_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-0.872664625997165" upper="0.785398163397448" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-0.872664625997165" upper="0.785398163397448" effort="22.2" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l3_link">
     <inertial>
@@ -92,13 +104,22 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="-1.5708 0 0" />
+      <geometry><cylinder radius="0.06" length="0.14" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 -0.125" rpy="0 0 0" />
+      <geometry><capsule radius="0.06" length="0.25" /></geometry>
+    </collision>
   </link>
   <joint name="leg_l3_joint" type="revolute">
     <origin xyz="0.000500354536093913 -0.00100000000000011 -0.1287" rpy="0 0 0" />
     <parent link="leg_l2_link" />
     <child link="leg_l3_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="72.0" velocity="20.93" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l4_link">
     <inertial>
@@ -115,13 +136,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 -0.17" rpy="0 0 0" />
+      <geometry><capsule radius="0.04" length="0.34" /></geometry>
+    </collision>
   </link>
   <joint name="leg_l4_joint" type="revolute">
     <origin xyz="-6.87185435835039E-05 0 -0.284" rpy="0 0 0" />
     <parent link="leg_l3_link" />
     <child link="leg_l4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.53072741539178" effort="180.0" velocity="23.55" />
+    <limit lower="0.0" upper="2.53072741539178" effort="135.0" velocity="11.62" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l5_link">
     <inertial>
@@ -144,7 +170,8 @@
     <parent link="leg_l4_link" />
     <child link="leg_l5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="46.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_l6_link">
     <inertial>
@@ -161,11 +188,58 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <!-- 2 box + 11 capsules (match XML) -->
     <collision>
-    	<origin xyz="0.0488 0 0" rpy="0 0 0"/>
-	    <geometry>
-		    <box size="0.25 0.1 0.04"/>
-	    </geometry>
+      <origin xyz="-0.008 0 -0.044" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.016 0 -0.051" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.042 0 -0.041" rpy="0 0 0" />
+      <geometry><box size="0.09 0.1 0.0108" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.063 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.076" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.036 0 -0.054" rpy="0 0 0" />
+      <geometry><box size="0.042 0.096 0.0108" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.09 0 -0.043" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.1 0 -0.046" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.109 0 -0.05" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.12 0 -0.053" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.13 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.139 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.082" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.152 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.064" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.165 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.04" /></geometry>
     </collision>
   </link>
   <joint name="leg_l6_joint" type="revolute">
@@ -173,7 +247,8 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="ll_foot_toe">
     <collision>
@@ -268,13 +343,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="-0.105 0 0" rpy="0 -1.5708 0" />
+      <geometry><cylinder radius="0.06" length="0.07" /></geometry>
+    </collision>
   </link>
   <joint name="leg_r1_joint" type="revolute">
     <origin xyz="-0.0024999 -0.087 -0.066" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="leg_r1_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.663225115757845" upper="0.314159265358979" effort="180.0" velocity="23.55" />
+    <limit lower="-0.663225115757845" upper="0.314159265358979" effort="127.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r2_link">
     <inertial>
@@ -297,7 +377,8 @@
     <parent link="leg_r1_link" />
     <child link="leg_r2_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-0.785398163397448" upper="0.872664625997165" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-0.785398163397448" upper="0.872664625997165" effort="22.2" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r3_link">
     <inertial>
@@ -314,13 +395,22 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="-1.5708 0 0" />
+      <geometry><cylinder radius="0.06" length="0.14" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 -0.125" rpy="0 0 0" />
+      <geometry><capsule radius="0.06" length="0.25" /></geometry>
+    </collision>
   </link>
   <joint name="leg_r3_joint" type="revolute">
     <origin xyz="-4.88006581312577E-05 0 -0.1287" rpy="0 0 0" />
     <parent link="leg_r2_link" />
     <child link="leg_r3_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="72.0" velocity="20.93" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r4_link">
     <inertial>
@@ -337,13 +427,18 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 -0.17" rpy="0 0 0" />
+      <geometry><capsule radius="0.04" length="0.34" /></geometry>
+    </collision>
   </link>
   <joint name="leg_r4_joint" type="revolute">
     <origin xyz="0.000147138572785148 0 -0.283999982974744" rpy="0 0 0" />
     <parent link="leg_r3_link" />
     <child link="leg_r4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.53072741539178" effort="180.0" velocity="23.55" />
+    <limit lower="0.0" upper="2.53072741539178" effort="135.0" velocity="11.62" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r5_link">
     <inertial>
@@ -366,7 +461,8 @@
     <parent link="leg_r4_link" />
     <child link="leg_r5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="46.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="leg_r6_link">
     <inertial>
@@ -383,11 +479,58 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <!-- 2 box + 11 capsules (match XML) -->
     <collision>
-    	<origin xyz="0.0488 0 0" rpy="0 0 0"/>
-	    <geometry>
-		    <box size="0.25 0.1 0.04"/>
-	    </geometry>
+      <origin xyz="0.042 0 -0.041" rpy="0 0 0" />
+      <geometry><box size="0.09 0.1 0.0108" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.008 0 -0.044" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.016 0 -0.051" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.063 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.076" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.036 0 -0.054" rpy="0 0 0" />
+      <geometry><box size="0.042 0.096 0.0108" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.09 0 -0.043" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.1 0 -0.046" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.109 0 -0.05" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.12 0 -0.053" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.13 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.139 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.082" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.152 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.064" /></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.165 0 -0.054" rpy="-1.5708 0 0" />
+      <geometry><capsule radius="0.008" length="0.04" /></geometry>
     </collision>
   </link>
   <joint name="leg_r6_joint" type="revolute">
@@ -395,7 +538,8 @@
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="10.46" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="rl_foot_toe">
     <collision>
@@ -477,9 +621,9 @@
   </joint>
   <link name="zarm_l1_link">
     <inertial>
-      <origin xyz="-0.00083 -0.02218 0.00035" rpy="0 0 0" />
-      <mass value="0.962" />
-      <inertia ixx="0.00225" ixy="-3e-05" ixz="0.0" iyy="0.00099" iyz="-2e-05" izz="0.00227" />
+      <origin xyz="0.00194934 -0.01222074 -0.00024523" rpy="0 0 0" />
+      <mass value="0.95200000" />
+      <inertia ixx="0.00177952" ixy="-0.00003936" ixz="-0.00000075" iyy="0.00088093" iyz="0.00000096" izz="0.00174476" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -490,19 +634,26 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 1.5708 0" />
+      <geometry>
+        <capsule radius="0.05" length="0.04" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_l1_joint" type="revolute">
     <origin xyz="-0.017499853 0.29269999999999996 0.4245" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.67" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l2_link">
     <inertial>
-      <origin xyz="-0.00791 0.0 -0.04655" rpy="0 0 0" />
-      <mass value="0.57" />
-      <inertia ixx="0.00163" ixy="0.0" ixz="5e-05" iyy="0.00211" iyz="0.0" izz="0.00122" />
+      <origin xyz="-0.00112901 0.00000665 -0.04637050" rpy="0 0 0" />
+      <mass value="0.38500000" />
+      <inertia ixx="0.00080437" ixy="-0.00000011" ixz="-0.00001699" iyy="0.00115579" iyz="-0.00000014" izz="0.00070010" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -513,25 +664,20 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.15" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.05" length="0.3" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zarm_l2_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_l1_link" />
     <child link="zarm_l2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.349065850398866" upper="2.0943951023932" effort="50.0" velocity="19.154" />
+    <limit lower="-0.349065850398866" upper="2.0943951023932" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l3_link">
     <inertial>
-      <origin xyz="0.00628 0.00107 -0.20878" rpy="0 0 0" />
-      <mass value="1.65" />
-      <inertia ixx="0.00815" ixy="-4e-05" ixz="0.00085" iyy="0.00828" iyz="0.00014" izz="0.00206" />
+      <origin xyz="0.00936999 0.00334408 -0.22965779" rpy="0 0 0" />
+      <mass value="1.75450000" />
+      <inertia ixx="0.00694471" ixy="-0.00006963" ixz="0.00081484" iyy="0.00704370" iyz="0.00033391" izz="0.00183829" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -542,19 +688,26 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 -0.18" rpy="0 0 0" />
+      <geometry>
+        <capsule radius="0.045" length="0.14" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_l3_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_l2_link" />
     <child link="zarm_l3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="18.84" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l4_link">
     <inertial>
-      <origin xyz="-0.01611 0.00143 -0.04857" rpy="0 0 0" />
-      <mass value="0.429" />
-      <inertia ixx="0.00135" ixy="0.0" ixz="-0.0001" iyy="0.00114" iyz="0.0" izz="0.00083" />
+      <origin xyz="-0.01825634 0.00149605 -0.06877688" rpy="0 0 0" />
+      <mass value="0.60780000" />
+      <inertia ixx="0.00144524" ixy="-0.00000754" ixz="-0.00012207" iyy="0.00125753" iyz="-0.00003303" izz="0.00065063" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -566,9 +719,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-0.02 0 -0.13" rpy="0 0 0" />
+      <origin xyz="-0.02 0 -0.14" rpy="0 0 0" />
       <geometry>
-        <cylinder radius="0.05" length="0.26" />
+        <capsule radius="0.045" length="0.18" />
       </geometry>
     </collision>
   </link>
@@ -577,13 +730,14 @@
     <parent link="zarm_l3_link" />
     <child link="zarm_l4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.61799387799149" upper="0.0" effort="50.0" velocity="18.84" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l5_link">
     <inertial>
-      <origin xyz="-0.00207 0.00018 -0.05079" rpy="0 0 0" />
-      <mass value="0.61" />
-      <inertia ixx="0.00107" ixy="0.0" ixz="-4e-05" iyy="0.00146" iyz="0.0" izz="0.00083" />
+      <origin xyz="-0.00874165 -0.00001372 -0.05033323" rpy="0 0 0" />
+      <mass value="0.63690000" />
+      <inertia ixx="0.00063700" ixy="-0.00000007" ixz="-0.00005666" iyy="0.00094941" iyz="0.00000002" izz="0.00054303" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -600,13 +754,14 @@
     <parent link="zarm_l4_link" />
     <child link="zarm_l5_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="12.0" velocity="21.666" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l6_link">
     <inertial>
-      <origin xyz="-0.00111 0.00335 -0.01335" rpy="0 0 0" />
-      <mass value="0.331" />
-      <inertia ixx="0.00022" ixy="0.0" ixz="0.0" iyy="0.00027" iyz="0.0" izz="0.00028" />
+      <origin xyz="-0.00158864 0.00654094 -0.01506679" rpy="0 0 0" />
+      <mass value="0.47390000" />
+      <inertia ixx="0.00018068" ixy="-0.00000464" ixz="0.00001148" iyy="0.00025494" iyz="0.00001047" izz="0.00026772" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -623,7 +778,8 @@
     <parent link="zarm_l5_link" />
     <child link="zarm_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-1.30899693899575" upper="0.698131700797732" effort="12.0" velocity="21.666" />
+    <limit lower="-1.30899693899575" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l7_link">
     <inertial>
@@ -641,9 +797,15 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 -0.07" rpy="0 0 0" />
+      <origin xyz="0 0 -0.158" rpy="0 0 -3.1415" />
       <geometry>
-        <cylinder radius="0.04" length="0.14" />
+        <box size="0.08 0.05 0.16" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0505 -0.0292 -0.116372" rpy="0 -0.2545 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.08" />
       </geometry>
     </collision>
   </link>
@@ -652,15 +814,10 @@
     <parent link="zarm_l6_link" />
     <child link="zarm_l7_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="12.0" velocity="21.666" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_l7_end_effector">
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0.03 0.05" />
-      <geometry>
-        <sphere radius="0.01" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zarm_l7_end_effector_joint" type="fixed">
     <origin xyz="0 -0.03 -0.17" rpy="0 0 0" />
@@ -669,9 +826,9 @@
   </joint>
   <link name="zarm_r1_link">
     <inertial>
-      <origin xyz="-0.00083 0.02218 0.00035" rpy="0 0 0" />
-      <mass value="0.962" />
-      <inertia ixx="0.00225" ixy="3e-05" ixz="0.0" iyy="0.00099" iyz="2e-05" izz="0.00227" />
+      <origin xyz="0.00194934 0.01222074 -0.00024523" rpy="0 0 0" />
+      <mass value="0.95200000" />
+      <inertia ixx="0.00177952" ixy="0.00003936" ixz="-0.00000075" iyy="0.00088093" iyz="-0.00000096" izz="0.00174476" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -682,19 +839,26 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 1.5708 0" />
+      <geometry>
+        <capsule radius="0.05" length="0.04" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_r1_joint" type="revolute">
     <origin xyz="-0.017499853 -0.29269999999999996 0.4245" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.67" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r2_link">
     <inertial>
-      <origin xyz="-0.00791 0.0 -0.04655" rpy="0 0 0" />
-      <mass value="0.57" />
-      <inertia ixx="0.00163" ixy="0.0" ixz="5e-05" iyy="0.00211" iyz="0.0" izz="0.00122" />
+      <origin xyz="-0.00112901 -0.00000665 -0.04637050" rpy="0 0 0" />
+      <mass value="0.38500000" />
+      <inertia ixx="0.00080437" ixy="0.00000011" ixz="-0.00001699" iyy="0.00115579" iyz="0.00000014" izz="0.00070010" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -705,25 +869,20 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 -0.15" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.05" length="0.3" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zarm_r2_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_r1_link" />
     <child link="zarm_r2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-2.0943951023932" upper="0.349065850398866" effort="50.0" velocity="19.154" />
+    <limit lower="-2.0943951023932" upper="0.349065850398866" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r3_link">
     <inertial>
-      <origin xyz="0.00628 -0.00107 -0.20878" rpy="0 0 0" />
-      <mass value="1.65" />
-      <inertia ixx="0.00815" ixy="4e-05" ixz="0.00085" iyy="0.00828" iyz="-0.00014" izz="0.00206" />
+      <origin xyz="0.00936999 -0.00334408 -0.22965779" rpy="0 0 0" />
+      <mass value="1.75450000" />
+      <inertia ixx="0.00694471" ixy="0.00006963" ixz="0.00081484" iyy="0.00704370" iyz="-0.00033391" izz="0.00183829" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -734,19 +893,26 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 -0.18" rpy="0 0 0" />
+      <geometry>
+        <capsule radius="0.045" length="0.14" />
+      </geometry>
+    </collision>
   </link>
   <joint name="zarm_r3_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_r2_link" />
     <child link="zarm_r3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="39.0" velocity="18.84" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r4_link">
     <inertial>
-      <origin xyz="-0.01611 -0.00143 -0.04857" rpy="0 0 0" />
-      <mass value="0.429" />
-      <inertia ixx="0.00135" ixy="0.0" ixz="-0.0001" iyy="0.00114" iyz="0.0" izz="0.00083" />
+      <origin xyz="-0.01825634 -0.00149605 -0.06877688" rpy="0 0 0" />
+      <mass value="0.60780000" />
+      <inertia ixx="0.00144524" ixy="0.00000754" ixz="-0.00012207" iyy="0.00125753" iyz="0.00003303" izz="0.00065063" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -758,9 +924,9 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="-0.02 0 -0.13" rpy="0 0 0" />
+      <origin xyz="-0.02 0 -0.14" rpy="0 0 0" />
       <geometry>
-        <cylinder radius="0.05" length="0.26" />
+        <capsule radius="0.045" length="0.18" />
       </geometry>
     </collision>
   </link>
@@ -769,13 +935,14 @@
     <parent link="zarm_r3_link" />
     <child link="zarm_r4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.61799387799149" upper="0.0" effort="50.0" velocity="18.84" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r5_link">
     <inertial>
-      <origin xyz="-0.00207 -0.00018 -0.05079" rpy="0 0 0" />
-      <mass value="0.61" />
-      <inertia ixx="0.00107" ixy="0.0" ixz="-4e-05" iyy="0.00146" iyz="0.0" izz="0.00083" />
+      <origin xyz="-0.00874165 0.00001372 -0.05033323" rpy="0 0 0" />
+      <mass value="0.63690000" />
+      <inertia ixx="0.00063700" ixy="0.00000007" ixz="-0.00005666" iyy="0.00094941" iyz="-0.00000002" izz="0.00054303" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -792,13 +959,14 @@
     <parent link="zarm_r4_link" />
     <child link="zarm_r5_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="12.0" velocity="21.666" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r6_link">
     <inertial>
-      <origin xyz="-0.00111 -0.00335 -0.01335" rpy="0 0 0" />
-      <mass value="0.331" />
-      <inertia ixx="0.00022" ixy="0.0" ixz="0.0" iyy="0.00027" iyz="0.0" izz="0.00028" />
+      <origin xyz="-0.00158864 -0.00654094 -0.01506679" rpy="0 0 0" />
+      <mass value="0.47390000" />
+      <inertia ixx="0.00018068" ixy="0.00000464" ixz="0.00001148" iyy="0.00025494" iyz="-0.00001047" izz="0.00026772" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -815,7 +983,8 @@
     <parent link="zarm_r5_link" />
     <child link="zarm_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.698131700797732" upper="1.30899693899575" effort="12.0" velocity="21.666" />
+    <limit lower="-0.698131700797732" upper="1.30899693899575" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r7_link">
     <inertial>
@@ -833,9 +1002,15 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 -0.07" rpy="0 0 0" />
+      <origin xyz="0 0 -0.158" rpy="0 0 -3.1415" />
       <geometry>
-        <cylinder radius="0.04" length="0.14" />
+        <box size="0.08 0.05 0.16" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0505 0.0292 -0.116372" rpy="0 -0.2545 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.08" />
       </geometry>
     </collision>
   </link>
@@ -844,15 +1019,10 @@
     <parent link="zarm_r6_link" />
     <child link="zarm_r7_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="12.0" velocity="21.666" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zarm_r7_end_effector">
-    <collision>
-      <origin rpy="0 0 0" xyz="0 -0.03 0.05" />
-      <geometry>
-        <sphere radius="0.01" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zarm_r7_end_effector_joint" type="fixed">
     <origin xyz="0 0.03 -0.17" rpy="0 0 0" />
@@ -874,12 +1044,6 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin rpy="0 0 0" xyz="0.03 0 0.09" />
-      <geometry>
-        <sphere radius="0.1" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zhead_1_joint" type="revolute">
     <origin xyz="-0.018499853 0.0 0.6014" rpy="0 0 0" />
@@ -887,6 +1051,7 @@
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="1.5" velocity="5.23333333333333" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="zhead_2_link">
     <inertial>
@@ -903,6 +1068,12 @@
         <color rgba="1 1 1 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0.02 0 0.07" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.11"/>
+      </geometry>
+    </collision>
   </link>
   <joint name="zhead_2_joint" type="revolute">
     <origin xyz="0 0 0" rpy="0 0 0" />
@@ -910,6 +1081,7 @@
     <child link="zhead_2_link" />
     <axis xyz="0 1 0" />
     <limit lower="-0.523598775598299" upper="0.523598775598299" effort="12.0" velocity="5.23333333333333" />
+    <dynamics damping="0.02" friction="0.02" />
   </joint>
   <link name="camera">
     <inertial>
@@ -933,56 +1105,26 @@
     <child link="camera" />
   </joint>
 
-  <link
-    name="camera_base">
+  <link name="camera_base">
     <inertial>
-      <origin
-        xyz="0.00354055659132058 0.00140392784997684 0.0124511787517705"
-        rpy="0 0 0" />
-      <mass
-        value="0.0170256015508834" />
-      <inertia
-        ixx="1.0918264029313E-05"
-        ixy="1.05354408167889E-07"
-        ixz="1.05871497323805E-08"
-        iyy="8.57178950734466E-07"
-        iyz="1.64018651463453E-08"
-        izz="1.02869893338382E-05" />
+      <origin xyz="0.00354055659132058 0.00140392784997684 0.0124511787517705" rpy="0 0 0" />
+      <mass value="0.0170256015508834" />
+      <inertia ixx="1.0918264029313E-05" ixy="1.05354408167889E-07" ixz="1.05871497323805E-08" iyy="8.57178950734466E-07" iyz="1.64018651463453E-08" izz="1.02869893338382E-05" />
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/camera_base.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/camera_base.STL" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
+      <material name="">
+        <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/camera_base.STL" />
-      </geometry>
-    </collision>
   </link>
-  <joint
-    name="camera_base"
-    type="fixed">
-    <origin
-      xyz="0.0828919080642966 0 0.119165137551254"
-      rpy="0 0.488692190558416 0" />
-    <parent
-      link="zhead_2_link" />
-    <child
-      link="camera_base" />
+  <joint name="camera_base" type="fixed">
+    <origin xyz="0.0828919080642966 0 0.119165137551254" rpy="0 0.488692190558416 0" />
+    <parent link="zhead_2_link" />
+    <child link="camera_base" />
   </joint>
 
   <link name="radar">
@@ -1007,327 +1149,141 @@
     <child link="radar" />
   </joint>
 
-  <link
-    name="torso-camera">
+  <link name="torso-camera">
     <inertial>
-      <origin
-        xyz="0.00156932606101622 0.0665388104781718 -0.00701167672575201"
-        rpy="0 0 0" />
-      <mass
-        value="0.1" />
-      <inertia
-        ixx="0.45922222140768"
-        ixy="0.00116938454009796"
-        ixz="5.81050583006598E-05"
-        iyy="0.0772067428906068"
-        iyz="0.0105506548802549"
-        izz="0.499312253423526" />
+      <origin xyz="0.00156932606101622 0.0665388104781718 -0.00701167672575201" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.45922222140768" ixy="0.00116938454009796" ixz="5.81050583006598E-05" iyy="0.0772067428906068" iyz="0.0105506548802549" izz="0.499312253423526" />
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/torso-camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/torso-camera.STL" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
+      <material name="">
+        <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/torso-camera.STL" />
-      </geometry>
-    </collision>
   </link>
-  <joint
-    name="torso-camera"
-    type="fixed">
-    <origin
-      xyz="0.115535332475413 0.0175000000005085 0.2883441440894"
-      rpy="0 0.732666 0" />
-    <parent
-      link="base_link" />
-    <child
-      link="torso-camera" />
-    <axis
-      xyz="0 0 0" />
+  <joint name="torso-camera" type="fixed">
+    <origin xyz="0.115535332475413 0.0175000000005085 0.2883441440894" rpy="0 0.732666 0" />
+    <parent link="base_link" />
+    <child link="torso-camera" />
+    <axis xyz="0 0 0" />
   </joint>
 
-  <link
-    name="waist_camera">
+  <link name="waist_camera">
     <inertial>
-      <origin
-        xyz="-0.0352747720086005 5.11279030860874E-05 -0.00154687630407949"
-        rpy="0 0 0" />
-      <mass
-        value="0.237986769607677" />
-      <inertia
-        ixx="0.000666718805832595"
-        ixy="1.39974366569124E-07"
-        ixz="-1.47166626554892E-05"
-        iyy="8.36219161597965E-05"
-        iyz="-3.58024687826506E-07"
-        izz="0.000699018993000803" />
+      <origin xyz="-0.0352747720086005 5.11279030860874E-05 -0.00154687630407949" rpy="0 0 0" />
+      <mass value="0.237986769607677" />
+      <inertia ixx="0.000666718805832595" ixy="1.39974366569124E-07" ixz="-1.47166626554892E-05" iyy="8.36219161597965E-05" iyz="-3.58024687826506E-07" izz="0.000699018993000803" />
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/waist_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/waist_camera.STL" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/waist_camera.STL" />
-      </geometry>
-    </collision>
   </link>
-  <joint
-    name="waist_camera"
-    type="fixed">
-    <origin
-      xyz="0.168717483101422 0 0.01355599662743"
-      rpy="0 0 0" />
-    <parent
-      link="base_link" />
-    <child
-      link="waist_camera" />
-    <axis
-      xyz="0 0 0" />
+  <joint name="waist_camera" type="fixed">
+    <origin xyz="0.168717483101422 0 0.01355599662743" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="waist_camera" />
+    <axis xyz="0 0 0" />
   </joint>
 
-  <link
-    name="l_hand_tripod">
+  <link name="l_hand_tripod">
     <inertial>
-      <origin
-        xyz="0.0653430919091347 -0.00776026775236038 -0.0648805742218587"
-        rpy="0 0 0" />
-      <mass
-        value="0.0342669089979502" />
-      <inertia
-        ixx="1.59850149176395E-05"
-        ixy="-5.29139847447712E-06"
-        ixz="1.78131910236665E-05"
-        iyy="9.8758759051122E-05"
-        iyz="-2.71719747666022E-07"
-        izz="9.75721402715185E-05" />
+      <origin xyz="0.0653430919091347 -0.00776026775236038 -0.0648805742218587" rpy="0 0 0" />
+      <mass value="0.0342669089979502" />
+      <inertia ixx="1.59850149176395E-05" ixy="-5.29139847447712E-06" ixz="1.78131910236665E-05" iyy="9.8758759051122E-05" iyz="-2.71719747666022E-07" izz="9.75721402715185E-05" />
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_tripod.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_tripod.STL" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
+      <material name="">
+        <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_tripod.STL" />
-      </geometry>
-    </collision>
   </link>
-  <joint
-    name="l_hand_tripod_joint"
-    type="fixed">
-    <origin
-      xyz="0.0 0.0 0.0"
-      rpy="0.0 0.0 0.0" />
-    <parent
-      link="zarm_l7_link" />
-    <child
-      link="l_hand_tripod" />
-    <axis
-      xyz="0 0 0" />
+  <joint name="l_hand_tripod_joint" type="fixed">
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+    <parent link="zarm_l7_link" />
+    <child link="l_hand_tripod" />
+    <axis xyz="0 0 0" />
   </joint>
 
-  <link
-    name="l_hand_camera">
+  <link name="l_hand_camera">
     <inertial>
-      <origin
-        xyz="-5.55111512312578E-17 -5.55111512312578E-17 0.0114631923429834"
-        rpy="0 0 0" />
-      <mass
-        value="0.038145442577304" />
-      <inertia
-        ixx="6.90025820370885E-06"
-        ixy="2.08889460021576E-21"
-        ixz="-6.35274710440725E-22"
-        iyy="6.86774271974419E-06"
-        iyz="-4.21980924697416E-22"
-        izz="1.04248094301688E-05" />
+      <origin xyz="-5.55111512312578E-17 -5.55111512312578E-17 0.0114631923429834" rpy="0 0 0" />
+      <mass value="0.038145442577304" />
+      <inertia ixx="6.90025820370885E-06" ixy="2.08889460021576E-21" ixz="-6.35274710440725E-22" iyy="6.86774271974419E-06" iyz="-4.21980924697416E-22" izz="1.04248094301688E-05" />
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 -1.57 0" />
+      <origin xyz="0 0 0" rpy="0 -1.57 0" />
       <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_camera.STL" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
+      <material name="">
+        <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 -1.57 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_camera.STL" />
-      </geometry>
-    </collision>
   </link>
-  <joint
-    name="l_hand_camera_joint"
-    type="fixed">
-    <origin
-      xyz="0.11540559159102 -0.0145586110669961 -0.110123491595499"
-      rpy="1.919862177193763 0.753528063917894 -2.897246568680842" />
-    <parent
-      link="l_hand_tripod" />
-    <child
-      link="l_hand_camera" />
-    <axis
-      xyz="0 0 0" />
+  <joint name="l_hand_camera_joint" type="fixed">
+    <origin xyz="0.11540559159102 -0.0145586110669961 -0.110123491595499" rpy="1.919862177193763 0.753528063917894 -2.897246568680842" />
+    <parent link="l_hand_tripod" />
+    <child link="l_hand_camera" />
+    <axis xyz="0 0 0" />
   </joint>
 
-  <link
-    name="r_hand_tripod">
+  <link name="r_hand_tripod">
     <inertial>
-      <origin
-        xyz="0.0653431459436017 0.00833186007885223 -0.0625275130281983"
-        rpy="0 0 0" />
-      <mass
-        value="0.034266881719861" />
-      <inertia
-        ixx="1.5985004453075E-05"
-        ixy="5.17271984897294E-06"
-        ixz="1.78480505198324E-05"
-        iyy="9.87551311174154E-05"
-        iyz="2.79574204670866E-07"
-        izz="9.75758243581943E-05" />
+      <origin xyz="0.0653431459436017 0.00833186007885223 -0.0625275130281983" rpy="0 0 0" />
+      <mass value="0.034266881719861" />
+      <inertia ixx="1.5985004453075E-05" ixy="5.17271984897294E-06" ixz="1.78480505198324E-05" iyy="9.87551311174154E-05" iyz="2.79574204670866E-07" izz="9.75758243581943E-05" />
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_tripod.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_tripod.STL" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
+      <material name="">
+        <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_tripod.STL" />
-      </geometry>
-    </collision>
   </link>
-  <joint
-    name="r_hand_tripod_joint"
-    type="fixed">
-    <origin
-      xyz="0.0 0.0 0.0"
-      rpy="0.0 0.0 0.0" />
-    <parent
-      link="zarm_r7_link" />
-    <child
-      link="r_hand_tripod" />
-    <axis
-      xyz="0 0 0" />
+  <joint name="r_hand_tripod_joint" type="fixed">
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+    <parent link="zarm_r7_link" />
+    <child link="r_hand_tripod" />
+    <axis xyz="0 0 0" />
   </joint>
 
-  <link
-    name="r_hand_camera">
+  <link name="r_hand_camera">
     <inertial>
-      <origin
-        xyz="0 5.55111512312578E-17 0.0114631923429834"
-        rpy="0 0 0" />
-      <mass
-        value="0.038145442577304" />
-      <inertia
-        ixx="6.90025820370885E-06"
-        ixy="-5.73053564581591E-21"
-        ixz="-1.27054942088145E-21"
-        iyy="6.8677427197442E-06"
-        iyz="7.56979586483243E-22"
-        izz="1.04248094301688E-05" />
+      <origin xyz="0 5.55111512312578E-17 0.0114631923429834" rpy="0 0 0" />
+      <mass value="0.038145442577304" />
+      <inertia ixx="6.90025820370885E-06" ixy="-5.73053564581591E-21" ixz="-1.27054942088145E-21" iyy="6.8677427197442E-06" iyz="7.56979586483243E-22" izz="1.04248094301688E-05" />
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 -1.57 0" />
+      <origin xyz="0 0 0" rpy="0 -1.57 0" />
       <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_camera.STL" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
+      <material name="">
+        <color rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 -1.57 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_camera.STL" />
-      </geometry>
-    </collision>
   </link>
-  <joint
-    name="r_hand_camera_joint"
-    type="fixed">
-    <origin
-      xyz="0.115405591590931 0.0154312352120435 -0.107724128430896"
-      rpy="1.208853693239594  0.751879414295006 2.888346587751982" />
-    <parent
-      link="r_hand_tripod" />
-    <child
-      link="r_hand_camera" />
-    <axis
-      xyz="0 0 0" />
+  <joint name="r_hand_camera_joint" type="fixed">
+    <origin xyz="0.115405591590931 0.0154312352120435 -0.107724128430896" rpy="1.208853693239594  0.751879414295006 2.888346587751982" />
+    <parent link="r_hand_tripod" />
+    <child link="r_hand_camera" />
+    <axis xyz="0 0 0" />
   </joint>
 </robot>

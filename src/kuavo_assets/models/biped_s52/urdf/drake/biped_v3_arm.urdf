@@ -5,14 +5,23 @@
   </mujoco>
   <link name="base_link">
     <inertial>
-      <origin xyz="-0.05051209 1.42e-06 -0.01248997" rpy="0 0 0" />
-      <mass value="6.48663928" />
-      <inertia ixx="0.06836878" ixy="1.858e-05" ixz="-0.0165872" iyy="0.04966552" iyz="-1.2e-05" izz="0.06645264" />
+      <!-- 质心：( -0.05495950, -0.00028705, -0.01468007 ) -->
+      <origin xyz="-0.05495950 -0.00028705 -0.01468007" rpy="0 0 0" />
+      <!-- 质量：7.06404632 kg -->
+      <mass value="7.06405" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自torso Lxx/Lyy/Lzz -->
+      <inertia
+        ixx="0.07432439"
+        ixy="0.0"
+        ixz="-0.01900645"
+        iyy="0.05497594"
+        iyz="0.0"
+        izz="0.07548789" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/base_link.STL" />
+        <mesh filename="../../meshes/torso.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -21,9 +30,18 @@
   </link>
   <link name="waist_yaw_link">
     <inertial>
-      <origin xyz="0.00089444 -0.00069446 0.16778314" rpy="0 0 0" />
-      <mass value="18.01415568" />
-      <inertia ixx="0.36258863" ixy="1.968e-05" ixz="0.00273234" iyy="0.27799251" iyz="0.00088683" izz="0.21591828" />
+      <!-- 质心：( -0.00044187, -0.00068282, 0.16674017 ) -->
+      <origin xyz="0.04044187 -0.00068282 0.16674017" rpy="0 0 0" />
+      <!-- 质量：17.11065787 kg -->
+      <mass value="20.63616" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自waist_yaw Lxx/Lyy/Lzz -->
+      <inertia
+        ixx="0.34143343"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.25757527"
+        iyz="0.0"
+        izz="0.20167280" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -40,186 +58,350 @@
     <parent link="base_link" />
     <child link="waist_yaw_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-3.14159" upper="3.14159" effort="180.0" velocity="23.55" />
+    <limit lower="-3.14159" upper="3.14159" effort="102.0" velocity="8.7" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_l1_link">
+  <!-- ============ l_arm_pitch ============ -->
+  <!-- 坐标系：l_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_l1_link">
     <inertial>
-      <origin xyz="0.00166796 0.07275896 0.00012987" rpy="0 0 0" />
-      <mass value="0.91653322" />
-      <inertia ixx="0.00126587" ixy="1.362e-05" ixz="-2e-05" iyy="0.00086921" iyz="1e-05" izz="0.00124337" />
+      <!-- 质心：( 0.00080154, -0.00930333, 0.00031203 ) -->
+      <origin xyz="0.00080154 -0.00930333 0.00031203" rpy="0 0 0" />
+      <!-- 质量：0.94520767 kg -->
+      <mass value="0.94521" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00133347"
+        ixy="-0.00000676"
+        ixz="0.00000067"
+        iyy="0.00088618"
+        iyz="-0.00000295"
+        izz="0.00133859" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_arm_pitch.STL" />
+        <mesh
+          filename="../../meshes/l_arm_pitch.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_l1_joint" type="revolute">
-    <origin xyz="-0.003 0.1737 0.2831" rpy="0 0 0" />
-    <parent link="waist_yaw_link" />
-    <child link="zarm_l1_link" />
-    <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_l1_joint"
+    type="revolute">
+    <origin
+      xyz="-0.003 0.2527 0.283"
+      rpy="0 0 0" />
+    <parent
+      link="waist_yaw_link" />
+    <child
+      link="zarm_l1_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_l2_link">
+  <!-- ============ l_arm_roll ============ -->
+  <!-- 坐标系：l_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_l2_link">
     <inertial>
-      <origin xyz="-0.00080932 6.91e-06 -0.04651" rpy="0 0 0" />
-      <mass value="0.3876739" />
-      <inertia ixx="0.0008074" ixy="-1.1e-05" ixz="-2.196e-05" iyy="0.00116146" iyz="-1.4e-05" izz="0.00070225" />
+      <!-- 质心：( -0.00087383, -0.00000389, -0.04690210 ) -->
+      <origin xyz="-0.00087383 -0.00000389 -0.04690210" rpy="0 0 0" />
+      <!-- 质量：0.41921257 kg -->
+      <mass value="0.41921" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00084950"
+        ixy="0.00000011"
+        ixz="-0.00002039"
+        iyy="0.00123033"
+        iyz="0.00000014"
+        izz="0.00074285" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_arm_roll.STL" />
+        <mesh
+          filename="../../meshes/l_arm_roll.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_l2_joint" type="revolute">
-    <origin xyz="0 0.081 0" rpy="0 0 0" />
-    <parent link="zarm_l1_link" />
-    <child link="zarm_l2_link" />
-    <axis xyz="1 0 0" />
-    <limit lower="-0.349065850398866" upper="2.0943951023932" effort="50.0" velocity="8.37333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_l2_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l1_link" />
+    <child
+      link="zarm_l2_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-0.349065850398866" upper="3.49065850398866" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_l3_link">
+
+  <!-- ============ l_arm_yaw ============ -->
+  <!-- 坐标系：l_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_l3_link">
     <inertial>
-      <origin xyz="0.00943019 0.00343988 -0.11304538" rpy="0 0 0" />
-      <mass value="1.77926875" />
-      <inertia ixx="0.00992856" ixy="-7.192e-05" ixz="0.00107196" iyy="0.01004582" iyz="0.00040685" izz="0.00185422" />
+      <!-- 质心：( 0.00961457, 0.00303320, -0.22991934 ) -->
+      <origin xyz="0.00961457 0.00303320 -0.22991934" rpy="0 0 0" />
+      <!-- 质量：1.78857489 kg -->
+      <mass value="1.78857" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00709279"
+        ixy="-0.00006786"
+        ixz="0.00082655"
+        iyy="0.00718506"
+        iyz="0.00029056"
+        izz="0.00191640" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_arm_yaw.STL" />
+        <mesh
+          filename="../../meshes/l_arm_yaw.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_l3_joint" type="revolute">
-    <origin xyz="0 0 -0.104" rpy="0 0 0" />
-    <parent link="zarm_l2_link" />
-    <child link="zarm_l3_link" />
-    <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="36.0" velocity="9.94333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_l3_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l2_link" />
+    <child
+      link="zarm_l3_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.48352986419518" upper="1.48352986419518" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_l4_link">
+
+  <!-- ============ l_foream ============ -->
+  <!-- 坐标系：l_foream -->
+  <link
+    name="zarm_l4_link">
     <inertial>
-      <origin xyz="-0.01829932 0.00087167 -0.06936622" rpy="0 0 0" />
-      <mass value="0.58507821" />
-      <inertia ixx="0.00143291" ixy="-4.8e-05" ixz="-0.00011641" iyy="0.00125018" iyz="-2.018e-05" izz="0.00068356" />
+      <!-- 质心：( -0.01815271, 0.00143762, -0.06748280 ) -->
+      <origin xyz="-0.01815271 0.00143762 -0.06748280" rpy="0 0 0" />
+      <!-- 质量：0.63148736 kg -->
+      <mass value="0.63149" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00152253"
+        ixy="-0.00000788"
+        ixz="-0.00012859"
+        iyy="0.00131180"
+        iyz="-0.00003238"
+        izz="0.00069075" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_forearm.STL" />
+        <mesh
+          filename="../../meshes/l_forearm.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_l4_joint" type="revolute">
-    <origin xyz="0.02 0 -0.1797" rpy="0 0 0" />
-    <parent link="zarm_l3_link" />
-    <child link="zarm_l4_link" />
-    <axis xyz="0 1 0" />
-    <limit lower="-2.61799387799149" upper="0.0" effort="50.0" velocity="8.37333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_l4_joint"
+    type="revolute">
+    <origin
+      xyz="0.02 0 -0.2837"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l3_link" />
+    <child
+      link="zarm_l4_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_l5_link">
+
+  <!-- ============ l_hand_yaw ============ -->
+  <!-- 坐标系：l_hand_yaw -->
+  <link
+    name="zarm_l5_link">
     <inertial>
-      <origin xyz="-0.0102609 1.322e-05 -0.06083944" rpy="0 0 0" />
-      <mass value="0.68679955" />
-      <inertia ixx="0.00086873" ixy="1.2e-05" ixz="-8.786e-05" iyy="0.00122518" iyz="-1.1e-05" izz="0.00066873" />
+      <!-- 质心：( -0.00516386, 0.00001560, -0.05589705 ) -->
+      <origin xyz="-0.00516386 0.00001560 -0.05589705" rpy="0 0 0" />
+      <!-- 质量：0.60827684 kg -->
+      <mass value="0.60828" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00065900"
+        ixy="0.00000008"
+        ixz="-0.00002661"
+        iyy="0.00092404"
+        iyz="0.00000000"
+        izz="0.00049898" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_hand_yaw.STL" />
+        <mesh
+          filename="../../meshes/l_hand_yaw.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_l5_joint" type="revolute">
-    <origin xyz="-0.02 0 -0.1195" rpy="0 0 0" />
-    <parent link="zarm_l4_link" />
-    <child link="zarm_l5_link" />
-    <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_l5_joint"
+    type="revolute">
+    <origin xyz="-0.02 0 -0.1201" rpy="0 0 0" />
+    <parent
+      link="zarm_l4_link" />
+    <child
+      link="zarm_l5_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_l6_link">
+
+  <!-- ============ l_hand_roll ============ -->
+  <!-- 坐标系：l_hand_roll -->
+  <link
+    name="zarm_l6_link">
     <inertial>
-      <origin xyz="0.00019162 0.00886363 -0.01747746" rpy="0 0 0" />
-      <mass value="0.39387181" />
-      <inertia ixx="0.00018535" ixy="7.5e-05" ixz="-4.6e-05" iyy="0.00019853" iyz="5e-05" izz="0.0002021" />
+      <!-- 质心：( -0.00674799, 0.00638282, -0.00862654 ) -->
+      <origin xyz="-0.00674799 0.00638282 -0.00862654" rpy="0 0 0" />
+      <!-- 质量：0.50616416 kg -->
+      <mass value="0.50616" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 第一个张量 -->
+      <inertia
+        ixx="0.00038064"
+        ixy="-0.00002132"
+        ixz="0.00013787"
+        iyy="0.00052077"
+        iyz="0.00003086"
+        izz="0.00032724" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_hand_roll.STL" />
+        <mesh
+          filename="../../meshes/l_hand_roll.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_l6_joint" type="revolute">
-    <origin xyz="0 0 -0.114" rpy="0 0 0" />
-    <parent link="zarm_l5_link" />
-    <child link="zarm_l6_link" />
-    <axis xyz="1 0 0" />
-    <limit lower="-1.30899693899575" upper="0.698131700797732" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_l6_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 0 -0.114"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l5_link" />
+    <child
+      link="zarm_l6_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-1.30899693899575" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_l7_link">
+
+  <!-- ============ l_hand_pitch ============ -->
+  <!-- 坐标系：l_hand_pitch -->
+  <link
+    name="zarm_l7_link">
     <inertial>
-      <origin xyz="0.00326402 0.0057645 -0.12230994" rpy="0 0 0" />
-      <mass value="0.61537779" />
-      <inertia ixx="0.00161739" ixy="1.846e-05" ixz="4.975e-05" iyy="0.00155413" iyz="-9.681e-05" izz="0.00018354" />
+      <!-- 质心：( 0.03810742, 0.00267575, -0.05086389 ) -->
+      <origin xyz="0.00481393 0.00873606 -0.0837543" rpy="0 0 0" />
+      <!-- 质量：0.18939501 kg -->
+      <mass value="0.7374" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00112502"
+        ixy="0"
+        ixz="0"
+        iyy="0.00133239"
+        iyz="0"
+        izz="0.000373427" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_hand_pitch.STL" />
+        <mesh
+          filename="../../meshes/l_hand_pitch_nohand.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_l7_joint" type="revolute">
-    <origin xyz="-0.0002 0 -0.021" rpy="0 0 0" />
-    <parent link="zarm_l6_link" />
-    <child link="zarm_l7_link" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_l7_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 -0.021"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l6_link" />
+    <child
+      link="zarm_l7_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <link name="zarm_l7_end_effector">
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <sphere radius="0.005" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zarm_l7_end_effector_joint" type="fixed">
-    <origin xyz="0 -0.03 -0.17" rpy="0 0 0" />
+    <origin xyz="0 0.0 -0.17" rpy="0 0 0" />
     <parent link="zarm_l7_link" />
     <child link="zarm_l7_end_effector" />
   </joint>
@@ -236,184 +418,350 @@
     <parent link="zarm_l7_end_effector" />
     <child link="zarm_l7_virtual_thumb_link" />
   </joint>
-  <link name="zarm_r1_link">
+  <!-- ============ r_arm_pitch ============ -->
+  <!-- 坐标系：r_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_r1_link">
     <inertial>
-      <origin xyz="0.00166796 -0.07275896 0.00012987" rpy="0 0 0" />
-      <mass value="0.92062797" />
-      <inertia ixx="0.00126587" ixy="1.362e-05" ixz="-2e-05" iyy="0.00086921" iyz="1e-05" izz="0.00124337" />
+      <!-- 质心：( 0.00162594, 0.00950442, -0.00031733 ) -->
+      <origin xyz="0.00162594 0.00950442 -0.00031733" rpy="0 0 0" />
+      <!-- 质量：0.92946504 kg -->
+      <mass value="0.92947" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00132776"
+        ixy="0.00001398"
+        ixz="-0.00000091"
+        iyy="0.00084780"
+        iyz="-0.00000301"
+        izz="0.00130062" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_arm_pitch.STL" />
+        <mesh
+          filename="../../meshes/r_arm_pitch.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_r1_joint" type="revolute">
-    <origin xyz="-0.003 -0.1737 0.2831" rpy="0 0 0" />
-    <parent link="waist_yaw_link" />
-    <child link="zarm_r1_link" />
-    <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_r1_joint"
+    type="revolute">
+    <origin
+      xyz="-0.003 -0.2527 0.283"
+      rpy="0 0 0" />
+    <parent
+      link="waist_yaw_link" />
+    <child
+      link="zarm_r1_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_r2_link">
+
+  <!-- ============ r_arm_roll ============ -->
+  <!-- 坐标系：r_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_r2_link">
     <inertial>
-      <origin xyz="-0.00080932 -6.91e-06 -0.04651" rpy="0 0 0" />
-      <mass value="0.38768053" />
-      <inertia ixx="0.0008074" ixy="-1.1e-05" ixz="-2.196e-05" iyy="0.00116146" iyz="-1.4e-05" izz="0.00070225" />
+      <!-- 质心：( -0.00082502, -0.00000618, -0.04699917 ) -->
+      <origin xyz="-0.00082502 -0.00000618 -0.04699917" rpy="0 0 0" />
+      <!-- 质量：0.41522857 kg -->
+      <mass value="0.41523" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00084475"
+        ixy="0.00000011"
+        ixz="-0.00002054"
+        iyy="0.00122057"
+        iyz="0.00000014"
+        izz="0.00073617" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_arm_roll.STL" />
+        <mesh
+          filename="../../meshes/r_arm_roll.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_r2_joint" type="revolute">
-    <origin xyz="0 -0.081 0" rpy="0 0 0" />
-    <parent link="zarm_r1_link" />
-    <child link="zarm_r2_link" />
-    <axis xyz="1 0 0" />
-    <limit lower="-2.0943951023932" upper="0.349065850398866" effort="50.0" velocity="8.37333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_r2_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r1_link" />
+    <child
+      link="zarm_r2_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-3.49065850398866" upper="0.349065850398866" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_r3_link">
+
+  <!-- ============ r_arm_yaw ============ -->
+  <!-- 坐标系：r_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_r3_link">
     <inertial>
-      <origin xyz="0.00933929 -0.00288519 -0.11324121" rpy="0 0 0" />
-      <mass value="1.77969208" />
-      <inertia ixx="0.00912947" ixy="5.935e-05" ixz="0.0010589" iyy="0.00911437" iyz="-0.0003408" izz="0.00118423" />
+      <!-- 质心：( 0.00936686, -0.00338228, -0.22947022 ) -->
+      <origin xyz="0.00936686 -0.00338228 -0.22947022" rpy="0 0 0" />
+      <!-- 质量：1.78472650 kg -->
+      <mass value="1.78473" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00706267"
+        ixy="0.00007037"
+        ixz="0.00081612"
+        iyy="0.00715549"
+        iyz="-0.00033921"
+        izz="0.00187467" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_arm_yaw.STL" />
+        <mesh
+          filename="../../meshes/r_arm_yaw.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_r3_joint" type="revolute">
-    <origin xyz="0 0 -0.104" rpy="0 0 0" />
-    <parent link="zarm_r2_link" />
-    <child link="zarm_r3_link" />
-    <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="36.0" velocity="9.94333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_r3_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r2_link" />
+    <child
+      link="zarm_r3_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.48352986419518" upper="1.48352986419518" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_r4_link">
+
+  <!-- ============ r_foream ============ -->
+  <!-- 坐标系：r_foream -->
+  <link
+    name="zarm_r4_link">
     <inertial>
-      <origin xyz="-0.01829785 -0.00087299 -0.06936486" rpy="0 0 0" />
-      <mass value="0.58514611" />
-      <inertia ixx="0.00137872" ixy="4.8e-05" ixz="-0.00011643" iyy="0.00119519" iyz="1.985e-05" izz="0.00061317" />
+      <!-- 质心：( -0.01808595, -0.00140005, -0.06722746 ) -->
+      <origin xyz="-0.01808595 -0.00140005 -0.06722746" rpy="0 0 0" />
+      <!-- 质量：0.63548283 kg -->
+      <mass value="0.63548" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00154594"
+        ixy="0.00000786"
+        ixz="-0.00013011"
+        iyy="0.00133341"
+        iyz="0.00003163"
+        izz="0.00070186" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_forearm.STL" />
+        <mesh
+          filename="../../meshes/r_forearm.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_r4_joint" type="revolute">
-    <origin xyz="0.02 0 -0.1797" rpy="0 0 0" />
-    <parent link="zarm_r3_link" />
-    <child link="zarm_r4_link" />
-    <axis xyz="0 1 0" />
-    <limit lower="-2.61799387799149" upper="0.0" effort="50.0" velocity="8.37333333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_r4_joint"
+    type="revolute">
+    <origin
+      xyz="0.02 0 -0.2837"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r3_link" />
+    <child
+      link="zarm_r4_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_r5_link">
+
+  <!-- ============ r_hand_yaw ============ -->
+  <!-- 坐标系：r_hand_yaw -->
+  <link
+    name="zarm_r5_link">
     <inertial>
-      <origin xyz="-0.01023461 -2.917e-05 -0.06078644" rpy="0 0 0" />
-      <mass value="0.68473867" />
-      <inertia ixx="0.00079741" ixy="-0.0001" ixz="-8.692e-05" iyy="0.00116896" iyz="9.7e-05" izz="0.00061233" />
+      <!-- 质心：( -0.00505317, 0.00001432, -0.05619135 ) -->
+      <origin xyz="-0.00505317 0.00001432 -0.05619135" rpy="0 0 0" />
+      <!-- 质量：0.61020748 kg -->
+      <mass value="0.61021" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00065686"
+        ixy="0.00000010"
+        ixz="-0.00002535"
+        iyy="0.00092519"
+        iyz="0.00000000"
+        izz="0.00050244" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_hand_yaw.STL" />
+        <mesh
+          filename="../../meshes/r_hand_yaw.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_r5_joint" type="revolute">
-    <origin xyz="-0.02 0 -0.1195" rpy="0 0 0" />
-    <parent link="zarm_r4_link" />
-    <child link="zarm_r5_link" />
-    <axis xyz="0 0 1" />
-    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_r5_joint"
+    type="revolute">
+    <origin xyz="-0.02 0 -0.1201" rpy="0 0 0" />
+    <parent
+      link="zarm_r4_link" />
+    <child
+      link="zarm_r5_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_r6_link">
+
+  <!-- ============ r_hand_roll ============ -->
+  <!-- 坐标系：r_hand_roll -->
+  <link
+    name="zarm_r6_link">
     <inertial>
-      <origin xyz="0.00019291 -0.0089543 -0.01746466" rpy="0 0 0" />
-      <mass value="0.39247462" />
-      <inertia ixx="0.00013001" ixy="-7.7e-05" ixz="-4.5e-05" iyy="0.00012773" iyz="-4.8e-05" izz="0.00014597" />
+      <!-- 质心：( -0.00633080, -0.00581708, -0.00833296 ) -->
+      <origin xyz="-0.00633080 -0.00581708 -0.00833296" rpy="0 0 0" />
+      <!-- 质量：0.53821377 kg -->
+      <mass value="0.53821" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00039845"
+        ixy="0.00001950"
+        ixz="0.00013771"
+        iyy="0.00056523"
+        iyz="-0.00003046"
+        izz="0.00037323" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_hand_roll.STL" />
+        <mesh
+          filename="../../meshes/r_hand_roll.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_r6_joint" type="revolute">
-    <origin xyz="0 0 -0.114" rpy="0 0 0" />
-    <parent link="zarm_r5_link" />
-    <child link="zarm_r6_link" />
-    <axis xyz="1 0 0" />
-    <limit lower="-0.698131700797732" upper="1.30899693899575" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_r6_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 0 -0.114"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r5_link" />
+    <child
+      link="zarm_r6_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-0.698131700797732" upper="1.30899693899575" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <link name="zarm_r7_link">
+
+  <!-- ============ r_hand_pitch ============ -->
+  <!-- 坐标系：r_hand_pitch -->
+  <link
+    name="zarm_r7_link">
     <inertial>
-      <origin xyz="0.00330838 -0.00562282 -0.12209714" rpy="0 0 0" />
-      <mass value="0.61562202" />
-      <inertia ixx="0.00161739" ixy="-1.846e-05" ixz="4.975e-05" iyy="0.00155413" iyz="9.681e-05" izz="0.00018354" />
+      <!-- 质心：( 0.03616769, -0.00232464, -0.04975256 ) -->
+      <origin xyz="0.00481393 -0.00870857 -0.0836411" rpy="0 0 0" />
+      <!-- 质量：0.19960270 kg -->
+      <mass value="0.7374" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00110836"
+        ixy="0"
+        ixz="0"
+        iyy="0.00131607"
+        iyz="0"
+        izz="0.000374168" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_hand_pitch.STL" />
+        <mesh
+          filename="../../meshes/r_hand_pitch_nohand.STL" />
       </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="zarm_r7_joint" type="revolute">
-    <origin xyz="0 0 -0.022284" rpy="0 0 0" />
-    <parent link="zarm_r6_link" />
-    <child link="zarm_r7_link" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="12.0" velocity="7.32666666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+  <joint
+    name="zarm_r7_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 0 -0.021"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r6_link" />
+    <child
+      link="zarm_r7_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <link name="zarm_r7_end_effector">
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <sphere radius="0.005" />
-      </geometry>
-    </collision>
   </link>
   <joint name="zarm_r7_end_effector_joint" type="fixed">
-    <origin xyz="0 0.03 -0.17" rpy="0 0 0" />
+    <origin xyz="0 0.0 -0.17" rpy="0 0 0" />
     <parent link="zarm_r7_link" />
     <child link="zarm_r7_end_effector" />
   </joint>

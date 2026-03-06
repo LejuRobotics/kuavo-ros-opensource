@@ -51,8 +51,9 @@ class RosbagToBezierPlanner:
     6. 保存结果为TACT文件格式
     """
     def __init__(self):
-        rospy.init_node('rosbag_to_bezier_planner')
-
+        # 检查是否已经有节点初始化，避免重复初始化
+        if rospy.get_node_uri() is None:
+            rospy.init_node('rosbag_to_bezier_planner')
         # 读取robot_version参数
         self.robot_version = int(os.environ.get("ROBOT_VERSION", "45"))
         rospy.loginfo(f"Robot version: {self.robot_version}")
@@ -60,45 +61,77 @@ class RosbagToBezierPlanner:
         # 确定 robotType
         self.robot_type = get_robot_type_for_dekstop_which_only_include_classify_robot_version(self.robot_version)
         rospy.loginfo(f"Robot type: {self.robot_type}")
-        
-        # 判断是否需要处理腰部数据（版本 >= 50）
-        self.has_waist = (self.robot_version // 10) >= 5  # major version >= 5
-        rospy.loginfo(f"Has waist joint: {self.has_waist}")
 
-        # 手臂关节名称 (左右手臂各7个关节)
-        self.arm_joint_names = [
-            "l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch",
-            "l_hand_yaw", "l_hand_pitch", "l_hand_roll",
-            "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch",
-            "r_hand_yaw", "r_hand_pitch", "r_hand_roll",
-        ]
-        
+        # 判断机器人类型
+        self.is_roban = (self.robot_version // 10) == 1  # 鲁班系列（版本号以1开头）
+        self.has_waist = (self.robot_version // 10) >= 5  # V5系列（版本号以5开头）
+        rospy.loginfo(f"Robot type: {'ROBAN' if self.is_roban else 'KUAVO'}, has_waist: {self.has_waist}")
+
+        # 手臂关节名称
+        if self.is_roban:
+            # 鲁班：8个手臂关节（左4右4），索引13-20
+            self.arm_joint_names = [
+                "zarm_l1_joint", "zarm_l2_joint", "zarm_l3_joint", "zarm_l4_joint",
+                "zarm_r1_joint", "zarm_r2_joint", "zarm_r3_joint", "zarm_r4_joint",
+            ]
+        else:
+            # KUAVO：14个手臂关节（左右各7个）
+            self.arm_joint_names = [
+                "l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch",
+                "l_hand_yaw", "l_hand_pitch", "l_hand_roll",
+                "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch",
+                "r_hand_yaw", "r_hand_pitch", "r_hand_roll",
+            ]
+
         # 构建控制关节名称列表
-        self.control_joint_names = [
-            "l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch",
-            "l_hand_yaw", "l_hand_pitch", "l_hand_roll",
-            "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch",
-            "r_hand_yaw", "r_hand_pitch", "r_hand_roll",
-            "l_thumb1", "l_thumb2", "l_index1", "l_middle1", "l_ring1", "l_pinky1",
-            "r_thumb1", "r_thumb2", "r_index1", "r_middle1", "r_ring1", "r_pinky1",
-            "head_yaw", "head_pitch",
-        ]
-        
-        # 如果有腰部，在最后添加腰部关节
-        if self.has_waist:
-            self.control_joint_names.append("waist_joint")
-            rospy.loginfo("Added waist_joint to control_joint_names")
+        if self.is_roban:
+            # 鲁班：23个关节（8手臂+12手指+2头部+1腰部）
+            self.control_joint_names = [
+                # 手臂 8 个（索引 0-7）
+                "zarm_l1_joint", "zarm_l2_joint", "zarm_l3_joint", "zarm_l4_joint",
+                "zarm_r1_joint", "zarm_r2_joint", "zarm_r3_joint", "zarm_r4_joint",
+                # 手指 12 个（索引 8-19）
+                "l_thumb1", "l_thumb2", "l_index1", "l_middle1", "l_ring1", "l_pinky1",
+                "r_thumb1", "r_thumb2", "r_index1", "r_middle1", "r_ring1", "r_pinky1",
+                # 头部 2 个（索引 20-21）
+                "head_yaw", "head_pitch",
+                # 腰部 1 个（索引 22）
+                "waist_joint",
+            ]
+        else:
+            # KUAVO：28或29个关节（14手臂+12手指+2头部+可选1腰部）
+            self.control_joint_names = [
+                "l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch",
+                "l_hand_yaw", "l_hand_pitch", "l_hand_roll",
+                "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch",
+                "r_hand_yaw", "r_hand_pitch", "r_hand_roll",
+                "l_thumb1", "l_thumb2", "l_index1", "l_middle1", "l_ring1", "l_pinky1",
+                "r_thumb1", "r_thumb2", "r_index1", "r_middle1", "r_ring1", "r_pinky1",
+                "head_yaw", "head_pitch",
+            ]
+            # 如果有腰部，在最后添加腰部关节
+            if self.has_waist:
+                self.control_joint_names.append("waist_joint")
+                rospy.loginfo("Added waist_joint to control_joint_names")
 
         # 关节在sensors_data_raw中的索引
-        # v50+: 腰部在索引12，手臂在索引13-26（14个，顺延1位），头部在索引27-28（2个，顺延1位）
-        # v40-: 手臂在索引12-25（14个），头部在索引26-27（2个）
-        if self.has_waist:
-            # v50+: 手臂关节索引为13-26（14个，跳过索引12的腰部），头部索引27-28（2个）
+        # ROBAN（v10-19）: 腿部0-11, 腰部12, 手臂13-20（8个）, 头部21-22（2个）
+        # KUAVO v50+: 腰部在索引12，手臂在索引13-26（14个），头部在索引27-28（2个）
+        # KUAVO v40-: 手臂在索引12-25（14个），头部在索引26-27（2个）
+        if self.is_roban:
+            # ROBAN: 需要从 sensors_data_raw 提取手臂、头部、腰部（手指从/dexhand/state）
+            self.arm_joint_indices = list(range(13, 21))  # 13-20，手臂8个
+            self.head_joint_indices = [21, 22]  # 21-22，头部2个
+            self.waist_joint_index = 12  # 12，腰部1个
+        elif self.has_waist:
+            # KUAVO v50+: 手臂关节索引为13-28（14个手臂+2个头部）
             self.arm_joint_indices = list(range(13, 29))  # 13-28，其中13-26是手臂，27-28是头部
+            self.head_joint_indices = None
             self.waist_joint_index = 12  # 腰部关节索引
         else:
-            # v40-: 手臂关节索引为12-25（14个），头部索引26-27（2个）
+            # KUAVO v40-: 手臂关节索引为12-27（14个手臂+2个头部）
             self.arm_joint_indices = list(range(12, 28))  # 12-27，其中12-25是手臂，26-27是头部
+            self.head_joint_indices = None
             self.waist_joint_index = None
 
         # 数据存储
@@ -164,59 +197,97 @@ class RosbagToBezierPlanner:
 
                     # 提取手臂关节数据
                     arm_positions = []
-                    hand_positions = []  # 这里实际存储头部数据
+                    head_positions = []  # 头部数据
                     waist_position = 0.0
-                    
-                    # 提取腰部数据（v50+）
-                    if self.has_waist and self.waist_joint_index is not None:
-                        if self.waist_joint_index < len(msg.joint_data.joint_q):
+
+                    if self.is_roban:
+                        # ROBAN: 提取腰部、手臂、头部数据
+                        # 提取腰部数据（索引12）
+                        if self.waist_joint_index is not None and self.waist_joint_index < len(msg.joint_data.joint_q):
                             waist_position = msg.joint_data.joint_q[self.waist_joint_index]
-                    
-                    # 提取手臂和头部关节数据
-                    # v50+: 腰部在索引12，手臂在索引13-26（14个），头部在索引27-28（2个）
-                    # v40-: 手臂在索引12-25（14个），头部在索引26-27（2个）
-                    for idx in self.arm_joint_indices:
-                        if idx < len(msg.joint_data.joint_q):
-                            if self.has_waist:
-                                # v50+: 头部索引从27开始（27-28）
-                                if idx >= 27:
-                                    hand_positions.append(msg.joint_data.joint_q[idx])
-                                else:
-                                    arm_positions.append(msg.joint_data.joint_q[idx])
+
+                        # 提取手臂数据（索引13-20，8个）
+                        for idx in self.arm_joint_indices:
+                            if idx < len(msg.joint_data.joint_q):
+                                arm_positions.append(msg.joint_data.joint_q[idx])
                             else:
-                                # v40-: 头部索引从26开始（26-27）
-                                if idx >= 26:
-                                    hand_positions.append(msg.joint_data.joint_q[idx])
+                                arm_positions.append(0.0)
+
+                        # 提取头部数据（索引21-22，2个）
+                        for idx in self.head_joint_indices:
+                            if idx < len(msg.joint_data.joint_q):
+                                head_positions.append(msg.joint_data.joint_q[idx])
+                            else:
+                                head_positions.append(0.0)
+
+                        # 确保 arm_positions 有 8 个元素
+                        expected_arm_count = 8
+                        if len(arm_positions) < expected_arm_count:
+                            arm_positions.extend([0.0] * (expected_arm_count - len(arm_positions)))
+                        elif len(arm_positions) > expected_arm_count:
+                            arm_positions = arm_positions[:expected_arm_count]
+
+                        # 确保 head_positions 有 2 个元素
+                        expected_head_count = 2
+                        if len(head_positions) < expected_head_count:
+                            head_positions.extend([0.0] * (expected_head_count - len(head_positions)))
+                        elif len(head_positions) > expected_head_count:
+                            head_positions = head_positions[:expected_head_count]
+
+                        # 组合控制关节数据：手臂(8) + 手指(12) + 头部(2) + 腰部(1) = 23
+                        control_positions = arm_positions + [0.0] * 12 + head_positions + [waist_position]
+                    else:
+                        # KUAVO v40-/v50+: 提取腰部、手臂、头部数据
+                        # 提取腰部数据（v50+）
+                        if self.has_waist and self.waist_joint_index is not None:
+                            if self.waist_joint_index < len(msg.joint_data.joint_q):
+                                waist_position = msg.joint_data.joint_q[self.waist_joint_index]
+
+                        # 提取手臂和头部关节数据
+                        # v50+: 腰部在索引12，手臂在索引13-26（14个），头部在索引27-28（2个）
+                        # v40-: 手臂在索引12-25（14个），头部在索引26-27（2个）
+                        for idx in self.arm_joint_indices:
+                            if idx < len(msg.joint_data.joint_q):
+                                if self.has_waist:
+                                    # v50+: 头部索引从27开始（27-28）
+                                    if idx >= 27:
+                                        head_positions.append(msg.joint_data.joint_q[idx])
+                                    else:
+                                        arm_positions.append(msg.joint_data.joint_q[idx])
                                 else:
-                                    arm_positions.append(msg.joint_data.joint_q[idx])
-                        else:
-                            arm_positions.append(0.0)
-                    
-                    # 确保 hand_positions 是列表（实际是头部数据）
-                    hand_positions = list(hand_positions)
-                    
-                    # 确保 arm_positions 有 14 个元素（左右各 7 个手臂关节）
-                    expected_arm_count = 14
-                    if len(arm_positions) < expected_arm_count:
-                        rospy.logwarn(f"arm_positions has {len(arm_positions)} elements, padding to {expected_arm_count}")
-                        arm_positions.extend([0.0] * (expected_arm_count - len(arm_positions)))
-                    elif len(arm_positions) > expected_arm_count:
-                        rospy.logwarn(f"arm_positions has {len(arm_positions)} elements, truncating to {expected_arm_count}")
-                        arm_positions = arm_positions[:expected_arm_count]
-                    
-                    # 确保 hand_positions 有 2 个元素（头部关节）
-                    expected_head_count = 2
-                    if len(hand_positions) < expected_head_count:
-                        rospy.logwarn(f"hand_positions has {len(hand_positions)} elements, padding to {expected_head_count}")
-                        hand_positions.extend([0.0] * (expected_head_count - len(hand_positions)))
-                    elif len(hand_positions) > expected_head_count:
-                        rospy.logwarn(f"hand_positions has {len(hand_positions)} elements, truncating to {expected_head_count}")
-                        hand_positions = hand_positions[:expected_head_count]
-                    
-                    # 组合控制关节数据：手臂(14) + 手指(12) + 头部(2) [+ 腰部(1)]
-                    control_positions = arm_positions + [0.0] * 12 + hand_positions
-                    if self.has_waist:
-                        control_positions.append(waist_position)  # 在最后添加腰部数据
+                                    # v40-: 头部索引从26开始（26-27）
+                                    if idx >= 26:
+                                        head_positions.append(msg.joint_data.joint_q[idx])
+                                    else:
+                                        arm_positions.append(msg.joint_data.joint_q[idx])
+                            else:
+                                arm_positions.append(0.0)
+
+                        # 确保 head_positions 是列表
+                        head_positions = list(head_positions)
+
+                        # 确保 arm_positions 有 14 个元素（左右各 7 个手臂关节）
+                        expected_arm_count = 14
+                        if len(arm_positions) < expected_arm_count:
+                            rospy.logwarn(f"arm_positions has {len(arm_positions)} elements, padding to {expected_arm_count}")
+                            arm_positions.extend([0.0] * (expected_arm_count - len(arm_positions)))
+                        elif len(arm_positions) > expected_arm_count:
+                            rospy.logwarn(f"arm_positions has {len(arm_positions)} elements, truncating to {expected_arm_count}")
+                            arm_positions = arm_positions[:expected_arm_count]
+
+                        # 确保 head_positions 有 2 个元素（头部关节）
+                        expected_head_count = 2
+                        if len(head_positions) < expected_head_count:
+                            rospy.logwarn(f"head_positions has {len(head_positions)} elements, padding to {expected_head_count}")
+                            head_positions.extend([0.0] * (expected_head_count - len(head_positions)))
+                        elif len(head_positions) > expected_head_count:
+                            rospy.logwarn(f"head_positions has {len(head_positions)} elements, truncating to {expected_head_count}")
+                            head_positions = head_positions[:expected_head_count]
+
+                        # 组合控制关节数据：手臂(14) + 手指(12) + 头部(2) [+ 腰部(1)]
+                        control_positions = arm_positions + [0.0] * 12 + head_positions
+                        if self.has_waist:
+                            control_positions.append(waist_position)  # 在最后添加腰部数据
                     
                     # 验证最终长度
                     expected_total = len(self.control_joint_names)
@@ -246,10 +317,15 @@ class RosbagToBezierPlanner:
                         rospy.logwarn(f"hand_position_list has {len(hand_position_list)} elements, truncating to {expected_finger_count}")
                         hand_position_list = hand_position_list[:expected_finger_count]
                     
-                    # 组合控制关节数据：手臂(14) + 手指(12) + 头部(2) [+ 腰部(1)]
-                    control_positions = [0.0] * 14 + hand_position_list + [0.0] * 2
-                    if self.has_waist:
-                        control_positions.append(0.0)  # 手部数据中没有腰部，填充0
+                    # 组合控制关节数据：根据机器人类型构建
+                    if self.is_roban:
+                        # ROBAN: 手臂(8) + 手指(12) + 头部(2) + 腰部(1) = 23
+                        control_positions = [0.0] * 8 + hand_position_list + [0.0] * 2 + [0.0]
+                    else:
+                        # KUAVO: 手臂(14) + 手指(12) + 头部(2) [+ 腰部(1)]
+                        control_positions = [0.0] * 14 + hand_position_list + [0.0] * 2
+                        if self.has_waist:
+                            control_positions.append(0.0)  # 手部数据中没有腰部，填充0
                     
                     # 验证最终长度
                     expected_total = len(self.control_joint_names)
@@ -521,8 +597,11 @@ class RosbagToBezierPlanner:
         self.bezier_control_points = []
 
         for joint_idx in range(len(self.control_joint_names)):
-            # 检查是否为手指关节（索引14-25）
-            is_finger_joint = 14 <= joint_idx < 26
+            # 检查是否为手指关节（根据机器人类型判断索引范围）
+            if self.is_roban:
+                is_finger_joint = 8 <= joint_idx < 20   # ROBAN: 手指索引8-19
+            else:
+                is_finger_joint = 14 <= joint_idx < 26  # KUAVO: 手指索引14-25
             
             # 如果没有手指数据且当前是手指关节，生成全0的控制点
             # 注意：腰部关节的数据来自sensors_data_raw话题，已经包含在control_data中，应该正常处理
@@ -703,8 +782,13 @@ class RosbagToBezierPlanner:
 
         def trajectory_callback(msg):
             start_time = msg.header.stamp.to_sec()
-            finger_start_idx = 14  # 手指关节起始索引
-            finger_end_idx = 26    # 手指关节结束索引（不包含）
+            # 根据机器人类型确定手指索引范围
+            if self.is_roban:
+                finger_start_idx = 8   # ROBAN: 手指索引8-19
+                finger_end_idx = 20
+            else:
+                finger_start_idx = 14  # KUAVO: 手指索引14-25
+                finger_end_idx = 26
             # 手指关节的弧度范围：0~100 映射到 0~1.7453 弧度
             finger_max_radians = 1.7453
 
@@ -888,21 +972,32 @@ class RosbagToBezierPlanner:
 
         # 为每个轨迹点创建frame
         for frame_idx, point in enumerate(unique_trajectory):
-            # 计算关节数量：v40-为28个，v50+为29个（包含腰部）
-            num_joints = 29 if self.has_waist else 28
+            # 计算关节数量：ROBAN为23个，KUAVO v40-为28个，v50+为29个（包含腰部）
+            if self.is_roban:
+                num_joints = 23  # 鲁班：8手臂+12手指+2头部+1腰部
+            elif self.has_waist:
+                num_joints = 29  # KUAVO v50+：28个+1个腰部
+            else:
+                num_joints = 28  # KUAVO v40-：28个
             # 创建servo数据
             servos = [0] * num_joints
 
             # 填充所有关节数据
-            # v40-: 手臂14个 + 手指12个 + 头部2个 = 28个
-            # v50+: 手臂14个 + 手指12个 + 头部2个 + 腰部1个 = 29个
+            # ROBAN: 手臂8个 + 手指12个 + 头部2个 + 腰部1个 = 23个
+            # KUAVO v40-: 手臂14个 + 手指12个 + 头部2个 = 28个
+            # KUAVO v50+: 手臂14个 + 手指12个 + 头部2个 + 腰部1个 = 29个
             positions = point.get('positions', [])
-            finger_start_idx = 14  # 手指关节起始索引
-            finger_end_idx = 26    # 手指关节结束索引（不包含）
-            
+            # 根据机器人类型确定手指索引范围
+            if self.is_roban:
+                finger_start_idx = 8   # ROBAN: 手指索引8-19
+                finger_end_idx = 20
+            else:
+                finger_start_idx = 14  # KUAVO: 手指索引14-25
+                finger_end_idx = 26
+
             for joint_idx in range(num_joints):  # 扩展到所有关节
                 if joint_idx < len(positions):
-                    # 手指关节（索引14-25）来自/dexhand/state，已经是0-100的百分比值，不需要转换
+                    # 手指关节来自/dexhand/state，已经是0-100的百分比值，不需要转换
                     # 手臂和头部关节来自/sensors_data_raw，是弧度值，需要转换为角度
                     if finger_start_idx <= joint_idx < finger_end_idx:
                         # 手指关节：直接使用原值（已经是0-100范围）
@@ -917,7 +1012,13 @@ class RosbagToBezierPlanner:
 
             # 创建属性数据（为所有关节计算控制点）
             attributes = {}
-            num_joints = 29 if self.has_waist else 28
+            # 计算关节数量：ROBAN为23个，KUAVO v40-为28个，v50+为29个
+            if self.is_roban:
+                num_joints = 23  # 鲁班：8手臂+12手指+2头部+1腰部
+            elif self.has_waist:
+                num_joints = 29  # KUAVO v50+：28个+1个腰部
+            else:
+                num_joints = 28  # KUAVO v40-：28个
             for servo_idx in range(1, num_joints + 1):  # 伺服电机索引从1开始
                 joint_idx = servo_idx - 1  # 转换为0-based索引
                 # 为所有关节（手臂、手指、头部、腰部）计算控制点
@@ -1014,9 +1115,14 @@ class RosbagToBezierPlanner:
         # 为每个时间点创建frame
         for time_idx, current_time in enumerate(sorted_times):
             keyframe = int(current_time * 100)  # 秒转10ms单位
-            
-            # 计算关节数量：v40-为28个，v50+为29个（包含腰部）
-            num_joints = 29 if self.has_waist else 28
+
+            # 计算关节数量：ROBAN为23个，KUAVO v40-为28个，v50+为29个
+            if self.is_roban:
+                num_joints = 23  # 鲁班：8手臂+12手指+2头部+1腰部
+            elif self.has_waist:
+                num_joints = 29  # KUAVO v50+：28个+1个腰部
+            else:
+                num_joints = 28  # KUAVO v40-：28个
             # 创建servo数据
             servos = [0] * num_joints
             
@@ -1069,10 +1175,15 @@ class RosbagToBezierPlanner:
                             current_position = p0_value if current_time <= p0_time else p3_value
                         
                         # 计算控制点（转换为TACT格式：相对于当前帧的偏移）
-                        # 手指关节（索引14-25）已经是0-100范围，不需要弧度转换
+                        # 手指关节已经是0-100范围，不需要弧度转换
                         # 其他关节是弧度值，需要转换为度
-                        finger_start_idx = 14
-                        finger_end_idx = 26
+                        # 根据机器人类型确定手指索引范围
+                        if self.is_roban:
+                            finger_start_idx = 8   # ROBAN: 手指索引8-19
+                            finger_end_idx = 20
+                        else:
+                            finger_start_idx = 14  # KUAVO: 手指索引14-25
+                            finger_end_idx = 26
                         is_finger_joint = finger_start_idx <= joint_idx < finger_end_idx
                         
                         # 左控制点：从当前时间到P1的时间偏移和角度偏移
@@ -1097,10 +1208,15 @@ class RosbagToBezierPlanner:
                         
                         break
                 
-                # 手指关节（索引14-25）已经是0-100范围，不需要弧度转换
+                # 手指关节已经是0-100范围，不需要弧度转换
                 # 其他关节是弧度值，需要转换为角度
-                finger_start_idx = 14
-                finger_end_idx = 26
+                # 根据机器人类型确定手指索引范围
+                if self.is_roban:
+                    finger_start_idx = 8   # ROBAN: 手指索引8-19
+                    finger_end_idx = 20
+                else:
+                    finger_start_idx = 14  # KUAVO: 手指索引14-25
+                    finger_end_idx = 26
                 is_finger_joint = finger_start_idx <= joint_idx < finger_end_idx
                 
                 if is_finger_joint:
@@ -1271,9 +1387,16 @@ class RosbagToBezierPlanner:
         # 步骤2: 始终保留第一个和最后一个点（确保轨迹边界完整）
         required_time_indices.add(0)
         required_time_indices.add(len(trajectory) - 1)
-        
-        # 步骤3: 对每个关节（0-13，共14个手臂关节）分别处理
-        for joint_idx in range(14):
+
+        # 步骤3: 对每个关节分别处理
+        # ROBAN: 23个关节 (0-22)，KUAVO: 28或29个关节
+        # 获取轨迹中实际有多少个关节数据
+        if trajectory:
+            num_joints = len(trajectory[0].get('positions', []))
+        else:
+            num_joints = 14
+
+        for joint_idx in range(num_joints):
             joint_required_indices = self._filter_joint_zero_velocity_points(
                 trajectory, joint_idx, velocity_threshold
             )
@@ -1386,8 +1509,15 @@ class RosbagToBezierPlanner:
         required_time_indices.add(0)
         required_time_indices.add(len(trajectory) - 1)
 
-        # 步骤3: 对每个关节（0-13，共 14 个手臂关节）分别处理
-        for joint_idx in range(14):
+        # 步骤3: 对每个关节分别处理
+        # ROBAN: 23个关节 (0-22)，KUAVO: 28或29个关节
+        # 获取轨迹中实际有多少个关节数据
+        if trajectory:
+            num_joints = len(trajectory[0].get('positions', []))
+        else:
+            num_joints = 14
+
+        for joint_idx in range(num_joints):
             joint_required_indices = self._filter_joint_small_position_change_points(
                 trajectory, joint_idx, position_threshold
             )
@@ -1646,10 +1776,15 @@ class RosbagToBezierPlanner:
             return False
 
         # 步骤1.5: 合并手部数据到手臂数据中（按时间戳对齐）
-        # 如果有手部数据，将手指部分（索引14-25）合并到joint_data中
+        # 如果有手部数据，将手指部分合并到joint_data中
         if len(self.hand_sensors_data) > 0 and len(self.joint_data) > 0:
-            finger_start_idx = 14  # 手指数据在joint_data中的起始索引
-            finger_end_idx = 26    # 手指数据在joint_data中的结束索引（不包含）
+            # 根据机器人类型确定手指索引范围
+            if self.is_roban:
+                finger_start_idx = 8   # ROBAN: 手指索引8-19
+                finger_end_idx = 20
+            else:
+                finger_start_idx = 14  # KUAVO: 手指索引14-25
+                finger_end_idx = 26
 
             merged_count = 0
             hand_idx = 0  # 手部数据的当前索引

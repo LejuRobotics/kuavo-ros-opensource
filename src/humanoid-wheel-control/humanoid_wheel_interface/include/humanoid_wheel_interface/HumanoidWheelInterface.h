@@ -88,9 +88,23 @@ class HumanoidWheelInterface final : public RobotInterface {
   std::unique_ptr<StateCost> getEndEffectorConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                       const std::string& prefix, bool useCaching, const std::string& libraryFolder,
                                                       bool recompileLibraries, int eefIdx);
+  std::unique_ptr<StateCost> getEndEffectorBoxSoftCost(const PinocchioInterface& pinocchioInterface, const std::string& taskFile, 
+                                                       bool usePreComputation, const std::string& libraryFolder, 
+                                                       bool recompileLibraries, int eefIdx);
+  std::unique_ptr<StateCost> getEndEffectorMultiPointBoxSoftCost(const PinocchioInterface& pinocchioInterface,
+                                                       const std::string& taskFile, bool usePreComputation, 
+                                                       const std::string& libraryFolder, bool recompileLibraries, 
+                                                       int eefIdx);
   std::unique_ptr<StateCost> getEndEffectorLocalConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                            const std::string& prefix, bool useCaching, const std::string& libraryFolder,
                                                            bool recompileLibraries, int eefIdx);
+  std::unique_ptr<StateCost> getEndEffectorLocalBoxSoftCost(const PinocchioInterface& pinocchioInterface, const std::string& taskFile, 
+                                                       bool usePreComputation, const std::string& libraryFolder, 
+                                                       bool recompileLibraries, int eefIdx);
+  std::unique_ptr<StateCost> getEndEffectorLocalMultiPointBoxSoftCost(const PinocchioInterface& pinocchioInterface,
+                                                       const std::string& taskFile, bool usePreComputation, 
+                                                       const std::string& libraryFolder, bool recompileLibraries, 
+                                                       int eefIdx);
   std::unique_ptr<StateCost> getSelfCollisionConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                         const std::string& urdfFile, const std::string& prefix, bool useCaching,
                                                         const std::string& libraryFolder, bool recompileLibraries);
@@ -98,6 +112,20 @@ class HumanoidWheelInterface final : public RobotInterface {
   std::unique_ptr<StateCost> getTorsoTrackingSoftConstraint(const PinocchioInterface& pinocchioInterface, 
                                                             const ManipulatorModelInfo& info, 
                                                             const std::string& taskFile);
+  std::unique_ptr<StateCost> getTorsoTrackingBoxSoftCost(const PinocchioInterface& pinocchioInterface,
+                                                         const std::string& taskFile);
+  std::unique_ptr<StateCost> getEndEffectorJointBias(const PinocchioInterface& pinocchioInterface, 
+                                                     const std::string& taskFile);
+  std::unique_ptr<StateCost> getEndEffectorMultiPointConstraint(const PinocchioInterface& pinocchioInterface, 
+                                                      const std::string& taskFile, bool usePreComp, 
+                                                      const std::string& libraryFolder, bool recompileLibraries, int eefIdx);
+  std::unique_ptr<StateCost> getEndEffectorLocalMultiPointConstraint(const PinocchioInterface& pinocchioInterface, 
+                                                                     const std::string& taskFile, bool usePreComp, 
+                                                                     const std::string& libraryFolder,
+                                                                     bool recompileLibraries, int eefIdx);
+  std::unique_ptr<StateCost> getSelfDistanceConstraint(int index, const PinocchioInterface& pinocchioInterface, 
+                                                       std::pair<std::string, std::string> linkPair,
+                                                       const std::string& taskFile, bool verbose);
 
   ddp::Settings ddpSettings_;
   sqp::Settings sqpSettings_;

@@ -70,7 +70,8 @@ class ArmTrajectoryBezierDemo:
         if self.robot_class == KUAVO:
             # 根据是否有腰部关节确定TACT长度
             tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
-            if self.kuavo_control_scheme == "rl":
+            current_control_mode = self.get_current_control_mode()
+            if current_control_mode == "rl":
                 self.INIT_ARM_POS = [int(0)] * tact_length
             else:
                 # 基础28个关节 + 可选的1个腰部关节
@@ -147,6 +148,12 @@ class ArmTrajectoryBezierDemo:
                                                 queue_size=1, 
                                                 tcp_nodelay=True)
 
+        # 订阅 /kuavo_arm_traj 用于 create_action_data 的起始帧（使用当前指令位姿而非关节反馈）
+        self._last_kuavo_arm_traj_msg = None
+        self.kuavo_arm_traj_sub = rospy.Subscriber(
+            '/kuavo_arm_traj', JointState, self._kuavo_arm_traj_callback, queue_size=1, tcp_nodelay=True
+        )
+
         # 添加发布者
         self.robot_action_state_pub = rospy.Publisher('/robot_action_state', RobotActionState, queue_size=1)
 
@@ -209,6 +216,27 @@ class ArmTrajectoryBezierDemo:
             self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
 
         self.current_arm_joint_state = [round(v, 5) for v in self.current_arm_joint_state]
+
+    def _kuavo_arm_traj_callback(self, msg):
+        """缓存 /kuavo_arm_traj 最新消息，供 create_action_data 使用"""
+        self._last_kuavo_arm_traj_msg = msg
+
+    def _get_servos_from_kuavo_arm_traj(self, tact_length):
+        """从 /kuavo_arm_traj 获取起始关节角（度），不足部分按长度填充0。"""
+        if getattr(self, '_last_kuavo_arm_traj_msg', None) is None or not getattr(
+            self._last_kuavo_arm_traj_msg, 'position', None
+        ):
+            return [int(round(math.degrees(x))) for x in self.current_arm_joint_state[:tact_length]]
+
+        msg = self._last_kuavo_arm_traj_msg
+        pos = list(msg.position)
+        n_from_topic = min(len(pos), tact_length)
+        from_topic = [int(round(x)) for x in pos[:n_from_topic]]
+        if n_from_topic >= tact_length:
+            return from_topic[:tact_length]
+        # 其余关节按长度填充0
+        rest = [0] * (tact_length - n_from_topic)
+        return from_topic + rest
 
     def traj_callback(self, msg):
         if len(msg.points) == 0:
@@ -653,22 +681,47 @@ class ArmTrajectoryBezierDemo:
         
         return transition_keyframe
 
-    def add_init_frame(self, frames, is_rl=False):
+    def add_init_frame(self, frames, is_rl=False, is_first_stage=True):
         action_data = {}
 
         # rl 要在刚开始插入当前状态为初始值来平滑过渡，ocs2 不需要
         if is_rl:
             import copy
+
+            # 检查当前状态和第一帧的差异
+            first_frame = frames[0]
+
+            if is_first_stage and not self.interrupt_flag:
+                # 检查当前状态和第一帧的差异
+                current_angles_deg = [math.degrees(pos) for pos in self.current_arm_joint_state[:len(first_frame["servos"])]]
+            else:
+                current_angles_deg = self.servos_start
+
+            # 使用 calculate_transition_time 精确计算过渡时间
+            # 考虑每个关节的实际差异和速度限制，比简单的平均差异更准确
+            transition_keyframes = self.calculate_transition_time(
+                current_angles_deg,
+                first_frame["servos"],
+                min_keyframe=10,   # 最小0.1秒（姿态几乎一致）
+                max_keyframe=100,  # 最大1秒（姿态差异大）
+                default_keyframe=50  # 默认0.5秒
+            )
+
+            rospy.loginfo(f"RL模式过渡时间：{transition_keyframes} keyframes ({transition_keyframes * 0.01:.2f}秒)")
+
             for frame in frames:
-                frame["keyframe"] += 100
+                frame["keyframe"] += transition_keyframes
             frame0 = copy.deepcopy(frames[0])
             # 如果原来的长度长则补全，否则就需要裁剪
-            if len(self.current_arm_joint_state) > len(frame0["servos"]):
-                # 当前状态长度更长，需要裁剪到原始长度
-                frame0["servos"] = [math.degrees(pos) for pos in self.current_arm_joint_state[:len(frame0["servos"])]]
+            if is_first_stage and not self.interrupt_flag:
+                if len(self.current_arm_joint_state) > len(frame0["servos"]):
+                    # 当前状态长度更长，需要裁剪到原始长度
+                    frame0["servos"] = [math.degrees(pos) for pos in self.current_arm_joint_state[:len(frame0["servos"])]]
+                else:
+                    # 当前状态长度更短或相等，需要补全到原始长度
+                    frame0["servos"] = [math.degrees(pos) for pos in self.current_arm_joint_state] + [0] * (len(frame0["servos"]) - len(self.current_arm_joint_state))
             else:
-                # 当前状态长度更短或相等，需要补全到原始长度
-                frame0["servos"] = [math.degrees(pos) for pos in self.current_arm_joint_state] + [0] * (len(frame0["servos"]) - len(self.current_arm_joint_state))
+                frame0["servos"] = self.servos_start
             frame0["keyframe"] = 0
             frames.insert(0, frame0)
         
@@ -845,7 +898,8 @@ class ArmTrajectoryBezierDemo:
         self._timer = rospy.Timer(rospy.Duration(delay), self._on_timer_trigger, oneshot=True)
 
     def reset_robot_state(self):
-        if self.kuavo_control_scheme == "rl":
+        current_control_mode = self.get_current_control_mode()
+        if current_control_mode == "rl":
             self.rl_reset_robot_state()
         else:
             # 做完动作之后恢复自然摆臂状态，并且手、头、腰部关节归位
@@ -871,9 +925,11 @@ class ArmTrajectoryBezierDemo:
             servos_end = [0] * tact_length
         else:
             servos_end = self.INIT_ARM_POS
+        # # 起始帧从 /kuavo_arm_traj 获取（当前指令位姿）；无数据时回退到 current_arm_joint_state
+        self.servos_start = self._get_servos_from_kuavo_arm_traj(tact_length)
         frames = [
             {
-                "servos": [int(round(math.degrees(x))) for x in self.current_arm_joint_state],
+                "servos": self.servos_start,
                 "keyframe": 0,
                 "attribute": {str(i+1): {"CP": [[0,0],[0,0]]} for i in range(tact_length)}
             },
@@ -892,11 +948,20 @@ class ArmTrajectoryBezierDemo:
         finish_time = 2
         data = self.create_action_data(finish_time, is_rl=True)
 
-        if self.get_current_control_mode() == "rl":
-            finish_time += 1
+        # 不需要额外增加时间，add_init_frame会根据实际差异动态添加过渡帧
         self.END_FRAME_TIME = finish_time
 
-        action_data = self.add_init_frame(data["frames"], is_rl=True)
+        action_data = self.add_init_frame(data["frames"], is_rl=True, is_first_stage=False)
+
+        # RL模式下，add_init_frame可能插入了过渡帧，需要更新END_FRAME_TIME
+        current_control_mode = self.get_current_control_mode()
+        if current_control_mode == "rl":
+            frames = data["frames"]
+            if frames:
+                last_keyframe = max(f.get("keyframe", 0) for f in frames)
+                # 将 keyframe 转换为秒并更新 END_FRAME_TIME
+                self.END_FRAME_TIME = last_keyframe * 0.01
+
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
@@ -928,9 +993,14 @@ class ArmTrajectoryBezierDemo:
             self._timer.shutdown()
 
     def _on_reset_timer_trigger(self, event):
-        """复位动作结束后停止发布，避免递归复位。"""
+        """复位动作结束后停止发布，并恢复手臂模式为自动摆臂（AMP/RL 下行走时摆手）。"""
         self.arm_flag = False
         rospy.loginfo("Reset trajectory finished. Stopping publishers.")
+        # AMP/RL 下做完动作会切到 mode 2，复位轨迹播完后需切回 mode 1，否则拨动摇杆行走时不摆手
+        current_control_mode = self.get_current_control_mode()
+        if current_control_mode == "rl":
+            self.call_change_arm_ctrl_mode_service(1)
+            # rospy.loginfo("RL reset done: arm mode switched back to 1 (auto swing) for walking.")
 
     def publish_running_action_state(self):
         """持续发布 state=1"""
@@ -1167,13 +1237,13 @@ class ArmTrajectoryBezierDemo:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
-        # RL模式下不需要手臂模式切换，RL控制器直接控制手臂
-        if self.kuavo_control_scheme != "rl":
-            self.call_change_arm_ctrl_mode_service(2)
 
-            # 等待手臂控制模式切换完成
-            if not self.wait_for_arm_mode_change_complete(2, timeout=2.0):
-                rospy.logwarn("Arm control mode change may not be complete, but continuing...")
+        self.call_change_arm_ctrl_mode_service(2)
+
+        # 等待手臂控制模式切换完成
+        if not self.wait_for_arm_mode_change_complete(2, timeout=2.0):
+            rospy.logwarn("Arm control mode change may not be complete, but continuing...")
+
 
         # 获取初始帧时间
         self.arm_flag = True
@@ -1184,8 +1254,7 @@ class ArmTrajectoryBezierDemo:
         # 读取动作完成时间
         finish_time = data.get("finish", 0) * 0.01 # 转换为秒
         current_control_mode = self.get_current_control_mode()
-        if current_control_mode == "rl":
-            finish_time += 1.0
+        # RL模式和OCS2模式的过渡时间都会在 add_init_frame 中动态添加，这里不需要额外增加时间
         # ocs2 模式的过渡时间将在 add_init_frame 中动态计算并更新
         self.END_FRAME_TIME = finish_time
 
@@ -1207,9 +1276,10 @@ class ArmTrajectoryBezierDemo:
                 rospy.loginfo("0f处没有动作帧，已添加初始站立帧")
 
         action_data = self.add_init_frame(frames, is_rl=current_control_mode == "rl")
-        
-        # ocs2 模式和半身模式下，根据实际计算的过渡时间更新结束时间
-        if current_control_mode == "ocs2" and self.only_half_up_body:
+
+        # 根据实际计算的过渡时间更新结束时间
+        # RL模式和OCS2半身模式都需要更新，因为add_init_frame可能插入了过渡帧
+        if current_control_mode == "rl" or (current_control_mode == "ocs2" and self.only_half_up_body):
             # 找到最后一帧的 keyframe（包括新添加的过渡帧）
             if frames:
                 last_keyframe = max(f.get("keyframe", 0) for f in frames)
@@ -1228,8 +1298,9 @@ class ArmTrajectoryBezierDemo:
         if success:
             rospy.loginfo("Arm trajectory planned successfully")
             threading.Thread(target=self.run).start()
-            # 半身模式下使用更新后的 END_FRAME_TIME（包含过渡帧时间），其他模式使用原始的 finish_time
-            if current_control_mode == "ocs2" and self.only_half_up_body:
+            # 使用更新后的 END_FRAME_TIME（包含过渡帧时间）
+            # RL模式和OCS2半身模式都会在add_init_frame中添加过渡帧并更新END_FRAME_TIME
+            if current_control_mode == "rl" or (current_control_mode == "ocs2" and self.only_half_up_body):
                 self.delayed_publish_action_state(self.END_FRAME_TIME)
             else:
                 self.delayed_publish_action_state(finish_time)
@@ -1237,7 +1308,7 @@ class ArmTrajectoryBezierDemo:
         else:
             rospy.logerr("Failed to plan arm trajectory")
             self.publish_action_state(0)
-            return ExecuteArmActionResponse(success=False, message="Failed to execute action")
+            return ExecuteArmActionResponse(success=False, message="Failed to exefcute action")
 
     def run(self):
         rate = rospy.Rate(100)

@@ -24,19 +24,19 @@ class Quest3ArmInfoTransformer final {
   bool updateHandPoseAndElbowPosition(const noitom_hi5_hand_udp_python::PoseInfoList &input,
                                       noitom_hi5_hand_udp_python::PoseInfoList &output);
 
-  const ArmPose &getLeftHandPose() const { return leftHandPose_; }
+  ArmPose getLeftHandPose() const { return leftHandPose_; }
 
-  const ArmPose &getRightHandPose() const { return rightHandPose_; }
+  ArmPose getRightHandPose() const { return rightHandPose_; }
 
-  const ArmPose &getLeftElbowPose() const { return leftElbowPose_; }
+  ArmPose getLeftElbowPose() const { return leftElbowPose_; }
 
-  const ArmPose &getRightElbowPose() const { return rightElbowPose_; }
+  ArmPose getRightElbowPose() const { return rightElbowPose_; }
 
-  const ArmPose &getLeftShoulderPose() const { return leftShoulderPose_; }
+  ArmPose getLeftShoulderPose() const { return leftShoulderPose_; }
 
-  const ArmPose &getRightShoulderPose() const { return rightShoulderPose_; }
+  ArmPose getRightShoulderPose() const { return rightShoulderPose_; }
 
-  const HeadBodyPose &getHeadBodyPose() const { return headBodyPose_; }
+  HeadBodyPose getHeadBodyPose() const { return headBodyPose_; }
 
   // 新增：更新手部和肘部位姿信息列表 - 参考Python版本
   void updateHandElbowPoseInfoList(noitom_hi5_hand_udp_python::PoseInfoList &output);
@@ -53,6 +53,7 @@ class Quest3ArmInfoTransformer final {
   bool isMeasureArmLength() const { return armLengthMeasurement_.isMeasureArmLength(); }
   void resetArmLengthMeasurement() { armLengthMeasurement_.reset(); }
   void completeArmLengthMeasurement() { armLengthMeasurement_.completeMeasurement(); }
+  bool isArmLengthMeasurementComplete() const { return armLengthMeasurement_.isMeasurementComplete(); }
   void setDeltaScale(const Eigen::Vector3d &deltaScale) { deltaScale_ = deltaScale; }
 
   // 新增：获取平均手臂长度

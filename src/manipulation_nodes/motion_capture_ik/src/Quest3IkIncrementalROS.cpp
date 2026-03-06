@@ -2397,7 +2397,7 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   // 读取关节角度fhan滤波参数
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_r_joint", fhanRJoint_, 900.0, 1);
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_kh0_joint", fhanKh0Joint_, 6.0, 1);
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", maxJointVelocity_, 1.0, 3);
+  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", maxJointVelocity_, 30.0, 3);
 
   // 读取手部位置约束参数
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/sphere_radius_limit", sphereRadiusLimit_, 0.5, 2);

@@ -134,7 +134,8 @@ class HardwarePlant
     void calibrateBipedLoop();
     void calibrateWheelLoop();
     void calibrateArmJoints();
-    bool calibrateArmJointsAtLimit(bool auto_mode = true, bool calibrate_head = true, bool head_only = false);
+    bool calibrateArmJointsAtLimit(bool auto_mode = true, bool calibrate_head = true, bool head_only = false, 
+                                   bool calibrate_leg = false, bool leg_only = false);
     void initEndEffector();
 
     bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);

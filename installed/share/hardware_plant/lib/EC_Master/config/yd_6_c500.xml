@@ -171,7 +171,7 @@
                 </Send>
                 <Recv>
                     <BitStart>0</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitLength>200</BitLength>
                 </Recv>
                 <Sm2>
                     <Type>Outputs</Type>
@@ -250,6 +250,13 @@
                         <BitLen>16</BitLen>
                         <Name>IGBT Temperature</Name>
                         <DataType>UINT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3009</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>NTC Temperature</Name>
+                        <DataType>INT</DataType>
                     </Entry>
                     <Entry>
                         <Index>#x6061</Index>
@@ -437,7 +444,7 @@
                         <Index>#x3504</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
+                        <Name>Velocity loop kp</Name>
                         <DataType>UINT</DataType>
                     </Entry>
                     <Entry>
@@ -726,6 +733,15 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>9</SubIndex>
+                            <Data>10000930</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1A00 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>6656</Index>
+                            <SubIndex>10</SubIndex>
                             <Data>08006160</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -735,7 +751,7 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>0a</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -1604,7 +1620,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1001</Adp>
                     <Ado>2072</Ado>
-                    <Data>0014170020000100</Data>
+                    <Data>0014190020000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -1624,7 +1640,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1001</Adp>
                     <Ado>1552</Ado>
-                    <Data>00080010170000070014000101000000</Data>
+                    <Data>00080010190000070014000101000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -1900,8 +1916,8 @@
                     <BitLength>184</BitLength>
                 </Send>
                 <Recv>
-                    <BitStart>184</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>200</BitStart>
+                    <BitLength>200</BitLength>
                 </Recv>
                 <Sm2>
                     <Type>Outputs</Type>
@@ -1980,6 +1996,13 @@
                         <BitLen>16</BitLen>
                         <Name>IGBT Temperature</Name>
                         <DataType>UINT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3009</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>NTC Temperature</Name>
+                        <DataType>INT</DataType>
                     </Entry>
                     <Entry>
                         <Index>#x6061</Index>
@@ -2167,7 +2190,7 @@
                         <Index>#x3504</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
+                        <Name>Velocity loop kp</Name>
                         <DataType>UINT</DataType>
                     </Entry>
                     <Entry>
@@ -2456,6 +2479,15 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>9</SubIndex>
+                            <Data>10000930</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1A00 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>6656</Index>
+                            <SubIndex>10</SubIndex>
                             <Data>08006160</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -2465,7 +2497,7 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>0a</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -3334,7 +3366,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1002</Adp>
                     <Ado>2072</Ado>
-                    <Data>0014170020000100</Data>
+                    <Data>0014190020000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -3354,7 +3386,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1002</Adp>
                     <Ado>1552</Ado>
-                    <Data>17080010170000070014000101000000</Data>
+                    <Data>19080010190000070014000101000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -3634,8 +3666,8 @@
                     <BitLength>184</BitLength>
                 </Send>
                 <Recv>
-                    <BitStart>368</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>400</BitStart>
+                    <BitLength>200</BitLength>
                 </Recv>
                 <Sm2>
                     <Type>Outputs</Type>
@@ -3714,6 +3746,13 @@
                         <BitLen>16</BitLen>
                         <Name>IGBT Temperature</Name>
                         <DataType>UINT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3009</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>NTC Temperature</Name>
+                        <DataType>INT</DataType>
                     </Entry>
                     <Entry>
                         <Index>#x6061</Index>
@@ -3901,7 +3940,7 @@
                         <Index>#x3504</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
+                        <Name>Velocity loop kp</Name>
                         <DataType>UINT</DataType>
                     </Entry>
                     <Entry>
@@ -4190,6 +4229,15 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>9</SubIndex>
+                            <Data>10000930</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1A00 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>6656</Index>
+                            <SubIndex>10</SubIndex>
                             <Data>08006160</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -4199,7 +4247,7 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>0a</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -5068,7 +5116,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1003</Adp>
                     <Ado>2072</Ado>
-                    <Data>0014170020000100</Data>
+                    <Data>0014190020000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -5088,7 +5136,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1003</Adp>
                     <Ado>1552</Ado>
-                    <Data>2e080010170000070014000101000000</Data>
+                    <Data>32080010190000070014000101000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -5368,8 +5416,8 @@
                     <BitLength>184</BitLength>
                 </Send>
                 <Recv>
-                    <BitStart>552</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>600</BitStart>
+                    <BitLength>200</BitLength>
                 </Recv>
                 <Sm2>
                     <Type>Outputs</Type>
@@ -5448,6 +5496,13 @@
                         <BitLen>16</BitLen>
                         <Name>IGBT Temperature</Name>
                         <DataType>UINT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3009</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>NTC Temperature</Name>
+                        <DataType>INT</DataType>
                     </Entry>
                     <Entry>
                         <Index>#x6061</Index>
@@ -5635,7 +5690,7 @@
                         <Index>#x3504</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
+                        <Name>Velocity loop kp</Name>
                         <DataType>UINT</DataType>
                     </Entry>
                     <Entry>
@@ -5924,6 +5979,15 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>9</SubIndex>
+                            <Data>10000930</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1A00 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>6656</Index>
+                            <SubIndex>10</SubIndex>
                             <Data>08006160</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -5933,7 +5997,7 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>0a</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -6802,7 +6866,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1004</Adp>
                     <Ado>2072</Ado>
-                    <Data>0014170020000100</Data>
+                    <Data>0014190020000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -6822,7 +6886,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1004</Adp>
                     <Ado>1552</Ado>
-                    <Data>45080010170000070014000101000000</Data>
+                    <Data>4b080010190000070014000101000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -7102,8 +7166,8 @@
                     <BitLength>184</BitLength>
                 </Send>
                 <Recv>
-                    <BitStart>736</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>800</BitStart>
+                    <BitLength>200</BitLength>
                 </Recv>
                 <Sm2>
                     <Type>Outputs</Type>
@@ -7182,6 +7246,13 @@
                         <BitLen>16</BitLen>
                         <Name>IGBT Temperature</Name>
                         <DataType>UINT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3009</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>NTC Temperature</Name>
+                        <DataType>INT</DataType>
                     </Entry>
                     <Entry>
                         <Index>#x6061</Index>
@@ -7369,7 +7440,7 @@
                         <Index>#x3504</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
+                        <Name>Velocity loop kp</Name>
                         <DataType>UINT</DataType>
                     </Entry>
                     <Entry>
@@ -7658,6 +7729,15 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>9</SubIndex>
+                            <Data>10000930</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1A00 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>6656</Index>
+                            <SubIndex>10</SubIndex>
                             <Data>08006160</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -7667,7 +7747,7 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>0a</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -8536,7 +8616,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1005</Adp>
                     <Ado>2072</Ado>
-                    <Data>0014170020000100</Data>
+                    <Data>0014190020000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -8556,7 +8636,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1005</Adp>
                     <Ado>1552</Ado>
-                    <Data>5c080010170000070014000101000000</Data>
+                    <Data>64080010190000070014000101000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -8836,8 +8916,8 @@
                     <BitLength>184</BitLength>
                 </Send>
                 <Recv>
-                    <BitStart>920</BitStart>
-                    <BitLength>184</BitLength>
+                    <BitStart>1000</BitStart>
+                    <BitLength>200</BitLength>
                 </Recv>
                 <Sm2>
                     <Type>Outputs</Type>
@@ -8916,6 +8996,13 @@
                         <BitLen>16</BitLen>
                         <Name>IGBT Temperature</Name>
                         <DataType>UINT</DataType>
+                    </Entry>
+                    <Entry>
+                        <Index>#x3009</Index>
+                        <SubIndex>0</SubIndex>
+                        <BitLen>16</BitLen>
+                        <Name>NTC Temperature</Name>
+                        <DataType>INT</DataType>
                     </Entry>
                     <Entry>
                         <Index>#x6061</Index>
@@ -9103,7 +9190,7 @@
                         <Index>#x3504</Index>
                         <SubIndex>0</SubIndex>
                         <BitLen>16</BitLen>
-                        <Name>Veloctiy loop kp</Name>
+                        <Name>Velocity loop kp</Name>
                         <DataType>UINT</DataType>
                     </Entry>
                     <Entry>
@@ -9392,6 +9479,15 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>9</SubIndex>
+                            <Data>10000930</Data>
+                        </InitCmd>
+                        <InitCmd Fixed="1">
+                            <Transition>PS</Transition>
+                            <Comment><![CDATA[download pdo 0x1A00 entry]]></Comment>
+                            <Timeout>0</Timeout>
+                            <Ccs>1</Ccs>
+                            <Index>6656</Index>
+                            <SubIndex>10</SubIndex>
                             <Data>08006160</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
@@ -9401,7 +9497,7 @@
                             <Ccs>1</Ccs>
                             <Index>6656</Index>
                             <SubIndex>0</SubIndex>
-                            <Data>09</Data>
+                            <Data>0a</Data>
                         </InitCmd>
                         <InitCmd Fixed="1">
                             <Transition>PS</Transition>
@@ -10270,7 +10366,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1006</Adp>
                     <Ado>2072</Ado>
-                    <Data>0014170020000100</Data>
+                    <Data>0014190020000100</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -10290,7 +10386,7 @@
                     <Cmd>5</Cmd>
                     <Adp>1006</Adp>
                     <Ado>1552</Ado>
-                    <Data>73080010170000070014000101000000</Data>
+                    <Data>7d080010190000070014000101000000</Data>
                     <Cnt>1</Cnt>
                     <Retries>3</Retries>
                 </InitCmd>
@@ -10565,8 +10661,8 @@
                     <Ado>304</Ado>
                     <DataLength>2</DataLength>
                     <Cnt>6</Cnt>
-                    <InputOffs>138</InputOffs>
-                    <OutputOffs>138</OutputOffs>
+                    <InputOffs>150</InputOffs>
+                    <OutputOffs>150</OutputOffs>
                 </Cmd>
                 <Cmd>
                     <State>PREOP</State>
@@ -10577,8 +10673,8 @@
                     <Adp>0</Adp>
                     <Ado>2304</Ado>
                     <DataLength>4</DataLength>
-                    <InputOffs>140</InputOffs>
-                    <OutputOffs>140</OutputOffs>
+                    <InputOffs>152</InputOffs>
+                    <OutputOffs>152</OutputOffs>
                 </Cmd>
                 <Cmd>
                     <State>PREOP</State>
@@ -10589,8 +10685,8 @@
                     <Adp>0</Adp>
                     <Ado>2320</Ado>
                     <DataLength>4</DataLength>
-                    <InputOffs>144</InputOffs>
-                    <OutputOffs>144</OutputOffs>
+                    <InputOffs>156</InputOffs>
+                    <OutputOffs>156</OutputOffs>
                 </Cmd>
                 <Cmd>
                     <State>PREOP</State>
@@ -10600,8 +10696,8 @@
                     <Cmd>10</Cmd>
                     <Addr>150994944</Addr>
                     <DataLength>2</DataLength>
-                    <InputOffs>148</InputOffs>
-                    <OutputOffs>148</OutputOffs>
+                    <InputOffs>160</InputOffs>
+                    <OutputOffs>160</OutputOffs>
                 </Cmd><!-- MSU Id 0: Task 0 -->
                 <Cmd>
                     <State>SAFEOP</State>
@@ -10620,7 +10716,7 @@
                     <Comment><![CDATA[PD; LRD;]]></Comment>
                     <Cmd>10</Cmd>
                     <Addr>268437504</Addr>
-                    <DataLength>138</DataLength>
+                    <DataLength>150</DataLength>
                     <Cnt>6</Cnt>
                     <InputOffs>0</InputOffs>
                     <OutputOffs>0</OutputOffs>
@@ -10629,7 +10725,7 @@
         </Cyclic>
         <ProcessImage>
             <Inputs>
-                <ByteSize>150</ByteSize>
+                <ByteSize>162</ByteSize>
                 <Variable>
                     <Name>Slave_1001 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Statusword</Name>
                     <DataType>UINT</DataType>
@@ -10685,320 +10781,362 @@
                     <BitOffs>160</BitOffs>
                 </Variable>
                 <Variable>
+                    <Name>Slave_1001 [YD300 Servo CoE Drive].1st Transmit PDO mapping.NTC
+                        Temperature</Name>
+                    <DataType>INT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>176</BitOffs>
+                </Variable>
+                <Variable>
                     <Name>Slave_1001 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Mode of
                         Operation Display</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>176</BitOffs>
+                    <BitOffs>192</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Statusword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>184</BitOffs>
+                    <BitOffs>200</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Position
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>200</BitOffs>
+                    <BitOffs>216</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>232</BitOffs>
+                    <BitOffs>248</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Torque Actual
                         Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>264</BitOffs>
+                    <BitOffs>280</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Demand Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>280</BitOffs>
+                    <BitOffs>296</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Torque Demand
                         Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>312</BitOffs>
+                    <BitOffs>328</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Error Code</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>328</BitOffs>
+                    <BitOffs>344</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.IGBT
                         Temperature</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>344</BitOffs>
+                    <BitOffs>360</BitOffs>
+                </Variable>
+                <Variable>
+                    <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.NTC
+                        Temperature</Name>
+                    <DataType>INT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>376</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1002 [YD300 Servo CoE Drive].1st Transmit PDO mapping.Mode of
                         Operation Display</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>360</BitOffs>
+                    <BitOffs>392</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Statusword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>368</BitOffs>
+                    <BitOffs>400</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Position
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>384</BitOffs>
+                    <BitOffs>416</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>416</BitOffs>
+                    <BitOffs>448</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Torque Actual
                         Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>448</BitOffs>
+                    <BitOffs>480</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Demand Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>464</BitOffs>
+                    <BitOffs>496</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Torque demand
                         value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>496</BitOffs>
+                    <BitOffs>528</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Error Code</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>512</BitOffs>
+                    <BitOffs>544</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.IGBT
                         Temperature</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>528</BitOffs>
+                    <BitOffs>560</BitOffs>
+                </Variable>
+                <Variable>
+                    <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.NTC
+                        Temperature</Name>
+                    <DataType>INT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>576</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1003 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Mode of
                         Operation Display</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>544</BitOffs>
+                    <BitOffs>592</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Statusword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>552</BitOffs>
+                    <BitOffs>600</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Position
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>568</BitOffs>
+                    <BitOffs>616</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>600</BitOffs>
+                    <BitOffs>648</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Torque Actual
                         Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>632</BitOffs>
+                    <BitOffs>680</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Demand Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>648</BitOffs>
+                    <BitOffs>696</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Torque demand
                         value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>680</BitOffs>
+                    <BitOffs>728</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Error Code</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>696</BitOffs>
+                    <BitOffs>744</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.IGBT
                         Temperature</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>712</BitOffs>
+                    <BitOffs>760</BitOffs>
+                </Variable>
+                <Variable>
+                    <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.NTC
+                        Temperature</Name>
+                    <DataType>INT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>776</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1004 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Mode of
                         Operation Display</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>728</BitOffs>
+                    <BitOffs>792</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Statusword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>736</BitOffs>
+                    <BitOffs>800</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Position
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>752</BitOffs>
+                    <BitOffs>816</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>784</BitOffs>
+                    <BitOffs>848</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Torque Actual
                         Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>816</BitOffs>
+                    <BitOffs>880</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Demand Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>832</BitOffs>
+                    <BitOffs>896</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Torque demand
                         value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>864</BitOffs>
+                    <BitOffs>928</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Error Code</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>880</BitOffs>
+                    <BitOffs>944</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.IGBT
                         Temperature</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>896</BitOffs>
+                    <BitOffs>960</BitOffs>
+                </Variable>
+                <Variable>
+                    <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.NTC
+                        Temperature</Name>
+                    <DataType>INT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>976</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1005 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Mode of
                         Operation Display</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>912</BitOffs>
+                    <BitOffs>992</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Statusword</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>920</BitOffs>
+                    <BitOffs>1000</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Position
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>936</BitOffs>
+                    <BitOffs>1016</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Actual Value</Name>
                     <DataType>DINT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>968</BitOffs>
+                    <BitOffs>1048</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Torque Actual
                         Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>1000</BitOffs>
+                    <BitOffs>1080</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Velocity
                         Demand Value</Name>
                     <DataType>INT</DataType>
                     <BitSize>32</BitSize>
-                    <BitOffs>1016</BitOffs>
+                    <BitOffs>1096</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Torque demand
                         value</Name>
                     <DataType>INT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>1048</BitOffs>
+                    <BitOffs>1128</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Error Code</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>1064</BitOffs>
+                    <BitOffs>1144</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.IGBT
                         Temperature</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
-                    <BitOffs>1080</BitOffs>
+                    <BitOffs>1160</BitOffs>
+                </Variable>
+                <Variable>
+                    <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.NTC
+                        Temperature</Name>
+                    <DataType>INT</DataType>
+                    <BitSize>16</BitSize>
+                    <BitOffs>1176</BitOffs>
                 </Variable>
                 <Variable>
                     <Name>Slave_1006 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Mode of
                         Operation Display</Name>
                     <DataType>SINT</DataType>
                     <BitSize>8</BitSize>
-                    <BitOffs>1096</BitOffs>
+                    <BitOffs>1192</BitOffs>
                 </Variable>
             </Inputs>
             <Outputs>
-                <ByteSize>150</ByteSize>
+                <ByteSize>162</ByteSize>
                 <Variable>
                     <Name>Slave_1001 [YD300 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
@@ -11043,7 +11181,7 @@
                     <BitOffs>144</BitOffs>
                 </Variable>
                 <Variable>
-                    <Name>Slave_1001 [YD300 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
+                    <Name>Slave_1001 [YD300 Servo CoE Drive].1st Receive PDO mapping.Velocity loop
                         kp</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
@@ -11100,7 +11238,7 @@
                     <BitOffs>328</BitOffs>
                 </Variable>
                 <Variable>
-                    <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
+                    <Name>Slave_1002 [YD300 Servo CoE Drive].1st Receive PDO mapping.Velocity loop
                         kp</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
@@ -11157,7 +11295,7 @@
                     <BitOffs>512</BitOffs>
                 </Variable>
                 <Variable>
-                    <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
+                    <Name>Slave_1003 [YD100 Servo CoE Drive].1st Receive PDO mapping.Velocity loop
                         kp</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
@@ -11214,7 +11352,7 @@
                     <BitOffs>696</BitOffs>
                 </Variable>
                 <Variable>
-                    <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
+                    <Name>Slave_1004 [YD100 Servo CoE Drive].1st Receive PDO mapping.Velocity loop
                         kp</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
@@ -11271,7 +11409,7 @@
                     <BitOffs>880</BitOffs>
                 </Variable>
                 <Variable>
-                    <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
+                    <Name>Slave_1005 [YD100 Servo CoE Drive].1st Receive PDO mapping.Velocity loop
                         kp</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>
@@ -11328,7 +11466,7 @@
                     <BitOffs>1064</BitOffs>
                 </Variable>
                 <Variable>
-                    <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Veloctiy loop
+                    <Name>Slave_1006 [YD100 Servo CoE Drive].1st Receive PDO mapping.Velocity loop
                         kp</Name>
                     <DataType>UINT</DataType>
                     <BitSize>16</BitSize>

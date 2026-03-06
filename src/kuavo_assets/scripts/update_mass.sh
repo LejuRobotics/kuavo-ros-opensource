@@ -17,7 +17,7 @@ if [ -z "${ROBOT_VERSION}" ]; then
 fi
 
 # 允许的机器人版本号列表
-allowed_versions=("11" "13" "14" "15" "16" "40" "41" "42" "43" "45" "46" "47" "48" "49" "50" "51" "52" "60" "61" "100045" "100049" "200049")
+allowed_versions=("11" "13" "14" "15" "16" "17" "40" "41" "42" "43" "45" "46" "47" "48" "49" "50" "51" "52" "53" "54" "60" "61" "62" "100045" "100049" "200049")
 if ! [[ " ${allowed_versions[@]} " =~ " ${ROBOT_VERSION} " ]]; then
     echo -e "\033[31m\nError: 机器人版本号(环境变量中 ROBOT_VERSION 的值) = '${ROBOT_VERSION}' 无效 \033[0m" >&2
     echo -e "\033[31m请参考readme.md文档，确认你的机器人版本号\n目前可用的版本号有: \n[${allowed_versions[*]}] \033[0m\n" >&2
@@ -50,13 +50,25 @@ LINK_NAMES=(
 )
 XML_TORSO_LINK_NAME="base_link"
 
-if [ "${ROBOT_VERSION}" = "14" ]; then
+if [ "${ROBOT_VERSION}" = "14" ] || [ "${ROBOT_VERSION}" = "15" ]|| [ "${ROBOT_VERSION}" = "17" ]; then
     LINK_NAMES=(
         "waist_yaw_link"
         "waist_yaw_link"
         "torso"
         "torso"
         "torso"
+    )
+    XML_TORSO_LINK_NAME="waist_yaw"
+fi
+
+# 52 版本：biped_s52/biped_s52_gazebo 与 drake/biped_v3/biped_v3_full 改 waist_yaw_link；drake/biped_v3_all_joint 仅有 torso
+if [ "${ROBOT_VERSION}" = "52" ] || [ "${ROBOT_VERSION}" = "53" ] || [ "${ROBOT_VERSION}" = "54" ]; then
+    LINK_NAMES=(
+        "waist_yaw_link"
+        "waist_yaw_link"
+        "torso"
+        "waist_yaw_link"
+        "waist_yaw_link"
     )
     XML_TORSO_LINK_NAME="waist_yaw"
 fi
@@ -150,8 +162,8 @@ fi
 TOTAL_MASS=$(cat ${MASS_FILE})
 echo "由配置文件 ${MASS_FILE} 指定总质量为: $TOTAL_MASS kg" >&2
 
-if [ "${ROBOT_VERSION}" = "60" ] || [ "${ROBOT_VERSION}" = "61" ]; then
-    echo "Skip mass update for robot version 60" >&2
+if [ "${ROBOT_VERSION}" = "60" ] || [ "${ROBOT_VERSION}" = "61" ] || [ "${ROBOT_VERSION}" = "62" ]; then
+    echo "Skip mass update for robot version ${ROBOT_VERSION}" >&2
 else
     # 遍历URDF_FILES，并同步取出链接名称
     for index in "${!URDF_FILES[@]}"; do

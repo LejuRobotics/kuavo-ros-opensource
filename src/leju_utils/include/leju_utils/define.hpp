@@ -83,7 +83,7 @@ inline EndEffectorType stringToEndEffectorType(const std::string& typeStr) {
 #define POSE_DATA_LIST_INDEX_LEFT_ELBOW 3   // 左肘
 #define POSE_DATA_LIST_INDEX_RIGHT_ELBOW 4  // 右肘
 #define POSE_DATA_LIST_SIZE 5
-#define POSE_DATA_LIST_SIZE_PLUS 11  // add [l_link6_pos, r_link6_pos, l_vir_thumb_pos, r_vir_thumb_pos]
+#define POSE_DATA_LIST_SIZE_PLUS 13  // add [l_link6_pos, r_link6_pos, l_vir_thumb_pos, r_vir_thumb_pos]
 
 #define POSE_DATA_LIST_INDEX_LEFT_LINK6 5           // 左link6
 #define POSE_DATA_LIST_INDEX_RIGHT_LINK6 6          // 右link6
@@ -91,6 +91,9 @@ inline EndEffectorType stringToEndEffectorType(const std::string& typeStr) {
 #define POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB 8  // 右虚拟拇指
 #define POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR 9    // 左end_effector
 #define POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR 10  // 右end_effector
+#define POSE_DATA_LIST_INDEX_LEFT_SHOULDER 11       // 左肩
+#define POSE_DATA_LIST_INDEX_RIGHT_SHOULDER 12      // 右肩
+
 struct TwoStageIKParameters {
   std::vector<std::string> ikConstraintFrameNames;
   double constraintTolerance = 1.0e-6;
@@ -128,6 +131,56 @@ enum class IncrementalMpcCtrlMode { NO_CONTROL = 0, ARM_ONLY = 1, BASE_ONLY = 2,
 enum class ControlMode { NONE = 0, INCREMENTAL = 1 };
 enum class VRHandControlType { NONE = 0, LEFT_HAND = 1, TWO_HAND = 2 };
 
+// 枚举：左右侧和身体索引（用于 UpperBodyPoseList）
+enum class UpperBodySide : int { LEFT = 0, RIGHT = 1, BODY = 2 };
+
+// 枚举：身体部位索引（用于 UpperBodyPoseList）
+enum class UpperBodyPart : int { SHOULDER = 0, HAND = 1, ELBOW = 2, WRIST = 3, WAIST = 4 };
+
+// 便捷别名：简化访问方式，支持 data[LEFT][SHOULDER].p
+constexpr UpperBodySide LEFT = UpperBodySide::LEFT;
+constexpr UpperBodySide RIGHT = UpperBodySide::RIGHT;
+constexpr UpperBodySide BODY = UpperBodySide::BODY;
+constexpr UpperBodyPart SHOULDER = UpperBodyPart::SHOULDER;
+constexpr UpperBodyPart HAND = UpperBodyPart::HAND;
+constexpr UpperBodyPart ELBOW = UpperBodyPart::ELBOW;
+constexpr UpperBodyPart WRIST = UpperBodyPart::WRIST;
+constexpr UpperBodyPart WAIST = UpperBodyPart::WAIST;
+
+/**
+ * @brief 将一个位姿从世界坐标系转换到指定的参考坐标系中
+ * 
+ * @param refQuatW 参考坐标系在世界坐标系下的姿态 (e.g., chestQuatW)
+ * @param refPosW 参考坐标系在世界坐标系下的位置 (e.g., chestPosW)
+ * @param targetQuatW 目标物体在世界坐标系下的姿态 (e.g., handQuatW)
+ * @param targetPosW 目标物体在世界坐标系下的位置 (e.g., handPosW)
+ * @return std::pair<Quaterniond, Vector3d> 目标物体在参考坐标系下的位姿 (姿态, 位置)
+ */
+ inline std::pair<Eigen::Quaterniond, Eigen::Vector3d> transformPose(
+  const Eigen::Quaterniond& refQuatW, 
+  const Eigen::Vector3d& refPosW, 
+  const Eigen::Quaterniond& targetQuatW, 
+  const Eigen::Vector3d& targetPosW) 
+{
+  // 计算从世界坐标系 (W) 到参考坐标系 (C, Chest) 的旋转
+  // 这是从参考坐标系到世界坐标系旋转的逆
+  // 对于单位四元数，其逆等于其共轭
+  Eigen::Quaterniond quatW_C = refQuatW.inverse(); 
+
+  // 1. 计算目标在参考坐标系下的姿态 (handQuatC)
+  // q_H_C = q_W_C * q_H_W
+  Eigen::Quaterniond targetQuatC = quatW_C * targetQuatW;
+
+  // 2. 计算目标在参考坐标系下的位置 (handPosC)
+  // 首先，计算从参考坐标系原点指向目标物体原点的向量在世界坐标系下的表示
+  Eigen::Vector3d vec_C_H_in_W = targetPosW - refPosW;
+  // 然后，将这个向量旋转到参考坐标系中
+  // p_H_C = q_W_C * (p_H_W - p_C_W)
+  Eigen::Vector3d targetPosC = quatW_C * vec_C_H_in_W;
+
+  return std::make_pair(targetQuatC, targetPosC);
+}
+
 inline HandSide intToHandSide(int value) {
   if (value < 0 || value > 2) throw std::invalid_argument("Invalid value for HandSide");
   return static_cast<HandSide>(value);
@@ -142,6 +195,43 @@ struct HeadBodyPose {
   double body_roll = 0.0;
   double body_pitch = 6.0 * M_PI / 180.0;
   double body_height = 0.74;
+};
+
+// 位姿结构体：包含位置和四元数
+struct Pose {
+  Eigen::Vector3d p = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
+};
+
+// 上身位姿列表：统一使用 data，支持 data[LEFT][SHOULDER].p 和 data[BODY][WAIST].p 访问方式
+// 也可以使用完整枚举：data[UpperBodySide::LEFT][UpperBodyPart::SHOULDER].p
+struct UpperBodyPoseList {
+  Pose data[3][5];  // [LEFT/RIGHT/BODY][SHOULDER/HAND/LINK4/LINK6/WAIST]，允许冗余
+
+  UpperBodyPoseList() {
+    // 初始化所有位姿（允许冗余）
+    for (int side = 0; side < 3; ++side) {
+      for (int part = 0; part < 5; ++part) {
+        data[side][part].p = Eigen::Vector3d::Zero();
+        data[side][part].q = Eigen::Quaterniond::Identity();
+      }
+    }
+  }
+
+  // 嵌套类用于支持二维索引访问
+  struct SideAccessor {
+    Pose* row;
+    SideAccessor(Pose* r) : row(r) {}
+    Pose& operator[](UpperBodyPart part) { return row[static_cast<int>(part)]; }
+    const Pose& operator[](UpperBodyPart part) const { return row[static_cast<int>(part)]; }
+  };
+
+  // 返回 SideAccessor 以支持链式访问
+  SideAccessor operator[](UpperBodySide side) { return SideAccessor(data[static_cast<int>(side)]); }
+
+  const SideAccessor operator[](UpperBodySide side) const {
+    return SideAccessor(const_cast<Pose*>(data[static_cast<int>(side)]));
+  }
 };
 
 inline VRHandControlType intToVRHandControlType(int value) {
@@ -507,6 +597,28 @@ inline Eigen::Quaterniond pickMinAbsEulerComponentsZYXToQuaternion(const Eigen::
   }
 
   return eulerZYXToQuaternionNoClip(e_out);
+}
+
+/**
+ * @brief 将Quest3的位姿转换为机器人的位姿
+ * @tparam QuaternionT 四元数类型，需要有w, x, y, z成员
+ * @param orientation 输入的四元数
+ * @return 转换后的Eigen四元数
+ */
+template <typename QuaternionT>
+inline Eigen::Quaterniond transformQuestPoseTORobotPose(const QuaternionT& orientation) {
+  Eigen::Quaterniond qCurrent = Eigen::Quaterniond(0.5, 0.5, 0.5, 0.5).conjugate() *
+                                Eigen::Quaterniond(orientation.w, orientation.x, orientation.y, orientation.z);
+
+  Eigen::Quaterniond qRemap = Eigen::Quaterniond(qCurrent.w(),  //
+                                                 qCurrent.z(),  // x
+                                                 qCurrent.x(),
+                                                 qCurrent.y());  // z x →z
+
+  Eigen::Quaterniond pitchOffset(Eigen::AngleAxisd(-M_PI / 12, Eigen::Vector3d::UnitY()));
+  qRemap = pitchOffset * qRemap;
+
+  return qRemap;
 }
 
 inline Eigen::Quaterniond limitQuaternionAngle(const Eigen::Quaterniond& q_input, double max_angle_rad) {

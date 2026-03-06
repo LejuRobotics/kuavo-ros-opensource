@@ -139,7 +139,10 @@ namespace humanoid_controller
     loadEigenMatrix("jointKd", jointKdRL_);
     loadEigenMatrix("torqueLimits", torqueLimitsRL_);
     loadEigenMatrix("actionScaleTest", actionScaleTestRL_);
-    loadEigenMatrix("velocityLimits", velocityLimits_); // 4 维
+    // 速度限制（8 维：正负方向独立设置）
+    // 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
+    //        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
+    loadEigenMatrix("velocityLimits", velocityLimits_);
     loadEigenMatrix("jointCmdFilterCutoffFreq", jointCmdFilterCutoffFreq_);
 
     jointCmdFilter_.setParams(dt_, jointCmdFilterCutoffFreq_);
@@ -346,6 +349,8 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, initial_cmd_.*cmdMember, prefixCommandData_ + ".scale." + cmdName, false);
     }
 
+    // 加载 X 负向单独缩放系数（用于不对称速度限制）
+    loadData::loadPtreeValue(pt, cmdVelLineXNegScale_, "commandData.scale.cmdVelLineXNegScale", false);
 
     ROS_INFO("[%s] loadConfig done. num_actions_=%d, numSingleObs_=%d, frameStack_=%d",
              name_.c_str(), num_actions_, numSingleObs_, frameStack_);
@@ -467,7 +472,9 @@ namespace humanoid_controller
   void AmpWalkController::updatePhase(const CommandDataRL& cmd)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
-    double ratio = cmd.cmdVelLineX_ / velocityLimits_(0);
+    // 根据速度方向选择正负限制：速度>0 用正向限制，速度<0 用负向限制
+    double velLimitX = (cmd.cmdVelLineX_ >= 0) ? velocityLimits_(0) : velocityLimits_(1);
+    double ratio = cmd.cmdVelLineX_ / velLimitX;
     double targetCycleTime = (ratio > switch_ratio_) ? cycleTime_short_ : cycleTime_;
     if (targetCycleTime != currentCycleTime_)
     {
@@ -509,12 +516,18 @@ namespace humanoid_controller
 
     // 速度命令 [vx, vy, omega_z]
     cmd.scale();
+    
+    // 应用 X 负向单独缩放系数（实现不对称速度限制）
+    if (cmd.cmdVelLineX_ < 0.0) {
+      cmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
+    }
+    
     Eigen::Vector3d velocity_commands;
     velocity_commands << cmd.cmdVelLineX_,
                          cmd.cmdVelLineY_,
                          cmd.cmdVelAngularZ_;
-    
-    // 应用YAW补偿（当旋转时给X方向速度添加偏置）
+        
+    // 应用 YAW 补偿（当旋转时给 X 方向速度添加偏置）
     if (yaw_compensation_enabled_) {
       double angular_z = velocity_commands(2);  // YAW角速度
       double linear_x = velocity_commands(0);   // X方向线速度
@@ -1439,16 +1452,16 @@ namespace humanoid_controller
 
   void AmpWalkController::updateVelocityLimitsParam(ros::NodeHandle& nh)
   {
-    // 将4维velocityLimits_转换为6维rosparam格式
-    // velocityLimits_格式: [linear_x, linear_y, linear_z, angular_z] (从配置文件读取)
-    // rosparam格式: [linear_x, linear_y, linear_z, angular_x, angular_y, angular_z]
+    // 将 4 维 velocityLimits_转换为 6 维 rosparam 格式
+    // velocityLimits_格式：[linear_x, linear_y, linear_z, angular_z] （统一上限）
+    // rosparam 格式：[linear_x, linear_y, linear_z, angular_x, angular_y, angular_z]
     std::vector<double> limits_vec(6);
-    limits_vec[0] = velocityLimits_(0);  // linear_x
+    limits_vec[0] = velocityLimits_(0);  // linear_x (positive limit)
     limits_vec[1] = velocityLimits_(1);  // linear_y
     limits_vec[2] = velocityLimits_(2);  // linear_z
-    limits_vec[3] = 0.0;                  // angular_x (通常为0)
-    limits_vec[4] = 0.0;                  // angular_y (通常为0)
-    limits_vec[5] = velocityLimits_(3);  // angular_z (修复：从索引2改为索引3)
+    limits_vec[3] = 0.0;                 // angular_x (通常为 0)
+    limits_vec[4] = 0.0;                 // angular_y (通常为 0)
+    limits_vec[5] = velocityLimits_(3);  // angular_z
     
     nh.setParam("/velocity_limits", limits_vec);
     

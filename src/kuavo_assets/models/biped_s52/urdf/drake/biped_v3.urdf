@@ -6,17 +6,26 @@
 <robot name="biped_v3" xmlns:drake="https://drake.mit.edu">
   <link name="torso">
    <inertial>
-      <origin xyz="-0.05051209 1.42e-06 -0.01248997" rpy="0 0 0" />
-      <mass value="18.99013928" />
-      <inertia ixx="0.06836878" ixy="1.858e-05" ixz="-0.0165872" iyy="0.04966552" iyz="-1.2e-05" izz="0.06645264" />
+    <!-- 质心：( -0.05495950, -0.00028705, -0.01468007 ) -->
+    <origin xyz="-0.05495950 -0.00028705 -0.01468007" rpy="0 0 0" />
+    <!-- 质量：7.06404632 kg -->
+    <mass value="7.06405" />
+    <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自torso Lxx/Lyy/Lzz -->
+    <inertia
+      ixx="0.07432439"
+      ixy="0.0"
+      ixz="-0.01900645"
+      iyy="0.05497594"
+      iyz="0.0"
+      izz="0.07548789" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/base_link.STL" />
+        <mesh filename="../../meshes/torso.STL" />
       </geometry>
       <material name="">
-        <color rgba="1 1 1 1" />
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
       </material>
     </visual>
     <!-- <collision>
@@ -28,9 +37,18 @@
   </link>
   <link name="waist_yaw_link">
     <inertial>
-      <origin xyz="0.00089444 -0.00069446 0.16778314" rpy="0 0 0" />
-      <mass value="18.01415568" />
-      <inertia ixx="0.36258863" ixy="1.968e-05" ixz="0.00273234" iyy="0.27799251" iyz="0.00088683" izz="0.21591828" />
+      <!-- 质心：( -0.00044187, -0.00068282, 0.16674017 ) -->
+      <origin xyz="0.04044187 -0.00068282 0.16674017" rpy="0 0 0" />
+      <!-- 质量：17.11065787 kg -->
+      <mass value="33.54346" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自waist_yaw Lxx/Lyy/Lzz -->
+      <inertia
+        ixx="0.34143343"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.25757527"
+        iyz="0.0"
+        izz="0.20167280" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -47,13 +65,26 @@
     <parent link="torso" />
     <child link="waist_yaw_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-2.0943951023932" upper="2.0943951023932" effort="180.0" velocity="23.55" />
+    <limit lower="-3.14159" upper="3.14159" effort="102.0" velocity="8.7" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
+   <!-- ============ l_leg_roll ============ -->
+  <!-- 坐标系：l_leg_yaw_roll -->
+  <!-- 对称源：r_leg_roll (X-Z平面对称) -->
   <link name="leg_l1_link">
     <inertial>
-      <origin xyz="-0.00558741 0.0001005 0.00069219" rpy="0 0 0" />
-      <mass value="1.63858534" />
-      <inertia ixx="0.00162115" ixy="-1.138e-05" ixz="-1.192e-05" iyy="0.00214632" iyz="1.03e-05" izz="0.0022122" />
+      <!-- 质心：右腿(-0.00560896, -0.00032862, -0.00212773) -> 左腿(-0.00560896, +0.00032862, -0.00212773) -->
+      <origin xyz="-0.00560896 0.00032862 -0.00212773" rpy="0 0 0" />
+      <!-- 质量：1.55641268 kg -->
+      <mass value="1.55641" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.00191127"
+        ixy="-0.00001633"      
+        ixz="-0.00000320"     
+        iyy="0.00254335"
+        iyz="0.00000055"     
+        izz="0.00260594" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -70,18 +101,30 @@
     <parent link="torso" />
     <child link="leg_l1_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="180.0" velocity="23.55" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="127.0" velocity="10.4" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l1_joint" />
     <actuator name="leg_l1_joint_motor" />
   </transmission>
+  <!-- ============ l_leg_yaw ============ -->
+  <!-- 坐标系：l_leg_yaw_roll -->
+  <!-- 对称源：r_leg_yaw (X-Z平面对称) -->
   <link name="leg_l2_link">
     <inertial>
-      <origin xyz="0.00013508 -0.00098545 -0.09149892" rpy="0 0 0" />
-      <mass value="0.70575545" />
-      <inertia ixx="0.00323862" ixy="-7.7e-05" ixz="3.2e-05" iyy="0.00183633" iyz="-6.472e-05" izz="0.00219531" />
+      <!-- 质心：右腿(0.00006341, 0.00960017, -0.09308949) -> 左腿(0.00006341, -0.00960017, -0.09308949) -->
+      <origin xyz="0.00006341 -0.00960017 -0.09308949" rpy="0 0 0" />
+      <!-- 质量：0.75872512 kg -->
+      <mass value="0.75873" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.00348980"
+        ixy="0.00000617"     
+        ixz="-0.00000543"      
+        iyy="0.00201021"
+        iyz="-0.00030265"      
+        izz="0.00236363" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -98,18 +141,30 @@
     <parent link="leg_l1_link" />
     <child link="leg_l2_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.91986217719376" upper="0.785398163397448" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.785398163397448" upper="1.91986217719376" effort="71.0" velocity="8.7" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l2_joint" />
     <actuator name="leg_l2_joint_motor" />
   </transmission>
+  <!-- ============ l_leg_pitch ============ -->
+  <!-- 坐标系：l_leg_pitch -->
+  <!-- 对称源：r_leg_pitch (X-Z平面对称) -->
   <link name="leg_l3_link">
     <inertial>
-      <origin xyz="0.00306476 0.00954886 -0.0778944" rpy="0 0 0" />
-      <mass value="5.93791258" />
-      <inertia ixx="0.05198316" ixy="2.637e-05" ixz="0.00155235" iyy="0.0492486" iyz="0.00371169" izz="0.01606721" />
+      <!-- 质心：右腿(0.00273544, -0.01478421, -0.09011501) -> 左腿(0.00273544, +0.01478421, -0.09011501) -->
+      <origin xyz="0.00273544 0.01478421 -0.09011501" rpy="0 0 0" />
+      <!-- 质量：6.68074305 kg -->
+      <mass value="6.68074" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.06155086"
+        ixy="0.00016595"      
+        ixz="-0.00169943"      
+        iyy="0.05999156"
+        iyz="0.00073898"     
+        izz="0.01575336" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -126,18 +181,30 @@
     <parent link="leg_l2_link" />
     <child link="leg_l3_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-1.91986217719376" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-1.91986217719376" upper="1.5707963267949" effort="132" velocity="12.7" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l3_joint" />
     <actuator name="leg_l3_joint_motor" />
   </transmission>
+  <!-- ============ l_knee ============ -->
+  <!-- 坐标系：l_knee -->
+  <!-- 对称源：r_knee (X-Z平面对称) -->
   <link name="leg_l4_link">
     <inertial>
-      <origin xyz="0.00501956 -0.00014918 -0.16578654" rpy="0 0 0" />
-      <mass value="4.02498548" />
-      <inertia ixx="0.046032" ixy="1.89e-05" ixz="-0.00054405" iyy="0.04550638" iyz="0.00026629" izz="0.00356532" />
+      <!-- 质心：右腿(0.00684787, -0.00006281, -0.16262733) -> 左腿(0.00684787, +0.00006281, -0.16262733) -->
+      <origin xyz="0.00684787 0.00006281 -0.16262733" rpy="0 0 0" />
+      <!-- 质量：3.64665831 kg -->
+      <mass value="3.64666" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.04372691"
+        ixy="0.00000494"     
+        ixz="0.00053020"      
+        iyy="0.04357016"
+        iyz="-0.00006946"      
+        izz="0.00246985" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -150,22 +217,34 @@
     </visual>
   </link>
   <joint name="leg_l4_joint" type="revolute">
-    <origin xyz="0 0 -0.284" rpy="0 0 0" />
+    <origin xyz="-0.0011639 0 -0.284" rpy="0 0 0" />
     <parent link="leg_l3_link" />
     <child link="leg_l4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.53072741539178" effort="180.0" velocity="23.55" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="0.0" upper="2.53072741539178" effort="280.0" velocity="10.4" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l4_joint" />
     <actuator name="leg_l4_joint_motor" />
   </transmission>
+  <!-- ============ l_foot_pitch ============ -->
+  <!-- 坐标系：l_foot_pitch_roll -->
+  <!-- 对称源：r_foot_pitch (完全对称) -->
   <link name="leg_l5_link">
     <inertial>
-      <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
-      <mass value="0.07848005" />
-      <inertia ixx="7.6e-05" ixy="0.0" ixz="0.0" iyy="7.6e-05" iyz="0.0" izz="1.318e-05" />
+      <!-- 质心：( 0, 0, 0 ) -->
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <!-- 质量：0.07848005 kg -->
+      <mass value="0.07848" />
+      <!-- ✅ 惯性张量：完全对称，与右腿完全相同 -->
+      <inertia
+        ixx="0.00000757"
+        ixy="0.00000000"
+        ixz="0.00000000"
+        iyy="0.00000757"
+        iyz="0.00000000"
+        izz="0.00001318" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -178,22 +257,34 @@
     </visual>
   </link>
   <joint name="leg_l5_joint" type="revolute">
-    <origin xyz="0.002 0.0003 -0.416" rpy="0 0 0" />
+    <origin xyz="0.002 0 -0.416" rpy="0 0 0" />
     <parent link="leg_l4_link" />
     <child link="leg_l5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="36.0" velocity="23.0266666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="91.6" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l5_joint" />
     <actuator name="leg_l5_joint_motor" />
   </transmission>
+  <!-- ============ l_foot_roll ============ -->
+  <!-- 坐标系：l_foot_pitch_roll -->
+  <!-- 对称源：r_foot_roll (完全对称，用户覆盖值相同) -->
   <link name="leg_l6_link">
     <inertial>
-      <origin xyz="0.03128029 -2.11e-06 -0.03618572" rpy="0 0 0" />
-      <mass value="0.58491513" />
-      <inertia ixx="0.00046778" ixy="2e-05" ixz="0.00010442" iyy="0.00176376" iyz="0.0" izz="0.00188181" />
+      <!-- 质心（用户覆盖）：( 0.02655895, -0.00004538, -0.03373024 ) -->
+      <origin xyz="0.02655895 -0.00004538 -0.03373024" rpy="0 0 0" />
+      <!-- 质量（用户覆盖）：0.69242441 kg -->
+      <mass value="0.69242" />
+      <!-- ✅ 惯性张量：完全对称，与右腿完全相同（质心Y为负，无需镜像） -->
+      <inertia
+        ixx="0.00051423"
+        ixy="-0.00000078"
+        ixz="0.00014745"
+        iyy="0.00189913"
+        iyz="0.00000033"
+        izz="0.00199352" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -210,8 +301,8 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l6_joint" />
@@ -220,11 +311,22 @@
   <frame link="leg_l6_link" name="l_foot_sole" xyz="0.04883799999999999 0.0 -0.0595" />
   <frame link="leg_l6_link" name="l_foot_toe" xyz="0.17084 0.0 -0.0595" />
   <frame link="leg_l6_link" name="l_foot_heel" xyz="-0.073164 0.0 -0.0595" />
+  <!-- ============ r_leg_roll ============ -->
+  <!-- 坐标系：r_leg_roll_yaw -->
   <link name="leg_r1_link">
     <inertial>
-      <origin xyz="-0.00553677 -0.00034203 0.0007206" rpy="0 0 0" />
-      <mass value="1.63861324" />
-      <inertia ixx="0.00163303" ixy="1.362e-05" ixz="-1.571e-05" iyy="0.00215111" iyz="7.4e-05" izz="0.00222063" />
+      <!-- 质心：( -0.00560896, -0.00032862, -0.00212773 ) -->
+      <origin xyz="-0.00560896 -0.00032862 -0.00212773" rpy="0 0 0" />
+      <!-- 质量：1.55641268 kg -->
+      <mass value="1.55641" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00191127"
+        ixy="0.00001633"
+        ixz="0.00000320"
+        iyy="0.00254335"
+        iyz="-0.00000055"
+        izz="0.00260594" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -241,18 +343,29 @@
     <parent link="torso" />
     <child link="leg_r1_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.663225115757845" upper="0.314159265358979" effort="180.0" velocity="23.55" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.663225115757845" upper="0.314159265358979" effort="127.0" velocity="10.4" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r1_joint" />
     <actuator name="leg_r1_joint_motor" />
   </transmission>
+  <!-- ============ r_leg_yaw ============ -->
+  <!-- 坐标系：r_leg_roll_yaw -->
   <link name="leg_r2_link">
     <inertial>
-      <origin xyz="-0.00013508 0.00098545 -0.09149892" rpy="0 0 0" />
-      <mass value="0.70575545" />
-      <inertia ixx="0.00323862" ixy="-7.7e-05" ixz="-3.2e-05" iyy="0.00183633" iyz="6.472e-05" izz="0.00219531" />
+      <!-- 质心：( 0.00006341, 0.00960017, -0.09308949 ) -->
+      <origin xyz="0.00006341 0.00960017 -0.09308949" rpy="0 0 0" />
+      <!-- 质量：0.75872512 kg -->
+      <mass value="0.75873" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00348980"
+        ixy="-0.00000617"
+        ixz="0.00000543"
+        iyy="0.00201021"
+        iyz="0.00030265"
+        izz="0.00236363" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -269,18 +382,29 @@
     <parent link="leg_r1_link" />
     <child link="leg_r2_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-0.785398163397448" upper="1.91986217719376" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-1.91986217719376" upper="0.785398163397448" effort="71.0" velocity="8.7" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r2_joint" />
     <actuator name="leg_r2_joint_motor" />
   </transmission>
+  <!-- ============ r_leg_pitch ============ -->
+  <!-- 坐标系：r_leg_pitch -->
   <link name="leg_r3_link">
     <inertial>
-      <origin xyz="0.00305583 -0.0095594 -0.0778079" rpy="0 0 0" />
-      <mass value="5.93791831" />
-      <inertia ixx="0.05201926" ixy="-3.06e-05" ixz="0.00155202" iyy="0.049279" iyz="-0.00368824" izz="0.01607353" />
+      <!-- 质心：( 0.00273544, -0.01478421, -0.09011501 ) -->
+      <origin xyz="0.00273544 -0.01478421 -0.09011501" rpy="0 0 0" />
+      <!-- 质量：6.68074305 kg -->
+      <mass value="6.68074" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.06155086"
+        ixy="-0.00016595"
+        ixz="0.00169943"
+        iyy="0.05999156"
+        iyz="-0.00073898"
+        izz="0.01575336" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -297,18 +421,29 @@
     <parent link="leg_r2_link" />
     <child link="leg_r3_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-1.91986217719376" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-1.91986217719376" upper="1.5707963267949" effort="132.0" velocity="12.7" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r3_joint" />
     <actuator name="leg_r3_joint_motor" />
   </transmission>
+  <!-- ============ r_knee ============ -->
+  <!-- 坐标系：r_knee -->
   <link name="leg_r4_link">
     <inertial>
-      <origin xyz="0.00501956 0.00014918 -0.16578654" rpy="0 0 0" />
-      <mass value="4.02498548" />
-      <inertia ixx="0.046032" ixy="1.89e-05" ixz="-0.00054405" iyy="0.04550638" iyz="0.00026629" izz="0.00356532" />
+      <!-- 质心：( 0.00684787, -0.00006281, -0.16262733 ) -->
+      <origin xyz="0.00684787 -0.00006281 -0.16262733" rpy="0 0 0" />
+      <!-- 质量：3.64665831 kg -->
+      <mass value="3.64666" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.04372691"
+        ixy="-0.00000494"
+        ixz="-0.00053020"
+        iyy="0.04357016"
+        iyz="0.00006946"
+        izz="0.00246985" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -321,22 +456,33 @@
     </visual>
   </link>
   <joint name="leg_r4_joint" type="revolute">
-    <origin xyz="0 0 -0.284" rpy="0 0 0" />
+    <origin xyz="-0.0011639 0 -0.284" rpy="0 0 0" />
     <parent link="leg_r3_link" />
     <child link="leg_r4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.53072741539178" effort="180.0" velocity="23.55" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="0.0" upper="2.53072741539178" effort="280.0" velocity="10.4" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r4_joint" />
     <actuator name="leg_r4_joint_motor" />
   </transmission>
+  <!-- ============ r_foot_pitch ============ -->
+  <!-- 坐标系：r_foot_pitch_roll -->
   <link name="leg_r5_link">
     <inertial>
-      <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
-      <mass value="0.07848005" />
-      <inertia ixx="7.6e-05" ixy="0.0" ixz="0.0" iyy="7.6e-05" iyz="0.0" izz="1.318e-05" />
+      <!-- 质心：( 0, 0, 0 ) -->
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <!-- 质量：0.07848005 kg -->
+      <mass value="0.07848" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 与输出坐标系相同因为质心在原点 -->
+      <inertia
+        ixx="0.00000757"
+        ixy="0.00000000"
+        ixz="0.00000000"
+        iyy="0.00000757"
+        iyz="0.00000000"
+        izz="0.00001318" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -349,22 +495,33 @@
     </visual>
   </link>
   <joint name="leg_r5_joint" type="revolute">
-    <origin xyz="0.00199999999983541 -0.000300000028212572 -0.415999999987417" rpy="0 0 0" />
+    <origin xyz="0.002 0 -0.416" rpy="0 0 0" />
     <parent link="leg_r4_link" />
     <child link="leg_r5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="36.0" velocity="23.0266666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="91.6" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r5_joint" />
     <actuator name="leg_r5_joint_motor" />
   </transmission>
+  <!-- ============ r_foot_roll ============ -->
+  <!-- 坐标系：r_foot_pitch_roll -->
   <link name="leg_r6_link">
     <inertial>
-      <origin xyz="0.03128029 -2.11e-06 -0.03618572" rpy="0 0 0" />
-      <mass value="0.58491513" />
-      <inertia ixx="0.00046778" ixy="2e-05" ixz="0.00010442" iyy="0.00176376" iyz="0.0" izz="0.00188181" />
+      <!-- 质心（用户覆盖）：( 0.02655895, -0.00004538, -0.03373024 ) -->
+      <origin xyz="0.02655895 -0.00004538 -0.03373024" rpy="0 0 0" />
+      <!-- 质量（用户覆盖）：0.69242441 kg -->
+      <mass value="0.69242" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00051423"
+        ixy="-0.00000078"
+        ixz="0.00014745"
+        iyy="0.00189913"
+        iyz="0.00000033"
+        izz="0.00199352" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -381,8 +538,8 @@
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
-    <dynamics damping="0.2" friction="0.0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r6_joint" />

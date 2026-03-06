@@ -104,7 +104,8 @@ enum RobotModel
   KUAVO = 0,         // kuavo
   ROBAN2 = 1,        // roban2
   KUAVO5 = 2,        // kuavo5
-  LUNBI = 3,        // lunbi
+  LUNBI = 3,         // lunbi
+  LUNBI_V62 = 4,     // lunbi_v62
   ROBOT_MODEL_NUM    // 用于表示RobotModel的数量，以后有新的映射关系，需要在此加入对应的映射索引。
 };
 typedef struct
@@ -117,6 +118,7 @@ typedef struct
   int16_t torque_demand_raw;
   uint16_t error_code;
   uint16_t igbt_temperature;
+  int16_t ntc_temperature;
   int8_t mode_of_opration_display;
 } YD_SlaveRead_t;
 
@@ -210,6 +212,7 @@ typedef struct
   double torque_demand_trans = 0.0;
   double velocity_demand_raw = 0.0;
   double igbt_temperature = 0.0; 
+  double ntc_temperature = 0.0; 
 } MotorParam_t;
 
 extern enum EcMasterType driver_type[30];

@@ -37,8 +37,10 @@ class LegBreakinStandalone:
         # scripts/ -> src/leg_breakin/src/
         leg_breakin_src = self.current_dir.parent.parent / "leg_breakin" / "src"
         self.leg_breakin_src = leg_breakin_src
-        self.joint_breakin_script = leg_breakin_src / "joint_breakin.py"  # roban2 统一入口（ROS控时长）
-        self.kuavo5_leg_breakin_script = leg_breakin_src / "leg_breakin_kuavo5_v52" / "kuavo5_leg_breakin.py"  # kuavo5_v52（ROS控时长）
+        self.joint_breakin_script = leg_breakin_src / "joint_breakin.py"  # roban2 统一入口（ROS控时长，版本13-14）
+        self.roban2_v17_leg_breakin_script = leg_breakin_src / "leg_breakin_roban2_v17" / "roban2_leg_breakin.py"  # roban2_v17（ROS控时长）
+        self.kuavo5_leg_breakin_script_v52_80A = leg_breakin_src / "leg_breakin_kuavo5_v52_80A" / "kuavo5_leg_breakin.py"  # kuavo5_v52_80A（ROS控时长，龙华25台版本）
+        self.kuavo5_leg_breakin_script_v52 = leg_breakin_src / "leg_breakin_kuavo5_v52" / "kuavo5_leg_breakin.py"  # kuavo5_v52（ROS控时长，普通v52版本）
         
         # 进程管理
         self.leg_process = None
@@ -205,10 +207,44 @@ class LegBreakinStandalone:
         is_kuavo5 = self._is_kuavo5(robot_version)
 
         # 选择腿部磨线脚本
-        if is_kuavo5:
-            target_script = self.kuavo5_leg_breakin_script
+        # 优先读取环境变量 LEG_BREAKIN_DIR（由主控制器传递）
+        leg_breakin_dir = os.environ.get("LEG_BREAKIN_DIR")
+        if leg_breakin_dir:
+            # 根据环境变量选择对应的脚本
+            if leg_breakin_dir == "leg_breakin_kuavo5_v52_80A":
+                target_script = self.kuavo5_leg_breakin_script_v52_80A
+            elif leg_breakin_dir == "leg_breakin_kuavo5_v52":
+                target_script = self.kuavo5_leg_breakin_script_v52
+            elif leg_breakin_dir == "leg_breakin_roban2_v17":
+                target_script = self.roban2_v17_leg_breakin_script
+            elif leg_breakin_dir == "leg_breakin_roban2_v14":
+                target_script = self.joint_breakin_script
+            else:
+                if is_kuavo5:
+                    target_script = self.kuavo5_leg_breakin_script_v52_80A
+                else:
+                    # 根据版本选择roban2脚本
+                    try:
+                        version_num = int(robot_version) if robot_version else 0
+                        if version_num == 17:
+                            target_script = self.roban2_v17_leg_breakin_script
+                        else:
+                            target_script = self.joint_breakin_script
+                    except (ValueError, TypeError):
+                        target_script = self.joint_breakin_script
         else:
-            target_script = self.joint_breakin_script
+            if is_kuavo5:
+                target_script = self.kuavo5_leg_breakin_script_v52_80A
+            else:
+                # 根据版本选择roban2脚本
+                try:
+                    version_num = int(robot_version) if robot_version else 0
+                    if version_num == 17:
+                        target_script = self.roban2_v17_leg_breakin_script
+                    else:
+                        target_script = self.joint_breakin_script
+                except (ValueError, TypeError):
+                    target_script = self.joint_breakin_script
 
         self.print_colored(f"调试：ROBOT_VERSION = {robot_version or '(unknown)'}", Colors.BLUE)
         self.print_colored(f"调试：选择腿部磨线脚本: {target_script}", Colors.BLUE)
@@ -348,7 +384,8 @@ class LegBreakinStandalone:
             if is_kuavo5:
                 leg_script_dir = target_script.parent
             else:
-                leg_script_dir = self.joint_breakin_script.parent
+                # 根据目标脚本确定工作目录
+                leg_script_dir = target_script.parent
             
             self.leg_process = subprocess.Popen(
                 ["python3", str(target_script)],

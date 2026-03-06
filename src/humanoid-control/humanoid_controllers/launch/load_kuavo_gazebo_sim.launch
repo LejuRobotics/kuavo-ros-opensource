@@ -13,6 +13,7 @@
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
     <!-- 添加楼梯加载参数 -->
     <arg name="load_stairs"        default="false" doc="是否加载楼梯到场景中"/>
+    <arg name="load_slope"         default="false" doc="是否加载斜坡到场景中"/>
     <!-- load the robot version manager -->
     <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
       <arg name="robot_version" value="$(arg robot_version)"/>
@@ -116,6 +117,7 @@
       <group unless="$(arg trace_path_automatic_test)">
       <include file="$(find gazebo_sim)/launch/gazebo-sim.launch">
         <arg name="use_stairs" value="$(arg load_stairs)"/>
+        <arg name="use_slope" value="$(arg load_slope)"/>
       </include>
       </group>
     </group>

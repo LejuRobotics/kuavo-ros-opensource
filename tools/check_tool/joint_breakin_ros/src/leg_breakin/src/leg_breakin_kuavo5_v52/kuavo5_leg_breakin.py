@@ -201,16 +201,57 @@ relative_path = "build_lib"
 target_path = os.path.join(script_dir, relative_path)
 sys.path.append(target_path)
 
-# 设置 LD_LIBRARY_PATH，确保运行时能找到 libemllI8254x.so
-lib_path = os.path.join(script_dir, "lib")
-if os.path.exists(lib_path):
+# 动态查找 libemllI8254x.so 并设置 LD_LIBRARY_PATH
+def find_libemllI8254x_so_path():
+    """从脚本目录向上查找，找到包含 tools/check_tool 的项目根目录，然后查找 libemllI8254x.so"""
+    current_path = Path(script_dir).resolve()
+    
+    # 向上查找项目根目录（包含 tools/check_tool 的目录）
+    for _ in range(10):
+        test_path = current_path / "tools" / "check_tool"
+        if test_path.exists():
+            project_root = current_path
+            
+            # 优先尝试 opensource 仓库路径（相对路径 ../kuavo-ros-opensource）
+            opensource_path1 = project_root.parent / "kuavo-ros-opensource" / "installed" / "lib" / "libemllI8254x.so"
+            if opensource_path1.exists():
+                print(f"[信息] 找到 libemllI8254x.so (opensource ../): {opensource_path1}")
+                return opensource_path1.parent  # 返回目录路径
+
+            # 尝试 opensource 仓库路径（相对路径 ../../kuavo-ros-opensource）
+            opensource_path2 = project_root.parent.parent / "kuavo-ros-opensource" / "installed" / "lib" / "libemllI8254x.so"
+            if opensource_path2.exists():
+                print(f"[信息] 找到 libemllI8254x.so (opensource ../../): {opensource_path2}")
+                return opensource_path2.parent  # 返回目录路径
+
+            # 最后尝试 control 仓库路径
+            control_path = project_root / "src" / "kuavo-ros-control-lejulib" / "hardware_plant" / "lib" / "EC_Master" / "lib" / "libemllI8254x.so"
+            if control_path.exists():
+                print(f"[信息] 找到 libemllI8254x.so (control): {control_path}")
+                return control_path.parent  # 返回目录路径
+            
+            break
+        
+        parent = current_path.parent
+        if parent == current_path:  # 到达根目录
+            break
+        current_path = parent
+    
+    # 如果都找不到，返回 None
+    print(f"[警告] 未找到 libemllI8254x.so，查找起始目录: {script_dir}")
+    return None
+
+# 查找 libemllI8254x.so 所在的目录
+lib_dir = find_libemllI8254x_so_path()
+if lib_dir:
+    lib_dir_str = str(lib_dir)
     # 获取当前的 LD_LIBRARY_PATH（如果存在）
     current_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
     # 将 lib 目录添加到 LD_LIBRARY_PATH
     if current_ld_path:
-        new_ld_path = f"{lib_path}:{current_ld_path}"
+        new_ld_path = f"{lib_dir_str}:{current_ld_path}"
     else:
-        new_ld_path = lib_path
+        new_ld_path = lib_dir_str
     os.environ["LD_LIBRARY_PATH"] = new_ld_path
     # 对于 Linux，还需要设置 ctypes 的库搜索路径
     if sys.platform == "linux":

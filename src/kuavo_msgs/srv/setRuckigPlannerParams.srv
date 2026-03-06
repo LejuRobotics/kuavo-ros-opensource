@@ -1,0 +1,18 @@
+int8 planner_index  # 0: 底盘位置运动, 1: 底盘速度运动, 2: 躯干笛卡尔运动, 3: 下肢关节运动, 4: 双臂笛卡尔运动, 5: 上肢关节运动
+
+# 具体参数
+float64[]  velocity_max
+float64[]  velocity_min
+
+float64[]  acceleration_max
+float64[]  acceleration_min
+
+float64[]  jerk_max
+
+# 同步还是异步
+bool is_sync
+
+---
+bool result     # 是否设置成功
+string message  # 详细信息
+

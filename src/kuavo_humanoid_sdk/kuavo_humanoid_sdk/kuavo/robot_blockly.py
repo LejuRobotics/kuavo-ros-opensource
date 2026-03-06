@@ -1264,7 +1264,7 @@ class RobotControlBlockly:
 
             while not rospy.is_shutdown():
 
-                results = yolo_detection.get_detections("head", model)
+                results = yolo_detection.get_detections("head", model, confidence=confidence)
                 if not results:
                     continue
 

@@ -33,24 +33,26 @@ commandData
     }
     scale
     {
-        ; cmd_vel的倍率
-        cmdVelLineX         1.6     ; 输入模型的最大cmdVelLineX = scale[0] * velocityLimits[0]
-        cmdVelLineY         1.06    ; 输入模型的最大cmdVelLineY = scale[1] * velocityLimits[1]
-        cmdVelLineZ         1       ; 输入模型的最大cmdVelLineZ = scale[2] * velocityLimits[2]
+        ; cmd_vel 的倍率
+        cmdVelLineX         1.6     ; 输入模型的最大 cmdVelLineX = scale[0] * velocityLimits[0]
+        cmdVelLineY         1.06    ; 输入模型的最大 cmdVelLineY = scale[1] * velocityLimits[1]
+        cmdVelLineZ         1       ; 输入模型的最大 cmdVelLineZ = scale[2] * velocityLimits[2]
         cmdVelAngularX      1   ;
         cmdVelAngularY      1   ;
-        cmdVelAngularZ      2       ; 输入模型的最大cmdVelAngularZ = scale[5] * velocityLimits[3]
+        cmdVelAngularZ      2       ; 输入模型的最大 cmdVelAngularZ = scale[5] * velocityLimits[3]
         cmdStance           1   ;
+        cmdVelLineXNegScale 0.5    ; X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
     }
-};预留完整的接口，当前只用到cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdWalkEnable，最大长度是4
+};预留完整的接口，当前只用到 cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdWalkEnable，最大长度是 4
 
 velocityLimits
 {
-    ; 定义速度命令的限制
-    (0,0)  0.55      ; cmdVelLineX
-    (1,0)  0.3      ; cmdVelLineY
-    (2,0)  0.3      ; cmdVelLineZ
-    (3,0)  0.3      ; cmdVelAngularZ
+    ; 定义速度命令的限制（简化为单一上限，X 负向通过单独的缩放系数实现不对称限制）
+    ; 格式：[linear_x, linear_y, linear_z, angular_z] （正向和负向使用相同的上限）
+    (0,0)  0.5      ; cmdVelLineX limit (positive)
+    (1,0)  0.3       ; cmdVelLineY limit (positive and negative)
+    (2,0)  0.3       ; cmdVelLineZ limit (positive and negative)
+    (3,0)  0.25       ; cmdVelAngularZ limit (positive and negative)
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
@@ -107,8 +109,8 @@ yDirectionCompensation
 mixedMotionLimits
 {
     enableMixedMode             true    ; 是否启用混合运动模式(true/false)
-    angularVelThreshold         0.03    ; 角速度阈值 (rad/s)
-    maxLinearVelWithAngular     0.4     ; 有角速度时最大线速度 (m/s)
+    angularVelThreshold         0.25    ; 角速度阈值 (rad/s)
+    maxLinearVelWithAngular     0.2     ; 有角速度时最大线速度 (m/s)
     linearVelThreshold          0.4     ; 线速度阈值 (m/s)
     maxAngularVelWithLinear     0.4     ; 有线速度时最大角速度 (rad/s)
     smoothTransition            true    ; 是否启用平滑过渡(true/false)

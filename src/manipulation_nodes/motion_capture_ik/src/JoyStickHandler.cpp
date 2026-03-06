@@ -2,11 +2,16 @@
 
 #include <ros/ros.h>
 
+#include <cmath>
 #include <iostream>
 
 namespace HighlyDynamic {
 
-JoyStickHandler::JoyStickHandler() : isInitialized_(false), endEffectorType_(EndEffectorType::LEJUCLAW) {}
+JoyStickHandler::JoyStickHandler(double threshold, double alpha)
+    : isInitialized_(false),
+      endEffectorType_(EndEffectorType::LEJUCLAW),
+      joyStickThreshold_(threshold),
+      joyStickAlpha_(alpha) {}
 
 void JoyStickHandler::initialize() {
   if (isInitialized_.load()) {
@@ -24,6 +29,14 @@ void JoyStickHandler::initialize() {
   leftHandPosition_.resize(6, 0);
   rightHandPosition_.resize(6, 0);
   clawPosition_.resize(2, 0);
+
+  leftJoyStickX_ = 0.0;
+  leftJoyStickY_ = 0.0;
+  rightJoyStickX_ = 0.0;
+  rightJoyStickY_ = 0.0;
+
+  RightJoyStickYHold_ = true;
+  rightJoyStickYHoldCount_ = 0;
 
   leftGrip_ = false;
   rightGrip_ = false;
@@ -75,6 +88,14 @@ void JoyStickHandler::reset() {
   rightHandPosition_.resize(6, 0);
   clawPosition_.resize(2, 0);
 
+  leftJoyStickX_ = 0.0;
+  leftJoyStickY_ = 0.0;
+  rightJoyStickX_ = 0.0;
+  rightJoyStickY_ = 0.0;
+
+  RightJoyStickYHold_ = true;
+  rightJoyStickYHoldCount_ = 0;
+
   leftGrip_ = false;
   rightGrip_ = false;
   leftSecondButtonPressed_ = false;
@@ -107,13 +128,113 @@ void JoyStickHandler::reset() {
   controlFingerType_ = 0;
 }
 
+double JoyStickHandler::getLeftJoyStickX() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  // print leftJoyStickX_
+  // std::cout << "\033[92m[JoyStickHandler] leftJoyStickX_: " << leftJoyStickX_ << "\033[0m" << std::endl;
+  return leftJoyStickX_;
+}
+
+double JoyStickHandler::getLeftJoyStickY() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  // std::cout << "\033[92m[JoyStickHandler] leftJoyStickY_: " << leftJoyStickY_ << "\033[0m" << std::endl;
+  return leftJoyStickY_;
+}
+
+double JoyStickHandler::getRightJoyStickX() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  // std::cout << "\033[92m[JoyStickHandler] rightJoyStickX_: " << rightJoyStickX_ << "\033[0m" << std::endl;
+  return rightJoyStickX_;
+}
+
+double JoyStickHandler::getRightJoyStickY() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  // std::cout << "\033[92m[JoyStickHandler] rightJoyStickY_: " << rightJoyStickY_ << "\033[0m" << std::endl;
+  return rightJoyStickY_;
+}
+
+bool JoyStickHandler::getRightJoyStickYHold() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return RightJoyStickYHold_;
+}
+
 void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
   std::lock_guard<std::mutex> lock(dataMutex_);
   if (!isInitialized_.load()) {
     std::cout << "\033[91m[JoyStickHandler] Not initialized, call initialize() first\033[0m" << std::endl;
     return;
   }
-  // 更新手柄数据
+
+  double rightJoyStickYValue = msg->right_y;
+  bool isCounting = false;
+
+  if (!RightJoyStickYHold_) {
+    if (rightJoyStickYValue > 0.8) {
+      // print count
+      ROS_INFO_STREAM_THROTTLE(
+          0.5, "\033[92m[JoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
+      rightJoyStickYHoldCount_++;
+      isCounting = true;
+      if (rightJoyStickYHoldCount_ > 100) {
+        RightJoyStickYHold_ = true;
+        rightJoyStickYHoldCount_ = 0;
+        std::cout << "\033[92m[JoyStickHandler] RightJoyStickYHold_ 状态切换为: true\033[0m" << std::endl;
+      }
+    } else {
+      rightJoyStickYHoldCount_ = 0;
+    }
+  } else {
+    if (rightJoyStickYValue < -0.8) {
+      ROS_INFO_STREAM_THROTTLE(
+          0.5, "\033[92m[JoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
+      rightJoyStickYHoldCount_++;
+      isCounting = true;
+      if (rightJoyStickYHoldCount_ > 100) {
+        RightJoyStickYHold_ = false;
+        rightJoyStickYHoldCount_ = 0;
+        std::cout << "\033[92m[JoyStickHandler] RightJoyStickYHold_ 状态切换为: false\033[0m" << std::endl;
+      }
+    } else {
+      rightJoyStickYHoldCount_ = 0;
+    }
+  }
+
+  if (std::abs(rightJoyStickYValue) > 0.8) {
+    leftJoyStickX_ = 0.0;
+    leftJoyStickY_ = 0.0;
+    rightJoyStickX_ = 0.0;
+    // 对 rightJoyStickY_ 应用阈值判断和低通滤波
+    if (std::abs(rightJoyStickYValue) > joyStickThreshold_) {
+      rightJoyStickY_ = joyStickAlpha_ * rightJoyStickY_ + (1.0 - joyStickAlpha_) * rightJoyStickYValue;
+    } else {
+      rightJoyStickY_ = 0.0;
+    }
+  } else {
+    // 对 leftJoyStickX_ 应用阈值判断和低通滤波
+    if (std::abs(msg->left_x) > joyStickThreshold_) {
+      leftJoyStickX_ = joyStickAlpha_ * leftJoyStickX_ + (1.0 - joyStickAlpha_) * msg->left_x;
+    } else {
+      leftJoyStickX_ = 0.0;
+    }
+    // 对 leftJoyStickY_ 应用阈值判断和低通滤波
+    if (std::abs(msg->left_y) > joyStickThreshold_) {
+      leftJoyStickY_ = joyStickAlpha_ * leftJoyStickY_ + (1.0 - joyStickAlpha_) * msg->left_y;
+    } else {
+      leftJoyStickY_ = 0.0;
+    }
+    // 对 rightJoyStickX_ 应用阈值判断和低通滤波
+    if (std::abs(msg->right_x) > joyStickThreshold_) {
+      rightJoyStickX_ = joyStickAlpha_ * rightJoyStickX_ + (1.0 - joyStickAlpha_) * msg->right_x;
+    } else {
+      rightJoyStickX_ = 0.0;
+    }
+    // 对 rightJoyStickY_ 应用阈值判断和低通滤波
+    if (std::abs(rightJoyStickYValue) > joyStickThreshold_) {
+      rightJoyStickY_ = joyStickAlpha_ * rightJoyStickY_ + (1.0 - joyStickAlpha_) * rightJoyStickYValue;
+    } else {
+      rightJoyStickY_ = 0.0;
+    }
+  }
   leftJoystick_[0] = msg->left_trigger;
   leftJoystick_[1] = msg->left_grip;
   rightJoystick_[0] = msg->right_trigger;

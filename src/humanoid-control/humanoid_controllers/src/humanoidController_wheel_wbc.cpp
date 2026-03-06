@@ -11,6 +11,8 @@
 #include <geometry_msgs/Twist.h>
 #include <angles/angles.h>
 
+#include "humanoid_wheel_interface/estimators/ContinuousEulerAnglesFromMatrix.h"
+
 
 namespace humanoidController_wheel_wbc
 {
@@ -180,6 +182,11 @@ namespace humanoidController_wheel_wbc
       mrtInputLimitFilterPtr_->setFirstOrderDerivativeLimit(optimizedTrajMaxAcc_);
       mrtInputLimitFilterPtr_->setSecondOrderDerivativeLimit(optimizedTrajMaxJerk_);
     }
+
+    // 关节输出限制
+    jointCmdLimiterPtr_ = std::make_shared<mobile_manipulator::jointCmdLimiter>(manipulatorModelInfo_.armDim, 
+                                                            *pinocchioInterface_ptr_,
+                                                            taskFile, manipulatorModelInfo_, dt_);
     /****************************************************/
 
     // 浮动基 7 + 底盘下肢电机 4 + 双臂 7*2 + 头部 
@@ -192,7 +199,7 @@ namespace humanoidController_wheel_wbc
     {
       mujoco_q[2] = 0.0;
     }
-    else if(robotVersion_ == 61)
+    else if(robotVersion_ == 61 || robotVersion_ == 62)
     {
       mujoco_q[2] = 0.0;
     }
@@ -217,6 +224,10 @@ namespace humanoidController_wheel_wbc
     controllerNh_.setParam("/initial_state", initial_state_vector);
     controllerNh_.setParam("/squat_initial_state", squat_initial_state_vector);
     controllerNh_.setParam("/default_joint_pos", default_joint_pos_vector);
+
+    // 初始化 MPC 初始期望
+    optimizedState_mrt_.tail(manipulatorModelInfo_.armDim) = mujoco_q.segment(7, manipulatorModelInfo_.armDim);
+
 
     // 初始化VR控制相关标志位和参数
     is_transitioning_ = false;
@@ -327,6 +338,14 @@ namespace humanoidController_wheel_wbc
         "/enable_lb_arm_quick_mode",
         [this](auto& req, auto& res) { 
             return enableLbArmQuickModeCallback(req, res); 
+        }
+    );
+
+    // 5. 轮臂MPC, 关节反馈机制切换服务
+    control_data_manager_->registerService<kuavo_msgs::changeLbMpcObsUpdateModeSrv>(
+        "/change_lb_mpc_obs_update_mode",
+        [this](auto& req, auto& res) { 
+            return changeLbObsUpdateModeCallback(req, res); 
         }
     );
     
@@ -487,6 +506,20 @@ namespace humanoidController_wheel_wbc
       SystemObservation kinemicLimitObs = observation_wheel_;
       kinemicLimitObs.state = obsStateLimitFilterPtr_->update(observation_wheel_.state);
       kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
+
+      /****************************允许采用mpc输出作为反馈**************************************/
+      if(mpcObsUpdateMode_ == 1 || mpcObsUpdateMode_ == 3)
+      {
+        kinemicLimitObs.state.segment(baseDim_, lowJointNum_) = optimizedState_mrt_.segment(baseDim_, lowJointNum_);
+        kinemicLimitObs.input.segment(baseDim_, lowJointNum_) = optimizedInput_mrt_.segment(baseDim_, lowJointNum_);
+      }
+      if(mpcObsUpdateMode_ == 2 || mpcObsUpdateMode_ == 3)
+      {
+        kinemicLimitObs.state.tail(armNum_) = optimizedState_mrt_.tail(armNum_);
+        kinemicLimitObs.input.tail(armNum_) = optimizedInput_mrt_.tail(armNum_);
+      }
+      /**************************************************************************************/
+      
       mrtRosInterface_->setCurrentObservation(kinemicLimitObs);
 
       // Trigger MRT callbacks
@@ -502,9 +535,9 @@ namespace humanoidController_wheel_wbc
         optimizedState_mrt_ = optimizedState_mrt;
         optimizedInput_mrt_ = optimizedInput_mrt;
       }
-      if(std::fabs(optimizedInput_mrt_[0]) < 0.001) optimizedInput_mrt_[0] = 0;
-      if(std::fabs(optimizedInput_mrt_[1]) < 0.001) optimizedInput_mrt_[1] = 0;
-      if(std::fabs(optimizedInput_mrt_[2]) < 0.001) optimizedInput_mrt_[2] = 0;
+      if(std::fabs(optimizedInput_mrt_[0]) < 0.05) optimizedInput_mrt_[0] = 0;
+      if(std::fabs(optimizedInput_mrt_[1]) < 0.05) optimizedInput_mrt_[1] = 0;
+      if(std::fabs(optimizedInput_mrt_[2]) < 0.05) optimizedInput_mrt_[2] = 0;
     }
     // 更新可视化数据
     // robotVisualizer_->update_obs(observation_wheel_);
@@ -568,10 +601,22 @@ namespace humanoidController_wheel_wbc
     if(update_cnt < (int)(1/dt_))   // 延时1秒钟进mpc，使mpc指令缓冲充分刷新
     {
       static vector_t observation_wheel_state_prev = observation_wheel_.state;
+      optimizedState_mrt_limit.setZero();
       optimizedState_mrt_limit.tail(info.armDim) = observation_wheel_state_prev.tail(info.armDim);
-      optimizedInput_mrt_limit.tail(info.armDim).setZero();
+      optimizedInput_mrt_limit.setZero();
       update_cnt++;
     }
+
+    {
+      static vector_t qposLimit, qvelLimit;
+
+      qposLimit = optimizedState_mrt_limit.tail(info.armDim);
+      qvelLimit = optimizedInput_mrt_limit.tail(info.armDim);
+      jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
+      optimizedState_mrt_limit.tail(info.armDim) = qposLimit;
+      optimizedInput_mrt_limit.tail(info.armDim) = qvelLimit;
+    }
+
     vector_t x = wheel_wbc_->update(optimizedState_mrt_limit, optimizedInput_mrt_limit, observation_wheel_);
 
     vector_t bodyAcc = x.head(info.stateDim-info.armDim);
@@ -743,10 +788,12 @@ namespace humanoidController_wheel_wbc
     getEEPose(observation_wheel_.state, obs_ee_pos, obs_ee_rot);
 
     vector_t eePoses = vector_t::Zero(manipulatorModelInfo_.eeFrames.size() * 6);
+    // 初始化连续欧拉角跟踪器
+    static std::vector<ocs2::mobile_manipulator::ContinuousEulerAnglesFromMatrix> eeUnwrappers(manipulatorModelInfo_.eeFrames.size());
     for(int i=0; i<manipulatorModelInfo_.eeFrames.size(); i++)
     {
       eePoses.segment(i * 6, 3) = obs_ee_pos[i];
-      eePoses.segment(i * 6 + 3, 3) = obs_ee_rot[i].eulerAngles(2, 1, 0);
+      eePoses.segment(i * 6 + 3, 3) = eeUnwrappers[i].update(obs_ee_rot[i]);
     }
     ros_logger_->publishVector("/humanoid_wheel/eePoses", eePoses);
     ros_logger_->publishVector("/mobile_manipulator_wbc_observation/state", observation_wheel_.state);
@@ -1191,6 +1238,16 @@ namespace humanoidController_wheel_wbc
     quickMode_ = req.quickMode;
     res.success = true;
     res.message = "success change quick ctrl mode to " + std::to_string(req.quickMode);
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::changeLbObsUpdateModeCallback(kuavo_msgs::changeLbMpcObsUpdateModeSrv::Request &req, 
+                                                                kuavo_msgs::changeLbMpcObsUpdateModeSrv::Response &res)
+  {
+    std::cout << "[ArmControl] mpc反馈机制切换请求: " << int(req.obsUpdateMode) << std::endl;
+    mpcObsUpdateMode_ = req.obsUpdateMode;
+    res.success = true;
+    res.message = "success change obs update mode to " + std::to_string(req.obsUpdateMode);
     return true;
   }
 

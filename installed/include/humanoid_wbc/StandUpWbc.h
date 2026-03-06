@@ -24,6 +24,7 @@ namespace ocs2
                       size_t mode, scalar_t period, bool mpc_update = false) override;
 
       void loadTasksSetting(const std::string &taskFile, bool verbose, bool is_real) override;
+      void loadSwitchParamsSetting(const std::string &taskFile, bool verbose, bool is_real) override;
 
     protected:
       Task formulateConstraints(const vector_t &inputDesired);

@@ -22,8 +22,8 @@
     "torsoP": 3.0,
     "torsoP_squat": 3.0,
     "StepH": 0.06,
-    "com_z": 0.84,
-    "squat_z": 0.667,
+    "com_z": 0.90,
+    "squat_z": 0.72,
     "com_z_jump": 0.62,
     "StepWith": 0.20,
     "StepDuration":0.35,
@@ -51,8 +51,8 @@
         "PA76_25",
         "PA100", "ruiwoPA72", "ruiwoPA60", "ruiwoPA72", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43",
         "PA100", "ruiwoPA72", "ruiwoPA60", "ruiwoPA72", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43"],
-    "ruiwo_kp": [30, 15, 30, 15, 15, 15, 30, 15, 30, 15, 15, 15, 4, 10],
-    "ruiwo_kd": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
+    "ruiwo_kp": [30, 30, 40, 38, 40, 35, 30, 30, 40, 38, 40, 35, 4, 10],
+    "ruiwo_kd": [2, 4, 4, 5, 5, 5, 2, 4, 4, 5, 5, 5, 3, 3],
 
     "amp_kpkd": {
         "ruiwo_kp": [30, 15, 30, 15, 15, 15, 30, 15, 30, 15, 15, 15, 4, 10],
@@ -60,8 +60,8 @@
     },
 
     "normal_kpkd": {
-        "ruiwo_kp": [30, 15, 30, 15, 15, 15, 30, 15, 30, 15, 15, 15, 4, 10],
-        "ruiwo_kd": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+        "ruiwo_kp": [30, 30, 40, 38, 40, 35, 30, 30, 40, 38, 40, 35, 4, 10],
+        "ruiwo_kd": [2, 4, 4, 5, 5, 5, 2, 4, 4, 5, 5, 5, 3, 3]
     },
     "EndEffectorType": ["qiangnao", "qiangnao"],
     "min_joint_position_limits":[

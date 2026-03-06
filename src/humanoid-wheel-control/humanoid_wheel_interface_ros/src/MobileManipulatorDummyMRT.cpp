@@ -51,6 +51,11 @@ int main(int argc, char** argv) {
 
   /********************************初始位置设置************************************/
   vector_t mujoco_q = vector_t::Zero(7 + 4 + 7*2 + 2);
+  mujoco_q[3] = 1.0;
+  mujoco_q[11] = 0.5236;
+  mujoco_q[14] = -1.57;
+  mujoco_q[18] = 0.5236;
+  mujoco_q[21] = -1.57;
   std::vector<double> robot_init_state_param;
   for (int i = 0; i < mujoco_q.size(); i++)
   {

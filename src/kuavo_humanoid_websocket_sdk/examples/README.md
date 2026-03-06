@@ -4,6 +4,11 @@
 
 ### Websocket 服务器启动
 
+### 安装 rosbridge_suite
+```bash
+sudo apt install ros-noetic-rosbridge-suite
+```
+
 #### 上位机启动
 使用 Weboskcet SDK 需要在上位机先启动 Websocket 服务器：
 ```bash
@@ -57,8 +62,6 @@ KuavoSDK.Init(
 参数说明：
 - `websocket_mode`: 是否启用WebSocket模式，必须设置为True
 - `websocket_host`: WebSocket服务器地址，默认为'127.0.0.1'
-
-
 
 ## 原子技能 （atomic_skills）
 

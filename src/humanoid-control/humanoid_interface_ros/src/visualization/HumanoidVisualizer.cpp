@@ -290,8 +290,13 @@ namespace ocs2
 
         const auto timeStamp = ros::Time::now();
         publishObservation(timeStamp, observation);
+        // 防护：避免 policy 并发/内存损坏导致 trajectory 元数据异常（如负的 size）而崩溃
+        constexpr size_t kMaxReasonableTrajectorySize = 50000;
         if (primalSolution.inputTrajectory_.empty() || primalSolution.inputTrajectory_[0].size() > 2048 ||
-          primalSolution.timeTrajectory_.size() == 0 || primalSolution.stateTrajectory_.size() == 0)
+            primalSolution.timeTrajectory_.size() == 0 || primalSolution.stateTrajectory_.size() == 0 ||
+            primalSolution.timeTrajectory_.size() > kMaxReasonableTrajectorySize ||
+            primalSolution.stateTrajectory_.size() > kMaxReasonableTrajectorySize ||
+            primalSolution.timeTrajectory_.size() != primalSolution.stateTrajectory_.size())
         {
           lastTime_ = observation.time;
           return;

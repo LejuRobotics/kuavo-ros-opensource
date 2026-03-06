@@ -56,6 +56,21 @@ namespace HighlyDynamic
         predefined_arm_pose.arm_calibration_position_variance_threshold = robot_config.getValue<double>("arm_calibration_position_variance_threshold");
         predefined_arm_pose.arm_poses.push_back(robot_config.getValue<Eigen::VectorXd>("arm_pose0"));
         predefined_arm_pose.arm_poses.push_back(robot_config.getValue<Eigen::VectorXd>("arm_pose1"));
+        
+        // 读取腿部校准参数（如果存在）
+        if (robot_config["leg_calibration_safe_pose"].is_array())
+        {
+            predefined_arm_pose.leg_calibration_safe_pose = robot_config.getValue<Eigen::VectorXd>("leg_calibration_safe_pose");
+            predefined_arm_pose.leg_calibration_limits = robot_config.getValue<Eigen::VectorXd>("leg_calibration_limits");
+            predefined_arm_pose.leg_calibration_directions = robot_config.getValue<Eigen::VectorXd>("leg_calibration_directions");
+        }
+        else
+        {
+            // 如果不存在，初始化为空向量
+            predefined_arm_pose.leg_calibration_safe_pose = Eigen::VectorXd();
+            predefined_arm_pose.leg_calibration_limits = Eigen::VectorXd();
+            predefined_arm_pose.leg_calibration_directions = Eigen::VectorXd();
+        }
     }
 
     void KuavoSettings::loadModelSettings(JSONConfigReader &robot_config)
@@ -216,9 +231,13 @@ namespace HighlyDynamic
                 {"dynamixel", {BIT_17_36, CK_MC, CK_C2T, DYNAMIXEL}},
                 {"realman", {BIT_17_36, CK_MC, CK_C2T, REALMAN}},
                 {"ruiwo", {BIT_17_36, CK_MC, CK_C2T, RUIWO}},
+                {"ruiwoPA81", {BIT_17_25, CK_MC, PA81_C2T, RUIWO}},
                 {"ruiwoPA72", {BIT_17_36, CK_MC, PA72_C2T, RUIWO}},
                 {"ruiwoPA60", {BIT_17_36, CK_MC, PA60_C2T, RUIWO}},
                 {"ruiwoPA43", {BIT_17_10, CK_MC, PA43_C2T, RUIWO}},
+                {"ruiwoPA4310_25", {BIT_17_25, CK_MC, PA4310_25_C2T, RUIWO}},
+                {"ruiwoPA4315_36", {BIT_17_36, CK_MC, PA4315_36_C2T, RUIWO}},
+                {"ruiwoPA60_16", {BIT_17_16, CK_MC, PA60_16_C2T, RUIWO}},
                 {"PA100_18", {BIT_17_18, PA100_MC, PA100_18_C2T, EC_MASTER}},
                 {"PA100_20", {BIT_17_20, PA100_MC, PA100_20_C2T, EC_MASTER}},
                 {"PA115", {BIT_17_120, PA115_MC, PA115_C2T, EC_MASTER}},
@@ -229,7 +248,10 @@ namespace HighlyDynamic
                 {"PA72_36_R", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
                 {"PA76_25", {BIT_17_25, PA76_25_MC, PA76_25_C2T, EC_MASTER}},
                 {"PA76_18", {BIT_17_18, PA76_18_MC, PA76_18_C2T, EC_MASTER}},
-                {"PA105_18", {BIT_17_18, PA105_18_MC, PA105_18_C2T, EC_MASTER}}};
+                {"PA81_18_25", {BIT_17_25, PA81_18_25_MC, PA81_18_25_C2T, EC_MASTER}},
+                {"PA105_18", {BIT_17_18, PA105_18_MC, PA105_18_C2T, EC_MASTER}},
+                {"PA81_25", {BIT_17_251, PA81_25_MC, PA81_25_C2T, EC_MASTER}},
+                {"PA4315_36", {BIT_17_36, PA4315_36_MC, PA4315_36_C2T, EC_MASTER}}};
         hardware_settings.num_joints = robot_config.getValue<uint8_t>("NUM_JOINT");
         hardware_settings.num_arm_joints = robot_config.getValue<uint8_t>("NUM_ARM_JOINT");
         hardware_settings.num_head_joints = robot_config.getValue<uint8_t>("NUM_HEAD_JOINT");
