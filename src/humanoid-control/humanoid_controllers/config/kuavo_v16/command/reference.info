@@ -1,8 +1,10 @@
 targetDisplacementVelocity          0.5;
 targetRotationVelocity              0.3;
 cmdvelLinearXLimit                  0.30;
+cmdvelLinearYLimit                  0.1;
 cmdvelLinearZLimit                  0.1;
 cmdvelAngularYAWLimit               0.3;
+waist_yaw_max                       150.0;
 armMode                             true; 
 
 targetArmDisplacementVelocity       1.2;
@@ -16,7 +18,7 @@ comHeight                           0.78
 vrSquatMinPitchDeg                  3.0;     ; min pitch (deg)
 vrSquatMaxPitchDeg                  35.0;    ; max pitch (deg)
 vrSquatHeightMin                    -0.25;   ; min height (m)
-vrSquatHeightMax                    0.1;     ; max height (m)
+vrSquatHeightMax                    0.03;     ; max height (m)
 
 targetTorsoDispalcementVelocity
 {
@@ -296,12 +298,12 @@ standJointState
 {
    ;; Arm Joint Positions:  ;;
    (0,0)   0.37     ; zarm_l1_joint
-   (1,0)   0.0      ; zarm_l2_joint
+   (1,0)   0.1745   ; zarm_l2_joint
    (2,0)   -0.0     ; zarm_l3_joint
    (3,0)   -0.85    ; zarm_l4_joint
 
    (4,0)   0.37     ; zarm_r1_joint
-   (5,0)   0.0      ; zarm_r2_joint
+   (5,0)   -0.1745  ; zarm_r2_joint
    (6,0)   -0.0     ; zarm_r3_joint
    (7,0)   -0.85    ; zarm_r4_joint
 }
@@ -332,16 +334,16 @@ squatJointState
 
 acc_filter_cutoff_freq
 {
-   (0,0)   30.0   ; x
-   (1,0)   30.0   ; y
-   (2,0)   30.0   ; z
+   (0,0)   90.0   ; x
+   (1,0)   90.0   ; y
+   (2,0)   90.0   ; z
 }
 
 gyro_filter_cutoff_freq
 {
-   (0,0)   60.0   ; x
-   (1,0)   60.0   ; y
-   (2,0)   60.0   ; z
+   (0,0)   120.0   ; x
+   (1,0)   120.0   ; y
+   (2,0)   120.0   ; z
 }
 
 arm_joint_pos_filter_cutoff_freq       100 ;
