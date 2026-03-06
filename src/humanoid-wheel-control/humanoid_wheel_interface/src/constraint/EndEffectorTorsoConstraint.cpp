@@ -64,7 +64,7 @@ size_t EndEffectorTorsoConstraint::getNumConstraints(scalar_t time) const {
 
 bool EndEffectorTorsoConstraint::isActive(scalar_t time) const 
 {
-  return referenceManagerPtr_->getEnableEeTargetLocalTrajectories();
+  return referenceManagerPtr_->getEnableEeTargetLocalTrajectoriesForArm(eef_Idx_);
 }
 /******************************************************************************************************/
 /******************************************************************************************************/
@@ -121,11 +121,11 @@ VectorFunctionLinearApproximation EndEffectorTorsoConstraint::getLinearApproxima
 /******************************************************************************************************/
 /******************************************************************************************************/
 auto EndEffectorTorsoConstraint::interpolateEndEffectorPose(scalar_t time) const -> std::pair<vector_t, quaternion_t> {
-  const auto& targetTrajectories = referenceManagerPtr_->getEeTargetTrajectories();
+  const auto& targetTrajectories = referenceManagerPtr_->getEeTargetTrajectories(eef_Idx_);
   const auto& targetEeState = targetTrajectories.getDesiredState(time);
 
-  vector_t position = targetEeState.segment(eef_Idx_ * 6, 3);
-  Eigen::Vector3d zyx = targetEeState.segment(eef_Idx_ * 6 + 3, 3);
+  vector_t position = targetEeState.segment(0, 3);
+  Eigen::Vector3d zyx = targetEeState.segment(3, 3);
   quaternion_t orientation = getQuaternionFromEulerAnglesZyx(zyx);
 
   return {position, orientation};

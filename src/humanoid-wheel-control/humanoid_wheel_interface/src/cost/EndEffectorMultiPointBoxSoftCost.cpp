@@ -139,7 +139,7 @@ EndEffectorMultiPointBoxSoftCost::EndEffectorMultiPointBoxSoftCost(int pointNums
 
 bool EndEffectorMultiPointBoxSoftCost::isActive(scalar_t time) const 
 {
-  return referenceManager_.getEnableEeTargetTrajectories();
+  return referenceManager_.getEnableEeTargetTrajectoriesForArm(eef_Idx_);
 }
 
 /******************************************************************************************************/
@@ -252,11 +252,11 @@ ScalarFunctionQuadraticApproximation EndEffectorMultiPointBoxSoftCost::getQuadra
 /******************************************************************************************************/
 /******************************************************************************************************/
 auto EndEffectorMultiPointBoxSoftCost::interpolateEndEffectorPose(scalar_t time) const -> std::pair<Eigen::Vector3d, quaternion_t> {
-  const auto& targetTrajectories = referenceManager_.getEeTargetTrajectories();
+  const auto& targetTrajectories = referenceManager_.getEeTargetTrajectories(eef_Idx_);
   const auto& targetEeState = targetTrajectories.getDesiredState(time);
 
-  Eigen::Vector3d position = targetEeState.segment(eef_Idx_ * 6, 3);
-  Eigen::Vector3d zyx = targetEeState.segment(eef_Idx_ * 6 + 3, 3);
+  Eigen::Vector3d position = targetEeState.segment(0, 3);
+  Eigen::Vector3d zyx = targetEeState.segment(3, 3);
   quaternion_t orientation = getQuaternionFromEulerAnglesZyx(zyx);
 
   return {position, orientation};

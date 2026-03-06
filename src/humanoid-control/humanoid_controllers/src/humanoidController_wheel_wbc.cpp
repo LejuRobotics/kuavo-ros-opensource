@@ -244,8 +244,10 @@ namespace humanoidController_wheel_wbc
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
 
     // 创建控制数据管理器（替代所有订阅者和服务）
+    vector_t leg_initial_state = optimizedState_mrt_.tail(manipulatorModelInfo_.armDim).head(lowJointNum_);
+    vector_t arm_initial_state = optimizedState_mrt_.tail(manipulatorModelInfo_.armDim).tail(armNum_);
     control_data_manager_ = std::make_unique<ControlDataManager>(
-        controllerNh_, is_real_, armNum_, lowJointNum_, headNum_);
+        controllerNh_, is_real_, armNum_, lowJointNum_, headNum_, leg_initial_state, arm_initial_state);
     
     // 初始化所有订阅者（包括传感器数据订阅）
     control_data_manager_->initializeSubscribers();

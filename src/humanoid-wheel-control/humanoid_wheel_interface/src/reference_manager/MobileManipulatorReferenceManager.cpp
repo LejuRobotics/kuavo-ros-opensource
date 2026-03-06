@@ -203,23 +203,20 @@ namespace mobile_manipulator {
 
   MobileManipulatorReferenceManager::MobileManipulatorReferenceManager(const ManipulatorModelInfo& info, const PinocchioInterface& pinocchioInterface, const std::string& taskFile)
   : ReferenceManager(TargetTrajectories(), ModeSchedule())
-  , info_(info)
+  , info_(info), singleArmJointDim_((info.armDim - 4) / 2)
   , pinocchioInterface_(pinocchioInterface)
   , taskFile_(taskFile)
   , stateInputTargetTrajectories_(TargetTrajectories({0}, {vector_t::Zero(info_.stateDim)}, {vector_t::Zero(info_.inputDim)}))
-  , torsoTargetTrajectories_(TargetTrajectories({0}, {vector_t::Zero(7)}, {vector_t::Zero(7)}))
-  , eeTargetTrajectories_(TargetTrajectories({0}, {vector_t::Zero(info_.eeFrames.size() * 6)}, {vector_t::Zero(info_.eeFrames.size() * 6)}))
+  , torsoTargetTrajectories_(TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)}))
+  , eeTargetTrajectories_{TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)}), 
+                          TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)})}
   {
 
     loadParamFromTaskFile();  // 加载配置参数
 
     baseDim_ = info_.stateDim-info_.armDim;
-    cmd_arm_zyx_ = vector_t::Zero(info_.eeFrames.size() * 6);
-    left_arm_traj_pose_ = vector_t::Zero(7);  // x,y,z,qx,qy,qz,qw
-    right_arm_traj_pose_ = vector_t::Zero(7); // x,y,z,qx,qy,qz,qw
-
-    left_arm_joint_traj_ = vector_t::Zero(7);
-    right_arm_joint_traj_ = vector_t::Zero(7);
+    cmd_arm_zyx_[0] = vector_t::Zero(6);
+    cmd_arm_zyx_[1] = vector_t::Zero(6);
     
     // 初始化MPC控制模式为NoControl（完全接收上层下发的 TargetTrajectory, 其余话题无法接收）
     currentMpcControlMode_ = 2;  // NoControl
@@ -334,56 +331,65 @@ namespace mobile_manipulator {
     /*********************************************************************************/
 
     /*******************ruckig双臂笛卡尔规划器初始化 (Zyx欧拉角)***************************/ 
-    auto createDualArmEePlanner = [&]() -> std::shared_ptr<cmdPosePlannerWithRuckig> 
+    auto createSingleArmEePlanner = [&]() -> std::shared_ptr<cmdPosePlannerWithRuckig> 
     {
-      auto plannerPtr = std::make_shared<cmdPosePlannerWithRuckig>(info_.eeFrames.size() * 6, true);
-      Eigen::VectorXd max_velocity_dualArm_ruckig, max_acceleration_dualArm_ruckig, max_jerk_dualArm_ruckig;
-      max_velocity_dualArm_ruckig.setZero(info_.eeFrames.size() * 6);
-      max_acceleration_dualArm_ruckig.setZero(info_.eeFrames.size() * 6);
-      max_jerk_dualArm_ruckig.setZero(info_.eeFrames.size() * 6);
-      for(int i=0; i<info_.eeFrames.size(); i++)
-      {
-        max_velocity_dualArm_ruckig.segment(i*6, 6) = dualArm_move_spd_.head<6>();
-        max_acceleration_dualArm_ruckig.segment(i*6, 6) = dualArm_move_acc_.head<6>();
-        max_jerk_dualArm_ruckig.segment(i*6, 6) = dualArm_move_jerk_.head<6>();
-      }
-      plannerPtr->setVelocityLimits(max_velocity_dualArm_ruckig, -max_velocity_dualArm_ruckig);
-      plannerPtr->setAccelerationLimits(max_acceleration_dualArm_ruckig, -max_acceleration_dualArm_ruckig);
-      plannerPtr->setJerkLimits(max_jerk_dualArm_ruckig);
+      auto plannerPtr = std::make_shared<cmdPosePlannerWithRuckig>(6, true);
+      Eigen::VectorXd max_velocity_singleArm_ruckig, max_acceleration_singleArm_ruckig, max_jerk_singleArm_ruckig;
+      max_velocity_singleArm_ruckig.setZero(6);
+      max_acceleration_singleArm_ruckig.setZero(6);
+      max_jerk_singleArm_ruckig.setZero(6);
+      max_velocity_singleArm_ruckig.head<6>() = dualArm_move_spd_.head<6>();
+      max_acceleration_singleArm_ruckig.head<6>() = dualArm_move_acc_.head<6>();
+      max_jerk_singleArm_ruckig.head<6>() = dualArm_move_jerk_.head<6>();
+      
+      plannerPtr->setVelocityLimits(max_velocity_singleArm_ruckig, -max_velocity_singleArm_ruckig);
+      plannerPtr->setAccelerationLimits(max_acceleration_singleArm_ruckig, -max_acceleration_singleArm_ruckig);
+      plannerPtr->setJerkLimits(max_jerk_singleArm_ruckig);
       return plannerPtr;
     };
-    cmdDualArmEePlannerRuckigPtr_ = createDualArmEePlanner();
-    timedPlannerScheduler_.addTimedPlannerPosePtr(createDualArmEePlanner());  // 一个世界系
-    timedPlannerScheduler_.addTimedPlannerPosePtr(createDualArmEePlanner());  // 一个局部系
-    cmdDualArm_prevTargetPose_.setZero(info_.eeFrames.size() * 6);
-    cmdDualArm_prevTargetVel_.setZero(info_.eeFrames.size() * 6);
-    cmdDualArm_prevTargetAcc_.setZero(info_.eeFrames.size() * 6);
+    cmdDualArmEePlannerRuckigPtr_[0] = createSingleArmEePlanner();  // 左臂笛卡尔
+    cmdDualArmEePlannerRuckigPtr_[1] = createSingleArmEePlanner();  // 右臂笛卡尔
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createSingleArmEePlanner());  // 左臂世界系
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createSingleArmEePlanner());  // 右臂世界系
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createSingleArmEePlanner());  // 左臂局部系
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createSingleArmEePlanner());  // 右臂局部系
+    for(int armIdx = 0; armIdx < info_.eeFrames.size(); armIdx++)
+    {
+      cmdDualArm_prevTargetPose_[armIdx].setZero(6);
+      cmdDualArm_prevTargetVel_[armIdx].setZero(6);
+      cmdDualArm_prevTargetAcc_[armIdx].setZero(6);
+    }
     /*********************************************************************************/
 
     /********************ruckig上肢关节规划器初始化 (单位: 弧度)***************************/
-    auto createArmJointPlanner = [&]() -> std::shared_ptr<cmdPosePlannerWithRuckig> 
+    auto createSingleArmJointPlanner = [&]() -> std::shared_ptr<cmdPosePlannerWithRuckig> 
     {
-      auto plannerPtr = std::make_shared<cmdPosePlannerWithRuckig>(info_.armDim - 4, true);
-      Eigen::VectorXd max_velocity_armJoint_ruckig, max_acceleration_armJoint_ruckig, max_jerk_armJoint_ruckig;
-      max_velocity_armJoint_ruckig.setZero(info_.armDim - 4);
-      max_acceleration_armJoint_ruckig.setZero(info_.armDim - 4);
-      max_jerk_armJoint_ruckig.setZero(info_.armDim - 4);
-      for(int i=0; i<info_.armDim - 4; i++)
+      auto plannerPtr = std::make_shared<cmdPosePlannerWithRuckig>(singleArmJointDim_, true);
+      Eigen::VectorXd max_velocity_singleArmJoint_ruckig, max_acceleration_singleArmJoint_ruckig, max_jerk_singleArmJoint_ruckig;
+      max_velocity_singleArmJoint_ruckig.setZero(singleArmJointDim_);
+      max_acceleration_singleArmJoint_ruckig.setZero(singleArmJointDim_);
+      max_jerk_singleArmJoint_ruckig.setZero(singleArmJointDim_);
+      for(int i=0; i<singleArmJointDim_; i++)
       {
-        max_velocity_armJoint_ruckig.segment(i, 1) = armJoint_move_spd_.head<1>();
-        max_acceleration_armJoint_ruckig.segment(i, 1) = armJoint_move_acc_.head<1>();
-        max_jerk_armJoint_ruckig.segment(i, 1) = armJoint_move_jerk_.head<1>();
+        max_velocity_singleArmJoint_ruckig.segment(i, 1) = armJoint_move_spd_.head<1>();
+        max_acceleration_singleArmJoint_ruckig.segment(i, 1) = armJoint_move_acc_.head<1>();
+        max_jerk_singleArmJoint_ruckig.segment(i, 1) = armJoint_move_jerk_.head<1>();
       }
-      plannerPtr->setVelocityLimits(max_velocity_armJoint_ruckig, -max_velocity_armJoint_ruckig);
-      plannerPtr->setAccelerationLimits(max_acceleration_armJoint_ruckig, -max_acceleration_armJoint_ruckig);
-      plannerPtr->setJerkLimits(max_jerk_armJoint_ruckig);
+      plannerPtr->setVelocityLimits(max_velocity_singleArmJoint_ruckig, -max_velocity_singleArmJoint_ruckig);
+      plannerPtr->setAccelerationLimits(max_acceleration_singleArmJoint_ruckig, -max_acceleration_singleArmJoint_ruckig);
+      plannerPtr->setJerkLimits(max_jerk_singleArmJoint_ruckig);
       return plannerPtr;
     };
-    armJointPlannerRuckigPtr_ = createArmJointPlanner();
-    timedPlannerScheduler_.addTimedPlannerPosePtr(createArmJointPlanner());
-    armJoint_prevTargetPose_.setZero(info_.armDim - 4);
-    armJoint_prevTargetPose_.setZero(info_.armDim - 4);
-    armJoint_prevTargetPose_.setZero(info_.armDim - 4);
+    armJointPlannerRuckigPtr_[0] = createSingleArmJointPlanner();
+    armJointPlannerRuckigPtr_[1] = createSingleArmJointPlanner();
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createSingleArmJointPlanner());   // 左臂关节
+    timedPlannerScheduler_.addTimedPlannerPosePtr(createSingleArmJointPlanner());   // 右臂关节
+    for(int armIdx = 0; armIdx < 2; armIdx++)
+    {
+      armJoint_prevTargetPose_[armIdx].setZero(singleArmJointDim_);
+      armJoint_prevTargetVel_[armIdx].setZero(singleArmJointDim_);
+      armJoint_prevTargetAcc_[armIdx].setZero(singleArmJointDim_);
+    }
     /*********************************************************************************/
 
     /******************** 时间调度器初始化相关 ***************************/
@@ -616,127 +622,136 @@ namespace mobile_manipulator {
     // 订阅双臂末端执行器位姿指令
     auto armEndEffectorCallback = [this](const kuavo_msgs::twoArmHandPoseCmd::ConstPtr &msg)
     {
-      desireMode_ = handPoseCmdFrameToLbArmMode(msg->frame);
-      if(desireMode_ == LbArmControlMode::FalseMode) 
+      for(int armIdx = 0; armIdx < info_.eeFrames.size(); armIdx++)
       {
-        desireMode_ = LbArmControlMode::JointSpace;
-        return;
-      }
-
-      armPose_mtx_.lock();
-      
-      if(desireMode_ == LbArmControlMode::WorldFrame || desireMode_ == LbArmControlMode::LocalFrame)
-      {
-        isCmdDualArmPoseUpdated_ = true;
-        cmdDualArmPoseDesiredTime_ = 0.0;
-        
-        if(msg->hand_poses.left_pose.joint_angles.size() != 7 || msg->hand_poses.right_pose.joint_angles.size() != 7)
+        desireMode_[armIdx] = handPoseCmdFrameToLbArmMode(msg->frame);
+        if(desireMode_[armIdx] == LbArmControlMode::FalseMode) 
         {
-          ROS_ERROR("Left or right arm joint angles size is not 7");
-          armPose_mtx_.unlock();
-          return;
+          desireMode_[armIdx] = LbArmControlMode::JointSpace;
+          continue;
         }
 
-        // 解析左臂位姿 (x,y,z,qx,qy,qz,qw)
-        left_arm_traj_pose_ = vector_t::Zero(7);
-        left_arm_traj_pose_[0] = msg->hand_poses.left_pose.pos_xyz[0];  // x
-        left_arm_traj_pose_[1] = msg->hand_poses.left_pose.pos_xyz[1];  // y
-        left_arm_traj_pose_[2] = msg->hand_poses.left_pose.pos_xyz[2];  // z
-        left_arm_traj_pose_[3] = msg->hand_poses.left_pose.quat_xyzw[0]; // qx
-        left_arm_traj_pose_[4] = msg->hand_poses.left_pose.quat_xyzw[1]; // qy
-        left_arm_traj_pose_[5] = msg->hand_poses.left_pose.quat_xyzw[2]; // qz
-        left_arm_traj_pose_[6] = msg->hand_poses.left_pose.quat_xyzw[3]; // qw
-
-        cmd_arm_zyx_.head(3) = left_arm_traj_pose_.head(3);
-        // cmd_arm_zyx_.segment(3, 3) = quatToZyx(Eigen::Quaterniond(left_arm_traj_pose_.tail<4>()));
-        // if(desireMode_ == LbArmControlMode::WorldFrame)
-        // {
-        //   cmd_arm_zyx_[3] += initState_[2];
-        // }
-        
-        // 解析右臂位姿 (x,y,z,qx,qy,qz,qw)
-        right_arm_traj_pose_ = vector_t::Zero(7);
-        right_arm_traj_pose_[0] = msg->hand_poses.right_pose.pos_xyz[0];  // x
-        right_arm_traj_pose_[1] = msg->hand_poses.right_pose.pos_xyz[1];  // y
-        right_arm_traj_pose_[2] = msg->hand_poses.right_pose.pos_xyz[2];  // z
-        right_arm_traj_pose_[3] = msg->hand_poses.right_pose.quat_xyzw[0]; // qx
-        right_arm_traj_pose_[4] = msg->hand_poses.right_pose.quat_xyzw[1]; // qy
-        right_arm_traj_pose_[5] = msg->hand_poses.right_pose.quat_xyzw[2]; // qz
-        right_arm_traj_pose_[6] = msg->hand_poses.right_pose.quat_xyzw[3]; // qw
-
-        cmd_arm_zyx_.segment(6, 3) = right_arm_traj_pose_.head(3);
-        // cmd_arm_zyx_.segment(9, 3) = quatToZyx(Eigen::Quaterniond(right_arm_traj_pose_.tail<4>()));
-        // if(desireMode_ == LbArmControlMode::WorldFrame)
-        // {
-        //   cmd_arm_zyx_[9] += initState_[2];
-        // }
-
-        Eigen::VectorXd currentEePose, currentEeVel, currentEeAcc;
-        switch (desireMode_)
+        if(desireMode_[armIdx] == LbArmControlMode::WorldFrame || 
+           desireMode_[armIdx] == LbArmControlMode::LocalFrame)
         {
-          case LbArmControlMode::WorldFrame: 
-            timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD, 
-                                                         currentEePose, currentEeVel, currentEeAcc);
-            break;
-          case LbArmControlMode::LocalFrame: 
-            timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD, 
-                                                         currentEePose, currentEeVel, currentEeAcc);
-            break;
-        }
-        // 将segment结果转换为Eigen::Vector3d
-        Eigen::Vector3d initial_zyx_1 = currentEePose.segment(3, 3);
-        Eigen::Vector3d initial_zyx_2 = currentEePose.segment(9, 3);
-        cmd_arm_zyx_.segment(3, 3) = quatToZyx(Eigen::Quaterniond(left_arm_traj_pose_.tail<4>()), 
-                                               initial_zyx_1);
-        cmd_arm_zyx_.segment(9, 3) = quatToZyx(Eigen::Quaterniond(right_arm_traj_pose_.tail<4>()), 
-                                               initial_zyx_2);
-        std::cout << "cmd_arm_zyx_: " << cmd_arm_zyx_.transpose() << std::endl;
-        std::cout << "currentEePose: " << currentEePose.transpose() << std::endl;
-      }
+          if(armIdx == 0 && msg->hand_poses.left_pose.joint_angles.size() != 7)
+          {
+            ROS_ERROR("Left arm joint angles size is not 7");
+            return;
+          }
 
-      if(desireMode_ == LbArmControlMode::JointSpace) //进行关节控制时, 进行慢速稳定控制
-      {
-        for (size_t i = 0; i < msg->hand_poses.left_pose.joint_angles.size(); ++i)
+          if(armIdx == 1 && msg->hand_poses.right_pose.joint_angles.size() != 7)
+          {
+            ROS_ERROR("Right arm joint angles size is not 7");
+            return;
+          }
+
+          Eigen::VectorXd currentEePose, currentEeVel, currentEeAcc;
+          switch (desireMode_[armIdx])
+          {
+            case LbArmControlMode::WorldFrame: 
+              timedPlannerScheduler_.getTimedPlannerStates((armIdx == 0) ? 
+                                                            LbTimedPosCmdType::LEFT_ARM_WORLD_CMD : 
+                                                            LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD, 
+                                                            currentEePose, currentEeVel, currentEeAcc);
+              break;
+            case LbArmControlMode::LocalFrame: 
+              timedPlannerScheduler_.getTimedPlannerStates((armIdx == 0) ? 
+                                                            LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD : 
+                                                            LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD, 
+                                                            currentEePose, currentEeVel, currentEeAcc);
+              break;
+          }
+
+          // 解析位姿 (x,y,z,qx,qy,qz,qw)
+          vector_t arm_traj_pose = vector_t::Zero(7);
+          switch(armIdx)
+          {
+            case 0: // 左臂
+              arm_traj_pose[0] = msg->hand_poses.left_pose.pos_xyz[0];  // x
+              arm_traj_pose[1] = msg->hand_poses.left_pose.pos_xyz[1];  // y
+              arm_traj_pose[2] = msg->hand_poses.left_pose.pos_xyz[2];  // z
+              arm_traj_pose[3] = msg->hand_poses.left_pose.quat_xyzw[0]; // qx
+              arm_traj_pose[4] = msg->hand_poses.left_pose.quat_xyzw[1]; // qy
+              arm_traj_pose[5] = msg->hand_poses.left_pose.quat_xyzw[2]; // qz
+              arm_traj_pose[6] = msg->hand_poses.left_pose.quat_xyzw[3]; // qw
+              break;
+            case 1: // 右臂
+              arm_traj_pose[0] = msg->hand_poses.right_pose.pos_xyz[0];  // x
+              arm_traj_pose[1] = msg->hand_poses.right_pose.pos_xyz[1];  // y
+              arm_traj_pose[2] = msg->hand_poses.right_pose.pos_xyz[2];  // z
+              arm_traj_pose[3] = msg->hand_poses.right_pose.quat_xyzw[0]; // qx
+              arm_traj_pose[4] = msg->hand_poses.right_pose.quat_xyzw[1]; // qy
+              arm_traj_pose[5] = msg->hand_poses.right_pose.quat_xyzw[2]; // qz
+              arm_traj_pose[6] = msg->hand_poses.right_pose.quat_xyzw[3]; // qw
+              break;
+          }
+
+          Eigen::Vector3d initial_zyx = currentEePose.segment(3, 3);
+
+          armPose_mtx_[armIdx].lock();
+          cmd_arm_zyx_[armIdx].head(3) = arm_traj_pose.head(3);
+          cmd_arm_zyx_[armIdx].segment(3, 3) = quatToZyx(Eigen::Quaterniond(arm_traj_pose.tail<4>()), 
+                                                 initial_zyx);
+
+          armPose_mtx_[armIdx].unlock();
+
+          isCmdDualArmPoseUpdated_[armIdx] = true;
+          cmdDualArmPoseDesiredTime_[armIdx] = 0.0;
+        }
+
+        if(desireMode_[armIdx] == LbArmControlMode::JointSpace) //进行关节控制时, 进行慢速稳定控制
         {
-          left_arm_joint_traj_[i] = msg->hand_poses.left_pose.joint_angles[i] * M_PI / 180.0; // 转换为弧度
-          right_arm_joint_traj_[i] = msg->hand_poses.right_pose.joint_angles[i] * M_PI / 180.0; // 转换为弧度
-        }
+          arm_joint_traj_[armIdx] = vector_t::Zero(singleArmJointDim_);
+          armJoint_mtx_[armIdx].lock();
+          for (size_t i = 0; i < msg->hand_poses.left_pose.joint_angles.size(); ++i)
+          {
+            arm_joint_traj_[armIdx][i] = (armIdx == 0) ?
+                                  msg->hand_poses.left_pose.joint_angles[i] * M_PI / 180.0 : // 转换为弧度
+                                  msg->hand_poses.right_pose.joint_angles[i] * M_PI / 180.0; // 转换为弧度
+          }
+          armJoint_mtx_[armIdx].unlock();
 
-        enableQuickJointControl_ = false;
-        isCmdArmJointUpdated_ = true;   // 触发关节指令规划
-        cmdArmJointDesiredTime_ = 0.0;
+          isCmdArmJointUpdated_[armIdx] = true;   // 触发关节指令规划
+          cmdArmJointDesiredTime_[armIdx] = 0.0;
+        }
       }
-      
-      armPose_mtx_.unlock();
     };
     armEndEffectorSubscriber_ =
         nodeHandle_.subscribe<kuavo_msgs::twoArmHandPoseCmd>("/mm/two_arm_hand_pose_cmd", 1, armEndEffectorCallback);
     
-    armEndEffectorReachTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/lb_arm_ee_reach_time", 10, false);
+    armEndEffectorReachTimePub_[0] = nodeHandle_.advertise<std_msgs::Float32>("/lb_arm_ee_reach_time/left", 10, false);
+    armEndEffectorReachTimePub_[1] = nodeHandle_.advertise<std_msgs::Float32>("/lb_arm_ee_reach_time/right", 10, false);
     
     // 添加订阅/kuavo_arm_traj话题
     auto armJointTrajCallback = [this](const sensor_msgs::JointState::ConstPtr &msg)
     {
-      armJoint_mtx_.lock();
-      
       // 解析关节角度数据
-      arm_joint_traj_ = vector_t::Zero(msg->position.size());
-      for (size_t i = 0; i < msg->position.size(); ++i)
+      arm_joint_traj_[0] = vector_t::Zero(singleArmJointDim_);
+      arm_joint_traj_[1] = vector_t::Zero(singleArmJointDim_);
+
+      armJoint_mtx_[0].lock();
+      armJoint_mtx_[1].lock();
+      for (size_t i = 0; i < msg->position.size() / 2; ++i)
       {
-        arm_joint_traj_[i] = msg->position[i] * M_PI / 180.0; // 转换为弧度
+        arm_joint_traj_[0][i] = msg->position[i] * M_PI / 180.0; // 转换为弧度
+        arm_joint_traj_[1][i] = msg->position[singleArmJointDim_ + i] * M_PI / 180.0; // 转换为弧度
       }
+      armJoint_mtx_[1].unlock();
+      armJoint_mtx_[0].unlock();
 
-      desireMode_ = LbArmControlMode::JointSpace;  // 切换模式
-      enableQuickJointControl_ = true;  // 使用该话题时，可以选择触发wbc独立控制的服务
-      
-      armJoint_mtx_.unlock();
+      desireMode_[0] = LbArmControlMode::JointSpace;  // 切换模式
+      desireMode_[1] = LbArmControlMode::JointSpace;  // 切换模式
 
-      cmdArmJointDesiredTime_ = 0.0;
-      isCmdArmJointUpdated_ = true;   // 触发关节指令规划
+      cmdArmJointDesiredTime_[0] = 0.0;
+      cmdArmJointDesiredTime_[1] = 0.0;
+      isCmdArmJointUpdated_[0] = true;   // 触发关节指令规划
+      isCmdArmJointUpdated_[1] = true;   // 触发关节指令规划
     };
     arm_joint_traj_sub_ = nodeHandle_.subscribe<sensor_msgs::JointState>("/kuavo_arm_traj", 10, armJointTrajCallback);
 
-    targetArmJointReachTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/lb_arm_joint_reach_time", 10, false);
+    targetArmJointReachTimePub_[0] = nodeHandle_.advertise<std_msgs::Float32>("/lb_arm_joint_reach_time/left", 10, false);
+    targetArmJointReachTimePub_[1] = nodeHandle_.advertise<std_msgs::Float32>("/lb_arm_joint_reach_time/right", 10, false);
 
     // 添加订阅/lb_leg_traj话题
     auto lbLegJointTrajCallback = [this](const sensor_msgs::JointState::ConstPtr &msg)
@@ -783,37 +798,37 @@ namespace mobile_manipulator {
     modifyReferenceTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/mobile_manipulator/lb_mpc_modify_ref_use_time", 10, false);
   }
 
-  // 获取第一次的目标轨迹，并分配到不同的约束轨迹，后续添加额外约束, 也需要在此初始化
-  void MobileManipulatorReferenceManager::getFirstTargetTrajectories(const TargetTrajectories& targetTrajectories)
-  {
-    // 第一次的轨迹, 包括 state, input, 躯干相对底座位姿, 所有手臂末端位姿
-    stateInputTargetTrajectories_.stateTrajectory.front()= targetTrajectories.stateTrajectory.front();
-    stateInputTargetTrajectories_.inputTrajectory.front() = targetTrajectories.inputTrajectory.front();
-    stateInputTargetTrajectories_.timeTrajectory.front() = targetTrajectories.timeTrajectory.front();
+  // // 获取第一次的目标轨迹，并分配到不同的约束轨迹，后续添加额外约束, 也需要在此初始化
+  // void MobileManipulatorReferenceManager::getFirstTargetTrajectories(const TargetTrajectories& targetTrajectories)
+  // {
+  //   // 第一次的轨迹, 包括 state, input, 躯干相对底座位姿, 所有手臂末端位姿
+  //   stateInputTargetTrajectories_.stateTrajectory.front()= targetTrajectories.stateTrajectory.front();
+  //   stateInputTargetTrajectories_.inputTrajectory.front() = targetTrajectories.inputTrajectory.front();
+  //   stateInputTargetTrajectories_.timeTrajectory.front() = targetTrajectories.timeTrajectory.front();
 
-    torsoTargetTrajectories_.timeTrajectory.front() = targetTrajectories.timeTrajectory.front();
-    torsoTargetTrajectories_.stateTrajectory.front() = targetTrajectories.stateTrajectory.front().segment(baseDim_, 7);
+  //   torsoTargetTrajectories_.timeTrajectory.front() = targetTrajectories.timeTrajectory.front();
+  //   torsoTargetTrajectories_.stateTrajectory.front() = targetTrajectories.stateTrajectory.front().segment(baseDim_, 7);
 
-    eeTargetTrajectories_.timeTrajectory.front() = targetTrajectories.timeTrajectory.front();
-    eeTargetTrajectories_.stateTrajectory.front() = targetTrajectories.stateTrajectory.front().segment(baseDim_ + 7, info_.eeFrames.size() * 6);
-  }
+  //   eeTargetTrajectories_.timeTrajectory.front() = targetTrajectories.timeTrajectory.front();
+  //   eeTargetTrajectories_.stateTrajectory.front() = targetTrajectories.stateTrajectory.front().segment(baseDim_ + 7, info_.eeFrames.size() * 6);
+  // }
 
-  // 获取所有的目标轨迹，并分配到不同的约束轨迹
-  void MobileManipulatorReferenceManager::getAllTargetTrajectories(const TargetTrajectories& targetTrajectories)
-  {
+  // // 获取所有的目标轨迹，并分配到不同的约束轨迹
+  // void MobileManipulatorReferenceManager::getAllTargetTrajectories(const TargetTrajectories& targetTrajectories)
+  // {
 
-    for(int i=0; i<targetTrajectories.timeTrajectory.size(); i++)
-    {
-      stateInputTargetTrajectories_.timeTrajectory[i] = targetTrajectories.timeTrajectory[i];
-      stateInputTargetTrajectories_.stateTrajectory[i].head(baseDim_) = targetTrajectories.stateTrajectory[i].head(baseDim_);
+  //   for(int i=0; i<targetTrajectories.timeTrajectory.size(); i++)
+  //   {
+  //     stateInputTargetTrajectories_.timeTrajectory[i] = targetTrajectories.timeTrajectory[i];
+  //     stateInputTargetTrajectories_.stateTrajectory[i].head(baseDim_) = targetTrajectories.stateTrajectory[i].head(baseDim_);
 
-      torsoTargetTrajectories_.timeTrajectory[i] = targetTrajectories.timeTrajectory[i];
-      torsoTargetTrajectories_.stateTrajectory[i] = targetTrajectories.stateTrajectory[i].segment(baseDim_, 7);
+  //     torsoTargetTrajectories_.timeTrajectory[i] = targetTrajectories.timeTrajectory[i];
+  //     torsoTargetTrajectories_.stateTrajectory[i] = targetTrajectories.stateTrajectory[i].segment(baseDim_, 7);
 
-      eeTargetTrajectories_.timeTrajectory[i] = targetTrajectories.timeTrajectory[i];
-      eeTargetTrajectories_.stateTrajectory[i] = targetTrajectories.stateTrajectory[i].segment(baseDim_ + 7, info_.eeFrames.size() * 6);
-    }
-  }
+  //     eeTargetTrajectories_.timeTrajectory[i] = targetTrajectories.timeTrajectory[i];
+  //     eeTargetTrajectories_.stateTrajectory[i] = targetTrajectories.stateTrajectory[i].segment(baseDim_ + 7, info_.eeFrames.size() * 6);
+  //   }
+  // }
 
   // 删除 TargetTrajectories 中 initTime 之前的所有帧，保留 initTime 前一个关键帧及之后的所有帧
   void MobileManipulatorReferenceManager::trimTargetTrajectoriesBeforeTime(scalar_t startTime)
@@ -849,7 +864,10 @@ namespace mobile_manipulator {
     // 对所有轨迹应用修剪
     trimTrajectory(stateInputTargetTrajectories_);
     trimTrajectory(torsoTargetTrajectories_);
-    trimTrajectory(eeTargetTrajectories_);
+    for(size_t i=0; i<info_.eeFrames.size(); i++)
+    {
+      trimTrajectory(eeTargetTrajectories_[i]);
+    }
   }
 
   vector_t MobileManipulatorReferenceManager::targetTrajToPose6D(const TargetTrajectories& Traj, scalar_t initTime)
@@ -962,21 +980,12 @@ namespace mobile_manipulator {
     ros_logger_->publishVector("mobile_manipulator/currentMpcTarget/state", stateInputTargetTrajectories_.getDesiredState(initTime));
     ros_logger_->publishVector("mobile_manipulator/currentMpcTarget/input", stateInputTargetTrajectories_.getDesiredInput(initTime));
 
-    vector_t torsoTraj = targetTorsoTrajToPose6DContinous(torsoTargetTrajectories_, initTime);
-    ros_logger_->publishVector("mobile_manipulator/torso_target_6D", torsoTraj);
+    // vector_t torsoTraj = targetTorsoTrajToPose6DContinous(torsoTargetTrajectories_, initTime);
+    ros_logger_->publishVector("mobile_manipulator/torso_target_6D", torsoTargetTrajectories_.getDesiredState(initTime));
  
-    std::vector<TargetTrajectories> dualArmEeTraj;
-    dualArmEeTraj.resize(info_.eeFrames.size());
     for(int i=0; i < info_.eeFrames.size(); i++)
     {
-      dualArmEeTraj[i].timeTrajectory = eeTargetTrajectories_.timeTrajectory;
-      dualArmEeTraj[i].stateTrajectory.resize(eeTargetTrajectories_.stateTrajectory.size());
-      for(int j=0; j < eeTargetTrajectories_.stateTrajectory.size(); j++)
-      {
-        dualArmEeTraj[i].stateTrajectory[j] = eeTargetTrajectories_.stateTrajectory[j].segment<6>(i*6);
-      }
-      // vector_t armEeTraj = targetEeTrajToPose6DContinous(dualArmEeTraj[i], initTime, i);
-      ros_logger_->publishVector("mobile_manipulator/ee_target_6D/point" + std::to_string(i), dualArmEeTraj[i].getDesiredState(initTime));
+      ros_logger_->publishVector("mobile_manipulator/ee_target_6D/point" + std::to_string(i), eeTargetTrajectories_[i].getDesiredState(initTime));
     }
   }
 
@@ -1008,7 +1017,6 @@ namespace mobile_manipulator {
       // 获取最初的躯干位姿期望
       initialTorsoPos_ = targetTrajectories.stateTrajectory.front().segment(baseDim_, 3);
       initialTorsoQuat_ = targetTrajectories.stateTrajectory.front().segment(baseDim_ + 3, 4);
-      getFirstTargetTrajectories(targetTrajectories);
       firstRun = false;
     }
 
@@ -1093,34 +1101,25 @@ namespace mobile_manipulator {
   }
 
   // 本体系的末端ruckig轨迹生成
-  void MobileManipulatorReferenceManager::calcRuckigTrajWithEePose(double initTime, const vector_t &targetArmEePose, double desiredTime)
+  void MobileManipulatorReferenceManager::calcRuckigTrajWithEePose(int armIdx, double initTime, const vector_t &targetArmEePose, double desiredTime)
   {
-    assert(targetArmEePose.size() == info_.eeFrames.size() * 6 && "dualArmPose dimension must be info_.eeFrames.size() * 6!");
+    assert(targetArmEePose.size() == 6 && "dualArmPose dimension must be 6!");
 
-    vector_t target6DEePose = vector_t::Zero(info_.eeFrames.size() * 6);
-    for(int i=0; i<info_.eeFrames.size(); i++)
-    {
-      // 目标末端执行器位姿转换为6D表示
-      target6DEePose.segment(i*6, 6) = targetArmEePose.segment(i*6, 6);
-      // eeQuatToZyxFromCurrentState(Eigen::Quaterniond(targetArmEePose.segment<4>(i*7 + 3)), 
-      //                                                                  initState_, i, true);
-    }
+    cmdDualArm_plannerInitialTime_[armIdx] = initTime;
+    cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentPose(cmdDualArm_prevTargetPose_[armIdx]);
+    cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentVelocity(cmdDualArm_prevTargetVel_[armIdx]);
+    cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentAcceleration(cmdDualArm_prevTargetAcc_[armIdx]);
 
-    cmdDualArm_plannerInitialTime_ = initTime;
-    cmdDualArmEePlannerRuckigPtr_->setCurrentPose(cmdDualArm_prevTargetPose_);
-    cmdDualArmEePlannerRuckigPtr_->setCurrentVelocity(cmdDualArm_prevTargetVel_);
-    cmdDualArmEePlannerRuckigPtr_->setCurrentAcceleration(cmdDualArm_prevTargetAcc_);
-
-    cmdDualArmEePlannerRuckigPtr_->setTargetPose(target6DEePose);
-    double durationTime = cmdDualArmEePlannerRuckigPtr_->calcTrajectory(desiredTime);
+    cmdDualArmEePlannerRuckigPtr_[armIdx]->setTargetPose(targetArmEePose);
+    double durationTime = cmdDualArmEePlannerRuckigPtr_[armIdx]->calcTrajectory(desiredTime);
    
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
-    armEndEffectorReachTimePub_.publish(time_msg); // 发布到达时间
+    armEndEffectorReachTimePub_[armIdx].publish(time_msg); // 发布到达时间
   }
 
   // 从 ruckig 中取出对应时间戳的6D位姿, 转换为约束可接收的 target 格式, 下发
-  void MobileManipulatorReferenceManager::generateDualArmEeTargetWithRuckig(double initTime, double finalTime, double dt)
+  void MobileManipulatorReferenceManager::generateDualArmEeTargetWithRuckig(int armIdx, double initTime, double finalTime, double dt)
   {
     // 使用 Ruckig 库生成平滑的手臂末端位姿轨迹
     scalar_array_t timeTraj;
@@ -1132,58 +1131,56 @@ namespace mobile_manipulator {
     Eigen::VectorXd currentTargetPose, currentTargetVel, currentTargetAcc;
 
     // 构建目标状态和输入
-    vector_t targetState = vector_t::Zero(info_.eeFrames.size() * 6);
-    vector_t targetInput = vector_t::Zero(info_.eeFrames.size() * 6);
+    vector_t targetState = vector_t::Zero(6);
+    vector_t targetInput = vector_t::Zero(6);
 
     for(int i=0; i<timeIncrement; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度（双臂轨迹）
       double currentTime = initTime + (i+1) * dt;
 
-      cmdDualArmEePlannerRuckigPtr_->getTrajectoryAtTime(currentTime - cmdDualArm_plannerInitialTime_, 
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->getTrajectoryAtTime(currentTime - cmdDualArm_plannerInitialTime_[armIdx], 
                                                          currentTargetPose, currentTargetVel, currentTargetAcc);
 
-      for(int i=0; i<info_.eeFrames.size(); i++)
-      {
-        targetState.segment(i*6, 6) = currentTargetPose.segment(i*6, 6);
-        
-        // 使用 Eigen 将 ZYX 欧拉角转换为四元数
-        // Eigen::Quaterniond quat = Eigen::AngleAxisd(currentTargetPose(i*6+3), Eigen::Vector3d::UnitZ())   // yaw (Z)
-        //                         * Eigen::AngleAxisd(currentTargetPose(i*6+4), Eigen::Vector3d::UnitY()) // pitch (Y)
-        //                         * Eigen::AngleAxisd(currentTargetPose(i*6+5), Eigen::Vector3d::UnitX()); // roll (X)
-        // targetState.segment(i*6 + 3, 4) = quat.coeffs();
-      }
-
+      targetState = currentTargetPose.head(6);
+      
+      // 使用 Eigen 将 ZYX 欧拉角转换为四元数
+      // Eigen::Quaterniond quat = Eigen::AngleAxisd(currentTargetPose(i*6+3), Eigen::Vector3d::UnitZ())   // yaw (Z)
+      //                         * Eigen::AngleAxisd(currentTargetPose(i*6+4), Eigen::Vector3d::UnitY()) // pitch (Y)
+      //                         * Eigen::AngleAxisd(currentTargetPose(i*6+5), Eigen::Vector3d::UnitX()); // roll (X)
+      // targetState.segment(i*6 + 3, 4) = quat.coeffs();
       timeTraj.push_back(currentTime);
       stateTraj.push_back(targetState);
       inputTraj.push_back(targetInput);
     }
 
     // 更新整段预测轨迹
-    eeTargetTrajectories_.timeTrajectory = timeTraj;
-    eeTargetTrajectories_.stateTrajectory = stateTraj;
-    eeTargetTrajectories_.inputTrajectory = inputTraj;
+    eeTargetTrajectories_[armIdx].timeTrajectory = timeTraj;
+    eeTargetTrajectories_[armIdx].stateTrajectory = stateTraj;
+    eeTargetTrajectories_[armIdx].inputTrajectory = inputTraj;
 
     // 保存当前时间的规划期望
-    cmdDualArmEePlannerRuckigPtr_->getTrajectoryAtTime(initTime - cmdDualArm_plannerInitialTime_ + dt, 
-                                                       cmdDualArm_prevTargetPose_,
-                                                       cmdDualArm_prevTargetVel_,
-                                                       cmdDualArm_prevTargetAcc_);
+    cmdDualArmEePlannerRuckigPtr_[armIdx]->getTrajectoryAtTime(initTime - cmdDualArm_plannerInitialTime_[armIdx] + dt, 
+                                                       cmdDualArm_prevTargetPose_[armIdx],
+                                                       cmdDualArm_prevTargetVel_[armIdx],
+                                                       cmdDualArm_prevTargetAcc_[armIdx]);
   }
 
   // 重置双臂末端Zyx插值器的初值
-  void MobileManipulatorReferenceManager::resetDualArmRuckig(double initTime, const vector_t& initState, bool rePlanning, LbArmControlMode desireMode)
+  void MobileManipulatorReferenceManager::resetDualArmRuckig(int armIdx, double initTime, const vector_t& initState, bool rePlanning, LbArmControlMode desireMode)
   {
     Eigen::VectorXd currentEePose, currentEeVel, currentEeAcc;
 
     switch (desireMode)
     {
-      case LbArmControlMode::WorldFrame: 
-        timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD, 
+      case LbArmControlMode::WorldFrame:
+        timedPlannerScheduler_.getTimedPlannerStates((armIdx == 0) ? LbTimedPosCmdType::LEFT_ARM_WORLD_CMD : 
+                                                                     LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD, 
                                                      currentEePose, currentEeVel, currentEeAcc);
         break;
       case LbArmControlMode::LocalFrame: 
-        timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD, 
+        timedPlannerScheduler_.getTimedPlannerStates((armIdx == 0) ? LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD : 
+                                                                     LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD, 
                                                      currentEePose, currentEeVel, currentEeAcc);
         break;
       case LbArmControlMode::JointSpace: return;
@@ -1192,19 +1189,19 @@ namespace mobile_manipulator {
         return;
     }
 
-    cmdDualArm_prevTargetPose_ = currentEePose;
-    cmdDualArm_prevTargetVel_ = currentEeVel;
-    cmdDualArm_prevTargetAcc_ = currentEeAcc;
+    cmdDualArm_prevTargetPose_[armIdx] = currentEePose;
+    cmdDualArm_prevTargetVel_[armIdx] = currentEeVel;
+    cmdDualArm_prevTargetAcc_[armIdx] = currentEeAcc;
 
     if(rePlanning)
     {
-      cmdDualArm_plannerInitialTime_ = initTime;
-      cmdDualArmEePlannerRuckigPtr_->setCurrentPose(cmdDualArm_prevTargetPose_);
-      cmdDualArmEePlannerRuckigPtr_->setCurrentVelocity(cmdDualArm_prevTargetVel_);
-      cmdDualArmEePlannerRuckigPtr_->setCurrentAcceleration(cmdDualArm_prevTargetAcc_);
+      cmdDualArm_plannerInitialTime_[armIdx] = initTime;
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentPose(cmdDualArm_prevTargetPose_[armIdx]);
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentVelocity(cmdDualArm_prevTargetVel_[armIdx]);
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentAcceleration(cmdDualArm_prevTargetAcc_[armIdx]);
 
-      cmdDualArmEePlannerRuckigPtr_->setTargetPose(cmdDualArm_prevTargetPose_);
-      double durationTime = cmdDualArmEePlannerRuckigPtr_->calcTrajectory();
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setTargetPose(cmdDualArm_prevTargetPose_[armIdx]);
+      double durationTime = cmdDualArmEePlannerRuckigPtr_[armIdx]->calcTrajectory();
     }
   }
 
@@ -1237,8 +1234,8 @@ namespace mobile_manipulator {
     Eigen::VectorXd currentTargetPose_torso, currentTargetVel_torso, currentTargetAcc_torso;
 
     // 构建目标状态和输入
-    vector_t targetState = vector_t::Zero(7);
-    vector_t targetInput = vector_t::Zero(7);
+    vector_t targetState = vector_t::Zero(6);
+    vector_t targetInput = vector_t::Zero(6);
 
     for(int i=0; i<timeIncrement; i++)
     {
@@ -1254,12 +1251,16 @@ namespace mobile_manipulator {
       targetState[1] = initialTorsoPos_[1];
       targetState[2] = currentTargetPose_torso[1];
 
+      targetState[3] = currentTargetPose_torso[2]; // yaw
+      targetState[4] = currentTargetPose_torso[3]; // pitch
+      targetState[5] = 0.0; // roll 固定为0
+
        // 使用 Eigen 将 ZYX 欧拉角转换为四元数
-      Eigen::Quaterniond quat = Eigen::AngleAxisd(currentTargetPose_torso[2], Eigen::Vector3d::UnitZ())   // yaw (Z)
-                              * Eigen::AngleAxisd(currentTargetPose_torso[3], Eigen::Vector3d::UnitY()) // pitch (Y)
-                              * Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitX()); // roll (X)
+      // Eigen::Quaterniond quat = Eigen::AngleAxisd(currentTargetPose_torso[2], Eigen::Vector3d::UnitZ())   // yaw (Z)
+      //                         * Eigen::AngleAxisd(currentTargetPose_torso[3], Eigen::Vector3d::UnitY()) // pitch (Y)
+      //                         * Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitX()); // roll (X)
       
-      targetState.tail(4) = quat.coeffs();
+      // targetState.tail(4) = quat.coeffs();
 
       timeTraj.push_back(currentTime);
       stateTraj.push_back(targetState);
@@ -1327,7 +1328,8 @@ namespace mobile_manipulator {
 
     Eigen::VectorXd currentTargetPose, currentTargetVel, currentTargetAcc;
     Eigen::VectorXd currentTargetPose_legJoint, currentTargetVel_legJoint, currentTargetAcc_legJoint;
-    Eigen::VectorXd currentTargetPose_armJoint, currentTargetVel_armJoint, currentTargetAcc_armJoint;
+    Eigen::VectorXd currentTargetPose_leftArm, currentTargetVel_leftArm, currentTargetAcc_leftArm;
+    Eigen::VectorXd currentTargetPose_rightArm, currentTargetVel_rightArm, currentTargetAcc_rightArm;
 
     // 构建目标状态和输入
     vector_t targetState = vector_t::Zero(info_.stateDim);
@@ -1338,9 +1340,22 @@ namespace mobile_manipulator {
       // 计算每个时间点的期望位姿、速度和加速度
       double currentTime = initTime + (i+1) * dt;
 
-      cmdPosePlannerRuckigPtr_->getTrajectoryAtTime(currentTime - plannerInitialTime_, currentTargetPose, currentTargetVel, currentTargetAcc);
-      legJointPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - legJoint_plannerInitialTime_, currentTargetPose_legJoint, currentTargetVel_legJoint, currentTargetAcc_legJoint);
-      armJointPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - armJoint_plannerInitialTime_, currentTargetPose_armJoint, currentTargetVel_armJoint, currentTargetAcc_armJoint);
+      cmdPosePlannerRuckigPtr_->getTrajectoryAtTime(currentTime - plannerInitialTime_, 
+                                                    currentTargetPose, 
+                                                    currentTargetVel, 
+                                                    currentTargetAcc);
+      legJointPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - legJoint_plannerInitialTime_, 
+                                                     currentTargetPose_legJoint, 
+                                                     currentTargetVel_legJoint, 
+                                                     currentTargetAcc_legJoint);
+      armJointPlannerRuckigPtr_[0]->getTrajectoryAtTime(currentTime - armJoint_plannerInitialTime_[0], 
+                                                        currentTargetPose_leftArm, 
+                                                        currentTargetVel_leftArm, 
+                                                        currentTargetAcc_leftArm);
+      armJointPlannerRuckigPtr_[1]->getTrajectoryAtTime(currentTime - armJoint_plannerInitialTime_[1], 
+                                                        currentTargetPose_rightArm, 
+                                                        currentTargetVel_rightArm, 
+                                                        currentTargetAcc_rightArm);
 
       targetState.head(baseDim_) = currentTargetPose; // [x, y, yaw]
       targetInput.head(baseDim_) = currentTargetVel;  // [vx, vy, wz]
@@ -1348,8 +1363,10 @@ namespace mobile_manipulator {
       targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
       targetInput.segment(baseDim_, 4) = currentTargetVel_legJoint;
 
-      targetState.tail(info_.armDim - 4) = currentTargetPose_armJoint;  // 上肢14自由度
-      targetInput.tail(info_.armDim - 4) = currentTargetVel_armJoint;
+      targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetPose_leftArm;  // 上肢左臂7自由度
+      targetInput.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetVel_leftArm;
+      targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetPose_rightArm;  // 上肢右臂7自由度
+      targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetVel_rightArm;
 
       timeTraj.push_back(currentTime);
       stateTraj.push_back(targetState);
@@ -1373,12 +1390,19 @@ namespace mobile_manipulator {
                                                    legJoint_prevTargetVel_, 
                                                    legJoint_prevTargetAcc_);
     }
-    if(getEnableArmJointTrack() == true)
+    if(getEnableArmJointTrackForArm(0) == true)
     {
-      armJointPlannerRuckigPtr_->getTrajectoryAtTime(initTime - armJoint_plannerInitialTime_ + dt, 
-                                                   armJoint_prevTargetPose_, 
-                                                   armJoint_prevTargetVel_, 
-                                                   armJoint_prevTargetAcc_);
+      armJointPlannerRuckigPtr_[0]->getTrajectoryAtTime(initTime - armJoint_plannerInitialTime_[0] + dt, 
+                                                   armJoint_prevTargetPose_[0], 
+                                                   armJoint_prevTargetVel_[0], 
+                                                   armJoint_prevTargetAcc_[0]);
+    }
+    if(getEnableArmJointTrackForArm(1) == true)
+    {
+      armJointPlannerRuckigPtr_[1]->getTrajectoryAtTime(initTime - armJoint_plannerInitialTime_[1] + dt, 
+                                                   armJoint_prevTargetPose_[1], 
+                                                   armJoint_prevTargetVel_[1], 
+                                                   armJoint_prevTargetAcc_[1]);
     }
 
   }
@@ -1431,7 +1455,8 @@ namespace mobile_manipulator {
 
     Eigen::VectorXd currentTargetPose, currentTargetVel, currentTargetAcc;
     Eigen::VectorXd currentTargetPose_legJoint, currentTargetVel_legJoint, currentTargetAcc_legJoint;
-    Eigen::VectorXd currentTargetPose_armJoint, currentTargetVel_armJoint, currentTargetAcc_armJoint;
+    Eigen::VectorXd currentTargetPose_leftArm, currentTargetVel_leftArm, currentTargetAcc_leftArm;
+    Eigen::VectorXd currentTargetPose_rightArm, currentTargetVel_rightArm, currentTargetAcc_rightArm;
 
     // 构建目标状态和输入
     vector_t targetState = vector_t::Zero(info_.stateDim);
@@ -1450,10 +1475,14 @@ namespace mobile_manipulator {
                                                      currentTargetPose_legJoint, 
                                                      currentTargetVel_legJoint, 
                                                      currentTargetAcc_legJoint);
-      armJointPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - armJoint_plannerInitialTime_, 
-                                                     currentTargetPose_armJoint, 
-                                                     currentTargetVel_armJoint, 
-                                                     currentTargetAcc_armJoint);
+      armJointPlannerRuckigPtr_[0]->getTrajectoryAtTime(currentTime - armJoint_plannerInitialTime_[0], 
+                                                        currentTargetPose_leftArm, 
+                                                        currentTargetVel_leftArm, 
+                                                        currentTargetAcc_leftArm);
+      armJointPlannerRuckigPtr_[1]->getTrajectoryAtTime(currentTime - armJoint_plannerInitialTime_[1], 
+                                                        currentTargetPose_rightArm, 
+                                                        currentTargetVel_rightArm, 
+                                                        currentTargetAcc_rightArm);
 
       if (i > 0) 
       {
@@ -1485,8 +1514,10 @@ namespace mobile_manipulator {
       targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
       targetInput.segment(baseDim_, 4) = currentTargetVel_legJoint;
 
-      targetState.tail(info_.armDim - 4) = currentTargetPose_armJoint;  // 上肢14自由度
-      targetInput.tail(info_.armDim - 4) = currentTargetVel_armJoint;
+      targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetPose_leftArm;  // 上肢左臂7自由度
+      targetInput.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetVel_leftArm;
+      targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetPose_rightArm;  // 上肢右臂7自由度
+      targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetVel_rightArm;
 
       timeTraj.push_back(currentTime);
       stateTraj.push_back(targetState);
@@ -1511,12 +1542,19 @@ namespace mobile_manipulator {
                                                    legJoint_prevTargetVel_, 
                                                    legJoint_prevTargetAcc_);
     }
-    if(getEnableArmJointTrack() == true)
+    if(getEnableArmJointTrackForArm(0) == true)
     {
-      armJointPlannerRuckigPtr_->getTrajectoryAtTime(initTime - armJoint_plannerInitialTime_ + dt, 
-                                                   armJoint_prevTargetPose_, 
-                                                   armJoint_prevTargetVel_, 
-                                                   armJoint_prevTargetAcc_);
+      armJointPlannerRuckigPtr_[0]->getTrajectoryAtTime(initTime - armJoint_plannerInitialTime_[0] + dt, 
+                                                   armJoint_prevTargetPose_[0], 
+                                                   armJoint_prevTargetVel_[0], 
+                                                   armJoint_prevTargetAcc_[0]);
+    }
+    if(getEnableArmJointTrackForArm(1) == true)
+    {
+      armJointPlannerRuckigPtr_[1]->getTrajectoryAtTime(initTime - armJoint_plannerInitialTime_[1] + dt, 
+                                                   armJoint_prevTargetPose_[1], 
+                                                   armJoint_prevTargetVel_[1], 
+                                                   armJoint_prevTargetAcc_[1]);
     }
   }
 
@@ -1531,7 +1569,8 @@ namespace mobile_manipulator {
 
     Eigen::VectorXd currentTargetPose, currentTargetVel, currentTargetAcc;
     Eigen::VectorXd currentTargetPose_legJoint, currentTargetVel_legJoint, currentTargetAcc_legJoint;
-    Eigen::VectorXd currentTargetPose_armJoint, currentTargetVel_armJoint, currentTargetAcc_armJoint;
+    Eigen::VectorXd currentTargetPose_leftArm, currentTargetVel_leftArm, currentTargetAcc_leftArm;
+    Eigen::VectorXd currentTargetPose_rightArm, currentTargetVel_rightArm, currentTargetAcc_rightArm;
 
     // 构建目标状态和输入
     vector_t targetState = vector_t::Zero(info_.stateDim);
@@ -1550,10 +1589,14 @@ namespace mobile_manipulator {
                                                      currentTargetPose_legJoint, 
                                                      currentTargetVel_legJoint, 
                                                      currentTargetAcc_legJoint);
-      armJointPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - armJoint_plannerInitialTime_, 
-                                                     currentTargetPose_armJoint, 
-                                                     currentTargetVel_armJoint, 
-                                                     currentTargetAcc_armJoint);
+      armJointPlannerRuckigPtr_[0]->getTrajectoryAtTime(currentTime - armJoint_plannerInitialTime_[0], 
+                                                     currentTargetPose_leftArm, 
+                                                     currentTargetVel_leftArm, 
+                                                     currentTargetAcc_leftArm);
+      armJointPlannerRuckigPtr_[1]->getTrajectoryAtTime(currentTime - armJoint_plannerInitialTime_[1], 
+                                                     currentTargetPose_rightArm, 
+                                                     currentTargetVel_rightArm, 
+                                                     currentTargetAcc_rightArm);
 
       targetState.head(3) = currentTargetPose; // [x, y, yaw]
       targetInput.head(3) = currentTargetVel;  // [vx, vy, wz]
@@ -1561,8 +1604,10 @@ namespace mobile_manipulator {
       targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
       targetInput.segment(baseDim_, 4) = currentTargetVel_legJoint;
 
-      targetState.tail(info_.armDim - 4) = currentTargetPose_armJoint;  // 上肢14自由度
-      targetInput.tail(info_.armDim - 4) = currentTargetVel_armJoint;
+      targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetPose_leftArm;  // 上肢左臂7自由度
+      targetInput.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetVel_leftArm;
+      targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetPose_rightArm;  // 上肢右臂7自由度
+      targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetVel_rightArm;
 
       timeTraj.push_back(currentTime);
       stateTraj.push_back(targetState);
@@ -1586,12 +1631,19 @@ namespace mobile_manipulator {
                                                    legJoint_prevTargetVel_, 
                                                    legJoint_prevTargetAcc_);
     }
-    if(getEnableArmJointTrack() == true)
+    if(getEnableArmJointTrackForArm(0) == true)
     {
-      armJointPlannerRuckigPtr_->getTrajectoryAtTime(initTime - armJoint_plannerInitialTime_ + dt, 
-                                                   armJoint_prevTargetPose_, 
-                                                   armJoint_prevTargetVel_, 
-                                                   armJoint_prevTargetAcc_);
+      armJointPlannerRuckigPtr_[0]->getTrajectoryAtTime(initTime - armJoint_plannerInitialTime_[0] + dt, 
+                                                   armJoint_prevTargetPose_[0], 
+                                                   armJoint_prevTargetVel_[0], 
+                                                   armJoint_prevTargetAcc_[0]);
+    }
+    if(getEnableArmJointTrackForArm(1) == true)
+    {
+      armJointPlannerRuckigPtr_[1]->getTrajectoryAtTime(initTime - armJoint_plannerInitialTime_[1] + dt, 
+                                                   armJoint_prevTargetPose_[1], 
+                                                   armJoint_prevTargetVel_[1], 
+                                                   armJoint_prevTargetAcc_[1]);
     }
   }
 
@@ -1648,39 +1700,42 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::calcRuckigTrajWithArmJoint(double initTime, const vector_t &targetArmJoint, double desiredTime)
+  void MobileManipulatorReferenceManager::calcRuckigTrajWithArmJoint(int armIdx, double initTime, const vector_t &targetArmJoint, double desiredTime)
   {
-    assert(targetArmJoint.size() == info_.armDim - 4 && "armJoint dimension must be info_.armDim - 4!");
+    assert(targetArmJoint.size() == singleArmJointDim_ && "armJoint dimension must be singleArmJointDim_ !");
 
-    armJoint_plannerInitialTime_ = initTime;
-    armJointPlannerRuckigPtr_->setCurrentPose(armJoint_prevTargetPose_);
-    armJointPlannerRuckigPtr_->setCurrentVelocity(armJoint_prevTargetVel_);
-    armJointPlannerRuckigPtr_->setCurrentAcceleration(armJoint_prevTargetAcc_);
+    armJoint_plannerInitialTime_[armIdx] = initTime;
+    armJointPlannerRuckigPtr_[armIdx]->setCurrentPose(armJoint_prevTargetPose_[armIdx]);
+    armJointPlannerRuckigPtr_[armIdx]->setCurrentVelocity(armJoint_prevTargetVel_[armIdx]);
+    armJointPlannerRuckigPtr_[armIdx]->setCurrentAcceleration(armJoint_prevTargetAcc_[armIdx]);
 
-    armJointPlannerRuckigPtr_->setTargetPose(targetArmJoint);
-    double durationTime = armJointPlannerRuckigPtr_->calcTrajectory(desiredTime);
+    armJointPlannerRuckigPtr_[armIdx]->setTargetPose(targetArmJoint);
+    double durationTime = armJointPlannerRuckigPtr_[armIdx]->calcTrajectory(desiredTime);
 
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
-    targetArmJointReachTimePub_.publish(time_msg); // 发布到达时间
+    targetArmJointReachTimePub_[armIdx].publish(time_msg); // 发布到达时间
   }
 
-  void MobileManipulatorReferenceManager::resetArmJointRuckig(double initTime, const vector_t& initState, bool rePlanning)
+  void MobileManipulatorReferenceManager::resetArmJointRuckig(int armIdx, double initTime, const vector_t& initState, bool rePlanning)
   {
-    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::ARM_JOINT_CMD, 
-                                                 armJoint_prevTargetPose_, 
-                                                 armJoint_prevTargetVel_, 
-                                                 armJoint_prevTargetAcc_);
+    LbTimedPosCmdType cmdType = (armIdx == 0) ? LbTimedPosCmdType::LEFT_ARM_JOINT_CMD : 
+                                                LbTimedPosCmdType::RIGHT_ARM_JOINT_CMD;
+
+    timedPlannerScheduler_.getTimedPlannerStates(cmdType, 
+                                                 armJoint_prevTargetPose_[armIdx], 
+                                                 armJoint_prevTargetVel_[armIdx], 
+                                                 armJoint_prevTargetAcc_[armIdx]);
 
     if(rePlanning)
     {
-      armJoint_plannerInitialTime_ = initTime;
-      armJointPlannerRuckigPtr_->setCurrentPose(armJoint_prevTargetPose_);
-      armJointPlannerRuckigPtr_->setCurrentVelocity(armJoint_prevTargetVel_);
-      armJointPlannerRuckigPtr_->setCurrentAcceleration(armJoint_prevTargetAcc_);
+      armJoint_plannerInitialTime_[armIdx] = initTime;
+      armJointPlannerRuckigPtr_[armIdx]->setCurrentPose(armJoint_prevTargetPose_[armIdx]);
+      armJointPlannerRuckigPtr_[armIdx]->setCurrentVelocity(armJoint_prevTargetVel_[armIdx]);
+      armJointPlannerRuckigPtr_[armIdx]->setCurrentAcceleration(armJoint_prevTargetAcc_[armIdx]);
 
-      armJointPlannerRuckigPtr_->setTargetPose(armJoint_prevTargetPose_);
-      double durationTime = armJointPlannerRuckigPtr_->calcTrajectory();
+      armJointPlannerRuckigPtr_[armIdx]->setTargetPose(armJoint_prevTargetPose_[armIdx]);
+      double durationTime = armJointPlannerRuckigPtr_[armIdx]->calcTrajectory();
     }
   }
 
@@ -1797,8 +1852,11 @@ namespace mobile_manipulator {
       arm_control_mode_vec << currentArmControlMode_;
       ros_logger_->publishVector("/humanoid/mpc/arm_control_mode", arm_control_mode_vec);
 
-      isCmdArmJointUpdated_ = true; // 触发关节指令规划
-      desireMode_ = LbArmControlMode::JointSpace;
+      for(int armIdx=0; armIdx<2; armIdx++)
+      {
+        isCmdArmJointUpdated_[armIdx] = true; // 触发关节指令规划
+        desireMode_[armIdx] = LbArmControlMode::JointSpace;
+      }
     }
     else
     {
@@ -1844,13 +1902,21 @@ namespace mobile_manipulator {
         plannerPosePtr = legJointPlannerRuckigPtr_;
         ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Leg Joint Planner Params.");
         break;
-      case 4: // Dual Arm EE Pose Planner
-        plannerPosePtr = cmdDualArmEePlannerRuckigPtr_;
-        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Dual Arm EE Pose Planner Params.");
+      case 4: // Left Arm EE Pose Planner
+        plannerPosePtr = cmdDualArmEePlannerRuckigPtr_[0];
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Left Arm EE Pose Planner Params.");
         break;
-      case 5: // Arm Joint Planner
-        plannerPosePtr = armJointPlannerRuckigPtr_;
-        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Arm Joint Pose Planner Params.");
+      case 5: // Right Arm EE Pose Planner
+        plannerPosePtr = cmdDualArmEePlannerRuckigPtr_[1];
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Right Arm EE Pose Planner Params.");
+        break;
+      case 6: // Left Arm Joint Planner
+        plannerPosePtr = armJointPlannerRuckigPtr_[0];
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Left Arm Joint Pose Planner Params.");
+        break;
+      case 7: // Right Arm Joint Planner
+        plannerPosePtr = armJointPlannerRuckigPtr_[1];
+        ROS_INFO_STREAM("[setRuckigPlannerParamsService] Setting Right Arm Joint Pose Planner Params.");
         break;
       default:
         res.result = false;
@@ -1869,10 +1935,14 @@ namespace mobile_manipulator {
       {
         timedPlannerScheduler_.setTimedPlannerSyncMode(cmdType, req.is_sync);
       }
-      if(cmdType == static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD) || 
-         cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+      if(cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
       {
         timedPlannerScheduler_.setTimedPlannerSyncMode(cmdType+1, req.is_sync);
+      }
+      if(cmdType == static_cast<int>(LbTimedPosCmdType::LEFT_ARM_WORLD_CMD) ||
+         cmdType == static_cast<int>(LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+      {
+        timedPlannerScheduler_.setTimedPlannerSyncMode(cmdType+2, req.is_sync);
       }
 
       ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Planner to " 
@@ -1957,10 +2027,14 @@ namespace mobile_manipulator {
         {
           timedPlannerScheduler_.updateTimedPlannerVelocityLimits(cmdType, vel_max, vel_min);
         }
-        if(cmdType == static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD) || 
-           cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+        if(cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
         {
           timedPlannerScheduler_.updateTimedPlannerVelocityLimits(cmdType+1, vel_max, vel_min);
+        }
+        if(cmdType == static_cast<int>(LbTimedPosCmdType::LEFT_ARM_WORLD_CMD) ||
+           cmdType == static_cast<int>(LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+        {
+          timedPlannerScheduler_.updateTimedPlannerVelocityLimits(cmdType+2, vel_max, vel_min);
         }
         ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Pose Planner Velocity Limits.");
         ROS_INFO_STREAM("  vel_max: [" << vel_max.transpose() << "]");
@@ -1974,10 +2048,14 @@ namespace mobile_manipulator {
         {
           timedPlannerScheduler_.updateTimedPlannerAccelerationLimits(cmdType, acc_max, acc_min);
         }
-        if(cmdType == static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD) || 
-           cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+        if(cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
         {
           timedPlannerScheduler_.updateTimedPlannerAccelerationLimits(cmdType+1, acc_max, acc_min);
+        }
+        if(cmdType == static_cast<int>(LbTimedPosCmdType::LEFT_ARM_WORLD_CMD) ||
+           cmdType == static_cast<int>(LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+        {
+          timedPlannerScheduler_.updateTimedPlannerAccelerationLimits(cmdType+2, acc_max, acc_min);
         }
         ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Pose Planner Acceleration Limits.");
         ROS_INFO_STREAM("  acc_max: [" << acc_max.transpose() << "]");
@@ -1991,10 +2069,14 @@ namespace mobile_manipulator {
         {
           timedPlannerScheduler_.updateTimedPlannerJerkLimits(cmdType, jerk_max);
         }
-        if(cmdType == static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD)|| 
-           cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+        if(cmdType == static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD))  // 世界系时需要同步更新局部系设置
         {
           timedPlannerScheduler_.updateTimedPlannerJerkLimits(cmdType+1, jerk_max);
+        }
+        if(cmdType == static_cast<int>(LbTimedPosCmdType::LEFT_ARM_WORLD_CMD) ||
+           cmdType == static_cast<int>(LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD))  // 世界系时需要同步更新局部系设置
+        {
+          timedPlannerScheduler_.updateTimedPlannerJerkLimits(cmdType+2, jerk_max);
         }
         ROS_INFO_STREAM("[setRuckigPlannerParamsService] Set Pose Planner Jerk Limits.");
         ROS_INFO_STREAM("  jerk_max: [" << jerk_max.transpose() << "]");
@@ -2101,16 +2183,25 @@ namespace mobile_manipulator {
       case LbTimedPosCmdType::LEG_JOINT_CMD:
         ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Leg Joint Command.");
         break;
-      case LbTimedPosCmdType::DUAL_ARM_WORLD_CMD:
+      case LbTimedPosCmdType::LEFT_ARM_WORLD_CMD:
         eigenCmdVec[3] = targetYawPreProcess(initState_[2], eigenCmdVec[3]);  // 世界系指令的yaw需要处理成多圈
-        eigenCmdVec[9] = targetYawPreProcess(initState_[2], eigenCmdVec[9]);
-        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Dual Arm World Frame EE Command.");
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Left Arm World Frame EE Command.");
         break;
-      case LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD:
-        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Dual Arm Local Frame EE Command.");
+      case LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD:
+        eigenCmdVec[3] = targetYawPreProcess(initState_[2], eigenCmdVec[3]);  // 世界系指令的yaw需要处理成多圈
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Right Arm World Frame EE Command.");
         break;
-      case LbTimedPosCmdType::ARM_JOINT_CMD:
-        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Arm Joint Command.");
+      case LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD:
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Left Arm Local Frame EE Command.");
+        break;
+      case LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD:
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Right Arm Local Frame EE Command.");
+        break;
+      case LbTimedPosCmdType::LEFT_ARM_JOINT_CMD:
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Left Arm Joint Command.");
+        break;
+      case LbTimedPosCmdType::RIGHT_ARM_JOINT_CMD:
+        ROS_INFO_STREAM("[setLbTimedPosCmdService] Setting Right Arm Joint Command.");
         break;
       default:
         res.isSuccess = false;
@@ -2216,14 +2307,25 @@ namespace mobile_manipulator {
           case LbTimedPosCmdType::LEG_JOINT_CMD:
             ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Leg Joint Command.");
             break;
-          case LbTimedPosCmdType::DUAL_ARM_WORLD_CMD:
-            ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Dual Arm World Frame EE Command.");
+          case LbTimedPosCmdType::LEFT_ARM_WORLD_CMD:
+            eigenCmdVec[3] = targetYawPreProcess(initState_[2], eigenCmdVec[3]);  // 世界系指令的yaw需要处理成多圈
+            ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Left Arm World Frame EE Command.");
             break;
-          case LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD:
-            ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Dual Arm Local Frame EE Command.");
+          case LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD:
+            eigenCmdVec[3] = targetYawPreProcess(initState_[2], eigenCmdVec[3]);  // 世界系指令的yaw需要处理成多圈
+            ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Right Arm World Frame EE Command.");
             break;
-          case LbTimedPosCmdType::ARM_JOINT_CMD:
-            ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Arm Joint Command.");
+          case LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD:
+            ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Left Arm Local Frame EE Command.");
+            break;
+          case LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD:
+            ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Right Arm Local Frame EE Command.");
+            break;
+          case LbTimedPosCmdType::LEFT_ARM_JOINT_CMD:
+            ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Left Arm Joint Command.");
+            break;
+          case LbTimedPosCmdType::RIGHT_ARM_JOINT_CMD:
+            ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] Setting Right Arm Joint Command.");
             break;
           default:
             res.isSuccess = false;
@@ -2364,7 +2466,7 @@ namespace mobile_manipulator {
       // 将末端位姿从世界坐标系转换到基座坐标系
       pinocchio::SE3 ee_pose_base = world_to_base * ee_pose_world;
 
-      EeState.segment<3>(ee_idx*6) = ee_pose_base.translation();
+      EeState.segment<3>(ee_idx*6) = ee_pose_world.translation();
 
       // 使用连续欧拉角跟踪器获取无跳变的ZYX欧拉角
       Eigen::Vector3d eulerZyx = eeBaseUnwrappers[ee_idx].update(ee_pose_base.rotation());
@@ -2445,23 +2547,37 @@ namespace mobile_manipulator {
   void MobileManipulatorReferenceManager::publishMultiPointPose_World(const vector_t& initState)
   {
     Eigen::VectorXd eeState_world, d_eeState_world, dd_eeState_world;
-    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD, 
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::LEFT_ARM_WORLD_CMD, 
                                                  eeState_world, d_eeState_world, dd_eeState_world);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState", eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState", d_eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState", dd_eeState_world);
+    ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/left", eeState_world);
+    ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/left", d_eeState_world);
+    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/left", dd_eeState_world);
+
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD, 
+                                                 eeState_world, d_eeState_world, dd_eeState_world);
+
+    ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/right", eeState_world);
+    ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/right", d_eeState_world);
+    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/right", dd_eeState_world);
   }
 
   void MobileManipulatorReferenceManager::publishMultiPointPose_Local(const vector_t& initState)
   {
     vector_t eeState_local, d_eeState_local, dd_eeState_local;
-    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD, 
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD, 
                                                  eeState_local, d_eeState_local, dd_eeState_local);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState", eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState", d_eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState", dd_eeState_local);
+    ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/left", eeState_local);
+    ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/left", d_eeState_local);
+    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/left", dd_eeState_local);
+
+    timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD, 
+                                                 eeState_local, d_eeState_local, dd_eeState_local);
+
+    ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/right", eeState_local);
+    ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/right", d_eeState_local);
+    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/right", dd_eeState_local);
     /********************************************************************************************************************/
     
     vector_t torsoState_local, d_torsoState_local, dd_torsoState_local;
@@ -2527,61 +2643,58 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::updateNoControl(double initTime, const TargetTrajectories& targetTrajectories, bool isChange)
-  {
-    static bool firstRun{true};
-    if(isChange || firstRun)
-    {
-      setEnableEeTargetTrajectories(true); // 开启末端笛卡尔跟踪
-      setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-      setEnableArmJointTrack(false); // 关闭手臂跟踪
-      setEnableBaseTrack(false);   // 关闭底盘跟踪
+  // void MobileManipulatorReferenceManager::updateNoControl(double initTime, const TargetTrajectories& targetTrajectories, bool isChange)
+  // {
+  //   static bool firstRun{true};
+  //   if(isChange || firstRun)
+  //   {
+  //     setEnableEeTargetTrajectories(true); // 开启末端笛卡尔跟踪
+  //     setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
+  //     setEnableArmJointTrack(false); // 关闭手臂跟踪
+  //     setEnableBaseTrack(false);   // 关闭底盘跟踪
 
-      firstRun = false;
-      // return;
-    }
+  //     firstRun = false;
+  //     // return;
+  //   }
 
-    getAllTargetTrajectories(targetTrajectories);
-  }
+  //   // getAllTargetTrajectories(targetTrajectories);
+  // }
 
-  void MobileManipulatorReferenceManager::updateArmOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange)
-  {
-    if(isChange)
-    {
-      vector_t eeState = vector_t::Zero(info_.eeFrames.size() * 7);
-      getCurrentEeWorldPose(eeState, initState);
-      left_arm_traj_pose_ = eeState.head(7);
-      right_arm_traj_pose_ = eeState.tail(7);
+  // void MobileManipulatorReferenceManager::updateArmOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange)
+  // {
+  //   if(isChange)
+  //   {
+  //     vector_t eeState_6d = vector_t::Zero(info_.eeFrames.size() * 6);
+  //     getCurrentEeWorldPoseContinuous(eeState_6d, initState);
+  //     cmd_arm_zyx_ = eeState_6d;
 
-      lb_leg_traj_ = initState.segment(baseDim_, 4);
-      arm_joint_traj_ = initState.tail(info_.armDim - 4);
-      left_arm_joint_traj_ = initState.tail(info_.armDim - 4).head((info_.armDim - 4)/2);
-      right_arm_joint_traj_ = initState.tail(info_.armDim - 4).tail((info_.armDim - 4)/2);
+  //     lb_leg_traj_ = initState.segment(baseDim_, 4);
+  //     arm_joint_traj_ = initState.tail(info_.armDim - 4);
 
-      resetAllMpcTraj(initTime_, initState_);
+  //     resetAllMpcTraj(initTime_, initState_);
 
-      // return;
-    }
+  //     // return;
+  //   }
 
-    if(initTime >= resetTorsoTime_ + resetTorsoInitTime_)
-    {
-      setArmControl(initTime, finalTime, initState);
-      setTorsoControl(initTime, finalTime, initState);
-    }
+  //   if(initTime >= resetTorsoTime_ + resetTorsoInitTime_)
+  //   {
+  //     setArmControl(initTime, finalTime, initState);
+  //     setTorsoControl(initTime, finalTime, initState);
+  //   }
 
-    generatePoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
-  }
+  //   generatePoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
+  // }
 
-  void MobileManipulatorReferenceManager::updateBaseOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange)
-  {
-    if(isChange)
-    {
-      resetAllMpcTraj(initTime_, initState_);
-      // return;
-    }
+  // void MobileManipulatorReferenceManager::updateBaseOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange)
+  // {
+  //   if(isChange)
+  //   {
+  //     resetAllMpcTraj(initTime_, initState_);
+  //     // return;
+  //   }
 
-    setChassisControl(initTime, finalTime, initState);
-  }
+  //   setChassisControl(initTime, finalTime, initState);
+  // }
 
   void MobileManipulatorReferenceManager::updateBaseArmControl(double initTime, double finalTime, const vector_t& initState, bool isChange)
   {
@@ -2596,59 +2709,55 @@ namespace mobile_manipulator {
 
     if(initTime >= resetTorsoTime_ + resetTorsoInitTime_)
     {
-      setArmControl(initTime, finalTime, initState);
+      setArmControl(0, initTime, finalTime, initState);
+      setArmControl(1, initTime, finalTime, initState);
       setTorsoControl(initTime, finalTime, initState);
     }
     setChassisControl(initTime, finalTime, initState);
   }
 
-  void MobileManipulatorReferenceManager::updateArmEeOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange)
-  {
-    if(isChange)
-    {
-      vector_t eeState = vector_t::Zero(info_.eeFrames.size() * 7);
-      getCurrentEeWorldPose(eeState, initState);
-      left_arm_traj_pose_ = eeState.head(7);
-      right_arm_traj_pose_ = eeState.tail(7);
+  // void MobileManipulatorReferenceManager::updateArmEeOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange)
+  // {
+  //   if(isChange)
+  //   {
+  //     resetAllMpcTraj(initTime, initState);
 
-      resetAllMpcTraj(initTime, initState);
+  //     // return;
+  //   }
 
-      // return;
-    }
-
-    static vector_t armEeTarget = vector_t::Zero(info_.eeFrames.size() * 7); // 双臂末端轨迹
+  //   static vector_t armEeTarget = vector_t::Zero(info_.eeFrames.size() * 7); // 双臂末端轨迹
     
 
-    if(isCmdDualArmPoseUpdated_)
-    {
-      bool isChange = getLbArmControlModeIsChange(desireMode_);
-      // TODO: 如果 isChange 为 true, 则根据当前模式重置一次初值
-      if(isChange)  resetDualArmRuckig(initTime, initState, false, desireMode_);
-      if(desireMode_ == LbArmControlMode::WorldFrame)
-      {
-        armPose_mtx_.lock();
-        armEeTarget << left_arm_traj_pose_, right_arm_traj_pose_;
-        calcRuckigTrajWithEePose(initTime, armEeTarget);
-        armPose_mtx_.unlock();
-      }
-      isCmdDualArmPoseUpdated_ = false;
-    }
-    else
-    {
-      resetDualArmRuckig(initTime, initState, false, desireMode_);
-    }
+  //   if(isCmdDualArmPoseUpdated_)
+  //   {
+  //     bool isChange = getLbArmControlModeIsChange(desireMode_);
+  //     // TODO: 如果 isChange 为 true, 则根据当前模式重置一次初值
+  //     if(isChange)  resetDualArmRuckig(initTime, initState, false, desireMode_);
+  //     if(desireMode_ == LbArmControlMode::WorldFrame)
+  //     {
+  //       armPose_mtx_.lock();
+  //       armEeTarget = cmd_arm_zyx_;
+  //       calcRuckigTrajWithEePose(initTime, armEeTarget, cmdDualArmPoseDesiredTime_);
+  //       armPose_mtx_.unlock();
+  //     }
+  //     isCmdDualArmPoseUpdated_ = false;
+  //   }
+  //   else
+  //   {
+  //     resetDualArmRuckig(initTime, initState, false, desireMode_);
+  //   }
 
-    if(desireMode_ == LbArmControlMode::WorldFrame) // 世界系的笛卡尔末端控制
-    {
-      setEnableArmJointTrack(false); // 关闭手臂跟踪
-      setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-      setEnableBaseTrack(false);   // 关闭底盘跟踪
-      setEnableEeTargetTrajectories(true); // 开启末端笛卡尔
-      setEnableTorsoPoseTargetTrajectories(true); // 开启躯干笛卡尔
+  //   if(desireMode_ == LbArmControlMode::WorldFrame) // 世界系的笛卡尔末端控制
+  //   {
+  //     setEnableArmJointTrack(false); // 关闭手臂跟踪
+  //     setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
+  //     setEnableBaseTrack(false);   // 关闭底盘跟踪
+  //     setEnableEeTargetTrajectories(true); // 开启末端笛卡尔
+  //     setEnableTorsoPoseTargetTrajectories(true); // 开启躯干笛卡尔
 
-      generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
-    }
-  }
+  //     generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
+  //   }
+  // }
 
   double MobileManipulatorReferenceManager::targetYawPreProcess(double currentYaw, double targetYaw)
   {
@@ -2857,84 +2966,75 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::setArmControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState)
+  void MobileManipulatorReferenceManager::setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState)
   {
     // 手臂控制模式接受三种收发逻辑（desireMode_用于选择）: 
     // 0. 发手臂末端世界系轨迹; //有些危险, 上层需关注清楚
     // 1. 发手臂末端局部系轨迹;
     // 2. 发手臂关节轨迹;
     
-    static vector_t armJointTarget = arm_init_joint_traj_; // 双臂关节轨迹
-    static vector_t armEeTarget = vector_t::Zero(info_.eeFrames.size() * 6); // 双臂末端轨迹 (姿态zyx)
+    static vector_t armJointTarget[2] = {vector_t::Zero(singleArmJointDim_), 
+                                         vector_t::Zero(singleArmJointDim_)}; // 双臂关节轨迹
+    static vector_t armEeTarget[2] = {vector_t::Zero(6), 
+                                      vector_t::Zero(6)}; // 双臂末端轨迹
     
-    if(isCmdDualArmPoseUpdated_)
+    if(isCmdDualArmPoseUpdated_[armIdx])
     {
-      bool isChange = getLbArmControlModeIsChange(desireMode_);
+      bool isChange = getLbArmControlModeIsChange(armIdx, desireMode_[armIdx]);
       // TODO: 如果 isChange 为 true, 则根据当前模式重置一次初值
-      if(isChange)  resetDualArmRuckig(initTime, initState, false, desireMode_);
-      if(desireMode_ == LbArmControlMode::WorldFrame || desireMode_ == LbArmControlMode::LocalFrame)
+      if(isChange)  resetDualArmRuckig(armIdx, initTime, initState, false, desireMode_[armIdx]);
+      if(desireMode_[armIdx] == LbArmControlMode::WorldFrame || desireMode_[armIdx] == LbArmControlMode::LocalFrame)
       {
-        armPose_mtx_.lock();
-        armEeTarget = cmd_arm_zyx_;
-        calcRuckigTrajWithEePose(initTime, armEeTarget, cmdDualArmPoseDesiredTime_);
-        armPose_mtx_.unlock();
+        armPose_mtx_[armIdx].lock();
+        armEeTarget[armIdx] = cmd_arm_zyx_[armIdx];
+        armPose_mtx_[armIdx].unlock();
+
+        calcRuckigTrajWithEePose(armIdx, initTime, armEeTarget[armIdx], cmdDualArmPoseDesiredTime_[armIdx]);
       }
-      isCmdDualArmPoseUpdated_ = false;
+      isCmdDualArmPoseUpdated_[armIdx] = false;
     }
 
-    if(isCmdArmJointUpdated_)
+    if(isCmdArmJointUpdated_[armIdx])
     {
-      bool isChange = getLbArmControlModeIsChange(desireMode_);
-      if(isChange && desireMode_ == LbArmControlMode::JointSpace)
+      bool isChange = getLbArmControlModeIsChange(armIdx, desireMode_[armIdx]);
+      if(isChange && desireMode_[armIdx] == LbArmControlMode::JointSpace)
       {
-        resetArmJointRuckig(initTime, initState, false);
+        resetArmJointRuckig(armIdx, initTime, initState, false);
       }
     }
     
     if(currentArmControlMode_  == LbArmControlServiceMode::EXTERN_CONTROL)
     {
-      if(desireMode_ == LbArmControlMode::WorldFrame) // 世界系的笛卡尔末端控制
+      if(desireMode_[armIdx] == LbArmControlMode::WorldFrame) // 世界系的笛卡尔末端控制
       {
-        setEnableArmJointTrack(false); // 关闭手臂跟踪
-        setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-        setEnableEeTargetTrajectories(true); // 开启末端笛卡尔
+        setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
+        setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
+        setEnableEeTargetTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔
 
-        generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
-
-        resetArmJointRuckig(initTime, initState, false);  // 笛卡尔控制影响手臂关节, 重置关节轨迹初值
+        generateDualArmEeTargetWithRuckig(armIdx, initTime, finalTime, ruckigDt_);
       }
-      else if(desireMode_ == LbArmControlMode::LocalFrame)  // 局部系的笛卡尔末端控制
+      else if(desireMode_[armIdx] == LbArmControlMode::LocalFrame)  // 局部系的笛卡尔末端控制
       {
-        setEnableArmJointTrack(false); // 关闭手臂跟踪
-        setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
-        setEnableEeTargetLocalTrajectories(true); // 开启末端笛卡尔局部跟踪
+        setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
+        setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
+        setEnableEeTargetLocalTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔局部跟踪
       
-        generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
-
-        resetArmJointRuckig(initTime, initState, false);  // 笛卡尔控制影响手臂关节, 重置关节轨迹初值
+        generateDualArmEeTargetWithRuckig(armIdx, initTime, finalTime, ruckigDt_);
       }
-      else if(desireMode_ == LbArmControlMode::JointSpace)  // 关节控制
+      else if(desireMode_[armIdx] == LbArmControlMode::JointSpace)  // 关节控制
       {
-        setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
-        setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-        setEnableArmJointTrack(true); // 开启手臂跟踪
+        setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
+        setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
+        setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
 
-        if(enableQuickJointControl_)  // true 为快速模式
+        armJoint_mtx_[armIdx].lock();
+        armJointTarget[armIdx] = arm_joint_traj_[armIdx];
+        armJoint_mtx_[armIdx].unlock();
+
+        if(isCmdArmJointUpdated_[armIdx])
         {
-          armJoint_mtx_.lock();
-          armJointTarget = arm_joint_traj_;
-          armJoint_mtx_.unlock();
-        }
-        else
-        {
-          armPose_mtx_.lock();
-          armJointTarget << left_arm_joint_traj_, right_arm_joint_traj_;
-          armPose_mtx_.unlock();
-        }
-        if(isCmdArmJointUpdated_)
-        {
-          calcRuckigTrajWithArmJoint(initTime, armJointTarget, cmdArmJointDesiredTime_);
-          isCmdArmJointUpdated_ = false;
+          calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
+          isCmdArmJointUpdated_[armIdx] = false;
         }
 
         // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
@@ -2942,32 +3042,30 @@ namespace mobile_manipulator {
     }
     else if(currentArmControlMode_  == LbArmControlServiceMode::KEEP)
     {
-      setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
-      setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-      setEnableArmJointTrack(true); // 开启手臂跟踪
+      setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
+      setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
+      setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
 
-      if(isCmdArmJointUpdated_)
+      if(isCmdArmJointUpdated_[armIdx])
       {
-        calcRuckigTrajWithArmJoint(initTime, armJointTarget);
-        isCmdArmJointUpdated_ = false;
+        calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
+        isCmdArmJointUpdated_[armIdx] = false;
       }
     }
     else if(currentArmControlMode_ == LbArmControlServiceMode::AUTO_SWING)
     {
-      setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
-      setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-      setEnableArmJointTrack(true); // 开启手臂跟踪
+      setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
+      setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
+      setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
 
-      if(isCmdArmJointUpdated_)
+      if(isCmdArmJointUpdated_[armIdx])
       {
-        calcRuckigTrajWithArmJoint(initTime, arm_init_joint_traj_, 1.0);
-        isCmdArmJointUpdated_ = false;
+        calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
+        isCmdArmJointUpdated_[armIdx] = false;
       }
 
-      armJointTarget = arm_init_joint_traj_;
-      arm_joint_traj_ = arm_init_joint_traj_;
-      left_arm_joint_traj_ = arm_init_joint_traj_.head((info_.armDim - 4)/2);
-      right_arm_joint_traj_ = arm_init_joint_traj_.tail((info_.armDim - 4)/2);
+      armJointTarget[armIdx] = arm_init_joint_traj_.segment(armIdx * singleArmJointDim_, singleArmJointDim_);
+      arm_joint_traj_[armIdx] = arm_init_joint_traj_.segment(armIdx * singleArmJointDim_, singleArmJointDim_);
     }
     else
     {
@@ -3081,25 +3179,29 @@ namespace mobile_manipulator {
 
       resetCmdPoseRuckig(initTime, initState, true);    // 重置底盘轨迹
       resetLegJointRuckig(initTime, initState, true);   // 重置下肢关节轨迹
-      resetArmJointRuckig(initTime, initState, true);   // 重置上肢关节轨迹
-      resetDualArmRuckig(initTime, initState, true, desireMode_);
-      desireMode_ = LbArmControlMode::JointSpace;
+      for(int i = 0; i < 2; ++i)
+      {
+        resetArmJointRuckig(i, initTime, initState, true);   // 重置上肢关节轨迹
+        resetDualArmRuckig(i, initTime, initState, true, desireMode_[i]);
+        desireMode_[i] = LbArmControlMode::JointSpace;
+      }
   }
 
   void MobileManipulatorReferenceManager::resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState)
   {
-    vector_t eeState = vector_t::Zero(info_.eeFrames.size() * 7);
-    getCurrentEeWorldPose(eeState, initState);
-    left_arm_traj_pose_ = eeState.head(7);
-    right_arm_traj_pose_ = eeState.tail(7);
     vector_t eeState_6d = vector_t::Zero(info_.eeFrames.size() * 6);
     getCurrentEeWorldPoseContinuous(eeState_6d, initState);
-    cmd_arm_zyx_ = eeState_6d;
+    for(int i = 0; i < info_.eeFrames.size(); i++)
+    {
+      cmd_arm_zyx_[i].head(6) = eeState_6d.segment(i*6, 6);
+    }
 
     lb_leg_traj_ = initState.segment(baseDim_, 4);
-    arm_joint_traj_ = initState.tail(info_.armDim - 4);
-    left_arm_joint_traj_ = initState.tail(info_.armDim - 4).head((info_.armDim - 4)/2);
-    right_arm_joint_traj_ = initState.tail(info_.armDim - 4).tail((info_.armDim - 4)/2);
+
+    for(int i = 0; i < 2; ++i)
+    {
+      arm_joint_traj_[i] = initState.tail(info_.armDim - 4).segment(i * singleArmJointDim_, singleArmJointDim_);
+    }
       
     resetAllMpcTraj(initTime, initState);
   }
@@ -3130,26 +3232,27 @@ namespace mobile_manipulator {
     
     vector_t eePose = vector_t::Zero(info_.eeFrames.size() * 6);    // 双臂世界系, 自由度(末端数*6)
     getCurrentEeWorldPoseContinuous(eePose, initState);
-    tmpPos.setZero(info_.eeFrames.size() * 6);
     for(int i=0; i<info_.eeFrames.size(); i++)
     {
-      tmpPos.segment(i*6, 3) = eePose.segment(i*6, 3);
-      tmpPos.segment(i*6 + 3, 3) = eePose.segment(i*6 + 3, 3);
+      tmpPos.setZero(6);
+      tmpPos.head(6) = eePose.segment(i*6, 6);
+      currentPos.push_back(tmpPos);
     }
-    currentPos.push_back(tmpPos);
 
     getCurrentEeBasePoseContinuous(eePose, initState);                        // 双臂局部系, 自由度(末端数*6)
-    tmpPos.setZero(info_.eeFrames.size() * 6);
     for(int i=0; i<info_.eeFrames.size(); i++)
     {
-      tmpPos.segment(i*6, 3) = eePose.segment(i*6, 3);
-      tmpPos.segment(i*6 + 3, 3) = eePose.segment(i*6 + 3, 3);
+      tmpPos.setZero(6);
+      tmpPos.head(6) = eePose.segment(i*6, 6);
+      currentPos.push_back(tmpPos);
     }
-    currentPos.push_back(tmpPos);
 
-    tmpPos.setZero(info_.armDim - 4);                               // 上肢, 自由度(全身关节数-4)
-    tmpPos = initState.tail(info_.armDim - 4);
-    currentPos.push_back(tmpPos);
+    for(int i = 0; i < 2; ++i) // 上肢单臂设置, 自由度(全身关节数-4)/2
+    {
+      tmpPos.setZero(singleArmJointDim_);                               
+      tmpPos = initState.tail(singleArmJointDim_ * 2).segment(i * singleArmJointDim_, singleArmJointDim_);
+      currentPos.push_back(tmpPos);
+    }
 
     timedPlannerScheduler_.setTimedPlannerStates(currentPos);
   }
@@ -3222,57 +3325,66 @@ namespace mobile_manipulator {
         lb_leg_traj_ = cmd_vec.head(desiredSize);
         break;
       }
-      case LbTimedPosCmdType::DUAL_ARM_WORLD_CMD:
+      case LbTimedPosCmdType::LEFT_ARM_WORLD_CMD:
       {
-        isCmdDualArmPoseUpdated_ = true;
-        desireMode_ = LbArmControlMode::WorldFrame;
-        cmdDualArmPoseDesiredTime_ = desireTime;
+        isCmdDualArmPoseUpdated_[0] = true;
+        desireMode_[0] = LbArmControlMode::WorldFrame;
+        cmdDualArmPoseDesiredTime_[0] = desireTime;
         /*******************************赋值双臂指令********************************/
-        Eigen::VectorXd tmpDualArmCmd = cmd_vec.head(desiredSize);
-        cmd_arm_zyx_ = tmpDualArmCmd;
-        cmd_arm_zyx_[3] = targetYawPreProcess(initState_[2], cmd_arm_zyx_[3]);  // 世界系指令的yaw需要处理成多圈
-        cmd_arm_zyx_[9] = targetYawPreProcess(initState_[2], cmd_arm_zyx_[9]);
-        // left_arm_traj_pose_.head(3) = tmpDualArmCmd.head(3);
-        // Eigen::Quaterniond leftQuat = Eigen::AngleAxisd(tmpDualArmCmd(3), Eigen::Vector3d::UnitZ())   // yaw (Z)
-        //                             * Eigen::AngleAxisd(tmpDualArmCmd(4), Eigen::Vector3d::UnitY()) // pitch (Y)
-        //                             * Eigen::AngleAxisd(tmpDualArmCmd(5), Eigen::Vector3d::UnitX()); // roll (X)
-        // left_arm_traj_pose_.tail(4) = leftQuat.coeffs();
-        // right_arm_traj_pose_.head(3) = tmpDualArmCmd.tail(desiredSize/2).head(3);
-        // Eigen::Quaterniond rightQuat = Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(3), Eigen::Vector3d::UnitZ())   // yaw (Z)
-        //                              * Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(4), Eigen::Vector3d::UnitY()) // pitch (Y)
-        //                              * Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(5), Eigen::Vector3d::UnitX()); // roll (X)
-        // right_arm_traj_pose_.tail(4) = rightQuat.coeffs();
+        Eigen::VectorXd tmpLeftArmCmd = cmd_vec.head(desiredSize);
+        cmd_arm_zyx_[0] = tmpLeftArmCmd;
+        cmd_arm_zyx_[0][3] = targetYawPreProcess(initState_[2], cmd_arm_zyx_[0][3]);  // 世界系指令的yaw需要处理成多圈
         /*************************************************************************/
         break;
       }
-      case LbTimedPosCmdType::DUAL_ARM_LOCAL_CMD:
+      case LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD:
       {
-        isCmdDualArmPoseUpdated_ = true;
-        desireMode_ = LbArmControlMode::LocalFrame;
-        cmdDualArmPoseDesiredTime_ = desireTime;
+        isCmdDualArmPoseUpdated_[1] = true;
+        desireMode_[1] = LbArmControlMode::WorldFrame;
+        cmdDualArmPoseDesiredTime_[1] = desireTime;
         /*******************************赋值双臂指令********************************/
-        Eigen::VectorXd tmpDualArmCmd = cmd_vec.head(desiredSize);
-        cmd_arm_zyx_ = tmpDualArmCmd;
-        // left_arm_traj_pose_.head(3) = tmpDualArmCmd.head(3);
-        // Eigen::Quaterniond leftQuat = Eigen::AngleAxisd(tmpDualArmCmd(3), Eigen::Vector3d::UnitZ())   // yaw (Z)
-        //                             * Eigen::AngleAxisd(tmpDualArmCmd(4), Eigen::Vector3d::UnitY()) // pitch (Y)
-        //                             * Eigen::AngleAxisd(tmpDualArmCmd(5), Eigen::Vector3d::UnitX()); // roll (X)
-        // left_arm_traj_pose_.tail(4) = leftQuat.coeffs();
-        // right_arm_traj_pose_.head(3) = tmpDualArmCmd.tail(desiredSize/2).head(3);
-        // Eigen::Quaterniond rightQuat = Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(3), Eigen::Vector3d::UnitZ())   // yaw (Z)
-        //                              * Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(4), Eigen::Vector3d::UnitY()) // pitch (Y)
-        //                              * Eigen::AngleAxisd(tmpDualArmCmd.tail(desiredSize/2)(5), Eigen::Vector3d::UnitX()); // roll (X)
-        // right_arm_traj_pose_.tail(4) = rightQuat.coeffs();
+        Eigen::VectorXd tmpRightArmCmd = cmd_vec.head(desiredSize);
+        cmd_arm_zyx_[1] = tmpRightArmCmd;
+        cmd_arm_zyx_[1][3] = targetYawPreProcess(initState_[2], cmd_arm_zyx_[1][3]);  // 世界系指令的yaw需要处理成多圈
         /*************************************************************************/
         break;
       }
-      case LbTimedPosCmdType::ARM_JOINT_CMD:
+      case LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD:
       {
-        isCmdArmJointUpdated_ = true;
-        desireMode_ = LbArmControlMode::JointSpace;  // 切换模式
-        cmdArmJointDesiredTime_ = desireTime;
-        enableQuickJointControl_ = true;  // 采用 kuavo_arm_traj 一样的发送方式
-        arm_joint_traj_ = cmd_vec.head(desiredSize);
+        isCmdDualArmPoseUpdated_[0] = true;
+        desireMode_[0] = LbArmControlMode::LocalFrame;
+        cmdDualArmPoseDesiredTime_[0] = desireTime;
+        /*******************************赋值双臂指令********************************/
+        Eigen::VectorXd tmpLeftArmCmd = cmd_vec.head(desiredSize);
+        cmd_arm_zyx_[0] = tmpLeftArmCmd;
+        /*************************************************************************/
+        break;
+      }
+      case LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD:
+      {
+        isCmdDualArmPoseUpdated_[1] = true;
+        desireMode_[1] = LbArmControlMode::LocalFrame;
+        cmdDualArmPoseDesiredTime_[1] = desireTime;
+        /*******************************赋值双臂指令********************************/
+        Eigen::VectorXd tmpRightArmCmd = cmd_vec.head(desiredSize);
+        cmd_arm_zyx_[1] = tmpRightArmCmd;
+        /*************************************************************************/
+        break;
+      }
+      case LbTimedPosCmdType::LEFT_ARM_JOINT_CMD:
+      {
+        isCmdArmJointUpdated_[0] = true;
+        desireMode_[0] = LbArmControlMode::JointSpace;  // 切换模式
+        cmdArmJointDesiredTime_[0] = desireTime;
+        arm_joint_traj_[0] = cmd_vec.head(desiredSize);
+        break;
+      }
+      case LbTimedPosCmdType::RIGHT_ARM_JOINT_CMD:
+      {
+        isCmdArmJointUpdated_[1] = true;
+        desireMode_[1] = LbArmControlMode::JointSpace;  // 切换模式
+        cmdArmJointDesiredTime_[1] = desireTime;
+        arm_joint_traj_[1] = cmd_vec.head(desiredSize);
         break;
       }
     }

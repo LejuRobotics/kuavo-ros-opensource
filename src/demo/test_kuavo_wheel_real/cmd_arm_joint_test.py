@@ -33,7 +33,7 @@ def execute_arm_tests():
 
     # 发布 / 订阅
     pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=10)
-    rospy.Subscriber('/lb_arm_joint_reach_time', Float32, time_callback)
+    rospy.Subscriber('/lb_arm_joint_reach_time/left', Float32, time_callback)
 
     # 等待连接
     rospy.sleep(1.0)

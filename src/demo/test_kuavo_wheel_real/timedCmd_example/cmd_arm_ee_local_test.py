@@ -66,27 +66,29 @@ def execute_dual_arm_pose_tests():
         left_arm_rad = degrees_to_radians(left_arm_pose)
         right_arm_rad = degrees_to_radians(right_arm_pose)
         
-        # 合并为完整位姿数据
-        pose_data = left_arm_rad + right_arm_rad
-        
         # 显示原始数据（度）
         rospy.loginfo(f"  左臂位姿(度): [x={left_arm_pose[0]:.2f}m, y={left_arm_pose[1]:.2f}m, z={left_arm_pose[2]:.2f}m, yaw={left_arm_pose[3]:.1f}°, pitch={left_arm_pose[4]:.1f}°, roll={left_arm_pose[5]:.1f}°]")
         rospy.loginfo(f"  右臂位姿(度): [x={right_arm_pose[0]:.2f}m, y={right_arm_pose[1]:.2f}m, z={right_arm_pose[2]:.2f}m, yaw={right_arm_pose[3]:.1f}°, pitch={right_arm_pose[4]:.1f}°, roll={right_arm_pose[5]:.1f}°]")
 
         # 发送命令（使用双臂末端位姿）
-        success, actual_time = ct.send_timed_single_command(
-            planner_index=5,
+        left_success, left_actual_time = ct.send_timed_single_command(
+            planner_index=6,
             desire_time=desire_time,
-            cmd_vec=pose_data  # 直接使用 [左臂x,y,z,yaw,pitch,roll, 右臂x,y,z,yaw,pitch,roll]
+            cmd_vec=left_arm_rad  # 直接使用 [左臂x,y,z,yaw,pitch,roll, 右臂x,y,z,yaw,pitch,roll]
         )
-
-        if success:
-            rospy.loginfo(f"  命令发送成功，实际执行时间: {actual_time:.2f} 秒")
+        right_success, right_actual_time = ct.send_timed_single_command(
+            planner_index=7,
+            desire_time=desire_time,
+            cmd_vec=right_arm_rad  # 直接使用 [左臂x,y,z,yaw,pitch,roll, 右臂x,y,z,yaw,pitch,roll]
+        )
+        if left_success and right_success:
+            actual_time = max(left_actual_time, right_actual_time)
+            rospy.loginfo(f"  双臂命令发送成功，实际执行时间: {actual_time:.2f} 秒")
         else:
-            rospy.logwarn(f"  命令发送失败")
+            rospy.logwarn(f"  命令发送失败: 左臂{'成功' if left_success else '失败'}, 右臂{'成功' if right_success else '失败'}")
 
         # 等待运动完成再发下一组
-        rospy.sleep(actual_time + 0.5)
+        rospy.sleep(actual_time + 0.5 if 'actual_time' in locals() else desire_time + 0.5)
         rospy.loginfo(f"  {name} 完成!")
 
     rospy.loginfo("\n所有双臂末端位姿测试数据发布完成！")

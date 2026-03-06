@@ -117,7 +117,6 @@ def execute_combined_base_torso_arm_tests():
         # 手臂角度转弧度
         left_arm_rad = degrees_to_radians(left_arm_pose)
         right_arm_rad = degrees_to_radians(right_arm_pose)
-        arm_pose_data = left_arm_rad + right_arm_rad  # [左臂6维, 右臂6维]
 
         rospy.loginfo(f"\n=== 第{idx}组测试: {name} ===")
         rospy.loginfo(f"  期望时间: {desire_time:.1f} 秒")
@@ -140,9 +139,14 @@ def execute_combined_base_torso_arm_tests():
                 'cmd_vec': torso_pose  # [x, z, yaw, pitch]
             },
             {
-                'planner_index': 5,  # 双臂末端规划器
+                'planner_index': 6,  # 左臂末端规划器
                 'desire_time': desire_time,
-                'cmd_vec': arm_pose_data  # [左臂6维, 右臂6维]
+                'cmd_vec': left_arm_rad
+            },
+            {
+                'planner_index': 7,  # 右臂末端规划器
+                'desire_time': desire_time,
+                'cmd_vec': right_arm_rad
             }
         ]
         

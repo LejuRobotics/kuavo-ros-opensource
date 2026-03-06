@@ -77,7 +77,7 @@ EndEffectorBoxSoftCost::EndEffectorBoxSoftCost(const EndEffectorKinematics<scala
 
 bool EndEffectorBoxSoftCost::isActive(scalar_t time) const 
 {
-  return referenceManager_.getEnableEeTargetTrajectories();
+  return referenceManager_.getEnableEeTargetTrajectoriesForArm(eef_Idx_);
 }
 
 /******************************************************************************************************/
@@ -233,11 +233,11 @@ ScalarFunctionQuadraticApproximation EndEffectorBoxSoftCost::getQuadraticApproxi
 /******************************************************************************************************/
 /******************************************************************************************************/
 auto EndEffectorBoxSoftCost::interpolateEndEffectorPose(scalar_t time) const -> std::pair<vector_t, quaternion_t> {
-  const auto& targetTrajectories = referenceManager_.getEeTargetTrajectories();
+  const auto& targetTrajectories = referenceManager_.getEeTargetTrajectories(eef_Idx_);
   const auto& targetEeState = targetTrajectories.getDesiredState(time);
 
-  vector_t position = targetEeState.segment(eef_Idx_ * 6, 3);
-  Eigen::Vector3d zyx = targetEeState.segment(eef_Idx_ * 6 + 3, 3);
+  vector_t position = targetEeState.segment(0, 3);
+  Eigen::Vector3d zyx = targetEeState.segment(3, 3);
   quaternion_t orientation = getQuaternionFromEulerAnglesZyx(zyx);
 
   return {position, orientation};

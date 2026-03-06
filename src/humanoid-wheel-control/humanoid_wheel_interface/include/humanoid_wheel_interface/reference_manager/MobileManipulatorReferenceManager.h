@@ -62,9 +62,15 @@ enum LbTimedPosCmdType {
   BASE_POS_LOCAL_CMD,             // 底盘局部系位置运动
   TORSO_POSE_CMD,                 // 躯干笛卡尔局部系运动
   LEG_JOINT_CMD,                  // 下肢关节运动
-  DUAL_ARM_WORLD_CMD,             // 双臂笛卡尔世界系运动
-  DUAL_ARM_LOCAL_CMD,             // 双臂笛卡尔局部系运动
-  ARM_JOINT_CMD,                  // 上肢关节运动
+  /****************************************/
+  LEFT_ARM_WORLD_CMD,             // 双臂笛卡尔世界系运动
+  RIGHT_ARM_WORLD_CMD,            // 双臂笛卡尔世界系运动
+  /****************************************/
+  LEFT_ARM_LOCAL_CMD,             // 双臂笛卡尔局部系运动
+  RIGHT_ARM_LOCAL_CMD,            // 双臂笛卡尔局部系运动
+  /****************************************/
+  LEFT_ARM_JOINT_CMD,             // 左臂关节运动
+  RIGHT_ARM_JOINT_CMD,            // 右臂关节运动
 };
 
 class MobileManipulatorReferenceManager : public ReferenceManager {
@@ -92,8 +98,6 @@ public:
   bool setLbResetTorsoService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
 
   // 多个约束轨迹的操作函数
-  void getFirstTargetTrajectories(const TargetTrajectories& targetTrajectories);
-  void getAllTargetTrajectories(const TargetTrajectories& targetTrajectories);
   void trimTargetTrajectoriesBeforeTime(scalar_t startTime);
   void publishTargetTrajectoriesNear(scalar_t initTime);
   vector_t targetTrajToPose6D(const TargetTrajectories& Traj, scalar_t initTime);
@@ -103,16 +107,27 @@ public:
   // 多种约束轨迹的获取函数
   const TargetTrajectories& getStateInputTargetTrajectories() const { return stateInputTargetTrajectories_; }
   const TargetTrajectories& getTorsoTargetTrajectories() const { return torsoTargetTrajectories_; }
-  const TargetTrajectories& getEeTargetTrajectories() const { return eeTargetTrajectories_; }
+  // const TargetTrajectories& getEeTargetTrajectories() const { return eeTargetTrajectories_; }
+  const TargetTrajectories& getEeTargetTrajectories(int armIdx) const { return eeTargetTrajectories_[armIdx]; }
   const TargetTrajectories& getEeTargetThreePointTrajectories() const { return eeTargetThreePointTrajectories_; }
 
-  // 多种约束的使能函数
-  const bool getEnableEeTargetTrajectories() const { return enableEeFlag_; }
-  void setEnableEeTargetTrajectories(bool flag) { enableEeFlag_ = flag; }
-  const bool getEnableEeTargetLocalTrajectories() const { return enableEeLocalFlag_; }
-  void setEnableEeTargetLocalTrajectories(bool flag) { enableEeLocalFlag_ = flag; }
-  const bool getEnableArmJointTrack() const { return enableArmJointTrackFlag_; }
-  void setEnableArmJointTrack(bool flag) { enableArmJointTrackFlag_ = flag; }
+  // 多种约束的使能函数 (全局setter同时设置两臂, per-arm版本支持独立控制)
+  // EE世界系
+  const bool getEnableEeTargetTrajectories() const { return enableEePerArm_[0] || enableEePerArm_[1]; }
+  const bool getEnableEeTargetTrajectoriesForArm(int armIdx) const { return enableEePerArm_[armIdx]; }
+  void setEnableEeTargetTrajectories(bool flag) { enableEePerArm_[0] = flag; enableEePerArm_[1] = flag; }
+  void setEnableEeTargetTrajectoriesForArm(int armIdx, bool flag) { enableEePerArm_[armIdx] = flag; }
+  // EE局部系
+  const bool getEnableEeTargetLocalTrajectories() const { return enableEeLocalPerArm_[0] || enableEeLocalPerArm_[1]; }
+  const bool getEnableEeTargetLocalTrajectoriesForArm(int armIdx) const { return enableEeLocalPerArm_[armIdx]; }
+  void setEnableEeTargetLocalTrajectories(bool flag) { enableEeLocalPerArm_[0] = flag; enableEeLocalPerArm_[1] = flag; }
+  void setEnableEeTargetLocalTrajectoriesForArm(int armIdx, bool flag) { enableEeLocalPerArm_[armIdx] = flag; }
+  // 手臂关节跟踪
+  const bool getEnableArmJointTrack() const { return enableArmJointTrackPerArm_[0] || enableArmJointTrackPerArm_[1]; }
+  const bool getEnableArmJointTrackForArm(int armIdx) const { return enableArmJointTrackPerArm_[armIdx]; }
+  void setEnableArmJointTrack(bool flag) { enableArmJointTrackPerArm_[0] = flag; enableArmJointTrackPerArm_[1] = flag; }
+  void setEnableArmJointTrackForArm(int armIdx, bool flag) { enableArmJointTrackPerArm_[armIdx] = flag; }
+  // 其他约束 (保持不变)
   const bool getEnableLegJointTrack() const { return enableLegJointTrackFlag_; }
   void setEnableLegJointTrack(bool flag) { enableLegJointTrackFlag_ = flag; }
   const bool getEnableTorsoPoseTargetTrajectories() const { return enableTorsoPoseFlag_; }
@@ -139,9 +154,9 @@ protected:
   void generateVelTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetCmdVelRuckig(double initTime, const vector_t& initState, bool rePlanning);
   // cmdEePose
-  void calcRuckigTrajWithEePose(double initTime, const vector_t &targetArmEePose, double desiredTime = 0.0);
-  void generateDualArmEeTargetWithRuckig(double initTime, double finalTime, double dt);
-  void resetDualArmRuckig(double initTime, const vector_t& initState, bool rePlanning, LbArmControlMode desireMode);
+  void calcRuckigTrajWithEePose(int armIdx, double initTime, const vector_t &targetArmEePose, double desiredTime = 0.0);
+  void generateDualArmEeTargetWithRuckig(int armIdx, double initTime, double finalTime, double dt);
+  void resetDualArmRuckig(int armIdx, double initTime, const vector_t& initState, bool rePlanning, LbArmControlMode desireMode);
   // cmdTorsoPose
   void calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose, double desiredTime = 0.0);
   void generateTorsoPoseTargetWithRuckig(double initTime, double finalTime, double dt);
@@ -151,12 +166,12 @@ protected:
   void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime = 0.0);
   void resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
   // cmdArmJoint
-  void calcRuckigTrajWithArmJoint(double initTime, const vector_t &targetArmJoint, double desiredTime = 0.0);
-  void resetArmJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
+  void calcRuckigTrajWithArmJoint(int armIdx, double initTime, const vector_t &targetArmJoint, double desiredTime = 0.0);
+  void resetArmJointRuckig(int armIdx, double initTime, const vector_t& initState, bool rePlanning);
   
   double targetYawPreProcess(double currentYaw, double targetYaw);
   void setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
-  void setArmControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
+  void setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void resetAllMpcTraj(scalar_t initTime, const vector_t& initState);
   void resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState);
@@ -173,43 +188,23 @@ protected:
     preMode = currentMode;
     return isChange;
   }
-  bool getLbArmControlModeIsChange(LbArmControlMode desiredMode)
+  bool getLbArmControlModeIsChange(int armIdx, LbArmControlMode desiredMode)
   {
-    static LbArmControlMode preMode;
-    static bool isFirstRun = true;
-    if(isFirstRun)
+    static LbArmControlMode preMode[10];
+    static bool isFirstRun[10] = {true};
+    // 确保 armIdx 在有效范围内
+    if (armIdx < 0 || armIdx >= 10) {
+        return false;  // 或者处理错误
+    }
+    if(isFirstRun[armIdx])
     {
-      isFirstRun = false;
-      preMode = desiredMode;
+      isFirstRun[armIdx] = false;
+      preMode[armIdx] = desiredMode;
       return true;
     }
-    bool isChange{false};
-    if(preMode != desiredMode) isChange = true;
-    preMode = desiredMode;
+    bool isChange = (preMode[armIdx] != desiredMode);
+    preMode[armIdx] = desiredMode;
     return isChange;
-  }
-
-  std::string LbTimedPosCmdTypeToString(LbTimedPosCmdType mode)
-  {
-    switch(mode)
-    {
-      case BASE_POS_WORLD_CMD:
-        return "BASE_POS_CMD";
-      case BASE_POS_LOCAL_CMD:
-        return "BASE_POS_CMD";
-      case TORSO_POSE_CMD:
-        return "TORSO_POSE_CMD";
-      case LEG_JOINT_CMD:
-        return "LEG_JOINT_CMD";
-      case DUAL_ARM_WORLD_CMD:
-        return "DUAL_ARM_WORLD_CMD";
-      case DUAL_ARM_LOCAL_CMD:
-        return "DUAL_ARM_LOCAL_CMD";
-      case ARM_JOINT_CMD:
-        return "ARM_JOINT_CMD";
-      default:
-        return "UNKNOWN_CMD_TYPE";
-    }
   }
 
   int SrvRequestIndexToCmdType(int planner_index)
@@ -223,9 +218,13 @@ protected:
       case 3:
         return static_cast<int>(LbTimedPosCmdType::LEG_JOINT_CMD);
       case 4:
-        return static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD);
+        return static_cast<int>(LbTimedPosCmdType::LEFT_ARM_WORLD_CMD);
       case 5:
-        return static_cast<int>(LbTimedPosCmdType::ARM_JOINT_CMD);
+        return static_cast<int>(LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD);
+      case 6:
+        return static_cast<int>(LbTimedPosCmdType::LEFT_ARM_JOINT_CMD);
+      case 7:
+        return static_cast<int>(LbTimedPosCmdType::RIGHT_ARM_JOINT_CMD);
       default:
         return -1;
     }
@@ -248,14 +247,15 @@ protected:
   void publishMultiPointPose_Local(const vector_t& initState);
 
   // 不同控制模式的执行函数
-  void updateNoControl(double initTime, const TargetTrajectories& targetTrajectories, bool isChange);
-  void updateArmOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange);
-  void updateBaseOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange);
+  // void updateNoControl(double initTime, const TargetTrajectories& targetTrajectories, bool isChange);
+  // void updateArmOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange);
+  // void updateBaseOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange);
   void updateBaseArmControl(double initTime, double finalTime, const vector_t& initState, bool isChange);
-  void updateArmEeOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange);
+  // void updateArmEeOnlyControl(double initTime, double finalTime, const vector_t& initState, bool isChange);
 
 private:
 
+  const int singleArmJointDim_;
   ros::NodeHandle nodeHandle_;
   humanoid::TopicLogger *ros_logger_ = nullptr;
   const ManipulatorModelInfo info_;
@@ -321,24 +321,21 @@ private:
   ros::ServiceServer getLbTorsoInitialPoseServiceServer_;
 
   // 双臂末端执行器位姿指令 (x,y,z,qx,qy,qz,qw)
-  vector_t cmd_arm_zyx_;
-  vector_t left_arm_traj_pose_;
-  vector_t right_arm_traj_pose_;
-  std::mutex armPose_mtx_;
-  bool isCmdDualArmPoseUpdated_{false};
-  double cmdDualArmPoseDesiredTime_{0.0};
+  vector_t cmd_arm_zyx_[2]; // [0]: 左臂, [1]: 右臂, 包含位置和欧拉角
+  std::mutex armPose_mtx_[2]; // [0]: 左臂, [1]: 右臂
+  bool isCmdDualArmPoseUpdated_[2]{false, false}; // [0]: 左臂, [1]: 右臂
+  double cmdDualArmPoseDesiredTime_[2]{0.0, 0.0}; // [0]: 左臂, [1]: 右臂
   ros::Subscriber armEndEffectorSubscriber_;
-  ros::Publisher armEndEffectorReachTimePub_;
+  ros::Publisher armEndEffectorReachTimePub_[2]; // [0]: 左臂, [1]: 右臂
 
   // 手臂关节轨迹指令
-  bool enableQuickJointControl_{false};
-  vector_t arm_joint_traj_;
+  vector_t arm_joint_traj_[2]; // [0]: 左臂, [1]: 右臂
   vector_t arm_init_joint_traj_;
-  std::mutex armJoint_mtx_;
-  bool isCmdArmJointUpdated_{false};
-  double cmdArmJointDesiredTime_{0.0};
+  std::mutex armJoint_mtx_[2]; // [0]: 左臂, [1]: 右臂
+  bool isCmdArmJointUpdated_[2]{false, false}; // [0]: 左臂, [1]: 右臂
+  double cmdArmJointDesiredTime_[2]{0.0, 0.0}; // [0]: 左臂, [1]: 右臂
   ros::Subscriber arm_joint_traj_sub_;
-  ros::Publisher targetArmJointReachTimePub_;
+  ros::Publisher targetArmJointReachTimePub_[2]; // [0]: 左臂, [1]: 右臂
 
   // 躯干下肢的关节轨迹指令
   bool isCmdLegJointUpdated_{false};
@@ -355,7 +352,8 @@ private:
   // 分别保存左右臂的关节轨迹（弧度）以及是否将关节角作为期望输入
   vector_t left_arm_joint_traj_;
   vector_t right_arm_joint_traj_;
-  LbArmControlMode desireMode_ = LbArmControlMode::WorldFrame;  
+  LbArmControlMode desireMode_[2] = {LbArmControlMode::WorldFrame, 
+                                     LbArmControlMode::WorldFrame}; // [0]: 左臂, [1]: 右臂
 
   // MPC控制模式相关
   int currentMpcControlMode_{0};  // 0: NoControl, 1: ArmOnly, 2: BaseOnly, 3: BaseArm
@@ -374,13 +372,16 @@ private:
   // 多种约束所需轨迹相关
   TargetTrajectories stateInputTargetTrajectories_;
   TargetTrajectories torsoTargetTrajectories_;
-  TargetTrajectories eeTargetTrajectories_;
+  TargetTrajectories eeTargetTrajectories_[2]; // [0]: 左臂, [1]: 右臂
   TargetTrajectories eeTargetThreePointTrajectories_;
 
   // 多种约束所需轨迹相关
-  bool enableEeFlag_{true};
-  bool enableEeLocalFlag_{true};
-  bool enableArmJointTrackFlag_{false};
+  // bool enableEeFlag_{true};
+  // bool enableEeLocalFlag_{true};
+  // bool enableArmJointTrackFlag_{false};
+  bool enableEePerArm_[2]{true, true};                  // EE世界系约束 [左臂, 右臂]
+  bool enableEeLocalPerArm_[2]{true, true};              // EE局部系约束 [左臂, 右臂]
+  bool enableArmJointTrackPerArm_[2]{false, false};      // 手臂关节跟踪 [左臂, 右臂]
   bool enableLegJointTrackFlag_{false};
   bool enableTorsoPoseFlag_{false};
   bool enableBaseTrackFlag_{true};
@@ -420,11 +421,11 @@ private:
   vector_t wheel_move_jerk_;  // x, y, yaw
 
   // 双臂轨迹规划器, 姿态的输入和输出均为Zyx欧拉角形式
-  std::shared_ptr<cmdPosePlannerWithRuckig> cmdDualArmEePlannerRuckigPtr_;
-  double cmdDualArm_plannerInitialTime_{0.0};
-  Eigen::VectorXd cmdDualArm_prevTargetPose_;
-  Eigen::VectorXd cmdDualArm_prevTargetVel_;
-  Eigen::VectorXd cmdDualArm_prevTargetAcc_;
+  std::shared_ptr<cmdPosePlannerWithRuckig> cmdDualArmEePlannerRuckigPtr_[2]; // [0]: 左臂, [1]: 右臂
+  double cmdDualArm_plannerInitialTime_[2]{0.0, 0.0};
+  Eigen::VectorXd cmdDualArm_prevTargetPose_[2];
+  Eigen::VectorXd cmdDualArm_prevTargetVel_[2];
+  Eigen::VectorXd cmdDualArm_prevTargetAcc_[2];
   
   vector_t dualArm_move_spd_;
   vector_t dualArm_move_acc_;
@@ -453,11 +454,11 @@ private:
   vector_t legJoint_move_jerk_;
 
   // 上肢关节规划器, 单位: rad
-  std::shared_ptr<cmdPosePlannerWithRuckig> armJointPlannerRuckigPtr_;
-  double armJoint_plannerInitialTime_{0.0};
-  Eigen::VectorXd armJoint_prevTargetPose_;
-  Eigen::VectorXd armJoint_prevTargetVel_;
-  Eigen::VectorXd armJoint_prevTargetAcc_;
+  std::shared_ptr<cmdPosePlannerWithRuckig> armJointPlannerRuckigPtr_[2]; // [0]: 左臂, [1]: 右臂
+  double armJoint_plannerInitialTime_[2]{0.0, 0.0};
+  Eigen::VectorXd armJoint_prevTargetPose_[2];
+  Eigen::VectorXd armJoint_prevTargetVel_[2];
+  Eigen::VectorXd armJoint_prevTargetAcc_[2];
 
   vector_t armJoint_move_spd_;
   vector_t armJoint_move_acc_;

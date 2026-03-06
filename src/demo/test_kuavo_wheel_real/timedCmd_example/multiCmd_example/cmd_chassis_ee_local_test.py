@@ -84,9 +84,6 @@ def execute_combined_tests():
         left_arm_rad = degrees_to_radians(left_arm_pose)
         right_arm_rad = degrees_to_radians(right_arm_pose)
         
-        # 合并为完整手臂位姿数据 [左臂6维, 右臂6维]
-        arm_pose_data = left_arm_rad + right_arm_rad
-        
         # 显示原始数据
         rospy.loginfo(f"  底盘位姿: [x={base_pose[0]:.2f}m, y={base_pose[1]:.2f}m, yaw={base_pose[2]:.2f}rad]")
         rospy.loginfo(f"  左臂位姿(度): [x={left_arm_pose[0]:.2f}m, y={left_arm_pose[1]:.2f}m, z={left_arm_pose[2]:.2f}m, yaw={left_arm_pose[3]:.1f}°, pitch={left_arm_pose[4]:.1f}°, roll={left_arm_pose[5]:.1f}°]")
@@ -100,9 +97,14 @@ def execute_combined_tests():
                 'cmd_vec': base_pose  # [x, y, yaw]
             },
             {
-                'planner_index': 5,  # 双臂末端规划器
+                'planner_index': 6,  # 左臂末端规划器
                 'desire_time': desire_time,
-                'cmd_vec': arm_pose_data  # [左臂6维, 右臂6维]
+                'cmd_vec': left_arm_rad
+            },
+            {
+                'planner_index': 7,  # 右臂末端规划器
+                'desire_time': desire_time,
+                'cmd_vec': right_arm_rad
             }
         ]
         

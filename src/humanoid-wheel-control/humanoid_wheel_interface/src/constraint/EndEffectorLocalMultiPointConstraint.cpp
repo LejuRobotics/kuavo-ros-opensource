@@ -108,7 +108,7 @@ size_t EndEffectorLocalMultiPointConstraint::getNumConstraints(scalar_t time) co
 
 bool EndEffectorLocalMultiPointConstraint::isActive(scalar_t time) const 
 {
-  return referenceManager_.getEnableEeTargetLocalTrajectories();
+  return referenceManager_.getEnableEeTargetLocalTrajectoriesForArm(eef_Idx_);
 }
 /******************************************************************************************************/
 /******************************************************************************************************/
@@ -168,11 +168,11 @@ VectorFunctionLinearApproximation EndEffectorLocalMultiPointConstraint::getLinea
 /******************************************************************************************************/
 /******************************************************************************************************/
 auto EndEffectorLocalMultiPointConstraint::interpolateEndEffectorPose(scalar_t time) const -> std::pair<Eigen::Vector3d, quaternion_t> {
-  const auto& targetTrajectories = referenceManager_.getEeTargetTrajectories();
+  const auto& targetTrajectories = referenceManager_.getEeTargetTrajectories(eef_Idx_);
   const auto& targetEeState = targetTrajectories.getDesiredState(time);
 
-  Eigen::Vector3d position = targetEeState.segment(eef_Idx_ * 6, 3);
-  Eigen::Vector3d zyx = targetEeState.segment(eef_Idx_ * 6 + 3, 3);
+  Eigen::Vector3d position = targetEeState.segment(0, 3);
+  Eigen::Vector3d zyx = targetEeState.segment(3, 3);
   quaternion_t orientation = getQuaternionFromEulerAnglesZyx(zyx);
 
   return {position, orientation};

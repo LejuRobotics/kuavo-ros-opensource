@@ -37,22 +37,36 @@ def execute_arm_tests():
         # 角度转换为弧度
         import math
         joint_angles_rad = [math.radians(angle) for angle in joint_angles_deg]
-        rospy.loginfo(f"  关节角度(弧度): {[f'{angle:.3f}' for angle in joint_angles_rad]}")
 
-        # 发送命令
-        success, actual_time = ct.send_timed_single_command(
-            planner_index=6,  # 假设4是双臂控制的索引，请根据实际情况调整
+        # 拆分成左臂和右臂 (假设前7个是左臂，后7个是右臂)
+        left_arm_angles = joint_angles_rad[:7]   # 左臂7个关节
+        right_arm_angles = joint_angles_rad[7:]  # 右臂7个关节
+        
+        rospy.loginfo(f"  左臂角度(弧度): {[f'{angle:.3f}' for angle in left_arm_angles]}")
+        rospy.loginfo(f"  右臂角度(弧度): {[f'{angle:.3f}' for angle in right_arm_angles]}")
+
+        # 发送左臂命令
+        left_success, left_actual_time = ct.send_timed_single_command(
+            planner_index=8,  # 左臂规划器索引
             desire_time=desire_time,
-            cmd_vec=joint_angles_rad
+            cmd_vec=left_arm_angles
         )
 
-        if success:
-            rospy.loginfo(f"  命令发送成功，实际执行时间: {actual_time:.2f} 秒")
+        # 发送右臂命令  
+        right_success, right_actual_time = ct.send_timed_single_command(
+            planner_index=9,  # 右臂规划器索引
+            desire_time=desire_time,
+            cmd_vec=right_arm_angles
+        )
+
+        if left_success and right_success:
+            actual_time = max(left_actual_time, right_actual_time)
+            rospy.loginfo(f"  双臂命令发送成功，实际执行时间: {actual_time:.2f} 秒")
         else:
-            rospy.logwarn(f"  命令发送失败")
+            rospy.logwarn(f"  命令发送失败: 左臂{'成功' if left_success else '失败'}, 右臂{'成功' if right_success else '失败'}")
 
         # 等待运动完成再发下一组
-        rospy.sleep(actual_time + 0.5)
+        rospy.sleep(actual_time + 0.5 if 'actual_time' in locals() else desire_time + 0.5)
         rospy.loginfo(f"  {name} 完成!")
 
     rospy.loginfo("\n所有双臂关节测试数据发布完成！")

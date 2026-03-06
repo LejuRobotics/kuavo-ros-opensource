@@ -66,7 +66,7 @@ def execute_two_arm_tests():
     rospy.init_node('test_two_arm_pose_publisher', anonymous=True)
 
     pub = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
-    rospy.Subscriber('/lb_arm_ee_reach_time', Float32, time_callback)
+    rospy.Subscriber('/lb_arm_ee_reach_time/left', Float32, time_callback)
 
     ct.set_arm_control_mode(1)  # 重置手臂, 避免奇异点问题
     rospy.sleep(1.0)
