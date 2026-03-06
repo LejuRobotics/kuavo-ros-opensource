@@ -27,18 +27,17 @@ def get_version_parameter():
         param_value = rospy.get_param(param_name)
         rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
         # 适配1000xx版本号
-        valid_series = [42, 45, 49, 52]
+        valid_series = [42, 45, 49, 52, 53, 54]
         MMMMN_MASK = 100000
         series = param_value % MMMMN_MASK
         if series not in valid_series:
-            rospy.logerr(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！程序退出。")
-            rospy.signal_shutdown("参数无效")
+            rospy.logwarn(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！")
+            return None
         else:
             rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
-        return param_value
+            return param_value
     except rospy.ROSException:
-        rospy.logerr(f"参数 {param_name} 不存在！程序退出。")
-        rospy.signal_shutdown("参数获取失败") 
+        rospy.logerr(f"参数 {param_name} 不存在！") 
         return None
 
 # FK正解服务
@@ -276,7 +275,8 @@ class IkArmService:
         ik_solve_param.major_iterations_limit = 100
         ik_solve_param.oritation_constraint_tol= 1e-3
         ik_solve_param.pos_constraint_tol = 1e-3 
-        ik_solve_param.pos_cost_weight = 0.0 
+        ik_solve_param.pos_cost_weight = 1.0 
+        ik_solve_param.constraint_mode = 0x06
 
         # 创建请求对象
         self.eef_pose_msg = twoArmHandPoseCmd()
@@ -353,7 +353,6 @@ class KeyBoardArmController:
     def __init__(self, x_gap = 0.03, y_gap = 0.03, z_gap = 0.03, 
                  roll_gap = 0.03, pitch_gap = 0.03, yaw_gap = 0.03, 
                  time_gap = 5, robot_version = 45 , which_hand=ArmType.Right):
-        rospy.init_node("arm_control_keyboard_node", anonymous=True)
 
         self.old_settings = termios.tcgetattr(sys.stdin)
         self.input_buffer = []  # 存储按键缓冲区
@@ -402,7 +401,7 @@ class KeyBoardArmController:
             return (version_number % MMMMN_MASK) == series
         if start_with_version(robot_version, 45) or start_with_version(robot_version, 49):
             self.robot_zero_x = -0.0173
-            self.robot_zero_y = -0.2927
+            self.robot_zero_y = -0.2927 + 0.03
             self.robot_zero_z = -0.2837
             self.robot_upper_arm = 0.30
             self.robot_lower_arm = 0.40
@@ -420,13 +419,13 @@ class KeyBoardArmController:
             # 设定sensors_data_raw中手臂角度的索引
             self.joint_data_header, self.joint_data_footer = 12, 26
 
-        elif start_with_version(robot_version, 52):
-            self.robot_zero_x = -0.012
-            self.robot_zero_y = -0.255 + 0.03 # shoulder_width
-            self.robot_zero_z = -0.315
-            self.robot_upper_arm = 0.2844
-            self.robot_lower_arm = 0.426
-            self.robot_shoulder_height = 0.3940
+        elif start_with_version(robot_version, 52) or start_with_version(robot_version, 53) or start_with_version(robot_version, 54):
+            self.robot_zero_x = -0.003 
+            self.robot_zero_y = -0.2527 # shoulder_width
+            self.robot_zero_z = -0.3144 
+            self.robot_upper_arm = 0.2837
+            self.robot_lower_arm = 0.4251
+            self.robot_shoulder_height = 0.3944 # shoulder_height
             # 设定sensors_data_raw中手臂角度的索引
             self.joint_data_header, self.joint_data_footer = 13, 27
 
@@ -459,7 +458,6 @@ class KeyBoardArmController:
             if fk_hand_poses is not None:
                 print("left hand poses ready","\r")
                 self.l_eef_target_xyz = np.array(fk_hand_poses.left_pose.pos_xyz)
-                self.l_eef_target_xyz # 为了测试五代临时这样修改,后续会改回来
                 x, y, z, w = fk_hand_poses.left_pose.quat_xyzw
                 euler =quaternion_to_euler(x, y, z, w)
                 self.l_eef_target_ypr = np.array([euler.yaw, euler.pitch, euler.roll])
@@ -494,14 +492,17 @@ class KeyBoardArmController:
 
     # 按键检测 
     def getKey(self):
-        tty.setraw(sys.stdin.fileno())
-        
-        rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
-        if rlist:
-            key = sys.stdin.read(1)
+        if self.input_buffer:
+            key = self.input_buffer.pop(0)
         else:
-            key = ''
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+            tty.setraw(sys.stdin.fileno())
+            
+            rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if rlist:
+                key = sys.stdin.read(1)
+            else:
+                key = ''
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
 
         # 更新末端位置
         if  key in self._control_xyz_keys:
@@ -513,12 +514,12 @@ class KeyBoardArmController:
                 # yaw pitch
                 if self.which_hand == ArmType.Left:
 
-                    self.eef_target_ypr[0]= math.atan((self.robot_zero_y + self.eef_target_xyz[1])/(self.eef_target_xyz[0] - self.robot_zero_x))-0.1746
+                    self.eef_target_ypr[0]= math.atan((self.robot_zero_y + self.eef_target_xyz[1])/(self.eef_target_xyz[0] - self.robot_zero_x))
                     self.eef_target_ypr[1]=eff_orientation_pitch(self.robot_upper_arm, self.robot_lower_arm, 
                                                             math.sqrt((self.eef_target_xyz[1] + self.robot_zero_y)**2+self.eef_target_xyz[0]**2), 
                                                             self.eef_target_xyz[2]-self.robot_shoulder_height)
                 else :
-                    self.eef_target_ypr[0]=math.atan((self.eef_target_xyz[1] - self.robot_zero_y)/(self.eef_target_xyz[0] - self.robot_zero_x))+0.1746
+                    self.eef_target_ypr[0]=math.atan((self.eef_target_xyz[1] - self.robot_zero_y)/(self.eef_target_xyz[0] - self.robot_zero_x))
                     self.eef_target_ypr[1]=eff_orientation_pitch(self.robot_upper_arm, self.robot_lower_arm, 
                                                             math.sqrt((self.eef_target_xyz[1] - self.robot_zero_y)**2+self.eef_target_xyz[0]**2), 
                                                             self.eef_target_xyz[2]-self.robot_shoulder_height)
@@ -623,9 +624,9 @@ class KeyBoardArmController:
             #if True :
                 degrees_list = [math.degrees(rad) for rad in joint_end_angles]
                 # 线性插值
-                self.exec_time = self.exec_time + self.time_gap
+                # self.exec_time = self.exec_time + self.time_gap
                 # 发送任务
-                self.publish_arm_target_poses([5], degrees_list)
+                self.publish_arm_target_poses([self.time_gap], degrees_list)
             # print("update_joy over")
         else:
             #quat=euler_to_quaternion(self.eef_target_ypr[0],self.eef_target_ypr[1],self.eef_target_ypr[2])
@@ -644,9 +645,9 @@ class KeyBoardArmController:
             #if True :
                 degrees_list = [math.degrees(rad) for rad in joint_end_angles]
                 # 线性插值
-                self.exec_time = self.exec_time + self.time_gap
+                # self.exec_time = self.exec_time + self.time_gap
                 # 发送任务
-                self.publish_arm_target_poses([5], degrees_list)
+                self.publish_arm_target_poses([self.time_gap], degrees_list)
             # print("update_joy over")
 
     def run(self): 
@@ -684,13 +685,18 @@ class KeyBoardArmController:
 
 if __name__ == "__main__":
     try:
+        rospy.init_node("arm_control_keyboard_node", anonymous=True)
+
         # 获取机器人版本
         my_robot_version = get_version_parameter()
+        if my_robot_version is None:
+            rospy.signal_shutdown("参数无效或获取失败")
+            raise rospy.ROSInterruptException
 
         # Right Arm
         keyboard_arm_controller = KeyBoardArmController(x_gap = 0.03, y_gap = 0.03, z_gap = 0.03,
                                                         roll_gap = 0.157, pitch_gap = 0.157, yaw_gap = 0.157, 
-                                                        time_gap = 5,
+                                                        time_gap = 1,
                                                         robot_version = my_robot_version,
                                                         which_hand=ArmType.Right)
         keyboard_arm_controller.run()
