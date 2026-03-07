@@ -63,7 +63,7 @@ class ArmTrajectoryBezierDemo:
         robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
         self.robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
         self.robot_class = KUAVO if self.robot_version.major() >= 4 else ROBAN
-        self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
+        self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "multi")
         # KUAVO v50+ 有腰部关节
         self.has_waist = (self.robot_version.major() == 5) if self.robot_class == KUAVO else False
         
