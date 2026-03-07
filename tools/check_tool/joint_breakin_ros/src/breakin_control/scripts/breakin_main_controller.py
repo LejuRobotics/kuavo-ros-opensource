@@ -29,15 +29,9 @@ class BreakinMainController:
         self.current_dir = Path(__file__).parent.absolute()
         # 自动向上查找 ROS 工作空间根目录（包含 src 子目录的那个目录）
         self.workspace_root = self._detect_workspace_root()
-        # leg_breakin EC_log 路径
-        self.leg_ec_log_dir = (
-            self.workspace_root
-            / "src"
-            / "leg_breakin"
-            / "src"
-            / "leg_breakin_roban2_v14"
-            / "EC_log"
-        )
+        # leg_breakin 目录和 EC_log 路径
+        self.leg_breakin_dir = None
+        self.leg_ec_log_dir = None
         
         # 脚本路径
         self.arm_breakin_standalone = self.current_dir / "arm_breakin_standalone.py"
@@ -80,7 +74,7 @@ class BreakinMainController:
         return ""
     
     def _is_kuavo5(self):
-        """根据 ROBOT_VERSION 判断是否为 Kuavo5V52（版本50-52）腿部磨线方案"""
+        """根据 ROBOT_VERSION 判断是否为 Kuavo5（版本50+）腿部磨线方案"""
         robot_version = self._get_robot_version()
         if not robot_version:
             return False
@@ -88,16 +82,121 @@ class BreakinMainController:
         rv_raw = str(robot_version).strip()
         rv = rv_raw.lower()
         
-        # 字符串匹配：kuavo5_v52, kuavo5, v5, kuavo5_v5 等
-        if ("kuavo5_v52" in rv) or ("kuavo5" in rv) or rv.startswith("v5") or rv.startswith("kuavo5_v5"):
+        # 字符串匹配：kuavo5_v52, kuavo5_v53, kuavo5, v5, kuavo5_v5 等
+        if ("kuavo5_v52" in rv) or ("kuavo5_v53" in rv) or ("kuavo5" in rv) or rv.startswith("v5") or rv.startswith("kuavo5_v5"):
             return True
         
-        # 数字版本判断：50-52 为 Kuavo5V52
+        # 数字版本判断：50+ 为 Kuavo5
         try:
             v = int(rv_raw)
-            return 50 <= v <= 52
+            return v >= 50
         except (ValueError, TypeError):
             return False
+    
+    def _is_robot_version_52(self):
+        """判断 ROBOT_VERSION 是否为 52"""
+        robot_version = self._get_robot_version()
+        if not robot_version:
+            return False
+        
+        rv_raw = str(robot_version).strip()
+        rv = rv_raw.lower()
+        
+        # 字符串匹配：包含 v52 或 kuavo5_v52
+        if "v52" in rv or "kuavo5_v52" in rv:
+            return True
+        
+        # 数字版本判断：52
+        try:
+            v = int(rv_raw)
+            return v == 52
+        except (ValueError, TypeError):
+            return False
+    
+    def _is_robot_version_53(self):
+        """判断 ROBOT_VERSION 是否为 53"""
+        robot_version = self._get_robot_version()
+        if not robot_version:
+            return False
+        
+        rv_raw = str(robot_version).strip()
+        rv = rv_raw.lower()
+        
+        # 字符串匹配：包含 v53 或 kuavo5_v53
+        if "v53" in rv or "kuavo5_v53" in rv:
+            return True
+        
+        # 数字版本判断：53
+        try:
+            v = int(rv_raw)
+            return v == 53
+        except (ValueError, TypeError):
+            return False
+    
+    def _select_leg_breakin_dir(self):
+        """根据 ROBOT_VERSION 选择腿部磨线目录
+        如果是版本53，直接使用v53版本
+        如果是版本52，询问用户选择机型
+        如果是版本50-51，使用普通v52版本
+        否则使用 roban2_v14
+        返回选择的目录名称
+        """
+        # 如果不是 Kuavo5，使用 roban2_v14
+        if not self._is_kuavo5():
+            return "leg_breakin_roban2_v14"
+        
+        # 如果是版本53，直接使用v53版本
+        if self._is_robot_version_53():
+            self.print_colored("=" * 50, Colors.CYAN)
+            self.print_colored("      检测到 ROBOT_VERSION = 53", Colors.CYAN)
+            self.print_colored("=" * 50, Colors.CYAN)
+            self.print_colored("已选择：kuavo5_v53版本（13个电机）", Colors.GREEN)
+            return "leg_breakin_kuavo5_v53"
+        
+        # 如果是版本52，询问用户选择机型
+        if self._is_robot_version_52():
+            self.print_colored("=" * 50, Colors.CYAN)
+            self.print_colored("      检测到 ROBOT_VERSION = 52", Colors.CYAN)
+            self.print_colored("=" * 50, Colors.CYAN)
+            print()
+            self.print_colored("请选择机型：", Colors.YELLOW)
+            print("1. 龙华25台版本（腿部80A）")
+            print("2. 普通v52版本")
+            print()
+            
+            while True:
+                try:
+                    choice = input("请输入选项 (1 或 2): ").strip()
+                    if choice == "1":
+                        self.print_colored("已选择：龙华25台版本（腿部80A）", Colors.GREEN)
+                        return "leg_breakin_kuavo5_v52_80A"
+                    elif choice == "2":
+                        self.print_colored("已选择：普通v52版本", Colors.GREEN)
+                        return "leg_breakin_kuavo5_v52"
+                    elif choice.lower() == 'q':
+                        self.print_colored("已取消操作", Colors.YELLOW)
+                        sys.exit(0)
+                    else:
+                        self.print_colored("无效选项，请输入 1 或 2", Colors.RED)
+                except KeyboardInterrupt:
+                    self.print_colored("\n已取消操作", Colors.YELLOW)
+                    sys.exit(0)
+        
+        # 如果是版本50-51，使用普通v52版本
+        return "leg_breakin_kuavo5_v52"
+    
+    def _ensure_leg_breakin_dir_selected(self):
+        """确保腿部磨线目录已选择（如果尚未选择，则进行选择）"""
+        if self.leg_breakin_dir is None:
+            self.leg_breakin_dir = self._select_leg_breakin_dir()
+            self.leg_ec_log_dir = (
+                self.workspace_root
+                / "src"
+                / "leg_breakin"
+                / "src"
+                / self.leg_breakin_dir
+                / "EC_log"
+            )
 
     def _detect_workspace_root(self):
         """从当前脚本目录向上查找，找到包含 src 目录的 ROS 工作空间根目录"""
@@ -239,6 +338,9 @@ class BreakinMainController:
 
     def _ensure_leg_ec_log_dir(self):
         """确保腿部磨线的 EC_log 目录存在"""
+        # 确保已选择腿部磨线目录
+        self._ensure_leg_breakin_dir_selected()
+        
         try:
             if not self.leg_ec_log_dir.exists():
                 self.leg_ec_log_dir.mkdir(parents=True, exist_ok=True)
@@ -462,12 +564,9 @@ class BreakinMainController:
         self.print_colored("=" * 50, Colors.CYAN)
         print()
         
-        # 每轮动作时长（秒）
-        cycle_time = 12.0
-
         # 0. 清理残留进程
         self._kill_existing_processes()
-        
+
         # 1. 获取用户输入的磨线轮数
         while True:
             try:
@@ -486,12 +585,8 @@ class BreakinMainController:
                 self.print_colored("\n已取消操作", Colors.YELLOW)
                 return 0
         
-        # 根据轮数计算总时长
-        arm_duration = target_rounds * cycle_time
-        
         print()
-        self.print_colored(f"将进行 {target_rounds} 轮磨线", Colors.GREEN)
-        self.print_colored(f"预计总时长: {arm_duration:.1f} 秒（每轮约 {cycle_time} 秒）", Colors.BLUE)
+        self.print_colored(f"将进行 {target_rounds} 轮磨线（基于轮数控制，不限制时间）", Colors.GREEN)
         print()
         
         # 2. 询问是否进行零点校准
@@ -553,10 +648,10 @@ class BreakinMainController:
             
             # 订阅 arm_started / arm_running，用于起始时间和每轮结束检测
             start_time = None   # 第一次真正开始执行动作的时间
-            min_round_duration = 14.0  # 最小一轮时间（秒）
             stop_publish_flag = threading.Event()
             arm_started = False
             arm_running = False
+            arm_has_run = False  # 标记是否至少运行过一轮（arm_running曾经为True）
             # 实际运行轮数：以本节点发布 start_new_round_arm=True 的次数为准
             published_rounds = 0
             completed_rounds = 0  # 已完成的轮数（包括第一轮）
@@ -565,13 +660,15 @@ class BreakinMainController:
                 nonlocal arm_started, start_time
                 if msg.data and not arm_started:
                     arm_started = True
-                    # 以 arm_started 为基准开始计时
+                    # 以 arm_started 为基准开始记录时间
                     start_time = time.time()
-                    self.print_colored("✓ 收到 arm_started = True，开始倒计时", Colors.GREEN)
+                    self.print_colored("✓ 收到 arm_started = True，开始记录轮数", Colors.GREEN)
             
             def arm_running_callback(msg):
-                nonlocal arm_running
+                nonlocal arm_running, arm_has_run
                 arm_running = msg.data
+                if arm_running:
+                    arm_has_run = True  # 标记至少运行过一轮
             
             sub_arm_started = None
             sub_arm_running = None
@@ -654,19 +751,27 @@ class BreakinMainController:
             publish_thread.start()
             self.print_colored("✓ 已启动手臂单独模式的100Hz话题发布线程", Colors.GREEN)
             
-            # 监控进程和时间
+            # 监控进程和轮数
             return_code = 0
+            last_arm_running_state = None
             try:
                 while True:
                     if process.poll() is not None:
                         return_code = process.returncode
                         break
                     
-                    # 如果已经开始，检查是否达到目标轮数
-                    if start_time is not None:
+                    # 如果已经开始，检查是否达到目标轮数（只基于轮数，不基于时间）
+                    if start_time is not None and arm_has_run:
                         completed_rounds_calc = 1 + published_rounds
-                        if completed_rounds_calc >= target_rounds and not arm_running:
-                            # 已完成所有轮数且当前不在运行中，停止
+                        # 只有当：1) 已完成轮数 >= 目标轮数
+                        #         2) 当前不在运行中（arm_running = False）
+                        #         3) 之前确实运行过（arm_has_run = True）
+                        #         4) 从运行状态变为完成状态（检测状态变化）
+                        was_running = (last_arm_running_state is True)
+                        just_finished = was_running and (not arm_running)
+                        
+                        if completed_rounds_calc >= target_rounds and just_finished:
+                            # 已完成所有轮数且当前轮刚刚完成，停止
                             self.print_colored(f"手臂磨线已完成 {target_rounds} 轮", Colors.GREEN)
                             stop_msg = Bool()
                             stop_msg.data = False
@@ -676,6 +781,8 @@ class BreakinMainController:
                             time.sleep(2.0)
                             break
                     
+                    # 更新上一次的运行状态
+                    last_arm_running_state = arm_running
                     time.sleep(0.1)
             finally:
                 # 在退出前输出实际运行轮数：第一轮本身也算一轮
@@ -737,9 +844,6 @@ class BreakinMainController:
         self.print_colored("=" * 50, Colors.CYAN)
         print()
 
-        # 每轮动作时长（秒）
-        cycle_time = 12.0
-
         # 0. 清理残留进程
         self._kill_existing_processes()
 
@@ -765,12 +869,8 @@ class BreakinMainController:
                 self.print_colored("\n已取消操作", Colors.YELLOW)
                 return 0
         
-        # 根据轮数计算总时长
-        leg_duration = target_rounds * cycle_time
-        
         print()
-        self.print_colored(f"将进行 {target_rounds} 轮磨线", Colors.GREEN)
-        self.print_colored(f"预计总时长: {leg_duration:.1f} 秒（每轮约 {cycle_time} 秒）", Colors.BLUE)
+        self.print_colored(f"将进行 {target_rounds} 轮磨线（基于轮数控制，不限制时间）", Colors.GREEN)
         print()
         
         # 2. 启动roscore
@@ -794,10 +894,10 @@ class BreakinMainController:
 
             # 启动100Hz发布线程（发布allow_run、can_start_new_round和start_new_round_leg）
             start_time = None  # 将在收到leg_started时设置
-            min_round_duration = 14.0  # 最小一轮时间（秒）
             stop_publish_flag = threading.Event()
             leg_started = False
             leg_running = False
+            leg_has_run = False  # 标记是否至少运行过一轮（leg_running曾经为True）
             published_rounds = 0  # 实际运行轮数：以本节点发布 start_new_round_leg=True 的次数为准
             completed_rounds = 0  # 已完成的轮数（包括第一轮）
             
@@ -806,11 +906,13 @@ class BreakinMainController:
                 if msg.data and not leg_started:
                     leg_started = True
                     start_time = time.time()
-                    self.print_colored("✓ 收到 leg_started = True，开始倒计时", Colors.GREEN)
+                    self.print_colored("✓ 收到 leg_started = True，开始记录轮数", Colors.GREEN)
             
             def leg_running_callback(msg):
-                nonlocal leg_running
+                nonlocal leg_running, leg_has_run
                 leg_running = msg.data
+                if leg_running:
+                    leg_has_run = True  # 标记至少运行过一轮
             
             # 订阅leg_started和leg_running话题（由C++层发布）
             sub_leg_started = rospy.Subscriber('/breakin/leg_started', Bool, leg_started_callback)
@@ -909,8 +1011,11 @@ class BreakinMainController:
             rospy.sleep(1.0)
             
             # 启动腿部磨线脚本（ROS控时长）
+            # 通过环境变量传递选择的腿部磨线目录
+            env = dict(os.environ)
+            env['LEG_BREAKIN_DIR'] = self.leg_breakin_dir
             cmd = ["python3", str(self.leg_breakin_standalone)]
-            process = subprocess.Popen(cmd, preexec_fn=os.setsid)
+            process = subprocess.Popen(cmd, preexec_fn=os.setsid, env=env)
             self.processes.append(process)
 
             # 等待腿部磨线开始运行（通过订阅leg_started话题）
@@ -929,18 +1034,26 @@ class BreakinMainController:
                     self.print_colored("提示：脚本仍在运行但未发布leg_started，请检查输出", Colors.YELLOW)
                 return 1
             
-            # 监控进程和时间
+            # 监控进程和轮数
+            last_leg_running_state = None
             while True:
                 # 检查进程是否还在运行
                 if process.poll() is not None:
                     return_code = process.returncode
                     break
                 
-                # 检查是否达到目标轮数
-                if start_time is not None:
+                # 检查是否达到目标轮数（只基于轮数，不基于时间）
+                if start_time is not None and leg_has_run:
                     completed_rounds_calc = 1 + published_rounds
-                    if completed_rounds_calc >= target_rounds and not leg_running:
-                        # 已完成所有轮数且当前不在运行中，停止
+                    # 只有当：1) 已完成轮数 >= 目标轮数
+                    #         2) 当前不在运行中（leg_running = False）
+                    #         3) 之前确实运行过（leg_has_run = True）
+                    #         4) 从运行状态变为完成状态（检测状态变化）
+                    was_running = (last_leg_running_state is True)
+                    just_finished = was_running and (not leg_running)
+                    
+                    if completed_rounds_calc >= target_rounds and just_finished:
+                        # 已完成所有轮数且当前轮刚刚完成，停止
                         self.print_colored(f"腿部磨线已完成 {target_rounds} 轮", Colors.GREEN)
                         # 发布停止信号
                         stop_msg = Bool()
@@ -958,6 +1071,9 @@ class BreakinMainController:
                                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                         return_code = process.returncode if process.poll() is not None else 0
                         break
+                
+                # 更新上一次的运行状态
+                last_leg_running_state = leg_running
                 
                 # 处理ROS回调
                 try:
@@ -1016,9 +1132,6 @@ class BreakinMainController:
         self.print_colored("      同时启动手臂和腿部磨线（ROS版本）", Colors.CYAN)
         self.print_colored("=" * 50, Colors.CYAN)
         print()
-
-        # 每轮动作时长（秒）
-        cycle_time = 12.0
 
         # 0. 清理残留进程
         self._kill_existing_processes()
@@ -1090,12 +1203,8 @@ class BreakinMainController:
                     self.print_colored("\n已取消操作", Colors.YELLOW)
                     return 0
             
-            # 根据轮数计算总时长
-            duration = target_rounds * cycle_time
-            
             print()
-            self.print_colored(f"手臂和腿部各将进行 {target_rounds} 轮磨线", Colors.GREEN)
-            self.print_colored(f"预计总时长: {duration:.1f} 秒（每轮约 {cycle_time} 秒）", Colors.BLUE)
+            self.print_colored(f"手臂和腿部各将进行 {target_rounds} 轮磨线（基于轮数控制，不限制时间）", Colors.GREEN)
             print()
             
             # 6. 启动主控制器节点（用于发布start_together）
@@ -1117,11 +1226,11 @@ class BreakinMainController:
             leg_cmd = ["python3", str(self.leg_breakin_standalone)]
             
             # 启动手臂磨线进程（ROS控时长，通过环境变量传递是否跳过校准）
-            env = dict(os.environ)
+            env_arm = dict(os.environ)
             if skip_calibration:
-                env['SKIP_ARM_CALIBRATION'] = 'true'
+                env_arm['SKIP_ARM_CALIBRATION'] = 'true'
             else:
-                env.pop('SKIP_ARM_CALIBRATION', None)  # 确保清除之前的值
+                env_arm.pop('SKIP_ARM_CALIBRATION', None)  # 确保清除之前的值
             
             arm_process = subprocess.Popen(
                 arm_cmd,
@@ -1130,17 +1239,20 @@ class BreakinMainController:
                 text=True,
                 bufsize=1,
                 preexec_fn=os.setsid,
-                env=env
+                env=env_arm
             )
             
-            # 启动腿部磨线进程（ROS控时长）
+            # 启动腿部磨线进程（ROS控时长，通过环境变量传递选择的目录）
+            env_leg = dict(os.environ)
+            env_leg['LEG_BREAKIN_DIR'] = self.leg_breakin_dir
             leg_process = subprocess.Popen(
                 leg_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                preexec_fn=os.setsid
+                preexec_fn=os.setsid,
+                env=env_leg
             )
             
             self.processes.append(arm_process)
@@ -1204,10 +1316,11 @@ class BreakinMainController:
                 # 运行状态标志
                 arm_running = False
                 leg_running = False
+                arm_has_run = False  # 标记手臂是否至少运行过一轮
+                leg_has_run = False  # 标记腿部是否至少运行过一轮
                 should_stop = False
                 start_time = None  # 将在收到start_together时设置
                 start_together_received = False
-                min_round_duration = 14.0  # 最小一轮时间（秒）
                 stop_publish_flag = threading.Event()
                 last_arm_running_state = None
                 last_leg_running_state = None
@@ -1228,15 +1341,19 @@ class BreakinMainController:
                         start_time = time.time()
                         # 标记第1轮（索引0）已开始
                         rounds_started_mask.add(0)
-                        self.print_colored("✓ 收到 start_together = True，开始倒计时", Colors.GREEN)
+                        self.print_colored("✓ 收到 start_together = True，开始记录轮数", Colors.GREEN)
                 
                 def arm_running_cb(msg):
-                    nonlocal arm_running
+                    nonlocal arm_running, arm_has_run
                     arm_running = msg.data
+                    if arm_running:
+                        arm_has_run = True  # 标记至少运行过一轮
                 
                 def leg_running_cb(msg):
-                    nonlocal leg_running
+                    nonlocal leg_running, leg_has_run
                     leg_running = msg.data
+                    if leg_running:
+                        leg_has_run = True  # 标记至少运行过一轮
                 
                 # 创建订阅者
                 sub_start_together = rospy.Subscriber('/breakin/start_together', Bool, start_together_callback)
@@ -1278,9 +1395,9 @@ class BreakinMainController:
                         
                         # 检查是否可以开始新一轮（用于start_new_round_arm和start_new_round_leg）
                         # 条件：1. 手臂和腿部都完成本轮（arm_running=False, leg_running=False）
-                        #       2. 剩余时间足够（>= min_round_duration）
-                        #       3. 已经收到start_together（第一轮已开始）
-                        #       4. 之前都在运行（从运行状态变为完成状态）
+                        #       2. 已经收到start_together（第一轮已开始）
+                        #       3. 之前都在运行（从运行状态变为完成状态）
+                        #       4. 可以开始新一轮（can_start_new_round_value = True）
                         
                         # 检查是否需要发布start_new_round信号
                         should_start_new_round = False
@@ -1398,11 +1515,12 @@ class BreakinMainController:
                     self.print_colored("检测到运行状态异常，正在停止所有子程序...", Colors.RED)
                     break
                 
-                # 检查是否达到目标轮数（仅在收到start_together后检查）
-                if start_time is not None:
+                # 检查是否达到目标轮数（仅在收到start_together后检查，只基于轮数，不基于时间）
+                if start_time is not None and arm_has_run and leg_has_run:
                     completed_rounds_calc = 1 + published_rounds  # 已触发的轮数（包括第1轮）
                     
                     # 需要确保：1) 已触发足够的轮数  2) 所有已触发的轮都已经至少开始过  3) 当前不在运行中
+                    #         4) 从运行状态变为完成状态（检测状态变化）
                     # 第1轮（索引0）总是已经完成，所以从第2轮（索引1）开始检查
                     all_triggered_rounds_started = True
                     if published_rounds > 0:
@@ -1412,8 +1530,12 @@ class BreakinMainController:
                                 all_triggered_rounds_started = False
                                 break
                     
-                    if completed_rounds_calc >= target_rounds and all_triggered_rounds_started and not arm_running and not leg_running:
-                        # 已完成所有轮数，且所有已触发的轮都已经开始并完成，停止
+                    # 检测是否从运行状态变为完成状态
+                    was_running = (last_arm_running_state is True) or (last_leg_running_state is True)
+                    just_finished = was_running and (not arm_running) and (not leg_running)
+                    
+                    if completed_rounds_calc >= target_rounds and all_triggered_rounds_started and just_finished:
+                        # 已完成所有轮数，且所有已触发的轮都已经开始并完成，且当前轮刚刚完成，停止
                         self.print_colored(f"手臂和腿部磨线已完成 {target_rounds} 轮", Colors.GREEN)
                         # 发布停止信号
                         stop_msg = Bool()

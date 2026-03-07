@@ -257,7 +257,7 @@ if lib_dir:
     if sys.platform == "linux":
         import ctypes
         try:
-            # 使用 ctypes 设置库搜索路径
+            # 使用 ctypes 设置库搜索路径（仅在 Linux 上有效）
             ctypes.CDLL("libdl.so.2").dlopen.restype = ctypes.c_void_p
         except:
             pass
@@ -298,7 +298,7 @@ def main():
     # 从脚本目录向上查找，找到joint_breakin_ros工作空间根目录
     action_config_file = ""
     script_dir = Path(__file__).parent.absolute()
-    # 脚本目录通常是 .../joint_breakin_ros/src/leg_breakin/src/leg_breakin_kuavo5_v52
+    # 脚本目录通常是 .../joint_breakin_ros/src/leg_breakin/src/leg_breakin_kuavo5_v52_80A
     # 需要向上4级找到工作空间根目录
     workspace_root = script_dir
     for _ in range(5):  # 最多向上5级

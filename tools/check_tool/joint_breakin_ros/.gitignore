@@ -2,5 +2,7 @@ devel/
 build/
 src/leg_breakin/src/leg_breakin_roban2_v14/src/
 src/leg_breakin/src/leg_breakin_kuavo5_v52/src/
+src/leg_breakin/src/leg_breakin_kuavo5_v52_80A/src/
+src/leg_breakin/src/leg_breakin_kuavo5_v53/src/
 kuavo5/
 __pycache__/

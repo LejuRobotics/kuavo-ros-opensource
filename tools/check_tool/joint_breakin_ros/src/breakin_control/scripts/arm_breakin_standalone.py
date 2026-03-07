@@ -51,6 +51,7 @@ class ArmBreakinStandalone:
         # ROS节点名称（默认，将根据机器人版本和CAN总线类型动态选择）
         self.arm_breakin_node_name = "arm_breakin_node"  # roban_v14_dual
         self.arm_breakin_kuavo_v52_dual_node_name = "arm_breakin_kuavo_v52_dual_node"  # kuavo_v52_dual
+        self.arm_breakin_kuavo_v53_dual_node_name = "arm_breakin_kuavo_v53_dual_node"  # kuavo_v53_dual
         
         # 进程管理
         self.arm_process = None
@@ -334,32 +335,82 @@ class ArmBreakinStandalone:
         robot_version = self.get_robot_version()
         selected_node_name = None
         
+        # 调试信息：打印实际检测到的值
+        self.print_colored(f"[调试] robot_version = {repr(robot_version)}, can_bus_type = {repr(can_bus_type)}", Colors.BLUE)
+        
         if robot_version:
+            # 改进的版本号解析：支持多种格式
+            version_num = None
+            robot_version_str = str(robot_version).strip()
+            
+            # 去除可能的引号
+            if robot_version_str.startswith('"') and robot_version_str.endswith('"'):
+                robot_version_str = robot_version_str[1:-1]
+            elif robot_version_str.startswith("'") and robot_version_str.endswith("'"):
+                robot_version_str = robot_version_str[1:-1]
+            
+            # 尝试直接转换为整数
             try:
-                version_num = int(robot_version)
-                if version_num == 14 and can_bus_type == "dual_bus":
+                version_num = int(robot_version_str)
+            except (ValueError, TypeError):
+                # 如果直接转换失败，尝试从字符串中提取版本号（如 "kuavo5_v53" -> 53）
+                import re
+                # 匹配 v52, v53, v14 等格式
+                match = re.search(r'v(\d+)', robot_version_str.lower())
+                if match:
+                    try:
+                        version_num = int(match.group(1))
+                    except (ValueError, TypeError):
+                        pass
+                # 如果还是没找到，尝试匹配纯数字（如 "kuavo5_v53" 中的 53）
+                if version_num is None:
+                    match = re.search(r'(\d+)', robot_version_str)
+                    if match:
+                        try:
+                            version_num = int(match.group(1))
+                        except (ValueError, TypeError):
+                            pass
+            
+            if version_num is not None:
+                # 确保 can_bus_type 去除空格
+                can_bus_type_clean = str(can_bus_type).strip()
+                self.print_colored(f"[调试] version_num = {version_num}, can_bus_type_clean = {repr(can_bus_type_clean)}", Colors.BLUE)
+                
+                if version_num == 14 and can_bus_type_clean == "dual_bus":
                     # roban_v14_dual 机型
                     selected_node_name = self.arm_breakin_node_name
-                    self.print_colored(f"检测到机型：roban_v14_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
-                elif version_num == 52 and can_bus_type == "dual_bus":
+                    self.print_colored(f"检测到机型：roban_v14_dual (版本 {version_num}, {can_bus_type_clean})", Colors.GREEN)
+                elif version_num == 52 and can_bus_type_clean == "dual_bus":
                     # kuavo_v52_dual 机型
                     selected_node_name = self.arm_breakin_kuavo_v52_dual_node_name
-                    self.print_colored(f"检测到机型：kuavo_v52_dual (版本 {version_num}, {can_bus_type})", Colors.GREEN)
+                    self.print_colored(f"检测到机型：kuavo_v52_dual (版本 {version_num}, {can_bus_type_clean})", Colors.GREEN)
+                elif version_num == 53 and can_bus_type_clean == "dual_bus":
+                    # kuavo_v53_dual 机型
+                    selected_node_name = self.arm_breakin_kuavo_v53_dual_node_name
+                    self.print_colored(f"检测到机型：kuavo_v53_dual (版本 {version_num}, {can_bus_type_clean})", Colors.GREEN)
                 else:
-                    # 默认使用 roban_v14_dual 节点
-                    selected_node_name = self.arm_breakin_node_name
-                    self.print_colored(f"警告：版本 {version_num} 和 CAN 总线类型 {can_bus_type} 的组合未明确配置，使用默认节点 {selected_node_name}", Colors.YELLOW)
-            except (ValueError, TypeError):
-                # 无法解析版本号，使用默认节点
-                selected_node_name = self.arm_breakin_node_name
-                self.print_colored(f"警告：无法解析版本号 {robot_version}，使用默认节点 {selected_node_name}", Colors.YELLOW)
+                    # 未匹配到任何配置，直接报错退出
+                    self.print_colored(f"错误：版本 {version_num} 和 CAN 总线类型 {can_bus_type_clean} 的组合未明确配置", Colors.RED)
+                    self.print_colored("支持的配置组合：", Colors.RED)
+                    self.print_colored("  - 版本 14 + dual_bus -> roban_v14_dual", Colors.RED)
+                    self.print_colored("  - 版本 52 + dual_bus -> kuavo_v52_dual", Colors.RED)
+                    self.print_colored("  - 版本 53 + dual_bus -> kuavo_v53_dual", Colors.RED)
+                    return 1
+            else:
+                # 无法解析版本号，直接报错退出
+                self.print_colored(f"错误：无法解析版本号 {robot_version}", Colors.RED)
+                self.print_colored("请检查 ROBOT_VERSION 环境变量或 .bashrc 中的配置", Colors.RED)
+                return 1
         else:
-            # 未找到版本号，使用默认节点
-            selected_node_name = self.arm_breakin_node_name
-            self.print_colored(f"警告：未找到 ROBOT_VERSION，使用默认节点 {selected_node_name}", Colors.YELLOW)
+            # 未找到版本号，直接报错退出
+            self.print_colored("错误：未找到 ROBOT_VERSION", Colors.RED)
+            self.print_colored("请设置 ROBOT_VERSION 环境变量或在 /home/lab/.bashrc 中配置", Colors.RED)
+            return 1
         
         if not selected_node_name:
-            selected_node_name = self.arm_breakin_node_name  # 最终兜底
+            # 兜底检查：如果还是没有选择节点，报错退出
+            self.print_colored("错误：未能选择手臂磨线节点", Colors.RED)
+            return 1
         
         # 根据用户选择决定是否进行零点校准
         if skip_calibration:

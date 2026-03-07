@@ -171,7 +171,7 @@ class ECLogMonitor:
 def signal_handler(signum, frame):
     """处理中断信号"""
     global stop_program
-    print(f"\n{time.strftime('%H:%M:%S', time.localtime())} 收到停止信号，正在安全停止Kuavo5V52腿部磨线程序...")
+    print(f"\n{time.strftime('%H:%M:%S', time.localtime())} 收到停止信号，正在安全停止Kuavo5V53腿部磨线程序...")
     stop_program = True
     
     # 尝试清理EC Master资源
@@ -183,7 +183,7 @@ def signal_handler(signum, frame):
         print(f"{time.strftime('%H:%M:%S', time.localtime())} [警告] 清理EC Master资源时出错: {e}")
     
     # 立即退出程序
-    print(f"{time.strftime('%H:%M:%S', time.localtime())} Kuavo5V52腿部磨线程序正在退出...")
+    print(f"{time.strftime('%H:%M:%S', time.localtime())} Kuavo5V53腿部磨线程序正在退出...")
     sys.exit(0)
 
 # 注册信号处理器
@@ -257,7 +257,7 @@ if lib_dir:
     if sys.platform == "linux":
         import ctypes
         try:
-            # 使用 ctypes 设置库搜索路径
+            # 使用 ctypes 设置库搜索路径（仅在 Linux 上有效）
             ctypes.CDLL("libdl.so.2").dlopen.restype = ctypes.c_void_p
         except:
             pass
@@ -298,11 +298,11 @@ def main():
     # 从脚本目录向上查找，找到joint_breakin_ros工作空间根目录
     action_config_file = ""
     script_dir = Path(__file__).parent.absolute()
-    # 脚本目录通常是 .../joint_breakin_ros/src/leg_breakin/src/leg_breakin_kuavo5_v52
+    # 脚本目录通常是 .../joint_breakin_ros/src/leg_breakin/src/leg_breakin_kuavo5_v53
     # 需要向上4级找到工作空间根目录
     workspace_root = script_dir
     for _ in range(5):  # 最多向上5级
-        config_file_path = workspace_root / "config" / "leg_breakin" / "leg_breakin_kuavo5_v52_config.yaml"
+        config_file_path = workspace_root / "config" / "leg_breakin" / "leg_breakin_kuavo5_v53_config.yaml"
         if config_file_path.exists():
             action_config_file = str(config_file_path)
             print(f"[信息] 找到配置文件: {action_config_file}")
@@ -316,8 +316,8 @@ def main():
     # 如果还没找到，尝试一些常见路径
     if not action_config_file:
         possible_paths = [
-            script_dir / ".." / ".." / ".." / ".." / "config" / "leg_breakin" / "leg_breakin_kuavo5_v52_config.yaml",
-            script_dir / ".." / ".." / ".." / ".." / ".." / "config" / "leg_breakin" / "leg_breakin_kuavo5_v52_config.yaml",
+            script_dir / ".." / ".." / ".." / ".." / "config" / "leg_breakin" / "leg_breakin_kuavo5_v53_config.yaml",
+            script_dir / ".." / ".." / ".." / ".." / ".." / "config" / "leg_breakin" / "leg_breakin_kuavo5_v53_config.yaml",
         ]
         for path in possible_paths:
             abs_path = path.resolve()
@@ -328,12 +328,12 @@ def main():
 
     success = False
     try:
-        # 调用函数：Kuavo5V52腿部磨线运动
+        # 调用函数：Kuavo5V53腿部磨线运动
         # 运行时长由主程序通过ROS话题 /breakin/can_start_new_round 控制
         # 传递配置文件路径给C++函数
-        success = ec_master_wrap.Kuavo5V52LegBreakin(check_arm_heartbeat, action_config_file)
+        success = ec_master_wrap.Kuavo5V53LegBreakin(check_arm_heartbeat, action_config_file)
         if not success:
-            print("\033[1;31m✘ Kuavo5V52磨线运动失败或被中断\033[0m")
+            print("\033[1;31m✘ Kuavo5V53磨线运动失败或被中断\033[0m")
     except KeyboardInterrupt:
         print(f"\n{time.strftime('%H:%M:%S', time.localtime())} 用户中断，正在安全停止...")
         stop_program = True
@@ -358,7 +358,7 @@ def main():
             print(f"{time.strftime('%H:%M:%S', time.localtime())} [警告] 停止EC日志监控时出错: {e}")
         
         if success:
-            print("\033[1;32m✓ Kuavo5V52磨线运动完成\033[0m")
+            print("\033[1;32m✓ Kuavo5V53磨线运动完成\033[0m")
 
 if __name__ == "__main__":
     main()
