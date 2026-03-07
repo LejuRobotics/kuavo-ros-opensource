@@ -2154,6 +2154,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // Reset MPC node
       mrtRosInterface_->resetMpcNode(target_trajectories);
       std::cout << "reset MPC node\n";
+      vector_t current_arm_pos = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
+      vector_t current_arm_vel = jointVelWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
+      arm_joint_pos_filter_.reset(current_arm_pos);
+      arm_joint_vel_filter_.reset(current_arm_vel);
       //暂时跳过MPC初始化
       if (!is_rl_start_)
       {

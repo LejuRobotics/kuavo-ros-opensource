@@ -221,9 +221,9 @@
   <frame link="leg_l6_link" name="l_foot_heel" xyz="-0.0538 0.0 -0.03" />
   <link name="leg_r1_link">
     <inertial>
-      <origin xyz="-0.00211316 0.02890476 0.02937117" rpy="0 0 0" />
-      <mass value="0.42877618" />
-      <inertia ixx="0.00068733" ixy="-3.303e-05" ixz="-3.348e-05" iyy="0.00109695" iyz="-4.173e-05" izz="0.00108874" />
+      <origin xyz="-0.00063257 0.03319679 0.03319679" rpy="0 0 0" />
+      <mass value="0.62568928" />
+      <inertia ixx="0.00115145" ixy="-0.00002961" ixz="-0.00002972" iyy="0.00195562" iyz="-0.00004384" izz="0.00194595" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -249,9 +249,9 @@
   </transmission>
   <link name="leg_r2_link">
     <inertial>
-      <origin xyz="0.00300817 1.847e-05 -0.05309364" rpy="0 0 0" />
-      <mass value="2.4999594" />
-      <inertia ixx="0.00728182" ixy="0" ixz="0" iyy="0.00721205" iyz="0" izz="0.00244863" />
+      <origin xyz="0.00998392 -0.00005405 -0.00920979" rpy="0 0 0" />
+      <mass value="2.03159924" />
+      <inertia ixx="0.00458902" ixy="-0.00000651" ixz="-0.00013665" iyy="0.00412295" iyz="0.00000554" izz="0.00339874" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />

@@ -13,7 +13,7 @@ model_settings
   positionErrorGain_xy          0.0 ; 20.0
   velocityErrorGain_xy          0.3;
   positionErrorGain_zero        0.0; // positionErrorGain for zero velocity constraint
-  positionErrorGainXYStepControl     70 ;
+  positionErrorGainXYStepControl     20 ;
   velocityErrorGainXYStepControl     1.0 ;
 
   phaseTransitionStanceTime     0.4
@@ -112,13 +112,13 @@ jointNamesReal
 swing_trajectory_config
 {
   liftOffVelocity               0.00
-  touchDownVelocity            -0.02
+  touchDownVelocity            -0.04
   swingHeight                   0.06
   climbStageSwingHeight         0.06
   swingTimeScale                0.15
 
-  toeSwingHeight                0.03
-  heelSwingHeight               0.04
+  toeSwingHeight                0.02
+  heelSwingHeight               0.05
   enable_slope_planner                                 false
   enable_interrupt_with_est_mode              false
   enable_dynamic_q             true
@@ -493,7 +493,7 @@ zeroVelocityConstraint
 ; Soft Constraint
 softSwingTrajConstraint
 {
-  weight      100
+  weight      400
 }
 
 selfCollision
@@ -519,9 +519,9 @@ selfCollision
 ; Whole body control
 torqueLimitsTask
 {
-   (0,0)  63.0     ; motor 1
-   (1,0)  63.0     ; motor 2
-   (2,0)  50.0     ; motor 3
+   (0,0)  68.0     ; motor 1
+   (1,0)  83.0     ; motor 2
+   (2,0)  67.0     ; motor 3
    (3,0)  58.0     ; motor 4
    (4,0)  40.0     ; motor 5
    (5,0)  40.0     ; motor 6
@@ -573,10 +573,10 @@ swingLegTask
 {
     real
     {
-      kp                   20  
-      kd                   10    
-      kp_xy                20  
-      kd_xy                10    
+      kp                   30  
+      kd                   15    
+      kp_xy                30  
+      kd_xy                15    
     }
     
     sim
@@ -715,22 +715,22 @@ weight
     accXY           0
     height          0
     angular         10
-    comPos          1.0
+    comPos          4.0
     contactForce    1.0
     stanceLeg       1000;0.05
-    accArm          3.0
+    accArm          1.0
     accFeet         0.0; only enable for MPC-RL switch
   }
   walk
   {
-    swingLeg        500
+    swingLeg        800
     accXY           0
     height          0
     angular         10
     comPos          1.0
     contactForce    1.0
     stanceLeg       1000;0.05
-    accArm          3.0
+    accArm          1.0
     accFeet         0.0
   }
 }
