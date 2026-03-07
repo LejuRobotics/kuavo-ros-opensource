@@ -220,6 +220,15 @@ const sidebars = {
     },
     {
       type: 'category',
+      label: '镜像恢复',
+      items: [
+        'basic_usage/kuavo-ros-control/docs/8上下位机镜像烧录/下位机烧录镜像',
+        'basic_usage/kuavo-ros-control/docs/8上下位机镜像烧录/上位机NX烧录镜像',
+        'basic_usage/kuavo-ros-control/docs/8上下位机镜像烧录/上位机AGX烧录镜像',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Q&A',
       items: [
         'basic_usage/kuavo-ros-control/docs/7常见问题与故障排查/故障排查',
