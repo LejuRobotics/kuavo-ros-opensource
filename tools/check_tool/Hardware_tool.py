@@ -983,6 +983,24 @@ def hip_imu_test():
     subprocess.run(command, shell=True)
 
 
+def stress_test_all_cores():
+    """
+    启动 CPU 压力测试，检查散热
+    """
+    stress_test_script = os.path.join(folder_path, "stress_test", "stress_test_all_cores.sh")
+    
+    if not os.path.exists(stress_test_script):
+        print(bcolors.FAIL + f"错误：压力测试脚本不存在: {stress_test_script}" + bcolors.ENDC)
+        return
+    
+    print(bcolors.OKCYAN + f"启动 CPU 压力测试脚本: {stress_test_script}" + bcolors.ENDC)
+    print()
+    
+    # 使用 subprocess.run() 运行命令
+    command = "bash " + stress_test_script
+    subprocess.run(command, shell=True)
+
+
 def isolate_cores():
     kuavo_ros_file_path = folder_path + "/isolate_cores.sh"
     kuavo_open_file_path = folder_path + "../../installed/share/hardware_plant/lib/hipnuc_imu/scripts/isolate_cores.sh" 
@@ -1284,6 +1302,7 @@ def secondary_menu():
         print("r. 隔离CPU核心 ")
         print("u. 配置robot上线提醒")
         print("t. 恢复出厂文件夹")
+        print("v. 执行CPU压力测试，检查散热")
 
         option = input("请输入你的选择：")
         if option == 'q':
@@ -1491,6 +1510,11 @@ def secondary_menu():
             print(bcolors.HEADER + "###开始，恢复出厂文件夹###" + bcolors.ENDC)
             reset_folder()
             print(bcolors.HEADER + "###结束，恢复出厂文件夹###" + bcolors.ENDC) 
+            break
+        elif option == "v":
+            print(bcolors.HEADER + "###开始，执行CPU压力测试，检查散热###" + bcolors.ENDC)
+            stress_test_all_cores()
+            print(bcolors.HEADER + "###结束，执行CPU压力测试，检查散热###" + bcolors.ENDC)
             break
         else:
             print(bcolors.FAIL + "无效选项，请重新选择！\n" + bcolors.ENDC)

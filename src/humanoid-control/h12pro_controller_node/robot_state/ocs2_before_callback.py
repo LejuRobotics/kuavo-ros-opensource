@@ -586,7 +586,11 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
         launch_cmd = LAUNCH_HUMANOID_ROBOT_SIM_CMD
     
     if calibrate:
-        launch_cmd += " cali:=true cali_arm:=true"
+        # LUNBI_V62 只执行 cali:=true，不执行 cali_arm
+        if robot_module == "LUNBI_V62":
+            launch_cmd += " cali:=true"
+        else:
+            launch_cmd += " cali:=true cali_arm:=true"
     
     # 通过读取kuavo.json文件，获取only_half_up_body参数，在launch_cmd中添加only_half_up_body:=true
     kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
