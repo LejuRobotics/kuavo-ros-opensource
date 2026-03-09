@@ -201,6 +201,52 @@ namespace mobile_manipulator {
       return best_candidate;
   }
 
+  /**
+  * @brief 从旋转矩阵提取 pitch 和 yaw (假设 roll=0)
+  * @param R 3x3旋转矩阵
+  * @return std::pair<double, double> (pitch, yaw) 弧度
+  * @throw 如果矩阵不符合 roll=0 的约束
+  */
+  std::pair<double, double> rotationMatrixToPitchYaw(const Eigen::Matrix3d& R) {
+      // 静态变量用于存储上一次的 yaw 值
+      static double last_yaw = 0.0;
+      static bool has_last = false;
+
+      // 验证 roll 接近0 (通过检查 R(2,1) 是否接近0)
+      const double eps = 1e-6;
+      if (std::abs(R(1,2)) > eps) {
+          throw std::runtime_error("旋转矩阵不满足 roll=0 约束");
+      }
+
+      // pitch: 从 R(0,2) 和 R(2,2) 提取
+      double pitch = std::atan2(R(0,2), R(2,2));
+
+      // yaw: 从 R(1,0) 和 R(1,1) 提取
+      double yaw_raw = std::atan2(R(1,0), R(1,1));
+
+      double yaw = 0;
+      if (!has_last) {
+          // 首次调用，直接使用原始值
+          yaw = yaw_raw;
+          has_last = true;
+      } else {
+          // 计算差值，确保连续性
+          double delta = yaw_raw - last_yaw;
+          // 处理角度跳变（超过π的跳变）
+          if (delta > M_PI) {
+              delta -= 2 * M_PI;
+          } else if (delta < -M_PI) {
+              delta += 2 * M_PI;
+          }
+          // 累积更新，保持连续
+          yaw = last_yaw + delta;
+      }
+        // 更新上一次的值
+        last_yaw = yaw;
+
+      return {pitch, yaw};
+  }
+
   MobileManipulatorReferenceManager::MobileManipulatorReferenceManager(const ManipulatorModelInfo& info, const PinocchioInterface& pinocchioInterface, const std::string& taskFile)
   : ReferenceManager(TargetTrajectories(), ModeSchedule())
   , info_(info), singleArmJointDim_((info.armDim - 4) / 2)
@@ -404,7 +450,7 @@ namespace mobile_manipulator {
 
     /************************躯干重置的参数相关*******************************/
     torsoResetMaxVel_.setZero(6);
-    torsoResetMaxVel_ << 0.2, 0.2, 0.2, 1.047, 1.047, 1.047;
+    torsoResetMaxVel_ << 0.2, 0.2, 0.2, 0.5235, 0.5235, 0.5235;
     /**********************************************************************/
   }
 
@@ -1190,6 +1236,62 @@ namespace mobile_manipulator {
     }
 
     cmdDualArm_prevTargetPose_[armIdx] = currentEePose;
+    cmdDualArm_prevTargetVel_[armIdx] = currentEeVel;
+    cmdDualArm_prevTargetAcc_[armIdx] = currentEeAcc;
+
+    if(rePlanning)
+    {
+      cmdDualArm_plannerInitialTime_[armIdx] = initTime;
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentPose(cmdDualArm_prevTargetPose_[armIdx]);
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentVelocity(cmdDualArm_prevTargetVel_[armIdx]);
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentAcceleration(cmdDualArm_prevTargetAcc_[armIdx]);
+
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setTargetPose(cmdDualArm_prevTargetPose_[armIdx]);
+      double durationTime = cmdDualArmEePlannerRuckigPtr_[armIdx]->calcTrajectory();
+    }
+  }
+
+  void MobileManipulatorReferenceManager::resetDualArmRuckig(int armIdx, double initTime, const vector_t& initState, bool rePlanning, 
+                                                             LbArmControlMode desireMode, const vector_t& targetArmEePose)
+  {
+    vector_t eeState = vector_t::Zero(info_.eeFrames.size() * 7);
+    switch(desireMode)
+    {
+      case LbArmControlMode::WorldFrame:
+        getCurrentEeWorldPose(eeState, initState);
+        break;
+      case LbArmControlMode::LocalFrame:
+        getCurrentEeBasePose(eeState, initState);
+        break;
+      default:
+        std::cerr << "[resetDualArmRuckig] 不支持该模式的末端轨迹生成, 返回" << std::endl;
+        return;
+    }
+    Eigen::Vector3d initial_zyx = targetArmEePose.segment<3>(3);  // 采用期望作为初值, 猜测出最近的欧拉角
+    Eigen::Vector3d zyx = quatToZyx(Eigen::Quaterniond(eeState.segment<4>(armIdx * 7 + 3)), initial_zyx);
+
+    Eigen::VectorXd currentEePose, currentEeVel, currentEeAcc;
+
+    switch (desireMode)
+    {
+      case LbArmControlMode::WorldFrame:
+        timedPlannerScheduler_.getTimedPlannerStates((armIdx == 0) ? LbTimedPosCmdType::LEFT_ARM_WORLD_CMD : 
+                                                                     LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD, 
+                                                     currentEePose, currentEeVel, currentEeAcc);
+        break;
+      case LbArmControlMode::LocalFrame: 
+        timedPlannerScheduler_.getTimedPlannerStates((armIdx == 0) ? LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD : 
+                                                                     LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD, 
+                                                     currentEePose, currentEeVel, currentEeAcc);
+        break;
+      case LbArmControlMode::JointSpace: return;
+      default:
+        std::cerr << "[resetDualArmRuckig] 不支持该模式的末端轨迹生成, 返回" << std::endl;
+        return;
+    }
+
+    cmdDualArm_prevTargetPose_[armIdx] = currentEePose;
+    cmdDualArm_prevTargetPose_[armIdx].tail<3>() = zyx;  // 替换为最近的欧拉角
     cmdDualArm_prevTargetVel_[armIdx] = currentEeVel;
     cmdDualArm_prevTargetAcc_[armIdx] = currentEeAcc;
 
@@ -2389,7 +2491,7 @@ namespace mobile_manipulator {
     {
       /***********************根据期望速度, 设置切换时间************************/
       vector_t torsoPose = vector_t::Zero(6);
-      getCurrentTorsoPoseInBaseContinuous(torsoPose, initState_);
+      getCurrentTorsoPoseInBasePitchYaw(torsoPose, initState_);
       Eigen::VectorXd err = Eigen::VectorXd::Zero(6);
       err[0] = std::fabs(initialTorsoPos_[0] - torsoPose[0]);
       err[2] = std::fabs(initialTorsoPos_[2] - torsoPose[2]);
@@ -2542,6 +2644,35 @@ namespace mobile_manipulator {
     static ContinuousEulerAnglesFromMatrix torsoUnwrapper;
     Eigen::Vector3d eulerZyx = torsoUnwrapper.update(baseToTorso.rotation());
     torsoPose.segment<3>(3) = eulerZyx;  // yaw, pitch, roll
+  }
+
+  void MobileManipulatorReferenceManager::getCurrentTorsoPoseInBasePitchYaw(vector_t& torsoPose, const vector_t& initState)
+  {
+    const auto& model = pinocchioInterface_.getModel();
+    auto& data = pinocchioInterface_.getData();
+    pinocchio::forwardKinematics(model, data, initState.head(model.nq));
+    pinocchio::updateFramePlacements(model, data);
+
+    // 获取躯干坐标系帧ID
+    pinocchio::FrameIndex torsoFrameId = model.getFrameId(info_.torsoFrame);
+    // 获取躯干在世界坐标系中的位姿
+    const pinocchio::SE3& worldToTorso = data.oMf[torsoFrameId];
+
+    // 获取基坐标系帧ID
+    pinocchio::FrameIndex baseFrameId = model.getFrameId(info_.baseFrame);
+    // 获取基座在世界坐标系中的位姿
+    const pinocchio::SE3& worldToBase = data.oMf[baseFrameId];
+
+    // 计算躯干在基坐标系中的位姿: baseToTorso = worldToBase.inverse() * worldToTorso
+    pinocchio::SE3 baseToTorso = worldToBase.actInv(worldToTorso);
+
+    torsoPose.segment<3>(0) = baseToTorso.translation();
+
+    std::pair<double, double> pitch_yaw = rotationMatrixToPitchYaw(baseToTorso.rotation());
+
+    torsoPose[3] = pitch_yaw.second;  // 按 zyx 表达
+    torsoPose[4] = pitch_yaw.first;
+    torsoPose[5] = 0.0;
   }
 
   void MobileManipulatorReferenceManager::publishMultiPointPose_World(const vector_t& initState)
@@ -2982,13 +3113,13 @@ namespace mobile_manipulator {
     {
       bool isChange = getLbArmControlModeIsChange(armIdx, desireMode_[armIdx]);
       // TODO: 如果 isChange 为 true, 则根据当前模式重置一次初值
-      if(isChange)  resetDualArmRuckig(armIdx, initTime, initState, false, desireMode_[armIdx]);
+      armPose_mtx_[armIdx].lock();
+      armEeTarget[armIdx] = cmd_arm_zyx_[armIdx];
+      armPose_mtx_[armIdx].unlock();
+
+      if(isChange)  resetDualArmRuckig(armIdx, initTime, initState, false, desireMode_[armIdx], armEeTarget[armIdx]);
       if(desireMode_[armIdx] == LbArmControlMode::WorldFrame || desireMode_[armIdx] == LbArmControlMode::LocalFrame)
       {
-        armPose_mtx_[armIdx].lock();
-        armEeTarget[armIdx] = cmd_arm_zyx_[armIdx];
-        armPose_mtx_[armIdx].unlock();
-
         calcRuckigTrajWithEePose(armIdx, initTime, armEeTarget[armIdx], cmdDualArmPoseDesiredTime_[armIdx]);
       }
       isCmdDualArmPoseUpdated_[armIdx] = false;
@@ -3086,7 +3217,7 @@ namespace mobile_manipulator {
 
     /*************************根据期望速度, 设置切换时间*******************************/
     vector_t torsoPose = vector_t::Zero(6);
-    getCurrentTorsoPoseInBaseContinuous(torsoPose, initState);
+    getCurrentTorsoPoseInBasePitchYaw(torsoPose, initState);
     Eigen::VectorXd err = Eigen::VectorXd::Zero(6);
     err[0] = std::fabs(initialTorsoPos_[0] - torsoPose[0]);
     err[2] = std::fabs(initialTorsoPos_[2] - torsoPose[2]);
@@ -3221,7 +3352,7 @@ namespace mobile_manipulator {
     currentPos.push_back(tmpPos);
 
     vector_t torsoPose = vector_t::Zero(6);                         // 躯干, 自由度4: x, z, yaw, pitch
-    getCurrentTorsoPoseInBaseContinuous(torsoPose, initState);
+    getCurrentTorsoPoseInBasePitchYaw(torsoPose, initState);
     tmpPos.setZero(4);   
     tmpPos << torsoPose[0], torsoPose[2], torsoPose[3], torsoPose[4];
     currentPos.push_back(tmpPos);

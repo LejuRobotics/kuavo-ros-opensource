@@ -157,6 +157,7 @@ protected:
   void calcRuckigTrajWithEePose(int armIdx, double initTime, const vector_t &targetArmEePose, double desiredTime = 0.0);
   void generateDualArmEeTargetWithRuckig(int armIdx, double initTime, double finalTime, double dt);
   void resetDualArmRuckig(int armIdx, double initTime, const vector_t& initState, bool rePlanning, LbArmControlMode desireMode);
+  void resetDualArmRuckig(int armIdx, double initTime, const vector_t& initState, bool rePlanning, LbArmControlMode desireMode, const vector_t &targetArmEePose);
   // cmdTorsoPose
   void calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose, double desiredTime = 0.0);
   void generateTorsoPoseTargetWithRuckig(double initTime, double finalTime, double dt);
@@ -241,6 +242,7 @@ protected:
   void getCurrentEeWorldPoseContinuous(vector_t& EeState, const vector_t& initState);
   void getCurrentEeBasePoseContinuous(vector_t& EeState, const vector_t& initState);
   void getCurrentTorsoPoseInBaseContinuous(vector_t& torsoPose, const vector_t& initState);
+  void getCurrentTorsoPoseInBasePitchYaw(vector_t& torsoPose, const vector_t& initState);
 
   // 发布所关注的笛卡尔位姿
   void publishMultiPointPose_World(const vector_t& initState);

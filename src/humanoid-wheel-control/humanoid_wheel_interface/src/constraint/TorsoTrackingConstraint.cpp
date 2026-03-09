@@ -120,7 +120,10 @@ auto TorsoTrackingConstraint::interpolateEndEffectorPose(scalar_t time) const ->
 
   vector_t position = targetTorsoState.head(3);
   Eigen::Vector3d zyx = targetTorsoState.segment(3, 3);
-  quaternion_t orientation = getQuaternionFromEulerAnglesZyx(zyx);
+  quaternion_t orientation =  // 轮臂躯干采用 pitch-yaw-roll 欧拉角, 可以节省一个角度来表达姿态
+         Eigen::AngleAxis<scalar_t>(zyx(1), Eigen::Matrix<scalar_t, 3, 1>::UnitY()) *
+         Eigen::AngleAxis<scalar_t>(zyx(0), Eigen::Matrix<scalar_t, 3, 1>::UnitZ()) *
+         Eigen::AngleAxis<scalar_t>(zyx(2), Eigen::Matrix<scalar_t, 3, 1>::UnitX());
 
   return {position, orientation};
 }
