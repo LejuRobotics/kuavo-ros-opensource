@@ -66,7 +66,9 @@ class ArmTrajectoryBezierDemo:
         self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "multi")
         # KUAVO v50+ 有腰部关节
         self.has_waist = (self.robot_version.major() == 5) if self.robot_class == KUAVO else False
-        
+
+        rospy.init_node('autostart_arm_trajectory_bezier_demo')
+
         if self.robot_class == KUAVO:
             # 根据是否有腰部关节确定TACT长度
             tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
@@ -112,8 +114,7 @@ class ArmTrajectoryBezierDemo:
 
         # rospy.spin()
 
-        # Initialize ROS node
-        rospy.init_node('autostart_arm_trajectory_bezier_demo')
+        # 读取节点参数
         self.arm_restore_flag = rospy.get_param('~arm_restore_flag', True)
         
         # 检查是否是半身模式
