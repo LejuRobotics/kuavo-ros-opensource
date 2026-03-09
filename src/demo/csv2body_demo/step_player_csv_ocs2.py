@@ -287,6 +287,14 @@ class ActionPlayer:
             rospy.logerr("未加载姿态控制数据")
             return None
 
+        # 尝试获取 /is_roban 参数（由 humanoidController 设置），非 roban 时左脚 y 需 +0.03
+        is_roban = True  # 默认 roban，不添加偏移
+        if rospy.has_param('/is_roban'):
+            try:
+                is_roban = rospy.get_param('/is_roban')
+            except Exception as e:
+                rospy.logwarn("获取 /is_roban 参数失败: {}".format(e))
+
         msg = footPoseTargetTrajectories()
         msg.timeTrajectory = []
         msg.footIndexTrajectory = []
@@ -467,7 +475,9 @@ class ActionPlayer:
                 msg.swingHeightTrajectory.append(swing_height)
 
                 foot_pose = footPose()
-                left_foot_pose = [left_foot_pose[0], left_foot_pose[1], 0.0, left_foot_pose[2]]  # 添加 z 值
+                # 非 roban 时左脚 y 需 +0.03，防止左倾摔倒
+                left_y_offset = 0.03 if not is_roban else 0.0
+                left_foot_pose = [left_foot_pose[0], left_foot_pose[1] + left_y_offset, 0.0, left_foot_pose[2]]  # 添加 z 值
                 foot_pose.footPose = left_foot_pose
                 foot_pose.torsoPose = [
                     torso_pose[0],  # x
@@ -475,6 +485,7 @@ class ActionPlayer:
                     height_offset,  # z (使用第一个高度作为参考)
                     torso_pose[3]  # yaw
                 ]
+
                 msg.footPoseTrajectory.append(foot_pose)
 
                 # 第三步：右脚摆动 (SF)
@@ -491,6 +502,7 @@ class ActionPlayer:
                     height_offset,  # z (使用第一个高度作为参考)
                     torso_pose[3]  # yaw
                 ]
+
                 msg.footPoseTrajectory.append(foot_pose)
                 # 更新上一帧的脚部位置
                 prev_left_foot_pos = left_foot_pose
