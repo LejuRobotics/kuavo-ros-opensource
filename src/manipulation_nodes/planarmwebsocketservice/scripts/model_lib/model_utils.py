@@ -181,7 +181,7 @@ class YOLO_detection:
     def get_max_area_object(self, results):
         results = self.tensor_to_msg(results)
         if not results or len(results.data) == 0:
-            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0}
+            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0, 'confidence': 0.0}
 
         max_area = 0
         max_obj = None
@@ -197,10 +197,11 @@ class YOLO_detection:
                     'h': detection.height,
                     'area': area,
                     'area_ratio': detection.area_ratio,
-                    'class_id': detection.class_id
+                    'class_id': detection.class_id,
+                    'confidence': float(detection.confidence)
                 }
 
-        return max_obj if max_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0}
+        return max_obj if max_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0, 'confidence': 0.0}
 
     def get_min_area_object(self, results):
         results = self.tensor_to_msg(results)
