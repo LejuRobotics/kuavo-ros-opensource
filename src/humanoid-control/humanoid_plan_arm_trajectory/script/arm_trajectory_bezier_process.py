@@ -10,6 +10,7 @@ import os
 import sys
 import rospkg
 import subprocess
+import rosgraph
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
     
 # 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
@@ -66,6 +67,30 @@ class ArmTrajectoryBezierDemo:
         self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "multi")
         # KUAVO v50+ 有腰部关节
         self.has_waist = (self.robot_version.major() == 5) if self.robot_class == KUAVO else False
+
+        # 等待 rosmaster 上线后再注册节点
+        print("[ArmTrajectory] 等待 rosmaster 启动...", flush=True)
+        wait_start_time = time.time()
+        retry_count = 0
+        last_log_time = 0
+
+        while not rospy.is_shutdown():
+            try:
+                # 使用 rosgraph 正确检测 rosmaster 是否在线
+                master = rosgraph.Master('/rostopic')
+                # 尝试获取master的PID，如果成功说明master在线
+                master.getPid()
+                total_wait = time.time() - wait_start_time
+                print("[ArmTrajectory] rosmaster 已就绪 (等待 %.3fs, 尝试 %d 次)" % (total_wait, retry_count + 1), flush=True)
+                break
+            except Exception:
+                retry_count += 1
+                current_wait = time.time() - wait_start_time
+                # 每5秒打印一次状态
+                if current_wait - last_log_time >= 5.0:
+                    print("[ArmTrajectory] 等待 rosmaster... (已 %.3fs, 第 %d 次尝试)" % (current_wait, retry_count), flush=True)
+                    last_log_time = current_wait
+                time.sleep(1.0)
 
         rospy.init_node('autostart_arm_trajectory_bezier_demo')
 
