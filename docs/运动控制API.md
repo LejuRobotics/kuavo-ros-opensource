@@ -438,6 +438,28 @@
 
 ---
 
+#### `/robot_waist_motion_data`
+
+**类型:** `kuavo_msgs::robotWaistControl`
+
+**功能说明:**
+
+用于控制机器人腰部转动的目标角度（躯干绕竖直轴 yaw 方向）。发布该话题后，控制器会按内部规划将腰部驱动到目标角度。
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| header | std_msgs/Header | 消息头，可设置 header.stamp |
+| data | std_msgs/Float64MultiArray | data.data 为长度 1 的数组，表示腰部目标角度 |
+
+**使用说明:**
+
+- `data.data[0]`：腰部目标角度，**单位：度（°）**。左转为负、右转为正；具体范围以机型为准，超出范围会被控制器限制。
+
+
+---
+
 #### `/control_robot_hand_position`
 
 **类型:** `kuavo_msgs::robotHandPosition`
