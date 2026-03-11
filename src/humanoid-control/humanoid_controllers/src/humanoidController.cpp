@@ -2450,12 +2450,20 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
               // 更新躯干插值
               updateMPCRLInterpolation(currentObservation_.time);
               // 检查插值是否完成
-              bool mpc_ready = mrtRosInterface_->initialPolicyReceived() && mrtRosInterface_->updatePolicy() && mrtRosInterface_->isPolicyUpdated();
-              if (!is_torso_interpolation_active_ && mpc_ready)
+              if (!is_torso_interpolation_active_)
               {
-                standupTime_ = currentObservation_.time;
-                std::cout << "Torso interpolation completed, switching to NORMAL" << std::endl;
-                resetting_mpc_state_ = ResettingMpcState::NOMAL;
+                bool mpc_ready = mrtRosInterface_->initialPolicyReceived() && mrtRosInterface_->updatePolicy() && mrtRosInterface_->isPolicyUpdated();
+                if (is_rl_controller_)// 切换到RL
+                {
+                  std::cout << "[MPC->RL] Torso interpolation completed, switching to NORMAL" << std::endl;
+                  resetting_mpc_state_ = ResettingMpcState::NOMAL;
+                }else if (mpc_ready)
+                {
+                  standupTime_ = currentObservation_.time;
+                  std::cout << "[RL->MPC] Torso interpolation completed, switching to NORMAL" << std::endl;
+                  resetting_mpc_state_ = ResettingMpcState::NOMAL;
+                }
+
               }
             }
             if (mrtRosInterface_->updatePolicy())
