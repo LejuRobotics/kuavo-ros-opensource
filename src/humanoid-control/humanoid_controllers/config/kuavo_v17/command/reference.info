@@ -15,6 +15,7 @@ vrSquatMinPitchDeg                  3.0;     ; min pitch (deg)
 vrSquatMaxPitchDeg                  35.0;    ; max pitch (deg)
 vrSquatHeightMin                    -0.25;   ; min height (m)
 vrSquatHeightMax                    0.03;     ; max height (m)
+waist_yaw_max                       150.0;
 
 targetTorsoDispalcementVelocity
 {

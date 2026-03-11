@@ -1,0 +1,32 @@
+<launch>
+    <!-- PICO teleop -->
+    <arg name="host" default="0.0.0.0"/>
+    <arg name="port" default="12345"/>
+    <arg name="control_mode" default="LowerBody"/>
+    <arg name="control_torso" default="0"/>
+    <arg name="service_mode" default="1"/>
+    <arg name="detection_mode" default="vr"/>
+    <arg name="play_mode" default="0"/>
+    <arg name="startup_delay" default="0.0"/>
+    <arg name="enable_head_control" default="true"/>
+    <arg name="head_control_mode" default="auto_track_active"/>
+
+    <node
+        pkg="humanoid_controllers"
+        type="start_node.sh"
+        name="pico_whole_body_teleop"
+        output="screen"
+        args="python3 $(find noitom_hi5_hand_udp_python)/../pico-body-tracking-server/scripts/pico_whole_body_teleop_example.py --host $(arg host) --port $(arg port) --control_mode $(arg control_mode) --control_torso $(arg control_torso) --service_mode $(arg service_mode) --detection_mode $(arg detection_mode) --play_mode $(arg play_mode)"
+        launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'"
+    />
+
+    <node
+        if="$(arg enable_head_control)"
+        pkg="humanoid_controllers"
+        type="start_node.sh"
+        name="pico_head_control"
+        output="screen"
+        args="python3 $(find noitom_hi5_hand_udp_python)/../pico-body-tracking-server/scripts/pico_head_control_node.py _mode:=$(arg head_control_mode)"
+        launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'"
+    />
+</launch>

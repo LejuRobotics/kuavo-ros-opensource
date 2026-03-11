@@ -138,6 +138,42 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 ---
 
+### ctrl_arm_example_protected.py
+
+**演示如何在启用手臂碰撞保护功能的情况下控制机器人手臂。**
+
+该示例与 ctrl_arm_example.py 类似，但增加了碰撞检测和保护机制，适用于需要安全防护的操作场景。
+
+**前置条件：**
+
+- 启动手臂碰撞检测节点：
+  ```bash
+  roslaunch kuavo_arm_collision_check arm_collision_check.launch arm_collision_enable_arm_moving:=true
+  ```
+- 将手臂控制话题从 `/mm/two_arm_hand_pose_cmd` 改为 `/arm_collision/mm/two_arm_hand_pose_cmd`
+
+**主要功能：**
+
+1. 碰撞保护模式开关：
+   - `robot.set_arm_collision_mode(True)`：开启手臂碰撞保护模式
+   - `robot.set_arm_collision_mode(False)`：关闭手臂碰撞保护模式
+
+2. 碰撞检测与处理：
+   - `robot.is_arm_collision()`：检查是否发生碰撞
+   - `robot.wait_arm_collision_complete()`：等待碰撞处理完成
+   - `robot.release_arm_collision_mode()`：释放碰撞模式，恢复正常控制
+
+3. 控制函数：
+   - `control_arm_traj()`：关节角度插值运动，包含碰撞异常处理
+   - `control_arm_joint_trajectory()`：关节轨迹控制，包含碰撞异常处理
+
+**注意事项：**
+
+- 开启碰撞保护前需确保已启动 `kuavo_arm_collision_check` 节点
+- 发生碰撞时，机器人会自动尝试将手臂移动到安全位置
+
+---
+
 ### lejuclaw_example.py
 
 **演示如何控制LejuClaw夹持器末端执行器的示例，包括位置、速度和扭矩控制。**
