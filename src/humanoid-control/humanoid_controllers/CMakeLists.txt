@@ -416,3 +416,8 @@ install(DIRECTORY include/${PROJECT_NAME}/
 install(FILES humanoid_controllers_plugins.xml
         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
+
+# Install scripts
+install(PROGRAMS scripts/restart_urobot_service.sh
+        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)

@@ -28,13 +28,16 @@ show_help() {
     echo_success "使用方法: $exec_path [选项]"
     echo ""
     echo "选项:"
-    echo "  --negative  电机方向辨识"
-    echo "  --cali      电机校准"
-    echo "  --help     显示此帮助信息"
+    echo "  --negative   电机方向辨识"
+    echo "  --cali       电机校准"
+    echo "  --set-zero   设置电机硬件零点"
+    echo "  --help       显示此帮助信息"
     echo ""
     echo "示例:"
-    echo "  $exec_path --negative  # 设置电机方向"
-    echo "  $exec_path --cali      # 电机校准"
+    echo "  $exec_path --negative   # 设置电机方向"
+    echo "  $exec_path --cali       # 电机校准"
+    echo "  $exec_path --set-zero   # 设置所有电机硬件零点"
+    echo "  $exec_path --set-zero 1,8 # 设置ID为1和8的电机硬件零点"
 }
 
 # 查找并执行 motorevo_tool
@@ -91,6 +94,15 @@ main() {
             --cali)
                 extra_args="--cali"
                 shift
+                ;;
+            --set-zero)
+                extra_args="--set-zero"
+                shift
+                # 收集所有后续参数作为电机ID
+                while [[ $# -gt 0 && ! $1 == --* ]]; do
+                    extra_args="$extra_args $1"
+                    shift
+                done
                 ;;
             --help)
                 show_help

@@ -30,7 +30,7 @@ model_settings
 {
   verbose                         true
   usePreComputation               true
-  recompileLibraries              true
+  recompileLibraries              false
 
   modelDof                    18   ; total dof of the model, including the arms and lowJoint
   mpcArmsDof                  14   ; mpc dof of the arms

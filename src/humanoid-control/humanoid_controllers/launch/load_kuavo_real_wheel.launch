@@ -207,4 +207,9 @@
         <node pkg="humanoid_controllers" type="auto_wheel_bridge.py" name="auto_wheel_bridge_node" 
               output="screen" required="false"/>
     </group>
+
+    <!-- restart urobot.service (depends on sshpass) -->
+    <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service"
+          output="screen" required="false"/>
+
 </launch>
