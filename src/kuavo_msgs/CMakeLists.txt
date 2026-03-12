@@ -115,6 +115,8 @@ add_message_files(
   tagDataArray.msg
   qv.msg
   fullBodyTargetTrajectories.msg
+  Rq2f85ClawCmd.msg
+  Rq2f85ClawState.msg
 
   # kuavo_tf2_web_republisher
   TFArray.msg
@@ -144,9 +146,6 @@ add_message_files(
   robotWaistControl.msg
   # VMP Controller
   VMPTrajectoryState.msg
-
-  # Battery info
-  BatteryInfo.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -155,7 +154,6 @@ add_service_files(
   jointMoveTo.srv
   setHwIntialState.srv
   changeArmCtrlMode.srv
-  changeWaistCtrlMode.srv
   switchController.srv
   getControllerList.srv
   switchToNextController.srv
@@ -185,7 +183,8 @@ add_service_files(
   playmusic.srv
   changeMotorParam.srv
   getMotorParam.srv
-
+  SetObjectPosition.srv
+  SetButtonState.srv
   # motion_capture_ik
   changeArmCtrlMode.srv
   twoArmHandPoseCmdSrv.srv
@@ -217,12 +216,6 @@ add_service_files(
   changeLbQuickModeSrv.srv
   SetString.srv
   GetStringList.srv
-  # VR head control
-  SetHeadControlMode.srv
-
-  # Battery service
-  GetBatteryInfo.srv
-
 )
 
 ## Generate actions in the 'action' folder

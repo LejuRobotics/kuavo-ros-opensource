@@ -209,30 +209,7 @@ namespace humanoid_controller
       fall_down_state_callback_ = callback;
     }
 
-    /**
-     * @brief 注册躯干速度回调函数
-     * @param callback 回调函数，返回12维躯干状态向量 [x, y, z, yaw, pitch, roll, vx, vy, vz, angularVx, angularVy, angularVz]
-     */
-    void registerTorsoStabilityCallback(std::function<bool()> callback)
-    {
-      std::lock_guard<std::recursive_mutex> lock(mutex_);
-      torso_stability_callback_ = callback;
-    }
-
-    /**
-     * @brief 检查躯干速度是否稳定（从状态估计器获取）
-     * @return 如果速度稳定返回true，否则返回false
-     */
-    bool isTorsoVelocityStable();
-
-
   private:
-    /**
-     * @brief 异步切换手臂控制模式
-     * @param mode 目标手臂控制模式
-     */
-    void changeArmCtrlModeAsync(int mode);
-
     /**
      * @brief ROS服务回调：切换控制器
      */
@@ -268,7 +245,6 @@ namespace humanoid_controller
      */
     void updateControllerListsByType();
 
-
   private:
     std::map<std::string, std::unique_ptr<RLControllerBase>> controllers_;  ///< 控制器映射表
     RLControllerBase* last_controller_ptr_ = nullptr;                       ///< 上一个控制器指针（不拥有所有权，仅做记录）
@@ -290,9 +266,6 @@ namespace humanoid_controller
 
     // 倒地状态回调函数
     std::function<void(int)> fall_down_state_callback_;  ///< 设置倒地状态的回调函数
-
-    // 躯干速度检查相关
-    std::function<bool()> torso_stability_callback_;          ///< 获取躯干稳定性状态的回调函数
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称

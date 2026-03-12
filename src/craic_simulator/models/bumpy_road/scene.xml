@@ -1,0 +1,51 @@
+<mujoco model="kuavo scene">
+  <include file="biped_s45.xml"/>
+
+  <statistic center="0 0 1" extent="1.8"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="160" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+
+    <!-- 定义石子路材质 -->
+    <material 
+      name="rough" 
+      rgba="0.4 0.4 0.4 1" 
+      reflectance="0.1" 
+      shininess="0.0"
+    />
+    <!-- 修改石子路尺寸为2.5m x 2.1m -->
+    <hfield file="../../mujoco_assets/road_heightfield_smooth.png" name="hf1" ncol="0" nrow="0" size="1.25 1.05 0.17 .1" />
+
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 3.5" dir="0 0 -1" directional="true"/>
+    
+    <!-- 启用高度场地形（石子路效果）- 调整几何体大小匹配新尺寸 -->
+    <geom name="ground" type="hfield" hfield="hf1" size="1.05 0.90 1" pos="1.5 0 -0.008  " quat="1 0 0 0" material="rough" condim="1" conaffinity='15' solref="0.02 1" solimp="0.9 0.95 0.001" friction="1 0.1 0.1" density="1000"/>
+    
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+  </worldbody>
+
+  <keyframe>
+    <key name="home"
+      qpos="
+    0 0 0.98
+    1 0 0 0
+    0 0 0 0 0 0
+    0 0 0 0 0 0
+    0 0 0 0 0 0 0
+    0 0 0 0 0 0 0
+    0 0"/>
+  </keyframe>
+
+</mujoco>

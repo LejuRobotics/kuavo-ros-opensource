@@ -8,7 +8,6 @@
 #include "kuavo_common/common/common.h"
 #include <ros/package.h>
 #include <cmath>
-#include <thread>
 
 namespace humanoid_controller
 {
@@ -67,13 +66,6 @@ namespace humanoid_controller
       ROS_WARN("[%s] /is_roban not found in ROS params, using default: %d", name_.c_str(), static_cast<int>(is_roban_));
     }
 
-    // 初始化 Ruiwo 电机参数切换服务客户端（仅在真实机器人上且使能 AMP 专用增益时使用）
-    if (is_real_ && use_amp_ruiwo_kpkd_)
-    {
-      srv_change_motor_param_ = nh_.serviceClient<kuavo_msgs::ExecuteArmAction>("/hardware/change_ruiwo_motor_param");
-      ROS_INFO("[%s] Motor param service client initialized for AMP controller", name_.c_str());
-    }
-
     // 初始化ankleSolver（从ROS参数获取，如果不存在则使用默认值）
     int ankle_solver_type = 0; // 默认值
     if (!nh_.getParam("/ankle_solver_type", ankle_solver_type))
@@ -108,7 +100,6 @@ namespace humanoid_controller
     }
     
     initArmControl(urdf_path);
-    initWaistControl();
 
     initialized_ = true;
 
@@ -139,10 +130,7 @@ namespace humanoid_controller
     loadEigenMatrix("jointKd", jointKdRL_);
     loadEigenMatrix("torqueLimits", torqueLimitsRL_);
     loadEigenMatrix("actionScaleTest", actionScaleTestRL_);
-    // 速度限制（8 维：正负方向独立设置）
-    // 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
-    //        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
-    loadEigenMatrix("velocityLimits", velocityLimits_);
+    loadEigenMatrix("velocityLimits", velocityLimits_); // 4 维
     loadEigenMatrix("jointCmdFilterCutoffFreq", jointCmdFilterCutoffFreq_);
 
     jointCmdFilter_.setParams(dt_, jointCmdFilterCutoffFreq_);
@@ -166,21 +154,9 @@ namespace humanoid_controller
     loadData::loadCppDataType(rlParamFile, "withArm", withArm_);
     loadData::loadCppDataType(rlParamFile, "inferenceFrequency", inference_frequency_);
     loadData::loadCppDataType(rlParamFile, "defaultBaseHeightControl", defaultBaseHeightControl_);
-    // 可选: RL 站立时 base 在 x 方向相对于足端中心(0)的偏移, 若配置文件未提供则保持默认 0
-    try
-    {
-      loadData::loadCppDataType(rlParamFile, "defaultBaseXOffsetControl", defaultBaseXOffsetControl_);
-    }
-    catch (const std::exception& e)
-    {
-      ROS_WARN("[%s] defaultBaseXOffsetControl not found in ROS params, using default: %f", name_.c_str(), defaultBaseXOffsetControl_);
-    }
 
     // 是否使用关节指令滤波（对应 skw_rl_param.info 中 use_jointcmd_filter）
     loadData::loadPtreeValue(pt, use_jointcmd_filter_, "use_jointcmd_filter", true);
-
-    // 是否使用 AMP 专用 Ruiwo 手臂增益（对应 skw_rl_param.info 中 use_amp_ruiwo_kpkd，默认不使用）
-    loadData::loadPtreeValue(pt, use_amp_ruiwo_kpkd_, "use_amp_ruiwo_kpkd", false);
 
     // 是否启用手臂指令替换功能（对应 skw_rl_param.info 中 setArmCommandReplacementEnabled）
     bool arm_command_replacement_enabled = false;
@@ -197,68 +173,6 @@ namespace humanoid_controller
       
       ROS_INFO("[%s] Arm control parameters loaded: max_velocity=%.3f rad/s, error_threshold=%.3f rad, mode_interpolation_velocity=%.3f rad/s",
                name_.c_str(), arm_max_tracking_velocity_, arm_tracking_error_threshold_, arm_mode_interpolation_velocity_);
-    }
-
-    // 是否启用腰部控制覆盖功能（对应 skw_rl_param.info 中 use_external_waist_controller）
-    bool waist_command_replacement_enabled = false;
-    loadData::loadPtreeValue(pt, waist_command_replacement_enabled, "use_external_waist_controller", false);
-    use_external_waist_controller(waist_command_replacement_enabled);
-    ROS_INFO("[%s] Waist command replacement enabled: %s", name_.c_str(), waist_command_replacement_enabled ? "true" : "false");
-    
-    // 加载腰部控制参数（用于 WaistController）
-    if (waist_command_replacement_enabled && waistNum_ > 0)
-    {
-      loadData::loadPtreeValue(pt, waist_mode_interpolation_velocity_, "waistControllerParam.modeInterpolationVelocity", false);
-      loadData::loadPtreeValue(pt, waist_mode2_cutoff_freq_, "waistControllerParam.mode2CutoffFreq", false);
-      
-      // 读取 kp 和 kd，如果未指定则使用默认值
-      double waist_kp_default = 10.0;
-      double waist_kd_default = 2.0;
-      loadData::loadPtreeValue(pt, waist_kp_default, "waistControllerParam.kp", false);
-      loadData::loadPtreeValue(pt, waist_kd_default, "waistControllerParam.kd", false);
-      
-      // 将标量值转换为向量（所有腰部关节使用相同的 kp 和 kd）
-      waist_kp_from_config_ = Eigen::VectorXd::Constant(waistNum_, waist_kp_default);
-      waist_kd_from_config_ = Eigen::VectorXd::Constant(waistNum_, waist_kd_default);
-      
-      ROS_INFO("[%s] Waist control parameters loaded: mode_interpolation_velocity=%.3f rad/s, mode2_cutoff_freq=%.1f Hz, kp=%.1f, kd=%.1f",
-               name_.c_str(), waist_mode_interpolation_velocity_, waist_mode2_cutoff_freq_, waist_kp_default, waist_kd_default);
-    }
-    
-    // 是否启用行走时腰部0位跟踪功能（忽略RL输出的腰部action，直接跟踪默认位置）
-    loadData::loadPtreeValue(pt, waist_zero_tracking_enabled_, "waistZeroTrackingEnabled", false);
-    ROS_INFO("[%s] Waist zero tracking in walking enabled: %s", name_.c_str(), waist_zero_tracking_enabled_ ? "true" : "false");
-
-    // 加载站立切换到行走时的支撑腿髋关节roll偏置参数
-    loadData::loadPtreeValue(pt, stanceToWalkHipRollBias_, "stanceToWalkHipRollBias", false);
-    loadData::loadPtreeValue(pt, stanceToWalkBiasDuration_, "stanceToWalkBiasDuration", false);
-    
-    ROS_INFO("[%s] Stance-to-walk hip roll bias parameters: bias=%.4f rad, duration=%.4f s",
-             name_.c_str(), stanceToWalkHipRollBias_, stanceToWalkBiasDuration_);
-
-    // 加载YAW补偿参数
-    if (pt.find("yawCompensation") != pt.not_found()) {
-      loadData::loadPtreeValue(pt, yaw_compensation_enabled_, "yawCompensation.enabled", false);
-      loadData::loadPtreeValue(pt, yaw_compensation_x_bias_, "yawCompensation.xBias", false);
-      loadData::loadPtreeValue(pt, yaw_compensation_threshold_, "yawCompensation.threshold", false);
-      loadData::loadPtreeValue(pt, yaw_compensation_x_velocity_threshold_, "yawCompensation.xVelocityThreshold", false);
-      loadData::loadPtreeValue(pt, yaw_compensation_separate_enabled_, "yawCompensation.enableSeparateCompensation", false);
-      loadData::loadPtreeValue(pt, yaw_compensation_x_bias_clockwise_, "yawCompensation.xBiasClockwise", false);
-      loadData::loadPtreeValue(pt, yaw_compensation_x_bias_counterclockwise_, "yawCompensation.xBiasCounterclockwise", false);
-      
-      ROS_INFO("[%s] YAW compensation loaded: enabled=%s, xBias=%.4f, threshold=%.4f, xVelThreshold=%.4f, separate=%s",
-               name_.c_str(), 
-               yaw_compensation_enabled_ ? "true" : "false",
-               yaw_compensation_x_bias_,
-               yaw_compensation_threshold_,
-               yaw_compensation_x_velocity_threshold_,
-               yaw_compensation_separate_enabled_ ? "true" : "false");
-      if (yaw_compensation_enabled_ && yaw_compensation_separate_enabled_) {
-        ROS_INFO("[%s] YAW separate compensation: clockwise=%.4f, counterclockwise=%.4f",
-                 name_.c_str(), yaw_compensation_x_bias_clockwise_, yaw_compensation_x_bias_counterclockwise_);
-      }
-    } else {
-      ROS_INFO("[%s] YAW compensation not found in config, using defaults (disabled)", name_.c_str());
     }
 
     std::string networkModelFile;
@@ -316,12 +230,6 @@ namespace humanoid_controller
     num_actions_ = jointNum_ + jointArmNum_ + waistNum_;
     setCurrentAction(Eigen::VectorXd::Zero(num_actions_));
 
-    // 初始化髋关节pitch角度索引
-    // 对于非roban机型：leg_l3_joint=2, leg_r3_joint=8
-    // 对于roban机型：leg_l3_joint=waistNum_+2, leg_r3_joint=waistNum_+8
-    leftHipPitchIdx_ = is_roban_ ? (waistNum_ + 2) : 2;
-    rightHipPitchIdx_ = is_roban_ ? (waistNum_ + 8) : 8;
-
     const std::string prefixCommandData_ = "commandData";
     const std::vector<std::pair<std::string, double CommandDataRL::*>> cmdInitalList = {
         {"cmdVelLineX", &CommandDataRL::cmdVelLineX_},
@@ -349,8 +257,6 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, initial_cmd_.*cmdMember, prefixCommandData_ + ".scale." + cmdName, false);
     }
 
-    // 加载 X 负向单独缩放系数（用于不对称速度限制）
-    loadData::loadPtreeValue(pt, cmdVelLineXNegScale_, "commandData.scale.cmdVelLineXNegScale", false);
 
     ROS_INFO("[%s] loadConfig done. num_actions_=%d, numSingleObs_=%d, frameStack_=%d",
              name_.c_str(), num_actions_, numSingleObs_, frameStack_);
@@ -383,12 +289,6 @@ namespace humanoid_controller
     {
       gait_receiver_->setEnabled(false);
     }
-
-    // 真实机器人暂停时切回正常 Ruiwo 电机参数（异步调用避免阻塞控制线程）
-    if (is_real_ && use_amp_ruiwo_kpkd_)
-    {
-      changeRuiwoMotorParamAsync("normal_kpkd");
-    }
   }
   void AmpWalkController::resume()
   {
@@ -397,13 +297,6 @@ namespace humanoid_controller
     {
       gait_receiver_->setEnabled(true);
     }
-
-    // 真实机器人恢复 AMP 控制时切换到 AMP 专用 Ruiwo 电机参数（异步调用避免阻塞控制线程）
-    if (is_real_ && use_amp_ruiwo_kpkd_)
-    {
-      changeRuiwoMotorParamAsync("amp_kpkd");
-    }
-
     ROS_INFO("[%s] Controller resumed, reset state", name_.c_str());
     reset();
   }
@@ -472,9 +365,7 @@ namespace humanoid_controller
   void AmpWalkController::updatePhase(const CommandDataRL& cmd)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
-    // 根据速度方向选择正负限制：速度>0 用正向限制，速度<0 用负向限制
-    double velLimitX = (cmd.cmdVelLineX_ >= 0) ? velocityLimits_(0) : velocityLimits_(1);
-    double ratio = cmd.cmdVelLineX_ / velLimitX;
+    double ratio = cmd.cmdVelLineX_ / velocityLimits_(0);
     double targetCycleTime = (ratio > switch_ratio_) ? cycleTime_short_ : cycleTime_;
     if (targetCycleTime != currentCycleTime_)
     {
@@ -516,50 +407,10 @@ namespace humanoid_controller
 
     // 速度命令 [vx, vy, omega_z]
     cmd.scale();
-    
-    // 应用 X 负向单独缩放系数（实现不对称速度限制）
-    if (cmd.cmdVelLineX_ < 0.0) {
-      cmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
-    }
-    
     Eigen::Vector3d velocity_commands;
     velocity_commands << cmd.cmdVelLineX_,
                          cmd.cmdVelLineY_,
                          cmd.cmdVelAngularZ_;
-        
-    // 应用 YAW 补偿（当旋转时给 X 方向速度添加偏置）
-    if (yaw_compensation_enabled_) {
-      double angular_z = velocity_commands(2);  // YAW角速度
-      double linear_x = velocity_commands(0);   // X方向线速度
-      
-      // 检查是否满足补偿条件：|角速度| > 阈值 且 |线速度| < 阈值
-      if (std::abs(angular_z) > yaw_compensation_threshold_ && 
-          std::abs(linear_x) < yaw_compensation_x_velocity_threshold_) {
-        
-        double x_bias = 0.0;
-        if (yaw_compensation_separate_enabled_) {
-          // 根据旋转方向使用不同的偏置值
-          // angular_z > 0: 逆时针旋转（CCW），angular_z < 0: 顺时针旋转（CW）
-          if (angular_z > 0) {
-            x_bias = yaw_compensation_x_bias_counterclockwise_;
-          } else {
-            x_bias = yaw_compensation_x_bias_clockwise_;
-          }
-        } else {
-          // 使用通用偏置值
-          x_bias = yaw_compensation_x_bias_;
-        }
-        
-        // 应用偏置到X方向速度（同时修改velocity_commands和cmd，确保一致性）
-        velocity_commands(0) += x_bias;
-        cmd.cmdVelLineX_ += x_bias;  // 关键：修改cmd对象，确保getCommandRL()返回补偿后的值
-        
-        // std::cout << "[" << name_ << "] YAW compensation applied: angular_z=" << angular_z
-        //           << ", linear_x=" << linear_x << " -> " << velocity_commands(0)
-        //           << " (bias=" << x_bias << ")" << std::endl;
-      }
-    }
-    
     Eigen::VectorXd tempCommand_ = cmd.getCommandRL();
 
 
@@ -708,103 +559,6 @@ namespace humanoid_controller
         action[i] = output_buf[i];
 
       clip(action, clipActions_);
-
-      // ==================== 站立切换到行走时的支撑腿髋关节roll偏置 ====================
-      // 计算并应用支撑腿髋关节roll偏置
-      if (isStanceToWalkBiasActive_)
-      {
-        double elapsed = (ros::Time::now() - stanceToWalkBiasStartTime_).toSec();
-        if (elapsed >= stanceToWalkBiasDuration_)
-        {
-          isStanceToWalkBiasActive_ = false;
-        }
-        else
-        {
-          double decay_factor = 1.0 - (elapsed / stanceToWalkBiasDuration_);
-          double current_bias = stanceToWalkHipRollBias_ * decay_factor;
-          
-          // 左腿支撑(-1)：施加正偏置到左腿髋关节roll(索引0)
-          // 右腿支撑(1)：施加负偏置到右腿髋关节roll(索引6)
-          if (stanceToWalkBiasSupportLeg_ == -1)
-          {
-            action[0] += current_bias;
-          }
-          else if (stanceToWalkBiasSupportLeg_ == 1)
-          {
-            action[6] -= current_bias;
-          }
-        }
-      }
-      
-      // 获取当前命令数据判断是否从站立切换到行走
-      CommandDataRL currentCmdData = gait_receiver_->getCurrentCommand();
-      bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
-      
-      // 当从站立切换到行走时（站立->行走），记录初始髋关节pitch角速度并开始数据收集
-      if (lastStanceState_ && !is_standing)
-      {
-        leftHipPitchVelIntegral_ = 0.0;
-        rightHipPitchVelIntegral_ = 0.0;
-        stanceToWalkHipPitchCollectionStartTime_ = ros::Time::now();
-        isHipPitchDataCollected_ = false;
-      }
-            
-      // 在站立切换到行走后的累积时间窗口内收集髋关节pitch角速度数据并进行积分比较
-      if (!lastStanceState_ && !is_standing && !isHipPitchDataCollected_)
-      {
-        SensorData current_sensor_data = getRobotSensorData();
-        double elapsed = (ros::Time::now() - stanceToWalkHipPitchCollectionStartTime_).toSec();
-        double currentLeftHipPitchVel = current_sensor_data.jointVel_[leftHipPitchIdx_];
-        double currentRightHipPitchVel = current_sensor_data.jointVel_[rightHipPitchIdx_];
-              
-        if (elapsed < kHipPitchCollectionDuration_)
-        {
-          // 积分累加：累加pitch角速度
-          leftHipPitchVelIntegral_ += currentLeftHipPitchVel;
-          rightHipPitchVelIntegral_ += currentRightHipPitchVel;
-        }
-        else
-        {
-          // 累积时间结束，比较积分结果判断支撑腿
-          // 计算左右髋pitch角速度积分差值：左腿-右腿
-          // 差值 > 0：左腿角速度积分更正（抬得少/踩得多）→ 右腿抬起 → 右腿支撑
-          // 差值 < 0：右腿角速度积分更负（抬得多/踩得少）→ 左腿抬起 → 左腿支撑
-          double hipPitchVelIntegralDiff = - leftHipPitchVelIntegral_ + rightHipPitchVelIntegral_;
-                
-          ROS_INFO("[SupportLegBias] Hip pitch velocity integral: L=%.6f, R=%.6f, diff=%.6f",
-                   leftHipPitchVelIntegral_, rightHipPitchVelIntegral_, hipPitchVelIntegralDiff);
-                
-          if (hipPitchVelIntegralDiff > 0)
-          {
-            // 左腿角速度积分 > 右腿 → 右腿抬起 → 右腿支撑
-            ROS_INFO("[SupportLegBias] -> Right leg lifting, using RIGHT support");
-            stanceToWalkBiasStartTime_ = ros::Time::now();
-            isStanceToWalkBiasActive_ = true;
-            stanceToWalkBiasSupportLeg_ = 1;
-          }
-          else if (hipPitchVelIntegralDiff < 0)
-          {
-            // 右腿角速度积分 < 左腿 → 左腿抬起 → 左腿支撑
-            ROS_INFO("[SupportLegBias] -> Left leg lifting, using LEFT support");
-            stanceToWalkBiasStartTime_ = ros::Time::now();
-            isStanceToWalkBiasActive_ = true;
-            stanceToWalkBiasSupportLeg_ = -1;
-          }
-          else
-          {
-            // 积分相等 → 默认右腿支撑
-            ROS_INFO("[SupportLegBias] -> Equal integral, using default RIGHT support");
-            stanceToWalkBiasStartTime_ = ros::Time::now();
-            isStanceToWalkBiasActive_ = true;
-            stanceToWalkBiasSupportLeg_ = 1;
-          }
-                
-          isHipPitchDataCollected_ = true;
-        }
-      }
-      
-      // 更新上一帧状态
-      lastStanceState_ = is_standing;
 
       return true;
     }
@@ -1244,231 +998,6 @@ namespace humanoid_controller
 
     // 模式0或2：已使用外部手臂指令替换，返回true
     return true;
-  }
-
-  void AmpWalkController::initWaistControl()
-  {
-    // 初始化腰部控制器（如果启用了腰部控制功能）
-    if (waist_command_replacement_enabled_ && waistNum_ > 0)
-    {
-      try
-      {
-        // 创建 WaistController 实例
-        waist_controller_ = std::make_unique<WaistController>(
-          nh_,
-          waistNum_,
-          ros_logger_,
-          is_real_
-        );
-        
-        // 使用从配置文件读取的 kp 和 kd 参数（如果已加载），否则使用默认值
-        Eigen::VectorXd waist_kp, waist_kd;
-        if (waist_kp_from_config_.size() == waistNum_ && waist_kd_from_config_.size() == waistNum_)
-        {
-          // 使用从配置文件读取的参数
-          waist_kp = waist_kp_from_config_;
-          waist_kd = waist_kd_from_config_;
-        }
-        else
-        {
-          // 如果未从配置文件加载，使用默认值
-          waist_kp = Eigen::VectorXd::Constant(waistNum_, 10.0);
-          waist_kd = Eigen::VectorXd::Constant(waistNum_, 2.0);
-          ROS_WARN("[%s] Waist kp/kd not loaded from config, using default values (kp=10.0, kd=2.0)", name_.c_str());
-        }
-        
-        // 获取默认腰部位置
-        Eigen::VectorXd default_waist_pos;
-        if (defalutJointPosRL_.size() >= jointNum_ + waistNum_)
-        {
-          if (is_roban_)
-          {
-            default_waist_pos = defalutJointPosRL_.segment(0, waistNum_);
-          }
-          else
-          {
-            default_waist_pos = defalutJointPosRL_.segment(jointNum_, waistNum_);
-          }
-        }
-        else
-        {
-          default_waist_pos = Eigen::VectorXd::Zero(waistNum_);
-          ROS_WARN("[%s] Cannot get default waist position, using zero vector", name_.c_str());
-        }
-        
-        // 加载配置参数
-        waist_controller_->loadSettings(
-          waist_kp,
-          waist_kd,
-          default_waist_pos,
-          waist_mode_interpolation_velocity_,
-          waist_mode2_cutoff_freq_
-        );
-        
-        // 腰部控制模式切换通过 /humanoid_controller/enable_waist_control 服务进行
-        waist_controller_->enable(true);
-        
-        ROS_INFO("[%s] Waist controller initialized (default mode=1 RL control, waist_joints=%zu)", 
-                 name_.c_str(), waistNum_);
-      }
-      catch (const std::exception& e)
-      {
-        ROS_ERROR("[%s] Failed to initialize waist controller: %s", name_.c_str(), e.what());
-        waist_command_replacement_enabled_ = false;
-        waist_controller_.reset();
-      }
-    }
-    else
-    {
-      ROS_INFO("[%s] Waist command replacement disabled or no waist joints", name_.c_str());
-    }
-  }
-
-  void AmpWalkController::changeRuiwoMotorParamAsync(const std::string& param_name)
-  {
-    // 仿真环境下直接返回
-    if (!is_real_)
-    {
-      return;
-    }
-
-    // 在独立线程中调用服务，避免在控制循环中发生阻塞
-    std::thread([this, param_name]()
-    {
-      try
-      {
-        const ros::Duration timeout(2.0);
-        if (!srv_change_motor_param_.waitForExistence(timeout))
-        {
-          ROS_WARN_THROTTLE(1.0, "[%s] Motor param service not available (timeout: 2s)", name_.c_str());
-          return;
-        }
-
-        kuavo_msgs::ExecuteArmAction srv;
-        srv.request.action_name = param_name;
-
-        if (srv_change_motor_param_.call(srv))
-        {
-          if (srv.response.success)
-          {
-            ROS_INFO("[AmpWalkController] Successfully changed Ruiwo motor param to: %s", param_name.c_str());
-          }
-          else
-          {
-            ROS_WARN("[AmpWalkController] Failed to change Ruiwo motor param: %s", srv.response.message.c_str());
-          }
-        }
-        else
-        {
-          ROS_WARN("[AmpWalkController] Failed to call Ruiwo motor param service");
-        }
-      }
-      catch (const ros::Exception& e)
-      {
-        ROS_ERROR("[AmpWalkController] ROS exception in changeRuiwoMotorParamAsync: %s", e.what());
-      }
-      catch (const std::exception& e)
-      {
-        ROS_ERROR("[AmpWalkController] Exception in changeRuiwoMotorParamAsync: %s", e.what());
-      }
-    }).detach();
-  }
-
-  // 更新腰部指令（可选功能，用于替换jointCmdMsg中的腰部部分）
-  bool AmpWalkController::updateWaistCommand(const ros::Time& time,
-                                             const SensorData& sensor_data,
-                                             kuavo_msgs::jointCmd& joint_cmd)
-  {
-    // 如果未启用腰部控制或没有腰部关节，直接返回false
-    if (!waist_command_replacement_enabled_ || waistNum_ == 0 || !waist_controller_)
-    {
-      ROS_WARN_THROTTLE(1.0, "[%s] updateWaistCommand: disabled or no controller (enabled=%d, waistNum_=%zu, controller=%p)",
-                          name_.c_str(), waist_command_replacement_enabled_, waistNum_, waist_controller_.get());
-      return false;
-    }
-    
-    // 获取控制周期
-    double dt = dt_;
-    if (dt <= 0.0 || dt > 0.1) dt = 0.002;  // 默认2ms
-
-    // 获取当前命令数据
-    CommandDataRL cmdData;
-    if (gait_receiver_)
-    {
-      cmdData = gait_receiver_->getCurrentCommand();
-    }
-
-    // 构建完整的关节位置和速度向量（腿 + 腰 + 手）
-    // 注意：WaistController 期望的顺序是：腿 + 腰 + 手
-    // 对于 roban 机型，preprocessSensorData 已将顺序调整为：腰 + 腿 + 手
-    // 所以需要重新排列为：腿 + 腰 + 手
-    Eigen::VectorXd full_joint_pos(jointNum_ + waistNum_ + jointArmNum_);
-    Eigen::VectorXd full_joint_vel(jointNum_ + waistNum_ + jointArmNum_);
-
-    if (is_roban_)
-    {
-      // roban 机型：sensor_data 顺序是 腰 + 腿 + 手，需要调整为 腿 + 腰 + 手
-      Eigen::VectorXd waist_pos = sensor_data.jointPos_.segment(0, waistNum_);
-      Eigen::VectorXd leg_pos = sensor_data.jointPos_.segment(waistNum_, jointNum_);
-      Eigen::VectorXd arm_pos = sensor_data.jointPos_.segment(waistNum_ + jointNum_, jointArmNum_);
-      
-      Eigen::VectorXd waist_vel = sensor_data.jointVel_.segment(0, waistNum_);
-      Eigen::VectorXd leg_vel = sensor_data.jointVel_.segment(waistNum_, jointNum_);
-      Eigen::VectorXd arm_vel = sensor_data.jointVel_.segment(waistNum_ + jointNum_, jointArmNum_);
-      
-      // 重新排列为：腿 + 腰 + 手
-      full_joint_pos << leg_pos, waist_pos, arm_pos;
-      full_joint_vel << leg_vel, waist_vel, arm_vel;
-    }
-    else
-    {
-      // 非 roban 机型：顺序已经是 腿 + 腰 + 手
-      full_joint_pos = sensor_data.jointPos_.head(jointNum_ + waistNum_ + jointArmNum_);
-      full_joint_vel = sensor_data.jointVel_.head(jointNum_ + waistNum_ + jointArmNum_);
-    }
-
-    // 调用 WaistController::update 进行腰部控制
-    // 注意：WaistController 内部会根据模式自动处理，模式1（RL控制）不会更新命令消息
-    waist_controller_->update(
-      time,
-      dt,
-      full_joint_pos,
-      full_joint_vel,
-      static_cast<int>(cmdData.cmdStance_),  // cmd_stance: 0=行走, 1=站立
-      joint_cmd,
-      jointNum_  // 腰部在joint_cmd中的起始索引（即腿部关节数）
-    );
-
-    // 检查当前模式，如果模式1（RL控制）则返回false，否则返回true
-    if (waist_controller_->getMode() == 1)
-    {
-      // 模式1：RL控制，不替换腰部指令，返回false表示未使用外部腰部指令替换
-      return false;
-    }
-
-    // 模式0或2：已使用外部腰部指令替换，返回true
-    return true;
-  }
-
-  void AmpWalkController::updateVelocityLimitsParam(ros::NodeHandle& nh)
-  {
-    // 将 4 维 velocityLimits_转换为 6 维 rosparam 格式
-    // velocityLimits_格式：[linear_x, linear_y, linear_z, angular_z] （统一上限）
-    // rosparam 格式：[linear_x, linear_y, linear_z, angular_x, angular_y, angular_z]
-    std::vector<double> limits_vec(6);
-    limits_vec[0] = velocityLimits_(0);  // linear_x (positive limit)
-    limits_vec[1] = velocityLimits_(1);  // linear_y
-    limits_vec[2] = velocityLimits_(2);  // linear_z
-    limits_vec[3] = 0.0;                 // angular_x (通常为 0)
-    limits_vec[4] = 0.0;                 // angular_y (通常为 0)
-    limits_vec[5] = velocityLimits_(3);  // angular_z
-    
-    nh.setParam("/velocity_limits", limits_vec);
-    
-    ROS_INFO("[%s] Updated /velocity_limits from controller config: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
-             name_.c_str(),
-             limits_vec[0], limits_vec[1], limits_vec[2],
-             limits_vec[3], limits_vec[4], limits_vec[5]);
   }
 
 } // namespace humanoid_controller

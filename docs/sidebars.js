@@ -47,10 +47,8 @@ const sidebars = {
           type: 'category',
           label: '轮臂产品',
           items: [
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/轮臂产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W_进阶版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W_MaxA版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W_MaxB版产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W 产品介绍',
           ],
         },
       ],
@@ -60,20 +58,6 @@ const sidebars = {
       label: '快速开始',
       items: [
         'basic_usage/kuavo-ros-control/docs/2快速开始/快速开始',
-        {
-          type: 'category',
-          label: '5w轮臂手柄控制说明文档',
-          items: [
-            'basic_usage/kuavo-ros-control/docs/2快速开始/5w轮臂手柄控制说明文档/轮臂手柄控制说明',
-          ],
-        },
-        {
-          type: 'category',
-          label: 'VR操作',
-          items: [
-            'basic_usage/kuavo-ros-control/docs/2快速开始/VR操作/5w_VR操作',
-          ],
-        },
       ],
     },
     {
@@ -85,10 +69,6 @@ const sidebars = {
         'basic_usage/kuavo-ros-control/docs/3调试教程/启动前准备',
         'basic_usage/kuavo-ros-control/docs/3调试教程/机器人关节标定',
         'basic_usage/kuavo-ros-control/docs/3调试教程/上肢控制模式',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/5w_启动前准备',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/5w_辨识手臂和头部电机方向',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/5w_全身零点标定',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/kuavo5-w 快速调试',
       ],
     },
     {
@@ -100,7 +80,6 @@ const sidebars = {
         'basic_usage/kuavo-ros-control/docs/4开发接口/接口使用文档',
         'basic_usage/kuavo-ros-control/docs/4开发接口/ROS2接口使用文档',
         'basic_usage/kuavo-ros-control/docs/4开发接口/手臂防碰撞功能使用文档',
-        'basic_usage/kuavo-ros-control/docs/4开发接口/5w接口使用文档',
         {
           type: 'category',
           label: 'PythonSDK使用文档',
@@ -216,15 +195,6 @@ const sidebars = {
         'basic_usage/kuavo-ros-control/docs/6常用工具/有线VR方案使用指南',
         'basic_usage/kuavo-ros-control/docs/6常用工具/Kuavo机器人桌面软件使用手册',
         'basic_usage/kuavo-ros-control/docs/6常用工具/Kuavo机器人启动脚本使用指南',
-      ],
-    },
-    {
-      type: 'category',
-      label: '镜像恢复',
-      items: [
-        'basic_usage/kuavo-ros-control/docs/8上下位机镜像烧录/下位机烧录镜像',
-        'basic_usage/kuavo-ros-control/docs/8上下位机镜像烧录/上位机NX烧录镜像',
-        'basic_usage/kuavo-ros-control/docs/8上下位机镜像烧录/上位机AGX烧录镜像',
       ],
     },
     {

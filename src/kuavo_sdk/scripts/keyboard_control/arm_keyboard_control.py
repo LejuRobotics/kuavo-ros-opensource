@@ -19,6 +19,9 @@ from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, changeAr
 from kuavo_msgs.srv import twoArmHandPoseCmdSrv
 from kuavo_msgs.msg import twoArmHandPoseCmd, ikSolveParam
 
+from gripper_controller import GripperController
+from geometry_msgs.msg import Twist
+
 # 获取机器人版本
 def get_version_parameter():
     param_name = 'robot_version'
@@ -27,17 +30,18 @@ def get_version_parameter():
         param_value = rospy.get_param(param_name)
         rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
         # 适配1000xx版本号
-        valid_series = [42, 45, 49, 52, 53, 54]
+        valid_series = [42, 45, 47, 49, 52]
         MMMMN_MASK = 100000
         series = param_value % MMMMN_MASK
         if series not in valid_series:
-            rospy.logwarn(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！")
-            return None
+            rospy.logerr(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！程序退出。")
+            rospy.signal_shutdown("参数无效")
         else:
             rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
-            return param_value
+        return param_value
     except rospy.ROSException:
-        rospy.logerr(f"参数 {param_name} 不存在！") 
+        rospy.logerr(f"参数 {param_name} 不存在！程序退出。")
+        rospy.signal_shutdown("参数获取失败") 
         return None
 
 # FK正解服务
@@ -353,6 +357,7 @@ class KeyBoardArmController:
     def __init__(self, x_gap = 0.03, y_gap = 0.03, z_gap = 0.03, 
                  roll_gap = 0.03, pitch_gap = 0.03, yaw_gap = 0.03, 
                  time_gap = 5, robot_version = 45 , which_hand=ArmType.Right):
+        rospy.init_node("arm_control_keyboard_node", anonymous=True)
 
         self.old_settings = termios.tcgetattr(sys.stdin)
         self.input_buffer = []  # 存储按键缓冲区
@@ -399,12 +404,12 @@ class KeyBoardArmController:
             # PPPPMMMMN
             MMMMN_MASK = 100000
             return (version_number % MMMMN_MASK) == series
-        if start_with_version(robot_version, 45) or start_with_version(robot_version, 49):
+        if start_with_version(robot_version, 45) or start_with_version(robot_version, 47) or start_with_version(robot_version, 49):
             self.robot_zero_x = -0.0173
-            self.robot_zero_y = -0.2927 + 0.03
+            self.robot_zero_y = -0.2927 + 0.03 # shoulder_width
             self.robot_zero_z = -0.2837
-            self.robot_upper_arm = 0.30
-            self.robot_lower_arm = 0.40
+            self.robot_upper_arm = 0.2844
+            self.robot_lower_arm = 0.426
             self.robot_shoulder_height = 0.4240
             # 设定sensors_data_raw中手臂角度的索引
             self.joint_data_header, self.joint_data_footer = 12, 26
@@ -419,12 +424,12 @@ class KeyBoardArmController:
             # 设定sensors_data_raw中手臂角度的索引
             self.joint_data_header, self.joint_data_footer = 12, 26
 
-        elif start_with_version(robot_version, 52) or start_with_version(robot_version, 53) or start_with_version(robot_version, 54):
+        elif start_with_version(robot_version, 52):
             self.robot_zero_x = -0.003 
             self.robot_zero_y = -0.2527 # shoulder_width
-            self.robot_zero_z = -0.3144 
+            self.robot_zero_z = -0.2894 
             self.robot_upper_arm = 0.2837
-            self.robot_lower_arm = 0.4251
+            self.robot_lower_arm = 0.4001
             self.robot_shoulder_height = 0.3944 # shoulder_height
             # 设定sensors_data_raw中手臂角度的索引
             self.joint_data_header, self.joint_data_footer = 13, 27
@@ -444,6 +449,20 @@ class KeyBoardArmController:
         while self.kuavo_arm_target_poses_pub.get_num_connections() == 0 and not rospy.is_shutdown():
             rospy.loginfo("等待 kuavo_arm_target_poses 订阅者连接...")
             rate.sleep()
+        
+        # 夹爪控制
+        self.gripper_controller = GripperController(publish_frequency=100.0)
+        # 高度控制
+        self.cmd_pose_pub = rospy.Publisher('/cmd_pose', Twist, queue_size=10)
+        self.cmd_pose_msg = Twist()
+        # 设置位置与姿态指令初值
+        self.cmd_pose_msg.linear.x = self.cmd_pose_msg.linear.y = self.cmd_pose_msg.linear.z = 0.0
+        self.cmd_pose_msg.angular.x = self.cmd_pose_msg.angular.y = self.cmd_pose_msg.angular.z = 0.0
+        # 确保发布者连接成功
+        rate = rospy.Rate(10)  # 10Hz
+        while self.cmd_pose_pub.get_num_connections() == 0 and not rospy.is_shutdown():
+            rospy.loginfo("等待订阅者连接...")
+            rate.sleep()
 
     # 获取传感器数据，回调函数，更新当前角度
     # 通过一次fk求解，将当前角度转换为当前坐标，以此进行初始化，用于展示当前坐标和后续修改目标信息
@@ -458,6 +477,7 @@ class KeyBoardArmController:
             if fk_hand_poses is not None:
                 print("left hand poses ready","\r")
                 self.l_eef_target_xyz = np.array(fk_hand_poses.left_pose.pos_xyz)
+                self.l_eef_target_xyz # 为了测试五代临时这样修改,后续会改回来
                 x, y, z, w = fk_hand_poses.left_pose.quat_xyzw
                 euler =quaternion_to_euler(x, y, z, w)
                 self.l_eef_target_ypr = np.array([euler.yaw, euler.pitch, euler.roll])
@@ -489,20 +509,25 @@ class KeyBoardArmController:
         self.kuavo_arm_target_poses_msg.values = values
         self.kuavo_arm_target_poses_pub.publish(self.kuavo_arm_target_poses_msg)
         rospy.loginfo("move msg publish over")
+    def publish_cmd_pose(self, linear_z):
+        """
+        发布 /cmd_pose 话题的控制指令。
+        """
+        self.cmd_pose_msg.linear.z = linear_z  # 增量高度 (m)
+        # 发布消息
+        self.cmd_pose_pub.publish(self.cmd_pose_msg)
+        rospy.loginfo(f"Published cmd_pose: linear.x={self.cmd_pose_msg.linear.x}, linear.y={self.cmd_pose_msg.linear.y}, linear.z={self.cmd_pose_msg.linear.z}, angular.z={self.cmd_pose_msg.angular.z}")
 
     # 按键检测 
     def getKey(self):
-        if self.input_buffer:
-            key = self.input_buffer.pop(0)
+        tty.setraw(sys.stdin.fileno())
+        
+        rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+        if rlist:
+            key = sys.stdin.read(1)
         else:
-            tty.setraw(sys.stdin.fileno())
-            
-            rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
-            if rlist:
-                key = sys.stdin.read(1)
-            else:
-                key = ''
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+            key = ''
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
 
         # 更新末端位置
         if  key in self._control_xyz_keys:
@@ -588,6 +613,34 @@ class KeyBoardArmController:
 
             except Exception as e:
                 print(e)
+        # 此处根据当前控制的手臂来控制相应夹爪, 另一个手臂的夹爪不动
+        elif key == 'z':
+            if self.which_hand == ArmType.Left:
+                rospy.loginfo("Closing left gripper only...")
+                self.gripper_controller.control_left_gripper(255.0)
+            else :
+                rospy.loginfo("Closing right gripper only...")
+                self.gripper_controller.control_right_gripper(255.0)
+            rospy.sleep(1)
+            return key
+        elif key == 'x':
+            if self.which_hand == ArmType.Left:
+                rospy.loginfo("Opening left gripper only...")
+                self.gripper_controller.control_left_gripper(0.0)
+            else :
+                rospy.loginfo("Opening right gripper only...")
+                self.gripper_controller.control_right_gripper(0.0)
+            rospy.sleep(1)
+            return key
+        # 此处控制机器人的下蹲与恢复站立
+        elif key == 'r':
+            # 执行下蹲动作
+            self.publish_cmd_pose(linear_z=-0.18)  # 增量高度 (m)
+            return key
+        elif key == 't':
+            # 执行恢复站立动作
+            self.publish_cmd_pose(linear_z=0.0)  # 增量高度 (m)
+            return key
 
         elif key != '\x03':
             key=""
@@ -624,7 +677,7 @@ class KeyBoardArmController:
             #if True :
                 degrees_list = [math.degrees(rad) for rad in joint_end_angles]
                 # 线性插值
-                # self.exec_time = self.exec_time + self.time_gap
+                self.exec_time = self.exec_time + self.time_gap
                 # 发送任务
                 self.publish_arm_target_poses([self.time_gap], degrees_list)
             # print("update_joy over")
@@ -645,7 +698,7 @@ class KeyBoardArmController:
             #if True :
                 degrees_list = [math.degrees(rad) for rad in joint_end_angles]
                 # 线性插值
-                # self.exec_time = self.exec_time + self.time_gap
+                self.exec_time = self.exec_time + self.time_gap
                 # 发送任务
                 self.publish_arm_target_poses([self.time_gap], degrees_list)
             # print("update_joy over")
@@ -665,6 +718,8 @@ class KeyBoardArmController:
             print("IK: rotation - Y - PITCH")
             print("JL: rotation - Z - YAW")
             print("Press N to Switch to another hand")
+            print("Press Z/X to Open/Close the claw of now arm")
+            print("Press R/T to squat/stand")
             print("Press Ctrl-C to exit")
 
             set_arm_control_mode(2)
@@ -676,7 +731,7 @@ class KeyBoardArmController:
                 if key:
                     self.update_response()
                 
-
+            self.gripper_controller.stop()
             set_arm_control_mode(1)
 
         finally:
@@ -685,18 +740,13 @@ class KeyBoardArmController:
 
 if __name__ == "__main__":
     try:
-        rospy.init_node("arm_control_keyboard_node", anonymous=True)
-
         # 获取机器人版本
         my_robot_version = get_version_parameter()
-        if my_robot_version is None:
-            rospy.signal_shutdown("参数无效或获取失败")
-            raise rospy.ROSInterruptException
 
         # Right Arm
-        keyboard_arm_controller = KeyBoardArmController(x_gap = 0.03, y_gap = 0.03, z_gap = 0.03,
+        keyboard_arm_controller = KeyBoardArmController(x_gap = 0.02, y_gap = 0.02, z_gap = 0.02,
                                                         roll_gap = 0.157, pitch_gap = 0.157, yaw_gap = 0.157, 
-                                                        time_gap = 1,
+                                                        time_gap = 0.5,
                                                         robot_version = my_robot_version,
                                                         which_hand=ArmType.Right)
         keyboard_arm_controller.run()

@@ -1,0 +1,85 @@
+<mujoco model="kuavo scene">
+  <include file="biped_s49.xml"/>
+
+  <statistic center="0 0 1" extent="1.8"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="160" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    
+    <!-- 斜坡 -->
+    <mesh name="ramp_mesh" file="xiepo.stl"/>
+    <!-- 楼梯 -->
+    <mesh name="stairs_mesh" file="louti.stl"/>
+
+    <!-- 定义纹理 -->
+    <texture name="img_tex" type="2d" file="april_36h11-1.png"/>
+    <!-- 定义材质（绑定纹理） -->
+    <material name="img_mat" texture="img_tex" texrepeat="1 1" texuniform="false"/>
+
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 3.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    
+    <!-- 斜坡：放在原点附近 -->
+    <geom 
+      name="ramp" 
+      type="mesh" 
+      mesh="ramp_mesh" 
+      pos="0.1 0 0" 
+      contype="1" 
+      conaffinity="1"
+      rgba="0.6 0.4 0.2 1"
+    />
+    
+    <!-- 楼梯：放在斜坡一侧（ Y = +2.0m） -->
+    <geom 
+      name="stairs" 
+      type="mesh" 
+      mesh="stairs_mesh" 
+      pos="0.1 2.0 0" 
+      contype="1" 
+      conaffinity="1"
+      rgba="0.3 0.5 0.7 1"
+    />
+
+    <!-- 创建一个无碰撞的薄板来显示图片 -->
+    <geom 
+      name="image_display"
+      type="box" 
+      size="0.07 0.07 0.005"        
+      pos="0.0 2.0 0.07"            
+      quat="1 0 0 0"                
+      material="img_mat"
+      contype="0"                   
+      conaffinity="0"               
+      rgba="1 1 1 1"                
+    />
+  </worldbody>
+
+  <keyframe>
+    <key name="home"
+      qpos="
+    0 0 0.98
+    1 0 0 0
+    0 0 0 0 0 0
+    0 0 0 0 0 0
+    0 0 0 0 0 0 0        
+    0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 
+    0 0 0 0 0 0 0 0 0 0 
+    0 0"/>
+    <!-- IMU,LLeg,RLeg,LArm,LDexhand,RArm, RDexhand, Head-->
+  </keyframe>
+
+</mujoco>

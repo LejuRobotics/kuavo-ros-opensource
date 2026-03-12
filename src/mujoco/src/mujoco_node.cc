@@ -32,27 +32,30 @@
 #include "kuavo_msgs/sensorsData.h"
 #include "kuavo_msgs/jointData.h"
 #include "kuavo_msgs/jointCmd.h"
+#include "kuavo_msgs/Rq2f85ClawCmd.h"
+#include "kuavo_msgs/Rq2f85ClawState.h"
+#include "kuavo_msgs/SetObjectPosition.h"
+#include "kuavo_msgs/SetButtonState.h"
+#include <random>
 #include "geometry_msgs/Wrench.h"
 #include "nav_msgs/Odometry.h"
 #include "std_srvs/SetBool.h"
 #include "std_msgs/Float64.h"
-#include "std_msgs/Float64.h"
+#include "std_msgs/Float64MultiArray.h"
+#include "std_msgs/String.h"
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Core>
 #include <csignal>
 #include <atomic>
 #include <queue>
-#include "kuavo_msgs/lejuClawCommand.h"
-#include "sensor_msgs/JointState.h"
-
+#include <sensor_msgs/JointState.h>
 #include "joint_address.hpp"
 #include "dexhand_mujoco_node.h"
 #include "dexhand/json.hpp"
+#include "geometry_msgs/Vector3Stamped.h"
 
-#if defined(USE_DDS) || defined(USE_LEJU_DDS)
-#include "mujoco_dds.h"
-#endif
-
+#include <geometry_msgs/PoseStamped.h>
+#include <unordered_map>
 //  ************************* lcm ****************************
 
 #include "lcm_interface/LcmInterface.h"
@@ -79,44 +82,26 @@ namespace
   namespace mju = ::mujoco::sample_util;
   std::shared_ptr<mj::Simulate> sim;
 
-  // 机器人版本号
-  int robotVersion_ = 60;
-
   // constants
   const double syncMisalign = 0.1;       // maximum mis-alignment before re-sync (simulation seconds)
   const double simRefreshFraction = 0.7; // fraction of refresh available for simulation
   const int kErrorLength = 1024;         // load error string length
   double frequency = 1000.0;             // simulation frequency (Hz)
   ros::Publisher sensorsPub;
-  ros::Publisher pubGroundTruth;  // 重命名原来的pubOdom
-  ros::Publisher pubOdom;          // 新增odom发布者
+  ros::Publisher pubOdom;
   ros::Publisher pubTimeDiff;
-  bool pure_sim = false;
+  ros::Publisher pubQpos;
 
-#ifdef USE_DDS
-  std::unique_ptr<MujocoDdsClient<unitree_hg::msg::dds_::LowCmd_, unitree_hg::msg::dds_::LowState_>> dds_client;
-#elif defined(USE_LEJU_DDS)
-  std::unique_ptr<MujocoDdsClient<leju::msgs::JointCmd, leju::msgs::SensorsData>> dds_client;
-#endif
   std::queue<std::vector<double>> controlCommands;
   std::vector<double> joint_tau_cmd;
   bool cmd_updated = false;
-  bool is_chassic_cmd_changed = false;
-  bool is_chassic_cmd_vel_changed = false;
 
   geometry_msgs::Wrench external_wrench_;
   bool external_wrench_updated_ = false;
 
-  std::vector<double> claw_cmd;
-  bool claw_cmd_updated = false;
-  size_t numClawJoints = 2; // 夹抓的自由度
-
   std::mutex queueMutex;
   ros::NodeHandle *g_nh_ptr;
-  int robot_type = -1;
-  size_t numJoints = 12;  // 默认值，将从配置文件中读取
-  size_t waistNum = 0;
-  size_t numWheels = 8;   /* LF + LB + RF + RB wheel */
+  size_t numJoints = 12;      /* LLeg+RLeg+LArm+RArm+Head (without the dexhand joints) */
   double is_spin_thread = true;
   ros::Time sim_time;
   // model and data
@@ -124,25 +109,155 @@ namespace
   mjData *d = nullptr;
   std::vector<double> qpos_init;
 
-  Eigen::Vector3d cmd_vel_chassis;
 
+  // 夹爪控制变量 - 合并版本
+  struct GripperCommand {
+    double left_cmd = 0.0;   // 左夹爪命令 (0-255)
+    double right_cmd = 0.0;  // 右夹爪命令 (0-255)
+    bool updated = false;
+  };
+
+  struct GripperState {
+    double left_position = 0.0;   // 左夹爪当前位置
+    double left_velocity = 0.0;   // 左夹爪当前速度
+    double left_force = 0.0;      // 左夹爪当前力
+    double right_position = 0.0;  // 右夹爪当前位置
+    double right_velocity = 0.0;  // 右夹爪当前速度
+    double right_force = 0.0;     // 右夹爪当前力
+  };
+
+  GripperCommand gripper_cmd;
+  GripperState gripper_state;
+  std::mutex gripper_mutex;
+  
+  // 夹爪发布器和订阅器 - 合并版本
+  ros::Publisher gripperJointStatePub;
+
+  
+  // 夹爪执行器地址
+  int left_gripper_actuator_id = -1;
+  int right_gripper_actuator_id = -1;
+
+  // 夹爪关节ID（用于读取状态）- 使用driver joint作为主要状态指示器
+  int left_right_driver_joint_id = -1;  // 左夹爪右侧driver关节
+  int left_left_driver_joint_id = -1;   // 左夹爪左侧driver关节
+  int right_right_driver_joint_id = -1; // 右夹爪右侧driver关节
+  int right_left_driver_joint_id = -1;  // 右夹爪左侧driver关节
+
+  // tendon ID（用于读取力）
+  int left_tendon_id = -1;  // split1 tendon
+  int right_tendon_id = -1; // split2 tendon
+
+  // ========== 按钮半球检测 ==========
+  struct ButtonState {
+    int geom_id = -1;
+    int mat_id = -1;
+    bool is_bright = true;
+    bool pressed = false;
+    int cooldown = 0;
+    float original_rgba[4] = {0, 0, 0, 1};
+  };
+  std::vector<ButtonState> button_states;
+  ros::Publisher buttonStatePub;
+  ros::Publisher cheatMonitorPub;  // 违规服务调用监控
+  double button_force_threshold = 2.5;  // 触发按钮的力阈值（牛顿）
+  
+  // 初始化按钮状态
+  void initButtonStates(mjModel* model) {
+    button_states.clear();
+    for (int i = 0; i < model->ngeom; i++) {
+      const char* name = mj_id2name(model, mjOBJ_GEOM, i);
+      if (name && std::string(name).find("button_") == 0) {
+        ButtonState btn;
+        btn.geom_id = i;
+        btn.mat_id = model->geom_matid[i];
+        // 判断初始亮暗状态（通过 emission）
+        if (btn.mat_id >= 0) {
+          btn.is_bright = (model->mat_emission[btn.mat_id] > 0.3);
+          if (btn.is_bright) {
+            // 亮态：直接存储当前 rgba 作为原始颜色
+            for (int j = 0; j < 4; j++) {
+              btn.original_rgba[j] = model->mat_rgba[btn.mat_id * 4 + j];
+            }
+          } else {
+            // 暗态：XML 中 rgba 已被乘以 0.15，反推原始全亮颜色
+            for (int j = 0; j < 3; j++) {
+              float val = model->mat_rgba[btn.mat_id * 4 + j];
+              btn.original_rgba[j] = (val > 0.001f) ? std::min(val / 0.15f, 1.0f) : 0.0f;
+            }
+            btn.original_rgba[3] = model->mat_rgba[btn.mat_id * 4 + 3];
+          }
+        }
+        button_states.push_back(btn);
+        std::cout << "[Button] Found: " << name << " (bright=" << btn.is_bright << ")" << std::endl;
+      }
+    }
+    std::cout << "[Button] Total buttons: " << button_states.size() << std::endl;
+  }
+  
+  // 更新按钮状态（每帧调用）
+  void updateButtonStates(mjModel* model, mjData* data) {
+    for (auto& btn : button_states) {
+      if (btn.cooldown > 0) {
+        btn.cooldown--;
+        continue;
+      }
+      
+      // 检查接触力（任何物体施加的力都算）
+      double max_force = 0;
+      for (int i = 0; i < data->ncon; i++) {
+        int g1 = data->contact[i].geom1;
+        int g2 = data->contact[i].geom2;
+        // 只要有任何物体与按钮接触
+        if (g1 == btn.geom_id || g2 == btn.geom_id) {
+          mjtNum force[6];
+          mj_contactForce(model, data, i, force);
+          double f = std::abs(force[0]);
+          if (f > max_force) max_force = f;
+        }
+      }
+      
+      // 力超过阈值且按钮是亮的
+      if (max_force >= button_force_threshold && !btn.pressed && btn.is_bright) {
+        btn.pressed = true;
+        btn.is_bright = false;
+        btn.cooldown = 25;  // 约 0.5 秒冷却
+        
+        // 修改材质：变暗
+        if (btn.mat_id >= 0) {
+          model->mat_emission[btn.mat_id] = 0.0;
+          for (int j = 0; j < 3; j++) {
+            model->mat_rgba[btn.mat_id * 4 + j] = btn.original_rgba[j] * 0.15f;
+          }
+        }
+        const char* name = mj_id2name(model, mjOBJ_GEOM, btn.geom_id);
+        std::cout << "[Button] " << (name ? name : "unknown") << ": 亮 → 暗 (force=" << max_force << "N)" << std::endl;
+      } else if (max_force < button_force_threshold * 0.5) {
+        btn.pressed = false;
+      }
+    }
+  }
+
+
+  // 传送带控制变量
+  double belt_speed_cmd = 0.0;      // 传送带速度命令 (-0.1 到 0.1 m/s)
+  bool belt_speed_updated = false;
+  std::mutex belt_mutex;
+  
+  // 传送带执行器地址
+  int belt_actuator_id = -1;
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+
+  std::vector<std::string> body_names_to_publish = {
+  "box_grab", "marker1","marker2","shampoo1", "shampoo2", "shampoo3", "shampoo4", "item1", "item2", "left_bin_A", "left_bin_B"
+  };
+
+  std::unordered_map<std::string, ros::Publisher> body_pose_publishers;
   // ******
   low_cmd_t recvCmd;
   // ******
-
-  // 全局手臂末端关节名称变量
-  std::string left_arm_end_joint = "zarm_l7_joint";   // 默认值
-  std::string right_arm_end_joint = "zarm_r7_joint";  // 默认值
-  
-  // 躯干约束相关变量
-  bool torso_constrained = false;
-  double fixed_torso_pos[3] = {0, 0, 0};
-  double fixed_torso_quat[4] = {1, 0, 0, 0};
-  
-  // 腿部关节约束相关变量
-  bool leg_joints_constrained = false;
-  std::vector<double> fixed_leg_l_qpos;  // 左腿关节固定位置
-  std::vector<double> fixed_leg_r_qpos;  // 右腿关节固定位置
 
   // control noise variables
   // mjtNum* ctrlnoise = nullptr;
@@ -152,8 +267,6 @@ namespace
   /************************************* Joint Address******************************************/
   // This section defines the joint addresses for various body parts of the robot.
   using namespace mujoco_node;
-  JointGroupAddress LegJointsAddr("leg_joints");
-  JointGroupAddress WheelJointsAddr("wheel_yaw_joint");
   JointGroupAddress LLegJointsAddr("l_leg_joints");
   JointGroupAddress RLegJointsAddr("r_leg_joints");
   JointGroupAddress WaistJointsAddr("waist_yaw_joint");
@@ -162,6 +275,7 @@ namespace
   JointGroupAddress HeadJointsAddr("head_joints");
   JointGroupAddress LHandJointsAddr("l_hand_joints");
   JointGroupAddress RHandJointsAddr("r_hand_joints");
+  // JointGroupAddress GRIPJointsAddr("grip_joints");
   /*********************************************************************************************/
   // Mujoco Dexhand
   std::shared_ptr<mujoco_node::DexHandMujocoRosNode> g_dexhand_node = nullptr;
@@ -311,7 +425,65 @@ namespace
 
     std::cout << jga <<std::endl;
   }
+  void init_additional_actuators(mjModel* model) {
+    // 获取夹爪执行器ID
+    left_gripper_actuator_id = mj_name2id(model, mjOBJ_ACTUATOR, "left_fingers_actuator");
+    right_gripper_actuator_id = mj_name2id(model, mjOBJ_ACTUATOR, "right_fingers_actuator");
+    belt_actuator_id = mj_name2id(model, mjOBJ_ACTUATOR, "belt_speed");
 
+    // 获取夹爪driver关节ID（用于读取位置和速度状态）
+    left_right_driver_joint_id = mj_name2id(model, mjOBJ_JOINT, "left_right_driver_joint");
+    left_left_driver_joint_id = mj_name2id(model, mjOBJ_JOINT, "left_left_driver_joint");
+    right_right_driver_joint_id = mj_name2id(model, mjOBJ_JOINT, "right_right_driver_joint");
+    right_left_driver_joint_id = mj_name2id(model, mjOBJ_JOINT, "right_left_driver_joint");
+    
+    // 获取tendon ID（用于读取力）
+    left_tendon_id = mj_name2id(model, mjOBJ_TENDON, "split1");
+    right_tendon_id = mj_name2id(model, mjOBJ_TENDON, "split2");
+
+    if (left_gripper_actuator_id >= 0) {
+      std::cout << "\033[32mLeft gripper actuator found, ID: " << left_gripper_actuator_id << "\033[0m" << std::endl;
+    } else {
+      std::cout << "\033[31mWarning: Left gripper actuator not found!\033[0m" << std::endl;
+    }
+    
+    if (right_gripper_actuator_id >= 0) {
+      std::cout << "\033[32mRight gripper actuator found, ID: " << right_gripper_actuator_id << "\033[0m" << std::endl;
+    } else {
+      std::cout << "\033[31mWarning: Right gripper actuator not found!\033[0m" << std::endl;
+    }
+
+    if (left_right_driver_joint_id >= 0 && left_left_driver_joint_id >= 0) {
+      std::cout << "\033[32mLeft gripper driver joints found, IDs: " << left_right_driver_joint_id 
+                << ", " << left_left_driver_joint_id << "\033[0m" << std::endl;
+    } else {
+      std::cout << "\033[31mWarning: Left gripper driver joints not found!\033[0m" << std::endl;
+    }
+    
+    if (right_right_driver_joint_id >= 0 && right_left_driver_joint_id >= 0) {
+      std::cout << "\033[32mRight gripper driver joints found, IDs: " << right_right_driver_joint_id 
+                << ", " << right_left_driver_joint_id << "\033[0m" << std::endl;
+    } else {
+      std::cout << "\033[31mWarning: Right gripper driver joints not found!\033[0m" << std::endl;
+    }
+    
+    if (left_tendon_id >= 0) {
+      std::cout << "\033[32mLeft gripper tendon found, ID: " << left_tendon_id << "\033[0m" << std::endl;
+    } else {
+      std::cout << "\033[31mWarning: Left gripper tendon not found!\033[0m" << std::endl;
+    }
+    
+    if (right_tendon_id >= 0) {
+      std::cout << "\033[32mRight gripper tendon found, ID: " << right_tendon_id << "\033[0m" << std::endl;
+    } else {
+      std::cout << "\033[31mWarning: Right gripper tendon not found!\033[0m" << std::endl;
+    }
+
+      if (belt_actuator_id >= 0) {
+      std::cout << "\033[32mBelt actuator found, ID: " << belt_actuator_id << "\033[0m" << std::endl;
+    }
+    // 没有 belt actuator 是正常的，不输出警告
+  }
   //------------------------------------------- simulation -------------------------------------------
   void signalHandler(int signum)
   {
@@ -359,39 +531,24 @@ namespace
       }
       
       /* Init Joint Address 初始化关节组的数据地址 */
-
-      // 通过rosparam robot_type (int) 区分结构
-      if (robot_type == 2) 
-      {
-        std::cout << "[mujoco_node] Using ROS param: biped (双足) robot structure." << std::endl;
-        init_joint_address(mnew, LLegJointsAddr, "leg_l1_joint", "leg_l6_joint");
-        init_joint_address(mnew, RLegJointsAddr, "leg_r1_joint", "leg_r6_joint");
-      } 
-      else if (robot_type == 1) 
-      {
-        std::cout << "[mujoco_node] Using ROS param: wheel-arm (轮臂) robot structure." << std::endl;
-        init_joint_address(mnew, WheelJointsAddr, "LF_wheel_yaw_joint", "RB_wheel_pitch_joint");
-        init_joint_address(mnew, LegJointsAddr, "knee_joint", "waist_yaw_joint");
-      } 
-      else 
-      {
-        std::cout << "[mujoco_node] Unknown robot_type param, please set to 1 (轮臂) or 2 (双足)!" << std::endl;
-        return nullptr;
+      init_joint_address(mnew, LLegJointsAddr, "leg_l1_joint", "leg_l6_joint");
+      init_joint_address(mnew, RLegJointsAddr, "leg_r1_joint", "leg_r6_joint");
+      // 腰部关节（v52有，v47没有，条件初始化）
+      if(mj_name2id(mnew, mjOBJ_JOINT, "waist_yaw_joint") != -1) {
+        init_joint_address(mnew, WaistJointsAddr, "waist_yaw_joint", "waist_yaw_joint");
       }
-      
-      // 其余分组
-      init_joint_address(mnew, WaistJointsAddr, "waist_yaw_joint", "waist_yaw_joint");
-      std::cout << "left_arm_end_joint: " << left_arm_end_joint << std::endl;
-      std::cout << "right_arm_end_joint: " << right_arm_end_joint << std::endl;
-      init_joint_address(mnew, LArmJointsAddr, "zarm_l1_joint", left_arm_end_joint.c_str());
-      init_joint_address(mnew, RArmJointsAddr, "zarm_r1_joint", right_arm_end_joint.c_str());
+      init_joint_address(mnew, LArmJointsAddr, "zarm_l1_joint", "zarm_l7_joint");
+
+      init_joint_address(mnew, RArmJointsAddr, "zarm_r1_joint", "zarm_r7_joint");
       init_joint_address(mnew, HeadJointsAddr, "zhead_1_joint", "zhead_2_joint");
 
+      // init_joint_address(mnew, GRIPJointsAddr, "right_driver_joint", "left_follower_joint");
       /* dexhand joint address */
       if(mj_name2id(mnew, mjOBJ_JOINT, "l_thumbCMC") != -1) {
         init_joint_address(mnew, LHandJointsAddr, "l_thumbCMC", "l_littlePIP");
         init_joint_address(mnew, RHandJointsAddr, "r_thumbCMC", "r_littlePIP");
       }
+      init_additional_actuators(mnew);
 
       // 遍历所有的物体
       double totalMass = 0.0;
@@ -439,7 +596,7 @@ namespace
     // init qpos
     
 //0.99863, -0.00000, 0.05233, -0.00000, -0.01767, 0.00000, 0.77337, -0.01871, -0.00197, -0.63345, 0.88205, -0.35329, 0.01882, 0.01871, 0.00197, -0.63345, 0.88204, -0.35329, -0.01882, 
-    for (int i = 0; i < m->nq; i++)
+    for (int i = 0; i < 49; i++)
     {
       d->qpos[i] = qpos_init[i];
     }
@@ -477,6 +634,74 @@ namespace
 
     return accelNoGravity;
   }
+
+
+  // 添加夹爪状态读取函数（在publish_ros_data函数之前）
+  void read_gripper_states(const mjData *d) {
+      // 读取左夹爪状态 - 使用右侧driver关节作为主要指示器
+      if (left_right_driver_joint_id >= 0) {
+          int qpos_addr = m->jnt_qposadr[left_right_driver_joint_id];
+          int dof_addr = m->jnt_dofadr[left_right_driver_joint_id];
+          
+          if (qpos_addr >= 0 && qpos_addr < m->nq) {
+              gripper_state.left_position = d->qpos[qpos_addr];
+          }
+          
+          if (dof_addr >= 0 && dof_addr < m->nv) {
+              gripper_state.left_velocity = d->qvel[dof_addr];
+          }
+      }
+      
+      // 读取左夹爪tendon力
+      if (left_tendon_id >= 0 && left_tendon_id < m->ntendon) {
+          gripper_state.left_force = d->actuator_force[left_gripper_actuator_id];
+      }
+      
+      // 读取右夹爪状态 - 使用右侧driver关节作为主要指示器  
+      if (right_right_driver_joint_id >= 0) {
+          int qpos_addr = m->jnt_qposadr[right_right_driver_joint_id];
+          int dof_addr = m->jnt_dofadr[right_right_driver_joint_id];
+          
+          if (qpos_addr >= 0 && qpos_addr < m->nq) {
+              gripper_state.right_position = d->qpos[qpos_addr];
+          }
+          
+          if (dof_addr >= 0 && dof_addr < m->nv) {
+              gripper_state.right_velocity = d->qvel[dof_addr];
+          }
+      }
+      
+      // 读取右夹爪tendon力
+      if (right_tendon_id >= 0 && right_tendon_id < m->ntendon) {
+          gripper_state.right_force = d->actuator_force[right_gripper_actuator_id];
+      }
+  }
+
+  // 添加夹爪状态发布函数（在publish_ros_data函数之前）
+  void publish_gripper_joint_states() {
+    sensor_msgs::JointState gripper_joint_state;
+    
+    // 设置消息头
+    gripper_joint_state.header.stamp = ros::Time::now();
+    gripper_joint_state.header.frame_id = "gripper";
+    
+    // 设置关节名称
+    gripper_joint_state.name.push_back("left_gripper_joint");
+    gripper_joint_state.name.push_back("right_gripper_joint");
+    
+    // 填充位置信息
+    gripper_joint_state.position.push_back(gripper_state.left_position);
+    gripper_joint_state.position.push_back(gripper_state.right_position);
+    
+    // 其他字段留空（velocity, effort可以根据需要添加）
+    gripper_joint_state.velocity.resize(2, 0.0);  // 可以设置为实际速度或保持为0
+    gripper_joint_state.effort.resize(2, 0.0);    // 可以设置为实际力或保持为0
+    
+    // 发布状态消息
+    gripperJointStatePub.publish(gripper_joint_state);
+  }
+
+
   // *****************************************************
   void publish_ros_data(const mjData *d, bool is_running)
   {
@@ -504,26 +729,15 @@ namespace
             joint_data.joint_torque.push_back(d->qfrc_actuator[*iter]);
         }
     };
-    // Joint Data: LLeg, RLeg, LArm, RArm, Head
-    if (robot_type == 2) 
-    {
-      updateJointData(LLegJointsAddr);
-      updateJointData(RLegJointsAddr);
-      updateJointData(WaistJointsAddr);
-    } 
-    else if (robot_type == 1) 
-    {
-      updateJointData(LegJointsAddr);
-    }
-    else 
-    {
-      std::cout << "[mujoco_node] Unknown robot_type param, please set to 1 (轮臂) or 2 (双足)!" << std::endl;
-      return;
-    }
+
+    // Joint Data: LLeg, RLeg, Waist, LArm, RArm, Head
+    updateJointData(LLegJointsAddr);
+    updateJointData(RLegJointsAddr);
+    updateJointData(WaistJointsAddr);
     updateJointData(LArmJointsAddr);
     updateJointData(RArmJointsAddr);
     updateJointData(HeadJointsAddr);
-    
+    // updateJointData(GRIPJointsAddr);
     // Dexhand: read state
     if(g_dexhand_node) {
       g_dexhand_node->readCallback(d);
@@ -533,7 +747,6 @@ namespace
     nav_msgs::Odometry bodyOdom;
     int pos_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "BodyPos")];
     int ori_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "BodyQuat")];
-    int vel_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "BodyVel")];
     int gyro_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "BodyGyro")];
     int acc_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "BodyAcc")];
     // std::cout << "pos_addr: " << pos_addr << std::endl;
@@ -542,7 +755,6 @@ namespace
     // std::cout << "acc_addr: " << acc_addr << std::endl;
     mjtNum *pos = d->sensordata + pos_addr;
     mjtNum *ori = d->sensordata + ori_addr;
-    mjtNum *vel = d->sensordata + vel_addr;
 
     mjtNum *angVel = d->sensordata + gyro_addr;
     mjtNum *acc = d->sensordata + acc_addr;
@@ -576,37 +788,14 @@ namespace
 
     sensors_data.joint_data = joint_data;
     sensors_data.imu_data = imu_data;
-
-#ifdef USE_DDS
-    // Publish DDS LowState via DDS (instead of ROS when DDS is enabled)
-    if (dds_client) {
-      unitree_hg::msg::dds_::LowState_ dds_state;
-      Eigen::Vector3d angVel_eigen(angVel[0], angVel[1], angVel[2]);
-      Eigen::Vector4d ori_eigen(ori[0], ori[1], ori[2], ori[3]);
-      ConvertMujocoToDdsState(joint_data.joint_q, joint_data.joint_v, joint_data.joint_vd, joint_data.joint_torque, acc_eigen, angVel_eigen, free_acc, ori_eigen, dds_state);
-      dds_client->publishLowState(dds_state);
-    }
-    else
-    {
-      std::cout << "NOT PUB" << std::endl;
-    }
-#elif defined(USE_LEJU_DDS)
-    // Publish Leju DDS SensorsData when LEJU_DDS is enabled
-    if (dds_client) {
-      leju::msgs::SensorsData leju_sensors_data;
-      Eigen::Vector3d angVel_eigen(angVel[0], angVel[1], angVel[2]);
-      Eigen::Vector4d ori_eigen(ori[0], ori[1], ori[2], ori[3]);
-      ConvertMujocoToDdsState(joint_data.joint_q, joint_data.joint_v, joint_data.joint_vd, joint_data.joint_torque, acc_eigen, angVel_eigen, free_acc, ori_eigen, leju_sensors_data);
-      dds_client->publishLowState(leju_sensors_data);
-    }
-    else
-    {
-      std::cout << "Leju NOT PUB" << std::endl;
-    }
-#else
-    // Publish ROS sensor data only when DDS is disabled
     sensorsPub.publish(sensors_data);
-#endif
+
+    // 发布完整 qpos 供 LiDAR 等节点同步仿真状态
+    std_msgs::Float64MultiArray qpos_msg;
+    qpos_msg.data.resize(m->nq);
+    for (int i = 0; i < m->nq; i++)
+      qpos_msg.data[i] = d->qpos[i];
+    pubQpos.publish(qpos_msg);
 
     // bodyOdom = Odometry();
     bodyOdom.header.stamp = sim_time;
@@ -617,102 +806,41 @@ namespace
     bodyOdom.pose.pose.orientation.y = ori[2];
     bodyOdom.pose.pose.orientation.z = ori[3];
     bodyOdom.pose.pose.orientation.w = ori[0];
-    bodyOdom.twist.twist.linear.x = vel[0];
-    bodyOdom.twist.twist.linear.y = vel[1];
-    bodyOdom.twist.twist.linear.z = vel[2];
+    bodyOdom.twist.twist.linear.x = d->qvel[0];
+    bodyOdom.twist.twist.linear.y = d->qvel[1];
+    bodyOdom.twist.twist.linear.z = d->qvel[2];
 
     bodyOdom.twist.twist.angular.x = angVel[0];
     bodyOdom.twist.twist.angular.y = angVel[1];
     bodyOdom.twist.twist.angular.z = angVel[2];
-    pubGroundTruth.publish(bodyOdom);  // 发布到/ground_truth/state
-    pubOdom.publish(bodyOdom);         // 发布到/odom
-  }
+    pubOdom.publish(bodyOdom);
 
-  double velocity_pid_func(int i, double target_vel)
-  {
-    double cur_vel = d->qvel[6 + i];
-    // std::cout << "i: " << i << "  cur_vel:  " << cur_vel << std::endl;
-    double error = target_vel - cur_vel;
+    for (const auto& name : body_names_to_publish) {
+      int id = mj_name2id(m, mjOBJ_BODY, name.c_str());
+      if (id < 0) {
+        continue; // body 不存在就跳过
+      }
 
-    double torque = 120 * error;
-    // std::cout << "i: " << i << "  torque:  " << torque << std::endl;
-    return torque;
-  }
+      // 获取位置
+      const mjtNum* pos = d->xpos + 3 * id;
+      const mjtNum* quat = d->xquat + 4 * id;
 
-  void updateWheelVel_VectorContorl(Eigen::Vector3d& cmd_vel)
-  {
-    const double wheel_radius = 0.075;  // 底盘轮子半径
-    const double robot_x_dis = 0.253; // 机器人中心到轮子的距离
-    const double robot_y_dis = 0.1785; // 机器人中心到轮子的距离
+      geometry_msgs::PoseStamped msg;
+      msg.header.stamp = ros::Time::now();
+      msg.header.frame_id = "odom";
+      msg.pose.position.x = pos[0];
+      msg.pose.position.y = pos[1];
+      msg.pose.position.z = pos[2];
+      msg.pose.orientation.w = quat[0];
+      msg.pose.orientation.x = quat[1];
+      msg.pose.orientation.y = quat[2];
+      msg.pose.orientation.z = quat[3];
 
-    // 四个轮子的位置（相对于底盘中心）
-    std::vector<Eigen::Vector2d> wheel_positions = {
-        Eigen::Vector2d( robot_x_dis,  robot_y_dis), // 左前轮 (x+, y+)
-        Eigen::Vector2d( robot_x_dis, -robot_y_dis), // 右前轮 (x+, y-)
-        Eigen::Vector2d(-robot_x_dis,  robot_y_dis), // 左后轮 (x-, y+)
-        Eigen::Vector2d(-robot_x_dis, -robot_y_dis)  // 右后轮 (x-, y-)
-    };
-    
-    for(int i = 0; i < 4; i++)
-    {
-      // 计算对应轮子的旋转速度，
-      Eigen::Vector2d rotational_vel(-wheel_positions[i].y() * cmd_vel[2], 
-                                      wheel_positions[i].x() * cmd_vel[2]);
-      
-      // 计算对应轮子的总速度矢量， x 总指向机器人的正前方
-      Eigen::Vector2d wheel_vel(cmd_vel[0] + rotational_vel.x(), 
-                                 cmd_vel[1] + rotational_vel.y());
-
-      // 3. 计算轮子的转向角度（yaw）
-      double wheel_yaw = std::atan2(wheel_vel.y(), wheel_vel.x());
-      
-      // 4. 计算轮子的转速（模长）
-      double wheel_speed = wheel_vel.norm();
-      
-      // 5. 设置电机控制
-      d->qpos[7 + i*2] = wheel_yaw;                    // 设置转向角度
-      d->ctrl[i*2 + 1] = velocity_pid_func(i*2 + 1, wheel_speed / wheel_radius);
+      body_pose_publishers[name].publish(msg);
     }
+    read_gripper_states(d);
+    publish_gripper_joint_states();
   }
-
-  void updateWheelVel_VectorContorl_omniWheel(Eigen::Vector3d& cmd_vel)
-  {
-    const double wheel_radius = 0.13035;  // 底盘轮子半径
-    const double robot_x_dis = 0.232489;  // 机器人中心到轮子的距离
-    const double robot_y_dis = 0.232489;  // 机器人中心到轮子的距离
-
-    // cmd_vel: [vx, vy, omega] - 机器人本体系速度和角速度
-    // 四个轮子的位置（相对于底盘中心）
-    std::vector<Eigen::Vector2d> wheel_positions = {
-        Eigen::Vector2d( robot_x_dis,  robot_y_dis), // 左前轮 (x+, y+)
-        Eigen::Vector2d( robot_x_dis, -robot_y_dis), // 右前轮 (x+, y-)
-        Eigen::Vector2d(-robot_x_dis,  robot_y_dis), // 左后轮 (x-, y+)
-        Eigen::Vector2d(-robot_x_dis, -robot_y_dis)  // 右后轮 (x-, y-)
-    };
-
-    for(int i = 0; i < 4; i++)
-    {
-      // 计算对应轮子的旋转速度，
-      Eigen::Vector2d rotational_vel(-wheel_positions[i].y() * cmd_vel[2], 
-                                      wheel_positions[i].x() * cmd_vel[2]);
-      
-      // 计算对应轮子的总速度矢量， x 总指向机器人的正前方
-      Eigen::Vector2d wheel_vel(cmd_vel[0] + rotational_vel.x(), 
-                                 cmd_vel[1] + rotational_vel.y());
-
-      // 3. 计算轮子的转向角度（yaw）
-      double wheel_yaw = std::atan2(wheel_vel.y(), wheel_vel.x());
-      
-      // 4. 计算轮子的转速（模长）
-      double wheel_speed = wheel_vel.norm();
-      
-      // 5. 设置电机控制
-      d->qpos[7 + i*2] = wheel_yaw;                    // 设置转向角度
-      d->ctrl[i*2 + 1] = velocity_pid_func(i*2 + 1, wheel_speed / wheel_radius);
-    }
-
-  }
-
   // simulate in background thread (while rendering in main thread)
   void PhysicsLoop(mj::Simulate &sim)
   {
@@ -732,7 +860,6 @@ namespace
       controlCommands.pop();
     }
     joint_tau_cmd = std::vector<double>(numJoints, 0);
-    claw_cmd = std::vector<double>(numClawJoints, 0);
     queueMutex.unlock();
     uint64_t step_count = 0;
     sim_time = ros::Time::now();
@@ -740,6 +867,37 @@ namespace
     ros::Rate loop_rate(frequency);
     while (!sim.exitrequest.load())
     {
+      // if (sim.droploadrequest.load()) {
+
+      //   sim.LoadMessage(sim.dropfilename);
+      //   mjModel* mnew = LoadModel(sim.dropfilename, sim);
+      //   sim.droploadrequest.store(false);
+
+      //   mjData* dnew = nullptr;
+      //   if (mnew) dnew = mj_makeData(mnew);
+      //   if (dnew) {
+      //     sim.Load(mnew, dnew, sim.dropfilename);
+
+      //     mj_deleteData(d);
+      //     mj_deleteModel(m);
+
+      //     m = mnew;
+      //     d = dnew;
+
+      //   // ********************************
+      //     InitRobotState(d);
+      //   // ********************************
+      //     mj_forward(m, d);
+
+      //     // allocate ctrlnoise
+      //     free(ctrlnoise);
+      //     ctrlnoise = (mjtNum*) malloc(sizeof(mjtNum)*m->nu);
+      //     mju_zero(ctrlnoise, m->nu);
+      //   } else {
+      //     sim.LoadMessageClear();
+      //   }
+      // }
+
       if (sim.uiloadrequest.load())
       {
         std::cout << "uiloadrequest" << std::endl;
@@ -765,6 +923,10 @@ namespace
 
           mj_forward(m, d);
 
+          // allocate ctrlnoise
+          // free(ctrlnoise);
+          // ctrlnoise = static_cast<mjtNum*>(malloc(sizeof(mjtNum)*m->nu));
+          // mju_zero(ctrlnoise, m->nu);
         }
         else
         {
@@ -776,12 +938,7 @@ namespace
           controlCommands.pop();
         }
         cmd_updated = false;
-        is_chassic_cmd_changed = false;
-        is_chassic_cmd_vel_changed = false;
         joint_tau_cmd = std::vector<double>(numJoints, 0);
-
-        claw_cmd_updated = false;
-        claw_cmd = std::vector<double>(numClawJoints, 0);
         queueMutex.unlock();
       }
 
@@ -805,197 +962,89 @@ namespace
         if (m)
         {
           // running
-          if (!sim.run)
+          if (sim.run)
           {
-            mj_forward(m, d);
-            sim.speed_changed = true;
-            ROS_WARN_STREAM_THROTTLE(1.0, "Sim is not running, forward and publish data");
-            publish_ros_data(d, sim.run);
-            continue;
-          }
+            bool stepped = false;
 
-          // ************ test ****************
-          // mujocolcm.SetSend(d);
-          // mujocolcm.Send();
-          // mujocolcm.GetRecv(recvCmd);
+            // ************ test ****************
+            // mujocolcm.SetSend(d);
+            // mujocolcm.Send();
+            // mujocolcm.GetRecv(recvCmd);
 
-          // ****************************
-          // external wrench
-          if (external_wrench_updated_)
-          {
-            std::cout << "Applying external wrench!\n";
-            d->xfrc_applied[6 + 0] = external_wrench_.force.x;
-            d->xfrc_applied[6 + 1] = external_wrench_.force.y;
-            d->xfrc_applied[6 + 2] = external_wrench_.force.z;
-            d->xfrc_applied[6 + 3] = external_wrench_.torque.x;
-            d->xfrc_applied[6 + 4] = external_wrench_.torque.y;
-            d->xfrc_applied[6 + 5] = external_wrench_.torque.z;
-            external_wrench_updated_ = false;
-          }
-          // ****************************
-          // control
-          bool updated = false;
-          bool claw_updated = false;
-          queueMutex.lock();
-          if (cmd_updated || is_chassic_cmd_changed || is_chassic_cmd_vel_changed || claw_cmd_updated || pure_sim)
-          {
-            updated = true;
-          }
-          cmd_updated = false;
-          is_chassic_cmd_changed = false;
-          is_chassic_cmd_vel_changed = false;
-          claw_updated = claw_cmd_updated;
-          claw_cmd_updated = false;
-          tau_cmd = joint_tau_cmd;
-          queueMutex.unlock();
-
-          if (claw_updated)
-          {
-            for (size_t i = 0; i < numClawJoints; i++)
+            // ****************************
+            // external wrench
+            if (external_wrench_updated_)
             {
-              d->ctrl[i + 28] = claw_cmd[i];
-              // std::cout << "claw_cmd: " << claw_cmd[i] << std::endl;
+              std::cout << "Applying external wrench!\n";
+              d->xfrc_applied[6 + 0] = external_wrench_.force.x;
+              d->xfrc_applied[6 + 1] = external_wrench_.force.y;
+              d->xfrc_applied[6 + 2] = external_wrench_.force.z;
+              d->xfrc_applied[6 + 3] = external_wrench_.torque.x;
+              d->xfrc_applied[6 + 4] = external_wrench_.torque.y;
+              d->xfrc_applied[6 + 5] = external_wrench_.torque.z;
+              external_wrench_updated_ = false;
             }
-          }
+            // ****************************
+            // control
+            bool updated = false;
+            queueMutex.lock();
+            // cmd_updated = !controlCommands.empty();
+            // if (cmd_updated)
+            // {
+            //   tau_cmd = controlCommands.front(); // 按顺序取值
+            //   // tau_cmd = controlCommands.back(); // 取最新的值
+            //   controlCommands.pop();
+            // }
+            updated = cmd_updated;
+            cmd_updated = false;
+            tau_cmd = joint_tau_cmd;
+            queueMutex.unlock();
+            if (updated)
+            {
+              std::lock_guard<std::mutex> gripper_lock(gripper_mutex);
+              if (gripper_cmd.updated) {
+                // 左夹爪控制
+                if (left_gripper_actuator_id >= 0) {
+                  d->ctrl[left_gripper_actuator_id] = gripper_cmd.left_cmd;
+                }
+                // 右夹爪控制
+                if (right_gripper_actuator_id >= 0) {
+                  d->ctrl[right_gripper_actuator_id] = gripper_cmd.right_cmd;
+                }
+                gripper_cmd.updated = false;
+              }
+              std::lock_guard<std::mutex> belt_lock(belt_mutex);
+              if (belt_speed_updated && belt_actuator_id >= 0) {
+                d->ctrl[belt_actuator_id] = belt_speed_cmd;
+                belt_speed_updated = false;
+              }
+              // update actuators/controls
+              auto updateControl = [&](const JointGroupAddress& jointAddr, int &i) {
+                  for (auto iter = jointAddr.ctrladr().begin(); iter != jointAddr.ctrladr().end(); iter++) {
+                      d->ctrl[*iter] = tau_cmd[i++];
+                  }
+              };
+              int i = 0;
+              updateControl(LLegJointsAddr, i);
+              updateControl(RLegJointsAddr, i);
+              updateControl(WaistJointsAddr, i);
+              updateControl(LArmJointsAddr, i);
+              updateControl(RArmJointsAddr, i);
+              updateControl(HeadJointsAddr, i);
+              // updateControl(GRIPJointsAddr, i);
+              // Dexhand: ctrl/command
+              if(g_dexhand_node) {
+                g_dexhand_node->writeCallback(d);
+              }
 
-          if (updated)
-          {
-            // update actuators/controls
-            auto updateControl = [&](const JointGroupAddress &jointAddr, int &i)
-            {
-              for (auto iter = jointAddr.ctrladr().begin(); iter != jointAddr.ctrladr().end(); iter++)
-              {
-                d->ctrl[*iter] = tau_cmd[i++];
-              }
-            };
-            int i = 0;
-            // 在半身模式下跳过腿部关节的控制
-            if (!leg_joints_constrained)
-            {
-              if (robot_type == 2)
-              {
-                updateControl(LLegJointsAddr, i);
-                updateControl(RLegJointsAddr, i);
-                updateControl(WaistJointsAddr, i);
-              }
-              else if (robot_type == 1)
-              {
-                if(robotVersion_ == 60)
-                {
-                  updateWheelVel_VectorContorl(cmd_vel_chassis);
-                  updateControl(LegJointsAddr, i);
-                }
-                else if(robotVersion_ == 61)
-                {
-                  updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
-                  updateControl(LegJointsAddr, i);
-                }
-              }
-              else
-              {
-                std::cout << "[mujoco_node] Unknown robot_type param, please set to 1 (轮臂) or 2 (双足)!" << std::endl;
-                return;
-              }
+              mj_step(m, d);
+              step_count++;
+              sim_time += ros::Duration(1 / frequency);
+              sim.AddToHistory();
+              
+              // 更新按钮状态（检测碰撞、变色）
+              updateButtonStates(m, d);
             }
-            else
-            {
-              // 跳过腿部关节的控制输入，但需要更新索引
-              // 在半身模式下，对于人形机器人版本，还需跳过腰部关节
-              i += LLegJointsAddr.ctrladr().size() + RLegJointsAddr.ctrladr().size();
-              if (robot_type == 2)
-              {
-                // 跳过腰部关节
-                i += WaistJointsAddr.ctrladr().size();
-              }
-            }
-
-            updateControl(LArmJointsAddr, i);
-            updateControl(RArmJointsAddr, i);
-            updateControl(HeadJointsAddr, i);
-
-            // Dexhand: ctrl/command
-            if (g_dexhand_node)
-            {
-              g_dexhand_node->writeCallback(d);
-            }
-
-            // 如果躯干被约束，在每步后强制固定躯干位置和姿态
-            if (torso_constrained)
-            {
-              d->qpos[0] = fixed_torso_pos[0];  // x position
-              d->qpos[1] = fixed_torso_pos[1];  // y position
-              d->qpos[2] = fixed_torso_pos[2];  // z position
-              d->qpos[3] = fixed_torso_quat[0]; // w quaternion
-              d->qpos[4] = fixed_torso_quat[1]; // x quaternion
-              d->qpos[5] = fixed_torso_quat[2]; // y quaternion
-              d->qpos[6] = fixed_torso_quat[3]; // z quaternion
-
-              // 同时固定躯干的速度为0
-              d->qvel[0] = 0; // x velocity
-              d->qvel[1] = 0; // y velocity
-              d->qvel[2] = 0; // z velocity
-              d->qvel[3] = 0; // x angular velocity
-              d->qvel[4] = 0; // y angular velocity
-              d->qvel[5] = 0; // z angular velocity
-            }
-
-            // 如果腿部关节被约束，在每步后强制固定腿部关节位置并停止控制
-            if (leg_joints_constrained)
-            {
-              // 固定左腿关节位置
-              if (!fixed_leg_l_qpos.empty() && !LLegJointsAddr.qposadr().invalid())
-              {
-                size_t idx = 0;
-                for (auto iter = LLegJointsAddr.qposadr().begin();
-                     iter != LLegJointsAddr.qposadr().end() && idx < fixed_leg_l_qpos.size();
-                     iter++, idx++)
-                {
-                  d->qpos[*iter] = fixed_leg_l_qpos[idx];
-                }
-
-                // 固定左腿关节速度为0
-                for (auto iter = LLegJointsAddr.qdofadr().begin(); iter != LLegJointsAddr.qdofadr().end(); iter++)
-                {
-                  d->qvel[*iter] = 0;
-                }
-
-                // 停止左腿关节控制输入
-                for (auto iter = LLegJointsAddr.ctrladr().begin(); iter != LLegJointsAddr.ctrladr().end(); iter++)
-                {
-                  d->ctrl[*iter] = 0;
-                }
-              }
-
-              // 固定右腿关节位置
-              if (!fixed_leg_r_qpos.empty() && !RLegJointsAddr.qposadr().invalid())
-              {
-                size_t idx = 0;
-                for (auto iter = RLegJointsAddr.qposadr().begin();
-                     iter != RLegJointsAddr.qposadr().end() && idx < fixed_leg_r_qpos.size();
-                     iter++, idx++)
-                {
-                  d->qpos[*iter] = fixed_leg_r_qpos[idx];
-                }
-
-                // 固定右腿关节速度为0
-                for (auto iter = RLegJointsAddr.qdofadr().begin(); iter != RLegJointsAddr.qdofadr().end(); iter++)
-                {
-                  d->qvel[*iter] = 0;
-                }
-
-                // 停止右腿关节控制输入
-                for (auto iter = RLegJointsAddr.ctrladr().begin(); iter != RLegJointsAddr.ctrladr().end(); iter++)
-                {
-                  d->ctrl[*iter] = 0;
-                }
-              }
-            }
-
-            mj_step(m, d);
-            step_count++;
-            sim_time += ros::Duration(1 / frequency);
-            sim.AddToHistory();
-
             // // record cpu time at start of iteration
             // const auto startCPU = mj::Simulate::Clock::now();
 
@@ -1037,7 +1086,7 @@ namespace
             //   // run single step, let next iteration deal with timing
             //   mj_step(m, d);
             //   std::cout << "step" << std::endl;
-            //   bool stepped = true;
+            //   stepped = true;
             // }
 
             // // in-sync: step until ahead of cpu
@@ -1078,6 +1127,12 @@ namespace
             //   sim.AddToHistory();
             // }
           }
+          else // paused
+          {
+            // run mj_forward, to update rendering and joint sliders
+            mj_forward(m, d);
+            sim.speed_changed = true;
+          }
           publish_ros_data(d, sim.run);
         }
       } // release std::lock_guard<std::mutex>
@@ -1091,6 +1146,11 @@ namespace
 bool handleSimStart(std_srvs::SetBool::Request &req,
                     std_srvs::SetBool::Response &res)
 {
+  // 发布违规监控事件
+  std_msgs::String cheat_msg;
+  cheat_msg.data = "sim_start";
+  cheatMonitorPub.publish(cheat_msg);
+
   if (req.data)
   {
     ROS_INFO("Received sim_start request: true");
@@ -1104,42 +1164,6 @@ bool handleSimStart(std_srvs::SetBool::Request &req,
   sim->run = req.data;
   return true;
 }
-#ifdef USE_DDS
-void ddsLowCmdCallback(const unitree_hg::msg::dds_::LowCmd_& cmd)
-{
-  // Convert DDS LowCmd to MuJoCo joint commands
-  std::vector<double> tau(numJoints, 0.0);
-  
-  // Map motor commands to joint torques (first 28 motors)
-  size_t joint_count = std::min((size_t)numJoints, KUAVO_JOINT_COUNT);
-  for (size_t i = 0; i < joint_count && i < cmd.motor_cmd().size(); ++i) {
-    const auto& motor_cmd = cmd.motor_cmd()[i];
-    tau[i] = static_cast<double>(motor_cmd.tau());
-  }
-  
-  std::lock_guard<std::mutex> lock(queueMutex);
-  joint_tau_cmd = tau;
-  cmd_updated = true;
-  
-}
-#elif defined(USE_LEJU_DDS)
-void lejuDdsLowCmdCallback(const leju::msgs::JointCmd& cmd)
-{
-  // Convert LEJU DDS JointCmd to MuJoCo joint commands
-  std::vector<double> tau(numJoints, 0.0);
-
-  // Map joint commands to joint torques
-  size_t joint_count = std::min((size_t)numJoints, cmd.tau().size());
-  for (size_t i = 0; i < joint_count; ++i) {
-    tau[i] = static_cast<double>(cmd.tau()[i]);
-  }
-
-  std::lock_guard<std::mutex> lock(queueMutex);
-  joint_tau_cmd = tau;
-  cmd_updated = true;
-}
-#endif
-
 void jointCmdCallback(const kuavo_msgs::jointCmd::ConstPtr &msg)
 {
    auto is_match_size = [&](size_t size)
@@ -1156,16 +1180,16 @@ void jointCmdCallback(const kuavo_msgs::jointCmd::ConstPtr &msg)
 
   if (!is_match_size(numJoints))
   {
-      ROS_WARN_STREAM_THROTTLE(1.0, "jointCmdCallback Error: joint_q, joint_v, tau, tau_ratio, control_modes, joint_kp, joint_kd size not match!");
-      ROS_WARN_STREAM_THROTTLE(1.0, "desired size: " << numJoints);
-      ROS_WARN_STREAM_THROTTLE(1.0, "joint_q size: " << msg->joint_q.size());
-      ROS_WARN_STREAM_THROTTLE(1.0, "joint_v size: " << msg->joint_v.size());
-      ROS_WARN_STREAM_THROTTLE(1.0, "tau size: " << msg->tau.size());
-      ROS_WARN_STREAM_THROTTLE(1.0, "tau_ratio size: " << msg->tau_ratio.size());
-      ROS_WARN_STREAM_THROTTLE(1.0, "control_modes size: " << msg->control_modes.size());
-      ROS_WARN_STREAM_THROTTLE(1.0, "tau_max size: " << msg->tau_max.size());
-      ROS_WARN_STREAM_THROTTLE(1.0, "joint_kp size: " << msg->joint_kp.size());
-      ROS_WARN_STREAM_THROTTLE(1.0, "joint_kd size: " << msg->joint_kd.size());
+      std::cerr << "jointCmdCallback Error: joint_q, joint_v, tau, tau_ratio, control_modes, joint_kp, joint_kd size not match!" << std::endl;
+      std::cerr << "desire size:" << numJoints << std::endl;
+      std::cerr << "joint_q size:" << msg->joint_q.size() << std::endl;
+      std::cerr << "joint_v size:" << msg->joint_v.size() << std::endl;
+      std::cerr << "tau size:" << msg->tau.size() << std::endl;
+      std::cerr << "tau_ratio size:" << msg->tau_ratio.size() << std::endl;
+      std::cerr << "control_modes size:" << msg->control_modes.size() << std::endl;
+      std::cerr << "tau_max size:" << msg->tau_max.size() << std::endl;
+      std::cerr << "joint_kp size:" << msg->joint_kp.size() << std::endl;
+      std::cerr << "joint_kd size:" << msg->joint_kd.size() << std::endl;
       return;
   }
   
@@ -1181,42 +1205,226 @@ void jointCmdCallback(const kuavo_msgs::jointCmd::ConstPtr &msg)
   cmd_updated = true;
 }
 
-void clawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg)
+// 添加设置物体位置的服务回调函数
+bool setObjectPositionCallback(kuavo_msgs::SetObjectPosition::Request &req,
+                                kuavo_msgs::SetObjectPosition::Response &res)
 {
-  //std::cout << "Received lejuClawCommand: " << msg->data.position[0] << std::endl;
+  // 发布违规监控事件
+  std_msgs::String cheat_msg;
+  cheat_msg.data = "set_object_position";
+  cheatMonitorPub.publish(cheat_msg);
+
+  if (!m || !d) {
+    res.success = false;
+    res.message = "MuJoCo model or data not initialized";
+    ROS_ERROR("MuJoCo model or data not initialized");
+    return true;
+  }
+
+  // 查找物体ID
+  int body_id = mj_name2id(m, mjOBJ_BODY, req.object_name.c_str());
+  if (body_id < 0) {
+    res.success = false;
+    res.message = "Object '" + req.object_name + "' not found in the model";
+    ROS_ERROR("Object '%s' not found in the model", req.object_name.c_str());
+    return true;
+  }
+
+  // 获取物体在qpos中的地址
+  int joint_id = mj_name2id(m, mjOBJ_JOINT, req.object_name.c_str());
+  if (joint_id < 0) {
+    res.success = false;
+    res.message = "Joint for object '" + req.object_name + "' not found. Object might be fixed.";
+    ROS_ERROR("Joint for object '%s' not found. Object might be fixed.", req.object_name.c_str());
+    return true;
+  }
+
+  int qpos_addr = m->jnt_qposadr[joint_id];
+  if (qpos_addr < 0) {
+    res.success = false;
+    res.message = "Invalid qpos address for object '" + req.object_name + "'";
+    ROS_ERROR("Invalid qpos address for object '%s'", req.object_name.c_str());
+    return true;
+  }
+
+  try {
+    // 锁定仿真以安全修改
+    const std::unique_lock<std::recursive_mutex> lock(sim->mtx);
+    
+    double x, y, z;
+    double qw, qx, qy, qz;
+    
+    if (req.randomize) {
+      // 使用随机位置
+      std::uniform_real_distribution<double> x_dist(req.x_min, req.x_max);
+      std::uniform_real_distribution<double> y_dist(req.y_min, req.y_max);
+      std::uniform_real_distribution<double> z_dist(req.z_min, req.z_max);
+      
+      x = x_dist(gen);
+      y = y_dist(gen);
+      z = z_dist(gen);
+      
+      // 如果没有指定姿态，保持原有姿态
+      if (req.orientation.w == 0 && req.orientation.x == 0 && 
+          req.orientation.y == 0 && req.orientation.z == 0) {
+        qw = d->qpos[qpos_addr + 3];
+        qx = d->qpos[qpos_addr + 4];
+        qy = d->qpos[qpos_addr + 5];
+        qz = d->qpos[qpos_addr + 6];
+      } else {
+        qw = req.orientation.w;
+        qx = req.orientation.x;
+        qy = req.orientation.y;
+        qz = req.orientation.z;
+      }
+    } else {
+      // 使用指定位置
+      x = req.position.x;
+      y = req.position.y;
+      z = req.position.z;
+      
+      if (req.orientation.w == 0 && req.orientation.x == 0 && 
+          req.orientation.y == 0 && req.orientation.z == 0) {
+        // 保持原有姿态
+        qw = d->qpos[qpos_addr + 3];
+        qx = d->qpos[qpos_addr + 4];
+        qy = d->qpos[qpos_addr + 5];
+        qz = d->qpos[qpos_addr + 6];
+      } else {
+        qw = req.orientation.w;
+        qx = req.orientation.x;
+        qy = req.orientation.y;
+        qz = req.orientation.z;
+      }
+    }
+
+    // 设置位置 (x, y, z)
+    d->qpos[qpos_addr + 0] = x;
+    d->qpos[qpos_addr + 1] = y;
+    d->qpos[qpos_addr + 2] = z;
+    
+    // 设置姿态 (quaternion: w, x, y, z)
+    d->qpos[qpos_addr + 3] = qw;
+    d->qpos[qpos_addr + 4] = qx;
+    d->qpos[qpos_addr + 5] = qy;
+    d->qpos[qpos_addr + 6] = qz;
+    
+    // 清零速度
+    int dof_addr = m->jnt_dofadr[joint_id];
+    if (dof_addr >= 0) {
+      for (int i = 0; i < 6; i++) {  // 6DOF (3 linear + 3 angular)
+        if (dof_addr + i < m->nv) {
+          d->qvel[dof_addr + i] = 0.0;
+        }
+      }
+    }
+    
+    // 更新仿真状态
+    mj_forward(m, d);
+    
+    // 准备响应
+    res.success = true;
+    res.message = "Object '" + req.object_name + "' position updated successfully";
+    res.final_position.x = x;
+    res.final_position.y = y;
+    res.final_position.z = z;
+    
+    ROS_INFO("Object '%s' moved to position (%.3f, %.3f, %.3f) with quaternion (%.3f, %.3f, %.3f, %.3f)", 
+              req.object_name.c_str(), x, y, z, qw, qx, qy, qz);
+              
+  } catch (const std::exception& e) {
+    res.success = false;
+    res.message = "Error updating object position: " + std::string(e.what());
+    ROS_ERROR("Error updating object position: %s", e.what());
+  }
   
-  // Check if the message has the expected size
-  if (msg->data.position.size() < numClawJoints) {
-    std::cerr << "Error: lejuClawCommand position size (" << msg->data.position.size() 
-              << ") is less than expected numClawJoints (" << numClawJoints << ")" << std::endl;
+  return true;
+}
+
+
+// 设置按钮亮暗状态的服务回调
+bool setButtonStateCallback(kuavo_msgs::SetButtonState::Request &req,
+                             kuavo_msgs::SetButtonState::Response &res)
+{
+  // 发布违规监控事件
+  std_msgs::String cheat_msg;
+  cheat_msg.data = "set_button_state";
+  cheatMonitorPub.publish(cheat_msg);
+
+  if (!m) {
+    res.success = false;
+    res.message = "Model not loaded";
+    return true;
+  }
+
+  // 查找按钮
+  for (auto& btn : button_states) {
+    const char* name = mj_id2name(m, mjOBJ_GEOM, btn.geom_id);
+    if (name && std::string(name) == req.button_name) {
+      btn.is_bright = req.is_bright;
+      btn.pressed = false;
+      if (btn.mat_id >= 0) {
+        if (req.is_bright) {
+          m->mat_emission[btn.mat_id] = 0.8;
+          for (int j = 0; j < 3; j++) {
+            m->mat_rgba[btn.mat_id * 4 + j] = btn.original_rgba[j];
+          }
+        } else {
+          m->mat_emission[btn.mat_id] = 0.0;
+          for (int j = 0; j < 3; j++) {
+            m->mat_rgba[btn.mat_id * 4 + j] = btn.original_rgba[j] * 0.15f;
+          }
+        }
+      }
+      res.success = true;
+      res.message = "Button '" + req.button_name + "' set to " + (req.is_bright ? "bright" : "dark");
+      ROS_INFO("[Button] %s: set to %s", req.button_name.c_str(), req.is_bright ? "bright" : "dark");
+      return true;
+    }
+  }
+
+  res.success = false;
+  res.message = "Button '" + req.button_name + "' not found";
+  ROS_WARN("[Button] %s: not found", req.button_name.c_str());
+  return true;
+}
+
+
+void gripperJointCommandCallback(const sensor_msgs::JointState::ConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(gripper_mutex);
+  
+  // 检查消息格式
+  if (msg->name.size() != 2 || msg->position.size() != 2) {
+    ROS_WARN("Invalid gripper joint command message format. Expected 2 joints with positions.");
     return;
   }
   
-  std::vector<double> tem(numClawJoints);
-  for (size_t i = 0; i < numClawJoints; i++)
-  {
-    // Convert position from percentage (0-100) to appropriate range for MuJoCo
-    // Assuming 0 = fully closed, 100 = fully open
-    // Map to range [0, 1] for MuJoCo control
-    // Convert position from percentage (0-100) to appropriate range for MuJoCo
-    // Assuming 0 = fully closed, 100 = fully open
-    // Map to range [-100, 0] for MuJoCo control
-    double raw_value = msg->data.position[i] - 100.0;
-    // Clamp to valid range to prevent issues
-    tem[i] = std::max(-100.0, std::min(0.0, raw_value));
-    
-    // Debug output for first few iterations
-    static int debug_count = 0;
-    if (debug_count < 10) {
-      std::cout << "Claw cmd[" << i << "]: input=" << msg->data.position[i] 
-                << ", raw=" << raw_value << ", clamped=" << tem[i] << std::endl;
+  // 查找左右夹爪关节
+  bool left_found = false, right_found = false;
+  
+  for (size_t i = 0; i < msg->name.size(); i++) {
+    if (msg->name[i] == "left_gripper_joint") {
+      gripper_cmd.left_cmd = std::max(0.0, std::min(255.0, msg->position[i]));
+      left_found = true;
+    } else if (msg->name[i] == "right_gripper_joint") {
+      gripper_cmd.right_cmd = std::max(0.0, std::min(255.0, msg->position[i]));
+      right_found = true;
     }
-    debug_count++;
   }
-
-  std::lock_guard<std::mutex> lock(queueMutex);
-  claw_cmd = tem;
-  claw_cmd_updated = true;
+  
+  if (left_found && right_found) {
+    gripper_cmd.updated = true;
+    // ROS_INFO("Gripper joint commands received - Left: %.2f, Right: %.2f", 
+    //          gripper_cmd.left_cmd, gripper_cmd.right_cmd);
+  } else {
+    ROS_WARN("Missing gripper joint names in command. Expected 'left_gripper_joint' and 'right_gripper_joint'");
+  }
+}
+void beltSpeedCallback(const geometry_msgs::Vector3Stamped::ConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(belt_mutex);
+  belt_speed_cmd = std::max(-0.1, std::min(0.1, msg->vector.x)); // 限制范围 -0.1 到 0.1 m/s
+  belt_speed_updated = true;
+  ROS_INFO("Belt speed command: %.3f m/s", belt_speed_cmd);
 }
 
 void extWrenchCallback(const geometry_msgs::Wrench::ConstPtr &msg)
@@ -1245,81 +1453,9 @@ void apply_wrench_to_link(mjModel* m, mjData* d, const char* link_name, const mj
   d->xfrc_applied[6 * link_index + 5] = torque[2]; // 劳动 z
 }
 
-void chassicPoseCallback(const geometry_msgs::Pose::ConstPtr &msg)
-{
-  // 获取chassic_link的qpos地址（前7个元素：3个位置 + 4个四元数）
-  // 注意：freejoint的qpos格式是 [x, y, z, qw, qx, qy, qz]
-  
-  std::lock_guard<std::mutex> lock(queueMutex);
-  
-  // 设置位置 (x, y, z)
-  d->qpos[0] = msg->position.x;
-  d->qpos[1] = msg->position.y; 
-  d->qpos[2] = msg->position.z;
-  
-  // 设置姿态四元数 (qw, qx, qy, qz)
-  d->qpos[3] = msg->orientation.w;
-  d->qpos[4] = msg->orientation.x;
-  d->qpos[5] = msg->orientation.y;
-  d->qpos[6] = msg->orientation.z;
-  
-  // 调用前向动力学更新物理状态
-  // mj_step(m, d);
-  is_chassic_cmd_changed = true;
-}
-
-void cmdVelCallback(const geometry_msgs::Twist::ConstPtr &msg)
-{
-  std::lock_guard<std::mutex> lock(queueMutex);
-
-  cmd_vel_chassis[0] = msg->linear.x; // 线速度 x
-  cmd_vel_chassis[1] = msg->linear.y; // 线速度 y
-  cmd_vel_chassis[2] = msg->angular.z; // 角速度 z
-  
-  // 调用前向动力学更新物理状态
-  // mj_step(m, d);
-  // is_chassic_cmd_vel_changed = true;
-  
-  // std::cout << "Set chassic_link vel to: vel(" 
-  //           << msg->linear.x << ", " << msg->linear.y << ", " << msg->angular.z << ")" << std::endl;
-}
-
-void chassicPoseForceCallback(const geometry_msgs::Pose::ConstPtr &msg)
-{
-  // 通过施加外力来控制chassic_link的位置
-  // 这种方法更平滑，不会造成突然的位置跳变
-  
-  // 计算当前位置和目标位置的差异
-  double pos_error_x = msg->position.x - d->qpos[0];
-  double pos_error_y = msg->position.y - d->qpos[1];
-  double pos_error_z = msg->position.z - d->qpos[2];
-  
-  // 简单的PD控制器参数 - 增加控制力
-  double kp_pos = 5000.0;  // 位置增益 - 增加5倍
-  double kd_pos = 500.0;   // 速度增益 - 增加5倍
-  
-  // 计算控制力
-  double force_x = kp_pos * pos_error_x - kd_pos * d->qvel[0];
-  double force_y = kp_pos * pos_error_y - kd_pos * d->qvel[1];
-  double force_z = kp_pos * pos_error_z - kd_pos * d->qvel[2];
-  
-  // 施加外力到chassic_link (body index = 0)
-  d->xfrc_applied[6 * 0 + 0] = force_x;  // 力 x
-  d->xfrc_applied[6 * 0 + 1] = force_y;  // 力 y
-  d->xfrc_applied[6 * 0 + 2] = force_z;  // 力 z
-  d->xfrc_applied[6 * 0 + 3] = 0.0;      // 力矩 x
-  d->xfrc_applied[6 * 0 + 4] = 0.0;      // 力矩 y
-  d->xfrc_applied[6 * 0 + 5] = 0.0;      // 力矩 z
-  
-  std::cout << "Applied force to chassic_link: (" 
-            << force_x << ", " << force_y << ", " << force_z 
-            << ") for target pos(" << msg->position.x << ", " 
-            << msg->position.y << ", " << msg->position.z << ")" << std::endl;
-}
-
 //-----------------------m--------------- physics_thread --------------------------------------------
 
-void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_body = false)
+void PhysicsThread(mj::Simulate *sim, const char *filename)
 {
   // request loadmodel if file given (otherwise drag-and-drop)
   if (filename != nullptr)
@@ -1329,31 +1465,23 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
     if (m)
       d = mj_makeData(m);
     m->opt.timestep = 1 / frequency;
-  
-    if (robot_type == 2) 
-    {
-      std::cout << "LLeg joints size: " << LLegJointsAddr.qdofadr().size() << std::endl;
-      std::cout << "RLeg joints size: " << RLegJointsAddr.qdofadr().size() << std::endl;
-      std::cout << "Waist joints size: " << WaistJointsAddr.qdofadr().size() << std::endl;
-      std::cout << "LArm joints size: " << LArmJointsAddr.qdofadr().size() << std::endl;
-      std::cout << "RArm joints size: " << RArmJointsAddr.qdofadr().size() << std::endl;
-      std::cout << "Head joints size: " << HeadJointsAddr.qdofadr().size() << std::endl;
-    } 
-    else if (robot_type == 1) 
-    {
-      numWheels += WheelJointsAddr.qdofadr().size();
-      std::cout << "Leg joints size: " << LegJointsAddr.qdofadr().size() << std::endl;
-      std::cout << "Wheel joints size: " << WheelJointsAddr.qdofadr().size() << std::endl;
-    }
-    else 
-    {
-      std::cout << "[mujoco_node] Unknown robot_type param, please set to 1 (轮臂) or 2 (双足)!" << std::endl;
-      return;
-    }
     
+    // Init numJoints
+    numJoints = 0;
+    std::cout << "LLeg joints size: " << LLegJointsAddr.qdofadr().size() << std::endl;
+    std::cout << "RLeg joints size: " << RLegJointsAddr.qdofadr().size() << std::endl;
+    std::cout << "Waist joints size: " << WaistJointsAddr.qdofadr().size() << std::endl;
+    std::cout << "LArm joints size: " << LArmJointsAddr.qdofadr().size() << std::endl;
+    std::cout << "RArm joints size: " << RArmJointsAddr.qdofadr().size() << std::endl;
+    std::cout << "Head joints size: " << HeadJointsAddr.qdofadr().size() << std::endl;
+    numJoints += LLegJointsAddr.qdofadr().size();
+    numJoints += RLegJointsAddr.qdofadr().size();
+    numJoints += WaistJointsAddr.qdofadr().size();
+    numJoints += LArmJointsAddr.qdofadr().size();
+    numJoints += RArmJointsAddr.qdofadr().size();
+    numJoints += HeadJointsAddr.qdofadr().size();
     std::cout << "\033[32mnumJoints: " << (m->nq - 7) << "\033[0m" << std::endl;
     std::cout << "\033[32mnumJoints(without dexhand): " << numJoints << "\033[0m" << std::endl;
-    std::cout << "\033[32mtotal qpos (m->nq): " << m->nq << "\033[0m" << std::endl;
 
     if (d)
     {
@@ -1361,72 +1489,11 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
       init_cmd(d);
       qpos_init.resize(m->nq);
       std::fill(qpos_init.begin(), qpos_init.end(), 0);
-      if (robot_type == 1)
-      {
-        qpos_init[2] = 0.0;// 初始化轮臂位置 - 设置在地面
-      }
-      else
-      {
-        qpos_init[2] = 0.99;// 初始化双足位置
-      }
+      qpos_init[2] = 0.99;// 初始化位置
       InitRobotState(d);
       // ********************************
       sim->Load(m, d, filename);
       mj_forward(m, d);
-
-      // 如果启用半身模式，固定躯干位置和腿部关节
-      if (only_half_up_body)
-      {
-        // 获取躯干(body)的ID
-        int torso_id = mj_name2id(m, mjOBJ_BODY, "base_link");
-        if (torso_id != -1)
-        {
-          // 记录初始位置和姿态
-          fixed_torso_pos[0] = d->qpos[0];
-          fixed_torso_pos[1] = d->qpos[1]; 
-          fixed_torso_pos[2] = d->qpos[2];
-          fixed_torso_quat[0] = d->qpos[3];
-          fixed_torso_quat[1] = d->qpos[4];
-          fixed_torso_quat[2] = d->qpos[5];
-          fixed_torso_quat[3] = d->qpos[6];
-          
-          torso_constrained = true;
-          
-          ROS_INFO("Torso position fixed at: [%.3f, %.3f, %.3f]", 
-                   fixed_torso_pos[0], fixed_torso_pos[1], fixed_torso_pos[2]);
-          ROS_INFO("Torso orientation fixed at quaternion: [%.3f, %.3f, %.3f, %.3f]", 
-                   fixed_torso_quat[0], fixed_torso_quat[1], fixed_torso_quat[2], fixed_torso_quat[3]);
-        }
-        else
-        {
-          ROS_WARN("Could not find 'base_link' body for torso constraint");
-        }
-        
-        // 固定腿部关节位置
-        if (!LLegJointsAddr.qposadr().invalid() && !RLegJointsAddr.qposadr().invalid())
-        {
-          // 初始化左腿关节固定位置
-          fixed_leg_l_qpos.clear();
-          for (auto iter = LLegJointsAddr.qposadr().begin(); iter != LLegJointsAddr.qposadr().end(); iter++) {
-            fixed_leg_l_qpos.push_back(d->qpos[*iter]);
-          }
-          
-          // 初始化右腿关节固定位置
-          fixed_leg_r_qpos.clear();
-          for (auto iter = RLegJointsAddr.qposadr().begin(); iter != RLegJointsAddr.qposadr().end(); iter++) {
-            fixed_leg_r_qpos.push_back(d->qpos[*iter]);
-          }
-          
-          leg_joints_constrained = true;
-          
-          ROS_INFO("Left leg joints fixed at %zu positions", fixed_leg_l_qpos.size());
-          ROS_INFO("Right leg joints fixed at %zu positions", fixed_leg_r_qpos.size());
-        }
-        else
-        {
-          ROS_WARN("Could not initialize leg joint constraints - joint addresses invalid");
-        }
-      }
 
       // allocate ctrlnoise
       // free(ctrlnoise);
@@ -1440,37 +1507,35 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   }
 
   sensorsPub = g_nh_ptr->advertise<kuavo_msgs::sensorsData>("/sensors_data_raw", 10);
-  pubGroundTruth = g_nh_ptr->advertise<nav_msgs::Odometry>("/ground_truth/state", 10);
-  pubOdom = g_nh_ptr->advertise<nav_msgs::Odometry>("/odom", 10);
+  pubOdom = g_nh_ptr->advertise<nav_msgs::Odometry>("/ground_truth/state", 10);
   pubTimeDiff = g_nh_ptr->advertise<std_msgs::Float64>("/monitor/time_cost/mujoco_loop_time", 10);
+  pubQpos = g_nh_ptr->advertise<std_msgs::Float64MultiArray>("/mujoco/qpos", 10);
+
+    // 添加夹爪状态发布器
+  gripperJointStatePub = g_nh_ptr->advertise<sensor_msgs::JointState>("/gripper/state", 10);
+  // 违规服务调用监控 topic
+  cheatMonitorPub = g_nh_ptr->advertise<std_msgs::String>("/cheat_monitor/service_called", 10);
+
+  // 初始化按钮状态（必须在服务注册之前，否则 set_button_state 调用时 button_states 为空）
+  initButtonStates(m);
+  g_nh_ptr->param("button_force_threshold", button_force_threshold, 5.0);
+  std::cout << "[Button] Force threshold: " << button_force_threshold << "N" << std::endl;
+
   // // 创建服务
   ros::ServiceServer service = g_nh_ptr->advertiseService("sim_start", handleSimStart);
-
+  ros::ServiceServer setObjectPositionService = g_nh_ptr->advertiseService("set_object_position", setObjectPositionCallback);
+  ros::ServiceServer setButtonStateService = g_nh_ptr->advertiseService("set_button_state", setButtonStateCallback);
   // // 创建订阅器
-  ros::Subscriber clawCmdSub = g_nh_ptr->subscribe("/leju_claw_command", 10, clawCmdCallback);
-#ifndef USE_DDS
   ros::Subscriber jointCmdSub = g_nh_ptr->subscribe("/joint_cmd", 10, jointCmdCallback);
-#endif
   ros::Subscriber extWrenchSub = g_nh_ptr->subscribe("/external_wrench", 10, extWrenchCallback);
 
-#ifdef USE_DDS
-      // 初始化DDS通信
-    std::cout << "\033[33m[MuJoCo DDS] Initializing DDS communication...\033[0m" << std::endl;
-    dds_client = std::make_unique<MujocoDdsClient<unitree_hg::msg::dds_::LowCmd_, unitree_hg::msg::dds_::LowState_>>();
-    dds_client->setLowCmdCallback(ddsLowCmdCallback);
-    dds_client->start();
-    std::cout << "\033[33m[MuJoCo DDS] DDS communication started\033[0m" << std::endl;
-#elif defined(USE_LEJU_DDS)
-    // Initialize Leju DDS communication
-    std::cout << "\033[33m[MuJoCo LEJU DDS] Initializing LEJU DDS communication...\033[0m" << std::endl;
-    dds_client = std::make_unique<MujocoDdsClient<leju::msgs::JointCmd, leju::msgs::SensorsData>>();
-    dds_client->setLowCmdCallback(lejuDdsLowCmdCallback);
-    dds_client->start();
-    std::cout << "\033[33m[MuJoCo LEJU DDS] LEJU DDS communication started\033[0m" << std::endl;
-#endif
-  ros::Subscriber chassicPoseSub = g_nh_ptr->subscribe("/chassic_pose", 10, chassicPoseCallback);
-  ros::Subscriber cmdVelSub = g_nh_ptr->subscribe("/move_base/base_cmd_vel", 10, cmdVelCallback);
-  ros::Subscriber chassicPoseForceSub = g_nh_ptr->subscribe("/chassic_pose_force", 10, chassicPoseForceCallback);
+  ros::Subscriber gripperJointCmdSub = g_nh_ptr->subscribe<sensor_msgs::JointState>("/gripper/command", 10, gripperJointCommandCallback);
+  ros::Subscriber beltSpeedSub = g_nh_ptr->subscribe<geometry_msgs::Vector3Stamped>("/belt/speed_command", 10, beltSpeedCallback);
+
+  for (const auto& name : body_names_to_publish) {
+  std::string topic_name = "/mujoco/" + name + "/pose";
+  body_pose_publishers[name] = g_nh_ptr->advertise<geometry_msgs::PoseStamped>(topic_name, 10);
+  }
 
   // 初始化灵巧手ROS
   if(!RHandJointsAddr.ctrladr().invalid()) {
@@ -1480,9 +1545,6 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
 
       int hand_joints_num = g_dexhand_node->get_hand_joints_num();
       g_nh_ptr->setParam("end_effector_joints_num", hand_joints_num);
-  }
-  else {
-    g_nh_ptr->setParam("end_effector_joints_num", 0);
   }
 
   std::cout << "[mujoco_node]: waiting for init qpos" << std::endl;
@@ -1496,46 +1558,13 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
       if (g_nh_ptr->getParam("robot_init_state_param", qpos_init_temp))
       {
         ROS_INFO("Get init qpos ");
-        // // insert waist qpos
-        // int waist_num = 0;
-        // g_nh_ptr->getParam("waistRealDof", waist_num);
-        // std::cout << "Mujoco waist_num: " << waist_num << std::endl;
-        // if (waist_num > 0)
-        // {
-        //   for (int i = 0; i < waist_num; i++)
-        //   {
-        //     qpos_init_temp.insert(qpos_init_temp.begin() + 7, 0.0);
-        //   }
-        // }
-        // waistNum = waist_num;
-        if(robot_type == 2)
+
+        for (int i = 0; i < qpos_init_temp.size(); i++)
         {
-          for (int i = 0; i < qpos_init_temp.size(); i++)
-          {
-            qpos_init[i] = qpos_init_temp[i];
-            std::cout << qpos_init_temp[i] << ", ";
-          }
-          std::cout << std::endl;
+          qpos_init[i] = qpos_init_temp[i];
+          std::cout << qpos_init_temp[i] << ", ";
         }
-        else if (robot_type == 1)
-        {
-          for (int i = 0; i < 7; i++)
-          {
-            qpos_init[i] = qpos_init_temp[i];
-            std::cout << qpos_init[i] << ", ";
-          }
-          for (int i = 7 ; i < qpos_init_temp.size(); i++)
-          {
-            qpos_init[i + 8] = qpos_init_temp[i];
-            std::cout << qpos_init[i + 8] << ", ";
-          }
-        }
-        
-        // // 根据机器人类型调整初始高度
-        // int robot_type = 2;
-        // g_nh_ptr->getParam("robot_type", robot_type);
-        // qpos_init[2] = (robot_type == 1) ? 0.195 : 0.74;
-        
+        std::cout << std::endl;
         break;
       }
       else
@@ -1544,8 +1573,10 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
         qpos_init = {-0.00505, 0.00000, 0.84414, 0.99864, 0.00000, 0.05215, -0.00000,
                      -0.01825, -0.00190, -0.52421, 0.73860, -0.31872, 0.01835, 
                      0.01825, 0.00190, -0.52421, 0.73860, -0.31872, -0.01835, 
-                     0, 0, 0, 0, 0, 0, 0, 
-                     0, 0, 0, 0, 0, 0, 0};
+                     0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 
+                     0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0};
         break;
       }
     }
@@ -1556,6 +1587,8 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   InitRobotState(d);
   sim->Load(m, d, filename);
   mj_forward(m, d);
+  
+  // 按钮状态已在服务注册前初始化，此处不再重复调用
 
   ros::Subscriber lHandExtWrenchSub = g_nh_ptr->subscribe<geometry_msgs::Wrench>("/external_wrench/left_hand", 10, [&](const geometry_msgs::Wrench::ConstPtr &msg)
       {
@@ -1613,31 +1646,6 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   }
   ROS_INFO("Mujoco Frequency: %f Hz", frequency);
   
-  // 获取only_half_up_body参数
-  bool only_half_up_body = false;
-  if (nh.hasParam("/only_half_up_body"))
-  {
-    nh.getParam("/only_half_up_body", only_half_up_body);
-    ROS_INFO("Only half up body mode: %s", only_half_up_body ? "true" : "false");
-  }
-
-  if (nh.hasParam("robot_type")) 
-  {
-    nh.getParam("robot_type", robot_type);
-    std::cout << "[mujoco_node] robot_type param: " << robot_type << std::endl;
-  }
-
-  if(nh.hasParam("robot_version"))
-  {
-    nh.getParam("robot_version", robotVersion_);
-  }
-
-  if(nh.hasParam("pure_sim"))
-  {
-    nh.getParam("pure_sim", pure_sim);
-    std::cout << "[mujoco_node] pure_sim param: " << pure_sim << std::endl;
-  }
-  
   // 获取配置文件
   if(nh.hasParam("/kuavo_configuration")) {
     std::string kuavo_configuration;
@@ -1655,35 +1663,10 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
               ROS_INFO("\033[32mEnd effector type: %s\033[0m", end_effector_type.c_str());
             }
           }
-          
-          // 解析手臂末端关节名称
-          if (config_json.contains("arm_end_joints") && config_json["arm_end_joints"].is_array()) {
-            auto arm_end_joints = config_json["arm_end_joints"];
-            if (arm_end_joints.size() >= 2) {
-              left_arm_end_joint = arm_end_joints[0].get<std::string>();
-              right_arm_end_joint = arm_end_joints[1].get<std::string>();
-              
-              ROS_INFO("\033[32mLeft arm end joint: %s\033[0m", left_arm_end_joint.c_str());
-              ROS_INFO("\033[32mRight arm end joint: %s\033[0m", right_arm_end_joint.c_str());
-            }
-          }
-          
-          // 读取NUM_JOINT参数
-          if (config_json.contains("NUM_JOINT") && config_json["NUM_JOINT"].is_number()) {
-            numJoints = config_json["NUM_JOINT"].get<size_t>();
-            ROS_INFO("\033[32mNUM_JOINT from config: %zu\033[0m", numJoints);
-          } else {
-            ROS_WARN("NUM_JOINT not found in config, using default value: %zu", numJoints);
-          }
-
       } catch (const std::exception& e) {
         ROS_ERROR("Error parsing configuration file: %s", e.what());
       }
     }
-  }
-  else
-  {
-    ROS_WARN("kuavo_configuration not found, using default value");
   }
 
   // scan for libraries in the plugin directory to load additional plugins
@@ -1724,7 +1707,7 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   // }
 
   // start physics thread
-  std::thread physicsthreadhandle(&PhysicsThread, sim.get(), filename, only_half_up_body);
+  std::thread physicsthreadhandle(&PhysicsThread, sim.get(), filename);
 
   // start simulation UI loop (blocking call)
   sim->RenderLoop();

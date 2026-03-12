@@ -2,19 +2,8 @@
     <!-- <arg name="robot_type" default="go1" doc="Robot type: [a1, aliengo, go1, laikago]"/>
      -->
     <rosparam file="$(find mujoco_cpp)/launch/defaultQpos.yaml" command="load" />
-    <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
-    <!-- robot_type: 1=轮臂, 2=双足
-         版本号规则: major=(version%100)/10, minor=version%10
-         判断方法: major==6 为轮臂，即 version%100 在[60,70)范围
-         例如: 45(major=4)->双足, 60(major=6)->轮臂, 100045(major=4)->双足, 100060(major=6)->轮臂 -->
-    <arg name="robot_type"
-         default="$(eval '1' if 60 &lt;= int(arg('robot_version')) % 100 &lt; 70 else '2')"/>
-    <param name="robot_type" value="$(arg robot_type)"/>
-    <!-- Handle version 15 special case: use version 14 scene -->
-    <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s14/xml/scene.xml" if="$(eval arg('robot_version') == 15)"/>
-    <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene.xml" unless="$(eval arg('robot_version') == 15)"/>
+    <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(optenv ROBOT_VERSION 40)/xml/scene.xml"/>
     <param name="legged_robot_scene_param" value="$(arg legged_robot_scene)" />
-
     <node name="mujoco_cpp" pkg="mujoco_cpp" type="mujoco_cpp_simulate" respawn="false"  output="screen"/>
 </launch>
  

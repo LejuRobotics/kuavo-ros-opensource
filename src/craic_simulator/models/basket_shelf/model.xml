@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="basket_shelf">
+  <asset>
+    <!-- 材质定义 -->
+    <material name="shelf_metal" rgba="0.5 0.5 0.55 1" specular="0.3" shininess="0.2"/>
+    <material name="shelf_wood" rgba="0.65 0.5 0.35 1" specular="0.1" shininess="0.1"/>
+  </asset>
+  
+  <worldbody>
+    <body name="basket_shelf">
+      <!-- 四条腿（长方体，从地面到架板） -->
+      <!-- 置物架尺寸：长0.6m(X方向), 宽0.25m(Y方向), 高0.8m(Z方向) -->
+      <!-- 腿的位置：距离中心 X方向±0.285m, Y方向±0.11m -->
+      
+      <!-- 前左腿 (X+, Y+) -->
+      <geom name="leg_fl" type="box" 
+            size="0.015 0.015 0.4" 
+            pos="0.285 0.11 0.4" 
+            material="shelf_wood"
+            mass="1"/>
+      
+      <!-- 前右腿 (X+, Y-) -->
+      <geom name="leg_fr" type="box" 
+            size="0.015 0.015 0.4" 
+            pos="0.285 -0.11 0.4" 
+            material="shelf_wood"
+            mass="1"/>
+      
+      <!-- 后左腿 (X-, Y+) -->
+      <geom name="leg_bl" type="box" 
+            size="0.015 0.015 0.4" 
+            pos="-0.285 0.11 0.4" 
+            material="shelf_wood"
+            mass="1"/>
+      
+      <!-- 后右腿 (X-, Y-) -->
+      <geom name="leg_br" type="box" 
+            size="0.015 0.015 0.4" 
+            pos="-0.285 -0.11 0.4" 
+            material="shelf_wood"
+            mass="1"/>
+      
+      <!-- 架板 (长0.6m, 宽0.25m, 厚0.015m) -->
+      <!-- size参数是半尺寸：X=0.3, Y=0.125, Z=0.0075 -->
+      <!-- 架板中心在z=0.8075，这样底部正好在z=0.8（与腿顶部贴合） -->
+      <geom name="shelf" type="box" 
+            size="0.3 0.125 0.0075" 
+            pos="0 0 0.8075" 
+            material="shelf_wood"
+            mass="2"/>
+    </body>
+  </worldbody>
+</mujoco>

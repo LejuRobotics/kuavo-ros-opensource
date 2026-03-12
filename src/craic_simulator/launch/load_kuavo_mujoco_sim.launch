@@ -1,0 +1,232 @@
+<?xml version="1.0" ?>
+
+<launch>
+
+    <!-- 输出日志格式 -->
+    <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
+
+    <arg name="output_system_info" default="true"/>
+    <arg name="vr_remote_control" default="false"/>
+    <arg name="robot_type"         default="2"/>    <!-- 1表示轮臂，2表示双足 -->
+    <arg name="rviz"                default="false" />
+    <arg name="multiplot"          default="false"/>
+    <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+
+    <arg name="urdfFile" 
+        default="$(find craic_simulator)/models/biped_s14/urdf/biped_s14.urdf" 
+        if="$(eval arg('robot_version') == 15)"/>
+    <arg name="urdfFile" 
+        default="$(find craic_simulator)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" 
+        unless="$(eval arg('robot_version') == 15)"/>
+    <arg name="kuavoConfigFile" 
+        default="$(find craic_simulator)/config/kuavo_v14/kuavo.json" 
+        if="$(eval arg('robot_version') == 15)"/>
+    <arg name="kuavoConfigFile" 
+        default="$(find craic_simulator)/config/kuavo_v$(arg robot_version)/kuavo.json" 
+        unless="$(eval arg('robot_version') == 15)"/>
+
+    <!-- load the robot version manager -->
+    <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+      <arg name="robot_version" value="$(arg robot_version)"/>
+      <arg name="rviz" value="$(arg rviz)"/>
+      <arg name="urdfFile" value="$(arg urdfFile)"/>
+      <arg name="kuavoConfigFile" value="$(arg kuavoConfigFile)"/>
+      <param name="modelPath" value="$(find craic_simulator)/models" />
+    </include>
+
+    <arg name="use_external_mpc"   default="true"/>
+    <arg name="wbc_frequency"      default="1000"/>
+    <arg name="sensor_frequency"   default="1000"/>
+    <arg name="inference_frequency" default="100"/>
+    <arg name="use_joystick"       default="false"/>
+    <arg name="with_estimation"    default="true"/>
+    <arg name="use_joint_filter"   default="false"/>
+    <arg name="estimator_type"     default="1"/>
+    <arg name="wbc_only"           default="false"/>
+    <arg name="play_back"          default="false"/>  
+    <arg name="joystick_type"      default="sim"/>
+    <arg name="arm_move_spd"      default="1.2"/>
+    <arg name="start_way"          default="manual"/>
+    <arg name="use_estimator_contact"   default="false"/>
+    <arg name="visualize_humanoid" default="true"/>
+    <arg name="only_half_up_body" default="false"/>
+    <arg name="waist_move_spd"     default="2.3"/>
+    <arg name="deformation_flag"   default="false"/>
+    <arg name="init_fall_down_state" default="false"/>
+    <!-- Set with_coredump parameter based on coredump value -->
+    <arg name="coredump" default="false"/>
+    <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
+    <arg name="with_coredump" value="" unless="$(arg coredump)"/>
+    <arg name="with_ik" default="true"/>
+    <arg name="with_mm_ik" default="false"/>
+    <arg name="joy_execute_action" default="true"/>
+
+    <!-- teach_pendant -->
+    <arg name="teach_pendant" default="0"/>
+
+    <!-- RL相关参数 -->
+    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
+    <arg name="is_rl_start" default="true" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
+
+    <!-- multiplot -->
+    <group if="$(arg multiplot)">
+      <include file="$(find humanoid_interface_ros)/launch/multiplot.launch"/>
+    </group>
+
+    <!-- make the files into global parameters -->
+    <param name="multiplot"         value="$(arg multiplot)"/>
+    <param name="wbc_only"          value="$(arg wbc_only)"/>
+    <param name="use_external_mpc"  value="$(arg use_external_mpc)"/>
+    <param name="wbc_frequency"     value="$(arg wbc_frequency)"/>
+    <param name="sensor_frequency"  value="$(arg sensor_frequency)"/>
+    <param name="inference_frequency" value="$(arg inference_frequency)"/>
+    <param name="with_estimation"   value="$(arg with_estimation)"/>
+    <param name="use_joint_filter"  value="$(arg use_joint_filter)"/>
+    <param name="estimator_type"    value="$(arg estimator_type)"/>
+    <param name="play_back"         value="$(arg play_back)"/>
+    <param name="joystick_type"  value="$(arg joystick_type)"/>
+    <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
+    <param name="start_way"  value="$(arg start_way)"/>
+    <param name="use_estimator_contact"  value="$(arg use_estimator_contact)"/>
+    <param name="only_half_up_body"   value="$(arg only_half_up_body)"/>
+    <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
+    <param name="visualize_humanoid" value="$(arg visualize_humanoid)" />
+    <param name="waist_move_spd"  value="$(arg waist_move_spd)"/>
+    <param name="deformation_flag" value="$(arg deformation_flag)"/>
+    <!-- RL相关参数 -->
+    <param name="network_model_file" value="$(arg network_model_file)"/>
+    <param name="rl_param" value="$(arg rl_param)"/>
+    <param name="is_rl_start" value="$(arg is_rl_start)"/>
+    <rosparam param="isolated_cpus">[2, 3]</rosparam>
+    <param name="enable_pull_up_protect" value="true"/>
+    <param name="pull_up_force_threshold" value="0.70"/>
+    <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
+    <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
+    <!-- Launch script to collect kuavo-launch information -->
+    <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
+    
+    <param name="teach_pendant"  value="$(arg teach_pendant)"/>
+    <!-- MPC调度相关参数 -->
+    <param name="/mpc/schedule/enable" value="false"/>
+    <param name="/mpc/schedule/start_time" value="-1.0"/>
+    <param name="/timeout_warning_ms" value="20"/>
+
+    <!-- 自动清理 .ros 文件夹参数 -->
+    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 按钮交互力阈值（牛顿），机器人按压按钮需要超过此力才会触发 -->
+    <param name="button_force_threshold" value="2.5"/>
+    
+    <!-- 机器人初始位置（必须在 nodelet_manager/Controller 之前设置，否则会被 Controller 覆盖为 (0,0,0)） -->
+    <!-- 姿态四元数 (qw, qx, qy, qz) - 绕Z轴旋转:
+         0°:   1,     0, 0, 0       (朝+X)
+         90°:  0.707, 0, 0, 0.707   (朝+Y)
+         180°: 0,     0, 0, 1       (朝-X)
+         -90°: 0.707, 0, 0, -0.707  (朝-Y)
+    -->
+    <group unless="$(arg play_back)">
+      <!-- v47: 7(free) + 6(legL) + 6(legR) + 7(armL) + 7(armR) + 2(head) = 35，无腰部关节 -->
+      <group if="$(eval arg('robot_version') != 52)">
+        <rosparam param="robot_init_state_param">[-4.75, 0.5, 0.84414, 0.707, 0, 0, 0.707, -0.01825, -0.00190, -0.52421, 0.73860, -0.31872, 0.01835, 0.01825, 0.00190, -0.52421, 0.73860, -0.31872, -0.01835, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]</rosparam>
+      </group>
+      <!-- v52: 7(free) + 6(legL) + 6(legR) + 1(waist) + 7(armL) + 7(armR) + 2(head) = 36 -->
+      <group if="$(eval arg('robot_version') == 52)">
+        <rosparam param="robot_init_state_param">[-4.75, 0.5, 0.84414, 0.707, 0, 0, 0.707, -0.01825, -0.00190, -0.52421, 0.73860, -0.31872, 0.01835, 0.01825, 0.00190, -0.52421, 0.73860, -0.31872, -0.01835, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]</rosparam>
+      </group>
+    </group>
+
+    <!-- mpc node -->
+    <group if="$(arg use_external_mpc)">
+      <node pkg="humanoid_interface_ros" type="humanoid_sqp_mpc" name="humanoid_sqp_mpc" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    </group>
+    <!-- <group unless="$(arg use_joystick)"> -->
+
+      <node pkg="humanoid_interface_ros" type="humanoid_gait_command" name="humanoid_gait_command"
+            output="screen" launch-prefix="gnome-terminal --disable-factory --"/>
+    <!-- </group> -->
+
+    <node pkg="humanoid_interface_ros" type="humanoid_hand_control" name="humanoid_hand_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_VR_hand_control" name="humanoid_VR_hand_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+    <node pkg="humanoid_interface_ros" type="humanoid_Arm_time_target_control" name="humanoid_Arm_time_target_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_gait_switch_by_name" name="humanoid_gait_switch_by_name" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+
+    <!-- nodelet manager -->
+    <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
+       output="screen" required="true" clear_params="true"
+       launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
+        <param name="num_worker_threads" type="int" value="10" />
+    </node>
+    <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
+      </node>
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
+      <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
+    </node>
+    <group unless="$(arg play_back)">
+      <!-- robot_init_state_param 已在上方、nodelet 之前设置，此处不再重复 -->
+      <param name="legged_robot_scene_param" value="$(find craic_simulator)/models/biped_s$(arg robot_version)/xml/my_scene.xml" />
+      <node pkg="nodelet" type="nodelet" name="nodelet_mujoco" args="load MujocoNodelet nodelet_manager" respawn="false" output="screen" />
+      <!-- mid360 雷达仿真：订阅 /mujoco/qpos，发布 /lidar/points (PointCloud2)，广播 TF: world -> lidar -->
+      <node pkg="craic_simulator" type="lidar_mid360_node.py" name="lidar_mid360" output="screen">
+        <param name="~lidar_frame" value="radar" />
+        <param name="~backend" value="cpu" />          <!-- cpu（稳定）或 taichi（GPU，需先运行 patch_tibvh.py） -->
+        <param name="~cutoff_dist" value="50.0" />     <!-- 探测距离（米） -->
+        <param name="~use_geomgroup" value="true" />   
+        <param name="~publish_tf" value="false" />     <!-- 禁用TF发布，radar frame 已通过 URDF 链路 (base_link->...->zhead_2_link->radar) 发布 -->
+      </node>
+    </group>
+      <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+   <group if="$(arg use_joystick)">
+      <group if="$(eval arg('joystick_type') == 'h12')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
+          <arg name="start_way" value="$(arg start_way)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'sim')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
+          <arg name="joystick_type" value="$(arg joystick_type)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
+        <group if="$(eval arg('start_way') == 'manual')">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+            <arg name="joystick_type" value="$(arg joystick_type)"/>
+            <arg name="real" value="false"/>
+          </include>
+        </group>
+        <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen"/>
+        <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+      </group>
+    </group>    
+
+    <!--publish system state  -->
+    <group if="$(arg output_system_info)">
+      <node pkg="humanoid_controllers" type="system_info_publisher.py" name="system_info_publisher"/>
+    </group>
+    <!-- monitor node -->
+    <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+    <group if="$(arg vr_remote_control)">
+      <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
+    </group>
+    
+    <group if="$(arg with_ik)">
+        <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
+    </group>
+
+    <group if="$(arg with_mm_ik)">
+      <group if="$(eval arg('robot_version') >= 30)">
+        <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
+          <arg name="sqp_mpc" value="1"/>
+          <arg name="rviz"    value="false"/>
+          <arg name="visualize_mm"   value="true"/>
+          <arg name="coredump" value="$(arg coredump)"/>
+        </include>
+      </group>
+    </group>
+</launch>

@@ -10,9 +10,6 @@
 #include <yaml-cpp/yaml.h>
 #include <fstream>
 #include <boost/filesystem.hpp>
-#include <ocs2_core/misc/LoadData.h>
-#include "kuavo_msgs/changeArmCtrlMode.h"
-#include <thread>
 
 namespace humanoid_controller
 {
@@ -158,8 +155,6 @@ namespace humanoid_controller
       }
       current_controller_name_ = "";
       ROS_INFO("[RLControllerManager] Switched to BASE controller");
-      // 切换到 MPC 控制器时也异步切换手臂模式到 1
-      changeArmCtrlModeAsync(1);
       return true;
     }
 
@@ -213,15 +208,6 @@ namespace humanoid_controller
     current_controller_name_ = name;
     ROS_INFO("[RLControllerManager] Switched to controller '%s' (type: %d)", 
              name.c_str(), static_cast<int>(new_controller->getType()));
-    // 调用控制器的更新速度限制接口
-    if (nh_ptr_) {
-      new_controller->updateVelocityLimitsParam(*nh_ptr_);
-    }
-    // 切换到非 MPC 控制器后，异步切换手臂模式到 1
-    if (new_controller && new_controller->getType() != RLControllerType::MPC)
-    {
-      changeArmCtrlModeAsync(1);
-    }
     return true;
   }
 
@@ -246,63 +232,6 @@ namespace humanoid_controller
 
     ROS_ERROR("[RLControllerManager] Controller with type %d not found", static_cast<int>(type));
     return false;
-  }
-
-  void RLControllerManager::changeArmCtrlModeAsync(int mode)
-  {
-    // 如果还没有初始化 NodeHandle，则无法调用服务
-    if (!nh_ptr_)
-    {
-      ROS_WARN("[RLControllerManager] nh_ptr_ is null, cannot change arm control mode");
-      return;
-    }
-
-    std::thread([this, mode]()
-    {
-      try
-      {
-        ros::NodeHandle nh = *nh_ptr_;
-        kuavo_msgs::changeArmCtrlMode srv;
-        srv.request.control_mode = mode;
-
-        ros::ServiceClient client =
-            nh.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_change_arm_ctrl_mode");
-
-        const ros::Duration timeout(2.0);
-        if (!client.waitForExistence(timeout))
-        {
-          ROS_WARN_THROTTLE(1.0,
-                            "[RLControllerManager] Arm ctrl mode service '/humanoid_change_arm_ctrl_mode' "
-                            "not available (timeout: 2s)");
-          return;
-        }
-
-        if (client.call(srv))
-        {
-          if (srv.response.result)
-          {
-            ROS_INFO("[RLControllerManager] Successfully changed arm control mode to %d", mode);
-          }
-          else
-          {
-            ROS_WARN("[RLControllerManager] Failed to change arm control mode to %d, current mode: %d",
-                     mode, srv.response.mode);
-          }
-        }
-        else
-        {
-          ROS_WARN("[RLControllerManager] Failed to call arm ctrl mode service '/humanoid_change_arm_ctrl_mode'");
-        }
-      }
-      catch (const ros::Exception& e)
-      {
-        ROS_ERROR("[RLControllerManager] ROS exception in changeArmCtrlModeAsync: %s", e.what());
-      }
-      catch (const std::exception& e)
-      {
-        ROS_ERROR("[RLControllerManager] Exception in changeArmCtrlModeAsync: %s", e.what());
-      }
-    }).detach();
   }
 
   RLControllerBase* RLControllerManager::getCurrentController()
@@ -574,7 +503,6 @@ namespace humanoid_controller
     switch_to_vmp_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_vmp_controller",
                                                         &RLControllerManager::switchToVMPControllerCallback, this);
 
-
     ROS_INFO("[RLControllerManager] ROS services initialized");
     return true;
   }
@@ -653,15 +581,6 @@ namespace humanoid_controller
       return true;
     }
     
-    // 检查躯干速度是否稳定
-    if (!isTorsoVelocityStable())
-    {
-      res.success = false;
-      res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
-      ROS_WARN("[RLControllerManager] Controller switch blocked: %s", res.message.c_str());
-      return true;
-    }
-    
     // 执行实际控制器切换
     bool switch_ok = true;
     if (new_index == 0)
@@ -737,21 +656,6 @@ namespace humanoid_controller
     return true;
   }
 
-  bool RLControllerManager::isTorsoVelocityStable()
-  {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    
-    // 使用状态估计器提供的稳定性状态
-    if (torso_stability_callback_)
-    {
-      return torso_stability_callback_();
-    }
-    
-    // 如果没有注册稳定性回调，返回true（允许切换）
-    ROS_INFO_THROTTLE(1.0, "[RLControllerManager] No torso stability callback registered, allowing switch");
-    return true;
-  }
-
   bool RLControllerManager::switchToNextControllerCallback(kuavo_msgs::switchToNextController::Request &req, 
                                                            kuavo_msgs::switchToNextController::Response &res)
   {
@@ -800,17 +704,6 @@ namespace humanoid_controller
     // 计算下一个控制器的索引（循环切换），只在BASE_CONTROLLER列表中切换
     int next_index = (current_index + 1) % static_cast<int>(walk_list.size());
     std::string next_controller = walk_list[next_index];
-    
-    // 检查躯干速度是否稳定（在切换前检查）
-    if (!isTorsoVelocityStable())
-    {
-      res.success = false;
-      res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
-      res.next_controller = "";
-      res.next_index = -1;
-      ROS_WARN("[RLControllerManager] Controller switch blocked: %s", res.message.c_str());
-      return true;
-    }
     
     // 实际执行控制器切换
     bool switch_ok = true;
@@ -942,7 +835,6 @@ namespace humanoid_controller
 
     return true;
   }
-
 
 } // namespace humanoid_controller
 

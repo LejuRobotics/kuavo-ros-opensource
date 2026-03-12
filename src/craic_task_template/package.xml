@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>craic_task_template</name>
+  <version>1.0.0</version>
+  <description>CRAIC 仿真赛选手任务模板功能包</description>
+
+  <maintainer email="craic@example.com">craic</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>craic_simulator</exec_depend>
+
+  <export>
+  </export>
+</package>

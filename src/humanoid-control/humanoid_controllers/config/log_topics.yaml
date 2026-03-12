@@ -18,7 +18,6 @@ topics:
   - /quest_joystick_data
   - /rosout
   - /rosout_agg
-  - /stop_robot
   - /tf
   - /tf_static
   - /state_estimate/.*
@@ -31,7 +30,6 @@ topics:
   - /route_plan_pose_array
   - /state_motion_control
   - /kuavo_arm_traj
-  - /lb_leg_traj
   - /gait_receiver/.*
   - /SwitchedModelReferenceManager/.*
   - /motor_cmd/.*
@@ -77,4 +75,3 @@ topics:
   - /rl_controller.*
   - /arm_controller.*
   - /vmp_controller/.*
-  - /ik_fk_result/.*

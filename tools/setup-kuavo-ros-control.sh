@@ -665,13 +665,7 @@ setup_preset_files() {
 }
 # Replace config file with resources version
 setup_config_file() {
-    # Only run for roban versions (version starts with '1': 13, 14, 15)
-    if [[ "$ROBOT_VERSION" != 1* ]]; then
-        print_info "非roban版本机器，跳过配置文件替换"
-        return 0
-    fi
-
-    print_info "替换配置文件（roban版本）..."
+    print_info "替换配置文件..."
     source_config_file="/home/lab/kuavo-ros-opensource/resources/config.yaml"
     dest_config_file="$HOME/.config/lejuconfig/config.yaml"
 
@@ -693,60 +687,6 @@ setup_config_file() {
     print_success "配置文件替换完成"
 }
 
-# Setup audio device configuration
-setup_audio_config() {
-    print_info "配置音频设备..."
-    
-    # 脚本路径
-    audio_script_path="$HOME/kuavo-ros-opensource/tools/udev_rules/setup_audio.sh"
-    
-    # 检查脚本是否存在
-    if [ ! -f "$audio_script_path" ]; then
-        print_error "未找到音频配置脚本: $audio_script_path"
-        return 1
-    fi
-    
-    # 检查脚本是否可执行
-    if [ ! -x "$audio_script_path" ]; then
-        print_info "设置脚本执行权限..."
-        chmod +x "$audio_script_path"
-    fi
-    
-    # 调用脚本（脚本内部会检查 root 权限，所以使用 sudo）
-    print_info "执行音频配置脚本..."
-    if sudo bash "$audio_script_path"; then
-        print_success "音频设备配置完成"
-    else
-        print_error "音频设备配置失败，请检查日志"
-        return 1
-    fi
-}
-
-setup_canbus_config() {
-    print_info "配置CANBUS配置..."
-
-    canbus_config_script_path="$HOME/kuavo-ros-opensource/tools/check_tool/canbus_config.sh"
-
-    if [ ! -f "$canbus_config_script_path" ]; then
-        print_error "未找到CANBUS配置脚本: $canbus_config_script_path"
-        return 1
-    fi
-
-    if [ ! -x "$canbus_config_script_path" ]; then
-        print_info "设置脚本执行权限..."
-        chmod +x "$canbus_config_script_path"
-    fi
-
-    print_info "执行CANBUS配置脚本..."
-    if sudo bash "$canbus_config_script_path"; then
-        print_success "CANBUS配置完成"
-    else
-        print_error "CANBUS配置失败，请检查日志"
-        return 1
-    fi
-}
-
-
 # Main execution
 main() {
     print_info "开始KUAVO-ROS-CONTROL安装配置脚本..."
@@ -765,8 +705,6 @@ main() {
     install_vr_deps
     setup_preset_files
     setup_config_file
-    setup_audio_config
-    setup_canbus_config
     build_project
     check_ip
     modify_hosts_mapping

@@ -159,10 +159,7 @@ class MRT_BASE {
   bool isRolloutSet() const { return rolloutPtr_ != nullptr; }
 
 
-  bool isPolicyUpdated() const {   
-    std::lock_guard<std::mutex> lock(bufferMutex_);
-    return activeCommandPtr_ != nullptr && activePrimalSolutionPtr_ != nullptr && activePerformanceIndicesPtr_ != nullptr; 
-  }
+  bool isPolicyUpdated() const { return activeCommandPtr_ != nullptr && activePrimalSolutionPtr_ != nullptr && activePerformanceIndicesPtr_ != nullptr; }
 
   /**
    * Adds an MRT observer to the policy update process
@@ -172,7 +169,6 @@ class MRT_BASE {
  protected:
   void moveToBuffer(std::unique_ptr<CommandData> commandDataPtr, std::unique_ptr<PrimalSolution> primalSolutionPtr,
                     std::unique_ptr<PerformanceIndex> performanceIndicesPtr);
-  std::atomic_bool pause_flag_{false};
 
  private:
   /** Calls modifyActiveSolution on all mrt observers. This function is called while holding a policyBufferMutex lock */

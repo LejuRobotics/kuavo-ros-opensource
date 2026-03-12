@@ -41,14 +41,14 @@ def set_pitch_limit(enable):
 
 class StairClimbingPlanner:
     def __init__(self):
-        self.dt = 0.6  # 步态周期
-        self.ss_time = 0.5
+        self.dt = 0.7  # 单步周期（抬腿时长=dt），减小可加快抬腿
+        self.ss_time = 0.6  # 落地后双支撑时间，减小可加快抬腿、减轻前倾
         self.foot_width = 0.10  # 宽
         self.step_height = 0.13  # 台阶高度
         self.step_length = 0.28  # 台阶长度,28,13
         self.total_step = 0  # 总步数
-        self.is_left_foot = True
-        self.foot_w = 0.12  # 半脚长
+        self.is_left_foot = False  # 循环开始会先 flip，故初始 False 使第一步为左脚
+        self.foot_w = 0.122  # 半脚长
         
     def calculate_foot_tip_offset(self, pitch_angle):
         """
@@ -335,7 +335,7 @@ class StairClimbingPlanner:
         if swing_trajectories is None:
             swing_trajectories = []
         torso_yaw = 0.0
-            
+
         # 获取最后一个轨迹点作为起始位置
         start_foot_pos_x = 0.0
         start_foot_pos_z = STAND_HEIGHT
@@ -349,13 +349,10 @@ class StairClimbingPlanner:
             current_torso_pos = np.array([0.0, 0.0, 0.0])
             current_foot_pos = np.array([0.0, 0.0, STAND_HEIGHT])
 
-        # 初始位置
-        torso_height_offset = -0.02  # 躯干高度偏移
-        current_torso_pos[2] += torso_height_offset
-        # current_foot_pos = np.array([0.0, 0.0, 0.0])
+        # 初始位置（不再下压躯干，避免起步抖动）
         offset_x = [0.0, 0.0, 0.0, 0.0, 0.0]
         first_step_offset = 0.35
-        
+
         # 记录前一次的左右脚位置
         prev_left_foot = [start_foot_pos_x, 0.1, start_foot_pos_z, torso_yaw]
         prev_right_foot = [start_foot_pos_x, -0.1, start_foot_pos_z, torso_yaw]
@@ -376,8 +373,8 @@ class StairClimbingPlanner:
                 current_foot_pos[0] = current_torso_pos[0] + self.step_length  # 脚掌相对躯干前移
                 current_foot_pos[1] = current_torso_pos[1] + self.foot_width if self.is_left_foot else -self.foot_width  # 左右偏移
                 current_foot_pos[2] = self.step_height + STAND_HEIGHT  # 脚掌高度
-                current_torso_pos[0] += self.step_length/3
-                
+                current_torso_pos[0] += self.step_length/3  # 第一步躯干少前移，防止前倾
+
             elif step == num_steps - 1: # 最后一步
                 # current_torso_pos[0] += self.step_length/2  # 向前移动
                 # current_torso_pos[2] += self.step_height/2  # 向上移动
@@ -403,31 +400,42 @@ class StairClimbingPlanner:
             # 生成腾空相轨迹
             if prev_left_foot is not None and prev_right_foot is not None:  # 从第二步开始生成腾空相轨迹
                 prev_foot = prev_left_foot if self.is_left_foot else prev_right_foot
-                swing_traj = self.plan_swing_phase(prev_foot, current_foot, swing_height=0.12, plot=PLOT, is_first_step=(step == 0 or step == num_steps - 1))
+                first_or_last = (step == 0 or step == num_steps - 1)
+                if first_or_last:
+                    sh = 0.05
+                elif step == 1:
+                    sh = 0.23  # 第二步抬高一点，确保跨过台阶边缘
+                else:
+                    sh = 0.12
+                swing_traj = self.plan_swing_phase(prev_foot, current_foot, swing_height=sh, plot=PLOT, is_first_step=first_or_last)
                 swing_trajectories.append(swing_traj)
             else:
                 swing_trajectories.append(None)
-            
+
             # 更新前一次的脚位置
             if self.is_left_foot:
                 prev_left_foot = current_foot
             else:
                 prev_right_foot = current_foot
-            
+
             # 添加轨迹点
             foot_traj.append(current_foot)
             torso_traj.append([*current_torso_pos, torso_yaw])
-            
+
             last_torso_pose = torso_traj[-1].copy()
             last_foot_pose = foot_traj[-1].copy()
-            # add SS 
+            # add SS（单支撑后双支撑：躯干置于支撑脚与落地脚之间，偏后以减轻前倾）
             if step != num_steps - 1:
-                pass
-                time_traj.append(time_traj[-1] + self.ss_time)
+                ss_duration = 2.0 if step == 0 else self.ss_time
+                time_traj.append(time_traj[-1] + ss_duration)
                 foot_idx_traj.append(2)
                 foot_traj.append(foot_traj[-1].copy())
-                last_torso_pose[0] = last_foot_pose[0] - self.step_length*0.0
+                stance_foot = prev_right_foot if self.is_left_foot else prev_left_foot
+                last_torso_pose[0] = (stance_foot[0] + last_foot_pose[0]) / 2  # 躯干在双脚之间
                 torso_traj.append(last_torso_pose)
+                # 双支撑阶段结束后，把 current_torso_pos 修正到双脚中间
+                # 这样后续步的落脚计算不会因为第一步少前移而累积偏差
+                current_torso_pos[0] = last_torso_pose[0]
                 swing_trajectories.append(footPoses6D())
             else: # 最后一步站立恢复站直
                 time_traj.append(time_traj[-1] + self.ss_time)
@@ -575,14 +583,13 @@ class StairClimbingPlanner:
             
             last_torso_pose = torso_traj[-1].copy()
             last_foot_pose = foot_traj[-1].copy()
-            # add SS 
+            # add SS（躯干置于支撑脚与落地脚之间，减轻前倾）
             if step != num_steps - 1:
-                pass
                 time_traj.append(time_traj[-1] + self.ss_time)
                 foot_idx_traj.append(2)
                 foot_traj.append(foot_traj[-1].copy())
-                # last_torso_pose[0] = last_foot_pose[0] - self.step_length*0.0
-                last_torso_pose[0] = (last_foot_pose[0] + last_torso_pose[0])/2
+                stance_foot = prev_right_foot if self.is_left_foot else prev_left_foot
+                last_torso_pose[0] = (stance_foot[0] + last_foot_pose[0]) / 2
                 torso_traj.append(last_torso_pose)
                 swing_trajectories.append(footPoses6D())
             else: # 最后一步站立恢复站直
@@ -788,12 +795,12 @@ class StairClimbingPlanner:
             torso_traj = []
         if swing_trajectories is None:
             swing_trajectories = []
-        self.dt = 0.6
-        self.step_length = 0.27
+        # 方案2：保持 step_length=0.28 避免踩空，增大 swing_height 减轻后跟擦台阶
+        self.step_length = 0.28
         torso_yaw = 0.0
         start_foot_pos_x = 0.0
-        start_foot_pos_z = STAND_HEIGHT 
-        
+        start_foot_pos_z = STAND_HEIGHT
+
         # 获取最后一个轨迹点作为起始位置
         if len(torso_traj) > 0:
             current_torso_pos = np.array(torso_traj[-1][0:3])
@@ -801,7 +808,7 @@ class StairClimbingPlanner:
             start_foot_pos_x = current_foot_pos[0]
             torso_yaw = torso_traj[-1][3]
             start_foot_pos_z = current_foot_pos[2]
-            
+
         else:
             current_torso_pos = np.array([0.0, 0.0, 0.0])
             current_foot_pos = np.array([0.0, 0.0, STAND_HEIGHT])
@@ -814,8 +821,8 @@ class StairClimbingPlanner:
         # 初始位置
         torso_height_offset = -0.0  # 躯干高度偏移
         current_torso_pos[2] += torso_height_offset
-        offset_x = [0.0, -0.0, -0.0, -0.0, -0.0]
-        
+        offset_x = [0.0, 0.0, 0.005, 0.1, 0.0]  # 补偿 first_step_offset 累积偏差
+
         # 记录前一次的左右脚位置
         prev_left_foot = [start_foot_pos_x, 0.1, start_foot_pos_z, torso_yaw]
         prev_right_foot = [start_foot_pos_x, -0.1, start_foot_pos_z, torso_yaw]
@@ -828,7 +835,7 @@ class StairClimbingPlanner:
                 prev_left_foot = foot_traj[-4] if len(foot_traj) > 3 else None
         initial_index = len(foot_traj)
         print("prev_left_foot: ", prev_left_foot)
-        print("prev_right_foot: ", prev_right_foot)        
+        print("prev_right_foot: ", prev_right_foot)
         # 添加下蹲
         if len(time_traj) > 0:
             time_traj.append(time_traj[-1] + 1)
@@ -860,8 +867,7 @@ class StairClimbingPlanner:
             if step == 0:
                 # current_torso_pos[0] += self.step_length/2 + first_step_offset
                 current_foot_pos[0] = current_torso_pos[0] + self.step_length + first_step_offset  # 脚掌相对躯干前移
-                current_torso_pos[0] += self.step_length/2 + first_step_offset
-                # current_torso_pos[0] = current_foot_pos[0] - 0.03 # 躯干落在前脚掌               
+                current_torso_pos[0] += self.step_length/3 + first_step_offset  # 第一步躯干少前移，防止前倾
                 current_foot_pos[1] = current_torso_pos[1] + self.foot_width if self.is_left_foot else -self.foot_width  # 左右偏移
                 current_foot_pos[2] -= self.step_height  # 脚掌高度
                 current_torso_pos[2] -= self.step_height-0.05 # 脚掌高度
@@ -871,24 +877,24 @@ class StairClimbingPlanner:
                 current_foot_pos[1] = current_torso_pos[1] + self.foot_width if self.is_left_foot else -self.foot_width  # 左右偏移
                 # current_torso_pos[2] += self.step_height  # 脚掌高度
             else:
-                current_torso_pos[0] += self.step_length  # 向前移动
+                current_torso_pos[0] += self.step_length * 2 / 3  # 摆动阶段躯干适度前移，防止前倾
                 current_torso_pos[2] -= self.step_height  # 向下移动
-            
-                # 计算落脚点位置
-                current_foot_pos[0] = current_foot_pos[0] + self.step_length # 脚掌相对躯干前移
+
+                # 计算落脚点位置（脚的位置不变，仍按整步前移）
+                current_foot_pos[0] = current_foot_pos[0] + self.step_length
                 current_foot_pos[1] = current_torso_pos[1] + self.foot_width if self.is_left_foot else -self.foot_width  # 左右偏移
                 current_foot_pos[2] -= self.step_height
-                
+
             if step < len(offset_x) and not step == num_steps - 1:    # 脚掌偏移
                 current_foot_pos[0] += offset_x[step]
-                
+
             # 记录当前脚的位置
             current_foot = [*current_foot_pos, torso_yaw]
-            
+
             # 生成腾空相轨迹
             if prev_left_foot is not None and prev_right_foot is not None:  # 从第二步开始生成腾空相轨迹
                 prev_foot = prev_left_foot if self.is_left_foot else prev_right_foot
-                swing_traj = self.plan_swing_phase(prev_foot, current_foot, swing_height=0.08, plot=PLOT, down_stairs=True, is_first_step=(step == 0 or step == num_steps - 1))
+                swing_traj = self.plan_swing_phase(prev_foot, current_foot, swing_height=0.13, plot=PLOT, down_stairs=True, is_first_step=(step == 0 or step == num_steps - 1))
                 swing_trajectories.append(swing_traj)
             else:
                 swing_trajectories.append(None)
@@ -928,9 +934,12 @@ class StairClimbingPlanner:
                 time_traj.append(time_traj[-1] + self.ss_time)
                 foot_idx_traj.append(5 if self.is_left_foot else 3)
                 foot_traj.append(foot_traj[-1].copy())
-                last_torso_pose[0] = last_foot_pose[0]
+                stance_foot = prev_right_foot if self.is_left_foot else prev_left_foot
+                last_torso_pose[0] = stance_foot[0] * 0.33 + last_foot_pose[0] * 0.67  # 躯干偏后，防止前倾
                 last_torso_pose[2] -= 0.05
                 torso_traj.append(last_torso_pose.copy())
+                # 修正 current_torso_pos，避免后续步累积偏差
+                current_torso_pos[0] = last_torso_pose[0]
                 swing_trajectories.append(footPoses6D())
                 
                 
@@ -1206,7 +1215,7 @@ class StairClimbingPlanner:
                 ],
                 'z': [
                     prev_foot_pose[2],
-                    (base_height + swing_height*0.6) if is_first_step else (prev_foot_pose[2] + (base_height-min_height) * 0.5),
+                    (base_height + swing_height) if is_first_step else (prev_foot_pose[2] + (base_height-min_height) * 0.5),
                     base_height + swing_height,
                     next_foot_pose[2]
                 ],
@@ -1226,13 +1235,13 @@ class StairClimbingPlanner:
                 last_step_offset = self.calculate_foot_tip_offset(pitch_sequence[-1])
 
                 control_points = {
-                    't': [0, 0.4, 0.5, 0.6, 1.0],
+                    't': [0, 0.3, 0.5, 0.7, 1.0],
                     'x': [
                         prev_foot_pose[0] + first_step_offset[0],
-                        prev_foot_pose[0] + x_distance * 0.5,
-                        prev_foot_pose[0] + x_distance * 0.65,
-                        prev_foot_pose[0] + x_distance * 0.8,
-                        next_foot_pose[0] + last_step_offset[0]
+                        prev_foot_pose[0] + x_distance * 0.55,   # t=0.3就走60%
+                        prev_foot_pose[0] + x_distance * 0.85,   # t=0.5走90%
+                        next_foot_pose[0] + last_step_offset[0], # t=0.7完全到位
+                        next_foot_pose[0] + last_step_offset[0]  # t=1.0保持
                     ],
                     'y': [
                         prev_foot_pose[1] + first_step_offset[1],
@@ -1243,10 +1252,10 @@ class StairClimbingPlanner:
                     ],
                     'z': [
                         prev_foot_pose[2] + first_step_offset[2],
-                        base_height + swing_height,
-                        base_height ,
-                        (next_foot_pose[2] + (base_height-min_height) * 0.8),
-                        next_foot_pose[2] + last_step_offset[2]
+                        base_height + swing_height,              # t=0.3最高点
+                        base_height + swing_height * 0.1,        # t=0.5开始下落
+                        next_foot_pose[2] + 0.05,               # t=0.7接近落点
+                        next_foot_pose[2] + last_step_offset[2] # t=1.0落地
                     ],
                     'yaw': [
                         prev_foot_pose[3],
@@ -1432,15 +1441,15 @@ if __name__ == '__main__':
         #         print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
         
         # # 规划上楼梯动作
-        # time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_up_stairs(5, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories)
-        # print("Up stairs plan done.")
-        # if (time_traj is not None):
-        #     for i,t in enumerate(time_traj):
-        #         print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
+        time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_up_stairs(5, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories)
+        print("Up stairs plan done.")
+        if (time_traj is not None):
+            for i,t in enumerate(time_traj):
+                print(f"{i:2}:{t:3.2f} {foot_idx_traj[i]} {foot_traj[i]} {torso_traj[i]}")
             
 
         time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_move_to_world(
-            dx=0.15,
+            dx=1.02,
             dy=0,
             # dyaw=0,  # Convert radians to degrees
             dyaw=0,  
@@ -1452,18 +1461,10 @@ if __name__ == '__main__':
             # modify_current_x= 0
         )
 
-        time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_move_to_world(
-            dx=0,
-            dy=0,
-            # dyaw=0,  # Convert radians to degrees
-            dyaw=-90,  
-            time_traj=time_traj,
-            foot_idx_traj=foot_idx_traj,
-            foot_traj=foot_traj,
-            torso_traj=torso_traj,
-            swing_trajectories=swing_trajectories,
-            # modify_current_x= 0
-        )
+        # 规划下台阶动作（参数与上台阶一致）
+        time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories = planner.plan_down_stairs(5, time_traj, foot_idx_traj, foot_traj, torso_traj, swing_trajectories)
+        print("Down stairs plan done.")
+
         
         # 打印规划结果
         print("\nTime trajectory:", time_traj)

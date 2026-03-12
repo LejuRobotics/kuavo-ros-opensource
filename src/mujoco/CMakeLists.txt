@@ -7,24 +7,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 
-# Add USE_DDS option
-option(USE_DDS "Enable DDS communication" OFF)
-if(USE_DDS)
-    add_definitions(-DUSE_DDS)
-    message(STATUS "MuJoCo DDS communication enabled")
-else()
-    message(STATUS "MuJoCo DDS communication disabled (compile with -DUSE_DDS=ON to enable)")
-endif()
-
-# Add USE_LEJU_DDS option
-option(USE_LEJU_DDS "Enable Leju DDS communication" OFF)
-if(USE_LEJU_DDS)
-    add_definitions(-DUSE_LEJU_DDS)
-    message(STATUS "MuJoCo Leju DDS communication enabled")
-else()
-    message(STATUS "MuJoCo Leju DDS communication disabled (compile with -DUSE_LEJU_DDS=ON to enable)")
-endif()
-
 ## Set default cmake build type to release
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
         set(CMAKE_BUILD_TYPE Release)
@@ -58,42 +40,7 @@ find_package(catkin REQUIRED
 find_package(Threads REQUIRED)
 find_library(MUJOCO_LIB mujoco HINTS ${PROJECT_SOURCE_DIR}/lib)
 find_package(glfw3 REQUIRED)
-
-# DDS dependencies (conditional)
-if(USE_DDS OR USE_LEJU_DDS)
-    # Find CyclonDDS-CXX
-    find_package(CycloneDDS-CXX REQUIRED)
-
-    # Set up leju IDL files paths (always available in DDS mode)
-    set(LEJU_GENERATED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_dds_plant/include/leju/idl)
-
-    # leju IDL generated source files (from hardware_dds_plant build)
-    set(LEJU_DDS_SOURCES
-        ${LEJU_GENERATED_DIR}/JointCmd.cpp
-        ${LEJU_GENERATED_DIR}/SensorsData.cpp
-        ${LEJU_GENERATED_DIR}/ImuData.cpp
-        ${LEJU_GENERATED_DIR}/JointData.cpp
-        ${LEJU_GENERATED_DIR}/EndEffectorData.cpp
-    )
-
-    # Set up Unitree SDK paths (same as humanoid_controllers)
-    set(UNITREE_SDK_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_dds_plant/include)
-    set(UNITREE_SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_dds_plant/unitree_sdk2/x86_64)
-    set(UNITREE_SDK_LIB_PATH ${UNITREE_SDK_LIB_DIR}/libunitree_sdk2.a)
-
-    if(EXISTS ${UNITREE_SDK_INCLUDE_PATH})
-        message(STATUS "Found Unitree SDK include at: ${UNITREE_SDK_INCLUDE_PATH}")
-    else()
-        message(WARNING "Unitree SDK include not found at: ${UNITREE_SDK_INCLUDE_PATH}")
-    endif()
-
-    if(EXISTS ${UNITREE_SDK_LIB_PATH})
-        message(STATUS "Found Unitree SDK library at: ${UNITREE_SDK_LIB_PATH}")
-    else()
-        message(WARNING "Unitree SDK library not found at: ${UNITREE_SDK_LIB_PATH}")
-    endif()
-endif()
-
+find_package(OpenCV REQUIRED)
 
 
 ## System dependencies are found with CMake's conventions
@@ -213,19 +160,8 @@ include_directories(
         ${catkin_INCLUDE_DIRS}
         ${glfw3_INCLUDE_DIRS}
         ${LCM_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
 )
-
-# Add DDS include directories
-if(USE_DDS OR USE_LEJU_DDS)
-    include_directories(/usr/local/include/ddscxx)
-    include_directories(${LEJU_GENERATED_DIR})  # For leju IDL generated headers
-    message(STATUS "DDS include directories configured for mujoco")
-
-    # Add Unitree SDK include directory if exists
-    if(EXISTS ${UNITREE_SDK_INCLUDE_PATH})
-        include_directories(${UNITREE_SDK_INCLUDE_PATH})
-    endif()
-endif()
 
 link_directories(../lib)
 
@@ -250,41 +186,13 @@ aux_source_directory(./src/simulate SIMULATE_SRCS)
 aux_source_directory(./src/lcm_interface LCM_SRCS)
 
 file(GLOB DEXHAND_SOURCES "src/dexhand/*.cpp" "src/dexhand/*.hpp")
-
-# Base library sources
-add_library(${PROJECT_NAME} SHARED
-    src/mujoco_node.cc
-    ${DEXHAND_SOURCES}
-    src/joint_address.hpp
-    src/dexhand_mujoco_node.cpp
-    ${SIMULATE_SRCS} ${LCM_SRCS}
-)
-
-# Conditionally add DDS sources
-if(USE_DDS OR USE_LEJU_DDS)
-    target_sources(${PROJECT_NAME} PRIVATE
-        src/mujoco_dds.cc
-        ${LEJU_DDS_SOURCES}
-    )
-endif()
-
-# Link libraries (conditionally include DDS)
-target_link_libraries(${PROJECT_NAME} PUBLIC
-    ${MUJOCO_LIB}
-    ${catkin_LIBRARIES}
-    Threads::Threads
-    glfw
-    ${glfw3_LIBRARIES}
-    ${LCM_LIBRARIES}
-)
-
-# Add DDS libraries when enabled
-if(USE_DDS OR USE_LEJU_DDS)
-    target_link_libraries(${PROJECT_NAME} PUBLIC
-        CycloneDDS-CXX::ddscxx
-        ${UNITREE_SDK_LIB_PATH}
-    )
-endif()
+add_library(${PROJECT_NAME} SHARED 
+        src/mujoco_node.cc 
+        ${DEXHAND_SOURCES}
+        src/joint_address.hpp
+        src/dexhand_mujoco_node.cpp
+${SIMULATE_SRCS} ${LCM_SRCS})
+target_link_libraries(${PROJECT_NAME} PUBLIC ${MUJOCO_LIB} ${catkin_LIBRARIES} Threads::Threads glfw ${glfw3_LIBRARIES} ${LCM_LIBRARIES} ${OpenCV_LIBS})
 
 add_executable(${PROJECT_NAME}_simulate src/main.cc)
 target_link_libraries(${PROJECT_NAME}_simulate ${PROJECT_NAME}) 

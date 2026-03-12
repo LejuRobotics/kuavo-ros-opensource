@@ -70,7 +70,6 @@
 #include <sensor_msgs/JointState.h>
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
 #include "kuavo_solver/ankle_solver.h"
-#include "humanoid_interface/foot_planner/floatInterpolation.h"
 
 namespace humanoid_controller
 {
@@ -248,7 +247,6 @@ namespace humanoid_controller
     void applySensorData(const SensorData &data);
     void applySensorDataRL(const SensorData &data);
     void updatakinematics(const SensorData &sensor_data, bool is_initialized_);
-    void resetKinematicsEstimation();
 
     // ==================== MPC-RL插值系统函数声明 ====================
     void startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos);
@@ -330,7 +328,7 @@ namespace humanoid_controller
                                         bool verbose, RobotVersion rb_version);
     virtual void setupMpc();
     virtual void setupMrt();
-    virtual void setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile);
+    virtual void setupStateEstimate(const std::string &taskFile, bool verbose);
     void sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr &msg);
     void startMpccallback(const std_msgs::Bool::ConstPtr &msg);
     // void checkArmControlModeAndUpdateArmJoint();
@@ -503,9 +501,7 @@ namespace humanoid_controller
     bool setPullUpState_{false};
     double standupTime_{0.0};
     double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
-    double arm_mode_sync_time_{0.0};  // 手臂模式同步完成的时间（当前模式切换到期望模式的时间）
     std::shared_ptr<WbcBase> standUpWbc_;
-    std::string taskFile_switchParams_;
     vector_t curRobotLegState_;
 
     // Visualization
@@ -722,13 +718,10 @@ namespace humanoid_controller
     bool last_ultra_fast_mode_ = false;
     
     // ==================== MPC-RL插值系统成员变量 ====================
-    std::shared_ptr<FloatInterpolation> torso_position_interpolator_ptr_; // 躯干位置插值器
     bool is_torso_interpolation_active_ = false;
     // 6D位姿插值的起点/目标/当前（xyz+rpy）
     vector6_t torso_interpolation_start_pose_;
     vector6_t torso_interpolation_target_pose_;
-    vector_t leg_interpolation_start_pose_;
-    vector_t leg_interpolation_target_pose_;
     double torso_interpolation_start_time_;
     double torso_interpolation_duration_; // 总期望插值时间 (s)
     double torso_interpolation_max_velocity_ = 0.1; // 最大插值速度 (m/s)
@@ -876,7 +869,6 @@ namespace humanoid_controller
     // std::string rl_config_file_;                                         // RL配置文件路径
     // double dt_ = 0.001;                                                  // 控制周期
     vector6_t torso_interpolation_result_;
-    vector_t leg_interpolation_result_;
     vector_t arm_interpolation_result_;
 
     // ROS 发布者和订阅者
@@ -896,23 +888,21 @@ namespace humanoid_controller
 
 
     bool has_fall_down_controller_{false};
-    bool condition_pull_up_mpc_height_{true};
     double switch_distance_threshold_ = 0.003;// MPC-RL切换距离阈值
     double switch_timeout_multiplier_threshold_ = 2.0;// MPC-RL切换超时时间倍率
-    double switch_timeout_base_threshold_ = 0.5;// MPC-RL切换基础超时时间（秒）
 
   };
 
   class humanoidCheaterController : public humanoidController
   {
   protected:
-    void setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile) override;
+    void setupStateEstimate(const std::string &taskFile, bool verbose) override;
   };
 
   class humanoidKuavoController : public humanoidController
   {
   protected:
-    void setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile) override;
+    void setupStateEstimate(const std::string &taskFile, bool verbose) override;
   };
 
 } // namespace humanoid_controller

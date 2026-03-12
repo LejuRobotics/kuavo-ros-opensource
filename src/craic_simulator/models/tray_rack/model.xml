@@ -1,0 +1,368 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="tray_rack">
+  <asset>
+    <!-- 材质定义 -->
+    <material name="rack_metal" rgba="0.6 0.6 0.65 1" specular="0.5" shininess="0.3"/>
+    <material name="shelf_wood" rgba="0.7 0.5 0.3 1" specular="0.1" shininess="0.1"/>
+  </asset>
+  
+  <worldbody>
+    <body name="tray_rack">
+      <!-- 底座 -->
+      <geom name="base" type="box" 
+            size="0.6 0.2 0.02" 
+            pos="0 0 0.02" 
+            material="shelf_wood"
+            mass="5"/>
+      
+      <!-- 四根立柱 (长1.2m, 宽0.4m, 高1.5m) -->
+      <!-- 前左立柱 -->
+      <geom name="pillar_fl" type="cylinder" 
+            size="0.02 0.75" 
+            pos="0.58 0.18 0.75" 
+            material="rack_metal"
+            mass="2"/>
+      
+      <!-- 前右立柱 -->
+      <geom name="pillar_fr" type="cylinder" 
+            size="0.02 0.75" 
+            pos="0.58 -0.18 0.75" 
+            material="rack_metal"
+            mass="2"/>
+      
+      <!-- 后左立柱 -->
+      <geom name="pillar_bl" type="cylinder" 
+            size="0.02 0.75" 
+            pos="-0.58 0.18 0.75" 
+            material="rack_metal"
+            mass="2"/>
+      
+      <!-- 后右立柱 -->
+      <geom name="pillar_br" type="cylinder" 
+            size="0.02 0.75" 
+            pos="-0.58 -0.18 0.75" 
+            material="rack_metal"
+            mass="2"/>
+      
+      <!-- 第一层架板 (高度: 0.35m -> 0.4m) -->
+      <geom name="shelf_1" type="box" 
+            size="0.6 0.2 0.015" 
+            pos="0 0 0.4" 
+            material="shelf_wood"
+            mass="3"
+            friction="2.5 1.8 0.02"
+            solref="0.01 1.2"
+            solimp="0.95 0.99 0.0005"/>
+      
+      <!-- 第一层围栏框架（防止竖立的托盘倒下） -->
+      <!-- 多根横杆，每隔5cm一根 -->
+      <geom name="shelf_1_rail_0" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.5 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_1" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.4 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_2" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.3 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_3" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.2 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_4" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.1 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_5" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.0 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_6" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.1 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_7" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.2 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_8" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.3 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_9" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.4 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_rail_10" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.5 0 0.5" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <!-- 前后连接杆（1.2m长，连接到边缘） -->
+      <geom name="shelf_1_rail_front" type="cylinder" 
+            size="0.008 0.6" 
+            pos="0 0.2 0.5" 
+            euler="0 1.5708 0"
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <geom name="shelf_1_rail_back" type="cylinder" 
+            size="0.008 0.6" 
+            pos="0 -0.2 0.5" 
+            euler="0 1.5708 0"
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <!-- 第一层新增框架（在围栏下方0.05m处） -->
+      <!-- 左右连接杆（与围栏横杆平行，沿x轴方向，连接到边缘立柱） -->
+      <geom name="shelf_1_frame_left" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.60 -0.0 0.45" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_1_frame_right" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.60 -0.0 0.45" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <!-- 两根横杆（与前后连接杆平行，沿y轴方向，连接左右连接杆） -->
+      <!-- 间距0.05m，中心位于前后连接杆的1/3处（y=-0.067），靠近y更小的连接杆 -->
+      <geom name="shelf_1_frame_bar_1" type="cylinder" 
+            size="0.008 0.6" 
+            pos="0 0.092 0.45" 
+            euler="0 1.5708 0"
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <geom name="shelf_1_frame_bar_2" type="cylinder" 
+            size="0.008 0.6" 
+            pos="0 0.042 0.45" 
+            euler="0 1.5708 0"
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <!-- 第一层支撑横杆 -->
+      <geom name="support_front_1" type="box" 
+            size="0.58 0.015 0.015" 
+            pos="0 0.18 0.37" 
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <geom name="support_back_1" type="box" 
+            size="0.58 0.015 0.015" 
+            pos="0 -0.18 0.37" 
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <!-- 第二层架板 (高度: 1.0m) -->
+      <geom name="shelf_2" type="box" 
+            size="0.6 0.2 0.015" 
+            pos="0 0 1.0" 
+            material="shelf_wood"
+            mass="3"
+            friction="2.5 1.8 0.02"
+            solref="0.01 1.2"
+            solimp="0.95 0.99 0.0005"/>
+      
+      <!-- 第二层围栏框架（防止竖立的托盘倒下） -->
+      <!-- 多根横杆，每隔5cm一根 -->
+      <geom name="shelf_2_rail_0" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.5 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_1" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.4 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_2" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.3 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_3" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.2 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_4" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.1 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_5" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.0 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_6" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.1 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_7" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.2 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_8" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.3 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_9" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.4 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_rail_10" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.5 0 1.1" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <!-- 前后连接杆（1.2m长，连接到边缘） -->
+      <geom name="shelf_2_rail_front" type="cylinder" 
+            size="0.008 0.6" 
+            pos="0 0.2 1.1" 
+            euler="0 1.5708 0"
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <geom name="shelf_2_rail_back" type="cylinder" 
+            size="0.008 0.6" 
+            pos="0 -0.2 1.1" 
+            euler="0 1.5708 0"
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <!-- 第二层新增框架（在围栏下方0.05m处） -->
+      <!-- 左右连接杆（与围栏横杆平行，沿x轴方向，连接到边缘立柱） -->
+      <geom name="shelf_2_frame_left" type="cylinder" 
+            size="0.008 0.2" 
+            pos="0.60 -0.0 1.05" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <geom name="shelf_2_frame_right" type="cylinder" 
+            size="0.008 0.2" 
+            pos="-0.60 -0.0 1.05" 
+            euler="1.5708 0 0"
+            material="rack_metal"
+            mass="0.2"/>
+      
+      <!-- 两根横杆（与前后连接杆平行，沿y轴方向，连接左右连接杆） -->
+      <!-- 间距0.05m，中心位于前后连接杆的1/3处（y=-0.067），靠近y更小的连接杆 -->
+      <geom name="shelf_2_frame_bar_1" type="cylinder" 
+            size="0.008 0.6" 
+            pos="0 0.092 1.05" 
+            euler="0 1.5708 0"
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <geom name="shelf_2_frame_bar_2" type="cylinder" 
+            size="0.008 0.6" 
+            pos="0 0.042 1.05" 
+            euler="0 1.5708 0"
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <!-- 第二层支撑横杆 -->
+      <geom name="support_front_2" type="box" 
+            size="0.58 0.015 0.015" 
+            pos="0 0.18 0.97" 
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <geom name="support_back_2" type="box" 
+            size="0.58 0.015 0.015" 
+            pos="0 -0.18 0.97" 
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <!-- 第三层架板 (高度: 1.5m，顶层) -->
+      <geom name="shelf_3" type="box" 
+            size="0.6 0.2 0.015" 
+            pos="0 0 1.5" 
+            material="shelf_wood"
+            mass="3"/>
+      
+      <!-- 第三层不需要围栏（顶层，方便取放） -->
+      
+      <!-- 第三层支撑横杆 -->
+      <geom name="support_front_3" type="box" 
+            size="0.58 0.015 0.015" 
+            pos="0 0.18 1.47" 
+            material="rack_metal"
+            mass="0.5"/>
+      
+      <geom name="support_back_3" type="box" 
+            size="0.58 0.015 0.015" 
+            pos="0 -0.18 1.47" 
+            material="rack_metal"
+            mass="0.5"/>
+    </body>
+  </worldbody>
+</mujoco>

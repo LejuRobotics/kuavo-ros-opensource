@@ -1,0 +1,117 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="kuavo scene">
+  <include file="biped_s47.xml" />
+  <statistic center="0 0 1" extent="1.8" />
+  <visual>
+    <headlight diffuse="0.5977223534 0.2912211958 0.477416135" ambient="0.1912172595 0.02058794022 0.299304179" specular="0.1446382052 0.02717409582 0.1078251392" />
+    <rgba haze="0.15 0.25 0.35 1" />
+    <global azimuth="160" elevation="-20" />
+  </visual>
+
+  <asset>
+    <!-- 使用纯色材质替代纹理 -->
+    <material name="walls_mat" reflectance="0.1" shininess="0.1" rgba="0.9 0.9 0.85 1" />
+    <material name="roofs_mat" reflectance="0.1" shininess="0.1" rgba="0.95 0.95 0.95 1" />
+    <material name="belt_mat" rgba="0.3 0.3 0.3 1" />
+    <material name="ground_mat" reflectance="0" rgba="0.8 0.8 0.75 1" /> 
+    <material name="table_ceramic" specular="0.20" shininess="0" reflectance="0" rgba="0.95 0.95 0.9 1" />
+    <material name="table_legs_metal" specular="0.0" shininess="0.8" reflectance="0.8" rgba="0.7 0.7 0.75 1" />
+  </asset>
+
+  <worldbody>
+    <light pos="5 0.5 5" dir="-1 0 -1" directional="false" />
+    <geom name="floor" size="0 0 0.05" type="plane" material="ground_mat" />
+
+    <geom name="wall_front" type="box" size="10 5 2" pos="0 10 2.5" euler="-1.57079633 0 3.14159265" material="walls_mat" contype="0" conaffinity="0" />
+
+    <geom name="wall_back" type="box" size="10 5 2" pos="0 -10 2.5" euler="-1.57079633 0 0" material="walls_mat" contype="0" conaffinity="0" />
+
+    <geom name="wall_right" type="box" size="10 5 2" pos="10 0 2.5" euler="0 1.57079633 1.57" material="walls_mat" contype="0" conaffinity="0" />
+
+    <geom name="wall_left" type="box" size="10 5 2" pos="-10 0 2.5" euler="0 -1.57079633 1.57" material="walls_mat" contype="0" conaffinity="0" />
+
+    <geom name="roof" type="plane" size="10 10 5" pos="0 0 5" euler="3.14159265 0 0" material="roofs_mat" />
+
+
+
+    <body name="belt_plate1" pos="0 0.7 0.85">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <joint name="belt_slide" type="slide" axis="1 0 0" range="-20 20" damping="0.001" />
+      <geom name="belt_geom1" type="box" size="100 0.3 0.01" material="belt_mat" friction="1.0 0.005 0.0001" />
+    </body>
+
+    <body name="belt_plate2" pos="0 -3 0.85">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_geom2" type="box" size="2.7 0.3 0.01" material="belt_mat" friction="1.0 0.005 0.0001" />
+    </body>
+
+    <body name="belt_plate3" pos="3 -1.15 0.85">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_geom3" type="box" size="0.3 1.545 0.01" material="belt_mat" friction="1.0 0.005 0.0001" />
+    </body>
+
+    <body name="belt_plate4" pos="-3 -1.15 0.85">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_geom4" type="box" size="0.3 1.545 0.01" material="belt_mat" friction="1.0 0.005 0.0001" />
+    </body>
+
+    <body name="belt_plate5" pos="2.7 -2.7 0.85">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_geom5" type="cylinder" size="0.6 0.009" material="belt_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="belt_plate6" pos="-2.7 -2.7 0.85">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_geom6" type="cylinder" size="0.6 0.009" material="belt_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="belt_plate7" pos="2.4 -2.4 0.43">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_geom7" type="box" size="0.3 0.3 0.43" material="ground_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="belt_plate8" pos="-2.4 -2.4 0.43">  
+      <inertial pos="0 0 0" mass="1e-1" diaginertia="1e-6 1e-6 1e-6" />
+      <geom name="belt_geom8" type="box" size="0.3 0.3 0.43" material="ground_mat" friction="1.0 0.005 0.0001" contype="0" conaffinity="0" />
+    </body>
+
+
+
+
+
+    <body name="box_grab" pos="1 0.52 0.95">
+      <freejoint name="box_grab" />
+      <geom name="box_on_belt" type="cylinder" size="0.0235 0.08" mass="1e-2" friction="1.0 0.005 0.0001" rgba="0.5488567591 0.1278553234 0.9309346378 1" pos="0 0 0" />
+
+      <geom name="box_base_disk" type="box" size="0.06 0.06 0.01" mass="1e-2" friction="1 0.005 0.0001" rgba="0.3848107113 0.1466337922 0.910363158 1" pos="0 0 -0.081" />
+    </body>
+
+
+    <body name="marker1" pos="0.4489347605 -0.005812924578 0.8721">
+      <geom type="box" size="0.035 0.035 0.001" rgba="0.8328167464 0.5072645426 0.3526430972 1" contype="0" conaffinity="0" />
+    </body>
+
+    <body name="marker2" pos="0.5012558443 -0.5486231808 0.8721">
+      <geom type="box" size="0.035 0.035 0.001" rgba="0.5647709607 0.6878922395 0.8494330299 1" contype="0" conaffinity="0" />
+    </body>
+
+
+    <body name="table" pos="0.62 -0.6 0.85">
+      
+      <geom name="table_top" type="box" size="0.40 0.8 0.02" material="table_ceramic" friction="1 0.005 0.0001" />
+
+      
+
+      
+      <geom name="leg_fl" type="cylinder" size="0.03 0.4" pos="0.2  0.6 -0.4" material="table_legs_metal" contype="0" conaffinity="0" />
+      <geom name="leg_fr" type="cylinder" size="0.03 0.4" pos=" 0.2 -0.6 -0.4" material="table_legs_metal" contype="0" conaffinity="0" />
+      <geom name="leg_rl" type="cylinder" size="0.03 0.4" pos="-0.2  0.6 -0.4" material="table_legs_metal" contype="0" conaffinity="0" />
+      <geom name="leg_rr" type="cylinder" size="0.03 0.4" pos="-0.2 -0.6 -0.4" material="table_legs_metal" contype="0" conaffinity="0" />
+    </body>
+  </worldbody>
+
+  <actuator>
+    <velocity name="belt_speed" joint="belt_slide" kv="1" ctrlrange="-0.1 0.1" />
+  </actuator>
+
+</mujoco>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="parts_table">
+  <asset>
+    <!-- 材质定义 - 木质 -->
+    <material name="table_top" rgba="0.1 0.3 0.1 1" specular="0.1" shininess="0.1"/>
+    <material name="table_legs" rgba="0.6 0.6 0.6 1" specular="0.1" shininess="0.1"/>
+  </asset>
+  
+  <worldbody>
+    <body name="parts_table">
+      <!-- 桌面 (长1.4m, 宽0.8m, 厚0.03m) -->
+      <!-- size参数是半尺寸：X=0.7, Y=0.4, Z=0.015 -->
+      <!-- 桌面中心在z=0.815，这样底部在z=0.8（与腿顶部贴合） -->
+      <geom name="table_top" type="box" 
+            size="0.7 0.4 0.015" 
+            pos="0 0 0.815" 
+            material="table_top"
+            mass="10"/>
+      
+      <!-- 四条腿（圆柱形，从地面到桌面） -->
+      <!-- 腿的位置：距离中心 X方向±0.65m, Y方向±0.35m -->
+      
+      <!-- 前左腿 (X+, Y+) -->
+      <geom name="leg_fl" type="cylinder" 
+            size="0.03 0.4" 
+            pos="0.65 0.35 0.4" 
+            material="table_legs"
+            mass="2"/>
+      
+      <!-- 前右腿 (X+, Y-) -->
+      <geom name="leg_fr" type="cylinder" 
+            size="0.03 0.4" 
+            pos="0.65 -0.35 0.4" 
+            material="table_legs"
+            mass="2"/>
+      
+      <!-- 后左腿 (X-, Y+) -->
+      <geom name="leg_bl" type="cylinder" 
+            size="0.03 0.4" 
+            pos="-0.65 0.35 0.4" 
+            material="table_legs"
+            mass="2"/>
+      
+      <!-- 后右腿 (X-, Y-) -->
+      <geom name="leg_br" type="cylinder" 
+            size="0.03 0.4" 
+            pos="-0.65 -0.35 0.4" 
+            material="table_legs"
+            mass="2"/>
+    </body>
+  </worldbody>
+</mujoco>

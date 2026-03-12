@@ -1,19 +1,12 @@
 {
-    "head_control": {
-        "_comment_mode": "头部控制模式选项: \"fixed\"(固定模式), \"auto_track\"(自动跟踪主动手), \"fixed_main\"(固定主手), \"vr_follow\"(VR随动模式)",
-        "mode": "vr_follow",
-        "fixed_main_hand": "right",
-        "joint_limits": {
-            "yaw": [-85, 85],
-            "pitch": [-25, 25]
-        },
-        "smoothing_factor_comment": "平滑滤波系数，范围0-1，越大越平滑",
-        "smoothing_factor": 0.2,
-        "active_hand_threshold_comment": "主动手阈值(cm)，超过该阈值则认为手部在移动，越小越敏感",
-        "active_hand_threshold": 0.0005
-    },
     "head_motion_range": {
-        "yaw": [-90, 90],
-        "pitch": [-20, 30]
+        "yaw": [
+            -85,
+            85
+        ],
+        "pitch": [
+            -30,
+            30
+        ]
     }
 }

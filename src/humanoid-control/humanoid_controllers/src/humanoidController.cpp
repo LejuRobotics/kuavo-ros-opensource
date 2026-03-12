@@ -452,9 +452,6 @@ namespace humanoid_controller
     centroidalModelInfo_ = HumanoidInterface_->getCentroidalModelInfo();
     eeKinematicsPtr_->setPinocchioInterface(*pinocchioInterface_ptr_);
 
-    torso_position_interpolator_ptr_ = std::make_shared<FloatInterpolation>(HumanoidInterface_->getPinocchioInterface(),
-                                                            HumanoidInterface_->getCentroidalModelInfo());
-
     auto &info = HumanoidInterface_->getCentroidalModelInfo();
     jointNum_ = HumanoidInterface_->modelSettings().mpcLegsDof;
     armNum_ = info.actuatedDofNum - jointNum_ - waistNum_;
@@ -507,7 +504,6 @@ namespace humanoid_controller
     jointAccRL_ = vector_t::Zero(jointNumReal_ + armNumReal_ + waistNum_);
     default_state_.resize(12+actuatedDofNumReal_);
     default_state_.setZero();
-    arm_mode_sync_time_ = ros::Time::now().toSec();
     
     // 检查RL参数文件是否存在，只有文件存在时才启用RL功能
     // std::ifstream rlParamFileCheck(rlParamFile);
@@ -554,12 +550,20 @@ namespace humanoid_controller
     ankleSolver.getconfig(ankleSolverType);
     // 同步脚踝解算类型到 ROS 参数，供倒地起身等 RL 控制器使用
     ros::param::set("/ankle_solver_type", static_cast<int>(ankleSolverType));
+    // 若 launch 已设置 robot_init_state_param（如 craic 场景指定初始位置），则不覆盖
     if (!init_fall_down_state_) // 初始倒地时不在这里设置初始状态
     {
-      ros::param::set("robot_init_state_param", robot_init_state_param);
+      if (!ros::param::has("robot_init_state_param"))
+        ros::param::set("robot_init_state_param", robot_init_state_param);
     }
   
-    ros::param::set("/humanoid/init_q", robot_init_state_param);
+    if (ros::param::has("robot_init_state_param")) {
+      std::vector<double> init_q;
+      ros::param::get("robot_init_state_param", init_q);
+      ros::param::set("/humanoid/init_q", init_q);
+    } else {
+      ros::param::set("/humanoid/init_q", robot_init_state_param);
+    }
 
     auto initial_state_ =  drake_interface_->getInitialState();// 里面不包含手臂和腰部
     auto squat_initial_state_ =  drake_interface_->getSquatInitialState();
@@ -820,22 +824,8 @@ namespace humanoid_controller
         ROS_INFO("[HumanoidController] fall_down_state_ set to %d via callback", fall_down_state_);
       });
       
-      // 注册躯干稳定性状态回调函数（从状态估计器获取）
-      controller_manager_->registerTorsoStabilityCallback([this]() -> bool {
-        if (stateEstimate_)
-        {
-          return stateEstimate_->isTorsoVelocityStable();
-        }
-        else
-        {
-          // 如果状态估计器未初始化，返回true（允许切换）
-          return true;
-        }
-      });
-      
       // 初始化 ROS 服务（由 RLControllerManager 管理）
       controller_manager_->initializeRosServices(controllerNh_);
-      
       
       // 只有在 RL 可用时才初始化控制器（需要配置文件）
       {
@@ -936,18 +926,6 @@ namespace humanoid_controller
         {
           mpcArmControlMode_ = static_cast<ArmControlMode>(msg->data[0]);
           std::cout << "[controller] mpc arm control mode changed to: " << mpcArmControlMode_ << std::endl;
-          
-          // 模式切换时重置拉起保护滤波器（避免模式切换时的接触力变化导致误触发）
-          if (stateEstimate_)
-          {
-            stateEstimate_->resetPullUpFilter();
-            ROS_INFO("[HumanoidController] Reset pullup filter due to mode switch (from %d to %d)", 
-                     static_cast<int>(mpcArmControlMode_));
-          }
-          
-          // 检查模式是否已同步，如果同步则记录时间
-          arm_mode_sync_time_ = ros::Time::now().toSec();
-          
         }
         if (msg->data[1] != mpcArmControlMode_desired_)
         {
@@ -1011,7 +989,7 @@ namespace humanoid_controller
       enable_wbc_sub_ = controllerNh_.subscribe("/enable_wbc_flag", 10, &humanoidController::getEnableWbcFlagCallback, this);
 
       // State estimation
-      setupStateEstimate(taskFile, verbose, referenceFile);
+      setupStateEstimate(taskFile, verbose);
       if (use_shm_communication_)
       {
         while (!sensors_data_buffer_ptr_->isReady())
@@ -1038,7 +1016,6 @@ namespace humanoid_controller
         wbc_->setHalfBodyMode(true);
       }
 
-      taskFile_switchParams_ = taskFile;
       standUpWbc_ = std::make_shared<StandUpWbc>(*pinocchioInterfaceWBCPtr_, centroidalModelInfoWBC_,
                                                  *eeKinematicsWBCPtr_);
       standUpWbc_->setArmNums(armNumReal_);
@@ -1566,6 +1543,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
        last_sensor_data_time_ = current_sensor_data_time;
        return;
      }
+ 
+
     double diff_time = (current_sensor_data_time - last_sensor_data_time_).toSec();
     ros::Duration period = ros::Duration(diff_time);
     nav_msgs::Odometry kinematics_odom;
@@ -1654,109 +1633,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     stateEstimate_->updateImu(sensor_data_new.quat_, sensor_data_new.angularVel_, sensor_data_new.linearAccel_, 
                               sensor_data_new.orientationCovariance_, sensor_data_new.angularVelCovariance_, 
                               sensor_data_new.linearAccelCovariance_);
-  }
-
-  void humanoidController::resetKinematicsEstimation()
-  {
-    // 获取当前传感器数据
-    SensorData sensors_data = sensors_data_buffer_ptr_->getLastData();
-    
-    // 清空robotlocalization队列中的旧数据
-    {
-      std::lock_guard<std::mutex> lock(robotlocalization_data_mutex_);
-      size_t queue_size_before = robotlocalizationDataQueue.size();
-      while(!robotlocalizationDataQueue.empty())
-      {
-        robotlocalizationDataQueue.pop();
-      }
-      ROS_INFO("[ResetKinematics] 清空robotlocalizationDataQueue，清空前大小: %zu", queue_size_before);
-      // robot_quat_state_update_会在第一次updatakinematics调用时自动更新为当前传感器值
-    }
-    
-    // 重置状态估计器
-    stateEstimate_->reset();
-    
-    // 重置时间戳，确保第一次更新的period很小
-    last_sensor_data_time_ = sensors_data.timeStamp_ - ros::Duration(0.002);
-    
-    // 更新关节状态
-    stateEstimate_->updateJointStates(jointPos_, jointVel_);
-    
-    // 使用当前IMU值更新初始欧拉角
-    quat_init = stateEstimate_->updateIntialEulerAngles(sensors_data.quat_);
-    
-    // 更新IMU数据
-    stateEstimate_->updateImu(sensors_data.quat_, sensors_data.angularVel_, 
-                            sensors_data.linearAccel_, 
-                            sensors_data.orientationCovariance_, 
-                            sensors_data.angularVelCovariance_, 
-                            sensors_data.linearAccelCovariance_);
-    
-    // 获取更新后的RBD状态并构建初始centroidal状态
-    measuredRbdState_ = stateEstimate_->getRbdState();
-    vector_t initial_centroidal_state = rbdConversions_->computeCentroidalStateFromRbdModel(measuredRbdState_);
-
-    
-    // 保持yaw的连续性，避免切换时跳变
-    // 从传感器数据获取当前yaw值
-    Eigen::Vector3d sensor_euler = quatToZyx(sensors_data.quat_);
-    scalar_t sensor_yaw = sensor_euler(0);
-    
-    // 确定使用哪个yaw值作为参考
-    scalar_t yawLast = sensor_yaw;  // 默认使用传感器yaw
-    bool use_sensor_yaw = true;
-    
-    if (currentObservation_.state.size() > 9 && std::abs(currentObservation_.state(9)) > 1e-6)
-    {
-      scalar_t current_yaw = currentObservation_.state(9);
-      scalar_t yaw_diff = std::abs(angles::shortest_angular_distance(current_yaw, sensor_yaw));
-      
-      ROS_INFO("[ResetKinematics] currentObservation_.state(9): %.6f", current_yaw);
-      ROS_INFO("[ResetKinematics] yaw差异检查: |current_yaw - sensor_yaw| = %.6f", yaw_diff);
-      
-      // 如果currentObservation_中的yaw与传感器yaw差异小于0.5弧度，使用currentObservation_的yaw
-      // 否则说明currentObservation_中的yaw可能已过时，使用传感器yaw
-      if (yaw_diff < 0.5)
-      {
-        yawLast = current_yaw;
-        use_sensor_yaw = false;
-        ROS_INFO("[ResetKinematics] ✓ 使用currentObservation_.state(9)作为yaw参考: %.6f (与传感器差异: %.6f < 0.5)", 
-                 yawLast, yaw_diff);
-      }
-      else
-      {
-        ROS_WARN("[ResetKinematics] ✗ currentObservation_.state(9)=%.6f与传感器yaw=%.6f差异过大(%.6f >= 0.5)，使用传感器yaw", 
-                 current_yaw, sensor_yaw, yaw_diff);
-      }
-    }
-    else
-    {
-      ROS_INFO("[ResetKinematics] currentObservation_.state(9)无效(size=%zu或值=%.6f)，使用传感器yaw: %.6f", 
-               currentObservation_.state.size(), 
-               (currentObservation_.state.size() > 9) ? currentObservation_.state(9) : 0.0,
-               sensor_yaw);
-    }
-    
-    // 计算yaw连续性保持
-    scalar_t newYaw = initial_centroidal_state(9);
-    scalar_t yawDiff = angles::shortest_angular_distance(yawLast, newYaw);
-    scalar_t yaw_before = initial_centroidal_state(9);
-    initial_centroidal_state(9) = yawLast + yawDiff;
-    
-    // 设置状态估计器的初始状态
-    ROS_INFO("[ResetKinematics] 调用set_intial_state设置状态估计器初始状态...");
-    ROS_INFO("[ResetKinematics] 设置前initial_centroidal_state(9): %.6f", initial_centroidal_state(9));
-    stateEstimate_->set_intial_state(initial_centroidal_state);
-    
-    // 重要：更新currentObservation_.state为新的初始状态，确保resetMpcNode使用正确的yaw值
-    // 这样MPC的参考轨迹会基于正确的yaw值进行校准
-    scalar_t currentObs_yaw_before = (currentObservation_.state.size() > 9) ? currentObservation_.state(9) : 0.0;
-    currentObservation_.state = initial_centroidal_state;
-    
-    // 更新stanceState_mrt_为重置后的状态，确保后续使用正确的yaw值
-    stanceState_mrt_ = initial_centroidal_state;
-    ROS_INFO("[ResetKinematics] stanceState_mrt_.yaw=%.6f", stanceState_mrt_(9));
-    
   }
   
   bool humanoidController::enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
@@ -1981,9 +1857,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       
       if (!isInitStandUpStartTime_)
       {
-        resetKinematicsEstimation();
-        initial_status_(9) = currentObservation_.state(9);
-        
         isInitStandUpStartTime_ = true;
         robotStartStandTime_ = time.toSec();
         // 站立的结束时间是依据开始时间确定的
@@ -2177,8 +2050,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       isPreUpdateComplete = true;
       standupTime_ = currentObservation_.time;
 
-      standUpWbc_->loadSwitchParamsSetting(taskFile_switchParams_, true, is_real_);
-
       std_msgs::Int8 bot_stand_up_complete;
       bot_stand_up_complete.data = 1;
       standUpCompletePub_.publish(bot_stand_up_complete);
@@ -2293,19 +2164,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       arm_joint_trajectory_.tau = Eigen::VectorXd::Zero(armNumReal_);
       ROS_INFO("[MPC->RL] 清理手臂轨迹缓存");
 
-      // 启动躯干插值，XY 基于当前双脚中心 + RL 控制器配置的 base X 偏移，Z 对齐 RL 默认高度
-      // 使用已有的躯干插值系统，并覆盖目标高度为 RL 默认高度
-      vector3_t feet_center = stateEstimate_->getFeetCenterPosition();
-      // RL 控制器配置的站立时 base 在 x 方向相对于足端中心(0)的偏移（机器人前向）
-      double base_x_offset = 0.0;
-      if (current_controller_ptr_)
-      {
-        base_x_offset = current_controller_ptr_->getDefaultBaseXOffsetControl();
-      }
-      // 将机体前向的 X 偏移旋转到世界坐标系，并叠加到双脚中心位置
-      const double yaw = currentObservation_.state(9);
-      feet_center(0) += std::cos(yaw) * base_x_offset;
-      feet_center(1) += std::sin(yaw) * base_x_offset;
+      // 启动躯干插值，XY 对齐双脚中心，Z 对齐 RL 默认高度
+      // 使用已有的躯干插值系统，并覆盖目标高度为 initialStateRL_(8)
+      vector3_t feet_center = currentObservation_.state.segment<3>(6);
       feet_center(2) = defaultBaseHeightControl_;
       vector6_t targetPose = vector6_t::Zero();
       targetPose.segment<3>(0) = feet_center;                  // xyz
@@ -2336,8 +2197,125 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       ROS_INFO("[RL->MPC] 清理手臂轨迹缓存，重置为当前位置: [%.3f, %.3f, ...]", 
                current_arm_pos(0), current_arm_pos(1));
       
-      // 从RL切换到MPC时，重置运动学估计（包括状态估计器、时间戳、yaw连续性等）
-      resetKinematicsEstimation();
+      // 从RL切换到MPC时，需要更新IMU并重置状态估计器
+      SensorData sensors_data = sensors_data_buffer_ptr_->getLastData();
+      
+  
+      
+      // 从RL切换到MPC时，清空robotlocalization队列中的旧数据（RL模式下估计器不更新，数据已过时）
+      {
+        std::lock_guard<std::mutex> lock(robotlocalization_data_mutex_);
+        size_t queue_size_before = robotlocalizationDataQueue.size();
+        // 清空队列中所有旧数据
+        while(!robotlocalizationDataQueue.empty())
+        {
+          robotlocalizationDataQueue.pop();
+        }
+        ROS_INFO("[RL->MPC] 清空robotlocalizationDataQueue，清空前大小: %zu", queue_size_before);
+        // robot_quat_state_update_会在第一次updatakinematics调用时自动更新为当前传感器值
+      }
+      
+      // 重置状态估计器
+      ROS_INFO("[RL->MPC] 重置状态估计器...");
+      stateEstimate_->reset();
+      
+      // 重置时间戳，确保第一次更新的period很小
+      last_sensor_data_time_ = sensors_data.timeStamp_ - ros::Duration(0.002);
+      ROS_INFO("[RL->MPC] 重置时间戳: last_sensor_data_time_ = %.6f", last_sensor_data_time_.toSec());
+      
+      // 更新关节状态
+      ROS_INFO("[RL->MPC] 更新关节状态...");
+      stateEstimate_->updateJointStates(jointPosWBC_, jointVelWBC_);
+      
+      // 使用当前IMU值更新初始欧拉角
+      ROS_INFO("[RL->MPC] 调用updateIntialEulerAngles...");
+      quat_init = stateEstimate_->updateIntialEulerAngles(sensors_data.quat_);
+      
+      // 更新IMU数据
+      ROS_INFO("[RL->MPC] 更新IMU数据...");
+      stateEstimate_->updateImu(sensors_data.quat_, sensors_data.angularVel_, 
+                                sensors_data.linearAccel_, 
+                                sensors_data.orientationCovariance_, 
+                                sensors_data.angularVelCovariance_, 
+                                sensors_data.linearAccelCovariance_);
+      
+      // 获取更新后的RBD状态并构建初始centroidal状态
+      ROS_INFO("[RL->MPC] 获取RBD状态并构建初始centroidal状态...");
+      measuredRbdState_ = stateEstimate_->getRbdState();
+      vector_t initial_centroidal_state = rbdConversions_->computeCentroidalStateFromRbdModel(measuredRbdState_);
+      ROS_INFO("[RL->MPC] initial_centroidal_state前12个值: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f]",
+               initial_centroidal_state(0), initial_centroidal_state(1), initial_centroidal_state(2),
+               initial_centroidal_state(3), initial_centroidal_state(4), initial_centroidal_state(5),
+               initial_centroidal_state(6), initial_centroidal_state(7), initial_centroidal_state(8),
+               initial_centroidal_state(9), initial_centroidal_state(10), initial_centroidal_state(11));
+      
+      // 保持yaw的连续性，避免切换时跳变
+      // 从传感器数据获取当前yaw值
+      Eigen::Vector3d sensor_euler = quatToZyx(sensors_data.quat_);
+      scalar_t sensor_yaw = sensor_euler(0);
+      
+      ROS_INFO("[RL->MPC] ====== Yaw连续性处理 ======");
+      ROS_INFO("[RL->MPC] 传感器yaw (sensor_euler(0)): %.6f", sensor_yaw);
+      ROS_INFO("[RL->MPC] initial_centroidal_state(9) (从RBD状态计算): %.6f", initial_centroidal_state(9));
+      
+      // 确定使用哪个yaw值作为参考
+      scalar_t yawLast = sensor_yaw;  // 默认使用传感器yaw
+      bool use_sensor_yaw = true;
+      
+      if (currentObservation_.state.size() > 9 && std::abs(currentObservation_.state(9)) > 1e-6)
+      {
+        scalar_t current_yaw = currentObservation_.state(9);
+        scalar_t yaw_diff = std::abs(angles::shortest_angular_distance(current_yaw, sensor_yaw));
+        
+        ROS_INFO("[RL->MPC] currentObservation_.state(9): %.6f", current_yaw);
+        ROS_INFO("[RL->MPC] yaw差异检查: |current_yaw - sensor_yaw| = %.6f", yaw_diff);
+        
+        // 如果currentObservation_中的yaw与传感器yaw差异小于0.5弧度，使用currentObservation_的yaw
+        // 否则说明currentObservation_中的yaw可能已过时（RL模式下未更新），使用传感器yaw
+        if (yaw_diff < 0.5)
+        {
+          yawLast = current_yaw;
+          use_sensor_yaw = false;
+          ROS_INFO("[RL->MPC] ✓ 使用currentObservation_.state(9)作为yaw参考: %.6f (与传感器差异: %.6f < 0.5)", 
+                   yawLast, yaw_diff);
+        }
+        else
+        {
+          ROS_WARN("[RL->MPC] ✗ currentObservation_.state(9)=%.6f与传感器yaw=%.6f差异过大(%.6f >= 0.5)，使用传感器yaw", 
+                   current_yaw, sensor_yaw, yaw_diff);
+        }
+      }
+      else
+      {
+        ROS_INFO("[RL->MPC] currentObservation_.state(9)无效(size=%zu或值=%.6f)，使用传感器yaw: %.6f", 
+                 currentObservation_.state.size(), 
+                 (currentObservation_.state.size() > 9) ? currentObservation_.state(9) : 0.0,
+                 sensor_yaw);
+      }
+      
+      // 计算yaw连续性保持
+      scalar_t newYaw = initial_centroidal_state(9);
+      scalar_t yawDiff = angles::shortest_angular_distance(yawLast, newYaw);
+      scalar_t yaw_before = initial_centroidal_state(9);
+      initial_centroidal_state(9) = yawLast + yawDiff;
+      
+      
+      // 设置状态估计器的初始状态
+      ROS_INFO("[RL->MPC] 调用set_intial_state设置状态估计器初始状态...");
+      ROS_INFO("[RL->MPC] 设置前initial_centroidal_state(9): %.6f", initial_centroidal_state(9));
+      stateEstimate_->set_intial_state(initial_centroidal_state);
+      
+      // 重要：更新currentObservation_.state为新的初始状态，确保resetMpcNode使用正确的yaw值
+      // 这样MPC的参考轨迹会基于正确的yaw值进行校准
+      scalar_t currentObs_yaw_before = (currentObservation_.state.size() > 9) ? currentObservation_.state(9) : 0.0;
+      currentObservation_.state = initial_centroidal_state;
+      
+      // 更新stanceState_mrt_为重置后的状态，确保后续使用正确的yaw值
+      stanceState_mrt_ = initial_centroidal_state;
+      ROS_INFO("[RL->MPC] 更新stanceState_mrt_为重置后的状态，yaw=%.6f", stanceState_mrt_(9));
+      
+      ROS_INFO("[RL->MPC] ====== 切换完成 ======");
+      ROS_INFO("==========================================");
     }
     last_is_rl_controller_ = is_rl_controller_;
     kuavo_msgs::jointCmd jointCmdMsg;
@@ -2398,28 +2376,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         arm_joint_vel_filter_.reset(current_arm_vel);
 
         reset_mpc_ = false;
+        resetting_mpc_state_ = ResettingMpcState::RESET_INITIAL_POLICY;
         standupTime_ = currentObservation_.time;
-
-        std::cout << "resetting_mpc_ and initialPolicyReceived, switching to RESET_BASE" << std::endl;
-        resetting_mpc_state_ = ResettingMpcState::RESET_BASE;
-        
-        // 获取双脚中心位置
-        vector3_t targetTorsoPos = stateEstimate_->getFeetCenterPosition();
-        targetTorsoPos(2) = default_state_[8];
-        vector6_t targetTorsoPose = vector6_t::Zero();
-        targetTorsoPose.segment<3>(0) = targetTorsoPos;
-        targetTorsoPose(3) = 0.0;
-        targetTorsoPose(4) = default_state_(10);
-        targetTorsoPose(5) = stanceState_mrt_(9);
-        
-        // 修复：切换到RL使用实际手臂位置作为插值目标，而不是默认位置，避免跳变
-        vector_t target_arm_pos = defalutArmPosMPC_;
-        if (is_rl_controller_)
-        {
-          target_arm_pos = currentDefalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
-        }
-
-        startMPCRLInterpolation(currentObservation_.time, targetTorsoPose, target_arm_pos);
+        std::cout << "reset MPC node at " << currentObservation_.time << "\n";
       }
       // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getNextData();
       // // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getData(ros::Time::now().toSec());
@@ -2436,11 +2395,42 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         // Only use halfup_body doesn't work well.
         if (!only_half_up_body_) {
           // Update the current state of the system
-          // mrtRosInterface_->setCurrentObservation(currentObservation_);
+          mrtRosInterface_->setCurrentObservation(currentObservation_);
           
           // Trigger MRT callbacks
           mrtRosInterface_->spinMRT();
           // Update the policy if a new on was received
+          if (resetting_mpc_state_ == ResettingMpcState::RESET_INITIAL_POLICY)// 重置MPC状态1：等待初始策略, 状态2：更新躯干位置
+          {
+            if (mrtRosInterface_->initialPolicyReceived() && mrtRosInterface_->updatePolicy() && mrtRosInterface_->isPolicyUpdated())// 收到初始策略，更新成功
+            {
+              std::cout << "resetting_mpc_ and initialPolicyReceived, switching to RESET_BASE" << std::endl;
+              resetting_mpc_state_ = ResettingMpcState::RESET_BASE;
+              
+              // 获取双脚中心位置
+              vector3_t targetTorsoPos = stateEstimate_->getFeetCenterPosition();
+              targetTorsoPos(2) = default_state_[8];
+              vector6_t targetTorsoPose = vector6_t::Zero();
+              targetTorsoPose.segment<3>(0) = targetTorsoPos;
+              targetTorsoPose(3) = 0.0;
+              targetTorsoPose(4) = default_state_(10);
+              targetTorsoPose(5) = stanceState_mrt_(9);
+              
+              // 修复：切换到RL使用当前实际手臂位置作为插值目标，而不是默认位置，避免跳变
+              vector_t target_arm_pos = defalutArmPosMPC_;
+              if (is_rl_controller_)
+              {
+                target_arm_pos = currentDefalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
+              }
+
+              startMPCRLInterpolation(currentObservation_.time, targetTorsoPose, target_arm_pos);
+            }
+            std::cout << "waiting for initialPolicy,using default state target..." << std::endl;
+            optimizedState_mrt = stanceState_mrt_;
+            optimizedInput_mrt = stanceInput_mrt_;
+            plannedMode_ = ModeNumber::SS;
+          }
+          else
           {
             optimizedState_mrt = stanceState_mrt_;
             optimizedInput_mrt = stanceInput_mrt_;
@@ -2452,18 +2442,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
               // 检查插值是否完成
               if (!is_torso_interpolation_active_)
               {
-                bool mpc_ready = mrtRosInterface_->initialPolicyReceived() && mrtRosInterface_->updatePolicy() && mrtRosInterface_->isPolicyUpdated();
-                if (is_rl_controller_)// 切换到RL
-                {
-                  std::cout << "[MPC->RL] Torso interpolation completed, switching to NORMAL" << std::endl;
-                  resetting_mpc_state_ = ResettingMpcState::NOMAL;
-                }else if (mpc_ready)
-                {
-                  standupTime_ = currentObservation_.time;
-                  std::cout << "[RL->MPC] Torso interpolation completed, switching to NORMAL" << std::endl;
-                  resetting_mpc_state_ = ResettingMpcState::NOMAL;
-                }
-
+                standupTime_ = currentObservation_.time;
+                std::cout << "Torso interpolation completed, switching to NORMAL" << std::endl;
+                resetting_mpc_state_ = ResettingMpcState::NOMAL;
               }
             }
             if (mrtRosInterface_->updatePolicy())
@@ -2478,26 +2459,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
               TargetTrajectories target_trajectories(policy.timeTrajectory_, policy.stateTrajectory_, policy.inputTrajectory_);
 
               publishFeetTrajectory(target_trajectories);
-              double height_tol = 0.002;
-              auto& check_state_traj = mpc_current_target_trajectories_.stateTrajectory;
-              // 鲁班检查是否是摇杆上下拉起
-              if (is_roban_ && check_state_traj.size() >= 1 && check_state_traj.front().size() > 8 && check_state_traj.back().size() > 8)
-              {
-                double first_height = check_state_traj.front()(8);
-                double last_height = check_state_traj.back()(8);
-                condition_pull_up_mpc_height_ = (std::abs(first_height - default_state_[8]) < height_tol &&
-                                        std::abs(last_height - default_state_[8]) < height_tol);
-              }
-              else
-                condition_pull_up_mpc_height_ = true; 
             }
             
             
-            if (is_torso_interpolation_active_ || resetting_mpc_state_ != ResettingMpcState::NOMAL /* && !is_rl_controller_ */) // 当前是从RL切换到MPC, 使用WBC插值防止MPC没有启动
+            if (is_torso_interpolation_active_ && !is_rl_controller_) // 当前是从RL切换到MPC, 使用WBC插值防止MPC没有启动
             {
               optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
-              optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = leg_interpolation_result_.head(jointNumReal_+ waistNum_);
-              // optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = default_state_.segment(12,jointNumReal_+ waistNum_);
+              optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = default_state_.segment(12,jointNumReal_+ waistNum_);
               // optimizedInput_mrt = stanceInput_mrt_;
               plannedMode_ = ModeNumber::SS;
 
@@ -2635,8 +2603,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             prev_filtered_pos = filtered_pos;
             low_latency_first_enter = false;
           }
-          // vector_t computed_vel = (filtered_pos - prev_filtered_pos) / dt_;
-          vector_t computed_vel = vector_t::Zero(armNumReal_);
+          vector_t computed_vel = (filtered_pos - prev_filtered_pos) / dt_;
             
             // 3. 对计算出的速度再次滤波
           optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(computed_vel);
@@ -2754,7 +2721,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         static vector_t x;
 
-        if( resetting_mpc_state_ != ResettingMpcState::NOMAL || is_torso_interpolation_active_)
+        if(is_roban_ && is_torso_interpolation_active_)
         {
           x = standUpWbc_->update(optimizedState2WBC_mrt_, optimizedInput2WBC_mrt_, measuredRbdStateReal_, ModeNumber::SS, period.toSec(), false);
         }
@@ -2854,17 +2821,12 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         jointCmdMsg.joint_kp.push_back(joint_kp_[i1]);
         jointCmdMsg.joint_kd.push_back(joint_kd_[i1]);
         jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
-        if(!is_roban_ && is_torso_interpolation_active_ && i1 < jointNumReal_)
-        {
-          jointCmdMsg.control_modes.push_back(2); // 躯干插值阶段，腿部全部位置控制
-          continue;
-        }
         jointCmdMsg.control_modes.push_back(joint_control_modes_[i1]);
 
         // jointCurrentWBC_(i1) = output_tau_(i1);
       }
       ModeSchedule current_mode_schedule;
-      if (resetting_mpc_state_ == ResettingMpcState::NOMAL)
+      if (resetting_mpc_state_ != ResettingMpcState::RESET_INITIAL_POLICY)
       {
         current_mode_schedule = mrtRosInterface_->getCurrentModeSchedule();
       }
@@ -3102,18 +3064,21 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     publishControlCommands(jointCmdMsg);
 
     // Visualization
-    if (visualizeHumanoid_)
+    if (visualizeHumanoid_ && resetting_mpc_state_ != ResettingMpcState::RESET_INITIAL_POLICY)
     {
       robotVisualizer_->updateSimplifiedArmPositions(simplifiedJointPos_);
-      if (is_rl_controller_ || resetting_mpc_state_ != ResettingMpcState::NOMAL)
+      // RL 模式下也允许更新可视化（即使 MPC policy 未更新）
+      if (mrtRosInterface_->isPolicyUpdated() || is_rl_controller_)
       {
-        // RL 模式下，直接使用 publishObservation 发布 tf 树（不需要 MPC 的 policy 和 command）
-        robotVisualizer_->publishObservation(ros::Time::now(), currentObservation_);
-      }
-      // 仅在 MPC 正常工作且 policy 已更新时，才使用 MPC 轨迹进行可视化
-      else if (mrtRosInterface_->isPolicyUpdated())
-      {
-        robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+        if (is_rl_controller_)
+        {
+          // RL 模式下，直接使用 publishObservation 发布 tf 树（不需要 MPC 的 policy 和 command）
+          robotVisualizer_->publishObservation(ros::Time::now(), currentObservation_);
+        }
+        else
+        {
+          robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+        }
       }
       robotVisualizer_->updateHeadJointPositions(sensor_data_head_.jointPos_);
       // 更新灵巧手可视化
@@ -3299,25 +3264,12 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         // stateEstimate_->updateKinematics(period);
         updatakinematics(sensors_data, is_initialized_);
         measuredRbdState_ = stateEstimate_->update(time, period);                // angle(zyx),pos(xyz),jointPos[info_.actuatedDofNum],angularVel(zyx),linervel(xyz),jointVel[info_.actuatedDofNum]
-        
-        // 更新躯干稳定性状态（用于控制器切换检测）
-        stateEstimate_->updateTorsoStability(time, period);
-        
         currentObservation_.time += period.toSec();
       }
       // 只有非半身轮臂模式站立状态&&站起来稳定之后进行保护, 并且手臂不是外部遥操作模式才可触发拉起保护
-      // 确保当前模式已切换到期望模式后才启用拉起保护，模式同步后还需要等待1.5秒才能触发拉起保护
-      double current_time = ros::Time::now().toSec();
-      bool mode_sync_ready = (mpcArmControlMode_ == mpcArmControlMode_desired_) && 
-                             (current_time - arm_mode_sync_time_ >= 1.5);
       bool enable_pull_up = enable_pull_up_protect_ &&  !is_rl_controller_ && isPreUpdateComplete && is_stance_mode_ && 
         !only_half_up_body_ && currentObservation_.time - standupTime_ > 4 
-        && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL && resetting_mpc_state_ == ResettingMpcState::NOMAL
-        && mode_sync_ready  // 确保当前模式已切换到期望模式，且已等待1.5秒
-        && (!is_roban_ || condition_pull_up_mpc_height_);  // roban 时要求 MPC 规划高度接近站立高度时才进行触发
-
-      // 发布拉起保护启用状态
-      ros_logger_->publishValue("/state_estimate/enable_pull_up", enable_pull_up);
+        && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL && resetting_mpc_state_ == ResettingMpcState::NOMAL;
 
       bool new_pull_up_state = false;
       if (enable_pull_up)
@@ -3435,12 +3387,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       ros_logger_->publishVector("/state_estimate/measuredRbdStateReal", measuredRbdStateReal_);
 
       // std::cout << "jointPosWBC_:" << jointPosWBC_.transpose() << std::endl;
-      if (!is_roban_) {
-        auto est_arm_contact_force = stateEstimate_->getEstArmContactForce(
-            jointPosWBC_, jointVelWBC_, activeTorqueWBC_, period);
-        ros_logger_->publishVector("/state_estimate/est_arm_contact_force",
-                                   est_arm_contact_force);
-      }
+
+      auto est_arm_contact_force = stateEstimate_->getEstArmContactForce(jointPosWBC_, jointVelWBC_, activeTorqueWBC_, period);
+      ros_logger_->publishVector("/state_estimate/est_arm_contact_force", est_arm_contact_force);
     }
   }
 
@@ -3641,26 +3590,24 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     return mpcPolicyMsg;
   }
 
-  void humanoidController::setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile)
+  void humanoidController::setupStateEstimate(const std::string &taskFile, bool verbose)
   {
     // 这部分只有下肢，可能需要修改。
     stateEstimate_ = std::make_shared<KalmanFilterEstimate>(HumanoidInterface_->getPinocchioInterface(),
                                                             HumanoidInterface_->getCentroidalModelInfo(), *eeKinematicsPtr_);
-    dynamic_cast<KalmanFilterEstimate &>(*stateEstimate_).loadSettings(taskFile, verbose, referenceFile);
+    dynamic_cast<KalmanFilterEstimate &>(*stateEstimate_).loadSettings(taskFile, verbose);
 
     currentObservation_.time = 0;
-    if (!is_roban_) {
-      stateEstimate_->initializeEstArmContactForce(*pinocchioInterfaceEstimatePtr_, centroidalModelInfoEstimate_);
-    }
+    stateEstimate_->initializeEstArmContactForce(*pinocchioInterfaceEstimatePtr_, centroidalModelInfoEstimate_);
   }
 
-  void humanoidCheaterController::setupStateEstimate(const std::string & /*taskFile*/, bool /*verbose*/, const std::string & /*referenceFile*/)
+  void humanoidCheaterController::setupStateEstimate(const std::string & /*taskFile*/, bool /*verbose*/)
   {
     stateEstimate_ = std::make_shared<FromTopicStateEstimate>(HumanoidInterface_->getPinocchioInterface(),
                                                               HumanoidInterface_->getCentroidalModelInfo(), *eeKinematicsPtr_, controllerNh_);
   }
 
-  void humanoidKuavoController::setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile)
+  void humanoidKuavoController::setupStateEstimate(const std::string &taskFile, bool verbose)
   {
 #ifdef KUAVO_CONTROL_LIB_FOUND
     // auto [plant, context] = drake_interface_->getPlantAndContext();
@@ -4357,27 +4304,6 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     is_torso_interpolation_active_ = true;
     torso_interpolation_start_pose_ = current_torso_pose;
     torso_interpolation_target_pose_ = target_torso_pose;
-
-    vector_t currentLegJointAngles = currentObservation_.state.segment(12, jointNumReal_);
-    vector_t targetLegJointAngles = initial_status_.segment(12, jointNumReal_);
-
-    leg_interpolation_start_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, current_torso_pose, currentLegJointAngles);
-    leg_interpolation_target_pose_ = torso_position_interpolator_ptr_->getlegJointAngles(currentObservation_.state, target_torso_pose, targetLegJointAngles);
-
-    leg_interpolation_result_.setZero(waistNum_ + jointNumReal_);
-    leg_interpolation_result_.head(jointNumReal_) = leg_interpolation_start_pose_;
-
-    double leg_distance = 0.0;
-    if (leg_interpolation_start_pose_.size() == leg_interpolation_target_pose_.size())
-    {
-      leg_distance = (leg_interpolation_target_pose_ - leg_interpolation_start_pose_).norm();
-    }
-    else
-    {
-      std::cout << "[MPCRLInterpolation] 错误：下肢位置维度不匹配(" 
-                << leg_interpolation_start_pose_.size() << " vs " << leg_interpolation_target_pose_.size() << ")" << std::endl;
-    }
-
     // torso_interpolation_target_pose_.head(2) = current_torso_pose.head(2);
     torso_interpolation_start_time_ = current_time;
     
@@ -4392,13 +4318,11 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
 
     // 初始化插值状态变量
     last_interpolated_pose_ = current_torso_pose;
-    // last_interpolation_time_ = current_time;
+    last_interpolation_time_ = current_time;
     std::cout << std::fixed << std::setprecision(3);
     std::cout << "Starting MPC-RL interpolation:" << std::endl;
     std::cout << "  Torso from [" << current_torso_pose.transpose() 
               << "] to [" << target_torso_pose.transpose() << "] (distance: " << torso_distance << "m)" << std::endl;
-    std::cout << "  Leg from [" << leg_interpolation_start_pose_.transpose() 
-              << "] to [" << leg_interpolation_target_pose_.transpose() << "] (distance: " << leg_distance << "rad)" << std::endl;
     std::cout << "  Arm from [" << current_arm_pos.transpose() 
               << "] to [" << target_arm_pos.transpose() << "] (distance: " << arm_distance << "rad)" << std::endl;
     std::cout << "  Max velocity: " << torso_interpolation_max_velocity_ 
@@ -4423,7 +4347,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     double distance_to_target = std::abs(pos_direction[2]);
     
     // 如果已经到达目标位置
-    if (distance_to_target < switch_distance_threshold_ || current_time - torso_interpolation_start_time_ > torso_interpolation_duration_ + switch_timeout_base_threshold_)
+    if (distance_to_target < switch_distance_threshold_ || current_time - torso_interpolation_start_time_ > torso_interpolation_duration_*switch_timeout_multiplier_threshold_)
     {
       is_torso_interpolation_active_ = false;
       is_arm_interpolating_ = false;
@@ -4437,8 +4361,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     
     // 使用线性插值计算当前躯干位姿
     vector6_t interpolated_pose = torso_interpolation_start_pose_ + alpha * (torso_interpolation_target_pose_ - torso_interpolation_start_pose_);
-    leg_interpolation_result_.head(jointNumReal_) = leg_interpolation_start_pose_ + alpha * (leg_interpolation_target_pose_ - leg_interpolation_start_pose_);
-
+    
     // 计算手臂插值
     arm_interpolation_result_ = arm_interpolation_start_pos_ + alpha * (arm_interpolation_target_pos_ - arm_interpolation_start_pos_);
     // 更新位姿和时间

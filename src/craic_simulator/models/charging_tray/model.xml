@@ -1,0 +1,35 @@
+<mujoco model="charging_tray">
+  <asset>
+    <!-- 视觉网格 -->
+    <mesh name="charging_tray_visual" file="charging_tray.stl"/>
+    
+    <!-- 碰撞网格 -->
+    <mesh name="charging_tray_collision" file="charging_tray.stl"/>
+  </asset>
+  
+  <worldbody>
+    <body name="charging_tray">
+      <!-- 添加惯性参数以避免默认计算问题 -->
+      <inertial pos="0 0 0" mass="0.05" diaginertia="0.0001 0.0001 0.0001"/>
+      
+      <!-- 视觉几何体 - 直接使用rgba设置颜色，设置为可见组 -->
+      <geom name="charging_tray_visual_geom" 
+            mesh="charging_tray_visual" 
+            type="mesh" 
+            contype="0" 
+            conaffinity="0" 
+            group="0"
+            rgba="0.7 0.7 0.7 1"/>
+      
+      <!-- 碰撞几何体 -->
+      <geom name="charging_tray_collision_geom" 
+            mesh="charging_tray_collision" 
+            type="mesh" 
+            group="3"
+            friction="1.5 1.2 0.02"
+            solref="0.02 1.0"
+            solimp="0.9 0.95 0.001"
+            condim="3"/>
+    </body>
+  </worldbody>
+</mujoco>

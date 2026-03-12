@@ -16,6 +16,7 @@
 
 #include <cstdlib>
 #include <utility>
+#include <string>
 
 #include <GLFW/glfw3.h>
 #include <mujoco/mjui.h>
@@ -39,6 +40,15 @@ int MaybeGlfwInit() {
   return is_initialized;
 }
 
+// Detect headless environment
+static inline bool IsHeadlessEnv() {
+  const char* headless = std::getenv("MUJOCO_HEADLESS");
+  const char* display = std::getenv("DISPLAY");
+  if (headless && std::string(headless) == "1") return true;
+  if (display == nullptr || display[0] == '\0') return true;
+  return false;
+}
+
 GlfwAdapter& GlfwAdapterFromWindow(GLFWwindow* window) {
   return *static_cast<GlfwAdapter*>(Glfw().glfwGetWindowUserPointer(window));
 }
@@ -49,14 +59,16 @@ GlfwAdapter::GlfwAdapter() {
     mju_error("could not initialize GLFW");
   }
 
+  const bool headless = IsHeadlessEnv();
+
   // multisampling
   Glfw().glfwWindowHint(GLFW_SAMPLES, 4);
-  Glfw().glfwWindowHint(GLFW_VISIBLE, 1);
+  Glfw().glfwWindowHint(GLFW_VISIBLE, headless ? 0 : 1);
 
   // get video mode and save
   vidmode_ = *Glfw().glfwGetVideoMode(Glfw().glfwGetPrimaryMonitor());
 
-  // create window
+  // create window (hidden when headless)
   window_ = Glfw().glfwCreateWindow((2 * vidmode_.width) / 3,
                                     (2 * vidmode_.height) / 3,
                                     "MuJoCo", nullptr, nullptr);

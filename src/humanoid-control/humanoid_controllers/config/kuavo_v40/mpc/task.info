@@ -16,8 +16,6 @@ model_settings
   positionErrorGainXYStepControl     50 ;
   velocityErrorGainXYStepControl     1.0;
 
-  positionErrorGainZStepControl  20.0 ; 20.0
-
   phaseTransitionStanceTime     0.4
 
   verboseCppAd                  false
@@ -742,30 +740,6 @@ standUpWeight
     Angular         10
     JointAcc        20
     contactForce    0.1 
-}
-
-switchJointAccelTask
-{
-  leg
-  {
-    kp    600
-    kd    10.2
-    kp_sim    500
-    kd_sim    10.2
-  }
-  arm
-  {
-    kp    200
-    kd    10.2
-  }
-}
-
-switchWeight
-{
-    Linear          3
-    Angular         10
-    JointAcc        20
-    contactForce    0.1
 }
 
 ; State Estimation

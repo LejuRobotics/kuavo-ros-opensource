@@ -1,0 +1,93 @@
+<!--
+  楼梯台阶模块 - 用于 MuJoCo 仿真场景
+  结构：4 级上行台阶 → 1m 平台 → 4 级下行台阶（对称）
+  台阶尺寸：每级 0.28m(深) × 1.5m(宽) × 0.13m(高)
+  平台尺寸：1.0m(深) × 1.5m(宽)，顶面 z=0.52m
+  总长：4×0.28 + 1.0 + 4×0.28 = 3.24m
+  碰撞体：实心填充（从地面到台阶顶面）
+-->
+<mujoco>
+  <asset>
+    <texture type="2d" name="stairs_tex" builtin="checker"
+             rgb1="0.4 0.4 0.4" rgb2="0.25 0.25 0.25"
+             width="300" height="300" mark="edge" markrgb="0.5 0.5 0.5"/>
+    <material name="stairs_mat" texture="stairs_tex"
+              texuniform="true" texrepeat="2 2" reflectance="0.1"/>
+  </asset>
+
+  <worldbody>
+    <body name="stairs" pos="1.0 0 0">
+
+      <!-- ===== 上行4级 ===== -->
+      <!-- 第1级：x=0.00~0.28，顶面z=0.130m -->
+      <geom name="step_up_1" type="box"
+            size="0.14 0.75 0.065"
+            pos="0.14 0 0.065"
+            material="stairs_mat" friction="1 0.1 0.1"
+            contype="1" conaffinity="1" condim="3"
+            solref="0.005 1" solimp="0.9 0.95 0.001"/>
+
+      <!-- 第2级：x=0.28~0.56，顶面z=0.260m -->
+      <geom name="step_up_2" type="box"
+            size="0.14 0.75 0.130"
+            pos="0.42 0 0.130"
+            material="stairs_mat" friction="1 0.1 0.1"
+            contype="1" conaffinity="1" condim="3"
+            solref="0.005 1" solimp="0.9 0.95 0.001"/>
+
+      <!-- 第3级：x=0.56~0.84，顶面z=0.390m -->
+      <geom name="step_up_3" type="box"
+            size="0.14 0.75 0.195"
+            pos="0.70 0 0.195"
+            material="stairs_mat" friction="1 0.1 0.1"
+            contype="1" conaffinity="1" condim="3"
+            solref="0.005 1" solimp="0.9 0.95 0.001"/>
+
+      <!-- 第4级：x=0.84~1.12，顶面z=0.520m -->
+      <geom name="step_up_4" type="box"
+            size="0.14 0.75 0.260"
+            pos="0.98 0 0.260"
+            material="stairs_mat" friction="1 0.1 0.1"
+            contype="1" conaffinity="1" condim="3"
+            solref="0.005 1" solimp="0.9 0.95 0.001"/>
+
+      <!-- ===== 平台 ===== -->
+      <!-- x范围：1.12~2.12，长1.0m，x中心=1.62，顶面z=0.520m -->
+      <geom name="platform" type="box"
+            size="0.50 0.75 0.260"
+            pos="1.62 0 0.260"
+            material="stairs_mat" friction="1 0.1 0.1"
+            contype="1" conaffinity="1" condim="3"
+            solref="0.005 1" solimp="0.9 0.95 0.001"/>
+
+      <!-- ===== 下行4级 ===== -->
+      <!-- 第1级：x=2.12~2.40，顶面z=0.390m -->
+      <geom name="step_dn_1" type="box"
+            size="0.14 0.75 0.195"
+            pos="2.26 0 0.195"
+            material="stairs_mat" friction="1 0.1 0.1"
+            contype="1" conaffinity="1" condim="3"
+            solref="0.005 1" solimp="0.9 0.95 0.001"/>
+
+      <!-- 第2级：x=2.40~2.68，顶面z=0.260m -->
+      <geom name="step_dn_2" type="box"
+            size="0.14 0.75 0.130"
+            pos="2.54 0 0.130"
+            material="stairs_mat" friction="1 0.1 0.1"
+            contype="1" conaffinity="1" condim="3"
+            solref="0.005 1" solimp="0.9 0.95 0.001"/>
+
+      <!-- 第3级：x=2.68~2.96，顶面z=0.130m -->
+      <geom name="step_dn_3" type="box"
+            size="0.14 0.75 0.065"
+            pos="2.82 0 0.065"
+            material="stairs_mat" friction="1 0.1 0.1"
+            contype="1" conaffinity="1" condim="3"
+            solref="0.005 1" solimp="0.9 0.95 0.001"/>
+
+      <!-- 第4步落地面z=0，无需geom -->
+      <!-- 落地点局部x=3.10，世界坐标x=4.10（body pos=1.0） -->
+
+    </body>
+  </worldbody>
+</mujoco>

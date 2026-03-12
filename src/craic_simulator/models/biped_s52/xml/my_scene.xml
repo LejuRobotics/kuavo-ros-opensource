@@ -1,0 +1,514 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="CRAIC Lab Scene">
+  <include file="biped_s52.xml"/>
+  <compiler angle="radian" autolimits="true"/>
+  <statistic center="4 1 3" extent="5"/>
+  <visual>
+    <headlight diffuse="0.45 0.45 0.45" ambient="0.25 0.25 0.25" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="160" elevation="-20"/>
+  </visual>
+  <asset>
+    <texture type="2d" name="ground_mat_tex" file="marble_tile.png"/>
+    <material name="ground_mat" texture="ground_mat_tex" texrepeat="50 50" texuniform="false" reflectance="0.02" shininess="0.05" rgba="0.75 0.73 0.70 1"/>
+    <material name="walls_mat" rgba="0.85 0.75 0.60 1" reflectance="0.05" shininess="0.05"/>
+    <material name="inner_wall_mat" rgba="0.78 0.68 0.53 1" reflectance="0.05" shininess="0.05"/>
+    <texture type="2d" name="outer_room_wall_0_tex" file="../../wall_textures/1.png"/>
+    <material name="outer_room_wall_0_mat" texture="outer_room_wall_0_tex" texrepeat="1 1" texuniform="false" rgba="0.85 0.75 0.60 1" reflectance="0.05" shininess="0.05"/>
+    <texture type="2d" name="outer_room_wall_1_tex" file="../../wall_textures/1.png"/>
+    <material name="outer_room_wall_1_mat" texture="outer_room_wall_1_tex" texrepeat="1 1" texuniform="false" rgba="0.85 0.75 0.60 1" reflectance="0.05" shininess="0.05"/>
+    <texture type="2d" name="outer_room_wall_2_tex" file="../../wall_textures/1.png"/>
+    <material name="outer_room_wall_2_mat" texture="outer_room_wall_2_tex" texrepeat="1 1" texuniform="false" rgba="0.85 0.75 0.60 1" reflectance="0.05" shininess="0.05"/>
+    <texture type="2d" name="outer_room_wall_3_tex" file="../../wall_textures/1.png"/>
+    <material name="outer_room_wall_3_mat" texture="outer_room_wall_3_tex" texrepeat="1 1" texuniform="false" rgba="0.85 0.75 0.60 1" reflectance="0.05" shininess="0.05"/>
+    <mesh name="tray_1_charging_tray_visual" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <mesh name="tray_1_charging_tray_collision" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <mesh name="tray_2_charging_tray_visual" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <mesh name="tray_2_charging_tray_collision" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <mesh name="tray_3_charging_tray_visual" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <mesh name="tray_3_charging_tray_collision" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <mesh name="tray_4_charging_tray_visual" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <mesh name="tray_4_charging_tray_collision" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <mesh name="tray_5_charging_tray_visual" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <mesh name="tray_5_charging_tray_collision" file="/root/kuavo_ws/src/craic_simulator/models/charging_tray/charging_tray.stl" scale="0.9090909090909092 0.9090909090909092 1.0714285714285714"/>
+    <material name="basket_shelf_shelf_metal" rgba="0.5 0.5 0.55 1" specular="0.3" shininess="0.2"/>
+    <material name="basket_shelf_shelf_wood" rgba="0.65 0.5 0.35 1" specular="0.1" shininess="0.1"/>
+    <texture type="2d" name="basket_1_texture" file="/root/kuavo_ws/src/craic_simulator/models/basket/texture.png"/>
+    <material name="basket_1_material_0" texture="basket_1_texture" specular="0.5" shininess="0.5"/>
+    <mesh name="basket_1_model" file="/root/kuavo_ws/src/craic_simulator/models/basket/model.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_0" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_0.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_1" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_1.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_2" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_2.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_3" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_3.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_4" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_4.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_5" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_5.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_6" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_6.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_7" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_7.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_8" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_8.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_9" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_9.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_10" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_10.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_11" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_11.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_12" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_12.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_13" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_13.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_14" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_14.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_15" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_15.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_16" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_16.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_17" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_17.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_18" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_18.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_19" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_19.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_20" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_20.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_21" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_21.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_22" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_22.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_23" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_23.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_24" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_24.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_25" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_25.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_26" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_26.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_27" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_27.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_28" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_28.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_29" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_29.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_30" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_30.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_1_model_collision_31" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_31.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <material name="parts_table_table_top" rgba="0.1 0.3 0.1 1" specular="0.1" shininess="0.1"/>
+    <material name="parts_table_table_legs" rgba="0.6 0.6 0.6 1" specular="0.1" shininess="0.1"/>
+    <texture type="2d" name="basket_2_texture" file="/root/kuavo_ws/src/craic_simulator/models/basket/texture.png"/>
+    <material name="basket_2_material_0" texture="basket_2_texture" specular="0.5" shininess="0.5"/>
+    <mesh name="basket_2_model" file="/root/kuavo_ws/src/craic_simulator/models/basket/model.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_0" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_0.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_1" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_1.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_2" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_2.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_3" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_3.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_4" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_4.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_5" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_5.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_6" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_6.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_7" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_7.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_8" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_8.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_9" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_9.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_10" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_10.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_11" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_11.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_12" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_12.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_13" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_13.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_14" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_14.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_15" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_15.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_16" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_16.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_17" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_17.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_18" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_18.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_19" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_19.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_20" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_20.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_21" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_21.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_22" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_22.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_23" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_23.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_24" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_24.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_25" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_25.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_26" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_26.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_27" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_27.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_28" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_28.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_29" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_29.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_30" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_30.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_2_model_collision_31" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_31.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <texture type="2d" name="basket_3_texture" file="/root/kuavo_ws/src/craic_simulator/models/basket/texture.png"/>
+    <material name="basket_3_material_0" texture="basket_3_texture" specular="0.5" shininess="0.5"/>
+    <mesh name="basket_3_model" file="/root/kuavo_ws/src/craic_simulator/models/basket/model.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_0" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_0.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_1" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_1.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_2" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_2.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_3" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_3.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_4" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_4.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_5" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_5.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_6" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_6.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_7" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_7.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_8" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_8.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_9" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_9.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_10" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_10.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_11" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_11.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_12" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_12.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_13" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_13.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_14" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_14.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_15" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_15.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_16" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_16.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_17" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_17.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_18" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_18.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_19" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_19.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_20" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_20.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_21" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_21.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_22" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_22.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_23" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_23.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_24" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_24.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_25" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_25.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_26" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_26.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_27" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_27.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_28" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_28.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_29" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_29.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_30" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_30.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <mesh name="basket_3_model_collision_31" file="/root/kuavo_ws/src/craic_simulator/models/basket/model_collision_31.obj" scale="1.6666666666666667 1.875 1.4666666666666668"/>
+    <texture type="2d" name="steel_pipe_fasteners_1_aluminum_alloy_tex" file="/root/kuavo_ws/src/craic_simulator/models/steel_pipe_fasteners/aluminum_alloy.png"/>
+    <material name="steel_pipe_fasteners_1_aluminum_alloy_mat" texture="steel_pipe_fasteners_1_aluminum_alloy_tex" texuniform="true" specular="0.8" shininess="0.6" rgba="1 1 1 1"/>
+    <mesh name="steel_pipe_fasteners_1_model" file="/root/kuavo_ws/src/craic_simulator/models/steel_pipe_fasteners/steel_pipe_fasteners_no_supports.stl" scale="0.0006667 0.0006667 0.0006667"/>
+    <texture type="2d" name="steel_pipe_fasteners_2_aluminum_alloy_tex" file="/root/kuavo_ws/src/craic_simulator/models/steel_pipe_fasteners/aluminum_alloy.png"/>
+    <material name="steel_pipe_fasteners_2_aluminum_alloy_mat" texture="steel_pipe_fasteners_2_aluminum_alloy_tex" texuniform="true" specular="0.8" shininess="0.6" rgba="1 1 1 1"/>
+    <mesh name="steel_pipe_fasteners_2_model" file="/root/kuavo_ws/src/craic_simulator/models/steel_pipe_fasteners/steel_pipe_fasteners_no_supports.stl" scale="0.0006667 0.0006667 0.0006667"/>
+    <texture type="2d" name="steel_pipe_fasteners_3_aluminum_alloy_tex" file="/root/kuavo_ws/src/craic_simulator/models/steel_pipe_fasteners/aluminum_alloy.png"/>
+    <material name="steel_pipe_fasteners_3_aluminum_alloy_mat" texture="steel_pipe_fasteners_3_aluminum_alloy_tex" texuniform="true" specular="0.8" shininess="0.6" rgba="1 1 1 1"/>
+    <mesh name="steel_pipe_fasteners_3_model" file="/root/kuavo_ws/src/craic_simulator/models/steel_pipe_fasteners/steel_pipe_fasteners_no_supports.stl" scale="0.0006667 0.0006667 0.0006667"/>
+    <mesh name="t_junction_1_t_junction" file="/root/kuavo_ws/src/craic_simulator/models/t_junction/T_junction.STL" scale="0.003 0.003 0.003"/>
+    <mesh name="t_junction_2_t_junction" file="/root/kuavo_ws/src/craic_simulator/models/t_junction/T_junction.STL" scale="0.003 0.003 0.003"/>
+    <mesh name="t_junction_3_t_junction" file="/root/kuavo_ws/src/craic_simulator/models/t_junction/T_junction.STL" scale="0.003 0.003 0.003"/>
+    <material name="tray_rack_rack_metal" rgba="0.6 0.6 0.65 1" specular="0.5" shininess="0.3"/>
+    <material name="tray_rack_shelf_wood" rgba="0.7 0.5 0.3 1" specular="0.1" shininess="0.1"/>
+    <mesh name="ramp_mesh" file="/root/kuavo_ws/src/craic_simulator/models/slope/meshes/xiepo.stl"/>
+    <texture type="2d" name="stairs_stairs_tex" builtin="checker" rgb1="0.4 0.4 0.4" rgb2="0.25 0.25 0.25" width="300" height="300" mark="edge" markrgb="0.5 0.5 0.5"/>
+    <material name="stairs_stairs_mat" texture="stairs_stairs_tex" texuniform="true" texrepeat="2 2" reflectance="0.1"/>
+    <material name="gravel_road_1_mat" rgba="1 1 1 1" reflectance="0.3" shininess="0.1" emission="0.2"/>
+    <hfield name="gravel_road_1_hf" file="/root/kuavo_ws/src/craic_simulator/models/gravel_road/mujoco_assets/road_heightfield.png" size="1.25 1.5 0.05 0.1"/>
+    <material name="bumpy_road_1_mat" rgba="0.4 0.4 0.4 1" reflectance="0.3" shininess="0.1" emission="0.2"/>
+    <hfield name="bumpy_road_1_hf" file="/root/kuavo_ws/src/craic_simulator/models/bumpy_road/road_heightfield_smooth.png" size="1.05 1.5 0.14 0.1"/>
+    <mesh name="speed_bump_1_mesh" file="/root/kuavo_ws/src/craic_simulator/models/speed_bump/uploads_files_2559840_Lezachiq.obj" scale="0.5469 0.3125 0.8798"/>
+    <material name="speed_bump_1_mat" rgba="0.3 0.3 0.3 1" reflectance="0.1" shininess="0.05"/>
+    <mesh name="speed_bump_2_mesh" file="/root/kuavo_ws/src/craic_simulator/models/speed_bump/uploads_files_2559840_Lezachiq.obj" scale="0.5469 0.3125 0.8798"/>
+    <material name="speed_bump_2_mat" rgba="0.3 0.3 0.3 1" reflectance="0.1" shininess="0.05"/>
+    <mesh name="speed_bump_3_mesh" file="/root/kuavo_ws/src/craic_simulator/models/speed_bump/uploads_files_2559840_Lezachiq.obj" scale="0.5469 0.3125 0.8798"/>
+    <material name="speed_bump_3_mat" rgba="0.3 0.3 0.3 1" reflectance="0.1" shininess="0.05"/>
+    <mesh name="traffic_cone_1_mesh" file="/root/kuavo_ws/src/craic_simulator/models/traffic_cone/uploads_files_3223633_traffic+cone.obj" scale="0.9706 0.8000 0.9706"/>
+    <material name="traffic_cone_1_mat" rgba="1.0 0.4 0.0 1" reflectance="0.3" shininess="0.1"/>
+    <mesh name="traffic_cone_2_mesh" file="/root/kuavo_ws/src/craic_simulator/models/traffic_cone/uploads_files_3223633_traffic+cone.obj" scale="0.9706 0.8000 0.9706"/>
+    <material name="traffic_cone_2_mat" rgba="1.0 0.4 0.0 1" reflectance="0.3" shininess="0.1"/>
+    <mesh name="traffic_cone_3_mesh" file="/root/kuavo_ws/src/craic_simulator/models/traffic_cone/uploads_files_3223633_traffic+cone.obj" scale="0.9706 0.8000 0.9706"/>
+    <material name="traffic_cone_3_mat" rgba="1.0 0.4 0.0 1" reflectance="0.3" shininess="0.1"/>
+    <mesh name="traffic_cone_4_mesh" file="/root/kuavo_ws/src/craic_simulator/models/traffic_cone/uploads_files_3223633_traffic+cone.obj" scale="0.9706 0.8000 0.9706"/>
+    <material name="traffic_cone_4_mat" rgba="1.0 0.4 0.0 1" reflectance="0.3" shininess="0.1"/>
+    <mesh name="traffic_cone_5_mesh" file="/root/kuavo_ws/src/craic_simulator/models/traffic_cone/uploads_files_3223633_traffic+cone.obj" scale="0.9706 0.8000 0.9706"/>
+    <material name="traffic_cone_5_mat" rgba="1.0 0.4 0.0 1" reflectance="0.3" shininess="0.1"/>
+    <mesh name="traffic_cone_6_mesh" file="/root/kuavo_ws/src/craic_simulator/models/traffic_cone/uploads_files_3223633_traffic+cone.obj" scale="0.9706 0.8000 0.9706"/>
+    <material name="traffic_cone_6_mat" rgba="1.0 0.4 0.0 1" reflectance="0.3" shininess="0.1"/>
+    <texture type="2d" name="pillar_1_tex" file="../../pillar/tech_panel.png"/>
+    <material name="pillar_1_mat" texture="pillar_1_tex" texrepeat="1 2.5" texuniform="false" emission="0.15" specular="0.4" shininess="0.6"/>
+    <texture type="2d" name="pillar_2_tex" file="../../pillar/tech_panel.png"/>
+    <material name="pillar_2_mat" texture="pillar_2_tex" texrepeat="1 2.5" texuniform="false" emission="0.15" specular="0.4" shininess="0.6"/>
+    <material name="button_1_green_mat" rgba="0.00 1.00 0.00 1.0" emission="0.8" reflectance="0.3" shininess="0.5"/>
+    <material name="button_1_red_mat" rgba="0.15 0.00 0.00 1.0" emission="0.0" reflectance="0.3" shininess="0.5"/>
+    <material name="button_2_green_mat" rgba="0.00 0.15 0.00 1.0" emission="0.0" reflectance="0.3" shininess="0.5"/>
+    <material name="button_2_red_mat" rgba="1.00 0.00 0.00 1.0" emission="0.8" reflectance="0.3" shininess="0.5"/>
+  </asset>
+  <worldbody>
+    <geom name="floor" type="plane" size="50 50 0.05" rgba="0.75 0.73 0.70 1" material="ground_mat"/>
+    <light name="main_light" pos="0 0 10" dir="0 0 -1" directional="true" diffuse="0.6 0.6 0.6" specular="0 0 0"/>
+    <geom name="outer_room_wall_0" type="box" size="6.25 0.5 0.025" pos="0.0 4.5 0.5" xyaxes="-1.0 0.0 0 0 0 1" material="walls_mat" contype="1" conaffinity="1"/>
+    <geom name="outer_room_wall_0_decal" type="box" size="6.25 0.5 0.0005" pos="0.0 4.5255 0.5" xyaxes="-1.0 0.0 0 0 0 1" material="outer_room_wall_0_mat" contype="0" conaffinity="0"/>
+    <geom name="outer_room_wall_1" type="box" size="4.5 0.5 0.025" pos="-6.25 0.0 0.5" xyaxes="0.0 -1.0 0 0 0 1" material="walls_mat" contype="1" conaffinity="1"/>
+    <geom name="outer_room_wall_1_decal" type="box" size="4.5 0.5 0.0005" pos="-6.2755 0.0 0.5" xyaxes="0.0 -1.0 0 0 0 1" material="outer_room_wall_1_mat" contype="0" conaffinity="0"/>
+    <geom name="outer_room_wall_2" type="box" size="6.25 0.5 0.025" pos="0.0 -4.5 0.5" xyaxes="1.0 0.0 0 0 0 1" material="walls_mat" contype="1" conaffinity="1"/>
+    <geom name="outer_room_wall_2_decal" type="box" size="6.25 0.5 0.0005" pos="0.0 -4.5255 0.5" xyaxes="1.0 0.0 0 0 0 1" material="outer_room_wall_2_mat" contype="0" conaffinity="0"/>
+    <geom name="outer_room_wall_3" type="box" size="4.5 0.5 0.025" pos="6.25 0.0 0.5" xyaxes="0.0 1.0 0 0 0 1" material="walls_mat" contype="1" conaffinity="1"/>
+    <geom name="outer_room_wall_3_decal" type="box" size="4.5 0.5 0.0005" pos="6.2755 0.0 0.5" xyaxes="0.0 1.0 0 0 0 1" material="outer_room_wall_3_mat" contype="0" conaffinity="0"/>
+    <geom name="inner_top_wall_wall" type="box" size="3.25 0.025 0.5" pos="0.0 1.5 0.5" euler="0 0 0.0" material="inner_wall_mat" contype="1" conaffinity="1"/>
+    <geom name="inner_bottom_wall_wall" type="box" size="4.25 0.025 0.5" pos="1.0 -2.5 0.5" euler="0 0 3.141592653589793" material="inner_wall_mat" contype="1" conaffinity="1"/>
+    <geom name="inner_right_wall_wall" type="box" size="2.0 0.025 0.5" pos="-3.25 -0.5 0.5" euler="0 0 1.5707963267948966" material="inner_wall_mat" contype="1" conaffinity="1"/>
+    <geom name="end_point" type="box" size="0.5 1.0 0.001" pos="5.75 -3.5 0.002" rgba="0.45 0.35 0.2 1" contype="0" conaffinity="0"/>
+    <geom name="end_point_border_top" type="box" size="0.5 0.02 0.001" pos="5.75 -2.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="end_point_border_bottom" type="box" size="0.5 0.02 0.001" pos="5.75 -4.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="end_point_border_left" type="box" size="0.02 1.0 0.001" pos="5.25 -3.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="end_point_border_right" type="box" size="0.02 1.0 0.001" pos="6.25 -3.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="pause_point" type="box" size="1.5 2.0 0.001" pos="4.75 -0.5 0.002" rgba="0.45 0.35 0.2 1" contype="0" conaffinity="0"/>
+    <geom name="pause_point_border_top" type="box" size="1.5 0.02 0.001" pos="4.75 1.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="pause_point_border_bottom" type="box" size="1.5 0.02 0.001" pos="4.75 -2.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="pause_point_border_left" type="box" size="0.02 2.0 0.001" pos="3.25 -0.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="pause_point_border_right" type="box" size="0.02 2.0 0.001" pos="6.25 -0.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="start_point1" type="box" size="1.5 1.5 0.001" pos="4.75 3.0 0.002" rgba="0.45 0.35 0.2 1" contype="0" conaffinity="0"/>
+    <geom name="start_point1_border_top" type="box" size="1.5 0.02 0.001" pos="4.75 4.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="start_point1_border_bottom" type="box" size="1.5 0.02 0.001" pos="4.75 1.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="start_point1_border_left" type="box" size="0.02 1.5 0.001" pos="3.25 3.0 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="start_point1_border_right" type="box" size="0.02 1.5 0.001" pos="6.25 3.0 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="start_point2" type="box" size="0.75 1.0 0.001" pos="2.0 -0.5 0.002" rgba="0.45 0.35 0.2 1" contype="0" conaffinity="0"/>
+    <geom name="start_point2_border_top" type="box" size="0.75 0.02 0.001" pos="2.0 0.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="start_point2_border_bottom" type="box" size="0.75 0.02 0.001" pos="2.0 -1.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="start_point2_border_left" type="box" size="0.02 1.0 0.001" pos="1.25 -0.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <geom name="start_point2_border_right" type="box" size="0.02 1.0 0.001" pos="2.75 -0.5 0.003" rgba="1 1 1 0.8" contype="0" conaffinity="0"/>
+    <body name="tray_1" pos="-0.10 -1.933 0.75" euler="0 1.5708 0">
+      <freejoint name="tray_1"/>
+      <inertial pos="0 0 0" mass="0.05" diaginertia="0.001 0.001 0.001"/>
+      <geom name="tray_1_charging_tray_visual_geom" mesh="tray_1_charging_tray_visual" type="mesh" contype="0" conaffinity="0" group="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="tray_1_charging_tray_collision_geom" mesh="tray_1_charging_tray_collision" type="mesh" group="3" friction="3.0 2.2 0.03" solref="0.005 1.5" solimp="0.98 0.995 0.0001" condim="6" contype="1" conaffinity="1"/>
+    </body>
+    <body name="tray_2" pos="-0.30 -1.933 0.75" euler="0 1.5708 0">
+      <freejoint name="tray_2"/>
+      <inertial pos="0 0 0" mass="0.05" diaginertia="0.001 0.001 0.001"/>
+      <geom name="tray_2_charging_tray_visual_geom" mesh="tray_2_charging_tray_visual" type="mesh" contype="0" conaffinity="0" group="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="tray_2_charging_tray_collision_geom" mesh="tray_2_charging_tray_collision" type="mesh" group="3" friction="3.0 2.2 0.03" solref="0.005 1.5" solimp="0.98 0.995 0.0001" condim="6" contype="1" conaffinity="1"/>
+    </body>
+    <body name="tray_3" pos="-0.30 -1.933 1.15" euler="0 1.5708 0">
+      <freejoint name="tray_3"/>
+      <inertial pos="0 0 0" mass="0.05" diaginertia="0.001 0.001 0.001"/>
+      <geom name="tray_3_charging_tray_visual_geom" mesh="tray_3_charging_tray_visual" type="mesh" contype="0" conaffinity="0" group="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="tray_3_charging_tray_collision_geom" mesh="tray_3_charging_tray_collision" type="mesh" group="3" friction="3.0 2.2 0.03" solref="0.005 1.5" solimp="0.98 0.995 0.0001" condim="6" contype="1" conaffinity="1"/>
+    </body>
+    <body name="tray_4" pos="-0.10 -1.933 1.15" euler="0 1.5708 0">
+      <freejoint name="tray_4"/>
+      <inertial pos="0 0 0" mass="0.05" diaginertia="0.001 0.001 0.001"/>
+      <geom name="tray_4_charging_tray_visual_geom" mesh="tray_4_charging_tray_visual" type="mesh" contype="0" conaffinity="0" group="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="tray_4_charging_tray_collision_geom" mesh="tray_4_charging_tray_collision" type="mesh" group="3" friction="3.0 2.2 0.03" solref="0.005 1.5" solimp="0.98 0.995 0.0001" condim="6" contype="1" conaffinity="1"/>
+    </body>
+    <body name="tray_5" pos="-0.50 -1.933 1.15" euler="0 1.5708 0">
+      <freejoint name="tray_5"/>
+      <inertial pos="0 0 0" mass="0.05" diaginertia="0.001 0.001 0.001"/>
+      <geom name="tray_5_charging_tray_visual_geom" mesh="tray_5_charging_tray_visual" type="mesh" contype="0" conaffinity="0" group="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="tray_5_charging_tray_collision_geom" mesh="tray_5_charging_tray_collision" type="mesh" group="3" friction="3.0 2.2 0.03" solref="0.005 1.5" solimp="0.98 0.995 0.0001" condim="6" contype="1" conaffinity="1"/>
+    </body>
+    <body name="basket_shelf" pos="-3.05 -1.3 0" euler="0 0 1.5708">
+      <geom name="basket_shelf_leg_fl" type="box" size="0.015 0.015 0.4" pos="0.285 0.11 0.4" material="basket_shelf_shelf_wood" mass="1"/>
+      <geom name="basket_shelf_leg_fr" type="box" size="0.015 0.015 0.4" pos="0.285 -0.11 0.4" material="basket_shelf_shelf_wood" mass="1"/>
+      <geom name="basket_shelf_leg_bl" type="box" size="0.015 0.015 0.4" pos="-0.285 0.11 0.4" material="basket_shelf_shelf_wood" mass="1"/>
+      <geom name="basket_shelf_leg_br" type="box" size="0.015 0.015 0.4" pos="-0.285 -0.11 0.4" material="basket_shelf_shelf_wood" mass="1"/>
+      <geom name="basket_shelf_shelf" type="box" size="0.3 0.125 0.0075" pos="0 0 0.8075" material="basket_shelf_shelf_wood" mass="2"/>
+    </body>
+    <body name="basket_1" pos="-3.05 -1.3 0.82" euler="0 0 1.5708">
+      <inertial pos="0 0 0" mass="0.3" diaginertia="0.006 0.006 0.006"/>
+      <freejoint name="basket_1"/>
+      <geom mesh="basket_1_model" type="mesh" contype="0" conaffinity="0" group="2" rgba="0.2 0.4 0.8 1"/>
+      <geom mesh="basket_1_model_collision_0" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_1" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_2" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_3" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_4" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_5" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_6" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_7" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_8" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_9" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_10" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_11" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_12" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_13" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_14" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_15" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_16" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_17" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_18" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_19" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_20" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_21" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_22" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_23" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_24" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_25" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_26" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_27" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_28" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_29" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_30" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_1_model_collision_31" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+    </body>
+    <body name="parts_table" pos="-0.2 1.0 0" euler="0 0 0">
+      <geom name="parts_table_table_top" type="box" size="0.7 0.4 0.015" pos="0 0 0.815" material="parts_table_table_top" mass="10"/>
+      <geom name="parts_table_leg_fl" type="cylinder" size="0.03 0.4" pos="0.65 0.35 0.4" material="parts_table_table_legs" mass="2"/>
+      <geom name="parts_table_leg_fr" type="cylinder" size="0.03 0.4" pos="0.65 -0.35 0.4" material="parts_table_table_legs" mass="2"/>
+      <geom name="parts_table_leg_bl" type="cylinder" size="0.03 0.4" pos="-0.65 0.35 0.4" material="parts_table_table_legs" mass="2"/>
+      <geom name="parts_table_leg_br" type="cylinder" size="0.03 0.4" pos="-0.65 -0.35 0.4" material="parts_table_table_legs" mass="2"/>
+    </body>
+    <body name="basket_2" pos="0.25 1.0 0.85" euler="0 0 1.5708">
+      <inertial pos="0 0 0" mass="0.3" diaginertia="0.006 0.006 0.006"/>
+      <freejoint name="basket_2"/>
+      <geom mesh="basket_2_model" type="mesh" contype="0" conaffinity="0" group="2" rgba="0.2 0.4 0.8 1"/>
+      <geom mesh="basket_2_model_collision_0" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_1" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_2" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_3" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_4" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_5" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_6" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_7" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_8" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_9" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_10" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_11" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_12" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_13" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_14" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_15" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_16" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_17" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_18" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_19" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_20" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_21" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_22" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_23" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_24" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_25" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_26" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_27" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_28" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_29" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_30" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_2_model_collision_31" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+    </body>
+    <body name="basket_3" pos="-0.65 1.0 0.85" euler="0 0 1.5708">
+      <inertial pos="0 0 0" mass="0.3" diaginertia="0.006 0.006 0.006"/>
+      <freejoint name="basket_3"/>
+      <geom mesh="basket_3_model" type="mesh" contype="0" conaffinity="0" group="2" rgba="0.2 0.4 0.8 1"/>
+      <geom mesh="basket_3_model_collision_0" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_1" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_2" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_3" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_4" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_5" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_6" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_7" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_8" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_9" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_10" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_11" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_12" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_13" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_14" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_15" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_16" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_17" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_18" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_19" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_20" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_21" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_22" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_23" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_24" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_25" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_26" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_27" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_28" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_29" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_30" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+      <geom mesh="basket_3_model_collision_31" type="mesh" group="3" friction="1.5 0.8 0.02" contype="1" conaffinity="1" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+    </body>
+    <body name="steel_pipe_fasteners_1" pos="-0.05 0.9 0.82" euler="0 0 0">
+      <inertial pos="0 0 0" mass="0.08" diaginertia="0.0016 0.0016 0.0016"/>
+      <freejoint name="steel_pipe_fasteners_1"/>
+      <geom name="steel_pipe_fasteners_1_visual" type="mesh" mesh="steel_pipe_fasteners_1_model" material="steel_pipe_fasteners_1_aluminum_alloy_mat" contype="0" conaffinity="0" group="2"/>
+      <geom name="steel_pipe_fasteners_1_collision" type="mesh" mesh="steel_pipe_fasteners_1_model" group="3" friction="4.5 1.2 0.03" condim="6" contype="1" conaffinity="1" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="steel_pipe_fasteners_2" pos="-0.3 0.8 0.82" euler="0 0 0.5">
+      <inertial pos="0 0 0" mass="0.08" diaginertia="0.0016 0.0016 0.0016"/>
+      <freejoint name="steel_pipe_fasteners_2"/>
+      <geom name="steel_pipe_fasteners_2_visual" type="mesh" mesh="steel_pipe_fasteners_2_model" material="steel_pipe_fasteners_2_aluminum_alloy_mat" contype="0" conaffinity="0" group="2"/>
+      <geom name="steel_pipe_fasteners_2_collision" type="mesh" mesh="steel_pipe_fasteners_2_model" group="3" friction="4.5 1.2 0.03" condim="6" contype="1" conaffinity="1" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="steel_pipe_fasteners_3" pos="-0.1 0.7 0.82" euler="0 0 1.0">
+      <inertial pos="0 0 0" mass="0.08" diaginertia="0.0016 0.0016 0.0016"/>
+      <freejoint name="steel_pipe_fasteners_3"/>
+      <geom name="steel_pipe_fasteners_3_visual" type="mesh" mesh="steel_pipe_fasteners_3_model" material="steel_pipe_fasteners_3_aluminum_alloy_mat" contype="0" conaffinity="0" group="2"/>
+      <geom name="steel_pipe_fasteners_3_collision" type="mesh" mesh="steel_pipe_fasteners_3_model" group="3" friction="4.5 1.2 0.03" condim="6" contype="1" conaffinity="1" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="t_junction_1" pos="-0.3 0.7 0.90" euler="0 0 0">
+      <inertial pos="0 0 0" mass="0.12" diaginertia="0.0024 0.0024 0.0024"/>
+      <freejoint name="t_junction_1"/>
+      <geom name="t_junction_1_visual" type="mesh" mesh="t_junction_1_t_junction" contype="0" conaffinity="0" group="2" rgba="0.08 0.08 0.08 1"/>
+      <geom name="t_junction_1_collision_base" type="box" pos="-0.010 0 0.02035" size="0.02365 0.027 0.02031" group="3" friction="4.5 1.2 0.03" condim="6" contype="1" conaffinity="1" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="t_junction_2" pos="-0.3 0.9 0.90" euler="0 0 0.8">
+      <inertial pos="0 0 0" mass="0.12" diaginertia="0.0024 0.0024 0.0024"/>
+      <freejoint name="t_junction_2"/>
+      <geom name="t_junction_2_visual" type="mesh" mesh="t_junction_2_t_junction" contype="0" conaffinity="0" group="2" rgba="0.08 0.08 0.08 1"/>
+      <geom name="t_junction_2_collision_base" type="box" pos="-0.010 0 0.02035" size="0.02365 0.027 0.02031" group="3" friction="4.5 1.2 0.03" condim="6" contype="1" conaffinity="1" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="t_junction_3" pos="-0.1 0.8 0.90" euler="0 0 1.5">
+      <inertial pos="0 0 0" mass="0.12" diaginertia="0.0024 0.0024 0.0024"/>
+      <freejoint name="t_junction_3"/>
+      <geom name="t_junction_3_visual" type="mesh" mesh="t_junction_3_t_junction" contype="0" conaffinity="0" group="2" rgba="0.08 0.08 0.08 1"/>
+      <geom name="t_junction_3_collision_base" type="box" pos="-0.010 0 0.02035" size="0.02365 0.027 0.02031" group="3" friction="4.5 1.2 0.03" condim="6" contype="1" conaffinity="1" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="tray_rack" pos="-0.25 -2.0 0" euler="0 0 0">
+      <geom name="tray_rack_base" type="box" size="0.6 0.2 0.02" pos="0 0 0.02" mass="5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_pillar_fl" type="cylinder" size="0.02 0.75" pos="0.58 0.18 0.75" mass="2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_pillar_fr" type="cylinder" size="0.02 0.75" pos="0.58 -0.18 0.75" mass="2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_pillar_bl" type="cylinder" size="0.02 0.75" pos="-0.58 0.18 0.75" mass="2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_pillar_br" type="cylinder" size="0.02 0.75" pos="-0.58 -0.18 0.75" mass="2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1" type="box" size="0.6 0.2 0.015" pos="0 0 0.4" mass="3" friction="2.5 1.8 0.02" solref="0.01 1.2" solimp="0.95 0.99 0.0005" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_0" type="cylinder" size="0.008 0.2" pos="0.5 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_1" type="cylinder" size="0.008 0.2" pos="0.4 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_2" type="cylinder" size="0.008 0.2" pos="0.3 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_3" type="cylinder" size="0.008 0.2" pos="0.2 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_4" type="cylinder" size="0.008 0.2" pos="0.1 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_5" type="cylinder" size="0.008 0.2" pos="0.0 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_6" type="cylinder" size="0.008 0.2" pos="-0.1 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_7" type="cylinder" size="0.008 0.2" pos="-0.2 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_8" type="cylinder" size="0.008 0.2" pos="-0.3 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_9" type="cylinder" size="0.008 0.2" pos="-0.4 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_10" type="cylinder" size="0.008 0.2" pos="-0.5 0 0.5" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_front" type="cylinder" size="0.008 0.6" pos="0 0.2 0.5" euler="0 1.5708 0" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_rail_back" type="cylinder" size="0.008 0.6" pos="0 -0.2 0.5" euler="0 1.5708 0" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_frame_left" type="cylinder" size="0.008 0.2" pos="0.60 -0.0 0.45" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_frame_right" type="cylinder" size="0.008 0.2" pos="-0.60 -0.0 0.45" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_frame_bar_1" type="cylinder" size="0.008 0.6" pos="0 0.092 0.45" euler="0 1.5708 0" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_1_frame_bar_2" type="cylinder" size="0.008 0.6" pos="0 0.042 0.45" euler="0 1.5708 0" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_support_front_1" type="box" size="0.58 0.015 0.015" pos="0 0.18 0.37" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_support_back_1" type="box" size="0.58 0.015 0.015" pos="0 -0.18 0.37" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2" type="box" size="0.6 0.2 0.015" pos="0 0 1.0" mass="3" friction="2.5 1.8 0.02" solref="0.01 1.2" solimp="0.95 0.99 0.0005" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_0" type="cylinder" size="0.008 0.2" pos="0.5 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_1" type="cylinder" size="0.008 0.2" pos="0.4 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_2" type="cylinder" size="0.008 0.2" pos="0.3 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_3" type="cylinder" size="0.008 0.2" pos="0.2 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_4" type="cylinder" size="0.008 0.2" pos="0.1 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_5" type="cylinder" size="0.008 0.2" pos="0.0 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_6" type="cylinder" size="0.008 0.2" pos="-0.1 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_7" type="cylinder" size="0.008 0.2" pos="-0.2 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_8" type="cylinder" size="0.008 0.2" pos="-0.3 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_9" type="cylinder" size="0.008 0.2" pos="-0.4 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_10" type="cylinder" size="0.008 0.2" pos="-0.5 0 1.1" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_front" type="cylinder" size="0.008 0.6" pos="0 0.2 1.1" euler="0 1.5708 0" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_rail_back" type="cylinder" size="0.008 0.6" pos="0 -0.2 1.1" euler="0 1.5708 0" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_frame_left" type="cylinder" size="0.008 0.2" pos="0.60 -0.0 1.05" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_frame_right" type="cylinder" size="0.008 0.2" pos="-0.60 -0.0 1.05" euler="1.5708 0 0" mass="0.2" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_frame_bar_1" type="cylinder" size="0.008 0.6" pos="0 0.092 1.05" euler="0 1.5708 0" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_2_frame_bar_2" type="cylinder" size="0.008 0.6" pos="0 0.042 1.05" euler="0 1.5708 0" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_support_front_2" type="box" size="0.58 0.015 0.015" pos="0 0.18 0.97" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_support_back_2" type="box" size="0.58 0.015 0.015" pos="0 -0.18 0.97" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_shelf_3" type="box" size="0.6 0.2 0.015" pos="0 0 1.5" mass="3" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_support_front_3" type="box" size="0.58 0.015 0.015" pos="0 0.18 1.47" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+      <geom name="tray_rack_support_back_3" type="box" size="0.58 0.015 0.015" pos="0 -0.18 1.47" mass="0.5" rgba="0.6 0.6 0.6 1"/>
+    </body>
+    <geom name="ramp" type="mesh" mesh="ramp_mesh" pos="-4.75 -3.5 0" euler="0 0 0" contype="1" conaffinity="1" rgba="0.35 0.25 0.15 1"/>
+    <geom name="ramp_platform" type="box" size="0.5 0.75 0.001" pos="-2.25 -3.5 0.521" rgba="0.55 0.42 0.28 1" contype="0" conaffinity="0"/>
+    <body name="stairs" pos="4.75 -3.5 0" euler="0 0 3.14159">
+      <geom name="stairs_step_up_1" type="box" size="0.14 0.75 0.065" pos="0.14 0 0.065" material="stairs_stairs_mat" friction="1 0.1 0.1" contype="1" conaffinity="1" condim="3" solref="0.005 1" solimp="0.9 0.95 0.001"/>
+      <geom name="stairs_step_up_2" type="box" size="0.14 0.75 0.130" pos="0.42 0 0.130" material="stairs_stairs_mat" friction="1 0.1 0.1" contype="1" conaffinity="1" condim="3" solref="0.005 1" solimp="0.9 0.95 0.001"/>
+      <geom name="stairs_step_up_3" type="box" size="0.14 0.75 0.195" pos="0.70 0 0.195" material="stairs_stairs_mat" friction="1 0.1 0.1" contype="1" conaffinity="1" condim="3" solref="0.005 1" solimp="0.9 0.95 0.001"/>
+      <geom name="stairs_step_up_4" type="box" size="0.14 0.75 0.260" pos="0.98 0 0.260" material="stairs_stairs_mat" friction="1 0.1 0.1" contype="1" conaffinity="1" condim="3" solref="0.005 1" solimp="0.9 0.95 0.001"/>
+      <geom name="stairs_platform" type="box" size="0.50 0.75 0.260" pos="1.62 0 0.260" material="stairs_stairs_mat" friction="1 0.1 0.1" contype="1" conaffinity="1" condim="3" solref="0.005 1" solimp="0.9 0.95 0.001"/>
+      <geom name="stairs_step_dn_1" type="box" size="0.14 0.75 0.195" pos="2.26 0 0.195" material="stairs_stairs_mat" friction="1 0.1 0.1" contype="1" conaffinity="1" condim="3" solref="0.005 1" solimp="0.9 0.95 0.001"/>
+      <geom name="stairs_step_dn_2" type="box" size="0.14 0.75 0.130" pos="2.54 0 0.130" material="stairs_stairs_mat" friction="1 0.1 0.1" contype="1" conaffinity="1" condim="3" solref="0.005 1" solimp="0.9 0.95 0.001"/>
+      <geom name="stairs_step_dn_3" type="box" size="0.14 0.75 0.065" pos="2.82 0 0.065" material="stairs_stairs_mat" friction="1 0.1 0.1" contype="1" conaffinity="1" condim="3" solref="0.005 1" solimp="0.9 0.95 0.001"/>
+    </body>
+    <geom name="gravel_road_1" type="hfield" hfield="gravel_road_1_hf" size="1.25 1.5 1" pos="-4.75 -1.25 -0.03" material="gravel_road_1_mat" condim="6" conaffinity="15" solref="0.02 1" solimp="0.9 0.95 0.001" friction="1.2 0.1 0.1" density="1000" euler="0 0 1.5708"/>
+    <geom name="bumpy_road_1" type="hfield" hfield="bumpy_road_1_hf" size="1.05 1.5 1" pos="-4.75 1.9 -0.008" material="bumpy_road_1_mat" condim="6" conaffinity="15" solref="0.02 1" solimp="0.9 0.95 0.001" friction="1.2 0.1 0.1" density="1000" euler="0 0 1.5708"/>
+    <geom name="speed_bump_1" type="mesh" mesh="speed_bump_1_mesh" pos="-4.82 -2.075 0.0" material="speed_bump_1_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" quat="0.5 0.5 0.5 0.5"/>
+    <geom name="speed_bump_2" type="mesh" mesh="speed_bump_2_mesh" pos="-4.82 -1.225 0.0" material="speed_bump_2_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" quat="0.5 0.5 0.5 0.5"/>
+    <geom name="speed_bump_3" type="mesh" mesh="speed_bump_3_mesh" pos="-4.82 -0.375 0.0" material="speed_bump_3_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" quat="0.5 0.5 0.5 0.5"/>
+    <body name="traffic_cone_1" pos="3.0 3.0 0.0" euler="1.5708 0 0">
+      <freejoint name="traffic_cone_1"/>
+      <geom name="traffic_cone_1" type="mesh" mesh="traffic_cone_1_mesh" material="traffic_cone_1_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" mass="2.0"/>
+    </body>
+    <body name="traffic_cone_2" pos="0.3 2.6 0.0" euler="1.5708 0 0">
+      <freejoint name="traffic_cone_2"/>
+      <geom name="traffic_cone_2" type="mesh" mesh="traffic_cone_2_mesh" material="traffic_cone_2_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" mass="2.0"/>
+    </body>
+    <body name="traffic_cone_3" pos="0.6 3.8 0.0" euler="1.5708 0 0">
+      <freejoint name="traffic_cone_3"/>
+      <geom name="traffic_cone_3" type="mesh" mesh="traffic_cone_3_mesh" material="traffic_cone_3_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" mass="2.0"/>
+    </body>
+    <body name="traffic_cone_4" pos="-1.2 3.2 0.0" euler="1.5708 0 0">
+      <freejoint name="traffic_cone_4"/>
+      <geom name="traffic_cone_4" type="mesh" mesh="traffic_cone_4_mesh" material="traffic_cone_4_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" mass="2.0"/>
+    </body>
+    <body name="traffic_cone_5" pos="-1.4 2.5 0.0" euler="1.5708 0 0">
+      <freejoint name="traffic_cone_5"/>
+      <geom name="traffic_cone_5" type="mesh" mesh="traffic_cone_5_mesh" material="traffic_cone_5_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" mass="2.0"/>
+    </body>
+    <body name="traffic_cone_6" pos="-3 2.0 0.0" euler="1.5708 0 0">
+      <freejoint name="traffic_cone_6"/>
+      <geom name="traffic_cone_6" type="mesh" mesh="traffic_cone_6_mesh" material="traffic_cone_6_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" mass="2.0"/>
+    </body>
+    <geom name="pillar_1" type="box" size="0.2000 0.2000 0.5000" pos="-5.75 -4.2 0.5" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" material="pillar_1_mat"/>
+    <geom name="pillar_2" type="box" size="0.2000 0.2000 0.5000" pos="-3.45 4.1 0.5" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4" material="pillar_2_mat"/>
+    <geom name="button_1_green" type="sphere" size="0.05" pos="-5.87 -4.2 1.0" material="button_1_green_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4"/>
+    <geom name="button_1_red" type="sphere" size="0.05" pos="-5.63 -4.2 1.0" material="button_1_red_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4"/>
+    <geom name="button_2_green" type="sphere" size="0.05" pos="-3.57 4.1 1.0" material="button_2_green_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4"/>
+    <geom name="button_2_red" type="sphere" size="0.05" pos="-3.33 4.1 1.0" material="button_2_red_mat" contype="1" conaffinity="1" friction="1 0.5 0.01" condim="4"/>
+  </worldbody>
+</mujoco>

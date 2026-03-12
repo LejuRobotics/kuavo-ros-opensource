@@ -1,0 +1,16 @@
+# Request
+string object_name          # 物体名称
+geometry_msgs/Point position # 新位置 (x, y, z)
+geometry_msgs/Quaternion orientation # 新姿态 (可选，如果都是0则不修改)
+bool randomize              # 是否使用随机位置（如果为true，则忽略具体的position值）
+float64 x_min               # 随机范围最小值
+float64 x_max               # 随机范围最大值  
+float64 y_min
+float64 y_max
+float64 z_min
+float64 z_max
+---
+# Response
+bool success                # 操作是否成功
+string message             # 操作结果消息
+geometry_msgs/Point final_position # 最终设置的位置

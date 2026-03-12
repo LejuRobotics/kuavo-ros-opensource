@@ -3,12 +3,11 @@ from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.nodes import NodeWalk, NodeP
     NodeWalkWithDistanceMonitor
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.api import ArmAPI, TorsoAPI, HeadAPI
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
-# 根据实际环境选择配置，仿真使用：config_sim，实机使用：config_real
-from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_real import config
+from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Frame
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.funcs import update_walk_goal, update_tag_guess
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.funcs import arm_generate_pick_keypoints, \
-    arm_generate_place_keypoints_new, arm_reset, arm_generate_pick_before, get_current_pick_tag_id, update_round_and_tag_id_fn
+    arm_generate_place_keypoints_new, arm_reset, arm_generate_pick_before
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoManipulationMpcFrame
 
 from kuavo_humanoid_sdk import KuavoSDK
@@ -33,27 +32,20 @@ head_api = HeadAPI(
 WALK_CONTROL_MODE = "cmd_vel"
 
 # 先构建树
-
-# 处理 config.pick.tag_id 可能是列表的情况
-if isinstance(config.pick.tag_id, list):
-    pick_tag_id = config.pick.tag_id[0]
-else:
-    pick_tag_id = config.pick.tag_id
-
 search_pick_tag_WALK = NodeWalk(name='search_pick_tag_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold)
 search_pick_tag_TAG2GOAL = NodeTagToNavGoal(name='search_pick_tag_TAG2GOAL',
-                                            tag_id=pick_tag_id,
+                                            tag_id=config.pick.tag_id,
                                             stand_in_tag_pos=config.pick.stand_in_tag_pos,
                                             stand_in_tag_euler=config.pick.stand_in_tag_euler)
 
-PERCEP = NodePercep(name='PERCEP', robot_sdk=robot_sdk, tag_ids=[pick_tag_id, config.place.tag_id])
+PERCEP = NodePercep(name='PERCEP', robot_sdk=robot_sdk, tag_ids=[config.pick.tag_id, config.place.tag_id])
 ACTION = py_trees.composites.Sequence(name="ACTION", memory=True)
 root = py_trees.composites.Parallel(name="root", policy=py_trees.common.ParallelPolicy.SuccessOnOne())
 root.add_children([ACTION, PERCEP])
 
 # 1. 寻找箱子
 search_pick_tag_GUESS = NodeFuntion(name="search_pick_tag_GUESS",
-                                    fn=lambda: update_tag_guess(tag_id=get_current_pick_tag_id(config),
+                                    fn=lambda: update_tag_guess(tag_id=config.pick.tag_id,
                                                                 tag_pos_world=config.pick.tag_pos_world,
                                                                 tag_euler_world=config.pick.tag_euler_world))
 
@@ -63,12 +55,12 @@ search_pick_tag_HEAD = NodeHead(
     head_api=head_api,
     head_search_yaws=config.common.head_search_yaws,
     head_search_pitchs=config.common.head_search_pitchs,
-    tag_id=pick_tag_id,  # 传入tag_id，用于检查是否识别到
+    tag_id=config.pick.tag_id,  # 传入tag_id，用于检查是否识别到
     check_interval=0.3  # 每次转头后等待0.5秒，给视觉识别时间
 )
 
 # 等待识别结果节点
-search_pick_tag_CONDITION = NodeWaitForBlackboard(key=f"latest_tag_{pick_tag_id}")
+search_pick_tag_CONDITION = NodeWaitForBlackboard(key=f"latest_tag_{config.pick.tag_id}")
 
 # 并行执行：头部搜索 || 等待识别
 search_pick_tag_HEAD_AND_WAIT = py_trees.composites.Parallel(
@@ -85,7 +77,7 @@ search_pick_tag.add_children(
 walk_to_pick_WALk = NodeWalk(name='walk_to_pick_WALk', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold)
 walk_to_pick_TAG2GOAL = py_trees.decorators.SuccessIsRunning(name="walk_to_pick_TAG2GOAL",
                                                              child=NodeTagToNavGoal(name='walk_to_pick_TAG2GOAL_',
-                                                                                    tag_id=pick_tag_id,
+                                                                                    tag_id=config.pick.tag_id,
                                                                                     stand_in_tag_pos=config.pick.stand_in_tag_pos,
                                                                                     stand_in_tag_euler=config.pick.stand_in_tag_euler))
 
@@ -103,10 +95,7 @@ walk_to_pick_ARM = NodeArm(
     arm_api=arm_api,
     control_base=False,
     total_time=1.0, 
-    frame=KuavoManipulationMpcFrame.LocalFrame,
-    arm_pos_threshold=config.common.arm_pos_threshold,
-    arm_angle_threshold=config.common.arm_angle_threshold,
-    arm_error_detect=config.common.arm_error_detect
+    frame=KuavoManipulationMpcFrame.LocalFrame
 )
 
 # 手臂预动作
@@ -119,7 +108,7 @@ walk_to_pick = py_trees.composites.Parallel(name="walk_to_pick",
 
 walk_to_pick.add_children([walk_to_pick_WALk, walk_to_pick_TAG2GOAL, pre_pick_arm])
 
-# 3. 拿起箱子
+# 3. 拿起箱子并后退
 left_arm_relative_keypoints, right_arm_relative_keypoints = arm_generate_pick_keypoints(
     box_width=config.common.box_width,
     box_behind_tag=config.pick.box_behind_tag,  # 箱子在tag后面的距离，单位米
@@ -130,12 +119,11 @@ left_arm_relative_keypoints, right_arm_relative_keypoints = arm_generate_pick_ke
 # 手臂关键点的执行
 pick_box_TAG2GOAL = NodeTagToArmGoal(name='pick_box_TAG2GOAL',
                                                   arm_api=arm_api,
-                                                  tag_id=pick_tag_id,
+                                                  tag_id=config.pick.tag_id,
                                                   left_arm_relative_keypoints=left_arm_relative_keypoints,
                                                   right_arm_relative_keypoints=right_arm_relative_keypoints)
 
-pick_box_ARM = NodeArm(name='pick_box_ARM', arm_api=arm_api, control_base=config.common.arm_control_base, total_time=config.pick.arm_total_time, frame=KuavoManipulationMpcFrame.WorldFrame,
-                        arm_pos_threshold=config.common.arm_pos_threshold, arm_angle_threshold=config.common.arm_angle_threshold, arm_error_detect=config.common.arm_error_detect)
+pick_box_ARM = NodeArm(name='pick_box_ARM', arm_api=arm_api, control_base=config.common.arm_control_base, total_time=config.pick.arm_total_time, frame=KuavoManipulationMpcFrame.WorldFrame)
 
 pick_box = py_trees.composites.Sequence(name="pick_box", memory=True)
 pick_box.add_children([pick_box_TAG2GOAL, pick_box_ARM])
@@ -226,8 +214,7 @@ place_box_TAG2GOAL = NodeTagToArmGoal(name='place_box_TAG2GOAL',
                                                    left_arm_relative_keypoints=left_arm_place_keypoints,
                                                    right_arm_relative_keypoints=right_arm_place_keypoints)
 
-place_box_ARM = NodeArm(name='place_box_ARM', arm_api=arm_api, control_base=config.common.arm_control_base, total_time=config.place.arm_total_time, frame=KuavoManipulationMpcFrame.WorldFrame,
-                        arm_pos_threshold=config.common.arm_pos_threshold, arm_angle_threshold=config.common.arm_angle_threshold, arm_error_detect=config.common.arm_error_detect)
+place_box_ARM = NodeArm(name='place_box_ARM', arm_api=arm_api, control_base=config.common.arm_control_base, total_time=config.place.arm_total_time, frame=KuavoManipulationMpcFrame.WorldFrame)
 
 place_box = py_trees.composites.Sequence(name="place_box", memory=True)
 place_box.add_children([place_box_TAG2GOAL, place_box_ARM])
@@ -283,13 +270,6 @@ back_to_origin_WALK = NodeWalk(name='walk_to_origin_WALK', torso_api=torso_api, 
 back_to_origin = py_trees.composites.Sequence(name="back_to_origin", memory=True)
 back_to_origin.add_children([back_to_origin_SETGOAL, back_to_origin_WALK])
 
-# 创建更新轮次和 tag_id 的函数（在所有节点创建后）
-update_round_and_tag_id_fn = update_round_and_tag_id_fn(
-    config, search_pick_tag_TAG2GOAL, search_pick_tag_HEAD, pick_box_TAG2GOAL,
-    walk_to_pick_TAG2GOAL, PERCEP, search_pick_tag_HEAD_AND_WAIT
-)
-update_round_node = NodeFuntion(name="update_round_node", fn=update_round_and_tag_id_fn)
-
 # 创建暂停节点，方便调试
 pause1 = NodeFuntion(name="pause1", fn=lambda: pause_for_next_step("1.寻找箱子", config.common.enable_step_pause))
 pause2 = NodeFuntion(name="pause2", fn=lambda: pause_for_next_step("2.走到箱子位置，中途持续识别并执行手臂预动作", config.common.enable_step_pause))
@@ -300,9 +280,9 @@ pause6 = NodeFuntion(name="pause6", fn=lambda: pause_for_next_step("6.走去放�
 pause7 = NodeFuntion(name="pause7", fn=lambda: pause_for_next_step("7.放置箱子并恢复状态", config.common.enable_step_pause))
 pause8 = NodeFuntion(name="pause8", fn=lambda: pause_for_next_step("8.手臂与腰部复位以及后退", config.common.enable_step_pause))
 pause9 = NodeFuntion(name="pause9", fn=lambda: pause_for_next_step("9.回到初始位置", enable_pause=True))
-pause10 = NodeFuntion(name="pause9", fn=lambda: pause_for_next_step("10.完成一轮搬箱子", enable_pause=config.common.enable_round_stop))
+pause10 = NodeFuntion(name="pause9", fn=lambda: pause_for_next_step("10.完成一轮搬箱子", enable_pause=True))
 
-ACTION.add_children([update_round_node, search_pick_tag, pause1, walk_to_pick, pause2, pick_box, pause3, walk_and_turn_waist, pause4,
+ACTION.add_children([search_pick_tag, pause1, walk_to_pick, pause2, pick_box, pause3, walk_and_turn_waist, pause4,
                      search_place_tag, pause5, walk_to_place, pause6, place_box, pause7,walk_and_turn, pause8, pause10])
 # 行为树
 # /_/ root [*]
@@ -375,7 +355,7 @@ if __name__ == '__main__':
     # robot_sdk.control.control_head(0, np.deg2rad(-10))
     KuavoSDK.Init(log_level="INFO")
     # 用 Repeat 包裹，让它无限循环
-    num_repeats = config.common.grab_box_num
+    num_repeats = 10
     looping_root = py_trees.decorators.Repeat(name="RepeatRoot", child=root, num_success=num_repeats)
 
     tree = py_trees.trees.BehaviourTree(looping_root)

@@ -1,0 +1,613 @@
+# CRAIC 机器人仿真场景配置
+# U型走廊场景：外围矩形房间 + 内部矩形障碍物 = U型走廊
+scene_name: "CRAIC Lab Scene"
+
+# 相机视角设置
+camera:
+  center: "4 1 3"      # 相机焦点位置 (x, y, z)
+  extent: "5"          # 视野范围（数值越小，视角越近）
+
+visual:
+  headlight:
+    diffuse: "0.45 0.45 0.45"
+    ambient: "0.25 0.25 0.25"
+    specular: "0 0 0"
+  haze: "0.15 0.25 0.35 1"
+  azimuth: 160
+  elevation: -20
+
+materials:
+  ground_mat:
+    texture_file: "marble_tile.png"  # 深灰大理石纹理贴图（放在 xml 目录下）
+    texrepeat: "50 50"
+    texuniform: "false"
+    reflectance: 0.02
+    shininess: 0.05
+    rgba: "0.75 0.73 0.70 1"
+  walls_mat:
+    rgba: "0.85 0.75 0.60 1"    # 浅棕色墙壁
+    reflectance: 0.05            # 降低反射
+    shininess: 0.05              # 降低光泽
+  inner_wall_mat:
+    rgba: "0.78 0.68 0.53 1"    # 深一点的棕色（内墙）
+    reflectance: 0.05            # 降低反射
+    shininess: 0.05              # 降低光泽
+    # texture_file: "models/wall_textures/wall.png"   # 内墙贴图，可单独指定
+
+ground:
+  enabled: true
+  size: "50 50 0.05"            # 有限平面，配合 texrepeat 控制格子大小
+  rgba: "0.75 0.73 0.70 1"     # 深灰底色
+  material: "ground_mat"
+
+lights:
+  - name: "main_light"
+    pos: "0 0 10"
+    dir: "0 0 -1"
+    directional: "true"
+    diffuse: "0.6 0.6 0.6"          # 白光
+    specular: "0 0 0"               # 无高光
+
+# U型走廊设计：
+# - 外围房间：12.46m x 9m
+# - 内部U型：三面独立的墙（上墙、下墙、右墙），左侧开口
+# 每面墙可单独贴图（一墙一图，等比例铺满）：
+#   texture_file: 单面墙用
+#   texture_files: [path1, path2, ...] 多面墙，与 points 边顺序对应
+rooms:
+  # 外围大房间
+  outer_room:
+    points:
+      - [6.25, 4.5]     # 右上角
+      - [-6.25, 4.5]    # 左上角
+      - [-6.25, -4.5]   # 左下角
+      - [6.25, -4.5]    # 右下角
+    height: 1.0
+    wall_thickness: 0.05
+    material: "walls_mat"
+    # 每面墙一张图，按墙顺序：上|左|下|右，交叉分配不重复
+    texture_files:
+      - "models/wall_textures/1.png"
+      - "models/wall_textures/1.png"
+      - "models/wall_textures/1.png"
+      - "models/wall_textures/1.png"
+  
+  # 内部U型 - 上墙（横墙）
+  inner_top_wall:
+    points:
+      - [-3.25, 1.5]       # 右端
+      - [3.25, 1.5]      # 左端
+    height: 1.0
+    wall_thickness: 0.05
+    material: "inner_wall_mat"
+    # texture_file: "models/wall_textures/inner_top.png"  # 单面墙贴图，图片与墙 6.5m×1m 等比例
+  # 内部U型 - 下墙（横墙）
+  inner_bottom_wall:
+    points:
+      - [5.25, -2.5]      # 右端
+      - [-3.25, -2.5]     # 左端
+    height: 1.0
+    wall_thickness: 0.05
+    material: "inner_wall_mat"
+  
+  # 内部U型 - 右墙（竖墙）
+  inner_right_wall:
+    points:
+      - [-3.25, -2.5]       # 上端
+      - [-3.25, 1.5]      # 下端
+    height: 1.0
+    wall_thickness: 0.05
+    material: "inner_wall_mat"
+
+# 场景物体（暂时为空）
+objects:
+  # 地面彩色标记示例
+  - type: "floor_marker"
+    name: "end_point"
+    points:
+      - [5.25, -2.5]      # 右上角
+      - [6.25, -2.5]     # 左上角
+      - [6.25, -4.5]    # 左下角
+      - [5.25, -4.5]     # 右下角
+    rgba: "0.45 0.35 0.2 1"    # 棕色不透明
+    z_offset: 0.002      # 略高于地面
+    border_rgba: "1 1 1 0.8"   # 白色边线
+    border_width: 0.04         # 边线宽度 4cm
+  - type: "floor_marker"
+    name: "pause_point"
+    points:
+      - [6.25, -2.5]      # 右上角
+      - [3.25, -2.5]     # 左上角
+      - [3.25, 1.5]    # 左下角
+      - [6.25, 1.5]     # 右下角
+    rgba: "0.45 0.35 0.2 1"    # 棕色不透明
+    z_offset: 0.002      # 略高于地面
+    border_rgba: "1 1 1 0.8"   # 白色边线
+    border_width: 0.04         # 边线宽度 4cm
+  - type: "floor_marker"
+    name: "start_point1"
+    points:
+      - [6.25, 4.5]      # 右上角
+      - [3.25, 4.5]     # 左上角
+      - [3.25, 1.5]    # 左下角
+      - [6.25, 1.5]     # 右下角
+    rgba: "0.45 0.35 0.2 1"    # 棕色不透明
+    z_offset: 0.002      # 略高于地面
+    border_rgba: "1 1 1 0.8"   # 白色边线
+    border_width: 0.04         # 边线宽度 4cm
+  - type: "floor_marker"
+    name: "start_point2"
+    points:
+      - [2.75, -1.5]      # 右上角
+      - [1.25, -1.5]     # 左上角
+      - [1.25, 0.5]    # 左下角
+      - [2.75, 0.5]     # 右下角
+    rgba: "0.45 0.35 0.2 1"    # 棕色不透明
+    z_offset: 0.002      # 略高于地面
+    border_rgba: "1 1 1 0.8"   # 白色边线
+    border_width: 0.04         # 边线宽度 4cm
+  
+  # 托盘（使用真实扫描模型）
+  # 立在架子第一层上
+  # 料盘X位置说明：
+  # 围栏杆世界X坐标（每0.1m一根）：0.25, 0.15, 0.05, -0.05, ..., -0.75
+  # 料盘应放在两根杆之间（偏移0.05m）：0.20, 0.10, 0.00, -0.10, -0.20, -0.30, ...
+  - type: "include"
+    name: "tray_1"
+    file: "/root/kuavo_ws/src/craic_simulator/models/charging_tray/model.xml"
+    pos: "-0.10 -1.933 0.75"        # 第一层架板上
+    euler: "0 1.5708 0"           # 绕Y轴旋转90度，让托盘竖立
+    target_size: "0.2 0.03"       # 目标尺寸：直径0.2m，高0.03m
+    rgba: "0.1 0.1 0.1 1"         # 黑色
+    movable: true                 # 是否可移动/可抓取
+    mass: 0.05                     # 质量（kg），影响物理仿真
+    friction: "3.0 2.2 0.03"      # 摩擦系数（滑移/扭转/滚动），大幅增大便于抓取
+    condim: "6"
+    solref: "0.005 1.5"
+    solimp: "0.98 0.995 0.0001"
+
+  - type: "include"
+    name: "tray_2"
+    file: "/root/kuavo_ws/src/craic_simulator/models/charging_tray/model.xml"
+    pos: "-0.30 -1.933 0.75"
+    euler: "0 1.5708 0"
+    target_size: "0.2 0.03"
+    rgba: "0.1 0.1 0.1 1"
+    movable: true
+    mass: 0.05
+    friction: "3.0 2.2 0.03"
+    condim: "6"
+    solref: "0.005 1.5"
+    solimp: "0.98 0.995 0.0001"
+
+  - type: "include"
+    name: "tray_3"
+    file: "/root/kuavo_ws/src/craic_simulator/models/charging_tray/model.xml"
+    pos: "-0.30 -1.933 1.15"       # 第二层架板上
+    euler: "0 1.5708 0"
+    target_size: "0.2 0.03"
+    rgba: "0.1 0.1 0.1 1"
+    movable: true
+    mass: 0.05
+    friction: "3.0 2.2 0.03"
+    condim: "6"
+    solref: "0.005 1.5"
+    solimp: "0.98 0.995 0.0001"
+
+  - type: "include"
+    name: "tray_4"
+    file: "/root/kuavo_ws/src/craic_simulator/models/charging_tray/model.xml"
+    pos: "-0.10 -1.933 1.15"
+    euler: "0 1.5708 0"
+    target_size: "0.2 0.03"
+    rgba: "0.1 0.1 0.1 1"
+    movable: true
+    mass: 0.05
+    friction: "3.0 2.2 0.03"
+    condim: "6"
+    solref: "0.005 1.5"
+    solimp: "0.98 0.995 0.0001"
+
+  - type: "include"
+    name: "tray_5"
+    file: "/root/kuavo_ws/src/craic_simulator/models/charging_tray/model.xml"
+    pos: "-0.50 -1.933 1.15"
+    euler: "0 1.5708 0"
+    target_size: "0.2 0.03"
+    rgba: "0.1 0.1 0.1 1"
+    movable: true
+    mass: 0.05
+    friction: "3.0 2.2 0.03"
+    condim: "6"
+    solref: "0.005 1.5"
+    solimp: "0.98 0.995 0.0001"
+
+  # 置物架（长0.6m，宽0.25m，高0.8m）
+  - type: "include"
+    name: "basket_shelf"
+    file: "/root/kuavo_ws/src/craic_simulator/models/basket_shelf/model.xml"
+    pos: "-3.05 -1.3 0"             # 位置：置物架底部中心
+    euler: "0 0 1.5708"                # 旋转角度
+  
+  # 篮子
+  - type: "include"
+    name: "basket_1"
+    file: "/root/kuavo_ws/src/craic_simulator/models/basket/model.xml"
+    pos: "-3.05 -1.3 0.82"          # 位置：置物架第一层架板上（z=0.4+0.02）
+    euler: "0 0 1.5708"             # 旋转角度
+    target_size: "0.4 0.3 0.22"     # 目标尺寸：长0.4m，宽0.3m，高0.22m
+    rgba: "0.2 0.4 0.8 1"           # 蓝色
+    movable: true                   # 是否可移动/可抓取
+    mass: 0.3                       # 质量（kg）
+    friction: "1.5 0.8 0.02"        # 摩擦系数
+    solref: "0.02 1"
+    solimp: "0.9 0.95 0.001"
+  
+  # 零件桌（长1.4m，宽0.8m，高0.8m）
+  - type: "include"
+    name: "parts_table"
+    file: "/root/kuavo_ws/src/craic_simulator/models/parts_table/model.xml"
+    pos: "-0.2 1.0 0"             # 位置：桌子底部中心
+    euler: "0 0 0"                # 旋转角度（模型自带绿色桌面+灰色桌腿）
+
+  - type: "include"
+    name: "basket_2"
+    file: "/root/kuavo_ws/src/craic_simulator/models/basket/model.xml"
+    pos: "0.25 1.0 0.85"
+    euler: "0 0 1.5708"
+    target_size: "0.4 0.3 0.22"
+    rgba: "0.2 0.4 0.8 1"           # 蓝色
+    movable: true
+    mass: 0.3
+    friction: "1.5 0.8 0.02"
+    solref: "0.02 1"
+    solimp: "0.9 0.95 0.001"
+
+  - type: "include"
+    name: "basket_3"
+    file: "/root/kuavo_ws/src/craic_simulator/models/basket/model.xml"
+    pos: "-0.65 1.0 0.85"
+    euler: "0 0 1.5708"
+    target_size: "0.4 0.3 0.22"
+    rgba: "0.2 0.4 0.8 1"           # 蓝色
+    movable: true
+    mass: 0.3
+    friction: "1.5 0.8 0.02"
+    solref: "0.02 1"
+    solimp: "0.9 0.95 0.001"
+  # 桌面上的物品 - 钢管扣件（3个）
+  - type: "include"
+    name: "steel_pipe_fasteners_1"
+    file: "/root/kuavo_ws/src/craic_simulator/models/steel_pipe_fasteners/model_no_supports.xml"
+    pos: "-0.05 0.9 0.82"
+    euler: "0 0 0"
+    movable: true
+    mass: 0.08
+    diaginertia: "0.0006 0.0006 0.0006"
+    friction: "4.5 1.2 0.03"
+    condim: "6"
+    solref: "0.008 1.2"
+    solimp: "0.95 0.99 0.001"
+  
+  - type: "include"
+    name: "steel_pipe_fasteners_2"
+    file: "/root/kuavo_ws/src/craic_simulator/models/steel_pipe_fasteners/model_no_supports.xml"
+    pos: "-0.3 0.8 0.82"
+    euler: "0 0 0.5"
+    movable: true
+    mass: 0.08
+    diaginertia: "0.0006 0.0006 0.0006"
+    friction: "4.5 1.2 0.03"
+    condim: "6"
+    solref: "0.008 1.2"
+    solimp: "0.95 0.99 0.001"
+  
+  - type: "include"
+    name: "steel_pipe_fasteners_3"
+    file: "/root/kuavo_ws/src/craic_simulator/models/steel_pipe_fasteners/model_no_supports.xml"
+    pos: "-0.1 0.7 0.82"
+    euler: "0 0 1.0"
+    movable: true
+    mass: 0.08
+    diaginertia: "0.0006 0.0006 0.0006"
+    friction: "4.5 1.2 0.03"
+    condim: "6"
+    solref: "0.008 1.2"
+    solimp: "0.95 0.99 0.001"
+  
+  # 桌面上的物品 - T形水管头（3个）
+  - type: "include"
+    name: "t_junction_1"
+    file: "/root/kuavo_ws/src/craic_simulator/models/t_junction/model.xml"
+    pos: "-0.3 0.7 0.90"
+    euler: "0 0 0"
+    rgba: "0.08 0.08 0.08 1"
+    movable: true
+    mass: 0.12
+    diaginertia: "0.0008 0.0008 0.0008"
+    friction: "4.5 1.2 0.03"
+    condim: "6"
+    solref: "0.008 1.2"
+    solimp: "0.95 0.99 0.001"
+  
+  - type: "include"
+    name: "t_junction_2"
+    file: "/root/kuavo_ws/src/craic_simulator/models/t_junction/model.xml"
+    pos: "-0.3 0.9 0.90"
+    euler: "0 0 0.8"
+    rgba: "0.08 0.08 0.08 1"
+    movable: true
+    mass: 0.12
+    diaginertia: "0.0008 0.0008 0.0008"
+    friction: "4.5 1.2 0.03"
+    condim: "6"
+    solref: "0.008 1.2"
+    solimp: "0.95 0.99 0.001"
+  
+  - type: "include"
+    name: "t_junction_3"
+    file: "/root/kuavo_ws/src/craic_simulator/models/t_junction/model.xml"
+    pos: "-0.1 0.8 0.90"
+    euler: "0 0 1.5"
+    rgba: "0.08 0.08 0.08 1"
+    movable: true
+    mass: 0.12
+    diaginertia: "0.0008 0.0008 0.0008"
+    friction: "4.5 1.2 0.03"
+    condim: "6"
+    solref: "0.008 1.2"
+    solimp: "0.95 0.99 0.001"
+  
+  # 料盘架子（三层，1.2m×0.4m×1.5m）
+  - type: "include"
+    name: "tray_rack"
+    file: "/root/kuavo_ws/src/craic_simulator/models/tray_rack/model.xml"
+    pos: "-0.25 -2.0 0"           # 位置：架子底部中心
+    euler: "0 0 0"                # 旋转角度
+    rgba: "0.6 0.6 0.6 1"        # 灰色
+  
+  # 斜坡
+  - type: "slope"
+    name: "ramp"
+    pos: "-4.75 -3.5 0"             # 位置
+    euler: "0 0 0"                # 旋转角度
+    rgba: "0.35 0.25 0.15 1"      # 斜面颜色（深棕）
+    platform_rgba: "0.55 0.42 0.28 1"  # 顶部平台颜色（浅棕，与斜面区分）
+    mesh_file: "/root/kuavo_ws/src/craic_simulator/models/slope/meshes/xiepo.stl"
+  
+  # 楼梯（使用 slope/stairs.xml 实心楼梯，踏面 0.28m 高 0.13m，4级上+平台1m+3级下）
+  - type: "include"
+    name: "stairs"
+    file: "models/slope/stairs.xml"
+    pos: "4.75 -3.5 0"
+    euler: "0 0 3.14159"
+  
+  # # 二维码标记（AprilTag）
+  # - type: "qrcode"
+  #   name: "apriltag_1"
+  #   pos: "3.0 1.5 0.07"           # 位置：楼梯顶部
+  #   size: "0.07 0.07 0.005"       # 尺寸：7cm x 7cm，厚度 0.5cm
+  #   image_file: "models/slope/xml/april_36h11-1.png"
+  
+  # 石子路（高度场地形）
+  - type: "gravel_road"
+    name: "gravel_road_1"
+    pos: "-4.75 -1.25 -0.03"            # 位置 (x y z)，z略低于地面
+    euler: "0 0 1.5708"                 # 绕 Z 轴旋转 90 度（弧度，π/2）
+    size: "1.25 1.5 0.05 0.1"       # 半宽 半长 最大高度 基础高度（半长1.5→宽3m）
+    geom_size: "1.25 1.5 1"         # geom 尺寸
+    rgba: "1 1 1 1"                  # 白色
+    friction: "1.2 0.1 0.1"           # 摩擦系数
+    hfield_file: "models/gravel_road/mujoco_assets/road_heightfield.png"
+
+  # 颠簸路段（比石子路更颠簸，高度更大）
+  - type: "gravel_road"
+    name: "bumpy_road_1"
+    pos: "-4.75 1.9 -0.008"             # 位置 (x y z)，z=-0.008 与 scene_rl.xml 一致
+    euler: "0 0 1.5708"                 # 绕 Z 轴旋转 90°
+    size: "1.05 1.5 0.14 0.1"         # 半宽 半长 最大高度(0.17) 基础高度（半长1.5→宽3m）
+    geom_size: "1.05 1.5 1"           # geom 尺寸
+    rgba: "0.4 0.4 0.4 1"             # 灰色
+    friction: "1.2 0.1 0.1"             # 摩擦系数
+    hfield_file: "models/bumpy_road/road_heightfield_smooth.png"
+
+  # 减速带
+  - type: "speed_bump"
+    name: "speed_bump_1"
+    pos: "-4.82 -2.075 0.0"              # 位置 (x y z)
+    quat: "0.5 0.5 0.5 0.5"         # 绕 X 轴 90° + 绕 Z 轴 90°，平躺且长度沿 X 轴
+    target_size: "0.35 3.0 0.05"    # 长(沿道路) 宽(横跨道路) 高(凸起)
+    rgba: "0.3 0.3 0.3 1"           # 深灰色
+    friction: "1 0.5 0.01"
+    mesh_file: "models/speed_bump/uploads_files_2559840_Lezachiq.obj"
+
+  - type: "speed_bump"
+    name: "speed_bump_2"
+    pos: "-4.82 -1.225 0.0"              # 位置 (x y z)
+    quat: "0.5 0.5 0.5 0.5"         # 绕 X 轴 90° + 绕 Z 轴 90°，平躺且长度沿 X 轴
+    target_size: "0.35 3.0 0.05"    # 长(沿道路) 宽(横跨道路) 高(凸起)
+    rgba: "0.3 0.3 0.3 1"           # 深灰色
+    friction: "1 0.5 0.01"
+    mesh_file: "models/speed_bump/uploads_files_2559840_Lezachiq.obj"
+
+  - type: "speed_bump"
+    name: "speed_bump_3"
+    pos: "-4.82 -0.375 0.0"              # 位置 (x y z)
+    quat: "0.5 0.5 0.5 0.5"         # 绕 X 轴 90° + 绕 Z 轴 90°，平躺且长度沿 X 轴
+    target_size: "0.35 3.0 0.05"    # 长(沿道路) 宽(横跨道路) 高(凸起)
+    rgba: "0.3 0.3 0.3 1"           # 深灰色
+    friction: "1 0.5 0.01"
+    mesh_file: "models/speed_bump/uploads_files_2559840_Lezachiq.obj"
+
+  # 锥形路障
+  - type: "traffic_cone"
+    name: "traffic_cone_1"
+    pos: "3.0 3.0 0.0"              # 位置 (x y z)
+    euler: "1.5708 0 0"            # 绕 X 轴 90°，让模型立起来
+    target_size: "0.33 0.6"         # 直径 高度（米）
+    rgba: "1.0 0.4 0.0 1"           # 橙色
+    mesh_file: "models/traffic_cone/uploads_files_3223633_traffic+cone.obj"
+
+  - type: "traffic_cone"
+    name: "traffic_cone_2"
+    pos: "0.3 2.6 0.0"              # 位置 (x y z)
+    euler: "1.5708 0 0"            # 绕 X 轴 90°，让模型立起来
+    target_size: "0.33 0.6"         # 直径 高度（米）
+    rgba: "1.0 0.4 0.0 1"           # 橙色
+    mesh_file: "models/traffic_cone/uploads_files_3223633_traffic+cone.obj"
+
+  - type: "traffic_cone"
+    name: "traffic_cone_3"
+    pos: "0.6 3.8 0.0"              # 位置 (x y z)
+    euler: "1.5708 0 0"            # 绕 X 轴 90°，让模型立起来
+    target_size: "0.33 0.6"         # 直径 高度（米）
+    rgba: "1.0 0.4 0.0 1"           # 橙色
+    mesh_file: "models/traffic_cone/uploads_files_3223633_traffic+cone.obj"
+
+  - type: "traffic_cone"
+    name: "traffic_cone_4"
+    pos: "-1.2 3.2 0.0"              # 位置 (x y z)
+    euler: "1.5708 0 0"            # 绕 X 轴 90°，让模型立起来
+    target_size: "0.33 0.6"         # 直径 高度（米）
+    rgba: "1.0 0.4 0.0 1"           # 橙色
+    mesh_file: "models/traffic_cone/uploads_files_3223633_traffic+cone.obj"
+
+  - type: "traffic_cone"
+    name: "traffic_cone_5"
+    pos: "-1.4 2.5 0.0"              # 位置 (x y z)
+    euler: "1.5708 0 0"            # 绕 X 轴 90°，让模型立起来
+    target_size: "0.33 0.6"         # 直径 高度（米）
+    rgba: "1.0 0.4 0.0 1"           # 橙色
+    mesh_file: "models/traffic_cone/uploads_files_3223633_traffic+cone.obj"
+
+  - type: "traffic_cone"
+    name: "traffic_cone_6"
+    pos: "-3 2.0 0.0"              # 位置 (x y z)
+    euler: "1.5708 0 0"            # 绕 X 轴 90°，让模型立起来
+    target_size: "0.33 0.6"         # 直径 高度（米）
+    rgba: "1.0 0.4 0.0 1"           # 橙色
+    mesh_file: "models/traffic_cone/uploads_files_3223633_traffic+cone.obj"
+
+  # 立柱（科技感面板纹理）
+  - type: "pillar"
+    name: "pillar_1"
+    pos: "-5.75 -4.2 0.0"             # 底面中心 (x y z)，z=0 表示贴地
+    target_size: "0.4 0.4 1.0"     # 长 宽 高（米）
+    texture_file: "models/pillar/tech_panel.png"
+    texrepeat: "1 2.5"              # 横向1次，纵向2.5次（立柱较高）
+    emission: 0.15                  # 自发光（科技感辉光）
+    specular: 0.4
+    shininess: 0.6
+
+  - type: "pillar"
+    name: "pillar_2"
+    pos: "-3.45 4.1 0.0"             # 底面中心 (x y z)，z=0 表示贴地
+    target_size: "0.4 0.4 1.0"     # 长 宽 高（米）
+    texture_file: "models/pillar/tech_panel.png"
+    texrepeat: "1 2.5"
+    emission: 0.15
+    specular: 0.4
+    shininess: 0.6
+
+  # 立柱1 上的两个按钮（绿/红并排，间距12cm）
+  - type: "button_sphere"
+    name: "button_1_green"
+    pos: "-5.87 -4.2 1.0"          # 立柱1顶部偏左
+    diameter: "0.1"                 # 直径 10cm
+    rgba: "0 1 0 1"                 # 绿色
+    bright: true                    # 初始亮
+
+  - type: "button_sphere"
+    name: "button_1_red"
+    pos: "-5.63 -4.2 1.0"          # 立柱1顶部偏右
+    diameter: "0.1"                 # 直径 10cm
+    rgba: "1 0 0 1"                 # 红色
+    bright: false                   # 初始暗
+
+  # 立柱2 上的两个按钮（绿/红并排）
+  - type: "button_sphere"
+    name: "button_2_green"
+    pos: "-3.57 4.1 1.0"           # 立柱2顶部偏左
+    diameter: "0.1"                 # 直径 10cm
+    rgba: "0 1 0 1"                 # 绿色
+    bright: false                   # 初始暗
+
+  - type: "button_sphere"
+    name: "button_2_red"
+    pos: "-3.33 4.1 1.0"           # 立柱2顶部偏右
+    diameter: "0.1"                 # 直径 10cm
+    rgba: "1 0 0 1"                 # 红色
+    bright: true                    # 初始亮
+
+# ============================================================
+# 随机化配置
+# ============================================================
+randomization:
+  # 可随机交换位置的零件组
+  # 基于 objects 中的默认位置，shuffle 打乱 + ±offset 微偏移
+  shuffleable_parts:
+    names:
+      - steel_pipe_fasteners_1
+      - steel_pipe_fasteners_2
+      - steel_pipe_fasteners_3
+      - t_junction_1
+      - t_junction_2
+      - t_junction_3
+    xy_offset: 0.02       # X/Y 方向 ±2cm 随机偏移
+
+  # 范围随机物体（每次 seed 生成不同位置，保证最小间距）
+  random_objects:
+    traffic_cones:
+      names:
+        - traffic_cone_1
+        - traffic_cone_2
+        - traffic_cone_3
+        - traffic_cone_4
+        - traffic_cone_5
+        - traffic_cone_6
+      x_min: -3.0
+      x_max: 3.0
+      y_min: 1.8
+      y_max: 4.2
+      z: 0.0
+      min_distance: 1.0        # 锥之间最小间距（米），避免扎堆
+
+  # 位置预设（料盘位置）
+  # 料盘架参数：pos="-0.25 -2.0 0"，架板宽1.2m（X方向±0.6），两层有围栏
+  # 围栏杆世界X：0.25, 0.15, 0.05, -0.05, -0.15, -0.25, -0.35, -0.45, -0.55, -0.65, -0.75
+  # 可用X槽位（杆间中点）：0.20, 0.10, 0.00, -0.10, -0.20, -0.30, -0.40, -0.50, -0.60, -0.70
+  # 下层 Z=0.75，上层 Z=1.15，Y固定-1.933
+  # 每套保证：下层2个 + 上层3个
+  presets:
+    # ---- preset 0：下层靠右，上层居中偏左 ----
+    - tray_1: {pos: "0.10 -1.933 0.75"}
+      tray_2: {pos: "-0.10 -1.933 0.75"}
+      tray_3: {pos: "-0.20 -1.933 1.15"}
+      tray_4: {pos: "0.00 -1.933 1.15"}
+      tray_5: {pos: "-0.40 -1.933 1.15"}
+
+    # ---- preset 1：下层靠左，上层靠右 ----
+    - tray_1: {pos: "-0.40 -1.933 0.75"}
+      tray_2: {pos: "-0.60 -1.933 0.75"}
+      tray_3: {pos: "0.10 -1.933 1.15"}
+      tray_4: {pos: "0.00 -1.933 1.15"}
+      tray_5: {pos: "-0.20 -1.933 1.15"}
+
+    # ---- preset 2：下层两端，上层均匀分布 ----
+    - tray_1: {pos: "0.10 -1.933 0.75"}
+      tray_2: {pos: "-0.60 -1.933 0.75"}
+      tray_3: {pos: "-0.40 -1.933 1.15"}
+      tray_4: {pos: "-0.20 -1.933 1.15"}
+      tray_5: {pos: "0.00 -1.933 1.15"}
+
+    # ---- preset 3：下层居中，上层两端+中间 ----
+    - tray_1: {pos: "-0.20 -1.933 0.75"}
+      tray_2: {pos: "0.00 -1.933 0.75"}
+      tray_3: {pos: "0.10 -1.933 1.15"}
+      tray_4: {pos: "-0.30 -1.933 1.15"}
+      tray_5: {pos: "-0.60 -1.933 1.15"}
+
+  # 按钮亮暗随机化（每根立柱上随机亮一个按钮）
+  button_groups:
+    - [button_1_green, button_1_red]    # 立柱1：随机亮绿或红
+    - [button_2_green, button_2_red]    # 立柱2：随机亮绿或红

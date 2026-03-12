@@ -1,0 +1,7 @@
+# Request
+string button_name    # 按钮 geom 名称（如 "button_1_green"）
+bool is_bright        # true=亮, false=暗
+---
+# Response
+bool success
+string message

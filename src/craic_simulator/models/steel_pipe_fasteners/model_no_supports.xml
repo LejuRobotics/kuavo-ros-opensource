@@ -1,0 +1,13 @@
+<mujoco model="steel_pipe_fasteners_no_supports">
+  <asset>
+    <texture type="2d" name="aluminum_alloy_tex" file="aluminum_alloy.png"/>
+    <material name="aluminum_alloy_mat" texture="aluminum_alloy_tex" texuniform="true" specular="0.8" shininess="0.6" rgba="1 1 1 1"/>
+    <mesh name="model" file="steel_pipe_fasteners_no_supports.stl" scale="0.0006667 0.0006667 0.0006667"/>
+  </asset>
+  <worldbody>
+    <body name="model">
+      <geom name="visual" type="mesh" mesh="model" material="aluminum_alloy_mat" contype="0" conaffinity="0" group="2"/>
+      <geom name="collision" type="mesh" mesh="model" group="3"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,12 @@
+*.egg
+*.egg-info
+__pycache__
+.DS_Store
+*.pyc
+.vscode/*
+*build
+
+hfield_ray/
+test.ipynb
+
+dist/

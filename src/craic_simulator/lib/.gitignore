@@ -1,0 +1,4 @@
+# 只保留 .so 文件
+*
+!.gitignore
+!*.so

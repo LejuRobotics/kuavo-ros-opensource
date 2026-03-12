@@ -1,14 +1,11 @@
 targetDisplacementVelocity          0.5;
 targetRotationVelocity              0.3;
 cmdvelLinearXLimit                  0.4;
-cmdvelLinearYLimit                  0.06;
+cmdvelLinearYLimit                  0.2;
 cmdvelAngularYAWLimit               0.4;
 armMode                             true; 
 
 targetArmDisplacementVelocity       1.2;
-
-torsoVelocityThreshold              0.08;     ; m/s
-torsoVelocityDuration               0.5;      ; s
 
 comHeight                           0.78
 

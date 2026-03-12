@@ -1,0 +1,11 @@
+<mujoco model="t_junction">
+  <asset>
+    <mesh name="t_junction" file="T_junction.STL" scale="0.003 0.003 0.003"/>
+  </asset>
+  <worldbody>
+    <body name="model">
+      <geom name="visual" type="mesh" mesh="t_junction" contype="0" conaffinity="0" group="2" rgba="0.75 0.75 0.75 1"/>
+      <geom name="collision_base" type="box" pos="-0.010 0 0.02035" size="0.02365 0.027 0.02031" group="3"/>
+    </body>
+  </worldbody>
+</mujoco>
