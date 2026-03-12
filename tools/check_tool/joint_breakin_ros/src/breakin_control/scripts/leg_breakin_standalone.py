@@ -37,10 +37,10 @@ class LegBreakinStandalone:
         # scripts/ -> src/leg_breakin/src/
         leg_breakin_src = self.current_dir.parent.parent / "leg_breakin" / "src"
         self.leg_breakin_src = leg_breakin_src
-        self.joint_breakin_script = leg_breakin_src / "joint_breakin.py"  # roban2 统一入口（ROS控时长，版本13-14）
-        self.roban2_v17_leg_breakin_script = leg_breakin_src / "leg_breakin_roban2_v17" / "roban2_leg_breakin.py"  # roban2_v17（ROS控时长）
+        self.joint_breakin_script = leg_breakin_src / "joint_breakin.py"  # roban2 统一入口（ROS控时长）
         self.kuavo5_leg_breakin_script_v52_80A = leg_breakin_src / "leg_breakin_kuavo5_v52_80A" / "kuavo5_leg_breakin.py"  # kuavo5_v52_80A（ROS控时长，龙华25台版本）
         self.kuavo5_leg_breakin_script_v52 = leg_breakin_src / "leg_breakin_kuavo5_v52" / "kuavo5_leg_breakin.py"  # kuavo5_v52（ROS控时长，普通v52版本）
+        self.kuavo5_leg_breakin_script_v53 = leg_breakin_src / "leg_breakin_kuavo5_v53" / "kuavo5_leg_breakin.py"  # kuavo5_v53（ROS控时长，v53版本）
         
         # 进程管理
         self.leg_process = None
@@ -76,14 +76,30 @@ class LegBreakinStandalone:
         rv = rv_raw.lower()
 
         # 明确字符串标识
-        if ("kuavo5_v52" in rv) or ("kuavo5" in rv) or rv.startswith("v5") or rv.startswith("kuavo5_v5"):
+        if ("kuavo5_v52" in rv) or ("kuavo5_v53" in rv) or ("kuavo5" in rv) or rv.startswith("v5") or rv.startswith("kuavo5_v5"):
             return True
 
-        # 兼容 ROBOT_VERSION=52 这种纯数字写法：Kuavo5V52 版本 50+
+        # 兼容 ROBOT_VERSION=52/53 这种纯数字写法：Kuavo5 版本 50+
         try:
             v = int(rv_raw)
             return v >= 50
         except Exception:
+            return False
+    
+    def _is_robot_version_53(self, robot_version: str):
+        """判断 ROBOT_VERSION 是否为 53"""
+        rv_raw = str(robot_version or "").strip()
+        rv = rv_raw.lower()
+        
+        # 字符串匹配：包含 v53 或 kuavo5_v53
+        if "v53" in rv or "kuavo5_v53" in rv:
+            return True
+        
+        # 数字版本判断：53
+        try:
+            v = int(rv_raw)
+            return v == 53
+        except (ValueError, TypeError):
             return False
 
     def _find_project_root(self):
@@ -215,36 +231,26 @@ class LegBreakinStandalone:
                 target_script = self.kuavo5_leg_breakin_script_v52_80A
             elif leg_breakin_dir == "leg_breakin_kuavo5_v52":
                 target_script = self.kuavo5_leg_breakin_script_v52
-            elif leg_breakin_dir == "leg_breakin_roban2_v17":
-                target_script = self.roban2_v17_leg_breakin_script
+            elif leg_breakin_dir == "leg_breakin_kuavo5_v53":
+                target_script = self.kuavo5_leg_breakin_script_v53
             elif leg_breakin_dir == "leg_breakin_roban2_v14":
                 target_script = self.joint_breakin_script
             else:
-                if is_kuavo5:
+                # 如果环境变量不匹配，根据版本自动选择
+                if self._is_robot_version_53(robot_version):
+                    target_script = self.kuavo5_leg_breakin_script_v53
+                elif is_kuavo5:
                     target_script = self.kuavo5_leg_breakin_script_v52_80A
                 else:
-                    # 根据版本选择roban2脚本
-                    try:
-                        version_num = int(robot_version) if robot_version else 0
-                        if version_num == 17:
-                            target_script = self.roban2_v17_leg_breakin_script
-                        else:
-                            target_script = self.joint_breakin_script
-                    except (ValueError, TypeError):
-                        target_script = self.joint_breakin_script
+                    target_script = self.joint_breakin_script
         else:
-            if is_kuavo5:
+            # 没有环境变量，根据版本自动选择
+            if self._is_robot_version_53(robot_version):
+                target_script = self.kuavo5_leg_breakin_script_v53
+            elif is_kuavo5:
                 target_script = self.kuavo5_leg_breakin_script_v52_80A
             else:
-                # 根据版本选择roban2脚本
-                try:
-                    version_num = int(robot_version) if robot_version else 0
-                    if version_num == 17:
-                        target_script = self.roban2_v17_leg_breakin_script
-                    else:
-                        target_script = self.joint_breakin_script
-                except (ValueError, TypeError):
-                    target_script = self.joint_breakin_script
+                target_script = self.joint_breakin_script
 
         self.print_colored(f"调试：ROBOT_VERSION = {robot_version or '(unknown)'}", Colors.BLUE)
         self.print_colored(f"调试：选择腿部磨线脚本: {target_script}", Colors.BLUE)
@@ -384,8 +390,7 @@ class LegBreakinStandalone:
             if is_kuavo5:
                 leg_script_dir = target_script.parent
             else:
-                # 根据目标脚本确定工作目录
-                leg_script_dir = target_script.parent
+                leg_script_dir = self.joint_breakin_script.parent
             
             self.leg_process = subprocess.Popen(
                 ["python3", str(target_script)],

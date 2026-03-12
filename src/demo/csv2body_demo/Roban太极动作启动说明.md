@@ -31,7 +31,7 @@ csv数据格式以第一行举例
 
 - 运行脚本
 
-`python3 ./src/demo/csv2body_demo/step_player_csv_ocs2.py`
+`python3 ./src/demo/csv2body_demo/step_player_csv_ocs2.py src/demo/csv2body_demo/actions/taiji_step_roban_stable.csv`
 
 
 

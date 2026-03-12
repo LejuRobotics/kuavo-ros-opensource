@@ -66,3 +66,7 @@ bag/*
 src/Livox-SDK2
 src/legged_control
 src/legged_perceptive
+*.log
+*.csv
+EC_log/
+.catkin_tools/

@@ -727,7 +727,7 @@ def ruiwo_negtive():
     while True:
         print("请选择手臂总线类型：")
         print("1. 单CAN")
-        print("2. 双CAN")
+        print("2. 双CAN（ROBAN2.1）")
         choice = input("请输入选择 (1 或 2): ").strip()
 
         if choice == "1":
@@ -761,7 +761,7 @@ def ruiwo_negtive():
     while True:
         print("请选择手臂总线类型：")
         print("1. 单CAN")
-        print("2. 双CAN")
+        print("2. 双CAN（ROBAN2.1）")
         can_choice = input("请输入选择 (1 或 2): ").strip()
 
         if can_choice == "2":
@@ -1367,41 +1367,12 @@ def secondary_menu():
             robot_version = get_robot_version()
             kuavo_breakin_script = None
             script_description = ""
-            is_executable_script = False  # 标记是否为可执行脚本（非Python脚本）
             
             if robot_version:
                 try:
                     version_num = int(robot_version)
 
-                    if version_num == 62:
-                        # 版本62：执行可执行脚本
-                        # 检查是开源仓库还是闭源仓库
-                        # 开源仓库：installed/lib/hardware_node/hardware_plant_wheel_arm_test
-                        # 闭源仓库：devel/lib/hardware_node/hardware_plant_wheel_arm_test
-
-                        workspace_root = os.path.abspath(os.path.join(folder_path, "..", ".."))
-                        installed_script = os.path.join(workspace_root, "installed", "lib", "hardware_node", "hardware_plant_wheel_arm_test")
-                        devel_script = os.path.join(workspace_root, "devel", "lib", "hardware_node", "hardware_plant_wheel_arm_test")
-
-                        if os.path.exists(installed_script):
-                            kuavo_breakin_script = installed_script
-                            script_description = f"开源仓库磨线脚本 installed/lib/hardware_node/hardware_plant_wheel_arm_test (版本 {robot_version})"
-                            is_executable_script = True
-                        elif os.path.exists(devel_script):
-                            kuavo_breakin_script = devel_script
-                            script_description = f"闭源仓库磨线脚本 devel/lib/hardware_node/hardware_plant_wheel_arm_test (版本 {robot_version})"
-                            is_executable_script = True
-                        else:
-                            print(bcolors.FAIL + f"错误：找不到 hardware_plant_wheel_arm_test 可执行文件" + bcolors.ENDC)
-                            print(f"  开源路径：{installed_script}")
-                            print(f"  闭源路径：{devel_script}")
-                            break
-
-                    elif 13 <= version_num <= 14:
-                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
-                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
-
-                    elif version_num == 17:
+                    if 13 <= version_num <= 14:
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
@@ -1413,8 +1384,13 @@ def secondary_menu():
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
+                    
+                    elif version_num == 53:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
+                        script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+
                     else:
-                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、40-49、50-52、62），当前不支持自动选择磨线脚本" + bcolors.ENDC)
+                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、40-49、50-52、    53），当前不支持自动选择磨线脚本" + bcolors.ENDC)
                 except (ValueError, TypeError):
                     print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，请检查 ~/.bashrc 中的 ROBOT_VERSION 设置" + bcolors.ENDC)
             else:
@@ -1423,25 +1399,9 @@ def secondary_menu():
             if kuavo_breakin_script:
                 if os.path.exists(kuavo_breakin_script):
                     print(bcolors.OKGREEN + f"\n使用{script_description}" + bcolors.ENDC)
-                    
-                    # 询问用户是否已校准零点并位于零点位置
-                    print(bcolors.FAIL + "\n⚠ 请确认轮臂机器人已校准零点，且当前位于零点位置" + bcolors.ENDC)
-                    user_confirm = input("确认无误后按回车继续，或输入 'q' 取消: ").strip()
-                    
-                    if user_confirm.lower() == 'q':
-                        print(bcolors.WARNING + "操作已取消" + bcolors.ENDC)
-                        print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)
-                        break
-                    
-                    # 根据脚本类型选择执行方式
-                    if is_executable_script:
-                        # 可执行脚本：直接执行（可能需要sudo权限）
-                        command = kuavo_breakin_script
-                        subprocess.run(command, shell=True)
-                    else:
-                        # Python脚本：使用python3执行
-                        command = "python3 " + kuavo_breakin_script
-                        subprocess.run(command, shell=True)
+                    # 如果需要以 root 运行，请直接使用 root 终端启动本工具
+                    command = "python3 " + kuavo_breakin_script
+                    subprocess.run(command, shell=True)
                 else:
                     print(bcolors.FAIL + f"错误：磨线脚本不存在: {kuavo_breakin_script}" + bcolors.ENDC)
             print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)

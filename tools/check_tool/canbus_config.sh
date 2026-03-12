@@ -27,9 +27,6 @@ KUAVO5_V53_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5_
 KUAVO4PRO_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_single_canbus_cofig.yaml"
 KUAVO4PRO_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_dual_canbus_cofig.yaml"
 
-# Kuavo5w_v62
-KUAVO5W_V62_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5w_v62_dual_canbus_cofig.yaml"
-
 # 打印带颜色的标题
 echo_title() {
     echo -e "\033[1m\033[0;34m=== $1 ===\033[0m"
@@ -108,7 +105,7 @@ select_wiring_type() {
 select_hand_protocol_type() {
     local -n result_ref=$1
     local hand_protocol_options=("proto_buf -- 485协议" "proto_can -- CAN协议")
-    show_menu "选择手部协议类型 (若无末端，请任意选择)" "${hand_protocol_options[@]}"
+    show_menu "选择手部协议类型" "${hand_protocol_options[@]}"
     get_user_selection 2 hand_protocol_selection
 
     local hand_protocol_types=("proto_buf" "proto_can")
@@ -196,8 +193,8 @@ get_end_effector_device_id() {
             fi
             ;;
         "lejuclaw")
-            # 手臂全为 CAN 的机型下，lejuclaw 的 ID 为 0x11 / 0x12，其它机型保持 0x0F / 0x10
-            if [ "$robot_type" = "kuavo5_v53" ] || [ "$robot_type" = "kuavo5w_v62" ]; then
+            # kuavo5_v53 使用 0x11/0x12，其他机型使用 0x0F/0x10
+            if [ "$robot_type" = "kuavo5_v53" ]; then
                 if [ "$side" = "L" ]; then
                     echo "0x11"
                 else
@@ -473,10 +470,10 @@ configure_kuavo() {
 
     # 选择CAN总线接线类型
     local wiring_type
-    # 只支持双总线的版本
-    if [ "$robot_type" = "kuavo5_v53" ] || [ "$robot_type" = "kuavo5w_v62" ]; then
+    # kuavo5_v53版本只支持双总线
+    if [ "$robot_type" = "kuavo5_v53" ]; then
         wiring_type="dual_bus"
-        echo_success "✓ $robot_type版本仅支持双总线模式"
+        echo_success "✓ kuavo5_v53版本仅支持双总线模式"
     else
         select_wiring_type wiring_type
     fi
@@ -487,28 +484,9 @@ configure_kuavo() {
 
     # 根据robot_type选择配置文件路径
     local dual_config_file=""
-    local single_config_file=""
     case "$robot_type" in
-        "kuavo4pro")
-            dual_config_file="$KUAVO4PRO_DUAL_SOURCE_CONFIG_FILE"
-            single_config_file="$KUAVO4PRO_SINGLE_SOURCE_CONFIG_FILE"
-            ;;
         "kuavo5")
             dual_config_file="$KUAVO5_DUAL_SOURCE_CONFIG_FILE"
-            single_config_file="$KUAVO5_SINGLE_SOURCE_CONFIG_FILE"
-            ;;
-        "kuavo5_v53")
-            dual_config_file="$KUAVO5_V53_DUAL_SOURCE_CONFIG_FILE"
-            single_config_file=""
-            ;;
-        "kuavo5w_v62")
-            dual_config_file="$KUAVO5W_V62_DUAL_SOURCE_CONFIG_FILE"
-            single_config_file=""
-            ;;
-        "kuavo5_v53")
-            dual_config_file="$KUAVO5_V53_DUAL_SOURCE_CONFIG_FILE"
-            # kuavo5_v53版本不支持单总线，不需要single_config_file
-            single_config_file=""
             ;;
         "kuavo5_v53")
             dual_config_file="$KUAVO5_V53_DUAL_SOURCE_CONFIG_FILE"
@@ -540,26 +518,20 @@ configure_kuavo() {
     local right_type
     select_end_effector_type "右" right_type
 
-    # 根据接线类型处理配置文件
-    if [ "$wiring_type" = "dual_bus" ]; then
-        # 拷贝并修改配置文件
-        local temp_file="/tmp/kuavo_canbus_device_cofig.yaml"
+    # 拷贝并修改配置文件
+    local temp_file="/tmp/kuavo_canbus_device_cofig.yaml"
 
-        if [ -f "$dual_config_file" ]; then
-            cp "$dual_config_file" "$temp_file"
-            echo_success "✓ 配置文件已拷贝到: $temp_file"
+    if [ -f "$dual_config_file" ]; then
+        cp "$dual_config_file" "$temp_file"
+        echo_success "✓ 配置文件已拷贝到: $temp_file"
 
-            # 更新CANBUS类型配置
-            update_canbus_type_config "$temp_file" "$left_canbus_type" "$right_canbus_type"
+        # 更新CANBUS类型配置
+        update_canbus_type_config "$temp_file" "$left_canbus_type" "$right_canbus_type"
 
-            # 替换末端执行器配置
-            replace_end_effector_config "$temp_file" "$left_type" "$right_type" "$robot_type"
-            echo_success "✓ 配置文件已更新: $temp_file"
-            config_file="$temp_file"
-        else
-            echo_error "✗ 错误: 源配置文件不存在: $dual_config_file"
-            config_file=""
-        fi
+        # 替换末端执行器配置
+        replace_end_effector_config "$temp_file" "$left_type" "$right_type"
+        echo_success "✓ 配置文件已更新: $temp_file"
+        config_file="$temp_file"
     else
         # kuavo5_v53版本不支持单总线
         if [ "$robot_type" = "kuavo5_v53" ]; then
@@ -618,9 +590,9 @@ main() {
     fi
 
     # 选择机器人类型
-    local robot_options=("roban2.0" "roban2.1" "kuavo4pro" "kuavo5" "kuavo5_v53" "kuavo5w_v62")
+    local robot_options=("roban2.0" "roban2.1" "kuavo4pro" "kuavo5" "kuavo5_v53")
     show_menu "选择机器人类型" "${robot_options[@]}"
-    get_user_selection 6 robot_selection
+    get_user_selection 5 robot_selection
 
     local robot_type="${robot_options[$((robot_selection-1))]}"
     echo_success "选择机器人类型: $robot_type"
@@ -637,18 +609,12 @@ main() {
         "roban2.0"|"roban2.1")
             configure_roban2 "$robot_type"
             ;;
-        "kuavo4pro"|"kuavo5"|"kuavo5_v53"|"kuavo5w_v62")
+        "kuavo4pro"|"kuavo5"|"kuavo5_v53")
             configure_kuavo "$robot_type"
             ;;
     esac
 
     echo_success "\n🎉 配置完成!"
-    echo ""
-    echo_warning "╔════════════════════════════════════════════════╗"
-    echo_warning "║  ⚠️  请执行以下命令进行电机方向辨识更新"
-    echo_warning "║  "
-    echo_warning "║  $SCRIPT_DIR/motorevo_tool.sh --negative"
-    echo_warning "╚════════════════════════════════════════════════╝"
 }
 
 # 运行主函数
