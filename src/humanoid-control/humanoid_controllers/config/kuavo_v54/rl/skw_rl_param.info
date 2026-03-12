@@ -18,7 +18,7 @@ use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使�
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 
-networkModelFile          /ampjzx250207_3_22.onnx; 
+networkModelFile          /ampjzx250311_5_7.onnx; 
 commandData 
 {
     inital
@@ -52,7 +52,7 @@ velocityLimits
     (0,0)  0.5      ; cmdVelLineX limit (positive)
     (1,0)  0.3       ; cmdVelLineY limit (positive and negative)
     (2,0)  0.3       ; cmdVelLineZ limit (positive and negative)
-    (3,0)  0.25       ; cmdVelAngularZ limit (positive and negative)
+    (3,0)  0.3       ; cmdVelAngularZ limit (positive and negative)
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
@@ -157,16 +157,16 @@ defaultBaseState
 defaultJointState
 {
     ; 定义各关节的默认状态
-    (0,0)  -0.       ; leg_l1_joint
+    (0,0)  0.0       ; leg_l1_joint
     (1,0)  -0.       ; leg_l2_joint
-    (2,0)  -0.08     ; leg_l3_joint
-    (3,0)   0.21     ; leg_l4_joint
+    (2,0)  -0.1     ; leg_l3_joint
+    (3,0)   0.25     ; leg_l4_joint
     (4,0)  -0.15     ; leg_l5_joint
     (5,0)   0.       ; leg_l6_joint
     (6,0)   -0.0       ; leg_r1_joint
     (7,0)   0.       ; leg_r2_joint
-    (8,0)  -0.08     ; leg_r3_joint
-    (9,0)   0.21     ; leg_r4_joint
+    (8,0)  -0.1     ; leg_r3_joint
+    (9,0)   0.25     ; leg_r4_joint
     (10,0) -0.15     ; leg_r5_joint
     (11,0) -0.       ; leg_r6_joint
     (12,0)  0        ; waist_joint
@@ -269,14 +269,14 @@ jointKp
     (13,0)  15       ; zarm_l1_joint
     (14,0)  30       ; zarm_l2_joint
     (15,0)  15       ; zarm_l3_joint
-    (16,0)  20       ; zarm_l4_joint
+    (16,0)  30       ; zarm_l4_joint
     (17,0)  15       ; zarm_l5_joint
     (18,0)  15       ; zarm_l6_joint
     (19,0)  15       ; zarm_l7_joint
     (20,0)  15       ; zarm_r1_joint
     (21,0)  30       ; zarm_r2_joint
     (22,0)  15       ; zarm_r3_joint
-    (23,0)  20       ; zarm_r4_joint
+    (23,0)  30       ; zarm_r4_joint
     (24,0)  15       ; zarm_r5_joint
     (25,0)  15       ; zarm_r6_joint
     (26,0)  15       ; zarm_r7_joint
@@ -415,13 +415,13 @@ actionScaleTest
     ; 定义各关节的控制增益
     (0,0)   1       ; leg_l1_joint
     (1,0)   1       ; leg_l2_joint
-    (2,0)   1.05       ; leg_l3_joint
+    (2,0)   1       ; leg_l3_joint
     (3,0)   1       ; leg_l4_joint
     (4,0)   1       ; leg_l5_joint
     (5,0)   1       ; leg_l6_joint
     (6,0)   1       ; leg_r1_joint
     (7,0)   1       ; leg_r2_joint
-    (8,0)   1.05       ; leg_r3_joint
+    (8,0)   1       ; leg_r3_joint
     (9,0)   1       ; leg_r4_joint
     (10,0)  1       ; leg_r5_joint
     (11,0)  1       ; leg_r6_joint
