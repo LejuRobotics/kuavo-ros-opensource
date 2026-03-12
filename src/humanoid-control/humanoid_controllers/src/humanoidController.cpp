@@ -2452,13 +2452,17 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
               // 检查插值是否完成
               if (!is_torso_interpolation_active_)
               {
-                bool mpc_ready = mrtRosInterface_->initialPolicyReceived() && mrtRosInterface_->updatePolicy() && mrtRosInterface_->isPolicyUpdated();
+                bool mpc_ready = mrtRosInterface_->initialPolicyReceived() && 
+                                          mrtRosInterface_->updatePolicy() && 
+                                          mrtRosInterface_->isPolicyUpdated() &&
+                                          mrtRosInterface_->getPolicyReceiveCount() > 1;
                 if (is_rl_controller_)// 切换到RL
                 {
                   std::cout << "[MPC->RL] Torso interpolation completed, switching to NORMAL" << std::endl;
                   resetting_mpc_state_ = ResettingMpcState::NOMAL;
                 }else if (mpc_ready)
                 {
+                  std::cout << "MPC-RL interpolation completed, policy receive count: " << mrtRosInterface_->getPolicyReceiveCount() << std::endl;
                   standupTime_ = currentObservation_.time;
                   std::cout << "[RL->MPC] Torso interpolation completed, switching to NORMAL" << std::endl;
                   resetting_mpc_state_ = ResettingMpcState::NOMAL;
@@ -2493,7 +2497,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             }
             
             
-            if (is_torso_interpolation_active_ || resetting_mpc_state_ != ResettingMpcState::NOMAL /* && !is_rl_controller_ */) // 当前是从RL切换到MPC, 使用WBC插值防止MPC没有启动
+            if (resetting_mpc_state_ != ResettingMpcState::NOMAL /* && !is_rl_controller_ */) // 当前是从RL切换到MPC, 使用WBC插值防止MPC没有启动
             {
               optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
               optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = leg_interpolation_result_.head(jointNumReal_+ waistNum_);
@@ -2668,7 +2672,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       }
       else
       {
-        if (resetting_mpc_state_ == ResettingMpcState::RESET_BASE && is_torso_interpolation_active_)
+        if (resetting_mpc_state_ != ResettingMpcState::NOMAL)
         { 
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_interpolation_result_;
         }
@@ -4421,19 +4425,19 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     vector6_t direction = torso_interpolation_target_pose_ - currentObservation_.state.segment<6>(6);
     vector3_t pos_direction = direction.segment<3>(0);
     double distance_to_target = std::abs(pos_direction[2]);
-    
-    // 如果已经到达目标位置
-    if (distance_to_target < switch_distance_threshold_ || current_time - torso_interpolation_start_time_ > torso_interpolation_duration_ + switch_timeout_base_threshold_)
-    {
-      is_torso_interpolation_active_ = false;
-      is_arm_interpolating_ = false;
-      std::cout << "MPC-RL interpolation completed" << std::endl;
-      return;
-    }
-    
     // 计算基于时间的插值进度
     double elapsed_time = current_time - torso_interpolation_start_time_;
     double alpha = std::min(1.0, elapsed_time / torso_interpolation_duration_);
+
+    // 如果已经到达目标位置
+    if (current_time - torso_interpolation_start_time_ >= torso_interpolation_duration_+0.1 && 
+      (distance_to_target < switch_distance_threshold_ || current_time - torso_interpolation_start_time_ > torso_interpolation_duration_ + switch_timeout_base_threshold_))
+    {
+      is_torso_interpolation_active_ = false;
+      is_arm_interpolating_ = false;
+      std::cout << "MPC-RL interpolation complete，elapsed_time: " << current_time - torso_interpolation_start_time_  << "s, duration: " << torso_interpolation_duration_ << "s" << std::endl;
+      return;
+    }
     
     // 使用线性插值计算当前躯干位姿
     vector6_t interpolated_pose = torso_interpolation_start_pose_ + alpha * (torso_interpolation_target_pose_ - torso_interpolation_start_pose_);
