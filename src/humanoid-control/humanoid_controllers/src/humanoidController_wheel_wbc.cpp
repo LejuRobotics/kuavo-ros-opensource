@@ -632,6 +632,7 @@ namespace humanoidController_wheel_wbc
 
     // 更新关节指令
     kuavo_msgs::jointCmd jointCmdMsg;
+    jointCmdMsg.header.stamp = time;
     for (int i1 = 0; i1 < lowJointNum_; ++i1)
     {
       jointCmdMsg.joint_q.push_back(optimizedState_mrt_limit.tail(info.armDim)[i1]);
