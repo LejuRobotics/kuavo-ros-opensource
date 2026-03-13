@@ -881,21 +881,23 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 关闭手臂控制、自动摆手
                 {
-                    callSetArmModeSrv(0);
+                    auto new_arm_mode = (arm_ctrl_mode_!=0) ? 0 : 1;
+                    callSetArmModeSrv(new_arm_mode);
                 }
                 else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed) // 启用手臂控制
                 {
                     // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪 
                     if (arm_collision_control_) {
                         arm_collision_control_ = false;
+                        return;
                     }
-                    else arm_ctrl_mode_ = (arm_ctrl_mode_!=1) ? 1 : 2;
-                    std::cout << "[QuestControlFSM] change arm mode to :" << arm_ctrl_mode_ << std::endl;
+                    auto new_arm_mode = (arm_ctrl_mode_!=2) ? 2 : 1;
+                    std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
                     if (only_half_up_body_) {
-                        callVRSetArmModeSrv(arm_ctrl_mode_);
+                        callVRSetArmModeSrv(new_arm_mode);
                     }
                     else {
-                        callSetArmModeSrv(arm_ctrl_mode_);
+                        callSetArmModeSrv(new_arm_mode);
                     }
                 }
 
