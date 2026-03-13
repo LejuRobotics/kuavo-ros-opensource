@@ -275,7 +275,8 @@ class H12PROControllerNode:
         # 添加线程池
         self.executor = ThreadPoolExecutor(max_workers=2)
         self._state_transition_lock = threading.Lock()
-        
+        self._state_transition_executing = False  # 标记是否有状态转换正在执行
+
         self._setup_ros_components()
         
     def _setup_ros_components(self) -> None:
@@ -771,11 +772,24 @@ class H12PROControllerNode:
         }
         if "arm_pose" in trigger:
             kwargs["current_arm_joint_state"] = self.current_arm_joint_state
-            
+
+        # 检查是否有状态转换正在执行，如果有则直接拒绝（不排队）
+        if self._state_transition_executing:
+            rospy.logwarn(f"[StateTransition] Trigger '{trigger}' rejected: Another state transition is already executing")
+            return
+
+        # 对于arm_pose和customize_action相关的trigger，检查是否有arm动作正在执行
+        if ("arm_pose" in trigger or "customize_action" in trigger) and self.robot_action_executing:
+            print(f"[StateTransition] Trigger '{trigger}' rejected: Arm action is currently executing (robot_action_executing={self.robot_action_executing})")
+            return
+        elif ("arm_pose" in trigger or "customize_action" in trigger):
+            print(f"[StateTransition] Trigger '{trigger}' accepted: robot_action_executing={self.robot_action_executing}, will submit to thread pool")
+
         # 提交到线程池执行状态转换
         def state_transition_task():
             with self._state_transition_lock:
                 try:
+                    self._state_transition_executing = True  # 标记开始执行
                     getattr(self.robot_state_machine, trigger)(**kwargs)
                                         # zsh如果不是stance状态，自动关闭头部控制模式
                     if self.robot_state_machine.state != "stance" and self.head_control_mode:
@@ -801,7 +815,9 @@ class H12PROControllerNode:
                         self.h12_to_joy_node.process_channels()
                 except Exception as e:
                     rospy.logerr(f"Error in state transition task: {e}")
-                    
+                finally:
+                    self._state_transition_executing = False  # 清除执行标志
+
         self.executor.submit(state_transition_task)
 #zsh
     def _handle_joystick_input(self, msg: h12proRemoteControllerChannel) -> None:
