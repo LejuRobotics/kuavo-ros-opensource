@@ -202,6 +202,25 @@ const sidebars = {
                 'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/轮臂案例/基础使用',
               ],
             },
+            {
+              type: 'category',
+              label: 'pytree案例',
+              items: [
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/轮臂组合案例',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_arm',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_head',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_move',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_torso',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_torso_joint',
+              ],
+            },
+            {
+              type: 'category',
+              label: '5w轮臂数据采集案例',
+              items: [
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/5w轮臂数据采集案例/拆垛案例',
+              ],
+            },
           ],
         },
       ],

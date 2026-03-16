@@ -56,7 +56,7 @@ namespace ocs2
     kuavo_msgs::footPoseTargetTrajectories CreateFootPoseTrajectory(const std::vector<Eigen::Vector4d>& body_poses) {
         // 使用HumanoidControl的get_multiple_steps_msg函数生成轨迹
         // 参数：身体姿态序列，时间步长，脚步间距，碰撞检测
-        return HumanoidControl::get_multiple_steps_msg(body_poses, 0.4, 0.1, true);
+        return HumanoidControl::get_multiple_steps_msg(body_poses, 0.4, 0.15, true);
     }
 
     // 单步转向区间定义
@@ -580,17 +580,19 @@ namespace ocs2
             
             for (int i = 0; i < left_turn_zones.size(); ++i) {
                 LeftTurnZoneConfig config;
-                
+
                 XmlRpc::XmlRpcValue& zone = left_turn_zones[i];
-                
-                // 读取各个参数
+
+                // 读取区间参数
                 config.min_value = static_cast<double>(zone["min_value"]);
                 config.max_value = static_cast<double>(zone["max_value"]);
-                config.body_x = static_cast<double>(zone["body_x"]);
-                config.body_y = static_cast<double>(zone["body_y"]);
-                config.body_z = static_cast<double>(zone["body_z"]);
+
+                // 只读取 body_yaw，body_x 和 body_y 直接设为 0
                 config.body_yaw = static_cast<double>(zone["body_yaw"]);
-                
+                config.body_x = 0.0;  // 直接设为0
+                config.body_y = 0.0;  // 直接设为0
+                config.body_z = 0.0;
+
                 left_turn_configs.push_back(config);
                 
                 std::cout << "Loaded left turn zone " << i << ": min=" << config.min_value 
@@ -884,7 +886,8 @@ namespace ocs2
                 {
                     if (robot_type_ == 2) // 人形机器人
                     {
-                        callSetArmModeSrv(0);
+                        auto new_arm_mode = (arm_ctrl_mode_!=0) ? 0 : 1;
+                        callSetArmModeSrv(new_arm_mode);
                     }
                     else if (robot_type_ == 1) // 轮臂机器人,通过奇偶按键次数锁定/解锁
                     {
@@ -906,14 +909,15 @@ namespace ocs2
                     // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪 
                     if (arm_collision_control_) {
                         arm_collision_control_ = false;
+                        return;
                     }
-                    else arm_ctrl_mode_ = (arm_ctrl_mode_!=1) ? 1 : 2;
-                    std::cout << "[QuestControlFSM] change arm mode to :" << arm_ctrl_mode_ << std::endl;
+                    auto new_arm_mode = (arm_ctrl_mode_!=2) ? 2 : 1;
+                    std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
                     if (only_half_up_body_) {
-                        callVRSetArmModeSrv(arm_ctrl_mode_);
+                        callVRSetArmModeSrv(new_arm_mode);
                     }
                     else {
-                        callSetArmModeSrv(arm_ctrl_mode_);
+                        callSetArmModeSrv(new_arm_mode);
                     }
 
                     if(1 == robot_type_) // 轮臂机器人

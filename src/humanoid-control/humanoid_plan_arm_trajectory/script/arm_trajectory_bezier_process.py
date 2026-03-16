@@ -898,6 +898,10 @@ class ArmTrajectoryBezierDemo:
         self._timer = rospy.Timer(rospy.Duration(delay), self._on_timer_trigger, oneshot=True)
 
     def reset_robot_state(self):
+        # 复位开始，发布 state=1 表示正在复位
+        rospy.loginfo("[RESET_START] Starting robot reset, publishing action state=1")
+        self.publish_action_state(1)
+
         current_control_mode = self.get_current_control_mode()
         if current_control_mode == "rl":
             self.rl_reset_robot_state()
@@ -914,6 +918,10 @@ class ArmTrajectoryBezierDemo:
                 self.waist_state.header.stamp = rospy.Time.now()
                 self.waist_state.data.data = [0]
                 self.control_waist_pub.publish(self.waist_state)
+
+            # OCS2/MPC 复位完成，发布 state=2
+            rospy.loginfo("[RESET_COMPLETE] OCS2/MPC reset finished, publishing action state=2")
+            self.publish_action_state(2)
 
     def create_action_data(self, finish_time, is_rl=False):
         # 根据是否有腰部关节确定TACT长度
@@ -995,7 +1003,9 @@ class ArmTrajectoryBezierDemo:
     def _on_reset_timer_trigger(self, event):
         """复位动作结束后停止发布，并恢复手臂模式为自动摆臂（AMP/RL 下行走时摆手）。"""
         self.arm_flag = False
-        rospy.loginfo("Reset trajectory finished. Stopping publishers.")
+        rospy.loginfo(f"[RESET_COMPLETE] Reset trajectory finished at {time.time():.3f}. Stopping publishers. [DEBUG] arm_flag={self.arm_flag}, running_action={self.running_action}")
+        # 复位完成，发布 state=2
+        self.publish_action_state(2)
         # AMP/RL 下做完动作会切到 mode 2，复位轨迹播完后需切回 mode 1，否则拨动摇杆行走时不摆手
         current_control_mode = self.get_current_control_mode()
         if current_control_mode == "rl":
