@@ -58,6 +58,7 @@ def publish_system_info():
     pub_cpu_usage = rospy.Publisher('/monitor/system_info/cpu_usage', Float64MultiArray, queue_size=10)
     pub_cpu_temp = rospy.Publisher('/monitor/system_info/cpu_temperature', Float64MultiArray, queue_size=10)
     pub_cpu_freq = rospy.Publisher('/monitor/system_info/cpu_frequency', Float64MultiArray, queue_size=10)
+    pub_mem_info = rospy.Publisher('/monitor/system_info/memory', Float64MultiArray, queue_size=10)
 
     rate = rospy.Rate(5)  # 5 Hz
     rospy.loginfo("System Info Publisher Started")
@@ -86,6 +87,19 @@ def publish_system_info():
         cpu_freq_msg.data = cpu_freqs
         pub_cpu_freq.publish(cpu_freq_msg)
         # rospy.loginfo("Published CPU Frequencies for each core: %s MHz", cpu_freqs)
+
+        # 记录系统内存信息并发布
+        mem = psutil.virtual_memory()
+        mem_msg = Float64MultiArray()
+        # data: [percent, used_GB, total_GB, available_GB]
+        mem_msg.data = [
+            float(mem.percent),
+            float(mem.used) / (1024 ** 3),
+            float(mem.total) / (1024 ** 3),
+            float(mem.available) / (1024 ** 3),
+        ]
+        pub_mem_info.publish(mem_msg)
+       
 
         rate.sleep()
 
