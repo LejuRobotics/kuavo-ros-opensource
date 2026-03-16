@@ -1080,10 +1080,10 @@ lowJointAccelTask
   }
   kd
   {
-    (0,0)   60.2     ; knee_pitch
-    (1,0)   60.2     ; leg_pitch
-    (2,0)   60.2     ; waist_pitch
-    (3,0)   60.2     ; waist_yaw_link
+    (0,0)   30.2     ; knee_pitch
+    (1,0)   30.2     ; leg_pitch
+    (2,0)   30.2     ; waist_pitch
+    (3,0)   30.2     ; waist_yaw_link
   }
 }
 
