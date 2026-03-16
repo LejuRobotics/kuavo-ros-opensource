@@ -6,9 +6,11 @@
 <robot name="biped_v3" xmlns:drake="https://drake.mit.edu">
   <link name="torso">
     <inertial>
-      <origin xyz="-0.006 0.0 0.145" rpy="0 0 0" />
-      <mass value="18.2491" />
-      <inertia ixx="0.104" ixy="0.0" ixz="0.0" iyy="0.084" iyz="0.0" izz="0.050" />
+      <origin xyz="-0.01005136 -0.00110498 0.14058574" rpy="0 0 0"/>
+      <mass value="15.78214703"/>
+      <inertia ixx="0.10436018" ixy="0.00037418" ixz="0.00220231"
+               iyy="0.08324244" iyz="-0.00108080"
+               izz="0.04927332"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -22,9 +24,11 @@
   </link>
   <link name="waist">
     <inertial>
-      <origin xyz="0.001 0.0 -0.122" rpy="0 0 0" />
-      <mass value="4.853" />
-      <inertia ixx="0.023" ixy="0.0" ixz="0.0" iyy="0.015" iyz="0.0" izz="0.017" />
+      <origin xyz="0.00202324 -0.00003822 -0.12282710" rpy="0 0 0"/>
+      <mass value="5.27737344"/>
+      <inertia ixx="0.02656560" ixy="0.00001678" ixz="-0.00000028"
+               iyy="0.01821248" iyz="-0.00000269"
+               izz="0.02080739"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -46,9 +50,15 @@
   </joint>
   <link name="leg_l1_link">
     <inertial>
-      <origin xyz="-0.00063257 -0.03319679 0.03319679" rpy="0 0 0" />
-      <mass value="0.62568928" />
-      <inertia ixx="0.00115145" ixy="0.00002961" ixz="-0.00002972" iyy="0.00195562" iyz="0.00004384" izz="0.00194595" />
+      <origin xyz="-0.00003227 -0.03334417 0.03367064" rpy="0 0 0" />
+      <mass value="0.6865" />
+      <inertia
+        ixx="0.00126377"
+        ixy="0.00001414"
+        ixz="-0.00001412"
+        iyy="0.00218060"
+        iyz="0.00004419"
+        izz="0.00217034" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -61,11 +71,11 @@
     </visual>
   </link>
   <joint name="leg_l1_joint" type="revolute">
-    <origin xyz="0.0 0.12441237 -0.22115341" rpy="0 0 0" />
+    <origin xyz="0 0.12441 -0.22265" rpy="0 0 0"/>
     <parent link="waist" />
     <child link="leg_l1_link" />
     <axis xyz="0 0.70711 -0.70711" />
-    <limit lower="-3.228" upper="2.44346" effort="180" velocity="23.55" />
+    <limit lower="-3.228" upper="2.44346" effort="150" velocity="14.6" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -74,9 +84,15 @@
   </transmission>
   <link name="leg_l2_link">
     <inertial>
-      <origin xyz="0.00998392 0.00005405 -0.00920979" rpy="0 0 0" />
-      <mass value="2.03159924" />
-      <inertia ixx="0.00458902" ixy="0.00000651" ixz="-0.00013665" iyy="0.00412295" iyz="-0.00000554" izz="0.00339874" />
+      <origin xyz="0.00997750 0.00006468 -0.00976037" rpy="0 0 0" />
+      <mass value="2.054" />
+      <inertia
+        ixx="0.00431431"
+        ixy="0.00000608"
+        ixz="-0.00014901"
+        iyy="0.00400702"
+        iyz="-0.00000584"
+        izz="0.00326276" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -93,7 +109,7 @@
     <parent link="leg_l1_link" />
     <child link="leg_l2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.837758" upper="2.40855" effort="100" velocity="41.3433333333333" />
+    <limit lower="-0.837758" upper="2.40855" effort="150" velocity="14.6" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -102,9 +118,15 @@
   </transmission>
   <link name="leg_l3_link">
     <inertial>
-      <origin xyz="-0.01363906  -0.00133710 -0.15770370" rpy="0 0 0" />
-      <mass value="3.38846623" />
-      <inertia ixx="0.01398219" ixy="-0.00011841" ixz="-0.00249868" iyy="0.01516820" iyz="-0.00032906" izz="0.00563002" />
+      <origin xyz="-0.01402491 -0.00139317 -0.15993926" rpy="0 0 0" />
+      <mass value="3.2746" />
+      <inertia
+        ixx="0.01347200"
+        ixy="-0.00009787"
+        ixz="-0.00236299"
+        iyy="0.01460281"
+        iyz="-0.00025458"
+        izz="0.00559251" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -121,7 +143,7 @@
     <parent link="leg_l2_link" />
     <child link="leg_l3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.7453" upper="1.7453" effort="100" velocity="41.3433333333333" />
+    <limit lower="-1.7453" upper="1.7453" effort="70" velocity="12.0" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -130,9 +152,15 @@
   </transmission>
   <link name="leg_l4_link">
     <inertial>
-      <origin xyz="0.02204595 0.00442347 -0.11473525" rpy="0 0 0" />
-      <mass value="2.61852" />
-      <inertia ixx="0.01197778" ixy="0.00020915" ixz="0.00023052" iyy="0.01216530" iyz="-0.00118030" izz="0.00311797" />
+      <origin xyz="0.02266979 0.00479531 -0.11412872" rpy="0 0 0" />
+      <mass value="2.4454" />
+      <inertia
+        ixx="0.01333243"
+        ixy="0.00025106"
+        ixz="0.00029427"
+        iyy="0.01330983"
+        iyz="-0.00133540"
+        izz="0.00318742" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -149,7 +177,7 @@
     <parent link="leg_l3_link" />
     <child link="leg_l4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.08726646" upper="2.530727" effort="180" velocity="23.55" />
+    <limit lower="-0.08726646" upper="2.530727" effort="150" velocity="14.6" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -158,9 +186,15 @@
   </transmission>
   <link name="leg_l5_link">
     <inertial>
-      <origin xyz="-0.00317025 0.00000108 -0.00652874" rpy="0 0 0" />
-      <mass value="0.10854305" />
-      <inertia ixx="0.00001902" ixy="0.0" ixz="-0.00000266" iyy="0.00002278" iyz="0.0" izz="0.00001170" />
+      <origin xyz="-0.00344503 -0.00000752 -0.00936005" rpy="0 0 0" />
+      <mass value="0.1314" />
+      <inertia
+        ixx="0.00002019"
+        ixy="0.00000000"
+        ixz="-0.00000328"
+        iyy="0.00002431"
+        iyz="0.00000000"
+        izz="0.00001384" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -177,7 +211,7 @@
     <parent link="leg_l4_link" />
     <child link="leg_l5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="74" velocity="17.0" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -186,9 +220,15 @@
   </transmission>
   <link name="leg_l6_link">
     <inertial>
-      <origin xyz="0.02388909 0.00010137 -0.01697048" rpy="0 0 0" />
-      <mass value="0.43610846" />
-      <inertia ixx="0.00019972" ixy="-0.00000020" ixz="0.00007928" iyy="0.00097984" iyz="-0.00000083" izz="0.00106502" />
+      <origin xyz="0.02860311 0.00007463 -0.01983204" rpy="0 0 0" />
+      <mass value="0.5783271" />
+      <inertia
+        ixx="0.00028622"
+        ixy="-0.00000001"
+        ixz="0.00013017"
+        iyy="0.00147216"
+        iyz="-0.00000093"
+        izz="0.00158313" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -205,7 +245,7 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36" velocity="23.0266666666667" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="74" velocity="17.0" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -217,9 +257,15 @@
   <frame link="leg_l6_link" name="l_foot_heel" xyz="-0.0538 0.0 -0.03" />
   <link name="leg_r1_link">
     <inertial>
-      <origin xyz="-0.00063257 0.03319679 0.03319679" rpy="0 0 0" />
-      <mass value="0.62568928" />
-      <inertia ixx="0.00115145" ixy="-0.00002961" ixz="-0.00002972" iyy="0.00195562" iyz="-0.00004384" izz="0.00194595" />
+      <origin xyz="-0.00003227 0.03334417 0.03367064" rpy="0 0 0" />
+      <mass value="0.6865" />
+      <inertia
+        ixx="0.00126377"
+        ixy="-0.00001414"
+        ixz="-0.00001412"
+        iyy="0.00218060"
+        iyz="-0.00004419"
+        izz="0.00217034" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -232,11 +278,11 @@
     </visual>
   </link>
   <joint name="leg_r1_joint" type="revolute">
-    <origin xyz="0.0 -0.12441237 -0.22115341" rpy="0 0 0" />
+    <origin xyz="0.0 -0.12441 -0.22265" rpy="0 0 0" />
     <parent link="waist" />
     <child link="leg_r1_link" />
     <axis xyz="0 -0.70711 -0.70711" />
-    <limit lower="-3.228" upper="2.44346" effort="180" velocity="23.55" />
+    <limit lower="-2.44346" upper="3.228" effort="150" velocity="14.6" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -245,9 +291,15 @@
   </transmission>
   <link name="leg_r2_link">
     <inertial>
-      <origin xyz="0.00998392 -0.00005405 -0.00920979" rpy="0 0 0" />
-      <mass value="2.03159924" />
-      <inertia ixx="0.00458902" ixy="-0.00000651" ixz="-0.00013665" iyy="0.00412295" iyz="0.00000554" izz="0.00339874" />
+      <origin xyz="0.00997750 -0.00006468 -0.00976037" rpy="0 0 0" />
+      <mass value="2.054" />
+      <inertia
+        ixx="0.00431431"
+        ixy="-0.00000608"
+        ixz="-0.00014901"
+        iyy="0.00400702"
+        iyz="0.00000584"
+        izz="0.00326276" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -264,7 +316,7 @@
     <parent link="leg_r1_link" />
     <child link="leg_r2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-2.40855" upper="0.837758" effort="100" velocity="41.3433333333333" />
+    <limit lower="-2.40855" upper="0.837758" effort="150" velocity="14.6" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -273,9 +325,15 @@
   </transmission>
   <link name="leg_r3_link">
     <inertial>
-      <origin xyz="-0.01363906  0.00133710 -0.15770370" rpy="0 0 0" />
-      <mass value="3.38846623" />
-      <inertia ixx="0.01398219" ixy="0.00011841" ixz="-0.00249868" iyy="0.01516820" iyz="0.00032906" izz="0.00563002" />
+      <origin xyz="-0.01402491 0.00139317 -0.15993926" rpy="0 0 0" />
+      <mass value="3.2746" />
+      <inertia
+        ixx="0.01347200"
+        ixy="0.00009787"
+        ixz="-0.00236299"
+        iyy="0.01460281"
+        iyz="0.00025458"
+        izz="0.00559251" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -292,7 +350,7 @@
     <parent link="leg_r2_link" />
     <child link="leg_r3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.7453" upper="1.7453" effort="100" velocity="41.3433333333333" />
+    <limit lower="-1.7453" upper="1.7453" effort="70" velocity="12.0" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -301,9 +359,15 @@
   </transmission>
   <link name="leg_r4_link">
     <inertial>
-      <origin xyz="0.02204595 -0.00442347 -0.11473525" rpy="0 0 0" />
-      <mass value="2.61852" />
-      <inertia ixx="0.01197778" ixy="-0.00020915" ixz="0.00023052" iyy="0.01216530" iyz="0.00118030" izz="0.00311797" />
+      <origin xyz="0.02266979 -0.00479531 -0.11412872" rpy="0 0 0" />
+      <mass value="2.4454" />
+      <inertia
+        ixx="0.01333243"
+        ixy="-0.00025106"
+        ixz="0.00029427"
+        iyy="0.01330983"
+        iyz="0.00133540"
+        izz="0.00318742" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -320,7 +384,7 @@
     <parent link="leg_r3_link" />
     <child link="leg_r4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.08726646" upper="2.530727" effort="180" velocity="23.55" />
+    <limit lower="-0.08726646" upper="2.530727" effort="150" velocity="14.6" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -329,9 +393,15 @@
   </transmission>
   <link name="leg_r5_link">
     <inertial>
-      <origin xyz="-0.00317025 0.00000108 -0.00652874" rpy="0 0 0" />
-      <mass value="0.10854305" />
-      <inertia ixx="0.00001902" ixy="0.0" ixz="-0.00000266" iyy="0.00002278" iyz="0.0" izz="0.00001170" />
+      <origin xyz="-0.00344503 0.00000752 -0.00936005" rpy="0 0 0" />
+      <mass value="0.1314" />
+      <inertia
+        ixx="0.00002019"
+        ixy="0.00000000"
+        ixz="-0.00000328"
+        iyy="0.00002431"
+        iyz="0.00000000"
+        izz="0.00001384" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -348,7 +418,7 @@
     <parent link="leg_r4_link" />
     <child link="leg_r5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.872664625997165" upper="0.523598775598299" effort="74" velocity="17.0" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">
@@ -357,9 +427,15 @@
   </transmission>
   <link name="leg_r6_link">
     <inertial>
-      <origin xyz="0.02388909 -0.00010137 -0.01697048" rpy="0 0 0" />
-      <mass value="0.43610846" />
-      <inertia ixx="0.00019972" ixy="0.00000020" ixz="0.00007928" iyy="0.00097984" iyz="0.00000083" izz="0.00106502" />
+      <origin xyz="0.02860311 -0.00007463 -0.01983204" rpy="0 0 0" />
+      <mass value="0.5783271" />
+      <inertia
+        ixx="0.00028622"
+        ixy="0.00000001"
+        ixz="0.00013017"
+        iyy="0.00147216"
+        iyz="0.00000093"
+        izz="0.00158313" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -376,7 +452,7 @@
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36" velocity="23.0266666666667" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="74" velocity="17.0" />
     <dynamics damping="0.2" friction="0.1" />
   </joint>
   <transmission type="SimpleTransmission">

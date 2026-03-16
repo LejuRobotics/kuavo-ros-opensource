@@ -6,9 +6,11 @@
 <robot name="biped_v3_arm" xmlns:drake="https://drake.mit.edu">
   <link name="torso">
     <inertial>
-      <origin xyz="-0.006 0.0 0.145" rpy="0 0 0" />
-      <mass value="8.730" />
-      <inertia ixx="0.104" ixy="0.0" ixz="0.0" iyy="0.084" iyz="0.0" izz="0.050" />
+      <origin xyz="-0.01005136 -0.00110498 0.14058574" rpy="0 0 0"/>
+      <mass value="8.37744703"/>
+      <inertia ixx="0.10436018" ixy="0.00037418" ixz="0.00220231"
+               iyy="0.08324244" iyz="-0.00108080"
+               izz="0.04927332"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -22,9 +24,11 @@
   </link>
   <link name="waist">
     <inertial>
-      <origin xyz="0.001 0.0 -0.122" rpy="0 0 0" />
-      <mass value="4.853" />
-      <inertia ixx="0.023" ixy="0.0" ixz="0.0" iyy="0.015" iyz="0.0" izz="0.017" />
+      <origin xyz="0.00202324 -0.00003822 -0.12282710" rpy="0 0 0"/>
+      <mass value="5.27737344"/>
+      <inertia ixx="0.02656560" ixy="0.00001678" ixz="-0.00000028"
+               iyy="0.01821248" iyz="-0.00000269"
+               izz="0.02080739"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -41,15 +45,21 @@
     <parent link="torso" />
     <child link="waist" />
     <axis xyz="0 0 1" />
-    <limit lower="-2.0943951023932" upper="2.0943951023932" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-2.61799387799149" upper="2.61799387799149" effort="80" velocity="12.0" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
   <!-- =========================================================== Arms ================================================================= -->
   <link name="zarm_l1_link">
     <inertial>
-      <origin xyz="0.01852427 -0.00307832 -0.00006089" rpy="0 0 0" />
-      <mass value="0.80328906" />
-      <inertia ixx="0.00065573" ixy="-0.00004427" ixz="-0.00000010" iyy="0.00082825" iyz="-0.00000114" izz="0.00093564" />
+      <origin xyz="0.01773604 -0.00289047 -0.00006872" rpy="0 0 0"/>
+      <mass value="0.84760000"/>
+      <inertia
+        ixx="0.00073101"
+        ixy="-0.00004199"
+        ixz="-0.00000127"
+        iyy="0.00088866"
+        iyz="-0.00000149"
+        izz="0.00101122"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -62,7 +72,7 @@
     </visual>
   </link>
   <joint name="zarm_l1_joint" type="revolute">
-    <origin xyz="0.0 0.18100293 0.23992606" rpy="0 0 0" />
+    <origin xyz="0 0.181 0.23843" rpy="0 0 0" />
     <parent link="torso" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
@@ -75,9 +85,15 @@
   </transmission>
   <link name="zarm_l2_link">
     <inertial>
-      <origin xyz="0.00217668 0.00574680 -0.03258678" rpy="0 0 0" />
-      <mass value="0.32360735" />
-      <inertia ixx="0.00046909" ixy="0.0" ixz="-0.00002559" iyy="0.00068110" iyz="0.0" izz="0.00049735" />
+      <origin xyz="0.00199256 0.00000000 -0.03214647" rpy="0 0 0"/>
+      <mass value="0.36680000"/>
+      <inertia
+        ixx="0.00053752"
+        ixy="0.00000001"
+        ixz="-0.00002375"
+        iyy="0.00078576"
+        iyz="0.00000000"
+        izz="0.00057618"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -103,9 +119,15 @@
   </transmission>
   <link name="zarm_l3_link">
     <inertial>
-      <origin xyz="-0.00006747 -0.01016408 -0.15041767" rpy="0 0 0" />
-      <mass value="1.46578996" />
-      <inertia ixx="0.00696550" ixy="0.00000046" ixz="0.00000200" iyy="0.00656301" iyz="-0.00085646" izz="0.00135717" />
+      <origin xyz="-0.00007730 -0.00993640 -0.15083251" rpy="0 0 0" />
+      <mass value="1.51660000"/>
+      <inertia
+        ixx="0.00716993"
+        ixy="0.00000142"
+        ixz="0.00000316"
+        iyy="0.00677305"
+        iyz="-0.00085824"
+        izz="0.00141913"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -131,9 +153,15 @@
   </transmission>
   <link name="zarm_l4_link">
     <inertial>
-      <origin xyz="-0.00081309 -0.01331683 -0.08985563" rpy="0 0 0" />
-      <mass value="0.42136972" />
-      <inertia ixx="0.00335991" ixy="0.00000193" ixz="0.00001686" iyy="0.00315848" iyz="0.00008493" izz="0.00049447" />
+      <origin xyz="-0.00104921 -0.00289774 -0.05095618" rpy="0 0 0"/>
+      <mass value="0.34500000"/>
+      <inertia
+        ixx="0.00124963"
+        ixy="0.00000224"
+        ixz="0.00000372"
+        iyy="0.00103949"
+        iyz="0.00004727"
+        izz="0.00047814"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -146,7 +174,7 @@
     </visual>
   </link>
   <joint name="zarm_l4_joint" type="revolute">
-    <origin xyz="0 0.0 -0.20533" rpy="0 0 0" />
+    <origin xyz="0 0 -0.2085" rpy="0 0 0" />
     <parent link="zarm_l3_link" />
     <child link="zarm_l4_link" />
     <axis xyz="0 1 0" />
@@ -157,6 +185,36 @@
     <joint name="zarm_l4_joint" />
     <actuator name="zarm_l4_joint_motor" />
   </transmission>
+  <link name="l_handball">
+    <inertial>
+      <!-- Y坐标取反（但原始值为0，所以不变） -->
+      <origin xyz="0 0 -0.08819581" rpy="0 0 0"/>
+      <mass value="0.17660000"/>
+      <inertia
+        ixx="0.00046676"
+        ixy="0.00000000"
+        ixz="0.00000000"
+        iyy="0.00046683"
+        iyz="0.00000000"
+        izz="0.00008009"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://biped_s17/meshes/l_handball.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+
+  <!-- Joint connecting zarm_l4_link to l_handball -->
+  <joint name="l_handball_joint" type="fixed">
+    <origin xyz="0 0 -0.085236" rpy="0 0 0"/>
+    <parent link="zarm_l4_link"/>
+    <child link="l_handball"/>
+  </joint>
   <link name="zarm_l7_end_effector">
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0" />
@@ -172,9 +230,15 @@
   </joint>
   <link name="zarm_r1_link">
     <inertial>
-      <origin xyz="0.01852427 0.00307832 -0.00006089" rpy="0 0 0" />
-      <mass value="0.80328906" />
-      <inertia ixx="0.00065573" ixy="0.00004427" ixz="-0.00000010" iyy="0.00082825" iyz="0.00000114" izz="0.00093564" />
+      <origin xyz="0.01773604 0.00289047 -0.00006872" rpy="0 0 0"/>
+      <mass value="0.84760000"/>
+      <inertia
+        ixx="0.00073101"
+        ixy="0.00004199"
+        ixz="-0.00000127"
+        iyy="0.00088866"
+        iyz="0.00000149"
+        izz="0.00101122"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -187,7 +251,7 @@
     </visual>
   </link>
   <joint name="zarm_r1_joint" type="revolute">
-    <origin xyz="0.0 -0.18100293 0.23992606" rpy="0 0 0" />
+    <origin xyz="0 -0.181 0.23843" rpy="0 0 0" />
     <parent link="torso" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
@@ -200,9 +264,15 @@
   </transmission>
   <link name="zarm_r2_link">
     <inertial>
-      <origin xyz="0.00217668 -0.00574680 -0.03258678" rpy="0 0 0" />
-      <mass value="0.32360735" />
-      <inertia ixx="0.00046909" ixy="0.0" ixz="-0.00002559" iyy="0.00068110" iyz="0.0" izz="0.00049735" />
+      <origin xyz="0.00199256 0.00000000 -0.03214647" rpy="0 0 0"/>
+      <mass value="0.36680000"/>
+      <inertia
+        ixx="0.00053752"
+        ixy="-0.00000001"
+        ixz="-0.00002375"
+        iyy="0.00078576"
+        iyz="0.00000000"
+        izz="0.00057618"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -228,9 +298,15 @@
   </transmission>
   <link name="zarm_r3_link">
     <inertial>
-      <origin xyz="-0.00006747 0.01016408 -0.15041767" rpy="0 0 0" />
-      <mass value="1.46578996" />
-      <inertia ixx="0.00696550" ixy="-0.00000046" ixz="0.00000200" iyy="0.00656301" iyz="0.00085646" izz="0.00135717" />
+      <origin xyz="-0.00007730 0.00993640 -0.15083251" rpy="0 0 0"/>
+      <mass value="1.51660000"/>
+      <inertia
+        ixx="0.00716993"
+        ixy="-0.00000142"
+        ixz="0.00000316"
+        iyy="0.00677305"
+        iyz="0.00085824"
+        izz="0.00141913"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -256,9 +332,15 @@
   </transmission>
   <link name="zarm_r4_link">
     <inertial>
-      <origin xyz="-0.00081309 0.01331683 -0.08985563" rpy="0 0 0" />
-      <mass value="0.42136972" />
-      <inertia ixx="0.00335991" ixy="-0.00000193" ixz="0.00001686" iyy="0.00315848" iyz="-0.00008493" izz="0.00049447" />
+      <origin xyz="-0.00104921 0.00289774 -0.05095618" rpy="0 0 0"/>
+      <mass value="0.34500000"/>
+      <inertia
+        ixx="0.00124963"
+        ixy="-0.00000224"
+        ixz="0.00000372"
+        iyy="0.00103949"
+        iyz="-0.00004727"
+        izz="0.00047814"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -271,7 +353,7 @@
     </visual>
   </link>
   <joint name="zarm_r4_joint" type="revolute">
-    <origin xyz="0 -0.0 -0.20533" rpy="0 0 0" />
+    <origin xyz="0 0 -0.2085" rpy="0 0 0"/>
     <parent link="zarm_r3_link" />
     <child link="zarm_r4_link" />
     <axis xyz="0 1 0" />
@@ -282,6 +364,36 @@
     <joint name="zarm_r4_joint" />
     <actuator name="zarm_r4_joint_motor" />
   </transmission>
+  <!-- r_handball link with updated inertial properties -->
+  <link name="r_handball">
+    <inertial>
+      <origin xyz="0 0 -0.08819581" rpy="0 0 0"/>
+      <mass value="0.17660000"/>
+      <inertia
+        ixx="0.00046676"
+        ixy="0.00000000"
+        ixz="0.00000000"
+        iyy="0.00046683"
+        iyz="0.00000000"
+        izz="0.00008009"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://biped_s17/meshes/r_handball.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+
+  <!-- Joint connecting r_forearm to r_handball -->
+  <joint name="r_handball_joint" type="fixed">
+    <origin xyz="0 0 -0.085236" rpy="0 0 0"/>
+    <parent link="zarm_r4_link"/>
+    <child link="r_handball"/>
+  </joint>
   <link name="zarm_r7_end_effector">
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0" />
