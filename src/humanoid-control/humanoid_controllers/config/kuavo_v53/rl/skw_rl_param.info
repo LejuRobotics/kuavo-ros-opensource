@@ -18,7 +18,7 @@ use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使�
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 
-networkModelFile          /ampjzx250311_5_7.onnx; 
+networkModelFile          /ampjzx250313_5.onnx; 
 commandData 
 {
     inital
@@ -49,7 +49,7 @@ velocityLimits
 {
     ; 定义速度命令的限制（简化为单一上限，X 负向通过单独的缩放系数实现不对称限制）
     ; 格式：[linear_x, linear_y, linear_z, angular_z] （正向和负向使用相同的上限）
-    (0,0)  0.5      ; cmdVelLineX limit (positive)
+    (0,0)  0.55      ; cmdVelLineX limit (positive)
     (1,0)  0.3       ; cmdVelLineY limit (positive and negative)
     (2,0)  0.3       ; cmdVelLineZ limit (positive and negative)
     (3,0)  0.3       ; cmdVelAngularZ limit (positive and negative)
@@ -118,8 +118,8 @@ mixedMotionLimits
 }
 
 ; ==================== 站立切换到行走时的支撑腿髋关节roll偏置配置 ====================
-stanceToWalkHipRollBias      0.8     ; 初始偏置值（弧度）
-stanceToWalkBiasDuration     0.2     ; 偏置衰减时间（秒）
+stanceToWalkHipRollBias      0.0     ; 初始偏置值（弧度）
+stanceToWalkBiasDuration     0.0     ; 偏置衰减时间（秒）
 
 ; ==================== 外部接管手臂轨迹速度限制配置====================
 armVelocityLimit
