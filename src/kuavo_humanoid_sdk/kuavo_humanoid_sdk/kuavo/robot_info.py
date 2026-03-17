@@ -17,6 +17,11 @@ class KuavoRobotInfo(RobotInfoBase):
             
         self._robot_version = kuavo_ros_param['robot_version']
         self._robot_version_major = (int(self._robot_version) // 10) % 10
+        
+        # 当版本号十位为 1 时，robot_type 为 roban
+        if self._robot_version_major == 1:
+            self._robot_type = "roban"
+        
         self._end_effector_type = kuavo_ros_param['end_effector_type']
         self._arm_joint_dof = kuavo_ros_param['arm_dof']
         self._leg_joint_dof = kuavo_ros_param['leg_dof']
