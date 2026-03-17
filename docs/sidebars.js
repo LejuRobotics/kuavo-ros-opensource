@@ -47,10 +47,10 @@ const sidebars = {
           type: 'category',
           label: '轮臂产品',
           items: [
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/轮臂产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W_进阶版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W_MaxA版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/KUAVO_5-W_MaxB版产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/Kuavo 5-W 轮臂产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/Kuavo 5-W MAX A版产品介绍',
+            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/Kuavo 5-W MAX B版产品介绍',
           ],
         },
       ],
@@ -62,16 +62,10 @@ const sidebars = {
         'basic_usage/kuavo-ros-control/docs/2快速开始/快速开始',
         {
           type: 'category',
-          label: '5w轮臂手柄控制说明文档',
+          label: 'Kuavo 5-W 操作说明',
           items: [
-            'basic_usage/kuavo-ros-control/docs/2快速开始/5w轮臂手柄控制说明文档/轮臂手柄控制说明',
-          ],
-        },
-        {
-          type: 'category',
-          label: 'VR操作',
-          items: [
-            'basic_usage/kuavo-ros-control/docs/2快速开始/VR操作/5w_VR操作',
+            'basic_usage/kuavo-ros-control/docs/2快速开始/轮臂手柄控制说明文档/Kuavo 5-W 手柄控制说明',
+            'basic_usage/kuavo-ros-control/docs/2快速开始/VR操作/Kuavo 5-W VR操作',
           ],
         },
       ],
@@ -85,10 +79,16 @@ const sidebars = {
         'basic_usage/kuavo-ros-control/docs/3调试教程/启动前准备',
         'basic_usage/kuavo-ros-control/docs/3调试教程/机器人关节标定',
         'basic_usage/kuavo-ros-control/docs/3调试教程/上肢控制模式',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/5w_启动前准备',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/5w_辨识手臂和头部电机方向',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/5w_全身零点标定',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/kuavo5-w 快速调试',
+        {
+          type: 'category',
+          label: 'Kuavo 5-W 调试教程',
+          items: [
+            'basic_usage/kuavo-ros-control/docs/3调试教程/Kuavo 5-W 快速调试',
+            'basic_usage/kuavo-ros-control/docs/3调试教程/Kuavo 5-W 启动前准备',
+            'basic_usage/kuavo-ros-control/docs/3调试教程/Kuavo 5-W 辨识手臂和头部电机方向',
+            'basic_usage/kuavo-ros-control/docs/3调试教程/Kuavo 5-W 全身零点标定',
+          ],
+        },
       ],
     },
     {
@@ -100,7 +100,7 @@ const sidebars = {
         'basic_usage/kuavo-ros-control/docs/4开发接口/接口使用文档',
         'basic_usage/kuavo-ros-control/docs/4开发接口/ROS2接口使用文档',
         'basic_usage/kuavo-ros-control/docs/4开发接口/手臂防碰撞功能使用文档',
-        'basic_usage/kuavo-ros-control/docs/4开发接口/5w接口使用文档',
+        'basic_usage/kuavo-ros-control/docs/4开发接口/Kuavo 5-W 接口使用文档',
         {
           type: 'category',
           label: 'PythonSDK使用文档',
@@ -195,9 +195,15 @@ const sidebars = {
             'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/扭腰搬箱子案例',
             'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/豆包大模型交互案例',
             'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/基于il的物料分拣案例',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Kuavo 5-W 案例',
+          items: [
             {  
               type: 'category',
-              label: '轮臂案例',
+              label: 'Kuavo 5-W 轮臂案例',
               items: [
                 'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/轮臂案例/基础使用',
               ],
@@ -216,9 +222,9 @@ const sidebars = {
             },
             {
               type: 'category',
-              label: '5w轮臂数据采集案例',
+              label: 'Kuavo 5-W 轮臂数据采集案例',
               items: [
-                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/5w轮臂数据采集案例/拆垛案例',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/Kuavo 5-W 轮臂数据采集案例/拆垛案例',
               ],
             },
           ],

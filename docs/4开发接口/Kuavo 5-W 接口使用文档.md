@@ -1,6 +1,6 @@
 # 轮臂控制API
 
-本文档详细介绍了 Kuavo 机器人轮式基座和机械臂控制的 ROS 话题和服务接口。开发者可以通过这些接口实现对机器人各个部位的精确控制，以及分析指令的时间可达性和控制效果
+本文档详细介绍了 Kuavo 5-W 机器人轮式基座和机械臂控制的 ROS 话题和服务接口。开发者可以通过这些接口实现对机器人各个部位的精确控制，以及分析指令的时间可达性和控制效果
 
 ## 目录
 
@@ -25,13 +25,13 @@ src/demo/test_kuavo_wheel_real 包含实物测试案例，可供参考
 #### 底盘接口
 
 - [/cmd_vel -本体坐标系速度控制](#1-cmd_vel---本体坐标系速度控制)
-- [/cmd_vel_world - 世界坐标系速度控制](#2-cmd_vel_world - 世界坐标系速度控制)
-- [/cmd_pose - 本体坐标系位置控制](#3-/cmd_pose - 本体坐标系位置控制)
-- [/cmd_pose_world - 世界坐标系位置控制（位置话题）](#4-/cmd_pose_world - 世界坐标系位置控制)
+- [/cmd_vel_world -世界坐标系速度控制](#2-cmd_vel_world---世界坐标系速度控制)
+- [/cmd_pose -本体坐标系位置控制](#3-cmd_pose---本体坐标系位置控制)
+- [/cmd_pose_world -世界坐标系位置控制（位置话题）](#4-cmd_pose_world---世界坐标系位置控制)
 
 #### 下肢控制接口
 
-- [/lb_leg_traj - 腿部关节控制](#5-/lb_leg_traj - 腿部关节控制)
+- [/lb_leg_traj - 腿部关节控制](#5-lb_leg_traj---腿部关节控制)
 - [/cmd_lb_torso_pose - 躯干相对基座的位姿控制](#6-cmd_lb_torso_pose---躯干相对基座的位姿控制)
 
 #### 上肢控制接口
@@ -51,27 +51,28 @@ src/demo/test_kuavo_wheel_real 包含实物测试案例，可供参考
 
 #### 轮臂MPC当前模式反馈
 
-- [/mobile_manipulator/lb_mpc_control_mode - 轮臂MPC当前的控制模式反馈](#6-mobile_manipulatorlb_mpc_control_mode---轮臂MPC当前的控制模式反馈)
+- [/mobile_manipulator/lb_mpc_control_mode - 轮臂MPC当前的控制模式反馈](#6-mobile_manipulatorlb_mpc_control_mode---轮臂mpc当前的控制模式反馈)
 
 #### MPC调试信息反馈(存入bag)
 
-- [/mobile_manipulator/currentMpcTarget/state - 轮臂MPC当前时刻的cost期望state](#7-mobile_manipulatorcurrentMpcTargetstate---轮臂MPC当前时刻的cost期望state)
-- [/mobile_manipulator/currentMpcTarget/input - 轮臂MPC当前时刻的cost期望input](#8-mobile_manipulatorcurrentMpcTargetinput---轮臂MPC当前时刻的cost期望input)
-- [/mobile_manipulator/torso_target_6D - 轮臂MPC当前时刻的躯干笛卡尔期望](#9-mobile_manipulatortorso_target_6D---轮臂MPC当前时刻的躯干笛卡尔期望)
-- [/mobile_manipulator/ee_target_6D/point - 轮臂MPC当前时刻的手臂末端笛卡尔期望](#10-mobile_manipulatoree_target_6Dpoint---轮臂MPC当前时刻的手臂末端笛卡尔期望)
+- [/mobile_manipulator/currentMpcTarget/state - 轮臂MPC当前时刻的cost期望state](#7-mobile_manipulatorcurrentmpctargetstate---轮臂mpc当前时刻的cost期望state)
+- [/mobile_manipulator/currentMpcTarget/input - 轮臂MPC当前时刻的cost期望input](#8-mobile_manipulatorcurrentmpctargetinput---轮臂mpc当前时刻的cost期望input)
+- [/mobile_manipulator/torso_target_6D - 轮臂MPC当前时刻的躯干笛卡尔期望](#9-mobile_manipulatortorso_target_6d---轮臂mpc当前时刻的躯干笛卡尔期望)
+- [/mobile_manipulator/ee_target_6D/point - 轮臂MPC当前时刻的手臂末端笛卡尔期望](#10-mobile_manipulatoree_target_6dpoint---轮臂mpc当前时刻的手臂末端笛卡尔期望)
 
 #### 控制器调试信息反馈(存入bag)
 
 - [/mobile_manipulator_wbc_observation - 机器人收到的原生传感器数据](#11-mobile_manipulator_wbc_observation---机器人收到的原生传感器数据)
-- [/mobile_manipulator_mpc_observation - 输入到轮臂MPC的原生传感器数据经过滤波](#12-mobile_manipulator_mpc_observation---输入到轮臂MPC的原生传感器数据经过滤波)
-- [/humanoid_wheel/optimizedState_mrt - MPC输出的原生MRT的state期望](#13-humanoid_wheeloptimizedState_mrt---MPC输出的原生MRT的state期望)
-- [/humanoid_wheel/optimizedInput_mrt - MPC输出的原生MRT的input期望](#14-humanoid_wheeloptimizedInput_mrt---MPC输出的原生MRT的input期望)
-- [/humanoid_wheel/optimizedState_mrt_kinemicLimit - 经过运动学限制滤波的MRT的state期望](#15-humanoid_wheeloptimizedState_mrt_kinemicLimit---经过运动学限制滤波的MRT的state期望)
-- [/humanoid_wheel/optimizedInput_mrt_kinemicLimit - 经过运动学限制滤波的MRT的input期望](#16-humanoid_wheeloptimizedInput_mrt_kinemicLimit---经过运动学限制滤波的MRT的input期望)
-- [/humanoid_wheel/bodyAcc - WBC求解的底盘的加速度](#17-humanoid_wheelbodyAcc---WBC求解的底盘的加速度)
-- [/humanoid_wheel/jointAcc - WBC求解的关节加速度包括下肢上肢](#18-humanoid_wheeljointAcc---WBC求解的关节加速度包括下肢上肢)
-- [/humanoid_wheel/torque - WBC求解的关节扭矩包括下肢上肢](#19-humanoid_wheeltorque---WBC求解的关节扭矩包括下肢上肢)
-- [/humanoid_wheel/eePoses - 双臂末端的世界坐标系6D位姿](#20-humanoid_wheeleePoses---双臂末端的世界坐标系6D位姿)
+- [/mobile_manipulator_mpc_observation - 输入到轮臂MPC的原生传感器数据经过滤波](#12-mobile_manipulator_mpc_observation---输入到轮臂mpc的原生传感器数据经过滤波)
+)
+- [/humanoid_wheel/optimizedState_mrt - MPC输出的原生MRT的state期望](#13-humanoid_wheeloptimizedstate_mrt---mpc输出的原生mrt的state期望)
+- [/humanoid_wheel/optimizedInput_mrt - MPC输出的原生MRT的input期望](#14-humanoid_wheeloptimizedinput_mrt---mpc输出的原生mrt的input期望)
+- [/humanoid_wheel/optimizedState_mrt_kinemicLimit - 经过运动学限制滤波的MRT的state期望](#15-humanoid_wheeloptimizedstate_mrt_kinemiclimit---经过运动学限制滤波的mrt的state期望)
+- [/humanoid_wheel/optimizedInput_mrt_kinemicLimit - 经过运动学限制滤波的MRT的input期望](#16-humanoid_wheeloptimizedinput_mrt_kinemiclimit---经过运动学限制滤波的mrt的input期望)
+- [/humanoid_wheel/bodyAcc - WBC求解的底盘的加速度](#17-humanoid_wheelbodyacc---wbc求解的底盘的加速度)
+- [/humanoid_wheel/jointAcc - WBC求解的关节加速度包括下肢上肢](#18-humanoid_wheeljointacc---wbc求解的关节加速度包括下肢上肢)
+- [/humanoid_wheel/torque - WBC求解的关节扭矩包括下肢上肢](#19-humanoid_wheeltorque---wbc求解的关节扭矩包括下肢上肢)
+- [/humanoid_wheel/eePoses - 双臂末端的世界坐标系6D位姿](#20-humanoid_wheeleeposes---双臂末端的世界坐标系6d位姿)
 
 ### 调用服务 (Called Services)
 
