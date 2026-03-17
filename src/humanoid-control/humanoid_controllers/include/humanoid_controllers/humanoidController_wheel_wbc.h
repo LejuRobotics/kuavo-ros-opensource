@@ -97,6 +97,7 @@ namespace humanoidController_wheel_wbc
     bool handleWaistIkService(kuavo_msgs::lbBaseLinkPoseCmdSrv::Request &req, kuavo_msgs::lbBaseLinkPoseCmdSrv::Response &res);
     bool enableLbArmQuickModeCallback(kuavo_msgs::changeLbQuickModeSrv::Request &req, 
                                       kuavo_msgs::changeLbQuickModeSrv::Response &res);
+    bool enableVelControlCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
     bool changeLbObsUpdateModeCallback(kuavo_msgs::changeLbMpcObsUpdateModeSrv::Request &req, 
                                       kuavo_msgs::changeLbMpcObsUpdateModeSrv::Response &res);
 
@@ -148,6 +149,7 @@ namespace humanoidController_wheel_wbc
     
     // 发布者
     ros::Publisher cmdVelPub_;
+    ros::Publisher velControlStatePub_;
     ros::Publisher jointCmdPub_;
     ros::Publisher waistYawKinematicPublisher_;  // waist_yaw_link运动学计算位置发布器
     ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
@@ -186,6 +188,8 @@ namespace humanoidController_wheel_wbc
     bool use_vr_control_{false};  // 是否启用VR控制
     bool prev_whole_torso_ctrl_{false};  // 上一次的全身控制模式状态
     ros::ServiceClient mpc_control_client_;  // MPC模式切换服务客户端
+    ros::ServiceClient reset_cmd_vel_ruckig_client_;  // 重置cmdVel Ruckig规划器服务客户端
+    std_srvs::SetBool reset_cmd_vel_ruckig_srv_;  // 重置cmdVel Ruckig规划器服务请求
 
     // ========== 平滑过渡相关 ==========
     bool is_transitioning_{false};  // 是否正在过渡
@@ -204,6 +208,10 @@ namespace humanoidController_wheel_wbc
     // ========== 手臂轨迹控制 ==========
     bool use_arm_trajectory_control_{false};  // 是否使用轨迹控制
     int8_t quickMode_{0};  // 全身快速模式类型: 0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
+    bool use_vel_control_{true};  // 是否使用速度控制
+    bool prev_use_vel_control_{true};  // 上一次的速度控制状态，用于检测模式切换
+    ros::Time last_reset_cmd_vel_ruckig_time_;  // 上次重置cmdVel Ruckig规划器的时间
+    static constexpr double RESET_CMD_VEL_RUCKIG_INTERVAL = 0.5;  // 重置规划器的最小时间间隔
     int arm_trajectory_mode_{-1};  // 轨迹控制模式
     int prev_arm_trajectory_mode_{0};  // 上一次的轨迹控制模式
     bool isArmControlModeChanged_{false};  // 是否需要处理模式切换

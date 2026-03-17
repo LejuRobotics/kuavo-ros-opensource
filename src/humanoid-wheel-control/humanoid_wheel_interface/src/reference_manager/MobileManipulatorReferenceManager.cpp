@@ -256,6 +256,7 @@ namespace mobile_manipulator {
   , torsoTargetTrajectories_(TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)}))
   , eeTargetTrajectories_{TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)}), 
                           TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)})}
+  , currentActualState_(vector_t::Zero(info_.stateDim))
   {
 
     loadParamFromTaskFile();  // 加载配置参数
@@ -570,6 +571,8 @@ namespace mobile_manipulator {
                                                            &MobileManipulatorReferenceManager::armControlModeSrvCallback, this);
     get_arm_control_mode_service_ = nodeHandle_.advertiseService("/humanoid_get_arm_ctrl_mode", 
                                                            &MobileManipulatorReferenceManager::getArmControlModeCallback, this);
+    resetCmdVelRuckigServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_reset_cmd_vel_ruckig",
+                                                           &MobileManipulatorReferenceManager::resetCmdVelRuckigService, this);
     // 设置各 ruckigPlanner 的参数的服务
     setRuckigPlannerParamsServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_set_ruckig_planner_params", 
                                                            &MobileManipulatorReferenceManager::setRuckigPlannerParamsService, this);
@@ -593,6 +596,12 @@ namespace mobile_manipulator {
     // 设置重置躯干指令
     resetTorsoStatusServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_reset_torso", 
                                                            &MobileManipulatorReferenceManager::setLbResetTorsoService, this);
+    // 订阅速度控制状态
+    vel_control_state_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
+      "/enable_vel_control_state", 1,
+      [this](const std_msgs::Bool::ConstPtr& msg) {
+        use_vel_control_.store(msg->data, std::memory_order_release);
+      });
 
 
     auto targetVelocityCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
@@ -1058,12 +1067,22 @@ namespace mobile_manipulator {
   void MobileManipulatorReferenceManager::modifyReferences(scalar_t initTime, scalar_t finalTime, const vector_t& initState, TargetTrajectories& targetTrajectories,
                                 ModeSchedule& modeSchedule)
   {
+    // 更新当前实际机器人状态
+    {
+      std::lock_guard<std::mutex> lock(currentActualState_mtx_);
+      currentActualState_ = initState;
+    }
+
     // 更新形参作为全局变量
     initTime_ = initTime;
     finalTime_ = finalTime;
     initState_ = initState;
-    // 底盘状态采用期望, 避免模式切换时滑动
-    initState_.head(baseDim_) = stateInputTargetTrajectories_.getDesiredState(initTime).head(baseDim_); 
+
+    if (use_vel_control_.load(std::memory_order_acquire))
+    {
+      // 底盘状态采用期望, 避免模式切换时滑动
+      initState_.head(baseDim_) = stateInputTargetTrajectories_.getDesiredState(initTime).head(baseDim_);
+    }
     
     /************************************ 更新状态差分 **************************************/
     Eigen::VectorXd dState, ddState;
@@ -1550,6 +1569,25 @@ namespace mobile_manipulator {
     }
   }
 
+  void MobileManipulatorReferenceManager::resetCmdPoseRuckigFromActualState(double initTime, const vector_t& initState, bool rePlanning)
+  {
+    // 使用 initState 的当前位置
+    prevTargetPose_ = initState.head(baseDim_);
+    prevTargetVel_.setZero(baseDim_);
+    prevTargetAcc_.setZero(baseDim_);
+
+    if(rePlanning)
+    {
+      plannerInitialTime_ = initTime;
+      cmdPosePlannerRuckigPtr_->setCurrentPose(prevTargetPose_);
+      cmdPosePlannerRuckigPtr_->setCurrentVelocity(prevTargetVel_);
+      cmdPosePlannerRuckigPtr_->setCurrentAcceleration(prevTargetAcc_);
+
+      cmdPosePlannerRuckigPtr_->setTargetPose(prevTargetPose_);
+      double durationTime = cmdPosePlannerRuckigPtr_->calcTrajectory();
+    }
+  }
+
   void MobileManipulatorReferenceManager::calcRuckigTrajWithCmdVel(double initTime, const vector_t &targetBaseVel)
   {
     assert(targetBasePose.size() == baseDim_ && "cmdPose dimension must be baseDim_!");
@@ -1790,6 +1828,26 @@ namespace mobile_manipulator {
     }
   }
 
+  void MobileManipulatorReferenceManager::resetCmdVelRuckigFromActualState(double initTime, const vector_t& initState, bool rePlanning)
+  {
+
+    // 使用 initState 重置速度规划
+    cmdVel_prevTargetPose_ = initState.head(baseDim_);
+    cmdVel_prevTargetVel_.setZero(baseDim_);
+    cmdVel_prevTargetAcc_.setZero(baseDim_);
+
+    if(rePlanning)
+    {
+      cmdVel_plannerInitialTime_ = initTime;
+      cmdVelPlannerRuckigPtr_->setCurrentPose(cmdVel_prevTargetPose_);
+      cmdVelPlannerRuckigPtr_->setCurrentVelocity(cmdVel_prevTargetVel_);
+      cmdVelPlannerRuckigPtr_->setCurrentAcceleration(cmdVel_prevTargetAcc_);
+      cmdVelPlannerRuckigPtr_->setTargetVelocity(cmdVel_prevTargetVel_);
+
+      cmdVelPlannerRuckigPtr_->calcTrajectory();
+    }
+  }
+
   void MobileManipulatorReferenceManager::calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime)
   {
     assert(targetLegJoint.size() == 4 && "armJoint dimension must be 4!");
@@ -1992,6 +2050,64 @@ namespace mobile_manipulator {
 
     return true;
   }
+
+  bool MobileManipulatorReferenceManager::resetCmdVelRuckigService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res)
+  {
+    // 使用当前时间进行重置
+    double initTime = ros::Time::now().toSec();
+
+    // 获取当前实际机器人状态
+    vector_t initState;
+    {
+      std::lock_guard<std::mutex> lock(currentActualState_mtx_);
+      if(currentActualState_.size() == info_.stateDim)
+      {
+        initState = currentActualState_;
+      }
+      else
+      {
+        // 如果还没有实际状态，使用轨迹中的位置作为后备
+        initState = stateInputTargetTrajectories_.getDesiredState(initTime);
+        ROS_WARN_STREAM("[resetCmdVelRuckigService] Using trajectory state as fallback, actual state not available yet");
+      }
+    }
+
+    // 清空指令和标志位
+    {
+      cmdvel_mtx_.lock();
+      cmdVel_.setZero();
+      isCmdVelUpdated_ = false;
+      cmdvel_mtx_.unlock();
+
+      cmdvelWorld_mtx_.lock();
+      cmdVelWorld_.setZero();
+      isCmdVelWorldUpdated_ = false;
+      cmdvelWorld_mtx_.unlock();
+    }
+
+    // 清空指令和标志位
+    {
+      cmdPose_mtx_.lock();
+      isCmdPoseUpdated_ = false;
+      cmdPose_mtx_.unlock();
+
+      cmdPoseWorld_mtx_.lock();
+      isCmdPoseWorldUpdated_ = false;
+      cmdPoseWorld_mtx_.unlock();
+    }
+
+    // 重置位置规划器
+    resetCmdPoseRuckigFromActualState(initTime, initState, req.data);
+
+    // 重置速度规划器
+    resetCmdVelRuckigFromActualState(initTime, initState, req.data);
+
+    res.success = true;
+    res.message = "Successfully reset cmdVel and cmdPose Ruckig planners using current position. All commands cleared. Robot will stop moving. re_planning=" + std::string(req.data ? "true" : "false");
+
+    return true;
+  }
+
 
   bool MobileManipulatorReferenceManager::getArmControlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
   {

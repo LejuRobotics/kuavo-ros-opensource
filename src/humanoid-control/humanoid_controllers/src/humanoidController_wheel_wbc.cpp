@@ -239,9 +239,17 @@ namespace humanoidController_wheel_wbc
 
     // 初始化发布者
     cmdVelPub_ = controllerNh_.advertise<geometry_msgs::Twist>("/move_base/base_cmd_vel", 10, true);
+    velControlStatePub_ = controllerNh_.advertise<std_msgs::Bool>("/enable_vel_control_state", 1, true);
     jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
+
+    // 发布初始速度控制开关状态
+    {
+      std_msgs::Bool msg;
+      msg.data = use_vel_control_;
+      velControlStatePub_.publish(msg);
+    }
 
     // 创建控制数据管理器（替代所有订阅者和服务）
     vector_t leg_initial_state = optimizedState_mrt_.tail(manipulatorModelInfo_.armDim).head(lowJointNum_);
@@ -303,6 +311,11 @@ namespace humanoidController_wheel_wbc
       }
     }
     
+    // 初始化重置cmdVel Ruckig规划器服务客户端
+    reset_cmd_vel_ruckig_client_ = controllerNh_.serviceClient<std_srvs::SetBool>("/mobile_manipulator_reset_cmd_vel_ruckig");
+    reset_cmd_vel_ruckig_srv_.request.data = true;  // 重新规划
+    last_reset_cmd_vel_ruckig_time_ = ros::Time::now();  // 初始化重置时间
+
     return true;
   }
 
@@ -350,8 +363,33 @@ namespace humanoidController_wheel_wbc
             return changeLbObsUpdateModeCallback(req, res); 
         }
     );
-    
+
+    control_data_manager_->registerService<std_srvs::SetBool>(
+      "/enable_vel_control",
+      [this](auto& req, auto& res) {
+          return enableVelControlCallback(req, res);
+      }
+  );
+
     ROS_INFO("[humanoidControllerWheelWbc] All ROS services registered through ControlDataManager");
+  }
+
+  bool humanoidControllerWheelWbc::enableVelControlCallback(std_srvs::SetBool::Request &req,
+                                                            std_srvs::SetBool::Response &res)
+  {
+    std::cout << "[vel_control] 速度控制切换请求: " << (req.data ? "启用" : "禁用") << std::endl;
+    use_vel_control_ = req.data;
+
+    // 发布速度控制状态
+    {
+      std_msgs::Bool msg;
+      msg.data = use_vel_control_;
+      velControlStatePub_.publish(msg);
+    }
+
+    res.success = true;
+    res.message = "success change vel control to " + std::to_string(req.data);
+    return true;
   }
 
   bool humanoidControllerWheelWbc::starting(const ros::Time &time)
@@ -473,6 +511,7 @@ namespace humanoidController_wheel_wbc
                                                     {initTarget}, 
                                                     {observation_wheel_.input});
       mrtRosInterface_->resetMpcNode(target_trajectories);
+
       reset_mpc_ = false;
       std::cout << "reset MPC node at " << observation_wheel_.time << "\n";
 
@@ -708,8 +747,47 @@ namespace humanoidController_wheel_wbc
       velCmdMsg.linear.y = desiredVelBody[1];
       velCmdMsg.angular.z = desiredVelBody[2];
     }
-    
-    cmdVelPub_.publish(velCmdMsg);
+    if(use_vel_control_)
+    {
+      cmdVelPub_.publish(velCmdMsg);
+    }else{
+        ros::Time current_time = ros::Time::now();
+        bool should_reset = false;
+
+        // 立即重置
+        if(prev_use_vel_control_ != use_vel_control_)
+        {
+          should_reset = true;
+          ROS_INFO("[vel_control] 检测到速度控制模式切换，重置cmdVel Ruckig规划器");
+        }
+        // 检测时间间隔：超过设定间隔时重置
+        else if((current_time - last_reset_cmd_vel_ruckig_time_).toSec() >= RESET_CMD_VEL_RUCKIG_INTERVAL)
+        {
+          should_reset = true;
+        }
+
+        if(should_reset)
+        {
+          if(reset_cmd_vel_ruckig_client_.call(reset_cmd_vel_ruckig_srv_))
+          {
+            if(reset_cmd_vel_ruckig_srv_.response.success)
+            {
+              last_reset_cmd_vel_ruckig_time_ = current_time;  // 更新重置时间
+              // ROS_INFO("[vel_control] Successfully reset cmdVel Ruckig planner: %s", reset_cmd_vel_ruckig_srv_.response.message.c_str());
+            }
+            else
+            {
+              ROS_WARN("[vel_control] Failed to reset cmdVel Ruckig planner: %s", reset_cmd_vel_ruckig_srv_.response.message.c_str());
+            }
+          }
+          else
+          {
+            ROS_WARN("[vel_control] Failed to call reset_cmd_vel_ruckig service");
+          }
+        }
+    }
+    // 更新上一次的速度控制状态
+    prev_use_vel_control_ = use_vel_control_;
     cnt++;
   }
 
