@@ -9,6 +9,7 @@
 #include <drake/systems/framework/diagram.h>
 #include <drake/systems/framework/diagram_builder.h>
 #include <kuavo_msgs/changeArmCtrlMode.h>
+#include <kuavo_msgs/Float32MultiArrayStamped.h>
 #include <kuavo_msgs/twoArmHandPose.h>
 #include <ros/package.h>
 #include <sensor_msgs/JointState.h>
@@ -1857,30 +1858,31 @@ void Quest3IkIncrementalROS::publishJointStates() {
   // 数据格式：14个float [左手pos_xyz(3), 左手quat_xyzw(4), 右手pos_xyz(3), 右手quat_xyzw(4)]
   // C++版本使用优化后的 leftEndEffectorPosition_ / rightEndEffectorPosition_ 和对应四元数
   {
-    std_msgs::Float32MultiArray inputPosMsg;
-    inputPosMsg.data.resize(14);
+    kuavo_msgs::Float32MultiArrayStamped inputPosMsg;
+    inputPosMsg.header.stamp = ros::Time::now();
+    inputPosMsg.data.data.resize(14);
 
     // 左手：优化后的末端执行器位置 + 约束列表中的四元数
-    inputPosMsg.data[0] = static_cast<float>(leftEndEffectorPosition_.x());
-    inputPosMsg.data[1] = static_cast<float>(leftEndEffectorPosition_.y());
-    inputPosMsg.data[2] = static_cast<float>(leftEndEffectorPosition_.z());
+    inputPosMsg.data.data[0] = static_cast<float>(leftEndEffectorPosition_.x());
+    inputPosMsg.data.data[1] = static_cast<float>(leftEndEffectorPosition_.y());
+    inputPosMsg.data.data[2] = static_cast<float>(leftEndEffectorPosition_.z());
     {
       std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
       Eigen::Quaterniond leftQuat(latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix);
-      inputPosMsg.data[3] = static_cast<float>(leftQuat.x());
-      inputPosMsg.data[4] = static_cast<float>(leftQuat.y());
-      inputPosMsg.data[5] = static_cast<float>(leftQuat.z());
-      inputPosMsg.data[6] = static_cast<float>(leftQuat.w());
+      inputPosMsg.data.data[3] = static_cast<float>(leftQuat.x());
+      inputPosMsg.data.data[4] = static_cast<float>(leftQuat.y());
+      inputPosMsg.data.data[5] = static_cast<float>(leftQuat.z());
+      inputPosMsg.data.data[6] = static_cast<float>(leftQuat.w());
 
       // 右手：优化后的末端执行器位置 + 约束列表中的四元数
-      inputPosMsg.data[7] = static_cast<float>(rightEndEffectorPosition_.x());
-      inputPosMsg.data[8] = static_cast<float>(rightEndEffectorPosition_.y());
-      inputPosMsg.data[9] = static_cast<float>(rightEndEffectorPosition_.z());
+      inputPosMsg.data.data[7] = static_cast<float>(rightEndEffectorPosition_.x());
+      inputPosMsg.data.data[8] = static_cast<float>(rightEndEffectorPosition_.y());
+      inputPosMsg.data.data[9] = static_cast<float>(rightEndEffectorPosition_.z());
       Eigen::Quaterniond rightQuat(latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix);
-      inputPosMsg.data[10] = static_cast<float>(rightQuat.x());
-      inputPosMsg.data[11] = static_cast<float>(rightQuat.y());
-      inputPosMsg.data[12] = static_cast<float>(rightQuat.z());
-      inputPosMsg.data[13] = static_cast<float>(rightQuat.w());
+      inputPosMsg.data.data[10] = static_cast<float>(rightQuat.x());
+      inputPosMsg.data.data[11] = static_cast<float>(rightQuat.y());
+      inputPosMsg.data.data[12] = static_cast<float>(rightQuat.z());
+      inputPosMsg.data.data[13] = static_cast<float>(rightQuat.w());
     }
 
     ikInputPosPublisher_.publish(inputPosMsg);
@@ -2341,7 +2343,7 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   rightHandPoseFromTransformerPublisher_ =
       nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_debug/right_hand_pose_from_transformer", 2);
   ikSolvedEefPosePublisher_ = nodeHandle_.advertise<kuavo_msgs::twoArmHandPose>("/ik_fk_result/eef_pose", 10);
-  ikInputPosPublisher_ = nodeHandle_.advertise<std_msgs::Float32MultiArray>("/ik_fk_result/input_pos", 10);
+  ikInputPosPublisher_ = nodeHandle_.advertise<kuavo_msgs::Float32MultiArrayStamped>("/ik_fk_result/input_pos", 10);
 
   // 初始化增量控制模块
   IncrementalControlConfig incrementalConfig;

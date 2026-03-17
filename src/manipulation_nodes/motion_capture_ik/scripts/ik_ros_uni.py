@@ -57,7 +57,15 @@ from noitom_hi5_hand_udp_python.msg import handRotationEular
 from noitom_hi5_hand_udp_python.msg import PoseInfo, PoseInfoList
 from kuavo_msgs.msg import JoySticks
 from tools.quest3_utils import Quest3ArmInfoTransformer
-from kuavo_msgs.msg import ikSolveError, handPose, robotArmQVVD, armHandPose, twoArmHandPose, twoArmHandPoseCmd
+from kuavo_msgs.msg import (
+    Float32MultiArrayStamped,
+    ikSolveError,
+    handPose,
+    robotArmQVVD,
+    armHandPose,
+    twoArmHandPose,
+    twoArmHandPoseCmd,
+)
 
 from tools.utils import get_package_path, ArmIdx, IkTypeIdx, rotation_matrix_diff_in_angle_axis, limit_value
 from tools.drake_trans import rpy_to_matrix
@@ -273,8 +281,9 @@ class IkRos:
         self.pub_ik_solved_eef_pose = rospy.Publisher(
             "/drake_ik/eef_pose", twoArmHandPose, queue_size=10
         )
+        # 带时间戳：/drake_ik/input_pos
         self.pub_ik_input_pos = rospy.Publisher(
-            "/drake_ik/input_pos", Float32MultiArray, queue_size=10
+            "/drake_ik/input_pos", Float32MultiArrayStamped, queue_size=10
         )
         self.pub_q0_tmp = rospy.Publisher(
             "/drake_ik/q0_tmp", Float32MultiArray, queue_size=10
@@ -592,7 +601,12 @@ class IkRos:
                     ik_input_data.extend(np.asarray(r_hand_quat).flatten().tolist())
                 else:
                     ik_input_data.extend([np.nan] * 7)
-                self.pub_ik_input_pos.publish(Float32MultiArray(data=np.asarray(ik_input_data, dtype=np.float32)))
+                arr = np.asarray(ik_input_data, dtype=np.float32)
+
+                input_pos_msg = Float32MultiArrayStamped()
+                input_pos_msg.header.stamp = rospy.Time.now()
+                input_pos_msg.data.data = arr.tolist()
+                self.pub_ik_input_pos.publish(input_pos_msg)
                 time_0 = time.time()
                 # 通过限制初值，避免迭代到不可解的区域
                 q0_tmp = q_last.copy()
