@@ -514,16 +514,18 @@ void Quest3IkIncrementalROS::fsmChange() {
 }
 
 void Quest3IkIncrementalROS::fsmProcess() {
+  processTorsoControlLoop();
+
   if (!incrementalController_->isIncrementalMode()) return;
 
   // latestHumanLeftElbowPos_ = quest3ArmInfoTransformerPtr_->getLeftElbowPose().position;
   // latestHumanRightElbowPos_ = quest3ArmInfoTransformerPtr_->getRightElbowPose().position;
 
-  // 【关键修复】使用专门的 transformerMutex_ 加锁保护，避免在获取时 bonePosesCallback 正在更新 Transformer
+  // 使用基类统一锁保护 Transformer 读写，避免与 bonePosesCallback 并发更新冲突
   ArmPose vrLeftPose;
   ArmPose vrRightPose;
   {
-    std::lock_guard<std::mutex> lock(transformerMutex_);
+    std::lock_guard<std::mutex> lock(transformerDataMutex_);
     vrLeftPose = quest3ArmInfoTransformerPtr_->getLeftHandPose();  // 值拷贝，不是引用
     vrRightPose = quest3ArmInfoTransformerPtr_->getRightHandPose(); // 值拷贝，不是引用
   }

@@ -28,6 +28,7 @@ void JoyStickHandler::initialize() {
   leftGrip_ = false;
   rightGrip_ = false;
   leftSecondButtonPressed_ = false;
+  leftSecondButtonTouched_ = false;
   leftFirstButtonTouched_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
@@ -78,6 +79,7 @@ void JoyStickHandler::reset() {
   leftGrip_ = false;
   rightGrip_ = false;
   leftSecondButtonPressed_ = false;
+  leftSecondButtonTouched_ = false;
   leftFirstButtonTouched_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
@@ -119,11 +121,18 @@ void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySt
   rightJoystick_[0] = msg->right_trigger;
   rightJoystick_[1] = msg->right_grip;
 
+  // 存储摇杆坐标用于腰部控制
+  leftStickX_ = msg->left_x;
+  leftStickY_ = msg->left_y;
+  rightStickX_ = msg->right_x;
+  rightStickY_ = msg->right_y;
+
   leftGrip_ = msg->left_grip > 0.75;
   rightGrip_ = msg->right_grip > 0.75;
 
   // 更新按钮状态
   leftSecondButtonPressed_ = msg->left_second_button_pressed;
+  leftSecondButtonTouched_ = msg->left_second_button_touched;
   leftFirstButtonTouched_ = msg->left_first_button_touched;
   leftFirstButtonPressed_ = msg->left_first_button_pressed;
   rightSecondButtonPressed_ = msg->right_second_button_pressed;
@@ -485,6 +494,16 @@ bool JoyStickHandler::isRightSecondButtonPressed() const {
   return rightSecondButtonPressed_;
 }
 
+bool JoyStickHandler::isLeftFirstButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return leftFirstButtonTouched_;
+}
+
+bool JoyStickHandler::isLeftSecondButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return leftSecondButtonTouched_;
+}
+
 bool JoyStickHandler::isLeftRightFirstButtonTouched() const {
   std::lock_guard<std::mutex> lock(dataMutex_);
   return leftFirstButtonTouched_ && rightFirstButtonTouched_;
@@ -546,6 +565,26 @@ void JoyStickHandler::forceSetRightArmCtrlMode(bool active) {
     // std::cout << "\033[92m[JoyStickHandler] 强制设置右手控制模式: " << (active ? "激活" : "停用")
     //           << "，已设置5秒超时保护\033[0m" << std::endl;
   }
+}
+
+double JoyStickHandler::getLeftJoyStickX() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return leftStickX_;
+}
+
+double JoyStickHandler::getLeftJoyStickY() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return leftStickY_;
+}
+
+double JoyStickHandler::getRightJoyStickX() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return rightStickX_;
+}
+
+double JoyStickHandler::getRightJoyStickY() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return rightStickY_;
 }
 
 }  // namespace HighlyDynamic

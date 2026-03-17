@@ -9,12 +9,14 @@
 
 #include "motion_capture_ik/json.hpp"
 
+#include <leju_utils/define.hpp>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Int32.h>
 #include <std_srvs/Trigger.h>
 #include <std_srvs/SetBool.h>
 #include <kuavo_msgs/lejuClawCommand.h>
 #include <kuavo_msgs/robotHandPosition.h>
+#include <kuavo_msgs/robotWaistControl.h>
 #include <kuavo_msgs/sensorsData.h>
 #include <kuavo_msgs/headBodyPose.h>
 
@@ -73,6 +75,10 @@ class ArmControlBaseROS {
   ros::Publisher lejuClawCommandPublisher_;
   ros::Publisher headBodyPosePublisher_;
   ros::Publisher kuavoArmTrajCppPublisher_;
+  ros::Publisher questJoystickDataPublisher_;
+  ros::Publisher waistMotionPublisher_;
+  ros::Publisher wholeTorsoCtrlPublisher_;
+  ros::ServiceClient vrWaistControlServiceClient_;
 
   // Atomic state variables for thread-safe operation
   std::atomic<bool> shouldStop_;
@@ -91,13 +97,46 @@ class ArmControlBaseROS {
   double thresholdArmDiffHalfUpBody_rad_;
   bool controlTorso_;
   bool enableWbcArmTrajectory_;
-  int waist_dof_;  // 腰部自由度数量（从JSON配置读取NUM_WAIST_JOINT）
+  bool torsoControlEnabled_ = false;
+  bool prevRightSecondButtonPressed_ = false;
+  int robotType_ = 2;
+  double waistYawMaxAngleDeg_ = 0.0;
+  HeadBodyPose currentHeadBodyPose_;
+  double torsoPitchZero_ = 0.0;
+  double torsoYawZero_ = 0.0;
+  double bodyHeightZero_ = 0.0;
+  double bodyXZero_ = 0.0;
+  double lastBodyYaw_ = 0.0;
+  double accumulatedYawOffset_ = 0.0;
+
+  // Robot joint dimension parameters (loaded from JSON with fallback compatibility)
+  // Sensor data structure: [Leg joints] + [Arm joints] + [Head joints]
+  //
+  // Compatibility strategy:
+  //   - Priority: Read from JSON (NUM_ARM_JOINT, NUM_HEAD_JOINT, NUM_WAIST_JOINT, NUM_JOINT)
+  //   - Fallback: If any critical field is missing or invalid, use legacy defaults:
+  //     arm=14, head=2, waist=0, total=28 (v49 layout)
+  //   - This ensures backward compatibility with old configurations while supporting new layouts
+  //
+  // Example configurations:
+  //   v49: [0-11: Legs(12)] + [12-25: Arms(14)] + [26-27: Head(2)] = 28 joints total, offset=12
+  //   v60: [0-3:  Legs(4)]  + [4-17:  Arms(14)] + [18-19: Head(2)] = 20 joints total, offset=4
+  //
+  int gripHoldCount_ = 0;
+  int numArmJoints_;         // Number of arm joints (从 JSON 中的 NUM_ARM_JOINT 加载，默认14)
+  int numHeadJoints_;        // Number of head joints (从 JSON 中的 NUM_HEAD_JOINT 加载，默认2)
+  int numWaistJoints_;       // Number of waist joints (从 JSON 中的 NUM_WAIST_JOINT 加载，默认0)
+  int numTotalJoints_;       // Total number of joints (从 JSON 中的 NUM_JOINT 加载，s49默认28，s60默认20)
+  int sensorDataArmOffset_;  // Offset to arm joints in sensor data = NUM_JOINT - NUM_HEAD_JOINT - NUM_ARM_JOINT
+                             // 即腿部关节数量 (v49为12，v60为4)
+                             // All joint_q array accesses MUST use: sensorDataArmOffset_ + i for arm joint index i
 
   std::mutex sensorDataRawMutex_;
   std::shared_ptr<kuavo_msgs::sensorsData> sensorDataRaw_;
 
   std::mutex bonePosesMutex_;
   std::mutex joystickMutex_;
+  std::mutex transformerDataMutex_;
   std::shared_ptr<noitom_hi5_hand_udp_python::PoseInfoList> latestBonePosesPtr_;
   std::unique_ptr<JoyStickHandler> joyStickHandlerPtr_;
   std::unique_ptr<Quest3ArmInfoTransformer> quest3ArmInfoTransformerPtr_;
@@ -152,6 +191,13 @@ class ArmControlBaseROS {
   void publishEndEffectorControlData();
   void publishHandPositionData();
   void publishClawCommandData();
+  void initializeTorsoControlFromReference();
+  void callVRWaistControlSrv(bool enable);
+  void controlWaist(double waistYaw);
+  void updateTorsoControl();
+  void handleTorsoControlJoystick();
+  void processAbsoluteTorsoControl(const HeadBodyPose& headBodyPose);
+  void processTorsoControlLoop();
 
   void initializeArmInfoTransformerFromJson(const nlohmann::json& configJson);
 

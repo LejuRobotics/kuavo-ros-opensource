@@ -18,6 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   kuavo_msgs
   noitom_hi5_hand_udp_python
   leju_utils
+  ocs2_core
 )
 find_package(BZip2 REQUIRED)
 
@@ -51,16 +52,12 @@ find_package(Boost REQUIRED COMPONENTS
   # fkSrv.srv
 # )
 
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-  geometry_msgs
-)
+# generate_messages already handled by kuavo_msgs
 
 catkin_package(
   INCLUDE_DIRS include
   # LIBRARIES motion_capture_ik_lib
-  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils
+  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core
   DEPENDS drake Eigen3
 )
 
@@ -101,7 +98,6 @@ include_directories(
 add_subdirectory(test)
 
 add_executable(arms_ik_node src/arms_ik_node.cpp)
-add_dependencies(arms_ik_node ${PROJECT_NAME}_generate_messages_cpp)
 if(EXISTS "${PLANT_IK_FILE}")
   target_link_libraries(arms_ik_node plantIK ${catkin_LIBRARIES} drake::drake)
 else()
@@ -151,7 +147,6 @@ add_executable(ik_ros_uni_cpp_node
   src/Quest3Debugger.cpp
   src/HandSmoother.cpp
 )
-add_dependencies(ik_ros_uni_cpp_node ${PROJECT_NAME}_generate_messages_cpp)
 target_include_directories(ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
 )

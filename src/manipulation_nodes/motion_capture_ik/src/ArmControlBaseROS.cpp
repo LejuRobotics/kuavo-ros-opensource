@@ -4,10 +4,18 @@
 #include "motion_capture_ik/JoyStickHandler.h"
 #include "motion_capture_ik/KeyFramesVisualizer.h"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
+#include "ros/console.h"
+
+#include <fstream>
+#include <ctime>
+#include <algorithm>
+#include <cmath>
+#include <ocs2_core/misc/LoadData.h>
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/lejuClawCommand.h>
 #include <kuavo_msgs/robotHandPosition.h>
+#include <kuavo_msgs/robotWaistControl.h>
 #include <kuavo_msgs/headBodyPose.h>
 #include <sensor_msgs/JointState.h>
 
@@ -26,7 +34,7 @@ ArmControlBaseROS::ArmControlBaseROS(ros::NodeHandle& nodeHandle, double publish
       maxSpeed_(0.21),
       thresholdArmDiffHalfUpBody_rad_(0.2),
       controlTorso_(false),
-      waist_dof_(0) {
+      numWaistJoints_(0) {
   ROS_INFO("[ArmControlBaseROS] Base class initialized with publishRate=%.2f, debugPrint=%s",
            publishRate_,
            debugPrint_ ? "true" : "false");
@@ -39,11 +47,11 @@ void ArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
 
   // 从JSON配置读取腰部自由度数量
   if (configJson.contains("NUM_WAIST_JOINT")) {
-    waist_dof_ = configJson["NUM_WAIST_JOINT"].get<int>();
-    ROS_INFO("✅ [ArmControlBaseROS] Set waist DOF from JSON: %d", waist_dof_);
+    numWaistJoints_ = configJson["NUM_WAIST_JOINT"].get<int>();
+    ROS_INFO("✅ [ArmControlBaseROS] Set waist DOF from JSON: %d", numWaistJoints_);
   } else {
     ROS_WARN("⚠️  [ArmControlBaseROS] 'NUM_WAIST_JOINT' field not found in JSON configuration, using default value: 0");
-    waist_dof_ = 0;
+    numWaistJoints_ = 0;
   }
 
   // Initialize service client for arm control mode
@@ -81,9 +89,15 @@ void ArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
 
   headBodyPosePublisher_ = nodeHandle_.advertise<kuavo_msgs::headBodyPose>("/kuavo_head_body_orientation_data", 10);
   kuavoArmTrajCppPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_cpp", 2);
+  questJoystickDataPublisher_ =
+      nodeHandle_.advertise<noitom_hi5_hand_udp_python::JoySticks>("/quest_joystick_data", 10);
+  waistMotionPublisher_ = nodeHandle_.advertise<kuavo_msgs::robotWaistControl>("/robot_waist_motion_data", 1);
+  wholeTorsoCtrlPublisher_ = nodeHandle_.advertise<std_msgs::Bool>("/vr_whole_torso_ctrl", 1);
+  vrWaistControlServiceClient_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid/mpc/vr_waist_control");
 
   // Load parameters from ROS parameter server
   loadParameters();
+  initializeTorsoControlFromReference();
 
   // Initialize visualization components
   initializeKeyFramesVisualizer();
@@ -166,11 +180,11 @@ bool ArmControlBaseROS::initializeArmJointsSafety() {
   }
 
   const size_t jointQSize = currentSensorData->joint_data.joint_q.size();
-  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+  const int armJointStartIndex = 12 + numWaistJoints_;  // 考虑腰部自由度
   const int numArmJoints = 14;
 
   ROS_INFO("[ArmControlBaseROS] joint_q array size: %zu, required: %d (waist_dof: %d)", 
-           jointQSize, armJointStartIndex + numArmJoints, waist_dof_);
+           jointQSize, armJointStartIndex + numArmJoints, numWaistJoints_);
 
   if (jointQSize < armJointStartIndex + numArmJoints) {
     std::string errorMsg = "joint_q array too small! Size: " + std::to_string(jointQSize) +
@@ -284,6 +298,7 @@ void ArmControlBaseROS::bonePosesCallback(const noitom_hi5_hand_udp_python::Pose
 }
 
 void ArmControlBaseROS::processBonePoses(const noitom_hi5_hand_udp_python::PoseInfoList::ConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(transformerDataMutex_);
   if (!quest3ArmInfoTransformerPtr_) return;
   if (!quest3ArmInfoTransformerPtr_->updateHandPoseAndElbowPosition(*msg, *HandPoseAndElbowPositonListPtr_)) return;
 }
@@ -309,6 +324,138 @@ void ArmControlBaseROS::updateRunningState() {
     ROS_INFO("[ArmControlBaseROS] Detected state change from stopped to running, setting armModeChanging to true");
     armModeChanging_.store(true);
   }
+}
+
+void ArmControlBaseROS::initializeTorsoControlFromReference() {
+  nodeHandle_.param("/robot_type", robotType_, 2);
+
+  std::string referenceFile;
+  nodeHandle_.getParam("/referenceFile", referenceFile);
+  std::cout << "get referenceFile: " << referenceFile << std::endl;
+  try {
+    ocs2::loadData::loadCppDataType(referenceFile, "waist_yaw_max", waistYawMaxAngleDeg_);
+  } catch (const std::exception& e) {
+    ROS_WARN_STREAM("waist_yaw_max not found, using default: " << waistYawMaxAngleDeg_);
+  }
+}
+
+void ArmControlBaseROS::callVRWaistControlSrv(bool enable) {
+  std_srvs::SetBool srv;
+  srv.request.data = enable;
+
+  if (!vrWaistControlServiceClient_.waitForExistence(ros::Duration(2.0))) {
+    ROS_WARN("VR waist control service not available, skipping call");
+    return;
+  }
+
+  if (vrWaistControlServiceClient_.call(srv)) {
+    if (srv.response.success) {
+      ROS_INFO("VRWaistControlSrv call successful: %s, response: %s",
+               enable ? "enabled" : "disabled",
+               srv.response.message.c_str());
+    } else {
+      ROS_WARN("VRWaistControlSrv returned failure: %s", srv.response.message.c_str());
+    }
+  } else {
+    ROS_ERROR("Failed to call VRWaistControlSrv");
+  }
+}
+
+void ArmControlBaseROS::controlWaist(double waistYaw) {
+  const double maxAngle = waistYawMaxAngleDeg_;
+  waistYaw = std::max(-maxAngle, std::min(waistYaw, maxAngle));
+
+  kuavo_msgs::robotWaistControl msg;
+  msg.header.stamp = ros::Time::now();
+  msg.data.data.resize(1);
+  msg.data.data[0] = waistYaw;
+  waistMotionPublisher_.publish(msg);
+}
+
+void ArmControlBaseROS::updateTorsoControl() {
+  if (numWaistJoints_ == 0 || !joyStickHandlerPtr_) return;
+
+  const float deadzone = 0.1f;
+  float rightX = static_cast<float>(joyStickHandlerPtr_->getRightJoyStickX());
+  if (std::abs(rightX) < deadzone) rightX = 0.0f;
+
+  const float targetYaw = -1.0f * rightX * static_cast<float>(waistYawMaxAngleDeg_);
+  controlWaist(targetYaw);
+}
+
+void ArmControlBaseROS::handleTorsoControlJoystick() {
+  if (!joyStickHandlerPtr_) return;
+
+  const bool leftFirstTouched = joyStickHandlerPtr_->isLeftFirstButtonTouched();
+  const bool leftSecondTouched = joyStickHandlerPtr_->isLeftSecondButtonTouched();
+  const bool rightSecondPressed = joyStickHandlerPtr_->isRightSecondButtonPressed();
+
+  if (leftFirstTouched && leftSecondTouched) {
+    const bool risingEdge = (!prevRightSecondButtonPressed_) && rightSecondPressed;
+    if (risingEdge) {
+      if (!torsoControlEnabled_ && controlTorso_) {
+        torsoControlEnabled_ = true;
+        torsoPitchZero_ = currentHeadBodyPose_.body_pitch;
+        torsoYawZero_ = currentHeadBodyPose_.body_yaw;
+        bodyHeightZero_ = currentHeadBodyPose_.body_height;
+        bodyXZero_ = currentHeadBodyPose_.body_x;
+        lastBodyYaw_ = currentHeadBodyPose_.body_yaw;
+        accumulatedYawOffset_ = 0.0;
+
+        std_msgs::Bool msg;
+        msg.data = true;
+        wholeTorsoCtrlPublisher_.publish(msg);
+        callVRWaistControlSrv(true);
+
+        ROS_INFO("[ArmControlBaseROS] Torso control enabled: yaw_zero=%.4f, pitch_zero=%.4f",
+                 torsoYawZero_,
+                 torsoPitchZero_);
+      } else {
+        torsoControlEnabled_ = false;
+        std_msgs::Bool msg;
+        msg.data = false;
+        wholeTorsoCtrlPublisher_.publish(msg);
+        callVRWaistControlSrv(false);
+        ROS_INFO("[ArmControlBaseROS] Torso control disabled");
+      }
+    }
+  }
+
+  if (leftSecondTouched && !leftFirstTouched && !torsoControlEnabled_) {
+    updateTorsoControl();
+  }
+
+  prevRightSecondButtonPressed_ = rightSecondPressed;
+}
+
+void ArmControlBaseROS::processAbsoluteTorsoControl(const HeadBodyPose& headBodyPose) {
+  currentHeadBodyPose_ = headBodyPose;
+  if (!torsoControlEnabled_ || numWaistJoints_ == 0) return;
+
+  const double currentYaw = currentHeadBodyPose_.body_yaw;
+  const double yawDiff = currentYaw - lastBodyYaw_;
+  if (yawDiff > M_PI) {
+    accumulatedYawOffset_ -= 2.0 * M_PI;
+  } else if (yawDiff < -M_PI) {
+    accumulatedYawOffset_ += 2.0 * M_PI;
+  }
+  lastBodyYaw_ = currentYaw;
+
+  const double continuousYaw = currentYaw + accumulatedYawOffset_;
+  const double relativeYaw = continuousYaw - torsoYawZero_;
+  controlWaist(relativeYaw * 180.0 / M_PI);
+}
+
+void ArmControlBaseROS::processTorsoControlLoop() {
+  handleTorsoControlJoystick();
+
+  HeadBodyPose headBodyPose;
+  {
+    std::lock_guard<std::mutex> lock(transformerDataMutex_);
+    if (!quest3ArmInfoTransformerPtr_) return;
+    headBodyPose = quest3ArmInfoTransformerPtr_->getHeadBodyPose();
+  }
+  processAbsoluteTorsoControl(headBodyPose);
 }
 
 void ArmControlBaseROS::publishEndEffectorControlData() {

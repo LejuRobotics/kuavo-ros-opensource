@@ -44,6 +44,8 @@ class JoyStickHandler {
   bool isRightFirstButtonPressed() const;
   bool isLeftSecondButtonPressed() const;
   bool isRightSecondButtonPressed() const;
+  bool isLeftFirstButtonTouched() const;
+  bool isLeftSecondButtonTouched() const;
 
   bool isLeftRightFirstButtonTouched() const;
   bool isLeftRightFirstButtonPressed() const;
@@ -61,6 +63,11 @@ class JoyStickHandler {
   void forceSetLeftArmCtrlMode(bool active);
   void forceSetRightArmCtrlMode(bool active);
 
+  double getLeftJoyStickX() const;
+  double getLeftJoyStickY() const;
+  double getRightJoyStickX() const;
+  double getRightJoyStickY() const;
+
  private:
   void processRobotEndHandWithFingerData();
 
@@ -75,6 +82,7 @@ class JoyStickHandler {
 
   // 按钮状态
   bool leftSecondButtonPressed_;
+  bool leftSecondButtonTouched_;
   bool leftFirstButtonTouched_;
   bool leftFirstButtonPressed_;  // 左手第一个按键按下状态
   bool rightSecondButtonPressed_;
@@ -111,6 +119,10 @@ class JoyStickHandler {
 
   std::vector<double> leftJoystick_;     // [left_trigger, left_grip]
   std::vector<double> rightJoystick_;    // [right_trigger, right_grip]
+  double leftStickX_;                    // left stick X coordinate
+  double leftStickY_;                    // left stick Y coordinate
+  double rightStickX_;                   // right stick X coordinate
+  double rightStickY_;                   // right stick Y coordinate
   std::vector<double> leftFingerData_;   // 左手手指关节数据
   std::vector<double> rightFingerData_;  // 右手手指关节数据
 
