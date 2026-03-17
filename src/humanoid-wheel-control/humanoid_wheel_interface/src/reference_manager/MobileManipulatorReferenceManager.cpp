@@ -273,7 +273,6 @@ namespace mobile_manipulator {
 
     // 躯干相对底盘位姿指令初始化
     cmdTorsoPose_.setZero(6);
-    currentTorsoPose_.setZero(6);
 
     // 注册日志记录器
     ros_logger_ = new humanoid::TopicLogger(nodeHandle_);
@@ -584,6 +583,12 @@ namespace mobile_manipulator {
 
     setLbMultiTimedPosCmdServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_timed_multi_cmd", 
                                                            &MobileManipulatorReferenceManager::setLbMultiTimedPosCmdService, this);
+    
+    setLbMultiTimedOfflineTrajServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_timed_offline_traj",
+                                                           &MobileManipulatorReferenceManager::setLbMultiTimedOfflineTrajService, this);
+    
+    setLbOfflineTrajEnableServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_timed_offline_traj_enable",
+                                                           &MobileManipulatorReferenceManager::setLbOfflineTrajEnableService, this);
 
     // 设置重置躯干指令
     resetTorsoStatusServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_reset_torso", 
@@ -902,8 +907,15 @@ namespace mobile_manipulator {
       // 如果存在需要删除的轨迹, 执行删除
       if (eraseCount > 0) {
         trajectory.timeTrajectory.erase(trajectory.timeTrajectory.begin(),  trajectory.timeTrajectory.begin() + eraseCount);
-        trajectory.stateTrajectory.erase(trajectory.stateTrajectory.begin(), trajectory.stateTrajectory.begin() + eraseCount);
-        trajectory.inputTrajectory.erase(trajectory.inputTrajectory.begin(), trajectory.inputTrajectory.begin() + eraseCount);
+        // 删除 stateTrajectory 前 eraseCount 个元素
+        if (!trajectory.stateTrajectory.empty() && trajectory.stateTrajectory.size() >= eraseCount) {
+          trajectory.stateTrajectory.erase(trajectory.stateTrajectory.begin(), 
+                                         trajectory.stateTrajectory.begin() + eraseCount);
+        }
+        if (!trajectory.inputTrajectory.empty() && trajectory.inputTrajectory.size() >= eraseCount) {
+          trajectory.inputTrajectory.erase(trajectory.inputTrajectory.begin(), 
+                                         trajectory.inputTrajectory.begin() + eraseCount);
+        }
       }
     };
 
@@ -913,6 +925,14 @@ namespace mobile_manipulator {
     for(size_t i=0; i<info_.eeFrames.size(); i++)
     {
       trimTrajectory(eeTargetTrajectories_[i]);
+    }
+    if(isOfflineTrajUpdate_ && startTime > isofflineTrajUpdateStartTime_ + 1.0)  // 避免删除起始的未执行的数据, 1秒内需要将轨迹更新完成
+    {
+      trimTrajectory(torsoOfflineTraj_);
+      for(size_t i=0; i<info_.eeFrames.size(); i++)
+      {
+        trimTrajectory(armEeOfflineTraj_[i]);
+      }
     }
   }
 
@@ -1072,6 +1092,9 @@ namespace mobile_manipulator {
     // 更新当前期望
     updateTimedSchedulerTargetTraj();
     
+    // 判断离线轨迹下发状态和给予对应期望赋值
+    updateTimedOfflineTraj(initTime, finalTime);
+    
     // 获取当前控制模式
     // controlMode_mtx_.lock();
     // int currentMode = currentMpcControlMode_;
@@ -1180,10 +1203,10 @@ namespace mobile_manipulator {
     vector_t targetState = vector_t::Zero(6);
     vector_t targetInput = vector_t::Zero(6);
 
-    for(int i=0; i<timeIncrement; i++)
+    for(int i=0; i<timeIncrement+1; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度（双臂轨迹）
-      double currentTime = initTime + (i+1) * dt;
+      double currentTime = initTime + i * dt;
 
       cmdDualArmEePlannerRuckigPtr_[armIdx]->getTrajectoryAtTime(currentTime - cmdDualArm_plannerInitialTime_[armIdx], 
                                                          currentTargetPose, currentTargetVel, currentTargetAcc);
@@ -1263,6 +1286,7 @@ namespace mobile_manipulator {
       case LbArmControlMode::LocalFrame:
         getCurrentEeBasePose(eeState, initState);
         break;
+      case LbArmControlMode::JointSpace: return;
       default:
         std::cerr << "[resetDualArmRuckig] 不支持该模式的末端轨迹生成, 返回" << std::endl;
         return;
@@ -1339,10 +1363,10 @@ namespace mobile_manipulator {
     vector_t targetState = vector_t::Zero(6);
     vector_t targetInput = vector_t::Zero(6);
 
-    for(int i=0; i<timeIncrement; i++)
+    for(int i=0; i<timeIncrement+1; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度
-      double currentTime = initTime + (i+1) * dt;
+      double currentTime = initTime + i * dt;
 
       torsoPosePlannerRuckigPtr_->getTrajectoryAtTime(currentTime - torsoPose_plannerInitialTime_, 
                                                       currentTargetPose_torso, 
@@ -1437,10 +1461,10 @@ namespace mobile_manipulator {
     vector_t targetState = vector_t::Zero(info_.stateDim);
     vector_t targetInput = vector_t::Zero(info_.inputDim);
     
-    for(int i=0; i<timeIncrement; i++)
+    for(int i=0; i<timeIncrement+1; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度
-      double currentTime = initTime + (i+1) * dt;
+      double currentTime = initTime + i * dt;
 
       cmdPosePlannerRuckigPtr_->getTrajectoryAtTime(currentTime - plannerInitialTime_, 
                                                     currentTargetPose, 
@@ -1564,10 +1588,10 @@ namespace mobile_manipulator {
     vector_t targetState = vector_t::Zero(info_.stateDim);
     vector_t targetInput = vector_t::Zero(info_.inputDim);
 
-    for(int i=1; i<timeIncrement; i++)
+    for(int i=1; i<timeIncrement+1; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度
-      double currentTime = initTime + (i+1) * dt;
+      double currentTime = initTime + i * dt;
 
       cmdVelPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - cmdVel_plannerInitialTime_, 
                                                    currentTargetPose, 
@@ -1678,10 +1702,10 @@ namespace mobile_manipulator {
     vector_t targetState = vector_t::Zero(info_.stateDim);
     vector_t targetInput = vector_t::Zero(info_.inputDim);
 
-    for(int i=0; i<timeIncrement; i++)
+    for(int i=0; i<timeIncrement+1; i++)
     {
       // 计算每个时间点的期望位姿、速度和加速度
-      double currentTime = initTime + (i+1) * dt;
+      double currentTime = initTime + i * dt;
 
       cmdVelPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - cmdVel_plannerInitialTime_, 
                                                    currentTargetPose, 
@@ -1945,6 +1969,7 @@ namespace mobile_manipulator {
     }
     if (res.result)
     {
+      offlineTrajDisable_ = true;
       currentArmControlMode_ = static_cast<LbArmControlServiceMode>(req.control_mode);
 
       std::cout << "currentArmControlMode_:"<< currentArmControlMode_ << std::endl;
@@ -2483,12 +2508,131 @@ namespace mobile_manipulator {
       ROS_INFO_STREAM("[setLbMultiTimedPosCmdService] All commands processed. Max execution time: " << res.actualTime);
       return true;
   }
-  
+
+  bool MobileManipulatorReferenceManager::setLbMultiTimedOfflineTrajService(kuavo_msgs::lbMultiTimedOfflineTraj::Request &req, 
+                                                                            kuavo_msgs::lbMultiTimedOfflineTraj::Response &res)
+  {
+    // 初始化响应
+    res.isSuccess = false;
+    res.message = "Successfully processed all trajectories";
+
+    if (req.offlineTraj.empty())   // 判断请求合法
+    {
+      res.message = "Invalid request: empty or malformed trajectory data";
+      ROS_ERROR_STREAM("[setLbMultiTimedOfflineTrajService] " + res.message);
+      return true;  // 服务调用成功，但处理失败
+    }
+
+    size_t trajCount = req.offlineTraj.size();
+    ROS_INFO_STREAM("[setLbMultiTimedOfflineTrajService] Processing " << trajCount << " offline trajectories");
+
+    for (size_t i = 0; i < trajCount; ++i)
+    {
+      // 获取当前轨迹
+      const auto& offlineTraj = req.offlineTraj[i];
+      const auto& timedTraj = offlineTraj.timedTraj;
+
+      // 判断是否合法
+      if(req.offlineTraj[i].timedTraj.empty())
+      {
+        res.message = "Invalid request: empty or malformed timedTraj " + std::to_string(i);
+        ROS_ERROR_STREAM("[setLbMultiTimedOfflineTrajService] " + res.message);
+        return true;
+      }
+      
+      size_t trajNum = req.offlineTraj[i].timedTraj.size();
+      ROS_INFO_STREAM("[setLbMultiTimedOfflineTrajService] Processing trajectory " << i << " with " << trajNum << " points");
+
+      // 遍历当前轨迹的每个点
+      for(size_t j = 0; j < trajNum; j++)
+      {
+        const auto& timedCmd = timedTraj[j];
+        Eigen::VectorXd eigenCmdVec = Eigen::Map<const Eigen::VectorXd>(timedCmd.cmdVec.data(), timedCmd.cmdVec.size());
+
+        // 对时间第一帧判断是否等于0, 浮点型需要近似等于
+        if(j == 0 && std::fabs(timedCmd.desireTime) > 1e-6)
+        {
+          res.message = "Invalid trajectory: first time is not 0";
+          ROS_ERROR_STREAM("[setLbMultiTimedOfflineTrajService] " + res.message);
+          return true;
+        }
+        // 对时间进行递增校验
+        if(j > 0 && timedCmd.desireTime <= timedTraj[j-1].desireTime)
+        {
+          res.message = "Invalid trajectory: time is not strictly increasing";
+          ROS_ERROR_STREAM("[setLbMultiTimedOfflineTrajService] " + res.message);
+          return true;
+        }
+
+        // 对 cmdVec 长度进行校验，左右臂轨迹为 6, 躯干轨迹为 4
+        if(offlineTraj.plannerIndex == 0 || offlineTraj.plannerIndex == 1) // 左右臂轨迹
+        {
+          if(eigenCmdVec.size() != 6)
+          {
+            res.message = "Invalid trajectory: cmdVec size is not 6 for left or right arm";
+            ROS_ERROR_STREAM("[setLbMultiTimedOfflineTrajService] " + res.message);
+            return true;
+          }
+          int index = offlineTraj.plannerIndex;
+          isArmEeOfflineTrajUpdate_[index] = true;
+          eeOfflineTrajFrame_[index] = offlineTraj.frame;
+          armEeOfflineTraj_[index].timeTrajectory.push_back(timedCmd.desireTime);
+          armEeOfflineTraj_[index].stateTrajectory.push_back(eigenCmdVec);
+        }
+        else if(offlineTraj.plannerIndex == 2) // 躯干轨迹
+        {
+          if(eigenCmdVec.size() != 4)
+          {
+            res.message = "Invalid trajectory: cmdVec size is not 4 for torso";
+            ROS_ERROR_STREAM("[setLbMultiTimedOfflineTrajService] " + res.message);
+            return true;
+          }
+          isTorsoOfflineTrajUpdate_ = true;
+          torsoOfflineTraj_.timeTrajectory.push_back(timedCmd.desireTime);
+          torsoOfflineTraj_.stateTrajectory.push_back(eigenCmdVec);
+        }
+        else
+        {
+          res.message = "Invalid planner index for trajectory " + std::to_string(i);
+          ROS_ERROR_STREAM("[setLbMultiTimedOfflineTrajService] " + res.message);
+          return true;
+        }
+      }
+      
+      ROS_INFO_STREAM("[setLbMultiTimedOfflineTrajService] trajectory have been load");
+    }
+
+    res.isSuccess = true;
+    return true;
+  }
+
+  bool MobileManipulatorReferenceManager::setLbOfflineTrajEnableService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res)
+  {
+    res.success = true;
+
+    if(req.data == false)
+    {
+      offlineTrajDisable_ = true;
+      res.message = "Offline trajectory disable successfully";
+      ROS_INFO_STREAM("[setLbOfflineTrajEnableService] " + res.message);
+    }
+
+    if(req.data == true)
+    {
+      offlineTrajDisable_ = false;
+      trajFrameUpdate_ = true;
+      res.message = "Offline trajectory enable successfully";
+      ROS_INFO_STREAM("[setLbOfflineTrajEnableService] " + res.message);
+    }
+    
+    return true;
+  }
 
   bool MobileManipulatorReferenceManager::setLbResetTorsoService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res)
   {
     if(req.data)
     {
+      offlineTrajDisable_ = true;
       /***********************根据期望速度, 设置切换时间************************/
       vector_t torsoPose = vector_t::Zero(6);
       getCurrentTorsoPoseInBasePitchYaw(torsoPose, initState_);
@@ -3109,7 +3253,29 @@ namespace mobile_manipulator {
     static vector_t armEeTarget[2] = {vector_t::Zero(6), 
                                       vector_t::Zero(6)}; // 双臂末端轨迹
     
-    if(isCmdDualArmPoseUpdated_[armIdx])
+    static bool isArmEeOfflineTrajUpdate_prev[2]{false, false};
+    static bool armEeOfflineEnd[2]{false, false};
+
+    if(isArmEeOfflineTrajUpdate_prev[armIdx] == true && 
+       isArmEeOfflineTrajUpdate_[armIdx] == false)    // 从离线调整为在线的第一次执行, 从离线轨迹最后一帧获取期望
+    {
+      armEeOfflineEnd[armIdx] = true;
+    }
+    isArmEeOfflineTrajUpdate_prev[armIdx] = isArmEeOfflineTrajUpdate_[armIdx];
+
+    if(armEeOfflineEnd[armIdx] == true && 
+      isArmEeOfflineTrajUpdate_[armIdx] != true && isOfflineTrajUpdate_ != true)
+    {
+      cmd_arm_zyx_[armIdx] = eeTargetTrajectories_[armIdx].getDesiredState(initTime);
+      cmdDualArm_prevTargetPose_[armIdx] = cmd_arm_zyx_[armIdx];
+      cmdDualArm_prevTargetVel_[armIdx] = vector_t::Zero(cmd_arm_zyx_[armIdx].size());
+      cmdDualArm_prevTargetAcc_[armIdx] = vector_t::Zero(cmd_arm_zyx_[armIdx].size());
+      calcRuckigTrajWithEePose(armIdx, initTime, cmd_arm_zyx_[armIdx], 0.0);
+      resetArmJointRuckig(armIdx, initTime, initState, false);
+      armEeOfflineEnd[armIdx] = false;
+    }
+
+    if(isCmdDualArmPoseUpdated_[armIdx] && isArmEeOfflineTrajUpdate_[armIdx] == false)
     {
       bool isChange = getLbArmControlModeIsChange(armIdx, desireMode_[armIdx]);
       // TODO: 如果 isChange 为 true, 则根据当前模式重置一次初值
@@ -3125,7 +3291,7 @@ namespace mobile_manipulator {
       isCmdDualArmPoseUpdated_[armIdx] = false;
     }
 
-    if(isCmdArmJointUpdated_[armIdx])
+    if(isCmdArmJointUpdated_[armIdx] && isArmEeOfflineTrajUpdate_[armIdx] == false)
     {
       bool isChange = getLbArmControlModeIsChange(armIdx, desireMode_[armIdx]);
       if(isChange && desireMode_[armIdx] == LbArmControlMode::JointSpace)
@@ -3138,34 +3304,43 @@ namespace mobile_manipulator {
     {
       if(desireMode_[armIdx] == LbArmControlMode::WorldFrame) // 世界系的笛卡尔末端控制
       {
-        setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
-        setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
-        setEnableEeTargetTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔
+        if(isArmEeOfflineTrajUpdate_[armIdx] != true && isOfflineTrajUpdate_ != true)
+        {
+          setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
+          setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
+          setEnableEeTargetTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔
 
-        generateDualArmEeTargetWithRuckig(armIdx, initTime, finalTime, ruckigDt_);
+          generateDualArmEeTargetWithRuckig(armIdx, initTime, finalTime, ruckigDt_);
+        }
       }
       else if(desireMode_[armIdx] == LbArmControlMode::LocalFrame)  // 局部系的笛卡尔末端控制
       {
-        setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
-        setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
-        setEnableEeTargetLocalTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔局部跟踪
+        if(isArmEeOfflineTrajUpdate_[armIdx] != true && isOfflineTrajUpdate_ != true)
+        {
+          setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
+          setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
+          setEnableEeTargetLocalTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔局部跟踪
       
-        generateDualArmEeTargetWithRuckig(armIdx, initTime, finalTime, ruckigDt_);
+          generateDualArmEeTargetWithRuckig(armIdx, initTime, finalTime, ruckigDt_);
+        }
       }
       else if(desireMode_[armIdx] == LbArmControlMode::JointSpace)  // 关节控制
       {
-        setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
-        setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
-        setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
-
-        armJoint_mtx_[armIdx].lock();
-        armJointTarget[armIdx] = arm_joint_traj_[armIdx];
-        armJoint_mtx_[armIdx].unlock();
-
-        if(isCmdArmJointUpdated_[armIdx])
+        if(isOfflineTrajUpdate_ != true)
         {
-          calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
-          isCmdArmJointUpdated_[armIdx] = false;
+          setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
+          setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
+          setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
+
+          armJoint_mtx_[armIdx].lock();
+          armJointTarget[armIdx] = arm_joint_traj_[armIdx];
+          armJoint_mtx_[armIdx].unlock();
+
+          if(isCmdArmJointUpdated_[armIdx])
+          {
+            calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
+            isCmdArmJointUpdated_[armIdx] = false;
+          }
         }
 
         // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
@@ -3173,30 +3348,41 @@ namespace mobile_manipulator {
     }
     else if(currentArmControlMode_  == LbArmControlServiceMode::KEEP)
     {
-      setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
-      setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
-      setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
-
-      if(isCmdArmJointUpdated_[armIdx])
+      if(isOfflineTrajUpdate_ != true)
       {
-        calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
-        isCmdArmJointUpdated_[armIdx] = false;
+        setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
+        setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
+        setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
+
+        armJointTarget[armIdx] = initState.tail(info_.armDim - 4).segment(armIdx * singleArmJointDim_, singleArmJointDim_);
+
+        if(isCmdArmJointUpdated_[armIdx])
+        {
+          cmdArmJointDesiredTime_[armIdx] = 0.0;
+          calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
+          isCmdArmJointUpdated_[armIdx] = false;
+        }
       }
     }
     else if(currentArmControlMode_ == LbArmControlServiceMode::AUTO_SWING)
     {
-      setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
-      setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
-      setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
-
-      if(isCmdArmJointUpdated_[armIdx])
+      if(isOfflineTrajUpdate_ != true)
       {
-        calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
-        isCmdArmJointUpdated_[armIdx] = false;
+        setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
+        setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
+        setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
+        
+        isArmEeOfflineTrajUpdate_[armIdx] = false;
+        armJointTarget[armIdx] = arm_init_joint_traj_.segment(armIdx * singleArmJointDim_, singleArmJointDim_);
+        arm_joint_traj_[armIdx] = arm_init_joint_traj_.segment(armIdx * singleArmJointDim_, singleArmJointDim_);
+        
+        if(isCmdArmJointUpdated_[armIdx])
+        {
+          cmdArmJointDesiredTime_[armIdx] = 1.0;
+          calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
+          isCmdArmJointUpdated_[armIdx] = false;
+        }
       }
-
-      armJointTarget[armIdx] = arm_init_joint_traj_.segment(armIdx * singleArmJointDim_, singleArmJointDim_);
-      arm_joint_traj_[armIdx] = arm_init_joint_traj_.segment(armIdx * singleArmJointDim_, singleArmJointDim_);
     }
     else
     {
@@ -3244,21 +3430,51 @@ namespace mobile_manipulator {
   
   void MobileManipulatorReferenceManager::setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState)
   {
-    if(isCmdTorsoPoseUpdated_)
+    static bool isTorsoOfflineTrajUpdate_prev{false};
+    static bool torsoOfflineEnd = false;
+
+    if(isTorsoOfflineTrajUpdate_prev == true && 
+       isTorsoOfflineTrajUpdate_ == false)    // 从离线调整为在线的第一次执行, 从离线轨迹最后一帧获取期望
+    {
+      torsoOfflineEnd = true;
+    }
+    isTorsoOfflineTrajUpdate_prev = isTorsoOfflineTrajUpdate_;
+
+    if(torsoOfflineEnd == true && 
+      isTorsoOfflineTrajUpdate_ != true && isOfflineTrajUpdate_ != true)
+    {
+      cmdTorsoPose_ = torsoTargetTrajectories_.getDesiredState(initTime);
+      vector_t torsoTarget4Dof = vector_t::Zero(4);
+      torsoTarget4Dof << cmdTorsoPose_[0],  // x, z, yaw, pitch
+                         cmdTorsoPose_[2], 
+                         cmdTorsoPose_[3], 
+                         cmdTorsoPose_[4];
+
+      torsoPose_prevTargetPose_ = torsoTarget4Dof;
+      torsoPose_prevTargetVel_ = vector_t::Zero(torsoTarget4Dof.size());
+      torsoPose_prevTargetAcc_ = vector_t::Zero(torsoTarget4Dof.size());
+      calcRuckigTrajWithTorsoPose(initTime, torsoTarget4Dof, 0.0);
+
+      torsoModeFlag_ = true;
+      torsoOfflineEnd = false;
+    }
+    static vector_t torsoTargetPose = vector_t::Zero(6);
+
+    if(isCmdTorsoPoseUpdated_ && isTorsoOfflineTrajUpdate_ != true)
     {
       // resetTorsoPoseRuckig(initTime, initState, false);
 
       std::cout << "[MobileManipulatorReferenceManager] 进入躯干笛卡尔控制 " << std::endl;
 
       cmdTorsoPose_mtx_.lock();
-      currentTorsoPose_ = cmdTorsoPose_;
+      torsoTargetPose = cmdTorsoPose_;
       cmdTorsoPose_mtx_.unlock();
 
       vector_t torsoPose4Dof = vector_t::Zero(4);
-      torsoPose4Dof << currentTorsoPose_[0],  // x, z, yaw, pitch
-                       currentTorsoPose_[2], 
-                       currentTorsoPose_[3], 
-                       currentTorsoPose_[4];
+      torsoPose4Dof << torsoTargetPose[0],  // x, z, yaw, pitch
+                       torsoTargetPose[2], 
+                       torsoTargetPose[3], 
+                       torsoTargetPose[4];
 
       calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, cmdTorsoPoseDesiredTime_);
 
@@ -3266,7 +3482,7 @@ namespace mobile_manipulator {
       torsoModeFlag_ = true;
     }
 
-    if(isCmdLegJointUpdated_)
+    if(isCmdLegJointUpdated_ && isTorsoOfflineTrajUpdate_ != true)
     {
       setEnableLegJointTrack(true); // 开启下肢关节跟踪
       setEnableTorsoPoseTargetTrajectories(false); // 关闭躯干
@@ -3285,10 +3501,13 @@ namespace mobile_manipulator {
     
     if(torsoModeFlag_)
     {
-      setEnableLegJointTrack(false); // 关闭下肢关节跟踪
-      setEnableTorsoPoseTargetTrajectories(true); // 开启躯干
+      if(isTorsoOfflineTrajUpdate_ != true && isOfflineTrajUpdate_ != true)
+      {
+        setEnableLegJointTrack(false); // 关闭下肢关节跟踪
+        setEnableTorsoPoseTargetTrajectories(true); // 开启躯干
 
-      generateTorsoPoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
+        generateTorsoPoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
+      }
 
       resetLegJointRuckig(initTime, initState, false); // 躯干笛卡尔控制影响下肢关节, 重置关节轨迹初值
     }
@@ -3408,6 +3627,106 @@ namespace mobile_manipulator {
         }
       }
       isUpdateTimedTarget_ = false;
+    }
+  }
+
+  void MobileManipulatorReferenceManager::updateTimedOfflineTraj(scalar_t initTime, scalar_t finalTime)
+  {
+    static bool offlineTrajDisable_prev = false;
+    if(offlineTrajDisable_ == true && offlineTrajDisable_prev == false)
+    {
+      isOfflineTrajUpdate_ = false;   // 关闭离线轨迹执行
+      isTorsoOfflineTrajUpdate_ = false;
+      for(int i=0; i<info_.eeFrames.size(); i++)
+      {
+        isArmEeOfflineTrajUpdate_[i] = false;
+      }
+    }
+    else if(offlineTrajDisable_ == false)
+    {
+      isOfflineTrajUpdate_ = true;
+    }
+    offlineTrajDisable_prev = offlineTrajDisable_;
+    if(trajFrameUpdate_ == true)
+    {
+      isofflineTrajUpdateStartTime_ = initTime;
+      for(int armIdx = 0; armIdx < info_.eeFrames.size(); armIdx++)
+      {
+        if(isArmEeOfflineTrajUpdate_[armIdx])
+        {
+          if(eeOfflineTrajFrame_[armIdx] == 0)
+          {
+            desireMode_[armIdx] = LbArmControlMode::WorldFrame;
+          }
+          else if(eeOfflineTrajFrame_[armIdx] == 1)
+          {
+            desireMode_[armIdx] = LbArmControlMode::LocalFrame;
+          }
+        }
+      }
+      trajFrameUpdate_ = false;
+    }
+
+    int timeIncrement = (finalTime - initTime) / ruckigDt_;
+
+    if(isOfflineTrajUpdate_)
+    {
+      scalar_array_t timeTraj;
+      vector_array_t torsoStateTraj, armEeStateTraj[2];
+
+      for(int i = 0; i < timeIncrement + 1; i++)
+      {
+        double currentTime = initTime + i * ruckigDt_;
+        timeTraj.push_back(currentTime);
+
+        // 每次只取其中一段
+        if(isTorsoOfflineTrajUpdate_)
+        {
+          torsoStateTraj.push_back(torsoOfflineTraj_.getDesiredState(currentTime - isofflineTrajUpdateStartTime_));
+        }
+
+        for(int armIdx = 0; armIdx < info_.eeFrames.size(); armIdx++)
+        {
+          if(isArmEeOfflineTrajUpdate_[armIdx])
+          {
+            armEeStateTraj[armIdx].push_back(armEeOfflineTraj_[armIdx].getDesiredState(currentTime - isofflineTrajUpdateStartTime_));
+          }
+        }
+      }
+      // 将片段赋值到实际执行的轨迹
+      if(isTorsoOfflineTrajUpdate_)
+      {
+        setEnableLegJointTrack(false); // 关闭下肢关节跟踪
+        setEnableTorsoPoseTargetTrajectories(true); // 开启躯干
+        torsoModeFlag_ = true;
+        torsoTargetTrajectories_.timeTrajectory = timeTraj;
+        torsoTargetTrajectories_.stateTrajectory = torsoStateTraj;
+      }
+      for(int armIdx = 0; armIdx < info_.eeFrames.size(); armIdx++)
+      {
+        if(isArmEeOfflineTrajUpdate_[armIdx])
+        {
+          switch(eeOfflineTrajFrame_[armIdx])
+          {
+            case 0: 
+            {
+              setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
+              setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
+              setEnableEeTargetTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔
+              break;
+            }
+            case 1:
+            {
+              setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
+              setEnableEeTargetLocalTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔局部跟踪
+              setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔
+              break;
+            }
+          }
+          eeTargetTrajectories_[armIdx].timeTrajectory = timeTraj;
+          eeTargetTrajectories_[armIdx].stateTrajectory = armEeStateTraj[armIdx];
+        }
+      }
     }
   }
 

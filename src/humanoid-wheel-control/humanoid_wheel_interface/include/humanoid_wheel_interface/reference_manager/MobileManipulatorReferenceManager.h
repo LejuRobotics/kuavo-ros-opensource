@@ -13,8 +13,10 @@
 #include <kuavo_msgs/setRuckigPlannerParams.h>
 #include <kuavo_msgs/getLbTorsoInitialPose.h>
 #include <kuavo_msgs/lbTimedPosCmd.h>
+#include <kuavo_msgs/lbMultiTimedOfflineTraj.h>
 #include <kuavo_msgs/lbMultiTimedPosCmd.h>
 #include <std_srvs/SetBool.h>
+#include <std_srvs/Trigger.h>
 
 #include <ocs2_oc/synchronized_module/ReferenceManager.h>
 #include "humanoid_wheel_interface/ManipulatorModelInfo.h"
@@ -95,6 +97,8 @@ public:
   bool getLbTorsoInitialPoseService(kuavo_msgs::getLbTorsoInitialPose::Request &req, kuavo_msgs::getLbTorsoInitialPose::Response &res);
   bool setLbTimedPosCmdService(kuavo_msgs::lbTimedPosCmd::Request &req, kuavo_msgs::lbTimedPosCmd::Response &res);
   bool setLbMultiTimedPosCmdService(kuavo_msgs::lbMultiTimedPosCmd::Request &req, kuavo_msgs::lbMultiTimedPosCmd::Response &res);
+  bool setLbMultiTimedOfflineTrajService(kuavo_msgs::lbMultiTimedOfflineTraj::Request &req, kuavo_msgs::lbMultiTimedOfflineTraj::Response &res);
+  bool setLbOfflineTrajEnableService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
   bool setLbResetTorsoService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
 
   // 多个约束轨迹的操作函数
@@ -109,7 +113,6 @@ public:
   const TargetTrajectories& getTorsoTargetTrajectories() const { return torsoTargetTrajectories_; }
   // const TargetTrajectories& getEeTargetTrajectories() const { return eeTargetTrajectories_; }
   const TargetTrajectories& getEeTargetTrajectories(int armIdx) const { return eeTargetTrajectories_[armIdx]; }
-  const TargetTrajectories& getEeTargetThreePointTrajectories() const { return eeTargetThreePointTrajectories_; }
 
   // 多种约束的使能函数 (全局setter同时设置两臂, per-arm版本支持独立控制)
   // EE世界系
@@ -178,6 +181,7 @@ protected:
   void resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState);
   void updateTimedSchedulerCurrentState(scalar_t initTime, const vector_t& initState);
   void updateTimedSchedulerTargetTraj(void);
+  void updateTimedOfflineTraj(scalar_t initTime, scalar_t finalTime);
   void updateIndexRuckigPlanner(int plannerIndex, double desireTime, const Eigen::VectorXd& cmd_vec);
   
   // 辅助函数
@@ -313,7 +317,6 @@ private:
   Eigen::Vector3d initialTorsoPos_;
   Eigen::Vector4d initialTorsoQuat_;
   Eigen::VectorXd cmdTorsoPose_;
-  Eigen::VectorXd currentTorsoPose_;
   std::mutex cmdTorsoPose_mtx_;
   bool isCmdTorsoPoseUpdated_{false};
   double cmdTorsoPoseDesiredTime_{0.0};
@@ -375,7 +378,6 @@ private:
   TargetTrajectories stateInputTargetTrajectories_;
   TargetTrajectories torsoTargetTrajectories_;
   TargetTrajectories eeTargetTrajectories_[2]; // [0]: 左臂, [1]: 右臂
-  TargetTrajectories eeTargetThreePointTrajectories_;
 
   // 多种约束所需轨迹相关
   // bool enableEeFlag_{true};
@@ -393,6 +395,19 @@ private:
 
   // 规划器限制更改服务
   ros::ServiceServer setRuckigPlannerParamsServiceServer_;
+
+  // 离线轨迹跟踪相关
+  ros::ServiceServer setLbMultiTimedOfflineTrajServiceServer_;
+  ros::ServiceServer setLbOfflineTrajEnableServiceServer_;
+  TargetTrajectories torsoOfflineTraj_;
+  bool isTorsoOfflineTrajUpdate_{false};
+  TargetTrajectories armEeOfflineTraj_[2];
+  bool isArmEeOfflineTrajUpdate_[2]{false, false};
+  bool eeOfflineTrajFrame_[2]{false, false};
+  bool isOfflineTrajUpdate_{false};
+  double isofflineTrajUpdateStartTime_{0.0};
+  bool offlineTrajDisable_{true};
+  bool trajFrameUpdate_{false};
 
   // 多规划器时间同步相关
   ros::ServiceServer setLbTimedPosCmdServiceServer_;

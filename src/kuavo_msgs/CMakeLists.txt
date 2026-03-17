@@ -150,6 +150,10 @@ add_message_files(
 
   # Lb single timed cmd
   timedSingleCmd.msg
+
+  # Lb offline Traj
+  timedPoint.msg
+  lbTimedOfflineTraj.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -241,6 +245,9 @@ add_service_files(
 
   # Lb Multi Timed Cmd
   lbMultiTimedPosCmd.srv
+
+  # Lb offline Traj
+  lbMultiTimedOfflineTraj.srv
 )
 
 ## Generate actions in the 'action' folder

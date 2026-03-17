@@ -11,6 +11,8 @@ from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
 from kuavo_msgs.srv import changeLbMpcObsUpdateModeSrv, changeLbMpcObsUpdateModeSrvRequest
 from kuavo_msgs.srv import lbTimedPosCmd, lbTimedPosCmdRequest
 from kuavo_msgs.srv import lbMultiTimedPosCmd, lbMultiTimedPosCmdRequest
+from kuavo_msgs.srv import lbMultiTimedOfflineTraj, lbMultiTimedOfflineTrajRequest
+from kuavo_msgs.msg import timedPoint, lbTimedOfflineTraj
 from kuavo_msgs.msg import timedSingleCmd
 from std_srvs.srv import SetBool, SetBoolRequest
 from std_msgs.msg import Bool
@@ -473,3 +475,115 @@ def set_focus_ee(focus_ee):
     msg = Bool(data=focus_ee)
     pub.publish(msg)
     rospy.loginfo(f"Focus set to {'EE' if focus_ee else 'Torso'}")
+
+def set_lb_multi_timed_offline_traj(offline_trajectories: list) -> tuple:
+    """
+    设置多条离线定时轨迹到移动机械臂
+    
+    :param offline_trajectories: 离线轨迹列表，每个元素为字典格式：
+        {
+            'planner_index': int,       # 规划器索引 0:左臂,1:右臂,2:躯干
+            'frame': int,                # 坐标系 (0:世界系, 1:局部系)
+            'timed_traj': list           # 定时轨迹点列表，每个点为字典：
+                {
+                    'desire_time': float,   # 期望执行时间(秒), 第一帧必须为0
+                    'cmd_vec': list         # 命令向量，左/右臂6维, 躯干4维
+                }
+        }
+    :return: (success, message)
+    """
+    # 基本验证
+    if not offline_trajectories:
+        return False, "轨迹数据为空"
+
+    try:
+        # 等待服务
+        rospy.wait_for_service('/mobile_manipulator_timed_offline_traj', timeout=3.0)
+        client = rospy.ServiceProxy('/mobile_manipulator_timed_offline_traj', lbMultiTimedOfflineTraj)
+        
+        # 准备请求 - 注意服务定义是 lbTimedOfflineTraj[] offlineTraj
+        req = lbMultiTimedOfflineTrajRequest()
+        
+        # 处理每条轨迹
+        for i, traj in enumerate(offline_trajectories):
+            # 验证规划器索引
+            if traj['planner_index'] not in [0, 1, 2]:
+                return False, f"轨迹{i}规划器索引无效: {traj['planner_index']}"
+            
+            # 验证轨迹点
+            if not traj['timed_traj']:
+                return False, f"轨迹{i}轨迹点为空"
+            
+            # 创建离线轨迹对象 - 直接使用消息类型
+            offline_traj = lbTimedOfflineTraj()
+            offline_traj.plannerIndex = traj['planner_index']
+            offline_traj.frame = traj.get('frame', 0)
+            
+            # 处理每个轨迹点
+            for j, point in enumerate(traj['timed_traj']):
+                # 验证必要字段
+                if 'desire_time' not in point or 'cmd_vec' not in point:
+                    return False, f"轨迹{i}点{j}缺少必要字段"
+                
+                # 验证第一帧时间
+                if j == 0 and abs(point['desire_time']) > 1e-6:
+                    return False, f"轨迹{i}第一帧时间不为0"
+                
+                # 验证时间递增
+                if j > 0 and point['desire_time'] <= traj['timed_traj'][j-1]['desire_time']:
+                    return False, f"轨迹{i}时间未严格递增"
+                
+                # 验证命令向量维度
+                expected_dim = 6 if traj['planner_index'] in [0, 1] else 4
+                if len(point['cmd_vec']) != expected_dim:
+                    return False, f"轨迹{i}点{j}命令向量维度错误: 期望{expected_dim}维"
+                
+                # 创建定时点消息
+                timed_cmd = timedPoint()
+                timed_cmd.desireTime = point['desire_time']
+                timed_cmd.cmdVec = point['cmd_vec']
+                offline_traj.timedTraj.append(timed_cmd)
+            
+            # 将离线轨迹添加到请求
+            req.offlineTraj.append(offline_traj)
+        
+        # 调用服务
+        resp = client(req)
+        
+        if resp.isSuccess:
+            rospy.loginfo(f"✅ 设置{len(offline_trajectories)}条离线轨迹成功")
+            return True, resp.message
+        else:
+            return False, f"设置失败: {resp.message}"
+            
+    except rospy.ServiceException as e:
+        return False, f"服务调用失败: {e}"
+    except Exception as e:
+        return False, f"未知错误: {e}"
+
+def set_offline_trajectory_enable(enable: bool) -> bool:
+    """
+    启用或禁用离线轨迹功能
+    
+    :param enable: True启用离线轨迹，False禁用离线轨迹
+    :return: bool 是否设置成功
+    """
+    rospy.wait_for_service('/mobile_manipulator_timed_offline_traj_enable')
+    try:
+        enable_service = rospy.ServiceProxy('/mobile_manipulator_timed_offline_traj_enable', SetBool)
+        resp = enable_service(enable)
+        
+        if resp.success:
+            status = "Enabled" if enable else "Disabled"
+            rospy.loginfo(f"Offline trajectory {status}. Message: {resp.message}")
+            return True
+        else:
+            rospy.logwarn(f"Offline trajectory enable request denied: {resp.message}")
+            return False
+            
+    except rospy.ServiceException as e:
+        rospy.logerr(f"Service call failed: {e}")
+        return False
+    except Exception as e:
+        rospy.logerr(f"Unexpected error: {e}")
+        return False

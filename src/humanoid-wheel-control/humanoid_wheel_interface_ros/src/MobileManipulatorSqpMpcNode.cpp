@@ -59,8 +59,7 @@ int main(int argc, char** argv) {
   HumanoidWheelInterface interface(taskFile, libFolder, urdfFile);
 
   // ROS ReferenceManager
-  std::shared_ptr<ocs2::RosReferenceManager> rosReferenceManagerPtr(
-      new ocs2::RosReferenceManager(robotName, interface.getReferenceManagerPtr()));
+  auto rosReferenceManagerPtr = std::make_shared<RosReferenceManager>(robotName, interface.getReferenceManagerPtr());
   rosReferenceManagerPtr->subscribe(nodeHandle);
 
   // MPC
