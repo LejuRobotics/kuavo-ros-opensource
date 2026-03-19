@@ -41,6 +41,7 @@ void JoyStickHandler::initialize() {
   leftGrip_ = false;
   rightGrip_ = false;
   leftSecondButtonPressed_ = false;
+  leftSecondButtonTouched_ = false;
   leftFirstButtonTouched_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
@@ -99,6 +100,7 @@ void JoyStickHandler::reset() {
   leftGrip_ = false;
   rightGrip_ = false;
   leftSecondButtonPressed_ = false;
+  leftSecondButtonTouched_ = false;
   leftFirstButtonTouched_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
@@ -240,11 +242,18 @@ void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySt
   rightJoystick_[0] = msg->right_trigger;
   rightJoystick_[1] = msg->right_grip;
 
+  // 存储摇杆坐标用于腰部控制
+  leftStickX_ = msg->left_x;
+  leftStickY_ = msg->left_y;
+  rightStickX_ = msg->right_x;
+  rightStickY_ = msg->right_y;
+
   leftGrip_ = msg->left_grip > 0.75;
   rightGrip_ = msg->right_grip > 0.75;
 
   // 更新按钮状态
   leftSecondButtonPressed_ = msg->left_second_button_pressed;
+  leftSecondButtonTouched_ = msg->left_second_button_touched;
   leftFirstButtonTouched_ = msg->left_first_button_touched;
   leftFirstButtonPressed_ = msg->left_first_button_pressed;
   rightSecondButtonPressed_ = msg->right_second_button_pressed;
@@ -604,6 +613,16 @@ bool JoyStickHandler::isLeftSecondButtonPressed() const {
 bool JoyStickHandler::isRightSecondButtonPressed() const {
   std::lock_guard<std::mutex> lock(dataMutex_);
   return rightSecondButtonPressed_;
+}
+
+bool JoyStickHandler::isLeftFirstButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return leftFirstButtonTouched_;
+}
+
+bool JoyStickHandler::isLeftSecondButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return leftSecondButtonTouched_;
 }
 
 bool JoyStickHandler::isLeftRightFirstButtonTouched() const {

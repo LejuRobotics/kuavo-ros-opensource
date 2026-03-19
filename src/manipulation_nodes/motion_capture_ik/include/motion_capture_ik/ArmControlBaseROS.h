@@ -12,12 +12,14 @@
 
 #include "motion_capture_ik/json.hpp"
 
+#include <leju_utils/define.hpp>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Int32.h>
 #include <std_srvs/Trigger.h>
 #include <std_srvs/SetBool.h>
 #include <kuavo_msgs/lejuClawCommand.h>
 #include <kuavo_msgs/robotHandPosition.h>
+#include <kuavo_msgs/robotWaistControl.h>
 #include <kuavo_msgs/sensorsData.h>
 #include <kuavo_msgs/headBodyPose.h>
 
@@ -77,6 +79,9 @@ class ArmControlBaseROS {
   ros::Publisher headBodyPosePublisher_;
   ros::Publisher kuavoArmTrajCppPublisher_;
   ros::Publisher questJoystickDataPublisher_;
+  ros::Publisher waistMotionPublisher_;
+  ros::Publisher wholeTorsoCtrlPublisher_;
+  ros::ServiceClient vrWaistControlServiceClient_;
 
   // Atomic state variables for thread-safe operation
   std::atomic<bool> shouldStop_;
@@ -95,6 +100,17 @@ class ArmControlBaseROS {
   double thresholdArmDiffHalfUpBody_rad_;
   bool controlTorso_;
   bool enableWbcArmTrajectory_;
+  bool torsoControlEnabled_ = false;
+  bool prevRightSecondButtonPressed_ = false;
+  int robotType_ = 2;
+  double waistYawMaxAngleDeg_ = 0.0;
+  HeadBodyPose currentHeadBodyPose_;
+  double torsoPitchZero_ = 0.0;
+  double torsoYawZero_ = 0.0;
+  double bodyHeightZero_ = 0.0;
+  double bodyXZero_ = 0.0;
+  double lastBodyYaw_ = 0.0;
+  double accumulatedYawOffset_ = 0.0;
 
   // Robot joint dimension parameters (loaded from JSON with fallback compatibility)
   // Sensor data structure: [Leg joints] + [Arm joints] + [Head joints]
@@ -123,6 +139,7 @@ class ArmControlBaseROS {
 
   std::mutex bonePosesMutex_;
   std::mutex joystickMutex_;
+  std::mutex transformerDataMutex_;
   std::shared_ptr<noitom_hi5_hand_udp_python::PoseInfoList> latestBonePosesPtr_;
   std::unique_ptr<JoyStickHandler> joyStickHandlerPtr_;
   std::unique_ptr<Quest3ArmInfoTransformer> quest3ArmInfoTransformerPtr_;
@@ -195,6 +212,13 @@ class ArmControlBaseROS {
   void publishEndEffectorControlData();
   void publishHandPositionData();
   void publishClawCommandData();
+  void initializeTorsoControlFromReference();
+  void callVRWaistControlSrv(bool enable);
+  void controlWaist(double waistYaw);
+  void updateTorsoControl();
+  void handleTorsoControlJoystick();
+  void processAbsoluteTorsoControl(const HeadBodyPose& headBodyPose);
+  void processTorsoControlLoop();
 
   // 发布 quest_joystick_data 消息（x轴和A按钮为true，其余全零）
   void publishQuestJoystickDataXAndA();

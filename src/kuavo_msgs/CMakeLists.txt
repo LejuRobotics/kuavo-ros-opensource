@@ -154,6 +154,7 @@ add_message_files(
   # Lb offline Traj
   timedPoint.msg
   lbTimedOfflineTraj.msg
+  Float32MultiArrayStamped.msg
 )
 
 ## Generate services in the 'srv' folder
