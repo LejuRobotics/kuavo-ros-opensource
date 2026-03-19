@@ -2,5 +2,8 @@
 
 <launch>
       <param name="topic_config" value="$(find humanoid_controllers)/config/log_topics.yaml" />
+      <!-- rosbag 录制参数 -->
+      <!-- 最大分割文件数量 -->
+      <param name="/nodelet_manager/max_splits" value="60"/>
       <node pkg="nodelet" type="nodelet" name="nodelet_rosbag" args="load RosbagNodelet nodelet_manager" respawn="false" output="screen" />
 </launch>

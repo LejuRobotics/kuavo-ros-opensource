@@ -136,7 +136,7 @@
     <group unless="$(arg play_back)">
       <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch"/>
     </group>
-      <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
