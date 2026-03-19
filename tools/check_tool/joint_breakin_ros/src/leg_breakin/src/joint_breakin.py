@@ -138,14 +138,14 @@ class KuavoUnifiedBreakin:
             sys.exit(1)
         
     def check_and_compile_leg_breakin(self):
-        """检查腿部磨线编译产物是否存在（支持roban2）"""
+        """检查腿部磨线编译产物是否存在"""
         if not self.leg_breakin_script or not self.leg_breakin_script.exists():
             self.print_colored(f"错误：腿部磨线脚本不存在: {self.leg_breakin_script}", Colors.RED)
             return False
         
-        # Roban2使用自研腿ec_master_tools目录下的编译产物
+        # 各版本腿部磨线脚本约定：在对应目录下的 build_lib 中放置 ec_master_wrap.so
         ec_master_dir = self.leg_breakin_script.parent
-        build_dir = ec_master_dir / "build_lib" / "roban2"
+        build_dir = ec_master_dir / "build_lib"
         ec_master_so = build_dir / "ec_master_wrap.so"
         
         if not build_dir.exists():

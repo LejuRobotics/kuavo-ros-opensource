@@ -86,6 +86,17 @@ namespace humanoidController_wheel_wbc
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
     /****************************************************/
+    /************load param from kuavo.json**************/
+    RobotVersion rb_version(6, 0);
+    if (controllerNh_.hasParam("/robot_version"))
+    {
+        int rb_version_int;
+        controllerNh_.getParam("/robot_version", rb_version_int);
+        rb_version = RobotVersion::create(rb_version_int);
+    }
+    drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
+    robot_config_ = drake_interface_->getRobotConfig();
+    kuavo_settings_ = drake_interface_->getKuavoSettings();
     /************** Initialize WBC **********************/
     wheel_wbc_ = std::make_shared<mobile_manipulator::WeightedWbc>(*pinocchioInterface_ptr_, manipulatorModelInfo_);
     wheel_wbc_->setArmNums(armNum_);
@@ -680,7 +691,7 @@ namespace humanoidController_wheel_wbc
       jointCmdMsg.tau_ratio.push_back(1);
       jointCmdMsg.joint_kp.push_back(0);
       jointCmdMsg.joint_kd.push_back(0);
-      jointCmdMsg.tau_max.push_back(120);
+      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
       jointCmdMsg.control_modes.push_back(2);
     }
     for (int i2 = 0; i2 < armNum_; ++i2)
@@ -691,7 +702,7 @@ namespace humanoidController_wheel_wbc
       jointCmdMsg.tau_ratio.push_back(1);
       jointCmdMsg.joint_kp.push_back(0);
       jointCmdMsg.joint_kd.push_back(0);
-      jointCmdMsg.tau_max.push_back(20);
+      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[lowJointNum_ + i2]);
       jointCmdMsg.control_modes.push_back(2);
     }
    
@@ -707,7 +718,7 @@ namespace humanoidController_wheel_wbc
         jointCmdMsg.joint_v.push_back(0);
         jointCmdMsg.tau.push_back(feedback_tau[i3]);
         jointCmdMsg.tau_ratio.push_back(1);
-        jointCmdMsg.tau_max.push_back(10);
+        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[lowJointNum_ + armNum_ + i3]);
         jointCmdMsg.control_modes.push_back(2);
         jointCmdMsg.joint_kp.push_back(0);
         jointCmdMsg.joint_kd.push_back(0);
@@ -716,7 +727,7 @@ namespace humanoidController_wheel_wbc
       vector_t head_pos = sensors_data_new.jointPos_.tail(headNum_);
       robotVisualizer_->updateHeadJointPositions(head_pos);
     }
-    
+    replaceDefaultEcMotorPdoGait(jointCmdMsg);  // 统一修改pdo写入的kpkd
     jointCmdPub_.publish(jointCmdMsg);
 
     //更新共享内存中的关节命令
@@ -1520,6 +1531,43 @@ namespace humanoidController_wheel_wbc
                        std::sin(yaw),  std::cos(yaw), 0,
                        0,               0,              1;
     return R_body_to_world * cmd_vel_body;
+  }
+
+  void humanoidControllerWheelWbc::replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg)
+  {
+    // 对于 control_modes == 2 且 driver == EC_MASTER 的电机，使用 running_settings.joint_kp 和 joint_kd
+    // running_settings.joint_kp 和 joint_kd 只包含 EC_MASTER 电机的值，需要建立映射
+    // 注意：ec_master_count 应该是所有 EC_MASTER 驱动器中的索引，而不是 control_modes == 2 的索引
+    const auto &hardware_settings = kuavo_settings_.hardware_settings;
+    const auto &running_settings = kuavo_settings_.running_settings;
+    
+    if (!running_settings.joint_kp.empty() && 
+        !running_settings.joint_kd.empty() &&
+        running_settings.joint_kp.size() == running_settings.joint_kd.size())
+    {
+      const int total_joints = lowJointNum_ + armNum_ + headNum_;
+      const int ec_master_size = static_cast<int>(running_settings.joint_kp.size());
+      int ec_master_count = 0;
+      
+      for (int i = 0; i < total_joints && i < static_cast<int>(jointCmdMsg.control_modes.size()); ++i)
+      {
+        // 检查是否为 EC_MASTER 驱动器
+        if (i < static_cast<int>(hardware_settings.driver.size()) &&
+            hardware_settings.driver[i] == EC_MASTER)
+        {
+          // 只有当 control_modes == 2 时才更新 joint_kp 和 joint_kd
+          if (jointCmdMsg.control_modes[i] == 2 && 
+              ec_master_count < ec_master_size)
+          {
+            jointCmdMsg.joint_kp[i] = static_cast<double>(running_settings.joint_kp[ec_master_count]);
+            jointCmdMsg.joint_kd[i] = static_cast<double>(running_settings.joint_kd[ec_master_count]);
+          }
+          // 无论 control_modes 是 0 还是 2，都要递增 ec_master_count
+          // 因为 running_settings.joint_kp/kd 的索引对应所有 EC_MASTER 驱动器
+          ec_master_count++;
+        }
+      }
+    }
   }
 
 } // namespace humanoidController_wheel_wbc

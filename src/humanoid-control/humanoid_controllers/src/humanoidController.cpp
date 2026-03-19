@@ -1838,6 +1838,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     // currentObservation_.state(8) = 0.78626;
     // currentObservation_.state.segment(6 + 6, jointNum_) = defalutJointPos_;
     initial_status_ = HumanoidInterface_->getInitialState();
+    initial_status_.tail(armNumReal_) = defalutArmPosMPC_;
     initial_statusRL_ = initialStateRL_;
     pull_up_status_ = initial_status_;
     cur_status_ = initial_status_;

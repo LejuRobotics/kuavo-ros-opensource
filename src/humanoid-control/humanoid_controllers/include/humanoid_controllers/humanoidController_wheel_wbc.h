@@ -41,6 +41,10 @@
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include "humanoid_wheel_interface/filters/jointCmdLimiter.h"
 
+// hardware params
+#include "humanoid_interface_drake/humanoid_interface_drake.h"
+#include "kuavo_common/common/json_config_reader.hpp"
+
 namespace humanoidController_wheel_wbc
 {
   using namespace ocs2;
@@ -100,6 +104,9 @@ namespace humanoidController_wheel_wbc
     bool enableVelControlCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
     bool changeLbObsUpdateModeCallback(kuavo_msgs::changeLbMpcObsUpdateModeSrv::Request &req, 
                                       kuavo_msgs::changeLbMpcObsUpdateModeSrv::Response &res);
+
+    // ======= 硬件相关处理函数 =========
+    void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);    // 替换EC_MASTER电机的kp/kd（从running_settings）
 
     // ========== 工具函数 ==========
     /**
@@ -230,6 +237,11 @@ namespace humanoidController_wheel_wbc
     vector_t optimizedTrajMaxVel_, optimizedTrajMaxAcc_, optimizedTrajMaxJerk_;
 
     std::shared_ptr<mobile_manipulator::jointCmdLimiter> jointCmdLimiterPtr_;
+
+    // ========== 硬件使用参数相关 ==========
+    HighlyDynamic::HumanoidInterfaceDrake *drake_interface_{nullptr};
+    HighlyDynamic::JSONConfigReader *robot_config_;
+    HighlyDynamic::KuavoSettings kuavo_settings_;
   };
 
 } // namespace humanoidController_wheel_wbc

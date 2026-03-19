@@ -54,7 +54,9 @@ class BreakinMainController:
         # 优先从环境变量读取
         rv = os.environ.get("ROBOT_VERSION")
         if rv:
-            return str(rv).strip()
+            rv_clean = str(rv).strip().strip('"').strip("'")
+            if rv_clean:
+                return rv_clean
         
         # 从 .bashrc 文件读取
         try:
@@ -65,9 +67,19 @@ class BreakinMainController:
                     lines = f.readlines()
                 # 从后往前查找，找到最后一个未注释的 export ROBOT_VERSION=
                 for line in reversed(lines):
+                    # 去除首尾空白字符
                     s = line.strip()
-                    if s.startswith("export ROBOT_VERSION=") and "#" not in s:
-                        return s.split("=", 1)[1].strip()
+                    # 跳过空行和注释行（以 # 开头的行）
+                    if not s or s.startswith('#'):
+                        continue
+                    # 检查是否包含 export ROBOT_VERSION=
+                    if 'export ROBOT_VERSION=' in s or s.startswith('export ROBOT_VERSION='):
+                        # 提取变量值，支持多种格式：export ROBOT_VERSION=17 或 export ROBOT_VERSION="17"
+                        parts = s.split('=', 1)
+                        if len(parts) == 2:
+                            value = parts[1].strip().strip('"').strip("'")
+                            if value:
+                                return value
         except Exception:
             pass
         
@@ -113,45 +125,30 @@ class BreakinMainController:
         except (ValueError, TypeError):
             return False
     
-    def _is_robot_version_53(self):
-        """判断 ROBOT_VERSION 是否为 53"""
-        robot_version = self._get_robot_version()
-        if not robot_version:
-            return False
-        
-        rv_raw = str(robot_version).strip()
-        rv = rv_raw.lower()
-        
-        # 字符串匹配：包含 v53 或 kuavo5_v53
-        if "v53" in rv or "kuavo5_v53" in rv:
-            return True
-        
-        # 数字版本判断：53
-        try:
-            v = int(rv_raw)
-            return v == 53
-        except (ValueError, TypeError):
-            return False
-    
     def _select_leg_breakin_dir(self):
         """根据 ROBOT_VERSION 选择腿部磨线目录
-        如果是版本53，直接使用v53版本
         如果是版本52，询问用户选择机型
         如果是版本50-51，使用普通v52版本
+        如果是版本17，使用 roban2_v17
         否则使用 roban2_v14
         返回选择的目录名称
         """
-        # 如果不是 Kuavo5，使用 roban2_v14
+        # 如果不是 Kuavo5，根据版本选择
         if not self._is_kuavo5():
+            robot_version = self._get_robot_version()
+            if robot_version:
+                try:
+                    # 去除可能的引号和空白字符
+                    version_str = str(robot_version).strip().strip('"').strip("'")
+                    version_num = int(version_str)
+                    if version_num == 17:
+                        return "leg_breakin_roban2_v17"
+                    elif 13 <= version_num <= 14:
+                        return "leg_breakin_roban2_v14"
+                except (ValueError, TypeError) as e:
+                    self.print_colored(f"警告：无法解析版本号 '{robot_version}'，使用默认 roban2_v14: {e}", Colors.YELLOW)
+            # 默认使用 roban2_v14
             return "leg_breakin_roban2_v14"
-        
-        # 如果是版本53，直接使用v53版本
-        if self._is_robot_version_53():
-            self.print_colored("=" * 50, Colors.CYAN)
-            self.print_colored("      检测到 ROBOT_VERSION = 53", Colors.CYAN)
-            self.print_colored("=" * 50, Colors.CYAN)
-            self.print_colored("已选择：kuavo5_v53版本（13个电机）", Colors.GREEN)
-            return "leg_breakin_kuavo5_v53"
         
         # 如果是版本52，询问用户选择机型
         if self._is_robot_version_52():
@@ -284,7 +281,6 @@ class BreakinMainController:
     
     def _kill_existing_processes(self):
         """杀掉之前残留的磨线相关进程"""
-        self.print_colored("正在清理残留进程...", Colors.BLUE)
         
         # 要清理的进程名称列表
         process_names = [
