@@ -227,7 +227,7 @@ const sidebars = {
               type: 'category',
               label: '模仿学习使用案例',
               items: [
-                'basic_usage/kuavo-ros-control/docs/5功能案例/科研框架/模仿学习使用案例/KUAVO人形机器人训练场(科研版)案例概述',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/科研框架/模仿学习使用案例/案例概述',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/科研框架/模仿学习使用案例/具身智能数据处理与模型训练框架',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/科研框架/模仿学习使用案例/仿真环境使用',
               ],
