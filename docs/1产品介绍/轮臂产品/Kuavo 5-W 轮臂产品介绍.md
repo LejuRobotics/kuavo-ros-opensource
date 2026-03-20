@@ -2,8 +2,6 @@
 - [Kuavo 5-W  轮臂产品介绍](#kuavo-5-w--轮臂产品介绍)
   - [说明](#说明)
   - [产品参数](#产品参数)
-  - [配套软件](#配套软件)
-  - [多机调度](#多机调度)
   - [开发接口](#开发接口)
 
 
@@ -37,21 +35,6 @@
 | 定位激光数量       | 1（2D激光雷达）    |
 | 软件支持           | PC端、iPad端软件支持           |
 
-
-## 配套软件
-
-1. `Leju Mobile`
-   - 下载链接：[软件下载链接](https://kuavo.lejurobot.com/kuavo_research_editiion/%E8%BD%AE%E8%87%82%E8%B5%84%E6%96%99/%E8%BD%AF%E4%BB%B6/Mobile_v1.1.20.apk)
-   - 支持系统：安卓、windows
-   ![Mobile软件](./images/mobile软件.png)
-
-1. `Leju Design`
-   - 下载链接：[软件下载链接](https://kuavo.lejurobot.com/kuavo_research_editiion/%E8%BD%AE%E8%87%82%E8%B5%84%E6%96%99/%E8%BD%AF%E4%BB%B6/Woosh_Design_v1.1.20_setup.exe)
-   - 支持系统：windows
-   ![Design软件](./images/Design软件.png)
-
-## 多机调度
-- 底盘支持额外选配调度系统，实现多机任务智能调度，道路交管等功能
 
 ## 开发接口
 - [轮臂基础使用](../../5功能案例/五代案例/轮臂案例/基础使用.md)

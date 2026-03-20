@@ -1,5 +1,7 @@
 # 机器人上位机烧录镜像(NX)
 
+[NX_1.3.0.zip 镜像下载地址](https://kuavo.lejurobot.com/back_images/NX_1.3.0.zip)
+
 ## 事前准备
 
 |      | 物品                                                          | 数量 | 示例图                                                       |
