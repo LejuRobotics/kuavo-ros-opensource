@@ -31,16 +31,15 @@ title: "Kuavo 5-W 手柄控制说明"
 
 ### 2.1 下位机分支编译
 
-- **下位机分支**: `yang/zjy/lb-mpc-deliver-add-s61`
+- **下位机仓库**: `kuavo-ros-opensource`
 
 ```bash
-catkin clean 
-catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release
-catkin build humanoid_controllers
-catkin build grab_box ar_control pytrees_actions kuavo_deploy
+cd kuavo-ros-opensource #仓库目录
+catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release # Important! 
+source installed/setup.bash # 加载一些已经安装的ROS包依赖环境，包括硬件包等
+catkin build  humanoid_controllers
 ```
 
-⚠️ **注意**: 如果没有 `kuavo_deploy` 包，需要从 embodied 仓库拉取并直接放入 control 的 src 目录下。
 
 ### 2.2 下位机启动（站立）
 
@@ -49,7 +48,7 @@ catkin build grab_box ar_control pytrees_actions kuavo_deploy
 #### 终端1 - 加载机器人控制器
 
 ```bash
-cd kuavo-ros-control
+cd kuavo-ros-opensource
 sudo su
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=bt2pro

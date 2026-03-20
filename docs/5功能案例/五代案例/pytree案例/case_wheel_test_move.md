@@ -31,7 +31,7 @@ sudo vim /opt/ros/noetic/share/apriltag_ros/config/tags.yaml
 
 - **Gazebo 仿真**：使用 `load_kuavo_gazebo_sim_wheel.launch`
 ```bash
-cd ~/kuavo_ros_control
+cd ~/kuavo_ros_opensouece
 export ROBOT_VERSION=60  # 或者61,根据底盘选择版本
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_gazebo_sim_wheel.launch
@@ -39,7 +39,7 @@ roslaunch humanoid_controllers load_kuavo_gazebo_sim_wheel.launch
 
 - **MuJoCo 仿真**：使用 `load_kuavo_mujoco_sim_wheel.launch`
 ```bash
-cd ~/kuavo_ros_control
+cd ~/kuavo_ros_opensouece
 export ROBOT_VERSION=60
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_mujoco_sim_wheel.launch
@@ -47,7 +47,7 @@ roslaunch humanoid_controllers load_kuavo_mujoco_sim_wheel.launch
 
 - **真实样机**：使用 `load_kuavo_real_wheel.launch`
 ```bash
-cd ~/kuavo_ros_control
+cd ~/kuavo_ros_opensouece
 export ROBOT_VERSION=60
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_real_wheel.launch
@@ -70,7 +70,7 @@ roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
 
 在另一个终端启动（建议先 cd 到仓库根目录并 source 环境）：
 ```bash
-cd ~/kuavo-ros-control
+cd ~/kuavo_ros_opensouece
 source devel/setup.bash
 cd src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box
 python3 case_wheel_test_move.py
