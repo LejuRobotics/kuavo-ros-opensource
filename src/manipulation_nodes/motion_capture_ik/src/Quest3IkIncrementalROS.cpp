@@ -18,6 +18,7 @@
 #include <geometry_msgs/Quaternion.h>
 #include <std_msgs/Int32.h>
 #include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <iomanip>
 #include <cmath>
 
@@ -1408,6 +1409,7 @@ void Quest3IkIncrementalROS::deactivateController() {
   if (!controllerActivated_.load()) return;
   if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
+  if (arm_ctrl_mode_ == 1 or arm_ctrl_mode_ == 2) return; //如果当前是模式1或者模式2，不切换回去，防止进入和退出增量模式时误触发
 
   kuavo_msgs::changeArmCtrlMode srv1, srv2;
   srv1.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
@@ -1418,6 +1420,14 @@ void Quest3IkIncrementalROS::deactivateController() {
       humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&  //
       changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&    //
       true));
+}
+
+void Quest3IkIncrementalROS::armCtrlModeCallback(const std_msgs::Float64MultiArray::ConstPtr& msg) {
+  if (msg->data.size() != 2) {
+    ROS_WARN("[Quest3IkIncrementalROS] Invalid arm control mode message");
+    return;
+  }
+  arm_ctrl_mode_ = static_cast<int>(msg->data[1]); //获取手臂控制模式
 }
 
 void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
@@ -2089,6 +2099,10 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
   leftElbowFixedPoint_ = Eigen::Vector3d(-0.3, 0.5, 0.32);
   rightElbowFixedPoint_ = Eigen::Vector3d(-0.3, -0.5, 0.32);
+
+  // 从主控制器实时订阅当前手臂控制模式
+  arm_ctrl_mode_vr_sub_ = nodeHandle_.subscribe(
+  "/humanoid/mpc/arm_control_mode", 1, &Quest3IkIncrementalROS::armCtrlModeCallback, this);
 
   //从JSON配置读取手臂关节数量
   if (configJson.contains("NUM_ARM_JOINT")) {
