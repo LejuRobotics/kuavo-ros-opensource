@@ -203,6 +203,8 @@ enum StarkHardwareType : uint8_t {
 /// Communication protocol type
 /// Determines how the SDK communicates with the device
 enum StarkProtocolType : uint8_t {
+  /// Auto-detect protocol (used in stark_auto_detect)
+  STARK_PROTOCOL_TYPE_AUTO = 0,
   /// Modbus RTU over RS485 serial
   STARK_PROTOCOL_TYPE_MODBUS = 1,
   /// CAN 2.0 protocol (1Mbps)
@@ -921,6 +923,38 @@ void protobuf_close(DeviceHandler *handle);
 ///         `close_device_handler` to release it.
 DeviceHandler *init_device_handler(StarkProtocolType protocol_type, uint8_t master_id);
 
+/// @brief  Create a device handler for CAN/CANFD protocol.
+///
+/// This function creates a device handler and stores the CAN baudrate information.
+///
+/// @param protocol_type Protocol type (STARK_PROTOCOL_TYPE_CAN or STARK_PROTOCOL_TYPE_CAN_FD)
+/// @param master_id Master ID (typically 1)
+/// @param arb_baudrate Arbitration baudrate in bps (e.g., 1000000 for 1 Mbps)
+/// @param data_baudrate Data baudrate in bps (for CANFD; equals arb_baudrate for CAN 2.0)
+/// @return Pointer to the newly created `DeviceHandler`. Call
+///         `close_device_handler` to release it.
+DeviceHandler *init_device_handler_can(StarkProtocolType protocol_type,
+                                       uint8_t master_id,
+                                       uint32_t arb_baudrate,
+                                       uint32_t data_baudrate);
+
+/// @brief  Create a device handler for CAN/CANFD protocol with hardware type pre-set.
+///
+/// @param protocol_type Protocol type (STARK_PROTOCOL_TYPE_CAN or STARK_PROTOCOL_TYPE_CAN_FD)
+/// @param master_id Master ID (typically 1)
+/// @param slave_id Slave ID to set hardware type for
+/// @param arb_baudrate Arbitration baudrate in bps (e.g., 1000000 for 1 Mbps)
+/// @param data_baudrate Data baudrate in bps (for CANFD; equals arb_baudrate for CAN 2.0)
+/// @param hw_type Hardware type (StarkHardwareType enum value)
+/// @return Pointer to the newly created `DeviceHandler`. Call
+///         `close_device_handler` to release it.
+DeviceHandler *init_device_handler_can_with_hw_type(StarkProtocolType protocol_type,
+                                                    uint8_t master_id,
+                                                    uint8_t slave_id,
+                                                    uint32_t arb_baudrate,
+                                                    uint32_t data_baudrate,
+                                                    StarkHardwareType hw_type);
+
 /// @brief  Create a device handler with hardware type pre-set.
 ///
 /// This is useful when you already know the hardware type (e.g., from auto_detect)
@@ -1032,19 +1066,27 @@ uint8_t scan_can_devices(const uint8_t *candidate_ids,
 /// Auto-detect Stark devices across all protocols
 ///
 /// Scans for devices in priority order:
-/// 1. ZQWL CANFD (Revo2: IDs 0x7E, 0x7F)
-/// 2. ZQWL CAN 2.0 (Revo1/Revo2: IDs 1, 2)
-/// 3. Modbus/RS485 (IDs 0x7E, 0x7F, 1, 2, 10)
+/// 1. ZQWL CANFD (IDs 0x7E, 0x7F) → CAN 2.0 (IDs 1, 2) (USB CDC, cross-platform)
+/// 2. SocketCAN CANFD (IDs 0x7E, 0x7F) → CAN 2.0 (IDs 1, 2) (Linux only)
+/// 3. Modbus/RS485 (IDs 0x7E, 0x7F, 1, 2 at 460800/115200/1Mbps/2Mbps)
+/// 4. Protobuf (legacy RS485, ID 10, 115200 baud)
+///
+/// When a specific protocol is requested, only that protocol is scanned.
 ///
 /// # Parameters
 /// - scan_all: If true, scan for all devices. If false, stop at first found.
 /// - port: Optional port name to scan. If NULL, scans all available ports.
-/// - protocol: Protocol to use (0=auto, 1=Modbus, 2=Can, 3=CanFd)
+/// - protocol: Protocol filter:
+///   - STARK_PROTOCOL_TYPE_AUTO: Auto-detect all protocols (recommended)
+///   - STARK_PROTOCOL_TYPE_MODBUS: Modbus only
+///   - STARK_PROTOCOL_TYPE_CAN: CAN 2.0 only
+///   - STARK_PROTOCOL_TYPE_CAN_FD: CANFD only
+///   - STARK_PROTOCOL_TYPE_PROTOBUF: Protobuf only
 ///
 /// # Returns
 /// Pointer to CDetectedDeviceList. Call `free_detected_device_list` to free.
 /// Returns empty list (count=0) if no devices found.
-CDetectedDeviceList *stark_auto_detect(bool scan_all, const char *port, uint8_t protocol);
+CDetectedDeviceList *stark_auto_detect(bool scan_all, const char *port, StarkProtocolType protocol);
 
 /// Free detected device list memory
 void free_detected_device_list(CDetectedDeviceList *list);
@@ -1062,7 +1104,7 @@ void free_detected_device_list(CDetectedDeviceList *list);
 /// - NULL on failure
 ///
 /// # Notes
-/// - For CAN/CANFD: Initializes ZQWL adapter automatically
+/// - For CAN/CANFD: Initializes BrainCo/ZQWL/SocketCAN adapter automatically
 /// - For Modbus: Opens serial port with detected baudrate
 /// - Call `close_from_detected` to cleanup
 DeviceHandler *init_from_detected(const CDetectedDevice *device);
@@ -1114,6 +1156,66 @@ void ethercat_start_dfu(DeviceHandler *handle,
 /// Returns a pointer to `DeviceInfo`; you must call `free_device_info` to free
 /// it. Returns NULL on failure.
 CDeviceInfo *stark_get_device_info(DeviceHandler *handle, uint8_t slave_id);
+
+/// Read holding registers (fast, no retry).
+/// address: Start register address.
+/// count: Number of registers to read.
+/// out_data: Pointer to array to store data (caller must allocate enough space).
+/// Returns 0 on success, -1 on failure.
+int32_t stark_read_holding_registers(DeviceHandler *handle,
+                                     uint8_t slave_id,
+                                     uint16_t address,
+                                     uint16_t count,
+                                     uint16_t *out_data);
+
+/// Read input registers (fast, no retry).
+/// address: Start register address.
+/// count: Number of registers to read.
+/// out_data: Pointer to array to store data (caller must allocate enough space).
+/// Returns 0 on success, -1 on failure.
+int32_t stark_read_input_registers(DeviceHandler *handle,
+                                   uint8_t slave_id,
+                                   uint16_t address,
+                                   uint16_t count,
+                                   uint16_t *out_data);
+
+/// Get the protocol type of the device handler.
+/// Returns: StarkProtocolType enum value:
+///   - STARK_PROTOCOL_TYPE_MODBUS = 1
+///   - STARK_PROTOCOL_TYPE_CAN = 2
+///   - STARK_PROTOCOL_TYPE_CAN_FD = 3
+///   - STARK_PROTOCOL_TYPE_ETHER_CAT = 4
+///   - STARK_PROTOCOL_TYPE_PROTOBUF = 5
+StarkProtocolType stark_get_protocol_type(DeviceHandler *handle);
+
+/// Get the serial port name of the device handler.
+/// Returns: Port name string (e.g., "/dev/ttyUSB0" or "COM3"), or NULL if not available.
+/// The returned string is owned by the DeviceHandler and should not be freed.
+/// For CAN/CANFD protocols, this may return an empty string.
+const char *stark_get_port_name(DeviceHandler *handle);
+
+/// Get the baudrate of the device handler.
+/// Returns: Baudrate in bps (e.g., 115200, 460800), or 0 if not applicable.
+/// For Modbus/Protobuf: returns serial baudrate
+/// For CAN/CANFD/EtherCAT: returns 0 (use stark_get_can_arb_baudrate/stark_get_can_data_baudrate instead)
+///
+/// Note: This function only returns serial port baudrate.
+/// For CAN baudrate information, use:
+///   - stark_get_can_arb_baudrate() - Get CAN arbitration baudrate
+///   - stark_get_can_data_baudrate() - Get CAN data baudrate (CANFD only)
+uint32_t stark_get_baudrate(DeviceHandler *handle);
+
+/// Get the CAN arbitration baudrate.
+/// Returns: Arbitration baudrate in bps (e.g., 1000000 for 1 Mbps), or 0 if not CAN/CANFD protocol.
+/// For CAN 2.0: This is the only baudrate
+/// For CANFD: This is the arbitration phase baudrate
+uint32_t stark_get_can_arb_baudrate(DeviceHandler *handle);
+
+/// Get the CAN data baudrate.
+/// Returns: Data baudrate in bps (e.g., 5000000 for 5 Mbps), or 0 if not CANFD protocol.
+/// For CAN 2.0: Returns the same as arbitration baudrate
+/// For CANFD: Returns the data phase baudrate
+uint32_t stark_get_can_data_baudrate(DeviceHandler *handle);
 
 /// Get touch sensor vendor type by reading register 970.
 /// Returns: 0=Unknown, 1=Capacitive, 2=Pressure
