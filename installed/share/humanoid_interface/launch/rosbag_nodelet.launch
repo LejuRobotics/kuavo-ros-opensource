@@ -5,5 +5,7 @@
       <!-- rosbag 录制参数 -->
       <!-- 最大分割文件数量 -->
       <param name="/nodelet_manager/max_splits" value="60"/>
+      <!-- 开机保留的 bag 文件数量 -->
+      <param name="/nodelet_manager/bags_to_keep" value="8"/>
       <node pkg="nodelet" type="nodelet" name="nodelet_rosbag" args="load RosbagNodelet nodelet_manager" respawn="false" output="screen" />
 </launch>

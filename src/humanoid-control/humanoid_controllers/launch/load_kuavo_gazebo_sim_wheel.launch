@@ -124,6 +124,7 @@
     </group>
 
     <!-- Rosbag记录 -->
+
     <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
 
     <!-- 手柄控制 -->

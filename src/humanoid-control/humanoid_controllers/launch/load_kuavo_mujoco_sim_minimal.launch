@@ -74,6 +74,7 @@
     <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch"/>
     
     <!-- 启动rosbag记录 -->
+
     <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
     
     <!-- 启动手柄控制 -->
