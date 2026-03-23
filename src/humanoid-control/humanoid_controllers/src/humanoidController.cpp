@@ -854,11 +854,13 @@ namespace humanoid_controller
             // 从 RLControllerManager 获取 WALK_CONTROLLER 列表（包括 BASE）
             available_controllers_ = controller_manager_->getWalkControllerList();
             
-            // is_rl_start模式：找到第一个BASE RL控制器并设置默认姿态
+            // is_rl_start模式：从所有已加载控制器中找到第一个非MPC、非FALL_STAND的控制器
+            // 不限于 walk_controllers_ 列表，dance等控制器也可以作为 rl_start 目标
             if (is_rl_start_)
             {
               std::string first_rl_controller = "";
-              for (const auto& name : available_controllers_)
+              auto all_controller_names = controller_manager_->getControllerNames();
+              for (const auto& name : all_controller_names)
               {
                 if (name != "mpc" && 
                     controller_manager_->getControllerTypeByName(name) != RLControllerType::FALL_STAND_CONTROLLER)
@@ -871,7 +873,10 @@ namespace humanoid_controller
               if (!first_rl_controller.empty())
               {
                 current_controller_ = first_rl_controller;
-                current_controller_index_ = std::find(available_controllers_.begin(), available_controllers_.end(), first_rl_controller) - available_controllers_.begin();
+                // 如果在 walk 列表中则设置索引，否则设为 -1
+                auto it = std::find(available_controllers_.begin(), available_controllers_.end(), first_rl_controller);
+                current_controller_index_ = (it != available_controllers_.end()) 
+                    ? static_cast<int>(it - available_controllers_.begin()) : -1;
                 
                 // 获取RL控制器的默认姿态，供preUpdate起立使用
                 auto* target_ptr = controller_manager_->getControllerByName(first_rl_controller);
@@ -886,7 +891,7 @@ namespace humanoid_controller
               }
               else
               {
-                ROS_WARN("[HumanoidController] is_rl_start=true but no BASE RL controller found, falling back to MPC");
+                ROS_WARN("[HumanoidController] is_rl_start=true but no suitable RL controller found, falling back to MPC");
                 is_rl_start_ = false;
               }
             }
@@ -1988,7 +1993,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       double endTime;
       double motionVel;
       if(is_roban_)
-        motionVel = 0.06;  //鲁班站立速度
+        motionVel = 0.03;  //鲁班站立速度
       else
         motionVel = 0.11;   //其他机器人站立速度
       
@@ -2003,7 +2008,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         startTime = robotStartStandTime_;
         endTime = startTime + (standState[8] - squatState[8]) / motionVel; // 以 motionVel 速度起立
         robotStandUpCompleteTime_ = endTime;
-        ROS_INFO_STREAM("Set standUp start time: " << robotStartStandTime_);
+        // std::cout << "standUp duration: " << robotStandUpCompleteTime_ - startTime << " seconds"  << std::endl;
+        ROS_INFO_STREAM("Set standUp start time: " << startTime << " end time: " << robotStandUpCompleteTime_);
       }
 
       vector_t curState = vector_t::Zero(infoWBC.stateDim);
@@ -2254,9 +2260,25 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     {
       if (current_controller_ptr_->isReadyToExit())
       {
-        ROS_WARN("[HumanoidController] Current controller requests exit, switching to BASE controller");
-        controller_manager_->switchToBaseController();
-        fall_down_state_ = FallStandState::STANDING;
+        if(current_controller_type==RLControllerType::DANCE_CONTROLLER)
+        {
+          ROS_INFO("[HumanoidController] Dance controller finished, switching to AMP walk controller");
+          if (controller_manager_->switchController(RLControllerType::AMP_CONTROLLER))
+          {
+            current_controller_ptr_ = controller_manager_->getCurrentController();
+            ROS_INFO("[HumanoidController] Successfully switched to AMP walk controller");
+          }
+          else
+          {
+            ROS_ERROR("[HumanoidController] Failed to switch to AMP walk controller");
+          }
+        }
+        else
+        {
+          ROS_WARN("[HumanoidController] Current controller requests exit, switching to BASE controller");
+          controller_manager_->switchToBaseController();
+          fall_down_state_ = FallStandState::STANDING;
+        }
       }
     }
     // is_rl_start模式：MPC初始化完成后直接切换到RL控制器（不需要MPC插值）

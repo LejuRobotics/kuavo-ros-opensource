@@ -85,3 +85,4 @@ topics:
   - /r_shoulder_pose
   - /l_shoulder_pose
   - /head_pose
+  - /dance_controller/.*

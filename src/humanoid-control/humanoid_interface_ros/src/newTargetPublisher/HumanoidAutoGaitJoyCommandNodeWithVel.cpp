@@ -466,6 +466,8 @@ namespace ocs2
       trigger_fall_stand_up_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/trigger_fall_stand_up");
       // Fall down state client
       set_fall_down_state_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_controller/set_fall_down_state");
+      // Dance controller trigger client
+      trigger_dance_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/switch_to_dance_controller");
       last_status_check_time_ = ros::Time(0);
 
       // 加载命令配置
@@ -915,28 +917,25 @@ namespace ocs2
         return;
       }
 
-      if (old_joy_msg_.buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_XBOX_BUTTON_NUM)
-      {
-        nodeHandle_.setParam("joystick_type", JOYSTICK_XBOX_MAP_JSON);
-        std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_XBOX_MAP_JSON + ".json";
-        nodeHandle_.setParam("channel_map_path", channel_map_path);
-        ROS_WARN("[JoyController]: Joystick data mapping has changed from BEITONG to X-Box");
-        reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_XBOX_BUTTON_NUM);
-        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
-        old_joy_msg_ = *joy_msg;
-        return;
-      }
-      if(old_joy_msg_.buttons.size() == JOYSTICK_XBOX_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM)
-      {
-        nodeHandle_.setParam("joystick_type", JOYSTICK_BEITONG_MAP_JSON);
-        std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_BEITONG_MAP_JSON + ".json";
-        nodeHandle_.setParam("channel_map_path", channel_map_path);
-        ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
-        reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
-        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
-        old_joy_msg_ = *joy_msg;
-        return;
-      }
+      // if (old_joy_msg_.buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_XBOX_BUTTON_NUM)
+      // {
+      //   nodeHandle_.setParam("joystick_type", JOYSTICK_XBOX_MAP_JSON);
+      //   std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_XBOX_MAP_JSON + ".json";
+      //   nodeHandle_.setParam("channel_map_path", channel_map_path);
+      //   ROS_WARN("[JoyController]: Joystick data mapping has changed from BEITONG to X-Box");
+      //   reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_XBOX_BUTTON_NUM);
+      // }
+      // if(old_joy_msg_.buttons.size() == JOYSTICK_XBOX_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM)
+      // {
+      //   nodeHandle_.setParam("joystick_type", JOYSTICK_BEITONG_MAP_JSON);
+      //   std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_BEITONG_MAP_JSON + ".json";
+      //   nodeHandle_.setParam("channel_map_path", channel_map_path);
+      //   ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
+      //   reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
+      //   // 更新old_joy_msg并跳过本次处理，避免状态混乱
+      //   old_joy_msg_ = *joy_msg;
+      //   return;
+      // }
 
       if (rb_version_.major() != 1)
       {
@@ -1233,6 +1232,14 @@ namespace ocs2
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
         {
           callTriggerFallStandUpSrv();
+          old_joy_msg_ = *joy_msg;
+          return;
+        }
+        // RB + BUTTON_WALK(Y): 切换到 DanceController
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
+        {
+          ROS_INFO("Switching to DanceController via RB+Y");
+          callTriggerDanceSrv();
           old_joy_msg_ = *joy_msg;
           return;
         }
@@ -1623,6 +1630,50 @@ namespace ocs2
       }
     }
 
+    void callTriggerDanceSrv()
+    {
+      std::cout << "trigger callTriggerDanceSrv" << std::endl;
+      
+      // 首先获取当前控制器，再决定切换方向
+      kuavo_msgs::getControllerList get_list_srv;
+      if (!get_controller_list_client_.call(get_list_srv) || !get_list_srv.response.success)
+      {
+        ROS_ERROR("[JoyControl] Failed to get current controller");
+        return;
+      }
+      
+      std::string current_controller = get_list_srv.response.current_controller;
+      ROS_INFO("[JoyControl] Current controller: %s", current_controller.c_str());
+      
+      // 如果当前已经在dance_controller，切换到amp_controller
+      if (current_controller == "dance_controller")
+      {
+        ROS_INFO("[JoyControl] Switching from DanceController to AmpWalkController");
+        if (callSwitchControllerService("amp_controller"))
+        {
+          ROS_INFO("[JoyControl] Successfully switched to AmpWalkController");
+        }
+        else
+        {
+          ROS_ERROR("[JoyControl] Failed to switch to AmpWalkController");
+        }
+      }
+      else
+      {
+        // 否则切换到dance_controller（通过专门的trigger_dance服务）
+        ROS_INFO("[JoyControl] Switching to DanceController");
+        std_srvs::Trigger srv;
+        if (trigger_dance_client_.call(srv) && srv.response.success)
+        {
+          ROS_INFO("[JoyControl] Successfully switched to DanceController: %s", srv.response.message.c_str());
+        }
+        else
+        {
+          ROS_ERROR("[JoyControl] Failed to switch to DanceController");
+        }
+      }
+    }
+
     /**
      * @brief 通用的平滑角度控制函数，包含死区处理、速度限制和平滑更新
      * @param raw_input 原始摇杆输入值 [-1.0, 1.0]
@@ -1967,6 +2018,8 @@ namespace ocs2
     ros::ServiceClient trigger_fall_stand_up_client_;
     // Fall down state service (SetBool)
     ros::ServiceClient set_fall_down_state_client_;
+    // Dance controller trigger service
+    ros::ServiceClient trigger_dance_client_;
     bool robot_launched_{false};
     ros::Time last_status_check_time_;
     bool real_{false};

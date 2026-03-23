@@ -115,7 +115,6 @@ namespace humanoid_controller
      * @return 当前控制器名称，如果是MPC控制器则返回空字符串
      */
     std::string getCurrentControllerName();
-    
 
     /**
      * @brief 检查控制器是否存在
@@ -293,6 +292,12 @@ namespace humanoid_controller
                                        std_srvs::Trigger::Response &res);
 
     /**
+     * @brief ROS服务回调：切换到Dance控制器
+     */
+    bool switchToDanceControllerCallback(std_srvs::Trigger::Request &req,
+                                         std_srvs::Trigger::Response &res);
+
+    /**
      * @brief 更新按类型分组的控制器列表
      */
     void updateControllerListsByType();
@@ -317,6 +322,7 @@ namespace humanoid_controller
     ros::ServiceServer set_rl_switch_mode_srv_;       ///< 设置RL切换模式服务
     ros::ServiceServer set_fall_down_state_srv_;     ///< 设置倒地状态服务
     ros::ServiceServer switch_to_vmp_controller_srv_; ///< 切换到VMP控制器服务
+    ros::ServiceServer switch_to_dance_controller_srv_; ///< 切换到Dance控制器服务
     ros::NodeHandle* nh_ptr_;                       ///< ROS节点句柄指针
 
     // RL切换模式：true 直接切换到RL；false 使用MPC过渡

@@ -4,16 +4,22 @@
 # type: 具体控制器类型，可选值：MPC, AMP_CONTROLLER, FALL_STAND_CONTROLLER
 
 controllers:
-  # - name: "fall_stand_controller"
-  #   class: "FALL_STAND_CONTROLLER"  # 倒地起身控制器
-  #   type: "FALL_STAND_CONTROLLER"   # 具体控制器类型
-  #   config_file: "rl/fall_stand_param.info"  # 相对于版本配置目录的路径
-  #   enabled: true  # 是否启用该控制器
-  # - name: "amp_controller"
-  #   class: "BASE_CONTROLLER"  # 基础行走控制器
-  #   type: "AMP_CONTROLLER"    # 具体控制器类型
-  #   config_file: "rl/amp_param.info" 
-  #   enabled: true  
+  - name: "dance_controller"
+    class: "DANCE_CONTROLLER"  # 舞蹈控制器
+    type: "DANCE_CONTROLLER"  # 具体控制器类型
+    config_file: "rl/dance_param.info"  # 相对于版本配置目录的路径
+    enabled: true  # 是否启用该控制器  
+  - name: "fall_stand_controller"
+    class: "FALL_STAND_CONTROLLER"  # 倒地起身控制器
+    type: "FALL_STAND_CONTROLLER"   # 具体控制器类型
+    config_file: "rl/fall_stand_param.info"  # 相对于版本配置目录的路径
+    enabled: true  # 是否启用该控制器
+  - name: "amp_controller"
+    class: "BASE_CONTROLLER"  # 基础行走控制器
+    type: "AMP_CONTROLLER"    # 具体控制器类型
+    config_file: "rl/amp_param.info" 
+    enabled: true  
+
 
 
 

@@ -6,6 +6,7 @@
 #include "humanoid_controllers/rl/AmpWalkController.h"
 #include "humanoid_controllers/rl/DepthWalkController.h"
 #include "humanoid_controllers/rl/VMPController.h"
+#include "humanoid_controllers/rl/DanceController.h"
 #include <algorithm>
 #include <ros/ros.h>
 #include <yaml-cpp/yaml.h>
@@ -130,9 +131,10 @@ namespace humanoid_controller
     {
       auto* current_controller = controllers_[current_controller_name_].get();
       bool current_is_fall_down_controller = current_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER;
-      if (!current_controller->isReadyToExit() && current_is_fall_down_controller)
+      bool current_is_dance_controller = current_controller->getType() == RLControllerType::DANCE_CONTROLLER;
+      if (!current_controller->isReadyToExit() && (current_is_fall_down_controller || current_is_dance_controller))
       {
-        ROS_WARN("[RLControllerManager] Current controller is fall down controller, switch to Next controller blocked!");
+        ROS_WARN("[RLControllerManager] Current controller is mimic controller, switch to Next controller blocked!");
         return false;
       }
     }
@@ -344,6 +346,7 @@ namespace humanoid_controller
     return current_controller_name_;
   }
 
+
   bool RLControllerManager::hasController(const std::string& name)
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -518,6 +521,11 @@ namespace humanoid_controller
           // VMP 控制器
           controller = std::make_unique<VMPController>(name, config_file_abs, nh, ros_logger);
         }
+        else if (type == RLControllerType::DANCE_CONTROLLER)
+        {
+          // Dance 控制器
+          controller = std::make_unique<DanceController>(name, config_file_abs, nh, ros_logger);
+        }
         else
         {
           ROS_WARN("[RLControllerManager] Controller type '%s' not yet implemented, skipping", type_str.c_str());
@@ -582,6 +590,8 @@ namespace humanoid_controller
                                                    &RLControllerManager::setFallDownStateCallback, this);
     switch_to_vmp_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_vmp_controller",
                                                         &RLControllerManager::switchToVMPControllerCallback, this);
+    switch_to_dance_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_dance_controller",
+                                                          &RLControllerManager::switchToDanceControllerCallback, this);
 
     ROS_INFO("[RLControllerManager] ROS services initialized");
     return true;
@@ -1058,6 +1068,52 @@ namespace humanoid_controller
 
     return true;
   }
+  
+  
+  bool RLControllerManager::switchToDanceControllerCallback(std_srvs::Trigger::Request &req,
+                                                            std_srvs::Trigger::Response &res)
+  {
+    ROS_INFO("[RLControllerManager] Received switch to Dance controller request");
+
+    // 查找Dance控制器
+    std::string dance_controller_name;
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      for (const auto& pair : controllers_)
+      {
+        if (pair.second->getType() == RLControllerType::DANCE_CONTROLLER)
+        {
+          dance_controller_name = pair.first;
+          break;
+        }
+      }
+    }
+
+    if (dance_controller_name.empty())
+    {
+      res.success = false;
+      res.message = "Dance controller not found. Please check if Dance controller is enabled in rl_controllers.yaml";
+      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+      return true;
+    }
+
+    // 执行控制器切换
+    bool switch_ok = switchController(dance_controller_name);
+    if (!switch_ok)
+    {
+      res.success = false;
+      res.message = "Failed to switch to Dance controller: " + dance_controller_name;
+      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+      return true;
+    }
+
+    res.success = true;
+    res.message = "Successfully switched to Dance controller: " + dance_controller_name;
+    ROS_INFO("[RLControllerManager] %s", res.message.c_str());
+
+    return true;
+  }
+
 
 } // namespace humanoid_controller
 

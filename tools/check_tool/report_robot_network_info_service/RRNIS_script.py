@@ -14,6 +14,41 @@ def get_ip_by_interface(interface_name):
     return None  # 如果没有找到该接口的IP地址，则返回None
 
 
+def wait_for_ip_address(interface_name, max_retries=30, retry_interval=2):
+    """
+    等待网络接口获取IP地址
+    :param interface_name: 网络接口名称
+    :param max_retries: 最大重试次数
+    :param retry_interval: 每次重试的间隔（秒）
+    :return: IP地址，如果超时则返回None
+    """
+    for attempt in range(max_retries):
+        ip_address = get_ip_by_interface(interface_name)
+        if ip_address and ip_address != "127.0.0.1":
+            print(f"成功获取IP地址: {ip_address} (尝试 {attempt + 1}/{max_retries})")
+            return ip_address
+        
+        # 检查接口是否存在且已启动
+        try:
+            net_if_stats = psutil.net_if_stats()
+            if interface_name in net_if_stats:
+                iface_stats = net_if_stats[interface_name]
+                if not iface_stats.isup:
+                    print(f"接口 {interface_name} 尚未启动，等待中... (尝试 {attempt + 1}/{max_retries})")
+                else:
+                    print(f"接口 {interface_name} 已启动，但尚未获取IP地址，等待中... (尝试 {attempt + 1}/{max_retries})")
+            else:
+                print(f"接口 {interface_name} 不存在，等待中... (尝试 {attempt + 1}/{max_retries})")
+        except Exception as e:
+            print(f"检查接口状态时出错: {e}")
+        
+        if attempt < max_retries - 1:  # 最后一次尝试不需要等待
+            time.sleep(retry_interval)
+    
+    print(f"警告: 在 {max_retries * retry_interval} 秒内未能获取到IP地址")
+    return None
+
+
 def get_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -26,16 +61,30 @@ def get_ip():
     return ip_address
 
 
-def get_wifi():
-    try:
-        result = (
-            os.popen("nmcli -t -f active,ssid dev wifi | egrep '^yes' | cut -d\: -f2")
-            .read()
-            .strip()
-        )
-        return result if result else "Unknown"
-    except Exception as e:
-        return f"Error: {e}"
+def get_wifi(max_retries=15, retry_interval=2):
+    """
+    获取WiFi SSID，带重试机制
+    :param max_retries: 最大重试次数
+    :param retry_interval: 每次重试的间隔（秒）
+    :return: WiFi SSID，如果未连接则返回"Unknown"
+    """
+    for attempt in range(max_retries):
+        try:
+            result = (
+                os.popen("nmcli -t -f active,ssid dev wifi | egrep '^yes' | cut -d\: -f2")
+                .read()
+                .strip()
+            )
+            if result:
+                return result
+        except Exception as e:
+            if attempt == max_retries - 1:  # 最后一次尝试
+                return f"Error: {e}"
+        
+        if attempt < max_retries - 1:  # 最后一次尝试不需要等待
+            time.sleep(retry_interval)
+    
+    return "Unknown"
 
 def check_file():
     file_path = "/home/lab/.config/lejuconfig/ec_master.key"
@@ -61,9 +110,21 @@ def report_info():
 
     # 检测以wl开头的接口获取IP地址
     interface_name = os.popen("ls /sys/class/net/ | grep '^wl' | head -1").read().strip() or "wlp3s0"
-    ip_address = get_ip_by_interface(interface_name)
-    # ip_address = get_ip()
-    wifi_ssid = get_wifi()
+    
+    # 等待WiFi接口获取IP地址（最多等待60秒，每2秒检查一次）
+    print(f"正在等待接口 {interface_name} 获取IP地址...")
+    ip_address = wait_for_ip_address(interface_name, max_retries=30, retry_interval=2)
+    
+    # 如果WiFi接口没有获取到IP，尝试使用备用方法
+    if not ip_address or ip_address == "127.0.0.1":
+        print("WiFi接口未获取到IP，尝试使用备用方法获取IP地址...")
+        ip_address = get_ip()
+        if ip_address == "127.0.0.1":
+            ip_address = None
+    
+    # 获取WiFi SSID（带重试机制）
+    print("正在获取WiFi SSID...")
+    wifi_ssid = get_wifi(max_retries=15, retry_interval=2)
     license_check = check_file()
 
     if not webhook_url or not robot_serial_number:

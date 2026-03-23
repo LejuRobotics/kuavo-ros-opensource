@@ -505,7 +505,7 @@ namespace humanoid_controller
     if (!yaw_offset_initialized)
     {
       auto mat = sensor_data.quat_.toRotationMatrix();
-      double current_yaw = std::atan2(mat(1, 2), mat(0, 2));
+      double current_yaw = std::atan2(mat(1, 0), mat(0, 0));
       my_yaw_offset_ = 0.0 - current_yaw;
       // 归一化到[-π, π]范围
       while (my_yaw_offset_ > M_PI) my_yaw_offset_ -= 2 * M_PI;
