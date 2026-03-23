@@ -21,6 +21,8 @@ namespace humanoid_controller
     MPC = 0,                  ///< MPC控制器
     AMP_CONTROLLER,           ///< AMP行走控制器
     FALL_STAND_CONTROLLER,    ///< 倒地起身控制器
+    PERCEPTION_LOCO_CONTROLLER, ///< 感知行走控制器
+    DEPTH_LOCO_CONTROLLER,
     VMP_CONTROLLER,           ///< VMP控制器
   };
 
@@ -83,6 +85,16 @@ namespace humanoid_controller
     else if (type_str == "FALL_STAND_CONTROLLER")
     {
       type = RLControllerType::FALL_STAND_CONTROLLER;
+      return true;
+    }
+    else if (type_str == "PERCEPTION_LOCO_CONTROLLER")
+    {
+      type = RLControllerType::PERCEPTION_LOCO_CONTROLLER;
+      return true;
+    }
+    else if (type_str == "DEPTH_LOCO_CONTROLLER")
+    {
+      type = RLControllerType::DEPTH_LOCO_CONTROLLER;
       return true;
     }
     else if (type_str == "VMP_CONTROLLER")

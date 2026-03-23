@@ -24,6 +24,12 @@ public:
                                   const Eigen::VectorXd& a_desired);
 
 private:
+    // 获取机器人版本
+    static std::string getRobotVersion();
+    
+    // 计算手臂关节的起始索引（考虑waist关节）
+    static int getArmStartIndex();
+    
     pinocchio::Model model_;        // 机器人模型
     pinocchio::Data data_;          // 模型数据
     Eigen::VectorXd kp_;            // 比例增益

@@ -37,6 +37,7 @@
 #include "std_srvs/SetBool.h"
 #include "std_msgs/Float64.h"
 #include "std_msgs/Float64.h"
+#include "std_msgs/Float64MultiArray.h"
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Core>
 #include <csignal>
@@ -45,6 +46,7 @@
 #include "kuavo_msgs/lejuClawCommand.h"
 #include "sensor_msgs/JointState.h"
 
+#include "mujoco_cpp/depth_camera_config.h"
 #include "joint_address.hpp"
 #include "dexhand_mujoco_node.h"
 #include "dexhand/json.hpp"
@@ -52,6 +54,13 @@
 #if defined(USE_DDS) || defined(USE_LEJU_DDS)
 #include "mujoco_dds.h"
 #endif
+
+//  ******************* raycaster camera *********************
+
+#include "RayCasterCamera.h"
+#include "sensor_msgs/Image.h"
+#include "sensor_msgs/CameraInfo.h"
+#include <opencv2/opencv.hpp>
 
 //  ************************* lcm ****************************
 
@@ -92,6 +101,35 @@ namespace
   ros::Publisher pubOdom;          // 新增odom发布者
   ros::Publisher pubTimeDiff;
   bool pure_sim = false;
+
+  // raycaster camera
+  ros::Publisher depthImagePub;
+  ros::Publisher depthImageArrayPub;
+  std::unique_ptr<RayCasterCamera> g_depth_camera;
+  const int DEPTH_CAMERA_WIDTH = 64;  // 64
+  const int DEPTH_CAMERA_HEIGHT = 36;  // 36
+  const mjtNum FOCAL_LENGTH = 2.12;
+  const mjtNum HORIZONTAL_APERTURE = 4.24;  // 4.24
+  const mjtNum VERTICAL_APERTURE = 2.4480;  // 2.4480
+  const mjtNum DEPTH_CAMERA_MIN_RANGE = 0.17;
+  const mjtNum DEPTH_CAMERA_MAX_RANGE = 2.5;
+  // raycaster camera thread
+  std::thread depth_thread;
+  std::atomic<bool> depth_thread_running{true};
+  std::mutex mujoco_data_mutex;  // Protects access to m and d
+  double depth_frequency = 60.0;  // Hz
+
+  // Depth image history buffer (6*6+7=43 frames)
+  struct DepthImageFrame {
+      std::vector<float> data;
+      ros::Time timestamp;
+  };
+  static const int DEPTH_BUFFER_SIZE = 43;
+  std::array<DepthImageFrame, DEPTH_BUFFER_SIZE> depth_buffer;
+  size_t current_buffer_index = 0;
+  bool depth_buffer_filled = false;  // Track if buffer has been filled once
+  std::mutex depth_buffer_mutex;
+  ros::Publisher depthHistoryPub;
 
 #ifdef USE_DDS
   std::unique_ptr<MujocoDdsClient<unitree_hg::msg::dds_::LowCmd_, unitree_hg::msg::dds_::LowState_>> dds_client;
@@ -152,10 +190,123 @@ namespace
   std::vector<double> fixed_leg_l_qpos;  // 左腿关节固定位置
   std::vector<double> fixed_leg_r_qpos;  // 右腿关节固定位置
 
+  void ResetDepthBufferState()
+  {
+    std::unique_lock<std::mutex> buffer_lock(depth_buffer_mutex);
+    current_buffer_index = 0;
+    depth_buffer_filled = false;
+    for (DepthImageFrame &frame : depth_buffer)
+    {
+      frame.data.clear();
+      frame.timestamp = ros::Time();
+    }
+  }
+
+  bool ConfigureDepthCameraForCurrentModel()
+  {
+    std::unique_lock<std::mutex> data_lock(mujoco_data_mutex);
+    g_depth_camera.reset();
+
+    if (!mujoco_cpp::ModelHasTargetDepthCamera(m))
+    {
+      data_lock.unlock();
+      ResetDepthBufferState();
+      ROS_INFO("[RayCasterCamera] Target camera '%s' not found in model, depth camera disabled.",
+               mujoco_cpp::kDepthCameraName);
+      return false;
+    }
+
+    try
+    {
+      auto depth_camera = std::make_unique<RayCasterCamera>(
+          m, d,
+          mujoco_cpp::kDepthCameraName,
+          FOCAL_LENGTH,
+          HORIZONTAL_APERTURE,
+          DEPTH_CAMERA_WIDTH,
+          DEPTH_CAMERA_HEIGHT,
+          std::array<mjtNum, 2>{DEPTH_CAMERA_MIN_RANGE, DEPTH_CAMERA_MAX_RANGE},
+          VERTICAL_APERTURE);
+      depth_camera->set_num_thread(16);
+      g_depth_camera = std::move(depth_camera);
+      data_lock.unlock();
+      ResetDepthBufferState();
+      ROS_INFO("[RayCasterCamera] Depth camera initialized successfully at %s",
+               mujoco_cpp::kDepthCameraName);
+      return true;
+    }
+    catch (const std::exception &e)
+    {
+      data_lock.unlock();
+      ResetDepthBufferState();
+      ROS_WARN("[RayCasterCamera] Initialization failed for %s: %s",
+               mujoco_cpp::kDepthCameraName, e.what());
+      return false;
+    }
+  }
+
   // control noise variables
   // mjtNum* ctrlnoise = nullptr;
 
   using Seconds = std::chrono::duration<double>;
+
+  //---------------------------------- depth history publisher -----------------------------------
+  
+  void publish_depth_history()
+  {
+    std::unique_lock<std::mutex> lock(depth_buffer_mutex);
+
+    // From 6*7+1=43 frames, take frame indices: 0, 6, 12, 18, 24, 30, 36, 42 (8 frames total)
+    std::vector<int> selected_indices;
+    for (int i = 0; i < 7; ++i) {
+      selected_indices.push_back(i * 6); // 1st frame of each group
+    }
+    selected_indices.push_back(DEPTH_BUFFER_SIZE - 1);  // Last remaining frame
+    
+    std::vector<float> first_frame_data;
+    if (!depth_buffer[0].data.empty()) {
+      first_frame_data = depth_buffer[0].data;
+    }
+
+    // if (!depth_buffer_filled) {
+    //   printf("depth buffer filled: %d; cur ids: %d \n", depth_buffer_filled, current_buffer_index);
+    // }
+    
+    ros::Time start_time = ros::Time::now();
+    std_msgs::Float64MultiArray history_array_msg;
+    for (int i = 0; i < selected_indices.size(); ++i) {
+    // for (int i = selected_indices.size() - 1; i >= 0; --i) {
+      int idx = selected_indices[i];
+      // go backward to find history frame
+      // int buffer_pos = (current_buffer_index - 1 - (DEPTH_BUFFER_SIZE - 1 - idx) + DEPTH_BUFFER_SIZE * 100) % DEPTH_BUFFER_SIZE;
+      int buffer_pos = ((current_buffer_index - 1) - idx + DEPTH_BUFFER_SIZE * 100) % DEPTH_BUFFER_SIZE;
+      
+      // If buffer is not yet full and this position is beyond the current write point, use first frame
+      if (!depth_buffer_filled && buffer_pos >= current_buffer_index) {
+        for (float val : first_frame_data) {
+          history_array_msg.data.push_back(val);
+        }
+        if (current_buffer_index < 3){
+          printf("%d ", buffer_pos);
+        }
+      } else if (!depth_buffer[buffer_pos].data.empty()) {
+        for (float val : depth_buffer[buffer_pos].data) {
+          history_array_msg.data.push_back(val);
+        }
+      } else if (!first_frame_data.empty()) {
+        // If this position is empty but buffer is full, use first frame as fallback
+        for (float val : first_frame_data) {
+          history_array_msg.data.push_back(val);
+        }
+      }
+    }
+    // if (!depth_buffer_filled && current_buffer_index < 3){
+    //   printf("\n");
+    // }
+    lock.unlock();
+    depthHistoryPub.publish(history_array_msg);
+  }
+  
 
   /************************************* Joint Address******************************************/
   // This section defines the joint addresses for various body parts of the robot.
@@ -744,6 +895,11 @@ namespace
     queueMutex.unlock();
     uint64_t step_count = 0;
     sim_time = ros::Time::now();
+
+    // Depth history publishing timer (60Hz)
+    ros::Time last_depth_history_pub_time = ros::Time::now();
+    double depth_history_interval = 1.0 / 60.0;  // 60Hz
+
     // run until asked to exit
     ros::Rate loop_rate(frequency);
     while (!sim.exitrequest.load())
@@ -787,6 +943,15 @@ namespace
         is_chassic_cmd_changed = false;
         is_chassic_cmd_vel_changed = false;
         joint_tau_cmd = std::vector<double>(numJoints, 0);
+
+        if (depth_thread.joinable() && mnew && dnew)
+        {
+          ConfigureDepthCameraForCurrentModel();
+        }
+        else
+        {
+          ResetDepthBufferState();
+        }
 
         claw_cmd_updated = false;
         claw_cmd = std::vector<double>(numClawJoints, 0);
@@ -1103,6 +1268,13 @@ namespace
             // }
           }
           publish_ros_data(d, sim.run);
+
+          // ros::Time current_time = ros::Time::now();
+          // if ((current_time - last_depth_history_pub_time).toSec() >= depth_history_interval)
+          // {
+          //   publish_depth_history();
+          //   last_depth_history_pub_time = current_time;
+          // }
         }
       } // release std::lock_guard<std::mutex>
     }
@@ -1467,6 +1639,13 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   pubGroundTruth = g_nh_ptr->advertise<nav_msgs::Odometry>("/ground_truth/state", 10);
   pubOdom = g_nh_ptr->advertise<nav_msgs::Odometry>("/odom", 10);
   pubTimeDiff = g_nh_ptr->advertise<std_msgs::Float64>("/monitor/time_cost/mujoco_loop_time", 10);
+  bool camera_available = ConfigureDepthCameraForCurrentModel();
+  if (camera_available) {
+    depthImagePub = g_nh_ptr->advertise<sensor_msgs::Image>(mujoco_cpp::kDepthImageTopic, 10);
+    depthImageArrayPub = g_nh_ptr->advertise<std_msgs::Float64MultiArray>(mujoco_cpp::kDepthImageArrayTopic, 10);
+    depthHistoryPub = g_nh_ptr->advertise<std_msgs::Float64MultiArray>(mujoco_cpp::kDepthHistoryTopic, 10);
+  }
+
   // // 创建服务
   ros::ServiceServer service = g_nh_ptr->advertiseService("sim_start", handleSimStart);
 
@@ -1476,6 +1655,122 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   ros::Subscriber jointCmdSub = g_nh_ptr->subscribe("/joint_cmd", 10, jointCmdCallback);
 #endif
   ros::Subscriber extWrenchSub = g_nh_ptr->subscribe("/external_wrench", 10, extWrenchCallback);
+
+  if (camera_available) {
+    depth_thread_running.store(true);
+    depth_thread = std::thread([]() {
+        ros::Rate depth_rate(depth_frequency);
+        while (depth_thread_running.load() && ros::ok()) {
+            // Lock mutex to safely copy MuJoCo data if needed
+            std::unique_lock<std::mutex> lock(mujoco_data_mutex);
+
+            if (g_depth_camera) {
+                // auto t0 = std::chrono::high_resolution_clock::now();
+                g_depth_camera->compute_distance();
+                // auto t1 = std::chrono::high_resolution_clock::now();
+                // double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+                // std::cout << "RayCasterCamera runtime: " << ms << " ms" << std::endl;
+
+                // Process and publish depth image
+                sensor_msgs::Image depth_msg;
+                depth_msg.header.stamp = ros::Time::now();
+                depth_msg.header.frame_id = mujoco_cpp::kDepthCameraFrameId;
+                depth_msg.height = DEPTH_CAMERA_HEIGHT;
+                depth_msg.width = DEPTH_CAMERA_WIDTH;
+                depth_msg.encoding = "32FC1";
+                depth_msg.step = DEPTH_CAMERA_WIDTH * sizeof(float);
+                depth_msg.is_bigendian = 0;
+                depth_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH * sizeof(float));
+                float* depth_data = reinterpret_cast<float*>(depth_msg.data.data());
+
+                if (g_depth_camera->dist != nullptr) {
+                    // const mjtNum range_inv = 1.0 / (DEPTH_CAMERA_MAX_RANGE - DEPTH_CAMERA_MIN_RANGE);
+                    for (int v = 0; v < DEPTH_CAMERA_HEIGHT; ++v) {
+                        for (int h = 0; h < DEPTH_CAMERA_WIDTH; ++h) {
+                            int pixel_idx = v * DEPTH_CAMERA_WIDTH + h;
+                            mjtNum dist = g_depth_camera->dist[pixel_idx];
+                            // float norm = (dist - DEPTH_CAMERA_MIN_RANGE) * range_inv;
+                            // norm = std::clamp(norm, 0.0f, 1.0f);
+                            // depth_data[pixel_idx] = norm;
+                            dist = std::clamp(dist, mjtNum(0), DEPTH_CAMERA_MAX_RANGE);
+                            depth_data[pixel_idx] = dist / DEPTH_CAMERA_MAX_RANGE;
+                        }
+                    }
+                }
+  
+                // Apply Gaussian blur
+                cv::Mat depth_mat(DEPTH_CAMERA_HEIGHT, DEPTH_CAMERA_WIDTH, CV_32FC1, depth_data);
+                cv::GaussianBlur(depth_mat, depth_mat, cv::Size(3, 3), 1, 1);
+
+                // Update circular buffer with current frame
+                std::unique_lock<std::mutex> buffer_lock(depth_buffer_mutex);
+                depth_buffer[current_buffer_index].data.assign(depth_data, depth_data + DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);  // deep copy
+                depth_buffer[current_buffer_index].timestamp = depth_msg.header.stamp;
+                current_buffer_index = (current_buffer_index + 1) % DEPTH_BUFFER_SIZE;
+                
+                // Mark buffer as filled once we've cycled through all 43 frames
+                if (current_buffer_index == 0 && !depth_buffer_filled) {
+                  depth_buffer_filled = true;
+                }
+                buffer_lock.unlock();
+
+                std_msgs::Float64MultiArray depth_array_msg;
+                depth_array_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);
+                for (int i = 0; i < DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH; ++i) {
+                    depth_array_msg.data[i] = depth_data[i];
+                }
+                depthImagePub.publish(depth_msg);
+                depthImageArrayPub.publish(depth_array_msg);
+
+                // Publish depth history buffer
+                // From 6*7+1=43 frames, take frame indices: 0, 6, 12, 18, 24, 30, 36, 42 (8 frames total)
+                std::unique_lock<std::mutex> lock(depth_buffer_mutex);
+                std::vector<int> selected_indices;
+                // printf("buf filled:%d | ", depth_buffer_filled);
+                for (int i = 0; i < 6 * 8; i += 6) {
+                  int idx = (current_buffer_index + i) % DEPTH_BUFFER_SIZE;
+                  // printf("idx %d ", idx);
+                  selected_indices.push_back(idx); // 1st frame of each group
+                }
+                
+                std::vector<float> first_frame_data;
+                if (!depth_buffer[0].data.empty()) {
+                  first_frame_data = depth_buffer[0].data;
+                }
+                
+                ros::Time start_time = ros::Time::now();
+                std_msgs::Float64MultiArray history_array_msg;
+                for (int i = 0; i < selected_indices.size(); ++i) {
+                  int idx = selected_indices[i];
+                  // printf("selected idx %d | ", idx);
+                  
+                  // If buffer is not yet full and the idx is beyond the processed point, use first frame to pad
+                  if (!depth_buffer_filled && idx >= current_buffer_index) {
+                    for (float val : first_frame_data) {
+                      history_array_msg.data.push_back(val);
+                    }
+                  } else if (!depth_buffer[idx].data.empty()) {
+                    for (float val : depth_buffer[idx].data) {
+                      history_array_msg.data.push_back(val);
+                    }
+                  } else if (!first_frame_data.empty()) {
+                    // If this position is empty but buffer is full, use first frame as fallback
+                    for (float val : first_frame_data) {
+                      history_array_msg.data.push_back(val);
+                    }
+                  }
+                }
+                // printf("\n");
+                lock.unlock();
+                depthHistoryPub.publish(history_array_msg);
+            }
+
+            lock.unlock();
+            depth_rate.sleep();
+        }
+        std::cout << "Depth thread exited." << std::endl;
+    });
+  }
 
 #ifdef USE_DDS
       // 初始化DDS通信
@@ -1628,6 +1923,13 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   }
 
   PhysicsLoop(*sim);
+
+  if (depth_thread.joinable()) {
+      depth_thread_running.store(false);
+      if (depth_thread.joinable()) {
+          depth_thread.join();
+      }
+  }
 
   // delete everything we allocated
 

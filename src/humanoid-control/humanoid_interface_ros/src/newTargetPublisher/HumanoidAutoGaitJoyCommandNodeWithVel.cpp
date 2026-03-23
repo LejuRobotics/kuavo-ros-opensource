@@ -163,6 +163,7 @@ namespace ocs2
 #define JOYSTICK_BEITONG_MAP_JSON "bt2pro"
 #define JOYSTICK_BEITONG_BUTTON_NUM 16
 #define JOYSTICK_AXIS_NUM 8
+#define WAIST_YAW_MAX_ANGLE_DEG 180.0  // 腰部最大旋转角度（度），±180度
 
   class JoyControl
   {
@@ -380,6 +381,7 @@ namespace ocs2
       switch_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchController>("/humanoid_controller/switch_controller");
       get_controller_list_client_ = nodeHandle_.serviceClient<kuavo_msgs::getControllerList>("/humanoid_controller/get_controller_list");
       switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
+      switch_to_previous_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_previous_controller");
       auto_gait_change_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_auto_gait");
       joy_sub_ = nodeHandle_.subscribe(current_joy_topic_, 10, &JoyControl::joyCallback, this);
       
@@ -1016,6 +1018,15 @@ namespace ocs2
         // 发布头部控制命令
         controlHead(current_head_yaw_, current_head_pitch_);
         // return;
+
+        // RT + X: 切换到上一个控制器
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
+        {
+          ROS_INFO("[JoyControl] RT+BUTTON_RL: switch to previous controller");
+          switchToPreviousController();
+          old_joy_msg_ = *joy_msg;
+          return;
+        }
 
         if(!joy_execute_action_)
         {
@@ -1832,6 +1843,27 @@ namespace ocs2
       }
     }
 
+    bool switchToPreviousController()
+    {
+      kuavo_msgs::switchToNextController srv;
+      
+      if (switch_to_previous_controller_client_.call(srv)) {
+        if (srv.response.success) {
+          ROS_INFO("Switch to previous controller successful: %s", srv.response.message.c_str());
+          ROS_INFO("Switched from %s (index: %d) to %s (index: %d)", 
+                   srv.response.current_controller.c_str(), srv.response.current_index,
+                   srv.response.next_controller.c_str(), srv.response.next_index);
+          return true;
+        } else {
+          ROS_ERROR("Switch to previous controller failed: %s", srv.response.message.c_str());
+          return false;
+        }
+      } else {
+        ROS_ERROR("Switch to previous controller service call failed");
+        return false;
+      }
+    }
+
     bool changeAutoGaitStatus(bool flag)
     {
       std_srvs::SetBool srv;
@@ -1911,6 +1943,7 @@ namespace ocs2
     ros::ServiceClient switch_controller_client_;
     ros::ServiceClient get_controller_list_client_;
     ros::ServiceClient switch_to_next_controller_client_;
+    ros::ServiceClient switch_to_previous_controller_client_;
     ros::ServiceClient auto_gait_change_client_;
     
     // 楼梯检测相关

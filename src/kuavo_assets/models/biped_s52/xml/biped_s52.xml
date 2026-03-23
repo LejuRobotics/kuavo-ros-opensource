@@ -6,6 +6,7 @@
     <joint limited="true" armature="0.05" damping="0.02" frictionloss="0.02"/>
     <motor ctrllimited="true" ctrlrange="-100 100"/>
     <!-- <geom contype="1" conaffinity="1" condim="1" solref="0.005 1"/> -->
+    <!-- <geom solref="0.01 0.35"/> -->
     <equality solref="0.005 1"/>
     <default class="collision">
       <!-- User parameter for geoms is used to identify collision types -->
@@ -173,6 +174,11 @@
         <!-- waist_yaw碰撞体 -->
         <geom type="capsule" size="0.13 0.06" pos="0.008 0 0.2486" quat="0.707388 0.706825 0 0" class="collision"/>
         <geom type="capsule" size="0.13 0.03" pos="0.008 0 0.0886" class="collision"/>
+        <body name="waist_camera_link" pos="0.09538 0 -0.01091" quat="0.868 0 0.497 0">
+          <inertial pos="0.0048485 0.00025646 0.013977" mass=".0483" diaginertia="5.9781e-05 5.8328e-06 5.9293e-05"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_camera"/>
+          <camera name="waist_camera" pos="0.01229 0.02375 0.01452" xyaxes="0 -1 0 0 0 1" fovy="80" />
+        </body>
         <body name="zarm_l1_link" pos="-0.003 0.2527 0.283">
           <inertial pos="0.00080154 -0.00930333 0.00031203" quat="0.535076 0.531531 -0.469812 0.458743" mass="0.94521" diaginertia="0.00133871 0.00133347 0.000886059"/>
           <joint name="zarm_l1_joint" pos="0 0 0" axis="0 1 0" range="-3.14159 1.5708" actuatorfrcrange="-66 66" damping="0.02"/>

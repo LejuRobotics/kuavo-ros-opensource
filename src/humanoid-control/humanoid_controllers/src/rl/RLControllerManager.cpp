@@ -4,6 +4,7 @@
 #include "humanoid_controllers/rl/RLControllerManager.h"
 #include "humanoid_controllers/rl/FallStandController.h"
 #include "humanoid_controllers/rl/AmpWalkController.h"
+#include "humanoid_controllers/rl/DepthWalkController.h"
 #include "humanoid_controllers/rl/VMPController.h"
 #include <algorithm>
 #include <ros/ros.h>
@@ -508,6 +509,10 @@ namespace humanoid_controller
           // AMP 走路控制器
           controller = std::make_unique<AmpWalkController>(name, config_file_abs, nh, ros_logger);
         }
+        else if (type == RLControllerType::DEPTH_LOCO_CONTROLLER)
+        {
+          controller = std::make_unique<DepthWalkController>(name, config_file_abs, nh, ros_logger);
+        }
         else if (type == RLControllerType::VMP_CONTROLLER)
         {
           // VMP 控制器
@@ -569,11 +574,14 @@ namespace humanoid_controller
                                                      &RLControllerManager::getControllerListCallback, this);
     switch_to_next_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_next_controller", 
                                                           &RLControllerManager::switchToNextControllerCallback, this);
+    switch_to_previous_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_previous_controller", 
+                                                              &RLControllerManager::switchToPreviousControllerCallback, this);
+    set_rl_switch_mode_srv_ = nh.advertiseService("/humanoid_controller/set_rl_switch_mode",
+                                                  &RLControllerManager::setRLSwitchModeCallback, this);
     set_fall_down_state_srv_ = nh.advertiseService("/humanoid_controller/set_fall_down_state",
                                                    &RLControllerManager::setFallDownStateCallback, this);
     switch_to_vmp_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_vmp_controller",
                                                         &RLControllerManager::switchToVMPControllerCallback, this);
-
 
     ROS_INFO("[RLControllerManager] ROS services initialized");
     return true;
@@ -608,11 +616,12 @@ namespace humanoid_controller
         controllers_by_type_[type].push_back(name);
       }
       
-      // 如果是AMP_CONTROLLER/VMP_CONTROLLER类型，添加到walk_controllers_列表
-      if (type == RLControllerType::AMP_CONTROLLER)
+      // 如果是AMP_CONTROLLER类型，添加到walk_controllers_列表
+      if (type == RLControllerType::AMP_CONTROLLER || type == RLControllerType::DEPTH_LOCO_CONTROLLER)
       {
         walk_controllers_.push_back(name);
       }
+
     }
   }
 
@@ -854,6 +863,113 @@ namespace humanoid_controller
     return true;
   }
 
+  bool RLControllerManager::switchToPreviousControllerCallback(kuavo_msgs::switchToNextController::Request &req, 
+                                                               kuavo_msgs::switchToNextController::Response &res)
+  {
+    // 获取当前状态
+    std::vector<std::string> walk_list;
+    std::string current_name;
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      walk_list = walk_controllers_;
+      current_name = current_controller_name_;
+    }
+    
+    if (walk_list.empty())
+    {
+      res.success = false;
+      res.message = "No controllers available";
+      res.current_controller = "";
+      res.next_controller = "";
+      res.current_index = -1;
+      res.next_index = -1;
+      ROS_WARN("[RLControllerManager] No controllers available for switching");
+      return true;
+    }
+    
+    // 保存当前控制器信息
+    int current_index = -1;
+    if (current_name.empty())
+    {
+      current_index = 0;  // MPC控制器在索引0
+    }
+    else
+    {
+      for (size_t i = 0; i < walk_list.size(); ++i)
+      {
+        if (walk_list[i] == current_name)
+        {
+          current_index = static_cast<int>(i);
+          break;
+        }
+      }
+    }
+    
+    res.current_controller = current_name.empty() ? "mpc" : current_name;
+    res.current_index = current_index;
+    
+    // 计算上一个控制器的索引（循环切换），只在BASE_CONTROLLER列表中切换
+    int prev_index = (current_index - 1 + static_cast<int>(walk_list.size())) % static_cast<int>(walk_list.size());
+    std::string prev_controller = walk_list[prev_index];
+    
+    // 实际执行控制器切换
+    bool switch_ok = true;
+    if (prev_index == 0)
+    {
+      // 切回 MPC 控制器
+      switchToBaseController();
+    }
+    else
+    {
+      if (!hasController(prev_controller))
+      {
+        ROS_WARN("[RLControllerManager] RL controller '%s' not found", prev_controller.c_str());
+        switch_ok = false;
+      }
+      else
+      {
+        switch_ok = switchController(prev_controller);
+      }
+    }
+    
+    if (!switch_ok)
+    {
+      res.success = false;
+      res.message = "Failed to switch to previous controller: " + prev_controller;
+      res.next_controller = "";
+      res.next_index = -1;
+      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+      return true;
+    }
+    
+    // 设置响应信息
+    res.next_controller = prev_controller;
+    res.next_index = prev_index;
+    res.success = true;
+    res.message = "Successfully switched from " + res.current_controller + " (index: " + std::to_string(res.current_index) + 
+                  ") to " + res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+    
+    ROS_INFO("[RLControllerManager] %s", res.message.c_str());
+    
+    return true;
+  }
+
+  bool RLControllerManager::setRLSwitchModeCallback(std_srvs::SetBool::Request &req,
+                                                    std_srvs::SetBool::Response &res)
+  {
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      direct_switch_to_rl_ = req.data;
+    }
+
+    res.success = true;
+    res.message = std::string("Set RL switch mode to ") +
+                  (req.data ? "direct" : "interpolated (via MPC)");
+
+    ROS_INFO("[RLControllerManager] %s", res.message.c_str());
+    return true;
+  }
+
   bool RLControllerManager::setFallDownStateCallback(std_srvs::SetBool::Request &req,
                                                      std_srvs::SetBool::Response &res)
   {
@@ -942,7 +1058,6 @@ namespace humanoid_controller
 
     return true;
   }
-
 
 } // namespace humanoid_controller
 

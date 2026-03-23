@@ -7,6 +7,7 @@
     <motor ctrllimited="true" ctrlrange="-100 100"/>
     <!-- <geom contype="1" conaffinity="1" condim="1" solref="0.005 1"/> -->
     <equality solref="0.005 1"/>
+    <!-- <equality solref="0.005 1"/> -->
     <default class="collision">
       <!-- User parameter for geoms is used to identify collision types -->
       <geom material="collision" contype="4" conaffinity="4" user="2" group="3" rgba="0.9 0.3 0.3 0.2"/>
@@ -167,12 +168,18 @@
         </body>
       </body>
       <body name="waist_yaw" pos="0 0 0.1114">
-        <inertial pos="0.04204947 -0.000608409 0.170535" quat="0.999626 0.00937051 -0.0256998 -0.000364493" mass="20.8448" diaginertia="0.353595 0.27201 0.213389"/>
+        <inertial pos="0.04204947 -0.000608409 0.170535" quat="0.999626 0.00937051 -0.0256998 -0.000364493" mass="20.7965" diaginertia="0.353595 0.27201 0.213389"/>
         <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" range="-3.14 3.14" actuatorfrcrange="-102 102"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_yaw"/>
         <!-- waist_yaw碰撞体 -->
         <geom type="capsule" size="0.13 0.06" pos="0.008 0 0.2486" quat="0.707388 0.706825 0 0" class="collision"/>
         <geom type="capsule" size="0.13 0.03" pos="0.008 0 0.0886" class="collision"/>
+        <!-- <body name="waist_camera_link" pos="0.09538 0 -0.01091" quat="0.868 0 0.497 0"> -->
+        <body name="waist_camera_link" pos="0.09538 0 -0.01491" quat="0.868 0 0.497 0">  <!-- 由于 waist_yaw 的 mesh 遮挡，略微向下移动相机位置 4mm -->
+          <inertial pos="0.0048485 0.00025646 0.013977" mass=".0483" diaginertia="5.9781e-05 5.8328e-06 5.9293e-05"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_camera"/>
+          <camera name="waist_camera" pos="0.01229 0.02375 0.01452" xyaxes="0 -1 0 0 0 1" fovy="80" />
+        </body>
         <body name="zarm_l1_link" pos="-0.003 0.2527 0.283">
           <inertial pos="0.00158747 -0.0104318 0.00030593" quat="0.704785 0.70897 -0.0243375 0.00683753" mass="0.96332" diaginertia="0.00140594 0.00138364 0.00087978"/>
           <joint name="zarm_l1_joint" pos="0 0 0" axis="0 1 0" range="-3.14159 1.5708" actuatorfrcrange="-66 66" damping="0.02"/>

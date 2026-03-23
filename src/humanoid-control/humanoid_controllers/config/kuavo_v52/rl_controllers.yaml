@@ -9,6 +9,3 @@ controllers:
     type: "AMP_CONTROLLER"    # 具体控制器类型
     config_file: "rl/skw_rl_param.info" 
     enabled: true  
-
-
-
