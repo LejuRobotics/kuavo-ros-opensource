@@ -1847,7 +1847,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     // currentObservation_.state(8) = 0.78626;
     // currentObservation_.state.segment(6 + 6, jointNum_) = defalutJointPos_;
     initial_status_ = HumanoidInterface_->getInitialState();
-    initial_status_.tail(armNumReal_) = defalutArmPosMPC_;
+    if (is_roban_) {
+      int arm_start = 12 + jointNumReal_ + waistNum_;
+      if (static_cast<int>(initial_status_.size()) >= arm_start + static_cast<int>(armNumReal_)) {
+        initial_status_.segment(arm_start, armNumReal_) = defalutArmPosMPC_;
+        arm_joint_pos_filter_.reset(defalutArmPosMPC_);
+      } else {
+        ROS_WARN_STREAM("[starting] initial_status_.size()=" << initial_status_.size()
+                        << " too small to set arm segment at " << arm_start
+                        << " (need " << armNumReal_ << ")");
+      }
+    }
+
     initial_statusRL_ = initialStateRL_;
     pull_up_status_ = initial_status_;
     cur_status_ = initial_status_;
