@@ -52,6 +52,7 @@
     <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
     <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
+    <arg name="run_mujoco_camera" default="true"/>   <!-- 是否运行mujoco的相机 -->
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -89,6 +90,7 @@
     <param name="torso_interpolation_max_velocity" value="0.06"/>
     <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
     <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
+    <param name="run_mujoco_camera" value="$(arg run_mujoco_camera)"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     
