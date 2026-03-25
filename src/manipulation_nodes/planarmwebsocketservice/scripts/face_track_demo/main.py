@@ -387,14 +387,7 @@ class FaceTrack:
                         self.find_face_in_picture(cv_image, detections, header, orig_size)
                     else:
                         # 未检测到人脸，发布空的人脸框消息（标记为无效）
-                        face_bbox = FaceBoundingBox()
-                        face_bbox.header = header
-                        face_bbox.x1 = 0
-                        face_bbox.y1 = 0
-                        face_bbox.x2 = 0
-                        face_bbox.y2 = 0
-                        face_bbox.confidence = 0.0
-                        self.face_position_pub.publish(face_bbox)
+                        self.publish_empty_face_bbox(header)
                         self.is_face_detected = False
                     
                     # 发布处理后的图像
@@ -472,6 +465,26 @@ class FaceTrack:
             return np.empty((0, 6), dtype=np.float32)
         return np.array(processed, dtype=np.float32)
 
+    def publish_empty_face_bbox(self, header):
+        face_bbox = FaceBoundingBox()
+        face_bbox.header = header
+        face_bbox.x1 = 0
+        face_bbox.y1 = 0
+        face_bbox.x2 = 0
+        face_bbox.y2 = 0
+        face_bbox.confidence = 0.0
+        self.face_position_pub.publish(face_bbox)
+
+    def publish_face_bbox(self, header, x1, y1, x2, y2, confidence):
+        face_bbox = FaceBoundingBox()
+        face_bbox.header = header
+        face_bbox.x1 = x1
+        face_bbox.y1 = y1
+        face_bbox.x2 = x2
+        face_bbox.y2 = y2
+        face_bbox.confidence = confidence
+        self.face_position_pub.publish(face_bbox)
+
     def find_face_in_picture(self, cv_image, detections, header, orig_size=None):
         xyxy = detections[:, :4]
         confs = detections[:, 4]
@@ -483,6 +496,7 @@ class FaceTrack:
         valid_faces = areas >= self.min_face_area
         if not np.any(valid_faces):
             self.is_face_detected = False
+            self.publish_empty_face_bbox(header)
             return
             
         # 在有效人脸中找最大的
@@ -518,14 +532,7 @@ class FaceTrack:
             x1_pub, y1_pub, x2_pub, y2_pub = x1, y1, x2, y2
 
         # 发布人脸检测框位置（原图坐标系下的 x1, y1, x2, y2）
-        face_bbox = FaceBoundingBox()
-        face_bbox.header = header  # 添加时间戳信息
-        face_bbox.x1 = x1_pub
-        face_bbox.y1 = y1_pub
-        face_bbox.x2 = x2_pub
-        face_bbox.y2 = y2_pub
-        face_bbox.confidence = confidence
-        self.face_position_pub.publish(face_bbox)
+        self.publish_face_bbox(header, x1_pub, y1_pub, x2_pub, y2_pub, confidence)
 
         # 绘制人脸框
         cv2.rectangle(cv_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -609,7 +616,7 @@ class FaceTrack:
                 self.send_head_motion_data([next_yaw, next_pitch])
             else:
                 # 没有检测到人脸时，降低循环频率以减少CPU占用
-                time.sleep(0.1)  # 休眠100ms，降低CPU占用
+                time.sleep(0.03)  # 休眠100ms，降低CPU占用
 
             rate.sleep()
     

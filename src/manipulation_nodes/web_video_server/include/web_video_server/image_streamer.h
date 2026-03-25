@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <deque>
+#include <memory>
 
 #include <ros/ros.h>
 #include <image_transport/image_transport.h>
@@ -55,34 +56,60 @@ protected:
   // 添加人脸检测边界框订阅者和相关变量
   ros::Subscriber face_bounding_box_sub_;
   kuavo_msgs::FaceBoundingBox face_bounding_box_;
-  kuavo_msgs::FaceBoundingBox last_valid_face_box_;  // 保存最近的有效人脸框（用于保留显示）
   bool face_detected_ = false;
+  bool has_received_face_box_ = false;
   ros::Time last_face_box_time_;
-  double face_box_timeout_ = 0.1; // 0.1秒超时，超过此时间未收到新的人脸框消息则认为检测不到人脸，清除显示
-  double face_box_retention_time_ = 0.1; // 0.1秒保留时间，即使没有新的人脸框消息，也继续显示之前的人脸框
+  double timestamp_tolerance_ = 0.06; // 图像与检测框的时间戳匹配容差
+  double face_box_state_timeout_seconds_ = 0.1; // 超过该时间未收到新框，则清除当前框状态
+  bool strict_sync_ = false; // 严格同步模式：没有足够的新框推进队列时尽量等待
+  double frame_timeout_seconds_ = 0.08; // 实时优先模式下，图像等待检测框的超时时间
+  double strict_sync_hard_timeout_seconds_ = 5.0; // 严格同步模式下的硬超时，避免永久卡死
+  double detection_mode_timeout_seconds_ = 0.5; // 超过该时间未收到检测结果，退出检测模式
+  std::chrono::steady_clock::time_point last_face_box_arrival_time_;
   
   // 图像队列结构
   struct QueuedImage {
     cv::Mat image;
     ros::Time timestamp;
     bool processed;  // 是否已处理（已匹配人脸框或确认无需处理）
+    bool should_send;  // 是否需要推流发送
     std::chrono::steady_clock::time_point queue_time;
     int original_width;   // 原始图像宽度（用于坐标转换）
     int original_height;  // 原始图像高度（用于坐标转换）
     
-    QueuedImage() : processed(false), original_width(0), original_height(0) {}
+    QueuedImage() : processed(false), should_send(true), original_width(0), original_height(0) {}
+  };
+
+  struct QueuedFaceBox {
+    kuavo_msgs::FaceBoundingBox face_box;
+    ros::Time timestamp;
+
+    QueuedFaceBox(const kuavo_msgs::FaceBoundingBox& box, const ros::Time& stamp)
+        : face_box(box), timestamp(stamp) {}
   };
   
   // 图像队列，最多存储10帧
   std::deque<QueuedImage> image_queue_;
-  static const size_t MAX_QUEUE_SIZE = 10;
+  std::deque<QueuedFaceBox> face_box_queue_;
+  static const size_t MAX_QUEUE_SIZE = 4;
+  static const size_t MAX_FACE_BOX_QUEUE_SIZE = 20;
   boost::mutex queue_mutex_;  // 保护图像队列的互斥锁
+
+  uint64_t image_frames_enqueued_ = 0;
+  uint64_t image_frames_sent_ = 0;
+  uint64_t image_frames_dropped_queue_full_ = 0;
+  uint64_t image_frames_dropped_timeout_ = 0;
+  uint64_t face_boxes_enqueued_ = 0;
   
   // 人脸边界框回调函数
   void faceBoundingBoxCallback(const kuavo_msgs::FaceBoundingBox::ConstPtr& msg);
   
-  // 根据时间戳在队列中查找并处理匹配的图像
-  void processFaceBoxInQueue(const kuavo_msgs::FaceBoundingBox& face_box, const ros::Time& face_box_time);
+  // 更新当前生效的人脸框状态
+  bool processFaceBoxInQueue(const kuavo_msgs::FaceBoundingBox& face_box, const ros::Time& face_box_time);
+  // 根据当前生效的人脸框状态处理图像队列
+  void processPendingFaceBoxesInQueue();
+  void trimFaceBoxQueueLocked();
+  bool isDetectionModeActiveLocked(const std::chrono::steady_clock::time_point& now) const;
 
 };
 
@@ -111,6 +138,7 @@ protected:
   boost::mutex send_mutex_;
 
 private:
+  ros::NodeHandle transport_nh_;
   image_transport::ImageTransport it_;
   bool initialized_;
 
@@ -119,7 +147,7 @@ private:
   // 从队列中发送已处理的图像
   void sendProcessedImagesFromQueue();
   
-  // 处理队列中等待时间过长的图像（即使未匹配到人脸框也发送）
+  // 处理队列中等待时间过长的图像
   void processTimeoutImagesInQueue();
 };
 

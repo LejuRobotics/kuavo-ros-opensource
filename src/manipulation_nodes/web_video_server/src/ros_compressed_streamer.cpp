@@ -5,7 +5,14 @@ namespace web_video_server
 
 RosCompressedStreamer::RosCompressedStreamer(const async_web_server_cpp::HttpRequest &request,
                              async_web_server_cpp::HttpConnectionPtr connection, ros::NodeHandle& nh) :
-  ImageStreamer(request, connection, nh), stream_(connection)
+  ImageStreamer(request, connection, nh),
+  stream_(connection,
+          "boundarydonotcross",
+          1,
+          0.1,
+          MultipartStream::makeStatusKey(
+              request.get_query_param_value_or_default("topic", ""),
+              "ros_compressed"))
 {
   stream_.sendInitialHeader();
 }

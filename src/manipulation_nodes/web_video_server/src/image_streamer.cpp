@@ -2,6 +2,8 @@
 #include <cv_bridge/cv_bridge.h>
 #include <ros/topic.h>
 #include <limits>
+#include <atomic>
+#include <iomanip>
 
 // 添加FaceBoundingBox的包含
 #include <kuavo_msgs/FaceBoundingBox.h>
@@ -9,6 +11,31 @@
 
 namespace web_video_server
 {
+
+namespace
+{
+std::atomic<uint64_t> g_streamer_transport_id(0);
+
+bool computeComparableRosAge(const ros::Time& stamp, double& age_seconds)
+{
+  if (stamp.isZero()) {
+    return false;
+  }
+
+  const ros::Time now = ros::Time::now();
+  if (now.isZero()) {
+    return false;
+  }
+
+  const double age = (now - stamp).toSec();
+  if (age < -1.0 || age > 60.0) {
+    return false;
+  }
+
+  age_seconds = age;
+  return true;
+}
+}
 
 ImageStreamer::ImageStreamer(const async_web_server_cpp::HttpRequest &request,
                              async_web_server_cpp::HttpConnectionPtr connection, ros::NodeHandle& nh) :
@@ -22,37 +49,61 @@ ImageStreamer::ImageStreamer(const async_web_server_cpp::HttpRequest &request,
   // 订阅人脸检测边界框话题
   face_bounding_box_sub_ = nh_.subscribe("/face_detection/bounding_box", 1, &ImageStreamer::faceBoundingBoxCallback, this);
   last_face_box_time_ = ros::Time(0);
-  face_box_retention_time_ = 0.1; // 默认保留0.1秒
+  timestamp_tolerance_ = request.get_query_param_value_or_default<double>("sync_tolerance", 0.06);
+  face_box_state_timeout_seconds_ =
+      request.get_query_param_value_or_default<double>("face_box_state_timeout", 0.1);
+  frame_timeout_seconds_ = request.get_query_param_value_or_default<double>("frame_timeout", 0.08);
+  strict_sync_hard_timeout_seconds_ =
+      request.get_query_param_value_or_default<double>("strict_sync_hard_timeout", 5.0);
+  detection_mode_timeout_seconds_ =
+      request.get_query_param_value_or_default<double>("detection_mode_timeout", 0.5);
+  last_face_box_arrival_time_ = std::chrono::steady_clock::time_point::min();
+
+  const std::string strict_sync_param = request.get_query_param_value_or_default("strict_sync", "");
+  strict_sync_ = request.has_query_param("strict_sync") &&
+                 strict_sync_param != "0" &&
+                 strict_sync_param != "false" &&
+                 strict_sync_param != "False";
 }
 
 ImageStreamer::~ImageStreamer()
 {
 }
 
+static bool isValidFaceBox(const kuavo_msgs::FaceBoundingBox& face_box)
+{
+  return face_box.confidence > 0.0f &&
+         face_box.x1 < face_box.x2 &&
+         face_box.y1 < face_box.y2;
+}
+
 void ImageStreamer::faceBoundingBoxCallback(const kuavo_msgs::FaceBoundingBox::ConstPtr& msg)
 {
-  // 在队列中查找匹配的图像并处理（无论是否有效）
-  // 这样可以确保即使没有检测到人脸，也能标记对应图像为已处理
-  processFaceBoxInQueue(*msg, msg->header.stamp);
-  
-  // 检查消息是否有效（坐标是否合理）
-  // 如果坐标无效（x1>=x2 或 y1>=y2），则认为检测不到人脸
-  if (msg->x1 >= msg->x2 || msg->y1 >= msg->y2) {
-    face_detected_ = false;
-    return;
+  {
+    boost::mutex::scoped_lock queue_lock(queue_mutex_);
+    face_box_queue_.emplace_back(*msg, msg->header.stamp);
+    ++face_boxes_enqueued_;
+    last_face_box_arrival_time_ = std::chrono::steady_clock::now();
+    trimFaceBoxQueueLocked();
+    ROS_INFO_STREAM_THROTTLE(
+        1.0,
+        "[face_box_queue] topic=" << topic_
+        << " detection_mode=1"
+        << " enqueued=" << face_boxes_enqueued_
+        << " size=" << face_box_queue_.size()
+        << " stamp=" << std::fixed << std::setprecision(3) << msg->header.stamp.toSec());
   }
-  
-  // 更新人脸边界框
-  face_bounding_box_ = *msg;
-  last_valid_face_box_ = *msg;  // 保存最近的有效人脸框（用于保留显示）
-  face_detected_ = true;
-  // 使用消息中的时间戳而不是当前时间
-  last_face_box_time_ = msg->header.stamp;
+
+  // 检测框作为“显示状态更新事件”，后续图像会一直沿用该状态直到下一条框到来
+  processPendingFaceBoxesInQueue();
 }
 
 ImageTransportImageStreamer::ImageTransportImageStreamer(const async_web_server_cpp::HttpRequest &request,
                              async_web_server_cpp::HttpConnectionPtr connection, ros::NodeHandle& nh) :
-  ImageStreamer(request, connection, nh), it_(nh), initialized_(false)
+  ImageStreamer(request, connection, nh),
+  transport_nh_(nh_, "streamer_" + std::to_string(g_streamer_transport_id.fetch_add(1))),
+  it_(transport_nh_),
+  initialized_(false)
 {
   output_width_ = request.get_query_param_value_or_default<int>("width", -1);
   output_height_ = request.get_query_param_value_or_default<int>("height", -1);
@@ -66,7 +117,7 @@ ImageTransportImageStreamer::~ImageTransportImageStreamer()
 
 void ImageTransportImageStreamer::start()
 {
-  image_transport::TransportHints hints(default_transport_);
+  image_transport::TransportHints hints(default_transport_, ros::TransportHints(), transport_nh_);
   ros::master::V_TopicInfo available_topics;
   ros::master::getTopics(available_topics);
   inactive_ = true;
@@ -214,7 +265,14 @@ void ImageTransportImageStreamer::imageCallback(const sensor_msgs::ImageConstPtr
       
       // 如果队列已满，移除最旧的图像
       if (image_queue_.size() >= MAX_QUEUE_SIZE) {
+        ++image_frames_dropped_queue_full_;
         image_queue_.pop_front();
+        ROS_WARN_STREAM_THROTTLE(
+            1.0,
+            "[image_queue] topic=" << topic_
+            << " dropped=queue_full"
+            << " dropped_total=" << image_frames_dropped_queue_full_
+            << " max_size=" << MAX_QUEUE_SIZE);
       }
       
       // 创建队列项
@@ -236,7 +294,31 @@ void ImageTransportImageStreamer::imageCallback(const sensor_msgs::ImageConstPtr
       }
       
       image_queue_.push_back(queued_img);
+      ++image_frames_enqueued_;
+      const double newest_age =
+          std::chrono::duration_cast<std::chrono::duration<double>>(
+              std::chrono::steady_clock::now() - image_queue_.front().queue_time).count();
+      double source_age = 0.0;
+      const bool has_comparable_source_age = computeComparableRosAge(msg->header.stamp, source_age);
+      ROS_INFO_STREAM_THROTTLE(
+          1.0,
+          "[image_queue] topic=" << topic_
+          << " detection_mode=" << (isDetectionModeActiveLocked(std::chrono::steady_clock::now()) ? 1 : 0)
+          << " enqueued=" << image_frames_enqueued_
+          << " sent=" << image_frames_sent_
+          << " queue_full_drop=" << image_frames_dropped_queue_full_
+          << " timeout_drop=" << image_frames_dropped_timeout_
+          << " image_q=" << image_queue_.size()
+          << " face_q=" << face_box_queue_.size()
+          << " source_age_s="
+          << (has_comparable_source_age ? (static_cast<std::ostringstream&&>(std::ostringstream()
+                 << std::fixed << std::setprecision(3) << source_age)).str()
+                                        : std::string("n/a(clock_mismatch)"))
+          << " oldest_age_s=" << std::fixed << std::setprecision(3) << newest_age
+          << " img_stamp=" << msg->header.stamp.toSec());
     }
+
+    processPendingFaceBoxesInQueue();
 
     // 处理超时的图像（即使未匹配到人脸框也发送，避免延迟过大）
     processTimeoutImagesInQueue();
@@ -324,8 +406,7 @@ static void transformFaceBoxCoordinates(const kuavo_msgs::FaceBoundingBox& face_
 static bool drawFaceBoxOnImage(cv::Mat& img, const kuavo_msgs::FaceBoundingBox& face_box,
                                int original_width, int original_height)
 {
-  // 检查坐标是否有效
-  if (face_box.x1 >= face_box.x2 || face_box.y1 >= face_box.y2) {
+  if (!isValidFaceBox(face_box)) {
     return false;
   }
   
@@ -343,62 +424,98 @@ static bool drawFaceBoxOnImage(cv::Mat& img, const kuavo_msgs::FaceBoundingBox& 
   return false;
 }
 
-void ImageStreamer::processFaceBoxInQueue(const kuavo_msgs::FaceBoundingBox& face_box, const ros::Time& face_box_time)
+bool ImageStreamer::processFaceBoxInQueue(const kuavo_msgs::FaceBoundingBox& face_box, const ros::Time& face_box_time)
+{
+  face_bounding_box_ = face_box;
+  face_detected_ = isValidFaceBox(face_box);
+  has_received_face_box_ = true;
+  last_face_box_time_ = face_box_time;
+
+  return true;
+}
+
+bool ImageStreamer::isDetectionModeActiveLocked(const std::chrono::steady_clock::time_point& now) const
+{
+  if (last_face_box_arrival_time_ == std::chrono::steady_clock::time_point::min()) {
+    return false;
+  }
+
+  if (detection_mode_timeout_seconds_ <= 0.0) {
+    return true;
+  }
+
+  return std::chrono::duration_cast<std::chrono::duration<double>>(now - last_face_box_arrival_time_).count()
+         <= detection_mode_timeout_seconds_;
+}
+
+void ImageStreamer::processPendingFaceBoxesInQueue()
 {
   boost::mutex::scoped_lock queue_lock(queue_mutex_);
-  
-  // 在队列中查找时间戳最接近的图像
-  // 允许的时间戳误差（秒）- 100ms以应对网络延迟和处理延迟
-  const double timestamp_tolerance = 0.1;  // 100ms
-  const double perfect_match_threshold = 0.01;  // 10ms内认为是完美匹配，可以提前退出
-  
-  double min_time_diff = std::numeric_limits<double>::max();
-  std::deque<QueuedImage>::iterator best_match = image_queue_.end();
-  
-  // 遍历队列查找最佳匹配
-  for (auto it = image_queue_.begin(); it != image_queue_.end(); ++it) {
-    if (it->processed) {
-      continue;  // 跳过已处理的图像
+  const bool detection_mode_active = isDetectionModeActiveLocked(std::chrono::steady_clock::now());
+
+  while (!image_queue_.empty() && !image_queue_.front().processed) {
+    QueuedImage& front_img = image_queue_.front();
+
+    if (!detection_mode_active) {
+      // 非检测模式下直接推流，不等待检测框，也不沿用旧框状态绘制。
+      front_img.processed = true;
+      front_img.should_send = true;
+      continue;
     }
-    
-    double time_diff = fabs((it->timestamp - face_box_time).toSec());
-    
-    // 如果找到完美匹配（时间戳差小于10ms），直接使用，提前退出
-    if (time_diff < perfect_match_threshold) {
-      best_match = it;
-      min_time_diff = time_diff;
+
+    size_t consumed_boxes = 0;
+
+    while (!face_box_queue_.empty() &&
+           face_box_queue_.front().timestamp <= front_img.timestamp + ros::Duration(timestamp_tolerance_)) {
+      processFaceBoxInQueue(face_box_queue_.front().face_box, face_box_queue_.front().timestamp);
+      face_box_queue_.pop_front();
+      consumed_boxes++;
+    }
+
+    if (consumed_boxes == 0) {
+      // 检测模式下只等待“真正被检测线程处理过”的帧，未匹配到检测结果的帧先不推进。
       break;
     }
-    
-    // 否则查找容差范围内的最佳匹配
-    if (time_diff < timestamp_tolerance && time_diff < min_time_diff) {
-      min_time_diff = time_diff;
-      best_match = it;
+
+    front_img.should_send = true;
+
+    if (face_detected_) {
+      if (drawFaceBoxOnImage(front_img.image, face_bounding_box_,
+                             front_img.original_width, front_img.original_height)) {
+        ROS_DEBUG("检测模式绘制匹配到的人脸框: 图像时间戳=%.3f, 检测框时间戳=%.3f, 原图坐标=(%d,%d)-(%d,%d)",
+                  front_img.timestamp.toSec(),
+                  last_face_box_time_.toSec(),
+                  face_bounding_box_.x1, face_bounding_box_.y1,
+                  face_bounding_box_.x2, face_bounding_box_.y2);
+      }
+    } else {
+      ROS_DEBUG_THROTTLE(5, "检测模式匹配到无脸结果，发送检测帧但不绘制: 图像时间戳=%.3f, 检测框时间戳=%.3f",
+                         front_img.timestamp.toSec(),
+                         last_face_box_time_.toSec());
     }
+
+    front_img.processed = true;
   }
   
-  // 如果找到匹配的图像，绘制人脸框
-  if (best_match != image_queue_.end()) {
-    // 尝试绘制人脸框
-    if (drawFaceBoxOnImage(best_match->image, face_box, 
-                          best_match->original_width, best_match->original_height)) {
-      ROS_DEBUG("绘制人脸框: 时间戳差=%.3fs, 原图坐标=(%d,%d)-(%d,%d)", 
-               min_time_diff, 
-               face_box.x1, face_box.y1, face_box.x2, face_box.y2);
-    }
-    // 无论是否绘制了人脸框，都标记为已处理（即使坐标无效，也表示已收到对应的人脸框消息）
-    best_match->processed = true;
-  } else {
-    // 未找到匹配的图像，不绘制人脸框，只记录调试信息
-    if (!image_queue_.empty()) {
-      double oldest_diff = fabs((image_queue_.front().timestamp - face_box_time).toSec());
-      double newest_diff = fabs((image_queue_.back().timestamp - face_box_time).toSec());
-      ROS_DEBUG_THROTTLE(5, "未找到匹配图像，不绘制: 人脸框时间戳=%.3f, 队列最旧=%.3f(差%.3fs), 队列最新=%.3f(差%.3fs), 队列大小=%zu",
-                        face_box_time.toSec(), 
-                        image_queue_.front().timestamp.toSec(), oldest_diff,
-                        image_queue_.back().timestamp.toSec(), newest_diff,
-                        image_queue_.size());
-    }
+  while (!face_box_queue_.empty() && image_queue_.empty()) {
+    processFaceBoxInQueue(face_box_queue_.front().face_box, face_box_queue_.front().timestamp);
+    face_box_queue_.pop_front();
+  }
+
+  while (!face_box_queue_.empty() && !image_queue_.empty() &&
+         face_box_queue_.front().timestamp + ros::Duration(timestamp_tolerance_) < image_queue_.front().timestamp) {
+    processFaceBoxInQueue(face_box_queue_.front().face_box, face_box_queue_.front().timestamp);
+    ROS_DEBUG_THROTTLE(5, "提前切换到更新后的人脸框状态: 检测框时间戳=%.3f, 队列头图像时间戳=%.3f",
+                      face_box_queue_.front().timestamp.toSec(),
+                      image_queue_.front().timestamp.toSec());
+    face_box_queue_.pop_front();
+  }
+}
+
+void ImageStreamer::trimFaceBoxQueueLocked()
+{
+  while (face_box_queue_.size() > MAX_FACE_BOX_QUEUE_SIZE) {
+    face_box_queue_.pop_front();
   }
 }
 
@@ -406,25 +523,57 @@ void ImageTransportImageStreamer::sendProcessedImagesFromQueue()
 {
   if (inactive_)
     return;
-    
-  boost::mutex::scoped_lock queue_lock(queue_mutex_);
-  
-  // 从队列头部开始，发送所有已处理的图像
-  while (!image_queue_.empty() && image_queue_.front().processed) {
-    QueuedImage& front_img = image_queue_.front();
-    
+
+  while (true) {
+    QueuedImage front_img;
+
+    {
+      boost::mutex::scoped_lock queue_lock(queue_mutex_);
+
+      if (image_queue_.empty() || !image_queue_.front().processed) {
+        break;
+      }
+
+      front_img = image_queue_.front();
+      image_queue_.pop_front();
+    }
+
+    if (!front_img.should_send) {
+      ROS_DEBUG_THROTTLE(5, "丢弃非检测帧，不进行推流: 图像时间戳=%.3f",
+                         front_img.timestamp.toSec());
+      continue;
+    }
+
     try {
+      const double queue_latency =
+          std::chrono::duration_cast<std::chrono::duration<double>>(
+              std::chrono::steady_clock::now() - front_img.queue_time).count();
+      double send_age = 0.0;
+      const bool has_comparable_send_age = computeComparableRosAge(front_img.timestamp, send_age);
       boost::mutex::scoped_lock send_lock(send_mutex_);
       // 更新 output_size_image 用于 restreamFrame
       front_img.image.copyTo(output_size_image);
       sendImage(front_img.image, front_img.queue_time);
       last_frame_ = front_img.queue_time;
+      ++image_frames_sent_;
+      ROS_INFO_STREAM_THROTTLE(
+          1.0,
+          "[stream_send] topic=" << topic_
+          << " sent=" << image_frames_sent_
+          << " enqueued=" << image_frames_enqueued_
+          << " send_age_s="
+          << (has_comparable_send_age ? (static_cast<std::ostringstream&&>(std::ostringstream()
+                 << std::fixed << std::setprecision(3) << send_age)).str()
+                                      : std::string("n/a(clock_mismatch)"))
+          << " queue_latency_s=" << std::fixed << std::setprecision(3) << queue_latency
+          << " img_stamp=" << front_img.timestamp.toSec());
     }
     catch (boost::system::system_error &e)
     {
       // happens when client disconnects
       ROS_DEBUG("system_error exception in sendProcessedImagesFromQueue: %s", e.what());
       inactive_ = true;
+      boost::mutex::scoped_lock queue_lock(queue_mutex_);
       image_queue_.clear();
       return;
     }
@@ -432,12 +581,10 @@ void ImageTransportImageStreamer::sendProcessedImagesFromQueue()
     {
       ROS_ERROR_THROTTLE(30, "exception in sendProcessedImagesFromQueue: %s", e.what());
       inactive_ = true;
+      boost::mutex::scoped_lock queue_lock(queue_mutex_);
       image_queue_.clear();
       return;
     }
-    
-    // 移除已发送的图像
-    image_queue_.pop_front();
   }
 }
 
@@ -448,51 +595,43 @@ void ImageTransportImageStreamer::processTimeoutImagesInQueue()
     
   boost::mutex::scoped_lock queue_lock(queue_mutex_);
   
-  // 处理所有超时的未处理图像
-  // 增加超时时间到300ms，给人脸框消息更多时间到达
-  const double timeout_seconds = 0.3;  // 300ms超时
-  
   // 提前计算当前时间，避免在循环中重复计算
   const auto now = std::chrono::steady_clock::now();
+  const bool detection_mode_active = isDetectionModeActiveLocked(now);
   
   // 从队列头部开始，处理所有超时的未处理图像
   // 注意：只处理队列头部的连续超时图像，保持FIFO顺序
   while (!image_queue_.empty() && !image_queue_.front().processed) {
     const auto wait_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
         now - image_queue_.front().queue_time).count() / 1000.0;
-    
-    if (wait_duration > timeout_seconds) {
-      // 超时，检查是否可以使用保留的人脸框
-      QueuedImage& front_img = image_queue_.front();
-      bool should_draw_face_box = false;
-      
-      // 检查是否有有效的保留人脸框，且时间在保留期内
-      if (face_detected_) {
-        // 计算图像时间戳与最后人脸框时间戳的差值
-        double time_since_last_face_box = fabs((front_img.timestamp - last_face_box_time_).toSec());
-        
-        // 如果在保留时间内，使用保留的人脸框绘制
-        if (time_since_last_face_box < face_box_retention_time_) {
-          should_draw_face_box = drawFaceBoxOnImage(front_img.image, last_valid_face_box_,
-                                                   front_img.original_width, front_img.original_height);
-          if (should_draw_face_box) {
-            ROS_DEBUG_THROTTLE(5, "使用保留人脸框绘制: 等待时间=%.3fs, 时间戳=%.3f, 距离最后人脸框=%.3fs",
-                              wait_duration, front_img.timestamp.toSec(), time_since_last_face_box);
-          }
-        }
-      }
-      
-      // 标记为已处理
+
+    QueuedImage& front_img = image_queue_.front();
+    if (!detection_mode_active) {
       front_img.processed = true;
-      
-      if (!should_draw_face_box) {
-        ROS_DEBUG_THROTTLE(5, "图像超时未匹配到人脸框，直接发送（不绘制）: 等待时间=%.3fs, 时间戳=%.3f",
-                          wait_duration, front_img.timestamp.toSec());
-      }
-    } else {
-      // 队列头部图像还未超时，停止处理（保持FIFO顺序）
-      break;
+      front_img.should_send = true;
+      continue;
     }
+
+    if (wait_duration > frame_timeout_seconds_) {
+      front_img.processed = true;
+      front_img.should_send = false;
+      ++image_frames_dropped_timeout_;
+      ROS_DEBUG_THROTTLE(5, "检测模式丢弃未匹配到检测结果的图像: 等待时间=%.3fs, 图像时间戳=%.3f",
+                         wait_duration, front_img.timestamp.toSec());
+      ROS_WARN_STREAM_THROTTLE(
+          1.0,
+          "[image_queue] topic=" << topic_
+          << " dropped=timeout_waiting_face_box"
+          << " dropped_total=" << image_frames_dropped_timeout_
+          << " wait_s=" << std::fixed << std::setprecision(3) << wait_duration
+          << " image_q=" << image_queue_.size()
+          << " face_q=" << face_box_queue_.size()
+          << " img_stamp=" << front_img.timestamp.toSec());
+      continue;
+    }
+
+    // 检测模式下，队头图像只等匹配到检测结果；没到超时就继续等。
+    break;
   }
 }
 
