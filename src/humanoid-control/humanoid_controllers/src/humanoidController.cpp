@@ -3102,6 +3102,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         get_head_pos = desire_head_pos_;
         head_mtx.unlock();
         auto &hardware_settings = kuavo_settings_.hardware_settings;
+        const auto &running_settings = kuavo_settings_.running_settings;
         vector_t head_feedback_tau = vector_t::Zero(headNum_);
         vector_t head_feedback_vel = vector_t::Zero(headNum_);
         if (!is_real_) // 实物不需要头部反馈力，来自kuavo仓库的移植
@@ -3113,14 +3114,27 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
           double head_limit_vel = hardware_settings.joint_velocity_limits[waistNum_+jointNum_ + armNumReal_ + i3];
 
           vel = std::clamp(vel, -head_limit_vel, head_limit_vel) * TO_RADIAN;
+          double head_kp_cmd = 0.0, head_kd_cmd = 0.0;
+          {
+            const int n_ruiwo = static_cast<int>(running_settings.ruiwo_kp.size());
+            if (!running_settings.ruiwo_kp.empty() &&
+                !running_settings.ruiwo_kd.empty() &&
+                running_settings.ruiwo_kp.size() == running_settings.ruiwo_kd.size() &&
+                n_ruiwo >= headNum_)
+            {
+              const int base = n_ruiwo - headNum_;
+              head_kp_cmd = static_cast<double>(running_settings.ruiwo_kp[base + i3]);
+              head_kd_cmd = static_cast<double>(running_settings.ruiwo_kd[base + i3]);
+            }
+          }
           jointCmdMsg.joint_q.push_back(get_head_pos(i3));
           jointCmdMsg.joint_v.push_back(0);
           jointCmdMsg.tau.push_back(head_feedback_tau(i3));
           jointCmdMsg.tau_ratio.push_back(1);
           jointCmdMsg.tau_max.push_back(10);
           jointCmdMsg.control_modes.push_back(2);
-          jointCmdMsg.joint_kp.push_back(0);
-          jointCmdMsg.joint_kd.push_back(0);
+          jointCmdMsg.joint_kp.push_back(head_kp_cmd);
+          jointCmdMsg.joint_kd.push_back(head_kd_cmd);
         }
         robotVisualizer_->updateHeadJointPositions(sensor_data_head_.jointPos_);
       }
@@ -3160,6 +3174,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         get_head_pos = desire_head_pos_;
         head_mtx.unlock();
         auto &hardware_settings = kuavo_settings_.hardware_settings;
+        const auto &running_settings = kuavo_settings_.running_settings;
         vector_t head_feedback_tau = vector_t::Zero(headNum_);
         vector_t head_feedback_vel = vector_t::Zero(headNum_);
         if (!is_real_) // 实物不需要头部反馈力，来自kuavo仓库的移植
@@ -3172,10 +3187,23 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
           vel = std::clamp(vel, -head_limit_vel, head_limit_vel) * TO_RADIAN;
           auto head_start_index = jointNumReal_ + waistNum_ + armNumReal_;
+          double head_kp_cmd = 0.0, head_kd_cmd = 0.0;
+          {
+            const int n_ruiwo = static_cast<int>(running_settings.ruiwo_kp.size());
+            if (!running_settings.ruiwo_kp.empty() &&
+                !running_settings.ruiwo_kd.empty() &&
+                running_settings.ruiwo_kp.size() == running_settings.ruiwo_kd.size() &&
+                n_ruiwo >= headNum_)
+            {
+              const int base = n_ruiwo - headNum_;
+              head_kp_cmd = static_cast<double>(running_settings.ruiwo_kp[base + i3]);
+              head_kd_cmd = static_cast<double>(running_settings.ruiwo_kd[base + i3]);
+            }
+          }
           jointCmdMsg.joint_q[head_start_index + i3] = get_head_pos(i3);
           jointCmdMsg.joint_v[head_start_index + i3] = 0;
-          jointCmdMsg.joint_kp[head_start_index + i3] = 0;
-          jointCmdMsg.joint_kd[head_start_index + i3] = 0;  
+          jointCmdMsg.joint_kp[head_start_index + i3] = head_kp_cmd;
+          jointCmdMsg.joint_kd[head_start_index + i3] = head_kd_cmd;
           jointCmdMsg.tau[head_start_index + i3] = head_feedback_tau(i3);
           jointCmdMsg.tau_ratio[head_start_index + i3] = 1;
           jointCmdMsg.tau_max[head_start_index + i3] = 10;
