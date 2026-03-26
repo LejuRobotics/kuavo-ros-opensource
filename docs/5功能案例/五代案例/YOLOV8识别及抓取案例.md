@@ -143,7 +143,6 @@ title: "YOLOV8识别及抓取案例"
 ### 上位机代码编译
 ```bash
 cd kuavo_ros_application #仓库目录
-sudo su
 catkin build detection_yolo_v8
 ```
 
@@ -179,7 +178,6 @@ roslaunch humanoid_controllers load_kuavo_real.launch cali:=true
 - 启动传感器
 ```bash
 cd kuavo_ros_application  # 进入上位机工作空间
-sudo su
 source devel/setup.bash
 # 五代进阶版
 roslaunch dynamic_biped kuavo5_sensor_robot_enable.launch
@@ -189,7 +187,6 @@ roslaunch dynamic_biped kuavo5_sensor_robot_enable.launch enable_wrist_camera:=t
 - 启动检测程序
 ```bash
 cd kuavo_ros_application  # 进入上位机工作空间
-sudo su
 source devel/setup.bash
 roslaunch detection_yolo_v8 detection.launch
 ```
