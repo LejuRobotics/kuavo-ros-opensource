@@ -54,6 +54,7 @@ add_message_files(
   FILES
   imuData.msg
   jointData.msg
+  FTsensorData.msg
   sensorsData.msg
   endEffectorData.msg
   jointCmd.msg
@@ -126,7 +127,6 @@ add_message_files(
 
   # kuavo_arm_collision_check
   armCollisionCheckInfo.msg
-  FTsensorData.msg
 
   MmDetectionMsg.msg
   AudioReceiverData.msg

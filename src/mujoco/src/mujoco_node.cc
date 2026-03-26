@@ -32,6 +32,7 @@
 #include "kuavo_msgs/sensorsData.h"
 #include "kuavo_msgs/jointData.h"
 #include "kuavo_msgs/jointCmd.h"
+#include "kuavo_msgs/FTsensorData.h"
 #include "geometry_msgs/Wrench.h"
 #include "nav_msgs/Odometry.h"
 #include "std_srvs/SetBool.h"
@@ -737,6 +738,34 @@ namespace
 
     sensors_data.joint_data = joint_data;
     sensors_data.imu_data = imu_data;
+
+    // Read and publish FT sensor data (force/torque sensors)
+    kuavo_msgs::FTsensorData FTsensor_data;
+    int l_force_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "l_force")];
+    int l_torque_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "l_torque")];
+    int r_force_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "r_force")];
+    int r_torque_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "r_torque")];
+    
+    // Check if FT sensors exist in the model
+    if (l_force_addr >= 0 && l_torque_addr >= 0 && r_force_addr >= 0 && r_torque_addr >= 0) {
+      mjtNum *l_force = d->sensordata + l_force_addr;
+      mjtNum *l_torque = d->sensordata + l_torque_addr;
+      mjtNum *r_force = d->sensordata + r_force_addr;
+      mjtNum *r_torque = d->sensordata + r_torque_addr;
+      FTsensor_data.Fx.push_back(l_force[0]);
+      FTsensor_data.Fx.push_back(r_force[0]);
+      FTsensor_data.Fy.push_back(l_force[1]);
+      FTsensor_data.Fy.push_back(r_force[1]);
+      FTsensor_data.Fz.push_back(l_force[2]);
+      FTsensor_data.Fz.push_back(r_force[2]);
+      FTsensor_data.Mx.push_back(l_torque[0]);
+      FTsensor_data.Mx.push_back(r_torque[0]);
+      FTsensor_data.My.push_back(l_torque[1]);
+      FTsensor_data.My.push_back(r_torque[1]);
+      FTsensor_data.Mz.push_back(l_torque[2]);
+      FTsensor_data.Mz.push_back(r_torque[2]);
+    }
+    sensors_data.FTsensor_data = FTsensor_data;
 
 #ifdef USE_DDS
     // Publish DDS LowState via DDS (instead of ROS when DDS is enabled)

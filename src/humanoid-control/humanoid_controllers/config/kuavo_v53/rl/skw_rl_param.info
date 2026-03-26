@@ -1,5 +1,5 @@
 withArm            true   ; 是否使用手臂训练 0:不使用 1:使用
-inferenceFrequency 50     ; 推理频率
+inferenceFrequency 80     ; 推理频率
 
 actionScale        0.25    ; default
 frameStack         1      ; 多长时间步的obs
@@ -18,7 +18,7 @@ use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使�
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 
-networkModelFile          /ampjzx250313_5.onnx; 
+networkModelFile          /ampjzx260324_7_2.onnx; 
 commandData 
 {
     inital
@@ -41,7 +41,7 @@ commandData
         cmdVelAngularY      1   ;
         cmdVelAngularZ      2       ; 输入模型的最大 cmdVelAngularZ = scale[5] * velocityLimits[3]
         cmdStance           1   ;
-        cmdVelLineXNegScale 0.5    ; X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
+        cmdVelLineXNegScale 0.4    ; X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
     }
 };预留完整的接口，当前只用到 cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdWalkEnable，最大长度是 4
 
@@ -60,7 +60,7 @@ defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity
 {
-    linearX        0.0     ; 原地踏步线速度X
+    linearX        -0.2     ; 原地踏步线速度X
     linearY         0.0       ; 原地踏步线速度Y
     linearZ         0.0       ; 接口留用
     angularX        0.0       ; 接口留用
@@ -82,13 +82,13 @@ continuousInPlaceStepVelocity
 ; ==================== YAW方向补偿配置 ====================
 yawCompensation
 {
-    enabled                     false    ; 是否启用YAW补偿(true/false)
-    xBias                       -0.1     ; 通用X轴偏置
+    enabled                     true    ; 是否启用YAW补偿(true/false)
+    xBias                       -0.     ; 通用X轴偏置
     threshold                   0.0     ; YAW阈值
     xVelocityThreshold          0.1    ; X方向速度阈值
-    enableSeparateCompensation  false    ; 是否启用分开补偿（顺时针/逆时针）(true/false)
-    xBiasClockwise             -0.1     ; 顺时针旋转时X轴偏置
-    xBiasCounterclockwise      -0.1     ; 逆时针旋转时X轴偏置
+    enableSeparateCompensation  true    ; 是否启用分开补偿（顺时针/逆时针）(true/false)
+    xBiasClockwise             -0.2     ; 顺时针旋转时X轴偏置
+    xBiasCounterclockwise      -0.2     ; 逆时针旋转时X轴偏置
 }
 
 ; ==================== Y方向行走补偿配置 ====================

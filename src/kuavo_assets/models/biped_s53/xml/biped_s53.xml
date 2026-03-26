@@ -364,5 +364,10 @@
     <jointvel name="zarm_r7_joint_vel" joint="zarm_r7_joint" />
     <jointvel name="zhead_1_joint_vel" joint="zhead_1_joint" />
     <jointvel name="zhead_2_joint_vel" joint="zhead_2_joint" />
+    <!-- FT sensors for left and right foot -->
+    <force name="l_force" site="l_ft_frame" />
+    <torque name="l_torque" site="l_ft_frame" />
+    <force name="r_force" site="r_ft_frame" />
+    <torque name="r_torque" site="r_ft_frame" />    
   </sensor>
 </mujoco>

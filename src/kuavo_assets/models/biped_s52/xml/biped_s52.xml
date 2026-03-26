@@ -168,7 +168,7 @@
         </body>
       </body>
       <body name="waist_yaw" pos="0 0 0.1114">
-        <inertial pos="0.0405387 -0.000615184 0.166422" quat="0.999998 0.00167928 -0.000969638 -0.00034323" mass="20.6782" diaginertia="0.34243 0.25856 0.201854"/>
+        <inertial pos="0.0405387 -0.000615184 0.166422" quat="0.999998 0.00167928 -0.000969638 -0.00034323" mass="16.1894" diaginertia="0.34243 0.25856 0.201854"/>
         <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" range="-3.14 3.14" actuatorfrcrange="-102 102"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_yaw"/>
         <!-- waist_yaw碰撞体 -->
@@ -370,5 +370,10 @@
     <jointvel name="zarm_r7_joint_vel" joint="zarm_r7_joint" />
     <jointvel name="zhead_1_joint_vel" joint="zhead_1_joint" />
     <jointvel name="zhead_2_joint_vel" joint="zhead_2_joint" />
+    <!-- FT sensors for left and right foot -->
+    <force name="l_force" site="l_ft_frame" />
+    <torque name="l_torque" site="l_ft_frame" />
+    <force name="r_force" site="r_ft_frame" />
+    <torque name="r_torque" site="r_ft_frame" />       
   </sensor>
 </mujoco>
