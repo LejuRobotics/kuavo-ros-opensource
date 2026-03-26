@@ -87,12 +87,6 @@ namespace humanoid_controller
     {
       ROS_WARN("[%s] /is_roban not found in ROS params, using default: %d", name_.c_str(), static_cast<int>(is_roban_));
     }
-    // 初始化 Ruiwo 电机参数切换服务客户端（仅在真实机器人上且使能 AMP 专用增益时使用）
-    if (is_real_ && use_dance_ruiwo_kpkd_)
-    {
-      srv_change_motor_param_ = nh_.serviceClient<kuavo_msgs::ExecuteArmAction>("/hardware/change_ruiwo_motor_param");
-      ROS_INFO("[%s] Motor param service client initialized for Dance controller", name_.c_str());
-    }
     // 初始化踝关节求解器
     int ankle_solver_type = 0;
     if (!nh_.getParam("/ankle_solver_type", ankle_solver_type))
@@ -179,13 +173,9 @@ namespace humanoid_controller
     loadEigenMatrix("torqueLimits", torqueLimitsRL_);
     loadEigenMatrix("actionScaleTest", actionScaleTestRL_);
 
-    // 是否使用 Dance 专用 Ruiwo 手臂增益（对应 dance_param.info 中 use_dance_ruiwo_kpkd，默认不使用）
-    loadData::loadCppDataType(config_file, "use_dance_ruiwo_kpkd", use_dance_ruiwo_kpkd_);
     // 设置初始状态
     initialStateRL_.resize(12 + defalutJointPosRL_.size());
     initialStateRL_ << defaultBaseStateRL_, defalutJointPosRL_;
-
-    std::cout << "use_dance_ruiwo_kpkd: " << use_dance_ruiwo_kpkd_ << std::endl;
     // 加载Dance特定参数
     loadData::loadCppDataType(config_file, "defaultBaseHeightControl", defaultBaseHeightControl_);
     loadData::loadCppDataType(config_file, "actionScale", actionScale_);
@@ -247,6 +237,7 @@ namespace humanoid_controller
     loadData::loadCppDataType(config_file, "residualAction", residualAction_);
     
     // 加载 RL 相关 IMU 滤波器参数（与 FallStandController 保持一致）
+    // motor_pdo_kp/kd 由 dance_param.info 配置；use_default_motor_csp_kpkd 为 false 时由 RLControllerBase::update 下发 CSP
     loadRLFilterParams(config_file);
 
     ROS_INFO("[%s] Configuration loaded successfully", name_.c_str());
@@ -526,12 +517,6 @@ namespace humanoid_controller
   void DanceController::pause()
   {
     RLControllerBase::pause();
-
-    // 真实机器人暂停时切回正常 Ruiwo 电机参数（异步调用避免阻塞控制线程）
-    if (is_real_ && use_dance_ruiwo_kpkd_)
-    {
-      changeRuiwoMotorParamAsync("normal_kpkd");
-    }
   }
 
   void DanceController::resume()
@@ -542,12 +527,6 @@ namespace humanoid_controller
     trajectory_time_accumulator_ = 0.0;
     actions_.setZero();
     first_run_ = true;
-  
-    // 真实机器人恢复时切换到 Dance 专用 Ruiwo 电机参数（异步调用避免阻塞控制线程）
-    if (is_real_ && use_dance_ruiwo_kpkd_)
-    {
-      changeRuiwoMotorParamAsync("dance_kpkd");
-    }
 
     ROS_INFO("[%s] Controller resumed, waiting for first update to set yaw offset", name_.c_str());
   }
@@ -1151,45 +1130,6 @@ namespace humanoid_controller
       sensor_data.jointAcc_[0] = -sensor_data.jointAcc_[0];
       sensor_data.jointCurrent_[0] = -sensor_data.jointCurrent_[0];
     }
-  }
-
-  void DanceController::changeRuiwoMotorParamAsync(const std::string& param_name)
-  {
-    // 仿真环境下直接返回
-    if (!is_real_)
-    {
-      return;
-    }
-
-    // 在独立线程中调用服务，避免在控制循环中发生阻塞
-    std::thread([this, param_name]()
-    {
-      try
-      {
-        const ros::Duration timeout(2.0);
-        if (!srv_change_motor_param_.waitForExistence(timeout))
-        {
-          ROS_WARN_THROTTLE(1.0, "[%s] Motor param service not available (timeout: 2s)", name_.c_str());
-          return;
-        }
-
-        kuavo_msgs::ExecuteArmAction srv;
-        srv.request.action_name = param_name;
-
-        if (srv_change_motor_param_.call(srv))
-        {
-          ROS_INFO("[%s] Successfully changed Ruiwo motor param to: %s", name_.c_str(), param_name.c_str());
-        }
-        else
-        {
-          ROS_ERROR("[%s] Failed to call motor param change service", name_.c_str());
-        }
-      }
-      catch (const std::exception& e)
-      {
-        ROS_ERROR("[%s] Exception in motor param change thread: %s", name_.c_str(), e.what());
-      }
-    }).detach(); // 分离线程，允许独立运行
   }
 
 } // namespace humanoid_controller

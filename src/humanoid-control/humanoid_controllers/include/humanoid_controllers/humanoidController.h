@@ -54,6 +54,7 @@
 #include "humanoid_interface/gait/GaitSchedule.h"
 #include "kuavo_msgs/robotHeadMotionData.h"
 #include "kuavo_msgs/getCurrentGaitName.h"
+#include "kuavo_msgs/ExecuteArmAction.h"
 #include "humanoid_controllers/shm_manager.h"
 #include <std_msgs/Int8.h>
 #if defined(USE_DDS) || defined(USE_LEJU_DDS)
@@ -569,6 +570,7 @@ namespace humanoid_controller
     ros::ServiceServer getMmArmCtrlSrv_;
     ros::ServiceServer currentGaitNameSrv_;
     ros::ServiceServer triggerFallStandUpSrv_;
+    ros::ServiceServer changeRuiwoMotorParamSrv_;
     GaitManager *gaitManagerPtr_=nullptr;
 
     PinocchioInterface *pinocchioInterface_ptr_;
@@ -756,6 +758,7 @@ namespace humanoid_controller
     void publishJointCmdToShm(const kuavo_msgs::jointCmd& jointCmdMsg);         // 发布关节命令到共享内存
     void publishControlCommands(const kuavo_msgs::jointCmd& jointCmdMsg);       // 发布控制命令的统一接口
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);                // 替换EC_MASTER电机的kp/kd（从running_settings）
+    bool changeRuiwoMotorParamCallback(kuavo_msgs::ExecuteArmActionRequest &req, kuavo_msgs::ExecuteArmActionResponse &res);  // 修改ruiwo电机kp/kd，更新running_settings后由replaceDefaultEcMotorPdoGait生效
     
     // CPU内核隔离设置
     bool setupCpuIsolation();  // 从ROS参数获取隔离CPU索引并设置线程亲和性

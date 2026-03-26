@@ -811,6 +811,8 @@ namespace humanoid_controller
       rHandWrenchPub_ = controllerNh_.advertise<geometry_msgs::WrenchStamped>("/hand_wrench/right_hand", 10);
       currentGaitNameSrv_ = controllerNh_.advertiseService(robotName_ + "_get_current_gait_name", 
         &humanoidController::getCurrentGaitNameCallback, this);
+      changeRuiwoMotorParamSrv_ = controllerNh_.advertiseService("humanoid_controller/change_ruiwo_motor_param",
+        &humanoidController::changeRuiwoMotorParamCallback, this);
       // 初始化 RL 控制器管理系统
       controller_manager_ = std::make_unique<RLControllerManager>();
       
@@ -1160,23 +1162,24 @@ namespace humanoid_controller
 
   void humanoidController::replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg)
   {
-    // 对于 control_modes == 2 且 driver == EC_MASTER 的电机，使用 running_settings.joint_kp 和 joint_kd
-    // running_settings.joint_kp 和 joint_kd 只包含 EC_MASTER 电机的值，需要建立映射
-    // 注意：ec_master_count 应该是所有 EC_MASTER 驱动器中的索引，而不是 control_modes == 2 的索引
+    // 对于 control_modes == 2 的电机：
+    //   EC_MASTER 电机：使用 running_settings.joint_kp/kd（来自 kuavo.json joint_kp/kd）
+    //   RUIWO 电机：使用 running_settings.ruiwo_kp/kd（来自 kuavo.json ruiwo_kp/kd）
+    // 注意：ec_master_count/ruiwo_count 对应各自驱动器数组中的索引
     const auto &hardware_settings = kuavo_settings_.hardware_settings;
     const auto &running_settings = kuavo_settings_.running_settings;
-    
+    const int total_joints = jointNumReal_ + waistNum_ + armNumReal_;
+
+    // 替换 EC_MASTER 电机 kp/kd
     if (!running_settings.joint_kp.empty() && 
         !running_settings.joint_kd.empty() &&
         running_settings.joint_kp.size() == running_settings.joint_kd.size())
     {
-      const int total_joints = jointNumReal_ + waistNum_ + armNumReal_;
       const int ec_master_size = static_cast<int>(running_settings.joint_kp.size());
       int ec_master_count = 0;
       
       for (int i = 0; i < total_joints && i < static_cast<int>(jointCmdMsg.control_modes.size()); ++i)
       {
-        // 检查是否为 EC_MASTER 驱动器
         if (i < static_cast<int>(hardware_settings.driver.size()) &&
             hardware_settings.driver[i] == EC_MASTER)
         {
@@ -1188,11 +1191,79 @@ namespace humanoid_controller
             jointCmdMsg.joint_kd[i] = static_cast<double>(running_settings.joint_kd[ec_master_count]);
           }
           // 无论 control_modes 是 0 还是 2，都要递增 ec_master_count
-          // 因为 running_settings.joint_kp/kd 的索引对应所有 EC_MASTER 驱动器
           ec_master_count++;
         }
       }
     }
+
+    // 替换 RUIWO 电机 kp/kd（手臂默认增益，来自 kuavo.json ruiwo_kp/kd）
+    if (!running_settings.ruiwo_kp.empty() &&
+        !running_settings.ruiwo_kd.empty() &&
+        running_settings.ruiwo_kp.size() == running_settings.ruiwo_kd.size())
+    {
+      const int ruiwo_size = static_cast<int>(running_settings.ruiwo_kp.size());
+      int ruiwo_count = 0;
+
+      for (int i = 0; i < total_joints && i < static_cast<int>(jointCmdMsg.control_modes.size()); ++i)
+      {
+        if (i < static_cast<int>(hardware_settings.driver.size()) &&
+            hardware_settings.driver[i] == RUIWO)
+        {
+          if (jointCmdMsg.control_modes[i] == 2 &&
+              ruiwo_count < ruiwo_size)
+          {
+            jointCmdMsg.joint_kp[i] = static_cast<double>(running_settings.ruiwo_kp[ruiwo_count]);
+            jointCmdMsg.joint_kd[i] = static_cast<double>(running_settings.ruiwo_kd[ruiwo_count]);
+          }
+          ruiwo_count++;
+        }
+      }
+    }
+  }
+
+  bool humanoidController::changeRuiwoMotorParamCallback(kuavo_msgs::ExecuteArmActionRequest &req, kuavo_msgs::ExecuteArmActionResponse &res)
+  {
+    const std::string &param_name = req.action_name;
+    auto robot_config = drake_interface_->getRobotConfig();
+    if (robot_config == nullptr) {
+      res.message = "Robot config is not initialized";
+      res.success = false;
+      ROS_ERROR("[HumanoidController] changeRuiwoMotorParamCallback: robot config is not initialized");
+      return true;
+    }
+
+    auto nested_obj = (*robot_config)[param_name];
+    if (!nested_obj.contains("ruiwo_kp") || !nested_obj.contains("ruiwo_kd")) {
+      res.message = "Nested object '" + param_name + "' does not contain ruiwo_kp or ruiwo_kd";
+      res.success = false;
+      ROS_ERROR("[HumanoidController] changeRuiwoMotorParamCallback: %s", res.message.c_str());
+      return true;
+    }
+
+    std::vector<int32_t> kp_values = nested_obj["ruiwo_kp"].get<std::vector<int32_t>>();
+    std::vector<int32_t> kd_values = nested_obj["ruiwo_kd"].get<std::vector<int32_t>>();
+
+    if (kp_values.empty() || kd_values.empty()) {
+      res.message = "Failed to load ruiwo_kp or ruiwo_kd from '" + param_name + "'";
+      res.success = false;
+      ROS_ERROR("[HumanoidController] changeRuiwoMotorParamCallback: %s", res.message.c_str());
+      return true;
+    }
+
+    if (kp_values.size() != kd_values.size()) {
+      res.message = "ruiwo_kp and ruiwo_kd size mismatch in '" + param_name + "'";
+      res.success = false;
+      ROS_ERROR("[HumanoidController] changeRuiwoMotorParamCallback: %s", res.message.c_str());
+      return true;
+    }
+
+    kuavo_settings_.running_settings.ruiwo_kp = kp_values;
+    kuavo_settings_.running_settings.ruiwo_kd = kd_values;
+
+    res.message = "Successfully set Ruiwo motor parameters from config: " + param_name;
+    res.success = true;
+    ROS_INFO("[HumanoidController] changeRuiwoMotorParamCallback: %s", res.message.c_str());
+    return true;
   }
 
   void humanoidController::headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg)
@@ -3078,11 +3149,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // 更新控制器
       current_controller_ptr_->update(time, getRobotSensorData(), getRobotState(), jointCmdMsg);
 
-      // 如果 use_default_motor_csp_kpkd 为 true，使用 running_settings 中的 kp/kd 替换 EC_MASTER 电机的值
-      if (current_controller_ptr_->getUseDefaultMotorCspKpkd())
-      {
-        replaceDefaultEcMotorPdoGait(jointCmdMsg);
-      }
+
 
       // 补充头部维度
       // 计算头部反馈力
@@ -3115,6 +3182,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
           jointCmdMsg.control_modes[head_start_index + i3] = 2;
         }
       }
+      // 如果 use_default_motor_csp_kpkd 为 true，使用 running_settings 中的 kp/kd 替换 EC_MASTER 电机的值
+      if (current_controller_ptr_->getUseDefaultMotorCspKpkd())
+      {
+        replaceDefaultEcMotorPdoGait(jointCmdMsg);
+      } 
 
       // 规范化jointCmd尺寸，确保与硬件/仿真期望一致
       {
@@ -3137,7 +3209,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         adjust_int(jointCmdMsg.control_modes, expected_size, 2);
       }
     }
-
+    
     // 发布控制命令
     publishControlCommands(jointCmdMsg);
 

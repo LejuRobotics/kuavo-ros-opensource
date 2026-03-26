@@ -21,7 +21,8 @@ residualAction          true
 defaultBaseHeightControl    0.76 ; 站立时的基座高度
 is_fall_down_controller     false ; 是否为倒地起身控制器
 use_interploate_from_mpc    true  ; 从MPC切换到dance时使用插值过渡到默认姿态
-use_dance_ruiwo_kpkd        true  ; 是否使用 Dance 专用 Ruiwo 手臂增益
+; 手臂 CSP 的 kpkd 仅由下方 motor_pdo_kp / motor_pdo_kd 填写；需与 kuavo.json 一致时请从 kuavo.json 手工抄入（如 dance_kpkd 或顶层 ruiwo_kp/kd）
+use_default_motor_csp_kpkd  false ; false 时使用 motor_pdo_kp/kd 经 RLControllerBase 下发（腿/腰见 joint_kp/kd，手臂见本文件 motor_pdo 段）
 
 defaultBaseState
 {
@@ -237,6 +238,58 @@ torqueLimits
     (18,0)  37.0   ; zarm_r2_joint
     (19,0)  37.0   ; zarm_r3_joint
     (20,0)  37.0   ; zarm_r4_joint
+}
+
+; CSP/PDO：与 kuavo_v17/kuavo.json 一致。Roban 在 joint_cmd 中为硬件序（DanceController 将腰置索引 12）：0-11 腿、12 腰、13-20 手臂。
+; 腿+腰：joint_kp/joint_kd（JSON：0-11 腿、12 腰）。手臂：dance_kpkd ruiwo 第 0-7 项。
+motor_pdo_kp
+{
+    (0,0)   200     ; leg_l1_joint (joint_kp[0])
+    (1,0)   200     ; leg_l2_joint (joint_kp[1])
+    (2,0)   200     ; leg_l3_joint (joint_kp[2])
+    (3,0)   200     ; leg_l4_joint (joint_kp[3])
+    (4,0)   200     ; leg_l5_joint (joint_kp[4])
+    (5,0)   200     ; leg_l6_joint (joint_kp[5])
+    (6,0)   200     ; leg_r1_joint (joint_kp[6])
+    (7,0)   200     ; leg_r2_joint (joint_kp[7])
+    (8,0)   200     ; leg_r3_joint (joint_kp[8])
+    (9,0)   200     ; leg_r4_joint (joint_kp[9])
+    (10,0)  200     ; leg_r5_joint (joint_kp[10])
+    (11,0)  200     ; leg_r6_joint (joint_kp[11])
+    (12,0)  200     ; waist_yaw_joint (joint_kp[12])
+    (13,0)  14      ; zarm_l1_joint (dance_kpkd ruiwo_kp[0])
+    (14,0)  14      ; zarm_l2_joint (dance_kpkd ruiwo_kp[1])
+    (15,0)  14      ; zarm_l3_joint (dance_kpkd ruiwo_kp[2])
+    (16,0)  14      ; zarm_l4_joint (dance_kpkd ruiwo_kp[3])
+    (17,0)  14      ; zarm_r1_joint (dance_kpkd ruiwo_kp[4])
+    (18,0)  14      ; zarm_r2_joint (dance_kpkd ruiwo_kp[5])
+    (19,0)  14      ; zarm_r3_joint (dance_kpkd ruiwo_kp[6])
+    (20,0)  14      ; zarm_r4_joint (dance_kpkd ruiwo_kp[7])
+}
+
+motor_pdo_kd
+{
+    (0,0)   5000    ; leg_l1_joint (joint_kd[0])
+    (1,0)   5000    ; leg_l2_joint (joint_kd[1])
+    (2,0)   5000    ; leg_l3_joint (joint_kd[2])
+    (3,0)   5000    ; leg_l4_joint (joint_kd[3])
+    (4,0)   10000   ; leg_l5_joint (joint_kd[4])
+    (5,0)   10000   ; leg_l6_joint (joint_kd[5])
+    (6,0)   5000    ; leg_r1_joint (joint_kd[6])
+    (7,0)   5000    ; leg_r2_joint (joint_kd[7])
+    (8,0)   5000    ; leg_r3_joint (joint_kd[8])
+    (9,0)   5000    ; leg_r4_joint (joint_kd[9])
+    (10,0)  10000   ; leg_r5_joint (joint_kd[10])
+    (11,0)  10000   ; leg_r6_joint (joint_kd[11])
+    (12,0)  5000    ; waist_yaw_joint (joint_kd[12])
+    (13,0)  0.4     ; zarm_l1_joint (dance_kpkd ruiwo_kd[0])
+    (14,0)  4       ; zarm_l2_joint (dance_kpkd ruiwo_kd[1])
+    (15,0)  6       ; zarm_l3_joint (dance_kpkd ruiwo_kd[2])
+    (16,0)  4       ; zarm_l4_joint (dance_kpkd ruiwo_kd[3])
+    (17,0)  0.4     ; zarm_r1_joint (dance_kpkd ruiwo_kd[4])
+    (18,0)  4       ; zarm_r2_joint (dance_kpkd ruiwo_kd[5])
+    (19,0)  6       ; zarm_r3_joint (dance_kpkd ruiwo_kd[6])
+    (20,0)  4       ; zarm_r4_joint (dance_kpkd ruiwo_kd[7])
 }
 
 actionScaleTest

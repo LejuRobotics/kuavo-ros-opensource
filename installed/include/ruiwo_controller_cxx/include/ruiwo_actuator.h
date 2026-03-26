@@ -179,7 +179,9 @@ public:
     void set_positions(const std::vector<uint8_t> &index,
         const std::vector<double> &positions,
         const std::vector<double> &torque,
-        const std::vector<double> &velocity) override;
+        const std::vector<double> &velocity,
+        const std::vector<double> &kp = {},
+        const std::vector<double> &kd = {}) override;
 
     /**
      * @brief Set the torque object

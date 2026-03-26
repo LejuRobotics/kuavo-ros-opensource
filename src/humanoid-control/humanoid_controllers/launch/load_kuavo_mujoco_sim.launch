@@ -52,7 +52,7 @@
     <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
     <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
-    <arg name="run_mujoco_camera" default="true"/>   <!-- 是否运行mujoco的相机 -->
+    <arg name="run_mujoco_camera" default="false"/>   <!-- 是否运行mujoco的相机 -->
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">

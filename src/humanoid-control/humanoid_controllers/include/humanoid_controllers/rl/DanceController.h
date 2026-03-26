@@ -7,8 +7,6 @@
 #include <Eigen/Dense>
 #include <std_srvs/Trigger.h>
 #include <std_srvs/SetBool.h>
-#include <kuavo_msgs/ExecuteArmAction.h>
-#include <thread>
 
 namespace humanoid_controller
 {
@@ -323,11 +321,6 @@ namespace humanoid_controller
     
     // ===== ROS服务 =====
     ros::ServiceServer restart_dance_srv_;  // 重新开始舞蹈服务
-    ros::ServiceClient srv_change_motor_param_;
-    bool use_dance_ruiwo_kpkd_{false};
-
-    // 异步切换 Ruiwo 电机参数，避免在控制循环中阻塞
-    void changeRuiwoMotorParamAsync(const std::string& param_name);
   };
 
 } // namespace humanoid_controller

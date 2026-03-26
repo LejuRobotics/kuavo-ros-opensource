@@ -330,14 +330,6 @@ namespace humanoid_controller
     ros::ServiceServer srv_stop_trajectory_;        ///< 停止轨迹服务
     ros::Publisher pub_trajectory_state_;           ///< 轨迹状态发布者
     ros::Timer trajectory_state_timer_;             ///< 轨迹状态发布定时器 (50Hz)
-    ros::ServiceClient srv_change_motor_param_;     ///< 切换电机参数服务客户端
-
-    /**
-     * @brief 切换 Ruiwo 电机参数
-     * @param param_name 参数名称 (如 "vmp_yongchun_kpkd" 或 "normal_kpkd")
-     * @return 是否切换成功
-     */
-    bool changeRuiwoMotorParam(const std::string& param_name);
 
     /**
      * @brief 轨迹播放状态枚举

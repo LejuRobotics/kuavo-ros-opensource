@@ -95,7 +95,7 @@
                 <body name="leg_l6_link">
                   <site name="l_ft_frame" pos="0 0 0" size="0.02 0.02 0.02" rgba="1 1 1 1" type="box" group="3"/>
                   <inertial pos="0.0301552 -1.60169e-06 -0.0354358" quat="2.0895e-05 0.739647 2.55497e-06 0.672995" mass="0.608522" diaginertia="0.0020548 0.00193363 0.000487855"/>
-                  <joint name="leg_l6_joint" pos="0 0 0" axis="1 0 0" range="-0.261799 0.261799" actuatorfrcrange="68.4 68.4" damping="0.02"/>
+                  <joint name="leg_l6_joint" pos="0 0 0" axis="1 0 0" range="-0.261799 0.261799" actuatorfrcrange="-68.4 68.4" damping="0.02"/>
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_foot_roll"/>
 
                   <geom type="capsule" size="0.008" fromto="-0.008 -0.046 -0.044 -0.008  0.046 -0.044" class="collision-left"/>
