@@ -44,6 +44,9 @@ cmdPosePlannerWithRuckig::cmdPosePlannerWithRuckig(int dofNum, bool isSync)
     for(size_t i = 0; i < dofNum_+1; ++i)
     {
         inputPtr_->enabled[i] = true;  // 启用该自由度
+    }
+    for(size_t i = 0; i < dofNum_; ++i)
+    {
         inputVec_[i].enabled = {true, true};  // 启用该自由度
         inputVec_[i].control_interface = ruckig::ControlInterface::Position;
         inputVec_[i].synchronization = ruckig::Synchronization::Time;
