@@ -22,6 +22,8 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
   sensor_msgs
+  nav_msgs
+  trajectory_msgs
   message_generation
   geometry_msgs
   kuavo_msgs
@@ -37,32 +39,28 @@ find_package(Boost REQUIRED COMPONENTS
   filesystem
 )
 
-# use kuavo_msgs instead
+add_message_files(
+  FILES
+  armHandPoseFree.msg
+  recordArmHandPoseFree.msg
+  twoArmHandPoseFree.msg
+  twoArmHandPoseCmdFree.msg
+)
 
-# add_message_files(
-  # FILES
-  # robotArmQVVD.msg
-  # ikSolveError.msg
-  # handPose.msg
-  # armHandPose.msg
-  # twoArmHandPose.msg
-  # headBodyPose.msg
-  # ikSolveParam.msg
-  # twoArmHandPoseCmd.msg
-  # robotHandPosition.msg
-  # headBodyPose.msg
-# )
-# add_service_files(
-#   DIRECTORY srv
-#   FILES
+add_service_files(
+  DIRECTORY srv
+  FILES
+  fkSrvFree.srv
+  twoArmHandPoseCmdFreeSrv.srv
+)
 
-  # changeArmCtrlMode.srv
-  # twoArmHandPoseCmdSrv.srv
-  # changeArmCtrlModeKuavo.srv
-  # fkSrv.srv
-# )
-
-# generate_messages already handled by kuavo_msgs
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+  geometry_msgs
+  kuavo_msgs
+  trajectory_msgs
+)
 
 catkin_package(
   INCLUDE_DIRS include
