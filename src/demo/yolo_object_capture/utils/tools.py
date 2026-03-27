@@ -37,18 +37,17 @@ def get_version_parameter():
         param_value = rospy.get_param(param_name)
         rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
         # 适配1000xx版本号
-        valid_series = [42, 45, 49, 52]
+        valid_series = [42, 45, 49, 52, 53, 54]
         MMMMN_MASK = 100000
         series = param_value % MMMMN_MASK
         if series not in valid_series:
-            rospy.logerr(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！程序退出。")
-            rospy.signal_shutdown("参数无效")
+            rospy.logwarn(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！")
+            return None
         else:
             rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
-        return param_value
+            return param_value
     except rospy.ROSException:
-        rospy.logerr(f"参数 {param_name} 不存在！程序退出。")
-        rospy.signal_shutdown("参数获取失败") 
+        rospy.logerr(f"参数 {param_name} 不存在！") 
         return None
 
 # IK 逆解服务
