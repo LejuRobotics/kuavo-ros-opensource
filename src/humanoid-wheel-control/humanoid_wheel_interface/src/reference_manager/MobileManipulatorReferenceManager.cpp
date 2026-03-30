@@ -1078,11 +1078,11 @@ namespace mobile_manipulator {
     finalTime_ = finalTime;
     initState_ = initState;
 
-    if (use_vel_control_.load(std::memory_order_acquire))
-    {
-      // 底盘状态采用期望, 避免模式切换时滑动
-      initState_.head(baseDim_) = stateInputTargetTrajectories_.getDesiredState(initTime).head(baseDim_);
-    }
+    // if (use_vel_control_.load(std::memory_order_acquire))
+    // {
+    //   // 底盘状态采用期望, 避免模式切换时滑动
+    //   initState_.head(baseDim_) = stateInputTargetTrajectories_.getDesiredState(initTime).head(baseDim_);
+    // }
     
     /************************************ 更新状态差分 **************************************/
     Eigen::VectorXd dState, ddState;
