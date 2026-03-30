@@ -1535,17 +1535,19 @@ namespace humanoidController_wheel_wbc
 
   void humanoidControllerWheelWbc::replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg)
   {
-    // 对于 control_modes == 2 且 driver == EC_MASTER 的电机，使用 running_settings.joint_kp 和 joint_kd
-    // running_settings.joint_kp 和 joint_kd 只包含 EC_MASTER 电机的值，需要建立映射
-    // 注意：ec_master_count 应该是所有 EC_MASTER 驱动器中的索引，而不是 control_modes == 2 的索引
+    // 对于 control_modes == 2 的电机：
+    //   EC_MASTER 电机：使用 running_settings.joint_kp/kd（来自 kuavo.json joint_kp/kd）
+    //   RUIWO 电机：使用 running_settings.ruiwo_kp/kd（来自 kuavo.json ruiwo_kp/kd）
+    // 注意：ec_master_count/ruiwo_count 对应各自驱动器数组中的索引
     const auto &hardware_settings = kuavo_settings_.hardware_settings;
     const auto &running_settings = kuavo_settings_.running_settings;
-    
+    const int total_joints = lowJointNum_ + armNum_ + headNum_;
+
+    // 替换 EC_MASTER 电机 kp/kd
     if (!running_settings.joint_kp.empty() && 
         !running_settings.joint_kd.empty() &&
         running_settings.joint_kp.size() == running_settings.joint_kd.size())
     {
-      const int total_joints = lowJointNum_ + armNum_ + headNum_;
       const int ec_master_size = static_cast<int>(running_settings.joint_kp.size());
       int ec_master_count = 0;
       
@@ -1565,6 +1567,30 @@ namespace humanoidController_wheel_wbc
           // 无论 control_modes 是 0 还是 2，都要递增 ec_master_count
           // 因为 running_settings.joint_kp/kd 的索引对应所有 EC_MASTER 驱动器
           ec_master_count++;
+        }
+      }
+    }
+
+    // 替换 RUIWO 电机 kp/kd（手臂默认增益，来自 kuavo.json ruiwo_kp/kd）
+    if (!running_settings.ruiwo_kp.empty() &&
+        !running_settings.ruiwo_kd.empty() &&
+        running_settings.ruiwo_kp.size() == running_settings.ruiwo_kd.size())
+    {
+      const int ruiwo_size = static_cast<int>(running_settings.ruiwo_kp.size());
+      int ruiwo_count = 0;
+
+      for (int i = 0; i < total_joints && i < static_cast<int>(jointCmdMsg.control_modes.size()); ++i)
+      {
+        if (i < static_cast<int>(hardware_settings.driver.size()) &&
+            hardware_settings.driver[i] == RUIWO)
+        {
+          if (jointCmdMsg.control_modes[i] == 2 &&
+              ruiwo_count < ruiwo_size)
+          {
+            jointCmdMsg.joint_kp[i] = static_cast<double>(running_settings.ruiwo_kp[ruiwo_count]);
+            jointCmdMsg.joint_kd[i] = static_cast<double>(running_settings.ruiwo_kd[ruiwo_count]);
+          }
+          ruiwo_count++;
         }
       }
     }
