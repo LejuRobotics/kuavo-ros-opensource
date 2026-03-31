@@ -363,14 +363,14 @@ motor_pdo_kd
     (1,0)   516     ; leg_l2_joint
     (2,0)   941    ; leg_l3_joint
     (3,0)   551     ; leg_l4_joint
-    (4,0)   2260    ; leg_l5_joint
-    (5,0)   2260    ; leg_l6_joint
+    (4,0)   2793    ; leg_l5_joint
+    (5,0)   2793    ; leg_l6_joint
     (6,0)   1506    ; leg_r1_joint
     (7,0)   516     ; leg_r2_joint
     (8,0)   941    ; leg_r3_joint
     (9,0)   551     ; leg_r4_joint
-    (10,0)  2260    ; leg_r5_joint
-    (11,0)  2260    ; leg_r6_joint
+    (10,0)  2793    ; leg_r5_joint
+    (11,0)  2793    ; leg_r6_joint
     (12,0)  929     ; waist_joint
     (13,0)  3254    ; zarm_l1_joint (EC_MASTER)
     (14,0)  3       ; zarm_l2_joint (RUIWO amp_kpkd ruiwo_kd[0])

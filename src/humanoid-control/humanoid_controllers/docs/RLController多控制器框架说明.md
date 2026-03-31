@@ -76,11 +76,18 @@ RLControllerBase (基类)
   - `/humanoid_controller/switch_controller` (`kuavo_msgs/switchController`)  
     - 根据请求中的 `controller_name` 在 **行走控制器列表** 中切换当前控制器：  
       - `"mpc"` 或空字符串：切回 MPC 基础控制；  
-      - 其他名称（如 `"amp_walk"`、`"fall_stand"` 等）：切换到对应 RL 控制器（若已加载且启用）。
+      - 其他名称（如 `"amp_controller"`、`"depth_loco_controller"`、`"fall_stand"` 等）：切换到对应 RL 控制器（若已加载且启用）。
   - `/humanoid_controller/get_controller_list` (`kuavo_msgs/getControllerList`)  
     - 返回当前可用的行走控制器名称列表（包含 `"mpc"`），以及当前激活控制器名称与索引。
   - `/humanoid_controller/switch_to_next_controller` (`kuavo_msgs/switchToNextController`)  
     - 在行走控制器列表中按顺序循环切换（`mpc → 第一个 RL → ... → mpc`），适合作为手柄或键盘「一键切换模式」接口。
+
+- **Depth Loco 控制器补充说明**
+  - `DepthWalkController` 属于 `DEPTH_LOCO_CONTROLLER`，适合走楼梯斜坡这类需要地形感知的行走场景。
+  - 该控制器除了常规机器人状态与 `/cmd_vel` 外，还依赖深度历史输入话题 `/camera/depth/depth_history_array`。
+  - 切换到 `depth_loco_controller` 前会先检查该话题是否已发布且能收到消息；如果没有，系统会拒绝切换。
+  - 从 `depth_loco_controller` 退出时，会优先恢复到进入前的控制器；如果没有历史记录，则回到 `amp_controller`。
+  - 在 `kuavo_v54` 中，可通过 [`rl_controllers.yaml`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl_controllers.yaml) 启用 `depth_loco_controller`，其模型配置位于 [`depth_loco_param.info`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl/depth_loco_param.info)。
 
 - **倒地 / 起身相关服务**
   - `/humanoid_controller/set_fall_down_state` (`std_srvs/SetBool`，在 `humanoidController` 中实现)  
@@ -955,6 +962,3 @@ custom_srv_ = nh_.advertiseService("/your_service",
 ## 10. 总结
 
 `RLControllerBase` 框架提供了一个灵活、可扩展的多控制器架构。通过继承基类并实现必要的虚函数，可以快速添加新的控制器。框架自动处理线程管理、数据同步和状态管理，让开发者专注于控制器特定的逻辑实现。
-
-
-

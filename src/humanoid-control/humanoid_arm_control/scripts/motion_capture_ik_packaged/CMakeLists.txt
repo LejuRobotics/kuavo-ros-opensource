@@ -14,7 +14,6 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   message_generation
   geometry_msgs
-  kuavo_msgs
 )
 find_package(BZip2 REQUIRED)
 
@@ -29,6 +28,7 @@ add_message_files(
   handPose.msg
   armHandPose.msg
   twoArmHandPose.msg
+  ikSolveParam.msg
   twoArmHandPoseCmd.msg
   robotHandPosition.msg
   twoArmHandPoseFree.msg
@@ -43,13 +43,12 @@ generate_messages(
   DEPENDENCIES
   std_msgs
   geometry_msgs
-  kuavo_msgs
 )
 
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES motion_capture_ik
- CATKIN_DEPENDS rospy std_msgs kuavo_msgs message_runtime
+ CATKIN_DEPENDS rospy std_msgs message_runtime
 #  DEPENDS system_lib
 )
 

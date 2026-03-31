@@ -166,6 +166,7 @@ rostopic echo /h12pro_channel
 |---------|---------|---------|
 | walk | A_PRESS | E_MIDDLE + F_MIDDLE |
 | trot | B_PRESS | E_MIDDLE + F_MIDDLE |
+| dance_controller | B_LONG_PRESS | E_RIGHT + F_LEFT |
 | arm_pose1 | A_PRESS | E_RIGHT + F_LEFT |
 | arm_pose2 | B_PRESS | E_RIGHT + F_LEFT |
 | arm_pose3 | C_PRESS | E_RIGHT + F_LEFT |
@@ -198,6 +199,13 @@ rostopic echo /h12pro_channel
 | initial | C_LONG_PRESS + D_LONG_PRESS | 任意 |
 | record_vr_rosbag | C_PRESS | 任意 |
 | stop_record_vr_rosbag | D_PRESS | 任意 |
+
+#### Dance_controller 状态转换
+
+| 目标状态 | 按键组合 | 开关位置 |
+|---------|---------|---------|
+| stance | B_LONG_PRESS | E_RIGHT + F_LEFT |
+| initial | C_LONG_PRESS + D_LONG_PRESS | 任意 |
 
 #### Climb_stair 状态转换
 

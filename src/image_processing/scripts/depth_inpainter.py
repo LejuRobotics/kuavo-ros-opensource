@@ -29,6 +29,7 @@ class DepthImageInpainter:
         self.cur_buf_idx = 0
         self.selected_ids = [0, 6, 12, 18, 24, 30, 36, 42]
         self.depth_buf_filled = False
+        self.last_delay_print_time = 0.0
         self.setup_publishers_subscribers()
     
     def get_parameters(self):
@@ -124,6 +125,11 @@ class DepthImageInpainter:
     
     def image_callback(self, msg):
         try:
+            publish_time =msg.header.stamp.to_sec()
+            current_time = rospy.Time.now().to_sec()
+            if current_time - self.last_delay_print_time >= 1.0:
+                print("delay time", current_time - publish_time)
+                self.last_delay_print_time = current_time
             if self.runtime:
                 start_time = time.time()
             if self.debug and not self.runtime:
@@ -137,6 +143,10 @@ class DepthImageInpainter:
             
             # encoding / unit convertion
             cv_image = cv_image.astype(np.float32) / 1000.0  # mm -> m
+            orig_h, orig_w = cv_image.shape[:2]
+            new_h = int(orig_h * 0.5)
+            new_w = int(orig_w * 0.5)
+            cv_image = cv2.resize(cv_image, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
             if self.debug:
                 rospy.loginfo(
                     f"""Enc={msg.encoding}, H={msg.height}, W={msg.width} dtype={cv_image.dtype}, S={cv_image.shape}, min={np.nanmin(cv_image):.1f}, max={np.nanmax(cv_image):.1f}"""
@@ -195,9 +205,11 @@ class DepthImageInpainter:
                 cv2.waitKey(1)
 
             # create mask for repair
+            mask_time = time.time() 
+
             mask = self.create_mask(cv_image)
             if self.debug:
-                mask_time = time.time() - start_time
+               
 
                 mask_msg = self.bridge.cv2_to_imgmsg(mask, encoding='mono8')
                 mask_msg.header = msg.header
@@ -220,8 +232,9 @@ class DepthImageInpainter:
             # img_resized = np.clip(img_resized, self.min_depth, self.max_depth)
             
             img_inpainted = self.inpaint_depth_image(img_resized, mask)
+            inpaint_time = time.time() 
             if self.debug:
-                inpaint_time = time.time() - mask_time
+                
                 # print(f"inpainted image min: {img_inpainted.min()}")
                 missing_pixels = np.sum(mask > 0)
                 total_pixels = mask.shape[0] * mask.shape[1]
@@ -253,8 +266,8 @@ class DepthImageInpainter:
                 self.neg_diff_pub.publish(msg)
 
             img_blurred = self.apply_gaussian_blur(img_inpainted)
-            if self.debug:
-                blur_time = time.time() - inpaint_time
+            blur_time = time.time() 
+                
             
             img_normalized = np.clip(img_blurred, 0, self.max_depth) / self.max_depth
             processed_msg = self.bridge.cv2_to_imgmsg(img_normalized, encoding='32FC1')
@@ -279,11 +292,11 @@ class DepthImageInpainter:
             history_msg.data = depth_history_stack.tolist()
             self.depth_history_array_pub.publish(history_msg)
             
-            if self.debug:
+            # if self.debug:
                 # rospy.loginfo(f"Processed image: Enc={output_encoding}, dtype={output_image.dtype}, S={output_image.shape}, min={np.nanmin(output_image):.1f}, max={np.nanmax(output_image):.1f}")
-                rospy.loginfo(f"Runtime >> Mask: {mask_time*1000:.2f} ms | Inpainting: {inpaint_time*1000:.2f} ms | GaussianBlur: {blur_time*1000:.2f} ms | Total: {(time.time() - start_time)*1000:.2f} ms")
             if self.runtime and not self.debug:
-                rospy.loginfo(f"Total processing time: {(time.time() - start_time)*1000:.2f} ms")    
+                rospy.loginfo(f"Runtime >> Mask: {(mask_time-start_time)*1000:.2f} ms | Inpainting: {(inpaint_time-mask_time)*1000:.2f} ms | GaussianBlur: {(blur_time-inpaint_time)*1000:.2f} ms | Total: {(time.time() - start_time)*1000:.2f} ms")
+
             
         except CvBridgeError as e:
             rospy.logerr(f"CV Bridge Error: {e}")
@@ -435,8 +448,8 @@ class DepthImageInpainter:
     def apply_resize(self, image, interpolation=cv2.INTER_NEAREST):
         if self.resize_scale != 1.0 and self.resize_scale > 0:
             orig_h, orig_w = image.shape[:2]
-            new_h = int(orig_h * self.resize_scale)
-            new_w = int(orig_w * self.resize_scale)
+            new_h = int(orig_h * self.resize_scale*2)
+            new_w = int(orig_w * self.resize_scale*2)
             image = cv2.resize(image, (new_w, new_h), interpolation=interpolation)
             if self.debug:
                 rospy.loginfo(f"Resized image to scale {self.resize_scale} ({new_h}x{new_w})")

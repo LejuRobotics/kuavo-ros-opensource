@@ -1,6 +1,7 @@
 import subprocess
 import rospy
 import os
+import collections
 from rich import console
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
@@ -29,9 +30,11 @@ import os
 import json
 import hashlib
 import math
+import re
 import numpy as np
 from sensor_msgs.msg import Joy
 from geometry_msgs.msg import Twist
+from std_msgs.msg import Float64MultiArray
 
 console = console.Console()
 
@@ -285,6 +288,9 @@ def stop_wifi_info_report():
 _switch_controller_lock = threading.Lock()
 _switch_controller_cooling_until = 0.0  # 冷却期结束时间戳
 SWITCH_CONTROLLER_COOLDOWN = 3.0  # 冷却期时长（秒）
+_depth_loco_restore_controller_name = None  # 进入 depth_loco_controller 前的控制器名
+_depth_history_topic_monitor = None
+_depth_history_topic_monitor_lock = threading.Lock()
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_dir = os.path.join(os.path.dirname(current_dir), "config")
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
@@ -1009,20 +1015,32 @@ def call_switch_controller_service(controller_name):
     """
     service_name = "/humanoid_controller/switch_controller"
     try:
+        current_controller_before = get_current_controller_name()
+        rospy.loginfo(
+            f"[ControllerSwitch] Request switch via '{service_name}': "
+            f"from '{current_controller_before}' to '{controller_name}'"
+        )
         rospy.wait_for_service(service_name, timeout=1.0)
         switch_client = rospy.ServiceProxy(service_name, switchController)
         response = switch_client(controller_name)
         if response.success:
-            rospy.loginfo(f"Switch controller successful: {response.message}")
-            rospy.loginfo(f"Switched to controller: '{controller_name}'")
+            current_controller_after = get_current_controller_name()
+            rospy.loginfo(
+                f"[ControllerSwitch] Switch success: {response.message}. "
+                f"Current controller is now '{current_controller_after}'"
+            )
         else:
-            rospy.logwarn(f"Switch controller failed: {response.message}")
+            current_controller_after = get_current_controller_name()
+            rospy.logwarn(
+                f"[ControllerSwitch] Switch failed: {response.message}. "
+                f"Current controller remains '{current_controller_after}'"
+            )
         return response.success
     except rospy.ServiceException as e:
-        rospy.logerr(f"Service call to '{service_name}' failed: {e}")
+        rospy.logerr(f"[ControllerSwitch] Service call to '{service_name}' failed: {e}")
         return False
     except rospy.ROSException as e:
-        rospy.logerr(f"Service '{service_name}' not available: {e}")
+        rospy.logerr(f"[ControllerSwitch] Service '{service_name}' not available: {e}")
         return False
 
 def call_switch_to_vmp_controller_service():
@@ -1033,19 +1051,68 @@ def call_switch_to_vmp_controller_service():
     """
     service_name = "/humanoid_controller/switch_to_vmp_controller"
     try:
+        current_controller_before = get_current_controller_name()
+        rospy.loginfo(
+            f"[ControllerSwitch] Request switch via '{service_name}': "
+            f"from '{current_controller_before}' to 'vmp_controller'"
+        )
         rospy.wait_for_service(service_name, timeout=1.0)
         switch_client = rospy.ServiceProxy(service_name, Trigger)
         response = switch_client()
         if response.success:
-            rospy.loginfo(f"Switch to VMP controller successful: {response.message}")
+            current_controller_after = get_current_controller_name()
+            rospy.loginfo(
+                f"[ControllerSwitch] VMP switch success: {response.message}. "
+                f"Current controller is now '{current_controller_after}'"
+            )
         else:
-            rospy.logwarn(f"Switch to VMP controller failed: {response.message}")
+            current_controller_after = get_current_controller_name()
+            rospy.logwarn(
+                f"[ControllerSwitch] VMP switch failed: {response.message}. "
+                f"Current controller remains '{current_controller_after}'"
+            )
         return response.success
     except rospy.ServiceException as e:
-        rospy.logerr(f"Service call to '{service_name}' failed: {e}")
+        rospy.logerr(f"[ControllerSwitch] Service call to '{service_name}' failed: {e}")
         return False
     except rospy.ROSException as e:
-        rospy.logerr(f"Service '{service_name}' not available: {e}")
+        rospy.logerr(f"[ControllerSwitch] Service '{service_name}' not available: {e}")
+        return False
+
+def call_switch_to_dance_controller_service():
+    """调用切换到Dance控制器的专用服务
+    使用服务接口：/humanoid_controller/switch_to_dance_controller (std_srvs/Trigger)
+
+    :return: bool, 服务调用结果
+    """
+    service_name = "/humanoid_controller/switch_to_dance_controller"
+    try:
+        current_controller_before = get_current_controller_name()
+        rospy.loginfo(
+            f"[ControllerSwitch] Request switch via '{service_name}': "
+            f"from '{current_controller_before}' to 'dance_controller'"
+        )
+        rospy.wait_for_service(service_name, timeout=1.0)
+        switch_client = rospy.ServiceProxy(service_name, Trigger)
+        response = switch_client()
+        if response.success:
+            current_controller_after = get_current_controller_name()
+            rospy.loginfo(
+                f"[ControllerSwitch] Dance switch success: {response.message}. "
+                f"Current controller is now '{current_controller_after}'"
+            )
+        else:
+            current_controller_after = get_current_controller_name()
+            rospy.logwarn(
+                f"[ControllerSwitch] Dance switch failed: {response.message}. "
+                f"Current controller remains '{current_controller_after}'"
+            )
+        return response.success
+    except rospy.ServiceException as e:
+        rospy.logerr(f"[ControllerSwitch] Service call to '{service_name}' failed: {e}")
+        return False
+    except rospy.ROSException as e:
+        rospy.logerr(f"[ControllerSwitch] Service '{service_name}' not available: {e}")
         return False
 
 def get_current_controller_name():
@@ -1070,6 +1137,126 @@ def get_current_controller_name():
     except rospy.ROSException as e:
         rospy.logerr(f"Service '{service_name}' not available: {e}")
         return None
+
+class TopicFrequencyMonitor(object):
+    """后台订阅话题并估算最近一段时间的消息频率。"""
+
+    def __init__(self, topic, msg_type, window_size=50, stale_timeout=0.5):
+        self._timestamps = collections.deque(maxlen=window_size)
+        self._stale_timeout = stale_timeout
+        self._lock = threading.Lock()
+        self._subscriber = rospy.Subscriber(topic, msg_type, self._cb, queue_size=window_size)
+
+    def _cb(self, _msg):
+        with self._lock:
+            self._timestamps.append(time.time())
+
+    def has_recent_message(self):
+        now_sec = time.time()
+        with self._lock:
+            if not self._timestamps:
+                return False
+            return (now_sec - self._timestamps[-1]) <= self._stale_timeout
+
+    def get_hz(self):
+        now_sec = time.time()
+        with self._lock:
+            timestamps = list(self._timestamps)
+
+        if len(timestamps) < 2:
+            return 0.0
+
+        if (now_sec - timestamps[-1]) > self._stale_timeout:
+            return 0.0
+
+        duration = timestamps[-1] - timestamps[0]
+        if duration <= 0.0:
+            return 0.0
+
+        return (len(timestamps) - 1) / duration
+
+def _get_depth_history_topic_monitor():
+    global _depth_history_topic_monitor
+
+    with _depth_history_topic_monitor_lock:
+        if _depth_history_topic_monitor is None:
+            _depth_history_topic_monitor = TopicFrequencyMonitor(
+                "/camera/depth/depth_history_array",
+                Float64MultiArray,
+                window_size=50,
+                stale_timeout=0.5,
+            )
+        return _depth_history_topic_monitor
+
+def is_depth_history_topic_available():
+    """检查深度历史话题是否已发布且当前能收到消息。
+
+    Returns:
+        bool: True 表示话题已发布、能收到消息且频率达到最低要求，False 表示当前不可切到 depth_loco_controller
+    """
+    target_topic = "/camera/depth/depth_history_array"
+    min_topic_frequency_hz = 50.0
+    wait_timeout_sec = 2.0
+    check_interval_sec = 0.05
+    try:
+        published_topics = rospy.get_published_topics()
+        if not published_topics:
+            rospy.logwarn("[DepthLocoSwitch] No published topics found while checking depth history topic.")
+            return False
+
+        if not any(topic_name == target_topic for topic_name, _topic_type in published_topics):
+            rospy.logwarn(f"[DepthLocoSwitch] Required topic '{target_topic}' is not published. Refuse to switch to depth_loco_controller.")
+            return False
+
+        topic_monitor = _get_depth_history_topic_monitor()
+        deadline = time.time() + wait_timeout_sec
+        estimated_hz = 0.0
+
+        while time.time() < deadline and not rospy.is_shutdown():
+            estimated_hz = topic_monitor.get_hz()
+            if estimated_hz >= min_topic_frequency_hz:
+                rospy.loginfo(
+                    f"[DepthLocoSwitch] Topic '{target_topic}' is available with estimated frequency "
+                    f"{estimated_hz:.1f} Hz."
+                )
+                return True
+            rospy.sleep(check_interval_sec)
+
+        if not topic_monitor.has_recent_message():
+            rospy.logwarn(
+                f"[DepthLocoSwitch] Required topic '{target_topic}' has no recent messages. "
+                f"Refuse to switch to depth_loco_controller."
+            )
+            return False
+
+        if estimated_hz < min_topic_frequency_hz:
+            rospy.logwarn(
+                f"[DepthLocoSwitch] Topic '{target_topic}' frequency too low: "
+                f"estimated {estimated_hz:.1f} Hz. Require at least {min_topic_frequency_hz:.1f} Hz."
+            )
+            return False
+        return True
+    except Exception as e:
+        rospy.logerr(f"[DepthLocoSwitch] Failed to check published topics: {e}")
+        return False
+
+def _set_depth_loco_restore_controller_name(controller_name):
+    """记录进入 depth_loco_controller 之前的控制器名。"""
+    global _depth_loco_restore_controller_name
+    with _switch_controller_lock:
+        _depth_loco_restore_controller_name = controller_name
+
+def _get_depth_loco_restore_controller_name():
+    """获取 depth_loco_controller 的恢复目标，不清空。"""
+    global _depth_loco_restore_controller_name
+    with _switch_controller_lock:
+        return _depth_loco_restore_controller_name
+
+def _clear_depth_loco_restore_controller_name():
+    """清空 depth_loco_controller 的恢复目标。"""
+    global _depth_loco_restore_controller_name
+    with _switch_controller_lock:
+        _depth_loco_restore_controller_name = None
 
 def _release_switch_controller_cooldown():
     """释放 switch_controller 冷却期（在后台线程中调用）"""
@@ -1147,6 +1334,63 @@ def switch_controller_callback(event):
         
     except Exception as e:
         rospy.logerr(f"Error in switch_controller_callback: {e}")
+
+def depth_loco_switch_callback(event):
+    """切换走楼梯斜坡控制器回调函数
+    - 如果当前是 mpc 或 amp_controller，切换到 depth_loco_controller
+    - 如果当前是 depth_loco_controller，切换回进入前的控制器
+    - 执行后设置冷却期，期间不允许其他状态转换
+    """
+    global _switch_controller_cooling_until
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+    print_state_transition(trigger, source, "stance")
+
+    try:
+        current_controller = get_current_controller_name()
+
+        if current_controller is None:
+            rospy.logerr("[DepthLocoSwitch] Failed to get current controller name. Cannot switch controller.")
+            return
+
+        current_controller_lower = current_controller.lower()
+
+        success = False
+        if current_controller_lower in ["mpc", "amp_controller"]:
+            if not is_depth_history_topic_available():
+                rospy.logwarn("[DepthLocoSwitch] depth_loco_switch blocked because depth history topic is unavailable.")
+                return
+            _set_depth_loco_restore_controller_name(current_controller_lower)
+            rospy.loginfo("[DepthLocoSwitch] Switching to depth_loco_controller")
+            success = call_switch_controller_service("depth_loco_controller")
+            if not success:
+                _set_depth_loco_restore_controller_name(None)
+                rospy.logwarn("[DepthLocoSwitch] Failed to switch to depth_loco_controller.")
+        elif current_controller_lower == "depth_loco_controller":
+            restore_controller_name = _get_depth_loco_restore_controller_name()
+            if restore_controller_name not in ["mpc", "amp_controller"]:
+                restore_controller_name = "amp_controller"
+            rospy.loginfo(f"[DepthLocoSwitch] Switching back to {restore_controller_name}")
+            success = call_switch_controller_service(restore_controller_name)
+            if not success:
+                rospy.logwarn(f"[DepthLocoSwitch] Failed to switch back to {restore_controller_name}.")
+            else:
+                _clear_depth_loco_restore_controller_name()
+        else:
+            rospy.logwarn(f"[DepthLocoSwitch] Unsupported current controller: {current_controller}.")
+
+        with _switch_controller_lock:
+            _switch_controller_cooling_until = time.time() + SWITCH_CONTROLLER_COOLDOWN
+            if success:
+                rospy.loginfo(f"[DepthLocoSwitch] Controller switched successfully. Cooldown period started for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
+            else:
+                rospy.loginfo(f"[DepthLocoSwitch] Cooldown period started (service call failed). State transitions will be blocked for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
+
+        cooldown_thread = threading.Thread(target=_release_switch_controller_cooldown, daemon=True)
+        cooldown_thread.start()
+
+    except Exception as e:
+        rospy.logerr(f"Error in depth_loco_switch_callback: {e}")
 
 def check_can_switch_to_vmp(event):
     """检查是否可以切换到VMP控制器
@@ -1236,6 +1480,49 @@ def exit_vmp_controller_callback(event):
         print_state_transition(trigger, source, "stance")
     except Exception as e:
         rospy.logerr(f"Error in exit_vmp_controller_callback: {e}")
+        return
+
+def dance_controller_callback(event):
+    """进入Dance控制模式回调函数
+    从 amp_controller 切换到 dance_controller
+    使用服务接口：/humanoid_controller/switch_to_dance_controller
+    """
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+
+    try:
+        rospy.loginfo("[DanceController] Switching from amp_controller to dance_controller")
+        success = call_switch_to_dance_controller_service()
+
+        if not success:
+            rospy.logerr("[DanceController] Failed to switch to dance_controller")
+            return
+
+        rospy.loginfo("[DanceController] Successfully entered Dance controller mode")
+        print_state_transition(trigger, source, "dance_controller")
+    except Exception as e:
+        rospy.logerr(f"Error in dance_controller_callback: {e}")
+        return
+
+def exit_dance_controller_callback(event):
+    """退出Dance控制模式回调函数
+    从 dance_controller 切换回 amp_controller
+    """
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+
+    try:
+        rospy.loginfo("[DanceController] Exiting Dance controller mode, switching back to amp_controller")
+        success = call_switch_controller_service("amp_controller")
+
+        if not success:
+            rospy.logerr("[DanceController] Failed to switch back to amp_controller.")
+            return
+
+        rospy.loginfo("[DanceController] Successfully switched back to amp_controller")
+        print_state_transition(trigger, source, "stance")
+    except Exception as e:
+        rospy.logerr(f"Error in exit_dance_controller_callback: {e}")
         return
 
 def vmp_action_callback(event):

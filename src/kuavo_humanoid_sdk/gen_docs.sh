@@ -64,7 +64,9 @@ check_ros_env() {
 }
 
 copy_ros_msgs() {
-    MSG_PACKAGES="kuavo_msgs ocs2_msgs motion_capture_ik"
+    # SDK consumes IK-related message/service types from kuavo_msgs.
+    # motion_capture_ik is not copied here as a standalone Python message package.
+    MSG_PACKAGES="kuavo_msgs ocs2_msgs"
     IFS=' ' read -r -a MSG_ARRAY <<< "$MSG_PACKAGES"
     dest_dir="$SCRIPT_DIR/kuavo_humanoid_sdk/msg"
     for msg_pkg in "${MSG_ARRAY[@]}"; do

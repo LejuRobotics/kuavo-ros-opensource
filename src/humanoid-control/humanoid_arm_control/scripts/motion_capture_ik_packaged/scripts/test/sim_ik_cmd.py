@@ -1,7 +1,6 @@
 import rospy
 from std_msgs.msg import Float32MultiArray
-from motion_capture_ik.msg import twoArmHandPoseCmd
-from kuavo_msgs.msg import ikSolveParam
+from motion_capture_ik.msg import twoArmHandPoseCmd, ikSolveParam
 
 import numpy as np
 

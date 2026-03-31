@@ -253,6 +253,22 @@ sudo journalctl -u h12pro_node.service -f
 * `joystick_to_corresponding_axis` 字段用于定义摇杆通道对应控制机器人运动方向的轴，以及速度限制(`left_joystick_vertical` 通道对应的轴为 `x`， 速度限制为 `min: -0.6`, `max: 0.6`)
 * 更多配置项请查看 `h12pro_remote_controller.json` 文件。
 
+### Multi 模式常用按键
+
+以下组合在 `KUAVO_CONTROL_SCHEME=multi` 下生效：
+
+* `E_MIDDLE + F_MIDDLE + A_PRESS`: `walk`
+* `E_MIDDLE + F_MIDDLE + B_PRESS`: `trot`
+* `E_MIDDLE + F_MIDDLE + C_PRESS`: 在 `mpc` 和 `amp_controller` 之间切换
+* `E_RIGHT + F_LEFT + C_LONG_PRESS`: 触发 `depth_loco_switch`
+  它会在 `mpc` / `amp_controller` 和 `depth_loco_controller` 之间切换，用于走楼梯斜坡
+* `E_RIGHT + F_LEFT + A_LONG_PRESS`: 切换到 `vmp_controller`
+
+`depth_loco_switch` 是状态机里的事件名，不是控制器名；真正被切换的是 `depth_loco_controller`。
+退出 `depth_loco_controller` 时，系统会优先恢复到进入前的控制器，如果没有记录则回到 `amp_controller`。
+
+使用 `depth_loco_controller` 走楼梯斜坡时，系统必须已经正常发布 `/camera/depth/depth_history_array` 且能收到消息，且话题频率建议达到 50Hz，否则会直接拒绝切换，避免机器人异常动作。
+
 示例：
 ```json
 {
@@ -303,4 +319,3 @@ sudo journalctl -u h12pro_node.service -f
 * 开启服务sudo systemctl start ocs2_h12pro_monitor.service
 * 然后机器人头部控制模式要早stance状态下进行，机器人进入站立状态后，使用组合键‘E_IDDLE,F_RIGHT,PRESS B’这时进入头部控制状态
 * 此时移动机器人的右遥感上下左右即可操作机器人头部上下左右移动
-
