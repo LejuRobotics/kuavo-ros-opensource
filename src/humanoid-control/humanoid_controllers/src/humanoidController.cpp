@@ -2735,7 +2735,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         low_latency_first_enter = true;
       }
-      if (use_ros_arm_joint_trajectory_)
+      if (use_ros_arm_joint_trajectory_ && resetting_mpc_state_ == ResettingMpcState::NOMAL)
       {
         if (mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL && mpcArmControlMode_ == ArmControlMode::EXTERN_CONTROL)
         {
