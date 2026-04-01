@@ -1,4 +1,4 @@
-prefix=/root/kuavo_ws/builds/tX_ftt_G1/0/highlydynamic/kuavo-ros-control/installed
+prefix=/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed
 
 Name: hardware_node
 Description: Description of hardware_node
