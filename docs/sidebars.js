@@ -59,7 +59,13 @@ const sidebars = {
       type: 'category',
       label: '快速开始',
       items: [
-        'basic_usage/kuavo-ros-control/docs/2快速开始/快速开始',
+        {
+          type: 'category',
+          label: '人形产品快速开始',
+          items: [
+            'basic_usage/kuavo-ros-control/docs/2快速开始/快速开始',
+          ],
+        },
         {
           type: 'category',
           label: 'Kuavo 5-W 操作说明',
@@ -74,11 +80,17 @@ const sidebars = {
       type: 'category',
       label: '调试教程',
       items: [
-        'basic_usage/kuavo-ros-control/docs/3调试教程/快速调试',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/配置文件说明',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/启动前准备',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/机器人关节标定',
-        'basic_usage/kuavo-ros-control/docs/3调试教程/上肢控制模式',
+        {
+          type: 'category',
+          label: '人形产品调试教程',
+          items: [
+            'basic_usage/kuavo-ros-control/docs/3调试教程/快速调试',
+            'basic_usage/kuavo-ros-control/docs/3调试教程/配置文件说明',
+            'basic_usage/kuavo-ros-control/docs/3调试教程/启动前准备',
+            'basic_usage/kuavo-ros-control/docs/3调试教程/机器人关节标定',
+            'basic_usage/kuavo-ros-control/docs/3调试教程/上肢控制模式',
+          ],
+        },
         {
           type: 'category',
           label: 'Kuavo 5-W 调试教程',
@@ -95,22 +107,34 @@ const sidebars = {
       type: 'category',
       label: '开发接口',
       items: [
-        'basic_usage/kuavo-ros-control/docs/4开发接口/仿真环境使用',
-        'basic_usage/kuavo-ros-control/docs/4开发接口/SDK介绍',
-        'basic_usage/kuavo-ros-control/docs/4开发接口/接口使用文档',
-        'basic_usage/kuavo-ros-control/docs/4开发接口/ROS2接口使用文档',
-        'basic_usage/kuavo-ros-control/docs/4开发接口/手臂防碰撞功能使用文档',
-        'basic_usage/kuavo-ros-control/docs/4开发接口/Kuavo 5-W 接口使用文档',
-        { 
+        {
           type: 'category',
-          label: 'PythonSDK使用文档',
+          label: '人形产品开发接口',
           items: [
-            'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/kuavo-humanoid-websocket-sdk介绍',
-            'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/Websockts通信',
-            'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/头部以及手部控制接口',
-            'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/机器人信息获取接口',
-            'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/机器人移动以及步态接口',
-            'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/音频播放接口',
+            'basic_usage/kuavo-ros-control/docs/4开发接口/仿真环境使用',
+            'basic_usage/kuavo-ros-control/docs/4开发接口/SDK介绍',
+            'basic_usage/kuavo-ros-control/docs/4开发接口/接口使用文档',
+            'basic_usage/kuavo-ros-control/docs/4开发接口/ROS2接口使用文档',
+            'basic_usage/kuavo-ros-control/docs/4开发接口/手臂防碰撞功能使用文档',
+            {
+              type: 'category',
+              label: 'PythonSDK使用文档',
+              items: [
+                'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/kuavo-humanoid-websocket-sdk介绍',
+                'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/Websockts通信',
+                'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/头部以及手部控制接口',
+                'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/机器人信息获取接口',
+                'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/机器人移动以及步态接口',
+                'basic_usage/kuavo-ros-control/docs/4开发接口/kuavo-humanoid-websocket-sdk接口/音频播放接口',
+              ],
+            },
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Kuavo 5-W 开发接口',
+          items: [
+            'basic_usage/kuavo-ros-control/docs/4开发接口/Kuavo 5-W 接口使用文档',
           ],
         },
       ],
