@@ -260,8 +260,11 @@
     <!-- 添加播放音乐参数 -->
     <arg name="music" default="enable" />
 
-    <!-- 当 music 不为 disable 时启动音频服务 -->
-    <group unless="$(eval arg('music') == 'disable')">
+    <!-- 音频服务跳过条件：
+         1. music == 'disable' 时禁用
+         2. robot_version == 53 时禁用（与上位机服务冲突）
+    -->
+    <group if="$(eval arg('music') != 'disable' and arg('robot_version') != 53)">
         <!-- 设置音频文件路径参数 -->
         <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string"/>
 

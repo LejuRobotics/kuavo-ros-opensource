@@ -2858,7 +2858,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         jointCmdMsg.joint_kp.push_back(joint_kp_[i1]);
         jointCmdMsg.joint_kd.push_back(joint_kd_[i1]);
         jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
-        if(!is_roban_ && is_torso_interpolation_active_ && i1 < jointNumReal_)
+        if(!is_roban_ && resetting_mpc_state_ != ResettingMpcState::NOMAL && i1 < jointNumReal_||is_rl_controller_)
         {
           jointCmdMsg.control_modes.push_back(2); // 躯干插值阶段，腿部全部位置控制
           continue;
