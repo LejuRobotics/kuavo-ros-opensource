@@ -400,7 +400,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool isFirstVelPub_ = true;
   
   // VR高度平滑切换相关变量
-  bool heightSmoothTransitionActive_ = true;  // 是否正在进行高度平滑过渡
+  bool heightSmoothTransitionActive_ = false;  // 是否正在进行高度平滑过渡
   scalar_t heightTransitionStartTime_ = 0.0;   // 平滑过渡开始时间
   scalar_t heightTransitionDuration_ = 2.0;    // 平滑过渡持续时间（秒，动态计算）
   scalar_t heightBeforeTransition_ = 0.0;      // 过渡前的高度

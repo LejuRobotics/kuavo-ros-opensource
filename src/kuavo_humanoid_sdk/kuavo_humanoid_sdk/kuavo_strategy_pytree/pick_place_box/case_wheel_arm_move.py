@@ -2,7 +2,7 @@
 轮臂上肢关节运动控制案例
 
 使用 NodeWheelMoveTimedCmd 通过 /mobile_manipulator_timed_single_cmd 服务发送上肢关节角度。
-planner_index=6，14个关节（左臂7个 + 右臂7个）。
+14 维关键点（左臂 7 + 右臂 7）在 API 层拆为左臂 planner 8、右臂 planner 9 各发一次。
 """
 import os
 import sys

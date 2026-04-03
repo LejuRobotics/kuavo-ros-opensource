@@ -590,11 +590,11 @@ namespace ocs2
           commands_map_[current_cmd.name] = current_cmd;
         }
         
-        std::cout << "Loaded " << commands_map_.size() << " commands" <<std::endl;
-        for (const auto& cmd : commands_map_)
-        {
-          std::cout << " - " << cmd.first << ": "<< cmd.second.type << " " << cmd.second.value << " " << cmd.second.description << std::endl;
-        }
+        // std::cout << "Loaded " << commands_map_.size() << " commands" <<std::endl;
+        // for (const auto& cmd : commands_map_)
+        // {
+        //   std::cout << " - " << cmd.first << ": "<< cmd.second.type << " " << cmd.second.value << " " << cmd.second.description << std::endl;
+        // }
       }
       catch (const std::exception& e)
       {
@@ -1487,7 +1487,7 @@ namespace ocs2
         updated[2] = true;
         // current_target_(2) = com_height_ + commad_line_target_(2);
         cmdVel.linear.z = commad_line_target_(2);
-        std::cout << "base height: " << current_target_(2) << std::endl;
+        ROS_INFO_THROTTLE(1.0, "base height: %f", current_target_(2));
       }
       else
       {

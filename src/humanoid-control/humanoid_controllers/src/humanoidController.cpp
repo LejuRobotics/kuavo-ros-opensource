@@ -1745,7 +1745,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         robotlocalizationDataQueue.pop();
       }
-      ROS_INFO("[ResetKinematics] 清空robotlocalizationDataQueue，清空前大小: %zu", queue_size_before);
       // robot_quat_state_update_会在第一次updatakinematics调用时自动更新为当前传感器值
     }
     
@@ -1787,8 +1786,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       scalar_t current_yaw = currentObservation_.state(9);
       scalar_t yaw_diff = std::abs(angles::shortest_angular_distance(current_yaw, sensor_yaw));
       
-      ROS_INFO("[ResetKinematics] currentObservation_.state(9): %.6f", current_yaw);
-      ROS_INFO("[ResetKinematics] yaw差异检查: |current_yaw - sensor_yaw| = %.6f", yaw_diff);
+      ROS_INFO("[ResetKinematics] yaw diff: |current_yaw - sensor_yaw| = %.6f", yaw_diff);
       
       // 如果currentObservation_中的yaw与传感器yaw差异小于0.5弧度，使用currentObservation_的yaw
       // 否则说明currentObservation_中的yaw可能已过时，使用传感器yaw
@@ -1796,18 +1794,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         yawLast = current_yaw;
         use_sensor_yaw = false;
-        ROS_INFO("[ResetKinematics] ✓ 使用currentObservation_.state(9)作为yaw参考: %.6f (与传感器差异: %.6f < 0.5)", 
+        ROS_INFO("[ResetKinematics] Using currentObservation_.state(9) as yaw reference: %.6f (diff from sensor: %.6f < 0.5)", 
                  yawLast, yaw_diff);
       }
       else
       {
-        ROS_WARN("[ResetKinematics] ✗ currentObservation_.state(9)=%.6f与传感器yaw=%.6f差异过大(%.6f >= 0.5)，使用传感器yaw", 
+        ROS_WARN("[ResetKinematics] currentObservation_.state(9)=%.6f differs too much from sensor yaw=%.6f (%.6f >= 0.5), using sensor yaw", 
                  current_yaw, sensor_yaw, yaw_diff);
       }
     }
     else
     {
-      ROS_INFO("[ResetKinematics] currentObservation_.state(9)无效(size=%zu或值=%.6f)，使用传感器yaw: %.6f", 
+      ROS_INFO("[ResetKinematics] currentObservation_.state(9) invalid (size=%zu or value=%.6f), using sensor yaw: %.6f", 
                currentObservation_.state.size(), 
                (currentObservation_.state.size() > 9) ? currentObservation_.state(9) : 0.0,
                sensor_yaw);
@@ -1820,8 +1818,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     initial_centroidal_state(9) = yawLast + yawDiff;
     
     // 设置状态估计器的初始状态
-    ROS_INFO("[ResetKinematics] 调用set_intial_state设置状态估计器初始状态...");
-    ROS_INFO("[ResetKinematics] 设置前initial_centroidal_state(9): %.6f", initial_centroidal_state(9));
+    ROS_INFO("[ResetKinematics] initial_centroidal_state(9) before set: %.6f", initial_centroidal_state(9));
     stateEstimate_->set_intial_state(initial_centroidal_state);
     
     // 重要：更新currentObservation_.state为新的初始状态，确保resetMpcNode使用正确的yaw值
@@ -3675,7 +3672,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
   
   void humanoidController::setupMpc()
   {
-    std::cout << "use_external_mpc_:" << use_external_mpc_ << std::endl;
     if (use_external_mpc_)
       return;
     // mpc_ = std::make_shared<SqpMpc>(HumanoidInterface_->mpcSettings(), HumanoidInterface_->sqpSettings(),

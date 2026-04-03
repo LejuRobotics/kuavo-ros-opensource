@@ -51,6 +51,7 @@
 #include "joint_address.hpp"
 #include "dexhand_mujoco_node.h"
 #include "dexhand/json.hpp"
+#include "mujoco_cpp/ActuatorDynamics.hpp"
 
 #if defined(USE_DDS) || defined(USE_LEJU_DDS)
 #include "mujoco_dds.h"
@@ -191,6 +192,8 @@ namespace
   bool leg_joints_constrained = false;
   std::vector<double> fixed_leg_l_qpos;  // 左腿关节固定位置
   std::vector<double> fixed_leg_r_qpos;  // 右腿关节固定位置
+  std::unique_ptr<mujoco_sim::ActuatorDynamicsCompensator> actuatorDynamicsCompensator;
+  constexpr int kArmCompensationDof = 14;
 
   void ResetDepthBufferState()
   {
@@ -328,6 +331,64 @@ namespace
   // Mujoco Dexhand
   std::shared_ptr<mujoco_node::DexHandMujocoRosNode> g_dexhand_node = nullptr;
   /*********************************************************************************************/
+
+  bool buildArmCompensationMeasuredDq(Eigen::VectorXd& measuredDq) {
+    measuredDq = Eigen::VectorXd::Zero(kArmCompensationDof);
+    if (!sim || !d || LArmJointsAddr.qdofadr().invalid() || RArmJointsAddr.qdofadr().invalid()) {
+      return false;
+    }
+    if (LArmJointsAddr.qdofadr().size() != kArmCompensationDof / 2 ||
+        RArmJointsAddr.qdofadr().size() != kArmCompensationDof / 2) {
+      return false;
+    }
+
+    std::unique_lock<std::recursive_mutex> lock(sim->mtx);
+    int idx = 0;
+    for (auto iter = LArmJointsAddr.qdofadr().begin(); iter != LArmJointsAddr.qdofadr().end(); ++iter) {
+      measuredDq[idx++] = d->qvel[*iter];
+    }
+    for (auto iter = RArmJointsAddr.qdofadr().begin(); iter != RArmJointsAddr.qdofadr().end(); ++iter) {
+      measuredDq[idx++] = d->qvel[*iter];
+    }
+    return true;
+  }
+
+  void applyArmActuatorDynamicsCompensation(const kuavo_msgs::jointCmd::ConstPtr &msg, std::vector<double>& tau) {
+    if (!actuatorDynamicsCompensator || tau.size() < static_cast<size_t>(numJoints) ||
+        msg->joint_v.size() < static_cast<size_t>(numJoints)) {
+      return;
+    }
+
+    const int headDof = static_cast<int>(HeadJointsAddr.qdofadr().size());
+    const int armStartIndex = static_cast<int>(numJoints) - headDof - kArmCompensationDof;
+    if (armStartIndex < 0 || armStartIndex + kArmCompensationDof > static_cast<int>(numJoints)) {
+      return;
+    }
+
+    Eigen::VectorXd tauCmd = Eigen::VectorXd::Zero(kArmCompensationDof);
+    Eigen::VectorXd dqCmd = Eigen::VectorXd::Zero(kArmCompensationDof);
+    Eigen::VectorXd dqMeas = Eigen::VectorXd::Zero(kArmCompensationDof);
+    const Eigen::VectorXd ddq = Eigen::VectorXd::Zero(kArmCompensationDof);
+
+    for (int i = 0; i < kArmCompensationDof; ++i) {
+      const int jointIndex = armStartIndex + i;
+      tauCmd[i] = msg->tau[jointIndex];
+      dqCmd[i] = msg->joint_v[jointIndex];
+    }
+
+    if (!buildArmCompensationMeasuredDq(dqMeas)) {
+      dqMeas = dqCmd;
+    }
+
+    const Eigen::VectorXd compensatedTau = actuatorDynamicsCompensator->compute(tauCmd, ddq, dqCmd, dqMeas);
+    if (compensatedTau.size() != kArmCompensationDof) {
+      return;
+    }
+    for (int i = 0; i < kArmCompensationDof; ++i) {
+      tau[armStartIndex + i] = compensatedTau[i];
+    }
+  }
+
   //---------------------------------------- plugin handling -----------------------------------------
 
   // return the path to the directory containing the current executable
@@ -1089,7 +1150,7 @@ namespace
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61 || robotVersion_ == 62)
+                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
@@ -1402,6 +1463,7 @@ void jointCmdCallback(const kuavo_msgs::jointCmd::ConstPtr &msg)
   {
     tau[i] = msg->tau[i];
   }
+  applyArmActuatorDynamicsCompensation(msg, tau);
   std::lock_guard<std::mutex> lock(queueMutex);
   // controlCommands.push(tau);
   joint_tau_cmd = tau;
@@ -1979,6 +2041,9 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   // ros::NodeHandle nh;
   is_spin_thread = spin_thread;
   g_nh_ptr = &nh;
+  if (!actuatorDynamicsCompensator) {
+    actuatorDynamicsCompensator = std::make_unique<mujoco_sim::ActuatorDynamicsCompensator>();
+  }
   // print version, check compatibility
   std::printf("MuJoCo version %s\n", mj_versionString());
   if (mjVERSION_HEADER != mj_version())

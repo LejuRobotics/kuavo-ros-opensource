@@ -17,10 +17,10 @@
 
 namespace HighlyDynamic {
 
-class KeyFramesVisualizer {
+class WheelKeyFramesVisualizer {
  public:
-  explicit KeyFramesVisualizer(ros::NodeHandle& nodeHandle);
-  ~KeyFramesVisualizer() = default;
+  explicit WheelKeyFramesVisualizer(ros::NodeHandle& nodeHandle);
+  ~WheelKeyFramesVisualizer() = default;
 
   void initialize();
 
@@ -81,7 +81,7 @@ class KeyFramesVisualizer {
    * @param incrementalResult 增量控制结果
    * @param poseConstraintList 位姿约束列表
    */
-  void publishIncrementalModePositions(const IncrementalPoseResult& incrementalResult,
+  void publishIncrementalModePositions(const WheelIncrementalPoseResult& incrementalResult,
                                        const std::vector<PoseData>& poseConstraintList);
 
   /**
@@ -91,7 +91,7 @@ class KeyFramesVisualizer {
    * @param fkCallback FK计算回调函数，用于计算measured pose
    */
   void publishIncrementalPoseVisualization(
-      const IncrementalPoseResult& incrementalResult,
+      const WheelIncrementalPoseResult& incrementalResult,
       const std::vector<PoseData>& poseConstraintList,
       std::function<void(Eigen::Vector3d&, Eigen::Quaterniond&, Eigen::Vector3d&, Eigen::Quaterniond&)> fkCallback);
 
@@ -217,7 +217,7 @@ class KeyFramesVisualizer {
       const Eigen::Vector3d& rightShoulderPos,
       double sphereRadius,
       double minReachableDistance,
-      const IncrementalPoseResult& incrementalResult,
+      const WheelIncrementalPoseResult& incrementalResult,
       const std::vector<PoseData>& poseConstraintList,
       const Eigen::Vector3d& boxMinBound,
       const Eigen::Vector3d& boxMaxBound,

@@ -12,6 +12,7 @@
 
     <build_depend>cmake_clang_tools</build_depend>
     <depend>roscpp</depend>
+    <depend>leju_utils</depend>
     <depend>kuavo_common</depend>
     <depend>kuavo_solver</depend>
     <depend>humanoid_common</depend>

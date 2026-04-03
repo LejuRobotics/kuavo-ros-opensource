@@ -52,15 +52,15 @@ def make_tree(timed_cmd_api, chassis_poses: Optional[List[dict]] = None, cmd_typ
         print(f"设置 {len(keypoints)} 个底盘关键点 ({cmd_type})")
         return True
     
-    # 根据cmd_type确定planner_index
+    # 根据cmd_type确定planner_index（臂类为左右单臂：4/5 世界系、6/7 局部系、8/9 关节）
     planner_index_map = {
         'chassis_world': 0,
         'chassis_local': 1,
         'torso': 2,
         'leg': 3,
-        'arm_ee_world': 4,
-        'arm_ee_local': 5,
-        'arm': 6,
+        'arm_ee_world': 4,   # 左臂世界系，右臂为 5
+        'arm_ee_local': 6,   # 左臂局部系，右臂为 7
+        'arm': 8,            # 左臂关节，右臂为 9
     }
     planner_index = planner_index_map.get(cmd_type, 0)
     

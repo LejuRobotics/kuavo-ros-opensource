@@ -8,24 +8,24 @@
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
-KeyFramesVisualizer::KeyFramesVisualizer(ros::NodeHandle& nodeHandle)
+WheelKeyFramesVisualizer::WheelKeyFramesVisualizer(ros::NodeHandle& nodeHandle)
     : nodeHandle_(nodeHandle), elbowMinDistance_(0.18), elbowMaxDistance_(0.65) {}
 
-void KeyFramesVisualizer::initialize() {
-  ROS_INFO("[KeyFramesVisualizer] Initializing Quest3 visualization system...");
+void WheelKeyFramesVisualizer::initialize() {
+  ROS_INFO("[WheelKeyFramesVisualizer] Initializing Quest3 visualization system...");
 
   // 从ROS参数读取手到肘距离约束参数
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/elbow_min_distance", elbowMinDistance_, 0.18);
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/elbow_max_distance", elbowMaxDistance_, 0.65);
   ROS_INFO(
-      "[KeyFramesVisualizer] Elbow distance constraints: min=%.2f, max=%.2f", elbowMinDistance_, elbowMaxDistance_);
+      "[WheelKeyFramesVisualizer] Elbow distance constraints: min=%.2f, max=%.2f", elbowMinDistance_, elbowMaxDistance_);
 
   initializePublishers();
-  ROS_INFO("[KeyFramesVisualizer] Quest3 visualization system initialized successfully");
+  ROS_INFO("[WheelKeyFramesVisualizer] Quest3 visualization system initialized successfully");
 }
 
-void KeyFramesVisualizer::initializePublishers() {
-  ROS_INFO("[KeyFramesVisualizer] Initializing visualization publishers...");
+void WheelKeyFramesVisualizer::initializePublishers() {
+  ROS_INFO("[WheelKeyFramesVisualizer] Initializing visualization publishers...");
 
   // 复现Python版本的发布器topic命名
   // 左侧发布器
@@ -131,10 +131,10 @@ void KeyFramesVisualizer::initializePublishers() {
   rightHandPosAfterOptPublisher_ =
       nodeHandle_.advertise<visualization_msgs::Marker>("/visualization_marker/right_link6_pos_after_opt", 1);
 
-  ROS_INFO("[KeyFramesVisualizer] All visualization publishers initialized successfully");
+  ROS_INFO("[WheelKeyFramesVisualizer] All visualization publishers initialized successfully");
 }
 
-void KeyFramesVisualizer::publishVisualizationMarkersForSide(const std::string& side,
+void WheelKeyFramesVisualizer::publishVisualizationMarkersForSide(const std::string& side,
                                                              const Eigen::Vector3d& handPos,
                                                              const Eigen::Vector3d& elbowPos,
                                                              const Eigen::Vector3d& shoulderPos,
@@ -150,7 +150,7 @@ void KeyFramesVisualizer::publishVisualizationMarkersForSide(const std::string& 
   publishChestMarker(chestPos);
 }
 
-void KeyFramesVisualizer::publishLeftSideMarkers(const Eigen::Vector3d& handPos,
+void WheelKeyFramesVisualizer::publishLeftSideMarkers(const Eigen::Vector3d& handPos,
                                                  const Eigen::Vector3d& elbowPos,
                                                  const Eigen::Vector3d& shoulderPos) {
   // 左手marker - 红色，尺寸0.08，透明度0.9（复现Python L837）
@@ -166,7 +166,7 @@ void KeyFramesVisualizer::publishLeftSideMarkers(const Eigen::Vector3d& handPos,
   markerPubShoulder_.publish(shoulderMarker);
 }
 
-void KeyFramesVisualizer::publishRightSideMarkers(const Eigen::Vector3d& handPos,
+void WheelKeyFramesVisualizer::publishRightSideMarkers(const Eigen::Vector3d& handPos,
                                                   const Eigen::Vector3d& elbowPos,
                                                   const Eigen::Vector3d& shoulderPos) {
   // 右手marker - 红色，尺寸0.08，透明度0.9（复现Python L837）
@@ -182,24 +182,24 @@ void KeyFramesVisualizer::publishRightSideMarkers(const Eigen::Vector3d& handPos
   markerPubShoulderRight_.publish(shoulderMarker);
 }
 
-void KeyFramesVisualizer::publishChestMarker(const Eigen::Vector3d& chestPos) {
+void WheelKeyFramesVisualizer::publishChestMarker(const Eigen::Vector3d& chestPos) {
   // 胸部marker - 蓝色，尺寸0.1，透明度0.8（每次都发布，复现Python L871-873逻辑）
   // 注意：使用原始胸部位置，不使用变换后的位置
   auto chestMarker = constructPointMarker(chestPos, 0.1, 0.8, {0, 0, 1}, "base_link");
   markerPubChest_.publish(chestMarker);
 }
 
-void KeyFramesVisualizer::publishHumanArrayLeft(const std::vector<visualization_msgs::Marker>& markers) {
+void WheelKeyFramesVisualizer::publishHumanArrayLeft(const std::vector<visualization_msgs::Marker>& markers) {
   auto markerArray = constructMarkerArray(markers, "base_link");
   markerPubHumanArrayLeft_.publish(markerArray);
 }
 
-void KeyFramesVisualizer::publishHumanArrayRight(const std::vector<visualization_msgs::Marker>& markers) {
+void WheelKeyFramesVisualizer::publishHumanArrayRight(const std::vector<visualization_msgs::Marker>& markers) {
   auto markerArray = constructMarkerArray(markers, "base_link");
   markerPubHumanArrayRight_.publish(markerArray);
 }
 
-visualization_msgs::Marker KeyFramesVisualizer::constructPointMarker(const Eigen::Vector3d& point,
+visualization_msgs::Marker WheelKeyFramesVisualizer::constructPointMarker(const Eigen::Vector3d& point,
                                                                      double scale,
                                                                      double alpha,
                                                                      const std::vector<double>& color,
@@ -236,7 +236,7 @@ visualization_msgs::Marker KeyFramesVisualizer::constructPointMarker(const Eigen
   return marker;
 }
 
-visualization_msgs::Marker KeyFramesVisualizer::constructMeshMarker(const Eigen::Vector3d& position,
+visualization_msgs::Marker WheelKeyFramesVisualizer::constructMeshMarker(const Eigen::Vector3d& position,
                                                                     const Eigen::Quaterniond& orientation,
                                                                     const std::vector<double>& rgba,
                                                                     const std::string& side,
@@ -282,7 +282,7 @@ visualization_msgs::Marker KeyFramesVisualizer::constructMeshMarker(const Eigen:
   return marker;
 }
 
-visualization_msgs::MarkerArray KeyFramesVisualizer::constructMarkerArray(
+visualization_msgs::MarkerArray WheelKeyFramesVisualizer::constructMarkerArray(
     const std::vector<visualization_msgs::Marker>& markers,
     const std::string& frameId) {
   visualization_msgs::MarkerArray markerArray;
@@ -297,7 +297,7 @@ visualization_msgs::MarkerArray KeyFramesVisualizer::constructMarkerArray(
   return markerArray;
 }
 
-void KeyFramesVisualizer::publishIncrementalModePositions(const IncrementalPoseResult& incrementalResult,
+void WheelKeyFramesVisualizer::publishIncrementalModePositions(const WheelIncrementalPoseResult& incrementalResult,
                                                           const std::vector<PoseData>& poseConstraintList) {
   if (!incrementalResult.isValid()) return;
 
@@ -314,8 +314,8 @@ void KeyFramesVisualizer::publishIncrementalModePositions(const IncrementalPoseR
   }
 }
 
-void KeyFramesVisualizer::publishIncrementalPoseVisualization(
-    const IncrementalPoseResult& incrementalResult,
+void WheelKeyFramesVisualizer::publishIncrementalPoseVisualization(
+    const WheelIncrementalPoseResult& incrementalResult,
     const std::vector<PoseData>& poseConstraintList,
     std::function<void(Eigen::Vector3d&, Eigen::Quaterniond&, Eigen::Vector3d&, Eigen::Quaterniond&)> fkCallback) {
   if (!incrementalResult.isValid()) return;
@@ -478,7 +478,7 @@ void KeyFramesVisualizer::publishIncrementalPoseVisualization(
   }
 }
 
-void KeyFramesVisualizer::publishHandXAxisVectorVisualization(const Eigen::Vector3d& leftHandPos,
+void WheelKeyFramesVisualizer::publishHandXAxisVectorVisualization(const Eigen::Vector3d& leftHandPos,
                                                               const Eigen::Vector3d& leftXAxisVector,
                                                               const Eigen::Vector3d& rightHandPos,
                                                               const Eigen::Vector3d& rightXAxisVector) {
@@ -554,7 +554,7 @@ void KeyFramesVisualizer::publishHandXAxisVectorVisualization(const Eigen::Vecto
   rightHandXAxisVectorPublisher_.publish(rightHandXAxisMarker);
 }
 
-void KeyFramesVisualizer::publishShoulderElbowPosVisualization(const Eigen::Vector3d& leftShoulderPos,
+void WheelKeyFramesVisualizer::publishShoulderElbowPosVisualization(const Eigen::Vector3d& leftShoulderPos,
                                                                const Eigen::Vector3d& rightShoulderPos,
                                                                const Eigen::Vector3d& leftElbowPos,
                                                                const Eigen::Vector3d& rightElbowPos) {
@@ -687,7 +687,7 @@ void KeyFramesVisualizer::publishShoulderElbowPosVisualization(const Eigen::Vect
   rightElbowPosMarkerPublisher_.publish(rightElbowMarker);
 }
 
-void KeyFramesVisualizer::publishHandSphereConstraintVisualization(const Eigen::Vector3d& leftShoulderPos,
+void WheelKeyFramesVisualizer::publishHandSphereConstraintVisualization(const Eigen::Vector3d& leftShoulderPos,
                                                                    const Eigen::Vector3d& rightShoulderPos,
                                                                    double sphereRadius,
                                                                    double minReachableDistance) {
@@ -790,7 +790,7 @@ void KeyFramesVisualizer::publishHandSphereConstraintVisualization(const Eigen::
   rightHandBoundBoxPublisher_.publish(rightHandInnerSphereMarker);
 }
 
-void KeyFramesVisualizer::publishHandCylinderConstraintVisualization(const Eigen::Vector3d& leftCenter,
+void WheelKeyFramesVisualizer::publishHandCylinderConstraintVisualization(const Eigen::Vector3d& leftCenter,
                                                                      const Eigen::Vector3d& rightCenter,
                                                                      double cylinderRadius) {
   ros::Time currentTime = ros::Time::now();
@@ -844,7 +844,7 @@ void KeyFramesVisualizer::publishHandCylinderConstraintVisualization(const Eigen
   rightHandBoundBoxPublisher_.publish(rightHandCylinderMarker);
 }
 
-void KeyFramesVisualizer::publishElbowDistanceConstraintVisualization(const Eigen::Vector3d& leftElbowPos,
+void WheelKeyFramesVisualizer::publishElbowDistanceConstraintVisualization(const Eigen::Vector3d& leftElbowPos,
                                                                       const Eigen::Vector3d& rightElbowPos) {
   ros::Time currentTime = ros::Time::now();
 
@@ -954,7 +954,7 @@ void KeyFramesVisualizer::publishElbowDistanceConstraintVisualization(const Eige
   }
 }
 
-void KeyFramesVisualizer::publishBoxBoundVisualization(const Eigen::Vector3d& boxMinBound,
+void WheelKeyFramesVisualizer::publishBoxBoundVisualization(const Eigen::Vector3d& boxMinBound,
                                                        const Eigen::Vector3d& boxMaxBound,
                                                        double chestOffsetY) {
   ros::Time currentTime = ros::Time::now();
@@ -1034,12 +1034,12 @@ void KeyFramesVisualizer::publishBoxBoundVisualization(const Eigen::Vector3d& bo
   rightHandBoundBoxPublisher_.publish(rightBoxMarker);
 }
 
-void KeyFramesVisualizer::publishAllVisualizations(
+void WheelKeyFramesVisualizer::publishAllVisualizations(
     const Eigen::Vector3d& leftShoulderPos,
     const Eigen::Vector3d& rightShoulderPos,
     double sphereRadius,
     double minReachableDistance,
-    const IncrementalPoseResult& incrementalResult,
+    const WheelIncrementalPoseResult& incrementalResult,
     const std::vector<PoseData>& poseConstraintList,
     const Eigen::Vector3d& boxMinBound,
     const Eigen::Vector3d& boxMaxBound,
@@ -1083,7 +1083,7 @@ void KeyFramesVisualizer::publishAllVisualizations(
       leftLink6Pos, rightLink6Pos, leftEndEffectorPos, rightEndEffectorPos, leftVirtualThumbPos, rightVirtualThumbPos);
 }
 
-void KeyFramesVisualizer::publishVisualization(const std::vector<PoseData>& poseConstraintList) {
+void WheelKeyFramesVisualizer::publishVisualization(const std::vector<PoseData>& poseConstraintList) {
   // 发布缩放后的手部位置可视化
   // 从poseConstraintList中读取scaledLeftHandPos和scaledRightHandPos
   // 使用不同的颜色和尺寸来区分scaled位置和FK计算的位置
@@ -1105,7 +1105,7 @@ void KeyFramesVisualizer::publishVisualization(const std::vector<PoseData>& pose
   }
 }
 
-void KeyFramesVisualizer::publishSixKeyPointsVisualization(const Eigen::Vector3d& leftLink6Pos,
+void WheelKeyFramesVisualizer::publishSixKeyPointsVisualization(const Eigen::Vector3d& leftLink6Pos,
                                                            const Eigen::Vector3d& rightLink6Pos,
                                                            const Eigen::Vector3d& leftEndEffectorPos,
                                                            const Eigen::Vector3d& rightEndEffectorPos,
@@ -1139,7 +1139,7 @@ void KeyFramesVisualizer::publishSixKeyPointsVisualization(const Eigen::Vector3d
   rightVirtualThumbPosPublisher_.publish(rightVirtualThumbMarker);
 }
 
-void KeyFramesVisualizer::publishRobotElbowPosVisualization(const Eigen::Vector3d& leftElbowPos,
+void WheelKeyFramesVisualizer::publishRobotElbowPosVisualization(const Eigen::Vector3d& leftElbowPos,
                                                             const Eigen::Vector3d& rightElbowPos) {
   // 墨绿色 RGB(0, 0.5, 0.5)，不透明 alpha=1.0，尺寸0.08
   const double markerSize = 0.1;
@@ -1155,7 +1155,7 @@ void KeyFramesVisualizer::publishRobotElbowPosVisualization(const Eigen::Vector3
   robotRightElbowPosPublisher_.publish(rightElbowMarker);
 }
 
-void KeyFramesVisualizer::publishHandPosOptimizationVisualization(const Eigen::Vector3d& leftHandPosBeforeOpt,
+void WheelKeyFramesVisualizer::publishHandPosOptimizationVisualization(const Eigen::Vector3d& leftHandPosBeforeOpt,
                                                                   const Eigen::Vector3d& leftHandPosAfterOpt,
                                                                   const Eigen::Vector3d& rightHandPosBeforeOpt,
                                                                   const Eigen::Vector3d& rightHandPosAfterOpt) {

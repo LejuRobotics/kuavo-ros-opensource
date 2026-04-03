@@ -125,11 +125,22 @@ namespace ocs2
                     get_observation_ = true;
                 }
             }
+            nodeHandle.param("/wheel_ik", wheel_ik_, false);
+            ROS_INFO_STREAM("[QuestControlFSM] wheel_ik: " << (wheel_ik_ ? "true" : "false"));
             auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
             auto kuavo_settings = drake_interface_->getKuavoSettings();
             waist_dof_ = kuavo_settings.hardware_settings.num_waist_joints;
             default_joint_state_ = drake_interface_->getDefaultJointState();
-            com_height_ = drake_interface_->getIntialHeight();
+            if (useLegacyWheelVr()) {
+                // 兼容旧版轮臂逻辑：避免无腿关节模型调用 getIntialHeight() 引发异常
+                try {
+                    loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
+                } catch (...) {
+                    com_height_ = 0.0;
+                }
+            } else {
+                com_height_ = drake_interface_->getIntialHeight();
+            }
             only_half_up_body_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
             std::cout << "only_half_up_body: " << only_half_up_body_ << std::endl;
             if(nodeHandle.hasParam("/only_half_up_body"))
@@ -470,6 +481,28 @@ namespace ocs2
                 return;
             }
 
+            if (useLegacyWheelVr()) {
+                if (switch_to_next_controller_client_.call(srv))
+                {
+                    if (srv.response.success)
+                    {
+                        ROS_INFO("Switch to next controller successful: %s", srv.response.message.c_str());
+                        ROS_INFO("Switched from %s (index: %d) to %s (index: %d)", 
+                                 srv.response.current_controller.c_str(), srv.response.current_index,
+                                 srv.response.next_controller.c_str(), srv.response.next_index);
+                    }
+                    else
+                    {
+                        ROS_WARN("Switch to next controller failed: %s", srv.response.message.c_str());
+                    }
+                }
+                else
+                {
+                    ROS_ERROR("Failed to call switch to next controller service");
+                }
+                return;
+            }
+
             // 设置控制器切换保护标志
             controller_switching_ = true;
             controller_switch_start_time_ = ros::Time::now();
@@ -595,10 +628,10 @@ namespace ocs2
 
                 left_turn_configs.push_back(config);
                 
-                std::cout << "Loaded left turn zone " << i << ": min=" << config.min_value 
-                          << ", max=" << config.max_value 
-                          << ", pose=[" << config.body_x << ", " << config.body_y 
-                          << ", " << config.body_z << ", " << config.body_yaw << "]" << std::endl;
+                // std::cout << "Loaded left turn zone " << i << ": min=" << config.min_value 
+                //           << ", max=" << config.max_value 
+                //           << ", pose=[" << config.body_x << ", " << config.body_y 
+                //           << ", " << config.body_z << ", " << config.body_yaw << "]" << std::endl;
             }
             
             // 为左转和右转预留空间
@@ -622,11 +655,11 @@ namespace ocs2
                 
                 turn_zones_.push_back(right_zone);
                 
-                std::cout << "Generated right turn zone " << (left_turn_configs.size() - 1 - i) 
-                          << ": min=" << right_zone.min_value 
-                          << ", max=" << right_zone.max_value 
-                          << ", pose=[" << left_config.body_x << ", " << -left_config.body_y 
-                          << ", " << left_config.body_z << ", " << -left_config.body_yaw << "]" << std::endl;
+                // std::cout << "Generated right turn zone " << (left_turn_configs.size() - 1 - i) 
+                //           << ": min=" << right_zone.min_value 
+                //           << ", max=" << right_zone.max_value 
+                //           << ", pose=[" << left_config.body_x << ", " << -left_config.body_y 
+                //           << ", " << left_config.body_z << ", " << -left_config.body_yaw << "]" << std::endl;
             }
             
             // 添加左转区间（负值范围）
@@ -686,10 +719,17 @@ namespace ocs2
 
         void armCtrlModeCallback(const std_msgs::Float64MultiArray::ConstPtr &mode_msg)
         {
-        if(mode_msg->data.size() == 2)
-        {
-            arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]); //获取手臂控制模式
-        }
+            if(mode_msg->data.size() >= 2)
+            {
+                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]); // 兼容MPC发布 [current, desired]
+                return;
+            }
+            if(mode_msg->data.size() == 1)
+            {
+                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[0]); // 兼容轮臂发布 [current]
+                return;
+            }
+            ROS_WARN_THROTTLE(2.0, "[QuestControlFSM] arm_control_mode is empty");
         }
 
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
@@ -813,6 +853,11 @@ namespace ocs2
             {
                 joystick_data_prev_ = joystick_data_;
                 rec_joystick_data_ = true;
+                return;
+            }
+
+            if (useLegacyWheelVr()) {
+                updateStateLegacyWheelVr();
                 return;
             }
             
@@ -1068,6 +1113,156 @@ namespace ocs2
             joystick_data_prev_ = joystick_data_;
         }
 
+        void updateStateLegacyWheelVr()
+        {
+            if (!get_observation_ && !joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+            {
+                callRealInitializeSrv();
+                return;
+            }
+
+            if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed)
+            {
+                callTerminateSrv();
+                return;
+            }
+
+            if (joystick_data_.left_trigger > 0.5)
+            {
+                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)
+                {
+                    callEnableWbcArmTrajectorySrv(1);
+                    return;
+                }
+                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+                {
+                    callSwitchToNextControllerSrv();
+                    return;
+                }
+            }
+
+            if (joystick_data_.left_grip > 0.5)
+            {
+                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)
+                {
+                    callEnableWbcArmTrajectorySrv(0);
+                    return;
+                }
+            }
+
+            if (joystick_data_.left_first_button_pressed)
+            {
+                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)
+                {
+                    callSetArmModeSrv(0);
+                    arm_ctrl_mode_ = 0;
+                }
+                else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+                {
+                    if (arm_collision_control_) {
+                        arm_ctrl_mode_ = 2;
+                        arm_collision_control_ = false;
+                    }
+                    else arm_ctrl_mode_ = (arm_ctrl_mode_!=1) ? 1 : 2;
+                    std::cout << "[QuestControlFSM] change arm mode to :" << arm_ctrl_mode_ << std::endl;
+                    if (only_half_up_body_) {
+                        callVRSetArmModeSrv(arm_ctrl_mode_);
+                    }
+                    else {
+                        callSetArmModeSrv(arm_ctrl_mode_);
+                    }
+
+                    if(1 == robot_type_)
+                    {
+                        callWheelMpcControlMode(3);
+                    }
+                }
+                return;
+            }
+
+            if (joystick_data_.left_trigger > 0.5)
+            {
+                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)
+                {
+                    if (!torso_control_enabled_)
+                    {
+                        torso_control_enabled_ = true;
+                        torso_pitch_zero_= current_head_body_pose_.body_pitch;
+                        torso_yaw_zero_ = current_head_body_pose_.body_yaw;
+                        torso_roll_zero_ = current_head_body_pose_.body_roll;
+                        body_height_zero_ = current_head_body_pose_.body_height;
+                        body_x_zero_ = current_head_body_pose_.body_x;
+                        torso_control_start_time_ = ros::Time::now();
+                        last_body_yaw_ = current_head_body_pose_.body_yaw;
+                        accumulated_yaw_offset_ = 0.0;
+
+                        std_msgs::Bool whole_torso_ctrl_msg;
+                        whole_torso_ctrl_msg.data = true;
+                        whole_torso_ctrl_pub_.publish(whole_torso_ctrl_msg);
+
+                        if(1 != robot_type_)
+                        {
+                            callAutoGaitModeSrv(false);
+                            callVRWaistControlSrv(true);
+                        }
+                        if(1 == robot_type_)
+                        {
+                            callWheelMpcControlMode(3);
+                        }
+                    }
+                    else
+                    {
+                        torso_control_enabled_ = false;
+                        std_msgs::Bool whole_torso_ctrl_msg;
+                        whole_torso_ctrl_msg.data = false;
+                        whole_torso_ctrl_pub_.publish(whole_torso_ctrl_msg);
+
+                        if(1 != robot_type_)
+                        {
+                            geometry_msgs::Twist cmd_pose;
+                            cmd_pose.linear.x = 0.0;
+                            cmd_pose.linear.y = 0.0;
+                            cmd_pose.linear.z = last_relative_height_;
+                            cmd_pose.angular.x = 0.0;
+                            cmd_pose.angular.y = last_body_pitch_;
+                            cmd_pose.angular.z = 0.0;
+                            cmd_pose_pub_.publish(cmd_pose);
+
+                            callAutoGaitModeSrv(true);
+                            callVRWaistControlSrv(false);
+                        }
+                        if(1 == robot_type_)
+                        {
+                            callWheelMpcControlMode(3);
+                        }
+                    }
+                    return;
+                }
+            }
+
+            if ((joystick_data_.left_second_button_touched && !joystick_data_.left_first_button_touched) && !torso_control_enabled_)
+            {
+                updateTorsoControl();
+                return;
+            }
+
+            if (!only_half_up_body_) {
+                checkGaitSwitchCommand(joystick_data_);
+
+                bool step_turning_enabled = false;
+                if (nodeHandle_.hasParam("/quest3/use_step_turning")) {
+                    nodeHandle_.getParam("/quest3/use_step_turning", step_turning_enabled);
+                }
+
+                if (step_turning_enabled) {
+                    updateSingleStepTurning();
+                }
+                else {
+                    updateCommandLine();
+                }
+            }
+        }
+
         void updateTorsoControl()
         {
             if (waist_dof_ == 0) return;
@@ -1119,6 +1314,11 @@ namespace ocs2
         void isRlControllerCallback(const std_msgs::Float64::ConstPtr& msg)
         {
             is_rl_controller_ = (std::abs(msg->data) > 0.5);
+        }
+        
+        bool useLegacyWheelVr() const
+        {
+            return robot_type_ == 1 && wheel_ik_;
         }
         
         void publishHandWrenchCmd(double item_mass, const std::vector<double>& left_force, const std::vector<double>& right_force)
@@ -1345,7 +1545,7 @@ namespace ocs2
                         publish_zero_spd();
                         ROS_WARN("===================> Current gait is walk, switching to stance first failed");
                     }
-                     else {
+                    else {
                         // ROS_WARN("Zone %d trajectory blocked - current gait is '%s' (not stance)", target_zone, current_gait.c_str());
                     }
                 }
@@ -1825,7 +2025,7 @@ namespace ocs2
         std::map<std::string, humanoid::ModeSequenceTemplate> gait_map_;
 
         ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
-        int arm_ctrl_mode_;
+        int arm_ctrl_mode_{2};
 
         ros::Subscriber joystick_sub_;
         std::string state_;
@@ -1851,6 +2051,7 @@ namespace ocs2
         bool only_half_up_body_{false};
         int robot_type_{0};  // 0: biped, 1: wheel robot
         int robot_version_int_{0};  // 机器人版本号
+        bool wheel_ik_{false}; // 轮臂增量VR兼容模式开关
 
         // VR control limits (loaded from reference.info)
         double vr_squat_min_pitch_deg_{3.0};    // min pitch (deg)

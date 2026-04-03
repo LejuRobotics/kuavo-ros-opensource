@@ -61,6 +61,7 @@ find_package(glfw3 REQUIRED)
 
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # DDS dependencies (conditional)
 if(USE_DDS OR USE_LEJU_DDS)
@@ -213,6 +214,7 @@ catkin_package(
 include_directories(
         include
         include/simulate
+        ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_node/include
         ${catkin_INCLUDE_DIRS}
         ${glfw3_INCLUDE_DIRS}
         ${LCM_INCLUDE_DIRS}
@@ -286,6 +288,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     ${LCM_LIBRARIES}
     Eigen3::Eigen 
     ${OpenCV_LIBRARIES}
+    yaml-cpp
 )
 
 # Add DDS libraries when enabled

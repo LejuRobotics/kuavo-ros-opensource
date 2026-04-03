@@ -40,11 +40,14 @@
     "imu_in_torso": [0, 0, 0],
     "isParallelArm":false,
     "only_half_up_body":false,
+    "useVrArmKpKd": true,
     "peak_protection":0.1,
     "locked_rotor_protection":2,
     "speed_protection":0.05,             
     "joint_kp": [300, 300, 260, 160, 550, 550],
     "joint_kd": [2150, 2300, 2150, 2150, 3880, 3880],
+    "vr_joint_kp": [160, 100, 160, 160, 400, 400],
+    "vr_joint_kd": [2150, 2300, 2150, 2150, 3080, 3080],
     "MOTORS_TYPE":[
         "PA115", "PA115", "PA115", "PA115",
         "PA100", "ruiwoPA72", "ruiwoPA60", "ruiwoPA72", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43",
@@ -52,6 +55,12 @@
         "ruiwoPA43", "ruiwoPA43"],
     "ruiwo_kp": [50, 50, 50, 30, 30, 30, 50, 50, 50, 30, 30, 30, 10, 10],
     "ruiwo_kd": [6, 6, 6, 3, 3, 3, 6, 6, 6, 3, 3, 3, 4, 3],
+    "vr_ruiwo_kp": [30, 30, 30, 20, 20, 20, 
+                    30, 30, 30, 20, 20, 20, 
+                    10, 10],
+    "vr_ruiwo_kd": [1, 1, 1, 5, 5, 5, 
+                    1, 1, 1, 5, 5, 5, 
+                    4, 3],
     "EndEffectorType": ["None", "None"],
     "min_joint_position_limits":[
         -0.5, -161, 
@@ -260,18 +269,20 @@
         "chestTrackingWeight": 5000.0,
 
         "jointSmoothWeightDefault": 50.0,
-        "jointSmoothWeight0": 500.0,
-        "jointSmoothWeight1": 500.0,
-        "jointSmoothWeight2": 30.0,
-        "jointSmoothWeight3": 30.0,
-        "jointSmoothWeight4": 1.0,
-        "jointSmoothWeight5": 1.0,
-        "jointSmoothWeight6": 1.0,
+        "jointSmoothWeight0": 1000.0,
+        "jointSmoothWeight1": 1000.0,
+        "jointSmoothWeight2": 500.0,
+        "jointSmoothWeight3": 300.0,
+        "jointSmoothWeight4": 10.0,
+        "jointSmoothWeight5": 10.0,
+        "jointSmoothWeight6": 10.0,
 
         "waistSmoothWeight0": 3000.0,
         "waistSmoothWeight1": 3000.0,
         "waistSmoothWeight2": 3000.0,
         "waistSmoothWeight3": 3000.0,
+
+        "dynamicsDt": 0.01,
         
         "constraintTolerance": 1e-8,
         "solverTolerance": 1e-6,
@@ -289,7 +300,12 @@
         "q1": 1.0,
         "q2": 15.0,
         "qv1": 1.0,
-        "qv2": 0.1
+        "qv2": 0.1,
+        "qa0": 0.0,
+        "qa1": 0.0,
+        "qa2": 1e-7,
+        "acc_use_fixed_dt": false,
+        "acc_fixed_dt_sec": 0.01
     },
 
     "drake_chest_elbow_hand_prev_filter": {
@@ -334,5 +350,7 @@
     "joint_state_publish_rate_hz": 100.0,
     "chest_default_offset": [0.0, 0.0, 1.2],
     "alway_update_chest": false,
-    "lb_leg_publish_rate_multiplier": 0.1
+    "lb_leg_publish_rate_multiplier": 0.1,
+    "pos_cutoff_hz": 20.0,
+    "orientation_cutoff_hz": 20.0
 }

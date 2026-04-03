@@ -38,6 +38,7 @@
 #include "humanoid_wheel_wbc/WeightedWbc.h"
 #include "humanoid_controllers/WaistKinematics.h"
 #include "humanoid_controllers/ControlDataManager.h"
+#include "humanoid_controllers/ArmTrajectoryInterpolator.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include "humanoid_wheel_interface/filters/jointCmdLimiter.h"
 
@@ -91,6 +92,8 @@ namespace humanoidController_wheel_wbc
 
     // ========== 关节控制相关函数 ==========
     void updateUserJointCmd(const ros::Time &time, vector_t& target_qpos, vector_t& target_qvel);
+    void applyArmTrajectoryInterpolation(const ros::Time& time, int8_t lbMpcMode, const SensorData& sensorData,
+                                         vector_t& target_qpos, vector_t& target_qvel);
     vector_t smoothTransition(const vector_t& current_pos, const vector_t& target_pos, double transition_duration = 1.0);
     vector_t interpolateArmTarget(scalar_t currentTime, const vector_t& currentArmState, const vector_t& newDesiredArmState, scalar_t maxSpeed);
     vector_t processArmControlModeSwitch(const ros::Time& time, const vector_t& current_qpos, const vector_t& target_qpos);
@@ -226,6 +229,10 @@ namespace humanoidController_wheel_wbc
     double arm_move_spd_{15.0};  // 手臂移动速度
     double arm_mode_switch_start_time_{0.0};  // 模式切换开始时间
     vector_t init_arm_target_qpos_;
+    bool enable_arm_traj_interpolator_{false};  // 手臂轨迹插补增强开关（默认关闭，保持旧行为）
+    ArmTrajectoryInterpolator armTrajectoryInterpolator_;
+    vector_t wbc_arm_raw_q_;
+    vector_t wbc_arm_raw_v_;
 
     // ========== 运动学限制滤波相关 ==========
     std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  obsStateLimitFilterPtr_;    // observation.state 限制滤波

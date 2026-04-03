@@ -41,6 +41,11 @@ namespace ocs2
         arm_nums_ = arm_nums;
         lowJoint_nums_ = info_.armDim - arm_nums_;
       }
+
+      void setUseVrArmAccelTask(bool useVrArmAccelTask)
+      {
+        useVrArmAccelTask_ = useVrArmAccelTask;
+      }
       
     protected:
       size_t getNumDecisionVars() const
@@ -72,7 +77,10 @@ namespace ocs2
       size_t arm_nums_{};
 
       vector_t armJointKp_, armJointKd_;
+      vector_t vrArmJointKp_, vrArmJointKd_;
       vector_t lowJointKp_, lowJointKd_;
+      bool useVrArmAccelTask_{false};
+      bool hasVrArmAccelTask_{false};
 
       vector_t torqueLimits_;
       matrix_t j_torso_, dj_torso_;

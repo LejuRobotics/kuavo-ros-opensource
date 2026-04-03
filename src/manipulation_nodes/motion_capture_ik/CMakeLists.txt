@@ -166,21 +166,19 @@ target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
 # wheel_ik_ros_uni_cpp_node
 add_executable(wheel_ik_ros_uni_cpp_node 
   src/wheel_ik_ros_uni_cpp_node.cpp 
-  src/ArmControlBaseROS.cpp
+  src/WheelArmControlBaseROS.cpp
   src/WheelQuest3IkIncrementalROS.cpp 
   src/WheelQuest3IkIncrementalTools.cpp
   src/WheelIncrementalControlModule.cpp
-  src/KeyFramesVisualizer.cpp
+  src/WheelKeyFramesVisualizer.cpp
   src/BaseIKSolver.cpp
-  src/TwoStageTorsoIKRec.cpp
-  src/OneStageIKEndEffector.cpp
+  src/WheelOneStageIKEndEffector.cpp
   src/Quest3ArmInfoTransformer.cpp
   src/ArmLengthMeasurement.cpp
-  src/JoyStickHandler.cpp
-  src/Quest3Debugger.cpp
-  src/HandSmoother.cpp
+  src/WheelJoyStickHandler.cpp
+  src/WheelHandSmoother.cpp
 )
-add_dependencies(wheel_ik_ros_uni_cpp_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(wheel_ik_ros_uni_cpp_node ${catkin_EXPORTED_TARGETS})
 target_include_directories(wheel_ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
   ${humanoid_wheel_interface_INCLUDE_DIRS}

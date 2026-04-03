@@ -1021,21 +1021,21 @@ class NodeWheelMoveTimedCmd(Behaviour):
     通用定时命令节点（支持底盘、下肢、上肢等）
     
     通过 /mobile_manipulator_timed_single_cmd 服务逐点发送命令，
-    直接执行关键点序列。
+    直接执行关键点序列。臂类为左右单臂规划器，arm_ee_local/arm_ee_world/arm 的
+    臂类关键点会在 API 层拆成左+右各发一次。
     
     根据 cmd_type 参数选择控制模式：
-        - 'chassis_world': 底盘世界系位姿（planner_index=0，3维：x, y, yaw）
-        - 'chassis_local': 底盘局部系位姿（planner_index=1，3维：x, y, yaw）
-        - 'torso': 躯干位姿（planner_index=2，4维：x, z, yaw, pitch）
-        - 'leg': 下肢关节（planner_index=3，4个关节）
-        - 'arm': 上肢关节（planner_index=6，14个关节）
+        - 'chassis_world': 底盘世界系（planner 0，3维）
+        - 'chassis_local': 底盘局部系（planner 1，3维）
+        - 'torso': 躯干（planner 2，4维）
+        - 'leg': 下肢关节（planner 3，4 个关节）
+        - 'arm_ee_world' / 'arm_ee_local': 双臂末端笛卡尔位姿，12 维 = 左 6 [x,y,z,yaw,pitch,roll] + 右 6，拆为 planner 4/5（世界系）或 6/7（局部系）
+        - 'arm': 双臂关节空间，14 维 = 左臂 7 个关节角 + 右臂 7 个关节角，拆为 planner 8/9
     
     从黑板读取（根据 cmd_type 自动选择键名）：
-        - cmd_type='chassis_world': chassis_world_keypoints, chassis_world_keypoint_times
-        - cmd_type='chassis_local': chassis_local_keypoints, chassis_local_keypoint_times
-        - cmd_type='torso': torso_keypoints, torso_keypoint_times
-        - cmd_type='leg': leg_keypoints, leg_keypoint_times
-        - cmd_type='arm': arm_joint_keypoints, arm_joint_keypoint_times
+        - chassis_world/local/torso/leg: 对应 keypoints、keypoint_times
+        - arm_ee_world/arm_ee_local: arm_ee_*_keypoints, arm_ee_keypoint_times
+        - arm: arm_joint_keypoints, arm_joint_keypoint_times
     
     Args:
         name: 节点名称
@@ -1193,18 +1193,16 @@ class NodeSetRuckigParams(Behaviour):
     设置Ruckig规划器参数节点
     
     用于在行为树中设置不同规划器的运动参数（速度、加速度、急动度等）。
+    臂类为左右单臂：4/5 左/右臂世界系，6/7 左/右臂局部系，8/9 左/右臂关节。
     
     Args:
         name: 节点名称
         timed_cmd_api: TimedCmdAPI 实例
         planner_index: 规划器索引
-            - 0: 底盘世界系
-            - 1: 底盘局部系
-            - 2: 躯干
-            - 3: 下肢
-            - 4: 双臂末端世界系
-            - 5: 双臂末端局部系
-            - 6: 上肢
+            - 0: 底盘世界系  1: 底盘局部系  2: 躯干  3: 下肢
+            - 4: 左臂笛卡尔世界系  5: 右臂笛卡尔世界系
+            - 6: 左臂笛卡尔局部系  7: 右臂笛卡尔局部系
+            - 8: 左臂上肢关节  9: 右臂上肢关节
         is_sync: 是否同步模式
         velocity_max: 最大速度列表
         acceleration_max: 最大加速度列表

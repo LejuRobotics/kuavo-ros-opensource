@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <stdexcept>
 #include <leju_utils/define.hpp>
 
@@ -32,6 +33,15 @@ struct DrakeChestElbowHandWeightConfig {
   // arm point smoothness
   double qv1 = 0.1;  // ||p1 - p1_prev||^2
   double qv2 = 0.1;  // ||p2 - p2_prev||^2
+
+  // acceleration cost weights
+  double qa0 = 5.0e-3;  // chest
+  double qa1 = 5.0e-3;  // elbow
+  double qa2 = 5.0e-3;  // hand
+
+  // acceleration dt: false = use measured intervals from steady_clock stamps; true = h1=h2=accFixedDtSec
+  bool accUseFixedDt = false;
+  double accFixedDtSec = 0.01;
 };
 
 struct DrakeChestElbowHandBoundsConfig {
@@ -129,7 +139,20 @@ class DrakeChestElbowHandPointOptSolver final {
 
   ~DrakeChestElbowHandPointOptSolver() = default;
 
-  void setWeights(const DrakeChestElbowHandWeightConfig& config) { weightConfig_ = config; }
+  void setWeights(const DrakeChestElbowHandWeightConfig& config) {
+    weightConfig_ = config;
+    accChestWeight_ = std::max(0.0, config.qa0);
+    accElbowWeight_ = std::max(0.0, config.qa1);
+    accHandWeight_ = std::max(0.0, config.qa2);
+    accUseFixedDt_ = config.accUseFixedDt;
+    {
+      double fd = config.accFixedDtSec;
+      if (!std::isfinite(fd) || !(fd > 0.0)) {
+        fd = 0.01;
+      }
+      accFixedDtSec_ = std::clamp(fd, accDtMinSec_, accDtMaxSec_);
+    }
+  }
 
   void setBounds(const DrakeChestElbowHandBoundsConfig& config) { boundsConfig_ = config; }
 
@@ -155,6 +178,8 @@ class DrakeChestElbowHandPointOptSolver final {
     using drake::symbolic::Expression;
 
     syncCachedPointsFromCachedState();  // 防御性初始化，确保cached points与cached state一致
+
+    const double solveStampSec = steadyClockNowSec();
 
     drake::solvers::MathematicalProgram prog;
 
@@ -262,6 +287,26 @@ class DrakeChestElbowHandPointOptSolver final {
     prog.AddQuadraticErrorCost(weightConfig_.qv1 * I3, pRightElbowPrev_, p1Right);
     prog.AddQuadraticErrorCost(weightConfig_.qv2 * I3, pRightHandPrev_, p2Right);
 
+    const SolverStateSample* tMinus2 = nullptr;
+    const SolverStateSample* tMinus1 = nullptr;
+    double h1 = 0.0;
+    double h2 = 0.0;
+    const char* accDisableReason = "startup";
+    const bool accEnabled = getAccContext(solveStampSec, tMinus2, tMinus1, h1, h2, accDisableReason);
+    if (accEnabled) {
+      const Eigen::Matrix<Expression, 3, 1> aChest = buildAccelerationExpr(pChest.cast<Expression>(), tMinus1->pChest, tMinus2->pChest, h1, h2);
+      const Eigen::Matrix<Expression, 3, 1> aP1Left = buildAccelerationExpr(p1Left.cast<Expression>(), tMinus1->p1Left, tMinus2->p1Left, h1, h2);
+      const Eigen::Matrix<Expression, 3, 1> aP2Left = buildAccelerationExpr(p2Left.cast<Expression>(), tMinus1->p2Left, tMinus2->p2Left, h1, h2);
+      const Eigen::Matrix<Expression, 3, 1> aP1Right = buildAccelerationExpr(p1Right.cast<Expression>(), tMinus1->p1Right, tMinus2->p1Right, h1, h2);
+      const Eigen::Matrix<Expression, 3, 1> aP2Right = buildAccelerationExpr(p2Right.cast<Expression>(), tMinus1->p2Right, tMinus2->p2Right, h1, h2);
+
+      prog.AddCost(accChestWeight_ * aChest.dot(aChest));
+      prog.AddCost(accElbowWeight_ * aP1Left.dot(aP1Left));
+      prog.AddCost(accHandWeight_ * aP2Left.dot(aP2Left));
+      prog.AddCost(accElbowWeight_ * aP1Right.dot(aP1Right));
+      prog.AddCost(accHandWeight_ * aP2Right.dot(aP2Right));
+    }
+
     // -----------------------------
     // Configurable constraints
     // -----------------------------
@@ -314,6 +359,12 @@ class DrakeChestElbowHandPointOptSolver final {
       // Fail-safe: do not update cached state.
       auto failSol = makeSolutionFromCache(false);
       failSol.solveTimeUs = solveTimeUs;
+      lastAccEnabled_ = accEnabled;
+      lastAccDisableReason_ = accEnabled ? "enabled" : accDisableReason;
+      lastAccCostValue_ = 0.0;
+      lastAccH1_ = h1;
+      lastAccH2_ = h2;
+      emitAccDebugLog();
       return failSol;
     }
 
@@ -350,10 +401,169 @@ class DrakeChestElbowHandPointOptSolver final {
     sol.pLeftShoulder = sol.pChest + RDouble * vClsInChest_;
     sol.pRightShoulder = sol.pChest + RDouble * vCrsInChest_;
 
+    if (accEnabled) {
+      lastAccCostValue_ = computeAccelerationCost(sol, *tMinus2, *tMinus1, h1, h2);
+    } else {
+      lastAccCostValue_ = 0.0;
+    }
+    lastAccEnabled_ = accEnabled;
+    lastAccDisableReason_ = accEnabled ? "enabled" : accDisableReason;
+    lastAccH1_ = h1;
+    lastAccH2_ = h2;
+    emitAccDebugLog();
+
+    pushHistorySample(makeSolverStateSample(sol, solveStampSec));
+
     return sol;
   }
 
  private:
+  struct SolverStateSample {
+    double stamp = 0.0;
+    Eigen::Vector3d pChest = Eigen::Vector3d::Zero();
+    Eigen::Vector3d p1Left = Eigen::Vector3d::Zero();
+    Eigen::Vector3d p2Left = Eigen::Vector3d::Zero();
+    Eigen::Vector3d p1Right = Eigen::Vector3d::Zero();
+    Eigen::Vector3d p2Right = Eigen::Vector3d::Zero();
+    Eigen::Quaterniond qChest = Eigen::Quaterniond::Identity();
+  };
+
+  static double steadyClockNowSec() {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::duration<double>>(now).count();
+  }
+
+  static Eigen::Vector3d computeAccelerationVector(const Eigen::Vector3d& xNow,
+                                                   const Eigen::Vector3d& xPrev1,
+                                                   const Eigen::Vector3d& xPrev2,
+                                                   double h1,
+                                                   double h2) {
+    const double scale = 2.0 / (h1 + h2);
+    return scale * ((xNow - xPrev1) / h2 - (xPrev1 - xPrev2) / h1);
+  }
+
+  static Eigen::Matrix<drake::symbolic::Expression, 3, 1> buildAccelerationExpr(
+      const Eigen::Matrix<drake::symbolic::Expression, 3, 1>& xNow,
+      const Eigen::Vector3d& xPrev1,
+      const Eigen::Vector3d& xPrev2,
+      double h1,
+      double h2) {
+    using drake::symbolic::Expression;
+    const Expression scale = 2.0 / (h1 + h2);
+    const Eigen::Matrix<Expression, 3, 1> xPrev1Expr = xPrev1.cast<Expression>();
+    const Eigen::Matrix<Expression, 3, 1> xPrev2Expr = xPrev2.cast<Expression>();
+    return scale * ((xNow - xPrev1Expr) / h2 - (xPrev1Expr - xPrev2Expr) / h1);
+  }
+
+  static SolverStateSample makeSolverStateSample(const DrakeChestElbowHandSolution& sol, double stampSec) {
+    SolverStateSample sample;
+    sample.stamp = stampSec;
+    sample.pChest = sol.pChest;
+    sample.p1Left = sol.pLeftElbow;
+    sample.p2Left = sol.pLeftHand;
+    sample.p1Right = sol.pRightElbow;
+    sample.p2Right = sol.pRightHand;
+    sample.qChest = sol.qChest;
+    return sample;
+  }
+
+  void emitAccDebugLog() const {
+    if (!accDebugPrint_) {
+      return;
+    }
+    std::cout << "[DrakeChestElbowHandPointOptSolver] acc_enabled=" << (lastAccEnabled_ ? "true" : "false")
+              << ", fixed_dt=" << (accUseFixedDt_ ? "true" : "false")
+              << ", h1=" << lastAccH1_ << ", h2=" << lastAccH2_ << ", j_acc=" << lastAccCostValue_
+              << ", reason=" << lastAccDisableReason_ << std::endl;
+  }
+
+  void clearHistorySample() { historySample2_.clear(); }
+
+  void pushHistorySample(const SolverStateSample& sample) {
+    historySample2_.push_back(sample);
+    if (historySample2_.size() > kHistorySize) {
+      historySample2_.pop_front();
+    }
+  }
+
+  bool getAccContext(double stampSecNow,
+                     const SolverStateSample*& tMinus2,
+                     const SolverStateSample*& tMinus1,
+                     double& h1,
+                     double& h2,
+                     const char*& disableReason) {
+    tMinus2 = nullptr;
+    tMinus1 = nullptr;
+    h1 = 0.0;
+    h2 = 0.0;
+    disableReason = "startup";
+    if (historySample2_.size() < kHistorySize) {
+      return false;
+    }
+
+    const SolverStateSample& sampleTMinus2 = historySample2_[0];
+    const SolverStateSample& sampleTMinus1 = historySample2_[1];
+    if (!std::isfinite(sampleTMinus2.stamp) || !std::isfinite(sampleTMinus1.stamp)) {
+      clearHistorySample();
+      disableReason = "nonfinite_stamp";
+      return false;
+    }
+
+    const double rawH1 = sampleTMinus1.stamp - sampleTMinus2.stamp;
+    const double rawH2 = stampSecNow - sampleTMinus1.stamp;
+    if (!(rawH1 > 0.0) || !(rawH2 > 0.0)) {
+      disableReason = "non_monotonic";
+      return false;
+    }
+
+    if (accUseFixedDt_) {
+      h1 = accFixedDtSec_;
+      h2 = accFixedDtSec_;
+      if (!std::isfinite(h1) || !std::isfinite(h2) || !(h1 > 0.0) || !(h2 > 0.0)) {
+        disableReason = "nonfinite_dt";
+        return false;
+      }
+      tMinus2 = &sampleTMinus2;
+      tMinus1 = &sampleTMinus1;
+      disableReason = "enabled_fixed_dt";
+      return true;
+    }
+
+    if (rawH1 > accStaleThresholdSec_ || rawH2 > accStaleThresholdSec_) {
+      clearHistorySample();
+      disableReason = "stale";
+      return false;
+    }
+
+    h1 = std::clamp(rawH1, accDtMinSec_, accDtMaxSec_);
+    h2 = std::clamp(rawH2, accDtMinSec_, accDtMaxSec_);
+    if (!std::isfinite(h1) || !std::isfinite(h2) || !(h1 > 0.0) || !(h2 > 0.0)) {
+      disableReason = "nonfinite_dt";
+      return false;
+    }
+
+    tMinus2 = &sampleTMinus2;
+    tMinus1 = &sampleTMinus1;
+    disableReason = "enabled_actual_dt";
+    return true;
+  }
+
+  double computeAccelerationCost(const DrakeChestElbowHandSolution& sol,
+                                 const SolverStateSample& tMinus2,
+                                 const SolverStateSample& tMinus1,
+                                 double h1,
+                                 double h2) const {
+    const Eigen::Vector3d aChest = computeAccelerationVector(sol.pChest, tMinus1.pChest, tMinus2.pChest, h1, h2);
+    const Eigen::Vector3d aP1Left = computeAccelerationVector(sol.pLeftElbow, tMinus1.p1Left, tMinus2.p1Left, h1, h2);
+    const Eigen::Vector3d aP2Left = computeAccelerationVector(sol.pLeftHand, tMinus1.p2Left, tMinus2.p2Left, h1, h2);
+    const Eigen::Vector3d aP1Right = computeAccelerationVector(sol.pRightElbow, tMinus1.p1Right, tMinus2.p1Right, h1, h2);
+    const Eigen::Vector3d aP2Right = computeAccelerationVector(sol.pRightHand, tMinus1.p2Right, tMinus2.p2Right, h1, h2);
+
+    return accChestWeight_ * aChest.squaredNorm() + accElbowWeight_ * aP1Left.squaredNorm() +
+           accHandWeight_ * aP2Left.squaredNorm() + accElbowWeight_ * aP1Right.squaredNorm() +
+           accHandWeight_ * aP2Right.squaredNorm();
+  }
+
   static Eigen::Vector3d normalizeSafe(const Eigen::Vector3d& v) {
     const double n = v.norm();
     if (n > 0.0) {
@@ -558,6 +768,18 @@ class DrakeChestElbowHandPointOptSolver final {
   DrakeChestElbowHandBoundsConfig boundsConfig_;
   DrakeChestElbowHandPrevFilterConfig prevFilterConfig_;
 
+  // acceleration cost internal configuration
+  static constexpr size_t kHistorySize = 2;
+  bool accDebugPrint_ = false;
+  double accChestWeight_ = 5.0e-3;
+  double accElbowWeight_ = 5.0e-3;
+  double accHandWeight_ = 5.0e-3;
+  double accDtMinSec_ = 1.0e-4;
+  double accDtMaxSec_ = 0.1;
+  double accStaleThresholdSec_ = 0.3;
+  bool accUseFixedDt_ = false;
+  double accFixedDtSec_ = 0.01;
+
   // cached previous solution (warm-start + smoothness reference)
   Eigen::Vector3d pChestPrev_;
   Eigen::Quaterniond qPrev_ = Eigen::Quaterniond::Identity();
@@ -571,6 +793,16 @@ class DrakeChestElbowHandPointOptSolver final {
   Eigen::Vector3d pLeftHandPrev_;
   Eigen::Vector3d pRightElbowPrev_;
   Eigen::Vector3d pRightHandPrev_;
+
+  // two-sample history for non-uniform acceleration cost
+  std::deque<SolverStateSample> historySample2_;
+
+  // lightweight observability for debugging
+  bool lastAccEnabled_ = false;
+  const char* lastAccDisableReason_ = "startup";
+  double lastAccH1_ = 0.0;
+  double lastAccH2_ = 0.0;
+  double lastAccCostValue_ = 0.0;
 };
 
 }  // namespace HighlyDynamic

@@ -1,7 +1,6 @@
 <launch>
     <!-- 定义命令行参数 -->
     <arg name="version" default="4" />
-    <arg name="startup_delay" default="0.0" />
     <arg name="ctrl_arm_idx" default="2" />
     <arg name="ik_type_idx" default="0" />
     <arg name="ip_address" default="" />
@@ -22,9 +21,9 @@
     <arg name="joint_space_acc_limit" default="500.0" />
     <arg name="joint_space_jerk_limit" default="3000.0" />
     <arg name="max_joint_velocity" default="30.0" />
-    <arg name="delta_scale_x" default="1.36" />
-    <arg name="delta_scale_y" default="1.36" />
-    <arg name="delta_scale_z" default="1.36" />
+    <arg name="delta_scale_x" default="1.26" />
+    <arg name="delta_scale_y" default="1.26" />
+    <arg name="delta_scale_z" default="1.26" />
     <arg name="delta_scale_roll" default="1.0" />
     <arg name="delta_scale_pitch" default="1.0" />
     <arg name="delta_scale_yaw" default="1.0" />
@@ -71,15 +70,17 @@
     <param name="/quest3/use_step_turning" value="$(arg use_step_turning)" />
     <!-- 设置全局control_torso参数 -->
     <param name="control_torso" value="$(arg control_torso)" type="bool"/>
+    <!-- 设置 wheel_ik 全局参数，供其他节点统一读取 -->
+    <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool"/>
     
     <!-- motion_capture_ik -->
     <!-- Python IK Node (启动当 use_cpp_incremental_ik=false 时) -->
-    <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(arg use_cpp_incremental_ik)" launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'">
+    <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(arg use_cpp_incremental_ik)">
         <param name="use_arm_collision" value="$(arg use_arm_collision)"/>
     </node>
 
     <!-- C++ IK Node (启动当 use_cpp_incremental_ik=true 且 wheel_ik=false 时) -->
-    <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="ik_ros_uni_cpp_node" output="screen" if="$(eval arg('use_cpp_incremental_ik') and not arg('wheel_ik'))" launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'">
+    <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="ik_ros_uni_cpp_node" output="screen" if="$(eval arg('use_cpp_incremental_ik') and not wheel_ik)">
         <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
         <param name="control_torso" value="$(arg control_torso)" />
         <param name="/end_effector_type" value="$(arg ee_type)"/>
@@ -144,7 +145,7 @@
     </node>
 
     <!-- Wheel C++ IK Node (启动当 use_cpp_incremental_ik=true 且 wheel_ik=true 时) -->
-    <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="wheel_ik_ros_uni_cpp_node" output="screen" if="$(eval arg('use_cpp_incremental_ik') and arg('wheel_ik'))" launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'">
+    <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="wheel_ik_ros_uni_cpp_node" output="screen" if="$(eval arg('use_cpp_incremental_ik') and wheel_ik)">
         <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
         <param name="control_torso" value="$(arg control_torso)" />
         <param name="/end_effector_type" value="$(arg ee_type)"/>
@@ -189,17 +190,20 @@
         <rosparam param="/quest3/zyx_limits_link4" subst_value="True">$(arg zyx_limits_link4)</rosparam>
     </node>
 
+    <!-- humanoid_quest_control_with_arm (启动当 wheel_ik=true 时) -->
+    <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" if="$(eval wheel_ik)" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
+
     <!-- noitom_hi5_hand_udp_python -->
     <!-- Python implementation (default) -->
-    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen" unless="$(arg use_cpp_monitor)" launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'">
+    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen" unless="$(arg use_cpp_monitor)">
         <param name="enable_head_control" value="$(arg enable_head_control)" />
     </node>
 
     <!-- C++ implementation -->
-    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3_cpp" args="$(arg ip_address)" name="monitor_quest3_cpp" output="screen" if="$(arg use_cpp_monitor)" launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'">
+    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3_cpp" args="$(arg ip_address)" name="monitor_quest3_cpp" output="screen" if="$(arg use_cpp_monitor)">
         <param name="enable_head_control" value="$(arg enable_head_control)" />
     </node>
 
     <!-- RobotStateServer still uses existing Python implementation as separate node -->
-    <node pkg="noitom_hi5_hand_udp_python" type="robot_state_server.py" name="robot_state_server" output="screen" if="$(arg use_cpp_monitor)" launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'" />
+    <node pkg="noitom_hi5_hand_udp_python" type="robot_state_server.py" name="robot_state_server" output="screen" if="$(arg use_cpp_monitor)" />
 </launch>

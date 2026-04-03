@@ -83,7 +83,7 @@ namespace mobile_manipulator
         initialTorsoPose_y_ = 0.0005;
         initialTorsoPose_z_ = 0.789919;
       }
-      else if(robotVersion_ == 61 || robotVersion_ == 62)
+      else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
       {
         initialTorsoPose_x_ = 0.11575;
         initialTorsoPose_y_ = 0.0;

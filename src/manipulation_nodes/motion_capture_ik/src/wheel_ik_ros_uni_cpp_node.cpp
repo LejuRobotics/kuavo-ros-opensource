@@ -8,7 +8,7 @@
 #include "motion_capture_ik/json.hpp"
 #include "leju_utils/define.hpp"
 
-int getRobotVersion(ros::NodeHandle& nodeHandle) {
+int wheelGetRobotVersion(ros::NodeHandle& nodeHandle) {
   // 持续查询robot_version参数，否则阻塞程序
   while (!nodeHandle.hasParam("/robot_version") && ros::ok()) {
     ROS_INFO("Waiting for robot_version parameter...");
@@ -21,7 +21,7 @@ int getRobotVersion(ros::NodeHandle& nodeHandle) {
   return robotVersion;
 }
 
-void loadJsonConfig(nlohmann::json& jsonData, const std::string& filename) {
+void wheelLoadJsonConfig(nlohmann::json& jsonData, const std::string& filename) {
   std::ifstream file(filename);
   if (file.is_open()) {
     file >> jsonData;
@@ -32,7 +32,7 @@ void loadJsonConfig(nlohmann::json& jsonData, const std::string& filename) {
   }
 }
 
-ArmIdx getCtrlArmIdx(ros::NodeHandle& nodeHandle) {
+ArmIdx wheelGetCtrlArmIdx(ros::NodeHandle& nodeHandle) {
   int ctrlArmIdx = 2;  // 默认值：控制双臂
   nodeHandle.param("ik_ros_uni_cpp_node/ctrl_arm_idx", ctrlArmIdx, 2);
   ROS_INFO("Read ctrl_arm_idx parameter: %d", ctrlArmIdx);
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
   ros::NodeHandle nodeHandle;
 
   // 从ROS参数服务器读取ctrl_arm_idx参数
-  ArmIdx ctrlArmIdx = getCtrlArmIdx(nodeHandle);
+  ArmIdx ctrlArmIdx = wheelGetCtrlArmIdx(nodeHandle);
   std::string armControlMsg;
   switch (ctrlArmIdx) {
     case ArmIdx::LEFT:
@@ -74,16 +74,16 @@ int main(int argc, char** argv) {
   }
   ROS_INFO("\033[92mControl %s arms.\033[0m", armControlMsg.c_str());
 
-  int robotVersionInt = getRobotVersion(nodeHandle);
+  int robotVersionInt = wheelGetRobotVersion(nodeHandle);
   std::string modelConfigFile =
       ros::package::getPath("kuavo_assets") + "/config/kuavo_v" + std::to_string(robotVersionInt) + "/kuavo.json";
 
   nlohmann::json jsonData;
-  loadJsonConfig(jsonData, modelConfigFile);
+  wheelLoadJsonConfig(jsonData, modelConfigFile);
 
-  HighlyDynamic::WheelQuest3IkIncrementalROS wheelQuest3IkIncrementalROS(nodeHandle, 100, false, ctrlArmIdx);
-  wheelQuest3IkIncrementalROS.initialize(jsonData);
-  wheelQuest3IkIncrementalROS.run();
+  HighlyDynamic::WheelQuest3IkIncrementalROS quest3IkIncrementalROS(nodeHandle, 100, false, ctrlArmIdx);
+  quest3IkIncrementalROS.initialize(jsonData);
+  quest3IkIncrementalROS.run();
 
   return 0;
 }

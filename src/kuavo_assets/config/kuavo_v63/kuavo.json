@@ -1,0 +1,253 @@
+{
+    "contact_frames_name": ["l_foot_toe", "l_foot_heel", "r_foot_toe", "r_foot_heel"],
+    "model_path": "biped_s49/urdf/drake/biped_v3.urdf",
+    "model_path_full": "biped_s49/urdf/drake/biped_v3_full.urdf",
+    "model_with_arm_path": "biped_s49/urdf/drake/biped_v3_all_joint.urdf",
+    "Lleg_urdf":"biped_s49/urdf/drake/Lleg.urdf",
+    "Rleg_urdf":"biped_s49/urdf/drake/Rleg.urdf",
+    "Larm_urdf": "biped_s49/urdf/drake/Larm.urdf",
+    "Rarm_urdf": "biped_s49/urdf/drake/Rarm.urdf",
+    "arm_urdf": "biped_s49/urdf/drake/biped_v3_arm.urdf",
+    "end_frames_name": ["torso", "l_foot_sole", "r_foot_sole"],
+    "end_frames_name_full_body": ["torso", "l_foot_sole", "r_foot_sole", "l_hand_sole", "r_hand_sole"],
+    "ankle_motor_offset_degree":[-15,-15,-15,-15],
+    "arm_ankle_motor_offset_degree": [-0.85, -0.85, -0.85, -0.85],
+    "NUM_ARM_JOINT" : 14,
+    "NUM_HEAD_JOINT" : 2,
+    "NUM_WAIST_JOINT" : 0,
+    "NUM_JOINT" : 20,
+    "ROBOT_MODULE": "LUNBI_V62",
+    "ankle_solver_type": -1,
+
+    "torsoP": 3.0,
+    "torsoP_squat": 3.0,
+    "StepH": 0.06,
+    "com_z": 0.85,
+    "squat_z": 0.667,
+    "com_z_jump": 0.62,
+    "StepWith": 0.20,
+    "StepDuration":0.35,
+    "VelocityLimit":[1.2, 0.6, 50],
+    "cmd_vel_step":[0.1, 0.05, 5],
+    "walk_stablizer_count":800,
+    "walk_stablizer_threshold":0.9,
+    "torsoY": 0.0,
+    "V_takeoff" : 1.2,
+    "swing_arm": true,
+    "swing_arm_gain": 0.2,
+    "swing_elbow_scale": 3.0,
+    "imu_invert":false,
+    "imu_in_torso": [0, 0, 0],
+    "isParallelArm":false,
+    "only_half_up_body":false,
+    "peak_protection":0.1,
+    "locked_rotor_protection":2,
+    "speed_protection":0.05,             
+    "joint_kp": [300, 300, 260, 160],
+    "joint_kd": [2150, 2300, 2150, 2150],
+    "MOTORS_TYPE":[
+        "PA115", "PA115", "PA115", "PA115",
+        "ruiwoPA81", "ruiwoPA72", "ruiwoPA60", "ruiwoPA72", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43",
+        "ruiwoPA81", "ruiwoPA72", "ruiwoPA60", "ruiwoPA72", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43"],
+    "ruiwo_kp": [50, 50, 50, 50, 50, 30, 30, 30, 50, 50, 50, 30, 20, 20, 10, 10],
+    "ruiwo_kd": [6, 6, 6, 6, 3, 3, 3, 6, 6, 6, 6, 3, 2, 2, 4, 3],
+    "EndEffectorType": ["None", "None"],
+    "min_joint_position_limits":[
+        -5.5, -161, 
+        -25, -190,
+        -180, -180, -180, -180, -180, -180, -180,
+        -180, -180, -180, -180, -180, -180, -180, -30, -25],
+    "max_joint_position_limits":[
+        83, 5.5,
+        181, 190,
+        180, 180, 180, 180, 180, 180, 180,
+        180, 180, 180, 180, 180, 180, 180, 30, 25],
+    "joint_velocity_limits":[
+        6.0, 6.0,
+        6.0, 6.0,
+        12.0, 6.0, 6.5, 6.0, 10.0, 10.0, 10.0,
+        12.0, 6.0, 6.5, 6.0, 10.0, 10.0, 10.0, 200.0, 200.0],
+    "joint_peak_velocity_limits":[
+        22.5, 22.5,
+        22.5, 22.5,
+        18.8, 8.0, 7.5, 8.0, 7.0, 7.0, 7.0,
+        18.8, 8.0, 7.5, 8.0, 7.0, 7.0, 7.0, 1800, 1800],
+    "joint_torque_limits":[
+        467.6, 467.6,
+        186.9, 186.9,
+        46.67, 52.5, 39.9, 52.5, 9.87, 9.87, 9.87,
+        46.67, 52.5, 39.9, 52.5, 9.87, 9.87, 9.87, 140, 140],
+    "joint_peak_torque_limits":[
+        668, 668,
+        267, 267,
+        66.67, 75, 57, 75, 14.1, 14.1, 14.1,
+        66.67, 75, 57, 75, 14.1, 14.1, 14.1, 200, 200],
+    "base_Q": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 1e-3, 1e-3, 1e-3, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
+    "base_R": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 5e2, 5e2, 5e2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
+    "com_Q": [1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3],
+    "com_R": [5e1, 5e1, 5e1, 2, 2, 2],
+
+    "joint_vel_Q": [0.01, 0.1, 0.1, 0.1, 0.1, 0.1],
+    "joint_vel_R": [0.8, 0.1, 0.1, 0.1, 0.1, 0.1],
+
+    "joint_pos_Q": [0.001, 0.5, 0.5, 0.5, 0.5, 0.5],
+    "joint_pos_R": [50.0, 0.1, 0.1, 0.1, 0.1, 0.1],
+    "l_joint_defor_K": 10,
+    "r_joint_defor_K": 10,
+
+    "base_orientation": [1,0,0,0],
+    "base_velocity": [0,0,0],
+    "base_position": [0,0,0.74],
+    "gyroscope_bias": [0,0,0],
+    "accelerometer_bias": [0,0,0],
+    "base_orientation_std": 0,
+    "base_velocity_std": 0,
+    "base_position_std": 0,
+    "gyroscope_bias_std": 0.0001,
+    "accelerometer_bias_std": 0.0001,
+
+    "gyroscope_noise": [0.01,0.01,0.01],
+    "accelerometer_noise": [0.1,0.1,10.01],
+    "gyroscope_bias_noise": [0.00001,0.00001,0.00001],
+    "accelerometer_bias_noise": [0.00001,0.00001,0.00001],
+    "contact_noise": [0.00001,0.00001,0.00001],
+    "kinematics_noise": [1e-2,1e-2,5e-2,5e-2,1e-2,1e-2],
+    "stand_kinematics_noise": [1e-2,1e-2,5e-2,5e-2,1e-2,1e-2],
+
+    "left_foot_ankle_link_joint_frames": [
+        "leg_l6_link", "l_l_tendon_y", "l_r_tendon_y", "l_l_arm_barxxx", "l_r_arm_barxxx",
+        "l_foot_roll_joint", "l_foot_pitch_joint", "l_l_tendon_y", "l_r_tendon_y", "l_l_bar_y", "l_r_bar_y",
+        "l_l_bar_y_motor", "l_r_bar_y_motor",
+        "l_l_foot_socket", "l_r_foot_socket", "l_l_tendon_socket", "l_r_tendon_socket", "l_l_foot_bar_frame", "l_r_foot_bar_frame"
+    ],
+    "right_foot_ankle_link_joint_frames": [
+        "leg_r6_link", "r_l_tendon_y", "r_r_tendon_y", "r_l_arm_barxxx", "r_r_arm_barxxx",
+        "r_foot_roll_joint", "r_foot_pitch_joint", "r_l_tendon_y", "r_r_tendon_y", "r_l_bar_y", "r_r_bar_y",
+        "r_l_bar_y_motor", "r_r_bar_y_motor",
+        "r_l_foot_socket", "r_r_foot_socket", "r_l_tendon_socket", "r_r_tendon_socket", "r_l_foot_bar_frame", "r_r_foot_bar_frame"
+    ],
+
+    "left_arm_ankle_link_joint_frames": [
+        "l_hand_pitch", "l_l_arm_tendon", "l_r_arm_tendon", "l_l_arm_bar", "l_r_arm_bar",
+        "l_hand_roll", "l_hand_pitch", "l_l_arm_tendon", "l_r_arm_tendon", "l_l_arm_bar", "l_r_arm_bar",
+        "l_l_arm_bar_motor", "l_r_arm_bar_motor",
+        "l_l_hand_socket", "l_r_hand_socket", "l_l_arm_tendon_socket", "l_r_arm_tendon_socket", "l_l_arm_bar_frame", "l_r_arm_bar_frame"],
+    "right_arm_ankle_link_joint_frames": [
+        "r_hand_pitch", "r_r_arm_tendon", "r_l_arm_tendon", "r_r_arm_bar", "r_l_arm_bar",
+        "r_hand_roll", "r_hand_pitch", "r_r_arm_tendon", "r_l_arm_tendon", "r_r_arm_bar", "r_l_arm_bar",
+        "r_r_arm_bar_motor", "r_l_arm_bar_motor",
+        "r_r_hand_socket", "r_l_hand_socket", "r_r_arm_tendon_socket", "r_l_arm_tendon_socket", "r_r_arm_bar_frame", "r_l_arm_bar_frame"],
+      
+    "end_frames_name_ik":  ["base_link", "zarm_l7_end_effector", "zarm_r7_end_effector", "zarm_l4_link", "zarm_r4_link"], 
+    "arm_end_joints": ["zarm_l7_joint", "zarm_r7_joint"],
+    "shoulder_frame_names" : ["zarm_l1_link", "zarm_r1_link"],
+    "eef_visual_stl_files" : ["l_hand_pitch.STL", "r_hand_pitch.STL"],
+    "upper_arm_length": 0.2844,
+    "lower_arm_length": 0.45,
+    "shoulder_width": 0.2927,
+    "eef_z_offset": -0.0,
+    "hand_ref_length": 0.193,
+    "base_height_offset": 0.204,
+    "base_chest_offset_x": -0.0,
+    
+    "motor_velocities_factor": 0.005,
+    "joint_velocities_limit": {
+        "head_pitch": [
+            -3,
+            3
+        ],
+        "head_yaw": [
+            -3,
+            3
+        ]
+    },
+    "MOTOR_C2T":
+    {
+        "PA100":{
+            "c2t_cul":[10,20,30,40,50,
+                       60,70,80,90,100],
+            "c2t_coeff":[1.2,1.2,1.2,1.2,1.2,
+                         1.2,1.2,1.2,1.2,1.2]
+        },
+        "PA115":{
+            "c2t_cul":[10,20,30,40,50,
+                       60,70,80,90,100],
+            "c2t_coeff":[11.5,11.5,11.5,11.5,11.5,
+                         11.5,11.5,11.5,11.5,11.5]
+        },
+        "CK":{
+            "c2t_cul":[10,20,30,40,50,
+                       60,70,80,90,100],
+            "c2t_coeff":[2.1,2.1,2.1,2.1,2.1,
+                         2.1,2.1,2.1,2.1,2.1]
+        },
+        "ruiwoPA81":{
+            "c2t_cul":[1.0,2.0,3.0,4.0,5.0,
+                       6.0,7.0,8.0,9.0,10.0],
+            "c2t_coeff":[2.55,2.55,2.55,2.55,2.55,
+                         2.55,2.55,2.55,2.55,2.55]
+        },
+        "ruiwoPA72":{
+            "c2t_cul":[1.0,2.0,3.0,4.0,5.0,
+                       6.0,7.0,8.0,9.0,10.0],
+            "c2t_coeff":[4.03,4.78,4.87,4.8975,5.006,
+                         5.146667,5.185714,5.195,5.136667,5.076]
+        },
+        "ruiwoPA60":{
+            "c2t_cul":[1.0,2.0,3.0,4.0,5.0,
+                       6.0,7.0,8.0,9.0,10.0],
+            "c2t_coeff":[3.86,4.65,5.116667,5.14,5.032,
+                         5.005,5.078571,5.015,4.961111,4.956]
+        },
+        "ruiwoPA43":{
+            "c2t_cul":[0.5,1.0,1.5,2.0,2.5,
+                       3.0,3.5,4.0,4.5,5.0],
+            "c2t_coeff":[4.12,4.88,4.82,4.825,4.812,
+                         4.373333,4.32,4.3625,4.344444,4.332]
+        }
+    },
+
+    "pos_kp": [1.0, 0.15, 1.0],
+    "pos_kd": [0.0, 0.00, 0.0],
+    "pos_ki": [0.0, 0.00, 0.0],
+    "pos_kp_sim": [1.0, 0.15, 1.0],
+    "pos_kd_sim": [25, 0.0, 0.0],
+    "pos_ki_sim": [0.0002, 0.0, 0.0],
+    "arm_kp": [500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500],
+    "arm_ki": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "arm_kd": [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50],
+    "pbc_kp": [400, 900, 40, 100, 0, 0, 30, 40, 40, 40, 0, 0],
+    "pbc_kd": [20, 40, 5, 10, 0, 0, 4, 5, 5, 5, 0, 0],
+    
+    "init_arm_pos": [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0],
+    "walk_arm_pose": [20, 0, 0, -35, 0, 0, 0, 20, 0, 0, -35, 0, 0, 0],
+    "calibration_safe_pose": [-60, 0, 30, -30, 0, 0, 0, 
+                              -60, 0, -30, -30, 0, 0, 0,
+                              0, 0],
+    "arm_calibration_limits": [90, -20, 90, -0, 90, 40, 40, 
+                               90, 20, -90, 0, -90, -40, 40, 
+                               -90, -30],
+    "arm_calibration_directions": [1, -1, 1, 1, 1, 1, 1, 
+                                   1, 1, -1, 1, -1, -1, 1,
+                                   -1, -1],
+    "arm_calibration_velocity": 15.0,
+    "arm_calibration_timeout": 20.0,
+    "arm_calibration_position_variance_time": 0.4,
+    "arm_calibration_position_variance_threshold": 0.1,    
+    "arm_pose0": [10, 0, 0, -30, 0, 0, 20, 10, 0, 0, -30, 0, 0, 20],
+    "arm_pose1": [10, 0, 0, -30, 0, 20, 0, 10, 0, 0, -30, 0, 20, 0],
+    "arm_pose2": [10, 20, 0, 0, 0, 0, 0, 10, -20, 0, 0, 0, 0, 0],
+
+    "wbc_w_qdd":0.8,
+    "wbc_w_xdd":1.0,
+    "wbc_w_rdd":1.0,
+    "static_friction":1.0,
+    "dynamic_friction":1.0,
+
+    "kuavo_wheel_torso_limit": {
+        "z_range": [0.74, 0.84],
+        "x_range": [0.1, 0.2],
+        "pitch_range": [0.0, 20.0],
+        "base_position": [0.0, 0.0, 0.74]
+    }
+}

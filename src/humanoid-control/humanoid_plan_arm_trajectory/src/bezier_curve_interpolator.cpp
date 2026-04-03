@@ -146,7 +146,6 @@ void BezierCurveInterpolator::initializeLimitations() {
 }
 
 void BezierCurveInterpolator::initializeSpecific() {
-    std::cout << "interpolate_type_: " << interpolate_type_ << std::endl;
     
     plan_arm_traj_srv_ = nh_->advertiseService(interpolate_type_ + "/plan_arm_trajectory", 
                                               &BezierCurveInterpolator::planArmTrajectoryBezierCurveCallback, this);

@@ -21,16 +21,17 @@
 #include <std_msgs/Float32MultiArray.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
+#include <chrono>
 #include <cmath>
 
 #include <leju_utils/define.hpp>
 #include <leju_utils/math.hpp>
 #include <leju_utils/RosMsgConvertor.hpp>
 
-#include "motion_capture_ik/ArmControlBaseROS.h"
+#include "motion_capture_ik/WheelArmControlBaseROS.h"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
-#include "motion_capture_ik/JoyStickHandler.h"
+#include "motion_capture_ik/WheelJoyStickHandler.h"
 
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
@@ -59,7 +60,7 @@ WheelQuest3IkIncrementalROS::WheelQuest3IkIncrementalROS(ros::NodeHandle& nodeHa
                                                double publishRate,
                                                bool debugPrint,
                                                ArmIdx ctrlArmIdx)
-    : ArmControlBaseROS(nodeHandle, publishRate, debugPrint), ctrlArmIdx_(ctrlArmIdx) {}
+    : WheelArmControlBaseROS(nodeHandle, publishRate, debugPrint), ctrlArmIdx_(ctrlArmIdx) {}
 
 WheelQuest3IkIncrementalROS::~WheelQuest3IkIncrementalROS() {
   shouldStop_ = true;
@@ -76,7 +77,27 @@ void WheelQuest3IkIncrementalROS::run() {
   ikSolveThread_ = std::thread(&WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
   jointStatePublishThread_ = std::thread(&WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction, this);
 
-  initializeArmControlMode();
+  {
+    kuavo_msgs::changeArmCtrlMode srv;
+    srv.request.control_mode = 1;
+    bool humanoidCallOk = false;
+    bool vrCallOk = false;
+    if (humanoidArmCtrlModeClient_.exists()) {
+      humanoidCallOk = humanoidArmCtrlModeClient_.call(srv) && srv.response.result;
+    } else {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] Service /humanoid_change_arm_ctrl_mode does not exist");
+    }
+    if (changeArmCtrlModeClient_.exists()) {
+      vrCallOk = changeArmCtrlModeClient_.call(srv) && srv.response.result;
+    } else {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] Service /change_arm_ctrl_mode does not exist");
+    }
+    if (humanoidCallOk && vrCallOk) {
+      ROS_INFO("[WheelQuest3IkIncrementalROS] Arm control mode set to 1 during initialization");
+    } else {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] Failed to set arm control mode to 1 during initialization");
+    }
+  }
   activateController();
   std::thread questJoystickDataThread = std::thread([this]() {
     while (ros::ok() && !quest3ArmInfoTransformerPtr_->isArmLengthMeasurementComplete()) {
@@ -230,7 +251,7 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
 
       resetMode2State(true);
 
-      latestIncrementalResult_ = IncrementalPoseResult();
+      latestIncrementalResult_ = WheelIncrementalPoseResult();
 
       enterMode2ResetCounter_++;
     }
@@ -1000,7 +1021,12 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
 void WheelQuest3IkIncrementalROS::solveIk() {
   std::vector<PoseData> poseConstraintListCopy;
   poseConstraintListCopy = latestPoseConstraintList_;
+
+  auto startTime = std::chrono::high_resolution_clock::now();
   auto ikResult = oneStageIkEndEffectorPtr_->solveIK(poseConstraintListCopy, ctrlArmIdx_, jointMidValues_);
+  auto endTime = std::chrono::high_resolution_clock::now();
+  auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+  // ROS_INFO("[WheelQuest3IkIncrementalROS] solveIK duration: %ld ms", static_cast<long>(durationMs));
 
   if (ikResult.isSuccess) {
     {

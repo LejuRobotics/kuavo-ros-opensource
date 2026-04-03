@@ -27,17 +27,19 @@
 #include <leju_utils/RosMsgConvertor.hpp>
 
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
-#include "motion_capture_ik/ArmControlBaseROS.h"
+#include "motion_capture_ik/WheelArmControlBaseROS.h"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
 #include "motion_capture_ik/json.hpp"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
-#include "motion_capture_ik/JoyStickHandler.h"
+#include "motion_capture_ik/WheelJoyStickHandler.h"
 
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
 void WheelQuest3IkIncrementalROS::activateController() {
   if (controllerActivated_.load()) return;
+
+  if (!changeMobileCtrlModeClient_.exists()) return;
   if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
 
@@ -48,7 +50,7 @@ void WheelQuest3IkIncrementalROS::activateController() {
   srv1.request.control_mode = static_cast<int>(MpcRefUpdateMode::ENABLED_ARM);
   srv2.request.control_mode = static_cast<int>(KuavoArmCtrlMode::EXTERNAL_CONTROL);
 
-  controllerActivated_.store(srv1.response.result &&  //
+  controllerActivated_.store(changeMobileCtrlModeClient_.call(srv1) && srv1.response.result &&  //
                              humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&   //
                              changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&     //
                              true);
@@ -56,6 +58,7 @@ void WheelQuest3IkIncrementalROS::activateController() {
 
 void WheelQuest3IkIncrementalROS::deactivateController() {
   if (!controllerActivated_.load()) return;
+  if (!changeMobileCtrlModeClient_.exists()) return;
   if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
 
@@ -65,7 +68,7 @@ void WheelQuest3IkIncrementalROS::deactivateController() {
   srv1.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
   srv2.request.control_mode = static_cast<int>(KuavoArmCtrlMode::ARM_FIXED);
 
-  controllerActivated_.store(!(srv1.response.result &&  //
+  controllerActivated_.store(!(changeMobileCtrlModeClient_.call(srv1) && srv1.response.result &&  //
                                humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&   //
                                changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&     //
                                true));
@@ -590,7 +593,7 @@ void WheelQuest3IkIncrementalROS::reset() {
   // 重置pose约束列表，使用默认手部位置初始化，确保进入增量模式时能正确初始化到默认位置
   latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
   Eigen::Quaterniond defaultHandQuat = Eigen::Quaterniond::Identity();
-  // 使用默认手部位置初始化，与 IncrementalControlModule 中的硬编码默认值保持一致
+  // 使用默认手部位置初始化，与 WheelIncrementalControlModule 中的硬编码默认值保持一致
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = defaultLeftHandPosOnExit_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = defaultHandQuat.toRotationMatrix();
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = defaultRightHandPosOnExit_;
@@ -610,7 +613,7 @@ void WheelQuest3IkIncrementalROS::reset() {
   latestLeftElbowPosAfterOpt_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position;
   latestRightElbowPosBeforeOpt_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position;
   latestRightElbowPosAfterOpt_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position;
-  latestIncrementalResult_ = IncrementalPoseResult();
+  latestIncrementalResult_ = WheelIncrementalPoseResult();
   {
     std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
     mode2EnterTime_ = ros::Time(0);
@@ -964,23 +967,28 @@ void WheelQuest3IkIncrementalROS::computeRightShoulderFK(Eigen::Vector3d& pOut, 
 // loadDrakeChestElbowHandBoundsFromJson, loadDrakeChestElbowHandPrevFilterConfigFromJson
 // ========================================================================================
 
-PointTrackIKSolverConfig WheelQuest3IkIncrementalROS::loadPointTrackIKSolverConfigFromJson(
+WheelPointTrackIKSolverConfig WheelQuest3IkIncrementalROS::loadPointTrackIKSolverConfigFromJson(
     const nlohmann::json& configJson) {
   ROS_INFO("==================================================================================");
-  ROS_INFO("🔧 [WheelQuest3IkIncrementalROS] Loading PointTrackIKSolverConfig from JSON configuration");
+  ROS_INFO("🔧 [WheelQuest3IkIncrementalROS] Loading WheelPointTrackIKSolverConfig from JSON configuration");
   ROS_INFO("==================================================================================");
 
-  PointTrackIKSolverConfig config;
+  WheelPointTrackIKSolverConfig config;
 
   try {
     if (configJson.contains("point_track_ik_solver_config") && configJson["point_track_ik_solver_config"].is_object()) {
       const auto& ikConfig = configJson["point_track_ik_solver_config"];
 
-      // Load PointTrackIKSolverConfig specific fields
+      // Load WheelPointTrackIKSolverConfig specific fields
       if (ikConfig.contains("historyBufferSize")) {
         config.historyBufferSize = ikConfig["historyBufferSize"].get<int>();
         ROS_INFO("  ✅ historyBufferSize: %d", config.historyBufferSize);
       }
+      if (ikConfig.contains("dynamicsDt")) {
+        config.dynamicsDt = ikConfig["dynamicsDt"].get<double>();
+        ROS_INFO("  ✅ dynamicsDt: %.6f", config.dynamicsDt);
+      }
+
 
       if (ikConfig.contains("eeTrackingWeight")) {
         config.eeTrackingWeight = ikConfig["eeTrackingWeight"].get<double>();
@@ -1115,13 +1123,13 @@ PointTrackIKSolverConfig WheelQuest3IkIncrementalROS::loadPointTrackIKSolverConf
         ROS_INFO("  ✅ waistSmoothWeight3: %.2e", config.waistSmoothWeight3);
       }
 
-      ROS_INFO("✅ [WheelQuest3IkIncrementalROS] Successfully loaded PointTrackIKSolverConfig from JSON");
+      ROS_INFO("✅ [WheelQuest3IkIncrementalROS] Successfully loaded WheelPointTrackIKSolverConfig from JSON");
     } else {
       ROS_WARN("❌ [WheelQuest3IkIncrementalROS] 'point_track_ik_solver_config' not found in JSON config, using defaults");
     }
 
   } catch (const std::exception& e) {
-    ROS_ERROR("❌ [WheelQuest3IkIncrementalROS] Exception while loading PointTrackIKSolverConfig: %s", e.what());
+    ROS_ERROR("❌ [WheelQuest3IkIncrementalROS] Exception while loading WheelPointTrackIKSolverConfig: %s", e.what());
     ROS_WARN("🔄 [WheelQuest3IkIncrementalROS] Falling back to default configuration");
   }
 
@@ -1142,6 +1150,11 @@ DrakeChestElbowHandWeightConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
   config.q2 = 1.0;
   config.qv1 = 0.1;
   config.qv2 = 0.1;
+  config.qa0 = 5.0e-3;
+  config.qa1 = 5.0e-3;
+  config.qa2 = 5.0e-3;
+  config.accUseFixedDt = false;
+  config.accFixedDtSec = 0.01;
 
   try {
     if (configJson.contains("drake_chest_elbow_hand_weights") &&
@@ -1168,6 +1181,11 @@ DrakeChestElbowHandWeightConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
       if (w.contains("q2")) config.q2 = w["q2"].get<double>();
       if (w.contains("qv1")) config.qv1 = w["qv1"].get<double>();
       if (w.contains("qv2")) config.qv2 = w["qv2"].get<double>();
+      if (w.contains("qa0")) config.qa0 = w["qa0"].get<double>();
+      if (w.contains("qa1")) config.qa1 = w["qa1"].get<double>();
+      if (w.contains("qa2")) config.qa2 = w["qa2"].get<double>();
+      if (w.contains("acc_use_fixed_dt")) config.accUseFixedDt = w["acc_use_fixed_dt"].get<bool>();
+      if (w.contains("acc_fixed_dt_sec")) config.accFixedDtSec = w["acc_fixed_dt_sec"].get<double>();
     }
   } catch (const std::exception& e) {
     ROS_ERROR("[WheelQuest3IkIncrementalROS] loadDrakeChestElbowHandWeightsFromJson exception: %s", e.what());
@@ -1176,7 +1194,7 @@ DrakeChestElbowHandWeightConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
   ROS_INFO(
       "[WheelQuest3IkIncrementalROS] DrakeChestElbowHandWeightConfig loaded: q0=[%.3f, %.3f, %.3f], "
       "qv0=[%.3f, %.3f, %.3f], wq0=[%.3f, %.3f, %.3f], wqv0=[%.3f, %.3f, %.3f], "
-      "q1=%.3f, q2=%.3f, qv1=%.3f, qv2=%.3f",
+      "q1=%.3f, q2=%.3f, qv1=%.3f, qv2=%.3f, qa0=%.6f, qa1=%.6f, qa2=%.6f, acc_use_fixed_dt=%s, acc_fixed_dt_sec=%.6f",
       config.q0.x(),
       config.q0.y(),
       config.q0.z(),
@@ -1192,7 +1210,12 @@ DrakeChestElbowHandWeightConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
       config.q1,
       config.q2,
       config.qv1,
-      config.qv2);
+      config.qv2,
+      config.qa0,
+      config.qa1,
+      config.qa2,
+      config.accUseFixedDt ? "true" : "false",
+      config.accFixedDtSec);
   return config;
 }
 
@@ -1557,13 +1580,64 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     armJintStateMsg.effort.resize(14);
     armJintStateMsg.name.resize(14);
 
+    // 使用局部变量保存本帧要发送的关节位置/速度，避免填充消息时读到被其他线程改写的 latest_q_/lowpass_dq_
+    Eigen::VectorXd armPositionForPublish = latest_q_;
+    Eigen::VectorXd armVelocityForPublish = lowpass_dq_;
+
+    // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变：
+    // 区间 1: [0, 0.3s)          — 传感器同步，速度清零
+    // 区间 2: [0.3s, 5.0s)      — 从 q_init_cmd_ 线性平滑到 q_（若 q_init_cmd_ 有效），速度清零
+    // 区间 3: [5.0s, +infty)    — 不在此处改写
+    ros::Time mode2EnterTime;
+    {
+      std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
+      mode2EnterTime = mode2EnterTime_;
+    }
+    const bool inMode2 = (armControlMode_.load() == 2) && !mode2EnterTime.isZero();
+    if (inMode2) {
+      constexpr double kMode2SensorSyncDurationSec = 0.3;
+      constexpr double kMode2SmoothDurationSec = 2.0;
+      const double elapsed = (ros::Time::now() - mode2EnterTime).toSec();
+
+      if (elapsed < kMode2SensorSyncDurationSec) {
+        // 区间 1: [0, 0.3s)
+        Eigen::VectorXd sensorArmQ = q_;
+        if (jointDataForDrakeFK_.size() >= sensorDataArmOffset_ + 14) {
+          sensorArmQ = jointDataForDrakeFK_.segment(sensorDataArmOffset_, 14);
+        } else if (jointDataForDrakeFK_.size() >= 14) {
+          sensorArmQ = jointDataForDrakeFK_.head(14);
+        }
+        q_init_cmd_ = sensorArmQ;
+        armPositionForPublish = sensorArmQ;
+        armVelocityForPublish.setZero();
+        latest_q_ = sensorArmQ;
+        latest_dq_.setZero();
+        lowpass_dq_.setZero();
+      } else if (elapsed < kMode2SmoothDurationSec) {
+        // 区间 2: [0.3s, 5.0s)，严格按时间进入，平滑仅在 q_init_cmd_ 有效时生效
+        if (q_init_cmd_.size() == 14) {
+          const double alpha = std::min(
+              std::max((elapsed - kMode2SensorSyncDurationSec) /
+                           (kMode2SmoothDurationSec - kMode2SensorSyncDurationSec),
+                       0.0),
+              1.0);
+          armPositionForPublish = (1.0 - alpha) * q_init_cmd_ + alpha * Eigen::VectorXd::Zero(14);
+          latest_q_ = armPositionForPublish;
+        }
+        armVelocityForPublish.setZero();
+        latest_dq_.setZero();
+        lowpass_dq_.setZero();
+      }
+      // 区间 3: elapsed >= 5.0s 时不做处理，armPositionForPublish/armVelocityForPublish 保持本帧初的拷贝
+    }
+
     for (int i = 0; i < 14; ++i) {
       armJintStateMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
     }
 
     for (int i = 0; i < 14; ++i) {
-      armJintStateMsg.position[i] = latest_q_(i) * 180.0 / M_PI;
-      armJintStateMsg.velocity[i] = lowpass_dq_(i) * 180.0 / M_PI;
+      armJintStateMsg.position[i] = armPositionForPublish(i) * 180.0 / M_PI;
+      armJintStateMsg.velocity[i] = armVelocityForPublish(i) * 180.0 / M_PI;
       armJintStateMsg.effort[i] = 0.0;
     }
   }
@@ -1937,7 +2011,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   std::vector<std::string> frameNames = loadFrameNamesFromConfig(configJson);
   auto pointTrackConfig = loadPointTrackIKSolverConfigFromJson(configJson);
   oneStageIkEndEffectorPtr_ =
-      std::make_unique<HighlyDynamic::OneStageIKEndEffector>(&plant, frameNames, pointTrackConfig);
+      std::make_unique<HighlyDynamic::WheelOneStageIKEndEffector>(&plant, frameNames, pointTrackConfig);
 
   // 计算并保存 ArmJoint 为全零时的双手位姿，避免运行时频繁调用 FK
   Eigen::VectorXd armJoints = Eigen::VectorXd::Zero(drakeJointStateSize_);
@@ -2185,20 +2259,25 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
   // 初始化增量控制模块
   IncrementalControlConfig incrementalConfig;
-  // 使用 nodeHandle_ (命名空间为 /quest3) 来读取参数，自动跳过节点前缀
-  while (!nodeHandle_.hasParam("/ik_ros_uni_cpp_node/quest3/task_space_acc_limit")) {
-    ROS_WARN("[WheelQuest3IkIncrementalROS] Waiting for /quest3/task_space_acc_limit parameter");
-    ros::Duration(0.1).sleep();
+  // 位置/姿态增量滤波截止频率统一从 JSON 读取（Hz）
+  if (configJson.contains("pos_cutoff_hz")) {
+    incrementalConfig.posCutoffHz = configJson["pos_cutoff_hz"].get<double>();
   }
-  PARAM_AND_PRINT_FLOAT(
-      nodeHandle_, "/ik_ros_uni_cpp_node/quest3/task_space_acc_limit", incrementalConfig.taskSpaceAccLimit, 100.0, 1);
+  if (!std::isfinite(incrementalConfig.posCutoffHz)) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] Invalid pos_cutoff_hz from JSON, fallback to 10.0 Hz");
+    incrementalConfig.posCutoffHz = 10.0;
+  }
+  ROS_INFO("[WheelQuest3IkIncrementalROS] Incremental LPF pos_cutoff_hz: %.3f Hz", incrementalConfig.posCutoffHz);
 
-  while (!nodeHandle_.hasParam("/ik_ros_uni_cpp_node/quest3/task_space_jerk_limit")) {
-    ROS_WARN("[WheelQuest3IkIncrementalROS] Waiting for /quest3/task_space_jerk_limit parameter");
-    ros::Duration(0.1).sleep();
+  if (configJson.contains("orientation_cutoff_hz")) {
+    incrementalConfig.orientationCutoffHz = configJson["orientation_cutoff_hz"].get<double>();
   }
-  PARAM_AND_PRINT_FLOAT(
-      nodeHandle_, "/ik_ros_uni_cpp_node/quest3/task_space_jerk_limit", incrementalConfig.taskSpaceJerkLimit, 600.0, 1);
+  if (!std::isfinite(incrementalConfig.orientationCutoffHz)) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] Invalid orientation_cutoff_hz from JSON, fallback to 10.0 Hz");
+    incrementalConfig.orientationCutoffHz = 10.0;
+  }
+  ROS_INFO("[WheelQuest3IkIncrementalROS] Incremental LPF orientation_cutoff_hz: %.3f Hz",
+           incrementalConfig.orientationCutoffHz);
 
   while (!nodeHandle_.hasParam("/ik_ros_uni_cpp_node/quest3/delta_scale_x")) {
     ROS_WARN("[WheelQuest3IkIncrementalROS] Waiting for /quest3/delta_scale_x parameter");
@@ -2377,8 +2456,8 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position = robotRightFixedShoulderPos_;
 
   // 初始化手部平滑插值器
-  leftHandSmoother_ = std::make_unique<HandSmoother>("左臂", "zarm_l6_link", defaultLeftHandPosOnExit_);
-  rightHandSmoother_ = std::make_unique<HandSmoother>("右臂", "zarm_r6_link", defaultRightHandPosOnExit_);
+  leftHandSmoother_ = std::make_unique<WheelHandSmoother>("左臂", "zarm_l6_link", defaultLeftHandPosOnExit_);
+  rightHandSmoother_ = std::make_unique<WheelHandSmoother>("右臂", "zarm_r6_link", defaultRightHandPosOnExit_);
 
   // 更新默认位置（在clip之后）
   leftHandSmoother_->setDefaultPosOnExit(defaultLeftHandPosOnExit_);

@@ -15,16 +15,16 @@
 
 #include <noitom_hi5_hand_udp_python/PoseInfoList.h>
 #include <leju_utils/define.hpp>
-#include "motion_capture_ik/ArmControlBaseROS.h"
-#include "motion_capture_ik/OneStageIKEndEffector.h"
+#include "motion_capture_ik/WheelArmControlBaseROS.h"
+#include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
-#include "motion_capture_ik/HandSmoother.h"
+#include "motion_capture_ik/WheelHandSmoother.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include "DrakeChestElbowHandPointOpt.hpp"
 
 namespace HighlyDynamic {
 
-class WheelQuest3IkIncrementalROS final : public ArmControlBaseROS {
+class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
  public:
   explicit WheelQuest3IkIncrementalROS(ros::NodeHandle& nodeHandle,
                                   double publishRate,
@@ -54,7 +54,7 @@ class WheelQuest3IkIncrementalROS final : public ArmControlBaseROS {
   void fsmProcess() override;
   void fsmExit() override;
 
-  PointTrackIKSolverConfig loadPointTrackIKSolverConfigFromJson(const nlohmann::json& configJson);
+  WheelPointTrackIKSolverConfig loadPointTrackIKSolverConfigFromJson(const nlohmann::json& configJson);
   DrakeChestElbowHandWeightConfig loadDrakeChestElbowHandWeightsFromJson(const nlohmann::json& configJson);
   DrakeChestElbowHandBoundsConfig loadDrakeChestElbowHandBoundsFromJson(const nlohmann::json& configJson);
   DrakeChestElbowHandPrevFilterConfig loadDrakeChestElbowHandPrevFilterConfigFromJson(const nlohmann::json& configJson);
@@ -152,6 +152,7 @@ class WheelQuest3IkIncrementalROS final : public ArmControlBaseROS {
   // 发布函数
   void publishJointStates();
   void publishDefaultJointStates();
+  void publishZeroJointStates();
   void publishLegJointStates();         // 发布下肢关节状态（基于 IK 解）
   void publishDefaultLegJointStates();  // 发布下肢关节默认状态
   void publishAuxiliaryStates();
@@ -252,10 +253,10 @@ class WheelQuest3IkIncrementalROS final : public ArmControlBaseROS {
   int drakeJointStateSize_;
   ArmIdx ctrlArmIdx_;  // 控制哪个手臂：LEFT, RIGHT, 或 BOTH
 
-  std::unique_ptr<OneStageIKEndEffector> oneStageIkEndEffectorPtr_;
+  std::unique_ptr<WheelOneStageIKEndEffector> oneStageIkEndEffectorPtr_;
   std::unique_ptr<WheelIncrementalControlModule> incrementalController_;
-  std::unique_ptr<HandSmoother> leftHandSmoother_;
-  std::unique_ptr<HandSmoother> rightHandSmoother_;
+  std::unique_ptr<WheelHandSmoother> leftHandSmoother_;
+  std::unique_ptr<WheelHandSmoother> rightHandSmoother_;
 
   std::unique_ptr<DrakeChestElbowHandPointOptSolver> chestElbowHandPointOptSolverPtr_;
   DrakeChestElbowHandWeightConfig chestElbowHandWeightConfig_;
@@ -295,6 +296,7 @@ class WheelQuest3IkIncrementalROS final : public ArmControlBaseROS {
   Eigen::VectorXd latest_q_;    // 最新的关节角度（弧度）
   Eigen::VectorXd latest_dq_;   // 最新的关节角速度（弧度/秒）
   Eigen::VectorXd lowpass_dq_;  // 低通滤波后的关节角速度（弧度/秒）
+  Eigen::VectorXd q_init_cmd_ = Eigen::VectorXd::Zero(14);  // mode2 切入时用于平滑过渡的起始关节角
   Eigen::VectorXd jointMidValues_;  // TEST: 关节限制中间值（用于测试），存储每个关节的(limit_lower+limit_upper)/2
 
   // 下肢(轮臂)关节状态：与 kuavo_arm_traj 同款平滑逻辑（ruckig + alpha指数平滑 + 速度低通）
@@ -343,7 +345,7 @@ class WheelQuest3IkIncrementalROS final : public ArmControlBaseROS {
 
   // 状态数据
   std::vector<PoseData> latestPoseConstraintList_;  // 保存最新的pose约束列表
-  IncrementalPoseResult latestIncrementalResult_;
+  WheelIncrementalPoseResult latestIncrementalResult_;
 
   // 保存 incrementalController_ 查询结果的手部和肘部位置
   Eigen::Vector3d latestHumanLeftElbowPos_;   // 左肘位置（通过 FK 计算）

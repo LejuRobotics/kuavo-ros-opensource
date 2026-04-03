@@ -3,8 +3,6 @@
 #include <cmath>
 #include <algorithm>
 
-#include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
-
 namespace HighlyDynamic {
 
 namespace {
@@ -19,7 +17,144 @@ inline double quaternionAngleRad(const Eigen::Quaterniond& qIn) {
   const double wAbs = std::abs(q.w());
   return 2.0 * std::acos(clampToUnit(wAbs));
 }
+
+inline Eigen::VectorXd vec3ToXd(const Eigen::Vector3d& p) {
+  Eigen::VectorXd x(3);
+  x << p.x(), p.y(), p.z();
+  return x;
+}
+
+void resizeLowpassState3(Eigen::VectorXd& x1,
+                         Eigen::VectorXd& x2,
+                         Eigen::VectorXd& y1,
+                         Eigen::VectorXd& y2) {
+  x1.resize(3);
+  x2.resize(3);
+  y1.resize(3);
+  y2.resize(3);
+  x1.setZero();
+  x2.setZero();
+  y1.setZero();
+  y2.setZero();
+}
+
+void resizeLowpassState1(Eigen::VectorXd& x1,
+                         Eigen::VectorXd& x2,
+                         Eigen::VectorXd& y1,
+                         Eigen::VectorXd& y2) {
+  x1.resize(1);
+  x2.resize(1);
+  y1.resize(1);
+  y2.resize(1);
+  x1.setZero();
+  x2.setZero();
+  y1.setZero();
+  y2.setZero();
+}
 }  // namespace
+
+WheelIncrementalControlModule::LowpassBiquadCoeff WheelIncrementalControlModule::makeSecondOrderLowpassCoeff(double cutoffHz,
+                                                                                                   double sampleTime) {
+  LowpassBiquadCoeff coeff;
+  if (cutoffHz <= 0.0 || sampleTime <= 1e-9) {
+    return coeff;
+  }
+
+  const double fs = 1.0 / sampleTime;
+  const double nyquist = 0.5 * fs;
+  const double fc = std::min(cutoffHz, 0.95 * nyquist);
+  if (fc <= 1e-6) {
+    return coeff;
+  }
+
+  constexpr double kSqrt2 = 1.4142135623730951;
+  constexpr double kPi = 3.14159265358979323846;
+  const double k = std::tan(kPi * fc / fs);
+  const double k2 = k * k;
+  const double norm = 1.0 / (1.0 + kSqrt2 * k + k2);
+
+  coeff.b0 = k2 * norm;
+  coeff.b1 = 2.0 * coeff.b0;
+  coeff.b2 = coeff.b0;
+  coeff.a1 = 2.0 * (k2 - 1.0) * norm;
+  coeff.a2 = (1.0 - kSqrt2 * k + k2) * norm;
+  coeff.enabled = true;
+  return coeff;
+}
+
+Eigen::VectorXd WheelIncrementalControlModule::applySecondOrderLowpassVec(const Eigen::VectorXd& x,
+                                                                   const LowpassBiquadCoeff& coeff,
+                                                                   Eigen::VectorXd& x1,
+                                                                   Eigen::VectorXd& x2,
+                                                                   Eigen::VectorXd& y1,
+                                                                   Eigen::VectorXd& y2) {
+  if (!coeff.enabled) {
+    return x;
+  }
+
+  Eigen::VectorXd y = coeff.b0 * x + coeff.b1 * x1 + coeff.b2 * x2 - coeff.a1 * y1 - coeff.a2 * y2;
+  x2 = x1;
+  x1 = x;
+  y2 = y1;
+  y1 = y;
+  return y;
+}
+
+void WheelIncrementalControlModule::filterAssignPosDelta(const Eigen::Vector3d& rawDelta,
+                                                    Eigen::Vector3d& outDelta,
+                                                    Eigen::Vector3d& outDot,
+                                                    Eigen::VectorXd& lpX1,
+                                                    Eigen::VectorXd& lpX2,
+                                                    Eigen::VectorXd& lpY1,
+                                                    Eigen::VectorXd& lpY2,
+                                                    Eigen::Vector3d& prevFiltered,
+                                                    bool& hasPrev) {
+  const double dt = 1.0 / std::max(config_.publishRate, 1.0);
+  Eigen::Vector3d out;
+  if (posLpCoeff_.enabled) {
+    Eigen::VectorXd rawV(3);
+    rawV << rawDelta.x(), rawDelta.y(), rawDelta.z();
+    const Eigen::VectorXd filt = applySecondOrderLowpassVec(rawV, posLpCoeff_, lpX1, lpX2, lpY1, lpY2);
+    out = Eigen::Vector3d(filt[0], filt[1], filt[2]);
+  } else {
+    out = rawDelta;
+  }
+  outDelta = out;
+  if (hasPrev) {
+    outDot = (outDelta - prevFiltered) / dt;
+  } else {
+    outDot.setZero();
+    hasPrev = true;
+  }
+  prevFiltered = outDelta;
+}
+
+void WheelIncrementalControlModule::filterAssignSlerp(double rawT,
+                                                 double& outT,
+                                                 double& outDt,
+                                                 Eigen::VectorXd& lpX1,
+                                                 Eigen::VectorXd& lpX2,
+                                                 Eigen::VectorXd& lpY1,
+                                                 Eigen::VectorXd& lpY2,
+                                                 double& prevFiltered,
+                                                 bool& hasPrev) {
+  const double dt = 1.0 / std::max(config_.publishRate, 1.0);
+  double out = rawT;
+  if (oriLpCoeff_.enabled) {
+    Eigen::VectorXd rawV(1);
+    rawV[0] = rawT;
+    const Eigen::VectorXd filt = applySecondOrderLowpassVec(rawV, oriLpCoeff_, lpX1, lpX2, lpY1, lpY2);
+    out = filt[0];
+  }
+  outT = clampToUnit(out);
+  if (hasPrev) {
+    outDt = (outT - prevFiltered) / dt;
+  } else {
+    outDt = 0.0;
+    hasPrev = true;
+  }
+  prevFiltered = outT;
+}
 
 // ==================== WheelIncrementalControlModule Implementation ====================
 
@@ -35,11 +170,11 @@ WheelIncrementalControlModule::WheelIncrementalControlModule(const IncrementalCo
       slerpQuatFactorThreshold_(1e-6),
       zyxLimitsEE_(config.zyxLimitsEE),
       zyxLimitsLink4_(config.zyxLimitsLink4) {
-  // Propagate python-compatible orientation config into result_ (stored inside IncrementalPoseResult)
+  // Propagate python-compatible orientation config into result_ (stored inside WheelIncrementalPoseResult)
   result_.usePythonIncrementalOrientation_ = config_.usePythonIncrementalOrientation;
   result_.pythonOrientationThresholdRad_ = config_.pythonOrientationThresholdRad;
   result_.zyxLimitsFinal_ = config_.zyxLimitsFinal;
-  initializeRuckigFiltersLocked();
+  initializeLowpassFiltersLocked();
   ROS_INFO("[WheelIncrementalControlModule] Module initialized successfully");
 }
 
@@ -236,62 +371,16 @@ void WheelIncrementalControlModule::resetSlerpFactor() {
   resetRightSlerpFilterLocked();
 }
 
-void WheelIncrementalControlModule::initializeFilter(
-    std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter>& filterPtr,
-    int dimension,
-    double dt,
-    double velLimit,
-    double accLimit,
-    double jerkLimit,
-    const std::string& filterName) {
-  filterPtr = std::make_unique<ocs2::mobile_manipulator::KinemicLimitFilter>(dimension, dt);
-  const Eigen::VectorXd velLimitVec = Eigen::VectorXd::Constant(dimension, velLimit);
-  const Eigen::VectorXd accLimitVec = Eigen::VectorXd::Constant(dimension, accLimit);
-  const Eigen::VectorXd jerkLimitVec = Eigen::VectorXd::Constant(dimension, jerkLimit);
-  filterPtr->setFirstOrderDerivativeLimit(velLimitVec);
-  filterPtr->setSecondOrderDerivativeLimit(accLimitVec);
-  filterPtr->setThirdOrderDerivativeLimit(jerkLimitVec);
-
-  // 表格化打印过滤器初始化信息
-  // static bool isFirstCall = true;
-  // if (isFirstCall) {
-  //   ROS_INFO("[WheelIncrementalControlModule] Filter Initialization Summary:");
-  //   ROS_INFO("+-------------------------+----------+--------------+--------------+--------------+--------------+");
-  //   ROS_INFO("| Filter Name             | Dimension| dt (s)       | Vel Limit    | Acc Limit    | Jerk Limit   |");
-  //   ROS_INFO("+-------------------------+----------+--------------+--------------+--------------+--------------+");
-  //   isFirstCall = false;
-  // }
-  // ROS_INFO("| %-23s | %8d | %12.6f | %12.6f | %12.6f | %12.6f |",
-  //          filterName.empty() ? "Unknown" : filterName.c_str(),
-  //          dimension, dt, velLimit, accLimit, jerkLimit);
-  
-  // 检查是否是最后一个过滤器（通过检查是否所有过滤器都已初始化）
-  // static int filterCount = 0;
-  // filterCount++;
-  // if (filterCount >= 5) {  // 总共有5个过滤器
-  //   ROS_INFO("+-------------------------+----------+--------------+--------------+--------------+--------------+");
-  //   filterCount = 0;  // 重置计数器，以便下次初始化时重新打印表头
-  //   isFirstCall = true;
-  // }
-}
-
-void WheelIncrementalControlModule::initializeRuckigFiltersLocked() {
+void WheelIncrementalControlModule::initializeLowpassFiltersLocked() {
   const double dt = 1.0 / std::max(config_.publishRate, 1.0);
-  
-  const double positionMaxVelocity = std::max(config_.posVelLimit, 1e-3);
-  const double positionMaxAcceleration = std::max(config_.taskSpaceAccLimit, 1e-3);
-  const double positionMaxJerk = std::max(config_.taskSpaceJerkLimit, 1e-3);
+  posLpCoeff_ = makeSecondOrderLowpassCoeff(config_.posCutoffHz, dt);
+  oriLpCoeff_ = makeSecondOrderLowpassCoeff(config_.orientationCutoffHz, dt);
 
-  const double slerpMaxVelocity = positionMaxVelocity;
-  const double slerpMaxAcceleration = std::max(config_.taskSpaceAccLimit / 10.0, 1e-3);
-  const double slerpMaxJerk = std::max(config_.taskSpaceJerkLimit, 1e-3);
-
-  initializeFilter(leftHandDeltaFilterPtr_, 3, dt, positionMaxVelocity, positionMaxAcceleration, positionMaxJerk, "LeftHandDelta");
-  initializeFilter(rightHandDeltaFilterPtr_, 3, dt, positionMaxVelocity, positionMaxAcceleration, positionMaxJerk, "RightHandDelta");
-  initializeFilter(chestDeltaFilterPtr_, 3, dt, positionMaxVelocity, positionMaxAcceleration, positionMaxJerk, "ChestDelta");
-
-  initializeFilter(leftSlerpFilterPtr_, 1, dt, slerpMaxVelocity, slerpMaxAcceleration, slerpMaxJerk, "LeftSlerp");
-  initializeFilter(rightSlerpFilterPtr_, 1, dt, slerpMaxVelocity, slerpMaxAcceleration, slerpMaxJerk, "RightSlerp");
+  resizeLowpassState3(leftHandLpX1_, leftHandLpX2_, leftHandLpY1_, leftHandLpY2_);
+  resizeLowpassState3(rightHandLpX1_, rightHandLpX2_, rightHandLpY1_, rightHandLpY2_);
+  resizeLowpassState3(chestLpX1_, chestLpX2_, chestLpY1_, chestLpY2_);
+  resizeLowpassState1(leftSlerpLpX1_, leftSlerpLpX2_, leftSlerpLpY1_, leftSlerpLpY2_);
+  resizeLowpassState1(rightSlerpLpX1_, rightSlerpLpX2_, rightSlerpLpY1_, rightSlerpLpY2_);
 
   resetChestFilterLocked();
   resetLeftHandFilterLocked();
@@ -301,103 +390,97 @@ void WheelIncrementalControlModule::initializeRuckigFiltersLocked() {
 }
 
 void WheelIncrementalControlModule::resetChestFilterLocked() {
-  if (!chestDeltaFilterPtr_) return;
-  chestDeltaFilterPtr_->reset(result_.robotChestDeltaPos_);
+  const Eigen::VectorXd z = vec3ToXd(result_.robotChestDeltaPos_);
+  chestLpX1_ = chestLpX2_ = chestLpY1_ = chestLpY2_ = z;
+  hasPrevChestFilteredDelta_ = false;
 }
 
 void WheelIncrementalControlModule::resetLeftHandFilterLocked() {
-  if (!leftHandDeltaFilterPtr_) return;
-  leftHandDeltaFilterPtr_->reset(result_.robotLeftHandDeltaPos_);
+  const Eigen::VectorXd z = vec3ToXd(result_.robotLeftHandDeltaPos_);
+  leftHandLpX1_ = leftHandLpX2_ = leftHandLpY1_ = leftHandLpY2_ = z;
+  hasPrevLeftHandFilteredDelta_ = false;
 }
 
 void WheelIncrementalControlModule::resetRightHandFilterLocked() {
-  if (!rightHandDeltaFilterPtr_) return;
-  rightHandDeltaFilterPtr_->reset(result_.robotRightHandDeltaPos_);
+  const Eigen::VectorXd z = vec3ToXd(result_.robotRightHandDeltaPos_);
+  rightHandLpX1_ = rightHandLpX2_ = rightHandLpY1_ = rightHandLpY2_ = z;
+  hasPrevRightHandFilteredDelta_ = false;
 }
 
 void WheelIncrementalControlModule::resetLeftSlerpFilterLocked() {
-  if (!leftSlerpFilterPtr_) return;
-  leftSlerpFilterPtr_->reset(Eigen::VectorXd::Constant(1, result_.leftSlerpQuatT_));
+  leftSlerpLpX1_ = leftSlerpLpX2_ = leftSlerpLpY1_ = leftSlerpLpY2_ = Eigen::VectorXd::Constant(1, result_.leftSlerpQuatT_);
+  hasPrevLeftSlerpFiltered_ = false;
 }
 
 void WheelIncrementalControlModule::resetRightSlerpFilterLocked() {
-  if (!rightSlerpFilterPtr_) return;
-  rightSlerpFilterPtr_->reset(Eigen::VectorXd::Constant(1, result_.rightSlerpQuatT_));
+  rightSlerpLpX1_ = rightSlerpLpX2_ = rightSlerpLpY1_ = rightSlerpLpY2_ =
+      Eigen::VectorXd::Constant(1, result_.rightSlerpQuatT_);
+  hasPrevRightSlerpFiltered_ = false;
 }
 
-void WheelIncrementalControlModule::computeRuckigFiltering(const ArmPose& vrLeftPose,
-                                                      const ArmPose& vrRightPose,
-                                                      bool isLeftActive,
-                                                      bool isRightActive,
-                                                      const double slerpQuatFactor) {
+void WheelIncrementalControlModule::computeIncrementalFiltering(const ArmPose& vrLeftPose,
+                                                         const ArmPose& vrRightPose,
+                                                         bool isLeftActive,
+                                                         bool isRightActive,
+                                                         const double slerpQuatFactor) {
   if (slerpQuatFactor - 1.0 > slerpQuatFactorThreshold_) {
     ROS_WARN("[WheelIncrementalControlModule] slerpQuatFactor is not 1.0, it is %f", slerpQuatFactor);
     return;
   }
-  if (isLeftActive && leftSlerpFilterPtr_) {
-    Eigen::VectorXd target(1);
-    target(0) = slerpQuatFactor;
-    const Eigen::VectorXd filtered = leftSlerpFilterPtr_->update(target);
-    result_.leftSlerpQuatT_ = clampToUnit(filtered(0));
-    result_.leftSlerpQuatDt_ = leftSlerpFilterPtr_->getFirstOrderDerivative()(0);
-  } else if (isLeftActive) {
-    result_.leftSlerpQuatT_ = clampToUnit(slerpQuatFactor);
-    result_.leftSlerpQuatDt_ = 0.0;
+  if (isLeftActive) {
+    filterAssignSlerp(slerpQuatFactor,
+                      result_.leftSlerpQuatT_,
+                      result_.leftSlerpQuatDt_,
+                      leftSlerpLpX1_,
+                      leftSlerpLpX2_,
+                      leftSlerpLpY1_,
+                      leftSlerpLpY2_,
+                      prevLeftSlerpFiltered_,
+                      hasPrevLeftSlerpFiltered_);
   }
-  if (isRightActive && rightSlerpFilterPtr_) {
-    Eigen::VectorXd target(1);
-    target(0) = slerpQuatFactor;
-    const Eigen::VectorXd filtered = rightSlerpFilterPtr_->update(target);
-    result_.rightSlerpQuatT_ = clampToUnit(filtered(0));
-    result_.rightSlerpQuatDt_ = rightSlerpFilterPtr_->getFirstOrderDerivative()(0);
-  } else if (isRightActive) {
-    result_.rightSlerpQuatT_ = clampToUnit(slerpQuatFactor);
-    result_.rightSlerpQuatDt_ = 0.0;
+  if (isRightActive) {
+    filterAssignSlerp(slerpQuatFactor,
+                      result_.rightSlerpQuatT_,
+                      result_.rightSlerpQuatDt_,
+                      rightSlerpLpX1_,
+                      rightSlerpLpX2_,
+                      rightSlerpLpY1_,
+                      rightSlerpLpY2_,
+                      prevRightSlerpFiltered_,
+                      hasPrevRightSlerpFiltered_);
   }
 
-  // ==================== 左臂手部位置增量滤波 ====================
-  // 关键修复：只有当左臂激活时才更新左臂的 ruckig 滤波状态
-  // 避免未激活时滤波状态向 0 收敛导致的状态污染
-  if (isLeftActive && leftHandDeltaFilterPtr_) {
-    Eigen::VectorXd rawLeftPosDelta(3);
-    rawLeftPosDelta(0) = (vrLeftPose.position[0] - result_.humanLeftHandPosAnchor_[0]) * config_.deltaScale[0];
-    rawLeftPosDelta(1) = (vrLeftPose.position[1] - result_.humanLeftHandPosAnchor_[1]) * config_.deltaScale[1];
-    rawLeftPosDelta(2) = (vrLeftPose.position[2] - result_.humanLeftHandPosAnchor_[2]) * config_.deltaScale[2];
-    const Eigen::VectorXd filtered = leftHandDeltaFilterPtr_->update(rawLeftPosDelta);
-    result_.robotLeftHandDeltaPos_ = filtered;
-    result_.dotLeftHandDeltaPos_ = leftHandDeltaFilterPtr_->getFirstOrderDerivative();
-  } else if (isLeftActive) {
-    result_.robotLeftHandDeltaPos_(0) =
-        (vrLeftPose.position[0] - result_.humanLeftHandPosAnchor_[0]) * config_.deltaScale[0];
-    result_.robotLeftHandDeltaPos_(1) =
-        (vrLeftPose.position[1] - result_.humanLeftHandPosAnchor_[1]) * config_.deltaScale[1];
-    result_.robotLeftHandDeltaPos_(2) =
-        (vrLeftPose.position[2] - result_.humanLeftHandPosAnchor_[2]) * config_.deltaScale[2];
-    result_.dotLeftHandDeltaPos_.setZero();
+  // 左臂：仅激活时更新低通状态
+  if (isLeftActive) {
+    const Eigen::Vector3d rawLeftPosDelta((vrLeftPose.position[0] - result_.humanLeftHandPosAnchor_[0]) * config_.deltaScale[0],
+                                          (vrLeftPose.position[1] - result_.humanLeftHandPosAnchor_[1]) * config_.deltaScale[1],
+                                          (vrLeftPose.position[2] - result_.humanLeftHandPosAnchor_[2]) * config_.deltaScale[2]);
+    filterAssignPosDelta(rawLeftPosDelta,
+                         result_.robotLeftHandDeltaPos_,
+                         result_.dotLeftHandDeltaPos_,
+                         leftHandLpX1_,
+                         leftHandLpX2_,
+                         leftHandLpY1_,
+                         leftHandLpY2_,
+                         prevLeftHandFilteredDelta_,
+                         hasPrevLeftHandFilteredDelta_);
   }
-  // 未激活时保持滤波状态不变，不向 0 收敛
 
-  // ==================== 右臂手部位置增量滤波 ====================
-  // 关键修复：只有当右臂激活时才更新右臂的 ruckig 滤波状态
-  // 避免未激活时滤波状态向 0 收敛导致的状态污染
-  if (isRightActive && rightHandDeltaFilterPtr_) {
-    Eigen::VectorXd rawRightPosDelta(3);
-    rawRightPosDelta(0) = (vrRightPose.position[0] - result_.humanRightHandPosAnchor_[0]) * config_.deltaScale[0];
-    rawRightPosDelta(1) = (vrRightPose.position[1] - result_.humanRightHandPosAnchor_[1]) * config_.deltaScale[1];
-    rawRightPosDelta(2) = (vrRightPose.position[2] - result_.humanRightHandPosAnchor_[2]) * config_.deltaScale[2];
-    const Eigen::VectorXd filtered = rightHandDeltaFilterPtr_->update(rawRightPosDelta);
-    result_.robotRightHandDeltaPos_ = filtered;
-    result_.dotRightHandDeltaPos_ = rightHandDeltaFilterPtr_->getFirstOrderDerivative();
-  } else if (isRightActive) {
-    result_.robotRightHandDeltaPos_(0) =
-        (vrRightPose.position[0] - result_.humanRightHandPosAnchor_[0]) * config_.deltaScale[0];
-    result_.robotRightHandDeltaPos_(1) =
-        (vrRightPose.position[1] - result_.humanRightHandPosAnchor_[1]) * config_.deltaScale[1];
-    result_.robotRightHandDeltaPos_(2) =
-        (vrRightPose.position[2] - result_.humanRightHandPosAnchor_[2]) * config_.deltaScale[2];
-    result_.dotRightHandDeltaPos_.setZero();
+  if (isRightActive) {
+    const Eigen::Vector3d rawRightPosDelta(
+        (vrRightPose.position[0] - result_.humanRightHandPosAnchor_[0]) * config_.deltaScale[0],
+        (vrRightPose.position[1] - result_.humanRightHandPosAnchor_[1]) * config_.deltaScale[1],
+        (vrRightPose.position[2] - result_.humanRightHandPosAnchor_[2]) * config_.deltaScale[2]);
+    filterAssignPosDelta(rawRightPosDelta,
+                         result_.robotRightHandDeltaPos_,
+                         result_.dotRightHandDeltaPos_,
+                         rightHandLpX1_,
+                         rightHandLpX2_,
+                         rightHandLpY1_,
+                         rightHandLpY2_,
+                         prevRightHandFilteredDelta_,
+                         hasPrevRightHandFilteredDelta_);
   }
-  // 未激活时保持滤波状态不变，不向 0 收敛
 }
 
 void WheelIncrementalControlModule::setHandQuatSeeds(const Eigen::Quaterniond& leftHandQuatSeed,
@@ -503,10 +586,10 @@ void WheelIncrementalControlModule::exitIncrementalModeRightArm(const ArmPose& v
   }
 }
 
-IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalChestPos(const Eigen::Vector3d& humanChestPos,
+WheelIncrementalPoseResult WheelIncrementalControlModule::computeIncrementalChestPos(const Eigen::Vector3d& humanChestPos,
                                                                            bool isChestActive) {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  IncrementalPoseResult latestIncrementalResult;
+  WheelIncrementalPoseResult latestIncrementalResult;
 
   if (!initialized_ || !chestActivated_) {
     std::cout << "\033[91m[WheelIncrementalControlModule] Chest not in incremental mode\033[0m" << std::endl;
@@ -525,27 +608,28 @@ IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalChestPos(
   rawChestPosDelta(0) = (humanChestPos[0] - result_.humanChestPosAnchor_[0]) * config_.deltaScale[0];
   rawChestPosDelta(1) = (humanChestPos[1] - result_.humanChestPosAnchor_[1]) * config_.deltaScale[1];
   rawChestPosDelta(2) = (humanChestPos[2] - result_.humanChestPosAnchor_[2]) * config_.deltaScale[2];
-  if (chestDeltaFilterPtr_) {
-    const Eigen::VectorXd filtered = chestDeltaFilterPtr_->update(rawChestPosDelta);
-    result_.robotChestDeltaPos_ = filtered;
-    result_.dotChestDeltaPos_ = chestDeltaFilterPtr_->getFirstOrderDerivative();
-  } else {
-    result_.robotChestDeltaPos_ = rawChestPosDelta;
-    result_.dotChestDeltaPos_.setZero();
-  }
+  filterAssignPosDelta(Eigen::Vector3d(rawChestPosDelta[0], rawChestPosDelta[1], rawChestPosDelta[2]),
+                       result_.robotChestDeltaPos_,
+                       result_.dotChestDeltaPos_,
+                       chestLpX1_,
+                       chestLpX2_,
+                       chestLpY1_,
+                       chestLpY2_,
+                       prevChestFilteredDelta_,
+                       hasPrevChestFilteredDelta_);
 
   result_.isValid_ = true;
   return result_;
 }
 
-IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPose(const ArmPose& vrLeftPose,
+WheelIncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPose(const ArmPose& vrLeftPose,
                                                                        const ArmPose& vrRightPose,
                                                                        bool isLeftActive,
                                                                        bool isRightActive,
                                                                        const Eigen::Quaterniond& qLeftEndEffector,
                                                                        const Eigen::Quaterniond& qRightEndEffector) {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  IncrementalPoseResult latestIncrementalResult;
+  WheelIncrementalPoseResult latestIncrementalResult;
   if (!initialized_ || (!leftHandStatus_.activated && !rightHandStatus_.activated)) {
     // print in red
     // std::cout << "\033[91m[WheelIncrementalControlModule] Not in incremental mode\033[0m" << std::endl;
@@ -571,7 +655,7 @@ IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPose(cons
     result_.humanRightHandQuatMeas_ = vrRightPose.quaternion.normalized();
   }
 
-  computeRuckigFiltering(vrLeftPose, vrRightPose, isLeftActive, isRightActive);
+  computeIncrementalFiltering(vrLeftPose, vrRightPose, isLeftActive, isRightActive);
   result_.slerpQuat(vrLeftPose.quaternion, vrRightPose.quaternion, isLeftActive, isRightActive);
 
   // ==================== Python compatible incremental orientation ====================
@@ -617,12 +701,12 @@ IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPose(cons
   return result_;
 }
 
-IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPoseLeftArm(
+WheelIncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPoseLeftArm(
     const ArmPose& vrLeftPose,
     bool isLeftActive,
     const Eigen::Quaterniond& qLeftEndEffector) {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  IncrementalPoseResult latestIncrementalResult;
+  WheelIncrementalPoseResult latestIncrementalResult;
   if (!initialized_ || !leftHandStatus_.activated) {
     std::cout << "\033[91m[WheelIncrementalControlModule] Left arm not in incremental mode\033[0m" << std::endl;
     latestIncrementalResult.isValid_ = false;
@@ -647,7 +731,7 @@ IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPoseLeftA
   vrRightPose.quaternion = result_.humanRightHandQuatMeas_;
 
   // 计算时只激活左臂
-  computeRuckigFiltering(vrLeftPose, vrRightPose, isLeftActive, false);
+  computeIncrementalFiltering(vrLeftPose, vrRightPose, isLeftActive, false);
   result_.slerpQuat(vrLeftPose.quaternion, vrRightPose.quaternion, isLeftActive, false);
 
   if (result_.usePythonIncrementalOrientation_ && isLeftActive) {
@@ -670,12 +754,12 @@ IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPoseLeftA
   return result_;
 }
 
-IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPoseRightArm(
+WheelIncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPoseRightArm(
     const ArmPose& vrRightPose,
     bool isRightActive,
     const Eigen::Quaterniond& qRightEndEffector) {
   std::lock_guard<std::mutex> lock(stateMutex_);
-  IncrementalPoseResult latestIncrementalResult;
+  WheelIncrementalPoseResult latestIncrementalResult;
   if (!initialized_ || !rightHandStatus_.activated) {
     std::cout << "\033[91m[WheelIncrementalControlModule] Right arm not in incremental mode\033[0m" << std::endl;
     latestIncrementalResult.isValid_ = false;
@@ -700,7 +784,7 @@ IncrementalPoseResult WheelIncrementalControlModule::computeIncrementalPoseRight
   vrLeftPose.quaternion = result_.humanLeftHandQuatMeas_;
 
   // 计算时只激活右臂
-  computeRuckigFiltering(vrLeftPose, vrRightPose, false, isRightActive);
+  computeIncrementalFiltering(vrLeftPose, vrRightPose, false, isRightActive);
   result_.slerpQuat(vrLeftPose.quaternion, vrRightPose.quaternion, false, isRightActive);
 
   if (result_.usePythonIncrementalOrientation_ && isRightActive) {
@@ -776,13 +860,13 @@ void WheelIncrementalControlModule::updateConfig(const IncrementalControlConfig&
   config_ = config;
   result_.usePythonIncrementalOrientation_ = config_.usePythonIncrementalOrientation;
   result_.pythonOrientationThresholdRad_ = config_.pythonOrientationThresholdRad;
-  initializeRuckigFiltersLocked();
+  initializeLowpassFiltersLocked();
 }
 
-IncrementalPoseResult WheelIncrementalControlModule::getLatestIncrementalResult() const {
+WheelIncrementalPoseResult WheelIncrementalControlModule::getLatestIncrementalResult() const {
   std::lock_guard<std::mutex> lock(stateMutex_);
   if (!initialized_) {
-    IncrementalPoseResult emptyResult;
+    WheelIncrementalPoseResult emptyResult;
     emptyResult.isValid_ = false;
     return emptyResult;
   }
@@ -828,12 +912,12 @@ void WheelIncrementalControlModule::reset() {
   std::lock_guard<std::mutex> lock(stateMutex_);
 
   // 重置增量计算结果
-  result_ = IncrementalPoseResult();
+  result_ = WheelIncrementalPoseResult();
 
   leftHandStatus_.reset();
   rightHandStatus_.reset();
   chestActivated_ = false;
-  initializeRuckigFiltersLocked();
+  initializeLowpassFiltersLocked();
 }
 
 }  // namespace HighlyDynamic

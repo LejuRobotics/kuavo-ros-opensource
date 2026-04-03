@@ -10,15 +10,9 @@
 #include <leju_utils/define.hpp>
 #include <leju_utils/math.hpp>
 
-namespace ocs2 {
-namespace mobile_manipulator {
-class KinemicLimitFilter;
-}  // namespace mobile_manipulator
-}  // namespace ocs2
-
 namespace HighlyDynamic {
 
-class IncrementalPoseResult {
+class WheelIncrementalPoseResult {
  private:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   bool isValid_ = false;
@@ -237,8 +231,10 @@ class IncrementalPoseResult {
 };
 
 struct IncrementalControlConfig {
-  double taskSpaceAccLimit = 100.0;                                         // ruckig 跟踪加速度约束参数
-  double taskSpaceJerkLimit = 600.0;                                         // ruckig 平滑系数（参与 jerk 设置）
+  /// 位置增量（手+chest）二阶低通截止频率（Hz）；<=0 表示旁路（不滤波）
+  double posCutoffHz = 10.0;
+  /// 姿态 slerp 插值因子二阶低通截止频率（Hz）；<=0 表示旁路
+  double orientationCutoffHz = 10.0;
   Eigen::Vector3d deltaScale = Eigen::Vector3d(1.0, 1.0, 1.0);  // VR增量缩放参数（x, y, z三轴独立）
   double posVelLimit = 30;                                    // 位置增量速度限制（米/秒）
   double armMoveThreshold = 0.01;                               // 手臂移动检测阈值
@@ -350,7 +346,7 @@ class WheelIncrementalControlModule {
                                    const Eigen::Quaterniond& qEndEffector,
                                    const Eigen::Quaterniond& qLink4);
 
-  IncrementalPoseResult computeIncrementalPose(
+  WheelIncrementalPoseResult computeIncrementalPose(
       const ArmPose& vrLeftPose,
       const ArmPose& vrRightPose,
       bool isLeftActive = true,
@@ -359,20 +355,20 @@ class WheelIncrementalControlModule {
       const Eigen::Quaterniond& qRightEndEffector = Eigen::Quaterniond::Identity());
 
   // 左右手独立计算增量位姿接口
-  IncrementalPoseResult computeIncrementalPoseLeftArm(
+  WheelIncrementalPoseResult computeIncrementalPoseLeftArm(
       const ArmPose& vrLeftPose,
       bool isLeftActive = true,
       const Eigen::Quaterniond& qLeftEndEffector = Eigen::Quaterniond::Identity());
 
-  IncrementalPoseResult computeIncrementalPoseRightArm(
+  WheelIncrementalPoseResult computeIncrementalPoseRightArm(
       const ArmPose& vrRightPose,
       bool isRightActive = true,
       const Eigen::Quaterniond& qRightEndEffector = Eigen::Quaterniond::Identity());
 
   // chest position incremental update (called together with hand updates)
-  IncrementalPoseResult computeIncrementalChestPos(const Eigen::Vector3d& humanChestPos, bool isChestActive = true);
+  WheelIncrementalPoseResult computeIncrementalChestPos(const Eigen::Vector3d& humanChestPos, bool isChestActive = true);
 
-  IncrementalPoseResult getLatestIncrementalResult() const;
+  WheelIncrementalPoseResult getLatestIncrementalResult() const;
 
   // 读取最新 anchor 姿态的接口函数
   Eigen::Vector3d getRobotChestAnchorPos() const;
@@ -424,7 +420,7 @@ class WheelIncrementalControlModule {
   void reset();
 
  private:
-  IncrementalPoseResult result_;
+  WheelIncrementalPoseResult result_;
 
   IncrementalControlConfig config_;
   bool initialized_ = false;
@@ -446,31 +442,90 @@ class WheelIncrementalControlModule {
   double posAnchorZeroThreshold_;        // 位置锚点零值检测阈值
   double slerpQuatFactorThreshold_;      // slerpQuatFactor检查阈值
 
-  void computeRuckigFiltering(const ArmPose& vrLeftPose,
-                              const ArmPose& vrRightPose,
-                              bool isLeftActive,
-                              bool isRightActive,
-                              const double slerpQuatFactor = 1.0);
+  void computeIncrementalFiltering(const ArmPose& vrLeftPose,
+                                   const ArmPose& vrRightPose,
+                                   bool isLeftActive,
+                                   bool isRightActive,
+                                   const double slerpQuatFactor = 1.0);
 
-  void initializeRuckigFiltersLocked();
-  void initializeFilter(std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter>& filterPtr,
-                        int dimension,
-                        double dt,
-                        double velLimit,
-                        double accLimit,
-                        double jerkLimit,
-                        const std::string& filterName = "");
+  void initializeLowpassFiltersLocked();
   void resetChestFilterLocked();
   void resetLeftHandFilterLocked();
   void resetRightHandFilterLocked();
   void resetLeftSlerpFilterLocked();
   void resetRightSlerpFilterLocked();
 
-  std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter> leftHandDeltaFilterPtr_;
-  std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter> rightHandDeltaFilterPtr_;
-  std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter> chestDeltaFilterPtr_;
-  std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter> leftSlerpFilterPtr_;
-  std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter> rightSlerpFilterPtr_;
+  struct LowpassBiquadCoeff {
+    double b0{0.0};
+    double b1{0.0};
+    double b2{0.0};
+    double a1{0.0};
+    double a2{0.0};
+    bool enabled{false};
+  };
+
+  static LowpassBiquadCoeff makeSecondOrderLowpassCoeff(double cutoffHz, double sampleTime);
+  static Eigen::VectorXd applySecondOrderLowpassVec(const Eigen::VectorXd& x,
+                                                    const LowpassBiquadCoeff& coeff,
+                                                    Eigen::VectorXd& x1,
+                                                    Eigen::VectorXd& x2,
+                                                    Eigen::VectorXd& y1,
+                                                    Eigen::VectorXd& y2);
+
+  void filterAssignPosDelta(const Eigen::Vector3d& rawDelta,
+                            Eigen::Vector3d& outDelta,
+                            Eigen::Vector3d& outDot,
+                            Eigen::VectorXd& lpX1,
+                            Eigen::VectorXd& lpX2,
+                            Eigen::VectorXd& lpY1,
+                            Eigen::VectorXd& lpY2,
+                            Eigen::Vector3d& prevFiltered,
+                            bool& hasPrev);
+
+  void filterAssignSlerp(double rawT,
+                         double& outT,
+                         double& outDt,
+                         Eigen::VectorXd& lpX1,
+                         Eigen::VectorXd& lpX2,
+                         Eigen::VectorXd& lpY1,
+                         Eigen::VectorXd& lpY2,
+                         double& prevFiltered,
+                         bool& hasPrev);
+
+  LowpassBiquadCoeff posLpCoeff_{};
+  LowpassBiquadCoeff oriLpCoeff_{};
+
+  Eigen::VectorXd leftHandLpX1_;
+  Eigen::VectorXd leftHandLpX2_;
+  Eigen::VectorXd leftHandLpY1_;
+  Eigen::VectorXd leftHandLpY2_;
+  Eigen::VectorXd rightHandLpX1_;
+  Eigen::VectorXd rightHandLpX2_;
+  Eigen::VectorXd rightHandLpY1_;
+  Eigen::VectorXd rightHandLpY2_;
+  Eigen::VectorXd chestLpX1_;
+  Eigen::VectorXd chestLpX2_;
+  Eigen::VectorXd chestLpY1_;
+  Eigen::VectorXd chestLpY2_;
+  Eigen::VectorXd leftSlerpLpX1_;
+  Eigen::VectorXd leftSlerpLpX2_;
+  Eigen::VectorXd leftSlerpLpY1_;
+  Eigen::VectorXd leftSlerpLpY2_;
+  Eigen::VectorXd rightSlerpLpX1_;
+  Eigen::VectorXd rightSlerpLpX2_;
+  Eigen::VectorXd rightSlerpLpY1_;
+  Eigen::VectorXd rightSlerpLpY2_;
+
+  Eigen::Vector3d prevLeftHandFilteredDelta_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d prevRightHandFilteredDelta_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d prevChestFilteredDelta_{Eigen::Vector3d::Zero()};
+  double prevLeftSlerpFiltered_{0.0};
+  double prevRightSlerpFiltered_{0.0};
+  bool hasPrevLeftHandFilteredDelta_{false};
+  bool hasPrevRightHandFilteredDelta_{false};
+  bool hasPrevChestFilteredDelta_{false};
+  bool hasPrevLeftSlerpFiltered_{false};
+  bool hasPrevRightSlerpFiltered_{false};
 
   void updateLastOnExit(const std::vector<PoseData>& latestPoseConstraintList);
   void resetDelta();

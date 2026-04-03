@@ -181,12 +181,15 @@ namespace ocs2
     {
       matrix_t a(arm_nums_, numDecisionVars_);
       vector_t b(a.rows());
+      const bool useVrArmPd = useVrArmAccelTask_ && hasVrArmAccelTask_;
+      const vector_t& armKp = useVrArmPd ? vrArmJointKp_ : armJointKp_;
+      const vector_t& armKd = useVrArmPd ? vrArmJointKd_ : armJointKd_;
       // 先写为加速度控制任务  ddq = kp_arm * (q - qd) + kd_arm * (dq - dqd);
       a.setZero();
       b.setZero();
       a.block(0, info_.stateDim-arm_nums_, arm_nums_, arm_nums_) = matrix_t::Identity(arm_nums_, arm_nums_);
-      b = armJointKp_.cwiseProduct(qDesired_.tail(arm_nums_) - qMeasured_.tail(arm_nums_)) + 
-          armJointKd_.cwiseProduct(vDesired_.tail(arm_nums_) - vMeasured_.tail(arm_nums_));
+      b = armKp.cwiseProduct(qDesired_.tail(arm_nums_) - qMeasured_.tail(arm_nums_)) +
+          armKd.cwiseProduct(vDesired_.tail(arm_nums_) - vMeasured_.tail(arm_nums_));
 
       // qMeasured_; vMeasured_; info_.generalizedCoordinatesNum; 
       return {a, b, matrix_t(), vector_t()};
@@ -256,6 +259,39 @@ namespace ocs2
         armJointKd_.resize(arm_nums_);
         loadData::loadEigenMatrix(taskFile, prefix + "kp", armJointKp_);
         loadData::loadEigenMatrix(taskFile, prefix + "kd", armJointKd_);
+
+        vrArmJointKp_ = armJointKp_;
+        vrArmJointKd_ = armJointKd_;
+        hasVrArmAccelTask_ = false;
+        bool hasVrKp = false;
+        bool hasVrKd = false;
+        try
+        {
+          prefix = "vrArmAccelTask.";
+          vector_t vrKp(arm_nums_);
+          loadData::loadEigenMatrix(taskFile, prefix + "kp", vrKp);
+          vrArmJointKp_ = vrKp;
+          hasVrKp = true;
+        }
+        catch (const std::exception&)
+        {
+        }
+        try
+        {
+          prefix = "vrArmAccelTask.";
+          vector_t vrKd(arm_nums_);
+          loadData::loadEigenMatrix(taskFile, prefix + "kd", vrKd);
+          vrArmJointKd_ = vrKd;
+          hasVrKd = true;
+        }
+        catch (const std::exception&)
+        {
+        }
+        hasVrArmAccelTask_ = hasVrKp && hasVrKd;
+        if (verbose)
+        {
+          std::cerr << "\n #### vrArm Accel Task loaded: " << (hasVrArmAccelTask_ ? "true" : "false") << "\n";
+        }
       }
     }
 

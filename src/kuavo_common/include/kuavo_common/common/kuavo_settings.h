@@ -156,10 +156,15 @@ namespace HighlyDynamic
         double v_takeoff;
         bool swing_arm;
         bool only_half_up_body = false;
+        bool use_vr_arm_kpkd = false;
         std::vector<int32_t> joint_kp;
         std::vector<int32_t> joint_kd;
         std::vector<int32_t> ruiwo_kp;
         std::vector<int32_t> ruiwo_kd;
+        std::vector<int32_t> vr_joint_kp;
+        std::vector<int32_t> vr_joint_kd;
+        std::vector<int32_t> vr_ruiwo_kp;
+        std::vector<int32_t> vr_ruiwo_kd;
     };
 
     struct HardwareSettings

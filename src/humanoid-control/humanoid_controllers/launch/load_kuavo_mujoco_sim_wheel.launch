@@ -24,8 +24,8 @@
 
      <!-- The URDF model of the robot -->
     <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
-    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v45/command/gait.info"/>
-    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v45/command/reference.info"/>
+    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info"/>
+    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info"/>
     <!-- The task file for the mpc. -->
     <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
     <!-- The library folder to generate CppAD codegen into -->

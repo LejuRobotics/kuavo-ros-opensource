@@ -485,11 +485,11 @@ class ArmAPI:
 
     def send_timed_arm_cmd(self, left_pose: Pose, right_pose: Pose, desire_time: float) -> Tuple[bool, float]:
         """
-        通过服务发送单次手臂位姿命令
+        通过服务发送单次手臂位姿命令（左右单臂各发一次）
         
-        根据 Pose 的 frame 自动选择 planner_index：
-            - WheelArmFrame.BASE / Frame.BASE → planner_index=5（双臂笛卡尔局部系运动）
-            - WheelArmFrame.ODOM / Frame.ODOM → planner_index=4（双臂笛卡尔世界系运动）
+        根据 Pose 的 frame 自动选择规划器：
+            - ODOM/世界系 → 左臂 planner 4、右臂 planner 5
+            - BASE/局部系 → 左臂 planner 6、右臂 planner 7
         
         参数：
             left_pose (Pose): 左臂目标位姿
@@ -499,48 +499,43 @@ class ArmAPI:
         返回：
             Tuple[bool, float]: (是否成功, 实际执行时间)
         """
-        # 根据 frame 自动选择 planner_index
         frame = left_pose.frame
         if frame in [WheelArmFrame.ODOM, Frame.ODOM, "odom"]:
-            planner_index = 4  # 双臂笛卡尔世界系运动
+            left_planner, right_planner = 4, 5  # 左/右臂笛卡尔世界系
         else:
-            planner_index = 5  # 双臂笛卡尔局部系运动
+            left_planner, right_planner = 6, 7  # 左/右臂笛卡尔局部系
         
-        # Pose 转 [x, y, z, yaw, pitch, roll] 格式
-        # Pose.get_euler('xyz') 返回 [roll, pitch, yaw]，服务需要 [yaw, pitch, roll]
-        left_euler = left_pose.get_euler(degrees=False)  # [roll, pitch, yaw]
+        # Pose 转 [x, y, z, yaw, pitch, roll]，get_euler 返回 [roll, pitch, yaw]
+        left_euler = left_pose.get_euler(degrees=False)
         right_euler = right_pose.get_euler(degrees=False)
+        left_vec = [*left_pose.pos, left_euler[2], left_euler[1], left_euler[0]]
+        right_vec = [*right_pose.pos, right_euler[2], right_euler[1], right_euler[0]]
         
-        cmd_vec = [
-            *left_pose.pos, left_euler[2], left_euler[1], left_euler[0],   # 左臂 x,y,z,yaw,pitch,roll
-            *right_pose.pos, right_euler[2], right_euler[1], right_euler[0]  # 右臂 x,y,z,yaw,pitch,roll
-        ]
-        
-        # 验证期望时间
         if desire_time <= 0:
             rospy.logwarn(f"期望执行时间应大于0，当前值: {desire_time:.3f}")
         
         try:
-            # 等待服务
             rospy.wait_for_service('/mobile_manipulator_timed_single_cmd', timeout=5.0)
             client = rospy.ServiceProxy('/mobile_manipulator_timed_single_cmd', lbTimedPosCmd)
-            
-            # 准备请求
-            req = lbTimedPosCmdRequest()
-            req.planner_index = planner_index
-            req.desireTime = desire_time
-            req.cmdVec = cmd_vec
-            
+            req_left = lbTimedPosCmdRequest()
+            req_left.planner_index = left_planner
+            req_left.desireTime = desire_time
+            req_left.cmdVec = left_vec
+            req_right = lbTimedPosCmdRequest()
+            req_right.planner_index = right_planner
+            req_right.desireTime = desire_time
+            req_right.cmdVec = right_vec
+            resp_left = client(req_left)
             # 调用服务
-            resp = client(req)
-            
-            if resp.isSuccess:
-                rospy.loginfo(f"手臂指令执行成功，实际时间: {resp.actualTime}s")
-                return True, resp.actualTime
+            resp_right = client(req_right)
+            ok_left = resp_left.isSuccess
+            ok_right = resp_right.isSuccess
+            actual_time = max(resp_left.actualTime, resp_right.actualTime)
+            if ok_left and ok_right:
+                rospy.loginfo(f"手臂指令执行成功，实际时间: {actual_time}s")
             else:
-                rospy.logerr(f"手臂指令执行失败: {resp.message}")
-                return False, resp.actualTime
-                
+                rospy.logerr(f"手臂指令执行失败（左: {ok_left}, 右: {ok_right}）")
+            return ok_left and ok_right, actual_time
         except rospy.ROSException as e:
             rospy.logerr(f"服务等待超时: {e}")
             return False, 0.0
@@ -560,19 +555,52 @@ class TimedCmdAPI:
     支持底盘、下肢、上肢等多种命令类型。
     """
     
-    # 命令类型配置：planner_index 和维度映射
+    # 命令类型配置：planner_index 和维度映射（服务侧已改为左右单臂：4/5 世界系、6/7 局部系、8/9 关节）
     CMD_CONFIG = {
         'chassis_world': {'planner_index': 0, 'dim': 3, 'name': '底盘世界系'},
         'chassis_local': {'planner_index': 1, 'dim': 3, 'name': '底盘局部系'},
         'torso': {'planner_index': 2, 'dim': 4, 'name': '躯干'},
         'leg': {'planner_index': 3, 'dim': 4, 'name': '下肢'},
-        'arm_ee_world': {'planner_index': 4, 'dim': 12, 'name': '双臂末端世界系'},
-        'arm_ee_local': {'planner_index': 5, 'dim': 12, 'name': '双臂末端局部系'},
-        'arm': {'planner_index': 6, 'dim': 14, 'name': '上肢'},
+        # 双臂逻辑类型（12/14 维）：在 send_timed_cmd 内拆成左右两次调用
+        'arm_ee_world': {'dim': 12, 'name': '双臂末端世界系', 'split_left_planner': 4, 'split_right_planner': 5},
+        'arm_ee_local': {'dim': 12, 'name': '双臂末端局部系', 'split_left_planner': 6, 'split_right_planner': 7},
+        'arm': {'dim': 14, 'name': '上肢', 'split_left_planner': 8, 'split_right_planner': 9},
+        # 单臂类型（供单臂节点或 Ruckig 用例）
+        'left_arm_ee_world': {'planner_index': 4, 'dim': 6, 'name': '左臂末端世界系'},
+        'right_arm_ee_world': {'planner_index': 5, 'dim': 6, 'name': '右臂末端世界系'},
+        'left_arm_ee_local': {'planner_index': 6, 'dim': 6, 'name': '左臂末端局部系'},
+        'right_arm_ee_local': {'planner_index': 7, 'dim': 6, 'name': '右臂末端局部系'},
+        'left_arm': {'planner_index': 8, 'dim': 7, 'name': '左臂关节'},
+        'right_arm': {'planner_index': 9, 'dim': 7, 'name': '右臂关节'},
     }
     
     # 向后兼容：旧的配置名
     JOINT_CONFIG = CMD_CONFIG
+
+    def _call_timed_single_cmd(self, planner_index: int, cmd_vec: List[float],
+                               desire_time: float) -> Tuple[bool, float]:
+        """内部方法：单次调用 /mobile_manipulator_timed_single_cmd。返回 (是否成功, 实际执行时间)。"""
+        try:
+            rospy.wait_for_service('/mobile_manipulator_timed_single_cmd', timeout=5.0)
+            client = rospy.ServiceProxy('/mobile_manipulator_timed_single_cmd', lbTimedPosCmd)
+            req = lbTimedPosCmdRequest()
+            req.planner_index = planner_index
+            req.desireTime = desire_time
+            req.cmdVec = list(cmd_vec)
+            resp = client(req)
+            if resp.isSuccess:
+                return True, resp.actualTime
+            rospy.logerr(f"单次指令失败 (planner={planner_index}): {resp.message}")
+            return False, resp.actualTime
+        except rospy.ROSException as e:
+            rospy.logerr(f"服务等待超时: {e}")
+            return False, 0.0
+        except rospy.ServiceException as e:
+            rospy.logerr(f"服务调用失败: {e}")
+            return False, 0.0
+        except Exception as e:
+            rospy.logerr(f"未知错误: {e}")
+            return False, 0.0
 
     def send_timed_cmd(self, cmd_type: str, cmd_vec: List[float], 
                        desire_time: float) -> Tuple[bool, float]:
@@ -581,11 +609,17 @@ class TimedCmdAPI:
         
         参数：
             cmd_type: 命令类型
-                - 'chassis_world': 底盘世界系位姿 (x, y, yaw)
-                - 'chassis_local': 底盘局部系位姿 (x, y, yaw)
-                - 'torso': 躯干位姿 (x, z, yaw, pitch)
-                - 'leg': 下肢关节 (4个关节角度)
-                - 'arm': 上肢关节 (14个关节角度)
+                - 'chassis_world' : 底盘世界系,[x,y,yaw],索引0
+                - 'chassis_local' : 底盘局部系,[x,y,yaw],索引1
+                - 'torso' : 躯干,[x,z,yaw,pitch],索引2
+                - 'leg' : 下肢,[joint1,joint2,joint3,joint4],索引3
+                - 'arm_ee_world_left' : 左臂末端世界系,[x,y,z,yaw,pitch,roll],索引4
+                - 'arm_ee_world_right' : 右臂末端世界系,[x,y,z,yaw,pitch,roll],索引5
+                - 'arm_ee_local_left' : 左臂末端局部系,[x,y,z,yaw,pitch,roll],索引6
+                - 'arm_ee_local_right' : 右臂末端局部系,[x,y,z,yaw,pitch,roll],索引7
+                - 'arm_joint_left' : 左臂关节，[joint1,joint2,joint3,joint4,joint5,joint6,joint7],索引8
+                - 'arm_joint_right' : 右臂关节，[joint1,joint2,joint3,joint4,joint5,joint6,joint7],索引9
+
             cmd_vec: 命令向量
             desire_time: 期望执行时间（秒）
             
@@ -599,7 +633,6 @@ class TimedCmdAPI:
             return False, 0.0
         
         config = self.CMD_CONFIG[cmd_type]
-        planner_index = config['planner_index']
         expected_dim = config['dim']
         cmd_name = config['name']
         
@@ -612,36 +645,35 @@ class TimedCmdAPI:
         if desire_time <= 0:
             rospy.logwarn(f"期望执行时间应大于0，当前值: {desire_time:.3f}")
         
-        try:
-            # 等待服务
-            rospy.wait_for_service('/mobile_manipulator_timed_single_cmd', timeout=5.0)
-            client = rospy.ServiceProxy('/mobile_manipulator_timed_single_cmd', lbTimedPosCmd)
-            
-            # 准备请求
-            req = lbTimedPosCmdRequest()
-            req.planner_index = planner_index
-            req.desireTime = desire_time
-            req.cmdVec = list(cmd_vec)
-            
-            # 调用服务
-            resp = client(req)
-            
-            if resp.isSuccess:
-                rospy.loginfo(f"{cmd_name}指令执行成功，实际时间: {resp.actualTime}s")
-                return True, resp.actualTime
+        # 双臂拆分：左+右各发一次
+        if 'split_left_planner' in config:
+            left_planner = config['split_left_planner']
+            right_planner = config['split_right_planner']
+            half = expected_dim // 2
+            left_vec = cmd_vec[:half]
+            right_vec = cmd_vec[half:]
+            ok_left, actual_left = self._call_timed_single_cmd(left_planner, left_vec, desire_time)
+            ok_right, actual_right = self._call_timed_single_cmd(right_planner, right_vec, desire_time)
+            if ok_left:
+                rospy.loginfo(f"{cmd_name}左臂指令执行成功，实际时间: {actual_left}s")
+            if ok_right:
+                rospy.loginfo(f"{cmd_name}右臂指令执行成功，实际时间: {actual_right}s")
+            success = ok_left and ok_right
+            actual_time = max(actual_left, actual_right)
+            if success:
+                rospy.loginfo(f"{cmd_name}指令执行成功，实际时间: {actual_time}s")
             else:
-                rospy.logerr(f"{cmd_name}指令执行失败: {resp.message}")
-                return False, resp.actualTime
-                
-        except rospy.ROSException as e:
-            rospy.logerr(f"服务等待超时: {e}")
-            return False, 0.0
-        except rospy.ServiceException as e:
-            rospy.logerr(f"服务调用失败: {e}")
-            return False, 0.0
-        except Exception as e:
-            rospy.logerr(f"未知错误: {e}")
-            return False, 0.0
+                rospy.logerr(f"{cmd_name}指令执行失败（左: {ok_left}, 右: {ok_right}）")
+            return success, actual_time
+        
+        # 单规划器
+        planner_index = config['planner_index']
+        success, actual_time = self._call_timed_single_cmd(planner_index, cmd_vec, desire_time)
+        if success:
+            rospy.loginfo(f"{cmd_name}指令执行成功，实际时间: {actual_time}s")
+        else:
+            rospy.logerr(f"{cmd_name}指令执行失败")
+        return success, actual_time
 
     def send_timed_joint_cmd(self, joint_type: str, joint_angles: List[float], 
                               desire_time: float) -> Tuple[bool, float]:
@@ -679,13 +711,16 @@ class TimedCmdAPI:
         
         参数：
             planner_index: 规划器索引
-                - 0: 底盘世界系
+                - 0: 底盘世界系  
                 - 1: 底盘局部系
-                - 2: 躯干
+                - 2: 躯干  
                 - 3: 下肢
-                - 4: 双臂末端世界系
-                - 5: 双臂末端局部系
-                - 6: 上肢
+                - 4: 左臂末端世界系
+                - 5: 右臂末端世界系
+                - 6: 左臂末端局部系
+                - 7: 右臂末端局部系
+                - 8: 左臂关节
+                - 9: 右臂关节
             is_sync: 是否同步模式
             velocity_max: 最大速度列表
             acceleration_max: 最大加速度列表

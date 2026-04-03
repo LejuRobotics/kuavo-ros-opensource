@@ -120,6 +120,11 @@ namespace HighlyDynamic
         running_settings.joint_kd = robot_config.getValue<std::vector<int32_t>>("joint_kd");
         running_settings.ruiwo_kp = robot_config.getValue<std::vector<int32_t>>("ruiwo_kp");
         running_settings.ruiwo_kd = robot_config.getValue<std::vector<int32_t>>("ruiwo_kd");
+        running_settings.use_vr_arm_kpkd = robot_config.getValue<bool>("useVrArmKpKd");
+        running_settings.vr_joint_kp = robot_config.getValue<std::vector<int32_t>>("vr_joint_kp");
+        running_settings.vr_joint_kd = robot_config.getValue<std::vector<int32_t>>("vr_joint_kd");
+        running_settings.vr_ruiwo_kp = robot_config.getValue<std::vector<int32_t>>("vr_ruiwo_kp");
+        running_settings.vr_ruiwo_kd = robot_config.getValue<std::vector<int32_t>>("vr_ruiwo_kd");
     }
 
     std::string HardwareSettings::getEcmasterType(RobotVersion rb_version) {

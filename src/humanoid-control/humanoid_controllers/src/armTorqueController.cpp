@@ -17,7 +17,6 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
                                          const Eigen::VectorXd& kp,
                                          const Eigen::VectorXd& kd)
 {
-    std::cout << "[ArmTorqueController] 构造函数" << std::endl;
     std::cout << "[ArmTorqueController] urdf_path: " << urdf_path << std::endl;
     std::cout << "[ArmTorqueController] kp: " << kp.transpose() << std::endl;
     std::cout << "[ArmTorqueController] kd: " << kd.transpose() << std::endl;

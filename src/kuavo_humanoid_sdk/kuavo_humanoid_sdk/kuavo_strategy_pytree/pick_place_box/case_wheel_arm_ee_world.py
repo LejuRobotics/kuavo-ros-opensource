@@ -2,7 +2,7 @@
 轮臂手臂末端控制案例：支持局部坐标系和世界坐标系
 
 使用 NodeWheelMoveTimedCmd 通过 /mobile_manipulator_timed_single_cmd 服务发送手臂末端位姿。
-命令格式：[左臂x,y,z,yaw,pitch,roll, 右臂x,y,z,yaw,pitch,roll]
+命令格式 12 维：[左臂 x,y,z,yaw,pitch,roll, 右臂 x,y,z,yaw,pitch,roll]，API 内拆为左/右单臂（planner 4/5 世界系或 6/7 局部系）各发一次。
 """
 import os
 import sys
