@@ -747,12 +747,12 @@ namespace humanoid_controller
     res.current_index = current_index;
     res.current_controller = current_controller_name_.empty() ? "mpc" : current_controller_name_;
     res.success = true;
-    res.message = "Successfully retrieved controller list, total " + std::to_string(res.count) + 
+    res.message = "Successfully retrieved controller list, total " + std::to_string(res.count) +
                   " controllers, current: " + res.current_controller + " (index: " + std::to_string(res.current_index) + ")";
-    
-    ROS_INFO("[RLControllerManager] current controller: %s (index: %d, total %d)", 
+
+    ROS_DEBUG("[RLControllerManager] current controller: %s (index: %d, total %d)",
              res.current_controller.c_str(), res.current_index, res.count);
-    
+
     return true;
   }
 

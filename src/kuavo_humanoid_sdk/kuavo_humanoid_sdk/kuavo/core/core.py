@@ -29,6 +29,7 @@ from kuavo_humanoid_sdk.interfaces.data_types import KuavoArmCtrlMode, KuavoIKPa
 from kuavo_humanoid_sdk.kuavo.core.ros.control import KuavoRobotControl
 from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCore
 from kuavo_humanoid_sdk.kuavo.core.ros.param import make_robot_param
+from kuavo_humanoid_sdk.kuavo.core.ros.controller import Controller
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.kuavo.logger_client import get_logger
 # Define robot states
@@ -174,6 +175,12 @@ class KuavoRobotCore:
             SDKLogger.debug(f"[Core] [StateMachine] State unchanged: already in trot state")
             return
         SDKLogger.debug(f"[Core] [StateMachine] Entering trot state, from {previous_state}")
+        
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] to_trot failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return
+        
         self._control.robot_trot()
 
     def _on_enter_custom_gait(self, event):
@@ -222,6 +229,11 @@ class KuavoRobotCore:
         return self._control.robot_walk(limited_linear_x, limited_linear_y, limited_angular_z)
     
     def squat(self, height:float, pitch:float)->bool:
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] squat failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
+
         if self.state != 'stance':
             SDKLogger.warn(f"[Core] control torso height failed, robot is not in stance state({self.state})!")
             return False
@@ -274,13 +286,18 @@ class KuavoRobotCore:
         """
         if len(target_pose) != 4:
             raise ValueError(f"[Core] target_pose length must be 4, but got {len(target_pose)}")
-    
+
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] step_by_step failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
+
         # Wait up to 1.0s for stance state
         wait_time = 0
         while self._rb_state.gait_name() != 'stance' and wait_time < 1.0:
             time.sleep(0.1)
             wait_time += 0.1
-            
+
         if self._rb_state.gait_name() != 'stance':
             raise RuntimeError(f"[Core] control robot step failed, robot is not in stance state, {self._rb_state.gait_name()}!")
 
@@ -373,22 +390,27 @@ class KuavoRobotCore:
     def control_command_pose(self, target_pose_x:float, target_pose_y:float, target_pose_z:float, target_pose_yaw:float)->bool:
         """
         Control robot pose in base_link frame
-        
+
         Arguments:
             - target_pose_x: x position (meters)
             - target_pose_y: y position (meters)
             - target_pose_z: z position (meters)
             - target_pose_yaw: yaw angle (radians)
-        
+
         Returns:
             bool: True if command was sent successfully, False otherwise
-            
+
         Raises:
             RuntimeError: If robot is not in stance state
         """
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] control_command_pose failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
+
         # if self.state != 'stance':
         #     raise RuntimeError(f"[Core] control_command_pose failed: robot must be in stance state, current state: {self.state}")
-        
+
         # Add any parameter validation if needed
         # e.g., limit ranges for safety
         MAX_HEIGHT = 0.1
@@ -411,22 +433,27 @@ class KuavoRobotCore:
     def control_command_pose_world(self, target_pose_x:float, target_pose_y:float, target_pose_z:float, target_pose_yaw:float)->bool:
         """
         Control robot pose in odom (world) frame
-        
+
         Arguments:
             - target_pose_x: x position (meters)
             - target_pose_y: y position (meters)
             - target_pose_z: z position (meters)
             - target_pose_yaw: yaw angle (radians)
-        
+
         Returns:
             bool: True if command was sent successfully, False otherwise
-            
+
         Raises:
             RuntimeError: If robot is not in stance state
         """
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] control_command_pose_world failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
+
         # if self.state != 'stance':
         #     raise RuntimeError(f"[Core] control_command_pose_world failed: robot must be in stance state, current state: {self.state}")
-        
+
         # Add any parameter validation if needed
         # e.g., limit ranges for safety
         MAX_HEIGHT = 0.1
@@ -519,7 +546,12 @@ class KuavoRobotCore:
             
         return self._control.control_robot_arm_joint_trajectory(times, joint_q)
     
-    def control_robot_end_effector_pose(self, left_pose: KuavoPose, right_pose: KuavoPose, frame: KuavoManipulationMpcFrame)->bool:        
+    def control_robot_end_effector_pose(self, left_pose: KuavoPose, right_pose: KuavoPose, frame: KuavoManipulationMpcFrame)->bool:
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] control_robot_end_effector_pose failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
+
         if self._arm_ctrl_mode != KuavoArmCtrlMode.ExternalControl:
             SDKLogger.debug("[Core] control_robot_end_effector_pose, current arm mode != ExternalControl, change it.")
             if not self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.ExternalControl):
@@ -531,7 +563,7 @@ class KuavoRobotCore:
             if not self.change_manipulation_mpc_ctrl_mode(KuavoManipulationMpcCtrlMode.ArmOnly):
                 SDKLogger.warn("[Core] control_robot_end_effector_pose failed, change manipulation mpc ctrl mode failed!")
                 return False
-        
+
         return self._control.control_robot_end_effector_pose(left_pose, right_pose, frame)
     
     def control_torso_pose(self, x, y, z, roll, pitch, yaw)->bool:
@@ -547,9 +579,18 @@ class KuavoRobotCore:
         return self._control.control_wheel_lower_joint(joint_traj)
 
     def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] control_hand_wrench failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
         return self._control.control_hand_wrench(left_wrench, right_wrench)
     
     def change_manipulation_mpc_frame(self, frame: KuavoManipulationMpcFrame)->bool:
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] change_manipulation_mpc_frame failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
+
         # Check if service is available (if current state is ERROR, service is not available)
         current_frame = self._rb_state.manipulation_mpc_frame
         if current_frame == KuavoManipulationMpcFrame.ERROR:
@@ -580,6 +621,11 @@ class KuavoRobotCore:
         return True
     
     def change_manipulation_mpc_ctrl_mode(self, control_mode: KuavoManipulationMpcCtrlMode)->bool:
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] change_manipulation_mpc_ctrl_mode failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
+
         # Check if service is available (if current state is ERROR, service is not available)
         current_mode = self._rb_state.manipulation_mpc_ctrl_mode
         if current_mode == KuavoManipulationMpcCtrlMode.ERROR:
@@ -589,7 +635,7 @@ class KuavoRobotCore:
             with self._manipulation_mpc_ctrl_mode_lock:
                 self._manipulation_mpc_ctrl_mode = control_mode
             return True
-        
+
         timeout = 1.0
         count = 0
         while self._rb_state.manipulation_mpc_ctrl_mode != control_mode:
@@ -610,6 +656,11 @@ class KuavoRobotCore:
         return True
     
     def change_manipulation_mpc_control_flow(self, control_flow: KuavoManipulationMpcControlFlow)->bool:
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] change_manipulation_mpc_control_flow failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
+
         # Check if service is available (if current state is ERROR, service is not available)
         current_flow = self._rb_state.manipulation_mpc_control_flow
         if current_flow == KuavoManipulationMpcControlFlow.Error:
@@ -684,8 +735,13 @@ class KuavoRobotCore:
         return self.change_robot_arm_ctrl_mode(KuavoArmCtrlMode.AutoSwing)
         
     def robot_manipulation_mpc_reset(self)->bool:
+        # 检查是否为 MPC 模式
+        if not self._is_mpc_mode():
+            SDKLogger.warn("[Core] robot_manipulation_mpc_reset failed: can only be executed in MPC mode. Please set manipulation mpc mode first.")
+            return False
+
         SDKLogger.info("[Core] Starting manipulation MPC reset...")
-        
+
         if self._manipulation_mpc_ctrl_mode != KuavoManipulationMpcCtrlMode.NoControl:
             SDKLogger.info("[Core] Resetting manipulation MPC control mode to NoControl...")
             if not self.change_manipulation_mpc_ctrl_mode(KuavoManipulationMpcCtrlMode.NoControl):
@@ -694,7 +750,7 @@ class KuavoRobotCore:
             SDKLogger.info("[Core] Manipulation MPC control mode reset to NoControl successfully")
         else:
             SDKLogger.info("[Core] Manipulation MPC control mode is already NoControl")
-        
+
         if self._manipulation_mpc_control_flow != KuavoManipulationMpcControlFlow.ThroughFullBodyMpc:
             SDKLogger.info("[Core] Resetting manipulation MPC control flow to ThroughFullBodyMpc...")
             if not self.change_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.ThroughFullBodyMpc):
@@ -703,7 +759,7 @@ class KuavoRobotCore:
             SDKLogger.info("[Core] Manipulation MPC control flow reset to ThroughFullBodyMpc successfully")
         else:
             SDKLogger.info("[Core] Manipulation MPC control flow is already ThroughFullBodyMpc")
-        
+
         SDKLogger.info("[Core] Manipulation MPC reset completed successfully")
         return True
     """ ------------------------------------------------------------------------"""
@@ -752,6 +808,17 @@ class KuavoRobotCore:
                 SDKLogger.debug(f"[Core] Received gait change notification: {gait_name} at time {current_time}")
                 # Call the transition method if it exists
                 getattr(self, to_method)()
+
+    def _is_mpc_mode(self) -> bool:
+        """检查当前控制器是否为 MPC 控制器。
+
+        Returns:
+            bool: 如果当前控制器是 "mpc" 返回 True，否则返回 False。
+        """
+        controller = Controller()
+        current_controller = controller.get_current_controller_name()
+        SDKLogger.info(f"[Core] Current controller: {current_controller}")
+        return current_controller == "mpc"
 
     def is_arm_collision(self)->bool:
         return self._control.is_arm_collision()
