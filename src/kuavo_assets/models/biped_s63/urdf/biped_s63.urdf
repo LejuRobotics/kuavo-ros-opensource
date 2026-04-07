@@ -9,17 +9,17 @@
     name="base_link">
     <inertial>
       <origin
-        xyz="0.0 0.0 0.18974825"
+        xyz="0.00237384 -0.00288534 0.18388782"
         rpy="0 0 0" />
       <mass
-        value="121.0" />
+        value="114.0" />
       <inertia
-        ixx="6.06119142"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="6.14303008"
-        iyz="0.0"
-        izz="9.37376841" />
+        ixx="5.69196532"
+        ixy="-0.00124455"
+        ixz="-0.03397154"
+        iyy="5.78484595"
+        iyz="0.02246676"
+        izz="7.29882874" />
     </inertial>
     <visual>
       <origin
@@ -51,17 +51,17 @@
     name="wheel_left_front">
     <inertial>
       <origin
-        xyz="-0.00022531 0.00013018 0.00025959"
+        xyz="-0.00002328 0.0 0.0"
         rpy="0 0 0" />
       <mass
-        value="6.0" />
+        value="3.85" />
       <inertia
-        ixx="0.04268644"
-        ixy="0.0"
+        ixx="0.03331258"
+        ixy="0.00000003"
         ixz="0.0"
-        iyy="0.02285498"
+        iyy="0.01734093"
         iyz="0.0"
-        izz="0.02285042" />
+        izz="0.01734098" />
     </inertial>
     <visual>
       <origin
@@ -88,8 +88,8 @@
     name="wheel_left_front_joint"
     type="continuous">
     <origin
-      xyz="0.23248871 0.23248871 0.13035"
-      rpy="0 0 0.785398163" />
+      xyz="0.23865 0.23865 0.13035"
+      rpy="0 0 0.7854" />
     <parent
       link="base_link" />
     <child
@@ -101,17 +101,17 @@
     name="wheel_right_front">
     <inertial>
       <origin
-        xyz="-0.00022531 0.00013018 0.00025959"
+        xyz="-0.00002328 0.0 0.0"
         rpy="0 0 0" />
       <mass
-        value="6.0" />
+        value="3.85" />
       <inertia
-        ixx="0.04268644"
-        ixy="0.0"
+        ixx="0.03331258"
+        ixy="0.00000003"
         ixz="0.0"
-        iyy="0.02285042"
+        iyy="0.01734093"
         iyz="0.0"
-        izz="0.02285498" />
+        izz="0.01734098" />
     </inertial>
     <visual>
       <origin
@@ -138,8 +138,8 @@
     name="wheel_right_front_joint"
     type="continuous">
     <origin
-      xyz="0.23248871 -0.23248871 0.13035"
-      rpy="0 0 -0.785398163" />
+      xyz="0.23865 -0.23865 0.13035"
+      rpy="0 0 -0.7854" />
     <parent
       link="base_link" />
     <child
@@ -151,17 +151,17 @@
     name="wheel_left_behind">
     <inertial>
       <origin
-        xyz="-0.00022326 0.00013367 0.00025959"
+        xyz="-0.00002328 0.0 0.0"
         rpy="0 0 0" />
       <mass
-        value="6.0" />
+        value="3.85" />
       <inertia
-        ixx="0.04268644"
-        ixy="0.0"
+        ixx="0.03331258"
+        ixy="-0.00000003"
         ixz="0.0"
-        iyy="0.02285042"
+        iyy="0.01734093"
         iyz="0.0"
-        izz="0.02285498" />
+        izz="0.01734098" />
     </inertial>
     <visual>
       <origin
@@ -188,8 +188,8 @@
     name="wheel_left_behind_joint"
     type="continuous">
     <origin
-      xyz="-0.23248871 0.23248871 0.13035"
-      rpy="0 0 2.356194372" />
+      xyz="-0.23865 0.23865 0.13035"
+      rpy="0 0 2.3562" />
     <parent
       link="base_link" />
     <child
@@ -201,17 +201,17 @@
     name="wheel_right_behind">
     <inertial>
       <origin
-        xyz="-0.00022531 0.00013018 0.00025959"
+        xyz="-0.00002328 0.0 0.0"
         rpy="0 0 0" />
       <mass
-        value="6.0" />
+        value="3.85" />
       <inertia
-        ixx="0.04268644"
-        ixy="0.0"
+        ixx="0.03331258"
+        ixy="-0.00000003"
         ixz="0.0"
-        iyy="0.02285042"
+        iyy="0.01734093"
         iyz="0.0"
-        izz="0.02285498" />
+        izz="0.01734098" />
     </inertial>
     <visual>
       <origin
@@ -238,8 +238,8 @@
     name="wheel_right_behind_joint"
     type="continuous">
     <origin
-      xyz="-0.23248871 -0.23248871 0.13035"
-      rpy="0 0 -2.356194372" />
+      xyz="-0.23865 -0.23865 0.13035"
+      rpy="0 0 -2.3562" />
     <parent
       link="base_link" />
     <child
@@ -282,7 +282,7 @@
     name="base_to_joint"
     type="fixed">
     <origin
-      xyz="0.098 0 0.27064321"
+      xyz="0.093 -0.0165 0.40635"
       rpy="0 0 0" />
     <parent
       link="base_link" />

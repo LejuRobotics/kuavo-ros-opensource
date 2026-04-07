@@ -929,8 +929,9 @@ namespace
   void updateWheelVel_VectorContorl_omniWheel(Eigen::Vector3d& cmd_vel)
   {
     const double wheel_radius = 0.13035;  // 底盘轮子半径
-    const double robot_x_dis = 0.232489;  // 机器人中心到轮子的距离
-    const double robot_y_dis = 0.232489;  // 机器人中心到轮子的距离
+    // s63 底盘轮距更大
+    const double robot_x_dis = (robotVersion_ == 63) ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
+    const double robot_y_dis = (robotVersion_ == 63) ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
 
     // cmd_vel: [vx, vy, omega] - 机器人本体系速度和角速度
     // 四个轮子的位置（相对于底盘中心）
