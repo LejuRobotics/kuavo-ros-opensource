@@ -38,8 +38,8 @@ git checkout opensource/wyx/lb/factory_test_version60
 ```batch
 sudo su  
 catkin clean -y  
-catkin config -DCMAKE_asm_COMPILER=/usr/bin/as -DCMAKE  _Builds_TYPE=Release  
-source installed/setup.bash  
+catkin config -DCMAKE_ASM_COMPILER=/usr/bin/as -DCMAKE_BUILD_TYPE=Release # Important! 
+source installed/setup.bash # 加载一些已经安装的ROS包依赖环境，包括硬件包等
 catkin build humanoid_controllers
 ```
 

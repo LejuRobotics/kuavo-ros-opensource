@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 底盘键盘控制节点
-直接通过底层接口 /move_base/base_cmd_vel 控制底盘运动
-不依赖轮臂上层控制器，可用于硬件故障时移动底盘
+启动时检测 ROS 节点 /mobile_manipulator_mpc_node：
+  - 若存在：向 /cmd_vel 发布速度（经 MPC / MobileManipulatorReferenceManager）
+  - 若不存在：向 /move_base/base_cmd_vel 发布（底层直驱，不经过 MPC）
 
 操作说明:
     w/s : 前进/后退
@@ -19,7 +20,35 @@ import select
 import termios
 import tty
 import rospy
+import rosgraph
+from rosgraph.masterapi import MasterException
 from geometry_msgs.msg import Twist
+
+# 与 humanoid_controllers launch 中 name= 一致；use_sqp:=true 时只有 sqp 节点存在
+MPC_NODE_CANDIDATES = (
+    "/mobile_manipulator_mpc_node",
+    "/mobile_manipulator_sqp_mpc_node",
+)
+
+MPC_DETECT_ATTEMPTS = 15
+MPC_DETECT_PERIOD_S = 0.1
+
+
+def _detect_mpc_node_on_master(master):
+    """
+    若任一候选节点可被 master.lookupNode，则认为 MPC 栈在线。
+    lookupNode 失败时可能抛 MasterError 或 MasterFailure，需统一捕获 MasterException。
+    """
+    for attempt in range(MPC_DETECT_ATTEMPTS):
+        for name in MPC_NODE_CANDIDATES:
+            try:
+                master.lookupNode(name)
+                return True, name
+            except MasterException:
+                pass
+        if attempt + 1 < MPC_DETECT_ATTEMPTS:
+            rospy.sleep(MPC_DETECT_PERIOD_S)
+    return False, None
 
 # 控制说明
 HELP_MSG = """
@@ -42,9 +71,15 @@ HELP_MSG = """
 class ChassisKeyboardControl:
     def __init__(self):
         rospy.init_node('chassis_keyboard_control', anonymous=True)
-        
-        # 底盘底层控制话题
-        self.cmd_vel_pub = rospy.Publisher('/move_base/base_cmd_vel', Twist, queue_size=10)
+
+        master = rosgraph.Master(rospy.get_name())
+        self.use_mpc_cmd, self._mpc_node_matched = _detect_mpc_node_on_master(master)
+
+        self.pub_cmd_vel = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
+        self.pub_base_cmd_vel = rospy.Publisher(
+            "/move_base/base_cmd_vel", Twist, queue_size=10
+        )
+        self._active_topic = "/cmd_vel" if self.use_mpc_cmd else "/move_base/base_cmd_vel"
         
         # 速度参数
         self.max_linear_speed = 0.3  # m/s (最大线速度)
@@ -65,7 +100,17 @@ class ChassisKeyboardControl:
         
         # 终端设置
         self.old_settings = None
-        
+
+        if self.use_mpc_cmd:
+            print(f"检测到 MPC 节点 {self._mpc_node_matched} -> 发布 /cmd_vel")
+        else:
+            tried = ", ".join(MPC_NODE_CANDIDATES)
+            max_wait = (MPC_DETECT_ATTEMPTS - 1) * MPC_DETECT_PERIOD_S
+            print(
+                f"未检测到 MPC 节点（候选 {tried}，"
+                f"最长等待约 {max_wait:.1f}s）-> 发布 /move_base/base_cmd_vel"
+            )
+
     def get_key(self, timeout=0.1):
         """非阻塞获取键盘输入"""
         if select.select([sys.stdin], [], [], timeout)[0]:
@@ -79,7 +124,10 @@ class ChassisKeyboardControl:
         
     def print_status(self):
         """打印当前状态"""
-        sys.stdout.write(f"\r当前速度: vx={self.current_vx:.2f}, vy={self.current_vy:.2f}, wz={self.current_wz:.2f} | 按空格急停   ")
+        sys.stdout.write(
+            f"\r当前速度: vx={self.current_vx:.2f}, vy={self.current_vy:.2f}, wz={self.current_wz:.2f} | "
+            f"{self._active_topic} | 按空格急停   "
+        )
         sys.stdout.flush()
         
     def publish_cmd_vel(self):
@@ -91,7 +139,10 @@ class ChassisKeyboardControl:
         msg.angular.x = 0.0
         msg.angular.y = 0.0
         msg.angular.z = self.current_wz
-        self.cmd_vel_pub.publish(msg)
+        if self.use_mpc_cmd:
+            self.pub_cmd_vel.publish(msg)
+        else:
+            self.pub_base_cmd_vel.publish(msg)
         
     def stop(self):
         """急停"""
@@ -184,9 +235,12 @@ class ChassisKeyboardControl:
 
 def main():
     print("=" * 50)
-    print("  底盘直接控制节点 - 键盘模式")
-    print("  话题: /move_base/base_cmd_vel")
-    print("  注意: 此节点直接控制底盘，不经过上层控制器")
+    print("  底盘键盘控制节点")
+    print(
+        "  启动时检测 MPC 节点 {}，选择 /cmd_vel（MPC）或 /move_base/base_cmd_vel（直驱）".format(
+            " / ".join(MPC_NODE_CANDIDATES)
+        )
+    )
     print("=" * 50)
     
     controller = ChassisKeyboardControl()

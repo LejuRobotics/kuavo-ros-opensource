@@ -157,8 +157,8 @@
     "shoulder_width": 0.2927,
     "eef_z_offset": -0.0,
     "hand_ref_length": 0.193,
-    "base_height_offset": 0.204,
-    "base_chest_offset_x": -0.0,
+    "base_height_offset": 1.0319,
+    "base_chest_offset_x": 0.1925,
     
     "motor_velocities_factor": 0.005,
     "joint_velocities_limit": {

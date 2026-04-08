@@ -192,6 +192,7 @@
 
     <!-- humanoid_quest_control_with_arm (启动当 wheel_ik=true 时) -->
     <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" if="$(eval wheel_ik)" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
+        <param name="wheel_ik" value="$(arg wheel_ik)" />
 
     <!-- noitom_hi5_hand_udp_python -->
     <!-- Python implementation (default) -->
