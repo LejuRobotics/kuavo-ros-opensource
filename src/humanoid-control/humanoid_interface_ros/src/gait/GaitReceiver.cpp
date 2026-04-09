@@ -468,7 +468,7 @@ namespace ocs2
       planner_vec = R_WB * planner_vec;
       planner_vec(2) = (state1(9) - state0(9)) / 0.015;
       ros_logger_->publishVector("/humanoid/GaitReceiver/planner_vec", planner_vec);
-      if (gaitSchedulePtr_->isWalkingGait(current_gait_name))//walking gait
+      if (gaitSchedulePtr_->isWalkingGait(last_gait_name))//walking gait
       {
         // std::cout << "planner_vec.norm() : " << planner_vec.norm() << std::endl;
         ros_logger_->publishValue("/humanoid/GaitReceiver/existValidFootPose_initTime", gaitSchedulePtr_->getModeSchedule().existValidFootPose(initTime));
