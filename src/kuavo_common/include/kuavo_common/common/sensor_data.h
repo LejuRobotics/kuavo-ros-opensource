@@ -15,6 +15,8 @@ typedef struct
   Eigen::VectorXd joint_torque_demand;
   Eigen::VectorXd joint_igbt_temperature;
   Eigen::VectorXd joint_ntc_temperature;
+  Eigen::VectorXd joint_status_word;
+  Eigen::VectorXd joint_error_code;
   Eigen::Vector3d gyro;
   Eigen::Vector3d acc;
   Eigen::Vector3d free_acc;
@@ -34,6 +36,8 @@ typedef struct
     joint_torque_demand.resize(n);
     joint_igbt_temperature.resize(n);
     joint_ntc_temperature.resize(n);
+    joint_status_word.resize(n);
+    joint_error_code.resize(n);
   }
 } SensorData_t;
 

@@ -79,8 +79,7 @@ sudo systemctl restart urobot.service
 
 1. 手柄顶部按键示意图
 
-    <img src="./img/controller_top.png" alt="controller_top" width="66.67%" />
-
+    ![controller_top](./img/controller_top.png)
     图中标注了手柄顶部的按键位置，包括：
     - **LT**（Left Trigger）：左扳机键
     - **LB**（Left Bumper）：左肩键
@@ -89,7 +88,7 @@ sudo systemctl restart urobot.service
 
 2. 手柄正面按键示意图
 
-    <img src="./img/controller_front.png" alt="controller_front" width="66.67%" />
+    ![controller_front](./img/controller_front.png)
 
     图中显示了手柄正面的按键布局，包括：
     - **左摇杆**：位于左上方的蓝色摇杆
