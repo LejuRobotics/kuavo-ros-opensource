@@ -2,12 +2,7 @@
 
 <launch>
       <param name="topic_config" value="$(find humanoid_controllers)/config/log_topics.yaml" />
-      <!-- rosbag 录制参数 -->
-      <!-- 最大分割文件数量 -->
-      <param name="/nodelet_manager/max_splits" value="60"/>
-      <!-- 开机保留的 bag 文件数量，仅在enable_bag_cleanup为true的时候生效 -->
-      <param name="/nodelet_manager/bags_to_keep" value="8"/>
-      <!-- 是否开启启动时限制 bag 个数的功能 -->
-      <param name="/nodelet_manager/enable_bag_cleanup" value="false"/>
+      <!-- rosbag 录制参数 (从 rosbag_params.yaml 加载) -->
+      <rosparam command="load" file="$(find humanoid_controllers)/config/rosbag_params.yaml" ns="nodelet_manager" />
       <node pkg="nodelet" type="nodelet" name="nodelet_rosbag" args="load RosbagNodelet nodelet_manager" respawn="false" output="screen" />
 </launch>
