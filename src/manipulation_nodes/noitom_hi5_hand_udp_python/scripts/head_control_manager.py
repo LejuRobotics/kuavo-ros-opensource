@@ -13,6 +13,7 @@ import rospy
 import math
 import numpy as np
 from kuavo_ros_interfaces.msg import robotHeadMotionData
+from std_msgs.msg import Int32
 
 
 class HeadControlMode:
@@ -321,7 +322,18 @@ class HeadControlManager:
         msg = robotHeadMotionData()
         msg.joint_data = [self.target_yaw, self.target_pitch]
         head_pub.publish(msg)
-    
+
+    def publish_head_control_mode(self, head_ctrl_mode_pub, mode):
+        """
+        发布头部控制模式
+
+        Args:
+            head_ctrl_mode_pub: 头部控制模式发布器
+        """
+        msg = Int32()
+        msg.data = mode
+        head_ctrl_mode_pub.publish(msg)
+
     def get_current_target(self):
         """
         获取当前目标位置

@@ -350,7 +350,6 @@ rospy.Subscriber('/robot_action_state', RobotActionState, robot_action_state_cal
 # 全局话题发布
 joy_pub = rospy.Publisher('/joy', Joy, queue_size=10)
 com_pose_pub = rospy.Publisher('/cmd_pose', Twist, queue_size=10)
-
 # 控制拨杆
 BUTTON_A = 0
 BUTTON_B = 1

@@ -11,5 +11,4 @@
     
     <!-- for Kuavo Humanoid Websocket SDK: host_srv -->
     <include file="$(find h12pro_controller_node)/launch/kuavo_humanoid_sdk_ws_srv.launch"/>
-    <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
 </launch>

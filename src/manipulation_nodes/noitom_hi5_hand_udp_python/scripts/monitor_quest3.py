@@ -20,7 +20,7 @@ import threading
 from visualization_msgs.msg import Marker
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Int32
 # Add the parent directory to the system path to allow relative imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
@@ -107,6 +107,11 @@ class Quest3BoneFramePublisher:
             self._handle_set_head_control_mode
         )
         rospy.loginfo("Head control mode service started at /quest3/set_head_control_mode")
+
+        # 创建头部控制模式发布节点
+        self.head_ctrl_mode_pub = rospy.Publisher('/quest3/head_control_mode', Int32, queue_size=10)
+
+        rospy.loginfo("Head reset service started at /quest3/reset_head_pose")
 
         # 初始化VR连接状态参数
         rospy.set_param('/quest3/connected', False)
@@ -670,6 +675,9 @@ class Quest3BoneFramePublisher:
                 pose_info_list.is_high_confidence = event.IsDataHighConfidence
                 pose_info_list.is_hand_tracking = event.IsHandTracking
                 self.pose_pub.publish(pose_info_list)
+
+                # 发布头部控制模式
+                self.head_control_manager.publish_head_control_mode(self.head_ctrl_mode_pub, self.head_control_manager.mode)
 
                 # if pose_info_list.is_high_confidence:
                 #     self.pose_pub.publish(pose_info_list)

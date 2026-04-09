@@ -30,6 +30,7 @@
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
+#include <kuavo_msgs/SetHeadControlMode.h>
 #include <kuavo_msgs/robotWaistControl.h>
 #include <kuavo_msgs/headBodyPose.h>
 #include <kuavo_msgs/footPose.h>
@@ -197,6 +198,9 @@ namespace ocs2
             arm_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(
             "/humanoid/mpc/arm_control_mode", 1, &QuestControlFSM::armCtrlModeCallback, this); 
 
+            // 订阅获取VR头部控制模式
+            head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<std_msgs::Int32>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
+
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
             observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
             stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
@@ -207,7 +211,8 @@ namespace ocs2
             change_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(change_arm_mode_service_name);
            
             change_arm_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
-            
+            change_head_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetHeadControlMode>("/quest3/set_head_control_mode");
+
             get_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_get_arm_ctrl_mode");
             whole_torso_ctrl_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/vr_whole_torso_ctrl", 1);
 
@@ -357,6 +362,21 @@ namespace ocs2
             else
             {
                 ROS_ERROR("Failed to call SetArmModeSrv");
+            }
+        }
+        void callVRSetHeadModeSrv(std::string head_mode)
+        {
+            kuavo_msgs::SetHeadControlMode srv;
+            srv.request.mode = head_mode;
+
+            // 调用服务
+            if (change_head_mode_service_VR_client_.call(srv))
+            {
+                ROS_INFO("VRSetHeadModeSrv call successful");
+            }
+            else
+            {
+                ROS_ERROR("Failed to call VRSetHeadModeSrv");
             }
         }
 
@@ -732,6 +752,16 @@ namespace ocs2
             ROS_WARN_THROTTLE(2.0, "[QuestControlFSM] arm_control_mode is empty");
         }
 
+        void headCtrlModeCallback(const std_msgs::Int32::ConstPtr &mode_msg)
+        {
+            if (mode_msg->data == 1)
+            {
+                use_auto_track_ = true;
+            }
+            head_ctrl_mode_ = mode_msg->data;
+            
+        }
+
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
         {
             joystick_data_ = *msg;
@@ -943,6 +973,13 @@ namespace ocs2
                     }
                     auto new_arm_mode = (arm_ctrl_mode_!=2) ? 2 : 1;
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
+
+                    // 如果头部控制模式为主动手跟踪模式（auto_track_active），手臂复位时头部也自动回正
+                    if(use_auto_track_ == true){
+                        auto new_head_mode = (new_arm_mode ==1) ? "fixed" : "auto_track_active";   
+                        callVRSetHeadModeSrv(new_head_mode);
+                    }
+
                     if (only_half_up_body_) {
                         callVRSetArmModeSrv(new_arm_mode);
                     }
@@ -1146,6 +1183,13 @@ namespace ocs2
                     }
                     auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 2) ? 2 : 1;
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
+
+                    // 如果头部控制模式为主动手跟踪模式（auto_track_active），手臂复位时头部也自动回正
+                    if(use_auto_track_ == true){
+                        auto new_head_mode = (arm_ctrl_mode_ ==1) ? "fixed" : "auto_track_active";   
+                        callVRSetHeadModeSrv(new_head_mode);
+                    }
+
                     if (only_half_up_body_) {
                         callVRSetArmModeSrv(new_arm_ctrl_mode_wheel_);
                     }
@@ -1986,6 +2030,7 @@ namespace ocs2
 
         ros::ServiceClient change_arm_mode_service_client_;
         ros::ServiceClient change_arm_mode_service_VR_client_;
+        ros::ServiceClient change_head_mode_service_VR_client_;
         ros::ServiceClient get_arm_mode_service_client_;
 
         ros::ServiceClient enable_wbc_arm_trajectory_control_client_;
@@ -2007,7 +2052,10 @@ namespace ocs2
         std::map<std::string, humanoid::ModeSequenceTemplate> gait_map_;
 
         ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
+        ros::Subscriber head_ctrl_mode_vr_sub_; // 从主控制器获取头部控制模式
         int arm_ctrl_mode_{2};
+        int head_ctrl_mode_{3};
+        bool use_auto_track_{false};
 
         ros::Subscriber joystick_sub_;
         std::string state_;

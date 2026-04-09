@@ -6,6 +6,7 @@
 #include "kuavo_msgs/switchController.h"
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
+#include "kuavo_msgs/ControllerSwitchEvent.h"
 #include "std_srvs/SetBool.h"
 #include "std_srvs/Trigger.h"
 #include <map>
@@ -302,6 +303,12 @@ namespace humanoid_controller
      */
     void updateControllerListsByType();
 
+    /**
+     * @brief 发布控制器切换事件
+     */
+    void publishControllerSwitchEvent(const std::string& from_controller,
+                                      const std::string& to_controller);
+
 
   private:
     std::map<std::string, std::unique_ptr<RLControllerBase>> controllers_;  ///< 控制器映射表
@@ -323,6 +330,7 @@ namespace humanoid_controller
     ros::ServiceServer set_fall_down_state_srv_;     ///< 设置倒地状态服务
     ros::ServiceServer switch_to_vmp_controller_srv_; ///< 切换到VMP控制器服务
     ros::ServiceServer switch_to_dance_controller_srv_; ///< 切换到Dance控制器服务
+    ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
     ros::NodeHandle* nh_ptr_;                       ///< ROS节点句柄指针
 
     // RL切换模式：true 直接切换到RL；false 使用MPC过渡
@@ -337,4 +345,3 @@ namespace humanoid_controller
   };
 
 } // namespace humanoid_controller
-

@@ -220,6 +220,9 @@
               output="screen" required="false"/>
     </group>
 
+    <!-- 启动手臂贝塞尔节点（轮臂机器人也支持手臂控制） -->
+    <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+
     <!-- restart urobot.service (depends on sshpass) -->
     <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service"
           output="screen" required="false"/>

@@ -126,6 +126,7 @@ namespace humanoid_controller
   bool RLControllerManager::switchController(const std::string& name)
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const std::string current_before = current_controller_name_.empty() ? "mpc" : current_controller_name_;
     // 检查当前是否为倒地起身控制器
     if (!current_controller_name_.empty())
     {
@@ -160,9 +161,14 @@ namespace humanoid_controller
         }
       }
       current_controller_name_ = "";
+      const std::string to_controller = "mpc";
       ROS_INFO("[RLControllerManager] Switched to BASE controller");
       // 切换到 MPC 控制器时也异步切换手臂模式到 1
       changeArmCtrlModeAsync(1);
+      if (current_before != to_controller)
+      {
+        publishControllerSwitchEvent(current_before, to_controller);
+      }
       return true;
     }
 
@@ -214,6 +220,7 @@ namespace humanoid_controller
     }
 
     current_controller_name_ = name;
+    const std::string to_controller = current_controller_name_;
     ROS_INFO("[RLControllerManager] Switched to controller '%s' (type: %d)", 
              name.c_str(), static_cast<int>(new_controller->getType()));
     // 调用控制器的更新速度限制接口
@@ -224,6 +231,10 @@ namespace humanoid_controller
     if (new_controller && new_controller->getType() != RLControllerType::MPC)
     {
       changeArmCtrlModeAsync(1);
+    }
+    if (current_before != to_controller)
+    {
+      publishControllerSwitchEvent(current_before, to_controller);
     }
     return true;
   }
@@ -592,9 +603,26 @@ namespace humanoid_controller
                                                         &RLControllerManager::switchToVMPControllerCallback, this);
     switch_to_dance_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_dance_controller",
                                                           &RLControllerManager::switchToDanceControllerCallback, this);
+    controller_switch_event_pub_ = nh.advertise<kuavo_msgs::ControllerSwitchEvent>(
+        "/humanoid_controller/controller_switch_event", 1, true);
 
     ROS_INFO("[RLControllerManager] ROS services initialized");
     return true;
+  }
+
+  void RLControllerManager::publishControllerSwitchEvent(const std::string& from_controller,
+                                                         const std::string& to_controller)
+  {
+    if (!controller_switch_event_pub_)
+    {
+      return;
+    }
+
+    kuavo_msgs::ControllerSwitchEvent msg;
+    msg.header.stamp = ros::Time::now();
+    msg.from_controller = from_controller;
+    msg.to_controller = to_controller;
+    controller_switch_event_pub_.publish(msg);
   }
 
   std::vector<std::string> RLControllerManager::getWalkControllerList()
@@ -1116,5 +1144,3 @@ namespace humanoid_controller
 
 
 } // namespace humanoid_controller
-
-

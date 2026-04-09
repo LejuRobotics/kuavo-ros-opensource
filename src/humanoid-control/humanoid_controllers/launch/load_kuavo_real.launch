@@ -308,4 +308,7 @@
 
     </group>
 
+    <!-- 启动手臂贝塞尔节点（统一在此处启动，避免与websocket启动冲突） -->
+    <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+
 </launch>

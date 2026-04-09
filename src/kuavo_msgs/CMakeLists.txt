@@ -147,6 +147,7 @@ add_message_files(
 
   # Battery info
   BatteryInfo.msg
+  ControllerSwitchEvent.msg
 
   # Lb single timed cmd
   timedSingleCmd.msg

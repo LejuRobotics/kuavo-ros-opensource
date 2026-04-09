@@ -13,6 +13,28 @@ import argparse
 STOP_THRESHOLD = 0.5
 
 
+def _bridge_network_defaults():
+    """ROBOT_VERSION==60 时使用 169.254.x.x（链路本地）；否则使用 192.168.26.x。"""
+    rv = os.environ.get("ROBOT_VERSION", "").strip()
+    try:
+        is_v60 = int(rv) == 60
+    except ValueError:
+        is_v60 = False
+    if is_v60:
+        return {
+            "kuavo_master": "http://169.254.128.130:11311",
+            "wheel_master": "http://169.254.128.2:11311",
+            "kuavo_slave_ip": "169.254.128.130",
+            "wheel_slave_ip": "169.254.128.130",
+        }
+    return {
+        "kuavo_master": "http://192.168.26.1:11311",
+        "wheel_master": "http://192.168.26.1:11311",
+        "kuavo_slave_ip": "192.168.26.22",
+        "wheel_slave_ip": "192.168.26.22",
+    }
+
+
 def kuavo_process(master_uri, shared_data, kuavo_slave_ip):
     """kuavo进程 - 订阅cmd_vel，发布odom，连接到 ROS Master A"""
     try:
@@ -141,16 +163,20 @@ def wheel_process(master_uri, shared_data, wheel_slave_ip):
         print(f"[Wheel Process] Error: {e}")
 
 def main():
-    # 创建参数解析器
+    net = _bridge_network_defaults()
     parser = argparse.ArgumentParser(description='ROS Bridge for Kuavo and Wheel communication')
-    parser.add_argument('--kuavo-master', default='http://169.254.128.130:11311', 
-                       help='Kuavo ROS Master URI (default: http://169.254.128.130:11311)')
-    parser.add_argument('--wheel-master', default='http://169.254.128.2:11311', 
-                       help='Wheel ROS Master URI (default: http://169.254.128.2:11311)')
-    parser.add_argument('--kuavo-slave-ip', default='169.254.128.130', 
-                       help='Kuavo slave IP address (default: 169.254.128.130)')
-    parser.add_argument('--wheel-slave-ip', default='169.254.128.130', 
-                       help='Wheel slave IP address (default: 169.254.128.130)')
+    parser.add_argument('--kuavo-master', default=net['kuavo_master'],
+                       help='Kuavo ROS Master URI (default: ROBOT_VERSION=60 -> '
+                            'http://169.254.128.130:11311, else -> http://192.168.26.1:11311)')
+    parser.add_argument('--wheel-master', default=net['wheel_master'],
+                       help='Wheel ROS Master URI (default: ROBOT_VERSION=60 -> '
+                            'http://169.254.128.2:11311, else -> http://192.168.26.1:11311)')
+    parser.add_argument('--kuavo-slave-ip', default=net['kuavo_slave_ip'],
+                       help='Kuavo slave IP address (default: ROBOT_VERSION=60 -> '
+                            '169.254.128.130, else -> 192.168.26.22)')
+    parser.add_argument('--wheel-slave-ip', default=net['wheel_slave_ip'],
+                       help='Wheel slave IP address (default: ROBOT_VERSION=60 -> '
+                            '169.254.128.130, else -> 192.168.26.22)')
     
     args, unknown = parser.parse_known_args()
     if unknown:
