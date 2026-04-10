@@ -77,7 +77,8 @@
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
 
     <!-- 日志管理参数 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
     <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- 启动信息收集脚本 -->

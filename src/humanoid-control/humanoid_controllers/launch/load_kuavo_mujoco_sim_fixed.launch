@@ -8,7 +8,8 @@
   <arg name="robot_version" default="46"/>
 
   <!-- 系统资源管理参数 -->
-  <param name="/nodelet_manager/max_log_size_gb" value="32.0"/>
+  <!-- 最大日志大小为 32GB因为运行时候要预留30G内存因此设置成日志大小大于 2GB 时删除日志 -->
+  <param name="/nodelet_manager/max_log_size_gb" value="2.0"/>
   <param name="/nodelet_manager/log_delete_limit_gb" value="2.0"/>
   
   <!-- 控制器参数 -->

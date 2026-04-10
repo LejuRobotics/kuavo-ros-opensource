@@ -44,7 +44,8 @@
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     
     <!-- 自动清理 .ros 文件夹参数 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
     <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- 只启动基本的MPC节点 -->
