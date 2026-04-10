@@ -1212,8 +1212,8 @@ namespace humanoid_controller
           if (jointCmdMsg.control_modes[i] == 2 &&
               ruiwo_count < ruiwo_size)
           {
-            jointCmdMsg.joint_kp[i] = static_cast<double>(running_settings.ruiwo_kp[ruiwo_count]);
-            jointCmdMsg.joint_kd[i] = static_cast<double>(running_settings.ruiwo_kd[ruiwo_count]);
+            jointCmdMsg.joint_kp[i] = running_settings.ruiwo_kp[ruiwo_count];
+            jointCmdMsg.joint_kd[i] = running_settings.ruiwo_kd[ruiwo_count];
           }
           ruiwo_count++;
         }
@@ -1240,8 +1240,8 @@ namespace humanoid_controller
       return true;
     }
 
-    std::vector<int32_t> kp_values = nested_obj["ruiwo_kp"].get<std::vector<int32_t>>();
-    std::vector<int32_t> kd_values = nested_obj["ruiwo_kd"].get<std::vector<int32_t>>();
+    std::vector<double> kp_values = nested_obj["ruiwo_kp"].get<std::vector<double>>();
+    std::vector<double> kd_values = nested_obj["ruiwo_kd"].get<std::vector<double>>();
 
     if (kp_values.empty() || kd_values.empty()) {
       res.message = "Failed to load ruiwo_kp or ruiwo_kd from '" + param_name + "'";
@@ -3120,8 +3120,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
                 n_ruiwo >= headNum_)
             {
               const int base = n_ruiwo - headNum_;
-              head_kp_cmd = static_cast<double>(running_settings.ruiwo_kp[base + i3]);
-              head_kd_cmd = static_cast<double>(running_settings.ruiwo_kd[base + i3]);
+              head_kp_cmd = running_settings.ruiwo_kp[base + i3];
+              head_kd_cmd = running_settings.ruiwo_kd[base + i3];
             }
           }
           jointCmdMsg.joint_q.push_back(get_head_pos(i3));
@@ -3193,8 +3193,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
                 n_ruiwo >= headNum_)
             {
               const int base = n_ruiwo - headNum_;
-              head_kp_cmd = static_cast<double>(running_settings.ruiwo_kp[base + i3]);
-              head_kd_cmd = static_cast<double>(running_settings.ruiwo_kd[base + i3]);
+              head_kp_cmd = running_settings.ruiwo_kp[base + i3];
+              head_kd_cmd = running_settings.ruiwo_kd[base + i3];
             }
           }
           jointCmdMsg.joint_q[head_start_index + i3] = get_head_pos(i3);

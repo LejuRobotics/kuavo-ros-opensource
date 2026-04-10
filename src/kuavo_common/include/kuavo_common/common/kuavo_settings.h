@@ -159,12 +159,12 @@ namespace HighlyDynamic
         bool use_vr_arm_kpkd = false;
         std::vector<int32_t> joint_kp;
         std::vector<int32_t> joint_kd;
-        std::vector<int32_t> ruiwo_kp;
-        std::vector<int32_t> ruiwo_kd;
+        std::vector<double> ruiwo_kp;
+        std::vector<double> ruiwo_kd;
         std::vector<int32_t> vr_joint_kp;
         std::vector<int32_t> vr_joint_kd;
-        std::vector<int32_t> vr_ruiwo_kp;
-        std::vector<int32_t> vr_ruiwo_kd;
+        std::vector<double> vr_ruiwo_kp;
+        std::vector<double> vr_ruiwo_kd;
     };
 
     struct HardwareSettings

@@ -115,8 +115,8 @@ namespace HighlyDynamic
         bool use_anthropomorphic_gait =false;
         std::vector<int32_t> joint_kp;
         std::vector<int32_t> joint_kd;
-        std::vector<int32_t> ruiwo_kp;  // Ruiwo 手臂电机默认 Kp（来自 kuavo.json ruiwo_kp）
-        std::vector<int32_t> ruiwo_kd;  // Ruiwo 手臂电机默认 Kd（来自 kuavo.json ruiwo_kd）
+        std::vector<double> ruiwo_kp;  // Ruiwo 手臂电机默认 Kp（来自 kuavo.json ruiwo_kp）
+        std::vector<double> ruiwo_kd;  // Ruiwo 手臂电机默认 Kd（来自 kuavo.json ruiwo_kd）
     };
 
     struct HardwareSettings

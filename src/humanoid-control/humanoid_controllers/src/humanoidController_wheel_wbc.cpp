@@ -1743,8 +1743,8 @@ namespace humanoidController_wheel_wbc
           if (jointCmdMsg.control_modes[i] == 2 &&
               ruiwo_count < ruiwo_size)
           {
-            jointCmdMsg.joint_kp[i] = static_cast<double>(running_settings.ruiwo_kp[ruiwo_count]);
-            jointCmdMsg.joint_kd[i] = static_cast<double>(running_settings.ruiwo_kd[ruiwo_count]);
+            jointCmdMsg.joint_kp[i] = running_settings.ruiwo_kp[ruiwo_count];
+            jointCmdMsg.joint_kd[i] = running_settings.ruiwo_kd[ruiwo_count];
           }
           ruiwo_count++;
         }
