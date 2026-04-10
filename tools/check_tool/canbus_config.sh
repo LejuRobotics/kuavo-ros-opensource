@@ -27,6 +27,9 @@ KUAVO5_5W_SHOULDER_CAN_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/co
 KUAVO4PRO_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_single_canbus_cofig.yaml"
 KUAVO4PRO_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_dual_canbus_cofig.yaml"
 
+# Kuavo5w_v62
+KUAVO5W_V62_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5w_v62_dual_canbus_cofig.yaml"
+
 # 打印带颜色的标题
 echo_title() {
     echo -e "\033[1m\033[0;34m=== $1 ===\033[0m"
@@ -105,7 +108,7 @@ select_wiring_type() {
 select_hand_protocol_type() {
     local -n result_ref=$1
     local hand_protocol_options=("proto_buf -- 485协议" "proto_can -- CAN协议")
-    show_menu "选择手部协议类型" "${hand_protocol_options[@]}"
+    show_menu "选择手部协议类型 (若无末端，请任意选择)" "${hand_protocol_options[@]}"
     get_user_selection 2 hand_protocol_selection
 
     local hand_protocol_types=("proto_buf" "proto_can")
@@ -592,7 +595,7 @@ main() {
     # 选择机器人类型
     local robot_options=("roban2.0" "roban2.1" "kuavo4pro" "kuavo5" "kuavo5/5w(shoulder CAN)")
     show_menu "选择机器人类型" "${robot_options[@]}"
-    get_user_selection 5 robot_selection
+    get_user_selection 6 robot_selection
 
     local robot_type="${robot_options[$((robot_selection-1))]}"
     echo_success "选择机器人类型: $robot_type"

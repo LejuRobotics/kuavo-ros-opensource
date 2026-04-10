@@ -11,6 +11,13 @@
 #include <iomanip>  // for std::setprecision
 #include <cstdio>   // for freopen, fflush
 #include <fcntl.h>  // for open, O_WRONLY
+#include <cstdlib>  // for getenv
+#include <unistd.h> // for read, STDIN_FILENO, dup, dup2
+#include <sys/stat.h>  // for stat
+#include <sys/types.h> // for stat
+#include <iomanip>  // for std::setprecision
+#include <cstdio>   // for freopen, fflush
+#include <fcntl.h>  // for open, O_WRONLY
 
 #include "hardware_plant.h"
 #include "joint_test_poses.h"
