@@ -245,8 +245,14 @@ const sidebars = {
         {
           type: 'category',
           label: '科研框架',
-          items: [
-            'basic_usage/kuavo-ros-control/docs/5功能案例/科研框架/强化学习运动控制框架合集',
+          items: [ 
+            {
+              type: 'category',
+              label: '强化学习使用案例',
+              items: [
+                'basic_usage/kuavo-ros-control/docs/5功能案例/科研框架/强化学习使用案例/强化学习运动控制框架合集',
+              ],
+            },
             {
               type: 'category',
               label: '模仿学习使用案例',
