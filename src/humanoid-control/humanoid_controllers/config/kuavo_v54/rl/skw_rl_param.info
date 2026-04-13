@@ -41,7 +41,7 @@ commandData
         cmdVelAngularY      1   ;
         cmdVelAngularZ      2       ; 输入模型的最大 cmdVelAngularZ = scale[5] * velocityLimits[3]
         cmdStance           1   ;
-        cmdVelLineXNegScale 0.4    ; X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
+        cmdVelLineXNegScale 0.7    ; X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
     }
 };预留完整的接口，当前只用到 cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdWalkEnable，最大长度是 4
 
@@ -60,7 +60,7 @@ defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity
 {
-    linearX        -0.2     ; 原地踏步线速度X
+    linearX        -0.05     ; 原地踏步线速度X
     linearY         0.0       ; 原地踏步线速度Y
     linearZ         0.0       ; 接口留用
     angularX        0.0       ; 接口留用
@@ -87,8 +87,8 @@ yawCompensation
     threshold                   0.0     ; YAW阈值
     xVelocityThreshold          0.1    ; X方向速度阈值
     enableSeparateCompensation  true    ; 是否启用分开补偿（顺时针/逆时针）(true/false)
-    xBiasClockwise             -0.2     ; 顺时针旋转时X轴偏置
-    xBiasCounterclockwise      -0.2     ; 逆时针旋转时X轴偏置
+    xBiasClockwise             -0.05     ; 顺时针旋转时X轴偏置
+    xBiasCounterclockwise      -0.05     ; 逆时针旋转时X轴偏置
 }
 
 ; ==================== Y方向行走补偿配置 ====================
@@ -369,14 +369,14 @@ motor_pdo_kd
     (13,0)  3254    ; zarm_l1_joint (EC_MASTER)
     (14,0)  3       ; zarm_l2_joint (RUIWO, amp_kpkd ruiwo_kd[0]=3)
     (15,0)  3       ; zarm_l3_joint (RUIWO, amp_kpkd ruiwo_kd[1]=3)
-    (16,0)  3       ; zarm_l4_joint (RUIWO, amp_kpkd ruiwo_kd[2]=3)
+    (16,0)  2       ; zarm_l4_joint (RUIWO, amp_kpkd ruiwo_kd[2]=3)
     (17,0)  3       ; zarm_l5_joint (RUIWO, amp_kpkd ruiwo_kd[3]=3)
     (18,0)  3       ; zarm_l6_joint (RUIWO, amp_kpkd ruiwo_kd[4]=3)
     (19,0)  3       ; zarm_l7_joint (RUIWO, amp_kpkd ruiwo_kd[5]=3)
     (20,0)  3254    ; zarm_r1_joint (EC_MASTER)
     (21,0)  3       ; zarm_r2_joint (RUIWO, amp_kpkd ruiwo_kd[6]=3)
     (22,0)  3       ; zarm_r3_joint (RUIWO, amp_kpkd ruiwo_kd[7]=3)
-    (23,0)  3       ; zarm_r4_joint (RUIWO, amp_kpkd ruiwo_kd[8]=3)
+    (23,0)  2       ; zarm_r4_joint (RUIWO, amp_kpkd ruiwo_kd[8]=3)
     (24,0)  3       ; zarm_r5_joint (RUIWO, amp_kpkd ruiwo_kd[9]=3)
     (25,0)  3       ; zarm_r6_joint (RUIWO, amp_kpkd ruiwo_kd[10]=3)
     (26,0)  3       ; zarm_r7_joint (RUIWO, amp_kpkd ruiwo_kd[11]=3)
