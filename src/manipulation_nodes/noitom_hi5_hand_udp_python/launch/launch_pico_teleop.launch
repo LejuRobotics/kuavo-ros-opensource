@@ -10,6 +10,7 @@
     <arg name="startup_delay" default="0.0"/>
     <arg name="enable_head_control" default="true"/>
     <arg name="head_control_mode" default="auto_track_active"/>
+    <arg name="use_pico" default="true"/>
 
     <node
         pkg="humanoid_controllers"

@@ -128,6 +128,8 @@ namespace ocs2
             }
             nodeHandle.param("/wheel_ik", wheel_ik_, false);
             ROS_INFO_STREAM("[QuestControlFSM] wheel_ik: " << (wheel_ik_ ? "true" : "false"));
+            nodeHandle.param("/use_pico", use_pico_, false);
+
             auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
             auto kuavo_settings = drake_interface_->getKuavoSettings();
             waist_dof_ = kuavo_settings.hardware_settings.num_waist_joints;
@@ -199,7 +201,8 @@ namespace ocs2
             "/humanoid/mpc/arm_control_mode", 1, &QuestControlFSM::armCtrlModeCallback, this); 
 
             // 订阅获取VR头部控制模式
-            head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<std_msgs::Int32>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
+            std::string head_vr_mode_sub_name = use_pico_ ? "/pico/head_control_mode" : "quest3/head_control_mode";
+            head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<std_msgs::String>(head_vr_mode_sub_name, 1, &QuestControlFSM::headCtrlModeCallback, this);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
             observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
@@ -209,9 +212,10 @@ namespace ocs2
 
             std::string change_arm_mode_service_name = robot_type_ == 1 ? "/wheel_arm_change_arm_ctrl_mode" : "/humanoid_change_arm_ctrl_mode";
             change_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(change_arm_mode_service_name);
-           
+            std::string change_head_mode_service_name = use_pico_ ? "/pico/set_head_control_mode" : "/quest3/set_head_control_mode";
+            change_head_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetHeadControlMode>(change_head_mode_service_name);
+
             change_arm_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
-            change_head_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetHeadControlMode>("/quest3/set_head_control_mode");
 
             get_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_get_arm_ctrl_mode");
             whole_torso_ctrl_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/vr_whole_torso_ctrl", 1);
@@ -752,9 +756,9 @@ namespace ocs2
             ROS_WARN_THROTTLE(2.0, "[QuestControlFSM] arm_control_mode is empty");
         }
 
-        void headCtrlModeCallback(const std_msgs::Int32::ConstPtr &mode_msg)
+        void headCtrlModeCallback(const std_msgs::String::ConstPtr &mode_msg)
         {
-            if (mode_msg->data == 1)
+            if (mode_msg->data == "auto_track_active")
             {
                 use_auto_track_ = true;
             }
@@ -2054,7 +2058,7 @@ namespace ocs2
         ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
         ros::Subscriber head_ctrl_mode_vr_sub_; // 从主控制器获取头部控制模式
         int arm_ctrl_mode_{2};
-        int head_ctrl_mode_{3};
+        std::string head_ctrl_mode_{"vr_follow"};
         bool use_auto_track_{false};
 
         ros::Subscriber joystick_sub_;
@@ -2082,6 +2086,7 @@ namespace ocs2
         int robot_type_{0};  // 0: biped, 1: wheel robot
         int robot_version_int_{0};  // 机器人版本号
         bool wheel_ik_{false}; // 轮臂增量VR兼容模式开关
+        bool use_pico_{false}; // PICO开关
 
         // VR control limits (loaded from reference.info)
         double vr_squat_min_pitch_deg_{3.0};    // min pitch (deg)

@@ -13,7 +13,7 @@ import rospy
 import math
 import numpy as np
 from kuavo_ros_interfaces.msg import robotHeadMotionData
-from std_msgs.msg import Int32
+from std_msgs.msg import String
 
 
 class HeadControlMode:
@@ -330,7 +330,7 @@ class HeadControlManager:
         Args:
             head_ctrl_mode_pub: 头部控制模式发布器
         """
-        msg = Int32()
+        msg = String()
         msg.data = mode
         head_ctrl_mode_pub.publish(msg)
 

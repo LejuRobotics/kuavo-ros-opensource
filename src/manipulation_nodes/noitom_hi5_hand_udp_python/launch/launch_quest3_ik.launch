@@ -16,6 +16,7 @@
     <arg name="use_cpp_monitor" default="false"/> <!-- false: use Python Monitor (monitor_quest3.py), true: use C++ Monitor (monitor_quest3_cpp) -->
     <arg name="use_cpp_incremental_ik" default="false"/> <!-- false: use Python IK (ik_ros_uni.py), true: use C++ Incremental IK (ik_ros_uni_cpp_node) -->
     <arg name="wheel_ik" default="false"/> <!-- false: use ik_ros_uni_cpp_node, true: use wheel_ik_ros_uni_cpp_node -->
+    <arg name="use_pico" default="false"/> <!-- false: use ik_ros_uni_cpp_node, true: use wheel_ik_ros_uni_cpp_node -->
     <arg name="task_space_acc_limit" default="500.0" />
     <arg name="task_space_jerk_limit" default="3000.0" />
     <arg name="joint_space_acc_limit" default="500.0" />
@@ -73,6 +74,8 @@
     <!-- 设置 wheel_ik 全局参数，供其他节点统一读取 -->
     <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool"/>
     
+    <param name="/use_pico" value="$(arg use_pico)" type="bool"/>
+
     <!-- motion_capture_ik -->
     <!-- Python IK Node (启动当 use_cpp_incremental_ik=false 时) -->
     <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(arg use_cpp_incremental_ik)">
@@ -193,6 +196,7 @@
     <!-- humanoid_quest_control_with_arm (启动当 wheel_ik=true 时) -->
     <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" if="$(eval wheel_ik)" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
         <param name="wheel_ik" value="$(arg wheel_ik)" />
+        <param name="use_pico" value="$(arg use_pico)" />
 
     <!-- noitom_hi5_hand_udp_python -->
     <!-- Python implementation (default) -->
