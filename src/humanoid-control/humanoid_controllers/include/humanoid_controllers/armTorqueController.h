@@ -31,9 +31,9 @@ private:
     Eigen::VectorXd q_measured_;    // 测量关节位置
     Eigen::VectorXd v_measured_;    // 测量关节速度
     const int n_leg_joints_{12};    // 腿关节数量
-    const int n_arm_joints_{14};    // 臂关节数量
-    static constexpr int n_left_arm_ = 7;   // 左手臂关节数量
-    static constexpr int n_right_arm_ = 7;   // 右手臂关节数量
+    const int n_arm_joints_{14};    // 臂关节数量（最大值，实际由URDF决定）
+    int n_left_arm_{0};             // 左手臂实际关节数量（由URDF动态确定）
+    int n_right_arm_{0};            // 右手臂实际关节数量（由URDF动态确定）
     
     int left_arm_q_start_idx_;      // 左手臂关节在q中的起始索引
     int left_arm_v_start_idx_;      // 左手臂关节在v中的起始索引

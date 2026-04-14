@@ -15,6 +15,12 @@ class Frame(str, Enum):
     TAG = "tag"  # AprilTag坐标系
 
 
+class WheelArmFrame(str, Enum):
+    """轮臂机器人坐标系"""
+    BASE = "base_link"  # 基座坐标系（局部系）
+    ODOM = "odom"  # 里程计原点（世界系）
+
+
 class Point:
     def __init__(self, x: float, y: float, z: float, frame: Frame):
         """

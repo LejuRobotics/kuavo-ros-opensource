@@ -14,7 +14,7 @@
     <arg name="robot_type"         default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="nodelet_robot_type"  default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="wheel_control_type"  default="1"/>    <!-- 0表示轮臂的仿真测试版mpc，1表示实际部署mpc -->
-    <arg name="use_sqp"   default="false" doc="Use SQP if true, DDP if false"/>
+    <arg name="use_sqp"   default="true" doc="Use SQP if true, DDP if false"/>
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
@@ -49,7 +49,7 @@
     <arg name="visualize_humanoid" default="true"/>
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <!-- 根据机器人类型设置only_half_up_body参数 -->
-    <arg name="only_half_up_body" default="true" if="$(eval arg('robot_type') == 1)"/>    <!-- 轮臂机器人 -->
+    <arg name="only_half_up_body" default="false" if="$(eval arg('robot_type') == 1)"/>    <!-- 轮臂机器人 -->
     <arg name="only_half_up_body" default="false" unless="$(eval arg('robot_type') == 1)"/> <!-- 双足机器人 -->
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
@@ -171,6 +171,7 @@
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
           <arg name="start_way" value="$(arg start_way)"/>
         </include>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
       </group>
       <group if="$(eval arg('joystick_type') == 'sim')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">

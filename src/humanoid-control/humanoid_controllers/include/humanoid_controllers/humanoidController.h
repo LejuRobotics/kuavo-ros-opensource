@@ -639,17 +639,10 @@ namespace humanoid_controller
     vector_t desire_head_pos_ = vector_t::Zero(2);
     vector_t desire_waist_pos_ = vector_t::Zero(1);  // 腰部目标位置
     vector_t desire_arm_q_prev_;
-    vector_t jointPos_, jointVel_;
-    vector_t jointPosRL_, jointVelRL_;
-    vector_t jointAcc_;
-    vector_t jointAccRL_;
-    vector_t jointTorque_;
-    vector_t jointTorqueRL_;
+    vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;
+    vector_t jointPosWBC_, jointVelWBC_, jointAccWBC_, jointCurrentWBC_;
+    vector_t jointPosRL_, jointVelRL_, jointAccRL_, jointTorqueRL_;
     vector_t dexhand_joint_pos_ = vector_t::Zero(12);
-
-    vector_t jointPosWBC_, jointVelWBC_;
-    vector_t jointAccWBC_;
-    vector_t jointCurrentWBC_;
 
     vector_t motor_c2t_;
     std::vector<std::vector<double>> motor_cul;

@@ -136,11 +136,10 @@ if [ "$LAUNCH1_RUNNING" = "false" ]; then
 
     # 检测动作执行节点启动
     echo "正在启动动作执行节点..."
-    if rosnode list | grep -q "autostart_arm_trajectory_bezier_demo"; then
-        echo "动作执行节点已启动。"
-    else
-        echo "注意：动作执行节点尚未检测到，请稍后检查节点状态"
-    fi
+    while ! rosnode list | grep -q "autostart_arm_trajectory_bezier_demo"; do
+        sleep 1
+    done
+    echo "动作执行节点已启动。"
 else
     echo "humanoid_plan_arm_trajectory 已在运行，跳过启动"
     PLAN_PID=""

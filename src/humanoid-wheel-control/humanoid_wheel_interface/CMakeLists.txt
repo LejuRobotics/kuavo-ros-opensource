@@ -79,6 +79,8 @@ add_library(${PROJECT_NAME}
   src/MobileManipulatorPreComputation.cpp
   src/MobileManipulatorPinocchioMapping.cpp
   src/constraint/EndEffectorConstraint.cpp
+  src/constraint/EndEffectorMultiPointConstraint.cpp
+  src/constraint/EndEffectorLocalMultiPointConstraint.cpp
   src/constraint/EndEffectorLocalConstraint.cpp
   src/constraint/EndEffectorTorsoConstraint.cpp
   src/constraint/TorsoTrackingConstraint.cpp
@@ -92,7 +94,17 @@ add_library(${PROJECT_NAME}
   src/motion_planner/VelocityLimiter.cpp
   src/motion_planner/cmdPosePlannerWithRuckig.cpp
   src/motion_planner/cmdVelPlannerWithRuckig.cpp
+  src/motion_planner/posePlannerTimedScheduler.cpp
+  src/filters/jointCmdLimiter.cpp
   src/filters/KinemicLimitFilter.cpp
+  src/cost/LinearStateInequalitySoftConstraint.cpp
+  src/cost/TorsoTrackingBoxSoftCost.cpp
+  src/cost/EndEffectorBoxSoftCost.cpp
+  src/cost/EndEffectorMultiPointBoxSoftCost.cpp
+  src/cost/EndEffectorLocalBoxSoftCost.cpp
+  src/cost/selfDistanceBoxSoftCost.cpp
+  src/cost/EndEffectorLocalMultiPointBoxSoftCost.cpp
+  src/cost/EndEffectorJointBias.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)

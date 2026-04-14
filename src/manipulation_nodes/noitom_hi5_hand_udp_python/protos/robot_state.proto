@@ -27,9 +27,15 @@ message JointState {
   repeated double torque = 3;
 }
 
+// 手臂力反馈（各手臂 xyz 中最大的力）
+message ArmForceFeedback {
+  repeated double max_force = 1;  // 各末端 xyz 中最大的力，归一化到 0-255，索引0=左手末端, 索引1=右手末端，方便扩展
+}
+
 message RobotState {
   Header header = 1;
   EndEffectorState ee_state = 2;
   JointState joint_state = 3;
   ItemMassForceResponse item_mass_force_response = 4;
+  optional ArmForceFeedback arm_force_feedback = 5;  // 左右末端最大力反馈数据（可选）
 }

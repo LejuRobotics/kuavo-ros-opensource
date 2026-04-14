@@ -111,6 +111,14 @@ namespace
   bool claw_cmd_updated = false;
   size_t numClawJoints = 2; // 夹抓的自由度
 
+  // 手臂外力（持续施加）
+  geometry_msgs::Wrench left_hand_wrench_;
+  geometry_msgs::Wrench right_hand_wrench_;
+  bool left_hand_active_ = false;
+  bool right_hand_active_ = false;
+  int left_arm_link_id_ = -1;   // 缓存左手link ID
+  int right_arm_link_id_ = -1;  // 缓存右手link ID
+
   std::mutex queueMutex;
   ros::NodeHandle *g_nh_ptr;
   int robot_type = -1;
@@ -885,7 +893,7 @@ namespace
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61)
+                else if(robotVersion_ == 61 || robotVersion_ == 62)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
@@ -990,7 +998,23 @@ namespace
                 }
               }
             }
-
+            // 每次step前应用手臂外力（因为xfrc_applied会在mj_step后自动清零）
+            if (left_hand_active_ && left_arm_link_id_ != -1) {
+              d->xfrc_applied[6 * left_arm_link_id_ + 0] = left_hand_wrench_.force.x;
+              d->xfrc_applied[6 * left_arm_link_id_ + 1] = left_hand_wrench_.force.y;
+              d->xfrc_applied[6 * left_arm_link_id_ + 2] = left_hand_wrench_.force.z;
+              d->xfrc_applied[6 * left_arm_link_id_ + 3] = left_hand_wrench_.torque.x;
+              d->xfrc_applied[6 * left_arm_link_id_ + 4] = left_hand_wrench_.torque.y;
+              d->xfrc_applied[6 * left_arm_link_id_ + 5] = left_hand_wrench_.torque.z;
+            }
+            if (right_hand_active_ && right_arm_link_id_ != -1) {
+              d->xfrc_applied[6 * right_arm_link_id_ + 0] = right_hand_wrench_.force.x;
+              d->xfrc_applied[6 * right_arm_link_id_ + 1] = right_hand_wrench_.force.y;
+              d->xfrc_applied[6 * right_arm_link_id_ + 2] = right_hand_wrench_.force.z;
+              d->xfrc_applied[6 * right_arm_link_id_ + 3] = right_hand_wrench_.torque.x;
+              d->xfrc_applied[6 * right_arm_link_id_ + 4] = right_hand_wrench_.torque.y;
+              d->xfrc_applied[6 * right_arm_link_id_ + 5] = right_hand_wrench_.torque.z;
+            }
             mj_step(m, d);
             step_count++;
             sim_time += ros::Duration(1 / frequency);
@@ -1557,14 +1581,41 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   sim->Load(m, d, filename);
   mj_forward(m, d);
 
+  // 初始化时查找手臂末端执行器或link ID
+  // 优先使用end_effector（更精确），fallback到link（兼容旧版本）
+  left_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_l7_end_effector");
+  if (left_arm_link_id_ == -1) {
+    left_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_l7_link");
+    if (left_arm_link_id_ == -1) {
+      left_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_l4_link");
+    }
+  }
+  
+  right_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_r7_end_effector");
+  if (right_arm_link_id_ == -1) {
+    right_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_r7_link");
+    if (right_arm_link_id_ == -1) {
+      right_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_r4_link");
+    }
+  }
+  
+  ROS_INFO("Arm force application IDs: left=%d, right=%d", left_arm_link_id_, right_arm_link_id_);
+
+  // 手臂外力订阅（存储外力值，在仿真循环中持续应用）
   ros::Subscriber lHandExtWrenchSub = g_nh_ptr->subscribe<geometry_msgs::Wrench>("/external_wrench/left_hand", 10, [&](const geometry_msgs::Wrench::ConstPtr &msg)
       {
-        apply_wrench_to_link(m, d, "zarm_l7_link", &msg->force.x, &msg->torque.x);
+        left_hand_wrench_ = *msg;
+        // 判断是否有力（任意分量非零即为激活）
+        left_hand_active_ = (std::abs(msg->force.x) > 1e-6 || std::abs(msg->force.y) > 1e-6 || std::abs(msg->force.z) > 1e-6 ||
+                            std::abs(msg->torque.x) > 1e-6 || std::abs(msg->torque.y) > 1e-6 || std::abs(msg->torque.z) > 1e-6);
       }
     );  
   ros::Subscriber rHandExtWrenchSub = g_nh_ptr->subscribe<geometry_msgs::Wrench>("/external_wrench/right_hand", 10, [&](const geometry_msgs::Wrench::ConstPtr &msg)
       {
-        apply_wrench_to_link(m, d, "zarm_r7_link", &msg->force.x, &msg->torque.x);
+        right_hand_wrench_ = *msg;
+        // 判断是否有力（任意分量非零即为激活）
+        right_hand_active_ = (std::abs(msg->force.x) > 1e-6 || std::abs(msg->force.y) > 1e-6 || std::abs(msg->force.z) > 1e-6 ||
+                             std::abs(msg->torque.x) > 1e-6 || std::abs(msg->torque.y) > 1e-6 || std::abs(msg->torque.z) > 1e-6);
       }
     );
 

@@ -10,6 +10,11 @@
 #include <kuavo_msgs/twoArmHandPoseCmd.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
 #include <kuavo_msgs/changeArmCtrlMode.h>
+#include <kuavo_msgs/setRuckigPlannerParams.h>
+#include <kuavo_msgs/getLbTorsoInitialPose.h>
+#include <kuavo_msgs/lbTimedPosCmd.h>
+#include <kuavo_msgs/lbMultiTimedPosCmd.h>
+#include <std_srvs/SetBool.h>
 
 #include <ocs2_oc/synchronized_module/ReferenceManager.h>
 #include "humanoid_wheel_interface/ManipulatorModelInfo.h"
@@ -20,6 +25,10 @@
 #include "humanoid_wheel_interface/motion_planner/VelocityLimiter.h"
 #include "humanoid_wheel_interface/motion_planner/cmdPosePlannerWithRuckig.h"
 #include "humanoid_wheel_interface/motion_planner/cmdVelPlannerWithRuckig.h"
+#include "humanoid_wheel_interface/motion_planner/posePlannerTimedScheduler.h"
+
+#include "humanoid_wheel_interface/estimators/CentralDifferenceDifferentiator.h"
+#include "humanoid_wheel_interface/estimators/ContinuousEulerAnglesFromMatrix.h"
 
 namespace ocs2 {
 namespace mobile_manipulator {
@@ -47,6 +56,17 @@ enum LbArmControlServiceMode {
   EXTERN_CONTROL = 2,    // 外部控制模式
 };
 
+// 轮臂的基于时间的指令类型
+enum LbTimedPosCmdType {
+  BASE_POS_WORLD_CMD = 0,         // 底盘世界系位置运动
+  BASE_POS_LOCAL_CMD,             // 底盘局部系位置运动
+  TORSO_POSE_CMD,                 // 躯干笛卡尔局部系运动
+  LEG_JOINT_CMD,                  // 下肢关节运动
+  DUAL_ARM_WORLD_CMD,             // 双臂笛卡尔世界系运动
+  DUAL_ARM_LOCAL_CMD,             // 双臂笛卡尔局部系运动
+  ARM_JOINT_CMD,                  // 上肢关节运动
+};
+
 class MobileManipulatorReferenceManager : public ReferenceManager {
 public:
   MobileManipulatorReferenceManager(const ManipulatorModelInfo& info, const PinocchioInterface& pinocchioInterface, const std::string& taskFile);
@@ -65,6 +85,11 @@ public:
   bool getMpcControlModeService(kuavo_msgs::changeTorsoCtrlMode::Request& req, kuavo_msgs::changeTorsoCtrlMode::Response& res);
   bool armControlModeSrvCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
   bool getArmControlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
+  bool setRuckigPlannerParamsService(kuavo_msgs::setRuckigPlannerParams::Request &req, kuavo_msgs::setRuckigPlannerParams::Response &res);
+  bool getLbTorsoInitialPoseService(kuavo_msgs::getLbTorsoInitialPose::Request &req, kuavo_msgs::getLbTorsoInitialPose::Response &res);
+  bool setLbTimedPosCmdService(kuavo_msgs::lbTimedPosCmd::Request &req, kuavo_msgs::lbTimedPosCmd::Response &res);
+  bool setLbMultiTimedPosCmdService(kuavo_msgs::lbMultiTimedPosCmd::Request &req, kuavo_msgs::lbMultiTimedPosCmd::Response &res);
+  bool setLbResetTorsoService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
 
   // 多个约束轨迹的操作函数
   void getFirstTargetTrajectories(const TargetTrajectories& targetTrajectories);
@@ -72,11 +97,14 @@ public:
   void trimTargetTrajectoriesBeforeTime(scalar_t startTime);
   void publishTargetTrajectoriesNear(scalar_t initTime);
   vector_t targetTrajToPose6D(const TargetTrajectories& Traj, scalar_t initTime);
+  vector_t targetTorsoTrajToPose6DContinous(const TargetTrajectories& Traj, scalar_t initTime);
+  vector_t targetEeTrajToPose6DContinous(const TargetTrajectories& Traj, scalar_t initTime, int eeInx);
 
   // 多种约束轨迹的获取函数
   const TargetTrajectories& getStateInputTargetTrajectories() const { return stateInputTargetTrajectories_; }
   const TargetTrajectories& getTorsoTargetTrajectories() const { return torsoTargetTrajectories_; }
   const TargetTrajectories& getEeTargetTrajectories() const { return eeTargetTrajectories_; }
+  const TargetTrajectories& getEeTargetThreePointTrajectories() const { return eeTargetThreePointTrajectories_; }
 
   // 多种约束的使能函数
   const bool getEnableEeTargetTrajectories() const { return enableEeFlag_; }
@@ -92,13 +120,17 @@ public:
   const bool getEnableBaseTrack() const { return enableBaseTrackFlag_; }
   void setEnableBaseTrack(bool flag) { enableBaseTrackFlag_ = flag; }
 
+  // 末端跟踪优先级调整的相关函数
+  const bool getIsFocusEeStatus() const { return isFocusEe_; }
+  void setIsFocusEeStatus(bool flag) { isFocusEe_ = flag; }
+
 protected:
   virtual void modifyReferences(scalar_t initTime, scalar_t finalTime, const vector_t& initState, TargetTrajectories& targetTrajectories,
                                 ModeSchedule& modeSchedule) override;
   
   // ruckig 轨迹生成相关
   // cmdPose
-  void calcRuckigTrajWithCmdPose(double initTime, const vector_t &targetBasePose);
+  void calcRuckigTrajWithCmdPose(double initTime, const vector_t &targetBasePose, double desiredTime = 0.0);
   void generatePoseTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetCmdPoseRuckig(double initTime, const vector_t& initState, bool rePlanning);
   // cmdVel
@@ -107,19 +139,19 @@ protected:
   void generateVelTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetCmdVelRuckig(double initTime, const vector_t& initState, bool rePlanning);
   // cmdEePose
-  void calcRuckigTrajWithEePose(double initTime, const vector_t &targetArmEePose);
+  void calcRuckigTrajWithEePose(double initTime, const vector_t &targetArmEePose, double desiredTime = 0.0);
   void generateDualArmEeTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetDualArmRuckig(double initTime, const vector_t& initState, bool rePlanning, LbArmControlMode desireMode);
   // cmdTorsoPose
-  void calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose);
+  void calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose, double desiredTime = 0.0);
   void generateTorsoPoseTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetTorsoPoseRuckig(double initTime, const vector_t& initState, bool rePlanning);
   void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState);
   // cmdLegJoint
-  void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint);
+  void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime = 0.0);
   void resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
   // cmdArmJoint
-  void calcRuckigTrajWithArmJoint(double initTime, const vector_t &targetArmJoint);
+  void calcRuckigTrajWithArmJoint(double initTime, const vector_t &targetArmJoint, double desiredTime = 0.0);
   void resetArmJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
   
   double targetYawPreProcess(double currentYaw, double targetYaw);
@@ -127,6 +159,10 @@ protected:
   void setArmControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void resetAllMpcTraj(scalar_t initTime, const vector_t& initState);
+  void resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState);
+  void updateTimedSchedulerCurrentState(scalar_t initTime, const vector_t& initState);
+  void updateTimedSchedulerTargetTraj(void);
+  void updateIndexRuckigPlanner(int plannerIndex, double desireTime, const Eigen::VectorXd& cmd_vec);
   
   // 辅助函数
   bool getControlModeIsChange(int currentMode)
@@ -153,12 +189,63 @@ protected:
     return isChange;
   }
 
+  std::string LbTimedPosCmdTypeToString(LbTimedPosCmdType mode)
+  {
+    switch(mode)
+    {
+      case BASE_POS_WORLD_CMD:
+        return "BASE_POS_CMD";
+      case BASE_POS_LOCAL_CMD:
+        return "BASE_POS_CMD";
+      case TORSO_POSE_CMD:
+        return "TORSO_POSE_CMD";
+      case LEG_JOINT_CMD:
+        return "LEG_JOINT_CMD";
+      case DUAL_ARM_WORLD_CMD:
+        return "DUAL_ARM_WORLD_CMD";
+      case DUAL_ARM_LOCAL_CMD:
+        return "DUAL_ARM_LOCAL_CMD";
+      case ARM_JOINT_CMD:
+        return "ARM_JOINT_CMD";
+      default:
+        return "UNKNOWN_CMD_TYPE";
+    }
+  }
+
+  int SrvRequestIndexToCmdType(int planner_index)
+  {
+    switch(planner_index)
+    {
+      case 0: 
+        return static_cast<int>(LbTimedPosCmdType::BASE_POS_WORLD_CMD);
+      case 2: 
+        return static_cast<int>(LbTimedPosCmdType::TORSO_POSE_CMD);
+      case 3:
+        return static_cast<int>(LbTimedPosCmdType::LEG_JOINT_CMD);
+      case 4:
+        return static_cast<int>(LbTimedPosCmdType::DUAL_ARM_WORLD_CMD);
+      case 5:
+        return static_cast<int>(LbTimedPosCmdType::ARM_JOINT_CMD);
+      default:
+        return -1;
+    }
+  }
+
   LbArmControlMode handPoseCmdFrameToLbArmMode(int frame);
 
   // 获取当前末端位姿
   void getCurrentEeWorldPose(vector_t& EeState, const vector_t& initState);
   void getCurrentEeBasePose(vector_t& EeState, const vector_t& initState);
   void getCurrentTorsoPoseInBase(vector_t& torsoPose, const vector_t& initState);
+
+  // 获取当前末端位姿（采用四元数插值计算增量, 且输出为6d位姿(Zyx欧拉角)， 保证万向锁附近不跳变）
+  void getCurrentEeWorldPoseContinuous(vector_t& EeState, const vector_t& initState);
+  void getCurrentEeBasePoseContinuous(vector_t& EeState, const vector_t& initState);
+  void getCurrentTorsoPoseInBaseContinuous(vector_t& torsoPose, const vector_t& initState);
+
+  // 发布所关注的笛卡尔位姿
+  void publishMultiPointPose_World(const vector_t& initState);
+  void publishMultiPointPose_Local(const vector_t& initState);
 
   // 不同控制模式的执行函数
   void updateNoControl(double initTime, const TargetTrajectories& targetTrajectories, bool isChange);
@@ -173,6 +260,15 @@ private:
   humanoid::TopicLogger *ros_logger_ = nullptr;
   const ManipulatorModelInfo info_;
   double baseDim_ = 0;
+  double initTime_ = 0.0;
+  double finalTime_ = 0.0;
+  vector_t initState_;
+  // 下肢重置相关
+  double resetTorsoTime_{0.0};
+  double resetTorsoInitTime_{0.0};
+  bool isResetTorso_{false};
+  Eigen::VectorXd torsoResetMaxVel_;
+  ros::ServiceServer resetTorsoStatusServiceServer_;
 
   // 配置参数文件路径
   std::string taskFile_;
@@ -198,6 +294,7 @@ private:
 
   // 指令底盘位置
   bool isCmdPoseUpdated_{false};
+  double cmdPoseDesiredTime_{0.0};
   Eigen::Vector3d cmdPose_;
   Eigen::Vector3d currentCmdPose_;
   std::mutex cmdPose_mtx_;
@@ -217,15 +314,19 @@ private:
   Eigen::VectorXd currentTorsoPose_;
   std::mutex cmdTorsoPose_mtx_;
   bool isCmdTorsoPoseUpdated_{false};
+  double cmdTorsoPoseDesiredTime_{0.0};
   ros::Subscriber targetTorsoPoseSubscriber_;
   ros::Publisher targetTorsoPoseReachTimePub_;
   bool torsoModeFlag_{true}; // true: 笛卡尔控制模式, false: 关节控制模式
+  ros::ServiceServer getLbTorsoInitialPoseServiceServer_;
 
   // 双臂末端执行器位姿指令 (x,y,z,qx,qy,qz,qw)
+  vector_t cmd_arm_zyx_;
   vector_t left_arm_traj_pose_;
   vector_t right_arm_traj_pose_;
   std::mutex armPose_mtx_;
   bool isCmdDualArmPoseUpdated_{false};
+  double cmdDualArmPoseDesiredTime_{0.0};
   ros::Subscriber armEndEffectorSubscriber_;
   ros::Publisher armEndEffectorReachTimePub_;
 
@@ -234,20 +335,27 @@ private:
   vector_t arm_joint_traj_;
   vector_t arm_init_joint_traj_;
   std::mutex armJoint_mtx_;
+  bool isCmdArmJointUpdated_{false};
+  double cmdArmJointDesiredTime_{0.0};
   ros::Subscriber arm_joint_traj_sub_;
   ros::Publisher targetArmJointReachTimePub_;
 
   // 躯干下肢的关节轨迹指令
   bool isCmdLegJointUpdated_{false};
+  double cmdLegJointDesiredTime_{0.0};
   vector_t lb_leg_traj_;
   std::mutex lbLegJoint_mtx_;
   ros::Subscriber lb_leg_joint_traj_sub_;
   ros::Publisher targetLegJointReachTimePub_;
 
+  // 用于记录末端笛卡尔模式的 focus 对象, true 为末端, false 为躯干
+  bool isFocusEe_{true};
+  ros::Subscriber set_focus_ee_sub_;
+
   // 分别保存左右臂的关节轨迹（弧度）以及是否将关节角作为期望输入
   vector_t left_arm_joint_traj_;
   vector_t right_arm_joint_traj_;
-  LbArmControlMode desireMode_ = LbArmControlMode::JointSpace;  
+  LbArmControlMode desireMode_ = LbArmControlMode::WorldFrame;  
 
   // MPC控制模式相关
   int currentMpcControlMode_{0};  // 0: NoControl, 1: ArmOnly, 2: BaseOnly, 3: BaseArm
@@ -258,6 +366,7 @@ private:
   ros::ServiceServer get_arm_control_mode_service_;
   ros::Publisher mpcControlModePub_;
   ros::Publisher mpcConstraintUsagePub_;
+  ros::Publisher modifyReferenceTimePub_;
 
   // 关节控制默认为外部控制模式
   LbArmControlServiceMode currentArmControlMode_ = LbArmControlServiceMode::EXTERN_CONTROL; 
@@ -266,6 +375,7 @@ private:
   TargetTrajectories stateInputTargetTrajectories_;
   TargetTrajectories torsoTargetTrajectories_;
   TargetTrajectories eeTargetTrajectories_;
+  TargetTrajectories eeTargetThreePointTrajectories_;
 
   // 多种约束所需轨迹相关
   bool enableEeFlag_{true};
@@ -277,6 +387,19 @@ private:
 
   // 规划器周期
   double ruckigDt_{0.0};
+
+  // 规划器限制更改服务
+  ros::ServiceServer setRuckigPlannerParamsServiceServer_;
+
+  // 多规划器时间同步相关
+  ros::ServiceServer setLbTimedPosCmdServiceServer_;
+  ros::ServiceServer setLbMultiTimedPosCmdServiceServer_;
+  posePlannerTimedScheduler timedPlannerScheduler_;
+  std::vector<bool> isTimedPlannerUpdated_;
+  std::vector<double> desireTime_;
+  std::vector<Eigen::VectorXd> timedCmdVec_;
+  std::vector<std::unique_ptr<std::mutex>> timedCmdVecMtx_;
+  bool isUpdateTimedTarget_{false};
   
   // cmdPose规划器
   std::shared_ptr<cmdPosePlannerWithRuckig> cmdPosePlannerRuckigPtr_;

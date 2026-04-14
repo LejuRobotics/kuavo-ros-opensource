@@ -21,6 +21,7 @@
 #include "kuavo_msgs/lbBaseLinkPoseCmdSrv.h"
 #include "kuavo_msgs/changeTorsoCtrlMode.h"
 #include "kuavo_msgs/changeLbQuickModeSrv.h"
+#include "kuavo_msgs/changeLbMpcObsUpdateModeSrv.h"
 
 // Third Party
 #include <ocs2_core/misc/LoadData.h>
@@ -38,6 +39,7 @@
 #include "humanoid_controllers/WaistKinematics.h"
 #include "humanoid_controllers/ControlDataManager.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
+#include "humanoid_wheel_interface/filters/jointCmdLimiter.h"
 
 namespace humanoidController_wheel_wbc
 {
@@ -95,6 +97,8 @@ namespace humanoidController_wheel_wbc
     bool handleWaistIkService(kuavo_msgs::lbBaseLinkPoseCmdSrv::Request &req, kuavo_msgs::lbBaseLinkPoseCmdSrv::Response &res);
     bool enableLbArmQuickModeCallback(kuavo_msgs::changeLbQuickModeSrv::Request &req, 
                                       kuavo_msgs::changeLbQuickModeSrv::Response &res);
+    bool changeLbObsUpdateModeCallback(kuavo_msgs::changeLbMpcObsUpdateModeSrv::Request &req, 
+                                      kuavo_msgs::changeLbMpcObsUpdateModeSrv::Response &res);
 
     // ========== 工具函数 ==========
     /**
@@ -167,6 +171,8 @@ namespace humanoidController_wheel_wbc
     bool enable_mpc_{false};
     size_t plannedMode_{0};
     vector_t optimizedState_mrt_, optimizedInput_mrt_;
+    int8_t mpcObsUpdateMode_{3};  // mpc优化采用的反馈机制: 0: 全部反馈, 1: 屏蔽下肢电机反馈, 2: 屏蔽上肢电机反馈, 3: 同时屏蔽上下肢电机反馈
+                                  // 屏蔽反馈时, 采用MPC输出的期望作为反馈
 
     // ========== 状态估计 ==========
     SystemObservation observation_wheel_;
@@ -215,6 +221,7 @@ namespace humanoidController_wheel_wbc
     vector_t observationMaxVel_, observationMaxAcc_, observationMaxJerk_;         //  限制参数
     vector_t optimizedTrajMaxVel_, optimizedTrajMaxAcc_, optimizedTrajMaxJerk_;
 
+    std::shared_ptr<mobile_manipulator::jointCmdLimiter> jointCmdLimiterPtr_;
   };
 
 } // namespace humanoidController_wheel_wbc

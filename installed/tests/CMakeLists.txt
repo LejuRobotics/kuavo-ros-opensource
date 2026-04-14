@@ -92,13 +92,30 @@ target_compile_definitions(kuavo_imu_test
         PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../"
 )
 
+# Hardware plant wheel arm test executable 
+add_executable(hardware_plant_wheel_arm_test
+    wheel_arm_ec_test.cpp
+)
+
 # Add dependencies to ensure message headers are generated
-add_dependencies(kuavo_imu_test
+add_dependencies(kuavo_imu_test hardware_plant_wheel_arm_test
     kuavo_msgs_generate_messages_cpp
     ${catkin_EXPORTED_TARGETS}
 )
 
+# Link libraries
+target_link_libraries(hardware_plant_wheel_arm_test
+    ${catkin_LIBRARIES}
+    hardware_plant
+)
+
+# Add compile definitions
+target_compile_definitions(hardware_plant_wheel_arm_test
+    PRIVATE
+        PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
 # Install
-install(TARGETS kuavo_imu_test
+install(TARGETS kuavo_imu_test hardware_plant_wheel_arm_test
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 ) 

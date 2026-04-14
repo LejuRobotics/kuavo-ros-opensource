@@ -727,7 +727,7 @@ def ruiwo_negtive():
     while True:
         print("请选择手臂总线类型：")
         print("1. 单CAN")
-        print("2. 双CAN（ROBAN2.1）")
+        print("2. 双CAN")
         choice = input("请输入选择 (1 或 2): ").strip()
 
         if choice == "1":
@@ -761,7 +761,7 @@ def ruiwo_negtive():
     while True:
         print("请选择手臂总线类型：")
         print("1. 单CAN")
-        print("2. 双CAN（ROBAN2.1）")
+        print("2. 双CAN")
         can_choice = input("请输入选择 (1 或 2): ").strip()
 
         if can_choice == "2":
@@ -798,21 +798,9 @@ def ruiwo_negtive():
 
 
 def qiangnao_hand():
-    """
-    测试灵巧手（一代手/二代手）
-    """
-    # 让用户选择手类型
-    print(bcolors.BOLD + "请选择手类型：" + bcolors.ENDC)
-    print("1. 一代手 (Revo1)")
-    print("2. 二代手 (Revo2) 注：灵心巧手属于二代手")
-    hand_type = input("请输入选项：")
-    if hand_type not in ["1", "2"]:
-        print(bcolors.FAIL + "无效选项" + bcolors.ENDC)
-        return
-
     # 检查CAN总线配置类型
     canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
-
+    
     is_dual_bus = False
     if os.path.exists(canbus_wiring_file):
         with open(canbus_wiring_file, 'r') as f:
@@ -820,27 +808,54 @@ def qiangnao_hand():
             if wiring_type == "dual_bus":
                 is_dual_bus = True
 
-    # 根据手类型和CAN总线配置选择不同的命令
-    command = None
-
-    if hand_type == "2":
-        # 二代手 (Revo2)
-        if is_dual_bus:
-            command = "bash " + folder_path + "/dexhand_test.sh --revo2can --test 3"
-            print(bcolors.OKGREEN + "检测到二代手双CAN配置，使用 Revo2Can 测试命令" + bcolors.ENDC)
+    # 读取环境变量 ROBOT_VERSION，使用 robot_version.py 判断版本
+    robot_version_str = get_robot_version()
+    robot_major = None
+    
+    if robot_version_str:
+        if RobotVersion:
+            try:
+                # 将字符串转换为整数
+                robot_version_int = int(robot_version_str)
+                # 使用 RobotVersion.create 创建版本对象
+                robot_version = RobotVersion.create(robot_version_int)
+                robot_major = robot_version.major()
+                print(bcolors.OKCYAN + f"检测到机器人版本: {robot_version.version_name()} (major={robot_major})" + bcolors.ENDC)
+            except (ValueError, AttributeError) as e:
+                print(bcolors.WARNING + f"警告: 无法解析 ROBOT_VERSION '{robot_version_str}': {e}" + bcolors.ENDC)
         else:
-            command = "bash " + folder_path + "/dexhand_test.sh --revo2 --test 3"
-            print(bcolors.OKGREEN + "检测到二代手单CAN配置，使用 Revo2 测试命令" + bcolors.ENDC)
+            print(bcolors.WARNING + f"警告: robot_version 模块未导入，无法解析版本号 '{robot_version_str}'" + bcolors.ENDC)
+            return
     else:
-        # 一代手 (Revo1)
+        print(bcolors.WARNING + "警告: 未找到 ROBOT_VERSION 环境变量" + bcolors.ENDC)
+        return
+    
+    # 根据机器人版本和CAN总线配置选择不同的命令
+    command = None
+    
+    if robot_major == 1:
+        # Roban2 (major == 1)
         if is_dual_bus:
-            command = "bash " + folder_path + "/dexhand_test.sh --revo1can --test 3"
-            print(bcolors.OKGREEN + "检测到一代手双CAN配置，使用 Revo1Can 测试命令" + bcolors.ENDC)
+            # 双CAN总线配置: 使用 revo2can
+            command = "bash " + folder_path + "/dexhand_test.sh --revo2can --test 3"
+            print(bcolors.OKGREEN + "检测到 Roban2 双CAN配置，使用 Revo2Can 测试命令" + bcolors.ENDC)
         else:
+            # 单CAN总线配置: 使用 revo2
+            command = "bash " + folder_path + "/dexhand_test.sh --revo2 --test 3"
+            print(bcolors.OKGREEN + "检测到 Roban2 单CAN配置，使用 Revo2 测试命令" + bcolors.ENDC)
+    else:
+        # Kuavo (major != 1)
+        if is_dual_bus:
+            # 双CAN总线配置: 使用 revo1can
+            command = "bash " + folder_path + "/dexhand_test.sh --revo1can --test 3"
+            print(bcolors.OKGREEN + "检测到 Kuavo 双CAN配置，使用 Revo1Can 测试命令" + bcolors.ENDC)
+        else:
+            # 单CAN总线配置: 使用 normal
             command = "bash " + folder_path + "/dexhand_test.sh --normal --test 3"
-            print(bcolors.OKGREEN + "检测到一代手单CAN配置，使用 normal 测试命令" + bcolors.ENDC)
-
+            print(bcolors.OKGREEN + "检测到 Kuavo 单CAN配置，使用 normal 测试命令" + bcolors.ENDC)
+    
     if command:
+        # 使用 subprocess.run() 运行命令
         subprocess.run(command, shell=True)
     else:
         print(bcolors.FAIL + "错误: 无法确定测试命令" + bcolors.ENDC)
@@ -1251,7 +1266,7 @@ def secondary_menu():
         print("3. 测试imu(先编译)")
         print("a. 测试二指夹爪（Ctrl + C 退出）")
         print("b. 配置灵巧手（普通）usb")
-        print("c. 测试灵巧手")
+        print("c. 测试灵巧手（普通）")
         print("d. 手臂电机设置零点")
         print("e. 手臂电机辨识方向(注意电机限位不要堵转)")    
         print("f. 零点文件备份")
@@ -1305,10 +1320,10 @@ def secondary_menu():
             print(bcolors.HEADER + "###结束，配置灵巧手（普通）usb###" + bcolors.ENDC)
             break
         elif option == "c":
-            print(bcolors.HEADER + "###开始，测试灵巧手###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###开始，测试灵巧手（普通）###" + bcolors.ENDC)
             print(bcolors.OKCYAN + "先左右手一起握，然后依次握左手，握右手" + bcolors.ENDC)
             qiangnao_hand()
-            print(bcolors.HEADER + "###结束，测试灵巧手###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###结束，测试灵巧手（普通）###" + bcolors.ENDC)  
             break
         elif option == "d":
             print(bcolors.HEADER + "###开始，手臂电机设置零点###" + bcolors.ENDC)
@@ -1367,12 +1382,41 @@ def secondary_menu():
             robot_version = get_robot_version()
             kuavo_breakin_script = None
             script_description = ""
+            is_executable_script = False  # 标记是否为可执行脚本（非Python脚本）
             
             if robot_version:
                 try:
                     version_num = int(robot_version)
 
-                    if 13 <= version_num <= 14:
+                    if version_num == 62:
+                        # 版本62：执行可执行脚本
+                        # 检查是开源仓库还是闭源仓库
+                        # 开源仓库：installed/lib/hardware_node/hardware_plant_wheel_arm_test
+                        # 闭源仓库：devel/lib/hardware_node/hardware_plant_wheel_arm_test
+
+                        workspace_root = os.path.abspath(os.path.join(folder_path, "..", ".."))
+                        installed_script = os.path.join(workspace_root, "installed", "lib", "hardware_node", "hardware_plant_wheel_arm_test")
+                        devel_script = os.path.join(workspace_root, "devel", "lib", "hardware_node", "hardware_plant_wheel_arm_test")
+
+                        if os.path.exists(installed_script):
+                            kuavo_breakin_script = installed_script
+                            script_description = f"开源仓库磨线脚本 installed/lib/hardware_node/hardware_plant_wheel_arm_test (版本 {robot_version})"
+                            is_executable_script = True
+                        elif os.path.exists(devel_script):
+                            kuavo_breakin_script = devel_script
+                            script_description = f"闭源仓库磨线脚本 devel/lib/hardware_node/hardware_plant_wheel_arm_test (版本 {robot_version})"
+                            is_executable_script = True
+                        else:
+                            print(bcolors.FAIL + f"错误：找不到 hardware_plant_wheel_arm_test 可执行文件" + bcolors.ENDC)
+                            print(f"  开源路径：{installed_script}")
+                            print(f"  闭源路径：{devel_script}")
+                            break
+
+                    elif 13 <= version_num <= 14:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
+                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+
+                    elif version_num == 17:
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
@@ -1384,13 +1428,8 @@ def secondary_menu():
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
-                    
-                    elif version_num == 53:
-                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
-                        script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
-
                     else:
-                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、40-49、50-52、    53），当前不支持自动选择磨线脚本" + bcolors.ENDC)
+                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、40-49、50-52、62），当前不支持自动选择磨线脚本" + bcolors.ENDC)
                 except (ValueError, TypeError):
                     print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，请检查 ~/.bashrc 中的 ROBOT_VERSION 设置" + bcolors.ENDC)
             else:
@@ -1399,9 +1438,25 @@ def secondary_menu():
             if kuavo_breakin_script:
                 if os.path.exists(kuavo_breakin_script):
                     print(bcolors.OKGREEN + f"\n使用{script_description}" + bcolors.ENDC)
-                    # 如果需要以 root 运行，请直接使用 root 终端启动本工具
-                    command = "python3 " + kuavo_breakin_script
-                    subprocess.run(command, shell=True)
+                    
+                    # 询问用户是否已校准零点并位于零点位置
+                    print(bcolors.FAIL + "\n⚠ 请确认轮臂机器人已校准零点，且当前位于零点位置" + bcolors.ENDC)
+                    user_confirm = input("确认无误后按回车继续，或输入 'q' 取消: ").strip()
+                    
+                    if user_confirm.lower() == 'q':
+                        print(bcolors.WARNING + "操作已取消" + bcolors.ENDC)
+                        print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)
+                        break
+                    
+                    # 根据脚本类型选择执行方式
+                    if is_executable_script:
+                        # 可执行脚本：直接执行（可能需要sudo权限）
+                        command = kuavo_breakin_script
+                        subprocess.run(command, shell=True)
+                    else:
+                        # Python脚本：使用python3执行
+                        command = "python3 " + kuavo_breakin_script
+                        subprocess.run(command, shell=True)
                 else:
                     print(bcolors.FAIL + f"错误：磨线脚本不存在: {kuavo_breakin_script}" + bcolors.ENDC)
             print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)
@@ -1499,7 +1554,7 @@ if __name__ == '__main__':
         print("2. 打开imu上位机软件(接屏幕)")
         print("3. 测试imu(先编译)")
         print("a. 测试二指夹爪（Ctrl + C 退出）")
-        print("c. 测试灵巧手") 
+        print("c. 测试灵巧手（普通）") 
         print("f. 零点文件备份")
         print("k. 更新当前目录程序(注意：会重置文件内容，建议备份文件)")
         print("o. 打开开发者工具")
@@ -1546,10 +1601,10 @@ if __name__ == '__main__':
             print(bcolors.HEADER + "###结束，测试夹爪###" + bcolors.ENDC)
             break
         elif option == "c":
-            print(bcolors.HEADER + "###开始，测试灵巧手###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###开始，测试灵巧手（普通）###" + bcolors.ENDC)
             print(bcolors.OKCYAN + "先左右手一起握，然后依次握左手，握右手" + bcolors.ENDC)
             qiangnao_hand()
-            print(bcolors.HEADER + "###结束，测试灵巧手###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###结束，测试灵巧手（普通）###" + bcolors.ENDC)  
             break
         elif option == "f":
             print(bcolors.HEADER + "###开始，文件备份###" + bcolors.ENDC)

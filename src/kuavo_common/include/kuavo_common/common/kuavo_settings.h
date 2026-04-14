@@ -16,9 +16,12 @@ namespace HighlyDynamic
 #define BIT_17 (1 << 17)
 #define BIT_17_9 (BIT_17 * 9)
 #define BIT_17_10 (BIT_17 * 10)
+#define BIT_17_16 (BIT_17 * 16)
 #define BIT_17_18 (BIT_17 * 18)
 #define BIT_17_20 (BIT_17 * 20)
 #define BIT_17_25 (BIT_17 * 25)
+//电机减速比25.775，乘2e17后为3378380
+#define BIT_17_251 (3378380) 
 #define BIT_17_36 (BIT_17 * 36)
 #define BIT_17_120 (BIT_17 * 120)
 
@@ -34,6 +37,8 @@ namespace HighlyDynamic
 #define PA76_18_MC (31.5)
 #define PA105_18_MC (70)
 #define PA115_MC (40)
+#define PA81_25_MC (40)
+#define PA4315_36_MC (22.5)
 
 
 #define AK10_9_C2T (1.26)
@@ -42,21 +47,24 @@ namespace HighlyDynamic
 #define PA100_C2T (1.2) // 1.2
 #define PA100_18_C2T (2.0)
 #define PA100_20_C2T (2.4)
+#define PA81_25_C2T (2.9)
+#define PA4315_36_C2T (1.6)
 
 
 #define CK_C2T (2.1) // 1.4
 #define PA72_C2T (3.6)
 #define PA60_C2T (2.0)
-#define PA43_C2T (1.45)
+#define PA43_C2T (4.7)
 
 #define PA76_25_C2T (4.2)
 #define PA76_18_C2T (2.0)
 #define PA105_18_C2T (4.1)
-#define PA4310_25_C2T (2.6)
 #define PA72_36_C2T (4.8)
 #define PA81_18_25_C2T (2.9)
 #define PA115_C2T (11.5)
-
+#define PA60_16_C2T (2.0)
+#define PA4310_25_C2T (4.7)
+#define PA4315_36_C2T (4.7)
 
 #define LEG_DOF 6
 #define LEGS_TOTEL_JOINT 12
@@ -101,6 +109,10 @@ namespace HighlyDynamic
         double arm_calibration_position_variance_time;
         double arm_calibration_position_variance_threshold;
         std::vector<Eigen::VectorXd> arm_poses;
+        // 腿部校准参数
+        Eigen::VectorXd leg_calibration_safe_pose;      // 安全姿态
+        Eigen::VectorXd leg_calibration_limits;        // 目标限位位置
+        Eigen::VectorXd leg_calibration_directions;    // 运动方向
     };
     struct ModelSettings
     {
