@@ -560,7 +560,8 @@ using namespace ocs2;
   void RLControllerBase::inferenceThreadFunc()
   {
     ros::Rate inference_rate(inference_frequency_);
-    
+    double last_cycle_start = -1.0;
+
     // 线程持续运行，直到控制器被停止（状态变为 INITIALIZING）
     while (ros::ok() && state_ != ControllerState::STOPPED)
     {
@@ -570,7 +571,20 @@ using namespace ocs2;
         inference_rate.sleep();
         continue;
       }
-      
+
+      const double cycle_start = ros::Time::now().toSec();
+      if (ros_logger_ && last_cycle_start >= 0.0)
+      {
+        const double dt_sec = cycle_start - last_cycle_start;
+        const double dt_ms = dt_sec * 1000.0;
+        ros_logger_->publishValue("/monitor/time_cost/rl_inference", dt_ms);
+        if (dt_sec > 1e-9)
+        {
+          ros_logger_->publishValue("/monitor/frequency/rl_inference", 1.0 / dt_sec);
+        }
+      }
+      last_cycle_start = cycle_start;
+
       // 从存储的成员变量获取传感器数据和状态
       SensorData sensors_data = getRobotSensorData();
       Eigen::VectorXd measuredRbdState = getRobotState();
