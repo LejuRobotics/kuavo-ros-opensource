@@ -186,7 +186,6 @@ const sidebars = {
               label: '综合案例',
               items: [
                 'basic_usage/kuavo-ros-control/docs/5功能案例/综合案例/策略模块搬箱子案例',
-                'basic_usage/kuavo-ros-control/docs/5功能案例/综合案例/机器人开源导航案例',
               ],
             },
             {
