@@ -642,11 +642,12 @@ namespace humanoid_controller
       // MPC控制器始终在BASE_CONTROLLER列表的索引0
       walk_controllers_.push_back("mpc");
     
-    // 遍历所有控制器，按类型分组
-    for (const auto& pair : controllers_)
+    // 遍历所有控制器，按添加顺序分组
+    for (const auto& name : controller_names_)
     {
-      const std::string& name = pair.first;
-      RLControllerType type = pair.second->getType();
+      auto it = controllers_.find(name);
+      if (it == controllers_.end()) continue;
+      RLControllerType type = it->second->getType();
       
       // 添加到按类型分组的列表（不包括MPC）
       if (type != RLControllerType::MPC)
