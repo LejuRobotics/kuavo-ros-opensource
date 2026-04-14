@@ -29,6 +29,8 @@ namespace HighlyDynamic {
 struct WheelPointTrackIKSolverConfig : public IKSolverConfig {
   int historyBufferSize = 10;  // for smoothness
   double dynamicsDt = 0.01;    // second
+  double refSecondOrderLpfCutoffHz = 12.0;  // always-on reference LPF cutoff
+  double refSecondOrderLpfDt = 0.0;          // <=0 means fallback to dynamicsDt
 
   // tracking weights
   double eeTrackingWeight = 4e3;
@@ -52,6 +54,10 @@ struct WheelPointTrackIKSolverConfig : public IKSolverConfig {
   double waistSmoothWeight1 = 0.0;
   double waistSmoothWeight2 = 0.0;
   double waistSmoothWeight3 = 0.0;
+
+  // acceleration and jerk smoothness weights
+  double accSmoothWeightDefault = 0.0;
+  double jerkSmoothWeightDefault = 0.0;
 
   // Default constructor - initializes base class with default values
   WheelPointTrackIKSolverConfig() : IKSolverConfig() {
@@ -98,23 +104,7 @@ class WheelIKResultHistoryBuffer {
     }
   }
 
-  void add(const IKSolveResult& result) { add(IKMotionState(result, Eigen::VectorXd(), Eigen::VectorXd(), Eigen::VectorXd())); }
-
-  void setMaxSize(size_t size) {
-    maxSize_ = size;
-    while (buffer_.size() > maxSize_) {
-      buffer_.pop_front();
-    }
-  }
-
-  size_t size() const { return buffer_.size(); }
   bool empty() const { return buffer_.empty(); }
-  void clear() { buffer_.clear(); }
-
-  bool hasAtLeast(size_t count) const { return buffer_.size() >= count; }
-
-  const std::deque<IKMotionState>& getHistory() const { return buffer_; }
-  const IKMotionState* get(size_t index) const { return (index < buffer_.size()) ? &buffer_[index] : nullptr; }
 
   const IKMotionState* fromBack(size_t reverseIndex) const {
     if (reverseIndex >= buffer_.size()) {
@@ -126,20 +116,6 @@ class WheelIKResultHistoryBuffer {
   const IKMotionState* latest() const { return fromBack(0); }
   const IKMotionState* prev() const { return fromBack(1); }
   const IKMotionState* pprev() const { return fromBack(2); }
-
-  Eigen::VectorXd getMeanSolution(int nq) const {
-    if (buffer_.empty()) {
-      return Eigen::VectorXd::Zero(nq);
-    }
-    Eigen::VectorXd mean = Eigen::VectorXd::Zero(nq);
-    for (const auto& state : buffer_) {
-      if (state.result.isSuccess && state.result.solution.size() == nq) {
-        mean += state.result.solution;
-      }
-    }
-    mean /= static_cast<double>(buffer_.size());
-    return mean;
-  }
 
   std::chrono::milliseconds getMeanDuration() const {
     if (buffer_.empty()) {
@@ -176,29 +152,45 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   // Forward Kinematics methods - matching plantIK.cc functionality
   std::pair<Eigen::Vector3d, Eigen::Quaterniond> FK(const Eigen::VectorXd& q, const std::string& frameName);
 
-  // Mean calculation
-  Eigen::VectorXd getMeanSolution() const { return historyBuffer_.getMeanSolution(nq_); }
   std::chrono::milliseconds getMeanSolveDuration() const { return historyBuffer_.getMeanDuration(); }
 
  private:
-  void initializeWristFrames();
+  struct LowpassBiquadCoeff {
+    double b0{0.0};
+    double b1{0.0};
+    double b2{0.0};
+    double a1{0.0};
+    double a2{0.0};
+    bool enabled{false};
+  };
+
+  static LowpassBiquadCoeff makeSecondOrderLowpassCoeff(double cutoffHz, double sampleTime);
+  static Eigen::VectorXd applySecondOrderLowpassVec(const Eigen::VectorXd& x,
+                                                    const LowpassBiquadCoeff& coeff,
+                                                    Eigen::VectorXd& x1,
+                                                    Eigen::VectorXd& x2,
+                                                    Eigen::VectorXd& y1,
+                                                    Eigen::VectorXd& y2);
+  void initializeRefLowpass();
+  Eigen::VectorXd applyRefLowpass(const Eigen::VectorXd& input);
 
   void setConstraints(drake::multibody::InverseKinematics& ik,
                       const std::vector<PoseData>& PoseConstraintList,
                       ArmIdx controlArmIndex,
                       const Eigen::VectorXd& initialGuess,
                       const Eigen::VectorXd& referenceSolution) const;
-  // Debug: Print configuration in table format
-  void printConfigTable() const;
 
   std::unique_ptr<drake::systems::Context<double>> plant_context_;
 
-  IKSolveResult solveResult_;
-
-  mutable Eigen::VectorXd currentReferenceSolution_;
-
   WheelIKResultHistoryBuffer historyBuffer_;
-  size_t validIkUpdateCount_ = 0;
+  LowpassBiquadCoeff refLowpassCoeff_;
+  Eigen::VectorXd refLpX1_;
+  Eigen::VectorXd refLpX2_;
+  Eigen::VectorXd refLpY1_;
+  Eigen::VectorXd refLpY2_;
+  Eigen::VectorXd refLowpassLatest_;
+  Eigen::VectorXd initialGuessSeed_;
+  bool hasRefLowpassState_{false};
 
   // Optional extended config for tracking weights
   std::unique_ptr<WheelPointTrackIKSolverConfig> pointTrackConfig_;

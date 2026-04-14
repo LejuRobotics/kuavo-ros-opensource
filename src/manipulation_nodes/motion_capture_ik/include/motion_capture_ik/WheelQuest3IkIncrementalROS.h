@@ -57,7 +57,6 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   WheelPointTrackIKSolverConfig loadPointTrackIKSolverConfigFromJson(const nlohmann::json& configJson);
   DrakeChestElbowHandWeightConfig loadDrakeChestElbowHandWeightsFromJson(const nlohmann::json& configJson);
   DrakeChestElbowHandBoundsConfig loadDrakeChestElbowHandBoundsFromJson(const nlohmann::json& configJson);
-  DrakeChestElbowHandPrevFilterConfig loadDrakeChestElbowHandPrevFilterConfigFromJson(const nlohmann::json& configJson);
 
  private:
   void chestPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
@@ -190,6 +189,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool lastLbQuickModeRequestSuccess_ = false;
 
   ros::Publisher kuavoArmTrajCppPublisher_;  // 发布kuavo_arm_traj_cpp；launch中通过remap话题方式来接入当前系统
+  ros::Publisher kuavoArmTrajRadPublisher_;  // 与 kuavo_arm_traj_cpp 同步，关节位置/速度为弧度
   ros::Publisher sensorDataArmJointsPublisher_;      // 发布传感器数据的手臂关节角
   ros::Publisher leftHandPosePublisher_;             // 发布左手pose
   ros::Publisher rightHandPosePublisher_;            // 发布右手pose
@@ -261,7 +261,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::unique_ptr<DrakeChestElbowHandPointOptSolver> chestElbowHandPointOptSolverPtr_;
   DrakeChestElbowHandWeightConfig chestElbowHandWeightConfig_;
   DrakeChestElbowHandBoundsConfig chestElbowHandBoundsConfig_;
-  DrakeChestElbowHandPrevFilterConfig chestElbowHandPrevFilterConfig_;
+  bool drakeSolveUpdateChestOrientation_ = true;
+  bool drakeSolveUpdateChestPositionConfig_ = true;  // 配置文件中的 position 总开关
+  bool drakeSolveUpdateChestPosition_ = true;
 
   // Drake diagram and context for plant
   std::unique_ptr<drake::systems::Diagram<double>> diagram_;
@@ -279,10 +281,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // 机器人结构参数
   Eigen::Vector3d robotRightFixedShoulderPos_;                     // 右肩绝对位置
   Eigen::Vector3d robotLeftFixedShoulderPos_;                      // 左肩绝对位置
-  Eigen::Vector3d robotFixedWaistYawPos_;                          // 腰关节yaw位置
-  Eigen::Vector3d latestWaistYawFkPos_ = Eigen::Vector3d::Zero();  // 当前关节 FK 计算的腰部 yaw 位置
+  Eigen::Vector3d robotFixedWaistYawPos_;                          // 胸部IK目标frame(waist_yaw_link)在零位时的位置
+  Eigen::Vector3d latestWaistYawFkPos_ = Eigen::Vector3d::Zero();  // 当前关节 FK 计算的胸部IK目标frame(waist_yaw_link)位置
   bool hasLatestWaistYawFk_ = false;
-  Eigen::Vector3d chestDefaultOffset_;                                  // 胸部默认位置相对腰部yaw的偏移量
+  Eigen::Vector3d chestDefaultOffset_;                             // 兼容旧配置保留，不再作为胸部IK目标的主来源
   Eigen::Vector3d latestLeftShoulderFkPos_ = Eigen::Vector3d::Zero();   // 当前关节 FK 计算的左肩位置
   Eigen::Vector3d latestRightShoulderFkPos_ = Eigen::Vector3d::Zero();  // 当前关节 FK 计算的右肩位置
   bool hasLatestLeftShoulderFk_ = false;
@@ -392,7 +394,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool lastLeftGripPressed_ = false;
   bool lastRightGripPressed_ = false;
 
-  bool chestIncrementalUpdateEnabled_ = true;
+  bool chestIncrementalUpdateEnabled_ = true;  // pose 总开关：true 更新位姿，false 冻结位姿
+  bool chestPositionUpdateEnable_ = true;      // position 子开关：仅在 pose 总开关为 true 时允许更新
 
   struct ModeChangeCycleCache {
     bool leftHandCtrlModeChanged = false;

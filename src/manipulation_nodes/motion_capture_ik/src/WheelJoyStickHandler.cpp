@@ -37,6 +37,8 @@ void WheelJoyStickHandler::initialize() {
 
   RightJoyStickYHold_ = true;
   rightJoyStickYHoldCount_ = 0;
+  rightJoyStickYHoldWithX_ = true;
+  rightJoyStickYHoldWithXCount_ = 0;
 
   leftGrip_ = false;
   rightGrip_ = false;
@@ -95,6 +97,8 @@ void WheelJoyStickHandler::reset() {
 
   RightJoyStickYHold_ = true;
   rightJoyStickYHoldCount_ = 0;
+  rightJoyStickYHoldWithX_ = true;
+  rightJoyStickYHoldWithXCount_ = 0;
 
   leftGrip_ = false;
   rightGrip_ = false;
@@ -158,6 +162,11 @@ bool WheelJoyStickHandler::getRightJoyStickYHold() const {
   return RightJoyStickYHold_;
 }
 
+bool WheelJoyStickHandler::getRightJoyStickYHoldWithX() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return rightJoyStickYHoldWithX_;
+}
+
 void WheelJoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
   std::lock_guard<std::mutex> lock(dataMutex_);
   if (!isInitialized_.load()) {
@@ -166,36 +175,71 @@ void WheelJoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::
   }
 
   double rightJoyStickYValue = msg->right_y;
-  bool isCounting = false;
+  const bool isXPressed = msg->left_first_button_pressed;
 
-  if (!RightJoyStickYHold_) {
-    if (rightJoyStickYValue > 0.8) {
-      // print count
-      ROS_INFO_STREAM_THROTTLE(
-          0.5, "\033[92m[WheelJoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
-      rightJoyStickYHoldCount_++;
-      isCounting = true;
-      if (rightJoyStickYHoldCount_ > 100) {
-        RightJoyStickYHold_ = true;
-        rightJoyStickYHoldCount_ = 0;
-        std::cout << "\033[92m[WheelJoyStickHandler] RightJoyStickYHold_ 状态切换为: true\033[0m" << std::endl;
+  if (isXPressed) {
+    rightJoyStickYHoldCount_ = 0;
+    if (!rightJoyStickYHoldWithX_) {
+      if (rightJoyStickYValue > 0.8) {
+        ROS_INFO_STREAM_THROTTLE(
+            0.5, "\033[92m[WheelJoyStickHandler] rightJoyStickYHoldWithXCount_: " << rightJoyStickYHoldWithXCount_
+                                                                                     << "\033[0m");
+        rightJoyStickYHoldWithXCount_++;
+        if (rightJoyStickYHoldWithXCount_ > 100) {
+          rightJoyStickYHoldWithX_ = true;
+          rightJoyStickYHoldWithXCount_ = 0;
+          std::cout << "\033[92m[WheelJoyStickHandler] rightJoyStickYHoldWithX_ 状态切换为: true\033[0m"
+                    << std::endl;
+        }
+      } else {
+        rightJoyStickYHoldWithXCount_ = 0;
       }
     } else {
-      rightJoyStickYHoldCount_ = 0;
+      if (rightJoyStickYValue < -0.8) {
+        ROS_INFO_STREAM_THROTTLE(
+            0.5, "\033[92m[WheelJoyStickHandler] rightJoyStickYHoldWithXCount_: " << rightJoyStickYHoldWithXCount_
+                                                                                     << "\033[0m");
+        rightJoyStickYHoldWithXCount_++;
+        if (rightJoyStickYHoldWithXCount_ > 100) {
+          rightJoyStickYHoldWithX_ = false;
+          rightJoyStickYHoldWithXCount_ = 0;
+          std::cout << "\033[92m[WheelJoyStickHandler] rightJoyStickYHoldWithX_ 状态切换为: false\033[0m"
+                    << std::endl;
+        }
+      } else {
+        rightJoyStickYHoldWithXCount_ = 0;
+      }
     }
   } else {
-    if (rightJoyStickYValue < -0.8) {
-      ROS_INFO_STREAM_THROTTLE(
-          0.5, "\033[92m[WheelJoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
-      rightJoyStickYHoldCount_++;
-      isCounting = true;
-      if (rightJoyStickYHoldCount_ > 100) {
-        RightJoyStickYHold_ = false;
+    rightJoyStickYHoldWithXCount_ = 0;
+    if (!RightJoyStickYHold_) {
+      if (rightJoyStickYValue > 0.8) {
+        ROS_INFO_STREAM_THROTTLE(
+            0.5,
+            "\033[92m[WheelJoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
+        rightJoyStickYHoldCount_++;
+        if (rightJoyStickYHoldCount_ > 100) {
+          RightJoyStickYHold_ = true;
+          rightJoyStickYHoldCount_ = 0;
+          std::cout << "\033[92m[WheelJoyStickHandler] RightJoyStickYHold_ 状态切换为: true\033[0m" << std::endl;
+        }
+      } else {
         rightJoyStickYHoldCount_ = 0;
-        std::cout << "\033[92m[WheelJoyStickHandler] RightJoyStickYHold_ 状态切换为: false\033[0m" << std::endl;
       }
     } else {
-      rightJoyStickYHoldCount_ = 0;
+      if (rightJoyStickYValue < -0.8) {
+        ROS_INFO_STREAM_THROTTLE(
+            0.5,
+            "\033[92m[WheelJoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
+        rightJoyStickYHoldCount_++;
+        if (rightJoyStickYHoldCount_ > 100) {
+          RightJoyStickYHold_ = false;
+          rightJoyStickYHoldCount_ = 0;
+          std::cout << "\033[92m[WheelJoyStickHandler] RightJoyStickYHold_ 状态切换为: false\033[0m" << std::endl;
+        }
+      } else {
+        rightJoyStickYHoldCount_ = 0;
+      }
     }
   }
 

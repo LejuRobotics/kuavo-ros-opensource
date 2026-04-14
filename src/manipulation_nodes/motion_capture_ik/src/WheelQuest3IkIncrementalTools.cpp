@@ -40,7 +40,6 @@ void WheelQuest3IkIncrementalROS::activateController() {
   if (controllerActivated_.load()) return;
 
   if (!changeMobileCtrlModeClient_.exists()) return;
-  if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
 
   ROS_INFO("[WheelQuest3IkIncrementalROS] Activating controller");
@@ -51,7 +50,6 @@ void WheelQuest3IkIncrementalROS::activateController() {
   srv2.request.control_mode = static_cast<int>(KuavoArmCtrlMode::EXTERNAL_CONTROL);
 
   controllerActivated_.store(changeMobileCtrlModeClient_.call(srv1) && srv1.response.result &&  //
-                             humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&   //
                              changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&     //
                              true);
 }
@@ -59,7 +57,6 @@ void WheelQuest3IkIncrementalROS::activateController() {
 void WheelQuest3IkIncrementalROS::deactivateController() {
   if (!controllerActivated_.load()) return;
   if (!changeMobileCtrlModeClient_.exists()) return;
-  if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
 
   kuavo_msgs::changeTorsoCtrlMode srv1;
@@ -69,7 +66,6 @@ void WheelQuest3IkIncrementalROS::deactivateController() {
   srv2.request.control_mode = static_cast<int>(KuavoArmCtrlMode::ARM_FIXED);
 
   controllerActivated_.store(!(changeMobileCtrlModeClient_.call(srv1) && srv1.response.result &&  //
-                               humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&   //
                                changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&     //
                                true));
 }
@@ -224,7 +220,9 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
                                               leftElbowRefRel,   // leftElbowRef - offset,
                                               leftHandRefRel,    // leftHandRef - offset,
                                               rightElbowRefRel,  // rightElbowRef - offset,
-                                              rightHandRefRel);  // rightHandRef - offset;
+                                              rightHandRefRel,   // rightHandRef - offset;
+                                              drakeSolveUpdateChestOrientation_,
+                                              drakeSolveUpdateChestPosition_);
   recordTimestamp("chestElbowHandPointOptSolverPtr_->solveFinish", loopSyncCount_);
   const bool freezeFeedAfterOpt =
       !isInMode2Warmup && bothGripsReleased && !chestIncrementalUpdateEnabled && sol.success;
@@ -599,12 +597,12 @@ void WheelQuest3IkIncrementalROS::reset() {
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = defaultRightHandPosOnExit_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = defaultHandQuat.toRotationMatrix();
   // 初始化 chest / shoulders（避免 IK shoulder/chest cost 拉到零）
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = robotFixedWaistYawPos_ + chestDefaultOffset_;
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = robotFixedWaistYawPos_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = Eigen::Matrix3d::Identity();
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_SHOULDER].position = robotLeftFixedShoulderPos_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position = robotRightFixedShoulderPos_;
-  latestChestPosBeforeOpt_ = robotFixedWaistYawPos_ + chestDefaultOffset_;
-  latestChestPosAfterOpt_ = robotFixedWaistYawPos_ + chestDefaultOffset_;
+  latestChestPosBeforeOpt_ = robotFixedWaistYawPos_;
+  latestChestPosAfterOpt_ = robotFixedWaistYawPos_;
   latestLeftShoulderPosBeforeOpt_ = robotLeftFixedShoulderPos_;
   latestLeftShoulderPosAfterOpt_ = robotLeftFixedShoulderPos_;
   latestRightShoulderPosBeforeOpt_ = robotRightFixedShoulderPos_;
@@ -905,7 +903,7 @@ void WheelQuest3IkIncrementalROS::computeRightLink6FK(Eigen::Vector3d& pOut, Eig
 }
 
 void WheelQuest3IkIncrementalROS::computeWaistYawFK(Eigen::Vector3d& pOut) {
-  // 默认值（FK 计算失败时的 fallback）
+  // 默认值（FK 计算失败时的 fallback），胸部IK目标对应 waist_yaw_link。
   pOut = robotFixedWaistYawPos_;
 
   if (filterJointDataForDrakeFK_.size() != drakeJointStateSize_) {
@@ -916,7 +914,7 @@ void WheelQuest3IkIncrementalROS::computeWaistYawFK(Eigen::Vector3d& pOut) {
   {
     std::lock_guard<std::mutex> lock(oneStageIkMutex_);
     auto [waistYawPosition, waistYawQuaternion] =
-        oneStageIkEndEffectorPtr_->FK(filterJointDataForDrakeFK_, "waist_yaw_joint_parent");
+        oneStageIkEndEffectorPtr_->FK(filterJointDataForDrakeFK_, "waist_yaw_link");
     (void)waistYawQuaternion;
     pOut = waistYawPosition;
     hasLatestWaistYawFk_ = true;
@@ -964,7 +962,7 @@ void WheelQuest3IkIncrementalROS::computeRightShoulderFK(Eigen::Vector3d& pOut, 
 // ========================================================================================
 // [AUTO-MOVED][stage 3] moved from WheelQuest3IkIncrementalROS.cpp
 // Functions: loadPointTrackIKSolverConfigFromJson, loadDrakeChestElbowHandWeightsFromJson,
-// loadDrakeChestElbowHandBoundsFromJson, loadDrakeChestElbowHandPrevFilterConfigFromJson
+// loadDrakeChestElbowHandBoundsFromJson
 // ========================================================================================
 
 WheelPointTrackIKSolverConfig WheelQuest3IkIncrementalROS::loadPointTrackIKSolverConfigFromJson(
@@ -987,6 +985,14 @@ WheelPointTrackIKSolverConfig WheelQuest3IkIncrementalROS::loadPointTrackIKSolve
       if (ikConfig.contains("dynamicsDt")) {
         config.dynamicsDt = ikConfig["dynamicsDt"].get<double>();
         ROS_INFO("  ✅ dynamicsDt: %.6f", config.dynamicsDt);
+      }
+      if (ikConfig.contains("refSecondOrderLpfCutoffHz")) {
+        config.refSecondOrderLpfCutoffHz = ikConfig["refSecondOrderLpfCutoffHz"].get<double>();
+        ROS_INFO("  ✅ refSecondOrderLpfCutoffHz: %.3f", config.refSecondOrderLpfCutoffHz);
+      }
+      if (ikConfig.contains("refSecondOrderLpfDt")) {
+        config.refSecondOrderLpfDt = ikConfig["refSecondOrderLpfDt"].get<double>();
+        ROS_INFO("  ✅ refSecondOrderLpfDt: %.6f", config.refSecondOrderLpfDt);
       }
 
 
@@ -1123,6 +1129,16 @@ WheelPointTrackIKSolverConfig WheelQuest3IkIncrementalROS::loadPointTrackIKSolve
         ROS_INFO("  ✅ waistSmoothWeight3: %.2e", config.waistSmoothWeight3);
       }
 
+      if (ikConfig.contains("accSmoothWeightDefault")) {
+        config.accSmoothWeightDefault = ikConfig["accSmoothWeightDefault"].get<double>();
+        ROS_INFO("  ✅ accSmoothWeightDefault: %.2e", config.accSmoothWeightDefault);
+      }
+
+      if (ikConfig.contains("jerkSmoothWeightDefault")) {
+        config.jerkSmoothWeightDefault = ikConfig["jerkSmoothWeightDefault"].get<double>();
+        ROS_INFO("  ✅ jerkSmoothWeightDefault: %.2e", config.jerkSmoothWeightDefault);
+      }
+
       ROS_INFO("✅ [WheelQuest3IkIncrementalROS] Successfully loaded WheelPointTrackIKSolverConfig from JSON");
     } else {
       ROS_WARN("❌ [WheelQuest3IkIncrementalROS] 'point_track_ik_solver_config' not found in JSON config, using defaults");
@@ -1153,6 +1169,9 @@ DrakeChestElbowHandWeightConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
   config.qa0 = 5.0e-3;
   config.qa1 = 5.0e-3;
   config.qa2 = 5.0e-3;
+  config.qjerk0 = 0.0;
+  config.qjerk1 = 0.0;
+  config.qjerk2 = 0.0;
   config.accUseFixedDt = false;
   config.accFixedDtSec = 0.01;
 
@@ -1184,6 +1203,9 @@ DrakeChestElbowHandWeightConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
       if (w.contains("qa0")) config.qa0 = w["qa0"].get<double>();
       if (w.contains("qa1")) config.qa1 = w["qa1"].get<double>();
       if (w.contains("qa2")) config.qa2 = w["qa2"].get<double>();
+      if (w.contains("qjerk0")) config.qjerk0 = w["qjerk0"].get<double>();
+      if (w.contains("qjerk1")) config.qjerk1 = w["qjerk1"].get<double>();
+      if (w.contains("qjerk2")) config.qjerk2 = w["qjerk2"].get<double>();
       if (w.contains("acc_use_fixed_dt")) config.accUseFixedDt = w["acc_use_fixed_dt"].get<bool>();
       if (w.contains("acc_fixed_dt_sec")) config.accFixedDtSec = w["acc_fixed_dt_sec"].get<double>();
     }
@@ -1194,7 +1216,8 @@ DrakeChestElbowHandWeightConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
   ROS_INFO(
       "[WheelQuest3IkIncrementalROS] DrakeChestElbowHandWeightConfig loaded: q0=[%.3f, %.3f, %.3f], "
       "qv0=[%.3f, %.3f, %.3f], wq0=[%.3f, %.3f, %.3f], wqv0=[%.3f, %.3f, %.3f], "
-      "q1=%.3f, q2=%.3f, qv1=%.3f, qv2=%.3f, qa0=%.6f, qa1=%.6f, qa2=%.6f, acc_use_fixed_dt=%s, acc_fixed_dt_sec=%.6f",
+      "q1=%.3f, q2=%.3f, qv1=%.3f, qv2=%.3f, qa0=%.6f, qa1=%.6f, qa2=%.6f, qjerk0=%.6f, qjerk1=%.6f, qjerk2=%.6f, "
+      "acc_use_fixed_dt=%s, acc_fixed_dt_sec=%.6f",
       config.q0.x(),
       config.q0.y(),
       config.q0.z(),
@@ -1214,6 +1237,9 @@ DrakeChestElbowHandWeightConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
       config.qa0,
       config.qa1,
       config.qa2,
+      config.qjerk0,
+      config.qjerk1,
+      config.qjerk2,
       config.accUseFixedDt ? "true" : "false",
       config.accFixedDtSec);
   return config;
@@ -1262,44 +1288,6 @@ DrakeChestElbowHandBoundsConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
     ROS_ERROR("[WheelQuest3IkIncrementalROS] loadDrakeChestElbowHandBoundsFromJson exception: %s", e.what());
   }
 
-  return config;
-}
-
-DrakeChestElbowHandPrevFilterConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbowHandPrevFilterConfigFromJson(
-    const nlohmann::json& configJson) {
-  DrakeChestElbowHandPrevFilterConfig config;
-
-  try {
-    if (configJson.contains("drake_chest_elbow_hand_prev_filter") &&
-        configJson["drake_chest_elbow_hand_prev_filter"].is_object()) {
-      const auto& f = configJson["drake_chest_elbow_hand_prev_filter"];
-      if (f.contains("p_chest")) config.pChest = f["p_chest"].get<double>();
-      if (f.contains("u1_left")) config.u1Left = f["u1_left"].get<double>();
-      if (f.contains("u2_left")) config.u2Left = f["u2_left"].get<double>();
-      if (f.contains("u1_right")) config.u1Right = f["u1_right"].get<double>();
-      if (f.contains("u2_right")) config.u2Right = f["u2_right"].get<double>();
-      if (f.contains("p_left_elbow")) config.pLeftElbow = f["p_left_elbow"].get<double>();
-      if (f.contains("p_left_hand")) config.pLeftHand = f["p_left_hand"].get<double>();
-      if (f.contains("p_right_elbow")) config.pRightElbow = f["p_right_elbow"].get<double>();
-      if (f.contains("p_right_hand")) config.pRightHand = f["p_right_hand"].get<double>();
-    }
-  } catch (const std::exception& e) {
-    ROS_ERROR("[WheelQuest3IkIncrementalROS] loadDrakeChestElbowHandPrevFilterConfigFromJson exception: %s", e.what());
-  }
-
-  ROS_INFO(
-      "[WheelQuest3IkIncrementalROS] DrakeChestElbowHandPrevFilterConfig loaded: p_chest=%.3f, u1_left=%.3f, "
-      "u2_left=%.3f, u1_right=%.3f, u2_right=%.3f, p_left_elbow=%.3f, p_left_hand=%.3f, p_right_elbow=%.3f, "
-      "p_right_hand=%.3f",
-      config.pChest,
-      config.u1Left,
-      config.u2Left,
-      config.u1Right,
-      config.u2Right,
-      config.pLeftElbow,
-      config.pLeftHand,
-      config.pRightElbow,
-      config.pRightHand);
   return config;
 }
 
@@ -1644,6 +1632,14 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
 
   kuavoArmTrajCppPublisher_.publish(armJintStateMsg);
   {
+    sensor_msgs::JointState armJintStateMsgRad = armJintStateMsg;
+    for (size_t i = 0; i < armJintStateMsgRad.position.size(); ++i) {
+      armJintStateMsgRad.position[i] *= M_PI / 180.0;
+      armJintStateMsgRad.velocity[i] *= M_PI / 180.0;
+    }
+    kuavoArmTrajRadPublisher_.publish(armJintStateMsgRad);
+  }
+  {
     std::lock_guard<std::mutex> lock(lbLegTargetMutex_);
     hasLatestLbTargetAngles_ = (finalLbAngles.size() == 4);
     if (hasLatestLbTargetAngles_) {
@@ -1657,8 +1653,8 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
   // 定义默认目标角度（度转弧度）
   // 左臂和右臂的默认角度：[45, 0, 0, -90, 0, 0, 0] 度
   Eigen::VectorXd defaultArmAngles = Eigen::VectorXd::Zero(14);
-  defaultArmAngles.head(7) << 45.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
-  defaultArmAngles.tail(7) << 45.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+  defaultArmAngles.head(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+  defaultArmAngles.tail(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
 
   // 发布手臂关节状态
   sensor_msgs::JointState armJintStateMsg;
@@ -1700,6 +1696,14 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
 
   // 发布手臂消息
   kuavoArmTrajCppPublisher_.publish(armJintStateMsg);
+  {
+    sensor_msgs::JointState armJintStateMsgRad = armJintStateMsg;
+    for (size_t i = 0; i < armJintStateMsgRad.position.size(); ++i) {
+      armJintStateMsgRad.position[i] *= M_PI / 180.0;
+      armJintStateMsgRad.velocity[i] *= M_PI / 180.0;
+    }
+    kuavoArmTrajRadPublisher_.publish(armJintStateMsgRad);
+  }
 
   // 注意：lb_leg 由 Timer 回调独立发布，这里不处理
 }
@@ -1991,6 +1995,8 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   q_ = Eigen::VectorXd::Zero(14);
   dq_ = Eigen::VectorXd::Zero(14);
   latest_q_ = Eigen::VectorXd::Zero(14);
+  latest_q_.head(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+  latest_q_.tail(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
   latest_dq_ = Eigen::VectorXd::Zero(14);
   lowpass_dq_ = Eigen::VectorXd::Zero(14);
 
@@ -2021,7 +2027,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   (void)rightJoint2Quaternion;
   auto [joint4Position, joint4Quaternion] = oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_l4_joint_parent");
   auto [joint6Position, joint6Quaternion] = oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_l6_joint_parent");
-  auto [waistYawPosition, waistYawQuaternion] = oneStageIkEndEffectorPtr_->FK(armJoints, "waist_yaw_joint_parent");
+  auto [waistYawPosition, waistYawQuaternion] = oneStageIkEndEffectorPtr_->FK(armJoints, "waist_yaw_link");
   auto [waistPitchPosition, waistPitchQuaternion] =
       oneStageIkEndEffectorPtr_->FK(armJoints, "waist_pitch_joint_parent");
   robotFixedWaistYawPos_ = waistYawPosition;
@@ -2039,7 +2045,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
            baseLinkQuaternion.z());
 
   //  print waistyaw position and quaternion
-  ROS_INFO("✅ [WheelQuest3IkIncrementalROS] Waist yaw position: [%.6f, %.6f, %.6f], quaternion: [%.6f, %.6f, %.6f, %.6f]",
+  ROS_INFO("✅ [WheelQuest3IkIncrementalROS] Chest target frame(waist_yaw_link) position: [%.6f, %.6f, %.6f], quaternion: [%.6f, %.6f, %.6f, %.6f]",
            waistYawPosition.x(),
            waistYawPosition.y(),
            waistYawPosition.z(),
@@ -2068,7 +2074,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
            robotRightFixedShoulderPos_.x(),
            robotRightFixedShoulderPos_.y(),
            robotRightFixedShoulderPos_.z());
-  ROS_INFO("   Waist yaw joint parent: [%.6f, %.6f, %.6f], quaternion: [%.6f, %.6f, %.6f, %.6f]",
+  ROS_INFO("   Chest target frame (waist_yaw_link): [%.6f, %.6f, %.6f], quaternion: [%.6f, %.6f, %.6f, %.6f]",
            waistYawPosition.x(),
            waistYawPosition.y(),
            waistYawPosition.z(),
@@ -2189,6 +2195,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       initZeroRightEndEffectorPosition_.z());
 
   kuavoArmTrajCppPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_cpp", 2);
+  kuavoArmTrajRadPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_rad", 2);
   sensorDataArmJointsPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_sensor_data", 2);
   leftHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/left_hand_pose", 2);
   rightHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/right_hand_pose", 2);
@@ -2232,11 +2239,22 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   lbLegTrajPublishTimer_ =
       nodeHandle_.createTimer(ros::Duration(lbLegPublishRateMultiplier_ / std::max(jointStatePublishRateHz_, 1.0)),
                               [this](const ros::TimerEvent&) {
-                                // 根据 armControlMode_ 决定调用哪个发布函数
-                                if (armControlMode_ == 2) {
-                                  publishLegJointStates();  // mode 2: 使用 IK 解
+                                const int armMode = armControlMode_.load();
+                                ros::Time mode2EnterTime;
+                                {
+                                  std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
+                                  mode2EnterTime = mode2EnterTime_;
+                                }
+
+                                const bool inMode2Warmup =
+                                    (armMode == 2) && !mode2EnterTime.isZero() &&
+                                    ((ros::Time::now() - mode2EnterTime).toSec() <= MODE_2_TIMEOUT_DURATION);
+
+                                // armMode!=2 或 mode2过渡窗口内，统一走默认下肢发布；其余 mode2 情况走 IK 下肢发布
+                                if (armMode != 2 || inMode2Warmup) {
+                                  publishDefaultLegJointStates();
                                 } else {
-                                  publishDefaultLegJointStates();  // 非 mode 2: 使用默认值
+                                  publishLegJointStates();
                                 }
                               });
 
@@ -2450,7 +2468,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = defaultRightHandPosOnExit_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = defaultHandQuat.toRotationMatrix();
   // 初始化 chest / shoulders（避免未收到 chestPoseCallback 时，IK shoulder cost 拉到零）
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = robotFixedWaistYawPos_ + chestDefaultOffset_;
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = robotFixedWaistYawPos_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = Eigen::Matrix3d::Identity();
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_SHOULDER].position = robotLeftFixedShoulderPos_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position = robotRightFixedShoulderPos_;
@@ -2465,10 +2483,29 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
   // 初始化 Drake 全身（chest + 双臂肘/手）参考点优化求解器
   {
+    if (configJson.contains("drake_solve_update_chest_orientation")) {
+      drakeSolveUpdateChestOrientation_ = configJson["drake_solve_update_chest_orientation"].get<bool>();
+    }
+    if (configJson.contains("drake_solve_update_chest_position")) {
+      drakeSolveUpdateChestPositionConfig_ = configJson["drake_solve_update_chest_position"].get<bool>();
+    }
+    // Backward compatibility: if old key exists, use it as unified fallback.
+    if (configJson.contains("alway_update_chest")) {
+      const bool alwaysUpdateChest = configJson["alway_update_chest"].get<bool>();
+      if (!configJson.contains("drake_solve_update_chest_orientation")) {
+        drakeSolveUpdateChestOrientation_ = alwaysUpdateChest;
+      }
+      if (!configJson.contains("drake_solve_update_chest_position")) {
+        drakeSolveUpdateChestPositionConfig_ = alwaysUpdateChest;
+      }
+    }
+    drakeSolveUpdateChestPosition_ = drakeSolveUpdateChestPositionConfig_;
+    ROS_INFO("[WheelQuest3IkIncrementalROS] drake solve update flags: orientation=%s, position=%s",
+             drakeSolveUpdateChestOrientation_ ? "true" : "false",
+             drakeSolveUpdateChestPosition_ ? "true" : "false");
+
     chestElbowHandWeightConfig_ = loadDrakeChestElbowHandWeightsFromJson(configJson);
     chestElbowHandBoundsConfig_ = loadDrakeChestElbowHandBoundsFromJson(configJson);
-    chestElbowHandPrevFilterConfig_ = loadDrakeChestElbowHandPrevFilterConfigFromJson(configJson);
-
     const Eigen::Vector3d vClsInChest = robotLeftFixedShoulderPos_ - robotFixedWaistYawPos_;
     const Eigen::Vector3d vCrsInChest = robotRightFixedShoulderPos_ - robotFixedWaistYawPos_;
 
@@ -2496,7 +2533,6 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
         std::make_unique<DrakeChestElbowHandPointOptSolver>(vClsInChest, vCrsInChest, l1_, l2_, &initFkResult);
     chestElbowHandPointOptSolverPtr_->setWeights(chestElbowHandWeightConfig_);
     chestElbowHandPointOptSolverPtr_->setBounds(chestElbowHandBoundsConfig_);
-    chestElbowHandPointOptSolverPtr_->setPrevFilterConfig(chestElbowHandPrevFilterConfig_);
 
     ROS_INFO("[WheelQuest3IkIncrementalROS] DrakeChestElbowHandPointOptSolver initialized with FK result (l1=%.4f, l2=%.4f)",
              l1_,

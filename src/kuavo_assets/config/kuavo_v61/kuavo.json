@@ -52,10 +52,14 @@
         "PA115", "PA115", "PA115", "PA115",
         "PA100", "ruiwoPA72", "ruiwoPA60", "ruiwoPA72", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43",
         "PA100", "ruiwoPA72", "ruiwoPA60", "ruiwoPA72", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43", "ruiwoPA43"],
-    "ruiwo_kp": [50, 50, 50, 30, 30, 30, 50, 50, 50, 30, 20, 20, 10, 10],
-    "ruiwo_kd": [6, 6, 6, 3, 3, 3, 6, 6, 6, 3, 2, 2, 4, 3],
-    "vr_ruiwo_kp": [50, 50, 50, 30, 30, 30, 50, 50, 50, 30, 30, 30, 10, 10],
-    "vr_ruiwo_kd": [6, 6, 6, 3, 3, 3, 6, 6, 6, 3, 3, 3, 4, 3],
+    "ruiwo_kp": [50, 50, 50, 30, 30, 30, 50, 50, 50, 30, 30, 30, 10, 10],
+    "ruiwo_kd": [6, 6, 6, 3, 3, 3, 6, 6, 6, 3, 3, 3, 4, 3],
+    "vr_ruiwo_kp": [200, 200, 200, 55, 55, 55, 
+                    200, 200, 200, 55, 55, 55, 
+                    10, 10],
+    "vr_ruiwo_kd": [5, 5, 5, 5, 5, 5, 
+                    5, 5, 5, 5, 5, 5, 
+                    4, 3],
     "EndEffectorType": ["None", "None"],
     "min_joint_position_limits":[
         -5.5, -161, 
@@ -272,12 +276,16 @@
         "waistSmoothWeight1": 3000.0,
         "waistSmoothWeight2": 3000.0,
         "waistSmoothWeight3": 3000.0,
+        "accSmoothWeightDefault": 5e1,
+        "jerkSmoothWeightDefault": 1e0,
 
         "dynamicsDt": 0.01,
+        "refSecondOrderLpfCutoffHz": 12.0,
+        "refSecondOrderLpfDt": 0.01,
         
-        "constraintTolerance": 1e-8,
-        "solverTolerance": 1e-6,
-        "maxIterations": 3000,
+        "constraintTolerance": 1e-7,
+        "solverTolerance": 1e-5,
+        "maxIterations": 4000,
         "controlArmIndex": 2,
         "isWeldBaseLink": true,
         "useJointLimits": true
@@ -285,34 +293,25 @@
 
     "drake_chest_elbow_hand_weights": {
         "q0_xyz": [35.0, 0, 35.0],
-        "qv0_xyz": [0.3, 0, 0.3],
+        "qv0_xyz": [1e-3, 0, 1e-3],
         "wq0_xyz": [35.0, 35.0, 35.0],
         "wqv0_xyz": [0.3, 0.3, 0.3],
-        "q1": 1.0,
-        "q2": 15.0,
-        "qv1": 1.0,
-        "qv2": 0.1,
-        "qa0": 0.0,
-        "qa1": 0.0,
+        "q1": 5.0,
+        "q2": 20.0,
+        "qv1": 1e-3,
+        "qv2": 1e-3,
+        "qa0": 1e-7,
+        "qa1": 1e-7,
         "qa2": 1e-7,
-        "acc_use_fixed_dt": false,
+        "qjerk0": 1e-15,
+        "qjerk1": 1e-15,
+        "qjerk2": 1e-15,
+        "acc_use_fixed_dt": true,
         "acc_fixed_dt_sec": 0.01
     },
 
-    "drake_chest_elbow_hand_prev_filter": {
-        "p_chest": 1.0,
-        "u1_left": 1.0,
-        "u2_left": 1.0,
-        "u1_right": 1.0,
-        "u2_right": 1.0,
-        "p_left_elbow": 1.0,
-        "p_left_hand": 1.0,
-        "p_right_elbow": 1.0,
-        "p_right_hand": 1.0
-    },
-
     "drake_chest_elbow_hand_bounds": {
-        "chest_lower_bound": [0.2, -0.001, 0.45],
+        "chest_lower_bound": [0.12, -0.001, 0.45],
         "chest_upper_bound": [0.65, 0.001, 1.15],
 
         "left_hand_lower_bound": [-1.25, -1000.0, -0.05],
@@ -340,8 +339,10 @@
     },
     "joint_state_publish_rate_hz": 100.0,
     "chest_default_offset": [0.0, 0.0, 1.2],
+    "drake_solve_update_chest_orientation": true,
+    "drake_solve_update_chest_position": true,
     "alway_update_chest": false,
     "lb_leg_publish_rate_multiplier": 0.1,
-    "pos_cutoff_hz": 20.0,
+    "pos_cutoff_hz": 12.0,
     "orientation_cutoff_hz": 20.0
 }

@@ -1,13 +1,101 @@
 #include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 
 #include <algorithm>
+#include <cmath>
+
 #include <ros/ros.h>
 
 #include <leju_utils/define.hpp>
 
 namespace HighlyDynamic {
-Eigen::Vector3d defaultRelativeEulerLimitZYX = Eigen::Vector3d(0.9 * 1.57, 0.55, 0.55);  // rad
-namespace {}                                                                             // namespace
+namespace {
+inline bool isValidSolution(const Eigen::VectorXd& q, int nq) {
+  return q.size() == nq && q.allFinite() && q.norm() > 1e-9;
+}
+}  // namespace
+
+WheelOneStageIKEndEffector::LowpassBiquadCoeff WheelOneStageIKEndEffector::makeSecondOrderLowpassCoeff(
+    double cutoffHz,
+    double sampleTime) {
+  LowpassBiquadCoeff coeff;
+  if (cutoffHz <= 0.0 || sampleTime <= 1e-9) {
+    return coeff;
+  }
+
+  const double fs = 1.0 / sampleTime;
+  const double nyquist = 0.5 * fs;
+  const double fc = std::min(cutoffHz, 0.95 * nyquist);
+  if (fc <= 1e-6) {
+    return coeff;
+  }
+
+  constexpr double kSqrt2 = 1.4142135623730951;
+  constexpr double kPi = 3.14159265358979323846;
+  const double k = std::tan(kPi * fc / fs);
+  const double k2 = k * k;
+  const double norm = 1.0 / (1.0 + kSqrt2 * k + k2);
+
+  coeff.b0 = k2 * norm;
+  coeff.b1 = 2.0 * coeff.b0;
+  coeff.b2 = coeff.b0;
+  coeff.a1 = 2.0 * (k2 - 1.0) * norm;
+  coeff.a2 = (1.0 - kSqrt2 * k + k2) * norm;
+  coeff.enabled = true;
+  return coeff;
+}
+
+Eigen::VectorXd WheelOneStageIKEndEffector::applySecondOrderLowpassVec(const Eigen::VectorXd& x,
+                                                                       const LowpassBiquadCoeff& coeff,
+                                                                       Eigen::VectorXd& x1,
+                                                                       Eigen::VectorXd& x2,
+                                                                       Eigen::VectorXd& y1,
+                                                                       Eigen::VectorXd& y2) {
+  if (!coeff.enabled) {
+    return x;
+  }
+
+  Eigen::VectorXd y = coeff.b0 * x + coeff.b1 * x1 + coeff.b2 * x2 - coeff.a1 * y1 - coeff.a2 * y2;
+  x2 = x1;
+  x1 = x;
+  y2 = y1;
+  y1 = y;
+  return y;
+}
+
+void WheelOneStageIKEndEffector::initializeRefLowpass() {
+  const double baseDt = (pointTrackConfig_ && pointTrackConfig_->dynamicsDt > 1e-9) ? pointTrackConfig_->dynamicsDt : 0.01;
+  const double lpfDt =
+      (pointTrackConfig_ && pointTrackConfig_->refSecondOrderLpfDt > 1e-9) ? pointTrackConfig_->refSecondOrderLpfDt : baseDt;
+  const double cutoffHz = pointTrackConfig_ ? pointTrackConfig_->refSecondOrderLpfCutoffHz : 12.0;
+  refLowpassCoeff_ = makeSecondOrderLowpassCoeff(cutoffHz, lpfDt);
+  if (!refLowpassCoeff_.enabled) {
+    ROS_WARN("WheelOneStageIKEndEffector: invalid ref LPF config (cutoff=%.3f, dt=%.6f), fallback to passthrough",
+             cutoffHz,
+             lpfDt);
+  }
+
+  refLpX1_ = Eigen::VectorXd::Zero(nq_);
+  refLpX2_ = Eigen::VectorXd::Zero(nq_);
+  refLpY1_ = Eigen::VectorXd::Zero(nq_);
+  refLpY2_ = Eigen::VectorXd::Zero(nq_);
+  refLowpassLatest_ = Eigen::VectorXd::Zero(nq_);
+  hasRefLowpassState_ = false;
+}
+
+Eigen::VectorXd WheelOneStageIKEndEffector::applyRefLowpass(const Eigen::VectorXd& input) {
+  if (!hasRefLowpassState_) {
+    refLpX1_ = input;
+    refLpX2_ = input;
+    refLpY1_ = input;
+    refLpY2_ = input;
+    refLowpassLatest_ = input;
+    hasRefLowpassState_ = true;
+    return input;
+  }
+  refLowpassLatest_ =
+      applySecondOrderLowpassVec(input, refLowpassCoeff_, refLpX1_, refLpX2_, refLpY1_, refLpY2_);
+  return refLowpassLatest_;
+}
 
 WheelOneStageIKEndEffector::WheelOneStageIKEndEffector(drake::multibody::MultibodyPlant<double>* plant,
                                              const std::vector<std::string>& ikConstraintFrameNames,
@@ -16,61 +104,34 @@ WheelOneStageIKEndEffector::WheelOneStageIKEndEffector(drake::multibody::Multibo
       historyBuffer_(config.historyBufferSize),
       pointTrackConfig_(std::make_unique<WheelPointTrackIKSolverConfig>(config)) {
   plant_context_ = plant_->CreateDefaultContext();
+  initializeRefLowpass();
+  initialGuessSeed_ = Eigen::VectorXd::Zero(nq_);
   ROS_INFO("WheelOneStageIKEndEffector::WheelOneStageIKEndEffector: nq_ = %d", nq_);
 
-  if (nq_ == 14) {
-    Eigen::VectorXd initialSolution = Eigen::VectorXd::Zero(nq_);
-    // 设置初始引导值
-    initialSolution(1) = 0.3;
-    initialSolution(2) = -0.3;
-    initialSolution(3) = 0.3;
-    // 0, 1, 2,  3,  4,  5,  6
-    // 7, 8, 9, 10, 11, 12, 13
-    initialSolution(8) = -0.3;
-    initialSolution(9) = 0.3;
-    initialSolution(10) = 0.3;
-
-    // 填充满历史步伐
-    IKSolveResult initialResult(initialSolution, std::chrono::milliseconds(0));
-    WheelIKResultHistoryBuffer::IKMotionState initialState(
-        initialResult, Eigen::VectorXd::Zero(nq_), Eigen::VectorXd::Zero(nq_), Eigen::VectorXd::Zero(nq_));
-    for (size_t i = 0; i < config.historyBufferSize; ++i) {
-      historyBuffer_.add(initialState);
-    }
-  }
   if (nq_ == 18) {
-    Eigen::VectorXd initialSolution = Eigen::VectorXd::Zero(nq_);
     // 设置初始引导值
-    initialSolution(1 + 4) = 0.3;
-    initialSolution(2 + 4) = -0.3;
-    initialSolution(3 + 4) = 0.3;
+    initialGuessSeed_(1 + 4) = 0.3;
+    initialGuessSeed_(2 + 4) = -0.3;
+    initialGuessSeed_(3 + 4) = 0.3;
     // 0, 1, 2,  3,  4,  5,  6
     // 7, 8, 9, 10, 11, 12, 13
-    initialSolution(8 + 4) = -0.3;
-    initialSolution(9 + 4) = 0.3;
-    initialSolution(10 + 4) = 0.3;
-
-    // 填充满历史步伐
-    IKSolveResult initialResult(initialSolution, std::chrono::milliseconds(0));
-    WheelIKResultHistoryBuffer::IKMotionState initialState(
-        initialResult, Eigen::VectorXd::Zero(nq_), Eigen::VectorXd::Zero(nq_), Eigen::VectorXd::Zero(nq_));
-    for (size_t i = 0; i < config.historyBufferSize; ++i) {
-      historyBuffer_.add(initialState);
-    }
+    initialGuessSeed_(8 + 4) = -0.3;
+    initialGuessSeed_(9 + 4) = 0.3;
+    initialGuessSeed_(10 + 4) = 0.3;
   }
 }
 
 IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& PoseConstraintList,
                                              ArmIdx controlArmIndex,
                                              const Eigen::VectorXd& jointMidValues /*未使用，可传空*/) {
-  // printConfigTable();
+  (void)jointMidValues;
   if (!plant_context_) {
     ROS_ERROR("WheelOneStageIKEndEffector::solveIK: plant_context_ is null");
     return IKSolveResult(nq_, "plant_context_ is null");
   }
 
-  if (nq_ != 14 && nq_ != 18) {
-    return IKSolveResult(nq_, "nq should be 14 or 18");
+  if (nq_ != 18) {
+    return IKSolveResult(nq_, "nq should be 18");
   }
   // ROS_INFO("WheelOneStageIKEndEffector::solveIK: start solve ik");
 
@@ -79,32 +140,43 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
   drake::multibody::InverseKinematics endEffectorIK(*plant_, useJointLimit);
   initInverseKinematicsSolver(endEffectorIK, SolverType::SNOPT);
 
-  Eigen::VectorXd referenceSolution = getWarmStartSolution();
-  // print referenceSolution size
-  // ROS_INFO("WheelOneStageIKEndEffector::solveIK: referenceSolution size = %zu", referenceSolution.size());
-  if (!historyBuffer_.empty()) {
-    Eigen::VectorXd meanSolution = getMeanSolution();
-    if (meanSolution.size() == nq_ && meanSolution.norm() > 1e-6) {
-      referenceSolution = meanSolution;
+  Eigen::VectorXd referenceSolution = Eigen::VectorXd::Zero(nq_);
+  if (hasRefLowpassState_ && isValidSolution(refLowpassLatest_, nq_)) {
+    referenceSolution = refLowpassLatest_;
+  } else {
+    const Eigen::VectorXd warmStart = getWarmStartSolution();
+    if (isValidSolution(warmStart, nq_)) {
+      referenceSolution = warmStart;
+    } else {
+      const auto* latestState = historyBuffer_.latest();
+      if (latestState && isValidSolution(latestState->result.solution, nq_)) {
+        referenceSolution = latestState->result.solution;
+      } else if (isValidSolution(initialGuessSeed_, nq_)) {
+        referenceSolution = initialGuessSeed_;
+      }
     }
   }
 
-  currentReferenceSolution_ = referenceSolution;
   setConstraints(endEffectorIK, PoseConstraintList, controlArmIndex, Eigen::VectorXd::Zero(nq_), referenceSolution);
 
   auto startTime = std::chrono::high_resolution_clock::now();
   auto ikResult = solveDrakeIK(endEffectorIK, referenceSolution, "SolveEndEffectorIK");
+  auto endTime = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+  ROS_INFO_THROTTLE(
+      1.0,
+      "WheelOneStageIKEndEffector latest IK solve time: %ld ms (success=%s)",
+      static_cast<long>(duration.count()),
+      ikResult.first ? "true" : "false");
+
   if (!ikResult.first) {
     ROS_WARN("WheelOneStageIKEndEffector::solveIK: EndEffectorIK solve failed");
     return IKSolveResult(nq_, "EndEffectorIK solve failed");
   }
 
-  auto endTime = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
-
-  updateLatestSolution(ikResult.second);
-
-  IKSolveResult result(ikResult.second, duration);
+  const Eigen::VectorXd filteredSolution = applyRefLowpass(ikResult.second);
+  updateLatestSolution(filteredSolution);
+  IKSolveResult result(filteredSolution, duration);
 
   const double dt = (pointTrackConfig_ && pointTrackConfig_->dynamicsDt > 1e-9) ? pointTrackConfig_->dynamicsDt : 0.01;
   Eigen::VectorXd velocity = Eigen::VectorXd::Zero(nq_);
@@ -117,21 +189,20 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
 
   if (prevState && prevState->result.solution.size() == nq_) {
     const Eigen::VectorXd& qPrev = prevState->result.solution;
-    velocity = (ikResult.second - qPrev) / dt;
+    velocity = (filteredSolution - qPrev) / dt;
 
     if (pprevState && pprevState->result.solution.size() == nq_) {
       const Eigen::VectorXd& qPprev = pprevState->result.solution;
-      acceleration = (ikResult.second - 2.0 * qPrev + qPprev) / (dt * dt);
+      acceleration = (filteredSolution - 2.0 * qPrev + qPprev) / (dt * dt);
 
       if (ppprevState && ppprevState->result.solution.size() == nq_) {
         const Eigen::VectorXd& qPpprev = ppprevState->result.solution;
-        jerk = (ikResult.second - 3.0 * qPrev + 3.0 * qPprev - qPpprev) / (dt * dt * dt);
+        jerk = (filteredSolution - 3.0 * qPrev + 3.0 * qPprev - qPpprev) / (dt * dt * dt);
       }
     }
   }
 
   historyBuffer_.add(WheelIKResultHistoryBuffer::IKMotionState(result, velocity, acceleration, jerk));
-  ++validIkUpdateCount_;
 
   return result;
 }
@@ -139,8 +210,9 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
 void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinematics& ik,
                                            const std::vector<PoseData>& PoseConstraintList,
                                            ArmIdx controlArmIndex,
-                                           const Eigen::VectorXd& initialGuess, /*未使用，可传空*/
+                                           const Eigen::VectorXd& initialGuess,
                                            const Eigen::VectorXd& referenceSolution) const {
+  (void)initialGuess;
   // Use WheelPointTrackIKSolverConfig weights if available, otherwise use defaults
   double eeWeight = pointTrackConfig_ ? pointTrackConfig_->eeTrackingWeight : 4e3;
   double elbowWeight = pointTrackConfig_ ? pointTrackConfig_->elbowTrackingWeight : 4e2;
@@ -277,30 +349,10 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
                 << std::endl;
     }
   }
-  // Build joint smoothness weights from config (7 joints per arm, symmetric)
+  // Build joint smoothness weights from config (waist + 7 joints per arm)
   std::vector<double> jointSmoothWeight(nq_, pointTrackConfig_ ? pointTrackConfig_->jointSmoothWeightDefault : 5e1);
 
   if (pointTrackConfig_) {
-    if (nq_ == 14) {
-      // Left arm joints [0-6]
-      jointSmoothWeight[0] = pointTrackConfig_->jointSmoothWeight0;
-      jointSmoothWeight[1] = pointTrackConfig_->jointSmoothWeight1;
-      jointSmoothWeight[2] = pointTrackConfig_->jointSmoothWeight2;
-      jointSmoothWeight[3] = pointTrackConfig_->jointSmoothWeight3;
-      jointSmoothWeight[4] = pointTrackConfig_->jointSmoothWeight4;
-      jointSmoothWeight[5] = pointTrackConfig_->jointSmoothWeight5;
-      jointSmoothWeight[6] = pointTrackConfig_->jointSmoothWeight6;
-
-      // Right arm joints [7-13] (symmetric to left arm)
-      jointSmoothWeight[7] = pointTrackConfig_->jointSmoothWeight0;
-      jointSmoothWeight[8] = pointTrackConfig_->jointSmoothWeight1;
-      jointSmoothWeight[9] = pointTrackConfig_->jointSmoothWeight2;
-      jointSmoothWeight[10] = pointTrackConfig_->jointSmoothWeight3;
-      jointSmoothWeight[11] = pointTrackConfig_->jointSmoothWeight4;
-      jointSmoothWeight[12] = pointTrackConfig_->jointSmoothWeight5;
-      jointSmoothWeight[13] = pointTrackConfig_->jointSmoothWeight6;
-    }
-
     if (nq_ == 18) {
       // [0~3] 腰部关节
       jointSmoothWeight[0] = pointTrackConfig_->waistSmoothWeight0;
@@ -326,6 +378,8 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
       jointSmoothWeight[11 + 4] = pointTrackConfig_->jointSmoothWeight4;
       jointSmoothWeight[12 + 4] = pointTrackConfig_->jointSmoothWeight5;
       jointSmoothWeight[13 + 4] = pointTrackConfig_->jointSmoothWeight6;
+    } else {
+      ROS_ERROR("WheelOneStageIKEndEffector::setConstraints: only nq=18 is supported, but got %d", nq_);
     }
   } else {
     // ros error instead of fallback
@@ -335,6 +389,25 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   Eigen::VectorXd weightVec = Eigen::VectorXd::Map(jointSmoothWeight.data(), jointSmoothWeight.size());
   Eigen::MatrixXd W_prev_solution = weightVec.asDiagonal();
   ik.get_mutable_prog()->AddQuadraticErrorCost(W_prev_solution, referenceSolution, ik.q());
+
+  const auto* s1 = historyBuffer_.latest();  // q_{k-1}
+  const auto* s2 = historyBuffer_.prev();    // q_{k-2}
+  const auto* s3 = historyBuffer_.pprev();   // q_{k-3}
+
+  if (pointTrackConfig_ && pointTrackConfig_->accSmoothWeightDefault > 1e-12 && s1 && s2 &&
+      s1->result.solution.size() == nq_ && s2->result.solution.size() == nq_) {
+    Eigen::VectorXd qAccTarget = 2.0 * s1->result.solution - s2->result.solution;
+    Eigen::MatrixXd W_acc = pointTrackConfig_->accSmoothWeightDefault * Eigen::MatrixXd::Identity(nq_, nq_);
+    ik.get_mutable_prog()->AddQuadraticErrorCost(W_acc, qAccTarget, ik.q());
+  }
+
+  if (pointTrackConfig_ && pointTrackConfig_->jerkSmoothWeightDefault > 1e-12 && s1 && s2 && s3 &&
+      s1->result.solution.size() == nq_ && s2->result.solution.size() == nq_ && s3->result.solution.size() == nq_) {
+    Eigen::VectorXd qJerkTarget =
+        3.0 * s1->result.solution - 3.0 * s2->result.solution + s3->result.solution;
+    Eigen::MatrixXd W_jerk = pointTrackConfig_->jerkSmoothWeightDefault * Eigen::MatrixXd::Identity(nq_, nq_);
+    ik.get_mutable_prog()->AddQuadraticErrorCost(W_jerk, qJerkTarget, ik.q());
+  }
 }
 
 std::pair<Eigen::Vector3d, Eigen::Quaterniond> WheelOneStageIKEndEffector::FK(const Eigen::VectorXd& q,
@@ -362,142 +435,6 @@ std::pair<Eigen::Vector3d, Eigen::Quaterniond> WheelOneStageIKEndEffector::FK(co
     ROS_ERROR("WheelOneStageIKEndEffector::FK: Exception occurred: %s", e.what());
     return std::make_pair(Eigen::Vector3d::Zero(), Eigen::Quaterniond::Identity());
   }
-}
-
-// ONLY FOR DEBUG
-void WheelOneStageIKEndEffector::printConfigTable() const {
-  char buffer[256];
-
-  ROS_INFO("+==================================================================================+");
-  ROS_INFO("|                    WheelOneStageIKEndEffector Configuration Table                    |");
-  ROS_INFO("+==================================================================================+");
-
-  // Print base IKSolverConfig fields
-  ROS_INFO("| Base IKSolverConfig:");
-  snprintf(buffer, sizeof(buffer), "|   %-30s | %-20.6e", "constraintTolerance", config_.constraintTolerance);
-  ROS_INFO("%s", buffer);
-  snprintf(buffer, sizeof(buffer), "|   %-30s | %-20.6e", "solverTolerance", config_.solverTolerance);
-  ROS_INFO("%s", buffer);
-  snprintf(buffer, sizeof(buffer), "|   %-30s | %-20d", "maxIterations", config_.maxIterations);
-  ROS_INFO("%s", buffer);
-
-  // Convert ArmIdx to string
-  std::string armIdxStr;
-  switch (config_.controlArmIndex) {
-    case ArmIdx::LEFT:
-      armIdxStr = "LEFT (0)";
-      break;
-    case ArmIdx::RIGHT:
-      armIdxStr = "RIGHT (1)";
-      break;
-    case ArmIdx::BOTH:
-      armIdxStr = "BOTH (2)";
-      break;
-    default:
-      armIdxStr = "UNKNOWN";
-      break;
-  }
-  snprintf(buffer, sizeof(buffer), "|   %-30s | %-20s", "controlArmIndex", armIdxStr.c_str());
-  ROS_INFO("%s", buffer);
-  snprintf(buffer, sizeof(buffer), "|   %-30s | %-20s", "isWeldBaseLink", config_.isWeldBaseLink ? "true" : "false");
-  ROS_INFO("%s", buffer);
-  snprintf(buffer, sizeof(buffer), "|   %-30s | %-20s", "useJointLimits", config_.useJointLimits ? "true" : "false");
-  ROS_INFO("%s", buffer);
-
-  // Print WheelPointTrackIKSolverConfig fields if available
-  if (pointTrackConfig_) {
-    ROS_INFO("+==================================================================================+");
-    ROS_INFO("| WheelPointTrackIKSolverConfig:");
-    snprintf(buffer, sizeof(buffer), "|   %-30s | %-20d", "historyBufferSize", pointTrackConfig_->historyBufferSize);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer, sizeof(buffer), "|   %-30s | %-20.6e", "dynamicsDt", pointTrackConfig_->dynamicsDt);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer, sizeof(buffer), "|   %-30s | %-20.6e", "eeTrackingWeight", pointTrackConfig_->eeTrackingWeight);
-    ROS_INFO("%s", buffer);
-    snprintf(
-        buffer, sizeof(buffer), "|   %-30s | %-20.6e", "elbowTrackingWeight", pointTrackConfig_->elbowTrackingWeight);
-    ROS_INFO("%s", buffer);
-    snprintf(
-        buffer, sizeof(buffer), "|   %-30s | %-20.6e", "link6TrackingWeight", pointTrackConfig_->link6TrackingWeight);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer,
-             sizeof(buffer),
-             "|   %-30s | %-20.6e",
-             "virtualThumbTrackingWeight",
-             pointTrackConfig_->virtualThumbTrackingWeight);
-    ROS_INFO("%s", buffer);
-    ROS_INFO("+==================================================================================+");
-    ROS_INFO("| Joint Smoothness Weights (7 joints per arm, symmetric):");
-    snprintf(buffer,
-             sizeof(buffer),
-             "|   %-30s | %-20.6e",
-             "jointSmoothWeightDefault",
-             pointTrackConfig_->jointSmoothWeightDefault);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer,
-             sizeof(buffer),
-             "|   %-30s | %-20.6e (Left[0] / Right[7])",
-             "jointSmoothWeight0",
-             pointTrackConfig_->jointSmoothWeight0);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer,
-             sizeof(buffer),
-             "|   %-30s | %-20.6e (Left[1] / Right[8])",
-             "jointSmoothWeight1",
-             pointTrackConfig_->jointSmoothWeight1);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer,
-             sizeof(buffer),
-             "|   %-30s | %-20.6e (Left[2] / Right[9])",
-             "jointSmoothWeight2",
-             pointTrackConfig_->jointSmoothWeight2);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer,
-             sizeof(buffer),
-             "|   %-30s | %-20.6e (Left[3] / Right[10])",
-             "jointSmoothWeight3",
-             pointTrackConfig_->jointSmoothWeight3);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer,
-             sizeof(buffer),
-             "|   %-30s | %-20.6e (Left[4] / Right[11])",
-             "jointSmoothWeight4",
-             pointTrackConfig_->jointSmoothWeight4);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer,
-             sizeof(buffer),
-             "|   %-30s | %-20.6e (Left[5] / Right[12])",
-             "jointSmoothWeight5",
-             pointTrackConfig_->jointSmoothWeight5);
-    ROS_INFO("%s", buffer);
-    snprintf(buffer,
-             sizeof(buffer),
-             "|   %-30s | %-20.6e (Left[6] / Right[13])",
-             "jointSmoothWeight6",
-             pointTrackConfig_->jointSmoothWeight6);
-    ROS_INFO("%s", buffer);
-
-    ROS_INFO("+----------------------------------------------------------------------------------+");
-    ROS_INFO("| Waist Joint Smoothness Weights (for nq=18):");
-    snprintf(
-        buffer, sizeof(buffer), "|   %-30s | %-20.6e", "waistSmoothWeight0", pointTrackConfig_->waistSmoothWeight0);
-    ROS_INFO("%s", buffer);
-    snprintf(
-        buffer, sizeof(buffer), "|   %-30s | %-20.6e", "waistSmoothWeight1", pointTrackConfig_->waistSmoothWeight1);
-    ROS_INFO("%s", buffer);
-    snprintf(
-        buffer, sizeof(buffer), "|   %-30s | %-20.6e", "waistSmoothWeight2", pointTrackConfig_->waistSmoothWeight2);
-    ROS_INFO("%s", buffer);
-    snprintf(
-        buffer, sizeof(buffer), "|   %-30s | %-20.6e", "waistSmoothWeight3", pointTrackConfig_->waistSmoothWeight3);
-    ROS_INFO("%s", buffer);
-
-  } else {
-    ROS_INFO("+==================================================================================+");
-    ROS_INFO("| WheelPointTrackIKSolverConfig: Not available (using default/base config)");
-  }
-
-  ROS_INFO("+==================================================================================+");
 }
 
 }  // namespace HighlyDynamic

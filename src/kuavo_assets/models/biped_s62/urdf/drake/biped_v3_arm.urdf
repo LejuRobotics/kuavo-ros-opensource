@@ -170,8 +170,8 @@
     <parent link="leg_link" />
     <child link="waist_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0"
-           upper="0.9"
+    <limit lower="-0.15707963267949"
+           upper="2.9845130209103"
            effort="618.48"
            velocity="25.33" />
     <dynamics damping="0.2"
@@ -252,8 +252,8 @@
     <parent link="waist_yaw_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979"
-           upper="1.5707963267949"
+    <limit lower="-2.4"
+           upper="0.6"
            effort="66.0"
            velocity="18.8" />
     <dynamics damping="0.2"
@@ -290,7 +290,7 @@
     <child link="zarm_l2_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.349065850398866"
-           upper="3.49065850398866"
+           upper="1.46"
            effort="75.0"
            velocity="8.0" />
     <dynamics damping="0.2"
@@ -326,8 +326,8 @@
     <parent link="zarm_l2_link" />
     <child link="zarm_l3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.48352986419518"
-           upper="1.48352986419518"
+    <limit lower="-1.5707963267949"
+           upper="0.46"
            effort="57.0"
            velocity="7.5" />
     <dynamics damping="0.2"
@@ -561,8 +561,8 @@
     <parent link="waist_yaw_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-3.14159265358979"
-           upper="1.5707963267949"
+    <limit lower="-2.4"
+           upper="0.6"
            effort="66.0"
            velocity="18.8" />
     <dynamics damping="0.2"
@@ -598,7 +598,7 @@
     <parent link="zarm_r1_link" />
     <child link="zarm_r2_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-3.49065850398866"
+    <limit lower="-1.46"
            upper="0.349065850398866"
            effort="75.0"
            velocity="8.0" />
@@ -635,8 +635,8 @@
     <parent link="zarm_r2_link" />
     <child link="zarm_r3_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.48352986419518"
-           upper="1.48352986419518"
+    <limit lower="-0.46"
+           upper="1.5707963267949"
            effort="57.0"
            velocity="7.5" />
     <dynamics damping="0.2"

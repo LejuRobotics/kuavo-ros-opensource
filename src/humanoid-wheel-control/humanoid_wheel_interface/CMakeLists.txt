@@ -97,7 +97,7 @@ add_library(${PROJECT_NAME}
   src/motion_planner/posePlannerTimedScheduler.cpp
   src/filters/jointCmdLimiter.cpp
   src/filters/KinemicLimitFilter.cpp
-  src/filters/HybridRuckigExtrapolator.cpp
+  src/filters/ConstantVelocityCommandKalmanFilter.cpp
   src/cost/LinearStateInequalitySoftConstraint.cpp
   src/cost/TorsoTrackingBoxSoftCost.cpp
   src/cost/EndEffectorBoxSoftCost.cpp

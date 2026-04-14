@@ -80,22 +80,15 @@ void WheelQuest3IkIncrementalROS::run() {
   {
     kuavo_msgs::changeArmCtrlMode srv;
     srv.request.control_mode = 1;
-    bool humanoidCallOk = false;
-    bool vrCallOk = false;
-    if (humanoidArmCtrlModeClient_.exists()) {
-      humanoidCallOk = humanoidArmCtrlModeClient_.call(srv) && srv.response.result;
-    } else {
-      ROS_WARN("[WheelQuest3IkIncrementalROS] Service /humanoid_change_arm_ctrl_mode does not exist");
-    }
     if (changeArmCtrlModeClient_.exists()) {
-      vrCallOk = changeArmCtrlModeClient_.call(srv) && srv.response.result;
+      const bool vrCallOk = changeArmCtrlModeClient_.call(srv) && srv.response.result;
+      if (vrCallOk) {
+        ROS_INFO("[WheelQuest3IkIncrementalROS] Arm control mode set to 1 during initialization");
+      } else {
+        ROS_WARN("[WheelQuest3IkIncrementalROS] Failed to set arm control mode to 1 during initialization");
+      }
     } else {
       ROS_WARN("[WheelQuest3IkIncrementalROS] Service /change_arm_ctrl_mode does not exist");
-    }
-    if (humanoidCallOk && vrCallOk) {
-      ROS_INFO("[WheelQuest3IkIncrementalROS] Arm control mode set to 1 during initialization");
-    } else {
-      ROS_WARN("[WheelQuest3IkIncrementalROS] Failed to set arm control mode to 1 during initialization");
     }
   }
   activateController();
@@ -124,21 +117,27 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     updateSensorArmJointFromSensorData();
     updateFkCacheFromSensorData();
 
-    const bool chestUpdateEnabled = joyStickHandlerPtr_->getRightJoyStickYHold();
-    if (chestUpdateEnabled != chestIncrementalUpdateEnabled_) {
-      if (!chestUpdateEnabled) {
+    const bool chestPoseUpdateEnabled = joyStickHandlerPtr_->getRightJoyStickYHoldWithX();
+    bool chestPositionUpdateEnable = false;
+    if (chestPoseUpdateEnabled) {
+      chestPositionUpdateEnable = joyStickHandlerPtr_->getRightJoyStickYHold();
+    }
+    if (chestPoseUpdateEnabled != chestIncrementalUpdateEnabled_) {
+      if (!chestPoseUpdateEnabled) {
         std::lock_guard<std::mutex> lock(chestPoseMutex_);
         frozenChestQuat_ =
             computeYawPitchOnlyQuatFromRotationMatrix(chestRotationQuaternion_.toRotationMatrix());
         if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
           frozenRobotChestPos_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position;
         } else {
-          frozenRobotChestPos_ = hasLatestWaistYawFk_ ? latestWaistYawFkPos_
-                                                      : (robotFixedWaistYawPos_ + chestDefaultOffset_);
+          frozenRobotChestPos_ = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
         }
       }
-      chestIncrementalUpdateEnabled_ = chestUpdateEnabled;
+      chestIncrementalUpdateEnabled_ = chestPoseUpdateEnabled;
     }
+    chestPositionUpdateEnable_ = chestPoseUpdateEnabled && chestPositionUpdateEnable;
+    drakeSolveUpdateChestPosition_ =
+        drakeSolveUpdateChestPositionConfig_ && chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_;
 
     {
       std::lock_guard<std::mutex> lock(chestPoseMutex_);
@@ -181,9 +180,8 @@ void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
 
 void WheelQuest3IkIncrementalROS::fsmEnter() {
   auto updateChestConstraintFromFk = [&]() {
-    // 如果 FK 可用，直接使用 FK 结果；否则使用固定值 + offset
-    Eigen::Vector3d chestPos =
-        hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : (robotFixedWaistYawPos_ + chestDefaultOffset_);
+    // 如果 FK 可用，直接使用胸部IK目标frame的 FK 结果；否则使用零位胸部目标frame位置
+    Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
     Eigen::Matrix3d chestR = Eigen::Matrix3d::Identity();
     chestR = chestRotationQuaternion_.toRotationMatrix();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
@@ -400,8 +398,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       }
     }
     // 使用当前 FK 更新胸部约束，避免胸部增量初始跳变
-    Eigen::Vector3d chestPos =
-        hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : (robotFixedWaistYawPos_ + chestDefaultOffset_);
+    Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
     Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
@@ -455,7 +452,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       input.chestPosRef = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position;
     } else {
-      input.chestPosRef = robotFixedWaistYawPos_ + chestDefaultOffset_;
+      input.chestPosRef = robotFixedWaistYawPos_;
     }
     if (!chestIncrementalUpdateEnabled_) {
       input.chestPosRef = frozenRobotChestPos_;
@@ -957,8 +954,7 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
         humanChestPos = latestChestPositionInRobot_;
       }
     }
-    Eigen::Vector3d chestPos =
-        hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : (robotFixedWaistYawPos_ + chestDefaultOffset_);
+      Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
     Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
@@ -1025,8 +1021,9 @@ void WheelQuest3IkIncrementalROS::solveIk() {
   auto startTime = std::chrono::high_resolution_clock::now();
   auto ikResult = oneStageIkEndEffectorPtr_->solveIK(poseConstraintListCopy, ctrlArmIdx_, jointMidValues_);
   auto endTime = std::chrono::high_resolution_clock::now();
-  auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
-  // ROS_INFO("[WheelQuest3IkIncrementalROS] solveIK duration: %ld ms", static_cast<long>(durationMs));
+  const auto durationUs = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
+  const double durationMs = static_cast<double>(durationUs) / 1000.0;
+  ROS_INFO_THROTTLE(1.0, "[WheelQuest3IkIncrementalROS] one-stage IK latest duration: %.3f ms (%ld us)", durationMs, static_cast<long>(durationUs));
 
   if (ikResult.isSuccess) {
     {

@@ -3,8 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "humanoid_wheel_interface/filters/HybridRuckigExtrapolator.h"
-#include "leju_utils/math.hpp"
+#include "humanoid_wheel_interface/filters/ConstantVelocityCommandKalmanFilter.h"
 
 namespace humanoidController_wheel_wbc {
 
@@ -24,15 +23,13 @@ void ArmTrajectoryInterpolator::reset(const Eigen::VectorXd& currentQ, const ros
   }
   smoothQ_ = currentQ;
   smoothV_ = Eigen::VectorXd::Zero(currentQ.size());
-  fhanQ_ = currentQ;
-  fhanV_ = Eigen::VectorXd::Zero(currentQ.size());
   lastTargetStamp_ = now;
   hasLastAppliedTargetSeq_ = false;
   initialized_ = true;
 }
 
 void ArmTrajectoryInterpolator::ingestRawTarget(const ros::Time& now, const Eigen::VectorXd& targetQ,
-                                                const Eigen::VectorXd& targetV, const Eigen::VectorXd& measuredDq) {
+                                                const Eigen::VectorXd& targetV) {
   if (targetQ.size() == 0 || !isFiniteVector(targetQ)) {
     return;
   }
@@ -44,11 +41,8 @@ void ArmTrajectoryInterpolator::ingestRawTarget(const ros::Time& now, const Eige
     hasTargetV = true;
   }
 
-  // If input velocity looks like a missing field (all zeros), estimate it from target position delta.
+  // Estimate velocity only when targetV is truly missing/invalid.
   bool shouldEstimateVel = !hasTargetV;
-  if (hasTargetV && mergedTargetV.cwiseAbs().maxCoeff() < 1e-6) {
-    shouldEstimateVel = true;
-  }
   if (shouldEstimateVel) {
     Eigen::VectorXd estimatedVel = Eigen::VectorXd::Zero(targetQ.size());
     if (hasLastRawTarget_ && lastRawTargetQ_.size() == targetQ.size() && !lastRawTargetStamp_.isZero()) {
@@ -66,12 +60,19 @@ void ArmTrajectoryInterpolator::ingestRawTarget(const ros::Time& now, const Eige
     mergedTargetV = estimatedVel;
     hasTargetV = true;
   }
+  for (Eigen::Index i = 0; i < mergedTargetV.size(); ++i) {
+    mergedTargetV[i] = std::clamp(mergedTargetV[i], -config_.kalmanVLimit, config_.kalmanVLimit);
+  }
+  const double alpha = std::clamp(config_.targetVAlpha, 0.0, 1.0);
+  if (alpha < 1.0 && lastRawTargetV_.size() == mergedTargetV.size()) {
+    mergedTargetV = alpha * mergedTargetV + (1.0 - alpha) * lastRawTargetV_;
+  }
 
   const bool targetChanged =
       !hasLastRawTarget_ || lastRawTargetQ_.size() != targetQ.size() ||
-      (targetQ - lastRawTargetQ_).cwiseAbs().maxCoeff() > 1e-9 ||
+      (targetQ - lastRawTargetQ_).cwiseAbs().maxCoeff() > std::max(1e-9, config_.targetChangeEps) ||
       lastRawTargetV_.size() != mergedTargetV.size() ||
-      (mergedTargetV - lastRawTargetV_).cwiseAbs().maxCoeff() > 1e-9;
+      (mergedTargetV - lastRawTargetV_).cwiseAbs().maxCoeff() > std::max(1e-9, config_.targetChangeEps);
   if (!targetChanged) {
     return;
   }
@@ -88,7 +89,6 @@ void ArmTrajectoryInterpolator::ingestRawTarget(const ros::Time& now, const Eige
   sample.hasTargetV = hasTargetV;
   sample.msgStamp = now;
   sample.msgSeq = ++localRawSeq_;
-  sample.measuredDq = measuredDq;
   pushTarget(sample);
 }
 
@@ -120,18 +120,8 @@ void ArmTrajectoryInterpolator::pushTarget(const TargetSample& sample) {
 ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
     const ros::Time& now, const ModeFlags& modeFlags, const Eigen::VectorXd& currentQ) {
   Output out;
-  // 每周期以 smoothQ_（后端轨迹）为参考，用 fhan 跟踪微分器推进一步，
-  // 输出天然满足加速度约束的 q/dq，作为本次默认输出（含所有 early-return）。
-  if (initialized_ && fhanQ_.size() == smoothQ_.size()) {
-    const double h  = config_.controlCycleSec;
-    const double h0 = h * config_.fhanH0Ratio;
-    const double r  = config_.fhanR;
-    for (Eigen::Index i = 0; i < smoothQ_.size(); ++i) {
-      leju_utils::fhanStepForward(fhanQ_(i), fhanV_(i), smoothQ_(i), r, h, h0);
-    }
-  }
-  out.smoothQ = fhanQ_.size() == smoothQ_.size() ? fhanQ_ : smoothQ_;
-  out.smoothV = fhanV_.size() == smoothV_.size() ? fhanV_ : smoothV_;
+  out.smoothQ = smoothQ_;
+  out.smoothV = smoothV_;
 
   const bool enabled = isEnabled(modeFlags);
   if (!enabled) {
@@ -155,9 +145,8 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
 
   if (!initialized_ || modeChanged || smoothQ_.size() != currentQ.size()) {
     reset(currentQ, now);
-    // reset() 已将 fhanQ_/fhanV_ 同步为 currentQ/zero，更新 out
-    out.smoothQ = fhanQ_;
-    out.smoothV = fhanV_;
+    out.smoothQ = smoothQ_;
+    out.smoothV = smoothV_;
     out.valid = true;
     return out;
   }
@@ -184,33 +173,52 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
     return out;
   }
 
-  const bool hasNewTarget = !hasLastAppliedTargetSeq_ || (latestTargetSeq_ != lastAppliedTargetSeq_);
+  const bool hasNewTargetRaw = !hasLastAppliedTargetSeq_ || (latestTargetSeq_ != lastAppliedTargetSeq_);
+  if (hasNewTargetRaw) {
+    ++rawUpdateCandidateCount_;
+  }
+  const double updatePeriodSec = std::max(config_.referenceUpdatePeriodSec, config_.controlCycleSec);
+  const bool periodGatePass = !hasLastAppliedTargetStamp_ ||
+                              (now - lastAppliedTargetStamp_).toSec() >= updatePeriodSec;
+  const bool hasNewTarget = hasNewTargetRaw && (config_.immediateUpdateOnNewTarget || periodGatePass);
+  if (hasNewTargetRaw && !hasNewTarget) {
+    ++gateBlockedCount_;
+  }
   if (hasNewTarget) {
     Eigen::VectorXd targetV = Eigen::VectorXd::Zero(target_.targetQ.size());
     if (target_.hasTargetV && target_.targetV.size() == target_.targetQ.size()) {
       targetV = target_.targetV;
     }
-    bool updateOk = false;
-    if (target_.measuredDq.size() == target_.targetQ.size()) {
-      updateOk = backend_->updateTarget(target_.targetQ, targetV, target_.measuredDq);
-    } else {
-      updateOk = backend_->updateTarget(target_.targetQ, targetV);
-    }
+    const bool updateOk = backend_->updateTarget(target_.targetQ, targetV);
     if (!updateOk) {
-      ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] backend updateTarget failed, hold previous output");
+      ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] backend updateTarget failed (%s), hold previous output",
+                        backend_->statusMessage().c_str());
       out.valid = true;
       return out;
     }
     lastAppliedTargetSeq_ = latestTargetSeq_;
     hasLastAppliedTargetSeq_ = true;
+    lastAppliedTargetStamp_ = now;
+    hasLastAppliedTargetStamp_ = true;
+    ++gatedUpdateCount_;
   }
 
   Eigen::VectorXd nextQ = smoothQ_;
   Eigen::VectorXd nextV = smoothV_;
-  if (!backend_->step(nextQ, nextV)) {
-    ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] backend step failed, hold previous output");
-    out.valid = true;
-    return out;
+  if (hasNewTarget) {
+    if (!backend_->step(nextQ, nextV)) {
+      ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] backend step failed (%s), hold previous output",
+                        backend_->statusMessage().c_str());
+      out.valid = true;
+      return out;
+    }
+  } else {
+    if (!backend_->predict(nextQ, nextV)) {
+      ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] backend predict failed (%s), hold previous output",
+                        backend_->statusMessage().c_str());
+      out.valid = true;
+      return out;
+    }
   }
   if (!isFiniteVector(nextQ) || !isFiniteVector(nextV)) {
     ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] backend produced non-finite output");
@@ -218,9 +226,20 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
     return out;
   }
 
-  // 更新后端轨迹状态；fhan 在下一周期顶部以新 smoothQ_ 为参考持续推进
+  // Update smoothed command state from Kalman backend.
   smoothQ_ = nextQ;
   smoothV_ = nextV;
+  if (backend_) {
+    const uint64_t predictCount = backend_->predictCount();
+    const uint64_t updateCount = backend_->updateCount();
+    const double ratio = updateCount > 0 ? static_cast<double>(predictCount) / static_cast<double>(updateCount) : 0.0;
+    ROS_INFO_THROTTLE(1.0,
+                      "[ArmTrajectoryInterpolator] cmd-only multirate stats: predict=%lu update=%lu ratio=%.2f "
+                      "rawUpdateCandidate=%lu gatedUpdate=%lu gateBlocked=%lu",
+                      static_cast<unsigned long>(predictCount), static_cast<unsigned long>(updateCount), ratio,
+                      static_cast<unsigned long>(rawUpdateCandidateCount_), static_cast<unsigned long>(gatedUpdateCount_),
+                      static_cast<unsigned long>(gateBlockedCount_));
+  }
   out.valid = true;
   return out;
 }
@@ -249,25 +268,33 @@ void ArmTrajectoryInterpolator::ensureBackend(size_t dof) {
   }
   if (!backend_) {
     const double cycle = std::clamp(config_.controlCycleSec, 1e-4, 0.02);
-    backend_ = std::make_shared<ocs2::mobile_manipulator::HybridRuckigExtrapolator>(static_cast<int>(dof), cycle);
+    backend_ = std::make_shared<ocs2::mobile_manipulator::ConstantVelocityCommandKalmanFilter>(static_cast<int>(dof), cycle);
   }
 
-  Eigen::VectorXd maxVel = config_.maxVel;
-  Eigen::VectorXd maxAcc = config_.maxAcc;
-  Eigen::VectorXd maxJerk = config_.maxJerk;
-  Eigen::VectorXd dqRemapK = config_.dqRemapK;
-  Eigen::VectorXd dqRemapOffset = config_.dqRemapOffset;
-  if (maxVel.size() != static_cast<Eigen::Index>(dof)) maxVel = Eigen::VectorXd::Ones(dof) * 4.0;
-  if (maxAcc.size() != static_cast<Eigen::Index>(dof)) maxAcc = Eigen::VectorXd::Ones(dof) * 10.0;
-  if (maxJerk.size() != static_cast<Eigen::Index>(dof)) maxJerk = Eigen::VectorXd::Ones(dof) * 50.0;
-  if (dqRemapK.size() != static_cast<Eigen::Index>(dof)) dqRemapK = Eigen::VectorXd::Ones(dof);
-  if (dqRemapOffset.size() != static_cast<Eigen::Index>(dof)) dqRemapOffset = Eigen::VectorXd::Zero(dof);
+  const bool limitValid = std::isfinite(config_.kalmanVLimit) && config_.kalmanVLimit > 0.0;
+  if (!limitValid) {
+    ROS_ERROR_THROTTLE(1.0, "[ArmTrajectoryInterpolator] Invalid kalman limit in armTrajInterpKinematicLimit, disable backend.");
+    backend_.reset();
+    return;
+  }
+  const Eigen::VectorXd maxVel = Eigen::VectorXd::Ones(dof) * config_.kalmanVLimit;
 
-  backend_->setKinematicLimits(maxVel.cwiseAbs(), maxAcc.cwiseAbs(), maxJerk.cwiseAbs());
-  backend_->setOutputLowpassCutoff(config_.qCutoffHz, config_.vCutoffHz);
-  backend_->setAccLowpassCutoff(config_.aCutoffHz);
-  backend_->setDqRemapK(dqRemapK);
-  backend_->setDqRemapOffset(dqRemapOffset);
+  const double refDt = std::max(config_.referenceUpdatePeriodSec, config_.controlCycleSec);
+  const double derivedAcc = (refDt > 1e-6) ? (config_.kalmanVLimit / refDt) : config_.kalmanVLimit;
+  const double nominalAcc = (std::isfinite(derivedAcc) && derivedAcc > 0.0) ? std::clamp(derivedAcc, 5.0, 80.0) : 10.0;
+  const double processNoise = std::clamp(0.1 * nominalAcc * nominalAcc, 1e-9, 400.0);
+
+  backend_->setKinematicLimits(maxVel.cwiseAbs());
+  backend_->setKalmanParameters(processNoise,
+                                config_.kalmanMeasurementQNoise,
+                                config_.kalmanMeasurementDqNoise,
+                                config_.kalmanInitialPosVar,
+                                config_.kalmanInitialVelVar,
+                                config_.fastUpdateRScale);
+  if (!backend_->isOperational()) {
+    ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] backend not operational after configure (%s)",
+                      backend_->statusMessage().c_str());
+  }
 }
 
 }  // namespace humanoidController_wheel_wbc

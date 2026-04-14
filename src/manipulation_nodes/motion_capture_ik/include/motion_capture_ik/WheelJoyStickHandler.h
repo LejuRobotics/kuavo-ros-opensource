@@ -37,6 +37,7 @@ class WheelJoyStickHandler {
   double getRightJoyStickX() const;
   double getRightJoyStickY() const;
   bool getRightJoyStickYHold() const;
+  bool getRightJoyStickYHoldWithX() const;
 
   void updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg);
   void processHandEndEffectorData();
@@ -138,6 +139,8 @@ class WheelJoyStickHandler {
   // RightJoyStickY 按下时间检查相关变量
   bool RightJoyStickYHold_;      // RightJoyStickY 保持状态，默认值为 true
   int rightJoyStickYHoldCount_;  // 连续满足条件的计数
+  bool rightJoyStickYHoldWithX_;      // X键按下时 RightJoyStickY 保持状态
+  int rightJoyStickYHoldWithXCount_;  // X键按下时连续满足条件计数
 
   HandPositionData handPositionData_;
   ClawCommandData clawCommandData_;
