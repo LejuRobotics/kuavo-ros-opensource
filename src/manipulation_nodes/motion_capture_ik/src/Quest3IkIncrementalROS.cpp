@@ -499,6 +499,13 @@ void Quest3IkIncrementalROS::fsmChange() {
   if (rightChangingMaintainUpdated) {
     rightProcessed = processChangingDataRightArm(rightHandCtrlModeChanged);
   }
+  // 手臂复位，退出极速模式
+  if (!joyStickHandlerPtr_->isLeftArmCtrlModeActive() && !joyStickHandlerPtr_->isRightArmCtrlModeActive())
+  {
+    kuavo_msgs::changeArmCtrlMode srv3;
+    srv3.request.control_mode = static_cast<int>(0);
+    enableWbcArmTrajectoryControlClient_.call(srv3);
+  }
 
   // 只有当至少一个臂处理成功时才继续
   if (!leftProcessed && !rightProcessed) return;

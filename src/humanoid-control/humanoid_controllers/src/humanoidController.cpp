@@ -1843,6 +1843,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         last_ultra_fast_mode_ = true;
         ROS_INFO_STREAM("[humanoidController] ultra fast mode");
       }
+      else      {
+        last_ultra_fast_mode_ = false;
+        ROS_INFO_STREAM("[humanoidController] normal arm control mode");
+      }
 
       if(last_ultra_fast_mode_ && use_ros_arm_joint_trajectory_){
         ultra_fast_mode_ = kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode;

@@ -201,8 +201,7 @@ namespace ocs2
             "/humanoid/mpc/arm_control_mode", 1, &QuestControlFSM::armCtrlModeCallback, this); 
 
             // 订阅获取VR头部控制模式
-            std::string head_vr_mode_sub_name = use_pico_ ? "/pico/head_control_mode" : "quest3/head_control_mode";
-            head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<std_msgs::String>(head_vr_mode_sub_name, 1, &QuestControlFSM::headCtrlModeCallback, this);
+            head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<std_msgs::String>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
             observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
@@ -1185,7 +1184,7 @@ namespace ocs2
                         arm_collision_control_ = false;
                         return;
                     }
-                    auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 2) ? 2 : 1;
+                    auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 1) ? 1 : 2;
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
 
                     // 如果头部控制模式为主动手跟踪模式（auto_track_active），手臂复位时头部也自动回正

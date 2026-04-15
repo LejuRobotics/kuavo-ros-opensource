@@ -19,7 +19,10 @@
         output="screen"
         args="python3 $(find noitom_hi5_hand_udp_python)/../pico-body-tracking-server/scripts/pico_whole_body_teleop_example.py --host $(arg host) --port $(arg port) --control_mode $(arg control_mode) --control_torso $(arg control_torso) --service_mode $(arg service_mode) --detection_mode $(arg detection_mode) --play_mode $(arg play_mode)"
         launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'"
-    />
+    >
+        <!-- 传递头部控制模式参数 -->
+        <param name="/head_control_mode" value="$(arg head_control_mode)"/>
+    </node>
 
     <node
         if="$(arg enable_head_control)"
