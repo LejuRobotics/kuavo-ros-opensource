@@ -2723,6 +2723,8 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
       {
         PRINT_PERF_MEAS();
         oPerfMeasPrintTimer.Restart();
+        ecatPerfMeasAppReset(pAppContext->pvPerfMeas,EC_PERF_MEAS_ALL);
+        ecatPerfMeasInternalReset(EC_PERF_MEAS_ALL);
       }
 
       /* check if demo shall terminate */
