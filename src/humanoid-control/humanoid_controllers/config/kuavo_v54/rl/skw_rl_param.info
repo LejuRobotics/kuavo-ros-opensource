@@ -265,7 +265,7 @@ jointKp
     (9,0)   80   ; leg_r4_joint
     (10,0)  30   ; leg_r5_joint
     (11,0)  50   ; leg_r6_joint
-    (12,0)  30   ; waist_joint
+    (12,0)  40   ; waist_joint
     (13,0)  15       ; zarm_l1_joint
     (14,0)  30       ; zarm_l2_joint
     (15,0)  15       ; zarm_l3_joint
@@ -331,7 +331,7 @@ motor_pdo_kp
     (9,0)   80      ; leg_r4_joint
     (10,0)  30      ; leg_r5_joint
     (11,0)  50      ; leg_r6_joint
-    (12,0)  30      ; waist_joint
+    (12,0)  40      ; waist_joint
     (13,0)  30      ; zarm_l1_joint (EC_MASTER)
     (14,0)  30      ; zarm_l2_joint (RUIWO, amp_kpkd ruiwo_kp[0]=30)
     (15,0)  15      ; zarm_l3_joint (RUIWO, amp_kpkd ruiwo_kp[1]=15)
@@ -365,7 +365,7 @@ motor_pdo_kd
     (9,0)   551     ; leg_r4_joint
     (10,0)  2260    ; leg_r5_joint
     (11,0)  2260    ; leg_r6_joint
-    (12,0)  929     ; waist_joint
+    (12,0)  1800     ; waist_joint
     (13,0)  3254    ; zarm_l1_joint (EC_MASTER)
     (14,0)  3       ; zarm_l2_joint (RUIWO, amp_kpkd ruiwo_kd[0]=3)
     (15,0)  3       ; zarm_l3_joint (RUIWO, amp_kpkd ruiwo_kd[1]=3)
