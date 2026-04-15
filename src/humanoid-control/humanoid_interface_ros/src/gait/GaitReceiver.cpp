@@ -399,7 +399,7 @@ namespace ocs2
         // std::cout << "euler_z: " << euler_zyx(0) << ", delta_yaw: " << delta_yaw << std::endl;
         cmd_vector << delta_pose.head(2), delta_yaw;
       }
-      else return;
+      else if (!gaitSchedulePtr_->isWalkingGait(last_gait_name)) return;
       double target_yaw = 0;
       ros_logger_->publishValue("/humanoid/GaitReceiver/single_step_yaw_computed_", single_step_yaw_computed_);
       ros_logger_->publishValue("/humanoid/GaitReceiver/getFinalYawSingleStepMode", swingTrajectoryPlannerPtr_->getFinalYawSingleStepMode());
@@ -468,7 +468,7 @@ namespace ocs2
       planner_vec = R_WB * planner_vec;
       planner_vec(2) = (state1(9) - state0(9)) / 0.015;
       ros_logger_->publishVector("/humanoid/GaitReceiver/planner_vec", planner_vec);
-      if (gaitSchedulePtr_->isWalkingGait(last_gait_name))//walking gait
+      if (gaitSchedulePtr_->isWalkingGait(current_gait_name))//walking gait
       {
         // std::cout << "planner_vec.norm() : " << planner_vec.norm() << std::endl;
         ros_logger_->publishValue("/humanoid/GaitReceiver/existValidFootPose_initTime", gaitSchedulePtr_->getModeSchedule().existValidFootPose(initTime));
