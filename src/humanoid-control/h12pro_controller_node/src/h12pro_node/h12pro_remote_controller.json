@@ -80,8 +80,7 @@
   "robot_state_transition_keycombination": {
     "initial":{
       "start":["E_LEFT","F_RIGHT","A_PRESS"],
-      "calibrate":["E_LEFT","C_PRESS"],
-      "set_zero":["E_LEFT","D_PRESS"]
+      "calibrate":["E_LEFT","C_PRESS"]
     },
     "calibrate":{
       "calibrate_finished":["E_RIGHT","C_PRESS"],
@@ -114,8 +113,7 @@
   },
   "ocs2_robot_state_transition_keycombination": {
     "initial":{
-      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"],
-      "calibrate":["E_LEFT","F_RIGHT","D_PRESS"]
+      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"]
     },
     "calibrate":{
       "cali_to_ready_stance":["E_LEFT","F_RIGHT","C_PRESS"],
@@ -170,8 +168,7 @@
   },
   "rl_robot_state_transition_keycombination":{
     "initial":{
-      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"],
-      "calibrate":["E_LEFT","F_RIGHT","D_PRESS"]
+      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"]
     },
     "calibrate":{
       "cali_to_ready_stance":["E_LEFT","F_RIGHT","C_PRESS"],
@@ -220,8 +217,7 @@
   },
   "multi_robot_state_transition_keycombination":{
     "initial":{
-      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"],
-      "calibrate":["E_LEFT","F_RIGHT","D_PRESS"]
+      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"]
     },
     "calibrate":{
       "cali_to_ready_stance":["E_LEFT","F_RIGHT","C_PRESS"],

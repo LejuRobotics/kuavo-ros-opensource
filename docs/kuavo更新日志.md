@@ -45,6 +45,7 @@
   - Roban2 新增配置文件`~/.config/lejuconfig/canbus_device_cofig.yaml`用于 Can 模块与总线上的设备关系描述
   - Kuavo Humanoid SDK 支持机器人版本14的关节名称处理
   - 更新强脑灵巧手SDK版本从`0.4.4`到`0.9.1`版本可支持自定义can协议
+  - 禁用 H12 遥控器按键 D 在 initial 状态下触发手臂校准功能（kuavo/ocs2/rl/multi 四种模式），避免误操作导致手臂跳圈。如需校准手臂请使用命令行 --cali_arm 参数或限位校准法
 
 
 - **修复问题**
