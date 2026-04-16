@@ -1,8 +1,4 @@
----
-title: "Kuavo 5-W VR操作"
----
-
-# Kuavo 5-W VR操作
+# VR 操作指南
 
 ## 1. 终端启动与连接
 

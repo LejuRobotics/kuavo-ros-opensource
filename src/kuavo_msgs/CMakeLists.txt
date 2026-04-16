@@ -147,7 +147,6 @@ add_message_files(
 
   # Battery info
   BatteryInfo.msg
-  Float32MultiArrayStamped.msg
 )
 
 ## Generate services in the 'srv' folder
