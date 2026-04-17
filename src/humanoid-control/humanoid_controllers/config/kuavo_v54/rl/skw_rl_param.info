@@ -60,7 +60,7 @@ defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity
 {
-    linearX        -0.05     ; 原地踏步线速度X
+    linearX        -0.12     ; 原地踏步线速度X
     linearY         0.0       ; 原地踏步线速度Y
     linearZ         0.0       ; 接口留用
     angularX        0.0       ; 接口留用
