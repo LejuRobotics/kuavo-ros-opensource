@@ -761,8 +761,11 @@ namespace ocs2
             {
                 use_auto_track_ = true;
             }
+            if (mode_msg->data == "vr_follow")
+            {
+                use_auto_track_ = false;
+            }
             head_ctrl_mode_ = mode_msg->data;
-            
         }
 
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
