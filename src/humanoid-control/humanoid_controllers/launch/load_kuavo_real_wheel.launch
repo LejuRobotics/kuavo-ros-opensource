@@ -168,8 +168,11 @@
    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
+        <param name="joystick_type" value="h12"/>
+        <!-- h12模式: 保持start_way=auto, 让系统服务继续运行ocs2_h12pro_node.py -->
+        <param name="start_way" value="auto"/>
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
-          <arg name="start_way" value="$(arg start_way)"/>
+          <arg name="start_way" value="auto"/>
         </include>
         <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
       </group>

@@ -32,6 +32,13 @@ pkg_path = rospack.get_path('h12pro_controller_node')
 h12pro_remote_controller_path = os.path.join(pkg_path, "src", "h12pro_node", "h12pro_remote_controller.json")
 kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
 
+try:
+    from robot_version import RobotVersion
+except ImportError:
+    import sys
+    sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
+    from robot_version import RobotVersion
+
 class Config:
     # Controller ranges
     MINUS_H12_AXIS_RANGE_MAX = -1722
@@ -134,6 +141,22 @@ class ChannelMapping:
         else:
             return self.update(channel_value)
 
+# G/H滚轮极值判断阈值
+G12_DIAL_THRESHOLD = 50
+
+# G12轮臂模式JoyButton常量
+G12_BUTTON_A = 0
+G12_BUTTON_B = 1
+G12_BUTTON_X = 2
+G12_BUTTON_Y = 3
+G12_BUTTON_LB = 4
+G12_BUTTON_RB = 5
+G12_BUTTON_BACK = 6
+G12_BUTTON_START = 7
+G12_BUTTON_GUIDE = 8
+G12_BUTTON_M1 = 9
+G12_BUTTON_M2 = 10
+
 class H12ToJoyControllerNode:
     def __init__(self):
         """Initialize joy controller node."""
@@ -142,6 +165,23 @@ class H12ToJoyControllerNode:
         self.channels_msg: Optional[Tuple[int, ...]] = None
         self.joy_pub = rospy.Publisher('/joy', Joy, queue_size=10)
         self.is_stopping = False    # cd按钮下蹲标志位
+
+        # G12轮臂模式检测
+        robot_version = os.environ.get('ROBOT_VERSION', '0')
+        try:
+            self.is_wheel = RobotVersion.create(int(robot_version)).start_with(major=6)
+        except (ValueError, TypeError):
+            self.is_wheel = False
+
+        # G12轮臂模式: C+D长按急停检测状态
+        self.cd_emergency_triggered = False
+        self.cd_press_start_time = None
+        # G+H同时极值2秒复位
+        self.gh_press_start_time = None
+
+        if self.is_wheel:
+            rospy.set_param('/joystick_type', 'h12')
+            rospy.loginfo("G12轮臂模式: ROBOT_VERSION=%s, 已设置joystick_type=h12", robot_version)
 
     @staticmethod
     def _create_channel_mapping() -> Dict[int, ChannelMapping]:
@@ -195,7 +235,16 @@ class H12ToJoyControllerNode:
         self.joy_msg.axes = [0.0] * 8
         self.joy_msg.buttons = [0] * 11
 
-        # Process each channel
+        # G12轮臂模式特殊处理
+        if self.is_wheel:
+            self._process_wheel_channels()
+        else:
+            self._process_default_channels()
+
+        self.joy_pub.publish(self.joy_msg)
+
+    def _process_default_channels(self) -> None:
+        """默认双足模式：使用标准channel映射"""
         for index, channel_value in enumerate(self.channels_msg):
             if mapping := self.channel_mapping.get(index + 1):
                 if index + 1 == 2 and self.is_stopping:
@@ -207,7 +256,75 @@ class H12ToJoyControllerNode:
                 if index + 1 == 2 and self.is_stopping:
                     mapping.scale = Config.SCALE_RIGHT_STICK_Z
 
-        self.joy_pub.publish(self.joy_msg)
+    def _process_wheel_channels(self) -> None:
+        """轮臂模式(G12)特殊处理"""
+        channels = list(self.channels_msg)
+
+        # E/F安全开关: 必须都在中间位置才生效
+        e_mid = abs(channels[4] - Config.H12_AXIS_MID_VALUE) < 100
+        f_mid = abs(channels[5] - Config.H12_AXIS_MID_VALUE) < 100
+        safe_enabled = e_mid and f_mid
+
+        # G/H滚轮极值检测
+        g_value = channels[10]
+        g_at_extreme = (g_value <= Config.H12_AXIS_RANGE_MIN + G12_DIAL_THRESHOLD or
+                        g_value >= Config.H12_AXIS_RANGE_MAX - G12_DIAL_THRESHOLD)
+        h_value = channels[11]
+        h_at_extreme = (h_value <= Config.H12_AXIS_RANGE_MIN + G12_DIAL_THRESHOLD or
+                        h_value >= Config.H12_AXIS_RANGE_MAX - G12_DIAL_THRESHOLD)
+
+        # 摇杆映射 (channel 1-4) 始终处理
+        for index in [0, 1, 2, 3]:
+            mapping = self.channel_mapping.get(index + 1)
+            if mapping and mapping.axis_index is not None:
+                self.joy_msg.axes[mapping.axis_index] = mapping.get_current_state(channels[index])
+
+        if not safe_enabled:
+            return
+
+        # 安全开关已启用
+        self.joy_msg.buttons[G12_BUTTON_LB] = 1
+        self.joy_msg.buttons[G12_BUTTON_RB] = 1
+
+        # C+D长按急停 (channel 9->index 8, channel 10->index 9)
+        c_pressed = channels[8] == Config.H12_AXIS_RANGE_MAX
+        d_pressed = channels[9] == Config.H12_AXIS_RANGE_MAX
+        if c_pressed and d_pressed:
+            if self.cd_press_start_time is None:
+                self.cd_press_start_time = time.time()
+            elif time.time() - self.cd_press_start_time >= 1.0 and not self.cd_emergency_triggered:
+                self.joy_msg.buttons[G12_BUTTON_BACK] = 1
+                self.cd_emergency_triggered = True
+        else:
+            self.cd_press_start_time = None
+            self.cd_emergency_triggered = False
+
+        # 按键映射 (C->9, A->7, B->8, D->10)
+        wheel_button_map = {
+            6: G12_BUTTON_Y,    # channel 7(A) -> buttons[3](Y)
+            7: G12_BUTTON_B,    # channel 8(B) -> buttons[1](B)
+            8: G12_BUTTON_X,    # channel 9(C) -> buttons[2](X)
+            9: G12_BUTTON_A,    # channel 10(D) -> buttons[0](A)
+        }
+        for ch_idx, btn_idx in wheel_button_map.items():
+            mapping = self.channel_mapping.get(ch_idx + 1)
+            if mapping and mapping.is_button:
+                self.joy_msg.buttons[btn_idx] = mapping.get_current_state(channels[ch_idx])
+
+        # G/H滚轮按钮
+        if g_at_extreme:
+            self.joy_msg.buttons[G12_BUTTON_GUIDE] = 1
+        if h_at_extreme:
+            self.joy_msg.buttons[G12_BUTTON_M1] = 1
+
+        # G+H同时极值2秒 -> 躯干复位
+        if g_at_extreme and h_at_extreme:
+            if self.gh_press_start_time is None:
+                self.gh_press_start_time = time.time()
+            elif time.time() - self.gh_press_start_time >= 2.0:
+                self.joy_msg.buttons[G12_BUTTON_M2] = 1
+        else:
+            self.gh_press_start_time = None
 
 class H12PROControllerNode:
     """Main controller node for H12PRO remote controller."""
@@ -851,11 +968,18 @@ class H12PROControllerNode:
 
         # 头部控制模式下处理摇杆控制
         if not self.head_control_mode:
-            stick_channels = Config.get_default_channels()
-            stick_channels[:4] = msg.channels[:4]
-            stick_msg = h12proRemoteControllerChannel()
-            stick_msg.channels = tuple(stick_channels)
-            self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
+            if self.h12_to_joy_node.is_wheel:
+                # G12轮臂模式: 传递全部12通道（包含E/F安全开关、A/B/C/D按钮、G/H拨杆）
+                full_msg = h12proRemoteControllerChannel()
+                full_msg.channels = msg.channels
+                self.h12_to_joy_node.update_channels_msg(msg=full_msg)
+            else:
+                # 双足模式: 只传递前4通道（摇杆），按钮由状态机直接处理
+                stick_channels = Config.get_default_channels()
+                stick_channels[:4] = msg.channels[:4]
+                stick_msg = h12proRemoteControllerChannel()
+                stick_msg.channels = tuple(stick_channels)
+                self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
             self.h12_to_joy_node.process_channels()
     #zsh
     def _map_channel_value(self, channel_value: int) -> float:
