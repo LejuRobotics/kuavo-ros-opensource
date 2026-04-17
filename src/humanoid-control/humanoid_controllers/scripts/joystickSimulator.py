@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+import time
 
 os.environ["QT_QPA_PLATFORM"] = os.environ.get("QT_QPA_PLATFORM", "xcb")
 os.environ["QT_FONT_DPI"] = "96"
@@ -343,6 +344,8 @@ class JoystickUI(QWidget):
         self._block_stick_update = False
         self._block_xyaw_update = False  # 新增：防止递归
         self.xyaw_window = None  # 新增：x-yaw圆盘窗口
+        self._last_user_interaction_time = 0.0  # 上次用户手动操作的时间戳
+        self._cmd_vel_ignore_duration = 10000.0     # 用户操作后忽略 cmd_vel 反馈的秒数
         self.initUI()
 
     def initUI(self):
@@ -469,9 +472,27 @@ class JoystickUI(QWidget):
         self.xyaw_window = XYawStickWindow(self)
         self.xyaw_window.show()
 
+    def _mark_user_interaction(self):
+        """标记用户正在手动操作摇杆，用于屏蔽 cmd_vel 反馈"""
+        self._last_user_interaction_time = time.time()
+
+    def _is_user_interacting(self):
+        """判断用户是否正在或刚刚操作摇杆（包括拖拽中和冷却期内）"""
+        # 任何摇杆正在被拖拽
+        if self.left_stick.dragging or self.right_stick.dragging:
+            return True
+        # x-yaw 圆盘正在跟随鼠标
+        if self.xyaw_window and self.xyaw_window.xyaw_stick.follow_mode:
+            return True
+        # 用户最近操作过，仍在冷却期内
+        if time.time() - self._last_user_interaction_time < self._cmd_vel_ignore_duration:
+            return True
+        return False
+
     def on_left_stick_changed(self, x, y):
         if self._block_stick_update:
             return
+        self._mark_user_interaction()
         self._block_slider_update = True
         self._block_xyaw_update = True
         # 更新joy_msg
@@ -489,6 +510,7 @@ class JoystickUI(QWidget):
     def on_right_stick_changed(self, x, y):
         if self._block_stick_update:
             return
+        self._mark_user_interaction()
         self._block_slider_update = True
         self._block_xyaw_update = True
         self.joy_msg.axes[AXIS_RIGHT_STICK_X] = x
@@ -503,6 +525,7 @@ class JoystickUI(QWidget):
     def on_xyaw_stick_changed(self, x, y):
         if self._block_xyaw_update:
             return
+        self._mark_user_interaction()
         self._block_stick_update = True
         self._block_slider_update = True
         # x为横向(yaw)，y为竖向(x速度)
@@ -523,6 +546,7 @@ class JoystickUI(QWidget):
     def on_vx_slider_changed(self, value):
         if self._block_slider_update:
             return
+        self._mark_user_interaction()
         self._block_stick_update = True
         self._block_xyaw_update = True
         y = value / 100.0
@@ -538,6 +562,7 @@ class JoystickUI(QWidget):
     def on_vy_slider_changed(self, value):
         if self._block_slider_update:
             return
+        self._mark_user_interaction()
         self._block_stick_update = True
         x = value / 100.0
         self.joy_msg.axes[AXIS_LEFT_STICK_X] = x
@@ -548,6 +573,7 @@ class JoystickUI(QWidget):
     def on_yaw_slider_changed(self, value):
         if self._block_slider_update:
             return
+        self._mark_user_interaction()
         self._block_stick_update = True
         self._block_xyaw_update = True
         x = value / 100.0
@@ -575,7 +601,10 @@ class JoystickUI(QWidget):
     def set_from_cmd_vel(self, vx, vy, yaw):
         """
         vx, vy, yaw: float, normalized to [-1, 1]
+        由外部 /cmd_vel 话题触发，若用户正在手动操作则忽略，防止强制置零。
         """
+        if self._is_user_interacting():
+            return
         self._block_stick_update = True
         self._block_slider_update = True
         self._block_xyaw_update = True
@@ -611,13 +640,14 @@ class SimulatedJoystickNode:
         self.ui = None
         self.shutdown_flag = False
 
-        # 订阅cmd_vel
+        # /cmd_vel 反向同步会和手动摇杆互相覆盖，默认关闭
+        self.enable_cmd_vel_feedback = rospy.get_param("~enable_cmd_vel_feedback", False)
         self.cmd_vel_max_vx = rospy.get_param("~max_vx", 1.0)
         self.cmd_vel_max_vy = rospy.get_param("~max_vy", 1.0)
         self.cmd_vel_max_yaw = rospy.get_param("~max_yaw", 1.0)
         self.cmd_vel_bridge = None  # 用于主线程信号
-
-        rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=1)
+        if self.enable_cmd_vel_feedback:
+            rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=1)
 
     def stop_robot_callback(self, msg):
         self.shutdown_flag = True
@@ -630,7 +660,8 @@ class SimulatedJoystickNode:
         font = QFont("Segoe UI", 12)
         self.app.setFont(font)
         self.ui = JoystickUI(self.joy_msg, self.joy_pub)
-        self.cmd_vel_bridge = CmdVelBridge(self.ui)
+        if self.enable_cmd_vel_feedback:
+            self.cmd_vel_bridge = CmdVelBridge(self.ui)
         self.ui.show()
         self.ui.xyaw_window.show()
         threading.Thread(target=self.spin_rospy, daemon=True).start()
@@ -642,6 +673,8 @@ class SimulatedJoystickNode:
             rate.sleep()
 
     def cmd_vel_callback(self, msg):
+        if not self.enable_cmd_vel_feedback:
+            return
         # 将Twist消息的线速度和角速度映射到[-1, 1]，并更新UI
         vx = max(min(msg.linear.x / self.cmd_vel_max_vx, 1.0), -1.0) if self.cmd_vel_max_vx > 0 else 0.0
         vy = max(min(msg.linear.y / self.cmd_vel_max_vy, 1.0), -1.0) if self.cmd_vel_max_vy > 0 else 0.0

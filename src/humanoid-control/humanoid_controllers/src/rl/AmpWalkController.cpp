@@ -104,9 +104,40 @@ namespace humanoid_controller
     initArmControl(urdf_path);
     initWaistControl();
 
+    // AMP 模式切换服务：允许外部设置 0/1/2 三种模式
+    change_amp_mode_srv_ = nh_.advertiseService("/humanoid_controller/change_amp_mode",
+                                                &AmpWalkController::changeAmpModeCallback,
+                                                this);
+
     initialized_ = true;
 
     ROS_INFO("[%s] AmpWalkController initialized", name_.c_str());
+    return true;
+  }
+
+  bool AmpWalkController::changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
+                                                kuavo_msgs::changeArmCtrlMode::Response &res)
+  {
+    int requested_mode = req.control_mode;
+
+    if (requested_mode < 0 || requested_mode > 2)
+    {
+      ROS_WARN("[%s] Received invalid AMP mode %d, valid range is [0, 2]. Keep current mode %d.",
+               name_.c_str(), requested_mode, amp_mode_);
+      res.result = false;
+      res.mode = amp_mode_;
+      res.message = "Invalid AMP mode, must be 0, 1 or 2";
+      return true;
+    }
+
+    amp_mode_ = requested_mode;
+
+    ROS_INFO("[%s] AMP mode switched to %d (0: pure AMP walk, 1: stance/bend/squat with arms, 2: walk with arms).",
+             name_.c_str(), amp_mode_);
+
+    res.result = true;
+    res.mode = amp_mode_;
+    res.message = "AMP mode updated successfully";
     return true;
   }
 
@@ -498,6 +529,8 @@ namespace humanoid_controller
       ROS_INFO("[%s] Initialized yaw_offset: %.6f (current_yaw: %.6f)", name_.c_str(), my_yaw_offset_, current_yaw);
     }
 
+    Eigen::VectorXd command_state(1);
+    command_state << cmd.cmdStance_;
     // 速度命令 [vx, vy, omega_z]
     cmd.scale();
     
@@ -582,6 +615,7 @@ namespace humanoid_controller
         {"base_ang_vel", bodyAngVel},
         {"projected_gravity", projected_gravity},
         {"velocity_commands", velocity_commands},
+        {"command_state", command_state},
         {"joint_pos", jointPos},
         {"joint_vel", jointVel},
         {"actions", local_action},
@@ -1121,11 +1155,20 @@ namespace humanoid_controller
           return;
         }
         
-        // 获取默认手臂位置
+        // 获取默认手臂位置（根据机型选择正确的手臂起始索引）
         Eigen::VectorXd default_arm_pos;
         if (defalutJointPosRL_.size() >= jointNum_ + waistNum_ + jointArmNum_)
         {
-          default_arm_pos = defalutJointPosRL_.segment(jointNum_ + waistNum_, jointArmNum_);
+          if (is_roban_)
+          {
+            // roban 机型：关节顺序为 腰 + 腿 + 手臂，手臂从 waistNum_ + jointNum_ 开始
+            default_arm_pos = defalutJointPosRL_.segment(waistNum_ + jointNum_, jointArmNum_);
+          }
+          else
+          {
+            // 其他机型：关节顺序为 腿 + 腰 + 手臂，手臂从 jointNum_ + waistNum_ 开始
+            default_arm_pos = defalutJointPosRL_.segment(jointNum_ + waistNum_, jointArmNum_);
+          }
         }
         else
         {

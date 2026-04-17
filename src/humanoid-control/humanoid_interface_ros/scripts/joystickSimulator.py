@@ -611,16 +611,16 @@ class SimulatedJoystickNode:
         self.ui = None
         self.shutdown_flag = False
 
-        # 订阅cmd_vel
+        # /cmd_vel 反向同步会和手动摇杆互相覆盖，默认关闭
+        self.enable_cmd_vel_feedback = rospy.get_param("~enable_cmd_vel_feedback", False)
         self.cmd_vel_max_vx = rospy.get_param("~max_vx", 1.0)
         self.cmd_vel_max_vy = rospy.get_param("~max_vy", 1.0)
         self.cmd_vel_max_yaw = rospy.get_param("~max_yaw", 1.0)
         self.cmd_vel_bridge = None  # 用于主线程信号
-
-        # rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=1)
+        if self.enable_cmd_vel_feedback:
+            rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=1)
 
     def stop_robot_callback(self, msg):
-        print("Received stop_robot signal, shutting down...")
         self.shutdown_flag = True
         rospy.signal_shutdown("stop_robot")
         if self.app:
@@ -631,7 +631,8 @@ class SimulatedJoystickNode:
         font = QFont("Segoe UI", 12)
         self.app.setFont(font)
         self.ui = JoystickUI(self.joy_msg, self.joy_pub)
-        self.cmd_vel_bridge = CmdVelBridge(self.ui)
+        if self.enable_cmd_vel_feedback:
+            self.cmd_vel_bridge = CmdVelBridge(self.ui)
         self.ui.show()
         self.ui.xyaw_window.show()
         threading.Thread(target=self.spin_rospy, daemon=True).start()
@@ -643,7 +644,8 @@ class SimulatedJoystickNode:
             rate.sleep()
 
     def cmd_vel_callback(self, msg):
-        print("Received cmd_vel:", msg)
+        if not self.enable_cmd_vel_feedback:
+            return
         # 将Twist消息的线速度和角速度映射到[-1, 1]，并更新UI
         vx = max(min(msg.linear.x / self.cmd_vel_max_vx, 1.0), -1.0) if self.cmd_vel_max_vx > 0 else 0.0
         vy = max(min(msg.linear.y / self.cmd_vel_max_vy, 1.0), -1.0) if self.cmd_vel_max_vy > 0 else 0.0

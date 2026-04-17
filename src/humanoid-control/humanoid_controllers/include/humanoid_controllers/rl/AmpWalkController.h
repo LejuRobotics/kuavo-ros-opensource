@@ -10,6 +10,7 @@
 #include "humanoid_controllers/rl/waistController.h"
 #include "kuavo_solver/ankle_solver.h"
 #include "kuavo_msgs/ExecuteArmAction.h"
+#include "kuavo_msgs/changeArmCtrlMode.h"
 #include <openvino/openvino.hpp>
 #include <memory>
 #include <map>
@@ -197,6 +198,13 @@ namespace humanoid_controller
     double yaw_compensation_x_bias_clockwise_{0.0};     ///< 顺时针旋转时X轴偏置
     double yaw_compensation_x_bias_counterclockwise_{0.0}; ///< 逆时针旋转时X轴偏置
 
+
+    // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
+    int amp_mode_{0};
+    ros::ServiceServer change_amp_mode_srv_;
+
+    bool changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
+                               kuavo_msgs::changeArmCtrlMode::Response &res);
 
   private:
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
