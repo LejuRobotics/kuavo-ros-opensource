@@ -43,6 +43,7 @@ namespace HighlyDynamic
 
 #define PA60_16_C2T (2.0)
 #define PA4310_25_C2T (4.7)
+#define PA4310_25_New_C2T (2.0)
 #define PA4315_36_C2T (4.7)
 #define LEG_DOF 6
 #define LEGS_TOTEL_JOINT 12
