@@ -241,6 +241,7 @@ namespace HighlyDynamic
                 {"ruiwoPA60", {BIT_17_36, CK_MC, PA60_C2T, RUIWO}},
                 {"ruiwoPA43", {BIT_17_10, CK_MC, PA43_C2T, RUIWO}},
                 {"ruiwoPA4310_25", {BIT_17_25, CK_MC, PA4310_25_C2T, RUIWO}},
+                {"ruiwoPA4310_25_New", {BIT_17_25, CK_MC, PA4310_25_C2T, RUIWO}},
                 {"ruiwoPA4315_36", {BIT_17_36, CK_MC, PA4315_36_C2T, RUIWO}},
                 {"ruiwoPA60_16", {BIT_17_16, CK_MC, PA60_16_C2T, RUIWO}},
                 {"PA100_18", {BIT_17_18, PA100_MC, PA100_18_C2T, EC_MASTER}},
