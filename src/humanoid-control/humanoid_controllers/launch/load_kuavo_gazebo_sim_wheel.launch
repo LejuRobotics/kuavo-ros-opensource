@@ -42,6 +42,8 @@
 
     <!-- 其他功能参数 -->
     <arg name="play_back" default="false"/>
+    <!-- 使用外部 odom->base_link TF 时设为 true，此时不发布内部的 odom->base_link，由外部系统（如 底盘）发布 -->
+    <arg name="use_external_odom_tf" default="false"/>
     <arg name="with_ik" default="true"/>
     <arg name="coredump" default="false"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
@@ -72,6 +74,7 @@
     <param name="wheel_control_type" value="$(arg wheel_control_type)"/>
     <param name="taskFile" value="$(arg taskFile)" />
     <param name="urdfFile" value="$(arg urdfFile)" />
+    <param name="use_external_odom_tf" value="$(arg use_external_odom_tf)"/>
     <param name="libFolder"  value="$(arg libFolder)" />
     <param name="robot_description" textfile="$(arg urdfFile)"/>
     <rosparam param="isolated_cpus">[2, 3]</rosparam>

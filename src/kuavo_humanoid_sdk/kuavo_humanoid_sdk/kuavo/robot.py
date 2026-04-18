@@ -14,6 +14,7 @@ from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
 from kuavo_humanoid_sdk.kuavo.robot_arm import KuavoRobotArm 
 from kuavo_humanoid_sdk.kuavo.robot_head import KuavoRobotHead
 from kuavo_humanoid_sdk.kuavo.robot_waist import KuavoRobotWaist
+from kuavo_humanoid_sdk.kuavo.robot_wheel_control import KuavoRobotWheelControl
 """
 Kuavo SDK - Kuavo机器人控制的Python接口
 
@@ -100,6 +101,7 @@ class KuavoRobot(RobotBase):
         self._robot_arm  = KuavoRobotArm()
         self._robot_head = KuavoRobotHead()
         self._robot_waist = KuavoRobotWaist()
+        self._robot_wheel_control = KuavoRobotWheelControl()
         self._kuavo_core = KuavoRobotCore()
     def stance(self)->bool:
         """使机器人进入'stance'站立模式。
@@ -358,6 +360,11 @@ class KuavoRobot(RobotBase):
     def control_waist_pos(self, joint_positions: list)->bool:
         """控制机器人的腰部关节位置。"""
         return self._robot_waist.control_waist(joint_positions)
+
+    @property
+    def wheel_control(self) -> "KuavoRobotWheelControl":
+        """轮臂机器人控制接口，用于手臂模式切换等。"""
+        return self._robot_wheel_control
 
     """ Robot Arm Control """
     def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:

@@ -66,6 +66,7 @@ namespace ocs2
       void updateDesired(const vector_t &stateDesired, const vector_t &inputDesired);
 
       size_t numDecisionVars_;
+      size_t contact_force_size_; // 接触力维度 (6 * num_end_effectors)
 
       PinocchioInterface pinocchioInterfaceMeasured_, pinocchioInterfaceDesired_;
       ManipulatorModelInfo info_;
@@ -86,7 +87,11 @@ namespace ocs2
       matrix_t j_torso_, dj_torso_;
       size_t torso_id_{0};
       size_t base_id_{0};
-      std::vector<size_t> ee_ids_; 
+      std::vector<size_t> ee_ids_;
+
+      // 末端执行器雅可比矩阵（6维，世界坐标系）
+      std::vector<matrix_t> j_ee_;
+      std::vector<matrix_t> dj_ee_;
     };
 
   } // namespace mobile_manipulator

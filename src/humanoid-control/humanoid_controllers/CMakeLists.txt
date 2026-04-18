@@ -261,6 +261,8 @@ add_library(${PROJECT_NAME}
         src/humanoidController.cpp
         src/humanoidWheelController.cpp
         src/humanoidController_wheel_wbc.cpp
+        src/ArmContactForceEstimatorWheel.cpp
+        src/DesiredForceManager.cpp
         src/ControlDataManager.cpp
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp

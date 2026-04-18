@@ -80,6 +80,13 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   std::vector<std::string> head_joint_names_;
   std::vector<double> head_joint_positions_;
   bool updateHeadJointPositions_ = false;
+
+  // 检测到外部 odom->base_link 时（/external_odom/active 为 true），不发布内部的 odom->base_link
+  bool use_external_odom_tf_ = false;
+  std::mutex external_odom_mutex_;
+  ros::Subscriber external_odom_active_sub_;
+
+  void externalOdomActiveCallback(const std_msgs::BoolConstPtr& msg);
 };
 
 }  // namespace mobile_manipulator

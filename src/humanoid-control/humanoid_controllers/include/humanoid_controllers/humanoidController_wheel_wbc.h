@@ -36,11 +36,14 @@
 #include "humanoid_wheel_interface/motion_planner/VelocityLimiter.h"
 #include "humanoid_wheel_interface_ros/MobileManipulatorDummyVisualization.h"
 #include "humanoid_wheel_wbc/WeightedWbc.h"
+#include "humanoid_wheel_wbc/ContactForceWbc.h"
 #include "humanoid_controllers/WaistKinematics.h"
 #include "humanoid_controllers/ControlDataManager.h"
 #include "humanoid_controllers/ArmTrajectoryInterpolator.h"
+#include "humanoid_controllers/ArmContactForceEstimatorWheel.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include "humanoid_wheel_interface/filters/jointCmdLimiter.h"
+#include "humanoid_controllers/DesiredForceManager.h"
 
 // hardware params
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
@@ -146,6 +149,9 @@ namespace humanoidController_wheel_wbc
     Eigen::Vector3d cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw);
     Eigen::Vector3d cmdVelBodyToWorld(const Eigen::Vector3d& cmd_vel_body, double yaw);
 
+    // ========== 期望力控制相关函数 ==========
+    vector_t getDesiredContactForce();
+
     // ========== 基础配置变量 ==========
     ros::NodeHandle controllerNh_;
     bool is_real_{false};
@@ -191,8 +197,12 @@ namespace humanoidController_wheel_wbc
     ros::Time current_time_, last_time_;
 
     // ========== 全身控制 ==========
-    std::shared_ptr<mobile_manipulator::WbcBase> wheel_wbc_;
+    std::shared_ptr<mobile_manipulator::WeightedWbc> wheel_wbc_;  // 基础WBC（WeightedWbc）
+    std::shared_ptr<mobile_manipulator::ContactForceWbc> contact_force_wbc_;  // 接触力控制WBC
     std::shared_ptr<mobile_manipulator::VelocityLimiter> velLimiter_;  // 梯形插补加减速
+
+    // ========== 期望力管理器 ==========
+    std::unique_ptr<DesiredForceManager> desired_force_manager_;
 
     // ========== VR控制相关 ==========
     bool use_vr_control_{false};  // 是否启用VR控制
@@ -245,6 +255,8 @@ namespace humanoidController_wheel_wbc
 
     std::shared_ptr<mobile_manipulator::jointCmdLimiter> jointCmdLimiterPtr_;
 
+    // ========== 手臂末端力估计器 ==========
+    std::unique_ptr<ArmContactForceEstimatorWheel> arm_force_estimator_;
     // ========== 硬件使用参数相关 ==========
     HighlyDynamic::HumanoidInterfaceDrake *drake_interface_{nullptr};
     HighlyDynamic::JSONConfigReader *robot_config_;

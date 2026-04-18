@@ -34,6 +34,7 @@
 #include "kuavo_msgs/jointCmd.h"
 #include "kuavo_msgs/FTsensorData.h"
 #include "geometry_msgs/Wrench.h"
+#include "geometry_msgs/WrenchStamped.h"
 #include "nav_msgs/Odometry.h"
 #include "std_srvs/SetBool.h"
 #include "std_msgs/Float64.h"
@@ -102,6 +103,8 @@ namespace
   ros::Publisher pubGroundTruth;  // 重命名原来的pubOdom
   ros::Publisher pubOdom;          // 新增odom发布者
   ros::Publisher pubTimeDiff;
+  ros::Publisher pubLeftArmFT;   // 左手臂末端力/扭矩
+  ros::Publisher pubRightArmFT;  // 右手臂末端力/扭矩
   bool pure_sim = false;
 
   // raycaster camera
@@ -877,6 +880,50 @@ namespace
     bodyOdom.twist.twist.angular.z = angVel[2];
     pubGroundTruth.publish(bodyOdom);  // 发布到/ground_truth/state
     pubOdom.publish(bodyOdom);         // 发布到/odom
+
+    // 读取并发布手臂末端力/扭矩传感器数据
+    int l_arm_force_id = mj_name2id(m, mjOBJ_SENSOR, "l_arm_force");
+    int l_arm_torque_id = mj_name2id(m, mjOBJ_SENSOR, "l_arm_torque");
+    int r_arm_force_id = mj_name2id(m, mjOBJ_SENSOR, "r_arm_force");
+    int r_arm_torque_id = mj_name2id(m, mjOBJ_SENSOR, "r_arm_torque");
+
+    // 检查左手臂传感器是否存在
+    if (l_arm_force_id >= 0 && l_arm_torque_id >= 0) {
+      int l_arm_force_addr = m->sensor_adr[l_arm_force_id];
+      int l_arm_torque_addr = m->sensor_adr[l_arm_torque_id];
+      mjtNum *l_arm_force = d->sensordata + l_arm_force_addr;
+      mjtNum *l_arm_torque = d->sensordata + l_arm_torque_addr;
+
+      geometry_msgs::WrenchStamped left_arm_ft;
+      left_arm_ft.header.stamp = sim_time;
+      left_arm_ft.header.frame_id = "l_arm_ft_frame";
+      left_arm_ft.wrench.force.x = l_arm_force[0];
+      left_arm_ft.wrench.force.y = l_arm_force[1];
+      left_arm_ft.wrench.force.z = l_arm_force[2];
+      left_arm_ft.wrench.torque.x = l_arm_torque[0];
+      left_arm_ft.wrench.torque.y = l_arm_torque[1];
+      left_arm_ft.wrench.torque.z = l_arm_torque[2];
+      pubLeftArmFT.publish(left_arm_ft);
+    }
+
+    // 检查右手臂传感器是否存在
+    if (r_arm_force_id >= 0 && r_arm_torque_id >= 0) {
+      int r_arm_force_addr = m->sensor_adr[r_arm_force_id];
+      int r_arm_torque_addr = m->sensor_adr[r_arm_torque_id];
+      mjtNum *r_arm_force = d->sensordata + r_arm_force_addr;
+      mjtNum *r_arm_torque = d->sensordata + r_arm_torque_addr;
+
+      geometry_msgs::WrenchStamped right_arm_ft;
+      right_arm_ft.header.stamp = sim_time;
+      right_arm_ft.header.frame_id = "r_arm_ft_frame";
+      right_arm_ft.wrench.force.x = r_arm_force[0];
+      right_arm_ft.wrench.force.y = r_arm_force[1];
+      right_arm_ft.wrench.force.z = r_arm_force[2];
+      right_arm_ft.wrench.torque.x = r_arm_torque[0];
+      right_arm_ft.wrench.torque.y = r_arm_torque[1];
+      right_arm_ft.wrench.torque.z = r_arm_torque[2];
+      pubRightArmFT.publish(right_arm_ft);
+    }
   }
 
   double velocity_pid_func(int i, double target_vel)
@@ -1733,6 +1780,8 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   pubGroundTruth = g_nh_ptr->advertise<nav_msgs::Odometry>("/ground_truth/state", 10);
   pubOdom = g_nh_ptr->advertise<nav_msgs::Odometry>("/odom", 10);
   pubTimeDiff = g_nh_ptr->advertise<std_msgs::Float64>("/monitor/time_cost/mujoco_loop_time", 10);
+  pubLeftArmFT = g_nh_ptr->advertise<geometry_msgs::WrenchStamped>("/arm_force_torque/left", 10);
+  pubRightArmFT = g_nh_ptr->advertise<geometry_msgs::WrenchStamped>("/arm_force_torque/right", 10);
   bool camera_available = ConfigureDepthCameraForCurrentModel();
   if (camera_available) {
     depthImagePub = g_nh_ptr->advertise<sensor_msgs::Image>(mujoco_cpp::kDepthImageTopic, 10);

@@ -1187,6 +1187,40 @@ armAccelTask
     (12,0)  30.0     ; zarm_r6_joint
     (13,0)  30.0     ; zarm_r7_joint
   }
+  kp_force_control
+  {
+    (0,0)   350.0  ; zarm_l1_joint
+    (1,0)   32.0   ; zarm_l2_joint
+    (2,0)   32.0   ; zarm_l3_joint
+    (3,0)   150.0  ; zarm_l4_joint
+    (4,0)   35.0   ; zarm_l5_joint
+    (5,0)   35.0   ; zarm_l6_joint
+    (6,0)   35.0   ; zarm_l7_joint
+    (7,0)   350.0  ; zarm_r1_joint
+    (8,0)   32.0   ; zarm_r2_joint
+    (9,0)   32.0   ; zarm_r3_joint
+    (10,0)  150.0  ; zarm_r4_joint
+    (11,0)  35.0   ; zarm_r5_joint
+    (12,0)  35.0   ; zarm_r6_joint
+    (13,0)  35.0   ; zarm_r7_joint
+  }
+  kd_force_control
+  {
+    (0,0)   9.0    ; zarm_l1_joint
+    (1,0)   6.0    ; zarm_l2_joint
+    (2,0)   6.0    ; zarm_l3_joint
+    (3,0)   20.0   ; zarm_l4_joint
+    (4,0)   15.0   ; zarm_l5_joint
+    (5,0)   15.0   ; zarm_l6_joint
+    (6,0)   15.0   ; zarm_l7_joint
+    (7,0)   9.0    ; zarm_r1_joint
+    (8,0)   6.0    ; zarm_r2_joint
+    (9,0)   6.0    ; zarm_r3_joint
+    (10,0)  20.0   ; zarm_r4_joint
+    (11,0)  15.0   ; zarm_r5_joint
+    (12,0)  15.0   ; zarm_r6_joint
+    (13,0)  15.0   ; zarm_r7_joint
+  }
 }
 
 weight
@@ -1194,4 +1228,14 @@ weight
   accLowJoint     20
   accArm          30
   accTorsoZero    0
+  contactForce    3.0
+}
+
+contact_force_params
+{
+  contactForceErrorThreshold  0.15    ; 误差阈值（rad），超过此值禁用接触力任务
+  weightArmAccelReduced    3.0    ; 施加期望力时的手臂任务权重
+  transitionTime   0.3    ; 权重平滑过渡时间常数（秒）
+  forceThreshold           5.0    ; 期望力阈值（N），超过此值认为施加了期望力
+  interpolationSpeed       300.0   ; 期望力插值速度（N/s）
 }

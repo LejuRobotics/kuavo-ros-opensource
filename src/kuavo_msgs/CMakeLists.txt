@@ -247,6 +247,7 @@ add_service_files(
 
   # Lb Multi Timed Cmd
   lbMultiTimedPosCmd.srv
+  setContactForceInterpParams.srv
 
   # Lb offline Traj
   lbMultiTimedOfflineTraj.srv

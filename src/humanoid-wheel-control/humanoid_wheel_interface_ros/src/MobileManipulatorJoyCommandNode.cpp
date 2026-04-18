@@ -191,6 +191,7 @@ namespace mobile_manipulator
       ROS_INFO("轮臂手柄控制节点已启动");
       ROS_INFO("操作提示: 使用左摇杆控制底盘移动，右摇杆控制旋转");
       ROS_INFO("模式切换: LB+A -> cmd_vel, LB+Y -> cmd_vel_world, LB+B -> 躯干控制");
+      ROS_INFO("BACK: chassis E-STOP + call terminate (publish /stop_robot)");
       ROS_INFO("当前映射: linear_x=%d, linear_y=%d, angular=%d, deadzone=%.2f",
                linear_axis_index_x_, linear_axis_index_y_, angular_axis_index_, deadzone_);
       ROS_INFO("当前模式: cmd_vel (默认)");
@@ -271,6 +272,9 @@ namespace mobile_manipulator
       ros::Time zero_control_start_time_;
       bool is_control_zero_;
       const double MIN_ZERO_DURATION_ = 2.0;  // 控制量为零的最小持续时间（秒）
+
+      // 底盘急停：按 BACK 时置位，持续发布零速度并每 10 次打印一次
+      bool emergency_stop_chassis_{false};
 
       // G12轮臂模式标志: is_wheel_(ROBOT_VERSION>=60) 且 joystick_type==h12
       bool is_wheel_;
@@ -758,12 +762,12 @@ namespace mobile_manipulator
         }
       }
 
-      // 检测 BUTTON_BACK 按下事件（从未按下到按下）
-      if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_BACK"]] && 
-          joy_msg->buttons[joyButtonMap["BUTTON_BACK"]])
-      {
+      // BACK：按下时底盘急停并调用退出程序（/stop_robot），按住期间持续发布零速度
+      bool back_pressed = (joy_msg->buttons.size() > static_cast<size_t>(joyButtonMap["BUTTON_BACK"]) &&
+                                joy_msg->buttons[joyButtonMap["BUTTON_BACK"]]);
+if (back_pressed && !old_joy_msg_.buttons[joyButtonMap["BUTTON_BACK"]])
         callTerminateSrv();
-      }
+      emergency_stop_chassis_ = back_pressed;
 
       // 根据当前模式处理不同的控制逻辑
       if (current_mode_ == ControlMode::TORSO_CONTROL)
@@ -918,43 +922,57 @@ namespace mobile_manipulator
       else
       {
         // ========== cmd_vel 和 cmd_vel_world 模式 ==========
-        // 读取摇杆输入值
-        double linear_x_input = joy_msg->axes[linear_axis_index_x_];
-        double linear_y_input = joy_msg->axes[linear_axis_index_y_];
-        double angular_input = joy_msg->axes[angular_axis_index_];
-
-        // 应用死区
-        if (std::abs(linear_x_input) < deadzone_)
-          linear_x_input = 0.0;
-        if (std::abs(linear_y_input) < deadzone_)
-          linear_y_input = 0.0;
-        if (std::abs(angular_input) < deadzone_)
-          angular_input = 0.0;
-
-        // 创建 cmd_vel 消息
-        geometry_msgs::Twist cmd_vel;
-        cmd_vel.linear.x = clamp(linear_x_input * linear_scale_x_, -linear_scale_x_, linear_scale_x_);
-        cmd_vel.linear.y = clamp(linear_y_input * linear_scale_y_, -linear_scale_y_, linear_scale_y_);
-        cmd_vel.linear.z = 0.0;
-        cmd_vel.angular.x = 0.0;
-        cmd_vel.angular.y = 0.0;
-        cmd_vel.angular.z = clamp(angular_input * angular_scale_z_, -angular_scale_z_, angular_scale_z_);
-
-        // 判断是否接近0（使用死区阈值）
-        bool isNearZero = (std::abs(cmd_vel.linear.x) < deadzone_ && 
-                           std::abs(cmd_vel.linear.y) < deadzone_ && 
-                           std::abs(cmd_vel.angular.z) < deadzone_);
-
-        // 根据当前模式发布到相应的话题
-        if(!isNearZero)
+        if (emergency_stop_chassis_)
         {
-          if (current_mode_ == ControlMode::CMD_VEL)
+          // 底盘急停：向两个话题发布零速度，每 10 次打印一次
+          geometry_msgs::Twist zero_cmd;
+          zero_cmd.linear.x = zero_cmd.linear.y = zero_cmd.linear.z = 0.0;
+          zero_cmd.angular.x = zero_cmd.angular.y = zero_cmd.angular.z = 0.0;
+          cmd_vel_publisher_.publish(zero_cmd);
+          cmd_vel_world_publisher_.publish(zero_cmd);
+          
+            ROS_INFO("Chassis Emergency Stop");
+        }
+        else
+        {
+          // 读取摇杆输入值
+          double linear_x_input = joy_msg->axes[linear_axis_index_x_];
+          double linear_y_input = joy_msg->axes[linear_axis_index_y_];
+          double angular_input = joy_msg->axes[angular_axis_index_];
+
+          // 应用死区
+          if (std::abs(linear_x_input) < deadzone_)
+            linear_x_input = 0.0;
+          if (std::abs(linear_y_input) < deadzone_)
+            linear_y_input = 0.0;
+          if (std::abs(angular_input) < deadzone_)
+            angular_input = 0.0;
+
+          // 创建 cmd_vel 消息
+          geometry_msgs::Twist cmd_vel;
+          cmd_vel.linear.x = clamp(linear_x_input * linear_scale_x_, -linear_scale_x_, linear_scale_x_);
+          cmd_vel.linear.y = clamp(linear_y_input * linear_scale_y_, -linear_scale_y_, linear_scale_y_);
+          cmd_vel.linear.z = 0.0;
+          cmd_vel.angular.x = 0.0;
+          cmd_vel.angular.y = 0.0;
+          cmd_vel.angular.z = clamp(angular_input * angular_scale_z_, -angular_scale_z_, angular_scale_z_);
+
+          // 判断是否接近0（使用死区阈值）
+          bool isNearZero = (std::abs(cmd_vel.linear.x) < deadzone_ &&
+                             std::abs(cmd_vel.linear.y) < deadzone_ &&
+                             std::abs(cmd_vel.angular.z) < deadzone_);
+
+          // 根据当前模式发布到相应的话题
+          if(!isNearZero)
           {
-            cmd_vel_publisher_.publish(cmd_vel);
-          }
-          else if (current_mode_ == ControlMode::CMD_VEL_WORLD)
-          {
-            cmd_vel_world_publisher_.publish(cmd_vel);
+            if (current_mode_ == ControlMode::CMD_VEL)
+            {
+              cmd_vel_publisher_.publish(cmd_vel);
+            }
+            else if (current_mode_ == ControlMode::CMD_VEL_WORLD)
+            {
+              cmd_vel_world_publisher_.publish(cmd_vel);
+            }
           }
         }
       }

@@ -2036,11 +2036,15 @@ namespace mobile_manipulator {
       vector_t arm_control_mode_vec(1);
       arm_control_mode_vec << currentArmControlMode_;
       ros_logger_->publishVector("/humanoid/mpc/arm_control_mode", arm_control_mode_vec);
-
-      for(int armIdx=0; armIdx<2; armIdx++)
+      // 仅模式 0/1 需要触发关节规划并切到 JointSpace；模式 2（外部控制）不触发关节规划，
+      // 并清除关节更新标志，否则会多执行一帧“当前→复位关节”的规划，导致下次 EE 末端运动开始时抖动。
+      if (currentArmControlMode_ != LbArmControlServiceMode::EXTERN_CONTROL)
       {
-        isCmdArmJointUpdated_[armIdx] = true; // 触发关节指令规划
-        desireMode_[armIdx] = LbArmControlMode::JointSpace;
+        for(int armIdx=0; armIdx<2; armIdx++)
+        {
+          isCmdArmJointUpdated_[armIdx] = true; // 触发关节指令规划
+          desireMode_[armIdx] = LbArmControlMode::JointSpace;
+        }
       }
     }
     else

@@ -2,8 +2,12 @@
 #include <pinocchio/algorithm/kinematics.hpp>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/algorithm/rnea.hpp>
+#include <pinocchio/algorithm/crba.hpp>
+#include <ocs2_robotic_tools/common/RotationDerivativesTransforms.h>
 
 #include "humanoid_controllers/humanoidController_wheel_wbc.h"
+#include "kuavo_msgs/setContactForceInterpParams.h"
 #include "humanoid_interface/common/TopicLogger.h"
 #include <iostream>
 #include <cmath>
@@ -149,7 +153,7 @@ namespace humanoidController_wheel_wbc
     robot_config_ = drake_interface_->getRobotConfig();
     kuavo_settings_ = drake_interface_->getKuavoSettings();
     /************** Initialize WBC **********************/
-    wheel_wbc_ = std::make_shared<mobile_manipulator::WeightedWbc>(*pinocchioInterface_ptr_, manipulatorModelInfo_);
+    wheel_wbc_ = std::make_shared<mobile_manipulator::ContactForceWbc>(*pinocchioInterface_ptr_, manipulatorModelInfo_);
     wheel_wbc_->setArmNums(armNum_);
     bool useVrArmAccelTask = false;
     try
@@ -374,8 +378,22 @@ namespace humanoidController_wheel_wbc
     // 初始化上一次滤波后的关节位置
     last_filtered_low_joint_pos_ = vector_t::Zero(lowJointNum_);
 
+    // 设置ContactForceWbc指针到DesiredForceManager
+    auto contact_force_wbc = std::dynamic_pointer_cast<mobile_manipulator::ContactForceWbc>(wheel_wbc_);
+    
+    // 初始化期望力管理器（从ContactForceWbc获取插值速度参数）
+    double interpolation_speed = contact_force_wbc ? contact_force_wbc->getInterpolationSpeed() : 15.0;
+    desired_force_manager_ = std::make_unique<DesiredForceManager>(controllerNh_, interpolation_speed);
+    
+    if (contact_force_wbc && desired_force_manager_) {
+      desired_force_manager_->setContactForceWbc(contact_force_wbc);
+    }
+
     // 初始化过渡起点位置
     waist_transition_start_pos_ = vector_t::Zero(lowJointNum_);
+    
+    arm_force_estimator_ = std::make_unique<ArmContactForceEstimatorWheel>(
+        pinocchioInterface_ptr_, manipulatorModelInfo_, lowJointNum_, ros_logger_);
     
     // 初始化MPC模式切换服务客户端并设置为ArmOnly模式（仅在启用外部MPC且VR模式时）
     if(enable_mpc_ && use_vr_control_)
@@ -455,6 +473,26 @@ namespace humanoidController_wheel_wbc
       }
   );
 
+    control_data_manager_->registerService<kuavo_msgs::setContactForceInterpParams>(
+        "/set_contact_force_params",
+        [this](kuavo_msgs::setContactForceInterpParams::Request& req,
+               kuavo_msgs::setContactForceInterpParams::Response& res) {
+          if (!desired_force_manager_) {
+            res.success = false;
+            res.message = "DesiredForceManager not ready";
+            return true;
+          }
+          if (req.transition_time <= 0.0 || req.interpolation_speed <= 0.0) {
+            res.success = false;
+            res.message = "params must be > 0";
+            return true;
+          }
+          desired_force_manager_->applyContactForceInterpParams(req.transition_time, req.interpolation_speed);
+          res.success = true;
+          res.message = "ok";
+          return true;
+        });
+    
     ROS_INFO("[humanoidControllerWheelWbc] All ROS services registered through ControlDataManager");
   }
 
@@ -749,6 +787,45 @@ namespace humanoidController_wheel_wbc
       optimizedInput_mrt_limit.tail(info.armDim) = qvelLimit;
     }
 
+    // 更新期望力插值
+    if (desired_force_manager_) {
+      desired_force_manager_->update(time);
+    }
+
+    // 获取期望接触力（基座坐标系）
+    vector_t desired_contact_force = getDesiredContactForce();
+
+    // 将期望力传递给WBC
+    auto contact_force_wbc = std::dynamic_pointer_cast<mobile_manipulator::ContactForceWbc>(wheel_wbc_);
+    if (contact_force_wbc) {
+      contact_force_wbc->setDesiredContactForce(desired_contact_force);
+      
+      // 更新自适应权重（根据期望力大小动态调整手臂任务权重）
+      contact_force_wbc->updateAdaptiveWeights(time);
+      
+      vector_t joint_position_error = optimizedState_mrt_limit.tail(armNum_) - 
+                                      observation_wheel_.state.tail(armNum_);
+      bool enable_force_empty_detact = desired_force_manager_ ? 
+                                       desired_force_manager_->getEnableForceEmptyDetact() : true;
+      contact_force_wbc->updateJointPositionError(joint_position_error, enable_force_empty_detact);
+      
+      // 发布 force_disabled_ 状态
+      bool force_disabled = contact_force_wbc->isForceDisabled();
+      ros_logger_->publishValue("/state_estimate/Arm_Contact_Detection/force_empty", static_cast<double>(force_disabled));
+      
+      // 如果检测到挥空，且启用了挥空检测失效功能，清除DesiredForceManager中的期望力，执行一次后重置挥空标志
+      // 检查期望力是否已经被清除（避免重复清除导致循环打印日志）
+      if (force_disabled && desired_force_manager_ && enable_force_empty_detact) {
+          // 检查是否还有期望力（避免重复清除）
+          bool has_force = desired_force_manager_->hasDesiredForce("left_hand") || 
+                          desired_force_manager_->hasDesiredForce("right_hand");
+          if (has_force) {
+              desired_force_manager_->clearAllForces();
+              contact_force_wbc->resetForceDisabled();
+          }
+      }
+    }
+
     vector_t optimizedState_wbc = optimizedState_mrt_limit;
     vector_t optimizedInput_wbc = optimizedInput_mrt_limit;
     if (enable_arm_traj_interpolator_ && armNum_ > 0)
@@ -760,14 +837,23 @@ namespace humanoidController_wheel_wbc
 
     vector_t x = wheel_wbc_->update(optimizedState_wbc, optimizedInput_wbc, observation_wheel_);
 
+    // 决策变量顺序：x = [ddq_stateDim, f_contact, tau_armDim]
     vector_t bodyAcc = x.head(info.stateDim-info.armDim);
     vector_t jointAcc = x.segment(info.stateDim-info.armDim, info.armDim);
-    vector_t torque = x.tail(info.armDim);
+    // 接触力在中间，力矩在最后
+    size_t contact_force_size = 6 * manipulatorModelInfo_.eeFrames.size();
+    vector_t torque = x.tail(info.armDim); // 力矩在决策变量的最后部分
 
     ros_logger_->publishVector("/humanoid_wheel/bodyAcc", bodyAcc);
     ros_logger_->publishVector("/humanoid_wheel/jointAcc", jointAcc);
     ros_logger_->publishVector("/humanoid_wheel/torque", torque);
     ros_logger_->publishVector("/humanoid_wheel/target_qpos", target_qpos);
+    
+    // 手臂末端力估计（使用当前时间步的周期）
+    if (arm_force_estimator_) {
+      arm_force_estimator_->setCmdTorque(torque);
+      arm_force_estimator_->update(observation_wheel_.state, observation_wheel_.input, dfd);
+    }
 
     // 更新关节指令
     kuavo_msgs::jointCmd jointCmdMsg;
@@ -1757,6 +1843,24 @@ namespace humanoidController_wheel_wbc
         }
       }
     }
+  }
+  vector_t humanoidControllerWheelWbc::getDesiredContactForce()
+  {
+    vector_t desired_force = vector_t::Zero(12); // 12维，双臂各6维
+
+    // 获取左臂期望力
+    if (desired_force_manager_->hasDesiredForce("left_hand")) {
+      DesiredForceManager::Vector6d left_force = desired_force_manager_->getDesiredForce("left_hand");
+      desired_force.segment<6>(0) = left_force;
+    }
+
+    // 获取右臂期望力
+    if (desired_force_manager_->hasDesiredForce("right_hand")) {
+      DesiredForceManager::Vector6d right_force = desired_force_manager_->getDesiredForce("right_hand");
+      desired_force.segment<6>(6) = right_force;
+    }
+
+    return desired_force;
   }
 
 } // namespace humanoidController_wheel_wbc

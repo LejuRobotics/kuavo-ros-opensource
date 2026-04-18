@@ -102,6 +102,72 @@ def transform_pose_from_tag_to_world(tag: Tag, pose: Pose) -> Pose:
     return stand_pose_in_world
 
 
+class ChassisApi:
+    """底盘相关 API：从 tag/walk_goal 设置目标位姿并写入黑板。"""
+
+    def __init__(self, robot_sdk: RobotSDK):
+        self.robot_sdk = robot_sdk
+
+    def set_walk_goal_from_tag(
+        self,
+        tag_id: int,
+        stand_pos: tuple,
+        stand_euler: tuple,
+        degrees: bool = False,
+    ) -> bool:
+        """
+        从黑板 latest_tag_{tag_id} 读取 tag，计算目标位姿，写入 walk_goal。
+        Returns:
+            True 成功，False 表示黑板上无该 tag。
+        """
+        import py_trees
+        bb = py_trees.blackboard.Client(name="ChassisApi_walk_goal")
+        key = f"latest_tag_{tag_id}"
+        for k in [key, "walk_goal", "is_walk_goal_new"]:
+            bb.register_key(key=k, access=py_trees.common.Access.READ)
+            bb.register_key(key=k, access=py_trees.common.Access.WRITE)
+        tag = getattr(bb, key, None)
+        if tag is None:
+            rospy.logwarn(f"❌ 黑板上没有找到 tag {tag_id}")
+            return False
+        stand_pose_in_tag = Pose.from_euler(
+            pos=stand_pos,
+            euler=stand_euler,
+            frame=Frame.TAG,
+            degrees=degrees,
+        )
+        target_pose = transform_pose_from_tag_to_world(tag, stand_pose_in_tag)
+        bb.walk_goal = target_pose
+        bb.is_walk_goal_new = True
+        rospy.loginfo(
+            f"🎯 设置行走目标(tag {tag_id}): 位置=[{target_pose.pos[0]:.3f}, {target_pose.pos[1]:.3f}, {target_pose.pos[2]:.3f}]"
+        )
+        return True
+
+    def set_chassis_keypoints_from_walk_goal(self, chassis_time: float = 7.0) -> bool:
+        """
+        从黑板 walk_goal 读取位姿，写入 chassis_world_keypoints 和 chassis_world_keypoint_times。
+        Returns:
+            True 成功，False 表示黑板上无 walk_goal。
+        """
+        import py_trees
+        bb = py_trees.blackboard.Client(name="ChassisApi_keypoints")
+        for k in ["walk_goal", "chassis_world_keypoints", "chassis_world_keypoint_times"]:
+            bb.register_key(key=k, access=py_trees.common.Access.READ)
+            bb.register_key(key=k, access=py_trees.common.Access.WRITE)
+        walk_goal = getattr(bb, "walk_goal", None)
+        if walk_goal is None:
+            rospy.logerr("ChassisApi: 黑板无 walk_goal")
+            return False
+        euler = walk_goal.get_euler(degrees=False)
+        yaw = float(euler[2])
+        x, y = float(walk_goal.pos[0]), float(walk_goal.pos[1])
+        bb.chassis_world_keypoints = [[x, y, yaw]]
+        bb.chassis_world_keypoint_times = [float(chassis_time)]
+        rospy.loginfo(f"📌 底盘关键点: [x={x:.3f}, y={y:.3f}, yaw={yaw:.3f}], time={chassis_time}s")
+        return True
+
+
 class HeadAPI:
     """
     头部控制API

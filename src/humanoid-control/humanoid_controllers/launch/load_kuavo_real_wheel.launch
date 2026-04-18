@@ -57,6 +57,8 @@
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
+    <!-- 使用外部 odom->base_link TF 时设为 true，由外部系统（如 SLAM）发布 -->
+    <arg name="use_external_odom_tf" default="false"/>
     
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
@@ -102,6 +104,7 @@
     <!-- make the files into global parameters -->
     <param name="taskFile"   value="$(arg taskFile)" />
     <param name="urdfFile"   value="$(arg urdfFile)" />
+    <param name="use_external_odom_tf" value="$(arg use_external_odom_tf)"/>
     <param name="libFolder"  value="$(arg libFolder)" />
     <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v45/command/gait.info"/>
     <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v45/command/reference.info"/>
