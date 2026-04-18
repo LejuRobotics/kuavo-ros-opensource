@@ -27,17 +27,37 @@ import threading
 import numpy as np
 from std_msgs.msg import Bool
 
-rospack = rospkg.RosPack()
-pkg_path = rospack.get_path('h12pro_controller_node')
-h12pro_remote_controller_path = os.path.join(pkg_path, "src", "h12pro_node", "h12pro_remote_controller.json")
-kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
-
 try:
     from robot_version import RobotVersion
 except ImportError:
     import sys
     sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
     from robot_version import RobotVersion
+
+
+rospack = rospkg.RosPack()
+pkg_path = rospack.get_path('h12pro_controller_node')
+h12pro_remote_controller_path = os.path.join(pkg_path, "src", "h12pro_node", "h12pro_remote_controller.json")
+kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
+
+# =====================================================
+# 状态持久化常量
+# =====================================================
+
+# 合法状态列表 (来自 robot_state.json ocs2 states)
+LEGAL_STATES = [
+    "initial",
+    "calibrate",
+    "ready_stance",
+    "stance",
+    "vr_remote_control",
+    "walk",
+    "trot",
+    "climb_stair"
+]
+
+# ROS param 名称用于持久化最后状态
+LAST_STATE_PARAM = "/joy_node/last_state"
 
 class Config:
     # Controller ranges
@@ -354,7 +374,28 @@ class H12PROControllerNode:
                 )
             
         print(f"[H12PROControllerNode]: robot_state_machine init state is {self.robot_state_machine.state}")
+
         self.h12_to_joy_node = H12ToJoyControllerNode()
+
+        # ===== 状态恢复逻辑 =====
+        if self.manual_h12_init_state == "none":
+            try:
+                last_saved_state = rospy.get_param(LAST_STATE_PARAM, "none")
+                rospy.loginfo(f"[StateRecovery] Last saved state: {last_saved_state}")
+
+                if last_saved_state != "none" and last_saved_state in LEGAL_STATES \
+                        and last_saved_state not in ["initial", "calibrate"]:
+
+                    # 1. 恢复软件状态
+                    self.robot_state_machine.machine.set_state(
+                        last_saved_state, self.robot_state_machine
+                    )
+                    rospy.loginfo(f"[StateRecovery] Software state recovered to: {last_saved_state}")
+
+            except Exception as e:
+                rospy.logerr(f"[StateRecovery] Failed to recover: {e}")
+        # =====================================================
+
         self.key_timestamp: Dict[str, float] = {}
         self._config = self._load_configuration()
         
@@ -806,6 +847,14 @@ class H12PROControllerNode:
                     self.h12_to_joy_node.is_stopping = False
                 
             getattr(self.robot_state_machine, "stop")(source=current_state)
+
+            # ===== 紧急停止状态持久化 =====
+            try:
+                rospy.set_param(LAST_STATE_PARAM, self.robot_state_machine.state)
+                rospy.loginfo(f"[StatePersistence] Emergency stop persisted: {self.robot_state_machine.state}")
+            except Exception as e:
+                rospy.logerr(f"[StatePersistence] Failed to persist: {e}")
+
             stop_msg = h12proRemoteControllerChannel()
             channels = Config.get_default_channels()
             channels[Config.TRIGGER_CHANNEL_MAP["stop"]] = Config.MINUS_H12_AXIS_RANGE_MAX
@@ -908,6 +957,15 @@ class H12PROControllerNode:
                 try:
                     self._state_transition_executing = True  # 标记开始执行
                     getattr(self.robot_state_machine, trigger)(**kwargs)
+
+                    # ===== 状态持久化 (新增) =====
+                    try:
+                        rospy.set_param(LAST_STATE_PARAM, self.robot_state_machine.state)
+                        rospy.loginfo(f"[StatePersistence] Persisted state: {self.robot_state_machine.state}")
+                    except Exception as e:
+                        rospy.logerr(f"[StatePersistence] Failed to persist state: {e}")
+                    # =====================================================
+
                                         # zsh如果不是stance状态，自动关闭头部控制模式
                     if self.robot_state_machine.state != "stance" and self.head_control_mode:
                         rospy.logwarn("[HeadControl] Current state is not 'stance'. Disabling head control mode.")
