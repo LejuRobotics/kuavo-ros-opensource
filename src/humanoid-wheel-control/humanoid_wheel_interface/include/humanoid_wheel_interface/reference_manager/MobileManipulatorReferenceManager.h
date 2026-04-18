@@ -145,6 +145,27 @@ public:
   // 末端跟踪优先级调整的相关函数
   const bool getIsFocusEeStatus() const { return isFocusEe_; }
   void setIsFocusEeStatus(bool flag) { isFocusEe_ = flag; }
+  const double getTorsoOriFocusScale() const { return torsoOriBoxScale_; }
+  void setTorsoOriFocusScale(double scale) { torsoOriBoxScale_ = scale; }
+
+  // torso/z 方向 relax barrier 的运行时参数（通过话题更新）
+  scalar_t getFocusZMu() const
+  {
+    std::lock_guard<std::mutex> lock(focusZ_mtx_);
+    return focusZMu_;
+  }
+  scalar_t getFocusZDelta() const
+  {
+    std::lock_guard<std::mutex> lock(focusZ_mtx_);
+    return focusZDelta_;
+  }
+
+  /** task.info: torsoBoxSoftCost.position.focus_z_barrier.use_focus_z；为 false 时 z 与 x/y 一样用 position.unFocus_barrier */
+  bool getUseFocusZ() const
+  {
+    std::lock_guard<std::mutex> lock(focusZ_mtx_);
+    return useFocusZ_;
+  }
 
 protected:
   virtual void modifyReferences(scalar_t initTime, scalar_t finalTime, const vector_t& initState, TargetTrajectories& targetTrajectories,
@@ -286,6 +307,12 @@ private:
   // 动力学库接口
   PinocchioInterface pinocchioInterface_;
 
+  // 末端控制优先级相关
+  bool desiredFocusEe_{false};
+  bool leftArmJointTrigger_{true};   // 从其他模式切换到关节模式则触发为 true
+  bool rightArmJointTrigger_{true};
+  double torsoOriBoxScale_{1.0};    // 躯干的boxConstrait中姿态的上下界, 高优先级和低优先级之间需要存在倍数关系
+
   // 指令底盘速度
   bool isCmdVelUpdated_{false};
   bool isCmdVelTimeUpdate_{false};
@@ -357,6 +384,13 @@ private:
   // 用于记录末端笛卡尔模式的 focus 对象, true 为末端, false 为躯干
   bool isFocusEe_{true};
   ros::Subscriber set_focus_ee_sub_;
+
+  // torso position z 方向 relax barrier 参数与开关（通过话题 /mobile_manipulator_focus_z 更新开关）
+  mutable std::mutex focusZ_mtx_;
+  scalar_t focusZMu_{0.0};
+  scalar_t focusZDelta_{0.0};
+  bool useFocusZ_{false};
+  ros::Subscriber set_focus_z_sub_;
 
   // 分别保存左右臂的关节轨迹（弧度）以及是否将关节角作为期望输入
   vector_t left_arm_joint_traj_;

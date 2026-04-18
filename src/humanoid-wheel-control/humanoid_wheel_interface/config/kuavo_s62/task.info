@@ -575,145 +575,85 @@ torsoBoxSoftCost
 {
   activate  true
 
-  focus_barrier
+  position
   {
-    ; relaxed log barrier mu
-    mu      0.8
-
-    ; relaxed log barrier delta
-    delta   0.001
-  }
-  
-  unFocus_barrier
-  {
-    ; relaxed log barrier mu
-    mu      0.3
-
-    ; relaxed log barrier delta
-    delta   0.01
-  }
-
-  pose_lower
-  {
-    (0,0)  -0.01  ; linear position x
-    (1,0)  -0.01  ; linear position y
-    (2,0)  -0.01  ; linear position z
-    (3,0)  -0.01  ; roll
-    (4,0)  -0.01  ; pitch
-    (5,0)  -0.01  ; yaw
-  }
-
-  pose_upper
-  {
-    (0,0)   0.01  ; linear position x
-    (1,0)   0.01  ; linear position y
-    (2,0)   0.01  ; linear position z
-    (3,0)   0.01  ; roll
-    (4,0)   0.01  ; pitch
-    (5,0)   0.01  ; yaw
-  }
-}
-
-multiPointEeConstraint
-{
-  activate false
-
-  leftArm   ; 左臂的三点末端, 默认索引 0 为主跟踪点
-  {
-    [0] "zarm_l7_end_effector"
-    [1] "zarm_l7_end_effector_1"
-    [2] "zarm_l7_end_effector_2"
-  }
-
-  rightArm   ; 右臂的三点末端, 双臂点数必须一致
-  {
-    [0] "zarm_r7_end_effector"
-    [1] "zarm_r7_end_effector_1"
-    [2] "zarm_r7_end_effector_2"
-  }
-  
-  endEffector 
-  {
-    mu  ; 三点位置权重
+    focus_barrier
     {
-      [0]  10.0   ; linear x
-      [1]  10.0   ; linear y
-      [2]  10.0   ; linear z
+      ; relaxed log barrier mu
+      mu      0.8
 
-      [3]  10.0   ; linear x
-      [4]  10.0   ; linear y
-      [5]  10.0   ; linear z
-
-      [6]  10.0   ; linear x
-      [7]  10.0   ; linear y
-      [8]  10.0   ; linear z
+      ; relaxed log barrier delta
+      delta   0.001
     }
-  }
 
-  endEffectorBox
-  {
-    activate true
+    unFocus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.05
+    }
+
+    focus_z_barrier
+    {
+      ; true: z 方向用本组 mu/delta；false:用 position.unFocus_barrier
+      use_focus_z  true
+
+      ; relaxed log barrier mu
+      mu      0.4
+
+      ; relaxed log barrier delta
+      delta   0.001
+    }
 
     lower
     {
       (0,0)  -0.01  ; linear position x
       (1,0)  -0.01  ; linear position y
       (2,0)  -0.01  ; linear position z
-
-      (3,0)  -0.01  ; linear position x
-      (4,0)  -0.01  ; linear position y
-      (5,0)  -0.01  ; linear position z
-
-      (6,0)  -0.01  ; linear position x
-      (7,0)  -0.01  ; linear position y
-      (8,0)  -0.01  ; linear position z
     }
 
     upper
     {
-      (0,0)  0.01  ; linear position x
-      (1,0)  0.01  ; linear position y
-      (2,0)  0.01  ; linear position z
+      (0,0)   0.01  ; linear position x
+      (1,0)   0.01  ; linear position y
+      (2,0)   0.01  ; linear position z
+    }
+  }
 
-      (3,0)  0.01  ; linear position x
-      (4,0)  0.01  ; linear position y
-      (5,0)  0.01  ; linear position z
+  orientation
+  {
+    focus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.8
 
-      (6,0)  0.01  ; linear position x
-      (7,0)  0.01  ; linear position y
-      (8,0)  0.01  ; linear position z
+      ; relaxed log barrier delta
+      delta   0.001
     }
 
-    focus_penalty   ; 松弛屏障的参数，数量需和点数一致
+    unFocus_barrier
     {
-      mu
-      {
-        [0] 2.3
-        [1] 2.3
-        [2] 2.3
-      }
-      delta
-      {
-        [0] 0.001
-        [1] 0.001
-        [2] 0.001
-      }
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.01
     }
 
-    unFocus_penalty   ; 松弛屏障的参数，数量需和点数一致
+    lower
     {
-      mu
-      {
-        [0] 0.3
-        [1] 0.3
-        [2] 0.3
-      }
-      delta
-      {
-        [0] 0.01
-        [1] 0.01
-        [2] 0.01
-      }
+      (0,0)  -0.5  ; roll
+      (1,0)  -0.5  ; pitch
+      (2,0)  -1.5  ; yaw
+    }
+
+    upper
+    {
+      (0,0)   0.5  ; roll
+      (1,0)   0.5  ; pitch
+      (2,0)   1.5  ; yaw
     }
   }
 }
@@ -721,56 +661,106 @@ multiPointEeConstraint
 endEffector
 {
   ; end effector quadratic penalty scaling
-  muPosition  10.0
-  muOrientation  0.0
+  muWeights
+  {
+    scaling 1e0
+
+    (0,0)    10.0   ; torso X
+    (1,0)    10.0   ; torso Y
+    (2,0)    10.0   ; torso Z
+    (3,0)    120.0   ; torso roll
+    (4,0)    120.0   ; torso pitch
+    (5,0)    120.0   ; torso yaw
+  }
 }
 
 finalEndEffector
 {
-  muPosition  10.0
-  muOrientation  0.0
+  muWeights
+  {
+    scaling 1e0
+
+    (0,0)    10.0   ; torso X
+    (1,0)    10.0   ; torso Y
+    (2,0)    10.0   ; torso Z
+    (3,0)    120.0   ; torso roll
+    (4,0)    120.0   ; torso pitch
+    (5,0)    120.0   ; torso yaw
+  }
 }
 
 endEffectorBox
 {
   activate true
 
-  focus_barrier
+  position
   {
-    ; relaxed log barrier mu
-    mu      0.3
+    focus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
 
-    ; relaxed log barrier delta
-    delta   0.001
+      ; relaxed log barrier delta
+      delta   0.001
+    }
+
+    unFocus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.01
+    }
+
+    lower
+    {
+      (0,0)  -0.001  ; linear position x
+      (1,0)  -0.001  ; linear position y
+      (2,0)  -0.001  ; linear position z
+    }
+
+    upper
+    {
+      (0,0)   0.001  ; linear position x
+      (1,0)   0.001  ; linear position y
+      (2,0)   0.001  ; linear position z
+    }
   }
-  
-  unFocus_barrier
-  {
-    ; relaxed log barrier mu
-    mu      0.3
 
-    ; relaxed log barrier delta
-    delta   0.01
-  }
-
-  pose_lower
+  orientation
   {
-    (0,0)  -0.001  ; linear position x
-    (1,0)  -0.001  ; linear position y
-    (2,0)  -0.001  ; linear position z
-    (3,0)  -0.01  ; roll
-    (4,0)  -0.01  ; pitch
-    (5,0)  -0.01  ; yaw
-  }
+    focus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
 
-  pose_upper
-  {
-    (0,0)   0.001  ; linear position x
-    (1,0)   0.001  ; linear position y
-    (2,0)   0.001  ; linear position z
-    (3,0)   0.01  ; roll
-    (4,0)   0.01  ; pitch
-    (5,0)   0.01  ; yaw
+      ; relaxed log barrier delta
+      delta   0.001
+    }
+
+    unFocus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.1
+    }
+
+    lower
+    {
+      (0,0)  -0.1  ; roll
+      (1,0)  -0.1  ; pitch
+      (2,0)  -0.1  ; yaw
+    }
+
+    upper
+    {
+      (0,0)   0.1  ; roll
+      (1,0)   0.1  ; pitch
+      (2,0)   0.1  ; yaw
+    }
   }
 }
 
@@ -781,9 +771,13 @@ eeJointBias
   biasJointNames   ; 需要设置偏好的关节名称
   {
     [0] "zarm_l2_joint"
-    [1] "zarm_l4_joint"
-    [2] "zarm_r2_joint"
-    [3] "zarm_r4_joint"
+    [1] "zarm_l3_joint"
+    [2] "zarm_l4_joint"
+    [3] "zarm_l6_joint"
+    [4] "zarm_r2_joint"
+    [5] "zarm_r3_joint"
+    [6] "zarm_r4_joint"
+    [7] "zarm_r6_joint"
   }
 
   biasDir     ; 偏好方向, True 为偏好正方向, False 为偏好负方向
@@ -791,32 +785,48 @@ eeJointBias
     [0] "True"
     [1] "False"
     [2] "False"
-    [3] "False"
+    [3] "True"
+    [4] "False"
+    [5] "True"
+    [6] "False"
+    [7] "False"
   }
 
   biasCenter  ; 偏好中心
   {
     [0]  0.0
-    [1]  -0.1
-    [2]  0.0
-    [3]  -0.1
+    [1]  0.0
+    [2]  -0.1
+    [3]  0.0
+    [4]  0.0
+    [5]  0.0
+    [6]  -0.1
+    [7]  0.0
   }
 
   ; 屏障函数相关
   biasMu
   {
     [0]  0.05
-    [1]  0.1
-    [2]  0.05
-    [3]  0.1
+    [1]  0.05
+    [2]  0.1
+    [3]  0.05
+    [4]  0.05
+    [5]  0.05
+    [6]  0.1
+    [7]  0.05
   }
 
   biasDelta
   {
     [0]  0.1
     [1]  0.01
-    [2]  0.1
-    [3]  0.01
+    [2]  0.01
+    [3]  0.4
+    [4]  0.1
+    [5]  0.01
+    [6]  0.01
+    [7]  0.4
   }
 }
 

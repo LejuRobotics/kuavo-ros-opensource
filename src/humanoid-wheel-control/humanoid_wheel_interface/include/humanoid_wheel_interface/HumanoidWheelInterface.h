@@ -61,7 +61,7 @@ class HumanoidWheelInterface final : public RobotInterface {
    * @param [in] libraryFolder: The absolute path to the directory to generate CppAD library into.
    * @param [in] urdfFile: The absolute path to the URDF file for the robot.
    */
-  HumanoidWheelInterface(const std::string& taskFile, const std::string& libraryFolder, const std::string& urdfFile);
+  HumanoidWheelInterface(const std::string& taskFile, const std::string& libraryFolder, const std::string& urdfFile, bool isLoadInitial = false);
 
   const vector_t& getInitialState() { return initialState_; }
 
@@ -91,20 +91,12 @@ class HumanoidWheelInterface final : public RobotInterface {
   std::unique_ptr<StateCost> getEndEffectorBoxSoftCost(const PinocchioInterface& pinocchioInterface, const std::string& taskFile, 
                                                        bool usePreComputation, const std::string& libraryFolder, 
                                                        bool recompileLibraries, int eefIdx);
-  std::unique_ptr<StateCost> getEndEffectorMultiPointBoxSoftCost(const PinocchioInterface& pinocchioInterface,
-                                                       const std::string& taskFile, bool usePreComputation, 
-                                                       const std::string& libraryFolder, bool recompileLibraries, 
-                                                       int eefIdx);
   std::unique_ptr<StateCost> getEndEffectorLocalConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                            const std::string& prefix, bool useCaching, const std::string& libraryFolder,
                                                            bool recompileLibraries, int eefIdx);
   std::unique_ptr<StateCost> getEndEffectorLocalBoxSoftCost(const PinocchioInterface& pinocchioInterface, const std::string& taskFile, 
                                                        bool usePreComputation, const std::string& libraryFolder, 
                                                        bool recompileLibraries, int eefIdx);
-  std::unique_ptr<StateCost> getEndEffectorLocalMultiPointBoxSoftCost(const PinocchioInterface& pinocchioInterface,
-                                                       const std::string& taskFile, bool usePreComputation, 
-                                                       const std::string& libraryFolder, bool recompileLibraries, 
-                                                       int eefIdx);
   std::unique_ptr<StateCost> getSelfCollisionConstraint(const PinocchioInterface& pinocchioInterface, const std::string& taskFile,
                                                         const std::string& urdfFile, const std::string& prefix, bool useCaching,
                                                         const std::string& libraryFolder, bool recompileLibraries);
@@ -116,16 +108,10 @@ class HumanoidWheelInterface final : public RobotInterface {
                                                          const std::string& taskFile);
   std::unique_ptr<StateCost> getEndEffectorJointBias(const PinocchioInterface& pinocchioInterface, 
                                                      const std::string& taskFile);
-  std::unique_ptr<StateCost> getEndEffectorMultiPointConstraint(const PinocchioInterface& pinocchioInterface, 
-                                                      const std::string& taskFile, bool usePreComp, 
-                                                      const std::string& libraryFolder, bool recompileLibraries, int eefIdx);
-  std::unique_ptr<StateCost> getEndEffectorLocalMultiPointConstraint(const PinocchioInterface& pinocchioInterface, 
-                                                                     const std::string& taskFile, bool usePreComp, 
-                                                                     const std::string& libraryFolder,
-                                                                     bool recompileLibraries, int eefIdx);
   std::unique_ptr<StateCost> getSelfDistanceConstraint(int index, const PinocchioInterface& pinocchioInterface, 
                                                        std::pair<std::string, std::string> linkPair,
                                                        const std::string& taskFile, bool verbose);
+  void setRobotInitialJointState(ros::NodeHandle& input_nh);
 
   ddp::Settings ddpSettings_;
   sqp::Settings sqpSettings_;

@@ -79,8 +79,6 @@ add_library(${PROJECT_NAME}
   src/MobileManipulatorPreComputation.cpp
   src/MobileManipulatorPinocchioMapping.cpp
   src/constraint/EndEffectorConstraint.cpp
-  src/constraint/EndEffectorMultiPointConstraint.cpp
-  src/constraint/EndEffectorLocalMultiPointConstraint.cpp
   src/constraint/EndEffectorLocalConstraint.cpp
   src/constraint/EndEffectorTorsoConstraint.cpp
   src/constraint/TorsoTrackingConstraint.cpp
@@ -101,10 +99,8 @@ add_library(${PROJECT_NAME}
   src/cost/LinearStateInequalitySoftConstraint.cpp
   src/cost/TorsoTrackingBoxSoftCost.cpp
   src/cost/EndEffectorBoxSoftCost.cpp
-  src/cost/EndEffectorMultiPointBoxSoftCost.cpp
   src/cost/EndEffectorLocalBoxSoftCost.cpp
   src/cost/selfDistanceBoxSoftCost.cpp
-  src/cost/EndEffectorLocalMultiPointBoxSoftCost.cpp
   src/cost/EndEffectorJointBias.cpp
 )
 

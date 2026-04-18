@@ -55,14 +55,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_wheel_interface/constraint/TorsoTrackingConstraint.h"
 #include "humanoid_wheel_interface/constraint/EndEffectorConstraint.h"
 #include "humanoid_wheel_interface/constraint/EndEffectorLocalConstraint.h"
-#include "humanoid_wheel_interface/constraint/EndEffectorMultiPointConstraint.h"
-#include "humanoid_wheel_interface/constraint/EndEffectorLocalMultiPointConstraint.h"
 #include "humanoid_wheel_interface/constraint/MobileManipulatorSelfCollisionConstraint.h"
 #include "humanoid_wheel_interface/cost/BaseStateInputCost.h"
 #include "humanoid_wheel_interface/cost/EndEffectorBoxSoftCost.h"
 #include "humanoid_wheel_interface/cost/EndEffectorLocalBoxSoftCost.h"
-#include "humanoid_wheel_interface/cost/EndEffectorMultiPointBoxSoftCost.h"
-#include "humanoid_wheel_interface/cost/EndEffectorLocalMultiPointBoxSoftCost.h"
 #include "humanoid_wheel_interface/cost/TorsoTrackingBoxSoftCost.h"
 #include "humanoid_wheel_interface/cost/EndEffectorJointBias.h"
 #include "humanoid_wheel_interface/cost/selfDistanceBoxSoftCost.h"
@@ -76,6 +72,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
 
+// ros
+#include <ros/ros.h>
+
 namespace ocs2 {
 namespace mobile_manipulator {
 
@@ -83,7 +82,7 @@ namespace mobile_manipulator {
 /******************************************************************************************************/
 /******************************************************************************************************/
 HumanoidWheelInterface::HumanoidWheelInterface(const std::string& taskFile, const std::string& libraryFolder,
-                                                       const std::string& urdfFile) {
+                                                       const std::string& urdfFile, bool isLoadInitial) {
   // check that task file exists
   boost::filesystem::path taskFilePath(taskFile);
   if (boost::filesystem::exists(taskFilePath)) {
@@ -154,6 +153,11 @@ HumanoidWheelInterface::HumanoidWheelInterface(const std::string& taskFile, cons
   // const int baseStateDim = manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim;
   // const int armStateDim = manipulatorModelInfo_.armDim;
 
+  if(isLoadInitial == true)
+  {
+    ros::NodeHandle nodeHandle;
+    setRobotInitialJointState(nodeHandle);
+  }
   // arm base DOFs initial state
   // if (baseStateDim > 0) {
   //   vector_t initialBaseState = vector_t::Zero(baseStateDim);
@@ -166,7 +170,7 @@ HumanoidWheelInterface::HumanoidWheelInterface(const std::string& taskFile, cons
   // loadData::loadEigenMatrix(taskFile, "initialState.arm", initialArmState);
   // initialState_.tail(armStateDim) = initialArmState;
 
-  // std::cerr << "Initial State:   " << initialState_.transpose() << std::endl;
+  std::cout << "Initial State:   " << initialState_.transpose() << std::endl;
 
   // DDP-MPC settings
   ddpSettings_ = ddp::loadSettings(taskFile, "ddp");
@@ -199,42 +203,6 @@ HumanoidWheelInterface::HumanoidWheelInterface(const std::string& taskFile, cons
   // joint limits constraint
   problem_.softConstraintPtr->add("jointLimits", getJointLimitSoftConstraint(*pinocchioInterfacePtr_, taskFile));
 
-  bool useEeMultiPoint = false;
-  loadData::loadPtreeValue(pt, useEeMultiPoint, "multiPointEeConstraint.activate", true);
-  if(useEeMultiPoint)
-  {
-    bool useEeBoxCost = false;
-    loadData::loadPtreeValue(pt, useEeBoxCost, "multiPointEeConstraint.endEffectorBox.activate", true);
-    for(int eef_idx = 0; eef_idx < manipulatorModelInfo_.eeFrames.size(); eef_idx++)
-    {
-      problem_.stateSoftConstraintPtr->add("endEffector_" + std::to_string(eef_idx), getEndEffectorMultiPointConstraint(*pinocchioInterfacePtr_, taskFile,
-                                                                                   usePreComputation, libraryFolder, recompileLibraries, eef_idx));
-      problem_.finalSoftConstraintPtr->add("finalEndEffector_" + std::to_string(eef_idx), getEndEffectorMultiPointConstraint(*pinocchioInterfacePtr_, taskFile,
-                                                                                   usePreComputation, libraryFolder, recompileLibraries, eef_idx));
-      if(useEeBoxCost)
-      {
-        problem_.stateCostPtr->add("endEffectorBox_" + std::to_string(eef_idx), getEndEffectorMultiPointBoxSoftCost(*pinocchioInterfacePtr_, taskFile, 
-                                                                                   usePreComputation, libraryFolder, recompileLibraries, eef_idx));
-        problem_.finalCostPtr->add("finalEndEffectorBox_" + std::to_string(eef_idx), getEndEffectorMultiPointBoxSoftCost(*pinocchioInterfacePtr_, taskFile, 
-                                                                                   usePreComputation, libraryFolder, recompileLibraries, eef_idx));  
-      }
-    }
-    for(int eef_idx = 0; eef_idx < manipulatorModelInfo_.eeFrames.size(); eef_idx++)
-    {
-      problem_.stateSoftConstraintPtr->add("endEffectorLocal_" + std::to_string(eef_idx), getEndEffectorLocalMultiPointConstraint(*pinocchioInterfacePtr_, taskFile,
-                                                                                   usePreComputation, libraryFolder, recompileLibraries, eef_idx));
-      problem_.finalSoftConstraintPtr->add("finalEndEffectorLocal_" + std::to_string(eef_idx), getEndEffectorLocalMultiPointConstraint(*pinocchioInterfacePtr_, taskFile,
-                                                                                   usePreComputation, libraryFolder, recompileLibraries, eef_idx));
-      if(useEeBoxCost)
-      {
-        problem_.stateCostPtr->add("endEffectorLocalBox_" + std::to_string(eef_idx), getEndEffectorLocalMultiPointBoxSoftCost(*pinocchioInterfacePtr_, taskFile, 
-                                                                                   usePreComputation, libraryFolder, recompileLibraries, eef_idx));
-        problem_.finalCostPtr->add("finalEndEffectorLocalBox_" + std::to_string(eef_idx), getEndEffectorLocalMultiPointBoxSoftCost(*pinocchioInterfacePtr_, taskFile, 
-                                                                                   usePreComputation, libraryFolder, recompileLibraries, eef_idx));  
-      }
-    }
-  }
-  else
   {
     // end-effector state constraint
     // end effector box soft cost
@@ -405,16 +373,16 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorConstraint(cons
   {
     throw std::invalid_argument("[getEndEffectorConstraint] eefIdx is out of range.");
   }
-  scalar_t muPosition = 1.0;
-  scalar_t muOrientation = 1.0;
+  // 默认权重值：位置(x,y,z) + 姿态(roll,pitch,yaw)
+  vector_t endEffector_mu = vector_t::Zero(6);
   // const std::string name = "WRIST_2";
 
   boost::property_tree::ptree pt;
   boost::property_tree::read_info(taskFile, pt);
   std::cerr << "\n #### " << prefix << " Settings: ";
   std::cerr << "\n #### =============================================================================\n";
-  loadData::loadPtreeValue(pt, muPosition, prefix + ".muPosition", true);
-  loadData::loadPtreeValue(pt, muOrientation, prefix + ".muOrientation", true);
+  loadData::loadEigenMatrix(taskFile, prefix + ".muWeights", endEffector_mu);
+  std::cout << "endEffector_mu: " << endEffector_mu.transpose() << std::endl;
   std::cerr << " #### =============================================================================\n";
 
   if (referenceManagerPtr_ == nullptr) {
@@ -435,8 +403,9 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorConstraint(cons
   }
 
   std::vector<std::unique_ptr<PenaltyBase>> penaltyArray(6);
-  std::generate_n(penaltyArray.begin(), 3, [&] { return std::make_unique<QuadraticPenalty>(muPosition); });
-  std::generate_n(penaltyArray.begin() + 3, 3, [&] { return std::make_unique<QuadraticPenalty>(muOrientation); });
+  for (int i = 0; i < 6; ++i) {
+    penaltyArray[i] = std::make_unique<QuadraticPenalty>(endEffector_mu[i]);
+  }
 
   return std::make_unique<StateSoftConstraint>(std::move(constraint), std::move(penaltyArray));
 }
@@ -457,6 +426,13 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorBoxSoftCost(con
   scalar_t mu_unFocus = 0.5;
   scalar_t delta_unFocus = 0.01;
 
+  std::vector<ocs2::RelaxedBarrierPenalty::Config> focusBarrier;
+  std::vector<ocs2::RelaxedBarrierPenalty::Config> unFocusBarrier;
+
+  Eigen::Vector3d pos_lower = Eigen::Vector3d::Ones() * -99;   // default a big num
+  Eigen::Vector3d pos_upper = Eigen::Vector3d::Ones() * 99;
+  Eigen::Vector3d ori_lower = Eigen::Vector3d::Ones() * -99;   // default a big num
+  Eigen::Vector3d ori_upper = Eigen::Vector3d::Ones() * 99;
   vector6_t pose_lower = vector6_t::Ones() * -99;   // default a big num
   vector6_t pose_upper = vector6_t::Ones() * 99;
 
@@ -465,17 +441,35 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorBoxSoftCost(con
   boost::property_tree::read_info(taskFile, pt);
   std::cerr << "\n #### endEffectorBox Settings: ";
   std::cerr << "\n #### =============================================================================\n";
-  /***********************************************************************************************************/
+  /*************************************** Position 参数设置 **************************************************/
+  std::string index = "position.";
   std::string barrierName = "focus_barrier.";
-  loadData::loadPtreeValue(pt, mu_Focus, prefix + barrierName + "mu", true);
-  loadData::loadPtreeValue(pt, delta_Focus, prefix + barrierName + "delta", true);
+  loadData::loadPtreeValue(pt, mu_Focus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_Focus, prefix + index + barrierName + "delta", true);
+  focusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus));
   barrierName = "unFocus_barrier.";
-  loadData::loadPtreeValue(pt, mu_unFocus, prefix + barrierName + "mu", true);
-  loadData::loadPtreeValue(pt, delta_unFocus, prefix + barrierName + "delta", true);
+  loadData::loadPtreeValue(pt, mu_unFocus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_unFocus, prefix + index + barrierName + "delta", true);
+  unFocusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus));
+  loadData::loadEigenMatrix(taskFile, prefix + index + "lower", pos_lower);
+  loadData::loadEigenMatrix(taskFile, prefix + index + "upper", pos_upper);
   /***********************************************************************************************************/
-  loadData::loadEigenMatrix(taskFile, prefix + "pose_lower", pose_lower);
+  /************************************** Orientation 参数设置 ************************************************/
+  index = "orientation.";
+  barrierName = "focus_barrier.";
+  loadData::loadPtreeValue(pt, mu_Focus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_Focus, prefix + index + barrierName + "delta", true);
+  focusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus));
+  barrierName = "unFocus_barrier.";
+  loadData::loadPtreeValue(pt, mu_unFocus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_unFocus, prefix + index + barrierName + "delta", true);
+  unFocusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus));
+  loadData::loadEigenMatrix(taskFile, prefix + index + "lower", ori_lower);
+  loadData::loadEigenMatrix(taskFile, prefix + index + "upper", ori_upper);
+  /***********************************************************************************************************/
+  pose_lower << pos_lower, ori_lower;
   std::cout << "pose_lower: " << pose_lower.transpose() << std::endl;
-  loadData::loadEigenMatrix(taskFile, prefix + "pose_upper", pose_upper);
+  pose_upper << pos_upper, ori_upper;
   std::cout << "pose_upper: " << pose_upper.transpose() << std::endl;
   std::cerr << "\n #### =============================================================================\n";
 
@@ -490,8 +484,8 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorBoxSoftCost(con
     PinocchioEndEffectorKinematics eeKinematics(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.eeFrames[eefIdx]});
     constraint.reset(new EndEffectorBoxSoftCost(eeKinematics, *referenceManagerPtr_, manipulatorModelInfo_, 
                                                 pose_lower, pose_upper, 
-                                                ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus), 
-                                                ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus), eefIdx));
+                                                focusBarrier, 
+                                                unFocusBarrier, eefIdx));
   } else {
     MobileManipulatorPinocchioMappingCppAd pinocchioMappingCppAd(manipulatorModelInfo_);
     PinocchioEndEffectorKinematicsCppAd eeKinematics(pinocchioInterface, pinocchioMappingCppAd, {manipulatorModelInfo_.eeFrames[eefIdx]},
@@ -499,98 +493,8 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorBoxSoftCost(con
                                                      "end_effector_kinematics", libraryFolder, recompileLibraries, false);
     constraint.reset(new EndEffectorBoxSoftCost(eeKinematics, *referenceManagerPtr_, manipulatorModelInfo_, 
                                                 pose_lower, pose_upper, 
-                                                ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus), 
-                                                ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus), eefIdx));
-  }
-
-  return constraint;
-}
-
-/******************************************************************************************************/
-/******************************************************************************************************/
-/******************************************************************************************************/
-std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorMultiPointBoxSoftCost(const PinocchioInterface& pinocchioInterface,
-                                                                             const std::string& taskFile, bool usePreComputation, 
-                                                                             const std::string& libraryFolder, bool recompileLibraries, 
-                                                                             int eefIdx) 
-{
-  boost::property_tree::ptree pt;
-  boost::property_tree::read_info(taskFile, pt);
-  std::string prefix = "multiPointEeConstraint.";
-  std::string point_prefix;
-  switch(eefIdx)
-  {
-    case 0: point_prefix = "leftArm";  break;
-    case 1: point_prefix = "rightArm"; break;
-    default: std::cout << "[getEndEffectorMultiPointBoxSoftCost] eefIdx do not support !!! " << std::endl; break;
-  }
-
-  if(eefIdx >= manipulatorModelInfo_.eeFrames.size())
-  {
-    throw std::invalid_argument("[getEndEffectorMultiPointBoxSoftCost] eefIdx is out of range.");
-  }
-
-  if (referenceManagerPtr_ == nullptr) {
-    throw std::runtime_error("[getEndEffectorMultiPointBoxSoftCost] referenceManagerPtr_ should be set first!");
-  }
-
-  std::vector<std::string> pointNames;
-  std::vector<scalar_t> eeMu_focus;
-  std::vector<scalar_t> eeDelta_focus;
-  std::vector<scalar_t> eeMu_unFocus;
-  std::vector<scalar_t> eeDelta_unFocus;
-
-  std::cerr << "\n #### endEffector Multi Point Box Settings: ";
-  std::cerr << "\n #### =============================================================================\n";
-  loadData::loadStdVector<std::string>(taskFile, prefix + point_prefix, pointNames, true);
-  /***************************************************************************************************************/
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffectorBox.focus_penalty.mu", eeMu_focus, true);
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffectorBox.focus_penalty.delta", eeDelta_focus, true);
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffectorBox.unFocus_penalty.mu", eeMu_unFocus, true);
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffectorBox.unFocus_penalty.delta", eeDelta_unFocus, true);
-  /***************************************************************************************************************/
-
-  if(eeMu_focus.size() != pointNames.size() || eeMu_unFocus.size() != pointNames.size())
-  {
-    throw std::invalid_argument("[getEndEffectorMultiPointBoxSoftCost] eeMu.size() is not equal to pointNames.size().");
-  }
-  if(eeDelta_focus.size() != pointNames.size() || eeDelta_unFocus.size() != pointNames.size())
-  {
-    throw std::invalid_argument("[getEndEffectorMultiPointBoxSoftCost] eeDelta.size() is not equal to pointNames.size().");
-  }
-  vector_t pos_lower = vector_t::Ones(pointNames.size() * 3) * -99;   // default a big num
-  vector_t pos_upper = vector_t::Ones(pointNames.size() * 3) * 99;
-  loadData::loadEigenMatrix(taskFile, prefix + "endEffectorBox.lower", pos_lower);
-  std::cout << "pos_lower: " << pos_lower.transpose() << std::endl;
-  loadData::loadEigenMatrix(taskFile, prefix + "endEffectorBox.upper", pos_upper);
-  std::cout << "pos_upper: " << pos_upper.transpose() << std::endl;
-  std::cerr << "\n #### =============================================================================\n";
-
-  std::vector<RelaxedBarrierPenalty::Config> settings_focus;
-  std::vector<RelaxedBarrierPenalty::Config> settings_unFocus;
-  for(int i=0; i < pointNames.size(); i++)
-  {
-    settings_focus.push_back(RelaxedBarrierPenalty::Config(eeMu_focus[i], eeDelta_focus[i]));
-    settings_unFocus.push_back(RelaxedBarrierPenalty::Config(eeMu_unFocus[i], eeDelta_unFocus[i]));
-  }
-
-  std::unique_ptr<StateCost> constraint;
-
-
-  if (usePreComputation) {
-    MobileManipulatorPinocchioMapping pinocchioMapping(manipulatorModelInfo_);
-    PinocchioEndEffectorKinematics eeKinematics(pinocchioInterface, pinocchioMapping, pointNames);
-    constraint.reset(new EndEffectorMultiPointBoxSoftCost(pointNames.size(), eeKinematics, *referenceManagerPtr_, 
-                                                          pinocchioInterface, manipulatorModelInfo_, 
-                                                          pos_lower, pos_upper, settings_focus, settings_unFocus, eefIdx));
-  } else {
-    MobileManipulatorPinocchioMappingCppAd pinocchioMappingCppAd(manipulatorModelInfo_);
-    PinocchioEndEffectorKinematicsCppAd eeKinematics(pinocchioInterface, pinocchioMappingCppAd, pointNames,
-                                                     manipulatorModelInfo_.stateDim, manipulatorModelInfo_.inputDim,
-                                                     "end_effector_kinematics_box", libraryFolder, recompileLibraries, false);
-    constraint.reset(new EndEffectorMultiPointBoxSoftCost(pointNames.size(), eeKinematics, *referenceManagerPtr_, 
-                                                          pinocchioInterface, manipulatorModelInfo_, 
-                                                          pos_lower, pos_upper, settings_focus, settings_unFocus, eefIdx));
+                                                focusBarrier, 
+                                                unFocusBarrier, eefIdx));
   }
 
   return constraint;
@@ -607,16 +511,16 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorLocalConstraint
   {
     throw std::invalid_argument("[getEndEffectorLocalConstraint] eefIdx is out of range.");
   }
-  scalar_t muPosition = 1.0;
-  scalar_t muOrientation = 1.0;
+  // 默认权重值：位置(x,y,z) + 姿态(roll,pitch,yaw)
+  vector_t endEffector_mu = vector_t::Zero(6);
   // const std::string name = "WRIST_2";
 
   boost::property_tree::ptree pt;
   boost::property_tree::read_info(taskFile, pt);
   std::cerr << "\n #### " << prefix << " Settings: ";
   std::cerr << "\n #### =============================================================================\n";
-  loadData::loadPtreeValue(pt, muPosition, prefix + ".muPosition", true);
-  loadData::loadPtreeValue(pt, muOrientation, prefix + ".muOrientation", true);
+  loadData::loadEigenMatrix(taskFile, prefix + ".muWeights", endEffector_mu);
+  std::cout << "endEffector_mu: " << endEffector_mu.transpose() << std::endl;
   std::cerr << " #### =============================================================================\n";
 
   if (referenceManagerPtr_ == nullptr) {
@@ -637,8 +541,9 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorLocalConstraint
   }
 
   std::vector<std::unique_ptr<PenaltyBase>> penaltyArray(6);
-  std::generate_n(penaltyArray.begin(), 3, [&] { return std::make_unique<QuadraticPenalty>(muPosition); });
-  std::generate_n(penaltyArray.begin() + 3, 3, [&] { return std::make_unique<QuadraticPenalty>(muOrientation); });
+  for (int i = 0; i < 6; ++i) {
+    penaltyArray[i] = std::make_unique<QuadraticPenalty>(endEffector_mu[i]);
+  }
 
   return std::make_unique<StateSoftConstraint>(std::move(constraint), std::move(penaltyArray));
 }
@@ -660,6 +565,13 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorLocalBoxSoftCos
   scalar_t mu_unFocus = 0.5;
   scalar_t delta_unFocus = 0.01;
 
+  std::vector<ocs2::RelaxedBarrierPenalty::Config> focusBarrier;
+  std::vector<ocs2::RelaxedBarrierPenalty::Config> unFocusBarrier;
+
+  Eigen::Vector3d pos_lower = Eigen::Vector3d::Ones() * -99;   // default a big num
+  Eigen::Vector3d pos_upper = Eigen::Vector3d::Ones() * 99;
+  Eigen::Vector3d ori_lower = Eigen::Vector3d::Ones() * -99;   // default a big num
+  Eigen::Vector3d ori_upper = Eigen::Vector3d::Ones() * 99;
   vector6_t pose_lower = vector6_t::Ones() * -99;   // default a big num
   vector6_t pose_upper = vector6_t::Ones() * 99;
 
@@ -668,17 +580,35 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorLocalBoxSoftCos
   boost::property_tree::read_info(taskFile, pt);
   std::cerr << "\n #### endEffectorLocalBox Settings: ";
   std::cerr << "\n #### =============================================================================\n";
-  /***********************************************************************************************************/
+  /*************************************** Position 参数设置 **************************************************/
+  std::string index = "position.";
   std::string barrierName = "focus_barrier.";
-  loadData::loadPtreeValue(pt, mu_Focus, prefix + barrierName + "mu", true);
-  loadData::loadPtreeValue(pt, delta_Focus, prefix + barrierName + "delta", true);
+  loadData::loadPtreeValue(pt, mu_Focus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_Focus, prefix + index + barrierName + "delta", true);
+  focusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus));
   barrierName = "unFocus_barrier.";
-  loadData::loadPtreeValue(pt, mu_unFocus, prefix + barrierName + "mu", true);
-  loadData::loadPtreeValue(pt, delta_unFocus, prefix + barrierName + "delta", true);
+  loadData::loadPtreeValue(pt, mu_unFocus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_unFocus, prefix + index + barrierName + "delta", true);
+  unFocusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus));
+  loadData::loadEigenMatrix(taskFile, prefix + index + "lower", pos_lower);
+  loadData::loadEigenMatrix(taskFile, prefix + index + "upper", pos_upper);
   /***********************************************************************************************************/
-  loadData::loadEigenMatrix(taskFile, prefix + "pose_lower", pose_lower);
+  /************************************** Orientation 参数设置 ************************************************/
+  index = "orientation.";
+  barrierName = "focus_barrier.";
+  loadData::loadPtreeValue(pt, mu_Focus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_Focus, prefix + index + barrierName + "delta", true);
+  focusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus));
+  barrierName = "unFocus_barrier.";
+  loadData::loadPtreeValue(pt, mu_unFocus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_unFocus, prefix + index + barrierName + "delta", true);
+  unFocusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus));
+  loadData::loadEigenMatrix(taskFile, prefix + index + "lower", ori_lower);
+  loadData::loadEigenMatrix(taskFile, prefix + index + "upper", ori_upper);
+  /***********************************************************************************************************/
+  pose_lower << pos_lower, ori_lower;
   std::cout << "pose_lower: " << pose_lower.transpose() << std::endl;
-  loadData::loadEigenMatrix(taskFile, prefix + "pose_upper", pose_upper);
+  pose_upper << pos_upper, ori_upper;
   std::cout << "pose_upper: " << pose_upper.transpose() << std::endl;
   std::cerr << "\n #### =============================================================================\n";
 
@@ -693,8 +623,8 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorLocalBoxSoftCos
     PinocchioEndEffectorKinematics eeKinematics(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.eeFrames[eefIdx]});
     constraint.reset(new EndEffectorLocalBoxSoftCost(eeKinematics, *referenceManagerPtr_, manipulatorModelInfo_, 
                                                      pose_lower, pose_upper, 
-                                                     ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus), 
-                                                     ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus), eefIdx));
+                                                     focusBarrier, 
+                                                     unFocusBarrier, eefIdx));
   } else {
     MobileManipulatorPinocchioMappingCppAd pinocchioMappingCppAd(manipulatorModelInfo_);
     PinocchioEndEffectorKinematicsCppAd eeKinematics(pinocchioInterface, pinocchioMappingCppAd, {manipulatorModelInfo_.eeFrames[eefIdx]},
@@ -702,98 +632,8 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorLocalBoxSoftCos
                                                      "end_effector_kinematics", libraryFolder, recompileLibraries, false);
     constraint.reset(new EndEffectorLocalBoxSoftCost(eeKinematics, *referenceManagerPtr_, manipulatorModelInfo_, 
                                                      pose_lower, pose_upper, 
-                                                     ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus), 
-                                                     ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus), eefIdx));
-  }
-
-  return constraint;
-}
-
-/******************************************************************************************************/
-/******************************************************************************************************/
-/******************************************************************************************************/
-std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorLocalMultiPointBoxSoftCost(const PinocchioInterface& pinocchioInterface,
-                                                                             const std::string& taskFile, bool usePreComputation, 
-                                                                             const std::string& libraryFolder, bool recompileLibraries, 
-                                                                             int eefIdx) 
-{
-  boost::property_tree::ptree pt;
-  boost::property_tree::read_info(taskFile, pt);
-  std::string prefix = "multiPointEeConstraint.";
-  std::string point_prefix;
-  switch(eefIdx)
-  {
-    case 0: point_prefix = "leftArm";  break;
-    case 1: point_prefix = "rightArm"; break;
-    default: std::cout << "[getEndEffectorLocalMultiPointBoxSoftCost] eefIdx do not support !!! " << std::endl; break;
-  }
-
-  if(eefIdx >= manipulatorModelInfo_.eeFrames.size())
-  {
-    throw std::invalid_argument("[getEndEffectorLocalMultiPointBoxSoftCost] eefIdx is out of range.");
-  }
-
-  if (referenceManagerPtr_ == nullptr) {
-    throw std::runtime_error("[getEndEffectorLocalMultiPointBoxSoftCost] referenceManagerPtr_ should be set first!");
-  }
-
-  std::vector<std::string> pointNames;
-  std::vector<scalar_t> eeMu_focus;
-  std::vector<scalar_t> eeDelta_focus;
-  std::vector<scalar_t> eeMu_unFocus;
-  std::vector<scalar_t> eeDelta_unFocus;
-
-  std::cerr << "\n #### endEffector Local Multi Point Box Settings: ";
-  std::cerr << "\n #### =============================================================================\n";
-  loadData::loadStdVector<std::string>(taskFile, prefix + point_prefix, pointNames, true);
-  /***************************************************************************************************************/
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffectorBox.focus_penalty.mu", eeMu_focus, true);
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffectorBox.focus_penalty.delta", eeDelta_focus, true);
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffectorBox.unFocus_penalty.mu", eeMu_unFocus, true);
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffectorBox.unFocus_penalty.delta", eeDelta_unFocus, true);
-  /***************************************************************************************************************/
-
-  if(eeMu_focus.size() != pointNames.size() || eeMu_unFocus.size() != pointNames.size())
-  {
-    throw std::invalid_argument("[getEndEffectorMultiPointBoxSoftCost] eeMu.size() is not equal to pointNames.size().");
-  }
-  if(eeDelta_focus.size() != pointNames.size() || eeDelta_unFocus.size() != pointNames.size())
-  {
-    throw std::invalid_argument("[getEndEffectorMultiPointBoxSoftCost] eeDelta.size() is not equal to pointNames.size().");
-  }
-  vector_t pos_lower = vector_t::Ones(pointNames.size() * 3) * -99;   // default a big num
-  vector_t pos_upper = vector_t::Ones(pointNames.size() * 3) * 99;
-  loadData::loadEigenMatrix(taskFile, prefix + "endEffectorBox.lower", pos_lower);
-  std::cout << "pos_lower: " << pos_lower.transpose() << std::endl;
-  loadData::loadEigenMatrix(taskFile, prefix + "endEffectorBox.upper", pos_upper);
-  std::cout << "pos_upper: " << pos_upper.transpose() << std::endl;
-  std::cerr << "\n #### =============================================================================\n";
-
-  std::vector<RelaxedBarrierPenalty::Config> settings_focus;
-  std::vector<RelaxedBarrierPenalty::Config> settings_unFocus;
-  for(int i=0; i < pointNames.size(); i++)
-  {
-    settings_focus.push_back(RelaxedBarrierPenalty::Config(eeMu_focus[i], eeDelta_focus[i]));
-    settings_unFocus.push_back(RelaxedBarrierPenalty::Config(eeMu_unFocus[i], eeDelta_unFocus[i]));
-  }
-
-  std::unique_ptr<StateCost> constraint;
-
-
-  if (usePreComputation) {
-    MobileManipulatorPinocchioMapping pinocchioMapping(manipulatorModelInfo_);
-    PinocchioEndEffectorKinematics eeKinematics(pinocchioInterface, pinocchioMapping, pointNames);
-    constraint.reset(new EndEffectorLocalMultiPointBoxSoftCost(pointNames.size(), eeKinematics, *referenceManagerPtr_, 
-                                            pinocchioInterface, manipulatorModelInfo_, 
-                                            pos_lower, pos_upper, settings_focus, settings_unFocus, eefIdx));
-  } else {
-    MobileManipulatorPinocchioMappingCppAd pinocchioMappingCppAd(manipulatorModelInfo_);
-    PinocchioEndEffectorKinematicsCppAd eeKinematics(pinocchioInterface, pinocchioMappingCppAd, pointNames,
-                                            manipulatorModelInfo_.stateDim, manipulatorModelInfo_.inputDim,
-                                            "end_effector_kinematics_local_box", libraryFolder, recompileLibraries, false);
-    constraint.reset(new EndEffectorLocalMultiPointBoxSoftCost(pointNames.size(), eeKinematics, *referenceManagerPtr_, 
-                                                          pinocchioInterface, manipulatorModelInfo_, 
-                                                          pos_lower, pos_upper, settings_focus, settings_unFocus, eefIdx));
+                                                     focusBarrier, 
+                                                     unFocusBarrier, eefIdx));
   }
 
   return constraint;
@@ -994,26 +834,51 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getTorsoTrackingBoxSoftCost(c
   scalar_t mu_unFocus = 0.5;      // scaling
   scalar_t delta_unFocus = 0.01;
 
-  vector6_t pose_lower_ = vector6_t::Ones() * -99;   // default a big num
-  vector6_t pose_upper_ = vector6_t::Ones() * 99;
+  std::vector<ocs2::RelaxedBarrierPenalty::Config> focusBarrier;
+  std::vector<ocs2::RelaxedBarrierPenalty::Config> unFocusBarrier;
+
+  Eigen::Vector3d pos_lower = Eigen::Vector3d::Ones() * -99;   // default a big num
+  Eigen::Vector3d pos_upper = Eigen::Vector3d::Ones() * 99;
+  Eigen::Vector3d ori_lower = Eigen::Vector3d::Ones() * -99;   // default a big num
+  Eigen::Vector3d ori_upper = Eigen::Vector3d::Ones() * 99;
+  vector6_t pose_lower = vector6_t::Ones() * -99;   // default a big num
+  vector6_t pose_upper = vector6_t::Ones() * 99;
 
   const std::string prefix = "torsoBoxSoftCost.";
   boost::property_tree::ptree pt;
   boost::property_tree::read_info(taskFile, pt);
   std::cerr << "\n #### torsoBoxSoftCost Settings: ";
   std::cerr << "\n #### =============================================================================\n";
-  /***********************************************************************************************************/
+  /*************************************** Position 参数设置 **************************************************/
+  std::string index = "position.";
   std::string barrierName = "focus_barrier.";
-  loadData::loadPtreeValue(pt, mu_Focus, prefix + barrierName + "mu", true);
-  loadData::loadPtreeValue(pt, delta_Focus, prefix + barrierName + "delta", true);
+  loadData::loadPtreeValue(pt, mu_Focus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_Focus, prefix + index + barrierName + "delta", true);
+  focusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus));
   barrierName = "unFocus_barrier.";
-  loadData::loadPtreeValue(pt, mu_unFocus, prefix + barrierName + "mu", true);
-  loadData::loadPtreeValue(pt, delta_unFocus, prefix + barrierName + "delta", true);
+  loadData::loadPtreeValue(pt, mu_unFocus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_unFocus, prefix + index + barrierName + "delta", true);
+  unFocusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus));
+  loadData::loadEigenMatrix(taskFile, prefix + index + "lower", pos_lower);
+  loadData::loadEigenMatrix(taskFile, prefix + index + "upper", pos_upper);
   /***********************************************************************************************************/
-  loadData::loadEigenMatrix(taskFile, prefix + "pose_lower", pose_lower_);
-  std::cout << "pose_lower: " << pose_lower_.transpose() << std::endl;
-  loadData::loadEigenMatrix(taskFile, prefix + "pose_upper", pose_upper_);
-  std::cout << "pose_upper: " << pose_upper_.transpose() << std::endl;
+  /************************************** Orientation 参数设置 ************************************************/
+  index = "orientation.";
+  barrierName = "focus_barrier.";
+  loadData::loadPtreeValue(pt, mu_Focus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_Focus, prefix + index + barrierName + "delta", true);
+  focusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus));
+  barrierName = "unFocus_barrier.";
+  loadData::loadPtreeValue(pt, mu_unFocus, prefix + index + barrierName + "mu", true);
+  loadData::loadPtreeValue(pt, delta_unFocus, prefix + index + barrierName + "delta", true);
+  unFocusBarrier.push_back(ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus));
+  loadData::loadEigenMatrix(taskFile, prefix + index + "lower", ori_lower);
+  loadData::loadEigenMatrix(taskFile, prefix + index + "upper", ori_upper);
+  /***********************************************************************************************************/
+  pose_lower << pos_lower, ori_lower;
+  std::cout << "pose_lower: " << pose_lower.transpose() << std::endl;
+  pose_upper << pos_upper, ori_upper;
+  std::cout << "pose_upper: " << pose_upper.transpose() << std::endl;
   std::cerr << "\n #### =============================================================================\n";
 
   if (referenceManagerPtr_ == nullptr) {
@@ -1026,9 +891,9 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getTorsoTrackingBoxSoftCost(c
   PinocchioEndEffectorKinematics eeKinematicTorso(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.torsoFrame});
 
   constraint.reset(new TorsoTrackingBoxSoftCost(eeKinematicTorso, *referenceManagerPtr_, 
-                                               pose_lower_, pose_upper_, 
-                                               ocs2::RelaxedBarrierPenalty::Config(mu_Focus, delta_Focus), 
-                                               ocs2::RelaxedBarrierPenalty::Config(mu_unFocus, delta_unFocus)));
+                                               pose_lower, pose_upper, 
+                                               focusBarrier, 
+                                               unFocusBarrier));
 
   return constraint;
 }
@@ -1127,140 +992,6 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorJointBias(const
   constraint.reset(new EndEffectorJointBias(biasLimits, *referenceManagerPtr_));
   
   return constraint;
-
-}
-
-std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorMultiPointConstraint(const PinocchioInterface& pinocchioInterface, 
-                                                                                      const std::string& taskFile, bool usePreComp, 
-                                                                                      const std::string& libraryFolder,
-                                                                                      bool recompileLibraries, int eefIdx)
-{
-  boost::property_tree::ptree pt;
-  boost::property_tree::read_info(taskFile, pt);
-  std::string prefix = "multiPointEeConstraint.";
-
-  if(eefIdx >= manipulatorModelInfo_.eeFrames.size())
-  {
-    throw std::invalid_argument("[getEndEffectorMultiPointConstraint] eefIdx is out of range.");
-  }
-
-  if (referenceManagerPtr_ == nullptr) {
-    throw std::runtime_error("[getEndEffectorMultiPointConstraint] referenceManagerPtr_ should be set first!");
-  }
-
-  std::vector<std::string> pointNames;
-  std::vector<double> eeMu;
-  std::string point_prefix;
-  switch(eefIdx)
-  {
-    case 0: point_prefix = "leftArm";  break;
-    case 1: point_prefix = "rightArm"; break;
-    default: std::cout << "[getEndEffectorMultiPointConstraint] eefIdx do not support !!! " << std::endl; break;
-  }
-  std::cerr << "\n #### EndEffector Multi Point Constraint Settings: ";
-  std::cerr << "\n #### =============================================================================\n";
-  loadData::loadStdVector<std::string>(taskFile, prefix + point_prefix, pointNames, true);
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffector.mu", eeMu, true);
-
-  std::unique_ptr<StateConstraint> constraint;
-
-  if (usePreComp) {
-    MobileManipulatorPinocchioMapping pinocchioMapping(manipulatorModelInfo_);
-    PinocchioEndEffectorKinematics eeKinematics(pinocchioInterface, pinocchioMapping, pointNames);
-    constraint.reset(new EndEffectorMultiPointConstraint(pointNames.size(), eeKinematics, *referenceManagerPtr_, 
-                                                         pinocchioInterface, manipulatorModelInfo_, eefIdx));
-  } else {
-    MobileManipulatorPinocchioMappingCppAd pinocchioMappingCppAd(manipulatorModelInfo_);
-    PinocchioEndEffectorKinematicsCppAd eeKinematics(pinocchioInterface, pinocchioMappingCppAd, pointNames, 
-                                                     manipulatorModelInfo_.stateDim, manipulatorModelInfo_.inputDim,
-                                                     "end_effector_kinematics", libraryFolder, recompileLibraries, false);
-    constraint.reset(new EndEffectorMultiPointConstraint(pointNames.size(), eeKinematics, *referenceManagerPtr_, 
-                                                         pinocchioInterface, manipulatorModelInfo_, eefIdx));
-  }
-
-  std::vector<std::unique_ptr<PenaltyBase>> penaltyArray(pointNames.size() * 3);
-
-  if(eeMu.size() != pointNames.size() * 3)
-  {
-    throw std::invalid_argument("[getEndEffectorMultiPointConstraint] eeMu.size() is not equal to pointNames.size() * 3.");
-  }
-
-  for (int i = 0; i < pointNames.size(); ++i) 
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      penaltyArray[i*3 + j] = std::make_unique<QuadraticPenalty>(eeMu[i*3 + j]);
-    }
-  }
-
-  return std::make_unique<StateSoftConstraint>(std::move(constraint), std::move(penaltyArray));
-}
-
-std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorLocalMultiPointConstraint(const PinocchioInterface& pinocchioInterface, 
-                                                                                           const std::string& taskFile, bool usePreComp, 
-                                                                                           const std::string& libraryFolder,
-                                                                                           bool recompileLibraries, int eefIdx)
-{
-  boost::property_tree::ptree pt;
-  boost::property_tree::read_info(taskFile, pt);
-  std::string prefix = "multiPointEeConstraint.";
-
-  if(eefIdx >= manipulatorModelInfo_.eeFrames.size())
-  {
-    throw std::invalid_argument("[getEndEffectorLocalMultiPointConstraint] eefIdx is out of range.");
-  }
-
-  if (referenceManagerPtr_ == nullptr) {
-    throw std::runtime_error("[getEndEffectorLocalMultiPointConstraint] referenceManagerPtr_ should be set first!");
-  }
-
-  std::vector<std::string> pointNames;
-  std::vector<double> eeMu;
-  std::string point_prefix;
-  switch(eefIdx)
-  {
-    case 0: point_prefix = "leftArm";  break;
-    case 1: point_prefix = "rightArm"; break;
-    default: std::cout << "[getEndEffectorLocalMultiPointConstraint] eefIdx do not support !!! " << std::endl; break;
-  }
-  std::cerr << "\n #### EndEffector Local Multi Point Constraint Settings: ";
-  std::cerr << "\n #### =============================================================================\n";
-  loadData::loadStdVector<std::string>(taskFile, prefix + point_prefix, pointNames, true);
-  loadData::loadStdVector<double>(taskFile, prefix + "endEffector.mu", eeMu, true);
-
-  std::unique_ptr<StateConstraint> constraint;
-
-  if (usePreComp) {
-    MobileManipulatorPinocchioMapping pinocchioMapping(manipulatorModelInfo_);
-    PinocchioEndEffectorKinematics eeKinematics(pinocchioInterface, pinocchioMapping, pointNames);
-    constraint.reset(new EndEffectorLocalMultiPointConstraint(pointNames.size(), eeKinematics, *referenceManagerPtr_, 
-                                                              pinocchioInterface, manipulatorModelInfo_, eefIdx));
-  } else {
-    MobileManipulatorPinocchioMappingCppAd pinocchioMappingCppAd(manipulatorModelInfo_);
-    PinocchioEndEffectorKinematicsCppAd eeKinematics(pinocchioInterface, pinocchioMappingCppAd, pointNames, 
-                                                     manipulatorModelInfo_.stateDim, manipulatorModelInfo_.inputDim,
-                                                     "end_effector_kinematics_local", libraryFolder, recompileLibraries, false);
-    constraint.reset(new EndEffectorLocalMultiPointConstraint(pointNames.size(), eeKinematics, *referenceManagerPtr_, 
-                                                              pinocchioInterface, manipulatorModelInfo_, eefIdx));
-  }
-
-  std::vector<std::unique_ptr<PenaltyBase>> penaltyArray(pointNames.size() * 3);
-
-  if(eeMu.size() != pointNames.size() * 3)
-  {
-    throw std::invalid_argument("[getEndEffectorMultiPointConstraint] eeMu.size() is not equal to pointNames.size() * 3.");
-  }
-
-  for (int i = 0; i < pointNames.size(); ++i) 
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      penaltyArray[i*3 + j] = std::make_unique<QuadraticPenalty>(eeMu[i*3 + j]);
-    }
-  }
-
-  return std::make_unique<StateSoftConstraint>(std::move(constraint), std::move(penaltyArray));
-
 }
 
 std::unique_ptr<StateCost> HumanoidWheelInterface::getSelfDistanceConstraint(int index, const PinocchioInterface& pinocchioInterface, 
@@ -1295,6 +1026,34 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getSelfDistanceConstraint(int
                                                maxDistance[index]));
 
   return constraint;
+}
+
+void HumanoidWheelInterface::setRobotInitialJointState(ros::NodeHandle& input_nh)
+{
+  std::vector<double> initialStateVector;
+  while (!input_nh.hasParam("/robot_init_state_param"))
+  {
+      static bool first = true;
+      if(first)
+      {
+        ROS_INFO("Waiting for '/robot_init_state_param' parameter to be set...");
+        first = false;
+      } 
+      ros::Duration(0.2).sleep(); // 等待1秒后再次尝试
+  }
+
+  input_nh.getParam("/robot_init_state_param", initialStateVector);
+  ROS_INFO("Set '/robot_init_state_param' parameter success !!!");
+
+  Eigen::VectorXd initialState(initialStateVector.size());
+  for (size_t i = 0; i < initialStateVector.size(); ++i)
+  {
+      initialState(i) = initialStateVector[i];
+  }
+
+  std::cout << "[HumanoidWheelInterface] robot_init_state_param: " << initialState.transpose() << std::endl;
+  initialState_.tail(manipulatorModelInfo_.armDim) = initialState.segment(7, manipulatorModelInfo_.armDim);   // 从初始获取手臂期望
+  
 }
 
 }  // namespace mobile_manipulator

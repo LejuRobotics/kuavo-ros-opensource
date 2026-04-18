@@ -46,13 +46,11 @@ EndEffectorConstraint::EndEffectorConstraint(const EndEffectorKinematics<scalar_
       endEffectorKinematicsPtr_(endEffectorKinematics.clone()),
       referenceManagerPtr_(&referenceManager), 
       info_(info),
-      eef_Idx_(eefInx),
-      eef_num_(info.eeFrames.size()) {
+      eef_Idx_(eefInx) {
   if (endEffectorKinematics.getIds().size() != 1) {
     throw std::runtime_error("[EndEffectorConstraint] endEffectorKinematics has wrong number of end effector IDs.");
   }
   pinocchioEEKinPtr_ = dynamic_cast<PinocchioEndEffectorKinematics*>(endEffectorKinematicsPtr_.get());
-  start_index_ = eef_Idx_ * 7;
 }
 
 /******************************************************************************************************/

@@ -46,8 +46,8 @@ EndEffectorLocalBoxSoftCost::EndEffectorLocalBoxSoftCost(const EndEffectorKinema
                                                  const ManipulatorModelInfo& info,
                                                  const Vector6d& pose_lower, 
                                                  const Vector6d& pose_upper,
-                                                 RelaxedBarrierPenalty::Config settingsFocus,
-                                                 RelaxedBarrierPenalty::Config settingsUnFocus,
+                                                 std::vector<RelaxedBarrierPenalty::Config> settingsFocus,
+                                                 std::vector<RelaxedBarrierPenalty::Config> settingsUnFocus,
                                                  const int eefInx)
     : endEffectorKinematicsPtr_(endEffectorKinematics.clone()),
       referenceManager_(referenceManager),
@@ -55,10 +55,7 @@ EndEffectorLocalBoxSoftCost::EndEffectorLocalBoxSoftCost(const EndEffectorKinema
       pose_lower_(pose_lower), pose_upper_(pose_upper),
       settingsFocus_(settingsFocus),
       settingsUnFocus_(settingsUnFocus),
-      penaltyFocusPtr_(new ocs2::RelaxedBarrierPenalty(settingsFocus)),
-      penaltyUnFocusPtr_(new ocs2::RelaxedBarrierPenalty(settingsUnFocus)),
-      eef_Idx_(eefInx),
-      eef_num_(info.eeFrames.size())
+      eef_Idx_(eefInx)
 {
   // 检查是否每个维度都是合理的（lower <= upper）
   for (int i = 0; i < pose_lower_.size(); ++i) {
@@ -72,7 +69,18 @@ EndEffectorLocalBoxSoftCost::EndEffectorLocalBoxSoftCost(const EndEffectorKinema
   }
 
   pinocchioEEKinPtr_ = dynamic_cast<PinocchioEndEffectorKinematics*>(endEffectorKinematicsPtr_.get());
-  start_index_ = eef_Idx_ * 7;
+
+  // 更新各轴屏障函数
+  for(int i = 0; i < 3; i++)
+  {
+    penaltyFocusPtr6D_.emplace_back(new ocs2::RelaxedBarrierPenalty(settingsFocus_[0]));
+    penaltyUnFocusPtr6D_.emplace_back(new ocs2::RelaxedBarrierPenalty(settingsUnFocus_[0]));
+  }
+  for(int i = 0; i < 3; i++)
+  {
+    penaltyFocusPtr6D_.emplace_back(new ocs2::RelaxedBarrierPenalty(settingsFocus_[1]));
+    penaltyUnFocusPtr6D_.emplace_back(new ocs2::RelaxedBarrierPenalty(settingsUnFocus_[1]));
+  }
 }
 
 bool EndEffectorLocalBoxSoftCost::isActive(scalar_t time) const 
@@ -98,56 +106,108 @@ scalar_t EndEffectorLocalBoxSoftCost::getValue(scalar_t time, const vector_t& st
   scalar_t cost(0.0);
   Eigen::Vector3d actualPos = endEffectorKinematicsPtr_->getPosition(state).front();
 
-  matrix_t A_tmp = matrix_t::Identity(6, 6);
-
-  vector_t h_tmp = vector_t::Zero(6);
-  h_tmp << actualPos - desiredPositionOrientationWorld.first - pose_lower_.head<3>(),   // 下界
-          -actualPos + desiredPositionOrientationWorld.first + pose_upper_.head<3>();  // 上界
-
-  vector_t f_tmp = vector_t::Zero(6);
-  f_tmp << actualPos, -actualPos;
-
-  LinearStateInequalitySoftConstraint constraint;
-  if(referenceManager_.getIsFocusEeStatus())
+  for(int i=0; i<3; i++)
   {
-    constraint.penalty = penaltyFocusPtr_.get();
-  }
-  else
-  {
-    constraint.penalty = penaltyUnFocusPtr_.get();
-  }
-  constraint.A = A_tmp;
-  constraint.h = h_tmp;
+    // 下界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
 
-  cost = ocs2::mobile_manipulator::getValue(constraint, f_tmp);
+      h_one << actualPos.segment(i, 1) - desiredPositionOrientationWorld.first.segment(i, 1) - pose_lower_.segment(i, 1);   // 下界
+      f_one << actualPos.segment(i, 1);
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost += ocs2::mobile_manipulator::getValue(constraint_one, f_one);
+    }
+
+    // 上界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+
+      h_one << -actualPos.segment(i, 1) + desiredPositionOrientationWorld.first.segment(i, 1) + pose_upper_.segment(i, 1);   // 上界
+      f_one << -actualPos.segment(i, 1);
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost += ocs2::mobile_manipulator::getValue(constraint_one, f_one);
+    }
+  }
 
   // 姿态上下界
-  scalar_t costOri(0.0);
   Eigen::Vector3d OriErr = endEffectorKinematicsPtr_->getOrientationError(state, {desiredPositionOrientationWorld.second}).front();
-  matrix_t A_ori_tmp = matrix_t::Identity(6, 6);
 
-  vector_t h_ori_tmp = vector_t::Zero(6);
-  h_ori_tmp << OriErr - pose_lower_.tail<3>(), // 下界
-              -OriErr + pose_upper_.tail<3>(); // 上界
-  
-  vector_t f_ori_tmp = vector_t::Zero(6);
-  f_ori_tmp << OriErr, -OriErr;
-
-  LinearStateInequalitySoftConstraint constraintOri;
-  if(referenceManager_.getIsFocusEeStatus())
+  for(int i=0; i<3; i++)
   {
-    constraintOri.penalty = penaltyFocusPtr_.get();
-  }
-  else
-  {
-    constraintOri.penalty = penaltyUnFocusPtr_.get();
-  }
-  constraintOri.A = A_tmp;
-  constraintOri.h = h_ori_tmp;
-  
-  costOri = ocs2::mobile_manipulator::getValue(constraintOri, f_ori_tmp);
+    // 下界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
 
-  return cost + costOri;
+      h_one << OriErr.segment(i, 1) - pose_lower_.tail<3>().segment(i, 1);   // 下界
+      f_one << OriErr.segment(i, 1);
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i+3].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i+3].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost += ocs2::mobile_manipulator::getValue(constraint_one, f_one);
+    }
+
+    // 上界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+
+      h_one << -OriErr.segment(i, 1) + pose_upper_.tail<3>().segment(i, 1);   // 上界
+      f_one << -OriErr.segment(i, 1);
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i+3].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i+3].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost += ocs2::mobile_manipulator::getValue(constraint_one, f_one);
+    }
+  }
+
+  return cost;
 }
 
 /******************************************************************************************************/
@@ -167,66 +227,128 @@ ScalarFunctionQuadraticApproximation EndEffectorLocalBoxSoftCost::getQuadraticAp
 
   // 位置上下界
   ScalarFunctionQuadraticApproximation cost;
+  cost.f = 0.0;
+  cost.dfdx = vector_t::Zero(state.size());
+  cost.dfdxx = matrix_t::Zero(state.size(), state.size());
   const auto eePosition = endEffectorKinematicsPtr_->getPositionLinearApproximation(state).front();
 
-  matrix_t A_tmp = matrix_t::Identity(6, 6);
-
-  vector_t h_tmp = vector_t::Zero(6);
-  h_tmp <<  eePosition.f - desiredPositionOrientationWorld.first - pose_lower_.head<3>(),   // 下界
-           -eePosition.f + desiredPositionOrientationWorld.first + pose_upper_.head<3>();  // 上界
-
-  vector_t f_tmp = vector_t::Zero(6);
-  f_tmp << eePosition.f, -eePosition.f;
-
-  matrix_t dfdx_tmp = matrix_t::Zero(6, state.rows());
-  dfdx_tmp << eePosition.dfdx, -eePosition.dfdx;
-
-  LinearStateInequalitySoftConstraint constraint;
-  if(referenceManager_.getIsFocusEeStatus())
+  for(int i=0; i<3; i++)
   {
-    constraint.penalty = penaltyFocusPtr_.get();
-  }
-  else
-  {
-    constraint.penalty = penaltyUnFocusPtr_.get();
-  }
-  constraint.A = A_tmp;
-  constraint.h = h_tmp;
+    // 下界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      ScalarFunctionQuadraticApproximation cost_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+      matrix_t dfdx_one = matrix_t::Zero(1, state.rows());
 
-  cost = ocs2::mobile_manipulator::getQuadraticApproximation(constraint, f_tmp, dfdx_tmp);
+      h_one << eePosition.f.segment(i, 1) - desiredPositionOrientationWorld.first.segment(i, 1) - pose_lower_.segment(i, 1);   // 下界
+      f_one << eePosition.f.segment(i, 1);
+      dfdx_one << eePosition.dfdx.row(i).eval();
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost_one = ocs2::mobile_manipulator::getQuadraticApproximation(constraint_one, f_one, dfdx_one);
+      cost += cost_one;
+    }
+
+    // 上界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      ScalarFunctionQuadraticApproximation cost_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+      matrix_t dfdx_one = matrix_t::Zero(1, state.rows());
+
+      h_one << -eePosition.f.segment(i, 1) + desiredPositionOrientationWorld.first.segment(i, 1) + pose_upper_.segment(i, 1);   // 上界
+      f_one << -eePosition.f.segment(i, 1);
+      dfdx_one << -eePosition.dfdx.row(i).eval();
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost_one = ocs2::mobile_manipulator::getQuadraticApproximation(constraint_one, f_one, dfdx_one);
+      cost += cost_one;
+    }
+  }
 
   // 姿态上下界
-  ScalarFunctionQuadraticApproximation costOri;
   const auto eeOrientationError = 
       endEffectorKinematicsPtr_->getOrientationErrorLinearApproximation(state, {desiredPositionOrientationWorld.second}).front();
 
-  vector_t h_ori_tmp = vector_t::Zero(6);
-  h_ori_tmp << eeOrientationError.f - pose_lower_.tail<3>(),   // 下界
-              -eeOrientationError.f + pose_upper_.tail<3>();  // 上界
-
-  vector_t f_ori_tmp = vector_t::Zero(6);
-  f_ori_tmp << eeOrientationError.f, -eeOrientationError.f;
-
-  matrix_t dfdx_ori_tmp = matrix_t::Zero(6, state.rows());
-  dfdx_ori_tmp << eeOrientationError.dfdx, -eeOrientationError.dfdx;
-
-  LinearStateInequalitySoftConstraint constraintOri;
-  if(referenceManager_.getIsFocusEeStatus())
+  for(int i=0; i<3; i++)
   {
-    constraintOri.penalty = penaltyFocusPtr_.get();
-  }
-  else
-  {
-    constraintOri.penalty = penaltyUnFocusPtr_.get();
-  }
-  constraintOri.A = A_tmp;
-  constraintOri.h = h_ori_tmp;
+    // 下界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      ScalarFunctionQuadraticApproximation cost_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+      matrix_t dfdx_one = matrix_t::Zero(1, state.rows());
 
-  costOri = ocs2::mobile_manipulator::getQuadraticApproximation(constraintOri, f_ori_tmp, dfdx_ori_tmp);
+      h_one << eeOrientationError.f.segment(i, 1) - pose_lower_.tail<3>().segment(i, 1);   // 下界
+      f_one << eeOrientationError.f.segment(i, 1);
+      dfdx_one << eeOrientationError.dfdx.row(i).eval();
 
-  cost.f += costOri.f;
-  cost.dfdx += costOri.dfdx;
-  cost.dfdxx += costOri.dfdxx;
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i+3].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i+3].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost_one = ocs2::mobile_manipulator::getQuadraticApproximation(constraint_one, f_one, dfdx_one);
+      cost += cost_one;
+    }
+
+    // 上界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      ScalarFunctionQuadraticApproximation cost_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+      matrix_t dfdx_one = matrix_t::Zero(1, state.rows());
+
+      h_one << -eeOrientationError.f.segment(i, 1) + pose_upper_.tail<3>().segment(i, 1);   // 上界
+      f_one << -eeOrientationError.f.segment(i, 1);
+      dfdx_one << -eeOrientationError.dfdx.row(i).eval();
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i+3].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i+3].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost_one = ocs2::mobile_manipulator::getQuadraticApproximation(constraint_one, f_one, dfdx_one);
+      cost += cost_one;
+    }
+  }
 
   return cost;
 }

@@ -58,8 +58,8 @@ class EndEffectorBoxSoftCost final : public StateCost {
                           const ManipulatorModelInfo& info,
                           const Vector6d& pose_lower, 
                           const Vector6d& pose_upper,
-                          RelaxedBarrierPenalty::Config settingsFocus,
-                          RelaxedBarrierPenalty::Config settingsUnFocus,
+                          std::vector<RelaxedBarrierPenalty::Config> settingsFocus,
+                          std::vector<RelaxedBarrierPenalty::Config> settingsUnFocus,
                           const int eefInx);
 
   ~EndEffectorBoxSoftCost() override = default;
@@ -91,15 +91,13 @@ class EndEffectorBoxSoftCost final : public StateCost {
   Vector6d pose_lower_;
   Vector6d pose_upper_;
 
-  RelaxedBarrierPenalty::Config settingsFocus_;
-  RelaxedBarrierPenalty::Config settingsUnFocus_;
-  std::unique_ptr<ocs2::RelaxedBarrierPenalty> penaltyFocusPtr_;
-  std::unique_ptr<ocs2::RelaxedBarrierPenalty> penaltyUnFocusPtr_;
+  std::vector<RelaxedBarrierPenalty::Config> settingsFocus_;
+  std::vector<RelaxedBarrierPenalty::Config> settingsUnFocus_;
+  std::vector<std::unique_ptr<ocs2::RelaxedBarrierPenalty>> penaltyFocusPtr6D_;
+  std::vector<std::unique_ptr<ocs2::RelaxedBarrierPenalty>> penaltyUnFocusPtr6D_;
 
   const ManipulatorModelInfo& info_;
   int eef_Idx_;
-  const int eef_num_ = 0;  
-  int start_index_ = 0;
 };
 
 }  // namespace mobile_manipulator

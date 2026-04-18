@@ -452,6 +452,10 @@ namespace mobile_manipulator {
     torsoResetMaxVel_.setZero(6);
     torsoResetMaxVel_ << 0.2, 0.2, 0.2, 0.5235, 0.5235, 0.5235;
     /**********************************************************************/
+
+    /************************躯干和双臂末端优先级相关参数设置********************/
+    double torsoOriScale = 1.0 / 10.0;
+    setTorsoOriFocusScale(torsoOriScale);
   }
 
   void MobileManipulatorReferenceManager::loadParamFromTaskFile(void)
@@ -526,6 +530,22 @@ namespace mobile_manipulator {
     double desiredFreq = 0.0;
     loadData::loadCppDataType(taskFile_, "mpc.mpcDesiredFrequency", desiredFreq);
     ruckigDt_ = 1 / desiredFreq;
+
+    // torso box: focus_z_barrier（用于无 focus 时仅 z 方向的 relax barrier 参数）
+    // 默认值回退到 unFocus_barrier，避免配置缺失导致行为不确定。
+    {
+      boost::property_tree::ptree pt;
+      boost::property_tree::read_info(taskFile_, pt);
+
+      const std::string prefix = "torsoBoxSoftCost.position.";
+      loadData::loadPtreeValue(pt, focusZMu_, prefix + "unFocus_barrier.mu", true);
+      loadData::loadPtreeValue(pt, focusZDelta_, prefix + "unFocus_barrier.delta", true);
+
+      // 若 task.info 中存在 focus_z_barrier，则覆盖默认值；否则保留 unFocus 的默认值。
+      loadData::loadPtreeValue(pt, focusZMu_, prefix + "focus_z_barrier.mu", false);
+      loadData::loadPtreeValue(pt, focusZDelta_, prefix + "focus_z_barrier.delta", false);
+      loadData::loadPtreeValue(pt, useFocusZ_, prefix + "focus_z_barrier.use_focus_z", false);
+    }
     /*******************************************************************************/
   }
 
@@ -841,10 +861,19 @@ namespace mobile_manipulator {
     auto setFocusEeCallback = [this](const std_msgs::Bool::ConstPtr &msg)
     {
       bool flag = msg->data;
-      setIsFocusEeStatus(flag);
-      ROS_INFO_STREAM("[setFocusEeCallback] focus_ee: [ " << flag << " ]");
+      desiredFocusEe_ = flag;
+      ROS_INFO_STREAM("[setFocusEeCallback] focus_ee: [ " << desiredFocusEe_ << " ]");
     };
     set_focus_ee_sub_ = nodeHandle_.subscribe<std_msgs::Bool>("/mobile_manipulator_focus_ee", 10, setFocusEeCallback);
+
+    // 设置是否启用 torso box z 的 focus_z（true: use_focus_z, false: 使用 position.unFocus_barrier）
+    auto setFocusZCallback = [this](const std_msgs::Bool::ConstPtr& msg)
+    {
+      std::lock_guard<std::mutex> lock(focusZ_mtx_);
+      useFocusZ_ = msg->data;
+      ROS_INFO_STREAM("[setFocusZCallback] use_focus_z: [ " << useFocusZ_ << " ]");
+    };
+    set_focus_z_sub_ = nodeHandle_.subscribe<std_msgs::Bool>("/mobile_manipulator_focus_z", 10, setFocusZCallback);
 
     targetLegJointReachTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/lb_leg_joint_reach_time", 10, false);
 
@@ -3417,6 +3446,11 @@ namespace mobile_manipulator {
       if(isChange && desireMode_[armIdx] == LbArmControlMode::JointSpace)
       {
         resetArmJointRuckig(armIdx, initTime, initState, false);
+        switch(armIdx)
+        {
+          case 0: leftArmJointTrigger_ = true;
+          case 1: rightArmJointTrigger_ = true;
+        }
       }
     }
     
@@ -3580,9 +3614,39 @@ namespace mobile_manipulator {
     }
     static vector_t torsoTargetPose = vector_t::Zero(6);
 
+    if(leftArmJointTrigger_ == true || rightArmJointTrigger_ == true)
+    {
+      if(getEnableArmJointTrackForArm(0) == true &&     // 双臂都为关节模式，则触发躯干指令回正
+         getEnableArmJointTrackForArm(1) == true)
+      {
+        setIsFocusEeStatus(false);
+        resetTorsoPoseRuckig(initTime, initState, false);
+        cmdTorsoPose_mtx_.lock();
+        torsoTargetPose = cmdTorsoPose_;
+        cmdTorsoPose_mtx_.unlock();
+
+        vector_t torsoPose4Dof = vector_t::Zero(4);
+        torsoPose4Dof << torsoTargetPose[0],  // x, z, yaw, pitch
+                         torsoTargetPose[2], 
+                         torsoTargetPose[3], 
+                         torsoTargetPose[4];
+
+        // 计算复位时间
+        Eigen::VectorXd err =  torsoPose4Dof - torsoPose_prevTargetPose_;
+        Eigen::VectorXd timeMax(4);
+        timeMax << torsoResetMaxVel_[0], torsoResetMaxVel_[2], torsoResetMaxVel_[3], torsoResetMaxVel_[4];
+        Eigen::ArrayXd validTimes = err.cwiseAbs().array() / timeMax.array();
+
+        calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, validTimes.maxCoeff());
+        torsoModeFlag_ = true;
+      }
+      leftArmJointTrigger_ = false;
+      rightArmJointTrigger_ = false;
+    }
+
     if(isCmdTorsoPoseUpdated_ && isTorsoOfflineTrajUpdate_ != true)
     {
-      // resetTorsoPoseRuckig(initTime, initState, false);
+      resetTorsoPoseRuckig(initTime, initState, false);
 
       std::cout << "[MobileManipulatorReferenceManager] 进入躯干笛卡尔控制 " << std::endl;
 
@@ -3600,6 +3664,12 @@ namespace mobile_manipulator {
 
       isCmdTorsoPoseUpdated_ = false;
       torsoModeFlag_ = true;
+    }
+
+    if(getEnableArmJointTrackForArm(0) == false ||  // 双臂存在笛卡尔控制模式时, 保证为期望模式
+       getEnableArmJointTrackForArm(1) == false)
+    {
+      setIsFocusEeStatus(desiredFocusEe_);
     }
 
     if(isCmdLegJointUpdated_ && isTorsoOfflineTrajUpdate_ != true)

@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
   std::cerr << "Loading library folder: " << libFolder << std::endl;
   std::cerr << "Loading urdf file: " << urdfFile << std::endl;
   // Robot Interface
-  mobile_manipulator::HumanoidWheelInterface interface(taskFile, libFolder, urdfFile);
+  mobile_manipulator::HumanoidWheelInterface interface(taskFile, libFolder, urdfFile, true);
 
   // MRT
   MRT_ROS_Interface mrt(robotName);

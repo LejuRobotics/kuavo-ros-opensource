@@ -57,8 +57,8 @@ class TorsoTrackingBoxSoftCost final : public StateCost {
                           const MobileManipulatorReferenceManager& referenceManager,
                           const Vector6d& pose_lower, 
                           const Vector6d& pose_upper,
-                          RelaxedBarrierPenalty::Config settingsFocus, 
-                          RelaxedBarrierPenalty::Config settingsUnFocus);
+                          std::vector<RelaxedBarrierPenalty::Config> settingsFocus,
+                          std::vector<RelaxedBarrierPenalty::Config> settingsUnFocus);
 
   ~TorsoTrackingBoxSoftCost() override = default;
   TorsoTrackingBoxSoftCost* clone() const override { return new TorsoTrackingBoxSoftCost(*endEffectorKinematicsTorsoPtr_, 
@@ -89,9 +89,18 @@ class TorsoTrackingBoxSoftCost final : public StateCost {
   Vector6d pose_lower_;
   Vector6d pose_upper_;
 
-  RelaxedBarrierPenalty::Config settingsFocus_, settingsUnFocus_;
-  std::unique_ptr<ocs2::RelaxedBarrierPenalty> penaltyFocusPtr_;
-  std::unique_ptr<ocs2::RelaxedBarrierPenalty> penaltyUnFocusPtr_;
+  std::vector<RelaxedBarrierPenalty::Config> settingsFocus_;
+  std::vector<RelaxedBarrierPenalty::Config> settingsUnFocus_;
+  std::vector<std::unique_ptr<ocs2::RelaxedBarrierPenalty>> penaltyFocusPtr6D_;
+  std::vector<std::unique_ptr<ocs2::RelaxedBarrierPenalty>> penaltyUnFocusPtr6D_;
+
+  // 仅 z 方向的运行时 relax barrier 参数（由 MobileManipulatorReferenceManager 提供）
+  mutable std::unique_ptr<ocs2::RelaxedBarrierPenalty> focusZPenaltyPtr_;
+  mutable scalar_t focusZMuCached_{0.0};
+  mutable scalar_t focusZDeltaCached_{0.0};
+  mutable bool focusZCacheValid_{false};
+
+  const ocs2::RelaxedBarrierPenalty* getFocusZPenalty() const;
 };
 
 }  // namespace mobile_manipulator

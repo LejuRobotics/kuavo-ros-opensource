@@ -600,6 +600,13 @@ namespace humanoidController_wheel_wbc
 
   void humanoidControllerWheelWbc::update(const ros::Time &time, const ros::Duration &dfd)
   {
+    static double lastTime = time.toSec() - dt_;
+    double curTime = time.toSec();
+    double dt = curTime - lastTime;
+    if(dt < dt_) return;
+    lastTime = curTime;
+    ros_logger_->publishValue("/humanoid_wheel/freq", 1 / dt);
+    ros_logger_->publishValue("/humanoid_wheel/dt_real", dt);
     static auto timeInit = time.toSec();
     auto& info = manipulatorModelInfo_;
     static int cnt = 0;
@@ -692,7 +699,8 @@ namespace humanoidController_wheel_wbc
       {
       }
 
-      mrtRosInterface_->evaluatePolicy(observation_wheel_.time, observation_wheel_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
+      // mrtRosInterface_->evaluatePolicy(kinemicLimitObs.time + dt_, kinemicLimitObs.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
+      mrtRosInterface_->rolloutPolicy(kinemicLimitObs.time, kinemicLimitObs.state, dt_, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
       if(enable_mpc_)
       {
         optimizedState_mrt_ = optimizedState_mrt;
@@ -784,7 +792,19 @@ namespace humanoidController_wheel_wbc
       qvelLimit = optimizedInput_mrt_limit.tail(info.armDim);
       jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
       optimizedState_mrt_limit.tail(info.armDim) = qposLimit;
-      optimizedInput_mrt_limit.tail(info.armDim) = qvelLimit;
+      // optimizedInput_mrt_limit.tail(info.armDim) = qvelLimit;
+      static vector_t jointPosTarget_last = optimizedState_mrt_limit.tail(info.armDim);
+      // static double lastTargetTime = curTime - dt_;
+      optimizedInput_mrt_limit.tail(info.armDim) = (optimizedState_mrt_limit.tail(info.armDim) - jointPosTarget_last) / 
+                                                    dt_; // (curTime - lastTargetTime);
+      // lastTargetTime = curTime;
+      jointPosTarget_last = optimizedState_mrt_limit.tail(info.armDim);
+    }
+
+    if(enable_mpc_)   // 回传到mpc作为反馈, 因此保持经过安全滤波后的数值
+    {
+      optimizedState_mrt_ = optimizedState_mrt_limit;
+      optimizedInput_mrt_ = optimizedState_mrt_limit;
     }
 
     // 更新期望力插值
