@@ -1,0 +1,681 @@
+withArm            true   ; 是否使用手臂训练 0:不使用 1:使用
+inferenceFrequency 50     ; 推理频率
+
+actionScale        0.25    ; default
+frameStack         1      ; 多长时间步的obs
+numSingleObs       88      ; 单一时刻的obs的维度
+cycleTime          1.2     ; 周期时间为1.2s
+cycleTime_short    1.0     ; 高步频时的周期时间0.8s
+switch_ratio       1.5     ; 步频切换对应的cmdVelLineX比例,超过1就不会切换
+phase              0       ; 初始相位设置为0
+episodeLength      0       ; 用于计算相位，每走一个step就加1
+clipObservations   18000.0    ; 用于对输入进行clip
+clipActions        18000.0    ; 用于对actions进行clip
+ankleSolverType    1       ; 用于仿真中关节换算版本指定 0:旧版本 1:新版本
+use_jointcmd_filter true       ; 是否对输出使用关节指令滤波器 0:不使用 1:使用
+use_external_arm_controller  true ; 是否使用外部手臂控制器指令替代模型输出的手臂指令 0:不使用 1:使用
+use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
+use_default_motor_csp_kpkd   false      ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
+
+networkModelFile          /policy_js2_2025-12-18_19-53-45_amp_torch_agent_319200.onnx       ; 
+commandData 
+{
+    inital
+    {
+        cmdVelLineX         0   ;
+        cmdVelLineY         0   ;
+        cmdVelLineZ         0   ;
+        cmdVelAngularX      0   ;
+        cmdVelAngularY      0   ;
+        cmdVelAngularZ      0   ;
+        cmdStance           1   ;
+    }
+    scale
+    {
+        ; cmd_vel的倍率
+        cmdVelLineX         1.956   ; 输入模型的最大cmdVelLineX = scale[0] * velocityLimits[0]
+        cmdVelLineY         1.467   ; 输入模型的最大cmdVelLineY = scale[1] * velocityLimits[1]
+        cmdVelLineZ         1       ; 输入模型的最大cmdVelLineZ = scale[2] * velocityLimits[2]
+        cmdVelAngularX      1   ;
+        cmdVelAngularY      1   ;
+        cmdVelAngularZ      1.0     ; 输入模型的最大cmdVelAngularZ = scale[5] * velocityLimits[3]
+        cmdStance           1   ;
+        cmdVelLineXNegScale 1    ; X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）         
+    }
+};预留完整的接口，当前只用到cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdWalkEnable，最大长度是4
+
+velocityLimits
+{
+    ; 定义速度命令的限制
+    (0,0)  0.45      ; cmdVelLineX
+    (1,0)  0.3      ; cmdVelLineY
+    (2,0)  0.3      ; cmdVelLineZ
+    (3,0)  1.0      ; cmdVelAngularZ
+}
+defaultBaseHeightControl    0.871 ; Actual standing height when using RL controller
+defaultBaseXOffsetControl     -0.04    ; Base offset when using RL controller
+; ==================== 原地踏步速度配置,只有实物生效 ====================
+inPlaceStepVelocity
+{
+    linearX        -0.08     ; 原地踏步线速度X
+    linearY         0.0       ; 原地踏步线速度Y
+    linearZ         0.0       ; 接口留用
+    angularX        0.0       ; 接口留用
+    angularY        0.0       ; 接口留用
+    angularZ        0.0       ; 原地踏步角速度Z
+}
+
+; ==================== 持续原地踏步速度配置 ====================
+continuousInPlaceStepVelocity
+{
+    linearX        -0.0     ; 持续原地踏步线速度X
+    linearY         0.0       ; 持续原地踏步线速度Y
+    linearZ         0.0       ; 接口留用
+    angularX        0.0       ; 接口留用
+    angularY        0.0       ; 接口留用
+    angularZ        0.0       ; 持续原地踏步角速度Z
+}
+
+; ==================== YAW方向补偿配置 ====================
+yawCompensation
+{
+    enabled                     true    ; 是否启用YAW补偿(true/false)
+    xBias                       0.0     ; 通用X轴偏置
+    threshold                   0.0     ; YAW阈值
+    xVelocityThreshold          0.01    ; X方向速度阈值
+    enableSeparateCompensation  true    ; 是否启用分开补偿（顺时针/逆时针）(true/false)
+    xBiasClockwise             0.0     ; 顺时针旋转时X轴偏置
+    xBiasCounterclockwise      0.0     ; 逆时针旋转时X轴偏置
+}
+
+; ==================== Y方向行走补偿配置 ====================
+yDirectionCompensation
+{
+    enabled                     true    ; 是否启用Y方向行走补偿(true/false)
+    xBias                       0.0     ; 通用X轴偏置
+    zBias                       0.0     ; 通用Z轴角速度偏置
+    threshold                   0.0     ; Y方向速度阈值
+    enableSeparateCompensation  true    ; 是否启用分开补偿（左/右）(true/false)
+    xBiasLeft                   0.06     ; 向右行走时X轴偏置(从后往前看)
+    xBiasRight                 -0.045     ; 向左行走时X轴偏置(从后往前看)
+    zBiasLeft                  -0.03     ; 向右行走时Z轴角速度偏置(从后往前看)
+    zBiasRight                  0.03     ; 向左行走时Z轴角速度偏置(从后往前看) 往左旋转是正
+}
+
+; ==================== 混合运动速度限制配置====================
+mixedMotionLimits
+{
+    enableMixedMode             true    ; 是否启用混合运动模式(true/false)
+    angularVelThreshold         0.05    ; 角速度阈值 (rad/s)
+    maxLinearVelWithAngular     0.5     ; 有角速度时最大线速度 (m/s)
+    linearVelThreshold          0.05    ; 线速度阈值 (m/s)
+    maxAngularVelWithLinear     0.5     ; 有线速度时最大角速度 (rad/s)
+    smoothTransition            true    ; 是否启用平滑过渡(true/false)
+    transitionFactor            0.8     ; 过渡因子
+}
+
+; ==================== 外部接管手臂轨迹速度限制配置====================
+armVelocityLimit
+{
+    maxTrackingVelocity         2.5     ; 手臂跟踪的最大速度 (rad/s)
+    trackingErrorThreshold      0.2     ; 手臂跟踪误差阈值 (rad)，小于此值后完全接管
+    modeInterpolationVelocity   1.5     ; 手臂插值的速度
+}
+
+defaultBaseState
+{
+    ; 定义base的默认基础状态
+    (0,0)   0       ; linear_vel_x
+    (1,0)   0       ; linear_vel_y
+    (2,0)   0       ; linear_vel_z
+    (3,0)   0       ; angular_vel_x
+    (4,0)   0       ; angular_vel_y
+    (5,0)   0       ; angular_vel_z
+    (6,0)   0       ; pos_x
+    (7,0)   0       ; pos_y
+    (8,0)   0.892    ; pos_z
+    (9,0)   0       ; angular_z
+    (10,0)  0.03    ; angular_y
+    (11,0)  0       ; angular_x
+}
+
+defaultJointState
+{
+    (0,0)  -0.00     ; leg_l1_joint
+    (1,0)  -0.00     ; leg_l2_joint
+    (2,0)  -0.27     ; leg_l3_joint
+    (3,0)   0.52     ; leg_l4_joint
+    (4,0)  -0.3      ; leg_l5_joint
+    (5,0)   0.       ; leg_l6_joint
+    (6,0)   0.00     ; leg_r1_joint
+    (7,0)   0.00     ; leg_r2_joint
+    (8,0)  -0.27     ; leg_r3_joint
+    (9,0)   0.52     ; leg_r4_joint
+    (10,0) -0.3      ; leg_r5_joint
+    (11,0) -0.       ; leg_r6_joint
+
+    (12,0)  0       ; zarm_l1_joint
+    (13,0)  0       ; zarm_l2_joint
+    (14,0)  0       ; zarm_l3_joint
+    (15,0)  0       ; zarm_l4_joint
+    (16,0)  0       ; zarm_l5_joint
+    (17,0)  0       ; zarm_l6_joint
+    (18,0)  0       ; zarm_l7_joint
+    (19,0)  0       ; zarm_r1_joint
+    (20,0)  0       ; zarm_r2_joint
+    (21,0)  0       ; zarm_r3_joint
+    (22,0)  0       ; zarm_r4_joint
+    (23,0)  0       ; zarm_r5_joint
+    (24,0)  0       ; zarm_r6_joint
+    (25,0)  0       ; zarm_r7_joint
+}
+
+JointControlMode 
+{
+    ; 定义各关节的控制模式，0:CST, 1:CSV, 2:CSP
+    (0,0)   2       ; leg_l1_joint
+    (1,0)   2       ; leg_l2_joint
+    (2,0)   2       ; leg_l3_joint
+    (3,0)   2       ; leg_l4_joint
+    (4,0)   2       ; leg_l5_joint
+    (5,0)   2       ; leg_l6_joint
+    (6,0)   2       ; leg_r1_joint
+    (7,0)   2       ; leg_r2_joint
+    (8,0)   2       ; leg_r3_joint
+    (9,0)   2       ; leg_r4_joint
+    (10,0)  2       ; leg_r5_joint
+    (11,0)  2       ; leg_r6_joint
+    (12,0)  2       ; zarm_l1_joint
+    (13,0)  2       ; zarm_l2_joint
+    (14,0)  2       ; zarm_l3_joint
+    (15,0)  2       ; zarm_l4_joint
+    (16,0)  2       ; zarm_l5_joint
+    (17,0)  2       ; zarm_l6_joint
+    (18,0)  2       ; zarm_l7_joint
+    (19,0)  2       ; zarm_r1_joint
+    (20,0)  2       ; zarm_r2_joint
+    (21,0)  2       ; zarm_r3_joint
+    (22,0)  2       ; zarm_r4_joint
+    (23,0)  2       ; zarm_r5_joint
+    (24,0)  2       ; zarm_r6_joint
+    (25,0)  2       ; zarm_r7_joint
+}
+
+JointPDMode 
+{
+    ; 定义各关节的pd的计算模式，0:用户层, 1:通信层
+    (0,0)   0       ; leg_l1_joint
+    (1,0)   0       ; leg_l2_joint
+    (2,0)   0       ; leg_l3_joint
+    (3,0)   0       ; leg_l4_joint
+    (4,0)   0       ; leg_l5_joint
+    (5,0)   0       ; leg_l6_joint
+    (6,0)   0       ; leg_r1_joint
+    (7,0)   0       ; leg_r2_joint
+    (8,0)   0       ; leg_r3_joint
+    (9,0)   0       ; leg_r4_joint
+    (10,0)  0       ; leg_r5_joint
+    (11,0)  0       ; leg_r6_joint
+    (12,0)  0       ; zarm_l1_joint
+    (13,0)  0       ; zarm_l2_joint
+    (14,0)  0       ; zarm_l3_joint
+    (15,0)  0       ; zarm_l4_joint
+    (16,0)  0       ; zarm_l5_joint
+    (17,0)  0       ; zarm_l6_joint
+    (18,0)  0       ; zarm_l7_joint
+    (19,0)  0       ; zarm_r1_joint
+    (20,0)  0       ; zarm_r2_joint
+    (21,0)  0       ; zarm_r3_joint
+    (22,0)  0       ; zarm_r4_joint
+    (23,0)  0       ; zarm_r5_joint
+    (24,0)  0       ; zarm_r6_joint
+    (25,0)  0       ; zarm_r7_joint
+}
+
+jointKp_stance
+{
+    ; 定义各关节的位置增益
+    (0,0)   100   ; leg_l1_joint
+    (1,0)   100   ; leg_l2_joint
+    (2,0)   80   ; leg_l3_joint
+    (3,0)   80   ; leg_l4_joint
+    (4,0)   30    ; leg_l5_joint
+    (5,0)   30    ; leg_l6_joint
+    (6,0)   100   ; leg_r1_joint
+    (7,0)   100   ; leg_r2_joint
+    (8,0)   80   ; leg_r3_joint
+    (9,0)   80   ; leg_r4_joint
+    (10,0)  30   ; leg_r5_joint
+    (11,0)  30   ; leg_r6_joint
+    (12,0)  30       ; zarm_l1_joint
+    (13,0)  30       ; zarm_l2_joint
+    (14,0)  30       ; zarm_l3_joint
+    (15,0)  20       ; zarm_l4_joint
+    (16,0)  10       ; zarm_l5_joint
+    (17,0)  10       ; zarm_l6_joint
+    (18,0)  10       ; zarm_l7_joint
+    (19,0)  30       ; zarm_r1_joint
+    (20,0)  30       ; zarm_r2_joint
+    (21,0)  30       ; zarm_r3_joint
+    (22,0)  20       ; zarm_r4_joint
+    (23,0)  10       ; zarm_r5_joint
+    (24,0)  10       ; zarm_r6_joint
+    (25,0)  10       ; zarm_r7_joint
+}
+
+jointKp
+{
+    ; 定义各关节的位置增益
+    (0,0)   100   ; leg_l1_joint
+    (1,0)   100   ; leg_l2_joint
+    (2,0)   80   ; leg_l3_joint
+    (3,0)   80   ; leg_l4_joint
+    (4,0)   30    ; leg_l5_joint
+    (5,0)   30    ; leg_l6_joint
+    (6,0)   100   ; leg_r1_joint
+    (7,0)   100   ; leg_r2_joint
+    (8,0)   80   ; leg_r3_joint
+    (9,0)   80   ; leg_r4_joint
+    (10,0)  30   ; leg_r5_joint
+    (11,0)  30   ; leg_r6_joint
+    (12,0)  30       ; zarm_l1_joint
+    (13,0)  30       ; zarm_l2_joint
+    (14,0)  30       ; zarm_l3_joint
+    (15,0)  20       ; zarm_l4_joint
+    (16,0)  10       ; zarm_l5_joint
+    (17,0)  10       ; zarm_l6_joint
+    (18,0)  10       ; zarm_l7_joint
+    (19,0)  30       ; zarm_r1_joint
+    (20,0)  30       ; zarm_r2_joint
+    (21,0)  30       ; zarm_r3_joint
+    (22,0)  20       ; zarm_r4_joint
+    (23,0)  10       ; zarm_r5_joint
+    (24,0)  10       ; zarm_r6_joint
+    (25,0)  10       ; zarm_r7_joint
+}
+
+jointKd
+{
+    ; 定义各关节的速度增益
+    (0,0)   4   ; leg_l1_joint
+    (1,0)   4  ; leg_l2_joint
+    (2,0)   4   ; leg_l3_joint
+    (3,0)   4   ; leg_l4_joint
+    (4,0)   4   ; leg_l5_joint
+    (5,0)   4   ; leg_l6_joint
+    (6,0)   4   ; leg_r1_joint
+    (7,0)   4   ; leg_r2_joint
+    (8,0)   4   ; leg_r3_joint
+    (9,0)   4   ; leg_r4_joint
+    (10,0)  4  ; leg_r5_joint
+    (11,0)  4   ; leg_r6_joint
+    (12,0)  3       ; zarm_l1_joint
+    (13,0)  3       ; zarm_l2_joint
+    (14,0)  3       ; zarm_l3_joint
+    (15,0)  3       ; zarm_l4_joint
+    (16,0)  3       ; zarm_l5_joint
+    (17,0)  3       ; zarm_l6_joint
+    (18,0)  3       ; zarm_l7_joint
+    (19,0)  3       ; zarm_r1_joint
+    (20,0)  3       ; zarm_r2_joint
+    (21,0)  3       ; zarm_r3_joint
+    (22,0)  3       ; zarm_r4_joint
+    (23,0)  3       ; zarm_r5_joint
+    (24,0)  3       ; zarm_r6_joint
+    (25,0)  3       ; zarm_r7_joint
+}
+
+motor_pdo_kp
+{
+    ; 定义各关节的PDO Kp参数（从kuavo.json的joint_kp读取，主要用于EC_MASTER电机）
+    (0,0)   220     ; leg_l1_joint
+    (1,0)   100     ; leg_l2_joint
+    (2,0)   224     ; leg_l3_joint
+    (3,0)   224     ; leg_l4_joint
+    (4,0)   580     ; leg_l5_joint
+    (5,0)   580     ; leg_l6_joint
+    (6,0)   220     ; leg_r1_joint
+    (7,0)   100     ; leg_r2_joint
+    (8,0)   224     ; leg_r3_joint
+    (9,0)   224     ; leg_r4_joint
+    (10,0)  580     ; leg_r5_joint
+    (11,0)  580     ; leg_r6_joint
+    (12,0)  586     ; zarm_l1_joint (EC_MASTER joint_kp)
+    (13,0)  30      ; zarm_l2_joint (RUIWO kuavo.json ruiwo_kp[0])
+    (14,0)  30      ; zarm_l3_joint (RUIWO ruiwo_kp[1])
+    (15,0)  40      ; zarm_l4_joint (RUIWO ruiwo_kp[2])
+    (16,0)  38      ; zarm_l5_joint (RUIWO ruiwo_kp[3])
+    (17,0)  40      ; zarm_l6_joint (RUIWO ruiwo_kp[4])
+    (18,0)  35      ; zarm_l7_joint (RUIWO ruiwo_kp[5])
+    (19,0)  586     ; zarm_r1_joint (EC_MASTER joint_kp)
+    (20,0)  30      ; zarm_r2_joint (RUIWO ruiwo_kp[6])
+    (21,0)  30      ; zarm_r3_joint (RUIWO ruiwo_kp[7])
+    (22,0)  40      ; zarm_r4_joint (RUIWO ruiwo_kp[8])
+    (23,0)  38      ; zarm_r5_joint (RUIWO ruiwo_kp[9])
+    (24,0)  40      ; zarm_r6_joint (RUIWO ruiwo_kp[10])
+    (25,0)  35      ; zarm_r7_joint (RUIWO ruiwo_kp[11])
+}
+
+motor_pdo_kd
+{
+    ; 定义各关节的PDO Kd参数（从kuavo.json的joint_kd读取，主要用于EC_MASTER电机）
+    (0,0)   1200    ; leg_l1_joint
+    (1,0)   3616    ; leg_l2_joint
+    (2,0)   3616    ; leg_l3_joint
+    (3,0)   1200    ; leg_l4_joint
+    (4,0)   570     ; leg_l5_joint
+    (5,0)   570     ; leg_l6_joint
+    (6,0)   1200    ; leg_r1_joint
+    (7,0)   3616    ; leg_r2_joint
+    (8,0)   3616    ; leg_r3_joint
+    (9,0)   1200    ; leg_r4_joint
+    (10,0)  570     ; leg_r5_joint
+    (11,0)  570     ; leg_r6_joint
+    (12,0)  2880    ; zarm_l1_joint (EC_MASTER)
+    (13,0)  2       ; zarm_l2_joint (RUIWO kuavo.json ruiwo_kd[0])
+    (14,0)  4       ; zarm_l3_joint (RUIWO ruiwo_kd[1])
+    (15,0)  4       ; zarm_l4_joint (RUIWO ruiwo_kd[2])
+    (16,0)  5       ; zarm_l5_joint (RUIWO ruiwo_kd[3])
+    (17,0)  5       ; zarm_l6_joint (RUIWO ruiwo_kd[4])
+    (18,0)  5       ; zarm_l7_joint (RUIWO ruiwo_kd[5])
+    (19,0)  2880    ; zarm_r1_joint (EC_MASTER)
+    (20,0)  2       ; zarm_r2_joint (RUIWO ruiwo_kd[6])
+    (21,0)  4       ; zarm_r3_joint (RUIWO ruiwo_kd[7])
+    (22,0)  4       ; zarm_r4_joint (RUIWO ruiwo_kd[8])
+    (23,0)  5       ; zarm_r5_joint (RUIWO ruiwo_kd[9])
+    (24,0)  5       ; zarm_r6_joint (RUIWO ruiwo_kd[10])
+    (25,0)  5       ; zarm_r7_joint (RUIWO ruiwo_kd[11])
+}
+
+jointKdstance
+{
+    ; 定义各关节的速度增益
+    (0,0)   4   ; leg_l1_joint
+    (1,0)   4  ; leg_l2_joint
+    (2,0)   4   ; leg_l3_joint
+    (3,0)   4   ; leg_l4_joint
+    (4,0)   4   ; leg_l5_joint
+    (5,0)   4   ; leg_l6_joint
+    (6,0)   4   ; leg_r1_joint
+    (7,0)   4   ; leg_r2_joint
+    (8,0)   4   ; leg_r3_joint
+    (9,0)   4   ; leg_r4_joint
+    (10,0)  4  ; leg_r5_joint
+    (11,0)  4   ; leg_r6_joint
+    (12,0)  3       ; zarm_l1_joint
+    (13,0)  3       ; zarm_l2_joint
+    (14,0)  3       ; zarm_l3_joint
+    (15,0)  3       ; zarm_l4_joint
+    (16,0)  3       ; zarm_l5_joint
+    (17,0)  3       ; zarm_l6_joint
+    (18,0)  3       ; zarm_l7_joint
+    (19,0)  3       ; zarm_r1_joint
+    (20,0)  3       ; zarm_r2_joint
+    (21,0)  3       ; zarm_r3_joint
+    (22,0)  3       ; zarm_r4_joint
+    (23,0)  3       ; zarm_r5_joint
+    (24,0)  3       ; zarm_r6_joint
+    (25,0)  3       ; zarm_r7_joint
+}
+
+torqueLimits
+{
+    ; 定义各关节的力矩限制
+    (0,0)   180   ; leg_l1_joint
+    (1,0)   100   ; leg_l2_joint
+    (2,0)   100  ; leg_l3_joint
+    (3,0)   180   ; leg_l4_joint
+    (4,0)   65   ; leg_l5_joint
+    (5,0)   36   ; leg_l6_joint
+    (6,0)   180   ; leg_r1_joint
+    (7,0)   100   ; leg_r2_joint
+    (8,0)   100   ; leg_r3_joint
+    (9,0)   180   ; leg_r4_joint
+    (10,0)  65    ; leg_r5_joint
+    (11,0)  36    ; leg_r6_joint
+    (12,0)  100       ; zarm_l1_joint
+    (13,0)  50       ; zarm_l2_joint
+    (14,0)  36       ; zarm_l3_joint
+    (15,0)  50       ; zarm_l4_joint
+    (16,0)  12       ; zarm_l5_joint
+    (17,0)  12       ; zarm_l6_joint
+    (18,0)  12       ; zarm_l7_joint
+    (19,0)  100      ; zarm_r1_joint
+    (20,0)  50       ; zarm_r2_joint
+    (21,0)  36       ; zarm_r3_joint
+    (22,0)  50       ; zarm_r4_joint
+    (23,0)  12       ; zarm_r5_joint
+    (24,0)  12       ; zarm_r6_joint
+    (25,0)  12       ; zarm_r7_joint
+}
+
+actionScaleTest
+{
+    ; 定义各关节的控制增益
+    (0,0)   1   ; leg_l1_joint
+    (1,0)   1   ; leg_l2_joint
+    (2,0)   1   ; leg_l3_joint
+    (3,0)   1   ; leg_l4_joint
+    (4,0)   1   ; leg_l5_joint
+    (5,0)   1   ; leg_l6_joint
+    (6,0)   1   ; leg_r1_joint
+    (7,0)   1   ; leg_r2_joint
+    (8,0)   1   ; leg_r3_joint
+    (9,0)   1   ; leg_r4_joint
+    (10,0)  1   ; leg_r5_joint
+    (11,0)  1   ; leg_r6_joint
+    (12,0)  1       ; zarm_l1_joint
+    (13,0)  1       ; zarm_l2_joint
+    (14,0)  1       ; zarm_l3_joint
+    (15,0)  1       ; zarm_l4_joint
+    (16,0)  1       ; zarm_l5_joint
+    (17,0)  1       ; zarm_l6_joint
+    (18,0)  1       ; zarm_l7_joint
+    (19,0)  1       ; zarm_r1_joint
+    (20,0)  1       ; zarm_r2_joint
+    (21,0)  1       ; zarm_r3_joint
+    (22,0)  1       ; zarm_r4_joint
+    (23,0)  1       ; zarm_r5_joint
+    (24,0)  1       ; zarm_r6_joint
+    (25,0)  1       ; zarm_r7_joint
+}
+
+accFilterCutoffFreq
+{
+    ; 定义加速度滤波器的截止频率
+   (0,0)   20.0   ; x
+   (1,0)   20.0   ; y
+   (2,0)   20.0   ; z
+};
+
+accFilterState
+{
+    ; 定义加速度滤波器的使用情况，0:close, 1:open
+   (0,0)   1   ; x
+   (1,0)   1   ; y
+   (2,0)   1   ; z
+}
+
+freeAccFilterCutoffFreq
+{
+    ; 定义加速度滤波器的截止频率
+   (0,0)   100.0   ; x
+   (1,0)   100.0   ; y
+   (2,0)   100.0   ; z
+}
+
+freeAccFilterState
+{
+    ; 定义加速度滤波器的使用情况，0:close, 1:open
+   (0,0)   0   ; x
+   (1,0)   0   ; y
+   (2,0)   0   ; z
+}
+
+gyroFilterCutoffFreq
+{
+    ; 定义陀螺仪滤波器的截止频率
+   (0,0)   100.0   ; x
+   (1,0)   100.0   ; y
+   (2,0)   100.0   ; z
+}
+
+gyroFilterState
+{
+    ; 定义陀螺仪滤波器的使用情况，0:close, 1:open
+   (0,0)   0   ; x
+   (1,0)   0   ; y
+   (2,0)   0   ; z
+}
+
+jointCmdFilterCutoffFreq
+{
+    ; 定义各关节的控制滤波器截止频率
+    (0,0)   50   ; leg_l1_joint
+    (1,0)   50   ; leg_l2_joint
+    (2,0)   50   ; leg_l3_joint
+    (3,0)   50   ; leg_l4_joint
+    (4,0)   50   ; leg_l5_joint
+    (5,0)   50   ; leg_l6_joint
+    (6,0)   50   ; leg_r1_joint
+    (7,0)   50   ; leg_r2_joint
+    (8,0)   50   ; leg_r3_joint
+    (9,0)   50   ; leg_r4_joint
+    (10,0)  50   ; leg_r5_joint
+    (11,0)  50   ; leg_r6_joint
+
+    (12,0)  50       ; zarm_l1_joint
+    (13,0)  50       ; zarm_l2_joint
+    (14,0)  50       ; zarm_l3_joint
+    (15,0)  50       ; zarm_l4_joint
+    (16,0)  50       ; zarm_l5_joint
+    (17,0)  50       ; zarm_l6_joint
+    (18,0)  50       ; zarm_l7_joint
+    (19,0)  50       ; zarm_r1_joint
+    (20,0)  50       ; zarm_r2_joint
+    (21,0)  50       ; zarm_r3_joint
+    (22,0)  50       ; zarm_r4_joint
+    (23,0)  50       ; zarm_r5_joint
+    (24,0)  50       ; zarm_r6_joint
+    (25,0)  50       ; zarm_r7_joint
+}
+
+jointCmdFilterState
+{
+    ; 定义各关节的控制滤波器的使用情况，0:close, 1:open
+    (0,0)   0   ; leg_l1_joint
+    (1,0)   0   ; leg_l2_joint
+    (2,0)   0   ; leg_l3_joint
+    (3,0)   0   ; leg_l4_joint
+    (4,0)   0   ; leg_l5_joint
+    (5,0)   0   ; leg_l6_joint
+    (6,0)   0   ; leg_r1_joint
+    (7,0)   0   ; leg_r2_joint
+    (8,0)   0   ; leg_r3_joint
+    (9,0)   0   ; leg_r4_joint
+    (10,0)  0   ; leg_r5_joint
+    (11,0)  0   ; leg_r6_joint
+    
+    (12,0)  0       ; zarm_l1_joint
+    (13,0)  0       ; zarm_l2_joint
+    (14,0)  0       ; zarm_l3_joint
+    (15,0)  0       ; zarm_l4_joint
+    (16,0)  0       ; zarm_l5_joint
+    (17,0)  0       ; zarm_l6_joint
+    (18,0)  0       ; zarm_l7_joint
+    (19,0)  0       ; zarm_r1_joint
+    (20,0)  0       ; zarm_r2_joint
+    (21,0)  0       ; zarm_r3_joint
+    (22,0)  0       ; zarm_r4_joint
+    (23,0)  0       ; zarm_r5_joint
+    (24,0)  0       ; zarm_r6_joint
+    (25,0)  0       ; zarm_r7_joint
+}
+
+singleInputData
+{
+    bodyAngVel
+    {
+        startIdx    0
+        numIdx      3 ;0-2
+        obsScales   1.0
+    }
+    gravity_body
+    {
+        startIdx    0
+        numIdx      3  ;3-5
+        obsScales   1.0
+    }
+    command
+    {
+        startIdx    0
+        numIdx      4  ;6-9
+        obsScales   1.0
+    }
+    jointPos
+    {
+        startIdx    0
+        numIdx      26  ;10-35
+        obsScales   1.0
+    }
+    jointVel
+    {
+        startIdx    0
+        numIdx      26  ;36-61
+        obsScales   1.0
+    }
+    action
+    {
+        startIdx    0
+        numIdx      26  ;62-87
+        obsScales   1.0
+    }
+    ;bodyLineAcc
+    ;{
+    ;    startIdx    0
+    ;    numIdx      3
+    ;    obsScales   0.5
+    ;}
+}
+;baseAngVel
+;{
+;    startIdx    0
+;    numIdx      3
+;    obsScales   1.0
+;}
+;baseLineVel
+;{
+;    startIdx    0
+;    numIdx      3
+;    obsScales   1.0
+;}
+;basePos
+;{
+;    startIdx    0
+;    numIdx      3
+;    obsScales   1.0
+;}
+;jointTorque
+;{
+;    startIdx    0
+;    numIdx      3
+;    obsScales   1.0
+;}
+;bodyLineAcc
+;{
+;    startIdx    0
+;    numIdx      3
+;    obsScales   1.0
+;}
+;bodyLineFreeAcc
+;{
+;    startIdx    0
+;    numIdx      3
+;    obsScales   1.0
+;}
+;bodyLineVel
+;{
+;    startIdx    0
+;    numIdx      3
+;    obsScales   1.0
+;}
