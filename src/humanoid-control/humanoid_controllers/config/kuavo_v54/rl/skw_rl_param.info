@@ -60,7 +60,7 @@ defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity
 {
-    linearX        -0.12     ; 原地踏步线速度X
+    linearX        -0.09     ; 原地踏步线速度X
     linearY         0.0       ; 原地踏步线速度Y
     linearZ         0.0       ; 接口留用
     angularX        0.0       ; 接口留用
@@ -87,8 +87,8 @@ yawCompensation
     threshold                   0.0     ; YAW阈值
     xVelocityThreshold          0.1    ; X方向速度阈值
     enableSeparateCompensation  true    ; 是否启用分开补偿（顺时针/逆时针）(true/false)
-    xBiasClockwise             -0.05     ; 顺时针旋转时X轴偏置
-    xBiasCounterclockwise      -0.05     ; 逆时针旋转时X轴偏置
+    xBiasClockwise             -0.09     ; 顺时针旋转时X轴偏置
+    xBiasCounterclockwise      -0.09     ; 逆时针旋转时X轴偏置
 }
 
 ; ==================== Y方向行走补偿配置 ====================
