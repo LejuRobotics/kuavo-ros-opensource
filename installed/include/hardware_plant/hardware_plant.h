@@ -71,6 +71,8 @@ class HardwarePlant
       std::vector<double> pos;
       std::vector<double> vel;
       std::vector<double> torque;
+      std::vector<double> kp;
+      std::vector<double> kd;
     };
 
   public:
@@ -128,13 +130,14 @@ class HardwarePlant
     inline void SetMotorTorque(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
     inline void SetMotorPosition(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
     inline void GetMotorData(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
-    // 辅助函数：为 EC_MASTER 电机设置默认的 kp/kd（用于 CSP 模式）
-    inline void setDefaultKpKdForEcMaster(std::vector<MotorParam_t> &motor_data, const std::vector<uint8_t> &joint_ids);
+    // 辅助函数：为所有电机（EC_MASTER 和 RUIWO）设置默认的 kp/kd（用于 CSP 模式）
+    inline void setDefaultKpKd(std::vector<MotorParam_t> &motor_data, const std::vector<uint8_t> &joint_ids);
     bool calibrateMotor(int motor_id, int direction, bool save_offset = false);
     void calibrateBipedLoop();
     void calibrateWheelLoop();
     void calibrateArmJoints();
-    bool calibrateArmJointsAtLimit(bool auto_mode = true, bool calibrate_head = true, bool head_only = false);
+    bool calibrateArmJointsAtLimit(bool auto_mode = true, bool calibrate_head = true, bool head_only = false, 
+                                   bool calibrate_leg = false, bool leg_only = false);
     void initEndEffector();
 
     bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);

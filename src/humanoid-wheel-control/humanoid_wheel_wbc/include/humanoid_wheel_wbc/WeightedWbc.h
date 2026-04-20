@@ -34,6 +34,12 @@ namespace ocs2
     protected:
       virtual Task formulateConstraints();
       virtual Task formulateWeightedTasks(const vector_t &stateDesired, const vector_t &inputDesired);
+      
+      // 访问权重的方法，供派生类使用
+      scalar_t getWeightArmAccel() const { return wbc_weight_wheel_.weightArmAccel_; }
+      void setWeightArmAccel(scalar_t weight) { wbc_weight_wheel_.weightArmAccel_ = weight; }
+      scalar_t getWeightLowJointAccel() const { return wbc_weight_wheel_.weightLowJointAccel_; }
+      scalar_t getWeightTorsoZeroAccel() const { return wbc_weight_wheel_.weightTorsoZeroAccel_; }
     
     private:
       vector_t last_qpSol;

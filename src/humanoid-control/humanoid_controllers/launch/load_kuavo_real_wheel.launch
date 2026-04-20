@@ -14,7 +14,7 @@
     <arg name="robot_type"         default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="nodelet_robot_type"  default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="wheel_control_type"  default="1"/>    <!-- 0表示轮臂的仿真测试版mpc，1表示实际部署mpc -->
-    <arg name="use_sqp"   default="false" doc="Use SQP if true, DDP if false"/>
+    <arg name="use_sqp"   default="true" doc="Use SQP if true, DDP if false"/>
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
@@ -49,7 +49,7 @@
     <arg name="visualize_humanoid" default="true"/>
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <!-- 根据机器人类型设置only_half_up_body参数 -->
-    <arg name="only_half_up_body" default="true" if="$(eval arg('robot_type') == 1)"/>    <!-- 轮臂机器人 -->
+    <arg name="only_half_up_body" default="false" if="$(eval arg('robot_type') == 1)"/>    <!-- 轮臂机器人 -->
     <arg name="only_half_up_body" default="false" unless="$(eval arg('robot_type') == 1)"/> <!-- 双足机器人 -->
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
@@ -57,6 +57,8 @@
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
+    <!-- 使用外部 odom->base_link TF 时设为 true，由外部系统（如 SLAM）发布 -->
+    <arg name="use_external_odom_tf" default="false"/>
     
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
@@ -102,6 +104,7 @@
     <!-- make the files into global parameters -->
     <param name="taskFile"   value="$(arg taskFile)" />
     <param name="urdfFile"   value="$(arg urdfFile)" />
+    <param name="use_external_odom_tf" value="$(arg use_external_odom_tf)"/>
     <param name="libFolder"  value="$(arg libFolder)" />
     <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v45/command/gait.info"/>
     <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v45/command/reference.info"/>
@@ -117,10 +120,10 @@
     <param name="/timeout_warning_ms" value="20"/>
 
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- rviz -->
     <!-- <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)"/> -->
@@ -168,9 +171,14 @@
    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
+        <param name="joystick_type" value="h12"/>
+        <!-- h12模式: 保持start_way=auto, 让系统服务继续运行ocs2_h12pro_node.py -->
+        <param name="start_way" value="auto"/>
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
-          <arg name="start_way" value="$(arg start_way)"/>
+          <arg name="start_way" value="auto"/>
         </include>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"
+              launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
       </group>
       <group if="$(eval arg('joystick_type') == 'sim')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">
@@ -182,7 +190,8 @@
           <arg name="joystick_type" value="$(arg joystick_type)"/>
           <arg name="real" value="$(arg real)"/>
         </include>
-        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"
+              launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
       </group>
     </group>    
 
@@ -197,6 +206,18 @@
       <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
     </group> -->
 
+    <!-- 添加播放音乐参数 -->
+    <arg name="music" default="enable" />
+
+    <!-- 当 music 不为 disable 时启动音频服务 -->
+    <group unless="$(eval arg('music') == 'disable')">
+        <!-- 设置音频文件路径参数 -->
+        <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string"/>
+
+        <!-- 启动 播放音乐服务 -->
+        <include file="$(find kuavo_audio_player)/launch/play_music.launch"/>
+    </group>
+
     <group if="$(arg with_ik)">
         <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
     </group>
@@ -206,5 +227,12 @@
         <node pkg="humanoid_controllers" type="auto_wheel_bridge.py" name="auto_wheel_bridge_node" 
               output="screen" required="false"/>
     </group>
+
+    <!-- 启动手臂贝塞尔节点（轮臂机器人也支持手臂控制） -->
+    <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+
+    <!-- restart urobot.service (depends on sshpass) -->
+    <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service"
+          output="screen" required="false"/>
 
 </launch>

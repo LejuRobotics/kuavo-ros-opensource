@@ -507,7 +507,7 @@ def run_tree(root: py_trees.behaviour.Behaviour):
             rospy.loginfo("=" * 60)
             break
 
-        time.sleep(0.1)
+        time.sleep(0.01)
 
 
 def main():

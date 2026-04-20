@@ -21,13 +21,10 @@ is_running_in_docker() {
 }
 
 # 要检测的 launch 文件名
-LAUNCH1="humanoid_plan_arm_trajectory.launch"
-LAUNCH2="plan_arm_action_websocket_server.launch"
+LAUNCH="plan_arm_action_websocket_server.launch"
 
 # 检测 launch 相关节点是否已运行（避免重复启动）
-# 无论 launch 文件是直接启动还是被 include 到其他 launch 中，都能正确检测
-LAUNCH1_RUNNING=false
-LAUNCH2_RUNNING=false
+LAUNCH_RUNNING=false
 SDK_RUNNING=false
 
 # 健康检测函数：检查节点是否真正活跃
@@ -49,44 +46,13 @@ check_node_healthy() {
     fi
 }
 
-# 检测 humanoid_plan_arm_trajectory 相关节点（需要检测两个节点）
-NODE1="autostart_arm_trajectory_bezier_demo"
-NODE2="humanoid_plan_arm_trajectory_node"
-NODE1_HEALTHY=false
-NODE2_HEALTHY=false
-
-echo "正在检测 humanoid_plan_arm_trajectory 相关节点..."
-
-if check_node_healthy "$NODE1"; then
-    NODE1_HEALTHY=true
-    echo "✓ 节点 $NODE1 运行正常"
-else
-    echo "✗ 节点 $NODE1 不存在或已清理"
-fi
-
-if check_node_healthy "$NODE2"; then
-    NODE2_HEALTHY=true
-    echo "✓ 节点 $NODE2 运行正常"
-else
-    echo "✗ 节点 $NODE2 不存在或已清理"
-fi
-
-# 两个节点都健康才算运行中
-if [ "$NODE1_HEALTHY" = "true" ] && [ "$NODE2_HEALTHY" = "true" ]; then
-    LAUNCH1_RUNNING=true
-    echo "✓ humanoid_plan_arm_trajectory 所有节点均正常运行，跳过启动"
-else
-    LAUNCH1_RUNNING=false
-    echo "⚠ humanoid_plan_arm_trajectory 节点不完整或存在僵尸节点，需要重新启动"
-fi
-
 # 检测 plan_arm_action_websocket_server 节点
 echo "正在检测 plan_arm_action_websocket_server 节点..."
 if check_node_healthy "plan_arm_action_websocket_server"; then
-    LAUNCH2_RUNNING=true
+    LAUNCH_RUNNING=true
     echo "✓ plan_arm_action_websocket_server 节点运行正常"
 else
-    LAUNCH2_RUNNING=false
+    LAUNCH_RUNNING=false
     echo "✗ plan_arm_action_websocket_server 节点不存在或已清理"
 fi
 
@@ -126,25 +92,8 @@ fi
 source /opt/ros/noetic/setup.bash --extend
 source $REPO_ROOT/devel/setup.bash
 
-# 根据 LAUNCH1_RUNNING 和 LAUNCH2_RUNNING 分别决定启动哪些节点
-
-# 启动 humanoid_plan_arm_trajectory（仅当 LAUNCH1 未运行时）
-if [ "$LAUNCH1_RUNNING" = "false" ]; then
-    echo "启动 humanoid_plan_arm_trajectory 节点"
-    roslaunch humanoid_plan_arm_trajectory humanoid_plan_arm_trajectory.launch &
-    PLAN_PID=$!
-
-    # 检测动作执行节点启动
-    echo "正在启动动作执行节点..."
-    if rosnode list | grep -q "autostart_arm_trajectory_bezier_demo"; then
-        echo "动作执行节点已启动。"
-    else
-        echo "注意：动作执行节点尚未检测到，请稍后检查节点状态"
-    fi
-else
-    echo "humanoid_plan_arm_trajectory 已在运行，跳过启动"
-    PLAN_PID=""
-fi
+# 根据 LAUNCH_RUNNING 决定启动哪些节点
+# 手臂贝塞尔节点由 load_kuavo_real.launch 统一启动，此处不再重复启动
 
 # 启动 h12pro_controller_node（仅当 SDK 未运行时）
 if [ "$SDK_RUNNING" = "false" ]; then
@@ -197,7 +146,7 @@ echo "正在启动太极触发节点..."
 roslaunch taiji_trigger_node taiji_trigger.launch &
 
 # 启动 websocket 服务节点
-if [ "$LAUNCH2_RUNNING" = "false" ]; then
+if [ "$LAUNCH_RUNNING" = "false" ]; then
     echo "正在启动 websocket 服务节点..."
     roslaunch planarmwebsocketservice plan_arm_action_websocket_server.launch robot_type:=ocs2 camera_type:=$CAMERA_TYPE
 else
@@ -209,10 +158,6 @@ cleanup() {
     if [[ -n "$CONTROLLER_PID" ]] && kill -0 "$CONTROLLER_PID" 2>/dev/null; then
         kill "$CONTROLLER_PID"
         echo "已杀掉 h12pro_controller_node 进程 $CONTROLLER_PID"
-    fi
-    if [[ -n "$PLAN_PID" ]] && kill -0 "$PLAN_PID" 2>/dev/null; then
-        kill "$PLAN_PID"
-        echo "已杀掉进程 $PLAN_PID"
     fi
 }
 

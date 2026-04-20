@@ -19,3 +19,18 @@ hand_wrench:
     lforceX: 0.0  
     lforceY: 15   # N  正数表示夹紧方向，负数表示松开方向
     lforceZ: -5.0  # N  正数表示向上
+
+# 灵巧手抓握与锁定配置（PICO 迁移对齐）
+dex_hand:
+  command_min: 0
+  command_max: 100
+  smoothing_alpha: 0.35
+  grip_deadzone: 0.02
+  thumb_open:
+    enabled: true
+    joint_indices: [1]
+    open_value: 100
+    require_teleop_unlock: true
+  stable_unlock:
+    enabled: true
+    reengage_threshold: 8

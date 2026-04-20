@@ -204,6 +204,8 @@ install(
 # Install scripts
 catkin_install_python(PROGRAMS
   scripts/chassis_keyboard_control.py
+  scripts/chassis_emergency_stop.py
+  scripts/external_odom_tf_publisher.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 install(DIRECTORY launch rviz

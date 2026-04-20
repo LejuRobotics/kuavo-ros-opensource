@@ -2,8 +2,12 @@
 #include <pinocchio/algorithm/kinematics.hpp>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/algorithm/rnea.hpp>
+#include <pinocchio/algorithm/crba.hpp>
+#include <ocs2_robotic_tools/common/RotationDerivativesTransforms.h>
 
 #include "humanoid_controllers/humanoidController_wheel_wbc.h"
+#include "kuavo_msgs/setContactForceInterpParams.h"
 #include "humanoid_interface/common/TopicLogger.h"
 #include <iostream>
 #include <cmath>
@@ -11,12 +15,65 @@
 #include <geometry_msgs/Twist.h>
 #include <angles/angles.h>
 
+#include "humanoid_wheel_interface/estimators/ContinuousEulerAnglesFromMatrix.h"
+
 
 namespace humanoidController_wheel_wbc
 {
   using namespace ocs2;
   using Duration = std::chrono::duration<double>;
   using Clock = std::chrono::high_resolution_clock;
+
+  namespace {
+
+  template <typename T>
+  void loadOptionalTaskParam(const std::string& taskFile, const std::string& key, T& value) {
+    try {
+      loadData::loadCppDataType(taskFile, key, value);
+    } catch (const std::exception&) {
+    }
+  }
+
+  void loadArmTrajInterpConfig(const std::string& taskFile, double controlCycleSec,
+                               ArmTrajectoryInterpolator::Config& config, bool& enableInterpolator) {
+    bool hasKalmanLimitConfig = true;
+    try {
+      loadData::loadCppDataType(taskFile, "armTrajInterpKinematicLimit.kalman_v_limit", config.kalmanVLimit);
+    } catch (const std::exception&) {
+      hasKalmanLimitConfig = false;
+    }
+
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_q", config.kalmanMeasurementQNoise);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_dq", config.kalmanMeasurementDqNoise);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_pos", config.kalmanInitialPosVar);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_vel", config.kalmanInitialVelVar);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.fast_update_r_scale", config.fastUpdateRScale);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.target_v_alpha", config.targetVAlpha);
+
+    int immediate = config.immediateUpdateOnNewTarget ? 1 : 0;
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.immediate_update_on_new_target", immediate);
+    config.immediateUpdateOnNewTarget = (immediate != 0);
+
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.timeout_sec", config.timeoutSec);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.reference_update_period",
+                          config.referenceUpdatePeriodSec);
+    config.controlCycleSec = controlCycleSec;
+
+    try {
+      loadData::loadCppDataType(taskFile, "armTrajInterpKinematicLimit.enable", enableInterpolator);
+    } catch (const std::exception&) {
+      enableInterpolator = false;
+    }
+
+    const bool kalmanLimitValid = hasKalmanLimitConfig && std::isfinite(config.kalmanVLimit) && config.kalmanVLimit > 0.0;
+    if (!kalmanLimitValid) {
+      ROS_ERROR_STREAM("[humanoidControllerWheelWbc] Invalid armTrajInterpKinematicLimit.kalman_v_limit, "
+                       "arm trajectory interpolator disabled.");
+      enableInterpolator = false;
+    }
+  }
+
+  }  // namespace
 
   static void callSimStartSrv(ros::NodeHandle &nh_)
   {
@@ -84,9 +141,32 @@ namespace humanoidController_wheel_wbc
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
     /****************************************************/
+    /************load param from kuavo.json**************/
+    RobotVersion rb_version(6, 0);
+    if (controllerNh_.hasParam("/robot_version"))
+    {
+        int rb_version_int;
+        controllerNh_.getParam("/robot_version", rb_version_int);
+        rb_version = RobotVersion::create(rb_version_int);
+    }
+    drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
+    robot_config_ = drake_interface_->getRobotConfig();
+    kuavo_settings_ = drake_interface_->getKuavoSettings();
     /************** Initialize WBC **********************/
-    wheel_wbc_ = std::make_shared<mobile_manipulator::WeightedWbc>(*pinocchioInterface_ptr_, manipulatorModelInfo_);
+    wheel_wbc_ = std::make_shared<mobile_manipulator::ContactForceWbc>(*pinocchioInterface_ptr_, manipulatorModelInfo_);
     wheel_wbc_->setArmNums(armNum_);
+    bool useVrArmAccelTask = false;
+    try
+    {
+      loadData::loadCppDataType(taskFile, "vrArmAccelTask.useVrArmAccelTask", useVrArmAccelTask);
+    }
+    catch (const std::exception&)
+    {
+      useVrArmAccelTask = false;
+    }
+    wheel_wbc_->setUseVrArmAccelTask(useVrArmAccelTask);
+    ROS_INFO_STREAM("[humanoidControllerWheelWbc] useVrArmAccelTask=" << (useVrArmAccelTask ? "true" : "false")
+                    << ", arm accel task=" << (useVrArmAccelTask ? "vrArmAccelTask" : "armAccelTask"));
     wheel_wbc_->loadTasksSetting(taskFile, verbose, is_real_);
     /****************************************************/
 
@@ -159,6 +239,16 @@ namespace humanoidController_wheel_wbc
     loadData::loadEigenMatrix(taskFile, "optimizedTrajKinematicLimit.max_vel", optimizedTrajMaxVel_);
     loadData::loadEigenMatrix(taskFile, "optimizedTrajKinematicLimit.max_acc", optimizedTrajMaxAcc_);
     loadData::loadEigenMatrix(taskFile, "optimizedTrajKinematicLimit.max_jerk", optimizedTrajMaxJerk_);
+    {
+      ArmTrajectoryInterpolator::Config config;
+      loadArmTrajInterpConfig(taskFile, dt_, config, enable_arm_traj_interpolator_);
+
+      armTrajectoryInterpolator_.configure(config);
+      wbc_arm_raw_q_ = vector_t::Zero(armNum_);
+      wbc_arm_raw_v_ = vector_t::Zero(armNum_);
+      ROS_INFO_STREAM("[humanoidControllerWheelWbc] arm trajectory interpolator enable="
+                      << (enable_arm_traj_interpolator_ ? "true" : "false"));
+    }
 
     if(obsLimitEnable)
     {
@@ -180,6 +270,11 @@ namespace humanoidController_wheel_wbc
       mrtInputLimitFilterPtr_->setFirstOrderDerivativeLimit(optimizedTrajMaxAcc_);
       mrtInputLimitFilterPtr_->setSecondOrderDerivativeLimit(optimizedTrajMaxJerk_);
     }
+
+    // 关节输出限制
+    jointCmdLimiterPtr_ = std::make_shared<mobile_manipulator::jointCmdLimiter>(manipulatorModelInfo_.armDim, 
+                                                            *pinocchioInterface_ptr_,
+                                                            taskFile, manipulatorModelInfo_, dt_);
     /****************************************************/
 
     // 浮动基 7 + 底盘下肢电机 4 + 双臂 7*2 + 头部 
@@ -192,7 +287,7 @@ namespace humanoidController_wheel_wbc
     {
       mujoco_q[2] = 0.0;
     }
-    else if(robotVersion_ == 61)
+    else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
     {
       mujoco_q[2] = 0.0;
     }
@@ -218,6 +313,10 @@ namespace humanoidController_wheel_wbc
     controllerNh_.setParam("/squat_initial_state", squat_initial_state_vector);
     controllerNh_.setParam("/default_joint_pos", default_joint_pos_vector);
 
+    // 初始化 MPC 初始期望
+    optimizedState_mrt_.tail(manipulatorModelInfo_.armDim) = mujoco_q.segment(7, manipulatorModelInfo_.armDim);
+
+
     // 初始化VR控制相关标志位和参数
     is_transitioning_ = false;
     prev_whole_torso_ctrl_ = false;
@@ -228,13 +327,23 @@ namespace humanoidController_wheel_wbc
 
     // 初始化发布者
     cmdVelPub_ = controllerNh_.advertise<geometry_msgs::Twist>("/move_base/base_cmd_vel", 10, true);
+    velControlStatePub_ = controllerNh_.advertise<std_msgs::Bool>("/enable_vel_control_state", 1, true);
     jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
 
+    // 发布初始速度控制开关状态
+    {
+      std_msgs::Bool msg;
+      msg.data = use_vel_control_;
+      velControlStatePub_.publish(msg);
+    }
+
     // 创建控制数据管理器（替代所有订阅者和服务）
+    vector_t leg_initial_state = optimizedState_mrt_.tail(manipulatorModelInfo_.armDim).head(lowJointNum_);
+    vector_t arm_initial_state = optimizedState_mrt_.tail(manipulatorModelInfo_.armDim).tail(armNum_);
     control_data_manager_ = std::make_unique<ControlDataManager>(
-        controllerNh_, is_real_, armNum_, lowJointNum_, headNum_);
+        controllerNh_, is_real_, armNum_, lowJointNum_, headNum_, leg_initial_state, arm_initial_state);
     
     // 初始化所有订阅者（包括传感器数据订阅）
     control_data_manager_->initializeSubscribers();
@@ -269,8 +378,22 @@ namespace humanoidController_wheel_wbc
     // 初始化上一次滤波后的关节位置
     last_filtered_low_joint_pos_ = vector_t::Zero(lowJointNum_);
 
+    // 设置ContactForceWbc指针到DesiredForceManager
+    auto contact_force_wbc = std::dynamic_pointer_cast<mobile_manipulator::ContactForceWbc>(wheel_wbc_);
+    
+    // 初始化期望力管理器（从ContactForceWbc获取插值速度参数）
+    double interpolation_speed = contact_force_wbc ? contact_force_wbc->getInterpolationSpeed() : 15.0;
+    desired_force_manager_ = std::make_unique<DesiredForceManager>(controllerNh_, interpolation_speed);
+    
+    if (contact_force_wbc && desired_force_manager_) {
+      desired_force_manager_->setContactForceWbc(contact_force_wbc);
+    }
+
     // 初始化过渡起点位置
     waist_transition_start_pos_ = vector_t::Zero(lowJointNum_);
+    
+    arm_force_estimator_ = std::make_unique<ArmContactForceEstimatorWheel>(
+        pinocchioInterface_ptr_, manipulatorModelInfo_, lowJointNum_, ros_logger_);
     
     // 初始化MPC模式切换服务客户端并设置为ArmOnly模式（仅在启用外部MPC且VR模式时）
     if(enable_mpc_ && use_vr_control_)
@@ -290,6 +413,11 @@ namespace humanoidController_wheel_wbc
       }
     }
     
+    // 初始化重置cmdVel Ruckig规划器服务客户端
+    reset_cmd_vel_ruckig_client_ = controllerNh_.serviceClient<std_srvs::SetBool>("/mobile_manipulator_reset_cmd_vel_ruckig");
+    reset_cmd_vel_ruckig_srv_.request.data = true;  // 重新规划
+    last_reset_cmd_vel_ruckig_time_ = ros::Time::now();  // 初始化重置时间
+
     return true;
   }
 
@@ -329,8 +457,61 @@ namespace humanoidController_wheel_wbc
             return enableLbArmQuickModeCallback(req, res); 
         }
     );
+
+    // 5. 轮臂MPC, 关节反馈机制切换服务
+    control_data_manager_->registerService<kuavo_msgs::changeLbMpcObsUpdateModeSrv>(
+        "/change_lb_mpc_obs_update_mode",
+        [this](auto& req, auto& res) { 
+            return changeLbObsUpdateModeCallback(req, res); 
+        }
+    );
+
+    control_data_manager_->registerService<std_srvs::SetBool>(
+      "/enable_vel_control",
+      [this](auto& req, auto& res) {
+          return enableVelControlCallback(req, res);
+      }
+  );
+
+    control_data_manager_->registerService<kuavo_msgs::setContactForceInterpParams>(
+        "/set_contact_force_params",
+        [this](kuavo_msgs::setContactForceInterpParams::Request& req,
+               kuavo_msgs::setContactForceInterpParams::Response& res) {
+          if (!desired_force_manager_) {
+            res.success = false;
+            res.message = "DesiredForceManager not ready";
+            return true;
+          }
+          if (req.transition_time <= 0.0 || req.interpolation_speed <= 0.0) {
+            res.success = false;
+            res.message = "params must be > 0";
+            return true;
+          }
+          desired_force_manager_->applyContactForceInterpParams(req.transition_time, req.interpolation_speed);
+          res.success = true;
+          res.message = "ok";
+          return true;
+        });
     
     ROS_INFO("[humanoidControllerWheelWbc] All ROS services registered through ControlDataManager");
+  }
+
+  bool humanoidControllerWheelWbc::enableVelControlCallback(std_srvs::SetBool::Request &req,
+                                                            std_srvs::SetBool::Response &res)
+  {
+    std::cout << "[vel_control] 速度控制切换请求: " << (req.data ? "启用" : "禁用") << std::endl;
+    use_vel_control_ = req.data;
+
+    // 发布速度控制状态
+    {
+      std_msgs::Bool msg;
+      msg.data = use_vel_control_;
+      velControlStatePub_.publish(msg);
+    }
+
+    res.success = true;
+    res.message = "success change vel control to " + std::to_string(req.data);
+    return true;
   }
 
   bool humanoidControllerWheelWbc::starting(const ros::Time &time)
@@ -419,6 +600,13 @@ namespace humanoidController_wheel_wbc
 
   void humanoidControllerWheelWbc::update(const ros::Time &time, const ros::Duration &dfd)
   {
+    static double lastTime = time.toSec() - dt_;
+    double curTime = time.toSec();
+    double dt = curTime - lastTime;
+    if(dt < dt_) return;
+    lastTime = curTime;
+    ros_logger_->publishValue("/humanoid_wheel/freq", 1 / dt);
+    ros_logger_->publishValue("/humanoid_wheel/dt_real", dt);
     static auto timeInit = time.toSec();
     auto& info = manipulatorModelInfo_;
     static int cnt = 0;
@@ -452,6 +640,7 @@ namespace humanoidController_wheel_wbc
                                                     {initTarget}, 
                                                     {observation_wheel_.input});
       mrtRosInterface_->resetMpcNode(target_trajectories);
+
       reset_mpc_ = false;
       std::cout << "reset MPC node at " << observation_wheel_.time << "\n";
 
@@ -487,6 +676,20 @@ namespace humanoidController_wheel_wbc
       SystemObservation kinemicLimitObs = observation_wheel_;
       kinemicLimitObs.state = obsStateLimitFilterPtr_->update(observation_wheel_.state);
       kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
+
+      /****************************允许采用mpc输出作为反馈**************************************/
+      if(mpcObsUpdateMode_ == 1 || mpcObsUpdateMode_ == 3)
+      {
+        kinemicLimitObs.state.segment(baseDim_, lowJointNum_) = optimizedState_mrt_.segment(baseDim_, lowJointNum_);
+        kinemicLimitObs.input.segment(baseDim_, lowJointNum_) = optimizedInput_mrt_.segment(baseDim_, lowJointNum_);
+      }
+      if(mpcObsUpdateMode_ == 2 || mpcObsUpdateMode_ == 3)
+      {
+        kinemicLimitObs.state.tail(armNum_) = optimizedState_mrt_.tail(armNum_);
+        kinemicLimitObs.input.tail(armNum_) = optimizedInput_mrt_.tail(armNum_);
+      }
+      /**************************************************************************************/
+      
       mrtRosInterface_->setCurrentObservation(kinemicLimitObs);
 
       // Trigger MRT callbacks
@@ -496,15 +699,16 @@ namespace humanoidController_wheel_wbc
       {
       }
 
-      mrtRosInterface_->evaluatePolicy(observation_wheel_.time, observation_wheel_.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
+      // mrtRosInterface_->evaluatePolicy(kinemicLimitObs.time + dt_, kinemicLimitObs.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
+      mrtRosInterface_->rolloutPolicy(kinemicLimitObs.time, kinemicLimitObs.state, dt_, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
       if(enable_mpc_)
       {
         optimizedState_mrt_ = optimizedState_mrt;
         optimizedInput_mrt_ = optimizedInput_mrt;
       }
-      if(std::fabs(optimizedInput_mrt_[0]) < 0.001) optimizedInput_mrt_[0] = 0;
-      if(std::fabs(optimizedInput_mrt_[1]) < 0.001) optimizedInput_mrt_[1] = 0;
-      if(std::fabs(optimizedInput_mrt_[2]) < 0.001) optimizedInput_mrt_[2] = 0;
+      if(std::fabs(optimizedInput_mrt_[0]) < 0.05) optimizedInput_mrt_[0] = 0;
+      if(std::fabs(optimizedInput_mrt_[1]) < 0.05) optimizedInput_mrt_[1] = 0;
+      if(std::fabs(optimizedInput_mrt_[2]) < 0.05) optimizedInput_mrt_[2] = 0;
     }
     // 更新可视化数据
     // robotVisualizer_->update_obs(observation_wheel_);
@@ -518,6 +722,10 @@ namespace humanoidController_wheel_wbc
     updateUserJointCmd(time, target_qpos, target_qvel);
 
     int8_t lbMpcMode = control_data_manager_->getLbMpcControlMode(); // 获取当前轮臂MPC控制模式
+    if (enable_arm_traj_interpolator_)
+    {
+      applyArmTrajectoryInterpolation(time, lbMpcMode, sensors_data_new, target_qpos, target_qvel);
+    }
     if(!enable_mpc_)
     {
       optimizedState_mrt_.tail(info.armDim) = target_qpos;
@@ -528,8 +736,6 @@ namespace humanoidController_wheel_wbc
       // 手臂跟踪快模式: 直接从 kuavo_arm_traj 话题获取手臂关节指令
       if (quickMode_ != 0 && (lbMpcMode == 1 || lbMpcMode == 3))  // 设置仅在armOnly和baseArm模式下生效
       {
-        vector_t arm_target_qpos = vector_t::Zero(armNum_);
-        vector_t arm_target_qvel = vector_t::Zero(armNum_);
         vector_t leg_target_qpos = vector_t::Zero(lowJointNum_);
         vector_t leg_target_qvel = vector_t::Zero(lowJointNum_);
 
@@ -543,13 +749,18 @@ namespace humanoidController_wheel_wbc
         }
         if(quickMode_ == 2 || quickMode_ == 3)
         {
-          arm_target_qpos = control_data_manager_->getArmExternalControlState().pos;
-          arm_target_qvel = control_data_manager_->getArmExternalControlState().vel;
-          optimizedState_mrt_.tail(armNum_) = arm_target_qpos;
-          optimizedInput_mrt_.tail(armNum_) = arm_target_qvel;
-          ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_quick_mode", arm_target_qpos);
+          // 兼容旧版：默认直通外部手臂目标；开启插补开关时由插补路径覆盖。
+          if (!enable_arm_traj_interpolator_)
+          {
+            vector_t arm_target_qpos = vector_t::Zero(armNum_);
+            vector_t arm_target_qvel = vector_t::Zero(armNum_);
+            arm_target_qpos = control_data_manager_->getArmExternalControlState().pos;
+            arm_target_qvel = control_data_manager_->getArmExternalControlState().vel;
+            optimizedState_mrt_.tail(armNum_) = arm_target_qpos;
+            optimizedInput_mrt_.tail(armNum_) = arm_target_qvel;
+            ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_quick_mode", arm_target_qpos);
+          }
         }
-
       }
     }
     /*******************************************************/
@@ -568,23 +779,106 @@ namespace humanoidController_wheel_wbc
     if(update_cnt < (int)(1/dt_))   // 延时1秒钟进mpc，使mpc指令缓冲充分刷新
     {
       static vector_t observation_wheel_state_prev = observation_wheel_.state;
+      optimizedState_mrt_limit.setZero();
       optimizedState_mrt_limit.tail(info.armDim) = observation_wheel_state_prev.tail(info.armDim);
-      optimizedInput_mrt_limit.tail(info.armDim).setZero();
+      optimizedInput_mrt_limit.setZero();
       update_cnt++;
     }
-    vector_t x = wheel_wbc_->update(optimizedState_mrt_limit, optimizedInput_mrt_limit, observation_wheel_);
 
+    {
+      static vector_t qposLimit, qvelLimit;
+
+      qposLimit = optimizedState_mrt_limit.tail(info.armDim);
+      qvelLimit = optimizedInput_mrt_limit.tail(info.armDim);
+      jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
+      optimizedState_mrt_limit.tail(info.armDim) = qposLimit;
+      // optimizedInput_mrt_limit.tail(info.armDim) = qvelLimit;
+      static vector_t jointPosTarget_last = optimizedState_mrt_limit.tail(info.armDim);
+      // static double lastTargetTime = curTime - dt_;
+      optimizedInput_mrt_limit.tail(info.armDim) = (optimizedState_mrt_limit.tail(info.armDim) - jointPosTarget_last) / 
+                                                    dt_; // (curTime - lastTargetTime);
+      // lastTargetTime = curTime;
+      jointPosTarget_last = optimizedState_mrt_limit.tail(info.armDim);
+    }
+
+    if(enable_mpc_)   // 回传到mpc作为反馈, 因此保持经过安全滤波后的数值
+    {
+      optimizedState_mrt_ = optimizedState_mrt_limit;
+      optimizedInput_mrt_ = optimizedState_mrt_limit;
+    }
+
+    // 更新期望力插值
+    if (desired_force_manager_) {
+      desired_force_manager_->update(time);
+    }
+
+    // 获取期望接触力（基座坐标系）
+    vector_t desired_contact_force = getDesiredContactForce();
+
+    // 将期望力传递给WBC
+    auto contact_force_wbc = std::dynamic_pointer_cast<mobile_manipulator::ContactForceWbc>(wheel_wbc_);
+    if (contact_force_wbc) {
+      contact_force_wbc->setDesiredContactForce(desired_contact_force);
+      
+      // 更新自适应权重（根据期望力大小动态调整手臂任务权重）
+      contact_force_wbc->updateAdaptiveWeights(time);
+      
+      vector_t joint_position_error = optimizedState_mrt_limit.tail(armNum_) - 
+                                      observation_wheel_.state.tail(armNum_);
+      bool enable_force_empty_detact = desired_force_manager_ ? 
+                                       desired_force_manager_->getEnableForceEmptyDetact() : true;
+      contact_force_wbc->updateJointPositionError(joint_position_error, enable_force_empty_detact);
+      
+      // 发布 force_disabled_ 状态
+      bool force_disabled = contact_force_wbc->isForceDisabled();
+      ros_logger_->publishValue("/state_estimate/Arm_Contact_Detection/force_empty", static_cast<double>(force_disabled));
+      
+      // 如果检测到挥空，且启用了挥空检测失效功能，清除DesiredForceManager中的期望力，执行一次后重置挥空标志
+      // 检查期望力是否已经被清除（避免重复清除导致循环打印日志）
+      if (force_disabled && desired_force_manager_ && enable_force_empty_detact) {
+          // 检查是否还有期望力（避免重复清除）
+          bool has_force = desired_force_manager_->hasDesiredForce("left_hand") || 
+                          desired_force_manager_->hasDesiredForce("right_hand");
+          if (has_force) {
+              desired_force_manager_->clearAllForces();
+              contact_force_wbc->resetForceDisabled();
+          }
+      }
+    }
+
+    vector_t optimizedState_wbc = optimizedState_mrt_limit;
+    vector_t optimizedInput_wbc = optimizedInput_mrt_limit;
+    if (enable_arm_traj_interpolator_ && armNum_ > 0)
+    {
+      ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qpos_smooth", optimizedState_wbc.tail(armNum_));
+      ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qvel_smooth", optimizedInput_wbc.tail(armNum_));
+      ROS_INFO_THROTTLE(1.0, "[humanoidControllerWheelWbc] WBC arm task uses interpolated arm target.");
+    }
+
+    vector_t x = wheel_wbc_->update(optimizedState_wbc, optimizedInput_wbc, observation_wheel_);
+
+    // 决策变量顺序：x = [ddq_stateDim, f_contact, tau_armDim]
     vector_t bodyAcc = x.head(info.stateDim-info.armDim);
     vector_t jointAcc = x.segment(info.stateDim-info.armDim, info.armDim);
-    vector_t torque = x.tail(info.armDim);
+    // 接触力在中间，力矩在最后
+    size_t contact_force_size = 6 * manipulatorModelInfo_.eeFrames.size();
+    vector_t torque = x.tail(info.armDim); // 力矩在决策变量的最后部分
 
     ros_logger_->publishVector("/humanoid_wheel/bodyAcc", bodyAcc);
     ros_logger_->publishVector("/humanoid_wheel/jointAcc", jointAcc);
     ros_logger_->publishVector("/humanoid_wheel/torque", torque);
     ros_logger_->publishVector("/humanoid_wheel/target_qpos", target_qpos);
+    
+    // 手臂末端力估计（使用当前时间步的周期）
+    if (arm_force_estimator_) {
+      arm_force_estimator_->setCmdTorque(torque);
+      arm_force_estimator_->update(observation_wheel_.state, observation_wheel_.input, dfd);
+    }
 
     // 更新关节指令
     kuavo_msgs::jointCmd jointCmdMsg;
+    jointCmdMsg.header.stamp = time;
+    vector_t armJointVelForPublish = optimizedInput_mrt_limit.tail(armNum_);
     for (int i1 = 0; i1 < lowJointNum_; ++i1)
     {
       jointCmdMsg.joint_q.push_back(optimizedState_mrt_limit.tail(info.armDim)[i1]);
@@ -593,18 +887,18 @@ namespace humanoidController_wheel_wbc
       jointCmdMsg.tau_ratio.push_back(1);
       jointCmdMsg.joint_kp.push_back(0);
       jointCmdMsg.joint_kd.push_back(0);
-      jointCmdMsg.tau_max.push_back(120);
+      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
       jointCmdMsg.control_modes.push_back(2);
     }
     for (int i2 = 0; i2 < armNum_; ++i2)
     {
       jointCmdMsg.joint_q.push_back(optimizedState_mrt_limit.tail(armNum_)[i2]);
-      jointCmdMsg.joint_v.push_back(optimizedInput_mrt_limit.tail(armNum_)[i2]);
+      jointCmdMsg.joint_v.push_back(armJointVelForPublish[i2]);
       jointCmdMsg.tau.push_back(torque.tail(armNum_)[i2]);
       jointCmdMsg.tau_ratio.push_back(1);
       jointCmdMsg.joint_kp.push_back(0);
       jointCmdMsg.joint_kd.push_back(0);
-      jointCmdMsg.tau_max.push_back(20);
+      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[lowJointNum_ + i2]);
       jointCmdMsg.control_modes.push_back(2);
     }
    
@@ -620,7 +914,7 @@ namespace humanoidController_wheel_wbc
         jointCmdMsg.joint_v.push_back(0);
         jointCmdMsg.tau.push_back(feedback_tau[i3]);
         jointCmdMsg.tau_ratio.push_back(1);
-        jointCmdMsg.tau_max.push_back(10);
+        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[lowJointNum_ + armNum_ + i3]);
         jointCmdMsg.control_modes.push_back(2);
         jointCmdMsg.joint_kp.push_back(0);
         jointCmdMsg.joint_kd.push_back(0);
@@ -629,7 +923,7 @@ namespace humanoidController_wheel_wbc
       vector_t head_pos = sensors_data_new.jointPos_.tail(headNum_);
       robotVisualizer_->updateHeadJointPositions(head_pos);
     }
-    
+    replaceDefaultEcMotorPdoGait(jointCmdMsg);  // 统一修改pdo写入的kpkd
     jointCmdPub_.publish(jointCmdMsg);
 
     //更新共享内存中的关节命令
@@ -660,8 +954,47 @@ namespace humanoidController_wheel_wbc
       velCmdMsg.linear.y = desiredVelBody[1];
       velCmdMsg.angular.z = desiredVelBody[2];
     }
-    
-    cmdVelPub_.publish(velCmdMsg);
+    if(use_vel_control_)
+    {
+      cmdVelPub_.publish(velCmdMsg);
+    }else{
+        ros::Time current_time = ros::Time::now();
+        bool should_reset = false;
+
+        // 立即重置
+        if(prev_use_vel_control_ != use_vel_control_)
+        {
+          should_reset = true;
+          ROS_INFO("[vel_control] 检测到速度控制模式切换，重置cmdVel Ruckig规划器");
+        }
+        // 检测时间间隔：超过设定间隔时重置
+        else if((current_time - last_reset_cmd_vel_ruckig_time_).toSec() >= RESET_CMD_VEL_RUCKIG_INTERVAL)
+        {
+          should_reset = true;
+        }
+
+        if(should_reset)
+        {
+          if(reset_cmd_vel_ruckig_client_.call(reset_cmd_vel_ruckig_srv_))
+          {
+            if(reset_cmd_vel_ruckig_srv_.response.success)
+            {
+              last_reset_cmd_vel_ruckig_time_ = current_time;  // 更新重置时间
+              // ROS_INFO("[vel_control] Successfully reset cmdVel Ruckig planner: %s", reset_cmd_vel_ruckig_srv_.response.message.c_str());
+            }
+            else
+            {
+              ROS_WARN("[vel_control] Failed to reset cmdVel Ruckig planner: %s", reset_cmd_vel_ruckig_srv_.response.message.c_str());
+            }
+          }
+          else
+          {
+            ROS_WARN("[vel_control] Failed to call reset_cmd_vel_ruckig service");
+          }
+        }
+    }
+    // 更新上一次的速度控制状态
+    prev_use_vel_control_ = use_vel_control_;
     cnt++;
   }
 
@@ -743,10 +1076,12 @@ namespace humanoidController_wheel_wbc
     getEEPose(observation_wheel_.state, obs_ee_pos, obs_ee_rot);
 
     vector_t eePoses = vector_t::Zero(manipulatorModelInfo_.eeFrames.size() * 6);
+    // 初始化连续欧拉角跟踪器
+    static std::vector<ocs2::mobile_manipulator::ContinuousEulerAnglesFromMatrix> eeUnwrappers(manipulatorModelInfo_.eeFrames.size());
     for(int i=0; i<manipulatorModelInfo_.eeFrames.size(); i++)
     {
       eePoses.segment(i * 6, 3) = obs_ee_pos[i];
-      eePoses.segment(i * 6 + 3, 3) = obs_ee_rot[i].eulerAngles(2, 1, 0);
+      eePoses.segment(i * 6 + 3, 3) = eeUnwrappers[i].update(obs_ee_rot[i]);
     }
     ros_logger_->publishVector("/humanoid_wheel/eePoses", eePoses);
     ros_logger_->publishVector("/mobile_manipulator_wbc_observation/state", observation_wheel_.state);
@@ -966,6 +1301,65 @@ namespace humanoidController_wheel_wbc
     arm_start_pos_ = interpolated_target;
     // std::cout << "[ArmControl] 模式切换中，误差: " << error  << ", 目标: " << target_arm_state.transpose() << ", 插值: " << interpolated_target.transpose() << std::endl;
     return interpolated_target;
+  }
+
+  void humanoidControllerWheelWbc::applyArmTrajectoryInterpolation(const ros::Time& time,
+                                                                    int8_t lbMpcMode,
+                                                                    const SensorData& sensorData,
+                                                                    vector_t& target_qpos,
+                                                                    vector_t& target_qvel)
+  {
+    (void)sensorData;
+    if (armNum_ == 0) {
+      return;
+    }
+
+    ArmTrajectoryInterpolator::ModeFlags modeFlags;
+    modeFlags.useArmTrajectoryControl = use_arm_trajectory_control_;
+    modeFlags.quickMode = quickMode_;
+    modeFlags.lbMpcMode = lbMpcMode;
+    modeFlags.armCtrlMode = arm_trajectory_mode_;
+
+    const vector_t currentArmQ = observation_wheel_.state.tail(armNum_);
+
+    vector_t armTargetRawQ = currentArmQ;
+    vector_t armTargetRawV = vector_t::Zero(armNum_);
+    bool hasArmTargetRaw = false;
+    ArmJointTrajectory armTrajRaw = control_data_manager_->getArmExternalControlState();
+    if (armTrajRaw.pos.size() == static_cast<Eigen::Index>(armNum_)) {
+      armTargetRawQ = armTrajRaw.pos;
+      hasArmTargetRaw = true;
+      if (armTrajRaw.vel.size() == static_cast<Eigen::Index>(armNum_)) {
+        armTargetRawV = armTrajRaw.vel;
+      }
+      armTrajectoryInterpolator_.ingestRawTarget(time, armTrajRaw.pos, armTrajRaw.vel);
+    }
+    if (hasArmTargetRaw) {
+      ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_raw", armTargetRawQ);
+      ros_logger_->publishVector("/humanoid_wheel/arm_target_qvel_raw", armTargetRawV);
+    }
+
+    const auto output = armTrajectoryInterpolator_.compute(time, modeFlags, currentArmQ);
+    if (!output.valid || output.smoothQ.size() != static_cast<Eigen::Index>(armNum_)) {
+      return;
+    }
+    ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_smooth", output.smoothQ);
+    ros_logger_->publishVector("/humanoid_wheel/arm_target_qvel_smooth", output.smoothV);
+
+    const bool quickArmModeActive = (quickMode_ == 2 || quickMode_ == 3) && (lbMpcMode == 1 || lbMpcMode == 3);
+    const bool shouldUseOutput = use_arm_trajectory_control_ || quickArmModeActive;
+    if (!shouldUseOutput) {
+      return;
+    }
+
+    target_qpos.segment(lowJointNum_, armNum_) = output.smoothQ;
+    target_qvel.segment(lowJointNum_, armNum_) = output.smoothV;
+    if (enable_mpc_ && quickArmModeActive) {
+      optimizedState_mrt_.tail(armNum_) = output.smoothQ;
+      optimizedInput_mrt_.tail(armNum_) = output.smoothV;
+    }
+    ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_interp", output.smoothQ);
+    ros_logger_->publishVector("/humanoid_wheel/arm_target_qvel_interp", output.smoothV);
   }
 
   void humanoidControllerWheelWbc::updateUserJointCmd(const ros::Time &time, vector_t& target_qpos, vector_t& target_qvel)
@@ -1194,6 +1588,16 @@ namespace humanoidController_wheel_wbc
     return true;
   }
 
+  bool humanoidControllerWheelWbc::changeLbObsUpdateModeCallback(kuavo_msgs::changeLbMpcObsUpdateModeSrv::Request &req, 
+                                                                kuavo_msgs::changeLbMpcObsUpdateModeSrv::Response &res)
+  {
+    std::cout << "[ArmControl] mpc反馈机制切换请求: " << int(req.obsUpdateMode) << std::endl;
+    mpcObsUpdateMode_ = req.obsUpdateMode;
+    res.success = true;
+    res.message = "success change obs update mode to " + std::to_string(req.obsUpdateMode);
+    return true;
+  }
+
   bool humanoidControllerWheelWbc::enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
   {
     if(req.control_mode == arm_trajectory_mode_)
@@ -1382,6 +1786,101 @@ namespace humanoidController_wheel_wbc
                        std::sin(yaw),  std::cos(yaw), 0,
                        0,               0,              1;
     return R_body_to_world * cmd_vel_body;
+  }
+
+  void humanoidControllerWheelWbc::replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg)
+  {
+    // 对于 control_modes == 2 的电机：
+    //   EC_MASTER 电机：useVrArmKpKd=true 且 vr_joint_* 有效时使用 vr_joint_kp/kd，否则使用 joint_kp/kd
+    //   RUIWO 电机：useVrArmKpKd=true 且 vr_ruiwo_* 有效时使用 vr_ruiwo_kp/kd，否则使用 ruiwo_kp/kd
+    // 注意：ec_master_count/ruiwo_count 对应各自驱动器数组中的索引
+    const auto &hardware_settings = kuavo_settings_.hardware_settings;
+    const auto &running_settings = kuavo_settings_.running_settings;
+    const int total_joints = lowJointNum_ + armNum_ + headNum_;
+
+    const bool use_vr_ec = running_settings.use_vr_arm_kpkd &&
+                           !running_settings.vr_joint_kp.empty() &&
+                           !running_settings.vr_joint_kd.empty() &&
+                           running_settings.vr_joint_kp.size() == running_settings.vr_joint_kd.size();
+    const bool use_vr_ruiwo = running_settings.use_vr_arm_kpkd &&
+                              !running_settings.vr_ruiwo_kp.empty() &&
+                              !running_settings.vr_ruiwo_kd.empty() &&
+                              running_settings.vr_ruiwo_kp.size() == running_settings.vr_ruiwo_kd.size();
+
+    const auto &selected_ec_kp = use_vr_ec ? running_settings.vr_joint_kp : running_settings.joint_kp;
+    const auto &selected_ec_kd = use_vr_ec ? running_settings.vr_joint_kd : running_settings.joint_kd;
+    const auto &selected_ruiwo_kp = use_vr_ruiwo ? running_settings.vr_ruiwo_kp : running_settings.ruiwo_kp;
+    const auto &selected_ruiwo_kd = use_vr_ruiwo ? running_settings.vr_ruiwo_kd : running_settings.ruiwo_kd;
+
+    // 替换 EC_MASTER 电机 kp/kd
+    if (!selected_ec_kp.empty() &&
+        !selected_ec_kd.empty() &&
+        selected_ec_kp.size() == selected_ec_kd.size())
+    {
+      const int ec_master_size = static_cast<int>(selected_ec_kp.size());
+      int ec_master_count = 0;
+      
+      for (int i = 0; i < total_joints && i < static_cast<int>(jointCmdMsg.control_modes.size()); ++i)
+      {
+        // 检查是否为 EC_MASTER 驱动器
+        if (i < static_cast<int>(hardware_settings.driver.size()) &&
+            hardware_settings.driver[i] == EC_MASTER)
+        {
+          // 只有当 control_modes == 2 时才更新 joint_kp 和 joint_kd
+          if (jointCmdMsg.control_modes[i] == 2 && 
+              ec_master_count < ec_master_size)
+          {
+            jointCmdMsg.joint_kp[i] = static_cast<double>(selected_ec_kp[ec_master_count]);
+            jointCmdMsg.joint_kd[i] = static_cast<double>(selected_ec_kd[ec_master_count]);
+          }
+          // 无论 control_modes 是 0 还是 2，都要递增 ec_master_count
+          // 因为 selected_ec_kp/kd 的索引对应所有 EC_MASTER 驱动器
+          ec_master_count++;
+        }
+      }
+    }
+
+    // 替换 RUIWO 电机 kp/kd（手臂默认增益）
+    if (!selected_ruiwo_kp.empty() &&
+        !selected_ruiwo_kd.empty() &&
+        selected_ruiwo_kp.size() == selected_ruiwo_kd.size())
+    {
+      const int ruiwo_size = static_cast<int>(selected_ruiwo_kp.size());
+      int ruiwo_count = 0;
+
+      for (int i = 0; i < total_joints && i < static_cast<int>(jointCmdMsg.control_modes.size()); ++i)
+      {
+        if (i < static_cast<int>(hardware_settings.driver.size()) &&
+            hardware_settings.driver[i] == RUIWO)
+        {
+          if (jointCmdMsg.control_modes[i] == 2 &&
+              ruiwo_count < ruiwo_size)
+          {
+            jointCmdMsg.joint_kp[i] = static_cast<double>(selected_ruiwo_kp[ruiwo_count]);
+            jointCmdMsg.joint_kd[i] = static_cast<double>(selected_ruiwo_kd[ruiwo_count]);
+          }
+          ruiwo_count++;
+        }
+      }
+    }
+  }
+  vector_t humanoidControllerWheelWbc::getDesiredContactForce()
+  {
+    vector_t desired_force = vector_t::Zero(12); // 12维，双臂各6维
+
+    // 获取左臂期望力
+    if (desired_force_manager_->hasDesiredForce("left_hand")) {
+      DesiredForceManager::Vector6d left_force = desired_force_manager_->getDesiredForce("left_hand");
+      desired_force.segment<6>(0) = left_force;
+    }
+
+    // 获取右臂期望力
+    if (desired_force_manager_->hasDesiredForce("right_hand")) {
+      DesiredForceManager::Vector6d right_force = desired_force_manager_->getDesiredForce("right_hand");
+      desired_force.segment<6>(6) = right_force;
+    }
+
+    return desired_force;
   }
 
 } // namespace humanoidController_wheel_wbc

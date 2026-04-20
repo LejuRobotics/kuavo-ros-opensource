@@ -66,9 +66,11 @@ trap restore_pip_source EXIT
 # echo "DEVEL_DIR: $DEVEL_DIR"
 # echo "INSTALLED_DIR: $INSTALLED_DIR"
 
-# Define the ROS message packages to be copied
-# These packages contain message definitions needed by the SDK
-MSG_PACKAGES="kuavo_msgs ocs2_msgs motion_capture_ik"
+# Define the ROS message packages to be copied.
+# SDK consumes IK-related message/service types from kuavo_msgs.
+# motion_capture_ik may still be needed at runtime as the IK node provider,
+# but it should not be treated as a standalone message package here.
+MSG_PACKAGES="kuavo_msgs ocs2_msgs"
 
 copy_ros_msg() {
     local src_dir=$1

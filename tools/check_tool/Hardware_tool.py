@@ -723,11 +723,76 @@ def ruiwo_zero():
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
+def ruiwo_zero_selective():
+    """
+    选择性设置指定电机硬件零点（仅支持双CAN配置）
+    """
+    # 检查CAN总线接线方式
+    canbus_wiring_file = os.path.expanduser('~/.config/lejuconfig/CanbusWiringType.ini')
+    
+    use_motorevo_tool = False
+    if os.path.exists(canbus_wiring_file):
+        with open(canbus_wiring_file, 'r') as f:
+            wiring_type = f.read().strip()
+            if wiring_type == "dual_bus":
+                use_motorevo_tool = True
+    
+    if not use_motorevo_tool:
+        print(bcolors.FAIL + "错误：此功能仅支持双CAN配置" + bcolors.ENDC)
+        print(bcolors.WARNING + "当前为单CAN配置，请使用选项 'd' 进行零点设置" + bcolors.ENDC)
+        return
+    
+    print(bcolors.OKGREEN + "检测到双CAN配置" + bcolors.ENDC)
+    print(bcolors.OKCYAN + "请输入要设置零点的电机ID（多个ID用逗号分隔，如：1,8）" + bcolors.ENDC)
+    print(bcolors.OKCYAN + "或直接按回车设置所有电机零点" + bcolors.ENDC)
+    
+    user_input = input("电机ID: ").strip()
+    
+    motorevo_tool = os.path.join(folder_path, "motorevo_tool.sh")
+    if not os.path.exists(motorevo_tool):
+        print(bcolors.FAIL + f"错误：未找到 {motorevo_tool}" + bcolors.ENDC)
+        return
+    
+    if user_input:
+        # 解析用户输入的电机ID
+        try:
+            # 去除空格并按逗号分割
+            motor_ids = [id.strip() for id in user_input.split(',') if id.strip()]
+            if not motor_ids:
+                print(bcolors.FAIL + "错误：未输入有效的电机ID" + bcolors.ENDC)
+                return
+            
+            # 验证所有ID都是数字
+            for id in motor_ids:
+                if not id.isdigit():
+                    print(bcolors.FAIL + f"错误：无效的电机ID '{id}'，请输入数字" + bcolors.ENDC)
+                    return
+            
+            motor_ids_str = ','.join(motor_ids)
+            print(bcolors.OKCYAN + f"将为以下电机设置零点: {motor_ids_str}" + bcolors.ENDC)
+            
+            # 执行设置零点命令，传递电机ID参数
+            command = f"bash {motorevo_tool} --set-zero {motor_ids_str}"
+            subprocess.run(command, shell=True)
+            
+        except Exception as e:
+            print(bcolors.FAIL + f"错误：{e}" + bcolors.ENDC)
+            return
+    else:
+        # 未输入ID，设置所有电机零点
+        print(bcolors.WARNING + "未指定电机ID，将设置所有电机零点" + bcolors.ENDC)
+        confirm = input("确定要设置所有电机零点吗？(yes/no): ").strip().lower()
+        if confirm == "yes":
+            command = f"bash {motorevo_tool} --set-zero"
+            subprocess.run(command, shell=True)
+        else:
+            print(bcolors.OKGREEN + "操作已取消" + bcolors.ENDC)
+
 def ruiwo_negtive():
     while True:
         print("请选择手臂总线类型：")
         print("1. 单CAN")
-        print("2. 双CAN（ROBAN2.1）")
+        print("2. 双CAN")
         choice = input("请输入选择 (1 或 2): ").strip()
 
         if choice == "1":
@@ -761,7 +826,7 @@ def ruiwo_negtive():
     while True:
         print("请选择手臂总线类型：")
         print("1. 单CAN")
-        print("2. 双CAN（ROBAN2.1）")
+        print("2. 双CAN")
         can_choice = input("请输入选择 (1 或 2): ").strip()
 
         if can_choice == "2":
@@ -965,6 +1030,24 @@ def hip_imu_test():
         return
         
     # 使用 subprocess.run() 运行命令
+    subprocess.run(command, shell=True)
+
+
+def stress_test_all_cores():
+    """
+    启动 CPU 压力测试，检查散热
+    """
+    stress_test_script = os.path.join(folder_path, "stress_test", "stress_test_all_cores.sh")
+    
+    if not os.path.exists(stress_test_script):
+        print(bcolors.FAIL + f"错误：压力测试脚本不存在: {stress_test_script}" + bcolors.ENDC)
+        return
+    
+    print(bcolors.OKCYAN + f"启动 CPU 压力测试脚本: {stress_test_script}" + bcolors.ENDC)
+    print()
+    
+    # 使用 subprocess.run() 运行命令
+    command = "bash " + stress_test_script
     subprocess.run(command, shell=True)
 
 
@@ -1252,8 +1335,9 @@ def secondary_menu():
         print("a. 测试二指夹爪（Ctrl + C 退出）")
         print("b. 配置灵巧手（普通）usb")
         print("c. 测试灵巧手")
-        print("d. 手臂电机设置零点")
-        print("e. 手臂电机辨识方向(注意电机限位不要堵转)")    
+        print("d. 手臂电机设置软件零点（仅将电机偏置值保存到零点文件）")
+        print("dd. 手臂电机设置硬件零点（将电机当前位置设为电机零点）")
+        print("e. 手臂电机辨识方向（注意电机限位不要堵转）")    
         print("f. 零点文件备份")
         print("g. 遥控器配置usb")
         print("h. 新款IMU通信板配置usb")
@@ -1269,6 +1353,7 @@ def secondary_menu():
         print("r. 隔离CPU核心 ")
         print("u. 配置robot上线提醒")
         print("t. 恢复出厂文件夹")
+        print("v. 执行CPU压力测试，检查散热")
 
         option = input("请输入你的选择：")
         if option == 'q':
@@ -1311,9 +1396,15 @@ def secondary_menu():
             print(bcolors.HEADER + "###结束，测试灵巧手###" + bcolors.ENDC)
             break
         elif option == "d":
-            print(bcolors.HEADER + "###开始，手臂电机设置零点###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###开始，手臂电机设置软件零点（仅将电机偏置值保存到零点文件）###" + bcolors.ENDC)
             ruiwo_zero()
-            print(bcolors.HEADER + "###结束，手臂电机设置零点###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###结束，手臂电机设置软件零点（仅将电机偏置值保存到零点文件）###" + bcolors.ENDC)
+            break
+        elif option == "dd":
+            print(bcolors.HEADER + "###开始，手臂电机设置硬件零点（将电机当前位置设为电机零点）###" + bcolors.ENDC)
+            ruiwo_zero_selective()
+            print(bcolors.HEADER + "###结束，手臂电机设置硬件零点（将电机当前位置设为电机零点）###" + bcolors.ENDC)
+            print(bcolors.HEADER + "###【注意，还需要执行 d, 来设置电机软件零点】###" + bcolors.ENDC)
             break
         elif option == "e":
             print(bcolors.HEADER + "###开始，手臂电机辨识方向###" + bcolors.ENDC)
@@ -1367,12 +1458,45 @@ def secondary_menu():
             robot_version = get_robot_version()
             kuavo_breakin_script = None
             script_description = ""
+            is_executable_script = False  # 标记是否为可执行脚本（非Python脚本）
             
             if robot_version:
                 try:
                     version_num = int(robot_version)
 
-                    if 13 <= version_num <= 14:
+                    if version_num == 62:
+                        # 版本62：执行可执行脚本
+                        # 检查是开源仓库还是闭源仓库
+                        # 开源仓库：installed/lib/hardware_node/hardware_plant_wheel_arm_test
+                        # 闭源仓库：devel/lib/hardware_node/hardware_plant_wheel_arm_test
+
+                        workspace_root = os.path.abspath(os.path.join(folder_path, "..", ".."))
+                        installed_script = os.path.join(workspace_root, "installed", "lib", "hardware_node", "hardware_plant_wheel_arm_test")
+                        devel_script = os.path.join(workspace_root, "devel", "lib", "hardware_node", "hardware_plant_wheel_arm_test")
+
+                        if os.path.exists(installed_script):
+                            kuavo_breakin_script = installed_script
+                            script_description = f"开源仓库磨线脚本 installed/lib/hardware_node/hardware_plant_wheel_arm_test (版本 {robot_version})"
+                            is_executable_script = True
+                        elif os.path.exists(devel_script):
+                            kuavo_breakin_script = devel_script
+                            script_description = f"闭源仓库磨线脚本 devel/lib/hardware_node/hardware_plant_wheel_arm_test (版本 {robot_version})"
+                            is_executable_script = True
+                        else:
+                            print(bcolors.FAIL + f"错误：找不到 hardware_plant_wheel_arm_test 可执行文件" + bcolors.ENDC)
+                            print(f"  开源路径：{installed_script}")
+                            print(f"  闭源路径：{devel_script}")
+                            break
+
+                    elif 13 <= version_num <= 14:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
+                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+
+                    elif version_num == 17:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
+                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+
+                    elif version_num == 17:
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
@@ -1390,7 +1514,7 @@ def secondary_menu():
                         script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
                     else:
-                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、40-49、50-52、    53），当前不支持自动选择磨线脚本" + bcolors.ENDC)
+                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、17、40-49、50-52、62、53），当前不支持自动选择磨线脚本" + bcolors.ENDC)
                 except (ValueError, TypeError):
                     print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，请检查 ~/.bashrc 中的 ROBOT_VERSION 设置" + bcolors.ENDC)
             else:
@@ -1399,9 +1523,25 @@ def secondary_menu():
             if kuavo_breakin_script:
                 if os.path.exists(kuavo_breakin_script):
                     print(bcolors.OKGREEN + f"\n使用{script_description}" + bcolors.ENDC)
-                    # 如果需要以 root 运行，请直接使用 root 终端启动本工具
-                    command = "python3 " + kuavo_breakin_script
-                    subprocess.run(command, shell=True)
+                    
+                    # 询问用户是否已校准零点并位于零点位置
+                    print(bcolors.FAIL + "\n⚠ 请确认轮臂机器人已校准零点，且当前位于零点位置" + bcolors.ENDC)
+                    user_confirm = input("确认无误后按回车继续，或输入 'q' 取消: ").strip()
+                    
+                    if user_confirm.lower() == 'q':
+                        print(bcolors.WARNING + "操作已取消" + bcolors.ENDC)
+                        print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)
+                        break
+                    
+                    # 根据脚本类型选择执行方式
+                    if is_executable_script:
+                        # 可执行脚本：直接执行（可能需要sudo权限）
+                        command = kuavo_breakin_script
+                        subprocess.run(command, shell=True)
+                    else:
+                        # Python脚本：使用python3执行
+                        command = "python3 " + kuavo_breakin_script
+                        subprocess.run(command, shell=True)
                 else:
                     print(bcolors.FAIL + f"错误：磨线脚本不存在: {kuavo_breakin_script}" + bcolors.ENDC)
             print(bcolors.HEADER + "###结束，执行机器人磨线###" + bcolors.ENDC)
@@ -1436,6 +1576,11 @@ def secondary_menu():
             print(bcolors.HEADER + "###开始，恢复出厂文件夹###" + bcolors.ENDC)
             reset_folder()
             print(bcolors.HEADER + "###结束，恢复出厂文件夹###" + bcolors.ENDC) 
+            break
+        elif option == "v":
+            print(bcolors.HEADER + "###开始，执行CPU压力测试，检查散热###" + bcolors.ENDC)
+            stress_test_all_cores()
+            print(bcolors.HEADER + "###结束，执行CPU压力测试，检查散热###" + bcolors.ENDC)
             break
         else:
             print(bcolors.FAIL + "无效选项，请重新选择！\n" + bcolors.ENDC)

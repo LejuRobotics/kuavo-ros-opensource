@@ -52,6 +52,7 @@
     <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
     <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
+    <arg name="run_mujoco_camera" default="false"/>   <!-- 是否运行mujoco的相机 -->
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -89,6 +90,7 @@
     <param name="torso_interpolation_max_velocity" value="0.06"/>
     <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
     <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
+    <param name="run_mujoco_camera" value="$(arg run_mujoco_camera)"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     
@@ -99,10 +101,10 @@
     <param name="/timeout_warning_ms" value="20"/>
 
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- mpc node -->
     <group if="$(arg use_external_mpc)">
@@ -136,7 +138,7 @@
     <group unless="$(arg play_back)">
       <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch"/>
     </group>
-      <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">

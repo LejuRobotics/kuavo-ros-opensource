@@ -182,6 +182,50 @@ class RobotStateTestClient:
             if ee_state.effort:
                 print(f"    Efforts: {ee_state.effort}")
 
+            # 解析手臂力反馈数据（新增）
+            if robot_state.HasField('arm_force_feedback'):
+                arm_force = robot_state.arm_force_feedback
+                print(f"  ╔═══════════════════════════════════════════════════════╗")
+                print(f"  ║          VR 端力反馈模拟 (Virtual Force Feedback)        ║")
+                print(f"  ╚═══════════════════════════════════════════════════════╝")
+
+                # 左臂 VR 模拟
+                left_vibration_intensity = int(arm_force.max_force[0])
+                left_weight_kg = (arm_force.max_force[0] / 255.0) * 2.0
+                print(f"  ║ 左臂 (Left Arm):")
+                print(f"  ║   振动强度: {left_vibration_intensity}/255")
+                print(f"  ║   估算重量: {left_weight_kg:.2f} kg (基于xyz中最大力)")
+                print(f"  ║   振动条形图: {'█' * (left_vibration_intensity // 10)}{'░' * (25 - left_vibration_intensity // 10)}")
+
+                # 右臂 VR 模拟
+                right_vibration_intensity = int(arm_force.max_force[1])
+                right_weight_kg = (arm_force.max_force[1] / 255.0) * 2.0
+                print(f"  ║")
+                print(f"  ║ 右臂 (Right Arm):")
+                print(f"  ║   振动强度: {right_vibration_intensity}/255")
+                print(f"  ║   估算重量: {right_weight_kg:.2f} kg (基于xyz中最大力)")
+                print(f"  ║   振动条形图: {'█' * (right_vibration_intensity // 10)}{'░' * (25 - right_vibration_intensity // 10)}")
+
+                # VR 触发建议
+                max_vibration = max(left_vibration_intensity, right_vibration_intensity)
+                if max_vibration > 200:
+                    print(f"  ║")
+                    print(f"  ║ 🎮 VR 动作建议: 强烈振动！抓取重物 (>1.5kg)")
+                elif max_vibration > 100:
+                    print(f"  ║")
+                    print(f"  ║ 🎮 VR 动作建议: 中等振动，抓取中物 (0.8-1.5kg)")
+                elif max_vibration > 20:
+                    print(f"  ║")
+                    print(f"  ║ 🎮 VR 动作建议: 轻微振动，抓取轻物 (0.2-0.8kg)")
+                else:
+                    print(f"  ║")
+                    print(f"  ║ 🎮 VR 动作建议: 无振动，空手或极轻物体")
+
+                print(f"  ╚═══════════════════════════════════════════════════════╝")
+            else:
+                print(f"  ║ Arm Force Feedback: 无数据")
+                print(f"  ╚═══════════════════════════════════════════════════════╝")
+
         except Exception as e:
             # 如果不是protobuf格式，可能是其他消息
             try:

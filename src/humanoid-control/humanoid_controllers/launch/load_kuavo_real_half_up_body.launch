@@ -19,6 +19,5 @@
     <arg name="teach_pendant" value="$(arg teach_pendant)"/>
   </include>
 
-  <!-- <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/> -->
 
 </launch>   

@@ -47,9 +47,6 @@ TwoStageTorsoIK::TwoStageTorsoIK(drake::multibody::MultibodyPlant<double>* plant
 IKSolveResult TwoStageTorsoIK::solveIK(const std::vector<PoseData>& PoseConstraintList,
                                        ArmIdx controlArmIndex,
                                        const Eigen::VectorXd& jointMidValues) {
-  if (!preSolveCheck(PoseConstraintList)) {
-    return IKSolveResult(nq_, "preSolveCheck failed");
-  }
 
   bool useJointLimit = true;  // 使用urdf中定义的joint limit
   drake::multibody::InverseKinematics stage1Ik(*plant_, useJointLimit);

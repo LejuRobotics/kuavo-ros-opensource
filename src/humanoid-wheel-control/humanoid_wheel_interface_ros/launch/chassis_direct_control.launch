@@ -29,14 +29,19 @@
     <arg name="joy_dev" default="/dev/input/js0"/>
     
     <!-- 速度参数 -->
-    <arg name="linear_scale_x" default="0.3"/>
-    <arg name="linear_scale_y" default="0.3"/>
-    <arg name="angular_scale_z" default="0.3"/>
+    <arg name="linear_scale_x" default="0.8"/>
+    <arg name="linear_scale_y" default="0.8"/>
+    <arg name="angular_scale_z" default="0.5"/>
     <arg name="deadzone" default="0.1"/>
     
     <!-- 实机控制：是否使用 wheel bridge (用于连接底盘硬件) -->
     <arg name="use_wheel_bridge" default="true"/>
 
+    <!-- The task file for the mpc. -->
+    <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
+    <param name="taskFile"   value="$(arg taskFile)" />
+    
     <!-- ========== 手柄控制 (bt2/bt2pro) ========== -->
     <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
         <!-- 手柄驱动节点 -->
@@ -68,5 +73,8 @@
         <node pkg="humanoid_controllers" type="auto_wheel_bridge.py" name="auto_wheel_bridge_node" 
               output="screen" required="false"/>
     </group>
+    <!-- restart urobot.service (depends on sshpass) -->
+    <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service"
+          output="screen" required="false"/>
 
 </launch>

@@ -178,6 +178,12 @@ static uint8_t physical2logical_[ROBOT_MODEL_NUM][NUM_SLAVE_MAX] = {
     6, 7, 8, 9, 10, 11,               // 冗余
     12, 13, 14, 15, 16, 17,
     18, 19, 20, 21, 22, 23,
+    24, 25, 26, 27, 28, 29},
+    // LunBi_V62
+   {3, 2, 1, 0,                       // 下肢
+    4, 5, 6, 7, 8, 9, 10, 11,         // 冗余
+    12, 13, 14, 15, 16, 17,
+    18, 19, 20, 21, 22, 23,
     24, 25, 26, 27, 28, 29}
 };
 
@@ -1361,6 +1367,15 @@ void setRobotMoudle(const int robot_module)
       std::cout << "||              Get Robot Module is Lunbi              ||" << std::endl;
       std::cout << "********************************************************" << std::endl;
       Robot_module = LUNBI;
+      std::cout << "Robot_module: " << Robot_module << std::endl;
+      break;
+    }
+    case LUNBI_V62:
+    {
+      std::cout << "********************************************************" << std::endl;
+      std::cout << "||              Get Robot Module is Lunbi_V62          ||" << std::endl;
+      std::cout << "********************************************************" << std::endl;
+      Robot_module = LUNBI_V62;
       std::cout << "Robot_module: " << Robot_module << std::endl;
       break;
     }

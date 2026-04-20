@@ -85,7 +85,7 @@ pip install --upgrade --pre kuavo_humanoid_sdk
 
 我们推荐您自己执行文档脚本生成文档到本地, 文档会输出到`docs/html`和`docs/markdown`文件夹:
 ```bash
-catkin build kuavo_msgs ocs2_msgs motion_capture_ik
+catkin build kuavo_msgs ocs2_msgs
 chmod +x ./gen_docs.sh
 ./gen_docs.sh
 ```

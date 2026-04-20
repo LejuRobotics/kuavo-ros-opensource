@@ -27,11 +27,12 @@ Kuavo Humanoid SDK
 
 .. toctree::
    :hidden:
-   
+
    pages/installation
    pages/quickstart
    pages/api_reference
    pages/data_types
+   pages/controller
    pages/examples
    pages/kuavo_strategy
    pages/kuavo_strategy_v2

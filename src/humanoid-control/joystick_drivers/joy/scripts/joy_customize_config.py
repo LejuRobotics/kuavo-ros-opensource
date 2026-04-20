@@ -520,10 +520,10 @@ class JoyCustomizeConfigNode:
             if 0 <= rt_idx < len(joy_msg.axes):
                 self._rt_pressed = joy_msg.axes[rt_idx] < -0.5
 
-            # 优先级最高：START + BACK 组合 -> 终止机器人并复位开关
-            if 0 <= start_idx < len(joy_msg.buttons) and 0 <= back_idx < len(joy_msg.buttons):
-                if joy_msg.buttons[start_idx] and joy_msg.buttons[back_idx]:
-                    rospy.logerr("[JoyCustomize] Emergency stop triggered (START + BACK)")
+            # 优先级最高：BACK 组合 -> 终止机器人并复位开关
+            if 0 <= back_idx < len(joy_msg.buttons):
+                if joy_msg.buttons[back_idx]:
+                    rospy.logerr("[JoyCustomize] Emergency stop triggered (BACK)")
                     self._gradually_move_right_stick_down()
                     self._call_terminate_srv()
                     self._allow_launch_once = True

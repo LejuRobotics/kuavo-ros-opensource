@@ -26,11 +26,17 @@ struct ClawCommandData {
 
 class JoyStickHandler {
  public:
-  JoyStickHandler();
+  JoyStickHandler(double threshold = 0.0, double alpha = 0.0);
 
   void initialize();
 
   void reset();
+
+  double getLeftJoyStickX() const;
+  double getLeftJoyStickY() const;
+  double getRightJoyStickX() const;
+  double getRightJoyStickY() const;
+  bool getRightJoyStickYHold() const;
 
   void updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg);
   void processHandEndEffectorData();
@@ -62,11 +68,6 @@ class JoyStickHandler {
 
   void forceSetLeftArmCtrlMode(bool active);
   void forceSetRightArmCtrlMode(bool active);
-
-  double getLeftJoyStickX() const;
-  double getLeftJoyStickY() const;
-  double getRightJoyStickX() const;
-  double getRightJoyStickY() const;
 
  private:
   void processRobotEndHandWithFingerData();
@@ -130,6 +131,20 @@ class JoyStickHandler {
   std::vector<int> leftHandPosition_;   // 左手位置 [0-100]
   std::vector<int> rightHandPosition_;  // 右手位置 [0-100]
   std::vector<int> clawPosition_;       // 爪子位置 [0-100]
+
+  // 手柄摇杆缓存数据
+  double leftJoyStickX_;
+  double leftJoyStickY_;
+  double rightJoyStickX_;
+  double rightJoyStickY_;
+
+  // 摇杆阈值和低通滤波参数
+  double joyStickThreshold_;
+  double joyStickAlpha_;
+
+  // RightJoyStickY 按下时间检查相关变量
+  bool RightJoyStickYHold_;      // RightJoyStickY 保持状态，默认值为 true
+  int rightJoyStickYHoldCount_;  // 连续满足条件的计数
 
   HandPositionData handPositionData_;
   ClawCommandData clawCommandData_;

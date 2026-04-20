@@ -399,7 +399,7 @@ namespace ocs2
         // std::cout << "euler_z: " << euler_zyx(0) << ", delta_yaw: " << delta_yaw << std::endl;
         cmd_vector << delta_pose.head(2), delta_yaw;
       }
-      else return;
+      else if (!gaitSchedulePtr_->isWalkingGait(last_gait_name)) return;
       double target_yaw = 0;
       ros_logger_->publishValue("/humanoid/GaitReceiver/single_step_yaw_computed_", single_step_yaw_computed_);
       ros_logger_->publishValue("/humanoid/GaitReceiver/getFinalYawSingleStepMode", swingTrajectoryPlannerPtr_->getFinalYawSingleStepMode());

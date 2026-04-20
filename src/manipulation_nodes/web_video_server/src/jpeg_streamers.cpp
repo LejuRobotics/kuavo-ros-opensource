@@ -6,7 +6,14 @@ namespace web_video_server
 
 MjpegStreamer::MjpegStreamer(const async_web_server_cpp::HttpRequest &request,
                              async_web_server_cpp::HttpConnectionPtr connection, ros::NodeHandle& nh) :
-  ImageTransportImageStreamer(request, connection, nh), stream_(connection)
+  ImageTransportImageStreamer(request, connection, nh),
+  stream_(connection,
+          "boundarydonotcross",
+          1,
+          request.get_query_param_value_or_default<double>("pending_frame_timeout", 0.1),
+          MultipartStream::makeStatusKey(
+              request.get_query_param_value_or_default("topic", ""),
+              "mjpeg"))
 {
   quality_ = request.get_query_param_value_or_default<int>("quality", 95);
   stream_.sendInitialHeader();

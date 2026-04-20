@@ -14,6 +14,7 @@ from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
 from kuavo_humanoid_sdk.kuavo.robot_arm import KuavoRobotArm 
 from kuavo_humanoid_sdk.kuavo.robot_head import KuavoRobotHead
 from kuavo_humanoid_sdk.kuavo.robot_waist import KuavoRobotWaist
+from kuavo_humanoid_sdk.kuavo.robot_wheel_control import KuavoRobotWheelControl
 """
 Kuavo SDK - Kuavo机器人控制的Python接口
 
@@ -100,6 +101,7 @@ class KuavoRobot(RobotBase):
         self._robot_arm  = KuavoRobotArm()
         self._robot_head = KuavoRobotHead()
         self._robot_waist = KuavoRobotWaist()
+        self._robot_wheel_control = KuavoRobotWheelControl()
         self._kuavo_core = KuavoRobotCore()
     def stance(self)->bool:
         """使机器人进入'stance'站立模式。
@@ -114,12 +116,15 @@ class KuavoRobot(RobotBase):
         
     def trot(self)->bool:
         """使机器人进入'trot'踏步模式。
-        
+
         Returns:
             bool: 如果机器人成功进入踏步模式返回 True,否则返回 False。
-            
+
         Note:
             你可以调用 :meth:`KuavoRobotState.wait_for_walk` 来等待机器人进入踏步模式。
+        
+        Warning:
+            该接口仅支持在 MPC 控制器下使用。
         """
         return self._kuavo_core.to_trot()
 
@@ -151,15 +156,18 @@ class KuavoRobot(RobotBase):
         """控制机器人的蹲姿高度和俯仰角。
 
         Args:
-            height (float): 相对于正常站立高度的高度偏移量,单位米,范围[-0.35, 0.1],负值表示下蹲。
+            height (float): 相对于正常站立高度的高度偏移量，单位米，范围[-0.35, 0.1],负值表示下蹲。
                             正常站立高度参考 :attr:`KuavoRobotInfo.init_stand_height`
-            pitch (float): 机器人躯干的俯仰角,单位弧度,范围[0, 0.4]。
-            
+            pitch (float): 机器人躯干的俯仰角，单位弧度，范围 [0, 0.4]。
+
         Returns:
-            bool: 如果蹲姿控制成功返回True,否则返回False。
-            
+            bool: 如果蹲姿控制成功返回 True,否则返回 False。
+
         Note:
-            下蹲和起立不要变化过快，一次变化最大不要超过0.2米。
+            下蹲和起立不要变化过快，一次变化最大不要超过 0.2 米。
+        
+        Warning:
+            该接口仅支持在 MPC 控制器下使用。
         """
         return self._kuavo_core.squat(height, pitch)
 
@@ -209,6 +217,7 @@ class KuavoRobot(RobotBase):
             你可以调用 :meth:`KuavoRobotState.wait_for_stance` 来等待step-control完成。
 
         Warning:
+            该接口仅支持在 MPC 控制器下使用.
             如果当前机器人的躯干高度过低(相对于正常站立高度低于-0.15m)，调用该函数会返回失败。
             正常站立高度参考 :attr:`KuavoRobotInfo.init_stand_height`
 
@@ -222,50 +231,56 @@ class KuavoRobot(RobotBase):
         return self._kuavo_core.step_control(target_pose, dt, is_left_first_default, collision_check)
 
     def control_command_pose(self, target_pose_x: float, target_pose_y: float, target_pose_z: float, target_pose_yaw: float) -> bool:
-        """在base_link坐标系下控制机器人姿态。
-        
+        """在 base_link 坐标系下控制机器人姿态。
+
         Args:
-            target_pose_x (float): 目标x位置,单位米。
-            target_pose_y (float): 目标y位置,单位米。
-            target_pose_z (float): 目标z位置,单位米。
-            target_pose_yaw (float): 目标偏航角,单位弧度。
-            
+            target_pose_x (float): 目标 x 位置，单位米。
+            target_pose_y (float): 目标 y 位置，单位米。
+            target_pose_z (float): 目标 z 位置，单位米。
+            target_pose_yaw (float): 目标偏航角，单位弧度。
+
         Returns:
-            bool: 如果命令发送成功返回True,否则返回False。
-            
+            bool: 如果命令发送成功返回 True，否则返回 False。
+
         Raises:
-            RuntimeError: 如果在尝试控制姿态时机器人不在stance状态。
-            
+            RuntimeError: 如果在尝试控制姿态时机器人不在 stance 状态。
+
         Note:
             此命令会将机器人状态改变为'command_pose'。
-        
+
+        Warning:
+            该接口仅支持在 MPC 控制器下使用。
+
         tips:
-            坐标系: base_link坐标系
-            执行误差： 0.05~0.1m, 0.2~5°
+            坐标系：base_link 坐标系
+            执行误差：0.05~0.1m, 0.2~5°
         """
         return self._kuavo_core.control_command_pose(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
 
     def control_command_pose_world(self, target_pose_x: float, target_pose_y: float, target_pose_z: float, target_pose_yaw: float) -> bool:
-        """在odom(世界)坐标系下控制机器人姿态。
-        
+        """在 odom(世界) 坐标系下控制机器人姿态。
+
         Args:
-            target_pose_x (float): 目标x位置,单位米。
-            target_pose_y (float): 目标y位置,单位米。
-            target_pose_z (float): 目标z位置,单位米。
-            target_pose_yaw (float): 目标偏航角,单位弧度。
-            
+            target_pose_x (float): 目标 x 位置，单位米。
+            target_pose_y (float): 目标 y 位置，单位米。
+            target_pose_z (float): 目标 z 位置，单位米。
+            target_pose_yaw (float): 目标偏航角，单位弧度。
+
         Returns:
-            bool: 如果命令发送成功返回True,否则返回False。
-            
+            bool: 如果命令发送成功返回 True，否则返回 False。
+
         Raises:
-            RuntimeError: 如果在尝试控制姿态时机器人不在stance状态。
-            
+            RuntimeError: 如果在尝试控制姿态时机器人不在 stance 状态。
+
         Note:
             此命令会将机器人状态改变为'command_pose_world'。
 
+        Warning:
+            该接口仅支持在 MPC 控制器下使用。
+
         tips:
-            坐标系: odom坐标系
-            执行误差： 0.03~0.1m, 0.5~5°
+            坐标系：odom 坐标系
+            执行误差：0.03~0.1m, 0.5~5°
         """
         return self._kuavo_core.control_command_pose_world(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
     
@@ -345,6 +360,11 @@ class KuavoRobot(RobotBase):
     def control_waist_pos(self, joint_positions: list)->bool:
         """控制机器人的腰部关节位置。"""
         return self._robot_waist.control_waist(joint_positions)
+
+    @property
+    def wheel_control(self) -> "KuavoRobotWheelControl":
+        """轮臂机器人控制接口，用于手臂模式切换等。"""
+        return self._robot_wheel_control
 
     """ Robot Arm Control """
     def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:

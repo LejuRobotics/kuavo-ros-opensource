@@ -78,6 +78,8 @@ src/demo/test_kuavo_wheel_real 包含实物测试案例，可供参考
 - [`/enable_lb_arm_quick_mode`](#1-enable_lb_arm_quick_mode---关节快速模式切换) - 关节快速模式切换
 - [`/mobile_manipulator_mpc_control`](#2-mobile_manipulator_mpc_control---mpc控制模式切换) - MPC控制模式切换
 
+### 新增轮臂VR增量遥操作接口
+
 ---
 
 ## ROS 话题接口
@@ -693,4 +695,26 @@ string message     # 状态消息
 
 **相关演示脚本：** `lb_ctrl_api.py`
 
+---
+
+## 新增轮臂VR增量遥操作接口
+### 启动方式
+
+```bash
+# 命令行1： 启动仿真环境
+export ROBOT_VERSION=60 # 暂时适配60， 待所有功能开发验证完成后再进行61适配
+source ./devel/setup.bash
+roslaunch humanoid_controllers load_kuavo_mujoco_sim_wheel.launch
+```
+
+```bash
+# 命令行2: 启动VR节点: 增量位置✅ + 增量姿态✅
+export ROBOT_VERSION=60
+source ./devel/setup.bash
+
+roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch \
+    ip_address:=10.10.31.34 \
+    use_cpp_incremental_ik:=true \
+    use_incremental_hand_orientation:=true
+```
 ---

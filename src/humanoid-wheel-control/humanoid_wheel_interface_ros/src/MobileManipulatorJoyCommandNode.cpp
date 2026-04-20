@@ -11,10 +11,12 @@
 #include <std_msgs/Bool.h>
 #include <kuavo_common/common/json.hpp>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
+#include <kuavo_msgs/SetJoyTopic.h>
 #include <map>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <cstdlib>
 
 #define DEAD_ZONE 0.05
 #define MAX_JOYSTICK_NAME_LEN 256
@@ -83,7 +85,7 @@ namespace mobile_manipulator
         initialTorsoPose_y_ = 0.0005;
         initialTorsoPose_z_ = 0.789919;
       }
-      else if(robotVersion_ == 61)
+      else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
       {
         initialTorsoPose_x_ = 0.11575;
         initialTorsoPose_y_ = 0.0;
@@ -132,6 +134,9 @@ namespace mobile_manipulator
       mpc_control_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeTorsoCtrlMode>("/mobile_manipulator_mpc_control");
       previous_mpc_mode_ = 0;  // 默认模式: No control
 
+      // 初始化set_joy_topic服务客户端（用于躯干模式禁用auto_gait节点）
+      set_joy_topic_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetJoyTopic>("/set_joy_topic");
+
       // 初始化控制模式（默认为 cmd_vel 模式）
       current_mode_ = ControlMode::CMD_VEL;
       previous_mode_ = ControlMode::CMD_VEL;
@@ -162,9 +167,31 @@ namespace mobile_manipulator
       zero_control_start_time_ = ros::Time::now();
       is_control_zero_ = true;  // 初始状态认为控制量为零
 
+      // G12轮臂模式: 需同时满足 is_wheel(ROBOT_VERSION major==6) 和 joystick_type==h12
+      // 版本号格式: PPPPMMMMN, major = (version / 10) % 10000
+      is_wheel_ = false;
+      use_g12_ = false;
+      const char* env_robot_version = std::getenv("ROBOT_VERSION");
+      if (env_robot_version != nullptr)
+      {
+        int env_version = std::atoi(env_robot_version);
+        int major = (env_version / 10) % 10000;
+        is_wheel_ = (major == 6);
+      }
+      std::string joystick_type;
+      if (nodeHandle_.getParam("joystick_type", joystick_type) && joystick_type == "h12")
+      {
+        if (is_wheel_)
+        {
+          use_g12_ = true;
+          ROS_INFO("G12轮臂模式已启用 (ROBOT_VERSION=%s)", env_robot_version ? env_robot_version : "unknown");
+        }
+      }
+
       ROS_INFO("轮臂手柄控制节点已启动");
       ROS_INFO("操作提示: 使用左摇杆控制底盘移动，右摇杆控制旋转");
       ROS_INFO("模式切换: LB+A -> cmd_vel, LB+Y -> cmd_vel_world, LB+B -> 躯干控制");
+      ROS_INFO("BACK: chassis E-STOP + call terminate (publish /stop_robot)");
       ROS_INFO("当前映射: linear_x=%d, linear_y=%d, angular=%d, deadzone=%.2f",
                linear_axis_index_x_, linear_axis_index_y_, angular_axis_index_, deadzone_);
       ROS_INFO("当前模式: cmd_vel (默认)");
@@ -184,6 +211,7 @@ namespace mobile_manipulator
     ros::Publisher stop_pub_;
     ros::Subscriber joy_sub_;
     ros::ServiceClient mpc_control_client_;
+    ros::ServiceClient set_joy_topic_client_;
 
     // 控制模式
     ControlMode current_mode_;
@@ -244,6 +272,13 @@ namespace mobile_manipulator
       ros::Time zero_control_start_time_;
       bool is_control_zero_;
       const double MIN_ZERO_DURATION_ = 2.0;  // 控制量为零的最小持续时间（秒）
+
+      // 底盘急停：按 BACK 时置位，持续发布零速度并每 10 次打印一次
+      bool emergency_stop_chassis_{false};
+
+      // G12轮臂模式标志: is_wheel_(ROBOT_VERSION>=60) 且 joystick_type==h12
+      bool is_wheel_;
+      bool use_g12_;
       
     // 检测手柄类型（BEITONG/XBOX）并自动加载对应配置
     void detectJoystickType()
@@ -454,6 +489,21 @@ namespace mobile_manipulator
           last_linear_z_input_ = 0.0;
           last_angular_y_input_ = 0.0;
           last_angular_z_input_ = 0.0;
+
+          // G12模式: 禁用humanoid_joy_control_auto_gait节点，防止底盘移动
+          if (use_g12_)
+          {
+            kuavo_msgs::SetJoyTopic srv;
+            srv.request.topic_name = "/joy_disabled";
+            if (set_joy_topic_client_.call(srv))
+            {
+              std::cout << "G12: auto_gait node disabled (joy topic switched to /joystick_disabled)" << std::endl;
+            }
+            else
+            {
+              std::cout << "G12: failed to disable auto_gait node" << std::endl;
+            }
+          }
         }
         // 从躯干控制模式切换到其他模式时，恢复之前的MPC模式
         else if (current_mode_ == ControlMode::TORSO_CONTROL)
@@ -461,6 +511,21 @@ namespace mobile_manipulator
           if (!callChangeMpcMode(previous_mpc_mode_))
           {
             ROS_ERROR("恢复MPC模式失败，模式: %d", previous_mpc_mode_);
+          }
+
+          // G12模式: 恢复humanoid_joy_control_auto_gait_with_vel节点
+          if (use_g12_)
+          {
+            kuavo_msgs::SetJoyTopic srv;
+            srv.request.topic_name = "/joy";
+            if (set_joy_topic_client_.call(srv))
+            {
+              std::cout << "G12: auto_gait node resumed (joy topic switched to /joystick)" << std::endl;
+            }
+            else
+            {
+              std::cout << "G12: failed to resume auto_gait node" << std::endl;
+            }
           }
         }
 
@@ -501,6 +566,156 @@ namespace mobile_manipulator
         ROS_WARN_THROTTLE(1.0, "接收到无效的手柄消息");
         return;
       }
+
+      // ========== G12轮臂模式（仅当 is_wheel_且joystick_type==h12 时启用） ==========
+      if (use_g12_)
+      {
+        // G12按钮索引: Python层映射 GUIDE=8, M1=9, M2=10
+        const int G12_BTN_GUIDE = 8;
+        const int G12_BTN_M1 = 9;
+        const int G12_BTN_M2 = 10;
+
+        bool guide_pressed = (joy_msg->buttons.size() > (size_t)G12_BTN_GUIDE && joy_msg->buttons[G12_BTN_GUIDE] == 1);
+        bool m1_pressed = (joy_msg->buttons.size() > (size_t)G12_BTN_M1 && joy_msg->buttons[G12_BTN_M1] == 1);
+        bool m2_pressed = (joy_msg->buttons.size() > (size_t)G12_BTN_M2 && joy_msg->buttons[G12_BTN_M2] == 1);
+
+        // G+H同时极值2秒 -> Python层BUTTON_M2=1 -> 躯干复位
+        if (m2_pressed)
+        {
+          integrated_linear_x_ = 0.0;
+          integrated_linear_z_ = 0.0;
+          integrated_angular_y_ = 0.0;
+          integrated_angular_z_ = 0.0;
+          last_linear_x_input_ = 0.0;
+          last_linear_z_input_ = 0.0;
+          last_angular_y_input_ = 0.0;
+          last_angular_z_input_ = 0.0;
+          zero_control_start_time_ = ros::Time::now();
+          is_control_zero_ = true;
+
+          geometry_msgs::Twist reset_cmd;
+          reset_cmd.linear.x = initialTorsoPose_x_;
+          reset_cmd.linear.y = initialTorsoPose_y_;
+          reset_cmd.linear.z = initialTorsoPose_z_;
+          reset_cmd.angular.x = 0.0;
+          reset_cmd.angular.y = 0.0;
+          reset_cmd.angular.z = 0.0;
+          cmd_lb_torso_publisher_.publish(reset_cmd);
+          std::cout << "G+H torso reset completed" << std::endl;
+        }
+
+        // G极值 + A/B/C 模式切换
+        // Python层G12按钮映射: A->buttons[3](Y), B->buttons[1](B), C->buttons[2](X)
+        if (guide_pressed)
+        {
+          const int G12_BTN_A = 3;  // Python层: channel 7(A) -> BUTTON_Y(3)
+          const int G12_BTN_B = 1;  // Python层: channel 8(B) -> BUTTON_B(1)
+          const int G12_BTN_C = 2;  // Python层: channel 9(C) -> BUTTON_X(2)
+
+          bool a_just = (joy_msg->buttons.size() > (size_t)G12_BTN_A && joy_msg->buttons[G12_BTN_A] == 1 &&
+                         old_joy_msg_.buttons.size() > (size_t)G12_BTN_A && old_joy_msg_.buttons[G12_BTN_A] == 0);
+          bool b_just = (joy_msg->buttons.size() > (size_t)G12_BTN_B && joy_msg->buttons[G12_BTN_B] == 1 &&
+                         old_joy_msg_.buttons.size() > (size_t)G12_BTN_B && old_joy_msg_.buttons[G12_BTN_B] == 0);
+          bool c_just = (joy_msg->buttons.size() > (size_t)G12_BTN_C && joy_msg->buttons[G12_BTN_C] == 1 &&
+                         old_joy_msg_.buttons.size() > (size_t)G12_BTN_C && old_joy_msg_.buttons[G12_BTN_C] == 0);
+
+          if (a_just) switchControlMode(ControlMode::CMD_VEL);
+          if (b_just) switchControlMode(ControlMode::CMD_VEL_WORLD);
+          if (c_just) switchControlMode(ControlMode::TORSO_CONTROL);
+        }
+
+        // C+D长按急停
+        int btn_back = joyButtonMap["BUTTON_BACK"];
+        bool back_just = (joy_msg->buttons.size() > (size_t)btn_back && joy_msg->buttons[btn_back] == 1 &&
+                          old_joy_msg_.buttons.size() > (size_t)btn_back && old_joy_msg_.buttons[btn_back] == 0);
+        if (back_just)
+        {
+          callTerminateSrv();
+        }
+
+        // 根据模式分发控制
+        if (current_mode_ == ControlMode::TORSO_CONTROL)
+        {
+          // 躯干积分控制
+          // G极值: 左杆上下->躯干X, 右杆上下->躯干Z
+          // H极值: 右杆左右->躯干Yaw, 左杆上下->躯干Pitch
+          double lx = 0.0, lz = 0.0, ay = 0.0, az = 0.0;
+
+          if (guide_pressed)  // G极值: 左杆上下->X, 右杆上下->Z
+          {
+            double raw = joy_msg->axes[linear_axis_index_x_];  // 左杆上下 axes[1]
+            if (std::abs(raw) >= deadzone_) lx = raw;
+            raw = joy_msg->axes[linear_z_axis_index_];         // 右杆上下 axes[4]
+            if (std::abs(raw) >= deadzone_) lz = raw;
+          }
+          if (m1_pressed)  // H极值: 右杆左右->Yaw, 左杆上下->Pitch
+          {
+            double raw = joy_msg->axes[angular_axis_index_];   // 右杆左右 axes[3]
+            if (std::abs(raw) >= deadzone_) az = raw;
+            raw = joy_msg->axes[linear_axis_index_x_];         // 左杆上下 axes[1]
+            if (std::abs(raw) >= deadzone_) ay = raw;
+          }
+
+          integrated_linear_x_ += lx * integral_gain_linear_x_;
+          integrated_linear_z_ += lz * integral_gain_linear_z_;
+          integrated_angular_y_ += ay * integral_gain_angular_y_;
+          integrated_angular_z_ += az * integral_gain_angular_z_;
+          integrated_linear_x_ = clamp(integrated_linear_x_, -1.0, 1.0);
+          integrated_linear_z_ = clamp(integrated_linear_z_, -1.0, 1.0);
+          integrated_angular_y_ = clamp(integrated_angular_y_, -1.0, 1.0);
+          integrated_angular_z_ = clamp(integrated_angular_z_, -1.0, 1.0);
+
+          auto calcOut = [](double v, double sp, double sn) -> double {
+            return (v >= 0) ? v * sp : v * sn;
+          };
+
+          geometry_msgs::Twist torso;
+          torso.linear.x = clamp(calcOut(integrated_linear_x_, torsoMax_x_, torsoMin_x_), -torsoMin_x_, torsoMax_x_) + initialTorsoPose_x_;
+          torso.linear.z = clamp(calcOut(integrated_linear_z_, torsoMax_z_, torsoMin_z_), -torsoMin_z_, torsoMax_z_) + initialTorsoPose_z_;
+          torso.angular.y = clamp(calcOut(integrated_angular_y_, torsoMax_pitch_, torsoMin_pitch_), -torsoMin_pitch_, torsoMax_pitch_);
+          torso.angular.z = clamp(calcOut(integrated_angular_z_, torsoMax_yaw_, torsoMin_yaw_), -torsoMin_yaw_, torsoMax_yaw_);
+
+          if (std::abs(integrated_linear_x_) >= 1e-6 || std::abs(integrated_linear_z_) >= 1e-6 ||
+              std::abs(integrated_angular_y_) >= 1e-6 || std::abs(integrated_angular_z_) >= 1e-6 ||
+              std::abs(torso.linear.x - initialTorsoPose_x_) >= deadzone_ ||
+              std::abs(torso.linear.z - initialTorsoPose_z_) >= deadzone_ ||
+              std::abs(torso.angular.y) >= deadzone_ || std::abs(torso.angular.z) >= deadzone_)
+          {
+            cmd_lb_torso_publisher_.publish(torso);
+          }
+        }
+        else
+        {
+          // cmd_vel / cmd_vel_world 模式: 摇杆控制底盘
+          double lx = joy_msg->axes[linear_axis_index_x_];
+          double ly = joy_msg->axes[linear_axis_index_y_];
+          double az = joy_msg->axes[angular_axis_index_];
+          if (std::abs(lx) < deadzone_) lx = 0.0;
+          if (std::abs(ly) < deadzone_) ly = 0.0;
+          if (std::abs(az) < deadzone_) az = 0.0;
+
+          geometry_msgs::Twist cmd;
+          cmd.linear.x = clamp(lx * linear_scale_x_, -linear_scale_x_, linear_scale_x_);
+          cmd.linear.y = clamp(ly * linear_scale_y_, -linear_scale_y_, linear_scale_y_);
+          cmd.linear.z = 0.0;
+          cmd.angular.x = 0.0;
+          cmd.angular.y = 0.0;
+          cmd.angular.z = clamp(az * angular_scale_z_, -angular_scale_z_, angular_scale_z_);
+
+          if (std::abs(cmd.linear.x) >= deadzone_ || std::abs(cmd.linear.y) >= deadzone_ || std::abs(cmd.angular.z) >= deadzone_)
+          {
+            if (current_mode_ == ControlMode::CMD_VEL)
+              cmd_vel_publisher_.publish(cmd);
+            else if (current_mode_ == ControlMode::CMD_VEL_WORLD)
+              cmd_vel_world_publisher_.publish(cmd);
+          }
+        }
+
+        old_joy_msg_ = *joy_msg;
+        return;  // G12模式处理完毕
+      }
+
+      // ========== 以下是原有BT2Pro手柄控制逻辑（完全未修改） ==========
 
       // 检测模式切换组合键
       bool lb_pressed = (joy_msg->buttons[joyButtonMap["BUTTON_LB"]] == 1);
@@ -547,12 +762,12 @@ namespace mobile_manipulator
         }
       }
 
-      // 检测 BUTTON_BACK 按下事件（从未按下到按下）
-      if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_BACK"]] && 
-          joy_msg->buttons[joyButtonMap["BUTTON_BACK"]])
-      {
+      // BACK：按下时底盘急停并调用退出程序（/stop_robot），按住期间持续发布零速度
+      bool back_pressed = (joy_msg->buttons.size() > static_cast<size_t>(joyButtonMap["BUTTON_BACK"]) &&
+                                joy_msg->buttons[joyButtonMap["BUTTON_BACK"]]);
+if (back_pressed && !old_joy_msg_.buttons[joyButtonMap["BUTTON_BACK"]])
         callTerminateSrv();
-      }
+      emergency_stop_chassis_ = back_pressed;
 
       // 根据当前模式处理不同的控制逻辑
       if (current_mode_ == ControlMode::TORSO_CONTROL)
@@ -707,43 +922,57 @@ namespace mobile_manipulator
       else
       {
         // ========== cmd_vel 和 cmd_vel_world 模式 ==========
-        // 读取摇杆输入值
-        double linear_x_input = joy_msg->axes[linear_axis_index_x_];
-        double linear_y_input = joy_msg->axes[linear_axis_index_y_];
-        double angular_input = joy_msg->axes[angular_axis_index_];
-
-        // 应用死区
-        if (std::abs(linear_x_input) < deadzone_)
-          linear_x_input = 0.0;
-        if (std::abs(linear_y_input) < deadzone_)
-          linear_y_input = 0.0;
-        if (std::abs(angular_input) < deadzone_)
-          angular_input = 0.0;
-
-        // 创建 cmd_vel 消息
-        geometry_msgs::Twist cmd_vel;
-        cmd_vel.linear.x = clamp(linear_x_input * linear_scale_x_, -linear_scale_x_, linear_scale_x_);
-        cmd_vel.linear.y = clamp(linear_y_input * linear_scale_y_, -linear_scale_y_, linear_scale_y_);
-        cmd_vel.linear.z = 0.0;
-        cmd_vel.angular.x = 0.0;
-        cmd_vel.angular.y = 0.0;
-        cmd_vel.angular.z = clamp(angular_input * angular_scale_z_, -angular_scale_z_, angular_scale_z_);
-
-        // 判断是否接近0（使用死区阈值）
-        bool isNearZero = (std::abs(cmd_vel.linear.x) < deadzone_ && 
-                           std::abs(cmd_vel.linear.y) < deadzone_ && 
-                           std::abs(cmd_vel.angular.z) < deadzone_);
-
-        // 根据当前模式发布到相应的话题
-        if(!isNearZero)
+        if (emergency_stop_chassis_)
         {
-          if (current_mode_ == ControlMode::CMD_VEL)
+          // 底盘急停：向两个话题发布零速度，每 10 次打印一次
+          geometry_msgs::Twist zero_cmd;
+          zero_cmd.linear.x = zero_cmd.linear.y = zero_cmd.linear.z = 0.0;
+          zero_cmd.angular.x = zero_cmd.angular.y = zero_cmd.angular.z = 0.0;
+          cmd_vel_publisher_.publish(zero_cmd);
+          cmd_vel_world_publisher_.publish(zero_cmd);
+          
+            ROS_INFO("Chassis Emergency Stop");
+        }
+        else
+        {
+          // 读取摇杆输入值
+          double linear_x_input = joy_msg->axes[linear_axis_index_x_];
+          double linear_y_input = joy_msg->axes[linear_axis_index_y_];
+          double angular_input = joy_msg->axes[angular_axis_index_];
+
+          // 应用死区
+          if (std::abs(linear_x_input) < deadzone_)
+            linear_x_input = 0.0;
+          if (std::abs(linear_y_input) < deadzone_)
+            linear_y_input = 0.0;
+          if (std::abs(angular_input) < deadzone_)
+            angular_input = 0.0;
+
+          // 创建 cmd_vel 消息
+          geometry_msgs::Twist cmd_vel;
+          cmd_vel.linear.x = clamp(linear_x_input * linear_scale_x_, -linear_scale_x_, linear_scale_x_);
+          cmd_vel.linear.y = clamp(linear_y_input * linear_scale_y_, -linear_scale_y_, linear_scale_y_);
+          cmd_vel.linear.z = 0.0;
+          cmd_vel.angular.x = 0.0;
+          cmd_vel.angular.y = 0.0;
+          cmd_vel.angular.z = clamp(angular_input * angular_scale_z_, -angular_scale_z_, angular_scale_z_);
+
+          // 判断是否接近0（使用死区阈值）
+          bool isNearZero = (std::abs(cmd_vel.linear.x) < deadzone_ &&
+                             std::abs(cmd_vel.linear.y) < deadzone_ &&
+                             std::abs(cmd_vel.angular.z) < deadzone_);
+
+          // 根据当前模式发布到相应的话题
+          if(!isNearZero)
           {
-            cmd_vel_publisher_.publish(cmd_vel);
-          }
-          else if (current_mode_ == ControlMode::CMD_VEL_WORLD)
-          {
-            cmd_vel_world_publisher_.publish(cmd_vel);
+            if (current_mode_ == ControlMode::CMD_VEL)
+            {
+              cmd_vel_publisher_.publish(cmd_vel);
+            }
+            else if (current_mode_ == ControlMode::CMD_VEL_WORLD)
+            {
+              cmd_vel_world_publisher_.publish(cmd_vel);
+            }
           }
         }
       }

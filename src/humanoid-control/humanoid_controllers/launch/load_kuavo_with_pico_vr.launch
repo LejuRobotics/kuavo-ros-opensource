@@ -1,0 +1,47 @@
+<?xml version="1.0" ?>
+
+<launch>
+    <!-- 运行模式 -->
+    <arg name="sim_mode" default="false"/> <!-- true: 仿真, false: 实物 -->
+
+    <!-- 底层控制参数 -->
+    <arg name="with_mm_ik" default="true"/>
+    <arg name="cmd_truncation_enable" default="false"/>
+    <arg name="joint_protect_enable" default="false"/>
+
+    <!-- PICO 参数 -->
+    <arg name="pico_host" default="0.0.0.0"/>
+    <arg name="pico_port" default="12345"/>
+    <arg name="pico_control_mode" default="LowerBody"/>
+    <arg name="pico_control_torso" default="0"/>
+    <arg name="pico_service_mode" default="1"/>
+    <arg name="pico_detection_mode" default="vr"/>
+    <arg name="pico_startup_delay" default="2.0"/>
+
+    <!-- 仿真 -->
+    <group if="$(arg sim_mode)">
+        <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim.launch">
+            <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
+        </include>
+    </group>
+
+    <!-- 实物 -->
+    <group unless="$(arg sim_mode)">
+        <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch">
+            <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
+            <arg name="cmd_truncation_enable" value="$(arg cmd_truncation_enable)"/>
+            <arg name="joint_protect_enable" value="$(arg joint_protect_enable)"/>
+        </include>
+    </group>
+
+    <!-- PICO -->
+    <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_pico_teleop.launch">
+        <arg name="host" value="$(arg pico_host)"/>
+        <arg name="port" value="$(arg pico_port)"/>
+        <arg name="control_mode" value="$(arg pico_control_mode)"/>
+        <arg name="control_torso" value="$(arg pico_control_torso)"/>
+        <arg name="service_mode" value="$(arg pico_service_mode)"/>
+        <arg name="detection_mode" value="$(arg pico_detection_mode)"/>
+        <arg name="startup_delay" value="$(arg pico_startup_delay)"/>
+    </include>
+</launch>

@@ -302,6 +302,21 @@ Visualization Manager:
         {}
       Queue Size: 100
       Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /ik_debug/whole_body_ref_markers
+      Name: WholeBodyRefMarkers
+      Namespaces:
+        wb_ref/chest: true
+        wb_ref/chain_left: true
+        wb_ref/chain_right: true
+        wb_ref/shoulder: true
+        wb_ref/elbow: true
+        wb_ref/hand: true
+        wb_ref/hand_before: true
+        wb_ref/hand_after: true
+      Queue Size: 100
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: visualization_marker

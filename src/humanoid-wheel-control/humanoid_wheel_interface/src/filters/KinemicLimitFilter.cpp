@@ -94,6 +94,14 @@ Eigen::VectorXd KinemicLimitFilter::update(const Eigen::VectorXd& data)
     return filteredData;
 }
 
+const Eigen::VectorXd& KinemicLimitFilter::getFirstOrderDerivative() const {
+    return prevDataFirstOrder_;
+}
+
+const Eigen::VectorXd& KinemicLimitFilter::getSecondOrderDerivative() const {
+    return prevDataSecondOrder_;
+}
+
 void KinemicLimitFilter::setFirstOrderDerivativeLimit(const Eigen::VectorXd& limit) {
     if (limit.size() != dofNum_) {
         ROS_ERROR_STREAM("First order limit dimension mismatch! Expected: " 
@@ -162,7 +170,7 @@ void KinemicLimitFilter::reset(const Eigen::VectorXd& initialValue) {
         inputVec_[i].current_acceleration = {0.0};
     }
     
-    ROS_INFO_STREAM("KinemicLimitFilter reset to specified initial state");
+    // ROS_INFO_STREAM("KinemicLimitFilter reset to specified initial state");
 }
 
 }  // namespace mobile_manipulator

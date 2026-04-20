@@ -103,7 +103,7 @@ class YOLO_detection:
                 tcp_nodelay=True
             )
 
-    def get_detections(self, camera, model):
+    def get_detections(self, camera, model, confidence=0.6):
         if camera not in self.cameras:
             rospy.logerr(f"Unknown camera: {camera}")
             return None
@@ -112,8 +112,8 @@ class YOLO_detection:
             image = self.cameras[camera]['image']
 
         if image is not None:
-            results = model.predict(image, conf=0.6, show=False, verbose=False)
-            self.publish_results(results, camera)
+            results = model.predict(image, conf=confidence, show=False, verbose=False)
+            self.publish_results(results, camera, image_shape=image.shape)
             return results
         else:
             rospy.loginfo(f"No {camera} Camera Image...")
@@ -125,31 +125,38 @@ class YOLO_detection:
     def node_is_shutdown(self):
         return rospy.is_shutdown()
 
-    def tensor_to_msg(self, results):
+    def tensor_to_msg(self, results, image_shape=None):
         if not results:
             return None
-        else:
-            yolo_detections = yoloDetection()
-            for result in results:
-                boxes = result.boxes.cpu().numpy()
+        shape = image_shape if image_shape is not None else self.cv_image_shape
+        image_area = (shape[0] * shape[1]) if shape is not None and len(shape) >= 2 else 0.0
 
-                xywh = boxes.xywh  # center-x(i,0), center-y(i,1), width(i,2), height(i,3)
-                class_ids = result.boxes.cls.int().cpu().numpy()
-                class_names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
-                confs = boxes.conf
+        yolo_detections = yoloDetection()
+        for result in results:
+            boxes = result.boxes.cpu().numpy()
 
-                for i in range(len(xywh)):
-                    yolo_output_data = yoloOutputData(
-                        class_name=class_names[i],
-                        class_id=int(class_ids[i]),
-                        confidence=confs[i], 
-                        x_pos=xywh[i][0], 
-                        y_pos=xywh[i][1], 
-                        height=xywh[i][2], 
-                        width=xywh[i][3]
-                    )
-                    yolo_detections.data.append(yolo_output_data)
-            return yolo_detections
+            xywh = boxes.xywh  # center-x(i,0), center-y(i,1), width(i,2), height(i,3)
+            class_ids = result.boxes.cls.int().cpu().numpy()
+            class_names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
+            confs = boxes.conf
+
+            for i in range(len(xywh)):
+                box_w, box_h = xywh[i][2], xywh[i][3]
+                box_area = box_w * box_h
+                area_ratio = (box_area / image_area) if image_area > 0 else 0.0
+
+                yolo_output_data = yoloOutputData(
+                    class_name=class_names[i],
+                    class_id=int(class_ids[i]),
+                    confidence=confs[i],
+                    x_pos=xywh[i][0],
+                    y_pos=xywh[i][1],
+                    height=box_h,
+                    width=box_w,
+                    area_ratio=area_ratio
+                )
+                yolo_detections.data.append(yolo_output_data)
+        return yolo_detections
 
     def show_results(self, results):
         if not results:
@@ -158,27 +165,27 @@ class YOLO_detection:
             yolo_detections = self.tensor_to_msg(results)
             print(yolo_detections)
 
-    def publish_results(self, results, camera):
+    def publish_results(self, results, camera, image_shape=None):
         if not results:
             rospy.loginfo(f"No results to publish for {camera} camera.")
             return
-            
+
         if camera not in self.cameras:
             rospy.logerr(f"Unknown camera: {camera}")
             return
-            
-        yolo_detections = self.tensor_to_msg(results)
+
+        yolo_detections = self.tensor_to_msg(results, image_shape=image_shape)
         if yolo_detections:
             self.cameras[camera]['publisher'].publish(yolo_detections)
 
     def get_max_area_object(self, results):
         results = self.tensor_to_msg(results)
         if not results or len(results.data) == 0:
-            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
-        
+            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0, 'confidence': 0.0}
+
         max_area = 0
         max_obj = None
-        
+
         for detection in results.data:
             area = detection.width * detection.height
             if area > max_area:
@@ -189,19 +196,21 @@ class YOLO_detection:
                     'w': detection.width,
                     'h': detection.height,
                     'area': area,
-                    'class_id': detection.class_id
+                    'area_ratio': detection.area_ratio,
+                    'class_id': detection.class_id,
+                    'confidence': float(detection.confidence)
                 }
-        
-        return max_obj if max_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
+
+        return max_obj if max_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0, 'confidence': 0.0}
 
     def get_min_area_object(self, results):
         results = self.tensor_to_msg(results)
         if not results or len(results.data) == 0:
-            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
-        
+            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0}
+
         min_area = float('inf')
         min_obj = None
-        
+
         for detection in results.data:
             area = detection.width * detection.height
             if area < min_area:
@@ -212,8 +221,9 @@ class YOLO_detection:
                     'w': detection.width,
                     'h': detection.height,
                     'area': area,
+                    'area_ratio': detection.area_ratio,
                     'class_id': detection.class_id
                 }
-        
-        return min_obj if min_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
+
+        return min_obj if min_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0}
 

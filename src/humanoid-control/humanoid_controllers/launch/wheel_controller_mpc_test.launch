@@ -12,7 +12,7 @@
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
     <arg name="rviz"   default="true"/>
     <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
-    <arg name="use_sqp"   default="false" doc="Use SQP if true, DDP if false"/>
+    <arg name="use_sqp"   default="true" doc="Use SQP if true, DDP if false"/>
 
     <!-- The URDF model of the robot -->
     <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
@@ -39,10 +39,10 @@
     <param name="robot_description" textfile="$(arg urdfFile)"/>
     
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <param name="nodelet_robot_type"      value="$(arg nodelet_robot_type)"/>
     <param name="wheel_control_type"      value="$(arg wheel_control_type)"/>
@@ -78,9 +78,11 @@
 
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
+        <param name="joystick_type" value="h12"/>
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
           <arg name="start_way" value="$(arg start_way)"/>
         </include>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
       </group>
       <group if="$(eval arg('joystick_type') == 'sim')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">

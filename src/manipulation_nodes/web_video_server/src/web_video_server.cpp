@@ -80,6 +80,8 @@ WebVideoServer::WebVideoServer(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
   handler_group_.addHandlerForPath("/stream_viewer",
                                    boost::bind(&WebVideoServer::handle_stream_viewer, this, _1, _2, _3, _4));
   handler_group_.addHandlerForPath("/snapshot", boost::bind(&WebVideoServer::handle_snapshot, this, _1, _2, _3, _4));
+  handler_group_.addHandlerForPath("/stream_status",
+                                   boost::bind(&WebVideoServer::handle_stream_status, this, _1, _2, _3, _4));
 
   try
   {
@@ -203,6 +205,40 @@ bool WebVideoServer::handle_snapshot(const async_web_server_cpp::HttpRequest &re
 
   boost::mutex::scoped_lock lock(subscriber_mutex_);
   image_subscribers_.push_back(streamer);
+  return true;
+}
+
+bool WebVideoServer::handle_stream_status(const async_web_server_cpp::HttpRequest &request,
+                                          async_web_server_cpp::HttpConnectionPtr connection, const char* begin,
+                                          const char* end)
+{
+  const std::string topic = request.get_query_param_value_or_default("topic", "");
+  const std::string type = request.get_query_param_value_or_default("type", __default_stream_type);
+  const MultipartStream::StatusSnapshot snapshot =
+      MultipartStream::getStatusSnapshot(MultipartStream::makeStatusKey(topic, type));
+
+  async_web_server_cpp::HttpReply::builder(async_web_server_cpp::HttpReply::ok)
+      .header("Connection", "close")
+      .header("Server", "web_video_server")
+      .header("Cache-Control", "no-cache, no-store, must-revalidate, pre-check=0, post-check=0, max-age=0")
+      .header("Pragma", "no-cache")
+      .header("Content-type", "application/json")
+      .header("Access-Control-Allow-Origin", "*")
+      .write(connection);
+
+  std::stringstream ss;
+  ss << "{"
+     << "\"topic\":\"" << topic << "\","
+     << "\"type\":\"" << type << "\","
+     << "\"found\":" << (snapshot.found ? "true" : "false") << ","
+     << "\"level\":\"" << snapshot.level << "\","
+     << "\"busy_count\":" << snapshot.busy_count << ","
+     << "\"replace_count\":" << snapshot.replace_count << ","
+     << "\"timeout_drop_count\":" << snapshot.timeout_drop_count << ","
+     << "\"has_pending\":" << (snapshot.has_pending ? "true" : "false") << ","
+     << "\"pending_size\":" << snapshot.pending_size
+     << "}";
+  connection->write(ss.str());
   return true;
 }
 

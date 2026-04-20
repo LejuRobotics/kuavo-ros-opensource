@@ -132,13 +132,7 @@ class ArmsIKNode
             // 替换原始eef name
             end_frames_name[1] = custom_eef_frame_names[0];
             end_frames_name[2] = custom_eef_frame_names[1];
-            std::cout << "new frame_name: " << std::endl;
-            for(auto& frame_name : end_frames_name)
-            {
-                std::cout << "  " << frame_name << std::endl;
-            }
             plant_ptr_->Finalize();
-            std::cout << "plant nq: " << plant_ptr_->num_positions() << ", nv: " << plant_ptr_->num_velocities() << std::endl;
 
             diagram_ptr_ = builder.Build();
             diagram_context_ptr_ = diagram_ptr_->CreateDefaultContext();

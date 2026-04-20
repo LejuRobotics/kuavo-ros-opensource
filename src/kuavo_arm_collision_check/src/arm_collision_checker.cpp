@@ -64,15 +64,17 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
     //     ROS_ERROR("current ROBOT_VERSION != 45, might cause stl model mismatch!");
     // }
 
-    // 如果版本是 49，增加额外 link
-    if(robot_version == "49") {
+    // 49 系列灵巧手版本都需要补齐手部碰撞 link。
+    const std::set<std::string> dexterous_hand_versions = {"49", "100049", "200049", "300049", "400049"};
+    if(dexterous_hand_versions.count(robot_version) > 0) {
         std::vector<std::string> extra_links_49 = {
             "r_palm", "r_thumb_dist", "r_index_dist", "r_middle_dist", "r_ring_dist", "r_little_dist",
             "l_palm", "l_thumb_dist", "l_index_dist", "l_middle_dist", "l_ring_dist", "l_little_dist"
         };
         // 将 extra_links_49 加入 enable_link_list
         enable_link_list.insert(enable_link_list.end(), extra_links_49.begin(), extra_links_49.end());
-        ROS_INFO_STREAM("Added extra links for ROBOT_VERSION 49, enable_link_list size: " << enable_link_list.size());
+        ROS_INFO_STREAM("Added extra links for 49-series ROBOT_VERSION " << robot_version
+                        << ", enable_link_list size: " << enable_link_list.size());
     }
 
     // Read parameter for publishing markers

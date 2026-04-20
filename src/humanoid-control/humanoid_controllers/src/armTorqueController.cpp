@@ -17,7 +17,6 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
                                          const Eigen::VectorXd& kp,
                                          const Eigen::VectorXd& kd)
 {
-    std::cout << "[ArmTorqueController] 构造函数" << std::endl;
     std::cout << "[ArmTorqueController] urdf_path: " << urdf_path << std::endl;
     std::cout << "[ArmTorqueController] kp: " << kp.transpose() << std::endl;
     std::cout << "[ArmTorqueController] kd: " << kd.transpose() << std::endl;
@@ -45,6 +44,8 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
     right_arm_q_start_idx_ = -1;
     right_arm_v_start_idx_ = -1;
     n_arm_ = 0;
+    int n_left_arm_local = 0;
+    int n_right_arm_local = 0;
     
     int current_q_idx = 0;
     int current_v_idx = 0;
@@ -65,6 +66,12 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
                     right_arm_q_start_idx_ = current_q_idx;
                     right_arm_v_start_idx_ = current_v_idx;
                 }
+                // 动态统计每侧关节数
+                if (joint_name.find("zarm_l") != std::string::npos) {
+                    n_left_arm_local++;
+                } else if (joint_name.find("zarm_r") != std::string::npos) {
+                    n_right_arm_local++;
+                }
                 break;
             }
         }
@@ -73,7 +80,12 @@ ArmTorqueController::ArmTorqueController(const std::string& urdf_path,
         current_v_idx += model_.joints[i].nv();
     }
     
-    std::cout << "[ArmTorqueController] 在URDF中找到的手臂关节数量: " << n_arm_ << std::endl;
+    // 根据URDF实际关节数设置，不再硬编码为7
+    n_left_arm_ = n_left_arm_local;
+    n_right_arm_ = n_right_arm_local;
+    
+    std::cout << "[ArmTorqueController] 在URDF中找到的手臂关节数量: " << n_arm_
+              << " (左: " << n_left_arm_ << ", 右: " << n_right_arm_ << ")" << std::endl;
     
     // 校验增益矩阵维度
     if (kp.rows() != n_arm_  || kd.rows() != n_arm_ ) {

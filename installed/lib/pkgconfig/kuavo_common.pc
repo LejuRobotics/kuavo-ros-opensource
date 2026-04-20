@@ -1,0 +1,8 @@
+prefix=/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed
+
+Name: kuavo_common
+Description: Description of kuavo_common
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib -lkuavo_common
+Requires: 

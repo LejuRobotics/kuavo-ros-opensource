@@ -6,6 +6,9 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <chrono>
+#include <vector>
+#include <string>
 
 #include "motion_capture_ik/json.hpp"
 
@@ -142,6 +145,22 @@ class ArmControlBaseROS {
   std::unique_ptr<Quest3ArmInfoTransformer> quest3ArmInfoTransformerPtr_;
   std::unique_ptr<KeyFramesVisualizer> quest3KeyFramesVisualizerPtr_;
   std::shared_ptr<noitom_hi5_hand_udp_python::PoseInfoList> HandPoseAndElbowPositonListPtr_;
+  int loopSyncCount_ = 0;
+
+  // 时间戳记录系统
+  struct TimestampRecord {
+    std::string stepName;
+    uint64_t timestamp;  // 微秒级时间戳
+    int64_t loopCount;   // 循环计数器
+  };
+  std::vector<TimestampRecord> timestampRecords_;
+  std::mutex timestampMutex_;
+  std::chrono::steady_clock::time_point lastSaveTime_;
+  const int64_t saveIntervalSeconds_ = 20;  // 每20秒保存一次
+
+  void recordTimestamp(const std::string& stepName, int64_t loopCount = -1);
+  void saveTimestampRecordsToFile();
+  void checkAndSaveTimestampRecords();
 
   void stopRobotCallback(const std_msgs::Bool::ConstPtr& msg);
 
@@ -156,6 +175,8 @@ class ArmControlBaseROS {
   virtual bool setArmModeChangingCallback(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res);
 
   bool changeArmCtrlMode(int mode);
+
+  bool initializeArmControlMode();
 
   bool initializeArmJointsSafety();
 
@@ -199,6 +220,9 @@ class ArmControlBaseROS {
   void processAbsoluteTorsoControl(const HeadBodyPose& headBodyPose);
   void processTorsoControlLoop();
 
+  // 发布 quest_joystick_data 消息（x轴和A按钮为true，其余全零）
+  void publishQuestJoystickDataXAndA();
+
   void initializeArmInfoTransformerFromJson(const nlohmann::json& configJson);
 
   std::vector<std::string> loadFrameNamesFromConfig(const nlohmann::json& configJson);
@@ -217,6 +241,10 @@ class ArmControlBaseROS {
 
   template <typename T, typename UpdateFunc>
   void processJsonParameter(const nlohmann::json& configJson, const std::string& paramName, UpdateFunc updateFunction);
+
+  // Dimension compatibility helpers
+  void loadJointDimensionsWithFallback(const nlohmann::json& configJson);
+  bool validateJointDimensions(int& numArm, int& numHead, int& numWaist, int& numTotal, int& offset) const;
 };
 
 }  // namespace HighlyDynamic

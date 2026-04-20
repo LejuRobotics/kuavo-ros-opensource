@@ -22,6 +22,7 @@ BaseIKSolver::BaseIKSolver(drake::multibody::MultibodyPlant<double>* plant,
   }
 
   nq_ = plant_->num_positions();
+  std::cout << "[BaseIKSolver] nq: " << nq_ << std::endl;
   latestSolution_ = Eigen::VectorXd::Zero(nq_);
   initializeFrames(ikConstraintFrameNames);
 }
@@ -33,45 +34,6 @@ void BaseIKSolver::initializeFrames(const std::vector<std::string>& ikConstraint
   for (const auto& frameName : ikConstraintFrameNames) {
     ConstraintFrames_.push_back(&plant_->GetFrameByName(frameName));
   }
-}
-
-bool BaseIKSolver::preSolveCheck(const std::vector<PoseData>& PoseConstraintList) const {
-  if (!plant_) {
-    std::cerr << "Error: plant_ is null" << std::endl;
-    return false;
-  }
-
-  if (PoseConstraintList.empty()) {
-    std::cerr << "Empty pose data list" << std::endl;
-    return false;
-  }
-
-  if (PoseConstraintList.size() != ConstraintFrames_.size()) {
-    std::cerr << "PoseConstraintList size != ConstraintFrames_.size" << std::endl;
-    return false;
-  }
-
-  for (size_t i = 0; i < PoseConstraintList.size(); ++i) {
-    const auto& pos = PoseConstraintList[i].position;
-
-    bool hasNaN = pos.hasNaN();
-    bool hasInf = !std::isfinite(pos(0)) || !std::isfinite(pos(1)) || !std::isfinite(pos(2));
-    bool isZero = pos.isZero(1e-10);
-    bool isExtreme = (pos.array().abs() > 1e6).any();
-
-    if (hasNaN) std::cerr << "position " << i << " contains NaN value!" << std::endl;
-    if (hasInf) std::cerr << "position " << i << " contains infinite value!" << std::endl;
-    // if (isZero) std::cout << "position " << i << " is zero vector" << std::endl;
-    if (isExtreme) std::cerr << "position " << i << " contains extreme value!" << std::endl;
-
-    if (hasNaN || hasInf || isExtreme) {
-      std::cerr << "Invalid position data, cannot solve IK!" << std::endl;
-      std::cerr << "Please check the data source of PoseConstraintList is correctly initialized." << std::endl;
-      return false;
-    }
-  }
-
-  return true;
 }
 
 std::pair<bool, Eigen::VectorXd> BaseIKSolver::solveDrakeIK(drake::multibody::InverseKinematics& ik,

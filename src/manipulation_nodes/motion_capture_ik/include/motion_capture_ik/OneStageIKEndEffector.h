@@ -34,6 +34,8 @@ struct PointTrackIKSolverConfig : public IKSolverConfig {
   double elbowTrackingWeight = 4e2;
   double link6TrackingWeight = 4e3;
   double virtualThumbTrackingWeight = 4e3;
+  double shoulderTrackingWeight = 4e3;
+  double chestTrackingWeight = 4e3;
 
   // joint smoothness weights (7 joints per arm, symmetric for left and right)
   double jointSmoothWeightDefault = 5e1;  // Default weight for all joints
@@ -44,6 +46,11 @@ struct PointTrackIKSolverConfig : public IKSolverConfig {
   double jointSmoothWeight4 = 1e-3;       // Joint 4 (left) / Joint 11 (right)
   double jointSmoothWeight5 = 1e-3;       // Joint 5 (left) / Joint 12 (right)
   double jointSmoothWeight6 = 1e-3;       // Joint 6 (left) / Joint 13 (right)
+
+  double waistSmoothWeight0 = 0.0;
+  double waistSmoothWeight1 = 0.0;
+  double waistSmoothWeight2 = 0.0;
+  double waistSmoothWeight3 = 0.0;
 
   // Default constructor - initializes base class with default values
   PointTrackIKSolverConfig() : IKSolverConfig() {
@@ -64,6 +71,8 @@ class IKResultHistoryBuffer {
   explicit IKResultHistoryBuffer(size_t maxSize = 15) : maxSize_(maxSize) {}
 
   void add(const IKSolveResult& result) {
+    // print result size in cout
+    // std::cout << "OneStageIKEndEffector::solveIK: result size = " << result.solution.size() << std::endl;
     if (result.isSuccess) {
       buffer_.push_back(result);
       if (buffer_.size() > maxSize_) {
@@ -121,7 +130,7 @@ class IKResultHistoryBuffer {
 class OneStageIKEndEffector : public BaseIKSolver {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
+  // Backward-compatible constructor for legacy callers using base config.
   explicit OneStageIKEndEffector(drake::multibody::MultibodyPlant<double>* plant,
                                  const std::vector<std::string>& ikConstraintFrameNames,
                                  const IKSolverConfig& config,
@@ -138,10 +147,11 @@ class OneStageIKEndEffector : public BaseIKSolver {
                         ArmIdx controlArmIndex = ArmIdx::LEFT,
                         const Eigen::VectorXd& jointMidValues = Eigen::VectorXd()) override;
 
-  // Forward Kinematics methods - matching plantIK.cc functionality
+  // Forward Kinematics methods - compatible with legacy and current callers.
   std::pair<Eigen::Vector3d, Eigen::Quaterniond> FK(const Eigen::VectorXd& q,
                                                     const std::string& frameName,
-                                                    int expectedSize = -1);
+                                                    int expectedSize);
+  std::pair<Eigen::Vector3d, Eigen::Quaterniond> FK(const Eigen::VectorXd& q, const std::string& frameName);
   std::pair<Eigen::Vector3d, Eigen::Quaterniond> FKElbow(const Eigen::VectorXd& q,
                                                          const std::string& frameName,
                                                          int expectedSize = -1);
