@@ -7,5 +7,6 @@
         <include file="$(find h12pro_controller_node)/launch/h12pro_to_joystick.launch"/>
     </group>
     <param name="joystick_sensitivity" value="20"/>
-    <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen"
+          launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
 </launch>

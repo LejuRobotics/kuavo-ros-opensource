@@ -201,7 +201,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://biped_s17/meshes/l_handball.STL"/>
+        <mesh filename="../../meshes/l_handball.STL"/>
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -380,7 +380,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://biped_s17/meshes/r_handball.STL"/>
+        <mesh filename="../../meshes/r_handball.STL"/>
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />

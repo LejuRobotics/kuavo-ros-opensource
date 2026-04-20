@@ -201,7 +201,7 @@ class H12ToJoyControllerNode:
 
         if self.is_wheel:
             rospy.set_param('/joystick_type', 'h12')
-            rospy.loginfo("G12轮臂模式: ROBOT_VERSION=%s, 已设置joystick_type=h12", robot_version)
+            rospy.loginfo("[G12] Wheel mode enabled, ROBOT_VERSION=%s, joystick_type=h12", robot_version)
 
     @staticmethod
     def _create_channel_mapping() -> Dict[int, ChannelMapping]:
@@ -277,15 +277,15 @@ class H12ToJoyControllerNode:
                     mapping.scale = Config.SCALE_RIGHT_STICK_Z
 
     def _process_wheel_channels(self) -> None:
-        """轮臂模式(G12)特殊处理"""
+        """Wheel-arm mode (G12) special channel processing."""
         channels = list(self.channels_msg)
 
-        # E/F安全开关: 必须都在中间位置才生效
+        # E/F safety switch: both must be at middle position
         e_mid = abs(channels[4] - Config.H12_AXIS_MID_VALUE) < 100
         f_mid = abs(channels[5] - Config.H12_AXIS_MID_VALUE) < 100
         safe_enabled = e_mid and f_mid
 
-        # G/H滚轮极值检测
+        # G/H dial extreme value detection
         g_value = channels[10]
         g_at_extreme = (g_value <= Config.H12_AXIS_RANGE_MIN + G12_DIAL_THRESHOLD or
                         g_value >= Config.H12_AXIS_RANGE_MAX - G12_DIAL_THRESHOLD)
@@ -293,7 +293,7 @@ class H12ToJoyControllerNode:
         h_at_extreme = (h_value <= Config.H12_AXIS_RANGE_MIN + G12_DIAL_THRESHOLD or
                         h_value >= Config.H12_AXIS_RANGE_MAX - G12_DIAL_THRESHOLD)
 
-        # 摇杆映射 (channel 1-4) 始终处理
+        # Joystick mapping (channel 1-4) always processed
         for index in [0, 1, 2, 3]:
             mapping = self.channel_mapping.get(index + 1)
             if mapping and mapping.axis_index is not None:
@@ -302,24 +302,28 @@ class H12ToJoyControllerNode:
         if not safe_enabled:
             return
 
-        # 安全开关已启用
+        # Safety switch enabled
         self.joy_msg.buttons[G12_BUTTON_LB] = 1
         self.joy_msg.buttons[G12_BUTTON_RB] = 1
 
-        # C+D长按急停 (channel 9->index 8, channel 10->index 9)
+        # C+D long press emergency stop (channel 9->index 8, channel 10->index 9)
         c_pressed = channels[8] == Config.H12_AXIS_RANGE_MAX
         d_pressed = channels[9] == Config.H12_AXIS_RANGE_MAX
         if c_pressed and d_pressed:
             if self.cd_press_start_time is None:
                 self.cd_press_start_time = time.time()
+                rospy.loginfo("[G12] C+D emergency stop: holding, waiting 1.0s...")
             elif time.time() - self.cd_press_start_time >= 1.0 and not self.cd_emergency_triggered:
                 self.joy_msg.buttons[G12_BUTTON_BACK] = 1
                 self.cd_emergency_triggered = True
+                rospy.logwarn("[G12] C+D emergency stop TRIGGERED!")
         else:
+            if self.cd_emergency_triggered:
+                rospy.loginfo("[G12] C+D emergency stop released")
             self.cd_press_start_time = None
             self.cd_emergency_triggered = False
 
-        # 按键映射 (C->9, A->7, B->8, D->10)
+        # Button mapping (C->9, A->7, B->8, D->10)
         wheel_button_map = {
             6: G12_BUTTON_Y,    # channel 7(A) -> buttons[3](Y)
             7: G12_BUTTON_B,    # channel 8(B) -> buttons[1](B)
@@ -331,19 +335,24 @@ class H12ToJoyControllerNode:
             if mapping and mapping.is_button:
                 self.joy_msg.buttons[btn_idx] = mapping.get_current_state(channels[ch_idx])
 
-        # G/H滚轮按钮
+        # G/H dial buttons
         if g_at_extreme:
             self.joy_msg.buttons[G12_BUTTON_GUIDE] = 1
         if h_at_extreme:
             self.joy_msg.buttons[G12_BUTTON_M1] = 1
 
-        # G+H同时极值2秒 -> 躯干复位
+        # G+H both at extreme for 2s -> torso reset
         if g_at_extreme and h_at_extreme:
             if self.gh_press_start_time is None:
                 self.gh_press_start_time = time.time()
+                rospy.loginfo("[G12] G+H torso reset: holding, waiting 2.0s...")
             elif time.time() - self.gh_press_start_time >= 2.0:
                 self.joy_msg.buttons[G12_BUTTON_M2] = 1
+                rospy.logwarn("[G12] G+H torso reset TRIGGERED!")
         else:
+            if self.gh_press_start_time is not None:
+                rospy.loginfo("[G12] G+H torso reset: released, %.1fs elapsed (not triggered)",
+                              time.time() - self.gh_press_start_time)
             self.gh_press_start_time = None
 
 class H12PROControllerNode:

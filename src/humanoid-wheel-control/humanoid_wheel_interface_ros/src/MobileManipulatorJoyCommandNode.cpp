@@ -490,18 +490,18 @@ namespace mobile_manipulator
           last_angular_y_input_ = 0.0;
           last_angular_z_input_ = 0.0;
 
-          // G12模式: 禁用humanoid_joy_control_auto_gait_with_vel节点，防止底盘移动
+          // G12模式: 禁用humanoid_joy_control_auto_gait节点，防止底盘移动
           if (use_g12_)
           {
             kuavo_msgs::SetJoyTopic srv;
             srv.request.topic_name = "/joy_disabled";
             if (set_joy_topic_client_.call(srv))
             {
-              ROS_INFO("G12: 已禁用auto_gait节点 (切换joy话题到/joystick_disabled)");
+              std::cout << "G12: auto_gait node disabled (joy topic switched to /joystick_disabled)" << std::endl;
             }
             else
             {
-              ROS_WARN("G12: 禁用auto_gait节点失败");
+              std::cout << "G12: failed to disable auto_gait node" << std::endl;
             }
           }
         }
@@ -520,11 +520,11 @@ namespace mobile_manipulator
             srv.request.topic_name = "/joy";
             if (set_joy_topic_client_.call(srv))
             {
-              ROS_INFO("G12: 已恢复auto_gait节点 (切换joy话题到/joystick)");
+              std::cout << "G12: auto_gait node resumed (joy topic switched to /joystick)" << std::endl;
             }
             else
             {
-              ROS_WARN("G12: 恢复auto_gait节点失败");
+              std::cout << "G12: failed to resume auto_gait node" << std::endl;
             }
           }
         }
@@ -601,7 +601,7 @@ namespace mobile_manipulator
           reset_cmd.angular.y = 0.0;
           reset_cmd.angular.z = 0.0;
           cmd_lb_torso_publisher_.publish(reset_cmd);
-          ROS_INFO("G12: G+H躯干复位完成");
+          std::cout << "G+H torso reset completed" << std::endl;
         }
 
         // G极值 + A/B/C 模式切换
