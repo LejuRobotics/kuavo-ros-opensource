@@ -917,25 +917,28 @@ namespace ocs2
         return;
       }
 
-      // if (old_joy_msg_.buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_XBOX_BUTTON_NUM)
-      // {
-      //   nodeHandle_.setParam("joystick_type", JOYSTICK_XBOX_MAP_JSON);
-      //   std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_XBOX_MAP_JSON + ".json";
-      //   nodeHandle_.setParam("channel_map_path", channel_map_path);
-      //   ROS_WARN("[JoyController]: Joystick data mapping has changed from BEITONG to X-Box");
-      //   reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_XBOX_BUTTON_NUM);
-      // }
-      // if(old_joy_msg_.buttons.size() == JOYSTICK_XBOX_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM)
-      // {
-      //   nodeHandle_.setParam("joystick_type", JOYSTICK_BEITONG_MAP_JSON);
-      //   std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_BEITONG_MAP_JSON + ".json";
-      //   nodeHandle_.setParam("channel_map_path", channel_map_path);
-      //   ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
-      //   reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
-      //   // 更新old_joy_msg并跳过本次处理，避免状态混乱
-      //   old_joy_msg_ = *joy_msg;
-      //   return;
-      // }
+      if (old_joy_msg_.buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_XBOX_BUTTON_NUM)
+      {
+        nodeHandle_.setParam("joystick_type", JOYSTICK_XBOX_MAP_JSON);
+        std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_XBOX_MAP_JSON + ".json";
+        nodeHandle_.setParam("channel_map_path", channel_map_path);
+        ROS_WARN("[JoyController]: Joystick data mapping has changed from BEITONG to X-Box");
+        reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_XBOX_BUTTON_NUM);
+        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
+        old_joy_msg_ = *joy_msg;
+        return;
+      }
+      if(old_joy_msg_.buttons.size() == JOYSTICK_XBOX_BUTTON_NUM && joy_msg->buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM)
+      {
+        nodeHandle_.setParam("joystick_type", JOYSTICK_BEITONG_MAP_JSON);
+        std::string channel_map_path = ros::package::getPath("humanoid_controllers") + "/launch/joy/" + JOYSTICK_BEITONG_MAP_JSON + ".json";
+        nodeHandle_.setParam("channel_map_path", channel_map_path);
+        ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
+        reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
+        loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
+        old_joy_msg_ = *joy_msg;
+        return;
+      }
 
       if (rb_version_.major() != 1)
       {
