@@ -70,6 +70,8 @@ const sidebars = {
           type: 'category',
           label: 'Kuavo 5-W 操作说明',
           items: [
+            'basic_usage/kuavo-ros-control/docs/2快速开始/开箱操作/Kuavo 5-W 开箱操作',
+            'basic_usage/kuavo-ros-control/docs/2快速开始/G12手柄控制文档/Kuavo 5-W G12操作',
             'basic_usage/kuavo-ros-control/docs/2快速开始/轮臂手柄控制说明文档/Kuavo 5-W 手柄控制说明',
             'basic_usage/kuavo-ros-control/docs/2快速开始/VR操作/Kuavo 5-W VR操作',
           ],
@@ -224,12 +226,13 @@ const sidebars = {
               type: 'category',
               label: 'pytree案例',
               items: [
-                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/轮臂组合案例',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/sdk与msgs常见问题',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_arm',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_head',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_move',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_torso',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/case_wheel_test_torso_joint',
+                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/轮臂组合案例',
               ],
             },
             {
