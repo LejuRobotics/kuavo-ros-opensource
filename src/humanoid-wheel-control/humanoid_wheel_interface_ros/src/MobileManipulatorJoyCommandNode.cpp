@@ -12,11 +12,14 @@
 #include <kuavo_common/common/json.hpp>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
 #include <kuavo_msgs/SetJoyTopic.h>
+#include <kuavo_msgs/getLbTorsoInitialPose.h>
+#include <std_srvs/SetBool.h>
 #include <map>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <cstdlib>
+#include <Eigen/Core>
 
 #define DEAD_ZONE 0.05
 #define MAX_JOYSTICK_NAME_LEN 256
@@ -79,24 +82,13 @@ namespace mobile_manipulator
         nodeHandle_.getParam("robot_version", robotVersion_);
       }
       // 躯干初始化位置xyz
-      if(robotVersion_ == 60)
-      {
-        initialTorsoPose_x_ = 0.196123;
-        initialTorsoPose_y_ = 0.0005;
-        initialTorsoPose_z_ = 0.789919;
-      }
-      else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
-      {
-        initialTorsoPose_x_ = 0.11575;
-        initialTorsoPose_y_ = 0.0;
-        initialTorsoPose_z_ = 0.923803;
-      }
+      loadTorsoInitialPoseFromServer(nodeHandle_);
 
       // 躯干笛卡尔运动限幅
-      torsoMax_x_ = 0.13; torsoMin_x_ = 0.2;
+      torsoMax_x_ = 0.25; torsoMin_x_ = 0.0;
       torsoMax_z_ = 0.32; torsoMin_z_ =  0.0;
       torsoMax_yaw_ = 0.5235; torsoMin_yaw_ = 0.5235;
-      torsoMax_pitch_ = 0.5235; torsoMin_pitch_ = 0.314;
+      torsoMax_pitch_ = 0.5235; torsoMin_pitch_ = 0.0;
 
       // 检测手柄类型并设置映射
       detectJoystickType();
@@ -385,6 +377,97 @@ namespace mobile_manipulator
       }
     }
 
+    // 获取躯干的初始位姿
+    void loadTorsoInitialPoseFromServer(ros::NodeHandle& nh) 
+    {
+      Eigen::VectorXd torsoPose = Eigen::VectorXd::Zero(6);
+      bool isGetTorsoPose = false;
+      int maxRetries = 30;  // 最大重试次数，30次即30秒
+      int retryCount = 0;
+
+      while (ros::ok() && retryCount < maxRetries) 
+      {
+          isGetTorsoPose = getTorsoInitialPose(nh, torsoPose);
+
+          if (isGetTorsoPose) {
+              // 检查位姿是否有效（非零）
+              if (std::abs(torsoPose[0]) > 1e-3 || 
+                  std::abs(torsoPose[1]) > 1e-3 || 
+                  std::abs(torsoPose[2]) > 1e-3) 
+              {
+                  initialTorsoPose_x_ = torsoPose[0];
+                  initialTorsoPose_y_ = torsoPose[1];
+                  initialTorsoPose_z_ = torsoPose[2];
+                  ROS_INFO("成功获取躯干初始位姿: [%.3f, %.3f, %.3f]", 
+                           initialTorsoPose_x_, initialTorsoPose_y_, initialTorsoPose_z_);
+                  break;  // 获取成功，退出循环
+              } else {
+                  ROS_WARN("获取到零位姿，继续重试... (第%d次)", retryCount + 1);
+                  isGetTorsoPose = false;
+              }
+          } 
+          else 
+          {
+              ROS_WARN("无法获取躯干初始位姿，1秒后重试... (第%d次)", retryCount + 1);
+          }
+
+          retryCount++;
+          ros::Duration(1.0).sleep();  // 等待1秒
+      }
+    }
+
+    // 获取躯干的初始位姿
+    bool getTorsoInitialPose(ros::NodeHandle& nh, Eigen::VectorXd& pose_data) 
+    {
+      // 等待服务可用，超时2秒
+      if (!ros::service::waitForService("/mobile_manipulator_get_torso_initial_pose", ros::Duration(10.0))) {
+          std::cerr << "服务不可用: /mobile_manipulator_get_torso_initial_pose (超时10秒)" << std::endl;
+          return false;
+      }
+
+      ros::ServiceClient client = nh.serviceClient<kuavo_msgs::getLbTorsoInitialPose>(
+          "/mobile_manipulator_get_torso_initial_pose");
+      
+      kuavo_msgs::getLbTorsoInitialPose srv;
+      srv.request.isNeed = true;
+      
+      if (client.call(srv) && srv.response.result) 
+      {
+        pose_data << srv.response.linear.x, srv.response.linear.y, srv.response.linear.z, 
+                     srv.response.angular.z, srv.response.angular.y, srv.response.angular.x;
+        std::cout << "获取躯干初始位姿成功, torsoPose is: \n" << pose_data.transpose() << std::endl;
+        return true;
+      }
+      else
+      {
+        std::cerr << "获取躯干初始位姿失败" << std::endl;
+      }
+      
+      return false;
+    }
+
+    bool resetTorsoToInitialAsync(ros::NodeHandle& nh) 
+    {
+      if (!ros::service::waitForService("/mobile_manipulator_reset_torso", ros::Duration(10.0))) {
+          ROS_ERROR("Service not available");
+          return false;
+      }
+
+      ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(
+          "/mobile_manipulator_reset_torso");
+      
+      std_srvs::SetBool srv;
+      srv.request.data = true;
+      
+      if (client.call(srv) && srv.response.success) {
+          ROS_INFO("Torso reset command sent successfully");
+          return true;
+      }
+
+      ROS_ERROR("Failed to send torso reset command");
+      return false;
+    }
+
     // 限制数值在指定范围内
     double clamp(double value, double min_value, double max_value)
     {
@@ -593,14 +676,15 @@ namespace mobile_manipulator
           zero_control_start_time_ = ros::Time::now();
           is_control_zero_ = true;
 
-          geometry_msgs::Twist reset_cmd;
-          reset_cmd.linear.x = initialTorsoPose_x_;
-          reset_cmd.linear.y = initialTorsoPose_y_;
-          reset_cmd.linear.z = initialTorsoPose_z_;
-          reset_cmd.angular.x = 0.0;
-          reset_cmd.angular.y = 0.0;
-          reset_cmd.angular.z = 0.0;
-          cmd_lb_torso_publisher_.publish(reset_cmd);
+          // geometry_msgs::Twist reset_cmd;
+          // reset_cmd.linear.x = initialTorsoPose_x_;
+          // reset_cmd.linear.y = initialTorsoPose_y_;
+          // reset_cmd.linear.z = initialTorsoPose_z_;
+          // reset_cmd.angular.x = 0.0;
+          // reset_cmd.angular.y = 0.0;
+          // reset_cmd.angular.z = 0.0;
+          // cmd_lb_torso_publisher_.publish(reset_cmd);
+          resetTorsoToInitialAsync(nodeHandle_);
           std::cout << "G+H torso reset completed" << std::endl;
         }
 
@@ -799,15 +883,16 @@ if (back_pressed && !old_joy_msg_.buttons[joyButtonMap["BUTTON_BACK"]])
           zero_control_start_time_ = ros::Time::now();
           is_control_zero_ = true;
           
-          // 复位时立即发布初始位置
-          geometry_msgs::Twist reset_cmd;
-          reset_cmd.linear.x = initialTorsoPose_x_;
-          reset_cmd.linear.y = initialTorsoPose_y_;
-          reset_cmd.linear.z = initialTorsoPose_z_;
-          reset_cmd.angular.x = 0.0;
-          reset_cmd.angular.y = 0.0;
-          reset_cmd.angular.z = 0.0;
-          cmd_lb_torso_publisher_.publish(reset_cmd);
+          // // 复位时立即发布初始位置
+          // geometry_msgs::Twist reset_cmd;
+          // reset_cmd.linear.x = initialTorsoPose_x_;
+          // reset_cmd.linear.y = initialTorsoPose_y_;
+          // reset_cmd.linear.z = initialTorsoPose_z_;
+          // reset_cmd.angular.x = 0.0;
+          // reset_cmd.angular.y = 0.0;
+          // reset_cmd.angular.z = 0.0;
+          // cmd_lb_torso_publisher_.publish(reset_cmd);
+          resetTorsoToInitialAsync(nodeHandle_);
           
           ROS_INFO("Torso control reset completed");
         }

@@ -303,7 +303,15 @@ namespace humanoidController_wheel_wbc
       robot_init_state_param.push_back(mujoco_q(i));
     }
 
+    std::vector<double> stand_arm_joint_state_vector;
+    int armStartIndex = 7 + lowJointNum_;
+    for (int i = 0; i < armNum_; i++)
+    {
+      stand_arm_joint_state_vector.push_back(mujoco_q(armStartIndex + i));
+    }
+
     controllerNh_.setParam("/robot_init_state_param", robot_init_state_param);
+    controllerNh_.setParam("/standJointState", stand_arm_joint_state_vector);
 
     // 设置初始状态参数
     std::vector<double> initial_state_vector(robot_init_state_param);
@@ -852,7 +860,7 @@ namespace humanoidController_wheel_wbc
     {
       ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qpos_smooth", optimizedState_wbc.tail(armNum_));
       ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qvel_smooth", optimizedInput_wbc.tail(armNum_));
-      ROS_INFO_THROTTLE(1.0, "[humanoidControllerWheelWbc] WBC arm task uses interpolated arm target.");
+      // ROS_INFO_THROTTLE(1.0, "[humanoidControllerWheelWbc] WBC arm task uses interpolated arm target.");
     }
 
     vector_t x = wheel_wbc_->update(optimizedState_wbc, optimizedInput_wbc, observation_wheel_);

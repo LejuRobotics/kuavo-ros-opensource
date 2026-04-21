@@ -592,20 +592,20 @@ torsoBoxSoftCost
       mu      0.3
 
       ; relaxed log barrier delta
-      delta   0.005
+      delta   0.05
     }
 
-  focus_z_barrier
-  {
-    ; true: z 方向用本组 mu/delta；false: 用 position.unFocus_barrier
-    use_focus_z  false
+    focus_z_barrier
+    {
+      ; true: z 方向用本组 mu/delta；false:用 position.unFocus_barrier
+      use_focus_z  true
 
-    ; relaxed log barrier mu
-    mu      0.3
+      ; relaxed log barrier mu
+      mu      0.4
 
-    ; relaxed log barrier delta
-    delta   0.001
-  }
+      ; relaxed log barrier delta
+      delta   0.001
+    }
 
     lower
     {
@@ -644,16 +644,16 @@ torsoBoxSoftCost
 
     lower
     {
-      (0,0)  -0.01  ; roll
-      (1,0)  -0.01  ; pitch
-      (2,0)  -0.01  ; yaw
+      (0,0)  -0.5  ; roll
+      (1,0)  -0.5  ; pitch
+      (2,0)  -1.5  ; yaw
     }
 
     upper
     {
-      (0,0)   0.01  ; roll
-      (1,0)   0.01  ; pitch
-      (2,0)   0.01  ; yaw
+      (0,0)   0.5  ; roll
+      (1,0)   0.5  ; pitch
+      (2,0)   1.5  ; yaw
     }
   }
 }
@@ -990,9 +990,9 @@ jointVelocityLimits
       (2,0)   -25.33   ; waist_pitch
       (3,0)   -25.33   ; waist_yaw_link
       (4,0)   -18.8   ; z_arm_l1 velocity
-      (5,0)   -8.0   ; z_arm_l2 velocity
-      (6,0)   -7.5   ; z_arm_l3 velocity
-      (7,0)   -8.0   ; z_arm_l4 velocity
+      (5,0)   -8.0    ; z_arm_l2 velocity
+      (6,0)   -7.5    ; z_arm_l3 velocity
+      (7,0)   -8.0    ; z_arm_l4 velocity
       (8,0)   -17.5   ; z_arm_l5 velocity
       (9,0)   -17.5   ; z_arm_l6 velocity
       (10,0)  -17.5   ; z_arm_l7 velocity
@@ -1244,8 +1244,8 @@ weight
 contact_force_params
 {
   contactForceErrorThreshold  0.15    ; 误差阈值（rad），超过此值禁用接触力任务
-  weightArmAccelReduced    30.0    ; 施加期望力时的手臂任务权重
-  transitionTime   0.3    ; 权重平滑过渡时间常数（秒
+  weightArmAccelReduced    3.0    ; 施加期望力时的手臂任务权重
+  transitionTime   0.3    ; 权重平滑过渡时间常数（秒）
   forceThreshold           5.0    ; 期望力阈值（N），超过此值认为施加了期望力
   interpolationSpeed       300.0   ; 期望力插值速度（N/s）
 }

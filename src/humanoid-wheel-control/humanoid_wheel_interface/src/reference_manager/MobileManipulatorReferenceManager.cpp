@@ -454,7 +454,7 @@ namespace mobile_manipulator {
     /**********************************************************************/
 
     /************************躯干和双臂末端优先级相关参数设置********************/
-    double torsoOriScale = 1.0 / 10.0;
+    double torsoOriScale = 1.0 / 100.0;
     setTorsoOriFocusScale(torsoOriScale);
   }
 
@@ -3130,13 +3130,24 @@ namespace mobile_manipulator {
       isFirstRun = false;
       // return;
     }
-
+    static bool isTriggerSetTorsoFirst = false;
     if(initTime >= resetTorsoTime_ + resetTorsoInitTime_)
     {
+      if(isTriggerSetTorsoFirst == true)
+      {
+        leftArmJointTrigger_ = true;  // 触发一次重置躯干位置，该标志和手臂ee共用
+        isTriggerSetTorsoFirst = false;
+      }
       setArmControl(0, initTime, finalTime, initState);
       setArmControl(1, initTime, finalTime, initState);
       setTorsoControl(initTime, finalTime, initState);
     }
+    else
+    {
+      isTriggerSetTorsoFirst = true;
+      std::cout << "In reset torso phase, only update base control. time: " << initTime << std::endl;
+    }
+
     setChassisControl(initTime, finalTime, initState);
   }
 
@@ -3616,28 +3627,28 @@ namespace mobile_manipulator {
 
     if(leftArmJointTrigger_ == true || rightArmJointTrigger_ == true)
     {
-      if(getEnableArmJointTrackForArm(0) == true &&     // 双臂都为关节模式，则触发躯干指令回正
+      if(getEnableArmJointTrackForArm(0) == true &&     // 双臂都为关节模式，则触发躯干切换到focusTorso，且保持原位不动
          getEnableArmJointTrackForArm(1) == true)
       {
         setIsFocusEeStatus(false);
-        resetTorsoPoseRuckig(initTime, initState, false);
-        cmdTorsoPose_mtx_.lock();
-        torsoTargetPose = cmdTorsoPose_;
-        cmdTorsoPose_mtx_.unlock();
+        resetTorsoPoseRuckig(initTime, initState, true);
+        // cmdTorsoPose_mtx_.lock();
+        // torsoTargetPose = cmdTorsoPose_;
+        // cmdTorsoPose_mtx_.unlock();
 
-        vector_t torsoPose4Dof = vector_t::Zero(4);
-        torsoPose4Dof << torsoTargetPose[0],  // x, z, yaw, pitch
-                         torsoTargetPose[2], 
-                         torsoTargetPose[3], 
-                         torsoTargetPose[4];
+        // vector_t torsoPose4Dof = vector_t::Zero(4);
+        // torsoPose4Dof << torsoTargetPose[0],  // x, z, yaw, pitch
+        //                  torsoTargetPose[2], 
+        //                  torsoTargetPose[3], 
+        //                  torsoTargetPose[4];
 
-        // 计算复位时间
-        Eigen::VectorXd err =  torsoPose4Dof - torsoPose_prevTargetPose_;
-        Eigen::VectorXd timeMax(4);
-        timeMax << torsoResetMaxVel_[0], torsoResetMaxVel_[2], torsoResetMaxVel_[3], torsoResetMaxVel_[4];
-        Eigen::ArrayXd validTimes = err.cwiseAbs().array() / timeMax.array();
+        // // 计算复位时间
+        // Eigen::VectorXd err =  torsoPose4Dof - torsoPose_prevTargetPose_;
+        // Eigen::VectorXd timeMax(4);
+        // timeMax << torsoResetMaxVel_[0], torsoResetMaxVel_[2], torsoResetMaxVel_[3], torsoResetMaxVel_[4];
+        // Eigen::ArrayXd validTimes = err.cwiseAbs().array() / timeMax.array();
 
-        calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, validTimes.maxCoeff());
+        // calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, validTimes.maxCoeff());
         torsoModeFlag_ = true;
       }
       leftArmJointTrigger_ = false;
@@ -3646,7 +3657,7 @@ namespace mobile_manipulator {
 
     if(isCmdTorsoPoseUpdated_ && isTorsoOfflineTrajUpdate_ != true)
     {
-      resetTorsoPoseRuckig(initTime, initState, false);
+      // resetTorsoPoseRuckig(initTime, initState, false);
 
       std::cout << "[MobileManipulatorReferenceManager] 进入躯干笛卡尔控制 " << std::endl;
 
