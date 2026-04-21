@@ -5,7 +5,6 @@
 #include <atomic>
 #include <leju_utils/define.hpp>
 #include <vector>
-#include <mutex>
 
 namespace HighlyDynamic {
 
@@ -30,8 +29,6 @@ class JoyStickHandler {
 
   void initialize();
 
-  void reset();
-
   void updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg);
   void processHandEndEffectorData();
   void processHandEndEffectorDataWithFingerTracking();
@@ -40,26 +37,15 @@ class JoyStickHandler {
   ClawCommandData getClawCommandData();
   EndEffectorType getEndEffectorType() const;
 
-  bool isLeftFirstButtonPressed() const;
-  bool isRightFirstButtonPressed() const;
-  bool isLeftSecondButtonPressed() const;
-  bool isRightSecondButtonPressed() const;
+  bool isLeftFirstButtonTouched() const { return leftFirstButtonTouched_; }
+  bool isRightFirstButtonTouched() const { return rightFirstButtonTouched_; }
+  bool isLeftFirstButtonPressed() const { return leftFirstButtonPressed_; }
+  bool isRightFirstButtonPressed() const { return rightFirstButtonPressed_; }
+  bool isLeftSecondButtonPressed() const { return leftSecondButtonPressed_; }
+  bool isRightSecondButtonPressed() const { return rightSecondButtonPressed_; }
 
-  bool isLeftRightFirstButtonTouched() const;
-  bool isLeftRightFirstButtonPressed() const;
-
-  bool isLeftGrip() const;
-  bool isRightGrip() const;
-  bool isLeftRightGrip() const;
-
-  bool isLeftArmCtrlModeActive() const;
-  bool isRightArmCtrlModeActive() const;
-
-  bool hasLeftArmCtrlModeChanged();
-  bool hasRightArmCtrlModeChanged();
-
-  void forceSetLeftArmCtrlMode(bool active);
-  void forceSetRightArmCtrlMode(bool active);
+  bool isLeftRightFirstButtonTouched() const { return leftFirstButtonTouched_ && rightFirstButtonTouched_; }
+  bool isLeftRightFirstButtonPressed() const { return leftFirstButtonPressed_ && rightFirstButtonPressed_; }
 
  private:
   void processRobotEndHandWithFingerData();
@@ -81,30 +67,12 @@ class JoyStickHandler {
   bool rightFirstButtonTouched_;
   bool rightFirstButtonPressed_;  // 右手第一个按键按下状态
 
-  bool leftGrip_;
-  bool rightGrip_;
-
   // 冻结功能相关变量
   bool buttonYLast_;                          // 上一次Y按钮状态，用于边沿检测
   bool freezeFinger_;                         // 冻结状态标志
   std::vector<int> frozenLeftHandPosition_;   // 冻结的左手位置
   std::vector<int> frozenRightHandPosition_;  // 冻结的右手位置
   std::vector<int> frozenClawPosition_;       // 冻结的夹爪位置
-
-  // 手臂控制模式相关变量
-  bool leftArmCtrlModeActive_;            // 左手控制模式是否激活
-  bool rightArmCtrlModeActive_;           // 右手控制模式是否激活
-  bool leftButtonXLastPressed_;           // X键上一次按下状态（用于边沿检测）
-  bool rightButtonALastPressed_;          // A键上一次按下状态（用于边沿检测）
-  ros::Time leftButtonXFirstPressTime_;   // X键第一次按下的时间戳
-  ros::Time rightButtonAFirstPressTime_;  // A键第一次按下的时间戳
-  ros::Time lastArmCtrlModeChangeTime_;  // 任意手控制模式最后一次状态变化的时间戳（用于统一保护机制）
-  static constexpr double DOUBLE_CLICK_TIMEOUT = 0.5;        // 双击检测超时时间（秒）
-  static constexpr double MODE_CHANGE_BLOCK_DURATION = 5.0;  // 模式切换后阻止所有手的时间（秒）
-
-  // 状态变化查询相关变量
-  bool lastQueryLeftArmCtrlModeActive_;   // 上次查询时的左手控制模式状态
-  bool lastQueryRightArmCtrlModeActive_;  // 上次查询时的右手控制模式状态
 
   std::atomic<EndEffectorType> endEffectorType_;
   int controlFingerType_;
@@ -124,8 +92,6 @@ class JoyStickHandler {
 
   void loadHandControlParameters();
   int limitIntValue(int value, int minVal, int maxVal) const;
-
-  mutable std::mutex dataMutex_;
 };
 
 }  // namespace HighlyDynamic

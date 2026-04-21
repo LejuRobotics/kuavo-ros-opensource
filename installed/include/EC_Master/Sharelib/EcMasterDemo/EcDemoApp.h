@@ -117,7 +117,6 @@ typedef struct
   int16_t torque_demand_raw;
   uint16_t error_code;
   uint16_t igbt_temperature;
-  int16_t ntc_temperature;
   int8_t mode_of_opration_display;
 } YD_SlaveRead_t;
 
@@ -129,8 +128,6 @@ typedef struct
   int16_t target_torque;
   int32_t velocity_offset;
   int16_t torque_offset;
-  uint16_t position_kp;  //位置环P增益
-  uint16_t velocity_kp;  //速度环P增益
   int8_t mode_of_opration;//选模式，例：CSP、CSV等。。。
 } YD_SlaveWrite_t;
 
@@ -211,7 +208,6 @@ typedef struct
   double torque_demand_trans = 0.0;
   double velocity_demand_raw = 0.0;
   double igbt_temperature = 0.0; 
-  double ntc_temperature = 0.0; 
 } MotorParam_t;
 
 extern enum EcMasterType driver_type[30];

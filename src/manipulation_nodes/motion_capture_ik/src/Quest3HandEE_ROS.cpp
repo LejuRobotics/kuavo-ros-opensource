@@ -17,8 +17,9 @@ void Quest3HandEE_ROS::initialize(const nlohmann::json& configJson) {
 
   // launch 中通过remap接入
   kuavoHandPosePublisher_ = nodeHandle_.advertise<kuavo_msgs::twoArmHandPoseCmd>("/mm/two_arm_hand_pose_cmd_cpp", 1);
-  changeArmModeClient_ =
-      nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
+
+  changeMobileCtrlModeClient_ =
+      nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/mobile_manipulator_mpc_control");
   fkServiceClient_ = nodeHandle_.serviceClient<kuavo_msgs::fkSrv>("/ik/fk_srv");
 }
 
@@ -43,7 +44,7 @@ void Quest3HandEE_ROS::processHandSE3ThreadFunction() {
     }
 
     // 夹爪/灵巧手的开合数据正常发布
-    publishEndEffectorControlData();
+    handleEndEffectorControlData();
   }
 
   rate.sleep();

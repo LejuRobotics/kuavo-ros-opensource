@@ -1,4 +1,0 @@
-string task_name  # 任务点名称
----
-bool success      # 是否成功
-string message    # 状态信息 

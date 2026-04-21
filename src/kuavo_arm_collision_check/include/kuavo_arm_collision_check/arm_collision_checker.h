@@ -37,7 +37,6 @@
 #include <kuavo_msgs/armCollisionCheckInfo.h>
 #include <kuavo_msgs/armTargetPoses.h>
 #include <kuavo_msgs/sensorsData.h>
-#include <kuavo_msgs/twoArmHandPoseCmd.h>
 #include <std_msgs/Int32.h>
 #include <deque>
 #include <chrono>
@@ -81,7 +80,6 @@ private:
     ros::Publisher arm_pose_pub_;
     ros::Publisher arm_traj_forward_pub_;  // 转发手臂轨迹数据的发布者
     ros::Publisher arm_traj_debug_pub_;  // 调试用的手臂轨迹发布者
-    ros::Publisher mm_two_arm_hand_pose_cmd_forward_pub_;  // 转发末端执行器位姿命令的发布者
     ros::Publisher collision_info_pub_;
     ros::Publisher collision_marker_pub_;
     ros::Publisher collision_check_duration_pub_;
@@ -89,7 +87,6 @@ private:
     // 新增的碰撞控制话题订阅者
     ros::Subscriber kuavo_arm_traj_sub_;
     ros::Subscriber kuavo_arm_target_poses_sub_;
-    ros::Subscriber kuavo_mm_two_arm_hand_pose_cmd_sub_;  // 订阅末端执行器位姿命令
     ros::Subscriber kuavo_sensors_data_sub_;
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
@@ -158,7 +155,6 @@ private:
     // 碰撞控制话题回调函数
     void kuavoArmTrajCallback(const sensor_msgs::JointState::ConstPtr& msg);
     void kuavoArmTargetPosesCallback(const kuavo_msgs::armTargetPoses::ConstPtr& msg);
-    void kuavoMmTwoArmHandPoseCmdCallback(const kuavo_msgs::twoArmHandPoseCmd::ConstPtr& msg);
     void sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr& msg);
 
     void playArmTrajBack();

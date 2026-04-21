@@ -1,5 +1,4 @@
 syntax = "proto3";
-package protos;
 
 message KuavoVrEvents {
   string webrtc_signaling_url = 1;

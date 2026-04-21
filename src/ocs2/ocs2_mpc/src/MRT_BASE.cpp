@@ -45,6 +45,7 @@ MRT_BASE::MRT_BASE() {
 /******************************************************************************************************/
 void MRT_BASE::reset() {
   std::lock_guard<std::mutex> lock(bufferMutex_);
+
   policyReceivedEver_ = false;
   newPolicyInBuffer_ = false;
   mrtTrylockWarningCount_ = 0;

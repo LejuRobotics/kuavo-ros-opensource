@@ -81,8 +81,8 @@ def convert_fields_to_snake_case(file_path):
         elif re.search(r'\btime\b', line, re.IGNORECASE) and not 'builtin_interfaces/Time' in line and not line.strip().startswith('#'):
             line = re.sub(r'\btime\b', 'builtin_interfaces/Time', line, flags=re.IGNORECASE)
             modified = True
-        elif re.match(r'^\s*duration\s+\w+', line) and not 'builtin_interfaces/Duration' in line:
-            line = re.sub(r'\bduration\b', 'builtin_interfaces/Duration', line)
+        elif re.search(r'\bduration\b', line, re.IGNORECASE) and not 'builtin_interfaces/Duration' in line and not line.strip().startswith('#'):
+            line = re.sub(r'\bduration\b', 'builtin_interfaces/Duration', line, flags=re.IGNORECASE)
             modified = True
         
         # 处理字段定义

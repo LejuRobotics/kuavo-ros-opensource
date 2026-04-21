@@ -61,12 +61,12 @@ git clone git@gitee.com:leju-robot/kuavo-ros-opensource.git
 - docker镜像可以自行根据后续章节使用`./docker/Dockerfile`构建，或者下载已经编译好的镜像：
 
 ```bash  
-wget https://kuavo.lejurobot.com/kuavo_research_editiion/docker_images/kuavo_opensource_mpc_wbc_img_v1.3.0.tar.gz
+wget https://kuavo.lejurobot.com/docker_images/kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
 ```
 
 - 执行以下命令导入容器镜像：
 ```bash
-docker load -i kuavo_opensource_mpc_wbc_img_v1.3.0.tar.gz
+docker load -i kuavo_opensource_mpc_wbc_img_v1.2.1.tar.gz
 ```
 - 执行`./docker/run.sh`进入容器后，默认在仓库的映射目录`/root/kuavo_ws`，执行以下命令开始编译：
 
@@ -313,9 +313,6 @@ roslaunch humanoid_controllers load_kuavo_real_half_up_body.launch
 
    # 启动C++版本的ik
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 use_cpp_ik:=true
-
-   # 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
-   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 use_cpp_ik:=true use_incremental_ik:=true
   ```
   > 如果希望同时映射躯干的运动（上下蹲和弯腰），可以增加选项`control_torso:=1`，使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度。
 

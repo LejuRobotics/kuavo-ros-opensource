@@ -30,7 +30,6 @@ show_help() {
     echo "选项:"
     echo "  --touch      Kuavo Revo1 触觉手测试模式"
     echo "  --normal     Kuavo Revo1 普通手测试模式"
-    echo "  --revo1can   Kuavo Revo1 Can协议灵巧手测试模式"
     echo "  --revo2      Roban2 Revo2 普通灵巧手测试模式"
     echo "  --revo2can   Roban2 Revo2 Can协议灵巧手测试模式"
     echo "  --scan       扫描设备(revo2can不支持), 识别 ttyUSB 设备"
@@ -41,7 +40,6 @@ show_help() {
     echo "  $exec_path --touch --scan      # Kuavo Revo1 触觉手扫描"
     echo "  $exec_path --touch --test      # Kuavo Revo1 触觉手测试"
     echo "  $exec_path --normal --test     # Kuavo Revo1 普通手测试"
-    echo "  $exec_path --revo1can --test   # Kuavo Revo1 Can协议灵巧手测试"
     echo "  $exec_path --revo2 --test      # Roban2 Revo2 普通手测试"
     echo "  $exec_path --revo2can --test   # Roban2 Revo2 Can协议灵巧手测试"
 }

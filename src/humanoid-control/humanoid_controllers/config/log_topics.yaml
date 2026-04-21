@@ -6,7 +6,6 @@ topics:
   - /cmd.*
   - /sensors_data_raw
   - /sensor_data/.*
-  - /h12pro_channel
   - /joy
   - /joy/set_feedback
   - /kuavo_.*
@@ -18,7 +17,6 @@ topics:
   - /quest_joystick_data
   - /rosout
   - /rosout_agg
-  - /stop_robot
   - /tf
   - /tf_static
   - /state_estimate/.*
@@ -31,7 +29,6 @@ topics:
   - /route_plan_pose_array
   - /state_motion_control
   - /kuavo_arm_traj
-  - /lb_leg_traj
   - /gait_receiver/.*
   - /SwitchedModelReferenceManager/.*
   - /motor_cmd/.*
@@ -66,15 +63,8 @@ topics:
   - /leju_claw_command
   - /leju/fused_hull_boundry_fuse_elevation
   - /leju/elevation_map0
-  - /righthand_pose
-  - /lefthand_pose
-  - /base_pose
-  - /keyframe_flag
   - /polygon_new_markers
   - /polygon_markers
   - /l515/color/image_raw
   - /livox/points
   - /rl_controller.*
-  - /arm_controller.*
-  - /vmp_controller/.*
-  - /ik_fk_result/.*

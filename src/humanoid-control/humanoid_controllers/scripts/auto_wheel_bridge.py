@@ -48,8 +48,8 @@ def kuavo_process(master_uri, shared_data, kuavo_slave_ip):
             with shared_data['cmd_vel_lock']:
                 shared_data['cmd_vel_data'] = copy.deepcopy(msg)
                 shared_data['cmd_vel_time'] = rospy.Time.now().to_sec()
-        rospy.Subscriber('/move_base/base_cmd_vel', Twist, cmd_vel_callback)
-        print("[Kuavo Process] Subscribed to /move_base/base_cmd_vel")
+        rospy.Subscriber('/filter_cmd_vel', Twist, cmd_vel_callback)
+        print("[Kuavo Process] Subscribed to /filter_cmd_vel")
         
         none_data_cnt = 0
         # 发布odom消息

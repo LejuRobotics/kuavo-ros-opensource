@@ -265,41 +265,15 @@ namespace mobile_manipulator {
     /*******************************************************************************/
   }
 
-  void MobileManipulatorReferenceManager::setRobotInitialArmJointTarget(ros::NodeHandle& input_nh)
-  {
-    std::vector<double> initialStateVector;
-    while (!input_nh.hasParam("/robot_init_state_param"))
-    {
-        ROS_INFO("Waiting for '/robot_init_state_param' parameter to be set...");
-        ros::Duration(0.2).sleep(); // 等待1秒后再次尝试
-    }
-    input_nh.getParam("/robot_init_state_param", initialStateVector);
-
-    Eigen::VectorXd initialState(initialStateVector.size());
-    for (size_t i = 0; i < initialStateVector.size(); ++i)
-    {
-        initialState(i) = initialStateVector[i];
-    }
-
-    arm_init_joint_traj_ = initialState.segment(7 + 4, info_.armDim - 4);   // 从初始获取手臂期望
-
-  }
-
   void MobileManipulatorReferenceManager::setupSubscriptions(std::string nodeHandleName)
   {
-    // 从参数服务器中更新初始期望
-    setRobotInitialArmJointTarget(nodeHandle_);
 
     // 设置服务服务器
     controlModeServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_mpc_control", 
                                                            &MobileManipulatorReferenceManager::controlModeService, this);
     getMpcControlModeServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_get_mpc_control_mode",
                                                            &MobileManipulatorReferenceManager::getMpcControlModeService, this);
-    changeArmControlService_ = nodeHandle_.advertiseService("wheel_arm_change_arm_ctrl_mode", 
-                                                           &MobileManipulatorReferenceManager::armControlModeSrvCallback, this);
-    get_arm_control_mode_service_ = nodeHandle_.advertiseService("/humanoid_get_arm_ctrl_mode", 
-                                                           &MobileManipulatorReferenceManager::getArmControlModeCallback, this);
-
+                                          
     auto targetVelocityCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
       cmdvel_mtx_.lock();
@@ -478,9 +452,6 @@ namespace mobile_manipulator {
 
     // 发布轮臂MPC当前控制模式
     mpcControlModePub_ = nodeHandle_.advertise<std_msgs::Int8>("/mobile_manipulator/lb_mpc_control_mode", 10, false);
-
-    // 发布轮臂MPC的约束使用情况
-    mpcConstraintUsagePub_ = nodeHandle_.advertise<std_msgs::Int8MultiArray>("/mobile_manipulator/lb_mpc_constraint_usage", 10, false);
   }
 
   // 获取第一次的目标轨迹，并分配到不同的约束轨迹，后续添加额外约束, 也需要在此初始化
@@ -660,18 +631,6 @@ namespace mobile_manipulator {
     std_msgs::Int8 modeMsg;
     modeMsg.data = currentMode;
     mpcControlModePub_.publish(modeMsg);
-
-    // 发布mpc使能各约束的标志, 按底盘, 下肢关节, 躯干, 手臂关节, 手臂末端轨迹顺序
-    std_msgs::Int8MultiArray constraintUsageMsg;
-    std::vector<int8_t> constraintUsageVec;
-    constraintUsageVec.push_back(getEnableBaseTrack() ? 1 : 0);
-    constraintUsageVec.push_back(getEnableLegJointTrack() ? 1 : 0);
-    constraintUsageVec.push_back(getEnableTorsoPoseTargetTrajectories() ? 1 : 0);
-    constraintUsageVec.push_back(getEnableArmJointTrack() ? 1 : 0);
-    constraintUsageVec.push_back(getEnableEeTargetTrajectories() ? 1 : 0);
-    constraintUsageVec.push_back(getEnableEeTargetLocalTrajectories() ? 1 : 0);
-    constraintUsageMsg.data = constraintUsageVec;
-    mpcConstraintUsagePub_.publish(constraintUsageMsg);
   }
 
   // 本体系的末端ruckig轨迹生成
@@ -1339,52 +1298,6 @@ namespace mobile_manipulator {
     return true;
   }
 
-  bool MobileManipulatorReferenceManager::armControlModeSrvCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
-  {
-
-    res.result = true;
-    switch (req.control_mode)
-    {
-    case 0:
-      res.message = "Arm control mode 0: keep current control position";
-      break;
-    case 1:
-      res.message = "Arm control mode 1: reset arm to initial Target";
-      break;
-    case 2:
-      res.message = "Arm control mode 2: using external controller";
-      break;
-    default:
-      res.result = false;
-      res.message = "Invalid control mode :" + std::to_string(req.control_mode);
-      break;
-    }
-    if (res.result)
-    {
-      currentArmControlMode_ = static_cast<LbArmControlServiceMode>(req.control_mode);
-
-      std::cout << "currentArmControlMode_:"<< currentArmControlMode_ << std::endl;
-      res.mode = currentArmControlMode_;
-      ROS_INFO_STREAM(res.message);
-      vector_t arm_control_mode_vec(1);
-      arm_control_mode_vec << currentArmControlMode_;
-      ros_logger_->publishVector("/humanoid/mpc/arm_control_mode", arm_control_mode_vec);
-    }
-    else
-    {
-      ROS_ERROR_STREAM(res.message);
-    }
-
-    return true;
-  }
-
-  bool MobileManipulatorReferenceManager::getArmControlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
-  {
-    res.result = true;
-    res.mode = currentArmControlMode_;
-    return true;
-  };
-
   void MobileManipulatorReferenceManager::getCurrentTorsoPoseInBase(vector_t& torsoPose, const vector_t& initState)
   {
     assert(torsoPose.size() == 7 && "torsoPose dimension must be 7!");
@@ -1491,7 +1404,6 @@ namespace mobile_manipulator {
       left_arm_traj_pose_ = eeState.head(7);
       right_arm_traj_pose_ = eeState.tail(7);
 
-      lb_leg_traj_ = initState.segment(baseDim_, 4);
       arm_joint_traj_ = initState.tail(info_.armDim - 4);
       left_arm_joint_traj_ = initState.tail(info_.armDim - 4).head((info_.armDim - 4)/2);
       right_arm_joint_traj_ = initState.tail(info_.armDim - 4).tail((info_.armDim - 4)/2);
@@ -1527,7 +1439,6 @@ namespace mobile_manipulator {
       left_arm_traj_pose_ = eeState.head(7);
       right_arm_traj_pose_ = eeState.tail(7);
 
-      lb_leg_traj_ = initState.segment(baseDim_, 4);
       arm_joint_traj_ = initState.tail(info_.armDim - 4);
       left_arm_joint_traj_ = initState.tail(info_.armDim - 4).head((info_.armDim - 4)/2);
       right_arm_joint_traj_ = initState.tail(info_.armDim - 4).tail((info_.armDim - 4)/2);
@@ -1538,7 +1449,6 @@ namespace mobile_manipulator {
     }
 
     setArmControl(initTime, finalTime, initState);
-    setTorsoControl(initTime, finalTime, initState);
     setChassisControl(initTime, finalTime, initState);
   }
 
@@ -1804,7 +1714,7 @@ namespace mobile_manipulator {
     // 1. 发手臂末端局部系轨迹;
     // 2. 发手臂关节轨迹;
     
-    static vector_t armJointTarget = arm_init_joint_traj_; // 双臂关节轨迹
+    static vector_t armJointTarget = vector_t::Zero(info_.armDim - 4); // 双臂关节轨迹
     static vector_t armEeTarget = vector_t::Zero(info_.eeFrames.size() * 7); // 双臂末端轨迹
     
     if(isCmdDualArmPoseUpdated_)
@@ -1821,83 +1731,52 @@ namespace mobile_manipulator {
       }
       isCmdDualArmPoseUpdated_ = false;
     }
-    // else
-    // {
-    //   resetDualArmRuckig(initTime, initState, false, desireMode_);
-    // }
-    
-    if(currentArmControlMode_  == LbArmControlServiceMode::EXTERN_CONTROL)
-    {
-      if(desireMode_ == LbArmControlMode::WorldFrame) // 世界系的笛卡尔末端控制
-      {
-        setEnableArmJointTrack(false); // 关闭手臂跟踪
-        setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-        setEnableEeTargetTrajectories(true); // 开启末端笛卡尔
-
-        generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
-
-        resetArmJointRuckig(initTime, initState, false);  // 笛卡尔控制影响手臂关节, 重置关节轨迹初值
-        resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
-      }
-      else if(desireMode_ == LbArmControlMode::LocalFrame)  // 局部系的笛卡尔末端控制
-      {
-        setEnableArmJointTrack(false); // 关闭手臂跟踪
-        setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
-        setEnableEeTargetLocalTrajectories(true); // 开启末端笛卡尔局部跟踪
-      
-        generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
-
-        resetArmJointRuckig(initTime, initState, false);  // 笛卡尔控制影响手臂关节, 重置关节轨迹初值
-        resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
-      }
-      else if(desireMode_ == LbArmControlMode::JointSpace)  // 关节控制
-      {
-        setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
-        setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-        setEnableArmJointTrack(true); // 开启手臂跟踪
-
-        if(enableQuickJointControl_)  // true 为快速模式
-        {
-          armJoint_mtx_.lock();
-          armJointTarget = arm_joint_traj_;
-          armJoint_mtx_.unlock();
-        }
-        else
-        {
-          armPose_mtx_.lock();
-          armJointTarget << left_arm_joint_traj_, right_arm_joint_traj_;
-          armPose_mtx_.unlock();
-        }
-        calcRuckigTrajWithArmJoint(initTime, armJointTarget);
-
-        // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
-      }
-    }
-    else if(currentArmControlMode_  == LbArmControlServiceMode::KEEP)
-    {
-      setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
-      setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-      setEnableArmJointTrack(true); // 开启手臂跟踪
-
-      calcRuckigTrajWithArmJoint(initTime, armJointTarget);
-      // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
-    }
-    else if(currentArmControlMode_ == LbArmControlServiceMode::AUTO_SWING)
-    {
-      setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
-      setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
-      setEnableArmJointTrack(true); // 开启手臂跟踪
-
-      calcRuckigTrajWithArmJoint(initTime, arm_init_joint_traj_);
-      // resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
-
-      arm_joint_traj_ = arm_init_joint_traj_;
-      left_arm_joint_traj_ = armJointTarget.head((info_.armDim - 4)/2);
-      right_arm_joint_traj_ = armJointTarget.tail((info_.armDim - 4)/2);
-    }
     else
     {
-      ROS_ERROR_STREAM("[MobileManipulatorReferenceManager] 错误设置 currentArmControlMode_");
+      resetDualArmRuckig(initTime, initState, false, desireMode_);
+    }
+    
+    if(desireMode_ == LbArmControlMode::WorldFrame) // 世界系的笛卡尔末端控制
+    {
+      setEnableArmJointTrack(false); // 关闭手臂跟踪
+      setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
+      setEnableEeTargetTrajectories(true); // 开启末端笛卡尔
+
+      generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
+
+      resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
+    }
+    else if(desireMode_ == LbArmControlMode::LocalFrame)  // 局部系的笛卡尔末端控制
+    {
+      setEnableArmJointTrack(false); // 关闭手臂跟踪
+      setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
+      setEnableEeTargetLocalTrajectories(true); // 开启末端笛卡尔局部跟踪
+  
+      generateDualArmEeTargetWithRuckig(initTime, finalTime, ruckigDt_);
+
+      resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
+    }
+    else if(desireMode_ == LbArmControlMode::JointSpace)  // 关节控制
+    {
+      setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
+      setEnableEeTargetLocalTrajectories(false); // 关闭末端笛卡尔局部跟踪
+      setEnableArmJointTrack(true); // 开启手臂跟踪
+
+      if(enableQuickJointControl_)  // true 为快速模式
+      {
+        armJoint_mtx_.lock();
+        armJointTarget = arm_joint_traj_;
+        armJoint_mtx_.unlock();
+      }
+      else
+      {
+        armPose_mtx_.lock();
+        armJointTarget << left_arm_joint_traj_, right_arm_joint_traj_;
+        armPose_mtx_.unlock();
+      }
+      calcRuckigTrajWithArmJoint(initTime, armJointTarget);
+
+      resetLegJointRuckig(initTime, initState, false);  // 笛卡尔控制影响下肢关节, 重置关节轨迹初值
     }
   }
 
@@ -1912,13 +1791,6 @@ namespace mobile_manipulator {
     resetPose[1] = initialTorsoPos_[2];
     resetTorsoPoseRuckig(initTime, initState, false);
     calcRuckigTrajWithTorsoPose(initTime, resetPose);
-
-    cmdTorsoPose_.setZero();
-    cmdTorsoPose_[0] = initialTorsoPos_[0];
-    cmdTorsoPose_[1] = initialTorsoPos_[1];
-    cmdTorsoPose_[2] = initialTorsoPos_[2];
-    cmdTorsoPose_[3] = 0;
-    cmdTorsoPose_[4] = 0;
 
     generateTorsoPoseTargetWithRuckig(initTime, initTime + 5.0, ruckigDt_);
   }
@@ -1942,7 +1814,11 @@ namespace mobile_manipulator {
       calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof);
 
       isCmdTorsoPoseUpdated_ = false;
-      torsoModeFlag_ = true;
+      isCmdLegJointUpdated_ = false;  // 关闭关节控制标志位
+    }
+    else    // 未收到躯干笛卡尔
+    {
+      resetTorsoPoseRuckig(initTime, initState, false);
     }
 
     if(isCmdLegJointUpdated_)
@@ -1957,23 +1833,15 @@ namespace mobile_manipulator {
       lbLegJoint_mtx_.unlock();
 
       calcRuckigTrajWithLegJoint(initTime, legJointTarget);
-
-      isCmdLegJointUpdated_ = false;
-      torsoModeFlag_ = false;
     }
-    
-    if(torsoModeFlag_)
+    else
     {
       setEnableLegJointTrack(false); // 关闭下肢关节跟踪
       setEnableTorsoPoseTargetTrajectories(true); // 开启躯干
 
       generateTorsoPoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
 
-      resetLegJointRuckig(initTime, initState, true); // 躯干笛卡尔控制影响下肢关节, 重置关节轨迹初值
-    }
-    else
-    {
-      resetTorsoPoseRuckig(initTime, initState, false);
+      resetLegJointRuckig(initTime, initState, false); // 躯干笛卡尔控制影响下肢关节, 重置关节轨迹初值
     }
   }
 

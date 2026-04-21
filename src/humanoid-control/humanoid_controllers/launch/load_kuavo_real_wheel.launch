@@ -62,8 +62,7 @@
     <arg name="teach_pendant" default="0"/>
     
     <!-- wheel bridge -->
-    <arg name="use_wheel_bridge" default="true" if="$(eval arg('robot_version') == 60)"/>
-    <arg name="use_wheel_bridge" default="false" unless="$(eval arg('robot_version') == 60)"/>
+    <arg name="use_wheel_bridge" default="true"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -146,7 +145,7 @@
     </node>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true">
       </node>
-    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 10">
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>
 

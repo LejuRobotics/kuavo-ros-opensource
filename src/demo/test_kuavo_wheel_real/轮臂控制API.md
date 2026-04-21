@@ -4,10 +4,6 @@
 
 ## 目录
 
-### 相关文件目录
-
-src/demo/test_kuavo_wheel_real 包含实物测试案例，可供参考
-
 ### 发布话题 (Published Topics)
 
 功能话题可分为三个类别：底盘控制，下肢控制，上肢控制，
@@ -75,7 +71,7 @@ src/demo/test_kuavo_wheel_real 包含实物测试案例，可供参考
 
 ### 调用服务 (Called Services)
 
-- [`/enable_lb_arm_quick_mode`](#1-enable_lb_arm_quick_mode---关节快速模式切换) - 关节快速模式切换
+- [`/enable_lb_arm_quick_mode`](#1-enable_lb_arm_quick_mode---手臂快速模式切换) - 手臂快速模式切换
 - [`/mobile_manipulator_mpc_control`](#2-mobile_manipulator_mpc_control---mpc控制模式切换) - MPC控制模式切换
 
 ---
@@ -633,19 +629,17 @@ Float64MultiArray data    # 数据格式(共6+6自由度)：[左臂位姿(6), �
 
 ### 调用服务 (Called Services)
 
-#### 1. `/enable_lb_arm_quick_mode` - 关节快速模式切换
+#### 1. `/enable_lb_arm_quick_mode` - 手臂快速模式切换
 
-**服务类型：** `kuavo_msgs::changeLbQuickModeSrv`
+**服务类型：** `std_srvs/SetBool`
 
-**功能描述：** 
-启用或禁用手臂快速模式，
-1. 启用下肢则下肢电机直接获取lb_leg_traj的指令，不从MPC获取下肢电机指令
-2. 启用上肢则手臂电机直接获取kuavo_arm_traj的指令，不从MPC获取手臂电机指令
+**功能描述：** 启用或禁用手臂快速模式，启用则手臂电机直接获取kuavo_arm_traj的指令，不从MPC获取手臂电机指令
 
 **请求字段：**
 ```yaml
-int8 quickMode    # 模式切换类型
-                  # 0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
+bool data    # 模式切换标志
+             # true: 启用快速模式
+             # false: 禁用快速模式
 ```
 
 **响应字段：**
@@ -656,7 +650,6 @@ string message  # 状态消息
 
 **相关演示脚本：** 
 - `cmd_arm_joint_test.py`
-- `cmd_leg_joint_test.py`
 
 ---
 

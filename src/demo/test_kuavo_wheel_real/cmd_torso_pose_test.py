@@ -6,7 +6,7 @@ import lb_ctrl_api as ct
 
 # -------------- 全局变量 --------------
 reach_time = 0.0
-initialTorsoPose_ = [0.196123, 0.0005, 0.789919]
+initialTorsoPose_ = [-0.0303766, 0.0005, 0.604619]
 
 # -------------- 回调函数 --------------
 def time_callback(msg):

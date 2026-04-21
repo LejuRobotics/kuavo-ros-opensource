@@ -39,7 +39,6 @@ namespace ocs2
     scalar_t weightStanceLeg_;
     scalar_t weightSwingLeg_;
     scalar_t weightArmAccel_;
-    scalar_t weightFeetAccel_;
     };
 
     // Decision Variables: x = [\dot u^T, 3*F(3)^T, \tau^T]^T , \dot u in ocal frame
@@ -54,7 +53,6 @@ namespace ocs2
               const PinocchioEndEffectorKinematics &eeKinematics);
 
       virtual void loadTasksSetting(const std::string &taskFile, bool verbose, bool is_real);
-      virtual void loadSwitchParamsSetting(const std::string &taskFile, bool verbose, bool is_real);
 
       virtual vector_t update(const vector_t &stateDesired, const vector_t &inputDesired, const vector_t &rbdStateMeasured,
                               size_t mode, scalar_t period, bool mpc_update = false);
@@ -102,7 +100,6 @@ namespace ocs2
       {
         waist_nums_ = waist_nums;
       }
-     
 
       inline Eigen::Vector3d getR() const { return r; }
       inline Eigen::Vector3d getRd() const { return rd; }

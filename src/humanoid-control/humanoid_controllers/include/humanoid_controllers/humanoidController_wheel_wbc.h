@@ -20,7 +20,6 @@
 #include "kuavo_msgs/changeArmCtrlMode.h"
 #include "kuavo_msgs/lbBaseLinkPoseCmdSrv.h"
 #include "kuavo_msgs/changeTorsoCtrlMode.h"
-#include "kuavo_msgs/changeLbQuickModeSrv.h"
 
 // Third Party
 #include <ocs2_core/misc/LoadData.h>
@@ -93,8 +92,7 @@ namespace humanoidController_wheel_wbc
     bool enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool changeArmCtrlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool handleWaistIkService(kuavo_msgs::lbBaseLinkPoseCmdSrv::Request &req, kuavo_msgs::lbBaseLinkPoseCmdSrv::Response &res);
-    bool enableLbArmQuickModeCallback(kuavo_msgs::changeLbQuickModeSrv::Request &req, 
-                                      kuavo_msgs::changeLbQuickModeSrv::Response &res);
+    bool enableLbArmQuickModeCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
 
     // ========== 工具函数 ==========
     /**
@@ -152,7 +150,6 @@ namespace humanoidController_wheel_wbc
     humanoid::TopicLogger *ros_logger_{nullptr};
 
     // ========== 机器人参数 ==========
-    size_t baseDim_{0};
     size_t armNum_{0};
     size_t lowJointNum_{0};
     size_t headNum_{2};
@@ -197,7 +194,7 @@ namespace humanoidController_wheel_wbc
 
     // ========== 手臂轨迹控制 ==========
     bool use_arm_trajectory_control_{false};  // 是否使用轨迹控制
-    int8_t quickMode_{0};  // 全身快速模式类型: 0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
+    bool use_lb_arm_quick_mode_{false};  // 是否使用手臂跟踪快速模式
     int arm_trajectory_mode_{-1};  // 轨迹控制模式
     int prev_arm_trajectory_mode_{0};  // 上一次的轨迹控制模式
     bool isArmControlModeChanged_{false};  // 是否需要处理模式切换

@@ -20,7 +20,7 @@
       </material>
     </visual>
   </link>
-  <link name="waist_yaw_link">
+  <link name="waist_yaw">
     <inertial>
       <origin xyz="0.00227055 6.536e-05 0.1163574" rpy="0 0 0" />
       <mass value="7.34228758" />
@@ -39,7 +39,7 @@
   <joint name="waist_yaw_joint" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="torso" />
-    <child link="waist_yaw_link" />
+    <child link="waist_yaw" />
     <axis xyz="0 0 1" />
     <limit lower="-2.0943951023932" upper="2.0943951023932" effort="50" velocity="8.37333333333333" />
   </joint>
@@ -62,7 +62,7 @@
   </link>
   <joint name="zarm_l1_joint" type="revolute">
     <origin xyz="0.0073474151 0.16250437899999998 0.20242688398" rpy="0 0 0" />
-    <parent link="waist_yaw_link" />
+    <parent link="waist_yaw" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="0.0" effort="12" velocity="7.32666666666667" />
@@ -170,7 +170,7 @@
   </link>
   <joint name="zarm_r1_joint" type="revolute">
     <origin xyz="0.0073474151 -0.16250437899999998 0.20242688398" rpy="0 0 0" />
-    <parent link="waist_yaw_link" />
+    <parent link="waist_yaw" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="0.0" effort="12" velocity="7.32666666666667" />

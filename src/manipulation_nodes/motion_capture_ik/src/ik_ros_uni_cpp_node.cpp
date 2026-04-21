@@ -4,7 +4,7 @@
 #include <fstream>
 #include <iostream>
 
-#include "motion_capture_ik/Quest3IkIncrementalROS.h"
+#include "motion_capture_ik/Quest3IkROS.h"
 #include "motion_capture_ik/json.hpp"
 #include "leju_utils/define.hpp"
 
@@ -15,10 +15,10 @@ int getRobotVersion(ros::NodeHandle& nodeHandle) {
     ros::Duration(0.1).sleep();
   }
 
-  int robotVersion = 42;
-  nodeHandle.getParam("/robot_version", robotVersion);
-  std::cout << "robotVersionInt: " << robotVersion << std::endl;
-  return robotVersion;
+  int robot_version = 42;
+  nodeHandle.getParam("/robot_version", robot_version);
+  std::cout << "robotVersionInt: " << robot_version << std::endl;
+  return robot_version;
 }
 
 void loadJsonConfig(nlohmann::json& jsonData, const std::string& filename) {
@@ -33,12 +33,12 @@ void loadJsonConfig(nlohmann::json& jsonData, const std::string& filename) {
 }
 
 ArmIdx getCtrlArmIdx(ros::NodeHandle& nodeHandle) {
-  int ctrlArmIdx = 2;  // 默认值：控制双臂
-  nodeHandle.param("ik_ros_uni_cpp_node/ctrl_arm_idx", ctrlArmIdx, 2);
-  ROS_INFO("Read ctrl_arm_idx parameter: %d", ctrlArmIdx);
+  int ctrl_arm_idx = 2;  // 默认值：控制双臂
+  nodeHandle.param("ik_ros_uni_cpp_node/ctrl_arm_idx", ctrl_arm_idx, 2);
+  ROS_INFO("Read ctrl_arm_idx parameter: %d", ctrl_arm_idx);
 
   // 转换为ArmIdx枚举
-  switch (ctrlArmIdx) {
+  switch (ctrl_arm_idx) {
     case 0:
       return ArmIdx::LEFT;
     case 1:
@@ -46,7 +46,7 @@ ArmIdx getCtrlArmIdx(ros::NodeHandle& nodeHandle) {
     case 2:
       return ArmIdx::BOTH;
     default:
-      ROS_WARN("Invalid ctrl_arm_idx value: %d, using default BOTH", ctrlArmIdx);
+      ROS_WARN("Invalid ctrl_arm_idx value: %d, using default BOTH", ctrl_arm_idx);
       return ArmIdx::BOTH;
   }
 }
@@ -81,9 +81,9 @@ int main(int argc, char** argv) {
   nlohmann::json jsonData;
   loadJsonConfig(jsonData, modelConfigFile);
 
-  HighlyDynamic::Quest3IkIncrementalROS quest3IkIncrementalROS(nodeHandle, 100, false, ctrlArmIdx);
-  quest3IkIncrementalROS.initialize(jsonData);
-  quest3IkIncrementalROS.run();
+  HighlyDynamic::Quest3IkROS quest3IkROS(nodeHandle, 100, false, ctrlArmIdx);
+  quest3IkROS.initialize(jsonData);
+  quest3IkROS.run();
 
   return 0;
 }

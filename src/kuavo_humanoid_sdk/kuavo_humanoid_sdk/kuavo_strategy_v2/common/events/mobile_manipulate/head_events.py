@@ -63,7 +63,7 @@ class EventPercep(BaseEvent):
             self.is_new_tag = False
         return res
 
-    def step(self, tag_up_axis: str = "y") -> EventStatus:
+    def step(self):
         """
         执行事件的每一步操作。
         """
@@ -97,16 +97,8 @@ class EventPercep(BaseEvent):
                 )
                 # FIXME: 如果latest_tag不垂直地面，强行改成垂直。(只保留yaw角)
                 old_tag_euler = self.latest_tag.pose.get_euler(degrees=True)
-                if tag_up_axis == "y":
-                    old_tag_euler[0] = 90
-                    old_tag_euler[1] = 0.0
-                elif tag_up_axis == "z":
-                    old_tag_euler[0] = 0.0
-                    old_tag_euler[1] = 0.0
-                elif tag_up_axis == "x":
-                    old_tag_euler[0] = 0.0
-                    old_tag_euler[1] = -90.0
-
+                old_tag_euler[0] = 90
+                old_tag_euler[1] = 0.0
                 self.latest_tag.pose = Pose.from_euler(
                     pos=(tag_pose.position.x, tag_pose.position.y, tag_pose.position.z),
                     euler=old_tag_euler,

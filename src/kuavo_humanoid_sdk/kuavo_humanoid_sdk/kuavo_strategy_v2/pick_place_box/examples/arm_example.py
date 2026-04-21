@@ -1,4 +1,3 @@
-import time
 import numpy as np
 
 from kuavo_humanoid_sdk.kuavo_strategy_v2.common.robot_sdk import RobotSDK
@@ -35,7 +34,7 @@ arm_event = EventArmMoveKeyPoint(
 fake_target_tag = Tag(
     id=1,  # 假设目标箱子的ID为1
     pose=Pose.from_euler(
-        pos=(0.5, 0.0, 0.9),  # 初始位置猜测，单位米
+        pos=(0.3, 0.0, 0.96),  # 初始位置猜测，单位米
         euler=(90, 0, -90),  # 初始姿态猜测，单位欧拉角（弧度）
         frame=Frame.ODOM,  # 使用里程计坐标系
         degrees=True
@@ -50,7 +49,7 @@ success = grab_box_and_backward(
     box_beneath_tag=0.0,  # 箱子在tag下方的距离，单位米
     box_left_tag=0.0,  # 箱子在tag左侧的距离，单位米
     tag=fake_target_tag,
-    step_back_distance=0.3,  # 搬起后向后平移的距离，单位米
+    step_back_distance=0.5,  # 搬起后向后平移的距离，单位米
 
     box_mass=10,  # 假设箱子质量，单位kg，用来计算纵向wrench
     force_ratio_z=0,  # 经验系数（根据1.5kg对应5N得出：5/(1.5*9.8)≈0.34
@@ -58,35 +57,3 @@ success = grab_box_and_backward(
 )
 
 print("Grab box success:", success)
-
-input("按回车：手臂回到零点")
-# # 获取当前手臂关节位置并进行插值到零位，避免运动过快
-current_joint_positions = robot_sdk.state.arm_joint_state().position  # 手臂关节位置
-target_joint_positions = [0.0] * 14  # 目标零位
-print(f"当前手臂关节位置：{current_joint_positions}")
-# 设置插值步数，控制运动速度
-interpolation_steps = 50
-robot_sdk.control.control_arm_joint_positions(
-        joint_positions=current_joint_positions
-    )
-for i in range(interpolation_steps + 1):
-    # 线性插值计算中间位置
-    alpha = i / interpolation_steps
-    interpolated_positions = [
-        current_pos + alpha * (target_pos - current_pos)
-        for current_pos, target_pos in zip(current_joint_positions, target_joint_positions)
-    ]
-    
-    # 控制手臂到插值位置
-    robot_sdk.control.control_arm_joint_positions(
-        joint_positions=interpolated_positions
-    )
-    
-    # 短暂延时确保运动平滑
-    time.sleep(0.02)
-current_jointsPos = robot_sdk.state.arm_joint_state().position  # 手臂关节位置
-print(f"最终期望关节位置：{interpolated_positions}")
-print(f"最终手臂关节位置：{current_jointsPos}")
-
-input("按回车：手臂回到初始摆动状态")
-arm_event.arm_reset()
