@@ -5,16 +5,8 @@ model_information {
   
   ; motion joints in the URDF to consider fixed
   removeJoints {
-    [0] "LF_wheel_yaw_joint"
-    [1] "LF_wheel_pitch_joint"
-    [2] "RF_wheel_yaw_joint"
-    [3] "RF_wheel_pitch_joint"
-    [4] "LB_wheel_yaw_joint"
-    [5] "LB_wheel_pitch_joint"
-    [6] "RB_wheel_yaw_joint"
-    [7] "RB_wheel_pitch_joint"
-    [8] "zhead_1_joint"
-    [9] "zhead_2_joint"
+    [0] "zhead_1_joint"
+    [1] "zhead_2_joint"
   }
 
   ; base frame of the robot (from URDF)
@@ -158,26 +150,26 @@ referencekinematicLimit
   {
     max_vel
     {
-      (0,0)  0.9    ; x
-      (1,0)  0.9    ; z
-      (2,0)  2.08   ; yaw
-      (3,0)  2.08   ; pitch
+      (0,0)  0.2    ; x
+      (1,0)  0.2    ; z
+      (2,0)  0.52   ; yaw
+      (3,0)  0.52   ; pitch
     }
 
     max_acc
     {
-      (0,0)  9.0   ; x
-      (1,0)  9.0   ; z
-      (2,0)  10.4   ; yaw
-      (3,0)  10.4   ; pitch
+      (0,0)  0.6   ; x
+      (1,0)  0.6   ; z
+      (2,0)  0.6   ; yaw
+      (3,0)  0.6   ; pitch
     }
 
     max_jerk
     {
-      (0,0)  15.6   ; x
-      (1,0)  15.6   ; z
-      (2,0)  40.6   ; yaw
-      (3,0)  40.6   ; pitch
+      (0,0)  0.6   ; x
+      (1,0)  0.6   ; z
+      (2,0)  0.6   ; yaw
+      (3,0)  0.6   ; pitch
     }
   }
 
@@ -544,12 +536,12 @@ torsoTracking
   {
     scaling 1e0
 
-    (0,0)    50.0   ; torso X
+    (0,0)    20.0   ; torso X
     (1,0)    20.0   ; torso Y
-    (2,0)    50.0   ; torso Z
+    (2,0)    10.0   ; torso Z
     (3,0)    10.0   ; torso roll
-    (4,0)    50.0   ; torso pitch
-    (5,0)    50.0   ; torso yaw
+    (4,0)    10.0   ; torso pitch
+    (5,0)    10.0   ; torso yaw
   }
 }
 

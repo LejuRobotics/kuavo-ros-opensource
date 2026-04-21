@@ -2,18 +2,18 @@
 <robot xmlns:xacro="http://ros.org/wiki/xacro" name="standalone_apriltag_cube">
   
   <!-- 定义参数 -->
-  <xacro:property name="table_height" value="0.8" />  <!-- 桌子高度参数 -->
+  <xacro:property name="table_height" value="0.6" />  <!-- 桌子高度参数 -->
   <xacro:property name="table_thickness" value="0.04" />  <!-- 桌面厚度 -->
   <xacro:property name="leg_radius" value="0.02" />  <!-- 桌腿半径 -->
   
   <!-- 第一个桌子位置参数 -->
-  <xacro:property name="table1_x" value="0.0" />
-  <xacro:property name="table1_y" value="1.8" />
+  <xacro:property name="table1_x" value="0.6" />
+  <xacro:property name="table1_y" value="0.0" />
   <xacro:property name="table1_z" value="${table_height}" />
   
   <!-- 第二个桌子位置参数 -->
-  <xacro:property name="table2_x" value="0.0" />
-  <xacro:property name="table2_y" value="-1.8" />
+  <xacro:property name="table2_x" value="-1.0" />
+  <xacro:property name="table2_y" value="0.0" />
   <xacro:property name="table2_z" value="${table_height}" />
 
   <!-- 立方体位置参数/参数相对于桌子来说 -->
@@ -219,44 +219,6 @@
       <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
     </inertial>
   </link>
-  <link name="apriltag_box_tag2_base">
-    <visual>
-      <geometry>
-        <box size="0.1 0.1 0.1"/>
-      </geometry>
-      <material>
-        <color rgba="0.8 0.8 0.8 0.5"/>
-      </material>
-    </visual>
-    <collision>
-      <geometry>
-        <box size="0.1 0.1 0.1"/>
-      </geometry>
-    </collision>
-    <inertial>
-      <mass value="0.1"/>
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
-    </inertial>
-  </link>
-  <link name="apriltag_box_tag3_base">
-    <visual>
-      <geometry>
-        <box size="0.1 0.1 0.1"/>
-      </geometry>
-      <material>
-        <color rgba="0.8 0.8 0.8 0.5"/>
-      </material>
-    </visual>
-    <collision>
-      <geometry>
-        <box size="0.1 0.1 0.1"/>
-      </geometry>
-    </collision>
-    <inertial>
-      <mass value="0.1"/>
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
-    </inertial>
-  </link>
   <link name="apriltag_shelf_base">
     <visual>
       <geometry>
@@ -281,37 +243,20 @@
   <joint name="world_to_box_tag_joint" type="fixed">
     <parent link="world"/>
     <child link="apriltag_box_base"/>
-    <origin xyz="0.0 -1.7 1.05" rpy="0 0 0"/>
+    <origin xyz="0.6 0.0 0.8" rpy="0 0 0"/>
   </joint>
-  <joint name="world_to_box_tag2_joint" type="fixed">
-    <parent link="world"/>
-    <child link="apriltag_box_tag2_base"/>
-    <origin xyz="0.5 -1.7 1.3" rpy="0 0 0"/>
-  </joint>
-  <joint name="world_to_box_tag3_joint" type="fixed">
-    <parent link="world"/>
-    <child link="apriltag_box_tag3_base"/>
-    <origin xyz="-0.5 -1.7 0.75" rpy="0 0 0"/>
-  </joint>
+
   <joint name="world_to_table_joint" type="fixed">
     <parent link="world"/>
     <child link="apriltag_shelf_base"/>
-    <origin xyz="0.0 1.7 1.6" rpy="0 0 4.712389"/> <!-- 绕z轴旋转270度 (4.712389弧度 = 270度) -->
+    <origin xyz="-1.0 0.0 0.8" rpy="0 0 0"/> <!-- 绕z轴旋转270度 (4.712389弧度 = 270度) -->
   </joint>
 
-  <xacro:apriltag_marker parent_link="apriltag_box_base" id="1">
-    <origin xyz="0 -0.055 -0.165" rpy="1.5708 1.5708 0"/>
-  </xacro:apriltag_marker>
-  
-  <xacro:apriltag_marker parent_link="apriltag_box_tag2_base" id="2">
-    <origin xyz="0 -0.055 -0.165" rpy="1.5708 1.5708 0"/>
-  </xacro:apriltag_marker>
-
-  <xacro:apriltag_marker parent_link="apriltag_box_tag3_base" id="3">
-    <origin xyz="0 -0.055 -0.165" rpy="1.5708 1.5708 0"/>
+  <xacro:apriltag_marker parent_link="apriltag_box_base" id="4">
+    <origin xyz="0 0 0" rpy="0 3.14159 0"/>
   </xacro:apriltag_marker>
   
   <xacro:apriltag_marker parent_link="apriltag_shelf_base" id="0">
-    <origin xyz="0.055 0 -0.165" rpy="0 -1.5708 3.14159"/>
+    <origin xyz="0 0 0" rpy="0 3.14159 3.14159"/>
   </xacro:apriltag_marker>
 </robot> 

@@ -71,24 +71,10 @@ namespace mobile_manipulator
       angular_scale_y_ = 0.4; // rad/s (用于躯干控制)
       deadzone_ = 0.05;
 
-      int robotVersion_ = 60;
-      if(nodeHandle_.hasParam("robot_version"))
-      {
-        nodeHandle_.getParam("robot_version", robotVersion_);
-      }
       // 躯干初始化位置xyz
-      if(robotVersion_ == 60)
-      {
-        initialTorsoPose_x_ = 0.196123;
-        initialTorsoPose_y_ = 0.0005;
-        initialTorsoPose_z_ = 0.789919;
-      }
-      else if(robotVersion_ == 61)
-      {
-        initialTorsoPose_x_ = 0.11575;
-        initialTorsoPose_y_ = 0.0;
-        initialTorsoPose_z_ = 0.923803;
-      }
+      initialTorsoPose_x_ = -0.0303766;
+      initialTorsoPose_y_ = 0.0005;
+      initialTorsoPose_z_ = 0.604619;
 
       // 躯干笛卡尔运动限幅
       torsoMax_x_ = 0.13; torsoMin_x_ = 0.2;

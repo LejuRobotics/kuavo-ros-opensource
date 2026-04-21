@@ -1,8 +1,5 @@
 // 机器人状态协议: Robot send to VR
 syntax = "proto3";
-package protos;
-
-import "protos/hand_wrench_srv.proto";
 
 // 头文件，包含时间戳和消息ID
 message Header {
@@ -31,5 +28,4 @@ message RobotState {
   Header header = 1;
   EndEffectorState ee_state = 2;
   JointState joint_state = 3;
-  ItemMassForceResponse item_mass_force_response = 4;
 }

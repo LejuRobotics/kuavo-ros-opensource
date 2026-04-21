@@ -11,9 +11,8 @@
 
       <arg name="rviz"   default="true"/>
       <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
-
       <arg name="use_joystick"       default="true"/>
-      <arg name="joystick_type"      default="sim"/>
+      <arg name="joystick_type"      default="bt2"/>
 
       <!-- make the files into global parameters -->
       <param name="taskFile"   value="$(arg taskFile)" />

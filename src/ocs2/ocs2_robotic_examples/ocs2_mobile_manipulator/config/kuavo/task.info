@@ -41,7 +41,7 @@ model_information {
     [33] "r_littleMCP"
     [34] "r_littlePIP"
   }
-  waistDof                   0   ; number of DOFs of the waist joint (0 if no waist joint)
+
   ; base frame of the robot (from URDF)
   baseFrame                       "base_link"
   ; end-effector frame of the robot (from URDF)
@@ -201,7 +201,7 @@ initialState
   }
 
   ; initial state for the arm DOFs
-  armAndWaist
+  arm
   {
     (0,0)  0.0  ; z_arm_l1
     (1,0)  0.0  ; z_arm_l2
@@ -394,22 +394,14 @@ inputCost
 endEffector
 {
   ; end effector quadratic penalty scaling
-  muPositionX       10.0
-  muPositionY       10.0
-  muPositionZ       10.0
-  muOrientationRoll   5.0
-  muOrientationPitch  5.0
-  muOrientationYaw    5.0
+  muPosition      10.0
+  muOrientation    5.0
 }
 
 finalEndEffector
 {
-  muPositionX       10.0
-  muPositionY       10.0
-  muPositionZ       10.0
-  muOrientationRoll   5.0
-  muOrientationPitch  5.0
-  muOrientationYaw    5.0
+  muPosition      10.0
+  muOrientation    5.0
 }
 
 selfCollision

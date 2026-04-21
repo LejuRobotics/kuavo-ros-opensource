@@ -3,7 +3,7 @@
 #########################################################
 canbus_interfaces:
   canbus0:
-    type: BUSMUST_A                 # ANCHOR_CANBUS0_TYPE
+    type: BUSMUST_A
     name: "BM-CANFD-X1(6729) CH1"
     nbitrate: 1000      # 仲裁段波特率
     dbitrate: 2000     # 数据段波特率

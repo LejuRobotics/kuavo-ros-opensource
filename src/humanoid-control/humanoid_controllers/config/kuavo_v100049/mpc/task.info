@@ -534,23 +534,6 @@ selfCollision
   delta   1e-3
 }
 
-; Center of Mass constraint
-centerOfMass
-{
-  ; Enable center of mass constraint (true/false)
-  enable  true
-  
-  ; Use relaxed barrier penalty (true) or quadratic penalty (false)
-  useRelaxedBarrier  true
-  
-  ; For relaxed barrier penalty
-  mu      100     ; barrier parameter (smaller = tighter constraint)
-  delta   1e-5     ; relaxation parameter
-  
-  ; For quadratic penalty (only used if useRelaxedBarrier = false)
-  weight  100.0    ; penalty weight
-}
-
 ; Whole body control
 torqueLimitsTask
 {
@@ -752,30 +735,6 @@ standUpWeight
     Angular         10
     JointAcc        20
     contactForce    0.1 
-}
-
-switchJointAccelTask
-{
-  leg
-  {
-    kp    100
-    kd    1.2
-    kp_sim    500
-    kd_sim    10.2
-  }
-  arm
-  {
-    kp    20
-    kd    1.2
-  }
-}
-
-switchWeight
-{
-    Linear          3
-    Angular         15
-    JointAcc        30
-    contactForce    0.01
 }
 
 ; State Estimation

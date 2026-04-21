@@ -4,10 +4,8 @@
 import os
 import sys
 import time
-import json
 import queue
 import rospy
-import rospkg
 import threading
 
 from sensor_msgs.msg import JointState
@@ -17,49 +15,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import protos.robot_state_pb2 as robot_state_pb2
 
 from udp_server import UDPServer
-
-
-def get_package_path(package_name):
-    """获取 ROS 包的路径"""
-    try:
-        rospack = rospkg.RosPack()
-        package_path = rospack.get_path(package_name)
-        return package_path
-    except rospkg.ResourceNotFound:
-        return None
-
-
-def get_end_effector_type():
-    """
-    获取末端执行器类型
-    优先从 ROS 参数服务器获取，如果不存在则从 kuavo.json 配置文件读取
-    """
-    if rospy.has_param("/end_effector_type"):
-        ee_type = rospy.get_param("/end_effector_type")
-        print(f"\033[92mrobot_state_server: end_effector_type from rosparam: {ee_type}\033[0m")
-        return ee_type
-    
-    # 从 kuavo.json 配置文件读取
-    kuavo_assets_path = get_package_path("kuavo_assets")
-    if kuavo_assets_path is None:
-        print("\033[91mrobot_state_server: kuavo_assets package not found, using default ee_type: none\033[0m")
-        return "none"
-    
-    robot_version = os.environ.get('ROBOT_VERSION', '40')
-    config_file = os.path.join(kuavo_assets_path, f"config/kuavo_v{robot_version}/kuavo.json")
-    
-    try:
-        with open(config_file, 'r') as f:
-            config = json.load(f)
-            ee_type = config.get("EndEffectorType", ["qiangnao", "qiangnao"])[0]
-            print(f"\033[93mrobot_state_server: end_effector_type from kuavo.json: {ee_type}\033[0m")
-            return ee_type
-    except FileNotFoundError:
-        print(f"\033[91mrobot_state_server: Config file not found: {config_file}, using default ee_type: none\033[0m")
-        return "none"
-    except (json.JSONDecodeError, KeyError, IndexError) as e:
-        print(f"\033[91mrobot_state_server: Error reading config file: {e}, using default ee_type: none\033[0m")
-        return "none"
 
 class RobotSubscriber:
     """机器人数据订阅器类"""
@@ -200,9 +155,6 @@ class RobotStateServer:
 
         # 创建机器人订阅器
         self.robot_subscriber = RobotSubscriber(ee_type=self.ee_type, subscribe_sensor_data=subscribe_sensor_data)
-        
-        # 物品质量与力响应队列
-        self.item_mass_force_response_queue = queue.Queue(maxsize=100)
 
     def start(self):
         """启动服务器
@@ -243,34 +195,6 @@ class RobotStateServer:
                 self.udp_server.stop()
                 print("\033[92mRobot State Server stopped!\033[0m")
         print("\033[91mRobot State Server stopped!\033[0m")
-    
-    def add_item_mass_force_response(self, response):
-        """添加物品质量与力响应到队列
-        
-        Args:
-            response: hand_wrench_srv_pb2.ItemMassForceResponse 消息
-        """
-        try:
-            if self.item_mass_force_response_queue.full():
-                # 如果队列满了，移除最旧的响应
-                try:
-                    self.item_mass_force_response_queue.get_nowait()
-                except queue.Empty:
-                    pass
-            self.item_mass_force_response_queue.put_nowait(response)
-        except Exception as e:
-            print(f"Error adding item mass force response: {e}")
-    
-    def _process_item_mass_force_response(self):
-        """从队列中获取物品质量与力响应
-        
-        Returns:
-            hand_wrench_srv_pb2.ItemMassForceResponse 或 None
-        """
-        try:
-            return self.item_mass_force_response_queue.get_nowait()
-        except queue.Empty:
-            return None
     def _publish_loop(self):
         """发布循环"""
         rate = rospy.Rate(self.publish_rate)
@@ -313,11 +237,6 @@ class RobotStateServer:
             ee_valid, ee_state = self.robot_subscriber.get_ee_state()
             if ee_valid and ee_state:
                 robot_state.ee_state.CopyFrom(ee_state)
-            
-            # 获取物品质量与力响应
-            item_mass_force_response = self._process_item_mass_force_response()
-            if item_mass_force_response:
-                robot_state.item_mass_force_response.CopyFrom(item_mass_force_response)
 
             return robot_state
 
@@ -331,12 +250,11 @@ def main():
     # 初始化ROS节点
     rospy.init_node('robot_state_server', anonymous=False)
 
-    # 获取末端执行器类型（优先从 ROS 参数，否则从 kuavo.json 读取）
-    ee_type = get_end_effector_type()
+    # 从ROS参数服务器获取end_effector_type参数
+    ee_type = rospy.get_param('/end_effector_type', 'none')
 
     # 创建并启动服务器
-    subscribe_sensor_data = True  # 订阅 sensors_data_raw
-    server = RobotStateServer(ee_type=ee_type, udp_port=15170, publish_rate=20, subscribe_sensor_data=subscribe_sensor_data)
+    server = RobotStateServer(ee_type=ee_type)
 
     try:
         if server.start():

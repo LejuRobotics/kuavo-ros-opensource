@@ -16,7 +16,7 @@ set(CMAKE_IMPORT_FILE_VERSION 1)
 set(_targetsDefined)
 set(_targetsNotDefined)
 set(_expectedTargets)
-foreach(_expectedTarget hardware_plant::hardware_plant hardware_plant::hardware_plant_cxx hardware_plant::xsens_mti_driver hardware_plant::ec_master_main hardware_plant::ec_app hardware_plant::mathtools_hw hardware_plant::lejuclaw hardware_plant::hipnuc_imu_receiver hardware_plant::dexhand_sdk hardware_plant::canbus_sdk hardware_plant::motorevo_controller hardware_plant::ruiwo_actuatorLib hardware_plant::ruiwo_actuatorCXXLib hardware_plant::xsens-lcm-types-lib)
+foreach(_expectedTarget hardware_plant::hardware_plant hardware_plant::hardware_plant_cxx hardware_plant::xsens_mti_driver hardware_plant::ec_master_main hardware_plant::ec_app hardware_plant::ruierman_actuatorLib hardware_plant::jodell_claw_driver hardware_plant::dxl_x64_cpp hardware_plant::mathtools_hw hardware_plant::lejuclaw hardware_plant::hipnuc_imu_receiver hardware_plant::dexhand_sdk hardware_plant::canbus_sdk hardware_plant::motorevo_controller hardware_plant::ruiwo_actuatorLib hardware_plant::ruiwo_actuatorCXXLib hardware_plant::xsens-lcm-types-lib)
   list(APPEND _expectedTargets ${_expectedTarget})
   if(NOT TARGET ${_expectedTarget})
     list(APPEND _targetsNotDefined ${_expectedTarget})
@@ -55,7 +55,7 @@ add_library(hardware_plant::hardware_plant STATIC IMPORTED)
 
 set_target_properties(hardware_plant::hardware_plant PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/kuavo_solver;${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/ruiwo_controller;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "hardware_plant::xsens_mti_driver;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;hardware_plant::canbus_sdk;hardware_plant::motorevo_controller;stdc++fs;hardware_plant::ruiwo_actuatorLib;/opt/ros/noetic/lib/libroscpp.so;/usr/lib/x86_64-linux-gnu/libpthread.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;/opt/ros/noetic/lib/librosconsole.so;/opt/ros/noetic/lib/librosconsole_log4cxx.so;/opt/ros/noetic/lib/librosconsole_backend_interface.so;/usr/lib/x86_64-linux-gnu/liblog4cxx.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.71.0;/opt/ros/noetic/lib/libxmlrpcpp.so;/opt/ros/noetic/lib/libroscpp_serialization.so;/opt/ros/noetic/lib/librostime.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.71.0;/opt/ros/noetic/lib/libcpp_common.so;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.71.0;/usr/lib/x86_64-linux-gnu/libconsole_bridge.so.0.4;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_solver.so"
+  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;hardware_plant::canbus_sdk;hardware_plant::motorevo_controller;stdc++fs;hardware_plant::ruiwo_actuatorLib;/opt/ros/noetic/lib/libroscpp.so;/usr/lib/x86_64-linux-gnu/libpthread.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;/opt/ros/noetic/lib/librosconsole.so;/opt/ros/noetic/lib/librosconsole_log4cxx.so;/opt/ros/noetic/lib/librosconsole_backend_interface.so;/usr/lib/x86_64-linux-gnu/liblog4cxx.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.71.0;/opt/ros/noetic/lib/libxmlrpcpp.so;/opt/ros/noetic/lib/libroscpp_serialization.so;/opt/ros/noetic/lib/librostime.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.71.0;/opt/ros/noetic/lib/libcpp_common.so;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.71.0;/usr/lib/x86_64-linux-gnu/libconsole_bridge.so.0.4;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_solver.so"
 )
 
 # Create imported target hardware_plant::hardware_plant_cxx
@@ -63,7 +63,7 @@ add_library(hardware_plant::hardware_plant_cxx STATIC IMPORTED)
 
 set_target_properties(hardware_plant::hardware_plant_cxx PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/kuavo_solver;${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/ruiwo_controller_cxx;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "hardware_plant::xsens_mti_driver;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;hardware_plant::canbus_sdk;hardware_plant::motorevo_controller;stdc++fs;hardware_plant::ruiwo_actuatorCXXLib;/opt/ros/noetic/lib/libroscpp.so;/usr/lib/x86_64-linux-gnu/libpthread.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;/opt/ros/noetic/lib/librosconsole.so;/opt/ros/noetic/lib/librosconsole_log4cxx.so;/opt/ros/noetic/lib/librosconsole_backend_interface.so;/usr/lib/x86_64-linux-gnu/liblog4cxx.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.71.0;/opt/ros/noetic/lib/libxmlrpcpp.so;/opt/ros/noetic/lib/libroscpp_serialization.so;/opt/ros/noetic/lib/librostime.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.71.0;/opt/ros/noetic/lib/libcpp_common.so;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.71.0;/usr/lib/x86_64-linux-gnu/libconsole_bridge.so.0.4;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_solver.so"
+  INTERFACE_LINK_LIBRARIES "gflags;hardware_plant::xsens_mti_driver;casadi;ncurses;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::ruierman_actuatorLib;hardware_plant::jodell_claw_driver;hardware_plant::dxl_x64_cpp;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;hardware_plant::canbus_sdk;hardware_plant::motorevo_controller;stdc++fs;hardware_plant::ruiwo_actuatorCXXLib;/opt/ros/noetic/lib/libroscpp.so;/usr/lib/x86_64-linux-gnu/libpthread.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;/opt/ros/noetic/lib/librosconsole.so;/opt/ros/noetic/lib/librosconsole_log4cxx.so;/opt/ros/noetic/lib/librosconsole_backend_interface.so;/usr/lib/x86_64-linux-gnu/liblog4cxx.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.71.0;/opt/ros/noetic/lib/libxmlrpcpp.so;/opt/ros/noetic/lib/libroscpp_serialization.so;/opt/ros/noetic/lib/librostime.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.71.0;/opt/ros/noetic/lib/libcpp_common.so;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.71.0;/usr/lib/x86_64-linux-gnu/libconsole_bridge.so.0.4;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_solver.so"
 )
 
 # Create imported target hardware_plant::xsens_mti_driver
@@ -88,6 +88,31 @@ add_library(hardware_plant::ec_app STATIC IMPORTED)
 set_target_properties(hardware_plant::ec_app PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/EC_Master/Common;${_IMPORT_PREFIX}/include/EC_Master/SDK/INC;${_IMPORT_PREFIX}/include/EC_Master/SDK/INC/Linux;${_IMPORT_PREFIX}/include/EC_Master/Sharelib/Common;${_IMPORT_PREFIX}/include/EC_Master/Sharelib/EcMasterDemo;${_IMPORT_PREFIX}/include/EC_Master/Sharelib/Linux;${_IMPORT_PREFIX}/include"
   INTERFACE_LINK_LIBRARIES "libAtemRasSrv.a;libEcMaster.a;libemllI8254x.so;-pthread;-ldl"
+)
+
+# Create imported target hardware_plant::ruierman_actuatorLib
+add_library(hardware_plant::ruierman_actuatorLib SHARED IMPORTED)
+
+set_target_properties(hardware_plant::ruierman_actuatorLib PROPERTIES
+  INTERFACE_INCLUDE_DIRECTORIES "/usr/include/python3.8;${_IMPORT_PREFIX}/include/ruierman_controller;/usr/include/python3.8;${_IMPORT_PREFIX}/include"
+  INTERFACE_LINK_LIBRARIES "Python3::Python;stdc++fs;-pthread"
+)
+
+# Create imported target hardware_plant::jodell_claw_driver
+add_library(hardware_plant::jodell_claw_driver SHARED IMPORTED)
+
+set_target_properties(hardware_plant::jodell_claw_driver PROPERTIES
+  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/jodell_claw_driver;${_IMPORT_PREFIX}/include"
+  INTERFACE_LINK_DIRECTORIES "${_IMPORT_PREFIX}/lib"
+  INTERFACE_LINK_LIBRARIES "jodellTool;jodellTool2;-pthread"
+)
+
+# Create imported target hardware_plant::dxl_x64_cpp
+add_library(hardware_plant::dxl_x64_cpp SHARED IMPORTED)
+
+set_target_properties(hardware_plant::dxl_x64_cpp PROPERTIES
+  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/DynamixelSDK/include/dynamixel_sdk;${_IMPORT_PREFIX}/include/DynamixelSDK/src;${_IMPORT_PREFIX}/include"
+  INTERFACE_LINK_LIBRARIES "pthread;Boost::system;Boost::filesystem"
 )
 
 # Create imported target hardware_plant::mathtools_hw
@@ -120,7 +145,7 @@ add_library(hardware_plant::dexhand_sdk STATIC IMPORTED)
 set_target_properties(hardware_plant::dexhand_sdk PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/dexhand_sdk;${_IMPORT_PREFIX}/include"
   INTERFACE_LINK_DIRECTORIES "${_IMPORT_PREFIX}/lib"
-  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;m;pthread;rt;dl;hardware_plant::canbus_sdk"
+  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;serialport;m;pthread;rt;dl;hardware_plant::canbus_sdk"
 )
 
 # Create imported target hardware_plant::canbus_sdk

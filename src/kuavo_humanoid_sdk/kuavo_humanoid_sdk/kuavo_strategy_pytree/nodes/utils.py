@@ -1,7 +1,7 @@
 import numpy as np
 from typing import List, Optional, Any, Callable
+from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose
 from kuavo_humanoid_sdk.interfaces.data_types import (
-    KuavoPose,
     KuavoManipulationMpcCtrlMode,
     KuavoArmCtrlMode,
     KuavoManipulationMpcFrame)
@@ -315,9 +315,10 @@ def bezier_interpolate_poses_full_trajectory(key_poses_list, num_points=100):
                 interp_quat = interp_quat / np.linalg.norm(interp_quat)
 
         # 创建插值后的姿态
-        interpolated_poses.append(KuavoPose(
-            position=interp_pos.tolist(),
-            orientation=interp_quat.tolist()
+        interpolated_poses.append(Pose(
+            pos=interp_pos.tolist(),
+            quat=interp_quat.tolist(),
+            frame=key_poses_list[0].frame
         ))
 
     return interpolated_poses
@@ -328,7 +329,6 @@ def generate_full_bezier_trajectory(
         current_right_pose,
         left_keypoints_list,
         right_keypoints_list,
-        traj_point_num: int = 50,
 ):
     """
     生成完整的贝塞尔轨迹（包含所有关键点）
@@ -339,28 +339,32 @@ def generate_full_bezier_trajectory(
     # 获取当前手臂位置作为起始点
 
     # 构建包含起始位置的完整关键点列表
-    left_key_poses = [KuavoPose(
-        position=current_left_pose.pos,
-        orientation=current_left_pose.quat.tolist()
+    left_key_poses = [Pose(
+        pos=current_left_pose.pos,
+        quat=current_left_pose.quat,
+        frame=current_left_pose.frame
     )]
-    right_key_poses = [KuavoPose(
-        position=current_right_pose.pos,
-        orientation=current_right_pose.quat.tolist()
+    right_key_poses = [Pose(
+        pos=current_right_pose.pos,
+        quat=current_right_pose.quat,
+        frame=current_right_pose.frame
     )]
 
     # 添加所有目标关键点
     for left_pose, right_pose in zip(left_keypoints_list, right_keypoints_list):
-        left_key_poses.append(KuavoPose(
-            position=left_pose.pos,
-            orientation=left_pose.quat.tolist()
+        left_key_poses.append(Pose(
+            pos=left_pose.pos,
+            quat=left_pose.quat,
+            frame=left_pose.frame
         ))
-        right_key_poses.append(KuavoPose(
-            position=right_pose.pos,
-            orientation=right_pose.quat.tolist()
+        right_key_poses.append(Pose(
+            pos=right_pose.pos,
+            quat=right_pose.quat,
+            frame=right_pose.frame
         ))
 
     # 生成完整的贝塞尔轨迹
-    total_points = len(left_keypoints_list) * traj_point_num  # 每个关键点段分配50个插值点
+    total_points = len(left_keypoints_list) * 50  # 每个关键点段分配50个插值点
     total_points = max(total_points, 100)  # 至少100个点
 
     left_full_trajectory = bezier_interpolate_poses_full_trajectory(

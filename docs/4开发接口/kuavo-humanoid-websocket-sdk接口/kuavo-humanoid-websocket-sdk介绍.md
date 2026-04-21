@@ -1,7 +1,3 @@
----
-title: "SDK介绍"
----
-
 # KUAVO Humanoid WebSocket SDK
 
 [![Version](https://img.shields.io/pypi/v/kuavo-humanoid-sdk.svg)](https://pypi.org/project/kuavo-humanoid-sdk/) [![License](https://img.shields.io/pypi/l/kuavo-humanoid-sdk.svg)](#) [![Supported Python Versions](https://img.shields.io/pypi/pyversions/kuavo-humanoid-sdk.svg)](https://pypi.python.org/pypi/kuavo-humanoid-sdk)
@@ -117,19 +113,6 @@ cd src/kuavo_humanoid_websocket_sdk
 chmod +x install.sh
 ./install.sh
 ```
-**注意（下位机仓库版本为 1.3.0 时）**：使用 WebSocket SDK 前需要在下位机仓库中做如下配置：  
-
-1. 在下位机仓库中找到并编辑文件：  
-   `src/humanoid-control/humanoid_controllers/launch/load_kuavo_real.launch`
-2. 确保其中参数设置为：  
-   ```xml
-   <arg name="with_mm_ik" default="true"/>
-   ```
-3. 如果提示缺少 `/websocket_sdk_srv/get_robot.launch_status`，则需要启动：  
-   ```bash
-   roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch
-   ```
-
 
 ## Upgrade Instructions 升级说明
 
@@ -183,7 +166,7 @@ pip install --upgrade --pre kuavo-humanoid-sdk-ws
 
 生成文档：
 ```bash
-cd /home/lab/kuavo-ros-opensource/src/kuavo_humanoid_websocket_sdk
+cd <kuavo-ros-opensource>/src/kuavo_humanoid_websocket_sdk
 chmod +x gen_docs.sh
 ./gen_docs.sh
 ```

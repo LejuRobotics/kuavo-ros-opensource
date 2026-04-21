@@ -18,7 +18,6 @@ ROBOT_VERSION=$ROBOT_VERSION
 
 # 获取当前脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT=$(dirname $(dirname $(dirname $(dirname $SCRIPT_DIR))))
 
 # 拼接 websocket_start.service 的绝对路径
 SERVICE_FILE="$SCRIPT_DIR/websocket_start.service"
@@ -93,9 +92,17 @@ sed -i "s|^Environment=CAMERA_TYPE=.*|Environment=CAMERA_TYPE=$CAMERA_MODEL|" $S
 # 替换 ExecStart 路径
 sed -i "s|^Environment=ROBOT_VERSION=.*|Environment=ROBOT_VERSION=$ROBOT_VERSION|" $SERVICE_FILE
 sudo sed -i "s|^ExecStart=.*|ExecStart=/bin/bash $START_SCRIPT_PATH|" $SERVICE_FILE
-sudo sed -i "s|^Environment=REPO_ROOT=.*|Environment=REPO_ROOT=$REPO_ROOT|" $SERVICE_FILE
 sudo cp $SERVICE_FILE /etc/systemd/system/
 
+cd "$SCRIPT_DIR"
+
+# 使用 git 命令获取仓库根目录
+REPO_ROOT=$(git rev-parse --show-toplevel)
+if [[ -z "$REPO_ROOT" ]]; then
+    echo "错误：无法找到 git 仓库根目录"
+    exit 1
+fi
+echo "仓库根目录: $REPO_ROOT"
 cd "$REPO_ROOT"
 
 # 重新设置配置文件权限，保证编译能够正常进行
@@ -126,9 +133,6 @@ source installed/setup.bash     # 加载一些已经安装的ROS包依赖环境�
 catkin build humanoid_controllers
 catkin build humanoid_plan_arm_trajectory
 catkin build planarmwebsocketservice
-catkin build kuavo_mapping
-catkin build voice_control_node # 编译语音控制节点
-catkin build taiji_trigger_node # 太极监听节点
 
 # 安装 sshpass，确保远程拷贝音乐文件正常工作
 sudo apt-get update

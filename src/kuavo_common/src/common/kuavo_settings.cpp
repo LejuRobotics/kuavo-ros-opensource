@@ -182,29 +182,6 @@ namespace HighlyDynamic
         return wiringType == "single_bus" ? CanbusWiringType::SINGLE_BUS : CanbusWiringType::DUAL_BUS;
     }
 
-    HandProtocolType HardwareSettings::getHandProtocolType() {
-
-        std::string filePath = getUserHomeDirectory() + "/.config/lejuconfig/HandProtocolType.ini";
-        std::ifstream file(filePath);
-        std::string handProtocolType;
-
-        if (!file.is_open()) {
-            std::cerr << "\033[33mwarning: " << filePath << " 文件不存在, 未指定手部协议类型, 使用默认值 'proto_buf'\033[0m" << std::endl;
-            return HandProtocolType::PROTO_BUF;
-        }
-
-        getline(file, handProtocolType);
-        file.close();
-
-        if (handProtocolType != "proto_buf" && handProtocolType != "proto_can") {
-            std::cerr << "\033[33mwarning: hand_protocol_type :" << handProtocolType
-                  << " error, 使用默认值 'proto_buf'\033[0m" << std::endl;
-            return HandProtocolType::PROTO_BUF;
-        }
-
-        return handProtocolType == "proto_buf" ? HandProtocolType::PROTO_BUF : HandProtocolType::PROTO_CAN;
-    }
-
     void KuavoSettings::loadHardwareSettings(JSONConfigReader &robot_config)
     {
         std::map<std::string, motor_config>
@@ -216,7 +193,6 @@ namespace HighlyDynamic
                 {"dynamixel", {BIT_17_36, CK_MC, CK_C2T, DYNAMIXEL}},
                 {"realman", {BIT_17_36, CK_MC, CK_C2T, REALMAN}},
                 {"ruiwo", {BIT_17_36, CK_MC, CK_C2T, RUIWO}},
-                {"ruiwoPA81", {BIT_17_25, CK_MC, PA81_C2T, RUIWO}},
                 {"ruiwoPA72", {BIT_17_36, CK_MC, PA72_C2T, RUIWO}},
                 {"ruiwoPA60", {BIT_17_36, CK_MC, PA60_C2T, RUIWO}},
                 {"ruiwoPA43", {BIT_17_10, CK_MC, PA43_C2T, RUIWO}},
@@ -229,9 +205,7 @@ namespace HighlyDynamic
                 {"PA72_36_L", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
                 {"PA72_36_R", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
                 {"PA76_25", {BIT_17_25, PA76_25_MC, PA76_25_C2T, EC_MASTER}},
-                {"PA76_18", {BIT_17_18, PA76_18_MC, PA76_18_C2T, EC_MASTER}},
-                {"PA81_18_25", {BIT_17_25, PA81_18_25_MC, PA81_18_25_C2T, EC_MASTER}},
-                {"PA105_18", {BIT_17_18, PA105_18_MC, PA105_18_C2T, EC_MASTER}}};
+                };
         hardware_settings.num_joints = robot_config.getValue<uint8_t>("NUM_JOINT");
         hardware_settings.num_arm_joints = robot_config.getValue<uint8_t>("NUM_ARM_JOINT");
         hardware_settings.num_head_joints = robot_config.getValue<uint8_t>("NUM_HEAD_JOINT");

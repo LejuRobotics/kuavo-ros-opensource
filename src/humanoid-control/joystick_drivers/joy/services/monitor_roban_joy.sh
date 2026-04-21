@@ -25,11 +25,8 @@ start_node() {
 
 stop_node() {
     if [ ! -z "$NODE_PID" ]; then
-        echo "Stopping joy node (PID: $NODE_PID)..."
-        kill -9 $NODE_PID 2>/dev/null || true
-        sleep 1
-        rosnode kill /joy_customize_config 2>/dev/null || true
-        rosnode kill /joy_node 2>/dev/null || true
+        kill -SIGINT $NODE_PID
+        # wait $NODE_PID 2>/dev/null || true
         NODE_PID=""
         echo "Stopped joy node"
     fi

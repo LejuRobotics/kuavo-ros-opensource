@@ -54,9 +54,6 @@
 
    # 启动C++版本的ik
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true
-   
-   # 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
-   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true use_incremental_ik:=true
 ```
 - 接入 VR
 - 运行程序，开始录制：

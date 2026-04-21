@@ -7,9 +7,7 @@
 #include <mutex>
 #include <iterator>
 #include <iostream> 
-#include <map>
 #include "ruiwo_actuator_base.h"
-#include <iostream>
 
 /**
  * Structure representing motor parameters for Ruiwo actuators
@@ -17,20 +15,20 @@
  */
 struct RuiwoMotorParam_t {
     // 关节参数[vel, kp_pos, kd_pos, tor, kp_vel, kd_vel, ki_vel] vel的pid只有在servo模式下才起作用
-    double vel;
-    double kp_pos;
-    double kd_pos;
-    double tor;
-    double kp_vel;
-    double kd_vel;
-    double ki_vel;
-
-    RuiwoMotorParam_t() : vel(0.0), kp_pos(0.0), kd_pos(0.0), tor(0.0), kp_vel(0.0), kd_vel(0.0), ki_vel(0.0) {}
-
-    RuiwoMotorParam_t(double vel_, double kp_pos_, double kd_pos_, double tor_, double kp_vel_, double kd_vel_, double ki_vel_) :
+    int vel;   
+    int kp_pos;
+    int kd_pos;
+    int tor;   
+    int kp_vel;
+    int kd_vel;
+    int ki_vel;
+    
+    RuiwoMotorParam_t() : vel(0), kp_pos(0), kd_pos(0), tor(0), kp_vel(0), kd_vel(0), ki_vel(0) {}
+    
+    RuiwoMotorParam_t(int vel_, int kp_pos_, int kd_pos_, int tor_, int kp_vel_, int kd_vel_, int ki_vel_) :
         vel(vel_), kp_pos(kp_pos_), kd_pos(kd_pos_), tor(tor_), kp_vel(kp_vel_), kd_vel(kd_vel_), ki_vel(ki_vel_) {}
 
-    RuiwoMotorParam_t(const std::vector<double> & motor_parameters) {
+    RuiwoMotorParam_t(const std::vector<int> & motor_parameters) {
         assert(motor_parameters.size() == 7 && "Invalid motor parameters size");
         vel = motor_parameters[0];
         kp_pos = motor_parameters[1];
@@ -39,19 +37,7 @@ struct RuiwoMotorParam_t {
         kp_vel = motor_parameters[4];
         kd_vel = motor_parameters[5];
         ki_vel = motor_parameters[6];
-    }
-
-    // 兼容性构造函数，支持从std::vector<int>构造
-    RuiwoMotorParam_t(const std::vector<int> & motor_parameters) {
-        assert(motor_parameters.size() == 7 && "Invalid motor parameters size");
-        vel = static_cast<double>(motor_parameters[0]);
-        kp_pos = static_cast<double>(motor_parameters[1]);
-        kd_pos = static_cast<double>(motor_parameters[2]);
-        tor = static_cast<double>(motor_parameters[3]);
-        kp_vel = static_cast<double>(motor_parameters[4]);
-        kd_vel = static_cast<double>(motor_parameters[5]);
-        ki_vel = static_cast<double>(motor_parameters[6]);
-    }
+    }    
 };
 
 struct RuiwoMotorConfig_t {
@@ -142,39 +128,22 @@ public:
      */
     int disable() override;
 
-    /**
-     * @brief 对指定 index 的电机执行 Enter Reset State 进入 Reset State 运行模式，即失能电机
-     * 
-     * @param motorIndex 
-     * @return true 
-     * @return false 
-     */
     bool disableMotor(int motorIndex) override;
-
-    /**
-     * @brief 关闭并释放所有资源
-     * 
-     */
     void close() override;
     void saveAsZeroPosition() override;
-    /**
-     * @brief 将当前零点位置输出到零点文件
-     * 
-     */
     void saveZeroPosition() override;
     void set_teach_pendant_mode(int mode) override;
     void changeEncoderZeroRound(int index, double direction) override;
     void adjustZeroPosition(int index, double offset) override;
     std::vector<double> getMotorZeroPoints() override;
-    void setZeroOffsetAdjustments(const std::map<size_t, double>& zero_offset_adjustments) override;
     
     /**
-     * @brief 设置电机目标位置
-     *
-     * @param index 关节索引 [0,1,2,3,...]
-     * @param positions 目标位置（角度）注意单位是角度
-     * @param torque 力矩值
-     * @param velocity 速度值（角度/秒）
+     * @brief Set the positions object
+     * 
+     * @param index     [0,1,2,3,...]
+     * @param positions  单位为角度
+     * @param torque     
+     * @param velocity  单位为角度/s
      */
     void set_positions(const std::vector<uint8_t> &index,
         const std::vector<double> &positions,
@@ -190,36 +159,23 @@ public:
     void set_torque(const std::vector<uint8_t> &index, const std::vector<double> &torque) override;
 
     /**
-     * @brief 设置电机目标速度
+     * @brief Set the velocity object
      * 
      * @param index [0,1,2,3,...]
-     * @param velocity 单位弧度/秒
+     * @param velocity 
      */
     void set_velocity(const std::vector<uint8_t> &index, const std::vector<double> &velocity) override;
     
     /**
-     * @brief 获取所有关节当前位置
-     *
-     * @return std::vector<double> 位置（弧度）
+     * @brief Get the positions object
+     * 
+     * @return std::vector<double> radians
      */
     std::vector<double> get_positions() override;
     std::vector<double> get_torque() override;
     std::vector<double> get_velocity() override;
 
-    /**
-     * @brief 获取电机状态
-     * 
-     * notes: std::vector<float> 长度为6: 电机ID、位置、速度、扭矩、温度、故障码
-     * 
-     * @return std::vector<std::vector<float>> 
-     */
     std::vector<std::vector<float>> get_joint_state();
-
-    /**
-     * @brief 获取所有电机状态
-     * 
-     * @return MotorStateDataVec 
-     */
     MotorStateDataVec get_motor_state() override;
 
     /**
@@ -357,10 +313,6 @@ private:
 
     /** Data */
     std::vector<RuiwoMotorConfig_t> ruiwo_mtr_config_;
-    
-    // 保存零点时的偏移调整参数（电机索引到偏移量的映射，弧度）
-    std::map<size_t, double> zero_offset_adjustments_;
-    mutable std::mutex zero_offset_adjustments_mutex_;
 };
 
 /**

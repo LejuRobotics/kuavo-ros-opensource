@@ -7,7 +7,6 @@ from sensor_msgs.msg import Joy
 from h12pro_controller_node.msg import h12proRemoteControllerChannel
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
 from robot_state.robot_state_machine import robot_state_machine, RobotStateMachine, states
-from robot_state.multi_before_callback import is_switch_controller_in_cooldown, clear_switch_controller_cooldown
 from transitions.core import MachineError
 from utils.utils import read_json_file
 import rospkg
@@ -17,10 +16,9 @@ import sys
 from ocs2_msgs.msg import mpc_observation
 from kuavo_msgs.msg import sensorsData
 from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData
-from kuavo_msgs.srv import getControllerList
 from sensor_msgs.msg import JointState
 import math
-from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory, planArmState, RobotActionState
+from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory, planArmState
 from trajectory_msgs.msg import JointTrajectory
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -72,7 +70,7 @@ class Config:
     LONG_PRESS_THRESHOLD = 1.0
 
     SCALE_RIGHT_STICK_Z = 0.2  # 右摇杆上下（上站下蹲）缩放比例
-    SCALE_LEFT_STICK_Y = 1.0  # 左摇杆左右（左右平移）缩放比例
+    SCALE_LEFT_STICK_Y = 0.25  # 左摇杆左右（左右平移）缩放比例
     
     @staticmethod
     def get_default_channels() -> List[int]:
@@ -163,7 +161,7 @@ class H12ToJoyControllerNode:
                 10: ChannelMapping(10, button_index=Config.BUTTON_MAPPING['A'], 
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
             }
-        elif kuavo_control_scheme == "ocs2" or kuavo_control_scheme == "multi":
+        elif kuavo_control_scheme == "ocs2":
             return {
                 1: ChannelMapping(1, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_YAW'], reverse=True),
                 2: ChannelMapping(2, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_Z'], reverse=True, scale=Config.SCALE_RIGHT_STICK_Z),
@@ -249,7 +247,6 @@ class H12PROControllerNode:
         self.should_pub_head_motion_data = robotHeadMotionData()
         self.start_way = rospy.get_param("start_way", "auto")
         self.real_robot = rospy.get_param("real_robot", False)
-        self.only_half_up_body = rospy.get_param("only_half_up_body", False)
         #zsh
         # 头部控制模式
        # 头部控制参数 (重新调整)
@@ -268,15 +265,11 @@ class H12PROControllerNode:
         #zsh
 
         self.is_navigation_mode = False # 导航状态变量
-        
-        # 动作执行状态跟踪（用于屏蔽摇杆输入）
-        self.robot_action_executing = False  # True表示有tact动作正在执行
 
         # 添加线程池
         self.executor = ThreadPoolExecutor(max_workers=2)
         self._state_transition_lock = threading.Lock()
-        self._state_transition_executing = False  # 标记是否有状态转换正在执行
-
+        
         self._setup_ros_components()
         
     def _setup_ros_components(self) -> None:
@@ -328,16 +321,6 @@ class H12PROControllerNode:
             queue_size=1,
             tcp_nodelay=True 
         )
-        
-        # 订阅手臂动作执行状态，用于在tact执行期间屏蔽摇杆输入
-        self.robot_action_state_sub = rospy.Subscriber(
-            "/robot_action_state",
-            RobotActionState,
-            self._robot_action_state_callback,
-            queue_size=1,
-            tcp_nodelay=True
-        )
-        
         self.control_hand_pub = rospy.Publisher(
             '/control_robot_hand_position', 
             robotHandPosition, 
@@ -425,15 +408,6 @@ class H12PROControllerNode:
         self.current_arm_joint_state = msg.joint_data.joint_q[12:26]
         self.current_arm_joint_state = [round(pos, 2) for pos in self.current_arm_joint_state]
         self.current_arm_joint_state.extend([0] * 14)
-    
-    def _robot_action_state_callback(self, msg: RobotActionState) -> None:
-        """处理手臂动作状态回调
-        state: 0=失败, 1=执行中, 2=成功
-        当state==1时，表示tact动作正在执行，需要屏蔽摇杆输入
-        """
-        self.robot_action_executing = (msg.state == 1)
-        if self.robot_action_executing:
-            rospy.logdebug("[RobotActionState] Tact action executing, joystick input will be blocked.")
 
     def _load_configuration(self) -> Dict[str, Any]:
         """Load and validate configuration from JSON file.
@@ -448,14 +422,11 @@ class H12PROControllerNode:
             config = read_json_file(h12pro_remote_controller_path)
             
             # Determine which state transition configuration to use based on control scheme
-            if kuavo_control_scheme == "ocs2":
-                state_transition_key = "ocs2_robot_state_transition_keycombination"
-            elif kuavo_control_scheme == "rl":
+            kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
+            if kuavo_control_scheme == "rl":
                 state_transition_key = "rl_robot_state_transition_keycombination"
-            elif kuavo_control_scheme == "multi":
-                state_transition_key = "multi_robot_state_transition_keycombination"
             else:
-                raise ConfigError(f"Invalid control scheme: {kuavo_control_scheme}")
+                state_transition_key = "ocs2_robot_state_transition_keycombination"
             
             required_fields = [
                 "channel_to_key_name",
@@ -485,7 +456,6 @@ class H12PROControllerNode:
     def _timer_callback(self, event: rospy.Timer) -> None:
         """Update has_joy_node parameter periodically."""
         self.start_way = rospy.get_param("start_way", "auto")
-        self.only_half_up_body = rospy.get_param("only_half_up_body", False)
 
     def _channel_callback(self, msg: h12proRemoteControllerChannel) -> None:
         """Process incoming channel messages.
@@ -641,31 +611,6 @@ class H12PROControllerNode:
             rospy.sleep(time)
             times -= 1
 
-    def _get_current_controller_name(self) -> Optional[str]:
-        """获取当前控制器名称
-        
-        Returns:
-            当前控制器名称，如果获取失败返回 None
-        """
-        service_name = "/humanoid_controller/get_controller_list"
-        try:
-            rospy.wait_for_service(service_name, timeout=1.0)
-            get_controller_client = rospy.ServiceProxy(service_name, getControllerList)
-            response = get_controller_client()
-            if response.success:
-                current_controller = response.current_controller
-                rospy.loginfo(f"Current controller: {current_controller} (index: {response.current_index})")
-                return current_controller
-            else:
-                rospy.logwarn(f"Get controller list failed: {response.message}")
-                return None
-        except rospy.ServiceException as e:
-            rospy.logerr(f"Service call to '{service_name}' failed: {e}")
-            return None
-        except rospy.ROSException as e:
-            rospy.logerr(f"Service '{service_name}' not available: {e}")
-            return None
-
     def _handle_emergency_stop(self, current_state: str, 
                              msg: h12proRemoteControllerChannel) -> None:
         """Handle emergency stop condition.
@@ -675,15 +620,9 @@ class H12PROControllerNode:
             msg: Channel message for response.
         """
         try:
-            # 紧急停止时，清除 switch_controller 的冷却期，确保可以立即停止
-            if kuavo_control_scheme == "multi":
-                clear_switch_controller_cooldown()
-                rospy.loginfo("[EmergencyStop] Cleared switch_controller cooldown to allow immediate stop.")
-
-            # 检查当前控制器是否为 mpc，只有 mpc 控制器支持缓慢下降
-            current_controller = self._get_current_controller_name()
-            if current_controller and current_controller.lower() == "mpc":
-                if current_state in ["stance", "walk", "trot", "vr_remote_control"]:
+            # rl 暂不支持缓慢下降
+            if kuavo_control_scheme == "ocs2":
+                if current_state in ["stance", "walk", "trot"]:
                     self.h12_to_joy_node.is_stopping = True
                     self._gradually_move_right_stick_down()
                     self.h12_to_joy_node.is_stopping = False
@@ -705,12 +644,6 @@ class H12PROControllerNode:
                                 key_combination: Set[str],
                                 msg: h12proRemoteControllerChannel) -> None:
         """Handle normal state transitions."""
-        # 检查是否在 switch_controller 冷却期内
-        if kuavo_control_scheme == "multi":
-            if is_switch_controller_in_cooldown():
-                rospy.logdebug("[StateTransition] Blocked: switch_controller is in cooldown period.")
-                return
-
         triggers = self.robot_state_machine.machine.get_triggers(current_state)
         
         for trigger in self._config["state_transitions"].get(current_state, {}):
@@ -772,24 +705,11 @@ class H12PROControllerNode:
         }
         if "arm_pose" in trigger:
             kwargs["current_arm_joint_state"] = self.current_arm_joint_state
-
-        # 检查是否有状态转换正在执行，如果有则直接拒绝（不排队）
-        if self._state_transition_executing:
-            rospy.logwarn(f"[StateTransition] Trigger '{trigger}' rejected: Another state transition is already executing")
-            return
-
-        # 对于arm_pose和customize_action相关的trigger，检查是否有arm动作正在执行
-        if ("arm_pose" in trigger or "customize_action" in trigger) and self.robot_action_executing:
-            print(f"[StateTransition] Trigger '{trigger}' rejected: Arm action is currently executing (robot_action_executing={self.robot_action_executing})")
-            return
-        elif ("arm_pose" in trigger or "customize_action" in trigger):
-            print(f"[StateTransition] Trigger '{trigger}' accepted: robot_action_executing={self.robot_action_executing}, will submit to thread pool")
-
+            
         # 提交到线程池执行状态转换
         def state_transition_task():
             with self._state_transition_lock:
                 try:
-                    self._state_transition_executing = True  # 标记开始执行
                     getattr(self.robot_state_machine, trigger)(**kwargs)
                                         # zsh如果不是stance状态，自动关闭头部控制模式
                     if self.robot_state_machine.state != "stance" and self.head_control_mode:
@@ -798,26 +718,21 @@ class H12PROControllerNode:
                         #zsh
                     
                     # 如果是有效状态,更新消息
-                    current_controller_support = True
-                    current_controller = self._get_current_controller_name()
-                    if current_controller and current_controller.lower() == "mpc" and trigger in ["trot"]:
-                        current_controller_support = False
-                        print("mpc not support this trigger")
-
-                    if trigger in Config.VALID_STATES and current_controller_support:
+                    if trigger in Config.VALID_STATES:
                         new_msg = h12proRemoteControllerChannel()
                         channels = Config.get_default_channels()
+                        if self.robot_state_machine.state == "stance" and trigger == "stance" and source == "stance":
+                            channels[8] = Config.H12_AXIS_RANGE_MAX
+                        else:
+                            channels[Config.TRIGGER_CHANNEL_MAP[trigger]] = Config.H12_AXIS_RANGE_MAX
 
-                        channels[Config.TRIGGER_CHANNEL_MAP[trigger]] = Config.H12_AXIS_RANGE_MAX
                         new_msg.channels = tuple(channels)
                         
                         self.h12_to_joy_node.update_channels_msg(msg=new_msg)
                         self.h12_to_joy_node.process_channels()
                 except Exception as e:
                     rospy.logerr(f"Error in state transition task: {e}")
-                finally:
-                    self._state_transition_executing = False  # 清除执行标志
-
+                    
         self.executor.submit(state_transition_task)
 #zsh
     def _handle_joystick_input(self, msg: h12proRemoteControllerChannel) -> None:
@@ -833,21 +748,6 @@ class H12PROControllerNode:
 
         # self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
         # self.h12_to_joy_node.process_channels()
-
-        if self.only_half_up_body or is_switch_controller_in_cooldown() or self.robot_action_executing:
-            neutral_msg = h12proRemoteControllerChannel()
-            channels = Config.get_default_channels()
-            neutral_msg.channels = tuple(channels)
-            self.h12_to_joy_node.update_channels_msg(msg=neutral_msg)
-            self.h12_to_joy_node.process_channels()
-
-            reasons = []
-            if is_switch_controller_in_cooldown():
-                reasons.append("switch_controller cooldown")
-            if self.robot_action_executing:
-                reasons.append("tact action executing")
-            rospy.logdebug(f"[JoystickInput] Blocked: {' and '.join(reasons)}. Publishing neutral joystick values.")
-            return
 
         # 头部控制模式下处理摇杆控制
         if not self.head_control_mode:
@@ -955,8 +855,7 @@ def main():
         rospy.loginfo("H12PRO Controller Node started successfully")
         
         while not rospy.is_shutdown():
-            # ocs2 和 multi 模式都需要处理 channels
-            if kuavo_control_scheme == "ocs2" or kuavo_control_scheme == "multi":
+            if kuavo_control_scheme == "ocs2":
                 node.h12_to_joy_node.process_channels()
             node.publish_arm_joint_state()
             rate.sleep()

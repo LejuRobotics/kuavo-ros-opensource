@@ -3,3 +3,4 @@ time sensor_time
 kuavo_msgs/jointData joint_data
 kuavo_msgs/imuData imu_data
 kuavo_msgs/endEffectorData end_effector_data
+kuavo_msgs/FTsensorData FTsensor_data

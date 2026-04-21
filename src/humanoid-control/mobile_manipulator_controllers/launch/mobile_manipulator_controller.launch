@@ -16,15 +16,7 @@
   <!-- <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s42/urdf/biped_s42_l.urdf" /> -->
   <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
   <!-- The task file for the mpc. -->
-  <!-- <arg name="taskFile"    value="$(find ocs2_mobile_manipulator)/config/kuavo/task.info" /> -->
-  <arg name="taskFile"
-      default="$(eval find('ocs2_mobile_manipulator') +(
-        '/config/kuavo5/task.info'  if arg('robot_version') >= 50 else
-        '/config/kuavo/task.info'   if arg('robot_version') >= 40 else
-        '/config/roban2/task.info'  if arg('robot_version') >= 10 else
-        '/config/kuavo/task.info'
-        ))" />
-
+  <arg name="taskFile"    value="$(find ocs2_mobile_manipulator)/config/kuavo/task.info" />
   <!-- The library folder to generate CppAD codegen into -->
   <arg name="libFolder"   value="$(find ocs2_mobile_manipulator)/auto_generated/kuavo" />
 
@@ -36,8 +28,6 @@
   <param name="dummy_sim_arm" value="$(arg dummy_sim_arm)" />
   <param name="visualize_humanoid" value="$(arg visualize_humanoid)" />
   <param name="visualize_mm"  value="$(arg visualize_mm)" />
-  <!-- Enable manipulation mpc services (default: true for wheel arm robots) -->
-  <param name="enable_manipulation_mpc" value="true" />
 
   <!-- <group if="$(arg rviz)"> -->
   <include file="$(find ocs2_mobile_manipulator_ros)/launch/include/visualize.launch">

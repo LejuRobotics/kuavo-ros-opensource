@@ -14,7 +14,10 @@
 #include "kalman_estimate.h"
 #include "imu_receiver.h"
 #include "utils.h"
+#include "ruierman_actuator.h"
 #include "ruiwo_actuator_base.h"
+#include "jodell_claw_driver.h"
+#include "dynamixel_interface.h"
 #include "lejuclaw_controller.h"
 #include "claw_types.h"
 #include "gesture_types.h"
@@ -86,8 +89,6 @@ class HardwarePlant
     Eigen::VectorXd GetC2Tcoeff_Torque(Eigen::VectorXd &joint_torque);
     void cmds2Cmdr(const Eigen::VectorXd &cmd_s, uint32_t na_src, Eigen::VectorXd &cmd_r, uint32_t na_r);
     bool readSensor(SensorData_t &sensor_data);
-    inline bool readHardwareState(SensorData_t &sensor_data) { return readSensor(sensor_data); }
-    void readHardwareJointState(SensorData_t &sensor_data);
     void setState(SensorData_t &sensor_data_motor, SensorData_t &sensor_data_joint);
     void getState(SensorData_t &sensor_data_motor, SensorData_t &sensor_data_joint);
     bool HWPlantCheck();
@@ -108,8 +109,6 @@ class HardwarePlant
     void qv_joint_to_motor(Eigen::VectorXd &no_arm_state, Eigen::VectorXd &with_arm_state, uint32_t nq_with_arm, uint32_t nq_no_arm);
     int8_t PDInitialize(Eigen::VectorXd &q0);
     void writeCommand(Eigen::VectorXd cmd_r, uint32_t na_r, std::vector<int> control_modes, Eigen::VectorXd &joint_kp, Eigen::VectorXd &joint_kd);
-    inline void writeHardwareCommand(Eigen::VectorXd cmd_r, uint32_t na_r, std::vector<int> control_modes, Eigen::VectorXd &joint_kp, Eigen::VectorXd &joint_kd) { writeCommand(cmd_r, na_r, control_modes, joint_kp, joint_kd); };
-    void writeHardwareJointCommand(Eigen::VectorXd cmd_r, uint32_t na_r, std::vector<int> control_modes, Eigen::VectorXd &joint_kp, Eigen::VectorXd &joint_kd);
     void endEffectorCommand(std::vector<EndEffectorData> &end_effector_cmd);
     bool checkJointPos(JointParam_t *joint_data, std::vector<uint8_t> ids, std::string *msg);
     bool checkJointSafety(const std::vector<JointParam_t> &joint_data, std::vector<uint8_t> ids, std::string &msg);
@@ -124,26 +123,22 @@ class HardwarePlant
     void performJointSymmetryCheck();
 
     
-    inline void SetMotorVelocity(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
-    inline void SetMotorTorque(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
-    inline void SetMotorPosition(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
-    inline void GetMotorData(const std::vector<uint8_t> &joint_ids, std::vector<MotorParam_t> &motor_data);
-    // 辅助函数：为 EC_MASTER 电机设置默认的 kp/kd（用于 CSP 模式）
-    inline void setDefaultKpKdForEcMaster(std::vector<MotorParam_t> &motor_data, const std::vector<uint8_t> &joint_ids);
+    inline void SetJointVelocity(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
+    inline void SetJointTorque(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
+    inline void SetJointPosition(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
+    inline void GetJointData(const std::vector<uint8_t> &joint_ids, std::vector<JointParam_t> &joint_data);
     bool calibrateMotor(int motor_id, int direction, bool save_offset = false);
     void calibrateBipedLoop();
     void calibrateWheelLoop();
     void calibrateArmJoints();
     bool calibrateArmJointsAtLimit(bool auto_mode = true, bool calibrate_head = true, bool head_only = false);
     void initEndEffector();
-
-    bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
-    bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
-    bool changeRuiwoMotorParam(const std::string &param_name, std::string &err_msg);
-    
-    // RuiWoActuator相关方法的封装
-    void adjustZeroPosition(int motor_index, double offset);
-    std::vector<double> getMotorZeroPoints();
+        bool changeMotorParam(const std::vector<MotorParam> &motor_params, std::string &err_msg);
+        bool getMotorParam(std::vector<MotorParam> &motor_params, std::string &err_msg);
+        
+        // RuiWoActuator相关方法的封装
+        void adjustZeroPosition(int motor_index, double offset);
+        std::vector<double> getMotorZeroPoints();
 
     // 0扭矩控制腿部EC电机接口（双足模式：1-12号关节，轮臂模式：1-4号关节）
     bool setZeroTorqueForLegECMotors();
@@ -257,7 +252,7 @@ private:
     int32_t na_foot_;
     int32_t nq_;
     int32_t nv_;
-    std::vector<std::string> end_frames_name_;
+        std::vector<std::string> end_frames_name_;
     std::unique_ptr<KalmanEstimate> filter;
     bool Uncalibration_IMU = true;
 
@@ -268,7 +263,7 @@ private:
     bool is_cali_{false};
     double ruiwo_motor_velocity_factor_{0.005};
     std::vector<std::string> ruiwo_2_joint_name_;
-    std::map<std::string, std::vector<double>> ruiwo_velocity_limit_map_;
+     std::map<std::string, std::vector<double>> ruiwo_velocity_limit_map_;
 
 
     RobotState_t state_est_, prev_state_est_;
@@ -306,10 +301,6 @@ private:
     
     /* only used in half-up body mode */
     std::unique_ptr<std::array<double, 12>> stance_leg_joint_pos_ = nullptr;
-
-    // 辅助函数：从配置文件读取反转电机地址列表
-    // 根据CAN总线模式选择配置文件：单/双CAN使用canbus_device_cofig.yaml，否则使用config.yaml
-    std::set<int> loadNegativeMotorAddresses(HighlyDynamic::CanbusWiringType canbus_mode) const;
 
 public:
     // Virtual methods for DDS functionality (implemented in derived classes)

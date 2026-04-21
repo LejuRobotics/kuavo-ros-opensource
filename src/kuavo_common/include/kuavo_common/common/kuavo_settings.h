@@ -25,16 +25,12 @@ namespace HighlyDynamic
 #define AK10_9_MC (40)
 #define AK70_10_MC (26.1) // 手册是 23.2
 #define PA81_MC (60)
-#define PA100_MC (70)
-#define PA76_25_MC (18)
-#define PA81_18_25_MC (18)
+#define PA100_MC (110)
 #define CK_MC (18)
 #define PA4310_25_MC (8)
 #define PA72_36_MC (15)
-#define PA76_18_MC (31.5)
-#define PA105_18_MC (70)
+#define PA76_25_MC (18)
 #define PA115_MC (40)
-
 
 #define AK10_9_C2T (1.26)
 #define AK70_10_C2T (1.23)
@@ -48,13 +44,9 @@ namespace HighlyDynamic
 #define PA72_C2T (3.6)
 #define PA60_C2T (2.0)
 #define PA43_C2T (1.45)
-
-#define PA76_25_C2T (4.2)
-#define PA76_18_C2T (2.0)
-#define PA105_18_C2T (4.1)
 #define PA4310_25_C2T (2.6)
+#define PA76_25_C2T (3.8)
 #define PA72_36_C2T (4.8)
-#define PA81_18_25_C2T (2.9)
 #define PA115_C2T (11.5)
 
 
@@ -65,11 +57,6 @@ namespace HighlyDynamic
         SINGLE_BUS,  // 单总线
         DUAL_BUS,    // 双总线 左右手臂各接一个CAN模块
         UNKNOWN      // 未知
-    };
-    enum class HandProtocolType {
-        PROTO_BUF,  // 485协议
-        PROTO_CAN,  // CAN协议
-        UNKNOWN  // 未知
     };
     inline auto vectorToEigen(std::vector<double> v) -> Eigen::VectorXd
     {
@@ -216,12 +203,6 @@ namespace HighlyDynamic
          */
         CanbusWiringType getCanbusWiringType(RobotVersion rb_version);
 
-        /**
-         * @brief 获取手部协议类型: Protobuf、CAN
-         * 
-         * @return HandProtocolType 
-         */
-        HandProtocolType getHandProtocolType();
     };
     struct MotorC2TSettings
     {

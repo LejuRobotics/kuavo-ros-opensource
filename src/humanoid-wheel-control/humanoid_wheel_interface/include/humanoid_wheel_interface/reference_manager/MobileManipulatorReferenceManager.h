@@ -6,10 +6,8 @@
 #include <std_msgs/Float32.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Int8.h>
-#include <std_msgs/Int8MultiArray.h>
 #include <kuavo_msgs/twoArmHandPoseCmd.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
-#include <kuavo_msgs/changeArmCtrlMode.h>
 
 #include <ocs2_oc/synchronized_module/ReferenceManager.h>
 #include "humanoid_wheel_interface/ManipulatorModelInfo.h"
@@ -40,13 +38,6 @@ enum LbArmControlMode {
   JointSpace = 2,   // 关节控制模式
 };
 
-// 轮臂的服务切换模式，影响手臂的指令更新逻辑
-enum LbArmControlServiceMode {
-  KEEP = 0,        // 保持当前关节动作
-  AUTO_SWING = 1,       // 摆动手模式
-  EXTERN_CONTROL = 2,    // 外部控制模式
-};
-
 class MobileManipulatorReferenceManager : public ReferenceManager {
 public:
   MobileManipulatorReferenceManager(const ManipulatorModelInfo& info, const PinocchioInterface& pinocchioInterface, const std::string& taskFile);
@@ -57,14 +48,9 @@ public:
   // 配置加载函数
   void loadParamFromTaskFile(void);
   
-  // 从参数服务器中更新初始期望
-  void setRobotInitialArmJointTarget(ros::NodeHandle& input_nh);
-  
   // 服务回调函数
   bool controlModeService(kuavo_msgs::changeTorsoCtrlMode::Request& req, kuavo_msgs::changeTorsoCtrlMode::Response& res);
   bool getMpcControlModeService(kuavo_msgs::changeTorsoCtrlMode::Request& req, kuavo_msgs::changeTorsoCtrlMode::Response& res);
-  bool armControlModeSrvCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
-  bool getArmControlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
 
   // 多个约束轨迹的操作函数
   void getFirstTargetTrajectories(const TargetTrajectories& targetTrajectories);
@@ -143,7 +129,6 @@ protected:
     static bool isFirstRun = true;
     if(isFirstRun)
     {
-      isFirstRun = false;
       preMode = desiredMode;
       return true;
     }
@@ -219,7 +204,6 @@ private:
   bool isCmdTorsoPoseUpdated_{false};
   ros::Subscriber targetTorsoPoseSubscriber_;
   ros::Publisher targetTorsoPoseReachTimePub_;
-  bool torsoModeFlag_{true}; // true: 笛卡尔控制模式, false: 关节控制模式
 
   // 双臂末端执行器位姿指令 (x,y,z,qx,qy,qz,qw)
   vector_t left_arm_traj_pose_;
@@ -232,7 +216,6 @@ private:
   // 手臂关节轨迹指令
   bool enableQuickJointControl_{false};
   vector_t arm_joint_traj_;
-  vector_t arm_init_joint_traj_;
   std::mutex armJoint_mtx_;
   ros::Subscriber arm_joint_traj_sub_;
   ros::Publisher targetArmJointReachTimePub_;
@@ -254,13 +237,7 @@ private:
   std::mutex controlMode_mtx_;
   ros::ServiceServer controlModeServiceServer_;
   ros::ServiceServer getMpcControlModeServiceServer_;
-  ros::ServiceServer changeArmControlService_;
-  ros::ServiceServer get_arm_control_mode_service_;
   ros::Publisher mpcControlModePub_;
-  ros::Publisher mpcConstraintUsagePub_;
-
-  // 关节控制默认为外部控制模式
-  LbArmControlServiceMode currentArmControlMode_ = LbArmControlServiceMode::EXTERN_CONTROL; 
 
   // 多种约束所需轨迹相关
   TargetTrajectories stateInputTargetTrajectories_;

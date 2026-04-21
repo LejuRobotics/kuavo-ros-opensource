@@ -126,19 +126,6 @@ namespace ocs2
       {
         if (estContactforce_.size() < 12)
           return false;
-        
-        // 检查时间间隔，如果相邻两次调用时间>0.5s，则重置滤波器
-        ros::Time current_time = ros::Time::now();
-        if (last_pullup_check_time_.isValid()) {
-          ros::Duration time_diff = current_time - last_pullup_check_time_;
-          if (time_diff.toSec() > 0.5) {
-            total_est_contact_force_ = robotMass_ * 9.81;
-            last_pullup_state_ = false;
-            pullup_window_.clear();
-            std::cout << "[StateEstimateBase] checkPullUp reset filter" << std::endl;
-          }
-        }
-        last_pullup_check_time_ = current_time;
           
         double new_total_est_contact_force_ = std::max(estContactforce_[2], 0.0) + std::max(estContactforce_[8], 0.0);
         // ros_logger_->publishValue("/state_estimate/checkPullUp/new_total_est_contact_force_", new_total_est_contact_force_);
@@ -171,15 +158,6 @@ namespace ocs2
         return first_value;
       }
 
-      void resetPullUpFilter()
-      {
-        total_est_contact_force_ = robotMass_ * 9.81;
-        last_pullup_state_ = false;
-        pullup_window_.clear();
-        last_pullup_check_time_ = ros::Time(); // 重置时间戳，让下次调用时重新初始化
-        std::cout << "[StateEstimateBase] resetPullUpFilter called" << std::endl;
-      }
-
       vector_t getBodyVelWorld()
       {
         vector_t body_vel(6);
@@ -205,7 +183,7 @@ namespace ocs2
       vector_t getEstArmContactForce(vector_t &jointPosWBC, vector_t &jointVelWBC, vector_t &cmd_torque_wbc, const ros::Duration &period);
 
       contact_flag_t estContactState(const scalar_t &time);
-      void loadSettings(const std::string &taskFile, bool verbose, const std::string &referenceFile);
+      void loadSettings(const std::string &taskFile, bool verbose);
 
       const vector_t &getEstContactForce()
       {
@@ -224,33 +202,6 @@ namespace ocs2
       vector_t getRbdState()
       {
         return rbdState_;
-      }
-
-      /**
-       * @brief 更新躯干速度稳定性状态（应在控制循环中持续调用）
-       * @param time 当前时间
-       * @param period 控制周期
-       */
-      void updateTorsoStability(const ros::Time &time, const ros::Duration &period);
-
-      /**
-       * @brief 检查躯干速度是否稳定
-       * @return 如果速度稳定返回true，否则返回false
-       */
-      bool isTorsoVelocityStable() const
-      {
-        return is_torso_velocity_stable_;
-      }
-
-      /**
-       * @brief 设置躯干稳定性检测参数
-       * @param threshold 速度阈值（m/s）
-       * @param duration 需要稳定的持续时间（秒）
-       */
-      void setTorsoStabilityParams(double threshold, double duration)
-      {
-        torsoVelocityThreshold_ = threshold;
-        torsoVelocityDuration_ = duration;
       }
 
       virtual void reset()
@@ -368,15 +319,7 @@ namespace ocs2
       std::deque<bool> pullup_window_;  // 滑动窗口用于存储历史判断结果
       const size_t pullup_window_size_ = 20;  // 滑动窗口大小
       bool last_pullup_state_ = false;  // 保存上一次的pullup状态
-      ros::Time last_pullup_check_time_;  // 上次调用checkPullUp的时间
       int waistNum_ = 0;
-      
-      // 躯干速度稳定性检测
-      double torsoVelocityThreshold_ = 0.05;  // 速度阈值（m/s，默认0.05）
-      double torsoVelocityDuration_ = 1.0;    // 需要稳定的持续时间（秒，默认1.0）
-      ros::Time torso_velocity_stable_start_time_;  // 速度开始稳定的时间戳
-      bool torso_velocity_stable_tracking_ = false;  // 是否正在跟踪稳定状态
-      bool is_torso_velocity_stable_ = false;       // 当前是否稳定
       
     };
 

@@ -47,7 +47,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/singleStepControl.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
-#include <kuavo_msgs/ExecuteArmAction.h>
 #include "kuavo_msgs/footPoseTargetTrajectoriesSrv.h"
 #include "kuavo_msgs/footPose6DTargetTrajectoriesSrv.h"
 #include "kuavo_msgs/kuavoModeSchedule.h"
@@ -58,9 +57,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ros/ros.h>
 #include "humanoid_interface/common/TopicLogger.h"
 #include <std_srvs/Empty.h>
-#include <std_msgs/Float64.h>
 #include <ocs2_centroidal_model/CentroidalModelRbdConversions.h>
-#include <map>
 
 #define X_MAX_SINGLE_STEP_SIZE 0.15
 #define Y_MAX_SINGLE_STEP_SIZE 0.05
@@ -150,9 +147,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
     endEffectorKinematicsPtr_->setPinocchioInterface(pinocchioInterface_);
   }
 
-  // VR waist control public getter
-  bool isVRWaistControlEnabled() const { return vrWaistControlEnabled_; }
-
  private:
   double calTerrainHeight(const contact_flag_t& contact_flags, const feet_array_t<vector3_t>& feet_pos);
   void processFullBodySchedule(const vector_t& initState, FullBodySchedule& fullBodySchedule);
@@ -201,6 +195,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   
   // VR waist control methods
   void setVRWaistControlEnabled(bool enabled) { vrWaistControlEnabled_ = enabled; }
+  bool isVRWaistControlEnabled() const { return vrWaistControlEnabled_; }
   bool vrWaistControlCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
   
   // Height smooth transition methods
@@ -215,7 +210,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   
   // Transition status query methods
   bool isHeightTransitionActive() const { return heightSmoothTransitionActive_; }
-  bool isArmExecuting() const { return isArmExecuting_; }
   scalar_t getHeightTransitionProgress() const {
     if (!heightSmoothTransitionActive_) return 1.0;
     scalar_t elapsedTime = ros::Time::now().toSec() - heightTransitionStartTime_;
@@ -226,12 +220,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool getArmControlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
   {
     res.result = true;
-    // 如果是RL控制模式下，使用newArmControlMode_，否则使用currentArmControlMode_
-    if (is_rl_controller_ != 0.0) {
-      res.mode = newArmControlMode_;
-    } else {
-      res.mode = currentArmControlMode_;
-    }
+    res.mode = currentArmControlMode_;
     return true;
   };
 
@@ -249,8 +238,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
 
   bool singleStepControlCallback(kuavo_msgs::singleStepControl::Request &req, kuavo_msgs::singleStepControl::Response &res);
 
-  bool loadDynamicQRCallback(kuavo_msgs::ExecuteArmAction::Request &req, kuavo_msgs::ExecuteArmAction::Response &res);
-
   void armTargetTrajectoriesCallback(const ocs2_msgs::mpc_target_trajectories::ConstPtr &msg);
   
   TargetTrajectories interpolateArmTarget(scalar_t startTime, const vector_t& currentArmState, const vector_t& newDesiredArmState, scalar_t maxSpeed);
@@ -264,7 +251,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   void checkSingleStepControlAndStop();
 
   void generateTargetwithTorsoMove(scalar_t initTime, const vector_t &initState, const vector_t &torsoDisplacement,
-                                    const TargetTrajectories &targetTrajectories, vector_t &finalState, double &torso_max_time, const vector6_t &velocity_scale);
+                                    const TargetTrajectories &targetTrajectories, vector_t &finalState, double &torso_max_time, double velocity_scale = 2.0);
 
   std::shared_ptr<GaitSchedule> gaitSchedulePtr_;
   std::shared_ptr<SwingTrajectoryPlanner> swingTrajectoryPtr_;
@@ -280,7 +267,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
 
   void loadBaseTrackingQ(const std::string &dynamic_qr_file);
   void loadBaseTrackingR(const std::string &dynamic_qr_file);
-  void loadDynamicQRMap(const std::string &dynamic_qr_file);  // 加载所有Q_dynamic_<gait_name>和R_dynamic_<gait_name>到map
   void setMatrixRByGaitPair(const std::string &gait_name, const scalar_t &time, bool all_stance);
   
   // 维度缩减函数（参考HumanoidInterface的实现）
@@ -317,16 +303,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   baseTrackingR baseTrackingR_;
   std::string dynamic_qr_file_;
   bool dynamic_qr_flag_ = false;
-  bool dynamic_r_set_ = false;  // Flag to indicate if R matrix was manually set via service, skip all_stance override
-  matrix_t dynamic_R = matrix_t::Zero(24, 24);
-  matrix_t dynamic_Q = matrix_t::Zero(24, 24);
-  
-  // Map存储gait_name到QR矩阵的映射，避免在回调函数中进行文件IO
-  struct DynamicQRPair {
-    matrix_t Q;
-    matrix_t R;
-  };
-  std::map<std::string, DynamicQRPair> dynamic_qr_map_;
+
   PinocchioInterface pinocchioInterface_;
   const CentroidalModelInfo& info_;
   std::unique_ptr<PinocchioEndEffectorKinematics> endEffectorKinematicsPtr_;
@@ -351,10 +328,10 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::Subscriber fullBodyTargetTrajectoriesSubscriber_;
   ros::Subscriber estContactStateSubscriber_;
   ros::Subscriber slope_planning_sub_;
-  ros::Subscriber is_rl_controller_sub_;
   ros::Publisher footContactPointPublisher_;
   ros::Publisher footDesiredPointPublisher_;
   ros::Publisher gaitTimeNamePublisher_;
+  ros::Publisher waistTargetCommandedPublisher_;
   ros::Publisher armTargetCommandedPublisher_;
   ros::Publisher isCustomGaitPublisher_;
   ros::Publisher singleStepModePublisher_;
@@ -372,8 +349,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::ServiceServer enable_pitch_limit_service_;
   ros::ServiceServer pitch_limit_status_service_;
   ros::ServiceServer vr_waist_control_service_;  // VR waist control service
-  ros::ServiceServer load_dynamic_qr_service_;  // Service to load dynamic Q and R matrices based on gait name
-  ros::Publisher isArmExecutingPublisher_;
   ros::Publisher modeSchedulePublisher_;
 
   vector_t cmdVel_;
@@ -389,7 +364,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool velCmdUpdated_ = false;
   bool PoseCmdUpdated_ = false;
   bool PoseWorldCmdUpdated_ = false;
-  bool isArmExecuting_ = false;
   bool isCmdPoseCached = false;
   bool poseTargetUpdated_ = false;
   bool armTargetUpdated_ = false;
@@ -400,7 +374,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   bool isFirstVelPub_ = true;
   
   // VR高度平滑切换相关变量
-  bool heightSmoothTransitionActive_ = false;  // 是否正在进行高度平滑过渡
+  bool heightSmoothTransitionActive_ = true;  // 是否正在进行高度平滑过渡
   scalar_t heightTransitionStartTime_ = 0.0;   // 平滑过渡开始时间
   scalar_t heightTransitionDuration_ = 2.0;    // 平滑过渡持续时间（秒，动态计算）
   scalar_t heightBeforeTransition_ = 0.0;      // 过渡前的高度
@@ -418,13 +392,8 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ArmControlMode currentArmControlMode_ = ArmControlMode::AUTO_SWING;
   ArmControlMode newArmControlMode_ = ArmControlMode::AUTO_SWING;
   TorsoControlMode torsoControlMode_ = TorsoControlMode::SIX_DOF;
-  double is_rl_controller_ = 0.0;  // RL控制器标志
-  double prev_is_rl_controller_ = 0.0;  // 上一次的RL控制器标志，用于检测切换
   bool isArmControlModeChanged_ = false;
   bool isArmControlModeChangedTrigger_ = false;
-  bool isCalcArmControlModeChangedTime_ = false;
-  scalar_t arm_mode_change_start_time_ = -1.0;  // 模式切换开始时间，-1表示未开始切换
-  scalar_t min_arm_mode_change_time_ = 0.5;  // 最小模式切换时间（秒）
   bool update_stop_single_step_ = false;
 
   bool begin_step_gait = false;
@@ -456,9 +425,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   vector_t joyWaist_ = vector_t::Zero(waistNums_);
   bool ismdPoseInWorldFrameCached_ = false;
 
-  ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.15, 0.2, 0.4, 0.3, 0.4};
-  // velocity_scale: x, z, pitch, yaw用0.35，y用0.15
-  vector6_t torso_velocity_scale_;
+  ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.15, 0.3, 0.4, 0.4, 0.4};
   double cmd_threshold = 0.02;
 
   InverseKinematics inverseKinematics_;

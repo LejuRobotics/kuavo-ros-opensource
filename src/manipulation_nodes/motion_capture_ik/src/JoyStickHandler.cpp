@@ -25,8 +25,6 @@ void JoyStickHandler::initialize() {
   rightHandPosition_.resize(6, 0);
   clawPosition_.resize(2, 0);
 
-  leftGrip_ = false;
-  rightGrip_ = false;
   leftSecondButtonPressed_ = false;
   leftFirstButtonTouched_ = false;
   leftFirstButtonPressed_ = false;
@@ -39,19 +37,6 @@ void JoyStickHandler::initialize() {
   frozenLeftHandPosition_.resize(6, 0);
   frozenRightHandPosition_.resize(6, 0);
   frozenClawPosition_.resize(2, 0);
-
-  // 初始化手臂控制模式相关变量
-  leftArmCtrlModeActive_ = false;
-  rightArmCtrlModeActive_ = false;
-  leftButtonXLastPressed_ = false;
-  rightButtonALastPressed_ = false;
-  leftButtonXFirstPressTime_ = ros::Time(0);
-  rightButtonAFirstPressTime_ = ros::Time(0);
-  lastArmCtrlModeChangeTime_ = ros::Time(0);
-
-  // 初始化状态变化查询相关变量
-  lastQueryLeftArmCtrlModeActive_ = false;
-  lastQueryRightArmCtrlModeActive_ = false;
 
   controlFingerType_ = 0;
 
@@ -61,54 +46,7 @@ void JoyStickHandler::initialize() {
   std::cout << "\033[92m[JoyStickHandler] Initialization completed\033[0m" << std::endl;
 }
 
-void JoyStickHandler::reset() {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-
-  handPositionData_.hasValidData = false;
-  clawCommandData_.hasValidData = false;
-
-  leftJoystick_.resize(2, 0.0);
-  rightJoystick_.resize(2, 0.0);
-  leftFingerData_.resize(6, 0.0);
-  rightFingerData_.resize(6, 0.0);
-  leftHandPosition_.resize(6, 0);
-  rightHandPosition_.resize(6, 0);
-  clawPosition_.resize(2, 0);
-
-  leftGrip_ = false;
-  rightGrip_ = false;
-  leftSecondButtonPressed_ = false;
-  leftFirstButtonTouched_ = false;
-  leftFirstButtonPressed_ = false;
-  rightSecondButtonPressed_ = false;
-  rightFirstButtonTouched_ = false;
-  rightFirstButtonPressed_ = false;
-
-  buttonYLast_ = false;
-  freezeFinger_ = false;
-  frozenLeftHandPosition_.resize(6, 0);
-  frozenRightHandPosition_.resize(6, 0);
-  frozenClawPosition_.resize(2, 0);
-
-  // 重置手臂控制模式相关变量
-  leftArmCtrlModeActive_ = false;
-  rightArmCtrlModeActive_ = false;
-  leftButtonXLastPressed_ = false;
-  rightButtonALastPressed_ = false;
-  leftButtonXFirstPressTime_ = ros::Time(0);
-  rightButtonAFirstPressTime_ = ros::Time(0);
-  lastArmCtrlModeChangeTime_ = ros::Time(0);
-
-  // 重置状态变化查询相关变量
-  lastQueryLeftArmCtrlModeActive_ = false;
-  lastQueryRightArmCtrlModeActive_ = false;
-
-  // 重置控制手指类型（与initialize()中一致）
-  controlFingerType_ = 0;
-}
-
 void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
-  std::lock_guard<std::mutex> lock(dataMutex_);
   if (!isInitialized_.load()) {
     std::cout << "\033[91m[JoyStickHandler] Not initialized, call initialize() first\033[0m" << std::endl;
     return;
@@ -118,9 +56,6 @@ void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySt
   leftJoystick_[1] = msg->left_grip;
   rightJoystick_[0] = msg->right_trigger;
   rightJoystick_[1] = msg->right_grip;
-
-  leftGrip_ = msg->left_grip > 0.75;
-  rightGrip_ = msg->right_grip > 0.75;
 
   // 更新按钮状态
   leftSecondButtonPressed_ = msg->left_second_button_pressed;
@@ -137,94 +72,9 @@ void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySt
               << std::endl;
   }
   buttonYLast_ = leftSecondButtonPressed_;
-
-  // X键双击检测（左手控制模式切换）
-  if (leftFirstButtonPressed_ && !leftButtonXLastPressed_) {
-    // 检测到按下边沿
-    ros::Time now = ros::Time::now();
-    // 修复：检查时间戳是否在未来（冷却期），如果是则忽略这次按下
-    if (!leftButtonXFirstPressTime_.isZero() && now < leftButtonXFirstPressTime_) {
-      // 在冷却期内，忽略这次按下，但仍需更新 lastPressed 状态
-      leftButtonXLastPressed_ = leftFirstButtonPressed_;
-    } else if (leftButtonXFirstPressTime_.isZero() ||
-               (now - leftButtonXFirstPressTime_).toSec() > DOUBLE_CLICK_TIMEOUT) {
-      // 第一次按下或超时，记录时间戳
-      leftButtonXFirstPressTime_ = now;
-      leftButtonXLastPressed_ = leftFirstButtonPressed_;
-    } else {
-      // 在超时时间内第二次按下，检查是否允许切换模式
-      // 检查任意手是否在5秒内有过模式变化
-      bool anyHandRecentlyChanged = !lastArmCtrlModeChangeTime_.isZero() &&
-                                    (now - lastArmCtrlModeChangeTime_).toSec() < MODE_CHANGE_BLOCK_DURATION;
-
-      if (anyHandRecentlyChanged) {
-        // 任意手最近有变化，阻止左手模式切换
-        std::cout << "\033[93m[JoyStickHandler] 左手控制模式切换被阻止：在 "
-                  << (now - lastArmCtrlModeChangeTime_).toSec() << " 秒前发生了模式变化\033[0m" << std::endl;
-        // 重置双击检测状态
-        leftButtonXFirstPressTime_ = now + ros::Duration(DOUBLE_CLICK_TIMEOUT);
-        leftButtonXLastPressed_ = leftFirstButtonPressed_;
-      } else {
-        // 允许切换，触发双击
-        leftArmCtrlModeActive_ = !leftArmCtrlModeActive_;
-        lastArmCtrlModeChangeTime_ = now;  // 记录统一模式变化时间
-        // 修复：使用一个未来的时间戳，防止立即被当作新的第一次按下
-        // 这样可以避免快速三次点击触发两次双击的问题
-        leftButtonXFirstPressTime_ = now + ros::Duration(DOUBLE_CLICK_TIMEOUT);
-        leftButtonXLastPressed_ = leftFirstButtonPressed_;
-        std::cout << "\033[92mX键双击检测: 左手控制模式 " << (leftArmCtrlModeActive_ ? "激活" : "停用") << "\033[0m"
-                  << std::endl;
-      }
-    }
-  } else {
-    leftButtonXLastPressed_ = leftFirstButtonPressed_;
-  }
-
-  // A键双击检测（右手控制模式切换）
-  if (rightFirstButtonPressed_ && !rightButtonALastPressed_) {
-    // 检测到按下边沿
-    ros::Time now = ros::Time::now();
-    // 修复：检查时间戳是否在未来（冷却期），如果是则忽略这次按下
-    if (!rightButtonAFirstPressTime_.isZero() && now < rightButtonAFirstPressTime_) {
-      // 在冷却期内，忽略这次按下，但仍需更新 lastPressed 状态
-      rightButtonALastPressed_ = rightFirstButtonPressed_;
-    } else if (rightButtonAFirstPressTime_.isZero() ||
-               (now - rightButtonAFirstPressTime_).toSec() > DOUBLE_CLICK_TIMEOUT) {
-      // 第一次按下或超时，记录时间戳
-      rightButtonAFirstPressTime_ = now;
-      rightButtonALastPressed_ = rightFirstButtonPressed_;
-    } else {
-      // 在超时时间内第二次按下，检查是否允许切换模式
-      // 检查任意手是否在5秒内有过模式变化
-      bool anyHandRecentlyChanged = !lastArmCtrlModeChangeTime_.isZero() &&
-                                    (now - lastArmCtrlModeChangeTime_).toSec() < MODE_CHANGE_BLOCK_DURATION;
-
-      if (anyHandRecentlyChanged) {
-        // 任意手最近有变化，阻止右手模式切换
-        std::cout << "\033[93m[JoyStickHandler] 右手控制模式切换被阻止：在 "
-                  << (now - lastArmCtrlModeChangeTime_).toSec() << " 秒前发生了模式变化\033[0m" << std::endl;
-        // 重置双击检测状态
-        rightButtonAFirstPressTime_ = now + ros::Duration(DOUBLE_CLICK_TIMEOUT);
-        rightButtonALastPressed_ = rightFirstButtonPressed_;
-      } else {
-        // 允许切换，触发双击
-        rightArmCtrlModeActive_ = !rightArmCtrlModeActive_;
-        lastArmCtrlModeChangeTime_ = now;  // 记录统一模式变化时间
-        // 修复：使用一个未来的时间戳，防止立即被当作新的第一次按下
-        // 这样可以避免快速三次点击触发两次双击的问题
-        rightButtonAFirstPressTime_ = now + ros::Duration(DOUBLE_CLICK_TIMEOUT);
-        rightButtonALastPressed_ = rightFirstButtonPressed_;
-        std::cout << "\033[92mA键双击检测: 右手控制模式 " << (rightArmCtrlModeActive_ ? "激活" : "停用") << "\033[0m"
-                  << std::endl;
-      }
-    }
-  } else {
-    rightButtonALastPressed_ = rightFirstButtonPressed_;
-  }
 }
 
 void JoyStickHandler::processHandEndEffectorData() {
-  std::lock_guard<std::mutex> lock(dataMutex_);
   if (!isInitialized_.load()) {
     std::cout << "\033[91m[JoyStickHandler] Not initialized, call initialize() first\033[0m" << std::endl;
     return;
@@ -250,7 +100,6 @@ void JoyStickHandler::processHandEndEffectorData() {
 }
 
 void JoyStickHandler::processHandEndEffectorDataWithFingerTracking() {
-  std::lock_guard<std::mutex> lock(dataMutex_);
   if (!isInitialized_.load()) {
     std::cout << "\033[91m[JoyStickHandler] Not initialized, call initialize() first\033[0m" << std::endl;
     return;
@@ -329,7 +178,6 @@ void JoyStickHandler::processRobotEndHandWithFingerData() {
 }
 
 HandPositionData JoyStickHandler::getHandPositionData() {
-  std::lock_guard<std::mutex> lock(dataMutex_);
   if (!isInitialized_.load()) {
     std::cout << "\033[91m[JoyStickHandler] Not initialized, call initialize() first\033[0m" << std::endl;
     return HandPositionData();  // 返回默认的空数据
@@ -338,7 +186,6 @@ HandPositionData JoyStickHandler::getHandPositionData() {
 }
 
 ClawCommandData JoyStickHandler::getClawCommandData() {
-  std::lock_guard<std::mutex> lock(dataMutex_);
   if (!isInitialized_.load()) {
     std::cout << "\033[91m[JoyStickHandler] Not initialized, call initialize() first\033[0m" << std::endl;
     return ClawCommandData();  // 返回默认的空数据
@@ -432,119 +279,6 @@ void JoyStickHandler::processClawDataWithHandTracking() {
 
     // 存储当前值用于冻结
     frozenClawPosition_ = clawPosition_;
-  }
-}
-
-bool JoyStickHandler::hasLeftArmCtrlModeChanged() {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  // 比较当前左手状态和上次查询状态
-  bool changed = (leftArmCtrlModeActive_ != lastQueryLeftArmCtrlModeActive_);
-
-  // 如果有变化，更新上次查询状态并返回true
-  if (changed) {
-    lastQueryLeftArmCtrlModeActive_ = leftArmCtrlModeActive_;
-    return true;
-  }
-
-  // 状态未变化，返回false
-  return false;
-}
-
-bool JoyStickHandler::hasRightArmCtrlModeChanged() {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  // 比较当前右手状态和上次查询状态
-  bool changed = (rightArmCtrlModeActive_ != lastQueryRightArmCtrlModeActive_);
-
-  // 如果有变化，更新上次查询状态并返回true
-  if (changed) {
-    lastQueryRightArmCtrlModeActive_ = rightArmCtrlModeActive_;
-    return true;
-  }
-
-  // 状态未变化，返回false
-  return false;
-}
-
-bool JoyStickHandler::isLeftFirstButtonPressed() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return leftFirstButtonPressed_;
-}
-
-bool JoyStickHandler::isRightFirstButtonPressed() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return rightFirstButtonPressed_;
-}
-
-bool JoyStickHandler::isLeftSecondButtonPressed() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return leftSecondButtonPressed_;
-}
-
-bool JoyStickHandler::isRightSecondButtonPressed() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return rightSecondButtonPressed_;
-}
-
-bool JoyStickHandler::isLeftRightFirstButtonTouched() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return leftFirstButtonTouched_ && rightFirstButtonTouched_;
-}
-
-bool JoyStickHandler::isLeftRightFirstButtonPressed() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return leftFirstButtonPressed_ && rightFirstButtonPressed_;
-}
-
-bool JoyStickHandler::isLeftGrip() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return leftGrip_;
-}
-
-bool JoyStickHandler::isRightGrip() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return rightGrip_;
-}
-
-bool JoyStickHandler::isLeftRightGrip() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return leftGrip_ && rightGrip_;
-}
-
-bool JoyStickHandler::isLeftArmCtrlModeActive() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return leftArmCtrlModeActive_;
-}
-
-bool JoyStickHandler::isRightArmCtrlModeActive() const {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  return rightArmCtrlModeActive_;
-}
-
-void JoyStickHandler::forceSetLeftArmCtrlMode(bool active) {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  // 强制设置状态，并更新上次查询状态以确保 hasLeftArmCtrlModeChanged() 能检测到变化
-  if (leftArmCtrlModeActive_ != active) {
-    leftArmCtrlModeActive_ = active;
-    // 重置上次查询状态，确保下次调用 hasLeftArmCtrlModeChanged() 时返回 true
-    lastQueryLeftArmCtrlModeActive_ = !active;
-    // 更新模式变化时间戳，设置5秒超时保护，防止其他按键切换
-    lastArmCtrlModeChangeTime_ = ros::Time::now();
-    // std::cout << "\033[92m[JoyStickHandler] 强制设置左手控制模式: " << (active ? "激活" : "停用")
-    //           << "，已设置5秒超时保护\033[0m" << std::endl;
-  }
-}
-
-void JoyStickHandler::forceSetRightArmCtrlMode(bool active) {
-  std::lock_guard<std::mutex> lock(dataMutex_);
-  // 强制设置状态，并更新上次查询状态以确保 hasRightArmCtrlModeChanged() 能检测到变化
-  if (rightArmCtrlModeActive_ != active) {
-    rightArmCtrlModeActive_ = active;
-    // 重置上次查询状态，确保下次调用 hasRightArmCtrlModeChanged() 时返回 true
-    lastQueryRightArmCtrlModeActive_ = !active;
-    // 更新模式变化时间戳，设置5秒超时保护，防止其他按键切换
-    lastArmCtrlModeChangeTime_ = ros::Time::now();
-    // std::cout << "\033[92m[JoyStickHandler] 强制设置右手控制模式: " << (active ? "激活" : "停用")
-    //           << "，已设置5秒超时保护\033[0m" << std::endl;
   }
 }
 

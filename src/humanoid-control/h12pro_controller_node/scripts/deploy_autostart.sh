@@ -10,15 +10,6 @@ else
     echo "服务 roban_joy_monitor.service 未开启。"
 fi
 
-if systemctl is-active --quiet h12pro_monitor.service; then
-    echo "服务 h12pro_monitor.service 已开启，正在停止..."
-    sudo systemctl stop h12pro_monitor.service
-    sudo systemctl disable h12pro_monitor.service
-    echo "服务 h12pro_monitor.service 已停止。"
-else
-    echo "服务 h12pro_monitor.service 未开启。"
-fi
-
 if systemctl is-active --quiet ocs2_h12pro_monitor.service; then
     echo "服务 ocs2_h12pro_monitor.service 已开启，正在停止..."
     sudo systemctl stop ocs2_h12pro_monitor.service
@@ -29,7 +20,7 @@ else
 fi
 
 while true; do
-    echo "请选择控制方案 (1: ocs2, 2: rl, 3: multi)。若为 rl，请先修改 ROBOT_VERSION=46，并将正确的仓库路径修改在脚本中，再运行该脚本:"
+    echo "请选择控制方案 (1: ocs2, 2: rl)。若为 rl，请先修改 ROBOT_VERSION=46，并将正确的仓库路径修改在脚本中，再运行该脚本:"
     read -r user_input
     if [ "$user_input" = "1" ]; then
         KUAVO_CONTROL_SCHEME=ocs2
@@ -39,12 +30,8 @@ while true; do
         KUAVO_CONTROL_SCHEME=rl
         echo "已选择: rl"
         break
-    elif [ "$user_input" = "3" ]; then
-        KUAVO_CONTROL_SCHEME=multi
-        echo "已选择: multi"
-        break
     else
-        echo "输入无效，请输入1、2或3。"
+        echo "输入无效，请输入1或2。"
     fi
 done
 
@@ -194,7 +181,3 @@ sudo systemctl start ocs2_h12pro_monitor.service
 sudo systemctl enable ocs2_h12pro_monitor.service
 
 echo "h12pro monitor service deploy successfully"
-
-echo "stop all ros node"
-sudo pkill ros -f
-echo "stop all ros node successfully"

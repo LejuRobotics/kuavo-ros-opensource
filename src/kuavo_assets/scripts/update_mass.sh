@@ -17,7 +17,7 @@ if [ -z "${ROBOT_VERSION}" ]; then
 fi
 
 # 允许的机器人版本号列表
-allowed_versions=("11" "13" "14" "15" "16" "40" "41" "42" "43" "45" "46" "47" "48" "49" "50" "51" "52" "53" "54" "60" "61" "100045" "100049" "200049")
+allowed_versions=("11" "13" "14" "40" "41" "42" "43" "45" "46" "47" "48" "49" "50" "60" "61" "100045" "100049")
 if ! [[ " ${allowed_versions[@]} " =~ " ${ROBOT_VERSION} " ]]; then
     echo -e "\033[31m\nError: 机器人版本号(环境变量中 ROBOT_VERSION 的值) = '${ROBOT_VERSION}' 无效 \033[0m" >&2
     echo -e "\033[31m请参考readme.md文档，确认你的机器人版本号\n目前可用的版本号有: \n[${allowed_versions[*]}] \033[0m\n" >&2
@@ -48,41 +48,10 @@ LINK_NAMES=(
     "torso"
     "torso"
 )
-XML_TORSO_LINK_NAME="base_link"
 
-if [ "${ROBOT_VERSION}" = "14" ]; then
-    LINK_NAMES=(
-        "waist_yaw_link"
-        "waist_yaw_link"
-        "torso"
-        "torso"
-        "torso"
-    )
-    XML_TORSO_LINK_NAME="waist_yaw"
-fi
-
-# 52 版本：biped_s52/biped_s52_gazebo 与 drake/biped_v3/biped_v3_full 改 waist_yaw_link；drake/biped_v3_all_joint 仅有 torso
-if [ "${ROBOT_VERSION}" = "52" ] || [ "${ROBOT_VERSION}" = "53" ] || [ "${ROBOT_VERSION}" = "54" ]; then
-    LINK_NAMES=(
-        "waist_yaw_link"
-        "waist_yaw_link"
-        "torso"
-        "waist_yaw_link"
-        "waist_yaw_link"
-    )
-    XML_TORSO_LINK_NAME="waist_yaw"
-fi
-
-# Handle version 15 special case: use version 14 resources
-if [ "${ROBOT_VERSION}" = "15" ]; then
-    ACTUAL_ROBOT_VERSION="14"
-    echo "Note: Robot version 15 will use version 14 resources for mass calculation"
-else
-    ACTUAL_ROBOT_VERSION="${ROBOT_VERSION}"
-fi
 
 # 构建基础URDF路径
-BASE_URDF_PATH="${SRC_DIR}/models/biped_s${ACTUAL_ROBOT_VERSION}/urdf"
+BASE_URDF_PATH="${SRC_DIR}/models/biped_s${ROBOT_VERSION}/urdf"
 
 CONFIG_DIR=~/.config/lejuconfig
 MASS_FILE=${CONFIG_DIR}/TotalMassV${ROBOT_VERSION}
@@ -181,11 +150,11 @@ else
     done
 
     # 修改mujoco xml文件
-    BASE_XML_PATH="${SRC_DIR}/models/biped_s${ACTUAL_ROBOT_VERSION}/xml"
-    XML_FILE_PATH="${BASE_XML_PATH}/biped_s${ACTUAL_ROBOT_VERSION}.xml"
+    BASE_XML_PATH="${SRC_DIR}/models/biped_s${ROBOT_VERSION}/xml"
+    XML_FILE_PATH="${BASE_XML_PATH}/biped_s${ROBOT_VERSION}.xml"
     if [ -f "$XML_FILE_PATH" ]; then
         # 调用修改质量的脚本，同时传入链接名称
-        ./modify_torso_mass_xml.sh "$XML_FILE_PATH" "${TOTAL_MASS}" "${XML_TORSO_LINK_NAME}" # 传入link_name作为参数
+        ./modify_torso_mass_xml.sh "$XML_FILE_PATH" "${TOTAL_MASS}"  # 传入link_name作为参数
         echo "Updated xml mass for ${XML_FILE_PATH}"
     else
         echo "Warning: ${XML_FILE_PATH} not found" >&2

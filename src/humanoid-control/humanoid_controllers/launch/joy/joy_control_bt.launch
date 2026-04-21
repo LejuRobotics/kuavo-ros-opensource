@@ -6,16 +6,11 @@
     <arg name="start_way" default="manual"/>
     <param name="start_way" value="$(arg start_way)"/>
 
-    <arg name="respawn" default="true"/>
-    <param name="respawn" value="$(arg respawn)"/>
-
     <param name="joystick_sensitivity" value="20"/>
     
     <arg name="joystick_type" default="bt2"/>
     <param name="channel_map_path" value="$(find humanoid_controllers)/launch/joy/$(arg joystick_type).json"/>
 
     <include file="$(find joy)/launch/joy_node.launch">
-        <arg name="respawn" value="$(arg respawn)"/>
-        <arg name="start_way" value="$(arg start_way)"/>
     </include>
 </launch>

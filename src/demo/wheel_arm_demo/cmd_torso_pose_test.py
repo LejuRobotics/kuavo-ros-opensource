@@ -3,7 +3,7 @@ import rospy
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float32
 
-initialTorsoPose_ = [0.196123, 0.0005, 0.789919]
+initialTorsoPose_ = [-0.0303766, 0.0005, 0.604619]
 
 reachTime = 0.0
 def time_callback(msg):

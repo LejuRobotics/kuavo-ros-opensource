@@ -12,7 +12,6 @@ Environment=ROBOT_VERSION=14
 Environment=NODE_SCRIPT=/home/lab/kuavo-ros-control/src/humanoid-control/joystick_drivers/joy/services/start_roban_joy_node.sh
 Environment=ROS_HOSTNAME=
 Environment=STAIR_DETECTION_CAMERA=d435
-Environment="LAUNCH_VOICE_CONTROL_REAL_CMD=roslaunch voice_control_node voice_control.launch start_way:=auto"
 ExecStart=/home/lab/kuavo-ros-control/src/humanoid-control/joystick_drivers/joy/services/monitor_roban_joy.sh
 Restart=always
 RestartSec=5s

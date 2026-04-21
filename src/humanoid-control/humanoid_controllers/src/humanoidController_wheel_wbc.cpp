@@ -80,7 +80,6 @@ namespace humanoidController_wheel_wbc
     loadData::loadCppDataType(taskFile, "model_settings.verbose", verbose);
     loadData::loadCppDataType(taskFile, "model_settings.mpcArmsDof", armNum_);
     lowJointNum_ = manipulatorModelInfo_.armDim - armNum_;
-    baseDim_ = manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim;
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
     /****************************************************/
@@ -113,9 +112,6 @@ namespace humanoidController_wheel_wbc
     {
       controllerNh_.getParam("/use_external_mpc", enable_mpc_);
       std::cout << "enable_mpc: " << enable_mpc_ << std::endl;
-      // 设置 enable_manipulation_mpc 参数为 true
-      controllerNh_.setParam("/enable_manipulation_mpc", true);
-      std::cout << "enable_manipulation_mpc: true" << std::endl;
     }
     
     double controlFrequency = 500.0; // 1000Hz
@@ -186,11 +182,10 @@ namespace humanoidController_wheel_wbc
     ros::param::set("/armRealDof",  static_cast<int>(armNum_));
     ros::param::set("/legRealDof",  static_cast<int>(lowJointNum_));
     ros::param::set("/headRealDof",  2);
-    ros::param::set("/waistRealDof",  0);
     vector_t mujoco_q = vector_t::Zero(7 + 4 + 7*2 + 2);
     if(robotVersion_ == 60)
     {
-      mujoco_q[2] = 0.0;
+      mujoco_q[2] = 0.185;
     }
     else if(robotVersion_ == 61)
     {
@@ -208,7 +203,7 @@ namespace humanoidController_wheel_wbc
       robot_init_state_param.push_back(mujoco_q(i));
     }
 
-    controllerNh_.setParam("/robot_init_state_param", robot_init_state_param);
+    ros::param::set("robot_init_state_param", robot_init_state_param);
 
     // 设置初始状态参数
     std::vector<double> initial_state_vector(robot_init_state_param);
@@ -227,7 +222,7 @@ namespace humanoidController_wheel_wbc
     controllerNh_.setParam("build_cppad_state", 2); // done 
 
     // 初始化发布者
-    cmdVelPub_ = controllerNh_.advertise<geometry_msgs::Twist>("/move_base/base_cmd_vel", 10, true);
+    cmdVelPub_ = controllerNh_.advertise<geometry_msgs::Twist>("/filter_cmd_vel", 10, true);
     jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
@@ -290,6 +285,25 @@ namespace humanoidController_wheel_wbc
       }
     }
     
+    
+    // 初始化MPC模式切换服务客户端并设置为ArmOnly模式（仅在启用外部MPC且VR模式时）
+    if(enable_mpc_ && use_vr_control_)
+    {
+      mpc_control_client_ = controllerNh_.serviceClient<kuavo_msgs::changeTorsoCtrlMode>("/mobile_manipulator_mpc_control");
+      
+      // 初始化时设置为BaseArm模式模式，用于VR躯干控制
+      kuavo_msgs::changeTorsoCtrlMode srv;
+      srv.request.control_mode = 3;
+      if(mpc_control_client_.call(srv) && srv.response.result)
+      {
+        ROS_INFO("[humanoidController_wheel_wbc] MPC mode initialized to ArmOnly for VR torso control");
+      }
+      else
+      {
+        ROS_WARN("[humanoidController_wheel_wbc] Failed to initialize MPC mode to ArmOnly");
+      }
+    }
+    
     return true;
   }
 
@@ -323,7 +337,7 @@ namespace humanoidController_wheel_wbc
     );
 
     // 4. 轮臂MPC, 手臂快慢运动模式切换服务
-    control_data_manager_->registerService<kuavo_msgs::changeLbQuickModeSrv>(
+    control_data_manager_->registerService<std_srvs::SetBool>(
         "/enable_lb_arm_quick_mode",
         [this](auto& req, auto& res) { 
             return enableLbArmQuickModeCallback(req, res); 
@@ -502,9 +516,9 @@ namespace humanoidController_wheel_wbc
         optimizedState_mrt_ = optimizedState_mrt;
         optimizedInput_mrt_ = optimizedInput_mrt;
       }
-      if(std::fabs(optimizedInput_mrt_[0]) < 0.001) optimizedInput_mrt_[0] = 0;
-      if(std::fabs(optimizedInput_mrt_[1]) < 0.001) optimizedInput_mrt_[1] = 0;
-      if(std::fabs(optimizedInput_mrt_[2]) < 0.001) optimizedInput_mrt_[2] = 0;
+      if(std::fabs(optimizedInput_mrt_[0]) < 0.05) optimizedInput_mrt_[0] = 0;
+      if(std::fabs(optimizedInput_mrt_[1]) < 0.05) optimizedInput_mrt_[1] = 0;
+      if(std::fabs(optimizedInput_mrt_[2]) < 0.05) optimizedInput_mrt_[2] = 0;
     }
     // 更新可视化数据
     // robotVisualizer_->update_obs(observation_wheel_);
@@ -526,31 +540,45 @@ namespace humanoidController_wheel_wbc
     else  // 轮臂MPC模式下的特殊处理
     {
       // 手臂跟踪快模式: 直接从 kuavo_arm_traj 话题获取手臂关节指令
-      if (quickMode_ != 0 && (lbMpcMode == 1 || lbMpcMode == 3))  // 设置仅在armOnly和baseArm模式下生效
+      if (use_lb_arm_quick_mode_ && lbMpcMode == 1)  // 设置仅在armOnly模式下生效
       {
-        vector_t arm_target_qpos = vector_t::Zero(armNum_);
-        vector_t arm_target_qvel = vector_t::Zero(armNum_);
-        vector_t leg_target_qpos = vector_t::Zero(lowJointNum_);
-        vector_t leg_target_qvel = vector_t::Zero(lowJointNum_);
+        vector_t arm_target_qpos = control_data_manager_->getArmExternalControlState().pos;
+        vector_t arm_target_qvel = control_data_manager_->getArmExternalControlState().vel;
+        optimizedState_mrt_.tail(armNum_) = arm_target_qpos;
+        optimizedInput_mrt_.tail(armNum_) = arm_target_qvel;
 
-        if(quickMode_ == 1 || quickMode_ == 3)
-        {
-          leg_target_qpos = control_data_manager_->getLegExternalControlState().pos;
-          leg_target_qvel = control_data_manager_->getLegExternalControlState().vel;
-          optimizedState_mrt_.segment(baseDim_, lowJointNum_) = leg_target_qpos;
-          optimizedInput_mrt_.segment(baseDim_, lowJointNum_) = leg_target_qvel;
-          ros_logger_->publishVector("/humanoid_wheel/leg_target_qpos_quick_mode", leg_target_qpos);
-        }
-        if(quickMode_ == 2 || quickMode_ == 3)
-        {
-          arm_target_qpos = control_data_manager_->getArmExternalControlState().pos;
-          arm_target_qvel = control_data_manager_->getArmExternalControlState().vel;
-          optimizedState_mrt_.tail(armNum_) = arm_target_qpos;
-          optimizedInput_mrt_.tail(armNum_) = arm_target_qvel;
-          ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_quick_mode", arm_target_qpos);
-        }
-
+        ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_quick_mode", arm_target_qpos);
       }
+
+      if(use_vr_control_ && (0 == arm_trajectory_mode_ || 1 == arm_trajectory_mode_))
+      {
+        // 仅仅在VR模式下使用,只修改手臂关节位置和速度
+        optimizedState_mrt_.tail(armNum_) = target_qpos.tail(armNum_);
+        optimizedInput_mrt_.tail(armNum_) = target_qvel.tail(armNum_);
+      }
+
+      if(use_vr_control_ && 2 == arm_trajectory_mode_ && isArmControlModeChanged_)
+      {
+        // 仅仅在VR模式下使用
+        optimizedState_mrt_.tail(armNum_) = target_qpos.tail(armNum_);
+        optimizedInput_mrt_.tail(armNum_) = target_qvel.tail(armNum_);
+      }
+
+
+      if(use_vr_control_ && (0 == arm_trajectory_mode_ || 1 == arm_trajectory_mode_))
+      {
+        // 仅仅在VR模式下使用,只修改手臂关节位置和速度
+        optimizedState_mrt_.tail(armNum_) = target_qpos.tail(armNum_);
+        optimizedInput_mrt_.tail(armNum_) = target_qvel.tail(armNum_);
+      }
+
+      if(use_vr_control_ && 2 == arm_trajectory_mode_ && isArmControlModeChanged_)
+      {
+        // 仅仅在VR模式下使用
+        optimizedState_mrt_.tail(armNum_) = target_qpos.tail(armNum_);
+        optimizedInput_mrt_.tail(armNum_) = target_qvel.tail(armNum_);
+      }
+
     }
     /*******************************************************/
     ros_logger_->publishVector("/humanoid_wheel/optimizedState_mrt", optimizedState_mrt_);
@@ -564,14 +592,6 @@ namespace humanoidController_wheel_wbc
     ros_logger_->publishVector("/humanoid_wheel/optimizedState_mrt_kinemicLimit", optimizedState_mrt_limit);
     ros_logger_->publishVector("/humanoid_wheel/optimizedInput_mrt_kinemicLimit", optimizedInput_mrt_limit);
 
-    static int update_cnt = 0;
-    if(update_cnt < (int)(1/dt_))   // 延时1秒钟进mpc，使mpc指令缓冲充分刷新
-    {
-      static vector_t observation_wheel_state_prev = observation_wheel_.state;
-      optimizedState_mrt_limit.tail(info.armDim) = observation_wheel_state_prev.tail(info.armDim);
-      optimizedInput_mrt_limit.tail(info.armDim).setZero();
-      update_cnt++;
-    }
     vector_t x = wheel_wbc_->update(optimizedState_mrt_limit, optimizedInput_mrt_limit, observation_wheel_);
 
     vector_t bodyAcc = x.head(info.stateDim-info.armDim);
@@ -1112,29 +1132,29 @@ namespace humanoidController_wheel_wbc
         // 使用滤波后的关节角度（转换为度）
         for(int i = 0; i < lowJointNum_; ++i)
         {
-          leg_traj_msg.name[i] = "leg_joint_" + std::to_string(i+1);
           leg_traj_msg.position[i] = target_qpos[i] * 180.0 / M_PI;  // 弧度转角度
         }
         
         lbLegTrajPub_.publish(leg_traj_msg);
       }
-      // 如果当前躯干模式为false，上一躯干模式为true，则下发一次 0 指令作为终止
-      static bool pre_torso_ctrl = whole_torso_ctrl;
 
-      if(whole_torso_ctrl == false && pre_torso_ctrl == true)
+      // 当使用外部MPC且启用全身控制时，发布lb_leg_traj话题
+      if(enable_mpc_ && whole_torso_ctrl && vr_torso_pose_valid)
       {
         sensor_msgs::JointState leg_traj_msg;
         leg_traj_msg.header.stamp = ros::Time::now();
         leg_traj_msg.name.resize(lowJointNum_);
-        leg_traj_msg.position.resize(lowJointNum_, 0.0);
+        leg_traj_msg.position.resize(lowJointNum_);
         leg_traj_msg.velocity.resize(lowJointNum_, 0.0);
+        
+        // 使用滤波后的关节角度（转换为度）
         for(int i = 0; i < lowJointNum_; ++i)
         {
-          leg_traj_msg.name[i] = "leg_joint_" + std::to_string(i+1);
+          leg_traj_msg.position[i] = target_qpos[i] * 180.0 / M_PI;  // 弧度转角度
         }
+        
         lbLegTrajPub_.publish(leg_traj_msg);
       }
-      pre_torso_ctrl = whole_torso_ctrl;
     }
 
     if(use_arm_trajectory_control_)
@@ -1184,13 +1204,13 @@ namespace humanoidController_wheel_wbc
     return true;
   }
 
-  bool humanoidControllerWheelWbc::enableLbArmQuickModeCallback(kuavo_msgs::changeLbQuickModeSrv::Request &req, 
-                                                                kuavo_msgs::changeLbQuickModeSrv::Response &res)
+  bool humanoidControllerWheelWbc::enableLbArmQuickModeCallback(std_srvs::SetBool::Request &req, 
+                                                                std_srvs::SetBool::Response &res)
   {
-    std::cout << "[ArmControl] 快速模式切换请求, 请求模式为: " << int(req.quickMode) << std::endl;
-    quickMode_ = req.quickMode;
+    std::cout << "[ArmControl] 快速模式切换请求: " << (req.data ? "启用" : "禁用") << std::endl;
+    use_lb_arm_quick_mode_ = req.data;
     res.success = true;
-    res.message = "success change quick ctrl mode to " + std::to_string(req.quickMode);
+    res.message = "success change arm ctrl mode to " + std::to_string(req.data);
     return true;
   }
 

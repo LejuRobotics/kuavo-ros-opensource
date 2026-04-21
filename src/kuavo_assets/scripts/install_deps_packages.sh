@@ -48,26 +48,11 @@ function install_packages() {
 }
 
 function install_dexhand_deps() {
-    local expected_md5s=(
-        "e20954ddf56d1d4b28068cb15b042d5a"
-        "8908f9c67c8eb4366bb382149da5e587"
-    )
+    local expected_md5="e20954ddf56d1d4b28068cb15b042d5a"
     local source_libs=(
         "$WS_PATH/installed/lib/libstark.so"
         "$WS_PATH/src/kuavo-ros-control-lejulib/hardware_plant/lib/dexhand_sdk/protobuf_sdk/dist/linux/shared/libstark.so"
     )
-
-    # 检查 MD5 是否在允许的列表中
-    function check_md5_in_list() {
-        local md5_to_check="$1"
-        local md5_list=("${expected_md5s[@]}")
-        for valid_md5 in "${md5_list[@]}"; do
-            if [[ "$md5_to_check" == "$valid_md5" ]]; then
-                return 0
-            fi
-        done
-        return 1
-    }
 
     ECHO_WARN "Checking libstark.so installation..."
 
@@ -79,7 +64,7 @@ function install_dexhand_deps() {
     # 先检查系统目录
     if [[ -f "$system_lib" ]]; then
         local current_md5=$(md5sum "$system_lib" | cut -d' ' -f1)
-        if check_md5_in_list "$current_md5"; then
+        if [[ "$current_md5" == "$expected_md5" ]]; then
             ECHO_WARN "libstark.so is already installed with correct MD5 at $system_lib"
             found_correct_lib=true
         fi
@@ -88,7 +73,7 @@ function install_dexhand_deps() {
     # 如果系统目录没有正确版本，检查用户目录
     if [ "$found_correct_lib" = false ] && [[ -f "$user_lib" ]]; then
         local current_md5=$(md5sum "$user_lib" | cut -d' ' -f1)
-        if check_md5_in_list "$current_md5"; then
+        if [[ "$current_md5" == "$expected_md5" ]]; then
             ECHO_WARN "libstark.so is already installed with correct MD5 at $user_lib"
             found_correct_lib=true
         fi
@@ -145,13 +130,13 @@ function install_dexhand_deps() {
     # 验证安装后的MD5
     if [[ -f "$target_lib" ]]; then
         local final_md5=$(md5sum "$target_lib" | cut -d' ' -f1)
-        if check_md5_in_list "$final_md5"; then
+        if [[ "$final_md5" == "$expected_md5" ]]; then
             ECHO_WARN "libstark.so installation verified with correct MD5."
             ECHO_WARN "已安装到: $target_lib"
             return 0
         else
             ECHO_ERR "libstark.so installed but MD5 verification failed."
-            ECHO_ERR "Expected one of: ${expected_md5s[*]}"
+            ECHO_ERR "Expected: $expected_md5"
             ECHO_ERR "Actual: $final_md5"
             return 1
         fi
@@ -221,15 +206,6 @@ install_openvino
 ECHO_WARN "Check and Install depend packages ..."
 
 bash $SCRIPT_DIR/install_robot_localization_env.sh >&2
-
-
-ECHO_WARN "Check and Install libudev-dev ..."
-if ! dpkg -l | grep -q "libudev-dev"; then
-    ECHO_WARN "Installing libudev-dev ..."
-    sudo apt-get install libudev-dev -y
-else
-    ECHO_WARN "libudev-dev is already installed."
-fi
 
 
 check_packages_installed "bash"
