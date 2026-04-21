@@ -82,7 +82,7 @@ namespace mobile_manipulator
         nodeHandle_.getParam("robot_version", robotVersion_);
       }
       // 躯干初始化位置xyz
-      loadTorsoInitialPoseFromServer(nodeHandle_);
+      loadTorsoInitialPoseFromServer(nodeHandle_, robotVersion_);
 
       // 躯干笛卡尔运动限幅
       torsoMax_x_ = 0.25; torsoMin_x_ = 0.0;
@@ -378,14 +378,12 @@ namespace mobile_manipulator
     }
 
     // 获取躯干的初始位姿
-    void loadTorsoInitialPoseFromServer(ros::NodeHandle& nh) 
+    void loadTorsoInitialPoseFromServer(ros::NodeHandle& nh, int robotVersion) 
     {
       Eigen::VectorXd torsoPose = Eigen::VectorXd::Zero(6);
       bool isGetTorsoPose = false;
-      int maxRetries = 30;  // 最大重试次数，30次即30秒
-      int retryCount = 0;
 
-      while (ros::ok() && retryCount < maxRetries) 
+      while (ros::ok()) 
       {
           isGetTorsoPose = getTorsoInitialPose(nh, torsoPose);
 
@@ -398,21 +396,41 @@ namespace mobile_manipulator
                   initialTorsoPose_x_ = torsoPose[0];
                   initialTorsoPose_y_ = torsoPose[1];
                   initialTorsoPose_z_ = torsoPose[2];
-                  ROS_INFO("成功获取躯干初始位姿: [%.3f, %.3f, %.3f]", 
-                           initialTorsoPose_x_, initialTorsoPose_y_, initialTorsoPose_z_);
+                  std::cout << "成功获取躯干初始位姿: " << torsoPose.transpose() << std::endl;
                   break;  // 获取成功，退出循环
               } else {
-                  ROS_WARN("获取到零位姿，继续重试... (第%d次)", retryCount + 1);
+                  std::cerr << "\033[31m获取到零位姿, 继续重试...\033[0m"  << std::endl;
                   isGetTorsoPose = false;
               }
           } 
           else 
           {
-              ROS_WARN("无法获取躯干初始位姿，1秒后重试... (第%d次)", retryCount + 1);
+              std::cerr << "\033[31m无法获取躯干初始位姿, 1秒后重试...\033[0m" << std::endl;
           }
 
-          retryCount++;
           ros::Duration(1.0).sleep();  // 等待1秒
+      }
+
+      if (std::abs(initialTorsoPose_x_) > 1e-3 || 
+          std::abs(initialTorsoPose_y_) > 1e-3 || 
+          std::abs(initialTorsoPose_z_) > 1e-3)
+      {
+      }
+      else
+      {
+        std::cout << "\033[31m无法正确加载初始位姿, 载入默认初始数值\033[0m" << std::endl;
+        if(robotVersion == 60)
+        {
+          initialTorsoPose_x_ = 0.196123;
+          initialTorsoPose_y_ = 0.0005;
+          initialTorsoPose_z_ = 0.789919;
+        }
+        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63)
+        {
+          initialTorsoPose_x_ = 0.11575;
+          initialTorsoPose_y_ = 0.0;
+          initialTorsoPose_z_ = 0.923803;
+        }
       }
     }
 
