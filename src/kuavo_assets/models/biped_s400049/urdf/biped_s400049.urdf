@@ -939,7 +939,7 @@
   </joint>
 
   
-  <link name="l_palm">
+  <!-- <link name="l_palm">
     <inertial>
       <origin xyz="0.0017239 0.0051432 -0.031065" rpy="0 0 0" />
       <mass value="0.427" />
@@ -1583,7 +1583,7 @@
     <child link="r_palm" />
     <origin xyz="0 0 -0.07" rpy="-1.57 0 0" />
   </joint>
-  
+   -->
   <link name="zhead_1_link">
     <inertial>
       <origin xyz="2e-05 0.00605 -0.01052" rpy="0 0 0" />
