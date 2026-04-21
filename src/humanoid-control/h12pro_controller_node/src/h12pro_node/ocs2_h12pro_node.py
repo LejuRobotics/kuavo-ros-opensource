@@ -27,18 +27,17 @@ import threading
 import numpy as np
 from std_msgs.msg import Bool
 
+rospack = rospkg.RosPack()
+pkg_path = rospack.get_path('h12pro_controller_node')
+h12pro_remote_controller_path = os.path.join(pkg_path, "src", "h12pro_node", "h12pro_remote_controller.json")
+kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
+
 try:
     from robot_version import RobotVersion
 except ImportError:
     import sys
     sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
     from robot_version import RobotVersion
-
-
-rospack = rospkg.RosPack()
-pkg_path = rospack.get_path('h12pro_controller_node')
-h12pro_remote_controller_path = os.path.join(pkg_path, "src", "h12pro_node", "h12pro_remote_controller.json")
-kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
 
 # =====================================================
 # 状态持久化常量
