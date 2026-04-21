@@ -1238,7 +1238,7 @@ weight
   accLowJoint     20
   accArm          30
   accTorsoZero    0
-  contactForce    3.0
+  contactForce    500
 }
 
 contact_force_params
