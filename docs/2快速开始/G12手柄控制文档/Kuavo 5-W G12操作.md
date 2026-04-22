@@ -55,6 +55,9 @@ sudo systemctl restart urobot.service
 ![img.png](img/bogan1.png)
 
 
-<p>2、同时长按C加D键，机器人双臂放下，表明关闭控制成功。</p>
-<img src="img/CD.png" alt="按键" width="500" /><br />
-<img src="img/fangshou.png" alt="关闭" width="500" />
+2、同时长按C加D键，机器人双臂放下，表明关闭控制成功。
+
+![img](img/CD.png)
+
+
+![img](img/fangshou.png)

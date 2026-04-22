@@ -7,9 +7,9 @@ title: "sdk 与 msgs 常见问题"
  在使用pytree案例时，我们有可能会遇到msgs包找不到与sdk安装的相关的问题，如下图所示。
 
 
-<img src="img/sdk.png" alt="sdk" width="500" /><br />
+![img](./img/sdk.png)
 
-<img src="img/msgs.png" alt="msgs" width="500" />
+![img](./img/msgs.png)
 
 ## 解决方案
 1、安装kuavo-humanoid-sdk
