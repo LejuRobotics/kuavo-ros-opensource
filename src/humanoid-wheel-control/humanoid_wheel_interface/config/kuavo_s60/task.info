@@ -596,19 +596,19 @@ torsoBoxSoftCost
       mu      0.3
 
       ; relaxed log barrier delta
-      delta   0.005
+      delta   0.05
     }
 
     focus_z_barrier
     {
-      ; true: z 方向用本组 mu/delta；false: 用 position.unFocus_barrier
-      use_focus_z  false
+      ; true: z 方向用本组 mu/delta；false:用 position.unFocus_barrier
+      use_focus_z  true
 
       ; relaxed log barrier mu
-      mu      0.3
+      mu      0.4
 
       ; relaxed log barrier delta
-      delta   0.005
+      delta   0.001
     }
 
     lower
@@ -648,16 +648,16 @@ torsoBoxSoftCost
 
     lower
     {
-      (0,0)  -0.01  ; roll
-      (1,0)  -0.01  ; pitch
-      (2,0)  -0.01  ; yaw
+      (0,0)  -0.5  ; roll
+      (1,0)  -0.5  ; pitch
+      (2,0)  -1.5  ; yaw
     }
 
     upper
     {
-      (0,0)   0.01  ; roll
-      (1,0)   0.01  ; pitch
-      (2,0)   0.01  ; yaw
+      (0,0)   0.5  ; roll
+      (1,0)   0.5  ; pitch
+      (2,0)   1.5  ; yaw
     }
   }
 }
@@ -1114,10 +1114,10 @@ lowJointAccelTask
   }
   kd
   {
-    (0,0)   60.2     ; knee_pitch
-    (1,0)   60.2     ; leg_pitch
-    (2,0)   60.2     ; waist_pitch
-    (3,0)   60.2     ; waist_yaw_link
+    (0,0)   30.2     ; knee_pitch
+    (1,0)   30.2     ; leg_pitch
+    (2,0)   30.2     ; waist_pitch
+    (3,0)   30.2     ; waist_yaw_link
   }
 }
 
@@ -1202,7 +1202,7 @@ armAccelTask
   kp_force_control
   {
     (0,0)   350.0  ; zarm_l1_joint
-    (1,0)   32.0   ; zarm_l2_joint 
+    (1,0)   32.0   ; zarm_l2_joint
     (2,0)   32.0   ; zarm_l3_joint
     (3,0)   150.0  ; zarm_l4_joint
     (4,0)   35.0   ; zarm_l5_joint
@@ -1240,13 +1240,13 @@ weight
   accLowJoint     20
   accArm          30
   accTorsoZero    0
-  contactForce    3.0
+  contactForce    500
 }
 
 contact_force_params
 {
   contactForceErrorThreshold  0.15    ; 误差阈值（rad），超过此值禁用接触力任务
-  weightArmAccelReduced    3.0    ; 施加期望力时的手臂任务权重
+  weightArmAccelReduced    30.0    ; 施加期望力时的手臂任务权重
   transitionTime   0.3    ; 权重平滑过渡时间常数（秒）
   forceThreshold           5.0    ; 期望力阈值（N），超过此值认为施加了期望力
   interpolationSpeed       300.0   ; 期望力插值速度（N/s）

@@ -989,14 +989,14 @@ jointVelocityLimits
       (1,0)   -25.33   ; leg_pitch
       (2,0)   -25.33   ; waist_pitch
       (3,0)   -25.33   ; waist_yaw_link
-      (4,0)   -18.8   ; z_arm_l1 velocity
+      (4,0)   -13.0   ; z_arm_l1 velocity
       (5,0)   -8.0   ; z_arm_l2 velocity
       (6,0)   -7.5   ; z_arm_l3 velocity
       (7,0)   -8.0   ; z_arm_l4 velocity
       (8,0)   -17.5   ; z_arm_l5 velocity
       (9,0)   -17.5   ; z_arm_l6 velocity
       (10,0)  -17.5   ; z_arm_l7 velocity
-      (11,0)  -18.8   ; z_arm_r1 velocity
+      (11,0)  -13.0   ; z_arm_r1 velocity
       (12,0)  -8.0    ; z_arm_r2 velocity
       (13,0)  -7.5    ; z_arm_r3 velocity
       (14,0)  -8.0    ; z_arm_r4 velocity
@@ -1065,14 +1065,14 @@ jointVelocityLimits
       (1,0)   25.33   ; leg_pitch
       (2,0)   25.33   ; waist_pitch
       (3,0)   25.33   ; waist_yaw_link
-      (4,0)   18.8   ; z_arm_l1 velocity
+      (4,0)   13.0   ; z_arm_l1 velocity
       (5,0)   8.0    ; z_arm_l2 velocity
       (6,0)   7.5    ; z_arm_l3 velocity
       (7,0)   8.0    ; z_arm_l4 velocity
       (8,0)   17.5   ; z_arm_l5 velocity
       (9,0)   17.5   ; z_arm_l6 velocity
       (10,0)  17.5   ; z_arm_l7 velocity
-      (11,0)  18.8   ; z_arm_r1 velocity
+      (11,0)  13.0   ; z_arm_r1 velocity
       (12,0)  8.0    ; z_arm_r2 velocity
       (13,0)  7.5    ; z_arm_r3 velocity
       (14,0)  8.0    ; z_arm_r4 velocity
@@ -1092,7 +1092,7 @@ torqueLimitsTask
    (3,0)  618.48     ; motor 4
 
    ;; arm Limits
-   (4,0)   66.0     ; motor 1
+   (4,0)   85.0     ; motor 1
    (5,0)   75.0     ; motor 2
    (6,0)   57.0     ; motor 3
    (7,0)   75.0     ; motor 4
@@ -1238,7 +1238,7 @@ weight
   accLowJoint     20
   accArm          30
   accTorsoZero    0
-  contactForce    3.0
+  contactForce    500
 }
 
 contact_force_params

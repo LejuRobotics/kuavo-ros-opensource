@@ -86,3 +86,4 @@ topics:
   - /l_shoulder_pose
   - /head_pose
   - /dance_controller/.*
+  - /move_base/base_cmd_vel

@@ -9,17 +9,17 @@
     name="base_link">
     <inertial>
       <origin
-        xyz="0.00237384 -0.00288534 0.18388782"
+        xyz="0.00196618 -0.00243108 0.17326354"
         rpy="0 0 0" />
       <mass
-        value="114.0" />
+        value="129.40001" />
       <inertia
-        ixx="5.69196532"
-        ixy="-0.00124455"
-        ixz="-0.03397154"
-        iyy="5.78484595"
-        iyz="0.02246676"
-        izz="7.29882874" />
+        ixx="6.70252462" 
+        ixy="0.0" 
+        ixz="0.0"
+        iyy="6.79536961" 
+        iyz="0.0" 
+        izz="9.12227793" />
     </inertial>
     <visual>
       <origin
@@ -27,7 +27,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s63/meshes/base_link.STL" />
+          filename="package://kuavo_assets/models/biped_s63/meshes/chassis.STL" />
       </geometry>
       <material
         name="">
@@ -251,17 +251,17 @@
     name="base_to_joint">
     <inertial>
       <origin
-        xyz="-0.00314715 -0.01111045 0.08162744"
+        xyz="-0.00321118 -0.01114798 0.08138519" 
         rpy="0 0 0" />
       <mass
-        value="7.27493629" />
+        value="7.34488200" />
       <inertia
-        ixx="0.02821438"
+        ixx="0.02854518"
         ixy="0.0"
         ixz="0.0"
-        iyy="0.02725740"
+        iyy="0.02763690"
         iyz="0.0"
-        izz="0.02049767" />
+        izz="0.02105854" />
     </inertial>
     <visual>
       <origin
@@ -282,7 +282,7 @@
     name="base_to_joint"
     type="fixed">
     <origin
-      xyz="0.093 -0.0165 0.40635"
+      xyz="0.093 0 0.30085"
       rpy="0 0 0" />
     <parent
       link="base_link" />
@@ -295,17 +295,17 @@
     name="knee_link">
     <inertial>
       <origin
-        xyz="-0.22895411 0.00062518 0.08817449"
+        xyz="-0.29609479 -0.00168429 0.11682310" 
         rpy="0 0 0" />
       <mass
-        value="13.41361777" />
+        value="13.60706531" />
       <inertia
-        ixx="0.14019856"
-        ixy="-0.00700530"
-        ixz="0.13323445"
-        iyy="0.44977434"
-        iyz="0.00328676"
-        izz="0.43766820" />
+        ixx="0.14336902"
+        ixy="-0.00576603"
+        ixz="0.14321772"
+        iyy="0.47203242"
+        iyz="0.00282772"
+        izz="0.45837046" />
     </inertial>
     <visual>
       <origin
@@ -313,7 +313,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s63/meshes/leg_Link.STL" />
+          filename="package://kuavo_assets/models/biped_s63/meshes/knee_pitch.STL" />
       </geometry>
       <material
         name="">
@@ -341,17 +341,17 @@
     name="leg_link">
     <inertial>
       <origin
-        xyz="0.24706164 0.01130291 0.06772512"
+        xyz="0.32241056 0.01068392 0.08659218" 
         rpy="0 0 0" />
       <mass
-        value="9.78118294" />
+        value="9.43091394" />
       <inertia
-        ixx="0.05688620"
-        ixy="0.01296222"
-        ixz="-0.08521923"
-        iyy="0.39041344"
-        iyz="0.00341900"
-        izz="0.35048179" />
+        ixx="0.05162574"
+        ixy="0.01484814"
+        ixz="-0.08014251"
+        iyy="0.36738536"
+        iyz="0.00395959"
+        izz="0.32855994" />
     </inertial>
     <visual>
       <origin
@@ -359,7 +359,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s63/meshes/waist_pitch_Link.STL" />
+          filename="package://kuavo_assets/models/biped_s63/meshes/leg_pitch.STL" />
       </geometry>
       <material
         name="">
@@ -386,17 +386,17 @@
     name="waist_link">
     <inertial>
       <origin
-        xyz="-0.00148154 0.0 0.05846250"
+        xyz="-0.00196130 0.00090053 0.12317089"
         rpy="0 0 0" />
       <mass
-        value="4.65997944" />
+        value="8.15311772" />
       <inertia
-        ixx="0.04744596"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.03649612"
-        iyz="0.0"
-        izz="0.03870953" />
+        ixx="0.06956980"
+        ixy="-0.00042690"
+        ixz="-0.00037219"
+        iyy="0.05682382"
+        iyz="0.00168263"
+        izz="0.04249525" />
     </inertial>
     <visual>
       <origin
@@ -404,7 +404,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s63/meshes/waist_yaw_Link.STL" />
+          filename="package://kuavo_assets/models/biped_s63/meshes/waist_pitch.STL" />
       </geometry>
       <material
         name="">
@@ -432,17 +432,17 @@
     name="waist_yaw_link">
     <inertial>
       <origin
-        xyz="0.00159298 -0.00027078 0.13187420"
+        xyz="-0.00205700 -0.00093254 0.15776501" 
         rpy="0 0 0" />
       <mass
-        value="11.56094002" />
+        value="12.64200813" />
       <inertia
-        ixx="0.24663556"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.15937676"
-        iyz="0.0"
-        izz="0.15881326" />
+        ixx="0.23016616"
+        ixy="0.00023876"
+        ixz="-0.00135390"
+        iyy="0.14716611"
+        iyz="0.00037425"
+        izz="0.15978860" />
     </inertial>
     <visual>
       <origin
@@ -469,7 +469,7 @@
     name="waist_yaw_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.235"
+      xyz="0 0 0.25" 
       rpy="0 0 0" />
     <parent
       link="waist_link" />
@@ -484,21 +484,21 @@
     name="zarm_l1_link">
     <inertial>
       <origin
-        xyz="0.00166796 -0.008241 0.00012987"
+        xyz="0.00140078 -0.01023500 -0.00030514" 
         rpy="0 0 0" />
       <mass
-        value="0.91653322" />
+        value="1.01295970"/>
       <inertia
-        ixx="0.00126587"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00086921"
-        iyz="0.0"
-        izz="0.00124337" />
+        ixx="0.00147361" 
+        ixy="-0.00003005" 
+        ixz="-0.00000103" 
+        iyy="0.00096625" 
+        iyz="0.00000299" 
+        izz="0.00144285"/>
     </inertial>
     <visual>
       <origin
-        xyz="0 -0.081 0"
+        xyz="0 0 0"
         rpy="0 0 0" />
       <geometry>
         <mesh
@@ -515,7 +515,7 @@
     name="zarm_l1_joint"
     type="revolute">
     <origin
-      xyz="0 0.2527 0.242"
+      xyz="0 0.253 0.227" 
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -523,24 +523,24 @@
       link="zarm_l1_link" />
     <axis
       xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="85.0" velocity="13.0" />
     <dynamics damping="0.0" friction="0.0" />
   </joint>
   <link
     name="zarm_l2_link">
     <inertial>
       <origin
-        xyz="-0.00080994 0.00000486 -0.04651026"
+        xyz="-0.00070214 -0.00000601 -0.04627791" 
         rpy="0 0 0" />
       <mass
-        value="0.38767390" />
+        value="0.43788857"/>
       <inertia
-        ixx="0.00080739"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00116144"
-        iyz="0.0"
-        izz="0.00070223" />
+        ixx="0.00088092" 
+        ixy="0.00000011" 
+        ixz="-0.00002250" 
+        iyy="0.00128467" 
+        iyz="0.00000014" 
+        izz="0.00077467"/>
     </inertial>
     <visual>
       <origin
@@ -582,17 +582,17 @@
     name="zarm_l3_link">
     <inertial>
       <origin
-        xyz="0.00943019 0.00343988 -0.11304538"
+        xyz="0.00964741 0.00319323 -0.22919475" 
         rpy="0 0 0" />
       <mass
-        value="1.77926875" />
+        value="1.83544700"/>
       <inertia
-        ixx="0.00992856"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.01004582"
-        iyz="0.0"
-        izz="0.00185422" />
+        ixx="0.00729083" 
+        ixy="-0.00007288" 
+        ixz="0.00081125" 
+        iyy="0.00738284" 
+        iyz="0.00031695" 
+        izz="0.00195142"/>
     </inertial>
     <visual>
       <origin
@@ -628,17 +628,17 @@
     name="zarm_l4_link">
     <inertial>
       <origin
-        xyz="-0.01829932 0.00087167 -0.06936622"
+        xyz="-0.01826291 0.00208235 -0.06695837" 
         rpy="0 0 0" />
       <mass
-        value="0.58507821" />
+        value="0.65770374"/>
       <inertia
-        ixx="0.00143291"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00125018"
-        iyz="0.0"
-        izz="0.00068356" />
+        ixx="0.00155516"
+        ixy="-0.00001090"
+        ixz="-0.00013674"
+        iyy="0.00134001"
+        iyz="-0.00005219"
+        izz="0.00071369"/>
     </inertial>
     <visual>
       <origin
@@ -680,17 +680,17 @@
     name="zarm_l5_link">
     <inertial>
       <origin
-        xyz="0.00026090 0.00001322 -0.06083944"
+        xyz="-0.00889277 0.00001406 -0.05689638" 
         rpy="0 0 0" />
       <mass
-        value="0.68679955" />
+        value="0.67878399"/>
       <inertia
-        ixx="0.00086873"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00122518"
-        iyz="0.0"
-        izz="0.00066873" />
+        ixx="0.00070608" 
+        ixy="0.00000004" 
+        ixz="-0.00006375" 
+        iyy="0.00105527" 
+        iyz="-0.00000153" 
+        izz="0.00059293"/>
     </inertial>
     <visual>
       <origin
@@ -726,17 +726,17 @@
     name="zarm_l6_link">
     <inertial>
       <origin
-        xyz="0.00019162 0.0 -0.01747746"
+        xyz="-0.00174110 0.00664955 -0.01430084" 
         rpy="0 0 0" />
       <mass
-        value="0.39387181" />
+        value="0.51230538"/>
       <inertia
-        ixx="0.00018535"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00019853"
-        iyz="0.0"
-        izz="0.00020210" />
+        ixx="0.00019781"
+        ixy="-0.00000521"
+        ixz="0.00001293"
+        iyy="0.00030102"
+        iyz="0.00001207"
+        izz="0.00030567"/>
     </inertial>
     <visual>
       <origin
@@ -772,17 +772,17 @@
     name="zarm_l7_link">
     <inertial>
       <origin
-        xyz="0.0 0.0 -0.10230994"
+        xyz="0.0 0.00873606 -0.0837543" 
         rpy="0 0 0" />
       <mass
-        value="0.71537800" />
+        value="0.7374"/>
       <inertia
-        ixx="0.001060440"
+        ixx="0.00112502"
         ixy="0.0"
         ixz="0.0"
-        iyy="0.001064636"
+        iyy="0.00133239"
         iyz="0.0"
-        izz="0.001061427" />
+        izz="0.000373427" />
     </inertial>
     <visual>
       <origin
@@ -851,21 +851,21 @@
     name="zarm_r1_link">
     <inertial>
       <origin
-        xyz="-0.00166796 0.00839971 0.00012987"
+        xyz="0.00140078 0.01023500 -0.00030514" 
         rpy="0 0 0" />
       <mass
-        value="0.91653322" />
+        value="1.01295970"/>
       <inertia
-        ixx="0.00126587"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00086921"
-        iyz="0.0"
-        izz="0.00124337" />
+        ixx="0.00147361"
+        ixy="0.00003005"
+        ixz="-0.00000103"
+        iyy="0.00096625"
+        iyz="-0.00000299"
+        izz="0.00144285"/>
     </inertial>
     <visual>
       <origin
-        xyz="0 0.081 0"
+        xyz="0 0 0"
         rpy="0 0 0" />
       <geometry>
         <mesh
@@ -882,7 +882,7 @@
     name="zarm_r1_joint"
     type="revolute">
     <origin
-      xyz="0 -0.2527 0.242"
+      xyz="0 -0.253 0.227"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -890,24 +890,24 @@
       link="zarm_r1_link" />
     <axis
       xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="85.0" velocity="13.0" />
     <dynamics damping="0.0" friction="0.0" />
   </joint>
   <link
     name="zarm_r2_link">
     <inertial>
       <origin
-        xyz="-0.00080994 -0.00000486 -0.04651026"
+        xyz="-0.00070214 0.00000601 -0.04627791" 
         rpy="0 0 0" />
       <mass
-        value="0.38767390" />
+        value="0.43788857"/>
       <inertia
-        ixx="0.00080739"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00116144"
-        iyz="0.0"
-        izz="0.00070223" />
+        ixx="0.00088092"
+        ixy="-0.00000011"
+        ixz="-0.00002250"
+        iyy="0.00128467"
+        iyz="-0.00000014"
+        izz="0.00077467"/>
     </inertial>
     <visual>
       <origin
@@ -949,17 +949,17 @@
     name="zarm_r3_link">
     <inertial>
       <origin
-        xyz="0.00943019 -0.00343988 -0.11304538"
+        xyz="0.00964741 -0.00319323 -0.22919475" 
         rpy="0 0 0" />
       <mass
-        value="1.77926875" />
+        value="1.83544700"/>
       <inertia
-        ixx="0.00992856"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.01004582"
-        iyz="0.0"
-        izz="0.00185422" />
+        ixx="0.00729083"
+        ixy="0.00007288"
+        ixz="0.00081125"
+        iyy="0.00738284"
+        iyz="-0.00031695"
+        izz="0.00195142"/>
     </inertial>
     <visual>
       <origin
@@ -995,17 +995,17 @@
     name="zarm_r4_link">
     <inertial>
       <origin
-        xyz="-0.01829932 -0.00087167 -0.06936622"
+        xyz="-0.01826291 -0.00208235 -0.06695837" 
         rpy="0 0 0" />
       <mass
-        value="0.58507821" />
+        value="0.65770374"/>
       <inertia
-        ixx="0.00143291"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00125018"
-        iyz="0.0"
-        izz="0.00068356" />
+        ixx="0.00155516"
+        ixy="0.00001090"
+        ixz="-0.00013674"
+        iyy="0.00134001"
+        iyz="0.00005219"
+        izz="0.00071369"/>
     </inertial>
     <visual>
       <origin
@@ -1047,17 +1047,17 @@
     name="zarm_r5_link">
     <inertial>
       <origin
-        xyz="-0.00026090 0.00001322 -0.06083944"
+        xyz="-0.00889277 -0.00001406 -0.05689638"
         rpy="0 0 0" />
       <mass
-        value="0.68679955" />
+        value="0.67878399"/>
       <inertia
-        ixx="0.00086873"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00122518"
-        iyz="0.0"
-        izz="0.00066873" />
+        ixx="0.00070608"
+        ixy="-0.00000004"
+        ixz="-0.00006375"
+        iyy="0.00105527"
+        iyz="0.00000153"
+        izz="0.00059293"/>
     </inertial>
     <visual>
       <origin
@@ -1093,17 +1093,17 @@
     name="zarm_r6_link">
     <inertial>
       <origin
-        xyz="0.00019162 0.0 -0.01747746"
+        xyz="-0.00174110 -0.00664955 -0.01430084" 
         rpy="0 0 0" />
       <mass
-        value="0.39387181" />
+        value="0.51230538"/>
       <inertia
-        ixx="0.00018535"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00019853"
-        iyz="0.0"
-        izz="0.00020210" />
+        ixx="0.00019781"
+        ixy="0.00000521"
+        ixz="0.00001293"
+        iyy="0.00030102"
+        iyz="-0.00001207"
+        izz="0.00030567"/>
     </inertial>
     <visual>
       <origin
@@ -1139,17 +1139,17 @@
     name="zarm_r7_link">
     <inertial>
       <origin
-        xyz="0.0 0.0 -0.10230994"
+        xyz="0.0 -0.00870857 -0.0836411" 
         rpy="0 0 0" />
       <mass
-        value="0.71537800" />
+        value="0.7374"/>
       <inertia
-        ixx="0.001060440"
+        ixx="0.00110836"
         ixy="0.0"
         ixz="0.0"
-        iyy="0.001064636"
+        iyy="0.00131607"
         iyz="0.0"
-        izz="0.001061427" />
+        izz="0.000374168" />
     </inertial>
     <visual>
       <origin
@@ -1218,17 +1218,17 @@
     name="zhead_1_link">
     <inertial>
       <origin
-        xyz="0.00173289 -0.00335491 0.09489286"
+        xyz="-0.00029696 -0.00279320 -0.03769991" 
         rpy="0 0 0" />
       <mass
-        value="0.83597358" />
+        value="0.81695367" />
       <inertia
-        ixx="0.00191700"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00184689"
-        iyz="0.0"
-        izz="0.00059064" />
+        ixx="0.00206263"
+        ixy="0.00000137"
+        ixz="-0.00000456"
+        iyy="0.00192022"
+        iyz="0.00006319"
+        izz="0.00065729" />
     </inertial>
     <visual>
       <origin
@@ -1255,7 +1255,7 @@
     name="zhead_1_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.3164"
+      xyz="0 0 0.43485" 
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -1270,17 +1270,17 @@
     name="zhead_2_link">
     <inertial>
       <origin
-        xyz="0.02233688 0.00050124 0.03714709"
+        xyz="0.03522567 0.00045985 0.04494372" 
         rpy="0 0 0" />
       <mass
-        value="0.75473516" />
+        value="0.82379681" />
       <inertia
-        ixx="0.00366352"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00461321"
-        iyz="0.0"
-        izz="0.00483805" />
+        ixx="0.00420019"
+        ixy="0.00001243"
+        ixz="0.00028841"
+        iyy="0.00472455"
+        iyz="0.00001336"
+        izz="0.00467660" />
     </inertial>
     <visual>
       <origin
@@ -1301,7 +1301,7 @@
     name="zhead_2_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.13795"
+      xyz="0 0 0"
       rpy="0 0 0" />
     <parent
       link="zhead_1_link" />
@@ -1314,14 +1314,16 @@
   </joint>
   <link name="camera_base">
     <inertial>
-      <origin xyz="-0.0109467295615343 -0.00025332024893314 0.000333522154238597" rpy="0 0 0" />
-      <mass value="0.0482361371130408" />
-      <inertia ixx="5.97804649866973E-05" ixy="0" ixz="0" iyy="5.8e-05" iyz="0" izz="5.92932584785117E-05" />
+      <origin xyz="0.00471770 0.00007850 0.01403306" rpy="0 0 0" />
+      <mass value="0.0" />
+      <inertia
+        ixx="0" ixy="0" ixz="0"
+        iyy="0" iyz="0" izz="0" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s60/meshes/head_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s63/meshes/head_camera_base.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1329,16 +1331,27 @@
     </visual>
   </link>
   <joint name="camera_base_joint" type="fixed">
-    <origin xyz="0.099478 0 0.032897" rpy="0 0.35805 0" />
+    <origin xyz="0.099619 0 0.032844" rpy="0 0.3406 0" />
     <parent link="zhead_2_link" />
     <child link="camera_base" />
   </joint>
   <link name="camera">
     <inertial>
-      <origin xyz="-0.0109467295615343 -0.00025332024893314 0.000333522154238597" rpy="0 0 0" />
-      <mass value="0.0482361371130408" />
-      <inertia ixx="5.97804649866973E-05" ixy="0" ixz="0" iyy="5.8e-05" iyz="0" izz="5.92932584785117E-05" />
+      <origin xyz="-0.00050000000000007 -6.93889390390723E-18 2.22044604925031E-16" rpy="0 0 0" />
+      <mass value="0.0" />
+      <inertia
+        ixx="0.0" ixy="0.0" ixz="0.0"
+        iyy="0.0" iyz="0.0" izz="0.0" />
     </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s63/meshes/head_camera_depth.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
   </link>
   <joint name="camera" type="fixed">
     <origin xyz="0.011715 0.0475 0.014311" rpy="0 0 0" />
@@ -1352,14 +1365,14 @@
         xyz="0 0 0"
         rpy="0 0 0" />
       <mass
-        value="0.001" />
+        value="0.0" />
       <inertia
-        ixx="0.00001"
+        ixx="0.0"
         ixy="0.0"
         ixz="0.0"
-        iyy="0.00001"
+        iyy="0.0"
         iyz="0.0"
-        izz="0.00001" />
+        izz="0.0" />
     </inertial>
     <visual>
       <origin
@@ -1380,7 +1393,7 @@
     name="radar"
     type="fixed">
     <origin
-      xyz="0 0 0.059701"
+      xyz="0 0 -0.078453"
       rpy="0 0 0" />
     <parent
       link="zhead_1_link" />
