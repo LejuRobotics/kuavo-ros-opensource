@@ -169,7 +169,7 @@
         </body>
       </body>
       <body name="waist_yaw" pos="0 0 0.111">
-        <inertial pos="-0.00349912 -0.00093618 0.17379544" quat="-0.000866044 -0.00655563 -0.0060153 0.99996" mass="19.97539" diaginertia="0.345781 0.268793 0.210969"/>
+        <inertial pos="0.05349912 -0.00093618 0.17379544" quat="-0.000866044 -0.00655563 -0.0060153 0.99996" mass="19.97539" diaginertia="0.345781 0.268793 0.210969"/>
         <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" range="-3.14159 3.14159" actuatorfrcrange="-102 102" damping="0.02"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_yaw"/>
         <!-- waist_yaw碰撞体 -->
