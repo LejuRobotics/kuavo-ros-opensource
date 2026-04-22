@@ -13,6 +13,11 @@
 - 实时 AprilTag 检测和位置反馈
 - 成功检测后自动停止搜索
 
+### 运行问题解决
+
+在运行中我们可能遇到sdk安装与msgs相关问题，详细解决方案如下：
+[问题解决](./sdk与msgs常见问题.md)
+
 ## 配置参数
 
 ```python
@@ -37,8 +42,8 @@ sudo vim /opt/ros/noetic/share/apriltag_ros/config/tags.yaml
 
 - **Gazebo 仿真**：使用 `load_kuavo_gazebo_sim_wheel.launch`
 ```bash
-cd ~/kuavo_ros_opensouece
-export ROBOT_VERSION=60  # 或者61,根据底盘选择版本
+cd ~/kuavo-ros-opensource
+sudo su
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_gazebo_sim_wheel.launch
 ```
@@ -47,8 +52,8 @@ roslaunch humanoid_controllers load_kuavo_gazebo_sim_wheel.launch
 
 - **真实样机**：使用 `load_kuavo_real_wheel.launch`
 ```bash
-cd ~/kuavo_ros_opensouece
-export ROBOT_VERSION=60
+cd ~/kuavo-ros-opensource
+sudo su
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_real_wheel.launch
 ```
@@ -59,8 +64,8 @@ roslaunch humanoid_controllers load_kuavo_real_wheel.launch
 
 仅在需要识别tag时使用：
 ```bash
-cd ~/kuavo_ros_opensouece
-export ROBOT_VERSION=60
+cd ~/kuavo-ros-opensource
+sudo su
 source devel/setup.bash
 rosrun ar_control ar_control_node.py
 ```
@@ -91,7 +96,8 @@ roslaunch dynamic_biped apriltag.launch
 
 在另一个终端启动（建议先 cd 到仓库根目录并 source 环境）：
 ```bash
-cd ~/kuavo_ros_opensouece
+cd ~/kuavo-ros-opensource
+sudo su
 source devel/setup.bash
 cd src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box
 python3 case_wheel_test_head.py

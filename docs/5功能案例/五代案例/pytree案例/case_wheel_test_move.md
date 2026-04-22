@@ -13,9 +13,14 @@
 - 可使用真实或模拟的 AprilTag 数据
 - 自动路径规划和执行
 
+### 运行问题解决
+
+在运行中我们可能遇到sdk安装与msgs相关问题，详细解决方案如下：
+[问题解决](./sdk与msgs常见问题.md)
+
 ## 启动说明
 
-轮臂跑 PyTree 前，通常需要先启动两类程序（写法/顺序参考"原子技能"类文档）：
+轮臂跑 PyTree 前，通常需要先启动两类程序：
 
 ### 准备
 
@@ -31,24 +36,24 @@ sudo vim /opt/ros/noetic/share/apriltag_ros/config/tags.yaml
 
 - **Gazebo 仿真**：使用 `load_kuavo_gazebo_sim_wheel.launch`
 ```bash
-cd ~/kuavo_ros_opensouece
-export ROBOT_VERSION=60  # 或者61,根据底盘选择版本
+cd ~/kuavo-ros-opensource
+sudo su
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_gazebo_sim_wheel.launch
 ```
 
 - **MuJoCo 仿真**：使用 `load_kuavo_mujoco_sim_wheel.launch`
 ```bash
-cd ~/kuavo_ros_opensouece
-export ROBOT_VERSION=60
+cd ~/kuavo-ros-opensource
+sudo su
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_mujoco_sim_wheel.launch
 ```
 
 - **真实样机**：使用 `load_kuavo_real_wheel.launch`
 ```bash
-cd ~/kuavo_ros_opensouece
-export ROBOT_VERSION=60
+cd ~/kuavo-ros-opensource
+sudo su
 source devel/setup.bash
 roslaunch humanoid_controllers load_kuavo_real_wheel.launch
 ```
@@ -70,7 +75,8 @@ roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
 
 在另一个终端启动（建议先 cd 到仓库根目录并 source 环境）：
 ```bash
-cd ~/kuavo_ros_opensouece
+cd ~/kuavo-ros-opensource
+sudo su
 source devel/setup.bash
 cd src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box
 python3 case_wheel_test_move.py
