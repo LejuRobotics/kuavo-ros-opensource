@@ -1211,7 +1211,10 @@ namespace ocs2
                 return;
             }
 
-            if (joystick_data_.left_trigger > 0.5)  // 腰部控制
+            const bool legacy_torso_toggle_modifier =
+                joystick_data_.left_first_button_touched && joystick_data_.left_second_button_touched;
+
+            if (legacy_torso_toggle_modifier)  // 旧轮臂VR：左手XY触摸 + 右手B切换腰部控制
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)
                 {

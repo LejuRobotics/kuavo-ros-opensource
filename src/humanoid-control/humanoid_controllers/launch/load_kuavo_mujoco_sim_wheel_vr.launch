@@ -27,8 +27,6 @@
         <arg name="use_external_mpc" value="true"/>
     </include>
 
-    <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
-
     <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
       <arg name="control_torso" value="$(arg control_torso)"/>
       <arg name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)"/>
