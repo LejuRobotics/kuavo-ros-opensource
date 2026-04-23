@@ -28,6 +28,7 @@
 
     <arg name="use_joystick"       default="true"/>
     <arg name="joystick_type"      default="bt2"/>
+    <arg name="sim_input_mode"     default="keyboard"/>
 
     <param name="robot_type"      value="$(arg robot_type)"/>
     <param name="wbc_frequency"     value="$(arg wbc_frequency)"/>
@@ -87,6 +88,7 @@
       <group if="$(eval arg('joystick_type') == 'sim')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
+          <arg name="sim_input_mode" value="$(arg sim_input_mode)"/>
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
