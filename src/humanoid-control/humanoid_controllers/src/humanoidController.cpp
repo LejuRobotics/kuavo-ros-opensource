@@ -2330,7 +2330,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     bool is_fall_stand_controller_active = current_controller_type == RLControllerType::FALL_STAND_CONTROLLER;
     if (is_rl_controller_)// 针对倒地起身控制器这种可以主动退出的控制器
     {
-      if (current_controller_ptr_->isReadyToExit())
+      if (current_controller_ptr_->requestToExit())
       {
         if(current_controller_type==RLControllerType::DANCE_CONTROLLER)
         {

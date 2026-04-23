@@ -9,6 +9,7 @@
 import copy
 import rospy
 from std_srvs.srv import Trigger, TriggerRequest
+from kuavo_msgs.srv import SetString, SetStringRequest
 from kuavo_humanoid_sdk.interfaces.Controller import (
     ControllerListInfo,
     ControllerResult,
@@ -266,22 +267,25 @@ class Controller:
             SDKLogger.error(f"Failed to switch to VMP controller: {e}")
         return ControllerResult(success=False, message="Service call failed")
 
-    def switch_to_dance_controller(self) -> ControllerResult:
-        """切换到舞蹈控制器。
+    def switch_to_dance_controller(self, data: str = "") -> ControllerResult:
+        """切换到舞蹈控制器（kuavo_msgs/SetString，与节点内 switchDanceControllerByStringCallback 一致）。
 
-        舞蹈控制器用于执行舞蹈动作。
+        - data 为空：切换到配置中舞蹈列表的第一项
+        - data 为 ``#0``、``#1``：按在 get_dance_controller_list 中的下标切换
+        - 否则：按已注册的舞蹈控制器名称切换
+
+        Args:
+            data: 请求中 ``data`` 字段，默认 ``""`` 表示第一个舞蹈。
 
         Returns:
-            ControllerResult: 操作结果，包含：
-                - success (bool): 操作是否成功
-                - message (str): 返回消息
+            ControllerResult: 操作结果
         """
         service_name = '/humanoid_controller/switch_to_dance_controller'
         try:
             rospy.wait_for_service(service_name, timeout=2.0)
-            switch_to_dance_srv = rospy.ServiceProxy(service_name, Trigger)
-
-            req = TriggerRequest()
+            switch_to_dance_srv = rospy.ServiceProxy(service_name, SetString)
+            req = SetStringRequest()
+            req.data = data
             resp = switch_to_dance_srv(req)
 
             if not resp.success:

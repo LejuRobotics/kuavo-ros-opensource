@@ -108,11 +108,12 @@ Kuavo 机器人控制器管理类，用于获取和查询机器人控制器信�
 
 
 
-#### switch_to_dance_controller()
-切换到舞蹈控制器。
+#### switch_to_dance_controller(data: str = "")
+切换舞蹈控制器。服务为 ``/humanoid_controller/switch_to_dance_controller``（``kuavo_msgs/SetString``）：
 
-舞蹈控制器用于执行舞蹈动作。
-
+* ``data == ""``：配置中舞蹈列表的第一项
+* ``"#0"``、``"#1"`` 等：按已加载舞蹈列表下标
+* 否则：按在 ``rl_controllers.yaml`` 中注册的控制器名称
 
 * **Returns**
 

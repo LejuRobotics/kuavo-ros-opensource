@@ -109,19 +109,6 @@ class KuavoRobotController:
         """
         return self._controller.switch_to_vmp_controller()
 
-    def switch_to_dance_controller(self) -> ControllerResult:
-        """切换到舞蹈控制器。
-
-        舞蹈控制器用于执行舞蹈动作。
-
-        支持的机器人型号：
-            - Kuavo 5（机器人版本 kuavo_v52、kuavo_v54）
-            - Roban 2.2（机器人版本 kuavo_v17）
-            - Roban（机器人版本 kuavo_v14）
-
-        Returns:
-            ControllerResult: 操作结果，包含：
-                - success (bool): 操作是否成功
-                - message (str): 返回消息
-        """
-        return self._controller.switch_to_dance_controller()
+    def switch_to_dance_controller(self, data: str = "") -> ControllerResult:
+        """切换到舞蹈控制器；``data`` 同节点侧 SetString（空=首项，``#0``/``#1``/名称）。"""
+        return self._controller.switch_to_dance_controller(data)

@@ -32,10 +32,11 @@ namespace humanoid_controller
     void resume() override;
 
     /**
-     * @brief 检查控制器是否准备好退出
-     * @return 如果姿态角>60度（倒地），返回true，请求退出控制
+     * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致）
+     * 与 Amp/Depth 行走类似：当机体姿态超过跌倒阈值时返回 true（具体以 .cpp 实现为准）。
+     * @return 判为需退出行走模式时为 true
      */
-    bool isReadyToExit() const override;
+    bool requestToExit() const override;
 
   protected:
     // 主循环：从 RLControllerBase::update 调用

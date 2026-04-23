@@ -61,10 +61,11 @@ namespace humanoid_controller
     void resume() override;
 
     /**
-     * @brief 检查控制器是否准备好退出
-     * @return 如果控制器已完成任务并准备好退出，返回true
+     * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致）
+     * 当前实现调用基类默认，恒为 false，不主动请求由上层自动退出；若需运动结束自动切出，可在此扩展条件。
+     * @return 恒为 false
      */
-    bool isReadyToExit() const override;
+    bool requestToExit() const override;
 
   protected:
     /**

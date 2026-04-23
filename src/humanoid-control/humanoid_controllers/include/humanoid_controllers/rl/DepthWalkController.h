@@ -34,16 +34,18 @@ namespace humanoid_controller
     void resume() override;
 
     /**
-     * @brief 检查控制器是否准备好退出
-     * @return 如果姿态角>60度（倒地），返回true，请求退出控制
+     * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致）
+     * 当估计的 roll/pitch 绝对值超过约 60°（判为跌倒）时返回 true，见实现与 AmpWalk 相同逻辑。
+     * @return 判为跌倒时为 true
      */
-    bool isReadyToExit() const override;
+    bool requestToExit() const override;
 
     /**
-     * @brief 检查控制器当前是否处于 stance（站立）模式
-     * @return 如果 cmdStance_ == 1 返回 true，否则返回 false
+     * @brief 是否允许从本控制器切换走（与 RLControllerBase 一致）
+     * 当步态接收器当前指令为 stance 站立（cmdStance_ ≥ 0.5）时返回 true，逻辑与 AmpWalk 一致；无接收器时默认 true。
+     * @return 允许在站立指令下切出时为 true
      */
-    bool isInStanceMode() const override;
+    bool isAllowToExit() const override;
 
     /**
      * @brief 更新速度限制到rosparam（重写基类方法）

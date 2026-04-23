@@ -3,11 +3,11 @@
 本文档整理了RL控制框架中提供的所有ROS服务接口和监控话题，包括控制器管理、控制器状态查询、以及特定控制器的功能服务和监控调试话题。
 - 其他关联文档：
   - [倒地起身说明](../src/humanoid-control/humanoid_controllers/docs/倒地起身操作说明.md)
-  - [RLController多控制器框架说明（初期版本）](../src/humanoid-control/humanoid_controllers/docs/RLController多控制器框架说明.md)
+  - [RLController 多控制器框架说明](../src/humanoid-control/humanoid_controllers/docs/RLController多控制器框架说明.md)（架构、类关系、多舞蹈与行走列表差异）
 
 ## 目录
 
-1. [控制器管理服务（RLControllerManager）](#1-控制器管理服务rlcontrollermanager) - 4个服务
+1. [控制器管理服务（RLControllerManager）](#1-控制器管理服务rlcontrollermanager) — 行走列表/循环/倒地状态及**多舞蹈**接口
 2. [控制器基础服务（RLControllerBase）](#2-控制器基础服务rlcontrollerbase) - 5个服务
 3. [倒地起身控制器服务（FallStandController）](#3-倒地起身控制器服务fallstandcontroller) - 1个服务
 4. [主控制器服务（humanoidController）](#4-主控制器服务humanoidcontroller) - 5个服务
@@ -37,7 +37,7 @@
 
 **使用说明**:
 - 只能切换到已加载且启用的控制器
-- 控制器必须在 `walk_controllers_` 列表中
+- 控制器必须在 `walk_controllers_` 列表中（**不包含**舞蹈控制器；舞蹈请使用 **1.5 节** `switch_to_dance_controller`）
 - 从RL切换到MPC时，如果RL控制器不在stance状态，切换会被阻止
 - 从MPC切换到RL时，如果MPC不在stance状态，切换会被阻止（倒地起身控制器除外）
 
@@ -142,9 +142,68 @@ rosservice call /humanoid_controller/set_fall_down_state "data: false"
 
 ---
 
+### 1.5 `/humanoid_controller/switch_to_dance_controller`
+
+**服务类型**: `kuavo_msgs/SetString`
+
+**功能**: 切换到指定舞蹈 RL 控制器实例。逻辑与 `RLControllerManager::switchDanceControllerByStringCallback` 一致（多支舞在 `rl_controllers.yaml` 中配置多条 `type: DANCE_CONTROLLER`）。
+
+**请求参数**:
+- `data` (string)，语义如下：
+  - **空字符串 `""`**：切换到舞蹈列表中的**第一项**（与旧版仅支持单舞时的默认行为一致）
+  - **`#` + 非负整数**（如 `#0`、`#1`）：按 `get_dance_controller_list` 返回的 `data[]` **下标**切换
+  - **其他字符串**：按已注册的**控制器名称**切换（须为 `get_dance_controller_list` 中的一项，例如 `dance_controller`）
+
+**响应参数**:
+- `success` (bool): 是否切换成功
+- `message` (string): 说明信息或失败原因
+
+**使用说明**:
+- 需在对应版本 `rl_controllers.yaml` 中启用至少一条 `DANCE_CONTROLLER`
+- 从 MPC 切到舞蹈时，仍受「MPC 须在 stance」等与 `switchController` 相同的保护；**不同舞蹈实例之间**允许直接切换（由各自 `resume()` 重置轨迹）
+- 从舞蹈切回 MPC/行走时，若舞蹈侧 `requestToExit()` 为 false，可能被 mimic 保护拦截（与倒地起身类似逻辑，详见框架说明文档）
+
+**示例**:
+```bash
+# 切换到 yaml 中第一个 DANCE_CONTROLLER
+rosservice call /humanoid_controller/switch_to_dance_controller "data: ''"
+
+# 按列表下标（第二个舞蹈）
+rosservice call /humanoid_controller/switch_to_dance_controller "data: '#1'"
+
+# 按控制器名称
+rosservice call /humanoid_controller/switch_to_dance_controller "data: 'dance_controller'"
+```
+
+---
+
+### 1.6 `/humanoid_controller/get_dance_controller_list`
+
+**服务类型**: `kuavo_msgs/GetStringList`
+
+**功能**: 返回当前已加载、且类型为 `DANCE_CONTROLLER` 的控制器 **name** 列表，顺序与 `rl_controllers.yaml` 中声明顺序一致（内部为 `dance_controllers_`）。
+
+**请求参数**: 无（`GetStringList` 请求体为空）
+
+**响应参数**:
+- `data` (string[]): 舞蹈控制器名称列表
+- `success` (bool): 查询是否成功
+- `message` (string): 简要说明（如舞蹈数量）
+
+**使用说明**:
+- 与 `get_controller_list` 互补：后者只返回**行走**列表（含 `mpc`），本服务只列舞蹈项
+- 可与 1.5 配合：先 `get_dance_controller_list` 再按名或 `#索引` 调用 `switch_to_dance_controller`
+
+**示例**:
+```bash
+rosservice call /humanoid_controller/get_dance_controller_list
+```
+
+---
+
 ## 2. 控制器基础服务（RLControllerBase）
 
-这些服务由所有RL控制器（包括 `AmpWalkController` 和 `FallStandController`）继承提供。服务命名空间为 `/humanoid_controllers/{controller_name}`，其中 `{controller_name}` 是控制器的名称（如 `amp_controller`、`fall_stand_controller` 等）。
+这些服务由所有 RL 控制器（如 `AmpWalkController`、`FallStandController`、`DanceController` 等）继承提供。服务命名空间为 `/humanoid_controllers/{controller_name}`，其中 `{controller_name}` 是控制器的名称（如 `amp_controller`、`fall_stand_controller`、`dance_controller` 等）。
 
 ### 2.1 `/humanoid_controllers/{controller_name}/reload`
 
@@ -419,6 +478,22 @@ rosservice call /humanoid_controllers/amp_controller/isActive
 rosservice call /humanoid_controller/switch_controller "controller_name: 'mpc'"
 ```
 
+### 多舞蹈切换流程
+
+```bash
+# 1. 查看已加载的舞蹈控制器名称（顺序与 rl_controllers.yaml 一致）
+rosservice call /humanoid_controller/get_dance_controller_list
+
+# 2. 进入第一个舞蹈（空 data）
+rosservice call /humanoid_controller/switch_to_dance_controller "data: ''"
+
+# 3. 切换到列表中的第二个舞蹈（若存在）
+rosservice call /humanoid_controller/switch_to_dance_controller "data: '#1'"
+
+# 4. 从舞蹈回到行走：须先满足 stance 等条件，再通过 switch_controller 切 amp 等
+rosservice call /humanoid_controller/switch_controller "controller_name: 'amp_controller'"
+```
+
 ### 倒地起身流程
 
 ```bash
@@ -440,6 +515,7 @@ rosservice call /humanoid_controller/set_fall_down_state "data: false"
    - 从RL切换到MPC时，RL控制器必须在stance状态
    - 从MPC切换到RL时，MPC必须在stance状态（倒地起身控制器除外）
    - 倒地起身控制器在未完成起身任务前，不允许切换到其他控制器
+   - **舞蹈控制器**：`switch_controller` 的行走列表**不包含**舞蹈；请使用 `switch_to_dance_controller`（SetString）。**舞蹈 A → 舞蹈 B** 允许直接切换；**舞蹈 → MPC/行走** 仍受上述 stance / `requestToExit` 等限制
 
 2. **控制器状态**:
    - `INITIALIZING`: 控制器正在初始化，不能执行操作
@@ -448,7 +524,7 @@ rosservice call /humanoid_controller/set_fall_down_state "data: false"
    - `STOPPED`: 控制器已停止，推理线程已退出
 
 3. **服务命名空间**:
-   - 控制器管理服务：`/humanoid_controller/*`（包括控制器切换、查询、倒地状态设置）
+   - 控制器管理服务：`/humanoid_controller/*`（包括行走切换、行走列表、舞蹈切换/舞蹈列表、倒地状态设置等）
    - 控制器基础服务：`/humanoid_controllers/{controller_name}/*`（每个RL控制器的独立服务）
    - 倒地起身服务：`/humanoid_controller/trigger_fall_stand_up`
 

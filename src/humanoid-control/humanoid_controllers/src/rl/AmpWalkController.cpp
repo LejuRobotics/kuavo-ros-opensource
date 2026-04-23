@@ -423,7 +423,7 @@ namespace humanoid_controller
     reset();
   }
 
-  bool AmpWalkController::isReadyToExit() const
+  bool AmpWalkController::requestToExit() const
   {
     if (!sensor_data_updated_)
     {
@@ -461,7 +461,7 @@ namespace humanoid_controller
     return is_fallen;
   }
 
-  bool AmpWalkController::isInStanceMode() const
+  bool AmpWalkController::isAllowToExit() const
   {
     if (!gait_receiver_)
     {

@@ -460,7 +460,7 @@ namespace humanoid_controller
     reset();
   }
 
-  bool DepthWalkController::isReadyToExit() const
+  bool DepthWalkController::requestToExit() const
   {
     if (!sensor_data_updated_)
     {
@@ -498,7 +498,7 @@ namespace humanoid_controller
     return is_fallen;
   }
 
-  bool DepthWalkController::isInStanceMode() const
+  bool DepthWalkController::isAllowToExit() const
   {
     if (!gait_receiver_)
     {
