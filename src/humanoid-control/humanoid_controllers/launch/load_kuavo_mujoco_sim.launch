@@ -29,6 +29,7 @@
     <arg name="play_back"          default="false"/>
     <arg name="real"               default="false"/>
     <arg name="joystick_type"      default="sim"/>
+    <arg name="sim_input_mode"     default="keyboard"/>
     <arg name="arm_move_spd"      default="1.2"/>
     <arg name="start_way"          default="manual"/>
     <arg name="use_estimator_contact"   default="false"/>
@@ -148,6 +149,7 @@
       <group if="$(eval arg('joystick_type') == 'sim')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
+          <arg name="sim_input_mode" value="$(arg sim_input_mode)"/>
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">

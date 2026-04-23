@@ -24,6 +24,7 @@
     <arg name="use_joint_filter"   default="false"/>
     <arg name="wbc_only"           default="false"/>
     <arg name="joystick_type"      default="bt2"/>
+    <arg name="sim_input_mode"     default="keyboard"/>
     <!-- The reference related config file of the robot -->
     <arg name="start_way"         default="manual"/>
     <arg name="use_estimator_contact"   default="false"/>
@@ -230,6 +231,7 @@
       <group if="$(eval arg('joystick_type') == 'sim')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
+          <arg name="sim_input_mode" value="$(arg sim_input_mode)"/>
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
