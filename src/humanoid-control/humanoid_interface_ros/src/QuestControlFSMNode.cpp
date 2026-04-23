@@ -1035,7 +1035,7 @@ namespace ocs2
                         }
 
                     }
-                    else
+                    else if (torso_control_enabled_)  // 防止VR未启用躯干控制时依然发最后一帧躯干位置
                     {
                         // 关闭腰部控制模式
                         torso_control_enabled_ = false;
@@ -1215,7 +1215,7 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)
                 {
-                    if (!torso_control_enabled_)
+                    if (!torso_control_enabled_ && control_torso_)
                     {
                         torso_control_enabled_ = true;
                         torso_pitch_zero_= current_head_body_pose_.body_pitch;
@@ -1241,7 +1241,7 @@ namespace ocs2
                             callWheelMpcControlMode(3);
                         }
                     }
-                    else
+                    else if (torso_control_enabled_) // 防止VR未启用躯干控制时依然发最后一帧躯干位置
                     {
                         torso_control_enabled_ = false;
                         std_msgs::Bool whole_torso_ctrl_msg;
