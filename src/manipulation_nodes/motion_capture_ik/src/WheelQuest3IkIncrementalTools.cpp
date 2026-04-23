@@ -1469,6 +1469,8 @@ void WheelQuest3IkIncrementalROS::publishAuxiliaryStates() {
 void WheelQuest3IkIncrementalROS::publishJointStates() {
   Eigen::VectorXd finalArmAngles;
   Eigen::VectorXd finalLbAngles;
+  const bool leftGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
+  const bool rightGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isRightGrip() : false;
   {
     std::lock_guard<std::mutex> lock(ikResultMutex_);
     if (!hasValidIkSolution_ || (latestIkSolution_.size() != drakeJointStateSize_)) {
@@ -1507,8 +1509,6 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
       dq_(i) = dq_(i) < -18.0 ? -18.0 : dq_(i);
     }
 
-    const bool leftGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
-    const bool rightGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isRightGrip() : false;
     if (leftGripPressed) {
       ros::Time currentTime = ros::Time::now();
       ros::Time startTime;
@@ -1645,7 +1645,8 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     if (hasLatestLbTargetAngles_) {
       latestLbTargetAngles_ = finalLbAngles;
     }
-    lbLegTrajPublishEnabled_ = hasLatestLbTargetAngles_ && chestIncrementalUpdateEnabled_;
+    lbLegTrajPublishEnabled_ =
+        hasLatestLbTargetAngles_ && chestIncrementalUpdateEnabled_ && (leftGripPressed || rightGripPressed);
   }
 }
 
