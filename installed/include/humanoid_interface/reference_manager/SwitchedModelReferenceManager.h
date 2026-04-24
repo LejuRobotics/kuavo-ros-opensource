@@ -358,6 +358,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::Publisher armTargetCommandedPublisher_;
   // Publisher for arm err used in mode-switch checks
   ros::Publisher armErrPublisher_;
+  ros::Publisher newArmStateFullPublisher_;  // 发布new_arm_state_full数据
   ros::Publisher isCustomGaitPublisher_;
   ros::Publisher singleStepModePublisher_;
   ros::Publisher currentFootPosesPublisher_;

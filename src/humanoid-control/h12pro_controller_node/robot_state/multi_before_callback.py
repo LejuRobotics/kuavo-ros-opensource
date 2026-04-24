@@ -5,7 +5,7 @@ import collections
 from rich import console
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
-from kuavo_msgs.srv import changeArmCtrlMode, switchToNextController, getControllerList, switchController, SetString
+from kuavo_msgs.srv import changeArmCtrlMode, switchToNextController, getControllerList, switchController, SetString, SetStringRequest
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
 import time
 import signal
@@ -1078,10 +1078,13 @@ def call_switch_to_vmp_controller_service():
         rospy.logerr(f"[ControllerSwitch] Service '{service_name}' not available: {e}")
         return False
 
-def call_switch_to_dance_controller_service():
-    """调用切换到Dance控制器的专用服务
-    使用服务接口：/humanoid_controller/switch_to_dance_controller (std_srvs/Trigger)
+def call_switch_to_dance_controller_service(dance_data=""):
+    """调用切换到 Dance 控制器的专用服务
+    使用 /humanoid_controller/switch_to_dance_controller (kuavo_msgs/SetString)，
+    与 RLControllerManager.switchDanceControllerByStringCallback 一致：
+    空字符串=舞蹈列表首项，"#0"/"#1"=下标，否则为控制器名称。
 
+    :param dance_data: 请求 data 字段，默认 "" 为第一个舞蹈
     :return: bool, 服务调用结果
     """
     service_name = "/humanoid_controller/switch_to_dance_controller"
@@ -1089,11 +1092,13 @@ def call_switch_to_dance_controller_service():
         current_controller_before = get_current_controller_name()
         rospy.loginfo(
             f"[ControllerSwitch] Request switch via '{service_name}': "
-            f"from '{current_controller_before}' to 'dance_controller'"
+            f"from '{current_controller_before}' (data={repr(dance_data)})"
         )
         rospy.wait_for_service(service_name, timeout=1.0)
-        switch_client = rospy.ServiceProxy(service_name, Trigger)
-        response = switch_client()
+        switch_client = rospy.ServiceProxy(service_name, SetString)
+        req = SetStringRequest()
+        req.data = dance_data
+        response = switch_client(req)
         if response.success:
             current_controller_after = get_current_controller_name()
             rospy.loginfo(
@@ -1482,10 +1487,7 @@ def exit_vmp_controller_callback(event):
         return
 
 def dance_controller_callback(event):
-    """进入Dance控制模式回调函数
-    从 amp_controller 切换到 dance_controller
-    使用服务接口：/humanoid_controller/switch_to_dance_controller
-    """
+    """进入Dance控制模式：/humanoid_controller/switch_to_dance_controller (SetString, 默认首项舞蹈)"""
     source = event.kwargs.get("source")
     trigger = event.kwargs.get("trigger")
 

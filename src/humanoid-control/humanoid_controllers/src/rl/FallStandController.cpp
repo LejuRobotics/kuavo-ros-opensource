@@ -479,9 +479,14 @@ namespace humanoid_controller
     reset();
   }
 
-  bool FallStandController::isReadyToExit() const
+  bool FallStandController::requestToExit() const
   {
     // 当控制器处于 STANDING 状态时，表示已完成起身任务，可以退出
+    return fall_stand_state_ == FallStandState::STANDING;
+  }
+
+  bool FallStandController::isAllowToExit() const
+  {
     return fall_stand_state_ == FallStandState::STANDING;
   }
 

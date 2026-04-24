@@ -380,9 +380,9 @@ void VMPController::resume()
 }
 
 
-bool VMPController::isReadyToExit() const
+bool VMPController::requestToExit() const
 {
-  return RLControllerBase::isReadyToExit();
+  return RLControllerBase::requestToExit();
 }
 
 bool VMPController::updateImpl(const ros::Time& time,

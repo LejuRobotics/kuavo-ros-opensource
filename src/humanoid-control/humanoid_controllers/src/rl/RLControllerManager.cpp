@@ -15,6 +15,7 @@
 #include <ocs2_core/misc/LoadData.h>
 #include "kuavo_msgs/changeArmCtrlMode.h"
 #include <thread>
+#include <cctype>
 
 namespace humanoid_controller
 {
@@ -133,7 +134,7 @@ namespace humanoid_controller
       auto* current_controller = controllers_[current_controller_name_].get();
       bool current_is_fall_down_controller = current_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER;
       bool current_is_dance_controller = current_controller->getType() == RLControllerType::DANCE_CONTROLLER;
-      if (!current_controller->isReadyToExit() && (current_is_fall_down_controller || current_is_dance_controller))
+      if (!current_controller->isAllowToExit() && (current_is_fall_down_controller))
       {
         ROS_WARN("[RLControllerManager] Current controller is mimic controller, switch to Next controller blocked!");
         return false;
@@ -147,9 +148,9 @@ namespace humanoid_controller
       if (!current_controller_name_.empty())
       {
         auto* current_controller = controllers_[current_controller_name_].get();
-        if (current_controller && !current_controller->isInStanceMode())
+        if (current_controller && !current_controller->isAllowToExit())
         {
-          ROS_WARN("[RLControllerManager] RL not in stance, switch to MPC blocked! Switch to stance first.");
+          ROS_WARN("[RLControllerManager] RL not in isAllowToExit , switch to MPC blocked! Switch to stance first.");
           return false;
         }
 
@@ -602,7 +603,9 @@ namespace humanoid_controller
     switch_to_vmp_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_vmp_controller",
                                                         &RLControllerManager::switchToVMPControllerCallback, this);
     switch_to_dance_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_dance_controller",
-                                                          &RLControllerManager::switchToDanceControllerCallback, this);
+                                                        &RLControllerManager::switchDanceControllerByStringCallback, this);
+    get_dance_controller_list_srv_ = nh.advertiseService("/humanoid_controller/get_dance_controller_list",
+                                                       &RLControllerManager::getDanceControllerListCallback, this);
     controller_switch_event_pub_ = nh.advertise<kuavo_msgs::ControllerSwitchEvent>(
         "/humanoid_controller/controller_switch_event", 1, true);
 
@@ -631,6 +634,62 @@ namespace humanoid_controller
     return walk_controllers_;
   }
 
+  std::vector<std::string> RLControllerManager::getDanceControllerList()
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return dance_controllers_;
+  }
+
+  bool RLControllerManager::switchToDanceControllerByName(const std::string& name)
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (name.empty())
+    {
+      ROS_WARN("[RLControllerManager] switchToDanceControllerByName: empty name");
+      return false;
+    }
+    if (std::find(dance_controllers_.begin(), dance_controllers_.end(), name) == dance_controllers_.end())
+    {
+      ROS_WARN("[RLControllerManager] '%s' is not a registered dance controller", name.c_str());
+      return false;
+    }
+    return switchController(name);
+  }
+
+  bool RLControllerManager::switchToDanceControllerByIndex(size_t index)
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (index >= dance_controllers_.size())
+    {
+      ROS_WARN("[RLControllerManager] switchToDanceControllerByIndex: index %zu out of range (size %zu)", index,
+               dance_controllers_.size());
+      return false;
+    }
+    return switchController(dance_controllers_[index]);
+  }
+
+  int RLControllerManager::getCurrentDanceControllerIndex() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (current_controller_name_.empty())
+    {
+      return -1;
+    }
+    auto it = controllers_.find(current_controller_name_);
+    if (it == controllers_.end() || it->second->getType() != RLControllerType::DANCE_CONTROLLER)
+    {
+      return -1;
+    }
+    for (size_t i = 0; i < dance_controllers_.size(); ++i)
+    {
+      if (dance_controllers_[i] == current_controller_name_)
+      {
+        return static_cast<int>(i);
+      }
+    }
+    return -1;
+  }
+
   void RLControllerManager::updateControllerListsByType()
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -638,6 +697,7 @@ namespace humanoid_controller
     // 清空按类型分组的列表
     controllers_by_type_.clear();
     walk_controllers_.clear();
+    dance_controllers_.clear();
     
       // MPC控制器始终在BASE_CONTROLLER列表的索引0
       walk_controllers_.push_back("mpc");
@@ -659,6 +719,10 @@ namespace humanoid_controller
       if (type == RLControllerType::AMP_CONTROLLER || type == RLControllerType::DEPTH_LOCO_CONTROLLER)
       {
         walk_controllers_.push_back(name);
+      }
+      if (type == RLControllerType::DANCE_CONTROLLER)
+      {
+        dance_controllers_.push_back(name);
       }
 
     }
@@ -1099,47 +1163,70 @@ namespace humanoid_controller
   }
   
   
-  bool RLControllerManager::switchToDanceControllerCallback(std_srvs::Trigger::Request &req,
-                                                            std_srvs::Trigger::Response &res)
+  bool RLControllerManager::switchDanceControllerByStringCallback(kuavo_msgs::SetString::Request &req,
+                                                                 kuavo_msgs::SetString::Response &res)
   {
-    ROS_INFO("[RLControllerManager] Received switch to Dance controller request");
-
-    // 查找Dance控制器
-    std::string dance_controller_name;
+    const std::string &d = req.data;
+    if (d.empty())
     {
-      std::lock_guard<std::recursive_mutex> lock(mutex_);
-      for (const auto& pair : controllers_)
+      if (!switchToDanceControllerByIndex(0))
       {
-        if (pair.second->getType() == RLControllerType::DANCE_CONTROLLER)
+        res.success = false;
+        res.message = "No dance controller to switch to (list empty or switch failed)";
+        return true;
+      }
+      res.success = true;
+      res.message = "Switched to first dance in list (empty request = index 0)";
+      return true;
+    }
+    if (d[0] == '#')
+    {
+      const std::string idx_str = d.substr(1);
+      if (idx_str.empty())
+      {
+        res.success = false;
+        res.message = "Invalid index, use e.g. #0 or #1";
+        return true;
+      }
+      for (char c : idx_str)
+      {
+        if (!std::isdigit(static_cast<unsigned char>(c)))
         {
-          dance_controller_name = pair.first;
-          break;
+          res.success = false;
+          res.message = "Invalid #index, digits only after #";
+          return true;
         }
       }
-    }
-
-    if (dance_controller_name.empty())
-    {
-      res.success = false;
-      res.message = "Dance controller not found. Please check if Dance controller is enabled in rl_controllers.yaml";
-      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+      const size_t idx = static_cast<size_t>(std::stoul(idx_str));
+      if (!switchToDanceControllerByIndex(idx))
+      {
+        res.success = false;
+        res.message = "Failed to switch to dance at index " + std::to_string(idx);
+        return true;
+      }
+      res.success = true;
+      res.message = "Switched to dance index " + std::to_string(idx);
       return true;
     }
-
-    // 执行控制器切换
-    bool switch_ok = switchController(dance_controller_name);
-    if (!switch_ok)
+    if (!switchToDanceControllerByName(d))
     {
       res.success = false;
-      res.message = "Failed to switch to Dance controller: " + dance_controller_name;
-      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+      res.message = "Failed to switch to dance name: " + d;
       return true;
     }
-
     res.success = true;
-    res.message = "Successfully switched to Dance controller: " + dance_controller_name;
-    ROS_INFO("[RLControllerManager] %s", res.message.c_str());
+    res.message = "Switched to dance: " + d;
+    return true;
+  }
 
+  bool RLControllerManager::getDanceControllerListCallback(kuavo_msgs::GetStringList::Request &req,
+                                                           kuavo_msgs::GetStringList::Response &res)
+  {
+    (void)req;
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    res.data = dance_controllers_;
+    res.success = true;
+    res.message = "Dance count: " + std::to_string(dance_controllers_.size());
     return true;
   }
 

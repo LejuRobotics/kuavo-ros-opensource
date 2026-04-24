@@ -531,14 +531,13 @@ namespace humanoid_controller
     ROS_INFO("[%s] Controller resumed, waiting for first update to set yaw offset", name_.c_str());
   }
 
-  bool DanceController::isReadyToExit() const
+  bool DanceController::requestToExit() const
   {
-    // DanceController不会自动退出，舞蹈完成后会保持指定帧
+    // 与 RLControllerBase::requestToExit：仅当配置 holdFrameIndex == -2 且轨迹已结束，才向上层请求自动切到 AMP
     if (dance_trajectory_.isFinish() && (dance_trajectory_.hold_frame_index == -2))
     {
         return true;
     }
-    // 需要手动切换到其他控制器
     return false;
   }
   
@@ -550,10 +549,14 @@ namespace humanoid_controller
     return base_check && trajectory_ready;
   }
 
-  bool DanceController::isInStanceMode() const
+  bool DanceController::isAllowToExit() const
   {
-    // Dance控制器在执行动作时不在stance模式
-    return false;
+    // 与 RLControllerBase::isAllowToExit：轨迹未播完不允许切出（如切回 MPC）；播完后允许
+    if (!dance_trajectory_.isFinish())
+    {
+      return false;
+    }
+    return true;
   }
 
   bool DanceController::updateImpl(const ros::Time& time,
@@ -747,9 +750,7 @@ namespace humanoid_controller
   bool DanceController::inference(const Eigen::VectorXd& observation,
                                    Eigen::VectorXd& action)
   {
-    ROS_INFO_THROTTLE(2.0, "[%s] inference() called, obs_size=%ld, networkInputDataRL_size=%ld", 
-                     name_.c_str(), observation.size(), networkInputDataRL_.size());
-    
+
     // 注意：参数observation保留用于接口兼容，但实际使用networkInputDataRL_（与FallStandController一致）
     const int expected_output_length = jointNum_ + jointArmNum_ + waistNum_;
     
@@ -827,7 +828,6 @@ namespace humanoid_controller
   void DanceController::updateObservation(const Eigen::VectorXd& state_est,
                                           const SensorData& sensor_data)
   {
-    ROS_INFO_THROTTLE(2.0, "[%s] updateObservation() called (inference thread)", name_.c_str());
     
     const int numJoints = jointNum_ + jointArmNum_ + waistNum_;
     

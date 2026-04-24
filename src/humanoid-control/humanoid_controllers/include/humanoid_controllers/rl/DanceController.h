@@ -55,7 +55,8 @@ namespace humanoid_controller
       Eigen::VectorXd command(joint_pos.cols() * 2);
       command.head(joint_pos.cols()) = joint_pos.row(step);
       command.tail(joint_vel.cols()) = joint_vel.row(step);
-      std::cout << "Getting command at step " << step <<std::endl;
+      if (!isFinish())
+        std::cout << "Getting command at step " << step <<std::endl;
       return command;
     }
     
@@ -183,11 +184,13 @@ namespace humanoid_controller
     void pause() override;
 
     /**
-     * @brief 检查控制器是否准备好退出
-     * @return 如果舞蹈轨迹执行完成，返回true
+     * @brief 检查控制器是否请求退出（与 RLControllerBase 语义一致）
+     * 为 true 时由 humanoidController 在 update 中触发自动切换。
+     * 本类：当轨迹已播放至末帧且配置中 holdFrameIndex == -2 时返回 true，将自动切到 AMP 行走控制器；否则为 false（需手动切换模式）。
+     * @return 本周期是否请求离开当前舞蹈 RL 模式
      */
-    bool isReadyToExit() const override;
-    
+    bool requestToExit() const override;
+
     /**
      * @brief 检查是否应该执行推理（添加轨迹就绪检查）
      * @return 如果状态为RUNNING且轨迹已加载，返回true
@@ -195,10 +198,12 @@ namespace humanoid_controller
     bool shouldRunInference() const override;
 
     /**
-     * @brief 检查控制器当前是否处于 stance（站立）模式
-     * @return Dance控制器始终返回false（因为在执行动作）
+     * @brief 检查控制器当前是否允许切换（与 RLControllerBase 语义一致）
+     * RLControllerManager 在切回 MPC、部分切换路径中会查询；为 false 时阻止“提前”切出。
+     * 本类：轨迹未播放完成返回 false，播放完成后返回 true。
+     * @return 是否允许从本控制器切换走（含切回 MPC）
      */
-    bool isInStanceMode() const override;
+    bool isAllowToExit() const override;
 
   protected:
     /**

@@ -72,6 +72,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/robotHandPosition.h"
 #include <std_srvs/SetBool.h>
 #include <kuavo_msgs/ExecuteArmAction.h>
+#include <kuavo_msgs/SetString.h>
 #include <humanoid_plan_arm_trajectory/RobotActionState.h>
 
 // 命令执行相关头文件
@@ -466,8 +467,8 @@ namespace ocs2
       trigger_fall_stand_up_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/trigger_fall_stand_up");
       // Fall down state client
       set_fall_down_state_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_controller/set_fall_down_state");
-      // Dance controller trigger client
-      trigger_dance_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/switch_to_dance_controller");
+      // Dance controller: kuavo_msgs/SetString（空 data=列表首项，或 #下标/名称）
+      switch_dance_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetString>("/humanoid_controller/switch_to_dance_controller");
       last_status_check_time_ = ros::Time(0);
 
       // 加载命令配置
@@ -1001,6 +1002,20 @@ namespace ocs2
         return;
       }
 
+      // MPC/RL 切换后短时间锁：只认 BUTTON_RL 的上升沿（行走列表中「下一个」），摇杆及其余按键不响应
+      if (isControllerSwitching())
+      {
+        const int rl_idx = joyButtonMap["BUTTON_RL"];
+        if (rl_idx >= 0 && static_cast<size_t>(rl_idx) < old_joy_msg_.buttons.size() &&
+            static_cast<size_t>(rl_idx) < joy_msg->buttons.size() && !old_joy_msg_.buttons[rl_idx] && joy_msg->buttons[rl_idx])
+        {
+          ROS_INFO("[JoyControl] (controller switch window) BUTTON_RL: switch to next controller");
+          switchToNextController();
+        }
+        joystick_origin_axis_.setZero();
+        old_joy_msg_ = *joy_msg;
+        return;
+      }
 
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
       {
@@ -1279,39 +1294,10 @@ namespace ocs2
         }
       }
       old_joy_msg_ = *joy_msg;
-
-      // 控制器切换阶段，禁用摇杆输入和除了BUTTON_RL外的button
-      if (isControllerSwitching())
-      {
-        joystick_origin_axis_.setZero();
-
-        sensor_msgs::Joy modified_joy_msg = *joy_msg;
-        int button_rl_index = joyButtonMap["BUTTON_RL"];
-        for (size_t i = 0; i < modified_joy_msg.buttons.size(); i++)
-        {
-          if (i != static_cast<size_t>(button_rl_index))
-          {
-            modified_joy_msg.buttons[i] = 0;
-          }
-        }
-        old_joy_msg_ = modified_joy_msg;
-      }
     }
 
     void checkGaitSwitchCommand(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
-      // 控制器切换阶段，只允许BUTTON_RL用于切换控制器，其他按钮禁用
-      if (isControllerSwitching())
-      {
-        // 只检查BUTTON_RL用于切换控制器
-        // if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
-        // {
-        //   ROS_INFO("[JoyControl] switch to next controller");
-        //   switchToNextController();
-        // }
-        return;
-      }
-
       // 有摇杆数据不可以步态切换
       if (
         std::abs(joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]]) > DEAD_ZONE ||
@@ -1663,10 +1649,11 @@ namespace ocs2
       }
       else
       {
-        // 否则切换到dance_controller（通过专门的trigger_dance服务）
-        ROS_INFO("[JoyControl] Switching to DanceController");
-        std_srvs::Trigger srv;
-        if (trigger_dance_client_.call(srv) && srv.response.success)
+        // 否则切到舞蹈列表首项（与空 SetString 语义一致）
+        ROS_INFO("[JoyControl] Switching to DanceController (first in list)");
+        kuavo_msgs::SetString srv;
+        srv.request.data = "";
+        if (switch_dance_client_.call(srv) && srv.response.success)
         {
           ROS_INFO("[JoyControl] Successfully switched to DanceController: %s", srv.response.message.c_str());
         }
@@ -2021,8 +2008,8 @@ namespace ocs2
     ros::ServiceClient trigger_fall_stand_up_client_;
     // Fall down state service (SetBool)
     ros::ServiceClient set_fall_down_state_client_;
-    // Dance controller trigger service
-    ros::ServiceClient trigger_dance_client_;
+    // Dance controller (SetString, 同 RLControllerManager::switchDanceControllerByStringCallback)
+    ros::ServiceClient switch_dance_client_;
     bool robot_launched_{false};
     ros::Time last_status_check_time_;
     bool real_{false};

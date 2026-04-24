@@ -15,6 +15,7 @@ import time
 import numpy as np
 import copy
 import rospy
+from std_msgs.msg import Bool
 from kuavo_msgs.srv import lbTimedPosCmd, lbTimedPosCmdRequest
 from kuavo_msgs.srv import setRuckigPlannerParams, setRuckigPlannerParamsRequest
 
@@ -827,6 +828,17 @@ class TimedCmdAPI:
         except Exception as e:
             rospy.logerr(f"❌ 未知错误: {e}")
             return False
+
+    def set_focus_ee(self, focus_ee: bool) -> None:
+        """
+        通过话题 /mobile_manipulator_focus_ee 设置笛卡尔跟踪优先级（与躯干同时发令时）。
+
+        Args:
+            focus_ee: True 为关注手臂末端，False 为关注躯干。
+        """
+        pub = rospy.Publisher("/mobile_manipulator_focus_ee", Bool, queue_size=10, latch=True)
+        pub.publish(Bool(data=bool(focus_ee)))
+        rospy.loginfo("笛卡尔跟踪焦点: %s", "末端(EE)" if focus_ee else "躯干(Torso)")
 
 
 class TorsoAPI:

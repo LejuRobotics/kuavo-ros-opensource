@@ -7,6 +7,8 @@
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
 #include "kuavo_msgs/ControllerSwitchEvent.h"
+#include "kuavo_msgs/GetStringList.h"
+#include "kuavo_msgs/SetString.h"
 #include "std_srvs/SetBool.h"
 #include "std_srvs/Trigger.h"
 #include <map>
@@ -218,6 +220,28 @@ namespace humanoid_controller
     std::vector<std::string> getWalkControllerList();
 
     /**
+     * @brief 获取已加载的舞蹈控制器名称列表（顺序与 rl_controllers.yaml 中 DANCE_CONTROLLER 项一致）
+     */
+    std::vector<std::string> getDanceControllerList();
+
+    /**
+     * @brief 按名称切换到指定舞蹈控制器（须为 getDanceControllerList() 中的名字）
+     * @return 是否切换成功
+     */
+    bool switchToDanceControllerByName(const std::string& name);
+
+    /**
+     * @brief 按在舞蹈列表中的索引切换（0 为第一个舞蹈）
+     * @return 是否切换成功
+     */
+    bool switchToDanceControllerByIndex(size_t index);
+
+    /**
+     * @brief 若当前为舞蹈控制器，返回其在 getDanceControllerList() 中的索引；否则返回 -1
+     */
+    int getCurrentDanceControllerIndex() const;
+
+    /**
      * @brief 注册倒地状态回调函数
      * @param callback 回调函数，参数为FallStandState枚举值（0=STANDING, 1=FALL_DOWN）
      */
@@ -293,10 +317,17 @@ namespace humanoid_controller
                                        std_srvs::Trigger::Response &res);
 
     /**
-     * @brief ROS服务回调：切换到Dance控制器
+     * @brief ROS服务回调：/humanoid_controller/switch_to_dance_controller (SetString)
+     * data 空：第一个舞蹈；#0/#1 为列表下标；否则为舞蹈控制器名
      */
-    bool switchToDanceControllerCallback(std_srvs::Trigger::Request &req,
-                                         std_srvs::Trigger::Response &res);
+    bool switchDanceControllerByStringCallback(kuavo_msgs::SetString::Request &req,
+                                               kuavo_msgs::SetString::Response &res);
+
+    /**
+     * @brief ROS服务回调：获取舞蹈控制器名称列表
+     */
+    bool getDanceControllerListCallback(kuavo_msgs::GetStringList::Request &req,
+                                        kuavo_msgs::GetStringList::Response &res);
 
     /**
      * @brief 更新按类型分组的控制器列表
@@ -320,6 +351,7 @@ namespace humanoid_controller
     // 按类型分组的控制器列表（不包括BASE）
     std::map<RLControllerType, std::vector<std::string>> controllers_by_type_;  ///< 按类型分组的控制器列表
     std::vector<std::string> walk_controllers_;                                ///< WALK_CONTROLLER类型列表（包括BASE，BASE在索引0）
+    std::vector<std::string> dance_controllers_;                               ///< DANCE_CONTROLLER 项名称列表（顺序同 yaml）
 
     // ROS服务
     ros::ServiceServer switch_controller_srv_;      ///< 切换控制器服务
@@ -329,7 +361,8 @@ namespace humanoid_controller
     ros::ServiceServer set_rl_switch_mode_srv_;       ///< 设置RL切换模式服务
     ros::ServiceServer set_fall_down_state_srv_;     ///< 设置倒地状态服务
     ros::ServiceServer switch_to_vmp_controller_srv_; ///< 切换到VMP控制器服务
-    ros::ServiceServer switch_to_dance_controller_srv_; ///< 切换到Dance控制器服务
+    ros::ServiceServer switch_to_dance_controller_srv_; ///< SetString: 空/#索引/名 切换舞蹈
+    ros::ServiceServer get_dance_controller_list_srv_;  ///< 获取舞蹈控制器名列表
     ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
     ros::NodeHandle* nh_ptr_;                       ///< ROS节点句柄指针
 

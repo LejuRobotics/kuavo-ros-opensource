@@ -2330,7 +2330,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     bool is_fall_stand_controller_active = current_controller_type == RLControllerType::FALL_STAND_CONTROLLER;
     if (is_rl_controller_)// 针对倒地起身控制器这种可以主动退出的控制器
     {
-      if (current_controller_ptr_->isReadyToExit())
+      if (current_controller_ptr_->requestToExit())
       {
         if(current_controller_type==RLControllerType::DANCE_CONTROLLER)
         {
@@ -2436,6 +2436,31 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       inference_running_ = false;
       stanceState_mrt_ = currentObservation_.state;
       stanceInput_mrt_ = initialInput2WBC_mrt_;
+      // 同时用估计器的左右脚法向力更新接触力段，使插值起点更贴近“当前脚载荷”
+      // 约定：WBC 的 8 个 3D 接触点按 [左脚4点, 右脚4点] 排列；仅填充 Fz，Fx/Fy 置 0
+      {
+        const auto& info = centroidalModelInfo_;
+        const int forceDim = static_cast<int>(3 * info.numThreeDofContacts);
+        if (forceDim >= 24 && stanceInput_mrt_.size() >= forceDim && contactForce_.size() >= 9)
+        {
+          const double fz_left = std::max(0.0, static_cast<double>(contactForce_(2)));
+          const double fz_right = std::max(0.0, static_cast<double>(contactForce_(8)));
+
+          // 清零接触力段（只影响 WBC contactForce 软目标）
+          stanceInput_mrt_.head(forceDim).setZero();
+
+          // 左脚4个接触点：0..3
+          for (int i = 0; i < 4; ++i)
+          {
+            stanceInput_mrt_(3 * i + 2) = fz_left / 4.0;
+          }
+          // 右脚4个接触点：4..7
+          for (int i = 4; i < 8; ++i)
+          {
+            stanceInput_mrt_(3 * i + 2) = fz_right / 4.0;
+          }
+        }
+      }
       // 清理 kuavo_arm_traj 话题缓存，避免使用旧数据
       // 重置为当前实际手臂位置，确保切换平滑
       vector_t current_arm_pos = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
