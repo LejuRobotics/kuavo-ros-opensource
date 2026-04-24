@@ -1211,8 +1211,12 @@ class NodeWheelMoveTimedCmd(Behaviour):
         timed_cmd_api: TimedCmdAPI 实例
         cmd_type: 命令类型，默认 'leg'
         time_per_point: 每个关键点的默认执行时间（秒），当黑板无时间列表时使用
+        focus_ee: 仅当 ``cmd_type`` 为 ``arm_ee_world`` / ``arm_ee_local`` 时有效。
     """
     
+    # 需在发令前设置 /mobile_manipulator_focus_ee 的臂类命令
+    _ARM_CMD_TYPES_WITH_FOCUS = frozenset({"arm_ee_world", "arm_ee_local"})
+
     # 黑板键名映射
     BLACKBOARD_KEYS = {
         'chassis_world': {'keypoints': 'chassis_world_keypoints', 'times': 'chassis_world_keypoint_times'},
@@ -1240,6 +1244,7 @@ class NodeWheelMoveTimedCmd(Behaviour):
                  timed_cmd_api: TimedCmdAPI = None,
                  cmd_type: str = 'leg',
                  time_per_point: float = 2.0,
+                 focus_ee: bool = False,
                  # 向后兼容参数
                  joint_api: TimedCmdAPI = None,
                  joint_type: str = None,
@@ -1263,7 +1268,8 @@ class NodeWheelMoveTimedCmd(Behaviour):
         self.timed_cmd_api = timed_cmd_api
         self.cmd_type = cmd_type
         self.time_per_point = time_per_point
-        
+        self.focus_ee = focus_ee
+
         # 向后兼容属性
         self.joint_api = timed_cmd_api
         self.joint_type = cmd_type
@@ -1309,6 +1315,13 @@ class NodeWheelMoveTimedCmd(Behaviour):
         self.is_waiting = False
         self.wait_until = 0.0
         setattr(self.bb, self.actual_times_key, [])
+
+        if (self.cmd_type in self._ARM_CMD_TYPES_WITH_FOCUS):
+            if not rospy.core.is_initialized():
+                rospy.init_node("node_wheel_move_timed_cmd", anonymous=True, disable_signals=True)
+            self.focus_ee = True
+            self.timed_cmd_api.set_focus_ee(self.focus_ee)
+
         print(f"===== NodeWheelMoveTimedCmd({self.display_name}): 共 {len(self.keypoints)} 个关键点待执行")
 
     def update(self):
