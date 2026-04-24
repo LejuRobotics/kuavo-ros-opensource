@@ -44,15 +44,15 @@ ThreadPool::ThreadPool(size_t nThreads, int priority) {
   for (size_t i = 0; i < nThreads; i++) {
     workerThreads_.emplace_back(&ThreadPool::worker, this, i);
     setThreadPriority(priority, workerThreads_.back());
-    if (isolate_core.size() >= 4)
-    {
-      cpu_set_t cpuset;
-      CPU_ZERO(&cpuset);
-      CPU_SET(isolate_core[0], &cpuset); 
-      CPU_SET(isolate_core[1], &cpuset);// 绑定隔离的前两个核
+    // if (isolate_core.size() >= 4)
+    // {
+    //   cpu_set_t cpuset;
+    //   CPU_ZERO(&cpuset);
+    //   CPU_SET(isolate_core[0], &cpuset); 
+    //   CPU_SET(isolate_core[1], &cpuset);// 绑定隔离的前两个核
 
-      setThreadAffinity(cpuset, workerThreads_.back());
-    }
+    //   setThreadAffinity(cpuset, workerThreads_.back());
+    // }
     
   }
 }
