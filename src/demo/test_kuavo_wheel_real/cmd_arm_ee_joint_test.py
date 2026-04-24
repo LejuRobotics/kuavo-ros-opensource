@@ -66,7 +66,7 @@ def execute_two_arm_joint_tests():
     # 发布器保持不变，使用twoArmHandPoseCmd话题
     pub = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
     # 订阅到达时间话题（使用关节控制的话题）
-    rospy.Subscriber('/lb_arm_joint_reach_time', Float32, time_callback)
+    rospy.Subscriber('/lb_arm_joint_reach_time/left', Float32, time_callback)
 
     rospy.sleep(1.0)
 
