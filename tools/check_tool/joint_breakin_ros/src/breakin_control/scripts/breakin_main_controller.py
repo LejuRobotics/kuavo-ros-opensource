@@ -124,6 +124,24 @@ class BreakinMainController:
             return v == 52
         except (ValueError, TypeError):
             return False
+
+    def _is_robot_version_53(self):
+        """判断 ROBOT_VERSION 是否为 53"""
+        robot_version = self._get_robot_version()
+        if not robot_version:
+            return False
+
+        rv_raw = str(robot_version).strip()
+        rv = rv_raw.lower()
+
+        if "v53" in rv or "kuavo5_v53" in rv:
+            return True
+
+        try:
+            v = int(rv_raw)
+            return v == 53
+        except (ValueError, TypeError):
+            return False
     
     def _select_leg_breakin_dir(self):
         """根据 ROBOT_VERSION 选择腿部磨线目录
@@ -178,14 +196,19 @@ class BreakinMainController:
                 except KeyboardInterrupt:
                     self.print_colored("\n已取消操作", Colors.YELLOW)
                     sys.exit(0)
-        
-        # 如果是版本50-51，使用普通v52版本
+
+        # 版本53使用专用腿部磨线目录
+        if self._is_robot_version_53():
+            return "leg_breakin_kuavo5_v53"
+
+        # 其他 Kuavo5 版本继续沿用既有逻辑，默认回落到普通 v52 版本
         return "leg_breakin_kuavo5_v52"
     
     def _ensure_leg_breakin_dir_selected(self):
         """确保腿部磨线目录已选择（如果尚未选择，则进行选择）"""
         if self.leg_breakin_dir is None:
             self.leg_breakin_dir = self._select_leg_breakin_dir()
+            self.print_colored(f"调试：选择腿部磨线目录: {self.leg_breakin_dir}", Colors.BLUE)
             self.leg_ec_log_dir = (
                 self.workspace_root
                 / "src"
