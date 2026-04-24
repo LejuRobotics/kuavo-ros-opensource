@@ -33,25 +33,22 @@ log() { echo "[$(date +%F\ %T)] $*"; }
 
 start_tree() {
     source "$HOME/.bashrc"
-    # 不重定向子进程的 stdout/stderr：让 roslaunch 和各节点的输出
-    # 继承 monitor 自己的 FD，由 systemd 统一收到 journald。
-    # 否则 joy_node 起不来 / 依赖缺失 / master 连不上时运维只能看到
-    # monitor 的 "started ... / joy_node process gone" 循环，无法定位根因。
-    setsid "$NODE_SCRIPT" &
+    # 不用 setsid：roslaunch 隐式拉起的 rosmaster 因此不在本脚本的进程组里，
+    # stop 阶段才不会连带把 master 一起杀掉（外部 joy_node 如 bt2 会被殃及）。
+    "$NODE_SCRIPT" &
     NODE_PID=$!
     log "started pid=$NODE_PID"
 }
 
 stop_tree() {
     [ -z "$NODE_PID" ] && return
-    local pgid
-    pgid=$(ps -o pgid= "$NODE_PID" 2>/dev/null | tr -d ' ')
-    if [ -n "$pgid" ]; then
-        kill -TERM -"$pgid" 2>/dev/null || true
-        sleep 2
-        kill -KILL -"$pgid" 2>/dev/null || true
-    fi
-    echo y | timeout 3 rosnode cleanup >/dev/null 2>&1 || true
+    # 只对 roslaunch 本 pid 发信号；它的子进程（含隐式 rosmaster）会被 init 接管继续存活。
+    # 业务节点用 rosnode kill 点名处理，避免 pgid kill / rosnode cleanup 的副作用。
+    kill -9 "$NODE_PID" 2>/dev/null || true
+    sleep 1
+    rosnode kill /h12pro_channel_publisher 2>/dev/null || true
+    rosnode kill /joy_node 2>/dev/null || true
+    rosnode kill /websocket_sdk_start_node 2>/dev/null || true
     NODE_PID=""
     log "stopped"
 }
