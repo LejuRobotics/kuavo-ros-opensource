@@ -195,7 +195,7 @@ def main():
     def reach_cb(msg: Float32):
         reach_time["t"] = float(msg.data)
 
-    rospy.Subscriber("/lb_arm_joint_reach_time", Float32, reach_cb, queue_size=1, tcp_nodelay=True)
+    rospy.Subscriber("/lb_arm_joint_reach_time/left", Float32, reach_cb, queue_size=1, tcp_nodelay=True)
 
     # 等订阅者（避免只发一帧被吞掉）
     t0 = time.time()
