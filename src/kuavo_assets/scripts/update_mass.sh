@@ -52,13 +52,13 @@ XML_TORSO_LINK_NAME="base_link"
 
 if [ "${ROBOT_VERSION}" = "14" ] || [ "${ROBOT_VERSION}" = "15" ]|| [ "${ROBOT_VERSION}" = "17" ]; then
     LINK_NAMES=(
-        "waist_yaw_link"
-        "waist_yaw_link"
+        "base_link"
+        "base_link"
         "torso"
         "torso"
         "torso"
     )
-    XML_TORSO_LINK_NAME="waist_yaw"
+    XML_TORSO_LINK_NAME="base_link"
 fi
 
 # 52 版本：biped_s52/biped_s52_gazebo 与 drake/biped_v3/biped_v3_full 改 waist_yaw_link；drake/biped_v3_all_joint 仅有 torso

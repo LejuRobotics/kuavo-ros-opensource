@@ -69,5 +69,6 @@ src/legged_control
 src/legged_perceptive
 *.log
 *.csv
+!src/humanoid-control/humanoid_controllers/config/kuavo_v17/rl/*.csv
 EC_log/
 .catkin_tools/

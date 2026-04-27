@@ -25,6 +25,12 @@ def execute_dual_arm_pose_tests():
     rospy.init_node('dual_arm_pose_publisher', anonymous=True)
 
     # 等待连接建立
+    reset_torso = True  # 默认进行躯干重置
+    resetTime = 0
+    if reset_torso:
+        resetTime = ct.reset_torso_to_initial()
+    rospy.sleep(resetTime + 0.5)
+    
     ct.set_arm_control_mode(1)  # 重置手臂, 避免奇异点问题
     rospy.sleep(1.0)
     ct.set_arm_control_mode(2)
@@ -43,6 +49,7 @@ def execute_dual_arm_pose_tests():
     # 使用参数
     focus_ee = (args.focus == 'ee')  # 简洁写法
     ct.set_focus_ee(focus_ee)
+    ct.set_focus_z(False)  # 不采用z轴聚焦
 
     # 测试用例列表： (名称, 时间, [左臂x,y,z,yaw,pitch,roll, 右臂x,y,z,yaw,pitch,roll])
     # 注意：位置单位为米，姿态单位为弧度

@@ -1391,6 +1391,12 @@ namespace mobile_manipulator {
     torsoPosePlannerRuckigPtr_->setTargetPose(targetTorsoPose);
     double durationTime = torsoPosePlannerRuckigPtr_->calcTrajectory(desiredTime);
 
+    if(isResetTorsoRePlanning_)
+    {
+      resetTorsoTime_ = durationTime;
+      isResetTorsoRePlanning_ = false;
+    }
+
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
     targetTorsoPoseReachTimePub_.publish(time_msg); // 发布到达时间
@@ -2791,7 +2797,7 @@ namespace mobile_manipulator {
       err[3] = std::fabs(torsoPose[3] - 0.0);
       err[4] = std::fabs(torsoPose[4] - 0.0);
       Eigen::ArrayXd validTimes = err.array() / torsoResetMaxVel_.array();
-      double actualTime = validTimes.maxCoeff();
+      double actualTime = validTimes.maxCoeff() + 0.3; // 加上0.3s的缓冲时间, 以确保在实际执行中有足够的时间完成躯干重置
       /*********************************************************************/
       res.success = true;
       res.message = std::to_string(actualTime);  // 直接转换
@@ -3144,6 +3150,7 @@ namespace mobile_manipulator {
     }
     else
     {
+      setIsFocusEeStatus(false);
       isTriggerSetTorsoFirst = true;
       std::cout << "In reset torso phase, only update base control. time: " << initTime << std::endl;
     }
@@ -3581,6 +3588,7 @@ namespace mobile_manipulator {
     ROS_INFO_STREAM("[MobileManipulatorReferenceManager] reset torso require time: " << resetTorsoTime_ << " s, err: " << err.transpose());
     /*****************************************************************************/
 
+    isResetTorsoRePlanning_ = true;
     calcRuckigTrajWithTorsoPose(initTime, resetPose, resetTorsoTime_);
 
     cmdTorsoPose_.setZero();
@@ -3823,7 +3831,7 @@ namespace mobile_manipulator {
           // double duration = timedPlannerScheduler_.calcTimedTrajectory(i, targetPos, desireTime_[i]);
           updateIndexRuckigPlanner(i, desireTime_[i], targetPos);
 
-          std::cout << "planner " << i << " duration: " << desireTime_[i] << std::endl;
+          std::cout << "planner " << i << " duration: " << desireTime_[i] << "cmd: " << targetPos.transpose() << std::endl;
           isTimedPlannerUpdated_[i] = false;
         }
       }

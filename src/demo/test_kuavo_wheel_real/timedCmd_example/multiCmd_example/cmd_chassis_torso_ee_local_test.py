@@ -59,6 +59,7 @@ def execute_combined_base_torso_arm_tests():
     # 设置焦点
     focus_ee = (args.focus == 'ee')
     ct.set_focus_ee(focus_ee)
+    ct.set_focus_z(False)  # 不采用z轴聚焦
 
     # 躯干重置
     reset_torso = not args.no_reset

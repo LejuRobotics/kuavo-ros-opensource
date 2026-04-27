@@ -63,6 +63,8 @@ def execute_torso_tests():
     # 等待连接建立
     rospy.sleep(resetTime + 0.5)
 
+    ct.set_focus_z(False)  # 不采用z轴聚焦
+
     # 测试用例列表： (名称, lx, ly, lz, ax, ay, az)
     # 注意：这里的lx, ly, lz是相对于初始位置的增量
     test_cases = [
@@ -99,6 +101,7 @@ def execute_torso_tests():
         rospy.sleep(reach_time + 0.5)
         rospy.loginfo(f"  {name} 完成!")
 
+    ct.set_focus_z(True)  # 不采用z轴聚焦
     rospy.loginfo("\n所有躯干位姿测试数据发布完成！")
 
 # -------------- 主入口 --------------

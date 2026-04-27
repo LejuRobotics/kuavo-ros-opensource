@@ -68,6 +68,12 @@ def execute_two_arm_tests():
     pub = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
     rospy.Subscriber('/lb_arm_ee_reach_time/left', Float32, time_callback)
 
+    reset_torso = True  # 默认进行躯干重置
+    resetTime = 0
+    if reset_torso:
+        resetTime = ct.reset_torso_to_initial()
+    rospy.sleep(resetTime + 0.5)
+    
     ct.set_arm_control_mode(1)  # 重置手臂, 避免奇异点问题
     rospy.sleep(1.0)
     ct.set_arm_control_mode(2)
@@ -86,6 +92,7 @@ def execute_two_arm_tests():
     # 使用参数
     focus_ee = (args.focus == 'ee')  # 简洁写法
     ct.set_focus_ee(focus_ee)
+    ct.set_focus_z(False)  # 不采用z轴聚焦
 
     # 测试用例列表： (名称, 左手[x,y,z,yaw,pitch,roll], 右手[...])
     test_cases = [
