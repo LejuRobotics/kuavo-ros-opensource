@@ -8,6 +8,7 @@
 
 #include "humanoid_controllers/humanoidController_wheel_wbc.h"
 #include "kuavo_msgs/setContactForceInterpParams.h"
+#include <kuavo_common/common/common.h>
 #include "humanoid_interface/common/TopicLogger.h"
 #include <iostream>
 #include <cmath>
@@ -172,7 +173,9 @@ namespace humanoidController_wheel_wbc
 
     if(controllerNh_.hasParam("/robot_version"))
     {
-      controllerNh_.getParam("/robot_version", robotVersion_);
+      int raw_version = 0;
+      controllerNh_.getParam("/robot_version", raw_version);
+      robotVersion_ = RobotVersion::create(raw_version).version_number();
     }
     std::cout << "robotVersion_: " << robotVersion_ << std::endl;
     if(controllerNh_.hasParam("/real"))
@@ -287,7 +290,7 @@ namespace humanoidController_wheel_wbc
     {
       mujoco_q[2] = 0.0;
     }
-    else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
+    else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
     {
       mujoco_q[2] = 0.0;
     }

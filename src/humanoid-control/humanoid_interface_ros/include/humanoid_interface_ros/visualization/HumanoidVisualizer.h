@@ -155,6 +155,7 @@ namespace ocs2
       ModelSettings visualModeSettings_;
 
       ros::Publisher eePosePub_;
+      ros::Publisher lejuClawStatePub_;
       urdf::Model urdfModel_;
 
     };

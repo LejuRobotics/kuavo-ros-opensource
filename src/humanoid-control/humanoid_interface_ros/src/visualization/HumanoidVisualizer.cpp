@@ -47,6 +47,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <geometry_msgs/PoseArray.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <kuavo_msgs/endEffectorData.h>
+#include <kuavo_msgs/lejuClawState.h>
+#include <sensor_msgs/JointState.h>
 
 // URDF related
 #include <kdl_parser/kdl_parser.hpp>
@@ -59,7 +61,7 @@ namespace ocs2
   namespace humanoid
   {
 
-    // 爪机构映射
+    // 爪机构映射 (200049)
     static const std::pair<const char*, double> kLeftClawJointInsertMap[] = {
       {"l_f_bar-1_joint", +1.0},
       {"l_b_bar-1",      -1.0},
@@ -72,8 +74,23 @@ namespace ocs2
       {"r_f_bar-3",      +1.0},
       {"r_b_bar-3",      -1.0},
     };
+    // 爪机构映射 (200053/200062)
+    static const std::pair<const char*, double> kLeftClawJointInsertMap200053[] = {
+      {"l_f_bar_1_joint", +1.0},
+      {"l_b_bar_1_joint", -1.0},
+      {"l_f_bar_3_joint", +1.0},
+      {"l_b_bar_3_joint", -1.0},
+    };
+    static const std::pair<const char*, double> kRightClawJointInsertMap200053[] = {
+      {"r_f_bar_1_joint", +1.0},
+      {"r_b_bar_1_joint", -1.0},
+      {"r_f_bar_3_joint", +1.0},
+      {"r_b_bar_3_joint", -1.0},
+    };
     static constexpr size_t kLeftClawJointInsertMapSize = sizeof(kLeftClawJointInsertMap) / sizeof(kLeftClawJointInsertMap[0]);
     static constexpr size_t kRightClawJointInsertMapSize = sizeof(kRightClawJointInsertMap) / sizeof(kRightClawJointInsertMap[0]);
+    static constexpr size_t kLeftClawJointInsertMap200053Size = sizeof(kLeftClawJointInsertMap200053) / sizeof(kLeftClawJointInsertMap200053[0]);
+    static constexpr size_t kRightClawJointInsertMap200053Size = sizeof(kRightClawJointInsertMap200053) / sizeof(kRightClawJointInsertMap200053[0]);
 
     /******************************************************************************************************/
     /******************************************************************************************************/
@@ -220,6 +237,7 @@ namespace ocs2
       planedFootPositionsPublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/humanoid/planedFootPositions", 1);
       currentStatePublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/humanoid/currentState", 1);
       eePosePub_ = nodeHandle.advertise<kuavo_msgs::endEffectorData>("/humanoid_ee_State", 1);
+      lejuClawStatePub_ = nodeHandle.advertise<kuavo_msgs::lejuClawState>("/leju_claw_state", 10);
 
       // subscribe claw command (percentage) and map to radians limits from URDF if available
       clawCmdSubscriber_ = nodeHandle.subscribe<kuavo_msgs::lejuClawCommand>(
@@ -393,8 +411,24 @@ namespace ocs2
           };
           tryInsertGroupRaw(kLeftClawJointInsertMap,  kLeftClawJointInsertMapSize,  claw_joint_positions_[0]);
           tryInsertGroupRaw(kRightClawJointInsertMap, kRightClawJointInsertMapSize, claw_joint_positions_[1]);
+          // 200053/200062 使用下划线命名
+          tryInsertGroupRaw(kLeftClawJointInsertMap200053,  kLeftClawJointInsertMap200053Size,  claw_joint_positions_[0]);
+          tryInsertGroupRaw(kRightClawJointInsertMap200053, kRightClawJointInsertMap200053Size, claw_joint_positions_[1]);
         }
         robotStatePublisherPtr_->publishTransforms(jointPositions, timeStamp);
+
+        // publish /leju_claw_state for bag recording
+        if (updateClawJointPositions_) {
+          kuavo_msgs::lejuClawState claw_state_msg;
+          claw_state_msg.header.stamp = timeStamp;
+          claw_state_msg.header.frame_id = "leju_claw";
+          claw_state_msg.data.name = {"left_claw", "right_claw"};
+          claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
+          claw_state_msg.data.velocity.resize(2, 0.0);
+          claw_state_msg.data.effort.resize(2, 0.0);
+          claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};
+          lejuClawStatePub_.publish(claw_state_msg);
+        }
       }
     }
 

@@ -47,6 +47,7 @@
 #include <queue>
 #include "kuavo_msgs/lejuClawCommand.h"
 #include "sensor_msgs/JointState.h"
+#include <kuavo_common/common/common.h>
 
 #include "mujoco_cpp/depth_camera_config.h"
 #include "joint_address.hpp"
@@ -1215,7 +1216,7 @@ namespace
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
+                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
@@ -2021,16 +2022,27 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
         }
         else if (robot_type == 1)
         {
+          // freejoint: qpos_init_temp[0..6] -> qpos[0..6]
           for (int i = 0; i < 7; i++)
           {
             qpos_init[i] = qpos_init_temp[i];
             std::cout << qpos_init[i] << ", ";
           }
-          for (int i = 7 ; i < qpos_init_temp.size(); i++)
-          {
-            qpos_init[i + 8] = qpos_init_temp[i];
-            std::cout << qpos_init[i + 8] << ", ";
-          }
+          // Use name-based qposadr lookup instead of hardcoded +8 offset
+          // qpos_init_temp[7..] = [leg, larm, rarm, head]
+          int src_idx = 7;
+          auto copyGroupQpos = [&](const JointGroupAddress& addr) {
+            for (auto iter = addr.qposadr().begin(); iter != addr.qposadr().end() && src_idx < (int)qpos_init_temp.size(); ++iter, ++src_idx) {
+              if (*iter < (int)qpos_init.size()) {
+                qpos_init[*iter] = qpos_init_temp[src_idx];
+                std::cout << qpos_init[*iter] << ", ";
+              }
+            }
+          };
+          copyGroupQpos(LegJointsAddr);
+          copyGroupQpos(LArmJointsAddr);
+          copyGroupQpos(RArmJointsAddr);
+          copyGroupQpos(HeadJointsAddr);
         }
         
         // // 根据机器人类型调整初始高度
@@ -2179,7 +2191,10 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
 
   if(nh.hasParam("robot_version"))
   {
-    nh.getParam("robot_version", robotVersion_);
+    int raw_version = 0;
+    nh.getParam("robot_version", raw_version);
+    robotVersion_ = RobotVersion::create(raw_version).version_number();
+    std::cout << "[mujoco_node] robot_version normalized: " << robotVersion_ << " (from raw: " << raw_version << ")" << std::endl;
   }
 
   if(nh.hasParam("pure_sim"))

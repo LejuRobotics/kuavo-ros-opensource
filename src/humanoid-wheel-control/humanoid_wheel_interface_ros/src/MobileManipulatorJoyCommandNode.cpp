@@ -10,6 +10,7 @@
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Bool.h>
 #include <kuavo_common/common/json.hpp>
+#include <kuavo_common/common/common.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
 #include <kuavo_msgs/SetJoyTopic.h>
 #include <kuavo_msgs/getLbTorsoInitialPose.h>
@@ -79,7 +80,9 @@ namespace mobile_manipulator
       int robotVersion_ = 60;
       if(nodeHandle_.hasParam("robot_version"))
       {
-        nodeHandle_.getParam("robot_version", robotVersion_);
+        int raw_version = 0;
+        nodeHandle_.getParam("robot_version", raw_version);
+        robotVersion_ = RobotVersion::create(raw_version).version_number();
       }
       // 躯干初始化位置xyz
       loadTorsoInitialPoseFromServer(nodeHandle_, robotVersion_);
@@ -425,7 +428,7 @@ namespace mobile_manipulator
           initialTorsoPose_y_ = 0.0005;
           initialTorsoPose_z_ = 0.789919;
         }
-        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63)
+        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63 || robotVersion == 200062 || robotVersion == 300062)
         {
           initialTorsoPose_x_ = 0.11575;
           initialTorsoPose_y_ = 0.0;

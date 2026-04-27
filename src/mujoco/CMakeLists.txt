@@ -50,6 +50,7 @@ find_package(catkin REQUIRED
         nav_msgs
         kuavo_msgs
         kuavo_assets
+        kuavo_common
         )
 
 # find_package(PkgConfig REQUIRED)
@@ -204,6 +205,7 @@ catkin_package(
                 roscpp
                 realtime_tools
                 lcm_msg
+                kuavo_common
 )
 ###########
 ## Build ##
