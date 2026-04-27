@@ -6,7 +6,6 @@
     <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
 
     <arg name="output_system_info" default="true"/>
-    <arg name="vr_remote_control" default="false"/>
     <arg name="robot_type"         default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="nodelet_robot_type"  default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="wheel_control_type"  default="1"/>    <!-- 0表示轮臂的仿真测试版mpc，1表示实际部署mpc -->
@@ -14,6 +13,9 @@
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <!-- 设置VR控制参数 -->
+    <arg name="use_vr_control" default="true"/>
+    <param name="use_vr_control" value="$(arg use_vr_control)"/>
 
     <!-- load the robot version manager -->
     <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
