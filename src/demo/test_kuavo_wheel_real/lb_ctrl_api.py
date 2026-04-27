@@ -476,6 +476,17 @@ def set_focus_ee(focus_ee):
     pub.publish(msg)
     rospy.loginfo(f"Focus set to {'EE' if focus_ee else 'Torso'}")
 
+def set_focus_z(focus_z):
+    """
+    设置Z轴方向移动的跟随焦点
+    Args:
+        focus_z: True跟踪Z轴焦点，False不跟踪
+    """
+    pub = rospy.Publisher('/mobile_manipulator_focus_z', Bool, queue_size=10, latch=True)
+    msg = Bool(data=focus_z)
+    pub.publish(msg)
+    rospy.loginfo(f"Focus Z set to: {focus_z}")
+
 def set_lb_multi_timed_offline_traj(offline_trajectories: list) -> tuple:
     """
     设置多条离线定时轨迹到移动机械臂

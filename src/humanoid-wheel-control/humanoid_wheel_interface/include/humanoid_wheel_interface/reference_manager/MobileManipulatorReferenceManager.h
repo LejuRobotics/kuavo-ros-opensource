@@ -298,6 +298,7 @@ private:
   double resetTorsoTime_{0.0};
   double resetTorsoInitTime_{0.0};
   bool isResetTorso_{false};
+  bool isResetTorsoRePlanning_{false};
   Eigen::VectorXd torsoResetMaxVel_;
   ros::ServiceServer resetTorsoStatusServiceServer_;
 

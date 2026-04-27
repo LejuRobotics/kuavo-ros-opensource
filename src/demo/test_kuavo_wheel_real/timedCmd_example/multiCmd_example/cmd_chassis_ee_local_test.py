@@ -43,6 +43,7 @@ def execute_combined_tests():
     # 使用参数
     focus_ee = (args.focus == 'ee')
     ct.set_focus_ee(focus_ee)
+    ct.set_focus_z(False)  # 不采用z轴聚焦
 
     # 测试用例列表： (名称, 时间, 底盘位姿, 左臂位姿, 右臂位姿)
     # 注意：底盘位姿 [x, y, yaw] (米, 米, 弧度)
