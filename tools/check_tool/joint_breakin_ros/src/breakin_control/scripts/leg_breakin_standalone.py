@@ -41,6 +41,7 @@ class LegBreakinStandalone:
         self.roban2_v17_leg_breakin_script = leg_breakin_src / "leg_breakin_roban2_v17" / "roban2_leg_breakin.py"  # roban2_v17（ROS控时长）
         self.kuavo5_leg_breakin_script_v52_80A = leg_breakin_src / "leg_breakin_kuavo5_v52_80A" / "kuavo5_leg_breakin.py"  # kuavo5_v52_80A（ROS控时长，龙华25台版本）
         self.kuavo5_leg_breakin_script_v52 = leg_breakin_src / "leg_breakin_kuavo5_v52" / "kuavo5_leg_breakin.py"  # kuavo5_v52（ROS控时长，普通v52版本）
+        self.kuavo5_leg_breakin_script_v53 = leg_breakin_src / "leg_breakin_kuavo5_v53" / "kuavo5_leg_breakin.py"  # kuavo5_v53（ROS控时长）
         
         # 进程管理
         self.leg_process = None
@@ -231,13 +232,18 @@ class LegBreakinStandalone:
                 target_script = self.kuavo5_leg_breakin_script_v52_80A
             elif leg_breakin_dir == "leg_breakin_kuavo5_v52":
                 target_script = self.kuavo5_leg_breakin_script_v52
+            elif leg_breakin_dir == "leg_breakin_kuavo5_v53":
+                target_script = self.kuavo5_leg_breakin_script_v53
             elif leg_breakin_dir == "leg_breakin_roban2_v17":
                 target_script = self.roban2_v17_leg_breakin_script
             elif leg_breakin_dir == "leg_breakin_roban2_v14":
                 target_script = self.joint_breakin_script
             else:
                 if is_kuavo5:
-                    target_script = self.kuavo5_leg_breakin_script_v52_80A
+                    if self._is_robot_version_53(robot_version):
+                        target_script = self.kuavo5_leg_breakin_script_v53
+                    else:
+                        target_script = self.kuavo5_leg_breakin_script_v52_80A
                 else:
                     # 根据版本选择roban2脚本
                     try:
@@ -250,7 +256,10 @@ class LegBreakinStandalone:
                         target_script = self.joint_breakin_script
         else:
             if is_kuavo5:
-                target_script = self.kuavo5_leg_breakin_script_v52_80A
+                if self._is_robot_version_53(robot_version):
+                    target_script = self.kuavo5_leg_breakin_script_v53
+                else:
+                    target_script = self.kuavo5_leg_breakin_script_v52_80A
             else:
                 # 根据版本选择roban2脚本
                 try:
@@ -263,6 +272,7 @@ class LegBreakinStandalone:
                     target_script = self.joint_breakin_script
 
         self.print_colored(f"调试：ROBOT_VERSION = {robot_version or '(unknown)'}", Colors.BLUE)
+        self.print_colored(f"调试：LEG_BREAKIN_DIR = {leg_breakin_dir or '(unset)'}", Colors.BLUE)
         self.print_colored(f"调试：选择腿部磨线脚本: {target_script}", Colors.BLUE)
         self.print_colored(f"调试：脚本是否存在: {target_script.exists()}", Colors.BLUE)
 
@@ -396,7 +406,7 @@ class LegBreakinStandalone:
             self.print_colored(f"脚本路径: {target_script}", Colors.BLUE)
 
             # 启动进程（ROS控时长）
-            # Kuavo5V52 和 Roban2 都使用 ROS 话题控制
+            # Kuavo5 和 Roban2 都使用 ROS 话题控制
             if is_kuavo5:
                 leg_script_dir = target_script.parent
             else:
