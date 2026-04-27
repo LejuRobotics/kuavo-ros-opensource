@@ -3,53 +3,22 @@
 #include <atomic>
 #include <memory>
 #include <string>
-#include <array> 
+#include <array>
 #include <map>
 #include <vector>
 #include <algorithm>
 #include <iostream>
 #include <mujoco/mujoco.h>
 #include "../joint_address.hpp"
+#include "mujoco_hand_base.hpp"
 
 namespace mujoco_node {
-using FingerArray = std::array<int16_t, 6>;
-using UnsignedFingerArray = std::array<uint16_t, 6>;
-struct FingerStatus {
-    UnsignedFingerArray positions;
-    FingerArray speeds;
-    FingerArray currents;
-    UnsignedFingerArray states;
-
-    FingerStatus() : positions{}, speeds{}, currents{}, states{} {}
-    friend std::ostream& operator<<(std::ostream& os, const FingerStatus& status) {
-        os << "Finger Positions: ";
-        for (const auto& pos : status.positions) {
-            os << pos << " ";
-        }
-        os << "\nFinger Speeds: ";
-        for (const auto& speed : status.speeds) {
-            os << speed << " ";
-        }
-        os << "\nFinger Currents: ";
-        for (const auto& current : status.currents) {
-            os << current << " ";
-        }
-        os << "\nFinger States: ";
-        for (const auto& state : status.states) {
-            os << state << " ";
-        }
-        return os;
-    }
-};
-using DualHandsArray = std::array<FingerArray, 2>;
-using UnsignedDualHandsArray = std::array<UnsignedFingerArray, 2>;
-using FingerStatusPtr = std::shared_ptr<FingerStatus>;
-using FingerStatusPtrArray = std::array<FingerStatusPtr, 2>;
 
 class MujocoDexHand;
 using MujocoDexHandPtr = std::shared_ptr<mujoco_node::MujocoDexHand>;
 
-class MujocoDexHand {
+// 老的强脑手实现，范围0-100
+class MujocoDexHand : public MujocoHandBase {
 public:
     MujocoDexHand(const mjModel* model, const JointGroupAddress& jga): jga_(jga) {
         if(!jga_.ctrladr().invalid()) {

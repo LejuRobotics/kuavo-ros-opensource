@@ -492,7 +492,7 @@ namespace
   }
 
   void init_joint_address(mjModel* model, JointGroupAddress &jga, const std::string& joint0, const std::string& joint1)
-  {     
+  {
     // 获取关节 ID
     auto id0 = mj_name2id(model, mjOBJ_JOINT, joint0.c_str());
     auto id1 = mj_name2id(model, mjOBJ_JOINT, joint1.c_str());
@@ -613,10 +613,27 @@ namespace
       init_joint_address(mnew, RArmJointsAddr, "zarm_r1_joint", right_arm_end_joint.c_str());
       init_joint_address(mnew, HeadJointsAddr, "zhead_1_joint", "zhead_2_joint");
 
-      /* dexhand joint address */
-      if(mj_name2id(mnew, mjOBJ_JOINT, "l_thumbCMC") != -1) {
-        init_joint_address(mnew, LHandJointsAddr, "l_thumbCMC", "l_littlePIP");
-        init_joint_address(mnew, RHandJointsAddr, "r_thumbCMC", "r_littlePIP");
+      /* dexhand joint address - 根据URDF自定义元数据hand_type区分手型号 */
+      int hand_type_id = mj_name2id(mnew, mjOBJ_NUMERIC, "hand_type");
+      if (hand_type_id != -1) {
+          int data_adr = mnew->numeric_adr[hand_type_id];
+          int hand_type_value = static_cast<int>(mnew->numeric_data[data_adr]);
+          if (hand_type_value == 1) {
+              // LinkerL6灵巧手关节命名
+              std::cout << "[mujoco_node]: Initialize LinkerL6 dexhand joint addresses" << std::endl;
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_roll", "l_pinky_pip_pitch");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_roll", "r_pinky_pip_pitch");
+          } else if (hand_type_value == 2) {
+              // LinkerO6灵巧手关节命名
+              std::cout << "[mujoco_node]: Initialize LinkerO6 dexhand joint addresses" << std::endl;
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_yaw", "l_pinky_dip");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_yaw", "r_pinky_dip");
+          }
+      } else {
+          // 旧版无hand_type元数据时，默认使用强脑手关节命名
+          std::cout << "[mujoco_node]: No hand_type metadata found, default to Qiangnao hand joint addresses" << std::endl;
+          init_joint_address(mnew, LHandJointsAddr, "l_thumbCMC", "l_littlePIP");
+          init_joint_address(mnew, RHandJointsAddr, "r_thumbCMC", "r_littlePIP");
       }
 
       // 遍历所有的物体
@@ -1938,7 +1955,30 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   if(!RHandJointsAddr.ctrladr().invalid()) {
       std::cout << "[mujoco_node]: init dexhand node" << std::endl;
       g_dexhand_node = std::make_shared<DexHandMujocoRosNode>();
-      g_dexhand_node->init(*g_nh_ptr, m, RHandJointsAddr, LHandJointsAddr);
+
+      // 优先从URDF自定义元数据中读取手类型
+      mujoco_node::HandType hand_type = mujoco_node::HandType::QIANGNAO;
+      int hand_type_id = mj_name2id(m, mjOBJ_NUMERIC, "hand_type");
+      
+      if (hand_type_id != -1) {
+          int hand_type_value = static_cast<int>(m->numeric_data[hand_type_id]);
+          if (hand_type_value == 1) {
+              hand_type = mujoco_node::HandType::LINKER_L6;
+              std::cout << "[mujoco_node]: Detected LinkerL6 dexhand from URDF custom metadata" << std::endl;
+          } else if (hand_type_value == 2) {
+              hand_type = mujoco_node::HandType::LINKER_O6;
+              std::cout << "[mujoco_node]: Detected LinkerO6 dexhand from URDF custom metadata" << std::endl;
+          } else {
+              hand_type = mujoco_node::HandType::QIANGNAO;
+              std::cout << "[mujoco_node]: Detected Qiangnao hand from URDF custom metadata" << std::endl;
+          }
+      } else {
+          // 没有找到自定义元数据，默认使用Qiangnao手
+          hand_type = mujoco_node::HandType::QIANGNAO;
+          std::cout << "[mujoco_node]: No hand_type metadata in URDF, default to use Qiangnao hand" << std::endl;
+      }
+
+      g_dexhand_node->init(*g_nh_ptr, m, RHandJointsAddr, LHandJointsAddr, hand_type);
 
       int hand_joints_num = g_dexhand_node->get_hand_joints_num();
       g_nh_ptr->setParam("end_effector_joints_num", hand_joints_num);
