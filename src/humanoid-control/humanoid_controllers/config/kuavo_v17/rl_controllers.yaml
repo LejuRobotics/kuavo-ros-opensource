@@ -15,14 +15,32 @@ controllers:
     config_file: "rl/amp_param.info" 
     enabled: true  
 
-  - name: "dance_controller"
-    class: "DANCE_CONTROLLER"  # 舞蹈控制器
-    type: "DANCE_CONTROLLER"  # 具体控制器类型
-    config_file: "rl/dance_param.info"  # 相对于版本配置目录的路径
-    enabled: true  # 是否启用该控制器
+  - name: "dance_balei"          # 芭蕾
+    class: "DANCE_CONTROLLER"
+    type: "DANCE_CONTROLLER"
+    config_file: "rl/dance_param_balei.info"
+    enabled: true
 
-  - name: "dance_controller_2"
-    class: "DANCE_CONTROLLER"  # 舞蹈控制器
-    type: "DANCE_CONTROLLER"  # 具体控制器类型
-    config_file: "rl/dance_param.info"  # 相对于版本配置目录的路径
-    enabled: true  # 是否启用该控制器
+  - name: "dance_xinjiang"       # 新疆舞
+    class: "DANCE_CONTROLLER"
+    type: "DANCE_CONTROLLER"
+    config_file: "rl/dance_param_xinjiang.info"
+    enabled: true
+
+  - name: "dance_aiqingniao"     # 爱情鸟
+    class: "DANCE_CONTROLLER"
+    type: "DANCE_CONTROLLER"
+    config_file: "rl/dance_param_aiqingniao.info"
+    enabled: true
+
+  - name: "dance_parapara"       # 芭啦芭啦樱之舞
+    class: "DANCE_CONTROLLER"
+    type: "DANCE_CONTROLLER"
+    config_file: "rl/dance_param_parapara.info"
+    enabled: true
+
+  - name: "dance_lonelydance"    # lonelydance
+    class: "DANCE_CONTROLLER"
+    type: "DANCE_CONTROLLER"
+    config_file: "rl/dance_param_lonelydance.info"
+    enabled: true

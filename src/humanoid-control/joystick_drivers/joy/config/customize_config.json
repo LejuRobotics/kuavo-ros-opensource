@@ -108,31 +108,16 @@
     ]
   },
   "customize_action_LT_A": {
-    "type": "action",
-    "arm_pose_name": [
-      "抱拳"
-    ],
-    "music_name": [
-      "抱拳.wav"
-    ]
+    "type": "dance",
+    "dance_name": "dance_balei"
   },
   "customize_action_LT_B": {
-    "type": "action",
-    "arm_pose_name": [
-      "右手打招呼"
-    ],
-    "music_name": [
-      "右手打招呼.wav"
-    ]
+    "type": "dance",
+    "dance_name": "dance_xinjiang"
   },
   "customize_action_LT_X": {
-    "type": "action",
-    "arm_pose_name": [
-      "左转腰打招呼"
-    ],
-    "music_name": [
-      "左转腰打招呼.wav"
-    ]
+    "type": "dance",
+    "dance_name": "dance_aiqingniao"
   },
   "customize_action_LT_Y": {
     "type": "action",
