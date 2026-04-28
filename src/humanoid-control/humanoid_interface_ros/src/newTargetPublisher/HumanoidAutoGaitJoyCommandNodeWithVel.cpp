@@ -58,6 +58,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_interface_ros/newTargetPublisher/LowPassFilter.h"
 #include "humanoid_interface_ros/newTargetPublisher/LowPassFilter5thOrder.h"
 #include "std_srvs/Trigger.h"
+#include <kuavo_common/common/common.h>
 #include <std_msgs/Bool.h>
 #include <ocs2_robotic_tools/common/RotationTransforms.h>
 
@@ -1037,7 +1038,9 @@ namespace ocs2
         // return;
 
         // RT + X: 切换到上一个控制器
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
+        // roban 保留 RT+X 作为动作组合键，避免与控制器切换冲突；kuavo 等其他版本允许切换控制器
+        if (!IS_ROBAN_LEGGED(rb_version_) &&
+            !old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
         {
           ROS_INFO("[JoyControl] RT+BUTTON_RL: switch to previous controller");
           switchToPreviousController();

@@ -1,0 +1,8 @@
+float64[] q
+string base_frame
+string end_effector_frame
+int32 hand_side
+---
+bool success
+string error_message
+twoArmHandPose hand_poses
