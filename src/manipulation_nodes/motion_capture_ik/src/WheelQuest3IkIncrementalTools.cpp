@@ -1464,6 +1464,70 @@ void WheelQuest3IkIncrementalROS::publishAuxiliaryStates() {
     rightEePoseMeasuredMsg.pose.orientation.z = rightEeQuaternionMeasured.z();
     rightEePoseMeasuredPublisher_.publish(rightEePoseMeasuredMsg);
   }
+
+  // 发布 /ik_fk_result/eef_pose（与4pro增量式IK一致）
+  {
+    kuavo_msgs::twoArmHandPose eefPoseMsg;
+    eefPoseMsg.header.frame_id = "base_link";
+    eefPoseMsg.header.stamp = ros::Time::now();
+
+    eefPoseMsg.left_pose.pos_xyz[0] = leftEePosition.x();
+    eefPoseMsg.left_pose.pos_xyz[1] = leftEePosition.y();
+    eefPoseMsg.left_pose.pos_xyz[2] = leftEePosition.z();
+    eefPoseMsg.left_pose.quat_xyzw[0] = leftEeQuaternion.x();
+    eefPoseMsg.left_pose.quat_xyzw[1] = leftEeQuaternion.y();
+    eefPoseMsg.left_pose.quat_xyzw[2] = leftEeQuaternion.z();
+    eefPoseMsg.left_pose.quat_xyzw[3] = leftEeQuaternion.w();
+    // 上肢关节角（armAngleLimited 末尾14个为上肢，前7个为左臂）
+    const int lbDof = drakeJointStateSize_ - 14;
+    for (int i = 0; i < 7; ++i) {
+      eefPoseMsg.left_pose.joint_angles[i] = armAngleLimited(lbDof + i);
+    }
+
+    eefPoseMsg.right_pose.pos_xyz[0] = rightEePosition.x();
+    eefPoseMsg.right_pose.pos_xyz[1] = rightEePosition.y();
+    eefPoseMsg.right_pose.pos_xyz[2] = rightEePosition.z();
+    eefPoseMsg.right_pose.quat_xyzw[0] = rightEeQuaternion.x();
+    eefPoseMsg.right_pose.quat_xyzw[1] = rightEeQuaternion.y();
+    eefPoseMsg.right_pose.quat_xyzw[2] = rightEeQuaternion.z();
+    eefPoseMsg.right_pose.quat_xyzw[3] = rightEeQuaternion.w();
+    for (int i = 0; i < 7; ++i) {
+      eefPoseMsg.right_pose.joint_angles[i] = armAngleLimited(lbDof + 7 + i);
+    }
+
+    ikSolvedEefPosePublisher_.publish(eefPoseMsg);
+  }
+
+  // 发布 /ik_fk_result/input_pos（与4pro增量式IK一致）
+  // 数据格式：14个float [左手pos_xyz(3), 左手quat_xyzw(4), 右手pos_xyz(3), 右手quat_xyzw(4)]
+  {
+    kuavo_msgs::Float32MultiArrayStamped inputPosMsg;
+    inputPosMsg.header.stamp = ros::Time::now();
+    inputPosMsg.data.data.resize(14);
+
+    inputPosMsg.data.data[0] = static_cast<float>(leftEndEffectorPosition_.x());
+    inputPosMsg.data.data[1] = static_cast<float>(leftEndEffectorPosition_.y());
+    inputPosMsg.data.data[2] = static_cast<float>(leftEndEffectorPosition_.z());
+    {
+      std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
+      Eigen::Quaterniond leftQuat(latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix);
+      inputPosMsg.data.data[3] = static_cast<float>(leftQuat.x());
+      inputPosMsg.data.data[4] = static_cast<float>(leftQuat.y());
+      inputPosMsg.data.data[5] = static_cast<float>(leftQuat.z());
+      inputPosMsg.data.data[6] = static_cast<float>(leftQuat.w());
+
+      inputPosMsg.data.data[7] = static_cast<float>(rightEndEffectorPosition_.x());
+      inputPosMsg.data.data[8] = static_cast<float>(rightEndEffectorPosition_.y());
+      inputPosMsg.data.data[9] = static_cast<float>(rightEndEffectorPosition_.z());
+      Eigen::Quaterniond rightQuat(latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix);
+      inputPosMsg.data.data[10] = static_cast<float>(rightQuat.x());
+      inputPosMsg.data.data[11] = static_cast<float>(rightQuat.y());
+      inputPosMsg.data.data[12] = static_cast<float>(rightQuat.z());
+      inputPosMsg.data.data[13] = static_cast<float>(rightQuat.w());
+    }
+
+    ikInputPosPublisher_.publish(inputPosMsg);
+  }
 }
 
 void WheelQuest3IkIncrementalROS::publishJointStates() {
@@ -2232,6 +2296,8 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_debug/left_hand_pose_from_transformer", 2);
   rightHandPoseFromTransformerPublisher_ =
       nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_debug/right_hand_pose_from_transformer", 2);
+  ikSolvedEefPosePublisher_ = nodeHandle_.advertise<kuavo_msgs::twoArmHandPose>("/ik_fk_result/eef_pose", 10);
+  ikInputPosPublisher_ = nodeHandle_.advertise<kuavo_msgs::Float32MultiArrayStamped>("/ik_fk_result/input_pos", 10);
 
   wholeBodyRefMarkerArrayPublisher_ =
       nodeHandle_.advertise<visualization_msgs::MarkerArray>("/ik_debug/whole_body_ref_markers", 2);

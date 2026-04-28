@@ -12,6 +12,8 @@
 #include <geometry_msgs/Twist.h>
 #include <sensor_msgs/JointState.h>
 #include <visualization_msgs/MarkerArray.h>
+#include <kuavo_msgs/twoArmHandPose.h>
+#include <kuavo_msgs/Float32MultiArrayStamped.h>
 
 #include <noitom_hi5_hand_udp_python/PoseInfoList.h>
 #include <leju_utils/define.hpp>
@@ -217,6 +219,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher rightHandPosAfterOptPublisher_;          // 发布优化后的右手位置
   ros::Publisher leftHandPoseFromTransformerPublisher_;   // 发布来自Transformer的左手pose
   ros::Publisher rightHandPoseFromTransformerPublisher_;  // 发布来自Transformer的右手pose
+  ros::Publisher ikSolvedEefPosePublisher_;  // 发布IK求解后的末端执行器pose（/ik_fk_result/eef_pose）
+  ros::Publisher ikInputPosPublisher_;       // 发布IK输入位置（/ik_fk_result/input_pos）
   ros::Publisher lbLegTrajPublisher_;
   ros::Timer lbLegTrajPublishTimer_;
   std::mutex lbLegTargetMutex_;
