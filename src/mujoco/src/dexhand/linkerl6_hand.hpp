@@ -67,8 +67,8 @@ public:
             auto &range1 = ctrllimited_map_[*iter];
             iter ++;
             finger_status_.positions[i+1] = Joints2Curl(joint0, range0, joint1, range1);
-            finger_status_.speeds[i+1] = (vel[i*2] + vel[i*2+1])/2;
-            finger_status_.currents[i+1] = (tau[i*2] + vel[i*2+1])/2;
+            finger_status_.speeds[i+1] = (vel[i*2 + 1] + vel[i*2 + 2]) / 2.0;
+            finger_status_.currents[i+1] = (tau[i*2 + 1] + tau[i*2 + 2]) / 2.0;
         }
     }
     /**

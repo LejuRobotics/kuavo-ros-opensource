@@ -318,7 +318,7 @@
                       <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_hand_base_link" />
 
                       <!-- 左手拇指 -->
-                      <body name="l_thumb_metacarpals_base2" pos="0.011508 -0.022975 0.037794" quat="1 0 0 0">
+                      <body name="l_thumb_metacarpals_base2" pos="0.011508 -0.035 0.037794" quat="1 0 0 0.0025">
                         <inertial pos="0.00162800681276937 -0.0027668017246415 -0.00184234438641236" quat="1 0 0 0" mass="0.00138588296544333" diaginertia="5.26292160685909e-08 4.82620491570326e-08 2.88550286112821e-08" />
                         <joint name="l_thumb_cmc_yaw" axis="0 0 1" limited="true" range="0 1.3" damping="0.2" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.15 0.15 0.15 1" mesh="l_thumb_metacarpals_base2" />
@@ -341,7 +341,7 @@
                       <!-- 左手拇指结束 -->
 
                       <!-- 左手食指 -->
-                      <body name="l_index_proximal" pos="0.0024758 -0.02419 0.103779" quat="0.99967 0.02618 0 0">
+                      <body name="l_index_proximal" pos="0.0024758 -0.02419 0.103779" quat="0.999048 -0.043619 0 0">
                         <inertial pos="-0.00208656556336457 2.53838713251686e-06 0.0172734941980264" quat="1 0 0 0" mass="0.00253174651934627" diaginertia="2.65988714157799e-07 2.72914069166233e-07 8.56017305636748e-08" />
                         <joint name="l_index_mcp_pitch" axis="0 1 0" limited="true" range="0 1.60" damping="0.2" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="l_index_proximal" />
@@ -357,7 +357,7 @@
                       <!-- 左手食指结束 -->
 
                       <!-- 左手中指 -->
-                      <body name="l_middle_proximal" pos="0.00052576 -0.00634 0.1077" quat="1 0 0 0">
+                      <body name="l_middle_proximal" pos="0.00052576 -0.00634 0.1077" quat="0.999048 -0.043619 0 0">
                         <inertial pos="-0.00208660654138235 2.56918180119303e-06 0.0172735011723351" quat="1 0 0 0" mass="0.00253177375206983" diaginertia="2.65989021304483e-07 2.72914402745606e-07 8.5602213431865e-08" />
                         <joint name="l_middle_mcp_pitch" axis="0 1 0" limited="true" range="0 1.60" damping="0.2" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="l_middle_proximal" />
@@ -373,7 +373,7 @@
                       <!-- 左手中指结束 -->
 
                       <!-- 左手无名指 -->
-                      <body name="l_ring_proximal" pos="0.0010258 0.011135 0.103767" quat="0.99967 -0.02618 0 0">
+                      <body name="l_ring_proximal" pos="0.0010258 0.011135 0.103767" quat="0.999048 -0.043619 0 0">
                         <inertial pos="-0.00208667931345812 2.63000419462034e-06 0.0172734926448377" quat="1 0 0 0" mass="0.00253182223645066" diaginertia="2.65989756076584e-07 2.7291510093393e-07 8.56031522765909e-08" />
                         <joint name="l_ring_mcp_pitch" axis="0 1 0" limited="true" range="0 1.60" damping="0.2" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="l_ring_proximal" />
@@ -517,7 +517,7 @@
                       <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_hand_base_link" />
 
                       <!-- 右手拇指 -->
-                      <body name="r_thumb_metacarpals_base2" pos="0.011508 0.022975 0.037794" quat="1 0 0 0">
+                      <body name="r_thumb_metacarpals_base2" pos="0.011508 0.035 0.037794" quat="1 0 0 -0.0025">
                         <inertial pos="0.00162795738393507 0.00276671978336815 -0.00184227725602707" quat="1 0 0 0" mass="0.00138591070212997" diaginertia="5.26294625624223e-08 4.82623724532942e-08 2.88555522060562e-08" />
                         <joint name="r_thumb_cmc_yaw" pos="0 0 0" axis="0 0 -1" range="0 1.36" damping="0.2" frictionloss="0.1" armature="0.001" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.15 0.15 0.15 1" mesh="r_thumb_metacarpals_base2" />
@@ -538,7 +538,7 @@
                       <!-- 右手拇指结束 -->
 
                       <!-- 右手食指 -->
-                      <body name="r_index_proximal" pos="0.0024758 0.02419 0.103779" quat="0.99967 -0.02618 0 0">
+                      <body name="r_index_proximal" pos="0.0024758 0.02419 0.103779" quat="0.999048 0.043619 0 0">
                         <inertial pos="-0.00208665596033792 -4.8964990644329e-06 0.0172736718900068" quat="1 0 0 0" mass="0.00253178529301663" diaginertia="2.65990159539482e-07 2.72915460277804e-07 8.56026306687528e-08" />
                         <joint name="r_index_mcp_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.60" damping="0.2" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="r_index_proximal" />
@@ -553,7 +553,7 @@
                       <!-- 右手食指结束 -->
 
                       <!-- 右手中指 -->
-                      <body name="r_middle_proximal" pos="0.00052576 0.00634 0.1077" quat="1 0 0 0">
+                      <body name="r_middle_proximal" pos="0.00052576 0.00634 0.1077" quat="0.999048 0.043619 0 0">
                         <inertial pos="-0.00208660654138235 -4.93451838476378e-06 0.0172736805321904" quat="1 0 0 0" mass="0.00253177375206983" diaginertia="2.65989021304483e-07 2.72914402745606e-07 8.5602213431865e-08" />
                         <joint name="r_middle_mcp_pitch" axis="0 1 0" limited="true" range="0 1.60" damping="0.2" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="r_middle_proximal" />
@@ -568,7 +568,7 @@
                       <!-- 右手中指结束 -->
 
                       <!-- 右手无名指 -->
-                      <body name="r_ring_proximal" pos="0.0010258 -0.011135 0.103767" quat="0.99967 0.02618 0 0">
+                      <body name="r_ring_proximal" pos="0.0010258 -0.011135 0.103767" quat="0.999048 0.043619 0 0">
                         <inertial pos="-0.00208667931345812 -4.98538564003281e-06 0.0172734926448377" quat="1 0 0 0" mass="0.00253182223645066" diaginertia="2.65989756076584e-07 2.7291510093393e-07 8.56031522765909e-08" />
                         <joint name="r_ring_mcp_pitch" axis="0 1 0" limited="true" range="0 1.60" damping="0.2" />
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="r_ring_proximal" />

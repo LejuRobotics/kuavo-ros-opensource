@@ -56,22 +56,26 @@ public:
         auto iter_ctrl = jga_.ctrladr().begin();
 
         // 拇指处理
-        // pos[0]是thumb_cmc_yaw，范围[0, 1.3]弧度，单独控制无耦合
-        finger_status_.positions[1] = Joints2Curl(pos[0], {0, 1.3}, pos[0], {0, 1.3});
+        // pos[0]是thumb_cmc_yaw，单独控制无耦合
+        auto& yaw_range = ctrllimited_map_[*iter_ctrl]; // 读取真实yaw执行器范围
+        finger_status_.positions[1] = Joints2Curl(pos[0], yaw_range, pos[0], yaw_range);
         finger_status_.speeds[1] = vel[0];
         finger_status_.currents[1] = tau[0];
-        iter_ctrl++; // 跳过yaw执行器
+        iter_ctrl++; // 处理完yaw，跳转到pitch执行器
 
         // pos[1]是thumb_cmc_pitch，pos[2]是thumb_ip，两个关节耦合
-        finger_status_.positions[0] = Joints2Curl(pos[1], {0, 0.58}, pos[2], {0, 1.08});
+        auto& pitch_range = ctrllimited_map_[*iter_ctrl]; // 读取pitch执行器范围
+        iter_ctrl++;
+        auto& ip_range = ctrllimited_map_[*iter_ctrl]; // 读取ip执行器范围
+        iter_ctrl++;
+        finger_status_.positions[0] = Joints2Curl(pos[1], pitch_range, pos[2], ip_range);
         finger_status_.speeds[0] = (vel[1] + vel[2]) / 2.0;
         finger_status_.currents[0] = (tau[1] + tau[2]) / 2.0;
-        ++iter_ctrl; // 跳过pitch执行器
-        ++iter_ctrl; // 跳过ip执行器
+        // 处理完pitch和ip，iter_ctrl已经跳转到第一个手指执行器
 
         // 其他手指处理：index(2), middle(3), ring(4), pinky(5)
         for (int i = 2; i < 6; i++) {
-            int pos_idx = 2 + (i - 2) * 2; // 食指从pos[3]开始
+            int pos_idx = 3 + (i - 2) * 2; // 食指从pos[3]开始（拇指占3个关节）
             auto joint1_pos = pos[pos_idx];
             auto joint2_pos = pos[pos_idx + 1];
             auto& range1 = ctrllimited_map_[*iter_ctrl];
@@ -104,13 +108,13 @@ public:
         iter++;
 
         // 拇指弯曲：ctrl_cmd_[0]，控制pitch和ip关节，耦合比例1.86
-        auto iter_next = iter;
-        ++iter_next;
-        auto thumb_cmd = Curl2Joints(ctrl_cmd_[0], ctrllimited_map_[*iter], ctrllimited_map_[*iter_next], true);
+        auto& pitch_range = ctrllimited_map_[*iter];
+        iter++;
+        auto& ip_range = ctrllimited_map_[*iter];
+        iter++;
+        auto thumb_cmd = Curl2Joints(ctrl_cmd_[0], pitch_range, ip_range, true);
         ctrl_cmd.push_back(thumb_cmd[0]);
         ctrl_cmd.push_back(thumb_cmd[1]);
-        ++iter;
-        ++iter;
 
         // 其他手指：index(2), middle(3), ring(4), pinky(5)，耦合比例0.89
         for (int i = 2; i < 6; i++) {
@@ -214,7 +218,7 @@ private:
         // 近指关节直接映射到范围
         double j1_command = j1_range[0] + norm * (j1_range[1] - j1_range[0]);
 
-        // 远指关节使用耦合比例：拇指1.86，其他手指0.89
+        // 远指关节使用耦合比例：拇指1.86（匹配关节行程避免顶死），其他手指0.89
         double mimic_ratio = is_thumb ? 1.86 : 0.89;
         double j2_command = j1_command * mimic_ratio;
 

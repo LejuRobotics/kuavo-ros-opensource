@@ -60,9 +60,9 @@ private:
     // 兼容原来的 control_robot_hand_position 接口
     void controlHandCallback(const kuavo_msgs::robotHandPosition::ConstPtr& msg);
 
-    // LinkerL6灵巧手的控制指令回调
-    void l6LeftHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg);
-    void l6RightHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg);
+    // Linker系列灵巧手的控制指令回调
+    void linkerLeftHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg);
+    void linkerRightHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg);
 
     /* gesture execute service. */
     bool gestureExecuteCallback(kuavo_msgs::gestureExecuteRequest &req,
@@ -82,9 +82,12 @@ private:
     ros::Subscriber l_hand_command_sub_;
     ros::Publisher status_pub_;
 
-    // LinkerL6灵巧手的话题订阅者
-    ros::Subscriber l6_l_hand_command_sub_;
-    ros::Subscriber l6_r_hand_command_sub_;
+    // Linker系列灵巧手的话题订阅者
+    ros::Subscriber linker_l_hand_command_sub_;
+    ros::Subscriber linker_r_hand_command_sub_;
+    // Linker系列灵巧手的状态发布者
+    ros::Publisher l_hand_state_pub_;
+    ros::Publisher r_hand_state_pub_;
     
     // 兼容原来的 control_robot_hand_position 接口
     ros::Subscriber hand_sub_;  
