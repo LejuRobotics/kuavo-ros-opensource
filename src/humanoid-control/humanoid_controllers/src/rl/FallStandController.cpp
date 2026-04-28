@@ -291,6 +291,14 @@ namespace humanoid_controller
       {
         loadData::loadCppDataType(config_file, "fallStandMaxJointVelocity", fall_stand_max_joint_velocity_);
       }
+
+      // 轨迹结束后的行为：是否允许切换到 STANDING（从而 isReadyToExit=true）
+      // 默认 false：保持在倒地起身控制器并锁最后一帧继续推理
+      // 可在 info 中配置：allowSwitchToStandingOnFinish true/false
+      if (pt.find("allowSwitchToStandingOnFinish") != pt.not_found())
+      {
+        loadData::loadCppDataType(config_file, "allowSwitchToStandingOnFinish", allow_switch_to_standing_on_finish_);
+      }
       
       // 加载RL控制相关参数
       loadData::loadEigenMatrix(config_file, "defaultJointState", defalutJointPosRL_);
@@ -358,6 +366,7 @@ namespace humanoid_controller
       ROS_INFO("[%s] Config loaded: network_model=%s, trajectory=%s, inference_freq=%.1f, num_obs=%d, num_actions=%d",
                name_.c_str(), network_model_file_.c_str(), trajectory_file_.c_str(), 
                inference_freq, num_obs_, num_actions_);
+      ROS_INFO("[%s] allowSwitchToStandingOnFinish=%d", name_.c_str(), static_cast<int>(allow_switch_to_standing_on_finish_));
       ROS_INFO("[%s] Joint numbers: leg=%d, arm=%d, waist=%d, head=%d",
                name_.c_str(), jointNum_, jointArmNum_, waistNum_, headNum_);
       if (!singleInputDataRLKeys.empty())
@@ -817,14 +826,35 @@ namespace humanoid_controller
 
   void FallStandController::updateObservation(const Eigen::VectorXd& state_est, const SensorData& sensor_data)
   {
-    // 在STAND_UP状态下更新轨迹时间步（与humanoidController一致）
+    // 在STAND_UP状态下更新轨迹时间步
     if (fall_stand_state_ == FallStandState::STAND_UP)
     {
-      motion_trajectory_.updateTimeStep();
-      if (motion_trajectory_.isFinish())
+      if (allow_switch_to_standing_on_finish_)
       {
-        ROS_INFO("[%s] Motion trajectory finished", name_.c_str());
-        fall_stand_state_ = FallStandState::STANDING;
+        motion_trajectory_.updateTimeStep();
+        if (motion_trajectory_.isFinish())
+        {
+          ROS_INFO("[%s] Motion trajectory finished, switch state to STANDING (allow exit)", name_.c_str());
+          fall_stand_state_ = FallStandState::STANDING;
+        }
+      }
+      else
+      {
+        // 需求：保持在倒地起身控制器，不切换到 STANDING（避免 shouldRunInference 停推理）
+        // 同时在轨迹结束后卡住最后一帧：不再推进 time_step，但持续输出最后一帧
+        if (!hold_last_frame_)
+        {
+          motion_trajectory_.updateTimeStep();
+          if (motion_trajectory_.isFinish())
+          {
+            hold_last_frame_ = true;
+            if (!motion_trajectory_finished_logged_)
+            {
+              ROS_INFO("[%s] Motion trajectory finished, hold last frame (keep inference running)", name_.c_str());
+              motion_trajectory_finished_logged_ = true;
+            }
+          }
+        }
       }
     }
     
@@ -1040,8 +1070,8 @@ namespace humanoid_controller
           double q_des  = joint_cmd.joint_q[i];
           double v_des  = joint_cmd.joint_v[i]; // 目前为0
 
-          double kp = 50;
-          double kd = 10;
+          double kp = 10;
+          double kd = 1;
 
           joint_cmd.tau[i] = kp * (q_des - q_meas) + kd * (v_des - v_meas);
         }

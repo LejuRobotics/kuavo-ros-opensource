@@ -140,6 +140,12 @@ namespace humanoid_controller
      */
     bool isAllowToExit() const override;
 
+    /**
+     * @brief 轨迹结束后是否允许切回基座/MPC（进入 STANDING，从而 isReadyToExit=true）
+     * @return true: 轨迹结束进入 STANDING，允许上层切换；false: 保持在倒地起身控制器并锁最后一帧继续推理
+     */
+    bool getAllowSwitchToStandingOnFinish() const { return allow_switch_to_standing_on_finish_; }
+
   protected:
     /**
      * @brief 更新控制器实现（重写基类方法）
@@ -349,6 +355,18 @@ namespace humanoid_controller
     MotionTrajectoryData motion_trajectory_;       ///< 当前使用的运动轨迹数据（指向prone或supine）
     MotionTrajectoryData motion_trajectory_prone_; ///< 趴着模型的运动轨迹数据
     MotionTrajectoryData motion_trajectory_supine_; ///< 躺着模型的运动轨迹数据
+
+    // 轨迹结束后的“保持最后一帧”模式：
+    // - 不切换到 STANDING（否则 shouldRunInference() 会停推理）
+    // - 不再推进轨迹 time_step
+    // - 输出保持在最后一帧（updateRLcmd 中会把 action 置零，锁在最后一帧默认姿态上）
+    bool hold_last_frame_ = false;
+    bool motion_trajectory_finished_logged_ = false;
+
+    // 轨迹结束后的行为开关（由 info 配置文件控制）
+    // - true: 轨迹结束后进入 STANDING，isReadyToExit() 返回 true（上层可切回 MPC/BASE）
+    // - false: 保持 STAND_UP 状态，锁最后一帧并持续推理（不触发上层自动切换）
+    bool allow_switch_to_standing_on_finish_ = false;
     
     // 配置参数
     std::string network_model_file_;                ///< 当前使用的网络模型文件路径（向后兼容）
