@@ -1204,10 +1204,10 @@ namespace ocs2
       
       if (joy_msg->buttons[joyButtonMap["BUTTON_LB"]])// 按下左侧侧键，切换模式
       {
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
-        pubModeGaitScale(0.9);
-        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
-        pubModeGaitScale(1.1);
+        if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
+          pubModeGaitScale(0.9);
+        else if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
+          pubModeGaitScale(1.1);
         else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
         {
           arm_ctrl_mode_ = (arm_ctrl_mode_ > 0)? 0 : 1;
