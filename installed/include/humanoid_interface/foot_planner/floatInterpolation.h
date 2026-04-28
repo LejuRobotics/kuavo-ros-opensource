@@ -28,12 +28,19 @@ public:
                                const vector_t& desired_leg_q);
 
 private:
+    struct IkSafetyConfig {    
+        double knee_min_rad{0.25};    // |knee| < knee_min 认为接近伸直风险
+        double torso_dz_step_m{0.003}; // 不安全时下调躯干高度步长（m），默认 5mm
+        int max_retries{5};           // 最多重试次数（每次会重新跑IK）
+    };
+
     InverseKinematics ikSolver_;
     PinocchioInterface pinocchio_interface_;
     const CentroidalModelInfo modelInfo_;
     std::vector<std::string> footFrameNames_ = {"leg_l6_link", "leg_r6_link"}; // 左右腿末端执行器的frame名称
     std::vector<size_t> footFrameIds_; // 左右腿末端执行器的frame id
     std::string baseFrameNames_ = {"base_link"}; // 浮动基的frame名称
+    IkSafetyConfig safety_{};
 };
 
 
