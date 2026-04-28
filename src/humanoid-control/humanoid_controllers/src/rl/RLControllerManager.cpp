@@ -134,9 +134,9 @@ namespace humanoid_controller
       auto* current_controller = controllers_[current_controller_name_].get();
       bool current_is_fall_down_controller = current_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER;
       bool current_is_dance_controller = current_controller->getType() == RLControllerType::DANCE_CONTROLLER;
-      if (!current_controller->isAllowToExit() && (current_is_fall_down_controller))
+      if (!current_controller->isAllowToExit() || current_is_fall_down_controller)
       {
-        ROS_WARN("[RLControllerManager] Current controller is mimic controller, switch to Next controller blocked!");
+        ROS_WARN("[RLControllerManager] Current controller is not allow to exit, switch to Next controller blocked!");
         return false;
       }
     }

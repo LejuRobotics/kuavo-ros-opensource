@@ -1336,13 +1336,20 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
       {
-        if (!joy_execute_action_)
+        // Roban: B switch to MPC
+        if (IS_ROBAN(rb_version_))
+        {
+          ROS_INFO("[JoyControl] B: switch to MPC");
+          callSwitchControllerService("mpc");
+          return;
+        }
+        else if (!joy_execute_action_)
         {
           publishGaitTemplate("trot");
         }
         else
         {
-          // 使用 TROT 作为“遥感/方向键输入”开关
+          // 使用 TROT 作为"遥感/方向键输入"开关
           axes_input_enabled_ = !axes_input_enabled_;
           ROS_WARN_STREAM("[JoyControl] Axes input toggled: " << (axes_input_enabled_ ? "ENABLED" : "DISABLED"));
           if (!axes_input_enabled_)
@@ -1357,6 +1364,13 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
+        // Roban: X switch to AMP
+        if (IS_ROBAN(rb_version_))
+        {
+          ROS_INFO("[JoyControl] X: switch to amp_controller");
+          callSwitchControllerService("amp_controller");
+          return;
+        }
         ROS_INFO("[JoyControl] switch to next controller");
         // Get controller list and switch to next
         switchToNextController();
