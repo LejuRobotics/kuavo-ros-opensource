@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <robot name="biped_s52">
   <mujoco>
-    <compiler meshdir="../meshes/" balanceinertia="true" discardvisual="false" />
+    <compiler meshdir="package://kuavo_assets/models/biped_s52/meshes/" balanceinertia="true" discardvisual="false" />
   </mujoco>
   <link name="dummy_link" />
   <link name="base_link">
@@ -1452,7 +1452,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../meshes/head_camera_base.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s52/meshes/head_camera_base.STL" />
       </geometry>
       <material name="">
         <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
@@ -1474,7 +1474,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../meshes/head_camera_depth.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s52/meshes/head_camera_depth.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1487,19 +1487,6 @@
     <child link="head_camera_depth" />
     <axis xyz="0 0 0" />
   </joint>
-  <link name="camera_base">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <mass value="0.000001" />
-      <inertia ixx="0.000000001" ixy="0" ixz="0" iyy="0.000000001" iyz="0" izz="0.000000001" />
-    </inertial>
-  </link>
-  <joint name="camera_base_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="head_camera_depth" />
-    <child link="camera_base" />
-    <axis xyz="0 0 0" />
-  </joint>
   <link name="head_radar">
     <inertial>
       <origin xyz="0.00018505 -0.00000652 0.01776962" rpy="0 0 0" />
@@ -1509,7 +1496,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../meshes/head_radar.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s52/meshes/head_radar.STL" />
       </geometry>
       <material name="">
         <color rgba="0.611764705882353 0.658823529411765 0.670588235294118 1" />

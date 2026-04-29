@@ -8,7 +8,7 @@
   <xacro:include filename="$(find realsense_ros_gazebo)/xacro/depthcam.xacro"/>
 
   <!-- d435 声明 -->
-  <xacro:realsense_d435 sensor_name="camera" parent_link="camera_base" rate="30">
+  <xacro:realsense_d435 sensor_name="camera" parent_link="head_camera_base" rate="30">
     <origin rpy="0 0 0 " xyz="0 0 0"/>
   </xacro:realsense_d435>
 
