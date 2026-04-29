@@ -45,12 +45,12 @@ public:
         }
         // thumb - LinkerL6手真实关节范围从URDF读取
         auto iter = jga_.ctrladr().begin();
-        // pos[0]对应l_thumb_cmc_roll关节，范围[-0.087266, 1.256637]弧度
+        // pos[0]对应l_thumb_cmc_yaw关节，范围[-0.087266, 1.256637]弧度
         finger_status_.positions[1] = Joints2Curl(pos[0], {-0.087266, 1.256637}, pos[0], {-0.087266, 1.256637});
         finger_status_.speeds[1] = vel[0];
         finger_status_.currents[1] = tau[0];
         iter++;
-        // pos[1]对应l_thumb_cmc_pitch关节，pos[2]对应l_thumb_dip关节，和其他手指一样合并计算曲度
+        // pos[1]对应l_thumb_cmc_pitch关节，pos[2]对应l_thumb_ip关节，和其他手指一样合并计算曲度
         int actuator_pitch = *iter;
         ++iter;
         int actuator_dip = *iter;
@@ -79,13 +79,13 @@ public:
     void writeCallback(mjData *d) override {
         std::vector<double> ctrl_cmd;
         auto iter = jga_.ctrladr().begin();
-        // thumb roll: 单关节无耦合，直接映射（和其他手指的单控制逻辑对齐）
+        // thumb yaw: 单关节无耦合，直接映射（和其他手指的单控制逻辑对齐）
         double roll_norm = ctrl_cmd_[1] / 255.0;
         auto &roll_range = ctrllimited_map_[*iter];
         double roll_cmd = roll_range[0] + roll_norm * (roll_range[1] - roll_range[0]);
         ctrl_cmd.push_back(roll_cmd);
         iter++;
-        // thumb pitch + dip: 耦合控制，和其他手指逻辑完全一致，使用拇指专属mimic比例1.226495
+        // thumb pitch + ip: 耦合控制，和其他手指逻辑完全一致，使用拇指专属mimic比例1.226495
         auto &pitch_range = ctrllimited_map_[*iter];
         iter++;
         auto &dip_range = ctrllimited_map_[*iter];

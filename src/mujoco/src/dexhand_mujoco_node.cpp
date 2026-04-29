@@ -44,12 +44,12 @@ bool DexHandMujocoRosNode::init(ros::NodeHandle& nh,
     if (hand_type_ == HandType::LINKER_L6 || hand_type_ == HandType::LINKER_O6) {
         // Linker系列灵巧手：订阅新的标准控制话题，发布手部状态话题
         std::string hand_name = (hand_type_ == HandType::LINKER_L6) ? "LinkerL6" : "LinkerO6";
-        linker_l_hand_command_sub_ = nh_.subscribe<sensor_msgs::JointState>("/cb_l_hand_control_cmd", 10, &DexHandMujocoRosNode::linkerLeftHandCommandCallback, this);
-        linker_r_hand_command_sub_ = nh_.subscribe<sensor_msgs::JointState>("/cb_r_hand_control_cmd", 10, &DexHandMujocoRosNode::linkerRightHandCommandCallback, this);
-        l_hand_state_pub_ = nh_.advertise<sensor_msgs::JointState>("/cb_l_hand_state", 10);
-        r_hand_state_pub_ = nh_.advertise<sensor_msgs::JointState>("/cb_r_hand_state", 10);
-        ROS_INFO("[DexHandMujoco] ✅ %s hand control topics subscribed! Listening to /cb_l_hand_control_cmd and /cb_r_hand_control_cmd", hand_name.c_str());
-        ROS_INFO("[DexHandMujoco] ✅ %s hand state topics advertised! Publishing to /cb_l_hand_state and /cb_r_hand_state", hand_name.c_str());
+        linker_l_hand_command_sub_ = nh_.subscribe<sensor_msgs::JointState>("/cb_left_hand_control_cmd", 10, &DexHandMujocoRosNode::linkerLeftHandCommandCallback, this);
+        linker_r_hand_command_sub_ = nh_.subscribe<sensor_msgs::JointState>("/cb_right_hand_control_cmd", 10, &DexHandMujocoRosNode::linkerRightHandCommandCallback, this);
+        l_hand_state_pub_ = nh_.advertise<sensor_msgs::JointState>("/cb_left_hand_state", 10);
+        r_hand_state_pub_ = nh_.advertise<sensor_msgs::JointState>("/cb_right_hand_state", 10);
+        ROS_INFO("[DexHandMujoco] ✅ %s hand control topics subscribed! Listening to /cb_left_hand_control_cmd and /cb_right_hand_control_cmd", hand_name.c_str());
+        ROS_INFO("[DexHandMujoco] ✅ %s hand state topics advertised! Publishing to /cb_left_hand_state and /cb_right_hand_state", hand_name.c_str());
     } else {
         // 强脑手：兼容旧的所有控制话题和状态发布
         status_pub_ = nh_.advertise<sensor_msgs::JointState>("dexhand/state", 10);

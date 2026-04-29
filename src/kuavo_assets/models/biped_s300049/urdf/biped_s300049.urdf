@@ -812,7 +812,7 @@
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_r2_link" />
     <child link="zarm_r3_link" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 1 0" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
     <dynamics damping="0.02" friction="0.02" />
   </joint>
@@ -866,7 +866,7 @@
     <origin xyz="-0.0200000000000001 0 -0.127037274261587" rpy="0 0 0" />
     <parent link="zarm_r4_link" />
     <child link="zarm_r5_link" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 1 0" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
     <dynamics damping="0.02" friction="0.02" />
   </joint>
@@ -1693,7 +1693,7 @@
     </collision>
   </link>
 
-  <joint name="l_thumb_cmc_roll" type="revolute">
+  <joint name="l_thumb_cmc_yaw" type="revolute">
     <origin xyz="0.0078133 -0.029898 0.026692" rpy="-0.034907 0 0" />
     <parent link="l_hand_base_link" />
     <child link="l_thumb_metacarpals_base1" />
@@ -1768,7 +1768,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="l_thumb_dip" type="revolute">
+  <joint name="l_thumb_ip" type="revolute">
     <origin xyz="0 0.0061 0.0827" rpy="0 0 0" />
     <parent link="l_thumb_metacarpals" />
     <child link="l_thumb_distal" />
@@ -2246,10 +2246,10 @@
 
   <transmission name="trans_thumb_cmc_roll">
     <type>transmission_interface/SimpleTransmission</type>
-    <joint name="l_thumb_cmc_roll">
+    <joint name="l_thumb_cmc_yaw">
       <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
     </joint>
-    <actuator name="motor_thumb_cmc_roll">
+    <actuator name="motor_thumb_cmc_yaw">
       <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
       <mechanicalReduction>0.0084</mechanicalReduction>
     </actuator>
@@ -2318,7 +2318,7 @@
       <joint name="couple_ring" joint1="ring_dip" joint2="ring_mcp_pitch" polycoef="0 1.125676 0 0 0 0"/>
       <joint name="couple_pinky" joint1="pinky_dip" joint2="pinky_mcp_pitch" polycoef="0 1.125676 0 0 0 0"/>
       <!-- 大拇指DIP关节的mimic约束 - 使用1.226495 -->
-      <joint name="couple_thumb" joint1="thumb_dip" joint2="thumb_cmc_pitch" polycoef="0 1.226495 0 0 0 0"/>
+      <joint name="couple_thumb" joint1="thumb_ip" joint2="thumb_cmc_pitch" polycoef="0 1.226495 0 0 0 0"/>
     </equality>
   </mujoco>
   <gazebo reference="hand_base_link">
@@ -2382,7 +2382,7 @@
     </collision>
   </link>
   <joint name="r_wrist_ft_to_hand" type="fixed">
-    <origin xyz="0 0 -0.065" rpy="-3.1415926 0 1.5707963" />
+    <origin xyz="0 0 -0.065" rpy="0 3.1415926 -1.5707963" />
     <parent link="r_wrist_ft_link" />
     <child link="r_hand_base_link" />
   </joint>
@@ -2432,7 +2432,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="r_thumb_cmc_roll" type="revolute">
+  <joint name="r_thumb_cmc_yaw" type="revolute">
     <origin xyz="0.0078133 0.030812 0.025678" rpy="-0.034907 0 0" />
     <parent link="r_hand_base_link" />
     <child link="r_thumb_metacarpals_base1" />
@@ -2490,7 +2490,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="r_thumb_dip" type="revolute">
+  <joint name="r_thumb_ip" type="revolute">
     <origin xyz="0 -0.0061 0.0827" rpy="0 0 0" />
     <parent link="r_thumb_metacarpals" />
     <child link="r_thumb_distal" />

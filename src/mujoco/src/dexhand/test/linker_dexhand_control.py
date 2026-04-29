@@ -95,7 +95,7 @@ def select_interface():
     """选择控制接口"""
     print("\n" + "-" * 40)
     print("选择控制接口:")
-    print("  1. L6 原生接口 (/cb_l_hand_control_cmd, /cb_r_hand_control_cmd)")
+    print("  1. L6 原生接口 (/cb_left_hand_control_cmd, /cb_right_hand_control_cmd)")
     print("  2. 新版统一接口 (/dexhand/command)")
     print("-" * 40)
     while True:
@@ -268,8 +268,8 @@ def main():
     rospy.init_node('l6_dexhand_control_test', anonymous=True)
 
     # 创建发布者
-    l_pub = rospy.Publisher('/cb_l_hand_control_cmd', JointState, queue_size=10)
-    r_pub = rospy.Publisher('/cb_r_hand_control_cmd', JointState, queue_size=10)
+    l_pub = rospy.Publisher('/cb_left_hand_control_cmd', JointState, queue_size=10)
+    r_pub = rospy.Publisher('/cb_right_hand_control_cmd', JointState, queue_size=10)
     new_pub = rospy.Publisher('/dexhand/command', dexhandCommand, queue_size=10)
     rate = rospy.Rate(PUBLISH_RATE)
 

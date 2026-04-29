@@ -622,8 +622,8 @@ namespace
           if (hand_type_value == 1) {
               // LinkerL6灵巧手关节命名
               std::cout << "[mujoco_node]: Initialize LinkerL6 dexhand joint addresses" << std::endl;
-              init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_roll", "l_pinky_pip_pitch");
-              init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_roll", "r_pinky_pip_pitch");
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_yaw", "l_pinky_dip");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_yaw", "r_pinky_dip");
           } else if (hand_type_value == 2) {
               // LinkerO6灵巧手关节命名
               std::cout << "[mujoco_node]: Initialize LinkerO6 dexhand joint addresses" << std::endl;

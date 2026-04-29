@@ -644,7 +644,13 @@ namespace humanoid_controller
     vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;
     vector_t jointPosWBC_, jointVelWBC_, jointAccWBC_, jointCurrentWBC_;
     vector_t jointPosRL_, jointVelRL_, jointAccRL_, jointTorqueRL_;
-    vector_t dexhand_joint_pos_ = vector_t::Zero(12);
+    vector_t dexhand_joint_pos_ = vector_t::Zero(12);  // qiangnao灵巧手专用变量
+    // Linker L6/O6灵巧手专属变量（命名完全和qiangnao区分）
+    vector_t linker_hand_joint_pos_ = vector_t::Zero(12);  // 12维：左手6+右手6
+    ros::Subscriber linker_left_hand_state_sub_;
+    ros::Subscriber linker_right_hand_state_sub_;
+    void linkerLeftHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
+    void linkerRightHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
 
     vector_t motor_c2t_;
     std::vector<std::vector<double>> motor_cul;

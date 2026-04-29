@@ -261,20 +261,23 @@
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_hand_base" />
 
                         <!-- 拇指 -->
-                        <body name="l_thumb_metacarpals_base1" pos="0.0078133 -0.029898 0.026692" euler="-0.034907 0 0">
-                          <joint name="l_thumb_cmc_roll" pos="0 0 0" axis="0 0 1" limited="true" range="-0.087266 1.256637" damping="0.2" />
+                        <body name="l_thumb_metacarpals_base1" pos="0.0078133 -0.029898 0.026692" quat="0.99985 -0.01745 0 0">
+                          <joint name="l_thumb_cmc_yaw" pos="0 0 0" axis="0 0 1" limited="true" range="-0.087266 1.256637" damping="0.2" />
                           <inertial pos="0.0018663 -0.0066406 0.001533" quat="1 0 0 0" mass="0.01" diaginertia="3.3724e-7 2.9457e-7 4.903e-7" />
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_thumb_metacarpals_base1" />
+                          <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="l_thumb_metacarpals_base1" />
 
-                          <body name="l_thumb_metacarpals" pos="0.0057298 -0.01332 0.0027456" euler="1.1083 0 0.40143">
+                          <body name="l_thumb_metacarpals" pos="0.0057298 -0.01332 0.0027456" quat="0.8337 0.5152 0.1046 0.1693">
                             <joint name="l_thumb_cmc_pitch" pos="0 0 0" axis="-1 0 0" limited="true" range="0 0.837758" damping="0.2" />
                             <inertial pos="0.0076927 0.0859662 0.0235283" quat="1 0 0 0" mass="0.065" diaginertia="8.407e-6 8.3899e-6 2.0091e-6" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_thumb_metacarpals" />
+                            <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="l_thumb_metacarpals" />
 
                             <body name="l_thumb_distal" pos="0 0.0061 0.0827" euler="0 0 0">
-                              <joint name="l_thumb_dip" pos="0 0 0" axis="-1 0 0" limited="true" range="0 0.963287" damping="0.2" />
+                              <joint name="l_thumb_ip" pos="0 0 0" axis="-1 0 0" limited="true" range="0 0.963287" damping="0.2" />
                               <inertial pos="0.0076927 0.0798662 -0.0591717" quat="1 0 0 0" mass="0.018" diaginertia="1.5546e-6 1.7108e-6 9.1709e-7" />
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_thumb_distal" />
+                              <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="l_thumb_distal" />
                             </body>
                           </body>
                         </body>
@@ -284,11 +287,13 @@
                           <joint name="l_index_mcp_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.134464" damping="0.2" />
                           <inertial pos="0.001776 -0.00011 0.012556" quat="1 0 0 0" mass="0.008553" diaginertia="7.97543e-7 8.00499e-7 3.57001e-7" />
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_index_proximal" />
+                          <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="l_index_proximal" />
 
                           <body name="l_index_distal" pos="0.001001 -0.000537 0.028003" euler="0 0 0">
-                            <joint name="l_index_pip_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
+                            <joint name="l_index_dip" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
                             <inertial pos="0.0134 0.002262 0.016992" quat="1 0 0 0" mass="0.018408" diaginertia="2.488712e-6 2.488712e-6 9.7712e-7" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_index_distal" />
+                            <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="l_index_distal" />
                           </body>
                         </body>
 
@@ -299,7 +304,7 @@
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_middle_proximal" />
 
                           <body name="l_middle_distal" pos="0.000994 0.000058 0.028008" euler="0 0 0">
-                            <joint name="l_middle_pip_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
+                            <joint name="l_middle_dip" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
                             <inertial pos="0.0134 0.002262 0.016992" quat="1 0 0 0" mass="0.018408" diaginertia="2.488712e-6 2.488712e-6 9.7712e-7" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_middle_distal" />
                           </body>
@@ -312,7 +317,7 @@
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_ring_proximal" />
 
                           <body name="l_ring_distal" pos="0.000979 0.001534 0.027967" euler="0 0 0">
-                            <joint name="l_ring_pip_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
+                            <joint name="l_ring_dip" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
                             <inertial pos="0.0134 0.002262 0.016992" quat="1 0 0 0" mass="0.018408" diaginertia="2.488712e-6 2.488712e-6 9.7712e-7" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_ring_distal" />
                           </body>
@@ -325,7 +330,7 @@
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_pinky_proximal" />
 
                           <body name="l_pinky_distal" pos="0.000979 0.001534 0.027967" euler="0 0 0">
-                            <joint name="l_pinky_pip_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
+                            <joint name="l_pinky_dip" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
                             <inertial pos="0.0134 0.002262 0.016992" quat="1 0 0 0" mass="0.018408" diaginertia="2.488712e-6 2.488712e-6 9.7712e-7" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="l_pinky_distal" />
                           </body>
@@ -448,20 +453,23 @@
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_hand_base" />
 
                         <!-- 拇指 -->
-                        <body name="r_thumb_metacarpals_base1" pos="0.0078133 0.030812 0.025678" euler="-0.034907 0 0">
-                          <joint name="r_thumb_cmc_roll" pos="0 0 0" axis="0 0.034899 -0.99939" limited="true" range="-0.087266 1.256637" damping="0.2" />
+                        <body name="r_thumb_metacarpals_base1" pos="0.0078133 0.030812 0.025678" quat="0.99985 -0.01745 0 0">
+                          <joint name="r_thumb_cmc_yaw" pos="0 0 0" axis="0 0.034899 -0.99939" limited="true" range="-0.087266 1.256637" damping="0.2" />
                           <inertial pos="0.0018663 0.0066406 0.001533" quat="1 0 0 0" mass="0.01" diaginertia="3.3724e-7 2.9457e-7 4.903e-7" />
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_thumb_metacarpals_base1" />
+                          <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="r_thumb_metacarpals_base1" />
 
-                          <body name="r_thumb_metacarpals" pos="0.0054997 0.013314 0.0032166" euler="-1.0762 0.013637 -0.40121">
+                          <body name="r_thumb_metacarpals" pos="0.0054997 0.013314 0.0032166" quat="0.8411 -0.5030 0.1081 -0.1672">
                             <joint name="r_thumb_cmc_pitch" pos="0 0 0" axis="1 0 0" limited="true" range="0 0.837758" damping="0.2" />
                             <inertial pos="0.0076927 -0.0859662 0.0235283" quat="1 0 0 0" mass="0.065" diaginertia="8.407e-6 8.3899e-6 2.0091e-6" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_thumb_metacarpals" />
+                            <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="r_thumb_metacarpals" />
 
                             <body name="r_thumb_distal" pos="0 -0.0061 0.0827" euler="0 0 0">
-                              <joint name="r_thumb_dip" pos="0 0 0" axis="1 0 0" limited="true" range="0 0.963287" damping="0.2" />
+                              <joint name="r_thumb_ip" pos="0 0 0" axis="1 0 0" limited="true" range="0 0.963287" damping="0.2" />
                               <inertial pos="0.0076927 -0.0798662 -0.0591717" quat="1 0 0 0" mass="0.018" diaginertia="1.5546e-6 1.7108e-6 9.1709e-7" />
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_thumb_distal" />
+                              <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="r_thumb_distal" />
                             </body>
                           </body>
                         </body>
@@ -471,11 +479,13 @@
                           <joint name="r_index_mcp_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.134464" damping="0.2" />
                           <inertial pos="0.001776 0.00011 0.012556" quat="1 0 0 0" mass="0.008553" diaginertia="7.97543e-7 8.00499e-7 3.57001e-7" />
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_index_proximal" />
+                          <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="r_index_proximal" />
 
                           <body name="r_index_distal" pos="0.0009359 0 0.028002" euler="0 0 0">
-                            <joint name="r_index_pip_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
+                            <joint name="r_index_dip" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
                             <inertial pos="0.0134 -0.002262 0.016992" quat="1 0 0 0" mass="0.018408" diaginertia="2.488712e-6 2.488712e-6 9.7712e-7" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_index_distal" />
+                            <geom type="mesh" contype="1" conaffinity="1" rgba="0.796 0.824 0.937 1" mesh="r_index_distal" />
                           </body>
                         </body>
 
@@ -486,7 +496,7 @@
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_middle_proximal" />
 
                           <body name="r_middle_distal" pos="0.0009359 0 0.028002" euler="0 0 0">
-                            <joint name="r_middle_pip_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
+                            <joint name="r_middle_dip" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
                             <inertial pos="0.0134 -0.002262 0.016992" quat="1 0 0 0" mass="0.018408" diaginertia="2.488712e-6 2.488712e-6 9.7712e-7" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_middle_distal" />
                           </body>
@@ -499,7 +509,7 @@
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_ring_proximal" />
 
                           <body name="r_ring_distal" pos="0.0009359 0 0.028002" euler="0 0 0">
-                            <joint name="r_ring_pip_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
+                            <joint name="r_ring_dip" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
                             <inertial pos="0.0134 -0.002262 0.016992" quat="1 0 0 0" mass="0.018408" diaginertia="2.488712e-6 2.488712e-6 9.7712e-7" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_ring_distal" />
                           </body>
@@ -512,7 +522,7 @@
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_pinky_proximal" />
 
                           <body name="r_pinky_distal" pos="0.0009359 0 0.028002" euler="0 0 0">
-                            <joint name="r_pinky_pip_pitch" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
+                            <joint name="r_pinky_dip" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.277039" damping="0.2" />
                             <inertial pos="0.0134 -0.002262 0.016992" quat="1 0 0 0" mass="0.018408" diaginertia="2.488712e-6 2.488712e-6 9.7712e-7" />
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.796 0.824 0.937 1" mesh="r_pinky_distal" />
                           </body>
@@ -639,30 +649,30 @@
     <!-- L6灵巧手 手指控制器 (共20个，左右手各10个) -->
     <!-- ====================================== -->
     <!-- 左手 -->
-    <position gear="1" joint="l_thumb_cmc_roll" name="l_thumb_cmc_roll_motor" ctrllimited="true" ctrlrange="-0.087266 1.256637" />
+    <position gear="1" joint="l_thumb_cmc_yaw" name="l_thumb_cmc_yaw_motor" ctrllimited="true" ctrlrange="-0.087266 1.256637" />
     <position gear="1" joint="l_thumb_cmc_pitch" name="l_thumb_cmc_pitch_motor" ctrllimited="true" ctrlrange="0 0.837758" />
-    <position gear="1" joint="l_thumb_dip" name="l_thumb_dip_motor" ctrllimited="true" ctrlrange="0 0.963287" />
+    <position gear="1" joint="l_thumb_ip" name="l_thumb_ip_motor" ctrllimited="true" ctrlrange="0 0.963287" />
     <position gear="1" joint="l_index_mcp_pitch" name="l_index_mcp_pitch_motor" ctrllimited="true" ctrlrange="0 1.134464" />
-    <position gear="1" joint="l_index_pip_pitch" name="l_index_pip_pitch_motor" ctrllimited="true" ctrlrange="0 1.277039" />
+    <position gear="1" joint="l_index_dip" name="l_index_dip_motor" ctrllimited="true" ctrlrange="0 1.277039" />
     <position gear="1" joint="l_middle_mcp_pitch" name="l_middle_mcp_pitch_motor" ctrllimited="true" ctrlrange="0 1.134464" />
-    <position gear="1" joint="l_middle_pip_pitch" name="l_middle_pip_pitch_motor" ctrllimited="true" ctrlrange="0 1.277039" />
+    <position gear="1" joint="l_middle_dip" name="l_middle_dip_motor" ctrllimited="true" ctrlrange="0 1.277039" />
     <position gear="1" joint="l_ring_mcp_pitch" name="l_ring_mcp_pitch_motor" ctrllimited="true" ctrlrange="0 1.134464" />
-    <position gear="1" joint="l_ring_pip_pitch" name="l_ring_pip_pitch_motor" ctrllimited="true" ctrlrange="0 1.277039" />
+    <position gear="1" joint="l_ring_dip" name="l_ring_dip_motor" ctrllimited="true" ctrlrange="0 1.277039" />
     <position gear="1" joint="l_pinky_mcp_pitch" name="l_pinky_mcp_pitch_motor" ctrllimited="true" ctrlrange="0 1.134464" />
-    <position gear="1" joint="l_pinky_pip_pitch" name="l_pinky_pip_pitch_motor" ctrllimited="true" ctrlrange="0 1.277039" />
+    <position gear="1" joint="l_pinky_dip" name="l_pinky_dip_motor" ctrllimited="true" ctrlrange="0 1.277039" />
 
     <!-- 右手 -->
-    <position gear="1" joint="r_thumb_cmc_roll" name="r_thumb_cmc_roll_motor" ctrllimited="true" ctrlrange="-0.087266 1.256637" />
+    <position gear="1" joint="r_thumb_cmc_yaw" name="r_thumb_cmc_yaw_motor" ctrllimited="true" ctrlrange="-0.087266 1.256637" />
     <position gear="1" joint="r_thumb_cmc_pitch" name="r_thumb_cmc_pitch_motor" ctrllimited="true" ctrlrange="0 0.837758" />
-    <position gear="1" joint="r_thumb_dip" name="r_thumb_dip_motor" ctrllimited="true" ctrlrange="0 0.963287" />
+    <position gear="1" joint="r_thumb_ip" name="r_thumb_ip_motor" ctrllimited="true" ctrlrange="0 0.963287" />
     <position gear="1" joint="r_index_mcp_pitch" name="r_index_mcp_pitch_motor" ctrllimited="true" ctrlrange="0 1.134464" />
-    <position gear="1" joint="r_index_pip_pitch" name="r_index_pip_pitch_motor" ctrllimited="true" ctrlrange="0 1.277039" />
+    <position gear="1" joint="r_index_dip" name="r_index_dip_motor" ctrllimited="true" ctrlrange="0 1.277039" />
     <position gear="1" joint="r_middle_mcp_pitch" name="r_middle_mcp_pitch_motor" ctrllimited="true" ctrlrange="0 1.134464" />
-    <position gear="1" joint="r_middle_pip_pitch" name="r_middle_pip_pitch_motor" ctrllimited="true" ctrlrange="0 1.277039" />
+    <position gear="1" joint="r_middle_dip" name="r_middle_dip_motor" ctrllimited="true" ctrlrange="0 1.277039" />
     <position gear="1" joint="r_ring_mcp_pitch" name="r_ring_mcp_pitch_motor" ctrllimited="true" ctrlrange="0 1.134464" />
-    <position gear="1" joint="r_ring_pip_pitch" name="r_ring_pip_pitch_motor" ctrllimited="true" ctrlrange="0 1.277039" />
+    <position gear="1" joint="r_ring_dip" name="r_ring_dip_motor" ctrllimited="true" ctrlrange="0 1.277039" />
     <position gear="1" joint="r_pinky_mcp_pitch" name="r_pinky_mcp_pitch_motor" ctrllimited="true" ctrlrange="0 1.134464" />
-    <position gear="1" joint="r_pinky_pip_pitch" name="r_pinky_pip_pitch_motor" ctrllimited="true" ctrlrange="0 1.277039" />
+    <position gear="1" joint="r_pinky_dip" name="r_pinky_dip_motor" ctrllimited="true" ctrlrange="0 1.277039" />
   </actuator>
   <sensor>
     <accelerometer name="BodyAcc" site="imu" />
@@ -707,28 +717,28 @@
     <!-- L6灵巧手 手指位置传感器 (共20个，左右手各10个) -->
     <!-- ====================================== -->
     <!-- 左手 -->
-    <jointpos name="l_thumbCMC_pos" joint="l_thumb_cmc_roll" />
+    <jointpos name="l_thumbCMC_pos" joint="l_thumb_cmc_yaw" />
     <jointpos name="l_thumbMCP_pos" joint="l_thumb_cmc_pitch" />
     <jointpos name="l_indexMCP_pos" joint="l_index_mcp_pitch" />
-    <jointpos name="l_indexPIP_pos" joint="l_index_pip_pitch" />
+    <jointpos name="l_indexPIP_pos" joint="l_index_dip" />
     <jointpos name="l_middleMCP_pos" joint="l_middle_mcp_pitch" />
-    <jointpos name="l_middlePIP_pos" joint="l_middle_pip_pitch" />
+    <jointpos name="l_middlePIP_pos" joint="l_middle_dip" />
     <jointpos name="l_ringMCP_pos" joint="l_ring_mcp_pitch" />
-    <jointpos name="l_ringPIP_pos" joint="l_ring_pip_pitch" />
+    <jointpos name="l_ringPIP_pos" joint="l_ring_dip" />
     <jointpos name="l_littleMCP_pos" joint="l_pinky_mcp_pitch" />
-    <jointpos name="l_littlePIP_pos" joint="l_pinky_pip_pitch" />
+    <jointpos name="l_littlePIP_pos" joint="l_pinky_dip" />
 
     <!-- 右手 -->
-    <jointpos name="r_thumbCMC_pos" joint="r_thumb_cmc_roll" />
+    <jointpos name="r_thumbCMC_pos" joint="r_thumb_cmc_yaw" />
     <jointpos name="r_thumbMCP_pos" joint="r_thumb_cmc_pitch" />
     <jointpos name="r_indexMCP_pos" joint="r_index_mcp_pitch" />
-    <jointpos name="r_indexPIP_pos" joint="r_index_pip_pitch" />
+    <jointpos name="r_indexPIP_pos" joint="r_index_dip" />
     <jointpos name="r_middleMCP_pos" joint="r_middle_mcp_pitch" />
-    <jointpos name="r_middlePIP_pos" joint="r_middle_pip_pitch" />
+    <jointpos name="r_middlePIP_pos" joint="r_middle_dip" />
     <jointpos name="r_ringMCP_pos" joint="r_ring_mcp_pitch" />
-    <jointpos name="r_ringPIP_pos" joint="r_ring_pip_pitch" />
+    <jointpos name="r_ringPIP_pos" joint="r_ring_dip" />
     <jointpos name="r_littleMCP_pos" joint="r_pinky_mcp_pitch" />
-    <jointpos name="r_littlePIP_pos" joint="r_pinky_pip_pitch" />
+    <jointpos name="r_littlePIP_pos" joint="r_pinky_dip" />
     <!-- <jointpos name="l_thumbCMC_pos" joint="l_thumbCMC" />
     <jointpos name="l_thumbMCP_pos" joint="l_thumbMCP" />
     <jointpos name="l_indexMCP_pos" joint="l_indexMCP" />
@@ -782,28 +792,28 @@
     <!-- L6灵巧手 手指速度传感器 (共20个，左右手各10个) -->
     <!-- ====================================== -->
     <!-- 左手 -->
-    <jointvel name="l_thumbCMC_vel" joint="l_thumb_cmc_roll" />
+    <jointvel name="l_thumbCMC_vel" joint="l_thumb_cmc_yaw" />
     <jointvel name="l_thumbMCP_vel" joint="l_thumb_cmc_pitch" />
     <jointvel name="l_indexMCP_vel" joint="l_index_mcp_pitch" />
-    <jointvel name="l_indexPIP_vel" joint="l_index_pip_pitch" />
+    <jointvel name="l_indexPIP_vel" joint="l_index_dip" />
     <jointvel name="l_middleMCP_vel" joint="l_middle_mcp_pitch" />
-    <jointvel name="l_middlePIP_vel" joint="l_middle_pip_pitch" />
+    <jointvel name="l_middlePIP_vel" joint="l_middle_dip" />
     <jointvel name="l_ringMCP_vel" joint="l_ring_mcp_pitch" />
-    <jointvel name="l_ringPIP_vel" joint="l_ring_pip_pitch" />
+    <jointvel name="l_ringPIP_vel" joint="l_ring_dip" />
     <jointvel name="l_littleMCP_vel" joint="l_pinky_mcp_pitch" />
-    <jointvel name="l_littlePIP_vel" joint="l_pinky_pip_pitch" />
+    <jointvel name="l_littlePIP_vel" joint="l_pinky_dip" />
 
     <!-- 右手 -->
-    <jointvel name="r_thumbCMC_vel" joint="r_thumb_cmc_roll" />
+    <jointvel name="r_thumbCMC_vel" joint="r_thumb_cmc_yaw" />
     <jointvel name="r_thumbMCP_vel" joint="r_thumb_cmc_pitch" />
     <jointvel name="r_indexMCP_vel" joint="r_index_mcp_pitch" />
-    <jointvel name="r_indexPIP_vel" joint="r_index_pip_pitch" />
+    <jointvel name="r_indexPIP_vel" joint="r_index_dip" />
     <jointvel name="r_middleMCP_vel" joint="r_middle_mcp_pitch" />
-    <jointvel name="r_middlePIP_vel" joint="r_middle_pip_pitch" />
+    <jointvel name="r_middlePIP_vel" joint="r_middle_dip" />
     <jointvel name="r_ringMCP_vel" joint="r_ring_mcp_pitch" />
-    <jointvel name="r_ringPIP_vel" joint="r_ring_pip_pitch" />
+    <jointvel name="r_ringPIP_vel" joint="r_ring_dip" />
     <jointvel name="r_littleMCP_vel" joint="r_pinky_mcp_pitch" />
-    <jointvel name="r_littlePIP_vel" joint="r_pinky_pip_pitch" />
+    <jointvel name="r_littlePIP_vel" joint="r_pinky_dip" />
     <!-- <jointvel name="l_thumbCMC_vel" joint="l_thumbCMC" />
     <jointvel name="l_thumbMCP_vel" joint="l_thumbMCP" />
     <jointvel name="l_indexMCP_vel" joint="l_indexMCP" />
