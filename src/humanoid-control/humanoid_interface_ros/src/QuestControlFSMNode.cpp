@@ -128,7 +128,6 @@ namespace ocs2
             }
             nodeHandle.param("/wheel_ik", wheel_ik_, false);
             ROS_INFO_STREAM("[QuestControlFSM] wheel_ik: " << (wheel_ik_ ? "true" : "false"));
-            nodeHandle.param("/use_pico", use_pico_, false);
 
             auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
             auto kuavo_settings = drake_interface_->getKuavoSettings();
@@ -211,8 +210,7 @@ namespace ocs2
 
             std::string change_arm_mode_service_name = robot_type_ == 1 ? "/wheel_arm_change_arm_ctrl_mode" : "/humanoid_change_arm_ctrl_mode";
             change_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(change_arm_mode_service_name);
-            std::string change_head_mode_service_name = use_pico_ ? "/pico/set_head_control_mode" : "/quest3/set_head_control_mode";
-            change_head_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetHeadControlMode>(change_head_mode_service_name);
+            change_head_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetHeadControlMode>("/quest3/set_head_control_mode");
 
             change_arm_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
 
@@ -963,14 +961,14 @@ namespace ocs2
 
             if (joystick_data_.left_first_button_pressed) // 左边第一个按钮按下了，切换模式
             {
-                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 关闭手臂控制、自动摆手
+                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // X+B：保持姿态 or 自动摆手
                 {
                     
-                    auto new_arm_mode = (arm_ctrl_mode_!=0) ? 0 : 2;
+                    auto new_arm_mode = (arm_ctrl_mode_!=0) ? 0 : 1;
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
                     callSetArmModeSrv(new_arm_mode);
                 }
-                else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed) // 启用手臂控制
+                else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed) // X+A：外部控制 or 自动摆手
                 {
                     // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪 
                     if (arm_collision_control_) {
@@ -2091,7 +2089,6 @@ namespace ocs2
         int robot_type_{0};  // 0: biped, 1: wheel robot
         int robot_version_int_{0};  // 机器人版本号
         bool wheel_ik_{false}; // 轮臂增量VR兼容模式开关
-        bool use_pico_{false}; // PICO开关
 
         // VR control limits (loaded from reference.info)
         double vr_squat_min_pitch_deg_{3.0};    // min pitch (deg)

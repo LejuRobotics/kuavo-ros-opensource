@@ -17,6 +17,7 @@
     <arg name="pico_service_mode" default="1"/>
     <arg name="pico_detection_mode" default="vr"/>
     <arg name="pico_startup_delay" default="2.0"/>
+    <arg name="head_control_mode" default="vr_follow"/>
 
     <!-- 仿真 -->
     <group if="$(arg sim_mode)">
@@ -43,5 +44,6 @@
         <arg name="service_mode" value="$(arg pico_service_mode)"/>
         <arg name="detection_mode" value="$(arg pico_detection_mode)"/>
         <arg name="startup_delay" value="$(arg pico_startup_delay)"/>
+        <arg name="head_control_mode" value="$(arg head_control_mode)"/>
     </include>
 </launch>

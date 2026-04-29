@@ -370,7 +370,7 @@ class KuavoPicoNode:
         self.last_xy_pressed = False
         
         # 头部控制模式相关 - 从参数服务器读取
-        self.current_head_mode = rospy.get_param('/pico_whole_body_teleop/head_control_mode', "auto_track_active")  # 从launch文件参数获取
+        self.current_head_mode = rospy.get_param('/head_control_mode', "vr_follow") 
         if self.current_head_mode == "auto_track_active":
             self.head_use_auto_track = True
         else:

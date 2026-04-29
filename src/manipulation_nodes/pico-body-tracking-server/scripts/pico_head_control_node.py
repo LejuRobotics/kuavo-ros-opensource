@@ -34,7 +34,7 @@ class PicoHeadControlNode:
     def __init__(self):
         rospy.init_node("pico_head_control_node")
 
-        self.mode = rospy.get_param("~mode", HeadControlMode.VR_FOLLOW)
+        self.mode = rospy.get_param("/head_control_mode", HeadControlMode.VR_FOLLOW)
         if self.mode not in HeadControlMode.ALL:
             rospy.logwarn("Invalid head mode '%s', fallback to vr_follow", self.mode)
             self.mode = HeadControlMode.VR_FOLLOW
