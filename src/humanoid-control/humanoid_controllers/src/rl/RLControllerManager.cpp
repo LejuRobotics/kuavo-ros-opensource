@@ -8,7 +8,10 @@
 #include "humanoid_controllers/rl/VMPController.h"
 #include "humanoid_controllers/rl/DanceController.h"
 #include <algorithm>
+#include <ros/master.h>
+#include <ros/topic.h>
 #include <ros/ros.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <yaml-cpp/yaml.h>
 #include <fstream>
 #include <boost/filesystem.hpp>
@@ -19,11 +22,32 @@
 
 namespace humanoid_controller
 {
+  namespace
+  {
+    constexpr char kDepthHistoryTopic[] = "/camera/depth/depth_history_array";
+  }  // namespace
+
   RLControllerManager::RLControllerManager() : current_controller_name_(""), 
                                                 nh_ptr_(nullptr)
   {
     // 初始化BASE_CONTROLLER列表，MPC控制器在索引0
     walk_controllers_.push_back("mpc");
+  }
+
+  RLControllerManager::~RLControllerManager()
+  {
+    depth_history_monitor_.stop();
+  }
+
+  void RLControllerManager::startDepthHistoryMonitor()
+  {
+    if (!nh_ptr_)
+    {
+      return;
+    }
+
+    depth_history_monitor_.setMaxSamples(depth_history_required_samples_);
+    depth_history_monitor_.start<std_msgs::Float64MultiArray>(*nh_ptr_, kDepthHistoryTopic, 200);
   }
 
   bool RLControllerManager::addController(const std::string& name, std::unique_ptr<RLControllerBase> controller)
@@ -126,8 +150,9 @@ namespace humanoid_controller
 
   bool RLControllerManager::switchController(const std::string& name)
   {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    const std::string current_before = current_controller_name_.empty() ? "mpc" : current_controller_name_;
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
+    const std::string current_before_name = current_controller_name_;
+    const std::string current_before = current_before_name.empty() ? "mpc" : current_before_name;
     // 检查当前是否为倒地起身控制器
     if (!current_controller_name_.empty())
     {
@@ -201,6 +226,36 @@ namespace humanoid_controller
       }
     }
 
+    auto it = controllers_.find(name);
+    if (it != controllers_.end() && it->second &&
+        it->second->getType() == RLControllerType::DEPTH_LOCO_CONTROLLER)
+    {
+      lock.unlock();
+      const bool depth_history_ok = isDepthHistoryTopicAvailable();
+      lock.lock();
+
+      if (current_controller_name_ != current_before_name)
+      {
+        ROS_WARN("[RLControllerManager] Controller state changed during depth history check, abort switch to '%s'.",
+                 name.c_str());
+        return false;
+      }
+
+      auto current_it = controllers_.find(name);
+      if (current_it == controllers_.end() || !current_it->second ||
+          current_it->second->getType() != RLControllerType::DEPTH_LOCO_CONTROLLER)
+      {
+        ROS_WARN("[RLControllerManager] Controller '%s' changed during depth history check.", name.c_str());
+        return false;
+      }
+
+      if (!depth_history_ok)
+      {
+        ROS_WARN("[RLControllerManager] Refuse to switch to depth_loco_controller because depth history topic check failed.");
+        return false;
+      }
+    }
+
     // 暂停当前控制器（如果存在）
     if (!current_controller_name_.empty())
     {
@@ -238,6 +293,60 @@ namespace humanoid_controller
       publishControllerSwitchEvent(current_before, to_controller);
     }
     return true;
+  }
+
+  bool RLControllerManager::isDepthHistoryTopicAvailable()
+  {
+    if (!nh_ptr_)
+    {
+      ROS_WARN("[DepthLocoSwitch] NodeHandle is null while checking topic '%s'.", kDepthHistoryTopic);
+      return false;
+    }
+
+    // 仅读取后台缓存的统计数据，避免切换路径上阻塞等待消息（并把判据/原因下沉到 TopicMonitor）
+    TopicMonitor::Requirements req;
+    req.must_be_published = true;
+    req.min_hz = depth_history_min_frequency_hz_;
+    req.max_age_sec = depth_history_wait_timeout_sec_;
+    req.min_samples = 2;
+
+    TopicMonitor::CheckReport report;
+    const auto res = depth_history_monitor_.check(req, &report);
+    if (res != TopicMonitor::CheckResult::Ok)
+    {
+      ROS_WARN("[DepthLocoSwitch] %s Refuse to switch to depth_loco_controller.", report.reason.c_str());
+      return false;
+    }
+
+    ROS_INFO("[DepthLocoSwitch] %s", report.reason.c_str());
+    return true;
+  }
+
+  void RLControllerManager::loadDepthHistoryCheckParams(ros::NodeHandle& nh)
+  {
+    constexpr double kDefaultMinFrequencyHz = 50.0;
+    constexpr double kDefaultWaitTimeoutSec = 2.0;
+    constexpr int kDefaultRequiredSamples = 10;
+    constexpr double kDefaultSampleTimeoutSec = 0.2;
+    constexpr const char* kLogTag = "[RLControllerManager]";
+
+    nh.param("depth_history_min_frequency_hz", depth_history_min_frequency_hz_, depth_history_min_frequency_hz_);
+    nh.param("depth_history_wait_timeout_sec", depth_history_wait_timeout_sec_, depth_history_wait_timeout_sec_);
+    nh.param("depth_history_required_samples", depth_history_required_samples_, depth_history_required_samples_);
+    nh.param("depth_history_sample_timeout_sec", depth_history_sample_timeout_sec_, depth_history_sample_timeout_sec_);
+
+    TopicMonitor::ensurePositiveParam(kLogTag, "depth_history_min_frequency_hz", depth_history_min_frequency_hz_, kDefaultMinFrequencyHz);
+    TopicMonitor::ensurePositiveParam(kLogTag, "depth_history_wait_timeout_sec", depth_history_wait_timeout_sec_, kDefaultWaitTimeoutSec);
+    TopicMonitor::ensureMinIntParam(kLogTag, "depth_history_required_samples", depth_history_required_samples_, 2, kDefaultRequiredSamples);
+    TopicMonitor::ensurePositiveParam(kLogTag, "depth_history_sample_timeout_sec", depth_history_sample_timeout_sec_, kDefaultSampleTimeoutSec);
+
+    ROS_INFO("[RLControllerManager] Depth history check params: min_frequency=%.1f Hz, wait_timeout=%.2f s, required_samples=%d, sample_timeout=%.2f s",
+             depth_history_min_frequency_hz_,
+             depth_history_wait_timeout_sec_,
+             depth_history_required_samples_,
+             depth_history_sample_timeout_sec_);
+
+    depth_history_monitor_.setMaxSamples(depth_history_required_samples_);
   }
 
   bool RLControllerManager::switchController(RLControllerType type)
@@ -587,6 +696,8 @@ namespace humanoid_controller
   bool RLControllerManager::initializeRosServices(ros::NodeHandle& nh)
   {
     nh_ptr_ = &nh;
+    loadDepthHistoryCheckParams(nh);
+    startDepthHistoryMonitor();
     
     switch_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_controller", 
                                                   &RLControllerManager::switchControllerCallback, this);

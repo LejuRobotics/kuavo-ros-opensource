@@ -1,7 +1,6 @@
 import subprocess
 import rospy
 import os
-import collections
 from rich import console
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
@@ -34,7 +33,6 @@ import re
 import numpy as np
 from sensor_msgs.msg import Joy
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Float64MultiArray
 
 console = console.Console()
 
@@ -289,8 +287,6 @@ _switch_controller_lock = threading.Lock()
 _switch_controller_cooling_until = 0.0  # 冷却期结束时间戳
 SWITCH_CONTROLLER_COOLDOWN = 3.0  # 冷却期时长（秒）
 _depth_loco_restore_controller_name = None  # 进入 depth_loco_controller 前的控制器名
-_depth_history_topic_monitor = None
-_depth_history_topic_monitor_lock = threading.Lock()
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_dir = os.path.join(os.path.dirname(current_dir), "config")
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
@@ -1142,108 +1138,6 @@ def get_current_controller_name():
         rospy.logerr(f"Service '{service_name}' not available: {e}")
         return None
 
-class TopicFrequencyMonitor(object):
-    """后台订阅话题并估算最近一段时间的消息频率。"""
-
-    def __init__(self, topic, msg_type, window_size=50, stale_timeout=0.5):
-        self._timestamps = collections.deque(maxlen=window_size)
-        self._stale_timeout = stale_timeout
-        self._lock = threading.Lock()
-        self._subscriber = rospy.Subscriber(topic, msg_type, self._cb, queue_size=window_size)
-
-    def _cb(self, _msg):
-        with self._lock:
-            self._timestamps.append(time.time())
-
-    def has_recent_message(self):
-        now_sec = time.time()
-        with self._lock:
-            if not self._timestamps:
-                return False
-            return (now_sec - self._timestamps[-1]) <= self._stale_timeout
-
-    def get_hz(self):
-        now_sec = time.time()
-        with self._lock:
-            timestamps = list(self._timestamps)
-
-        if len(timestamps) < 2:
-            return 0.0
-
-        if (now_sec - timestamps[-1]) > self._stale_timeout:
-            return 0.0
-
-        duration = timestamps[-1] - timestamps[0]
-        if duration <= 0.0:
-            return 0.0
-
-        return (len(timestamps) - 1) / duration
-
-def _get_depth_history_topic_monitor():
-    global _depth_history_topic_monitor
-
-    with _depth_history_topic_monitor_lock:
-        if _depth_history_topic_monitor is None:
-            _depth_history_topic_monitor = TopicFrequencyMonitor(
-                "/camera/depth/depth_history_array",
-                Float64MultiArray,
-                window_size=50,
-                stale_timeout=0.5,
-            )
-        return _depth_history_topic_monitor
-
-def is_depth_history_topic_available():
-    """检查深度历史话题是否已发布且当前能收到消息。
-
-    Returns:
-        bool: True 表示话题已发布、能收到消息且频率达到最低要求，False 表示当前不可切到 depth_loco_controller
-    """
-    target_topic = "/camera/depth/depth_history_array"
-    min_topic_frequency_hz = 50.0
-    wait_timeout_sec = 2.0
-    check_interval_sec = 0.05
-    try:
-        published_topics = rospy.get_published_topics()
-        if not published_topics:
-            rospy.logwarn("[DepthLocoSwitch] No published topics found while checking depth history topic.")
-            return False
-
-        if not any(topic_name == target_topic for topic_name, _topic_type in published_topics):
-            rospy.logwarn(f"[DepthLocoSwitch] Required topic '{target_topic}' is not published. Refuse to switch to depth_loco_controller.")
-            return False
-
-        topic_monitor = _get_depth_history_topic_monitor()
-        deadline = time.time() + wait_timeout_sec
-        estimated_hz = 0.0
-
-        while time.time() < deadline and not rospy.is_shutdown():
-            estimated_hz = topic_monitor.get_hz()
-            if estimated_hz >= min_topic_frequency_hz:
-                rospy.loginfo(
-                    f"[DepthLocoSwitch] Topic '{target_topic}' is available with estimated frequency "
-                    f"{estimated_hz:.1f} Hz."
-                )
-                return True
-            rospy.sleep(check_interval_sec)
-
-        if not topic_monitor.has_recent_message():
-            rospy.logwarn(
-                f"[DepthLocoSwitch] Required topic '{target_topic}' has no recent messages. "
-                f"Refuse to switch to depth_loco_controller."
-            )
-            return False
-
-        if estimated_hz < min_topic_frequency_hz:
-            rospy.logwarn(
-                f"[DepthLocoSwitch] Topic '{target_topic}' frequency too low: "
-                f"estimated {estimated_hz:.1f} Hz. Require at least {min_topic_frequency_hz:.1f} Hz."
-            )
-            return False
-        return True
-    except Exception as e:
-        rospy.logerr(f"[DepthLocoSwitch] Failed to check published topics: {e}")
-        return False
-
 def _set_depth_loco_restore_controller_name(controller_name):
     """记录进入 depth_loco_controller 之前的控制器名。"""
     global _depth_loco_restore_controller_name
@@ -1361,9 +1255,6 @@ def depth_loco_switch_callback(event):
 
         success = False
         if current_controller_lower in ["mpc", "amp_controller"]:
-            if not is_depth_history_topic_available():
-                rospy.logwarn("[DepthLocoSwitch] depth_loco_switch blocked because depth history topic is unavailable.")
-                return
             _set_depth_loco_restore_controller_name(current_controller_lower)
             rospy.loginfo("[DepthLocoSwitch] Switching to depth_loco_controller")
             success = call_switch_controller_service("depth_loco_controller")

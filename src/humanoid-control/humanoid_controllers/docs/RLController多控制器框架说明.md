@@ -100,7 +100,8 @@ RLControllerBase (基类)
 - **Depth Loco 控制器补充说明**
   - `DepthWalkController` 属于 `DEPTH_LOCO_CONTROLLER`，适合走楼梯斜坡这类需要地形感知的行走场景。
   - 该控制器除了常规机器人状态与 `/cmd_vel` 外，还依赖深度历史输入话题 `/camera/depth/depth_history_array`。
-  - 切换到 `depth_loco_controller` 前会先检查该话题是否已发布且能收到消息；如果没有，系统会拒绝切换。
+  - 切换到 `depth_loco_controller` 前，底层 `RLControllerManager` 会统一检查该话题是否满足切换条件；如果没有，系统会拒绝切换。
+  - 相关检查阈值可通过 ROS 参数覆盖：`depth_history_min_frequency_hz`（默认 `50.0`）、`depth_history_wait_timeout_sec`（默认 `2.0`）、`depth_history_required_samples`（默认 `5`）、`depth_history_sample_timeout_sec`（默认 `0.2`）。
   - 从 `depth_loco_controller` 退出时，会优先恢复到进入前的控制器；如果没有历史记录，则回到 `amp_controller`。
   - 在 `kuavo_v54` 中，可通过 [`rl_controllers.yaml`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl_controllers.yaml) 启用 `depth_loco_controller`，其模型配置位于 [`depth_loco_param.info`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl/depth_loco_param.info)。
 

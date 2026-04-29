@@ -19,6 +19,8 @@
 #include <functional>
 #include <ros/ros.h>
 
+#include "humanoid_controllers/util/TopicMonitor.h"
+
 namespace humanoid_controller
 {
   /**
@@ -36,7 +38,7 @@ namespace humanoid_controller
     /**
      * @brief 析构函数
      */
-    ~RLControllerManager() = default;
+    ~RLControllerManager();
 
     /**
      * @brief 添加控制器
@@ -275,6 +277,26 @@ namespace humanoid_controller
     void changeArmCtrlModeAsync(int mode);
 
     /**
+     * @brief 加载 depth_loco_controller 切换前检查的 ROS 参数
+     */
+    void loadDepthHistoryCheckParams(ros::NodeHandle& nh);
+
+    /**
+     * @brief 检查 depth_loco_controller 切换前的深度历史话题状态
+     */
+    bool isDepthHistoryTopicAvailable();
+
+    /**
+     * @brief 启动深度历史话题后台监控（常驻订阅 + 频率缓存）
+     */
+    void startDepthHistoryMonitor();
+
+    /**
+     * @brief 深度历史话题回调（更新频率缓存）
+     */
+    // 已迁移到 TopicMonitor 内部回调
+
+    /**
      * @brief ROS服务回调：切换控制器
      */
     bool switchControllerCallback(kuavo_msgs::switchController::Request &req, 
@@ -375,6 +397,13 @@ namespace humanoid_controller
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
+    double depth_history_min_frequency_hz_ = 50.0;  ///< depth 历史话题最低频率要求
+    double depth_history_wait_timeout_sec_ = 2.0;   ///< depth 历史话题总等待超时
+    int depth_history_required_samples_ = 10;       ///< depth 历史话题最少采样点数
+    double depth_history_sample_timeout_sec_ = 0.2; ///< 单次等待消息的超时
+
+    // 深度历史话题后台监控（避免切换路径上阻塞等待）
+    TopicMonitor depth_history_monitor_;
   };
 
 } // namespace humanoid_controller
