@@ -77,6 +77,18 @@ select_cam_and_wait() {
   sleep 0.5
 }
 
+select_cams_and_wait() {
+  # 一次性声明本轮会用到的相机（连续发 SELECT），最后统一等待一次，避免逐个等待导致时序被拉长。
+  # 用法：select_cams_and_wait head_camera right_wrist_camera left_wrist_camera
+  local cam_name
+  for cam_name in "$@"; do
+    echo "[INFO] 标定控制：SELECT|${cam_name} -> ${CONTROL_TOPIC}"
+    pub_control "SELECT|${cam_name}"
+  done
+  # 给上位机一点时间切换订阅并等首帧
+  sleep 0.5
+}
+
 motion_done_cam() {
   local cam_name="$1"
   echo "[INFO] 标定控制：MOTION_DONE|${cam_name} -> ${CONTROL_TOPIC}"
@@ -438,15 +450,13 @@ if [[ "${CHOICE}" == "4" ]]; then
     move)
       echo "[INFO] 全部同时：头部 + 左右手（并行；左右手使用「合并下发」避免在 /kuavo_arm_traj 上打架；全部结束后再发 SESSION_DONE）"
 
-      select_cam_and_wait "head_camera"
+      # 先一次性声明三路相机，再执行运动；结束后统一 SESSION_DONE
+      select_cams_and_wait "head_camera" "right_wrist_camera" "left_wrist_camera"
       start_motion_head_then_arms \
         "${TEACH_DIR}/teach_head_joint.json" \
         "${TEACH_DIR}/teach_left_joint.json" \
         "${TEACH_DIR}/teach_right_joint.json"
       motion_done_cam "head_camera"
-
-      select_cam_and_wait "right_wrist_camera"
-      select_cam_and_wait "left_wrist_camera"
       motion_done_cam "right_wrist_camera"
       motion_done_cam "left_wrist_camera"
       session_done
@@ -733,13 +743,12 @@ if [[ "${MODE}" == "move" ]]; then
   else
     echo "[INFO] 全部同时：头部 + 左右手（同时执行；左右手使用「合并下发」避免在 /kuavo_arm_traj 上打架；全部结束后再发 SESSION_DONE）"
 
-    select_cam_and_wait "head_camera"
+    # 先一次性声明三路相机，再执行运动；结束后统一 SESSION_DONE
+    select_cams_and_wait "head_camera" "right_wrist_camera" "left_wrist_camera"
     echo "[INFO] 全部同时：顺序执行，先头部..."
     python3 "${CC_DIR}/demos/kuavo_head_demo/head_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _teach_json_path:="${TEACH_DIR}/teach_head_joint.json"
-    select_cam_and_wait "right_wrist_camera"
-    select_cam_and_wait "left_wrist_camera"
     echo "[INFO] 全部同时：再左右手（合并下发）..."
     python3 "${CC_DIR}/demos/kuavo_both_arms/both_arms_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
