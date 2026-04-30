@@ -98,6 +98,13 @@ def execute_dual_arm_pose_tests():
         rospy.sleep(actual_time + 0.5 if 'actual_time' in locals() else desire_time + 0.5)
         rospy.loginfo(f"  {name} 完成!")
 
+        # 获取并打印末端误差
+        left_success, left_err, left_msg = ct.get_ee_pose_reach_error(True)
+        right_success, right_err, right_msg = ct.get_ee_pose_reach_error(False)
+        
+        rospy.loginfo(f"  左臂误差: {left_err}")
+        rospy.loginfo(f"  右臂误差: {right_err}")
+
     rospy.loginfo("\n所有双臂末端位姿测试数据发布完成！")
 
 # -------------- 主入口 --------------

@@ -456,6 +456,25 @@
   </joint>
 
   <!-- 相机光学坐标系：采用标准光学坐标 (z 前, x 右, y 下)，直接以 camera_base 为父节点 -->
+  <link name="head_camera_color_optical_frame_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+      <material name="camera_optical_material">
+        <color rgba="0 1 0 0" />
+      </material>
+    </visual>
+  </link>
+  <joint name="head_camera_color_optical_frame_joint_0" type="fixed">
+    <!-- 经典光学坐标变换：R = Rz(-90°) * Rx(-90°) -->
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679" />
+    <parent link="camera_base" />
+    <child link="head_camera_color_optical_frame_0" />
+  </joint>
+
+  <!-- 相机rgb坐标系：相对于depth坐标系有偏移 -->
   <link name="head_camera_color_optical_frame">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -469,8 +488,8 @@
   </link>
   <joint name="head_camera_color_optical_frame_joint" type="fixed">
     <!-- 经典光学坐标变换：R = Rz(-90°) * Rx(-90°) -->
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679" />
-    <parent link="camera_base" />
+    <origin xyz="0.02375 0 0" rpy="0 0 0" />
+    <parent link="head_camera_color_optical_frame_0" />
     <child link="head_camera_color_optical_frame" />
   </joint>
 

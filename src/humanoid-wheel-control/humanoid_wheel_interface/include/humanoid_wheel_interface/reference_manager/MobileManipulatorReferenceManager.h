@@ -16,6 +16,9 @@
 #include <kuavo_msgs/lbTimedPosCmd.h>
 #include <kuavo_msgs/lbMultiTimedOfflineTraj.h>
 #include <kuavo_msgs/lbMultiTimedPosCmd.h>
+#include <kuavo_msgs/accessIkSolve.h>
+#include <kuavo_msgs/eePoseReachError.h>
+#include <kuavo_msgs/sensorsData.h>
 #include <std_srvs/SetBool.h>
 #include <std_srvs/Trigger.h>
 
@@ -32,6 +35,8 @@
 
 #include "humanoid_wheel_interface/estimators/CentralDifferenceDifferentiator.h"
 #include "humanoid_wheel_interface/estimators/ContinuousEulerAnglesFromMatrix.h"
+
+#include "humanoid_wheel_interface/motion_planner/InverseKinematics.h"
 
 namespace ocs2 {
 namespace mobile_manipulator {
@@ -104,6 +109,8 @@ public:
   bool setLbMultiTimedOfflineTrajService(kuavo_msgs::lbMultiTimedOfflineTraj::Request &req, kuavo_msgs::lbMultiTimedOfflineTraj::Response &res);
   bool setLbOfflineTrajEnableService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
   bool setLbResetTorsoService(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
+  bool checkTargetPoseReachableService(kuavo_msgs::accessIkSolve::Request &req, kuavo_msgs::accessIkSolve::Response &res);
+  bool eePoseReachErrorService(kuavo_msgs::eePoseReachError::Request &req, kuavo_msgs::eePoseReachError::Response &res);
 
   // 多个约束轨迹的操作函数
   void trimTargetTrajectoriesBeforeTime(scalar_t startTime);
@@ -262,6 +269,8 @@ protected:
 
   LbArmControlMode handPoseCmdFrameToLbArmMode(int frame);
 
+  void computeErrorArmEeIsReachTarget(int armIdx, double initTime, double finalTime, const vector_t& initState);
+
   // 获取当前末端位姿
   void getCurrentEeWorldPose(vector_t& EeState, const vector_t& initState);
   void getCurrentEeBasePose(vector_t& EeState, const vector_t& initState);
@@ -307,6 +316,19 @@ private:
   
   // 动力学库接口
   PinocchioInterface pinocchioInterface_;
+
+  // 检测末端可达性相关
+  ros::ServiceServer checkTargetPoseReachableServiceServer_;
+
+  // 声明多线程spinner
+  ros::AsyncSpinner asyncSpinner_;
+
+  // 判断末端位姿运动后的误差
+  ros::Subscriber sensors_data_sub_;
+  vector_t currentSensorDataJointPos_;
+  bool isEeMotionComplete_[2]{false, false}; // 判断是否运动已抵达目标
+  vector_t eeError_[2]; // 末端位姿误差
+  ros::ServiceServer eePoseReachErrorServiceServer_;
 
   // 末端控制优先级相关
   bool desiredFocusEe_{false};
@@ -484,6 +506,9 @@ private:
   vector_t wheel_move_spd_;  // x, y, yaw
   vector_t wheel_move_acc_;  // x, y, yaw
   vector_t wheel_move_jerk_;  // x, y, yaw
+
+  // ik 可达性分析相关
+  InverseKinematics ikSolverDiff_;
 
   // 双臂轨迹规划器, 姿态的输入和输出均为Zyx欧拉角形式
   std::shared_ptr<cmdPosePlannerWithRuckig> cmdDualArmEePlannerRuckigPtr_[2]; // [0]: 左臂, [1]: 右臂

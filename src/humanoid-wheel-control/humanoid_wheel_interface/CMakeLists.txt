@@ -93,6 +93,7 @@ add_library(${PROJECT_NAME}
   src/motion_planner/cmdPosePlannerWithRuckig.cpp
   src/motion_planner/cmdVelPlannerWithRuckig.cpp
   src/motion_planner/posePlannerTimedScheduler.cpp
+  src/motion_planner/InverseKinematics.cpp
   src/filters/jointCmdLimiter.cpp
   src/filters/KinemicLimitFilter.cpp
   src/filters/ConstantVelocityCommandKalmanFilter.cpp
