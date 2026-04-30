@@ -235,13 +235,6 @@ const sidebars = {
                 'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/pytree案例/轮臂组合案例',
               ],
             },
-            {
-              type: 'category',
-              label: 'Kuavo 5-W 轮臂数据采集案例',
-              items: [
-                'basic_usage/kuavo-ros-control/docs/5功能案例/五代案例/Kuavo 5-W 轮臂数据采集案例/拆垛案例',
-              ],
-            },
           ],
         },
         {
