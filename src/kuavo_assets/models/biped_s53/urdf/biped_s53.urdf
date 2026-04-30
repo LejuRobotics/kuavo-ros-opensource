@@ -1709,19 +1709,6 @@
     <child link="head_camera_depth" />
     <axis xyz="0 0 0" />
   </joint>
-  <link name="camera_base">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <mass value="0.000001" />
-      <inertia ixx="0.000000001" ixy="0" ixz="0" iyy="0.000000001" iyz="0" izz="0.000000001" />
-    </inertial>
-  </link>
-  <joint name="camera_base_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="head_camera_depth" />
-    <child link="camera_base" />
-    <axis xyz="0 0 0" />
-  </joint>
   <link name="head_radar">
     <inertial>
       <origin xyz="0.00018505 -0.00000652 0.01776962" rpy="0 0 0" />

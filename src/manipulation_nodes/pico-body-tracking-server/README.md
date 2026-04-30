@@ -5,7 +5,8 @@
 
 ### 机器人端机器人
 
-先启动机器人:
+#### 机器人与Pico分别启动
+1. 先启动机器人:
 - 可以选择关闭命令截断、关节保护等功能，这样做大幅度动作的时候不会触发保护而摔倒.
 - 必须要打开`with_mm_ik`选项来启用运动学MPC功能，否则无法控制手臂.
 
@@ -14,6 +15,7 @@
 sudo su
 cd kuavo-ros-opensource
 source devel/setup.bash
+
 # 需要加with_mm_ik选项
 roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
 
@@ -21,22 +23,25 @@ roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
 roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true cmd_truncation_enable:=false joint_protect_enable:=false
 ```
 
-然后启动 Pico 服务节点:
+2. 然后启动 Pico 服务节点:
 ```bash
 sudo su
 cd kuavo-ros-opensource
 source devel/setup.bash
-cd src/manipulation_nodes/pico-body-tracking-server
-python3 scripts/pico_whole_body_teleop_example.py 
-```
-
-标准 launch 启动（推荐）：
-```bash
 roslaunch noitom_hi5_hand_udp_python launch_pico_teleop.launch
 ```
-
-也可以使用一键 launch（仿真/实物 + PICO + 头控）：
+- 如需启用迁移后的 PICO 主动手头控：
 ```bash
+roslaunch noitom_hi5_hand_udp_python launch_pico_teleop.launch head_control_mode:=auto_track_active
+```
+#### 一键 launch 启动（仿真/实物 + PICO + 头控）
+
+- 默认参数启动（头部控制模式为"vr_follow" ）
+```bash
+sudo su
+cd kuavo-ros-opensource
+source devel/setup.bash
+
 # 仿真
 roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=true
 
@@ -44,15 +49,18 @@ roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=true
 roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=false with_mm_ik:=true
 ```
 
-如需启用迁移后的 PICO 主动手头控（独立节点）：
+- 主动手头控（头部控制模式为"auto_track_active" ）
 ```bash
 sudo su
 cd kuavo-ros-opensource
 source devel/setup.bash
-cd src/manipulation_nodes/pico-body-tracking-server
-python3 scripts/pico_head_control_node.py _mode:=auto_track_active
-```
 
+# 仿真
+roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=true head_control_mode:=auto_track_active
+
+# 实物
+roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=false with_mm_ik:=true head_control_mode:=auto_track_active
+```
 说明：
 - 该节点会发布 `/robot_head_motion_data`，并自动设置 `/pico/use_external_head_control=true`，避免与旧链路重复发布。
 - 支持模式：`fixed`、`auto_track_active`、`fixed_main_hand`、`vr_follow`。

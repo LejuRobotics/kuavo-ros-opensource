@@ -1312,7 +1312,7 @@
     <limit lower="-0.526" upper="0.526" effort="14.5" velocity="2.198" />
     <dynamics damping="0.0" friction="0.0" />
   </joint>
-  <link name="camera_base">
+  <link name="head_camera_base">
     <inertial>
       <origin xyz="0.00471770 0.00007850 0.01403306" rpy="0 0 0" />
       <mass value="0.0" />
@@ -1330,12 +1330,12 @@
       </material>
     </visual>
   </link>
-  <joint name="camera_base_joint" type="fixed">
+  <joint name="head_camera_base_joint" type="fixed">
     <origin xyz="0.099619 0 0.032844" rpy="0 0.3406 0" />
     <parent link="zhead_2_link" />
-    <child link="camera_base" />
+    <child link="head_camera_base" />
   </joint>
-  <link name="camera">
+  <link name="head_camera_depth">
     <inertial>
       <origin xyz="-0.00050000000000007 -6.93889390390723E-18 2.22044604925031E-16" rpy="0 0 0" />
       <mass value="0.0" />
@@ -1353,10 +1353,10 @@
       </material>
     </visual>
   </link>
-  <joint name="camera" type="fixed">
+  <joint name="head_camera_depth_joint" type="fixed">
     <origin xyz="0.011715 0.0475 0.014311" rpy="0 0 0" />
-    <parent link="camera_base" />
-    <child link="camera" />
+    <parent link="head_camera_base" />
+    <child link="head_camera_depth" />
   </joint>
   <link
     name="radar">

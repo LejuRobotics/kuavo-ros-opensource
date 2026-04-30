@@ -67,6 +67,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/gaitTimeName.h"
 #include <ocs2_msgs/mpc_flattened_controller.h>
 #include <kuavo_common/common/json.hpp>
+#include <kuavo_common/common/common.h>
 #include <map>
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include "kuavo_msgs/robotHeadMotionData.h"
@@ -1203,10 +1204,10 @@ namespace ocs2
       
       if (joy_msg->buttons[joyButtonMap["BUTTON_LB"]])// 按下左侧侧键，切换模式
       {
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
-        pubModeGaitScale(0.9);
-        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
-        pubModeGaitScale(1.1);
+        if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
+          pubModeGaitScale(0.9);
+        else if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
+          pubModeGaitScale(1.1);
         else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
         {
           arm_ctrl_mode_ = (arm_ctrl_mode_ > 0)? 0 : 1;
@@ -1235,32 +1236,48 @@ namespace ocs2
       }
       else if (joy_msg->buttons[joyButtonMap["BUTTON_RB"]])// 按下右侧侧键，切换模式
       {
+        // RB + BUTTON_STANCE(A)
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
         {
-          c_relative_base_limit_[0] -= (c_relative_base_limit_[0] > 0.1) ? 0.05 : 0.0;
-          c_relative_base_limit_[3] -= (c_relative_base_limit_[3] > 0.1) ? 0.05 : 0.0;
-          std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
-                    << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
+          // RB+A roban2 芭啦芭啦樱之舞
+          if (IS_ROBAN(rb_version_))
+          {
+            ROS_INFO("[JoyControl] RB+A: dance_parapara");
+            callSwitchToDanceSrvByName("dance_parapara");
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          else
+          {
+            c_relative_base_limit_[0] -= (c_relative_base_limit_[0] > 0.1) ? 0.05 : 0.0;
+            c_relative_base_limit_[3] -= (c_relative_base_limit_[3] > 0.1) ? 0.05 : 0.0;
+            std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
+                      << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
+          }
         }
-        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
+        // RB + BUTTON_WALK(Y)
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
         {
-          c_relative_base_limit_[0] += 0.05;
-          c_relative_base_limit_[3] += 0.05;
-          std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
-                    << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
+          // RB+Y roban2 lonelydance舞蹈
+          if (IS_ROBAN(rb_version_))
+          {
+            ROS_INFO("[JoyControl] RB+Y: dance_lonelydance");
+            callSwitchToDanceSrvByName("dance_lonelydance");
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          else
+          {
+            ROS_INFO("Switching to DanceController via RB+Y");
+            callTriggerDanceSrv();
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
         }
         // RB + BUTTON_RL(X): 起身
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
         {
           callTriggerFallStandUpSrv();
-          old_joy_msg_ = *joy_msg;
-          return;
-        }
-        // RB + BUTTON_WALK(Y): 切换到 DanceController
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
-        {
-          ROS_INFO("Switching to DanceController via RB+Y");
-          callTriggerDanceSrv();
           old_joy_msg_ = *joy_msg;
           return;
         }
@@ -1319,13 +1336,20 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
       {
-        if (!joy_execute_action_)
+        // Roban: B switch to MPC
+        if (IS_ROBAN(rb_version_))
+        {
+          ROS_INFO("[JoyControl] B: switch to MPC");
+          callSwitchControllerService("mpc");
+          return;
+        }
+        else if (!joy_execute_action_)
         {
           publishGaitTemplate("trot");
         }
         else
         {
-          // 使用 TROT 作为“遥感/方向键输入”开关
+          // 使用 TROT 作为"遥感/方向键输入"开关
           axes_input_enabled_ = !axes_input_enabled_;
           ROS_WARN_STREAM("[JoyControl] Axes input toggled: " << (axes_input_enabled_ ? "ENABLED" : "DISABLED"));
           if (!axes_input_enabled_)
@@ -1340,6 +1364,13 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
+        // Roban: X switch to AMP
+        if (IS_ROBAN(rb_version_))
+        {
+          ROS_INFO("[JoyControl] X: switch to amp_controller");
+          callSwitchControllerService("amp_controller");
+          return;
+        }
         ROS_INFO("[JoyControl] switch to next controller");
         // Get controller list and switch to next
         switchToNextController();
@@ -1664,6 +1695,21 @@ namespace ocs2
         {
           ROS_ERROR("[JoyControl] Failed to switch to DanceController");
         }
+      }
+    }
+
+    void callSwitchToDanceSrvByName(const std::string& dance_data)
+    {
+      ROS_INFO("[JoyControl] Switching to dance: %s", dance_data.c_str());
+      kuavo_msgs::SetString srv;
+      srv.request.data = dance_data;
+      if (switch_dance_client_.call(srv) && srv.response.success)
+      {
+        ROS_INFO("[JoyControl] Dance switch success: %s", srv.response.message.c_str());
+      }
+      else
+      {
+        ROS_ERROR("[JoyControl] Dance switch failed (data=%s)", dance_data.c_str());
       }
     }
 
