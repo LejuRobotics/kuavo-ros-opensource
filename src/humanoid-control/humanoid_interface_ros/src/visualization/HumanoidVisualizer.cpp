@@ -361,6 +361,12 @@ namespace ocs2
         robotStatePublisherPtr_.reset(new robot_state_publisher::RobotStatePublisher(kdlTree));
         robotStatePublisherPtr_->publishFixedTransforms(true);
 
+        // 每隔1秒重发一次所有静态TF，避免录bag时启动晚了漏录
+        fixed_tf_publish_timer_ = nodeHandle.createTimer(ros::Duration(1.0),
+          [this](const ros::TimerEvent&) {
+            robotStatePublisherPtr_->publishFixedTransforms(true);
+          });
+
         // 自动识别手型
         if (urdfModel_.getJoint("l_thumb_cmc_yaw") != nullptr) {
           isLinkerHand_ = true;

@@ -375,9 +375,6 @@ void DexHandMujocoRosNode::linkerLeftHandCommandCallback(const sensor_msgs::Join
         positions[i] = static_cast<uint16_t>(std::clamp(msg->position[i], 0.0, 255.0));
     }
 
-    std::string hand_name = (hand_type_ == HandType::LINKER_L6) ? "LinkerL6" : "LinkerO6";
-    ROS_INFO("Received %s left hand command: thumb_flex=%d, thumb_roll=%d, index_flex=%d, middle_flex=%d, ring_flex=%d, pinky_flex=%d",
-             hand_name.c_str(), positions[0], positions[1], positions[2], positions[3], positions[4], positions[5]);
 
     controller_->send_left_position(positions);
 }

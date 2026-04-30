@@ -131,6 +131,7 @@ namespace ocs2
 
       tf::TransformBroadcaster tfBroadcaster_;
       std::unique_ptr<robot_state_publisher::RobotStatePublisher> robotStatePublisherPtr_;
+      ros::Timer fixed_tf_publish_timer_; // 周期性发布静态TF，防止录bag漏录
 
       ros::Publisher costDesiredBasePositionPublisher_;
       std::vector<ros::Publisher> costDesiredFeetPositionPublishers_;
