@@ -30,7 +30,9 @@ public:
 
     // 设置运动学约束
     void setFirstOrderDerivativeLimit(const Eigen::VectorXd& limit);
+    void setFirstOrderDerivativeLimit(const Eigen::VectorXd& minLimit, const Eigen::VectorXd& maxLimit);
     void setSecondOrderDerivativeLimit(const Eigen::VectorXd& limit);
+    void setSecondOrderDerivativeLimit(const Eigen::VectorXd& minLimit, const Eigen::VectorXd& maxLimit);
     void setThirdOrderDerivativeLimit(const Eigen::VectorXd& limit);
 
     // 重置滤波器

@@ -137,6 +137,33 @@ void KinemicLimitFilter::setValueLimit(const Eigen::VectorXd& minLimit,
     hasValueLimits_ = true;
 }
 
+void KinemicLimitFilter::setFirstOrderDerivativeLimit(const Eigen::VectorXd& minLimit, 
+                                                       const Eigen::VectorXd& maxLimit) 
+{
+    if (minLimit.size() != dofNum_ || maxLimit.size() != dofNum_) {
+        ROS_ERROR_STREAM("First order limit dimension mismatch! Expected: " 
+                        << dofNum_ << ", Got min: " << minLimit.size() 
+                        << ", max: " << maxLimit.size());
+        return;
+    }
+    
+    for (size_t i = 0; i < dofNum_; ++i) {
+        if (maxLimit(i) > 0) {
+            inputVec_[i].max_velocity = {maxLimit(i)};
+        } else {
+            ROS_WARN_STREAM("Invalid second order maxLimit for DOF " << i << ": " << maxLimit(i));
+        }
+    }
+
+    for (size_t i = 0; i < dofNum_; ++i) {
+        if (minLimit(i) < maxLimit(i)) {
+            inputVec_[i].min_velocity = {minLimit(i)};
+        } else {
+            ROS_WARN_STREAM("Invalid second order minLimit for DOF " << i << ": " << minLimit(i));
+        }
+    }
+}
+
 void KinemicLimitFilter::setFirstOrderDerivativeLimit(const Eigen::VectorXd& limit) {
     if (limit.size() != dofNum_) {
         ROS_ERROR_STREAM("First order limit dimension mismatch! Expected: " 
@@ -149,6 +176,33 @@ void KinemicLimitFilter::setFirstOrderDerivativeLimit(const Eigen::VectorXd& lim
             inputVec_[i].max_velocity = {limit(i)};
         } else {
             ROS_WARN_STREAM("Invalid first order limit for DOF " << i << ": " << limit(i));
+        }
+    }
+}
+
+void KinemicLimitFilter::setSecondOrderDerivativeLimit(const Eigen::VectorXd& minLimit, 
+                                                       const Eigen::VectorXd& maxLimit) 
+{
+    if (minLimit.size() != dofNum_ || maxLimit.size() != dofNum_) {
+        ROS_ERROR_STREAM("Second order limit dimension mismatch! Expected: " 
+                        << dofNum_ << ", Got min: " << minLimit.size() 
+                        << ", max: " << maxLimit.size());
+        return;
+    }
+    
+    for (size_t i = 0; i < dofNum_; ++i) {
+        if (maxLimit(i) > 0) {
+            inputVec_[i].max_acceleration = {maxLimit(i)};
+        } else {
+            ROS_WARN_STREAM("Invalid second order maxLimit for DOF " << i << ": " << maxLimit(i));
+        }
+    }
+
+    for (size_t i = 0; i < dofNum_; ++i) {
+        if (minLimit(i) < maxLimit(i)) {
+            inputVec_[i].min_acceleration = {minLimit(i)};
+        } else {
+            ROS_WARN_STREAM("Invalid second order minLimit for DOF " << i << ": " << minLimit(i));
         }
     }
 }

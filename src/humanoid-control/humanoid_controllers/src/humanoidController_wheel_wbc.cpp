@@ -278,7 +278,7 @@ namespace humanoidController_wheel_wbc
     // 关节输出限制
     jointCmdLimiterPtr_ = std::make_shared<mobile_manipulator::jointCmdLimiter>(manipulatorModelInfo_.armDim, 
                                                             *pinocchioInterface_ptr_,
-                                                            taskFile, manipulatorModelInfo_, dt_);
+                                                            taskFile, manipulatorModelInfo_, dt_, armNum_);
     /****************************************************/
 
     // 浮动基 7 + 底盘下肢电机 4 + 双臂 7*2 + 头部 
@@ -815,6 +815,18 @@ namespace humanoidController_wheel_wbc
     }
 
     {
+      vector_t qposLimit = optimizedState_mrt_limit.tail(info.armDim);
+      jointCmdLimiterPtr_->clipPositionCommand(qposLimit);
+      optimizedState_mrt_limit.tail(info.armDim) = qposLimit;
+
+      if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
+      {
+        optimizedState_mrt_ = optimizedState_mrt_limit;
+        optimizedInput_mrt_ = optimizedInput_mrt_limit;
+      }
+    }
+
+    {
       static vector_t qposLimit, qvelLimit;
 
       qposLimit = optimizedState_mrt_limit.tail(info.armDim);
@@ -828,12 +840,6 @@ namespace humanoidController_wheel_wbc
                                                     dt_; // (curTime - lastTargetTime);
       // lastTargetTime = curTime;
       jointPosTarget_last = optimizedState_mrt_limit.tail(info.armDim);
-    }
-
-    if(enable_mpc_)   // 回传到mpc作为反馈, 因此保持经过安全滤波后的数值
-    {
-      optimizedState_mrt_ = optimizedState_mrt_limit;
-      optimizedInput_mrt_ = optimizedInput_mrt_limit;
     }
 
     // 更新期望力插值

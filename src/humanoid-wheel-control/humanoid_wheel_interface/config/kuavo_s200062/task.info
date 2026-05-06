@@ -1091,6 +1091,32 @@ jointVelocityLimits
   }
 }
 
+safeAccLimit
+{
+  enable true   ; 启动默认的加速度边界, 采用大负载计算获得
+
+  realTimeAccEnable  false  ; 实时计算加速度边界
+
+  factor  0.8   ; 安全系数, 所得边界均乘上该系数
+
+  bound   ; 加速度边界, 无方向要求, 单位: m/s^2
+  {
+    (0,0)  8.8        ; motor 1
+    (1,0)  20.3       ; motor 2
+    (2,0)  141.1      ; motor 3
+    (3,0)  653.7      ; motor 4
+
+    ;; arm Limits
+    (4,0)   90.6     ; motor 1
+    (5,0)   91.9      ; motor 2
+    (6,0)   338.2     ; motor 3
+    (7,0)   479.7     ; motor 4
+    (8,0)   500.9    ; motor 5
+    (9,0)   575.5    ; motor 6
+    (10,0)  564.7    ; motor 7
+  }
+}
+
 ; Whole body control
 torqueLimitsTask
 {
