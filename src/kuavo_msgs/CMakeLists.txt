@@ -94,6 +94,7 @@ add_message_files(
   footPoseWithVision.msg
   footPoseWithVisionArray.msg
   kuavoModeSchedule.msg
+  headCtrlMode.msg
 
   # motion_capture_ik
   robotArmQVVD.msg

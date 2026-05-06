@@ -14,7 +14,7 @@ import netifaces
 from pprint import pprint
 from kuavo_ros_interfaces.msg import robotHeadMotionData
 from noitom_hi5_hand_udp_python.msg import PoseInfoList, PoseInfo
-from kuavo_msgs.msg import JoySticks
+from kuavo_msgs.msg import JoySticks, headCtrlMode
 from geometry_msgs.msg import Point, Quaternion, PoseStamped
 import threading
 from visualization_msgs.msg import Marker
@@ -109,7 +109,7 @@ class Quest3BoneFramePublisher:
         rospy.loginfo("Head control mode service started at /quest3/set_head_control_mode")
 
         # 创建头部控制模式发布节点
-        self.head_ctrl_mode_pub = rospy.Publisher('/quest3/head_control_mode', String, queue_size=10)
+        self.head_ctrl_mode_pub = rospy.Publisher('/quest3/head_control_mode', headCtrlMode, queue_size=10)
 
         rospy.loginfo("Head reset service started at /quest3/reset_head_pose")
 
@@ -677,7 +677,7 @@ class Quest3BoneFramePublisher:
                 self.pose_pub.publish(pose_info_list)
 
                 # 发布头部控制模式
-                self.head_control_manager.publish_head_control_mode(self.head_ctrl_mode_pub, HeadControlMode.to_string(self.head_control_manager.mode))
+                self.head_control_manager.publish_head_control_mode(self.head_ctrl_mode_pub, HeadControlMode.to_string(self.head_control_manager.mode), self.head_control_manager.fixed_main_hand)
 
                 # if pose_info_list.is_high_confidence:
                 #     self.pose_pub.publish(pose_info_list)
