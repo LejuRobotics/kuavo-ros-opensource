@@ -550,10 +550,10 @@ namespace humanoid_controller
     }
     
     auto robot_config = drake_interface_->getRobotConfig();
-    AnkleSolverType ankleSolverType = static_cast<AnkleSolverType>(robot_config->getValue<int>("ankle_solver_type"));
-    ankleSolver.getconfig(ankleSolverType);
+    const std::string ankleSolverTypeToken = robot_config->getValue<std::string>("ankle_solver_type");
+    ankleSolver.getconfig(ankleSolverTypeToken);
     // 同步脚踝解算类型到 ROS 参数，供倒地起身等 RL 控制器使用
-    ros::param::set("/ankle_solver_type", static_cast<int>(ankleSolverType));
+    ros::param::set("/ankle_solver_type", ankleSolverTypeToken);
     if (!init_fall_down_state_) // 初始倒地时不在这里设置初始状态
     {
       ros::param::set("robot_init_state_param", robot_init_state_param);

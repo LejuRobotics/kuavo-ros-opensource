@@ -997,14 +997,14 @@ jointVelocityLimits
       (1,0)   -25.33   ; leg_pitch
       (2,0)   -25.33   ; waist_pitch
       (3,0)   -25.33   ; waist_yaw_link
-      (4,0)   -18.8   ; z_arm_l1 velocity
+      (4,0)   -13.0   ; z_arm_l1 velocity
       (5,0)   -8.0    ; z_arm_l2 velocity
       (6,0)   -7.5    ; z_arm_l3 velocity
       (7,0)   -8.0    ; z_arm_l4 velocity
       (8,0)   -17.5   ; z_arm_l5 velocity
       (9,0)   -17.5   ; z_arm_l6 velocity
       (10,0)  -17.5   ; z_arm_l7 velocity
-      (11,0)  -18.8   ; z_arm_r1 velocity
+      (11,0)  -13.0   ; z_arm_r1 velocity
       (12,0)  -8.0    ; z_arm_r2 velocity
       (13,0)  -7.5    ; z_arm_r3 velocity
       (14,0)  -8.0    ; z_arm_r4 velocity
@@ -1073,14 +1073,14 @@ jointVelocityLimits
       (1,0)   25.33   ; leg_pitch
       (2,0)   25.33   ; waist_pitch
       (3,0)   25.33   ; waist_yaw_link
-      (4,0)   18.8   ; z_arm_l1 velocity
+      (4,0)   13.0   ; z_arm_l1 velocity
       (5,0)   8.0    ; z_arm_l2 velocity
       (6,0)   7.5    ; z_arm_l3 velocity
       (7,0)   8.0    ; z_arm_l4 velocity
       (8,0)   17.5   ; z_arm_l5 velocity
       (9,0)   17.5   ; z_arm_l6 velocity
       (10,0)  17.5   ; z_arm_l7 velocity
-      (11,0)  18.8   ; z_arm_r1 velocity
+      (11,0)  13.0   ; z_arm_r1 velocity
       (12,0)  8.0    ; z_arm_r2 velocity
       (13,0)  7.5    ; z_arm_r3 velocity
       (14,0)  8.0    ; z_arm_r4 velocity
@@ -1100,7 +1100,7 @@ torqueLimitsTask
    (3,0)  618.48     ; motor 4
 
    ;; arm Limits
-   (4,0)   66.0     ; motor 1
+   (4,0)   85.0     ; motor 1
    (5,0)   75.0     ; motor 2
    (6,0)   57.0     ; motor 3
    (7,0)   75.0     ; motor 4
@@ -1173,14 +1173,14 @@ armAccelTask
 {
   kp
   {
-    (0,0)   700.0  ; zarm_l1_joint
+    (0,0)   1200.0  ; zarm_l1_joint
     (1,0)   64.0   ; zarm_l2_joint
     (2,0)   64.0   ; zarm_l3_joint
     (3,0)   300.0  ; zarm_l4_joint
     (4,0)   70.0   ; zarm_l5_joint
     (5,0)   70.0   ; zarm_l6_joint
     (6,0)   70.0   ; zarm_l7_joint
-    (7,0)   700.0  ; zarm_r1_joint
+    (7,0)   1200.0  ; zarm_r1_joint
     (8,0)   64.0   ; zarm_r2_joint
     (9,0)   64.0   ; zarm_r3_joint
     (10,0)  300.0  ; zarm_r4_joint
@@ -1246,13 +1246,13 @@ weight
   accLowJoint     20
   accArm          30
   accTorsoZero    0
-  contactForce    3.0
+  contactForce    500
 }
 
 contact_force_params
 {
   contactForceErrorThreshold  0.15    ; 误差阈值（rad），超过此值禁用接触力任务
-  weightArmAccelReduced    3.0    ; 施加期望力时的手臂任务权重
+  weightArmAccelReduced    30.0    ; 施加期望力时的手臂任务权重
   transitionTime   0.3    ; 权重平滑过渡时间常数（秒）
   forceThreshold           5.0    ; 期望力阈值（N），超过此值认为施加了期望力
   interpolationSpeed       300.0   ; 期望力插值速度（N/s）

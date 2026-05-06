@@ -102,18 +102,21 @@ namespace humanoid_controller
     {
       ROS_WARN("[%s] /is_roban not found in ROS params, using default: %d", name_.c_str(), static_cast<int>(is_roban_));
     }
-    // 初始化踝关节求解器
-    int ankle_solver_type = 0;
+    // 初始化踝关节求解器（从 ROS 参数获取类型 token；与 AmpWalk/FallStand/VMP 保持一致）
+    std::string ankle_solver_type = "4gen_pro";
     if (!nh_.getParam("/ankle_solver_type", ankle_solver_type))
     {
-      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %d", name_.c_str(), ankle_solver_type);
+      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %s",
+               name_.c_str(), ankle_solver_type.c_str());
     }
     else
     {
-      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %d", name_.c_str(), ankle_solver_type);
+      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %s",
+               name_.c_str(), ankle_solver_type.c_str());
     }
     ankleSolver_.getconfig(ankle_solver_type);
-    ROS_INFO("[%s] AnkleSolver initialized with type: %d", name_.c_str(), ankle_solver_type);
+    ROS_INFO("[%s] AnkleSolver initialized with type: %s",
+             name_.c_str(), ankle_solver_type.c_str());
 
     // 加载神经网络模型
     try

@@ -17,7 +17,7 @@
     "NUM_WAIST_JOINT" : 1,
     "NUM_JOINT" : 23,
     "ROBOT_MODULE": "ROBAN2",
-    "ankle_solver_type": 5,
+    "ankle_solver_type": "s2gen_2",
 
     "torsoP": 0.0,
     "torsoP_squat": 20.0,

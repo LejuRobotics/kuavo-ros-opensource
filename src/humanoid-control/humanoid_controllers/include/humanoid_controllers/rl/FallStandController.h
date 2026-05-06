@@ -3,7 +3,7 @@
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include <openvino/openvino.hpp>
 #include <memory>
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include <Eigen/Dense>
 #include <std_srvs/Trigger.h>
 #include <std_srvs/SetBool.h>
@@ -419,7 +419,7 @@ namespace humanoid_controller
     double my_yaw_offset_ = 0.0;                   ///< Yaw角度偏移
     
     // AnkleSolver
-    AnkleSolver ankleSolver_;                      ///< 脚踝解算器
+    kuavo_solver::AnkleSolver ankleSolver_;        ///< 脚踝解算器
     
     // ROS服务
     ros::ServiceServer trigger_fall_stand_up_srv_;  ///< 触发倒地起身服务

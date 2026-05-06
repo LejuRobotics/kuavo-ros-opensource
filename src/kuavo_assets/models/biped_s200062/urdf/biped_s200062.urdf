@@ -523,7 +523,7 @@
       link="zarm_l1_link" />
     <axis
       xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="85.0" velocity="13.0" />
     <dynamics damping="0.0" friction="0.0" />
   </joint>
   <link
@@ -1140,7 +1140,7 @@
       link="zarm_r1_link" />
     <axis
       xyz="0 1 0" />
-    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="85.0" velocity="13.0" />
     <dynamics damping="0.0" friction="0.0" />
   </joint>
   <link
@@ -1812,7 +1812,7 @@
     <limit lower="-0.526" upper="0.526" effort="14.5" velocity="2.198" />
     <dynamics damping="0.0" friction="0.0" />
   </joint>
-  <link name="camera_base">
+  <link name="head_camera_base">
     <inertial>
       <origin xyz="-0.0109467295615343 -0.00025332024893314 0.000333522154238597" rpy="0 0 0" />
       <mass value="0.0482361371130408" />
@@ -1821,7 +1821,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s60/meshes/head_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s200062/meshes/head_camera.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />

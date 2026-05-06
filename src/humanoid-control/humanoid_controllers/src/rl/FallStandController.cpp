@@ -133,18 +133,18 @@ namespace humanoid_controller
     fall_stand_init_joints_ = fall_stand_init_joints_prone_;
 
     // 初始化ankleSolver（从ROS参数获取，如果不存在则使用默认值）
-    int ankle_solver_type = 0; // 默认值
+    std::string ankle_solver_type = "4gen_pro"; // 默认值
     // 尝试从ROS参数获取ankle_solver_type
     if (!nh_.getParam("/ankle_solver_type", ankle_solver_type))
     {
-      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %d", name_.c_str(), ankle_solver_type);
+      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %s", name_.c_str(), ankle_solver_type.c_str());
     }
     else
     {
-      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %d", name_.c_str(), ankle_solver_type);
+      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %s", name_.c_str(), ankle_solver_type.c_str());
     }
     ankleSolver_.getconfig(ankle_solver_type);
-    ROS_INFO("[%s] AnkleSolver initialized with type: %d", name_.c_str(), ankle_solver_type);
+    ROS_INFO("[%s] AnkleSolver initialized with type: %s", name_.c_str(), ankle_solver_type.c_str());
 
     // 初始化动作和观测数据（与humanoidController一致）
     singleInputDataRL_.resize(numSingleObsRL_);

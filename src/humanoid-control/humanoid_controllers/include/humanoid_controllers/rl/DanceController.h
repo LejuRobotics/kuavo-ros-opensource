@@ -3,7 +3,7 @@
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include <openvino/openvino.hpp>
 #include <memory>
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include <Eigen/Dense>
 #include <std_srvs/Trigger.h>
 #include <std_srvs/SetBool.h>
@@ -317,7 +317,7 @@ namespace humanoid_controller
     Eigen::VectorXd danceDefaultJointPosRL_;       // 跳舞控制内部使用的默认关节位姿（defaultJointState_rl）
 
     // ===== 踝关节求解器 =====
-    AnkleSolver ankleSolver_;
+    kuavo_solver::AnkleSolver ankleSolver_;
     
     // ===== 机器人配置 =====
     bool is_real_{false};               // 默认false（与FallStandController一致）

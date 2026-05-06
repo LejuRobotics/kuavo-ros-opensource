@@ -22,7 +22,7 @@
 #include "revo2_hand_controller.h"
 #include "hipnuc_imu_receiver.h"
 #include "motor_status_manager.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include <set>
 #include <mutex>
 

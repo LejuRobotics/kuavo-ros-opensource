@@ -70,7 +70,7 @@
 #include <openvino/openvino.hpp>
 #include <sensor_msgs/JointState.h>
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "humanoid_interface/foot_planner/floatInterpolation.h"
 
 namespace humanoid_controller
@@ -583,7 +583,7 @@ namespace humanoid_controller
     // Node Handle
     ros::NodeHandle controllerNh_;
     HighlyDynamic::HumanoidInterfaceDrake *drake_interface_{nullptr};
-    AnkleSolver ankleSolver;
+    kuavo_solver::AnkleSolver ankleSolver;
 #ifdef KUAVO_CONTROL_LIB_FOUND
     HighlyDynamic::JointFilter *joint_filter_ptr_{nullptr};
 #endif
