@@ -105,18 +105,18 @@ def plan_and_execute_ik_target(is_left: bool, is_local: bool, is_whole_body: boo
         )
     
     # 2. 解析关节角度（统一格式：[下肢4, 左臂7, 右臂7]）
-    if not ik_success:
-        error_msg = f"❌ 无法获得有效IK解: {ik_msg}"
-        rospy.logerr(error_msg)
-        solution_info = {
-            'solution_type': 'none',
-            'q_leg': [],
-            'q_left_arm': [],
-            'q_right_arm': [],
-            'linear_error': linear_error,
-            'angular_error': angular_error
-        }
-        return False, 0.0, error_msg, solution_info
+    # if not ik_success:
+    #     error_msg = f"❌ 无法获得有效IK解: {ik_msg}"
+    #     rospy.logerr(error_msg)
+    #     solution_info = {
+    #         'solution_type': 'none',
+    #         'q_leg': [],
+    #         'q_left_arm': [],
+    #         'q_right_arm': [],
+    #         'linear_error': linear_error,
+    #         'angular_error': angular_error
+    #     }
+    #     return False, 0.0, error_msg, solution_info
     
     # 解析：期望返回格式为 [下肢4, 左臂7, 右臂7] 共18维
     if len(q_solution) == 18:

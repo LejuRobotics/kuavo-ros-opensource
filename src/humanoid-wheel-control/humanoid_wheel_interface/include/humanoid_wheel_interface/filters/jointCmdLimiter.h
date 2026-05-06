@@ -7,6 +7,7 @@
 #include <Eigen/Core>
 #include "ocs2_pinocchio_interface/PinocchioInterface.h"
 #include "humanoid_wheel_interface/ManipulatorModelInfo.h"
+#include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 
 namespace ocs2 {
 namespace mobile_manipulator {
@@ -25,12 +26,11 @@ public:
 
 private:
     // 常规成员
-    Eigen::VectorXd lastQpos_, lastQvel_;
     double dt_ = 0.001;
 
-    // 上下限制
-    Eigen::VectorXd qposMax_, qposMin_;
-    Eigen::VectorXd qvelMax_, qvelMin_;
+    // 插值类
+    std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  jointPosFilter_ptr_;
+    std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  jointVelFilter_ptr_;
 
 };
 

@@ -25,6 +25,9 @@ public:
     const Eigen::VectorXd& getFirstOrderDerivative() const;
     const Eigen::VectorXd& getSecondOrderDerivative() const;
 
+    // 设置值约束
+    void setValueLimit(const Eigen::VectorXd& minLimit, const Eigen::VectorXd& maxLimit);
+
     // 设置运动学约束
     void setFirstOrderDerivativeLimit(const Eigen::VectorXd& limit);
     void setSecondOrderDerivativeLimit(const Eigen::VectorXd& limit);
@@ -45,6 +48,10 @@ private:
     std::vector<ruckig::OutputParameter<1>> outputVec_;
     std::vector<ruckig::Ruckig<1>> ruckigVec_;
 
+    // 值约束相关
+    bool hasValueLimits_;
+    Eigen::VectorXd minValues_;
+    Eigen::VectorXd maxValues_;
 };
 
 }  // namespace mobile_manipulator

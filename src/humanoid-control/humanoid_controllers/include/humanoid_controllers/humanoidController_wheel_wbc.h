@@ -114,6 +114,10 @@ namespace humanoidController_wheel_wbc
     // ======= 硬件相关处理函数 =========
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);    // 替换EC_MASTER电机的kp/kd（从running_settings）
 
+    // ======= 机器人初始动作相关函数 ========
+    void performSimpleActions(const ros::Time &time);
+    void initialPreTargetActions(const vector_t& startActions, const vector_t& preTargetActions, double desiredTime);
+
     // ========== 工具函数 ==========
     /**
      * @brief 创建零位姿态 [0, 0, 0, 1, 0, 0, 0]
@@ -144,6 +148,10 @@ namespace humanoidController_wheel_wbc
         }
         return filtered_data;
     }
+    // ========== 机器人启动初始动作 ==========
+    vector_t preTargetActions_;
+    vector_t startActions_;
+    double robotPreActionDesiredTime_ = 0.0;
 
     // ========== 坐标变换相关 ==========
     Eigen::Vector3d cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw);
