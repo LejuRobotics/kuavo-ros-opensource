@@ -99,11 +99,6 @@ class MRT_ROS_Interface : public MRT_BASE {
   void spinMRT();
 
   /**
-   * @brief getPolicyReceiveCount returns the number of policy receive count
-   * @return the number of policy receive count
-   */
-  size_t getPolicyReceiveCount() const { return policyReceiveCount_; }
-  /**
    * Launches the ROS publishers and subscribers to communicate with the MPC node.
    * @param nodeHandle
    */
@@ -158,7 +153,6 @@ class MRT_ROS_Interface : public MRT_BASE {
   std::thread publisherWorker_;
   std::mutex publisherMutex_;
   std::condition_variable msgReady_;
-  size_t policyReceiveCount_{0};
 };
 
 }  // namespace ocs2

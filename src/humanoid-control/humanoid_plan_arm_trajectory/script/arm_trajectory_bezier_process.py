@@ -63,10 +63,10 @@ class ArmTrajectoryBezierDemo:
         robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
         self.robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
         self.robot_class = KUAVO if self.robot_version.major() >= 4 else ROBAN
-        self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "multi")
+        self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
         # KUAVO v50+ 有腰部关节
         self.has_waist = (self.robot_version.major() == 5) if self.robot_class == KUAVO else False
-       
+        
         if self.robot_class == KUAVO:
             # 根据是否有腰部关节确定TACT长度
             tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
@@ -898,10 +898,6 @@ class ArmTrajectoryBezierDemo:
         self._timer = rospy.Timer(rospy.Duration(delay), self._on_timer_trigger, oneshot=True)
 
     def reset_robot_state(self):
-        # 复位开始，发布 state=1 表示正在复位
-        rospy.loginfo("[RESET_START] Starting robot reset, publishing action state=1")
-        self.publish_action_state(1)
-
         current_control_mode = self.get_current_control_mode()
         if current_control_mode == "rl":
             self.rl_reset_robot_state()
@@ -918,10 +914,6 @@ class ArmTrajectoryBezierDemo:
                 self.waist_state.header.stamp = rospy.Time.now()
                 self.waist_state.data.data = [0]
                 self.control_waist_pub.publish(self.waist_state)
-
-            # OCS2/MPC 复位完成，发布 state=2
-            rospy.loginfo("[RESET_COMPLETE] OCS2/MPC reset finished, publishing action state=2")
-            self.publish_action_state(2)
 
     def create_action_data(self, finish_time, is_rl=False):
         # 根据是否有腰部关节确定TACT长度
@@ -1003,9 +995,7 @@ class ArmTrajectoryBezierDemo:
     def _on_reset_timer_trigger(self, event):
         """复位动作结束后停止发布，并恢复手臂模式为自动摆臂（AMP/RL 下行走时摆手）。"""
         self.arm_flag = False
-        rospy.loginfo(f"[RESET_COMPLETE] Reset trajectory finished at {time.time():.3f}. Stopping publishers. [DEBUG] arm_flag={self.arm_flag}, running_action={self.running_action}")
-        # 复位完成，发布 state=2
-        self.publish_action_state(2)
+        rospy.loginfo("Reset trajectory finished. Stopping publishers.")
         # AMP/RL 下做完动作会切到 mode 2，复位轨迹播完后需切回 mode 1，否则拨动摇杆行走时不摆手
         current_control_mode = self.get_current_control_mode()
         if current_control_mode == "rl":
@@ -1190,27 +1180,6 @@ class ArmTrajectoryBezierDemo:
 
     def handle_execute_action(self, req):
         action_name = req.action_name
-
-        # 检查是否有动作正在执行
-        if self.arm_flag or self.running_action:
-            rospy.logwarn(f"Action '{action_name}' rejected: Another action is already executing")
-            return ExecuteArmActionResponse(
-                success=False,
-                message=f"另一个动作正在执行中，请等待当前动作完成后再试"
-            )
-
-        # 清理旧动作的定时器，防止旧定时器在新动作执行时触发
-        if hasattr(self, '_timer') and self._timer:
-            rospy.loginfo(f"Stopping old timer before executing: {action_name}")
-            self._timer.shutdown()
-            self._timer = None
-
-        # 停止旧动作的执行线程
-        if self.arm_flag:
-            rospy.loginfo(f"Stopping old action thread before executing: {action_name}")
-            self.interrupt_flag = True
-            rospy.sleep(0.05)  # 给旧线程一点时间退出
-            self.interrupt_flag = False
 
         file_path = f"{self.action_files_path}/{action_name}.tact"
         data = self.load_json_file(file_path)

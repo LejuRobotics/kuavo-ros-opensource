@@ -74,7 +74,6 @@ void MRT_ROS_Interface::resetMpcNode(const TargetTrajectories& initTargetTraject
 
     mpcResetServiceClient_.call(resetSrv);
     ROS_INFO_STREAM("MPC node has been reset.");
-    policyReceiveCount_ = 0;
   }).detach();
 }
 
@@ -98,7 +97,6 @@ void MRT_ROS_Interface::pauseResumeMpcNode(bool pause) {
       ROS_INFO_STREAM("MPC node has been resumed.");
     }
     this->reset();
-    policyReceiveCount_ = 0;
   }).detach();
 }
 
@@ -220,7 +218,6 @@ void MRT_ROS_Interface::mpcPolicyCallback(const ocs2_msgs::mpc_flattened_control
   if (pause_flag_)
   {
     ROS_INFO_STREAM("[MRT_ROS_Interface] MPC is paused, skipping policy callback");
-    policyReceiveCount_=0;
     return;
   }
   // read new policy and command from msg
@@ -230,7 +227,6 @@ void MRT_ROS_Interface::mpcPolicyCallback(const ocs2_msgs::mpc_flattened_control
   readPolicyMsg(*msg, *commandPtr, *primalSolutionPtr, *performanceIndicesPtr);
 
   this->moveToBuffer(std::move(commandPtr), std::move(primalSolutionPtr), std::move(performanceIndicesPtr));
-  policyReceiveCount_++;
 }
 
 /******************************************************************************************************/

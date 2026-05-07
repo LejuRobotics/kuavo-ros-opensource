@@ -760,8 +760,8 @@ switchJointAccelTask
 {
   leg
   {
-    kp    300
-    kd    3.2
+    kp    100
+    kd    1.2
     kp_sim    500
     kd_sim    10.2
   }
@@ -777,7 +777,7 @@ switchWeight
     Linear          3
     Angular         6
     JointAcc        30
-    contactForce    0.1
+    contactForce    0.07
 }
 
 ; State Estimation

@@ -2,7 +2,7 @@
   <!-- 第一段楼梯参数（上楼梯） -->
   <arg name="use_stairs" default="true" doc="是否添加楼梯到场景中"/>
   <arg name="stairs_model_path" default="$(find gazebo_sim)/models/stairs/stairs_25cm_8cm.sdf" doc="楼梯模型SDF文件路径"/>
-  <arg name="stairs_x" default="0.13" doc="楼梯位置X坐标"/>
+  <arg name="stairs_x" default="0.17" doc="楼梯位置X坐标"/>
   <arg name="stairs_y" default="0.0" doc="楼梯位置Y坐标"/>
   <arg name="stairs_z" default="0.0" doc="楼梯位置Z坐标"/>
   <arg name="stairs_roll" default="0.0" doc="楼梯绕X轴旋转角度（弧度）"/>

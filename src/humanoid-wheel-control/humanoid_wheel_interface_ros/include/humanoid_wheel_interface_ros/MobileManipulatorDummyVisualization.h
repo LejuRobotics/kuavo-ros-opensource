@@ -70,6 +70,7 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
 
   std::unique_ptr<robot_state_publisher::RobotStatePublisher> robotStatePublisherPtr_;
   tf::TransformBroadcaster tfBroadcaster_;
+  bool use_external_odom_tf_{false};
 
   ros::Publisher stateOptimizedPublisher_;
   ros::Publisher stateOptimizedPosePublisher_;

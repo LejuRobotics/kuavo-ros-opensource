@@ -294,18 +294,18 @@ standBaseState
 standJointState
 {
    ;; Arm Joint Positions:  ;;
-   (0,0)   0.15      ; zarm_l1_joint
+   (0,0)   0.1      ; zarm_l1_joint
    (1,0)   0.0      ; zarm_l2_joint
    (2,0)   -0.0     ; zarm_l3_joint
-   (3,0)   -0.4     ; zarm_l4_joint
+   (3,0)   -0.3     ; zarm_l4_joint
    (4,0)   -0.0     ; zarm_l5_joint
    (5,0)   -0.0     ; zarm_l6_joint
    (6,0)   -0.0     ; zarm_l7_joint
 
-   (7,0)   0.15      ; zarm_r1_joint
+   (7,0)   0.1      ; zarm_r1_joint
    (8,0)   0.0      ; zarm_r2_joint
    (9,0)   -0.0     ; zarm_r3_joint
-   (10,0)  -0.4     ; zarm_r4_joint
+   (10,0)  -0.3     ; zarm_r4_joint
    (11,0)  -0.0     ; zarm_r5_joint
    (12,0)  -0.0     ; zarm_r6_joint
    (13,0)  -0.0     ; zarm_r7_joint

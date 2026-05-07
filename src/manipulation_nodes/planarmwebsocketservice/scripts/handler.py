@@ -1003,7 +1003,7 @@ update_joy_config_pub = None
 
 def timer_callback(event):
     global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub
-    if g_robot_type == "ocs2" and len(ocs2_joint_state.position) > 0 and plan_arm_state_status is False:
+    if g_robot_type == "ocs2" and len(ocs2_joint_state.position) > 0 and plan_arm_state_status is False and vr_manager.recording_state != vr_manager.RecordingState.CONVERTING:
         if len(ocs2_joint_state.position) != 0:
             kuavo_arm_traj_pub.publish(ocs2_joint_state)
         if len(ocs2_hand_state.left_hand_position) != 0 or len(ocs2_hand_state.right_hand_position) != 0:
@@ -1586,7 +1586,8 @@ async def get_robot_info_handler(
             "maps_folder_path": MAP_FILE_FOLDER,
             "h12_config_path": H12_CONFIG_PATH,
             "repo_path": REPO_PATH,
-            "vr_recording_path": vr_recording_path
+            "vr_recording_path": vr_recording_path,
+            "workspace_setup_path": os.path.join(KUAVO_ROS_CONTROL_WS_PATH, "devel", "setup.bash")
         }
     )
 
@@ -5280,9 +5281,6 @@ async def start_vr_record_handler(websocket: websockets.WebSocketServerProtocol,
     payload = Payload(cmd="start_vr_record", data={"code": 0, "message": "Recording started"})
 
     try:
-        # 导入VR录制模块
-        import vr_manager
-
         # 调用录制函数（自动生成文件名）
         success, message = vr_manager.start_recording()
 
@@ -5299,6 +5297,70 @@ async def start_vr_record_handler(websocket: websockets.WebSocketServerProtocol,
         print(traceback.format_exc())
         payload.data["code"] = 2
         payload.data["message"] = f"Start recording failed: {str(e)}"
+
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+
+async def stop_vr_record_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """
+    停止VR录制并转换为TACT文件接口
+    """
+    payload = Payload(cmd="stop_vr_record", data={"code": 0, "message": "Recording stopped"})
+
+    try:
+        # 获取tact_filename参数
+        request_data = data.get("data", {}) or {}
+        tact_filename = request_data.get("tact_filename")
+
+        if not tact_filename:
+            payload.data["code"] = 1
+            payload.data["message"] = "tact_filename parameter is required"
+        else:
+            # 调用停止录制并转换函数
+            success, message = vr_manager.stop_recording_and_convert(tact_filename)
+
+            if success:
+                payload.data["code"] = 0
+                payload.data["message"] = message
+            else:
+                payload.data["code"] = 1
+                payload.data["message"] = message
+
+    except Exception as e:
+        print(f"Stop VR recording error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        payload.data["code"] = 2
+        payload.data["message"] = f"Stop recording failed: {str(e)}"
+
+    response = Response(payload=payload, target=websocket)
+    response_queue.put(response)
+
+
+async def cancel_vr_record_handler(websocket: websockets.WebSocketServerProtocol, data: dict):
+    """
+    取消VR录制接口
+    """
+    payload = Payload(cmd="cancel_vr_record", data={"code": 0, "message": "Recording cancelled"})
+
+    try:
+        # 调用取消录制函数
+        success, message = vr_manager.cancel_recording()
+
+        if success:
+            payload.data["code"] = 0
+            payload.data["message"] = message
+        else:
+            payload.data["code"] = 1
+            payload.data["message"] = message
+
+    except Exception as e:
+        print(f"Cancel VR recording error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        payload.data["code"] = 2
+        payload.data["message"] = f"Cancel recording failed: {str(e)}"
 
     response = Response(payload=payload, target=websocket)
     response_queue.put(response)

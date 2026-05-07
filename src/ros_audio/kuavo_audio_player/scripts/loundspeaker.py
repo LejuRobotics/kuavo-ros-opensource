@@ -227,6 +227,19 @@ class MusicPlayerNode:
                 
                 rospy.loginfo(f"音频信息: 长度={len(audio_array)}, 采样率={wav_file.getframerate()}")
                 
+                # 计算全局最大值，确定安全增益以避免溢出
+                max_abs_value = np.max(np.abs(audio_array))
+                if max_abs_value > 0:
+                    # 计算安全增益：确保放大后不超过 int16 范围
+                    safe_gain = min(self.DEFAULT_GAIN, 32767.0 / max_abs_value)
+                    if safe_gain < self.DEFAULT_GAIN:
+                        rospy.logwarn(f"音频最大值 {max_abs_value}，目标增益 {self.DEFAULT_GAIN} 会导致溢出，使用安全增益 {safe_gain:.2f}")
+                else:
+                    safe_gain = self.DEFAULT_GAIN
+                
+                # 打印实际增益
+                rospy.loginfo(f"实际增益: {safe_gain:.4f}, 目标增益: {self.DEFAULT_GAIN}, 音频最大值: {max_abs_value}")
+                
                 # 分块发布
                 for i in range(0, len(audio_array), self.CHUNK_SIZE):
                     if rospy.is_shutdown():
@@ -234,8 +247,8 @@ class MusicPlayerNode:
                     
                     chunk = audio_array[i:i+self.CHUNK_SIZE]
                     
-                    # 应用增益
-                    chunk = (chunk * self.DEFAULT_GAIN).astype(np.int16)
+                    # 应用安全增益，转换为浮点数计算避免溢出
+                    chunk = (chunk.astype(np.float32) * safe_gain).astype(np.int16)
                     
                     # 创建并发布消息
                     msg = Int16MultiArray()

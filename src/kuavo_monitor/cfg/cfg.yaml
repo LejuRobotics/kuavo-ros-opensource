@@ -1,2 +1,2 @@
 monitor_rate: 10
-node_list: ["/humanoid_VR_hand_control"]
+node_list: []

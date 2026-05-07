@@ -242,11 +242,11 @@ namespace humanoid_controller
     // Hardware interface
     // TODO: setup hardware controller interface
     // create a ROS subscriber to receive the joint pos and vel
-    jointPos_ = vector_t::Zero(jointNum_);
+    joint_pos_ = vector_t::Zero(jointNum_);
     // set jointPos_ to {0, 0, 0.35, -0.90, -0.55, 0, 0, 0, 0.35, -0.90, -0.55, 0}
-    jointPos_ << -0.01867, -0.00196, -0.65815, 0.86691, -0.31346, 0.01878, 0.01868, 0.00197, -0.65815, 0.86692, -0.31347, -0.01878;
-    jointVel_ = vector_t::Zero(jointNum_);
-    jointAcc_ = vector_t::Zero(jointNum_);
+    joint_pos_ << -0.01867, -0.00196, -0.65815, 0.86691, -0.31346, 0.01878, 0.01868, 0.00197, -0.65815, 0.86692, -0.31347, -0.01878;
+    joint_vel_ = vector_t::Zero(jointNum_);
+    joint_acc_ = vector_t::Zero(jointNum_);
     quat_ = Eigen::Quaternion<scalar_t>(1, 0, 0, 0);
 
     acc_filter_.setParams(dt_, acc_filter_params);
@@ -597,10 +597,10 @@ namespace humanoid_controller
   
   void humanoidController::applySensorData(const SensorData &data)
   {
-    jointPos_ = data.jointPos_;
-    jointVel_ = data.jointVel_;
-    jointAcc_ = data.jointAcc_;
-    jointTorque_ = data.jointTorque_;
+    joint_pos_ = data.jointPos_;
+    joint_vel_ = data.jointVel_;
+    joint_acc_ = data.jointAcc_;
+    joint_torque_ = data.jointTorque_;
     quat_ = data.quat_;
     angularVel_ = data.angularVel_;
     linearAccel_ = data.linearAccel_;
@@ -608,7 +608,7 @@ namespace humanoid_controller
     angularVelCovariance_ = data.angularVelCovariance_;
     linearAccelCovariance_ = data.linearAccelCovariance_;
     current_time_ = data.timeStamp_;
-    // stateEstimate_->updateJointStates(jointPos_, jointVel_);
+    // stateEstimate_->updateJointStates(joint_pos_, joint_vel_);
     stateEstimate_->updateImu(quat_, angularVel_, linearAccel_, orientationCovariance_, angularVelCovariance_, linearAccelCovariance_);
   }
   void humanoidController::updateStateEstimation(const ros::Time &time, bool is_init)
@@ -633,7 +633,7 @@ namespace humanoid_controller
     if (is_init)
     {
       last_time_ = current_time_ - ros::Duration(0.001);
-      stateEstimate_->updateJointStates(jointPos_, jointVel_);
+      stateEstimate_->updateJointStates(joint_pos_, joint_vel_);
       stateEstimate_->updateIntialEulerAngles(quat_);
       applySensorData(sensors_data);
       stateEstimate_->set_intial_state(currentObservation_.state);
@@ -665,8 +665,8 @@ namespace humanoid_controller
     // rbdState_: Angular(zyx),pos(xyz),jointPos[info_.actuatedDofNum],angularVel(zyx),linervel(xyz),jointVel[info_.actuatedDofNum]
     if (diff_time > 0.00005 || is_init)
     {
-      Eigen::VectorXd updated_joint_pos = jointPos_;
-      Eigen::VectorXd updated_joint_vel = jointVel_;
+      Eigen::VectorXd updated_joint_pos = joint_pos_;
+      Eigen::VectorXd updated_joint_vel = joint_vel_;
 
       // ros_logger_->publishVector("/humanoid_controller/updated_joint_pos", updated_joint_pos);
       // ros_logger_->publishVector("/humanoid_controller/updated_joint_vel", updated_joint_vel);

@@ -92,6 +92,9 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   robotStatePublisherPtr_.reset(new robot_state_publisher::RobotStatePublisher(tree));
   robotStatePublisherPtr_->publishFixedTransforms(true);
 
+  // 实物模式下不发布 odom->base_link tf，避免和底盘 EKF 的 tf 冲突
+  nodeHandle.param("/use_external_odom_tf", use_external_odom_tf_, false);
+
   // 初始化头部关节
   head_joint_names_ = {"zhead_1_joint", "zhead_2_joint"};
   head_joint_positions_ = {0.0, 0.0};
@@ -150,6 +153,7 @@ void MobileManipulatorDummyVisualization::update_obs(const SystemObservation& ob
 /******************************************************************************************************/
 void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& timeStamp, const SystemObservation& observation) {
   // publish world -> base transform
+  if (!use_external_odom_tf_) {
   const auto r_world_base = getBasePosition(observation.state, modelInfo_);
   const Eigen::Quaternion<scalar_t> q_world_base = getBaseOrientation(observation.state, modelInfo_);
 
@@ -161,6 +165,7 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
   base_tf.transform.translation.z += baseHeightOffset;
   base_tf.transform.rotation = ros_msg_helpers::getOrientationMsg(q_world_base);
   tfBroadcaster_.sendTransform(base_tf);
+  }
 
   // publish joints transforms
   const auto j_arm = getArmJointAngles(observation.state, modelInfo_);

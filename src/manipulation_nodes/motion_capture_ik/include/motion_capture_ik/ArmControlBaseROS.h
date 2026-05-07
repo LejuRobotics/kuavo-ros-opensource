@@ -6,6 +6,9 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <chrono>
+#include <vector>
+#include <string>
 
 #include "motion_capture_ik/json.hpp"
 
@@ -73,6 +76,7 @@ class ArmControlBaseROS {
   ros::Publisher lejuClawCommandPublisher_;
   ros::Publisher headBodyPosePublisher_;
   ros::Publisher kuavoArmTrajCppPublisher_;
+  ros::Publisher questJoystickDataPublisher_;
 
   // Atomic state variables for thread-safe operation
   std::atomic<bool> shouldStop_;
@@ -91,7 +95,28 @@ class ArmControlBaseROS {
   double thresholdArmDiffHalfUpBody_rad_;
   bool controlTorso_;
   bool enableWbcArmTrajectory_;
-  int waist_dof_;  // 腰部自由度数量（从JSON配置读取NUM_WAIST_JOINT）
+
+  // Robot joint dimension parameters (loaded from JSON with fallback compatibility)
+  // Sensor data structure: [Leg joints] + [Arm joints] + [Head joints]
+  //
+  // Compatibility strategy:
+  //   - Priority: Read from JSON (NUM_ARM_JOINT, NUM_HEAD_JOINT, NUM_WAIST_JOINT, NUM_JOINT)
+  //   - Fallback: If any critical field is missing or invalid, use legacy defaults:
+  //     arm=14, head=2, waist=0, total=28 (v49 layout)
+  //   - This ensures backward compatibility with old configurations while supporting new layouts
+  //
+  // Example configurations:
+  //   v49: [0-11: Legs(12)] + [12-25: Arms(14)] + [26-27: Head(2)] = 28 joints total, offset=12
+  //   v60: [0-3:  Legs(4)]  + [4-17:  Arms(14)] + [18-19: Head(2)] = 20 joints total, offset=4
+  //
+  int gripHoldCount_ = 0;
+  int numArmJoints_;         // Number of arm joints (从 JSON 中的 NUM_ARM_JOINT 加载，默认14)
+  int numHeadJoints_;        // Number of head joints (从 JSON 中的 NUM_HEAD_JOINT 加载，默认2)
+  int numWaistJoints_;       // Number of waist joints (从 JSON 中的 NUM_WAIST_JOINT 加载，默认0)
+  int numTotalJoints_;       // Total number of joints (从 JSON 中的 NUM_JOINT 加载，s49默认28，s60默认20)
+  int sensorDataArmOffset_;  // Offset to arm joints in sensor data = NUM_JOINT - NUM_HEAD_JOINT - NUM_ARM_JOINT
+                             // 即腿部关节数量 (v49为12，v60为4)
+                             // All joint_q array accesses MUST use: sensorDataArmOffset_ + i for arm joint index i
 
   std::mutex sensorDataRawMutex_;
   std::shared_ptr<kuavo_msgs::sensorsData> sensorDataRaw_;
@@ -103,6 +128,22 @@ class ArmControlBaseROS {
   std::unique_ptr<Quest3ArmInfoTransformer> quest3ArmInfoTransformerPtr_;
   std::unique_ptr<KeyFramesVisualizer> quest3KeyFramesVisualizerPtr_;
   std::shared_ptr<noitom_hi5_hand_udp_python::PoseInfoList> HandPoseAndElbowPositonListPtr_;
+  int loopSyncCount_ = 0;
+
+  // 时间戳记录系统
+  struct TimestampRecord {
+    std::string stepName;
+    uint64_t timestamp;  // 微秒级时间戳
+    int64_t loopCount;   // 循环计数器
+  };
+  std::vector<TimestampRecord> timestampRecords_;
+  std::mutex timestampMutex_;
+  std::chrono::steady_clock::time_point lastSaveTime_;
+  const int64_t saveIntervalSeconds_ = 20;  // 每20秒保存一次
+
+  void recordTimestamp(const std::string& stepName, int64_t loopCount = -1);
+  void saveTimestampRecordsToFile();
+  void checkAndSaveTimestampRecords();
 
   void stopRobotCallback(const std_msgs::Bool::ConstPtr& msg);
 
@@ -117,6 +158,8 @@ class ArmControlBaseROS {
   virtual bool setArmModeChangingCallback(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res);
 
   bool changeArmCtrlMode(int mode);
+
+  bool initializeArmControlMode();
 
   bool initializeArmJointsSafety();
 
@@ -153,6 +196,9 @@ class ArmControlBaseROS {
   void publishHandPositionData();
   void publishClawCommandData();
 
+  // 发布 quest_joystick_data 消息（x轴和A按钮为true，其余全零）
+  void publishQuestJoystickDataXAndA();
+
   void initializeArmInfoTransformerFromJson(const nlohmann::json& configJson);
 
   std::vector<std::string> loadFrameNamesFromConfig(const nlohmann::json& configJson);
@@ -171,6 +217,10 @@ class ArmControlBaseROS {
 
   template <typename T, typename UpdateFunc>
   void processJsonParameter(const nlohmann::json& configJson, const std::string& paramName, UpdateFunc updateFunction);
+
+  // Dimension compatibility helpers
+  void loadJointDimensionsWithFallback(const nlohmann::json& configJson);
+  bool validateJointDimensions(int& numArm, int& numHead, int& numWaist, int& numTotal, int& offset) const;
 };
 
 }  // namespace HighlyDynamic

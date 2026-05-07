@@ -25,6 +25,7 @@
   <build_depend>eigen3</build_depend>
   <build_depend>drake</build_depend>
   <build_depend>leju_utils</build_depend>
+  <build_depend>humanoid_wheel_interface</build_depend>
   
   <build_export_depend>rospy</build_export_depend>
   <build_export_depend>roscpp</build_export_depend>
@@ -36,6 +37,7 @@
   <build_export_depend>eigen3</build_export_depend>
   <build_export_depend>drake</build_export_depend>
   <build_export_depend>leju_utils</build_export_depend>
+  <build_export_depend>humanoid_wheel_interface</build_export_depend>
   
   <exec_depend>rospy</exec_depend>
   <exec_depend>roscpp</exec_depend>
@@ -47,4 +49,5 @@
   <exec_depend>kuavo_msgs</exec_depend>
   <exec_depend>noitom_hi5_hand_udp_python</exec_depend>
   <exec_depend>leju_utils</exec_depend>
+  <exec_depend>humanoid_wheel_interface</exec_depend>
 </package>

@@ -69,7 +69,6 @@ def execute_two_arm_joint_tests():
     rospy.Subscriber('/lb_arm_joint_reach_time', Float32, time_callback)
 
     rospy.sleep(1.0)
-    ct.set_control_mode(1)  # 切换到ArmOnly模式
 
     # 测试用例列表： (名称, 左臂7关节角度, 右臂7关节角度)
     test_cases = [ 
@@ -106,7 +105,6 @@ def execute_two_arm_joint_tests():
         rospy.loginfo(f"  {name} 完成!")
 
     rospy.loginfo("\n所有双臂关节角度测试数据发布完成！")
-    ct.set_control_mode(2)  # 切换回BaseOnly模式
 
 # -------------- 主入口 --------------
 def main():

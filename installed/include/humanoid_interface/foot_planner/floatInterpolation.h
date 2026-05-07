@@ -24,8 +24,7 @@ public:
     std::pair<vector3_t, matrix3_t> getBasePose(const vector_t& init_q);
 
 
-    vector_t getlegJointAngles(const vector_t& observationState, const vector6_t& basePose, 
-                               const vector_t& desired_leg_q);
+    vector_t getlegJointAngles(const vector_t& observationState, const vector6_t& basePose);
 
 private:
     InverseKinematics ikSolver_;

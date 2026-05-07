@@ -3696,8 +3696,8 @@
                     <Cmd>10</Cmd>
                     <Addr>150994944</Addr>
                     <DataLength>2</DataLength>
-                    <InputOffs>60</InputOffs>
-                    <OutputOffs>60</OutputOffs>
+                    <InputOffs>56</InputOffs>
+                    <OutputOffs>56</OutputOffs>
                 </Cmd><!-- MSU Id 0: Task 0 -->
                 <Cmd>
                     <State>SAFEOP</State>
@@ -3725,7 +3725,7 @@
         </Cyclic>
         <ProcessImage>
             <Inputs>
-                <ByteSize>62</ByteSize>
+                <ByteSize>58</ByteSize>
                 <Variable>
                     <Name>Slave_1001 [YD100 Servo CoE Drive].1st Transmit PDO mapping.Statusword</Name>
                     <DataType>UINT</DataType>
@@ -3864,7 +3864,7 @@
                 </Variable>
             </Inputs>
             <Outputs>
-                <ByteSize>62</ByteSize>
+                <ByteSize>58</ByteSize>
                 <Variable>
                     <Name>Slave_1001 [YD100 Servo CoE Drive].1st Receive PDO mapping.Controlword</Name>
                     <DataType>UINT</DataType>
