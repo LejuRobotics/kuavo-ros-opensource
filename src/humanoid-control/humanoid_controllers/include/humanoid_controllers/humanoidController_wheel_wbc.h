@@ -110,6 +110,10 @@ namespace humanoidController_wheel_wbc
     bool enableVelControlCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
     bool changeLbObsUpdateModeCallback(kuavo_msgs::changeLbMpcObsUpdateModeSrv::Request &req, 
                                       kuavo_msgs::changeLbMpcObsUpdateModeSrv::Response &res);
+    // VR 增量遥操作相关服务回调
+    bool enableVrArmAccelTaskCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
+    bool enableArmTrajInterpCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
+    bool enableVrArmKpKdCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
 
     // ======= 硬件相关处理函数 =========
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);    // 替换EC_MASTER电机的kp/kd（从running_settings）

@@ -35,11 +35,6 @@ WheelArmControlBaseROS::WheelArmControlBaseROS(ros::NodeHandle& nodeHandle, doub
            publishRate_,
            debugPrint_ ? "true" : "false");
 
-  // 初始化时间戳记录系统
-  timestampRecords_.clear();
-  timestampRecords_.reserve(10000);  // 预分配空间，避免频繁内存分配
-  lastSaveTime_ = std::chrono::steady_clock::now();
-  ROS_INFO("[WheelArmControlBaseROS] Timestamp recording system initialized");
 }
 
 WheelArmControlBaseROS::~WheelArmControlBaseROS() { ROS_INFO("[WheelArmControlBaseROS] Base class destructor called"); }
@@ -340,6 +335,16 @@ void WheelArmControlBaseROS::loadParameters() {
   nodeHandle_.param("/quest3/enable_wbc_arm_trajectory", enableWbcArmTrajectory_, true);
   ROS_INFO("[WheelArmControlBaseROS] enableWbcArmTrajectory: %s", enableWbcArmTrajectory_ ? "true" : "false");
 
+  nodeHandle_.param("/enable_timestamp_log", enableTimestampLog_, false);
+  ROS_INFO("[WheelArmControlBaseROS] enableTimestampLog: %s", enableTimestampLog_ ? "true" : "false");
+
+  // 仅在启用日志时预分配记录空间
+  if (enableTimestampLog_) {
+    timestampRecords_.reserve(10000);
+    lastSaveTime_ = std::chrono::steady_clock::now();
+    ROS_INFO("[WheelArmControlBaseROS] Timestamp recording system initialized");
+  }
+
   ROS_INFO("[WheelArmControlBaseROS] Parameters loaded successfully");
 }
 
@@ -577,6 +582,8 @@ void WheelArmControlBaseROS::publishVisualizationMarkersForSide(const std::strin
 }
 
 void WheelArmControlBaseROS::recordTimestamp(const std::string& stepName, int64_t loopCount) {
+  if (!enableTimestampLog_) return;
+
   std::lock_guard<std::mutex> lock(timestampMutex_);
 
   // 获取当前时间戳（微秒）
@@ -601,13 +608,22 @@ void WheelArmControlBaseROS::saveTimestampRecordsToFile() {
   std::tm tm_now;
   localtime_r(&time_t_now, &tm_now);
 
-  // 创建logs目录（如果不存在）
-  system("mkdir -p /root/kuavo_ws/logs");
+  // 创建当前用户 logs 目录（如果不存在）
+  const char* homeDir = getenv("HOME");
+  if (!homeDir) homeDir = "/tmp";
+  char logDir[256];
+  snprintf(logDir, sizeof(logDir), "%s/logs", homeDir);
+  {
+    char mkdirCmd[300];
+    snprintf(mkdirCmd, sizeof(mkdirCmd), "mkdir -p %s", logDir);
+    system(mkdirCmd);
+  }
 
   char filename[512];
   snprintf(filename,
            sizeof(filename),
-           "/root/kuavo_ws/logs/timestamp_log_%04d%02d%02d_%02d%02d%02d.csv",
+           "%s/timestamp_log_%04d%02d%02d_%02d%02d%02d.csv",
+           logDir,
            tm_now.tm_year + 1900,
            tm_now.tm_mon + 1,
            tm_now.tm_mday,
@@ -661,6 +677,8 @@ void WheelArmControlBaseROS::saveTimestampRecordsToFile() {
 }
 
 void WheelArmControlBaseROS::checkAndSaveTimestampRecords() {
+  if (!enableTimestampLog_) return;
+
   auto now = std::chrono::steady_clock::now();
   auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(now - lastSaveTime_).count();
 

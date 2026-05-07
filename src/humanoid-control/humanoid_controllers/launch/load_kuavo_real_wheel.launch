@@ -15,7 +15,7 @@
     <arg name="nodelet_robot_type"  default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="wheel_control_type"  default="1"/>    <!-- 0表示轮臂的仿真测试版mpc，1表示实际部署mpc -->
     <arg name="use_sqp"   default="true" doc="Use SQP if true, DDP if false"/>
-    <arg name="rviz"                default="true" />
+    <arg name="rviz"                default="false" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
     <!-- 设置VR控制参数 -->
@@ -153,9 +153,6 @@
     </node>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true">
       </node>
-    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 10">
-      <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
-    </node>
 
     <param name="hardware/is_ready" value="0"/>
    

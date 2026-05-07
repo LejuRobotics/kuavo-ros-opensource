@@ -157,6 +157,7 @@ class ArmControlBaseROS {
   std::mutex timestampMutex_;
   std::chrono::steady_clock::time_point lastSaveTime_;
   const int64_t saveIntervalSeconds_ = 20;  // 每20秒保存一次
+  bool enableTimestampLog_{false};           // 是否启用时间戳日志（由 ROS param enable_timestamp_log 控制）
 
   void recordTimestamp(const std::string& stepName, int64_t loopCount = -1);
   void saveTimestampRecordsToFile();

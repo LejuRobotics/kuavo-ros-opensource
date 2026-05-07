@@ -242,7 +242,6 @@ namespace humanoidController_wheel_wbc
     {
       ArmTrajectoryInterpolator::Config config;
       loadArmTrajInterpConfig(taskFile, dt_, config, enable_arm_traj_interpolator_);
-
       armTrajectoryInterpolator_.configure(config);
       wbc_arm_raw_q_ = vector_t::Zero(armNum_);
       wbc_arm_raw_v_ = vector_t::Zero(armNum_);
@@ -481,6 +480,20 @@ namespace humanoidController_wheel_wbc
       }
   );
 
+    // VR 增量遥操作相关服务
+    control_data_manager_->registerService<std_srvs::SetBool>(
+        "/enable_vr_arm_accel_task",
+        [this](auto& req, auto& res) { return enableVrArmAccelTaskCallback(req, res); }
+    );
+    control_data_manager_->registerService<std_srvs::SetBool>(
+        "/enable_arm_traj_interpolator",
+        [this](auto& req, auto& res) { return enableArmTrajInterpCallback(req, res); }
+    );
+    control_data_manager_->registerService<std_srvs::SetBool>(
+        "/enable_vr_arm_kpkd",
+        [this](auto& req, auto& res) { return enableVrArmKpKdCallback(req, res); }
+    );
+
     control_data_manager_->registerService<kuavo_msgs::setContactForceInterpParams>(
         "/set_contact_force_params",
         [this](kuavo_msgs::setContactForceInterpParams::Request& req,
@@ -519,6 +532,36 @@ namespace humanoidController_wheel_wbc
 
     res.success = true;
     res.message = "success change vel control to " + std::to_string(req.data);
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::enableVrArmAccelTaskCallback(std_srvs::SetBool::Request &req,
+                                                                std_srvs::SetBool::Response &res)
+  {
+    wheel_wbc_->setUseVrArmAccelTask(req.data);
+    ROS_INFO("[humanoidControllerWheelWbc] useVrArmAccelTask set to %s", req.data ? "true" : "false");
+    res.success = true;
+    res.message = std::string("useVrArmAccelTask set to ") + (req.data ? "true" : "false");
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::enableArmTrajInterpCallback(std_srvs::SetBool::Request &req,
+                                                               std_srvs::SetBool::Response &res)
+  {
+    enable_arm_traj_interpolator_ = req.data;
+    ROS_INFO("[humanoidControllerWheelWbc] enable_arm_traj_interpolator set to %s", req.data ? "true" : "false");
+    res.success = true;
+    res.message = std::string("enable_arm_traj_interpolator set to ") + (req.data ? "true" : "false");
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::enableVrArmKpKdCallback(std_srvs::SetBool::Request &req,
+                                                           std_srvs::SetBool::Response &res)
+  {
+    kuavo_settings_.running_settings.use_vr_arm_kpkd = req.data;
+    ROS_INFO("[humanoidControllerWheelWbc] use_vr_arm_kpkd set to %s", req.data ? "true" : "false");
+    res.success = true;
+    res.message = std::string("use_vr_arm_kpkd set to ") + (req.data ? "true" : "false");
     return true;
   }
 
