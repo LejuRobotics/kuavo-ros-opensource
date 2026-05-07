@@ -71,8 +71,8 @@ AxisOffsetAnkleSolver::AxisOffsetLoadedParam AxisOffsetAnkleSolver::loadOffsetPa
     out.l_rlbar = std::sqrt(p.y_rltd * p.y_rltd + p.z_rltd * p.z_rltd);
     out.l_rrbar = std::sqrt(p.y_rrtd * p.y_rrtd + p.z_rrtd * p.z_rrtd);
 
-    // 膝关节联动（可选）
-    p.knee_linkage_enabled = loader.has("knee_linkage_enabled");
+    // 膝关节联动（可选）：须读 YAML 标量；has() 在值为 false 时仍为 true。
+    loader.optional("knee_linkage_enabled", &p.knee_linkage_enabled, false);
     if (p.knee_linkage_enabled) {
         loader.require("z_bar_knee", &p.z_bar_knee)
               .require("l_tendon", &p.l_tendon)
