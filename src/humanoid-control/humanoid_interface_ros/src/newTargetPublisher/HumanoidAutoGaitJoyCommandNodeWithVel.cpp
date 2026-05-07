@@ -1339,10 +1339,21 @@ namespace ocs2
         // Roban: B switch to MPC
         if (IS_ROBAN(rb_version_))
         {
+          // Dance控制器下不允许切MPC（MPC无法接管直腿/倾斜姿态）
+          kuavo_msgs::getControllerList get_list_srv;
+          if (get_controller_list_client_.call(get_list_srv) && get_list_srv.response.success)
+          {
+            const std::string& cur = get_list_srv.response.current_controller;
+            if (cur.find("dance") != std::string::npos)
+            {
+              ROS_WARN("[JoyControl] B: dance controller active, MPC switch ignored. Press X for AMP.");
+              return;
+            }
+          } // end of get current controller
           ROS_INFO("[JoyControl] B: switch to MPC");
           callSwitchControllerService("mpc");
           return;
-        }
+        }// end of Roban: B switch to MPC
         else if (!joy_execute_action_)
         {
           publishGaitTemplate("trot");
