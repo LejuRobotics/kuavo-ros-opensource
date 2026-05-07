@@ -62,7 +62,8 @@
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
     <!-- 使用外部 odom->base_link TF 时设为 true，由外部系统（如 SLAM）发布 -->
-    <arg name="use_external_odom_tf" default="false"/>
+    <!-- 实物模式下不发布 odom->base_link tf，由底盘 EKF 发布，避免 tf 冲突 -->
+    <arg name="use_external_odom_tf" default="$(arg real)"/>
     
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
