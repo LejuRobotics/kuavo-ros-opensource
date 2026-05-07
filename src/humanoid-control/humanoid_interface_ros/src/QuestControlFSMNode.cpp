@@ -31,6 +31,7 @@
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
 #include <kuavo_msgs/SetHeadControlMode.h>
+#include <kuavo_msgs/headCtrlMode.h>
 #include <kuavo_msgs/robotWaistControl.h>
 #include <kuavo_msgs/headBodyPose.h>
 #include <kuavo_msgs/footPose.h>
@@ -200,7 +201,7 @@ namespace ocs2
             "/humanoid/mpc/arm_control_mode", 1, &QuestControlFSM::armCtrlModeCallback, this); 
 
             // 订阅获取VR头部控制模式
-            head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<std_msgs::String>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
+            head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<kuavo_msgs::headCtrlMode>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
             observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
@@ -369,6 +370,10 @@ namespace ocs2
         {
             kuavo_msgs::SetHeadControlMode srv;
             srv.request.mode = head_mode;
+            if (head_mode == "fixed_main_hand")
+            {
+                srv.request.fixed_hand = fixed_hand_;
+            }
 
             // 调用服务
             if (change_head_mode_service_VR_client_.call(srv))
@@ -753,17 +758,22 @@ namespace ocs2
             ROS_WARN_THROTTLE(2.0, "[QuestControlFSM] arm_control_mode is empty");
         }
 
-        void headCtrlModeCallback(const std_msgs::String::ConstPtr &mode_msg)
+        void headCtrlModeCallback(const kuavo_msgs::headCtrlMode::ConstPtr &mode_msg)
         {
-            if (mode_msg->data == "auto_track_active")
+            if (mode_msg->mode == "auto_track_active" || mode_msg->mode == "fixed_main_hand")
             {
                 use_auto_track_ = true;
+                if (mode_msg->mode == "fixed_main_hand")
+                {
+                    fixed_hand_ = mode_msg->fixed_main_hand;
+                }
+                last_head_ctrl_mode_ = mode_msg->mode;  // 缓存上一个控制模式
             }
-            if (mode_msg->data == "vr_follow")
+            if (mode_msg->mode == "vr_follow")
             {
                 use_auto_track_ = false;
             }
-            head_ctrl_mode_ = mode_msg->data;
+            head_ctrl_mode_ = mode_msg->mode;  // 更新头部控制模式
         }
 
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
@@ -979,8 +989,17 @@ namespace ocs2
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
 
                     // 如果头部控制模式为主动手跟踪模式（auto_track_active），手臂复位时头部也自动回正
+                    std::string new_head_mode = "vr_follow";
                     if(use_auto_track_ == true){
-                        auto new_head_mode = (new_arm_mode ==1) ? "fixed" : "auto_track_active";   
+                        if (new_arm_mode == 1)
+                        {
+                            new_head_mode = "fixed";
+                            last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
+                        }
+                        else
+                        {
+                            new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
+                        }
                         callVRSetHeadModeSrv(new_head_mode);
                     }
 
@@ -1189,8 +1208,17 @@ namespace ocs2
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
 
                     // 如果头部控制模式为主动手跟踪模式（auto_track_active），手臂复位时头部也自动回正
+                    std::string new_head_mode = "vr_follow";
                     if(use_auto_track_ == true){
-                        auto new_head_mode = (arm_ctrl_mode_ ==1) ? "fixed" : "auto_track_active";   
+                        if (new_arm_ctrl_mode_wheel_ == 1)
+                        {
+                            new_head_mode = "fixed";
+                            last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
+                        }
+                        else
+                        {
+                            new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
+                        }
                         callVRSetHeadModeSrv(new_head_mode);
                     }
 
@@ -2062,6 +2090,8 @@ namespace ocs2
         ros::Subscriber head_ctrl_mode_vr_sub_; // 从主控制器获取头部控制模式
         int arm_ctrl_mode_{2};
         std::string head_ctrl_mode_{"vr_follow"};
+        std::string last_head_ctrl_mode_;
+        std::string fixed_hand_{"right"};
         bool use_auto_track_{false};
 
         ros::Subscriber joystick_sub_;
