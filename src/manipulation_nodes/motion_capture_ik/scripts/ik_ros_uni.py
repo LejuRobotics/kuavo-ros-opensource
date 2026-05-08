@@ -421,6 +421,18 @@ class IkRos:
             rospy.logerr(f"Service {service_name} not available")
 
     @staticmethod
+    def wheel_change_arm_ctrl_mode(mode: int):
+        service_name = "/wheel_arm_change_arm_ctrl_mode"
+        try:
+            rospy.wait_for_service(service_name)
+            changeHandTrackingMode_srv = rospy.ServiceProxy(
+                service_name, changeArmCtrlMode
+            )
+            changeHandTrackingMode_srv(mode)
+        except rospy.ROSException:
+            rospy.logerr(f"Service {service_name} not available")
+
+    @staticmethod
     def change_arm_ctrl_mode4kuavo(mode: bool):
         service_name = "/change_arm_ctrl_mode"
         try:
@@ -502,6 +514,8 @@ class IkRos:
         if self.__send_srv:
             print("[ik]: Send start service signal to robot, wait for response.")
             self.change_arm_ctrl_mode(2)
+            if self.robot_type == 1:
+                self.wheel_change_arm_ctrl_mode(2)
             # self.change_arm_ctrl_mode4kuavo(True)
             print("\033[92m[ik]: Recied start signal response, Start teleoperation.\033[0m")
 
