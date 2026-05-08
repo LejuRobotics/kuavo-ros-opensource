@@ -1634,6 +1634,10 @@ namespace ocs2
 
         void updateCommandLine()
         {
+            // 轮臂 wheel_ik 底盘 /cmd_vel 由 motion_capture_ik（wheel_ik_ros_uni_cpp_node）发布，避免双发
+            if (robot_type_ == 1 && wheel_ik_ ) {
+                return;
+            }
             const std::vector<float> deadzone = {0.02f, 0.02f, 0.02f, 0.02f};
             auto joystick_vector = getJoystickVector(deadzone);
             if (joystick_vector[0] < 0.0)

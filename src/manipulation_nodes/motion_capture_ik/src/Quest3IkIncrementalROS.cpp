@@ -2505,6 +2505,18 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
                            2,
                            "[Quest3IkIncrementalROS]");
 
+  if (configJson.contains("chassis_joy_cmd_travel_scale")) {
+    const double v = configJson["chassis_joy_cmd_travel_scale"].get<double>();
+    if (std::isfinite(v) && v > 0.0) {
+      incrementalConfig.chassisJoyCmdTravelScale = v;
+    } else {
+      ROS_WARN(
+          "[Quest3IkIncrementalROS] Invalid chassis_joy_cmd_travel_scale in JSON, fallback to 1.0 (no joy scaling)");
+      incrementalConfig.chassisJoyCmdTravelScale = 1.0;
+    }
+  }
+  ROS_INFO("[Quest3IkIncrementalROS] chassis_joy_cmd_travel_scale: %.4f", incrementalConfig.chassisJoyCmdTravelScale);
+
   incrementalController_ = std::make_unique<IncrementalControlModule>(incrementalConfig);
 
   quest3ArmInfoTransformerPtr_->setDeltaScale(deltaScale_);

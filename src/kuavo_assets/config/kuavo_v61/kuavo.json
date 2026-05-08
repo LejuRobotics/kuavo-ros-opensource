@@ -344,5 +344,6 @@
     "alway_update_chest": false,
     "lb_leg_publish_rate_multiplier": 0.1,
     "pos_cutoff_hz": 12.0,
-    "orientation_cutoff_hz": 20.0
+    "orientation_cutoff_hz": 20.0,
+    "chassis_joy_cmd_travel_scale": 0.5
 }

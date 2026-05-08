@@ -236,6 +236,8 @@ struct IncrementalControlConfig {
   /// 姿态 slerp 插值因子二阶低通截止频率（Hz）；<=0 表示旁路
   double orientationCutoffHz = 10.0;
   Eigen::Vector3d deltaScale = Eigen::Vector3d(1.0, 1.0, 1.0);  // VR增量缩放参数（x, y, z三轴独立）
+  /// 增量遥控底盘模式下 VR→/cmd_vel 摇杆行程缩放；JSON 未配置时默认 1.0（不缩放）
+  double chassisJoyCmdTravelScale = 1.0;
   double posVelLimit = 30;                                    // 位置增量速度限制（米/秒）
   double armMoveThreshold = 0.01;                               // 手臂移动检测阈值
   double publishRate = 100.0;                                   // 发布频率

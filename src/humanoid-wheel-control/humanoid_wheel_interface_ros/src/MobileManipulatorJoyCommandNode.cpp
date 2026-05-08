@@ -76,6 +76,18 @@ namespace mobile_manipulator
       angular_scale_y_ = 0.4; // rad/s (用于躯干控制)
       deadzone_ = 0.05;
 
+      // 与 VR 增量节点共用：可由全局参数 /mobile_manipulator_joy/* 覆盖上述默认（绝对路径与 nodeHandle 命名空间无关）
+      nodeHandle_.param("/mobile_manipulator_joy/linear_scale_x", linear_scale_x_, linear_scale_x_);
+      nodeHandle_.param("/mobile_manipulator_joy/linear_scale_y", linear_scale_y_, linear_scale_y_);
+      nodeHandle_.param("/mobile_manipulator_joy/linear_scale_z", linear_scale_z_, linear_scale_z_);
+      nodeHandle_.param("/mobile_manipulator_joy/angular_scale_z", angular_scale_z_, angular_scale_z_);
+      nodeHandle_.param("/mobile_manipulator_joy/angular_scale_y", angular_scale_y_, angular_scale_y_);
+      nodeHandle_.param("/mobile_manipulator_joy/deadzone", deadzone_, deadzone_);
+      ROS_INFO_STREAM("[mobile_manipulator_joy] scales (m/s, rad/s): lin_x=" << linear_scale_x_
+                      << " lin_y=" << linear_scale_y_ << " lin_z=" << linear_scale_z_
+                      << " ang_z=" << angular_scale_z_ << " ang_y=" << angular_scale_y_
+                      << " deadzone=" << deadzone_);
+
       int robotVersion_ = 60;
       if(nodeHandle_.hasParam("robot_version"))
       {
