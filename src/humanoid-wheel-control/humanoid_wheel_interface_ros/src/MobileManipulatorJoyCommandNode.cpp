@@ -166,6 +166,17 @@ namespace mobile_manipulator
       integral_gain_linear_z_ = 0.01;
       integral_gain_angular_y_ = 0.01;
       integral_gain_angular_z_ = 0.01;
+
+      // G12 publishes /joy continuously at a higher fixed rate. Keep its
+      // left-stick torso channels slower so lower-body joints 1/3 do not jump.
+      g12_wheelarm_integral_gain_linear_x_ = 0.003;
+      g12_wheelarm_integral_gain_linear_z_ = 0.01;
+      g12_wheelarm_integral_gain_angular_y_ = 0.003;
+      g12_wheelarm_integral_gain_angular_z_ = 0.01;
+      nodeHandle_.param("g12_wheelarm_integral_gain_linear_x", g12_wheelarm_integral_gain_linear_x_, g12_wheelarm_integral_gain_linear_x_);
+      nodeHandle_.param("g12_wheelarm_integral_gain_linear_z", g12_wheelarm_integral_gain_linear_z_, g12_wheelarm_integral_gain_linear_z_);
+      nodeHandle_.param("g12_wheelarm_integral_gain_angular_y", g12_wheelarm_integral_gain_angular_y_, g12_wheelarm_integral_gain_angular_y_);
+      nodeHandle_.param("g12_wheelarm_integral_gain_angular_z", g12_wheelarm_integral_gain_angular_z_, g12_wheelarm_integral_gain_angular_z_);
       
       // 初始化控制量为零的时间跟踪
       zero_control_start_time_ = ros::Time::now();
@@ -271,6 +282,10 @@ namespace mobile_manipulator
       double integral_gain_linear_z_;
       double integral_gain_angular_y_;
       double integral_gain_angular_z_;
+      double g12_wheelarm_integral_gain_linear_x_;
+      double g12_wheelarm_integral_gain_linear_z_;
+      double g12_wheelarm_integral_gain_angular_y_;
+      double g12_wheelarm_integral_gain_angular_z_;
       
       // 控制量为零的时间跟踪（用于模式切换检查）
       ros::Time zero_control_start_time_;
@@ -770,10 +785,10 @@ namespace mobile_manipulator
             if (std::abs(raw) >= deadzone_) ay = raw;
           }
 
-          integrated_linear_x_ += lx * integral_gain_linear_x_;
-          integrated_linear_z_ += lz * integral_gain_linear_z_;
-          integrated_angular_y_ += ay * integral_gain_angular_y_;
-          integrated_angular_z_ += az * integral_gain_angular_z_;
+          integrated_linear_x_ += lx * g12_wheelarm_integral_gain_linear_x_;
+          integrated_linear_z_ += lz * g12_wheelarm_integral_gain_linear_z_;
+          integrated_angular_y_ += ay * g12_wheelarm_integral_gain_angular_y_;
+          integrated_angular_z_ += az * g12_wheelarm_integral_gain_angular_z_;
           integrated_linear_x_ = clamp(integrated_linear_x_, -1.0, 1.0);
           integrated_linear_z_ = clamp(integrated_linear_z_, -1.0, 1.0);
           integrated_angular_y_ = clamp(integrated_angular_y_, -1.0, 1.0);
@@ -1108,4 +1123,3 @@ int main(int argc, char *argv[])
 
   return 0;
 }
-
