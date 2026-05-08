@@ -142,6 +142,8 @@ namespace humanoidController_wheel_wbc
     baseDim_ = manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim;
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
+    loadData::loadCppDataType(taskFile, "mpc.mpcDesiredFrequency", mpcFreq_);
+    mpcDt_ = 1 / mpcFreq_;
     /****************************************************/
     /************load param from kuavo.json**************/
     RobotVersion rb_version(6, 0);
@@ -336,7 +338,8 @@ namespace humanoidController_wheel_wbc
 
     // 初始化 MPC 初始期望
     optimizedState_mrt_.tail(manipulatorModelInfo_.armDim) = mujoco_q.segment(7, manipulatorModelInfo_.armDim);
-
+    optimizedState_mrt_limit_ = optimizedState_mrt_;
+    optimizedInput_mrt_limit_ = optimizedInput_mrt_;
 
     // 初始化VR控制相关标志位和参数
     is_transitioning_ = false;
@@ -630,8 +633,12 @@ namespace humanoidController_wheel_wbc
   void humanoidControllerWheelWbc::update(const ros::Time &time, const ros::Duration &dfd)
   {
     static double lastTime = time.toSec() - dt_;
+    static double lastMpcObsTime = time.toSec() - mpcDt_;
     double curTime = time.toSec();
     double dt = curTime - lastTime;
+    double dtObsMpc = curTime - lastMpcObsTime;
+    static bool isUpdateMpcObs = false;
+    if(dtObsMpc > mpcDt_ - 1e-6) {isUpdateMpcObs = true;}
     if(dt < dt_) return;
     lastTime = curTime;
     ros_logger_->publishValue("/humanoid_wheel/freq", 1 / dt);
@@ -698,6 +705,14 @@ namespace humanoidController_wheel_wbc
 
     computeObservationFromSensorData(sensors_data_new, odomData_new);
 
+    /********************************  计算关键点笛卡尔跟踪分析(局部系) ********************************/
+    vector_t targetStateTmp = optimizedState_mrt_limit_;
+    targetStateTmp.head(3) = Eigen::Vector3d::Zero();
+    vector_t currentStateTmp = observation_wheel_.state;
+    currentStateTmp.head(3) = Eigen::Vector3d::Zero();
+    computeErrorMultiEeFromTargetAndData(targetStateTmp, currentStateTmp);
+    /**********************************************************************************************/
+
     // 更新 mpc 数据
     {
       vector_t optimizedState_mrt, optimizedInput_mrt;
@@ -719,7 +734,15 @@ namespace humanoidController_wheel_wbc
       }
       /**************************************************************************************/
       
-      mrtRosInterface_->setCurrentObservation(kinemicLimitObs);
+      if(isUpdateMpcObs == true)
+      {
+        ros_logger_->publishValue("/humanoid_wheel/dt_mpcObs_pub", curTime - lastMpcObsTime);
+        ros_logger_->publishValue("/humanoid_wheel/freq_mpcObs_pub", 1 / (curTime - lastMpcObsTime));
+        mrtRosInterface_->setCurrentObservation(kinemicLimitObs);
+
+        lastMpcObsTime = curTime;
+        isUpdateMpcObs = false;
+      }
 
       // Trigger MRT callbacks
       mrtRosInterface_->spinMRT();
@@ -796,50 +819,48 @@ namespace humanoidController_wheel_wbc
     ros_logger_->publishVector("/humanoid_wheel/optimizedState_mrt", optimizedState_mrt_);
     ros_logger_->publishVector("/humanoid_wheel/optimizedInput_mrt", optimizedInput_mrt_);
 
-    vector_t optimizedState_mrt_limit = optimizedState_mrt_;
-    vector_t optimizedInput_mrt_limit = optimizedInput_mrt_;
-    optimizedState_mrt_limit = mrtStateLimitFilterPtr_->update(optimizedState_mrt_);
-    optimizedInput_mrt_limit = mrtInputLimitFilterPtr_->update(optimizedInput_mrt_);
+    optimizedState_mrt_limit_ = mrtStateLimitFilterPtr_->update(optimizedState_mrt_);
+    optimizedInput_mrt_limit_ = mrtInputLimitFilterPtr_->update(optimizedInput_mrt_);
 
-    ros_logger_->publishVector("/humanoid_wheel/optimizedState_mrt_kinemicLimit", optimizedState_mrt_limit);
-    ros_logger_->publishVector("/humanoid_wheel/optimizedInput_mrt_kinemicLimit", optimizedInput_mrt_limit);
+    ros_logger_->publishVector("/humanoid_wheel/optimizedState_mrt_kinemicLimit", optimizedState_mrt_limit_);
+    ros_logger_->publishVector("/humanoid_wheel/optimizedInput_mrt_kinemicLimit", optimizedInput_mrt_limit_);
 
     static int update_cnt = 0;
     if(update_cnt < (int)(1/dt_))   // 延时1秒钟进mpc，使mpc指令缓冲充分刷新
     {
       static vector_t observation_wheel_state_prev = observation_wheel_.state;
-      optimizedState_mrt_limit.setZero();
-      optimizedState_mrt_limit.tail(info.armDim) = observation_wheel_state_prev.tail(info.armDim);
-      optimizedInput_mrt_limit.setZero();
+      optimizedState_mrt_limit_.setZero();
+      optimizedState_mrt_limit_.tail(info.armDim) = observation_wheel_state_prev.tail(info.armDim);
+      optimizedInput_mrt_limit_.setZero();
       update_cnt++;
     }
 
     {
-      vector_t qposLimit = optimizedState_mrt_limit.tail(info.armDim);
+      vector_t qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
       jointCmdLimiterPtr_->clipPositionCommand(qposLimit);
-      optimizedState_mrt_limit.tail(info.armDim) = qposLimit;
+      optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
 
       if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
       {
-        optimizedState_mrt_ = optimizedState_mrt_limit;
-        optimizedInput_mrt_ = optimizedInput_mrt_limit;
+        optimizedState_mrt_ = optimizedState_mrt_limit_;
+        optimizedInput_mrt_ = optimizedInput_mrt_limit_;
       }
     }
 
     {
       static vector_t qposLimit, qvelLimit;
 
-      qposLimit = optimizedState_mrt_limit.tail(info.armDim);
-      qvelLimit = optimizedInput_mrt_limit.tail(info.armDim);
+      qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
+      qvelLimit = optimizedInput_mrt_limit_.tail(info.armDim);
       jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
-      optimizedState_mrt_limit.tail(info.armDim) = qposLimit;
-      // optimizedInput_mrt_limit.tail(info.armDim) = qvelLimit;
-      static vector_t jointPosTarget_last = optimizedState_mrt_limit.tail(info.armDim);
+      optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
+      // optimizedInput_mrt_limit_.tail(info.armDim) = qvelLimit;
+      static vector_t jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
       // static double lastTargetTime = curTime - dt_;
-      optimizedInput_mrt_limit.tail(info.armDim) = (optimizedState_mrt_limit.tail(info.armDim) - jointPosTarget_last) / 
+      optimizedInput_mrt_limit_.tail(info.armDim) = (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / 
                                                     dt_; // (curTime - lastTargetTime);
       // lastTargetTime = curTime;
-      jointPosTarget_last = optimizedState_mrt_limit.tail(info.armDim);
+      jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
     }
 
     // 更新期望力插值
@@ -858,7 +879,7 @@ namespace humanoidController_wheel_wbc
       // 更新自适应权重（根据期望力大小动态调整手臂任务权重）
       contact_force_wbc->updateAdaptiveWeights(time);
       
-      vector_t joint_position_error = optimizedState_mrt_limit.tail(armNum_) - 
+      vector_t joint_position_error = optimizedState_mrt_limit_.tail(armNum_) - 
                                       observation_wheel_.state.tail(armNum_);
       bool enable_force_empty_detact = desired_force_manager_ ? 
                                        desired_force_manager_->getEnableForceEmptyDetact() : true;
@@ -881,8 +902,8 @@ namespace humanoidController_wheel_wbc
       }
     }
 
-    vector_t optimizedState_wbc = optimizedState_mrt_limit;
-    vector_t optimizedInput_wbc = optimizedInput_mrt_limit;
+    vector_t optimizedState_wbc = optimizedState_mrt_limit_;
+    vector_t optimizedInput_wbc = optimizedInput_mrt_limit_;
     if (enable_arm_traj_interpolator_ && armNum_ > 0)
     {
       ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qpos_smooth", optimizedState_wbc.tail(armNum_));
@@ -913,11 +934,11 @@ namespace humanoidController_wheel_wbc
     // 更新关节指令
     kuavo_msgs::jointCmd jointCmdMsg;
     jointCmdMsg.header.stamp = time;
-    vector_t armJointVelForPublish = optimizedInput_mrt_limit.tail(armNum_);
+    vector_t armJointVelForPublish = optimizedInput_mrt_limit_.tail(armNum_);
     for (int i1 = 0; i1 < lowJointNum_; ++i1)
     {
-      jointCmdMsg.joint_q.push_back(optimizedState_mrt_limit.tail(info.armDim)[i1]);
-      jointCmdMsg.joint_v.push_back(optimizedInput_mrt_limit.tail(info.armDim)[i1]);
+      jointCmdMsg.joint_q.push_back(optimizedState_mrt_limit_.tail(info.armDim)[i1]);
+      jointCmdMsg.joint_v.push_back(optimizedInput_mrt_limit_.tail(info.armDim)[i1]);
       jointCmdMsg.tau.push_back(torque.head(lowJointNum_)[i1]);
       jointCmdMsg.tau_ratio.push_back(1);
       jointCmdMsg.joint_kp.push_back(0);
@@ -927,7 +948,7 @@ namespace humanoidController_wheel_wbc
     }
     for (int i2 = 0; i2 < armNum_; ++i2)
     {
-      jointCmdMsg.joint_q.push_back(optimizedState_mrt_limit.tail(armNum_)[i2]);
+      jointCmdMsg.joint_q.push_back(optimizedState_mrt_limit_.tail(armNum_)[i2]);
       jointCmdMsg.joint_v.push_back(armJointVelForPublish[i2]);
       jointCmdMsg.tau.push_back(torque.tail(armNum_)[i2]);
       jointCmdMsg.tau_ratio.push_back(1);
@@ -981,7 +1002,7 @@ namespace humanoidController_wheel_wbc
     } 
     else 
     {
-      Eigen::Vector3d desiredVel = optimizedInput_mrt_limit.head(3);
+      Eigen::Vector3d desiredVel = optimizedInput_mrt_limit_.head(3);
       Eigen::Vector3d desiredVelBody = cmdVelWorldToBody(desiredVel, 
                                                          observation_wheel_.state[2]);
       // 使用MPC优化的速度
@@ -2017,6 +2038,102 @@ namespace humanoidController_wheel_wbc
 
     replaceDefaultEcMotorPdoGait(jointCmdMsg);  // 统一修改pdo写入的kpkd
     jointCmdPub_.publish(jointCmdMsg);
+  }
+
+  // 用于更新指令和反馈的关键笛卡尔位姿的误差
+  void humanoidControllerWheelWbc::computeErrorMultiEeFromTargetAndData(const vector_t& targetState, 
+                                                                        const vector_t& currentState)
+  {
+    bool verbose = false;
+    std::cout << std::fixed << std::setprecision(4);  // 打印4位小数点
+
+    const auto& model = pinocchioInterface_ptr_->getModel();
+    auto& data = pinocchioInterface_ptr_->getData();
+    auto& info = manipulatorModelInfo_;
+    
+    // 存储当前状态和目标状态的位姿
+    pinocchio::SE3 currentTorsoPose, targetTorsoPose;
+    std::map<std::string, pinocchio::SE3> currentEePoses, targetEePoses;
+    
+    // 1. 先计算当前状态，保存位姿
+    pinocchio::forwardKinematics(model, data, currentState.head(model.nq));
+    pinocchio::updateFramePlacements(model, data);
+    
+    const int torsoFrameId = model.getFrameId(info.torsoFrame);
+    if (torsoFrameId != model.frames.size()) {
+      currentTorsoPose = data.oMf[torsoFrameId];
+    }
+    
+    for (const auto& eeFrame : info.eeFrames) {
+      const int eeFrameId = model.getFrameId(eeFrame);
+      if (eeFrameId != model.frames.size()) {
+        currentEePoses[eeFrame] = data.oMf[eeFrameId];
+      }
+    }
+    
+    // 2. 再计算目标状态，保存位姿
+    pinocchio::forwardKinematics(model, data, targetState.head(model.nq));
+    pinocchio::updateFramePlacements(model, data);
+    
+    if (torsoFrameId != model.frames.size()) {
+      targetTorsoPose = data.oMf[torsoFrameId];
+    }
+    
+    for (const auto& eeFrame : info.eeFrames) {
+      const int eeFrameId = model.getFrameId(eeFrame);
+      if (eeFrameId != model.frames.size()) {
+        targetEePoses[eeFrame] = data.oMf[eeFrameId];
+      }
+    }
+
+    // 辅助函数：轴角转ZYX欧拉角，输出顺序 [yaw, pitch, roll]
+    auto axisAngleToEulerZYX = [](const Eigen::Vector3d& axisAngle) -> Eigen::Vector3d {
+      double theta = axisAngle.norm();
+      if (theta < 1e-6) return Eigen::Vector3d::Zero();
+      Eigen::Matrix3d R = Eigen::AngleAxisd(theta, axisAngle/theta).toRotationMatrix();
+      // ZYX欧拉角: yaw (z), pitch (y), roll (x)
+      double yaw = std::atan2(R(1,0), R(0,0));
+      double pitch = std::atan2(-R(2,0), std::sqrt(R(2,1)*R(2,1) + R(2,2)*R(2,2)));
+      double roll = std::atan2(R(2,1), R(2,2));
+      return Eigen::Vector3d(yaw, pitch, roll);
+    };
+
+    // 3. 计算torso的误差（直接计算）
+    Eigen::Vector3d posError = (targetTorsoPose.translation() - currentTorsoPose.translation());
+    Eigen::Vector3d rotError = pinocchio::log3(targetTorsoPose.rotation() * currentTorsoPose.rotation().transpose());
+    Eigen::Vector3d rotErrorEulerZYX = axisAngleToEulerZYX(rotError);
+
+    vector_t torsoError6d = vector_t::Zero(6);
+    torsoError6d << posError, rotErrorEulerZYX;
+    ros_logger_->publishVector("/humanoid_wheel/" + info.torsoFrame + "_error_6d", torsoError6d);
+
+    if(verbose)
+    {
+      std::cout << info.torsoFrame << " position error: " << posError.transpose() << std::endl;
+      std::cout << info.torsoFrame << " rotation error (ZYX) [yaw, pitch, roll]: " << rotErrorEulerZYX.transpose() << std::endl;
+    }
+
+    // 4. 计算所有末端执行器的误差（直接计算）
+    for (const auto& eeFrame : info.eeFrames) {
+      auto itCurrent = currentEePoses.find(eeFrame);
+      auto itTarget = targetEePoses.find(eeFrame);
+      
+      if (itCurrent != currentEePoses.end() && itTarget != targetEePoses.end()) {
+        Eigen::Vector3d posError = (itTarget->second.translation() - itCurrent->second.translation());
+        Eigen::Vector3d rotError = pinocchio::log3(itTarget->second.rotation() * itCurrent->second.rotation().transpose());
+        Eigen::Vector3d rotErrorEulerZYX = axisAngleToEulerZYX(rotError);
+
+        if(verbose)
+        {
+          std::cout << eeFrame << " position error: " << posError.transpose() << std::endl;
+          std::cout << eeFrame << " rotation error: " << rotError.transpose() << std::endl;
+        }
+
+        vector_t eeError6d = vector_t::Zero(6);
+        eeError6d << posError, rotErrorEulerZYX;
+        ros_logger_->publishVector("/humanoid_wheel/" + eeFrame + "_error_6d", eeError6d);
+      }
+    }
   }
 
 } // namespace humanoidController_wheel_wbc

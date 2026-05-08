@@ -118,6 +118,10 @@ namespace humanoidController_wheel_wbc
     void performSimpleActions(const ros::Time &time);
     void initialPreTargetActions(const vector_t& startActions, const vector_t& preTargetActions, double desiredTime);
 
+    // ======= 更新期望位姿的误差分析 ========
+    void computeErrorMultiEeFromTargetAndData(const vector_t& targetState, 
+                                              const vector_t& currentState);
+
     // ========== 工具函数 ==========
     /**
      * @brief 创建零位姿态 [0, 0, 0, 1, 0, 0, 0]
@@ -196,9 +200,11 @@ namespace humanoidController_wheel_wbc
     bool reset_mpc_{false};
     bool enable_mpc_{false};
     size_t plannedMode_{0};
-    vector_t optimizedState_mrt_, optimizedInput_mrt_;
+    vector_t optimizedState_mrt_, optimizedInput_mrt_, optimizedState_mrt_limit_, optimizedInput_mrt_limit_;
     int8_t mpcObsUpdateMode_{3};  // mpc优化采用的反馈机制: 0: 全部反馈, 1: 屏蔽下肢电机反馈, 2: 屏蔽上肢电机反馈, 3: 同时屏蔽上下肢电机反馈
                                   // 屏蔽反馈时, 采用MPC输出的期望作为反馈
+    double mpcDt_{0.01};
+    double mpcFreq_{100};
 
     // ========== 状态估计 ==========
     SystemObservation observation_wheel_;

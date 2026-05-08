@@ -581,6 +581,7 @@ namespace mobile_manipulator {
     std::cout << "[MobileManipulatorReferenceManager] robot_init_state_param: " << initialState.transpose() << std::endl;
 
     arm_init_joint_traj_ = initialState.segment(7 + 4, info_.armDim - 4);   // 从初始获取手臂期望
+    initialJointTarget_ = initialState.segment(7, info_.armDim);    // 从初始获取全部关节期望
 
   }
 
@@ -590,6 +591,8 @@ namespace mobile_manipulator {
 
     // 从参数服务器中更新初始期望
     setRobotInitialArmJointTarget(nodeHandle_);
+
+    setInitialTorsoPos();   // 更新躯干初始位姿
 
     // 设置服务服务器
     controlModeServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_mpc_control", 
@@ -1157,9 +1160,6 @@ namespace mobile_manipulator {
     static bool firstRun{true};
     if(firstRun)
     {
-      // 获取最初的躯干位姿期望
-      initialTorsoPos_ = targetTrajectories.stateTrajectory.front().segment(baseDim_, 3);
-      initialTorsoQuat_ = targetTrajectories.stateTrajectory.front().segment(baseDim_ + 3, 4);
       firstRun = false;
     }
 
@@ -1792,8 +1792,12 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::generateVelTargetWithRuckig(double initTime, double finalTime, double dt)
+  void MobileManipulatorReferenceManager::generateVelTargetWithRuckig(double initTime, double finalTime, double dt, 
+                                                                      const vector_t& initstate)
   {
+    // 提取初始位姿 [x, y, yaw]
+    Eigen::Vector3d currentPos = initstate.head(3);
+
     // 使用 Ruckig 库生成平滑的底盘位姿轨迹
     scalar_array_t timeTraj;
     vector_array_t stateTraj;
@@ -1831,6 +1835,13 @@ namespace mobile_manipulator {
                                                      currentTargetPose_rightArm, 
                                                      currentTargetVel_rightArm, 
                                                      currentTargetAcc_rightArm);
+      
+      if (i > 0) 
+      {
+          // 从第二个时间点开始才进行积分更新
+          currentPos += currentTargetVel.head(3) * dt;  // 更新位置期望
+      }
+      currentTargetPose.head(3) = currentPos;
 
       targetState.head(3) = currentTargetPose; // [x, y, yaw]
       targetInput.head(3) = currentTargetVel;  // [vx, vy, wz]
@@ -3564,7 +3575,7 @@ namespace mobile_manipulator {
       /*****************************更新ruckig规划器所需实时数据************************************/
       calcRuckigTrajWithCmdVel(initTime, currentCmdVelWorld_);
 
-      generateVelTargetWithRuckig(initTime, finalTime, ruckigDt_);
+      generateVelTargetWithRuckig(initTime, finalTime, ruckigDt_, initState);
       /*****************************************************************************************/
 
       // 判断速度为0，跳出速度控制
@@ -4314,6 +4325,40 @@ namespace mobile_manipulator {
     isEeMotionComplete_[armIdx] = true;
 
     return;
+  }
+
+  void MobileManipulatorReferenceManager::setInitialTorsoPos(void)
+  {
+    const auto& model = pinocchioInterface_.getModel();
+    auto& data = pinocchioInterface_.getData();
+
+    vector_t initialQpos = vector_t::Zero(info_.stateDim);
+    initialQpos.tail(info_.armDim) = initialJointTarget_;
+
+    pinocchio::forwardKinematics(model, data, initialQpos);
+    pinocchio::updateFramePlacements(model, data);
+
+    // 获取躯干的初始位姿
+    pinocchio::FrameIndex torsoFrameId = model.getFrameId(info_.torsoFrame);
+    const pinocchio::SE3& torsoPose = data.oMf[torsoFrameId];
+
+        // 获取位置（平移向量）
+    const Eigen::Vector3d& position = torsoPose.translation();
+    initialTorsoPos_ = position;
+    
+    // 获取姿态旋转矩阵并转换为四元数
+    const Eigen::Matrix3d& rotationMatrix = torsoPose.rotation();
+    Eigen::Quaterniond quaternion(rotationMatrix);
+    initialTorsoQuat_ = quaternion.coeffs();
+    
+    // 打印位置
+    std::cout << "========== Initial Torso Pose ==========" << std::endl;
+    std::cout << "Position (x, y, z): " 
+              << position.transpose() << std::endl;
+    
+    // 打印四元数 (w, x, y, z) - 注意Eigen四元数存储顺序为 (x, y, z, w)
+    std::cout << "Orientation (quaternion):" << std::endl;
+    std::cout << "quatVec: " << initialTorsoQuat_.transpose() << std::endl;
   }
 
 }  // namespace mobile_manipulator

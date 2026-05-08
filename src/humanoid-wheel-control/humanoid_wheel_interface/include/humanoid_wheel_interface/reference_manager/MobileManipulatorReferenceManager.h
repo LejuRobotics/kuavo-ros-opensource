@@ -93,6 +93,7 @@ public:
   
   // 从参数服务器中更新初始期望
   void setRobotInitialArmJointTarget(ros::NodeHandle& input_nh);
+  void setInitialTorsoPos(void);
   
   // 服务回调函数
   bool controlModeService(kuavo_msgs::changeTorsoCtrlMode::Request& req, kuavo_msgs::changeTorsoCtrlMode::Response& res);
@@ -186,7 +187,7 @@ protected:
   // cmdVel
   void calcRuckigTrajWithCmdVel(double initTime, const vector_t &targetBaseVel);
   void generateVelTargetBaseWithRuckig(double initTime, double finalTime, double dt, const vector_t &initState);
-  void generateVelTargetWithRuckig(double initTime, double finalTime, double dt);
+  void generateVelTargetWithRuckig(double initTime, double finalTime, double dt, const vector_t &initState);
   void resetCmdVelRuckig(double initTime, const vector_t& initState, bool rePlanning);
   // cmdEePose
   void calcRuckigTrajWithEePose(int armIdx, double initTime, const vector_t &targetArmEePose, double desiredTime = 0.0);
@@ -397,6 +398,7 @@ private:
   ros::Publisher targetArmJointReachTimePub_[2]; // [0]: 左臂, [1]: 右臂
 
   // 躯干下肢的关节轨迹指令
+  vector_t initialJointTarget_;
   bool isCmdLegJointUpdated_{false};
   double cmdLegJointDesiredTime_{0.0};
   vector_t lb_leg_traj_;
