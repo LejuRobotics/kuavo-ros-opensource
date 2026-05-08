@@ -44,6 +44,7 @@
     "peak_protection":0.1,
     "locked_rotor_protection":2,
     "speed_protection":0.05,             
+    "joint_limit_torque_ratio": 1.0,
     "joint_kp": [300, 300, 260, 160, 550, 550],
     "joint_kd": [2150, 2300, 2150, 2150, 3880, 3880],
     "vr_joint_kp": [160, 100, 160, 160, 400, 400],

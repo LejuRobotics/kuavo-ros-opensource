@@ -97,6 +97,20 @@ namespace HighlyDynamic
                 return T{};
             }
         }
+        template <typename T>
+        T getValueOrDefault(const std::string &key, T default_value)
+        {
+            if (data_.contains(key))
+            {
+                if constexpr (std::is_same<T, uint8_t>::value)
+                {
+                    int value = data_[key].get<int>();
+                    return static_cast<uint8_t>(value);
+                }
+                return data_[key].get<T>();
+            }
+            return default_value;
+        }
         nlohmann::json::reference operator[](const std::string &key)
         {
             return data_[key];

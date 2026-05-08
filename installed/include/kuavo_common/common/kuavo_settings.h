@@ -195,6 +195,7 @@ namespace HighlyDynamic
         std::vector<double> joint_lock_rotor_limits;
         std::vector<double> joint_peak_limits;
         std::vector<EndEffectorType> end_effector_type;
+        double joint_limit_torque_ratio = 1.0;  // 到达关节限位时触发保护所需的扭矩阈值倍率（相对于peak torque limit），默认1.0倍
 
         std::vector<bool> motors_exist;
         std::vector<bool> motors_disable;

@@ -335,6 +335,8 @@ namespace HighlyDynamic
              hardware_settings.joint_peak_limits[i] = peak_torque_limits[i];
         }
 
+        hardware_settings.joint_limit_torque_ratio = robot_config.getValueOrDefault<double>("joint_limit_torque_ratio", 1.0);
+
         std::vector<std::string> end_effector_type = robot_config.getValue<std::vector<std::string>>("EndEffectorType");
         std::map<std::string, EndEffectorType> end_effector_type_map = {{"none", EndEffectorType::none},
                                                                         {"jodell", EndEffectorType::jodell},

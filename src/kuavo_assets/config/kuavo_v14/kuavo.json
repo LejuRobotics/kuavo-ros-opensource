@@ -43,6 +43,7 @@
     "peak_protection":0.1,
     "locked_rotor_protection":2,
     "speed_protection":0.05,
+    "joint_limit_torque_ratio": 1.0,
     "joint_kp": [200, 200, 200, 200, 200, 200,
                  200, 200, 200, 200, 200, 200,
                  200],
