@@ -228,6 +228,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasLatestLbTargetAngles_ = false;
   bool lbLegTrajPublishEnabled_ = false;
   ros::Publisher cmdVelPublisher_;  // 发布底盘速度控制命令
+  /// 与 /mobile_manipulator_joy/linear_scale_x|y、angular_scale_z 一致（再乘 chassisJoyCmdTravelScale）
+  double chassisCmdVelLinearXLimit_ = 0.8;
+  double chassisCmdVelLinearYLimit_ = 0.8;
+  double chassisCmdVelAngularYawLimit_ = 0.5;
   ros::ServiceClient enableLbArmQuickModeClient_;
   ros::ServiceClient changeTorsoCtrlModeClient_;
   ros::Subscriber chestPoseSubscriber_;  // 订阅/robot_chest_pose

@@ -43,6 +43,7 @@
     "peak_protection":0.1,
     "locked_rotor_protection":2,
     "speed_protection":0.05,             
+    "joint_limit_torque_ratio": 1.0,
     "joint_kp": [300, 300, 260, 160],
     "joint_kd": [2150, 2300, 2150, 2150],
     "MOTORS_TYPE":[
@@ -259,5 +260,6 @@
         "x_range": [0.1, 0.2],
         "pitch_range": [0.0, 20.0],
         "base_position": [0.0, 0.0, 0.74]
-    }
+    },
+    "chassis_joy_cmd_travel_scale": 0.5
 }

@@ -248,7 +248,6 @@ namespace humanoidController_wheel_wbc
     {
       ArmTrajectoryInterpolator::Config config;
       loadArmTrajInterpConfig(taskFile, dt_, config, enable_arm_traj_interpolator_);
-
       armTrajectoryInterpolator_.configure(config);
       wbc_arm_raw_q_ = vector_t::Zero(armNum_);
       wbc_arm_raw_v_ = vector_t::Zero(armNum_);
@@ -497,6 +496,20 @@ namespace humanoidController_wheel_wbc
       }
   );
 
+    // VR 增量遥操作相关服务
+    control_data_manager_->registerService<std_srvs::SetBool>(
+        "/enable_vr_arm_accel_task",
+        [this](auto& req, auto& res) { return enableVrArmAccelTaskCallback(req, res); }
+    );
+    control_data_manager_->registerService<std_srvs::SetBool>(
+        "/enable_arm_traj_interpolator",
+        [this](auto& req, auto& res) { return enableArmTrajInterpCallback(req, res); }
+    );
+    control_data_manager_->registerService<std_srvs::SetBool>(
+        "/enable_vr_arm_kpkd",
+        [this](auto& req, auto& res) { return enableVrArmKpKdCallback(req, res); }
+    );
+
     control_data_manager_->registerService<kuavo_msgs::setContactForceInterpParams>(
         "/set_contact_force_params",
         [this](kuavo_msgs::setContactForceInterpParams::Request& req,
@@ -538,26 +551,57 @@ namespace humanoidController_wheel_wbc
     return true;
   }
 
+  bool humanoidControllerWheelWbc::enableVrArmAccelTaskCallback(std_srvs::SetBool::Request &req,
+                                                                std_srvs::SetBool::Response &res)
+  {
+    wheel_wbc_->setUseVrArmAccelTask(req.data);
+    ROS_INFO("[humanoidControllerWheelWbc] useVrArmAccelTask set to %s", req.data ? "true" : "false");
+    res.success = true;
+    res.message = std::string("useVrArmAccelTask set to ") + (req.data ? "true" : "false");
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::enableArmTrajInterpCallback(std_srvs::SetBool::Request &req,
+                                                               std_srvs::SetBool::Response &res)
+  {
+    enable_arm_traj_interpolator_ = req.data;
+    ROS_INFO("[humanoidControllerWheelWbc] enable_arm_traj_interpolator set to %s", req.data ? "true" : "false");
+    res.success = true;
+    res.message = std::string("enable_arm_traj_interpolator set to ") + (req.data ? "true" : "false");
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::enableVrArmKpKdCallback(std_srvs::SetBool::Request &req,
+                                                           std_srvs::SetBool::Response &res)
+  {
+    kuavo_settings_.running_settings.use_vr_arm_kpkd = req.data;
+    ROS_INFO("[humanoidControllerWheelWbc] use_vr_arm_kpkd set to %s", req.data ? "true" : "false");
+    res.success = true;
+    res.message = std::string("use_vr_arm_kpkd set to ") + (req.data ? "true" : "false");
+    return true;
+  }
+
   bool humanoidControllerWheelWbc::starting(const ros::Time &time)
   {
     ROS_WARN_THROTTLE(1.0, "[starting] Waiting for odometry data...");
-    // 1. 启动仿真/硬件
-    if (!is_real_) 
-    {
+    // 1. 启动仿真/硬件（回放模式跳过）
+    bool play_back = false;
+    controllerNh_.getParam("/play_back", play_back);
+    if (play_back) {
+      ROS_INFO("[starting] Play back mode, skipping sim/hardware startup");
+    } else if (!is_real_) {
       callSimStartSrv(controllerNh_);
-    } 
-    else 
-    {
+    } else {
       // 等待硬件就绪
       int isHardwareReady = 0;
-      while (ros::ok() && isHardwareReady != 1) 
+      while (ros::ok() && isHardwareReady != 1)
       {
         controllerNh_.getParam("/hardware/is_ready", isHardwareReady);
         usleep(10000);  // 10ms
       }
     }
 
-    // 2. 等待数据就绪（5秒超时）
+    // 2. 等待数据就绪
     ROS_INFO("Waiting for ControlDataManager data...");
     auto start = std::chrono::steady_clock::now();
     int wait_sec = 0;
@@ -570,7 +614,8 @@ namespace humanoidController_wheel_wbc
         usleep(1000);
         
         auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        if (elapsed > 5.0) {
+        double timeout = play_back ? -1.0 : 5.0;  // 回放模式不超时
+        if (timeout > 0 && elapsed > timeout) {
             ROS_ERROR("Data timeout! Check: /sensors_data_raw, /odom, /waist_yaw_link_pose");
             return false;
         }
@@ -578,7 +623,11 @@ namespace humanoidController_wheel_wbc
         // 每秒打印一次
         if (static_cast<int>(elapsed) > wait_sec) {
             wait_sec = static_cast<int>(elapsed);
-            ROS_WARN("Waiting... %d/5 s", wait_sec);
+            if (play_back) {
+                ROS_WARN("[play_back] Waiting for bag data... %d s", wait_sec);
+            } else {
+                ROS_WARN("Waiting... %d/5 s", wait_sec);
+            }
         }
     }
     

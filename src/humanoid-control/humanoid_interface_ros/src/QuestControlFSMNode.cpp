@@ -129,6 +129,8 @@ namespace ocs2
             }
             nodeHandle.param("/wheel_ik", wheel_ik_, false);
             ROS_INFO_STREAM("[QuestControlFSM] wheel_ik: " << (wheel_ik_ ? "true" : "false"));
+            nodeHandle.param("/use_cpp_incremental_ik", use_cpp_incremental_ik_, false);
+            ROS_INFO_STREAM("[QuestControlFSM] use_cpp_incremental_ik: " << (use_cpp_incremental_ik_ ? "true" : "false"));
 
             auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
             auto kuavo_settings = drake_interface_->getKuavoSettings();
@@ -1634,6 +1636,11 @@ namespace ocs2
 
         void updateCommandLine()
         {
+            // 轮臂 wheel_ik 底盘 /cmd_vel 由 motion_capture_ik（wheel_ik_ros_uni_cpp_node）发布，避免双发
+            ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
+            if (robot_type_ == 1 && wheel_ik_ && use_cpp_incremental_ik_) {
+                return;
+            }
             const std::vector<float> deadzone = {0.02f, 0.02f, 0.02f, 0.02f};
             auto joystick_vector = getJoystickVector(deadzone);
             if (joystick_vector[0] < 0.0)
@@ -2119,6 +2126,7 @@ namespace ocs2
         int robot_type_{0};  // 0: biped, 1: wheel robot
         int robot_version_int_{0};  // 机器人版本号
         bool wheel_ik_{false}; // 轮臂增量VR兼容模式开关
+        bool use_cpp_incremental_ik_{false}; // 是否使用 C++ 增量式 IK（ik_ros_uni_cpp_node）
 
         // VR control limits (loaded from reference.info)
         double vr_squat_min_pitch_deg_{3.0};    // min pitch (deg)

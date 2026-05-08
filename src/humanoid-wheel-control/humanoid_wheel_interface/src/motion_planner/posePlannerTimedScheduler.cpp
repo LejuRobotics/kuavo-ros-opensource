@@ -17,6 +17,10 @@ void posePlannerTimedScheduler::addTimedPlannerPosePtr(
 {
     timedPlannerPosePtrVec_.push_back(plannerPtr);
     stateDiffVec_.resize(timedPlannerPosePtrVec_.size());
+
+    currentPos_.resize(timedPlannerPosePtrVec_.size());
+    currentVel_.resize(timedPlannerPosePtrVec_.size());
+    currentAcc_.resize(timedPlannerPosePtrVec_.size());
 }
 
 // 设置时间同步器中的状态信息
@@ -26,15 +30,6 @@ void posePlannerTimedScheduler::setTimedPlannerStates(
     size_t numPlanners = timedPlannerPosePtrVec_.size();
     if (currentPose.size() != numPlanners) {
         throw std::runtime_error("Size mismatch when setting timed planner states.");
-    }
-
-    static bool isFirstRun{true};
-    if(isFirstRun)
-    {
-        currentPos_.resize(currentPose.size());
-        currentVel_.resize(currentPose.size());
-        currentAcc_.resize(currentPose.size());
-        isFirstRun = false;
     }
 
     static double currentTime = 0.0;
@@ -56,6 +51,40 @@ void posePlannerTimedScheduler::setTimedPlannerStates(
         timedPlannerPosePtrVec_[i]->setCurrentAcceleration(Eigen::VectorXd::Zero(dofNum)); // 这里暂时不使用加速度信息，直接设置为零
     }
     currentTime += diffDt_;
+}
+
+// 设置时间同步器中的状态信息(独立索引)
+void posePlannerTimedScheduler::setTimedPlannerStates(Eigen::VectorXd currentPose, const int8_t plannerIndex)
+{
+    if (plannerIndex < 0 || static_cast<size_t>(plannerIndex) >= timedPlannerPosePtrVec_.size()) {
+        ROS_ERROR_STREAM("Invalid planner index in getTimedPlannerStates.");
+        return;
+    }
+
+    int dofNum = timedPlannerPosePtrVec_[plannerIndex]->getDofNum();
+    // 校验维度
+    if (currentPose.size() != dofNum) {
+        ROS_ERROR_STREAM("Dimension mismatch: currentPose size = " << currentPose.size() 
+                         << ", expected DOF = " << dofNum << " for planner index " << (int)plannerIndex);
+        return;
+    }
+
+    static std::vector<double> currentTime(timedPlannerPosePtrVec_.size(), 0.0);
+
+    currentPose = currentPose.unaryExpr([](double x) {    // 只保留4位小数，避免数值误差过大导致的差分计算问题
+        return std::round(x * 10000.0) / 10000.0;
+    });
+    /******************************** 计算差分 ************************************/
+    stateDiffVec_[plannerIndex].differentiate(currentPose, currentTime[plannerIndex], currentVel_[plannerIndex], currentAcc_[plannerIndex]);
+    /*****************************************************************************/
+
+    currentPos_[plannerIndex] = currentPose;
+    currentAcc_[plannerIndex] = Eigen::VectorXd::Zero(dofNum);
+    timedPlannerPosePtrVec_[plannerIndex]->setCurrentPose(currentPose);
+    timedPlannerPosePtrVec_[plannerIndex]->setCurrentVelocity(currentVel_[plannerIndex]);
+    timedPlannerPosePtrVec_[plannerIndex]->setCurrentAcceleration(Eigen::VectorXd::Zero(dofNum)); // 这里暂时不使用加速度信息，直接设置为零
+    
+    currentTime[plannerIndex] += diffDt_;
 }
 
 void posePlannerTimedScheduler::setTimedPlanner_dStates(
@@ -116,6 +145,50 @@ double posePlannerTimedScheduler::calcTimedTrajectory(int8_t plannerIndex,
     }
 
     timedPlannerPosePtrVec_[plannerIndex]->setTargetPose(cmdVec);
+    return timedPlannerPosePtrVec_[plannerIndex]->calcTrajectory(desiredTime);
+}
+
+// 计算时间同步的轨迹，返回预计运动时间（可重设初始位置、速度、加速度）
+double posePlannerTimedScheduler::calcTimedTrajectory(int8_t plannerIndex, Eigen::VectorXd cmdVec, 
+                                                     const Eigen::VectorXd& currentPos, 
+                                                     const Eigen::VectorXd& currentVel, 
+                                                     const Eigen::VectorXd& currentAcc,
+                                                     double desiredTime)
+{
+    if (plannerIndex < 0 || static_cast<size_t>(plannerIndex) >= timedPlannerPosePtrVec_.size()) {
+        ROS_ERROR_STREAM("Invalid planner index in calcTimedTrajectory.");
+        return -1.0;
+    }
+
+    int dofNum = getTimedPlannerDofNum(plannerIndex);
+    
+    // 校验维度
+    if (cmdVec.size() != dofNum) {
+        ROS_ERROR_STREAM("Command vector dimension mismatch in calcTimedTrajectory.");
+        return -1.0;
+    }
+    if (currentPos.size() != dofNum) {
+        ROS_ERROR_STREAM("Current position dimension mismatch in calcTimedTrajectory.");
+        return -1.0;
+    }
+    if (currentVel.size() != dofNum) {
+        ROS_ERROR_STREAM("Current velocity dimension mismatch in calcTimedTrajectory.");
+        return -1.0;
+    }
+    if (currentAcc.size() != dofNum) {
+        ROS_ERROR_STREAM("Current acceleration dimension mismatch in calcTimedTrajectory.");
+        return -1.0;
+    }
+
+    // 重设规划器的当前状态
+    timedPlannerPosePtrVec_[plannerIndex]->setCurrentPose(currentPos);
+    timedPlannerPosePtrVec_[plannerIndex]->setCurrentVelocity(currentVel);
+    timedPlannerPosePtrVec_[plannerIndex]->setCurrentAcceleration(currentAcc);
+    
+    // 设置目标状态
+    timedPlannerPosePtrVec_[plannerIndex]->setTargetPose(cmdVec);
+    
+    // 计算轨迹
     return timedPlannerPosePtrVec_[plannerIndex]->calcTrajectory(desiredTime);
 }
 

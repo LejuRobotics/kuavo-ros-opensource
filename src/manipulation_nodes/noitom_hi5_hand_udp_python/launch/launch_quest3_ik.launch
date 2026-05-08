@@ -16,7 +16,10 @@
     <arg name="use_step_turning" default="false"/> <!-- 是否启用单步转向功能 -->
     <arg name="use_cpp_monitor" default="false"/> <!-- false: use Python Monitor (monitor_quest3.py), true: use C++ Monitor (monitor_quest3_cpp) -->
     <arg name="use_cpp_incremental_ik" default="false"/> <!-- false: use Python IK (ik_ros_uni.py), true: use C++ Incremental IK (ik_ros_uni_cpp_node) -->
+    <param name="/use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)" type="bool"/>
     <arg name="wheel_ik" default="$(eval int(arg('robot_version')) // 10 == 6)"/> <!-- tens digit is 6: true, else false -->
+    <arg name="enable_timestamp_log" default="false"/> <!-- 是否启用 IK 时间戳日志，开启后保存至 $HOME/logs/ -->
+    <param name="/enable_timestamp_log" value="$(arg enable_timestamp_log)" type="bool"/>
     <arg name="use_pico" default="false"/> <!-- false: use ik_ros_uni_cpp_node, true: use wheel_ik_ros_uni_cpp_node -->
     <arg name="task_space_acc_limit" default="500.0" />
     <arg name="task_space_jerk_limit" default="3000.0" />

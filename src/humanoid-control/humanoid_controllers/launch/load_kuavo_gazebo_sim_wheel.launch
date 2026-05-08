@@ -112,12 +112,6 @@
         args="load HumanoidControllerNodelet nodelet_manager" 
         respawn="false" output="screen" required="true"/>
 
-    <node pkg="nodelet" type="nodelet" name="ekf_se" 
-        args="load RobotLocalization/EkfNodelet nodelet_manager" 
-        respawn="false" output="screen" required="true" 
-        launch-prefix="taskset -c 12">
-        <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
-    </node>
 
     <!-- Gazebo仿真 -->
     <group unless="$(arg play_back)">

@@ -27,6 +27,7 @@ public:
 
     // 设置时间同步器中的状态信息
     void setTimedPlannerStates(const std::vector<Eigen::VectorXd>& currentPose);
+    void setTimedPlannerStates(Eigen::VectorXd currentPose, const int8_t plannerIndex);
     void setTimedPlanner_dStates(const std::vector<Eigen::VectorXd>& currentVelocity);
     void setTimedPlanner_ddStates(const std::vector<Eigen::VectorXd>& currentAcceleration);
 
@@ -38,6 +39,9 @@ public:
 
     // 计算时间同步的轨迹，返回预计运动时间
     double calcTimedTrajectory(int8_t plannerIndex, Eigen::VectorXd cmdVec, double desiredTime = 0.0);
+    double calcTimedTrajectory(int8_t plannerIndex, Eigen::VectorXd cmdVec, 
+                               const Eigen::VectorXd& currentPos, const Eigen::VectorXd& currentVel, const Eigen::VectorXd& currentAcc, 
+                               double desiredTime = 0.0);
 
     // 更新指定索引的速度限制
     void updateTimedPlannerVelocityLimits(int8_t plannerIndex,

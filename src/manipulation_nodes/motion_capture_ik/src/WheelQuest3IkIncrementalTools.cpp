@@ -1299,22 +1299,25 @@ DrakeChestElbowHandBoundsConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
 void WheelQuest3IkIncrementalROS::publishAuxiliaryStates() {
   // 发布底盘速度控制命令
   if (joyStickHandlerPtr_ != nullptr && armControlMode_ == 2) {
+    const double joyScale =
+        (incrementalController_ != nullptr) ? incrementalController_->getConfig().chassisJoyCmdTravelScale : 1.0;
     geometry_msgs::Twist cmdVelMsg;
-    double leftX = joyStickHandlerPtr_->getLeftJoyStickY();
-    double leftY = -joyStickHandlerPtr_->getLeftJoyStickX();
-    double rightX = -joyStickHandlerPtr_->getRightJoyStickX();
+    const double nx = std::clamp(joyStickHandlerPtr_->getLeftJoyStickY(), -1.0, 1.0);
+    const double ny = std::clamp(-joyStickHandlerPtr_->getLeftJoyStickX(), -1.0, 1.0);
+    const double nw = std::clamp(-joyStickHandlerPtr_->getRightJoyStickX(), -1.0, 1.0);
 
-    // 设置线速度：x方向向前，y方向向左
-    cmdVelMsg.linear.x = leftX;
-    cmdVelMsg.linear.y = leftY;
+    // 先按 reference.info 最大速度映射，再乘 joyScale（与 QuestControlFSM 限幅语义一致）
+    cmdVelMsg.linear.x = nx * chassisCmdVelLinearXLimit_ * joyScale;
+    cmdVelMsg.linear.y = ny * chassisCmdVelLinearYLimit_ * joyScale;
     cmdVelMsg.linear.z = 0.0;
 
     // 设置角速度：z轴为yaw（逆时针为正）
     cmdVelMsg.angular.x = 0.0;
     cmdVelMsg.angular.y = 0.0;
-    cmdVelMsg.angular.z = rightX;
+    cmdVelMsg.angular.z = nw * chassisCmdVelAngularYawLimit_ * joyScale;
 
-    if (abs(cmdVelMsg.linear.x) > 1e-2 || abs(cmdVelMsg.linear.y) > 1e-2 || abs(cmdVelMsg.angular.z) > 1e-2) {
+    if (std::abs(cmdVelMsg.linear.x) > 1e-2 || std::abs(cmdVelMsg.linear.y) > 1e-2 ||
+        std::abs(cmdVelMsg.angular.z) > 1e-2) {
       cmdVelPublisher_.publish(cmdVelMsg);
     }
   }
@@ -1923,6 +1926,26 @@ void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
 void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   initializeBase(configJson);
 
+  {
+    nodeHandle_.param("/mobile_manipulator_joy/linear_scale_x", chassisCmdVelLinearXLimit_, chassisCmdVelLinearXLimit_);
+    nodeHandle_.param("/mobile_manipulator_joy/linear_scale_y", chassisCmdVelLinearYLimit_, chassisCmdVelLinearYLimit_);
+    nodeHandle_.param("/mobile_manipulator_joy/angular_scale_z", chassisCmdVelAngularYawLimit_, chassisCmdVelAngularYawLimit_);
+    if (!std::isfinite(chassisCmdVelLinearXLimit_) || chassisCmdVelLinearXLimit_ <= 0.0) {
+      chassisCmdVelLinearXLimit_ = 0.8;
+    }
+    if (!std::isfinite(chassisCmdVelLinearYLimit_) || chassisCmdVelLinearYLimit_ <= 0.0) {
+      chassisCmdVelLinearYLimit_ = 0.8;
+    }
+    if (!std::isfinite(chassisCmdVelAngularYawLimit_) || chassisCmdVelAngularYawLimit_ <= 0.0) {
+      chassisCmdVelAngularYawLimit_ = 0.5;
+    }
+    ROS_INFO(
+        "[WheelQuest3IkIncrementalROS] VR cmd_vel max: lin_x=%.4f lin_y=%.4f ang_z=%.4f (from /mobile_manipulator_joy/*)",
+        chassisCmdVelLinearXLimit_,
+        chassisCmdVelLinearYLimit_,
+        chassisCmdVelAngularYawLimit_);
+  }
+
   // 初始化胸部pose订阅器
   chestPoseSubscriber_ = nodeHandle_.subscribe(
       "/robot_chest_pose", 10, &WheelQuest3IkIncrementalROS::chestPoseCallback, this, ros::TransportHints().tcpNoDelay());
@@ -2363,6 +2386,19 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   }
   ROS_INFO("[WheelQuest3IkIncrementalROS] Incremental LPF orientation_cutoff_hz: %.3f Hz",
            incrementalConfig.orientationCutoffHz);
+
+  if (configJson.contains("chassis_joy_cmd_travel_scale")) {
+    const double v = configJson["chassis_joy_cmd_travel_scale"].get<double>();
+    if (std::isfinite(v) && v > 0.0) {
+      incrementalConfig.chassisJoyCmdTravelScale = v;
+    } else {
+      ROS_WARN(
+          "[WheelQuest3IkIncrementalROS] Invalid chassis_joy_cmd_travel_scale in JSON, fallback to 1.0 "
+          "(no joy scaling)");
+      incrementalConfig.chassisJoyCmdTravelScale = 1.0;
+    }
+  }
+  ROS_INFO("[WheelQuest3IkIncrementalROS] chassis_joy_cmd_travel_scale: %.4f", incrementalConfig.chassisJoyCmdTravelScale);
 
   while (!nodeHandle_.hasParam("/ik_ros_uni_cpp_node/quest3/delta_scale_x")) {
     ROS_WARN("[WheelQuest3IkIncrementalROS] Waiting for /quest3/delta_scale_x parameter");
