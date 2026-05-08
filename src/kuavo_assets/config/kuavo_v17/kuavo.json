@@ -23,7 +23,7 @@
     "torsoP_squat": 20.0,
     "StepH": 0.06,
     "com_z": 0.60,
-
+    
     "squat_z": 0.56,
     "com_z_jump": 0.62,
     "StepWith": 0.248824,
@@ -97,11 +97,11 @@
         1800, 1800, 1800, 1800,
         1800, 1800, 1800, 1800, 1800, 1800],
     "joint_peak_velocity_limits":[
-        14.46, 14.46, 12.93, 14.62, 17.46, 17.46,
-        14.46, 14.46, 12.93, 14.62, 17.46, 17.46,
-        12.46,
-        10.8, 15.0, 15.0, 15.0,
-        10.8, 15.0, 15.0, 15.0, 1800, 1800],
+        14.6, 14.6, 12.0, 14.6, 17.0, 17.0,
+        14.6, 14.6, 12.0, 14.6, 17.0, 17.0,
+        12.0,
+        10.5, 15.0, 15.0, 15.0,
+        10.5, 15.0, 15.0, 15.0, 1800, 1800],
     "joint_torque_limits":[
         150.9, 150.54, 70.4, 150.5, 74.9, 74.9,
         150.9, 150.54, 70.4, 150.5, 74.9, 74.9,
@@ -169,7 +169,7 @@
         "r_hand_roll", "r_hand_pitch", "r_r_arm_tendon", "r_l_arm_tendon", "r_r_arm_bar", "r_l_arm_bar",
         "r_r_arm_bar_motor", "r_l_arm_bar_motor",
         "r_r_hand_socket", "r_l_hand_socket", "r_r_arm_tendon_socket", "r_l_arm_tendon_socket", "r_r_arm_bar_frame", "r_l_arm_bar_frame"],
-
+      
     "end_frames_name_ik":  ["torso", "zarm_l4_link", "zarm_r4_link", "zarm_l4_link", "zarm_r4_link"],
     "arm_end_joints": ["zarm_l4_joint", "zarm_r4_joint"],
     "shoulder_frame_names" : ["zarm_l1_link", "zarm_r1_link"],
@@ -181,7 +181,7 @@
     "hand_ref_length": 0.0,
     "base_height_offset": 0.24,
     "base_chest_offset_x": -0.0,
-
+    
     "motor_velocities_factor": 0.005,
     "joint_velocities_limit": {
         "head_pitch": [
@@ -262,7 +262,7 @@
     "arm_kd": [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50],
     "pbc_kp": [400, 900, 40, 100, 0, 0, 30, 40, 40, 40, 0, 0],
     "pbc_kd": [20, 40, 5, 10, 0, 0, 4, 5, 5, 5, 0, 0],
-
+    
     "init_arm_pos": [20, 0, 0, -30, 0, 0, 0, 20, 0, 0, -30, 0, 0, 0],
     "walk_arm_pose": [20, 0, 0, -35, 0, 0, 0, 20, 0, 0, -35, 0, 0, 0],
     "calibration_safe_pose": [-60, 0, 30, -30, 0, 0, 0, 
