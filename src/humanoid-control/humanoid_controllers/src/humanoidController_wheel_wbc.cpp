@@ -681,13 +681,10 @@ namespace humanoidController_wheel_wbc
 
   void humanoidControllerWheelWbc::update(const ros::Time &time, const ros::Duration &dfd)
   {
-    static double lastTime = time.toSec() - dt_;
-    static double lastMpcObsTime = time.toSec() - mpcDt_;
-    double curTime = time.toSec();
+    static const double firstTime = time.toSec();
+    double curTime = time.toSec() - firstTime;
+    static double lastTime = curTime - dt_;
     double dt = curTime - lastTime;
-    double dtObsMpc = curTime - lastMpcObsTime;
-    static bool isUpdateMpcObs = false;
-    if(dtObsMpc > mpcDt_ - 1e-6) {isUpdateMpcObs = true;}
     if(dt < dt_) return;
     lastTime = curTime;
     ros_logger_->publishValue("/humanoid_wheel/freq", 1 / dt);
@@ -721,7 +718,7 @@ namespace humanoidController_wheel_wbc
         initTarget.tail(info.eeFrames.size() * 7).segment(eef_inx*7, 3) = init_ee_pos[eef_inx];
         initTarget.tail(info.eeFrames.size() * 7).segment(eef_inx*7+3, 4) = Eigen::Quaternion<scalar_t>(init_ee_rot[eef_inx]).coeffs();
       }
-      auto target_trajectories = TargetTrajectories({observation_wheel_.time}, 
+      auto target_trajectories = TargetTrajectories({curTime}, 
                                                     {initTarget}, 
                                                     {observation_wheel_.input});
       mrtRosInterface_->resetMpcNode(target_trajectories);
@@ -783,15 +780,8 @@ namespace humanoidController_wheel_wbc
       }
       /**************************************************************************************/
       
-      if(isUpdateMpcObs == true)
-      {
-        ros_logger_->publishValue("/humanoid_wheel/dt_mpcObs_pub", curTime - lastMpcObsTime);
-        ros_logger_->publishValue("/humanoid_wheel/freq_mpcObs_pub", 1 / (curTime - lastMpcObsTime));
-        mrtRosInterface_->setCurrentObservation(kinemicLimitObs);
-
-        lastMpcObsTime = curTime;
-        isUpdateMpcObs = false;
-      }
+      kinemicLimitObs.time = curTime;
+      mrtRosInterface_->setCurrentObservation_directPub(kinemicLimitObs, mpcDt_);
 
       // Trigger MRT callbacks
       mrtRosInterface_->spinMRT();
