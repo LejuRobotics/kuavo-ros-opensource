@@ -549,6 +549,24 @@ def call_real_initialize_srv():
     except rospy.ServiceException as e:
         rospy.logerr(f"Service call failed: {e}")
 
+def is_real_launch_in_ready_stance(event):
+    """
+    状态机条件判断函数：查询real_launch_status服务，确认是否是ready_stance状态
+    返回True允许状态切换，返回False阻止切换
+    """
+    client = rospy.ServiceProxy('/humanoid_controller/real_launch_status', Trigger)
+    req = TriggerRequest()
+    try:
+        resp = client.call(req)
+        if resp.success and resp.message == "ready_stance":
+            rospy.loginfo("[Condition] real_launch_status is ready_stance, allow switch to stance")
+            return True
+        else:
+            rospy.logwarn(f"[Condition] real_launch_status is {resp.message}, not ready_stance, block switch to stance")
+            return False
+    except rospy.ServiceException as e:
+        rospy.logerr(f"[Condition] Failed to call real_launch_status service: {e}, block switch")
+        return False
 
 def print_state_transition(trigger, source, target) -> None:
     console.print(

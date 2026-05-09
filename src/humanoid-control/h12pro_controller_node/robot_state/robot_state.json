@@ -192,7 +192,8 @@
         "trigger": "ready_stance",
         "source": "ready_stance",
         "dest": "stance",
-        "before": "ready_stance_callback"
+        "before": "ready_stance_callback",
+        "conditions": ["is_real_launch_in_ready_stance"]
       },
       {
         "trigger": "stance",
@@ -634,7 +635,9 @@
         "trigger": "ready_stance",
         "source": "ready_stance",
         "dest": "stance",
-        "before": "ready_stance_callback"
+        "before": "ready_stance_callback",
+        "conditions": ["is_real_launch_in_ready_stance"]
+
       },
       {
         "trigger": "walk",
