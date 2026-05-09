@@ -3036,24 +3036,24 @@ namespace mobile_manipulator {
     Eigen::VectorXd qNullSpace = initial_q.tail(info_.armDim);  // 零空间解初始为当前手臂关节状态
     switch (req.isWholeBody)  // 只计算位置优先
     {
-      case true:  // 全身运动
-      {
-        std::cout << "[checkTargetPoseReachableService] Using whole-body IK solver." << std::endl;
-        Eigen::Vector3d targetPos = eeTargetPose.head(3);
-        Eigen::Vector3d targetEulerZyx = eeTargetPose.segment<3>(3);
-        Eigen::VectorXd solution = ikSolverDiff_.computeWholeBodyIK(initial_q, armIdx, targetPos, targetEulerZyx, false);
-        qNullSpace = solution.tail(info_.armDim);
-        break;
-      }
-      case false: // 仅手臂运动
-      {
-        std::cout << "[checkTargetPoseReachableService] Using arm-only IK solver." << std::endl;
-        Eigen::Vector3d targetPos = eeTargetPose.head(3);
-        Eigen::Vector3d targetEulerZyx = eeTargetPose.segment<3>(3);
-        Eigen::VectorXd solution = ikSolverDiff_.computeHandOnlyIK(initial_q, armIdx, targetPos, targetEulerZyx, false);
-        qNullSpace = solution.tail(info_.armDim);
-        break;
-      }
+        case true:  // 全身运动
+        {
+          std::cout << "[checkTargetPoseReachableService] Using whole-body IK solver." << std::endl;
+          Eigen::Vector3d targetPos = eeTargetPose.head(3);
+          Eigen::Vector3d targetEulerZyx = eeTargetPose.segment<3>(3);
+          Eigen::VectorXd solution = ikSolverDiff_.computeWholeBodyIK(initial_q, armIdx, targetPos, targetEulerZyx, false);
+          qNullSpace = solution.tail(info_.armDim);
+          break;
+        }
+        case false: // 仅手臂运动
+        {
+          std::cout << "[checkTargetPoseReachableService] Using arm-only IK solver." << std::endl;
+          Eigen::Vector3d targetPos = eeTargetPose.head(3);
+          Eigen::Vector3d targetEulerZyx = eeTargetPose.segment<3>(3);
+          Eigen::VectorXd solution = ikSolverDiff_.computeHandOnlyIK(initial_q, armIdx, targetPos, targetEulerZyx, false);
+          qNullSpace = solution.tail(info_.armDim);
+          break;
+        }
     }
 
     res.posPriorityAccess = ikSolverDiff_.isBestSolutionWithinPosThreshold();

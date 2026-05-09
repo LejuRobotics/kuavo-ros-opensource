@@ -84,7 +84,7 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        head_camera:
+        head_radar:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -95,6 +95,11 @@ Visualization Manager:
           Show Trail: false
           Value: true
         l_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        l_handball:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -189,6 +194,11 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        r_handball:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         rl_foot_heel:
           Alpha: 1
           Show Axes: false
@@ -205,6 +215,11 @@ Visualization Manager:
           Show Trail: false
           Value: true
         rr_foot_toe:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        torso:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -229,22 +244,7 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        zarm_l5_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        zarm_l6_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         zarm_l7_end_effector:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        zarm_l7_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -269,22 +269,7 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        zarm_r5_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        zarm_r6_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         zarm_r7_end_effector:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        zarm_r7_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -374,7 +359,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker
       Name: Marker
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -384,13 +369,13 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 100
-      Value: false
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/elbow
       Name: Marker
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -400,7 +385,7 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 100
-      Value: false
+      Value: true
     - Class: rviz/MarkerArray
       Enabled: false
       Marker Topic: /humanoid/planedFootPositions
@@ -422,7 +407,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker/shoulder
       Name: Marker
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -432,7 +417,7 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 100
-      Value: false
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/shoulder_quest3
@@ -448,7 +433,7 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 100
-      Value: false
+      Value: true
     - Alpha: 1
       Arrow Width: 0.5
       Class: rviz/WrenchStamped
@@ -478,7 +463,7 @@ Visualization Manager:
       Torque Arrow Scale: 2
       Torque Color: 204; 204; 51
       Unreliable: false
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Class: grid_map_rviz_plugin/GridMap
@@ -694,7 +679,7 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 10
-      Value: false
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/incremental_left_shoulder
@@ -710,7 +695,7 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 10
-      Value: false
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/incremental_left_elbow
@@ -726,7 +711,7 @@ Visualization Manager:
       Namespaces:
         {}
       Queue Size: 10
-      Value: false
+      Value: true
     - Class: rviz/Marker
       Enabled: true
       Marker Topic: /visualization_marker/left_hand_bound_box
@@ -772,7 +757,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker_right
       Name: Marker
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -780,7 +765,7 @@ Visualization Manager:
       Marker Topic: /visualization_marker_right/elbow
       Name: Marker
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -788,7 +773,17 @@ Visualization Manager:
       Marker Topic: /visualization_marker_right/shoulder
       Name: Marker
       Namespaces:
-        "": true
+        {}
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /ik/debug/vis_markers
+      Name: MarkerArray
+      Namespaces:
+        eef_ori: true
+        eef_ref: true
+        elbow_ref: true
       Queue Size: 100
       Value: true
   Enabled: true
@@ -835,9 +830,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.3847985565662384
+      Pitch: 0.22979851067066193
       Target Frame: base_link
-      Yaw: 0.5550013184547424
+      Yaw: 0.3350013494491577
     Saved:
       - Class: rviz/Orbit
         Distance: 5.575319766998291
@@ -875,5 +870,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1056
-  X: 2323
-  Y: 121
+  X: 652
+  Y: 149

@@ -27,6 +27,7 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   message_generation
   geometry_msgs
+  visualization_msgs
   kuavo_msgs
   noitom_hi5_hand_udp_python
   leju_utils

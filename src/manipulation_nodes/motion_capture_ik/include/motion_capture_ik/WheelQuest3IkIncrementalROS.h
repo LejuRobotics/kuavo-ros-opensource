@@ -282,6 +282,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasValidIkSolution_ = false;
   Eigen::VectorXd ikLowerBodyJointCommand_;  // 保存IK结果的前4个关节角度（size = 4）
   Eigen::VectorXd ikUpperBodyJointCommand_;  // 保存IK结果的前4个关节角度的指数均值滤波状态（size = 14）
+  // 双扳机同时松开时捕获的lb关节命令快照（用于胸部增量模式激活时冻结knee/leg/waist_pitch，只允许waist_yaw跟随VR）
+  Eigen::VectorXd frozenLbJointCommand_;
+  bool hasLbJointCommandFrozen_ = false;
 
   // 姿态和位置偏置
   Eigen::Vector3d deltaScale_;  // delta_scale 参数（x, y, z三轴独立）

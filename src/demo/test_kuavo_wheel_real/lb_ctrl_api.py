@@ -743,9 +743,9 @@ def check_target_pose_reachable_with_fallback(is_left: bool, is_local: bool, is_
     elif fallback_to_position_priority and not pos_access:
         rospy.logwarn(f"⚠️ 位置优先零空间解也不满足误差要求")
         rospy.logwarn(f"   线位移误差: {pos_linear_err:.6f}m")
-        return False, q_pos, 'none', pos_linear_err, pos_angular_err, "无有效解"
+        return False, [], 'none', pos_linear_err, pos_angular_err, "无有效解"
     else:
-        return False, q_pos, 'none', best_linear_err, best_angular_err, "无有效解"
+        return False, [], 'none', best_linear_err, best_angular_err, "无有效解"
 
 def get_ee_pose_reach_error(is_left: bool) -> tuple:
     """

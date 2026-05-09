@@ -588,6 +588,8 @@ void WheelQuest3IkIncrementalROS::reset() {
     }
     ikUpperBodyJointCommand_.setZero();
   }
+  frozenLbJointCommand_ = Eigen::VectorXd::Zero(4);
+  hasLbJointCommandFrozen_ = false;
   // 重置pose约束列表，使用默认手部位置初始化，确保进入增量模式时能正确初始化到默认位置
   latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
   Eigen::Quaterniond defaultHandQuat = Eigen::Quaterniond::Identity();
@@ -1552,6 +1554,12 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     }
     finalArmAngles = ikUpperBodyJointCommand_;
     finalLbAngles = ikLowerBodyJointCommand_;
+    // 双扳机全部松开但胸部增量模式仍激活时：冻结 knee/leg/waist_pitch（关节1~3），
+    // 只允许 waist_yaw（关节4）继续跟随 VR 偏航旋转，防止 IK 漂移引起折叠臂缓慢上升
+    if (!leftGripPressed && !rightGripPressed && chestIncrementalUpdateEnabled_ &&
+        hasLbJointCommandFrozen_ && frozenLbJointCommand_.size() == 4 && finalLbAngles.size() == 4) {
+      finalLbAngles.head(3) = frozenLbJointCommand_.head(3);
+    }
   }
 
   sensor_msgs::JointState armJintStateMsg;
@@ -1712,8 +1720,9 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     if (hasLatestLbTargetAngles_) {
       latestLbTargetAngles_ = finalLbAngles;
     }
+    // 只要胸部增量模式开启，无论是否按住 grip，腰部关节（waist_yaw/pitch）都持续跟随 VR 旋转
     lbLegTrajPublishEnabled_ =
-        hasLatestLbTargetAngles_ && chestIncrementalUpdateEnabled_ && (leftGripPressed || rightGripPressed);
+        hasLatestLbTargetAngles_ && chestIncrementalUpdateEnabled_;
   }
 }
 

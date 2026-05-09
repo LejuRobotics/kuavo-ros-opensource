@@ -764,8 +764,8 @@ namespace humanoidController_wheel_wbc
       vector_t optimizedState_mrt, optimizedInput_mrt;
       // Update the current state of the system
       SystemObservation kinemicLimitObs = observation_wheel_;
-      kinemicLimitObs.state = obsStateLimitFilterPtr_->update(observation_wheel_.state);
-      kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
+      // kinemicLimitObs.state = obsStateLimitFilterPtr_->update(observation_wheel_.state);
+      // kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
 
       /****************************允许采用mpc输出作为反馈**************************************/
       if(mpcObsUpdateMode_ == 1 || mpcObsUpdateMode_ == 3)
