@@ -42,6 +42,7 @@
 #include <kuavo_msgs/switchToNextController.h>
 #include <kuavo_msgs/headBodyPose.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <kuavo_msgs/changeLbQuickModeSrv.h>
 
 namespace ocs2
 {
@@ -225,6 +226,9 @@ namespace ocs2
             // 添加 enable_wbc_arm_trajectory_control 服务客户端
             enable_wbc_arm_trajectory_control_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/enable_wbc_arm_trajectory_control");
             
+            // 轮臂快速模式服务客户端（轮臂VR低延迟模式专用）
+            enable_lb_arm_quick_mode_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeLbQuickModeSrv>("/enable_lb_arm_quick_mode");
+            
             // VR腰部控制动态Q矩阵服务客户端
             vr_waist_control_service_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid/mpc/vr_waist_control");
             
@@ -401,6 +405,26 @@ namespace ocs2
             else
             {
                 ROS_ERROR("Failed to call EnableWbcArmTrajectorySrv");
+            }
+        }
+
+        // 轮臂VR低延迟模式：调用 /enable_lb_arm_quick_mode 设置快速模式
+        // quickMode: 0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
+        void callEnableLbArmQuickModeSrv(int8_t quickMode)
+        {
+            kuavo_msgs::changeLbQuickModeSrv srv;
+            srv.request.quickMode = quickMode;
+
+            if (enable_lb_arm_quick_mode_client_.call(srv))
+            {
+                if (srv.response.success)
+                    ROS_INFO("EnableLbArmQuickMode call successful, quickMode: %d", quickMode);
+                else
+                    ROS_WARN("EnableLbArmQuickMode call returned failure, quickMode: %d", quickMode);
+            }
+            else
+            {
+                ROS_ERROR("Failed to call EnableLbArmQuickMode (quickMode=%d)", quickMode);
             }
         }
 
@@ -1171,9 +1195,9 @@ namespace ocs2
 
             if (joystick_data_.left_trigger > 0.5)
             {
-                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 使能 WBC 手臂轨迹控制
+                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 开启上肢快速模式（低延迟模式）
                 {
-                    callEnableWbcArmTrajectorySrv(1);
+                    callEnableLbArmQuickModeSrv(2);
                     return;
                 }
                 if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)  // 切换到下一个控制器
@@ -1185,9 +1209,9 @@ namespace ocs2
 
             if (joystick_data_.left_grip > 0.5)
             {
-                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 不使能 WBC 手臂轨迹控制
+                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 关闭快速模式
                 {
-                    callEnableWbcArmTrajectorySrv(0);
+                    callEnableLbArmQuickModeSrv(0);
                     return;
                 }
             }
@@ -2076,6 +2100,7 @@ namespace ocs2
         ros::ServiceClient get_arm_mode_service_client_;
 
         ros::ServiceClient enable_wbc_arm_trajectory_control_client_;
+        ros::ServiceClient enable_lb_arm_quick_mode_client_;  // 轮臂快速模式服务客户端
         ros::ServiceClient vr_waist_control_service_client_;  // VR腰部控制动态Q矩阵服务客户端
         ros::ServiceClient auto_gait_mode_service_client_;    // GaitReceiver自动步态模式服务客户端
         ros::ServiceClient control_mode_client_;              // MPC控制模式切换服务客户端
