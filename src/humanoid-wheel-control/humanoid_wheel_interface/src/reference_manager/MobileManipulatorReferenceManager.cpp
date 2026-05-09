@@ -33,6 +33,7 @@ namespace mobile_manipulator {
         std::atan2(2 * (q.y() * q.z() + q.w() * q.x()), square(q.w()) - square(q.x()) - square(q.y()) + square(q.z()));
     return zyx;
   }
+
   // 选取轴向变动最少，且变化范围为 initial_zyx 在180度以内的解
   template <typename SCALAR_T>
   Eigen::Matrix<SCALAR_T, 3, 1> quatToZyx(const Eigen::Quaternion<SCALAR_T> &q, 
@@ -201,6 +202,28 @@ namespace mobile_manipulator {
       return best_candidate;
   }
 
+  template <typename SCALAR_T>
+  Eigen::Matrix<SCALAR_T, 3, 1> quatToZyxContinous(const Eigen::Quaternion<SCALAR_T> &q, const Eigen::Vector3d& last_zyx)
+  {
+    Eigen::Vector3d zyx_raw = quatToZyx(q);
+
+    // 对每个欧拉角分别处理连续性
+    Eigen::Matrix<SCALAR_T, 3, 1> zyx_continuous;
+    for (int i = 0; i < 3; i++) {
+        SCALAR_T delta = zyx_raw(i) - last_zyx(i);
+        // 处理角度跳变（超过π的跳变）
+        if (delta > M_PI) {
+            delta -= 2 * M_PI;
+        } else if (delta < -M_PI) {
+            delta += 2 * M_PI;
+        }
+        // 累积更新，保持连续
+        zyx_continuous(i) = last_zyx(i) + delta;
+    }
+
+    return zyx_continuous;
+  }
+
   /**
   * @brief 从旋转矩阵提取 pitch 和 yaw (假设 roll=0)
   * @param R 3x3旋转矩阵
@@ -257,6 +280,7 @@ namespace mobile_manipulator {
   , eeTargetTrajectories_{TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)}), 
                           TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)})}
   , currentActualState_(vector_t::Zero(info_.stateDim))
+  , asyncSpinner_(4)  // 使用4线程的AsyncSpinner
   {
 
     loadParamFromTaskFile();  // 加载配置参数
@@ -456,6 +480,12 @@ namespace mobile_manipulator {
     /************************躯干和双臂末端优先级相关参数设置********************/
     double torsoOriScale = 1.0 / 100.0;
     setTorsoOriFocusScale(torsoOriScale);
+    /***********************************************************************/
+
+    /****************************** 可达性分析参数设置 **********************************/
+    ikSolverDiff_.setParam(std::make_shared<PinocchioInterface>(pinocchioInterface_), 
+                           std::make_shared<ManipulatorModelInfo>(info_), 4);
+    /*********************************************************************************/
   }
 
   void MobileManipulatorReferenceManager::loadParamFromTaskFile(void)
@@ -574,13 +604,18 @@ namespace mobile_manipulator {
     std::cout << "[MobileManipulatorReferenceManager] robot_init_state_param: " << initialState.transpose() << std::endl;
 
     arm_init_joint_traj_ = initialState.segment(7 + 4, info_.armDim - 4);   // 从初始获取手臂期望
+    initialJointTarget_ = initialState.segment(7, info_.armDim);    // 从初始获取全部关节期望
 
   }
 
   void MobileManipulatorReferenceManager::setupSubscriptions(std::string nodeHandleName)
   {
+    asyncSpinner_.start();  // 启动异步spinner处理回调
+
     // 从参数服务器中更新初始期望
     setRobotInitialArmJointTarget(nodeHandle_);
+
+    setInitialTorsoPos();   // 更新躯干初始位姿
 
     // 设置服务服务器
     controlModeServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_mpc_control", 
@@ -616,6 +651,15 @@ namespace mobile_manipulator {
     // 设置重置躯干指令
     resetTorsoStatusServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_reset_torso", 
                                                            &MobileManipulatorReferenceManager::setLbResetTorsoService, this);
+
+    // 检测当前期望是否可达的服务
+    checkTargetPoseReachableServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_ik_accessibility_check", 
+                                                           &MobileManipulatorReferenceManager::checkTargetPoseReachableService, this);
+    
+    // 确认末端指令完全执行后, 对应的误差是多少
+    eePoseReachErrorServiceServer_ = nodeHandle_.advertiseService("/mobile_manipulator_ee_pose_reach_error", 
+                                                           &MobileManipulatorReferenceManager::eePoseReachErrorService, this);
+
     // 订阅速度控制状态
     vel_control_state_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
       "/enable_vel_control_state", 1,
@@ -726,22 +770,20 @@ namespace mobile_manipulator {
             return;
           }
 
-          Eigen::VectorXd currentEePose, currentEeVel, currentEeAcc;
+          vector_t eeState = vector_t::Zero(info_.eeFrames.size() * 7);  // 双臂位姿
           switch (desireMode_[armIdx])
           {
             case LbArmControlMode::WorldFrame: 
-              timedPlannerScheduler_.getTimedPlannerStates((armIdx == 0) ? 
-                                                            LbTimedPosCmdType::LEFT_ARM_WORLD_CMD : 
-                                                            LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD, 
-                                                            currentEePose, currentEeVel, currentEeAcc);
+              getCurrentEeWorldPose(eeState, initState_);
               break;
             case LbArmControlMode::LocalFrame: 
-              timedPlannerScheduler_.getTimedPlannerStates((armIdx == 0) ? 
-                                                            LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD : 
-                                                            LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD, 
-                                                            currentEePose, currentEeVel, currentEeAcc);
+              getCurrentEeBasePose(eeState, initState_);
               break;
           }
+
+          vector_t currentEePose = vector_t::Zero(6);
+          Eigen::Vector3d zyxEe = quatToZyx(Eigen::Quaterniond(eeState.segment<4>(armIdx*7 + 3)));
+          currentEePose << eeState.head(3), zyxEe;
 
           // 解析位姿 (x,y,z,qx,qy,qz,qw)
           vector_t arm_traj_pose = vector_t::Zero(7);
@@ -885,6 +927,17 @@ namespace mobile_manipulator {
 
     // 发布在modifyReference函数消耗的时间
     modifyReferenceTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/mobile_manipulator/lb_mpc_modify_ref_use_time", 10, false);
+
+    // 订阅 sensors_data_raw 话题，获取当前机器人状态
+    currentSensorDataJointPos_.setZero(info_.armDim);
+    auto sensorsDataCallback = [this](const kuavo_msgs::sensorsData::ConstPtr &msg)
+    {
+      for(int i = 0; i < info_.armDim; i++)
+      {
+        currentSensorDataJointPos_[i] = msg->joint_data.joint_q[i];
+      }
+    };
+    sensors_data_sub_ = nodeHandle_.subscribe<kuavo_msgs::sensorsData>("/sensors_data_raw", 10, sensorsDataCallback);
   }
 
   // // 获取第一次的目标轨迹，并分配到不同的约束轨迹，后续添加额外约束, 也需要在此初始化
@@ -1128,10 +1181,13 @@ namespace mobile_manipulator {
     static bool firstRun{true};
     if(firstRun)
     {
-      // 获取最初的躯干位姿期望
-      initialTorsoPos_ = targetTrajectories.stateTrajectory.front().segment(baseDim_, 3);
-      initialTorsoQuat_ = targetTrajectories.stateTrajectory.front().segment(baseDim_ + 3, 4);
       firstRun = false;
+    }
+
+    // 计算在末端控制模式下, 当前末端位姿与目标位姿之间的误差
+    for(int i = 0; i < info_.eeFrames.size(); i++)
+    {
+      computeErrorArmEeIsReachTarget(i, initTime, finalTime, initState);
     }
 
     // 更新当前状态
@@ -1370,13 +1426,58 @@ namespace mobile_manipulator {
     if(rePlanning)
     {
       cmdDualArm_plannerInitialTime_[armIdx] = initTime;
-      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentPose(cmdDualArm_prevTargetPose_[armIdx]);
-      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentVelocity(cmdDualArm_prevTargetVel_[armIdx]);
-      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentAcceleration(cmdDualArm_prevTargetAcc_[armIdx]);
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentPose(cmdDualArm_prevTargetPose_[armIdx]);   // 默认在静止下才重置指令
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentVelocity(vector_t::Zero(6));
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->setCurrentAcceleration(vector_t::Zero(6));
 
       cmdDualArmEePlannerRuckigPtr_[armIdx]->setTargetPose(cmdDualArm_prevTargetPose_[armIdx]);
       double durationTime = cmdDualArmEePlannerRuckigPtr_[armIdx]->calcTrajectory();
     }
+  }
+
+  vector_t MobileManipulatorReferenceManager::getDualArmRuckigInitialPose(LbTimedPosCmdType cmdType, const vector_t& initState, 
+                                                                          const vector_t& targetArmEePose)
+  {
+    vector_t eeState = vector_t::Zero(info_.eeFrames.size() * 7);
+    Eigen::Vector3d initial_zyx = targetArmEePose.segment<3>(3);  // 采用期望作为初值, 猜测出最近的欧拉角
+    Eigen::Vector3d zyx = Eigen::Vector3d::Zero();
+
+    switch(cmdType)
+    {
+      case LbTimedPosCmdType::LEFT_ARM_WORLD_CMD:
+      {
+        getCurrentEeWorldPose(eeState, initState);
+        zyx = quatToZyx(Eigen::Quaterniond(eeState.segment<4>(3)), initial_zyx);
+        break;
+      }
+      case LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD:
+      {
+        getCurrentEeWorldPose(eeState, initState);
+        zyx = quatToZyx(Eigen::Quaterniond(eeState.segment<4>(7+3)), initial_zyx);
+        break;
+      }
+      case LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD:
+      {
+        getCurrentEeBasePose(eeState, initState);
+        zyx = quatToZyx(Eigen::Quaterniond(eeState.segment<4>(3)), initial_zyx);
+        break;
+      }
+      case LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD:
+      {
+        getCurrentEeBasePose(eeState, initState);
+        zyx = quatToZyx(Eigen::Quaterniond(eeState.segment<4>(7+3)), initial_zyx);
+        break;
+      }
+      default:
+        std::cerr << "[getDualArmRuckigInitialPose] 错误的 LbTimedPosCmdType, 返回" << std::endl;
+        return vector_t::Zero(6);
+    }
+
+    Eigen::VectorXd currentEePose, currentEeVel, currentEeAcc;
+    timedPlannerScheduler_.getTimedPlannerStates(cmdType, currentEePose, currentEeVel, currentEeAcc);
+
+    currentEePose.tail(3) = zyx;
+    return currentEePose;
   }
 
   void MobileManipulatorReferenceManager::calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose, double desiredTime)
@@ -1757,8 +1858,12 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::generateVelTargetWithRuckig(double initTime, double finalTime, double dt)
+  void MobileManipulatorReferenceManager::generateVelTargetWithRuckig(double initTime, double finalTime, double dt, 
+                                                                      const vector_t& initstate)
   {
+    // 提取初始位姿 [x, y, yaw]
+    Eigen::Vector3d currentPos = initstate.head(3);
+
     // 使用 Ruckig 库生成平滑的底盘位姿轨迹
     scalar_array_t timeTraj;
     vector_array_t stateTraj;
@@ -1796,6 +1901,13 @@ namespace mobile_manipulator {
                                                      currentTargetPose_rightArm, 
                                                      currentTargetVel_rightArm, 
                                                      currentTargetAcc_rightArm);
+      
+      if (i > 0) 
+      {
+          // 从第二个时间点开始才进行积分更新
+          currentPos += currentTargetVel.head(3) * dt;  // 更新位置期望
+      }
+      currentTargetPose.head(3) = currentPos;
 
       targetState.head(3) = currentTargetPose; // [x, y, yaw]
       targetInput.head(3) = currentTargetVel;  // [vx, vy, wz]
@@ -2493,7 +2605,20 @@ namespace mobile_manipulator {
     }
     
     // 调用对应的轨迹规划器计算所需时间
-    double desiredTime = timedPlannerScheduler_.calcTimedTrajectory(req.planner_index, eigenCmdVec, req.desireTime);
+    double desiredTime = 0.0;
+    LbTimedPosCmdType cmdType = static_cast<LbTimedPosCmdType>(req.planner_index);
+    
+    if(cmdType != LEFT_ARM_WORLD_CMD || cmdType != RIGHT_ARM_WORLD_CMD ||
+       cmdType != LEFT_ARM_LOCAL_CMD || cmdType != RIGHT_ARM_LOCAL_CMD)
+    {
+      desiredTime = timedPlannerScheduler_.calcTimedTrajectory(req.planner_index, eigenCmdVec, req.desireTime);
+    }
+    else
+    {
+      vector_t initialPose = getDualArmRuckigInitialPose(cmdType, initState_, eigenCmdVec);
+      desiredTime = timedPlannerScheduler_.calcTimedTrajectory(req.planner_index, eigenCmdVec, 
+                                                               initialPose, vector_t::Zero(6), vector_t::Zero(6), req.desireTime);
+    }
 
     if(desiredTime == -1)
     {
@@ -2617,7 +2742,20 @@ namespace mobile_manipulator {
         }
 
         // 调用对应的轨迹规划器计算所需时间
-        double desiredTime = timedPlannerScheduler_.calcTimedTrajectory(timedCmd.planner_index, eigenCmdVec, timedCmd.desireTime);
+        double desiredTime = 0.0;
+        LbTimedPosCmdType cmdType = static_cast<LbTimedPosCmdType>(timedCmd.planner_index);
+
+        if(cmdType != LEFT_ARM_WORLD_CMD || cmdType != RIGHT_ARM_WORLD_CMD ||
+           cmdType != LEFT_ARM_LOCAL_CMD || cmdType != RIGHT_ARM_LOCAL_CMD)
+        {
+          desiredTime = timedPlannerScheduler_.calcTimedTrajectory(timedCmd.planner_index, eigenCmdVec, timedCmd.desireTime);
+        }
+        else
+        {
+          vector_t initialPose = getDualArmRuckigInitialPose(cmdType, initState_, eigenCmdVec);
+          desiredTime = timedPlannerScheduler_.calcTimedTrajectory(timedCmd.planner_index, eigenCmdVec, 
+                                                                   initialPose, vector_t::Zero(6), vector_t::Zero(6), timedCmd.desireTime);
+        }
 
         if(desiredTime == -1)
         {
@@ -2807,6 +2945,154 @@ namespace mobile_manipulator {
 
     res.success = false;
     res.message = "0.0";
+    return true;
+  }
+
+  bool MobileManipulatorReferenceManager::checkTargetPoseReachableService(kuavo_msgs::accessIkSolve::Request &req, 
+                                                                          kuavo_msgs::accessIkSolve::Response &res)
+  {
+    int armIdx = req.isLeft ? 0 : 1;
+    Eigen::VectorXd eeTargetPose = Eigen::Map<Eigen::VectorXd>(req.poseDesired.data(), req.poseDesired.size());
+
+    // 判断向量维度是否合法
+    if (eeTargetPose.size() != 6)
+    {      
+      res.success = false;
+      res.bestLinearError = -1.0;
+      res.bestAngularError = -1.0;
+      res.qBest.clear();
+      res.posPriorityAccess = false;
+      res.posPriorityLinearError = -1.0;
+      res.posPriorityAngularError = -1.0;
+      res.qPosPriorityBest.clear();
+
+      std::string message = "Target pose size mismatch! input size: " + std::to_string(eeTargetPose.size()) + ", required size: 6.";
+      ROS_ERROR_STREAM("[checkTargetPoseReachableService] " + message);
+      return true;
+    }
+    
+    vector_t initial_q = initState_;
+    switch (req.isLocal)
+    {
+      case true:  // 局部坐标系
+      {
+        initial_q.head(baseDim_) = vector_t::Zero(baseDim_);  // 局部坐标系下基座位置视为原点
+        std::cout << "[checkTargetPoseReachableService] Checking target pose in local coordinate frame." << std::endl;
+        break;
+      }
+      case false: // 世界坐标系
+      {
+        std::cout << "[checkTargetPoseReachableService] Checking target pose in world coordinate frame." << std::endl;
+        break;
+      }
+    }
+
+    ikSolverDiff_.setTotalTimeDesired(req.totalTimeDesired);
+    ikSolverDiff_.setMaxAttempts(req.maxAttempts);
+    ikSolverDiff_.setLinearErrorMax(req.linearErrorMax);
+    ikSolverDiff_.setAngularErrorMax(req.angularErrorMax);
+
+    Eigen::VectorXd qBest = initial_q.tail(info_.armDim);
+    switch (req.isWholeBody)  // 先计算位姿精确ik解
+    {
+      case true:  // 全身运动
+      {
+        std::cout << "[checkTargetPoseReachableService] Using whole-body IK solver." << std::endl;
+        Eigen::Vector3d targetPos = eeTargetPose.head(3);
+        Eigen::Vector3d targetEulerZyx = eeTargetPose.segment<3>(3);
+        Eigen::VectorXd solution = ikSolverDiff_.computeWholeBodyIK(initial_q, armIdx, targetPos, targetEulerZyx, true);
+        qBest = solution.tail(info_.armDim);
+        break;
+      }
+      case false: // 仅手臂运动
+      {
+        std::cout << "[checkTargetPoseReachableService] Using arm-only IK solver." << std::endl;
+        Eigen::Vector3d targetPos = eeTargetPose.head(3);
+        Eigen::Vector3d targetEulerZyx = eeTargetPose.segment<3>(3);
+        Eigen::VectorXd solution = ikSolverDiff_.computeHandOnlyIK(initial_q, armIdx, targetPos, targetEulerZyx, true);
+        qBest = solution.tail(info_.armDim);
+        break;
+      }
+    }
+
+    res.success = ikSolverDiff_.isBestSolutionWithinThreshold();  // 检查是否有解满足误差要求
+    res.bestLinearError = ikSolverDiff_.getBestLinearError();
+    res.bestAngularError = ikSolverDiff_.getBestAngularError();
+    res.qBest = std::vector<double>(qBest.data(), qBest.data() + qBest.size());
+
+    if(res.success) // 精确解有解时，直接返回
+    {
+      ROS_INFO_STREAM("[checkTargetPoseReachableService] Target pose is reachable. Best solution found with linear error: " 
+                      << res.bestLinearError << " m, angular error: " << res.bestAngularError << " rad.");
+      return true;
+    }
+    else
+    {
+      ROS_WARN_STREAM("[checkTargetPoseReachableService] Target pose is NOT reachable. Best solution found with linear error: " 
+                      << res.bestLinearError << " m, angular error: " << res.bestAngularError << " rad.");
+    }
+
+    // 当精确ik解不可达时, 计算位置优先的零空间解
+    Eigen::VectorXd qNullSpace = initial_q.tail(info_.armDim);  // 零空间解初始为当前手臂关节状态
+    switch (req.isWholeBody)  // 只计算位置优先
+    {
+      switch (req.isWholeBody)  // 先计算位姿精确ik解
+      {
+        case true:  // 全身运动
+        {
+          std::cout << "[checkTargetPoseReachableService] Using whole-body IK solver." << std::endl;
+          Eigen::Vector3d targetPos = eeTargetPose.head(3);
+          Eigen::Vector3d targetEulerZyx = eeTargetPose.segment<3>(3);
+          Eigen::VectorXd solution = ikSolverDiff_.computeWholeBodyIK(initial_q, armIdx, targetPos, targetEulerZyx, false);
+          qNullSpace = solution.tail(info_.armDim);
+          break;
+        }
+        case false: // 仅手臂运动
+        {
+          std::cout << "[checkTargetPoseReachableService] Using arm-only IK solver." << std::endl;
+          Eigen::Vector3d targetPos = eeTargetPose.head(3);
+          Eigen::Vector3d targetEulerZyx = eeTargetPose.segment<3>(3);
+          Eigen::VectorXd solution = ikSolverDiff_.computeHandOnlyIK(initial_q, armIdx, targetPos, targetEulerZyx, false);
+          qNullSpace = solution.tail(info_.armDim);
+          break;
+        }
+      }
+    }
+
+    res.posPriorityAccess = ikSolverDiff_.isBestSolutionWithinPosThreshold();
+    res.posPriorityLinearError = ikSolverDiff_.getBestLinearError();
+    res.posPriorityAngularError = ikSolverDiff_.getBestAngularError();
+    res.qPosPriorityBest = std::vector<double>(qNullSpace.data(), qNullSpace.data() + qNullSpace.size());
+
+    if(res.posPriorityAccess)
+    {
+      ROS_INFO_STREAM("[checkTargetPoseReachableService] Target pose is reachable in position priority mode. Best solution found with linear error: " 
+                      << res.posPriorityLinearError << " m, angular error: " << res.posPriorityAngularError << " rad.");
+    }
+    else
+    {
+      ROS_WARN_STREAM("[checkTargetPoseReachableService] Target pose is NOT reachable even in position priority mode. Best solution found with linear error: " 
+                      << res.posPriorityLinearError << " m, angular error: " << res.posPriorityAngularError << " rad.");
+    }
+
+    return true;
+  }
+
+  bool MobileManipulatorReferenceManager::eePoseReachErrorService(kuavo_msgs::eePoseReachError::Request &req, kuavo_msgs::eePoseReachError::Response &res)
+  {
+    int armIdx = req.isLeft ? 0 : 1;
+    if(isEeMotionComplete_[armIdx])
+    {
+      res.success = true;
+      res.errVector = std::vector<double>(eeError_[armIdx].data(), eeError_[armIdx].data() + eeError_[armIdx].size());;
+      ROS_INFO_STREAM("[eePoseReachErrorService] EE motion is complete, error: " << eeError_[armIdx].transpose());
+    }
+    else
+    {
+      res.success = false;
+      res.errVector = std::vector<double>(eeError_[armIdx].data(), eeError_[armIdx].data() + eeError_[armIdx].size());;
+      ROS_INFO_STREAM("[eePoseReachErrorService] EE motion is not complete, or is nor in ee mode.");
+    }
     return true;
   }
 
@@ -3033,11 +3319,11 @@ namespace mobile_manipulator {
     {
       // 获取末端执行器帧ID（这里需要您根据实际情况获取）
       pinocchio::FrameIndex frameId = model.getFrameId(info_.eeFrames[ee_idx]);
-      // 获取末端在世界坐标系中的位姿
-      const pinocchio::SE3& ee_pose = data.oMf[frameId];
+      // 获取末端在局部坐标系中的位姿
+      const pinocchio::SE3& ee_pose_base = data.oMf[frameId];
 
-      EeState.segment<3>(ee_idx*7) = ee_pose.translation();
-      EeState.segment<4>(ee_idx*7+3) = Eigen::Quaterniond(ee_pose.rotation()).coeffs();
+      EeState.segment<3>(ee_idx*7) = ee_pose_base.translation();
+      EeState.segment<4>(ee_idx*7+3) = Eigen::Quaterniond(ee_pose_base.rotation()).coeffs();
     }
   }
 
@@ -3047,26 +3333,18 @@ namespace mobile_manipulator {
 
     const auto& model = pinocchioInterface_.getModel();
     auto& data = pinocchioInterface_.getData();
-    pinocchio::forwardKinematics(model, data, initState.head(model.nq));
+    vector_t initStateLocal = initState;
+    initStateLocal.head(3) = Eigen::Vector3d::Zero();
+    pinocchio::forwardKinematics(model, data, initStateLocal.head(model.nq));
     pinocchio::updateFramePlacements(model, data);
-
-    // 获取基座的世界系位姿
-    pinocchio::FrameIndex baseFrameId = model.getFrameId(info_.baseFrame);
-    const pinocchio::SE3& base_pose_world = data.oMf[baseFrameId];
-
-    // 计算世界到基座的变换矩阵
-    pinocchio::SE3 world_to_base = base_pose_world.inverse();
 
     // 遍历每个末端执行器
     for (size_t ee_idx = 0; ee_idx < info_.eeFrames.size(); ++ee_idx) 
     {
       // 获取末端执行器帧ID（这里需要您根据实际情况获取）
       pinocchio::FrameIndex frameId = model.getFrameId(info_.eeFrames[ee_idx]);
-      // 获取末端在世界坐标系中的位姿
-      const pinocchio::SE3& ee_pose_world = data.oMf[frameId];
-
-      // 将末端位姿从世界坐标系转换到基座坐标系
-      pinocchio::SE3 ee_pose_base = world_to_base * ee_pose_world;
+      // 获取末端在局部坐标系中的位姿
+      const pinocchio::SE3& ee_pose_base = data.oMf[frameId];
 
       EeState.segment<3>(ee_idx*7) = ee_pose_base.translation();
       EeState.segment<4>(ee_idx*7+3) = Eigen::Quaterniond(ee_pose_base.rotation()).coeffs();
@@ -3384,7 +3662,7 @@ namespace mobile_manipulator {
       /*****************************更新ruckig规划器所需实时数据************************************/
       calcRuckigTrajWithCmdVel(initTime, currentCmdVelWorld_);
 
-      generateVelTargetWithRuckig(initTime, finalTime, ruckigDt_);
+      generateVelTargetWithRuckig(initTime, finalTime, ruckigDt_, initState);
       /*****************************************************************************************/
 
       // 判断速度为0，跳出速度控制
@@ -3767,53 +4045,77 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::updateTimedSchedulerCurrentState(scalar_t initTime, const vector_t& initState)
   {
-    std::vector<Eigen::VectorXd> currentPos;
+    // std::vector<Eigen::VectorXd> currentPos;
 
     Eigen::VectorXd tmpPos;
 
     tmpPos.setZero(baseDim_);                                       // 底盘世界系, 自由度3: x, y, yaw
     tmpPos = initState.head(baseDim_);
-    currentPos.push_back(tmpPos);
+    // currentPos.push_back(tmpPos);
+    timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::BASE_POS_WORLD_CMD);
 
     tmpPos.setZero(baseDim_);                                       // 底盘局部系, 采用世界系做反馈, 自由度3: x, y, yaw
     tmpPos = initState.head(baseDim_);
-    currentPos.push_back(tmpPos);
+    // currentPos.push_back(tmpPos);
+    timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::BASE_POS_LOCAL_CMD);
 
     vector_t torsoPose = vector_t::Zero(6);                         // 躯干, 自由度4: x, z, yaw, pitch
     getCurrentTorsoPoseInBasePitchYaw(torsoPose, initState);
     tmpPos.setZero(4);   
     tmpPos << torsoPose[0], torsoPose[2], torsoPose[3], torsoPose[4];
-    currentPos.push_back(tmpPos);
+    // currentPos.push_back(tmpPos);
+    timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::TORSO_POSE_CMD);
 
     tmpPos.setZero(4);                                              // 下肢, 自由度4
     tmpPos = initState.segment(baseDim_, 4);
-    currentPos.push_back(tmpPos);
+    // currentPos.push_back(tmpPos);
+    timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::LEG_JOINT_CMD);
     
-    vector_t eePose = vector_t::Zero(info_.eeFrames.size() * 6);    // 双臂世界系, 自由度(末端数*6)
-    getCurrentEeWorldPoseContinuous(eePose, initState);
+    // getCurrentEeWorldPoseContinuous(eePose, initState);
+    vector_t eeStateLocal = vector_t::Zero(info_.eeFrames.size() * 7);  // 双臂世界系, 自由度(末端数*6)
+    getCurrentEeBasePose(eeStateLocal, initState);
+    std::vector<Eigen::Vector3d> zyxEe(info_.eeFrames.size());
+    static std::vector<Eigen::Vector3d> last_zyxEe(info_.eeFrames.size(), Eigen::Vector3d::Zero());
+    for(int i=0; i<info_.eeFrames.size(); i++)
+    {
+      zyxEe[i] = quatToZyxContinous(Eigen::Quaterniond(eeStateLocal.segment<4>(i * 7 + 3)), last_zyxEe[i]);
+      last_zyxEe[i] = zyxEe[i];
+    }
     for(int i=0; i<info_.eeFrames.size(); i++)
     {
       tmpPos.setZero(6);
-      tmpPos.head(6) = eePose.segment(i*6, 6);
-      currentPos.push_back(tmpPos);
+      // tmpPos.head(6) = eePose.segment(i*6, 6);
+      tmpPos.head(3) = eeStateLocal.segment(i*7, 3);
+      tmpPos.head(2) += initState.head(2);
+      tmpPos.tail(3) = zyxEe[i];
+      tmpPos[3] += initState[2];
+      // currentPos.push_back(tmpPos);
+      if(i == 0) timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::LEFT_ARM_WORLD_CMD);
+      else timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD);
     }
 
-    getCurrentEeBasePoseContinuous(eePose, initState);                        // 双臂局部系, 自由度(末端数*6)
+    // getCurrentEeBasePoseContinuous(eePose, initState);                        // 双臂局部系, 自由度(末端数*6)
     for(int i=0; i<info_.eeFrames.size(); i++)
     {
       tmpPos.setZero(6);
-      tmpPos.head(6) = eePose.segment(i*6, 6);
-      currentPos.push_back(tmpPos);
+      // tmpPos.head(6) = eePose.segment(i*6, 6);
+      tmpPos.head(3) = eeStateLocal.segment(i*7, 3);
+      tmpPos.tail(3) = zyxEe[i];
+      // currentPos.push_back(tmpPos);
+      if(i == 0) timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD);
+      else timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD);
     }
 
     for(int i = 0; i < 2; ++i) // 上肢单臂设置, 自由度(全身关节数-4)/2
     {
       tmpPos.setZero(singleArmJointDim_);                               
       tmpPos = initState.tail(singleArmJointDim_ * 2).segment(i * singleArmJointDim_, singleArmJointDim_);
-      currentPos.push_back(tmpPos);
+      // currentPos.push_back(tmpPos);
+      if(i == 0) timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::LEFT_ARM_JOINT_CMD);
+      else timedPlannerScheduler_.setTimedPlannerStates(tmpPos, LbTimedPosCmdType::RIGHT_ARM_JOINT_CMD);
     }
 
-    timedPlannerScheduler_.setTimedPlannerStates(currentPos);
+    // timedPlannerScheduler_.setTimedPlannerStates(currentPos);
   }
 
   void MobileManipulatorReferenceManager::updateTimedSchedulerTargetTraj(void)
@@ -4047,6 +4349,127 @@ namespace mobile_manipulator {
         break;
       }
     }
+  }
+
+  void MobileManipulatorReferenceManager::computeErrorArmEeIsReachTarget(int armIdx, double initTime, double finalTime, const vector_t& initState)
+  {
+    if(isEeMotionComplete_[armIdx] == false)
+    {
+      eeError_[armIdx] = vector_t::Constant(6, 999.0);
+    }
+    vector_t targetPose = cmd_arm_zyx_[armIdx].head(6);
+    vector_t currentPose = vector_t::Zero(6);
+    
+    vector_t initial_q = initState;
+    initial_q.tail(info_.armDim) = currentSensorDataJointPos_; // 采用传感器数据
+
+    // 判断对应末端所处模式, 对应合适的误差计算方法
+    if(getEnableEeTargetLocalTrajectoriesForArm(armIdx))
+    {
+      initial_q.head(baseDim_) = vector_t::Zero(baseDim_); // 局部系误差不考虑底盘位置
+    }
+    else if(getEnableEeTargetTrajectoriesForArm(armIdx))
+    {
+    }
+    else
+    {
+      isEeMotionComplete_[armIdx] = false;
+      return;
+    }
+
+    const vector_t stateTrajCur = getEeTargetTrajectories(armIdx).getDesiredState(initTime);
+    const vector_t stateTrajNext = getEeTargetTrajectories(armIdx).getDesiredState(finalTime);
+    
+    // 判断两个向量是否在误差范围内相等
+    const double tolerance = 1e-6;  // 设置容差
+    if (stateTrajCur.isApprox(stateTrajNext, tolerance))
+    {
+    }
+    else
+    {
+      isEeMotionComplete_[armIdx] = false;
+      return;
+    }
+
+    // 更新模型参数
+    const auto& model = pinocchioInterface_.getModel();
+    auto& data = pinocchioInterface_.getData();
+    pinocchio::forwardKinematics(model, data, initial_q.head(model.nq));
+    pinocchio::updateFramePlacements(model, data);
+
+    // 构建目标位姿
+    Eigen::Vector3d posDesired = cmd_arm_zyx_[armIdx].head(3);
+    Eigen::Vector3d zyxDesired = cmd_arm_zyx_[armIdx].segment(3, 3);
+    matrix3_t R_des = getRotationMatrixFromZyxEulerAngles(zyxDesired);
+    pinocchio::SE3 goal_tform(R_des, posDesired);
+
+    // 计算误差向量
+    auto FRAME_ID = model.getFrameId(info_.eeFrames[armIdx]);
+    
+    // 位置误差：直接减法（世界坐标系）
+    eeError_[armIdx].head(3) = posDesired - data.oMf[FRAME_ID].translation();
+    
+    // 姿态误差：使用 log3 获取轴角，然后转换为 ZYX 欧拉角
+    matrix3_t R_current = data.oMf[FRAME_ID].rotation();
+    matrix3_t R_error = R_des * R_current.transpose();  // 相对旋转矩阵
+    Eigen::Vector3d axis_angle_error = pinocchio::log3(R_error);
+    
+    // 轴角转换为 ZYX 欧拉角 (yaw, pitch, roll)
+    double angle = axis_angle_error.norm();
+
+    if (angle < 1e-8) {
+        eeError_[armIdx].tail(3).setZero();
+    } else {
+        Eigen::Vector3d axis = axis_angle_error / angle;
+        Eigen::AngleAxisd angle_axis(angle, axis);
+        Eigen::Quaterniond quat(angle_axis);
+        
+        // 提取 ZYX 欧拉角 (yaw, pitch, roll)
+        Eigen::Vector3d euler_zyx = quatToZyx(quat);
+        
+        // 存储为 ZYX 顺序 (yaw, pitch, roll)
+        eeError_[armIdx].tail(3) = euler_zyx;
+    }
+
+    // std::cout << "Arm " << armIdx << " EE error: " << eeError_[armIdx].transpose() << std::endl;
+
+    isEeMotionComplete_[armIdx] = true;
+
+    return;
+  }
+
+  void MobileManipulatorReferenceManager::setInitialTorsoPos(void)
+  {
+    const auto& model = pinocchioInterface_.getModel();
+    auto& data = pinocchioInterface_.getData();
+
+    vector_t initialQpos = vector_t::Zero(info_.stateDim);
+    initialQpos.tail(info_.armDim) = initialJointTarget_;
+
+    pinocchio::forwardKinematics(model, data, initialQpos);
+    pinocchio::updateFramePlacements(model, data);
+
+    // 获取躯干的初始位姿
+    pinocchio::FrameIndex torsoFrameId = model.getFrameId(info_.torsoFrame);
+    const pinocchio::SE3& torsoPose = data.oMf[torsoFrameId];
+
+        // 获取位置（平移向量）
+    const Eigen::Vector3d& position = torsoPose.translation();
+    initialTorsoPos_ = position;
+    
+    // 获取姿态旋转矩阵并转换为四元数
+    const Eigen::Matrix3d& rotationMatrix = torsoPose.rotation();
+    Eigen::Quaterniond quaternion(rotationMatrix);
+    initialTorsoQuat_ = quaternion.coeffs();
+    
+    // 打印位置
+    std::cout << "========== Initial Torso Pose ==========" << std::endl;
+    std::cout << "Position (x, y, z): " 
+              << position.transpose() << std::endl;
+    
+    // 打印四元数 (w, x, y, z) - 注意Eigen四元数存储顺序为 (x, y, z, w)
+    std::cout << "Orientation (quaternion):" << std::endl;
+    std::cout << "quatVec: " << initialTorsoQuat_.transpose() << std::endl;
   }
 
 }  // namespace mobile_manipulator

@@ -14,6 +14,8 @@ from kuavo_msgs.srv import lbMultiTimedPosCmd, lbMultiTimedPosCmdRequest
 from kuavo_msgs.srv import lbMultiTimedOfflineTraj, lbMultiTimedOfflineTrajRequest
 from kuavo_msgs.msg import timedPoint, lbTimedOfflineTraj
 from kuavo_msgs.msg import timedSingleCmd
+from kuavo_msgs.srv import accessIkSolve, accessIkSolveRequest
+from kuavo_msgs.srv import eePoseReachError, eePoseReachErrorRequest
 from std_srvs.srv import SetBool, SetBoolRequest
 from std_msgs.msg import Bool
 
@@ -598,3 +600,197 @@ def set_offline_trajectory_enable(enable: bool) -> bool:
     except Exception as e:
         rospy.logerr(f"Unexpected error: {e}")
         return False
+
+def check_target_pose_reachable(is_left: bool, is_local: bool, is_whole_body: bool, 
+                                 pose_desired: list, total_time_desired: float = 1.0,
+                                 max_attempts: int = 5, linear_error_max: float = 0.005,
+                                 angular_error_max: float = 0.05) -> tuple:
+    """
+    检查移动机械臂的目标位姿是否可达
+    
+    :param is_left: 是否为左臂 (True: 左臂, False: 右臂)
+    :param is_local: 是否使用局部坐标系 (True: 局部坐标系, False: 世界坐标系)
+    :param is_whole_body: 是否使用全身运动 (True: 全身运动, False: 仅手臂运动)
+    :param pose_desired: 期望位姿 [x, y, z, roll, pitch, yaw] (6维向量)
+    :param total_time_desired: 期望求解总时间（秒）
+    :param max_attempts: 最大求解尝试次数
+    :param linear_error_max: 最大允许线位移误差（米）
+    :param angular_error_max: 最大允许角位移误差（弧度）
+    :return: (success, best_linear_error, best_angular_error, q_best, 
+              pos_priority_access, pos_priority_linear_error, pos_priority_angular_error, q_pos_priority_best, message)
+             success: 是否可达 (精确IK解满足误差要求)
+             best_linear_error: 最优解的线位移误差
+             best_angular_error: 最优解的角位移误差
+             q_best: 最优关节角度 (精确IK解)
+             pos_priority_access: [仅当success=False时有意义] 零空间解（位置优先）是否满足位置误差要求
+             pos_priority_linear_error: [仅当success=False时有意义] 零空间解的线位移误差
+             pos_priority_angular_error: [仅当success=False时有意义] 零空间解的角位移误差
+             q_pos_priority_best: [仅当success=False时有意义] 零空间解（位置优先）的关节角度
+             message: 详细信息
+    """
+    
+    # 验证参数
+    if not pose_desired or len(pose_desired) != 6:
+        rospy.logerr(f"❌ 期望位姿参数错误，需要6维向量 [x,y,z,roll,pitch,yaw]")
+        return False, 0.0, 0.0, [], False, 0.0, 0.0, [], "期望位姿参数错误"
+    
+    try:
+        # 等待服务
+        rospy.wait_for_service('/mobile_manipulator_ik_accessibility_check', timeout=5.0)
+        client = rospy.ServiceProxy('/mobile_manipulator_ik_accessibility_check', accessIkSolve)
+        
+        # 准备请求
+        req = accessIkSolveRequest()
+        req.isLeft = is_left
+        req.isLocal = is_local
+        req.isWholeBody = is_whole_body
+        req.poseDesired = pose_desired
+        req.totalTimeDesired = total_time_desired
+        req.maxAttempts = max_attempts
+        req.linearErrorMax = linear_error_max
+        req.angularErrorMax = angular_error_max
+        
+        # 调用服务
+        resp = client(req)
+        
+        # 构建返回消息
+        arm_name = "左臂" if is_left else "右臂"
+        coord_name = "局部坐标系" if is_local else "世界坐标系"
+        motion_name = "全身运动" if is_whole_body else "仅手臂运动"
+        
+        if resp.success:
+            rospy.loginfo(f"✅ 目标位姿可达检查成功")
+            rospy.loginfo(f"   手臂: {arm_name}")
+            rospy.loginfo(f"   坐标系: {coord_name}")
+            rospy.loginfo(f"   运动模式: {motion_name}")
+            rospy.loginfo(f"   线位移误差: {resp.bestLinearError:.6f}m")
+            rospy.loginfo(f"   角位移误差: {resp.bestAngularError:.6f}rad")
+            rospy.loginfo(f"   最优关节角度: {resp.qBest}")
+            rospy.loginfo(f"   ⚠️ 位置优先零空间解未计算（精确解已满足要求）")
+            
+            message = f"目标位姿可达，线误差:{resp.bestLinearError:.6f}m，角误差:{resp.bestAngularError:.6f}rad"
+            return resp.success, resp.bestLinearError, resp.bestAngularError, resp.qBest, \
+                   False, -1.0, -1.0, [], message
+        else:
+            rospy.logwarn(f"⚠️ 目标位姿不可达，尝试位置优先零空间解")
+            rospy.logwarn(f"   手臂: {arm_name}")
+            rospy.logwarn(f"   坐标系: {coord_name}")
+            rospy.logwarn(f"   运动模式: {motion_name}")
+            rospy.logwarn(f"   最佳线位移误差: {resp.bestLinearError:.6f}m")
+            rospy.logwarn(f"   最佳角位移误差: {resp.bestAngularError:.6f}rad")
+            rospy.logwarn(f"   最优关节角度: {resp.qBest}")
+            
+            if resp.posPriorityAccess:
+                rospy.loginfo(f"   ✅ 位置优先零空间解满足位置误差要求")
+                rospy.loginfo(f"      线位移误差: {resp.posPriorityLinearError:.6f}m")
+                rospy.loginfo(f"      角位移误差: {resp.posPriorityAngularError:.6f}rad")
+                rospy.loginfo(f"      关节角度: {resp.qPosPriorityBest}")
+            else:
+                rospy.logwarn(f"   ❌ 位置优先零空间解仍不满足误差要求")
+                rospy.logwarn(f"      线位移误差: {resp.posPriorityLinearError:.6f}m")
+                rospy.logwarn(f"      角位移误差: {resp.posPriorityAngularError:.6f}rad")
+            
+            message = f"目标位姿不可达，最小线误差:{resp.bestLinearError:.6f}m, 最小角误差:{resp.bestAngularError:.6f}rad"
+            return resp.success, resp.bestLinearError, resp.bestAngularError, resp.qBest, \
+                   resp.posPriorityAccess, resp.posPriorityLinearError, resp.posPriorityAngularError, \
+                   resp.qPosPriorityBest, message
+            
+    except rospy.ROSException as e:
+        error_msg = f"服务等待超时: {e}"
+        rospy.logerr(f"❌ {error_msg}")
+        return False, -1.0, -1.0, [], False, -1.0, -1.0, [], error_msg
+    except rospy.ServiceException as e:
+        error_msg = f"服务调用失败: {e}"
+        rospy.logerr(f"❌ {error_msg}")
+        return False, -1.0, -1.0, [], False, -1.0, -1.0, [], error_msg
+    except Exception as e:
+        error_msg = f"未知错误: {e}"
+        rospy.logerr(f"❌ {error_msg}")
+        return False, -1.0, -1.0, [], False, -1.0, -1.0, [], error_msg
+    
+def check_target_pose_reachable_with_fallback(is_left: bool, is_local: bool, is_whole_body: bool,
+                                               pose_desired: list, fallback_to_position_priority: bool = True) -> tuple:
+    """
+    检查目标位姿是否可达，并在不可达时返回位置优先零空间解
+    
+    :param is_left: 是否为左臂
+    :param is_local: 是否使用局部坐标系
+    :param is_whole_body: 是否使用全身运动
+    :param pose_desired: 期望位姿 [x, y, z, roll, pitch, yaw]
+    :param fallback_to_position_priority: 是否在精确IK失败时使用位置优先解
+    :return: (success, q_solution, solution_type, linear_error, angular_error, message)
+             success: 是否获得有效解（精确解或位置优先解）
+             q_solution: 关节角度解
+             solution_type: 'exact' 或 'position_priority' 或 'none'
+             linear_error: 线位移误差
+             angular_error: 角位移误差
+             message: 详细信息
+    """
+    # 先尝试精确IK求解
+    exact_success, best_linear_err, best_angular_err, q_best, \
+    pos_access, pos_linear_err, pos_angular_err, q_pos, msg = \
+        check_target_pose_reachable(is_left, is_local, is_whole_body, pose_desired)
+    
+    if exact_success:
+        return True, q_best, 'exact', best_linear_err, best_angular_err, "使用精确IK解"
+    
+    # 精确解失败，考虑使用位置优先解
+    if fallback_to_position_priority and pos_access:
+        rospy.loginfo(f"✅ 使用位置优先零空间解（位置误差满足要求）")
+        rospy.loginfo(f"   线位移误差: {pos_linear_err:.6f}m")
+        rospy.loginfo(f"   角位移误差: {pos_angular_err:.6f}rad")
+        return True, q_pos, 'position_priority', pos_linear_err, pos_angular_err, "使用位置优先解（位置精度满足，姿态精度不满足）"
+    elif fallback_to_position_priority and not pos_access:
+        rospy.logwarn(f"⚠️ 位置优先零空间解也不满足误差要求")
+        rospy.logwarn(f"   线位移误差: {pos_linear_err:.6f}m")
+        return False, [], 'none', pos_linear_err, pos_angular_err, "无有效解"
+    else:
+        return False, [], 'none', best_linear_err, best_angular_err, "无有效解"
+
+def get_ee_pose_reach_error(is_left: bool) -> tuple:
+    """
+    获取机械臂末端执行器的位姿到达误差
+    
+    :param is_left: 是否为左臂 (True: 左臂, False: 右臂)
+    :return: (success, err_vector, message)
+             success: 是否成功（仅在末端模式且期望位姿不再更新时返回True）
+             err_vector: 6维误差向量 [x, y, z, yaw, pitch, roll]
+                       位置误差(米)，姿态误差(弧度) - ZYX欧拉角顺序
+             message: 详细信息
+    """
+    try:
+        # 等待服务
+        rospy.wait_for_service('/mobile_manipulator_ee_pose_reach_error', timeout=5.0)
+        client = rospy.ServiceProxy('/mobile_manipulator_ee_pose_reach_error', eePoseReachError)
+        
+        # 准备请求
+        req = eePoseReachErrorRequest()
+        req.isLeft = is_left
+        
+        # 调用服务
+        resp = client(req)
+        
+        arm_name = "左臂" if is_left else "右臂"
+        
+        if resp.success:
+            rospy.loginfo(f"✅ {arm_name} 末端运动已完成")
+            rospy.loginfo(f"   误差向量: [{', '.join([f'{err:.6f}' for err in resp.errVector])}]")
+            message = f"{arm_name} 末端运动已完成"
+            return True, list(resp.errVector), message
+        else:
+            rospy.logwarn(f"⚠️ {arm_name} 末端运动未完成或不在末端模式")
+            message = f"{arm_name} 末端运动未完成或不在末端模式"
+            return False, list(resp.errVector) if resp.errVector else [0.0] * 6, message
+            
+    except rospy.ROSException as e:
+        error_msg = f"服务等待超时: {e}"
+        rospy.logerr(f"❌ {error_msg}")
+        return False, [0.0] * 6, error_msg
+    except rospy.ServiceException as e:
+        error_msg = f"服务调用失败: {e}"
+        rospy.logerr(f"❌ {error_msg}")
+        return False, [0.0] * 6, error_msg
+    except Exception as e:
+        error_msg = f"未知错误: {e}"
+        rospy.logerr(f"❌ {error_msg}")
+        return False, [0.0] * 6, error_msg

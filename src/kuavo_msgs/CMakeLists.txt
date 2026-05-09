@@ -252,6 +252,12 @@ add_service_files(
 
   # Lb offline Traj
   lbMultiTimedOfflineTraj.srv
+
+  # Lb accsessibility judge
+  accessIkSolve.srv
+
+  # Lb eePose reach error
+  eePoseReachError.srv
 )
 
 ## Generate actions in the 'action' folder

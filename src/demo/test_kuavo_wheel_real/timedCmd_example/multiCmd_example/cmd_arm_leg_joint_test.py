@@ -70,9 +70,14 @@ def execute_leg_tests():
                 'cmd_vec': leg_angles_rad
             },
             {
-                'planner_index': 6,  # 双臂规划器索引
+                'planner_index': 8,  # 左臂规划器索引
                 'desire_time': desire_time,
-                'cmd_vec': arm_angles_rad
+                'cmd_vec': arm_angles_rad[:7]
+            },
+            {
+                'planner_index': 9,  # 右臂规划器索引
+                'desire_time': desire_time,
+                'cmd_vec': arm_angles_rad[7:14]
             }
         ]
         
