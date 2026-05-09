@@ -791,6 +791,19 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   bool leftGripRisingEdge = currentLeftGripPressed && !lastLeftGripPressed_;
   bool rightGripRisingEdge = currentRightGripPressed && !lastRightGripPressed_;
 
+  // 双扳机同时松开的下降沿：捕获当前 lb 关节命令快照
+  // 目的：胸部增量模式激活时，松开扳机后仅允许 waist_yaw（关节4）跟随 VR 旋转，
+  //       冻结 knee/leg/waist_pitch（关节1~3），避免 IK 优化目标切换引起手臂漂移上升
+  const bool bothGripsJustReleased = (lastLeftGripPressed_ || lastRightGripPressed_) &&
+                                     !currentLeftGripPressed && !currentRightGripPressed;
+  if (bothGripsJustReleased && chestIncrementalUpdateEnabled_) {
+    std::lock_guard<std::mutex> lock(ikResultMutex_);
+    if (ikLowerBodyJointCommand_.size() == 4) {
+      frozenLbJointCommand_ = ikLowerBodyJointCommand_;
+      hasLbJointCommandFrozen_ = true;
+    }
+  }
+
   // 更新上一帧的 grip 状态（必须在使用完之后更新）
   lastLeftGripPressed_ = currentLeftGripPressed;
   lastRightGripPressed_ = currentRightGripPressed;

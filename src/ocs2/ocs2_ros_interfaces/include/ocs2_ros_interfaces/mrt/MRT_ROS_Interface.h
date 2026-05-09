@@ -111,6 +111,8 @@ class MRT_ROS_Interface : public MRT_BASE {
 
   void setCurrentObservation(const SystemObservation& currentObservation) override;
 
+  void setCurrentObservation_directPub(const SystemObservation& currentObservation, const double dtDesired) override;
+
  private:
   /**
    * Callback method to receive the MPC policy as well as the mode sequence.
