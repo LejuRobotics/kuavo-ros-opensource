@@ -197,6 +197,7 @@ class H12ToJoyControllerNode:
         self.cd_press_start_time = None
         # G+H同时极值2秒复位
         self.gh_press_start_time = None
+        self.gh_triggered = False
 
         if self.is_wheel:
             rospy.set_param('/joystick_type', 'h12')
@@ -279,7 +280,7 @@ class H12ToJoyControllerNode:
         """Wheel-arm mode (G12) special channel processing."""
         channels = list(self.channels_msg)
 
-        # E/F safety switch: both must be at middle position
+        # E/F safety switch: both must be at middle position for mode switching
         e_mid = abs(channels[4] - Config.H12_AXIS_MID_VALUE) < 100
         f_mid = abs(channels[5] - Config.H12_AXIS_MID_VALUE) < 100
         safe_enabled = e_mid and f_mid
@@ -298,14 +299,12 @@ class H12ToJoyControllerNode:
             if mapping and mapping.axis_index is not None:
                 self.joy_msg.axes[mapping.axis_index] = mapping.get_current_state(channels[index])
 
-        if not safe_enabled:
-            return
+        # Safety switch: only controls LB/RB for mode switching
+        if safe_enabled:
+            self.joy_msg.buttons[G12_BUTTON_LB] = 1
+            self.joy_msg.buttons[G12_BUTTON_RB] = 1
 
-        # Safety switch enabled
-        self.joy_msg.buttons[G12_BUTTON_LB] = 1
-        self.joy_msg.buttons[G12_BUTTON_RB] = 1
-
-        # C+D long press emergency stop (channel 9->index 8, channel 10->index 9)
+        # C+D long press emergency stop - always active
         c_pressed = channels[8] == Config.H12_AXIS_RANGE_MAX
         d_pressed = channels[9] == Config.H12_AXIS_RANGE_MAX
         if c_pressed and d_pressed:
@@ -322,7 +321,7 @@ class H12ToJoyControllerNode:
             self.cd_press_start_time = None
             self.cd_emergency_triggered = False
 
-        # Button mapping (C->9, A->7, B->8, D->10)
+        # Button mapping (A/B/C/D) - always active
         wheel_button_map = {
             6: G12_BUTTON_Y,    # channel 7(A) -> buttons[3](Y)
             7: G12_BUTTON_B,    # channel 8(B) -> buttons[1](B)
@@ -334,25 +333,27 @@ class H12ToJoyControllerNode:
             if mapping and mapping.is_button:
                 self.joy_msg.buttons[btn_idx] = mapping.get_current_state(channels[ch_idx])
 
-        # G/H dial buttons
+        # G/H dial buttons - always active
         if g_at_extreme:
             self.joy_msg.buttons[G12_BUTTON_GUIDE] = 1
         if h_at_extreme:
             self.joy_msg.buttons[G12_BUTTON_M1] = 1
 
-        # G+H both at extreme for 2s -> torso reset
-        if g_at_extreme and h_at_extreme:
+        # G+H both at extreme for 2s -> torso reset - requires E/F at middle
+        if safe_enabled and g_at_extreme and h_at_extreme:
             if self.gh_press_start_time is None:
                 self.gh_press_start_time = time.time()
-                rospy.loginfo("[G12] G+H torso reset: holding, waiting 2.0s...")
-            elif time.time() - self.gh_press_start_time >= 2.0:
+                self.gh_triggered = False
+            elif time.time() - self.gh_press_start_time >= 2.0 and not self.gh_triggered:
                 self.joy_msg.buttons[G12_BUTTON_M2] = 1
+                self.gh_triggered = True
                 rospy.logwarn("[G12] G+H torso reset TRIGGERED!")
         else:
             if self.gh_press_start_time is not None:
                 rospy.loginfo("[G12] G+H torso reset: released, %.1fs elapsed (not triggered)",
                               time.time() - self.gh_press_start_time)
             self.gh_press_start_time = None
+            self.gh_triggered = False
 
 class H12PROControllerNode:
     """Main controller node for H12PRO remote controller."""
@@ -655,17 +656,17 @@ class H12PROControllerNode:
 
     def _channel_callback(self, msg: h12proRemoteControllerChannel) -> None:
         """Process incoming channel messages.
-        
+
         Args:
             msg: Channel message containing control data.
         """
-        if self.start_way == "manual":
-            return
-        
         if msg.sbus_state == 0:
-            rospy.logwarn("No receive h12pro channel message. Please check device `/dev/usb_remote` exist or not and re-plug the h12pro signal receiver.")
+            rospy.logwarn_throttle(5.0, "No receive h12pro channel message. Please check device `/dev/usb_remote` exist or not and re-plug the h12pro signal receiver.")
             return
-        
+
+        # Always update channels for joy publishing (wheel mode needs all 12 channels)
+        self.h12_to_joy_node.update_channels_msg(msg)
+
         try:
             key_combination = self._process_channels(msg.channels)
             self._handle_state_transitions(key_combination, msg)

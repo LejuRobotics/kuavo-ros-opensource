@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.0.2)
 project(motion_capture_ik)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
+# 可重现构建：固定调试信息中的时间戳，使 .so 内容仅取决于源码内容而非文件 mtime
+set(ENV{SOURCE_DATE_EPOCH} "0")
 find_package(drake CONFIG REQUIRED)
 find_package(Eigen3 REQUIRED)
 
