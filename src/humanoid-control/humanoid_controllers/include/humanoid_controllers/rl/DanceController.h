@@ -4,6 +4,7 @@
 #include <openvino/openvino.hpp>
 #include <memory>
 #include "kuavo_solver/ankle_solver.h"
+#include "kuavo_msgs/DanceTrajectoryState.h"
 #include <Eigen/Dense>
 #include <std_srvs/Trigger.h>
 #include <std_srvs/SetBool.h>
@@ -287,6 +288,17 @@ namespace humanoid_controller
     bool restartDanceCallback(std_srvs::Trigger::Request& req,
                               std_srvs::Trigger::Response& res);
 
+    /**
+     * @brief 发布舞蹈轨迹播放状态
+     */
+    void publishDanceTrajectoryState(const ros::Time& stamp,
+                                     const std::string& state);
+
+    /**
+     * @brief 重置本轮状态发布缓存
+     */
+    void resetDanceTrajectoryStatePublishCache();
+
     // ===== 控制参数 =====
     double dt_{0.002};                    // 控制周期（从/wbc_frequency获取）
     double actionScale_{0.25};             // 动作缩放因子
@@ -323,9 +335,14 @@ namespace humanoid_controller
     bool is_roban_{false};
     bool first_run_ = true;
     double my_yaw_offset_{0.0};              // Yaw角度偏移（与FallStandController一致）
+    uint32_t dance_run_id_{0};               // 每次resume/restart自增，用于外部区分舞蹈轮次
+    bool dance_started_published_{false};    // 本轮是否已发布started状态
+    std::string last_published_dance_state_; // 上一次发布的状态
+    int last_published_dance_step_{-1};      // 上一次发布的轨迹步
     
     // ===== ROS服务 =====
     ros::ServiceServer restart_dance_srv_;  // 重新开始舞蹈服务
+    ros::Publisher dance_trajectory_state_pub_;  // 舞蹈轨迹状态发布器
   };
 
 } // namespace humanoid_controller
