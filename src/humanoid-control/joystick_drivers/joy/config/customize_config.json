@@ -109,24 +109,15 @@
   },
   "customize_action_LT_A": {
     "type": "dance",
-    "dance_name": "dance_balei",
-    "music_name": [
-      "dance_balei.wav"
-    ]
+    "dance_name": "dance_balei"
   },
   "customize_action_LT_B": {
     "type": "dance",
-    "dance_name": "dance_xinjiang",
-    "music_name": [
-      "dance_xinjiang.wav"
-    ]
+    "dance_name": "dance_xinjiang"
   },
   "customize_action_LT_X": {
     "type": "dance",
-    "dance_name": "dance_aiqingniao",
-    "music_name": [
-      "dance_aiqingniao.wav"
-    ]
+    "dance_name": "dance_aiqingniao"
   },
   "customize_action_LT_Y": {
     "type": "action",
