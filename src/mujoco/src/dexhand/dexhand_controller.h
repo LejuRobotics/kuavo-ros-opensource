@@ -13,7 +13,7 @@
 #include <array>
 
 #include "dexhand_def.h"
-#include "mujoco_dexhand.hpp"
+#include "mujoco_hand_base.hpp"
 #include "kuavo_msgs/gestureInfo.h"
 
 namespace eef_controller {
@@ -30,7 +30,7 @@ public:
 
     ~DexhandController();
 
-    bool init(MujocoDexHandPtr l_dexhand, MujocoDexHandPtr r_dexhand);
+    bool init(MujocoHandBasePtr l_dexhand, MujocoHandBasePtr r_dexhand);
     bool close();
     
     /**
@@ -111,8 +111,8 @@ private:
     bool sleep_for_100ms(int ms_count);
 
 private:
-    MujocoDexHandPtr left_dexhand_ = nullptr;
-    MujocoDexHandPtr right_dexhand_ = nullptr;
+    MujocoHandBasePtr left_dexhand_ = nullptr;
+    MujocoHandBasePtr right_dexhand_ = nullptr;
     std::string gesture_file_path_;                                 /* gesture config file */
     std::unordered_map<std::string, GestureInfoPtr> gesture_map_;   /* gesture info map */
 

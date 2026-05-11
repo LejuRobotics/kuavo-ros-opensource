@@ -2,7 +2,7 @@
 
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include "humanoid_controllers/rl/vmp/vmp_types.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 
 #include "kuavo_msgs/GetStringList.h"
 #include "kuavo_msgs/SetString.h"
@@ -61,10 +61,11 @@ namespace humanoid_controller
     void resume() override;
 
     /**
-     * @brief 检查控制器是否准备好退出
-     * @return 如果控制器已完成任务并准备好退出，返回true
+     * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致）
+     * 当前实现调用基类默认，恒为 false，不主动请求由上层自动退出；若需运动结束自动切出，可在此扩展条件。
+     * @return 恒为 false
      */
-    bool isReadyToExit() const override;
+    bool requestToExit() const override;
 
   protected:
     /**
@@ -250,7 +251,7 @@ namespace humanoid_controller
     //==========================================================================
     bool is_real_{false};                           ///< 是否为真实机器人
     bool withArm_{true};                            ///< 是否包含手臂控制
-    AnkleSolver ankleSolver_;                       ///< 脚踝解算器
+    kuavo_solver::AnkleSolver ankleSolver_;         ///< 脚踝解算器
 
     //==========================================================================
     // 观测相关参数
@@ -330,14 +331,6 @@ namespace humanoid_controller
     ros::ServiceServer srv_stop_trajectory_;        ///< 停止轨迹服务
     ros::Publisher pub_trajectory_state_;           ///< 轨迹状态发布者
     ros::Timer trajectory_state_timer_;             ///< 轨迹状态发布定时器 (50Hz)
-    ros::ServiceClient srv_change_motor_param_;     ///< 切换电机参数服务客户端
-
-    /**
-     * @brief 切换 Ruiwo 电机参数
-     * @param param_name 参数名称 (如 "vmp_yongchun_kpkd" 或 "normal_kpkd")
-     * @return 是否切换成功
-     */
-    bool changeRuiwoMotorParam(const std::string& param_name);
 
     /**
      * @brief 轨迹播放状态枚举

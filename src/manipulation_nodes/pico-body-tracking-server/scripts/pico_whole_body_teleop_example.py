@@ -55,7 +55,9 @@ def parse_args():
                       help='Maximum step length in x direction (default: 0.3)')
     parser.add_argument('--max_step_length_y', type=float, default=0.15,
                       help='Maximum step length in y direction (default: 0.15)')
-    return parser.parse_args()
+    # roslaunch 会注入 __name/__log 等参数，这里忽略未知参数以兼容 ROS 启动方式
+    args, _ = parser.parse_known_args()
+    return args
 
 def print_status(pico: KuavoRobotPico):
     """Print current Pico status information."""

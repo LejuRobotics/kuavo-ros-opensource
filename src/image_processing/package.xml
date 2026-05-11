@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>image_processing</name>
+  <version>0.1.0</version>
+  <description>
+    ROS package for depth image inpainting using OpenCV.
+    Provides nodes to inpaint missing depth values in depth images.
+  </description>
+
+  <maintainer email="your-email@example.com">Your Name</maintainer>
+  <license>BSD</license>
+  <author email="your-email@example.com">Your Name</author>
+
+
+  <buildtool_depend>catkin</buildtool_depend>
+  
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>message_generation</depend>
+  <depend>message_runtime</depend>
+  <depend>dynamic_reconfigure</depend>
+
+</package>

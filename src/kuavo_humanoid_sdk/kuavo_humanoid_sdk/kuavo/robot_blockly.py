@@ -118,7 +118,7 @@ def verify_robot_version(file_path: str):
     version_compat_map = {
         41: [41],
         42: [42],
-        45: [43, 45, 46, 48, 49],
+        45: [43, 45, 46, 48, 49, 100045, 100049, 200049, 300049, 400049],
         11: [11, 13, 14],
         13: [11, 13, 14],
         14: [11, 13, 14]
@@ -1226,14 +1226,21 @@ class RobotControlBlockly:
         except Exception as e:
             print(f"Robot waist control failed: {str(e)}")
 
-    def alignment_target(self, class_name: str, confidence: float = 0.5, x: float = 0.0, y: float = 0.0, z: float = 0.0):
+    def alignment_target(self, class_name: str, confidence: float = 0.5, x: float = 0.0, y: float = 0.0, z: float = 0.0, model_path: str = None):
         """
-        使机器人对准指定类别到对象，并移动到目标前
-        :param class_name: yolo 检测中需要检测的对象名称，和训练模型中的类别名称一致
-        :param confidence: yolo 检测置信度，默认 0.5
-        :param x: 图像 x 方向的偏移值，物体中心的 x 小于该参数 -x 时，机器人左移，大于该参数 x 时，机器人右移
-        :param y: 图像 y 方向的偏移值，物体中心的 y 小于该参数 y 时，机器人前进，否则停止移动
-        :param z: 机器人上下蹲的高度控制
+        使机器人对准指定类别的目标对象，并根据图像中的目标位置进行移动对准。
+
+        使用头部相机和 YOLO 模型检测指定类别的目标，在多个目标时选择面积最大的一个，
+        根据目标相对图像中心的偏移量控制机器人左右/前后移动，使目标进入设定范围。
+
+        :param class_name: YOLO 检测的目标类别名称，需与训练模型中的类别名称一致
+        :param confidence: YOLO 检测置信度阈值，范围 [0, 1]，默认 0.5
+        :param x: 图像 x 方向允许的偏移范围（像素）。目标中心 x 小于 (图像中心 - x) 时机器人左移，
+                  大于 (图像中心 + x) 时机器人右移，在此范围内则不左右移动
+        :param y: 图像 y 方向偏移阈值（像素）。目标中心 y 小于该值时机器人前进，否则停止前后移动
+        :param z: 机器人上下蹲的高度控制参数，用于在对准过程中调整机身高度
+        :param model_path: YOLO 模型文件路径（如 .pt）。若为 None，则优先使用调用方所在目录下的 best.pt，
+                           若无法解析调用方则使用包内 upload_files/best.pt
         """
         try:
             # 加载 yolo 模型
@@ -1241,19 +1248,28 @@ class RobotControlBlockly:
             model = model_utils.model
             is_yolo_init = model_utils.is_yolo_init
 
-            if  not is_yolo_init:
+
+            if  not is_yolo_init or yolo_detection is None or model is None:
                 yolo_detection = YOLO_detection()
                 yolo_detection.init_ros_node()
-                caller_file_path = self.package_path + "/upload_files/"
-                print(f"caller_file_path: {caller_file_path}")
-                model_path = os.path.join(os.path.dirname(caller_file_path), 'best.pt')
-                # print(f"函数被文件调用: {model_path}")
+                if model_path is None:
+                    caller_file_path = None
+                    frame = inspect.currentframe()
+                    if frame and frame.f_back:
+                        caller_globals = frame.f_back.f_globals
+                        caller_file = caller_globals.get('__file__', '')
+                        if caller_file and not caller_file.startswith('<'):
+                            caller_file_path = os.path.dirname(os.path.abspath(caller_file))
+                    if not caller_file_path:
+                        caller_file_path = self.package_path + "/upload_files/"
+                    model_path = os.path.join(caller_file_path, 'best.pt')
+
+                # print(f"model_path: {model_path}")
                 model = yolo_detection.load_model(model_path)
                 result = yolo_detection.camera_interface.get_camera_image("head")
                 if result is None:
                     print("No head camera image...")
                     return
-            yolo_detection.set_conf( confidence)
 
             IMAGE_CENTER_X = yolo_detection.camera_interface.cv_image_shape[1] / 2.0
             IMAGE_CENTER_Y = yolo_detection.camera_interface.cv_image_shape[0] / 2.0
@@ -1264,7 +1280,7 @@ class RobotControlBlockly:
 
             while not rospy.is_shutdown():
 
-                results = yolo_detection.get_detections("head", model)
+                results = yolo_detection.get_detections("head", model, confidence=confidence)
                 if not results:
                     continue
 

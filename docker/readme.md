@@ -13,6 +13,7 @@
 ./build.sh
 ```
 
+
 #### 2. (或者)下载容器镜像
 - 从[这里](https://kuavo.lejurobot.com/kuavo_research_editiion/docker_images/kuavo_opensource_mpc_wbc_img_v1.3.0.tar.gz)下载容器镜像
 - 导入镜像：

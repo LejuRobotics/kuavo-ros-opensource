@@ -11,6 +11,9 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/thread/mutex.hpp>
 
+#include <deque>
+#include <vector>
+
 namespace async_web_server_cpp
 {
 
@@ -66,11 +69,23 @@ public:
     void write(const std::vector<boost::asio::const_buffer>& buffer,
                ResourcePtr resource);
 
+    void write_replaceable(const std::vector<boost::asio::const_buffer>& buffer,
+                           ResourcePtr resource);
+
 private:
+    struct PendingWrite {
+        std::vector<boost::asio::const_buffer> buffers;
+        std::vector<ResourcePtr> resources;
+        bool replaceable = false;
+    };
+
     void handle_read(const char* begin, const char* end);
     void handle_read_raw(ReadHandler callback,
                          const boost::system::error_code& e,
                          std::size_t bytes_transferred);
+    void enqueue_write(std::vector<boost::asio::const_buffer> buffers,
+                       std::vector<ResourcePtr> resources,
+                       bool replaceable);
 
     // Must be called while holding write lock
     void write_pending();
@@ -87,8 +102,7 @@ private:
 
     boost::mutex write_mutex_;
     bool write_in_progress_;
-    std::vector<boost::asio::const_buffer> pending_write_buffers_;
-    std::vector<ResourcePtr> pending_write_resources_;
+    std::deque<PendingWrite> pending_writes_;
     boost::system::error_code last_error_;
     ReadHandler read_handler_;
 };

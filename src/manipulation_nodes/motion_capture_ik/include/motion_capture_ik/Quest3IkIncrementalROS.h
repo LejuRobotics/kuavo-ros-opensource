@@ -15,6 +15,7 @@
 #include "motion_capture_ik/IncrementalControlModule.h"
 #include "motion_capture_ik/HandSmoother.h"
 #include "DrakeElbowHandPointOpt.hpp"
+#include <std_msgs/Float64MultiArray.h>
 
 namespace HighlyDynamic {
 
@@ -57,9 +58,11 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void activateController() override;
   void deactivateController() override;
 
+  void armCtrlModeCallback(const std_msgs::Float64MultiArray::ConstPtr& msg);
   void armModeCallback(const std_msgs::Int32::ConstPtr& msg) override;
   std::atomic<int> armControlMode_ = 0;
   std::atomic<int> lastArmControlMode_ = 0;
+  int arm_ctrl_mode_;
 
   // 超时机制相关
   ros::Time mode2EnterTime_;                              // 记录进入 mode 2 的时间戳
@@ -84,6 +87,8 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
   void updateSensorArmJointMeanFromSensorData();
+
+  ros::Subscriber arm_ctrl_mode_vr_sub_;
 
   // FK 辅助函数：计算左手末端执行器姿态
   void computeLeftEndEffectorFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut);

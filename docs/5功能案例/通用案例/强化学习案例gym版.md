@@ -113,11 +113,13 @@ sudo su
 export ROBOT_VERSION=42
 source devel/setup.bash
 # 仿真
-roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim # 启动rl控制器、wbc、仿真器。
+roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim # 启动rl控制器、wbc、仿真器（默认 sim_input_mode:=keyboard）。
+# 如需 GUI 虚拟手柄输入，请显式指定：
+# roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim sim_input_mode:=gui
 # 实物
 roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 # 可以选择cali:=true和cali_arm:=true进行校准启动，但校准启动不会自动缩腿，需要把F键拨到最左边两次，第一次是执行缩腿，第二次是执行站立 。
 ```
-> 注意：仿真和实物选择一个启动即可。也可通过键盘控制，joystick_type参数指定为sim即可，终端有按键功能提示。
+> 注意：仿真和实物选择一个启动即可。`joystick_type:=sim` 默认使用键盘输入（`sim_input_mode:=keyboard`），GUI 模式需显式传 `sim_input_mode:=gui`。
 
 ### 电机控制话题说明
 

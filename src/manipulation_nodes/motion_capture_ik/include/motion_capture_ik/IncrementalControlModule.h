@@ -211,6 +211,8 @@ struct IncrementalControlConfig {
   double fhanR = 900.0;                                         // FHAN跟踪微分器加速度约束参数
   double fhanKh0 = 6.0;                                         // FHAN跟踪微分器平滑系数
   Eigen::Vector3d deltaScale = Eigen::Vector3d(1.0, 1.0, 1.0);  // VR增量缩放参数（x, y, z三轴独立）
+  /// 增量遥控下映射到 /cmd_vel 的 VR 摇杆行程缩放；JSON/参数未配置时为 1.0（不缩放）
+  double chassisJoyCmdTravelScale = 1.0;
   double maxPosDiff = 0.45;                                     // 最大位置差异阈值
   double armMoveThreshold = 0.01;                               // 手臂移动检测阈值
   double publishRate = 100.0;                                   // 发布频率

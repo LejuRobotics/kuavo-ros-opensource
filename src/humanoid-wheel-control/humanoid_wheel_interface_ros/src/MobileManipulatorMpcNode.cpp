@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
   std::cerr << "Loading library folder: " << libFolder << std::endl;
   std::cerr << "Loading urdf file: " << urdfFile << std::endl;
   // Robot interface
-  HumanoidWheelInterface interface(taskFile, libFolder, urdfFile);
+  HumanoidWheelInterface interface(taskFile, libFolder, urdfFile, true);
 
   // ROS ReferenceManager
   auto rosReferenceManagerPtr = std::make_shared<ocs2::RosReferenceManager>(robotName, interface.getReferenceManagerPtr());

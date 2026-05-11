@@ -50,6 +50,7 @@ find_package(catkin REQUIRED
         nav_msgs
         kuavo_msgs
         kuavo_assets
+        kuavo_common
         )
 
 # find_package(PkgConfig REQUIRED)
@@ -58,6 +59,10 @@ find_package(catkin REQUIRED
 find_package(Threads REQUIRED)
 find_library(MUJOCO_LIB mujoco HINTS ${PROJECT_SOURCE_DIR}/lib)
 find_package(glfw3 REQUIRED)
+
+find_package(Eigen3 REQUIRED)
+find_package(OpenCV REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # DDS dependencies (conditional)
 if(USE_DDS OR USE_LEJU_DDS)
@@ -200,6 +205,7 @@ catkin_package(
                 roscpp
                 realtime_tools
                 lcm_msg
+                kuavo_common
 )
 ###########
 ## Build ##
@@ -210,10 +216,16 @@ catkin_package(
 include_directories(
         include
         include/simulate
+        ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_node/include
         ${catkin_INCLUDE_DIRS}
         ${glfw3_INCLUDE_DIRS}
         ${LCM_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
 )
+
+set(ray_caster_path ${CMAKE_CURRENT_SOURCE_DIR}/utils/cpp_ray_caster)
+include_directories(${ray_caster_path})
+file(GLOB ray_caster ${ray_caster_path}/*.cpp)
 
 # Add DDS include directories
 if(USE_DDS OR USE_LEJU_DDS)
@@ -257,7 +269,7 @@ add_library(${PROJECT_NAME} SHARED
     ${DEXHAND_SOURCES}
     src/joint_address.hpp
     src/dexhand_mujoco_node.cpp
-    ${SIMULATE_SRCS} ${LCM_SRCS}
+    ${SIMULATE_SRCS} ${LCM_SRCS} ${ray_caster}
 )
 
 # Conditionally add DDS sources
@@ -276,6 +288,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     glfw
     ${glfw3_LIBRARIES}
     ${LCM_LIBRARIES}
+    Eigen3::Eigen 
+    ${OpenCV_LIBRARIES}
+    yaml-cpp
 )
 
 # Add DDS libraries when enabled
@@ -339,10 +354,9 @@ install(TARGETS nodelet_mujoco
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-# catkin_install_python(PROGRAMS
-#   scripts/my_python_script
-#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+catkin_install_python(PROGRAMS
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html

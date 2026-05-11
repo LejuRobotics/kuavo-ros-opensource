@@ -1,0 +1,49 @@
+# Kuavo 右手腕相机 棋盘采集 + 链配置（Capture）
+#
+# 2D 角点方案：在 color image_raw 上检测角点，结合 camera_info 做 PnP，
+# 生成 camera 侧角点 3D（相机坐标系）与 board 侧角点 3D（棋盘坐标系）。
+
+features:
+  right_wrist_checkerboard:
+    type: robot_calibration/CheckerboardFinder2d
+
+    # 图像话题（与当前在线话题一致）
+    topic: /right_wrist_camera/color/image_raw
+    camera_info_topic: /right_wrist_camera/color/camera_info
+
+    # 相机驱动参数（若驱动不提供 z_offset/z_scaling，可忽略；Finder 会做容错日志）
+    camera_driver: /right_wrist_camera/driver
+
+    # 棋盘坐标系（需与 URDF 里链模型 tip 一致）
+    frame_id: checkerboard_link
+
+    # 图像 header.frame_id（需与实际一致）
+    camera_frame: right_wrist_camera_color_optical_frame
+
+    # 传感器模型名称（用于 CSV/优化步骤匹配）
+    camera_sensor_name: right_wrist_camera_to_base
+    chain_sensor_name: tag_to_base
+
+    # 棋盘参数（按需改）
+    points_x: 11
+    points_y: 8
+    size: 0.03
+    origin_at_center: false
+    board_offset_x: 0.0
+    board_offset_y: 0.0
+    board_offset_z: 0.0
+
+chains:
+  # 相机链：从 base 到右手腕相机光学坐标系
+  # 这里先给出右臂 7 关节；相机固定关节在 URDF 中定义（建议挂在 zarm_r7_end_effector 上）。
+  - name: right_wrist_camera_to_base_chain
+    planning_group: ""
+    joints:
+      - zarm_r1_joint
+      - zarm_r2_joint
+      - zarm_r3_joint
+      - zarm_r4_joint
+      - zarm_r5_joint
+      - zarm_r6_joint
+      - zarm_r7_joint
+

@@ -316,11 +316,28 @@ roslaunch humanoid_controllers load_kuavo_real_half_up_body.launch
 
    # 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 use_cpp_ik:=true use_incremental_ik:=true
+
+   # 启用轮臂ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 wheel_ik:=true
   ```
   > 如果希望同时映射躯干的运动（上下蹲和弯腰），可以增加选项`control_torso:=1`，使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度。
 
   > 默认控制双手，如果需要控制单手，可以增加选项`ctrl_arm_idx:=0`, 其中0，1，2分别对应左手，右手，双手
-- 全程使用VR的手柄控制即可
+
+- 同时启动VR节点和机器人
+  - 运行
+
+  ```bash
+  sudo su
+  source devel/setup.bash
+  # 启用双足机器人VR控制
+  roslaunch humanoid_controllers load_kuavo_real_with_vr.launch
+  
+  # 启用轮臂机器人VR控制
+  roslaunch humanoid_controllers load_kuavo_real_wheel.launch
+  ```
+
+- 全程使用VR的手柄控制即可(以下皆为**双足**机器人VR控制操作说明)
   - 启动时按A键站立(从启动等待开始状态站立，相当于kuavo中的按o)；
   - 停止机器人，同时按下左侧XY两个键，停止机器人
   - 自动模式下，推摇杆即走，松摇杆自动立即停止
@@ -349,10 +366,10 @@ roslaunch humanoid_controllers load_kuavo_real_half_up_body.launch
  - 如没有手柄或者VR等，可以使用键盘控制节点进行控制, 如运行仿真器并且使用键盘控制节点
  
  ```bash
- source devel/setup.bash   
- roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim 
+ source devel/setup.bash
+ roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim
  ```
- - 运行后将会启动仿真，并且在另外一个终端窗口打开键盘控制窗口，按键控制机器人运动，具体按键如下：
+- 运行后将会启动仿真，并且在另外一个终端窗口打开键盘控制窗口（默认 `sim_input_mode:=keyboard`），按键控制机器人运动，具体按键如下：
 ```
 WASD: Left stick, control forward/backward, left/right
 IKJL/QE: Right stick, up/down, turn left/right
@@ -361,7 +378,12 @@ B: BUTTON_BACK, O/F: BUTTON_START
 <space>: Reset all axes to zero
 Press Ctrl-C to exit
 ```
-- 键盘控制节点也单独可以手动开启，可以运行多个
+- 如需显式使用 GUI 虚拟手柄，可在启动时指定：
+```bash
+source devel/setup.bash
+roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim sim_input_mode:=gui
+```
+- 顶层 launch 已自动拉起输入节点，默认场景不要再额外手动 `rosrun`。仅在单独调试输入节点时使用：
 ```bash
 source devel/setup.bash
 rosrun humanoid_interface_ros joystickSimulator.py 
@@ -396,5 +418,4 @@ You can run the docker container with the following command:
 ./docker/run.sh
 ```
 > This script will automatically find the exisiting container and restart it, or create a new container if it does not exist, and run the container with the correct parameters. 
-
 

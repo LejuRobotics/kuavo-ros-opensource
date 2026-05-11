@@ -20,6 +20,7 @@
   <!-- 楼梯参数（用于传递给load_stairs.launch） -->
   <!-- 第一段楼梯（上楼梯）参数 -->
   <arg name="use_stairs" default="false" doc="是否添加楼梯到场景中"/>
+  <arg name="use_slope" default="false" doc="是否添加斜坡到场景中"/>
   <arg name="stairs_model_path" default="$(find gazebo_sim)/models/stairs/stairs_generated.sdf" doc="楼梯模型SDF文件路径"/>
   <arg name="stairs_x" default="1.5" doc="楼梯位置X坐标"/>
   <arg name="stairs_y" default="0.0" doc="楼梯位置Y坐标"/>
@@ -55,6 +56,12 @@
     <include file="$(find gazebo_sim)/launch/load_slope_roban.launch">
     </include>
     </group>
+  </group>
+
+    <group if="$(arg use_slope)">
+      <!-- 加载斜坡模型 -->
+      <include file="$(find gazebo_sim)/launch/load_slope_roban.launch">
+    </include>
   </group>
 
   <!-- Load URDF or XACRO file based on model version -->

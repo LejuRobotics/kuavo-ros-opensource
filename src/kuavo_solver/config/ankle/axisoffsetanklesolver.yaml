@@ -1,0 +1,180 @@
+version: 1
+variants:
+  5gen_2:
+    ankle_pitch_limits:
+    - -0.872664625997165
+    - 0.349065850398866
+    ankle_roll_limits:
+    - -0.261799387799149
+    - 0.261799387799149
+    knee_linkage_enabled: true
+    z_bar_knee: -0.169
+    l_tendon: 0.16918805677712595
+    l_bar_td: 0.03500001265742629
+    l_knee_eq: 0.03500285274088385
+    q_offset_knee: 0.26181698840065826
+    q_offset_bar: 0.3738812519350086
+    derive_bar_lengths: true
+    z_pitch: -0.439
+    z_roll: -0.023
+    x_pitch: 0.000
+    x_lleq: 0.0362
+    y_lleq: 0.026
+    z_lleq: 0.007
+    x_lreq: 0.0362
+    y_lreq: -0.026
+    z_lreq: 0.007
+    x_llbar: 0.0535
+    z_llbar: -0.1883
+    x_lrbar: 0.0535
+    z_lrbar: -0.0983
+    x_lltd: 0.0
+    y_lltd: 0.033649
+    z_lltd: -0.0092618
+    x_lrtd: 0.0
+    y_lrtd: -0.033392
+    z_lrtd: -0.010146
+    l0_ll_eqtd: 0.235200057
+    l0_lr_eqtd: 0.324100482
+    x_rleq: 0.0362
+    y_rleq: 0.026
+    z_rleq: 0.007
+    x_rreq: 0.0362
+    y_rreq: -0.026
+    z_rreq: 0.007
+    x_rlbar: 0.0535
+    z_rlbar: -0.0983
+    x_rrbar: 0.0535
+    z_rrbar: -0.1883
+    x_rltd: 0.0
+    y_rltd: 0.033392
+    z_rltd: -0.010146
+    x_rrtd: 0.0
+    y_rrtd: -0.033649
+    z_rrtd: -0.0092618
+    l0_rl_eqtd: 0.324100482
+    l0_rr_eqtd: 0.235200057
+    default_tolerance: 1.0e-08
+    max_iterations: 10
+  s2gen_2:
+    ankle_pitch_limits:
+    - -0.872664625997165
+    - 0.523598775598299
+    ankle_roll_limits:
+    - -0.261799387799149
+    - 0.261799387799149
+    knee_linkage_enabled: false
+    derive_bar_lengths: false
+    z_pitch: -0.294
+    z_roll: -0.018
+    x_pitch: 0.03
+    x_lleq: 0.02780675
+    y_lleq: 0.0207
+    z_lleq: 0.00367032
+    x_lreq: 0.02780675
+    y_lreq: -0.0186
+    z_lreq: 0.00367032
+    x_llbar: 0.047123
+    z_llbar: -0.1595
+    x_lrbar: 0.05117
+    z_lrbar: -0.10163
+    x_lltd: 0.014
+    y_lltd: 0.023428
+    z_lltd: -0.0039472
+    x_lrtd: 0.014
+    y_lrtd: -0.023357
+    z_lrtd: -0.0044851
+    l0_ll_eqtd: 0.12695512289393013
+    l0_lr_eqtd: 0.18442304081686461
+    l_llbar: 0.0237581895741237
+    l_lrbar: 0.02378372491873382
+    x_rleq: 0.02780675
+    y_rleq: 0.0186
+    z_rleq: 0.00367032
+    x_rreq: 0.02780675
+    y_rreq: -0.0207
+    z_rreq: 0.00367032
+    x_rlbar: 0.05117
+    z_rlbar: -0.10163
+    x_rrbar: 0.047123
+    z_rrbar: -0.1595
+    x_rltd: 0.014
+    y_rltd: 0.023357
+    z_rltd: -0.0044851
+    x_rrtd: 0.014
+    y_rrtd: -0.023428
+    z_rrtd: -0.0039472
+    l0_rl_eqtd: 0.18442304081686461
+    l0_rr_eqtd: 0.12695512289393013
+    l_rlbar: 0.02378372491873382
+    l_rrbar: 0.0237581895741237
+    default_tolerance: 1.0e-08
+    max_iterations: 10
+  7gen:
+    ankle_pitch_limits:
+    - -0.872664625997165
+    - 0.349065850398866
+    ankle_roll_limits:
+    - -0.261799387799149
+    - 0.261799387799149
+    knee_linkage_enabled: true
+    # === 膝盖 4-bar 几何（2026-04 校准：与 biped_ankles_7gen/mjcf/biped_knees.xml 严格一致）===
+    # 机架：把 l_knee_bar 轴放 W 原点（xz 平面），l_knee 轴在 W 下的位置 = (x_bar_knee, z_bar_knee)。
+    #   x_bar_knee = l_knee.pos.x - l_knee_bar.pos.x = -0.03 - 0 = -0.03
+    #   z_bar_knee = l_knee.pos.z - l_knee_bar.pos.z = -0.498454 - (-0.357954) = -0.1405
+    x_bar_knee: -0.03
+    z_bar_knee: -0.1405
+    # l_tendon = |tendon_site - tendon_hinge| in tendon body = √(0.00183425² + 0.14168803²)
+    l_tendon: 0.14170027184066055
+    # l_bar_td = |tendon_hinge - l_knee_bar axis| = √(0.013781² + 0.038083²)
+    l_bar_td: 0.04049980759181829
+    # l_knee_eq = |eq anchor - l_knee axis| = √(0.01438475² + 0.03689497²)
+    l_knee_eq: 0.039600042434343826
+    # q_offset_knee = atan2(eq_anchor.x, eq_anchor.z) in l_knee frame = atan2(0.01438475, 0.03689497)
+    q_offset_knee: 0.37189665932957366
+    # q_offset_bar = atan2(|tendon_hinge.x|, tendon_hinge.z) in l_knee_bar frame = atan2(0.013781, 0.038083)
+    q_offset_bar: 0.3471638926867104
+    derive_bar_lengths: true
+    z_pitch: -0.45
+    z_roll: -0.023
+    x_pitch: 0.03
+    x_lleq: 0.0362
+    y_lleq: 0.026
+    z_lleq: 0.007
+    x_lreq: 0.0362
+    y_lreq: -0.026
+    z_lreq: 0.007
+    # 与 biped_ankles_7gen：l_l_bar 深 -0.1993 / l_r_bar 浅 -0.1093；lleq 行必须对应 l_l 链，lreq 行对应 l_r 链（此前 z/td/l0 与 MJ 对调会导致仅左脚验证失败）
+    x_llbar: 0.0835
+    z_llbar: -0.1993
+    x_lrbar: 0.0835
+    z_lrbar: -0.1093
+    x_lltd: 0.0
+    # 以右腿为基准镜像：ll↔rr（深链），lr↔rl（浅链）
+    y_lltd: 0.033392
+    z_lltd: -0.010146
+    x_lrtd: 0.0
+    y_lrtd: -0.033649
+    z_lrtd: -0.0092618
+    l0_ll_eqtd: 0.23431048329086776
+    l0_lr_eqtd: 0.3249891426190112
+    x_rleq: 0.0362
+    y_rleq: 0.026
+    z_rleq: 0.007
+    x_rreq: 0.0362
+    y_rreq: -0.026
+    z_rreq: 0.007
+    x_rlbar: 0.0835
+    z_rlbar: -0.1093
+    x_rrbar: 0.0835
+    z_rrbar: -0.1993
+    x_rltd: 0.0
+    y_rltd: 0.033649
+    z_rltd: -0.0092618
+    x_rrtd: 0.0
+    y_rrtd: -0.033392
+    z_rrtd: -0.010146
+    l0_rl_eqtd: 0.3249891426190112
+    l0_rr_eqtd: 0.23431048329086776
+    default_tolerance: 1.0e-08
+    max_iterations: 10

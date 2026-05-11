@@ -2,5 +2,7 @@
 
 <launch>
       <param name="topic_config" value="$(find humanoid_controllers)/config/log_topics.yaml" />
+      <!-- rosbag 录制参数 (从 rosbag_params.yaml 加载) -->
+      <rosparam command="load" file="$(find humanoid_controllers)/config/rosbag_params.yaml" ns="nodelet_manager" />
       <node pkg="nodelet" type="nodelet" name="nodelet_rosbag" args="load RosbagNodelet nodelet_manager" respawn="false" output="screen" />
 </launch>

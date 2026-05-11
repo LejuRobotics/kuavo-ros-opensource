@@ -16,6 +16,26 @@ find_package(Eigen3 REQUIRED)
 if(NOT EIGEN3_FOUND)
     message(FATAL_ERROR "Eigen3 is required but not found!")
 endif()
+find_package(yaml-cpp REQUIRED)
+
+# ==============================================================================
+# Optional: Python bindings (pybind11)
+# ==============================================================================
+option(KUAVO_SOLVER_BUILD_PYTHON "Build Python bindings via pybind11" ON)
+if(KUAVO_SOLVER_BUILD_PYTHON)
+    # Try system pybind11 first; if unavailable, fall back to FetchContent.
+    find_package(pybind11 CONFIG QUIET)
+    if(NOT pybind11_FOUND)
+        include(FetchContent)
+        FetchContent_Declare(
+            pybind11
+            GIT_REPOSITORY https://github.com/pybind/pybind11.git
+            GIT_TAG v2.11.1
+        )
+        FetchContent_MakeAvailable(pybind11)
+    endif()
+endif()
+
 
 # ==============================================================================
 # Build Settings
@@ -56,11 +76,28 @@ include_directories(
 # Library Target
 # ==============================================================================
 # 创建动态链接库
-add_library(kuavo_solver SHARED src/ankle_solver.cpp)
+add_library(kuavo_solver SHARED
+  src/common/solver_tools.cpp
+  src/ankle/ankle_solver.cpp
+  src/ankle/axis_offset_ankle_solver.cpp
+  src/ankle/fixed_axis_ankle_solver.cpp
+  src/arm/arm_solver.cpp
+  src/arm/parallel_linear_arm_solver.cpp
+  src/waist/waist_solver.cpp
+  src/waist/parallel_rotate_waist_solver.cpp
+)
 
 # 链接依赖库
 target_link_libraries(kuavo_solver
   ${EIGEN3_LIBRARIES}
+  yaml-cpp
+)
+
+# AnkleSolver 内部读取的唯一 config_dir（禁用 fallback）
+target_compile_definitions(kuavo_solver PRIVATE
+  KUAVO_ANKLE_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/ankle"
+  KUAVO_ARM_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/arm"
+  KUAVO_WAIST_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/waist"
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -78,6 +115,36 @@ endif()
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
   COMMAND chmod 755 $<TARGET_FILE:${PROJECT_NAME}>
 )
+
+# ==============================================================================
+# Python module target (pybind11)
+# ==============================================================================
+if(KUAVO_SOLVER_BUILD_PYTHON)
+    # Build a Python extension module named "kuavo_solver_py"
+    pybind11_add_module(kuavo_solver_py
+        python/kuavo_solver_pybind.cpp
+    )
+
+    target_link_libraries(kuavo_solver_py PRIVATE
+        ${PROJECT_NAME}
+        ${EIGEN3_LIBRARIES}
+    )
+
+    target_include_directories(kuavo_solver_py PRIVATE
+        ${EIGEN3_INCLUDE_DIRS}
+        ${PROJECT_SOURCE_DIR}/include
+    )
+
+    target_compile_definitions(kuavo_solver_py PRIVATE
+        KUAVO_ANKLE_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/ankle"
+        KUAVO_ARM_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/arm"
+    )
+
+    # Place the built module in a convenient import location under the build dir
+    set_target_properties(kuavo_solver_py PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/python
+    )
+endif()
 
 # ==============================================================================
 # Installation

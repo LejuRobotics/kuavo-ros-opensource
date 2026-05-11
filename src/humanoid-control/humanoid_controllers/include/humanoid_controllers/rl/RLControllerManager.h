@@ -6,6 +6,9 @@
 #include "kuavo_msgs/switchController.h"
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
+#include "kuavo_msgs/ControllerSwitchEvent.h"
+#include "kuavo_msgs/GetStringList.h"
+#include "kuavo_msgs/SetString.h"
 #include "std_srvs/SetBool.h"
 #include "std_srvs/Trigger.h"
 #include <map>
@@ -15,6 +18,8 @@
 #include <mutex>
 #include <functional>
 #include <ros/ros.h>
+
+#include "humanoid_controllers/util/TopicMonitor.h"
 
 namespace humanoid_controller
 {
@@ -33,7 +38,7 @@ namespace humanoid_controller
     /**
      * @brief 析构函数
      */
-    ~RLControllerManager() = default;
+    ~RLControllerManager();
 
     /**
      * @brief 添加控制器
@@ -115,7 +120,6 @@ namespace humanoid_controller
      * @return 当前控制器名称，如果是MPC控制器则返回空字符串
      */
     std::string getCurrentControllerName();
-    
 
     /**
      * @brief 检查控制器是否存在
@@ -185,6 +189,24 @@ namespace humanoid_controller
      * @return 是否初始化成功
      */
     bool initializeRosServices(ros::NodeHandle& nh);
+    
+    /**
+     * @brief 设置是否直接切换到RL控制器（跳过MPC过渡）
+     */
+    void setDirectSwitchToRL(bool direct)
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      direct_switch_to_rl_ = direct;
+    }
+
+    /**
+     * @brief 获取当前是否直接切换到RL控制器（跳过MPC过渡）
+     */
+    bool getDirectSwitchToRL() const
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      return direct_switch_to_rl_;
+    }
 
     /**
      * @brief 更新MPC控制器的stance状态（由humanoidController调用）
@@ -198,6 +220,28 @@ namespace humanoid_controller
      * @return WALK_CONTROLLER类型的控制器名称列表
      */
     std::vector<std::string> getWalkControllerList();
+
+    /**
+     * @brief 获取已加载的舞蹈控制器名称列表（顺序与 rl_controllers.yaml 中 DANCE_CONTROLLER 项一致）
+     */
+    std::vector<std::string> getDanceControllerList();
+
+    /**
+     * @brief 按名称切换到指定舞蹈控制器（须为 getDanceControllerList() 中的名字）
+     * @return 是否切换成功
+     */
+    bool switchToDanceControllerByName(const std::string& name);
+
+    /**
+     * @brief 按在舞蹈列表中的索引切换（0 为第一个舞蹈）
+     * @return 是否切换成功
+     */
+    bool switchToDanceControllerByIndex(size_t index);
+
+    /**
+     * @brief 若当前为舞蹈控制器，返回其在 getDanceControllerList() 中的索引；否则返回 -1
+     */
+    int getCurrentDanceControllerIndex() const;
 
     /**
      * @brief 注册倒地状态回调函数
@@ -225,13 +269,32 @@ namespace humanoid_controller
      */
     bool isTorsoVelocityStable();
 
-
   private:
     /**
      * @brief 异步切换手臂控制模式
      * @param mode 目标手臂控制模式
      */
     void changeArmCtrlModeAsync(int mode);
+
+    /**
+     * @brief 加载 depth_loco_controller 切换前检查的 ROS 参数
+     */
+    void loadDepthHistoryCheckParams(ros::NodeHandle& nh);
+
+    /**
+     * @brief 检查 depth_loco_controller 切换前的深度历史话题状态
+     */
+    bool isDepthHistoryTopicAvailable();
+
+    /**
+     * @brief 启动深度历史话题后台监控（常驻订阅 + 频率缓存）
+     */
+    void startDepthHistoryMonitor();
+
+    /**
+     * @brief 深度历史话题回调（更新频率缓存）
+     */
+    // 已迁移到 TopicMonitor 内部回调
 
     /**
      * @brief ROS服务回调：切换控制器
@@ -252,6 +315,18 @@ namespace humanoid_controller
                                         kuavo_msgs::switchToNextController::Response &res);
 
     /**
+     * @brief ROS服务回调：切换到上一个控制器
+     */
+    bool switchToPreviousControllerCallback(kuavo_msgs::switchToNextController::Request &req, 
+                                            kuavo_msgs::switchToNextController::Response &res);
+    
+    /**
+     * @brief ROS服务回调：设置RL切换模式（是否直接切换）
+     */
+    bool setRLSwitchModeCallback(std_srvs::SetBool::Request &req,
+                                 std_srvs::SetBool::Response &res);
+
+    /**
      * @brief ROS服务回调：设置倒地状态
      */
     bool setFallDownStateCallback(std_srvs::SetBool::Request &req,
@@ -264,9 +339,28 @@ namespace humanoid_controller
                                        std_srvs::Trigger::Response &res);
 
     /**
+     * @brief ROS服务回调：/humanoid_controller/switch_to_dance_controller (SetString)
+     * data 空：第一个舞蹈；#0/#1 为列表下标；否则为舞蹈控制器名
+     */
+    bool switchDanceControllerByStringCallback(kuavo_msgs::SetString::Request &req,
+                                               kuavo_msgs::SetString::Response &res);
+
+    /**
+     * @brief ROS服务回调：获取舞蹈控制器名称列表
+     */
+    bool getDanceControllerListCallback(kuavo_msgs::GetStringList::Request &req,
+                                        kuavo_msgs::GetStringList::Response &res);
+
+    /**
      * @brief 更新按类型分组的控制器列表
      */
     void updateControllerListsByType();
+
+    /**
+     * @brief 发布控制器切换事件
+     */
+    void publishControllerSwitchEvent(const std::string& from_controller,
+                                      const std::string& to_controller);
 
 
   private:
@@ -279,24 +373,37 @@ namespace humanoid_controller
     // 按类型分组的控制器列表（不包括BASE）
     std::map<RLControllerType, std::vector<std::string>> controllers_by_type_;  ///< 按类型分组的控制器列表
     std::vector<std::string> walk_controllers_;                                ///< WALK_CONTROLLER类型列表（包括BASE，BASE在索引0）
+    std::vector<std::string> dance_controllers_;                               ///< DANCE_CONTROLLER 项名称列表（顺序同 yaml）
 
     // ROS服务
     ros::ServiceServer switch_controller_srv_;      ///< 切换控制器服务
     ros::ServiceServer get_controller_list_srv_;     ///< 获取控制器列表服务
     ros::ServiceServer switch_to_next_controller_srv_;  ///< 切换到下一个控制器服务
+    ros::ServiceServer switch_to_previous_controller_srv_;  ///< 切换到上一个控制器服务
+    ros::ServiceServer set_rl_switch_mode_srv_;       ///< 设置RL切换模式服务
     ros::ServiceServer set_fall_down_state_srv_;     ///< 设置倒地状态服务
     ros::ServiceServer switch_to_vmp_controller_srv_; ///< 切换到VMP控制器服务
+    ros::ServiceServer switch_to_dance_controller_srv_; ///< SetString: 空/#索引/名 切换舞蹈
+    ros::ServiceServer get_dance_controller_list_srv_;  ///< 获取舞蹈控制器名列表
+    ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
     ros::NodeHandle* nh_ptr_;                       ///< ROS节点句柄指针
 
+    // RL切换模式：true 直接切换到RL；false 使用MPC过渡
+    bool direct_switch_to_rl_ = true;
     // 倒地状态回调函数
     std::function<void(int)> fall_down_state_callback_;  ///< 设置倒地状态的回调函数
-
     // 躯干速度检查相关
     std::function<bool()> torso_stability_callback_;          ///< 获取躯干稳定性状态的回调函数
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
+    double depth_history_min_frequency_hz_ = 50.0;  ///< depth 历史话题最低频率要求
+    double depth_history_wait_timeout_sec_ = 2.0;   ///< depth 历史话题总等待超时
+    int depth_history_required_samples_ = 10;       ///< depth 历史话题最少采样点数
+    double depth_history_sample_timeout_sec_ = 0.2; ///< 单次等待消息的超时
+
+    // 深度历史话题后台监控（避免切换路径上阻塞等待）
+    TopicMonitor depth_history_monitor_;
   };
 
 } // namespace humanoid_controller
-

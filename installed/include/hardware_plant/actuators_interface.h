@@ -13,6 +13,7 @@ typedef struct {
   int num_actuators;
   std::string ec_type;
   std::string robot_module;
+  int robot_version_int = 0;  
 
 } EcActuatorParams;
 typedef struct

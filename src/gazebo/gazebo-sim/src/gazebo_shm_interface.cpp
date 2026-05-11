@@ -10,6 +10,7 @@
 #include <nav_msgs/Odometry.h>
 #include <tf/transform_broadcaster.h>
 #include <geometry_msgs/Twist.h>
+#include <geometry_msgs/Wrench.h>
 #include <kuavo_msgs/sensorsData.h>
 #include <kuavo_msgs/imuData.h>
 #include <kuavo_msgs/jointData.h>
@@ -137,6 +138,8 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
     
     stop_sub_ = nh_->subscribe("/stop_robot", 1, &GazeboShmInterface::stopCallback, this);
     cmd_vel_sub_ = nh_->subscribe("/move_base/base_cmd_vel", 10, &GazeboShmInterface::cmdVelCallback, this);
+    l_hand_ext_wrench_sub_ = nh_->subscribe<geometry_msgs::Wrench>("/external_wrench/left_hand", 10, &GazeboShmInterface::leftHandWrenchCallback, this);
+    r_hand_ext_wrench_sub_ = nh_->subscribe<geometry_msgs::Wrench>("/external_wrench/right_hand", 10, &GazeboShmInterface::rightHandWrenchCallback, this);
     sim_start_srv_ = nh_->advertiseService("sim_start", &GazeboShmInterface::simStartCallback, this);
     
     // 初始化里程计发布器
@@ -227,6 +230,32 @@ void GazeboShmInterface::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
     if (!ParseContacts(_sdf)) {
         gzerr << "Failed to parse contacts configuration" << std::endl;
         return;
+    }
+
+    // 手臂末端 link: Gazebo 会将 fixed joint 子 link 合并到父 link，
+    // 因此直接使用 l7/r7_link 并通过偏移量在 end_effector 位置施力
+    left_arm_link_ = model_->GetLink("zarm_l7_end_effector");
+
+    auto offset_z = 0.10230994 - 0.17; // zarm_l7_link 到 zarm_l7_end_effector 的偏移量, 0.10230994是zarm_l7_link的质心偏移量
+    if (left_arm_link_) {
+        left_ee_offset_ = ignition::math::Vector3d::Zero;
+        std::cout << "[GazeboShmInterface] left_arm_link_: zarm_l7_end_effector" << std::endl;
+    } else {
+        left_arm_link_ = model_->GetLink("zarm_l7_link");
+        left_ee_offset_ = ignition::math::Vector3d(0, 0, offset_z);
+        if (left_arm_link_)
+            std::cout << "[GazeboShmInterface] left_arm_link_: zarm_l7_link (ee offset: 0,0," << offset_z << ")" << std::endl;
+    }
+    right_arm_link_ = model_->GetLink("zarm_r7_end_effector");
+    if (right_arm_link_) {
+        right_ee_offset_ = ignition::math::Vector3d::Zero;
+        std::cout << "[GazeboShmInterface] right_arm_link_: zarm_r7_end_effector" << std::endl;
+    } else {
+        right_arm_link_ = model_->GetLink("zarm_r7_link");
+        right_ee_offset_ = ignition::math::Vector3d(0, 0, offset_z);
+        if (right_arm_link_)
+            std::cout << "[GazeboShmInterface] right_arm_link_: zarm_r7_link (ee offset: 0,0," << offset_z << ")" << std::endl;
+
     }
 
     // 等待并加载参数
@@ -502,6 +531,23 @@ void GazeboShmInterface::OnUpdate(const common::UpdateInfo& _info)
         // joints_[i]->SetPosition(0, q, true);
     }
     
+    // 手臂末端外力施加（在 end-effector 偏移位置施力）
+    {
+        std::lock_guard<std::mutex> lock(wrench_mutex_);
+        if (left_hand_active_ && left_arm_link_) {
+            ignition::math::Vector3d force(left_hand_wrench_.force.x, left_hand_wrench_.force.y, left_hand_wrench_.force.z);
+            ignition::math::Vector3d torque(left_hand_wrench_.torque.x, left_hand_wrench_.torque.y, left_hand_wrench_.torque.z);
+            left_arm_link_->AddForceAtRelativePosition(force, left_ee_offset_);
+            left_arm_link_->AddTorque(torque);
+        }
+        if (right_hand_active_ && right_arm_link_) {
+            ignition::math::Vector3d force(right_hand_wrench_.force.x, right_hand_wrench_.force.y, right_hand_wrench_.force.z);
+            ignition::math::Vector3d torque(right_hand_wrench_.torque.x, right_hand_wrench_.torque.y, right_hand_wrench_.torque.z);
+            right_arm_link_->AddForceAtRelativePosition(force, right_ee_offset_);
+            right_arm_link_->AddTorque(torque);
+        }
+    }
+    
     // 发布消息
     publishJointCmd(cmd);
 }
@@ -736,6 +782,22 @@ void GazeboShmInterface::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& ms
     cmd_vel_chassis_.Z() = msg->angular.z;  // 角速度 z
 }
 
+void GazeboShmInterface::leftHandWrenchCallback(const geometry_msgs::Wrench::ConstPtr& msg)
+{
+    std::lock_guard<std::mutex> lock(wrench_mutex_);
+    left_hand_wrench_ = *msg;
+    left_hand_active_ = (std::abs(msg->force.x) > 1e-6 || std::abs(msg->force.y) > 1e-6 || std::abs(msg->force.z) > 1e-6 ||
+                        std::abs(msg->torque.x) > 1e-6 || std::abs(msg->torque.y) > 1e-6 || std::abs(msg->torque.z) > 1e-6);
+}
+
+void GazeboShmInterface::rightHandWrenchCallback(const geometry_msgs::Wrench::ConstPtr& msg)
+{
+    std::lock_guard<std::mutex> lock(wrench_mutex_);
+    right_hand_wrench_ = *msg;
+    right_hand_active_ = (std::abs(msg->force.x) > 1e-6 || std::abs(msg->force.y) > 1e-6 || std::abs(msg->force.z) > 1e-6 ||
+                         std::abs(msg->torque.x) > 1e-6 || std::abs(msg->torque.y) > 1e-6 || std::abs(msg->torque.z) > 1e-6);
+}
+
 double GazeboShmInterface::velocityPidControl(physics::JointPtr joint, double target_vel)
 {
     double cur_vel = joint->GetVelocity(0);
@@ -758,11 +820,17 @@ void GazeboShmInterface::updateWheelControl()
     double robot_x_dis = 0.253;     // 机器人中心到轮子的x距离
     double robot_y_dis = 0.1785;    // 机器人中心到轮子的y距离
 
-    if(robotVersion_ == 61)
+    if(robotVersion_ == 61 || robotVersion_ == 62)
     {
         wheel_radius = 0.13035;
         robot_x_dis = 0.232489;
         robot_y_dis = 0.232489;
+    }
+    else if(robotVersion_ == 63)
+    {
+        wheel_radius = 0.13035;
+        robot_x_dis = 0.23865;  // s63 底盘轮距更大
+        robot_y_dis = 0.23865;
     }
     
     // 四个轮子的位置（相对于底盘中心）

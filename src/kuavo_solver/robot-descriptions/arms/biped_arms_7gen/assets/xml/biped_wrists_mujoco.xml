@@ -1,0 +1,186 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="biped_wrists">
+  <compiler angle="radian" meshdir="../../../../../../kuavo_assets/models/biped_s70/meshes/" />
+  <option>
+    <flag gravity="enable" contact="disable" />
+    </option>
+  <statistic meansize="0.02" />
+  <default>
+    <joint armature="0.01" damping="0.8" frictionloss="0.08" />
+    </default>
+  <asset>
+    <mesh name="R_arm_base" file="R_arm_base.STL" />
+    <mesh name="R_arm_pitch" file="R_arm_pitch.STL" />
+    <mesh name="R_arm_roll" file="R_arm_roll.STL" />
+    <mesh name="R_arm_yaw" file="R_arm_yaw.STL" />
+    <mesh name="R_foream" file="R_foream.STL" />
+    <mesh name="R_hand_yaw" file="R_hand_yaw.STL" />
+    <mesh name="R_hand_roll" file="R_hand_roll.STL" />
+    <mesh name="R_hand_pitch" file="R_hand_pitch.STL" />
+    <mesh name="L_arm_base" file="L_arm_base.STL" />
+    <mesh name="L_arm_pitch" file="L_arm_pitch.STL" />
+    <mesh name="L_arm_roll" file="L_arm_roll.STL" />
+    <mesh name="L_arm_yaw" file="L_arm_yaw.STL" />
+    <mesh name="L_foream" file="L_foream.STL" />
+    <mesh name="L_hand_yaw" file="L_hand_yaw.STL" />
+    <mesh name="L_hand_roll" file="L_hand_roll.STL" />
+    <mesh name="L_hand_pitch" file="L_hand_pitch.STL" />
+    <mesh name="Hand_Prismatic_base_A" file="Hand_Prismatic_base_A.STL" />
+    <mesh name="Hand_Prismatic_link_A" file="Hand_Prismatic_link_A.STL" />
+    <mesh name="Hand_Prismatic_base_B" file="Hand_Prismatic_base_B.STL" />
+    <mesh name="Hand_Prismatic_link_B" file="Hand_Prismatic_link_B.STL" />
+    <mesh name="L_Hand_Prismatic_base_A" file="L_Hand_Prismatic_base_A.STL" />
+    <mesh name="L_Hand_Prismatic_link_A" file="L_Hand_Prismatic_link_A.STL" />
+    <mesh name="L_Hand_Prismatic_base_B" file="L_Hand_Prismatic_base_B.STL" />
+    <mesh name="L_Hand_Prismatic_link_B" file="L_Hand_Prismatic_link_B.STL" />
+    </asset>
+  <worldbody>
+    <camera name="front" fovy="0.01" pos="-0.4 0 -0.6" quat="0.707 0 -0.707 0" />
+    <body name="l_arm_base" pos="0 0 0">
+      <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_arm_base" />
+      <body name="L_arm_pitch" pos="0.00018391 0.06075 4.928e-05">
+        <inertial pos="0.00122135 0.0733264 5.898e-06" quat="0.703208 -0.703006 -0.0752086 0.0749993" mass="0.263341" diaginertia="0.000414671 0.000311128 0.000243944" />
+        <joint name="L_arm_pitch_joint" pos="0 0 0" axis="0 1 0" range="-3.1416 1.5708" actuatorfrcrange="-100 100" />
+        <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_arm_pitch" />
+        <body name="L_arm_roll" pos="0 0.08825 0">
+          <inertial pos="0.00291879 9.45216e-10 -0.0403525" quat="0.997237 7.07162e-07 0.0742904 -4.14611e-06" mass="0.0993487" diaginertia="7.59486e-05 6.50023e-05 5.43441e-05" />
+          <joint name="L_arm_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.3491 3.49065850398866" actuatorfrcrange="-100 100" />
+          <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_arm_roll" />
+          <body name="L_arm_yaw" pos="0 0 -0.0705">
+            <inertial pos="-0.000774112 1.26464e-05 -0.124662" quat="0.0197197 -0.584104 -0.00487189 -0.811424" mass="0.618073" diaginertia="0.000576997 0.000561409 0.00055851" />
+            <joint name="L_arm_yaw_joint" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-100 100" />
+            <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_arm_yaw" />
+            <body name="L_foream" pos="0.028143 0 -0.27226">
+              <inertial pos="-0.0268922 -0.000108114 -0.0499461" quat="0.00640403 -0.710195 -0.00648144 -0.703946" mass="0.16919" diaginertia="0.000151305 0.000127679 0.000121071" />
+              <joint name="L_foream_joint" pos="0 0 0" axis="0 1 0" range="-2.618 0" actuatorfrcrange="-100 100" />
+              <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_foream" />
+              <site name="L_elbow_anchor" size="0.004" pos="-0.01967509 0 0.00359278" rgba="0 0.5 1 0.8" />
+              <body name="L_hand_yaw" pos="-0.028143 0 -0.0915">
+                <inertial pos="0.00015336 0.00663965 -0.0469769" quat="0.999625 -0.0273904 -0.000602594 0.00014477" mass="0.0631956" diaginertia="0.000114504 0.000105101 1.9641e-05" />
+                <joint name="L_hand_yaw_joint" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-100 100" />
+                <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_hand_yaw" />
+                <body name="L_hand_roll" pos="0 5.2025e-05 -0.1623">
+                  <inertial pos="1.00555e-10 6.41194e-09 -0.0119243" mass="0.0102682" diaginertia="9.27588e-07 8.21215e-07 3.48994e-07" />
+                  <joint name="L_hand_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.5236 0.8727" actuatorfrcrange="-100 100" />
+                  <geom type="mesh" rgba="0.698039 0.817647 0.929412 1" mesh="L_hand_roll" />
+                  <body name="L_hand_pitch" pos="0 0 -0.018">
+                    <inertial pos="3.80251e-09 -0.00543064 -0.00637619" quat="0.57446 -0.412306 -0.412306 -0.57446" mass="0.0210141" diaginertia="8.8284e-06 6.483e-06 4.17287e-06" />
+                    <joint name="L_hand_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.3752 0.3752" actuatorfrcrange="-100 100" />
+                    <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_hand_pitch" />
+                    <site name="L_hand_socket_A" size="0.0052" pos="0.0235 -0.02758 0.01314" rgba="0.2 0.8 0.2 0.5" />
+                    <site name="L_hand_socket_B" size="0.0052" pos="-0.0235 -0.02758 0.01314" rgba="0.2 0.8 0.2 0.5" />
+                    </body>
+                  </body>
+                <body name="L_Hand_Prismatic_base_A" pos="0.0235 -0.008 -0.02">
+                  <inertial pos="7.83448e-05 -0.0081917 -0.0607152" quat="0.968828 0.0644442 0.0152265 -0.238722" mass="0.0685187" diaginertia="2.2336e-05 2.22477e-05 1.48375e-05" />
+                  <joint name="L_Hand_Prismatic_base_joint_A" type="ball" />
+                  <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_Hand_Prismatic_base_A" />
+                  <body name="L_Hand_Prismatic_link_A">
+                    <inertial pos="-4.70819e-08 -0.0174493 -0.131534" quat="0.997826 0.0658973 -2.67158e-06 -1.76434e-07" mass="0.0018117" diaginertia="3.20614e-07 3.12342e-07 1.62191e-08" />
+                    <joint name="L_Hand_Prismatic_joint_A" pos="0 0 0" axis="0 -0.131509 -0.991315" type="slide" range="-0.0235514 0.0124486" actuatorfrcrange="-100 100" />
+                    <geom type="mesh" mesh="L_Hand_Prismatic_link_A" />
+                    <site name="L_base_A" size="0.0052" pos="0 0 0" rgba="0.8 0.2 0.2 0.5" />
+                    </body>
+                  </body>
+                <body name="L_Hand_Prismatic_base_B" pos="-0.0235 -0.008 -0.02">
+                  <inertial pos="-7.80469e-05 -0.0079232 -0.0607504" quat="0.96861 0.0638609 0.0151162 -0.239768" mass="0.0685179" diaginertia="2.23358e-05 2.22476e-05 1.48375e-05" />
+                  <joint name="L_Hand_Prismatic_base_joint_B" type="ball" />
+                  <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_Hand_Prismatic_base_B" />
+                  <body name="L_Hand_Prismatic_link_B">
+                    <joint name="L_Hand_Prismatic_joint_B" pos="0 0 0" axis="0 -0.131509 -0.991315" type="slide" range="-0.0235514 0.0124486" actuatorfrcrange="-100 100" />
+                    <inertial pos="-4.70814e-08 -0.0174493 -0.131534" quat="0.997826 0.0658973 -2.67158e-06 -1.76434e-07" mass="0.0018117" diaginertia="3.20614e-07 3.12342e-07 1.62191e-08" />
+                    <geom type="mesh" mesh="L_Hand_Prismatic_link_B" />
+                    <site name="L_base_B" size="0.0052" pos="0 0 0" rgba="0.8 0.2 0.2 0.5" />
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    <body name="r_arm_base" pos="0 0 0">
+      <geom type="mesh" rgba="1 1 1 1" mesh="R_arm_base" />
+      <body name="R_arm_pitch" pos="0.00018391 -0.06075 4.928e-05">
+        <inertial pos="0.00122135 -0.0733264 5.898e-06" quat="0.703208 0.703006 -0.0752086 -0.0749993" mass="0.263341" diaginertia="0.000414671 0.000311128 0.000243944" />
+        <joint name="R_arm_pitch_joint" pos="0 0 0" axis="0 1 0" range="-3.1416 1.5708" actuatorfrcrange="-100 100" />
+        <geom type="mesh" rgba="1 1 1 1" mesh="R_arm_pitch" />
+        <body name="R_arm_roll" pos="0 -0.08825 0">
+          <inertial pos="0.00291879 -9.45216e-10 -0.0403525" quat="0.997237 -7.07162e-07 0.0742904 4.14611e-06" mass="0.0993487" diaginertia="7.59486e-05 6.50023e-05 5.43441e-05" />
+          <joint name="R_arm_roll_joint" pos="0 0 0" axis="1 0 0" range="-2.0944 3.49065850398866" actuatorfrcrange="-100 100" />
+          <geom type="mesh" rgba="1 1 1 1" mesh="R_arm_roll" />
+          <body name="R_arm_yaw" pos="0 0 -0.0705">
+            <inertial pos="-0.000774112 -1.26464e-05 -0.124662" quat="0.0197197 0.584104 -0.00487189 0.811424" mass="0.618073" diaginertia="0.000576997 0.000561409 0.00055851" />
+            <joint name="R_arm_yaw_joint" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-100 100" />
+            <geom type="mesh" rgba="1 1 1 1" mesh="R_arm_yaw" />
+            <body name="R_foream" pos="0.028143 0 -0.27226">
+              <inertial pos="-0.0268922 0.000108114 -0.0499461" quat="0.00640403 0.710195 -0.00648144 0.703946" mass="0.16919" diaginertia="0.000151305 0.000127679 0.000121071" />
+              <joint name="R_foream_joint" pos="0 0 0" axis="0 1 0" range="-2.618 0" actuatorfrcrange="-100 100" />
+              <geom type="mesh" rgba="1 1 1 1" mesh="R_foream" />
+              <site name="R_elbow_anchor" size="0.004" pos="-0.01967509 0 0.00359278" rgba="0 0.5 1 0.8" />
+              <body name="R_hand_yaw" pos="-0.028143 0 -0.0915">
+                <inertial pos="0.00015336 -0.00663965 -0.0469769" quat="0.999625 0.0273904 -0.000602594 -0.00014477" mass="0.0631956" diaginertia="0.000114504 0.000105101 1.9641e-05" />
+                <joint name="R_hand_yaw_joint" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-100 100" />
+                <geom type="mesh" rgba="1 1 1 1" mesh="R_hand_yaw" />
+                <body name="R_hand_roll" pos="0 -5.2025e-05 -0.1623">
+                  <inertial pos="1.00555e-10 -6.41194e-09 -0.0119243" mass="0.0102682" diaginertia="9.27588e-07 8.21215e-07 3.48994e-07" />
+                  <joint name="R_hand_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.8727 0.5236" actuatorfrcrange="-100 100" />
+                  <geom type="mesh" rgba="0.898039 0.917647 0.929412 1" mesh="R_hand_roll" />
+                  <body name="R_hand_pitch" pos="0 0 -0.018">
+                    <inertial pos="3.80251e-09 0.00543064 -0.00637619" quat="0.57446 0.412306 -0.412306 0.57446" mass="0.0210141" diaginertia="8.8284e-06 6.483e-06 4.17287e-06" />
+                    <joint name="R_hand_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.3752 0.3752" actuatorfrcrange="-100 100" />
+                    <geom type="mesh" rgba="1 1 1 1" mesh="R_hand_pitch" />
+                    <site name="R_hand_socket_A" size="0.0052" pos="0.0235 0.02758 0.01314" rgba="0.2 0.8 0.2 0.5" />
+                    <site name="R_hand_socket_B" size="0.0052" pos="-0.0235 0.02758 0.01314" rgba="0.2 0.8 0.2 0.5" />
+                    </body>
+                  </body>
+                <body name="R_Hand_Prismatic_base_A" pos="0.0235 0.008 -0.02">
+                  <inertial pos="7.83448e-05 0.0081917 -0.0607152" quat="0.968828 -0.0644442 0.0152265 0.238722" mass="0.0685187" diaginertia="2.2336e-05 2.22477e-05 1.48375e-05" />
+                  <joint name="R_Hand_Prismatic_base_joint_A" type="ball" />
+                  <geom type="mesh" rgba="1 1 1 1" mesh="Hand_Prismatic_base_A" />
+                  <body name="R_Hand_Prismatic_link_A">
+                    <inertial pos="-4.70819e-08 0.0174493 -0.131534" quat="0.997826 -0.0658973 -2.67158e-06 1.76434e-07" mass="0.0018117" diaginertia="3.20614e-07 3.12342e-07 1.62191e-08" />
+                    <joint name="R_Hand_Prismatic_joint_A" pos="0 0 0" axis="0 0.131509 -0.991315" type="slide" range="-0.0235514 0.0124486" actuatorfrcrange="-100 100" />
+                    <geom type="mesh" mesh="Hand_Prismatic_link_A" />
+                    <site name="R_base_A" size="0.0052" pos="0 0 0" rgba="0.8 0.2 0.2 0.5" />
+                    </body>
+                  </body>
+                <body name="R_Hand_Prismatic_base_B" pos="-0.0235 0.008 -0.02">
+                  <inertial pos="-7.80469e-05 0.0079232 -0.0607504" quat="0.96861 -0.0638609 0.0151162 0.239768" mass="0.0685179" diaginertia="2.23358e-05 2.22476e-05 1.48375e-05" />
+                  <joint name="R_Hand_Prismatic_base_joint_B" type="ball" />
+                  <geom type="mesh" rgba="1 1 1 1" mesh="Hand_Prismatic_base_B" />
+                  <body name="R_Hand_Prismatic_link_B">
+                    <joint name="R_Hand_Prismatic_joint_B" pos="0 0 0" axis="0 0.131509 -0.991315" type="slide" range="-0.0235514 0.0124486" actuatorfrcrange="-100 100" />
+                    <inertial pos="-4.70814e-08 0.0174493 -0.131534" quat="0.997826 -0.0658973 -2.67158e-06 1.76434e-07" mass="0.0018117" diaginertia="3.20614e-07 3.12342e-07 1.62191e-08" />
+                    <geom type="mesh" mesh="Hand_Prismatic_link_B" />
+                    <site name="R_base_B" size="0.0052" pos="0 0 0" rgba="0.8 0.2 0.2 0.5" />
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </worldbody>
+  <equality>
+    <connect name="L_loop_A" body1="L_hand_pitch" body2="L_Hand_Prismatic_link_A" anchor="0.0235 -0.02758 0.01314" solref="0.002 1" />
+    <connect name="L_loop_B" body1="L_hand_pitch" body2="L_Hand_Prismatic_link_B" anchor="-0.0235 -0.02758 0.01314" solref="0.002 1" />
+    <connect name="R_loop_A" body1="R_hand_pitch" body2="R_Hand_Prismatic_link_A" anchor="0.0235 0.02758 0.01314" solref="0.002 1" />
+    <connect name="R_loop_B" body1="R_hand_pitch" body2="R_Hand_Prismatic_link_B" anchor="-0.0235 0.02758 0.01314" solref="0.002 1" />
+    </equality>
+  <actuator>
+    <position name="L_arm_pitch_motor" joint="L_arm_pitch_joint" kp="20" kv="1" ctrlrange="-3.1416 1.5708" />
+    <position name="L_arm_roll_motor" joint="L_arm_roll_joint" kp="20" kv="1" ctrlrange="-0.3491 2.0944" />
+    <position name="L_arm_yaw_motor" joint="L_arm_yaw_joint" kp="20" kv="1" ctrlrange="-1.5708 1.5708" />
+    <position name="L_hand_yaw_motor" joint="L_hand_yaw_joint" kp="20" kv="1" ctrlrange="-1.5708 1.5708" />
+    <position name="L_Linear_A_pos" joint="L_Hand_Prismatic_joint_A" kp="500" kv="50" ctrlrange="-0.0235514 0.0124486" forcerange="-300 300" />
+    <position name="L_Linear_B_pos" joint="L_Hand_Prismatic_joint_B" kp="500" kv="50" ctrlrange="-0.0235514 0.0124486" forcerange="-300 300" />
+    <position name="R_arm_pitch_motor" joint="R_arm_pitch_joint" kp="20" kv="1" ctrlrange="-3.1416 1.5708" />
+    <position name="R_arm_roll_motor" joint="R_arm_roll_joint" kp="20" kv="1" ctrlrange="-0.3491 2.0944" />
+    <position name="R_arm_yaw_motor" joint="R_arm_yaw_joint" kp="20" kv="1" ctrlrange="-1.5708 1.5708" />
+    <position name="R_hand_yaw_motor" joint="R_hand_yaw_joint" kp="20" kv="1" ctrlrange="-1.5708 1.5708" />
+    <position name="R_Linear_A_pos" joint="R_Hand_Prismatic_joint_A" kp="500" kv="50" ctrlrange="-0.0235514 0.0124486" forcerange="-300 300" />
+    <position name="R_Linear_B_pos" joint="R_Hand_Prismatic_joint_B" kp="500" kv="50" ctrlrange="-0.0235514 0.0124486" forcerange="-300 300" />
+    </actuator>
+  </mujoco>

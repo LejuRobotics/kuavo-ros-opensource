@@ -1,0 +1,82 @@
+version: 1
+variants:
+  7gen:
+    # elbow (slider-crank) geometry
+    elbow:
+      left:
+        O_f_x: 0.028143
+        O_f_z: -0.27226
+        O_p_x: 0.0
+        O_p_z: -0.22077
+        a_x: -0.01967509
+        a_z: 0.00359278
+        t_x: 0.00846791
+        t_z: -0.04789722
+        sign: 1
+        theta_sign: -1
+      right:
+        O_f_x: 0.028143
+        O_f_z: -0.27226
+        O_p_x: 0.0
+        O_p_z: -0.22077
+        a_x: -0.01967509
+        a_z: 0.00359278
+        t_x: 0.00846791
+        t_z: -0.04789722
+        sign: 1
+        theta_sign: -1
+
+    wrist:
+      left:
+        base_A: [0.0235, 0.0, 0.0]
+        base_B: [-0.0235, 0.0, 0.0]
+        roll_center: [0.0, 0.00805203, -0.1423]
+        roll_axis: [1.0, 0.0, 0.0]
+        pitch_center_in_roll: [0.0, 0.0, -0.018]
+        pitch_axis: [0.0, 1.0, 0.0]
+        anchor_A_pitch: [0.0235, -0.02758, 0.01314]
+        anchor_B_pitch: [-0.0235, -0.02758, 0.01314]
+        len_A_zero: 0.14845002
+        len_B_zero: 0.14845002
+      right:
+        base_A: [0.0235, 0.0, 0.0]
+        base_B: [-0.0235, 0.0, 0.0]
+        roll_center: [0.0, -0.00805203, -0.1423]
+        roll_axis: [-1.0, 0.0, 0.0]
+        pitch_center_in_roll: [0.0, 0.0, -0.018]
+        pitch_axis: [0.0, -1.0, 0.0]
+        anchor_A_pitch: [0.0235, 0.02758, 0.01314]
+        anchor_B_pitch: [-0.0235, 0.02758, 0.01314]
+        len_A_zero: 0.14845002
+        len_B_zero: 0.14845002
+
+    # limits
+    # 兼容性：历史上 `joint_limits/motor_limits` 直接挂在 variants[token] 下；
+    # 新增 `limits:` 包装层用于统一读取口径（同时保留旧字段不删）。
+    limits:
+      joint_limits:
+        elbow_left: [-2.618, 0.0]
+        elbow_right: [-2.618, 0.0]
+        wrist_roll_left: [-0.5236, 0.8727]
+        wrist_roll_right: [-0.8727, 0.5236]
+        wrist_pitch_left: [-0.3752, 0.3752]
+        wrist_pitch_right: [-0.3752, 0.3752]
+      motor_limits:
+        elbow: [0.0, 0.0425]
+        wrist_a: [-0.0235514, 0.0124486]
+        wrist_b: [-0.0235514, 0.0124486]
+    joint_limits:
+      elbow_left: [-2.618, 0.0]
+      elbow_right: [-2.618, 0.0]
+      wrist_roll_left: [-0.5236, 0.8727]
+      wrist_roll_right: [-0.8727, 0.5236]
+      wrist_pitch_left: [-0.3752, 0.3752]
+      wrist_pitch_right: [-0.3752, 0.3752]
+    motor_limits:
+      elbow: [0.0, 0.0425]
+      wrist_a: [-0.0235514, 0.0124486]
+      wrist_b: [-0.0235514, 0.0124486]
+
+    ik:
+      default_tolerance: 1.0e-8
+      max_iterations: 30

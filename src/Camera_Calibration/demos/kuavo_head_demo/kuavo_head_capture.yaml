@@ -1,0 +1,60 @@
+# Kuavo 头部相机 棋盘采集 + 链配置（Capture）
+# =============================================
+#
+# 这个文件合并了：
+# - 原来的 kuavo_head_features.yaml（feature_finders）
+# - 原来的 kuavo_head_chains.yaml   （chains）
+#
+# 用于 data capture 阶段（feature 提取 + 关节链配置）。
+
+features:
+  head_checkerboard:
+    # 使用 2D 图像版本的 CheckerboardFinder（更稳）：在 image_raw 上检测角点，再结合 camera_info 做 PnP
+    type: robot_calibration/CheckerboardFinder2d
+
+    # 图像话题
+    topic: /head_camera/color/image_raw
+
+    # 相机内参与驱动，用于 solvePnP 反投影。
+    camera_info_topic: /head_camera/color/camera_info
+    camera_driver: /head_camera/driver
+
+    # 棋盘/tag 所在坐标系：与链模型 tip 保持一致，避免 frame 语义错配。
+    # 这里 head_board 的 tip 使用 checkerboard_link，因此 frame_id 也设为 checkerboard_link。
+    frame_id: checkerboard_link
+
+    # 用于计算 base<-tag(obs) 的相机 frame（必须与图像 header.frame_id 一致）
+    camera_frame: head_camera_color_optical_frame
+
+    # 传感器模型名称：
+    # - camera_sensor_name: 相机链模型（head_camera）
+    # - chain_sensor_name: 棋盘链模型（head_board）
+    camera_sensor_name: camera_to_base
+    chain_sensor_name: tag_to_base
+
+    # 棋盘格内角点数量（OpenCV findChessboardCorners 的 pattern size）
+    points_x: 11
+    points_y: 8
+
+    # 相邻角点间距（单位：米）
+    size: 0.03
+    # 棋盘角点坐标原点模式：
+    # - true: 以棋盘中心为原点
+    # - false: 以角点(0,0)为原点（当前使用，优化阶段再统一 remap 到中心）
+    origin_at_center: false
+    # 额外平移偏置（米），用于微调 board 坐标系定义；默认 0
+    board_offset_x: 0.0
+    board_offset_y: 0.0
+    board_offset_z: 0.0
+
+chains:
+  # 头部关节链：用于在采样时记录 /joint_states，并在优化时做 FK。
+  # 不设置 topic 可避免连接 FollowJointTrajectory action server（仅订阅 /joint_states 即可）。
+  # waist_yaw_joint 仍参与 FK（几何路径必经）；不优化其零位见 kuavo_head_chessboard_calibration.yaml 的 free_params。
+  - name: camera_to_base_chain
+    planning_group: ""
+    joints:
+      - waist_yaw_joint
+      - zhead_1_joint
+      - zhead_2_joint
+

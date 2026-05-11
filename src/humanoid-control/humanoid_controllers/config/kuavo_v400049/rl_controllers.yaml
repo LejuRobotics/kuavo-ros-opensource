@@ -1,0 +1,17 @@
+# RL控制器列表配置文件
+# 定义该版本机器人需要加载的RL控制器
+# class: 控制器大类，可选值：BASE_CONTROLLER, FALL_STAND_CONTROLLER
+# type: 具体控制器类型，可选值：MPC, AMP_CONTROLLER, FALL_STAND_CONTROLLER, VMP_CONTROLLER
+
+controllers:
+  - name: "amp_controller"
+    class: "BASE_CONTROLLER"  # 基础行走控制器
+    type: "AMP_CONTROLLER"    # 具体控制器类型
+    config_file: "rl/skw_rl_param.info" 
+    enabled: true  
+
+  - name: "vmp_controller"
+    class: "BASE_CONTROLLER"  
+    type: "VMP_CONTROLLER"    # VMP控制器类型
+    config_file: "rl/vmp_param.info"
+    enabled: false  # 非45/46版本仿真都存在问题，暂时关闭支持  

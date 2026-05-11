@@ -471,9 +471,9 @@
   </joint>
   <link name="zarm_l1_link">
     <inertial>
-      <origin xyz="-0.00083 -0.02218 0.00035" rpy="0 0 0" />
-      <mass value="0.962" />
-      <inertia ixx="0.00225" ixy="-3e-05" ixz="0.0" iyy="0.00099" iyz="-2e-05" izz="0.00227" />
+      <origin xyz="0.00194934 -0.01222074 -0.00024523" rpy="0 0 0" />
+      <mass value="0.95200000" />
+      <inertia ixx="0.00177952" ixy="-0.00003936" ixz="-0.00000075" iyy="0.00088093" iyz="0.00000096" izz="0.00174476" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -494,9 +494,9 @@
   </joint>
   <link name="zarm_l2_link">
     <inertial>
-      <origin xyz="-0.00791 0.0 -0.04655" rpy="0 0 0" />
-      <mass value="0.57" />
-      <inertia ixx="0.00163" ixy="0.0" ixz="5e-05" iyy="0.00211" iyz="0.0" izz="0.00122" />
+      <origin xyz="-0.00112901 0.00000665 -0.04637050" rpy="0 0 0" />
+      <mass value="0.38500000" />
+      <inertia ixx="0.00080437" ixy="-0.00000011" ixz="-0.00001699" iyy="0.00115579" iyz="-0.00000014" izz="0.00070010" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -517,9 +517,9 @@
   </joint>
   <link name="zarm_l3_link">
     <inertial>
-      <origin xyz="0.00628 0.00107 -0.20878" rpy="0 0 0" />
-      <mass value="1.65" />
-      <inertia ixx="0.00815" ixy="-4e-05" ixz="0.00085" iyy="0.00828" iyz="0.00014" izz="0.00206" />
+      <origin xyz="0.00936999 0.00334408 -0.22965779" rpy="0 0 0" />
+      <mass value="1.75450000" />
+      <inertia ixx="0.00694471" ixy="-0.00006963" ixz="0.00081484" iyy="0.00704370" iyz="0.00033391" izz="0.00183829" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -540,9 +540,9 @@
   </joint>
   <link name="zarm_l4_link">
     <inertial>
-      <origin xyz="-0.01611 0.00143 -0.04857" rpy="0 0 0" />
-      <mass value="0.429" />
-      <inertia ixx="0.00135" ixy="0.0" ixz="-0.0001" iyy="0.00114" iyz="0.0" izz="0.00083" />
+      <origin xyz="-0.01825634 0.00149605 -0.06877688" rpy="0 0 0" />
+      <mass value="0.60780000" />
+      <inertia ixx="0.00144524" ixy="-0.00000754" ixz="-0.00012207" iyy="0.00125753" iyz="-0.00003303" izz="0.00065063" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -563,9 +563,9 @@
   </joint>
   <link name="zarm_l5_link">
     <inertial>
-      <origin xyz="-0.00207 0.00018 -0.05079" rpy="0 0 0" />
-      <mass value="0.203" />
-      <inertia ixx="0.000357" ixy="0.0" ixz="-1.33e-05" iyy="0.000487" iyz="0.0" izz="0.000277" />
+      <origin xyz="-0.00874165 -0.00001372 -0.05033323" rpy="0 0 0" />
+      <mass value="0.63690000" />
+      <inertia ixx="0.00063700" ixy="-0.00000007" ixz="-0.00005666" iyy="0.00094941" iyz="0.00000002" izz="0.00054303" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -586,9 +586,9 @@
   </joint>
   <link name="zarm_l6_link">
     <inertial>
-      <origin xyz="-0.00111 0.00335 -0.01335" rpy="0 0 0" />
-      <mass value="0.111" />
-      <inertia ixx="0.000073" ixy="0.0" ixz="0.0" iyy="0.00009" iyz="0.0" izz="0.00009" />
+      <origin xyz="-0.00158864 0.00654094 -0.01506679" rpy="0 0 0" />
+      <mass value="0.47390000" />
+      <inertia ixx="0.00018068" ixy="-0.00000464" ixz="0.00001148" iyy="0.00025494" iyz="0.00001047" izz="0.00026772" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -645,9 +645,9 @@
   </joint>
   <link name="zarm_r1_link">
     <inertial>
-      <origin xyz="-0.00083 0.02218 0.00035" rpy="0 0 0" />
-      <mass value="0.962" />
-      <inertia ixx="0.00225" ixy="3e-05" ixz="0.0" iyy="0.00099" iyz="2e-05" izz="0.00227" />
+      <origin xyz="0.00194934 0.01222074 -0.00024523" rpy="0 0 0" />
+      <mass value="0.95200000" />
+      <inertia ixx="0.00177952" ixy="0.00003936" ixz="-0.00000075" iyy="0.00088093" iyz="-0.00000096" izz="0.00174476" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -668,9 +668,9 @@
   </joint>
   <link name="zarm_r2_link">
     <inertial>
-      <origin xyz="-0.00791 0.0 -0.04655" rpy="0 0 0" />
-      <mass value="0.57" />
-      <inertia ixx="0.00163" ixy="0.0" ixz="5e-05" iyy="0.00211" iyz="0.0" izz="0.00122" />
+      <origin xyz="-0.00112901 -0.00000665 -0.04637050" rpy="0 0 0" />
+      <mass value="0.38500000" />
+      <inertia ixx="0.00080437" ixy="0.00000011" ixz="-0.00001699" iyy="0.00115579" iyz="0.00000014" izz="0.00070010" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -691,9 +691,9 @@
   </joint>
   <link name="zarm_r3_link">
     <inertial>
-      <origin xyz="0.00628 -0.00107 -0.20878" rpy="0 0 0" />
-      <mass value="1.65" />
-      <inertia ixx="0.00815" ixy="4e-05" ixz="0.00085" iyy="0.00828" iyz="-0.00014" izz="0.00206" />
+      <origin xyz="0.00936999 -0.00334408 -0.22965779" rpy="0 0 0" />
+      <mass value="1.75450000" />
+      <inertia ixx="0.00694471" ixy="0.00006963" ixz="0.00081484" iyy="0.00704370" iyz="-0.00033391" izz="0.00183829" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -714,9 +714,9 @@
   </joint>
   <link name="zarm_r4_link">
     <inertial>
-      <origin xyz="-0.01611 -0.00143 -0.04857" rpy="0 0 0" />
-      <mass value="0.429" />
-      <inertia ixx="0.00135" ixy="0.0" ixz="-0.0001" iyy="0.00114" iyz="0.0" izz="0.00083" />
+      <origin xyz="-0.01825634 -0.00149605 -0.06877688" rpy="0 0 0" />
+      <mass value="0.60780000" />
+      <inertia ixx="0.00144524" ixy="0.00000754" ixz="-0.00012207" iyy="0.00125753" iyz="0.00003303" izz="0.00065063" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -737,9 +737,9 @@
   </joint>
   <link name="zarm_r5_link">
     <inertial>
-      <origin xyz="-0.00207 -0.00018 -0.05079" rpy="0 0 0" />
-      <mass value="0.203" />
-      <inertia ixx="0.000357" ixy="0.0" ixz="-1.33e-05" iyy="0.000487" iyz="0.0" izz="0.000277" />
+      <origin xyz="-0.00874165 0.00001372 -0.05033323" rpy="0 0 0" />
+      <mass value="0.63690000" />
+      <inertia ixx="0.00063700" ixy="0.00000007" ixz="-0.00005666" iyy="0.00094941" iyz="-0.00000002" izz="0.00054303" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -760,9 +760,9 @@
   </joint>
   <link name="zarm_r6_link">
     <inertial>
-      <origin xyz="-0.00111 -0.00335 -0.01335" rpy="0 0 0" />
-      <mass value="0.111" />
-      <inertia ixx="0.000073" ixy="0.0" ixz="0.0" iyy="0.00009" iyz="0.0" izz="0.00009" />
+      <origin xyz="-0.00158864 -0.00654094 -0.01506679" rpy="0 0 0" />
+      <mass value="0.47390000" />
+      <inertia ixx="0.00018068" ixy="0.00000464" ixz="0.00001148" iyy="0.00025494" iyz="-0.00001047" izz="0.00026772" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />

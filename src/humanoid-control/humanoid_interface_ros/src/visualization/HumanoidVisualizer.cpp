@@ -47,6 +47,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <geometry_msgs/PoseArray.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <kuavo_msgs/endEffectorData.h>
+#include <kuavo_msgs/lejuClawState.h>
+#include <sensor_msgs/JointState.h>
 
 // URDF related
 #include <kdl_parser/kdl_parser.hpp>
@@ -59,7 +61,7 @@ namespace ocs2
   namespace humanoid
   {
 
-    // 爪机构映射
+    // 爪机构映射 (200049)
     static const std::pair<const char*, double> kLeftClawJointInsertMap[] = {
       {"l_f_bar-1_joint", +1.0},
       {"l_b_bar-1",      -1.0},
@@ -72,8 +74,23 @@ namespace ocs2
       {"r_f_bar-3",      +1.0},
       {"r_b_bar-3",      -1.0},
     };
+    // 爪机构映射 (200053/200062)
+    static const std::pair<const char*, double> kLeftClawJointInsertMap200053[] = {
+      {"l_f_bar_1_joint", +1.0},
+      {"l_b_bar_1_joint", -1.0},
+      {"l_f_bar_3_joint", +1.0},
+      {"l_b_bar_3_joint", -1.0},
+    };
+    static const std::pair<const char*, double> kRightClawJointInsertMap200053[] = {
+      {"r_f_bar_1_joint", +1.0},
+      {"r_b_bar_1_joint", -1.0},
+      {"r_f_bar_3_joint", +1.0},
+      {"r_b_bar_3_joint", -1.0},
+    };
     static constexpr size_t kLeftClawJointInsertMapSize = sizeof(kLeftClawJointInsertMap) / sizeof(kLeftClawJointInsertMap[0]);
     static constexpr size_t kRightClawJointInsertMapSize = sizeof(kRightClawJointInsertMap) / sizeof(kRightClawJointInsertMap[0]);
+    static constexpr size_t kLeftClawJointInsertMap200053Size = sizeof(kLeftClawJointInsertMap200053) / sizeof(kLeftClawJointInsertMap200053[0]);
+    static constexpr size_t kRightClawJointInsertMap200053Size = sizeof(kRightClawJointInsertMap200053) / sizeof(kRightClawJointInsertMap200053[0]);
 
     /******************************************************************************************************/
     /******************************************************************************************************/
@@ -96,11 +113,30 @@ namespace ocs2
       launchVisualizerNode(nodeHandle);
       head_joint_names_ = {"zhead_1_joint", "zhead_2_joint"};
       head_joint_positions_ = {0.0, 0.0};
-      dexhand_joint_names_ = {"l_thumbCMC", "l_thumbMCP", "l_indexMCP", "l_indexPIP", "l_middleMCP", 
-                              "l_middlePIP", "l_ringMCP", "l_ringPIP", "l_littleMCP", "l_littlePIP", 
-                             "r_thumbCMC", "r_thumbMCP", "r_indexMCP", "r_indexPIP", "r_middleMCP", 
+      // 原有qiangnao手关节初始化
+      dexhand_joint_names_ = {"l_thumbCMC", "l_thumbMCP", "l_indexMCP", "l_indexPIP", "l_middleMCP",
+                              "l_middlePIP", "l_ringMCP", "l_ringPIP", "l_littleMCP", "l_littlePIP",
+                             "r_thumbCMC", "r_thumbMCP", "r_indexMCP", "r_indexPIP", "r_middleMCP",
                              "r_middlePIP", "r_ringMCP", "r_ringPIP", "r_littleMCP", "r_littlePIP"};
       dexhand_joint_positions_ = std::vector<double>(dexhand_joint_names_.size(), 0.0);
+
+      // 新增Linker L6/O6手关节初始化（22个关节，左右手各11个，和URDF完全一致）
+      linker_hand_joint_names_ = {
+        // 左手11个关节
+        "l_thumb_cmc_yaw", "l_thumb_cmc_pitch", "l_thumb_ip",
+        "l_index_mcp_pitch", "l_index_dip",
+        "l_middle_mcp_pitch", "l_middle_dip",
+        "l_ring_mcp_pitch", "l_ring_dip",
+        "l_pinky_mcp_pitch", "l_pinky_dip",
+        // 右手11个关节
+        "r_thumb_cmc_yaw", "r_thumb_cmc_pitch", "r_thumb_ip",
+        "r_index_mcp_pitch", "r_index_dip",
+        "r_middle_mcp_pitch", "r_middle_dip",
+        "r_ring_mcp_pitch", "r_ring_dip",
+        "r_pinky_mcp_pitch", "r_pinky_dip"
+      };
+      linker_hand_joint_positions_ = std::vector<double>(linker_hand_joint_names_.size(), 0.0);
+
       simplifiedJointPositions_ = std::vector<double>(visualModeSettings_.simplifiedJointNames.size(), 0.0);
     };
     
@@ -135,24 +171,111 @@ namespace ocs2
       updateHeadJointPositions_ = true;
     }
 
-    void HumanoidVisualizer::updateHandJointPositions(const vector_t &positions)
+    /******************************************************************************************************/
+    // 单独拆分的Linker L6/O6手转换逻辑：12维控制量 → 22个关节角度
+    void HumanoidVisualizer::updateLinkerHandJointPositions(const vector_t &positions)
     {
       if(positions.size() != 12) {
-        return;
-      }
-      
-      if(!urdfModel_.getJoint("l_thumbCMC")) {
-        return;
+        return; // 输入固定为12维：左右手各6个控制值
       }
 
+      // -------------------- Linker L6/O6手转换逻辑（和mujoco中linkerl6_hand.hpp逻辑完全一致） --------------------
+      if (isLinkerHand_) {
+        // Linker手工具函数：0~255曲度 → 关节角度，耦合比例和真实机械一致
+        auto Curl2JointsLinker = [](double curl, const std::array<double, 2>& j1_range, bool is_thumb = false) {
+          curl = std::clamp(curl, 0.0, 255.0);
+          double norm = curl / 255.0;
+          double j1 = j1_range[0] + norm * (j1_range[1] - j1_range[0]);
+          // 耦合比例：拇指1.226495，其他手指1.125676（和真实机械mimic比例一致）
+          double mimic_ratio = is_thumb ? 1.226495 : 1.125676;
+          double j2 = j1 * mimic_ratio;
+          return std::array<double, 2>{j1, j2};
+        };
+
+        // ==================== 左手（前6维输入：positions[0]~positions[5]） ====================
+        // 输入0：拇指pitch + ip（耦合控制）
+        auto l_thumb_pitch = urdfModel_.getJoint("l_thumb_cmc_pitch");
+        auto l_thumb_ip = urdfModel_.getJoint("l_thumb_ip");
+        if (l_thumb_pitch && l_thumb_pitch->limits && l_thumb_ip && l_thumb_ip->limits) {
+          std::array<double, 2> pitch_range = {l_thumb_pitch->limits->lower, l_thumb_pitch->limits->upper};
+          auto joints = Curl2JointsLinker(positions[0], pitch_range, true);
+          linker_hand_joint_positions_[1] = joints[0]; // l_thumb_cmc_pitch
+          linker_hand_joint_positions_[2] = std::clamp(joints[1], l_thumb_ip->limits->lower, l_thumb_ip->limits->upper); // l_thumb_ip
+        }
+        // 输入1：拇指yaw（单关节独立控制）
+        auto l_thumb_yaw = urdfModel_.getJoint("l_thumb_cmc_yaw");
+        if (l_thumb_yaw && l_thumb_yaw->limits) {
+          double norm = std::clamp(positions[1], 0.0, 255.0) / 255.0;
+          linker_hand_joint_positions_[0] = l_thumb_yaw->limits->lower + norm * (l_thumb_yaw->limits->upper - l_thumb_yaw->limits->lower);
+        }
+        // 输入2~5：食指、中指、无名指、小指（每指2关节耦合）
+        for (int i = 0; i < 4; i++) {
+          int joint_base_idx = 3 + i * 2; // 左手非拇指关节从索引3开始，每指占2个位置
+          int input_idx = 2 + i;
+          const auto& mcp_name = linker_hand_joint_names_[joint_base_idx];
+          const auto& dip_name = linker_hand_joint_names_[joint_base_idx + 1];
+          auto mcp_joint = urdfModel_.getJoint(mcp_name);
+          auto dip_joint = urdfModel_.getJoint(dip_name);
+          if (!mcp_joint || !mcp_joint->limits || !dip_joint || !dip_joint->limits) continue;
+
+          std::array<double, 2> mcp_range = {mcp_joint->limits->lower, mcp_joint->limits->upper};
+          auto joints = Curl2JointsLinker(positions[input_idx], mcp_range);
+          linker_hand_joint_positions_[joint_base_idx] = joints[0];
+          linker_hand_joint_positions_[joint_base_idx + 1] = std::clamp(joints[1], dip_joint->limits->lower, dip_joint->limits->upper);
+        }
+
+        // ==================== 右手（后6维输入：positions[6]~positions[11]） ====================
+        // 右手拇指顺序和左手完全一致：输入6是拇指pitch + ip，输入7是拇指yaw（与左手控制逻辑对齐）
+        // 处理拇指pitch + ip（耦合控制）
+        auto r_thumb_pitch = urdfModel_.getJoint("r_thumb_cmc_pitch");
+        auto r_thumb_ip = urdfModel_.getJoint("r_thumb_ip");
+        if (r_thumb_pitch && r_thumb_pitch->limits && r_thumb_ip && r_thumb_ip->limits) {
+          std::array<double, 2> pitch_range = {r_thumb_pitch->limits->lower, r_thumb_pitch->limits->upper};
+          auto joints = Curl2JointsLinker(positions[6], pitch_range, true);
+          // 右手拇指弯曲方向和四指一致，镜像后自然对称
+          linker_hand_joint_positions_[12] = joints[0]; // r_thumb_cmc_pitch
+          linker_hand_joint_positions_[13] = std::clamp(joints[1], r_thumb_ip->limits->lower, r_thumb_ip->limits->upper); // r_thumb_ip
+        }
+        // 处理拇指yaw（单关节独立控制）
+        auto r_thumb_yaw = urdfModel_.getJoint("r_thumb_cmc_yaw");
+        if (r_thumb_yaw && r_thumb_yaw->limits) {
+          double norm = std::clamp(positions[7], 0.0, 255.0) / 255.0;
+          // 与mujoco处理逻辑保持一致，URDF已定义关节镜像，无需额外反转
+          linker_hand_joint_positions_[11] = r_thumb_yaw->limits->lower + norm * (r_thumb_yaw->limits->upper - r_thumb_yaw->limits->lower);
+        }
+        // 输入8~11：食指、中指、无名指、小指（每指2关节耦合）
+        for (int i = 0; i < 4; i++) {
+          int joint_base_idx = 14 + i * 2; // 右手非拇指关节从索引14开始，每指占2个位置
+          int input_idx = 8 + i;
+          const auto& mcp_name = linker_hand_joint_names_[joint_base_idx];
+          const auto& dip_name = linker_hand_joint_names_[joint_base_idx + 1];
+          auto mcp_joint = urdfModel_.getJoint(mcp_name);
+          auto dip_joint = urdfModel_.getJoint(dip_name);
+          if (!mcp_joint || !mcp_joint->limits || !dip_joint || !dip_joint->limits) continue;
+
+          std::array<double, 2> mcp_range = {mcp_joint->limits->lower, mcp_joint->limits->upper};
+          auto joints = Curl2JointsLinker(positions[input_idx], mcp_range);
+          linker_hand_joint_positions_[joint_base_idx] = joints[0];
+          linker_hand_joint_positions_[joint_base_idx + 1] = std::clamp(joints[1], dip_joint->limits->lower, dip_joint->limits->upper);
+        }
+
+        updateDexhandJointPositions_ = true;
+        return;
+      }
+    }
+
+    /******************************************************************************************************/
+    void HumanoidVisualizer::updateHandJointPositions(const vector_t &positions)
+    {
+      if(positions.size() != 12 || !urdfModel_.getJoint("l_thumbCMC")) {
+        return; // qiangnao手专用：输入固定为12维控制量，左右手各6个（范围0~100）
+      }
+
+      // -------------------- qiangnao手转换逻辑 --------------------
+
       auto Curl2Joints = [](double curl, const std::array<double, 2>& j1_range, const std::array<double, 2>& j2_range) {
-          // 限制曲度输入范围
           curl = std::clamp(curl, 0.0, 100.0);
-          
-          // 计算归一化曲度
           double norm = curl / 100.0;
-          
-          // 生成关节控制指令
           double j1 = j1_range[0] + norm * (j1_range[1] - j1_range[0]);
           double j2 = j2_range[0] + norm * (j2_range[1] - j2_range[0]);
           return std::array<double, 2>{j1, j2};
@@ -161,7 +284,6 @@ namespace ocs2
       // left dexhand(大拇指关节)
       dexhand_joint_positions_[0] = Curl2Joints(positions[1], {0.23, 1.36}, {0.23, 1.36})[0];
       dexhand_joint_positions_[1] = Curl2Joints(positions[0], {0.16, 0.75}, {0.16, 0.75})[0];
-
 
       // left dexhand(非大拇指关节)
       for(int i = 0; i < 4; i++) {
@@ -220,6 +342,7 @@ namespace ocs2
       planedFootPositionsPublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/humanoid/planedFootPositions", 1);
       currentStatePublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/humanoid/currentState", 1);
       eePosePub_ = nodeHandle.advertise<kuavo_msgs::endEffectorData>("/humanoid_ee_State", 1);
+      lejuClawStatePub_ = nodeHandle.advertise<kuavo_msgs::lejuClawState>("/leju_claw_state", 10);
 
       // subscribe claw command (percentage) and map to radians limits from URDF if available
       clawCmdSubscriber_ = nodeHandle.subscribe<kuavo_msgs::lejuClawCommand>(
@@ -237,6 +360,25 @@ namespace ocs2
 
         robotStatePublisherPtr_.reset(new robot_state_publisher::RobotStatePublisher(kdlTree));
         robotStatePublisherPtr_->publishFixedTransforms(true);
+
+        // 每隔1秒重发一次所有静态TF，避免录bag时启动晚了漏录
+        fixed_tf_publish_timer_ = nodeHandle.createTimer(ros::Duration(1.0),
+          [this](const ros::TimerEvent&) {
+            robotStatePublisherPtr_->publishFixedTransforms(true);
+          });
+
+        // 自动识别手型
+        if (urdfModel_.getJoint("l_thumb_cmc_yaw") != nullptr) {
+          isLinkerHand_ = true;
+          ROS_INFO("[HumanoidVisualizer] 自动识别到Linker L6/O6灵巧手，使用Linker适配逻辑");
+        } else if (urdfModel_.getJoint("l_thumbCMC") != nullptr) {
+          isLinkerHand_ = false;
+          ROS_INFO("[HumanoidVisualizer] 自动识别到qiangnao灵巧手，使用qiangnao适配逻辑");
+          // qiangnao手的订阅逻辑保持原有实现
+        } else {
+          isLinkerHand_ = false;
+          ROS_INFO("[HumanoidVisualizer] 未检测到灵巧手，跳过手部可视化");
+        }
       }
       auto planedFootPositionsCallback = [this](const std_msgs::Float32MultiArray::ConstPtr &msg)
       {
@@ -273,6 +415,7 @@ namespace ocs2
           return false;
         }
       }
+      return false;
     }
 
     /******************************************************************************************************/
@@ -374,9 +517,16 @@ namespace ocs2
         }
         if (updateDexhandJointPositions_)
         {
-          for (size_t i = 0; i < dexhand_joint_names_.size(); i++)
-          {
-            jointPositions.insert({dexhand_joint_names_[i], dexhand_joint_positions_[i]});
+          if (isLinkerHand_) {
+            // 发布Linker L6/O6手关节
+            for (size_t i = 0; i < linker_hand_joint_names_.size(); i++) {
+              jointPositions.insert({linker_hand_joint_names_[i], linker_hand_joint_positions_[i]});
+            }
+          } else {
+            // 发布qiangnao手关节
+            for (size_t i = 0; i < dexhand_joint_names_.size(); i++) {
+              jointPositions.insert({dexhand_joint_names_[i], dexhand_joint_positions_[i]});
+            }
           }
         }
         if (updateClawJointPositions_)
@@ -393,8 +543,24 @@ namespace ocs2
           };
           tryInsertGroupRaw(kLeftClawJointInsertMap,  kLeftClawJointInsertMapSize,  claw_joint_positions_[0]);
           tryInsertGroupRaw(kRightClawJointInsertMap, kRightClawJointInsertMapSize, claw_joint_positions_[1]);
+          // 200053/200062 使用下划线命名
+          tryInsertGroupRaw(kLeftClawJointInsertMap200053,  kLeftClawJointInsertMap200053Size,  claw_joint_positions_[0]);
+          tryInsertGroupRaw(kRightClawJointInsertMap200053, kRightClawJointInsertMap200053Size, claw_joint_positions_[1]);
         }
         robotStatePublisherPtr_->publishTransforms(jointPositions, timeStamp);
+
+        // publish /leju_claw_state for bag recording
+        if (updateClawJointPositions_) {
+          kuavo_msgs::lejuClawState claw_state_msg;
+          claw_state_msg.header.stamp = timeStamp;
+          claw_state_msg.header.frame_id = "leju_claw";
+          claw_state_msg.data.name = {"left_claw", "right_claw"};
+          claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
+          claw_state_msg.data.velocity.resize(2, 0.0);
+          claw_state_msg.data.effort.resize(2, 0.0);
+          claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};
+          lejuClawStatePub_.publish(claw_state_msg);
+        }
       }
     }
 
@@ -688,6 +854,8 @@ namespace ocs2
       }
       eePosePub_.publish(endEffectorState_);
     }
+
+    /******************************************************************************************************/
 
     /******************************************************************************************************/
     /******************************************************************************************************/

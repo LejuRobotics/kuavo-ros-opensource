@@ -44,8 +44,8 @@
   </link>
   <joint name="floating_base" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="dummy_link" />
-    <child link="base_link" />
+    <parent link="base_link" />
+    <child link="dummy_link" />
   </joint>
   <link
     name="wheel_left_front">
@@ -1312,7 +1312,7 @@
     <limit lower="-0.526" upper="0.526" effort="14.5" velocity="2.198" />
     <dynamics damping="0.0" friction="0.0" />
   </joint>
-  <link name="camera_base">
+  <link name="head_camera_base">
     <inertial>
       <origin xyz="-0.0109467295615343 -0.00025332024893314 0.000333522154238597" rpy="0 0 0" />
       <mass value="0.0482361371130408" />
@@ -1321,29 +1321,29 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s60/meshes/head_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s61/meshes/head_camera.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="camera_base_joint" type="fixed">
-    <origin xyz="0.099478 0 0.032897" rpy="0 0.35805 0" />
+  <joint name="head_camera_base_joint" type="fixed">
+    <origin xyz="0.099619 0 0.032844" rpy="0 0.3406 0" />
     <parent link="zhead_2_link" />
-    <child link="camera_base" />
+    <child link="head_camera_base" />
   </joint>
-  <link name="camera">
+  <link name="head_camera_depth">
     <inertial>
       <origin xyz="-0.0109467295615343 -0.00025332024893314 0.000333522154238597" rpy="0 0 0" />
       <mass value="0.0482361371130408" />
       <inertia ixx="5.97804649866973E-05" ixy="0" ixz="0" iyy="5.8e-05" iyz="0" izz="5.92932584785117E-05" />
     </inertial>
   </link>
-  <joint name="camera" type="fixed">
+  <joint name="head_camera_depth_joint" type="fixed">
     <origin xyz="0.011715 0.0475 0.014311" rpy="0 0 0" />
-    <parent link="camera_base" />
-    <child link="camera" />
+    <parent link="head_camera_base" />
+    <child link="head_camera_depth" />
   </joint>
   <link
     name="radar">

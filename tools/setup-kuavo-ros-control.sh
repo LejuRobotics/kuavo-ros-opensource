@@ -15,6 +15,205 @@ print_success() {
     echo -e "\033[1;32m[SUCCESS] $1\033[0m"
 }
 
+print_warning() {
+    echo -e "\033[1;33m[WARNING] $1\033[0m"
+}
+
+run_git_retry() {
+    local description="$1"
+    shift
+
+    local attempt=1
+    local max_attempts=3
+
+    while [ $attempt -le $max_attempts ]; do
+        print_info "$description (第 ${attempt}/${max_attempts} 次)"
+        # `protocol.version=2` 和 `http.version=HTTP/1.1` 用于减少弱网下的协商抖动。
+        # `http.lowSpeedLimit/time` 允许 HTTPS 回退源在短时间低速时继续等待，而不是过早断开。
+        if git \
+            -c protocol.version=2 \
+            -c http.version=HTTP/1.1 \
+            -c http.lowSpeedLimit=1 \
+            -c http.lowSpeedTime=600 \
+            "$@"; then
+            return 0
+        fi
+
+        if [ $attempt -lt $max_attempts ]; then
+            print_warning "$description 失败，8 秒后重试"
+            sleep 8
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    return 1
+}
+
+set_remote_url() {
+    local remote_name="$1"
+    local remote_url="$2"
+
+    if git remote get-url "$remote_name" >/dev/null 2>&1; then
+        git remote set-url "$remote_name" "$remote_url"
+    else
+        git remote add "$remote_name" "$remote_url"
+    fi
+}
+
+get_repo_remote_url() {
+    local remote_url
+
+    remote_url=$(git remote get-url origin 2>/dev/null || true)
+    if [ -n "$remote_url" ]; then
+        echo "$remote_url"
+        return 0
+    fi
+
+    # 兼容历史脚本留下的远程别名，统一迁移到单一 origin。
+    remote_url=$(git remote get-url origin_factory 2>/dev/null || true)
+    if [ -n "$remote_url" ]; then
+        echo "$remote_url"
+        return 0
+    fi
+
+    git remote get-url origin_gitee 2>/dev/null || true
+}
+
+cleanup_legacy_git_remotes() {
+    git remote remove origin_factory >/dev/null 2>&1 || true
+    git remote remove origin_gitee >/dev/null 2>&1 || true
+}
+
+prompt_code_source_mode() {
+    while true; do
+        print_info "请选择代码源:"
+        echo "1) 自动选择（推荐，优先工厂镜像，失败后回退到 Gitee）"
+        echo "2) 仅工厂镜像"
+        echo "3) 仅 Gitee"
+        read -r source_choice
+
+        case "$source_choice" in
+            ""|"1")
+                SOURCE_MODE="auto"
+                SOURCE_MODE_TEXT="自动选择（优先工厂镜像，失败后回退到 Gitee）"
+                break
+                ;;
+            "2")
+                SOURCE_MODE="factory"
+                SOURCE_MODE_TEXT="仅工厂镜像"
+                break
+                ;;
+            "3")
+                SOURCE_MODE="gitee"
+                SOURCE_MODE_TEXT="仅 Gitee"
+                break
+                ;;
+            *)
+                print_error "无效的代码源选项，请输入 1、2 或 3"
+                ;;
+        esac
+    done
+
+    print_info "当前代码源策略: ${SOURCE_MODE_TEXT}"
+}
+
+fetch_branch_by_source_mode() {
+    local branch="$1"
+
+    case "$SOURCE_MODE" in
+        "factory")
+            if fetch_branch_from_origin "工厂镜像" "$FACTORY_URL" "$branch"; then
+                active_source="工厂镜像"
+                active_url="$FACTORY_URL"
+                return 0
+            fi
+            ;;
+        "gitee")
+            if fetch_branch_from_origin "Gitee" "$GITEE_URL" "$branch"; then
+                active_source="Gitee"
+                active_url="$GITEE_URL"
+                return 0
+            fi
+            ;;
+        *)
+            if fetch_branch_from_origin "工厂镜像" "$FACTORY_URL" "$branch"; then
+                active_source="工厂镜像"
+                active_url="$FACTORY_URL"
+                return 0
+            fi
+            if fetch_branch_from_origin "Gitee" "$GITEE_URL" "$branch"; then
+                active_source="Gitee"
+                active_url="$GITEE_URL"
+                return 0
+            fi
+            ;;
+    esac
+
+    return 1
+}
+
+fetch_commit_by_source_mode() {
+    local commit="$1"
+
+    case "$SOURCE_MODE" in
+        "factory")
+            if fetch_commit_from_origin "工厂镜像" "$FACTORY_URL" "$commit"; then
+                active_source="工厂镜像"
+                active_url="$FACTORY_URL"
+                return 0
+            fi
+            ;;
+        "gitee")
+            if fetch_commit_from_origin "Gitee" "$GITEE_URL" "$commit"; then
+                active_source="Gitee"
+                active_url="$GITEE_URL"
+                return 0
+            fi
+            ;;
+        *)
+            if fetch_commit_from_origin "工厂镜像" "$FACTORY_URL" "$commit"; then
+                active_source="工厂镜像"
+                active_url="$FACTORY_URL"
+                return 0
+            fi
+            if fetch_commit_from_origin "Gitee" "$GITEE_URL" "$commit"; then
+                active_source="Gitee"
+                active_url="$GITEE_URL"
+                return 0
+            fi
+            ;;
+    esac
+
+    return 1
+}
+
+fetch_branch_from_origin() {
+    local source_label="$1"
+    local remote_url="$2"
+    local branch="$3"
+
+    set_remote_url origin "$remote_url"
+    cleanup_legacy_git_remotes
+
+    # `--depth=1` 只拉取目标分支最新一层历史，避免安装脚本在弱网下全量下载数百 MiB 历史。
+    # `--no-tags` 跳过标签对象，进一步减少首次部署需要传输的对象数量。
+    run_git_retry "从 ${source_label} 抓取分支 ${branch}" \
+        fetch --depth=1 --no-tags --progress origin "$branch"
+}
+
+fetch_commit_from_origin() {
+    local source_label="$1"
+    local remote_url="$2"
+    local commit="$3"
+
+    set_remote_url origin "$remote_url"
+    cleanup_legacy_git_remotes
+
+    # 指定 commit 时同样保持浅抓取，尽量只拿到落地该 commit 所需的最小对象集合。
+    run_git_retry "从 ${source_label} 抓取 commit ${commit}" \
+        fetch --depth=1 --no-tags --progress origin "$commit"
+}
+
 # Configure PIP
 setup_pip() {
     print_info "配置 PIP 镜像源..."
@@ -33,6 +232,11 @@ clone_repos() {
         print_error "请使用普通用户权限运行，需要时脚本会通过sudo请求权限。"
         exit 1
     fi
+    FACTORY_URL="git://10.11.99.175:9418/kuavo-ros-opensource.git"
+    GITEE_URL="https://gitee.com/leju-robot/kuavo-ros-opensource.git"
+    SOURCE_MODE="auto"
+    SOURCE_MODE_TEXT=""
+    need_clone=false
     cd ~
     print_info "请输入分支名称（直接回车则使用默认 master 分支)"
     read -r branch
@@ -41,6 +245,7 @@ clone_repos() {
 
     print_info "请输入仓库commit(直接回车则使用最新 commit)"
     read -r commit
+    prompt_code_source_mode
     # 清理 /root 下的 kuavo-ros-opensource 文件夹
     if [ -d "/root/kuavo-ros-opensource" ]; then
         print_info "清理 /root 下的 kuavo-ros-opensource 文件夹..."
@@ -53,34 +258,81 @@ clone_repos() {
     # 检查 kuavo-ros-opensource 目录和远程仓库
     if [ -d "kuavo-ros-opensource" ] && [ -d "kuavo-ros-opensource/.git" ]; then
         cd kuavo-ros-opensource
-        REMOTE_URL=$(git remote get-url origin 2>/dev/null)
-        if [ "$REMOTE_URL" = "https://gitee.com/leju-robot/kuavo-ros-opensource.git" ]; then
-            print_info "目录已存在且远程仓库正确，清理工作区..."
-            git reset --hard HEAD
-            git clean -fd
+        REMOTE_URL=$(get_repo_remote_url)
+        if [ "$REMOTE_URL" = "$GITEE_URL" ] || [ "$REMOTE_URL" = "$FACTORY_URL" ]; then
+            if git rev-parse --verify HEAD >/dev/null 2>&1; then
+                print_info "目录已存在且远程仓库正确，清理工作区..."
+                git reset --hard HEAD
+                git clean -fd
+            else
+                print_warning "检测到未完成初始化的仓库，将复用已有对象并继续浅抓取"
+            fi
         else
-            print_info "目录存在但远程仓库不匹配，重新克隆..."
-            cd ~
-            rm -rf kuavo-ros-opensource
-            need_clone=true
+            echo ""
+            echo "=========================================="
+            echo "  WARNING: kuavo-ros-opensource 远程 URL 不匹配"
+            echo "=========================================="
+            echo "  合法 URL: $FACTORY_URL"
+            echo "           $GITEE_URL"
+            echo "  实际 URL: $REMOTE_URL"
+            echo ""
+            echo "  选择 yes 将删除当前目录并优先从工厂镜像重新克隆。"
+            echo "  选择 no 将中止部署。"
+            echo ""
+            read -r -p "是否继续？(yes/no): " user_choice
+            if [ "$user_choice" = "yes" ]; then
+                print_info "用户确认，删除并重新克隆..."
+                cd ~
+                rm -rf kuavo-ros-opensource
+                need_clone=true
+            else
+                print_error "用户取消，中止部署。"
+                exit 1
+            fi
         fi
     else
         need_clone=true
     fi
 
     if [ "$need_clone" = true ]; then
-        git clone https://gitee.com/leju-robot/kuavo-ros-opensource.git --branch "$branch"
+        print_info "初始化空仓库，并通过浅抓取代替全量 clone"
+        mkdir -p kuavo-ros-opensource
         cd kuavo-ros-opensource
+        git init
     fi
 
-    git checkout "$branch"
-    # 只有当commit非空时才checkout
+    active_source=""
+    active_url=""
+
     if [ -n "$commit" ]; then
-        git checkout "$commit"
+        if ! fetch_commit_by_source_mode "$commit"; then
+            print_error "指定 commit $commit 抓取失败，请检查网络后重试"
+            exit 1
+        fi
+
+        git checkout --detach FETCH_HEAD
+        if [ "$active_url" != "$FACTORY_URL" ]; then
+            echo ""
+            echo "=========================================="
+            echo "  WARNING: commit $commit 在工厂代码源远端不存在"
+            echo "=========================================="
+            echo "  请联系 IT 将最新代码同步到工厂服务器 (10.11.99.175)"
+            echo ""
+        fi
     else
-        git pull
+        if ! fetch_branch_by_source_mode "$branch"; then
+            print_error "分支 $branch 抓取失败，请检查网络后重试"
+            exit 1
+        fi
+
+        git checkout -B "$branch" FETCH_HEAD
+        git branch --set-upstream-to="origin/${branch}" "$branch" >/dev/null 2>&1 || true
     fi
- 
+
+    set_remote_url origin "$active_url"
+    cleanup_legacy_git_remotes
+    print_info "当前代码源: ${active_source}"
+
     print_success "代码仓库克隆/更新完成"
 }
 

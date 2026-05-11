@@ -2,6 +2,71 @@ withArm            true        ; 是否使用手臂训练 1:使用手臂(26个�
 inferenceFrequency 100         ; 推理频率
 controlFrequency   1000        ; 控制频率（Hz），VMP需要1000Hz控制频率
 enableThetaNormalization true  ; 是否启用theta yaw角归一化功能
+use_default_motor_csp_kpkd       false  ; EC_MASTER电机是否使用默认kpkd(kuavo.json)，false则使用下方 motor_pdo_kp/kd
+
+motor_pdo_kp
+{
+    ; EC_MASTER 腿部/手臂第1关节：来自 kuavo.json joint_kp
+    ; RUIWO 手臂关节：来自 kuavo.json vmp_yongchun_kpkd.ruiwo_kp
+    (0,0)   220     ; leg_l1_joint
+    (1,0)   100     ; leg_l2_joint
+    (2,0)   224     ; leg_l3_joint
+    (3,0)   224     ; leg_l4_joint
+    (4,0)   580     ; leg_l5_joint
+    (5,0)   580     ; leg_l6_joint
+    (6,0)   220     ; leg_r1_joint
+    (7,0)   100     ; leg_r2_joint
+    (8,0)   224     ; leg_r3_joint
+    (9,0)   224     ; leg_r4_joint
+    (10,0)  580     ; leg_r5_joint
+    (11,0)  580     ; leg_r6_joint
+    (12,0)  586     ; zarm_l1_joint (EC_MASTER)
+    (13,0)  25      ; zarm_l2_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[0]=25)
+    (14,0)  20      ; zarm_l3_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[1]=20)
+    (15,0)  20      ; zarm_l4_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[2]=20)
+    (16,0)  10      ; zarm_l5_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[3]=10)
+    (17,0)  10      ; zarm_l6_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[4]=10)
+    (18,0)  10      ; zarm_l7_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[5]=10)
+    (19,0)  586     ; zarm_r1_joint (EC_MASTER)
+    (20,0)  25      ; zarm_r2_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[6]=25)
+    (21,0)  20      ; zarm_r3_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[7]=20)
+    (22,0)  20      ; zarm_r4_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[8]=20)
+    (23,0)  10      ; zarm_r5_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[9]=10)
+    (24,0)  10      ; zarm_r6_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[10]=10)
+    (25,0)  10      ; zarm_r7_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kp[11]=10)
+}
+
+motor_pdo_kd
+{
+    ; EC_MASTER 腿部/手臂第1关节：来自 kuavo.json joint_kd
+    ; RUIWO 手臂关节：来自 kuavo.json vmp_yongchun_kpkd.ruiwo_kd（全为3）
+    (0,0)   1200    ; leg_l1_joint
+    (1,0)   3616    ; leg_l2_joint
+    (2,0)   3616    ; leg_l3_joint
+    (3,0)   1200    ; leg_l4_joint
+    (4,0)   570     ; leg_l5_joint
+    (5,0)   570     ; leg_l6_joint
+    (6,0)   1200    ; leg_r1_joint
+    (7,0)   3616    ; leg_r2_joint
+    (8,0)   3616    ; leg_r3_joint
+    (9,0)   1200    ; leg_r4_joint
+    (10,0)  570     ; leg_r5_joint
+    (11,0)  570     ; leg_r6_joint
+    (12,0)  2880    ; zarm_l1_joint (EC_MASTER)
+    (13,0)  3       ; zarm_l2_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[0]=3)
+    (14,0)  3       ; zarm_l3_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[1]=3)
+    (15,0)  3       ; zarm_l4_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[2]=3)
+    (16,0)  3       ; zarm_l5_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[3]=3)
+    (17,0)  3       ; zarm_l6_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[4]=3)
+    (18,0)  3       ; zarm_l7_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[5]=3)
+    (19,0)  2880    ; zarm_r1_joint (EC_MASTER)
+    (20,0)  3       ; zarm_r2_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[6]=3)
+    (21,0)  3       ; zarm_r3_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[7]=3)
+    (22,0)  3       ; zarm_r4_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[8]=3)
+    (23,0)  3       ; zarm_r5_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[9]=3)
+    (24,0)  3       ; zarm_r6_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[10]=3)
+    (25,0)  3       ; zarm_r7_joint (RUIWO, vmp_yongchun_kpkd ruiwo_kd[11]=3)
+}
 
 ; 基础控制参数
 actionScale        0.25    ; 动作缩放系数（恢复到0.25）
@@ -58,7 +123,7 @@ trajectories
     [3]
     {
         name        "yc_06_straight_punch"
-        data_file   "yc_06_spec_data.bin"
+        data_file   "task_data_yc_06.bin"
     }
 }
 

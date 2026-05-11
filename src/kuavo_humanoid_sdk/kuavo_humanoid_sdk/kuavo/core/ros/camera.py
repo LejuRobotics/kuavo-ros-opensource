@@ -68,28 +68,35 @@ class CameraROSInterface:
     def tensor_to_msg(self, results):
         if not results:
             return None
-        else:
-            yolo_detections = yoloDetection()
-            for result in results:
-                boxes = result.boxes.cpu().numpy()
+        shape = self.cv_image_shape
+        image_area = (shape[0] * shape[1]) if shape is not None and len(shape) >= 2 else 0.0
 
-                xywh = boxes.xywh  # center-x(i,0), center-y(i,1), width(i,2), height(i,3)
-                class_ids = result.boxes.cls.int().cpu().numpy()
-                class_names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
-                confs = boxes.conf
+        yolo_detections = yoloDetection()
+        for result in results:
+            boxes = result.boxes.cpu().numpy()
 
-                for i in range(len(xywh)):
-                    yolo_output_data = yoloOutputData(
-                        class_name=class_names[i],
-                        class_id=int(class_ids[i]),
-                        confidence=confs[i], 
-                        x_pos=xywh[i][0], 
-                        y_pos=xywh[i][1], 
-                        height=xywh[i][2], 
-                        width=xywh[i][3]
-                    )
-                    yolo_detections.data.append(yolo_output_data)
-            return yolo_detections
+            xywh = boxes.xywh  # center-x(i,0), center-y(i,1), width(i,2), height(i,3)
+            class_ids = result.boxes.cls.int().cpu().numpy()
+            class_names = [result.names[cls.item()] for cls in result.boxes.cls.int()]
+            confs = boxes.conf
+
+            for i in range(len(xywh)):
+                box_w, box_h = xywh[i][2], xywh[i][3]
+                box_area = box_w * box_h
+                area_ratio = (box_area / image_area) if image_area > 0 else 0.0
+
+                yolo_output_data = yoloOutputData(
+                    class_name=class_names[i],
+                    class_id=int(class_ids[i]),
+                    confidence=confs[i],
+                    x_pos=xywh[i][0],
+                    y_pos=xywh[i][1],
+                    height=box_h,
+                    width=box_w,
+                    area_ratio=area_ratio
+                )
+                yolo_detections.data.append(yolo_output_data)
+        return yolo_detections
 
     def publish_results(self, results, camera):
         if not results:

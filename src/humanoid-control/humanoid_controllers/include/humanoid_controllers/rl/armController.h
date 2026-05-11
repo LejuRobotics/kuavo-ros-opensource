@@ -84,14 +84,14 @@ public:
     
     /**
      * @brief 更新手臂控制（主循环调用，整合所有逻辑）
-     * 
+     *
      * 此函数整合了以下功能：
      * 1. 自动模式切换（根据cmd_stance）
      * 2. 期望状态更新（根据当前模式）
      * 3. 限速跟踪和指令缓存处理
      * 4. 力矩计算
      * 5. 命令消息填充（仅在模式0和2时，只更新joint_q、joint_v和tau，保留其他原有值）
-     * 
+     *
      * @param time 当前时间
      * @param dt 控制周期（秒）
      * @param joint_pos 当前关节位置（完整，包括腿+腰+手）
@@ -106,6 +106,29 @@ public:
                 const Eigen::VectorXd& joint_vel,
                 int cmd_stance,
                 kuavo_msgs::jointCmd& joint_cmd_msg);
+
+    /**
+     * @brief 平滑插值到目标位置（专用插值函数）
+     *
+     * 使用五次多项式插值从当前位置平滑移动到目标位置，并直接替换joint_cmd_msg中的手臂指令。
+     * 插值完成后会自动切换到RL控制（返回false）。
+     *
+     * @param time 当前时间
+     * @param dt 控制周期（秒）
+     * @param joint_pos 当前关节位置（完整，包括腿+腰+手）
+     * @param joint_vel 当前关节速度（完整，包括腿+腰+手）
+     * @param target_pos 目标手臂位置
+     * @param joint_cmd_msg 输出：关节命令消息（直接更新手臂的joint_q、joint_v和tau）
+     * @param interpolation_duration 插值持续时间（秒），默认1.0秒
+     * @return true表示正在插值，false表示插值完成
+     */
+    bool interpolateToTarget(const ros::Time& time,
+                           double dt,
+                           const Eigen::VectorXd& joint_pos,
+                           const Eigen::VectorXd& joint_vel,
+                           const Eigen::VectorXd& target_pos,
+                           kuavo_msgs::jointCmd& joint_cmd_msg,
+                           double interpolation_duration = 1.0);
 
     // ==================== 模式控制接口 ====================
     
@@ -319,6 +342,9 @@ private:
     ros::Time interpolation_start_time_;   // 插值起始时间
     Eigen::VectorXd interpolation_start_pos_; // 插值起始位置
     double interpolation_duration_;        // 插值总持续时间
+
+    // 专用插值函数相关（复用现有插值状态）
+    Eigen::VectorXd target_interpolation_target_pos_; // 专用插值目标位置
     
     // 指令缓存机制
     int pending_arm_mode_;              // 缓存的待执行模式（-1表示无缓存）

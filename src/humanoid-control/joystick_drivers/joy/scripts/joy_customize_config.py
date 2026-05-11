@@ -12,6 +12,7 @@ from std_msgs.msg import String, Bool, Float64
 from geometry_msgs.msg import Twist
 from kuavo_msgs.srv import playmusic, playmusicRequest
 from kuavo_msgs.srv import ExecuteArmAction, ExecuteArmActionRequest
+from kuavo_msgs.srv import SetString, SetStringRequest
 from std_srvs.srv import Trigger
 from humanoid_plan_arm_trajectory.msg import RobotActionState
 
@@ -520,10 +521,10 @@ class JoyCustomizeConfigNode:
             if 0 <= rt_idx < len(joy_msg.axes):
                 self._rt_pressed = joy_msg.axes[rt_idx] < -0.5
 
-            # 优先级最高：START + BACK 组合 -> 终止机器人并复位开关
-            if 0 <= start_idx < len(joy_msg.buttons) and 0 <= back_idx < len(joy_msg.buttons):
-                if joy_msg.buttons[start_idx] and joy_msg.buttons[back_idx]:
-                    rospy.logerr("[JoyCustomize] Emergency stop triggered (START + BACK)")
+            # 优先级最高：BACK 组合 -> 终止机器人并复位开关
+            if 0 <= back_idx < len(joy_msg.buttons):
+                if joy_msg.buttons[back_idx]:
+                    rospy.logerr("[JoyCustomize] Emergency stop triggered (BACK)")
                     self._gradually_move_right_stick_down()
                     self._call_terminate_srv()
                     self._allow_launch_once = True
@@ -641,43 +642,39 @@ class JoyCustomizeConfigNode:
 
                     if button_prev == 1 and button_current == 0:
 
-                        # 如果当前处于RL控制器模式，跳过组合按键动作
-                        if self._is_rl_controller:
-                            rospy.loginfo(f"Skipping customize action: currently in RL controller mode (is_rl_controller={self._is_rl_controller})")
-                            continue
-
                         # 每次按钮释放时重新加载配置文件
                         self._load_customize_config()
 
+                        # 确定 action_key
+                        action_key = None
                         # 情况 1: M1 按下、M2 未按下
                         if self._m1_pressed and not self._m2_pressed:
                             action_key = f"customize_action_M1_{button_name}"
-                            rospy.loginfo(f"M1 + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
-
                         # 情况 2: M2 按下、M1 未按下
                         elif self._m2_pressed and not self._m1_pressed:
                             action_key = f"customize_action_M2_{button_name}"
-                            rospy.loginfo(f"M2 + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
-
                         # 情况 3: M1 和 M2 同时按下
                         elif self._m1_pressed and self._m2_pressed:
                             action_key = f"customize_action_M1M2_{button_name}"
-                            rospy.loginfo(f"M1 + M2 + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
-
                         # 情况 4: LT（轴）按下、RT 未按下
                         elif self._lt_pressed and not self._rt_pressed and self.joy_execute_action:
                             action_key = f"customize_action_LT_{button_name}"
-                            rospy.loginfo(f"LT + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
-
                         # 情况 5: RT（轴）按下、LT 未按下
                         elif self._rt_pressed and not self._lt_pressed and self.joy_execute_action:
                             action_key = f"customize_action_RT_{button_name}"
-                            rospy.loginfo(f"RT + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
+
+                        if action_key is None:
+                            continue
+
+                        # 如果当前处于RL控制器模式，dance类型允许通过，其他类型跳过
+                        if self._is_rl_controller:
+                            action_type = self.customize_config.get(action_key, {}).get("type", "")
+                            if action_type != "dance":
+                                rospy.loginfo(f"Skipping customize action: currently in RL controller mode (is_rl_controller={self._is_rl_controller})")
+                                continue
+
+                        rospy.loginfo(f"{button_name} released, triggering {action_key}")
+                        self._execute_customize_action(action_key)
 
             # Update previous states
             self._prev_buttons = list(joy_msg.buttons)
@@ -779,6 +776,28 @@ class JoyCustomizeConfigNode:
         else:
             rospy.logwarn(f"No shell_command found for action")
 
+    def execute_dance_type(self, action_config):
+        """处理dance类型的自定义动作，切换到指定舞蹈控制器"""
+        dance_name = action_config.get("dance_name", "")
+        if not dance_name:
+            rospy.logwarn("No dance_name specified for dance action")
+            return
+        service_name = "/humanoid_controller/switch_to_dance_controller"
+        try:
+            rospy.wait_for_service(service_name, timeout=1.0)
+            switch_client = rospy.ServiceProxy(service_name, SetString)
+            req = SetStringRequest()
+            req.data = dance_name
+            response = switch_client(req)
+            if response.success:
+                rospy.loginfo(f"[JoyCustomize] Dance switch success: {response.message}")
+            else:
+                rospy.logwarn(f"[JoyCustomize] Dance switch failed: {response.message}")
+        except rospy.ServiceException as e:
+            rospy.logerr(f"[JoyCustomize] Service call to '{service_name}' failed: {e}")
+        except rospy.ROSException as e:
+            rospy.logerr(f"[JoyCustomize] Service '{service_name}' not available: {e}")
+
     def _execute_customize_action(self, action_key: str) -> None:
         """执行自定义动作"""
         try:
@@ -789,7 +808,8 @@ class JoyCustomizeConfigNode:
                 # 使用字典映射方式调用对应的处理函数
                 action_handlers = {
                     "action": lambda: self.execute_action_type(action_config),
-                    "shell": lambda: self.execute_shell_type(action_config)
+                    "shell": lambda: self.execute_shell_type(action_config),
+                    "dance": lambda: self.execute_dance_type(action_config)
                 }
                 
                 # 获取并调用对应的处理函数

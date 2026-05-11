@@ -1,0 +1,62 @@
+arm:
+  profile_key: x1
+  arm_solver_type_token: x1
+  geometry:
+    elbow:
+      left:
+        O_f_x: 28.143
+        O_f_z: -272.26
+        O_p_x: 0.0
+        O_p_z: -220.77
+        a_x: -19.67509
+        a_z: 3.59278
+        t_x: 8.46791
+        t_z: -47.89722
+        sign: 1
+        theta_sign: -1
+      right:
+        O_f_x: 28.143
+        O_f_z: -272.26
+        O_p_x: 0.0
+        O_p_z: -220.77
+        a_x: -19.67509
+        a_z: 3.59278
+        t_x: 8.46791
+        t_z: -47.89722
+        sign: 1
+        theta_sign: -1
+    wrist:
+      left:
+        base_A: [23.5, 0.0, 0.0]
+        base_B: [-23.5, 0.0, 0.0]
+        roll_center: [0.0, 8.05203, -142.3]
+        roll_axis: [1.0, 0.0, 0.0]
+        pitch_center_in_roll: [0.0, 0.0, -18.0]
+        pitch_axis: [0.0, 1.0, 0.0]
+        anchor_A_pitch: [23.5, -27.58, 13.14]
+        anchor_B_pitch: [-23.5, -27.58, 13.14]
+        len_A_zero: 148.45002
+        len_B_zero: 148.45002
+      right:
+        base_A: [23.5, 0.0, 0.0]
+        base_B: [-23.5, 0.0, 0.0]
+        roll_center: [0.0, -8.05203, -142.3]
+        roll_axis: [-1.0, 0.0, 0.0]
+        pitch_center_in_roll: [0.0, 0.0, -18.0]
+        pitch_axis: [0.0, -1.0, 0.0]
+        anchor_A_pitch: [23.5, 27.58, 13.14]
+        anchor_B_pitch: [-23.5, 27.58, 13.14]
+        len_A_zero: 148.45002
+        len_B_zero: 148.45002
+  limits:
+    joint:
+      elbow_left: [-2.618, 0.0]
+      elbow_right: [-2.618, 0.0]
+      wrist_roll_left: [-0.5236, 0.8727]
+      wrist_roll_right: [-0.8727, 0.5236]
+      wrist_pitch_left: [-0.3752, 0.3752]
+      wrist_pitch_right: [-0.3752, 0.3752]
+    motor:
+      elbow: [0.0, 42.5]
+      wrist_a: [-23.5514, 12.4486]
+      wrist_b: [-23.5514, 12.4486]

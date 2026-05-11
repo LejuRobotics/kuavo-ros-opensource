@@ -42,11 +42,32 @@ namespace HighlyDynamic
 
         ros::Rate rate(config["monitor_rate"].as<int>());
         auto node_list = config["node_list"].as<std::vector<std::string>>();
+
+        int robot_type = 2;
+        if (!nh_.getParam("/robot_type", robot_type))
+        {
+            std::string robot_type_str;
+            if (nh_.getParam("/robot_type", robot_type_str))
+            {
+                try
+                {
+                    robot_type = std::stoi(robot_type_str);
+                }
+                catch (...)
+                {
+                    robot_type = 2;
+                }
+            }
+        }
+
         while(ros::ok())
         {
-          for(auto node_name : node_list)
-            if(!doesNodeExist(node_name))
-              ROS_ERROR("Node %s is not running", node_name.c_str());
+          if (robot_type != 1)
+          {
+            for(auto node_name : node_list)
+              if(!doesNodeExist(node_name))
+                ROS_ERROR("Node %s is not running", node_name.c_str());
+          }
           ros::spinOnce();
           rate.sleep();
         }

@@ -44,6 +44,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_interface/common/ModelSettings.h"
 #include <urdf/model.h>
 #include <kuavo_msgs/lejuClawCommand.h>
+#include <sensor_msgs/JointState.h>
 
 
 namespace ocs2
@@ -99,7 +100,11 @@ namespace ocs2
 
       void updateHeadJointPositions(const vector_t &positions);
       
+      // qiangnao手专用关节更新接口，输入12维控制量（范围0~100，左右手各6个）
       void updateHandJointPositions(const vector_t &positions);
+
+      // Linker L6/O6手专用关节更新接口，输入12维控制量（范围0~255，左右手各6个）
+      void updateLinkerHandJointPositions(const vector_t &positions);
 
       void updateClawJointPositions(const vector_t &positions);
 
@@ -126,6 +131,7 @@ namespace ocs2
 
       tf::TransformBroadcaster tfBroadcaster_;
       std::unique_ptr<robot_state_publisher::RobotStatePublisher> robotStatePublisherPtr_;
+      ros::Timer fixed_tf_publish_timer_; // 周期性发布静态TF，防止录bag漏录
 
       ros::Publisher costDesiredBasePositionPublisher_;
       std::vector<ros::Publisher> costDesiredFeetPositionPublishers_;
@@ -143,11 +149,17 @@ namespace ocs2
       bool updateDexhandJointPositions_ = false;
       std::vector<double> dexhand_joint_positions_;
 
+      // Linker L6/O6灵巧手相关成员
+      bool isLinkerHand_ = false;
+      std::vector<std::string> linker_hand_joint_names_;
+      std::vector<double> linker_hand_joint_positions_;
+
 
       bool updateClawJointPositions_ = true;
       std::vector<double> claw_joint_positions_ = {0.0, 0.0};
       ros::Subscriber clawCmdSubscriber_;
       void lejuClawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg);
+
 
       scalar_t lastTime_;
       scalar_t minPublishTimeDifference_;
@@ -155,6 +167,7 @@ namespace ocs2
       ModelSettings visualModeSettings_;
 
       ros::Publisher eePosePub_;
+      ros::Publisher lejuClawStatePub_;
       urdf::Model urdfModel_;
 
     };

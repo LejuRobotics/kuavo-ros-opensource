@@ -58,6 +58,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_interface_ros/newTargetPublisher/LowPassFilter.h"
 #include "humanoid_interface_ros/newTargetPublisher/LowPassFilter5thOrder.h"
 #include "std_srvs/Trigger.h"
+#include <kuavo_common/common/common.h>
 #include <std_msgs/Bool.h>
 #include <ocs2_robotic_tools/common/RotationTransforms.h>
 
@@ -66,12 +67,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/gaitTimeName.h"
 #include <ocs2_msgs/mpc_flattened_controller.h>
 #include <kuavo_common/common/json.hpp>
+#include <kuavo_common/common/common.h>
 #include <map>
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include "kuavo_msgs/robotHeadMotionData.h"
 #include "kuavo_msgs/robotHandPosition.h"
 #include <std_srvs/SetBool.h>
 #include <kuavo_msgs/ExecuteArmAction.h>
+#include <kuavo_msgs/SetString.h>
 #include <humanoid_plan_arm_trajectory/RobotActionState.h>
 
 // 命令执行相关头文件
@@ -163,6 +166,7 @@ namespace ocs2
 #define JOYSTICK_BEITONG_MAP_JSON "bt2pro"
 #define JOYSTICK_BEITONG_BUTTON_NUM 16
 #define JOYSTICK_AXIS_NUM 8
+#define WAIST_YAW_MAX_ANGLE_DEG 180.0  // 腰部最大旋转角度（度），±180度
 
   class JoyControl
   {
@@ -380,6 +384,7 @@ namespace ocs2
       switch_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchController>("/humanoid_controller/switch_controller");
       get_controller_list_client_ = nodeHandle_.serviceClient<kuavo_msgs::getControllerList>("/humanoid_controller/get_controller_list");
       switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
+      switch_to_previous_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_previous_controller");
       auto_gait_change_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_auto_gait");
       joy_sub_ = nodeHandle_.subscribe(current_joy_topic_, 10, &JoyControl::joyCallback, this);
       
@@ -464,6 +469,8 @@ namespace ocs2
       trigger_fall_stand_up_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/trigger_fall_stand_up");
       // Fall down state client
       set_fall_down_state_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_controller/set_fall_down_state");
+      // Dance controller: kuavo_msgs/SetString（空 data=列表首项，或 #下标/名称）
+      switch_dance_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetString>("/humanoid_controller/switch_to_dance_controller");
       last_status_check_time_ = ros::Time(0);
 
       // 加载命令配置
@@ -586,11 +593,11 @@ namespace ocs2
           commands_map_[current_cmd.name] = current_cmd;
         }
         
-        std::cout << "Loaded " << commands_map_.size() << " commands" <<std::endl;
-        for (const auto& cmd : commands_map_)
-        {
-          std::cout << " - " << cmd.first << ": "<< cmd.second.type << " " << cmd.second.value << " " << cmd.second.description << std::endl;
-        }
+        // std::cout << "Loaded " << commands_map_.size() << " commands" <<std::endl;
+        // for (const auto& cmd : commands_map_)
+        // {
+        //   std::cout << " - " << cmd.first << ": "<< cmd.second.type << " " << cmd.second.value << " " << cmd.second.description << std::endl;
+        // }
       }
       catch (const std::exception& e)
       {
@@ -997,6 +1004,20 @@ namespace ocs2
         return;
       }
 
+      // MPC/RL 切换后短时间锁：只认 BUTTON_RL 的上升沿（行走列表中「下一个」），摇杆及其余按键不响应
+      if (isControllerSwitching())
+      {
+        const int rl_idx = joyButtonMap["BUTTON_RL"];
+        if (rl_idx >= 0 && static_cast<size_t>(rl_idx) < old_joy_msg_.buttons.size() &&
+            static_cast<size_t>(rl_idx) < joy_msg->buttons.size() && !old_joy_msg_.buttons[rl_idx] && joy_msg->buttons[rl_idx])
+        {
+          ROS_INFO("[JoyControl] (controller switch window) BUTTON_RL: switch to next controller");
+          switchToNextController();
+        }
+        joystick_origin_axis_.setZero();
+        old_joy_msg_ = *joy_msg;
+        return;
+      }
 
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
       {
@@ -1016,6 +1037,17 @@ namespace ocs2
         // 发布头部控制命令
         controlHead(current_head_yaw_, current_head_pitch_);
         // return;
+
+        // RT + X: 切换到上一个控制器
+        // roban 保留 RT+X 作为动作组合键，避免与控制器切换冲突；kuavo 等其他版本允许切换控制器
+        if (!IS_ROBAN_LEGGED(rb_version_) &&
+            !old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
+        {
+          ROS_INFO("[JoyControl] RT+BUTTON_RL: switch to previous controller");
+          switchToPreviousController();
+          old_joy_msg_ = *joy_msg;
+          return;
+        }
 
         if(!joy_execute_action_)
         {
@@ -1172,10 +1204,10 @@ namespace ocs2
       
       if (joy_msg->buttons[joyButtonMap["BUTTON_LB"]])// 按下左侧侧键，切换模式
       {
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
-        pubModeGaitScale(0.9);
-        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
-        pubModeGaitScale(1.1);
+        if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
+          pubModeGaitScale(0.9);
+        else if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
+          pubModeGaitScale(1.1);
         else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
         {
           arm_ctrl_mode_ = (arm_ctrl_mode_ > 0)? 0 : 1;
@@ -1204,19 +1236,43 @@ namespace ocs2
       }
       else if (joy_msg->buttons[joyButtonMap["BUTTON_RB"]])// 按下右侧侧键，切换模式
       {
+        // RB + BUTTON_STANCE(A)
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
         {
-          c_relative_base_limit_[0] -= (c_relative_base_limit_[0] > 0.1) ? 0.05 : 0.0;
-          c_relative_base_limit_[3] -= (c_relative_base_limit_[3] > 0.1) ? 0.05 : 0.0;
-          std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
-                    << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
+          // RB+A roban2 芭啦芭啦樱之舞
+          if (IS_ROBAN(rb_version_))
+          {
+            ROS_INFO("[JoyControl] RB+A: dance_parapara");
+            callSwitchToDanceSrvByName("dance_parapara");
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          else
+          {
+            c_relative_base_limit_[0] -= (c_relative_base_limit_[0] > 0.1) ? 0.05 : 0.0;
+            c_relative_base_limit_[3] -= (c_relative_base_limit_[3] > 0.1) ? 0.05 : 0.0;
+            std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
+                      << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
+          }
         }
-        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
+        // RB + BUTTON_WALK(Y)
+        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
         {
-          c_relative_base_limit_[0] += 0.05;
-          c_relative_base_limit_[3] += 0.05;
-          std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
-                    << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
+          // RB+Y roban2 lonelydance舞蹈
+          if (IS_ROBAN(rb_version_))
+          {
+            ROS_INFO("[JoyControl] RB+Y: dance_lonelydance");
+            callSwitchToDanceSrvByName("dance_lonelydance");
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          else
+          {
+            ROS_INFO("Switching to DanceController via RB+Y");
+            callTriggerDanceSrv();
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
         }
         // RB + BUTTON_RL(X): 起身
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
@@ -1258,39 +1314,10 @@ namespace ocs2
         }
       }
       old_joy_msg_ = *joy_msg;
-
-      // 控制器切换阶段，禁用摇杆输入和除了BUTTON_RL外的button
-      if (isControllerSwitching())
-      {
-        joystick_origin_axis_.setZero();
-
-        sensor_msgs::Joy modified_joy_msg = *joy_msg;
-        int button_rl_index = joyButtonMap["BUTTON_RL"];
-        for (size_t i = 0; i < modified_joy_msg.buttons.size(); i++)
-        {
-          if (i != static_cast<size_t>(button_rl_index))
-          {
-            modified_joy_msg.buttons[i] = 0;
-          }
-        }
-        old_joy_msg_ = modified_joy_msg;
-      }
     }
 
     void checkGaitSwitchCommand(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
-      // 控制器切换阶段，只允许BUTTON_RL用于切换控制器，其他按钮禁用
-      if (isControllerSwitching())
-      {
-        // 只检查BUTTON_RL用于切换控制器
-        // if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
-        // {
-        //   ROS_INFO("[JoyControl] switch to next controller");
-        //   switchToNextController();
-        // }
-        return;
-      }
-
       // 有摇杆数据不可以步态切换
       if (
         std::abs(joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]]) > DEAD_ZONE ||
@@ -1309,13 +1336,31 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
       {
-        if (!joy_execute_action_)
+        // Roban: B switch to MPC
+        if (IS_ROBAN(rb_version_))
+        {
+          // Dance控制器下不允许切MPC（MPC无法接管直腿/倾斜姿态）
+          kuavo_msgs::getControllerList get_list_srv;
+          if (get_controller_list_client_.call(get_list_srv) && get_list_srv.response.success)
+          {
+            const std::string& cur = get_list_srv.response.current_controller;
+            if (cur.find("dance") != std::string::npos)
+            {
+              ROS_WARN("[JoyControl] B: dance controller active, MPC switch ignored. Press X for AMP.");
+              return;
+            }
+          } // end of get current controller
+          ROS_INFO("[JoyControl] B: switch to MPC");
+          callSwitchControllerService("mpc");
+          return;
+        }// end of Roban: B switch to MPC
+        else if (!joy_execute_action_)
         {
           publishGaitTemplate("trot");
         }
         else
         {
-          // 使用 TROT 作为“遥感/方向键输入”开关
+          // 使用 TROT 作为"遥感/方向键输入"开关
           axes_input_enabled_ = !axes_input_enabled_;
           ROS_WARN_STREAM("[JoyControl] Axes input toggled: " << (axes_input_enabled_ ? "ENABLED" : "DISABLED"));
           if (!axes_input_enabled_)
@@ -1330,6 +1375,13 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
+        // Roban: X switch to AMP
+        if (IS_ROBAN(rb_version_))
+        {
+          ROS_INFO("[JoyControl] X: switch to amp_controller");
+          callSwitchControllerService("amp_controller");
+          return;
+        }
         ROS_INFO("[JoyControl] switch to next controller");
         // Get controller list and switch to next
         switchToNextController();
@@ -1469,7 +1521,7 @@ namespace ocs2
         updated[2] = true;
         // current_target_(2) = com_height_ + commad_line_target_(2);
         cmdVel.linear.z = commad_line_target_(2);
-        std::cout << "base height: " << current_target_(2) << std::endl;
+        ROS_INFO_THROTTLE(1.0, "base height: %f", current_target_(2));
       }
       else
       {
@@ -1609,6 +1661,66 @@ namespace ocs2
       else
       {
         ROS_ERROR("[JoyControl] Failed to call set_fall_down_state service");
+      }
+    }
+
+    void callTriggerDanceSrv()
+    {
+      std::cout << "trigger callTriggerDanceSrv" << std::endl;
+      
+      // 首先获取当前控制器，再决定切换方向
+      kuavo_msgs::getControllerList get_list_srv;
+      if (!get_controller_list_client_.call(get_list_srv) || !get_list_srv.response.success)
+      {
+        ROS_ERROR("[JoyControl] Failed to get current controller");
+        return;
+      }
+      
+      std::string current_controller = get_list_srv.response.current_controller;
+      ROS_INFO("[JoyControl] Current controller: %s", current_controller.c_str());
+      
+      // 如果当前已经在dance_controller，切换到amp_controller
+      if (current_controller == "dance_controller")
+      {
+        ROS_INFO("[JoyControl] Switching from DanceController to AmpWalkController");
+        if (callSwitchControllerService("amp_controller"))
+        {
+          ROS_INFO("[JoyControl] Successfully switched to AmpWalkController");
+        }
+        else
+        {
+          ROS_ERROR("[JoyControl] Failed to switch to AmpWalkController");
+        }
+      }
+      else
+      {
+        // 否则切到舞蹈列表首项（与空 SetString 语义一致）
+        ROS_INFO("[JoyControl] Switching to DanceController (first in list)");
+        kuavo_msgs::SetString srv;
+        srv.request.data = "";
+        if (switch_dance_client_.call(srv) && srv.response.success)
+        {
+          ROS_INFO("[JoyControl] Successfully switched to DanceController: %s", srv.response.message.c_str());
+        }
+        else
+        {
+          ROS_ERROR("[JoyControl] Failed to switch to DanceController");
+        }
+      }
+    }
+
+    void callSwitchToDanceSrvByName(const std::string& dance_data)
+    {
+      ROS_INFO("[JoyControl] Switching to dance: %s", dance_data.c_str());
+      kuavo_msgs::SetString srv;
+      srv.request.data = dance_data;
+      if (switch_dance_client_.call(srv) && srv.response.success)
+      {
+        ROS_INFO("[JoyControl] Dance switch success: %s", srv.response.message.c_str());
+      }
+      else
+      {
+        ROS_ERROR("[JoyControl] Dance switch failed (data=%s)", dance_data.c_str());
       }
     }
 
@@ -1832,6 +1944,27 @@ namespace ocs2
       }
     }
 
+    bool switchToPreviousController()
+    {
+      kuavo_msgs::switchToNextController srv;
+      
+      if (switch_to_previous_controller_client_.call(srv)) {
+        if (srv.response.success) {
+          ROS_INFO("Switch to previous controller successful: %s", srv.response.message.c_str());
+          ROS_INFO("Switched from %s (index: %d) to %s (index: %d)", 
+                   srv.response.current_controller.c_str(), srv.response.current_index,
+                   srv.response.next_controller.c_str(), srv.response.next_index);
+          return true;
+        } else {
+          ROS_ERROR("Switch to previous controller failed: %s", srv.response.message.c_str());
+          return false;
+        }
+      } else {
+        ROS_ERROR("Switch to previous controller service call failed");
+        return false;
+      }
+    }
+
     bool changeAutoGaitStatus(bool flag)
     {
       std_srvs::SetBool srv;
@@ -1911,6 +2044,7 @@ namespace ocs2
     ros::ServiceClient switch_controller_client_;
     ros::ServiceClient get_controller_list_client_;
     ros::ServiceClient switch_to_next_controller_client_;
+    ros::ServiceClient switch_to_previous_controller_client_;
     ros::ServiceClient auto_gait_change_client_;
     
     // 楼梯检测相关
@@ -1934,6 +2068,8 @@ namespace ocs2
     ros::ServiceClient trigger_fall_stand_up_client_;
     // Fall down state service (SetBool)
     ros::ServiceClient set_fall_down_state_client_;
+    // Dance controller (SetString, 同 RLControllerManager::switchDanceControllerByStringCallback)
+    ros::ServiceClient switch_dance_client_;
     bool robot_launched_{false};
     ros::Time last_status_check_time_;
     bool real_{false};

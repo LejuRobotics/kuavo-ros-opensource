@@ -38,6 +38,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <humanoid_wheel_interface/HumanoidWheelInterface.h>
 #include <ocs2_self_collision_visualization/GeometryInterfaceVisualization.h>
 
+#include <kuavo_msgs/lejuClawCommand.h>
+#include <kuavo_msgs/lejuClawState.h>
+#include <sensor_msgs/JointState.h>
+
 namespace ocs2 {
 namespace mobile_manipulator {
 
@@ -80,6 +84,29 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   std::vector<std::string> head_joint_names_;
   std::vector<double> head_joint_positions_;
   bool updateHeadJointPositions_ = false;
+
+  // 夹爪相关
+  bool updateClawJointPositions_ = true;
+  std::vector<double> claw_joint_positions_ = {0.0, 0.0};
+  ros::Subscriber clawCmdSubscriber_;
+  ros::Publisher lejuClawStatePub_;
+  void lejuClawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg);
+  void updateClawJointPositions(const Eigen::VectorXd& positions);
+
+  // 灵巧手相关
+  std::vector<std::string> dexhand_joint_names_;
+  std::vector<double> dexhand_joint_positions_;
+  bool updateDexhandJointPositions_ = false;
+  ros::Subscriber dexhandStateSubscriber_;
+  void dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
+  void updateHandJointPositions(const Eigen::VectorXd& positions);
+
+  // 检测到外部 odom->base_link 时（/external_odom/active 为 true），不发布内部的 odom->base_link
+  bool use_external_odom_tf_ = false;
+  std::mutex external_odom_mutex_;
+  ros::Subscriber external_odom_active_sub_;
+
+  void externalOdomActiveCallback(const std_msgs::BoolConstPtr& msg);
 };
 
 }  // namespace mobile_manipulator

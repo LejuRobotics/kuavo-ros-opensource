@@ -18,6 +18,7 @@
 #include <geometry_msgs/Quaternion.h>
 #include <std_msgs/Int32.h>
 #include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <iomanip>
 #include <cmath>
 
@@ -498,6 +499,13 @@ void Quest3IkIncrementalROS::fsmChange() {
   if (rightChangingMaintainUpdated) {
     rightProcessed = processChangingDataRightArm(rightHandCtrlModeChanged);
   }
+  // 手臂复位，退出极速模式
+  if (!joyStickHandlerPtr_->isLeftArmCtrlModeActive() && !joyStickHandlerPtr_->isRightArmCtrlModeActive())
+  {
+    kuavo_msgs::changeArmCtrlMode srv3;
+    srv3.request.control_mode = static_cast<int>(0);
+    enableWbcArmTrajectoryControlClient_.call(srv3);
+  }
 
   // 只有当至少一个臂处理成功时才继续
   if (!leftProcessed && !rightProcessed) return;
@@ -514,16 +522,18 @@ void Quest3IkIncrementalROS::fsmChange() {
 }
 
 void Quest3IkIncrementalROS::fsmProcess() {
+  processTorsoControlLoop();
+
   if (!incrementalController_->isIncrementalMode()) return;
 
   // latestHumanLeftElbowPos_ = quest3ArmInfoTransformerPtr_->getLeftElbowPose().position;
   // latestHumanRightElbowPos_ = quest3ArmInfoTransformerPtr_->getRightElbowPose().position;
 
-  // 【关键修复】使用专门的 transformerMutex_ 加锁保护，避免在获取时 bonePosesCallback 正在更新 Transformer
+  // 使用基类统一锁保护 Transformer 读写，避免与 bonePosesCallback 并发更新冲突
   ArmPose vrLeftPose;
   ArmPose vrRightPose;
   {
-    std::lock_guard<std::mutex> lock(transformerMutex_);
+    std::lock_guard<std::mutex> lock(transformerDataMutex_);
     vrLeftPose = quest3ArmInfoTransformerPtr_->getLeftHandPose();  // 值拷贝，不是引用
     vrRightPose = quest3ArmInfoTransformerPtr_->getRightHandPose(); // 值拷贝，不是引用
   }
@@ -1406,6 +1416,7 @@ void Quest3IkIncrementalROS::deactivateController() {
   if (!controllerActivated_.load()) return;
   if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
+  if (arm_ctrl_mode_ == 1 or arm_ctrl_mode_ == 2) return; //如果当前是模式1或者模式2，不切换回去，防止进入和退出增量模式时误触发
 
   kuavo_msgs::changeArmCtrlMode srv1, srv2;
   srv1.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
@@ -1416,6 +1427,14 @@ void Quest3IkIncrementalROS::deactivateController() {
       humanoidArmCtrlModeClient_.call(srv2) && srv2.response.result &&  //
       changeArmCtrlModeClient_.call(srv2) && srv2.response.result &&    //
       true));
+}
+
+void Quest3IkIncrementalROS::armCtrlModeCallback(const std_msgs::Float64MultiArray::ConstPtr& msg) {
+  if (msg->data.size() != 2) {
+    ROS_WARN("[Quest3IkIncrementalROS] Invalid arm control mode message");
+    return;
+  }
+  arm_ctrl_mode_ = static_cast<int>(msg->data[1]); //获取手臂控制模式
 }
 
 void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
@@ -2088,6 +2107,10 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   leftElbowFixedPoint_ = Eigen::Vector3d(-0.3, 0.5, 0.32);
   rightElbowFixedPoint_ = Eigen::Vector3d(-0.3, -0.5, 0.32);
 
+  // 从主控制器实时订阅当前手臂控制模式
+  arm_ctrl_mode_vr_sub_ = nodeHandle_.subscribe(
+  "/humanoid/mpc/arm_control_mode", 1, &Quest3IkIncrementalROS::armCtrlModeCallback, this);
+
   //从JSON配置读取手臂关节数量
   if (configJson.contains("NUM_ARM_JOINT")) {
     jointStateSize_ = configJson["NUM_ARM_JOINT"].get<int>();
@@ -2399,7 +2422,7 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   // 读取关节角度fhan滤波参数
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_r_joint", fhanRJoint_, 900.0, 1);
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/fhan_kh0_joint", fhanKh0Joint_, 6.0, 1);
-  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", maxJointVelocity_, 1.0, 3);
+  PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", maxJointVelocity_, 30.0, 3);
 
   // 读取手部位置约束参数
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/sphere_radius_limit", sphereRadiusLimit_, 0.5, 2);
@@ -2481,6 +2504,18 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
                            Eigen::Vector3d(M_PI / 2.0, 0.6, 0.6),
                            2,
                            "[Quest3IkIncrementalROS]");
+
+  if (configJson.contains("chassis_joy_cmd_travel_scale")) {
+    const double v = configJson["chassis_joy_cmd_travel_scale"].get<double>();
+    if (std::isfinite(v) && v > 0.0) {
+      incrementalConfig.chassisJoyCmdTravelScale = v;
+    } else {
+      ROS_WARN(
+          "[Quest3IkIncrementalROS] Invalid chassis_joy_cmd_travel_scale in JSON, fallback to 1.0 (no joy scaling)");
+      incrementalConfig.chassisJoyCmdTravelScale = 1.0;
+    }
+  }
+  ROS_INFO("[Quest3IkIncrementalROS] chassis_joy_cmd_travel_scale: %.4f", incrementalConfig.chassisJoyCmdTravelScale);
 
   incrementalController_ = std::make_unique<IncrementalControlModule>(incrementalConfig);
 

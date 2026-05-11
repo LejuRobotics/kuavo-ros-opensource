@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 import rospy
 import psutil
 import subprocess
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, String
 
 def is_running_in_docker():
     try:
@@ -15,6 +16,61 @@ def is_running_in_docker():
     except FileNotFoundError:
         pass
     return False
+
+def get_commit_hash():
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    project_dir = os.path.realpath(os.path.join(script_dir, "../../../../"))
+    version_dir = os.path.join(project_dir, ".version")
+
+    if os.path.isdir(os.path.join(project_dir, ".git")):
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=project_dir,
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+
+    version_file = os.path.join(version_dir, "GIT_COMMIT")
+    if os.path.isfile(version_file):
+        try:
+            with open(version_file, "r") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+
+    return "unknown"
+
+def get_git_tag():
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    project_dir = os.path.realpath(os.path.join(script_dir, "../../../../"))
+    version_dir = os.path.join(project_dir, ".version")
+
+    if os.path.isdir(os.path.join(project_dir, ".git")):
+        try:
+            tag_result = subprocess.run(
+                ["git", "describe", "--tags"],
+                cwd=project_dir,
+                capture_output=True, text=True, timeout=5,
+            )
+            if tag_result.returncode == 0:
+                return tag_result.stdout.strip()
+        except Exception:
+            pass
+
+    version_file = os.path.join(version_dir, "GIT_TAG")
+    if os.path.isfile(version_file):
+        try:
+            with open(version_file, "r") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+
+    return "unknown"
+
 
 def get_cpu_usage():
     # 获取每个 CPU 核心的使用率
@@ -54,6 +110,18 @@ def publish_system_info():
         return
 
     rospy.init_node('system_info_publisher')
+
+    # Publish git commit hash (latched, one-shot)
+    commit_pub = rospy.Publisher('/kuavo/running_commit', String, queue_size=1, latch=True)
+    commit_hash = get_commit_hash()
+    commit_pub.publish(String(data=commit_hash))
+    rospy.loginfo("Running commit: %s", commit_hash)
+
+    # Publish git tag/describe info (latched, one-shot)
+    git_tag_pub = rospy.Publisher('/kuavo/running_tag', String, queue_size=1, latch=True)
+    git_tag = get_git_tag()
+    git_tag_pub.publish(String(data=git_tag))
+    rospy.loginfo("Running git tag: %s", git_tag)
 
     pub_cpu_usage = rospy.Publisher('/monitor/system_info/cpu_usage', Float64MultiArray, queue_size=10)
     pub_cpu_temp = rospy.Publisher('/monitor/system_info/cpu_temperature', Float64MultiArray, queue_size=10)
