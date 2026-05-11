@@ -101,12 +101,16 @@ catkin build  humanoid_controllers
 ```bash
 source devel/setup.bash # 如果使用docker环境，则使用source devel/setup.zsh
 roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch # 启动控制器、mpc、wbc、mujoco仿真器
+# 注：轮臂机器人请使用 
+roslaunch humanoid_controllers load_kuavo_mujoco_sim_wheel.launch
 ```
 * 使用gazebo仿真器
 ```bash
 catkin build humanoid_controllers gazebo_sim # 需要编译gazebo_sim包
 source devel/setup.bash # 如果使用docker环境，则使用source devel/setup.zsh
 roslaunch humanoid_controllers load_kuavo_gazebo_sim.launch # 启动控制器、mpc、wbc、gazebo仿真器
+# 注：轮臂机器人请使用
+roslaunch humanoid_controllers load_kuavo_gazebo_sim_wheel.launch
 ```
 * 使用isaac-sim仿真器
 ```bash
