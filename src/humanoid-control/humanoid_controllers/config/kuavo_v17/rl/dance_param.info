@@ -230,11 +230,11 @@ torqueLimits
     (10,0)  150.0  ; leg_r4_joint
     (11,0)  74.0   ; leg_r5_joint
     (12,0)  74.0   ; leg_r6_joint
-    (13,0)  14.1   ; zarm_l1_joint
+    (13,0)  16.0   ; zarm_l1_joint
     (14,0)  37.0   ; zarm_l2_joint
     (15,0)  37.0   ; zarm_l3_joint
     (16,0)  37.0   ; zarm_l4_joint
-    (17,0)  14.1   ; zarm_r1_joint
+    (17,0)  16.0   ; zarm_r1_joint
     (18,0)  37.0   ; zarm_r2_joint
     (19,0)  37.0   ; zarm_r3_joint
     (20,0)  37.0   ; zarm_r4_joint
