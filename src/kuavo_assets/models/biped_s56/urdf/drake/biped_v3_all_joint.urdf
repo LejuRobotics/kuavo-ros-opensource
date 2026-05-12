@@ -473,7 +473,7 @@
     </visual>
   </link>
   <joint name="leg_r6_joint" type="revolute">
-    <origin xyz="0 0 0" rpy="0 0 0" />
+    <origin xyz="0 0 -0.023" rpy="0 0 0" />
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />

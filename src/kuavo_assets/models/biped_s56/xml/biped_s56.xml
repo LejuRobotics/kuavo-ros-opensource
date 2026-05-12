@@ -58,7 +58,8 @@
     <mesh name="head_camera_base" file="head_camera_base.STL"/>
     <mesh name="head_camera_depth" file="head_camera_depth.STL"/>
     <mesh name="head_radar" file="head_radar.STL"/>
-    <mesh name="waist_camera" file="waist_camera.STL"/>
+    <mesh name="waist_camera_base" file="waist_camera_base.STL"/>
+    <mesh name="waist_camera_depth" file="waist_camera_depth.STL"/>
   </asset>
   <worldbody>
     <body name="base_link" pos="0 0 0.82">
@@ -92,7 +93,7 @@
                 <inertial pos="0.00000366 0.00000000 -0.01009408" quat="1 0 0 0" mass="0.33065201" diaginertia="9.895e-05 1.0782e-04 7.01e-05"/>
                 <joint name="leg_l5_joint" pos="0 0 0" axis="0 1 0" range="-0.872665 0.349066" actuatorfrcrange="-91.6 91.6" damping="0.02"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_foot_pitch"/>
-                <body name="leg_l6_link">
+                <body name="leg_l6_link" pos="0 0 -0.023">
                   <site name="l_ft_frame" pos="0 0 0" size="0.02 0.02 0.02" rgba="1 1 1 1" type="box" group="3"/>
                   <site name="l_foot_sole" pos="0.04883799999999999 0.0 -0.0365" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="3"/>
                   <site name="l_foot_toe" pos="0.17083623 0.0 -0.0365" size="0.01 0.01 0.01" rgba="0 1 0 1" type="sphere" group="3"/>
@@ -144,7 +145,7 @@
                 <inertial pos="0.00000366 0.00000000 -0.01009408" quat="1 0 0 0" mass="0.33065201" diaginertia="9.895e-05 1.0782e-04 7.01e-05"/>
                 <joint name="leg_r5_joint" pos="0 0 0" axis="0 1 0" range="-0.872665 0.349066" actuatorfrcrange="-91.6 91.6" damping="0.02"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_foot_pitch"/>
-                <body name="leg_r6_link">
+                <body name="leg_r6_link" pos="0 0 -0.023">
                   <site name="r_ft_frame" pos="0 0 0" size="0.02 0.02 0.02" rgba="1 1 1 1" type="box" group="3"/>
                   <site name="r_foot_sole" pos="0.04883799999999999 0.0 -0.0365" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="3"/>
                   <site name="r_foot_toe" pos="0.17083623 0.0 -0.0365" size="0.01 0.01 0.01" rgba="0 1 0 1" type="sphere" group="3"/>
@@ -180,11 +181,15 @@
         <!-- waist_yaw碰撞体 -->
         <geom type="capsule" size="0.13 0.06" pos="0.008 0 0.2486" quat="0.707388 0.706825 0 0" class="collision"/>
         <geom type="capsule" size="0.13 0.03" pos="0.008 0 0.0886" class="collision"/>
-        <!-- <body name="waist_camera_link" pos="0.09538 0 -0.01091" quat="0.868 0 0.497 0"> -->
-        <body name="waist_camera_link" pos="0.09538 0 -0.01491" quat="0.868 0 0.497 0">  <!-- 由于 waist_yaw 的 mesh 遮挡，略微向下移动相机位置 4mm -->
-          <inertial pos="0.0048485 0.00025646 0.013977" mass=".0483" diaginertia="5.9781e-05 5.8328e-06 5.9293e-05"/>
-          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_camera"/>
-          <camera name="waist_camera" pos="0.01229 0.02375 0.01452" xyaxes="0 -1 0 0 0 1" fovy="80" />
+        <!-- 腰相机 mesh 与 biped_s56.urdf / s53 一致：base + depth -->
+        <body name="waist_camera_base_link" pos="0.0787 0 -0.028149" quat="0.956365 0 0.292372 0">
+          <inertial pos="0.00471770 0.00007850 0.01403306" quat="1 0 0 0" mass="0.133" diaginertia="0.00016465 0.00001688 0.00016361"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="waist_camera_base"/>
+          <body name="waist_camera_link" pos="0.011715 0.0475 0.014312">
+            <inertial pos="-0.0005 0 0" quat="1 0 0 0" mass="0.0000785398163397463" diaginertia="0.000000000981747704246829 0.000000000497418836818394 0.000000000497418836818394"/>
+            <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_camera_depth"/>
+            <camera name="waist_camera" pos="0 0 0" xyaxes="0 -1 0 0 0 1" fovy="80"/>
+          </body>
         </body>
         <body name="zarm_l1_link" pos="-0.003 0.2527 0.283">
           <inertial pos="0.00140078 -0.010235 -0.00030514" quat="0.708449 0.7049 -0.00774269 -0.034" mass="1.01296" diaginertia="0.00147543 0.00144282 0.000964459"/>
