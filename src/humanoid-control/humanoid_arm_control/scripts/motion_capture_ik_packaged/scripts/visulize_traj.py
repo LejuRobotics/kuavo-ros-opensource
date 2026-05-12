@@ -29,7 +29,7 @@ def kuavo_arm_traj_callback(msg):
 
 def finger_joint_callback(msg):
     global finger_joint_position, end_effector_type
-    if end_effector_type == QIANGNAO:
+    if end_effector_type == QIANGNAO or end_effector_type == "linker_hand":
         for i in range(6):
             finger_joint_position[0][i] = msg.left_hand_position[i] * QIANGNAO_SCALE
             finger_joint_position[1][i] = msg.right_hand_position[i] * QIANGNAO_SCALE

@@ -17,7 +17,7 @@ import numpy as np
 import rospy
 import tf.transformations as tft
 from std_msgs.msg import String
-from kuavo_msgs.msg import robotBodyMatrices, robotHeadMotionData
+from kuavo_msgs.msg import robotBodyMatrices, robotHeadMotionData, headCtrlMode
 from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeResponse
 
 
@@ -63,6 +63,7 @@ class PicoHeadControlNode:
         rospy.on_shutdown(self._on_shutdown)
 
         self.head_pub = rospy.Publisher("/robot_head_motion_data", robotHeadMotionData, queue_size=10)
+        self.head_mode_status_pub = rospy.Publisher("/pico/head_control_mode_status", headCtrlMode, queue_size=10)
         rospy.Subscriber("/robot_body_matrices", robotBodyMatrices, self._on_robot_body_matrices)
         rospy.Subscriber("/pico/head_control_mode", String, self._on_mode)
         self.head_control_mode_service = rospy.Service(
@@ -82,6 +83,13 @@ class PicoHeadControlNode:
     def _clamp(value: float, min_val: float, max_val: float) -> float:
         return max(min_val, min(max_val, value))
 
+    def _publish_head_mode_status(self):
+        """发布当前头部控制模式状态（含 fixed_main_hand 信息）."""
+        msg = headCtrlMode()
+        msg.mode = self.mode
+        msg.fixed_main_hand = self.fixed_main_hand if self.mode == HeadControlMode.FIXED_MAIN_HAND else ""
+        self.head_mode_status_pub.publish(msg)
+
     def _on_mode(self, msg: String):
         mode = msg.data.strip().lower()
         if mode in HeadControlMode.ALL and mode != self.mode:
@@ -89,6 +97,7 @@ class PicoHeadControlNode:
             self.mode = mode
             self.mode_changed = True
             rospy.loginfo("Head mode switched: %s -> %s", self.last_mode, self.mode)
+            self._publish_head_mode_status()
         elif mode not in HeadControlMode.ALL:
             rospy.logwarn("Ignore invalid head mode: %s", mode)
 
@@ -124,6 +133,7 @@ class PicoHeadControlNode:
             self.mode_changed = True
             rospy.loginfo("Head mode switched via service: %s -> %s", self.last_mode, self.mode)
 
+        self._publish_head_mode_status()
         response.success = True
         response.message = (
             f"Head control mode set to: {mode}"

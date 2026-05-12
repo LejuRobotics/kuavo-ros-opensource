@@ -76,6 +76,7 @@ class KuavoRobotInfo(RobotInfoBase):
                 - ``qiangnao`` 表示普通灵巧手
                 - ``lejuclaw`` 表示乐聚二指夹爪
                 - ``qiangnao_touch`` 表示触觉灵巧手
+                - ``linker_hand`` 表示灵心巧手(与 qiangnao 等价, 仅硬件侧做位置映射)
                 - ...
         """
         return self._end_effector_type

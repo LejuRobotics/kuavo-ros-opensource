@@ -122,7 +122,7 @@ class Quest3Node:
         robot_hand_position = robotHandPosition()
         robot_hand_position.header.stamp = rospy.Time.now()
 
-        if self.end_effector_type == "qiangnao":
+        if self.end_effector_type == "qiangnao" or self.end_effector_type == "linker_hand":
             self.handle_qiangnao(joyStick_data, hand_finger_data, left_hand_position, right_hand_position, robot_hand_position)
         elif self.end_effector_type == "jodell":
             self.handle_jodell(hand_finger_data, left_hand_position, right_hand_position, robot_hand_position)
