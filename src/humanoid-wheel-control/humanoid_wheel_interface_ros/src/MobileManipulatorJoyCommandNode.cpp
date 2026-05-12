@@ -14,6 +14,8 @@
 #include <kuavo_msgs/SetJoyTopic.h>
 #include <kuavo_msgs/getLbTorsoInitialPose.h>
 #include <std_srvs/SetBool.h>
+#include <std_srvs/Trigger.h>
+#include <ocs2_msgs/mpc_observation.h>
 #include <map>
 #include <algorithm>
 #include <cmath>
@@ -133,6 +135,9 @@ namespace mobile_manipulator
       cmd_lb_torso_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_lb_torso_pose", 10, true);
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       joy_sub_ = nodeHandle_.subscribe("/joy", 10, &MobileManipulatorJoyControl::joyCallback, this);
+
+      // 订阅MPC observation话题，用于判断是否已经完成初始化
+      observation_sub_ = nodeHandle_.subscribe("/mobile_manipulator_mpc_observation", 10, &MobileManipulatorJoyControl::observationCallback, this);
       
       // 初始化MPC模式切换服务客户端
       mpc_control_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeTorsoCtrlMode>("/mobile_manipulator_mpc_control");
@@ -140,6 +145,9 @@ namespace mobile_manipulator
 
       // 初始化set_joy_topic服务客户端（用于躯干模式禁用auto_gait节点）
       set_joy_topic_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetJoyTopic>("/set_joy_topic");
+
+      // 初始化real_initial_start服务客户端（用于从准备状态切换到运行状态）
+      real_initialize_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_initial_start");
 
       // 初始化控制模式（默认为 cmd_vel 模式）
       current_mode_ = ControlMode::CMD_VEL;
@@ -227,6 +235,7 @@ namespace mobile_manipulator
     ros::Subscriber joy_sub_;
     ros::ServiceClient mpc_control_client_;
     ros::ServiceClient set_joy_topic_client_;
+    ros::ServiceClient real_initialize_client_;
 
     // 控制模式
     ControlMode current_mode_;
@@ -298,6 +307,10 @@ namespace mobile_manipulator
       // G12轮臂模式标志: is_wheel_(ROBOT_VERSION>=60) 且 joystick_type==h12
       bool is_wheel_;
       bool use_g12_;
+
+      // MPC observation相关标志，用于判断是否已经完成初始化
+      bool get_observation_ = false;
+      ros::Subscriber observation_sub_;
       
     // 检测手柄类型（BEITONG/XBOX）并自动加载对应配置
     void detectJoystickType()
@@ -529,6 +542,39 @@ namespace mobile_manipulator
         msg.data = true;
         stop_pub_.publish(msg);
         ros::Duration(0.1).sleep();
+      }
+    }
+
+    // 调用real_initial_start服务（从准备状态切换到运行状态）
+    void callRealInitializeSrv()
+    {
+      std::cout << "callRealInitializeSrv triggered, switching from ready state to running state" << std::endl;
+      std_srvs::Trigger srv;
+      if (real_initialize_client_.call(srv))
+      {
+        if (srv.response.success)
+        {
+          ROS_INFO("State switch succeeded: %s", srv.response.message.c_str());
+        }
+        else
+        {
+          ROS_ERROR("State switch failed: %s", srv.response.message.c_str());
+        }
+      }
+      else
+      {
+        ROS_ERROR("Failed to call service /humanoid_controller/real_initial_start");
+      }
+    }
+
+    // MPC observation回调函数，收到第一个observation表示初始化完成
+    void observationCallback(const ocs2_msgs::mpc_observation::ConstPtr &observation_msg)
+    {
+      (void)observation_msg; // 避免未使用参数警告
+      if (!get_observation_)
+      {
+        get_observation_ = true;
+        ROS_INFO("Received MPC observation, robot initialization completed");
       }
     }
 
@@ -894,9 +940,16 @@ namespace mobile_manipulator
       // BACK：按下时底盘急停并调用退出程序（/stop_robot），按住期间持续发布零速度
       bool back_pressed = (joy_msg->buttons.size() > static_cast<size_t>(joyButtonMap["BUTTON_BACK"]) &&
                                 joy_msg->buttons[joyButtonMap["BUTTON_BACK"]]);
-if (back_pressed && !old_joy_msg_.buttons[joyButtonMap["BUTTON_BACK"]])
+      if (back_pressed && !old_joy_msg_.buttons[joyButtonMap["BUTTON_BACK"]])
         callTerminateSrv();
       emergency_stop_chassis_ = back_pressed;
+
+      // START：按下时调用real_initial_start服务，从准备状态切换到运行状态
+      // 只有当未收到MPC observation（未初始化）时才允许调用，避免重复初始化
+      bool start_pressed = (joy_msg->buttons.size() > static_cast<size_t>(joyButtonMap["BUTTON_START"]) &&
+                                joy_msg->buttons[joyButtonMap["BUTTON_START"]]);
+      if (!get_observation_ && start_pressed && !old_joy_msg_.buttons[joyButtonMap["BUTTON_START"]])
+        callRealInitializeSrv();
 
       // 根据当前模式处理不同的控制逻辑
       if (current_mode_ == ControlMode::TORSO_CONTROL)
