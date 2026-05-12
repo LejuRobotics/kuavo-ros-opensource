@@ -20,7 +20,8 @@ new-docs
 src/manipulation_nodes/planarmwebsocketservice/models/*.pt
 .claude/
 src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs/**
-src/manipulation_nodes/motion_capture_ik/lib/*.so
+src/manipulation_nodes/motion_capture_ik/lib/libplantIK.so
+src/humanoid-control/humanoid_arm_control/scripts/motion_capture_ik_packaged/lib/libplantIK.so
 src/legged_control
 src/legged_perceptive
 src/Livox-SDK2

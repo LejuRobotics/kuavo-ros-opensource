@@ -4,6 +4,24 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 HOTSPOT_PASSWORD="kuavo123456"
 HOTSPOT_SSID="kuavo-$(hostname)的热点"
 
+install_kuavo_tools() {
+  echo -e "\033[32m\n✅ 开始安装 Kuavo 配网工具...\n\033[0m"
+
+  local kuavo_tools_install_url="${KUAVO_TOOLS_INSTALL_URL:-https://kuavo.lejurobot.com/kuavo-tools/install-beta.sh}"
+  local pipefail_state
+  pipefail_state=$(set -o | awk '$1 == "pipefail" {print $2}')
+  set -o pipefail
+
+  if curl -fsSL "$kuavo_tools_install_url" | bash; then
+    [ "$pipefail_state" = "off" ] && set +o pipefail
+    echo -e "\033[32m✅ Kuavo 配网工具安装完成\033[0m"
+  else
+    [ "$pipefail_state" = "off" ] && set +o pipefail
+    echo -e "\033[31m❌ Kuavo 配网工具安装失败，请检查网络或安装日志\033[0m"
+    exit 1
+  fi
+}
+
 echo -e "\033[32m\n🚀🚀🚀 开始安装...\n\033[0m"
 
 # @@@ INSTALL
@@ -56,4 +74,8 @@ sudo systemctl enable create_ap
 sudo systemctl start create_ap
 if [ "$(systemctl is-active create_ap)" = "active" ]; then
   echo -e "\033[32m🚀🚀🚀 热点服务已启动! \n \033[0m"
+  install_kuavo_tools
+else
+  echo -e "\033[31m❌ 热点服务启动失败，跳过 Kuavo 配网工具安装\033[0m"
+  exit 1
 fi
