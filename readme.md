@@ -123,6 +123,7 @@ roslaunch humanoid_controllers load_kuavo_isaac_sim.launch  # 启动控制器、
 - `qiangnao` : 灵巧手, 默认值
 - `lejuclaw` : 二指夹爪
 - `qiangnao_touch` : 触觉灵巧手
+- `linker_hand` : 灵心巧手
 
 在运行实物时，您可以通过指定`ruiwo_cxx_sdk`参数来选择手臂电机使用 C++ SDK 还是 Python SDK：
 - 默认值为`true`表示使用 C++ SDK
