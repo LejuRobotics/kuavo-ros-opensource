@@ -1243,15 +1243,15 @@ namespace ocs2
         // RB + BUTTON_STANCE(A)
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
         {
-          // RB+A roban2 芭啦芭啦樱之舞
-          if (IS_ROBAN(rb_version_))
-          {
-            ROS_INFO("[JoyControl] RB+A: dance_parapara");
-            callSwitchToDanceSrvByName("dance_parapara");
-            old_joy_msg_ = *joy_msg;
-            return;
-          }
-          else
+          // // RB+A roban2 芭啦芭啦樱之舞
+          // if (IS_ROBAN(rb_version_))
+          // {
+          //   ROS_INFO("[JoyControl] RB+A: dance_parapara");
+          //   callSwitchToDanceSrvByName("dance_parapara");
+          //   old_joy_msg_ = *joy_msg;
+          //   return;
+          // }
+          // else
           {
             c_relative_base_limit_[0] -= (c_relative_base_limit_[0] > 0.1) ? 0.05 : 0.0;
             c_relative_base_limit_[3] -= (c_relative_base_limit_[3] > 0.1) ? 0.05 : 0.0;
