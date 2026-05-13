@@ -82,7 +82,7 @@ class KuavoRobotStateCore:
             self._ee_type = kuavo_info['end_effector_type']
             if self._ee_type == EndEffectorType.LEJUCLAW:
                 rospy.Subscriber("/leju_claw_state", lejuClawState, self._lejuclaw_state_callback)
-            elif self._ee_type == EndEffectorType.QIANGNAO:
+            elif self._ee_type == EndEffectorType.QIANGNAO or self._ee_type == EndEffectorType.LINKER_HAND:
                 rospy.Subscriber("/dexhand/state", JointState, self._dexterous_hand_state_callback)
             elif self._ee_type == EndEffectorType.QIANGNAO_TOUCH:
                 rospy.Subscriber("/dexhand/state", JointState, self._dexterous_hand_state_callback)
@@ -126,14 +126,14 @@ class KuavoRobotStateCore:
                 angular = (0.0, 0.0, 0.0)
             )
             self._eef_state = (EndEffectorState(
-                position = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and kuavo_info['end_effector_type'].startswith('qiangnao') else [0.0] * 2,
-                velocity = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and kuavo_info['end_effector_type'].startswith('qiangnao') else [0.0] * 2,
-                effort = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and kuavo_info['end_effector_type'].startswith('qiangnao') else [0.0] * 2,
+                position = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and (kuavo_info['end_effector_type'].startswith('qiangnao') or kuavo_info['end_effector_type'] == EndEffectorType.LINKER_HAND) else [0.0] * 2,
+                velocity = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and (kuavo_info['end_effector_type'].startswith('qiangnao') or kuavo_info['end_effector_type'] == EndEffectorType.LINKER_HAND) else [0.0] * 2,
+                effort = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and (kuavo_info['end_effector_type'].startswith('qiangnao') or kuavo_info['end_effector_type'] == EndEffectorType.LINKER_HAND) else [0.0] * 2,
                 state=EndEffectorState.GraspingState.UNKNOWN
             ), EndEffectorState(
-                position = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and kuavo_info['end_effector_type'].startswith('qiangnao') else [0.0] * 2,
-                velocity = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and kuavo_info['end_effector_type'].startswith('qiangnao') else [0.0] * 2,
-                effort = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and kuavo_info['end_effector_type'].startswith('qiangnao') else [0.0] * 2,
+                position = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and (kuavo_info['end_effector_type'].startswith('qiangnao') or kuavo_info['end_effector_type'] == EndEffectorType.LINKER_HAND) else [0.0] * 2,
+                velocity = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and (kuavo_info['end_effector_type'].startswith('qiangnao') or kuavo_info['end_effector_type'] == EndEffectorType.LINKER_HAND) else [0.0] * 2,
+                effort = [0.0] * 12 if kuavo_info['end_effector_type'] is not None and (kuavo_info['end_effector_type'].startswith('qiangnao') or kuavo_info['end_effector_type'] == EndEffectorType.LINKER_HAND) else [0.0] * 2,
                 state=EndEffectorState.GraspingState.UNKNOWN
             ))
             

@@ -1085,7 +1085,7 @@ jointVelocityLimits
 
 safeAccLimit
 {
-  enable true   ; 启动默认的加速度边界, 采用大负载计算获得
+  enable false   ; 启动默认的加速度边界, 采用大负载计算获得
 
   realTimeAccEnable  false  ; 实时计算加速度边界
 

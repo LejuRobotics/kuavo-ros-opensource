@@ -264,74 +264,6 @@ class ArmTrajectoryBezierDemo:
         # 其余关节按长度填充0
         rest = [0] * (tact_length - n_from_topic)
         return from_topic + rest
-    
-    def map_thumb_position(self, brainco_thumb_pos):
-        """将强脑大拇指弯曲自由度位置指令映射为灵心巧手大拇指弯曲自由度位置指令
-
-        Args:
-            brainco_thumb_pos: int[6], 强脑拇指位置指令 (0~100)
-
-        Returns:
-            LinkBot_pos: int[6], 映射后的灵心巧手拇指位置指令 (0~100)
-        """
-        # 映射表：{强脑位置: 灵心巧手位置}
-        # TODO: 根据实际测试结果填入映射关系
-        THUMB_MAPPING = {
-            # 强脑值   灵心巧手值
-            0:   20,
-            13:  25,
-            23:  30,
-            32:  33,
-            40:  38,
-            50:  42,
-            65:  45,
-            75:  50,
-            85:  55,
-            100:  60,
-        }
-        
-        # 初始化指令列表，默认与强脑指令相同
-        LinkBot_pos = list(brainco_thumb_pos)
-        
-        # 大拇指侧向自由度映射
-        # 当强脑大拇指位置指令大于0但小于40时，灵心巧手无法到达此工作空间，所以为0
-        if 0 < brainco_thumb_pos[1] < 40:
-            LinkBot_pos[1] = 0
-        elif brainco_thumb_pos[1] >= 40:
-            LinkBot_pos[1] = brainco_thumb_pos[1] - 40  # 将40及以上的部分线性映射到0~60范围内
-        
-        # 查表精确匹配
-        if brainco_thumb_pos[0] in THUMB_MAPPING:
-            LinkBot_pos[0] = THUMB_MAPPING[brainco_thumb_pos[0]]
-            return LinkBot_pos
-
-        # 线性插值：在相邻映射点之间平滑过渡
-        sorted_keys = sorted(THUMB_MAPPING.keys())
-        lower_key = None
-        upper_key = None
-        for key in sorted_keys:
-            if key < brainco_thumb_pos:
-                lower_key = key
-            if key > brainco_thumb_pos and upper_key is None:
-                upper_key = key
-                break
-
-        if lower_key is not None and upper_key is not None:
-            lower_val = THUMB_MAPPING[lower_key]
-            upper_val = THUMB_MAPPING[upper_key]
-            ratio = (brainco_thumb_pos - lower_key) / (upper_key - lower_key)
-            mapped_val = lower_val + (upper_val - lower_val) * ratio
-            LinkBot_pos[0] = int(round(mapped_val))
-            return LinkBot_pos
-
-        # 超出映射表范围：按最近邻返回
-        if lower_key is not None:
-            LinkBot_pos[0] = THUMB_MAPPING[lower_key]
-            return LinkBot_pos
-        if upper_key is not None:
-            LinkBot_pos[0] = THUMB_MAPPING[upper_key]
-            return LinkBot_pos
-        return brainco_thumb_pos
 
     def traj_callback(self, msg):
         if len(msg.points) == 0:
@@ -360,12 +292,7 @@ class ArmTrajectoryBezierDemo:
             self.joint_state.effort = [0] * 14
 
             self.hand_state.left_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[14:20]]  # 无符号整数
-            self.hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
-                                                point.positions[20:26]]  # 无符号整数
-            
-            # 对强脑手的位置指令进行映射，得到灵心巧手的指令
-            self.hand_state.left_hand_position = self.map_thumb_position(self.hand_state.left_hand_position)
-            self.hand_state.right_hand_position = self.map_thumb_position(self.hand_state.right_hand_position)
+            self.hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[20:26]]  # 无符号整数
             
             self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:28]]
             if self.has_waist and len(point.positions) > 28:
@@ -1007,13 +934,16 @@ class ArmTrajectoryBezierDemo:
         else:
             # 做完动作之后恢复自然摆臂状态，并且手、头、腰部关节归位
             self.call_change_arm_ctrl_mode_service(1)
-            self.hand_state.left_hand_position = [0] * 6
-            self.hand_state.right_hand_position = [0] * 6
+            left_hand_pos_reset = [0] * 6
+            right_hand_pos_reset = [0] * 6
+
+            left_hand_pos_reset[0] = 100  # 大拇指握拳，其他手指伸直
+            right_hand_pos_reset[0] = 100  # 大拇指握拳，其他手指伸直
             
             # 收缩大拇指，避免灵心巧手的大拇指与腿发生干涉
-            self.hand_state.left_hand_position[0] = 100 
-            self.hand_state.right_hand_position[0] = 100
-            
+            self.hand_state.left_hand_position = left_hand_pos_reset
+            self.hand_state.right_hand_position = right_hand_pos_reset
+
             self.control_hand_pub.publish(self.hand_state)
             self.head_state.joint_data = [0] * 2
             self.control_head_pub.publish(self.head_state)
@@ -1355,7 +1285,7 @@ class ArmTrajectoryBezierDemo:
             41: [41],
             42: [42],
             45: [43, 45, 46, 48, 49, 100045, 100049, 200049, 300049, 400049],
-            52: [52, 53, 54],
+            52: [52, 53, 54, 55],
             62: [60,61,62, 63, 200062, 300062],
             11: [11, 13, 14, 15, 16, 17],
             13: [11, 13, 14, 15, 16, 17],

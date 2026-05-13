@@ -6,6 +6,17 @@ from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planA
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
 from kuavo_msgs.srv import changeArmCtrlMode, switchToNextController, getControllerList, switchController, SetString, SetStringRequest
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
+
+# 导入RobotVersion，兼容不同环境
+try:
+    from robot_version import RobotVersion
+except ImportError:
+    import rospkg
+    rospack = rospkg.RosPack()
+    import sys
+    sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
+    from robot_version import RobotVersion
+
 import time
 import signal
 import datetime
@@ -585,6 +596,26 @@ def is_real_launch_in_ready_stance(event):
     except rospy.ServiceException as e:
         rospy.logerr(f"[Condition] Failed to call real_launch_status service: {e}, block switch")
         return False
+
+def is_not_wheel_robot(event):
+    """
+    状态机条件判断函数：判断是否不是轮臂机器人
+    轮臂机器人版本号以6开头（60-69），禁止切换walk/trot步态
+    返回True允许状态切换，返回False阻止切换
+    """
+    # 判断是否为轮臂机器人(6代: major=6)
+    robot_version = os.environ.get('ROBOT_VERSION', '0')
+    is_wheel = False
+    try:
+        is_wheel = RobotVersion.create(int(robot_version)).start_with(major=6)
+    except (ValueError, TypeError):
+        rospy.logerr(f"ROBOT_VERSION环境变量格式错误: {robot_version}，默认不为轮臂")
+
+    if is_wheel:
+        rospy.logerr(f"[Condition] 当前为轮臂机器人（version={robot_version}），禁止切换walk/trot步态。")
+        return False
+    rospy.loginfo(f"[Condition] 当前为非轮臂机器人（version={robot_version}），允许切换walk/trot步态。")
+    return True
 
 def print_state_transition(trigger, source, target) -> None:
     console.print(

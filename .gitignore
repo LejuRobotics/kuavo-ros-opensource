@@ -72,3 +72,5 @@ src/legged_perceptive
 # *.csv
 EC_log/
 .catkin_tools/
+.agent_history.txt
+ci_scripts/is_git_fatal_error.sh

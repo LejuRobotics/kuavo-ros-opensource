@@ -7,6 +7,7 @@ class EndEffectorType:
     QIANGNAO = "qiangnao"
     QIANGNAO_TOUCH = "qiangnao_touch"
     LEJUCLAW = "lejuclaw"
+    LINKER_HAND = "linker_hand"  # 灵心巧手, 与 qiangnao 等价(同 12 关节、同协议), 仅硬件侧做位置映射
 class RosParameter:
     def __init__(self):
         pass
@@ -97,7 +98,7 @@ class RosParameter:
 
 kuavo_ros_param = RosParameter()
 
-def joint_names()->dict:
+def joint_names(robot_desc:str=None)->dict:
 
     robot_version_major = (int(kuavo_ros_param.robot_version()) // 10) % 10 
 
@@ -156,7 +157,9 @@ def joint_names()->dict:
         head_link_names = [
             'zhead_1_link', 'zhead_2_link'
         ]
-    robot_desc = kuavo_ros_param.humanoid_description()
+    # 允许调用方把已经取到的 URDF 传进来，避免重复的 ROS 参数服务器拉取（整份 URDF 较大）。
+    if robot_desc is None:
+        robot_desc = kuavo_ros_param.humanoid_description()
     if robot_desc is None:
         return None
 
@@ -292,6 +295,10 @@ def make_robot_param()->dict:
     
     kuavo_ros_param = RosParameter()
 
+    # 启动时只拉取一次 URDF，既用于解析关节名，也缓存进 info 供 KuavoRobotInfo 复用，
+    # 避免后续再次从 ROS 参数服务器拉取整份 URDF。
+    robot_desc = kuavo_ros_param.humanoid_description()
+
     kuavo_ros_info = {
         'robot_version': kuavo_ros_param.robot_version(),
         'arm_dof': kuavo_ros_param.arm_dof(),
@@ -299,9 +306,10 @@ def make_robot_param()->dict:
         'leg_dof': kuavo_ros_param.leg_dof(),
         'waist_dof': kuavo_ros_param.waist_dof(),
         'end_effector_type': kuavo_ros_param.end_effector_type(),
-        'joint_names': joint_names(),
+        'joint_names': joint_names(robot_desc),
         'end_frames_names': end_frames_names(),
-        'init_stand_height': kuavo_ros_param.init_stand_height()
+        'init_stand_height': kuavo_ros_param.init_stand_height(),
+        'humanoid_description': robot_desc,
     }
 
     # for key, value in kuavo_ros_info.items():

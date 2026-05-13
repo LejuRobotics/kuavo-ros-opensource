@@ -27,7 +27,7 @@ from kuavo_msgs.msg import (
     twoArmHandPoseCmd, robotBodyMatrices, picoPoseInfoList,
     robotHeadMotionData, ikSolveParam, footPoseTargetTrajectories,
     JoySticks, sensorsData, switchGaitByName,
-    lejuClawCommand,robotHandPosition,dexhandCommand
+    lejuClawCommand, robotHandPosition, dexhandCommand, headCtrlMode
 )
 from kuavo_msgs.srv import changeArmCtrlMode, changeTorsoCtrlMode, changeTorsoCtrlModeRequest, changeArmCtrlMode, changeArmCtrlModeRequest
 from kuavo_msgs.srv import fkSrv
@@ -371,10 +371,13 @@ class KuavoPicoNode:
         
         # 头部控制模式相关 - 从参数服务器读取
         self.current_head_mode = rospy.get_param('/head_control_mode', "vr_follow") 
-        if self.current_head_mode == "auto_track_active":
+        self.current_fixed_hand = ""  # 当前 fixed_main_hand 模式下跟踪的手
+        if self.current_head_mode in ("auto_track_active", "fixed_main_hand"):
             self.head_use_auto_track = True
         else:
             self.head_use_auto_track = False
+        self.head_mode_before_reset = None   # 手臂复位前保存的头部控制模式
+        self.fixed_hand_before_reset = ""    # 手臂复位前保存的 fixed_hand 信息
         self.head_control_service_client = None  # 头部控制模式服务客户端
         
         SDKLogger.info(f"从参数服务器读取头部模式: {self.current_head_mode}, head_use_auto_track={self.head_use_auto_track}")
@@ -552,7 +555,7 @@ class KuavoPicoNode:
                 '/leju_claw_command', 
                 lejuClawCommand, 
                 queue_size=10)
-        elif self.eef_type.startswith('qiangnao'): # 灵巧手
+        elif self.eef_type.startswith('qiangnao') or self.eef_type == 'linker_hand': # 灵巧手 / 灵心巧手
             self.pub_control_robot_hand_position = rospy.Publisher(
                 '/control_robot_hand_position', robotHandPosition, queue_size=10
             )
@@ -583,6 +586,7 @@ class KuavoPicoNode:
         rospy.Subscriber("/ik/error_norm", Float32MultiArray, self.ik_error_norm_callback)
         rospy.Subscriber("/pico/control_mode", Int32, self.set_control_mode_callback)
         rospy.Subscriber("/pico/incremental_mode", Int32, self.set_incremental_mode_callback)
+        rospy.Subscriber("/pico/head_control_mode_status", headCtrlMode, self._head_mode_status_callback)
 
 
     """//////////////////////////////////// Joy Callbacks //////////////////////////////////////////"""
@@ -1001,41 +1005,45 @@ class KuavoPicoNode:
     def _handle_head_mode_on_arm_mode_change(self, arm_mode: int) -> None:
         """根据手臂控制模式切换头部控制模式.
         
-        当手臂复位(mode=1)时,如果第一帧读到auto_track_active模式,则切换头部到fixed
-        当启用手臂控制(mode=2)时,如果之前头部是fixed,则恢复为auto_track_active
+        当手臂复位(mode=1)时，保存当前头部控制模式后切换到 fixed 回正；
+        当启用手臂控制(mode=2)时，恢复复位前保存的头部控制模式（含 fixed_hand 信息）。
         
         Args:
             arm_mode: 手臂控制模式 (1=复位, 2=启用)
         """
         try:
-            # 只有在第一帧读到auto_track_active时才启用此功能
             if not self.head_use_auto_track:
                 SDKLogger.debug(f"head_use_auto_track为False, 不随手臂模式切换头部模式")
                 return
             
-            # 根据手臂模式设置新的头部模式
             new_head_mode = None
+            new_fixed_hand = ""
             if arm_mode == 1:
-                # 手臂复位时,头部自动回正到fixed
+                # 手臂复位时，保存当前头部模式（包括 fixed_hand），然后切换到 fixed 回正
+                self.head_mode_before_reset = self.current_head_mode
+                self.fixed_hand_before_reset = self.current_fixed_hand
                 new_head_mode = "fixed"
             elif arm_mode == 2:
-                # 启用手臂控制时,头部恢复为auto_track_active
-                new_head_mode = "auto_track_active"
+                # 解锁手臂时，恢复复位前的头部控制模式
+                new_head_mode = self.head_mode_before_reset if self.head_mode_before_reset else "auto_track_active"
+                new_fixed_hand = self.fixed_hand_before_reset if self.head_mode_before_reset == "fixed_main_hand" else ""
+                self.head_mode_before_reset = None
+                self.fixed_hand_before_reset = ""
             
             if new_head_mode is None or new_head_mode == self.current_head_mode:
                 return
             
-            # 调用头部控制模式设置服务
-            self._set_head_control_mode(new_head_mode)
+            self._set_head_control_mode(new_head_mode, new_fixed_hand)
             
         except Exception as e:
             SDKLogger.error(f"处理手臂模式切换时的头部控制模式失败: {e}")
     
-    def _set_head_control_mode(self, mode: str) -> None:
+    def _set_head_control_mode(self, mode: str, fixed_hand: str = "") -> None:
         """设置头部控制模式.
         
         Args:
             mode: 头部控制模式 ("fixed", "auto_track_active", "fixed_main_hand", "vr_follow")
+            fixed_hand: 固定主手方向，仅在 fixed_main_hand 模式下有效 ("left" 或 "right")
         """
         try:
             # 初始化服务客户端(如果还未初始化)
@@ -1051,14 +1059,14 @@ class KuavoPicoNode:
             # 调用服务
             req = SetHeadControlModeRequest()
             req.mode = mode
-            req.fixed_hand = ""  # 仅在 fixed_main_hand 模式下需要
+            req.fixed_hand = fixed_hand if mode == "fixed_main_hand" else ""
             response = self.head_control_service_client(req)
             
             if response.success:
                 old_mode = self.current_head_mode
                 self.current_head_mode = mode
-                # 如果切换到auto_track_active,确保head_use_auto_track为True
-                SDKLogger.info(f"头部控制模式已切换: {old_mode} -> {mode}")
+                self.current_fixed_hand = fixed_hand if mode == "fixed_main_hand" else ""
+                SDKLogger.info(f"头部控制模式已切换: {old_mode} -> {mode}" + (f"(fixed_hand={fixed_hand})" if mode == "fixed_main_hand" else ""))
             else:
                 SDKLogger.error(f"头部控制模式切换失败: {response.message}")
                 
@@ -1191,7 +1199,7 @@ class KuavoPicoNode:
             self.last_eef_command = dict(self.filtered_eef_command)
             eef_command = dict(self.filtered_eef_command)
         try:  
-            if self.eef_type.startswith("qiangnao"):
+            if self.eef_type.startswith("qiangnao") or self.eef_type == "linker_hand":
                 # 创建末端执行器控制消息
                 hand_control_msg = robotHandPosition()
                 hand_control_msg.header.stamp = rospy.Time.now()
@@ -1349,6 +1357,19 @@ class KuavoPicoNode:
         self.hand_wrench_config = hand_wrench_config
         SDKLogger.info(f"VR App端设置末端力配置: {case_name} --- {hand_wrench_config}")
         
+    def _head_mode_status_callback(self, msg: headCtrlMode) -> None:
+        """订阅 pico_head_control_node 发布的头部控制模式状态，同步当前模式和 fixed_hand 信息."""
+        mode = msg.mode
+        fixed_hand = msg.fixed_main_hand
+        if mode != self.current_head_mode or fixed_hand != self.current_fixed_hand:
+            SDKLogger.info(f"头部控制模式同步: {self.current_head_mode}({self.current_fixed_hand}) -> {mode}({fixed_hand})")
+            self.current_head_mode = mode
+            self.current_fixed_hand = fixed_hand
+            if mode in ("auto_track_active", "fixed_main_hand"):
+                self.head_use_auto_track = True
+            else:
+                self.head_use_auto_track = False
+
     def set_control_mode_callback(self, control_mode: Int32) -> None:
         """Set control mode."""
         self._set_control_mode(control_mode.data)

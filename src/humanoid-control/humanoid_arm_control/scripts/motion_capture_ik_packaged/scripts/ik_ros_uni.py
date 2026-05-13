@@ -181,7 +181,7 @@ class IkRos:
             else:
                 ros_end_effector_type_param = rospy.get_param("/end_effector_type")
                 # TODO should compatible more ee types
-                self.end_effector_type = QIANGNAO if QIANGNAO in ros_end_effector_type_param else JODELL
+                self.end_effector_type = QIANGNAO if (QIANGNAO in ros_end_effector_type_param or ros_end_effector_type_param == "linker_hand") else JODELL
         except KeyError:
             self.end_effector_type = QIANGNAO
         print(f"End effector type: {self.end_effector_type}")

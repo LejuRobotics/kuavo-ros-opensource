@@ -42,7 +42,6 @@
 #include <kuavo_msgs/switchToNextController.h>
 #include <kuavo_msgs/headBodyPose.h>
 #include <geometry_msgs/PoseStamped.h>
-
 namespace ocs2
 {
     enum ArmTarget
@@ -121,11 +120,6 @@ namespace ocs2
             {
                 nodeHandle.getParam("/robot_type", robot_type_);
                 std::cout << "Robot type: " << robot_type_ << " (1 for wheel robot, 0 for biped)" << std::endl;
-                
-                if(1 == robot_type_)
-                {
-                    get_observation_ = true;
-                }
             }
             nodeHandle.param("/wheel_ik", wheel_ik_, false);
             ROS_INFO_STREAM("[QuestControlFSM] wheel_ik: " << (wheel_ik_ ? "true" : "false"));
@@ -206,7 +200,9 @@ namespace ocs2
             head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<kuavo_msgs::headCtrlMode>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
-            observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
+            // 根据机器人类型订阅不同的mpc_observation话题
+            std::string observation_topic = robot_type_ == 1 ? "/mobile_manipulator_mpc_observation" : robotName + "_mpc_observation";
+            observation_sub_ = nodeHandle_.subscribe(observation_topic, 10, &QuestControlFSM::observationCallback, this);
             stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
             step_num_stop_pub_ = nodeHandle_.advertise<std_msgs::Int32>(robotName + "_mpc_stop_step_num", 10, true);
             vel_control_pub_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
@@ -275,7 +271,7 @@ namespace ocs2
                 if (!get_observation_)
                 {
                 // ROS_INFO_STREAM("Waiting for observation message...");
-                continue;
+                    continue;
                 }
                 // checkAndPublishCommandLine(joystick_origin_axis_);
             }
@@ -1169,28 +1165,7 @@ namespace ocs2
                 return;
             }
 
-            if (joystick_data_.left_trigger > 0.5)
-            {
-                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 使能 WBC 手臂轨迹控制
-                {
-                    callEnableWbcArmTrajectorySrv(1);
-                    return;
-                }
-                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)  // 切换到下一个控制器
-                {
-                    callSwitchToNextControllerSrv();
-                    return;
-                }
-            }
-
-            if (joystick_data_.left_grip > 0.5)
-            {
-                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 不使能 WBC 手臂轨迹控制
-                {
-                    callEnableWbcArmTrajectorySrv(0);
-                    return;
-                }
-            }
+            // 轮臂 VR：左手扳机相关快捷键（低延迟、切换下一控制器）已按 QA 关闭。
 
             if (joystick_data_.left_first_button_pressed)
             {

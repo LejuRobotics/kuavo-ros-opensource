@@ -295,11 +295,12 @@ namespace humanoid_controller
     return true;
   }
 
-  bool RLControllerManager::isDepthHistoryTopicAvailable()
+  bool RLControllerManager::isDepthHistoryTopicAvailable(bool log)
   {
     if (!nh_ptr_)
     {
-      ROS_WARN("[DepthLocoSwitch] NodeHandle is null while checking topic '%s'.", kDepthHistoryTopic);
+      if (log)
+        ROS_WARN("[DepthLocoSwitch] NodeHandle is null while checking topic '%s'.", kDepthHistoryTopic);
       return false;
     }
 
@@ -314,12 +315,65 @@ namespace humanoid_controller
     const auto res = depth_history_monitor_.check(req, &report);
     if (res != TopicMonitor::CheckResult::Ok)
     {
-      ROS_WARN("[DepthLocoSwitch] %s Refuse to switch to depth_loco_controller.", report.reason.c_str());
+      if (log)
+        ROS_WARN("[DepthLocoSwitch] %s Refuse to switch to depth_loco_controller.", report.reason.c_str());
       return false;
     }
 
-    ROS_INFO("[DepthLocoSwitch] %s", report.reason.c_str());
+    if (log)
+      ROS_INFO("[DepthLocoSwitch] %s", report.reason.c_str());
     return true;
+  }
+
+  bool RLControllerManager::canSwitchTo(const std::string& name)
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    // 切到 MPC：除"当前控制器能否退出"（由调用方判）外没有目标侧前置
+    if (name.empty())
+      return true;
+
+    // 目标控制器必须已加载
+    auto it = controllers_.find(name);
+    if (it == controllers_.end() || !it->second)
+      return false;
+
+    // 切到自身视为可行（真正执行时 switchController 会直接返回成功）
+    if (current_controller_name_ == name)
+      return true;
+
+    auto* target = it->second.get();
+    const bool target_is_falldown = target->getType() == RLControllerType::FALL_STAND_CONTROLLER;
+
+    // 当前在 MPC 时：切到非倒地控制器要求 MPC 处于 stance（与 switchController 中的保护一致）
+    if (current_controller_name_.empty() && !target_is_falldown)
+    {
+      const bool is_current_stance = (mpc_current_gait_name_ == "stance") || mpc_is_stance_mode_;
+      if (!is_current_stance)
+        return false;
+    }
+
+    // depth_loco_controller：要求深度历史话题此刻可用（静默探测，不打日志）
+    if (target->getType() == RLControllerType::DEPTH_LOCO_CONTROLLER)
+      return isDepthHistoryTopicAvailable(/*log=*/false);
+
+    return true;
+  }
+
+  int RLControllerManager::findNextSwitchableIndex(int current_index, int dir)
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const int n = static_cast<int>(walk_controllers_.size());
+    if (n <= 1)
+      return -1;
+    for (int step = 1; step <= n - 1; ++step)
+    {
+      const int idx = ((current_index + dir * step) % n + n) % n;
+      const std::string probe = (idx == 0) ? std::string() : walk_controllers_[idx];  // 索引 0 固定为 MPC
+      if (canSwitchTo(probe))
+        return idx;
+    }
+    return -1;
   }
 
   void RLControllerManager::loadDepthHistoryCheckParams(ros::NodeHandle& nh)
@@ -1019,11 +1073,24 @@ namespace humanoid_controller
     
     res.current_controller = current_name.empty() ? "mpc" : current_name;
     res.current_index = current_index;
-    
-    // 计算下一个控制器的索引（循环切换），只在BASE_CONTROLLER列表中切换
-    int next_index = (current_index + 1) % static_cast<int>(walk_list.size());
-    std::string next_controller = walk_list[next_index];
-    
+
+    // 一次性硬前置：当前控制器若不允许退出（如 AMP 还在行走）或是倒地起身控制器，直接拒绝，
+    // 避免下面"沿环找可切候选"时绕一圈空试。
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      auto it = controllers_.find(current_controller_name_);
+      if (!current_controller_name_.empty() && it != controllers_.end() && it->second &&
+          (!it->second->isAllowToExit() || it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER))
+      {
+        res.success = false;
+        res.message = "Current controller is not allowed to exit.";
+        res.next_controller = "";
+        res.next_index = -1;
+        ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+        return true;
+      }
+    }
+
     // 检查躯干速度是否稳定（在切换前检查）
     if (!isTorsoVelocityStable())
     {
@@ -1034,31 +1101,25 @@ namespace humanoid_controller
       ROS_WARN("[RLControllerManager] Controller switch blocked: %s", res.message.c_str());
       return true;
     }
-    
-    // 实际执行控制器切换
-    bool switch_ok = true;
-    if (next_index == 0)
-    {
-      // 切回 MPC 控制器
-      switchToBaseController();
-    }
-    else
-    {
-      if (!hasController(next_controller))
-      {
-        ROS_WARN("[RLControllerManager] RL controller '%s' not found", next_controller.c_str());
-        switch_ok = false;
-      }
-      else
-      {
-        switch_ok = switchController(next_controller);
-      }
-    }
-    
-    if (!switch_ok)
+
+    // 沿环找下一个"此刻可切换"的控制器（跳过不可用的，如深度话题未就绪的 depth_loco_controller）
+    int target_index = findNextSwitchableIndex(current_index, +1);
+    if (target_index < 0)
     {
       res.success = false;
-      res.message = "Failed to switch to next controller: " + next_controller;
+      res.message = "No switchable controller available in the cycle.";
+      res.next_controller = "";
+      res.next_index = -1;
+      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+      return true;
+    }
+
+    // 索引 0 固定为 MPC；直接用 switchController("")（而非 switchToBaseController()），以便检查切回 MPC 是否成功
+    const std::string target_name = (target_index == 0) ? std::string() : walk_list[target_index];
+    if (!switchController(target_name))
+    {
+      res.success = false;
+      res.message = "Failed to switch to controller: " + (target_name.empty() ? std::string("mpc") : target_name);
       res.next_controller = "";
       res.next_index = -1;
       ROS_WARN("[RLControllerManager] %s", res.message.c_str());
@@ -1066,8 +1127,8 @@ namespace humanoid_controller
     }
     
     // 设置响应信息
-    res.next_controller = next_controller;
-    res.next_index = next_index;
+    res.next_controller = target_name.empty() ? "mpc" : target_name;
+    res.next_index = target_index;
     res.success = true;
     res.message = "Successfully switched from " + res.current_controller + " (index: " + std::to_string(res.current_index) + 
                   ") to " + res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
@@ -1121,35 +1182,41 @@ namespace humanoid_controller
     
     res.current_controller = current_name.empty() ? "mpc" : current_name;
     res.current_index = current_index;
-    
-    // 计算上一个控制器的索引（循环切换），只在BASE_CONTROLLER列表中切换
-    int prev_index = (current_index - 1 + static_cast<int>(walk_list.size())) % static_cast<int>(walk_list.size());
-    std::string prev_controller = walk_list[prev_index];
-    
-    // 实际执行控制器切换
-    bool switch_ok = true;
-    if (prev_index == 0)
+
+    // 一次性硬前置：当前控制器若不允许退出（如 AMP 还在行走）或是倒地起身控制器，直接拒绝。
     {
-      // 切回 MPC 控制器
-      switchToBaseController();
-    }
-    else
-    {
-      if (!hasController(prev_controller))
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      auto it = controllers_.find(current_controller_name_);
+      if (!current_controller_name_.empty() && it != controllers_.end() && it->second &&
+          (!it->second->isAllowToExit() || it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER))
       {
-        ROS_WARN("[RLControllerManager] RL controller '%s' not found", prev_controller.c_str());
-        switch_ok = false;
-      }
-      else
-      {
-        switch_ok = switchController(prev_controller);
+        res.success = false;
+        res.message = "Current controller is not allowed to exit.";
+        res.next_controller = "";
+        res.next_index = -1;
+        ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+        return true;
       }
     }
-    
-    if (!switch_ok)
+
+    // 沿环（反方向）找上一个"此刻可切换"的控制器（跳过不可用的）。
+    int target_index = findNextSwitchableIndex(current_index, -1);
+    if (target_index < 0)
     {
       res.success = false;
-      res.message = "Failed to switch to previous controller: " + prev_controller;
+      res.message = "No switchable controller available in the cycle.";
+      res.next_controller = "";
+      res.next_index = -1;
+      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+      return true;
+    }
+
+    // 索引 0 固定为 MPC；直接用 switchController("")（而非 switchToBaseController()），以便检查切回 MPC 是否成功
+    const std::string target_name = (target_index == 0) ? std::string() : walk_list[target_index];
+    if (!switchController(target_name))
+    {
+      res.success = false;
+      res.message = "Failed to switch to controller: " + (target_name.empty() ? std::string("mpc") : target_name);
       res.next_controller = "";
       res.next_index = -1;
       ROS_WARN("[RLControllerManager] %s", res.message.c_str());
@@ -1157,8 +1224,8 @@ namespace humanoid_controller
     }
     
     // 设置响应信息
-    res.next_controller = prev_controller;
-    res.next_index = prev_index;
+    res.next_controller = target_name.empty() ? "mpc" : target_name;
+    res.next_index = target_index;
     res.success = true;
     res.message = "Successfully switched from " + res.current_controller + " (index: " + std::to_string(res.current_index) + 
                   ") to " + res.next_controller + " (index: " + std::to_string(res.next_index) + ")";

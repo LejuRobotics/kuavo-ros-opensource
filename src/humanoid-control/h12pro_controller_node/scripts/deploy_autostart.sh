@@ -19,6 +19,15 @@ else
     echo "服务 h12pro_monitor.service 未开启。"
 fi
 
+if systemctl is-active --quiet lejulab_joy_monitor.service; then
+    echo "服务 lejulab_joy_monitor.service 已开启，正在停止..."
+    sudo systemctl stop lejulab_joy_monitor.service
+    sudo systemctl disable lejulab_joy_monitor.service
+    echo "服务 lejulab_joy_monitor.service 已停止。"
+else
+    echo "服务 lejulab_joy_monitor.service 未开启。"
+fi
+
 if systemctl is-active --quiet ocs2_h12pro_monitor.service; then
     echo "服务 ocs2_h12pro_monitor.service 已开启，正在停止..."
     sudo systemctl stop ocs2_h12pro_monitor.service

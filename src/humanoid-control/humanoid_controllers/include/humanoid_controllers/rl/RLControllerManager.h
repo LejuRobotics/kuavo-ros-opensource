@@ -283,8 +283,24 @@ namespace humanoid_controller
 
     /**
      * @brief 检查 depth_loco_controller 切换前的深度历史话题状态
+     * @param log 是否打印检查结果日志（仅做"能否切换"探测时传 false 以免刷屏）
      */
-    bool isDepthHistoryTopicAvailable();
+    bool isDepthHistoryTopicAvailable(bool log = true);
+
+    /**
+     * @brief 只读探测：在不改变任何状态的前提下，判断"此刻"能否切换到名为 name 的控制器
+     *        （name 为空字符串表示 MPC）。只检查目标侧的前置条件（目标已加载、当前在 MPC 时
+     *        需处于 stance、depth_loco_controller 需深度话题可用等），不检查"当前控制器是否
+     *        允许退出"——后者由调用方在循环外做一次性硬前置判断。
+     */
+    bool canSwitchTo(const std::string& name);
+
+    /**
+     * @brief 从 current_index 出发，沿 dir 方向（+1=下一个，-1=上一个）在 walk_controllers_
+     *        环里找第一个"此刻可切换"的控制器索引（用 canSwitchTo 判定，跳过不可用的）。
+     * @return 找到则返回该索引；环里没有任何可切换的控制器则返回 -1。
+     */
+    int findNextSwitchableIndex(int current_index, int dir);
 
     /**
      * @brief 启动深度历史话题后台监控（常驻订阅 + 频率缓存）

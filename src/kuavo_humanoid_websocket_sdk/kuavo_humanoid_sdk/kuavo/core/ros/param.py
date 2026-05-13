@@ -9,6 +9,7 @@ class EndEffectorType:
     QIANGNAO = "qiangnao"
     QIANGNAO_TOUCH = "qiangnao_touch"
     LEJUCLAW = "lejuclaw"
+    LINKER_HAND = "linker_hand"  # 灵心巧手, 与 qiangnao 等价(同 12 关节、同协议), 仅硬件侧做位置映射
 
 
 class RosParamWebsocket:

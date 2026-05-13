@@ -764,8 +764,8 @@ namespace humanoidController_wheel_wbc
       vector_t optimizedState_mrt, optimizedInput_mrt;
       // Update the current state of the system
       SystemObservation kinemicLimitObs = observation_wheel_;
-      // kinemicLimitObs.state = obsStateLimitFilterPtr_->update(observation_wheel_.state);
-      // kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
+      kinemicLimitObs.state = obsStateLimitFilterPtr_->update(observation_wheel_.state);
+      kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
 
       /****************************允许采用mpc输出作为反馈**************************************/
       if(mpcObsUpdateMode_ == 1 || mpcObsUpdateMode_ == 3)
@@ -874,17 +874,17 @@ namespace humanoidController_wheel_wbc
       update_cnt++;
     }
 
-    {
-      vector_t qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
-      jointCmdLimiterPtr_->clipPositionCommand(qposLimit);
-      optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
+    // {
+    //   vector_t qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
+    //   jointCmdLimiterPtr_->clipPositionCommand(qposLimit);
+    //   optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
 
-      if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
-      {
-        optimizedState_mrt_ = optimizedState_mrt_limit_;
-        optimizedInput_mrt_ = optimizedInput_mrt_limit_;
-      }
-    }
+    //   if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
+    //   {
+    //     optimizedState_mrt_ = optimizedState_mrt_limit_;
+    //     optimizedInput_mrt_ = optimizedInput_mrt_limit_;
+    //   }
+    // }
 
     {
       static vector_t qposLimit, qvelLimit;
@@ -900,6 +900,12 @@ namespace humanoidController_wheel_wbc
                                                     dt_; // (curTime - lastTargetTime);
       // lastTargetTime = curTime;
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
+    }
+
+    if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
+    {
+      optimizedState_mrt_ = optimizedState_mrt_limit_;
+      optimizedInput_mrt_ = optimizedInput_mrt_limit_;
     }
 
     // 更新期望力插值

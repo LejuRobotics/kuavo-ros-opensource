@@ -75,6 +75,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <std_srvs/SetBool.h>
 #include <kuavo_msgs/ExecuteArmAction.h>
 #include <kuavo_msgs/SetString.h>
+#include <kuavo_msgs/DanceTrajectoryState.h>
+#include <kuavo_msgs/playmusic.h>
 #include <humanoid_plan_arm_trajectory/RobotActionState.h>
 
 // 命令执行相关头文件
@@ -452,6 +454,8 @@ namespace ocs2
       // 从主控制器实时订阅当前手臂控制模式
       arm_ctrl_mode_sub_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(
       "/humanoid/mpc/arm_control_mode", 1, &JoyControl::armCtrlModeCallback, this); 
+      dance_trajectory_state_sub_ = nodeHandle_.subscribe<kuavo_msgs::DanceTrajectoryState>(
+      "/humanoid_controller/dance_trajectory_state", 1, &JoyControl::danceTrajectoryStateCallback, this);
 
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       re_start_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/re_start_robot", 10);
@@ -1239,15 +1243,15 @@ namespace ocs2
         // RB + BUTTON_STANCE(A)
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
         {
-          // RB+A roban2 芭啦芭啦樱之舞
-          if (IS_ROBAN(rb_version_))
-          {
-            ROS_INFO("[JoyControl] RB+A: dance_parapara");
-            callSwitchToDanceSrvByName("dance_parapara");
-            old_joy_msg_ = *joy_msg;
-            return;
-          }
-          else
+          // // RB+A roban2 芭啦芭啦樱之舞
+          // if (IS_ROBAN(rb_version_))
+          // {
+          //   ROS_INFO("[JoyControl] RB+A: dance_parapara");
+          //   callSwitchToDanceSrvByName("dance_parapara");
+          //   old_joy_msg_ = *joy_msg;
+          //   return;
+          // }
+          // else
           {
             c_relative_base_limit_[0] -= (c_relative_base_limit_[0] > 0.1) ? 0.05 : 0.0;
             c_relative_base_limit_[3] -= (c_relative_base_limit_[3] > 0.1) ? 0.05 : 0.0;
@@ -1664,6 +1668,94 @@ namespace ocs2
       }
     }
 
+    void prepareDanceMusicPending(const std::string& dance_name)
+    {
+      pending_dance_music_.active = true;
+      pending_dance_music_.dance_name = dance_name;
+      pending_dance_music_.request_time = ros::Time::now();
+      pending_dance_music_.previous_run_id = last_dance_run_id_[dance_name];
+      pending_dance_music_.played = false;
+      ROS_INFO("[JoyControl] Pending dance music: %s (previous_run_id=%u)",
+               dance_name.c_str(), pending_dance_music_.previous_run_id);
+    }
+
+    void clearDanceMusicPending()
+    {
+      pending_dance_music_.active = false;
+      pending_dance_music_.dance_name.clear();
+      pending_dance_music_.request_time = ros::Time(0);
+      pending_dance_music_.previous_run_id = 0;
+      pending_dance_music_.played = false;
+    }
+
+    bool playDanceMusic(const std::string& dance_name)
+    {
+      kuavo_msgs::playmusic srv;
+      srv.request.music_number = dance_name + ".wav";
+      srv.request.volume = 100;
+      ros::ServiceClient play_music_client = nodeHandle_.serviceClient<kuavo_msgs::playmusic>("/play_music");
+      if (play_music_client.call(srv))
+      {
+        ROS_INFO("[JoyControl] /play_music '%s' -> %s",
+                 srv.request.music_number.c_str(), srv.response.success_flag ? "success" : "failed");
+        return srv.response.success_flag;
+      }
+      ROS_ERROR("[JoyControl] Failed to call /play_music for %s", srv.request.music_number.c_str());
+      return false;
+    }
+
+    bool restartDanceController(const std::string& dance_name)
+    {
+      const std::string service_name = "/humanoid_controller/" + dance_name + "/restart_dance";
+      ros::ServiceClient restart_client = nodeHandle_.serviceClient<std_srvs::Trigger>(service_name);
+      std_srvs::Trigger srv;
+      if (restart_client.call(srv) && srv.response.success)
+      {
+        ROS_INFO("[JoyControl] Restarted dance '%s': %s", dance_name.c_str(), srv.response.message.c_str());
+        return true;
+      }
+      ROS_WARN("[JoyControl] Failed to restart dance '%s'", dance_name.c_str());
+      return false;
+    }
+
+    void danceTrajectoryStateCallback(const kuavo_msgs::DanceTrajectoryState::ConstPtr& msg)
+    {
+      last_dance_run_id_[msg->dance_name] = msg->run_id;
+
+      if (!pending_dance_music_.active || pending_dance_music_.played)
+      {
+        return;
+      }
+      if ((ros::Time::now() - pending_dance_music_.request_time).toSec() > dance_music_pending_timeout_)
+      {
+        ROS_WARN("[JoyControl] Dance music pending timeout: %s", pending_dance_music_.dance_name.c_str());
+        clearDanceMusicPending();
+        return;
+      }
+      if (msg->dance_name != pending_dance_music_.dance_name)
+      {
+        return;
+      }
+      if (msg->state != "started" && msg->state != "running")
+      {
+        return;
+      }
+
+      const bool new_run = msg->run_id > pending_dance_music_.previous_run_id;
+      const bool state_after_request = msg->header.stamp >= pending_dance_music_.request_time;
+      if (!new_run || !state_after_request)
+      {
+        return;
+      }
+
+      pending_dance_music_.played = true;
+      const std::string dance_name = msg->dance_name;
+      std::thread([this, dance_name]() {
+        playDanceMusic(dance_name);
+      }).detach();
+      clearDanceMusicPending();
+    }
+
     void callTriggerDanceSrv()
     {
       std::cout << "trigger callTriggerDanceSrv" << std::endl;
@@ -1712,6 +1804,18 @@ namespace ocs2
     void callSwitchToDanceSrvByName(const std::string& dance_data)
     {
       ROS_INFO("[JoyControl] Switching to dance: %s", dance_data.c_str());
+      std::string current_controller;
+      const bool got_current_controller = getCurrentControllerName(current_controller);
+      prepareDanceMusicPending(dance_data);
+      if (got_current_controller && current_controller == dance_data)
+      {
+        if (!restartDanceController(dance_data))
+        {
+          clearDanceMusicPending();
+        }
+        return;
+      }
+
       kuavo_msgs::SetString srv;
       srv.request.data = dance_data;
       if (switch_dance_client_.call(srv) && srv.response.success)
@@ -1721,6 +1825,7 @@ namespace ocs2
       else
       {
         ROS_ERROR("[JoyControl] Dance switch failed (data=%s)", dance_data.c_str());
+        clearDanceMusicPending();
       }
     }
 
@@ -1901,6 +2006,18 @@ namespace ocs2
       }
     }
 
+    bool getCurrentControllerName(std::string& current_controller)
+    {
+      kuavo_msgs::getControllerList srv;
+      if (get_controller_list_client_.call(srv) && srv.response.success)
+      {
+        current_controller = srv.response.current_controller;
+        return true;
+      }
+      ROS_WARN("[JoyControl] Failed to get current controller name");
+      return false;
+    }
+
     bool getControllerList(std::vector<std::string>& controller_list)
     {
       kuavo_msgs::getControllerList srv;
@@ -1996,6 +2113,7 @@ namespace ocs2
     ros::Subscriber gait_change_sub_;
     ros::Subscriber is_rl_controller_sub_;
     ros::Subscriber arm_ctrl_mode_sub_;
+    ros::Subscriber dance_trajectory_state_sub_;
     int arm_ctrl_mode_;
     bool is_rl_controller_{false};  // 当前是否为RL控制器
     ocs2::scalar_array_t mpc_default_velocity_limits_{0.4, 0.2, 0.3, 0.4};  // 保存MPC默认速度限制
@@ -2070,6 +2188,17 @@ namespace ocs2
     ros::ServiceClient set_fall_down_state_client_;
     // Dance controller (SetString, 同 RLControllerManager::switchDanceControllerByStringCallback)
     ros::ServiceClient switch_dance_client_;
+    struct DanceMusicPending
+    {
+      bool active{false};
+      std::string dance_name;
+      ros::Time request_time;
+      uint32_t previous_run_id{0};
+      bool played{false};
+    };
+    DanceMusicPending pending_dance_music_;
+    std::map<std::string, uint32_t> last_dance_run_id_;
+    const double dance_music_pending_timeout_{10.0};
     bool robot_launched_{false};
     ros::Time last_status_check_time_;
     bool real_{false};

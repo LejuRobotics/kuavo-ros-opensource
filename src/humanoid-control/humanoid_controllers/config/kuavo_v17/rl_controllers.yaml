@@ -38,11 +38,11 @@ controllers:
     config_file: "rl/dance_param_aiqingniao.info"
     enabled: true
 
-  - name: "dance_parapara"       # 芭啦芭啦樱之舞
-    class: "DANCE_CONTROLLER"
-    type: "DANCE_CONTROLLER"
-    config_file: "rl/dance_param_parapara.info"
-    enabled: true
+  # - name: "dance_parapara"       # 芭啦芭啦樱之舞
+  #   class: "DANCE_CONTROLLER"
+  #   type: "DANCE_CONTROLLER"
+  #   config_file: "rl/dance_param_parapara.info"
+  #   enabled: true
 
   - name: "dance_lonelydance"    # lonelydance
     class: "DANCE_CONTROLLER"
