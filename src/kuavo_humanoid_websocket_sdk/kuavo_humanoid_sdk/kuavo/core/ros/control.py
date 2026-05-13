@@ -17,8 +17,8 @@ class ControlEndEffectorWebsocket:
         self._eef_type = eef_type
         self._pubs = []
         websocket = WebSocketKuavoSDK()
-        if self._eef_type == EndEffectorType.QIANGNAO:
-            self._pub_ctrl_robot_hand = roslibpy.Topic(websocket.client, '/control_robot_hand_position', 'kuavo_msgs/robotHandPosition')                
+        if self._eef_type == EndEffectorType.QIANGNAO or self._eef_type == EndEffectorType.LINKER_HAND:
+            self._pub_ctrl_robot_hand = roslibpy.Topic(websocket.client, '/control_robot_hand_position', 'kuavo_msgs/robotHandPosition')
             # publisher, name, require
             self._pubs.append((self._pub_ctrl_robot_hand, False))
         elif self._eef_type == EndEffectorType.QIANGNAO_TOUCH:
@@ -35,7 +35,7 @@ class ControlEndEffectorWebsocket:
         return True
 
     def pub_control_robot_dexhand(self, left_position:list, right_position:list)->bool:
-        if not self._eef_type.startswith(EndEffectorType.QIANGNAO): # qiangnao, qiangnao_touch
+        if not (self._eef_type.startswith(EndEffectorType.QIANGNAO) or self._eef_type == EndEffectorType.LINKER_HAND): # qiangnao, qiangnao_touch, linker_hand
             SDKLogger.warning(f"{self._eef_type} not support control dexhand")
             return False
         try:
@@ -85,7 +85,7 @@ class ControlEndEffectorWebsocket:
             return False
         
     def srv_execute_gesture(self, gestures:list)->bool:
-        if not self._eef_type.startswith(EndEffectorType.QIANGNAO): # qiangnao, qiangnao_touch
+        if not (self._eef_type.startswith(EndEffectorType.QIANGNAO) or self._eef_type == EndEffectorType.LINKER_HAND): # qiangnao, qiangnao_touch, linker_hand
             SDKLogger.warning(f"{self._eef_type} not support control dexhand")
             return False
         try:
@@ -108,7 +108,7 @@ class ControlEndEffectorWebsocket:
             return False
 
     def srv_get_gesture_names(self)->list:
-        if not self._eef_type.startswith(EndEffectorType.QIANGNAO): # qiangnao, qiangnao_touch
+        if not (self._eef_type.startswith(EndEffectorType.QIANGNAO) or self._eef_type == EndEffectorType.LINKER_HAND): # qiangnao, qiangnao_touch, linker_hand
             SDKLogger.warning(f"{self._eef_type} not support control dexhand")
             return []
         try:

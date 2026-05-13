@@ -1,0 +1,104 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="input_topic" default="/camera/depth/image_raw" />
+    <arg name="output_topic" default="/camera/depth/image_processed" />
+
+    <arg name="queue_size" default="1" />
+
+    <!-- Remove hardware noise (white spot) -->
+    <arg name="use_white_spot_removal" default="true" />
+    <arg name="fst_spot_ddiff" default="0.25" />
+    <arg name="fst_wh_thres" default="2.5" />
+    <arg name="fst_max_spot_size" default="1024" />
+    <arg name="fst_sur_black_ratio" default="0.5" />
+    <arg name="sec_spot_ddiff" default="0.5" />
+    <arg name="sec_wh_thres" default="1.0" />
+    <arg name="sec_max_spot_size" default="1024" />
+    <arg name="sec_sur_black_ratio" default="0.5" />
+    
+    <arg name="min_depth" default="0.0" />
+    <arg name="min_depth_physics" default="0.17" />
+    <arg name="max_depth" default="2.5" />
+
+    <arg name="resize_scale" default="0.151" />
+
+    <!-- <arg name="crop_top" default="6" />
+    <arg name="crop_bottom" default="0" />
+    <arg name="crop_left" default="4" />
+    <arg name="crop_right" default="4" /> -->
+    <arg name="crop_top" default="0" />
+    <arg name="crop_bottom" default="0" />
+    <arg name="crop_left" default="0" />
+    <arg name="crop_right" default="0" />
+
+    <arg name="inpaint_radius" default="2" />
+    <arg name="inpaint_method" default="ns" />
+
+    <arg name="use_gaussian" default="true" />
+    <arg name="gaussian_kernel_size" default="3" />
+    <arg name="gaussian_sigma_x" default="1" />
+    <arg name="gaussian_sigma_y" default="1" />
+
+    <arg name="output_encoding" default="32FC1" /> <!-- same_as_input, 32FC1, 16UC1 -->
+
+    <arg name="debug" default="false" />
+    <arg name="runtime" default="true" />
+
+    <arg name="show_histogram" default="false" />
+    <arg name="histogram_bins" default="125" />
+    <arg name="histogram_width" default="800" />
+    <arg name="histogram_height" default="450" />
+    <arg name="histogram_min_depth" default="0.18" />
+    <arg name="histogram_max_depth" default="2.5" />
+    
+    <node name="depth_inpainter" pkg="image_processing" type="depth_inpainter.py" output="screen" respawn="true" respawn_delay="5">
+        
+        <param name="input_topic" value="$(arg input_topic)" />
+        <param name="output_topic" value="$(arg output_topic)" />
+
+        <param name="queue_size" value="$(arg queue_size)" />
+
+        <param name="use_white_spot_removal" value="$(arg use_white_spot_removal)" />
+        <param name="fst_spot_ddiff" value="$(arg fst_spot_ddiff)" />
+        <param name="fst_wh_thres" value="$(arg fst_wh_thres)" />
+        <param name="fst_max_spot_size" value="$(arg fst_max_spot_size)" />
+        <param name="fst_sur_black_ratio" value="$(arg fst_sur_black_ratio)" />
+        <param name="sec_spot_ddiff" value="$(arg sec_spot_ddiff)" />
+        <param name="sec_wh_thres" value="$(arg sec_wh_thres)" />
+        <param name="sec_max_spot_size" value="$(arg sec_max_spot_size)" />
+        <param name="sec_sur_black_ratio" value="$(arg sec_sur_black_ratio)" />
+
+        <param name="min_depth" value="$(arg min_depth)" />
+        <param name="min_depth_physics" value="$(arg min_depth_physics)" />
+        <param name="max_depth" value="$(arg max_depth)" />
+
+        <param name="resize_scale" value="$(arg resize_scale)" />
+        <param name="crop_top" value="$(arg crop_top)" />
+        <param name="crop_bottom" value="$(arg crop_bottom)" />
+        <param name="crop_left" value="$(arg crop_left)" />
+        <param name="crop_right" value="$(arg crop_right)" />
+
+        <param name="inpaint_radius" value="$(arg inpaint_radius)" />
+        <param name="inpaint_method" value="$(arg inpaint_method)" />
+        
+        <param name="use_gaussian" value="$(arg use_gaussian)" />
+        <param name="gaussian_kernel_size" value="$(arg gaussian_kernel_size)" />
+        <param name="gaussian_sigma_x" value="$(arg gaussian_sigma_x)" />
+        <param name="gaussian_sigma_y" value="$(arg gaussian_sigma_y)" />
+
+        <param name="output_encoding" value="$(arg output_encoding)" />
+
+        <param name="debug" value="$(arg debug)" />
+        <param name="runtime" value="$(arg runtime)" />
+
+        <param name="show_histogram" value="$(arg show_histogram)" />
+        <param name="histogram_bins" value="$(arg histogram_bins)" />
+        <param name="histogram_width" value="$(arg histogram_width)" />
+        <param name="histogram_height" value="$(arg histogram_height)" />
+        <param name="histogram_min_depth" value="$(arg histogram_min_depth)" />
+        <param name="histogram_max_depth" value="$(arg histogram_max_depth)" />
+                
+        <remap from="/camera/depth/image_raw" to="$(arg input_topic)" />
+        <remap from="/camera/depth/image_inpainted" to="$(arg output_topic)" />
+    </node>
+</launch>

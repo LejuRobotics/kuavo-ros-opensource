@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <robot name="biped_s53">
   <mujoco>
-    <compiler meshdir="../meshes/" balanceinertia="true" discardvisual="false" />
+    <compiler meshdir="package://kuavo_assets/models/biped_s53/meshes/" balanceinertia="true" discardvisual="false" />
   </mujoco>
   <link name="dummy_link" />
   <link name="base_link">
@@ -256,7 +256,7 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="17.8" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="68.4" velocity="17.8" />
     <dynamics damping="0.02" friction="0.0" />
   </joint>
   <link name="ll_foot_toe">
@@ -553,7 +553,7 @@
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="17.8" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="68.4" velocity="17.8" />
     <dynamics damping="0.02" friction="0.0" />
   </joint>
   <link name="rl_foot_toe">
@@ -639,7 +639,7 @@
       <!-- 质心：( -0.00044187, -0.00068282, 0.16674017 ) -->
       <origin xyz="0.05349912 -0.00068282 0.16674017" rpy="0 0 0" />
       <!-- 质量：17.11065787 kg -->
-      <mass value="21.63516" />
+      <mass value="21.81526" />
       <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自waist_yaw Lxx/Lyy/Lzz -->
       <inertia
         ixx="0.34143343"
@@ -1443,113 +1443,121 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <!-- ============ head_camera - 完全按照txt文件 ============ -->
-  <link name="camera_base">
+  <link name="head_camera_base">
     <inertial>
-      <!-- 质心：( 0.01583173, -0.04712613, -0.00019589 ) 完全按照txt -->
-      <origin xyz="0.01583173 -0.04712613 -0.00019589" rpy="0 0 0" />
-      <!-- 质量（用户覆盖）= 0.00000000 千克，完全按照txt -->
-      <mass value="0.00000000" />
-      <!-- txt中没有惯性张量数据，设置为0 -->
-      <inertia
-        ixx="0.0"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.0"
-        iyz="0.0"
-        izz="0.0" />
+      <origin xyz="0.00471770 0.00007850 0.01403306" rpy="0 0 0" />
+      <mass value="0.0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s53/meshes/head_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s53/meshes/head_camera_base.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+      </link>
+  <joint name="head_camera_base_joint" type="fixed">
+    <origin xyz="0.099619 0 0.032844" rpy="0 0.3406 0" />
+    <parent link="zhead_2_link" />
+    <child link="head_camera_base" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="head_camera_depth">
+    <inertial>
+      <origin xyz="-0.0005 0 0" rpy="0 0 0" />
+      <mass value="0.0000785398163397463" />
+      <inertia ixx="0.000000000981747704246829" ixy="0" ixz="0" iyy="0.000000000497418836818394" iyz="0" izz="0.000000000497418836818394" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s53/meshes/head_camera_depth.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+      </link>
+  <joint name="head_camera_depth_joint" type="fixed">
+    <origin xyz="0.011715 0.0475 0.014312" rpy="0 0 0" />
+    <parent link="head_camera_base" />
+    <child link="head_camera_depth" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="head_radar">
+    <inertial>
+      <origin xyz="0.00018505 -0.00000652 0.01776962" rpy="0 0 0" />
+      <mass value="0.0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s53/meshes/head_radar.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.611764705882353 0.658823529411765 0.670588235294118 1" />
+      </material>
+    </visual>
+      </link>
+  <joint name="head_radar_joint" type="fixed">
+    <origin xyz="0 0 -0.078453" rpy="0 0 0" />
+    <parent link="zhead_1_link" />
+    <child link="head_radar" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="waist_camera_base">
+    <inertial>
+      <origin xyz="0.00471770 0.00007850 0.01403306" rpy="0 0 0" />
+      <mass value="0.13300000" />
+      <inertia
+        ixx="0.00016465"
+        ixy="0.00000040"
+        ixz="-0.00000032"
+        iyy="0.00001688"
+        iyz="-0.00000006"
+        izz="0.00016361" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s53/meshes/waist_camera_base.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_camera_base_joint" type="fixed">
+    <origin xyz="0.0787 0 -0.028149" rpy="0 0.59341 0" />
+    <parent link="waist_yaw_link" />
+    <child link="waist_camera_base" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="waist_camera">
+    <inertial>
+      <origin xyz="-0.0005 0 0" rpy="0 0 0" />
+      <mass value="0.0000785398163397463" />
+      <inertia ixx="0.000000000981747704246829" ixy="0" ixz="0" iyy="0.000000000497418836818394" iyz="0" izz="0.000000000497418836818394" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s53/meshes/waist_camera_depth.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="camera_base" type="fixed">
-    <origin xyz="0.093839 0.0475 0.050077" rpy="0 0.3406 0" />
-    <parent link="zhead_2_link" />
-    <child link="camera_base" />
-  </joint>
-
-  <link name="head_rader">
-    <inertial>
-      <!-- 质心：( 0.00018505, -0.00000652, 0.01776962 ) -->
-      <origin xyz="0.00018505 -0.00000652 0.01776962" rpy="0 0 0" />
-      <!-- 质量（用户覆盖）：0.26500000 kg -->
-      <mass value="0.26500" />
-      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自head_radar Lxx/Lxy/Lxz... -->
-      <inertia
-        ixx="0.00012489"
-        ixy="0.0"
-        ixz="0.0"
-        iyy="0.00013451"
-        iyz="0.0"
-        izz="0.00013326" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s53/meshes/head_rader.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="0.61176 0.65882 0.67059 1" />
-      </material>
-    </visual>
-  </link>
-  
-  <joint name="head_rader_joint" type="fixed">
-    <origin xyz="0 0 -0.078253" rpy="0 0 0" />
-    <parent link="zhead_1_link" />
-    <child link="head_rader" />
+  <joint name="waist_camera_joint" type="fixed">
+    <origin xyz="0.011715 0.0475 0.014312" rpy="0 0 0" />
+    <parent link="waist_camera_base" />
+    <child link="waist_camera" />
     <axis xyz="0 0 0" />
-  </joint>
-  <link
-    name="waist_camera">
-    <inertial>
-      <origin
-        xyz="0.0048485 0.00025646 0.013977"
-        rpy="0 0 0" />
-      <mass
-        value="0.048238" />
-      <inertia
-        ixx="5.9781E-05"
-        ixy="-2.4765E-07"
-        ixz="1.0778E-07"
-        iyy="5.8328E-06"
-        iyz="-1.0739E-07"
-        izz="5.9293E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s53/meshes/waist_camera.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint
-    name="waist_camera"
-    type="fixed">
-    <origin
-      xyz="0.0787 0 -0.028449"
-      rpy="0 0.59341 0" />
-    <parent
-      link="waist_yaw_link" />
-    <child
-      link="waist_camera" />
-    <axis
-      xyz="0 0 0" />
   </joint>
   
   <!-- 在原有的gazebo插件配置后添加 -->

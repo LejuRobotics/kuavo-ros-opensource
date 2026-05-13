@@ -38,8 +38,8 @@
   </link>
   <joint name="floating_base" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="dummy_link" />
-    <child link="base_link" />
+    <parent link="base_link" />
+    <child link="dummy_link" />
   </joint>
   <link
     name="LF_wheel_yaw">
@@ -1453,7 +1453,7 @@
     <dynamics damping="0.0" friction="0.0" />
   </joint>
   <link
-    name="camera">
+    name="head_camera_base">
     <inertial>
       <origin
         xyz="0 0 0"
@@ -1484,15 +1484,43 @@
     </visual>
   </link>
   <joint
-    name="camera"
+    name="head_camera_base_joint"
     type="fixed">
     <origin
-      xyz="0.099478 0 0.032897"
-      rpy="0 0.35805 0" />
+      xyz="0.099619 0 0.032844"
+      rpy="0 0.3406 0" />
     <parent
       link="zhead_2_link" />
     <child
-      link="camera" />
+      link="head_camera_base" />
+  </joint>
+  <link
+    name="head_camera_depth">
+    <inertial>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="0.001" />
+      <inertia
+        ixx="0.00001"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.00001"
+        iyz="0.0"
+        izz="0.00001" />
+    </inertial>
+  </link>
+  <joint
+    name="head_camera_depth_joint"
+    type="fixed">
+    <origin
+      xyz="0.011715 0.0475 0.014311"
+      rpy="0 0 0" />
+    <parent
+      link="head_camera_base" />
+    <child
+      link="head_camera_depth" />
   </joint>
   <link
     name="radar">
@@ -1574,7 +1602,7 @@
     <plugin name="gazebo_shm_interface" filename="libgazebo_sim_shm_interface.so">
       <!-- IMU配置 -->
       <imu>
-        <frame_id>dummy_link</frame_id>
+        <frame_id>base_link</frame_id>
       </imu>
       
       <!-- 关节配置 -->

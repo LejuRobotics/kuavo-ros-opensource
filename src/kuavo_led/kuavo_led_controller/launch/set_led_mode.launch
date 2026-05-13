@@ -1,10 +1,18 @@
 <launch>
     <arg name="LED" default="enable" />
+    <arg name="ROBOT_VERSION" default="52" />
 
     <!-- 当 LED 不为 disable 时启动 LED 控制服务 -->
     <group unless="$(eval arg('LED') == 'disable')">
-        <!-- 启动 LED 控制服务 -->
-        <node pkg="kuavo_led_controller" type="kuavo_led_controller_node.py" name="led_controller_node" output="screen"/>
+        <!-- ROBOT_VERSION % 100 在 52-59 之间时启动新的 LED Strip 服务 -->
+        <group if="$(eval 52 &lt;= (arg('ROBOT_VERSION') % 100) &lt;= 59)">
+            <node pkg="kuavo_led_controller" type="led_strip_service.py" name="led_strip_service_node" output="screen"/>
+        </group>
+
+        <!-- 其他情况启动旧的 LED 控制服务 -->
+        <group unless="$(eval 52 &lt;= (arg('ROBOT_VERSION') % 100) &lt;= 59)">
+            <node pkg="kuavo_led_controller" type="kuavo_led_controller_node.py" name="led_controller_node" output="screen"/>
+        </group>
     </group>
 
 </launch>

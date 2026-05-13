@@ -59,6 +59,10 @@ find_package(Threads REQUIRED)
 find_library(MUJOCO_LIB mujoco HINTS ${PROJECT_SOURCE_DIR}/lib)
 find_package(glfw3 REQUIRED)
 
+find_package(Eigen3 REQUIRED)
+find_package(OpenCV REQUIRED)
+find_package(yaml-cpp REQUIRED)
+
 # DDS dependencies (conditional)
 if(USE_DDS OR USE_LEJU_DDS)
     # Find CyclonDDS-CXX
@@ -210,10 +214,16 @@ catkin_package(
 include_directories(
         include
         include/simulate
+        ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_node/include
         ${catkin_INCLUDE_DIRS}
         ${glfw3_INCLUDE_DIRS}
         ${LCM_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
 )
+
+set(ray_caster_path ${CMAKE_CURRENT_SOURCE_DIR}/utils/cpp_ray_caster)
+include_directories(${ray_caster_path})
+file(GLOB ray_caster ${ray_caster_path}/*.cpp)
 
 # Add DDS include directories
 if(USE_DDS OR USE_LEJU_DDS)
@@ -257,7 +267,7 @@ add_library(${PROJECT_NAME} SHARED
     ${DEXHAND_SOURCES}
     src/joint_address.hpp
     src/dexhand_mujoco_node.cpp
-    ${SIMULATE_SRCS} ${LCM_SRCS}
+    ${SIMULATE_SRCS} ${LCM_SRCS} ${ray_caster}
 )
 
 # Conditionally add DDS sources
@@ -276,6 +286,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     glfw
     ${glfw3_LIBRARIES}
     ${LCM_LIBRARIES}
+    Eigen3::Eigen 
+    ${OpenCV_LIBRARIES}
+    yaml-cpp
 )
 
 # Add DDS libraries when enabled

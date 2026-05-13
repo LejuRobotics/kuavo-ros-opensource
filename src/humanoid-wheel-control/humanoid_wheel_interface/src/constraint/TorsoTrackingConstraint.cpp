@@ -116,29 +116,14 @@ VectorFunctionLinearApproximation TorsoTrackingConstraint::getLinearApproximatio
 /******************************************************************************************************/
 auto TorsoTrackingConstraint::interpolateEndEffectorPose(scalar_t time) const -> std::pair<vector_t, quaternion_t> {
   const auto& targetTrajectories = referenceManager_.getTorsoTargetTrajectories();
-  const auto& timeTrajectory = targetTrajectories.timeTrajectory;
-  const auto& stateTrajectory = targetTrajectories.stateTrajectory;
+  const auto& targetTorsoState = targetTrajectories.getDesiredState(time);
 
-  vector_t position;
-  quaternion_t orientation;
-
-  if (stateTrajectory.size() > 1) {
-    // Normal interpolation case
-    int index;
-    scalar_t alpha;
-    std::tie(index, alpha) = LinearInterpolation::timeSegment(time, timeTrajectory);
-
-    const auto& lhs = stateTrajectory[index].head(7);
-    const auto& rhs = stateTrajectory[index + 1].head(7);
-    const quaternion_t q_lhs(lhs.tail<4>());
-    const quaternion_t q_rhs(rhs.tail<4>());
-
-    position = alpha * lhs.head(3) + (1.0 - alpha) * rhs.head(3);
-    orientation = q_lhs.slerp((1.0 - alpha), q_rhs);
-  } else {  // stateTrajectory.size() == 1
-    position = stateTrajectory.front().head(7).head(3);
-    orientation = quaternion_t(stateTrajectory.front().head(7).tail<4>());
-  }
+  vector_t position = targetTorsoState.head(3);
+  Eigen::Vector3d zyx = targetTorsoState.segment(3, 3);
+  quaternion_t orientation =  // 轮臂躯干采用 pitch-yaw-roll 欧拉角, 可以节省一个角度来表达姿态
+         Eigen::AngleAxis<scalar_t>(zyx(1), Eigen::Matrix<scalar_t, 3, 1>::UnitY()) *
+         Eigen::AngleAxis<scalar_t>(zyx(0), Eigen::Matrix<scalar_t, 3, 1>::UnitZ()) *
+         Eigen::AngleAxis<scalar_t>(zyx(2), Eigen::Matrix<scalar_t, 3, 1>::UnitX());
 
   return {position, orientation};
 }

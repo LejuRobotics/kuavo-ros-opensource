@@ -69,22 +69,22 @@ class KuavoRobotToolsCore:
             is_wheel_arm = (robot_type == 1)
 
             frame_mapping = {}
-            if is_wheel_arm:
-                frame_mapping = {
-                    "base_link": "waist_yaw_link",      # 人形中的 base_link 对应轮臂的 waist_yaw_link,获取轮臂躯干位置时使用 waist_yaw_link 坐标系
-                    "odom": "base_link",                # 轮臂获取底盘位置时使用 base_link 坐标系
-                }
+            # if is_wheel_arm:
+            #     frame_mapping = {
+            #         "base_link": "waist_yaw_link",      # 人形中的 base_link 对应轮臂的 waist_yaw_link,获取轮臂躯干位置时使用 waist_yaw_link 坐标系
+            #         "odom": "base_link",                # 轮臂获取底盘位置时使用 base_link 坐标系
+            #     }
 
-                # 转换坐标系名称
-                if target_frame in frame_mapping:
-                    mapped_target_frame = frame_mapping[target_frame]
-                    SDKLogger.debug(f"🔵 目标坐标系映射: {target_frame} -> {mapped_target_frame}")
-                    target_frame = mapped_target_frame
+            #     # 转换坐标系名称
+            #     if target_frame in frame_mapping:
+            #         mapped_target_frame = frame_mapping[target_frame]
+            #         SDKLogger.debug(f"🔵 目标坐标系映射: {target_frame} -> {mapped_target_frame}")
+            #         target_frame = mapped_target_frame
 
-                if source_frame in frame_mapping:
-                    mapped_source_frame = frame_mapping[source_frame]
-                    SDKLogger.debug(f"🟢 源坐标系映射: {source_frame} -> {mapped_source_frame}")
-                    source_frame = mapped_source_frame
+            #     if source_frame in frame_mapping:
+            #         mapped_source_frame = frame_mapping[source_frame]
+            #         SDKLogger.debug(f"🟢 源坐标系映射: {source_frame} -> {mapped_source_frame}")
+            #         source_frame = mapped_source_frame
             
             # #######################################
             # 调用服务

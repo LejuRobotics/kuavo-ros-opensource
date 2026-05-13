@@ -70,7 +70,6 @@ class BaseIKSolver {
     return rawSolution;
   };
   void updateLatestSolution(const Eigen::VectorXd& solution);
-  bool preSolveCheck(const std::vector<PoseData>& PoseConstraintList) const;
 
  protected:
   IKSolverConfig config_;

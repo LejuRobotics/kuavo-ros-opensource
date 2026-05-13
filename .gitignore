@@ -53,6 +53,7 @@ kuavo-ros-control-fd/
 debugHumanoidController.cpp
 # ik_ros_uni_cpp_vr_mujoco_sim.launch
 debugQuestControlFSMNode.cpp
+**/*.bag*
 # **/*.sh
 # merge_compile_commands.py
 # **/*.bag

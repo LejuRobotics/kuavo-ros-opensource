@@ -88,34 +88,72 @@ void HttpConnection::write_and_clear(std::vector<unsigned char>& data)
     boost::shared_ptr<std::vector<unsigned char>> buffer(
         new std::vector<unsigned char>());
     buffer->swap(data);
-    write(boost::asio::buffer(*buffer), buffer);
+    std::vector<boost::asio::const_buffer> buffers;
+    buffers.push_back(boost::asio::buffer(*buffer));
+    std::vector<ResourcePtr> resources;
+    resources.push_back(buffer);
+    enqueue_write(std::move(buffers), std::move(resources), false);
 }
 
 void HttpConnection::write(const std::string& content)
 {
     boost::shared_ptr<std::string> str(new std::string(content));
-    write(boost::asio::buffer(*str), str);
+    std::vector<boost::asio::const_buffer> buffers;
+    buffers.push_back(boost::asio::buffer(*str));
+    std::vector<ResourcePtr> resources;
+    resources.push_back(str);
+    enqueue_write(std::move(buffers), std::move(resources), false);
 }
 
 void HttpConnection::write(const boost::asio::const_buffer& buffer,
                            ResourcePtr resource)
 {
-    boost::mutex::scoped_lock lock(write_mutex_);
-    pending_write_buffers_.push_back(buffer);
+    std::vector<boost::asio::const_buffer> buffers;
+    buffers.push_back(buffer);
+    std::vector<ResourcePtr> resources;
     if (resource)
-        pending_write_resources_.push_back(resource);
-    if (!write_in_progress_)
-        write_pending();
+        resources.push_back(resource);
+    enqueue_write(std::move(buffers), std::move(resources), false);
 }
 
 void HttpConnection::write(
     const std::vector<boost::asio::const_buffer>& buffers, ResourcePtr resource)
 {
-    boost::mutex::scoped_lock lock(write_mutex_);
-    pending_write_buffers_.insert(pending_write_buffers_.end(), buffers.begin(),
-                                  buffers.end());
+    std::vector<ResourcePtr> resources;
     if (resource)
-        pending_write_resources_.push_back(resource);
+        resources.push_back(resource);
+    enqueue_write(buffers, std::move(resources), false);
+}
+
+void HttpConnection::write_replaceable(
+    const std::vector<boost::asio::const_buffer>& buffers, ResourcePtr resource)
+{
+    std::vector<ResourcePtr> resources;
+    if (resource)
+        resources.push_back(resource);
+    enqueue_write(buffers, std::move(resources), true);
+}
+
+void HttpConnection::enqueue_write(std::vector<boost::asio::const_buffer> buffers,
+                                   std::vector<ResourcePtr> resources,
+                                   bool replaceable)
+{
+    boost::mutex::scoped_lock lock(write_mutex_);
+    if (replaceable)
+    {
+        for (auto it = pending_writes_.begin(); it != pending_writes_.end();)
+        {
+            if (it->replaceable)
+            {
+                it = pending_writes_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+    pending_writes_.push_back(PendingWrite{std::move(buffers), std::move(resources), replaceable});
     if (!write_in_progress_)
         write_pending();
 }
@@ -127,14 +165,20 @@ void HttpConnection::write_pending()
     {
         boost::throw_exception(boost::system::system_error(last_error_));
     }
+    if (pending_writes_.empty())
+    {
+        write_in_progress_ = false;
+        return;
+    }
+
     write_in_progress_ = true;
-    boost::asio::async_write(socket_, pending_write_buffers_,
+    PendingWrite pending_write = std::move(pending_writes_.front());
+    pending_writes_.pop_front();
+    boost::asio::async_write(socket_, pending_write.buffers,
                              boost::bind(&HttpConnection::handle_write,
                                          shared_from_this(),
                                          boost::asio::placeholders::error,
-                                         pending_write_resources_));
-    pending_write_buffers_.clear();
-    pending_write_resources_.clear();
+                                         pending_write.resources));
 }
 
 void HttpConnection::handle_write(const boost::system::error_code& e,
@@ -144,7 +188,7 @@ void HttpConnection::handle_write(const boost::system::error_code& e,
     write_in_progress_ = false;
     if (!e)
     {
-        if (!pending_write_buffers_.empty())
+        if (!pending_writes_.empty())
         {
             write_pending();
         }

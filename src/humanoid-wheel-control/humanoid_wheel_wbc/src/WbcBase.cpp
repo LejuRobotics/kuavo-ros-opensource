@@ -36,9 +36,11 @@ namespace ocs2
       Eigen::setNbThreads(1);  // No multithreading within Eigen.
       Eigen::initParallel();
       
-      // 决策变量， 3*base_acc + (4+7*2)*joint_acc + (4+7*2)*torque
+      // 决策变量：x = [3*base_acc + (4+7*2)*joint_acc, f_contact, (4+7*2)*torque]
+      // f_contact: 12维，双臂各6维（力+力矩）
       std::cout << "[wbcBase] info_.armDim: " << info_.armDim << std::endl;
-      numDecisionVars_ = info_.stateDim + info_.armDim;
+      contact_force_size_ = 6 * info_.eeFrames.size(); // 每个末端执行器6维
+      numDecisionVars_ = info_.stateDim + contact_force_size_ + info_.armDim;
       
       const auto &model = pinocchioInterfaceMeasured_.getModel();
       int nq = model.nq;
@@ -56,8 +58,17 @@ namespace ocs2
         ee_ids_[i] = model.getBodyId(info_.eeFrames[i]);
       }
 
+      // 初始化末端执行器雅可比矩阵
+      j_ee_.resize(ee_ids_.size());
+      dj_ee_.resize(ee_ids_.size());
+      for (size_t i = 0; i < ee_ids_.size(); ++i) {
+        j_ee_[i] = matrix_t::Zero(6, info_.stateDim);
+        dj_ee_[i] = matrix_t::Zero(6, info_.stateDim);
+      }
+
       std::cout << "[wbcBase] model.nq: " << model.nq << std::endl;
       std::cout << "[wbcBase] model.nv: " << model.nv << std::endl;
+      std::cout << "[wbcBase] contact_force_size_: " << contact_force_size_ << std::endl;
     }
 
     vector_t WbcBase::update(const vector_t &stateDesired, const vector_t &inputDesired, const SystemObservation& observation)
@@ -96,6 +107,12 @@ namespace ocs2
       pinocchio::getFrameJacobian(model, data, torso_id_, pinocchio::LOCAL_WORLD_ALIGNED, j_torso_);
       j_torso_ = j_torso_ - j_base;
 
+      // 计算每个末端执行器的6维雅可比矩阵
+      for (size_t i = 0; i < ee_ids_.size(); ++i) {
+        pinocchio::getFrameJacobian(model, data, ee_ids_[i],
+                                    pinocchio::LOCAL_WORLD_ALIGNED, j_ee_[i]);
+      }
+
       j_base = matrix_t::Zero(6, info_.stateDim);
       pinocchio::computeJointJacobiansTimeVariation(model, data, qMeasured_, vMeasured_);
       dj_torso_ = matrix_t::Zero(6, info_.stateDim);
@@ -104,6 +121,12 @@ namespace ocs2
       pinocchio::getFrameJacobianTimeVariation(model, data, base_id_,
                                 pinocchio::LOCAL_WORLD_ALIGNED, j_base);
       dj_torso_ = dj_torso_ - j_base;
+
+      // 计算雅可比时间导数
+      for (size_t i = 0; i < ee_ids_.size(); ++i) {
+        pinocchio::getFrameJacobianTimeVariation(model, data, ee_ids_[i],
+                                                 pinocchio::LOCAL_WORLD_ALIGNED, dj_ee_[i]);
+      }
     }
 
     void WbcBase::updateDesired(const vector_t &stateDesired, const vector_t &inputDesired)
@@ -133,14 +156,21 @@ namespace ocs2
       matrix_t s = matrix_t::Zero(info_.stateDim, info_.armDim);
       s.bottomRows(info_.armDim) = matrix_t::Identity(info_.armDim, info_.armDim);
 
+      // 组装所有末端执行器的雅可比矩阵
+      matrix_t j_contact = matrix_t::Zero(info_.stateDim, contact_force_size_);
+      for (size_t i = 0; i < ee_ids_.size(); ++i) {
+        // J^T: 将6维雅可比转置后放入对应位置
+        j_contact.block(0, i*6, info_.stateDim, 6) = j_ee_[i].transpose();
+      }
+
       matrix_t a(info_.stateDim, numDecisionVars_);
       a.setZero();
-      // A = [M, -S]
-      a.block(0, 0, info_.stateDim, info_.stateDim) = data.M;          // ddq 的系数
-      a.block(0, info_.stateDim, info_.stateDim, info_.armDim) = -s;         // tau_arm 的系数
+      // A = [M, -J^T, -S]
+      // 决策变量顺序：x = [ddq_stateDim, f_contact, tau_armDim]
+      a.block(0, 0, info_.stateDim, info_.stateDim) = data.M;  // ddq的系数
+      a.block(0, info_.stateDim, info_.stateDim, contact_force_size_) = -j_contact; // f_contact的系数
+      a.block(0, info_.stateDim + contact_force_size_, info_.stateDim, info_.armDim) = -s; // tau的系数
 
-      // matrix_t a = (matrix_t(info_.stateDim, numDecisionVars_) << data.M, -s.transpose())
-      //                  .finished();
       vector_t b = -data.nle;
 
       return {a, b, matrix_t(), vector_t()};
@@ -151,10 +181,10 @@ namespace ocs2
       matrix_t d(2 * info_.armDim, numDecisionVars_);
       d.setZero();
       matrix_t i = matrix_t::Identity(info_.armDim, info_.armDim);
-      d.block(0, info_.stateDim, info_.armDim,
-              info_.armDim) = i;
-      d.block(info_.armDim, info_.stateDim, info_.armDim,
-              info_.armDim) = -i;
+      // 力矩在决策变量中的位置：stateDim + contact_force_size 之后
+      size_t torque_start_idx = info_.stateDim + contact_force_size_;
+      d.block(0, torque_start_idx, info_.armDim, info_.armDim) = i;
+      d.block(info_.armDim, torque_start_idx, info_.armDim, info_.armDim) = -i;
       vector_t f(2 * info_.armDim);
       vector_t all_joint_limits(info_.armDim);
       all_joint_limits << torqueLimits_.head(lowJoint_nums_), torqueLimits_.tail(arm_nums_/2), torqueLimits_.tail(arm_nums_/2);
@@ -181,12 +211,15 @@ namespace ocs2
     {
       matrix_t a(arm_nums_, numDecisionVars_);
       vector_t b(a.rows());
+      const bool useVrArmPd = useVrArmAccelTask_ && hasVrArmAccelTask_;
+      const vector_t& armKp = useVrArmPd ? vrArmJointKp_ : armJointKp_;
+      const vector_t& armKd = useVrArmPd ? vrArmJointKd_ : armJointKd_;
       // 先写为加速度控制任务  ddq = kp_arm * (q - qd) + kd_arm * (dq - dqd);
       a.setZero();
       b.setZero();
       a.block(0, info_.stateDim-arm_nums_, arm_nums_, arm_nums_) = matrix_t::Identity(arm_nums_, arm_nums_);
-      b = armJointKp_.cwiseProduct(qDesired_.tail(arm_nums_) - qMeasured_.tail(arm_nums_)) + 
-          armJointKd_.cwiseProduct(vDesired_.tail(arm_nums_) - vMeasured_.tail(arm_nums_));
+      b = armKp.cwiseProduct(qDesired_.tail(arm_nums_) - qMeasured_.tail(arm_nums_)) +
+          armKd.cwiseProduct(vDesired_.tail(arm_nums_) - vMeasured_.tail(arm_nums_));
 
       // qMeasured_; vMeasured_; info_.generalizedCoordinatesNum; 
       return {a, b, matrix_t(), vector_t()};
@@ -256,6 +289,39 @@ namespace ocs2
         armJointKd_.resize(arm_nums_);
         loadData::loadEigenMatrix(taskFile, prefix + "kp", armJointKp_);
         loadData::loadEigenMatrix(taskFile, prefix + "kd", armJointKd_);
+
+        vrArmJointKp_ = armJointKp_;
+        vrArmJointKd_ = armJointKd_;
+        hasVrArmAccelTask_ = false;
+        bool hasVrKp = false;
+        bool hasVrKd = false;
+        try
+        {
+          prefix = "vrArmAccelTask.";
+          vector_t vrKp(arm_nums_);
+          loadData::loadEigenMatrix(taskFile, prefix + "kp", vrKp);
+          vrArmJointKp_ = vrKp;
+          hasVrKp = true;
+        }
+        catch (const std::exception&)
+        {
+        }
+        try
+        {
+          prefix = "vrArmAccelTask.";
+          vector_t vrKd(arm_nums_);
+          loadData::loadEigenMatrix(taskFile, prefix + "kd", vrKd);
+          vrArmJointKd_ = vrKd;
+          hasVrKd = true;
+        }
+        catch (const std::exception&)
+        {
+        }
+        hasVrArmAccelTask_ = hasVrKp && hasVrKd;
+        if (verbose)
+        {
+          std::cerr << "\n #### vrArm Accel Task loaded: " << (hasVrArmAccelTask_ ? "true" : "false") << "\n";
+        }
       }
     }
 

@@ -85,6 +85,12 @@ class MRT_BASE {
   virtual void setCurrentObservation(const SystemObservation& observation) = 0;
 
   /**
+   * @brief setCurrentObservation notifies MPC of a new state
+   * @param observation: the current measurement to send to the MPC
+   */
+  virtual void setCurrentObservation_directPub(const SystemObservation& observation, const double dtDesired) = 0;
+
+  /**
    * Gets a reference to the command data corresponding to the current policy.
    * @warning access to the returned reference is not threadsafe. Read access and calls to updatePolicy() must be synced by the user.
    *

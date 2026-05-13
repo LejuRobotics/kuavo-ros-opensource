@@ -45,6 +45,7 @@ link_directories(
 add_library(${PROJECT_NAME}
         src/WbcBase.cpp
         src/WeightedWbc.cpp
+        src/ContactForceWbc.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}

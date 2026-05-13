@@ -77,7 +77,9 @@ setup(
         "websockets",
         "openai==1.3.8",
         "websocket-client==0.58.0",
-        "httpx>=0.25.2"
+        "httpx>=0.25.2",
+        "pyaudio",
+        "deprecated"
     ],
     extras_require={
         "audio": [

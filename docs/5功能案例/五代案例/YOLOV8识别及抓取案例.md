@@ -8,17 +8,17 @@ title: "YOLOV8识别及抓取案例"
   - [流程逻辑](#流程逻辑)
   - [实机视频展示](#实机视频展示)
 - [调整配置文件(上位机)](#调整配置文件上位机)
-  - [1. 模型相关配置](#1-模型相关配置)
-  - [2. 检测目标配置](#2-检测目标配置)
-  - [3. 输入数据源配置](#3-输入数据源配置)
-  - [4. 定位高度参数配置](#4-定位高度参数配置)
+  - [定位高度参数配置(重要)](#定位高度参数配置重要)
 - [调整配置文件(下位机)](#调整配置文件下位机)
+  - [代码检查](#代码检查)
   - [程序运行配置参数](#程序运行配置参数)
     - [启动参数](#启动参数)
     - [坐标偏移量](#坐标偏移量)
     - [欧拉角设定](#欧拉角设定)
 - [代码编译](#代码编译)
+  - [上位机部署遥控器服务(已部署可跳过此步)](#上位机部署遥控器服务已部署可跳过此步)
   - [上位机代码编译](#上位机代码编译)
+  - [下位机依赖安装](#下位机依赖安装)
 - [运行示例](#运行示例)
   - [运行步骤](#运行步骤)
     - [1. **下位机 使机器人站立**](#1-下位机-使机器人站立)
@@ -55,30 +55,7 @@ title: "YOLOV8识别及抓取案例"
 ## 调整配置文件(上位机)
 - 配置文件位于 `~/kuavo_ros_application/src/ros_vision/detection_yolo_v8/config/params.yaml`
 
-### 1. 模型相关配置
-- **model_path**  
-  - 作用：指定YOLOv8预训练模型文件的路径，模型用于目标特征提取与识别。  
-  - 示例值："models/yolov8n.pt"  
-  - 说明：支持.pt格式的YOLOv8系列模型，可根据识别精度与速度需求选择。
-
-- **conf_threshold**  
-  - 作用：设置目标检测的置信度阈值，过滤置信度低于该值的检测结果，减少误检。  
-  - 示例值：0.5  
-  - 说明：取值范围0~1，值越高检测越严格，漏检率可能上升；值越低误检率可能上升。
-
-### 2. 检测目标配置
-- **target_class**  
-  - 作用：定义需要识别的目标类别，基于COCO数据集标注体系。  
-  - 示例值：["bottle", "cup"]  
-  - 说明：可根据实际需求添加/删减类别，需与模型训练的类别标签一致。
-
-### 3. 输入数据源配置
-- **input_image**  
-  作用：指定输入图像的ROS话题名称，接收相机采集的彩色图像流。  
-  示例值："/camera/color/image_raw"  
-  说明：需与实际相机发布的图像话题匹配，确保数据链路畅通。
-
-### 4. 定位高度参数配置
+### 定位高度参数配置(重要)
 - **height_table**  
   作用：设置放置目标的桌面高度（单位：米），作为空间定位的基准高度。  
   示例值：0.864  
@@ -87,74 +64,106 @@ title: "YOLOV8识别及抓取案例"
   作用：设置瓶子目标的实际高度（单位：米），用于结合图像像素坐标计算目标实际三维位置。  
   示例值：0.22  
 
+- **height_orange**  
+  作用：设置橙子目标的实际高度（单位：米），用于结合图像像素坐标计算目标实际三维位置。
+  示例值：0.071  
+
+- 注意：
+  - height_bottle和height_orange为物体本体的高度，非物体在空间中的高度
+  - 若检测置信度偏低，可适当降低 `conf_threshold`（默认 `0.5`）
+
 ## 调整配置文件(下位机)
 
+### 代码检查
+
+**下位机1.4.0上的此demo包为不带转腰的版本,需要先执行如下命令更新.**
+
+```bash
+cd ~/kuavo-ros-opensource
+git fetch origin beta
+git restore --source origin/beta --worktree --staged src/demo/yolo_object_capture
+```
+
 ### 程序运行配置参数
-- 程序位于 `/home/lab/kuavo-ros-opensource/src/demo/yolo_object_capture/yolo_object_capture.py`
+- 抓取程序位于 `~/kuavo-ros-opensource/src/demo/yolo_object_capture/`
+  - 抓取水瓶：`yolo_cylinder_capture.py`
+  - 抓取橙子：`yolo_sphere_capture.py`
+- 偏移量配置文件：`yolo_object_capture/config/offset.yaml`
 
 #### 启动参数
-- `offset_start` : 是否启动坐标偏移量
-  - 参数输入 `True` ：启用坐标偏移量，一般在实机中使用，以观察抓取效果
-  - 参数输入 `False` ：不启用坐标偏移量，一般用来观察求解效果及定位准确度
+- `--use_offset`：启用抓取偏移量（推荐）
+- `--no_waist`：禁用转腰抓取逻辑
+- 说明：两个参数不存在绑定关系，可单独使用，也可同时使用
 
 #### 坐标偏移量
-- 主要参数：
-  - `offset_z`  z方向偏移量，默认默认的抓取点在二维码正下方，因此为负值
-  - `temp_x_l temp_x_r` x方向偏移量，左右都为负值
-  - `temp_y_l temp_y_r` y方向偏移量，均为正值，左加右减
-  - `offset_angle` z轴角度偏移量缩放倍率，在进行ik求解时，若觉得yaw角不符合预期，可适当增加或降低该值
-- 调参说明：（以右手为例，机器人面朝方向为前方）
-  - 若抓取点偏上，则降低 `offset_z` 的值，反之则调高
-  - 若抓取点偏右，则增大 `temp_y_r` 的值，反之则降低
-  - 若抓取点偏前，则降低 `temp_x_r` 的值，反之则调高
-- 参数位置：
-  - `yolo_object_capture.py`文件，主函数中进行设置
-  - 使用示例：
+- 通过 `yolo_object_capture/config/offset.yaml` 配置抓取偏移量
+- 以 `base_link` 坐标系为参考（右手系，机器人面朝方向为 x 正方向，向上为 z 正方向）
+- 生效条件：
+  - 仅当启动参数包含 `--use_offset` 且当前 `target_id` 在 `targets` 中存在时生效
+  - 否则偏移量按 `0.0` 处理，`offset_angle` 按 `1.0` 处理
+- 文件结构示例：
+```yaml
+targets:
+  "39":    # 瓶子
+    offset:
+      z: 0.00
+      left:
+        x: -0.00
+        y: 0.03
+      right:
+        x: -0.00
+        y: -0.03
+    offset_angle: 0.15
 ```
-    # offset_start="True"表示启用偏移量 否则不启用偏移量
-    if args.offset_start == "True":
-        # 偏向侧后边一点
-        offset_z=-0.10  # 抓取点位于标签正下方
-        temp_x_l=-0.035
-        temp_y_l=0.035
-        temp_x_r=-0.045
-        temp_y_r=0.035
-    else :
-        offset_z=0.00
-        temp_x_l=0.00
-        temp_y_l=0.00
-        temp_x_r=0.00
-        temp_y_r=0.00
-    # 角度偏移量（修正绕z轴的偏移角度）
-    offset_angle=1.00
-```
+- 字段说明：
+  - `targets`：按目标 ID 分组配置，不同目标可使用不同偏移参数
+  - `"39" / "41" / "49"`：YOLO 目标 ID（当前示例对应瓶子/杯子/橙子）
+  - `offset.z`：抓取点 z 方向修正量（单位：米），参与 `set_z = yolo_object_z + offset_z`
+  - `offset.left.x / offset.left.y`：左手抓取时 x/y 修正量（单位：米）
+  - `offset.right.x / offset.right.y`：右手抓取时 x/y 修正量（单位：米）
+  - `offset_angle`：yaw 角缩放系数（无单位），参与 `relative_angle * offset_angle`
+- 调参建议：
+  - 抓取点偏高：减小 `offset.z`；抓取点偏低：增大 `offset.z`
+  - 抓取点偏前：减小对应手的 `offset.*.x`；抓取点偏后：增大 `offset.*.x`
+  - 抓取点偏左：减小对应手的 `offset.*.y`；抓取点偏右：增大对应手的 `offset.*.y`
+  - 末端朝向不正：优先微调 `offset_angle`
+- 补充说明：
+  - `yolo_cylinder_capture.py` 默认目标 ID 为 `39`，`yolo_sphere_capture.py` 默认目标 ID 为 `49`
+  - 若新增目标类别，需要在 `offset.yaml` 中增加对应 ID 配置，否则 `--use_offset` 不会对该目标生效
 
 #### 欧拉角设定
-- 使用示例：
-  - `quat=ToQuaternion(relative_angle*offset_angle, -1.57 , 0)`
-  - `eef_pose_msg.hand_poses.left_pose.quat_xyzw = [quat.x,quat.y,quat.z,quat.w]`
-- ToQuaternion参数：
-  - 偏航角yaw：通过当前手臂末端位置与目标手臂末端位置计算
-  - 俯仰角pitch：左右手均固定为负90度
-  - 横滚角度roll：一般置零即可
+- 抓取脚本会根据目标位姿自动计算末端欧拉角
+- 若末端朝向偏差较大，优先通过 `offset.yaml` 中 `offset_angle` 对 yaw 方向进行微调
 
 ## 代码编译
 
+### 上位机部署遥控器服务(已部署可跳过此步)
+```bash
+cd ~/kuavo_ros_application/src/ros_audio/kuavo_audio_player/scripts
+./deploy_autostart_h12pro.sh
+```
+
 ### 上位机代码编译
 ```bash
-cd kuavo_ros_application #仓库目录
-sudo su
+cd ~/kuavo_ros_application #仓库目录
 catkin build detection_yolo_v8
+```
+
+### 下位机依赖安装
+```bash
+sudo apt-get install ros-noetic-vision-msgs
 ```
 
 ## 运行示例
 
 ### 运行步骤
+**启动前建议先完成头部和手臂限位自动标定：**  
+https://kuavo.lejurobot.com/manual/basic_usage/kuavo-ros-control/docs/3%E8%B0%83%E8%AF%95%E6%95%99%E7%A8%8B/%E6%9C%BA%E5%99%A8%E4%BA%BA%E5%85%B3%E8%8A%82%E6%A0%87%E5%AE%9A/#%E5%A4%B4%E9%83%A8%E5%92%8C%E6%89%8B%E8%87%82%E9%9B%B6%E7%82%B9%E8%87%AA%E5%8A%A8%E6%A0%87%E5%AE%9A
 
 #### 1. **下位机 使机器人站立**
 - **注意:若已使用遥控器等方式让机器人站立,可跳过此步骤**
 ```bash
-cd kuavo-ros-opensource  # 进入下位机工作空间
+cd ~/kuavo-ros-opensource  # 进入下位机工作空间
 sudo su
 source devel/setup.bash
 # 仿真
@@ -169,7 +178,7 @@ roslaunch humanoid_controllers load_kuavo_real.launch cali:=true
   - 若已存在`/arms_ik_node`, 则跳过此步
   - 若不存在`/arms_ik_node`, 则运行:
       ```bash
-      cd kuavo-ros-opensource  # 进入下位机工作空间
+      cd ~/kuavo-ros-opensource  # 进入下位机工作空间
       sudo su
       source devel/setup.bash
       roslaunch motion_capture_ik ik_node.launch 
@@ -178,18 +187,16 @@ roslaunch humanoid_controllers load_kuavo_real.launch cali:=true
 #### 3. **上位机 启动yoloV8检测程序**
 - 启动传感器
 ```bash
-cd kuavo_ros_application  # 进入上位机工作空间
-sudo su
+cd ~/kuavo_ros_application  # 进入上位机工作空间
 source devel/setup.bash
-# 五代进阶版
-roslaunch dynamic_biped kuavo5_sensor_robot_enable.launch
-# 五代MaxA版,MaxB版
-roslaunch dynamic_biped kuavo5_sensor_robot_enable.launch enable_wrist_camera:=true
+# 五代进阶版(无手腕相机)
+roslaunch dynamic_biped kuavo5_sensor_only_enable.launch
+# 五代MaxA版,MaxB版(有手腕相机)
+roslaunch dynamic_biped kuavo5_sensor_only_enable.launch enable_wrist_camera:=true
 ```
 - 启动检测程序
 ```bash
-cd kuavo_ros_application  # 进入上位机工作空间
-sudo su
+cd ~/kuavo_ros_application  # 进入上位机工作空间
 source devel/setup.bash
 roslaunch detection_yolo_v8 detection.launch
 ```
@@ -205,15 +212,25 @@ roslaunch detection_yolo_v8 detection.launch
   - 要下位机启动程序使机器人站立后，上位机才能检测到机器人各关节的角度，以计算出基于机器人坐标系的结果
 
 #### 5. **下位机 启动yoloV8抓取流程**
-- 执行 
+- **确保步骤1-3已正常运行**
+- 抓取水瓶示例：
 ```bash
-cd kuavo-ros-opensource  # 进入下位机工作空间
+cd ~/kuavo-ros-opensource  # 进入下位机工作空间
+source devel/setup.bash
+# 带抓取偏移量, 自动转腰(推荐)
+python3 src/demo/yolo_object_capture/yolo_cylinder_capture.py --use_offset
+# 不带抓取偏移量, 不带转腰
+python3 src/demo/yolo_object_capture/yolo_cylinder_capture.py --no_waist
+```
+- 抓取橙子示例：
+```bash
+cd ~/kuavo-ros-opensource  # 进入下位机工作空间
 sudo su
 source devel/setup.bash
-# 运行启用偏移量的抓取流程(二选一)
-python3 src/demo/yolo_object_capture/yolo_object_capture.py --offset_start True
-# 运行不启用偏移量的抓取流程(二选一)
-python3 src/demo/yolo_object_capture/yolo_object_capture.py --offset_start False
+# 带抓取偏移量, 自动转腰(推荐)
+python3 src/demo/yolo_object_capture/yolo_sphere_capture.py --use_offset
+# 不带抓取偏移量, 不带转腰
+python3 src/demo/yolo_object_capture/yolo_sphere_capture.py --no_waist
 ```
 - 注：若仿真环境卡顿，可适当增加延时，以确保机器人手臂每个动作都能执行到位，示例如下：
   - `publish_arm_target_poses([1.5], [20.0, ...])`修改为`publish_arm_target_poses([3], [20.0, ...])`
@@ -239,6 +256,6 @@ python3 src/demo/yolo_object_capture/yolo_object_capture.py --offset_start False
 5. 控制机器人夹爪开合
   - 调用 ROS 服务 `/control_robot_leju_claw`
   - 设置夹爪开合的角度
-6. 获取二维码标签信息
+6. 获取YOLO标签信息
    - 从话题`/robot_yolov8_info`接收到Detection2DArray消息
    - 获取指定ID的yolo目标物体的平均位置(基于机器人基坐标系)

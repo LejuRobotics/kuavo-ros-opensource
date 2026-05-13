@@ -14,9 +14,16 @@ class KuavoRobotInfo(RobotInfoBase):
         # Load robot parameters from ROS parameter server
         kuavo_ros_param = make_robot_param()
         self._ros_param = RosParameter()
-            
+        # make_robot_param() 启动时已取过整份 URDF，这里复用，避免再次 XMLRPC 拉取。
+        self._humanoid_description = kuavo_ros_param.get('humanoid_description')
+
         self._robot_version = kuavo_ros_param['robot_version']
         self._robot_version_major = (int(self._robot_version) // 10) % 10
+        
+        # 当版本号十位为 1 时，robot_type 为 roban
+        if self._robot_version_major == 1:
+            self._robot_type = "roban"
+        
         self._end_effector_type = kuavo_ros_param['end_effector_type']
         self._arm_joint_dof = kuavo_ros_param['arm_dof']
         self._leg_joint_dof = kuavo_ros_param['leg_dof']
@@ -48,6 +55,9 @@ class KuavoRobotInfo(RobotInfoBase):
             self._arm_joint_names = self._joint_names[arm_start_idx:arm_start_idx + self._arm_joint_dof]
         self._init_stand_height = kuavo_ros_param['init_stand_height']
 
+        # 仅在构造时从 URDF 拉取并解析一次手臂关节限位并缓存。
+        self._arm_joint_limits = self._load_arm_joint_limits_from_urdf()
+
     @property
     def robot_version(self) -> str:
         """返回 Kuavo 机器人的版本。
@@ -66,6 +76,7 @@ class KuavoRobotInfo(RobotInfoBase):
                 - ``qiangnao`` 表示普通灵巧手
                 - ``lejuclaw`` 表示乐聚二指夹爪
                 - ``qiangnao_touch`` 表示触觉灵巧手
+                - ``linker_hand`` 表示灵心巧手(与 qiangnao 等价, 仅硬件侧做位置映射)
                 - ...
         """
         return self._end_effector_type
@@ -178,9 +189,16 @@ class KuavoRobotInfo(RobotInfoBase):
             这些限制从URDF文件的 <joint><limit> 标签中解析得到，针对每个关节的真实角度范围进行了定义。
             动态从URDF中提取所有手臂相关的link和关节，兼容不同机器人版本。
         """
+        arm_min, arm_max = self._arm_joint_limits
+        return list(arm_min), list(arm_max)
+
+    def _load_arm_joint_limits_from_urdf(self) -> Tuple[list, list]:
+        """从 URDF 解析手臂关节限位（仅在构造时调用一次）。失败时回退到默认限位。"""
         try:
-            # 获取URDF内容
-            robot_desc = self._ros_param.humanoid_description()
+            # 优先复用 make_robot_param() 启动时已取到的 URDF，没有再回退到 XMLRPC 拉取
+            robot_desc = self._humanoid_description
+            if robot_desc is None:
+                robot_desc = self._ros_param.humanoid_description()
             if robot_desc is None:
                 SDKLogger.warn("Failed to get URDF description, using default limits")
                 return self._get_default_arm_joint_limits()

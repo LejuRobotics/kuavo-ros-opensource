@@ -90,6 +90,13 @@ struct ROSPublishers {
     ros::Publisher force_plate_pub;
     ros::Publisher rigid_body_lefthand_pub;
     ros::Publisher rigid_body_righthand_pub;
+    // 位置话题发布者（轮式/手部）
+    ros::Publisher rigid_body_r_hand_pose_pub;
+    ros::Publisher rigid_body_l_hand_pose_pub;
+    ros::Publisher rigid_body_waist_pose_pub;
+    ros::Publisher rigid_body_r_shoulder_pose_pub;
+    ros::Publisher rigid_body_l_shoulder_pose_pub;
+    ros::Publisher rigid_body_head_pose_pub;
     // 如有更多刚体，可在此添加更多 publisher
     
     // 新增：TF广播器
@@ -282,6 +289,14 @@ int main(int argc, char *argv[])
     ros_pubs.rigid_body_righthand_pub = nh.advertise<geometry_msgs::Pose>("righthand_pose", 1000);
     ros_pubs.rigid_body_robot_pub = nh.advertise<geometry_msgs::Pose>("robot_pose", 1000);
     ros_pubs.rigid_body_base_pub = nh.advertise<geometry_msgs::Pose>("base_pose", 1000);
+    
+    // 位置话题发布者
+    ros_pubs.rigid_body_r_hand_pose_pub = nh.advertise<geometry_msgs::Pose>("r_hand_pose", 1000);
+    ros_pubs.rigid_body_l_hand_pose_pub = nh.advertise<geometry_msgs::Pose>("l_hand_pose", 1000);
+    ros_pubs.rigid_body_waist_pose_pub = nh.advertise<geometry_msgs::Pose>("waist_pose", 1000);
+    ros_pubs.rigid_body_r_shoulder_pose_pub = nh.advertise<geometry_msgs::Pose>("r_shoulder_pose", 1000);
+    ros_pubs.rigid_body_l_shoulder_pose_pub = nh.advertise<geometry_msgs::Pose>("l_shoulder_pose", 1000);
+    ros_pubs.rigid_body_head_pose_pub = nh.advertise<geometry_msgs::Pose>("head_pose", 1000);
 
     // 力板数据
     ros_pubs.force_plate_pub = nh.advertise<motioncapture::ForcePlateData>("seeker_force_plates", 1000);
@@ -407,7 +422,7 @@ void DataHandler(sFrameOfMocapData *data, void *pUserData)
             std::string rbName = g_rigidBodyNames[rbID];
 
             // 判断名称来发布到不同话题
-            if (rbName == "car")
+            if (rbName == "car_pose")
             {
                 publishers->rigid_body_car_pub.publish(rb_pose);
             }
@@ -461,7 +476,31 @@ void DataHandler(sFrameOfMocapData *data, void *pUserData)
             {
                 publishers->rigid_body_lefthand_pub.publish(rb_pose);
             }
-            else 
+            else if (rbName == "r_hand_pose")
+            {
+                publishers->rigid_body_r_hand_pose_pub.publish(rb_pose);
+            }
+            else if (rbName == "l_hand_pose")
+            {
+                publishers->rigid_body_l_hand_pose_pub.publish(rb_pose);
+            }
+            else if (rbName == "waist_pose")
+            {
+                publishers->rigid_body_waist_pose_pub.publish(rb_pose);
+            }
+            else if (rbName == "r_shoulder_pose")
+            {
+                publishers->rigid_body_r_shoulder_pose_pub.publish(rb_pose);
+            }
+            else if (rbName == "l_shoulder_pose")
+            {
+                publishers->rigid_body_l_shoulder_pose_pub.publish(rb_pose);
+            }
+            else if (rbName == "head_pose")
+            {
+                publishers->rigid_body_head_pose_pub.publish(rb_pose);
+            }
+            else
             {
                 // 如果有其他名字，可以继续 else if，或忽略
             }
@@ -469,7 +508,6 @@ void DataHandler(sFrameOfMocapData *data, void *pUserData)
         else
         {
             printf("RigidBody ID=%d (unknown):\n", rbID);
-            // 如果查不到 ID->Name 的映射，可忽略或打印日志
         }
     }
 }

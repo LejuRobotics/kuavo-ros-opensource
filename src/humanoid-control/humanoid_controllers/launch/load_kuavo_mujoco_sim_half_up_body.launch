@@ -4,6 +4,4 @@
     <arg name="only_half_up_body" value="true"/>
   </include>
 
-  <!-- <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/> -->
-
 </launch>   

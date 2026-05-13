@@ -61,6 +61,14 @@ void MPC_MRT_Interface::setCurrentObservation(const SystemObservation& currentOb
 /******************************************************************************************************/
 /******************************************************************************************************/
 /******************************************************************************************************/
+void MPC_MRT_Interface::setCurrentObservation_directPub(const SystemObservation& currentObservation, const double dtDesired) {
+  std::lock_guard<std::mutex> lock(observationMutex_);
+  currentObservation_ = currentObservation;
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
 ReferenceManagerInterface& MPC_MRT_Interface::getReferenceManager() {
   return mpc_.getSolverPtr()->getReferenceManager();
 }

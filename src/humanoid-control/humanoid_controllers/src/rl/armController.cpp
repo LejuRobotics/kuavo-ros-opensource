@@ -394,6 +394,49 @@ void ArmController::applySmoothInterpolation(const ros::Time& current_time,
   is_interpolating_ = true;
 }
 
+bool ArmController::interpolateToTarget(const ros::Time& time,
+                                       double dt,
+                                       const Eigen::VectorXd& joint_pos,
+                                       const Eigen::VectorXd& joint_vel,
+                                       const Eigen::VectorXd& target_pos,
+                                       kuavo_msgs::jointCmd& joint_cmd_msg,
+                                       double interpolation_duration)
+{
+  // 保存当前手臂位置和速度
+  current_arm_pos_ = joint_pos.segment(arm_start_idx_, joint_arm_num_);
+  current_arm_vel_ = joint_vel.segment(arm_start_idx_, joint_arm_num_);
+
+  // 如果还没开始插值，初始化插值状态
+  if (!is_interpolating_)
+  {
+    // 复用 applySmoothInterpolation 的状态变量
+    interpolation_start_time_ = time;
+    interpolation_start_pos_ = current_arm_pos_;
+    target_interpolation_target_pos_ = target_pos;
+    interpolation_duration_ = interpolation_duration;
+    is_interpolating_ = true;
+
+    ROS_INFO("[ArmController] Starting smooth interpolation to target position (duration: %.2fs)", interpolation_duration);
+  }
+
+  // 复用 applySmoothInterpolation 的插值计算逻辑
+  applySmoothInterpolation(time, target_interpolation_target_pos_, Eigen::VectorXd::Zero(joint_arm_num_));
+
+  // 检查插值是否完成
+  if (!is_interpolating_)
+  {
+    ROS_INFO("[ArmController] Smooth interpolation completed, switching to RL control");
+    // 插值完成后 desire_arm_q_ 和 desire_arm_v_ 已经被设置为最终值
+    fillJointCmdMessage(joint_cmd_msg, desire_arm_q_, desire_arm_v_, joint_pos, joint_vel);
+    return false;  // 插值完成，返回false让RL接管
+  }
+
+  // 插值进行中，使用计算出的期望位置和速度
+  fillJointCmdMessage(joint_cmd_msg, desire_arm_q_, desire_arm_v_, joint_pos, joint_vel);
+
+  return true;  // 正在插值，使用外部控制
+}
+
 bool ArmController::changeModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
                                       kuavo_msgs::changeArmCtrlMode::Response &res)
 {

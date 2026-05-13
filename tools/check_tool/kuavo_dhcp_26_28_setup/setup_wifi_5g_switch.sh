@@ -1,4 +1,26 @@
 #!/bin/bash
+#
+# setup_wifi_5g_switch.sh
+#
+# 作用：
+#   配置 Wifi/5G 自动切换机制
+#   - 自动检测 Wifi 和 5G 接口的网络质量（延迟）
+#   - 根据网络质量和延迟自动切换主路由
+#   - 防抖机制避免频繁切换
+#   - 每5秒检查一次网络质量
+#
+# 适用环境：
+#   - Ubuntu 18.04/20.04/22.04
+#   - 需要 Wifi 和 5G 接口
+#
+# 使用方法：
+#   sudo bash setup_wifi_5g_switch.sh
+#
+# 注意：
+#   - 脚本会创建 systemd 定时服务，自动运行
+#   - 不会断开已建立的连接（如 SSH）
+#
+
 set -e
 
 # 彩色输出
@@ -94,22 +116,28 @@ if [ -z "$WIFI_IFACE" ] || [ -z "$WWAN_IFACE" ]; then
   exit 0
 fi
 
-# 检测接口网络质量并返回延迟（毫秒）
-# 返回格式：延迟值（毫秒），如果失败返回 -1
-# 使用方式：LATENCY=$(check_interface_quality "<iface_name>")
+# 滑动窗口大小
+WINDOW_SIZE=5
+
+# 存储接口延迟历史的文件
+LATENCY_HISTORY_DIR="/var/run/network-latency-history"
+
+# 检测接口网络质量并返回质量指标
+# 返回格式：延迟值（毫秒）,丢包率（0-100）,抖动（毫秒），如果失败返回 -1,-1,-1
+# 使用方式：read LATENCY LOSS JITTER <<< $(check_interface_quality "<iface_name>")
 check_interface_quality() {
   local iface=$1
   
   # 检查接口是否存在
   if [ -z "$iface" ]; then
     log_msg "接口 $iface 名称为空"
-    printf "-1"
+    printf "-1,-1,-1"
     return
   fi
   
   if ! ip link show "$iface" &>/dev/null; then
     log_msg "接口 $iface 不存在"
-    printf "-1"
+    printf "-1,-1,-1"
     return
   fi
   
@@ -121,14 +149,14 @@ check_interface_quality() {
   if echo "$iface" | grep -qE "wwan|wwx"; then
       if [ "$state" != "UP" ] && [ "$state" != "UNKNOWN" ]; then
         log_msg "接口 $iface (5G) 状态异常: $state，不允许继续"
-        printf "-1"
+        printf "-1,-1,-1"
         return
       fi
     else
       # 对于其他接口（如 Wifi），必须 UP
       if [ "$state" != "UP" ]; then
         log_msg "接口 $iface 未 UP，当前状态: $state"
-        printf "-1"
+        printf "-1,-1,-1"
         return
       fi
   fi
@@ -136,85 +164,146 @@ check_interface_quality() {
   # 检查接口是否有 IP 地址
   if ! ip addr show "$iface" 2>/dev/null | grep -q "inet "; then
     log_msg "接口 $iface 没有 IP 地址"
-    printf "-1"
+    printf "-1,-1,-1"
     return
   fi
   
   # 尝试 ping 网关（如果存在），先检查网关连通性
   local gateway=$(ip route | grep "$iface" | grep default | awk '{print $3}' | head -1)
   if [ -n "$gateway" ]; then
-  # 指定接口 ping 网关，避免多默认路由时走错出口
-  local gateway_ping_result=$(ping -c 1 -W 2 -I "$iface" "$gateway" 2>&1)
+    local gateway_ping_result=$(ping -c 1 -W 2 -I "$iface" "$gateway" 2>&1)
     local gateway_ping_code=$?
     if [ $gateway_ping_code -ne 0 ]; then
       log_msg "接口 $iface ping 网关失败（返回码: $gateway_ping_code）:"
       echo "$gateway_ping_result" | while IFS= read -r line; do
         log_msg "  $line"
       done
-      printf "-1"
+      printf "-1,-1,-1"
       return
     fi
   fi
   
-  # 尝试 ping 外网（8.8.8.8）并获取延迟
-  # 使用 -I 指定接口，-c 1 发送1个包，-W 3 超时3秒
-  # 从输出中提取时间（time=XX.X ms）
-  local ping_result
-  local ping_exit_code
-  ping_result=$(ping -c 1 -W 3 -I "$iface" 8.8.8.8 2>&1)
-  ping_exit_code=$?
+  # 多个检测目标，避免单点故障
+  local ping_targets=("8.8.8.8" "1.1.1.1" "223.5.5.5")
+  local max_attempts=5
+  local ping_results=()
+  local ping_success=0
+  local total_attempts=0
   
-  if [ $ping_exit_code -ne 0 ]; then
-    log_msg "接口 $iface ping 失败，返回码: $ping_exit_code"
-    printf "-1"
-    return
-  fi
-  
-  # 提取延迟值（毫秒）
-  # ping 输出格式可能是：
-  #   64 bytes from 8.8.8.8: icmp_seq=1 ttl=111 time=288 ms
-  #   或 time=25.3 ms
-  #   或 time<1ms
-  # 注意：ping 输出的 time=XX.X 单位是毫秒
-  local latency
-  
-  # 方法1：匹配 time=XXX ms 或 time=XX.X ms 格式
-  # 使用 sed 提取 time= 后面的数字（整数或小数），去掉可能的空格
-  latency=$(echo "$ping_result" | grep -oE "time=[0-9.]+" | sed 's/time=//' | head -1)
-  
-  # 如果没匹配到，尝试 time<1ms 格式
-  if [ -z "$latency" ]; then
-      latency=$(echo "$ping_result" | grep -oE "time<[0-9.]+" | sed 's/time<//' | head -1)
-      if [ -z "$latency" ]; then
-        log_msg "接口 $iface 无法从 ping 输出中提取延迟值，尝试提取的格式: time=[0-9.]+ 和 time<[0-9.]+"
-        log_msg "grep 结果: $(echo "$ping_result" | grep -oE "time=[0-9.]+" || echo '无匹配')"
-        printf "-1"
-        return
+  # 尝试每个目标，直到成功或所有目标都尝试完
+  for target in "${ping_targets[@]}"; do
+    if [ $ping_success -ge 3 ] || [ $total_attempts -ge $max_attempts ]; then
+      break
+    fi
+    
+    for ((i=1; i<=2 && $ping_success < 3 && $total_attempts < $max_attempts; i++)); do
+      local ping_result=$(ping -c 1 -W 3 -I "$iface" "$target" 2>&1)
+      local ping_exit_code=$?
+      total_attempts=$((total_attempts + 1))
+      
+      if [ $ping_exit_code -eq 0 ]; then
+        # 提取延迟值
+        local latency=$(echo "$ping_result" | grep -oE "time=[0-9.]+" | sed 's/time=//' | head -1)
+        if [ -z "$latency" ]; then
+          latency=$(echo "$ping_result" | grep -oE "time<[0-9.]+" | sed 's/time<//' | head -1)
+          if [ -n "$latency" ]; then
+            latency="1"
+          fi
+        fi
+        
+        if [ -n "$latency" ] && echo "$latency" | grep -qE '^[0-9]+\.?[0-9]*$'; then
+          local latency_ms=$(echo "$latency" | awk '{printf "%.0f", $1}')
+          ping_results+=($latency_ms)
+          ping_success=$((ping_success + 1))
+        fi
       fi
-      # 如果延迟小于1ms，返回1
-    printf "1"
+    done
+  done
+  
+  if [ $ping_success -eq 0 ]; then
+    log_msg "接口 $iface ping 失败，所有目标都尝试失败"
+    printf "-1,-1,-1"
     return
   fi
   
-  # 如果提取到延迟值，转换为整数毫秒（四舍五入）
-  if [ -n "$latency" ]; then
-    # 验证是否为有效数字（整数或小数）
-    if echo "$latency" | grep -qE '^[0-9]+\.?[0-9]*$'; then
-      # 转换为整数（四舍五入）
-      local latency_ms=$(echo "$latency" | awk '{printf "%.0f", $1}')
-      # 确保返回的是纯数字（去除所有非数字字符）
-      latency_ms=$(echo "$latency_ms" | tr -d '\n\r ' | grep -oE '^[0-9]+$' || echo "-1")
-      # 使用 printf 确保输出纯数字，不换行
-      printf "%d" "$latency_ms"
-      return
-    else
-      log_msg "接口 $iface 提取到的延迟值格式无效: '$latency'"
+  # 计算丢包率
+  local loss=$(( (total_attempts - ping_success) * 100 / total_attempts ))
+  
+  # 计算中位数延迟
+  IFS=$'\n' sorted=($(sort -n <<<"${ping_results[*]}"))
+  unset IFS
+  local mid=$((ping_success / 2))
+  local median=${sorted[$mid]}
+  
+  # 计算抖动（标准差的近似值）
+  local jitter=0
+  if [ $ping_success -gt 1 ]; then
+    local sum=0
+    local sum_sq=0
+    for val in "${ping_results[@]}"; do
+      sum=$((sum + val))
+      sum_sq=$((sum_sq + val * val))
+    done
+    local mean=$((sum / ping_success))
+    local variance=$(( (sum_sq - sum * mean) / ping_success ))
+    jitter=$(echo "sqrt($variance)" | bc -l | awk '{printf "%.0f", $1}')
+    if [ -z "$jitter" ] || [ "$jitter" -lt 0 ]; then
+      jitter=0
     fi
   fi
   
-  # 如果都失败了，返回 -1
-  log_msg "接口 $iface 延迟提取完全失败"
-  printf "-1"
+  # 维护滑动窗口历史
+  mkdir -p "$LATENCY_HISTORY_DIR" 2>/dev/null || true
+  local history_file="$LATENCY_HISTORY_DIR/${iface}.history"
+  
+  # 添加新的质量指标到历史
+  echo "$median,$loss,$jitter" >> "$history_file"
+  
+  # 只保留最近 WINDOW_SIZE 个值
+  tail -n "$WINDOW_SIZE" "$history_file" > "$history_file.tmp"
+  mv "$history_file.tmp" "$history_file" 2>/dev/null || true
+  
+  # 从历史中计算平均质量指标
+  local history_latencies=()
+  local history_losses=()
+  local history_jitters=()
+  
+  while IFS=, read -r h_latency h_loss h_jitter; do
+    if echo "$h_latency" | grep -qE '^[0-9]+$' && \
+       echo "$h_loss" | grep -qE '^[0-9]+$' && \
+       echo "$h_jitter" | grep -qE '^[0-9]+$'; then
+      history_latencies+=($h_latency)
+      history_losses+=($h_loss)
+      history_jitters+=($h_jitter)
+    fi
+  done < "$history_file"
+  
+  local history_count=${#history_latencies[@]}
+  
+  if [ $history_count -gt 0 ]; then
+    # 计算历史延迟中位数
+    IFS=$'\n' history_sorted=($(sort -n <<<"${history_latencies[*]}"))
+    unset IFS
+    local history_mid=$((history_count / 2))
+    median=${history_sorted[$history_mid]}
+    
+    # 计算历史丢包率平均值
+    local sum_loss=0
+    for l in "${history_losses[@]}"; do
+      sum_loss=$((sum_loss + l))
+    done
+    loss=$((sum_loss / history_count))
+    
+    # 计算历史抖动平均值
+    local sum_jitter=0
+    for j in "${history_jitters[@]}"; do
+      sum_jitter=$((sum_jitter + j))
+    done
+    jitter=$((sum_jitter / history_count))
+  fi
+  
+  # 使用 printf 确保输出纯数字，不换行
+  printf "%d,%d,%d" "$median" "$loss" "$jitter"
 }
 
 # 设置默认路由的 metric（不删除旧路由，避免断开现有连接）
@@ -304,42 +393,36 @@ elif [ "$WWAN_AVAILABLE" != true ] && [ "$WIFI_AVAILABLE" != true ]; then
   exit 0
 fi
 
-# 检查 Wifi 延迟
-WIFI_LATENCY=$(check_interface_quality "$WIFI_IFACE")
-# 清理返回值：去除换行符、回车符和空格
-WIFI_LATENCY=$(echo "$WIFI_LATENCY" | tr -d '\n\r ' | head -1)
+# 检查 Wifi 质量
+read WIFI_LATENCY WIFI_LOSS WIFI_JITTER <<< $(check_interface_quality "$WIFI_IFACE" | tr ',' ' ')
 
 WIFI_OK=false
 # 检查是否为有效数字且 >= 0
 if [ -n "$WIFI_LATENCY" ] && echo "$WIFI_LATENCY" | grep -qE '^[0-9]+$' && [ "$WIFI_LATENCY" -ge 0 ] 2>/dev/null; then
   WIFI_OK=true
   WIFI_LATENCY_SEC=$(awk "BEGIN {printf \"%.2f\", $WIFI_LATENCY/1000}")
-  log_msg "Wifi ($WIFI_IFACE) 网络质量正常，延迟: ${WIFI_LATENCY_SEC}s (${WIFI_LATENCY}ms)"
+  log_msg "Wifi ($WIFI_IFACE) 网络质量正常，延迟: ${WIFI_LATENCY_SEC}s (${WIFI_LATENCY}ms), 丢包率: ${WIFI_LOSS}%, 抖动: ${WIFI_JITTER}ms"
 else
-  log_msg "Wifi ($WIFI_IFACE) 网络质量异常（无法连接或ping失败），延迟值: '${WIFI_LATENCY}'"
+  log_msg "Wifi ($WIFI_IFACE) 网络质量异常（无法连接或ping失败）"
   WIFI_LATENCY=999999
+  WIFI_LOSS=100
+  WIFI_JITTER=999999
 fi
 
-# 检查 5G 延迟
-WWAN_LATENCY=$(check_interface_quality "$WWAN_IFACE")
-# 清理返回值：去除换行符、回车符和空格
-WWAN_LATENCY=$(echo "$WWAN_LATENCY" | tr -d '\n\r ' | head -1)
+# 检查 5G 质量
+read WWAN_LATENCY WWAN_LOSS WWAN_JITTER <<< $(check_interface_quality "$WWAN_IFACE" | tr ',' ' ')
 
 WWAN_OK=false
 # 检查是否为有效数字且 >= 0
 if [ -n "$WWAN_LATENCY" ] && echo "$WWAN_LATENCY" | grep -qE '^[0-9]+$' && [ "$WWAN_LATENCY" -ge 0 ] 2>/dev/null; then
   WWAN_OK=true
   WWAN_LATENCY_SEC=$(awk "BEGIN {printf \"%.2f\", $WWAN_LATENCY/1000}")
-  log_msg "5G ($WWAN_IFACE) 网络质量正常，延迟: ${WWAN_LATENCY_SEC}s (${WWAN_LATENCY}ms)"
+  log_msg "5G ($WWAN_IFACE) 网络质量正常，延迟: ${WWAN_LATENCY_SEC}s (${WWAN_LATENCY}ms), 丢包率: ${WWAN_LOSS}%, 抖动: ${WWAN_JITTER}ms"
 else
-  log_msg "5G ($WWAN_IFACE) 网络质量异常（无法连接或ping失败），延迟值: '${WWAN_LATENCY}'"
-  # 尝试数值比较看具体错误
-  if [ "$WWAN_LATENCY" -ge 0 ] 2>&1; then
-    log_msg "数值比较成功，但条件判断失败，可能是逻辑问题"
-  else
-    log_msg "数值比较失败: $?"
-  fi
+  log_msg "5G ($WWAN_IFACE) 网络质量异常（无法连接或ping失败）"
   WWAN_LATENCY=999999
+  WWAN_LOSS=100
+  WWAN_JITTER=999999
 fi
 
 # 读取上一次的主路由接口
@@ -348,34 +431,60 @@ if [ -f "$STATE_FILE" ]; then
   CURRENT_PRIMARY=$(cat "$STATE_FILE" 2>/dev/null | head -1)
 fi
 
+# 计算接口质量评分（综合考虑延迟、丢包率和抖动）
+# 评分越低越好
+calculate_quality_score() {
+  local latency=$1
+  local loss=$2
+  local jitter=$3
+  
+  # 基础评分：延迟（毫秒）
+  local score=$latency
+  
+  # 丢包率惩罚：每1%丢包增加10ms延迟
+  score=$((score + loss * 10))
+  
+  # 抖动惩罚：抖动值直接加到评分中
+  score=$((score + jitter))
+  
+  echo $score
+}
+
+# 计算质量评分
+WIFI_SCORE=$(calculate_quality_score "$WIFI_LATENCY" "$WIFI_LOSS" "$WIFI_JITTER")
+WWAN_SCORE=$(calculate_quality_score "$WWAN_LATENCY" "$WWAN_LOSS" "$WWAN_JITTER")
+
+log_msg "Wifi 质量评分: $WIFI_SCORE, 5G 质量评分: $WWAN_SCORE"
+
 # 确定应该使用哪个接口作为主路由
 SELECTED_IFACE=""
-SELECTED_LATENCY=999999
+SELECTED_SCORE=999999
 SELECTED_OK=false
 
 # 策略1：如果只有一个接口正常，使用它
-# 注意：这里必须显式加括号分组，避免 bash 的 &&/|| 优先级导致误判
-if [[ "$WIFI_OK" == true && "$WIFI_LATENCY" -lt "$LATENCY_THRESHOLD" && ( "$WWAN_OK" != true || "$WWAN_LATENCY" -ge "$LATENCY_THRESHOLD" ) ]]; then
+if [ "$WIFI_OK" = true ] && [ "$WIFI_LATENCY" -lt "$LATENCY_THRESHOLD" ] && \
+   { [ "$WWAN_OK" != true ] || [ "$WWAN_LATENCY" -ge "$LATENCY_THRESHOLD" ]; }; then
   SELECTED_IFACE="$WIFI_IFACE"
-  SELECTED_LATENCY="$WIFI_LATENCY"
+  SELECTED_SCORE="$WIFI_SCORE"
   SELECTED_OK=true
   log_msg "决策：只有 Wifi 正常，选择 Wifi"
-elif [[ "$WWAN_OK" == true && "$WWAN_LATENCY" -lt "$LATENCY_THRESHOLD" && ( "$WIFI_OK" != true || "$WIFI_LATENCY" -ge "$LATENCY_THRESHOLD" ) ]]; then
+elif [ "$WWAN_OK" = true ] && [ "$WWAN_LATENCY" -lt "$LATENCY_THRESHOLD" ] && \
+     { [ "$WIFI_OK" != true ] || [ "$WIFI_LATENCY" -ge "$LATENCY_THRESHOLD" ]; }; then
   SELECTED_IFACE="$WWAN_IFACE"
-  SELECTED_LATENCY="$WWAN_LATENCY"
+  SELECTED_SCORE="$WWAN_SCORE"
   SELECTED_OK=true
   log_msg "决策：只有 5G 正常，选择 5G"
-# 策略2：如果两个都正常，选择延迟更低的
+# 策略2：如果两个都正常，选择质量评分更低的
 elif [ "$WIFI_OK" = true ] && [ "$WIFI_LATENCY" -lt "$LATENCY_THRESHOLD" ] && \
      [ "$WWAN_OK" = true ] && [ "$WWAN_LATENCY" -lt "$LATENCY_THRESHOLD" ]; then
-  if [ "$WIFI_LATENCY" -lt "$WWAN_LATENCY" ]; then
+  if [ "$WIFI_SCORE" -lt "$WWAN_SCORE" ]; then
     SELECTED_IFACE="$WIFI_IFACE"
-    SELECTED_LATENCY="$WIFI_LATENCY"
-    log_msg "决策：两者都正常，Wifi 延迟更低 (${WIFI_LATENCY}ms < ${WWAN_LATENCY}ms)，选择 Wifi"
+    SELECTED_SCORE="$WIFI_SCORE"
+    log_msg "决策：两者都正常，Wifi 质量更好 (${WIFI_SCORE} < ${WWAN_SCORE})，选择 Wifi"
   else
     SELECTED_IFACE="$WWAN_IFACE"
-    SELECTED_LATENCY="$WWAN_LATENCY"
-    log_msg "决策：两者都正常，5G 延迟更低 (${WWAN_LATENCY}ms < ${WIFI_LATENCY}ms)，选择 5G"
+    SELECTED_SCORE="$WWAN_SCORE"
+    log_msg "决策：两者都正常，5G 质量更好 (${WWAN_SCORE} < ${WIFI_SCORE})，选择 5G"
   fi
   SELECTED_OK=true
 fi
@@ -383,7 +492,7 @@ fi
 # 如果都没有选择，说明都异常
 if [ -z "$SELECTED_IFACE" ]; then
   log_msg "警告：Wifi 和 5G 都异常或延迟过高，无法切换"
-  log_msg "---"
+log_msg "---"
   exit 0
 fi
 
@@ -405,24 +514,24 @@ elif [ "$CURRENT_PRIMARY" = "$WIFI_IFACE" ] && ([ "$WIFI_OK" != true ] || [ "$WI
 elif [ "$CURRENT_PRIMARY" = "$WWAN_IFACE" ] && ([ "$WWAN_OK" != true ] || [ "$WWAN_LATENCY" -ge "$LATENCY_THRESHOLD" ]); then
   DECISION_IFACE="$SELECTED_IFACE"
   log_msg "当前主路由 5G 异常，决策切换到 $SELECTED_IFACE"
-# 如果新接口明显更好（延迟差超过防抖阈值），决策切换
+# 如果新接口明显更好（质量评分差超过防抖阈值），决策切换
 else
-  # 获取当前主路由的延迟
-  CURRENT_LATENCY=999999
+  # 获取当前主路由的质量评分
+  CURRENT_SCORE=999999
   if [ "$CURRENT_PRIMARY" = "$WIFI_IFACE" ]; then
-    CURRENT_LATENCY="$WIFI_LATENCY"
+    CURRENT_SCORE="$WIFI_SCORE"
   elif [ "$CURRENT_PRIMARY" = "$WWAN_IFACE" ]; then
-    CURRENT_LATENCY="$WWAN_LATENCY"
+    CURRENT_SCORE="$WWAN_SCORE"
   fi
   
-  # 只有当新接口延迟比当前接口低超过防抖阈值时才决策切换
-  LATENCY_DIFF=$((CURRENT_LATENCY - SELECTED_LATENCY))
-  if [ "$LATENCY_DIFF" -gt "$HYSTERESIS_THRESHOLD" ]; then
+  # 只有当新接口质量评分比当前接口低超过防抖阈值时才决策切换
+  SCORE_DIFF=$((CURRENT_SCORE - SELECTED_SCORE))
+  if [ "$SCORE_DIFF" -gt "$HYSTERESIS_THRESHOLD" ]; then
     DECISION_IFACE="$SELECTED_IFACE"
-    log_msg "新接口延迟明显更好 (差 ${LATENCY_DIFF}ms > ${HYSTERESIS_THRESHOLD}ms)，决策切换到 $SELECTED_IFACE"
+    log_msg "新接口质量明显更好 (评分差 ${SCORE_DIFF} > ${HYSTERESIS_THRESHOLD})，决策切换到 $SELECTED_IFACE"
   else
     DECISION_IFACE="$CURRENT_PRIMARY"
-    log_msg "新接口延迟优势不明显 (差 ${LATENCY_DIFF}ms <= ${HYSTERESIS_THRESHOLD}ms)，决策保持当前路由 $CURRENT_PRIMARY"
+    log_msg "新接口质量优势不明显 (评分差 ${SCORE_DIFF} <= ${HYSTERESIS_THRESHOLD})，决策保持当前路由 $CURRENT_PRIMARY"
   fi
 fi
 
@@ -532,20 +641,6 @@ EOF
 log_ok "systemd 服务已创建"
 
 #------------------------------
-# 3.1. 配置 CPU 亲和性（绑定到 CPU 15）
-#------------------------------
-log_info "配置 network-quality-check 服务 CPU 亲和性（绑定到 CPU 15）..."
-
-mkdir -p /etc/systemd/system/network-quality-check.service.d/
-
-cat > /etc/systemd/system/network-quality-check.service.d/cpu-affinity.conf <<'EOF'
-[Service]
-CPUAffinity=15
-EOF
-
-log_ok "CPU 亲和性配置完成（绑定到 CPU 15）"
-
-#------------------------------
 # 4. 创建日志目录和日志轮转配置
 #------------------------------
 log_info "创建日志目录..."
@@ -600,7 +695,7 @@ log_info "  - 接口: Wifi=$WIFI_IFACE, 5G=$WWAN_IFACE"
 log_info "  - 延迟阈值: 500ms（超过此值认为质量差）"
 log_info "  - 防抖阈值: 200ms（延迟差超过此值才切换）"
 log_info "  - 连续决策: 需要连续4次相同决策才切换"
-log_info "  - CPU 亲和性: 绑定到 CPU 15（与 DHCP 服务相同）"
+
 log_info "  - 开机自启: 已启用（开机后1分钟开始检查）"
 log_info "  - 优先级: 主路由 metric=100，备用路由 metric=200"
 echo ""

@@ -54,6 +54,7 @@ add_message_files(
   FILES
   imuData.msg
   jointData.msg
+  FTsensorData.msg
   sensorsData.msg
   endEffectorData.msg
   jointCmd.msg
@@ -93,6 +94,7 @@ add_message_files(
   footPoseWithVision.msg
   footPoseWithVisionArray.msg
   kuavoModeSchedule.msg
+  headCtrlMode.msg
 
   # motion_capture_ik
   robotArmQVVD.msg
@@ -126,7 +128,6 @@ add_message_files(
 
   # kuavo_arm_collision_check
   armCollisionCheckInfo.msg
-  FTsensorData.msg
 
   MmDetectionMsg.msg
   AudioReceiverData.msg
@@ -144,9 +145,18 @@ add_message_files(
   robotWaistControl.msg
   # VMP Controller
   VMPTrajectoryState.msg
+  DanceTrajectoryState.msg
 
   # Battery info
   BatteryInfo.msg
+  ControllerSwitchEvent.msg
+
+  # Lb single timed cmd
+  timedSingleCmd.msg
+
+  # Lb offline Traj
+  timedPoint.msg
+  lbTimedOfflineTraj.msg
   Float32MultiArrayStamped.msg
 )
 
@@ -224,6 +234,31 @@ add_service_files(
   # Battery service
   GetBatteryInfo.srv
 
+
+  # Lb obs update mode
+  changeLbMpcObsUpdateModeSrv.srv
+
+  # Lb ruckig planner params
+  setRuckigPlannerParams.srv
+
+  # Lb Torso Initial Pose
+  getLbTorsoInitialPose.srv
+
+  # Lb Timed Cmd 
+  lbTimedPosCmd.srv
+
+  # Lb Multi Timed Cmd
+  lbMultiTimedPosCmd.srv
+  setContactForceInterpParams.srv
+
+  # Lb offline Traj
+  lbMultiTimedOfflineTraj.srv
+
+  # Lb accsessibility judge
+  accessIkSolve.srv
+
+  # Lb eePose reach error
+  eePoseReachError.srv
 )
 
 ## Generate actions in the 'action' folder

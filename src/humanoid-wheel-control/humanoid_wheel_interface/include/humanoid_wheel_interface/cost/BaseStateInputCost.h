@@ -70,12 +70,19 @@ class BaseStateInputCost final : public QuadraticStateInputCost {
       inputDeviation.segment(baseNums_, 4) = input.segment(baseNums_, 4) - 
             referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).segment(baseNums_, 4);
     }
-    if(referenceManager_.getEnableArmJointTrack()) // 使能手臂关节跟踪
+    if(referenceManager_.getEnableArmJointTrackForArm(0)) // 使能左臂关节跟踪
     {
-      stateDeviation.tail(info_.armDim - 4) = state.tail(info_.armDim - 4) - 
-            referenceManager_.getStateInputTargetTrajectories().getDesiredState(time).tail(info_.armDim - 4);
-      inputDeviation.tail(info_.armDim - 4) = input.tail(info_.armDim - 4) - 
-            referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).tail(info_.armDim - 4);
+      stateDeviation.tail(info_.armDim - 4).head(7) = state.tail(info_.armDim - 4).head(7) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredState(time).tail(info_.armDim - 4).head(7);
+      inputDeviation.tail(info_.armDim - 4).head(7) = input.tail(info_.armDim - 4).head(7) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).tail(info_.armDim - 4).head(7);
+    }
+    if(referenceManager_.getEnableArmJointTrackForArm(1)) // 使能右臂关节跟踪
+    {
+      stateDeviation.tail(info_.armDim - 4).tail(7) = state.tail(info_.armDim - 4).tail(7) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredState(time).tail(info_.armDim - 4).tail(7);
+      inputDeviation.tail(info_.armDim - 4).tail(7) = input.tail(info_.armDim - 4).tail(7) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).tail(info_.armDim - 4).tail(7);
     }
 
     return {stateDeviation, inputDeviation};

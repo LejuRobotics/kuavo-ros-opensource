@@ -265,8 +265,7 @@ class ArmTrajectoryBezierDemo:
             self.joint_state.effort = [0] * 14
 
             self.hand_state.left_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[14:20]]  # 无符号整数
-            self.hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
-                                                point.positions[20:26]]  # 无符号整数
+            self.hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[20:26]]  # 无符号整数
             
             self.head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:28]]
             if self.has_waist and len(point.positions) > 28:
@@ -908,8 +907,16 @@ class ArmTrajectoryBezierDemo:
         else:
             # 做完动作之后恢复自然摆臂状态，并且手、头、腰部关节归位
             self.call_change_arm_ctrl_mode_service(1)
-            self.hand_state.left_hand_position = [0] * 6
-            self.hand_state.right_hand_position = [0] * 6
+            left_hand_pos_reset = [0] * 6
+            right_hand_pos_reset = [0] * 6
+
+            left_hand_pos_reset[0] = 100  # 大拇指握拳，其他手指伸直
+            right_hand_pos_reset[0] = 100  # 大拇指握拳，其他手指伸直
+            
+            # 收缩大拇指，避免灵心巧手的大拇指与腿发生干涉
+            self.hand_state.left_hand_position = left_hand_pos_reset
+            self.hand_state.right_hand_position = right_hand_pos_reset
+
             self.control_hand_pub.publish(self.hand_state)
             self.head_state.joint_data = [0] * 2
             self.control_head_pub.publish(self.head_state)
@@ -1250,12 +1257,15 @@ class ArmTrajectoryBezierDemo:
         version_compat_map = {
             41: [41],
             42: [42],
-            45: [43, 45, 46, 48, 49, 100045, 100049, 200049],
-            11: [11, 13, 14, 15, 16],
-            13: [11, 13, 14, 15, 16],
-            14: [11, 13, 14, 15, 16],
-            15: [11, 13, 14, 15, 16],
-            16: [11, 13, 14, 15, 16],
+            45: [43, 45, 46, 48, 49, 100045, 100049, 200049, 300049, 400049],
+            52: [52, 53, 54],
+            11: [11, 13, 14, 15, 16, 17],
+            13: [11, 13, 14, 15, 16, 17],
+            14: [11, 13, 14, 15, 16, 17],
+            15: [11, 13, 14, 15, 16, 17],
+            16: [11, 13, 14, 15, 16, 17],
+            17: [11, 13, 14, 15, 16, 17],
+
         }
         allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
         # 使用 version_number() 获取版本号数字进行比较

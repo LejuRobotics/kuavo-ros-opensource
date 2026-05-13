@@ -32,11 +32,14 @@
 #include "kuavo_msgs/sensorsData.h"
 #include "kuavo_msgs/jointData.h"
 #include "kuavo_msgs/jointCmd.h"
+#include "kuavo_msgs/FTsensorData.h"
 #include "geometry_msgs/Wrench.h"
+#include "geometry_msgs/WrenchStamped.h"
 #include "nav_msgs/Odometry.h"
 #include "std_srvs/SetBool.h"
 #include "std_msgs/Float64.h"
 #include "std_msgs/Float64.h"
+#include "std_msgs/Float64MultiArray.h"
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Core>
 #include <csignal>
@@ -45,13 +48,22 @@
 #include "kuavo_msgs/lejuClawCommand.h"
 #include "sensor_msgs/JointState.h"
 
+#include "mujoco_cpp/depth_camera_config.h"
 #include "joint_address.hpp"
 #include "dexhand_mujoco_node.h"
 #include "dexhand/json.hpp"
+#include "mujoco_cpp/ActuatorDynamics.hpp"
 
 #if defined(USE_DDS) || defined(USE_LEJU_DDS)
 #include "mujoco_dds.h"
 #endif
+
+//  ******************* raycaster camera *********************
+
+#include "RayCasterCamera.h"
+#include "sensor_msgs/Image.h"
+#include "sensor_msgs/CameraInfo.h"
+#include <opencv2/opencv.hpp>
 
 //  ************************* lcm ****************************
 
@@ -91,7 +103,39 @@ namespace
   ros::Publisher pubGroundTruth;  // 重命名原来的pubOdom
   ros::Publisher pubOdom;          // 新增odom发布者
   ros::Publisher pubTimeDiff;
+  ros::Publisher pubLeftArmFT;   // 左手臂末端力/扭矩
+  ros::Publisher pubRightArmFT;  // 右手臂末端力/扭矩
   bool pure_sim = false;
+
+  // raycaster camera
+  ros::Publisher depthImagePub;
+  ros::Publisher depthImageArrayPub;
+  std::unique_ptr<RayCasterCamera> g_depth_camera;
+  const int DEPTH_CAMERA_WIDTH = 64;  // 64
+  const int DEPTH_CAMERA_HEIGHT = 36;  // 36
+  const mjtNum FOCAL_LENGTH = 2.12;
+  const mjtNum HORIZONTAL_APERTURE = 4.24;  // 4.24
+  const mjtNum VERTICAL_APERTURE = 2.4480;  // 2.4480
+  const mjtNum DEPTH_CAMERA_MIN_RANGE = 0.17;
+  const mjtNum DEPTH_CAMERA_MAX_RANGE = 2.5;
+  // raycaster camera thread
+  std::thread depth_thread;
+  std::atomic<bool> depth_thread_running{true};
+  std::mutex mujoco_data_mutex;  // Protects access to m and d
+  double depth_frequency = 60.0;  // Hz
+  bool isRunCamera_{false};
+
+  // Depth image history buffer (6*6+7=43 frames)
+  struct DepthImageFrame {
+      std::vector<float> data;
+      ros::Time timestamp;
+  };
+  static const int DEPTH_BUFFER_SIZE = 43;
+  std::array<DepthImageFrame, DEPTH_BUFFER_SIZE> depth_buffer;
+  size_t current_buffer_index = 0;
+  bool depth_buffer_filled = false;  // Track if buffer has been filled once
+  std::mutex depth_buffer_mutex;
+  ros::Publisher depthHistoryPub;
 
 #ifdef USE_DDS
   std::unique_ptr<MujocoDdsClient<unitree_hg::msg::dds_::LowCmd_, unitree_hg::msg::dds_::LowState_>> dds_client;
@@ -110,6 +154,14 @@ namespace
   std::vector<double> claw_cmd;
   bool claw_cmd_updated = false;
   size_t numClawJoints = 2; // 夹抓的自由度
+
+  // 手臂外力（持续施加）
+  geometry_msgs::Wrench left_hand_wrench_;
+  geometry_msgs::Wrench right_hand_wrench_;
+  bool left_hand_active_ = false;
+  bool right_hand_active_ = false;
+  int left_arm_link_id_ = -1;   // 缓存左手link ID
+  int right_arm_link_id_ = -1;  // 缓存右手link ID
 
   std::mutex queueMutex;
   ros::NodeHandle *g_nh_ptr;
@@ -143,11 +195,127 @@ namespace
   bool leg_joints_constrained = false;
   std::vector<double> fixed_leg_l_qpos;  // 左腿关节固定位置
   std::vector<double> fixed_leg_r_qpos;  // 右腿关节固定位置
+  std::unique_ptr<mujoco_sim::ActuatorDynamicsCompensator> actuatorDynamicsCompensator;
+  constexpr int kArmCompensationDof = 14;
+
+  void ResetDepthBufferState()
+  {
+    std::unique_lock<std::mutex> buffer_lock(depth_buffer_mutex);
+    current_buffer_index = 0;
+    depth_buffer_filled = false;
+    for (DepthImageFrame &frame : depth_buffer)
+    {
+      frame.data.clear();
+      frame.timestamp = ros::Time();
+    }
+  }
+
+  bool ConfigureDepthCameraForCurrentModel()
+  {
+    if(isRunCamera_ == false) return false;
+    std::unique_lock<std::mutex> data_lock(mujoco_data_mutex);
+    g_depth_camera.reset();
+
+    if (!mujoco_cpp::ModelHasTargetDepthCamera(m))
+    {
+      data_lock.unlock();
+      ResetDepthBufferState();
+      ROS_INFO("[RayCasterCamera] Target camera '%s' not found in model, depth camera disabled.",
+               mujoco_cpp::kDepthCameraName);
+      return false;
+    }
+
+    try
+    {
+      auto depth_camera = std::make_unique<RayCasterCamera>(
+          m, d,
+          mujoco_cpp::kDepthCameraName,
+          FOCAL_LENGTH,
+          HORIZONTAL_APERTURE,
+          DEPTH_CAMERA_WIDTH,
+          DEPTH_CAMERA_HEIGHT,
+          std::array<mjtNum, 2>{DEPTH_CAMERA_MIN_RANGE, DEPTH_CAMERA_MAX_RANGE},
+          VERTICAL_APERTURE);
+      depth_camera->set_num_thread(16);
+      g_depth_camera = std::move(depth_camera);
+      data_lock.unlock();
+      ResetDepthBufferState();
+      ROS_INFO("[RayCasterCamera] Depth camera initialized successfully at %s",
+               mujoco_cpp::kDepthCameraName);
+      return true;
+    }
+    catch (const std::exception &e)
+    {
+      data_lock.unlock();
+      ResetDepthBufferState();
+      ROS_WARN("[RayCasterCamera] Initialization failed for %s: %s",
+               mujoco_cpp::kDepthCameraName, e.what());
+      return false;
+    }
+  }
 
   // control noise variables
   // mjtNum* ctrlnoise = nullptr;
 
   using Seconds = std::chrono::duration<double>;
+
+  //---------------------------------- depth history publisher -----------------------------------
+  
+  void publish_depth_history()
+  {
+    std::unique_lock<std::mutex> lock(depth_buffer_mutex);
+
+    // From 6*7+1=43 frames, take frame indices: 0, 6, 12, 18, 24, 30, 36, 42 (8 frames total)
+    std::vector<int> selected_indices;
+    for (int i = 0; i < 7; ++i) {
+      selected_indices.push_back(i * 6); // 1st frame of each group
+    }
+    selected_indices.push_back(DEPTH_BUFFER_SIZE - 1);  // Last remaining frame
+    
+    std::vector<float> first_frame_data;
+    if (!depth_buffer[0].data.empty()) {
+      first_frame_data = depth_buffer[0].data;
+    }
+
+    // if (!depth_buffer_filled) {
+    //   printf("depth buffer filled: %d; cur ids: %d \n", depth_buffer_filled, current_buffer_index);
+    // }
+    
+    ros::Time start_time = ros::Time::now();
+    std_msgs::Float64MultiArray history_array_msg;
+    for (int i = 0; i < selected_indices.size(); ++i) {
+    // for (int i = selected_indices.size() - 1; i >= 0; --i) {
+      int idx = selected_indices[i];
+      // go backward to find history frame
+      // int buffer_pos = (current_buffer_index - 1 - (DEPTH_BUFFER_SIZE - 1 - idx) + DEPTH_BUFFER_SIZE * 100) % DEPTH_BUFFER_SIZE;
+      int buffer_pos = ((current_buffer_index - 1) - idx + DEPTH_BUFFER_SIZE * 100) % DEPTH_BUFFER_SIZE;
+      
+      // If buffer is not yet full and this position is beyond the current write point, use first frame
+      if (!depth_buffer_filled && buffer_pos >= current_buffer_index) {
+        for (float val : first_frame_data) {
+          history_array_msg.data.push_back(val);
+        }
+        if (current_buffer_index < 3){
+          printf("%d ", buffer_pos);
+        }
+      } else if (!depth_buffer[buffer_pos].data.empty()) {
+        for (float val : depth_buffer[buffer_pos].data) {
+          history_array_msg.data.push_back(val);
+        }
+      } else if (!first_frame_data.empty()) {
+        // If this position is empty but buffer is full, use first frame as fallback
+        for (float val : first_frame_data) {
+          history_array_msg.data.push_back(val);
+        }
+      }
+    }
+    // if (!depth_buffer_filled && current_buffer_index < 3){
+    //   printf("\n");
+    // }
+    lock.unlock();
+    depthHistoryPub.publish(history_array_msg);
+  }
+  
 
   /************************************* Joint Address******************************************/
   // This section defines the joint addresses for various body parts of the robot.
@@ -166,6 +334,64 @@ namespace
   // Mujoco Dexhand
   std::shared_ptr<mujoco_node::DexHandMujocoRosNode> g_dexhand_node = nullptr;
   /*********************************************************************************************/
+
+  bool buildArmCompensationMeasuredDq(Eigen::VectorXd& measuredDq) {
+    measuredDq = Eigen::VectorXd::Zero(kArmCompensationDof);
+    if (!sim || !d || LArmJointsAddr.qdofadr().invalid() || RArmJointsAddr.qdofadr().invalid()) {
+      return false;
+    }
+    if (LArmJointsAddr.qdofadr().size() != kArmCompensationDof / 2 ||
+        RArmJointsAddr.qdofadr().size() != kArmCompensationDof / 2) {
+      return false;
+    }
+
+    std::unique_lock<std::recursive_mutex> lock(sim->mtx);
+    int idx = 0;
+    for (auto iter = LArmJointsAddr.qdofadr().begin(); iter != LArmJointsAddr.qdofadr().end(); ++iter) {
+      measuredDq[idx++] = d->qvel[*iter];
+    }
+    for (auto iter = RArmJointsAddr.qdofadr().begin(); iter != RArmJointsAddr.qdofadr().end(); ++iter) {
+      measuredDq[idx++] = d->qvel[*iter];
+    }
+    return true;
+  }
+
+  void applyArmActuatorDynamicsCompensation(const kuavo_msgs::jointCmd::ConstPtr &msg, std::vector<double>& tau) {
+    if (!actuatorDynamicsCompensator || tau.size() < static_cast<size_t>(numJoints) ||
+        msg->joint_v.size() < static_cast<size_t>(numJoints)) {
+      return;
+    }
+
+    const int headDof = static_cast<int>(HeadJointsAddr.qdofadr().size());
+    const int armStartIndex = static_cast<int>(numJoints) - headDof - kArmCompensationDof;
+    if (armStartIndex < 0 || armStartIndex + kArmCompensationDof > static_cast<int>(numJoints)) {
+      return;
+    }
+
+    Eigen::VectorXd tauCmd = Eigen::VectorXd::Zero(kArmCompensationDof);
+    Eigen::VectorXd dqCmd = Eigen::VectorXd::Zero(kArmCompensationDof);
+    Eigen::VectorXd dqMeas = Eigen::VectorXd::Zero(kArmCompensationDof);
+    const Eigen::VectorXd ddq = Eigen::VectorXd::Zero(kArmCompensationDof);
+
+    for (int i = 0; i < kArmCompensationDof; ++i) {
+      const int jointIndex = armStartIndex + i;
+      tauCmd[i] = msg->tau[jointIndex];
+      dqCmd[i] = msg->joint_v[jointIndex];
+    }
+
+    if (!buildArmCompensationMeasuredDq(dqMeas)) {
+      dqMeas = dqCmd;
+    }
+
+    const Eigen::VectorXd compensatedTau = actuatorDynamicsCompensator->compute(tauCmd, ddq, dqCmd, dqMeas);
+    if (compensatedTau.size() != kArmCompensationDof) {
+      return;
+    }
+    for (int i = 0; i < kArmCompensationDof; ++i) {
+      tau[armStartIndex + i] = compensatedTau[i];
+    }
+  }
+
   //---------------------------------------- plugin handling -----------------------------------------
 
   // return the path to the directory containing the current executable
@@ -577,6 +803,34 @@ namespace
     sensors_data.joint_data = joint_data;
     sensors_data.imu_data = imu_data;
 
+    // Read and publish FT sensor data (force/torque sensors)
+    kuavo_msgs::FTsensorData FTsensor_data;
+    int l_force_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "l_force")];
+    int l_torque_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "l_torque")];
+    int r_force_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "r_force")];
+    int r_torque_addr = m->sensor_adr[mj_name2id(m, mjOBJ_SENSOR, "r_torque")];
+    
+    // Check if FT sensors exist in the model
+    if (l_force_addr >= 0 && l_torque_addr >= 0 && r_force_addr >= 0 && r_torque_addr >= 0) {
+      mjtNum *l_force = d->sensordata + l_force_addr;
+      mjtNum *l_torque = d->sensordata + l_torque_addr;
+      mjtNum *r_force = d->sensordata + r_force_addr;
+      mjtNum *r_torque = d->sensordata + r_torque_addr;
+      FTsensor_data.Fx.push_back(l_force[0]);
+      FTsensor_data.Fx.push_back(r_force[0]);
+      FTsensor_data.Fy.push_back(l_force[1]);
+      FTsensor_data.Fy.push_back(r_force[1]);
+      FTsensor_data.Fz.push_back(l_force[2]);
+      FTsensor_data.Fz.push_back(r_force[2]);
+      FTsensor_data.Mx.push_back(l_torque[0]);
+      FTsensor_data.Mx.push_back(r_torque[0]);
+      FTsensor_data.My.push_back(l_torque[1]);
+      FTsensor_data.My.push_back(r_torque[1]);
+      FTsensor_data.Mz.push_back(l_torque[2]);
+      FTsensor_data.Mz.push_back(r_torque[2]);
+    }
+    sensors_data.FTsensor_data = FTsensor_data;
+
 #ifdef USE_DDS
     // Publish DDS LowState via DDS (instead of ROS when DDS is enabled)
     if (dds_client) {
@@ -626,6 +880,50 @@ namespace
     bodyOdom.twist.twist.angular.z = angVel[2];
     pubGroundTruth.publish(bodyOdom);  // 发布到/ground_truth/state
     pubOdom.publish(bodyOdom);         // 发布到/odom
+
+    // 读取并发布手臂末端力/扭矩传感器数据
+    int l_arm_force_id = mj_name2id(m, mjOBJ_SENSOR, "l_arm_force");
+    int l_arm_torque_id = mj_name2id(m, mjOBJ_SENSOR, "l_arm_torque");
+    int r_arm_force_id = mj_name2id(m, mjOBJ_SENSOR, "r_arm_force");
+    int r_arm_torque_id = mj_name2id(m, mjOBJ_SENSOR, "r_arm_torque");
+
+    // 检查左手臂传感器是否存在
+    if (l_arm_force_id >= 0 && l_arm_torque_id >= 0) {
+      int l_arm_force_addr = m->sensor_adr[l_arm_force_id];
+      int l_arm_torque_addr = m->sensor_adr[l_arm_torque_id];
+      mjtNum *l_arm_force = d->sensordata + l_arm_force_addr;
+      mjtNum *l_arm_torque = d->sensordata + l_arm_torque_addr;
+
+      geometry_msgs::WrenchStamped left_arm_ft;
+      left_arm_ft.header.stamp = sim_time;
+      left_arm_ft.header.frame_id = "l_arm_ft_frame";
+      left_arm_ft.wrench.force.x = l_arm_force[0];
+      left_arm_ft.wrench.force.y = l_arm_force[1];
+      left_arm_ft.wrench.force.z = l_arm_force[2];
+      left_arm_ft.wrench.torque.x = l_arm_torque[0];
+      left_arm_ft.wrench.torque.y = l_arm_torque[1];
+      left_arm_ft.wrench.torque.z = l_arm_torque[2];
+      pubLeftArmFT.publish(left_arm_ft);
+    }
+
+    // 检查右手臂传感器是否存在
+    if (r_arm_force_id >= 0 && r_arm_torque_id >= 0) {
+      int r_arm_force_addr = m->sensor_adr[r_arm_force_id];
+      int r_arm_torque_addr = m->sensor_adr[r_arm_torque_id];
+      mjtNum *r_arm_force = d->sensordata + r_arm_force_addr;
+      mjtNum *r_arm_torque = d->sensordata + r_arm_torque_addr;
+
+      geometry_msgs::WrenchStamped right_arm_ft;
+      right_arm_ft.header.stamp = sim_time;
+      right_arm_ft.header.frame_id = "r_arm_ft_frame";
+      right_arm_ft.wrench.force.x = r_arm_force[0];
+      right_arm_ft.wrench.force.y = r_arm_force[1];
+      right_arm_ft.wrench.force.z = r_arm_force[2];
+      right_arm_ft.wrench.torque.x = r_arm_torque[0];
+      right_arm_ft.wrench.torque.y = r_arm_torque[1];
+      right_arm_ft.wrench.torque.z = r_arm_torque[2];
+      pubRightArmFT.publish(right_arm_ft);
+    }
   }
 
   double velocity_pid_func(int i, double target_vel)
@@ -678,8 +976,9 @@ namespace
   void updateWheelVel_VectorContorl_omniWheel(Eigen::Vector3d& cmd_vel)
   {
     const double wheel_radius = 0.13035;  // 底盘轮子半径
-    const double robot_x_dis = 0.232489;  // 机器人中心到轮子的距离
-    const double robot_y_dis = 0.232489;  // 机器人中心到轮子的距离
+    // s63 底盘轮距更大
+    const double robot_x_dis = (robotVersion_ == 63) ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
+    const double robot_y_dis = (robotVersion_ == 63) ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
 
     // cmd_vel: [vx, vy, omega] - 机器人本体系速度和角速度
     // 四个轮子的位置（相对于底盘中心）
@@ -736,6 +1035,11 @@ namespace
     queueMutex.unlock();
     uint64_t step_count = 0;
     sim_time = ros::Time::now();
+
+    // Depth history publishing timer (60Hz)
+    ros::Time last_depth_history_pub_time = ros::Time::now();
+    double depth_history_interval = 1.0 / 60.0;  // 60Hz
+
     // run until asked to exit
     ros::Rate loop_rate(frequency);
     while (!sim.exitrequest.load())
@@ -779,6 +1083,15 @@ namespace
         is_chassic_cmd_changed = false;
         is_chassic_cmd_vel_changed = false;
         joint_tau_cmd = std::vector<double>(numJoints, 0);
+
+        if (depth_thread.joinable() && mnew && dnew)
+        {
+          ConfigureDepthCameraForCurrentModel();
+        }
+        else
+        {
+          ResetDepthBufferState();
+        }
 
         claw_cmd_updated = false;
         claw_cmd = std::vector<double>(numClawJoints, 0);
@@ -885,7 +1198,7 @@ namespace
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61)
+                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
@@ -990,7 +1303,23 @@ namespace
                 }
               }
             }
-
+            // 每次step前应用手臂外力（因为xfrc_applied会在mj_step后自动清零）
+            if (left_hand_active_ && left_arm_link_id_ != -1) {
+              d->xfrc_applied[6 * left_arm_link_id_ + 0] = left_hand_wrench_.force.x;
+              d->xfrc_applied[6 * left_arm_link_id_ + 1] = left_hand_wrench_.force.y;
+              d->xfrc_applied[6 * left_arm_link_id_ + 2] = left_hand_wrench_.force.z;
+              d->xfrc_applied[6 * left_arm_link_id_ + 3] = left_hand_wrench_.torque.x;
+              d->xfrc_applied[6 * left_arm_link_id_ + 4] = left_hand_wrench_.torque.y;
+              d->xfrc_applied[6 * left_arm_link_id_ + 5] = left_hand_wrench_.torque.z;
+            }
+            if (right_hand_active_ && right_arm_link_id_ != -1) {
+              d->xfrc_applied[6 * right_arm_link_id_ + 0] = right_hand_wrench_.force.x;
+              d->xfrc_applied[6 * right_arm_link_id_ + 1] = right_hand_wrench_.force.y;
+              d->xfrc_applied[6 * right_arm_link_id_ + 2] = right_hand_wrench_.force.z;
+              d->xfrc_applied[6 * right_arm_link_id_ + 3] = right_hand_wrench_.torque.x;
+              d->xfrc_applied[6 * right_arm_link_id_ + 4] = right_hand_wrench_.torque.y;
+              d->xfrc_applied[6 * right_arm_link_id_ + 5] = right_hand_wrench_.torque.z;
+            }
             mj_step(m, d);
             step_count++;
             sim_time += ros::Duration(1 / frequency);
@@ -1079,6 +1408,13 @@ namespace
             // }
           }
           publish_ros_data(d, sim.run);
+
+          // ros::Time current_time = ros::Time::now();
+          // if ((current_time - last_depth_history_pub_time).toSec() >= depth_history_interval)
+          // {
+          //   publish_depth_history();
+          //   last_depth_history_pub_time = current_time;
+          // }
         }
       } // release std::lock_guard<std::mutex>
     }
@@ -1175,6 +1511,7 @@ void jointCmdCallback(const kuavo_msgs::jointCmd::ConstPtr &msg)
   {
     tau[i] = msg->tau[i];
   }
+  applyArmActuatorDynamicsCompensation(msg, tau);
   std::lock_guard<std::mutex> lock(queueMutex);
   // controlCommands.push(tau);
   joint_tau_cmd = tau;
@@ -1443,6 +1780,15 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   pubGroundTruth = g_nh_ptr->advertise<nav_msgs::Odometry>("/ground_truth/state", 10);
   pubOdom = g_nh_ptr->advertise<nav_msgs::Odometry>("/odom", 10);
   pubTimeDiff = g_nh_ptr->advertise<std_msgs::Float64>("/monitor/time_cost/mujoco_loop_time", 10);
+  pubLeftArmFT = g_nh_ptr->advertise<geometry_msgs::WrenchStamped>("/arm_force_torque/left", 10);
+  pubRightArmFT = g_nh_ptr->advertise<geometry_msgs::WrenchStamped>("/arm_force_torque/right", 10);
+  bool camera_available = ConfigureDepthCameraForCurrentModel();
+  if (camera_available) {
+    depthImagePub = g_nh_ptr->advertise<sensor_msgs::Image>(mujoco_cpp::kDepthImageTopic, 10);
+    depthImageArrayPub = g_nh_ptr->advertise<std_msgs::Float64MultiArray>(mujoco_cpp::kDepthImageArrayTopic, 10);
+    depthHistoryPub = g_nh_ptr->advertise<std_msgs::Float64MultiArray>(mujoco_cpp::kDepthHistoryTopic, 10);
+  }
+
   // // 创建服务
   ros::ServiceServer service = g_nh_ptr->advertiseService("sim_start", handleSimStart);
 
@@ -1452,6 +1798,122 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   ros::Subscriber jointCmdSub = g_nh_ptr->subscribe("/joint_cmd", 10, jointCmdCallback);
 #endif
   ros::Subscriber extWrenchSub = g_nh_ptr->subscribe("/external_wrench", 10, extWrenchCallback);
+
+  if (camera_available) {
+    depth_thread_running.store(true);
+    depth_thread = std::thread([]() {
+        ros::Rate depth_rate(depth_frequency);
+        while (depth_thread_running.load() && ros::ok()) {
+            // Lock mutex to safely copy MuJoCo data if needed
+            std::unique_lock<std::mutex> lock(mujoco_data_mutex);
+
+            if (g_depth_camera) {
+                // auto t0 = std::chrono::high_resolution_clock::now();
+                g_depth_camera->compute_distance();
+                // auto t1 = std::chrono::high_resolution_clock::now();
+                // double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+                // std::cout << "RayCasterCamera runtime: " << ms << " ms" << std::endl;
+
+                // Process and publish depth image
+                sensor_msgs::Image depth_msg;
+                depth_msg.header.stamp = ros::Time::now();
+                depth_msg.header.frame_id = mujoco_cpp::kDepthCameraFrameId;
+                depth_msg.height = DEPTH_CAMERA_HEIGHT;
+                depth_msg.width = DEPTH_CAMERA_WIDTH;
+                depth_msg.encoding = "32FC1";
+                depth_msg.step = DEPTH_CAMERA_WIDTH * sizeof(float);
+                depth_msg.is_bigendian = 0;
+                depth_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH * sizeof(float));
+                float* depth_data = reinterpret_cast<float*>(depth_msg.data.data());
+
+                if (g_depth_camera->dist != nullptr) {
+                    // const mjtNum range_inv = 1.0 / (DEPTH_CAMERA_MAX_RANGE - DEPTH_CAMERA_MIN_RANGE);
+                    for (int v = 0; v < DEPTH_CAMERA_HEIGHT; ++v) {
+                        for (int h = 0; h < DEPTH_CAMERA_WIDTH; ++h) {
+                            int pixel_idx = v * DEPTH_CAMERA_WIDTH + h;
+                            mjtNum dist = g_depth_camera->dist[pixel_idx];
+                            // float norm = (dist - DEPTH_CAMERA_MIN_RANGE) * range_inv;
+                            // norm = std::clamp(norm, 0.0f, 1.0f);
+                            // depth_data[pixel_idx] = norm;
+                            dist = std::clamp(dist, mjtNum(0), DEPTH_CAMERA_MAX_RANGE);
+                            depth_data[pixel_idx] = dist / DEPTH_CAMERA_MAX_RANGE;
+                        }
+                    }
+                }
+  
+                // Apply Gaussian blur
+                cv::Mat depth_mat(DEPTH_CAMERA_HEIGHT, DEPTH_CAMERA_WIDTH, CV_32FC1, depth_data);
+                cv::GaussianBlur(depth_mat, depth_mat, cv::Size(3, 3), 1, 1);
+
+                // Update circular buffer with current frame
+                std::unique_lock<std::mutex> buffer_lock(depth_buffer_mutex);
+                depth_buffer[current_buffer_index].data.assign(depth_data, depth_data + DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);  // deep copy
+                depth_buffer[current_buffer_index].timestamp = depth_msg.header.stamp;
+                current_buffer_index = (current_buffer_index + 1) % DEPTH_BUFFER_SIZE;
+                
+                // Mark buffer as filled once we've cycled through all 43 frames
+                if (current_buffer_index == 0 && !depth_buffer_filled) {
+                  depth_buffer_filled = true;
+                }
+                buffer_lock.unlock();
+
+                std_msgs::Float64MultiArray depth_array_msg;
+                depth_array_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);
+                for (int i = 0; i < DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH; ++i) {
+                    depth_array_msg.data[i] = depth_data[i];
+                }
+                depthImagePub.publish(depth_msg);
+                depthImageArrayPub.publish(depth_array_msg);
+
+                // Publish depth history buffer
+                // From 6*7+1=43 frames, take frame indices: 0, 6, 12, 18, 24, 30, 36, 42 (8 frames total)
+                std::unique_lock<std::mutex> lock(depth_buffer_mutex);
+                std::vector<int> selected_indices;
+                // printf("buf filled:%d | ", depth_buffer_filled);
+                for (int i = 0; i < 6 * 8; i += 6) {
+                  int idx = (current_buffer_index + i) % DEPTH_BUFFER_SIZE;
+                  // printf("idx %d ", idx);
+                  selected_indices.push_back(idx); // 1st frame of each group
+                }
+                
+                std::vector<float> first_frame_data;
+                if (!depth_buffer[0].data.empty()) {
+                  first_frame_data = depth_buffer[0].data;
+                }
+                
+                ros::Time start_time = ros::Time::now();
+                std_msgs::Float64MultiArray history_array_msg;
+                for (int i = 0; i < selected_indices.size(); ++i) {
+                  int idx = selected_indices[i];
+                  // printf("selected idx %d | ", idx);
+                  
+                  // If buffer is not yet full and the idx is beyond the processed point, use first frame to pad
+                  if (!depth_buffer_filled && idx >= current_buffer_index) {
+                    for (float val : first_frame_data) {
+                      history_array_msg.data.push_back(val);
+                    }
+                  } else if (!depth_buffer[idx].data.empty()) {
+                    for (float val : depth_buffer[idx].data) {
+                      history_array_msg.data.push_back(val);
+                    }
+                  } else if (!first_frame_data.empty()) {
+                    // If this position is empty but buffer is full, use first frame as fallback
+                    for (float val : first_frame_data) {
+                      history_array_msg.data.push_back(val);
+                    }
+                  }
+                }
+                // printf("\n");
+                lock.unlock();
+                depthHistoryPub.publish(history_array_msg);
+            }
+
+            lock.unlock();
+            depth_rate.sleep();
+        }
+        std::cout << "Depth thread exited." << std::endl;
+    });
+  }
 
 #ifdef USE_DDS
       // 初始化DDS通信
@@ -1557,14 +2019,41 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   sim->Load(m, d, filename);
   mj_forward(m, d);
 
+  // 初始化时查找手臂末端执行器或link ID
+  // 优先使用end_effector（更精确），fallback到link（兼容旧版本）
+  left_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_l7_end_effector");
+  if (left_arm_link_id_ == -1) {
+    left_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_l7_link");
+    if (left_arm_link_id_ == -1) {
+      left_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_l4_link");
+    }
+  }
+  
+  right_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_r7_end_effector");
+  if (right_arm_link_id_ == -1) {
+    right_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_r7_link");
+    if (right_arm_link_id_ == -1) {
+      right_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_r4_link");
+    }
+  }
+  
+  ROS_INFO("Arm force application IDs: left=%d, right=%d", left_arm_link_id_, right_arm_link_id_);
+
+  // 手臂外力订阅（存储外力值，在仿真循环中持续应用）
   ros::Subscriber lHandExtWrenchSub = g_nh_ptr->subscribe<geometry_msgs::Wrench>("/external_wrench/left_hand", 10, [&](const geometry_msgs::Wrench::ConstPtr &msg)
       {
-        apply_wrench_to_link(m, d, "zarm_l7_link", &msg->force.x, &msg->torque.x);
+        left_hand_wrench_ = *msg;
+        // 判断是否有力（任意分量非零即为激活）
+        left_hand_active_ = (std::abs(msg->force.x) > 1e-6 || std::abs(msg->force.y) > 1e-6 || std::abs(msg->force.z) > 1e-6 ||
+                            std::abs(msg->torque.x) > 1e-6 || std::abs(msg->torque.y) > 1e-6 || std::abs(msg->torque.z) > 1e-6);
       }
     );  
   ros::Subscriber rHandExtWrenchSub = g_nh_ptr->subscribe<geometry_msgs::Wrench>("/external_wrench/right_hand", 10, [&](const geometry_msgs::Wrench::ConstPtr &msg)
       {
-        apply_wrench_to_link(m, d, "zarm_r7_link", &msg->force.x, &msg->torque.x);
+        right_hand_wrench_ = *msg;
+        // 判断是否有力（任意分量非零即为激活）
+        right_hand_active_ = (std::abs(msg->force.x) > 1e-6 || std::abs(msg->force.y) > 1e-6 || std::abs(msg->force.z) > 1e-6 ||
+                             std::abs(msg->torque.x) > 1e-6 || std::abs(msg->torque.y) > 1e-6 || std::abs(msg->torque.z) > 1e-6);
       }
     );
 
@@ -1577,6 +2066,13 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   }
 
   PhysicsLoop(*sim);
+
+  if (depth_thread.joinable()) {
+      depth_thread_running.store(false);
+      if (depth_thread.joinable()) {
+          depth_thread.join();
+      }
+  }
 
   // delete everything we allocated
 
@@ -1595,6 +2091,9 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   // ros::NodeHandle nh;
   is_spin_thread = spin_thread;
   g_nh_ptr = &nh;
+  if (!actuatorDynamicsCompensator) {
+    actuatorDynamicsCompensator = std::make_unique<mujoco_sim::ActuatorDynamicsCompensator>();
+  }
   // print version, check compatibility
   std::printf("MuJoCo version %s\n", mj_versionString());
   if (mjVERSION_HEADER != mj_version())
@@ -1612,6 +2111,17 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
     nh.getParam("/wbc_frequency", frequency);
   }
   ROS_INFO("Mujoco Frequency: %f Hz", frequency);
+  
+  // 获取相机是否启动的判断
+  if (!nh.hasParam("/run_mujoco_camera"))
+  {
+    ROS_INFO("run_mujoco_camera was deleted!\n");
+  }
+  else
+  {
+    nh.getParam("/run_mujoco_camera", isRunCamera_);
+  }
+  ROS_INFO("run_mujoco_camera: %d", isRunCamera_);
   
   // 获取only_half_up_body参数
   bool only_half_up_body = false;

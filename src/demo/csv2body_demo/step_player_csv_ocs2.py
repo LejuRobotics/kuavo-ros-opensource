@@ -54,8 +54,8 @@ def load_dynamic_qr_service(gait_name="taiji"):
 
 def change_ruiwo_motor_param(param_name):
     try:
-        rospy.wait_for_service('/hardware/change_ruiwo_motor_param', timeout=5.0)
-        service_proxy = rospy.ServiceProxy('/hardware/change_ruiwo_motor_param', ExecuteArmAction)
+        rospy.wait_for_service('/humanoid_controller/change_ruiwo_motor_param', timeout=5.0)
+        service_proxy = rospy.ServiceProxy('/humanoid_controller/change_ruiwo_motor_param', ExecuteArmAction)
         response = service_proxy(action_name=param_name)
         
         if response.success:

@@ -114,27 +114,27 @@
         </body>
       </body>
       <body name="zarm_l1_link" pos="-0.0174999 0.2927 0.4245">
-        <inertial pos="-0.00083 -0.02218 0.00035" quat="0.507855 0.504005 -0.503768 0.484025" mass="0.962" diaginertia="0.00227032 0.0022507 0.000988974" />
+        <inertial pos="0.00194934 -0.01222074 -0.00024523" quat="0.507855 0.504005 -0.503768 0.484025" mass="0.95200000" diaginertia="0.00177952 0.00088093 0.00174476" />
         <joint name="zarm_l1_joint" type="hinge" pos="0 0 0" axis="0 1 0" range="-3.14159 1.5708" actuatorfrcrange="-100 100" damping="0.2" />
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_arm_pitch" />
         <body name="zarm_l2_link">
-          <inertial pos="-0.00791 0 -0.04655" quat="0.705843 -0.0422654 -0.0422654 0.705843" mass="0.57" diaginertia="0.00211 0.00163601 0.00121399" />
+          <inertial pos="-0.00112901 0.00000665 -0.04637050" quat="0.705843 -0.0422654 -0.0422654 0.705843" mass="0.38500000" diaginertia="0.00080437 0.00115579 0.00070010" />
           <joint name="zarm_l2_joint" type="hinge" pos="0 0 0" axis="1 0 0" range="-0.349066 2.0944" actuatorfrcrange="-50 50" damping="0.2" />
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_arm_roll" />
           <body name="zarm_l3_link">
-            <inertial pos="0.00628 0.00107 -0.20878" quat="0.46857 -0.0547044 -0.0420079 0.88073" mass="1.65" diaginertia="0.00829713 0.00825256 0.00194031" />
+            <inertial pos="0.00936999 0.00334408 -0.22965779" quat="0.46857 -0.0547044 -0.0420079 0.88073" mass="1.75450000" diaginertia="0.00694471 0.00704370 0.00183829" />
             <joint name="zarm_l3_joint" type="hinge" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-39 39" damping="0.2" />
             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_arm_yaw" />
             <body name="zarm_l4_link" pos="0.02 0 -0.2837">
-              <inertial pos="-0.01611 0.00143 -0.04857" quat="0.99579 0 0.0916646 0" mass="0.429" diaginertia="0.00136857 0.00114 0.000811432" />
+              <inertial pos="-0.01825634 0.00149605 -0.06877688" quat="0.99579 0 0.0916646 0" mass="0.60780000" diaginertia="0.00144524 0.00125753 0.00065063" />
               <joint name="zarm_l4_joint" type="hinge" pos="0 0 0" axis="0 1 0" range="-2.61799 0" actuatorfrcrange="-50 50" damping="0.2" />
               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_forearm" />
               <body name="zarm_l5_link" pos="-0.02 0 -0.127037">
-                <inertial pos="-0.00207 0.00018 -0.05079" quat="0.70482 0.0568167 0.0568167 0.70482" mass="0.61" diaginertia="0.00146 0.00107649 0.000823509" />
+                <inertial pos="-0.00874165 -0.00001372 -0.05033323" quat="0.70482 0.0568167 0.0568167 0.70482" mass="0.63690000" diaginertia="0.00063700 0.00094941 0.00054303" />
                 <joint name="zarm_l5_joint" type="hinge" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-12 12" damping="0.2" />
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_yaw" />
                 <body name="zarm_l6_link" pos="0.0002 0 -0.106463">
-                  <inertial pos="-0.00111 0.00335 -0.01335" quat="0 0.707107 0 0.707107" mass="0.331" diaginertia="0.00028 0.00027 0.00022" />
+                  <inertial pos="-0.00158864 0.00654094 -0.01506679" quat="0 0.707107 0 0.707107" mass="0.47390000" diaginertia="0.00018068 0.00025494 0.00026772" />
                   <joint name="zarm_l6_joint" type="hinge" pos="0 0 0" axis="1 0 0" range="-1.309 0.698132" actuatorfrcrange="-12 12" damping="0.2" />
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_roll" />
                   <body name="zarm_l7_link" pos="0 0 -0.0210005">
@@ -150,27 +150,27 @@
         </body>
       </body>
       <body name="zarm_r1_link" pos="-0.0174999 -0.2927 0.4245">
-        <inertial pos="-0.00083 0.02218 0.00035" quat="0.504005 0.507855 -0.484025 0.503768" mass="0.962" diaginertia="0.00227032 0.0022507 0.000988974" />
+        <inertial pos="0.00194934 0.01222074 -0.00024523" quat="0.504005 0.507855 -0.484025 0.503768" mass="0.95200000" diaginertia="0.00177952 0.00088093 0.00174476" />
         <joint name="zarm_r1_joint" type="hinge" pos="0 0 0" axis="0 1 0" range="-3.14159 1.5708" actuatorfrcrange="-100 100" damping="0.2" />
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_pitch" />
         <body name="zarm_r2_link">
-          <inertial pos="-0.00791 0 -0.04655" quat="0.705843 -0.0422654 -0.0422654 0.705843" mass="0.57" diaginertia="0.00211 0.00163601 0.00121399" />
+          <inertial pos="-0.00112901 -0.00000665 -0.04637050" quat="0.705843 -0.0422654 -0.0422654 0.705843" mass="0.38500000" diaginertia="0.00080437 0.00115579 0.00070010" />
           <joint name="zarm_r2_joint" type="hinge"pos="0 0 0" axis="1 0 0" range="-2.0944 0.349066" actuatorfrcrange="-50 50" damping="0.2" />
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_roll" />
           <body name="zarm_r3_link">
-            <inertial pos="0.00628 -0.00107 -0.20878" quat="0.88073 -0.0420079 -0.0547044 0.46857" mass="1.65" diaginertia="0.00829713 0.00825256 0.00194031" />
+            <inertial pos="0.00936999 -0.00334408 -0.22965779" quat="0.88073 -0.0420079 -0.0547044 0.46857" mass="1.75450000" diaginertia="0.00694471 0.00704370 0.00183829" />
             <joint name="zarm_r3_joint" type="hinge" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-39 39" damping="0.2" />
             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_yaw" />
             <body name="zarm_r4_link" pos="0.02 0 -0.2837">
-              <inertial pos="-0.01611 -0.00143 -0.04857" quat="0.99579 0 0.0916646 0" mass="0.429" diaginertia="0.00136857 0.00114 0.000811432" />
+              <inertial pos="-0.01825634 -0.00149605 -0.06877688" quat="0.99579 0 0.0916646 0" mass="0.60780000" diaginertia="0.00144524 0.00125753 0.00065063" />
               <joint name="zarm_r4_joint" type="hinge" pos="0 0 0" axis="0 1 0" range="-2.61799 0" actuatorfrcrange="-50 50" damping="0.2" />
               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_forearm" />
               <body name="zarm_r5_link" pos="-0.02 0 -0.127037">
-                <inertial pos="-0.00207 -0.00018 -0.05079" quat="0.70482 0.0568167 0.0568167 0.70482" mass="0.61" diaginertia="0.00146 0.00107649 0.000823509" />
+                <inertial pos="-0.00874165 0.00001372 -0.05033323" quat="0.70482 0.0568167 0.0568167 0.70482" mass="0.63690000" diaginertia="0.00063700 0.00094941 0.00054303" />
                 <joint name="zarm_r5_joint" type="hinge" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-12 12" damping="0.2" />
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_yaw" />
                 <body name="zarm_r6_link" pos="0 0 -0.106463">
-                  <inertial pos="-0.00111 -0.00335 -0.01335" quat="0 0.707107 0 0.707107" mass="0.331" diaginertia="0.00028 0.00027 0.00022" />
+                  <inertial pos="-0.00158864 -0.00654094 -0.01506679" quat="0 0.707107 0 0.707107" mass="0.47390000" diaginertia="0.00018068 0.00025494 0.00026772" />
                   <joint name="zarm_r6_joint" type="hinge" pos="0 0 0" axis="1 0 0" range="-0.698132 1.309" actuatorfrcrange="-12 12" damping="0.2" />
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_roll" />
                   <body name="zarm_r7_link" pos="0 0 -0.021">

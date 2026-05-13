@@ -169,15 +169,29 @@ include_directories(
 # roban_v14_dual 机型节点
 add_executable(arm_breakin_node src/arm_breakin_node.cpp)
 
+# roban_v17_dual 机型节点
+add_executable(arm_breakin_roban_v17_dual_node src/arm_breakin_roban_v17_dual_node.cpp)
+
 # kuavo_v52_dual 机型节点
 add_executable(arm_breakin_kuavo_v52_dual_node src/arm_breakin_kuavo_v52_dual_node.cpp)
 
 # kuavo_v53_dual 机型节点
 add_executable(arm_breakin_kuavo_v53_dual_node src/arm_breakin_kuavo_v53_dual_node.cpp)
 
+# kuavo_v55_dual / kuavo_v56_dual（独立源码，默认与 v53 一致，便于后续差异化）
+add_executable(arm_breakin_kuavo_v55_dual_node src/arm_breakin_kuavo_v55_dual_node.cpp)
+add_executable(arm_breakin_kuavo_v56_dual_node src/arm_breakin_kuavo_v56_dual_node.cpp)
+
 ## Add cmake target dependencies
 # 确保在构建arm_breakin_node之前先构建motorevo_controller和canbus_sdk
 add_dependencies(arm_breakin_node 
+    ${catkin_EXPORTED_TARGETS}
+    motorevo_controller
+    canbus_sdk
+)
+
+# 确保在构建arm_breakin_roban_v17_dual_node之前先构建motorevo_controller和canbus_sdk
+add_dependencies(arm_breakin_roban_v17_dual_node 
     ${catkin_EXPORTED_TARGETS}
     motorevo_controller
     canbus_sdk
@@ -197,10 +211,33 @@ add_dependencies(arm_breakin_kuavo_v53_dual_node
     canbus_sdk
 )
 
+add_dependencies(arm_breakin_kuavo_v55_dual_node 
+    ${catkin_EXPORTED_TARGETS}
+    motorevo_controller
+    canbus_sdk
+)
+
+add_dependencies(arm_breakin_kuavo_v56_dual_node 
+    ${catkin_EXPORTED_TARGETS}
+    motorevo_controller
+    canbus_sdk
+)
+
 ## Specify libraries to link
 # 直接链接到通过add_subdirectory添加的库目标
 # roban_v14_dual 节点
 target_link_libraries(arm_breakin_node
+    ${catkin_LIBRARIES}
+    motorevo_controller
+    canbus_sdk
+    yaml-cpp
+    pthread
+    m
+    stdc++
+)
+
+# roban_v17_dual 节点
+target_link_libraries(arm_breakin_roban_v17_dual_node
     ${catkin_LIBRARIES}
     motorevo_controller
     canbus_sdk
@@ -232,6 +269,26 @@ target_link_libraries(arm_breakin_kuavo_v53_dual_node
     stdc++
 )
 
+target_link_libraries(arm_breakin_kuavo_v55_dual_node
+    ${catkin_LIBRARIES}
+    motorevo_controller
+    canbus_sdk
+    yaml-cpp
+    pthread
+    m
+    stdc++
+)
+
+target_link_libraries(arm_breakin_kuavo_v56_dual_node
+    ${catkin_LIBRARIES}
+    motorevo_controller
+    canbus_sdk
+    yaml-cpp
+    pthread
+    m
+    stdc++
+)
+
 #############
 ## Install ##
 #############
@@ -247,11 +304,11 @@ target_link_libraries(arm_breakin_kuavo_v53_dual_node
 # )
 
 ## Mark executables for installation
-install(TARGETS arm_breakin_node arm_breakin_kuavo_v52_dual_node
+install(TARGETS arm_breakin_node arm_breakin_roban_v17_dual_node arm_breakin_kuavo_v52_dual_node arm_breakin_kuavo_v53_dual_node arm_breakin_kuavo_v55_dual_node arm_breakin_kuavo_v56_dual_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-install(TARGETS arm_breakin_node arm_breakin_kuavo_v53_dual_node
+install(TARGETS arm_breakin_node arm_breakin_kuavo_v53_dual_node arm_breakin_kuavo_v55_dual_node arm_breakin_kuavo_v56_dual_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

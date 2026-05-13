@@ -197,7 +197,7 @@ if os.geteuid() != 0:
 
 # 获取当前脚本所在目录（而非工作目录）
 script_dir = os.path.dirname(os.path.abspath(__file__))
-relative_path = "build_lib/roban2"
+relative_path = "build_lib"
 target_path = os.path.join(script_dir, relative_path)
 sys.path.append(target_path)
 

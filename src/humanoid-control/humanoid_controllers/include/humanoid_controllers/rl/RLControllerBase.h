@@ -148,16 +148,16 @@ public:
   bool isInitialized() const { return initialized_; }
 
   /**
-   * @brief 检查控制器是否完成任务并准备好退出
-   * @return 如果控制器已完成任务并准备好退出，返回true
+   * @brief 是否请求退出当前 RL 模式（由 humanoidController 等每周期轮询）
+   * @return 本周期希望上层自动退出/切换时返回 true
    */
-  virtual bool isReadyToExit() const { return false; }
+  virtual bool requestToExit() const { return false; }
 
   /**
-   * @brief 检查控制器当前是否处于 stance（站立）模式
-   * @return 如果控制器处于 stance 模式返回 true，否则返回 false
+   * @brief 是否允许从本控制器切换走（如切回 MPC、换入其他 RL；RLControllerManager 会查询）
+   * @return 允许切出时 true，需保持本模式时 false
    */
-  virtual bool isInStanceMode() const { return true; }
+  virtual bool isAllowToExit() const { return true; }
 
   /**
    * @brief 获取控制器的初始状态（用于设置仿真/机器人初始状态）

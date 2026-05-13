@@ -80,8 +80,7 @@
   "robot_state_transition_keycombination": {
     "initial":{
       "start":["E_LEFT","F_RIGHT","A_PRESS"],
-      "calibrate":["E_LEFT","C_PRESS"],
-      "set_zero":["E_LEFT","D_PRESS"]
+      "calibrate":["E_LEFT","C_PRESS"]
     },
     "calibrate":{
       "calibrate_finished":["E_RIGHT","C_PRESS"],
@@ -114,8 +113,7 @@
   },
   "ocs2_robot_state_transition_keycombination": {
     "initial":{
-      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"],
-      "calibrate":["E_LEFT","F_RIGHT","D_PRESS"]
+      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"]
     },
     "calibrate":{
       "cali_to_ready_stance":["E_LEFT","F_RIGHT","C_PRESS"],
@@ -170,8 +168,7 @@
   },
   "rl_robot_state_transition_keycombination":{
     "initial":{
-      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"],
-      "calibrate":["E_LEFT","F_RIGHT","D_PRESS"]
+      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"]
     },
     "calibrate":{
       "cali_to_ready_stance":["E_LEFT","F_RIGHT","C_PRESS"],
@@ -220,8 +217,7 @@
   },
   "multi_robot_state_transition_keycombination":{
     "initial":{
-      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"],
-      "calibrate":["E_LEFT","F_RIGHT","D_PRESS"]
+      "initial_pre":["E_LEFT","F_RIGHT","C_PRESS"]
     },
     "calibrate":{
       "cali_to_ready_stance":["E_LEFT","F_RIGHT","C_PRESS"],
@@ -235,7 +231,9 @@
       "walk":["E_MIDDLE", "F_MIDDLE", "A_PRESS"],
       "trot":["E_MIDDLE", "F_MIDDLE", "B_PRESS"],
       "switch_controller":["E_MIDDLE", "F_MIDDLE", "C_PRESS"],
+      "depth_loco_switch":["E_RIGHT", "F_LEFT", "C_LONG_PRESS"],
       "vmp_controller":["E_RIGHT", "F_LEFT", "A_LONG_PRESS"],
+      "dance_controller":["E_RIGHT", "F_LEFT", "B_LONG_PRESS"],
       "customize_action_RR_A":["E_RIGHT", "F_RIGHT", "A_PRESS"],
       "customize_action_RR_B":["E_RIGHT", "F_RIGHT", "B_PRESS"],
       "customize_action_RR_C":["E_RIGHT", "F_RIGHT", "C_PRESS"],
@@ -263,6 +261,10 @@
       "vmp_action_RL_B":["E_RIGHT", "F_LEFT", "B_PRESS"],
       "vmp_action_RL_C":["E_RIGHT", "F_LEFT", "C_PRESS"],
       "vmp_action_RL_D":["E_RIGHT", "F_LEFT", "D_PRESS"],
+      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
+    },
+    "dance_controller":{
+      "exit_dance_controller":["E_RIGHT", "F_LEFT", "B_LONG_PRESS"],
       "stop":["C_LONG_PRESS","D_LONG_PRESS"]
     },
     "vr_remote_control":{

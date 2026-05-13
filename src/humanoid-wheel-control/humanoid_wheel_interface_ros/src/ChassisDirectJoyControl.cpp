@@ -13,6 +13,8 @@
 #include <fstream>
 #include <map>
 #include <kuavo_common/common/json.hpp>
+#include "humanoid_wheel_interface/motion_planner/cmdVelPlannerWithRuckig.h"
+#include <ocs2_core/misc/LoadData.h>
 
 namespace chassis_direct_control
 {
@@ -52,6 +54,38 @@ public:
         ROS_INFO("左摇杆: 移动 | 右摇杆: 旋转 | BACK: 急停");
         ROS_INFO("轴映射: x=%d, y=%d, yaw=%d", axis_linear_x_, axis_linear_y_, axis_angular_z_);
         ROS_INFO("============================================");
+
+        // 从任务文件中加载参数
+        std::string taskFile;
+        while (!nh_.hasParam("/taskFile"))
+        {
+            static bool first = true;
+            if(first)
+            {
+              ROS_INFO("Waiting for '/taskFile' parameter to be set...");
+              first = false;
+            } 
+            ros::Duration(0.2).sleep(); // 等待1秒后再次尝试
+        }
+        nh_.getParam("/taskFile", taskFile);
+        std::cout << "[ChassisDirectJoyControl] Loaded task file: " << taskFile << std::endl;
+
+        Eigen::VectorXd max_velocity_ruckig, max_acceleration_ruckig, max_jerk_ruckig;
+        max_velocity_ruckig.setZero(3);
+        max_acceleration_ruckig.setZero(3);
+        max_jerk_ruckig.setZero(3);
+        std::string prefix = "referencekinematicLimit.";
+        ocs2::loadData::loadEigenMatrix(taskFile, prefix + "wheel_move.max_acc", max_acceleration_ruckig);
+        ocs2::loadData::loadEigenMatrix(taskFile, prefix + "wheel_move.max_jerk", max_jerk_ruckig);
+
+        max_velocity_ruckig(0) = linear_scale_x_;   // Ruckig的速度约束需要根据手柄输入的缩放来设置
+        max_velocity_ruckig(1) = linear_scale_y_;
+        max_velocity_ruckig(2) = angular_scale_z_;
+
+        // 创建 S型规划器实例
+        cmdVelPlannerRuckigPtr_ = std::make_shared<ocs2::mobile_manipulator::cmdVelPlannerWithRuckig>(3); // 3 DOF: vx, vy, wz
+        cmdVelPlannerRuckigPtr_->setAccelerationLimits(max_acceleration_ruckig, -max_acceleration_ruckig);
+        cmdVelPlannerRuckigPtr_->setJerkLimits(max_jerk_ruckig);
     }
 
     void run() { ros::spin(); }
@@ -65,8 +99,16 @@ private:
     double linear_scale_x_, linear_scale_y_, angular_scale_z_, deadzone_;
     int axis_linear_x_, axis_linear_y_, axis_angular_z_, button_stop_;
     geometry_msgs::Twist current_cmd_;
+    geometry_msgs::Twist smooth_cmd_;
     ros::Time last_joy_time_;
     bool joy_received_;
+
+    // S型规划相关
+    std::shared_ptr<ocs2::mobile_manipulator::cmdVelPlannerWithRuckig> cmdVelPlannerRuckigPtr_;
+    Eigen::VectorXd target_velocity_ = Eigen::VectorXd::Zero(3); // 目标速度向量
+    Eigen::VectorXd cmdVel_prevTargetPose_ = Eigen::VectorXd::Zero(3);
+    Eigen::VectorXd cmdVel_prevTargetVel_ = Eigen::VectorXd::Zero(3);
+    Eigen::VectorXd cmdVel_prevTargetAcc_ = Eigen::VectorXd::Zero(3);
     
     void loadJoyConfig(const std::string& path)
     {
@@ -136,8 +178,27 @@ private:
             current_cmd_ = geometry_msgs::Twist();
             std::cout << "No joy message received for 1 second, stopping chassis" << std::endl;
         }
+
+        // 加上S型规划器的速度平滑
+        target_velocity_ << current_cmd_.linear.x, current_cmd_.linear.y, current_cmd_.angular.z;
+        cmdVelPlannerRuckigPtr_->setCurrentPose(cmdVel_prevTargetPose_);
+        cmdVelPlannerRuckigPtr_->setCurrentVelocity(cmdVel_prevTargetVel_);
+        cmdVelPlannerRuckigPtr_->setCurrentAcceleration(cmdVel_prevTargetAcc_);
+        cmdVelPlannerRuckigPtr_->setTargetVelocity(target_velocity_);
+        cmdVelPlannerRuckigPtr_->calcTrajectory();
         
-        cmd_vel_pub_.publish(current_cmd_);
+        static ros::Time last_print_time = ros::Time::now();
+        double time_since_last_print = (ros::Time::now() - last_print_time).toSec();
+        cmdVelPlannerRuckigPtr_->getTrajectoryAtTime(time_since_last_print, 
+                                                     cmdVel_prevTargetPose_,
+                                                     cmdVel_prevTargetVel_,
+                                                     cmdVel_prevTargetAcc_);
+        last_print_time = ros::Time::now();
+        smooth_cmd_.linear.x = cmdVel_prevTargetVel_(0);
+        smooth_cmd_.linear.y = cmdVel_prevTargetVel_(1);
+        smooth_cmd_.angular.z = cmdVel_prevTargetVel_(2);
+
+        cmd_vel_pub_.publish(smooth_cmd_);
     }
 };
 

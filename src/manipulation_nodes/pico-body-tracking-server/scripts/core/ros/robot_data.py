@@ -116,7 +116,7 @@ class RobotDataServer:
 
 
     def hand_data_cur_callback(self, data):
-        if self.eef_type == "qiangnao":
+        if self.eef_type == "qiangnao" or self.eef_type == "linker_hand":
             now = time.time()
             if now - self.last_hand_time >= self.downsample_interval:
                 hand_data = [x * 6 / 1000 for x in data.effort]  # 将0-100映射到0~0.6A
@@ -222,7 +222,7 @@ class RobotDataServer:
                 except queue.Empty:
                     motor_cur = last_motor_cur
 
-                if self.eef_type == "qiangnao":
+                if self.eef_type == "qiangnao" or self.eef_type == "linker_hand":
                     try:
                         eef_cur = self.hand_queue.get_nowait()
                         last_eef_cur = eef_cur

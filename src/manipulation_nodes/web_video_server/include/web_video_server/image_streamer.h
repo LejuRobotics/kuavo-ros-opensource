@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <deque>
+#include <memory>
 
 #include <ros/ros.h>
 #include <image_transport/image_transport.h>
@@ -16,12 +17,6 @@
 
 namespace web_video_server
 {
-
-// 图像缓存结构体
-struct CachedImage {
-  cv::Mat image;
-  ros::Time timestamp;
-};
 
 class ImageStreamer
 {
@@ -62,16 +57,59 @@ protected:
   ros::Subscriber face_bounding_box_sub_;
   kuavo_msgs::FaceBoundingBox face_bounding_box_;
   bool face_detected_ = false;
+  bool has_received_face_box_ = false;
   ros::Time last_face_box_time_;
-  double face_box_timeout_ = 1; // 0.05秒超时
+  double timestamp_tolerance_ = 0.06; // 图像与检测框的时间戳匹配容差
+  double face_box_state_timeout_seconds_ = 0.1; // 超过该时间未收到新框，则清除当前框状态
+  bool strict_sync_ = false; // 严格同步模式：没有足够的新框推进队列时尽量等待
+  double frame_timeout_seconds_ = 0.08; // 实时优先模式下，图像等待检测框的超时时间
+  double strict_sync_hard_timeout_seconds_ = 5.0; // 严格同步模式下的硬超时，避免永久卡死
+  double detection_mode_timeout_seconds_ = 0.5; // 超过该时间未收到检测结果，退出检测模式
+  std::chrono::steady_clock::time_point last_face_box_arrival_time_;
   
-  // 图像缓存队列和相关参数
-  std::deque<CachedImage> image_cache_;
-  size_t cache_max_size_;
-  double time_tolerance_;
+  // 图像队列结构
+  struct QueuedImage {
+    cv::Mat image;
+    ros::Time timestamp;
+    bool processed;  // 是否已处理（已匹配人脸框或确认无需处理）
+    bool should_send;  // 是否需要推流发送
+    std::chrono::steady_clock::time_point queue_time;
+    int original_width;   // 原始图像宽度（用于坐标转换）
+    int original_height;  // 原始图像高度（用于坐标转换）
+    
+    QueuedImage() : processed(false), should_send(true), original_width(0), original_height(0) {}
+  };
+
+  struct QueuedFaceBox {
+    kuavo_msgs::FaceBoundingBox face_box;
+    ros::Time timestamp;
+
+    QueuedFaceBox(const kuavo_msgs::FaceBoundingBox& box, const ros::Time& stamp)
+        : face_box(box), timestamp(stamp) {}
+  };
+  
+  // 图像队列，最多存储10帧
+  std::deque<QueuedImage> image_queue_;
+  std::deque<QueuedFaceBox> face_box_queue_;
+  static const size_t MAX_QUEUE_SIZE = 4;
+  static const size_t MAX_FACE_BOX_QUEUE_SIZE = 20;
+  boost::mutex queue_mutex_;  // 保护图像队列的互斥锁
+
+  uint64_t image_frames_enqueued_ = 0;
+  uint64_t image_frames_sent_ = 0;
+  uint64_t image_frames_dropped_queue_full_ = 0;
+  uint64_t image_frames_dropped_timeout_ = 0;
+  uint64_t face_boxes_enqueued_ = 0;
   
   // 人脸边界框回调函数
   void faceBoundingBoxCallback(const kuavo_msgs::FaceBoundingBox::ConstPtr& msg);
+  
+  // 更新当前生效的人脸框状态
+  bool processFaceBoxInQueue(const kuavo_msgs::FaceBoundingBox& face_box, const ros::Time& face_box_time);
+  // 根据当前生效的人脸框状态处理图像队列
+  void processPendingFaceBoxesInQueue();
+  void trimFaceBoxQueueLocked();
+  bool isDetectionModeActiveLocked(const std::chrono::steady_clock::time_point& now) const;
 
 };
 
@@ -100,10 +138,17 @@ protected:
   boost::mutex send_mutex_;
 
 private:
+  ros::NodeHandle transport_nh_;
   image_transport::ImageTransport it_;
   bool initialized_;
 
   void imageCallback(const sensor_msgs::ImageConstPtr &msg);
+  
+  // 从队列中发送已处理的图像
+  void sendProcessedImagesFromQueue();
+  
+  // 处理队列中等待时间过长的图像
+  void processTimeoutImagesInQueue();
 };
 
 class ImageStreamerType

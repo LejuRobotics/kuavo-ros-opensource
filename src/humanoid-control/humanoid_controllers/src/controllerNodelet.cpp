@@ -337,6 +337,9 @@ private:
                 // Control
                 if(nodelet_robot_type == 1)
                 {
+                    static int cycle_counter = 0;
+                    const int YIELD_INTERVAL = 10;  // 每100个周期让出一次CPU
+
                     if(wheel_control_type == 0)
                     {
                         controller_wheel_ptr_->update(ros::Time::now(), elapsedTime);
@@ -345,10 +348,14 @@ private:
                     {
                         controller_wheel_real_ptr_->update(ros::Time::now(), elapsedTime);
                     }
-                    // 轮式机器人使用固定频率
-                    next_time.tv_sec += (next_time.tv_nsec + 1 / controlFrequency * 1e9) / 1e9;
-                    next_time.tv_nsec = (int)(next_time.tv_nsec + 1 / controlFrequency * 1e9) % (int)1e9;
-                    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_time, NULL);
+                    // 偶尔让出CPU，避免时间片耗尽被强制抢占
+                    cycle_counter++;
+                    if (cycle_counter >= YIELD_INTERVAL) {
+                        std::this_thread::yield();  // 主动让出CPU，但不睡眠
+                        // 或者使用微小睡眠
+                        // std::this_thread::sleep_for(std::chrono::microseconds(50));
+                        cycle_counter = 0;
+                    }
                 }
                 else
                 {

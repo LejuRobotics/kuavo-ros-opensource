@@ -36,7 +36,8 @@
       "vr_remote_control",
       "walk",
       "trot",
-      "vmp_controller"
+      "vmp_controller",
+      "dance_controller"
     ]
   },
   "transitions": {
@@ -191,7 +192,8 @@
         "trigger": "ready_stance",
         "source": "ready_stance",
         "dest": "stance",
-        "before": "ready_stance_callback"
+        "before": "ready_stance_callback",
+        "conditions": ["is_real_launch_in_ready_stance"]
       },
       {
         "trigger": "stance",
@@ -203,7 +205,8 @@
         "trigger": "walk",
         "source": "stance",
         "dest": "walk",
-        "before": "walk_callback"
+        "before": "walk_callback",
+        "conditions": ["is_not_wheel_robot"]
       },
       {
         "trigger": "stance",
@@ -317,7 +320,8 @@
         "trigger": "trot",
         "source": "stance",
         "dest": "trot",
-        "before": "trot_callback"
+        "before": "trot_callback",
+        "conditions": ["is_not_wheel_robot"]
       },
       {
         "trigger": "trot",
@@ -633,20 +637,23 @@
         "trigger": "ready_stance",
         "source": "ready_stance",
         "dest": "stance",
-        "before": "ready_stance_callback"
+        "before": "ready_stance_callback",
+        "conditions": ["is_real_launch_in_ready_stance"]
+
       },
       {
         "trigger": "walk",
         "source": "stance",
         "dest": "walk",
-        "before": "walk_callback"
+        "before": "walk_callback",
+        "conditions": ["is_not_wheel_robot"]
       },
       {
         "trigger": "trot",
         "source": "stance",
         "dest": "trot",
         "before": "trot_callback",
-        "conditions": "check_is_amp_controller"
+        "conditions": ["check_is_amp_controller", "is_not_wheel_robot"]
       },
       {
         "trigger": "switch_controller",
@@ -655,11 +662,23 @@
         "before": "switch_controller_callback"
       },
       {
+        "trigger": "depth_loco_switch",
+        "source": "stance",
+        "dest": "stance",
+        "before": "depth_loco_switch_callback"
+      },
+      {
         "trigger": "vmp_controller",
         "source": "stance",
         "dest": "vmp_controller",
         "before": "vmp_controller_callback",
         "conditions": "check_can_switch_to_vmp"
+      },
+      {
+        "trigger": "dance_controller",
+        "source": "stance",
+        "dest": "dance_controller",
+        "before": "dance_controller_callback"
       },
       {
         "trigger": "arm_pose1",
@@ -789,6 +808,12 @@
         "before": "exit_vmp_controller_callback"
       },
       {
+        "trigger": "exit_dance_controller",
+        "source": "dance_controller",
+        "dest": "stance",
+        "before": "exit_dance_controller_callback"
+      },
+      {
         "trigger": "vmp_action_RL_A",
         "source": "vmp_controller",
         "dest": "vmp_controller",
@@ -851,6 +876,12 @@
       {
         "trigger": "stop",
         "source": "vmp_controller",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "stop",
+        "source": "dance_controller",
         "dest": "initial",
         "before": "stop_callback"
       }

@@ -1,0 +1,44 @@
+# 期望的计算时间 ( 需要大于等于1秒 )
+float64 totalTimeDesired
+# 重启计算次数 (越多越精准, 但会降低单次求解的时长, 每次求解时间为: 期望的计算时间 / 重启计算次数)
+int32 maxAttempts
+
+# 线性误差阈值 (米)
+float64 linearErrorMax
+# 角度误差阈值 (弧度)
+float64 angularErrorMax
+
+# 位姿期望( 位置 + 姿态 (zyx欧拉角), 单位为: 米, 弧度 )
+float64[6] poseDesired
+
+# 世界系还是本体系
+bool isLocal
+
+# 左臂还是右臂
+bool isLeft
+
+# 全身还是纯手臂
+bool isWholeBody
+
+---
+
+# 是否在阈值内完全可达
+bool success
+
+# 实际的误差精度
+float64 bestLinearError
+float64 bestAngularError
+
+# 返回全身关节的角度期望
+float64[] qBest
+
+# 位置优先次优解是否可达
+bool posPriorityAccess
+
+# 位置优先次优解的位置误差（米）
+float64 posPriorityLinearError
+# 位置优先次优解的姿态误差（弧度）
+float64 posPriorityAngularError
+
+# 返回全身关节的角度期望（位置优先次优解）
+float64[] qPosPriorityBest

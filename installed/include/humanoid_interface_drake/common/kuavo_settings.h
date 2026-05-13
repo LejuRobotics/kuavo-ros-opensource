@@ -16,6 +16,7 @@ namespace HighlyDynamic
 #define BIT_17 (1 << 17)
 #define BIT_17_9 (BIT_17 * 9)
 #define BIT_17_10 (BIT_17 * 10)
+#define BIT_17_16 (BIT_17 * 16)
 #define BIT_17_18 (BIT_17 * 18)
 #define BIT_17_20 (BIT_17 * 20)
 #define BIT_17_36 (BIT_17 * 36)
@@ -36,10 +37,14 @@ namespace HighlyDynamic
 #define CK_C2T (2.1) // 1.4
 #define PA72_C2T (2.0)
 #define PA60_C2T (2.0)
-#define PA43_C2T (1.45)
+#define PA43_C2T (4.7)
 #define PA105_18_C2T (4.1)
 #define PA81_18_25_C2T (2.9)
 
+#define PA60_16_C2T (2.0)
+#define PA4310_25_C2T (4.7)
+#define PA4310_25_New_C2T (2.0)
+#define PA4315_36_C2T (4.7)
 #define LEG_DOF 6
 #define LEGS_TOTEL_JOINT 12
     inline auto vectorToEigen(std::vector<double> v) -> Eigen::VectorXd
@@ -111,6 +116,8 @@ namespace HighlyDynamic
         bool use_anthropomorphic_gait =false;
         std::vector<int32_t> joint_kp;
         std::vector<int32_t> joint_kd;
+        std::vector<double> ruiwo_kp;  // Ruiwo 手臂电机默认 Kp（来自 kuavo.json ruiwo_kp）
+        std::vector<double> ruiwo_kd;  // Ruiwo 手臂电机默认 Kd（来自 kuavo.json ruiwo_kd）
     };
 
     struct HardwareSettings

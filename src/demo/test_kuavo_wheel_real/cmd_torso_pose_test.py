@@ -3,10 +3,11 @@ import rospy
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float32
 import lb_ctrl_api as ct
+import argparse
 
 # -------------- 全局变量 --------------
 reach_time = 0.0
-initialTorsoPose_ = [0.196123, 0.0005, 0.789919]
+initialTorsoPose_ = [0.0, 0.0, 0.0]
 
 # -------------- 回调函数 --------------
 def time_callback(msg):
@@ -29,15 +30,41 @@ def execute_torso_tests():
 
     # 初始化节点
     rospy.init_node('torso_pose_publisher', anonymous=True)
-
+    
     # 发布 / 订阅
     pub = rospy.Publisher('/cmd_lb_torso_pose', Twist, queue_size=10)
     rospy.Subscriber('/lb_torso_pose_reach_time', Float32, time_callback)
 
-    # 等待连接建立
-    rospy.sleep(1.0)
+    # 首先获取躯干初始位姿
+    rospy.loginfo("正在获取躯干初始位姿...")
 
-    ct.set_control_mode(1)
+    start_time = rospy.get_time()  # 记录开始时间
+    success, initial_pose = ct.get_torso_initial_pose(True)
+    end_time = rospy.get_time()    # 记录结束时间
+
+    execution_time = end_time - start_time
+
+    rospy.loginfo(f"✅ 获取躯干初始位姿完成，耗时: {execution_time:.3f} 秒")
+    
+    if not success:
+        rospy.logerr("❌ 无法获取躯干初始位姿，退出程序")
+        return
+    
+    # 提取初始位置
+    initialTorsoPose_ = initial_pose['position']
+
+    parser = argparse.ArgumentParser(description='躯干测试程序')
+    parser.add_argument('--no-reset', action='store_true', help='跳过躯干重置')
+    args = parser.parse_args()
+    reset_torso = not args.no_reset
+    resetTime = 0
+    if reset_torso:
+        resetTime = ct.reset_torso_to_initial()
+    # 等待连接建立
+    rospy.sleep(resetTime + 0.5)
+
+    ct.set_focus_z(False)  # 不采用z轴聚焦
+
     # 测试用例列表： (名称, lx, ly, lz, ax, ay, az)
     # 注意：这里的lx, ly, lz是相对于初始位置的增量
     test_cases = [
@@ -74,9 +101,8 @@ def execute_torso_tests():
         rospy.sleep(reach_time + 0.5)
         rospy.loginfo(f"  {name} 完成!")
 
+    ct.set_focus_z(True)  # 不采用z轴聚焦
     rospy.loginfo("\n所有躯干位姿测试数据发布完成！")
-    
-    ct.set_control_mode(2)
 
 # -------------- 主入口 --------------
 def main():

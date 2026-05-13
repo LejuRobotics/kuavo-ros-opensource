@@ -46,6 +46,9 @@ void cmdVelPlannerWithRuckig::setTargetVelocity(const Eigen::VectorXd& velocity)
         return;
     }
     target_velocity_ = velocity;
+    target_velocity_ = target_velocity_.unaryExpr([](double x) {    // 只保留3位小数，避免数值误差过大导致的差分计算问题
+        return std::round(x * 1000.0) / 1000.0;
+    });
 }
 
 void cmdVelPlannerWithRuckig::setCurrentPose(const Eigen::VectorXd& pose) {
@@ -56,6 +59,9 @@ void cmdVelPlannerWithRuckig::setCurrentPose(const Eigen::VectorXd& pose) {
         return;
     }
     current_pose_ = pose;
+    current_pose_ = current_pose_.unaryExpr([](double x) {    // 只保留3位小数，避免数值误差过大导致的差分计算问题
+        return std::round(x * 1000.0) / 1000.0;
+    });
 }
 
 void cmdVelPlannerWithRuckig::setCurrentVelocity(const Eigen::VectorXd& velocity) {
@@ -66,6 +72,9 @@ void cmdVelPlannerWithRuckig::setCurrentVelocity(const Eigen::VectorXd& velocity
         return;
     }
     current_velocity_ = velocity;
+    current_velocity_ = current_velocity_.unaryExpr([](double x) {    // 只保留3位小数，避免数值误差过大导致的差分计算问题
+        return std::round(x * 1000.0) / 1000.0;
+    });
 }
 
 void cmdVelPlannerWithRuckig::setCurrentAcceleration(const Eigen::VectorXd& acceleration) {
@@ -76,6 +85,9 @@ void cmdVelPlannerWithRuckig::setCurrentAcceleration(const Eigen::VectorXd& acce
         return;
     }
     current_acceleration_ = acceleration;
+    current_acceleration_ = current_acceleration_.unaryExpr([](double x) {    // 只保留3位小数，避免数值误差过大导致的差分计算问题
+        return std::round(x * 1000.0) / 1000.0;
+    });
 }
 
 void cmdVelPlannerWithRuckig::setAccelerationLimits(const Eigen::VectorXd& max_acceleration, 

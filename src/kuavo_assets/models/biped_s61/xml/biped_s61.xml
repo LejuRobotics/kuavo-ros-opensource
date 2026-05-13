@@ -126,6 +126,10 @@
                             <joint name="zarm_l7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-14.1 14.1" damping="0.0"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_pitch_noHand"/>
                             <geom size="0.005" pos="0 0 -0.17"/>
+                            <body name="zarm_l7_end_effector" pos="0 0 -0.17">
+                              <site name="l_arm_ft_frame" pos="0 0 0" size="0.01 0.005 0.01" rgba="1 0 0 1" type="box" group="1"/>
+                              <geom type="box" size="0.01 0.005 0.02" contype="1" conaffinity="1"/>
+                            </body>
                           </body>
                         </body>
                       </body>
@@ -162,6 +166,11 @@
                             <joint name="zarm_r7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-14.1 14.1" damping="0.0"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_pitch_noHand"/>
                             <geom size="0.005" pos="0 0 -0.17"/>
+                            <!-- 右手末端执行器 -->
+                            <body name="zarm_r7_end_effector" pos="0 0 -0.17">
+                              <site name="r_arm_ft_frame" pos="0 0 0" size="0.01 0.005 0.01" rgba="0 0 1 1" type="box" group="1"/>
+                              <geom type="box" size="0.01 0.005 0.02" contype="1" conaffinity="1"/>
+                            </body>
                           </body>
                         </body>
                       </body>
@@ -224,6 +233,10 @@
     <gyro name="BodyGyro" site="imu" />
     <framepos name="BodyPos" objtype="site" objname="imu" />
     <framequat name="BodyQuat" objtype="site" objname="imu" />
+    <force name="l_arm_force" site="l_arm_ft_frame"/>
+    <torque name="l_arm_torque" site="l_arm_ft_frame"/>
+    <force name="r_arm_force" site="r_arm_ft_frame"/>
+    <torque name="r_arm_torque" site="r_arm_ft_frame"/>
 
     <jointpos name="LF_wheel_yaw_joint_pos"   joint="LF_wheel_yaw_joint"   />
     <jointpos name="LF_wheel_pitch_joint_pos" joint="LF_wheel_pitch_joint" />

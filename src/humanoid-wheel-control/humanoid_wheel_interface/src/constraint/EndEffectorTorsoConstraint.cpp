@@ -64,7 +64,7 @@ size_t EndEffectorTorsoConstraint::getNumConstraints(scalar_t time) const {
 
 bool EndEffectorTorsoConstraint::isActive(scalar_t time) const 
 {
-  return referenceManagerPtr_->getEnableEeTargetLocalTrajectories();
+  return referenceManagerPtr_->getEnableEeTargetLocalTrajectoriesForArm(eef_Idx_);
 }
 /******************************************************************************************************/
 /******************************************************************************************************/
@@ -121,30 +121,12 @@ VectorFunctionLinearApproximation EndEffectorTorsoConstraint::getLinearApproxima
 /******************************************************************************************************/
 /******************************************************************************************************/
 auto EndEffectorTorsoConstraint::interpolateEndEffectorPose(scalar_t time) const -> std::pair<vector_t, quaternion_t> {
-  const auto& targetTrajectories = referenceManagerPtr_->getEeTargetTrajectories();
-  const auto& timeTrajectory = targetTrajectories.timeTrajectory;
-  const auto& stateTrajectory = targetTrajectories.stateTrajectory;
+  const auto& targetTrajectories = referenceManagerPtr_->getEeTargetTrajectories(eef_Idx_);
+  const auto& targetEeState = targetTrajectories.getDesiredState(time);
 
-  vector_t position;
-  quaternion_t orientation;
-
-  if (stateTrajectory.size() > 1) {
-    // Normal interpolation case
-    int index;
-    scalar_t alpha;
-    std::tie(index, alpha) = LinearInterpolation::timeSegment(time, timeTrajectory);
-
-    const auto& lhs = stateTrajectory[index].tail(eef_num_ * 7);
-    const auto& rhs = stateTrajectory[index + 1].tail(eef_num_ * 7);
-    const quaternion_t q_lhs(lhs.segment<4>(eef_Idx_ * 7 + 3));
-    const quaternion_t q_rhs(rhs.segment<4>(eef_Idx_ * 7 + 3));
-
-    position = alpha * lhs.segment<3>(eef_Idx_ * 7) + (1.0 - alpha) * rhs.segment<3>(eef_Idx_ * 7);
-    orientation = q_lhs.slerp((1.0 - alpha), q_rhs);
-  } else {  // stateTrajectory.size() == 1
-    position = stateTrajectory.front().tail(eef_num_ * 7).segment<3>(eef_Idx_ * 7);
-    orientation = quaternion_t(stateTrajectory.front().tail(eef_num_ * 7).segment<4>(eef_Idx_ * 7 + 3));
-  }
+  vector_t position = targetEeState.segment(0, 3);
+  Eigen::Vector3d zyx = targetEeState.segment(3, 3);
+  quaternion_t orientation = getQuaternionFromEulerAnglesZyx(zyx);
 
   return {position, orientation};
 }

@@ -20,12 +20,15 @@ ROBAN2_1_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-
 KUAVO5_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5_dual_canbus_cofig.yaml"
 KUAVO5_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5_single_canbus_cofig.yaml"
 
-# Kuavo5 v53
-KUAVO5_V53_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5_v53_dual_canbus_cofig.yaml"
+# Kuavo5/5w(肩膀为CAN)
+KUAVO5_5W_SHOULDER_CAN_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5_5w_shoulder_can_dual_canbus_cofig.yaml"
 
 # Kuavo4pro
 KUAVO4PRO_SINGLE_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_single_canbus_cofig.yaml"
 KUAVO4PRO_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo4pro_dual_canbus_cofig.yaml"
+
+# Kuavo5w_v62
+KUAVO5W_V62_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/kuavo5w_v62_dual_canbus_cofig.yaml"
 
 # 打印带颜色的标题
 echo_title() {
@@ -105,7 +108,7 @@ select_wiring_type() {
 select_hand_protocol_type() {
     local -n result_ref=$1
     local hand_protocol_options=("proto_buf -- 485协议" "proto_can -- CAN协议")
-    show_menu "选择手部协议类型" "${hand_protocol_options[@]}"
+    show_menu "选择手部协议类型 (若无末端，请任意选择)" "${hand_protocol_options[@]}"
     get_user_selection 2 hand_protocol_selection
 
     local hand_protocol_types=("proto_buf" "proto_can")
@@ -193,8 +196,8 @@ get_end_effector_device_id() {
             fi
             ;;
         "lejuclaw")
-            # kuavo5_v53 使用 0x11/0x12，其他机型使用 0x0F/0x10
-            if [ "$robot_type" = "kuavo5_v53" ]; then
+            # kuavo5/5w(shoulder CAN) 使用 0x11/0x12，其他机型使用 0x0F/0x10
+            if [ "$robot_type" = "kuavo5/5w(shoulder CAN)" ]; then
                 if [ "$side" = "L" ]; then
                     echo "0x11"
                 else
@@ -470,10 +473,10 @@ configure_kuavo() {
 
     # 选择CAN总线接线类型
     local wiring_type
-    # kuavo5_v53版本只支持双总线
-    if [ "$robot_type" = "kuavo5_v53" ]; then
+    # kuavo5/5w(shoulder CAN) 版本只支持双总线
+    if [ "$robot_type" = "kuavo5/5w(shoulder CAN)" ]; then
         wiring_type="dual_bus"
-        echo_success "✓ kuavo5_v53版本仅支持双总线模式"
+        echo_success "✓ $robot_type 版本仅支持双总线模式"
     else
         select_wiring_type wiring_type
     fi
@@ -488,9 +491,9 @@ configure_kuavo() {
         "kuavo5")
             dual_config_file="$KUAVO5_DUAL_SOURCE_CONFIG_FILE"
             ;;
-        "kuavo5_v53")
-            dual_config_file="$KUAVO5_V53_DUAL_SOURCE_CONFIG_FILE"
-            # kuavo5_v53版本不支持单总线，不需要single_config_file
+        "kuavo5/5w(shoulder CAN)")
+            dual_config_file="$KUAVO5_5W_SHOULDER_CAN_DUAL_SOURCE_CONFIG_FILE"
+            # kuavo5/5w(shoulder CAN)版本不支持单总线，不需要single_config_file
             single_config_file=""
             ;;
     esac
@@ -533,9 +536,9 @@ configure_kuavo() {
         echo_success "✓ 配置文件已更新: $temp_file"
         config_file="$temp_file"
     else
-        # kuavo5_v53版本不支持单总线
-        if [ "$robot_type" = "kuavo5_v53" ]; then
-            echo_error "✗ 错误: kuavo5_v53版本不支持单总线模式"
+        # kuavo5/5w(shoulder CAN)版本不支持单总线
+        if [ "$robot_type" = "kuavo5/5w(shoulder CAN)" ]; then
+            echo_error "✗ 错误: $robot_type 版本不支持单总线模式"
             return 1
         fi
 
@@ -590,9 +593,9 @@ main() {
     fi
 
     # 选择机器人类型
-    local robot_options=("roban2.0" "roban2.1" "kuavo4pro" "kuavo5" "kuavo5_v53")
+    local robot_options=("roban2.0" "roban2.1" "kuavo4pro" "kuavo5" "kuavo5/5w(shoulder CAN)")
     show_menu "选择机器人类型" "${robot_options[@]}"
-    get_user_selection 5 robot_selection
+    get_user_selection 6 robot_selection
 
     local robot_type="${robot_options[$((robot_selection-1))]}"
     echo_success "选择机器人类型: $robot_type"
@@ -609,7 +612,7 @@ main() {
         "roban2.0"|"roban2.1")
             configure_roban2 "$robot_type"
             ;;
-        "kuavo4pro"|"kuavo5"|"kuavo5_v53")
+        "kuavo4pro"|"kuavo5"|"kuavo5/5w(shoulder CAN)")
             configure_kuavo "$robot_type"
             ;;
     esac

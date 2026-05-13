@@ -405,6 +405,19 @@
     <parent link="zarm_l7_link" />
     <child link="zarm_l7_end_effector" />
   </joint>
+  <link name="zarm_l7_virtual_thumb_link">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="zarm_l7_virtual_thumb_joint_ee" type="fixed">
+    <origin xyz="0.15 0 0" rpy="0 0 0" />
+    <parent link="zarm_l7_end_effector" />
+    <child link="zarm_l7_virtual_thumb_link" />
+  </joint>
   <!-- ============ r_arm_pitch ============ -->
   <!-- 坐标系：r_arm_pitch_roll_yaw -->
   <link
@@ -751,5 +764,18 @@
     <origin xyz="0 0.0 -0.17" rpy="0 0 0" />
     <parent link="zarm_r7_link" />
     <child link="zarm_r7_end_effector" />
+  </joint>
+  <link name="zarm_r7_virtual_thumb_link">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="zarm_r7_virtual_thumb_joint_ee" type="fixed">
+    <origin xyz="0.15 0 0" rpy="0 0 0" />
+    <parent link="zarm_r7_end_effector" />
+    <child link="zarm_r7_virtual_thumb_link" />
   </joint>
   </robot>

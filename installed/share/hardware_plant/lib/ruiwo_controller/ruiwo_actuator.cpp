@@ -714,7 +714,8 @@ bool RuiWoActuator::disableMotor(int motorIndex)
 }
 
 // set_positions接口
-void RuiWoActuator::set_positions(const std::vector<uint8_t> &ids, const std::vector<double> &positions,const std::vector<double> &torque,const std::vector<double> &velocity)
+void RuiWoActuator::set_positions(const std::vector<uint8_t> &ids, const std::vector<double> &positions,const std::vector<double> &torque,const std::vector<double> &velocity,
+                                   const std::vector<double> &kp, const std::vector<double> &kd)
 {
     std::vector<double> rad_position;
     std::vector<double> rad_velocity;

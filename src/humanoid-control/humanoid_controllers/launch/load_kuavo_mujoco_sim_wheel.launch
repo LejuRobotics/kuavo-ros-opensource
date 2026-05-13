@@ -6,14 +6,16 @@
     <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
 
     <arg name="output_system_info" default="true"/>
-    <arg name="vr_remote_control" default="false"/>
     <arg name="robot_type"         default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="nodelet_robot_type"  default="1"/>    <!-- 1表示轮臂，2表示双足 -->
     <arg name="wheel_control_type"  default="1"/>    <!-- 0表示轮臂的仿真测试版mpc，1表示实际部署mpc -->
-    <arg name="use_sqp"   default="false" doc="Use SQP if true, DDP if false"/>
+    <arg name="use_sqp"   default="true" doc="Use SQP if true, DDP if false"/>
     <arg name="rviz"                default="true" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <!-- 设置VR控制参数 -->
+    <arg name="use_vr_control" default="true"/>
+    <param name="use_vr_control" value="$(arg use_vr_control)"/>
 
     <!-- load the robot version manager -->
     <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
@@ -24,8 +26,8 @@
 
      <!-- The URDF model of the robot -->
     <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
-    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v45/command/gait.info"/>
-    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v45/command/reference.info"/>
+    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info"/>
+    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info"/>
     <!-- The task file for the mpc. -->
     <arg name="taskFile"    value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
     <!-- The library folder to generate CppAD codegen into -->
@@ -41,6 +43,7 @@
     <arg name="wbc_only"           default="false"/>
     <arg name="play_back"          default="false"/>  
     <arg name="joystick_type"      default="sim"/>
+    <arg name="sim_input_mode"     default="keyboard"/>
     <arg name="arm_move_spd"      default="1.2"/>
     <arg name="start_way"          default="manual"/>
     <arg name="use_estimator_contact"   default="false"/>
@@ -107,10 +110,10 @@
     <param name="/timeout_warning_ms" value="20"/>
 
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- mpc node -->
     <group unless="$(arg pure_sim)">
@@ -135,33 +138,36 @@
     </node>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true">
       </node>
-    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
-      <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
-    </node>
+
     
     <!-- 根据机器人类型启动mujoco仿真 -->
     <group unless="$(arg play_back)">
       <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch"/>
     </group>
+
       <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
           <arg name="start_way" value="$(arg start_way)"/>
         </include>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"
+              launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
       </group>
       <group if="$(eval arg('joystick_type') == 'sim')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
+          <arg name="sim_input_mode" value="$(arg sim_input_mode)"/>
         </include>
       </group>
       <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
           <arg name="joystick_type" value="$(arg joystick_type)"/>
         </include>
-        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"
+              launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
       </group>
-    </group>    
+    </group>
 
      <!--publish system state  -->
     <group if="$(arg output_system_info)">
@@ -170,8 +176,9 @@
     <!-- monitor node -->
     <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
 
+    <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+    
     <group if="$(arg with_ik)">
         <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
     </group>
-
 </launch>

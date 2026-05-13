@@ -6,6 +6,7 @@ import py_trees
 from py_trees.common import Access
 import numpy as np
 import time
+import rospy
 # 初始化API
 robot_sdk = RobotSDK()
 arm_api = ArmAPI(
@@ -94,6 +95,21 @@ def arm_generate_pick_boxes_before():
         Pose.from_euler(pos=(-0.4, 0.4, 1.1), euler=(0, -90, 180),
                         degrees=True,
                         frame=Frame.ROBOT)]
+
+    return pick_left_arm_poses, pick_right_arm_poses
+
+def lb_arm_generate_pick_before():
+    # 手臂预抓取动作
+    # 这里以机器人坐标系为基准，这样手臂动作总是相对于机器人，机器人坐标系位于基座在地面的投影点
+    pick_left_arm_poses = [
+        Pose.from_euler(pos=(0.5, 0.4, 0.9), euler=(0, -90, 0),
+                        degrees=True,
+                        frame=Frame.BASE)]
+
+    pick_right_arm_poses = [
+        Pose.from_euler(pos=(0.5, -0.4, 0.9), euler=(0, -90, 0),
+                        degrees=True,
+                        frame=Frame.BASE)]
 
     return pick_left_arm_poses, pick_right_arm_poses
 
@@ -301,6 +317,223 @@ def arm_generate_place_keypoints(
     ]  # 手臂关键点数据，假设为空列表
 
     return place_left_arm_poses, place_right_arm_poses
+
+# 轮臂抓取点位
+def lb_arm_generate_pick_keypoints(
+        box_width: float,
+        box_behind_tag: float,  # 箱子在tag后面的距离，单位米
+        box_beneath_tag: float,  # 箱子在tag下方的距离，单位米
+        box_left_tag: float,  # 箱子在tag左侧的距离，单位米
+        hand_pitch_degree: float = 0.0,  # 手臂pitch角度（相比水平, 下倾是正），单位度
+):
+    """
+    轮臂抓取点位（不包含抬升点位）：
+    1. 预抓取点位
+    2. 并拢点位
+    抬升点位由 lb_arm_liftUp_keypoint 单独生成。
+    """
+    pick_left_arm_poses = [
+        # 1. 预抓取点位
+        Pose.from_euler(
+            pos=(-box_width - box_left_tag, -box_beneath_tag, -box_behind_tag),
+            euler=(0, 0, 90),
+            degrees=True,
+            frame=Frame.TAG,
+        ),
+        # 2. 并拢点位
+        Pose.from_euler(
+            pos=(-box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+            euler=(0, 0, 90),
+            degrees=True,
+            frame=Frame.TAG,
+        ),
+    ]
+
+    pick_right_arm_poses = [
+        # 1. 预抓取点位
+        Pose.from_euler(
+            pos=(box_width - box_left_tag, -box_beneath_tag, -box_behind_tag),
+            euler=(0, 0, 90),
+            degrees=True,
+            frame=Frame.TAG,
+        ),
+        # 2. 并拢点位
+        Pose.from_euler(
+            pos=(box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+            euler=(0, 0, 90),
+            degrees=True,
+            frame=Frame.TAG,
+        ),
+    ]
+
+    return pick_left_arm_poses, pick_right_arm_poses
+
+def lb_arm_liftUp_keypoint(
+        box_width: float,
+        box_behind_tag: float,  # 箱子在tag后面的距离，单位米
+        box_beneath_tag: float,  # 箱子在tag下方的距离，单位米
+        box_left_tag: float,  # 箱子在tag左侧的距离，单位米
+):
+    """
+    抓取完成后的抬升点位：1.施加期望力点位 2.抬升点位
+    """
+    left_lift_pose = [
+        Pose.from_euler(
+            pos=(-box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+            euler=(0, 0, 90),
+            degrees=True,
+            frame=Frame.TAG,
+        ),
+        Pose.from_euler(
+            pos=(-box_width / 2 - box_left_tag, -box_beneath_tag + 0.15, -box_behind_tag),
+            euler=(0, 0, 90),
+            degrees=True,
+            frame=Frame.TAG,
+        )
+    ]
+    right_lift_pose = [
+        Pose.from_euler(
+            pos=(box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+            euler=(0, 0, 90),
+            degrees=True,
+            frame=Frame.TAG,
+        ),
+        Pose.from_euler(
+            pos=(box_width / 2 - box_left_tag, -box_beneath_tag + 0.15, -box_behind_tag),
+            euler=(0, 0, 90),
+            degrees=True,
+            frame=Frame.TAG,
+        )
+    ]
+    return left_lift_pose, right_lift_pose
+
+
+def lb_arm_generate_pre_place_keypoints(
+        box_width: float,
+        box_behind_tag: float,
+        box_beneath_tag: float,
+        box_left_tag: float,
+):
+    """
+    放置点位：手臂移动到放置位置
+    """
+    place_left = [
+        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+                        euler=(0, 0, 90), degrees=True, frame=Frame.TAG),
+    ]
+    place_right = [
+        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+                        euler=(0, 0, 90), degrees=True, frame=Frame.TAG),
+    ]
+    return place_left, place_right
+
+
+def lb_arm_generate_place_keypoints(
+        box_width: float,
+        box_behind_tag: float,
+        box_beneath_tag: float,
+        box_left_tag: float,
+):
+    """
+    放置阶段：撤销期望力然后放置箱子。
+    """
+    place_left = [
+        # 1.撤销期望力点位
+        Pose.from_euler(pos=(-box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+                        euler=(0, 0, 90), degrees=True, frame=Frame.TAG),
+        # 2.打开点位
+        Pose.from_euler(pos=(-box_width - box_left_tag, -box_beneath_tag, -box_behind_tag),
+                        euler=(0, 0, 90), degrees=True, frame=Frame.TAG),
+        # 3.收臂点位
+        Pose.from_euler(pos=(0.35, 0.3, 0.68), euler=(0, -70, 0), degrees=True, frame=Frame.BASE),
+    ]
+    place_right = [
+        # 1.撤销期望力点位
+        Pose.from_euler(pos=(box_width / 2 - box_left_tag, -box_beneath_tag, -box_behind_tag),
+                        euler=(0, 0, 90), degrees=True, frame=Frame.TAG),
+        # 2.打开点位
+        Pose.from_euler(pos=(box_width - box_left_tag, -box_beneath_tag, -box_behind_tag),
+                        euler=(0, 0, 90), degrees=True, frame=Frame.TAG),
+        # 3.收臂点位
+        Pose.from_euler(pos=(0.35, -0.3, 0.68), euler=(0, -70, 0), degrees=True, frame=Frame.BASE),
+    ]
+    return place_left, place_right
+
+def _normalize_angle_rad(angle: float) -> float:
+    """
+    将弧度归一化到 [-pi, pi) 区间。
+    """
+    return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def _euler_xyz_equivalent_small_roll(euler_xyz: np.ndarray, eps: float = 0.2) -> np.ndarray:
+    """
+    对 xyz 欧拉角做等价重写，在 pitch 接近 ±pi/2（万向节锁区域）时，
+    选取 roll 更小（理想情况下为 0）的等价表示，保持旋转本身不变。
+
+    说明：
+    - 对于 xyz（外旋）或 ZYX（等价内旋）在 pitch=±pi/2 处，存在无穷多组 (roll, pitch, yaw)
+      表示同一旋转，满足 roll 和 yaw 之间线性关系。
+    - 这里采用简化形式：
+        pitch ≈ +pi/2:  roll' = 0, yaw' = yaw + roll
+        pitch ≈ -pi/2:  roll' = 0, yaw' = yaw - roll
+      从而得到 roll≈0 的等价欧拉角。
+    """
+    roll, pitch, yaw = float(euler_xyz[0]), float(euler_xyz[1]), float(euler_xyz[2])
+
+    # 不在万向节锁附近 或 roll和yaw都接近0：直接返回原欧拉角
+    if abs(abs(pitch) - np.pi / 2.0) >= eps or (abs(roll) <= eps and abs(yaw) <= eps):
+        return euler_xyz
+
+    if pitch > 0.0:
+        yaw_new = yaw - roll
+    else:
+        yaw_new = yaw + roll
+
+    roll_new = 0.0
+    yaw_new = _normalize_angle_rad(yaw_new)
+
+    return np.array([roll_new, pitch, yaw_new], dtype=float)
+
+
+def _pose_to_yaw_pitch_roll(pose: Pose):
+    """Pose 的欧拉角 [roll, pitch, yaw] -> 服务格式 [yaw, pitch, roll] 弧度（在万向节锁处做等价小 roll 重写）"""
+    euler = pose.get_euler(degrees=False)
+    print(f"euler: {euler}")
+    euler = _euler_xyz_equivalent_small_roll(euler)
+    print(f"等价后的新euler: {euler}")
+    return [float(euler[2]), float(euler[1]), float(euler[0])]
+
+
+def set_arm_ee_local_keypoints_from_poses(left_poses, right_poses, total_time: float):
+    """将 BASE 系下的左右臂 Pose 列表转为 arm_ee_local 关键点并写入黑板。"""
+    if not left_poses or not right_poses or len(left_poses) != len(right_poses):
+        rospy.logerr("set_arm_ee_local_keypoints_from_poses: 左右臂点位数量需一致且非空")
+        return False
+    keypoints = []
+    for left_p, right_p in zip(left_poses, right_poses):
+        left_ypr = _pose_to_yaw_pitch_roll(left_p)
+        right_ypr = _pose_to_yaw_pitch_roll(right_p)
+        cmd_vec = [
+            *list(left_p.pos),
+            *left_ypr,
+            *list(right_p.pos),
+            *right_ypr,
+        ]
+        keypoints.append(cmd_vec)
+    n = len(keypoints)
+    dt = total_time / n if n else total_time
+    times = [dt] * n
+
+    bb = py_trees.blackboard.Client(name="set_arm_ee_local_keypoints")
+    bb.register_key("arm_ee_local_keypoints", access=py_trees.common.Access.WRITE)
+    bb.register_key("arm_ee_keypoint_times", access=py_trees.common.Access.WRITE)
+    bb.arm_ee_local_keypoints = keypoints
+    bb.arm_ee_keypoint_times = times
+    rospy.loginfo(f"📌 手臂末端关键点(arm_ee_local/BASE): {n} 点, 总时间 {total_time}s")
+    return True
+
+
 
 def time_sleep(seconds: float):
     time.sleep(seconds)

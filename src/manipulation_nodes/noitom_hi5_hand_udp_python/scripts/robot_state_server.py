@@ -11,6 +11,7 @@ import rospkg
 import threading
 
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray
 from kuavo_msgs.msg import sensorsData, lejuClawState
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
@@ -64,6 +65,10 @@ def get_end_effector_type():
 class RobotSubscriber:
     """机器人数据订阅器类"""
 
+    # 力反馈归一化常量
+    MAX_FORCE_NEWTONS = 19.6  # 最大力值（牛顿），对应2kg重量
+    VR_VIBRATION_MAX = 255    # VR振动强度最大值
+
     def __init__(self, ee_type="none", subscribe_sensor_data=False):
         self.ee_type = ee_type.lower()
         self.subscribe_sensor_data = subscribe_sensor_data
@@ -72,6 +77,7 @@ class RobotSubscriber:
         queue_size = 100
         self.sensor_queue = queue.Queue(maxsize=queue_size)
         self.ee_queue = queue.Queue(maxsize=queue_size)
+        self.arm_force_queue = queue.Queue(maxsize=queue_size)
 
         # 设置订阅
         self._setup_subscription()
@@ -85,11 +91,15 @@ class RobotSubscriber:
         if self.ee_type == "lejuclaw":
             self.ee_sub = rospy.Subscriber("/leju_claw_state", lejuClawState, self._lejuclaw_callback)
             print(f"robot_state_server: Subscribed to /leju_claw_state (leju claw) for ee_type: {self.ee_type}")
-        elif self.ee_type in ["qiangnao", "qiangnao_touch", "revo2"]:
+        elif self.ee_type in ["qiangnao", "qiangnao_touch", "revo2", "linker_hand"]:
             self.ee_sub = rospy.Subscriber("/dexhand/state", JointState, self._dexhand_callback)
             print(f"robot_state_server: Subscribed to /dexhand/state (dexhand) for ee_type: {self.ee_type}")
         else:
             print(f"robot_state_server: No end effector subscription for ee_type: {self.ee_type}")
+
+        # 订阅手臂接触力反馈数据
+        self.arm_force_sub = rospy.Subscriber("/state_estimate/arm_contact_force", Float64MultiArray, self._arm_force_callback)
+        print(f"robot_state_server: Subscribed to /state_estimate/arm_contact_force (arm force feedback)")
 
     def _sensors_callback(self, msg):
         """传感器数据回调函数"""
@@ -157,6 +167,51 @@ class RobotSubscriber:
         except Exception as e:
             print(f"Error processing dexhand data: {e}")
 
+    def _normalize_force(self, value):
+        """将力值归一化到 VR 振动强度范围
+
+        Args:
+            value: 力值（牛顿）
+
+        Returns:
+            float: 归一化后的振动强度 (0-255)
+        """
+        normalized = (value / self.MAX_FORCE_NEWTONS) * self.VR_VIBRATION_MAX
+        return min(self.VR_VIBRATION_MAX, max(0.0, normalized))
+
+    def _arm_force_callback(self, msg):
+        """手臂接触力反馈回调函数"""
+        try:
+            # 数据格式: [左臂Fx, Fy, Fz, 右臂Fx, Fy, Fz]
+            data = list(msg.data)
+
+            if len(data) < 6:
+                print(f"robot_state_server: Invalid arm force data length: {len(data)}, expected 6")
+                return
+
+            # 创建 ArmForceFeedback 消息
+            arm_force = robot_state_pb2.ArmForceFeedback()
+
+            # 计算左臂 xyz 中最大的力（取绝对值）并归一化
+            left_max_force = max(abs(data[0]), abs(data[1]), abs(data[2]))
+            arm_force.max_force.append(self._normalize_force(left_max_force))
+
+            # 计算右臂 xyz 中最大的力（取绝对值）并归一化
+            right_max_force = max(abs(data[6]), abs(data[7]), abs(data[8]))
+            arm_force.max_force.append(self._normalize_force(right_max_force))
+
+            # 放入队列，如果队列满了则丢弃最旧的数据
+            if self.arm_force_queue.full():
+                try:
+                    self.arm_force_queue.get_nowait()
+                except queue.Empty:
+                    pass
+
+            self.arm_force_queue.put_nowait(arm_force)
+
+        except Exception as e:
+            print(f"Error processing arm force feedback data: {e}")
+
     def get_joint_state(self):
         """从队列获取最新的关节状态"""
         try:
@@ -171,6 +226,19 @@ class RobotSubscriber:
             pass
         return (False, robot_state_pb2.JointState())
 
+    def get_arm_force_feedback(self):
+        """从队列获取最新的手臂力反馈数据"""
+        try:
+            # 获取队列中最新的数据
+            latest_data = None
+            while not self.arm_force_queue.empty():
+                latest_data = self.arm_force_queue.get_nowait()
+
+            if latest_data:
+                return (True, latest_data)
+        except queue.Empty:
+            pass
+        return (False, robot_state_pb2.ArmForceFeedback())
 
     def get_ee_state(self):
         try:
@@ -318,6 +386,11 @@ class RobotStateServer:
             item_mass_force_response = self._process_item_mass_force_response()
             if item_mass_force_response:
                 robot_state.item_mass_force_response.CopyFrom(item_mass_force_response)
+
+            # 获取手臂力反馈数据
+            arm_force_valid, arm_force = self.robot_subscriber.get_arm_force_feedback()
+            if arm_force_valid and arm_force:
+                robot_state.arm_force_feedback.CopyFrom(arm_force)
 
             return robot_state
 

@@ -10,6 +10,7 @@ namespace humanoid_controller
   {
     BASE_CONTROLLER = 0,      ///< 基础控制器大类（MPC等）
     FALL_STAND_CONTROLLER,    ///< 倒地起身控制器大类
+    DANCE_CONTROLLER,         ///< 舞蹈控制器大类
   };
 
   /**
@@ -21,7 +22,10 @@ namespace humanoid_controller
     MPC = 0,                  ///< MPC控制器
     AMP_CONTROLLER,           ///< AMP行走控制器
     FALL_STAND_CONTROLLER,    ///< 倒地起身控制器
+    PERCEPTION_LOCO_CONTROLLER, ///< 感知行走控制器
+    DEPTH_LOCO_CONTROLLER,
     VMP_CONTROLLER,           ///< VMP控制器
+    DANCE_CONTROLLER,         ///< Dance控制器
   };
 
 
@@ -56,6 +60,11 @@ namespace humanoid_controller
       controller_class = ControllerClass::FALL_STAND_CONTROLLER;
       return true;
     }
+    else if (class_str == "DANCE_CONTROLLER")
+    {
+      controller_class = ControllerClass::DANCE_CONTROLLER;
+      return true;
+    }
     else
     {
       return false;
@@ -85,9 +94,24 @@ namespace humanoid_controller
       type = RLControllerType::FALL_STAND_CONTROLLER;
       return true;
     }
+    else if (type_str == "PERCEPTION_LOCO_CONTROLLER")
+    {
+      type = RLControllerType::PERCEPTION_LOCO_CONTROLLER;
+      return true;
+    }
+    else if (type_str == "DEPTH_LOCO_CONTROLLER")
+    {
+      type = RLControllerType::DEPTH_LOCO_CONTROLLER;
+      return true;
+    }
     else if (type_str == "VMP_CONTROLLER")
     {
       type = RLControllerType::VMP_CONTROLLER;
+      return true;
+    }
+    else if (type_str == "DANCE_CONTROLLER")
+    {
+      type = RLControllerType::DANCE_CONTROLLER;
       return true;
     }
     else

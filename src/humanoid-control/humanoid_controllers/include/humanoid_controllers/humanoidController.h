@@ -54,6 +54,7 @@
 #include "humanoid_interface/gait/GaitSchedule.h"
 #include "kuavo_msgs/robotHeadMotionData.h"
 #include "kuavo_msgs/getCurrentGaitName.h"
+#include "kuavo_msgs/ExecuteArmAction.h"
 #include "humanoid_controllers/shm_manager.h"
 #include <std_msgs/Int8.h>
 #if defined(USE_DDS) || defined(USE_LEJU_DDS)
@@ -569,6 +570,7 @@ namespace humanoid_controller
     ros::ServiceServer getMmArmCtrlSrv_;
     ros::ServiceServer currentGaitNameSrv_;
     ros::ServiceServer triggerFallStandUpSrv_;
+    ros::ServiceServer changeRuiwoMotorParamSrv_;
     GaitManager *gaitManagerPtr_=nullptr;
 
     PinocchioInterface *pinocchioInterface_ptr_;
@@ -639,17 +641,10 @@ namespace humanoid_controller
     vector_t desire_head_pos_ = vector_t::Zero(2);
     vector_t desire_waist_pos_ = vector_t::Zero(1);  // 腰部目标位置
     vector_t desire_arm_q_prev_;
-    vector_t jointPos_, jointVel_;
-    vector_t jointPosRL_, jointVelRL_;
-    vector_t jointAcc_;
-    vector_t jointAccRL_;
-    vector_t jointTorque_;
-    vector_t jointTorqueRL_;
+    vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;
+    vector_t jointPosWBC_, jointVelWBC_, jointAccWBC_, jointCurrentWBC_;
+    vector_t jointPosRL_, jointVelRL_, jointAccRL_, jointTorqueRL_;
     vector_t dexhand_joint_pos_ = vector_t::Zero(12);
-
-    vector_t jointPosWBC_, jointVelWBC_;
-    vector_t jointAccWBC_;
-    vector_t jointCurrentWBC_;
 
     vector_t motor_c2t_;
     std::vector<std::vector<double>> motor_cul;
@@ -763,6 +758,7 @@ namespace humanoid_controller
     void publishJointCmdToShm(const kuavo_msgs::jointCmd& jointCmdMsg);         // 发布关节命令到共享内存
     void publishControlCommands(const kuavo_msgs::jointCmd& jointCmdMsg);       // 发布控制命令的统一接口
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);                // 替换EC_MASTER电机的kp/kd（从running_settings）
+    bool changeRuiwoMotorParamCallback(kuavo_msgs::ExecuteArmActionRequest &req, kuavo_msgs::ExecuteArmActionResponse &res);  // 修改ruiwo电机kp/kd，更新running_settings后由replaceDefaultEcMotorPdoGait生效
     
     // CPU内核隔离设置
     bool setupCpuIsolation();  // 从ROS参数获取隔离CPU索引并设置线程亲和性

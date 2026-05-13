@@ -1460,7 +1460,7 @@ response:
 - model: 加载成功的YOLO模型对象
 - None: 加载失败时返回
 
-### get_detections(camera, model)
+### get_detections(camera, model，confidence=0.6)
 
 获取当前图像的目标检测结果。
 
@@ -1468,6 +1468,7 @@ response:
 
 - `camera` (str): 相机名称
 - `model`: YOLO模型对象
+- `confidence` (float): 置信度阈值，默认为0.6
 
 **返回:**
 
@@ -1491,6 +1492,7 @@ response:
     'w': float,      # 宽度
     'h': float,      # 高度
     'area': float,   # 面积
+    'area_ratio': float,   # 面积占比，检测框占整幅图像面积的比例 [0, 1]
     'class_name': str  # 目标名称
 }
 ```
@@ -1512,6 +1514,7 @@ response:
     'w': float,      # 宽度
     'h': float,      # 高度
     'area': float,   # 面积
+    'area_ratio': float,   # 面积占比，检测框占整幅图像面积的比例 [0, 1]
     'class_name': str  # 目标名称
 }
 ```
