@@ -179,7 +179,6 @@ const sidebars = {
               type: 'category',
               label: '扩展案例',
               items: [
-                'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/手腕相机抓取放置案例',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/拓展案例/百度EdgeBoard接入机器人案例',
               ],
             },
