@@ -1007,6 +1007,7 @@ class KuavoPicoNode:
         
         当手臂复位(mode=1)时，保存当前头部控制模式后切换到 fixed 回正；
         当启用手臂控制(mode=2)时，恢复复位前保存的头部控制模式（含 fixed_hand 信息）。
+        复位后、解锁前若用户通过头控服务改了模式/主手，由 _head_mode_status_callback 同步覆盖上述快照。
         
         Args:
             arm_mode: 手臂控制模式 (1=复位, 2=启用)
@@ -1030,7 +1031,12 @@ class KuavoPicoNode:
                 self.head_mode_before_reset = None
                 self.fixed_hand_before_reset = ""
             
-            if new_head_mode is None or new_head_mode == self.current_head_mode:
+            if new_head_mode is None:
+                return
+            # fixed_main_hand 需同时比较 fixed_hand，避免仅模式字符串相同但手侧错误时误跳过恢复
+            if new_head_mode == self.current_head_mode and (
+                new_head_mode != "fixed_main_hand" or new_fixed_hand == self.current_fixed_hand
+            ):
                 return
             
             self._set_head_control_mode(new_head_mode, new_fixed_hand)
@@ -1365,10 +1371,23 @@ class KuavoPicoNode:
             SDKLogger.info(f"头部控制模式同步: {self.current_head_mode}({self.current_fixed_hand}) -> {mode}({fixed_hand})")
             self.current_head_mode = mode
             self.current_fixed_hand = fixed_hand
+            # 与 QuestControlFSMNode::headCtrlModeCallback 一致：复位过程中的 fixed 不应关闭「随手臂切换头部」，
+            # 否则解锁时 _handle_head_mode_on_arm_mode_change 会提前 return，无法恢复 fixed_main_hand / auto_track_active
             if mode in ("auto_track_active", "fixed_main_hand"):
                 self.head_use_auto_track = True
-            else:
+            elif mode == "vr_follow":
                 self.head_use_auto_track = False
+            # 已手臂复位、尚未解锁时用户若切换头控/主手，应覆盖「解锁后要恢复」的快照；程序性 fixed 回正不改变快照
+            if self.head_mode_before_reset is not None:
+                if mode == "fixed_main_hand" and fixed_hand in ("left", "right"):
+                    self.head_mode_before_reset = "fixed_main_hand"
+                    self.fixed_hand_before_reset = fixed_hand
+                elif mode == "auto_track_active":
+                    self.head_mode_before_reset = "auto_track_active"
+                    self.fixed_hand_before_reset = ""
+                elif mode == "vr_follow":
+                    self.head_mode_before_reset = "vr_follow"
+                    self.fixed_hand_before_reset = ""
 
     def set_control_mode_callback(self, control_mode: Int32) -> None:
         """Set control mode."""
