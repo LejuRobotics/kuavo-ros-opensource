@@ -30,6 +30,7 @@ find_package(catkin REQUIRED COMPONENTS
   leju_utils
   humanoid_wheel_interface
   ocs2_core
+  ocs2_msgs
 )
 find_package(BZip2 REQUIRED)
 
@@ -68,7 +69,7 @@ find_package(Boost REQUIRED COMPONENTS
 catkin_package(
   INCLUDE_DIRS include
   # LIBRARIES motion_capture_ik_lib
-  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core humanoid_wheel_interface
+  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core ocs2_msgs humanoid_wheel_interface
   DEPENDS drake Eigen3
 )
 
