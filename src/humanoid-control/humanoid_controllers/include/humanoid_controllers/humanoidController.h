@@ -380,7 +380,6 @@ namespace humanoid_controller
     static ocs2_msgs::mpc_flattened_controller createMpcPolicyMsg(const PrimalSolution &primalSolution, const CommandData &commandData,
                                                                   const PerformanceIndex &performanceIndices);
 
-    void dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
 
     void setJoyCmdState(const vector_t &joyCmdState)
     {
@@ -559,7 +558,6 @@ namespace humanoid_controller
     ros::Publisher mpcPolicyPublisher_;
     ros::Publisher cmdPoseWorldPublisher_; // 发布躯干位置控制命令 (geometry_msgs::Twist)
 
-    ros::Subscriber dexhand_state_sub_;
 
     ros::ServiceServer armJointSynchronizationSrv_;
     ros::Subscriber enable_mpc_sub_;
@@ -644,13 +642,6 @@ namespace humanoid_controller
     vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;
     vector_t jointPosWBC_, jointVelWBC_, jointAccWBC_, jointCurrentWBC_;
     vector_t jointPosRL_, jointVelRL_, jointAccRL_, jointTorqueRL_;
-    vector_t dexhand_joint_pos_ = vector_t::Zero(12);  // qiangnao灵巧手专用变量
-    // Linker L6/O6灵巧手专属变量（命名完全和qiangnao区分）
-    vector_t linker_hand_joint_pos_ = vector_t::Zero(12);  // 12维：左手6+右手6
-    ros::Subscriber linker_left_hand_state_sub_;
-    ros::Subscriber linker_right_hand_state_sub_;
-    void linkerLeftHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
-    void linkerRightHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
 
     vector_t motor_c2t_;
     std::vector<std::vector<double>> motor_cul;

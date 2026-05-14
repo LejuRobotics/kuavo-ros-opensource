@@ -57,8 +57,11 @@ public:
 private:
     void dualHandCommandCallback(const kuavo_msgs::dexhandCommand::ConstPtr& msg);
     void controlSingleHand(HandSide side, const kuavo_msgs::dexhandCommand::ConstPtr& msg);
-    // 兼容原来的 control_robot_hand_position 接口
+    // 兼容原来的 control_robot_hand_position 接口（强脑手使用，范围0-100）
     void controlHandCallback(const kuavo_msgs::robotHandPosition::ConstPtr& msg);
+
+    // LinkerO6手使用的control_robot_hand_position接口（范围0-100）
+    void linkerO6ControlHandCallback(const kuavo_msgs::robotHandPosition::ConstPtr& msg);
 
     // Linker系列灵巧手的控制指令回调
     void linkerLeftHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg);
