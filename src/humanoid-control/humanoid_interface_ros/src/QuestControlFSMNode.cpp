@@ -242,7 +242,8 @@ namespace ocs2
             command_height_ = 0.0;
             command_add_height_pre_ = 0.0;
 
-            arm_mode_pub_ = nodeHandle_.advertise<std_msgs::Int32>("/quest3/triger_arm_mode", 1);
+            // latched：后启动的 IK/碰撞检测等节点仍能收到最近一次手臂模式，避免 TCP 建链晚于首次 publish 而丢消息
+            arm_mode_pub_ = nodeHandle_.advertise<std_msgs::Int32>("/quest3/triger_arm_mode", 1, true);
 
             // 添加足部轨迹发布者
             foot_pose_target_pub_ = nodeHandle_.advertise<kuavo_msgs::footPoseTargetTrajectories>("/humanoid_mpc_foot_pose_target_trajectories", 10);
@@ -278,7 +279,7 @@ namespace ocs2
             return;
         }
 
-        void callRealInitializeSrv()
+        bool callRealInitializeSrv()
         {
             ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_initial_start");
             std_srvs::Trigger srv;
@@ -287,11 +288,10 @@ namespace ocs2
             if (client.call(srv))
             {
                 ROS_INFO("RealInitializeSrv call successful");
+                return true;
             }
-            else
-            {
-                ROS_ERROR("Failed to call RealInitializeSrv");
-            }
+            ROS_ERROR("Failed to call RealInitializeSrv");
+            return false;
         }
         int callGetArmModeSrv()
         {
@@ -786,6 +786,7 @@ namespace ocs2
         {
             observation_ = ros_msg_conversions::readObservationMsg(*observation_msg);
             get_observation_ = true;
+            vr_a_button_held_since_not_observing_ = ros::Time(0);
         }
 
         void headBodyPoseCallback(const kuavo_msgs::headBodyPose::ConstPtr& msg)
@@ -932,10 +933,25 @@ namespace ocs2
                 }
             }
 
-            if (!get_observation_ && !joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
-            {
-                callRealInitializeSrv();
-                return;
+            // 尚无 MPC observation 时，用「长按 A」触发 real_initial_start（替代终端按 o）。
+            // VR 刚连接时 A 键短脉冲/抖动易被误判为启动（见 kuavodevlab#2995）；按住期间不处理其它手柄逻辑。
+            if (!get_observation_) {
+                if (joystick_data_.right_first_button_pressed) {
+                    if (vr_a_button_held_since_not_observing_.isZero()) {
+                        vr_a_button_held_since_not_observing_ = ros::Time::now();
+                    } else if (!vr_real_initial_start_fired_ &&
+                               (ros::Time::now() - vr_a_button_held_since_not_observing_).toSec() >=
+                                   kVrRealInitialStartHoldSeconds) {
+                        if (callRealInitializeSrv()) {
+                            vr_real_initial_start_fired_ = true;
+                        } else {
+                            vr_a_button_held_since_not_observing_ = ros::Time(0);
+                        }
+                    }
+                    joystick_data_prev_ = joystick_data_;
+                    return;
+                }
+                vr_a_button_held_since_not_observing_ = ros::Time(0);
             }
             
             if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
@@ -1103,7 +1119,7 @@ namespace ocs2
                 }
             }
             
-            if (!only_half_up_body_) {
+            if (!only_half_up_body_ && !wheel_ik_) {
                 // 全身控制时才支持步态控制
                 checkGaitSwitchCommand(joystick_data_);
 
@@ -1153,10 +1169,23 @@ namespace ocs2
 
         void updateStateLegacyWheelVr()  // 轮臂vr遥操
         {
-            if (!get_observation_ && !joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
-            {
-                callRealInitializeSrv();
-                return;
+            if (!get_observation_) {
+                if (joystick_data_.right_first_button_pressed) {
+                    if (vr_a_button_held_since_not_observing_.isZero()) {
+                        vr_a_button_held_since_not_observing_ = ros::Time::now();
+                    } else if (!vr_real_initial_start_fired_ &&
+                               (ros::Time::now() - vr_a_button_held_since_not_observing_).toSec() >=
+                                   kVrRealInitialStartHoldSeconds) {
+                        if (callRealInitializeSrv()) {
+                            vr_real_initial_start_fired_ = true;
+                        } else {
+                            vr_a_button_held_since_not_observing_ = ros::Time(0);
+                        }
+                    }
+                    joystick_data_prev_ = joystick_data_;
+                    return;
+                }
+                vr_a_button_held_since_not_observing_ = ros::Time(0);
             }
 
             if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
@@ -2017,6 +2046,10 @@ namespace ocs2
         TargetTrajectoriesRosPublisher targetPoseCommand_;
         ros::Subscriber observation_sub_;
         bool get_observation_ = false;
+        /// 在尚未收到 MPC observation 时，用于「长按 A 再触发 real_initial_start」的去抖（VR 连接抖动误触 #2995）
+        ros::Time vr_a_button_held_since_not_observing_{0};
+        bool vr_real_initial_start_fired_{false};
+        static constexpr double kVrRealInitialStartHoldSeconds = 0.35;
         vector_t current_target_ = vector_t::Zero(6);
         scalar_t target_displacement_velocity_;
         scalar_t target_rotation_velocity_;

@@ -117,6 +117,21 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     updateSensorArmJointFromSensorData();
     updateFkCacheFromSensorData();
 
+    // 实物：硬件未就绪则不进入后续（放在未激活判断与 fsm 之前，少做无效状态维护）
+    {
+      bool is_real_robot = false;
+      if (ros::param::getCached("/is_real", is_real_robot) && is_real_robot) {
+        int hardware_is_ready = 0;
+        if (!ros::param::getCached("/hardware/is_ready", hardware_is_ready) || hardware_is_ready == 0) {
+          ROS_INFO_THROTTLE(3.0,
+                            "[WheelQuest3IkIncrementalROS] Waiting /hardware/is_ready != 0 before incremental FSM (real robot)");
+          reset();
+          rate.sleep();
+          continue;
+        }
+      }
+    }
+
     const bool chestPoseUpdateEnabled = joyStickHandlerPtr_->getRightJoyStickYHoldWithX();
     bool chestPositionUpdateEnable = false;
     if (chestPoseUpdateEnabled) {
