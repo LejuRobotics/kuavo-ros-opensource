@@ -2103,7 +2103,7 @@ namespace ocs2
 
         ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
         ros::Subscriber head_ctrl_mode_vr_sub_; // 从主控制器获取头部控制模式
-        int arm_ctrl_mode_{2};
+        int arm_ctrl_mode_{1};
         std::string head_ctrl_mode_{"vr_follow"};
         std::string last_head_ctrl_mode_;
         std::string fixed_hand_{"right"};
