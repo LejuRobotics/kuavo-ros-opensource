@@ -93,7 +93,12 @@ private:
 
         if (isFistTrajAfterChangeMode) 
         {
-            stateTrajectory.push_back(initstate_);
+            if (initstate_.size() == num_arm_joints_) {
+                stateTrajectory.push_back(initstate_);
+            } else {
+                ROS_WARN("[ArmTrajNode]: initstate_ is not initialized, use current arm state as trajectory start.");
+                stateTrajectory.push_back(targetState);
+            }
             isFistTrajAfterChangeMode = false;
         }
         else
@@ -137,7 +142,6 @@ private:
 
     void observationCallback(const ocs2_msgs::mpc_observation::ConstPtr& msg) {
         observation_ = ros_msg_conversions::readObservationMsg(*msg);
-        receivedObservation_ = true;
 
         // Determine the starting index of the arm joints in the state vector
         // This should be adjusted based on actual state vector structure
@@ -147,6 +151,10 @@ private:
             // Parameter not found, using default value
         }
         armJointStartIndex_ = 12 + 12 + waistNums;  // Update this index according to state vector structure
+        if (!receivedObservation_) {
+            initstate_ = observation_.state.segment(armJointStartIndex_, num_arm_joints_);
+        }
+        receivedObservation_ = true;
     }
 
     TargetTrajectories generateTargetTrajectories(const scalar_array_t& timeTrajectory,
@@ -208,6 +216,12 @@ private:
 
     bool changeArmCtlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
     {
+        if (!receivedObservation_) {
+            ROS_WARN("[ArmTrajNode]: Haven't received observation yet. Ignoring mode change.");
+            res.result = false;
+            return true;
+        }
+
         int control_mode = req.control_mode;
         enable_ctrl_ = control_mode;
         res.result = true;
