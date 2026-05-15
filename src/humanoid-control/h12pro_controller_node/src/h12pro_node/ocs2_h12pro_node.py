@@ -848,7 +848,10 @@ class H12PROControllerNode:
                 rospy.loginfo("[EmergencyStop] Cleared switch_controller cooldown to allow immediate stop.")
 
             # 检查当前控制器是否为 mpc，只有 mpc 控制器支持缓慢下降
-            current_controller = self._get_current_controller_name()
+            current_controller = None
+            skip_controller_list = self.only_half_up_body or rospy.get_param("robot_type", 2) == 1
+            if not skip_controller_list:
+                current_controller = self._get_current_controller_name()
             if current_controller and current_controller.lower() == "mpc":
                 if current_state in ["stance", "walk", "trot", "vr_remote_control"]:
                     self.h12_to_joy_node.is_stopping = True
@@ -983,7 +986,10 @@ class H12PROControllerNode:
                     
                     # 如果是有效状态,更新消息
                     current_controller_support = True
-                    current_controller = self._get_current_controller_name()
+                    current_controller = None
+                    skip_controller_list = self.only_half_up_body or rospy.get_param("robot_type", 2) == 1
+                    if not skip_controller_list:
+                        current_controller = self._get_current_controller_name()
                     if current_controller and current_controller.lower() == "mpc" and trigger in ["trot"]:
                         current_controller_support = False
                         print("mpc not support this trigger")
