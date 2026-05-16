@@ -46,20 +46,21 @@ public:
         auto iter1 = jga_.qdofadr().begin();
         for(; iter0 != jga_.qposadr().end() && iter1 != jga_.qdofadr().end(); ++iter0, ++iter1) {
             pos.push_back(d->qpos[*iter0]);
-            // std::cout << "pos:" << *iter0 << " " << d->qpos[*iter0] << std::endl;
             vel.push_back(d->qvel[*iter1] * (180.0 / M_PI));
             tau.push_back(d->qfrc_actuator[*iter1] * 1000);
         }
 
         // thumb
+        const std::array<double, 2> thumb_cmc_range{0.0, 1.5708};
+        const std::array<double, 2> thumb_mcp_range{0.0, 0.8727};
         auto iter = jga_.ctrladr().begin();
-        finger_status_.positions[1] = Joints2Curl(pos[0], {0.23, 1.36}, pos[0], {0.23, 1.36});
+        finger_status_.positions[1] = Joints2Curl(pos[0], thumb_cmc_range, pos[0], thumb_cmc_range);
         // finger_status_.positions[0] = Joints2Curl(pos[0], ctrllimited_map_[*iter], pos[0], ctrllimited_map_[*iter]);
         finger_status_.speeds[1] = vel[0];
         finger_status_.currents[1] = tau[0];            
         iter++; 
 
-        finger_status_.positions[0] = Joints2Curl(pos[1], {0.16, 0.75}, pos[1], {0.16, 0.75});
+        finger_status_.positions[0] = Joints2Curl(pos[1], thumb_mcp_range, pos[1], thumb_mcp_range);
         // finger_status_.positions[1] = Joints2Curl(pos[1], ctrllimited_map_[*iter], pos[1], ctrllimited_map_[*iter]);
         finger_status_.speeds[0] = vel[1]; 
         finger_status_.currents[0] = tau[1];        
@@ -123,9 +124,11 @@ public:
         
         auto iter = jga_.ctrladr().begin();
         // thumb
-        auto joint_cmd0 = Curl2Joints(ctrl_cmd_[1], ctrllimited_map_[*iter], ctrllimited_map_[*iter]);
+        const std::array<double, 2> thumb_cmc_range{0.0, 1.5708};
+        const std::array<double, 2> thumb_mcp_range{0.0, 0.8727};
+        auto joint_cmd0 = Curl2Joints(ctrl_cmd_[1], thumb_cmc_range, thumb_cmc_range);
         iter++;
-        auto joint_cmd1 = Curl2Joints(ctrl_cmd_[0], ctrllimited_map_[*iter], ctrllimited_map_[*iter]);
+        auto joint_cmd1 = Curl2Joints(ctrl_cmd_[0], thumb_mcp_range, thumb_mcp_range);
         iter++;
         ctrl_cmd.push_back(joint_cmd0[0]);
         ctrl_cmd.push_back(joint_cmd1[0]);
