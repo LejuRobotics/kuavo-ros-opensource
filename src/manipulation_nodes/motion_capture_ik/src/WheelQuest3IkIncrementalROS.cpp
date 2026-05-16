@@ -91,7 +91,6 @@ void WheelQuest3IkIncrementalROS::run() {
       ROS_WARN("[WheelQuest3IkIncrementalROS] Service /change_arm_ctrl_mode does not exist");
     }
   }
-  activateController();
   std::thread questJoystickDataThread = std::thread([this]() {
     while (ros::ok() && !quest3ArmInfoTransformerPtr_->isArmLengthMeasurementComplete()) {
       ros::Duration(0.05).sleep();
