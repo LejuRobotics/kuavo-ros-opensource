@@ -362,6 +362,7 @@ class IkRos:
             self.arm_control_mode_callback
         )
         self.__need_reset_ik_guess = False  # 标志是否需要重置IK初始猜测
+        self.__first_change_arm_mode = True  # 标志是否为第一次切换手臂模式
 
         self.run()
         self.ik_thread.join()
@@ -1282,16 +1283,18 @@ class IkRos:
             current_mode = int(msg.data[0])  # 当前模式
             new_mode = int(msg.data[1])      # 新模式
             
-            # 检测模式切换：当data[0] != data[1]时表示正在切换，重置IK初始猜测
-            if current_mode != new_mode:
+
+            # 检测模式切换：当data[0] != data[1]时表示正在切换，重置IK初始猜测。且只在模式切换刚开始时重置IK初始猜测。
+            if current_mode != new_mode and self.__first_change_arm_mode:
+                self.__first_change_arm_mode = False
                 self.__need_reset_ik_guess = True
                 self.arm_mode_changing = True
-            else:
+            elif current_mode == new_mode and not self.__first_change_arm_mode:
                 # 模式切换完成，关闭arm_mode_changing标志
                 if not self.only_half_up_body:
                     self.arm_mode_changing = False
-                
-            
+                    self.__first_change_arm_mode = True
+
     def sensor_data_raw_callback(self, msg):
         self.sensor_data_raw = msg
     

@@ -568,7 +568,7 @@ void WheelQuest3IkIncrementalROS::reset() {
   // 重置激活所有手臂控制模式的计数器，确保下次进入增量模式时可以重新执行激活逻辑
   activateAllArmCtrlModeCounter_ = 0;
   // 重置退出 mode 2 的计数器，确保下次退出时可以重新执行过渡逻辑
-  exitMode2Counter_ = 0;
+  // exitMode2Counter_ = 0;
   // 重置进入 mode 2 时的位置重置计数器，确保下次进入时可以重新执行位置重置逻辑
   enterMode2ResetCounter_ = 0;
   // 重置IK求解结果
