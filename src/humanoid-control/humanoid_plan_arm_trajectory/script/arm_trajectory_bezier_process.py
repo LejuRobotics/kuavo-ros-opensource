@@ -27,7 +27,7 @@ except (rospkg.ResourceNotFound, ImportError) as e:
         sys.path.insert(0, kuavo_common_python_path)
     from robot_version import RobotVersion
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
-from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl
+from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl, gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getControllerList
 from ocs2_msgs.msg import mpc_observation
 from sensor_msgs.msg import JointState
@@ -154,6 +154,21 @@ class ArmTrajectoryBezierDemo:
             '/kuavo_arm_traj', JointState, self._kuavo_arm_traj_callback, queue_size=1, tcp_nodelay=True
         )
 
+        # ===================================================================
+        # [步态感知] 订阅 OCS2 控制器发布的步态切换通知，当步态为 walk / trot 时
+        # 自动将 linker_hand 的大拇指内扣（position[0]=100），避免摆臂时拇指与腿干涉。
+        # stance 不做处理，拇指展开由 reset 逻辑控制。
+        #
+        # 覆盖范围：SDK / Pico VR / Quest VR / 手柄 / 命令行 / demo 等所有路径，
+        # 因为 /humanoid_mpc_gait_time_name 是 OCS2 控制器内部唯一汇聚点。
+        # 仅 linker_hand 末端生效，其他末端直接跳过。
+        # ===================================================================
+        self._last_gait_name = None  # 记录上一次步态名，避免重复触发
+        self._gait_sub = rospy.Subscriber(
+            "/humanoid_mpc_gait_time_name", gaitTimeName,
+            self._gait_changed_callback, queue_size=10
+        )
+
         # 添加发布者
         self.robot_action_state_pub = rospy.Publisher('/robot_action_state', RobotActionState, queue_size=1)
 
@@ -220,6 +235,39 @@ class ArmTrajectoryBezierDemo:
     def _kuavo_arm_traj_callback(self, msg):
         """缓存 /kuavo_arm_traj 最新消息，供 create_action_data 使用"""
         self._last_kuavo_arm_traj_msg = msg
+
+    def _gait_changed_callback(self, msg):
+        """
+        [步态切换回调] 当 OCS2 控制器发布步态变更通知时被调用。
+
+        仅对 linker_hand 末端生效：当前步态为 walk / trot 时内扣大拇指
+        （position[0]=100），避免摆臂时拇指与腿部干涉。
+        stance 或其他步态不做处理（拇指展开由 reset 逻辑或外部指令控制）。
+
+        Args:
+            msg (gaitTimeName): 包含 start_time (float) 和 gait_name (str)
+                gait_name 的取值: "stance" / "walk" / "trot" / "custom_gait"
+        """
+        # ---- 1. 仅 linker_hand 需要处理拇指，其他末端直接返回 ----
+        if rospy.get_param('/end_effector_type', '') != 'linker_hand':
+            return
+
+        new_gait = msg.gait_name
+        # ---- 2. 去重：消息内容未变则跳过 ----
+        if new_gait == self._last_gait_name:
+            return
+
+        prev_gait = self._last_gait_name
+        self._last_gait_name = new_gait
+        rospy.loginfo("[GaitThumb] gait switch: %s → %s", prev_gait, new_gait)
+
+        # ---- 3. 当前步态为 walk / trot → 内扣大拇指 ----
+        if new_gait in ("walk", "trot"):
+            # 大拇指关节 (index=0) 置 100 使其内扣，其余手指保持全展
+            self.hand_state.left_hand_position  = [100, 0, 0, 0, 0, 0]
+            self.hand_state.right_hand_position = [100, 0, 0, 0, 0, 0]
+            self.control_hand_pub.publish(self.hand_state)
+            rospy.loginfo("[GaitThumb] thumb retracted → left[0]=100 right[0]=100")
 
     def _get_servos_from_kuavo_arm_traj(self, tact_length):
         """从 /kuavo_arm_traj 获取起始关节角（度），不足部分按长度填充0。"""
@@ -907,15 +955,8 @@ class ArmTrajectoryBezierDemo:
         else:
             # 做完动作之后恢复自然摆臂状态，并且手、头、腰部关节归位
             self.call_change_arm_ctrl_mode_service(1)
-            left_hand_pos_reset = [0] * 6
-            right_hand_pos_reset = [0] * 6
-
-            left_hand_pos_reset[0] = 100  # 大拇指握拳，其他手指伸直
-            right_hand_pos_reset[0] = 100  # 大拇指握拳，其他手指伸直
-            
-            # 收缩大拇指，避免灵心巧手的大拇指与腿发生干涉
-            self.hand_state.left_hand_position = left_hand_pos_reset
-            self.hand_state.right_hand_position = right_hand_pos_reset
+            self.hand_state.left_hand_position  = [0] * 6
+            self.hand_state.right_hand_position = [0] * 6
 
             self.control_hand_pub.publish(self.hand_state)
             self.head_state.joint_data = [0] * 2

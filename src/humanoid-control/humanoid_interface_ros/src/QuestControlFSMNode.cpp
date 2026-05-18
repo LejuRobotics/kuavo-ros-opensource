@@ -26,6 +26,7 @@
 #include "std_srvs/Trigger.h"
 #include <std_srvs/SetBool.h>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Empty.h>
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
@@ -198,6 +199,8 @@ namespace ocs2
 
             // 订阅获取VR头部控制模式
             head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<kuavo_msgs::headCtrlMode>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
+            quest3_head_fixed_intent_sub_ = nodeHandle_.subscribe<std_msgs::Empty>(
+                "/quest3/head_fixed_forward_user_intent", 10, &QuestControlFSM::quest3HeadFixedIntentCallback, this);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
             // 根据机器人类型订阅不同的mpc_observation话题
@@ -774,6 +777,21 @@ namespace ocs2
             head_ctrl_mode_ = mode_msg->mode;  // 更新头部控制模式
         }
 
+        void quest3HeadFixedIntentCallback(const std_msgs::Empty::ConstPtr & /*msg*/)
+        {
+            if (suppress_next_quest3_head_fixed_intent_)
+            {
+                suppress_next_quest3_head_fixed_intent_ = false;
+                return;
+            }
+            if (!quest3_arm_reset_head_snapshot_active_)
+            {
+                return;
+            }
+            last_head_ctrl_mode_ = "fixed";
+            ROS_INFO("[QuestControlFSM] Quest3: user head fixed-forward intent during arm reset lock; unlock will restore fixed.");
+        }
+
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
         {
             joystick_data_ = *msg;
@@ -1009,9 +1027,13 @@ namespace ocs2
                         {
                             new_head_mode = "fixed";
                             last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
+                            quest3_arm_reset_head_snapshot_active_ = true;
+                            suppress_next_quest3_head_fixed_intent_ = true;
                         }
                         else
                         {
+                            quest3_arm_reset_head_snapshot_active_ = false;
+                            suppress_next_quest3_head_fixed_intent_ = false;
                             new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
                         }
                         callVRSetHeadModeSrv(new_head_mode);
@@ -1220,9 +1242,13 @@ namespace ocs2
                         {
                             new_head_mode = "fixed";
                             last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
+                            quest3_arm_reset_head_snapshot_active_ = true;
+                            suppress_next_quest3_head_fixed_intent_ = true;
                         }
                         else
                         {
+                            quest3_arm_reset_head_snapshot_active_ = false;
+                            suppress_next_quest3_head_fixed_intent_ = false;
                             new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
                         }
                         callVRSetHeadModeSrv(new_head_mode);
@@ -2103,6 +2129,9 @@ namespace ocs2
 
         ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
         ros::Subscriber head_ctrl_mode_vr_sub_; // 从主控制器获取头部控制模式
+        ros::Subscriber quest3_head_fixed_intent_sub_;
+        bool suppress_next_quest3_head_fixed_intent_{false};
+        bool quest3_arm_reset_head_snapshot_active_{false};
         int arm_ctrl_mode_{2};
         std::string head_ctrl_mode_{"vr_follow"};
         std::string last_head_ctrl_mode_;

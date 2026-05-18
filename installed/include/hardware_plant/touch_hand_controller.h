@@ -173,6 +173,8 @@ public:
      */
     bool is_gesture_executing();
 
+    void set_linker_hand(bool is_linker);
+
 private:
     DexhandController(const std::string &action_sequences_path,
                       bool is_touch_dexhand,
@@ -202,6 +204,7 @@ private:
     /* data */
     bool is_can_protocol_{false};
     bool is_touch_dexhand_{false};
+    bool is_linker_hand_{false};
     std::atomic<bool> l_position_updated_{false};
     std::atomic<bool> r_position_updated_{false};
     UnsignedFingerArray right_position_;

@@ -16,7 +16,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import rospy
 import tf.transformations as tft
-from std_msgs.msg import String
+from std_msgs.msg import String, Empty
 from kuavo_msgs.msg import robotBodyMatrices, robotHeadMotionData, headCtrlMode
 from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeResponse
 
@@ -64,6 +64,10 @@ class PicoHeadControlNode:
 
         self.head_pub = rospy.Publisher("/robot_head_motion_data", robotHeadMotionData, queue_size=10)
         self.head_mode_status_pub = rospy.Publisher("/pico/head_control_mode_status", headCtrlMode, queue_size=10)
+        # 每次 set_head_control_mode 成功设为 fixed 时发布，供 Pico 主节点在手臂复位窗口内更新「解锁后恢复」快照（含重复 fixed）
+        self._pub_head_fixed_user_intent = rospy.Publisher(
+            "/pico/head_fixed_forward_user_intent", Empty, queue_size=1, latch=False
+        )
         rospy.Subscriber("/robot_body_matrices", robotBodyMatrices, self._on_robot_body_matrices)
         rospy.Subscriber("/pico/head_control_mode", String, self._on_mode)
         self.head_control_mode_service = rospy.Service(
@@ -134,6 +138,8 @@ class PicoHeadControlNode:
             rospy.loginfo("Head mode switched via service: %s -> %s", self.last_mode, self.mode)
 
         self._publish_head_mode_status()
+        if mode == HeadControlMode.FIXED:
+            self._pub_head_fixed_user_intent.publish(Empty())
         response.success = True
         response.message = (
             f"Head control mode set to: {mode}"
