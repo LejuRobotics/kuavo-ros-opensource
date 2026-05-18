@@ -77,20 +77,8 @@ void WheelQuest3IkIncrementalROS::run() {
   ikSolveThread_ = std::thread(&WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
   jointStatePublishThread_ = std::thread(&WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction, this);
 
-  {
-    kuavo_msgs::changeArmCtrlMode srv;
-    srv.request.control_mode = 1;
-    if (changeArmCtrlModeClient_.exists()) {
-      const bool vrCallOk = changeArmCtrlModeClient_.call(srv) && srv.response.result;
-      if (vrCallOk) {
-        ROS_INFO("[WheelQuest3IkIncrementalROS] Arm control mode set to 1 during initialization");
-      } else {
-        ROS_WARN("[WheelQuest3IkIncrementalROS] Failed to set arm control mode to 1 during initialization");
-      }
-    } else {
-      ROS_WARN("[WheelQuest3IkIncrementalROS] Service /change_arm_ctrl_mode does not exist");
-    }
-  }
+  // 手臂 mode 由标定后的 publishQuestJoystickDataXAndA → FSM X+A 统一设置；
+  // 不在此预置 mode 1 / activateController，避免与 FSM、fsmExit 形成 2↔0 振荡。
   std::thread questJoystickDataThread = std::thread([this]() {
     while (ros::ok() && !quest3ArmInfoTransformerPtr_->isArmLengthMeasurementComplete()) {
       ros::Duration(0.05).sleep();
@@ -1044,6 +1032,8 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
     }
   }
   if (!shouldExitIncrementalLeftArm && !shouldExitIncrementalRightArm) return;
+  // 松 grip 仅退出增量手臂；mode 1/2 下保持 WBC/MPC 外部控制，由 deactivateController 内 guard 双重保护
+  if (armControlMode_.load() != 0) return;
   deactivateController();
 }
 

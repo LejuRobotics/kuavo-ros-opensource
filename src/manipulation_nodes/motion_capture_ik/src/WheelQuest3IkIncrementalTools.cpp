@@ -59,6 +59,12 @@ void WheelQuest3IkIncrementalROS::deactivateController() {
   if (!changeMobileCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
 
+  // 仍在 VR 手臂 mode 1/2 时禁止把 WBC/MPC 打到 0，避免与 fsmProcess::activateController 对打（2↔0 刷屏）
+  const int armMode = armControlMode_.load();
+  if (armMode == 1 || armMode == 2) {
+    return;
+  }
+
   kuavo_msgs::changeTorsoCtrlMode srv1;
   kuavo_msgs::changeArmCtrlMode srv2;
 
