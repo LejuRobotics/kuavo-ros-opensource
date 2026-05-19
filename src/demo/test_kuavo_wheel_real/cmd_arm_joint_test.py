@@ -38,6 +38,9 @@ def execute_arm_tests():
     # 等待连接
     rospy.sleep(1.0)
 
+    # 设置手臂控制模式为外部控制
+    ct.set_arm_control_mode(2)
+
     # 测试用例列表： (名称, 14 个关节角度)
     test_cases = [
         ("展开双臂",   [-30, 20, 15, -45, 25, 10, -35,

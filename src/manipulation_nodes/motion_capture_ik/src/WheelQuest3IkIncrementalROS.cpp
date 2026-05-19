@@ -18,6 +18,7 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Quaternion.h>
 #include <std_msgs/Int32.h>
+#include <std_srvs/Trigger.h>
 #include <std_msgs/Float32MultiArray.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
@@ -77,14 +78,20 @@ void WheelQuest3IkIncrementalROS::run() {
   ikSolveThread_ = std::thread(&WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
   jointStatePublishThread_ = std::thread(&WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction, this);
 
-  // 手臂 mode 由标定后的 publishQuestJoystickDataXAndA → FSM X+A 统一设置；
-  // 不在此预置 mode 1 / activateController，避免与 FSM、fsmExit 形成 2↔0 振荡。
-  std::thread questJoystickDataThread = std::thread([this]() {
+  // 标定后调 FSM 初始化手臂 mode 1（等价于 X+A 到跟随态的主路径）
+  std::thread bootstrapArmModeThread = std::thread([this]() {
     while (ros::ok() && !quest3ArmInfoTransformerPtr_->isArmLengthMeasurementComplete()) {
       ros::Duration(0.05).sleep();
     }
-    ros::Duration(0.1).sleep();  // 完成后再等 0.5 秒
-    publishQuestJoystickDataXAndA();
+    ros::Duration(0.1).sleep();
+    ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>("/quest3/bootstrap_wheel_arm_mode");
+    std_srvs::Trigger srv;
+    if (client.call(srv) && srv.response.success) {
+      ROS_INFO("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode ok");
+    } else {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode failed: %s",
+               srv.response.message.c_str());
+    }
   });
 
   std::cout << "\033[32m[WheelQuest3IkIncrementalROS] spinning start\033[0m" << std::endl;

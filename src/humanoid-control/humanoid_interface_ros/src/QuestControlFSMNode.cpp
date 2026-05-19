@@ -257,6 +257,8 @@ namespace ocs2
 
             // 添加arm_collision_control服务
             arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
+            bootstrap_wheel_arm_mode_service_ = nodeHandle_.advertiseService(
+                "/quest3/bootstrap_wheel_arm_mode", &QuestControlFSM::bootstrapWheelArmModeCallback, this);
             
             // 添加切换控制器服务客户端
             switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
@@ -577,6 +579,29 @@ namespace ocs2
             }
             res.message = "Arm collision control set to " + std::string(req.data ? "true" : "false");
             ROS_INFO("Arm collision control set to %s", req.data ? "true" : "false");
+            return true;
+        }
+
+        bool bootstrapWheelArmModeCallback(std_srvs::Trigger::Request&, std_srvs::Trigger::Response& res)
+        {
+            if (!useLegacyWheelVr())
+            {
+                res.success = false;
+                res.message = "Not legacy wheel VR (robot_type=1 && wheel_ik)";
+                return true;
+            }
+            if (!get_observation_)
+            {
+                res.success = false;
+                res.message = "MPC observation not ready";
+                return true;
+            }
+            callSetArmModeSrv(1);
+            callWheelMpcControlMode(3);
+            arm_ctrl_mode_ = 1;
+            res.success = true;
+            res.message = "wheel arm mode initialized to 1";
+            ROS_INFO("[QuestControlFSM] bootstrap_wheel_arm_mode -> mode 1");
             return true;
         }
 
@@ -1192,7 +1217,8 @@ namespace ocs2
         void updateStateLegacyWheelVr()  // 轮臂vr遥操
         {
             if (!get_observation_) {
-                if (joystick_data_.right_first_button_pressed) {
+                // 左手扳机按住时右 X 用于 X+A 切手臂模式，勿进入长按 A 初始化分支
+                if (joystick_data_.right_first_button_pressed && !joystick_data_.left_first_button_pressed) {
                     if (vr_a_button_held_since_not_observing_.isZero()) {
                         vr_a_button_held_since_not_observing_ = ros::Time::now();
                     } else if (!vr_real_initial_start_fired_ &&
@@ -2115,6 +2141,7 @@ namespace ocs2
         ros::ServiceClient control_mode_client_;              // MPC控制模式切换服务客户端
         ros::ServiceClient switch_to_next_controller_client_; // 切换控制器服务客户端
         ros::ServiceServer arm_collision_control_service_;
+        ros::ServiceServer bootstrap_wheel_arm_mode_service_;
 
         // 腰部控制相关的订阅者和发布者
         ros::Subscriber head_body_pose_sub_;
@@ -2129,10 +2156,12 @@ namespace ocs2
 
         ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
         ros::Subscriber head_ctrl_mode_vr_sub_; // 从主控制器获取头部控制模式
+
         ros::Subscriber quest3_head_fixed_intent_sub_;
         bool suppress_next_quest3_head_fixed_intent_{false};
         bool quest3_arm_reset_head_snapshot_active_{false};
-        int arm_ctrl_mode_{2};
+        int arm_ctrl_mode_{1};
+        
         std::string head_ctrl_mode_{"vr_follow"};
         std::string last_head_ctrl_mode_;
         std::string fixed_hand_{"right"};
