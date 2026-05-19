@@ -414,6 +414,55 @@
 
 ---
 
+#### `/dexhand/left/set_turbo_mode`、`/dexhand/right/set_turbo_mode`、`/dexhand/set_turbo_mode`
+
+**类型:** `std_srvs::SetBool`
+
+**设备支持:**
+- ✅ qiangnao (标准灵巧手 for Kuavo)
+- ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
+- ✅ revo2 (revo2 二代手 for Roban)
+
+**功能说明:**
+该服务用于设置灵巧手的turbo模式。turbo模式下，灵巧手会持续保持握紧状态，提供更大的抓握力，适用于需要牢固抓握物体的场景。开启之后会持续握紧，掉电后Turbo模式会自动恢复到默认关闭状态。
+
+- `/dexhand/left/set_turbo_mode`: 仅设置左手的turbo模式
+- `/dexhand/right/set_turbo_mode`: 仅设置右手的turbo模式
+- `/dexhand/set_turbo_mode`: 同时设置双手的turbo模式
+
+**消息字段:**
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | bool | 请求数据，true表示开启turbo模式，false表示关闭turbo模式 |
+| success | bool | 返回数据，是否调用成功 |
+| message | string | 返回数据，调用结果描述信息 |
+
+---
+
+#### `/dexhand/left/get_turbo_mode`、`/dexhand/right/get_turbo_mode`、`/dexhand/get_turbo_mode`
+
+**类型:** `std_srvs::Trigger`
+
+**设备支持:**
+- ✅ qiangnao (标准灵巧手 for Kuavo)
+- ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
+- ✅ revo2 (revo2 二代手 for Roban)
+
+**功能说明:**
+该服务用于获取灵巧手当前的turbo模式状态。
+
+- `/dexhand/left/get_turbo_mode`: 仅获取左手的turbo模式状态
+- `/dexhand/right/get_turbo_mode`: 仅获取右手的turbo模式状态
+- `/dexhand/get_turbo_mode`: 获取双手的turbo模式状态
+
+**消息字段:**
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据，是否调用成功 |
+| message | string | 返回数据，调用结果描述信息，包含turbo模式状态。对于单手服务，返回"true"或"false"表示当前状态；对于双手服务，格式为"left: [状态], right: [状态]"，其中状态为"true"或"false"。 |
+
+---
+
 ### 2.2 话题 (Topics)
 
 #### `/robot_head_motion_data`

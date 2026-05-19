@@ -168,10 +168,62 @@ public:
 
     /**
      * @brief check if a gesture is currently executing.
-     * 
+     *
      * @return true if a gesture is currently executing, false otherwise
      */
     bool is_gesture_executing();
+
+    /**
+     * @brief 设置双手的turbo模式开关
+     *
+     * @param enabled true为开启turbo模式，false为关闭
+     * @return true 至少有一只手设置成功
+     * @return false 两只手都设置失败
+     */
+    bool set_turbo_mode_enabled(bool enabled);
+
+    /**
+     * @brief 设置右手的turbo模式开关
+     *
+     * @param enabled true为开启turbo模式，false为关闭
+     * @return true 设置成功
+     * @return false 设置失败或右手未连接
+     */
+    bool set_right_hand_turbo_mode_enabled(bool enabled);
+
+    /**
+     * @brief 设置左手的turbo模式开关
+     *
+     * @param enabled true为开启turbo模式，false为关闭
+     * @return true 设置成功
+     * @return false 设置失败或左手未连接
+     */
+    bool set_left_hand_turbo_mode_enabled(bool enabled);
+
+    /**
+     * @brief 查询左手是否开启了turbo模式
+     *
+     * @return true 左手已开启turbo模式
+     * @return false 左手未开启turbo模式或左手未连接
+     */
+    bool is_left_hand_turbo_mode_enabled();
+
+    /**
+     * @brief 查询右手是否开启了turbo模式
+     *
+     * @return true 右手已开启turbo模式
+     * @return false 右手未开启turbo模式或右手未连接
+     */
+    bool is_right_hand_turbo_mode_enabled();
+
+    /**
+     * @brief 查询双手是否都开启了turbo模式
+     *
+     * @return true 双手都已开启turbo模式
+     * @return false 至少有一只手未开启turbo模式或未连接
+     */
+    bool is_turbo_mode_enabled();
+
 
 private:
     DexhandController(const std::string &action_sequences_path,
