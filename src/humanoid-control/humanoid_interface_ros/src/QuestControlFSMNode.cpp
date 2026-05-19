@@ -773,11 +773,13 @@ namespace ocs2
         {
             if(mode_msg->data.size() >= 2)
             {
-                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]); // 兼容MPC发布 [current, desired]
+                arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]); // 兼容MPC发布 [current, desired]
+                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]);
                 return;
             }
             if(mode_msg->data.size() == 1)
             {
+                arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]);
                 arm_ctrl_mode_ = static_cast<int>(mode_msg->data[0]); // 兼容轮臂发布 [current]
                 return;
             }
@@ -1030,7 +1032,10 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // X+B：保持姿态 or 自动摆手
                 {
-                    
+                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+B.");
+                        return;
+                    }
                     auto new_arm_mode = (arm_ctrl_mode_!=0) ? 0 : 1;
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
                     callSetArmModeSrv(new_arm_mode);
@@ -1040,6 +1045,10 @@ namespace ocs2
                     // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪 
                     if (arm_collision_control_) {
                         arm_collision_control_ = false;
+                        return;
+                    }
+                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
                     auto new_arm_mode = (arm_ctrl_mode_!=2) ? 2 : 1;
@@ -1248,6 +1257,10 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)  // 锁定或解锁手臂
                 {
+                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+B.");
+                        return;
+                    }
                     auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 0) ? 0 : 2;
                     callSetArmModeSrv(new_arm_ctrl_mode_wheel_);
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
@@ -1256,6 +1269,10 @@ namespace ocs2
                 {
                     if (arm_collision_control_) {
                         arm_collision_control_ = false;
+                        return;
+                    }
+                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
                     auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 1) ? 1 : 2;
@@ -2160,6 +2177,7 @@ namespace ocs2
         ros::Subscriber quest3_head_fixed_intent_sub_;
         bool suppress_next_quest3_head_fixed_intent_{false};
         bool quest3_arm_reset_head_snapshot_active_{false};
+        int arm_ctrl_mode_current_{2};
         int arm_ctrl_mode_{1};
         
         std::string head_ctrl_mode_{"vr_follow"};
