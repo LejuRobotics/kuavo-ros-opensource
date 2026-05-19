@@ -30,7 +30,6 @@ def execute_twist_tests():
     # 等待发布器建立连接
     time.sleep(1)
     
-    ct.set_control_mode(2) 
     # 测试数据列表
     test_cases = [
         # (名称, linear_x, linear_y, linear_z, angular_x, angular_y, angular_z)
@@ -70,8 +69,6 @@ def execute_twist_tests():
         print(f"  {name} 完成!")
     
     print("\n所有测试数据发布完成！请检查C++程序的输出。")
-
-    ct.set_control_mode(2)
 
 def main():
     """主函数"""

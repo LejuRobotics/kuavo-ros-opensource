@@ -31,6 +31,7 @@ find_package(catkin REQUIRED
         controller_interface
         humanoid_common
         humanoid_interface
+        leju_utils
         humanoid_interface_ros
         humanoid_wheel_interface
         humanoid_wheel_interface_ros
@@ -118,6 +119,7 @@ catkin_package(
                 controller_interface
                 humanoid_common
                 humanoid_interface
+                leju_utils
                 humanoid_interface_ros
                 humanoid_wheel_interface
                 humanoid_wheel_interface_ros
@@ -130,6 +132,7 @@ catkin_package(
                 
                 # ocs2_biped_robot_ros
                 angles
+                kuavo_msgs
                 kuavo_common
                 kuavo_solver
 )
@@ -259,7 +262,10 @@ add_library(${PROJECT_NAME}
         src/humanoidController.cpp
         src/humanoidWheelController.cpp
         src/humanoidController_wheel_wbc.cpp
+        src/ArmContactForceEstimatorWheel.cpp
+        src/DesiredForceManager.cpp
         src/ControlDataManager.cpp
+        src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
         src/rl/RlGaitReceiver.cpp
         src/rl/RLControllerBase.cpp
@@ -267,10 +273,12 @@ add_library(${PROJECT_NAME}
         src/rl/RLControllerManager.cpp
         src/rl/AmpWalkController.cpp
         src/rl/armController.cpp
+        src/rl/DepthWalkController.cpp
         src/rl/waistController.cpp
         # src/AMPController.cpp
         # src/MinicController.cpp
         src/rl/VMPController.cpp
+        src/rl/DanceController.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}
@@ -415,4 +423,9 @@ install(DIRECTORY include/${PROJECT_NAME}/
 # Install plugins
 install(FILES humanoid_controllers_plugins.xml
         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+# Install scripts
+install(PROGRAMS scripts/restart_urobot_service.sh
+        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

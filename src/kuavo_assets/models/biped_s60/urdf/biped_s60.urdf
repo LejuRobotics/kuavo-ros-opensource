@@ -22,8 +22,8 @@
   </link>
   <joint name="floating_base" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="dummy_link" />
-    <child link="base_link" />
+    <parent link="base_link" />
+    <child link="dummy_link" />
   </joint>
   <link
     name="LF_wheel_yaw">

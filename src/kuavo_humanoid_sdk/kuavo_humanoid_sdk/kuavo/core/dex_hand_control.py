@@ -105,7 +105,7 @@ class DexHandControl:
             try:
                 command, side, data = self.queue.get()  # This will block until an item is available in the queue
                 SDKLogger.debug(f'[DexHandControl] Received command: {command}, for side: {side}, with data: {data}')
-                if self._ee_type == EndEffectorType.QIANGNAO:
+                if self._ee_type == EndEffectorType.QIANGNAO or self._ee_type == EndEffectorType.LINKER_HAND:
                     self._process_dexhand_command(command, side, data)
                 elif self._ee_type == EndEffectorType.QIANGNAO_TOUCH:
                     self._process_touch_dexhand_command(command, side, data)    

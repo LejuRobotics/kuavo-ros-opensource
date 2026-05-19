@@ -339,7 +339,8 @@ sudo journalctl -u ocs2_h12pro_monitor.service -f
 | 操作 | 按键说明 |
 | ---- | ---- |
 | 开机 | E_左 + F_右 + C |
-| 校准(校准完只能结束) | E_左 + F_右 + D |
+
+> 注意：D 按键不再支持在 initial 状态触发手臂校准。如需校准手臂，请使用命令行 --cali_arm 参数。
 
 缩腿到站立：
 
@@ -352,7 +353,7 @@ sudo journalctl -u ocs2_h12pro_monitor.service -f
 | 操作 | 按键说明 |
 | ---- | ---- |
 | 原地踏步 | E_中 + F_中 + A |
-| 回到站立 | E_左 + F_右 + D |
+| 回到站立 | E_中 + F_中 + D |
 
 左摇杆：
 
@@ -426,7 +427,7 @@ roslaunch humanoid_controllers load_kuavo_real_with_vr.launch
    - 长按右手柄 meta 按钮，等待圆圈转完
 6. 机器人站立
    - 如果机器人双腿已经缩起
-   - 按下右手柄 A 键，进入站立状态(需用力扶住机器人背部)
+   - **长按**右手柄 **A 键约 0.35 秒**，（需用力扶住机器人背部）
 
 7. 控制方式
 

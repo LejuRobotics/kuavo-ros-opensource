@@ -36,26 +36,26 @@ robot_control = RobotControlBlockly()
     - 描述：令机器人停止移动
 
 5. **执行机器人动作**
-    - 函数：`robot_control.excute_action_file("roban2")`
+    - 函数：`robot_control.execute_action_file("roban2")`
     - 参数类型：string
     - 描述：机器人执行默认目录下的目标 .tact 动作
     - 备注：需将目标 .tact 文件下载到 **/home/lab/.config/lejuconfig/action_files** 目录下
 
 6. **执行机器人目标目录下的动作**
-    - 函数：`robot_control.excute_action_file("roban2", proj_name="proj_name")`
+    - 函数：`robot_control.execute_action_file("roban2", proj_name="proj_name")`
     - 参数类型：string, string
     - 描述：机器人执行 proj_name/action_files 目录下的目标 .tact 动作
     - 备注：需将目标 .tact 文件下载到 **upload_files/proj_name/action_files** 目录下
 
 7. **执行机器人动作并同步播放音频**
-    - 函数：`robot_control.excute_action_file("roban2", music_file="music_name.wav")`
+    - 函数：`robot_control.execute_action_file("roban2", music_file="music_name.wav")`
     - 参数类型：string, string
     - 描述：机器人执行默认目录下的目标 .tact 动作并且播放 music_name.wav 音频
     - 备注：需将目标 .tact 文件下载到 **/home/lab/.config/lejuconfig/action_files** 目录下，音频文件下载到 *
       */home/lab/.config/lejuconfig/music** 目录下
 
 8. **执行机器人目标目录下动作并同步播放音频**
-    - 函数：`robot_control.excute_action_file("roban2", proj_name="roban2", music_file="music_name.wav")`
+    - 函数：`robot_control.execute_action_file("roban2", proj_name="roban2", music_file="music_name.wav")`
     - 参数类型：string, string, string
     - 描述：机器人执行目标目录下的目标 .tact 动作并且播放 music_name.wav 音频
     - 备注：需将目标 .tact 文件下载到 **upload_files/proj_name/action_files** 目录下，音频文件下载到 *
@@ -127,16 +127,17 @@ robot_control = RobotControlBlockly()
     - 备注：需将目标音频文件下载到 **/home/lab/.config/lejuconfig/music** 目录下  
 
 19. **机器人对准目标**  
-    - 函数：`robot_control.alignment_target(class_name, confidence, x, y, z)`
-    - 参数类型：string, float, float, float, float
-    - 描述：使机器人对准指定类别到对象，并移动到目标前
+    - 函数：`robot_control.alignment_target(class_name, confidence=0.5, x=0.0, y=0.0, z=0.0, model_path=None)`
+    - 参数类型：string, float, float, float, float, str（可选）
+    - 描述：使机器人对准指定类别的目标对象，并根据图像中的目标位置进行移动对准。使用头部相机和 YOLO 模型检测指定类别的目标，在多个目标时选择面积最大的一个，根据目标相对图像中心的偏移量控制机器人左右/前后移动。
     - 参数说明：（以图像中心建立二维坐标，向右为 x 的正方向，向下为 y 的正方向）
-      - class_id 为 yolo 检测中需要检测的对象名称，和训练模型中的类别名称一致;
-      - confidence 为 yolo 检测中需要检测的概率阈值
-      - x 为图像 x 方向的偏移值，物体中心的 x 小于该参数 -x 时，机器人左移，大于该参数 x 时，机器人右移
-      - y 为图像 y 方向的偏移值，物体中心的 y 小于该参数 y 时，机器人前进，否则停止移动
-      - z 为机器人上下蹲的高度控制
-    - 参数范围：x:[0,320]像素点;y:[-240，240]像素点;z:[-0.3,0.3]米
+      - **class_name**：YOLO 检测的目标类别名称，需与训练模型中的类别名称一致
+      - **confidence**：YOLO 检测置信度阈值，范围 [0, 1]，默认 0.5
+      - **x**：图像 x 方向允许的偏移范围（像素）。目标中心 x 小于 (图像中心 - x) 时机器人左移，大于 (图像中心 + x) 时机器人右移，在此范围内则不左右移动
+      - **y**：图像 y 方向偏移阈值（像素）。目标中心 y 小于该值时机器人前进，否则停止前后移动
+      - **z**：机器人上下蹲的高度控制参数，用于在对准过程中调整机身高度
+      - **model_path**：YOLO 模型文件路径（如 .pt）。若为 None，则优先使用调用方所在目录下的 `best.pt`，若无法解析调用方则使用包内 `upload_files/best.pt`
+    - 参数范围：x:[0,320] 像素；y:[-240, 240] 像素；z:[-0.3, 0.3] 米
     - 返回值：无
 
 ## 导航类模块定义
@@ -641,46 +642,73 @@ kuavo_llm.register_case(
 ### 7. 大模型返回并只播报语音
 需求: 大模型返回文本后,将文本转换为语音,并播放出来
 
-- 函数: `kuavo_llm.response_with_voice(llm_output: dict)`
+- 函数: `response_from_llm(llm_output: dict, action_flag = False)`
 - 作用: 将文本转换为语音,并播放出来
 - args:
   - llm_output: dict: 大模型返回的文本与函数调用信息
+  - action_flag: bool = False: 是否执行函数调用,需要由前端拼入
 - return:
   - None
-
+def main():
+    ...
+    response_from_llm(kuavo_llm.chat_with_llm(),False)
+```
+注:该功能需要在生成的python代码中通过字符串运行函数,所以需要类似aelos那样在生成的python代码中加入函数定义,见9. 语音播报函数定义
 
 
 ### 8. 大模型返回播报语音并执行函数
 需求: 大模型返回文本后,将文本转换为语音,并播放出来,如果有函数调用,则执行函数
 
-- 函数: `response_with_voice_and_action(llm_output: dict)`
+- 函数: `response_from_llm(llm_output, action_flag = True)`
 - 作用: 将文本转换为语音,并播放出来,如果有函数调用,则执行函数
 - args:
   - llm_output: dict: 大模型返回的文本与函数调用信息
+  - action_flag: bool = True: 是否执行函数调用,需要由前端拼入
 - return:
   - None
   
 注: 该功能需要在生成的python代码中通过字符串运行函数,所以需要类似aelos那样在生成的python代码中加入函数定义
-形如(在生成的python文件中):
+```python
+def main():
+    ...
+    response_from_llm(kuavo_llm.chat_with_llm(),True)
+```
+
+### 9. 语音播报函数定义
+函数定义如下:
 ```python
 ...
-def response_with_voice_and_action(llm_output: dict):
+def response_from_llm(llm_output: dict, action_flag: bool = False):
     if not llm_output.get("success", 1) == 0:
         return
     kuavo_llm.response_with_voice(llm_output) 
-    if llm_output.get("intent", "") == "function_call":
-        try:
-            eval(llm_output.get("slot"))
-        except:
-            print(f"【函数调用】执行失败:{llm_output.get('slot','')}")
-    if llm_output.get("intent", "") == "action":
-        robot_control.excute_action_file(llm_output["slot"][:-5])
+    if action_flag:
+        if llm_output.get("intent", "") == "function_call":
+            try:
+                eval(llm_output.get("slot"))
+            except:
+                print(f"【函数调用】执行失败:{llm_output.get('slot','')}")
+        if llm_output.get("intent", "") == "action":
+            robot_control.execute_action_file(llm_output["slot"])
 
-    if llm_output.get("intent", "") == "action_custom":
-        robot_control.excute_action_file(llm_output['slot'][:-5],"demo_project") # 拼接项目信息
+        if llm_output.get("intent", "") == "action_custom":
+            robot_control.execute_action_file(llm_output['slot'],"demo_project") # 拼接项目信息
+    while not kuavo_llm.tts_end.is_synthesis_finished() or kuavo_llm.playing_status:
+        time.sleep(0.1)
 ...
 
-def main():
-    ...
-    response_with_voice_and_action(kuavo_llm.chat_with_llm())
 ```
+### 9. 播放提示音
+如果需要播放预制提示音,可以使用"播放音乐"接口:`kuavo_llm.play_music(music_name: str)`(见本文档111行:`17. **播放音乐**`)
+
+需要用到的音效需要提前(也可以点击运行时)放入`~/.config/lejuconfig/music/`中
+
+### 10. 播放自定义文本作为提示音
+与 [大模型播放语音](#7.-大模型返回并只播报语音) 功能类似,只是将文本转换为语音后,播放出来的是自定义的文本,而不是大模型返回的文本
+
+在使用时,需要将`9. 语音播报函数定义`中的函数预先定义,然后在积木块对应位置拼入以下函数调用:
+```python
+response_from_llm(text:str,False)
+```
+
+其中text为需要播放的自定义文本

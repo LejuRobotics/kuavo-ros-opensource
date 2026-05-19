@@ -47,11 +47,11 @@ class YOLO_detection:
     def init_ros_node(self):
         self.camera_interface.init_ros_node()
 
-    def get_detections(self, camera, model):
+    def get_detections(self, camera, model, confidence=0.6):
         image = self.camera_interface.get_camera_image(camera)
         
         if image is not None:
-            results = model.predict(image, conf=self.conf, show=False, verbose=False)
+            results = model.predict(image, conf=confidence, show=False, verbose=False)
             self.publish_results(results, camera)
             return results
         else:
@@ -80,11 +80,11 @@ class YOLO_detection:
     def get_max_area_object(self, results):
         results = self.tensor_to_msg(results)
         if not results or len(results.data) == 0:
-            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
-        
+            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0}
+
         max_area = 0
         max_obj = None
-        
+
         for detection in results.data:
             area = detection.width * detection.height
             if area > max_area:
@@ -95,19 +95,20 @@ class YOLO_detection:
                     'w': detection.width,
                     'h': detection.height,
                     'area': area,
+                    'area_ratio': detection.area_ratio,
                     'class_id': detection.class_id
                 }
-        
-        return max_obj if max_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
+
+        return max_obj if max_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0}
 
     def get_min_area_object(self, results):
         results = self.tensor_to_msg(results)
         if not results or len(results.data) == 0:
-            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
-        
+            return {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0}
+
         min_area = float('inf')
         min_obj = None
-        
+
         for detection in results.data:
             area = detection.width * detection.height
             if area < min_area:
@@ -118,7 +119,8 @@ class YOLO_detection:
                     'w': detection.width,
                     'h': detection.height,
                     'area': area,
+                    'area_ratio': detection.area_ratio,
                     'class_id': detection.class_id
                 }
-        
-        return min_obj if min_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'class_id': 0}
+
+        return min_obj if min_obj else {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'area': 0, 'area_ratio': 0.0, 'class_id': 0}

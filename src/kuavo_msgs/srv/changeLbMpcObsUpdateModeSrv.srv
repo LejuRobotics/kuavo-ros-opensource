@@ -1,0 +1,6 @@
+int8 obsUpdateMode  # mpc优化采用的反馈机制: 0: 全部反馈, 1: 屏蔽下肢电机反馈, 2: 屏蔽上肢电机反馈, 3: 同时屏蔽上下肢电机反馈
+                    # 屏蔽反馈时, 采用MPC输出的期望作为反馈
+---
+bool success
+string message
+

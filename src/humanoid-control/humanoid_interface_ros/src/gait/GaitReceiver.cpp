@@ -399,7 +399,7 @@ namespace ocs2
         // std::cout << "euler_z: " << euler_zyx(0) << ", delta_yaw: " << delta_yaw << std::endl;
         cmd_vector << delta_pose.head(2), delta_yaw;
       }
-      else return;
+      else if (!gaitSchedulePtr_->isWalkingGait(last_gait_name)) return;
       double target_yaw = 0;
       ros_logger_->publishValue("/humanoid/GaitReceiver/single_step_yaw_computed_", single_step_yaw_computed_);
       ros_logger_->publishValue("/humanoid/GaitReceiver/getFinalYawSingleStepMode", swingTrajectoryPlannerPtr_->getFinalYawSingleStepMode());
@@ -488,7 +488,11 @@ namespace ocs2
           ros_logger_->publishValue("/humanoid/GaitReceiver/reached_target", reached_target);
           ros_logger_->publishValue("/humanoid/GaitReceiver/feets_contact", feet_contact);
           // std::cout << "[GaitRecevier] is_walking : "<< is_walking << " reached_target : "<< reached_target << " feet_contact : "<< feet_contact << std::endl;
-          if ( is_walking && reached_target && feet_contact)// need to stop
+          // 切换到 walk 后需要一段冷却时间，等待规划器目标轨迹响应速度指令
+          // 避免 planner_vec 因规划器延迟而仍接近0，导致误触发 stop
+          constexpr double AUTO_GAIT_COOL_DOWN = 0.3; // s
+          bool in_cool_down = (auto_gait_start_time_ >= 0.0) && (initTime - auto_gait_start_time_ < AUTO_GAIT_COOL_DOWN);
+          if ( is_walking && reached_target && feet_contact && !in_cool_down)// need to stop
           {
             mode_scale_enabled_ = false;
             // gaitSchedulePtr_->setGaitName(gaitSchedulePtr_->getGaitMap().at("stance"));
@@ -520,6 +524,7 @@ namespace ocs2
             }
             PoseCmdUpdated_ = false;
             PoseCmdWorldUpdated_ = false;
+            velCmdUpdated_ = false;
             swingTrajectoryPlannerPtr_->setFinalYawSingleStepMode(false);
 
           }
@@ -549,6 +554,9 @@ namespace ocs2
           gaitSchedulePtr_->modifyWalkModeSequenceTemplate(new_gait, initTime, timeHorizon, "walk");
           // pub msg
           pusblishGaittime();
+          // 使用 walk 在 gait schedule 中实际开始的时间（而非触发时的 initTime），
+          // 确保冷却时间从 walk 真正开始执行时算起，避免因调度延迟导致冷却提前失效
+          auto_gait_start_time_ = gaitSchedulePtr_->getGgaitTimeName().first;
           std::cout << "[GaitReceiver]: auto gait: start" << std::endl;
         }
         velCmdUpdated_ = false;

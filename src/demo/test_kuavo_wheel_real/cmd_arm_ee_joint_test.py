@@ -66,10 +66,12 @@ def execute_two_arm_joint_tests():
     # 发布器保持不变，使用twoArmHandPoseCmd话题
     pub = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
     # 订阅到达时间话题（使用关节控制的话题）
-    rospy.Subscriber('/lb_arm_joint_reach_time', Float32, time_callback)
+    rospy.Subscriber('/lb_arm_joint_reach_time/left', Float32, time_callback)
 
     rospy.sleep(1.0)
-    ct.set_control_mode(1)  # 切换到ArmOnly模式
+    
+    # 设置手臂控制模式为外部控制
+    ct.set_arm_control_mode(2)
 
     # 测试用例列表： (名称, 左臂7关节角度, 右臂7关节角度)
     test_cases = [ 
@@ -106,7 +108,6 @@ def execute_two_arm_joint_tests():
         rospy.loginfo(f"  {name} 完成!")
 
     rospy.loginfo("\n所有双臂关节角度测试数据发布完成！")
-    ct.set_control_mode(2)  # 切换回BaseOnly模式
 
 # -------------- 主入口 --------------
 def main():

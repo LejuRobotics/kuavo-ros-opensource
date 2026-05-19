@@ -43,6 +43,7 @@
     "peak_protection":0.1,
     "locked_rotor_protection":2,
     "speed_protection":0.05,
+    "joint_limit_torque_ratio": 0.3,
     "joint_kp": [200, 200, 200, 200, 200, 200,
                  200, 200, 200, 200, 200, 200,
                  200],
@@ -53,22 +54,22 @@
         "PA76_25", "PA72_36", "PA76_25", "PA72_36", "PA4310_25", "PA4310_25", 
         "PA76_25", "PA72_36", "PA76_25", "PA72_36", "PA4310_25", "PA4310_25",
         "PA76_25",
-        "ruiwo", "ruiwo", "ruiwo", "ruiwo",
-        "ruiwo", "ruiwo", "ruiwo", "ruiwo",
-        "ruiwo", "ruiwo"],
+        "ruiwoPA60_16", "ruiwoPA4310_25", "ruiwoPA4310_25", "ruiwoPA4310_25",
+        "ruiwoPA60_16", "ruiwoPA4310_25", "ruiwoPA4310_25", "ruiwoPA4310_25",
+        "ruiwoPA4310_25", "ruiwoPA4310_25"],
     "ruiwo_kp": [20, 20, 20, 20, 20, 20, 20, 20, 20, 10],
     "ruiwo_kd": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
     "EndEffectorType": ["none", "none"],
     "min_joint_position_limits":[
         -190, -180, -180, -10, -90, -95,
         -190, -180, -180, -10, -90, -95,
-        -150,
+        -160,
         -180, -180, -90, -130,
         -180, -200, -90, -130, -999, -999],
     "max_joint_position_limits":[
         190, 180, 180, 180, 90, 95,
         190, 180, 180, 180, 90, 95,
-        150,
+        160,
         120, 180, 90, 10,
         120, 180, 90, 10, 999, 999],
     "joint_velocity_limits":[
@@ -211,6 +212,18 @@
                        60,70,80,90,100],
             "c2t_coeff":[2.1,2.1,2.1,2.1,2.1,
                          2.1,2.1,2.1,2.1,2.1]
+        },
+        "ruiwoPA4315_36":{
+            "c2t_cul":[1,2],
+            "c2t_coeff":[1.14,1.14]
+        },
+        "ruiwoPA4310_25":{
+            "c2t_cul":[1,2],
+            "c2t_coeff":[4.7,4.7]
+        },
+        "ruiwoPA60_16":{
+            "c2t_cul":[1,2],
+            "c2t_coeff":[2.0,2.0]
         }
     },
 

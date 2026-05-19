@@ -31,9 +31,26 @@ ik_solve_param.major_iterations_limit = 100
 ik_solve_param.oritation_constraint_tol= 1e-3
 ik_solve_param.pos_constraint_tol = 1e-3 # work when pos_cost_weight==0.0
 ik_solve_param.pos_cost_weight = 10.0 # If U need high accuracy, set this to 0.0 !!!
+ik_solve_param.elbow_cost_scale = 0.05  # elbow soft cost weight relative to pos_cost_weight
 
 close_hand = [100, 100, 80, 75, 75, 75]    # catch pose
 open_hand = [0, 100, 0, 0, 0, 0]          # open pose
+
+LOWER_ARM_LENGTH = 0.21  # 小臂长度（米）
+
+def calc_elbow_pos(pos_xyz, quat_xyzw, arm_length=LOWER_ARM_LENGTH):
+    """从末端位置和姿态反算肘部参考位置。
+    eef_z_offset < 0 表示 EEF 在 zarm_*4_link（肘关节）的 local -z 方向，
+    因此肘部在 EEF local +z 方向：elbow = eef_pos + R_eef @ [0, 0, arm_length]
+    """
+    x, y, z, w = quat_xyzw
+    R = np.array([
+        [1 - 2*(y*y + z*z),  2*(x*y - w*z),      2*(x*z + w*y)],
+        [2*(x*y + w*z),      1 - 2*(x*x + z*z),   2*(y*z - w*x)],
+        [2*(x*z - w*y),      2*(y*z + w*x),        1 - 2*(x*x + y*y)],
+    ])
+    elbow = np.array(pos_xyz) + R @ np.array([0.0, 0.0, arm_length])
+    return elbow.tolist()
 
 def get_key():
     """
@@ -144,17 +161,20 @@ if __name__ == "__main__":
             eef_pose_msg.hand_poses.left_pose.joint_angles = np.zeros(7) # rads
             eef_pose_msg.hand_poses.right_pose.joint_angles = np.zeros(7)
 
-            eef_pose_msg.hand_poses.left_pose.quat_xyzw = init_pose_quat
-            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = [0.1, 0.2, 0]
-
-            eef_pose_msg.hand_poses.right_pose.quat_xyzw = init_pose_quat
-            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = [0.1, -0.2, 0] # 针对roban的一个对大部分情况合理的肘部位置
             if args.hand == 'left':
-                eef_pose_msg.hand_poses.left_pose.pos_xyz = current_pos
-                eef_pose_msg.hand_poses.right_pose.pos_xyz = right_init_pose_xyz
+                left_pos = current_pos
+                right_pos = right_init_pose_xyz
             else:
-                eef_pose_msg.hand_poses.left_pose.pos_xyz = left_init_pose_xyz
-                eef_pose_msg.hand_poses.right_pose.pos_xyz = current_pos
+                left_pos = left_init_pose_xyz
+                right_pos = current_pos
+
+            eef_pose_msg.hand_poses.left_pose.pos_xyz = left_pos
+            eef_pose_msg.hand_poses.left_pose.quat_xyzw = init_pose_quat
+            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = calc_elbow_pos(left_pos, init_pose_quat)
+
+            eef_pose_msg.hand_poses.right_pose.pos_xyz = right_pos
+            eef_pose_msg.hand_poses.right_pose.quat_xyzw = init_pose_quat
+            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = calc_elbow_pos(right_pos, init_pose_quat)
             pub.publish(eef_pose_msg)
 
     def control_hand_pose(key):

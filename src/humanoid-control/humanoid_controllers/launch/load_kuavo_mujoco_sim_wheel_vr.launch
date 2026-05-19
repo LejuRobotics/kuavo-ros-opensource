@@ -9,6 +9,11 @@
     <arg name="enable_head_control" default="true"/>
     <arg name="use_vr_control" default="true"/>
     <arg name="ip_address" default=""/>
+    
+    <!-- 增量VR遥操作控制相关参数 -->
+    <arg name="use_cpp_incremental_ik" default="false"/>
+    <arg name="use_incremental_hand_orientation" default="false"/>
+    <arg name="wheel_ik" default="true"/>
 
     <!-- 设置VR控制参数 -->
     <param name="use_vr_control" value="$(arg use_vr_control)"/>
@@ -17,12 +22,9 @@
     <!-- 包含基础的轮臂仿真launch文件 -->
     <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim_wheel.launch">
         <!-- 覆盖基础launch文件中的参数 -->
-        <arg name="vr_remote_control" value="true"/>  <!-- 启用VR远程控制 -->
         <arg name="use_joystick" value="false"/>      <!-- 禁用手柄控制 -->
         <arg name="use_external_mpc" value="true"/>
     </include>
-
-    <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
 
     <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
       <arg name="control_torso" value="$(arg control_torso)"/>
@@ -31,6 +33,9 @@
       <arg name="ee_type" default="$(arg ee_type)"/>
       <arg name="enable_head_control" value="true"/>
       <arg name="ip_address" value="$(arg ip_address)"/>
+      <arg name="use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)"/>
+      <arg name="use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)"/>
+      <arg name="wheel_ik" value="$(arg wheel_ik)"/>
     </include>
 
 </launch>

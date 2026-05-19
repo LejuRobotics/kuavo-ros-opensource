@@ -11,6 +11,7 @@
 #include <ros/ros.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Float32MultiArray.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <ros/package.h>
 #include <fstream>
 
@@ -95,6 +96,7 @@ class ArmsIKNode
         , hand_side_(hand_side)
         , shoulder_frame_names_(shoulder_frame_names)
         {
+            std::cout << "custom_eef_frame_pos: " << custom_eef_frame_pos.transpose() << std::endl;
             // 从ROS参数读取腰部关节信息
             int mpc_waist_dof = 0;
             if (nh_.hasParam("/mpc/mpcWaistDof"))
@@ -132,13 +134,7 @@ class ArmsIKNode
             // 替换原始eef name
             end_frames_name[1] = custom_eef_frame_names[0];
             end_frames_name[2] = custom_eef_frame_names[1];
-            std::cout << "new frame_name: " << std::endl;
-            for(auto& frame_name : end_frames_name)
-            {
-                std::cout << "  " << frame_name << std::endl;
-            }
             plant_ptr_->Finalize();
-            std::cout << "plant nq: " << plant_ptr_->num_positions() << ", nv: " << plant_ptr_->num_velocities() << std::endl;
 
             diagram_ptr_ = builder.Build();
             diagram_context_ptr_ = diagram_ptr_->CreateDefaultContext();
@@ -162,6 +158,8 @@ class ArmsIKNode
             ik_result_pub_ = nh_.advertise<kuavo_msgs::twoArmHandPose>("/ik/result", 10);
             ik_result_free_pub_ = nh_.advertise<kuavo_msgs::twoArmHandPoseFree>("/ik/result_free", 10);
             head_body_pose_pub_ = nh_.advertise<kuavo_msgs::headBodyPose>("/kuavo_head_body_orientation", 10);
+            ik_vis_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("/ik/debug/vis_markers", 10);
+            nh_.param<bool>("enable_ik_vis", enable_ik_vis_, false);
             // srv
             // 初始化服务服务器
             ik_server_ = nh_.advertiseService("/ik/two_arm_hand_pose_cmd_srv", &ArmsIKNode::handleServiceRequest, this);
@@ -475,6 +473,84 @@ class ArmsIKNode
             return best;
         }
 
+        // 构造一个 Marker 球体，用于显示位置参考点
+        visualization_msgs::Marker makeSphereMarker(
+            const std::string& ns, int id,
+            const Eigen::Vector3d& pos,
+            float r, float g, float b, float a = 0.8,
+            float scale = 0.04)
+        {
+            visualization_msgs::Marker m;
+            m.header.frame_id = "torso";
+            m.header.stamp = ros::Time::now();
+            m.ns = ns;
+            m.id = id;
+            m.type = visualization_msgs::Marker::SPHERE;
+            m.action = visualization_msgs::Marker::ADD;
+            m.pose.position.x = pos.x();
+            m.pose.position.y = pos.y();
+            m.pose.position.z = pos.z();
+            m.pose.orientation.w = 1.0;
+            m.scale.x = m.scale.y = m.scale.z = scale;
+            m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = a;
+            m.lifetime = ros::Duration(0.5);
+            return m;
+        }
+
+        // 构造一个 Marker 箭头，用于显示末端姿态的 X 轴朝向
+        visualization_msgs::Marker makeArrowMarker(
+            const std::string& ns, int id,
+            const Eigen::Vector3d& pos, const Eigen::Quaterniond& quat,
+            float r, float g, float b, float a = 0.9)
+        {
+            visualization_msgs::Marker m;
+            m.header.frame_id = "torso";
+            m.header.stamp = ros::Time::now();
+            m.ns = ns;
+            m.id = id;
+            m.type = visualization_msgs::Marker::ARROW;
+            m.action = visualization_msgs::Marker::ADD;
+            m.pose.position.x = pos.x();
+            m.pose.position.y = pos.y();
+            m.pose.position.z = pos.z();
+            m.pose.orientation.x = quat.x();
+            m.pose.orientation.y = quat.y();
+            m.pose.orientation.z = quat.z();
+            m.pose.orientation.w = quat.w();
+            m.scale.x = 0.08;  // 箭头长度
+            m.scale.y = 0.01;  // 箭头轴径
+            m.scale.z = 0.015; // 箭头头部径
+            m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = a;
+            m.lifetime = ros::Duration(0.5);
+            return m;
+        }
+
+        // 发布 IK 输入（末端+肘部参考）的 RViz 可视化 Marker
+        void publishIkVisMarkers(
+            const Eigen::Vector3d& left_pos, const Eigen::Quaterniond& left_quat,
+            const Eigen::Vector3d& right_pos, const Eigen::Quaterniond& right_quat,
+            const Eigen::Vector3d& left_elbow, const Eigen::Vector3d& right_elbow)
+        {
+            if (!enable_ik_vis_)
+                return;
+
+            visualization_msgs::MarkerArray arr;
+
+            // 末端参考：绿色(左) / 红色(右) 球 + 姿态箭头
+            arr.markers.push_back(makeSphereMarker("eef_ref", 0, left_pos,  0.0f, 1.0f, 0.0f));
+            arr.markers.push_back(makeSphereMarker("eef_ref", 1, right_pos, 1.0f, 0.0f, 0.0f));
+            arr.markers.push_back(makeArrowMarker("eef_ori", 2, left_pos,  left_quat,  0.0f, 0.8f, 0.2f));
+            arr.markers.push_back(makeArrowMarker("eef_ori", 3, right_pos, right_quat, 0.8f, 0.2f, 0.0f));
+
+            // 肘部参考：青色(左) / 橙色(右) 球（仅当非零时显示）
+            if (!left_elbow.isZero(1e-6))
+                arr.markers.push_back(makeSphereMarker("elbow_ref", 4, left_elbow,  0.0f, 0.8f, 1.0f, 0.8f, 0.05f));
+            if (!right_elbow.isZero(1e-6))
+                arr.markers.push_back(makeSphereMarker("elbow_ref", 5, right_elbow, 1.0f, 0.5f, 0.0f, 0.8f, 0.05f));
+
+            ik_vis_pub_.publish(arr);
+        }
+
     public:
         void run()
         {
@@ -496,8 +572,9 @@ class ArmsIKNode
                     {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_left_.elbow_pos_xyz},
                     {Eigen::Quaterniond(1, 0, 0, 0), ik_cmd_right_.elbow_pos_xyz}
                     };
-                // std::cout << "ik_cmd_left_.elbow_pos_xyz: " << ik_cmd_left_.elbow_pos_xyz.transpose() << std::endl;
-                // std::cout << "ik_cmd_right_.elbow_pos_xyz: " << ik_cmd_right_.elbow_pos_xyz.transpose() << std::endl;
+                publishIkVisMarkers(ik_cmd_left_.pos_xyz, ik_cmd_left_.quat,
+                                    ik_cmd_right_.pos_xyz, ik_cmd_right_.quat,
+                                    ik_cmd_left_.elbow_pos_xyz, ik_cmd_right_.elbow_pos_xyz);
                 Eigen::VectorXd q;
                 // std::cout << std::fixed << std::setprecision(5) << "q0: " << q0_.head(single_arm_num_).transpose() << std::endl;
                 if(use_ik_cmd_q0_)
@@ -626,6 +703,7 @@ class ArmsIKNode
             ik_solve_params_.pos_constraint_tol = p.pos_constraint_tol;
             ik_solve_params_.pos_cost_weight = p.pos_cost_weight;
             ik_solve_params_.constraint_mode = p.constraint_mode;
+            ik_solve_params_.elbow_cost_scale = p.elbow_cost_scale;
         }
 
         template <typename HandPosesT>
@@ -1622,6 +1700,7 @@ class ArmsIKNode
         ros::Publisher ik_result_pub_;
         ros::Publisher ik_result_free_pub_;
         ros::Publisher head_body_pose_pub_;
+        ros::Publisher ik_vis_pub_;
         ros::ServiceServer ik_server_;
         ros::ServiceServer ik_server_muli_refer_;
         ros::ServiceServer ik_free_server_;
@@ -1635,6 +1714,7 @@ class ArmsIKNode
         std::vector<std::string> shoulder_frame_names_;
         std::vector<std::string> end_frames_name_;  // 保存end_frames_name用于伪逆求解
         bool print_ik_info_{true};
+        bool enable_ik_vis_{false};
         // waist joint compensation
         bool has_waist_joint_{false};
         int waist_joint_index_{-1};
@@ -1693,7 +1773,8 @@ int main(int argc, char* argv[])
     auto shoulder_frame_names = json_data["shoulder_frame_names"].get<std::vector<std::string>>();
     // auto lower_arm_length = json_data["lower_arm_length"].get<double>();
     auto num_arm_dof = json_data["NUM_ARM_JOINT"].get<int>();
-    auto eef_z_offset = json_data["eef_z_offset"].get<double>()/100.0;
+    // kuavo.json 中 eef_z_offset 单位为米，与 Python ArmIk（ik_ros_uni）一致，不再除以 100
+    auto eef_z_offset = json_data["eef_z_offset"].get<double>();
     int single_arm_num = num_arm_dof/2;
     std::cout << "single_arm_num: " << single_arm_num << std::endl;
     Eigen::Vector3d custom_eef_frame_pos = Eigen::Vector3d(0, 0, eef_z_offset);

@@ -23,7 +23,7 @@
 
     <!-- MPC相关参数 -->
     <arg name="use_external_mpc" default="true"/>
-    <arg name="use_sqp" default="false" doc="Use SQP if true, DDP if false"/>
+    <arg name="use_sqp" default="true" doc="Use SQP if true, DDP if false"/>
     <arg name="wbc_frequency" default="500"/>
     <arg name="wbc_only" default="false"/>
 
@@ -42,6 +42,8 @@
 
     <!-- 其他功能参数 -->
     <arg name="play_back" default="false"/>
+    <!-- 使用外部 odom->base_link TF 时设为 true，此时不发布内部的 odom->base_link，由外部系统（如 底盘）发布 -->
+    <arg name="use_external_odom_tf" default="false"/>
     <arg name="with_ik" default="true"/>
     <arg name="coredump" default="false"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
@@ -72,13 +74,15 @@
     <param name="wheel_control_type" value="$(arg wheel_control_type)"/>
     <param name="taskFile" value="$(arg taskFile)" />
     <param name="urdfFile" value="$(arg urdfFile)" />
+    <param name="use_external_odom_tf" value="$(arg use_external_odom_tf)"/>
     <param name="libFolder"  value="$(arg libFolder)" />
     <param name="robot_description" textfile="$(arg urdfFile)"/>
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
 
     <!-- 日志管理参数 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- 启动信息收集脚本 -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
@@ -108,12 +112,6 @@
         args="load HumanoidControllerNodelet nodelet_manager" 
         respawn="false" output="screen" required="true"/>
 
-    <node pkg="nodelet" type="nodelet" name="ekf_se" 
-        args="load RobotLocalization/EkfNodelet nodelet_manager" 
-        respawn="false" output="screen" required="true" 
-        launch-prefix="taskset -c 12">
-        <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
-    </node>
 
     <!-- Gazebo仿真 -->
     <group unless="$(arg play_back)">
@@ -124,14 +122,17 @@
     </group>
 
     <!-- Rosbag记录 -->
+
     <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
 
     <!-- 手柄控制 -->
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
+        <param name="joystick_type" value="h12"/>
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
           <arg name="start_way" value="$(arg start_way)"/>
         </include>
+        <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen"/>
       </group>
       <group if="$(eval arg('joystick_type') == 'sim')">
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">

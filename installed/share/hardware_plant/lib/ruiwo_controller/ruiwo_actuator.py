@@ -22,7 +22,7 @@ sys.path.append('/usr/lib/python3/dist-packages')
 dt=0.004
 # 插值规划的速度
 max_speed = 4
-velocity_factor = 0.01
+velocity_factor = 1.0
 DISABLE_ADDRESS = 0x00
 
 class RuiwoErrCode(Enum):
@@ -705,6 +705,9 @@ class RuiWoActuator():
                 continue
 
             address = self.joint_address_list[i]
+            # 保存缩放前的速度用于日志
+            v_before_scaling_nr = velocity[i]
+            
             if (address) in self.negtive_joint_address_list:
                 pos[i] = -(pos[i] + self.zero_position[i]) #减去零点偏移
                 torque[i] = max(-10.0, -torque[i])
@@ -713,6 +716,17 @@ class RuiWoActuator():
                 pos[i] = pos[i] + self.zero_position[i] #减去零点偏移
                 torque[i] = min(10.0, torque[i])
                 velocity[i] = velocity_factor * velocity[i]
+            
+            # 每100次打印一次速度缩放信息（前3个电机）
+            if not hasattr(self, '_velocity_log_counter_nr'):
+                self._velocity_log_counter_nr = 0
+            if i < 3 and self._velocity_log_counter_nr % 100 == 0:
+                print(f"[send_positions_No_response Python] Motor[{i}] velocity_factor scaling: "
+                      f"{v_before_scaling_nr:.4f} rad/s × {velocity_factor} = {velocity[i]:.4f} rad/s "
+                      f"(velocity_factor={velocity_factor})")
+                self._velocity_log_counter_nr = 0
+            self._velocity_log_counter_nr += 1
+            
             if self.joint_address_list[i] == self.Head_joint_address[1]:
                 target_torque[i] = self.head_high_torque
             if self.control_mode == "ptm":

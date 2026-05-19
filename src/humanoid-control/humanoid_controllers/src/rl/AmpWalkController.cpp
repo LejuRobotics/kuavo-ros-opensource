@@ -67,12 +67,6 @@ namespace humanoid_controller
       ROS_WARN("[%s] /is_roban not found in ROS params, using default: %d", name_.c_str(), static_cast<int>(is_roban_));
     }
 
-    // 初始化 Ruiwo 电机参数切换服务客户端（仅在真实机器人上且使能 AMP 专用增益时使用）
-    if (is_real_ && use_amp_ruiwo_kpkd_)
-    {
-      srv_change_motor_param_ = nh_.serviceClient<kuavo_msgs::ExecuteArmAction>("/hardware/change_ruiwo_motor_param");
-      ROS_INFO("[%s] Motor param service client initialized for AMP controller", name_.c_str());
-    }
 
     // 初始化ankleSolver（从ROS参数获取，如果不存在则使用默认值）
     int ankle_solver_type = 0; // 默认值
@@ -110,9 +104,40 @@ namespace humanoid_controller
     initArmControl(urdf_path);
     initWaistControl();
 
+    // AMP 模式切换服务：允许外部设置 0/1/2 三种模式
+    change_amp_mode_srv_ = nh_.advertiseService("/humanoid_controller/change_amp_mode",
+                                                &AmpWalkController::changeAmpModeCallback,
+                                                this);
+
     initialized_ = true;
 
     ROS_INFO("[%s] AmpWalkController initialized", name_.c_str());
+    return true;
+  }
+
+  bool AmpWalkController::changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
+                                                kuavo_msgs::changeArmCtrlMode::Response &res)
+  {
+    int requested_mode = req.control_mode;
+
+    if (requested_mode < 0 || requested_mode > 2)
+    {
+      ROS_WARN("[%s] Received invalid AMP mode %d, valid range is [0, 2]. Keep current mode %d.",
+               name_.c_str(), requested_mode, amp_mode_);
+      res.result = false;
+      res.mode = amp_mode_;
+      res.message = "Invalid AMP mode, must be 0, 1 or 2";
+      return true;
+    }
+
+    amp_mode_ = requested_mode;
+
+    ROS_INFO("[%s] AMP mode switched to %d (0: pure AMP walk, 1: stance/bend/squat with arms, 2: walk with arms).",
+             name_.c_str(), amp_mode_);
+
+    res.result = true;
+    res.mode = amp_mode_;
+    res.message = "AMP mode updated successfully";
     return true;
   }
 
@@ -179,8 +204,6 @@ namespace humanoid_controller
     // 是否使用关节指令滤波（对应 skw_rl_param.info 中 use_jointcmd_filter）
     loadData::loadPtreeValue(pt, use_jointcmd_filter_, "use_jointcmd_filter", true);
 
-    // 是否使用 AMP 专用 Ruiwo 手臂增益（对应 skw_rl_param.info 中 use_amp_ruiwo_kpkd，默认不使用）
-    loadData::loadPtreeValue(pt, use_amp_ruiwo_kpkd_, "use_amp_ruiwo_kpkd", false);
 
     // 是否启用手臂指令替换功能（对应 skw_rl_param.info 中 setArmCommandReplacementEnabled）
     bool arm_command_replacement_enabled = false;
@@ -384,11 +407,7 @@ namespace humanoid_controller
       gait_receiver_->setEnabled(false);
     }
 
-    // 真实机器人暂停时切回正常 Ruiwo 电机参数（异步调用避免阻塞控制线程）
-    if (is_real_ && use_amp_ruiwo_kpkd_)
-    {
-      changeRuiwoMotorParamAsync("normal_kpkd");
-    }
+    // Ruiwo 手臂增益已通过 joint_cmd 实时下发，无需单独调用 ROS 服务切换
   }
   void AmpWalkController::resume()
   {
@@ -398,17 +417,13 @@ namespace humanoid_controller
       gait_receiver_->setEnabled(true);
     }
 
-    // 真实机器人恢复 AMP 控制时切换到 AMP 专用 Ruiwo 电机参数（异步调用避免阻塞控制线程）
-    if (is_real_ && use_amp_ruiwo_kpkd_)
-    {
-      changeRuiwoMotorParamAsync("amp_kpkd");
-    }
+    // Ruiwo 手臂增益已通过 motor_pdo_kp/kd（skw_rl_param.info）在 joint_cmd 中实时下发
 
     ROS_INFO("[%s] Controller resumed, reset state", name_.c_str());
     reset();
   }
 
-  bool AmpWalkController::isReadyToExit() const
+  bool AmpWalkController::requestToExit() const
   {
     if (!sensor_data_updated_)
     {
@@ -446,7 +461,7 @@ namespace humanoid_controller
     return is_fallen;
   }
 
-  bool AmpWalkController::isInStanceMode() const
+  bool AmpWalkController::isAllowToExit() const
   {
     if (!gait_receiver_)
     {
@@ -505,7 +520,7 @@ namespace humanoid_controller
     if (!yaw_offset_initialized)
     {
       auto mat = sensor_data.quat_.toRotationMatrix();
-      double current_yaw = std::atan2(mat(1, 2), mat(0, 2));
+      double current_yaw = std::atan2(mat(1, 0), mat(0, 0));
       my_yaw_offset_ = 0.0 - current_yaw;
       // 归一化到[-π, π]范围
       while (my_yaw_offset_ > M_PI) my_yaw_offset_ -= 2 * M_PI;
@@ -514,6 +529,8 @@ namespace humanoid_controller
       ROS_INFO("[%s] Initialized yaw_offset: %.6f (current_yaw: %.6f)", name_.c_str(), my_yaw_offset_, current_yaw);
     }
 
+    Eigen::VectorXd command_state(1);
+    command_state << cmd.cmdStance_;
     // 速度命令 [vx, vy, omega_z]
     cmd.scale();
     
@@ -598,6 +615,7 @@ namespace humanoid_controller
         {"base_ang_vel", bodyAngVel},
         {"projected_gravity", projected_gravity},
         {"velocity_commands", velocity_commands},
+        {"command_state", command_state},
         {"joint_pos", jointPos},
         {"joint_vel", jointVel},
         {"actions", local_action},
@@ -1137,11 +1155,20 @@ namespace humanoid_controller
           return;
         }
         
-        // 获取默认手臂位置
+        // 获取默认手臂位置（根据机型选择正确的手臂起始索引）
         Eigen::VectorXd default_arm_pos;
         if (defalutJointPosRL_.size() >= jointNum_ + waistNum_ + jointArmNum_)
         {
-          default_arm_pos = defalutJointPosRL_.segment(jointNum_ + waistNum_, jointArmNum_);
+          if (is_roban_)
+          {
+            // roban 机型：关节顺序为 腰 + 腿 + 手臂，手臂从 waistNum_ + jointNum_ 开始
+            default_arm_pos = defalutJointPosRL_.segment(waistNum_ + jointNum_, jointArmNum_);
+          }
+          else
+          {
+            // 其他机型：关节顺序为 腿 + 腰 + 手臂，手臂从 jointNum_ + waistNum_ 开始
+            default_arm_pos = defalutJointPosRL_.segment(jointNum_ + waistNum_, jointArmNum_);
+          }
         }
         else
         {
@@ -1324,55 +1351,6 @@ namespace humanoid_controller
     }
   }
 
-  void AmpWalkController::changeRuiwoMotorParamAsync(const std::string& param_name)
-  {
-    // 仿真环境下直接返回
-    if (!is_real_)
-    {
-      return;
-    }
-
-    // 在独立线程中调用服务，避免在控制循环中发生阻塞
-    std::thread([this, param_name]()
-    {
-      try
-      {
-        const ros::Duration timeout(2.0);
-        if (!srv_change_motor_param_.waitForExistence(timeout))
-        {
-          ROS_WARN_THROTTLE(1.0, "[%s] Motor param service not available (timeout: 2s)", name_.c_str());
-          return;
-        }
-
-        kuavo_msgs::ExecuteArmAction srv;
-        srv.request.action_name = param_name;
-
-        if (srv_change_motor_param_.call(srv))
-        {
-          if (srv.response.success)
-          {
-            ROS_INFO("[AmpWalkController] Successfully changed Ruiwo motor param to: %s", param_name.c_str());
-          }
-          else
-          {
-            ROS_WARN("[AmpWalkController] Failed to change Ruiwo motor param: %s", srv.response.message.c_str());
-          }
-        }
-        else
-        {
-          ROS_WARN("[AmpWalkController] Failed to call Ruiwo motor param service");
-        }
-      }
-      catch (const ros::Exception& e)
-      {
-        ROS_ERROR("[AmpWalkController] ROS exception in changeRuiwoMotorParamAsync: %s", e.what());
-      }
-      catch (const std::exception& e)
-      {
-        ROS_ERROR("[AmpWalkController] Exception in changeRuiwoMotorParamAsync: %s", e.what());
-      }
-    }).detach();
-  }
 
   // 更新腰部指令（可选功能，用于替换jointCmdMsg中的腰部部分）
   bool AmpWalkController::updateWaistCommand(const ros::Time& time,

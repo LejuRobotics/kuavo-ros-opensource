@@ -1,6 +1,6 @@
 {
     "head_control": {
-        "_comment_mode": "头部控制模式选项: \"fixed\"(固定模式), \"auto_track\"(自动跟踪主动手), \"fixed_main\"(固定主手), \"vr_follow\"(VR随动模式)",
+        "_comment_mode": "头部控制模式选项: \"fixed\"(固定模式), \"auto_track_active\"(自动跟踪主动手), \"fixed_main\"(固定主手), \"vr_follow\"(VR随动模式)",
         "mode": "vr_follow",
         "fixed_main_hand": "right",
         "joint_limits": {

@@ -8,7 +8,7 @@
 
 - **RLControllerBase**: 控制器基类，提供统一接口和基础功能
 - **RLControllerManager**: 控制器管理器，负责加载、切换和管理多个控制器
-- **具体控制器实现**: 如 `FallStandController`（倒地起身）、`AmpWalkController`（行走控制）
+- **具体控制器实现**: 如 `FallStandController`（倒地起身）、`AmpWalkController`（行走）、`DanceController`（舞蹈轨迹 + RL）、`DepthWalkController`、`VMPController` 等
 
 ### 1.2 主要特性
 
@@ -25,8 +25,11 @@
 
 ```
 RLControllerBase (基类)
-├── FallStandController (倒地起身控制器)
-└── AmpWalkController (AMP行走控制器)
+├── FallStandController (倒地起身)
+├── AmpWalkController (AMP 行走)
+├── DanceController (舞蹈：轨迹 CSV + OpenVINO 等)
+├── DepthWalkController（深度感知行走，可选）
+└── VMPController（可选）
 ```
 
 **文件结构与主要 RL 相关文件**（相对 `src/humanoid-control/humanoid_controllers`）：
@@ -37,21 +40,24 @@ RLControllerBase (基类)
 │           ├── rl_controller_types.h   # 定义 RL 控制器类型（MPC/AMP/FALL_STAND 等）和控制器状态枚举，提供字符串↔枚举转换
 │           ├── RLControllerBase.h      # RL 控制器抽象基类声明：统一接口、推理线程、IMU 滤波、线程安全数据访问等
 │           ├── RLControllerManager.h   # 控制器管理器声明：加载/存储/切换多个 RLControllerBase 派生类，声明相关 ROS 服务
-│           ├── FallStandController.h   # 倒地起身控制器声明：状态机（FALL_DOWN/READY/STAND_UP/STANDING）、轨迹数据结构、服务接口等
-│           └── AmpWalkController.h     # AMP 行走控制器声明：行走命令结构、观测构建接口、RL 推理与关节命令接口
+│           ├── FallStandController.h   # 倒地起身控制器声明：状态机、轨迹数据结构、服务接口等
+│           ├── AmpWalkController.h     # AMP 行走控制器声明
+│           └── DanceController.h       # 舞蹈控制器：轨迹数据、观测与关节命令、restart 等
 ├── src/
 │   └── rl/
 │       ├── RLControllerBase.cpp        # RLControllerBase 实现：推理线程循环、IMU 滤波、clip 裁剪、传感器/状态/动作的线程安全封装
 │       ├── RLControllerManager.cpp     # RLControllerManager 实现：从 YAML 加载控制器、创建具体控制器、提供 switch/get_list 等 ROS 服务
-│       ├── FallStandController.cpp     # 倒地起身控制器实现：加载模型与 CSV 轨迹、插值起身关节、RL 推理、服务回调、观测构建等
-│       └── AmpWalkController.cpp       # AMP 行走控制器实现：加载 RL 配置与 OpenVINO 模型、gait 指令接收、观测拼接、RL 推理与力/位控映射
+│       ├── FallStandController.cpp     # 倒地起身实现
+│       ├── AmpWalkController.cpp       # AMP 行走实现
+│       └── DanceController.cpp         # 舞蹈：读 info/CSV、轨迹步进、OpenVINO 推理、关节命令下发等
 ├── config/
 │   └── kuavo_v<版本号>/                      # 针对不同版本机器人（如 kuavo_v14）的配置目录
 │       ├── rl_controllers.yaml         # RL 控制器列表配置：定义各控制器 name/type/config_file/enabled/class 等
 │       └── rl/                         # 本版本下所有 RL 控制器的参数与轨迹文件
 │           ├── amp_param.info          # AMP 行走控制器的 RL 配置（网络模型、观测布局、动作缩放、步态周期等，文件名随版本略有不同）
-│           ├── fall_stand_param.info   # 倒地起身控制器的 RL/轨迹配置（模型文件名、轨迹 CSV、obs 配置、起身插值参数等）
-│           └── skw_rl_param.info       # 其他 RL 控制器（如单腿/特殊步态）配置示例（不同版本可能仅包含子集）
+│           ├── fall_stand_param.info   # 倒地起身 RL/轨迹配置
+│           ├── dance_param.info        # 舞蹈控制器配置（网络、轨迹 CSV 名、hold 帧等；多舞时每条 yaml 可指向不同 info）
+│           └── skw_rl_param.info       # 其他 RL 配置示例（不同版本可能仅包含子集）
 └── src/                                # humanoid_controllers 顶层源码目录
     └── humanoidController.cpp          # 主控制器：整合 MPC+WBC 与 RLControllerManager，
                                         # 在 update() 中根据当前模式选择走「MPC+WBC」还是调用当前 RL 控制器的 update() 生成 jointCmd，
@@ -59,6 +65,8 @@ RLControllerBase (基类)
 ```
 
 ### 2.2 与 RL / 控制器切换相关的 ROS 接口
+
+各服务的**类型、字段与 `rosservice` 示例**以仓库根目录 [`docs/RL控制框架ROS接口文档.md`](../../../../docs/RL控制框架ROS接口文档.md) 为准；本节侧重在框架中的职责与数据流。
 
 - **控制器级服务（由每个 RL 控制器自动提供，命名空间为 `/humanoid_controllers/{controller_name}`）**
   - `/humanoid_controllers/{controller_name}/reload` (`std_srvs/Trigger`)  
@@ -76,11 +84,25 @@ RLControllerBase (基类)
   - `/humanoid_controller/switch_controller` (`kuavo_msgs/switchController`)  
     - 根据请求中的 `controller_name` 在 **行走控制器列表** 中切换当前控制器：  
       - `"mpc"` 或空字符串：切回 MPC 基础控制；  
-      - 其他名称（如 `"amp_walk"`、`"fall_stand"` 等）：切换到对应 RL 控制器（若已加载且启用）。
+      - 其他名称（如 `"amp_controller"`、`"depth_loco_controller"`、`"fall_stand"` 等）：切换到对应 RL 控制器（若已加载且启用）。
   - `/humanoid_controller/get_controller_list` (`kuavo_msgs/getControllerList`)  
     - 返回当前可用的行走控制器名称列表（包含 `"mpc"`），以及当前激活控制器名称与索引。
   - `/humanoid_controller/switch_to_next_controller` (`kuavo_msgs/switchToNextController`)  
     - 在行走控制器列表中按顺序循环切换（`mpc → 第一个 RL → ... → mpc`），适合作为手柄或键盘「一键切换模式」接口。
+  - `/humanoid_controller/switch_to_dance_controller` (`kuavo_msgs/SetString`)  
+    - **唯一**用于从 ROS 侧进入/切换舞蹈模式的入口（与 `std_srvs/Trigger` 旧接口已合并为同一服务名）。  
+    - `data` 为空：yaml 中**第一个** `DANCE_CONTROLLER`；`data` 为 `#0` / `#1`：按 `dance_controllers_` 下标；否则为**控制器 name**（须在列表中）。实现见 `RLControllerManager::switchDanceControllerByStringCallback`。  
+  - `/humanoid_controller/get_dance_controller_list` (`kuavo_msgs/GetStringList`)  
+    - 返回当前已加载舞蹈控制器的名称数组，顺序与 `rl_controllers.yaml` 中 `DANCE_CONTROLLER` 条目一致（内部 `dance_controllers_`）。  
+  - **C++ 侧（`RLControllerManager`）与 ROS 语义对齐的接口**：`getDanceControllerList()`、`switchToDanceControllerByName(name)`、`switchToDanceControllerByIndex(index)`、`getCurrentDanceControllerIndex()`；底层均走 `switchController(name)`，并在「舞蹈 A → 舞蹈 B」时放宽 mimic 阻塞（仍对 舞蹈→MPC/行走 等保留保护）。  
+  - **配置多支舞**：在 `config/kuavo_v<版本>/rl_controllers.yaml` 的 `controllers:` 下增加多条 `type: "DANCE_CONTROLLER"`，每条 **name** 唯一、**config_file** 指向各自的 `rl/*.info`（及对应轨迹 CSV 等）。
+
+- **Depth Loco 控制器补充说明**
+  - `DepthWalkController` 属于 `DEPTH_LOCO_CONTROLLER`，适合走楼梯斜坡这类需要地形感知的行走场景。
+  - 该控制器除了常规机器人状态与 `/cmd_vel` 外，还依赖深度历史输入话题 `/camera/depth/depth_history_array`。
+  - 切换到 `depth_loco_controller` 前会先检查该话题是否已发布且能收到消息；如果没有，系统会拒绝切换。
+  - 从 `depth_loco_controller` 退出时，会优先恢复到进入前的控制器；如果没有历史记录，则回到 `amp_controller`。
+  - 在 `kuavo_v54` 中，可通过 [`rl_controllers.yaml`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl_controllers.yaml) 启用 `depth_loco_controller`，其模型配置位于 [`depth_loco_param.info`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl/depth_loco_param.info)。
 
 - **倒地 / 起身相关服务**
   - `/humanoid_controller/set_fall_down_state` (`std_srvs/SetBool`，在 `humanoidController` 中实现)  
@@ -102,10 +124,9 @@ RLControllerBase (基类)
       - `1` (`RESET_INITIAL_POLICY`)：重置 MPC 状态1，等待初始策略；  
       - `2` (`RESET_BASE`)：重置 MPC 状态2，更新躯干位置（插值阶段）。  
     - 当从 RL 切回 MPC 时，状态会依次经历 `RESET_INITIAL_POLICY` → `RESET_BASE` → `NOMAL`，便于监控 MPC 重置进度。
-  - 
- - **遥控器集成**
-   - 目前北通遥控器集成了多控制器切换、倒地起身等功能
-     - 
+
+- **遥控器集成**  
+  - 北通等遥控流程中，进入舞蹈一般调用 `/humanoid_controller/switch_to_dance_controller`（`SetString`，空 `data` 表示首支舞）；退出舞蹈仍通过 `switch_controller` 切回 `amp_controller` 等行走控制器（须满足 stance 等条件）。
 
 ### 2.3 核心类说明
 
@@ -153,8 +174,31 @@ virtual void updateObservation(const Eigen::VectorXd& state_est, const SensorDat
 virtual bool inference(const Eigen::VectorXd& observation, Eigen::VectorXd& action);
 virtual void actionToJointCmd(...);
 virtual bool shouldRunInference() const;
-virtual bool isReadyToExit() const;
+virtual bool requestToExit() const;
+virtual bool isAllowToExit() const;
 ```
+
+**`requestToExit()` 与 `isAllowToExit()`（基类 `RLControllerBase`）**  
+
+语义以 `include/humanoid_controllers/rl/RLControllerBase.h` 为准，与 `humanoidController`、`RLControllerManager` 协同使用：
+
+| 方法 | 默认实现 | 含义 |
+|------|----------|------|
+| `requestToExit()` | 恒为 `false` | 本周期是否**主动请求**退出当前 RL 模式。`humanoidController::update` 在 RL 激活时轮询；为 `true` 时会触发**自动**切换（例如倒地起身结束后回 MPC、舞蹈在特定配置下回 AMP 等），具体行为依当前 `RLControllerType` 分支而定。 |
+| `isAllowToExit()` | 恒为 `true` | 当前是否**允许**从本控制器**切换走**（包括切回 MPC、或换到其他 RL）。`RLControllerManager::switchController` 在从 RL 切到 MPC 等路径上会检查；为 `false` 时阻止切出。 |
+
+**`DanceController` 中的实现**  
+
+- **`requestToExit()`**  
+  - 当 `dance_trajectory_` 已播放到最后一帧（`isFinish()`）**且**配置项 `holdFrameIndex == -2` 时返回 `true`。  
+  - 此时 `humanoidController` 中针对 `DANCE_CONTROLLER` 的分支会**自动** `switchController(RLControllerType::AMP_CONTROLLER)`，切到 AMP 行走。  
+  - 其他情况返回 `false`，需通过 ROS/服务/手柄等**手动**切换。  
+
+- **`isAllowToExit()`**  
+  - 轨迹**未**播放完成时返回 `false`，避免在舞蹈进行中被切回 MPC；**播放完成**后返回 `true`，与 `RLControllerManager` 的 RL→MPC 保护一致。  
+  - 多舞蹈之间切换由 `RLControllerManager` 单独处理，是否允许另见该处逻辑；本接口主要表达“单支舞是否已跑完、可否视为安全切出到 MPC/行走”。  
+
+> 与「行走」中 `AmpWalkController::isAllowToExit`（`cmdStance_` 为站立）对照：Dance 用**轨迹是否结束**表达可切性，接口语义相同而条件不同。  
 
 #### RLControllerManager
 
@@ -162,7 +206,7 @@ virtual bool isReadyToExit() const;
 - 管理多个控制器的生命周期
 - 从 YAML 配置文件加载控制器
 - 提供控制器切换功能
-- 提供 ROS 服务接口（switch_controller, get_controller_list, switch_to_next_controller）
+- 提供 ROS 服务接口（行走：`switch_controller`、`get_controller_list`、`switch_to_next_controller`；舞蹈：`switch_to_dance_controller`、`get_dance_controller_list`；及其他）
 
 **关键方法**:
 ```cpp
@@ -170,6 +214,11 @@ bool addController(const std::string& name, std::unique_ptr<RLControllerBase> co
 bool switchController(const std::string& name);
 bool loadControllersFromConfig(const std::string& config_file, ...);
 RLControllerBase* getCurrentController();
+// 多舞蹈（与 ROS SetString 服务语义一致）
+std::vector<std::string> getDanceControllerList();
+bool switchToDanceControllerByName(const std::string& name);
+bool switchToDanceControllerByIndex(size_t index);
+int getCurrentDanceControllerIndex() const;
 ```
 
 ### 2.4 工作流程
@@ -192,7 +241,8 @@ RLControllerBase* getCurrentController();
          ▼
 ┌─────────────────┐
 │ 具体控制器实现   │
-│ (FallStand/Amp) │
+│ FallStand/Amp/  │
+│ Dance/…         │
 │  - 计算关节命令  │
 └─────────────────┘
 
@@ -222,7 +272,7 @@ RLControllerBase* getCurrentController();
   - 使用 `WeightedWbc` / `StandUpWbc` 将质心/摆动脚目标转化为关节空间的 `posDes/velDes/torque`。  
   - `SafetyChecker` 在此层之后做安全检查，失败时会触发倒地逻辑并切换到 RL 倒地起身控制器。
 - **RL 控制层（本文件的主角）**  
-  - 由 `RLControllerManager` + 若干 `RLControllerBase` 派生类构成，例如 `AmpWalkController`、`FallStandController`。  
+  - 由 `RLControllerManager` + 若干 `RLControllerBase` 派生类构成，例如 `AmpWalkController`、`FallStandController`、`DanceController` 等。  
   - 在 **RL 模式** 下，当前 RL 控制器直接在 `update()` 中生成完整的 `kuavo_msgs::jointCmd`，替代「MPC+WBC」链路的输出。
 
 可以将两条控制路径抽象成：
@@ -278,7 +328,11 @@ RLControllerBase* getCurrentController();
     - `SafetyChecker` 检测到严重安全问题（例如中心高度/接触力异常）并将 `fall_down_state_` 置为倒地。  
   - 切换逻辑：  
     - `RLControllerManager` 切到 `RLControllerType::FALL_STAND_CONTROLLER`，`humanoidController` 暂停 MPC，之后 `update()` 直接调用倒地起身控制器的 `update()` 生成关节命令。  
-    - 当 `FallStandController::isReadyToExit()` 返回 `true`（站起完成），`humanoidController` 会自动调用 `switchToBaseController()` 切回 MPC 模式，并将 `fall_down_state_` 置为 STANDING。
+    - 当 `FallStandController::requestToExit()` 返回 `true`（站起完成），`humanoidController` 会自动调用 `switchToBaseController()` 切回 MPC 模式，并将 `fall_down_state_` 置为 STANDING。  
+
+- **与舞蹈控制（DanceController）的协同**  
+  - 当 `DanceController::requestToExit()` 为 `true`（轨迹结束且 `holdFrameIndex == -2`）时，`humanoidController` 会**自动**切换到 **AMP 行走**控制器，而非切回 MPC。  
+  - `DanceController::isAllowToExit()` 在轨迹未结束时为 `false`，使 `RLControllerManager` 无法过早执行 RL→MPC；轨迹结束后为 `true`，与手动/服务切回行走或 MPC 的保护一致。详见上文「RLControllerBase」小节中两接口说明。  
 
 通过上述机制，**MPC 始终作为系统的「基准 / 安全 fallback 控制器」存在，RL 控制器作为按需启用的「插件式高层控制」**：  
 - RL 激活时可以完全接管 jointCmd 生成；  
@@ -349,7 +403,7 @@ namespace humanoid_controller
     bool initialize() override;
     bool loadConfig(const std::string& config_file) override;
     void reset() override;
-    bool isReadyToExit() const override;
+    bool requestToExit() const override;
 
   protected:
     // 必须实现的虚函数
@@ -515,7 +569,7 @@ namespace humanoid_controller
     ROS_INFO("[%s] Controller reset", name_.c_str());
   }
 
-  bool YourNewController::isReadyToExit() const
+  bool YourNewController::requestToExit() const
   {
     // 定义何时控制器完成任务
     return false;  // 或根据实际逻辑返回
@@ -955,6 +1009,3 @@ custom_srv_ = nh_.advertiseService("/your_service",
 ## 10. 总结
 
 `RLControllerBase` 框架提供了一个灵活、可扩展的多控制器架构。通过继承基类并实现必要的虚函数，可以快速添加新的控制器。框架自动处理线程管理、数据同步和状态管理，让开发者专注于控制器特定的逻辑实现。
-
-
-

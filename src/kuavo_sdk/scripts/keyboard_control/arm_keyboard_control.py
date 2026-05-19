@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import sys
+import os
 import termios
 import tty
 import select
@@ -9,6 +10,7 @@ import time
 import math
 import rospy
 import numpy as np
+import rospkg
 from enum import Enum
 
 from kuavo_msgs.srv import fkSrv
@@ -19,6 +21,20 @@ from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, changeAr
 from kuavo_msgs.srv import twoArmHandPoseCmdSrv
 from kuavo_msgs.msg import twoArmHandPoseCmd, ikSolveParam
 
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
+    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError):
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, '../../../kuavo_common/python'))
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion
+
 # 获取机器人版本
 def get_version_parameter():
     param_name = 'robot_version'
@@ -26,16 +42,20 @@ def get_version_parameter():
         # 获取参数值
         param_value = rospy.get_param(param_name)
         rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
-        # 适配1000xx版本号
-        valid_series = [42, 45, 49, 52, 53, 54]
-        MMMMN_MASK = 100000
-        series = param_value % MMMMN_MASK
-        if series not in valid_series:
-            rospy.logwarn(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！")
+        if not RobotVersion.is_valid(param_value):
+            rospy.logwarn(f"无效的机器人版本号: {param_value}，版本号格式不合法！")
             return None
-        else:
-            rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
+
+        robot_version = RobotVersion.create(int(param_value))
+        if (robot_version.start_with(4, 2)
+                or robot_version.start_with(4, 5)
+                or robot_version.start_with(4, 9)
+                or robot_version.start_with(5)):
+            rospy.loginfo(f"✅ 机器人版本号有效: {param_value} ({robot_version.version_name()})")
             return param_value
+        else:
+            rospy.logwarn(f"无效的机器人版本号: {param_value} ({robot_version.version_name()})，仅支持 4.2、4.5、4.9 系列及5代！")
+            return None
     except rospy.ROSException:
         rospy.logerr(f"参数 {param_name} 不存在！") 
         return None
@@ -394,12 +414,8 @@ class KeyBoardArmController:
         self.ik_service=IkArmService()
 
         #不同型号机器人的初始位置 (机器人坐标系) 和 手臂长度(单位米)
-        def start_with_version(version_number:int, series:int):
-            """判断版本号是否属于某系列"""
-            # PPPPMMMMN
-            MMMMN_MASK = 100000
-            return (version_number % MMMMN_MASK) == series
-        if start_with_version(robot_version, 45) or start_with_version(robot_version, 49):
+        robot_version_info = RobotVersion.create(int(robot_version))
+        if robot_version_info.start_with(4, 5) or robot_version_info.start_with(4, 9):
             self.robot_zero_x = -0.0173
             self.robot_zero_y = -0.2927 + 0.03
             self.robot_zero_z = -0.2837
@@ -409,7 +425,7 @@ class KeyBoardArmController:
             # 设定sensors_data_raw中手臂角度的索引
             self.joint_data_header, self.joint_data_footer = 12, 26
 
-        elif start_with_version(robot_version, 42):
+        elif robot_version_info.start_with(4, 2):
             self.robot_zero_x = -0.0175
             self.robot_zero_y = -0.25886
             self.robot_zero_z = -0.20115
@@ -419,7 +435,7 @@ class KeyBoardArmController:
             # 设定sensors_data_raw中手臂角度的索引
             self.joint_data_header, self.joint_data_footer = 12, 26
 
-        elif start_with_version(robot_version, 52) or start_with_version(robot_version, 53) or start_with_version(robot_version, 54):
+        elif robot_version_info.start_with(5):
             self.robot_zero_x = -0.003 
             self.robot_zero_y = -0.2527 # shoulder_width
             self.robot_zero_z = -0.3144 

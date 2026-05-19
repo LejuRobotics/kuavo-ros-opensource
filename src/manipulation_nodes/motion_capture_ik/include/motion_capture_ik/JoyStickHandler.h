@@ -26,11 +26,17 @@ struct ClawCommandData {
 
 class JoyStickHandler {
  public:
-  JoyStickHandler();
+  JoyStickHandler(double threshold = 0.0, double alpha = 0.0);
 
   void initialize();
 
   void reset();
+
+  double getLeftJoyStickX() const;
+  double getLeftJoyStickY() const;
+  double getRightJoyStickX() const;
+  double getRightJoyStickY() const;
+  bool getRightJoyStickYHold() const;
 
   void updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg);
   void processHandEndEffectorData();
@@ -44,6 +50,8 @@ class JoyStickHandler {
   bool isRightFirstButtonPressed() const;
   bool isLeftSecondButtonPressed() const;
   bool isRightSecondButtonPressed() const;
+  bool isLeftFirstButtonTouched() const;
+  bool isLeftSecondButtonTouched() const;
 
   bool isLeftRightFirstButtonTouched() const;
   bool isLeftRightFirstButtonPressed() const;
@@ -75,6 +83,7 @@ class JoyStickHandler {
 
   // 按钮状态
   bool leftSecondButtonPressed_;
+  bool leftSecondButtonTouched_;
   bool leftFirstButtonTouched_;
   bool leftFirstButtonPressed_;  // 左手第一个按键按下状态
   bool rightSecondButtonPressed_;
@@ -111,6 +120,10 @@ class JoyStickHandler {
 
   std::vector<double> leftJoystick_;     // [left_trigger, left_grip]
   std::vector<double> rightJoystick_;    // [right_trigger, right_grip]
+  double leftStickX_;                    // left stick X coordinate
+  double leftStickY_;                    // left stick Y coordinate
+  double rightStickX_;                   // right stick X coordinate
+  double rightStickY_;                   // right stick Y coordinate
   std::vector<double> leftFingerData_;   // 左手手指关节数据
   std::vector<double> rightFingerData_;  // 右手手指关节数据
 
@@ -118,6 +131,20 @@ class JoyStickHandler {
   std::vector<int> leftHandPosition_;   // 左手位置 [0-100]
   std::vector<int> rightHandPosition_;  // 右手位置 [0-100]
   std::vector<int> clawPosition_;       // 爪子位置 [0-100]
+
+  // 手柄摇杆缓存数据
+  double leftJoyStickX_;
+  double leftJoyStickY_;
+  double rightJoyStickX_;
+  double rightJoyStickY_;
+
+  // 摇杆阈值和低通滤波参数
+  double joyStickThreshold_;
+  double joyStickAlpha_;
+
+  // RightJoyStickY 按下时间检查相关变量
+  bool RightJoyStickYHold_;      // RightJoyStickY 保持状态，默认值为 true
+  int rightJoyStickYHoldCount_;  // 连续满足条件的计数
 
   HandPositionData handPositionData_;
   ClawCommandData clawCommandData_;

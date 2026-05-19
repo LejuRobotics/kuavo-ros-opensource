@@ -46,7 +46,7 @@
 
 5. Client 类
 
-  - 作用：实现与讯飞实时语音转写（RTASR）服务的WebSocket通信。
+  - 作用：实现与讯飞实时语音转写标准版（RTASR）服务的WebSocket通信。
 
   - 关键逻辑：
 
@@ -94,8 +94,8 @@ python3 -m pip install numpy==1.22.2 requests==2.31.0
    ⚠️ **注意: 该案例使用了科大讯飞的RTASR，TTS模型以及深度求索（deepseek）的deepseek-chat模型。这三个模型均为收费模型，需要自行创建账号充值获取API Key并将获取到的API Key复制到程序对应地方，使用时机器人上位机要连接外网（能访问互联网）**
 
    - 该案例所使用的语音，文字转换模型为讯飞的模型： https://www.xfyun.cn/
-      - 讯飞实时语音转写（RTASR）模型 
-        - 访问讯飞平台,选择语音识别-实时语音转写:https://console.xfyun.cn/services/rta，获取app_id和api_key
+      - 讯飞实时语音转写标准版（RTASR） 
+        - 访问讯飞平台,选择语音识别-实时语音转写标准版:https://console.xfyun.cn/services/rta，获取app_id和api_key
         - 将程序`~/kuavo_ros_application/src/kuavo_large_model/kuavo_deepseek_model/rtasr_python3_demo.py`第298，299行的app_id和api_key替换成获取到的即可
       
       - 讯飞语音合成（TTS）模型

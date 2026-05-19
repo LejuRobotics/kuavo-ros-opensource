@@ -78,3 +78,12 @@ topics:
   - /arm_controller.*
   - /vmp_controller/.*
   - /ik_fk_result/.*
+  - /r_hand_pose
+  - /l_hand_pose
+  - /car_pose
+  - /waist_pose
+  - /r_shoulder_pose
+  - /l_shoulder_pose
+  - /head_pose
+  - /dance_controller/.*
+  - /move_base/base_cmd_vel

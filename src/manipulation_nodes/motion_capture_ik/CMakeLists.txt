@@ -5,6 +5,15 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 find_package(drake CONFIG REQUIRED)
 find_package(Eigen3 REQUIRED)
 
+# catkin_package(DEPENDS Eigen3) expects Eigen3_INCLUDE_DIRS/Eigen3_LIBRARIES.
+# FindEigen3.cmake typically defines EIGEN3_INCLUDE_DIRS instead (note the case).
+if(DEFINED EIGEN3_INCLUDE_DIRS AND NOT DEFINED Eigen3_INCLUDE_DIRS)
+  set(Eigen3_INCLUDE_DIRS "${EIGEN3_INCLUDE_DIRS}")
+endif()
+if(TARGET Eigen3::Eigen AND NOT DEFINED Eigen3_LIBRARIES)
+  set(Eigen3_LIBRARIES Eigen3::Eigen)
+endif()
+
 find_package(catkin REQUIRED COMPONENTS
   roslib
   rosbag
@@ -15,9 +24,13 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   message_generation
   geometry_msgs
+  visualization_msgs
   kuavo_msgs
   noitom_hi5_hand_udp_python
   leju_utils
+  humanoid_wheel_interface
+  ocs2_core
+  ocs2_msgs
 )
 find_package(BZip2 REQUIRED)
 
@@ -51,16 +64,12 @@ find_package(Boost REQUIRED COMPONENTS
   # fkSrv.srv
 # )
 
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-  geometry_msgs
-)
+# generate_messages already handled by kuavo_msgs
 
 catkin_package(
   INCLUDE_DIRS include
   # LIBRARIES motion_capture_ik_lib
-  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils
+  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core ocs2_msgs humanoid_wheel_interface
   DEPENDS drake Eigen3
 )
 
@@ -96,12 +105,12 @@ include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
+  ${humanoid_wheel_interface_INCLUDE_DIRS}
 )
 
 add_subdirectory(test)
 
 add_executable(arms_ik_node src/arms_ik_node.cpp)
-add_dependencies(arms_ik_node ${PROJECT_NAME}_generate_messages_cpp)
 if(EXISTS "${PLANT_IK_FILE}")
   target_link_libraries(arms_ik_node plantIK ${catkin_LIBRARIES} drake::drake)
 else()
@@ -151,8 +160,30 @@ add_executable(ik_ros_uni_cpp_node
   src/Quest3Debugger.cpp
   src/HandSmoother.cpp
 )
-add_dependencies(ik_ros_uni_cpp_node ${PROJECT_NAME}_generate_messages_cpp)
 target_include_directories(ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
 )
 target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
+
+# wheel_ik_ros_uni_cpp_node
+add_executable(wheel_ik_ros_uni_cpp_node 
+  src/wheel_ik_ros_uni_cpp_node.cpp 
+  src/WheelArmControlBaseROS.cpp
+  src/WheelQuest3IkIncrementalROS.cpp 
+  src/WheelQuest3IkIncrementalTools.cpp
+  src/WheelIncrementalControlModule.cpp
+  src/WheelKeyFramesVisualizer.cpp
+  src/BaseIKSolver.cpp
+  src/WheelOneStageIKEndEffector.cpp
+  src/Quest3ArmInfoTransformer.cpp
+  src/ArmLengthMeasurement.cpp
+  src/WheelJoyStickHandler.cpp
+  src/WheelHandSmoother.cpp
+)
+add_dependencies(wheel_ik_ros_uni_cpp_node ${catkin_EXPORTED_TARGETS})
+target_include_directories(wheel_ik_ros_uni_cpp_node PRIVATE
+  ${PROJECT_BINARY_DIR}/include
+  ${humanoid_wheel_interface_INCLUDE_DIRS}
+)
+target_link_libraries(wheel_ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake)
+target_compile_features(wheel_ik_ros_uni_cpp_node PUBLIC cxx_std_17)

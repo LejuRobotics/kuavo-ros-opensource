@@ -1,3 +1,4 @@
+      
 <mujoco model="kuavo scene">
   <include file="biped_s54.xml"/>
 
@@ -6,7 +7,7 @@
   <visual>
     <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
     <rgba haze="0.15 0.25 0.35 1"/>
-    <global azimuth="160" elevation="-20"/>
+    <global azimuth="-60" elevation="-5"/>
   </visual>
 
   <asset>
@@ -14,11 +15,64 @@
     <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
       markrgb="0.8 0.8 0.8" width="300" height="300"/>
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <!-- 崎岖地形高度场纹理 -->
+    <!-- size = (radius_x, radius_y, elevation_z, base_z) -->
+    <hfield name="rough" file="../../mujoco_assets/rough.png" size="10 10 0.1 0.20"/>
   </asset>
 
   <worldbody>
     <light pos="0 0 3.5" dir="0 0 -1" directional="true"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+        
+    <!-- 斜坡元素 -->
+    <geom name="slope"
+      type="box"
+      size="2.0 6.0 0.1"
+      euler="0 -0.174533 0"
+      pos="14 0 0.2571"
+      rgba="0.7 0.7 0.7 1"/>
+    <geom name="platform_10deg"
+      type="box"
+      size="0.5 6.0 0.08"
+      euler="0 0 0"
+      pos="16.46788 0 0.62288"
+      rgba="0.6 0.6 0.6 1"/>
+
+    <geom name="slope_down_10deg"
+      type="box"
+      size="2.0 6 0.1"
+      euler="0 0.174533 0"
+      pos="18.93576 0 0.25710"
+      rgba="0.7 0.7 0.7 1"/>
+
+    <geom name="slope_5deg"
+      type="box"
+      size="2.0 6 0.08"
+      euler="0 -0.0872665 0"
+      pos="3 0 0.08427"
+      rgba="0.7 0.7 0.7 1"/>
+    <geom name="platform_5deg"
+      type="box"
+      size="0.5 6 0.08"
+      euler="0 0 0"
+      pos="5.49152 0 0.25828"
+      rgba="0.6 0.6 0.6 1"/>
+
+    <geom name="slope_down_5deg"
+      type="box"
+      size="2.0 6 0.08"
+      euler="0 0.0872665 0"
+      pos="7.98304 0 0.08427"
+      rgba="0.7 0.7 0.7 1"/>
+    
+    <!-- heightfield 崎岖地形，平移到 x=15，避免和斜坡区域重叠 -->
+    <geom name="rough_terrain"
+      type="hfield"
+      hfield="rough"
+      pos="-11 0 0"
+      rgba="0.5 0.5 0.5 1"
+      friction="1 0.005 0.0001"/>
+    
   </worldbody>
 
   <keyframe>
@@ -34,4 +88,4 @@
     0 0"/>
   </keyframe>
 
-</mujoco>
+</mujoco>    

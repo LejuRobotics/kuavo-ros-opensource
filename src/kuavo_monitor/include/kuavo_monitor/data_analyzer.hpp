@@ -47,10 +47,6 @@ namespace HighlyDynamic
             std::for_each(data_queue_.end() - recent_num_, data_queue_.end(), [&](float data)
                           { continous_high &= (data > upperThreshold); });
 
-            if (continous_low)
-                printError("连续" + std::to_string(recent_num_) + "个 " + data_name_ + " 数据值低于下限阈值(" + std::to_string(lowerThreshold) + ") !");
-            if (continous_high)
-                printError("连续" + std::to_string(recent_num_) + "个 " + data_name_ + " 数据值低于下限阈值(" + std::to_string(lowerThreshold) + ") !");
         }
 
         void analyzeVariance(float warningThreshold, float errorThreshold)

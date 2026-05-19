@@ -56,11 +56,10 @@ int main(int argc, char** argv) {
   std::cerr << "Loading library folder: " << libFolder << std::endl;
   std::cerr << "Loading urdf file: " << urdfFile << std::endl;
   // Robot interface
-  HumanoidWheelInterface interface(taskFile, libFolder, urdfFile);
+  HumanoidWheelInterface interface(taskFile, libFolder, urdfFile, true);
 
   // ROS ReferenceManager
-  std::shared_ptr<ocs2::RosReferenceManager> rosReferenceManagerPtr(
-      new ocs2::RosReferenceManager(robotName, interface.getReferenceManagerPtr()));
+  auto rosReferenceManagerPtr = std::make_shared<RosReferenceManager>(robotName, interface.getReferenceManagerPtr());
   rosReferenceManagerPtr->subscribe(nodeHandle);
 
   // MPC

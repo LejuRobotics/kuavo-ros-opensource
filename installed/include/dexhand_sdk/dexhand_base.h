@@ -88,7 +88,7 @@ using ActionSeqDataTypeVec = std::vector<ActionSeqDataType>;
 
 /* open finger positions */
 const UnsignedFingerArray kOpenFingerPositions = {
-    0, 0, 0, 0, 0, 0
+    100, 0, 0, 0, 0, 0
 };
 /* close finger positions */
 const UnsignedFingerArray kCloseFingerPositions = {

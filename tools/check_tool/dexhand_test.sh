@@ -93,7 +93,7 @@ main() {
     # 解析命令行参数
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --touch|--normal|--revo2|--revo2can)
+            --touch|--normal|--revo1can|--revo2|--revo2can)
                 extra_args="$extra_args $1"
                 shift
                 ;;

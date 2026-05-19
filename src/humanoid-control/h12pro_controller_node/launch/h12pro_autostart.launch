@@ -4,12 +4,20 @@
     <param name="start_way"  value="auto"/>
     <param name="real_robot" value="true"/>
     <arg name="h12_log_channel" default="true"/>
+    <arg name="coredump" default="true"/>
+    <arg name="core_prefix" value="/bin/bash -c 'ulimit -c unlimited; exec &quot;$0&quot; &quot;$@&quot;'" if="$(arg coredump)"/>
+    <arg name="core_prefix" value="" unless="$(arg coredump)"/>
     <param name="h12_log_channel" value="$(arg h12_log_channel)"/>
     <node pkg="h12pro_controller_node" type="h12pro_channel_publisher" name="h12pro_channel_publisher" output="screen"/>
 
-    <node pkg="h12pro_controller_node" type="ocs2_h12pro_node.py" name="joy_node" output="screen"/>
+    <!-- joy_node 的生命周期由 monitor_ocs2_h12pro.sh 管理：
+         不设 respawn，避免和 bt2 等手动路径下的同名 /joy_node 争抢。
+         进程异常退出 / hang / 被 bt2 抢占名字，均由 monitor 做统一恢复和让位。 -->
+    <node pkg="h12pro_controller_node" type="ocs2_h12pro_node.py" name="joy_node" output="screen" launch-prefix="$(arg core_prefix)">
+        <env name="PYTHONFAULTHANDLER" value="1"/>
+        <env name="PYTHONUNBUFFERED" value="1"/>
+    </node>
     
     <!-- for Kuavo Humanoid Websocket SDK: host_srv -->
     <include file="$(find h12pro_controller_node)/launch/kuavo_humanoid_sdk_ws_srv.launch"/>
-    <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
 </launch>

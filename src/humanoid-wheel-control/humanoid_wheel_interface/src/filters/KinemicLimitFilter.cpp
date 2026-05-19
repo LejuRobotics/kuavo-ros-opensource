@@ -19,6 +19,11 @@ KinemicLimitFilter::KinemicLimitFilter(int dofNum, double dt)
     prevDataFirstOrder_ = Eigen::VectorXd::Zero(dofNum_);
     prevDataSecondOrder_ = Eigen::VectorXd::Zero(dofNum_);
 
+    // 初始化值限制
+    hasValueLimits_ = false;
+    minValues_ = Eigen::VectorXd::Constant(dofNum_, -std::numeric_limits<double>::infinity());
+    maxValues_ = Eigen::VectorXd::Constant(dofNum_, std::numeric_limits<double>::infinity());
+
     // 初始化 ruckig 相关数据结构
     inputVec_.resize(dofNum_);
     outputVec_.resize(dofNum_);
@@ -54,6 +59,15 @@ Eigen::VectorXd KinemicLimitFilter::update(const Eigen::VectorXd& data)
         return prevData_;
     }
 
+    // 应用值限制
+    Eigen::VectorXd clampedData = data;
+    if (hasValueLimits_)
+    {
+        for (size_t i = 0; i < dofNum_; ++i) {
+            clampedData(i) = std::max(minValues_(i), std::min(maxValues_(i), data(i)));
+        }
+    }
+
     Eigen::VectorXd filteredData(dofNum_);
     Eigen::VectorXd filteredFirstOrder(dofNum_);
     Eigen::VectorXd filteredSecondOrder(dofNum_);
@@ -66,7 +80,7 @@ Eigen::VectorXd KinemicLimitFilter::update(const Eigen::VectorXd& data)
         inputVec_[i].current_acceleration = {prevDataSecondOrder_(i)};
         
         // 只设置目标位置，不设置目标速度和加速度
-        inputVec_[i].target_position = {data(i)};
+        inputVec_[i].target_position = {clampedData(i)};
         
         // 使用ruckig进行轨迹规划
         auto result = ruckigVec_[i].update(inputVec_[i], outputVec_[i]);
@@ -94,6 +108,62 @@ Eigen::VectorXd KinemicLimitFilter::update(const Eigen::VectorXd& data)
     return filteredData;
 }
 
+const Eigen::VectorXd& KinemicLimitFilter::getFirstOrderDerivative() const {
+    return prevDataFirstOrder_;
+}
+
+const Eigen::VectorXd& KinemicLimitFilter::getSecondOrderDerivative() const {
+    return prevDataSecondOrder_;
+}
+
+void KinemicLimitFilter::setValueLimit(const Eigen::VectorXd& minLimit, 
+                                       const Eigen::VectorXd& maxLimit) {
+    if (minLimit.size() != dofNum_ || maxLimit.size() != dofNum_) {
+        ROS_ERROR_STREAM("Value limit dimension mismatch! Expected: " 
+                        << dofNum_ << ", Got min: " << minLimit.size() 
+                        << ", max: " << maxLimit.size());
+        return;
+    }
+    
+    for (size_t i = 0; i < dofNum_; ++i) {
+        if (minLimit(i) > maxLimit(i)) {
+            ROS_ERROR_STREAM("Invalid value limits for DOF " << i 
+                           << ": min (" << minLimit(i) << ") > max (" << maxLimit(i) << ")");
+            return;
+        }
+        minValues_(i) = minLimit(i);
+        maxValues_(i) = maxLimit(i);
+    }
+    hasValueLimits_ = true;
+}
+
+void KinemicLimitFilter::setFirstOrderDerivativeLimit(const Eigen::VectorXd& minLimit, 
+                                                       const Eigen::VectorXd& maxLimit) 
+{
+    if (minLimit.size() != dofNum_ || maxLimit.size() != dofNum_) {
+        ROS_ERROR_STREAM("First order limit dimension mismatch! Expected: " 
+                        << dofNum_ << ", Got min: " << minLimit.size() 
+                        << ", max: " << maxLimit.size());
+        return;
+    }
+    
+    for (size_t i = 0; i < dofNum_; ++i) {
+        if (maxLimit(i) > 0) {
+            inputVec_[i].max_velocity = {maxLimit(i)};
+        } else {
+            ROS_WARN_STREAM("Invalid second order maxLimit for DOF " << i << ": " << maxLimit(i));
+        }
+    }
+
+    for (size_t i = 0; i < dofNum_; ++i) {
+        if (minLimit(i) < maxLimit(i)) {
+            inputVec_[i].min_velocity = {minLimit(i)};
+        } else {
+            ROS_WARN_STREAM("Invalid second order minLimit for DOF " << i << ": " << minLimit(i));
+        }
+    }
+}
+
 void KinemicLimitFilter::setFirstOrderDerivativeLimit(const Eigen::VectorXd& limit) {
     if (limit.size() != dofNum_) {
         ROS_ERROR_STREAM("First order limit dimension mismatch! Expected: " 
@@ -106,6 +176,33 @@ void KinemicLimitFilter::setFirstOrderDerivativeLimit(const Eigen::VectorXd& lim
             inputVec_[i].max_velocity = {limit(i)};
         } else {
             ROS_WARN_STREAM("Invalid first order limit for DOF " << i << ": " << limit(i));
+        }
+    }
+}
+
+void KinemicLimitFilter::setSecondOrderDerivativeLimit(const Eigen::VectorXd& minLimit, 
+                                                       const Eigen::VectorXd& maxLimit) 
+{
+    if (minLimit.size() != dofNum_ || maxLimit.size() != dofNum_) {
+        ROS_ERROR_STREAM("Second order limit dimension mismatch! Expected: " 
+                        << dofNum_ << ", Got min: " << minLimit.size() 
+                        << ", max: " << maxLimit.size());
+        return;
+    }
+    
+    for (size_t i = 0; i < dofNum_; ++i) {
+        if (maxLimit(i) > 0) {
+            inputVec_[i].max_acceleration = {maxLimit(i)};
+        } else {
+            ROS_WARN_STREAM("Invalid second order maxLimit for DOF " << i << ": " << maxLimit(i));
+        }
+    }
+
+    for (size_t i = 0; i < dofNum_; ++i) {
+        if (minLimit(i) < maxLimit(i)) {
+            inputVec_[i].min_acceleration = {minLimit(i)};
+        } else {
+            ROS_WARN_STREAM("Invalid second order minLimit for DOF " << i << ": " << minLimit(i));
         }
     }
 }
@@ -162,7 +259,7 @@ void KinemicLimitFilter::reset(const Eigen::VectorXd& initialValue) {
         inputVec_[i].current_acceleration = {0.0};
     }
     
-    ROS_INFO_STREAM("KinemicLimitFilter reset to specified initial state");
+    // ROS_INFO_STREAM("KinemicLimitFilter reset to specified initial state");
 }
 
 }  // namespace mobile_manipulator

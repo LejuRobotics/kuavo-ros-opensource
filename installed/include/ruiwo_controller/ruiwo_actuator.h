@@ -86,7 +86,8 @@ public:
     void close() override;
     void join();
     // void set_positions(const std::vector<uint8_t> &ids, const std::vector<double> &positions ,std::vector<double> vel ,std::vector<double> pos_kp ,std::vector<double> pos_kd,std::vector<double> torque);
-    void set_positions(const std::vector<uint8_t> &ids, const std::vector<double> &positions,const std::vector<double> &torque,const std::vector<double> &velocity) override;
+    void set_positions(const std::vector<uint8_t> &ids, const std::vector<double> &positions,const std::vector<double> &torque,const std::vector<double> &velocity,
+                       const std::vector<double> &kp = {}, const std::vector<double> &kd = {}) override;
     void set_torque(const std::vector<uint8_t> &ids, const std::vector<double> &torque) override;
     void set_velocity(const std::vector<uint8_t> &ids, const std::vector<double> &velocity) override;
     void saveZeroPosition() override;

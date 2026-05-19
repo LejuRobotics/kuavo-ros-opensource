@@ -169,11 +169,15 @@ public:
      * @param positions 目标位置（角度）
      * @param torque 力矩值
      * @param velocity 速度值（角度/秒）
+     * @param kp 位置比例增益（为空时使用缓存的 rt_params.kp_pos）
+     * @param kd 位置微分增益（为空时使用缓存的 rt_params.kd_pos）
      */
     virtual void set_positions(const std::vector<uint8_t> &index,
                              const std::vector<double> &positions,
                              const std::vector<double> &torque,
-                             const std::vector<double> &velocity) = 0;
+                             const std::vector<double> &velocity,
+                             const std::vector<double> &kp = {},
+                             const std::vector<double> &kd = {}) = 0;
 
     /**
      * @brief 设置多个关节力矩

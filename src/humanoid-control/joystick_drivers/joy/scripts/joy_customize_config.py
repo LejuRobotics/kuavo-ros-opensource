@@ -12,6 +12,9 @@ from std_msgs.msg import String, Bool, Float64
 from geometry_msgs.msg import Twist
 from kuavo_msgs.srv import playmusic, playmusicRequest
 from kuavo_msgs.srv import ExecuteArmAction, ExecuteArmActionRequest
+from kuavo_msgs.srv import SetString, SetStringRequest
+from kuavo_msgs.srv import getControllerList
+from kuavo_msgs.msg import DanceTrajectoryState
 from std_srvs.srv import Trigger
 from humanoid_plan_arm_trajectory.msg import RobotActionState
 
@@ -152,12 +155,21 @@ class JoyCustomizeConfigNode:
         self.robot_action_state_sub = rospy.Subscriber("/robot_action_state", RobotActionState, self._robot_action_state_callback, queue_size=1)
         # 订阅RL控制器状态话题，用于判断当前是否处于RL控制器模式
         self.is_rl_controller_sub = rospy.Subscriber("/humanoid_controller/is_rl_controller_", Float64, self._is_rl_controller_callback, queue_size=1)
+        self.dance_trajectory_state_sub = rospy.Subscriber(
+            "/humanoid_controller/dance_trajectory_state",
+            DanceTrajectoryState,
+            self._dance_trajectory_state_callback,
+            queue_size=1,
+        )
         
         # 动作执行状态标志
         self.robot_action_executing = False
         
         # RL控制器状态标志（用于判断是否处于RL控制器模式）
         self._is_rl_controller = False
+        self._last_dance_run_ids: Dict[str, int] = {}
+        self._pending_dance_music: Optional[Dict[str, Any]] = None
+        self._dance_music_pending_timeout = 10.0
 
         # Publishers for robot control (align with C++ behavior)
         self.stop_pub = rospy.Publisher("/stop_robot", Bool, queue_size=10)
@@ -420,6 +432,18 @@ class JoyCustomizeConfigNode:
                 except Exception as e:
                     rospy.logerr(f"Failed to play music {music}: {e}")
 
+    def _normalize_name_list(self, names):
+        """将配置中的名称字段统一成过滤空值后的列表。"""
+        if names is None:
+            return []
+        if isinstance(names, str):
+            name = names.strip()
+            return [name] if name else []
+        if isinstance(names, (list, tuple)):
+            return [str(name).strip() for name in names if str(name).strip()]
+        name = str(names).strip()
+        return [name] if name else []
+
     def _set_robot_play_music(self, music_file_name: str, music_volume: int) -> bool:
         """机器人播放指定文件的音乐"""
         try:
@@ -445,6 +469,83 @@ class JoyCustomizeConfigNode:
         # data: 0.0=MPC模式, 1.0=RL控制器模式
         # 当data > 0.5时，表示当前处于RL控制器模式
         self._is_rl_controller = (msg.data > 0.5)
+
+    def _prepare_dance_music_pending(self, dance_name: str, music_names) -> None:
+        normalized_music_names = self._normalize_name_list(music_names)
+        self._pending_dance_music = {
+            "dance_name": dance_name,
+            "music_names": normalized_music_names,
+            "request_time": rospy.Time.now(),
+            "previous_run_id": int(self._last_dance_run_ids.get(dance_name, 0)),
+            "played": False,
+        }
+        rospy.loginfo(
+            f"[JoyCustomize] Pending dance music: {dance_name} "
+            f"(previous_run_id={self._pending_dance_music['previous_run_id']}, "
+            f"music={normalized_music_names})"
+        )
+
+    def _clear_dance_music_pending(self) -> None:
+        self._pending_dance_music = None
+
+    def _dance_trajectory_state_callback(self, msg: DanceTrajectoryState) -> None:
+        self._last_dance_run_ids[msg.dance_name] = int(msg.run_id)
+
+        pending = self._pending_dance_music
+        if not pending or pending.get("played", False):
+            return
+
+        if (rospy.Time.now() - pending["request_time"]).to_sec() > self._dance_music_pending_timeout:
+            rospy.logwarn(f"[JoyCustomize] Dance music pending timeout: {pending['dance_name']}")
+            self._clear_dance_music_pending()
+            return
+
+        if msg.dance_name != pending["dance_name"]:
+            return
+        if msg.state not in ("started", "running"):
+            return
+
+        new_run = int(msg.run_id) > int(pending["previous_run_id"])
+        state_after_request = msg.header.stamp >= pending["request_time"]
+        if not new_run or not state_after_request:
+            return
+
+        pending["played"] = True
+        music_names = pending.get("music_names", [])
+        if music_names:
+            rospy.loginfo(f"[JoyCustomize] Dance trajectory started, playing music: {music_names}")
+            music_thread = threading.Thread(target=self._play_music, args=(music_names,))
+            music_thread.daemon = True
+            music_thread.start()
+        else:
+            rospy.loginfo(f"[JoyCustomize] Dance trajectory started, no music configured for {msg.dance_name}")
+        self._clear_dance_music_pending()
+
+    def _get_current_controller_name(self) -> Optional[str]:
+        service_name = "/humanoid_controller/get_controller_list"
+        try:
+            client = rospy.ServiceProxy(service_name, getControllerList)
+            response = client()
+            if response.success:
+                return response.current_controller
+            rospy.logwarn(f"[JoyCustomize] Get current controller failed: {response.message}")
+        except Exception as e:
+            rospy.logwarn(f"[JoyCustomize] Service call to '{service_name}' failed: {e}")
+        return None
+
+    def _restart_dance_controller(self, dance_name: str) -> bool:
+        service_name = f"/humanoid_controller/{dance_name}/restart_dance"
+        try:
+            rospy.wait_for_service(service_name, timeout=1.0)
+            client = rospy.ServiceProxy(service_name, Trigger)
+            response = client()
+            if response.success:
+                rospy.loginfo(f"[JoyCustomize] Restarted dance '{dance_name}': {response.message}")
+                return True
+            rospy.logwarn(f"[JoyCustomize] Restart dance '{dance_name}' failed: {response.message}")
+        except Exception as e:
+            rospy.logwarn(f"[JoyCustomize] Service call to '{service_name}' failed: {e}")
+        return False
     
     def _call_execute_arm_action(self, action_name):
         """调用手臂动作执行服务"""
@@ -641,43 +742,39 @@ class JoyCustomizeConfigNode:
 
                     if button_prev == 1 and button_current == 0:
 
-                        # 如果当前处于RL控制器模式，跳过组合按键动作
-                        if self._is_rl_controller:
-                            rospy.loginfo(f"Skipping customize action: currently in RL controller mode (is_rl_controller={self._is_rl_controller})")
-                            continue
-
                         # 每次按钮释放时重新加载配置文件
                         self._load_customize_config()
 
+                        # 确定 action_key
+                        action_key = None
                         # 情况 1: M1 按下、M2 未按下
                         if self._m1_pressed and not self._m2_pressed:
                             action_key = f"customize_action_M1_{button_name}"
-                            rospy.loginfo(f"M1 + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
-
                         # 情况 2: M2 按下、M1 未按下
                         elif self._m2_pressed and not self._m1_pressed:
                             action_key = f"customize_action_M2_{button_name}"
-                            rospy.loginfo(f"M2 + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
-
                         # 情况 3: M1 和 M2 同时按下
                         elif self._m1_pressed and self._m2_pressed:
                             action_key = f"customize_action_M1M2_{button_name}"
-                            rospy.loginfo(f"M1 + M2 + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
-
                         # 情况 4: LT（轴）按下、RT 未按下
                         elif self._lt_pressed and not self._rt_pressed and self.joy_execute_action:
                             action_key = f"customize_action_LT_{button_name}"
-                            rospy.loginfo(f"LT + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
-
                         # 情况 5: RT（轴）按下、LT 未按下
                         elif self._rt_pressed and not self._lt_pressed and self.joy_execute_action:
                             action_key = f"customize_action_RT_{button_name}"
-                            rospy.loginfo(f"RT + {button_name} released, triggering {action_key}")
-                            self._execute_customize_action(action_key)
+
+                        if action_key is None:
+                            continue
+
+                        # 如果当前处于RL控制器模式，dance类型允许通过，其他类型跳过
+                        if self._is_rl_controller:
+                            action_type = self.customize_config.get(action_key, {}).get("type", "")
+                            if action_type != "dance":
+                                rospy.loginfo(f"Skipping customize action: currently in RL controller mode (is_rl_controller={self._is_rl_controller})")
+                                continue
+
+                        rospy.loginfo(f"{button_name} released, triggering {action_key}")
+                        self._execute_customize_action(action_key)
 
             # Update previous states
             self._prev_buttons = list(joy_msg.buttons)
@@ -779,6 +876,38 @@ class JoyCustomizeConfigNode:
         else:
             rospy.logwarn(f"No shell_command found for action")
 
+    def execute_dance_type(self, action_config):
+        """处理dance类型的自定义动作，切换到指定舞蹈控制器"""
+        dance_name = action_config.get("dance_name", "")
+        if not dance_name:
+            rospy.logwarn("No dance_name specified for dance action")
+            return
+        music_names = action_config.get("music_name", [])
+        service_name = "/humanoid_controller/switch_to_dance_controller"
+        current_controller = self._get_current_controller_name()
+        self._prepare_dance_music_pending(dance_name, music_names)
+        if current_controller == dance_name:
+            if not self._restart_dance_controller(dance_name):
+                self._clear_dance_music_pending()
+            return
+        try:
+            rospy.wait_for_service(service_name, timeout=1.0)
+            switch_client = rospy.ServiceProxy(service_name, SetString)
+            req = SetStringRequest()
+            req.data = dance_name
+            response = switch_client(req)
+            if response.success:
+                rospy.loginfo(f"[JoyCustomize] Dance switch success: {response.message}")
+            else:
+                rospy.logwarn(f"[JoyCustomize] Dance switch failed: {response.message}")
+                self._clear_dance_music_pending()
+        except rospy.ServiceException as e:
+            rospy.logerr(f"[JoyCustomize] Service call to '{service_name}' failed: {e}")
+            self._clear_dance_music_pending()
+        except rospy.ROSException as e:
+            rospy.logerr(f"[JoyCustomize] Service '{service_name}' not available: {e}")
+            self._clear_dance_music_pending()
+
     def _execute_customize_action(self, action_key: str) -> None:
         """执行自定义动作"""
         try:
@@ -789,7 +918,8 @@ class JoyCustomizeConfigNode:
                 # 使用字典映射方式调用对应的处理函数
                 action_handlers = {
                     "action": lambda: self.execute_action_type(action_config),
-                    "shell": lambda: self.execute_shell_type(action_config)
+                    "shell": lambda: self.execute_shell_type(action_config),
+                    "dance": lambda: self.execute_dance_type(action_config)
                 }
                 
                 # 获取并调用对应的处理函数

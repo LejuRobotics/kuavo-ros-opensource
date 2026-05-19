@@ -1,0 +1,6 @@
+kuavo_msgs/lbTimedOfflineTraj[]    offlineTraj   # 多条离线轨迹(目前支持左右臂, 躯干笛卡尔)
+
+---
+
+bool isSuccess          # 是否能成功执行
+string message          # 详细信息

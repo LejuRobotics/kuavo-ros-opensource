@@ -13,6 +13,7 @@
 #include <std_srvs/SetBool.h>
 #include <geometry_msgs/Twist.h>
 #include <nav_msgs/Odometry.h>
+#include <geometry_msgs/Wrench.h>
 
 namespace gazebo
 {
@@ -32,6 +33,8 @@ private:
     void stopCallback(const std_msgs::Bool::ConstPtr& msg);
     bool simStartCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
+    void leftHandWrenchCallback(const geometry_msgs::Wrench::ConstPtr& msg);
+    void rightHandWrenchCallback(const geometry_msgs::Wrench::ConstPtr& msg);
 
     void OnUpdate(const common::UpdateInfo& _info);
     bool ParseImu(const sdf::ElementPtr& _sdf);
@@ -93,6 +96,8 @@ private:
     ros::NodeHandle* nh_;
     ros::Subscriber stop_sub_;
     ros::Subscriber cmd_vel_sub_;
+    ros::Subscriber l_hand_ext_wrench_sub_;
+    ros::Subscriber r_hand_ext_wrench_sub_;
     ros::ServiceServer sim_start_srv_;
     
     // 里程计发布相关
@@ -113,6 +118,18 @@ private:
     std::mutex cmd_vel_mutex_;
     std::vector<physics::JointPtr> wheel_yaw_joints_;    // 4个yaw关节
     std::vector<physics::JointPtr> wheel_pitch_joints_;  // 4个pitch关节
+
+    // 手臂末端外力
+    std::mutex wrench_mutex_;
+    physics::LinkPtr left_arm_link_;
+    physics::LinkPtr right_arm_link_;
+    ignition::math::Vector3d left_ee_offset_;
+    ignition::math::Vector3d right_ee_offset_;
+    physics::LinkPtr left_hand_link_;   // Gazebo 中对应 MuJoCo 的 zarm_r7_end_effector
+    geometry_msgs::Wrench left_hand_wrench_;
+    bool left_hand_active_ = false;
+    geometry_msgs::Wrench right_hand_wrench_;
+    bool right_hand_active_ = false;
 
     // 机器人版本
     int robotVersion_ = 60;

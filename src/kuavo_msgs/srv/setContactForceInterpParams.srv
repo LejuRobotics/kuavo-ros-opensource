@@ -1,0 +1,5 @@
+float64 transition_time
+float64 interpolation_speed
+---
+bool success
+string message

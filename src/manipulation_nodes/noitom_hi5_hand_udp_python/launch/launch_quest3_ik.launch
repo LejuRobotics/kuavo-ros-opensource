@@ -1,6 +1,7 @@
 <launch>
     <!-- 定义命令行参数 -->
     <arg name="version" default="4" />
+    <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
     <arg name="ctrl_arm_idx" default="2" />
     <arg name="ik_type_idx" default="0" />
     <arg name="ip_address" default="" />
@@ -15,19 +16,37 @@
     <arg name="use_step_turning" default="false"/> <!-- 是否启用单步转向功能 -->
     <arg name="use_cpp_monitor" default="false"/> <!-- false: use Python Monitor (monitor_quest3.py), true: use C++ Monitor (monitor_quest3_cpp) -->
     <arg name="use_cpp_incremental_ik" default="false"/> <!-- false: use Python IK (ik_ros_uni.py), true: use C++ Incremental IK (ik_ros_uni_cpp_node) -->
-    <arg name="fhan_r" default="3000.0" />
-    <arg name="fhan_kh0" default="4.0" />
-    <arg name="fhan_r_joint" default="3000.0" />
-    <arg name="fhan_kh0_joint" default="4.0" />
-    <arg name="max_joint_velocity" default="300.0" />
-    <arg name="delta_scale_x" default="1.36" />
-    <arg name="delta_scale_y" default="1.36" />
-    <arg name="delta_scale_z" default="1.36" />
+    <param name="/use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)" type="bool"/>
+    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) // 10 == 6)"/> <!-- tens digit is 6: true, else false -->
+    <arg name="enable_timestamp_log" default="false"/> <!-- 是否启用 IK 时间戳日志，开启后保存至 $HOME/logs/ -->
+    <param name="/enable_timestamp_log" value="$(arg enable_timestamp_log)" type="bool"/>
+    <arg name="use_pico" default="false"/> <!-- false: use ik_ros_uni_cpp_node, true: use wheel_ik_ros_uni_cpp_node -->
+    <arg name="task_space_acc_limit" default="500.0" />
+    <arg name="task_space_jerk_limit" default="3000.0" />
+    <arg name="joint_space_acc_limit" default="500.0" />
+    <arg name="joint_space_jerk_limit" default="3000.0" />
+    <arg name="max_joint_velocity" default="30.0" />
+    <arg name="delta_scale_x" default="1.26" />
+    <arg name="delta_scale_y" default="1.26" />
+    <arg name="delta_scale_z" default="1.26" />
     <arg name="delta_scale_roll" default="1.0" />
     <arg name="delta_scale_pitch" default="1.0" />
     <arg name="delta_scale_yaw" default="1.0" />
     <arg name="max_pos_diff" default="0.45" />
     <arg name="arm_move_threshold" default="0.002" />
+    <arg name="pos_vel_limit" default="30.0" /> <!-- 位置速度限制 -->
+    <!-- 增量控制核心参数（ik_ros_uni_cpp_node 需要，缺失会卡在 hasParam 等待） -->
+    <arg name="fhan_r" default="3000.0" />
+    <arg name="fhan_kh0" default="3.0" />
+    <!-- 按 ik_launch.sh 默认值设置 -->
+    <arg name="fhan_r_joint" default="6000.0" />
+    <arg name="fhan_kh0_joint" default="3.0" />
+    <!-- 仅用于 ik_ros_uni_cpp_node 的旧行为速度参数 -->
+    <arg name="ik_ros_fhan_r" default="3000.0" />
+    <arg name="ik_ros_fhan_kh0" default="4.0" />
+    <arg name="ik_ros_fhan_r_joint" default="3000.0" />
+    <arg name="ik_ros_fhan_kh0_joint" default="4.0" />
+    <arg name="ik_ros_max_joint_velocity" default="300.0" />
     <!-- 末端夹爪姿态偏置旋转（RPY角度，单位：弧度） -->
     <arg name="left_hand_quat_offset_roll" default="0.0" />
     <arg name="left_hand_quat_offset_pitch" default="0.0" />
@@ -40,7 +59,7 @@
     <arg name="min_reachable_distance" default="0.08" /> <!-- 最小可达距离 -->
     <arg name="elbow_min_distance" default="0.16" /> <!-- 手到肘最小距离约束 -->
     <arg name="elbow_max_distance" default="0.24" /> <!-- 手到肘最大距离约束 -->
-    <arg name="use_incremental_hand_orientation" default="true" /> <!-- 是否使用增量式手部姿态 -->
+    <arg name="use_incremental_hand_orientation" default="false" /> <!-- 是否使用增量式手部姿态 -->
     <arg name="box_min_bound" default="[0.00, -0.6, -0.19]" /> <!-- 手部位置约束边界框最小值 [x, y, z] -->
     <arg name="box_max_bound" default="[0.4, 0.6, 0.4]" /> <!-- 手部位置约束边界框最大值 [x, y, z] -->
     <arg name="chest_offset_y_ax" default="0.05" /> <!-- 胸部中线偏移量，用于防止左右手过中线 -->
@@ -48,7 +67,7 @@
     <arg name="right_center" default="[0, -0.02, 0]" /> <!-- 右手圆柱体约束中心 [x, y, z] -->
     <arg name="default_left_hand_pos_on_exit" default="[0.00, 0.293, -0.16]" /> <!-- 退出时左手默认目标位置 [x, y, z] -->
     <arg name="default_right_hand_pos_on_exit" default="[0.00, -0.293, -0.16]" /> <!-- 退出时右手默认目标位置 [x, y, z] -->
-    <arg name="hand_changing_mode_threshold" default="0.085" /> <!-- 手部模式切换时的阈值 -->
+    <arg name="hand_changing_mode_threshold" default="1.20" /> <!-- 手部模式切换时的阈值 -->
     <!-- 四元数角度限制参数（ZYX欧拉角，单位：弧度） -->
     <arg name="zyx_limits_final" default="[1.4923, 1.4923, 1.4923]" /> <!-- 最终四元数角度限制 [z, y, x] -->
     <arg name="zyx_limits_ee" default="[1.4923, 1.4923, 1.4923]" /> <!-- 相对end-effector的四元数角度限制 [z, y, x] -->
@@ -56,24 +75,29 @@
     <param name="/quest3/use_step_turning" value="$(arg use_step_turning)" />
     <!-- 设置全局control_torso参数 -->
     <param name="control_torso" value="$(arg control_torso)" type="bool"/>
+    <!-- 设置 wheel_ik 全局参数，供其他节点统一读取 -->
+    <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool"/>
     
+    <param name="/use_pico" value="$(arg use_pico)" type="bool"/>
+
     <!-- motion_capture_ik -->
     <!-- Python IK Node (启动当 use_cpp_incremental_ik=false 时) -->
     <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(arg use_cpp_incremental_ik)">
         <param name="use_arm_collision" value="$(arg use_arm_collision)"/>
     </node>
 
-    <!-- C++ IK Node (启动当 use_cpp_incremental_ik=true 时) -->
-    <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="ik_ros_uni_cpp_node" output="screen" if="$(arg use_cpp_incremental_ik)">
+    <!-- C++ IK Node (启动当 use_cpp_incremental_ik=true 且 wheel_ik=false 时) -->
+    <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="ik_ros_uni_cpp_node" output="screen" if="$(eval arg('use_cpp_incremental_ik') and not wheel_ik)">
         <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
         <param name="control_torso" value="$(arg control_torso)" />
         <param name="/end_effector_type" value="$(arg ee_type)"/>
         <remap from="/kuavo_arm_traj_cpp" to="/kuavo_arm_traj" />
-        <param name="/quest3/fhan_r" value="$(arg fhan_r)" />
-        <param name="/quest3/fhan_kh0" value="$(arg fhan_kh0)" />
-        <param name="/quest3/fhan_r_joint" value="$(arg fhan_r_joint)" />
-        <param name="/quest3/fhan_kh0_joint" value="$(arg fhan_kh0_joint)" />
-        <param name="/quest3/max_joint_velocity" value="$(arg max_joint_velocity)" />
+        <!-- 兼容 C++ 节点当前读取路径：/ik_ros_uni_cpp_node/quest3/* -->
+        <param name="/quest3/fhan_r" value="$(arg ik_ros_fhan_r)" />
+        <param name="/quest3/fhan_kh0" value="$(arg ik_ros_fhan_kh0)" />
+        <param name="/quest3/fhan_r_joint" value="$(arg ik_ros_fhan_r_joint)" />
+        <param name="/quest3/fhan_kh0_joint" value="$(arg ik_ros_fhan_kh0_joint)" />
+        <param name="/quest3/max_joint_velocity" value="$(arg ik_ros_max_joint_velocity)" />
         <param name="/quest3/delta_scale_x" value="$(arg delta_scale_x)" />
         <param name="/quest3/delta_scale_y" value="$(arg delta_scale_y)" />
         <param name="/quest3/delta_scale_z" value="$(arg delta_scale_z)" />
@@ -82,6 +106,25 @@
         <param name="/quest3/delta_scale_yaw" value="$(arg delta_scale_yaw)" />
         <param name="/quest3/max_pos_diff" value="$(arg max_pos_diff)" />
         <param name="/quest3/arm_move_threshold" value="$(arg arm_move_threshold)" />
+        <!-- 同步到 /quest3/*，兼容其他实现 -->
+        <param name="/quest3/fhan_r" value="$(arg ik_ros_fhan_r)" />
+        <param name="/quest3/fhan_kh0" value="$(arg ik_ros_fhan_kh0)" />
+        <param name="/quest3/fhan_r_joint" value="$(arg ik_ros_fhan_r_joint)" />
+        <param name="/quest3/fhan_kh0_joint" value="$(arg ik_ros_fhan_kh0_joint)" />
+        <param name="/quest3/task_space_acc_limit" value="$(arg task_space_acc_limit)" />
+        <param name="/quest3/task_space_jerk_limit" value="$(arg task_space_jerk_limit)" />
+        <param name="/quest3/joint_space_acc_limit" value="$(arg joint_space_acc_limit)" />
+        <param name="/quest3/joint_space_jerk_limit" value="$(arg joint_space_jerk_limit)" />
+        <param name="/quest3/max_joint_velocity" value="$(arg ik_ros_max_joint_velocity)" />
+        <param name="/quest3/delta_scale_x" value="$(arg delta_scale_x)" />
+        <param name="/quest3/delta_scale_y" value="$(arg delta_scale_y)" />
+        <param name="/quest3/delta_scale_z" value="$(arg delta_scale_z)" />
+        <param name="/quest3/delta_scale_roll" value="$(arg delta_scale_roll)" />
+        <param name="/quest3/delta_scale_pitch" value="$(arg delta_scale_pitch)" />
+        <param name="/quest3/delta_scale_yaw" value="$(arg delta_scale_yaw)" />
+        <param name="/quest3/max_pos_diff" value="$(arg max_pos_diff)" />
+        <param name="/quest3/arm_move_threshold" value="$(arg arm_move_threshold)" />
+        <param name="/quest3/pos_vel_limit" value="$(arg pos_vel_limit)" />
         <param name="/quest3/left_hand_quat_offset_roll" value="$(arg left_hand_quat_offset_roll)" />
         <param name="/quest3/left_hand_quat_offset_pitch" value="$(arg left_hand_quat_offset_pitch)" />
         <param name="/quest3/left_hand_quat_offset_yaw" value="$(arg left_hand_quat_offset_yaw)" />
@@ -107,6 +150,57 @@
         <rosparam param="/quest3/zyx_limits_ee" subst_value="True">$(arg zyx_limits_ee)</rosparam>
         <rosparam param="/quest3/zyx_limits_link4" subst_value="True">$(arg zyx_limits_link4)</rosparam>
     </node>
+
+    <!-- Wheel C++ IK Node (启动当 use_cpp_incremental_ik=true 且 wheel_ik=true 时) -->
+    <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="wheel_ik_ros_uni_cpp_node" output="screen" if="$(eval arg('use_cpp_incremental_ik') and wheel_ik)">
+        <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
+        <param name="control_torso" value="$(arg control_torso)" />
+        <param name="/end_effector_type" value="$(arg ee_type)"/>
+        <remap from="/kuavo_arm_traj_cpp" to="/kuavo_arm_traj" />
+        <param name="/quest3/task_space_acc_limit" value="$(arg task_space_acc_limit)" />
+        <param name="/quest3/task_space_jerk_limit" value="$(arg task_space_jerk_limit)" />
+        <param name="/quest3/joint_space_acc_limit" value="$(arg joint_space_acc_limit)" />
+        <param name="/quest3/joint_space_jerk_limit" value="$(arg joint_space_jerk_limit)" />
+        <param name="/quest3/max_joint_velocity" value="$(arg max_joint_velocity)" />
+        <param name="/quest3/delta_scale_x" value="$(arg delta_scale_x)" />
+        <param name="/quest3/delta_scale_y" value="$(arg delta_scale_y)" />
+        <param name="/quest3/delta_scale_z" value="$(arg delta_scale_z)" />
+        <param name="/quest3/delta_scale_roll" value="$(arg delta_scale_roll)" />
+        <param name="/quest3/delta_scale_pitch" value="$(arg delta_scale_pitch)" />
+        <param name="/quest3/delta_scale_yaw" value="$(arg delta_scale_yaw)" />
+        <param name="/quest3/max_pos_diff" value="$(arg max_pos_diff)" />
+        <param name="/quest3/arm_move_threshold" value="$(arg arm_move_threshold)" />
+        <param name="/quest3/pos_vel_limit" value="$(arg pos_vel_limit)" />
+        <param name="/quest3/left_hand_quat_offset_roll" value="$(arg left_hand_quat_offset_roll)" />
+        <param name="/quest3/left_hand_quat_offset_pitch" value="$(arg left_hand_quat_offset_pitch)" />
+        <param name="/quest3/left_hand_quat_offset_yaw" value="$(arg left_hand_quat_offset_yaw)" />
+        <param name="/quest3/right_hand_quat_offset_roll" value="$(arg right_hand_quat_offset_roll)" />
+        <param name="/quest3/right_hand_quat_offset_pitch" value="$(arg right_hand_quat_offset_pitch)" />
+        <param name="/quest3/right_hand_quat_offset_yaw" value="$(arg right_hand_quat_offset_yaw)" />
+        <!-- 手部位置约束参数 -->
+        <param name="/quest3/sphere_radius_limit" value="$(arg sphere_radius_limit)" />
+        <param name="/quest3/min_reachable_distance" value="$(arg min_reachable_distance)" />
+        <param name="/quest3/elbow_min_distance" value="$(arg elbow_min_distance)" />
+        <param name="/quest3/elbow_max_distance" value="$(arg elbow_max_distance)" />
+        <param name="/quest3/use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)" />
+        <param name="/quest3/hand_changing_mode_threshold" value="$(arg hand_changing_mode_threshold)" />
+        <rosparam param="/quest3/box_min_bound" subst_value="True">$(arg box_min_bound)</rosparam>
+        <rosparam param="/quest3/box_max_bound" subst_value="True">$(arg box_max_bound)</rosparam>
+        <param name="/quest3/chest_offset_y_ax" value="$(arg chest_offset_y_ax)" />
+        <rosparam param="/quest3/left_center" subst_value="True">$(arg left_center)</rosparam>
+        <rosparam param="/quest3/right_center" subst_value="True">$(arg right_center)</rosparam>
+        <rosparam param="/quest3/default_left_hand_pos_on_exit" subst_value="True">$(arg default_left_hand_pos_on_exit)</rosparam>
+        <rosparam param="/quest3/default_right_hand_pos_on_exit" subst_value="True">$(arg default_right_hand_pos_on_exit)</rosparam>
+        <!-- 四元数角度限制参数 -->
+        <rosparam param="/quest3/zyx_limits_final" subst_value="True">$(arg zyx_limits_final)</rosparam>
+        <rosparam param="/quest3/zyx_limits_ee" subst_value="True">$(arg zyx_limits_ee)</rosparam>
+        <rosparam param="/quest3/zyx_limits_link4" subst_value="True">$(arg zyx_limits_link4)</rosparam>
+    </node>
+
+    <!-- humanoid_quest_control_with_arm (启动当 wheel_ik=true 时) -->
+    <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" if="$(eval wheel_ik)" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
+        <param name="wheel_ik" value="$(arg wheel_ik)" />
+        <param name="use_pico" value="$(arg use_pico)" />
 
     <!-- noitom_hi5_hand_udp_python -->
     <!-- Python implementation (default) -->

@@ -28,20 +28,21 @@ AXIS_RIGHT_RT = 5  # 1 -> (-1)
 AXIS_LEFT_RIGHT_TRIGGER = 6
 AXIS_FORWARD_BACK_TRIGGER = 7
 
+
 class SimulatedJoystick:
     def __init__(self):
         rospy.init_node('joystickSimulator')
-        rospy.Subscriber("/stop_robot", Bool, self.stop_robot_callback)
+        rospy.Subscriber('/stop_robot', Bool, self.stop_robot_callback)
 
         self.joy_pub = rospy.Publisher('/joy', Joy, queue_size=10)
         self.joy_msg = Joy()
-        self.joy_msg.axes = [0.0] * 8  # Initialize 8 axes
-        self.joy_msg.buttons = [0] * 11  # Initialize 11 buttons
+        self.joy_msg.axes = [0.0] * 8
+        self.joy_msg.buttons = [0] * 11
         self.old_settings = termios.tcgetattr(sys.stdin)
 
-    def stop_robot_callback(self, msg):
-        rospy.signal_shutdown("stop_robot")
-        
+    def stop_robot_callback(self, _msg):
+        rospy.signal_shutdown('stop_robot')
+
     def getKey(self):
         tty.setraw(sys.stdin.fileno())
         rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
@@ -54,10 +55,8 @@ class SimulatedJoystick:
 
     def update_joy(self, key):
         key = key.lower()
-        # Reset all buttons
         self.joy_msg.buttons = [0] * 11
 
-        # Gradual change for axes
         if key == 'w':
             self.joy_msg.axes[AXIS_LEFT_STICK_X] = round(min(1.0, self.joy_msg.axes[AXIS_LEFT_STICK_X] + 0.1), 3)
         elif key == 's':
@@ -74,49 +73,56 @@ class SimulatedJoystick:
             self.joy_msg.axes[AXIS_RIGHT_STICK_YAW] = round(max(-1.0, self.joy_msg.axes[AXIS_RIGHT_STICK_YAW] - 0.1), 3)
         elif key == 'j' or key == 'q':
             self.joy_msg.axes[AXIS_RIGHT_STICK_YAW] = round(min(1.0, self.joy_msg.axes[AXIS_RIGHT_STICK_YAW] + 0.1), 3)
-        elif key == ' ':  # Space key
-            self.joy_msg.axes = [0.0] * 8  # Reset all axes to zero
+        elif key == ' ':
+            self.joy_msg.axes = [0.0] * 8
         elif key == 'r':
-            self.joy_msg.buttons[BUTTON_Y] = 1  # 发送walk
+            self.joy_msg.buttons[BUTTON_Y] = 1
         elif key == 'c':
-            self.joy_msg.buttons[BUTTON_A] = 1  # 发送stance
-            self.joy_msg.axes = [0.0] * 8  # Reset all axes to zero
+            self.joy_msg.buttons[BUTTON_A] = 1
+            self.joy_msg.axes = [0.0] * 8
         elif key == 't':
-            self.joy_msg.buttons[BUTTON_B] = 1  # 发送trot
-        elif key == 'b':  # ESC键
-            self.joy_msg.buttons[BUTTON_BACK] = 1  # 发送BUTTON_BACK
+            self.joy_msg.buttons[BUTTON_B] = 1
+        elif key == 'b':
+            self.joy_msg.buttons[BUTTON_BACK] = 1
         elif key == 'o' or key == 'f':
-            self.joy_msg.buttons[BUTTON_START] = 1  # 发送BUTTON_START
+            self.joy_msg.buttons[BUTTON_START] = 1
         elif key == 'm':
-            self.joy_msg.buttons[BUTTON_X] = 1  # BUTTON_X
-            print("BUTTON_X")
+            self.joy_msg.buttons[BUTTON_X] = 1
+            print('BUTTON_X')
         elif key == 'g':
-            self.joy_msg.buttons[BUTTON_GUIDE] = 1  # 发送BUTTON_GUIDE
-            print("BUTTON_GUIDE")
-            
-        cmdvel = [self.joy_msg.axes[AXIS_LEFT_STICK_X],self.joy_msg.axes[AXIS_LEFT_STICK_Y], 0, 0, 0, self.joy_msg.axes[AXIS_RIGHT_STICK_YAW]]
+            self.joy_msg.buttons[BUTTON_GUIDE] = 1
+            print('BUTTON_GUIDE')
+
+        cmdvel = [
+            self.joy_msg.axes[AXIS_LEFT_STICK_X],
+            self.joy_msg.axes[AXIS_LEFT_STICK_Y],
+            0,
+            0,
+            0,
+            self.joy_msg.axes[AXIS_RIGHT_STICK_YAW],
+        ]
         print(f"cmdvel: {[f'{x * 100:.0f}%' for x in cmdvel]}", end='\r')
-        # self.joy_pub.publish(self.joy_msg)
 
     def run(self):
         try:
-            print("Use keys to control:")
-            print("WASD: Left stick, control forward/backward, left/right")
-            print("IKJL/QE: Right stick, up/down, turn left/right")
-            print("R: walk, C: stance, T: trot")
-            print("B: BUTTON_BACK, O/F: BUTTON_START")
-            print("<space>: Reset all axes to zero")
-            print("Press Ctrl-C to exit")
-            
+            print('Use keys to control:')
+            print('WASD: Left stick, control forward/backward, left/right')
+            print('IKJL/QE: Right stick, up/down, turn left/right')
+            print('R: walk, C: stance, T: trot')
+            print('B: BUTTON_BACK, O/F: BUTTON_START')
+            print('<space>: Reset all axes to zero')
+            print('Press Ctrl-C to exit')
+
             while not rospy.is_shutdown():
                 key = self.getKey()
                 if key:
                     self.update_joy(key)
-                if (key == '\x03'):  # Ctrl-C
+                if key == '\x03':
                     break
                 self.joy_pub.publish(self.joy_msg)
         finally:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+
 
 if __name__ == '__main__':
     try:

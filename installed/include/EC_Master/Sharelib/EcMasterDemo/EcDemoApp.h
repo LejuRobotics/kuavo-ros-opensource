@@ -104,7 +104,8 @@ enum RobotModel
   KUAVO = 0,         // kuavo
   ROBAN2 = 1,        // roban2
   KUAVO5 = 2,        // kuavo5
-  LUNBI = 3,        // lunbi
+  LUNBI = 3,         // lunbi
+  LUNBI_V62 = 4,     // lunbi_v62
   ROBOT_MODEL_NUM    // 用于表示RobotModel的数量，以后有新的映射关系，需要在此加入对应的映射索引。
 };
 typedef struct

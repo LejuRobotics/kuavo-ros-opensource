@@ -123,6 +123,7 @@ roslaunch humanoid_controllers load_kuavo_isaac_sim.launch  # 启动控制器、
 - `qiangnao` : 灵巧手, 默认值
 - `lejuclaw` : 二指夹爪
 - `qiangnao_touch` : 触觉灵巧手
+- `linker_hand` : 灵心巧手
 
 在运行实物时，您可以通过指定`ruiwo_cxx_sdk`参数来选择手臂电机使用 C++ SDK 还是 Python SDK：
 - 默认值为`true`表示使用 C++ SDK
@@ -349,10 +350,10 @@ roslaunch humanoid_controllers load_kuavo_real_half_up_body.launch
  - 如没有手柄或者VR等，可以使用键盘控制节点进行控制, 如运行仿真器并且使用键盘控制节点
  
  ```bash
- source devel/setup.bash   
- roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim 
+ source devel/setup.bash
+ roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim
  ```
- - 运行后将会启动仿真，并且在另外一个终端窗口打开键盘控制窗口，按键控制机器人运动，具体按键如下：
+- 运行后将会启动仿真，并且在另外一个终端窗口打开键盘控制窗口（默认 `sim_input_mode:=keyboard`），按键控制机器人运动，具体按键如下：
 ```
 WASD: Left stick, control forward/backward, left/right
 IKJL/QE: Right stick, up/down, turn left/right
@@ -361,7 +362,12 @@ B: BUTTON_BACK, O/F: BUTTON_START
 <space>: Reset all axes to zero
 Press Ctrl-C to exit
 ```
-- 键盘控制节点也单独可以手动开启，可以运行多个
+- 如需显式使用 GUI 虚拟手柄，可在启动时指定：
+```bash
+source devel/setup.bash
+roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=sim sim_input_mode:=gui
+```
+- 顶层 launch 已自动拉起输入节点，默认场景不要再额外手动 `rosrun`。仅在单独调试输入节点时使用：
 ```bash
 source devel/setup.bash
 rosrun humanoid_interface_ros joystickSimulator.py 
@@ -396,5 +402,4 @@ You can run the docker container with the following command:
 ./docker/run.sh
 ```
 > This script will automatically find the exisiting container and restart it, or create a new container if it does not exist, and run the container with the correct parameters. 
-
 

@@ -1,0 +1,34 @@
+# 不同 target_id 对应不同 offset 参数
+targets:
+  "39":    # 瓶子
+    offset:
+      z: 0.00
+      left:
+        x: -0.00
+        y: 0.03
+      right:
+        x: -0.00
+        y: -0.03
+    offset_angle: 0.15
+
+  "41":    # 杯子
+    offset:
+      z: 0.00
+      left:
+        x: -0.00
+        y: 0.04
+      right:
+        x: -0.00
+        y: -0.04
+    offset_angle: 1.0
+
+  "49":    # 橙子
+    offset:
+      z: -0.02
+      left:
+        x: -0.00
+        y: 0.03
+      right:
+        x: -0.00
+        y: -0.03
+    offset_angle: 1.0

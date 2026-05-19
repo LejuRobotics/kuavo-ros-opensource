@@ -1,7 +1,6 @@
 ---
 title: "Kuavo 5-W G12手柄操作"
 ---
-
 ## Kuavo 5-W G12手柄操作
 
 ### 1. G12遥控器开机
@@ -38,24 +37,17 @@ title: "Kuavo 5-W G12手柄操作"
 
 7、如果发现底盘不动，上半身轻微晃动，需要重新启动底盘服务，在下位机中进行如下操作：
 
-   新建终端，使用 SSH 登录底盘主机（密码：`133233`）
+新建终端，使用 SSH 登录底盘主机（密码：`133233`）
 
 ```bash
-
 ssh -oKexAlgorithms=+diffie-hellman-group14-sha1 \
-
     -oHostKeyAlgorithms=+ssh-rsa \
-
     -oCiphers=+aes128-cbc,3des-cbc \
-
 ucore@192.168.26.22
-
 ```
 
 ```bash
-
 sudo systemctl restart urobot.service
-
 ```
 
 ### 3. 机器人关闭控制

@@ -82,25 +82,21 @@ namespace HighlyDynamic
     double oritation_constraint_tol{1e-3};
     double pos_constraint_tol{1e-3}; // work when pos_cost_weight > 0.0
     double pos_cost_weight{100}; // NOT work if pos_cost_weight <= 0.0
-    // 使用 IKParams::constraint_mode 的 bit 来选择模式（以当前 plantIK.cc 实现为准）：
-    //   bit1 (0x02): 位置 hard(1)/soft(0)
-    //   bit0 (0x01): 姿态 hard(1)/soft(0)
-    //   bit2 (0x04): 三点位置模式(1)/传统位姿模式(0)
-    //
-    // 传统位姿模式（bit2=0，只看 bit1/bit0）：
-    //   00->0: 位软 + 姿软   (AddPositionCost + AddOrientationCost)
-    //   01->1: 位软 + 姿硬   (AddPositionCost + AddOrientationConstraint)
-    //   10->2: 位硬 + 姿软   (AddPositionConstraint + AddOrientationCost)
-    //   11->3: 位硬 + 姿硬   (AddPositionConstraint + AddOrientationConstraint)
-    //
-    // 三点位置模式（bit2=1，不添加任何姿态约束/代价；仅对每只手的末端帧添加 3 个点的位置项）：
-    //   - 三个点（在 eef frame 内）：
-    //       P0 = eef 原点 (0,0,0)
-    //       P1 = link7 原点在 eef 中的平移（由固定变换计算）
-    //       P2 = virtual thumb 点 (0.15, 0, 0)  [URDF: zarm_*7_virtual_thumb_joint_ee]
-    //   04->4: 三点“全软” (P0/P1/P2 全是 AddPositionCost)
-    //   06->6: 三点“混合” (P0 用 AddPositionConstraint，P1/P2 用 AddPositionCost)
+    // 外部写入值（经 MapExternalConstraintModeToInternal 后内部 0<->1 互换）：
+    //   传统位姿模式（外部写入值 -> 实际效果）：
+    //     0 -> 位软 + 姿硬  (AddPositionCost + AddOrientationConstraint)  <- 消息默认/缺省
+    //     1 -> 位软 + 姿软  (AddPositionCost + AddOrientationCost)
+    //     2 -> 位硬 + 姿软  (AddPositionConstraint + AddOrientationCost)
+    //     3 -> 位硬 + 姿硬  (AddPositionConstraint + AddOrientationConstraint)
+    //   三点位置模式（bit2=1，不添加任何姿态项；用 3 个点的位置项间接约束姿态）：
+    //     4 -> 三点全软  (P0/P1/P2 全是 AddPositionCost)
+    //     6 -> 三点混合  (P0 用 AddPositionConstraint，P1/P2 用 AddPositionCost)
     uint8_t constraint_mode{1};
+    // 肘部位置软约束的相对权重（相对于 pos_cost_weight）：
+    //   == 0.0 （默认）: 使用内置默认值 0.1
+    //    < 0.0          : 不添加任何肘部约束
+    //    > 0.0          : 直接使用该值作为 elbow_cost_scale
+    double elbow_cost_scale{0.0};
   };
   class CoMIK
   {

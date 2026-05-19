@@ -126,6 +126,20 @@ void MRT_ROS_Interface::setCurrentObservation(const SystemObservation& currentOb
 /******************************************************************************************************/
 /******************************************************************************************************/
 /******************************************************************************************************/
+void MRT_ROS_Interface::setCurrentObservation_directPub(const SystemObservation& currentObservation, const double dtDesired) {
+  static double lastPublishTime = currentObservation.time;
+    // 限制发布频率
+  if (currentObservation.time - lastPublishTime < dtDesired) {  // 自设周期
+    return;
+  }
+  lastPublishTime = currentObservation.time;
+  mpcObservationMsg_ = ros_msg_conversions::createObservationMsg(currentObservation);
+  mpcObservationPublisher_.publish(mpcObservationMsg_);
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
 void MRT_ROS_Interface::publisherWorkerThread() {
   while (!terminateThread_) {
     std::unique_lock<std::mutex> lk(publisherMutex_);

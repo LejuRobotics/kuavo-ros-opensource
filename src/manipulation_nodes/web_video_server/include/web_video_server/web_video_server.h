@@ -46,6 +46,9 @@ public:
   bool handle_snapshot(const async_web_server_cpp::HttpRequest &request,
                        async_web_server_cpp::HttpConnectionPtr connection, const char* begin, const char* end);
 
+  bool handle_stream_status(const async_web_server_cpp::HttpRequest &request,
+                            async_web_server_cpp::HttpConnectionPtr connection, const char* begin, const char* end);
+
   bool handle_list_streams(const async_web_server_cpp::HttpRequest &request,
                            async_web_server_cpp::HttpConnectionPtr connection, const char* begin, const char* end);
 

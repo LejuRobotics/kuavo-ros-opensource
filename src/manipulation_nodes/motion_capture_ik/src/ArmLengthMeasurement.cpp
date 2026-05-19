@@ -46,6 +46,7 @@ void ArmLengthMeasurement::updateMeasurement(double humanUpperArmLength,
 
 void ArmLengthMeasurement::completeMeasurement() {
   measureArmLength_ = false;
+  measurementCompleted_ = true;
 
   ROS_INFO("[ArmLengthMeasurement] Measurement completed:");
   ROS_INFO("  Left arm - Upper: %.4f, Lower: %.4f (samples: %zu)",

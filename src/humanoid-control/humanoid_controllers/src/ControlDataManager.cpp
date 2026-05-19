@@ -7,7 +7,8 @@ namespace humanoidController_wheel_wbc {
 
 using namespace ocs2;
 
-ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int arm_num, int low_joint_num, int head_num)
+ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int arm_num, int low_joint_num, int head_num, 
+                                       const vector_t& leg_initial_state, const vector_t& arm_initial_state)
     : nh_(nh), is_real_(is_real), arm_num_(arm_num), low_joint_num_(low_joint_num),head_num_(head_num)
 {
     // 初始化轮臂关节状态（4个关节）
@@ -43,9 +44,17 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
     
     // 初始化手臂轨迹
     arm_external_control_state_.data.init(arm_num);
+    ArmJointTrajectory arm_traj;
+    arm_traj.init(arm_num_);
+    arm_traj.pos = arm_initial_state;  
+    arm_external_control_state_.update(arm_traj);
 
     // 初始化下肢轨迹
     leg_external_control_state_.data.init(low_joint_num);
+    ArmJointTrajectory leg_traj;
+    leg_traj.init(low_joint_num_);
+    leg_traj.pos = leg_initial_state;  
+    leg_external_control_state_.update(leg_traj);
 
     // 初始化重置旋转矩阵
     R_resetOrigin_ = Eigen::Matrix2d::Identity();

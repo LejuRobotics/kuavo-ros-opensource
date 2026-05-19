@@ -6,6 +6,17 @@ from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planA
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
 from kuavo_msgs.srv import changeArmCtrlMode
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
+
+# 导入RobotVersion，兼容不同环境
+try:
+    from robot_version import RobotVersion
+except ImportError:
+    import rospkg
+    rospack = rospkg.RosPack()
+    import sys
+    sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
+    from robot_version import RobotVersion
+
 import time
 import signal
 import datetime
@@ -13,6 +24,14 @@ import json
 from std_srvs.srv import Trigger, TriggerRequest
 
 import threading
+try:
+    import serial
+except ImportError:
+    import subprocess
+    import sys
+    print("pyserial 库未安装，正在尝试安装...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyserial"])
+    import serial
 from h12pro_controller_node.srv import playmusic, playmusicRequest, playmusicResponse
 from h12pro_controller_node.srv import ExecuteArmAction, ExecuteArmActionRequest, ExecuteArmActionResponse
 from h12pro_controller_node.msg import RobotActionState
@@ -26,6 +45,253 @@ from sensor_msgs.msg import Joy
 from geometry_msgs.msg import Twist
 
 console = console.Console()
+
+def encode_wifi_name_base64(name):
+    """将 WiFi 名称编码为 base64，避免 JSON 特殊字符问题
+    :param name: 原始 WiFi 名称
+    :return: base64 编码后的字符串，如果输入为 None 则返回 None
+    """
+    if name is None:
+        return None
+
+    try:
+        import base64
+        # 确保是字符串类型
+        if isinstance(name, bytes):
+            name_bytes = name
+        else:
+            name_bytes = name.encode('utf-8')
+
+        # 编码为 base64
+        return base64.b64encode(name_bytes).decode('ascii')
+    except Exception as e:
+        print(f"WiFi 名称 base64 编码失败: {e}")
+        return None
+
+def get_wifi_password(ssid):
+    """获取指定 WiFi 的密码
+    :param ssid: WiFi 名称（原始名称，非 base64）
+    :return: base64 编码的密码，如果获取失败返回 None
+    """
+    if ssid is None:
+        return None
+
+    try:
+        import base64
+        # 使用 nmcli 获取已保存的 WiFi 密码（需要 root 权限）
+        result = subprocess.run(
+            ["nmcli", "-s", "-g", "802-11-wireless-security.psk", "connection", "show", ssid],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            password = result.stdout.strip()
+            # 使用 base64 编码
+            return base64.b64encode(password.encode('utf-8')).decode('ascii')
+    except Exception as e:
+        print(f"获取 WiFi 密码失败: {e}")
+
+    return None
+
+def get_wifi_info():
+    """获取当前 WiFi 连接信息（SSID、IP 地址和密码）
+    :return: dict, 包含 wifi_name、robot_ip 和 wifi_password 的字典
+    """
+    wifi_info = {"wifi_name": None, "robot_ip": None, "wifi_password": None}
+    wifi_interface = None
+    raw_ssid = None  # 保存原始 SSID 用于获取密码
+
+    # 获取 WiFi 接口名称和 SSID
+    try:
+        # 优先使用 iwgetid 获取 SSID（更可靠，不会有分隔符问题）
+        result = subprocess.run(
+            ["iwgetid", "-r"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            raw_ssid = result.stdout.strip()
+            wifi_info["wifi_name"] = encode_wifi_name_base64(raw_ssid)
+            # 获取无线接口名
+            iface_result = subprocess.run(
+                ["iwgetid"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if iface_result.returncode == 0 and iface_result.stdout:
+                wifi_interface = iface_result.stdout.split()[0]
+    except Exception as e:
+        print(f"使用 iwgetid 获取 WiFi SSID 失败: {e}")
+
+    # 如果 iwgetid 失败，回退到 nmcli
+    if wifi_info["wifi_name"] is None:
+        try:
+            # 使用 nmcli 获取当前活动的 WiFi 连接信息
+            # 注意：nmcli -t 使用 : 作为分隔符，如果 SSID 包含 : 会导致分割错误
+            # 所以使用 -e yes 来转义特殊字符
+            result = subprocess.run(
+                ["nmcli", "-t", "-e", "yes", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    # nmcli -e yes 会将 : 转义为 \:，所以需要先处理转义
+                    # 使用正则表达式分割，忽略转义的冒号
+                    import re
+                    # 分割时忽略 \: （转义的冒号）
+                    parts = re.split(r'(?<!\\):', line)
+                    # 还原转义的冒号
+                    parts = [p.replace('\\:', ':') for p in parts]
+                    if len(parts) >= 4 and parts[1] == 'wifi' and parts[2] == 'connected':
+                        wifi_interface = parts[0]
+                        raw_ssid = parts[3]
+                        wifi_info["wifi_name"] = encode_wifi_name_base64(raw_ssid)
+                        break
+        except Exception as e:
+            print(f"使用 nmcli 获取 WiFi 信息失败: {e}")
+
+    # 获取 WiFi 密码
+    if raw_ssid:
+        wifi_info["wifi_password"] = get_wifi_password(raw_ssid)
+
+    # 获取 WiFi 接口的 IP 地址
+    if wifi_interface:
+        try:
+            import re
+            result = subprocess.run(
+                ["ip", "-4", "addr", "show", wifi_interface],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', result.stdout)
+                if match:
+                    wifi_info["robot_ip"] = match.group(1)
+        except Exception as e:
+            print(f"获取接口 {wifi_interface} 的 IP 地址失败: {e}")
+
+    # 如果没找到 WiFi 接口 IP，获取第一个非 lo 接口的 IP 作为备选
+    if wifi_info["robot_ip"] is None:
+        try:
+            import re
+            result = subprocess.run(
+                ["hostname", "-I"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # 取第一个 IP
+                wifi_info["robot_ip"] = result.stdout.strip().split()[0]
+        except Exception as e:
+            print(f"获取 IP 地址失败: {e}")
+
+    return wifi_info
+
+def send_wifi_info_to_serial(serial_device="/dev/H12_log_channel", baudrate=57600):
+    """将 WiFi 信息以 JSON 格式发送到串口（单次）
+    :param serial_device: 串口设备路径
+    :param baudrate: 波特率
+    :return: bool, 发送是否成功
+    """
+    try:
+        wifi_info = get_wifi_info()
+        # 构造指定格式的数据
+        data = {
+            "cmd": "rc/send_robot_info",
+            "data": {
+                "wifi_name": wifi_info["wifi_name"],
+                "robot_ip": wifi_info["robot_ip"]
+            }
+        }
+        json_data = json.dumps(data, ensure_ascii=False) + "\r\n"
+
+        with serial.Serial(serial_device, baudrate, timeout=1) as ser:
+            ser.write(json_data.encode('utf-8'))
+            ser.flush()
+
+        print(f"已发送 WiFi 信息到串口: {json_data.strip()}")
+        return True
+    except Exception as e:
+        print(f"发送 WiFi 信息到串口失败: {e}")
+        return False
+
+# WiFi 信息上报线程控制
+_wifi_report_thread = None
+_wifi_report_stop_event = threading.Event()
+
+def _wifi_report_loop(serial_device, baudrate, interval=1.0):
+    """WiFi 信息上报循环（在后台线程中运行）
+    :param serial_device: 串口设备路径
+    :param baudrate: 波特率
+    :param interval: 上报间隔（秒）
+    """
+    global _wifi_report_stop_event
+    ser = None
+    try:
+        ser = serial.Serial(serial_device, baudrate, timeout=1)
+        print(f"WiFi 信息上报线程已启动，设备: {serial_device}, 间隔: {interval}秒")
+
+        while not _wifi_report_stop_event.is_set():
+            try:
+                wifi_info = get_wifi_info()
+                data = {
+                    "cmd": "rc/send_robot_info",
+                    "data": {
+                        "wifi_name": wifi_info["wifi_name"],
+                        "robot_ip": wifi_info["robot_ip"],
+                        "wifi_password": wifi_info["wifi_password"]
+                    }
+                }
+                json_data = json.dumps(data, ensure_ascii=False) + "\r\n"
+                ser.write(json_data.encode('utf-8'))
+                ser.flush()
+            except Exception as e:
+                print(f"WiFi 信息上报失败: {e}")
+
+            # 等待间隔时间，同时检查停止事件
+            _wifi_report_stop_event.wait(timeout=interval)
+    except Exception as e:
+        print(f"WiFi 信息上报线程异常: {e}")
+    finally:
+        if ser and ser.is_open:
+            ser.close()
+        print("WiFi 信息上报线程已停止")
+
+def start_wifi_info_report(serial_device="/dev/H12_log_channel", baudrate=57600, interval=1.0):
+    """启动 WiFi 信息持续上报线程
+    :param serial_device: 串口设备路径
+    :param baudrate: 波特率
+    :param interval: 上报间隔（秒）
+    """
+    global _wifi_report_thread, _wifi_report_stop_event
+
+    # 如果已有线程在运行，先停止
+    stop_wifi_info_report()
+
+    _wifi_report_stop_event.clear()
+    _wifi_report_thread = threading.Thread(
+        target=_wifi_report_loop,
+        args=(serial_device, baudrate, interval),
+        daemon=True
+    )
+    _wifi_report_thread.start()
+
+def stop_wifi_info_report():
+    """停止 WiFi 信息上报线程"""
+    global _wifi_report_thread, _wifi_report_stop_event
+
+    if _wifi_report_thread and _wifi_report_thread.is_alive():
+        _wifi_report_stop_event.set()
+        _wifi_report_thread.join(timeout=2.0)
+        _wifi_report_thread = None
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_dir = os.path.join(os.path.dirname(current_dir), "config")
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
@@ -35,6 +301,7 @@ VR_REMOTE_CONTROL_SESSION_NAME = "vr_remote_control"
 LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12 start_way:=auto"
 # LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12"
 LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 start_way:=auto"
+LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD = "roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=h12 start_way:=auto"
 LAUNCH_VR_REMOTE_CONTROL_CMD = "roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch"
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
@@ -293,6 +560,44 @@ def call_real_initialize_srv():
     except rospy.ServiceException as e:
         rospy.logerr(f"Service call failed: {e}")
 
+def is_real_launch_in_ready_stance(event):
+    """
+    状态机条件判断函数：查询real_launch_status服务，确认是否是ready_stance或launched状态
+    返回True允许状态切换，返回False阻止切换
+    """
+    client = rospy.ServiceProxy('/humanoid_controller/real_launch_status', Trigger)
+    req = TriggerRequest()
+    try:
+        resp = client.call(req)
+        if resp.success and resp.message in ["ready_stance", "launched"]:
+            rospy.loginfo(f"[Condition] real_launch_status is {resp.message}, allow switch to stance")
+            return True
+        else:
+            rospy.logwarn(f"[Condition] real_launch_status is {resp.message}, not ready_stance or launched, block switch to stance")
+            return False
+    except rospy.ServiceException as e:
+        rospy.logerr(f"[Condition] Failed to call real_launch_status service: {e}, block switch")
+        return False
+
+def is_not_wheel_robot(event):
+    """
+    状态机条件判断函数：判断是否不是轮臂机器人
+    轮臂机器人版本号以6开头（60-69），禁止切换walk/trot步态
+    返回True允许状态切换，返回False阻止切换
+    """
+    # 判断是否为轮臂机器人(6代: major=6)
+    robot_version = os.environ.get('ROBOT_VERSION', '0')
+    is_wheel = False
+    try:
+        is_wheel = RobotVersion.create(int(robot_version)).start_with(major=6)
+    except (ValueError, TypeError):
+        rospy.logerr(f"ROBOT_VERSION环境变量格式错误: {robot_version}，默认不为轮臂")
+
+    if is_wheel:
+        rospy.logerr(f"[Condition] 当前为轮臂机器人（version={robot_version}），禁止切换walk/trot步态。")
+        return False
+    rospy.loginfo(f"[Condition] 当前为非轮臂机器人（version={robot_version}），允许切换walk/trot步态。")
+    return True
 
 def print_state_transition(trigger, source, target) -> None:
     console.print(
@@ -307,13 +612,34 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
     subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME], 
                     stderr=subprocess.DEVNULL) 
     
+    # 通过读取kuavo.json文件，获取ROBOT_MODULE和only_half_up_body参数
+    kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
+    if not os.path.exists(kuavo_json):
+        print(f"Error: Could not find {kuavo_json}")
+        raise Exception(f"Error: Could not find {kuavo_json}")
+    with open(kuavo_json, "r") as f:    
+        kuavo_json_data = json.load(f)
+    
+    # 获取机器人模块类型
+    robot_module = kuavo_json_data.get("ROBOT_MODULE", "")
+    only_half_up_body = kuavo_json_data["only_half_up_body"]
+    
+    # 根据机器人模块类型选择启动命令
     if real_robot:
-        launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_CMD
+        # 如果是LUNBI或LUNBI_V62，使用轮臂启动命令
+        if robot_module == "LUNBI" or robot_module == "LUNBI_V62":
+            launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD
+        else:
+            launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_CMD
     else:
         launch_cmd = LAUNCH_HUMANOID_ROBOT_SIM_CMD
     
     if calibrate:
-        launch_cmd += " cali:=true cali_arm:=true"
+        # LUNBI_V62 只执行 cali:=true，不执行 cali_arm
+        if robot_module == "LUNBI_V62":
+            launch_cmd += " cali:=true"
+        else:
+            launch_cmd += " cali:=true cali_arm:=true"
     
     # 通过读取kuavo.json文件，获取only_half_up_body参数，在launch_cmd中添加only_half_up_body:=true
     kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
@@ -330,10 +656,14 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
         log_channel_status = rospy.get_param("h12_log_channel")
         if log_channel_status is True:
             if os.path.exists("/dev/H12_log_channel"):
+                # 启动 WiFi 信息持续上报（1秒间隔）
+                start_wifi_info_report("/dev/H12_log_channel", baudrate=57600, interval=1.0)
+
                 log_channel_cmd_start = "stdbuf -oL -eL"
                 log_channel_cmd_end = "2>&1 | sed -u -e 's/\\x1b\\[[0-9;]*[mK]//g' -e 's/$/\\r/' | stdbuf -oL tee /dev/H12_log_channel"
                 launch_cmd = f"{log_channel_cmd_start} {launch_cmd} {log_channel_cmd_end}"
-            rospy.logerr("未检测到 /dev/H12_log_channel 设备文件，请确认已加载遥控器串口 udev 规则并连接设备。")
+            else:
+                rospy.logerr("未检测到 /dev/H12_log_channel 设备文件，请确认已加载遥控器串口 udev 规则并连接设备。")
 
     print(f"launch_cmd: {launch_cmd}")
     print("If you want to check the session, please run 'tmux attach -t humanoid_robot'")
@@ -450,11 +780,13 @@ def trot_callback(event):
 def stop_callback(event):
     source = event.kwargs.get("source")
     print_state_transition("stop", source, "initial")
+    # 停止 WiFi 信息上报
+    stop_wifi_info_report()
     # kill humanoid_robot and vr_remote_control
-    subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME], 
-                  stderr=subprocess.DEVNULL) 
-    subprocess.run(["tmux", "kill-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME], 
-                  stderr=subprocess.DEVNULL) 
+    subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME],
+                  stderr=subprocess.DEVNULL)
+    subprocess.run(["tmux", "kill-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME],
+                  stderr=subprocess.DEVNULL)
     kill_record_vr_rosbag()
     
     manual_h12_init_state = rospy.get_param("manual_h12_init_state", "none")

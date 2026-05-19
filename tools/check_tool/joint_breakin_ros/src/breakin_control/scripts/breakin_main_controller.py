@@ -14,6 +14,9 @@ import threading
 import shutil
 from pathlib import Path
 
+# 手臂/腿部/控制器子进程内若有 EC 或 ROS 清理，3s 过短易触发 SIGKILL，导致网卡「Device busy」
+_BREAKIN_GRACEFUL_TERM_SEC = 20.0
+
 class Colors:
     """终端颜色定义"""
     RED = '\033[0;31m'
@@ -54,7 +57,9 @@ class BreakinMainController:
         # 优先从环境变量读取
         rv = os.environ.get("ROBOT_VERSION")
         if rv:
-            return str(rv).strip()
+            rv_clean = str(rv).strip().strip('"').strip("'")
+            if rv_clean:
+                return rv_clean
         
         # 从 .bashrc 文件读取
         try:
@@ -65,9 +70,19 @@ class BreakinMainController:
                     lines = f.readlines()
                 # 从后往前查找，找到最后一个未注释的 export ROBOT_VERSION=
                 for line in reversed(lines):
+                    # 去除首尾空白字符
                     s = line.strip()
-                    if s.startswith("export ROBOT_VERSION=") and "#" not in s:
-                        return s.split("=", 1)[1].strip()
+                    # 跳过空行和注释行（以 # 开头的行）
+                    if not s or s.startswith('#'):
+                        continue
+                    # 检查是否包含 export ROBOT_VERSION=
+                    if 'export ROBOT_VERSION=' in s or s.startswith('export ROBOT_VERSION='):
+                        # 提取变量值，支持多种格式：export ROBOT_VERSION=17 或 export ROBOT_VERSION="17"
+                        parts = s.split('=', 1)
+                        if len(parts) == 2:
+                            value = parts[1].strip().strip('"').strip("'")
+                            if value:
+                                return value
         except Exception:
             pass
         
@@ -112,46 +127,85 @@ class BreakinMainController:
             return v == 52
         except (ValueError, TypeError):
             return False
-    
+
     def _is_robot_version_53(self):
-        """判断 ROBOT_VERSION 是否为 53"""
+        """ROBOT_VERSION 为 53 → 腿部 leg_breakin_kuavo5_v53"""
         robot_version = self._get_robot_version()
         if not robot_version:
             return False
-        
+
         rv_raw = str(robot_version).strip()
         rv = rv_raw.lower()
-        
-        # 字符串匹配：包含 v53 或 kuavo5_v53
+
         if "v53" in rv or "kuavo5_v53" in rv:
             return True
-        
-        # 数字版本判断：53
+
         try:
             v = int(rv_raw)
             return v == 53
         except (ValueError, TypeError):
             return False
+
+    def _is_robot_version_55(self):
+        """ROBOT_VERSION 为 55 → 腿部 leg_breakin_kuavo5_v55"""
+        robot_version = self._get_robot_version()
+        if not robot_version:
+            return False
+
+        rv_raw = str(robot_version).strip()
+        rv = rv_raw.lower()
+
+        if "v55" in rv or "kuavo5_v55" in rv:
+            return True
+
+        try:
+            v = int(rv_raw)
+            return v == 55
+        except (ValueError, TypeError):
+            return False
+
+    def _is_robot_version_56(self):
+        """ROBOT_VERSION 为 56 → 腿部 leg_breakin_kuavo5_v56"""
+        robot_version = self._get_robot_version()
+        if not robot_version:
+            return False
+
+        rv_raw = str(robot_version).strip()
+        rv = rv_raw.lower()
+
+        if "v56" in rv or "kuavo5_v56" in rv:
+            return True
+
+        try:
+            v = int(rv_raw)
+            return v == 56
+        except (ValueError, TypeError):
+            return False
     
     def _select_leg_breakin_dir(self):
         """根据 ROBOT_VERSION 选择腿部磨线目录
-        如果是版本53，直接使用v53版本
         如果是版本52，询问用户选择机型
         如果是版本50-51，使用普通v52版本
+        如果是版本17，使用 roban2_v17
         否则使用 roban2_v14
         返回选择的目录名称
         """
-        # 如果不是 Kuavo5，使用 roban2_v14
+        # 如果不是 Kuavo5，根据版本选择
         if not self._is_kuavo5():
+            robot_version = self._get_robot_version()
+            if robot_version:
+                try:
+                    # 去除可能的引号和空白字符
+                    version_str = str(robot_version).strip().strip('"').strip("'")
+                    version_num = int(version_str)
+                    if version_num == 17:
+                        return "leg_breakin_roban2_v17"
+                    elif 13 <= version_num <= 14:
+                        return "leg_breakin_roban2_v14"
+                except (ValueError, TypeError) as e:
+                    self.print_colored(f"警告：无法解析版本号 '{robot_version}'，使用默认 roban2_v14: {e}", Colors.YELLOW)
+            # 默认使用 roban2_v14
             return "leg_breakin_roban2_v14"
-        
-        # 如果是版本53，直接使用v53版本
-        if self._is_robot_version_53():
-            self.print_colored("=" * 50, Colors.CYAN)
-            self.print_colored("      检测到 ROBOT_VERSION = 53", Colors.CYAN)
-            self.print_colored("=" * 50, Colors.CYAN)
-            self.print_colored("已选择：kuavo5_v53版本（13个电机）", Colors.GREEN)
-            return "leg_breakin_kuavo5_v53"
         
         # 如果是版本52，询问用户选择机型
         if self._is_robot_version_52():
@@ -181,14 +235,22 @@ class BreakinMainController:
                 except KeyboardInterrupt:
                     self.print_colored("\n已取消操作", Colors.YELLOW)
                     sys.exit(0)
-        
-        # 如果是版本50-51，使用普通v52版本
+
+        if self._is_robot_version_53():
+            return "leg_breakin_kuavo5_v53"
+        if self._is_robot_version_55():
+            return "leg_breakin_kuavo5_v55"
+        if self._is_robot_version_56():
+            return "leg_breakin_kuavo5_v56"
+
+        # 其他 Kuavo5 版本继续沿用既有逻辑，默认回落到普通 v52 版本
         return "leg_breakin_kuavo5_v52"
     
     def _ensure_leg_breakin_dir_selected(self):
         """确保腿部磨线目录已选择（如果尚未选择，则进行选择）"""
         if self.leg_breakin_dir is None:
             self.leg_breakin_dir = self._select_leg_breakin_dir()
+            self.print_colored(f"调试：选择腿部磨线目录: {self.leg_breakin_dir}", Colors.BLUE)
             self.leg_ec_log_dir = (
                 self.workspace_root
                 / "src"
@@ -284,7 +346,6 @@ class BreakinMainController:
     
     def _kill_existing_processes(self):
         """杀掉之前残留的磨线相关进程"""
-        self.print_colored("正在清理残留进程...", Colors.BLUE)
         
         # 要清理的进程名称列表
         process_names = [
@@ -381,27 +442,38 @@ class BreakinMainController:
             except:
                 pass
         
-        # 停止子进程
+        # 停止子进程（SIGTERM → 等待清理 → 最后才 SIGKILL）
         for process in self.processes:
             if process and process.poll() is None:
                 try:
                     os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                    process.wait(timeout=3)
-                except:
+                    process.wait(timeout=_BREAKIN_GRACEFUL_TERM_SEC)
+                except subprocess.TimeoutExpired:
                     try:
                         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                    except:
+                        process.wait(timeout=5)
+                    except Exception:
+                        pass
+                except Exception:
+                    try:
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    except Exception:
                         pass
         
         # 停止roscore
         if self.roscore_process and self.roscore_process.poll() is None:
             try:
                 os.killpg(os.getpgid(self.roscore_process.pid), signal.SIGTERM)
-                self.roscore_process.wait(timeout=3)
-            except:
+                self.roscore_process.wait(timeout=8)
+            except subprocess.TimeoutExpired:
                 try:
                     os.killpg(os.getpgid(self.roscore_process.pid), signal.SIGKILL)
-                except:
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    os.killpg(os.getpgid(self.roscore_process.pid), signal.SIGKILL)
+                except Exception:
                     pass
     
     def show_menu(self):
@@ -821,11 +893,17 @@ class BreakinMainController:
                 if process.poll() is None:
                     try:
                         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                        process.wait(timeout=3)
+                        process.wait(timeout=_BREAKIN_GRACEFUL_TERM_SEC)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                            process.wait(timeout=5)
+                        except Exception:
+                            pass
                     except Exception:
                         try:
                             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                            process.wait(timeout=1)
+                            process.wait(timeout=5)
                         except Exception:
                             pass
             
@@ -1066,9 +1144,19 @@ class BreakinMainController:
                         if process.poll() is None:
                             try:
                                 os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                                process.wait(timeout=3)
-                            except:
-                                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                                process.wait(timeout=_BREAKIN_GRACEFUL_TERM_SEC)
+                            except subprocess.TimeoutExpired:
+                                try:
+                                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                                    process.wait(timeout=5)
+                                except Exception:
+                                    pass
+                            except Exception:
+                                try:
+                                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                                    process.wait(timeout=5)
+                                except Exception:
+                                    pass
                         return_code = process.returncode if process.poll() is not None else 0
                         break
                 
@@ -1589,34 +1677,52 @@ class BreakinMainController:
             if not arm_exited:
                 try:
                     os.killpg(os.getpgid(arm_process.pid), signal.SIGTERM)
-                    arm_process.wait(timeout=3)
-                except:
+                    arm_process.wait(timeout=_BREAKIN_GRACEFUL_TERM_SEC)
+                except subprocess.TimeoutExpired:
                     try:
                         os.killpg(os.getpgid(arm_process.pid), signal.SIGKILL)
-                        arm_process.wait(timeout=1)
-                    except:
+                        arm_process.wait(timeout=5)
+                    except Exception:
+                        pass
+                except Exception:
+                    try:
+                        os.killpg(os.getpgid(arm_process.pid), signal.SIGKILL)
+                        arm_process.wait(timeout=5)
+                    except Exception:
                         pass
             
             if not leg_exited:
                 try:
                     os.killpg(os.getpgid(leg_process.pid), signal.SIGTERM)
-                    leg_process.wait(timeout=3)
-                except:
+                    leg_process.wait(timeout=_BREAKIN_GRACEFUL_TERM_SEC)
+                except subprocess.TimeoutExpired:
                     try:
                         os.killpg(os.getpgid(leg_process.pid), signal.SIGKILL)
-                        leg_process.wait(timeout=1)
-                    except:
+                        leg_process.wait(timeout=5)
+                    except Exception:
+                        pass
+                except Exception:
+                    try:
+                        os.killpg(os.getpgid(leg_process.pid), signal.SIGKILL)
+                        leg_process.wait(timeout=5)
+                    except Exception:
                         pass
             
             if not controller_exited:
                 try:
                     os.killpg(os.getpgid(controller_process.pid), signal.SIGTERM)
-                    controller_process.wait(timeout=3)
-                except:
+                    controller_process.wait(timeout=_BREAKIN_GRACEFUL_TERM_SEC)
+                except subprocess.TimeoutExpired:
                     try:
                         os.killpg(os.getpgid(controller_process.pid), signal.SIGKILL)
-                        controller_process.wait(timeout=1)
-                    except:
+                        controller_process.wait(timeout=5)
+                    except Exception:
+                        pass
+                except Exception:
+                    try:
+                        os.killpg(os.getpgid(controller_process.pid), signal.SIGKILL)
+                        controller_process.wait(timeout=5)
+                    except Exception:
                         pass
             
             # 等待一下，确保进程完全退出

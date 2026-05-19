@@ -54,6 +54,7 @@ kuavo-ros-control-fd/
 debugHumanoidController.cpp
 # ik_ros_uni_cpp_vr_mujoco_sim.launch
 debugQuestControlFSMNode.cpp
+**/*.bag*
 # **/*.sh
 # merge_compile_commands.py
 # **/*.bag
@@ -68,6 +69,5 @@ src/Livox-SDK2
 src/legged_control
 src/legged_perceptive
 *.log
-*.csv
 EC_log/
 .catkin_tools/

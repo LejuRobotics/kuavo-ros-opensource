@@ -56,7 +56,10 @@ include_directories(
 # Library Target
 # ==============================================================================
 # 创建动态链接库
-add_library(kuavo_solver SHARED src/ankle_solver.cpp)
+add_library(kuavo_solver SHARED 
+  src/ankle_solver.cpp
+  src/roban_ankle_solver.cpp
+)
 
 # 链接依赖库
 target_link_libraries(kuavo_solver

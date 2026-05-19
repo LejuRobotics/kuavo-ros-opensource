@@ -75,8 +75,6 @@ class EndEffectorLocalConstraint final : public StateConstraint {
   const MobileManipulatorReferenceManager* referenceManagerPtr_;
   const ManipulatorModelInfo& info_;
   int eef_Idx_;
-  const int eef_num_ = 0;  
-  int start_index_ = 0;
 };
 
 }  // namespace mobile_manipulator

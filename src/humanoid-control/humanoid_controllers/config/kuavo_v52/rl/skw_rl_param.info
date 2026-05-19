@@ -316,7 +316,8 @@ jointKd
 
 motor_pdo_kp
 {
-    ; 定义各关节的PDO Kp参数（从kuavo.json的joint_kp读取，主要用于EC_MASTER电机）
+    ; EC_MASTER 电机（腿部、腰部、手臂第1关节）：来自 kuavo.json joint_kp
+    ; RUIWO 手臂关节（l2-l7, r2-r7）：来自 kuavo.json amp_kpkd.ruiwo_kp（AMP 专用，非顶层 ruiwo_kp）
     (0,0)   100     ; leg_l1_joint
     (1,0)   100     ; leg_l2_joint
     (2,0)   80     ; leg_l3_joint
@@ -330,25 +331,26 @@ motor_pdo_kp
     (10,0)  30      ; leg_r5_joint
     (11,0)  50      ; leg_r6_joint
     (12,0)  40     ; waist_joint
-    (13,0)  30     ; zarm_l1_joint (除了第一个ec电机之外其他手臂关节暂设为0，ruiwo暂不支持，可根据需要调整)
-    (14,0)  0       ; zarm_l2_joint
-    (15,0)  0       ; zarm_l3_joint
-    (16,0)  0       ; zarm_l4_joint
-    (17,0)  0       ; zarm_l5_joint
-    (18,0)  0       ; zarm_l6_joint
-    (19,0)  0       ; zarm_l7_joint
-    (20,0)  30     ; zarm_r1_joint
-    (21,0)  0       ; zarm_r2_joint
-    (22,0)  0       ; zarm_r3_joint
-    (23,0)  0       ; zarm_r4_joint
-    (24,0)  0       ; zarm_r5_joint
-    (25,0)  0       ; zarm_r6_joint
-    (26,0)  0       ; zarm_r7_joint
+    (13,0)  30     ; zarm_l1_joint (EC_MASTER)
+    (14,0)  30      ; zarm_l2_joint (motorevo, amp_kpkd ruiwo_kp[0])
+    (15,0)  15      ; zarm_l3_joint (motorevo, amp_kpkd ruiwo_kp[1])
+    (16,0)  30      ; zarm_l4_joint (motorevo, amp_kpkd ruiwo_kp[2])
+    (17,0)  15      ; zarm_l5_joint (motorevo, amp_kpkd ruiwo_kp[3])
+    (18,0)  15      ; zarm_l6_joint (motorevo, amp_kpkd ruiwo_kp[4])
+    (19,0)  15      ; zarm_l7_joint (motorevo, amp_kpkd ruiwo_kp[5])
+    (20,0)  30     ; zarm_r1_joint (EC_MASTER)
+    (21,0)  30      ; zarm_r2_joint (motorevo, amp_kpkd ruiwo_kp[6])
+    (22,0)  15      ; zarm_r3_joint (motorevo, amp_kpkd ruiwo_kp[7])
+    (23,0)  30      ; zarm_r4_joint (motorevo, amp_kpkd ruiwo_kp[8])
+    (24,0)  15      ; zarm_r5_joint (motorevo, amp_kpkd ruiwo_kp[9])
+    (25,0)  15      ; zarm_r6_joint (motorevo, amp_kpkd ruiwo_kp[10])
+    (26,0)  15      ; zarm_r7_joint (motorevo, amp_kpkd ruiwo_kp[11])
 }
 
 motor_pdo_kd
 {
-    ; 定义各关节的PDO Kd参数（从kuavo.json的joint_kd读取，主要用于EC_MASTER电机）
+    ; EC_MASTER 电机（腿部、腰部、手臂第1关节）：来自 kuavo.json joint_kd
+    ; motorevo 手臂关节（l2-l7, r2-r7）：来自 kuavo.json amp_kpkd.ruiwo_kd（AMP 专用）
     (0,0)   1506    ; leg_l1_joint
     (1,0)   516     ; leg_l2_joint
     (2,0)   1506    ; leg_l3_joint
@@ -362,20 +364,20 @@ motor_pdo_kd
     (10,0)  2260    ; leg_r5_joint
     (11,0)  2260    ; leg_r6_joint
     (12,0)  1800     ; waist_joint
-    (13,0)  3254    ; zarm_l1_joint (除了第一个ec电机之外其他手臂关节暂设为0，ruiwo暂不支持，可根据需要调整)
-    (14,0)  0       ; zarm_l2_joint
-    (15,0)  0       ; zarm_l3_joint
-    (16,0)  0       ; zarm_l4_joint
-    (17,0)  0       ; zarm_l5_joint
-    (18,0)  0       ; zarm_l6_joint
-    (19,0)  0       ; zarm_l7_joint
-    (20,0)  3254    ; zarm_r1_joint
-    (21,0)  0       ; zarm_r2_joint
-    (22,0)  0       ; zarm_r3_joint
-    (23,0)  0       ; zarm_r4_joint
-    (24,0)  0       ; zarm_r5_joint
-    (25,0)  0       ; zarm_r6_joint
-    (26,0)  0       ; zarm_r7_joint
+    (13,0)  3254    ; zarm_l1_joint (EC_MASTER)
+    (14,0)  3       ; zarm_l2_joint (motorevo, amp_kpkd ruiwo_kd[0])
+    (15,0)  3       ; zarm_l3_joint (motorevo, amp_kpkd ruiwo_kd[1])
+    (16,0)  0.95    ; zarm_l4_joint (motorevo, amp_kpkd ruiwo_kd[2])
+    (17,0)  3       ; zarm_l5_joint (motorevo, amp_kpkd ruiwo_kd[3])
+    (18,0)  3       ; zarm_l6_joint (motorevo, amp_kpkd ruiwo_kd[4])
+    (19,0)  3       ; zarm_l7_joint (motorevo, amp_kpkd ruiwo_kd[5])
+    (20,0)  3254    ; zarm_r1_joint (EC_MASTER)
+    (21,0)  3       ; zarm_r2_joint (motorevo, amp_kpkd ruiwo_kd[6])
+    (22,0)  3       ; zarm_r3_joint (motorevo, amp_kpkd ruiwo_kd[7])
+    (23,0)  0.95    ; zarm_r4_joint (motorevo, amp_kpkd ruiwo_kd[8])
+    (24,0)  3       ; zarm_r5_joint (motorevo, amp_kpkd ruiwo_kd[9])
+    (25,0)  3       ; zarm_r6_joint (motorevo, amp_kpkd ruiwo_kd[10])
+    (26,0)  3       ; zarm_r7_joint (motorevo, amp_kpkd ruiwo_kd[11])
 }
 
 torqueLimits

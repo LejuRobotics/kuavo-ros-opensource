@@ -1,11 +1,23 @@
 import subprocess
 import rospy
 import os
+import collections
 from rich import console
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
-from kuavo_msgs.srv import changeArmCtrlMode, switchToNextController, getControllerList, switchController, SetString
+from kuavo_msgs.srv import changeArmCtrlMode, switchToNextController, getControllerList, switchController, SetString, SetStringRequest
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
+
+# 导入RobotVersion，兼容不同环境
+try:
+    from robot_version import RobotVersion
+except ImportError:
+    import rospkg
+    rospack = rospkg.RosPack()
+    import sys
+    sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
+    from robot_version import RobotVersion
+
 import time
 import signal
 import datetime
@@ -13,6 +25,14 @@ import json
 from std_srvs.srv import Trigger, TriggerRequest
 
 import threading
+try:
+    import serial
+except ImportError:
+    import subprocess
+    import sys
+    print("pyserial 库未安装，正在尝试安装...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyserial"])
+    import serial
 from h12pro_controller_node.srv import playmusic, playmusicRequest, playmusicResponse
 from h12pro_controller_node.srv import ExecuteArmAction, ExecuteArmActionRequest, ExecuteArmActionResponse
 from h12pro_controller_node.msg import RobotActionState
@@ -21,16 +41,267 @@ import os
 import json
 import hashlib
 import math
+import re
 import numpy as np
 from sensor_msgs.msg import Joy
 from geometry_msgs.msg import Twist
+from std_msgs.msg import Float64MultiArray
 
 console = console.Console()
+
+def encode_wifi_name_base64(name):
+    """将 WiFi 名称编码为 base64，避免 JSON 特殊字符问题
+    :param name: 原始 WiFi 名称
+    :return: base64 编码后的字符串，如果输入为 None 则返回 None
+    """
+    if name is None:
+        return None
+
+    try:
+        import base64
+        # 确保是字符串类型
+        if isinstance(name, bytes):
+            name_bytes = name
+        else:
+            name_bytes = name.encode('utf-8')
+
+        # 编码为 base64
+        return base64.b64encode(name_bytes).decode('ascii')
+    except Exception as e:
+        print(f"WiFi 名称 base64 编码失败: {e}")
+        return None
+
+def get_wifi_password(ssid):
+    """获取指定 WiFi 的密码
+    :param ssid: WiFi 名称（原始名称，非 base64）
+    :return: base64 编码的密码，如果获取失败返回 None
+    """
+    if ssid is None:
+        return None
+
+    try:
+        import base64
+        # 使用 nmcli 获取已保存的 WiFi 密码（需要 root 权限）
+        result = subprocess.run(
+            ["nmcli", "-s", "-g", "802-11-wireless-security.psk", "connection", "show", ssid],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            password = result.stdout.strip()
+            # 使用 base64 编码
+            return base64.b64encode(password.encode('utf-8')).decode('ascii')
+    except Exception as e:
+        print(f"获取 WiFi 密码失败: {e}")
+
+    return None
+
+def get_wifi_info():
+    """获取当前 WiFi 连接信息（SSID、IP 地址和密码）
+    :return: dict, 包含 wifi_name、robot_ip 和 wifi_password 的字典
+    """
+    wifi_info = {"wifi_name": None, "robot_ip": None, "wifi_password": None}
+    wifi_interface = None
+    raw_ssid = None  # 保存原始 SSID 用于获取密码
+
+    # 获取 WiFi 接口名称和 SSID
+    try:
+        # 优先使用 iwgetid 获取 SSID（更可靠，不会有分隔符问题）
+        result = subprocess.run(
+            ["iwgetid", "-r"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            raw_ssid = result.stdout.strip()
+            wifi_info["wifi_name"] = encode_wifi_name_base64(raw_ssid)
+            # 获取无线接口名
+            iface_result = subprocess.run(
+                ["iwgetid"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if iface_result.returncode == 0 and iface_result.stdout:
+                wifi_interface = iface_result.stdout.split()[0]
+    except Exception as e:
+        print(f"使用 iwgetid 获取 WiFi SSID 失败: {e}")
+
+    # 如果 iwgetid 失败，回退到 nmcli
+    if wifi_info["wifi_name"] is None:
+        try:
+            # 使用 nmcli 获取当前活动的 WiFi 连接信息
+            # 注意：nmcli -t 使用 : 作为分隔符，如果 SSID 包含 : 会导致分割错误
+            # 所以使用 -e yes 来转义特殊字符
+            result = subprocess.run(
+                ["nmcli", "-t", "-e", "yes", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    # nmcli -e yes 会将 : 转义为 \:，所以需要先处理转义
+                    # 使用正则表达式分割，忽略转义的冒号
+                    import re
+                    # 分割时忽略 \: （转义的冒号）
+                    parts = re.split(r'(?<!\\):', line)
+                    # 还原转义的冒号
+                    parts = [p.replace('\\:', ':') for p in parts]
+                    if len(parts) >= 4 and parts[1] == 'wifi' and parts[2] == 'connected':
+                        wifi_interface = parts[0]
+                        raw_ssid = parts[3]
+                        wifi_info["wifi_name"] = encode_wifi_name_base64(raw_ssid)
+                        break
+        except Exception as e:
+            print(f"使用 nmcli 获取 WiFi 信息失败: {e}")
+
+    # 获取 WiFi 密码
+    if raw_ssid:
+        wifi_info["wifi_password"] = get_wifi_password(raw_ssid)
+
+    # 获取 WiFi 接口的 IP 地址
+    if wifi_interface:
+        try:
+            import re
+            result = subprocess.run(
+                ["ip", "-4", "addr", "show", wifi_interface],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', result.stdout)
+                if match:
+                    wifi_info["robot_ip"] = match.group(1)
+        except Exception as e:
+            print(f"获取接口 {wifi_interface} 的 IP 地址失败: {e}")
+
+    # 如果没找到 WiFi 接口 IP，获取第一个非 lo 接口的 IP 作为备选
+    if wifi_info["robot_ip"] is None:
+        try:
+            import re
+            result = subprocess.run(
+                ["hostname", "-I"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # 取第一个 IP
+                wifi_info["robot_ip"] = result.stdout.strip().split()[0]
+        except Exception as e:
+            print(f"获取 IP 地址失败: {e}")
+
+    return wifi_info
+
+def send_wifi_info_to_serial(serial_device="/dev/H12_log_channel", baudrate=57600):
+    """将 WiFi 信息以 JSON 格式发送到串口（单次）
+    :param serial_device: 串口设备路径
+    :param baudrate: 波特率
+    :return: bool, 发送是否成功
+    """
+    try:
+        wifi_info = get_wifi_info()
+        # 构造指定格式的数据
+        data = {
+            "cmd": "rc/send_robot_info",
+            "data": {
+                "wifi_name": wifi_info["wifi_name"],
+                "robot_ip": wifi_info["robot_ip"]
+            }
+        }
+        json_data = json.dumps(data, ensure_ascii=False) + "\r\n"
+
+        with serial.Serial(serial_device, baudrate, timeout=1) as ser:
+            ser.write(json_data.encode('utf-8'))
+            ser.flush()
+
+        print(f"已发送 WiFi 信息到串口: {json_data.strip()}")
+        return True
+    except Exception as e:
+        print(f"发送 WiFi 信息到串口失败: {e}")
+        return False
+
+# WiFi 信息上报线程控制
+_wifi_report_thread = None
+_wifi_report_stop_event = threading.Event()
+
+def _wifi_report_loop(serial_device, baudrate, interval=1.0):
+    """WiFi 信息上报循环（在后台线程中运行）
+    :param serial_device: 串口设备路径
+    :param baudrate: 波特率
+    :param interval: 上报间隔（秒）
+    """
+    global _wifi_report_stop_event
+    ser = None
+    try:
+        ser = serial.Serial(serial_device, baudrate, timeout=1)
+        print(f"WiFi 信息上报线程已启动，设备: {serial_device}, 间隔: {interval}秒")
+
+        while not _wifi_report_stop_event.is_set():
+            try:
+                wifi_info = get_wifi_info()
+                data = {
+                    "cmd": "rc/send_robot_info",
+                    "data": {
+                        "wifi_name": wifi_info["wifi_name"],
+                        "robot_ip": wifi_info["robot_ip"],
+                        "wifi_password": wifi_info["wifi_password"]
+                    }
+                }
+                json_data = json.dumps(data, ensure_ascii=False) + "\r\n"
+                ser.write(json_data.encode('utf-8'))
+                ser.flush()
+            except Exception as e:
+                print(f"WiFi 信息上报失败: {e}")
+
+            # 等待间隔时间，同时检查停止事件
+            _wifi_report_stop_event.wait(timeout=interval)
+    except Exception as e:
+        print(f"WiFi 信息上报线程异常: {e}")
+    finally:
+        if ser and ser.is_open:
+            ser.close()
+        print("WiFi 信息上报线程已停止")
+
+def start_wifi_info_report(serial_device="/dev/H12_log_channel", baudrate=57600, interval=1.0):
+    """启动 WiFi 信息持续上报线程
+    :param serial_device: 串口设备路径
+    :param baudrate: 波特率
+    :param interval: 上报间隔（秒）
+    """
+    global _wifi_report_thread, _wifi_report_stop_event
+
+    # 如果已有线程在运行，先停止
+    stop_wifi_info_report()
+
+    _wifi_report_stop_event.clear()
+    _wifi_report_thread = threading.Thread(
+        target=_wifi_report_loop,
+        args=(serial_device, baudrate, interval),
+        daemon=True
+    )
+    _wifi_report_thread.start()
+
+def stop_wifi_info_report():
+    """停止 WiFi 信息上报线程"""
+    global _wifi_report_thread, _wifi_report_stop_event
+
+    if _wifi_report_thread and _wifi_report_thread.is_alive():
+        _wifi_report_stop_event.set()
+        _wifi_report_thread.join(timeout=2.0)
+        _wifi_report_thread = None
 
 # switch_controller 冷却期机制
 _switch_controller_lock = threading.Lock()
 _switch_controller_cooling_until = 0.0  # 冷却期结束时间戳
 SWITCH_CONTROLLER_COOLDOWN = 3.0  # 冷却期时长（秒）
+_depth_loco_restore_controller_name = None  # 进入 depth_loco_controller 前的控制器名
+_depth_history_topic_monitor = None
+_depth_history_topic_monitor_lock = threading.Lock()
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_dir = os.path.join(os.path.dirname(current_dir), "config")
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
@@ -40,6 +311,7 @@ VR_REMOTE_CONTROL_SESSION_NAME = "vr_remote_control"
 LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12 start_way:=auto"
 # LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12"
 LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 start_way:=auto"
+LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD = "roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=h12 start_way:=auto"
 LAUNCH_VR_REMOTE_CONTROL_CMD = "roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch"
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
@@ -89,7 +361,6 @@ rospy.Subscriber('/robot_action_state', RobotActionState, robot_action_state_cal
 # 全局话题发布
 joy_pub = rospy.Publisher('/joy', Joy, queue_size=10)
 com_pose_pub = rospy.Publisher('/cmd_pose', Twist, queue_size=10)
-
 # 控制拨杆
 BUTTON_A = 0
 BUTTON_B = 1
@@ -311,6 +582,44 @@ def call_real_initialize_srv():
     except rospy.ServiceException as e:
         rospy.logerr(f"Service call failed: {e}")
 
+def is_real_launch_in_ready_stance(event):
+    """
+    状态机条件判断函数：查询real_launch_status服务，确认是否是ready_stance或launched状态
+    返回True允许状态切换，返回False阻止切换
+    """
+    client = rospy.ServiceProxy('/humanoid_controller/real_launch_status', Trigger)
+    req = TriggerRequest()
+    try:
+        resp = client.call(req)
+        if resp.success and resp.message in ["ready_stance", "launched"]:
+            rospy.loginfo(f"[Condition] real_launch_status is {resp.message}, allow switch to stance")
+            return True
+        else:
+            rospy.logwarn(f"[Condition] real_launch_status is {resp.message}, not ready_stance or launched, block switch to stance")
+            return False
+    except rospy.ServiceException as e:
+        rospy.logerr(f"[Condition] Failed to call real_launch_status service: {e}, block switch")
+        return False
+
+def is_not_wheel_robot(event):
+    """
+    状态机条件判断函数：判断是否不是轮臂机器人
+    轮臂机器人版本号以6开头（60-69），禁止切换walk/trot步态
+    返回True允许状态切换，返回False阻止切换
+    """
+    # 判断是否为轮臂机器人(6代: major=6)
+    robot_version = os.environ.get('ROBOT_VERSION', '0')
+    is_wheel = False
+    try:
+        is_wheel = RobotVersion.create(int(robot_version)).start_with(major=6)
+    except (ValueError, TypeError):
+        rospy.logerr(f"ROBOT_VERSION环境变量格式错误: {robot_version}，默认不为轮臂")
+
+    if is_wheel:
+        rospy.logerr(f"[Condition] 当前为轮臂机器人（version={robot_version}），禁止切换walk/trot步态。")
+        return False
+    rospy.loginfo(f"[Condition] 当前为非轮臂机器人（version={robot_version}），允许切换walk/trot步态。")
+    return True
 
 def print_state_transition(trigger, source, target) -> None:
     console.print(
@@ -325,13 +634,34 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
     subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME], 
                     stderr=subprocess.DEVNULL) 
     
+    # 通过读取kuavo.json文件，获取ROBOT_MODULE和only_half_up_body参数
+    kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
+    if not os.path.exists(kuavo_json):
+        print(f"Error: Could not find {kuavo_json}")
+        raise Exception(f"Error: Could not find {kuavo_json}")
+    with open(kuavo_json, "r") as f:    
+        kuavo_json_data = json.load(f)
+    
+    # 获取机器人模块类型
+    robot_module = kuavo_json_data.get("ROBOT_MODULE", "")
+    only_half_up_body = kuavo_json_data["only_half_up_body"]
+    
+    # 根据机器人模块类型选择启动命令
     if real_robot:
-        launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_CMD
+        # 如果是LUNBI或LUNBI_V62，使用轮臂启动命令
+        if robot_module == "LUNBI" or robot_module == "LUNBI_V62":
+            launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD
+        else:
+            launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_CMD
     else:
         launch_cmd = LAUNCH_HUMANOID_ROBOT_SIM_CMD
     
     if calibrate:
-        launch_cmd += " cali:=true cali_arm:=true"
+        # LUNBI_V62 只执行 cali:=true，不执行 cali_arm
+        if robot_module == "LUNBI_V62":
+            launch_cmd += " cali:=true"
+        else:
+            launch_cmd += " cali:=true cali_arm:=true"
     
     # 通过读取kuavo.json文件，获取only_half_up_body参数，在launch_cmd中添加only_half_up_body:=true
     kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
@@ -348,10 +678,14 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
         log_channel_status = rospy.get_param("h12_log_channel")
         if log_channel_status is True:
             if os.path.exists("/dev/H12_log_channel"):
+                # 启动 WiFi 信息持续上报（1秒间隔）
+                start_wifi_info_report("/dev/H12_log_channel", baudrate=57600, interval=1.0)
+
                 log_channel_cmd_start = "stdbuf -oL -eL"
                 log_channel_cmd_end = "2>&1 | sed -u -e 's/\\x1b\\[[0-9;]*[mK]//g' -e 's/$/\\r/' | stdbuf -oL tee /dev/H12_log_channel"
                 launch_cmd = f"{log_channel_cmd_start} {launch_cmd} {log_channel_cmd_end}"
-            rospy.logerr("未检测到 /dev/H12_log_channel 设备文件，请确认已加载遥控器串口 udev 规则并连接设备。")
+            else:
+                rospy.logerr("未检测到 /dev/H12_log_channel 设备文件，请确认已加载遥控器串口 udev 规则并连接设备。")
 
     print(f"launch_cmd: {launch_cmd}")
     print("If you want to check the session, please run 'tmux attach -t humanoid_robot'")
@@ -467,11 +801,13 @@ def trot_callback(event):
 def stop_callback(event):
     source = event.kwargs.get("source")
     print_state_transition("stop", source, "initial")
+    # 停止 WiFi 信息上报
+    stop_wifi_info_report()
     # kill humanoid_robot and vr_remote_control
-    subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME], 
-                  stderr=subprocess.DEVNULL) 
-    subprocess.run(["tmux", "kill-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME], 
-                  stderr=subprocess.DEVNULL) 
+    subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME],
+                  stderr=subprocess.DEVNULL)
+    subprocess.run(["tmux", "kill-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME],
+                  stderr=subprocess.DEVNULL)
     kill_record_vr_rosbag()
     
     manual_h12_init_state = rospy.get_param("manual_h12_init_state", "none")
@@ -727,20 +1063,32 @@ def call_switch_controller_service(controller_name):
     """
     service_name = "/humanoid_controller/switch_controller"
     try:
+        current_controller_before = get_current_controller_name()
+        rospy.loginfo(
+            f"[ControllerSwitch] Request switch via '{service_name}': "
+            f"from '{current_controller_before}' to '{controller_name}'"
+        )
         rospy.wait_for_service(service_name, timeout=1.0)
         switch_client = rospy.ServiceProxy(service_name, switchController)
         response = switch_client(controller_name)
         if response.success:
-            rospy.loginfo(f"Switch controller successful: {response.message}")
-            rospy.loginfo(f"Switched to controller: '{controller_name}'")
+            current_controller_after = get_current_controller_name()
+            rospy.loginfo(
+                f"[ControllerSwitch] Switch success: {response.message}. "
+                f"Current controller is now '{current_controller_after}'"
+            )
         else:
-            rospy.logwarn(f"Switch controller failed: {response.message}")
+            current_controller_after = get_current_controller_name()
+            rospy.logwarn(
+                f"[ControllerSwitch] Switch failed: {response.message}. "
+                f"Current controller remains '{current_controller_after}'"
+            )
         return response.success
     except rospy.ServiceException as e:
-        rospy.logerr(f"Service call to '{service_name}' failed: {e}")
+        rospy.logerr(f"[ControllerSwitch] Service call to '{service_name}' failed: {e}")
         return False
     except rospy.ROSException as e:
-        rospy.logerr(f"Service '{service_name}' not available: {e}")
+        rospy.logerr(f"[ControllerSwitch] Service '{service_name}' not available: {e}")
         return False
 
 def call_switch_to_vmp_controller_service():
@@ -751,19 +1099,73 @@ def call_switch_to_vmp_controller_service():
     """
     service_name = "/humanoid_controller/switch_to_vmp_controller"
     try:
+        current_controller_before = get_current_controller_name()
+        rospy.loginfo(
+            f"[ControllerSwitch] Request switch via '{service_name}': "
+            f"from '{current_controller_before}' to 'vmp_controller'"
+        )
         rospy.wait_for_service(service_name, timeout=1.0)
         switch_client = rospy.ServiceProxy(service_name, Trigger)
         response = switch_client()
         if response.success:
-            rospy.loginfo(f"Switch to VMP controller successful: {response.message}")
+            current_controller_after = get_current_controller_name()
+            rospy.loginfo(
+                f"[ControllerSwitch] VMP switch success: {response.message}. "
+                f"Current controller is now '{current_controller_after}'"
+            )
         else:
-            rospy.logwarn(f"Switch to VMP controller failed: {response.message}")
+            current_controller_after = get_current_controller_name()
+            rospy.logwarn(
+                f"[ControllerSwitch] VMP switch failed: {response.message}. "
+                f"Current controller remains '{current_controller_after}'"
+            )
         return response.success
     except rospy.ServiceException as e:
-        rospy.logerr(f"Service call to '{service_name}' failed: {e}")
+        rospy.logerr(f"[ControllerSwitch] Service call to '{service_name}' failed: {e}")
         return False
     except rospy.ROSException as e:
-        rospy.logerr(f"Service '{service_name}' not available: {e}")
+        rospy.logerr(f"[ControllerSwitch] Service '{service_name}' not available: {e}")
+        return False
+
+def call_switch_to_dance_controller_service(dance_data=""):
+    """调用切换到 Dance 控制器的专用服务
+    使用 /humanoid_controller/switch_to_dance_controller (kuavo_msgs/SetString)，
+    与 RLControllerManager.switchDanceControllerByStringCallback 一致：
+    空字符串=舞蹈列表首项，"#0"/"#1"=下标，否则为控制器名称。
+
+    :param dance_data: 请求 data 字段，默认 "" 为第一个舞蹈
+    :return: bool, 服务调用结果
+    """
+    service_name = "/humanoid_controller/switch_to_dance_controller"
+    try:
+        current_controller_before = get_current_controller_name()
+        rospy.loginfo(
+            f"[ControllerSwitch] Request switch via '{service_name}': "
+            f"from '{current_controller_before}' (data={repr(dance_data)})"
+        )
+        rospy.wait_for_service(service_name, timeout=1.0)
+        switch_client = rospy.ServiceProxy(service_name, SetString)
+        req = SetStringRequest()
+        req.data = dance_data
+        response = switch_client(req)
+        if response.success:
+            current_controller_after = get_current_controller_name()
+            rospy.loginfo(
+                f"[ControllerSwitch] Dance switch success: {response.message}. "
+                f"Current controller is now '{current_controller_after}'"
+            )
+        else:
+            current_controller_after = get_current_controller_name()
+            rospy.logwarn(
+                f"[ControllerSwitch] Dance switch failed: {response.message}. "
+                f"Current controller remains '{current_controller_after}'"
+            )
+        return response.success
+    except rospy.ServiceException as e:
+        rospy.logerr(f"[ControllerSwitch] Service call to '{service_name}' failed: {e}")
+        return False
+    except rospy.ROSException as e:
+        rospy.logerr(f"[ControllerSwitch] Service '{service_name}' not available: {e}")
         return False
 
 def get_current_controller_name():
@@ -788,6 +1190,126 @@ def get_current_controller_name():
     except rospy.ROSException as e:
         rospy.logerr(f"Service '{service_name}' not available: {e}")
         return None
+
+class TopicFrequencyMonitor(object):
+    """后台订阅话题并估算最近一段时间的消息频率。"""
+
+    def __init__(self, topic, msg_type, window_size=50, stale_timeout=0.5):
+        self._timestamps = collections.deque(maxlen=window_size)
+        self._stale_timeout = stale_timeout
+        self._lock = threading.Lock()
+        self._subscriber = rospy.Subscriber(topic, msg_type, self._cb, queue_size=window_size)
+
+    def _cb(self, _msg):
+        with self._lock:
+            self._timestamps.append(time.time())
+
+    def has_recent_message(self):
+        now_sec = time.time()
+        with self._lock:
+            if not self._timestamps:
+                return False
+            return (now_sec - self._timestamps[-1]) <= self._stale_timeout
+
+    def get_hz(self):
+        now_sec = time.time()
+        with self._lock:
+            timestamps = list(self._timestamps)
+
+        if len(timestamps) < 2:
+            return 0.0
+
+        if (now_sec - timestamps[-1]) > self._stale_timeout:
+            return 0.0
+
+        duration = timestamps[-1] - timestamps[0]
+        if duration <= 0.0:
+            return 0.0
+
+        return (len(timestamps) - 1) / duration
+
+def _get_depth_history_topic_monitor():
+    global _depth_history_topic_monitor
+
+    with _depth_history_topic_monitor_lock:
+        if _depth_history_topic_monitor is None:
+            _depth_history_topic_monitor = TopicFrequencyMonitor(
+                "/camera/depth/depth_history_array",
+                Float64MultiArray,
+                window_size=50,
+                stale_timeout=0.5,
+            )
+        return _depth_history_topic_monitor
+
+def is_depth_history_topic_available():
+    """检查深度历史话题是否已发布且当前能收到消息。
+
+    Returns:
+        bool: True 表示话题已发布、能收到消息且频率达到最低要求，False 表示当前不可切到 depth_loco_controller
+    """
+    target_topic = "/camera/depth/depth_history_array"
+    min_topic_frequency_hz = 50.0
+    wait_timeout_sec = 2.0
+    check_interval_sec = 0.05
+    try:
+        published_topics = rospy.get_published_topics()
+        if not published_topics:
+            rospy.logwarn("[DepthLocoSwitch] No published topics found while checking depth history topic.")
+            return False
+
+        if not any(topic_name == target_topic for topic_name, _topic_type in published_topics):
+            rospy.logwarn(f"[DepthLocoSwitch] Required topic '{target_topic}' is not published. Refuse to switch to depth_loco_controller.")
+            return False
+
+        topic_monitor = _get_depth_history_topic_monitor()
+        deadline = time.time() + wait_timeout_sec
+        estimated_hz = 0.0
+
+        while time.time() < deadline and not rospy.is_shutdown():
+            estimated_hz = topic_monitor.get_hz()
+            if estimated_hz >= min_topic_frequency_hz:
+                rospy.loginfo(
+                    f"[DepthLocoSwitch] Topic '{target_topic}' is available with estimated frequency "
+                    f"{estimated_hz:.1f} Hz."
+                )
+                return True
+            rospy.sleep(check_interval_sec)
+
+        if not topic_monitor.has_recent_message():
+            rospy.logwarn(
+                f"[DepthLocoSwitch] Required topic '{target_topic}' has no recent messages. "
+                f"Refuse to switch to depth_loco_controller."
+            )
+            return False
+
+        if estimated_hz < min_topic_frequency_hz:
+            rospy.logwarn(
+                f"[DepthLocoSwitch] Topic '{target_topic}' frequency too low: "
+                f"estimated {estimated_hz:.1f} Hz. Require at least {min_topic_frequency_hz:.1f} Hz."
+            )
+            return False
+        return True
+    except Exception as e:
+        rospy.logerr(f"[DepthLocoSwitch] Failed to check published topics: {e}")
+        return False
+
+def _set_depth_loco_restore_controller_name(controller_name):
+    """记录进入 depth_loco_controller 之前的控制器名。"""
+    global _depth_loco_restore_controller_name
+    with _switch_controller_lock:
+        _depth_loco_restore_controller_name = controller_name
+
+def _get_depth_loco_restore_controller_name():
+    """获取 depth_loco_controller 的恢复目标，不清空。"""
+    global _depth_loco_restore_controller_name
+    with _switch_controller_lock:
+        return _depth_loco_restore_controller_name
+
+def _clear_depth_loco_restore_controller_name():
+    """清空 depth_loco_controller 的恢复目标。"""
+    global _depth_loco_restore_controller_name
+    with _switch_controller_lock:
+        _depth_loco_restore_controller_name = None
 
 def _release_switch_controller_cooldown():
     """释放 switch_controller 冷却期（在后台线程中调用）"""
@@ -865,6 +1387,63 @@ def switch_controller_callback(event):
         
     except Exception as e:
         rospy.logerr(f"Error in switch_controller_callback: {e}")
+
+def depth_loco_switch_callback(event):
+    """切换走楼梯斜坡控制器回调函数
+    - 如果当前是 mpc 或 amp_controller，切换到 depth_loco_controller
+    - 如果当前是 depth_loco_controller，切换回进入前的控制器
+    - 执行后设置冷却期，期间不允许其他状态转换
+    """
+    global _switch_controller_cooling_until
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+    print_state_transition(trigger, source, "stance")
+
+    try:
+        current_controller = get_current_controller_name()
+
+        if current_controller is None:
+            rospy.logerr("[DepthLocoSwitch] Failed to get current controller name. Cannot switch controller.")
+            return
+
+        current_controller_lower = current_controller.lower()
+
+        success = False
+        if current_controller_lower in ["mpc", "amp_controller"]:
+            if not is_depth_history_topic_available():
+                rospy.logwarn("[DepthLocoSwitch] depth_loco_switch blocked because depth history topic is unavailable.")
+                return
+            _set_depth_loco_restore_controller_name(current_controller_lower)
+            rospy.loginfo("[DepthLocoSwitch] Switching to depth_loco_controller")
+            success = call_switch_controller_service("depth_loco_controller")
+            if not success:
+                _set_depth_loco_restore_controller_name(None)
+                rospy.logwarn("[DepthLocoSwitch] Failed to switch to depth_loco_controller.")
+        elif current_controller_lower == "depth_loco_controller":
+            restore_controller_name = _get_depth_loco_restore_controller_name()
+            if restore_controller_name not in ["mpc", "amp_controller"]:
+                restore_controller_name = "amp_controller"
+            rospy.loginfo(f"[DepthLocoSwitch] Switching back to {restore_controller_name}")
+            success = call_switch_controller_service(restore_controller_name)
+            if not success:
+                rospy.logwarn(f"[DepthLocoSwitch] Failed to switch back to {restore_controller_name}.")
+            else:
+                _clear_depth_loco_restore_controller_name()
+        else:
+            rospy.logwarn(f"[DepthLocoSwitch] Unsupported current controller: {current_controller}.")
+
+        with _switch_controller_lock:
+            _switch_controller_cooling_until = time.time() + SWITCH_CONTROLLER_COOLDOWN
+            if success:
+                rospy.loginfo(f"[DepthLocoSwitch] Controller switched successfully. Cooldown period started for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
+            else:
+                rospy.loginfo(f"[DepthLocoSwitch] Cooldown period started (service call failed). State transitions will be blocked for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
+
+        cooldown_thread = threading.Thread(target=_release_switch_controller_cooldown, daemon=True)
+        cooldown_thread.start()
+
+    except Exception as e:
+        rospy.logerr(f"Error in depth_loco_switch_callback: {e}")
 
 def check_can_switch_to_vmp(event):
     """检查是否可以切换到VMP控制器
@@ -954,6 +1533,46 @@ def exit_vmp_controller_callback(event):
         print_state_transition(trigger, source, "stance")
     except Exception as e:
         rospy.logerr(f"Error in exit_vmp_controller_callback: {e}")
+        return
+
+def dance_controller_callback(event):
+    """进入Dance控制模式：/humanoid_controller/switch_to_dance_controller (SetString, 默认首项舞蹈)"""
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+
+    try:
+        rospy.loginfo("[DanceController] Switching from amp_controller to dance_controller")
+        success = call_switch_to_dance_controller_service()
+
+        if not success:
+            rospy.logerr("[DanceController] Failed to switch to dance_controller")
+            return
+
+        rospy.loginfo("[DanceController] Successfully entered Dance controller mode")
+        print_state_transition(trigger, source, "dance_controller")
+    except Exception as e:
+        rospy.logerr(f"Error in dance_controller_callback: {e}")
+        return
+
+def exit_dance_controller_callback(event):
+    """退出Dance控制模式回调函数
+    从 dance_controller 切换回 amp_controller
+    """
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+
+    try:
+        rospy.loginfo("[DanceController] Exiting Dance controller mode, switching back to amp_controller")
+        success = call_switch_controller_service("amp_controller")
+
+        if not success:
+            rospy.logerr("[DanceController] Failed to switch back to amp_controller.")
+            return
+
+        rospy.loginfo("[DanceController] Successfully switched back to amp_controller")
+        print_state_transition(trigger, source, "stance")
+    except Exception as e:
+        rospy.logerr(f"Error in exit_dance_controller_callback: {e}")
         return
 
 def vmp_action_callback(event):

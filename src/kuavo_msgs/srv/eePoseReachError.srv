@@ -1,0 +1,10 @@
+# 左臂还是右臂
+bool isLeft
+
+---
+
+# 是否返回成功, 仅在末端模式且期望位姿不再更新时调用才会成功
+bool success
+
+# 返回误差向量
+float64[] errVector

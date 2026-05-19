@@ -86,7 +86,8 @@ struct TimestampedData {
 
 class ControlDataManager {
 public:
-    explicit ControlDataManager(ros::NodeHandle& nh, bool is_real, int arm_num, int low_joint_num, int head_num);
+    explicit ControlDataManager(ros::NodeHandle& nh, bool is_real, int arm_num, int low_joint_num, int head_num, 
+                                const vector_t& leg_initial_state, const vector_t& arm_initial_state);
     ~ControlDataManager() = default;
 
     // 初始化所有订阅者

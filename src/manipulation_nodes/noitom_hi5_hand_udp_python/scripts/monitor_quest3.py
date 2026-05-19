@@ -14,15 +14,15 @@ import netifaces
 from pprint import pprint
 from kuavo_ros_interfaces.msg import robotHeadMotionData
 from noitom_hi5_hand_udp_python.msg import PoseInfoList, PoseInfo
-from kuavo_msgs.msg import JoySticks
+from kuavo_msgs.msg import JoySticks, headCtrlMode
 from geometry_msgs.msg import Point, Quaternion, PoseStamped
 import threading
 from visualization_msgs.msg import Marker
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, String, Empty
 # Add the parent directory to the system path to allow relative imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../protos/')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 # Import the hand_pose_pb2 module
 import protos.hand_pose_pb2 as event_pb2
@@ -55,6 +55,7 @@ class Quest3BoneFramePublisher:
         self.CONFIG_FILE = os.path.join(self.current_file_dir, "config.json")
         self.calibrated_head_quat_matrix_inv = None
         self.head_motion_range = self.get_head_motion_range()
+        self.chest_motion_range = self.get_chest_motion_range()
         self.chest_motion_range = self.get_chest_motion_range()
         
         self.sock = None
@@ -106,6 +107,18 @@ class Quest3BoneFramePublisher:
             self._handle_set_head_control_mode
         )
         rospy.loginfo("Head control mode service started at /quest3/set_head_control_mode")
+
+        # 创建头部控制模式发布节点
+        self.head_ctrl_mode_pub = rospy.Publisher('/quest3/head_control_mode', headCtrlMode, queue_size=10)
+        # 每次 set_head_control_mode 成功设为 fixed 时发布，供 QuestControlFSM 在手臂复位窗口内更新「解锁后恢复」快照（含重复 fixed）
+        self._pub_head_fixed_user_intent = rospy.Publisher(
+            '/quest3/head_fixed_forward_user_intent', Empty, queue_size=1, latch=False
+        )
+
+        rospy.loginfo("Head reset service started at /quest3/reset_head_pose")
+
+        # 初始化VR连接状态参数
+        rospy.set_param('/quest3/connected', False)
 
     def set_robot_state_server(self, robot_state_server):
         """设置 RobotStateServer 引用
@@ -236,6 +249,9 @@ class Quest3BoneFramePublisher:
                 self.sock.sendto(message, self.server_address)
                 self.sock.recvfrom(1024)
                 print(f"\033[92mAcknowledgment From Quest3 received on attempt {attempt + 1}, start to receiving data...\033[0m")
+                # 连接成功后设置参数服务器参数
+                rospy.set_param('/quest3/connected', True)
+                rospy.loginfo("VR连接成功！已设置参数: /quest3/connected=True")
                 return True
             except socket.timeout:
                 print(f"\033[91mQuest3_timeout: Attempt {attempt + 1} timed out. Retrying...\033[0m")
@@ -394,6 +410,19 @@ class Quest3BoneFramePublisher:
             rospy.logerr(f"TF lookup failed for torso->Chest transform: {e}")
             return
     
+    def pub_chest_pose_in_torso_frame(self, chest_position, chest_quat, root_offset, time_now):
+        chest_pose_msg = PoseStamped()
+        chest_pose_msg.header.stamp = time_now
+        chest_pose_msg.header.frame_id = "torso"
+        chest_pose_msg.pose.position.x = chest_position["x"] - root_offset["x"]
+        chest_pose_msg.pose.position.y = chest_position["y"] - root_offset["y"]
+        chest_pose_msg.pose.position.z = chest_position["z"]
+        chest_pose_msg.pose.orientation.x = chest_quat[0]
+        chest_pose_msg.pose.orientation.y = chest_quat[1]
+        chest_pose_msg.pose.orientation.z = chest_quat[2]
+        chest_pose_msg.pose.orientation.w = chest_quat[3]
+        self.chest_pose_pub.publish(chest_pose_msg)
+
     def _get_robot_hand_tcp_positions(self):
         """
         获取机器人本体左右手末端TCP位置（相对于base_link）
@@ -503,6 +532,8 @@ class Quest3BoneFramePublisher:
             
             # 设置模式
             self.head_control_manager.set_mode(mode, fixed_hand)
+            if mode == HeadControlMode.FIXED:
+                self._pub_head_fixed_user_intent.publish(Empty())
             
             response.success = True
             response.message = f"Head control mode set to: {req.mode}" + (f", fixed_hand: {fixed_hand}" if mode == HeadControlMode.FIXED_MAIN_HAND else "")
@@ -651,6 +682,9 @@ class Quest3BoneFramePublisher:
                 pose_info_list.is_hand_tracking = event.IsHandTracking
                 self.pose_pub.publish(pose_info_list)
 
+                # 发布头部控制模式
+                self.head_control_manager.publish_head_control_mode(self.head_ctrl_mode_pub, HeadControlMode.to_string(self.head_control_manager.mode), self.head_control_manager.fixed_main_hand)
+
                 # if pose_info_list.is_high_confidence:
                 #     self.pose_pub.publish(pose_info_list)
                 # else:
@@ -659,10 +693,14 @@ class Quest3BoneFramePublisher:
                 self.rate.sleep()
             except socket.timeout:
                 print('Timeout occurred, no data received. Restarting socket...')
+                rospy.set_param('/quest3/connected', False)
+                rospy.logwarn("VR连接断开！已设置参数: /quest3/connected=False")
                 if not self.restart_socket():
                     break
             except Exception as e:
                 print(f'An error occurred: {e}')
+                rospy.set_param('/quest3/connected', False)
+                rospy.logwarn("VR连接异常！已设置参数: /quest3/connected=False")
                 if not self.restart_socket():
                     break
 
@@ -715,6 +753,12 @@ class Quest3BoneFramePublisher:
         scale_factor = {"x": 3.0, "y": 3.0, "z": 3.0}
         # 创建TFMessage用于批量发布所有骨骼的TF变换
         tf_msg = TFMessage()
+        root_offset = {"x": 0.0, "y": 0.0, "z": 0.0}
+        root_index = self.bone_name_to_index.get("Root", None)
+        if root_index is not None and root_index < len(event.poses):
+            root_pose = event.poses[root_index]
+            root_position = {"x": root_pose.position.x, "y": root_pose.position.y, "z": root_pose.position.z}
+            root_offset = self.convert_position_to_right_hand(root_position)
         
         for i, pose in enumerate(event.poses):
             bone_name = self.index_to_bone_name[i]
@@ -741,7 +785,7 @@ class Quest3BoneFramePublisher:
                 self.pub_head_motion_data(right_hand_quat)
             
             if bone_name == "Chest":
-                self.pub_chest_motion_data(right_hand_quat)
+                self.pub_chest_pose_in_torso_frame(right_hand_position, right_hand_quat, root_offset, time_now)
         
         # 批量发布所有骨骼的TF变换（一次性发布，而不是循环中逐个发布）
         if len(tf_msg.transforms) > 0:
@@ -764,6 +808,7 @@ class Quest3BoneFramePublisher:
             print("Failed to restart socket connection.")
             return False
         print("Socket connection restarted successfully.")
+        # send_initial_message() 成功时已设置 /quest3/connected=True
         return True
 
     def _periodic_robot_info_broadcaster(self):

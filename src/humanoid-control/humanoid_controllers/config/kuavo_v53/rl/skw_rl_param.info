@@ -49,7 +49,7 @@ velocityLimits
 {
     ; 定义速度命令的限制（简化为单一上限，X 负向通过单独的缩放系数实现不对称限制）
     ; 格式：[linear_x, linear_y, linear_z, angular_z] （正向和负向使用相同的上限）
-    (0,0)  0.5      ; cmdVelLineX limit (positive)
+    (0,0)  0.55      ; cmdVelLineX limit (positive)
     (1,0)  0.3       ; cmdVelLineY limit (positive and negative)
     (2,0)  0.3       ; cmdVelLineZ limit (positive and negative)
     (3,0)  0.3       ; cmdVelAngularZ limit (positive and negative)
@@ -171,14 +171,14 @@ defaultJointState
     (11,0) -0.       ; leg_r6_joint
     (12,0)  0        ; waist_joint
     (13,0)  0        ; zarm_l1_joint
-    (14,0)  0        ; zarm_l2_joint
+    (14,0)  0.075      ; zarm_l2_joint
     (15,0)  0        ; zarm_l3_joint
     (16,0)  0        ; zarm_l4_joint
     (17,0)  0        ; zarm_l5_joint
     (18,0)  0        ; zarm_l6_joint
     (19,0)  0        ; zarm_l7_joint
     (20,0)  0        ; zarm_r1_joint
-    (21,0)  0        ; zarm_r2_joint
+    (21,0)  -0.075     ; zarm_r2_joint
     (22,0)  0        ; zarm_r3_joint
     (23,0)  0        ; zarm_r4_joint
     (24,0)  0        ; zarm_r5_joint

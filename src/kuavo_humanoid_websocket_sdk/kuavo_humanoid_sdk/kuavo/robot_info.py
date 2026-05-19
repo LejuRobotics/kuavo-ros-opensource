@@ -63,6 +63,7 @@ class KuavoRobotInfo(RobotInfoBase):
                 - "qiangnao" means "dexteroushand"
                 - "lejuclaw" means "lejuclaw"
                 - "qiangnao_touch" means "touchdexteroushand"
+                - "linker_hand" means LinkBot "LingXin" dexteroushand (equivalent to qiangnao, only the hardware layer applies position mapping)
                 - ...
         """
         return self._end_effector_type

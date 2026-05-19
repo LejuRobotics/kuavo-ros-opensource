@@ -1,0 +1,466 @@
+/******************************************************************************
+Copyright (c) 2021, Farbod Farshidian. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+ * Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+******************************************************************************/
+
+#include <ocs2_pinocchio_interface/PinocchioEndEffectorKinematics.h>
+#include <ocs2_robotic_tools/end_effector/EndEffectorKinematics.h>
+
+#include <humanoid_wheel_interface/MobileManipulatorPreComputation.h>
+#include "humanoid_wheel_interface/cost/TorsoTrackingBoxSoftCost.h"
+
+#include <ocs2_core/misc/LinearInterpolation.h>
+
+namespace ocs2 {
+namespace mobile_manipulator {
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+TorsoTrackingBoxSoftCost::TorsoTrackingBoxSoftCost(const EndEffectorKinematics<scalar_t>& endEffectorKinematicsTorso,
+                                                 const MobileManipulatorReferenceManager& referenceManager,
+                                                 const Vector6d& pose_lower, 
+                                                 const Vector6d& pose_upper,
+                                                 std::vector<RelaxedBarrierPenalty::Config> settingsFocus, 
+                                                 std::vector<RelaxedBarrierPenalty::Config> settingsUnFocus)
+    : endEffectorKinematicsTorsoPtr_(endEffectorKinematicsTorso.clone()),
+      referenceManager_(referenceManager),
+      pose_lower_(pose_lower), pose_upper_(pose_upper),
+      settingsFocus_(settingsFocus),
+      settingsUnFocus_(settingsUnFocus)
+{
+  // 检查是否每个维度都是合理的（lower <= upper）
+  for (int i = 0; i < pose_lower_.size(); ++i) {
+    if (pose_lower_[i] > pose_upper_[i]) {
+      throw std::invalid_argument(
+          "[TorsoTrackingBoxSoftCost] pose_lower must be less than or equal to pose_upper! "
+          "Dimension " + std::to_string(i) + ": " + 
+          "lower = " + std::to_string(pose_lower_[i]) + 
+          ", upper = " + std::to_string(pose_upper_[i]));
+    }
+  }
+
+  pinocchioEEKinTorsoPtr_ = dynamic_cast<PinocchioEndEffectorKinematics*>(endEffectorKinematicsTorsoPtr_.get());
+
+  // 更新各轴屏障函数
+  for(int i = 0; i < 3; i++)
+  {
+    penaltyFocusPtr6D_.emplace_back(new ocs2::RelaxedBarrierPenalty(settingsFocus_[0]));
+    penaltyUnFocusPtr6D_.emplace_back(new ocs2::RelaxedBarrierPenalty(settingsUnFocus_[0]));
+  }
+  for(int i = 0; i < 3; i++)
+  {
+    penaltyFocusPtr6D_.emplace_back(new ocs2::RelaxedBarrierPenalty(settingsFocus_[1]));
+    penaltyUnFocusPtr6D_.emplace_back(new ocs2::RelaxedBarrierPenalty(settingsUnFocus_[1]));
+  }
+}
+
+const ocs2::RelaxedBarrierPenalty* TorsoTrackingBoxSoftCost::getFocusZPenalty() const
+{
+  const scalar_t mu = referenceManager_.getFocusZMu();
+  const scalar_t delta = referenceManager_.getFocusZDelta();
+
+  const scalar_t eps = static_cast<scalar_t>(1e-12);
+  if (!focusZCacheValid_ || std::abs(mu - focusZMuCached_) > eps || std::abs(delta - focusZDeltaCached_) > eps)
+  {
+    focusZPenaltyPtr_.reset(new ocs2::RelaxedBarrierPenalty(ocs2::RelaxedBarrierPenalty::Config{mu, delta}));
+    focusZMuCached_ = mu;
+    focusZDeltaCached_ = delta;
+    focusZCacheValid_ = true;
+  }
+  return focusZPenaltyPtr_.get();
+}
+
+bool TorsoTrackingBoxSoftCost::isActive(scalar_t time) const 
+{
+  return referenceManager_.getEnableTorsoPoseTargetTrajectories();
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+scalar_t TorsoTrackingBoxSoftCost::getValue(scalar_t time, const vector_t& state, const ocs2::TargetTrajectories& targetTrajectories,
+                                            const ocs2::PreComputation& preComp) const {
+   // PinocchioEndEffectorKinematics requires pre-computation with shared PinocchioInterface.
+  if (pinocchioEEKinTorsoPtr_ != nullptr) {
+    const auto& preCompMM = cast<MobileManipulatorPreComputation>(preComp);
+    pinocchioEEKinTorsoPtr_->setPinocchioInterface(preCompMM.getPinocchioInterface());
+  }
+  // const auto& currentPositionOrientation = preCompMM.getTorsoPose();
+  const auto& desiredPositionOrientation = interpolateEndEffectorPose(time);
+  auto desiredPositionOrientationWorld = targetBaseToWorld(state, desiredPositionOrientation);
+
+  // 位置上下界
+  scalar_t cost(0.0);
+  Eigen::Vector3d actualPos = endEffectorKinematicsTorsoPtr_->getPosition(state).front();
+
+  for(int i=0; i<3; i++)
+  {
+    // 下界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+
+      h_one << actualPos.segment(i, 1) - desiredPositionOrientationWorld.first.segment(i, 1) - pose_lower_.segment(i, 1);   // 下界
+      f_one << actualPos.segment(i, 1);
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        if (i == 2 && referenceManager_.getUseFocusZ())
+        {
+          constraint_one.penalty = getFocusZPenalty();
+        }
+        else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i].get();
+        }
+      }
+      else
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost += ocs2::mobile_manipulator::getValue(constraint_one, f_one);
+    }
+
+    // 上界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+
+      h_one << -actualPos.segment(i, 1) + desiredPositionOrientationWorld.first.segment(i, 1) + pose_upper_.segment(i, 1);   // 上界
+      f_one << -actualPos.segment(i, 1);
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        if (i == 2 && referenceManager_.getUseFocusZ())
+        {
+          constraint_one.penalty = getFocusZPenalty();
+        }
+        else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i].get();
+        }
+      }
+      else
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost += ocs2::mobile_manipulator::getValue(constraint_one, f_one);
+    }
+  }
+
+  // 姿态上下界
+  Eigen::Vector3d OriErr = endEffectorKinematicsTorsoPtr_->getOrientationError(state, {desiredPositionOrientationWorld.second}).front();
+  
+  Eigen::Vector3d poseLower = pose_lower_.tail<3>();
+  Eigen::Vector3d poseUpper = pose_upper_.tail<3>();
+  if(!referenceManager_.getIsFocusEeStatus())
+  {
+    const double scale = referenceManager_.getTorsoOriFocusScale();
+    poseLower *= scale;
+    poseUpper *= scale;
+  }
+
+  for(int i=0; i<3; i++)
+  {
+    // 下界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+
+      h_one << OriErr.segment(i, 1) - poseLower.segment(i, 1);   // 下界
+      f_one << OriErr.segment(i, 1);
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i+3].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i+3].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost += ocs2::mobile_manipulator::getValue(constraint_one, f_one);
+    }
+
+    // 上界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+
+      h_one << -OriErr.segment(i, 1) + poseUpper.segment(i, 1);   // 上界
+      f_one << -OriErr.segment(i, 1);
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i+3].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i+3].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost += ocs2::mobile_manipulator::getValue(constraint_one, f_one);
+    }
+  }
+
+  return cost;
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+ScalarFunctionQuadraticApproximation TorsoTrackingBoxSoftCost::getQuadraticApproximation(scalar_t time, const vector_t& state,
+                                                                                         const ocs2::TargetTrajectories& targetTrajectories,
+                                                                                         const ocs2::PreComputation& preComp) const {
+  // PinocchioEndEffectorKinematics requires pre-computation with shared PinocchioInterface.
+  if (pinocchioEEKinTorsoPtr_ != nullptr) {
+    const auto& preCompMM = cast<MobileManipulatorPreComputation>(preComp);
+    pinocchioEEKinTorsoPtr_->setPinocchioInterface(preCompMM.getPinocchioInterface());
+  }
+
+  const auto& desiredPositionOrientation = interpolateEndEffectorPose(time);
+  auto desiredPositionOrientationWorld = targetBaseToWorld(state, desiredPositionOrientation);
+
+  // 位置上下界
+  ScalarFunctionQuadraticApproximation cost;
+  cost.f = 0.0;
+  cost.dfdx = vector_t::Zero(state.size());
+  cost.dfdxx = matrix_t::Zero(state.size(), state.size());
+  const auto eePositionTorso = endEffectorKinematicsTorsoPtr_->getPositionLinearApproximation(state).front();
+
+  for(int i=0; i<3; i++)
+  {
+    // 下界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      ScalarFunctionQuadraticApproximation cost_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+      matrix_t dfdx_one = matrix_t::Zero(1, state.rows());
+
+      h_one << eePositionTorso.f.segment(i, 1) - desiredPositionOrientationWorld.first.segment(i, 1) - pose_lower_.segment(i, 1);   // 下界
+      f_one << eePositionTorso.f.segment(i, 1);
+      dfdx_one << eePositionTorso.dfdx.row(i).eval();
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        if (i == 2 && referenceManager_.getUseFocusZ())
+        {
+          constraint_one.penalty = getFocusZPenalty();
+        }
+        else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i].get();
+        }
+      }
+      else
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost_one = ocs2::mobile_manipulator::getQuadraticApproximation(constraint_one, f_one, dfdx_one);
+      cost += cost_one;
+    }
+
+    // 上界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      ScalarFunctionQuadraticApproximation cost_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+      matrix_t dfdx_one = matrix_t::Zero(1, state.rows());
+
+      h_one << -eePositionTorso.f.segment(i, 1) + desiredPositionOrientationWorld.first.segment(i, 1) + pose_upper_.segment(i, 1);   // 上界
+      f_one << -eePositionTorso.f.segment(i, 1);
+      dfdx_one << -eePositionTorso.dfdx.row(i).eval();
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        if (i == 2 && referenceManager_.getUseFocusZ())
+        {
+          constraint_one.penalty = getFocusZPenalty();
+        }
+        else
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i].get();
+        }
+      }
+      else
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost_one = ocs2::mobile_manipulator::getQuadraticApproximation(constraint_one, f_one, dfdx_one);
+      cost += cost_one;
+    }
+  }
+
+  // 姿态上下界
+  Eigen::Vector3d poseLower = pose_lower_.tail<3>();
+  Eigen::Vector3d poseUpper = pose_upper_.tail<3>();
+  if(!referenceManager_.getIsFocusEeStatus())
+  {
+    const double scale = referenceManager_.getTorsoOriFocusScale();
+    poseLower *= scale;
+    poseUpper *= scale;
+  }
+
+  ScalarFunctionQuadraticApproximation costOri;
+  const auto eeOrientationError = 
+      endEffectorKinematicsTorsoPtr_->getOrientationErrorLinearApproximation(state, {desiredPositionOrientationWorld.second}).front();
+
+  for(int i=0; i<3; i++)
+  {
+    // 下界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      ScalarFunctionQuadraticApproximation cost_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+      matrix_t dfdx_one = matrix_t::Zero(1, state.rows());
+
+      h_one << eeOrientationError.f.segment(i, 1) - poseLower.segment(i, 1);   // 下界
+      f_one << eeOrientationError.f.segment(i, 1);
+      dfdx_one << eeOrientationError.dfdx.row(i).eval();
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i+3].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i+3].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost_one = ocs2::mobile_manipulator::getQuadraticApproximation(constraint_one, f_one, dfdx_one);
+      cost += cost_one;
+    }
+
+    // 上界
+    {
+      LinearStateInequalitySoftConstraint constraint_one;
+      ScalarFunctionQuadraticApproximation cost_one;
+      vector_t h_one = vector_t::Zero(1);
+      vector_t f_one = vector_t::Zero(1);
+      matrix_t dfdx_one = matrix_t::Zero(1, state.rows());
+
+      h_one << -eeOrientationError.f.segment(i, 1) + poseUpper.segment(i, 1);   // 上界
+      f_one << -eeOrientationError.f.segment(i, 1);
+      dfdx_one << -eeOrientationError.dfdx.row(i).eval();
+
+      if(referenceManager_.getIsFocusEeStatus())
+      {
+        constraint_one.penalty = penaltyUnFocusPtr6D_[i+3].get();
+      }
+      else
+      {
+        constraint_one.penalty = penaltyFocusPtr6D_[i+3].get();
+      }
+      constraint_one.A = matrix_t::Identity(1, 1);
+      constraint_one.h = h_one;
+
+      cost_one = ocs2::mobile_manipulator::getQuadraticApproximation(constraint_one, f_one, dfdx_one);
+      cost += cost_one;
+    }
+  }
+
+  return cost;
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+auto TorsoTrackingBoxSoftCost::interpolateEndEffectorPose(scalar_t time) const -> std::pair<vector_t, quaternion_t> {
+  const auto& targetTrajectories = referenceManager_.getTorsoTargetTrajectories();
+  const auto& targetTorsoState = targetTrajectories.getDesiredState(time);
+
+  vector_t position = targetTorsoState.head(3);
+  Eigen::Vector3d zyx = targetTorsoState.segment(3, 3);
+  quaternion_t orientation =   // 轮臂躯干采用 pitch-yaw-roll 欧拉角, 可以节省一个角度来表达姿态
+         Eigen::AngleAxis<scalar_t>(zyx(1), Eigen::Matrix<scalar_t, 3, 1>::UnitY()) *
+         Eigen::AngleAxis<scalar_t>(zyx(0), Eigen::Matrix<scalar_t, 3, 1>::UnitZ()) *
+         Eigen::AngleAxis<scalar_t>(zyx(2), Eigen::Matrix<scalar_t, 3, 1>::UnitX());
+
+  return {position, orientation};
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
+auto TorsoTrackingBoxSoftCost::targetBaseToWorld(const vector_t& state, 
+              const std::pair<vector_t, quaternion_t>& targetBase) const -> std::pair<vector_t, quaternion_t> 
+{
+  vector_t position = vector_t::Zero(3);
+  quaternion_t orientation;
+
+  // 提取当前基座状态 [x, y, yaw]
+  Eigen::Vector2d basePos = state.head(2);  // 世界系位置 [x, y]
+  scalar_t baseYaw = state(2);              // 世界系偏航角
+
+  // 构建基座姿态的旋转矩阵 (2D)
+  Eigen::Matrix2d R_base = Eigen::Rotation2D<scalar_t>(baseYaw).toRotationMatrix();
+
+  // 位置转换：世界系位置 = 基座位置 + 旋转矩阵 * 本体系相对位置
+  Eigen::Vector2d bodyPosition = targetBase.first.head(2);
+  Eigen::Vector2d worldPosition = basePos + R_base * bodyPosition;
+
+  // 姿态转换：世界系姿态 = 基座姿态 * 本体系相对姿态
+  quaternion_t baseQuat(Eigen::AngleAxisd(baseYaw, Eigen::Vector3d::UnitZ()));
+  quaternion_t worldQuat = baseQuat * targetBase.second;
+  worldQuat.normalize();
+
+  // 设置世界系位姿
+  position.head(2) = worldPosition;
+  position(2) = targetBase.first(2);
+  orientation = worldQuat;
+
+  return {position, orientation};
+}
+
+}  // namespace mobile_manipulator
+}  // namespace ocs2

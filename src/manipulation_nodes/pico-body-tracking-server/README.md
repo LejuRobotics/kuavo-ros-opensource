@@ -5,7 +5,8 @@
 
 ### 机器人端机器人
 
-先启动机器人:
+#### 机器人与Pico分别启动
+1. 先启动机器人:
 - 可以选择关闭命令截断、关节保护等功能，这样做大幅度动作的时候不会触发保护而摔倒.
 - 必须要打开`with_mm_ik`选项来启用运动学MPC功能，否则无法控制手臂.
 
@@ -14,6 +15,7 @@
 sudo su
 cd kuavo-ros-opensource
 source devel/setup.bash
+
 # 需要加with_mm_ik选项
 roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
 
@@ -21,14 +23,83 @@ roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
 roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true cmd_truncation_enable:=false joint_protect_enable:=false
 ```
 
-然后启动 Pico 服务节点:
+2. 然后启动 Pico 服务节点:
 ```bash
 sudo su
 cd kuavo-ros-opensource
 source devel/setup.bash
-cd src/manipulation_nodes/pico-body-tracking-server
-python3 scripts/pico_whole_body_teleop_example.py 
+roslaunch noitom_hi5_hand_udp_python launch_pico_teleop.launch
 ```
+- 如需启用迁移后的 PICO 主动手头控：
+```bash
+roslaunch noitom_hi5_hand_udp_python launch_pico_teleop.launch head_control_mode:=auto_track_active
+```
+#### 一键 launch 启动（仿真/实物 + PICO + 头控）
+
+- 默认参数启动（头部控制模式为"vr_follow" ）
+```bash
+sudo su
+cd kuavo-ros-opensource
+source devel/setup.bash
+
+# 仿真
+roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=true
+
+# 实物
+roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=false with_mm_ik:=true
+```
+
+- 主动手头控（头部控制模式为"auto_track_active" ）
+```bash
+sudo su
+cd kuavo-ros-opensource
+source devel/setup.bash
+
+# 仿真
+roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=true head_control_mode:=auto_track_active
+
+# 实物
+roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=false with_mm_ik:=true head_control_mode:=auto_track_active
+```
+说明：
+- 该节点会发布 `/robot_head_motion_data`，并自动设置 `/pico/use_external_head_control=true`，避免与旧链路重复发布。
+- 支持模式：`fixed`、`auto_track_active`、`fixed_main_hand`、`vr_follow`。
+- 可通过话题 `/pico/head_control_mode`（`std_msgs/String`）在运行时切换模式。
+- 头控服务接口：`/pico/set_head_control_mode`（`kuavo_msgs/SetHeadControlMode`）。
+
+头部控制服务接口：
+- 服务名：`/pico/set_head_control_mode`
+- 服务类型：`kuavo_msgs/SetHeadControlMode`
+- 请求字段：
+  - `mode`：`fixed` / `auto_track_active` / `fixed_main_hand` / `vr_follow`
+  - `fixed_hand`：仅 `fixed_main_hand` 时必填，`left` 或 `right`
+- 响应字段：
+  - `success`：是否成功
+  - `message`：错误或成功信息
+  - `current_mode`：当前生效模式
+
+示例：
+```bash
+# 固定模式
+rosservice call /pico/set_head_control_mode "{mode: 'fixed', fixed_hand: ''}"
+
+# 自动跟踪主动手
+rosservice call /pico/set_head_control_mode "{mode: 'auto_track_active', fixed_hand: ''}"
+
+# 固定主手（左手）
+rosservice call /pico/set_head_control_mode "{mode: 'fixed_main_hand', fixed_hand: 'left'}"
+
+# VR随动
+rosservice call /pico/set_head_control_mode "{mode: 'vr_follow', fixed_hand: ''}"
+```
+
+灵巧手迁移说明（PICO）：
+- 已对齐“抓握 + 锁定/解锁”的控制链路，按键逻辑保持不变（`Y` 锁定/解锁）。
+- 新增抓握配置项在 `config/pico_vr_config.yaml` 的 `dex_hand` 下：
+  - `command_min` / `command_max`：抓握输出范围
+  - `smoothing_alpha`：抓握平滑系数
+  - `grip_deadzone`：抓握死区
+  - `stable_unlock.enabled` / `stable_unlock.reengage_threshold`：解锁回切防突变阈值
 
 ### Pico App 端启动
 
@@ -147,12 +218,15 @@ body_tracker_role = [
 | **RT+RG** | 锁定手臂规划 | 按右扳机 + 按住右抓握 | 可替换为 LG+RG |
 | **LG/RG** | 末端抓握控制 | 单独按下对应抓握键 | 左/右手独立控制 |
 | **B** | 开始踏步 | 单独按下B键 | 进入踏步模式 |
-| **A** | 停止踏步/站立 | 单独按下A键 | 回到站立姿态 |
+| **A** | 启动/站立 | 单独按下A键 | 首次按下调用`/humanoid_controller/real_initial_start`，后续按下切换到`stance` |
 | **Y** | 抓握状态锁定 | 点按Y键切换 | 锁定/解锁抓握状态 |
+| **X+Y** | 紧急停止机器人 | 同时点按X和Y键 | 连续发布`/stop_robot` |
 | **X** | 录制控制 | 点按X键 | 开始/停止录制(此功能暂不支持) |
 | **LT+A** | 末端力控制 | 按左扳机 + 点按A键 | 施加/释放末端力 |
 | **LT+Y** | 手臂复位/外部控制模式 | 按左扳机 + 点按Y键 | 恢复到默认位置/手臂切换到外部控制模式 |
 | **LT+X** | 开始/停止增量控制模式 | 按左扳机 + 点按X键 | 只有在界面上切换到增量控制模式时才生效 |
+| **X_LONG** | 左拇指张开切换 | 长按X键 | 切换左拇指张开/恢复 |
+| **A_LONG** | 右拇指张开切换 | 长按A键 | 切换右拇指张开/恢复 |
 | **LT+RT+A_LONG** | 机器人解锁 | 按住左右上板机然后同时长按A键 | 解锁机器人控制 |
 
 
@@ -170,11 +244,15 @@ body_tracker_role = [
 | **RT+RG** | 停止全身规划 | 按右扳机 + 按右抓握 | 可替换为 LG+RG |
 | **LG/RG** | 末端抓握控制 | 单独按下对应抓握键 | 左/右手独立控制 |
 | **LT+A** | 末端力控制 | 按左扳机 + 点按A键 | 施加/释放末端力 |
+| **A** | 启动/站立 | 单独按下A键 | 首次按下调用`/humanoid_controller/real_initial_start`，后续按下切换到`stance` |
 | **B** | 回归站立姿势 | 单独按下B键 | 会先踏步调整，然后回到OCS2站立姿态 |
 | **Y** | 抓握状态锁定 | 点按Y键切换 | 锁定/解锁抓握状态 |
+| **X+Y** | 紧急停止机器人 | 同时点按X和Y键 | 连续发布`/stop_robot` |
 | **X** | 录制控制 | 点按X键 | 开始/停止录制(此功能暂不支持) |
 | **LT+Y** | 手臂复位/外部控制模式 | 按左扳机 + 点按Y键 | 恢复到默认位置/手臂切换到外部控制模式 |
 | **LT+X** | 开始/停止增量控制模式 | 按左扳机 + 点按X键 | 只有在界面上切换到增量控制模式时才生效 |
+| **X_LONG** | 左拇指张开切换 | 长按X键 | 切换左拇指张开/恢复 |
+| **A_LONG** | 右拇指张开切换 | 长按A键 | 切换右拇指张开/恢复 |
 | **LT+RT+A_LONG** | 机器人解锁 | 按住左右上板机然后同时长按A键 | 解锁机器人控制 |
 
 ## 机器人延迟诊断功能
@@ -242,6 +320,43 @@ python3 robot_pico_recorder.py play my_control_session.bag
 - 播放前检查机器人状态和安全
 - 录制的bag文件包含时间戳信息
 - Ctrl+C中断录制/播放
+
+## 三模式切换语义与当前策略
+
+当前节点包含 3 条独立的模式切换通道，语义如下：
+
+- `change_arm_ctrl_mode` (`/change_arm_ctrl_mode`)：手臂控制源/模式（如自动摆臂、外部控制）
+- `change_mobile_ctrl_mode` (`/mobile_manipulator_mpc_control`)：移动操作器/MPC 模式（如 ArmOnly/BaseOnly/BaseArm）
+- `change_mm_wbc_arm_ctrl_mode` (`/enable_mm_wbc_arm_trajectory_control`)：MM WBC 手臂轨迹控制开关
+
+当前 `pico.py` 对 `mobile` 默认采用 **service-call** 策略，服务类型与人形控制器对齐为 `kuavo_msgs/changeTorsoCtrlMode`：
+
+- 调用 `/mobile_manipulator_mpc_control` 服务
+- 同步发布 `/pico/mobile_ctrl_mode_change`
+
+`arm` 与 `mm_wbc` 仍保持服务调用方式。
+
+## 统一到 changeTorsoCtrlMode 的改造范围（评审结论）
+
+为避免历史脚本类型不一致，建议统一到 `kuavo_msgs/changeTorsoCtrlMode`，并联动评审以下模块：
+
+- `src/manipulation_nodes/pico-body-tracking-server/scripts/core/ros/pico.py`
+- `src/manipulation_nodes/motion_capture_ik/scripts/quest3_node.py`
+- `src/manipulation_nodes/motion_capture_ik/scripts/quest3_node_incremental.py`
+- 与 `/mobile_manipulator_mpc_control` 交互的调用脚本与回放脚本
+
+## 回归检查清单
+
+1. 启动后确认日志包含：
+   - `Mode semantics: ...`
+   - `Mobile control mode strategy: service-call`
+2. 执行外部控制切换，确认：
+   - `arm` 与 `mm_wbc` 模式切换日志正常
+   - 不再出现 `/mobile_manipulator_mpc_control ... md5sum mismatch`
+3. 确认话题发布正常：
+   - `rostopic echo /pico/mobile_ctrl_mode_change`
+4. 确认手臂末端遥操链路不受影响：
+   - `/ik/two_arm_hand_pose_cmd` 或 `/mm/two_arm_hand_pose_cmd` 持续更新
 
 
 ## 接口文档

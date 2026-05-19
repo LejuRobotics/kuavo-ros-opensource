@@ -111,6 +111,11 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   boost::property_tree::read_info(taskFile, pt);
   bool activateSelfCollision = true;
   loadData::loadPtreeValue(pt, activateSelfCollision, "selfCollision.activate", true);
+  // 订阅 /external_odom/active：当有外部 odom->base_link 发布时，该话题为 true，则不发布内部的 odom->base_link
+  // 也可通过 /use_external_odom_tf 参数强制使用外部 odom
+  nodeHandle.param("/use_external_odom_tf", use_external_odom_tf_, false);
+  external_odom_active_sub_ = nodeHandle.subscribe(
+      "/external_odom/active", 1, &MobileManipulatorDummyVisualization::externalOdomActiveCallback, this);
   // create pinocchio interface
   PinocchioInterface pinocchioInterface(mobile_manipulator::createPinocchioInterface(urdfFile, modelType, removeJointNames_));
   // activate markers for self-collision visualization
@@ -148,8 +153,25 @@ void MobileManipulatorDummyVisualization::update_obs(const SystemObservation& ob
 /******************************************************************************************************/
 /******************************************************************************************************/
 /******************************************************************************************************/
+void MobileManipulatorDummyVisualization::externalOdomActiveCallback(const std_msgs::BoolConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(external_odom_mutex_);
+  use_external_odom_tf_ = msg->data;  // true: 外部发布中，停止内部发布；false: 恢复内部发布
+}
+
+/******************************************************************************************************/
+/******************************************************************************************************/
+/******************************************************************************************************/
 void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& timeStamp, const SystemObservation& observation) {
-  // publish world -> base transform
+  ros::spinOnce();  // 处理 /external_odom/active 回调
+  bool use_external = false;
+  {
+    std::lock_guard<std::mutex> lock(external_odom_mutex_);
+    use_external = use_external_odom_tf_;  // 由 /external_odom/active 或 /use_external_odom_tf 参数设置
+  }
+  // publish world -> base transform (odom -> base_link)
+  // 当检测到外部 odom->base_link（/external_odom/active 为 true）时，不发布，由外部系统发布
+  // std::cout << "use_external: " << use_external << std::endl;
+  if (!use_external) {
   const auto r_world_base = getBasePosition(observation.state, modelInfo_);
   const Eigen::Quaternion<scalar_t> q_world_base = getBaseOrientation(observation.state, modelInfo_);
 
@@ -161,6 +183,7 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
   base_tf.transform.translation.z += baseHeightOffset;
   base_tf.transform.rotation = ros_msg_helpers::getOrientationMsg(q_world_base);
   tfBroadcaster_.sendTransform(base_tf);
+  }
 
   // publish joints transforms
   const auto j_arm = getArmJointAngles(observation.state, modelInfo_);

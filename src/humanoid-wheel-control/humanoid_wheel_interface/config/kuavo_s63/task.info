@@ -1,0 +1,1277 @@
+; robot model meta-information
+model_information {
+  manipulatorModelType     4      ; 0: Default-arm, 1: Wheel-based manipulator, 2: Floating-arm manipulator, 
+                                  ; 3: Fully actuated floating-arm manipulator, 4: Wheel-World-based manipulator
+  
+  ; motion joints in the URDF to consider fixed
+  removeJoints {
+    [0] "wheel_left_front_joint"
+    [1] "wheel_right_front_joint"
+    [2] "wheel_left_behind_joint"
+    [3] "wheel_right_behind_joint"
+    [4] "zhead_1_joint"
+    [5] "zhead_2_joint"
+  }
+
+  ; base frame of the robot (from URDF)
+  baseFrame                       "base_link"
+
+  torsoFrame                      "waist_yaw_link"  ; 用于区分浮动基和真正的躯干, 允许两者不相同
+
+  ; end-effector frame of the robot (from URDF)
+  eeFrames
+  {
+    [0] "zarm_l7_end_effector"
+    [1] "zarm_r7_end_effector"
+  }                         
+}
+
+model_settings
+{
+  verbose                         true
+  usePreComputation               true
+  recompileLibraries              false
+
+  modelDof                    18   ; total dof of the model, including the arms and lowJoint
+  mpcArmsDof                  14   ; mpc dof of the arms
+}
+
+; DDP settings
+ddp
+{
+  algorithm                       SLQ
+
+  nThreads                        9
+  threadPriority                  0
+
+  maxNumIterations                50
+  minRelCost                      0.1
+  constraintTolerance             1e-3
+
+  displayInfo                     false
+  displayShortSummary             false
+  checkNumericalStability         false
+  debugPrintRollout               false
+  debugCaching                    false
+
+  AbsTolODE                       1e-5
+  RelTolODE                       1e-3
+  maxNumStepsPerSecond            100000
+  timeStep                        1e-3
+  backwardPassIntegratorType      ODE45
+
+  constraintPenaltyInitialValue   20.0
+  constraintPenaltyIncreaseRate   2.0
+
+  preComputeRiccatiTerms          true
+
+  useFeedbackPolicy               false
+
+  strategy                        LINE_SEARCH
+  lineSearch
+  {
+    minStepLength                 1e-2
+    maxStepLength                 1.0
+    hessianCorrectionStrategy     DIAGONAL_SHIFT
+    hessianCorrectionMultiple     1e-3
+  }
+}
+
+; Multiple_Shooting SQP settings
+sqp
+{
+  nThreads                              3
+  dt                                    0.02
+  sqpIteration                          3
+  deltaTol                              1e-4
+  g_max                                 1e-2
+  g_min                                 1e-6
+  inequalityConstraintMu                0.1
+  inequalityConstraintDelta             5.0
+  projectStateInputEqualityConstraints  true
+  printSolverStatistics                 false
+  printSolverStatus                     false
+  printLinesearch                       false
+  useFeedbackPolicy                     false
+  integratorType                        RK2
+  threadPriority                        0
+}
+
+; Rollout settings
+rollout
+{
+  AbsTolODE                       1e-5
+  RelTolODE                       1e-3
+  timeStep                        1e-2
+  integratorType                  ODE45
+  maxNumStepsPerSecond            100000
+  checkNumericalStability         false
+}
+
+; MPC settings
+mpc
+{
+  timeHorizon                     0.3   ; [s]
+  solutionTimeWindow              0.2   ; [s]
+  coldStart                       false
+  
+  debugPrint                      false
+
+  mpcDesiredFrequency             100   ; [Hz]
+  mrtDesiredFrequency             500   ; [Hz]
+}
+
+
+; MPC 的 ReferenceManager 的运动学限制, 平移单位: m, 旋转单位: rad
+referencekinematicLimit  
+{
+  ; 每一维必须保证大于0
+  wheel_move
+  {
+    max_vel
+    {
+      (0,0)  0.8  ; base x
+      (1,0)  0.8  ; base y
+      (2,0)  1.6  ; base yaw 
+    }
+
+    max_acc
+    {
+      (0,0)  0.9  ; base x
+      (1,0)  0.9  ; base y
+      (2,0)  1.3  ; base yaw 
+    }
+
+    max_jerk
+    {
+      (0,0)  3.0  ; base x
+      (1,0)  3.0  ; base y
+      (2,0)  9.0  ; base yaw 
+    }
+  }
+
+  torsoPose_move    ; 轮臂躯干没有 y, roll 自由度
+  {
+    max_vel
+    {
+      (0,0)  0.9    ; x
+      (1,0)  0.9    ; z
+      (2,0)  2.08   ; yaw
+      (3,0)  2.08   ; pitch
+    }
+
+    max_acc
+    {
+      (0,0)  9.0   ; x
+      (1,0)  9.0   ; z
+      (2,0)  10.4   ; yaw
+      (3,0)  10.4   ; pitch
+    }
+
+    max_jerk
+    {
+      (0,0)  15.6   ; x
+      (1,0)  15.6   ; z
+      (2,0)  40.6   ; yaw
+      (3,0)  40.6   ; pitch
+    }
+  }
+
+  dualArm_move
+  {
+    max_vel
+    {
+      (0,0)  1.0   ; x
+      (1,0)  1.0   ; y
+      (2,0)  1.0   ; z
+      (3,0)  3.14   ; yaw
+      (4,0)  3.14   ; pitch
+      (5,0)  3.14   ; roll
+    }
+
+    max_acc
+    {
+      (0,0)  999.0   ; x
+      (1,0)  999.0   ; y
+      (2,0)  999.0   ; z
+      (3,0)  999.0   ; yaw
+      (4,0)  999.0   ; pitch
+      (5,0)  999.0   ; roll
+    }
+
+    max_jerk
+    {
+      (0,0)  999.0   ; x
+      (1,0)  999.0   ; y
+      (2,0)  999.0   ; z
+      (3,0)  999.0   ; yaw
+      (4,0)  999.0   ; pitch
+      (5,0)  999.0   ; roll
+    }
+  }
+
+  ; 下肢关节指令, 电机区别不大, 使用统一的限制
+  legJoint_move 
+  {
+    max_vel
+    {
+      (0,0) 3.14  ; 
+    }
+
+    max_acc
+    {
+      (0,0) 5.14  ; 
+    }
+
+    max_jerk
+    {
+      (0,0) 60.0  ;
+    }
+  }
+
+  ; 手臂关节指令, 使用统一的限制
+  armJoint_move 
+  {
+    max_vel
+    {
+      (0,0) 5.14  ; 
+    }
+
+    max_acc
+    {
+      (0,0) 25.0  ; 
+    }
+
+    max_jerk
+    {
+      (0,0) 100.0  ;
+    }
+  }
+}
+
+; MPC 输入的 observation 的运动学限制, 平移单位: m, 旋转单位: rad
+observationKinematicLimit
+{
+  activate  false
+
+  max_vel    
+  {
+    (0,0)   1.2    ; base_x
+    (1,0)   1.2    ; base_y
+    (2,0)   1.2    ; base_z
+
+    (3,0)   3.14  ; knee_pitch
+    (4,0)   3.14  ; leg_pitch
+    (5,0)   3.14  ; waist_pitch
+    (6,0)   3.14  ; waist_yaw_link
+
+    (7,0)   3.14  ; z_arm_l1 
+    (8,0)   3.14  ; z_arm_l2 
+    (9,0)   3.14  ; z_arm_l3 
+    (10,0)  3.14  ; z_arm_l4 
+    (11,0)  3.14  ; z_arm_l5 
+    (12,0)  3.14  ; z_arm_l6 
+    (13,0)  3.14  ; z_arm_l7 
+
+    (14,0)  3.14  ; z_arm_r1 
+    (15,0)  3.14  ; z_arm_r2 
+    (16,0)  3.14  ; z_arm_r3 
+    (17,0)  3.14  ; z_arm_r4 
+    (18,0)  3.14  ; z_arm_r5 
+    (19,0)  3.14  ; z_arm_r6 
+    (20,0)  3.14  ; z_arm_r7 
+  }
+
+  max_acc
+  {
+    (0,0)   99.0    ; base_x
+    (1,0)   99.0    ; base_y
+    (2,0)   99.0    ; base_z
+
+    (3,0)   99.0  ; knee_pitch
+    (4,0)   99.0  ; leg_pitch
+    (5,0)   99.0  ; waist_pitch
+    (6,0)   99.0  ; waist_yaw_link
+
+    (7,0)   99.0  ; z_arm_l1 
+    (8,0)   99.0  ; z_arm_l2 
+    (9,0)   99.0  ; z_arm_l3 
+    (10,0)  99.0  ; z_arm_l4 
+    (11,0)  99.0  ; z_arm_l5 
+    (12,0)  99.0  ; z_arm_l6 
+    (13,0)  99.0  ; z_arm_l7 
+
+    (14,0)  99.0  ; z_arm_r1 
+    (15,0)  99.0  ; z_arm_r2 
+    (16,0)  99.0  ; z_arm_r3 
+    (17,0)  99.0  ; z_arm_r4 
+    (18,0)  99.0  ; z_arm_r5 
+    (19,0)  99.0  ; z_arm_r6 
+    (20,0)  99.0  ; z_arm_r7 
+  }
+
+  max_jerk
+  {
+    (0,0)   99.0    ; base_x
+    (1,0)   99.0    ; base_y
+    (2,0)   99.0    ; base_z
+
+    (3,0)   99.0  ; knee_pitch
+    (4,0)   99.0  ; leg_pitch
+    (5,0)   99.0  ; waist_pitch
+    (6,0)   99.0  ; waist_yaw_link
+
+    (7,0)   99.0  ; z_arm_l1 
+    (8,0)   99.0  ; z_arm_l2 
+    (9,0)   99.0  ; z_arm_l3 
+    (10,0)  99.0  ; z_arm_l4 
+    (11,0)  99.0  ; z_arm_l5 
+    (12,0)  99.0  ; z_arm_l6 
+    (13,0)  99.0  ; z_arm_l7 
+
+    (14,0)  99.0  ; z_arm_r1 
+    (15,0)  99.0  ; z_arm_r2 
+    (16,0)  99.0  ; z_arm_r3 
+    (17,0)  99.0  ; z_arm_r4 
+    (18,0)  99.0  ; z_arm_r5 
+    (19,0)  99.0  ; z_arm_r6 
+    (20,0)  99.0  ; z_arm_r7 
+  }
+}
+
+; MPC 输出的 mrt轨迹 的运动学限制, 平移单位: m, 旋转单位: rad
+optimizedTrajKinematicLimit
+{
+  activate  false
+
+  max_vel    
+  {
+    (0,0)   1.2    ; base_x
+    (1,0)   1.2    ; base_y
+    (2,0)   1.2    ; base_z
+
+    (3,0)   3.14  ; knee_pitch
+    (4,0)   3.14  ; leg_pitch
+    (5,0)   3.14  ; waist_pitch
+    (6,0)   3.14  ; waist_yaw_link
+
+    (7,0)   3.14  ; z_arm_l1 
+    (8,0)   3.14  ; z_arm_l2 
+    (9,0)   3.14  ; z_arm_l3 
+    (10,0)  3.14  ; z_arm_l4 
+    (11,0)  3.14  ; z_arm_l5 
+    (12,0)  3.14  ; z_arm_l6 
+    (13,0)  3.14  ; z_arm_l7 
+
+    (14,0)  3.14  ; z_arm_r1 
+    (15,0)  3.14  ; z_arm_r2 
+    (16,0)  3.14  ; z_arm_r3 
+    (17,0)  3.14  ; z_arm_r4 
+    (18,0)  3.14  ; z_arm_r5 
+    (19,0)  3.14  ; z_arm_r6 
+    (20,0)  3.14  ; z_arm_r7 
+  }
+
+  max_acc
+  {
+    (0,0)   99.0    ; base_x
+    (1,0)   99.0    ; base_y
+    (2,0)   99.0    ; base_z
+
+    (3,0)   99.0  ; knee_pitch
+    (4,0)   99.0  ; leg_pitch
+    (5,0)   99.0  ; waist_pitch
+    (6,0)   99.0  ; waist_yaw_link
+
+    (7,0)   99.0  ; z_arm_l1 
+    (8,0)   99.0  ; z_arm_l2 
+    (9,0)   99.0  ; z_arm_l3 
+    (10,0)  99.0  ; z_arm_l4 
+    (11,0)  99.0  ; z_arm_l5 
+    (12,0)  99.0  ; z_arm_l6 
+    (13,0)  99.0  ; z_arm_l7 
+
+    (14,0)  99.0  ; z_arm_r1 
+    (15,0)  99.0  ; z_arm_r2 
+    (16,0)  99.0  ; z_arm_r3 
+    (17,0)  99.0  ; z_arm_r4 
+    (18,0)  99.0  ; z_arm_r5 
+    (19,0)  99.0  ; z_arm_r6 
+    (20,0)  99.0  ; z_arm_r7 
+  }
+
+  max_jerk
+  {
+    (0,0)   99.0    ; base_x
+    (1,0)   99.0    ; base_y
+    (2,0)   99.0    ; base_z
+
+    (3,0)   99.0  ; knee_pitch
+    (4,0)   99.0  ; leg_pitch
+    (5,0)   99.0  ; waist_pitch
+    (6,0)   99.0  ; waist_yaw_link
+
+    (7,0)   99.0  ; z_arm_l1 
+    (8,0)   99.0  ; z_arm_l2 
+    (9,0)   99.0  ; z_arm_l3 
+    (10,0)  99.0  ; z_arm_l4 
+    (11,0)  99.0  ; z_arm_l5 
+    (12,0)  99.0  ; z_arm_l6 
+    (13,0)  99.0  ; z_arm_l7 
+
+    (14,0)  99.0  ; z_arm_r1 
+    (15,0)  99.0  ; z_arm_r2 
+    (16,0)  99.0  ; z_arm_r3 
+    (17,0)  99.0  ; z_arm_r4 
+    (18,0)  99.0  ; z_arm_r5 
+    (19,0)  99.0  ; z_arm_r6 
+    (20,0)  99.0  ; z_arm_r7 
+  }
+}
+
+; 手臂轨迹插补限制（仅用于上层 armTrajInterpFilter），与 optimizedTrajKinematicLimit 解耦
+armTrajInterpKinematicLimit
+{
+  enable                         true  ; false: 保持旧版逻辑, true: 启用手臂轨迹插补增强路径
+  reference_update_period        0.010  ; [s], should match arm trajectory source period
+  kalman_r_q                     3e-7    ; PV模型: 全14DoF共享 position measurement noise
+  kalman_r_dq                    5e-4    ; PV模型: 全14DoF共享 velocity measurement noise
+  kalman_p0_pos                  1e-2    ; PV模型: 全14DoF共享 initial covariance (position)
+  kalman_p0_vel                  5e-1    ; PV模型: 全14DoF共享 initial covariance (velocity)
+  kalman_v_limit                 30.0    ; PV模型: 全14DoF共享 velocity limit [rad/s]
+  fast_update_r_scale            1.0     ; 量测噪声缩放（1.0=常规更新）
+  immediate_update_on_new_target true    ; 新目标到达后立即更新，不受周期门控阻塞
+  target_v_alpha                 0.80    ; targetV去毛刺系数，1.0表示关闭；无新rawV时预测保持v常值
+
+  ; fhan 跟踪微分器参数（动力学约束 q/dq 平滑层）
+  ; fhan_r: 等效加速度阈值 [rad/s^2]，越大跟踪越快但响应越硬
+  ; fhan_h0_ratio: h0 = ratio * controlCycleSec，建议 2~5
+  fhan_r                         5000.0
+  fhan_h0_ratio                  3.0
+}
+
+
+baseCost
+{
+  ; control weight matrix
+  Q
+  {
+    ; input costs for the different types of arm base DOFs
+    base
+    {
+      wheelBasedMobileManipulator
+      {
+        scaling 1e0
+
+        (0,0)  20.0  ; base x position
+        (1,1)  20.0  ; base y position
+        (2,2)  20.0  ; base yaw 
+      }
+      wheelWorldBasedMobileManipulator
+      {
+        scaling 1e3
+
+        (0,0)  500.0  ; base x position
+        (1,1)  500.0  ; base y position
+        (2,2)  500.0  ; base yaw 
+      }
+    }
+
+    ; state costs for the arm DOFs
+    arm
+    {
+      scaling 1e0
+
+      (0,0)    600.0  ; knee_pitch
+      (1,1)    600.0  ; leg_pitch
+      (2,2)    600.0  ; waist_pitch
+      (3,3)    600.0  ; waist_yaw_link
+
+      (4,4)    100.0  ; z_arm_l1 
+      (5,5)    100.0  ; z_arm_l2 
+      (6,6)    100.0  ; z_arm_l3 
+      (7,7)    100.0  ; z_arm_l4 
+      (8,8)    100.0  ; z_arm_l5 
+      (9,9)    100.0  ; z_arm_l6 
+      (10,10)  100.0  ; z_arm_l7 
+
+      (11,11)  100.0  ; z_arm_r1 
+      (12,12)  100.0  ; z_arm_r2 
+      (13,13)  100.0  ; z_arm_r3 
+      (14,14)  100.0  ; z_arm_r4 
+      (15,15)  100.0  ; z_arm_r5 
+      (16,16)  100.0  ; z_arm_r6 
+      (17,17)  100.0  ; z_arm_r7 
+    }
+  }
+  ; control weight matrix
+  R
+  {
+    ; input costs for the different types of arm base DOFs
+    base
+    {
+      wheelBasedMobileManipulator
+      {
+        scaling 1e-2
+
+        (0,0)  10000.0  ; forward velocity
+        (1,1)  10000.0  ; turning velocity
+      }
+      wheelWorldBasedMobileManipulator
+      {
+        scaling 1e2
+
+        (0,0)  1000.0  ; forward x velocity
+        (1,1)  1000.0  ; forward y velocity
+        (2,2)  1000.0  ; turning velocity
+      }
+    }
+
+    ; input costs for the arm DOFs
+    arm
+    {
+      scaling 1e-2
+
+      (0,0)    300.0  ; SH_ROT velocity
+      (1,1)    300.0  ; SH_FLE velocity
+      (2,2)    300.0  ; EL_FLE velocity
+      (3,3)    300.0  ; EL_ROT velocity
+
+      (4,4)    100.0  ; WR_FLE velocity
+      (5,5)    100.0 ; WR_ROT velocity
+      (6,6)    100.0 ; WR_ROT velocity
+      (7,7)    100.0  ; WR_ROT velocity
+      (8,8)    100.0  ; WR_ROT velocity
+      (9,9)    100.0  ; WR_ROT velocity
+      (10,10)  100.0  ; WR_ROT velocity
+
+      (11,11)  100.0  ; WR_ROT velocity
+      (12,12)  100.0  ; WR_ROT velocity
+      (13,13)  100.0  ; WR_ROT velocity
+      (14,14)  100.0 ; WR_ROT velocity
+      (15,15)  100.0 ; WR_ROT velocity
+      (16,16)  100.0   ; WR_ROT velocity
+      (17,17)  100.0   ; WR_ROT velocity
+    }
+  }
+}
+
+torsoTracking
+{
+  muWeights
+  {
+    scaling 1e0
+
+    (0,0)    20.0   ; torso X
+    (1,0)    20.0   ; torso Y
+    (2,0)    20.0   ; torso Z
+    (3,0)    10.0   ; torso roll
+    (4,0)    10.0   ; torso pitch
+    (5,0)    10.0   ; torso yaw
+  }
+}
+
+torsoBoxSoftCost
+{
+  activate  true
+
+  position
+  {
+    focus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.8
+
+      ; relaxed log barrier delta
+      delta   0.001
+    }
+
+    unFocus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.05
+    }
+
+    focus_z_barrier
+    {
+      ; true: z 方向用本组 mu/delta；false:用 position.unFocus_barrier
+      use_focus_z  true
+
+      ; relaxed log barrier mu
+      mu      0.4
+
+      ; relaxed log barrier delta
+      delta   0.001
+    }
+
+    lower
+    {
+      (0,0)  -0.01  ; linear position x
+      (1,0)  -0.01  ; linear position y
+      (2,0)  -0.01  ; linear position z
+    }
+
+    upper
+    {
+      (0,0)   0.01  ; linear position x
+      (1,0)   0.01  ; linear position y
+      (2,0)   0.01  ; linear position z
+    }
+  }
+
+  orientation
+  {
+    focus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.8
+
+      ; relaxed log barrier delta
+      delta   0.001
+    }
+
+    unFocus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.01
+    }
+
+    lower
+    {
+      (0,0)  -0.5  ; roll
+      (1,0)  -0.5  ; pitch
+      (2,0)  -1.5  ; yaw
+    }
+
+    upper
+    {
+      (0,0)   0.5  ; roll
+      (1,0)   0.5  ; pitch
+      (2,0)   1.5  ; yaw
+    }
+  }
+}
+
+endEffector
+{
+  ; end effector quadratic penalty scaling
+  muWeights
+  {
+    scaling 1e0
+
+    (0,0)    10.0   ; torso X
+    (1,0)    10.0   ; torso Y
+    (2,0)    10.0   ; torso Z
+    (3,0)    120.0   ; torso roll
+    (4,0)    120.0   ; torso pitch
+    (5,0)    120.0   ; torso yaw
+  }
+}
+
+finalEndEffector
+{
+  muWeights
+  {
+    scaling 1e0
+
+    (0,0)    10.0   ; torso X
+    (1,0)    10.0   ; torso Y
+    (2,0)    10.0   ; torso Z
+    (3,0)    120.0   ; torso roll
+    (4,0)    120.0   ; torso pitch
+    (5,0)    120.0   ; torso yaw
+  }
+}
+
+endEffectorBox
+{
+  activate true
+
+  position
+  {
+    focus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.001
+    }
+
+    unFocus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.01
+    }
+
+    lower
+    {
+      (0,0)  -0.001  ; linear position x
+      (1,0)  -0.001  ; linear position y
+      (2,0)  -0.001  ; linear position z
+    }
+
+    upper
+    {
+      (0,0)   0.001  ; linear position x
+      (1,0)   0.001  ; linear position y
+      (2,0)   0.001  ; linear position z
+    }
+  }
+
+  orientation
+  {
+    focus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.001
+    }
+
+    unFocus_barrier
+    {
+      ; relaxed log barrier mu
+      mu      0.3
+
+      ; relaxed log barrier delta
+      delta   0.1
+    }
+
+    lower
+    {
+      (0,0)  -0.1  ; roll
+      (1,0)  -0.1  ; pitch
+      (2,0)  -0.1  ; yaw
+    }
+
+    upper
+    {
+      (0,0)   0.1  ; roll
+      (1,0)   0.1  ; pitch
+      (2,0)   0.1  ; yaw
+    }
+  }
+}
+
+eeJointBias
+{
+  activate  true
+
+  biasJointNames   ; 需要设置偏好的关节名称
+  {
+    [0] "zarm_l2_joint"
+    [1] "zarm_l3_joint"
+    [2] "zarm_l4_joint"
+    [3] "zarm_l6_joint"
+    [4] "zarm_r2_joint"
+    [5] "zarm_r3_joint"
+    [6] "zarm_r4_joint"
+    [7] "zarm_r6_joint"
+  }
+
+  biasDir     ; 偏好方向, True 为偏好正方向, False 为偏好负方向
+  {
+    [0] "True"
+    [1] "False"
+    [2] "False"
+    [3] "True"
+    [4] "False"
+    [5] "True"
+    [6] "False"
+    [7] "False"
+  }
+
+  biasCenter  ; 偏好中心
+  {
+    [0]  0.0
+    [1]  0.0
+    [2]  -0.1
+    [3]  0.0
+    [4]  0.0
+    [5]  0.0
+    [6]  -0.1
+    [7]  0.0
+  }
+
+  ; 屏障函数相关
+  biasMu
+  {
+    [0]  0.05
+    [1]  0.05
+    [2]  0.1
+    [3]  0.05
+    [4]  0.05
+    [5]  0.05
+    [6]  0.1
+    [7]  0.05
+  }
+
+  biasDelta
+  {
+    [0]  0.1
+    [1]  0.01
+    [2]  0.01
+    [3]  0.4
+    [4]  0.1
+    [5]  0.01
+    [6]  0.01
+    [7]  0.4
+  }
+}
+
+selfDistanceConstraint
+{
+  ; activate self-distance constraint
+  activate  true
+
+  linkPairs
+  {
+    [0] "zarm_l1_link, zarm_l7_link"
+    [1] "zarm_r1_link, zarm_r7_link"
+  }
+
+  ; 屏障函数相关
+  mu
+  {
+    [0] 0.8
+    [1] 0.8
+  }
+
+  delta
+  {
+    [0] 0.001
+    [1] 0.001
+  }
+
+  maxDistance   ; 最大距离，单位: m, 5w手臂最长 0.5382
+  {
+    [0] 0.53
+    [1] 0.53
+  }
+}
+
+selfCollision
+{ 
+  ; activate self-collision constraint
+  activate  true
+
+  ; Self Collision raw object pairs
+  collisionObjectPairs
+  {
+  }
+
+  ; Self Collision pairs
+  collisionLinkPairs
+  {
+    [0]  "waist_yaw_link, zarm_l2_link"
+    [1]  "waist_yaw_link, zarm_r2_link"
+    [2]  "waist_yaw_link, zarm_l4_link"
+    [3]  "waist_yaw_link, zarm_r4_link"
+    [4]  "waist_yaw_link, zarm_l7_link"
+    [5]  "waist_yaw_link, zarm_l7_link"
+    [6]  "zhead_1_link, zarm_l2_link"
+    [7]  "zhead_1_link, zarm_r2_link"
+    [8]  "zhead_1_link, zarm_l4_link"
+    [9]  "zhead_1_link, zarm_r4_link"
+    [10] "zhead_1_link, zarm_l7_link"
+    [11] "zhead_1_link, zarm_r7_link"
+    [12] "zarm_l2_link, zarm_r2_link"
+    [13] "zarm_l2_link, zarm_r4_link"
+    [14] "zarm_l2_link, zarm_r7_link"
+    [15] "zarm_l4_link, zarm_r2_link"
+    [16] "zarm_l4_link, zarm_r4_link"
+    [17] "zarm_l4_link, zarm_r7_link"
+    [18] "zarm_l7_link, zarm_r2_link"
+    [19] "zarm_l7_link, zarm_r4_link"
+    [20] "zarm_l7_link, zarm_r7_link"
+    [21] "base_link, zarm_l7_link"
+    [22] "base_link, zarm_r7_link"
+  }
+
+  ; minimum distance allowed between the pairs
+  minimumDistance  0.01
+
+  ; relaxed log barrier mu
+  mu      1e-3
+
+  ; relaxed log barrier delta
+  delta   1e-3
+}
+
+; Only applied for arm joints: limits parsed from URDF
+jointPositionLimits
+{ 
+  ; activate constraint
+  activate  true
+
+  ; relaxed log barrier mu
+  mu      1e-2
+
+  ; relaxed log barrier delta
+  delta   1e-3
+}
+
+jointVelocityLimits
+{
+  ; relaxed log barrier mu
+  mu      0.01
+
+  ; relaxed log barrier delta
+  delta   1e-3
+
+  lowerBound
+  {
+    ; velocity limits for the different types of arm base DOFs
+    base
+    {
+      defaultManipulator
+      {
+      }
+
+      floatingArmManipulator
+      {
+      }
+
+      fullyActuatedFloatingArmManipulator
+      {
+        (0,0)  -0.1  ; linear velocity x
+        (1,0)  -0.1  ; linear velocity y
+        (2,0)  -5.0  ; linear velocity z
+        (3,0)  -0.3  ; euler angle velocity z
+        (4,0)  -5.0  ; euler angle velocity y
+        (5,0)  -0.3  ; euler angle velocity x
+      }
+
+      wheelBasedMobileManipulator
+      {
+        (0,0)  -0.5 ; forward velocity
+        (1,0)  -0.5 ; turning velocity
+      }
+
+      wheelWorldBasedMobileManipulator
+      {
+        (0,0)  -1.2 ; forward x velocity
+        (1,0)  -1.2 ; forward y velocity
+        (2,0)  -1.2 ; turning velocity
+      }
+
+      actuatedXYZYawPitchManipulator
+      {
+        (0,0)  -0.1  ; linear velocity x
+        (1,0)  -0.1  ; linear velocity y
+        (2,0)  -0.1  ; linear velocity z
+        (3,0)  -0.3  ; euler angle velocity z
+        (4,0)  -0.3  ; euler angle velocity y
+      }
+
+      actuatedZPitchManipulator
+      {
+        (0,0)  -5.0  ; linear velocity z
+        (1,0)  -5.0  ; euler angle velocity y
+      }
+    }
+
+    ; velocity limits for the arm DOFs
+    arm
+    {
+      (0,0)   -25.33   ; knee_pitch
+      (1,0)   -25.33   ; leg_pitch
+      (2,0)   -25.33   ; waist_pitch
+      (3,0)   -25.33   ; waist_yaw_link
+      (4,0)   -13.0   ; z_arm_l1 velocity
+      (5,0)   -8.0   ; z_arm_l2 velocity
+      (6,0)   -7.5   ; z_arm_l3 velocity
+      (7,0)   -8.0   ; z_arm_l4 velocity
+      (8,0)   -17.5   ; z_arm_l5 velocity
+      (9,0)   -17.5   ; z_arm_l6 velocity
+      (10,0)  -17.5   ; z_arm_l7 velocity
+      (11,0)  -13.0   ; z_arm_r1 velocity
+      (12,0)  -8.0    ; z_arm_r2 velocity
+      (13,0)  -7.5    ; z_arm_r3 velocity
+      (14,0)  -8.0    ; z_arm_r4 velocity
+      (15,0)  -17.5   ; z_arm_r5 velocity
+      (16,0)  -17.5   ; z_arm_r6 velocity
+      (17,0)  -17.5   ; z_arm_r7 velocity
+    }
+  }
+
+  upperBound
+  {
+    ; velocity limits for the different types of arm base DOFs
+    base
+    {
+      defaultManipulator
+      {
+      }
+
+      floatingArmManipulator
+      {
+      }
+
+      fullyActuatedFloatingArmManipulator
+      {
+        (0,0)  0.1  ; linear velocity x
+        (1,0)  0.1  ; linear velocity y
+        (2,0)  5.0  ; linear velocity z
+        (3,0)  0.3  ; euler angle velocity z
+        (4,0)  5.0  ; euler angle velocity y
+        (5,0)  0.3  ; euler angle velocity x
+      }
+
+      wheelBasedMobileManipulator
+      {
+        (0,0)  0.5 ; forward velocity
+        (1,0)  0.5 ; turning velocity
+      }
+
+      wheelWorldBasedMobileManipulator
+      {
+        (0,0)  1.2 ; forward x velocity
+        (1,0)  1.2 ; forward y velocity
+        (2,0)  1.2 ; turning velocity
+      }
+
+      actuatedXYZYawPitchManipulator
+      {
+        (0,0)  0.1  ; linear velocity x
+        (1,0)  0.1  ; linear velocity y
+        (2,0)  0.1  ; linear velocity z
+        (3,0)  0.3  ; euler angle velocity z
+        (4,0)  0.3  ; euler angle velocity y
+      }
+      
+      actuatedZPitchManipulator
+      {
+        (0,0)  5.0  ; linear velocity z
+        (1,0)  5.0  ; euler angle velocity y
+      }
+    }
+
+    ; velocity limits for the arm DOFs
+    arm
+    {
+      (0,0)   25.33   ; knee_pitch
+      (1,0)   25.33   ; leg_pitch
+      (2,0)   25.33   ; waist_pitch
+      (3,0)   25.33   ; waist_yaw_link
+      (4,0)   13.0   ; z_arm_l1 velocity
+      (5,0)   8.0    ; z_arm_l2 velocity
+      (6,0)   7.5    ; z_arm_l3 velocity
+      (7,0)   8.0    ; z_arm_l4 velocity
+      (8,0)   17.5   ; z_arm_l5 velocity
+      (9,0)   17.5   ; z_arm_l6 velocity
+      (10,0)  17.5   ; z_arm_l7 velocity
+      (11,0)  13.0   ; z_arm_r1 velocity
+      (12,0)  8.0    ; z_arm_r2 velocity
+      (13,0)  7.5    ; z_arm_r3 velocity
+      (14,0)  8.0    ; z_arm_r4 velocity
+      (15,0)  17.5   ; z_arm_r5 velocity
+      (16,0)  17.5   ; z_arm_r6 velocity
+      (17,0)  17.5   ; z_arm_r7 velocity
+    }
+  }
+}
+
+safeAccLimit
+{
+  enable false   ; 启动默认的加速度边界, 采用大负载计算获得
+
+  realTimeAccEnable  false  ; 实时计算加速度边界
+
+  factor  0.8   ; 安全系数, 所得边界均乘上该系数
+
+  bound   ; 加速度边界, 无方向要求, 单位: m/s^2
+  {
+    (0,0)  8.8        ; motor 1
+    (1,0)  20.3       ; motor 2
+    (2,0)  141.1      ; motor 3
+    (3,0)  653.7      ; motor 4
+
+    ;; arm Limits
+    (4,0)   90.6     ; motor 1
+    (5,0)   91.9      ; motor 2
+    (6,0)   338.2     ; motor 3
+    (7,0)   479.7     ; motor 4
+    (8,0)   500.9    ; motor 5
+    (9,0)   575.5    ; motor 6
+    (10,0)  564.7    ; motor 7
+  }
+}
+
+; Whole body control
+torqueLimitsTask
+{
+   (0,0)  668.53     ; motor 1
+   (1,0)  668.53     ; motor 2
+   (2,0)  618.48     ; motor 3
+   (3,0)  618.48     ; motor 4
+
+   ;; arm Limits
+   (4,0)   85.0     ; motor 1
+   (5,0)   75.0     ; motor 2
+   (6,0)   57.0     ; motor 3
+   (7,0)   75.0     ; motor 4
+   (8,0)   14.1     ; motor 5
+   (9,0)   14.1     ; motor 6
+   (10,0)  14.1     ; motor 7
+}
+
+lowJointAccelTask
+{
+  kp
+  {
+    (0,0)   350.00   ; knee_pitch
+    (1,0)   350.00   ; leg_pitch
+    (2,0)   350.00   ; waist_pitch
+    (3,0)   350.00   ; waist_yaw_link
+  }
+  kd
+  {
+    (0,0)   30.2     ; knee_pitch
+    (1,0)   30.2     ; leg_pitch
+    (2,0)   30.2     ; waist_pitch
+    (3,0)   30.2     ; waist_yaw_link
+  }
+}
+
+vrArmAccelTask
+{
+  ; 是否启用 vrArmAccelTask（false: armAccelTask, true: vrArmAccelTask）
+  useVrArmAccelTask false
+
+  kp
+  {
+    (0,0)   400.00   ; zarm_l1_joint
+    (1,0)   400.00   ; zarm_l2_joint
+    (2,0)   400.00   ; zarm_l3_joint
+    (3,0)   400.00   ; zarm_l4_joint
+    (4,0)   100.00   ; zarm_l5_joint
+    (5,0)   100.00   ; zarm_l6_joint
+    (6,0)   100.00   ; zarm_l7_joint
+    (7,0)   400.00   ; zarm_r1_joint
+    (8,0)   400.00   ; zarm_r2_joint
+    (9,0)   400.00   ; zarm_r3_joint
+    (10,0)  400.00   ; zarm_r4_joint
+    (11,0)  100.00   ; zarm_r5_joint
+    (12,0)  100.00   ; zarm_r6_joint
+    (13,0)  100.00   ; zarm_r7_joint
+  }
+  kd
+  {
+    (0,0)   36.00    ; zarm_l1_joint
+    (1,0)   36.00     ; zarm_l2_joint
+    (2,0)   36.00     ; zarm_l3_joint
+    (3,0)   36.00     ; zarm_l4_joint
+    (4,0)   18.00     ; zarm_l5_joint
+    (5,0)   18.00     ; zarm_l6_joint
+    (6,0)   18.00     ; zarm_l7_joint
+    (7,0)   36.00     ; zarm_r1_joint
+    (8,0)   36.00     ; zarm_r2_joint
+    (9,0)   36.00     ; zarm_r3_joint
+    (10,0)  36.00     ; zarm_r4_joint
+    (11,0)  18.00     ; zarm_r5_joint
+    (12,0)  18.00     ; zarm_r6_joint
+    (13,0)  18.00     ; zarm_r7_joint
+  }
+}
+
+
+armAccelTask
+{
+  kp
+  {
+    (0,0)   1200.0  ; zarm_l1_joint
+    (1,0)   64.0   ; zarm_l2_joint
+    (2,0)   64.0   ; zarm_l3_joint
+    (3,0)   300.0  ; zarm_l4_joint
+    (4,0)   70.0   ; zarm_l5_joint
+    (5,0)   70.0   ; zarm_l6_joint
+    (6,0)   70.0   ; zarm_l7_joint
+    (7,0)   1200.0  ; zarm_r1_joint
+    (8,0)   64.0   ; zarm_r2_joint
+    (9,0)   64.0   ; zarm_r3_joint
+    (10,0)  300.0  ; zarm_r4_joint
+    (11,0)  70.0   ; zarm_r5_joint
+    (12,0)  70.0   ; zarm_r6_joint
+    (13,0)  70.0   ; zarm_r7_joint
+  }
+  kd
+  {
+    (0,0)   18.0     ; zarm_l1_joint
+    (1,0)   12.0     ; zarm_l2_joint
+    (2,0)   12.0     ; zarm_l3_joint
+    (3,0)   40.0     ; zarm_l4_joint
+    (4,0)   30.0     ; zarm_l5_joint
+    (5,0)   30.0     ; zarm_l6_joint
+    (6,0)   30.0     ; zarm_l7_joint
+    (7,0)   18.0     ; zarm_r1_joint
+    (8,0)   12.0     ; zarm_r2_joint
+    (9,0)   12.0     ; zarm_r3_joint
+    (10,0)  40.0     ; zarm_r4_joint
+    (11,0)  30.0     ; zarm_r5_joint
+    (12,0)  30.0     ; zarm_r6_joint
+    (13,0)  30.0     ; zarm_r7_joint
+  }
+  kp_force_control
+  {
+    (0,0)   350.0  ; zarm_l1_joint
+    (1,0)   32.0   ; zarm_l2_joint
+    (2,0)   32.0   ; zarm_l3_joint
+    (3,0)   150.0  ; zarm_l4_joint
+    (4,0)   35.0   ; zarm_l5_joint
+    (5,0)   35.0   ; zarm_l6_joint
+    (6,0)   35.0   ; zarm_l7_joint
+    (7,0)   350.0  ; zarm_r1_joint
+    (8,0)   32.0   ; zarm_r2_joint
+    (9,0)   32.0   ; zarm_r3_joint
+    (10,0)  150.0  ; zarm_r4_joint
+    (11,0)  35.0   ; zarm_r5_joint
+    (12,0)  35.0   ; zarm_r6_joint
+    (13,0)  35.0   ; zarm_r7_joint
+  }
+  kd_force_control
+  {
+    (0,0)   9.0    ; zarm_l1_joint
+    (1,0)   6.0    ; zarm_l2_joint
+    (2,0)   6.0    ; zarm_l3_joint
+    (3,0)   20.0   ; zarm_l4_joint
+    (4,0)   15.0   ; zarm_l5_joint
+    (5,0)   15.0   ; zarm_l6_joint
+    (6,0)   15.0   ; zarm_l7_joint
+    (7,0)   9.0    ; zarm_r1_joint
+    (8,0)   6.0    ; zarm_r2_joint
+    (9,0)   6.0    ; zarm_r3_joint
+    (10,0)  20.0   ; zarm_r4_joint
+    (11,0)  15.0   ; zarm_r5_joint
+    (12,0)  15.0   ; zarm_r6_joint
+    (13,0)  15.0   ; zarm_r7_joint
+  }
+}
+
+weight
+{
+  accLowJoint     20
+  accArm          30
+  accTorsoZero    0
+  contactForce    500
+}
+
+contact_force_params
+{
+  contactForceErrorThreshold  0.15    ; 误差阈值（rad），超过此值禁用接触力任务
+  weightArmAccelReduced    30.0    ; 施加期望力时的手臂任务权重
+  transitionTime   0.3    ; 权重平滑过渡时间常数（秒
+  forceThreshold           5.0    ; 期望力阈值（N），超过此值认为施加了期望力
+  interpolationSpeed       300.0   ; 期望力插值速度（N/s）
+}

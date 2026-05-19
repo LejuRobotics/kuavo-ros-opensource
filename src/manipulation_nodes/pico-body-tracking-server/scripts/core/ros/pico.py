@@ -19,18 +19,20 @@ import numpy as np
 import enum
 import time
 import math
+import threading
 from typing import List, Optional, Any
 from tf2_msgs.msg import TFMessage
-from std_msgs.msg import Float64MultiArray,Float64
+from std_msgs.msg import Float64MultiArray,Float64,String
 from kuavo_msgs.msg import (
     twoArmHandPoseCmd, robotBodyMatrices, picoPoseInfoList,
     robotHeadMotionData, ikSolveParam, footPoseTargetTrajectories,
     JoySticks, sensorsData, switchGaitByName,
-    lejuClawCommand,robotHandPosition,dexhandCommand
+    lejuClawCommand, robotHandPosition, dexhandCommand, headCtrlMode
 )
 from kuavo_msgs.srv import changeArmCtrlMode, changeTorsoCtrlMode, changeTorsoCtrlModeRequest, changeArmCtrlMode, changeArmCtrlModeRequest
 from kuavo_msgs.srv import fkSrv
-from std_msgs.msg import Float32MultiArray, Int32, Bool
+from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeRequest
+from std_msgs.msg import Float32MultiArray, Int32, Bool, Empty
 from std_srvs.srv import Trigger, TriggerResponse
 from geometry_msgs.msg import Twist
 from .pico_utils import KuavoPicoInfoTransformer
@@ -285,6 +287,7 @@ class KuavoPicoNode:
             self._init_subscribers()
             # Initialize joy handler
             self._init_joy_controller()
+            self._log_mode_switch_semantics()
 
             self.robot_matrix_publisher = RobotMatrixPublisher()
 
@@ -345,13 +348,53 @@ class KuavoPicoNode:
         self.set_ik_solver_params()
         
         self.send_srv = True
+        # mobile 模式切换默认使用 /mobile_manipulator_mpc_control 服务调用。
+        # 服务类型与人形控制器保持一致：kuavo_msgs/changeTorsoCtrlMode。
+        self.mobile_ctrl_publish_only = False
         self.last_pico_running_state = False
         self.button_y_last = False
         self.config_manager = PicoVrConfig()
+        self.dex_hand_config = self.config_manager.get_dex_hand_config()
+        thumb_cfg = self.dex_hand_config.get('thumb_open', {})
+        self.dex_thumb_open_enabled = bool(thumb_cfg.get('enabled', True))
+        self.dex_thumb_joint_indices = list(thumb_cfg.get('joint_indices', [1]))
+        self.dex_thumb_open_value = int(thumb_cfg.get('open_value', 100))
+        self.dex_thumb_require_unlock = bool(thumb_cfg.get('require_teleop_unlock', True))
+        self.dex_left_thumb_open = False
+        self.dex_right_thumb_open = False
+        # 新增外部头控开关：启用后由独立节点发布 /robot_head_motion_data
+        self.use_external_head_control = rospy.get_param('/pico/use_external_head_control', False)
+        # 启动服务成功前，A 键优先用于触发启动；成功后恢复原本 A 键逻辑
+        self.start_service_succeeded = False
+        self.last_a_pressed = False
+        self.last_xy_pressed = False
+        
+        # 头部控制模式相关 - 从参数服务器读取
+        self.current_head_mode = rospy.get_param('/head_control_mode', "vr_follow") 
+        self.current_fixed_hand = ""  # 当前 fixed_main_hand 模式下跟踪的手
+        if self.current_head_mode in ("auto_track_active", "fixed_main_hand"):
+            self.head_use_auto_track = True
+        else:
+            self.head_use_auto_track = False
+        self.head_mode_before_reset = None   # 手臂复位前保存的头部控制模式
+        self.fixed_hand_before_reset = ""    # 手臂复位前保存的 fixed_hand 信息
+        self.head_control_service_client = None  # 头部控制模式服务客户端
+        # 手臂程序化切 fixed 时抑制一次 head_fixed_forward_user_intent，避免把复位回正当成用户「解锁后保持 fixed」
+        self._suppress_next_head_fixed_user_intent = False
+        
+        SDKLogger.info(f"从参数服务器读取头部模式: {self.current_head_mode}, head_use_auto_track={self.head_use_auto_track}")
 
         # 末端执行器类型
         self.eef_type = rospy.get_param('/end_effector_type', 'qiangnao')
         self.last_eef_command = None # 记录上一次的末端执行器命令
+        self.filtered_eef_command = None
+        self.eef_wait_reengage = False
+
+    def _log_mode_switch_semantics(self) -> None:
+        """Log mode-switch semantics and current runtime strategy."""
+        SDKLogger.info("Mode semantics: arm=/change_arm_ctrl_mode, mobile=/mobile_manipulator_mpc_control, mm_wbc=/enable_mm_wbc_arm_trajectory_control")
+        mobile_strategy = "publish-only" if self.mobile_ctrl_publish_only else "service-call"
+        SDKLogger.info(f"Mobile control mode strategy: {mobile_strategy}")
 
     def _init_toggle_switch(self) -> None:
         # hand wrench
@@ -385,8 +428,13 @@ class KuavoPicoNode:
         def on_freeze_finger_changed(event: ToggleEvent):
             SDKLogger.info(f"手指锁定状态变化: {event.old_state} -> {event.new_state}")
             if event.new_state:
+                if self.last_eef_command is not None:
+                    self.filtered_eef_command = dict(self.last_eef_command)
+                self.eef_wait_reengage = False
                 banner_echo(f"手指锁定", 'green')
             else:
+                stable_unlock_enabled = bool(self.dex_hand_config.get('stable_unlock', {}).get('enabled', True))
+                self.eef_wait_reengage = stable_unlock_enabled
                 banner_echo(f"手指解锁", 'yellow')
         self.toggle_freeze_finger = ToggleSwitch("freeze_finger")
         self.toggle_freeze_finger.add_callback(on_freeze_finger_changed)
@@ -509,7 +557,7 @@ class KuavoPicoNode:
                 '/leju_claw_command', 
                 lejuClawCommand, 
                 queue_size=10)
-        elif self.eef_type.startswith('qiangnao'): # 灵巧手
+        elif self.eef_type.startswith('qiangnao') or self.eef_type == 'linker_hand': # 灵巧手 / 灵心巧手
             self.pub_control_robot_hand_position = rospy.Publisher(
                 '/control_robot_hand_position', robotHandPosition, queue_size=10
             )
@@ -540,7 +588,14 @@ class KuavoPicoNode:
         rospy.Subscriber("/ik/error_norm", Float32MultiArray, self.ik_error_norm_callback)
         rospy.Subscriber("/pico/control_mode", Int32, self.set_control_mode_callback)
         rospy.Subscriber("/pico/incremental_mode", Int32, self.set_incremental_mode_callback)
-    
+        rospy.Subscriber("/pico/head_control_mode_status", headCtrlMode, self._head_mode_status_callback)
+        rospy.Subscriber(
+            "/pico/head_fixed_forward_user_intent",
+            Empty,
+            self._on_head_fixed_forward_user_intent,
+        )
+
+
     """//////////////////////////////////// Joy Callbacks //////////////////////////////////////////"""
     def _init_joy_controller(self) -> None:
         """Initialize joy controller"""
@@ -552,6 +607,8 @@ class KuavoPicoNode:
             "teleop_lock": ({"RT_PRESSED", "RG_PRESSED"}, self._teleop_lock_callback),      # 基础模式/全身遥操模式 - 上锁
             "hand_wrench": ({"LT_PRESSED", "A_PRESSED"}, self._hand_wrench_callback),       # 基础模式/全身遥操模式 - 末端力施加开关
             "freeze_finger": ({"Y_PRESSED"}, self._freeze_finger_callback),                 # 基础模式/全身遥操模式 - 锁定/解锁手指
+            "left_thumb_open_toggle": ({"X_LONG_PRESSED", "LT_IDLE", "RT_IDLE"}, self._left_thumb_open_toggle_callback),  # 左拇指张开切换
+            "right_thumb_open_toggle": ({"A_LONG_PRESSED", "LT_IDLE", "RT_IDLE"}, self._right_thumb_open_toggle_callback), # 右拇指张开切换
             # "record_rosbag": ({"X_PRESSED"}, self._record_rosbag_callback),                 # 基础模式/全身遥操模式 - 录制rosbag
             "reset_to_stance": ({"A_PRESSED"}, self._reset_to_stance_callback),             # 基础模式/全身遥操模式 - 切换到站立模式
             "stop_robot": ({"LT_PRESSED","RT_PRESSED", "A_LONG_PRESSED"}, self._stop_robot_callback),# 基础模式/全身遥操模式 - 停止机器人
@@ -589,6 +646,9 @@ class KuavoPicoNode:
         # //////////////////////////// Debug CallBacks ////////////////////////////
     def sub_joy_callback(self, joy: JoySticks) -> None:
         """订阅手柄回调"""
+        # A / X+Y 属于高优先级安全与启动功能，不依赖遥操解锁与回调匹配
+        self._handle_stop_hotkey(joy)
+        self._handle_start_hotkey(joy)
 
         # 更新按键状态，内部处理组合按键回调，另外返回当前按键组合和是否触发了回调函数
         key_combination, callback_triggered = self.joy_button_handler.update(joy)
@@ -605,6 +665,23 @@ class KuavoPicoNode:
                 return
             self.handle_joystick_movement(joy)
 
+    def _handle_start_hotkey(self, joy: JoySticks) -> None:
+        """Handle A hotkey independent of teleop loop."""
+        if self.start_service_succeeded:
+            return
+
+        a_pressed = bool(joy.right_first_button_pressed)
+        if a_pressed and not self.last_a_pressed:
+            self.start_service_succeeded = self._call_real_initialize_srv()
+        self.last_a_pressed = a_pressed
+
+    def _handle_stop_hotkey(self, joy: JoySticks) -> None:
+        """Handle X+Y stop hotkey independent of teleop loop."""
+        xy_pressed = bool(joy.left_first_button_pressed and joy.left_second_button_pressed)
+        if xy_pressed and not self.last_xy_pressed:
+            self._terminate_robot_xy_callback(set(), joy)
+        self.last_xy_pressed = xy_pressed
+
     def _hand_wrench_callback(self, key_combination: Set[str], joy:JoySticks)->None:
         """Callback for hand wrench."""
         # 下半身模式不响应
@@ -619,6 +696,28 @@ class KuavoPicoNode:
     def _freeze_finger_callback(self, key_combination: Set[str], joy:JoySticks)->None:
         """Callback for freeze finger."""
         self.toggle_freeze_finger.toggle() # 锁定/解锁手指
+
+    def _left_thumb_open_toggle_callback(self, key_combination: Set[str], joy: JoySticks) -> None:
+        """Callback for left thumb open toggle."""
+        if not self.dex_thumb_open_enabled:
+            return
+        if self.dex_thumb_require_unlock and not self.toggle_teleop_unlock:
+            SDKLogger.warning("\033[93m遥操未解锁，无法切换左拇指张开\033[0m")
+            return
+        self.dex_left_thumb_open = not self.dex_left_thumb_open
+        state = "开启" if self.dex_left_thumb_open else "关闭"
+        banner_echo(f"左拇指张开{state}", 'green' if self.dex_left_thumb_open else 'yellow')
+
+    def _right_thumb_open_toggle_callback(self, key_combination: Set[str], joy: JoySticks) -> None:
+        """Callback for right thumb open toggle."""
+        if not self.dex_thumb_open_enabled:
+            return
+        if self.dex_thumb_require_unlock and not self.toggle_teleop_unlock:
+            SDKLogger.warning("\033[93m遥操未解锁，无法切换右拇指张开\033[0m")
+            return
+        self.dex_right_thumb_open = not self.dex_right_thumb_open
+        state = "开启" if self.dex_right_thumb_open else "关闭"
+        banner_echo(f"右拇指张开{state}", 'green' if self.dex_right_thumb_open else 'yellow')
 
     def _teleop_unlock_callback(self, key_combination: Set[str], joy:JoySticks)->None:
         """Callback for teleoperation unlock."""
@@ -724,6 +823,32 @@ class KuavoPicoNode:
         except Exception as e:
             SDKLogger.error(f"Error switching to stance mode: {e}")
 
+    def _terminate_robot_xy_callback(self, key_combination: Set[str], joy: JoySticks) -> None:
+        """Callback for Quest-aligned emergency stop on X+Y pressed."""
+        stop_msg = Bool(data=True)
+        for _ in range(5):
+            if rospy.is_shutdown():
+                break
+            self.pub_stop_robot.publish(stop_msg)
+            rospy.sleep(0.1)
+        banner_echo("已触发 X+Y 停止机器人", "yellow")
+        SDKLogger.warning("Quest-aligned stop triggered by X+Y")
+
+    def _call_real_initialize_srv(self) -> bool:
+        """Call real initialize service only."""
+        service_name = "/humanoid_controller/real_initial_start"
+        try:
+            rospy.wait_for_service(service_name, timeout=1.0)
+            real_init_srv = rospy.ServiceProxy(service_name, Trigger)
+            res = real_init_srv()
+            if getattr(res, "success", False):
+                banner_echo("初始化启动成功", "green")
+                SDKLogger.info("Real initialize service call SUCCESS")
+                return
+            SDKLogger.error(f"Real initialize service call FAILED: {getattr(res, 'message', '')}")
+        except Exception as e:
+            SDKLogger.error(f"Failed to call {service_name}: {e}")
+
     def _auto_swing_arm_callback(self, key_combination: Set[str], joy:JoySticks)->None:
         """Callback for arm reset."""
         # 下半身遥操模式下不响应
@@ -773,6 +898,9 @@ class KuavoPicoNode:
             SDKLogger.error(f"Error in robot stop sequence: {e}")
 
     def _pub_head_pose(self) -> None:
+        if self.use_external_head_control:
+            return
+
         def normalize_degree_in_180(angle: float) -> float:
             """Normalize an angle to the range [-180, 180] degrees."""
             normalized = angle % 360
@@ -860,7 +988,11 @@ class KuavoPicoNode:
         SDKLogger.info("IK solver parameters set successfully")
 
     def change_arm_ctrl_mode(self, mode: int) -> None:
-        """Change arm control mode."""
+        """Change arm control mode via /change_arm_ctrl_mode.
+        
+        Args:
+            mode: 手臂控制模式 (1=复位/自动摆臂, 2=外部控制/手臂跟随)
+        """
         try:
             rospy.wait_for_service("/change_arm_ctrl_mode", timeout=3.0)
             changeHandTrackingMode_srv = rospy.ServiceProxy("/change_arm_ctrl_mode", changeArmCtrlMode)
@@ -868,28 +1000,124 @@ class KuavoPicoNode:
             # 服务调用成功后，发布模式切换话题
             self.pub_arm_ctrl_mode.publish(Int32(data=mode))
             SDKLogger.info(f"Arm control mode changed to {mode} and published to /pico/arm_ctrl_mode_change")
+            
+            # 根据手臂控制模式切换头部控制模式
+            self._handle_head_mode_on_arm_mode_change(mode)
+            
         except rospy.ROSException as e:
             SDKLogger.error(f"\033[31m服务 /change_arm_ctrl_mode 连接超时或连接失败, 请检查服务是否启动: {e}\033[0m")
         except Exception as e:
             SDKLogger.error(f"服务 /change_arm_ctrl_mode 调用失败: {e}")
+    
+    def _handle_head_mode_on_arm_mode_change(self, arm_mode: int) -> None:
+        """根据手臂控制模式切换头部控制模式.
+        
+        当手臂复位(mode=1)时，保存当前头部控制模式后切换到 fixed 回正；
+        当启用手臂控制(mode=2)时，恢复复位前保存的头部控制模式（含 fixed_hand 信息）。
+        复位后、解锁前若用户通过头控服务/话题改了模式/主手，由 _head_mode_status_callback 与
+        /pico/head_fixed_forward_user_intent（每次 fixed 服务成功）同步覆盖上述快照。
+        
+        Args:
+            arm_mode: 手臂控制模式 (1=复位, 2=启用)
+        """
+        try:
+            if not self.head_use_auto_track:
+                SDKLogger.debug(f"head_use_auto_track为False, 不随手臂模式切换头部模式")
+                return
+            
+            new_head_mode = None
+            new_fixed_hand = ""
+            if arm_mode == 1:
+                # 手臂复位时，保存当前头部模式（包括 fixed_hand），然后切换到 fixed 回正
+                self.head_mode_before_reset = self.current_head_mode
+                self.fixed_hand_before_reset = self.current_fixed_hand
+                new_head_mode = "fixed"
+            elif arm_mode == 2:
+                # 解锁手臂时，恢复复位前的头部控制模式
+                new_head_mode = self.head_mode_before_reset if self.head_mode_before_reset else "auto_track_active"
+                new_fixed_hand = self.fixed_hand_before_reset if self.head_mode_before_reset == "fixed_main_hand" else ""
+                self.head_mode_before_reset = None
+                self.fixed_hand_before_reset = ""
+                self._suppress_next_head_fixed_user_intent = False
+            
+            if new_head_mode is None:
+                return
+            # fixed_main_hand 需同时比较 fixed_hand，避免仅模式字符串相同但手侧错误时误跳过恢复
+            if new_head_mode == self.current_head_mode and (
+                new_head_mode != "fixed_main_hand" or new_fixed_hand == self.current_fixed_hand
+            ):
+                return
+            
+            if arm_mode == 1 and new_head_mode == "fixed":
+                self._suppress_next_head_fixed_user_intent = True
+            self._set_head_control_mode(new_head_mode, new_fixed_hand)
+            
+        except Exception as e:
+            SDKLogger.error(f"处理手臂模式切换时的头部控制模式失败: {e}")
+    
+    def _on_head_fixed_forward_user_intent(self, _msg: Empty) -> None:
+        """头控节点每次 fixed 服务成功时发布；在手臂复位窗口内更新「解锁后恢复」快照（程序化复位由抑制标志跳过）。"""
+        if self._suppress_next_head_fixed_user_intent:
+            self._suppress_next_head_fixed_user_intent = False
+            return
+        if self.head_mode_before_reset is None:
+            return
+        self.head_mode_before_reset = "fixed"
+        self.fixed_hand_before_reset = ""
+        SDKLogger.info("用户在手掌握复位锁定期间请求头部保持正前方，解锁手臂后将保持 fixed 模式")
+
+    def _set_head_control_mode(self, mode: str, fixed_hand: str = "") -> None:
+        """设置头部控制模式.
+        
+        Args:
+            mode: 头部控制模式 ("fixed", "auto_track_active", "fixed_main_hand", "vr_follow")
+            fixed_hand: 固定主手方向，仅在 fixed_main_hand 模式下有效 ("left" 或 "right")
+        """
+        try:
+            # 初始化服务客户端(如果还未初始化)
+            if self.head_control_service_client is None:
+                self.head_control_service_client = rospy.ServiceProxy(
+                    "/pico/set_head_control_mode", 
+                    SetHeadControlMode
+                )
+            
+            # 等待服务可用
+            rospy.wait_for_service("/pico/set_head_control_mode", timeout=2.0)
+            
+            # 调用服务
+            req = SetHeadControlModeRequest()
+            req.mode = mode
+            req.fixed_hand = fixed_hand if mode == "fixed_main_hand" else ""
+            response = self.head_control_service_client(req)
+            
+            if response.success:
+                old_mode = self.current_head_mode
+                self.current_head_mode = mode
+                self.current_fixed_hand = fixed_hand if mode == "fixed_main_hand" else ""
+                SDKLogger.info(f"头部控制模式已切换: {old_mode} -> {mode}" + (f"(fixed_hand={fixed_hand})" if mode == "fixed_main_hand" else ""))
+            else:
+                SDKLogger.error(f"头部控制模式切换失败: {response.message}")
+                
+        except rospy.ROSException as e:
+            SDKLogger.warning(f"头部控制模式服务不可用: {e}")
+        except Exception as e:
+            SDKLogger.error(f"设置头部控制模式失败: {e}")
 
     def change_mobile_ctrl_mode(self, mode: int) -> None:
-        """Change mobile control mode."""
+        """Change mobile control mode via /mobile_manipulator_mpc_control."""
         try:
             rospy.wait_for_service("/mobile_manipulator_mpc_control", timeout=3.0)
-            changeHandTrackingMode_srv = rospy.ServiceProxy("/mobile_manipulator_mpc_control", changeArmCtrlMode)
-            changeHandTrackingMode_srv(mode)
-            # 服务调用成功后，发布模式切换话题
+            changeMobileModeSrv = rospy.ServiceProxy("/mobile_manipulator_mpc_control", changeTorsoCtrlMode)
+            changeMobileModeSrv(mode)
             self.pub_mobile_ctrl_mode.publish(Int32(data=mode))
             SDKLogger.info(f"Mobile control mode changed to {mode} and published to /pico/mobile_ctrl_mode_change")
-            # print(f"=================================changeHandTrackingMode_srv({mode})=============================================")
         except rospy.ROSException as e:
             SDKLogger.error(f"\033[31m服务 /mobile_manipulator_mpc_control 连接超时或连接失败, 请检查服务是否启动: {e}\033[0m")
         except Exception as e:
             SDKLogger.error(f"服务 /mobile_manipulator_mpc_control 调用失败: {e}")
 
     def change_mm_wbc_arm_ctrl_mode(self, mode: int) -> None:
-        """Change MM WBC arm control mode."""
+        """Change MM WBC arm control mode via /enable_mm_wbc_arm_trajectory_control."""
         try:
             rospy.wait_for_service("/enable_mm_wbc_arm_trajectory_control", timeout=3.0)
             changeHandTrackingMode_srv = rospy.ServiceProxy("/enable_mm_wbc_arm_trajectory_control", changeArmCtrlMode)
@@ -947,26 +1175,78 @@ class KuavoPicoNode:
         Args:
             joy: JoySticks message containing left_grip and right_grip values (0~1)
         """
-        # 将 grip 值从 0~1 映射到 0~100
-        eef_command = {
-            'left': int(max(0, min(100, joy.left_grip * 100))),
-            'right': int(max(0, min(100, joy.right_grip * 100))),
+        # 将 grip 值从 0~1 映射到配置的控制区间
+        cmd_min = int(self.dex_hand_config.get('command_min', 0))
+        cmd_max = int(self.dex_hand_config.get('command_max', 100))
+        if cmd_min > cmd_max:
+            cmd_min, cmd_max = cmd_max, cmd_min
+        cmd_span = max(1, cmd_max - cmd_min)
+
+        grip_deadzone = float(self.dex_hand_config.get('grip_deadzone', 0.02))
+        smoothing_alpha = float(self.dex_hand_config.get('smoothing_alpha', 0.35))
+        smoothing_alpha = max(0.0, min(1.0, smoothing_alpha))
+        reengage_threshold = int(self.dex_hand_config.get('stable_unlock', {}).get('reengage_threshold', 8))
+
+        def _grip_to_cmd(grip: float) -> int:
+            g = max(0.0, min(1.0, float(grip)))
+            if g < grip_deadzone:
+                g = 0.0
+            return int(round(cmd_min + g * cmd_span))
+
+        raw_command = {
+            'left': _grip_to_cmd(joy.left_grip),
+            'right': _grip_to_cmd(joy.right_grip),
         }
-        if self.last_eef_command is None:
-            self.last_eef_command = eef_command
-        # 如果eef_freeze为True，则使用上一次的末端执行器命令
-        if not eef_freeze:
-            self.last_eef_command = eef_command
+
+        # 一阶低通，减小抓握输入抖动
+        if self.filtered_eef_command is None:
+            self.filtered_eef_command = dict(raw_command)
         else:
-            eef_command = self.last_eef_command
+            self.filtered_eef_command = {
+                'left': int(round((1.0 - smoothing_alpha) * self.filtered_eef_command['left'] + smoothing_alpha * raw_command['left'])),
+                'right': int(round((1.0 - smoothing_alpha) * self.filtered_eef_command['right'] + smoothing_alpha * raw_command['right'])),
+            }
+
+        if self.last_eef_command is None:
+            self.last_eef_command = dict(self.filtered_eef_command)
+
+        # 抓握锁定时固定输出；解锁后采用“回切阈值”避免瞬时跳变
+        if eef_freeze:
+            eef_command = dict(self.last_eef_command)
+        elif self.eef_wait_reengage:
+            left_diff = abs(self.filtered_eef_command['left'] - self.last_eef_command['left'])
+            right_diff = abs(self.filtered_eef_command['right'] - self.last_eef_command['right'])
+            if left_diff <= reengage_threshold and right_diff <= reengage_threshold:
+                self.eef_wait_reengage = False
+                self.last_eef_command = dict(self.filtered_eef_command)
+                eef_command = dict(self.filtered_eef_command)
+                SDKLogger.info("灵巧手解锁完成：抓握值已平滑回切")
+            else:
+                eef_command = dict(self.last_eef_command)
+        else:
+            self.last_eef_command = dict(self.filtered_eef_command)
+            eef_command = dict(self.filtered_eef_command)
         try:  
-            if self.eef_type.startswith("qiangnao"):
+            if self.eef_type.startswith("qiangnao") or self.eef_type == "linker_hand":
                 # 创建末端执行器控制消息
                 hand_control_msg = robotHandPosition()
                 hand_control_msg.header.stamp = rospy.Time.now()
                 hand_control_msg.header.frame_id = "pico_vr_control"
-                hand_control_msg.left_hand_position = [eef_command['left']] * 6
-                hand_control_msg.right_hand_position = [eef_command['right']] * 6
+                left_hand_pos = [eef_command['left']] * 6
+                right_hand_pos = [eef_command['right']] * 6
+
+                # 通过长按按键切换拇指张开，适配 PICO 无 touch 语义
+                if self.dex_thumb_open_enabled:
+                    open_value = max(cmd_min, min(cmd_max, self.dex_thumb_open_value))
+                    for idx in self.dex_thumb_joint_indices:
+                        if isinstance(idx, int) and 0 <= idx < 6:
+                            if self.dex_left_thumb_open:
+                                left_hand_pos[idx] = open_value
+                            if self.dex_right_thumb_open:
+                                right_hand_pos[idx] = open_value
+
+                hand_control_msg.left_hand_position = left_hand_pos
+                hand_control_msg.right_hand_position = right_hand_pos
                 
                 # 发布末端执行器控制消息
                 self.pub_control_robot_hand_position.publish(hand_control_msg)
@@ -1055,8 +1335,8 @@ class KuavoPicoNode:
             else:
                 mobile_mode = 1 if self.pico_info_transformer.is_running else 0
             wbc_mode = 1 if self.pico_info_transformer.is_running else 0
-            self.change_arm_ctrl_mode(mode)
             self.change_mobile_ctrl_mode(mobile_mode)
+            self.change_arm_ctrl_mode(mode)
             self.change_mm_wbc_arm_ctrl_mode(wbc_mode)
             self.last_pico_running_state = self.pico_info_transformer.is_running
 
@@ -1096,8 +1376,8 @@ class KuavoPicoNode:
             mode = 2 if self.pico_info_transformer.is_running else 0
             mobile_mode = 0 if self.pico_info_transformer.is_running else 0
             wbc_mode = 0 if self.pico_info_transformer.is_running else 0
-            self.change_arm_ctrl_mode(mode)
             self.change_mobile_ctrl_mode(mobile_mode)
+            self.change_arm_ctrl_mode(mode)
             self.change_mm_wbc_arm_ctrl_mode(wbc_mode)
             self.last_pico_running_state = self.pico_info_transformer.is_running
     def set_item_mass_force(self, case_name:str, hand_wrench_config:HandWrenchConfig)->None:
@@ -1105,6 +1385,33 @@ class KuavoPicoNode:
         self.hand_wrench_config = hand_wrench_config
         SDKLogger.info(f"VR App端设置末端力配置: {case_name} --- {hand_wrench_config}")
         
+    def _head_mode_status_callback(self, msg: headCtrlMode) -> None:
+        """订阅 pico_head_control_node 发布的头部控制模式状态，同步当前模式和 fixed_hand 信息."""
+        mode = msg.mode
+        fixed_hand = msg.fixed_main_hand
+        if mode != self.current_head_mode or fixed_hand != self.current_fixed_hand:
+            SDKLogger.info(f"头部控制模式同步: {self.current_head_mode}({self.current_fixed_hand}) -> {mode}({fixed_hand})")
+            self.current_head_mode = mode
+            self.current_fixed_hand = fixed_hand
+            # 与 QuestControlFSMNode::headCtrlModeCallback 一致：复位过程中的 fixed 不应关闭「随手臂切换头部」，
+            # 否则解锁时 _handle_head_mode_on_arm_mode_change 会提前 return，无法恢复 fixed_main_hand / auto_track_active
+            if mode in ("auto_track_active", "fixed_main_hand"):
+                self.head_use_auto_track = True
+            elif mode == "vr_follow":
+                self.head_use_auto_track = False
+            # 已手臂复位、尚未解锁时用户若切换头控/主手，应覆盖「解锁后要恢复」的快照；
+            # fixed 且与当前模式相同时 headCtrlMode 可能无变化，由 /pico/head_fixed_forward_user_intent 记录（见 _on_head_fixed_forward_user_intent）
+            if self.head_mode_before_reset is not None:
+                if mode == "fixed_main_hand" and fixed_hand in ("left", "right"):
+                    self.head_mode_before_reset = "fixed_main_hand"
+                    self.fixed_hand_before_reset = fixed_hand
+                elif mode == "auto_track_active":
+                    self.head_mode_before_reset = "auto_track_active"
+                    self.fixed_hand_before_reset = ""
+                elif mode == "vr_follow":
+                    self.head_mode_before_reset = "vr_follow"
+                    self.fixed_hand_before_reset = ""
+
     def set_control_mode_callback(self, control_mode: Int32) -> None:
         """Set control mode."""
         self._set_control_mode(control_mode.data)
@@ -1323,8 +1630,8 @@ class KuavoPicoNode:
             mode = 2 if self.pico_info_transformer.is_running else 0
             mobile_mode = 1 if self.pico_info_transformer.is_running else 0
             wbc_mode = 1 if self.pico_info_transformer.is_running else 0
-            self.change_arm_ctrl_mode(mode)
             self.change_mobile_ctrl_mode(mobile_mode)
+            self.change_arm_ctrl_mode(mode)
             self.change_mm_wbc_arm_ctrl_mode(wbc_mode)
             self.last_pico_running_state = self.pico_info_transformer.is_running
 

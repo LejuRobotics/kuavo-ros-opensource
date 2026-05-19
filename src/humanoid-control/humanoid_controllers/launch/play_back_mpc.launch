@@ -46,10 +46,10 @@
     <!-- mpc node -->
       <node pkg="humanoid_interface_ros" type="humanoid_sqp_mpc" name="humanoid_sqp_mpc" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
     <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh"/>
-   
+
     <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
 
-    <node pkg="rosbag" type="play" name="rosbag_playback" 
+    <node pkg="rosbag" type="play" name="rosbag_playback"
       args=" $(arg rosbag_file) --topics /humanoid_mpc_policy /humanoid_mpc_solver_data /humanoid_mpc_observation /humanoid_controller/com/r /humanoid_controller/com/rd /humanoid_controller/com/r_des /humanoid_controller/com/rd_des /humanoid_controller/optimizedInput_mrt_ /humanoid_controller/optimizedState_mrt_"  
       output="screen"
     >

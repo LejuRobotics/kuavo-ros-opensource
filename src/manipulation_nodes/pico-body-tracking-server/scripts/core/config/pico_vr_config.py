@@ -154,6 +154,58 @@ class PicoVrConfig:
             Dict[str, Any]: 原始配置字典
         """
         return self._config_data or {}
+
+    def get_dex_hand_config(self) -> Dict[str, Any]:
+        """
+        获取灵巧手控制配置。
+
+        Returns:
+            Dict[str, Any]: 灵巧手配置字典（带默认值）
+        """
+        defaults = {
+            "command_min": 0,
+            "command_max": 100,
+            "smoothing_alpha": 0.35,
+            "grip_deadzone": 0.02,
+            "thumb_open": {
+                "enabled": True,
+                "joint_indices": [1],
+                "open_value": 100,
+                "require_teleop_unlock": True,
+            },
+            "stable_unlock": {
+                "enabled": True,
+                "reengage_threshold": 8
+            }
+        }
+
+        if not self._config_data:
+            return defaults
+
+        dex_cfg = self._config_data.get("dex_hand", {})
+        thumb_open_cfg = dex_cfg.get("thumb_open", {})
+        stable_unlock_cfg = dex_cfg.get("stable_unlock", {})
+        merged = {
+            "command_min": dex_cfg.get("command_min", defaults["command_min"]),
+            "command_max": dex_cfg.get("command_max", defaults["command_max"]),
+            "smoothing_alpha": dex_cfg.get("smoothing_alpha", defaults["smoothing_alpha"]),
+            "grip_deadzone": dex_cfg.get("grip_deadzone", defaults["grip_deadzone"]),
+            "thumb_open": {
+                "enabled": thumb_open_cfg.get("enabled", defaults["thumb_open"]["enabled"]),
+                "joint_indices": thumb_open_cfg.get("joint_indices", defaults["thumb_open"]["joint_indices"]),
+                "open_value": thumb_open_cfg.get("open_value", defaults["thumb_open"]["open_value"]),
+                "require_teleop_unlock": thumb_open_cfg.get(
+                    "require_teleop_unlock", defaults["thumb_open"]["require_teleop_unlock"]
+                ),
+            },
+            "stable_unlock": {
+                "enabled": stable_unlock_cfg.get("enabled", defaults["stable_unlock"]["enabled"]),
+                "reengage_threshold": stable_unlock_cfg.get(
+                    "reengage_threshold", defaults["stable_unlock"]["reengage_threshold"]
+                ),
+            },
+        }
+        return merged
     
     def reload_config(self):
         """

@@ -10,6 +10,7 @@
 #include "humanoid_controllers/rl/waistController.h"
 #include "kuavo_solver/ankle_solver.h"
 #include "kuavo_msgs/ExecuteArmAction.h"
+#include "kuavo_msgs/changeArmCtrlMode.h"
 #include <openvino/openvino.hpp>
 #include <memory>
 #include <map>
@@ -35,16 +36,18 @@ namespace humanoid_controller
     void resume() override;
 
     /**
-     * @brief 检查控制器是否准备好退出
-     * @return 如果姿态角>60度（倒地），返回true，请求退出控制
+     * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致）
+     * 当估计的 roll/pitch 绝对值超过约 60°（判为跌倒）时返回 true，供上层切出行走模式。
+     * @return 判为跌倒时为 true
      */
-    bool isReadyToExit() const override;
+    bool requestToExit() const override;
 
     /**
-     * @brief 检查控制器当前是否处于 stance（站立）模式
-     * @return 如果 cmdStance_ == 1 返回 true，否则返回 false
+     * @brief 是否允许从本控制器切换走（与 RLControllerBase 一致）
+     * 当步态接收器当前指令为 stance 站立（cmdStance_ ≥ 0.5，实现中与 AmpWalk 一致）时返回 true，便于站立静止时切回 MPC 等；行走中一般为 false。
+     * @return stance 指令成立时为 true
      */
-    bool isInStanceMode() const override;
+    bool isAllowToExit() const override;
 
     /**
      * @brief 更新速度限制到rosparam（重写基类方法）
@@ -137,8 +140,6 @@ namespace humanoid_controller
     bool is_roban_{false};
     AnkleSolver ankleSolver_;
 
-    // 是否使用 AMP 专用 Ruiwo 手臂增益（由 skw_rl_param.info 中 use_amp_ruiwo_kpkd 配置）
-    bool use_amp_ruiwo_kpkd_{false};
 
     // AMP
     LowPassFilter2ndOrder jointCmdFilter_;
@@ -199,8 +200,13 @@ namespace humanoid_controller
     double yaw_compensation_x_bias_clockwise_{0.0};     ///< 顺时针旋转时X轴偏置
     double yaw_compensation_x_bias_counterclockwise_{0.0}; ///< 逆时针旋转时X轴偏置
 
-    // Ruiwo 电机参数切换服务客户端（用于 AMP 手臂增益切换）
-    ros::ServiceClient srv_change_motor_param_;
+
+    // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
+    int amp_mode_{0};
+    ros::ServiceServer change_amp_mode_srv_;
+
+    bool changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
+                               kuavo_msgs::changeArmCtrlMode::Response &res);
 
   private:
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
@@ -212,7 +218,5 @@ namespace humanoid_controller
     // 腰部控制辅助函数
     void initWaistControl();
 
-    // 异步切换 Ruiwo 电机参数，避免在控制循环中阻塞
-    void changeRuiwoMotorParamAsync(const std::string& param_name);
   };
 }

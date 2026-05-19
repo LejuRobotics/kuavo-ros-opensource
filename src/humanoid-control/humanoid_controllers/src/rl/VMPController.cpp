@@ -366,11 +366,7 @@ void VMPController::pause()
   // 停止轨迹播放
   playback_state_ = TrajectoryPlaybackState::STOPPED;
 
-  // 真实机器人需要切换回正常电机参数
-  if (is_real_) {
-    changeRuiwoMotorParam("normal_kpkd");
-  }
-
+  // Ruiwo 手臂增益通过 joint_cmd 实时下发，切换后由 replaceDefaultEcMotorPdoGait 恢复默认增益
   ROS_INFO("[VMPController] Controller paused, trajectory playback stopped");
 }
 
@@ -378,56 +374,15 @@ void VMPController::resume()
 {
   RLControllerBase::resume();
 
-  // 真实机器人需要切换到 VMP 电机参数
-  if (is_real_) {
-    changeRuiwoMotorParam("vmp_yongchun_kpkd");
-  }
-
+  // Ruiwo 手臂增益通过 motor_pdo_kp/kd（VMP info 文件）在 joint_cmd 中实时下发
   ROS_INFO("[VMPController] Controller resumed, resetting state");
   reset();
 }
 
-bool VMPController::changeRuiwoMotorParam(const std::string& param_name)
+
+bool VMPController::requestToExit() const
 {
-  if (!is_real_) {
-    return true;  // 仿真环境不需要切换
-  }
-
-  try {
-    // 设置超时时间（2秒）
-    const ros::Duration timeout(2.0);
-    if (!srv_change_motor_param_.waitForExistence(timeout)) {
-      ROS_WARN("[VMPController] Motor param service not available (timeout: 2s)");
-      return false;
-    }
-
-    kuavo_msgs::ExecuteArmAction srv;
-    srv.request.action_name = param_name;
-
-    if (srv_change_motor_param_.call(srv)) {
-      if (srv.response.success) {
-        ROS_INFO("[VMPController] Successfully changed motor param to: %s", param_name.c_str());
-        return true;
-      } else {
-        ROS_WARN("[VMPController] Failed to change motor param: %s", srv.response.message.c_str());
-        return false;
-      }
-    } else {
-      ROS_WARN("[VMPController] Failed to call motor param service");
-      return false;
-    }
-  } catch (const ros::Exception& e) {
-    ROS_ERROR("[VMPController] ROS exception in changeRuiwoMotorParam: %s", e.what());
-    return false;
-  } catch (const std::exception& e) {
-    ROS_ERROR("[VMPController] Exception in changeRuiwoMotorParam: %s", e.what());
-    return false;
-  }
-}
-
-bool VMPController::isReadyToExit() const
-{
-  return RLControllerBase::isReadyToExit();
+  return RLControllerBase::requestToExit();
 }
 
 bool VMPController::updateImpl(const ros::Time& time,
@@ -1541,12 +1496,6 @@ void VMPController::initROSServices()
       &VMPController::trajectoryStateTimerCallback,
       this);
 
-  // 初始化电机参数切换服务客户端（仅在真实机器人上）
-  if (is_real_) {
-    srv_change_motor_param_ = nh_.serviceClient<kuavo_msgs::ExecuteArmAction>(
-        "/hardware/change_ruiwo_motor_param");
-    ROS_INFO("[%s] Motor param service client initialized", name_.c_str());
-  }
 
   ROS_INFO("[%s] ROS services initialized:", name_.c_str());
   ROS_INFO("   - %s/trajectory/list", service_ns.c_str());

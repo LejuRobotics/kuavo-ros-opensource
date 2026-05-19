@@ -1,5 +1,7 @@
 # 机器人上位机烧录镜像(AGX)
 
+[AGX_1.3.0.zip 镜像下载地址](https://kuavo.lejurobot.com/back_images/AGX_1.3.0.zip)
+
 ##  事前准备
 
 1. ⼀台 **ubuntu 20.04** 系统的电脑, 带显示器

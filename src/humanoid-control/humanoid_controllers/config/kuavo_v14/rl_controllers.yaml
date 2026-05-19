@@ -1,7 +1,8 @@
 # RL控制器列表配置文件
 # 定义该版本机器人需要加载的RL控制器
 # class: 控制器大类，可选值：BASE_CONTROLLER, FALL_STAND_CONTROLLER
-# type: 具体控制器类型，可选值：MPC, AMP_CONTROLLER, FALL_STAND_CONTROLLER
+# type: 具体控制器类型，可选值：MPC, AMP_CONTROLLER, FALL_STAND_CONTROLLER, DANCE_CONTROLLER
+# 多支舞蹈：在 controllers 中增加多个 type: DANCE_CONTROLLER 项，每项 name 唯一、config_file 各自指向不同的 rl/*.info（与轨迹等）
 
 controllers:
   - name: "fall_stand_controller"
@@ -14,6 +15,21 @@ controllers:
     type: "AMP_CONTROLLER"    # 具体控制器类型
     config_file: "rl/amp_param.info" 
     enabled: true  
+  - name: "dance_controller"
+    class: "DANCE_CONTROLLER"  # 舞蹈控制器
+    type: "DANCE_CONTROLLER"  # 具体控制器类型
+    config_file: "rl/dance_param.info"  # 相对于版本配置目录的路径
+    enabled: true  # 是否启用该控制器
+  - name: "dance_controller_2"
+    class: "DANCE_CONTROLLER"  # 舞蹈控制器
+    type: "DANCE_CONTROLLER"  # 具体控制器类型
+    config_file: "rl/dance_param.info"  # 相对于版本配置目录的路径
+    enabled: true  # 是否启用该控制器
+  - name: "dance_controller_3"
+    class: "DANCE_CONTROLLER"  # 舞蹈控制器
+    type: "DANCE_CONTROLLER"  # 具体控制器类型
+    config_file: "rl/dance_param.info"  # 相对于版本配置目录的路径
+    enabled: true  # 是否启用该控制器
 
 
 

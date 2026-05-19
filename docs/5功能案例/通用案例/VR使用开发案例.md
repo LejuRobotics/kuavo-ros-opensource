@@ -15,6 +15,8 @@
   - [QUEST3 VR控制](#quest3-vr控制)
     - [准备](#准备)
     - [使用](#使用)
+      - [启动python版本的ik（跟随人体姿态绝对式VR）](#启动python版本的ik跟随人体姿态绝对式vr)
+      - [启动C++版本的ik（末端增量式VR）](#启动c版本的ik末端增量式vr)
     - [QUEST3 视频流](#quest3-视频流)
     - [若发现VR设备显示的视频流数据画面翻转，并且机器人摄像头为奥比中光摄像头，可以按下面操作解决](#若发现vr设备显示的视频流数据画面翻转并且机器人摄像头为奥比中光摄像头可以按下面操作解决)
       - [前置准备](#前置准备)
@@ -120,28 +122,19 @@
     - 将其修改为`<arg name="ee_type" default="lejuclaw"/>`(若已为"lejuclaw"则不需要修改)
 
   - 注意:该配置在更新代码仓库后会失效, 需要重新进行检查和配置
+  
+-   > 旧版镜像如果没有包含VR相关依赖，需要手动安装：`cd src/manipulation_nodes/noitom_hi5_hand_udp_python && pip install -r requirements.txt && cd -`
 
+#### 启动python版本的ik（跟随人体姿态绝对式VR）
 - 正常启动机器人完成站立
-
 - 启动VR节点
-   - 运行
-  > 旧版镜像如果没有包含VR相关依赖，需要手动安装：`cd src/manipulation_nodes/noitom_hi5_hand_udp_python && pip install -r requirements.txt && cd -`
-  
   ```bash
-   source devel/setup.bash
+  sudo su
+  source devel/setup.bash
   
-   # VR先和机器人连到同一局域网, VR 会广播 自身IP 到局域网中
-   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch
-
-   # 可选配置参数：use_cpp_ik
-   # 启动python版本的ik
-   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=false
-
-   # 启动C++版本的ik
-   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true
-
-   # 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
-   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch use_cpp_ik:=true use_incremental_ik:=true
+  # VR先和机器人连到同一局域网, VR 会广播 自身IP 到局域网中
+  # 启动python版本的ik（跟随人体姿态）
+  roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch
   ```
 
   > 如果手动输入VR的IP地址, 在启动命令后追加参数 `ip_address:=192.168.3.32`(替换成VR的实际IP地址)
@@ -175,7 +168,7 @@
     roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_adress:=填入VRip control_torso:=true
   ```
 
-  > vr程序启动后，按下A键站立，长按左右前扳机将手部解锁，随后按下左前扳机+B进入躯干映射模式，此时操控人员可以进行下蹲和前后倾斜鞠躬。使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度。**注意：不能长时间执行蹲下和弯腰动作，且在执行躯干运动时幅度不宜过大**
+  > vr程序启动后，**请长按右手柄 A 约 0.35 秒**触发站立，长按左右前扳机将手部解锁，随后按下左前扳机+B进入躯干映射模式，此时操控人员可以进行下蹲和前后倾斜鞠躬。使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度。**注意：不能长时间执行蹲下和弯腰动作，且在执行躯干运动时幅度不宜过大**
 
 - 低延迟模式  
 
@@ -183,7 +176,7 @@
 
   - 使用前准备
 
-  > 参考[有线vr使用教程](../../6常用工具/有线VR方案使用指南.md)，**注意网线和vr的转接线头如果是usb口的话必须使用usb3.0的转接口，否则路由器可能会识别不到VR设备**，随后在路由器的后台查看VR设备的ip地址
+  > 参考[有线vr使用教程](../../6常用工具/有线VR方案使用指南.md)，**注意网线和vr的转接线头如果是usb口的话必须使用usb3.0的转接口，否则路由器可能会识别不到VR设备**，随后在路由器的后台查看VR设备的ip地址- 运行 
 
   - 运行 
 
@@ -192,6 +185,54 @@
   ```
 
   > vr程序启动后，同时按下左边前扳机+X，开启低时延模式；按下左边侧扳机+X，关闭低时延模式
+
+#### 启动C++版本的ik（末端增量式VR）
+- 首先检查 `src/humanoid-control/humanoid_controllers/launch/load_kuavo_real.launch` 中 `with_mm_ik` 参数是否为 `true` 
+- 正常启动机器人完成站立
+1. 启动VR节点
+  ```bash
+  # 增量位置 + 绝对姿态
+  roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=your quest ip use_cpp_incremental_ik:=true use_incremental_hand_orientation:=false
+
+  # 增量位置 + 增量姿态
+  roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=your quest ip use_cpp_incremental_ik:=true use_incremental_hand_orientation:=true
+  ```
+2. 人体姿态标定
+  为确保操作精准度与舒适度，可选头戴或者挂脖：
+
+  - **正常头戴标定**：
+    *   正常佩戴 VR 头显。
+    *   操作员大臂自然下垂，小臂水平置于腰侧。
+    *   **长按 Meta 键** 进行标定。
+  - **挂脖模式标定**（不需要挂脖无需进行此操作）：
+    *   将 VR 头显取下，改为挂脖佩戴（确保居中对称）。
+    *   保持大臂自然下垂，小臂水平置于腰侧。
+    *   **再次长按 Meta 键** 进行标定。
+3. 激活增量控制
+  - 同时按下 **左手柄 `X`** + **右手柄 `A`**。
+  - **状态确认**：
+    *   若手臂从微弯切换至**完全伸直**，说明激活成功。
+    *   等待 **5秒**，机器人准备完毕。
+    *   若无响应，请重新尝试按下 `X` + `A`。
+4. 增量操作说明
+  - 机器人双臂完全伸直 5 秒后，按下任意侧手柄的**侧扳机** 即可开始控制。
+
+| 左侧扳机 (L) | 右侧扳机 (R) | 机器人行为 | 预期响应 |
+| :--: | :--: | :--: | :--: |
+| ✔ 按下 | ⭕ 松开 | **仅左臂运动** | 右臂保持锁定，左臂跟随手柄增量移动 |
+| ⭕ 松开 | ✔ 按下 | **仅右臂运动** | 左臂保持锁定，右臂跟随手柄增量移动 |
+| ✔ 按下 | ✔ 按下 | **双臂运动** | 双手同时进行增量控制 |
+| ⭕ 松开 | ⭕ 松开 | **停止/锁定** | 机器人双臂立即停止在当前位置，不跟随移动 |
+
+5. 操作Tips
+  - **空间受限处理**：
+    *   在直臂模式下向后收回手臂时，若感到活动空间受限，可先将手臂稍向外侧平移（**左手向左，右手向右**），然后再进行内收动作。
+  - **分段操作**：
+    *   从“绝对式”切换到“增量式”需要适应过程。
+    *   进行长距离或精细操作时，推荐采用**"松开扳机 → 调整人手到舒适位置 → 重新按下扳机"**的策略，以找到最舒适的操作姿势并缓解疲劳。
+  - **姿态调整**：
+    *   增量式不依赖于人体手臂的映射位置，但**保持与设备一致的姿态**能够获得更好的操作体验。建议在增量操作过程中保持与设备相对接近的姿态。
+
 
 ### QUEST3 视频流
 
@@ -283,17 +324,3 @@ sudo apt install libv4l-dev
 - ⚠️ 确保USB线支持数据传输（部分充电线不支持数据传输）
 - 💡 安装成功后会显示"Success"提示
 - 💡 如果adb一直显示"waiting for device"，检查VR设备是否已授权USB调试
-
-# CPP版本IK使用说明（测试版）
-## 仿真
-```bash
-roslaunch motion_capture_ik ik_ros_uni_cpp_vr_mujoco_sim.launch ip_address:="your_quest3_ip"
-# 例如
-# roslaunch motion_capture_ik ik_ros_uni_cpp_vr_mujoco_sim.launch ip_address:=10.10.20.234
-```
-## 实物
-```bash
-roslaunch motion_capture_ik ik_ros_uni_cpp_vr_real.launch ip_address:="your_quest3_ip"
-# 例如
-# roslaunch motion_capture_ik ik_ros_uni_cpp_vr_real.launch ip_address:=10.10.20.234
-```
