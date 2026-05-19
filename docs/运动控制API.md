@@ -423,6 +423,8 @@
 - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
 - ✅ revo2 (revo2 二代手 for Roban)
 
+> **注意:** revo1的protobuf协议灵巧手不支持turbo模式，只有modbus协议支持。
+
 **功能说明:**
 该服务用于设置灵巧手的turbo模式。turbo模式下，灵巧手会持续保持握紧状态，提供更大的抓握力，适用于需要牢固抓握物体的场景。开启之后会持续握紧，掉电后Turbo模式会自动恢复到默认关闭状态。
 
@@ -447,6 +449,8 @@
 - ✅ qiangnao (标准灵巧手 for Kuavo)
 - ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
 - ✅ revo2 (revo2 二代手 for Roban)
+
+> **注意:** revo1的protobuf协议灵巧手不支持turbo模式，只有modbus协议支持。
 
 **功能说明:**
 该服务用于获取灵巧手当前的turbo模式状态。
