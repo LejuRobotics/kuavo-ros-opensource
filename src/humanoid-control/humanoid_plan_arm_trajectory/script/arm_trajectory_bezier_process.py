@@ -35,7 +35,7 @@ from std_msgs.msg import Float64MultiArray
 from trajectory_msgs.msg import JointTrajectory
 from humanoid_plan_arm_trajectory.msg import RobotActionState
 from humanoid_plan_arm_trajectory.srv import ExecuteArmAction, ExecuteArmActionResponse  # Import new service type
-from std_srvs.srv  import Trigger, TriggerResponse  # 中断服务依赖 
+from std_srvs.srv  import Trigger, TriggerResponse, SetBool, SetBoolResponse  # 中断服务依赖
 
 # 根据机器人型号确定关节数据
 KUAVO = "kuavo"
@@ -117,6 +117,7 @@ class ArmTrajectoryBezierDemo:
         # Initialize ROS node
         rospy.init_node('autostart_arm_trajectory_bezier_demo')
         self.arm_restore_flag = rospy.get_param('~arm_restore_flag', True)
+        self.keep_arm_pose = False
         
         # 检查是否是半身模式
         self.only_half_up_body = rospy.get_param('/only_half_up_body', False)
@@ -162,6 +163,9 @@ class ArmTrajectoryBezierDemo:
         # Add service to execute arm actions
         self.execute_service = rospy.Service('/execute_arm_action', ExecuteArmAction, self.handle_execute_action)
         self._interrupt_service = rospy.Service('/interrupt_arm_traj', Trigger, self.handle_interrupt  )
+        self._keep_arm_pose_service = rospy.Service(
+            '/humanoid_plan_arm_trajectory/keep_arm_pose', SetBool, self.handle_keep_arm_pose
+        )
 
         # Store the file path base directory for actions
         # self.action_files_path = "/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_plan_arm_trajectory/script/action_files"
@@ -1026,9 +1030,13 @@ class ArmTrajectoryBezierDemo:
         self.publish_action_state(2)
         self.arm_flag = False
         # 动作播放完成以后恢复机器人初始状态
-        if self.arm_restore_flag:
+        if self.arm_restore_flag and not self.keep_arm_pose:
             self.reset_robot_state()
-        rospy.loginfo(f"After the action playback is complete, revert the robot initial state ")
+            rospy.loginfo("After the action playback is complete, revert the robot initial state")
+        elif self.keep_arm_pose:
+            rospy.loginfo("After the action playback is complete, keep arm pose at the last tact frame")
+        else:
+            rospy.loginfo("After the action playback is complete, arm restore is disabled")
 
     def stop_action(self):
         if self._timer:
@@ -1221,6 +1229,15 @@ class ArmTrajectoryBezierDemo:
             success=True,
             message=f"动作于{time.strftime('%Y-%m-%d  %H:%M:%S')}成功中断"
         )
+
+    def handle_keep_arm_pose(self, req):
+        self.keep_arm_pose = req.data
+        if self.keep_arm_pose:
+            message = "keep_arm_pose enabled: action will keep arm pose at the last tact frame"
+        else:
+            message = "keep_arm_pose disabled: action will reset arm pose after completion"
+        rospy.loginfo(message)
+        return SetBoolResponse(success=True, message=message)
 
     def handle_execute_action(self, req):
         action_name = req.action_name
