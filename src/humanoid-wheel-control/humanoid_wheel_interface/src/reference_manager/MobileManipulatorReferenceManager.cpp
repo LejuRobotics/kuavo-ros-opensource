@@ -2620,8 +2620,8 @@ namespace mobile_manipulator {
     double desiredTime = 0.0;
     LbTimedPosCmdType cmdType = static_cast<LbTimedPosCmdType>(req.planner_index);
     
-    if(cmdType != LEFT_ARM_WORLD_CMD || cmdType != RIGHT_ARM_WORLD_CMD ||
-       cmdType != LEFT_ARM_LOCAL_CMD || cmdType != RIGHT_ARM_LOCAL_CMD)
+    if(cmdType != LEFT_ARM_WORLD_CMD && cmdType != RIGHT_ARM_WORLD_CMD &&
+       cmdType != LEFT_ARM_LOCAL_CMD && cmdType != RIGHT_ARM_LOCAL_CMD)
     {
       desiredTime = timedPlannerScheduler_.calcTimedTrajectory(req.planner_index, eigenCmdVec, req.desireTime);
     }
@@ -2757,8 +2757,8 @@ namespace mobile_manipulator {
         double desiredTime = 0.0;
         LbTimedPosCmdType cmdType = static_cast<LbTimedPosCmdType>(timedCmd.planner_index);
 
-        if(cmdType != LEFT_ARM_WORLD_CMD || cmdType != RIGHT_ARM_WORLD_CMD ||
-           cmdType != LEFT_ARM_LOCAL_CMD || cmdType != RIGHT_ARM_LOCAL_CMD)
+        if(cmdType != LEFT_ARM_WORLD_CMD && cmdType != RIGHT_ARM_WORLD_CMD &&
+           cmdType != LEFT_ARM_LOCAL_CMD && cmdType != RIGHT_ARM_LOCAL_CMD)
         {
           desiredTime = timedPlannerScheduler_.calcTimedTrajectory(timedCmd.planner_index, eigenCmdVec, timedCmd.desireTime);
         }
