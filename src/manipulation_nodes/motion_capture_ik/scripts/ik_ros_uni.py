@@ -5,7 +5,7 @@ import signal
 import rospy
 import argparse
 import argparse
-from std_msgs.msg import Float32, Float32MultiArray, Float64MultiArray, Int32, Bool
+from std_msgs.msg import Float32, Float32MultiArray, Float64MultiArray, Int32, Bool, Float64
 from sensor_msgs.msg import JointState
 from handcontrollerdemorosnode.msg import armPoseWithTimeStamp
 from kuavo_msgs.msg import robotHandPosition
@@ -118,6 +118,7 @@ JODELL = "jodell"
 LEJUCLAW = "lejuclaw"
 QIANGNAO_TOUCH = "qiangnao_touch"
 REVO2 = "revo2"
+LINKER_HAND = "linker_hand"
 
 control_finger_type = 0
 control_torso = 0
@@ -153,6 +154,8 @@ class IkRos:
         self.__button_y_last = False
         self.__frozen_left_hand_position = [0 for i in range(6)]
         self.__frozen_right_hand_position = [0 for i in range(6)]
+        self.__robot_walking_status = False
+        self.__arm_control_mode = 0
         self.__frozen_claw_pos = [0.0, 0.0]
         self.__arm_dof = num_arm_joints_var
         self.__single_arm_dof = self.__arm_dof//2
@@ -267,6 +270,10 @@ class IkRos:
         self.stop_robot_sub = rospy.Subscriber(
             "/stop_robot", Bool, self.stop_robot_callback, queue_size=1
         )
+
+        self.robot_walking_status_sub = rospy.Subscriber(
+            "/robot_walking_status", Bool, self.robot_walking_status_callback, queue_size=1
+        )
         
         self.arm_mode_changing = False
         # 检测到碰撞后，由外部控制手臂
@@ -329,7 +336,8 @@ class IkRos:
                 JODELL: JODELL,
                 LEJUCLAW: LEJUCLAW,
                 QIANGNAO_TOUCH:QIANGNAO_TOUCH,
-                REVO2: REVO2
+                REVO2: REVO2,
+                LINKER_HAND: LINKER_HAND
             }
             if end_effector_type in end_effector_mapping:
                 self.end_effector_type = end_effector_mapping[end_effector_type]
@@ -1132,7 +1140,7 @@ class IkRos:
         right_hand_position = [0 for i in range(6)]
         robot_hand_position = robotHandPosition()
         robot_hand_position.header.stamp = rospy.Time.now()
-        if self.end_effector_type == QIANGNAO or self.end_effector_type == QIANGNAO_TOUCH or self.end_effector_type == REVO2:
+        if self.end_effector_type == QIANGNAO or self.end_effector_type == QIANGNAO_TOUCH or self.end_effector_type == REVO2 or self.end_effector_type == LINKER_HAND:
             if joyStick_data is not None:
                 if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
                     print(f"\033[91mButton Y is pressed.\033[0m")
@@ -1166,6 +1174,11 @@ class IkRos:
                         for i in range(0, 6):
                             right_hand_position[i] = 100 
                         right_hand_position[2] = 0
+                    
+                    if self.end_effector_type == LINKER_HAND and self.__robot_walking_status and self.__arm_control_mode == 1 and self.arm_mode_changing == False:
+                        left_hand_position[0] = left_hand_position[0] if joyStick_data.left_first_button_touched else 100
+                        right_hand_position[0] = right_hand_position[0] if joyStick_data.right_first_button_touched else 100
+
                     # Store current values for freezing
                     self.__frozen_left_hand_position = left_hand_position.copy()
                     self.__frozen_right_hand_position = right_hand_position.copy()
@@ -1282,6 +1295,7 @@ class IkRos:
         if len(msg.data) >= 2:
             current_mode = int(msg.data[0])  # 当前模式
             new_mode = int(msg.data[1])      # 新模式
+            self.__arm_control_mode = current_mode
             
 
             # 检测模式切换：当data[0] != data[1]时表示正在切换，重置IK初始猜测。且只在模式切换刚开始时重置IK初始猜测。
@@ -1347,6 +1361,9 @@ class IkRos:
             rospy.loginfo("[IkRos] 收到停止机器人信号，正在退出程序...")
             self.stop_event.set()  # 设置停止事件
             rospy.signal_shutdown("Received stop signal")  # 触发ROS节点关闭
+
+    def robot_walking_status_callback(self, msg):
+        self.__robot_walking_status = msg.data
 
     def set_arm_mode_changing_callback(self, req):
         """服务回调函数，设置arm_mode_changing为True"""

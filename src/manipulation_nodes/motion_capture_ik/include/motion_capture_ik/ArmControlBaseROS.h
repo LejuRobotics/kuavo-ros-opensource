@@ -72,6 +72,7 @@ class ArmControlBaseROS {
   ros::Subscriber armModeSubscriber_;
   ros::Subscriber bonePosesSubscriber_;
   ros::Subscriber joystickSubscriber_;
+  ros::Subscriber robotWalkingStatusSubscriber_;
 
   // End effector control publishers
   ros::Publisher robotHandPositionPublisher_;
@@ -171,6 +172,7 @@ class ArmControlBaseROS {
 
   void bonePosesCallback(const noitom_hi5_hand_udp_python::PoseInfoList::ConstPtr& msg);
   void joystickCallback(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg);
+  void robotWalkingStatusCallback(const std_msgs::Bool::ConstPtr& msg);
 
   virtual void processBonePoses(const noitom_hi5_hand_udp_python::PoseInfoList::ConstPtr& msg);
   virtual bool setArmModeChangingCallback(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res);

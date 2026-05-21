@@ -511,6 +511,16 @@ void JoyStickHandler::processHandFingerDataWithJoystick() {
     leftHandPosition_[1] = leftFirstButtonTouched_ ? 100 : 0;
     rightHandPosition_[1] = rightFirstButtonTouched_ ? 100 : 0;
 
+    // 对应 Python ik_ros_uni.py:1178-1181
+    // LINKER_HAND 走路 + 手臂模式 1 + 模式未切换：大拇指默认内扣（除非按住 trigger）
+    if (endEffectorType_.load() == EndEffectorType::LINKER_HAND &&
+        robotWalkingStatus_.load() &&
+        currentArmCtrlMode_.load() == 1 &&
+        !armModeChanging_.load()) {
+      if (!leftFirstButtonTouched_)  leftHandPosition_[0]  = 100;
+      if (!rightFirstButtonTouched_) rightHandPosition_[0] = 100;
+    }
+
     // 存储当前值用于冻结
     frozenLeftHandPosition_ = leftHandPosition_;
     frozenRightHandPosition_ = rightHandPosition_;
@@ -687,5 +697,9 @@ void JoyStickHandler::forceSetRightArmCtrlMode(bool active) {
     //           << "，已设置5秒超时保护\033[0m" << std::endl;
   }
 }
+
+void JoyStickHandler::setRobotWalkingStatus(bool status) { robotWalkingStatus_.store(status); }
+void JoyStickHandler::setCurrentArmCtrlMode(int mode)    { currentArmCtrlMode_.store(mode); }
+void JoyStickHandler::setArmModeChanging(bool changing)  { armModeChanging_.store(changing); }
 
 }  // namespace HighlyDynamic
