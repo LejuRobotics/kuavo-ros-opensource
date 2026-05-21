@@ -32,7 +32,7 @@ from kuavo_msgs.msg import (
 from kuavo_msgs.srv import changeArmCtrlMode, changeTorsoCtrlMode, changeTorsoCtrlModeRequest, changeArmCtrlMode, changeArmCtrlModeRequest
 from kuavo_msgs.srv import fkSrv
 from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeRequest
-from std_msgs.msg import Float32MultiArray, Int32, Bool
+from std_msgs.msg import Float32MultiArray, Int32, Bool, Empty
 from std_srvs.srv import Trigger, TriggerResponse
 from geometry_msgs.msg import Twist
 from .pico_utils import KuavoPicoInfoTransformer
@@ -379,6 +379,8 @@ class KuavoPicoNode:
         self.head_mode_before_reset = None   # 手臂复位前保存的头部控制模式
         self.fixed_hand_before_reset = ""    # 手臂复位前保存的 fixed_hand 信息
         self.head_control_service_client = None  # 头部控制模式服务客户端
+        # 手臂程序化切 fixed 时抑制一次 head_fixed_forward_user_intent，避免把复位回正当成用户「解锁后保持 fixed」
+        self._suppress_next_head_fixed_user_intent = False
         
         SDKLogger.info(f"从参数服务器读取头部模式: {self.current_head_mode}, head_use_auto_track={self.head_use_auto_track}")
 
@@ -587,6 +589,11 @@ class KuavoPicoNode:
         rospy.Subscriber("/pico/control_mode", Int32, self.set_control_mode_callback)
         rospy.Subscriber("/pico/incremental_mode", Int32, self.set_incremental_mode_callback)
         rospy.Subscriber("/pico/head_control_mode_status", headCtrlMode, self._head_mode_status_callback)
+        rospy.Subscriber(
+            "/pico/head_fixed_forward_user_intent",
+            Empty,
+            self._on_head_fixed_forward_user_intent,
+        )
 
 
     """//////////////////////////////////// Joy Callbacks //////////////////////////////////////////"""
@@ -1007,7 +1014,8 @@ class KuavoPicoNode:
         
         当手臂复位(mode=1)时，保存当前头部控制模式后切换到 fixed 回正；
         当启用手臂控制(mode=2)时，恢复复位前保存的头部控制模式（含 fixed_hand 信息）。
-        复位后、解锁前若用户通过头控服务改了模式/主手，由 _head_mode_status_callback 同步覆盖上述快照。
+        复位后、解锁前若用户通过头控服务/话题改了模式/主手，由 _head_mode_status_callback 与
+        /pico/head_fixed_forward_user_intent（每次 fixed 服务成功）同步覆盖上述快照。
         
         Args:
             arm_mode: 手臂控制模式 (1=复位, 2=启用)
@@ -1030,6 +1038,7 @@ class KuavoPicoNode:
                 new_fixed_hand = self.fixed_hand_before_reset if self.head_mode_before_reset == "fixed_main_hand" else ""
                 self.head_mode_before_reset = None
                 self.fixed_hand_before_reset = ""
+                self._suppress_next_head_fixed_user_intent = False
             
             if new_head_mode is None:
                 return
@@ -1039,11 +1048,24 @@ class KuavoPicoNode:
             ):
                 return
             
+            if arm_mode == 1 and new_head_mode == "fixed":
+                self._suppress_next_head_fixed_user_intent = True
             self._set_head_control_mode(new_head_mode, new_fixed_hand)
             
         except Exception as e:
             SDKLogger.error(f"处理手臂模式切换时的头部控制模式失败: {e}")
     
+    def _on_head_fixed_forward_user_intent(self, _msg: Empty) -> None:
+        """头控节点每次 fixed 服务成功时发布；在手臂复位窗口内更新「解锁后恢复」快照（程序化复位由抑制标志跳过）。"""
+        if self._suppress_next_head_fixed_user_intent:
+            self._suppress_next_head_fixed_user_intent = False
+            return
+        if self.head_mode_before_reset is None:
+            return
+        self.head_mode_before_reset = "fixed"
+        self.fixed_hand_before_reset = ""
+        SDKLogger.info("用户在手掌握复位锁定期间请求头部保持正前方，解锁手臂后将保持 fixed 模式")
+
     def _set_head_control_mode(self, mode: str, fixed_hand: str = "") -> None:
         """设置头部控制模式.
         
@@ -1377,7 +1399,8 @@ class KuavoPicoNode:
                 self.head_use_auto_track = True
             elif mode == "vr_follow":
                 self.head_use_auto_track = False
-            # 已手臂复位、尚未解锁时用户若切换头控/主手，应覆盖「解锁后要恢复」的快照；程序性 fixed 回正不改变快照
+            # 已手臂复位、尚未解锁时用户若切换头控/主手，应覆盖「解锁后要恢复」的快照；
+            # fixed 且与当前模式相同时 headCtrlMode 可能无变化，由 /pico/head_fixed_forward_user_intent 记录（见 _on_head_fixed_forward_user_intent）
             if self.head_mode_before_reset is not None:
                 if mode == "fixed_main_hand" and fixed_hand in ("left", "right"):
                     self.head_mode_before_reset = "fixed_main_hand"

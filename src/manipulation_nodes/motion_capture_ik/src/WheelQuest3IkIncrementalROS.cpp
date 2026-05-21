@@ -18,6 +18,7 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Quaternion.h>
 #include <std_msgs/Int32.h>
+#include <std_srvs/Trigger.h>
 #include <std_msgs/Float32MultiArray.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
@@ -77,27 +78,20 @@ void WheelQuest3IkIncrementalROS::run() {
   ikSolveThread_ = std::thread(&WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
   jointStatePublishThread_ = std::thread(&WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction, this);
 
-  {
-    kuavo_msgs::changeArmCtrlMode srv;
-    srv.request.control_mode = 1;
-    if (changeArmCtrlModeClient_.exists()) {
-      const bool vrCallOk = changeArmCtrlModeClient_.call(srv) && srv.response.result;
-      if (vrCallOk) {
-        ROS_INFO("[WheelQuest3IkIncrementalROS] Arm control mode set to 1 during initialization");
-      } else {
-        ROS_WARN("[WheelQuest3IkIncrementalROS] Failed to set arm control mode to 1 during initialization");
-      }
-    } else {
-      ROS_WARN("[WheelQuest3IkIncrementalROS] Service /change_arm_ctrl_mode does not exist");
-    }
-  }
-  activateController();
-  std::thread questJoystickDataThread = std::thread([this]() {
+  // 标定后调 FSM 初始化手臂 mode 1（等价于 X+A 到跟随态的主路径）
+  std::thread bootstrapArmModeThread = std::thread([this]() {
     while (ros::ok() && !quest3ArmInfoTransformerPtr_->isArmLengthMeasurementComplete()) {
       ros::Duration(0.05).sleep();
     }
-    ros::Duration(0.1).sleep();  // 完成后再等 0.5 秒
-    publishQuestJoystickDataXAndA();
+    ros::Duration(0.1).sleep();
+    ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>("/quest3/bootstrap_wheel_arm_mode");
+    std_srvs::Trigger srv;
+    if (client.call(srv) && srv.response.success) {
+      ROS_INFO("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode ok");
+    } else {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode failed: %s",
+               srv.response.message.c_str());
+    }
   });
 
   std::cout << "\033[32m[WheelQuest3IkIncrementalROS] spinning start\033[0m" << std::endl;
@@ -1045,6 +1039,8 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
     }
   }
   if (!shouldExitIncrementalLeftArm && !shouldExitIncrementalRightArm) return;
+  // 松 grip 仅退出增量手臂；mode 1/2 下保持 WBC/MPC 外部控制，由 deactivateController 内 guard 双重保护
+  if (armControlMode_.load() != 0) return;
   deactivateController();
 }
 

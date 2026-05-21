@@ -26,6 +26,7 @@
 #include "std_srvs/Trigger.h"
 #include <std_srvs/SetBool.h>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Empty.h>
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
@@ -198,6 +199,8 @@ namespace ocs2
 
             // 订阅获取VR头部控制模式
             head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<kuavo_msgs::headCtrlMode>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
+            quest3_head_fixed_intent_sub_ = nodeHandle_.subscribe<std_msgs::Empty>(
+                "/quest3/head_fixed_forward_user_intent", 10, &QuestControlFSM::quest3HeadFixedIntentCallback, this);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
             // 根据机器人类型订阅不同的mpc_observation话题
@@ -254,6 +257,8 @@ namespace ocs2
 
             // 添加arm_collision_control服务
             arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
+            bootstrap_wheel_arm_mode_service_ = nodeHandle_.advertiseService(
+                "/quest3/bootstrap_wheel_arm_mode", &QuestControlFSM::bootstrapWheelArmModeCallback, this);
             
             // 添加切换控制器服务客户端
             switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
@@ -577,6 +582,29 @@ namespace ocs2
             return true;
         }
 
+        bool bootstrapWheelArmModeCallback(std_srvs::Trigger::Request&, std_srvs::Trigger::Response& res)
+        {
+            if (!useLegacyWheelVr())
+            {
+                res.success = false;
+                res.message = "Not legacy wheel VR (robot_type=1 && wheel_ik)";
+                return true;
+            }
+            if (!get_observation_)
+            {
+                res.success = false;
+                res.message = "MPC observation not ready";
+                return true;
+            }
+            callSetArmModeSrv(1);
+            callWheelMpcControlMode(3);
+            arm_ctrl_mode_ = 1;
+            res.success = true;
+            res.message = "wheel arm mode initialized to 1";
+            ROS_INFO("[QuestControlFSM] bootstrap_wheel_arm_mode -> mode 1");
+            return true;
+        }
+
     private:
         // 从YAML文件加载转向区间配置
         void loadTurnZones(ros::NodeHandle& nodeHandle) {
@@ -745,11 +773,13 @@ namespace ocs2
         {
             if(mode_msg->data.size() >= 2)
             {
-                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]); // 兼容MPC发布 [current, desired]
+                arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]); // 兼容MPC发布 [current, desired]
+                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]);
                 return;
             }
             if(mode_msg->data.size() == 1)
             {
+                arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]);
                 arm_ctrl_mode_ = static_cast<int>(mode_msg->data[0]); // 兼容轮臂发布 [current]
                 return;
             }
@@ -772,6 +802,21 @@ namespace ocs2
                 use_auto_track_ = false;
             }
             head_ctrl_mode_ = mode_msg->mode;  // 更新头部控制模式
+        }
+
+        void quest3HeadFixedIntentCallback(const std_msgs::Empty::ConstPtr & /*msg*/)
+        {
+            if (suppress_next_quest3_head_fixed_intent_)
+            {
+                suppress_next_quest3_head_fixed_intent_ = false;
+                return;
+            }
+            if (!quest3_arm_reset_head_snapshot_active_)
+            {
+                return;
+            }
+            last_head_ctrl_mode_ = "fixed";
+            ROS_INFO("[QuestControlFSM] Quest3: user head fixed-forward intent during arm reset lock; unlock will restore fixed.");
         }
 
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
@@ -987,7 +1032,10 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // X+B：保持姿态 or 自动摆手
                 {
-                    
+                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+B.");
+                        return;
+                    }
                     auto new_arm_mode = (arm_ctrl_mode_!=0) ? 0 : 1;
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
                     callSetArmModeSrv(new_arm_mode);
@@ -997,6 +1045,10 @@ namespace ocs2
                     // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪 
                     if (arm_collision_control_) {
                         arm_collision_control_ = false;
+                        return;
+                    }
+                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
                     auto new_arm_mode = (arm_ctrl_mode_!=2) ? 2 : 1;
@@ -1009,9 +1061,13 @@ namespace ocs2
                         {
                             new_head_mode = "fixed";
                             last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
+                            quest3_arm_reset_head_snapshot_active_ = true;
+                            suppress_next_quest3_head_fixed_intent_ = true;
                         }
                         else
                         {
+                            quest3_arm_reset_head_snapshot_active_ = false;
+                            suppress_next_quest3_head_fixed_intent_ = false;
                             new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
                         }
                         callVRSetHeadModeSrv(new_head_mode);
@@ -1170,7 +1226,8 @@ namespace ocs2
         void updateStateLegacyWheelVr()  // 轮臂vr遥操
         {
             if (!get_observation_) {
-                if (joystick_data_.right_first_button_pressed) {
+                // 左手扳机按住时右 X 用于 X+A 切手臂模式，勿进入长按 A 初始化分支
+                if (joystick_data_.right_first_button_pressed && !joystick_data_.left_first_button_pressed) {
                     if (vr_a_button_held_since_not_observing_.isZero()) {
                         vr_a_button_held_since_not_observing_ = ros::Time::now();
                     } else if (!vr_real_initial_start_fired_ &&
@@ -1200,6 +1257,10 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)  // 锁定或解锁手臂
                 {
+                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+B.");
+                        return;
+                    }
                     auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 0) ? 0 : 2;
                     callSetArmModeSrv(new_arm_ctrl_mode_wheel_);
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
@@ -1208,6 +1269,10 @@ namespace ocs2
                 {
                     if (arm_collision_control_) {
                         arm_collision_control_ = false;
+                        return;
+                    }
+                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
                     auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 1) ? 1 : 2;
@@ -1220,9 +1285,13 @@ namespace ocs2
                         {
                             new_head_mode = "fixed";
                             last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
+                            quest3_arm_reset_head_snapshot_active_ = true;
+                            suppress_next_quest3_head_fixed_intent_ = true;
                         }
                         else
                         {
+                            quest3_arm_reset_head_snapshot_active_ = false;
+                            suppress_next_quest3_head_fixed_intent_ = false;
                             new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
                         }
                         callVRSetHeadModeSrv(new_head_mode);
@@ -2089,6 +2158,7 @@ namespace ocs2
         ros::ServiceClient control_mode_client_;              // MPC控制模式切换服务客户端
         ros::ServiceClient switch_to_next_controller_client_; // 切换控制器服务客户端
         ros::ServiceServer arm_collision_control_service_;
+        ros::ServiceServer bootstrap_wheel_arm_mode_service_;
 
         // 腰部控制相关的订阅者和发布者
         ros::Subscriber head_body_pose_sub_;
@@ -2103,7 +2173,13 @@ namespace ocs2
 
         ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
         ros::Subscriber head_ctrl_mode_vr_sub_; // 从主控制器获取头部控制模式
+
+        ros::Subscriber quest3_head_fixed_intent_sub_;
+        bool suppress_next_quest3_head_fixed_intent_{false};
+        bool quest3_arm_reset_head_snapshot_active_{false};
+        int arm_ctrl_mode_current_{2};
         int arm_ctrl_mode_{1};
+        
         std::string head_ctrl_mode_{"vr_follow"};
         std::string last_head_ctrl_mode_;
         std::string fixed_hand_{"right"};

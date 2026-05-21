@@ -83,6 +83,10 @@ void ArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
   joystickSubscriber_ = nodeHandle_.subscribe(
       "/quest_joystick_data", 10, &ArmControlBaseROS::joystickCallback, this, ros::TransportHints().tcpNoDelay());
 
+  robotWalkingStatusSubscriber_ = nodeHandle_.subscribe(
+      "/robot_walking_status", 1, &ArmControlBaseROS::robotWalkingStatusCallback, this,
+      ros::TransportHints().tcpNoDelay());
+
   sensorDataRaw_ = std::make_shared<kuavo_msgs::sensorsData>();
   latestBonePosesPtr_ = std::make_shared<noitom_hi5_hand_udp_python::PoseInfoList>();
 
@@ -185,9 +189,17 @@ void ArmControlBaseROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
   if (newMode != 2) {
     ROS_WARN("\033[91m[ArmControlBaseROS] Reset arm mode\033[0m");
     armModeChanging_.store(false);
+    if (joyStickHandlerPtr_) joyStickHandlerPtr_->setArmModeChanging(false);
   } else {
     ROS_WARN("\033[91m[ArmControlBaseROS] Arm mode changing\033[0m");
     armModeChanging_.store(true);
+    if (joyStickHandlerPtr_) joyStickHandlerPtr_->setArmModeChanging(true);
+  }
+}
+
+void ArmControlBaseROS::robotWalkingStatusCallback(const std_msgs::Bool::ConstPtr& msg) {
+  if (joyStickHandlerPtr_) {
+    joyStickHandlerPtr_->setRobotWalkingStatus(msg->data);
   }
 }
 
@@ -284,6 +296,7 @@ bool ArmControlBaseROS::setArmModeChangingCallback(std_srvs::Trigger::Request& r
 
   // 设置arm mode changing标志
   armModeChanging_.store(true);
+  if (joyStickHandlerPtr_) joyStickHandlerPtr_->setArmModeChanging(true);
 
   return handleServiceResponse(res, true, "Arm mode changing set to True successfully");
 }
@@ -408,6 +421,7 @@ void ArmControlBaseROS::updateRunningState() {
   if (!wasRunning() && isRunning()) {
     ROS_INFO("[ArmControlBaseROS] Detected state change from stopped to running, setting armModeChanging to true");
     armModeChanging_.store(true);
+    if (joyStickHandlerPtr_) joyStickHandlerPtr_->setArmModeChanging(true);
   }
 }
 

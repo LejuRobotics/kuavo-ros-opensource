@@ -893,12 +893,13 @@ namespace humanoidController_wheel_wbc
       qvelLimit = optimizedInput_mrt_limit_.tail(info.armDim);
       jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
       optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
-      // optimizedInput_mrt_limit_.tail(info.armDim) = qvelLimit;
       static vector_t jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
-      // static double lastTargetTime = curTime - dt_;
-      optimizedInput_mrt_limit_.tail(info.armDim) = (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / 
-                                                    dt_; // (curTime - lastTargetTime);
-      // lastTargetTime = curTime;
+      if (enable_arm_traj_interpolator_) {
+        optimizedInput_mrt_limit_.tail(info.armDim) = qvelLimit;
+      } else {
+        optimizedInput_mrt_limit_.tail(info.armDim) =
+            (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / dt_;
+      }
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
     }
 
