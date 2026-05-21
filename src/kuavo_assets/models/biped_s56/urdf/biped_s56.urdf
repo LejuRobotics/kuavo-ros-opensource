@@ -1716,45 +1716,44 @@
   </joint>
   <link name="waist_camera_base">
     <inertial>
-      <origin xyz="0.00471770 0.00007850 0.01403306" rpy="0 0 0" />
-      <mass value="0.13300000" />
-      <inertia
-        ixx="0.00016465"
-        ixy="0.00000040"
-        ixz="-0.00000032"
-        iyy="0.00001688"
-        iyz="-0.00000006"
-        izz="0.00016361" />
+      <!-- Updated mass and inertia from provided data (by centroid, aligned to output coordinate system) -->
+      <origin xyz="-0.00502855 0.00095523 0.01145259" rpy="0 0 0"/>
+      <mass value="0.13300000"/>
+      <inertia ixx="0.00023984" ixy="0.00000030" ixz="-0.00000807"
+               iyy="0.00003306" iyz="0.00000049"
+               izz="0.00023116"/>
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s56/meshes/waist_camera_base.STL" />
+        <mesh filename="../meshes/waist_camera_base.STL"/>
       </geometry>
       <material name="">
-        <color rgba="0.75294 0.75294 0.75294 1" />
+        <color rgba="0.75294 0.75294 0.75294 1"/>
       </material>
     </visual>
   </link>
   <joint name="waist_camera_base_joint" type="fixed">
-    <origin xyz="0.0787 0 -0.028149" rpy="0 0.59341 0" />
+    <origin xyz="0.09462 0 -0.010454" rpy="0 1.0472 0"/>
     <parent link="waist_yaw_link" />
     <child link="waist_camera_base" />
     <axis xyz="0 0 0" />
   </joint>
   <link name="waist_camera">
     <inertial>
-      <origin xyz="-0.0005 0 0" rpy="0 0 0" />
-      <mass value="0.0000785398163397463" />
-      <inertia ixx="0.000000000981747704246829" ixy="0" ixz="0" iyy="0.000000000497418836818394" iyz="0" izz="0.000000000497418836818394" />
+      <origin xyz="-0.000500000000001943 1.15130127653629E-12 -1.16599618849023E-06" rpy="0 0 0"/>
+      <mass value="7.8539816339743E-05"/>
+      <inertia ixx="9.81747704246788E-10" ixy="-2.14215407495108E-24" ixz="1.65694616452028E-23"
+               iyy="4.97418836818372E-10" iyz="5.78021200862574E-28"
+               izz="4.97418836818372E-10"/>
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s56/meshes/waist_camera_depth.STL" />
+        <mesh filename="../meshes/waist_camera_depth.STL"/>
       </geometry>
       <material name="">
-        <color rgba="1 1 1 1" />
+        <color rgba="1 1 1 1"/>
       </material>
     </visual>
   </link>

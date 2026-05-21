@@ -36,7 +36,7 @@ tmux split-window -v -f # 创建底部窗格
 # 现在分别向各个窗格发送命令
 # 窗格 0: roscore (左上)
 tmux send-keys -t $SESSION:0.0 "sudo su" C-m
-# tmux send-keys -t $SESSION:0.0 "pkill -f ros" C-m
+tmux send-keys -t $SESSION:0.0 "pkill -f ros" C-m
 tmux send-keys -t $SESSION:0.0 "source $ROS_WS_PATH/devel/setup.bash" C-m
 tmux send-keys -t $SESSION:0.0 "roscore" C-m
 
@@ -54,7 +54,7 @@ tmux send-keys -t $SESSION:0.2 "python3 $SSH_SCRIPT_NAME" C-m
 # ----------  3: humanoid_controller ----------
 tmux send-keys -t $SESSION:0.3 "sudo su -" C-m
 tmux send-keys -t $SESSION:0.3 "ROS_WS_PATH=${ROS_WS_PATH}" C-m
-tmux send-keys -t $SESSION:0.3 "export ROBOT_VERSION=54" C-m
+tmux send-keys -t $SESSION:0.3 "export ROBOT_VERSION=${ROBOT_VERSION}" C-m
 tmux send-keys -t $SESSION:0.3 "source \${ROS_WS_PATH}/devel/setup.bash" C-m
 tmux send-keys -t $SESSION:0.3 "sleep 2" C-m
 tmux send-keys -t $SESSION:0.3 "roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=bt2" C-m

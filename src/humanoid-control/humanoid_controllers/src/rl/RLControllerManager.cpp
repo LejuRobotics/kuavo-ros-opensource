@@ -182,6 +182,11 @@ namespace humanoid_controller
         if (current_controller)
         {
           current_controller->pause();
+          if (nh_ptr_)
+          {
+            // Restore the shared velocity limit param to MPC defaults when leaving RL.
+            current_controller->RLControllerBase::updateVelocityLimitsParam(*nh_ptr_);
+          }
           // 仅记录上一个控制器的裸指针，所有权仍由 controllers_ 管理
           last_controller_ptr_ = current_controller;
         }

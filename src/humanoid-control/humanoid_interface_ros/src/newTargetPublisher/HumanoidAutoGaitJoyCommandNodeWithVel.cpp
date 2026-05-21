@@ -620,6 +620,7 @@ namespace ocs2
     void run()
     {
       ros::Rate rate(100);
+      size_t update_count = 0;
       while (ros::ok())
       {
         ros::spinOnce();
@@ -646,6 +647,11 @@ namespace ocs2
         }
         
         rate.sleep();
+        if(++update_count > 10)
+        {
+          update_count=0;
+          updateVelocityLimitsFromParam();
+        }
         if (robot_type_ == 1)
         {
           checkAndPublishCommandLine(joystick_origin_axis_);
