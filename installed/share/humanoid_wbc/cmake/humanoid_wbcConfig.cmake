@@ -67,14 +67,14 @@ set(humanoid_wbc_CONFIG_INCLUDED TRUE)
 
 # set variables for source/devel/install prefixes
 if("FALSE" STREQUAL "TRUE")
-  set(humanoid_wbc_SOURCE_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/src/humanoid-control/humanoid_wbc)
-  set(humanoid_wbc_DEVEL_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/devel)
+  set(humanoid_wbc_SOURCE_PREFIX /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/humanoid-control/humanoid_wbc)
+  set(humanoid_wbc_DEVEL_PREFIX /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel)
   set(humanoid_wbc_INSTALL_PREFIX "")
   set(humanoid_wbc_PREFIX ${humanoid_wbc_DEVEL_PREFIX})
 else()
   set(humanoid_wbc_SOURCE_PREFIX "")
   set(humanoid_wbc_DEVEL_PREFIX "")
-  set(humanoid_wbc_INSTALL_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed)
+  set(humanoid_wbc_INSTALL_PREFIX /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed)
   set(humanoid_wbc_PREFIX ${humanoid_wbc_INSTALL_PREFIX})
 endif()
 
@@ -91,9 +91,9 @@ endif()
 # flag project as catkin-based to distinguish if a find_package()-ed project is a catkin project
 set(humanoid_wbc_FOUND_CATKIN_PROJECT TRUE)
 
-if(NOT "include;/opt/ros/noetic/lib/pkgconfig/../../include;/usr/include/eigen3;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include " STREQUAL " ")
+if(NOT "include;/opt/ros/noetic/lib/pkgconfig/../../include;/usr/include/eigen3;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include;/opt/ros/noetic/include " STREQUAL " ")
   set(humanoid_wbc_INCLUDE_DIRS "")
-  set(_include_dirs "include;/opt/ros/noetic/lib/pkgconfig/../../include;/usr/include/eigen3;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include")
+  set(_include_dirs "include;/opt/ros/noetic/lib/pkgconfig/../../include;/usr/include/eigen3;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include;/opt/ros/noetic/include")
   if(NOT " " STREQUAL " ")
     set(_report "Check the issue tracker '' and consider creating a ticket if the problem has not been reported yet.")
   elseif(NOT " " STREQUAL " ")
@@ -154,7 +154,7 @@ foreach(library ${libraries})
     set(lib_path "")
     set(lib "${library}-NOTFOUND")
     # since the path where the library is found is returned we have to iterate over the paths manually
-    foreach(path /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed/lib;/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed/lib;/opt/ros/noetic/lib)
+    foreach(path /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed/lib;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed/lib;/opt/ros/noetic/lib)
       find_library(lib ${library}
         PATHS ${path}
         NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
