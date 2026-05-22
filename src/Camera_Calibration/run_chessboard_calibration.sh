@@ -49,7 +49,21 @@ done
 
 WS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CC_DIR="${WS_DIR}/src/Camera_Calibration"
+CC_ROS_PKG="kuavo_camera_calibration"
 TEACH_DIR="${CC_DIR}/teach_capture_output"
+
+cc_ros_launch_path() {
+  local launch_name="$1"
+  local share
+  share="$(rospack find "${CC_ROS_PKG}" 2>/dev/null)" || return 1
+  echo "${share}/launch/${launch_name}"
+}
+
+cc_ros_launch() {
+  local launch_name="$1"
+  shift
+  roslaunch "${CC_ROS_PKG}" "${launch_name}" "$@"
+}
 
 banner() {
   echo ""
@@ -240,7 +254,7 @@ read -r -p "输入 1/2/3/4 并回车: " CHOICE
 case "${CHOICE}" in
   1)
     DEMO_NAME="kuavo_head"
-    DEMO_LAUNCH="${CC_DIR}/demos/kuavo_head_demo/kuavo_head_demo.launch"
+    DEMO_LAUNCH_FILE="kuavo_head_demo.launch"
     DEFAULT_CSV_DIR="${CC_DIR}/output_csv/kuavo_head"
     DEFAULT_TEST_CSV_DIR="${CC_DIR}/output_csv/kuavo_head_test"
     PLOT_OUT_DIR="${CC_DIR}/output/kuavo_head"
@@ -252,7 +266,7 @@ case "${CHOICE}" in
     ;;
   2)
     DEMO_NAME="kuavo_right_wrist"
-    DEMO_LAUNCH="${CC_DIR}/demos/kuavo_right_wrist/kuavo_right_wrist_demo.launch"
+    DEMO_LAUNCH_FILE="kuavo_right_wrist_demo.launch"
     DEFAULT_CSV_DIR="${CC_DIR}/output_csv/kuavo_right_wrist"
     DEFAULT_TEST_CSV_DIR="${CC_DIR}/output_csv/kuavo_right_wrist_test"
     PLOT_OUT_DIR="${CC_DIR}/output/kuavo_right_wrist"
@@ -264,7 +278,7 @@ case "${CHOICE}" in
     ;;
   3)
     DEMO_NAME="kuavo_left_wrist"
-    DEMO_LAUNCH="${CC_DIR}/demos/kuavo_left_wrist/kuavo_left_wrist_demo.launch"
+    DEMO_LAUNCH_FILE="kuavo_left_wrist_demo.launch"
     DEFAULT_CSV_DIR="${CC_DIR}/output_csv/kuavo_left_wrist"
     DEFAULT_TEST_CSV_DIR="${CC_DIR}/output_csv/kuavo_left_wrist_test"
     PLOT_OUT_DIR="${CC_DIR}/output/kuavo_left_wrist"
@@ -321,20 +335,19 @@ echo "[INFO] demo: ${DEMO_NAME}"
 if [[ -n "${OUT_DIR}" ]]; then
   echo "[INFO] CSV 输出目录: ${OUT_DIR}"
 fi
-if [[ -n "${DEMO_LAUNCH:-}" ]]; then
-  echo "[INFO] demo launch: ${DEMO_LAUNCH}"
-fi
-
-if [[ "${CHOICE}" != "4" && ! -f "${DEMO_LAUNCH}" ]]; then
-  echo "[ERROR] 找不到 demo launch 文件: ${DEMO_LAUNCH}" >&2
-  exit 1
+if [[ -n "${DEMO_LAUNCH_FILE:-}" ]]; then
+  DEMO_LAUNCH_PATH="$(cc_ros_launch_path "${DEMO_LAUNCH_FILE}")" || die "找不到 ROS 包 ${CC_ROS_PKG}，请先 catkin build ${CC_ROS_PKG} 并 source devel/setup.bash"
+  echo "[INFO] demo launch: ${CC_ROS_PKG} ${DEMO_LAUNCH_FILE}"
+  if [[ ! -f "${DEMO_LAUNCH_PATH}" ]]; then
+    die "找不到 launch 文件: ${DEMO_LAUNCH_PATH}"
+  fi
 fi
 
 if $BUILD; then
   echo "[INFO] 编译 robot_calibration, robot_calibration_msgs, kuavo_msgs ..."
   cd "${WS_DIR}"
   if command -v catkin >/dev/null 2>&1; then
-    catkin build robot_calibration robot_calibration_msgs kuavo_msgs
+    catkin build kuavo_camera_calibration robot_calibration robot_calibration_msgs kuavo_msgs
   else
     catkin_make --pkg robot_calibration robot_calibration_msgs kuavo_msgs
   fi
@@ -368,9 +381,12 @@ if [[ "${CHOICE}" == "4" ]]; then
     fi
   }
 
-  HEAD_LAUNCH="${CC_DIR}/demos/kuavo_head_demo/kuavo_head_demo.launch"
-  RIGHT_LAUNCH="${CC_DIR}/demos/kuavo_right_wrist/kuavo_right_wrist_demo.launch"
-  LEFT_LAUNCH="${CC_DIR}/demos/kuavo_left_wrist/kuavo_left_wrist_demo.launch"
+  HEAD_LAUNCH_FILE="kuavo_head_demo.launch"
+  RIGHT_LAUNCH_FILE="kuavo_right_wrist_demo.launch"
+  LEFT_LAUNCH_FILE="kuavo_left_wrist_demo.launch"
+  HEAD_LAUNCH_PATH="$(cc_ros_launch_path "${HEAD_LAUNCH_FILE}")" || die "找不到 ${CC_ROS_PKG} launch"
+  RIGHT_LAUNCH_PATH="$(cc_ros_launch_path "${RIGHT_LAUNCH_FILE}")" || die "找不到 ${CC_ROS_PKG} launch"
+  LEFT_LAUNCH_PATH="$(cc_ros_launch_path "${LEFT_LAUNCH_FILE}")" || die "找不到 ${CC_ROS_PKG} launch"
 
   # 并行：统一后台进程管理（参考 chessboard_pose_logger/start_capture.sh）
   PIDS=()
@@ -423,13 +439,13 @@ if [[ "${CHOICE}" == "4" ]]; then
     echo "[INFO] (left_wrist) capture 输出: ${out_left}"
 
     # 三路同时 launch 须区分 rsp_name / capture_name，否则 ROS 报「同名节点注册」并互相踢掉
-    roslaunch "${HEAD_LAUNCH}" "csv_dir:=${out_head}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
+    cc_ros_launch "${HEAD_LAUNCH_FILE}" "csv_dir:=${out_head}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
       "rsp_name:=rsp_head" "capture_name:=cap_capture_head" &
     PIDS+=( "$!" )
-    roslaunch "${RIGHT_LAUNCH}" "csv_dir:=${out_right}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
+    cc_ros_launch "${RIGHT_LAUNCH_FILE}" "csv_dir:=${out_right}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
       "rsp_name:=rsp_right" "capture_name:=cap_capture_right" &
     PIDS+=( "$!" )
-    roslaunch "${LEFT_LAUNCH}" "csv_dir:=${out_left}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
+    cc_ros_launch "${LEFT_LAUNCH_FILE}" "csv_dir:=${out_left}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
       "rsp_name:=rsp_left" "capture_name:=cap_capture_left" &
     PIDS+=( "$!" )
   }
@@ -600,14 +616,14 @@ if [[ "${CHOICE}" == "4" ]]; then
       # 顺序执行：不落盘日志，避免生成 output/_parallel_optimize_logs
       run_sequential_optimize() {
         local tag="$1"
-        local launch_f="$2"
+        local launch_name="$2"
         local csv_d="$3"
         local rsp="$4"
         local optn="$5"
         echo ""
         echo "[INFO] >>> ${tag} optimize 启动（csv: ${csv_d}）"
         set +e
-        roslaunch "${launch_f}" \
+        cc_ros_launch "${launch_name}" \
           "csv_dir:=${csv_d}" \
           "do_capture_to_csv:=false" \
           "do_optimize_from_csv:=true" \
@@ -627,14 +643,15 @@ if [[ "${CHOICE}" == "4" ]]; then
       # 行为与单路 MODE=optimize 中 plot_board_error_from_csv 一致；指标追加写入各 demo 的 optimization_metrics.md。
       plot_after_sequential_optimize() {
         local tag="$1"
-        local launch_f="$2"
+        local launch_name="$2"
         local csv_d="$3"
         local plot_dir="$4"
         local cam_tip="$5"
         local sensor="$6"
-        local pos_m rot_deg metrics prc
-        pos_m="$(read_launch_param_default "${launch_f}" "outlier_reject_pos_m" "0.1")"
-        rot_deg="$(read_launch_param_default "${launch_f}" "outlier_reject_rot_deg" "10")"
+        local launch_path pos_m rot_deg metrics prc
+        launch_path="$(cc_ros_launch_path "${launch_name}")"
+        pos_m="$(read_launch_param_default "${launch_path}" "outlier_reject_pos_m" "0.1")"
+        rot_deg="$(read_launch_param_default "${launch_path}" "outlier_reject_rot_deg" "10")"
         metrics="${plot_dir}/optimization_metrics.md"
         mkdir -p "${plot_dir}"
         # 兼容旧版本输出：避免后续又生成/追加同名 txt
@@ -685,16 +702,16 @@ if [[ "${CHOICE}" == "4" ]]; then
         fi
       }
 
-      run_sequential_optimize "head" "${HEAD_LAUNCH}" "${out_head}" "rsp_head" "cap_optimize_head"
-      plot_after_sequential_optimize "head" "${HEAD_LAUNCH}" "${out_head}" "${CC_DIR}/output/kuavo_head" \
+      run_sequential_optimize "head" "${HEAD_LAUNCH_FILE}" "${out_head}" "rsp_head" "cap_optimize_head"
+      plot_after_sequential_optimize "head" "${HEAD_LAUNCH_FILE}" "${out_head}" "${CC_DIR}/output/kuavo_head" \
         "head_camera_color_optical_frame" "camera_to_base"
 
-      run_sequential_optimize "right_wrist" "${RIGHT_LAUNCH}" "${out_right}" "rsp_right" "cap_optimize_right"
-      plot_after_sequential_optimize "right_wrist" "${RIGHT_LAUNCH}" "${out_right}" "${CC_DIR}/output/kuavo_right_wrist" \
+      run_sequential_optimize "right_wrist" "${RIGHT_LAUNCH_FILE}" "${out_right}" "rsp_right" "cap_optimize_right"
+      plot_after_sequential_optimize "right_wrist" "${RIGHT_LAUNCH_FILE}" "${out_right}" "${CC_DIR}/output/kuavo_right_wrist" \
         "right_wrist_camera_color_optical_frame" "right_wrist_camera_to_base"
 
-      run_sequential_optimize "left_wrist" "${LEFT_LAUNCH}" "${out_left}" "rsp_left" "cap_optimize_left"
-      plot_after_sequential_optimize "left_wrist" "${LEFT_LAUNCH}" "${out_left}" "${CC_DIR}/output/kuavo_left_wrist" \
+      run_sequential_optimize "left_wrist" "${LEFT_LAUNCH_FILE}" "${out_left}" "rsp_left" "cap_optimize_left"
+      plot_after_sequential_optimize "left_wrist" "${LEFT_LAUNCH_FILE}" "${out_left}" "${CC_DIR}/output/kuavo_left_wrist" \
         "left_wrist_camera_color_optical_frame" "left_wrist_camera_to_base"
 
       echo ""
@@ -770,7 +787,7 @@ fi
 if [[ "${MODE}" == "capture" ]]; then
   banner "阶段 1/2：采数（capture_to_csv -> 写入 CSV）"
   precheck_ros_and_topics "${CHOICE}" "${MODE}" || exit 1
-  roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" &
+  cc_ros_launch "${DEMO_LAUNCH_FILE}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" &
   LAUNCH_PID=$!
   echo "[INFO] roslaunch PID = ${LAUNCH_PID}"
   sleep 5
@@ -836,7 +853,7 @@ if [[ "${MODE}" == "test" ]]; then
     die "找不到测试关节角 JSON：${TEST_TEACH_JSON}。请先运行 teach_joint_capture.py 选择“用于测试”生成 *_test.json"
   fi
 
-  roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" &
+  cc_ros_launch "${DEMO_LAUNCH_FILE}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" &
   LAUNCH_PID=$!
   echo "[INFO] roslaunch PID = ${LAUNCH_PID}"
   sleep 5
@@ -932,8 +949,8 @@ if [[ "${MODE}" == "optimize" ]]; then
   if [[ "${CSV_COUNT}" -le 0 ]]; then
     die "优化阶段找不到可用 CSV（目录为空或不存在）：${OUT_DIR}。请先运行 capture 阶段生成 CSV。"
   fi
-  PLOT_REJECT_POS_M="$(read_launch_param_default "${DEMO_LAUNCH}" "outlier_reject_pos_m" "0.1")"
-  PLOT_REJECT_ROT_DEG="$(read_launch_param_default "${DEMO_LAUNCH}" "outlier_reject_rot_deg" "10")"
+  PLOT_REJECT_POS_M="$(read_launch_param_default "${DEMO_LAUNCH_PATH}" "outlier_reject_pos_m" "0.1")"
+  PLOT_REJECT_ROT_DEG="$(read_launch_param_default "${DEMO_LAUNCH_PATH}" "outlier_reject_rot_deg" "10")"
   echo "[INFO] 离群点阈值（来自 launch）: pos=${PLOT_REJECT_POS_M} m, rot=${PLOT_REJECT_ROT_DEG} deg"
 
   mkdir -p "${PLOT_OUT_DIR}"
@@ -952,7 +969,7 @@ if [[ "${MODE}" == "optimize" ]]; then
     echo "============================================================"
     echo ""
     echo "---------- optimize_from_csv / roslaunch ----------"
-    roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=false" "do_optimize_from_csv:=true" "do_calibrate_manual:=false"
+    cc_ros_launch "${DEMO_LAUNCH_FILE}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=false" "do_optimize_from_csv:=true" "do_calibrate_manual:=false"
     echo ""
     echo "---------- plot_board_error_from_csv（标定前后 FK 误差表与 summary）----------"
     python3 "${CC_DIR}/plot_board_error_from_csv.py" \
