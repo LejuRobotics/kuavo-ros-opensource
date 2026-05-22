@@ -1257,10 +1257,6 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)  // 锁定或解锁手臂
                 {
-                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
-                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+B.");
-                        return;
-                    }
                     auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 0) ? 0 : 2;
                     callSetArmModeSrv(new_arm_ctrl_mode_wheel_);
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
@@ -1269,10 +1265,6 @@ namespace ocs2
                 {
                     if (arm_collision_control_) {
                         arm_collision_control_ = false;
-                        return;
-                    }
-                    if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
-                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
                     auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 1) ? 1 : 2;

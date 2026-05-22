@@ -84,13 +84,22 @@ void WheelQuest3IkIncrementalROS::run() {
       ros::Duration(0.05).sleep();
     }
     ros::Duration(0.1).sleep();
+
     ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>("/quest3/bootstrap_wheel_arm_mode");
     std_srvs::Trigger srv;
-    if (client.call(srv) && srv.response.success) {
-      ROS_INFO("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode ok");
-    } else {
-      ROS_WARN("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode failed: %s",
-               srv.response.message.c_str());
+    while (ros::ok()) {
+      if (client.call(srv) && srv.response.success) {
+        ROS_INFO("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode ok");
+        break;
+      }
+      if (srv.response.message.find("Not legacy wheel VR") != std::string::npos) {
+        ROS_WARN("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode skipped: %s",
+                 srv.response.message.c_str());
+        break;
+      }
+      ROS_WARN_THROTTLE(2.0, "[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode failed: %s",
+                        srv.response.message.c_str());
+      ros::Duration(0.5).sleep();
     }
   });
 
