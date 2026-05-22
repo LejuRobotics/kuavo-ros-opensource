@@ -316,7 +316,7 @@ class ArmTrajectoryBezierDemo:
 
     def _extract_kuavo_biped_waist(self, joint_q, hand_part):
         """双足模型+腰部 (v50): [leg*12, waist, arm*14, head*2]"""
-        return list(joint_q[12:26]) + hand_part + list(joint_q[-2:]) + [joint_q[12]]
+        return list(joint_q[13:27]) + hand_part + list(joint_q[-2:]) + [joint_q[12]]
 
     def _extract_roban(self, joint_q, hand_part):
         """ROBAN: [hand*12, waist, arm*8, head*2]"""
@@ -1024,6 +1024,26 @@ class ArmTrajectoryBezierDemo:
                     ])
         return action_data
 
+    def crop_frames_from_first(self, frames, first_keyframe):
+        """按 tact 原始 first 裁剪动作段，并将剩余 keyframe 归零。"""
+        import copy
+
+        first_keyframe = int(first_keyframe)
+        cropped_frames = []
+        for frame in frames:
+            keyframe = frame.get("keyframe", 0)
+            if keyframe >= first_keyframe:
+                new_frame = copy.deepcopy(frame)
+                new_frame["keyframe"] = keyframe - first_keyframe
+                cropped_frames.append(new_frame)
+
+        if not cropped_frames and frames:
+            new_frame = copy.deepcopy(frames[-1])
+            new_frame["keyframe"] = 0
+            cropped_frames.append(new_frame)
+
+        return cropped_frames
+
     def filter_data(self, action_data):
         filtered_action_data = {}
         for key, frames in action_data.items():
@@ -1540,6 +1560,11 @@ class ArmTrajectoryBezierDemo:
                 frames.insert(0, init_stand_frame)
                 rospy.loginfo("0f处没有动作帧，已添加初始站立帧")
 
+        if current_control_mode == "rl":
+            frames = self.crop_frames_from_first(frames, first_value)
+            self.START_FRAME_TIME = 0
+            self.x_shift = 0
+
         action_data = self.add_init_frame(frames, is_rl=current_control_mode == "rl")
 
         # 根据实际计算的过渡时间更新结束时间
@@ -1550,7 +1575,10 @@ class ArmTrajectoryBezierDemo:
                 last_keyframe = max(f.get("keyframe", 0) for f in frames)
                 # 将 keyframe 转换为秒并更新 END_FRAME_TIME
                 self.END_FRAME_TIME = last_keyframe * 0.01
-        filtered_data = self.filter_data(action_data)
+        if current_control_mode == "rl":
+            filtered_data = action_data
+        else:
+            filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
         rospy.loginfo(f"Planning arm trajectory for action: {action_name}...")
