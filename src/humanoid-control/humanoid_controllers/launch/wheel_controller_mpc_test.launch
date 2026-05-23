@@ -40,10 +40,10 @@
     <param name="robot_description" textfile="$(arg urdfFile)"/>
     
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
-    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
-    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
+    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
+    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
 
     <param name="nodelet_robot_type"      value="$(arg nodelet_robot_type)"/>
     <param name="wheel_control_type"      value="$(arg wheel_control_type)"/>
