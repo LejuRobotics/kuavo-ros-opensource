@@ -189,11 +189,9 @@ void ArmControlBaseROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
   if (newMode != 2) {
     ROS_WARN("\033[91m[ArmControlBaseROS] Reset arm mode\033[0m");
     armModeChanging_.store(false);
-    if (joyStickHandlerPtr_) joyStickHandlerPtr_->setArmModeChanging(false);
   } else {
     ROS_WARN("\033[91m[ArmControlBaseROS] Arm mode changing\033[0m");
     armModeChanging_.store(true);
-    if (joyStickHandlerPtr_) joyStickHandlerPtr_->setArmModeChanging(true);
   }
 }
 
@@ -296,7 +294,6 @@ bool ArmControlBaseROS::setArmModeChangingCallback(std_srvs::Trigger::Request& r
 
   // 设置arm mode changing标志
   armModeChanging_.store(true);
-  if (joyStickHandlerPtr_) joyStickHandlerPtr_->setArmModeChanging(true);
 
   return handleServiceResponse(res, true, "Arm mode changing set to True successfully");
 }
@@ -421,7 +418,6 @@ void ArmControlBaseROS::updateRunningState() {
   if (!wasRunning() && isRunning()) {
     ROS_INFO("[ArmControlBaseROS] Detected state change from stopped to running, setting armModeChanging to true");
     armModeChanging_.store(true);
-    if (joyStickHandlerPtr_) joyStickHandlerPtr_->setArmModeChanging(true);
   }
 }
 

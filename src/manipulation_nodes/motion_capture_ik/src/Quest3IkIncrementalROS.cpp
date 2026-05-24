@@ -1451,14 +1451,6 @@ void Quest3IkIncrementalROS::armCtrlModeCallback(const std_msgs::Float64MultiArr
   }
   arm_ctrl_mode_ = static_cast<int>(msg->data[1]); //获取手臂控制模式
   currentArmCtrlMode_ = static_cast<int>(msg->data[0]); // 对应 Python __arm_control_mode（current_mode）
-  if (joyStickHandlerPtr_) {
-    joyStickHandlerPtr_->setCurrentArmCtrlMode(currentArmCtrlMode_);
-    if (currentArmCtrlMode_ != arm_ctrl_mode_) {
-      joyStickHandlerPtr_->setArmModeChanging(true);
-    } else {
-      joyStickHandlerPtr_->setArmModeChanging(false);
-    }
-  }
 }
 
 void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {

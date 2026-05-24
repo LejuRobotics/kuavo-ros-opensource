@@ -1175,7 +1175,7 @@ class IkRos:
                             right_hand_position[i] = 100 
                         right_hand_position[2] = 0
                     
-                    if self.end_effector_type == LINKER_HAND and self.__robot_walking_status and self.__arm_control_mode == 1 and self.arm_mode_changing == False:
+                    if self.end_effector_type == LINKER_HAND and self.__robot_walking_status:
                         left_hand_position[0] = left_hand_position[0] if joyStick_data.left_first_button_touched else 100
                         right_hand_position[0] = right_hand_position[0] if joyStick_data.right_first_button_touched else 100
 
