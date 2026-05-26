@@ -1070,8 +1070,8 @@ namespace humanoid_controller
           double q_des  = joint_cmd.joint_q[i];
           double v_des  = joint_cmd.joint_v[i]; // 目前为0
 
-          double kp = 10;
-          double kd = 1;
+          double kp = 50;
+          double kd = 2;
 
           joint_cmd.tau[i] = kp * (q_des - q_meas) + kd * (v_des - v_meas);
         }

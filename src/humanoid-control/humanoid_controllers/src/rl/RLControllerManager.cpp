@@ -153,15 +153,16 @@ namespace humanoid_controller
     std::unique_lock<std::recursive_mutex> lock(mutex_);
     const std::string current_before_name = current_controller_name_;
     const std::string current_before = current_before_name.empty() ? "mpc" : current_before_name;
-    // 检查当前是否为倒地起身控制器
+    // mimic 类控制器（倒地起身/舞蹈）：仅在未完成（isAllowToExit==false）时禁止切出
     if (!current_controller_name_.empty())
     {
       auto* current_controller = controllers_[current_controller_name_].get();
-      bool current_is_fall_down_controller = current_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER;
-      bool current_is_dance_controller = current_controller->getType() == RLControllerType::DANCE_CONTROLLER;
-      if (!current_controller->isAllowToExit() || current_is_fall_down_controller)
+      const bool current_is_mimic_controller =
+          current_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER ||
+          current_controller->getType() == RLControllerType::DANCE_CONTROLLER;
+      if (!current_controller->isAllowToExit() && current_is_mimic_controller)
       {
-        ROS_WARN("[RLControllerManager] Current controller is not allow to exit, switch to Next controller blocked!");
+        ROS_WARN("[RLControllerManager] Current mimic controller is not ready to exit, switch blocked!");
         return false;
       }
     }

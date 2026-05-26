@@ -2,13 +2,13 @@
 # H12PRO joy_node 监控脚本
 #
 # 职责:
-#   1. joy_node 异常退出/被踢/hang 时，重启整棵 launch 树
+#   1. 关键节点异常退出/被踢/hang 时，重启整棵 launch 树
 #   2. 检测到外部手动路径（如 bt2 launch，start_way=manual）后主动让位
 #
 # 探活策略（由便宜到贵，按需触发）:
 #   - kill -0 NODE_PID:     μs 级，判断 launch 树是否还活
 #   - pgrep -f ...py:       ms 级，判断 joy_node Python 进程是否还活（覆盖 SIGSEGV zombie）
-#   - rosnode ping:         ~300ms，仅周期性触发，兜底 hang/deadlock
+#   - rosnode ping:         1s 级周期触发，兜底 hang/deadlock/stale registration
 #
 # 前置要求: h12pro_autostart.launch 中 joy_node 必须关闭 respawn，
 #          让本脚本作为唯一的重启来源，避免同名竞争。
@@ -19,9 +19,10 @@ source $ROS_WS_PATH/setup.bash
 [ -z "$NODE_SCRIPT" ] && { echo "Error: NODE_SCRIPT not set"; exit 1; }
 [ ! -f "$NODE_SCRIPT" ] && { echo "Error: $NODE_SCRIPT not found"; exit 1; }
 
-POLL_INTERVAL=5         # 主循环间隔
-HANG_CHECK_EVERY=6      # 每 N 个 tick 做一次 rosnode ping 兜底（约 30s 一次）
-MANUAL_IDLE_THRESHOLD=3 # start_way=manual 且无任何 /joy_node 持续 N tick 后接管
+POLL_INTERVAL=1         # 主循环间隔
+HANG_CHECK_EVERY=1      # 每 N 个 tick 做一次 rosnode ping 兜底（约 1s 一次）
+ROS_PING_TIMEOUT=1      # rosnode ping 超时时间
+MANUAL_IDLE_THRESHOLD=15 # start_way=manual 且无任何 /joy_node 持续 N tick 后接管
                         # 容忍 bt2 启动过程中"param 已设但 joy_node 未注册"的窗口
 JOY_PROC_PATTERN="ocs2_h12pro_node.py"
 
@@ -43,12 +44,13 @@ start_tree() {
 stop_tree() {
     [ -z "$NODE_PID" ] && return
     # 只对 roslaunch 本 pid 发信号；它的子进程（含隐式 rosmaster）会被 init 接管继续存活。
-    # 业务节点用 rosnode kill 点名处理，避免 pgid kill / rosnode cleanup 的副作用。
+    # 业务节点用 rosnode kill 点名处理，避免 pgid kill 的副作用。
     kill -9 "$NODE_PID" 2>/dev/null || true
     sleep 1
     rosnode kill /h12pro_channel_publisher 2>/dev/null || true
     rosnode kill /joy_node 2>/dev/null || true
     rosnode kill /websocket_sdk_start_node 2>/dev/null || true
+    yes | timeout 3 rosnode cleanup >/dev/null 2>&1 || true
     NODE_PID=""
     log "stopped"
 }
@@ -95,11 +97,14 @@ while true; do
         log "joy_node process gone, restarting"
         stop_tree
     elif [ $((TICK % HANG_CHECK_EVERY)) -eq 0 ]; then
-        # 周期性兜底：进程在但不响应 XMLRPC（hang）
-        if ! timeout 2 rosnode ping -c 1 /joy_node >/dev/null 2>&1; then
-            log "joy_node unresponsive (possible hang), restarting"
-            stop_tree
-        fi
+        # 周期性兜底：进程在但关键节点不响应 XMLRPC（hang/stale）
+        for ROS_NODE in /joy_node /h12pro_channel_publisher; do
+            if ! timeout "$ROS_PING_TIMEOUT" rosnode ping -c 1 "$ROS_NODE" >/dev/null 2>&1; then
+                log "$ROS_NODE unresponsive (possible hang/stale), restarting"
+                stop_tree
+                break
+            fi
+        done
     fi
 
     sleep "$POLL_INTERVAL"

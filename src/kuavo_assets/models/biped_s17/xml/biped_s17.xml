@@ -138,7 +138,7 @@
         </body>
       <body name="torso">
         <site name="imu" pos="0 0 0" />
-        <inertial pos="-0.0100514 -0.00110498 0.140586" quat="0.999642 -0.0162049 -0.0199132 0.00748437" mass="8.37745" diaginertia="0.104453 0.0832724 0.0491503"/>
+        <inertial pos="-0.0100514 -0.00110498 0.140586" quat="0.999642 -0.0162049 -0.0199132 0.00748437" mass="8.37747" diaginertia="0.104453 0.0832724 0.0491503"/>
         <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" range="-2.61799 2.61799" actuatorfrcrange="-50 50" armature="0.003" damping="0.2" frictionloss="0.0"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso"/>
         <geom size="0.07 0.1 0.13" pos="0.01 0 0.14" type="box" class="collision"/>
