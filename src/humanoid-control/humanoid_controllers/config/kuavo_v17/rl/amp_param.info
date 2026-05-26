@@ -51,7 +51,7 @@ velocityLimits
 {
     ; 定义速度命令的限制
     (0,0)  0.80      ; cmdVelLineX
-    (1,0)  0.6      ; cmdVelLineY
+    (1,0)  0.0      ; cmdVelLineY
     (2,0)  0.0      ; cmdVelLineZ
     (3,0)  1.0      ; cmdVelAngularZ
 }
