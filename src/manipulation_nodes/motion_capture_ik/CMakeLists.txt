@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.0.2)
 project(motion_capture_ik)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
+# 可重现构建：固定调试信息中的时间戳，使 .so 内容仅取决于源码内容而非文件 mtime
+set(ENV{SOURCE_DATE_EPOCH} "0")
 find_package(drake CONFIG REQUIRED)
 find_package(Eigen3 REQUIRED)
 
@@ -111,6 +114,7 @@ include_directories(
 add_subdirectory(test)
 
 add_executable(arms_ik_node src/arms_ik_node.cpp)
+add_dependencies(arms_ik_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 if(EXISTS "${PLANT_IK_FILE}")
   target_link_libraries(arms_ik_node plantIK ${catkin_LIBRARIES} drake::drake)
 else()

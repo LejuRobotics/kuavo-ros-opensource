@@ -22,18 +22,18 @@
   </worldbody>
 
   <keyframe>
+    <!-- IMU,LLeg,RLeg,LArm,RArm,Head,LeftHand,RightHand-->
     <key name="home"
       qpos="
     0 0 0.98
     1 0 0 0
     0 0 0 0 0 0
     0 0 0 0 0 0
-    0 0 0 0 0 0 0        
-    0 0 0 0 0 0 0 0 0 0
-    0 0 0 0 0 0 0 
-    0 0 0 0 0 0 0 0 0 0 
-    0 0"/>
-    <!-- IMU,LLeg,RLeg,LArm,LDexhand,RArm, RDexhand, Head-->
+    0 0 0 0 0 0 0
+    0 0 0 0 0 0 0
+    0 0
+    0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0" />
   </keyframe>
 
 </mujoco>

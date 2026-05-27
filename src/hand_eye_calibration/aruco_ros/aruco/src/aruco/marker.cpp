@@ -307,7 +307,7 @@ void Marker::calculateExtrinsics(float markerSize, const CameraParameters& CP, b
                       setYPerpendicular);
 }
 
-void print(cv::Point3f p, std::string cad)
+void print(cv::Point3f p, const std::string& cad)
 {
   std::cout << cad << " " << p.x << " " << p.y << " " << p.z << std::endl;
 }

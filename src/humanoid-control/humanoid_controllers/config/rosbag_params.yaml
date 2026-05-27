@@ -3,5 +3,8 @@
 max_splits: 8
 # 开机保留的 bag 文件数量，仅在 enable_bag_cleanup 为 true 时生效
 bags_to_keep: 8
-# 是否开启启动时限制 bag 个数的功能
+# 是否开启清理日志的功能
 enable_bag_cleanup: false
+# 是否开启每次运行保留bags_to_keep的功能,如果是true则保留之前每一次的bags_to_keep的数目的bag，如果是false则只保留最近8个bag
+# 仅在 enable_bag_cleanup 为 true 时生效
+enable_bag_keep: false

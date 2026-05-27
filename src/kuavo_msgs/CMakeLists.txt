@@ -206,6 +206,7 @@ add_service_files(
   lbBaseLinkPoseCmdSrv.srv
   lbLegControlSrv.srv
   chassisPoseCmdSrv.srv
+  fkSrvWithReferFrame.srv
 
   SpeechSynthesis.srv
   setMmCtrlFrame.srv

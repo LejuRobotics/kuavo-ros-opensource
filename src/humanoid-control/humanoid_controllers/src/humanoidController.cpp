@@ -550,10 +550,10 @@ namespace humanoid_controller
     }
     
     auto robot_config = drake_interface_->getRobotConfig();
-    AnkleSolverType ankleSolverType = static_cast<AnkleSolverType>(robot_config->getValue<int>("ankle_solver_type"));
-    ankleSolver.getconfig(ankleSolverType);
+    const std::string ankleSolverTypeToken = robot_config->getValue<std::string>("ankle_solver_type");
+    ankleSolver.getconfig(ankleSolverTypeToken);
     // 同步脚踝解算类型到 ROS 参数，供倒地起身等 RL 控制器使用
-    ros::param::set("/ankle_solver_type", static_cast<int>(ankleSolverType));
+    ros::param::set("/ankle_solver_type", ankleSolverTypeToken);
     if (!init_fall_down_state_) // 初始倒地时不在这里设置初始状态
     {
       ros::param::set("robot_init_state_param", robot_init_state_param);
@@ -1009,8 +1009,6 @@ namespace humanoid_controller
       });
       
       armEefWbcPosePublisher_ = controllerNh_.advertise<std_msgs::Float64MultiArray>("/humanoid_controller/wbc_arm_eef_pose", 10, true);
-      // dexhand state
-      dexhand_state_sub_ = controllerNh_.subscribe("/dexhand/state", 10, &humanoidController::dexhandStateCallback, this);
 
       standUpCompletePub_ = controllerNh_.advertise<std_msgs::Int8>("/bot_stand_up_complete", 10);
       
@@ -3282,8 +3280,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
       }
       robotVisualizer_->updateHeadJointPositions(sensor_data_head_.jointPos_);
-      // 更新灵巧手可视化
-      robotVisualizer_->updateHandJointPositions(dexhand_joint_pos_);
     }
 
     // publish time cost
@@ -4254,13 +4250,6 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     return;
   }
 
-  void humanoidController::dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg)
-  {
-    if(msg->name.size() != dexhand_joint_pos_.size())
-      return;
-    for(size_t i = 0; i < dexhand_joint_pos_.size(); ++i)  
-      dexhand_joint_pos_(i) = msg->position[i];
-  }
 
   void humanoidController::getEnableMpcFlagCallback(const std_msgs::Bool::ConstPtr &msg)
   {

@@ -20,7 +20,7 @@ use_interploate_from_mpc     false       ; 从MPC切换到这个模型时是使�
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 
-networkModelFile          /model_34600_lab_signal_0313.onnx       ; 
+networkModelFile          /depth_0513_167000_reduce_ffor_drdof_all.onnx       ; 
 commandData 
 {
     inital
@@ -51,14 +51,14 @@ velocityLimits
     ; 定义速度命令的限制（正负方向独立设置）
     ; 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
     ;        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
-    (0,0)  0.6      ; cmdVelLineX positive
-    (1,0)  -0.5     ; cmdVelLineX negative
+    (0,0)  0.55      ; cmdVelLineX positive
+    (1,0)  -0.     ; cmdVelLineX negative
     (2,0)  0.3      ; cmdVelLineY positive
     (3,0)  -0.3     ; cmdVelLineY negative
     (4,0)  0.5      ; cmdVelLineZ positive
     (5,0)  -0.5     ; cmdVelLineZ negative
-    (6,0)  1.5     ; cmdVelAngularZ positive
-    (7,0)  -1.5    ; cmdVelAngularZ negative
+    (6,0)  1.     ; cmdVelAngularZ positive
+    (7,0)  -1.    ; cmdVelAngularZ negative
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller

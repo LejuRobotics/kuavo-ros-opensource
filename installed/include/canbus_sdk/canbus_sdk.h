@@ -189,14 +189,14 @@ public:
      * @param frequency_ms 接收线程频率（毫秒）
      * @return 设置是否成功
      */
-    bool setRecvThreadFrequency(const std::string& bus_name, int frequency_ms);
+    bool setRecvThreadFrequency(const std::string& bus_name, double frequency_ms);
 
     /**
      * @brief 获取指定CAN总线接收线程频率
      * @param bus_name CAN总线名称
-     * @return 当前接收线程频率（毫秒），如果总线不存在返回-1
+     * @return 当前接收线程频率（毫秒），如果总线不存在返回-1.0
      */
-    int getRecvThreadFrequency(const std::string& bus_name) const;
+    double getRecvThreadFrequency(const std::string& bus_name) const;
 
     /**
      * @brief 通过CAN总线名称获取总线ID

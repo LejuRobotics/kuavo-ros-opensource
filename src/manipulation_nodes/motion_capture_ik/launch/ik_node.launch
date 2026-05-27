@@ -1,14 +1,18 @@
 <launch>
     <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
     <arg name="visualize" default="false"/>
+    <!-- 6代轮臂(版本号 % 100 在 60~69): 使用上半身 URDF；其余代际默认 false -->
+    <arg name="use_upper_body_urdf" default="$(eval 60 &lt;= int(arg('robot_version')) % 100 and int(arg('robot_version')) % 100 &lt; 70)"/>
     <!-- Handle version 15 special case: use version 14 model -->
     <arg name="model_path" default="$(find kuavo_assets)/models/biped_s14/urdf/drake/biped_v3_arm.urdf" if="$(eval arg('robot_version') == 15)"/>
-    <arg name="model_path" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/drake/biped_v3_arm.urdf" unless="$(eval arg('robot_version') == 15)"/>
+    <arg name="model_path" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/drake/biped_v3_upper_body.urdf" if="$(eval arg('robot_version') != 15 and arg('use_upper_body_urdf'))"/>
+    <arg name="model_path" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/drake/biped_v3_arm.urdf" if="$(eval arg('robot_version') != 15 and not arg('use_upper_body_urdf'))"/>
     <arg name="model_path_vis" default="$(find kuavo_assets)/models/biped_s14/urdf/biped_s14.urdf" if="$(eval arg('robot_version') == 15)"/>
     <arg name="model_path_vis" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" unless="$(eval arg('robot_version') == 15)"/>
     <arg name="control_hand_side" default="2"/> <!-- 0: left, 1: right, 2: both -->
     <arg name="print_ik_info"     default="false"/>
     <arg name="enable_ik_vis"     default="true"/>
+    <param name="use_upper_body_urdf" value="$(arg use_upper_body_urdf)"/>
     <param name="model_path" value="$(arg model_path)"/>
     <param name="robot_version"    value="$(arg robot_version)"/>
     <param name="control_hand_side" value="$(arg control_hand_side)"/>

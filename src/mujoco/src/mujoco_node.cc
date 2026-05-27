@@ -47,6 +47,7 @@
 #include <queue>
 #include "kuavo_msgs/lejuClawCommand.h"
 #include "sensor_msgs/JointState.h"
+#include <kuavo_common/common/common.h>
 
 #include "mujoco_cpp/depth_camera_config.h"
 #include "joint_address.hpp"
@@ -492,7 +493,7 @@ namespace
   }
 
   void init_joint_address(mjModel* model, JointGroupAddress &jga, const std::string& joint0, const std::string& joint1)
-  {     
+  {
     // 获取关节 ID
     auto id0 = mj_name2id(model, mjOBJ_JOINT, joint0.c_str());
     auto id1 = mj_name2id(model, mjOBJ_JOINT, joint1.c_str());
@@ -613,10 +614,27 @@ namespace
       init_joint_address(mnew, RArmJointsAddr, "zarm_r1_joint", right_arm_end_joint.c_str());
       init_joint_address(mnew, HeadJointsAddr, "zhead_1_joint", "zhead_2_joint");
 
-      /* dexhand joint address */
-      if(mj_name2id(mnew, mjOBJ_JOINT, "l_thumbCMC") != -1) {
-        init_joint_address(mnew, LHandJointsAddr, "l_thumbCMC", "l_littlePIP");
-        init_joint_address(mnew, RHandJointsAddr, "r_thumbCMC", "r_littlePIP");
+      /* dexhand joint address - 根据URDF自定义元数据hand_type区分手型号 */
+      int hand_type_id = mj_name2id(mnew, mjOBJ_NUMERIC, "hand_type");
+      if (hand_type_id != -1) {
+          int data_adr = mnew->numeric_adr[hand_type_id];
+          int hand_type_value = static_cast<int>(mnew->numeric_data[data_adr]);
+          if (hand_type_value == 1) {
+              // LinkerL6灵巧手关节命名
+              std::cout << "[mujoco_node]: Initialize LinkerL6 dexhand joint addresses" << std::endl;
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_yaw", "l_pinky_dip");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_yaw", "r_pinky_dip");
+          } else if (hand_type_value == 2) {
+              // LinkerO6灵巧手关节命名
+              std::cout << "[mujoco_node]: Initialize LinkerO6 dexhand joint addresses" << std::endl;
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_yaw", "l_pinky_dip");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_yaw", "r_pinky_dip");
+          }
+      } else {
+          // 旧版无hand_type元数据时，默认使用强脑手关节命名
+          std::cout << "[mujoco_node]: No hand_type metadata found, default to Qiangnao hand joint addresses" << std::endl;
+          init_joint_address(mnew, LHandJointsAddr, "l_thumbCMC", "l_littlePIP");
+          init_joint_address(mnew, RHandJointsAddr, "r_thumbCMC", "r_littlePIP");
       }
 
       // 遍历所有的物体
@@ -1198,7 +1216,7 @@ namespace
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
+                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
@@ -1938,7 +1956,30 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   if(!RHandJointsAddr.ctrladr().invalid()) {
       std::cout << "[mujoco_node]: init dexhand node" << std::endl;
       g_dexhand_node = std::make_shared<DexHandMujocoRosNode>();
-      g_dexhand_node->init(*g_nh_ptr, m, RHandJointsAddr, LHandJointsAddr);
+
+      // 优先从URDF自定义元数据中读取手类型
+      mujoco_node::HandType hand_type = mujoco_node::HandType::QIANGNAO;
+      int hand_type_id = mj_name2id(m, mjOBJ_NUMERIC, "hand_type");
+      
+      if (hand_type_id != -1) {
+          int hand_type_value = static_cast<int>(m->numeric_data[hand_type_id]);
+          if (hand_type_value == 1) {
+              hand_type = mujoco_node::HandType::LINKER_L6;
+              std::cout << "[mujoco_node]: Detected LinkerL6 dexhand from URDF custom metadata" << std::endl;
+          } else if (hand_type_value == 2) {
+              hand_type = mujoco_node::HandType::LINKER_O6;
+              std::cout << "[mujoco_node]: Detected LinkerO6 dexhand from URDF custom metadata" << std::endl;
+          } else {
+              hand_type = mujoco_node::HandType::QIANGNAO;
+              std::cout << "[mujoco_node]: Detected Qiangnao hand from URDF custom metadata" << std::endl;
+          }
+      } else {
+          // 没有找到自定义元数据，默认使用Qiangnao手
+          hand_type = mujoco_node::HandType::QIANGNAO;
+          std::cout << "[mujoco_node]: No hand_type metadata in URDF, default to use Qiangnao hand" << std::endl;
+      }
+
+      g_dexhand_node->init(*g_nh_ptr, m, RHandJointsAddr, LHandJointsAddr, hand_type);
 
       int hand_joints_num = g_dexhand_node->get_hand_joints_num();
       g_nh_ptr->setParam("end_effector_joints_num", hand_joints_num);
@@ -1981,16 +2022,27 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
         }
         else if (robot_type == 1)
         {
+          // freejoint: qpos_init_temp[0..6] -> qpos[0..6]
           for (int i = 0; i < 7; i++)
           {
             qpos_init[i] = qpos_init_temp[i];
             std::cout << qpos_init[i] << ", ";
           }
-          for (int i = 7 ; i < qpos_init_temp.size(); i++)
-          {
-            qpos_init[i + 8] = qpos_init_temp[i];
-            std::cout << qpos_init[i + 8] << ", ";
-          }
+          // Use name-based qposadr lookup instead of hardcoded +8 offset
+          // qpos_init_temp[7..] = [leg, larm, rarm, head]
+          int src_idx = 7;
+          auto copyGroupQpos = [&](const JointGroupAddress& addr) {
+            for (auto iter = addr.qposadr().begin(); iter != addr.qposadr().end() && src_idx < (int)qpos_init_temp.size(); ++iter, ++src_idx) {
+              if (*iter < (int)qpos_init.size()) {
+                qpos_init[*iter] = qpos_init_temp[src_idx];
+                std::cout << qpos_init[*iter] << ", ";
+              }
+            }
+          };
+          copyGroupQpos(LegJointsAddr);
+          copyGroupQpos(LArmJointsAddr);
+          copyGroupQpos(RArmJointsAddr);
+          copyGroupQpos(HeadJointsAddr);
         }
         
         // // 根据机器人类型调整初始高度
@@ -2139,7 +2191,10 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
 
   if(nh.hasParam("robot_version"))
   {
-    nh.getParam("robot_version", robotVersion_);
+    int raw_version = 0;
+    nh.getParam("robot_version", raw_version);
+    robotVersion_ = RobotVersion::create(raw_version).version_number();
+    std::cout << "[mujoco_node] robot_version normalized: " << robotVersion_ << " (from raw: " << raw_version << ")" << std::endl;
   }
 
   if(nh.hasParam("pure_sim"))

@@ -68,6 +68,7 @@ private:
 
         control_mode_ = 0;   // Set default control mode
         is_rl_controller_ = 0.0;  // Initialize RL controller flag
+        initstate_ = vector_t::Zero(num_arm_joints_);
     }
 
     void commandCallback(const kuavo_msgs::armTargetPoses::ConstPtr& msg) {
@@ -87,7 +88,7 @@ private:
         // Extract times and target poses
         scalar_array_t timeTrajectory;
         vector_array_t stateTrajectory;
-        vector_t targetState = observation_.state.segment(armJointStartIndex_,num_arm_joints_);
+        vector_t targetState = getArmStateFromObservationOrZero();
 
         scalar_t currentTime = observation_.time;
 
@@ -129,9 +130,16 @@ private:
         }
         
         // Generate target trajectories
-        auto targetTrajectories = generateTargetTrajectories(timeTrajectory, stateTrajectory, observation_);
+        TargetTrajectories targetTrajectories;
+        try {
+            targetTrajectories = generateTargetTrajectories(timeTrajectory, stateTrajectory, observation_);
+        } catch (const std::exception& e) {
+            ROS_WARN_THROTTLE(1.0, "[ArmTrajNode]: generateTargetTrajectories failed: %s", e.what());
+            return;
+        }
 
         // Publish the target trajectories to MPC
+        if (!validateArmTrajectoriesForPublish(targetTrajectories)) return;
         auto mpcTargetTrajectoriesMsg = ros_msg_conversions::createTargetTrajectoriesMsg(targetTrajectories);
         trajectoryPublisher_.publish(mpcTargetTrajectoriesMsg);
 
@@ -164,12 +172,76 @@ private:
         if (timeTrajectory.empty() || stateTrajectory.empty() || timeTrajectory.size() != stateTrajectory.size()) {
             throw std::runtime_error("[ArmTrajNode]: Invalid time or state trajectory.");
         }
+        for (size_t i = 0; i < stateTrajectory.size(); ++i) {
+            if (stateTrajectory[i].size() != static_cast<size_t>(num_arm_joints_)) {
+                throw std::runtime_error("[ArmTrajNode]: State dimension at index " + std::to_string(i) +
+                                         " is " + std::to_string(stateTrajectory[i].size()) +
+                                         ", expected " + std::to_string(num_arm_joints_) + ".");
+            }
+        }
+        for (size_t i = 1; i < timeTrajectory.size(); ++i) {
+            if (timeTrajectory[i] < timeTrajectory[i - 1]) {
+                throw std::runtime_error("[ArmTrajNode]: Time trajectory is not nondecreasing at index " + std::to_string(i) + ".");
+            }
+        }
 
         // Create input trajectory (dummy inputs)
         size_t inputDim = observation.input.size();
         vector_array_t inputTrajectory(timeTrajectory.size(), vector_t::Zero(inputDim));
 
         return {timeTrajectory, stateTrajectory, inputTrajectory};
+    }
+
+    bool validateArmTrajectoriesForPublish(const TargetTrajectories& traj) {
+        if (traj.timeTrajectory.empty() || traj.stateTrajectory.empty()) {
+            ROS_WARN_THROTTLE(1.0, "[ArmTrajNode]: Refusing to publish empty arm trajectory (time:%zu state:%zu).",
+                              traj.timeTrajectory.size(), traj.stateTrajectory.size());
+            return false;
+        }
+        if (traj.timeTrajectory.size() != traj.stateTrajectory.size()) {
+            ROS_WARN_THROTTLE(1.0, "[ArmTrajNode]: Refusing to publish arm trajectory with mismatched time/state sizes (%zu/%zu).",
+                              traj.timeTrajectory.size(), traj.stateTrajectory.size());
+            return false;
+        }
+        for (size_t i = 0; i < traj.stateTrajectory.size(); ++i) {
+            if (traj.stateTrajectory[i].size() != static_cast<size_t>(num_arm_joints_)) {
+                ROS_WARN_THROTTLE(1.0, "[ArmTrajNode]: Refusing to publish arm trajectory with state[%zu] dim %zu != num_arm_joints_ %d.",
+                                  i, traj.stateTrajectory[i].size(), num_arm_joints_);
+                return false;
+            }
+        }
+        for (size_t i = 1; i < traj.timeTrajectory.size(); ++i) {
+            if (traj.timeTrajectory[i] < traj.timeTrajectory[i - 1]) {
+                ROS_WARN_THROTTLE(1.0, "[ArmTrajNode]: Refusing to publish arm trajectory with nonmonotonic time at index %zu.", i);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    vector_t getArmStateFromObservationOrZero() {
+        const size_t requiredSize = armJointStartIndex_ + static_cast<size_t>(num_arm_joints_);
+        if (observation_.state.size() < requiredSize) {
+            ROS_WARN_THROTTLE(1.0, "[ArmTrajNode]: observation state size %ld < required arm state size %zu, using zero arm state.",
+                              observation_.state.size(), requiredSize);
+            return vector_t::Zero(num_arm_joints_);
+        }
+        return observation_.state.segment(armJointStartIndex_, num_arm_joints_);
+    }
+
+    vector_t getInitialArmState() {
+        const size_t requiredSize = armJointStartIndex_ + static_cast<size_t>(num_arm_joints_);
+        if (observation_.state.size() >= requiredSize) {
+            return observation_.state.segment(armJointStartIndex_, num_arm_joints_);
+        }
+        if (hasLastTargetState_ && lastTargetState_.size() == static_cast<size_t>(num_arm_joints_)) {
+            return lastTargetState_;
+        }
+        if (initstate_.size() == static_cast<size_t>(num_arm_joints_)) {
+            return initstate_;
+        }
+        ROS_WARN_THROTTLE(1.0, "[ArmTrajNode]: No valid initial arm state, using zero arm state.");
+        return vector_t::Zero(num_arm_joints_);
     }
 
     void isRlControllerCallback(const std_msgs::Float64::ConstPtr& msg) {
@@ -241,11 +313,20 @@ private:
         scalar_array_t zeroTimeTrajectory;
         vector_array_t zeroStateTrajectory;
         scalar_t zeroTime = observation_.time;
-        vector_t zeroState = observation_.state.segment(armJointStartIndex_, num_arm_joints_);
+        vector_t zeroState = getArmStateFromObservationOrZero();
         zeroTimeTrajectory.push_back(zeroTime);
         zeroStateTrajectory.push_back(zeroState);
-        auto zeroTrajectories = generateTargetTrajectories(zeroTimeTrajectory, zeroStateTrajectory, observation_);
-        auto mpczeroTrajectoriesMsg = ros_msg_conversions::createTargetTrajectoriesMsg(zeroTrajectories);
+        TargetTrajectories zeroTrajectories;
+        try {
+            zeroTrajectories = generateTargetTrajectories(zeroTimeTrajectory, zeroStateTrajectory, observation_);
+        } catch (const std::exception& e) {
+            ROS_WARN_THROTTLE(1.0, "[ArmTrajNode]: zero trajectory generate failed: %s", e.what());
+        }
+        const bool zero_traj_valid = validateArmTrajectoriesForPublish(zeroTrajectories);
+        ocs2_msgs::mpc_target_trajectories mpczeroTrajectoriesMsg;
+        if (zero_traj_valid) {
+            mpczeroTrajectoriesMsg = ros_msg_conversions::createTargetTrajectoriesMsg(zeroTrajectories);
+        }
         
         bool is_mode_change_success = false;
 
@@ -266,7 +347,9 @@ private:
             // 处理其他ROS回调，让armControlModeCallback等能够更新
             ros::spinOnce();
             
-            trajectoryPublisher_.publish(mpczeroTrajectoriesMsg);
+            if (zero_traj_valid) {
+                trajectoryPublisher_.publish(mpczeroTrajectoriesMsg);
+            }
 
             // if (getArmCtlModeSrv())
             {

@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<mujoco model="7gen_knees">
+  <!-- 最小膝模型：拓扑参考 ankle-conversion 的 biped_s504_Rknee.xml（仅膝并联）
+       2026-04：补全为左右两套膝机构（l_*/r_*），方便 viewer/绘图一致使用。 -->
+  <compiler angle="radian" meshdir="../../../../../kuavo_assets/models/biped_s70/meshes/"/>
+  <option>
+    <flag gravity="disable" />
+  </option>
+
+  <!-- 与 7gen 踝一致：默认大阻尼抑制闭链颤振；膝主关节/knee_bar 仍显式覆盖 -->
+  <default>
+    <joint armature="0.01" damping="0.0" frictionloss="0.0" />
+  </default>
+
+  <asset>
+    <!-- Left -->
+    <mesh name="l_leg_pitch" file="l_leg_pitch.STL"/>
+    <mesh name="l_knee" file="l_knee.STL"/>
+    <mesh name="l_knee_bar" file="l_knee_bar.STL"/>
+    <mesh name="l_knee_tendon" file="l_knee_tendon.STL"/>
+    <!-- Right -->
+    <mesh name="r_leg_pitch" file="r_leg_pitch.STL"/>
+    <mesh name="r_knee" file="r_knee.STL"/>
+    <mesh name="r_knee_bar" file="r_knee_bar.STL"/>
+    <mesh name="r_knee_tendon" file="r_knee_tendon.STL"/>
+  </asset>
+
+  <worldbody>
+    <body name="l_leg_pitch">
+      <inertial pos="0 0 0" mass="1e-6" diaginertia="1e-12 1e-12 1e-12"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 0.05" mesh="l_leg_pitch"/>
+
+      <!-- 对齐 URDF(biped_s601_rleg) 后做左右镜像（y 取反）：
+           r_leg_pitch -> r_knee = (-0.03 -0.1116 -0.498454)
+           => l_leg_pitch -> l_knee = (-0.03  +0.1116 -0.498454) -->
+      <body name="l_knee" pos="-0.03 0.1116 -0.498454">
+        <inertial pos="0.02482871 0.00017211 -0.19017539" mass="3.69763050" diaginertia="0.06114718 0.06011780 0.00307561"/>
+        <joint name="l_knee" pos="0 0 0" axis="0 1 0" range="0 2.53073" damping="0.0"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 0.05" mesh="l_knee"/>
+        <site name="l_knee_eq" pos="0.01438475 -0.0075 0.03689497" type="sphere" group="1" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+      </body>
+
+      <!-- l_leg_pitch -> l_knee_bar = (0 +0.1116 -0.357954) -->
+      <body name="l_knee_bar" pos="0 0.1116 -0.357954">
+        <inertial pos="-0.00791545 -0.00036569 0.01409760" mass="0.26107307" diaginertia="0.00016966 0.00026740 0.00012610"/>
+        <joint name="l_knee_bar" pos="0 0 0" axis="0 -1 0" range="0 2.53073" armature="0.02"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_knee_bar"/>
+        <body name="l_knee_tendon" pos="-0.013781 0 0.038083">
+          <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+          <joint name="l_knee_tendon" pos="0 0 0" type="hinge" axis="0 -1 0" limited="false"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.776471 0.756863 0.737255 1" mesh="l_knee_tendon"/>
+          <!-- connect 第二锚点（eq_data[i][3:6]），与 l_knee_eq 世界坐标一致 -->
+          <geom name="l_knee_tendon_marker" pos="-0.00183425 -0.0075 -0.14168803" type="sphere" contype="0" conaffinity="0" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <site name="l_knee_tendon_site" pos="-0.00183425 -0.0075 -0.14168803" type="sphere" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+        </body>
+      </body>
+    </body>
+
+    <body name="r_leg_pitch">
+      <inertial pos="0 0 0" mass="1e-6" diaginertia="1e-12 1e-12 1e-12"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 0.05" mesh="r_leg_pitch"/>
+
+      <!-- 对齐 URDF(biped_s601_rleg):
+           r_leg_pitch -> r_leg_roll (0 -0.1326 -0.080454)
+                      -> r_leg_yaw  (0  0.021  -0.0801)
+                      -> r_knee     (-0.03 0   -0.3379)
+           => r_leg_pitch -> r_knee = (-0.03 -0.1116 -0.498454) -->
+      <body name="r_knee" pos="-0.03 -0.1116 -0.498454">
+        <inertial pos="0.02482871 -0.00017211 -0.19017539" mass="3.69763050" diaginertia="0.06114718 0.06011780 0.00307561"/>
+        <joint name="r_knee" pos="0 0 0" axis="0 1 0" range="0 2.53073" damping="0.0"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 0.05" mesh="r_knee"/>
+        <site name="r_knee_eq" pos="0.01438475 0.0075 0.03689497" type="sphere" group="1" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+      </body>
+
+      <!-- r_leg_pitch -> r_knee_bar = (0 -0.1116 -0.357954) -->
+      <body name="r_knee_bar" pos="0 -0.1116 -0.357954">
+        <inertial pos="-0.00791545 0.00036569 0.01409760" mass="0.26107307" diaginertia="0.00016966 0.00026740 0.00012610"/>
+        <joint name="r_knee_bar" pos="0 0 0" axis="0 -1 0" range="0 2.53073" armature="0.02"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_knee_bar"/>
+        <body name="r_knee_tendon" pos="-0.013781 0 0.038083">
+          <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+          <joint name="r_knee_tendon" pos="0 0 0" type="hinge" axis="0 -1 0" limited="false"/>
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.776471 0.756863 0.737255 1" mesh="r_knee_tendon"/>
+          <geom name="r_knee_tendon_marker" pos="-0.00183425 0.0075 -0.14168803" type="sphere" contype="0" conaffinity="0" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <site name="r_knee_tendon_site" pos="-0.00183425 0.0075 -0.14168803" type="sphere" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <equality>
+    <connect name="l_knee_eq" body1="l_knee" body2="l_knee_tendon" anchor="0.01438475 -0.0075 0.03689497" solref="0.001 1" />
+    <connect name="r_knee_eq" body1="r_knee" body2="r_knee_tendon" anchor="0.01438475 0.0075 0.03689497" solref="0.001 1" />
+  </equality>
+
+  <actuator>
+    <position name="l_knee_bar" joint="l_knee_bar" kp="0.1" kv="0.1" ctrlrange="0 2.53073" forcerange="-30 30"/>
+    <position name="r_knee_bar" joint="r_knee_bar" kp="0.1" kv="0.1" ctrlrange="0 2.53073" forcerange="-30 30"/>
+  </actuator>
+</mujoco>

@@ -1,0 +1,109 @@
+<launch>
+  <!-- Kuavo 左手腕相机 demo：一个 launch 覆盖 capture / optimize -->
+
+  <arg name="cc_dir" default="$(find kuavo_camera_calibration)" doc="Camera_Calibration 根目录"/>
+  <arg name="csv_dir" default="$(arg cc_dir)/output_csv/kuavo_left_wrist"/>
+  <arg name="do_capture_to_csv" default="true" />
+  <arg name="do_optimize_from_csv" default="false" />
+  <arg name="keyframe_flag_topic" default="/left_wrist_keyframe_flag" />
+  <arg name="keyframe_done_topic" default="/left_wrist_keyframe_done" />
+
+  <arg name="rsp_name" default="robot_state_publisher" />
+  <arg name="capture_name" default="robot_calibration_capture" />
+  <arg name="optimize_name" default="robot_calibration_optimize" />
+
+  <!-- 公共 URDF（所有 demo 共用） -->
+  <param name="robot_description"
+         textfile="$(arg cc_dir)/biped_v3_arm.urdf" />
+
+  <node pkg="robot_state_publisher"
+       type="robot_state_publisher"
+       name="$(arg rsp_name)"
+       output="screen" />
+
+  <!-- /sensors_data_raw -> /joint_states（左臂 7 关节 + 腰） -->
+  <node pkg="robot_calibration"
+       type="sensors_joint_state_bridge.py"
+       name="left_wrist_joint_state_bridge"
+       output="screen">
+    <param name="input" value="/sensors_data_raw" />
+    <param name="output" value="/joint_states" />
+    <param name="publish_waist_joint" value="true" />
+    <param name="waist_joint" value="waist_yaw_joint" />
+    <param name="waist_joint_index" value="12" />
+    <rosparam param="joint_map">
+      <!-- 与仓库 sensorsData 切片约定保持一致：左臂 7 关节 joint_q[13:20] -->
+      - {name: zarm_l1_joint, index: 13}
+      - {name: zarm_l2_joint, index: 14}
+      - {name: zarm_l3_joint, index: 15}
+      - {name: zarm_l4_joint, index: 16}
+      - {name: zarm_l5_joint, index: 17}
+      - {name: zarm_l6_joint, index: 18}
+      - {name: zarm_l7_joint, index: 19}
+    </rosparam>
+  </node>
+
+  <group if="$(arg do_capture_to_csv)">
+    <node pkg="robot_calibration"
+          type="capture_to_csv"
+          name="$(arg capture_name)"
+          clear_params="true"
+          output="screen"
+          required="true"
+          args="--manual">
+      <!-- capture_to_csv 使用私有 NodeHandle("~") 读取 features/chains，所以必须加载到该节点的私有命名空间 -->
+      <rosparam
+          file="$(arg cc_dir)/demos/kuavo_left_wrist/kuavo_left_wrist_capture.yaml"
+          command="load" />
+      <param name="out_dir" value="$(arg csv_dir)" />
+      <param name="print_fk" value="true" />
+      <param name="fk_base" value="base_link" />
+      <param name="fk_tip_camera" value="left_wrist_camera_color_optical_frame" />
+      <param name="fk_tip_board" value="checkerboard_link" />
+      <param name="keyframe_flag_topic" value="$(arg keyframe_flag_topic)" />
+      <param name="keyframe_done_topic" value="$(arg keyframe_done_topic)" />
+    </node>
+  </group>
+
+  <group if="$(arg do_optimize_from_csv)">
+    <node pkg="robot_calibration"
+          type="optimize_from_csv"
+          name="$(arg optimize_name)"
+          clear_params="true"
+          output="screen"
+          required="true">
+      <!-- optimize_from_csv 使用私有 NodeHandle("~") 读取 models/error_blocks/free_*（以及可选 cal_steps） -->
+      <rosparam
+          file="$(arg cc_dir)/demos/kuavo_left_wrist/kuavo_left_wrist_chessboard_calibration.yaml"
+          command="load" />
+      <param name="print_board_obs_pose" value="true" />
+      <param name="outlier_reject_enable" value="true" />
+      <param name="outlier_reject_pos_m" value="0.1" />
+      <param name="outlier_reject_rot_deg" value="10.0" />
+      <param name="output_dir" value="$(arg cc_dir)/output/kuavo_left_wrist" />
+      <param name="fixed_output_names" value="true" />
+      <!-- 共享 calibrated URDF 写到 kuavo_camera_calibration 包根目录 -->
+      <param name="urdf_output_path" value="$(arg cc_dir)/biped_v3_arm_calibrated.urdf" />
+      <param name="csv_dir" value="$(arg csv_dir)" />
+      <param name="verbose" value="false" />
+      <param name="print_fk" value="true" />
+      <param name="fk_base" value="zarm_l1_ref_link" />
+      <param name="fk_tip_camera" value="left_wrist_camera_color_optical_frame" />
+      <param name="fk_tip_board" value="checkerboard_link" />
+      <param name="obs_camera_sensor" value="left_wrist_camera_to_base" />
+      <param name="print_obs_cam_board" value="true" />
+      <param name="print_obs_cam_board_post" value="true" />
+
+      <param name="remap_board_obs_origin" value="true" />
+      <param name="board_obs_sensor" value="tag_to_base" />
+      <param name="board_obs_frame" value="checkerboard_link" />
+      <param name="remap_board_obs_auto_from_grid" value="true" />
+      <param name="board_points_x" value="11" />
+      <param name="board_points_y" value="8" />
+      <param name="board_square_size" value="0.03" />
+      <param name="board_obs_shift_x" value="0.0" />
+      <param name="board_obs_shift_y" value="0.0" />
+      <param name="board_obs_shift_z" value="0.0" />
+    </node>
+  </group>
+</launch>

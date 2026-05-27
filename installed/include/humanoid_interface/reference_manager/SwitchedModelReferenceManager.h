@@ -466,6 +466,8 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   TargetTrajectories currentArmTargetTrajectories_;
   TargetTrajectories currentWaistTargetTrajectories_;
   TargetTrajectories currentArmTargetTrajectoriesWithAllJoints_;
+  TargetTrajectories newArmTargetTrajectoriesWhenTransitioning_;
+  bool hasArmTargetTrajectoriesWhenTransitioning_ = false;
   BufferedValue<TargetTrajectories> armTargetTrajectories_;
   BufferedValue<TargetTrajectories> armFullDofTargetTrajectories_;
 

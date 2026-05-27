@@ -19,6 +19,8 @@
 #include <functional>
 #include <ros/ros.h>
 
+#include "humanoid_controllers/util/TopicMonitor.h"
+
 namespace humanoid_controller
 {
   /**
@@ -36,7 +38,7 @@ namespace humanoid_controller
     /**
      * @brief 析构函数
      */
-    ~RLControllerManager() = default;
+    ~RLControllerManager();
 
     /**
      * @brief 添加控制器
@@ -275,6 +277,42 @@ namespace humanoid_controller
     void changeArmCtrlModeAsync(int mode);
 
     /**
+     * @brief 加载 depth_loco_controller 切换前检查的 ROS 参数
+     */
+    void loadDepthHistoryCheckParams(ros::NodeHandle& nh);
+
+    /**
+     * @brief 检查 depth_loco_controller 切换前的深度历史话题状态
+     * @param log 是否打印检查结果日志（仅做"能否切换"探测时传 false 以免刷屏）
+     */
+    bool isDepthHistoryTopicAvailable(bool log = true);
+
+    /**
+     * @brief 只读探测：在不改变任何状态的前提下，判断"此刻"能否切换到名为 name 的控制器
+     *        （name 为空字符串表示 MPC）。只检查目标侧的前置条件（目标已加载、当前在 MPC 时
+     *        需处于 stance、depth_loco_controller 需深度话题可用等），不检查"当前控制器是否
+     *        允许退出"——后者由调用方在循环外做一次性硬前置判断。
+     */
+    bool canSwitchTo(const std::string& name);
+
+    /**
+     * @brief 从 current_index 出发，沿 dir 方向（+1=下一个，-1=上一个）在 walk_controllers_
+     *        环里找第一个"此刻可切换"的控制器索引（用 canSwitchTo 判定，跳过不可用的）。
+     * @return 找到则返回该索引；环里没有任何可切换的控制器则返回 -1。
+     */
+    int findNextSwitchableIndex(int current_index, int dir);
+
+    /**
+     * @brief 启动深度历史话题后台监控（常驻订阅 + 频率缓存）
+     */
+    void startDepthHistoryMonitor();
+
+    /**
+     * @brief 深度历史话题回调（更新频率缓存）
+     */
+    // 已迁移到 TopicMonitor 内部回调
+
+    /**
      * @brief ROS服务回调：切换控制器
      */
     bool switchControllerCallback(kuavo_msgs::switchController::Request &req, 
@@ -375,6 +413,13 @@ namespace humanoid_controller
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
+    double depth_history_min_frequency_hz_ = 50.0;  ///< depth 历史话题最低频率要求
+    double depth_history_wait_timeout_sec_ = 2.0;   ///< depth 历史话题总等待超时
+    int depth_history_required_samples_ = 10;       ///< depth 历史话题最少采样点数
+    double depth_history_sample_timeout_sec_ = 0.2; ///< 单次等待消息的超时
+
+    // 深度历史话题后台监控（避免切换路径上阻塞等待）
+    TopicMonitor depth_history_monitor_;
   };
 
 } // namespace humanoid_controller

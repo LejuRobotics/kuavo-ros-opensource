@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <csignal>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -51,6 +52,7 @@
 #include "ros/ros.h"
 #include "std_msgs/String.h"
 #include "geometry_msgs/Pose.h"
+#include "geometry_msgs/PoseStamped.h"
 #include "visualization_msgs/Marker.h"
 #include "tf2_ros/transform_broadcaster.h"  // 新增：TF2 广播器
 #include "geometry_msgs/TransformStamped.h" // 新增：TF变换消息
@@ -69,6 +71,11 @@ void ForcePlateHandler(sForcePlates *pForcePlate, void *pUserData);
 #endif
 
 int CreateClient(char *serverIp);
+
+#ifndef _LINUX
+#else
+void sigintHandler(int sig);
+#endif
 
 unsigned int MyServersDataPort = 3130;
 unsigned int MyServersCommandPort = 3131;
@@ -90,6 +97,21 @@ struct ROSPublishers {
     ros::Publisher force_plate_pub;
     ros::Publisher rigid_body_lefthand_pub;
     ros::Publisher rigid_body_righthand_pub;
+    ros::Publisher rigid_body_tag_pub;
+    ros::Publisher rigid_body_base_pose_pub;
+    ros::Publisher rigid_body_shoulder_pub;
+    ros::Publisher rigid_body_effector_pub;
+    ros::Publisher rigid_body_elbow_pub;
+    ros::Publisher rigid_body_belly_pub;
+    ros::Publisher rigid_body_calimark_pub;
+    ros::Publisher rigid_body_joint_1_pub;
+    ros::Publisher rigid_body_joint_2_pub;
+    ros::Publisher rigid_body_joint_3_pub;
+    ros::Publisher rigid_body_joint_4_pub;
+    ros::Publisher rigid_body_joint_5_pub;
+    ros::Publisher rigid_body_joint_6_pub;
+    ros::Publisher rigid_body_joint_7_pub;
+    ros::Publisher rigid_body_joint_end_pub;
     // 位置话题发布者（轮式/手部）
     ros::Publisher rigid_body_r_hand_pose_pub;
     ros::Publisher rigid_body_l_hand_pose_pub;
@@ -234,6 +256,16 @@ int CreateClient(char *szServerIP)
 }
 
 #ifndef _LINUX
+#else
+void sigintHandler(int sig)
+{
+    (void)sig;
+    printf("\nReceived Ctrl+C, shutting down...\n");
+    ros::shutdown();
+}
+#endif
+
+#ifndef _LINUX
 int _tmain(int argc, _TCHAR *argv[])
 #else
 int main(int argc, char *argv[])
@@ -283,13 +315,27 @@ int main(int argc, char *argv[])
     // 这里仍然保留对 Marker 的发布（如果不需要可注释）
     ros_pubs.marker_pub = nh.advertise<visualization_msgs::Marker>("seeker_markers", 1000);
 
-    // ★ 分别为 car 与 robot 创建不同的话题
-    ros_pubs.rigid_body_car_pub = nh.advertise<geometry_msgs::Pose>("car_pose", 1000);
-    ros_pubs.rigid_body_lefthand_pub = nh.advertise<geometry_msgs::Pose>("lefthand_pose", 1000);
-    ros_pubs.rigid_body_righthand_pub = nh.advertise<geometry_msgs::Pose>("righthand_pose", 1000);
-    ros_pubs.rigid_body_robot_pub = nh.advertise<geometry_msgs::Pose>("robot_pose", 1000);
-    ros_pubs.rigid_body_base_pub = nh.advertise<geometry_msgs::Pose>("base_pose", 1000);
-    
+    // ★ 分别为 car / robot / base / shoulder / effector / elbow / belly 刚体创建 PoseStamped 话题
+    ros_pubs.rigid_body_car_pub = nh.advertise<geometry_msgs::PoseStamped>("car_pose", 1000);
+    ros_pubs.rigid_body_lefthand_pub = nh.advertise<geometry_msgs::PoseStamped>("lefthand_pose", 1000);
+    ros_pubs.rigid_body_righthand_pub = nh.advertise<geometry_msgs::PoseStamped>("righthand_pose", 1000);
+    ros_pubs.rigid_body_robot_pub = nh.advertise<geometry_msgs::PoseStamped>("robot_pose", 1000);
+    ros_pubs.rigid_body_base_pub = nh.advertise<geometry_msgs::PoseStamped>("base_pose", 1000);
+    ros_pubs.rigid_body_tag_pub = nh.advertise<geometry_msgs::PoseStamped>("tag_pose", 1000);
+    ros_pubs.rigid_body_base_pose_pub = nh.advertise<geometry_msgs::PoseStamped>("base_pose", 1000);
+    ros_pubs.rigid_body_shoulder_pub = nh.advertise<geometry_msgs::PoseStamped>("shoulder_pose", 1000);
+    ros_pubs.rigid_body_effector_pub = nh.advertise<geometry_msgs::PoseStamped>("effector_pose", 1000);
+    ros_pubs.rigid_body_elbow_pub = nh.advertise<geometry_msgs::PoseStamped>("elbow_pose", 1000);
+    ros_pubs.rigid_body_belly_pub = nh.advertise<geometry_msgs::PoseStamped>("belly_pose", 1000);
+    ros_pubs.rigid_body_calimark_pub = nh.advertise<geometry_msgs::PoseStamped>("calimark_pose", 1000);
+    ros_pubs.rigid_body_joint_1_pub = nh.advertise<geometry_msgs::PoseStamped>("joint_1", 1000);
+    ros_pubs.rigid_body_joint_2_pub = nh.advertise<geometry_msgs::PoseStamped>("joint_2", 1000);
+    ros_pubs.rigid_body_joint_3_pub = nh.advertise<geometry_msgs::PoseStamped>("joint_3", 1000);
+    ros_pubs.rigid_body_joint_4_pub = nh.advertise<geometry_msgs::PoseStamped>("joint_4", 1000);
+    ros_pubs.rigid_body_joint_5_pub = nh.advertise<geometry_msgs::PoseStamped>("joint_5", 1000);
+    ros_pubs.rigid_body_joint_6_pub = nh.advertise<geometry_msgs::PoseStamped>("joint_6", 1000);
+    ros_pubs.rigid_body_joint_7_pub = nh.advertise<geometry_msgs::PoseStamped>("joint_7", 1000);
+    ros_pubs.rigid_body_joint_end_pub = nh.advertise<geometry_msgs::PoseStamped>("joint_end", 1000);    
     // 位置话题发布者
     ros_pubs.rigid_body_r_hand_pose_pub = nh.advertise<geometry_msgs::Pose>("r_hand_pose", 1000);
     ros_pubs.rigid_body_l_hand_pose_pub = nh.advertise<geometry_msgs::Pose>("l_hand_pose", 1000);
@@ -305,10 +351,19 @@ int main(int argc, char *argv[])
     CallbackData callback_data;
     callback_data.ros_pubs = &ros_pubs;
 
-    // 初始化 SeekerSDK 客户端并连接
+    // 初始化 SeekerSDK 客户端并连接：支持命令行参数或交互输入
     char ipBuf[100] = {0};
-    printf("Please input the server IP\n");
-    scanf("%s", ipBuf);
+    if (argc >= 2)
+    {
+        strncpy(ipBuf, argv[1], sizeof(ipBuf) - 1);
+        ipBuf[sizeof(ipBuf) - 1] = '\0';
+        printf("Server IP (from args): %s\n", ipBuf);
+    }
+    else
+    {
+        printf("Please input the server IP\n");
+        scanf("%s", ipBuf);
+    }
 
     iResult = CreateClient(ipBuf);
     if (iResult != ErrorCode_OK)
@@ -326,6 +381,12 @@ int main(int argc, char *argv[])
         printf("Client initialized and ready.\n");
     }
 
+#ifndef _LINUX
+#else
+    signal(SIGINT, sigintHandler);
+    signal(SIGTERM, sigintHandler);
+#endif
+
     // 将客户端指针赋值给回调数据
     callback_data.client = theClient;
 
@@ -338,12 +399,10 @@ int main(int argc, char *argv[])
         ros::spin();
     });
 
-#ifndef _LINUX
-    getch();
-#else
-    getchar();
-    getchar();
-#endif
+    while (ros::ok())
+    {
+        ros::Duration(0.1).sleep();
+    }
 
     // 清理工作
     theClient->Uninitialize();
@@ -394,26 +453,31 @@ void DataHandler(sFrameOfMocapData *data, void *pUserData)
             pose.position.z = markerset->Markers[i_Marker][2];
             pose.orientation.w = 1.0; // 无方向
 
-            marker_msg.id = i * 1000 + i_Marker;
+            marker_msg.header.frame_id = markerset->szName;
+            marker_msg.id = i_Marker;
             marker_msg.pose = pose;
             publishers->marker_pub.publish(marker_msg);
         }
     }
 
     // -------------------
-    // 2) 分别发布 car 和 robot 刚体
+    // 2) 分别发布 car / robot / base / shoulder / effector / elbow / belly 等刚体
+    //    使用 PoseStamped，并在同一帧内共用 current_time 作为时间戳
     // -------------------
     for (int i = 0; i < data->nRigidBodies; i++)
     {
-        // 取出刚体的位姿
-        geometry_msgs::Pose rb_pose;
-        rb_pose.position.x = data->RigidBodies[i].x;
-        rb_pose.position.y = data->RigidBodies[i].y;
-        rb_pose.position.z = data->RigidBodies[i].z;
-        rb_pose.orientation.x = data->RigidBodies[i].qx;
-        rb_pose.orientation.y = data->RigidBodies[i].qy;
-        rb_pose.orientation.z = data->RigidBodies[i].qz;
-        rb_pose.orientation.w = data->RigidBodies[i].qw;
+        // 取出刚体的位姿（统一封装为 PoseStamped，方便外部获取时间戳）
+        geometry_msgs::PoseStamped rb_pose_stamped;
+        rb_pose_stamped.header.stamp = current_time;      // 同一帧内保持一致的时间戳
+        rb_pose_stamped.header.frame_id = "mocap_frame";  // 统一坐标系（如需可根据实际修改）
+
+        rb_pose_stamped.pose.position.x = data->RigidBodies[i].x;
+        rb_pose_stamped.pose.position.y = data->RigidBodies[i].y;
+        rb_pose_stamped.pose.position.z = data->RigidBodies[i].z;
+        rb_pose_stamped.pose.orientation.x = data->RigidBodies[i].qx;
+        rb_pose_stamped.pose.orientation.y = data->RigidBodies[i].qy;
+        rb_pose_stamped.pose.orientation.z = data->RigidBodies[i].qz;
+        rb_pose_stamped.pose.orientation.w = data->RigidBodies[i].qw;
 
         // 根据 RigidBody ID 查找名称
         int rbID = data->RigidBodies[i].ID;
@@ -424,11 +488,11 @@ void DataHandler(sFrameOfMocapData *data, void *pUserData)
             // 判断名称来发布到不同话题
             if (rbName == "car_pose")
             {
-                publishers->rigid_body_car_pub.publish(rb_pose);
+                publishers->rigid_body_car_pub.publish(rb_pose_stamped);
             }
             else if (rbName == "robot")
             {
-                publishers->rigid_body_robot_pub.publish(rb_pose);
+                publishers->rigid_body_robot_pub.publish(rb_pose_stamped);
                 
                 // 发布 TF: mocap_frame -> mocap_robot
                 geometry_msgs::TransformStamped transform_robot;
@@ -437,19 +501,19 @@ void DataHandler(sFrameOfMocapData *data, void *pUserData)
                 transform_robot.child_frame_id = "mocap_robot";
                 
                 // 设置变换的平移部分
-                transform_robot.transform.translation.x = rb_pose.position.x;
-                transform_robot.transform.translation.y = rb_pose.position.y;
-                transform_robot.transform.translation.z = rb_pose.position.z;
+                transform_robot.transform.translation.x = rb_pose_stamped.pose.position.x;
+                transform_robot.transform.translation.y = rb_pose_stamped.pose.position.y;
+                transform_robot.transform.translation.z = rb_pose_stamped.pose.position.z;
                 
                 // 设置变换的旋转部分
-                transform_robot.transform.rotation = rb_pose.orientation;
+                transform_robot.transform.rotation = rb_pose_stamped.pose.orientation;
                 
                 // 广播变换
                 publishers->tf_broadcaster.sendTransform(transform_robot);
             }
             else if (rbName == "base")
             {
-                publishers->rigid_body_base_pub.publish(rb_pose);
+                publishers->rigid_body_base_pub.publish(rb_pose_stamped);
                 
                 // 发布 TF: mocap_frame -> mocap_base
                 geometry_msgs::TransformStamped transform_base;
@@ -458,23 +522,83 @@ void DataHandler(sFrameOfMocapData *data, void *pUserData)
                 transform_base.child_frame_id = "mocap_base";
                 
                 // 设置变换的平移部分
-                transform_base.transform.translation.x = rb_pose.position.x;
-                transform_base.transform.translation.y = rb_pose.position.y;
-                transform_base.transform.translation.z = rb_pose.position.z;
+                transform_base.transform.translation.x = rb_pose_stamped.pose.position.x;
+                transform_base.transform.translation.y = rb_pose_stamped.pose.position.y;
+                transform_base.transform.translation.z = rb_pose_stamped.pose.position.z;
                 
                 // 设置变换的旋转部分
-                transform_base.transform.rotation = rb_pose.orientation;
+                transform_base.transform.rotation = rb_pose_stamped.pose.orientation;
                 
                 // 广播变换
                 publishers->tf_broadcaster.sendTransform(transform_base);
             }
             else if (rbName == "righthand")
             {
-                publishers->rigid_body_righthand_pub.publish(rb_pose);
+                publishers->rigid_body_righthand_pub.publish(rb_pose_stamped);
             }
             else if (rbName == "lefthand")
             {
-                publishers->rigid_body_lefthand_pub.publish(rb_pose);
+                publishers->rigid_body_lefthand_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "tag")
+            {
+                publishers->rigid_body_tag_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "base_pose")
+            {
+                publishers->rigid_body_base_pose_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "shoulder")
+            {
+                publishers->rigid_body_shoulder_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "effector")
+            {
+                publishers->rigid_body_effector_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "elbow")
+            {
+                publishers->rigid_body_elbow_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "belly")
+            {
+                publishers->rigid_body_belly_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "calimark")
+            {
+                publishers->rigid_body_calimark_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "joint_1")
+            {
+                publishers->rigid_body_joint_1_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "joint_2")
+            {
+                publishers->rigid_body_joint_2_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "joint_3")
+            {
+                publishers->rigid_body_joint_3_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "joint_4")
+            {
+                publishers->rigid_body_joint_4_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "joint_5")
+            {
+                publishers->rigid_body_joint_5_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "joint_6")
+            {
+                publishers->rigid_body_joint_6_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "joint_7")
+            {
+                publishers->rigid_body_joint_7_pub.publish(rb_pose_stamped);
+            }
+            else if (rbName == "joint_end")
+            {
+                publishers->rigid_body_joint_end_pub.publish(rb_pose_stamped);
             }
             else if (rbName == "r_hand_pose")
             {

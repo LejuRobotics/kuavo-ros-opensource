@@ -54,7 +54,7 @@ class BatteryInfoReader:
     def read_battery_info(self, battery_id):
         """
         读取电池信息
-        :param battery_id: 电池ID (0: BAT1/左电池, 1: BAT2/右电池)
+        :param battery_id: 电池ID (0: BAT1/右电池, 1: BAT2/左电池)
         :return: 电池信息字典或None
         """
         # 加锁，防止定时器和服务的串口访问冲突
@@ -64,12 +64,12 @@ class BatteryInfoReader:
     def _read_battery_info_unlocked(self, battery_id):
         """
         读取电池信息（无锁版本）
-        :param battery_id: 电池ID (0: BAT1/左电池, 1: BAT2/右电池)
+        :param battery_id: 电池ID (0: BAT1/右电池, 1: BAT2/左电池)
         :return: 电池信息字典或None
         """
         # 验证 battery_id 范围
         if battery_id not in [0, 1]:
-            rospy.logerr(f"无效的电池ID: {battery_id}，仅支持 0(左电池) 或 1(右电池)")
+            rospy.logerr(f"无效的电池ID: {battery_id}，仅支持 0(右电池) 或 1(左电池)")
             return None
 
         # 构建数据包

@@ -8,7 +8,7 @@
 #include "humanoid_controllers/LowPassFilter.h"
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "kuavo_msgs/ExecuteArmAction.h"
 #include "kuavo_msgs/changeArmCtrlMode.h"
 #include <openvino/openvino.hpp>
@@ -138,7 +138,7 @@ namespace humanoid_controller
     // 真实/机型配置
     bool is_real_{false};
     bool is_roban_{false};
-    AnkleSolver ankleSolver_;
+    kuavo_solver::AnkleSolver ankleSolver_;
 
 
     // AMP

@@ -36,7 +36,7 @@ from std_msgs.msg import Float64MultiArray, String, Bool
 from trajectory_msgs.msg import JointTrajectory
 from humanoid_plan_arm_trajectory.msg import RobotActionState
 from humanoid_plan_arm_trajectory.srv import ExecuteArmAction, ExecuteArmActionResponse  # Import new service type
-from std_srvs.srv  import Trigger, TriggerResponse  # 中断服务依赖 
+from std_srvs.srv  import Trigger, TriggerResponse, SetBool, SetBoolResponse  # 中断服务依赖
 
 # 根据机器人型号确定关节数据
 KUAVO = "kuavo"
@@ -66,7 +66,9 @@ class ArmTrajectoryBezierDemo:
         self.robot_class = KUAVO if self.robot_version.major() >= 4 else ROBAN
         self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "multi")
         # KUAVO v50+ 有腰部关节
-        self.has_waist = (self.robot_version.major() == 5) if self.robot_class == KUAVO else False
+        self.has_waist = (self.robot_version.major() in (5,6)) if self.robot_class == KUAVO else False
+        # KUAVO v60+ 为轮臂模型，joint_q 布局与双足版本不同
+        self.is_wheeled = (self.robot_version.major() == 6) if self.robot_class == KUAVO else False
        
         if self.robot_class == KUAVO:
             # 根据是否有腰部关节确定TACT长度
@@ -116,6 +118,7 @@ class ArmTrajectoryBezierDemo:
         # Initialize ROS node
         rospy.init_node('autostart_arm_trajectory_bezier_demo')
         self.arm_restore_flag = rospy.get_param('~arm_restore_flag', True)
+        self.keep_arm_pose = False
         
         # 从 RL/MPC 配置文件分别读取肩部 roll 默认偏移（启动时加载一次）
         self._rl_shoulder_roll, self._mpc_shoulder_roll = self._load_shoulder_roll_offsets()
@@ -199,6 +202,9 @@ class ArmTrajectoryBezierDemo:
         # Add service to execute arm actions
         self.execute_service = rospy.Service('/execute_arm_action', ExecuteArmAction, self.handle_execute_action)
         self._interrupt_service = rospy.Service('/interrupt_arm_traj', Trigger, self.handle_interrupt  )
+        self._keep_arm_pose_service = rospy.Service(
+            '/humanoid_plan_arm_trajectory/keep_arm_pose', SetBool, self.handle_keep_arm_pose
+        )
 
         # Store the file path base directory for actions
         # self.action_files_path = "/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_plan_arm_trajectory/script/action_files"
@@ -298,29 +304,54 @@ class ArmTrajectoryBezierDemo:
         if hasattr(self, "_last_joint_msg"):
             self._update_current_arm_joint_state(self._last_joint_msg, self._last_hand_msg)
 
+    # --- 各机型 joint_q 提取函数 ---
+
+    def _extract_kuavo_wheeled(self, joint_q, hand_part):
+        """轮臂模型 (v60+): [knee, leg, waist_pitch, waist_yaw, arm_l*7, arm_r*7, head*2]"""
+        return list(joint_q[4:18]) + hand_part + list(joint_q[-2:]) + [joint_q[3]]
+
+    def _extract_kuavo_biped(self, joint_q, hand_part):
+        """双足模型 (v4x): [leg*12, arm*14, head*2]"""
+        return list(joint_q[12:26]) + hand_part + list(joint_q[-2:])
+
+    def _extract_kuavo_biped_waist(self, joint_q, hand_part):
+        """双足模型+腰部 (v50): [leg*12, waist, arm*14, head*2]"""
+        return list(joint_q[13:27]) + hand_part + list(joint_q[-2:]) + [joint_q[12]]
+
+    def _extract_roban(self, joint_q, hand_part):
+        """ROBAN: [hand*12, waist, arm*8, head*2]"""
+        return list(joint_q[13:21]) + hand_part + list(joint_q[21:23]) + [joint_q[12]]
+
+    # 函数注册表：机型 key -> 提取函数
+    _JOINT_EXTRACTORS = {}
+
+    def _get_extractor_key(self):
+        """根据当前机器人配置，返回对应的提取函数 key"""
+        if self.robot_class == ROBAN:
+            return "ROBAN"
+        if self.is_wheeled:
+            return "KUAVO_WHEELED"
+        if self.has_waist:
+            return "KUAVO_BIPED_WAIST"
+        if self.robot_class == KUAVO:
+            return "KUAVO_BIPED"
+        raise RuntimeError(
+            f"Unknown robot config: class={self.robot_class}, is_wheeled={self.is_wheeled}, "
+            f"has_waist={self.has_waist}, version={self.robot_version.version_name()}"
+        )
+
+    @staticmethod
+    def _extract_hand_part(hand_msg):
+        """从手部话题提取手部关节数据，不足12个补零"""
+        return list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+
     def _update_current_arm_joint_state(self, joint_msg, hand_msg):
         """整合 joint_msg 和 hand_msg，更新 current_arm_joint_state"""
-        if self.robot_class == KUAVO:
-            arm_part = list(joint_msg.joint_data.joint_q[12:26])
-            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
-            head_part = list(joint_msg.joint_data.joint_q[-2:])
-            if self.has_waist:
-                # KUAVO v50+: 腰部关节在joint_q[12]位置
-                waist_part = [joint_msg.joint_data.joint_q[12]]
-                self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
-            else:
-                self.current_arm_joint_state = arm_part + hand_part + head_part
+        joint_q = joint_msg.joint_data.joint_q
+        hand_part = self._extract_hand_part(hand_msg)
 
-        elif self.robot_class == ROBAN:
-            # 按照 joint_q 索引顺序定义变量
-            hand_part = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12  # 对应 joint_q[0:12]
-            waist_part = [joint_msg.joint_data.joint_q[12]]  # 对应 joint_q[12]
-            arm_part = list(joint_msg.joint_data.joint_q[13:21])  # 对应 joint_q[13:21]
-            head_part = list(joint_msg.joint_data.joint_q[21:23])  # 对应 joint_q[21:23]
-            # 保持最终组合顺序不变：arm_part + hand_part + head_part + waist_part
-            self.current_arm_joint_state = arm_part + hand_part + head_part + waist_part
-
-        self.current_arm_joint_state = [round(v, 5) for v in self.current_arm_joint_state]
+        extractor = self._JOINT_EXTRACTORS[self._get_extractor_key()]
+        self.current_arm_joint_state = [round(v, 5) for v in extractor(self, joint_q, hand_part)]
 
     def _kuavo_arm_traj_callback(self, msg):
         """缓存 /kuavo_arm_traj 最新消息，供 create_action_data 使用"""
@@ -993,6 +1024,26 @@ class ArmTrajectoryBezierDemo:
                     ])
         return action_data
 
+    def crop_frames_from_first(self, frames, first_keyframe):
+        """按 tact 原始 first 裁剪动作段，并将剩余 keyframe 归零。"""
+        import copy
+
+        first_keyframe = int(first_keyframe)
+        cropped_frames = []
+        for frame in frames:
+            keyframe = frame.get("keyframe", 0)
+            if keyframe >= first_keyframe:
+                new_frame = copy.deepcopy(frame)
+                new_frame["keyframe"] = keyframe - first_keyframe
+                cropped_frames.append(new_frame)
+
+        if not cropped_frames and frames:
+            new_frame = copy.deepcopy(frames[-1])
+            new_frame["keyframe"] = 0
+            cropped_frames.append(new_frame)
+
+        return cropped_frames
+
     def filter_data(self, action_data):
         filtered_action_data = {}
         for key, frames in action_data.items():
@@ -1158,9 +1209,13 @@ class ArmTrajectoryBezierDemo:
         self.publish_action_state(2)
         self.arm_flag = False
         # 动作播放完成以后恢复机器人初始状态
-        if self.arm_restore_flag:
+        if self.arm_restore_flag and not self.keep_arm_pose:
             self.reset_robot_state()
-        rospy.loginfo(f"After the action playback is complete, revert the robot initial state ")
+            rospy.loginfo("After the action playback is complete, revert the robot initial state")
+        elif self.keep_arm_pose:
+            rospy.loginfo("After the action playback is complete, keep arm pose at the last tact frame")
+        else:
+            rospy.loginfo("After the action playback is complete, arm restore is disabled")
 
     def stop_action(self):
         if self._timer:
@@ -1354,6 +1409,15 @@ class ArmTrajectoryBezierDemo:
             message=f"动作于{time.strftime('%Y-%m-%d  %H:%M:%S')}成功中断"
         )
 
+    def handle_keep_arm_pose(self, req):
+        self.keep_arm_pose = req.data
+        if self.keep_arm_pose:
+            message = "keep_arm_pose enabled: action will keep arm pose at the last tact frame"
+        else:
+            message = "keep_arm_pose disabled: action will reset arm pose after completion"
+        rospy.loginfo(message)
+        return SetBoolResponse(success=True, message=message)
+
     def handle_execute_action(self, req):
         action_name = req.action_name
 
@@ -1418,6 +1482,7 @@ class ArmTrajectoryBezierDemo:
             42: [42],
             45: [43, 45, 46, 48, 49, 100045, 100049, 200049, 300049, 400049],
             52: [52, 53, 54, 55],
+            62: [60,61,62, 63, 200062, 300062],
             11: [11, 13, 14, 15, 16, 17],
             13: [11, 13, 14, 15, 16, 17],
             14: [11, 13, 14, 15, 16, 17],
@@ -1495,6 +1560,11 @@ class ArmTrajectoryBezierDemo:
                 frames.insert(0, init_stand_frame)
                 rospy.loginfo("0f处没有动作帧，已添加初始站立帧")
 
+        if current_control_mode == "rl":
+            frames = self.crop_frames_from_first(frames, first_value)
+            self.START_FRAME_TIME = 0
+            self.x_shift = 0
+
         action_data = self.add_init_frame(frames, is_rl=current_control_mode == "rl")
 
         # 根据实际计算的过渡时间更新结束时间
@@ -1505,7 +1575,10 @@ class ArmTrajectoryBezierDemo:
                 last_keyframe = max(f.get("keyframe", 0) for f in frames)
                 # 将 keyframe 转换为秒并更新 END_FRAME_TIME
                 self.END_FRAME_TIME = last_keyframe * 0.01
-        filtered_data = self.filter_data(action_data)
+        if current_control_mode == "rl":
+            filtered_data = action_data
+        else:
+            filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
         rospy.loginfo(f"Planning arm trajectory for action: {action_name}...")
@@ -1553,6 +1626,14 @@ class ArmTrajectoryBezierDemo:
 
         if self.interrupt_flag: 
             self.interrupt_flag  = False
+
+# 在类定义完成后注册提取函数到注册表
+ArmTrajectoryBezierDemo._JOINT_EXTRACTORS = {
+    "KUAVO_WHEELED":     ArmTrajectoryBezierDemo._extract_kuavo_wheeled,
+    "KUAVO_BIPED":       ArmTrajectoryBezierDemo._extract_kuavo_biped,
+    "KUAVO_BIPED_WAIST": ArmTrajectoryBezierDemo._extract_kuavo_biped_waist,
+    "ROBAN":             ArmTrajectoryBezierDemo._extract_roban,
+}
 
 if __name__ == "__main__":
     demo = ArmTrajectoryBezierDemo()

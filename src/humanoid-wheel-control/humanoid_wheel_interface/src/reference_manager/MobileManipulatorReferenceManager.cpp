@@ -3048,8 +3048,6 @@ namespace mobile_manipulator {
     Eigen::VectorXd qNullSpace = initial_q.tail(info_.armDim);  // 零空间解初始为当前手臂关节状态
     switch (req.isWholeBody)  // 只计算位置优先
     {
-      switch (req.isWholeBody)  // 先计算位姿精确ik解
-      {
         case true:  // 全身运动
         {
           std::cout << "[checkTargetPoseReachableService] Using whole-body IK solver." << std::endl;
@@ -3068,7 +3066,6 @@ namespace mobile_manipulator {
           qNullSpace = solution.tail(info_.armDim);
           break;
         }
-      }
     }
 
     res.posPriorityAccess = ikSolverDiff_.isBestSolutionWithinPosThreshold();
