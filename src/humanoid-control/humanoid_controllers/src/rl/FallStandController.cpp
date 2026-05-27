@@ -1052,6 +1052,13 @@ namespace humanoid_controller
     if (alpha >= 1.0)
     {
       is_fall_stand_interpolating_complete_ = true;
+      // 插值完成，恢复之前 override 的 use_default_motor_csp_kpkd_
+      if (fallstand_override_use_default_kpkd_active_)
+      {
+        use_default_motor_csp_kpkd_ = fallstand_prev_use_default_motor_csp_kpkd_;
+        fallstand_override_use_default_kpkd_active_ = false;
+        ROS_INFO("[%s] FallStand: interpolation complete, restored use_default_motor_csp_kpkd_=%d", name_.c_str(), static_cast<int>(use_default_motor_csp_kpkd_));
+      }
     }
   }
 
@@ -1072,6 +1079,12 @@ namespace humanoid_controller
     {
       ROS_WARN("[%s] sensor_data.jointPos_ size(%ld) < total_body_joints(%d), skip interpolation.",
                name_.c_str(), sensor_data.jointPos_.size(), total_body_joints);
+      // 恢复之前可能被覆盖的 use_default_motor_csp_kpkd_ 标志
+      if (fallstand_override_use_default_kpkd_active_)
+      {
+        use_default_motor_csp_kpkd_ = fallstand_prev_use_default_motor_csp_kpkd_;
+        fallstand_override_use_default_kpkd_active_ = false;
+      }
       is_fall_stand_interpolating_ = false;
       is_fall_stand_interpolating_complete_ = false;
       return;
@@ -1099,6 +1112,16 @@ namespace humanoid_controller
     fall_stand_interp_start_time_ = time.toSec();
     is_fall_stand_interpolating_ = true;
     is_fall_stand_interpolating_complete_ = false;
+    // 在开始插值时，如果是实物，则临时设置 use_default_motor_csp_kpkd_ = true
+    if (is_real_ && !fallstand_override_use_default_kpkd_active_)
+    {
+      // 保存之前的值
+      fallstand_prev_use_default_motor_csp_kpkd_ = use_default_motor_csp_kpkd_;
+      // 强制使用默认 kuavo.json 中的 kp/kd，这样 replaceDefaultEcMotorPdoGait 在后续流程中会将 kp/kd 恢复为默认值
+      use_default_motor_csp_kpkd_ = true;
+      fallstand_override_use_default_kpkd_active_ = true;
+      ROS_INFO("[%s] FallStand: temporarily set use_default_motor_csp_kpkd_ = true for interpolation", name_.c_str());
+    }
     
     std::cout << "[FallStandInterpolation] start, required_time: " << fall_stand_required_time_
               << " s, joints: " << total_body_joints << " fall_stand_start_pos_: " << fall_stand_start_pos_.transpose() 
