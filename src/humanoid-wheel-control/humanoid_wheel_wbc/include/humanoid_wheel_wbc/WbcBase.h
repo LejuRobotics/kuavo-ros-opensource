@@ -60,6 +60,9 @@ namespace ocs2
       Task formulateTorsoZeroAccTask();
       Task formulateBaseAccTask();
 
+      void processArmJointErrorsWithSafe(vector_t& pos_error, vector_t& vel_error);
+      void processLowJointErrorsWithSafe(vector_t& pos_error, vector_t& vel_error);
+
       Eigen::Vector3d bodyToWorldVelocity(double v_body, double vyaw_body, double yaw);
 
       void updateMeasured(const vector_t &stateMeasured, const vector_t &inputMeasured);

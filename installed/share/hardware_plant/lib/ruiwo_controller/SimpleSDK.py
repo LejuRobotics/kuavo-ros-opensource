@@ -240,7 +240,7 @@ class RUIWOTools:
                     arbitration_id=arbitration_id,
                     is_extended_id=False,
                     dlc=0x08,
-                    data=[0x67, 0x06, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x76],
+                    data=[0x67, 0x06, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x76],
                 )
                 self.dev.send(tx_msg, self.dev_info["timeout"])
             except Exception as exc:
