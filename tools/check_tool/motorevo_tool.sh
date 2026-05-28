@@ -94,6 +94,16 @@ main() {
             --cali)
                 extra_args="--cali"
                 shift
+                # 收集后续参数（可能是 --qibeng 或电机ID）
+                while [[ $# -gt 0 && ! $1 == --* ]]; do
+                    extra_args="$extra_args $1"
+                    shift
+                done
+                ;;
+            --qibeng)
+                # 气泵版参数
+                extra_args="$extra_args --qibeng"
+                shift
                 ;;
             --set-zero)
                 extra_args="--set-zero"

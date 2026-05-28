@@ -1131,10 +1131,10 @@ lowJointAccelTask
 {
   kp
   {
-    (0,0)   350.00   ; knee_pitch
-    (1,0)   350.00   ; leg_pitch
-    (2,0)   350.00   ; waist_pitch
-    (3,0)   350.00   ; waist_yaw_link
+    (0,0)   150.00   ; knee_pitch
+    (1,0)   150.00   ; leg_pitch
+    (2,0)   150.00   ; waist_pitch
+    (3,0)   150.00   ; waist_yaw_link
   }
   kd
   {
@@ -1191,14 +1191,14 @@ armAccelTask
 {
   kp
   {
-    (0,0)   1200.0  ; zarm_l1_joint
+    (0,0)   300.0  ; zarm_l1_joint
     (1,0)   64.0   ; zarm_l2_joint
     (2,0)   64.0   ; zarm_l3_joint
     (3,0)   300.0  ; zarm_l4_joint
     (4,0)   70.0   ; zarm_l5_joint
     (5,0)   70.0   ; zarm_l6_joint
     (6,0)   70.0   ; zarm_l7_joint
-    (7,0)   1200.0  ; zarm_r1_joint
+    (7,0)   300.0  ; zarm_r1_joint
     (8,0)   64.0   ; zarm_r2_joint
     (9,0)   64.0   ; zarm_r3_joint
     (10,0)  300.0  ; zarm_r4_joint
