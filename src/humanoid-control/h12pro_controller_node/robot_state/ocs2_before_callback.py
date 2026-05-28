@@ -302,7 +302,7 @@ LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoc
 # LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12"
 LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 start_way:=auto"
 LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD = "roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=h12 start_way:=auto"
-LAUNCH_VR_REMOTE_CONTROL_CMD = "roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch"
+LAUNCH_VR_REMOTE_CONTROL_CMD = os.getenv("LAUNCH_VR_REMOTE_CONTROL_CMD")
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
 ROS_HOSTNAME = os.getenv("ROS_HOSTNAME")
@@ -1149,4 +1149,3 @@ def stop_stair_detect_callback(event):
         rospy.logerr(f"Service call failed: {e}")
     except Exception as e:
         rospy.logerr(f"Unexpected error in stop_stair_detect_callback: {e}")
-

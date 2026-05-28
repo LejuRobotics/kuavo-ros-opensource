@@ -16,5 +16,5 @@
     <!-- noitom_hi5_hand_udp_python -->
     <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen">
     </node>
-    <node pkg="noitom_hi5_hand_udp_python" type="webrtc_videostream.py" name="webrtc_videostream" args="$(arg camera_publisher_name)" output="screen"/>
+    <node pkg="noitom_hi5_hand_udp_python" type="webrtc_videostream.py" name="webrtc_videostream" args="$(arg camera_publisher_name) $(arg ip_address)" output="screen"/>
 </launch>
