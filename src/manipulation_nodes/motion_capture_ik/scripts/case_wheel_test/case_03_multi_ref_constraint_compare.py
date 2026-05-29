@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""Case03：固定期望位姿对比 constraint_mode。位姿参考系: waist_yaw_link。"""
 
 import math
 
@@ -29,10 +30,10 @@ def euler_zyx_deg_to_quat_xyzw(roll_deg, pitch_deg, yaw_deg):
 def main():
     api = ArmsIKApi("case_03_multi_ref_constraint_compare")
 
-    # 期望末端位置（m）
-    left_pos = [0.45, 0.25, 0.22]       #以腰部waist_yaw_link为参考系
+    # 期望末端位置（m），参考系: waist_yaw_link
+    left_pos = [0.45, 0.25, 0.22]
     right_pos = [0.45, -0.25, 0.22]
-    # 期望末端姿态用欧拉角配置（deg），更方便用户改参数
+    # 期望末端姿态：欧拉角 (roll, pitch, yaw) deg，相对 waist_yaw_link
     left_rpy_deg = [0.0, -90, 0.0]
     right_rpy_deg = [0.0, -90, 0.0]
     left_quat = euler_zyx_deg_to_quat_xyzw(*left_rpy_deg)

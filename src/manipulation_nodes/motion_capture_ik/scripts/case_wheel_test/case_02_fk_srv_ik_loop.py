@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""Case02：FK 闭环 + 单参考 Service IK。FK/IK 目标位姿约定为 waist_yaw_link 系。"""
 
 import time
 import numpy as np
@@ -17,7 +18,7 @@ def main():
     if not fk_res.success:
         return
 
-    # 计算正解得到的末端位姿
+    # FK 正解位姿作为 IK 目标（参考系: waist_yaw_link）
     target_pose = fk_res.hand_poses
 
     # 执行关节跟踪

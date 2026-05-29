@@ -2,6 +2,8 @@
 
 本文档说明 `scripts/case_wheel_test/` 下 6 个案例脚本的使用方法、参数、依赖话题/服务，以及常见输出含义。
 
+**坐标系**：case00~case05 中的末端期望位置、姿态（及 case04 肘部点）均在 **`waist_yaw_link`** 坐标系下给出（位置单位 m）。
+
 ## 1. 目录与脚本
 
 目录：
@@ -33,7 +35,7 @@
 
 - `default_ik_param(constraint_mode=...)`
   - 可切换约束模式（详见 case3）
-  - 默认容差均为 `1e-3`（见 3.4 节；求解失败时可适当放宽）
+  - 默认容差均为 `1e-3`（见 2.4 节；求解失败时可适当放宽）
 
 ### 2.2 关节初值来源
 
@@ -93,7 +95,7 @@ cmd = api.build_two_arm_cmd(..., ik_param=ik_param)
 
 ## Case 0: `case_00_desired_pose_ik.py`
 
-在脚本 `main()` 中配置双手期望末端位姿（位置 m + 欧拉角 RPY deg），通过命令行参数 **`--mode`** 选择**一种** IK 方式执行，打印求解结果与位姿误差。
+在脚本 `main()` 中配置双手期望末端位姿（位置 m + 欧拉角 RPY deg），通过命令行参数 **`--mode`** 选择**一种** IK 方式执行。
 
 流程：
 
@@ -103,9 +105,9 @@ cmd = api.build_two_arm_cmd(..., ik_param=ik_param)
 
 | `--mode` | 接口 | 说明 |
 |----------|------|------|
-| `topic` | `/ik/two_arm_hand_pose_cmd` | 订阅 `/ik/result` 获取结果；**不做** waist_yaw 变换 |
-| `srv` | `/ik/two_arm_hand_pose_cmd_srv` | 单参考 q0 + 粗解→二分 refinement；轮臂下做 waist_yaw 变换 |
-| `muli_refer` | `/ik/two_arm_hand_pose_cmd_srv_muli_refer` | 多参考初值尝试并择优；轮臂下做 waist_yaw 变换 |
+| `topic` | `/ik/two_arm_hand_pose_cmd` | 订阅 `/ik/result` |
+| `srv` | `/ik/two_arm_hand_pose_cmd_srv` | 单参考 Service |
+| `muli_refer` | `/ik/two_arm_hand_pose_cmd_srv_muli_refer` | 多参考 Service |
 
 
 ## Case 1: `case_01_fk_topic_ik_loop.py`
@@ -157,7 +159,7 @@ cmd = api.build_two_arm_cmd(..., ik_param=ik_param)
 
 ## Case 4: `case_04_srv_with_elbow_constraint.py`
 
-在末端位姿之外，额外给 `left_elbow` / `right_elbow`，使用多参考 IK 服务求解，验证肘部约束效果。
+在末端位姿之外，额外给 `left_elbow` / `right_elbow`，使用多参考 IK 服务求解。
 
 可改参数：
 
@@ -169,7 +171,6 @@ cmd = api.build_two_arm_cmd(..., ik_param=ik_param)
 ## Case 5: `case_05_fk_srv_muli_refer_ik_loop.py`
 
 流程与 Case2 相同（FK -> 轨迹执行 -> 回零 -> IK），但 IK 使用多参考初值服务：
-
 - 服务：`/ik/two_arm_hand_pose_cmd_srv_muli_refer`
 - API：`call_ik_multi_ref_srv(...)`
 - 求解策略：依次尝试用户 q0、上一解、限位中点、伪逆/解析种子等多组初值，择优返回
@@ -223,5 +224,5 @@ Case5 失败时还可能打印：
 - `error_reason: ...`
   - 多参考 IK 服务返回的失败原因说明
 
-若 IK 持续失败，可参照 **3.4 节** 放宽 `default_ik_param()` 中的求解容差（如 `1e-3` → `5e-3`）。
+若 IK 持续失败，可参照 **2.4 节** 放宽 `default_ik_param()` 中的求解容差（如 `1e-3` → `5e-3`）。
 

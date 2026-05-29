@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""Case05：FK 闭环 + 多参考 Service IK。FK/IK 目标位姿约定为 waist_yaw_link 系。"""
 
 import time
 import numpy as np
@@ -17,6 +18,7 @@ def main():
     if not fk_res.success:
         return
 
+    # FK 正解位姿作为 IK 目标（参考系: waist_yaw_link）
     target_pose = fk_res.hand_poses
 
     api.publish_arm_traj(q_arm.tolist())
@@ -33,7 +35,7 @@ def main():
         left_quat_xyzw=target_pose.left_pose.quat_xyzw,
         right_pos_xyz=target_pose.right_pose.pos_xyz,
         right_quat_xyzw=target_pose.right_pose.quat_xyzw,
-        ik_param=api.default_ik_param(constraint_mode=3),
+        ik_param=api.default_ik_param(constraint_mode=2),
         joint_angles_as_q0=True,
         # left_joint_angles=q_arm[0:7],
         # right_joint_angles=q_arm[7:14],

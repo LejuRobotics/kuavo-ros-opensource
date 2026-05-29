@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""Case04：带肘部约束 IK。末端/肘部目标参考系: waist_yaw_link。"""
 
 import time
 
@@ -9,14 +10,15 @@ from arms_ik_api import ArmsIKApi
 def main():
     api = ArmsIKApi("case_04_srv_with_elbow_constraint")
 
+    # 期望末端位置（m），参考系: waist_yaw_link
     left_pos = [0.45, 0.25, 0.12]
     right_pos = [0.45, -0.25, 0.12]
     left_quat = [0.0, -0.70682518, 0.0, 0.70738827]
     right_quat = [0.0, -0.70682518, 0.0, 0.70738827]
 
-    # 非零肘部目标，触发肘部约束路径
-    left_elbow = [0.24, 0.20, 0.28]
-    right_elbow = [0.24, -0.20, 0.28]
+    # 肘部约束点（m），参考系: waist_yaw_link
+    left_elbow = [0.24, 0.30, 0.28]
+    right_elbow = [0.24, -0.30, 0.28]
 
     cmd = api.build_two_arm_cmd(
         left_pos_xyz=left_pos,

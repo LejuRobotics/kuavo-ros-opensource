@@ -367,6 +367,9 @@ namespace humanoid_controller
     // - true: 轨迹结束后进入 STANDING，isReadyToExit() 返回 true（上层可切回 MPC/BASE）
     // - false: 保持 STAND_UP 状态，锁最后一帧并持续推理（不触发上层自动切换）
     bool allow_switch_to_standing_on_finish_ = false;
+    // 临时覆盖基类的 use_default_motor_csp_kpkd_ 标志（用于在插值阶段使用 kuavo.json 默认 kp/kd）
+    bool fallstand_override_use_default_kpkd_active_ = false;
+    bool fallstand_prev_use_default_motor_csp_kpkd_ = false;
     
     // 配置参数
     std::string network_model_file_;                ///< 当前使用的网络模型文件路径（向后兼容）

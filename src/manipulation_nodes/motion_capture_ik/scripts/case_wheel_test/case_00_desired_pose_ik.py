@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Case00：给定期望双臂末端位姿（欧拉角 RPY），按 --mode 选择一种 IK 方式求解。"""
+"""Case00：给定期望双臂末端位姿（欧拉角 RPY），按 --mode 选择一种 IK 方式求解。
+
+末端期望位置/姿态参考系：waist_yaw_link（位置 m；姿态 RPY deg 或四元数 xyzw）。
+"""
 
 import argparse
 import math
 import sys
+import time
 
 from arms_ik_api import ArmsIKApi
 
@@ -37,13 +41,13 @@ def main():
 
     api = ArmsIKApi("case_00_desired_pose_ik")
 
-    # ===== 在此修改期望位姿 =====
+    # ===== 在此修改期望位姿（参考系: waist_yaw_link，单位 m / deg）=====
     left_pos, right_pos = [0.45, 0.3, 0.0], [0.45, -0.3, 0.0]
     left_rpy, right_rpy = [0.0, -90.0, 0.0], [0.0, -90.0, 0.0]
     cmd = api.build_two_arm_cmd(
         left_pos, rpy_deg_to_quat(*left_rpy),
         right_pos, rpy_deg_to_quat(*right_rpy),
-        ik_param=api.default_ik_param(constraint_mode=3),
+        ik_param=api.default_ik_param(constraint_mode=2),
         joint_angles_as_q0=True,
     )
 
@@ -52,6 +56,7 @@ def main():
     print("left_pos:", list(cmd.hand_poses.left_pose.pos_xyz))
     print("right_pos:", list(cmd.hand_poses.right_pose.pos_xyz))
 
+    q_exec = None
     if mode == "topic":
         api.reset_ik_result_topic_buffer()
         api.publish_ik_topic(cmd)  # /ik/two_arm_hand_pose_cmd
@@ -59,6 +64,8 @@ def main():
         ok = ik_msg is not None
         err = api.calc_pose_error(cmd.hand_poses, ik_msg) if ok else None
         api.print_ik_summary(tag, ok, None, err)
+        if ok:
+            q_exec = list(ik_msg.left_pose.joint_angles) + list(ik_msg.right_pose.joint_angles)
     else:
         call = api.call_ik_srv if mode == "srv" else api.call_ik_multi_ref_srv
         res = call(cmd)  # srv 或 muli_refer 服务
@@ -67,6 +74,12 @@ def main():
         if not res.success and res.error_reason:
             print("[{}] error_reason: {}".format(tag, res.error_reason))
         ok = res.success
+        if ok and len(res.q_arm) >= 14:
+            q_exec = res.q_arm[:14]
+
+    if q_exec is not None:
+        api.publish_arm_traj(q_exec)
+        time.sleep(0.2)
 
     sys.exit(0 if ok else 1)
 

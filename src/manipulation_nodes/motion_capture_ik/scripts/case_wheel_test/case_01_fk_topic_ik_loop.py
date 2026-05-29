@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""Case01：FK 闭环 + Topic IK。FK/IK 目标位姿约定为 waist_yaw_link 系。"""
 
 import time
 import numpy as np
@@ -14,12 +15,13 @@ def main():
     q_arm = np.array([-1.38, 0, -0.29, -0.43, 0.0, -0.17, 0.0, 
                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
 
-    # 计算正解得到的末端位姿
+    # 计算正解得到的末端位姿（参考系: waist_yaw_link）
     fk_res = api.call_fk(q_arm.tolist())
     print("[Case1] FK success:", fk_res.success)
     if not fk_res.success:
         return
 
+    # FK 正解位姿作为 IK 目标（参考系: waist_yaw_link）
     target_pose = fk_res.hand_poses
     print("[Case1] FK left_pos:", target_pose.left_pose.pos_xyz)
     print("[Case1] FK right_pos:", target_pose.right_pose.pos_xyz)

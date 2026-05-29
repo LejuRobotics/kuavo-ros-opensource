@@ -104,12 +104,12 @@ class ArmsIKApi(object):
     @staticmethod
     def default_ik_param(constraint_mode: int = 0) -> ikSolveParam:
         p = ikSolveParam()
-        p.major_optimality_tol = 1e-3
-        p.major_feasibility_tol = 1e-3
-        p.minor_feasibility_tol = 1e-3
+        p.major_optimality_tol = 3e-3
+        p.major_feasibility_tol = 3e-3
+        p.minor_feasibility_tol = 3e-3
         p.major_iterations_limit = 100
-        p.oritation_constraint_tol = 1e-3
-        p.pos_constraint_tol = 1e-3
+        p.oritation_constraint_tol = 3e-3
+        p.pos_constraint_tol = 3e-3
         p.pos_cost_weight = 10.0
         p.constraint_mode = int(constraint_mode)
         return p

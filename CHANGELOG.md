@@ -3,7 +3,22 @@
 ## Breaking Changes
 
 ## 文档相关
-- 更新强化学习运动控制框架文档，新增虚拟控制器相关内容，[文档链接](./docs/5功能案例/科研框架/强化学习使用案例/强化学习运动控制框架合集.md)
+- 待补充
+
+## 新增功能
+- 待补充
+
+## 修复问题
+- 待补充
+
+## 其他改进
+- 待补充
+
+# 1.4.4
+
+## Breaking Changes
+
+## 文档相关
 - 新增LED灯光串口控制文档，[文档链接](./src/kuavo_led/kuavo_led_controller/docs/led_serial.md)
 - 新增LED灯带ROS节点使用文档，[文档链接](./src/kuavo_led/kuavo_led_controller/docs/led_strip_ros_node.md)
 - 更新5W机型产品介绍及VR操作文档，[文档链接](./docs/2快速开始/VR操作/Kuavo%205-W%20VR操作.md)
