@@ -8,6 +8,14 @@
     "Larm_urdf": "biped_s49/urdf/drake/Larm.urdf",
     "Rarm_urdf": "biped_s49/urdf/drake/Rarm.urdf",
     "arm_urdf": "biped_s62/urdf/drake/biped_v3_arm.urdf",
+    "arm_only_urdf": "biped_s62/urdf/drake/biped_v3_arm_only.urdf",
+    "_comment_drake_velocity_ik_geometry": "v62 (5W) 半身 IK 几何：base_link 在地面坐标系，shoulder 在 base 下大约 z=1.17。l1/l2 跟 v52 几乎一致（wheel C++ FK 算 l1=0.2844, l2=0.2344）。",
+    "drake_velocity_ik_geometry": {
+        "l1": 0.2844,
+        "l2": 0.2344,
+        "left_p0":  [0.1157,  0.2527, 1.1658],
+        "right_p0": [0.1157, -0.2527, 1.1658]
+    },
     "end_frames_name": ["torso", "l_foot_sole", "r_foot_sole"],
     "end_frames_name_full_body": ["torso", "l_foot_sole", "r_foot_sole", "l_hand_sole", "r_hand_sole"],
     "ankle_motor_offset_degree":[-15,-15,-15,-15],

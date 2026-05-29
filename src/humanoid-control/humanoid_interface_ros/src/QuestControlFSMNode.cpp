@@ -87,6 +87,7 @@ namespace ocs2
             last_update_time_(ros::Time::now()),
             targetPoseCommand_(nodeHandle, robotName),
             torso_control_enabled_(false),
+            single_hand_torso_active_(false),
             torso_yaw_zero_(0.0),
             body_height_zero_(0.0),
             torso_control_start_time_(ros::Time(0)),
@@ -203,6 +204,10 @@ namespace ocs2
                 "/quest3/head_fixed_forward_user_intent", 10, &QuestControlFSM::quest3HeadFixedIntentCallback, this);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
+            // 单手摇杆控躯干模式激活时，抑制本节点的 /cmd_vel 转发，避免与 /cmd_lb_torso_pose 抢摇杆
+            single_hand_torso_active_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
+                "/single_hand_torso_active", 1,
+                [this](const std_msgs::Bool::ConstPtr& msg) { single_hand_torso_active_ = msg->data; });
             // 根据机器人类型订阅不同的mpc_observation话题
             std::string observation_topic = robot_type_ == 1 ? "/mobile_manipulator_mpc_observation" : robotName + "_mpc_observation";
             observation_sub_ = nodeHandle_.subscribe(observation_topic, 10, &QuestControlFSM::observationCallback, this);
@@ -1755,6 +1760,10 @@ namespace ocs2
             cmdVel_.linear.y = commad_line_target_(1);
             cmdVel_.linear.z = commad_line_target_(2);
             cmdVel_.angular.z = commad_line_target_(3);
+            // 单手摇杆控躯干模式激活时（grip 按住），完全不发 cmd_vel，让 torso_joystick_node 独占摇杆
+            if (single_hand_torso_active_) {
+                return;
+            }
             if(!torso_control_enabled_ || robot_type_ == 1)  // 轮臂支持动腰和行走同时下发
                 vel_control_pub_.publish(cmdVel_);
         }
@@ -2214,6 +2223,8 @@ namespace ocs2
         // 腰部控制相关变量
         bool torso_control_enabled_;
         bool control_torso_{false};  // 是否允许启动腰部控制
+        bool single_hand_torso_active_;  // 单手摇杆控躯干模式激活标志（来自 /single_hand_torso_active）
+        ros::Subscriber single_hand_torso_active_sub_;
         
         // 末端力控制相关变量
         bool hand_wrench_enabled_;  // 末端力施加状态

@@ -170,10 +170,10 @@ target_include_directories(ik_ros_uni_cpp_node PRIVATE
 target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
 
 # wheel_ik_ros_uni_cpp_node
-add_executable(wheel_ik_ros_uni_cpp_node 
-  src/wheel_ik_ros_uni_cpp_node.cpp 
+add_executable(wheel_ik_ros_uni_cpp_node
+  src/wheel_ik_ros_uni_cpp_node.cpp
   src/WheelArmControlBaseROS.cpp
-  src/WheelQuest3IkIncrementalROS.cpp 
+  src/WheelQuest3IkIncrementalROS.cpp
   src/WheelQuest3IkIncrementalTools.cpp
   src/WheelIncrementalControlModule.cpp
   src/WheelKeyFramesVisualizer.cpp
@@ -191,3 +191,25 @@ target_include_directories(wheel_ik_ros_uni_cpp_node PRIVATE
 )
 target_link_libraries(wheel_ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake)
 target_compile_features(wheel_ik_ros_uni_cpp_node PUBLIC cxx_std_17)
+
+# wheel_arm_only_ik_ros_uni_cpp_node — v62 (5W) 平台半身 IK 入口
+# 复用 v52 的 Quest3IkIncrementalROS 实现，加载 v62 config + arm_only_urdf (14 DOF 纯双臂)
+add_executable(wheel_arm_only_ik_ros_uni_cpp_node
+  src/wheel_arm_only_ik_ros_uni_cpp_node.cpp
+  src/ArmControlBaseROS.cpp
+  src/Quest3IkIncrementalROS.cpp
+  src/IncrementalControlModule.cpp
+  src/KeyFramesVisualizer.cpp
+  src/BaseIKSolver.cpp
+  src/TwoStageTorsoIKRec.cpp
+  src/OneStageIKEndEffector.cpp
+  src/Quest3ArmInfoTransformer.cpp
+  src/ArmLengthMeasurement.cpp
+  src/JoyStickHandler.cpp
+  src/Quest3Debugger.cpp
+  src/HandSmoother.cpp
+)
+target_include_directories(wheel_arm_only_ik_ros_uni_cpp_node PRIVATE
+  ${PROJECT_BINARY_DIR}/include
+)
+target_link_libraries(wheel_arm_only_ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)

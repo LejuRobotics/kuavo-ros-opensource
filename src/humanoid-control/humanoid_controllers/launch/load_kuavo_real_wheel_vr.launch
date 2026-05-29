@@ -14,6 +14,7 @@
     <arg name="use_cpp_incremental_ik" default="false"/>
     <arg name="use_incremental_hand_orientation" default="false"/>
     <arg name="wheel_ik" default="true"/>
+    <arg name="single_hand_mode" default="false"/> <!-- true: 启动单手摇杆控躯干独立节点 -->
 
     <!-- 设置VR控制参数 -->
     <param name="use_vr_control" value="$(arg use_vr_control)"/>
@@ -37,6 +38,7 @@
       <arg name="use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)"/>
       <arg name="use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)"/>
       <arg name="wheel_ik" value="$(arg wheel_ik)"/>
+      <arg name="single_hand_mode" value="$(arg single_hand_mode)"/>
     </include>
 
 </launch>
