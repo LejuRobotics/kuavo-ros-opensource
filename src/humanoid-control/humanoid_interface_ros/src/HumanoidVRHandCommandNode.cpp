@@ -369,12 +369,8 @@ class VRHandCommandNode {
         armJointState(i) = deg2rad * msg->position[i];
       }
       TargetTrajectories goalTargetTrajectories = goalHandPoseToTargetTrajectories(armJointState, observation_);
-      if (goalTargetTrajectories.stateTrajectory.empty() || goalTargetTrajectories.stateTrajectory[0].size() != static_cast<size_t>(num_arm_joints_)) {
-        ROS_WARN_THROTTLE(1.0, "[VRHandCommandNode]: Arm trajectory invalid (state dim %zu), skip publish.",
-                          goalTargetTrajectories.stateTrajectory.empty() ? 0u : goalTargetTrajectories.stateTrajectory[0].size());
-        return;
-      }
       const auto mpcTargetTrajectoriesMsg = ros_msg_conversions::createTargetTrajectoriesMsg(goalTargetTrajectories);
+
       ArmTargetTrajectoriesPublisher_.publish(mpcTargetTrajectoriesMsg);
       
       // targetTrajectoriesPublisherPtr_->publishTargetTrajectories(goalTargetTrajectories);

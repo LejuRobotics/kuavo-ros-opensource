@@ -1650,7 +1650,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
                                 sensor_data_new.quat_.coeffs().y(), 
                                 sensor_data_new.quat_.coeffs().z());
     imu_msg.header.stamp = current_sensor_data_time;
-    imu_msg.header.frame_id = "dummy_link";
+    imu_msg.header.frame_id = "base_link";
     imu_msg.header.seq = seq_;
     imu_msg.orientation.w = sensor_data_new.quat_.coeffs().w();
     imu_msg.orientation.x = sensor_data_new.quat_.coeffs().x();
