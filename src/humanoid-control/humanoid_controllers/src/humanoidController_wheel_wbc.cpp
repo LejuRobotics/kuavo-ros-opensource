@@ -139,6 +139,29 @@ namespace humanoidController_wheel_wbc
     loadData::loadCppDataType(taskFile, "model_settings.mpcArmsDof", armNum_);
     lowJointNum_ = manipulatorModelInfo_.armDim - armNum_;
     baseDim_ = manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim;
+    // 从 task.info 加载 /move_base/base_cmd_vel 专用速度上下界
+    {
+      base_cmd_vel_limit_enable_ = false;
+      loadOptionalTaskParam(taskFile, "baseCmdVelLimit.activate", base_cmd_vel_limit_enable_);
+      vector_t lowerBound = vector_t::Zero(3);
+      vector_t upperBound = vector_t::Zero(3);
+      try
+      {
+        loadData::loadEigenMatrix(taskFile, "baseCmdVelLimit.lowerBound", lowerBound);
+        loadData::loadEigenMatrix(taskFile, "baseCmdVelLimit.upperBound", upperBound);
+        base_cmd_vel_min_ << lowerBound[0], lowerBound[1], lowerBound[2];
+        base_cmd_vel_max_ << upperBound[0], upperBound[1], upperBound[2];
+      }
+      catch (const std::exception& e)
+      {
+        ROS_WARN("[humanoidControllerWheelWbc] baseCmdVelLimit bounds not found in task.info, using default +/-1.2: %s",
+                 e.what());
+      }
+      ROS_INFO("[humanoidControllerWheelWbc] base_cmd_vel limit enable=%s, min=(%.3f, %.3f, %.3f), max=(%.3f, %.3f, %.3f)",
+               base_cmd_vel_limit_enable_ ? "true" : "false",
+               base_cmd_vel_min_[0], base_cmd_vel_min_[1], base_cmd_vel_min_[2],
+               base_cmd_vel_max_[0], base_cmd_vel_max_[1], base_cmd_vel_max_[2]);
+    }
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
     loadData::loadCppDataType(taskFile, "mpc.mpcDesiredFrequency", mpcFreq_);
@@ -794,9 +817,9 @@ namespace humanoidController_wheel_wbc
         optimizedState_mrt_ = optimizedState_mrt;
         optimizedInput_mrt_ = optimizedInput_mrt;
       }
+      // 仅对线速度做小死区，[2] 为角速度 wz，不应与线速度共用 0.05 阈值
       if(std::fabs(optimizedInput_mrt_[0]) < 0.05) optimizedInput_mrt_[0] = 0;
       if(std::fabs(optimizedInput_mrt_[1]) < 0.05) optimizedInput_mrt_[1] = 0;
-      if(std::fabs(optimizedInput_mrt_[2]) < 0.05) optimizedInput_mrt_[2] = 0;
     }
     // 更新可视化数据
     // robotVisualizer_->update_obs(observation_wheel_);
@@ -1055,6 +1078,10 @@ namespace humanoidController_wheel_wbc
     }
     if(use_vel_control_)
     {
+      if (base_cmd_vel_limit_enable_)
+      {
+        clampBaseCmdVel(velCmdMsg);
+      }
       cmdVelPub_.publish(velCmdMsg);
     }else{
         ros::Time current_time = ros::Time::now();
@@ -1867,6 +1894,13 @@ namespace humanoidController_wheel_wbc
              req.with_chassis, res.success, res.time_cost);
     
     return true;
+  }
+
+  void humanoidControllerWheelWbc::clampBaseCmdVel(geometry_msgs::Twist& cmd) const
+  {
+    cmd.linear.x = std::max(base_cmd_vel_min_[0], std::min(base_cmd_vel_max_[0], cmd.linear.x));
+    cmd.linear.y = std::max(base_cmd_vel_min_[1], std::min(base_cmd_vel_max_[1], cmd.linear.y));
+    cmd.angular.z = std::max(base_cmd_vel_min_[2], std::min(base_cmd_vel_max_[2], cmd.angular.z));
   }
 
   Eigen::Vector3d humanoidControllerWheelWbc::cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw)

@@ -349,6 +349,10 @@ namespace humanoid_controller
     MotionTrajectoryData motion_trajectory_;       ///< 当前使用的运动轨迹数据（指向prone或supine）
     MotionTrajectoryData motion_trajectory_prone_; ///< 趴着模型的运动轨迹数据
     MotionTrajectoryData motion_trajectory_supine_; ///< 躺着模型的运动轨迹数据
+
+    // 临时覆盖基类的 use_default_motor_csp_kpkd_ 标志（用于在插值阶段使用 kuavo.json 默认 kp/kd）
+    bool fallstand_override_use_default_kpkd_active_ = false;
+    bool fallstand_prev_use_default_motor_csp_kpkd_ = false;
     
     // 配置参数
     std::string network_model_file_;                ///< 当前使用的网络模型文件路径（向后兼容）

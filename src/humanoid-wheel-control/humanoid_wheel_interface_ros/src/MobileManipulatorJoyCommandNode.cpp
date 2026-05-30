@@ -104,10 +104,7 @@ namespace mobile_manipulator
       torsoMax_yaw_ = 0.5235; torsoMin_yaw_ = 0.5235;
       torsoMax_pitch_ = 0.5235; torsoMin_pitch_ = 0.0;
 
-      // 检测手柄类型并设置映射
-      detectJoystickType();
-
-      // 加载手柄映射配置
+      // 先加载 launch 指定的映射配置（sim.json / bt2.json 等）
       if (nodeHandle.hasParam("channel_map_path"))
       {
         std::string channel_map_path;
@@ -120,8 +117,15 @@ namespace mobile_manipulator
         ROS_WARN_STREAM("未找到 channel_map_path 参数，使用默认手柄映射");
       }
 
-      // 从 joyAxisMap 获取轴索引（支持JSON配置）
-      // 根据 joy_to_cmd_vel_xy.py: axes[1]->linear.x, axes[0]->linear.y, axes[2]->angular.z
+      // 仿真键盘模式不检测物理手柄，避免 bt2pro 映射(angular=axis2) 覆盖 sim.json(angular=axis3)
+      std::string joystick_type_early;
+      nodeHandle_.getParam("joystick_type", joystick_type_early);
+      if (joystick_type_early != "sim")
+      {
+        detectJoystickType();
+      }
+
+      // 从 joyAxisMap 获取轴索引（sim: axes[3]=右摇杆Yaw -> angular.z）
       linear_axis_index_x_ = joyAxisMap["AXIS_LEFT_STICK_X"];   // axes[1] -> 前进/后退
       linear_axis_index_y_ = joyAxisMap["AXIS_LEFT_STICK_Y"];   // axes[0] -> 左右移动
       angular_axis_index_ = joyAxisMap["AXIS_RIGHT_STICK_YAW"];  // 旋转

@@ -164,6 +164,8 @@ namespace humanoidController_wheel_wbc
     // ========== 坐标变换相关 ==========
     Eigen::Vector3d cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw);
     Eigen::Vector3d cmdVelBodyToWorld(const Eigen::Vector3d& cmd_vel_body, double yaw);
+    // 发布 /move_base/base_cmd_vel 前的速度上下界限幅
+    void clampBaseCmdVel(geometry_msgs::Twist& cmd) const;
 
     // ========== 期望力控制相关函数 ==========
     vector_t getDesiredContactForce();
@@ -218,6 +220,9 @@ namespace humanoidController_wheel_wbc
     std::shared_ptr<mobile_manipulator::WeightedWbc> wheel_wbc_;  // 基础WBC（WeightedWbc）
     std::shared_ptr<mobile_manipulator::ContactForceWbc> contact_force_wbc_;  // 接触力控制WBC
     std::shared_ptr<mobile_manipulator::VelocityLimiter> velLimiter_;  // 梯形插补加减速
+    Eigen::Vector3d base_cmd_vel_max_{1.2, 1.2, 1.2};   // vx, vy, wz 上限 [m/s, m/s, rad/s]
+    Eigen::Vector3d base_cmd_vel_min_{-1.2, -1.2, -1.2};  // vx, vy, wz 下限
+    bool base_cmd_vel_limit_enable_{false};  // 是否启用 base_cmd_vel 速度限幅
 
     // ========== 期望力管理器 ==========
     std::unique_ptr<DesiredForceManager> desired_force_manager_;
