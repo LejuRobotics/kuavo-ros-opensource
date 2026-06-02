@@ -221,7 +221,7 @@ namespace ocs2
       
       // 计算 PD 控制量并限幅
       b = lowJointKp_.cwiseProduct(pos_error) + lowJointKd_.cwiseProduct(vel_error);
-      b = b.cwiseMax(-300.0).cwiseMin(300.0);  // 加速度限幅 [-300, 300]
+      b = b.cwiseMax(-20.0).cwiseMin(20.0);  // 加速度限幅 [-20, 20]
 
       return {a, b, matrix_t(), vector_t()};
     }
@@ -253,8 +253,8 @@ namespace ocs2
     void WbcBase::processArmJointErrorsWithSafe(vector_t& pos_error, vector_t& vel_error)
     {
       const double max_pos_jump = 0.5;   // 最大允许位置跳变 [rad]
-      const double max_pos_error = 1.0;  // 最大位置误差 [rad]
-      const double max_vel_error = 10.0; // 最大速度误差 [rad/s]
+      const double max_pos_error = 0.017453293;  // 最大位置误差 [rad], 1度, 减少位置的主要作用
+      const double max_vel_error = 3.0; // 最大速度误差 [rad/s]
       
       static vector_t qMeasured_prev;
       static vector_t vMeasured_prev;
@@ -298,8 +298,8 @@ namespace ocs2
     void WbcBase::processLowJointErrorsWithSafe(vector_t& pos_error, vector_t& vel_error)
     {
       const double max_pos_jump = 0.5;   // 最大允许位置跳变 [rad]
-      const double max_pos_error = 1.0;  // 最大位置误差 [rad]
-      const double max_vel_error = 10.0; // 最大速度误差 [rad/s]
+      const double max_pos_error = 0.017453293;  // 最大位置误差 [rad], 1度, 减少位置的主要作用
+      const double max_vel_error = 0.1; // 最大速度误差 [rad/s]
       
       static vector_t qMeasured_prev_low;
       static vector_t vMeasured_prev_low;
