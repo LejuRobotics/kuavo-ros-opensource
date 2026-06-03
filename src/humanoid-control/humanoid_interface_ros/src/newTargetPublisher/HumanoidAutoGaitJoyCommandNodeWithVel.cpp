@@ -1342,7 +1342,18 @@ namespace ocs2
       // 检查是否有gait切换指令
       if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
       {
+        if (IS_ROBAN(rb_version_))
+        {
+          // A 键切换“站立姿态控制模式”：stance + amp_mode=1 / walk + amp_mode=0
+          setPostureControlMode(!posture_control_mode_);
+          return;
+        }
         publishGaitTemplate("stance");
+      }
+      else if (IS_ROBAN(rb_version_) && posture_control_mode_)
+      {
+        // Roban姿态控制模式下，不再响应其他 gait 切换按键，避免打断姿态命令语义
+        return;
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
       {
@@ -1385,11 +1396,29 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
-        // Roban: X switch to AMP
+        // Roban: X 在行走控制器环中切换（mpc -> amp_controller -> amp_hand_controller -> ...）
         if (IS_ROBAN(rb_version_))
         {
-          ROS_INFO("[JoyControl] X: switch to amp_controller");
-          callSwitchControllerService("amp_controller");
+          std::string current_controller;
+          if (getCurrentControllerName(current_controller) && current_controller == "mpc")
+          {
+            std::vector<std::string> controller_list;
+            if (getControllerList(controller_list) && controller_list.size() > 1)
+            {
+              ROS_INFO("[JoyControl] X (Roban): MPC -> %s", controller_list[1].c_str());
+              callSwitchControllerService(controller_list[1]);
+            }
+            else
+            {
+              ROS_INFO("[JoyControl] X (Roban): MPC -> amp_controller");
+              callSwitchControllerService("amp_controller");
+            }
+          }
+          else
+          {
+            ROS_INFO("[JoyControl] X (Roban): switch to next walk controller");
+            switchToNextController();
+          }
           return;
         }
         ROS_INFO("[JoyControl] switch to next controller");
@@ -1512,6 +1541,49 @@ namespace ocs2
       }
 
       const vector_t currentPose = observation.state.segment<6>(6);
+
+      if (posture_control_mode_)
+      {
+        // 姿态控制模式:
+        // linear.x -> 弯腰
+        // linear.y -> 预留/侧向姿态通道
+        // linear.z -> base高度偏移(下蹲)
+        // angular.z -> 禁止旋转，避免与下蹲语义冲突
+        if (std::abs(joystick_origin_axis(0)) > DEAD_ZONE)
+        {
+          cmdVel.linear.x = commad_line_target_(0);
+          updated[0] = true;
+        }
+        if (std::abs(joystick_origin_axis(1)) > DEAD_ZONE)
+        {
+          cmdVel.linear.y = commad_line_target_(1);
+          updated[1] = true;
+        }
+        if (std::abs(joystick_origin_axis(2)) > DEAD_ZONE)
+        {
+          cmdVel.linear.z = commad_line_target_(2);
+          updated[2] = true;
+        }
+
+        static bool last_auto_gait_state = true;
+        const double height_diff_max = 0.1;
+        if (std::fabs(cmdVel.linear.z) > height_diff_max && cur_gait_name_ == "stance")
+        {
+          if (last_auto_gait_state)
+          {
+            changeAutoGaitStatus(false);
+            last_auto_gait_state = false;
+          }
+        }
+        else if (!last_auto_gait_state)
+        {
+          changeAutoGaitStatus(true);
+          last_auto_gait_state = true;
+        }
+
+        return updated;
+      }
+
       // vector_t target(6);
       if (joystick_origin_axis.head(2).cwiseAbs().maxCoeff() > DEAD_ZONE)
       { // base p_x, p_y are relative to current state
@@ -1570,6 +1642,58 @@ namespace ocs2
       }
 
       return updated;
+    }
+
+    bool callAmpModeService(int mode)
+    {
+      std::string current_controller;
+      if (!getCurrentControllerName(current_controller) || current_controller == "mpc")
+      {
+        ROS_WARN("[JoyControl] change_amp_mode(%d) skipped: current controller is not AMP (current=%s)",
+                 mode, current_controller.c_str());
+        return false;
+      }
+
+      const std::string service_name =
+          "/humanoid_controller/" + current_controller + "/change_amp_mode";
+      ros::ServiceClient amp_mode_client =
+          nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(service_name);
+
+      kuavo_msgs::changeArmCtrlMode srv;
+      srv.request.control_mode = mode;
+      if (amp_mode_client.call(srv))
+      {
+        ROS_INFO("[JoyControl] %s(%d) -> %s, mode=%d, msg=%s",
+                 service_name.c_str(),
+                 mode,
+                 srv.response.result ? "success" : "failure",
+                 srv.response.mode,
+                 srv.response.message.c_str());
+        return srv.response.result;
+      }
+      ROS_ERROR("[JoyControl] Failed to call %s with mode=%d", service_name.c_str(), mode);
+      return false;
+    }
+
+    void setPostureControlMode(bool enable)
+    {
+      posture_control_mode_ = enable;
+      joystick_origin_axis_.setZero();
+      vector_t zero_axis = vector_t::Zero(6);
+      checkAndPublishCommandLine(zero_axis);
+
+      if (enable)
+      {
+        publishGaitTemplate("stance");
+        callAmpModeService(1);
+        ROS_WARN("[JoyControl] Posture control mode enabled: stick -> bend/squat");
+      }
+      else
+      {
+        callAmpModeService(0);
+        publishGaitTemplate("walk");
+        ROS_WARN("[JoyControl] Posture control mode disabled: restored walking mode");
+      }
     }
 
     inline void pubModeGaitScale(float scale)
@@ -2176,6 +2300,7 @@ namespace ocs2
     
     // 遥感/方向键轴输入开关（默认允许）
     bool axes_input_enabled_{true};
+    bool posture_control_mode_{false};
     // 手抓开合状态（默认张开 -> false）
     bool hand_closed_{false};
     

@@ -20,6 +20,7 @@ namespace humanoid
 RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialCommand)
   : nh_(nh)
   , enabled_(true)
+  , reuse_walk_command_in_stance_(false)
   , smart_stop_enabled_(true)
   , torso_velocity_threshold_(0.05)
   , feet_alignment_threshold_(0.05)
@@ -98,6 +99,12 @@ bool RlGaitReceiver::isEnabled() const
   return enabled_;
 }
 
+void RlGaitReceiver::setReuseWalkCommandInStance(bool enable)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  reuse_walk_command_in_stance_ = enable;
+}
+
 void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions)
 {
   if (!enabled_) {
@@ -105,6 +112,21 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   }
   double velocity_magnitude = calculateVelocityMagnitude(smoothed_cmd_vel_);
   std::lock_guard<std::mutex> lock(command_mutex_);
+
+  // sim-to-sim: 站立模式下复用行走三维指令（x/y/yaw）作为姿态命令通道。
+  // 这与训练侧 vel_command_b 的复用语义一致：x->弯腰，y->保留，yaw(z)->下蹲高度。
+  if (currentCommand_.cmdStance_ == 1 && reuse_walk_command_in_stance_)
+  {
+    currentCommand_.cmdVelLineX_ = smoothed_cmd_vel_.linear.x;
+    currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y;
+    currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z;
+    currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x;
+    currentCommand_.cmdVelAngularY_ = smoothed_cmd_vel_.angular.y;
+    // 站立姿态模式下，将 base 高度偏移通道复用为策略的第 3 个速度命令输入。
+    currentCommand_.cmdVelAngularZ_ = smoothed_cmd_vel_.linear.z;
+    currentCommand_.cmdStance_ = 1;
+    return;
+  }
 
   if (velocity_magnitude < 0.01 && currentCommand_.cmdStance_ == 1) // Low velocity and already in stance mode
     return;
