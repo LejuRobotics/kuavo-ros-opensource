@@ -408,6 +408,14 @@ namespace humanoid_controller
       updateFallStandInterpolation(time, sensor_data, measuredRbdState, joint_cmd);
       if (request_for_stand_up_ && is_fall_stand_interpolating_complete_)
       {
+        // 进入STAND_UP状态前，恢复之前override的use_default_motor_csp_kpkd_，使其不再使用默认kpkd
+        if (fallstand_override_use_default_kpkd_active_)
+        {
+          use_default_motor_csp_kpkd_ = fallstand_prev_use_default_motor_csp_kpkd_;
+          fallstand_override_use_default_kpkd_active_ = false;
+          ROS_INFO("[%s] FallStand: entering STAND_UP state, restored use_default_motor_csp_kpkd_=%d", name_.c_str(), static_cast<int>(use_default_motor_csp_kpkd_));
+        }
+
         // 根据当前机体姿态自动判断并切换模型
         autoSelectAndSwitchModel();
         
@@ -1052,13 +1060,6 @@ namespace humanoid_controller
     if (alpha >= 1.0)
     {
       is_fall_stand_interpolating_complete_ = true;
-      // 插值完成，恢复之前 override 的 use_default_motor_csp_kpkd_
-      if (fallstand_override_use_default_kpkd_active_)
-      {
-        use_default_motor_csp_kpkd_ = fallstand_prev_use_default_motor_csp_kpkd_;
-        fallstand_override_use_default_kpkd_active_ = false;
-        ROS_INFO("[%s] FallStand: interpolation complete, restored use_default_motor_csp_kpkd_=%d", name_.c_str(), static_cast<int>(use_default_motor_csp_kpkd_));
-      }
     }
   }
 
@@ -1441,10 +1442,3 @@ namespace humanoid_controller
 
 
 } // namespace humanoid_controller
-
-
-
-
-
-
-

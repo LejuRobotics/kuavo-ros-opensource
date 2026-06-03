@@ -167,13 +167,13 @@ class ArmsIKNode
             ik_free_server_ = nh_.advertiseService("/ik/two_arm_hand_pose_cmd_free_srv", &ArmsIKNode::free_handleServiceRequest, this);
             fk_server_ = nh_.advertiseService("/ik/fk_srv", &ArmsIKNode::handleFKServiceRequest, this);
             // solver params
-            ik_solve_params_.major_optimality_tol = 9e-3;
-            ik_solve_params_.major_feasibility_tol = 9e-3;
-            ik_solve_params_.minor_feasibility_tol = 9e-3;
+            ik_solve_params_.major_optimality_tol = 1e-3;
+            ik_solve_params_.major_feasibility_tol = 1e-3;
+            ik_solve_params_.minor_feasibility_tol = 1e-3;
 
             ik_solve_params_.major_iterations_limit = 50;
-            ik_solve_params_.oritation_constraint_tol = 19e-3;
-            ik_solve_params_.pos_constraint_tol = 9e-3;
+            ik_solve_params_.oritation_constraint_tol = 11e-3;
+            ik_solve_params_.pos_constraint_tol = 1e-3;
             ik_solve_params_.pos_cost_weight = 10;
             // default constraint mode: pos soft + ori hard (01 -> 1)
             ik_solve_params_.constraint_mode = 0;
@@ -580,8 +580,11 @@ class ArmsIKNode
                 if(use_ik_cmd_q0_)
                 {
                     q0_ << ik_cmd_left_.joint_angles, ik_cmd_right_.joint_angles;
+                    if (print_ik_info_ && recived__new_cmd_)
+                    {
                     std::cout << std::fixed << std::setprecision(3) << "Left: " << q0_.head(single_arm_num_).transpose()
                                             << ", Right: " << q0_.tail(single_arm_num_).transpose() << std::endl;
+                    }
                 }
                 auto start = std::chrono::high_resolution_clock::now();
                 checkInWorkspace(pose_vec[1].second, pose_vec[2].second);
@@ -622,7 +625,8 @@ class ArmsIKNode
                     }
                     publish_ik_result_info(q);
                 }
-                if(print_ik_info_)
+                // 仅在收到新的 IK 命令时打印，避免 1kHz 循环重复刷屏
+                if(print_ik_info_ && recived__new_cmd_)
                     printIkResultInfo(ik_cmd_left_, ik_cmd_right_, q, result);
                 // else
                 //     std::cout << "IK failed" << std::endl;
@@ -1647,8 +1651,9 @@ class ArmsIKNode
         // Step 2: 使用最高精度进行求解
         result = ik_.solve(pose_vec, q0_tmp, q, ik_solve_params_);
         if (result) {
-            // 如果最高精度求解成功，直接返回
-            std::cout << "Highest precision solve success" << std::endl;
+            // 如果最高精度求解成功，直接返回（仅在 IK 命令更新时打印，避免 1kHz 循环刷屏）
+            if (print_ik_info_ && recived__new_cmd_)
+                std::cout << "Highest precision solve success" << std::endl;
             return true;
         }
         // Step 3: 二分法求解
