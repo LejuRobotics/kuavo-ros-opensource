@@ -218,16 +218,7 @@ class KuavoRobotState:
                 * acceleration (list[float]): 关节加速度，单位为rad/s^2，长度=waist_dof
                 
         """
-        # 环境判断
-        if env == 'real':
-            jointData = self._rs_core.joint_data
-        elif env == 'mujoco':
-            jointData = self._rs_core.joint_data
-        elif env == 'gazebo':
-            jointData = self._rs_core.joint_data_shm
-        else:
-            raise ValueError(f"Invalid environment: {self.env}")
-        
+        jointData = self._rs_core.joint_data
         # Get waist joint states from 13 indices
         waist_joint_indices = range(12, 12+waist_dof)
         return KuavoJointData(
