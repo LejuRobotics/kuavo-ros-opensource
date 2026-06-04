@@ -12,16 +12,22 @@ import sys
 from colorama import Fore, Style, init
 from setup_kuavo_ros_control_remote import (
     FACTORY_URL,
+    GITCODE_URL,
     GITEE_URL,
     KUAVO_ROS_ALLOWED_URLS,
     SOURCE_MODE_AUTO,
     SOURCE_MODE_FACTORY,
+    SOURCE_MODE_GITCODE,
     SOURCE_MODE_GITEE,
+    VERSION_REGISTRY,
     branch_exists,
     clone_sources,
     commit_exists_in_origin_factory,
     expected_urls_text,
+    get_valid_display_versions,
+    get_version_internal,
     is_allowed_remote,
+    is_valid_version,
 )
 
 init(autoreset=True)
@@ -43,32 +49,39 @@ def prompt_code_source_mode():
     global source_mode
     while True:
         print_info("请选择代码源:")
-        print("1) 自动选择（推荐，优先工厂镜像，失败后回退到 Gitee）")
+        print("1) 自动选择（推荐，优先工厂镜像 → GitCode → Gitee）")
         print("2) 仅工厂镜像")
-        print("3) 仅 Gitee")
+        print("3) 仅 GitCode")
+        print("4) 仅 Gitee")
         choice = input().strip()
         if choice in ("", "1"):
             source_mode = SOURCE_MODE_AUTO
-            mode_text = "自动选择（优先工厂镜像，失败后回退到 Gitee）"
+            mode_text = "自动选择（优先工厂镜像 → GitCode → Gitee）"
             break
         if choice == "2":
             source_mode = SOURCE_MODE_FACTORY
             mode_text = "仅工厂镜像"
             break
         if choice == "3":
+            source_mode = SOURCE_MODE_GITCODE
+            mode_text = "仅 GitCode"
+            break
+        if choice == "4":
             source_mode = SOURCE_MODE_GITEE
             mode_text = "仅 Gitee"
             break
-        print_error("无效的代码源选项，请输入 1、2 或 3")
+        print_error("无效的代码源选项，请输入 1、2、3 或 4")
     print_info(f"当前代码源策略: {mode_text}")
 
 
 def ask_user_for_kinds_of_settings():
     global robot_version, repo_commit, weight, board_type, effector_choice, need_setup, branch
 
+    valid_versions = get_valid_display_versions()
     while True:
-        robot_version = input("请输入机器人版本 (40/41/42/43/44/45): ")
-        if robot_version in ["40", "41", "42", "43", "44", "45"]:
+        robot_version = input(f"请输入机器人版本 ({'/'.join(valid_versions)}): ")
+        if is_valid_version(robot_version):
+            robot_version = str(get_version_internal(robot_version))
             break
         else:
             print_error("无效的机器人版本，请重新输入。")
@@ -290,7 +303,7 @@ def clone_repos() -> bool:
 
     # 验证kuavo-ros-opensource分支
     if not validate_branch(branch):
-        print_error(f"分支 {branch} 在工厂镜像和 Gitee 中都不存在")
+        print_error(f"分支 {branch} 在所有代码源中都不存在")
         raise ValueError("无效的分支名称")
 
     # kuavo-ros-opensource仓库操作

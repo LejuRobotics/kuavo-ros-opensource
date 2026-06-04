@@ -2,6 +2,55 @@
 
 set -e
 
+# ============================================================================
+# 版本注册表 —— 新增版本只需在此数组加一行，其余逻辑自动生效。
+# 格式: "显示版本|内部版本|资源系列|描述"
+# 注意: 此脚本可能被单独拉取部署，不依赖仓库内其他文件。
+#       与 src/kuavo_common/scripts/robot_version.sh 保持同步。
+# ============================================================================
+_VERSION_REGISTRY=(
+    "42|42|kuavo4|短臂版本"
+    "45|45|kuavo4|长臂版本"
+    "49|49|kuavo4|pro max版本"
+    "45.1|100045|kuavo4|假手版"
+    "49.1|100049|kuavo4|展厅版"
+    "52|52|kuavo5|普通kuavo5"
+    "53|53|kuavo5|手臂pitch电机改ruiwo"
+    "55|55|kuavo5|手臂部分电机改ruiwoPA4310"
+    "60|60|kuavo5w|悟时底盘轮臂"
+    "61|61|kuavo5w|玖物底盘轮臂"
+    "13|13|roban|roban2.0版本"
+    "14|14|roban|roban2.1版本"
+    "15|15|roban|roban2.2版本"
+)
+
+is_valid_version() {
+    local target="$1"
+    for entry in "${_VERSION_REGISTRY[@]}"; do
+        IFS='|' read -r disp _ _ _ <<< "$entry"
+        if [[ "$target" == "$disp" ]]; then return 0; fi
+    done
+    return 1
+}
+
+get_version_internal() {
+    local target="$1"
+    for entry in "${_VERSION_REGISTRY[@]}"; do
+        IFS='|' read -r disp ver _ _ <<< "$entry"
+        if [[ "$target" == "$disp" ]]; then echo "$ver"; return 0; fi
+    done
+    echo "$target"
+}
+
+get_version_series() {
+    local target="$1"
+    for entry in "${_VERSION_REGISTRY[@]}"; do
+        IFS='|' read -r disp _ series _ <<< "$entry"
+        if [[ "$target" == "$disp" ]]; then echo "$series"; return 0; fi
+    done
+    echo "kuavo4"
+}
+
 # Function to print colored output
 print_info() {
     echo -e "\033[1;34m[INFO] $1\033[0m"
@@ -81,21 +130,23 @@ get_repo_remote_url() {
 
 cleanup_legacy_git_remotes() {
     git remote remove origin_factory >/dev/null 2>&1 || true
+    git remote remove origin_gitcode >/dev/null 2>&1 || true
     git remote remove origin_gitee >/dev/null 2>&1 || true
 }
 
 prompt_code_source_mode() {
     while true; do
         print_info "请选择代码源:"
-        echo "1) 自动选择（推荐，优先工厂镜像，失败后回退到 Gitee）"
+        echo "1) 自动选择（推荐，优先工厂镜像 → GitCode → Gitee）"
         echo "2) 仅工厂镜像"
-        echo "3) 仅 Gitee"
+        echo "3) 仅 GitCode"
+        echo "4) 仅 Gitee"
         read -r source_choice
 
         case "$source_choice" in
             ""|"1")
                 SOURCE_MODE="auto"
-                SOURCE_MODE_TEXT="自动选择（优先工厂镜像，失败后回退到 Gitee）"
+                SOURCE_MODE_TEXT="自动选择（优先工厂镜像 → GitCode → Gitee）"
                 break
                 ;;
             "2")
@@ -104,12 +155,17 @@ prompt_code_source_mode() {
                 break
                 ;;
             "3")
+                SOURCE_MODE="gitcode"
+                SOURCE_MODE_TEXT="仅 GitCode"
+                break
+                ;;
+            "4")
                 SOURCE_MODE="gitee"
                 SOURCE_MODE_TEXT="仅 Gitee"
                 break
                 ;;
             *)
-                print_error "无效的代码源选项，请输入 1、2 或 3"
+                print_error "无效的代码源选项，请输入 1、2、3 或 4"
                 ;;
         esac
     done
@@ -128,6 +184,13 @@ fetch_branch_by_source_mode() {
                 return 0
             fi
             ;;
+        "gitcode")
+            if fetch_branch_from_origin "GitCode" "$GITCODE_URL" "$branch"; then
+                active_source="GitCode"
+                active_url="$GITCODE_URL"
+                return 0
+            fi
+            ;;
         "gitee")
             if fetch_branch_from_origin "Gitee" "$GITEE_URL" "$branch"; then
                 active_source="Gitee"
@@ -139,6 +202,11 @@ fetch_branch_by_source_mode() {
             if fetch_branch_from_origin "工厂镜像" "$FACTORY_URL" "$branch"; then
                 active_source="工厂镜像"
                 active_url="$FACTORY_URL"
+                return 0
+            fi
+            if fetch_branch_from_origin "GitCode" "$GITCODE_URL" "$branch"; then
+                active_source="GitCode"
+                active_url="$GITCODE_URL"
                 return 0
             fi
             if fetch_branch_from_origin "Gitee" "$GITEE_URL" "$branch"; then
@@ -163,6 +231,13 @@ fetch_commit_by_source_mode() {
                 return 0
             fi
             ;;
+        "gitcode")
+            if fetch_commit_from_origin "GitCode" "$GITCODE_URL" "$commit"; then
+                active_source="GitCode"
+                active_url="$GITCODE_URL"
+                return 0
+            fi
+            ;;
         "gitee")
             if fetch_commit_from_origin "Gitee" "$GITEE_URL" "$commit"; then
                 active_source="Gitee"
@@ -174,6 +249,11 @@ fetch_commit_by_source_mode() {
             if fetch_commit_from_origin "工厂镜像" "$FACTORY_URL" "$commit"; then
                 active_source="工厂镜像"
                 active_url="$FACTORY_URL"
+                return 0
+            fi
+            if fetch_commit_from_origin "GitCode" "$GITCODE_URL" "$commit"; then
+                active_source="GitCode"
+                active_url="$GITCODE_URL"
                 return 0
             fi
             if fetch_commit_from_origin "Gitee" "$GITEE_URL" "$commit"; then
@@ -209,6 +289,18 @@ fetch_commit_from_origin() {
     set_remote_url origin "$remote_url"
     cleanup_legacy_git_remotes
 
+    # git fetch 不支持短 hash，先通过 ls-remote 解析为完整 SHA。
+    if [ ${#commit} -lt 40 ]; then
+        local full_sha
+        full_sha=$(git ls-remote origin 2>/dev/null | awk -v short="$commit" '$1 ~ "^"short {print $1; exit}')
+        if [ -n "$full_sha" ] && [ ${#full_sha} -eq 40 ]; then
+            print_info "短 commit ${commit} 解析为 ${full_sha}"
+            commit="$full_sha"
+        else
+            print_warning "无法通过 ls-remote 解析短 commit ${commit}，将直接尝试 fetch"
+        fi
+    fi
+
     # 指定 commit 时同样保持浅抓取，尽量只拿到落地该 commit 所需的最小对象集合。
     run_git_retry "从 ${source_label} 抓取 commit ${commit}" \
         fetch --depth=1 --no-tags --progress origin "$commit"
@@ -233,6 +325,7 @@ clone_repos() {
         exit 1
     fi
     FACTORY_URL="git://10.11.99.175:9418/kuavo-ros-opensource.git"
+    GITCODE_URL="https://gitcode.com/OpenLET/kuavo-ros-opensource.git"
     GITEE_URL="https://gitee.com/leju-robot/kuavo-ros-opensource.git"
     SOURCE_MODE="auto"
     SOURCE_MODE_TEXT=""
@@ -259,7 +352,7 @@ clone_repos() {
     if [ -d "kuavo-ros-opensource" ] && [ -d "kuavo-ros-opensource/.git" ]; then
         cd kuavo-ros-opensource
         REMOTE_URL=$(get_repo_remote_url)
-        if [ "$REMOTE_URL" = "$GITEE_URL" ] || [ "$REMOTE_URL" = "$FACTORY_URL" ]; then
+        if [ "$REMOTE_URL" = "$GITEE_URL" ] || [ "$REMOTE_URL" = "$FACTORY_URL" ] || [ "$REMOTE_URL" = "$GITCODE_URL" ]; then
             if git rev-parse --verify HEAD >/dev/null 2>&1; then
                 print_info "目录已存在且远程仓库正确，清理工作区..."
                 git reset --hard HEAD
@@ -273,6 +366,7 @@ clone_repos() {
             echo "  WARNING: kuavo-ros-opensource 远程 URL 不匹配"
             echo "=========================================="
             echo "  合法 URL: $FACTORY_URL"
+            echo "           $GITCODE_URL"
             echo "           $GITEE_URL"
             echo "  实际 URL: $REMOTE_URL"
             echo ""
@@ -353,45 +447,21 @@ setup_robot_version() {
     # 版本选择和确认循环
     while true; do
         print_info "请输入机器人版本:"
-        print_info "42 (短臂版本)"
-        print_info "45 (长臂版本)"
-        print_info "49 (pro max版本)"
-        print_info "45.1 (假手版)"
-        print_info "49.1 (展厅版)"
-        print_info "52 (普通kuavo5)"
-        print_info "53 (kuavo5，手臂pitch电机改ruiwo)"
-        print_info "60 (悟时底盘轮臂)"
-        print_info "61 (玖物底盘轮臂)"
-        print_info "13 (roban2.0版本)"
-        print_info "14 (roban2.1版本)"
-        print_info "15 (roban2.2版本)"
+        for entry in "${VERSION_REGISTRY[@]}"; do
+            IFS='|' read -r disp _ _ desc <<< "$entry"
+            print_info "$disp ($desc)"
+        done
         read -r version
 
         # 验证输入的版本是否有效
-        if [[ "$version" != "42" && "$version" != "45" && "$version" != "49" &&
-              "$version" != "45.1" && "$version" != "49.1" &&
-              "$version" != "52" && "$version" != "53" &&
-              "$version" != "60" && "$version" != "61" &&
-              "$version" != "13" && "$version" != "14" && "$version" != "15" ]]; then
+        if ! is_valid_version "$version"; then
             print_error "无效的版本号: $version"
             print_info "请选择上述列出的有效版本号"
             continue  # 重新开始循环
         fi
 
-        # 处理特殊版本号转换
-        if [[ "$version" == "45.1" || "$version" == "49.1" ]]; then
-            if [[ "$version" == "45.1" ]]; then
-                version=100045
-            else
-                version=100049
-            fi
-        elif [[ "$version" == "13" ]]; then
-            version=13
-        elif [[ "$version" == "14" ]]; then
-            version=14
-        elif [[ "$version" == "15" ]]; then
-            version=15
-        fi
+        # 处理版本号内部转换 (如 45.1 -> 100045)
+        version=$(get_version_internal "$version")
 
         # 显示选择的版本并要求确认
         print_info "您选择的机器人版本是: $version"
@@ -851,8 +921,20 @@ setup_preset_files() {
     # Use the absolute path for kuavo-ros-opensource
     KUAVO_ROS_CONTROL_DIR="/home/lab/kuavo-ros-opensource"
 
-    # For kuavo5 versions (52, 53), use resources/kuavo5 directory
-    if [[ "$version" == "52" || "$version" == "53" ]]; then
+    # 根据版本的资源系列选择资源目录
+    local series
+    # version 变量已经是内部版本号，需要通过原始显示版本查找系列
+    # 但 setup_preset_files 被调用时 version 已是内部值，这里做反查
+    series="kuavo4"
+    for entry in "${VERSION_REGISTRY[@]}"; do
+        IFS='|' read -r _ ver s _ <<< "$entry"
+        if [[ "$version" == "$ver" ]]; then
+            series="$s"
+            break
+        fi
+    done
+
+    if [[ "$series" == "kuavo5" ]]; then
         RESOURCES_DIR="$KUAVO_ROS_CONTROL_DIR/resources/kuavo5"
         print_info "使用 kuavo5 资源目录: $RESOURCES_DIR"
     else
