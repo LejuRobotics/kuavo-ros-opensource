@@ -286,9 +286,10 @@ class DepthImageInpainter:
                 self.depth_buf_filled = True
             self.cur_buf_idx = (self.cur_buf_idx + 1) % self.buf_size
             depth_history_stack = self.depth_buf[self.selected_ids].reshape(-1).astype(np.float64)
-            history_msg = Float64MultiArray()
-            history_msg.data = depth_history_stack.tolist()
-            self.depth_history_array_pub.publish(history_msg)
+            if current_time - publish_time < 0.03:
+                history_msg = Float64MultiArray()
+                history_msg.data = depth_history_stack.tolist()
+                self.depth_history_array_pub.publish(history_msg)
             
             # if self.debug:
                 # rospy.loginfo(f"Processed image: Enc={output_encoding}, dtype={output_image.dtype}, S={output_image.shape}, min={np.nanmin(output_image):.1f}, max={np.nanmax(output_image):.1f}")

@@ -151,8 +151,7 @@ namespace humanoid_controller
   bool RLControllerManager::switchController(const std::string& name)
   {
     std::unique_lock<std::recursive_mutex> lock(mutex_);
-    const std::string current_before_name = current_controller_name_;
-    const std::string current_before = current_before_name.empty() ? "mpc" : current_before_name;
+    const std::string current_before = current_controller_name_.empty() ? "mpc" : current_controller_name_;
     // mimic 类控制器（倒地起身/舞蹈）：仅在未完成（isAllowToExit==false）时禁止切出
     if (!current_controller_name_.empty())
     {
@@ -236,26 +235,7 @@ namespace humanoid_controller
     if (it != controllers_.end() && it->second &&
         it->second->getType() == RLControllerType::DEPTH_LOCO_CONTROLLER)
     {
-      lock.unlock();
-      const bool depth_history_ok = isDepthHistoryTopicAvailable();
-      lock.lock();
-
-      if (current_controller_name_ != current_before_name)
-      {
-        ROS_WARN("[RLControllerManager] Controller state changed during depth history check, abort switch to '%s'.",
-                 name.c_str());
-        return false;
-      }
-
-      auto current_it = controllers_.find(name);
-      if (current_it == controllers_.end() || !current_it->second ||
-          current_it->second->getType() != RLControllerType::DEPTH_LOCO_CONTROLLER)
-      {
-        ROS_WARN("[RLControllerManager] Controller '%s' changed during depth history check.", name.c_str());
-        return false;
-      }
-
-      if (!depth_history_ok)
+      if (!canSwitchToDepthWalkController())
       {
         ROS_WARN("[RLControllerManager] Refuse to switch to depth_loco_controller because depth history topic check failed.");
         return false;
@@ -319,6 +299,7 @@ namespace humanoid_controller
 
     TopicMonitor::CheckReport report;
     const auto res = depth_history_monitor_.check(req, &report);
+    publishDepthHistoryStatus(res);
     if (res != TopicMonitor::CheckResult::Ok)
     {
       if (log)
@@ -329,6 +310,19 @@ namespace humanoid_controller
     if (log)
       ROS_INFO("[DepthLocoSwitch] %s", report.reason.c_str());
     return true;
+  }
+
+  void RLControllerManager::updateDepthHistorySwitchFlag(const ros::TimerEvent& /*event*/)
+  {
+    const bool depth_history_ok = isDepthHistoryTopicAvailable(/*log=*/false);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    can_switch_to_depth_walk_controller_ = depth_history_ok;
+  }
+
+  bool RLControllerManager::canSwitchToDepthWalkController() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return can_switch_to_depth_walk_controller_;
   }
 
   bool RLControllerManager::canSwitchTo(const std::string& name)
@@ -361,7 +355,7 @@ namespace humanoid_controller
 
     // depth_loco_controller：要求深度历史话题此刻可用（静默探测，不打日志）
     if (target->getType() == RLControllerType::DEPTH_LOCO_CONTROLLER)
-      return isDepthHistoryTopicAvailable(/*log=*/false);
+      return canSwitchToDepthWalkController();
 
     return true;
   }
@@ -384,8 +378,8 @@ namespace humanoid_controller
 
   void RLControllerManager::loadDepthHistoryCheckParams(ros::NodeHandle& nh)
   {
-    constexpr double kDefaultMinFrequencyHz = 50.0;
-    constexpr double kDefaultWaitTimeoutSec = 2.0;
+    constexpr double kDefaultMinFrequencyHz = 55.0;
+    constexpr double kDefaultWaitTimeoutSec = 0.2;
     constexpr int kDefaultRequiredSamples = 10;
     constexpr double kDefaultSampleTimeoutSec = 0.2;
     constexpr const char* kLogTag = "[RLControllerManager]";
@@ -400,7 +394,7 @@ namespace humanoid_controller
     TopicMonitor::ensureMinIntParam(kLogTag, "depth_history_required_samples", depth_history_required_samples_, 2, kDefaultRequiredSamples);
     TopicMonitor::ensurePositiveParam(kLogTag, "depth_history_sample_timeout_sec", depth_history_sample_timeout_sec_, kDefaultSampleTimeoutSec);
 
-    ROS_INFO("[RLControllerManager] Depth history check params: min_frequency=%.1f Hz, wait_timeout=%.2f s, required_samples=%d, sample_timeout=%.2f s",
+    ROS_INFO("[RLControllerManager] Depth history check params: min_frequency=%.1f Hz, wait_timeout=%.3f s, required_samples=%d, sample_timeout=%.3f s",
              depth_history_min_frequency_hz_,
              depth_history_wait_timeout_sec_,
              depth_history_required_samples_,
@@ -779,6 +773,13 @@ namespace humanoid_controller
                                                        &RLControllerManager::getDanceControllerListCallback, this);
     controller_switch_event_pub_ = nh.advertise<kuavo_msgs::ControllerSwitchEvent>(
         "/humanoid_controller/controller_switch_event", 1, true);
+    depth_history_status_pub_ = nh.advertise<std_msgs::Int32>(
+        "/humanoid_controller/depth_history_status", 1, true);
+    can_switch_to_depth_walk_controller_ = isDepthHistoryTopicAvailable(/*log=*/false);
+    const double depth_history_check_period_sec = std::min(0.1, depth_history_wait_timeout_sec_ * 0.5);
+    depth_history_check_timer_ = nh.createTimer(ros::Duration(depth_history_check_period_sec),
+                                                &RLControllerManager::updateDepthHistorySwitchFlag,
+                                                this);
 
     ROS_INFO("[RLControllerManager] ROS services initialized");
     return true;
@@ -797,6 +798,18 @@ namespace humanoid_controller
     msg.from_controller = from_controller;
     msg.to_controller = to_controller;
     controller_switch_event_pub_.publish(msg);
+  }
+
+  void RLControllerManager::publishDepthHistoryStatus(TopicMonitor::CheckResult result)
+  {
+    if (!depth_history_status_pub_)
+    {
+      return;
+    }
+
+    std_msgs::Int32 msg;
+    msg.data = TopicMonitor::statusCode(result);
+    depth_history_status_pub_.publish(msg);
   }
 
   std::vector<std::string> RLControllerManager::getWalkControllerList()

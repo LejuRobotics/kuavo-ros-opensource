@@ -11,6 +11,7 @@
 #include "kuavo_msgs/SetString.h"
 #include "std_srvs/SetBool.h"
 #include "std_srvs/Trigger.h"
+#include "std_msgs/Int32.h"
 #include <map>
 #include <vector>
 #include <string>
@@ -288,6 +289,16 @@ namespace humanoid_controller
     bool isDepthHistoryTopicAvailable(bool log = true);
 
     /**
+     * @brief 周期刷新 depth_loco_controller 是否允许切换的缓存标志
+     */
+    void updateDepthHistorySwitchFlag(const ros::TimerEvent& event);
+
+    /**
+     * @brief 读取 depth_loco_controller 是否允许切换的缓存标志
+     */
+    bool canSwitchToDepthWalkController() const;
+
+    /**
      * @brief 只读探测：在不改变任何状态的前提下，判断"此刻"能否切换到名为 name 的控制器
      *        （name 为空字符串表示 MPC）。只检查目标侧的前置条件（目标已加载、当前在 MPC 时
      *        需处于 stance、depth_loco_controller 需深度话题可用等），不检查"当前控制器是否
@@ -378,6 +389,8 @@ namespace humanoid_controller
     void publishControllerSwitchEvent(const std::string& from_controller,
                                       const std::string& to_controller);
 
+    void publishDepthHistoryStatus(TopicMonitor::CheckResult result);
+
 
   private:
     std::map<std::string, std::unique_ptr<RLControllerBase>> controllers_;  ///< 控制器映射表
@@ -402,6 +415,8 @@ namespace humanoid_controller
     ros::ServiceServer switch_to_dance_controller_srv_; ///< SetString: 空/#索引/名 切换舞蹈
     ros::ServiceServer get_dance_controller_list_srv_;  ///< 获取舞蹈控制器名列表
     ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
+    ros::Publisher depth_history_status_pub_;        ///< 深度历史话题检查状态发布器
+    ros::Timer depth_history_check_timer_;           ///< 深度历史话题检查定时器
     ros::NodeHandle* nh_ptr_;                       ///< ROS节点句柄指针
 
     // RL切换模式：true 直接切换到RL；false 使用MPC过渡
@@ -413,13 +428,14 @@ namespace humanoid_controller
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
-    double depth_history_min_frequency_hz_ = 50.0;  ///< depth 历史话题最低频率要求
-    double depth_history_wait_timeout_sec_ = 2.0;   ///< depth 历史话题总等待超时
+    double depth_history_min_frequency_hz_ = 55.0;  ///< depth 历史话题最低频率要求
+    double depth_history_wait_timeout_sec_ = 0.2;   ///< depth 历史话题最大消息过期时间
     int depth_history_required_samples_ = 10;       ///< depth 历史话题最少采样点数
     double depth_history_sample_timeout_sec_ = 0.2; ///< 单次等待消息的超时
 
     // 深度历史话题后台监控（避免切换路径上阻塞等待）
     TopicMonitor depth_history_monitor_;
+    bool can_switch_to_depth_walk_controller_ = false;  ///< 是否允许切换到 depth walk 控制器
   };
 
 } // namespace humanoid_controller

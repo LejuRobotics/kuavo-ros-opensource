@@ -54,6 +54,7 @@
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
     <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
     <arg name="run_mujoco_camera" default="false"/>   <!-- 是否运行mujoco的相机 -->
+    <arg name="depth_frequency" default="60.0"/>       <!-- mujoco深度相机发布频率，单位Hz -->
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -137,7 +138,9 @@
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>
     <group unless="$(arg play_back)">
-      <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch"/>
+      <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch">
+        <arg name="depth_frequency" value="$(arg depth_frequency)"/>
+      </include>
     </group>
     <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">
