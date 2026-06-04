@@ -40,13 +40,14 @@ joint_angles_as_q0 = False
 # 创建ikSolverParam对象
 ik_solve_param = ikSolveParam()
 # 设置ikSolveParam对应参数
-ik_solve_param.major_optimality_tol = 1e-3
-ik_solve_param.major_feasibility_tol = 1e-3
-ik_solve_param.minor_feasibility_tol = 1e-3
+ik_solve_param.major_optimality_tol = 1e-4
+ik_solve_param.major_feasibility_tol = 1e-4
+ik_solve_param.minor_feasibility_tol = 1e-4
 ik_solve_param.major_iterations_limit = 100
 ik_solve_param.oritation_constraint_tol= 1e-3
-ik_solve_param.pos_constraint_tol = 1e-3 
+ik_solve_param.pos_constraint_tol = 1e-4 
 ik_solve_param.pos_cost_weight = 0.0 
+ik_solve_param.constraint_mode = 6
 
 # 获取机器人版本
 def get_parameter(param_name):

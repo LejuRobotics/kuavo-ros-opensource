@@ -107,7 +107,7 @@ private:
     // 统一控制频率（可一处修改）：初始设为 500Hz；如需 200Hz，修改为 200.0f 即可
     static constexpr float CONTROL_LOOP_HZ = 200.0f;               // 全局控制频率 Hz
     static constexpr float CONTROL_LOOP_DT = 1.0f / CONTROL_LOOP_HZ; // 全局控制周期 s
-    static constexpr float DEFAULT_KP = 10.00f;                    // 比例增益系数
+    static constexpr float DEFAULT_KP = 13.80f;                    // 比例增益系数
     static constexpr float DEFAULT_KD = 2.20f;                     // 微分增益系数
     static constexpr float DEFAULT_ALPHA = 0.20f;                  // 低通滤波器系数
     static constexpr float DEFAULT_MAX_CURRENT = 2.50f;            // 最大电流限制 A
@@ -140,6 +140,12 @@ private:
     static constexpr int VR_STUCK_DETECTION_CYCLES = 50;           // VR 卡死检测周期数
     static constexpr float VR_STUCK_POSITION_THRESHOLD = 0.01f;    // VR 卡死位置阈值 rad
     static constexpr float VR_TARGET_POSITION_THRESHOLD = 0.5f;    // VR 目标差阈值 rad
+    
+    // VR 限位保持模式参数
+    static constexpr float VR_LIMIT_HOLD_CURRENT = 1.2f;           // VR 限位保持电流 A（增大以克服末端阻尼）
+    static constexpr float VR_LIMIT_THRESHOLD_PERCENT = 1.0f;      // VR 限位判定阈值 %（目标位置>99%时激活）
+    static constexpr float VR_LIMIT_HOLD_ON_THRESHOLD_PERCENT = 90.0f;  // VR 限位保持开启阈值 %（当前位置>此值时激活保持模式）
+    static constexpr float VR_LIMIT_HOLD_OFF_THRESHOLD_PERCENT = 85.0f; // VR 限位保持关闭阈值 %（当前位置<此值时关闭保持模式）
 
     // 统计高电流冲击使用次数（调试/记录）
     int three_amp_current_usage_count = 0;
@@ -149,13 +155,13 @@ private:
     static constexpr float ZERO_CONTROL_KP = 0.0f;                  // 零点控制比例增益，零点寻找时使用
     static constexpr float ZERO_CONTROL_KD = 1.0f;                  // 零点控制微分增益，零点寻找时使用
     static constexpr float ZERO_CONTROL_ALPHA = 1.50f;              // 零点控制低通滤波系数
-    static constexpr float ZERO_CONTROL_MAX_CURRENT = 1.80f;        // 零点控制最大电流限制，单位 A，仅作最大电流限制保护使用
-    static constexpr float STALL_CURRENT_THRESHOLD = 1.50f;         // 堵转电流阈值，超过阈值后认为到达限位，单位 A
-    static constexpr float STALL_VELOCITY_THRESHOLD = 0.10f;        // 堵转速度阈值，小于阈值后认为到达限位，单位 rad/s
+    static constexpr float ZERO_CONTROL_MAX_CURRENT = 2.50f;        // 零点控制最大电流限制，单位 A，仅作最大电流限制保护使用
+    static constexpr float STALL_CURRENT_THRESHOLD = 2.20f;         // 堵转电流阈值，超过阈值后认为到达限位，单位 A
+    static constexpr float STALL_VELOCITY_THRESHOLD = 0.01f;        // 堵转速度阈值，小于阈值后认为到达限位，单位 rad/s
     static constexpr float ZERO_CONTROL_DT = CONTROL_LOOP_DT;       // 零点控制周期，单位 s（与全局频率一致）
     static constexpr int ZERO_FIND_TIMEOUT_MS = 20000;              // 零点寻找超时时间，单位 ms
     static constexpr int ZERO_WAIT_MS = 500;                        // 零点等待时间，单位 ms
-    static constexpr float OPEN_LIMIT_ADJUSTMENT = -10.0f;          // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
+    static constexpr float OPEN_LIMIT_ADJUSTMENT = 0.0f;            // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float CLOSE_LIMIT_ADJUSTMENT = 0.0f;           // 关限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float TARGET_VELOCITY = 5.0f;                  // 限位寻找目标速度，单位 rad/s
     // 关爪限位寻找参数
@@ -197,6 +203,10 @@ private:
     int   cfg_VR_STUCK_DETECTION_CYCLES = VR_STUCK_DETECTION_CYCLES;
     float cfg_VR_STUCK_POSITION_THRESHOLD = VR_STUCK_POSITION_THRESHOLD;
     float cfg_VR_TARGET_POSITION_THRESHOLD = VR_TARGET_POSITION_THRESHOLD;
+    float cfg_VR_LIMIT_HOLD_CURRENT = VR_LIMIT_HOLD_CURRENT;
+    float cfg_VR_LIMIT_THRESHOLD_PERCENT = VR_LIMIT_THRESHOLD_PERCENT;
+    float cfg_VR_LIMIT_HOLD_ON_THRESHOLD_PERCENT = VR_LIMIT_HOLD_ON_THRESHOLD_PERCENT;
+    float cfg_VR_LIMIT_HOLD_OFF_THRESHOLD_PERCENT = VR_LIMIT_HOLD_OFF_THRESHOLD_PERCENT;
 
     float cfg_ZERO_CONTROL_KP = ZERO_CONTROL_KP;
     float cfg_ZERO_CONTROL_KD = ZERO_CONTROL_KD;
@@ -300,6 +310,10 @@ private:
     // 设备ID -> CAN总线名称 映射（用于反注册等操作）
     std::unordered_map<MotorId, std::string> device_canbus_map_;
     std::unordered_map<MotorId, MotorCtrlData> motor_ctrl_datas_;
+    
+    // VR 限位保持模式
+    std::unordered_map<MotorId, bool> vr_limit_hold_mode_;         // 是否激活限位保持
+    std::unordered_map<MotorId, float> vr_limit_hold_current_;     // 保持电流（正：关方向，负：开方向）
 
     // 控制线程
     std::atomic<bool> thread_running{false};

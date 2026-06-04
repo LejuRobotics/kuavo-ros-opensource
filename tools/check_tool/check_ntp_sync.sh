@@ -1,9 +1,38 @@
 #!/bin/bash
 
+# 根据 ROBOT_VERSION 环境变量选择配置
+if [ -z "$ROBOT_VERSION" ]; then
+    echo -e "${RED}错误: 未设置 ROBOT_VERSION 环境变量${RESET}"
+    echo "请设置环境变量后再运行脚本，例如:"
+    echo "  export ROBOT_VERSION=62"
+    echo "  或"
+    echo "  export ROBOT_VERSION=63"
+    exit 1
+elif [ "$ROBOT_VERSION" = "62" ]; then
+    SSH_USER="ucore"
+    SSH_PASS="133233"
+    # ROBOT_VERSION=62 需要额外的SSH加密算法配置
+    SSH_COMMON_OPTS="-o StrictHostKeyChecking=no \
+        -oKexAlgorithms=+diffie-hellman-group14-sha1 \
+        -oHostKeyAlgorithms=+ssh-rsa \
+        -oCiphers=+aes128-cbc,3des-cbc"
+elif [ "$ROBOT_VERSION" = "63" ]; then
+    SSH_USER="jt"
+    SSH_PASS="lab123"
+    SSH_COMMON_OPTS="-o StrictHostKeyChecking=no"
+else
+    echo -e "${RED}错误: 未知的 ROBOT_VERSION: $ROBOT_VERSION${RESET}"
+    echo "支持的版本: 62, 63"
+    exit 1
+fi
+
+echo "========================================"
+echo -e "当前 ROBOT_VERSION: ${YELLOW}$ROBOT_VERSION${RESET}"
+echo -e "使用配置: SSH_USER=${SSH_USER}, SSH_PASS=******"
+echo "========================================"
+
 # SSH连接信息
-SSH_USER="jt"
 SSH_HOST="192.168.26.22"
-SSH_PASS="lab123"
 
 # 目标NTP服务器
 TARGET_NTP="192.168.26.12"
@@ -16,7 +45,7 @@ YELLOW='\033[33m'
 BLUE='\033[34m'
 RESET='\033[0m'
 
-echo "========================================"
+echo ""
 echo -e "${BLUE}开始检查底盘时间同步状态...${RESET}"
 echo "========================================"
 
@@ -61,9 +90,19 @@ echo -e "${YELLOW}本机检查完成！${RESET}"
 echo ""
 echo -e "${BLUE}=== 检查底盘（192.168.26.22）时间同步状态 ===${RESET}"
 
+# 检查网络连通性（ping测试）
+echo ""
+echo "[底盘步骤1] 检查底盘网络连通性..."
+if ! ping -c 1 -W 5 "$SSH_HOST" &> /dev/null; then
+    echo -e "${RED}✗ 无法ping通底盘 $SSH_HOST，网络不通${RESET}"
+    echo -e "${RED}错误: 底盘连接失败，请检查网络连接${RESET}"
+    exit 1
+fi
+echo -e "${GREEN}✓ 底盘 $SSH_HOST 网络连通正常${RESET}"
+
 # 检查SSH是否可用
 echo ""
-echo "[底盘步骤1] 检查SSH连接..."
+echo "[底盘步骤2] 检查SSH连接..."
 if ! command -v sshpass &> /dev/null; then
     echo -e "${YELLOW}警告: 未找到sshpass命令，正在自动安装...${RESET}"
     sudo apt-get update && sudo apt-get install -y sshpass
@@ -77,7 +116,7 @@ fi
 # 执行timedatectl status检查
 echo ""
 echo "[底盘步骤2] 执行timedatectl status检查..."
-STATUS_OUTPUT=$(sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "timedatectl status")
+STATUS_OUTPUT=$(sshpass -p "$SSH_PASS" ssh $SSH_COMMON_OPTS "$SSH_USER@$SSH_HOST" "timedatectl status")
 echo "$STATUS_OUTPUT"
 
 # 检查System clock synchronized状态
@@ -90,7 +129,7 @@ if [ "$SYNC_STATUS" = "yes" ]; then
     echo -e "${GREEN}✓ 底盘时间同步状态已为yes，检查配置文件...${RESET}"
 
     # 检查配置文件
-    CONF_CONTENT=$(sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "cat $TIMESYNCD_CONF")
+    CONF_CONTENT=$(sshpass -p "$SSH_PASS" ssh $SSH_COMMON_OPTS "$SSH_USER@$SSH_HOST" "cat $TIMESYNCD_CONF")
     echo ""
     echo "当前配置文件内容:"
     echo "$CONF_CONTENT"
@@ -130,7 +169,7 @@ echo "[底盘步骤3] 修复timesyncd配置..."
 # 备份原始配置文件（带时间戳）
 echo -e "${YELLOW}正在备份原始配置文件...${RESET}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no -tt "$SSH_USER@$SSH_HOST" "echo '$SSH_PASS' | sudo -S cp $TIMESYNCD_CONF ${TIMESYNCD_CONF}.bak.${TIMESTAMP}; exit"
+sshpass -p "$SSH_PASS" ssh $SSH_COMMON_OPTS -tt "$SSH_USER@$SSH_HOST" "echo '$SSH_PASS' | sudo -S cp $TIMESYNCD_CONF ${TIMESYNCD_CONF}.bak.${TIMESTAMP}; exit"
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ 配置文件备份成功${RESET}"
@@ -141,7 +180,7 @@ else
 fi
 
 # 使用sshpass和scp上传配置文件到远程临时目录
-sshpass -p "$SSH_PASS" scp -o StrictHostKeyChecking=no "$TMP_CONF" "$SSH_USER@$SSH_HOST:/tmp/timesyncd.conf.tmp"
+sshpass -p "$SSH_PASS" scp $SSH_COMMON_OPTS "$TMP_CONF" "$SSH_USER@$SSH_HOST:/tmp/timesyncd.conf.tmp"
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ 配置文件上传成功${RESET}"
@@ -152,7 +191,7 @@ else
 fi
 
 # 使用ssh执行sudo命令复制文件
-sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no -tt "$SSH_USER@$SSH_HOST" "echo '$SSH_PASS' | sudo -S cp /tmp/timesyncd.conf.tmp $TIMESYNCD_CONF; exit"
+sshpass -p "$SSH_PASS" ssh $SSH_COMMON_OPTS -tt "$SSH_USER@$SSH_HOST" "echo '$SSH_PASS' | sudo -S cp /tmp/timesyncd.conf.tmp $TIMESYNCD_CONF; exit"
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ 配置文件写入成功${RESET}"
@@ -168,7 +207,7 @@ rm -f "$TMP_CONF"
 # 重启时间同步服务
 echo ""
 echo "[底盘步骤4] 重启systemd-timesyncd服务..."
-sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no -tt "$SSH_USER@$SSH_HOST" "echo '$SSH_PASS' | sudo -S systemctl restart systemd-timesyncd; exit"
+sshpass -p "$SSH_PASS" ssh $SSH_COMMON_OPTS -tt "$SSH_USER@$SSH_HOST" "echo '$SSH_PASS' | sudo -S systemctl restart systemd-timesyncd; exit"
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ 服务重启成功${RESET}"
@@ -185,7 +224,7 @@ sleep 1
 # 再次检查状态
 echo ""
 echo "[底盘步骤6] 再次验证时间同步状态..."
-STATUS_OUTPUT=$(sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "timedatectl status")
+STATUS_OUTPUT=$(sshpass -p "$SSH_PASS" ssh $SSH_COMMON_OPTS "$SSH_USER@$SSH_HOST" "timedatectl status")
 echo "$STATUS_OUTPUT"
 
 SYNC_STATUS=$(echo "$STATUS_OUTPUT" | grep "System clock synchronized" | awk '{print $4}')
