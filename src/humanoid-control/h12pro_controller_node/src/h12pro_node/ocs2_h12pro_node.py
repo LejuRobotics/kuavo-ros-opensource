@@ -25,7 +25,7 @@ from trajectory_msgs.msg import JointTrajectory
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import numpy as np
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Empty
 
 rospack = rospkg.RosPack()
 pkg_path = rospack.get_path('h12pro_controller_node')
@@ -512,11 +512,13 @@ class H12PROControllerNode:
             tcp_nodelay=True
         )
         self.control_head_pub = rospy.Publisher(
-            '/robot_head_motion_data', 
-            robotHeadMotionData, 
-            queue_size=1, 
+            '/robot_head_motion_data',
+            robotHeadMotionData,
+            queue_size=1,
             tcp_nodelay=True
         )
+        # 初始化全局停止话题发布者（项目统一用Bool协议，True表示停止）
+        self.stop_robot_pub = rospy.Publisher('/stop_robot', Bool, queue_size=1)
         self.update_h12_customize_config_sub = rospy.Subscriber(
             "/update_h12_customize_config",
             UpdateH12CustomizeConfig,
@@ -860,7 +862,10 @@ class H12PROControllerNode:
                     self.h12_to_joy_node.is_stopping = True
                     self._gradually_move_right_stick_down()
                     self.h12_to_joy_node.is_stopping = False
-                
+            
+            # 发布全局停止指令到/stop_robot话题（True表示停止，项目统一协议）
+            self.stop_robot_pub.publish(Bool(data=True))  
+
             getattr(self.robot_state_machine, "stop")(source=current_state)
 
             # ===== 紧急停止状态持久化 =====

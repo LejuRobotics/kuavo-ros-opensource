@@ -3,8 +3,8 @@
 相机标定优化指标报告
   demo: left_wrist
   时间: 2026-04-24T15:50:19+08:00
-  CSV 目录: src/Camera_Calibration/output_csv/kuavo_left_wrist
-  结果目录: src/Camera_Calibration/output/kuavo_left_wrist
+  CSV 目录: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output_csv/kuavo_left_wrist
+  结果目录: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_left_wrist
 ============================================================
 
 ---------- optimize_from_csv ----------
@@ -26,8 +26,8 @@
 | 7 | 0.012673 | 0.003862 | 2.0530 | 0.8912 |
 | 8 | 0.020584 | 0.009081 | 2.2359 | 1.1084 |
 | mean | 0.026522 | 0.004990 | 2.9020 | 0.7160 |
-Wrote src/Camera_Calibration/output/kuavo_left_wrist/board_pose_error_pre_post_vs_urdf.png
-Wrote src/Camera_Calibration/output/kuavo_left_wrist/board_pose_bars_vs_urdf.png
+Wrote /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_left_wrist/board_pose_error_pre_post_vs_urdf.png
+Wrote /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_left_wrist/board_pose_bars_vs_urdf.png
 [summary] 平均误差下降（与输出图片一致，基于最终用于绘图的样本）
   position: mean 0.026522 -> 0.004990 m, drop 0.021532 m (81.19%)
   rotation: mean 2.9020 -> 0.7160 deg, drop 2.1860 deg (75.33%)

@@ -3,8 +3,8 @@
 相机标定优化指标报告
   demo: head
   时间: 2026-04-23T11:26:55+08:00
-  CSV 目录: src/Camera_Calibration/output_csv/kuavo_head
-  结果目录: src/Camera_Calibration/output/kuavo_head
+  CSV 目录: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output_csv/kuavo_head
+  结果目录: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_head
 ============================================================
 
 ---------- optimize_from_csv ----------
@@ -26,8 +26,8 @@
 | 7 | 0.011561 | 0.011215 | 1.1856 | 1.2079 |
 | 8 | 0.009879 | 0.009823 | 0.7873 | 0.7821 |
 | mean | 0.010364 | 0.010183 | 1.0336 | 1.0458 |
-Wrote src/Camera_Calibration/output/kuavo_head/board_pose_error_pre_post_vs_urdf.png
-Wrote src/Camera_Calibration/output/kuavo_head/board_pose_bars_vs_urdf.png
+Wrote /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_head/board_pose_error_pre_post_vs_urdf.png
+Wrote /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_head/board_pose_bars_vs_urdf.png
 [summary] 平均误差下降（与输出图片一致，基于最终用于绘图的样本）
   position: mean 0.010364 -> 0.010183 m, drop 0.000181 m (1.75%)
   rotation: mean 1.0336 -> 1.0458 deg, drop -0.0123 deg (-1.19%)

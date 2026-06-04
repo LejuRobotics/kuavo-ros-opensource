@@ -2,9 +2,9 @@
 相机标定测试指标报告
   demo: kuavo_left_wrist
   时间: 2026-04-24T15:43:43+08:00
-  测试 CSV 目录: src/Camera_Calibration/output_csv/kuavo_left_wrist_test
-  测试结果目录: src/Camera_Calibration/output/kuavo_left_wrist_test
-  FK 使用 URDF: src/Camera_Calibration/biped_v3_arm.urdf（nominal only）
+  测试 CSV 目录: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output_csv/kuavo_left_wrist_test
+  测试结果目录: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_left_wrist_test
+  FK 使用 URDF: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/biped_v3_arm.urdf（nominal only）
 ============================================================
 
 | sample | pos_err_pre(m) | pos_err_post(m) | rot_err_pre(deg) | rot_err_post(deg) |
@@ -14,8 +14,8 @@
 | 2 | 0.045752 | 0.045752 | 3.7459 | 3.7459 |
 | 3 | 0.045203 | 0.045203 | 4.3020 | 4.3020 |
 | mean | 0.040591 | 0.040591 | 3.8983 | 3.8983 |
-Wrote src/Camera_Calibration/output/kuavo_left_wrist_test/board_pose_error_pre_post_vs_urdf_test.png
-Wrote src/Camera_Calibration/output/kuavo_left_wrist_test/board_pose_bars_vs_urdf_test.png
+Wrote /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_left_wrist_test/board_pose_error_pre_post_vs_urdf_test.png
+Wrote /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_left_wrist_test/board_pose_bars_vs_urdf_test.png
 [summary] 平均误差下降（与输出图片一致，基于最终用于绘图的样本）
   position: mean 0.040591 -> 0.040591 m, drop 0.000000 m (0.00%)
   rotation: mean 3.8983 -> 3.8983 deg, drop 0.0000 deg (0.00%)

@@ -7,8 +7,7 @@
 你日常在 Kuavo 实机上跑标定，通常**不需要直接阅读/修改**这里的内容；请优先阅读并使用：
 
 - 顶层使用手册：`src/Camera_Calibration/README.md`
-- Launch（ROS 包 `kuavo_camera_calibration`）：`src/Camera_Calibration/launch/*.launch`
-- 三个 demo 说明：`src/Camera_Calibration/demos/**/README.md`
+- 三个 demo：`src/Camera_Calibration/demos/**/README.md`
 - 统一入口脚本：`src/Camera_Calibration/run_chessboard_calibration.sh`
 - 写零点脚本：`src/Camera_Calibration/apply_zero_deltas_to_arms_zero.py`
 

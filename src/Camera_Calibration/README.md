@@ -12,13 +12,12 @@
 
 ## 目录结构（你真正需要看的部分）
 
-- **ROS 包 `kuavo_camera_calibration`**（本目录根下的 `package.xml` + `CMakeLists.txt`）
-  - **`launch/`**：`kuavo_head_demo.launch`、`kuavo_right_wrist_demo.launch`、`kuavo_left_wrist_demo.launch`
-  - 启动示例：`roslaunch kuavo_camera_calibration kuavo_head_demo.launch`
-  - URDF / yaml / 默认输出路径在 launch 内通过 `$(find kuavo_camera_calibration)` 解析
-
 - **`demos/`**
-  - 各 demo 的 yaml 配置与轨迹下发脚本；说明见各子目录 README。
+  - 每个 demo 一个 `*.launch`，负责接入 `robot_calibration` 的 capture/optimize 流程，并对齐 Kuavo 的话题/坐标系约定。
+  - 入口 README：
+    - `demos/kuavo_head_demo/README.md`
+    - `demos/kuavo_left_wrist/README.md`
+    - `demos/kuavo_right_wrist/README.md`
 
 - **`run_chessboard_calibration.sh`**
   - 三个 demo 的统一入口脚本，支持一次性跑完采集/优化（以及项目里约定的并行优化模式）。
@@ -54,13 +53,6 @@
 
 ### 前置条件
 
-- **编译 ROS 包**（launch/URDF 路径通过 `$(find kuavo_camera_calibration)` 解析，勿写死本机用户目录）：
-
-```bash
-catkin build kuavo_camera_calibration robot_calibration robot_calibration_msgs
-source devel/setup.bash
-```
-
 - **机器人控制已启动**：确保 Kuavo 实机相关 launch 已运行，能够下发手臂轨迹并且相机话题在发布。
 - **棋盘格可见**：相机画面能稳定看到棋盘格，且光照/反光不过曝。
 - **三路 demo 的话题/`frame_id` 对齐**：各 demo README 里有对应话题约定。
@@ -80,14 +72,6 @@ bash src/Camera_Calibration/run_chessboard_calibration.sh capture
 ```bash
 bash src/Camera_Calibration/run_chessboard_calibration.sh optimize
 ```
-
-### 一键采集 + 优化 + 写零点（QA 手眼/相机标定闭环）
-
-```bash
-python3 src/Camera_Calibration/auto_camera_calib_and_apply_zero.py
-```
-
-内部调用 `run_chessboard_calibration.sh`，launch 使用 `roslaunch kuavo_camera_calibration <demo>.launch`。
 
 优化完成后会在 `src/Camera_Calibration/output/<demo>/` 下看到：
 
