@@ -19,6 +19,6 @@ controllers:
   - name: "depth_loco_controller"
     class: "BASE_CONTROLLER"  # 基础行走控制器
     type: "DEPTH_LOCO_CONTROLLER"    # 具体控制器类型
-    config_file: "rl/depth_loco_param.info" 
-    enabled: true  
+    config_file: "rl/depth_loco_param.info"
+    enabled: false  # 关闭上楼梯控制器：无合适深度数据时切入会异常，按 X 循环切换时不再进入
 
