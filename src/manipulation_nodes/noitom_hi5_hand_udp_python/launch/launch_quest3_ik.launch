@@ -17,6 +17,8 @@
     <arg name="use_cpp_monitor" default="false"/> <!-- false: use Python Monitor (monitor_quest3.py), true: use C++ Monitor (monitor_quest3_cpp) -->
     <arg name="use_cpp_incremental_ik" default="false"/> <!-- false: use Python IK (ik_ros_uni.py), true: use C++ Incremental IK (ik_ros_uni_cpp_node) -->
     <param name="/use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)" type="bool"/>
+    <arg name="enable_vr_stop_robot" default="true"/> <!-- false: 禁用 VR 手柄 X+Y 触发 stop_robot，仅遥控器可关机 -->
+    <param name="/enable_vr_stop_robot" value="$(arg enable_vr_stop_robot)" type="bool"/>
     <arg name="wheel_ik" default="$(eval int(arg('robot_version')) // 10 == 6)"/> <!-- tens digit is 6: true, else false -->
     <arg name="single_hand_mode" default="false" /> <!-- 5W: true 启动单手摇杆控躯干独立节点 -->
     <!-- v62 (5W) 平台半身 IK 入口（pure arm 14 DOF）：仅在 wheel_ik=true 时生效，

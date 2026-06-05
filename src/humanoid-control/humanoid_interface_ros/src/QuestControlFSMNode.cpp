@@ -904,6 +904,12 @@ namespace ocs2
                 nodeHandle_.getParam("/control_torso", control_torso_);
             }
 
+            // 动态读取 enable_vr_stop_robot 参数，控制 X+Y 是否触发 stop_robot
+            if(nodeHandle_.hasParam("/enable_vr_stop_robot"))
+            {
+                nodeHandle_.getParam("/enable_vr_stop_robot", enable_vr_stop_robot_);
+            }
+
             if (!rec_joystick_data_)
             {
                 joystick_data_prev_ = joystick_data_;
@@ -920,7 +926,7 @@ namespace ocs2
             if (controller_switching_)
             {
                 // 只允许安全相关的操作（如关闭机器人），其他操作都被禁用
-                if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
+                if (enable_vr_stop_robot_ && joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
                 {
                     callTerminateSrv();
                     return;
@@ -966,7 +972,7 @@ namespace ocs2
                 vr_a_button_held_since_not_observing_ = ros::Time(0);
             }
             
-            if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
+            if (enable_vr_stop_robot_ && joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
             {
                   callTerminateSrv();
                   return;
@@ -1177,9 +1183,9 @@ namespace ocs2
                 vr_a_button_held_since_not_observing_ = ros::Time(0);
             }
 
-            if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
+            if (enable_vr_stop_robot_ && joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
             {
-                callTerminateSrv(); 
+                callTerminateSrv();
                 return;
             }
 
@@ -1824,6 +1830,7 @@ namespace ocs2
         // 腰部控制相关变量
         bool torso_control_enabled_;
         bool control_torso_{false};  // 是否允许启动腰部控制
+        bool enable_vr_stop_robot_{true};  // 是否允许 VR 手柄 X+Y 触发 stop_robot
         bool single_hand_torso_active_;  // 单手摇杆控躯干模式激活标志（来自 /single_hand_torso_active）
         ros::Subscriber single_hand_torso_active_sub_;
         

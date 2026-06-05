@@ -1,0 +1,18 @@
+# H12/G12 启动 VR 遥操时传给 launch_quest3_ik.launch 的可配置参数。
+# 包内此文件为默认值；如需现场覆盖，在 ~/.config/lejuconfig/h12_vr_launch.yaml
+# 写同名字段即可（缺省字段沿用本默认）。可用交互脚本 h12_vr_launch_config_editor.py 编辑。
+
+# VR 设备 IP，留空则不注入、走 launch 文件默认
+ip_address: ""
+
+# 遥操形式：位置 / 姿态是否使用增量模式
+# (use_cpp_incremental_ik=false, use_incremental_hand_orientation=true) 为无效组合，加载时拒绝
+use_cpp_incremental_ik: false
+use_incremental_hand_orientation: false
+
+# 是否启用控腰（false 可避免 VR 重连时腰部猛转）
+control_torso: false
+
+# VR 手柄 X+Y 是否允许触发 stop_robot（关闭全身使能）
+# 置 false 后 VR 手柄不再能关机器人，只能用 H12/G12 遥控器 stop
+enable_vr_stop_robot: true

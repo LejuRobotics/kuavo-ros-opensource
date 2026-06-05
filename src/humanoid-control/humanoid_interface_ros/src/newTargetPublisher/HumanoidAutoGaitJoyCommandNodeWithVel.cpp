@@ -78,6 +78,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kuavo_msgs/DanceTrajectoryState.h>
 #include <kuavo_msgs/playmusic.h>
 #include <humanoid_plan_arm_trajectory/RobotActionState.h>
+#include "kuavo_msgs/ControllerSwitchEvent.h"
 
 // 命令执行相关头文件
 #include <cstdlib>
@@ -446,6 +447,24 @@ namespace ocs2
                      c_relative_base_limit_[0], c_relative_base_limit_[1], 
                      c_relative_base_limit_[2], c_relative_base_limit_[3]);
           }
+        }
+      });
+
+      // 订阅控制器切换事件，更新AMP控制器状态
+      controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>("/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr &msg)
+      {
+        // 检查是否切换到AMP控制器
+        bool old_is_amp = is_amp_controller_;
+        is_amp_controller_ = (msg->to_controller == "amp_controller");
+
+        // 只在状态切换时打印一次提示
+        if (!old_is_amp && is_amp_controller_)
+        {
+          ROS_INFO("[JoyControl] Entered AMP mode: right stick vertical control will be ignored");
+        }
+        else if (old_is_amp && !is_amp_controller_)
+        {
+          ROS_INFO("[JoyControl] Exited AMP mode: right stick vertical control restored");
         }
       });
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
@@ -1197,7 +1216,15 @@ namespace ocs2
     
       // 非辅助模式下才可控行走
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] > -0.5 && joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] > -0.5 && axes_input_enabled_)
+      {
         joystickOriginAxisTemp_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+
+        // AMP模式下忽略右摇杆上下控制（高度控制）
+        if (is_amp_controller_)
+        {
+          joystickOriginAxisTemp_(2) = 0.0;  // 索引2对应AXIS_RIGHT_STICK_Z
+        }
+      }
     
       joystickOriginAxisFilter_ = joystickOriginAxisTemp_;
       // for(int i=0;i<4;i++)
@@ -2242,10 +2269,12 @@ namespace ocs2
     ros::Subscriber policy_sub_;
     ros::Subscriber gait_change_sub_;
     ros::Subscriber is_rl_controller_sub_;
+    ros::Subscriber controller_switch_event_sub_;
     ros::Subscriber arm_ctrl_mode_sub_;
     ros::Subscriber dance_trajectory_state_sub_;
     int arm_ctrl_mode_;
     bool is_rl_controller_{false};  // 当前是否为RL控制器
+    bool is_amp_controller_{false};  // 当前是否为AMP控制器
     ocs2::scalar_array_t mpc_default_velocity_limits_{0.4, 0.2, 0.3, 0.4};  // 保存MPC默认速度限制
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
