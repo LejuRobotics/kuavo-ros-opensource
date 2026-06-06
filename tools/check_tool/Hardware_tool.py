@@ -886,9 +886,10 @@ def qiangnao_hand():
     # 让用户选择手类型
     print(bcolors.BOLD + "请选择手类型：" + bcolors.ENDC)
     print("1. 一代手 (Revo1)")
-    print("2. 二代手 (Revo2) 注：灵心巧手属于二代手")
+    print("2. 二代手 (Revo2)")
+    print("3. 灵心巧手(linker_hand)")
     hand_type = input("请输入选项：")
-    if hand_type not in ["1", "2"]:
+    if hand_type not in ["1", "2", "3"]:
         print(bcolors.FAIL + "无效选项" + bcolors.ENDC)
         return
 
@@ -913,6 +914,14 @@ def qiangnao_hand():
         else:
             command = "bash " + folder_path + "/dexhand_test.sh --revo2 --test 3"
             print(bcolors.OKGREEN + "检测到二代手单CAN配置，使用 Revo2 测试命令" + bcolors.ENDC)
+    elif hand_type == "3":
+        # 灵心巧手
+        if is_dual_bus:
+            command = "bash " + folder_path + "/dexhand_test.sh --revo1can --test 3"
+            print(bcolors.OKGREEN + "检测到灵心巧手双CAN配置，使用 linker_hand 测试命令" + bcolors.ENDC)
+        else:
+            command = "bash " + folder_path + "/dexhand_test.sh --normal --test 3"
+            print(bcolors.OKGREEN + "检测到灵心巧手单CAN配置，使用 linker_hand 测试命令" + bcolors.ENDC)
     else:
         # 一代手 (Revo1)
         if is_dual_bus:
