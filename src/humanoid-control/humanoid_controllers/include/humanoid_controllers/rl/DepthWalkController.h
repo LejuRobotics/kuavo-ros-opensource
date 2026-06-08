@@ -8,7 +8,7 @@
 #include "humanoid_controllers/LowPassFilter.h"
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "kuavo_msgs/ExecuteArmAction.h"
 #include <openvino/openvino.hpp>
 #include <memory>
@@ -146,7 +146,7 @@ namespace humanoid_controller
     // 真实/机型配置
     bool is_real_{false};
     bool is_roban_{false};
-    AnkleSolver ankleSolver_;
+    kuavo_solver::AnkleSolver ankleSolver_;
 
     // 是否使用 AMP 专用 Ruiwo 手臂增益（由 skw_rl_param.info 中 use_amp_ruiwo_kpkd 配置）
     bool use_amp_ruiwo_kpkd_{false};

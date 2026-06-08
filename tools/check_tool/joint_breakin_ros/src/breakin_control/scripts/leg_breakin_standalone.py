@@ -24,9 +24,6 @@ class Colors:
     NC = '\033[0m'
 
 class LegBreakinStandalone:
-    # EC Master 释放网卡/驱动通常需要数秒；过短会走到 SIGKILL，下次运行易 Device busy
-    _LEG_CHILD_TERM_TIMEOUT_SEC = 20.0
-
     def __init__(self):
         # 获取当前脚本所在目录
         self.current_dir = Path(__file__).parent.absolute()
@@ -45,57 +42,15 @@ class LegBreakinStandalone:
         self.kuavo5_leg_breakin_script_v52_80A = leg_breakin_src / "leg_breakin_kuavo5_v52_80A" / "kuavo5_leg_breakin.py"  # kuavo5_v52_80A（ROS控时长，龙华25台版本）
         self.kuavo5_leg_breakin_script_v52 = leg_breakin_src / "leg_breakin_kuavo5_v52" / "kuavo5_leg_breakin.py"  # kuavo5_v52（ROS控时长，普通v52版本）
         self.kuavo5_leg_breakin_script_v53 = leg_breakin_src / "leg_breakin_kuavo5_v53" / "kuavo5_leg_breakin.py"  # kuavo5_v53（ROS控时长）
-        self.kuavo5_leg_breakin_script_v55 = leg_breakin_src / "leg_breakin_kuavo5_v55" / "kuavo5_leg_breakin.py"
-        self.kuavo5_leg_breakin_script_v56 = leg_breakin_src / "leg_breakin_kuavo5_v56" / "kuavo5_leg_breakin.py"
         
         # 进程管理
         self.leg_process = None
         self.roscore_process = None
         self.stop_flag = threading.Event()
-        self._signal_shutdown_started = False
         
         # 注册信号处理器
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
-
-    def _env_with_ec_master_lib_path(self, env):
-        """EC-Master I8254x 会 dlopen libemllI8254x.so；在子进程 env 里提前加入常见安装路径，避免「盘上有库仍报 not found」。"""
-        env = dict(env)
-        lib_name = "libemllI8254x.so"
-        candidates = []
-        pr = self.project_root
-        if pr is not None:
-            candidates.extend(
-                [
-                    pr.parent / "kuavo-ros-opensource" / "installed" / "lib",
-                    pr.parent.parent / "kuavo-ros-opensource" / "installed" / "lib",
-                    Path.home() / "kuavo-ros-opensource" / "installed" / "lib",
-                    pr
-                    / "src"
-                    / "kuavo-ros-control-lejulib"
-                    / "hardware_plant"
-                    / "lib"
-                    / "EC_Master"
-                    / "lib",
-                ]
-            )
-        prepend = []
-        seen = set()
-        for d in candidates:
-            try:
-                key = d.resolve()
-            except OSError:
-                key = d
-            if key in seen:
-                continue
-            seen.add(key)
-            if (key / lib_name).is_file():
-                prepend.append(str(key))
-        if not prepend:
-            return env
-        cur = env.get("LD_LIBRARY_PATH", "") or ""
-        env["LD_LIBRARY_PATH"] = ":".join(prepend + ([cur] if cur else []))
-        return env
 
     def _get_robot_version(self):
         """获取 ROBOT_VERSION：优先环境变量，其次读取 /home/lab/.bashrc"""
@@ -133,44 +88,20 @@ class LegBreakinStandalone:
             return False
     
     def _is_robot_version_53(self, robot_version: str):
+        """判断 ROBOT_VERSION 是否为 53"""
         rv_raw = str(robot_version or "").strip()
         rv = rv_raw.lower()
+        
+        # 字符串匹配：包含 v53 或 kuavo5_v53
         if "v53" in rv or "kuavo5_v53" in rv:
             return True
+        
+        # 数字版本判断：53
         try:
-            return int(rv_raw) == 53
+            v = int(rv_raw)
+            return v == 53
         except (ValueError, TypeError):
             return False
-
-    def _is_robot_version_55(self, robot_version: str):
-        rv_raw = str(robot_version or "").strip()
-        rv = rv_raw.lower()
-        if "v55" in rv or "kuavo5_v55" in rv:
-            return True
-        try:
-            return int(rv_raw) == 55
-        except (ValueError, TypeError):
-            return False
-
-    def _is_robot_version_56(self, robot_version: str):
-        rv_raw = str(robot_version or "").strip()
-        rv = rv_raw.lower()
-        if "v56" in rv or "kuavo5_v56" in rv:
-            return True
-        try:
-            return int(rv_raw) == 56
-        except (ValueError, TypeError):
-            return False
-
-    def _select_kuavo5_leg_script(self, robot_version: str):
-        """Kuavo5 数字/字符串版本 → 对应腿部脚本（53/55/56 独立目录，其余沿用原默认）。"""
-        if self._is_robot_version_53(robot_version):
-            return self.kuavo5_leg_breakin_script_v53
-        if self._is_robot_version_55(robot_version):
-            return self.kuavo5_leg_breakin_script_v55
-        if self._is_robot_version_56(robot_version):
-            return self.kuavo5_leg_breakin_script_v56
-        return self.kuavo5_leg_breakin_script_v52_80A
 
     def _find_project_root(self):
         """查找项目根目录（包含 tools/check_tool 的目录）"""
@@ -256,36 +187,26 @@ class LegBreakinStandalone:
         except Exception as e:
             self.print_colored(f"停止roscore失败: {e}", Colors.YELLOW)
     
-    def _stop_leg_child_graceful(self):
-        """仅终止 kuavo5/joint 腿部子进程：SIGTERM → 等待 EC 清理 → 必要时 SIGKILL。"""
-        if not self.leg_process or self.leg_process.poll() is not None:
-            return
-        self.print_colored(
-            f"正在停止腿部 EC 子进程（最多等待 {int(self._LEG_CHILD_TERM_TIMEOUT_SEC)}s 以释放 EtherCAT）...",
-            Colors.YELLOW,
-        )
-        try:
-            self.leg_process.terminate()
-            self.leg_process.wait(timeout=self._LEG_CHILD_TERM_TIMEOUT_SEC)
-        except subprocess.TimeoutExpired:
-            self.print_colored("子进程未在时限内退出，发送 SIGKILL（可能影响下次占用网卡）", Colors.RED)
-            try:
-                self.leg_process.kill()
-                self.leg_process.wait(timeout=5)
-            except Exception:
-                pass
-        except Exception as e:
-            self.print_colored(f"停止腿部子进程时出错: {e}", Colors.YELLOW)
-
     def signal_handler(self, signum, frame):
-        """信号处理函数（Ctrl+C / SIGTERM）：优先让子进程跑完 EC 清理，避免 killpg 误杀或 3s 强杀）。"""
-        if self._signal_shutdown_started:
-            return
-        self._signal_shutdown_started = True
-        self.print_colored(f"\n收到停止信号，正在安全停止腿部磨线...", Colors.YELLOW)
+        """信号处理函数"""
+        self.print_colored(f"\n收到停止信号，正在停止腿部磨线程序...", Colors.YELLOW)
         self.stop_flag.set()
-        self._stop_leg_child_graceful()
+        
+        # 停止腿部磨线进程
+        if self.leg_process and self.leg_process.poll() is None:
+            self.print_colored("正在停止腿部磨线进程...", Colors.YELLOW)
+            try:
+                os.killpg(os.getpgid(self.leg_process.pid), signal.SIGTERM)
+                self.leg_process.wait(timeout=3)
+            except:
+                try:
+                    os.killpg(os.getpgid(self.leg_process.pid), signal.SIGKILL)
+                except:
+                    pass
+        
+        # 停止roscore
         self._stop_roscore()
+        
         sys.exit(0)
     
     def run_leg_breakin(self):
@@ -313,17 +234,16 @@ class LegBreakinStandalone:
                 target_script = self.kuavo5_leg_breakin_script_v52
             elif leg_breakin_dir == "leg_breakin_kuavo5_v53":
                 target_script = self.kuavo5_leg_breakin_script_v53
-            elif leg_breakin_dir == "leg_breakin_kuavo5_v55":
-                target_script = self.kuavo5_leg_breakin_script_v55
-            elif leg_breakin_dir == "leg_breakin_kuavo5_v56":
-                target_script = self.kuavo5_leg_breakin_script_v56
             elif leg_breakin_dir == "leg_breakin_roban2_v17":
                 target_script = self.roban2_v17_leg_breakin_script
             elif leg_breakin_dir == "leg_breakin_roban2_v14":
                 target_script = self.joint_breakin_script
             else:
                 if is_kuavo5:
-                    target_script = self._select_kuavo5_leg_script(robot_version)
+                    if self._is_robot_version_53(robot_version):
+                        target_script = self.kuavo5_leg_breakin_script_v53
+                    else:
+                        target_script = self.kuavo5_leg_breakin_script_v52_80A
                 else:
                     # 根据版本选择roban2脚本
                     try:
@@ -336,7 +256,10 @@ class LegBreakinStandalone:
                         target_script = self.joint_breakin_script
         else:
             if is_kuavo5:
-                target_script = self._select_kuavo5_leg_script(robot_version)
+                if self._is_robot_version_53(robot_version):
+                    target_script = self.kuavo5_leg_breakin_script_v53
+                else:
+                    target_script = self.kuavo5_leg_breakin_script_v52_80A
             else:
                 # 根据版本选择roban2脚本
                 try:
@@ -478,7 +401,6 @@ class LegBreakinStandalone:
             leg_script_dir = self.joint_breakin_script.parent
             # ROS_BREAKIN_CONTROL_TIME=true: 告诉 joint_breakin.py "时长由ROS主控制器管理，不要再询问并读取时长"
             env = dict(os.environ, PYTHONUNBUFFERED='1', ROS_BREAKIN_CONTROL_TIME='true')
-            env = self._env_with_ec_master_lib_path(env)
             
             self.print_colored("正在启动腿部磨线脚本...", Colors.BLUE)
             self.print_colored(f"脚本路径: {target_script}", Colors.BLUE)
@@ -491,8 +413,6 @@ class LegBreakinStandalone:
                 # 根据目标脚本确定工作目录
                 leg_script_dir = target_script.parent
             
-            # 不使用 setsid：子进程与本脚本同进程组，主控 killpg(本脚本) 时也能把 EC 子进程一并 SIGTERM，
-            # 避免「只杀掉 launcher、kuavo5_leg_breakin 仍占网卡」。
             self.leg_process = subprocess.Popen(
                 ["python3", str(target_script)],
                 cwd=str(leg_script_dir),
@@ -501,6 +421,7 @@ class LegBreakinStandalone:
                 text=True,
                 bufsize=1,
                 env=env,
+                preexec_fn=os.setsid
             )
             
             self.print_colored(f"腿部磨线进程已启动，PID: {self.leg_process.pid}", Colors.GREEN)
@@ -642,15 +563,12 @@ class LegBreakinStandalone:
             return 1
 
 def main():
-    app = None
     try:
         app = LegBreakinStandalone()
         exit_code = app.run_leg_breakin()
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}程序被用户中断{Colors.NC}")
-        if app is not None:
-            app._stop_leg_child_graceful()
         sys.exit(0)
     except Exception as e:
         print(f"{Colors.RED}程序运行出错: {e}{Colors.NC}")

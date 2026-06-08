@@ -77,6 +77,11 @@ topics:
   - /rl_controller.*
   - /arm_controller.*
   - /vmp_controller/.*
+  - /tool_mocap_shoulder
+  - /tool_fk_shoulder
+  - /tool_position_error_shoulder
+  - /belly_pose
+  - /joint_.*
   - /ik_fk_result/.*
   - /r_hand_pose
   - /l_hand_pose

@@ -51,7 +51,7 @@ velocityLimits
 {
     ; 定义速度命令的限制
     (0,0)  0.80      ; cmdVelLineX
-    (1,0)  0.0      ; cmdVelLineY
+    (1,0)  0.6      ; cmdVelLineY
     (2,0)  0.0      ; cmdVelLineZ
     (3,0)  1.0      ; cmdVelAngularZ
 }
@@ -194,14 +194,14 @@ JointControlMode
     (10,0)  0       ; leg_r4_joint
     (11,0)  0       ; leg_r5_joint
     (12,0)  0       ; leg_r6_joint
-    (13,0)  0       ; zarm_l1_joint
-    (14,0)  0       ; zarm_l2_joint
-    (15,0)  0       ; zarm_l3_joint
-    (16,0)  0       ; zarm_l4_joint
-    (17,0)  0       ; zarm_r1_joint
-    (18,0)  0       ; zarm_r2_joint
-    (19,0)  0       ; zarm_r3_joint
-    (20,0)  0       ; zarm_r4_joint
+    (13,0)  2       ; zarm_l1_joint
+    (14,0)  2       ; zarm_l2_joint
+    (15,0)  2       ; zarm_l3_joint
+    (16,0)  2       ; zarm_l4_joint
+    (17,0)  2       ; zarm_r1_joint
+    (18,0)  2       ; zarm_r2_joint
+    (19,0)  2       ; zarm_r3_joint
+    (20,0)  2       ; zarm_r4_joint
 
 }
 

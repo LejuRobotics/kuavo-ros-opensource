@@ -343,8 +343,8 @@ gyro_filter_cutoff_freq
    (2,0)   120.0   ; z
 }
 
-arm_joint_pos_filter_cutoff_freq       100 ;
-arm_joint_vel_filter_cutoff_freq       100 ;
+arm_joint_pos_filter_cutoff_freq       5 ;
+arm_joint_vel_filter_cutoff_freq       5 ;
 mrt_joint_vel_filter_cutoff_freq       40 ;
 initialModeSchedule
 {

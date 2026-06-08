@@ -16,6 +16,40 @@
 ✅ 遥控器配置  
 ✅ 闭源代码清理
 
+脚本入口：
+- `tools/setup-kuavo-ros-control.sh`
+- `tools/setup-kuavo-ros-control.py`
+
+输入参数与交互输入：
+- 分支名称：回车默认 `master`
+- 仓库 commit：回车表示使用当前分支最新提交
+- 代码源选择：1) 自动（推荐） 2) 仅工厂镜像 3) 仅 Gitee
+- 机器人版本、重量、驱动板类型、末端执行器类型、是否配置 H12PRO
+
+仓库处理行为：
+- `kuavo-ros-opensource` 支持两个合法远端：
+  - 工厂镜像 `git://10.11.99.175:9418/kuavo-ros-opensource.git`
+  - Gitee `https://gitee.com/leju-robot/kuavo-ros-opensource.git`
+- 代码源选择对应三种策略：
+  - 自动（默认，回车或 1）：优先工厂镜像，失败后自动回退到 Gitee
+  - 仅工厂镜像（2）：只使用工厂镜像，失败不回退（适合工厂网络环境）
+  - 仅 Gitee（3）：只使用 Gitee，跳过工厂镜像（适合开发/外网环境）
+- 如果本地 `origin` 是上述任一地址，都视为合法，不触发 URL 不匹配告警
+- 脚本会自动补充 `origin_factory` 远端并尝试 `git fetch origin_factory`
+- 当用户指定的 commit 不在 `origin_factory` 远端分支中时，脚本会打印提示，要求操作员联系 IT 同步工厂镜像
+
+输出结果：
+- 成功时输出各阶段 `[SUCCESS]` 日志
+- 失败时输出 `[ERROR]` 日志并停止执行
+- 远端异常但允许继续的场景会输出 `WARNING`
+
+使用示例：
+
+```bash
+./tools/setup-kuavo-ros-control.sh
+python3 ./tools/setup-kuavo-ros-control.py
+```
+
 ---
 
 ## 使用步骤
@@ -31,6 +65,7 @@ wget -qO /tmp/setup-kuavo-ros-control.sh https://kuavo.lejurobot.com/statics/set
 1. **分支选择**  
    - 输入分支名称（直接回车默认使用master分支）
    - 输入特定commit哈希（直接回车使用最新版本）
+   - 选择代码源：1) 自动（推荐，优先工厂镜像，失败回退 Gitee） 2) 仅工厂镜像 3) 仅 Gitee
 
 2. **机器人参数配置**  
    - 输入机器人版本号：[40/41/42/43/44/45]
@@ -57,7 +92,8 @@ wget -qO /tmp/setup-kuavo-ros-control.sh https://kuavo.lejurobot.com/statics/set
    - 需要sudo权限执行部分操作
 
 2. **网络依赖**  
-   - 需要访问Gitee代码仓库
+   - 优先访问工厂镜像 `10.11.99.175:9418`
+   - 工厂镜像不可达时需要访问 Gitee 代码仓库
 
 3. **错误处理**  
    - 脚本使用 `set -e` 遇到错误立即退出
@@ -72,10 +108,11 @@ Q: 如何重新配置机器人参数？
 A: 直接重新运行脚本，已有配置会被覆盖更新
 
 Q: 克隆代码仓库失败怎么办？  
-A: 检查网络连接，确认能访问gitee.com，或手动克隆仓库：
+A: 检查网络连接，优先确认能访问工厂镜像；若工厂镜像不可达，再确认能访问 gitee.com，或手动克隆仓库：
 
 ```bash
 cd ~
+git clone git://10.11.99.175:9418/kuavo-ros-opensource.git
 git clone https://gitee.com/leju-robot/kuavo-ros-opensource.git
 git clone https://gitee.com/leju-robot/kuavo_opensource.git
 ```

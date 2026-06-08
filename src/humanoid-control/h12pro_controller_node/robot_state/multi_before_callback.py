@@ -1,23 +1,11 @@
 import subprocess
 import rospy
 import os
-import collections
 from rich import console
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
 from kuavo_msgs.srv import changeArmCtrlMode, switchToNextController, getControllerList, switchController, SetString, SetStringRequest
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
-
-# 导入RobotVersion，兼容不同环境
-try:
-    from robot_version import RobotVersion
-except ImportError:
-    import rospkg
-    rospack = rospkg.RosPack()
-    import sys
-    sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
-    from robot_version import RobotVersion
-
 import time
 import signal
 import datetime
@@ -45,7 +33,6 @@ import re
 import numpy as np
 from sensor_msgs.msg import Joy
 from geometry_msgs.msg import Twist
-from std_msgs.msg import Float64MultiArray
 
 console = console.Console()
 
@@ -300,8 +287,6 @@ _switch_controller_lock = threading.Lock()
 _switch_controller_cooling_until = 0.0  # 冷却期结束时间戳
 SWITCH_CONTROLLER_COOLDOWN = 3.0  # 冷却期时长（秒）
 _depth_loco_restore_controller_name = None  # 进入 depth_loco_controller 前的控制器名
-_depth_history_topic_monitor = None
-_depth_history_topic_monitor_lock = threading.Lock()
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_dir = os.path.join(os.path.dirname(current_dir), "config")
 ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
@@ -584,42 +569,22 @@ def call_real_initialize_srv():
 
 def is_real_launch_in_ready_stance(event):
     """
-    状态机条件判断函数：查询real_launch_status服务，确认是否是ready_stance或launched状态
+    状态机条件判断函数：查询real_launch_status服务，确认是否是ready_stance状态
     返回True允许状态切换，返回False阻止切换
     """
     client = rospy.ServiceProxy('/humanoid_controller/real_launch_status', Trigger)
     req = TriggerRequest()
     try:
         resp = client.call(req)
-        if resp.success and resp.message in ["ready_stance", "launched"]:
-            rospy.loginfo(f"[Condition] real_launch_status is {resp.message}, allow switch to stance")
+        if resp.success and resp.message == "ready_stance":
+            rospy.loginfo("[Condition] real_launch_status is ready_stance, allow switch to stance")
             return True
         else:
-            rospy.logwarn(f"[Condition] real_launch_status is {resp.message}, not ready_stance or launched, block switch to stance")
+            rospy.logwarn(f"[Condition] real_launch_status is {resp.message}, not ready_stance, block switch to stance")
             return False
     except rospy.ServiceException as e:
         rospy.logerr(f"[Condition] Failed to call real_launch_status service: {e}, block switch")
         return False
-
-def is_not_wheel_robot(event):
-    """
-    状态机条件判断函数：判断是否不是轮臂机器人
-    轮臂机器人版本号以6开头（60-69），禁止切换walk/trot步态
-    返回True允许状态切换，返回False阻止切换
-    """
-    # 判断是否为轮臂机器人(6代: major=6)
-    robot_version = os.environ.get('ROBOT_VERSION', '0')
-    is_wheel = False
-    try:
-        is_wheel = RobotVersion.create(int(robot_version)).start_with(major=6)
-    except (ValueError, TypeError):
-        rospy.logerr(f"ROBOT_VERSION环境变量格式错误: {robot_version}，默认不为轮臂")
-
-    if is_wheel:
-        rospy.logerr(f"[Condition] 当前为轮臂机器人（version={robot_version}），禁止切换walk/trot步态。")
-        return False
-    rospy.loginfo(f"[Condition] 当前为非轮臂机器人（version={robot_version}），允许切换walk/trot步态。")
-    return True
 
 def print_state_transition(trigger, source, target) -> None:
     console.print(
@@ -1191,108 +1156,6 @@ def get_current_controller_name():
         rospy.logerr(f"Service '{service_name}' not available: {e}")
         return None
 
-class TopicFrequencyMonitor(object):
-    """后台订阅话题并估算最近一段时间的消息频率。"""
-
-    def __init__(self, topic, msg_type, window_size=50, stale_timeout=0.5):
-        self._timestamps = collections.deque(maxlen=window_size)
-        self._stale_timeout = stale_timeout
-        self._lock = threading.Lock()
-        self._subscriber = rospy.Subscriber(topic, msg_type, self._cb, queue_size=window_size)
-
-    def _cb(self, _msg):
-        with self._lock:
-            self._timestamps.append(time.time())
-
-    def has_recent_message(self):
-        now_sec = time.time()
-        with self._lock:
-            if not self._timestamps:
-                return False
-            return (now_sec - self._timestamps[-1]) <= self._stale_timeout
-
-    def get_hz(self):
-        now_sec = time.time()
-        with self._lock:
-            timestamps = list(self._timestamps)
-
-        if len(timestamps) < 2:
-            return 0.0
-
-        if (now_sec - timestamps[-1]) > self._stale_timeout:
-            return 0.0
-
-        duration = timestamps[-1] - timestamps[0]
-        if duration <= 0.0:
-            return 0.0
-
-        return (len(timestamps) - 1) / duration
-
-def _get_depth_history_topic_monitor():
-    global _depth_history_topic_monitor
-
-    with _depth_history_topic_monitor_lock:
-        if _depth_history_topic_monitor is None:
-            _depth_history_topic_monitor = TopicFrequencyMonitor(
-                "/camera/depth/depth_history_array",
-                Float64MultiArray,
-                window_size=50,
-                stale_timeout=0.5,
-            )
-        return _depth_history_topic_monitor
-
-def is_depth_history_topic_available():
-    """检查深度历史话题是否已发布且当前能收到消息。
-
-    Returns:
-        bool: True 表示话题已发布、能收到消息且频率达到最低要求，False 表示当前不可切到 depth_loco_controller
-    """
-    target_topic = "/camera/depth/depth_history_array"
-    min_topic_frequency_hz = 50.0
-    wait_timeout_sec = 2.0
-    check_interval_sec = 0.05
-    try:
-        published_topics = rospy.get_published_topics()
-        if not published_topics:
-            rospy.logwarn("[DepthLocoSwitch] No published topics found while checking depth history topic.")
-            return False
-
-        if not any(topic_name == target_topic for topic_name, _topic_type in published_topics):
-            rospy.logwarn(f"[DepthLocoSwitch] Required topic '{target_topic}' is not published. Refuse to switch to depth_loco_controller.")
-            return False
-
-        topic_monitor = _get_depth_history_topic_monitor()
-        deadline = time.time() + wait_timeout_sec
-        estimated_hz = 0.0
-
-        while time.time() < deadline and not rospy.is_shutdown():
-            estimated_hz = topic_monitor.get_hz()
-            if estimated_hz >= min_topic_frequency_hz:
-                rospy.loginfo(
-                    f"[DepthLocoSwitch] Topic '{target_topic}' is available with estimated frequency "
-                    f"{estimated_hz:.1f} Hz."
-                )
-                return True
-            rospy.sleep(check_interval_sec)
-
-        if not topic_monitor.has_recent_message():
-            rospy.logwarn(
-                f"[DepthLocoSwitch] Required topic '{target_topic}' has no recent messages. "
-                f"Refuse to switch to depth_loco_controller."
-            )
-            return False
-
-        if estimated_hz < min_topic_frequency_hz:
-            rospy.logwarn(
-                f"[DepthLocoSwitch] Topic '{target_topic}' frequency too low: "
-                f"estimated {estimated_hz:.1f} Hz. Require at least {min_topic_frequency_hz:.1f} Hz."
-            )
-            return False
-        return True
-    except Exception as e:
-        rospy.logerr(f"[DepthLocoSwitch] Failed to check published topics: {e}")
-        return False
-
 def _set_depth_loco_restore_controller_name(controller_name):
     """记录进入 depth_loco_controller 之前的控制器名。"""
     global _depth_loco_restore_controller_name
@@ -1410,9 +1273,6 @@ def depth_loco_switch_callback(event):
 
         success = False
         if current_controller_lower in ["mpc", "amp_controller"]:
-            if not is_depth_history_topic_available():
-                rospy.logwarn("[DepthLocoSwitch] depth_loco_switch blocked because depth history topic is unavailable.")
-                return
             _set_depth_loco_restore_controller_name(current_controller_lower)
             rospy.loginfo("[DepthLocoSwitch] Switching to depth_loco_controller")
             success = call_switch_controller_service("depth_loco_controller")

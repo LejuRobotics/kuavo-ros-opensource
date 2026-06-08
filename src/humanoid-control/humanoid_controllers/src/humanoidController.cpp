@@ -550,10 +550,10 @@ namespace humanoid_controller
     }
     
     auto robot_config = drake_interface_->getRobotConfig();
-    AnkleSolverType ankleSolverType = static_cast<AnkleSolverType>(robot_config->getValue<int>("ankle_solver_type"));
-    ankleSolver.getconfig(ankleSolverType);
+    const std::string ankleSolverTypeToken = robot_config->getValue<std::string>("ankle_solver_type");
+    ankleSolver.getconfig(ankleSolverTypeToken);
     // 同步脚踝解算类型到 ROS 参数，供倒地起身等 RL 控制器使用
-    ros::param::set("/ankle_solver_type", static_cast<int>(ankleSolverType));
+    ros::param::set("/ankle_solver_type", ankleSolverTypeToken);
     if (!init_fall_down_state_) // 初始倒地时不在这里设置初始状态
     {
       ros::param::set("robot_init_state_param", robot_init_state_param);
@@ -1011,6 +1011,9 @@ namespace humanoid_controller
       armEefWbcPosePublisher_ = controllerNh_.advertise<std_msgs::Float64MultiArray>("/humanoid_controller/wbc_arm_eef_pose", 10, true);
       // dexhand state
       dexhand_state_sub_ = controllerNh_.subscribe("/dexhand/state", 10, &humanoidController::dexhandStateCallback, this);
+      // Linker L6/O6灵巧手状态订阅（变量/函数名完全和qiangnao区分）
+      linker_left_hand_state_sub_ = controllerNh_.subscribe("/cb_left_hand_state", 10, &humanoidController::linkerLeftHandStateCallback, this);
+      linker_right_hand_state_sub_ = controllerNh_.subscribe("/cb_right_hand_state", 10, &humanoidController::linkerRightHandStateCallback, this);
 
       standUpCompletePub_ = controllerNh_.advertise<std_msgs::Int8>("/bot_stand_up_complete", 10);
       
@@ -1915,16 +1918,16 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     // currentObservation_.state(8) = 0.78626;
     // currentObservation_.state.segment(6 + 6, jointNum_) = defalutJointPos_;
     initial_status_ = HumanoidInterface_->getInitialState();
-
-    // 修改为所有版本都能实现的方式：直接在initial_status_中设置手臂关节的初始位置
-    int arm_start = 12 + jointNumReal_ + waistNum_;
-    if (static_cast<int>(initial_status_.size()) >= arm_start + static_cast<int>(armNumReal_)) {
-      initial_status_.segment(arm_start, armNumReal_) = defalutArmPosMPC_;
-      arm_joint_pos_filter_.reset(defalutArmPosMPC_);
-    } else {
-      ROS_WARN_STREAM("[starting] initial_status_.size()=" << initial_status_.size()
-                      << " too small to set arm segment at " << arm_start
-                      << " (need " << armNumReal_ << ")");
+    if (is_roban_) {
+      int arm_start = 12 + jointNumReal_ + waistNum_;
+      if (static_cast<int>(initial_status_.size()) >= arm_start + static_cast<int>(armNumReal_)) {
+        initial_status_.segment(arm_start, armNumReal_) = defalutArmPosMPC_;
+        arm_joint_pos_filter_.reset(defalutArmPosMPC_);
+      } else {
+        ROS_WARN_STREAM("[starting] initial_status_.size()=" << initial_status_.size()
+                        << " too small to set arm segment at " << arm_start
+                        << " (need " << armNumReal_ << ")");
+      }
     }
 
     initial_statusRL_ = initialStateRL_;
@@ -3282,8 +3285,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
       }
       robotVisualizer_->updateHeadJointPositions(sensor_data_head_.jointPos_);
-      // 更新灵巧手可视化
-      robotVisualizer_->updateHandJointPositions(dexhand_joint_pos_);
+      // 更新灵巧手可视化（变量完全区分：Linker用linker_hand_joint_pos_，qiangnao用dexhand_joint_pos_）
+      // 自动识别手型：Linker手话题有发布者则用Linker数据，否则用qiangnao数据
+      if (linker_left_hand_state_sub_.getNumPublishers() > 0 || linker_right_hand_state_sub_.getNumPublishers() > 0) {
+        robotVisualizer_->updateLinkerHandJointPositions(linker_hand_joint_pos_);
+      } else {
+        robotVisualizer_->updateHandJointPositions(dexhand_joint_pos_);
+      }
     }
 
     // publish time cost
@@ -4258,8 +4266,28 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
   {
     if(msg->name.size() != dexhand_joint_pos_.size())
       return;
-    for(size_t i = 0; i < dexhand_joint_pos_.size(); ++i)  
+    for(size_t i = 0; i < dexhand_joint_pos_.size(); ++i)
       dexhand_joint_pos_(i) = msg->position[i];
+  }
+
+  // Linker L6/O6左手状态回调（完全使用Linker专属变量，不碰qiangnao的dexhand变量）
+  void humanoidController::linkerLeftHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg)
+  {
+    if(msg->position.size() < 6)
+      return;
+    // 手状态发布时做了反转，这里转回来得到内部控制量：0=张开，255=闭合
+    for(size_t i = 0; i < 6; ++i)
+      linker_hand_joint_pos_(i) = 255.0 - std::clamp(msg->position[i], 0.0, 255.0);
+  }
+
+  // Linker L6/O6右手状态回调（完全使用Linker专属变量，不碰qiangnao的dexhand变量）
+  void humanoidController::linkerRightHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg)
+  {
+    if(msg->position.size() < 6)
+      return;
+    // 手状态发布时做了反转，这里转回来得到内部控制量：0=张开，255=闭合
+    for(size_t i = 0; i < 6; ++i)
+      linker_hand_joint_pos_(i + 6) = 255.0 - std::clamp(msg->position[i], 0.0, 255.0);
   }
 
   void humanoidController::getEnableMpcFlagCallback(const std_msgs::Bool::ConstPtr &msg)

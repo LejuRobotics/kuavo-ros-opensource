@@ -16,9 +16,6 @@ def execute_arm_tests():
 
     # 等待连接建立
     rospy.sleep(0.01)
-    
-    # 设置手臂控制模式为外部控制
-    ct.set_arm_control_mode(2)
 
     # 测试用例列表： (名称, 期望时间, [14个关节角度])
     # 注意：角度单位为度，后续会转换为弧度

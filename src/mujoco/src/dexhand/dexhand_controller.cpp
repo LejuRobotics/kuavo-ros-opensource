@@ -18,7 +18,7 @@ namespace eef_controller
         this->close();
     }
 
-    bool DexhandController::init(MujocoDexHandPtr l_dexhand, MujocoDexHandPtr r_dexhand)
+    bool DexhandController::init(MujocoHandBasePtr l_dexhand, MujocoHandBasePtr r_dexhand)
     {
         left_dexhand_ = l_dexhand;
         right_dexhand_ = r_dexhand;

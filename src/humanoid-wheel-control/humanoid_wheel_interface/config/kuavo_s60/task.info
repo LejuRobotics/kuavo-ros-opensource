@@ -436,7 +436,7 @@ optimizedTrajKinematicLimit
 ; 手臂轨迹插补限制（仅用于上层 armTrajInterpFilter），与 optimizedTrajKinematicLimit 解耦
 armTrajInterpKinematicLimit
 {
-  enable                         false  ; false: 保持旧版逻辑, true: 启用手臂轨迹插补增强路径
+  enable                         true  ; false: 保持旧版逻辑, true: 启用手臂轨迹插补增强路径
   reference_update_period        0.010  ; [s], should match arm trajectory source period
   kalman_r_q                     3e-7    ; PV模型: 全14DoF共享 position measurement noise
   kalman_r_dq                    5e-4    ; PV模型: 全14DoF共享 velocity measurement noise
@@ -1087,7 +1087,7 @@ jointVelocityLimits
 
 safeAccLimit
 {
-  enable false   ; 启动默认的加速度边界, 采用大负载计算获得
+  enable true   ; 启动默认的加速度边界, 采用大负载计算获得
 
   realTimeAccEnable  false  ; 实时计算加速度边界
 

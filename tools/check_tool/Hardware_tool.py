@@ -869,10 +869,9 @@ def qiangnao_hand():
     # 让用户选择手类型
     print(bcolors.BOLD + "请选择手类型：" + bcolors.ENDC)
     print("1. 一代手 (Revo1)")
-    print("2. 二代手 (Revo2)")
-    print("3. 灵心巧手(linker_hand)")
+    print("2. 二代手 (Revo2) 注：灵心巧手属于二代手")
     hand_type = input("请输入选项：")
-    if hand_type not in ["1", "2", "3"]:
+    if hand_type not in ["1", "2"]:
         print(bcolors.FAIL + "无效选项" + bcolors.ENDC)
         return
 
@@ -897,14 +896,6 @@ def qiangnao_hand():
         else:
             command = "bash " + folder_path + "/dexhand_test.sh --revo2 --test 3"
             print(bcolors.OKGREEN + "检测到二代手单CAN配置，使用 Revo2 测试命令" + bcolors.ENDC)
-    elif hand_type == "3":
-        # 灵心巧手
-        if is_dual_bus:
-            command = "bash " + folder_path + "/dexhand_test.sh --revo1can --test 3"
-            print(bcolors.OKGREEN + "检测到灵心巧手双CAN配置，使用 linker_hand 测试命令" + bcolors.ENDC)
-        else:
-            command = "bash " + folder_path + "/dexhand_test.sh --normal --test 3"
-            print(bcolors.OKGREEN + "检测到灵心巧手单CAN配置，使用 linker_hand 测试命令" + bcolors.ENDC)
     else:
         # 一代手 (Revo1)
         if is_dual_bus:
@@ -1513,12 +1504,17 @@ def secondary_menu():
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "joint_breakin.py")
                         script_description = f"Kuavo4磨线脚本 joint_breakin/joint_breakin.py (版本 {robot_version})"
 
-                    elif 50 <= version_num <= 56:
+                    elif 50 <= version_num <= 52:
+                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
+                        script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+
+                    
+                    elif version_num == 53:
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
                     else:
-                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、17、40-49、50-56、62），当前不支持自动选择磨线脚本" + bcolors.ENDC)
+                        print(bcolors.WARNING + f"警告：版本 {robot_version} 不在支持的范围内（13-14、17、40-49、50-52、62、53），当前不支持自动选择磨线脚本" + bcolors.ENDC)
                 except (ValueError, TypeError):
                     print(bcolors.WARNING + f"警告：无法解析版本号 {robot_version}，请检查 ~/.bashrc 中的 ROBOT_VERSION 设置" + bcolors.ENDC)
             else:

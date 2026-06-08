@@ -74,21 +74,6 @@ void Quest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
   while (!shouldStop() && ros::ok()) {
     updateSensorArmJointMeanFromSensorData();
 
-    // 实物：硬件未就绪则不进入后续（放在未激活判断与 fsm 之前，少做无效状态维护）
-    {
-      bool is_real_robot = false;
-      if (ros::param::getCached("/is_real", is_real_robot) && is_real_robot) {
-        int hardware_is_ready = 0;
-        if (!ros::param::getCached("/hardware/is_ready", hardware_is_ready) || hardware_is_ready == 0) {
-          ROS_INFO_THROTTLE(3.0,
-                            "[Quest3IkIncrementalROS] Waiting /hardware/is_ready != 0 before incremental FSM (real robot)");
-          reset();
-          rate.sleep();
-          continue;
-        }
-      }
-    }
-
     if ((armControlMode_ == 0 && lastArmControlMode_ == 0) || (armControlMode_ == 1 && lastArmControlMode_ == 0)) {
       reset();  // 机器人未激活 (0→0 或 0→1)，持续重置各类状态，确保进入系统时正常
 
@@ -1450,7 +1435,6 @@ void Quest3IkIncrementalROS::armCtrlModeCallback(const std_msgs::Float64MultiArr
     return;
   }
   arm_ctrl_mode_ = static_cast<int>(msg->data[1]); //获取手臂控制模式
-  currentArmCtrlMode_ = static_cast<int>(msg->data[0]); // 对应 Python __arm_control_mode（current_mode）
 }
 
 void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {

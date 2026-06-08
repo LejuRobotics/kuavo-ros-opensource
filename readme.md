@@ -101,12 +101,16 @@ catkin build  humanoid_controllers
 ```bash
 source devel/setup.bash # 如果使用docker环境，则使用source devel/setup.zsh
 roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch # 启动控制器、mpc、wbc、mujoco仿真器
+# 注：轮臂机器人请使用 
+roslaunch humanoid_controllers load_kuavo_mujoco_sim_wheel.launch
 ```
 * 使用gazebo仿真器
 ```bash
 catkin build humanoid_controllers gazebo_sim # 需要编译gazebo_sim包
 source devel/setup.bash # 如果使用docker环境，则使用source devel/setup.zsh
 roslaunch humanoid_controllers load_kuavo_gazebo_sim.launch # 启动控制器、mpc、wbc、gazebo仿真器
+# 注：轮臂机器人请使用
+roslaunch humanoid_controllers load_kuavo_gazebo_sim_wheel.launch
 ```
 * 使用isaac-sim仿真器
 ```bash
@@ -123,7 +127,6 @@ roslaunch humanoid_controllers load_kuavo_isaac_sim.launch  # 启动控制器、
 - `qiangnao` : 灵巧手, 默认值
 - `lejuclaw` : 二指夹爪
 - `qiangnao_touch` : 触觉灵巧手
-- `linker_hand` : 灵心巧手
 
 在运行实物时，您可以通过指定`ruiwo_cxx_sdk`参数来选择手臂电机使用 C++ SDK 还是 Python SDK：
 - 默认值为`true`表示使用 C++ SDK
@@ -317,11 +320,28 @@ roslaunch humanoid_controllers load_kuavo_real_half_up_body.launch
 
    # 可选配置参数：use_incremental_ik(仅当use_cpp_ik:=true 时，可选是否启用增量式IK)
    roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 use_cpp_ik:=true use_incremental_ik:=true
+
+   # 启用轮臂ik
+   roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch ip_address:=192.168.3.32 wheel_ik:=true
   ```
   > 如果希望同时映射躯干的运动（上下蹲和弯腰），可以增加选项`control_torso:=1`，使用前**务必在站立状态下长按VR右手柄的meta键**以标定躯干高度。
 
   > 默认控制双手，如果需要控制单手，可以增加选项`ctrl_arm_idx:=0`, 其中0，1，2分别对应左手，右手，双手
-- 全程使用VR的手柄控制即可
+
+- 同时启动VR节点和机器人
+  - 运行
+
+  ```bash
+  sudo su
+  source devel/setup.bash
+  # 启用双足机器人VR控制
+  roslaunch humanoid_controllers load_kuavo_real_with_vr.launch
+  
+  # 启用轮臂机器人VR控制
+  roslaunch humanoid_controllers load_kuavo_real_wheel.launch
+  ```
+
+- 全程使用VR的手柄控制即可(以下皆为**双足**机器人VR控制操作说明)
   - 启动时按A键站立(从启动等待开始状态站立，相当于kuavo中的按o)；
   - 停止机器人，同时按下左侧XY两个键，停止机器人
   - 自动模式下，推摇杆即走，松摇杆自动立即停止

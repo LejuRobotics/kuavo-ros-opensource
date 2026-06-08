@@ -117,7 +117,6 @@ class WheelArmControlBaseROS {
 
   std::mutex bonePosesMutex_;
   std::mutex joystickMutex_;
-  std::mutex transformerDataMutex_;
   std::shared_ptr<noitom_hi5_hand_udp_python::PoseInfoList> latestBonePosesPtr_;
   std::unique_ptr<WheelJoyStickHandler> joyStickHandlerPtr_;
   std::unique_ptr<Quest3ArmInfoTransformer> quest3ArmInfoTransformerPtr_;

@@ -88,7 +88,6 @@ enum EndEffectorType
   jodell,
   qiangnao,
   lejuclaw,
-  linker_hand,
 };
 enum MotorDriveType
 {

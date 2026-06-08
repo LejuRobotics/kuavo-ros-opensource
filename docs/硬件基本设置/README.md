@@ -427,7 +427,7 @@ roslaunch humanoid_controllers load_kuavo_real_with_vr.launch
    - 长按右手柄 meta 按钮，等待圆圈转完
 6. 机器人站立
    - 如果机器人双腿已经缩起
-   - **长按**右手柄 **A 键约 0.35 秒**，（需用力扶住机器人背部）
+   - 按下右手柄 A 键，进入站立状态(需用力扶住机器人背部)
 
 7. 控制方式
 

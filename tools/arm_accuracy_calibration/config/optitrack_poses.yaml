@@ -1,0 +1,24 @@
+# 动捕标定：tag / joint_1 刚体 -> 关节 的 T_rigid_body_to_joint（单位 mm）。
+# joint_1 偏置与 config.yaml 中 arrays.joint_1 保持一致；修改标定时可只改本文件或同步两处。
+# 刚体在动捕系下的位姿由 ROS 订阅（tag_pose、joint_1，PoseStamped，mm + xyzw）。
+poses:
+  tag_array:
+    # 刚体(tag阵列) -> 关节 的偏移
+    T_rigid_body_to_joint:
+      - [1, 0, 0, -203.93]
+      - [0, 1, 0, -153.93]
+      - [0, 0, 1, -12]
+      - [0, 0, 0, 1]
+
+  joint_1_array:
+    # 刚体(joint_1) -> joint_1 关节（与 config.yaml arrays.joint_1 相同）
+    T_rigid_body_to_joint:
+      - [1, 0, 0, 0]
+      - [0, 1, 0, 25.80]
+      - [0, 0, 1, 105.00]
+      - [0, 0, 0, 1]
+
+  # 仅 --offline-from-yaml 时在 joint_1_array 下补充一帧刚体位姿，例如：
+  #   position_mm: [x, y, z]
+  #   quaternion_xyzw: [qx, qy, qz, qw]
+  # tag_array 下也需同样补充 position_mm / quaternion_xyzw

@@ -132,7 +132,6 @@ catkin_package(
                 
                 # ocs2_biped_robot_ros
                 angles
-                kuavo_msgs
                 kuavo_common
                 kuavo_solver
 )
@@ -267,6 +266,7 @@ add_library(${PROJECT_NAME}
         src/ControlDataManager.cpp
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
+        src/util/TopicMonitor.cpp
         src/rl/RlGaitReceiver.cpp
         src/rl/RLControllerBase.cpp
         src/rl/FallStandController.cpp

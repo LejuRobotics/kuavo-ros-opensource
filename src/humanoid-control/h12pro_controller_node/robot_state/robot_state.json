@@ -205,8 +205,7 @@
         "trigger": "walk",
         "source": "stance",
         "dest": "walk",
-        "before": "walk_callback",
-        "conditions": ["is_not_wheel_robot"]
+        "before": "walk_callback"
       },
       {
         "trigger": "stance",
@@ -320,8 +319,7 @@
         "trigger": "trot",
         "source": "stance",
         "dest": "trot",
-        "before": "trot_callback",
-        "conditions": ["is_not_wheel_robot"]
+        "before": "trot_callback"
       },
       {
         "trigger": "trot",
@@ -645,15 +643,14 @@
         "trigger": "walk",
         "source": "stance",
         "dest": "walk",
-        "before": "walk_callback",
-        "conditions": ["is_not_wheel_robot"]
+        "before": "walk_callback"
       },
       {
         "trigger": "trot",
         "source": "stance",
         "dest": "trot",
         "before": "trot_callback",
-        "conditions": ["check_is_amp_controller", "is_not_wheel_robot"]
+        "conditions": "check_is_amp_controller"
       },
       {
         "trigger": "switch_controller",

@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.0.2)
 project(motion_capture_ik)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
+# 可重现构建：固定调试信息中的时间戳，使 .so 内容仅取决于源码内容而非文件 mtime
+set(ENV{SOURCE_DATE_EPOCH} "0")
 find_package(drake CONFIG REQUIRED)
 find_package(Eigen3 REQUIRED)
 
@@ -30,7 +33,6 @@ find_package(catkin REQUIRED COMPONENTS
   leju_utils
   humanoid_wheel_interface
   ocs2_core
-  ocs2_msgs
 )
 find_package(BZip2 REQUIRED)
 
@@ -69,7 +71,7 @@ find_package(Boost REQUIRED COMPONENTS
 catkin_package(
   INCLUDE_DIRS include
   # LIBRARIES motion_capture_ik_lib
-  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core ocs2_msgs humanoid_wheel_interface
+  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core humanoid_wheel_interface
   DEPENDS drake Eigen3
 )
 
@@ -111,6 +113,7 @@ include_directories(
 add_subdirectory(test)
 
 add_executable(arms_ik_node src/arms_ik_node.cpp)
+add_dependencies(arms_ik_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 if(EXISTS "${PLANT_IK_FILE}")
   target_link_libraries(arms_ik_node plantIK ${catkin_LIBRARIES} drake::drake)
 else()

@@ -1085,7 +1085,7 @@ jointVelocityLimits
 
 safeAccLimit
 {
-  enable false   ; 启动默认的加速度边界, 采用大负载计算获得
+  enable true   ; 启动默认的加速度边界, 采用大负载计算获得
 
   realTimeAccEnable  false  ; 实时计算加速度边界
 
@@ -1271,7 +1271,7 @@ contact_force_params
 {
   contactForceErrorThreshold  0.15    ; 误差阈值（rad），超过此值禁用接触力任务
   weightArmAccelReduced    30.0    ; 施加期望力时的手臂任务权重
-  transitionTime   0.3    ; 权重平滑过渡时间常数（秒
+  transitionTime   0.3    ; 权重平滑过渡时间常数（秒）
   forceThreshold           5.0    ; 期望力阈值（N），超过此值认为施加了期望力
   interpolationSpeed       300.0   ; 期望力插值速度（N/s）
 }

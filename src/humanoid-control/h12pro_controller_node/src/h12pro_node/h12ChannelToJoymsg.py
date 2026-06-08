@@ -175,7 +175,7 @@ class H12ToJoyControllerNode:
         """轮臂模式(G12)特殊处理"""
         channels = list(self.channels_msg)
 
-        # E/F安全开关: 必须都在中间位置才生效
+        # E/F safety switch: both must be at middle position for mode switching
         e_mid = abs(channels[4] - H12_AXIS_MID_VALUE) < 100
         f_mid = abs(channels[5] - H12_AXIS_MID_VALUE) < 100
         safe_enabled = e_mid and f_mid
@@ -194,14 +194,12 @@ class H12ToJoyControllerNode:
             if mapping and mapping.axis_index is not None:
                 self.joy_msg.axes[mapping.axis_index] = mapping.get_current_state(channels[index])
 
-        if not safe_enabled:
-            return
+        # Safety switch: only controls LB/RB for mode switching
+        if safe_enabled:
+            self.joy_msg.buttons[BUTTON_LB] = 1
+            self.joy_msg.buttons[BUTTON_RB] = 1
 
-        # 安全开关已启用
-        self.joy_msg.buttons[BUTTON_LB] = 1
-        self.joy_msg.buttons[BUTTON_RB] = 1
-
-        # C+D长按急停 (channel 9->index 8, channel 10->index 9)
+        # C+D long press emergency stop - always active
         c_pressed = channels[8] == H12_AXIS_RANGE_MAX
         d_pressed = channels[9] == H12_AXIS_RANGE_MAX
         if c_pressed and d_pressed:
@@ -214,20 +212,20 @@ class H12ToJoyControllerNode:
             self.cd_press_start_time = None
             self.cd_emergency_triggered = False
 
-        # 按键映射 (C->9, A->7, B->8, D->10)
+        # Button mapping (A/B/C/D) - always active
         for ch_idx, btn_ch in [(8, 9), (6, 7), (7, 8), (9, 10)]:
             mapping = self.channel_mapping.get(btn_ch)
             if mapping and mapping.is_button:
                 self.joy_msg.buttons[mapping.button_index] = mapping.get_current_state(channels[ch_idx])
 
-        # G/H滚轮按钮
+        # G/H dial buttons - always active
         if g_at_extreme:
             self.joy_msg.buttons[BUTTON_GUIDE] = 1
         if h_at_extreme:
             self.joy_msg.buttons[BUTTON_M1] = 1
 
-        # G+H同时极值2秒 -> 躯干复位
-        if g_at_extreme and h_at_extreme:
+        # G+H both at extreme for 2s -> torso reset - requires E/F at middle
+        if safe_enabled and g_at_extreme and h_at_extreme:
             if not hasattr(self, 'gh_press_start_time') or self.gh_press_start_time is None:
                 self.gh_press_start_time = time.time()
             elif time.time() - self.gh_press_start_time >= 2.0:

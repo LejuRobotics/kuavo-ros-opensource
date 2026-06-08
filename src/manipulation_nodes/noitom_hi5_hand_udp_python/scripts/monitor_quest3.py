@@ -20,7 +20,7 @@ import threading
 from visualization_msgs.msg import Marker
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
-from std_msgs.msg import Float64MultiArray, String, Empty
+from std_msgs.msg import Float64MultiArray, String
 # Add the parent directory to the system path to allow relative imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
@@ -110,10 +110,6 @@ class Quest3BoneFramePublisher:
 
         # 创建头部控制模式发布节点
         self.head_ctrl_mode_pub = rospy.Publisher('/quest3/head_control_mode', headCtrlMode, queue_size=10)
-        # 每次 set_head_control_mode 成功设为 fixed 时发布，供 QuestControlFSM 在手臂复位窗口内更新「解锁后恢复」快照（含重复 fixed）
-        self._pub_head_fixed_user_intent = rospy.Publisher(
-            '/quest3/head_fixed_forward_user_intent', Empty, queue_size=1, latch=False
-        )
 
         rospy.loginfo("Head reset service started at /quest3/reset_head_pose")
 
@@ -532,8 +528,6 @@ class Quest3BoneFramePublisher:
             
             # 设置模式
             self.head_control_manager.set_mode(mode, fixed_hand)
-            if mode == HeadControlMode.FIXED:
-                self._pub_head_fixed_user_intent.publish(Empty())
             
             response.success = True
             response.message = f"Head control mode set to: {req.mode}" + (f", fixed_hand: {fixed_hand}" if mode == HeadControlMode.FIXED_MAIN_HAND else "")

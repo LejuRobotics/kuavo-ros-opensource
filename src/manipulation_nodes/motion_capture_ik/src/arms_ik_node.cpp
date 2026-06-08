@@ -51,6 +51,7 @@
 
 #include "kuavo_msgs/twoArmHandPoseCmdSrv.h"
 #include "kuavo_msgs/fkSrv.h"
+#include "kuavo_msgs/fkSrvWithReferFrame.h"
 #include "kuavo_msgs/twoArmHandPoseCmdFreeSrv.h"
 #include "kuavo_msgs/twoArmHandPoseFree.h"
 #include "kuavo_msgs/sensorsData.h"
@@ -166,6 +167,7 @@ class ArmsIKNode
             ik_server_muli_refer_ = nh_.advertiseService("/ik/two_arm_hand_pose_cmd_srv_muli_refer", &ArmsIKNode::handleServiceRequest_multiple_refer_q, this);
             ik_free_server_ = nh_.advertiseService("/ik/two_arm_hand_pose_cmd_free_srv", &ArmsIKNode::free_handleServiceRequest, this);
             fk_server_ = nh_.advertiseService("/ik/fk_srv", &ArmsIKNode::handleFKServiceRequest, this);
+            fk_server_with_refer_frame_ = nh_.advertiseService("/ik/fk_srv_with_refer_frame", &ArmsIKNode::handleFKServiceRequestWithReferFrame, this);
             // solver params
             ik_solve_params_.major_optimality_tol = 9e-3;
             ik_solve_params_.major_feasibility_tol = 9e-3;
@@ -1331,6 +1333,110 @@ class ArmsIKNode
             return true;
         }
 
+        // 处理带基准坐标系的FK服务请求
+        bool handleFKServiceRequestWithReferFrame(kuavo_msgs::fkSrvWithReferFrame::Request &req, kuavo_msgs::fkSrvWithReferFrame::Response &res) 
+        {
+            const int num_dof = q0_.size(); 
+            if(req.q.size() != num_dof)
+            {
+                res.success = false;
+                res.error_message = "The size of the request q (" + std::to_string(req.q.size()) + 
+                                   ") is not equal to the number of dof in ik_node(" + std::to_string(num_dof) + ")";
+                ROS_ERROR_STREAM(res.error_message);
+                return false;
+            }
+
+            HighlyDynamic::HandSide side = static_cast<HighlyDynamic::HandSide>(req.hand_side);
+            if(side != HighlyDynamic::HandSide::LEFT && side != HighlyDynamic::HandSide::RIGHT)
+            {
+                res.success = false;
+                res.error_message = "Invalid hand_side value. Must be 0 (LEFT) or 1 (RIGHT)";
+                ROS_ERROR_STREAM(res.error_message);
+                return false;
+            }
+
+            // 确定使用的坐标系
+            std::string base_frame = req.base_frame.empty() ? end_frames_name_[0] : req.base_frame;
+            std::string end_frame = req.end_effector_frame.empty() 
+                ? (side == HighlyDynamic::HandSide::LEFT ? end_frames_name_[1] : end_frames_name_[2])
+                : req.end_effector_frame;
+
+            // 验证坐标系是否存在
+            auto checkFrameExists = [&](const std::string& frame_name) -> bool {
+                const int n = plant_ptr_->num_model_instances();
+                for (int i = 0; i < n; ++i) {
+                    const drake::multibody::ModelInstanceIndex mi(i);
+                    if (plant_ptr_->HasFrameNamed(frame_name, mi)) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+            if(!checkFrameExists(base_frame))
+            {
+                res.success = false;
+                res.error_message = "base_frame '" + base_frame + "' does not exist";
+                ROS_ERROR_STREAM(res.error_message);
+                return false;
+            }
+
+            if(!checkFrameExists(end_frame))
+            {
+                res.success = false;
+                res.error_message = "end_effector_frame '" + end_frame + "' does not exist";
+                ROS_ERROR_STREAM(res.error_message);
+                return false;
+            }
+
+            Eigen::VectorXd q = Eigen::VectorXd::Zero(num_dof);
+            for(int i = 0; i < num_dof; i++)
+                q(i) = req.q[i];
+
+            std::pair<Eigen::Vector3d, Eigen::Quaterniond> pose = (req.base_frame.empty() && req.end_effector_frame.empty())
+                ? ik_.FK(q, side)
+                : ik_.FKWithBaseAndEndFrame(q, side, base_frame, end_frame);
+
+            // 填充响应消息
+            res.success = true;
+            res.error_message = "";
+            
+            const int start_idx = q.size() - 2*single_arm_num_;
+            
+            if(side == HighlyDynamic::HandSide::LEFT)
+            {
+                for (size_t i = 0; i < single_arm_num_; i++)
+                {
+                    res.hand_poses.left_pose.joint_angles[i] = q[i + start_idx];
+                }
+                for(int i = 0; i < 3; i++)
+                {
+                    res.hand_poses.left_pose.pos_xyz[i] = pose.first[i];
+                }
+                for(int i = 0; i < 4; i++)
+                {
+                    res.hand_poses.left_pose.quat_xyzw[i] = pose.second.coeffs()[i];
+                }
+            }
+            else
+            {
+                for (size_t i = 0; i < single_arm_num_; i++)
+                {
+                    res.hand_poses.right_pose.joint_angles[i] = q[i + single_arm_num_ + start_idx];
+                }
+                for(int i = 0; i < 3; i++)
+                {
+                    res.hand_poses.right_pose.pos_xyz[i] = pose.first[i];
+                }
+                for(int i = 0; i < 4; i++)
+                {
+                    res.hand_poses.right_pose.quat_xyzw[i] = pose.second.coeffs()[i];
+                }
+            }
+
+            return true;
+        }
+
     // 基于雅可比的伪逆求解，用于提供初始猜测
     Eigen::VectorXd solvePseudoInverseIK(const std::vector<std::pair<Eigen::Quaterniond, Eigen::Vector3d>>& pose_vec, const Eigen::VectorXd& q0_init)
     {
@@ -1705,6 +1811,7 @@ class ArmsIKNode
         ros::ServiceServer ik_server_muli_refer_;
         ros::ServiceServer ik_free_server_;
         ros::ServiceServer fk_server_;
+        ros::ServiceServer fk_server_with_refer_frame_;
         bool recived_cmd_ = false;
         bool recived__new_cmd_ = false;
         HighlyDynamic::IKParams ik_solve_params_;

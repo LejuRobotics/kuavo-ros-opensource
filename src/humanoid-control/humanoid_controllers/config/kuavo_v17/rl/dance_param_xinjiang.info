@@ -177,27 +177,27 @@ jointKd
 torqueLimits
 {
     ; 定义各关节的力矩限制
-    (0,0)   80.0   ; waist_yaw_joint
-    (1,0)   150.0  ; leg_l1_joint
-    (2,0)   150.0  ; leg_l2_joint
-    (3,0)   70.0   ; leg_l3_joint
+    (0,0)   64.0  ; waist_yaw_joint
+    (1,0)   120.0  ; leg_l1_joint
+    (2,0)   120.0  ; leg_l2_joint
+    (3,0)   56.0  ; leg_l3_joint
     (4,0)   150.0  ; leg_l4_joint
-    (5,0)   74.0   ; leg_l5_joint
-    (6,0)   74.0   ; leg_l6_joint
-    (7,0)   150.0  ; leg_r1_joint
-    (8,0)   150.0  ; leg_r2_joint
-    (9,0)   70.0   ; leg_r3_joint
+    (5,0)   70.2  ; leg_l5_joint
+    (6,0)   70.2  ; leg_l6_joint
+    (7,0)   120.0  ; leg_r1_joint
+    (8,0)   120.0  ; leg_r2_joint
+    (9,0)   56.0   ; leg_r3_joint
     (10,0)  150.0  ; leg_r4_joint
-    (11,0)  74.0   ; leg_r5_joint
-    (12,0)  74.0   ; leg_r6_joint
-    (13,0)  16.0   ; zarm_l1_joint
-    (14,0)  37.0   ; zarm_l2_joint
-    (15,0)  37.0   ; zarm_l3_joint
-    (16,0)  37.0   ; zarm_l4_joint
-    (17,0)  16.0   ; zarm_r1_joint
-    (18,0)  37.0   ; zarm_r2_joint
-    (19,0)  37.0   ; zarm_r3_joint
-    (20,0)  37.0   ; zarm_r4_joint
+    (11,0)  70.2   ; leg_r5_joint
+    (12,0)  70.2   ; leg_r6_joint
+    (13,0)  11.28   ; zarm_l1_joint
+    (14,0)  29.6   ; zarm_l2_joint
+    (15,0)  29.6   ; zarm_l3_joint
+    (16,0)  29.6   ; zarm_l4_joint
+    (17,0)  11.28   ; zarm_r1_joint
+    (18,0)  29.6   ; zarm_r2_joint
+    (19,0)  29.6   ; zarm_r3_joint
+    (20,0)  29.6   ; zarm_r4_joint
 }
 
 actionScaleTest

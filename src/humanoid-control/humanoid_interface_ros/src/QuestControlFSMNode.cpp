@@ -26,7 +26,6 @@
 #include "std_srvs/Trigger.h"
 #include <std_srvs/SetBool.h>
 #include <std_msgs/Bool.h>
-#include <std_msgs/Empty.h>
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
@@ -43,6 +42,7 @@
 #include <kuavo_msgs/switchToNextController.h>
 #include <kuavo_msgs/headBodyPose.h>
 #include <geometry_msgs/PoseStamped.h>
+
 namespace ocs2
 {
     enum ArmTarget
@@ -121,6 +121,11 @@ namespace ocs2
             {
                 nodeHandle.getParam("/robot_type", robot_type_);
                 std::cout << "Robot type: " << robot_type_ << " (1 for wheel robot, 0 for biped)" << std::endl;
+                
+                if(1 == robot_type_)
+                {
+                    get_observation_ = true;
+                }
             }
             nodeHandle.param("/wheel_ik", wheel_ik_, false);
             ROS_INFO_STREAM("[QuestControlFSM] wheel_ik: " << (wheel_ik_ ? "true" : "false"));
@@ -199,13 +204,9 @@ namespace ocs2
 
             // 订阅获取VR头部控制模式
             head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<kuavo_msgs::headCtrlMode>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
-            quest3_head_fixed_intent_sub_ = nodeHandle_.subscribe<std_msgs::Empty>(
-                "/quest3/head_fixed_forward_user_intent", 10, &QuestControlFSM::quest3HeadFixedIntentCallback, this);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
-            // 根据机器人类型订阅不同的mpc_observation话题
-            std::string observation_topic = robot_type_ == 1 ? "/mobile_manipulator_mpc_observation" : robotName + "_mpc_observation";
-            observation_sub_ = nodeHandle_.subscribe(observation_topic, 10, &QuestControlFSM::observationCallback, this);
+            observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
             stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
             step_num_stop_pub_ = nodeHandle_.advertise<std_msgs::Int32>(robotName + "_mpc_stop_step_num", 10, true);
             vel_control_pub_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
@@ -245,8 +246,7 @@ namespace ocs2
             command_height_ = 0.0;
             command_add_height_pre_ = 0.0;
 
-            // latched：后启动的 IK/碰撞检测等节点仍能收到最近一次手臂模式，避免 TCP 建链晚于首次 publish 而丢消息
-            arm_mode_pub_ = nodeHandle_.advertise<std_msgs::Int32>("/quest3/triger_arm_mode", 1, true);
+            arm_mode_pub_ = nodeHandle_.advertise<std_msgs::Int32>("/quest3/triger_arm_mode", 1);
 
             // 添加足部轨迹发布者
             foot_pose_target_pub_ = nodeHandle_.advertise<kuavo_msgs::footPoseTargetTrajectories>("/humanoid_mpc_foot_pose_target_trajectories", 10);
@@ -257,8 +257,6 @@ namespace ocs2
 
             // 添加arm_collision_control服务
             arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
-            bootstrap_wheel_arm_mode_service_ = nodeHandle_.advertiseService(
-                "/quest3/bootstrap_wheel_arm_mode", &QuestControlFSM::bootstrapWheelArmModeCallback, this);
             
             // 添加切换控制器服务客户端
             switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
@@ -277,14 +275,14 @@ namespace ocs2
                 if (!get_observation_)
                 {
                 // ROS_INFO_STREAM("Waiting for observation message...");
-                    continue;
+                continue;
                 }
                 // checkAndPublishCommandLine(joystick_origin_axis_);
             }
             return;
         }
 
-        bool callRealInitializeSrv()
+        void callRealInitializeSrv()
         {
             ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_initial_start");
             std_srvs::Trigger srv;
@@ -293,10 +291,11 @@ namespace ocs2
             if (client.call(srv))
             {
                 ROS_INFO("RealInitializeSrv call successful");
-                return true;
             }
-            ROS_ERROR("Failed to call RealInitializeSrv");
-            return false;
+            else
+            {
+                ROS_ERROR("Failed to call RealInitializeSrv");
+            }
         }
         int callGetArmModeSrv()
         {
@@ -582,29 +581,6 @@ namespace ocs2
             return true;
         }
 
-        bool bootstrapWheelArmModeCallback(std_srvs::Trigger::Request&, std_srvs::Trigger::Response& res)
-        {
-            if (!useLegacyWheelVr())
-            {
-                res.success = false;
-                res.message = "Not legacy wheel VR (robot_type=1 && wheel_ik)";
-                return true;
-            }
-            if (!get_observation_)
-            {
-                res.success = false;
-                res.message = "MPC observation not ready";
-                return true;
-            }
-            callSetArmModeSrv(1);
-            callWheelMpcControlMode(3);
-            arm_ctrl_mode_ = 1;
-            res.success = true;
-            res.message = "wheel arm mode initialized to 1";
-            ROS_INFO("[QuestControlFSM] bootstrap_wheel_arm_mode -> mode 1");
-            return true;
-        }
-
     private:
         // 从YAML文件加载转向区间配置
         void loadTurnZones(ros::NodeHandle& nodeHandle) {
@@ -773,13 +749,11 @@ namespace ocs2
         {
             if(mode_msg->data.size() >= 2)
             {
-                arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]); // 兼容MPC发布 [current, desired]
-                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]);
+                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]); // 兼容MPC发布 [current, desired]
                 return;
             }
             if(mode_msg->data.size() == 1)
             {
-                arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]);
                 arm_ctrl_mode_ = static_cast<int>(mode_msg->data[0]); // 兼容轮臂发布 [current]
                 return;
             }
@@ -804,21 +778,6 @@ namespace ocs2
             head_ctrl_mode_ = mode_msg->mode;  // 更新头部控制模式
         }
 
-        void quest3HeadFixedIntentCallback(const std_msgs::Empty::ConstPtr & /*msg*/)
-        {
-            if (suppress_next_quest3_head_fixed_intent_)
-            {
-                suppress_next_quest3_head_fixed_intent_ = false;
-                return;
-            }
-            if (!quest3_arm_reset_head_snapshot_active_)
-            {
-                return;
-            }
-            last_head_ctrl_mode_ = "fixed";
-            ROS_INFO("[QuestControlFSM] Quest3: user head fixed-forward intent during arm reset lock; unlock will restore fixed.");
-        }
-
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
         {
             joystick_data_ = *msg;
@@ -831,7 +790,6 @@ namespace ocs2
         {
             observation_ = ros_msg_conversions::readObservationMsg(*observation_msg);
             get_observation_ = true;
-            vr_a_button_held_since_not_observing_ = ros::Time(0);
         }
 
         void headBodyPoseCallback(const kuavo_msgs::headBodyPose::ConstPtr& msg)
@@ -978,25 +936,10 @@ namespace ocs2
                 }
             }
 
-            // 尚无 MPC observation 时，用「长按 A」触发 real_initial_start（替代终端按 o）。
-            // VR 刚连接时 A 键短脉冲/抖动易被误判为启动（见 kuavodevlab#2995）；按住期间不处理其它手柄逻辑。
-            if (!get_observation_) {
-                if (joystick_data_.right_first_button_pressed) {
-                    if (vr_a_button_held_since_not_observing_.isZero()) {
-                        vr_a_button_held_since_not_observing_ = ros::Time::now();
-                    } else if (!vr_real_initial_start_fired_ &&
-                               (ros::Time::now() - vr_a_button_held_since_not_observing_).toSec() >=
-                                   kVrRealInitialStartHoldSeconds) {
-                        if (callRealInitializeSrv()) {
-                            vr_real_initial_start_fired_ = true;
-                        } else {
-                            vr_a_button_held_since_not_observing_ = ros::Time(0);
-                        }
-                    }
-                    joystick_data_prev_ = joystick_data_;
-                    return;
-                }
-                vr_a_button_held_since_not_observing_ = ros::Time(0);
+            if (!get_observation_ && !joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+            {
+                callRealInitializeSrv();
+                return;
             }
             
             if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
@@ -1032,10 +975,7 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // X+B：保持姿态 or 自动摆手
                 {
-                    // if (arm_ctrl_mode_current_ != arm_ctrl_mode_) {
-                    //     ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+B.");
-                    //     return;
-                    // }
+                    
                     auto new_arm_mode = (arm_ctrl_mode_!=0) ? 0 : 1;
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
                     callSetArmModeSrv(new_arm_mode);
@@ -1045,11 +985,6 @@ namespace ocs2
                     // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪 
                     if (arm_collision_control_) {
                         arm_collision_control_ = false;
-                        return;
-                    }
-                    ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
-                    if (use_cpp_incremental_ik_ && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
-                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
                     auto new_arm_mode = (arm_ctrl_mode_!=2) ? 2 : 1;
@@ -1062,13 +997,9 @@ namespace ocs2
                         {
                             new_head_mode = "fixed";
                             last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
-                            quest3_arm_reset_head_snapshot_active_ = true;
-                            suppress_next_quest3_head_fixed_intent_ = true;
                         }
                         else
                         {
-                            quest3_arm_reset_head_snapshot_active_ = false;
-                            suppress_next_quest3_head_fixed_intent_ = false;
                             new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
                         }
                         callVRSetHeadModeSrv(new_head_mode);
@@ -1176,7 +1107,7 @@ namespace ocs2
                 }
             }
             
-            if (!only_half_up_body_ && !wheel_ik_) {
+            if (!only_half_up_body_) {
                 // 全身控制时才支持步态控制
                 checkGaitSwitchCommand(joystick_data_);
 
@@ -1226,24 +1157,10 @@ namespace ocs2
 
         void updateStateLegacyWheelVr()  // 轮臂vr遥操
         {
-            if (!get_observation_) {
-                // 左手扳机按住时右 X 用于 X+A 切手臂模式，勿进入长按 A 初始化分支
-                if (joystick_data_.right_first_button_pressed && !joystick_data_.left_first_button_pressed) {
-                    if (vr_a_button_held_since_not_observing_.isZero()) {
-                        vr_a_button_held_since_not_observing_ = ros::Time::now();
-                    } else if (!vr_real_initial_start_fired_ &&
-                               (ros::Time::now() - vr_a_button_held_since_not_observing_).toSec() >=
-                                   kVrRealInitialStartHoldSeconds) {
-                        if (callRealInitializeSrv()) {
-                            vr_real_initial_start_fired_ = true;
-                        } else {
-                            vr_a_button_held_since_not_observing_ = ros::Time(0);
-                        }
-                    }
-                    joystick_data_prev_ = joystick_data_;
-                    return;
-                }
-                vr_a_button_held_since_not_observing_ = ros::Time(0);
+            if (!get_observation_ && !joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+            {
+                callRealInitializeSrv();
+                return;
             }
 
             if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
@@ -1252,7 +1169,28 @@ namespace ocs2
                 return;
             }
 
-            // 轮臂 VR：左手扳机相关快捷键（低延迟、切换下一控制器）已按 QA 关闭。
+            if (joystick_data_.left_trigger > 0.5)
+            {
+                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 使能 WBC 手臂轨迹控制
+                {
+                    callEnableWbcArmTrajectorySrv(1);
+                    return;
+                }
+                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)  // 切换到下一个控制器
+                {
+                    callSwitchToNextControllerSrv();
+                    return;
+                }
+            }
+
+            if (joystick_data_.left_grip > 0.5)
+            {
+                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 不使能 WBC 手臂轨迹控制
+                {
+                    callEnableWbcArmTrajectorySrv(0);
+                    return;
+                }
+            }
 
             if (joystick_data_.left_first_button_pressed)
             {
@@ -1278,13 +1216,9 @@ namespace ocs2
                         {
                             new_head_mode = "fixed";
                             last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
-                            quest3_arm_reset_head_snapshot_active_ = true;
-                            suppress_next_quest3_head_fixed_intent_ = true;
                         }
                         else
                         {
-                            quest3_arm_reset_head_snapshot_active_ = false;
-                            suppress_next_quest3_head_fixed_intent_ = false;
                             new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
                         }
                         callVRSetHeadModeSrv(new_head_mode);
@@ -2108,10 +2042,6 @@ namespace ocs2
         TargetTrajectoriesRosPublisher targetPoseCommand_;
         ros::Subscriber observation_sub_;
         bool get_observation_ = false;
-        /// 在尚未收到 MPC observation 时，用于「长按 A 再触发 real_initial_start」的去抖（VR 连接抖动误触 #2995）
-        ros::Time vr_a_button_held_since_not_observing_{0};
-        bool vr_real_initial_start_fired_{false};
-        static constexpr double kVrRealInitialStartHoldSeconds = 0.35;
         vector_t current_target_ = vector_t::Zero(6);
         scalar_t target_displacement_velocity_;
         scalar_t target_rotation_velocity_;
@@ -2151,7 +2081,6 @@ namespace ocs2
         ros::ServiceClient control_mode_client_;              // MPC控制模式切换服务客户端
         ros::ServiceClient switch_to_next_controller_client_; // 切换控制器服务客户端
         ros::ServiceServer arm_collision_control_service_;
-        ros::ServiceServer bootstrap_wheel_arm_mode_service_;
 
         // 腰部控制相关的订阅者和发布者
         ros::Subscriber head_body_pose_sub_;
@@ -2166,13 +2095,7 @@ namespace ocs2
 
         ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
         ros::Subscriber head_ctrl_mode_vr_sub_; // 从主控制器获取头部控制模式
-
-        ros::Subscriber quest3_head_fixed_intent_sub_;
-        bool suppress_next_quest3_head_fixed_intent_{false};
-        bool quest3_arm_reset_head_snapshot_active_{false};
-        int arm_ctrl_mode_current_{2};
-        int arm_ctrl_mode_{1};
-        
+        int arm_ctrl_mode_{2};
         std::string head_ctrl_mode_{"vr_follow"};
         std::string last_head_ctrl_mode_;
         std::string fixed_hand_{"right"};

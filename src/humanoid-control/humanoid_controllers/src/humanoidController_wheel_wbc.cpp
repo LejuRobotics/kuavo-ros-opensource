@@ -9,6 +9,7 @@
 
 #include "humanoid_controllers/humanoidController_wheel_wbc.h"
 #include "kuavo_msgs/setContactForceInterpParams.h"
+#include <kuavo_common/common/common.h>
 #include "humanoid_interface/common/TopicLogger.h"
 #include <iostream>
 #include <cmath>
@@ -175,7 +176,9 @@ namespace humanoidController_wheel_wbc
 
     if(controllerNh_.hasParam("/robot_version"))
     {
-      controllerNh_.getParam("/robot_version", robotVersion_);
+      int raw_version = 0;
+      controllerNh_.getParam("/robot_version", raw_version);
+      robotVersion_ = RobotVersion::create(raw_version).version_number();
     }
     std::cout << "robotVersion_: " << robotVersion_ << std::endl;
     if(controllerNh_.hasParam("/real"))
@@ -289,7 +292,7 @@ namespace humanoidController_wheel_wbc
     {
       mujoco_q[2] = 0.0;
     }
-    else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
+    else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
     {
       mujoco_q[2] = 0.0;
     }
@@ -761,8 +764,8 @@ namespace humanoidController_wheel_wbc
       vector_t optimizedState_mrt, optimizedInput_mrt;
       // Update the current state of the system
       SystemObservation kinemicLimitObs = observation_wheel_;
-      kinemicLimitObs.state = obsStateLimitFilterPtr_->update(observation_wheel_.state);
-      kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
+      // kinemicLimitObs.state = obsStateLimitFilterPtr_->update(observation_wheel_.state);
+      // kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
 
       /****************************允许采用mpc输出作为反馈**************************************/
       if(mpcObsUpdateMode_ == 1 || mpcObsUpdateMode_ == 3)
@@ -871,17 +874,17 @@ namespace humanoidController_wheel_wbc
       update_cnt++;
     }
 
-    // {
-    //   vector_t qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
-    //   jointCmdLimiterPtr_->clipPositionCommand(qposLimit);
-    //   optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
+    {
+      vector_t qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
+      jointCmdLimiterPtr_->clipPositionCommand(qposLimit);
+      optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
 
-    //   if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
-    //   {
-    //     optimizedState_mrt_ = optimizedState_mrt_limit_;
-    //     optimizedInput_mrt_ = optimizedInput_mrt_limit_;
-    //   }
-    // }
+      if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
+      {
+        optimizedState_mrt_ = optimizedState_mrt_limit_;
+        optimizedInput_mrt_ = optimizedInput_mrt_limit_;
+      }
+    }
 
     {
       static vector_t qposLimit, qvelLimit;
@@ -890,20 +893,13 @@ namespace humanoidController_wheel_wbc
       qvelLimit = optimizedInput_mrt_limit_.tail(info.armDim);
       jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
       optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
+      // optimizedInput_mrt_limit_.tail(info.armDim) = qvelLimit;
       static vector_t jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
-      if (enable_arm_traj_interpolator_) {
-        optimizedInput_mrt_limit_.tail(info.armDim) = qvelLimit;
-      } else {
-        optimizedInput_mrt_limit_.tail(info.armDim) =
-            (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / dt_;
-      }
+      // static double lastTargetTime = curTime - dt_;
+      optimizedInput_mrt_limit_.tail(info.armDim) = (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / 
+                                                    dt_; // (curTime - lastTargetTime);
+      // lastTargetTime = curTime;
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
-    }
-
-    if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
-    {
-      optimizedState_mrt_ = optimizedState_mrt_limit_;
-      optimizedInput_mrt_ = optimizedInput_mrt_limit_;
     }
 
     // 更新期望力插值

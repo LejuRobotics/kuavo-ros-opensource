@@ -1,0 +1,95 @@
+#!/usr/bin/env python
+
+# Copyright (C) 2015 Fetch Robotics Inc.
+# Copyright (C) 2013-2014 Unbounded Robotics Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Author: Michael Ferguson
+
+from __future__ import print_function
+
+import string
+
+import rospy
+import rosbag
+
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64
+from robot_calibration_msgs.msg import CaptureConfig
+
+
+class CapturePoses:
+    last_state_ = None # last joint states
+
+    def __init__(self):
+        self.last_state_ = CaptureConfig()
+        self.capture_flag_ = False
+
+        rospy.init_node('capture_calibration_poses')
+        rospy.Subscriber("joint_states", JointState, self.stateCb)
+        # 关键帧触发话题（由 head_keyframe_publisher.py 发布）
+        trigger_topic = rospy.get_param("~keyframe_flag_topic", "/head_keyframe_flag")
+        rospy.Subscriber(trigger_topic, Float64, self.triggerCb, queue_size=10)
+
+        # bag to write data to
+        bag = rosbag.Bag('calibration_poses.bag', 'w')
+
+        # put samples in
+        count = 0
+        rate = rospy.Rate(50)
+        while not rospy.is_shutdown():
+            # 等待关键帧触发：由外部节点在关键帧时间点发布 Float64（例如时间戳）
+            if not self.capture_flag_:
+                rate.sleep()
+                continue
+
+            # 清除触发标志，准备下一次
+            self.capture_flag_ = False
+
+            if self.last_state_ == None:
+                print('Cannot save state (no joint_states yet)')
+                continue
+
+            # save a pose
+            print(self.last_state_)
+            bag.write('calibration_joint_states', self.last_state_)
+            print("Saving pose %d" % count)
+            count += 1
+        bag.close()
+
+    def stateCb(self, msg):
+        """ Callback for joint_states messages """
+        for joint, position in zip(msg.name, msg.position):
+            try:
+                idx = self.last_state_.joint_states.name.index(joint)
+                self.last_state_.joint_states.position[idx] = position
+            except ValueError:
+                self.last_state_.joint_states.name.append(joint)
+                self.last_state_.joint_states.position.append(position)
+
+    def triggerCb(self, msg):
+        """
+        关键帧触发回调：
+        - 当收到非零数据时认为是“到达关键帧”，触发一次采样
+        - 若上游连续发布同一个值，多次回调也无所谓，我们只在主循环中按标志取一次
+        """
+        try:
+            v = float(msg.data)
+        except Exception:
+            v = 0.0
+        if abs(v) > 1e-9:
+            self.capture_flag_ = True
+
+if __name__=='__main__':
+    CapturePoses()

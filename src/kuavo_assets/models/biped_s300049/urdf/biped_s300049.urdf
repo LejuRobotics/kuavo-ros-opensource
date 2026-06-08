@@ -7,7 +7,7 @@
   <link name="base_link">
     <inertial>
       <origin xyz="-0.0185005 0.00031952 0.1929569" rpy="0 0 0" />
-      <mass value="28.27893803" />
+      <mass value="26.71633803" />
       <inertia ixx="0.93103133" ixy="0.00011763" ixz="-0.07210993" iyy="0.82590532" iyz="6.88e-06" izz="0.27686612" />
     </inertial>
     <visual>
@@ -812,7 +812,7 @@
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_r2_link" />
     <child link="zarm_r3_link" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 1 0" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
     <dynamics damping="0.02" friction="0.02" />
   </joint>
@@ -866,7 +866,7 @@
     <origin xyz="-0.0200000000000001 0 -0.127037274261587" rpy="0 0 0" />
     <parent link="zarm_r4_link" />
     <child link="zarm_r5_link" />
-    <axis xyz="0 0 1" />
+    <axis xyz="0 1 0" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
     <dynamics damping="0.02" friction="0.02" />
   </joint>
@@ -939,7 +939,7 @@
   </joint>
 
   
-  <link name="l_palm">
+  <!-- <link name="l_palm">
     <inertial>
       <origin xyz="0.0017239 0.0051432 -0.031065" rpy="0 0 0" />
       <mass value="0.427" />
@@ -1584,6 +1584,1182 @@
     <origin xyz="0 0 -0.07" rpy="-1.57 0 0" />
   </joint>
   
+   -->
+
+  <!-- 左手 -->
+  <joint name="zarm_l7_to_l_wrist_ft" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="zarm_l7_link" />
+    <child link="l_wrist_ft_link" />
+  </joint>
+
+  <link name="l_wrist_ft_link">
+    <inertial>
+      <origin xyz="0 0.007401 -0.009046" rpy="0 0 0" />
+      <mass value="0.161981" />
+      <inertia
+        ixx="0.0001244"
+        ixy="-1.432e-09"
+        ixz="1.1042e-08"
+        iyy="0.000089334"
+        iyz="-3.619685e-05"
+        izz="0.00008401" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.035" rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/wrist_ft_link.stl"
+          scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="">
+        <color rgba="0.8 0.8 0.8 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.0704" rpy="3.1415926 0 -1.5707963" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/wrist_ft_link.stl"
+          scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- 手掌基座，变为 wrist_ft_link 的子节点 -->
+  <link name="l_hand_base_link">
+    <inertial>
+      <origin xyz="0.00199 -0.00091 0.058381" rpy="0 0 0" />
+      <mass value="0.4185" />
+      <inertia
+        ixx="0.0004998"
+        ixy="0.000012853"
+        ixz="-0.000008317"
+        iyy="0.0003567"
+        iyz="0.000010354"
+        izz="0.0002301" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/hand_base_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/hand_base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="l_wrist_ft_to_hand" type="fixed">
+    <origin xyz="0 0 -0.065" rpy="0 3.1415926 1.5707963" />
+    <parent link="l_wrist_ft_link" />
+    <child link="l_hand_base_link" />
+  </joint>
+
+  <link name="l_thumb_metacarpals_base1">
+    <inertial>
+      <origin xyz="0.0018663 -0.0066406 0.001533" rpy="0 0 0" />
+      <mass value="0.01" />
+      <inertia
+        ixx="3.3724E-07"
+        ixy="1.11E-07"
+        ixz="-3.6039E-08"
+        iyy="2.9457E-07"
+        iyz="5.7181E-08"
+        izz="4.903E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/thumb_metacarpals_base1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/thumb_metacarpals_base1.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="l_thumb_cmc_yaw" type="revolute">
+    <origin xyz="0.0078133 -0.029898 0.026692" rpy="-0.034907 0 0" />
+    <parent link="l_hand_base_link" />
+    <child link="l_thumb_metacarpals_base1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-0.087266" upper="1.256637" effort="0.588" velocity="5.95" />
+    <dynamics damping="1.4e-05" friction="0.008"/>
+  </joint>
+
+
+  <link name="l_thumb_metacarpals">
+    <inertial>
+      <origin xyz="0.00769270907060086 0.0859662184722988 0.0235283086675235" rpy="0 0 0" />
+      <mass value="0.065" />
+      <inertia
+        ixx="8.407E-06"
+        ixy="-1.1338E-09"
+        ixz="1.1136E-08"
+        iyy="8.3899E-06"
+        iyz="3.1171E-07"
+        izz="2.0091E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/thumb_metacarpals.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/thumb_metacarpals.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_thumb_cmc_pitch" type="revolute">
+    <origin xyz="0.0057298 -0.01332 0.0027456" rpy="1.1083 0 0.40143" />
+    <parent link="l_thumb_metacarpals_base1" />
+    <child link="l_thumb_metacarpals" />
+    <axis xyz="-1 0 0" />
+    <limit lower="0" upper="0.837758" effort="1.008" velocity="3.47" />
+    <dynamics damping="1.4e-05" friction="0.008"/>
+  </joint>
+
+  <link name="l_thumb_distal">
+    <inertial>
+      <origin xyz="0.00769270907081708 0.0798662184721594 -0.0591716913325555" rpy="0 0 0" />
+      <mass value="0.018" />
+      <inertia
+        ixx="1.5546E-06"
+        ixy="2.4423E-09"
+        ixz="2.8147E-09"
+        iyy="1.7108E-06"
+        iyz="-7.2756E-08"
+        izz="9.1709E-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/thumb_distal.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/thumb_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_thumb_ip" type="revolute">
+    <origin xyz="0 0.0061 0.0827" rpy="0 0 0" />
+    <parent link="l_thumb_metacarpals" />
+    <child link="l_thumb_distal" />
+    <axis xyz="-1 0 0" />
+    <limit lower="0" upper="0.963287" effort="0" velocity="1.7" />
+    <mimic
+      joint="l_thumb_cmc_pitch"
+      multiplier="1.226495"
+      offset="0" />
+  </joint>
+
+
+  <link name="l_index_proximal">
+    <inertial>
+      <origin
+        xyz="0.001776 -0.00011 0.012556"
+        rpy="0 0 0" />
+      <mass
+        value="0.008553" />
+      <inertia
+        ixx="0.000000797543"
+        ixy="-0.000000001275"
+        ixz="0.000000138601"
+        iyy="0.000000800499"
+        iyz="0.000000000939"
+        izz="0.000000357001" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/index_proximal.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/index_proximal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_index_mcp_pitch" type="revolute">
+    <origin
+      xyz="-0.00066821 -0.028967 0.11722"
+      rpy="0 0 0" />
+    <parent
+      link="l_hand_base_link" />
+    <child
+      link="l_index_proximal" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="1.134464"
+      effort="0.574"
+      velocity="6.10" />
+    <dynamics damping="1.4e-05" friction="0.008"/>
+  </joint>
+  <link name="l_index_distal">
+    <inertial>
+      <origin
+        xyz="0.0134 0.002262 0.016992"
+        rpy="0 0 0" />
+      <mass
+        value="0.018408" />
+      <inertia
+        ixx="0.000002488712"
+        ixy="0.000000008249"
+        ixz="-0.000001523059"
+        iyy="0.000003723754"
+        iyz="0.000000014019"
+        izz="0.000001813582" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/index_distal.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/index_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_index_dip" type="revolute">
+    <origin
+      xyz="0.001001 -0.000537 0.028003"
+      rpy="0 0 0" />
+    <parent
+      link="l_index_proximal" />
+    <child
+      link="l_index_distal" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="1.277039"
+      effort="0"
+      velocity="3.1" />
+    <mimic
+      joint="l_index_mcp_pitch"
+      multiplier="1.125676"
+      offset="0" />
+  </joint>
+
+  <link name="l_middle_proximal">
+    <inertial>
+      <origin
+        xyz="0.001776 -0.00011 0.012556"
+        rpy="0 0 0" />
+      <mass
+        value="0.008553" />
+      <inertia
+        ixx="0.000000797543"
+        ixy="-0.000000001275"
+        ixz="0.000000138601"
+        iyy="0.000000800499"
+        iyz="0.000000000939"
+        izz="0.000000357001" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/middle_proximal.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/middle_proximal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_middle_mcp_pitch" type="revolute">
+    <origin
+      xyz="-0.00066821 -0.0089013 0.12322"
+      rpy="0 0 0" />
+    <parent
+      link="l_hand_base_link" />
+    <child
+      link="l_middle_proximal" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="1.134464"
+      effort="0.574"
+      velocity="6.10" />
+    <dynamics damping="1.4e-05" friction="0.008"/>
+  </joint>
+  <link name="l_middle_distal">
+    <inertial>
+      <origin
+        xyz="0.0134 0.002262 0.016992"
+        rpy="0 0 0" />
+      <mass
+        value="0.018408" />
+      <inertia
+        ixx="0.000002488712"
+        ixy="0.000000008249"
+        ixz="-0.000001523059"
+        iyy="0.000003723754"
+        iyz="0.000000014019"
+        izz="0.000001813582" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/middle_distal.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/middle_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_middle_dip" type="revolute">
+    <origin
+      xyz="0.000994 0.000058 0.028008"
+      rpy="0 0 0" />
+    <parent
+      link="l_middle_proximal" />
+    <child
+      link="l_middle_distal" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="1.277039"
+      effort="0"
+      velocity="3.1" />
+    <mimic
+      joint="l_middle_mcp_pitch"
+      multiplier="1.125676"
+      offset="0" />
+  </joint>
+  <link name="l_ring_proximal">
+    <inertial>
+      <origin
+        xyz="0.001776 -0.00011 0.012556"
+        rpy="0 0 0" />
+      <mass
+        value="0.008553" />
+      <inertia
+        ixx="0.000000797543"
+        ixy="-0.000000001275"
+        ixz="0.000000138601"
+        iyy="0.000000800499"
+        iyz="0.000000000939"
+        izz="0.000000357001" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/ring_proximal.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/ring_proximal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_ring_mcp_pitch" type="revolute">
+    <origin
+      xyz="-0.00067368 0.010717 0.11822"
+      rpy="0 0 0" />
+    <parent
+      link="l_hand_base_link" />
+    <child
+      link="l_ring_proximal" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="1.134464"
+      effort="0.574"
+      velocity="6.10" />
+    <dynamics damping="1.4e-05" friction="0.008"/>
+  </joint>
+
+  <link name="l_ring_distal">
+    <inertial>
+      <origin
+        xyz="0.0134 0.002262 0.016992"
+        rpy="0 0 0" />
+      <mass
+        value="0.018408" />
+      <inertia
+        ixx="0.000002488712"
+        ixy="0.000000008249"
+        ixz="-0.000001523059"
+        iyy="0.000003723754"
+        iyz="0.000000014019"
+        izz="0.000001813582" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/ring_distal.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/ring_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_ring_dip" type="revolute">
+    <origin
+      xyz="0.000979 0.001534 0.027967"
+      rpy="0 0 0" />
+    <parent
+      link="l_ring_proximal" />
+    <child
+      link="l_ring_distal" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="1.277039"
+      effort="0"
+      velocity="3.1" />
+    <mimic
+      joint="l_ring_mcp_pitch"
+      multiplier="1.125676"
+      offset="0" />
+  </joint>
+  <link name="l_pinky_proximal">
+    <inertial>
+      <origin
+        xyz="0.001776 -0.00011 0.012556"
+        rpy="0 0 0" />
+      <mass
+        value="0.008553" />
+      <inertia
+        ixx="0.000000797543"
+        ixy="-0.000000001275"
+        ixz="0.000000138601"
+        iyy="0.000000800499"
+        iyz="0.000000000939"
+        izz="0.000000357001" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/pinky_proximal.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/pinky_proximal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_pinky_mcp_pitch" type="revolute">
+    <origin
+      xyz="-0.00067852 0.029814 0.11424"
+      rpy="0 0 0" />
+    <parent
+      link="l_hand_base_link" />
+    <child
+      link="l_pinky_proximal" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="1.134464"
+      effort="0.574"
+      velocity="6.10" />
+    <dynamics damping="1.4e-05" friction="0.008"/>
+  </joint>
+  <link name="l_pinky_distal">
+    <inertial>
+      <origin
+        xyz="0.0134 0.002262 0.016992"
+        rpy="0 0 0" />
+      <mass
+        value="0.018408" />
+      <inertia
+        ixx="0.000002488712"
+        ixy="0.000000008249"
+        ixz="-0.000001523059"
+        iyy="0.000003723754"
+        iyz="0.000000014019"
+        izz="0.000001813582" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/pinky_distal.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_left_leju/meshes/pinky_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_pinky_dip" type="revolute">
+    <origin
+      xyz="0.000979 0.001534 0.027967"
+      rpy="0 0 0" />
+    <parent
+      link="l_pinky_proximal" />
+    <child
+      link="l_pinky_distal" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="0"
+      upper="1.277039"
+      effort="0"
+      velocity="3.1" />
+    <mimic
+      joint="l_pinky_mcp_pitch"
+      multiplier="1.125676"
+      offset="0" />
+  </joint>
+
+  <transmission name="trans_thumb_cmc_roll">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="l_thumb_cmc_yaw">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor_thumb_cmc_yaw">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>0.0084</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="trans_index_mcp_pitch">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="l_index_mcp_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor_index_mcp_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>0.0082</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="trans_middle_mcp_pitch">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="l_middle_mcp_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor_middle_mcp_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>0.0082</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="trans_ring_mcp_pitch">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="l_ring_mcp_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor_ring_mcp_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>0.0082</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="trans_pinky_mcp_pitch">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="l_pinky_mcp_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor_pinky_mcp_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>0.0082</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="trans_thumb_cmc_pitch">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="l_thumb_cmc_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor_thumb_cmc_pitch">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>0.0144</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <mujoco>
+    <compiler meshdir="meshes/" balanceinertia="true" discardvisual="false"/>
+    <default>
+      <joint armature="3.4707e-08" damping="5.0" frictionloss="0.5"/>
+    </default>
+    <equality>
+      <!-- 四指DIP关节的mimic约束 - 统一使用1.125676 -->
+      <!-- polycoef格式: c0 c1 c2 c3 c4 c5，关系: q1 = c0 + c1*q2 + c2*q2^2 + ... -->
+      <!-- 对于 mimic: q_dip = 0 + 1.125676*q_mcp + 0*q_mcp^2 + ... -->
+      <joint name="couple_index" joint1="index_dip" joint2="index_mcp_pitch" polycoef="0 1.125676 0 0 0 0"/>
+      <joint name="couple_middle" joint1="middle_dip" joint2="middle_mcp_pitch" polycoef="0 1.125676 0 0 0 0"/>
+      <joint name="couple_ring" joint1="ring_dip" joint2="ring_mcp_pitch" polycoef="0 1.125676 0 0 0 0"/>
+      <joint name="couple_pinky" joint1="pinky_dip" joint2="pinky_mcp_pitch" polycoef="0 1.125676 0 0 0 0"/>
+      <!-- 大拇指DIP关节的mimic约束 - 使用1.226495 -->
+      <joint name="couple_thumb" joint1="thumb_ip" joint2="thumb_cmc_pitch" polycoef="0 1.226495 0 0 0 0"/>
+    </equality>
+  </mujoco>
+  <gazebo reference="hand_base_link">
+    <mu1>1.5</mu1>
+    <mu2>1.5</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="thumb_distal">
+    <mu1>1.5</mu1>
+    <mu2>1.5</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="index_distal">
+    <mu1>1.1</mu1>
+    <mu2>1.1</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="middle_distal">
+    <mu1>1.1</mu1>
+    <mu2>1.1</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="ring_distal">
+    <mu1>1.1</mu1>
+    <mu2>1.1</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <gazebo reference="pinky_distal">
+    <mu1>1.1</mu1>
+    <mu2>1.1</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+
+<!-- 右手 -->
+ <joint name="zarm_r7_to_r_wrist_ft" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="zarm_r7_link" />
+    <child link="r_wrist_ft_link" />
+  </joint>
+
+  <link name="r_wrist_ft_link">
+    <inertial>
+      <origin xyz="0.0000000000 -0.0074010000 -0.0090460000" rpy="0 0 0" />
+      <mass value="0.161981" />
+      <inertia ixx="0.0001244" ixy="1.432e-09" ixz="1.1042e-08" iyy="8.9334e-05" iyz="3.619685e-05" izz="8.401e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.035" rpy="0 0 -3.1415926" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/wrist_ft_link.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="">
+        <color rgba="0.8 0.8 0.8 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.035" rpy="0 0 -3.1415926" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/wrist_ft_link.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_wrist_ft_to_hand" type="fixed">
+    <origin xyz="0 0 -0.065" rpy="0 3.1415926 -1.5707963" />
+    <parent link="r_wrist_ft_link" />
+    <child link="r_hand_base_link" />
+  </joint>
+  <link name="r_hand_base_link">
+    <inertial>
+      <origin xyz="0.0019900000 0.0009100000 0.0583810000" rpy="0 0 0" />
+      <mass value="0.4185" />
+      <inertia ixx="0.0004998" ixy="-1.2853e-05" ixz="-8.317e-06" iyy="0.0003567" iyz="-1.0354e-05" izz="0.0002301" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/hand_base_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/hand_base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+
+  <link name="r_thumb_metacarpals_base1">
+    <inertial>
+      <origin xyz="0.0018663000 0.0066406000 0.0015330000" rpy="0 0 0" />
+      <mass value="0.01" />
+      <inertia ixx="3.3724e-07" ixy="-1.11e-07" ixz="-3.6039e-08" iyy="2.9457e-07" iyz="-5.7181e-08" izz="4.903e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/thumb_metacarpals_base1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/thumb_metacarpals_base1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_thumb_cmc_yaw" type="revolute">
+    <origin xyz="0.0078133 0.030812 0.025678" rpy="-0.034907 0 0" />
+    <parent link="r_hand_base_link" />
+    <child link="r_thumb_metacarpals_base1" />
+    <axis xyz="0 0.034899 -0.99939" />
+    <limit lower="-0.087266" upper="1.256637" effort="0.588" velocity="5.95" />
+  <dynamics damping="1.4e-05" friction="0.008" /></joint>
+  <link name="r_thumb_metacarpals">
+    <inertial>
+      <origin xyz="0.0076927091 -0.0859662185 0.0235283087" rpy="0 0 0" />
+      <mass value="0.065" />
+      <inertia ixx="8.407e-06" ixy="1.1338e-09" ixz="1.1136e-08" iyy="8.3899e-06" iyz="-3.1171e-07" izz="2.0091e-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/thumb_metacarpals.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/thumb_metacarpals.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_thumb_cmc_pitch" type="revolute">
+    <origin xyz="0.0054997 0.013314 0.0032166" rpy="-1.0762 0.013637 -0.40121" />
+    <parent link="r_thumb_metacarpals_base1" />
+    <child link="r_thumb_metacarpals" />
+    <axis xyz="1 0 0" />
+    <limit lower="0" upper="0.837758" effort="1.008" velocity="3.47" />
+  <dynamics damping="1.4e-05" friction="0.008" /></joint>
+  <link name="r_thumb_distal">
+    <inertial>
+      <origin xyz="0.0076927091 -0.0798662185 -0.0591716913" rpy="0 0 0" />
+      <mass value="0.018" />
+      <inertia ixx="1.5546e-06" ixy="-2.4423e-09" ixz="2.8147e-09" iyy="1.7108e-06" iyz="7.2756e-08" izz="9.1709e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/thumb_distal.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/thumb_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_thumb_ip" type="revolute">
+    <origin xyz="0 -0.0061 0.0827" rpy="0 0 0" />
+    <parent link="r_thumb_metacarpals" />
+    <child link="r_thumb_distal" />
+    <axis xyz="1 0 0" />
+    <limit lower="0" upper="0.963287" effort="0" velocity="1.7" />
+    <mimic joint="r_thumb_cmc_pitch" multiplier="1.226495" offset="0" />
+  </joint>
+
+  <link name="r_index_proximal">
+    <inertial>
+      <origin xyz="0.0017760000 0.0001100000 0.0125560000" rpy="0 0 0" />
+      <mass value="0.008553" />
+      <inertia ixx="7.97543e-07" ixy="1.275e-09" ixz="1.38601e-07" iyy="8.00499e-07" iyz="-9.39e-10" izz="3.57001e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/index_proximal.STL" />
+      </geometry>
+      <material name="">
+        
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/index_proximal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_index_mcp_pitch" type="revolute">
+    <origin xyz="-0.00066821 0.033467 0.11622" rpy="-0.087266 0 0" />
+    <parent link="r_hand_base_link" />
+    <child link="r_index_proximal" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="1.134464" effort="0.574" velocity="6.10" />
+  <dynamics damping="1.4e-05" friction="0.008" /></joint>
+
+  <link name="r_index_distal">
+    <inertial>
+      <origin xyz="0.0134000000 -0.0022620000 0.0169920000" rpy="0 0 0" />
+      <mass value="0.018408" />
+      <inertia ixx="2.488712e-06" ixy="-8.249e-09" ixz="-1.523059e-06" iyy="3.723754e-06" iyz="-1.4019e-08" izz="1.813582e-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/index_distal.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/index_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_index_dip" type="revolute">
+    <origin xyz="0.0009359 0 0.028002" rpy="0 0 0" />
+    <parent link="r_index_proximal" />
+    <child link="r_index_distal" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="1.277039" effort="0" velocity="3.1" />
+    <mimic joint="r_index_mcp_pitch" multiplier="1.125676" offset="0" />
+  </joint>
+
+
+  <link name="r_middle_proximal">
+    <inertial>
+      <origin xyz="0.0017760000 0.0001100000 0.0125560000" rpy="0 0 0" />
+      <mass value="0.008553" />
+      <inertia ixx="7.97543e-07" ixy="1.275e-09" ixz="1.38601e-07" iyy="8.00499e-07" iyz="-9.39e-10" izz="3.57001e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/middle_proximal.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/middle_proximal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_middle_mcp_pitch" type="revolute">
+    <origin xyz="-0.00066821 0.0134013 0.12272" rpy="-0.034907 0 0" />
+    <parent link="r_hand_base_link" />
+    <child link="r_middle_proximal" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="1.134464" effort="0.574" velocity="6.10" />
+  <dynamics damping="1.4e-05" friction="0.008" /></joint>
+  <link name="r_middle_distal">
+    <inertial>
+      <origin xyz="0.0134000000 -0.0022620000 0.0169920000" rpy="0 0 0" />
+      <mass value="0.018408" />
+      <inertia ixx="2.488712e-06" ixy="-8.249e-09" ixz="-1.523059e-06" iyy="3.723754e-06" iyz="-1.4019e-08" izz="1.813582e-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/middle_distal.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/middle_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_middle_dip" type="revolute">
+    <origin xyz="0.0009359 0 0.028002" rpy="0 0 0" />
+    <parent link="r_middle_proximal" />
+    <child link="r_middle_distal" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="1.277039" effort="0" velocity="3.1" />
+    <mimic joint="r_middle_mcp_pitch" multiplier="1.125676" offset="0" />
+  </joint>
+
+
+  <link name="r_ring_proximal">
+    <inertial>
+      <origin xyz="0.0017760000 0.0001100000 0.0125560000" rpy="0 0 0" />
+      <mass value="0.008553" />
+      <inertia ixx="7.97543e-07" ixy="1.275e-09" ixz="1.38601e-07" iyy="8.00499e-07" iyz="-9.39e-10" izz="3.57001e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/ring_proximal.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/ring_proximal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_ring_mcp_pitch" type="revolute">
+    <origin xyz="-0.00067368 -0.006217 0.11872" rpy="0.017453 0 0" />
+    <parent link="r_hand_base_link" />
+    <child link="r_ring_proximal" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="1.134464" effort="0.574" velocity="6.10" />
+  <dynamics damping="1.4e-05" friction="0.008" /></joint>
+  <link name="r_ring_distal">
+    <inertial>
+      <origin xyz="0.0134000000 -0.0022620000 0.0169920000" rpy="0 0 0" />
+      <mass value="0.018408" />
+      <inertia ixx="2.488712e-06" ixy="-8.249e-09" ixz="-1.523059e-06" iyy="3.723754e-06" iyz="-1.4019e-08" izz="1.813582e-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/ring_distal.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/ring_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_ring_dip" type="revolute">
+    <origin xyz="0.0009359 0 0.028002" rpy="0 0 0" />
+    <parent link="r_ring_proximal" />
+    <child link="r_ring_distal" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="1.277039" effort="0" velocity="3.1" />
+    <mimic joint="r_ring_mcp_pitch" multiplier="1.125676" offset="0" />
+  </joint>
+
+  <link name="r_pinky_proximal">
+    <inertial>
+      <origin xyz="0.0017760000 0.0001100000 0.0125560000" rpy="0 0 0" />
+      <mass value="0.008553" />
+      <inertia ixx="7.97543e-07" ixy="1.275e-09" ixz="1.38601e-07" iyy="8.00499e-07" iyz="-9.39e-10" izz="3.57001e-07" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/pinky_proximal.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/pinky_proximal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_pinky_mcp_pitch" type="revolute">
+    <origin xyz="-0.00067852 -0.025314 0.11474" rpy="0.05236 0 0" />
+    <parent link="r_hand_base_link" />
+    <child link="r_pinky_proximal" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="1.134464" effort="0.574" velocity="6.10" />
+  <dynamics damping="1.4e-05" friction="0.008" /></joint>
+  <link name="r_pinky_distal">
+    <inertial>
+      <origin xyz="0.0134000000 -0.0022620000 0.0169920000" rpy="0 0 0" />
+      <mass value="0.018408" />
+      <inertia ixx="2.488712e-06" ixy="-8.249e-09" ixz="-1.523059e-06" iyy="3.723754e-06" iyz="-1.4019e-08" izz="1.813582e-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/pinky_distal.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.796078431372549 0.823529411764706 0.937254901960784 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s300049/L6V3.1_leju/L6V3.1_right_leju/meshes/pinky_distal.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_pinky_dip" type="revolute">
+    <origin xyz="0.0009359 0 0.028002" rpy="0 0 0" />
+    <parent link="r_pinky_proximal" />
+    <child link="r_pinky_distal" />
+    <axis xyz="0 1 0" />
+    <limit lower="0" upper="1.277039" effort="0" velocity="3.1" />
+    <mimic joint="r_pinky_mcp_pitch" multiplier="1.125676" offset="0" />
+  </joint>
+
+  <mujoco>
+    <compiler meshdir="meshes/" balanceinertia="true" discardvisual="false" />
+      <default>
+        <joint armature="3.4707e-08" damping="5.0" frictionloss="0.5" />
+      </default>
+    <equality>
+      <joint name="couple_index" joint1="index_dip" joint2="index_mcp_pitch" polycoef="0 1.125676 0 0 0 0" />
+      <joint name="couple_middle" joint1="middle_dip" joint2="middle_mcp_pitch" polycoef="0 1.125676 0 0 0 0" />
+      <joint name="couple_ring" joint1="ring_dip" joint2="ring_mcp_pitch" polycoef="0 1.125676 0 0 0 0" />
+      <joint name="couple_pinky" joint1="pinky_dip" joint2="pinky_mcp_pitch" polycoef="0 1.125676 0 0 0 0" />
+       
+      <joint name="couple_thumb" joint1="thumb_dip" joint2="thumb_cmc_pitch" polycoef="0 1.226495 0 0 0 0" />
+    </equality>
+  </mujoco>
+
+  <!-- dexhand end l6-->
+
   <link name="zhead_1_link">
     <inertial>
       <origin xyz="2e-05 0.00605 -0.01052" rpy="0 0 0" />

@@ -69,9 +69,6 @@ def execute_two_arm_joint_tests():
     rospy.Subscriber('/lb_arm_joint_reach_time/left', Float32, time_callback)
 
     rospy.sleep(1.0)
-    
-    # 设置手臂控制模式为外部控制
-    ct.set_arm_control_mode(2)
 
     # 测试用例列表： (名称, 左臂7关节角度, 右臂7关节角度)
     test_cases = [ 

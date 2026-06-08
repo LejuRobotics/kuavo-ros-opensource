@@ -16,8 +16,6 @@ model_settings
   positionErrorGainXYStepControl     50 ;
   velocityErrorGainXYStepControl     1.0 ;
 
-  positionErrorGainZStepControl  20.0 ; 20.0
-
   phaseTransitionStanceTime     0.4
 
   verboseCppAd                  false
@@ -141,8 +139,8 @@ swing_trajectory_config
   heelToeMaxHeightVelocity     0.3
 
   swing_shoulder_center         0.15
-  swing_elbow_center            0.0
   swing_shoulder_scale          0.3
+  swing_elbow_center            0.0
   swing_elbow_scale             0.8
 }
 
@@ -485,7 +483,7 @@ frictionConeSoftConstraint
 
 basePitchLimits
 {
-  enable                 true
+  enable                 true ;can be close by /humanoid/mpc/enable_base_pitch_limit
   pos
   {
     mu      0.1       ; relaxed log barrier mu
@@ -744,16 +742,16 @@ standUpJointAccelTask
   }
   arm
   {
-    kp    20
-    kd    1.2
+    kp    200
+    kd    10.2
   }
 }
 
 standUpWeight
 {
     Linear          3
-    Angular         6
-    JointAcc        30
+    Angular         10
+    JointAcc        20
     contactForce    0.1 
 }
 
@@ -761,8 +759,8 @@ switchJointAccelTask
 {
   leg
   {
-    kp    300
-    kd    3.2
+    kp    100
+    kd    1.2
     kp_sim    500
     kd_sim    10.2
   }
@@ -776,9 +774,9 @@ switchJointAccelTask
 switchWeight
 {
     Linear          3
-    Angular         6
+    Angular         15
     JointAcc        30
-    contactForce    0.1
+    contactForce    0.01
 }
 
 ; State Estimation

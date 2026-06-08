@@ -18,7 +18,6 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Quaternion.h>
 #include <std_msgs/Int32.h>
-#include <std_srvs/Trigger.h>
 #include <std_msgs/Float32MultiArray.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
@@ -78,29 +77,27 @@ void WheelQuest3IkIncrementalROS::run() {
   ikSolveThread_ = std::thread(&WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
   jointStatePublishThread_ = std::thread(&WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction, this);
 
-  // 标定后调 FSM 初始化手臂 mode 1（等价于 X+A 到跟随态的主路径）
-  std::thread bootstrapArmModeThread = std::thread([this]() {
+  {
+    kuavo_msgs::changeArmCtrlMode srv;
+    srv.request.control_mode = 1;
+    if (changeArmCtrlModeClient_.exists()) {
+      const bool vrCallOk = changeArmCtrlModeClient_.call(srv) && srv.response.result;
+      if (vrCallOk) {
+        ROS_INFO("[WheelQuest3IkIncrementalROS] Arm control mode set to 1 during initialization");
+      } else {
+        ROS_WARN("[WheelQuest3IkIncrementalROS] Failed to set arm control mode to 1 during initialization");
+      }
+    } else {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] Service /change_arm_ctrl_mode does not exist");
+    }
+  }
+  activateController();
+  std::thread questJoystickDataThread = std::thread([this]() {
     while (ros::ok() && !quest3ArmInfoTransformerPtr_->isArmLengthMeasurementComplete()) {
       ros::Duration(0.05).sleep();
     }
-    ros::Duration(0.1).sleep();
-
-    ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>("/quest3/bootstrap_wheel_arm_mode");
-    std_srvs::Trigger srv;
-    while (ros::ok()) {
-      if (client.call(srv) && srv.response.success) {
-        ROS_INFO("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode ok");
-        break;
-      }
-      if (srv.response.message.find("Not legacy wheel VR") != std::string::npos) {
-        ROS_WARN("[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode skipped: %s",
-                 srv.response.message.c_str());
-        break;
-      }
-      ROS_WARN_THROTTLE(2.0, "[WheelQuest3IkIncrementalROS] bootstrap_wheel_arm_mode failed: %s",
-                        srv.response.message.c_str());
-      ros::Duration(0.5).sleep();
-    }
+    ros::Duration(0.1).sleep();  // 完成后再等 0.5 秒
+    publishQuestJoystickDataXAndA();
   });
 
   std::cout << "\033[32m[WheelQuest3IkIncrementalROS] spinning start\033[0m" << std::endl;
@@ -119,21 +116,6 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     updateSensorArmJointMeanFromSensorData();
     updateSensorArmJointFromSensorData();
     updateFkCacheFromSensorData();
-
-    // 实物：硬件未就绪则不进入后续（放在未激活判断与 fsm 之前，少做无效状态维护）
-    {
-      bool is_real_robot = false;
-      if (ros::param::getCached("/is_real", is_real_robot) && is_real_robot) {
-        int hardware_is_ready = 0;
-        if (!ros::param::getCached("/hardware/is_ready", hardware_is_ready) || hardware_is_ready == 0) {
-          ROS_INFO_THROTTLE(3.0,
-                            "[WheelQuest3IkIncrementalROS] Waiting /hardware/is_ready != 0 before incremental FSM (real robot)");
-          reset();
-          rate.sleep();
-          continue;
-        }
-      }
-    }
 
     const bool chestPoseUpdateEnabled = joyStickHandlerPtr_->getRightJoyStickYHoldWithX();
     bool chestPositionUpdateEnable = false;
@@ -162,12 +144,6 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
       latestLeftHandPose_vr_ = quest3ArmInfoTransformerPtr_->getLeftHandPose();
       latestRightHandPose_vr_ = quest3ArmInfoTransformerPtr_->getRightHandPose();
     }
-
-    // 【三点跳变检测】验证并过滤 VR 数据中的异常跳变
-    bool currentLeftGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
-    bool currentRightGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isRightGrip() : false;
-    validateVrPose(latestLeftHandPose_vr_, latestLeftHandPose_vr_, "Left", currentLeftGripPressed);
-    validateVrPose(latestRightHandPose_vr_, latestRightHandPose_vr_, "Right", currentRightGripPressed);
 
     if (armControlMode_ == 0 || armControlMode_ == 1) {
       if (lastArmControlMode_ == 2) {
@@ -838,7 +814,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   if (chestIncrementalUpdateEnabled_ && (lastLeftGripPressed_ || lastRightGripPressed_)) {
     Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
     {
-      std::lock_guard<std::mutex> lock(transformerDataMutex_);
+      std::lock_guard<std::mutex> lock(chestPoseMutex_);
       if (hasChestPose_) {
         humanChestPos = latestChestPositionInRobot_;
       }
@@ -1048,8 +1024,6 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
     }
   }
   if (!shouldExitIncrementalLeftArm && !shouldExitIncrementalRightArm) return;
-  // 松 grip 仅退出增量手臂；mode 1/2 下保持 WBC/MPC 外部控制，由 deactivateController 内 guard 双重保护
-  if (armControlMode_.load() != 0) return;
   deactivateController();
 }
 
@@ -1081,131 +1055,6 @@ void WheelQuest3IkIncrementalROS::solveIk() {
   } else {
     ROS_ERROR("[WheelQuest3IkIncrementalROS] solveIk failed: %s", ikResult.solverLog.c_str());
   }
-}
-
-bool WheelQuest3IkIncrementalROS::validateVrPose(const ::ArmPose& currentPose, ::ArmPose& validatedPose, const std::string& side, bool isArmActive) {
-  Eigen::Vector3d currentPos = currentPose.position;
-  
-  // 【关键修改】如果手臂未激活，直接通过，不进行跳变检测
-  if (!isArmActive) {
-    validatedPose = currentPose;
-    return true;
-  }
-  
-  // 选择对应的缓冲区和计数器
-  Eigen::Vector3d* prev1 = nullptr;
-  Eigen::Vector3d* prev2 = nullptr;
-  int* count = nullptr;
-  int* spikeCount = nullptr;
-  ros::Time* spikeStartTime = nullptr;
-  
-  if (side == "Left") {
-    prev1 = &leftHandPrev1_;
-    prev2 = &leftHandPrev2_;
-    count = &leftHandCount_;
-    spikeCount = &leftHandSpikeCount_;
-    spikeStartTime = &leftHandSpikeStartTime_;
-  } else if (side == "Right") {
-    prev1 = &rightHandPrev1_;
-    prev2 = &rightHandPrev2_;
-    count = &rightHandCount_;
-    spikeCount = &rightHandSpikeCount_;
-    spikeStartTime = &rightHandSpikeStartTime_;
-  } else {
-    ROS_ERROR("[WheelQuest3IkIncrementalROS] Invalid side parameter: %s", side.c_str());
-    validatedPose = currentPose;
-    return false;
-  }
-  
-  (*count)++;
-  
-  // 初始化阶段：前3个点直接通过
-  if (*count < 3) {
-    if (*count == 1) {
-      *prev1 = currentPos;
-    } else if (*count == 2) {
-      *prev2 = *prev1;
-      *prev1 = currentPos;
-    }
-    validatedPose = currentPose;
-    *spikeCount = 0;  // 重置跳变计数
-    return true;
-  }
-  
-  // 核心检测逻辑：检查当前点是否异常跳变
-  // 规则：如果当前点同时偏离前两点（使用欧几里得距离），且前两点相近，则认为是异常跳变
-  Eigen::Vector3d diff_prev1_vec = currentPos - *prev1;
-  Eigen::Vector3d diff_prev2_vec = currentPos - *prev2;
-  Eigen::Vector3d diff_prev_prev_vec = *prev1 - *prev2;
-  
-  // 使用欧几里得距离（3D空间距离）来判断跳变
-  double dist_prev1 = diff_prev1_vec.norm();
-  double dist_prev2 = diff_prev2_vec.norm();
-  double dist_prev_prev = diff_prev_prev_vec.norm();
-  
-  // 如果当前点同时偏离前两点，且前两点相近，则认为是跳变
-  bool isSpike = (dist_prev1 > SPIKE_THRESHOLD && 
-                  dist_prev2 > SPIKE_THRESHOLD &&
-                  dist_prev_prev < SPIKE_THRESHOLD * 0.2);
-  
-  ros::Time currentTime = ros::Time::now();
-  
-  // 【超时检测】如果跳变持续超过阈值时间，强制恢复
-  bool forceRecover = false;
-  if (isSpike) {
-    if (spikeStartTime->isZero()) {
-      // 第一次检测到跳变，记录开始时间
-      *spikeStartTime = currentTime;
-    } else {
-      // 检查是否超时
-      double elapsedTime = (currentTime - *spikeStartTime).toSec();
-      if (elapsedTime > SPIKE_TIMEOUT_DURATION) {
-        forceRecover = true;
-        ROS_WARN_THROTTLE(1.0, "[WheelQuest3IkIncrementalROS] %s hand VR pose: timeout recovery triggered (%.3f seconds)",
-                          side.c_str(), elapsedTime);
-      }
-    }
-  } else {
-    // 数据正常，重置跳变开始时间
-    *spikeStartTime = ros::Time(0);
-  }
-  
-  // 恢复机制：如果连续N帧都被判定为跳变，可能是快速正常运动，应该恢复
-  // 或者超时恢复机制触发
-  if (isSpike && !forceRecover) {
-    (*spikeCount)++;
-    if (*spikeCount >= SPIKE_RECOVERY_COUNT) {
-      // 连续跳变次数达到阈值，认为是快速正常运动，恢复使用当前数据
-      isSpike = false;
-      *spikeCount = 0;  // 重置计数
-      *spikeStartTime = ros::Time(0);  // 重置时间戳
-      ROS_INFO_THROTTLE(1.0, "[WheelQuest3IkIncrementalROS] %s hand VR pose: continuous spikes detected, recovering (likely fast normal motion)",
-                        side.c_str());
-    } else {
-      // 检测到跳变，使用前一个点替代
-      validatedPose.position = *prev1;
-      validatedPose.quaternion = currentPose.quaternion;  // 保持当前姿态
-      ROS_WARN_THROTTLE(1.0, "[WheelQuest3IkIncrementalROS] %s hand VR pose spike detected (%d/%d), using previous position",
-                        side.c_str(), *spikeCount, SPIKE_RECOVERY_COUNT);
-    }
-  } else {
-    // 数据正常，或者超时恢复触发，使用当前数据
-    if (forceRecover) {
-      isSpike = false;
-      *spikeCount = 0;  // 重置计数
-      *spikeStartTime = ros::Time(0);  // 重置时间戳
-    } else {
-      // 数据正常，重置跳变计数
-      *spikeCount = 0;
-    }
-    validatedPose = currentPose;
-  }
-  
-  // 更新缓冲区
-  *prev2 = *prev1;
-  *prev1 = validatedPose.position;
-  
-  return !isSpike;
 }
 
 }  // namespace HighlyDynamic

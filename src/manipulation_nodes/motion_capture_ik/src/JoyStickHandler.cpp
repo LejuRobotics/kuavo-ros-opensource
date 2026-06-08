@@ -420,7 +420,7 @@ void JoyStickHandler::loadHandControlParameters() {
     nh.getParam("/end_effector_type", endEffectorTypeStr);
 
     if (endEffectorTypeStr != "qiangnao" && endEffectorTypeStr != "qiangnao_touch" && endEffectorTypeStr != "revo2" &&
-        endEffectorTypeStr != "lejuclaw" && endEffectorTypeStr != "linker_hand") {
+        endEffectorTypeStr != "lejuclaw") {
       throw std::invalid_argument("Unknown end_effector_type: " + endEffectorTypeStr);
     }
     endEffectorType_ = stringToEndEffectorType(endEffectorTypeStr);
@@ -510,14 +510,6 @@ void JoyStickHandler::processHandFingerDataWithJoystick() {
     // 处理第一个按钮的触摸状态 - 移植自Python版本
     leftHandPosition_[1] = leftFirstButtonTouched_ ? 100 : 0;
     rightHandPosition_[1] = rightFirstButtonTouched_ ? 100 : 0;
-
-    // 对应 Python ik_ros_uni.py
-    // LINKER_HAND 走路：大拇指默认内扣（除非按住 trigger）
-    if (endEffectorType_.load() == EndEffectorType::LINKER_HAND &&
-        robotWalkingStatus_.load()) {
-      if (!leftFirstButtonTouched_)  leftHandPosition_[0]  = 100;
-      if (!rightFirstButtonTouched_) rightHandPosition_[0] = 100;
-    }
 
     // 存储当前值用于冻结
     frozenLeftHandPosition_ = leftHandPosition_;
@@ -695,7 +687,5 @@ void JoyStickHandler::forceSetRightArmCtrlMode(bool active) {
     //           << "，已设置5秒超时保护\033[0m" << std::endl;
   }
 }
-
-void JoyStickHandler::setRobotWalkingStatus(bool status) { robotWalkingStatus_.store(status); }
 
 }  // namespace HighlyDynamic

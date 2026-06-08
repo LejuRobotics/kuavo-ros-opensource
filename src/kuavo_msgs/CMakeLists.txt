@@ -145,7 +145,6 @@ add_message_files(
   robotWaistControl.msg
   # VMP Controller
   VMPTrajectoryState.msg
-  DanceTrajectoryState.msg
 
   # Battery info
   BatteryInfo.msg
@@ -206,6 +205,7 @@ add_service_files(
   lbBaseLinkPoseCmdSrv.srv
   lbLegControlSrv.srv
   chassisPoseCmdSrv.srv
+  fkSrvWithReferFrame.srv
 
   SpeechSynthesis.srv
   setMmCtrlFrame.srv

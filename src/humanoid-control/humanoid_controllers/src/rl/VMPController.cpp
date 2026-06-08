@@ -58,14 +58,14 @@ bool VMPController::initialize()
   ROS_INFO("[%s] is_real: %s", name_.c_str(), is_real_ ? "true" : "false");
 
   // 初始化 ankleSolver（从ROS参数获取类型）
-  int ankle_solver_type = 0;
+  std::string ankle_solver_type = "4gen_pro";
   if (nh_.getParam("/ankle_solver_type", ankle_solver_type))
   {
-    ROS_INFO("[%s] Using ankle_solver_type from ROS param: %d", name_.c_str(), ankle_solver_type);
+    ROS_INFO("[%s] Using ankle_solver_type from ROS param: %s", name_.c_str(), ankle_solver_type.c_str());
   }
   else
   {
-    ROS_WARN("[%s] /ankle_solver_type not found, using default: 0", name_.c_str());
+    ROS_WARN("[%s] /ankle_solver_type not found, using default: %s", name_.c_str(), ankle_solver_type.c_str());
   }
   ankleSolver_.getconfig(ankle_solver_type);
 

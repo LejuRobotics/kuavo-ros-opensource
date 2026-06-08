@@ -1,6 +1,6 @@
 # rosbag 录制参数
 # 最大分割文件数量
-max_splits: 8
+max_splits: 60
 # 开机保留的 bag 文件数量，仅在 enable_bag_cleanup 为 true 时生效
 bags_to_keep: 8
 # 是否开启启动时限制 bag 个数的功能

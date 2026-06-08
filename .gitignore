@@ -2,7 +2,6 @@
 .vscode/
 __pycache__/
 .catkin_tools/
-.agent_history.txt
 build/*
 devel/*
 logs/*
@@ -69,5 +68,6 @@ src/Livox-SDK2
 src/legged_control
 src/legged_perceptive
 *.log
+# *.csv
 EC_log/
 .catkin_tools/

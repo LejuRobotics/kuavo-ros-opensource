@@ -256,6 +256,7 @@ namespace HighlyDynamic
                 {"PA76_18", {BIT_17_18, PA76_18_MC, PA76_18_C2T, EC_MASTER}},
                 {"PA81_18_25", {BIT_17_25, PA81_18_25_MC, PA81_18_25_C2T, EC_MASTER}},
                 {"PA105_18", {BIT_17_18, PA105_18_MC, PA105_18_C2T, EC_MASTER}},
+                {"PA105_18_DS", {BIT_17_18, PA105_18_DS_MC, PA105_18_DS_C2T, EC_MASTER}},
                 {"PA81_25", {BIT_17_251, PA81_25_MC, PA81_25_C2T, EC_MASTER}},
                 {"PA4315_36", {BIT_17_36, PA4315_36_MC, PA4315_36_C2T, EC_MASTER}}};
         hardware_settings.num_joints = robot_config.getValue<uint8_t>("NUM_JOINT");
@@ -343,8 +344,7 @@ namespace HighlyDynamic
                                                                         {"qiangnao", EndEffectorType::qiangnao},
                                                                         {"lejuclaw", EndEffectorType::lejuclaw},
                                                                         {"qiangnao_touch", EndEffectorType::qiangnao_touch},
-                                                                        {"revo2", EndEffectorType::revo2},
-                                                                        {"linker_hand", EndEffectorType::linker_hand}};
+                                                                        {"revo2", EndEffectorType::revo2}};
         for (auto &name : end_effector_type)
         {
             // std::cout << "EndEffectorType: " << name << std::endl;

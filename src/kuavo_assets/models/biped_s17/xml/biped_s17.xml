@@ -159,14 +159,17 @@
               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_arm_yaw"/>
               <geom size="0.035 0.025" pos="0 0 -0.125" type="capsule" class="collision"/>
               <body name="zarm_l4_link" pos="0 0 -0.2085">
-                <inertial pos="-0.000693279 -0.00191472 -0.0925486" quat="0.999843 0.0163619 -0.00329901 0.00594719" mass="0.522124" diaginertia="0.00347786 0.00326967 0.000556314"/>
+                <inertial pos="-0.00104921 -0.00289774 -0.05095618" mass="0.345" fullinertia="0.00124963 0.00103949 0.00047814 0.00000224 0.00000372 0.00004727"/>
                 <joint name="zarm_l4_joint" pos="0 0 0" axis="0 1 0" range="-2.26893 0.08726" actuatorfrcrange="-37 37" armature="0.003" damping="0.2" frictionloss="0.0"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_forearm"/>
                 <geom size="0.045 0.015" quat="0.707388 0.706825 0 0" type="capsule" class="collision"/>
                 <geom size="0.02 0.06" pos="0 0 -0.1" type="capsule" class="collision"/>
                 <geom size="0.03" pos="0 0 -0.2175" class="collision" friction="0.0001 0.005 0.0001"/>
-                <geom pos="0 0 -0.085236" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_handball"/>
                 <geom size="0.005" pos="0 0 -0.2175" type="sphere" class="collision"/>
+                <body name="l_handball" pos="0 0 -0.085236">
+                  <inertial pos="0 0 -0.08819581" mass="0.1766" fullinertia="0.00046676 0.00046683 0.00008009 0 0 0"/>
+                  <geom pos="0 0 0" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_handball"/>
+                </body>
               </body>
             </body>
           </body>
@@ -187,14 +190,17 @@
               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_yaw"/>
               <geom size="0.035 0.025" pos="0 0 -0.125" type="capsule" class="collision"/>
               <body name="zarm_r4_link" pos="0 0 -0.2085">
-                <inertial pos="-0.000693279 0.00191472 -0.0925486" quat="0.999843 -0.0163619 -0.00329901 -0.00594719" mass="0.522124" diaginertia="0.00347786 0.00326967 0.000556314"/>
+                <inertial pos="-0.00104921 0.00289774 -0.05095618" mass="0.345" fullinertia="0.00124963 0.00103949 0.00047814 -0.00000224 0.00000372 -0.00004727"/>
                 <joint name="zarm_r4_joint" pos="0 0 0" axis="0 1 0" range="-2.26893 0.08726" actuatorfrcrange="-37 37" armature="0.003" damping="0.2" frictionloss="0.0"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_forearm"/>
                 <geom size="0.045 0.015" quat="0.707388 0.706825 0 0" type="capsule" class="collision"/>
                 <geom size="0.02 0.06" pos="0 0 -0.1" type="capsule" class="collision"/>
                 <geom size="0.03" pos="0 0 -0.2175" class="collision" friction="0.0001 0.005 0.0001"/>
-                <geom pos="0 0 -0.085236" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_handball"/>
                 <geom size="0.005" pos="0 0 -0.2175" type="sphere" class="collision"/>
+                <body name="r_handball" pos="0 0 -0.085236">
+                  <inertial pos="0 0 -0.08819581" mass="0.1766" fullinertia="0.00046676 0.00046683 0.00008009 0 0 0"/>
+                  <geom pos="0 0 0" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_handball"/>
+                </body>
               </body>
             </body>
           </body>

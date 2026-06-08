@@ -455,7 +455,7 @@ void WheelJoyStickHandler::loadHandControlParameters() {
     nh.getParam("/end_effector_type", endEffectorTypeStr);
 
     if (endEffectorTypeStr != "qiangnao" && endEffectorTypeStr != "qiangnao_touch" && endEffectorTypeStr != "revo2" &&
-        endEffectorTypeStr != "lejuclaw" && endEffectorTypeStr != "linker_hand") {
+        endEffectorTypeStr != "lejuclaw") {
       throw std::invalid_argument("Unknown end_effector_type: " + endEffectorTypeStr);
     }
     endEffectorType_ = stringToEndEffectorType(endEffectorTypeStr);

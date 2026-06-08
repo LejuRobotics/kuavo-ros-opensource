@@ -360,7 +360,6 @@ void WheelArmControlBaseROS::bonePosesCallback(const noitom_hi5_hand_udp_python:
 }
 
 void WheelArmControlBaseROS::processBonePoses(const noitom_hi5_hand_udp_python::PoseInfoList::ConstPtr& msg) {
-  std::lock_guard<std::mutex> lock(transformerDataMutex_);
   if (!quest3ArmInfoTransformerPtr_) return;
   if (!quest3ArmInfoTransformerPtr_->updateHandPoseAndElbowPosition(*msg, *HandPoseAndElbowPositonListPtr_)) return;
 }

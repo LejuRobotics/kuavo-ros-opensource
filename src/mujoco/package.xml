@@ -55,6 +55,7 @@
     <depend>kuavo_msgs</depend>
     <depend>nodelet</depend>
     <depend>kuavo_assets</depend>
+    <depend>kuavo_common</depend>
     <depend>opencv</depend>
     <depend>yaml-cpp</depend>
   <!-- The export tag contains other, unspecified, tags -->
