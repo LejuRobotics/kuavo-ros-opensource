@@ -1454,7 +1454,12 @@ namespace ocs2
         if (IS_ROBAN(rb_version_))
         {
           std::string current_controller;
-          if (getCurrentControllerName(current_controller) && current_controller == "mpc")
+          if (!getCurrentControllerName(current_controller))
+          {
+            ROS_WARN("[JoyControl] X (Roban): failed to get current controller");
+            return;
+          }
+          if (current_controller == "mpc")
           {
             std::vector<std::string> controller_list;
             if (getControllerList(controller_list) && controller_list.size() > 1)
@@ -1467,6 +1472,12 @@ namespace ocs2
               ROS_INFO("[JoyControl] X (Roban): MPC -> amp_controller");
               callSwitchControllerService("amp_controller");
             }
+          }
+          else if (current_controller.find("dance") != std::string::npos)
+          {
+            // 舞蹈控制器不在 walk_controllers_ 环中；switchToNextController 会误切到 MPC（#3123）
+            ROS_INFO("[JoyControl] X (Roban): dance -> amp_controller");
+            callSwitchControllerService("amp_controller");
           }
           else
           {
