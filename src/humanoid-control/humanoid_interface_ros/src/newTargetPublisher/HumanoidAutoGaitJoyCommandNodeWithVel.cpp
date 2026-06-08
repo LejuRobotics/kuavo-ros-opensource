@@ -1241,6 +1241,34 @@ namespace ocs2
       
       if (joy_msg->buttons[joyButtonMap["BUTTON_LB"]])// 按下左侧侧键，切换模式
       {
+        // LB+A (Roban): 进入/退出站立姿态控制模式；进入需在 amp_hand_controller 控制器下才有效
+        if (IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] &&
+            joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
+        {
+          if (posture_control_mode_)
+          {
+            setPostureControlMode(false);
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          std::string current_controller;
+          if (!getCurrentControllerName(current_controller))
+          {
+            ROS_WARN("[JoyControl] LB+A: failed to get current controller");
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          if (current_controller != "amp_hand_controller")
+          {
+            ROS_WARN("[JoyControl] LB+A: enter posture control only on amp_hand_controller (current=%s)",
+                     current_controller.c_str());
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          setPostureControlMode(true);
+          old_joy_msg_ = *joy_msg;
+          return;
+        }
         if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
           pubModeGaitScale(0.9);
         else if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
@@ -1369,21 +1397,15 @@ namespace ocs2
       // 检查是否有gait切换指令
       if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
       {
-        if (IS_ROBAN(rb_version_))
-        {
-          // A 键切换“站立姿态控制模式”：stance + amp_mode=1 / walk + amp_mode=0
-          setPostureControlMode(!posture_control_mode_);
-          return;
-        }
         publishGaitTemplate("stance");
-      }
-      else if (IS_ROBAN(rb_version_) && posture_control_mode_)
-      {
-        // Roban姿态控制模式下，不再响应其他 gait 切换按键，避免打断姿态命令语义
-        return;
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
       {
+        if (IS_ROBAN(rb_version_) && posture_control_mode_)
+        {
+          ROS_WARN("[JoyControl] B: ignored in posture control mode (exit with LB+A)");
+          return;
+        }
         // Roban: B switch to MPC
         if (IS_ROBAN(rb_version_))
         {
@@ -1423,6 +1445,11 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
+        if (IS_ROBAN(rb_version_) && posture_control_mode_)
+        {
+          ROS_WARN("[JoyControl] X: ignored in posture control mode (exit with LB+A)");
+          return;
+        }
         // Roban: X 在行走控制器环中切换（mpc -> amp_controller -> amp_hand_controller -> ...）
         if (IS_ROBAN(rb_version_))
         {
@@ -1718,7 +1745,6 @@ namespace ocs2
       else
       {
         callAmpModeService(0);
-        publishGaitTemplate("walk");
         ROS_WARN("[JoyControl] Posture control mode disabled: restored walking mode");
       }
     }
