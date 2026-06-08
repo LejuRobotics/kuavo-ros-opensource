@@ -168,14 +168,27 @@ class ArmsIKNode
             ik_free_server_ = nh_.advertiseService("/ik/two_arm_hand_pose_cmd_free_srv", &ArmsIKNode::free_handleServiceRequest, this);
             fk_server_ = nh_.advertiseService("/ik/fk_srv", &ArmsIKNode::handleFKServiceRequest, this);
             fk_server_with_refer_frame_ = nh_.advertiseService("/ik/fk_srv_with_refer_frame", &ArmsIKNode::handleFKServiceRequestWithReferFrame, this);
-            // solver params
-            ik_solve_params_.major_optimality_tol = 1e-3;
-            ik_solve_params_.major_feasibility_tol = 1e-3;
-            ik_solve_params_.minor_feasibility_tol = 1e-3;
+            // solver params: 6代轮臂使用较紧容差，其余代际（含5代双足）保持原默认
+            bool use_upper_body_urdf = false;
+            nh_.param<bool>("use_upper_body_urdf", use_upper_body_urdf, false);
+            if (use_upper_body_urdf)
+            {
+                ik_solve_params_.major_optimality_tol = 1e-3;
+                ik_solve_params_.major_feasibility_tol = 1e-3;
+                ik_solve_params_.minor_feasibility_tol = 1e-3;
+                ik_solve_params_.oritation_constraint_tol = 11e-3;
+                ik_solve_params_.pos_constraint_tol = 1e-3;
+            }
+            else
+            {
+                ik_solve_params_.major_optimality_tol = 9e-3;
+                ik_solve_params_.major_feasibility_tol = 9e-3;
+                ik_solve_params_.minor_feasibility_tol = 9e-3;
+                ik_solve_params_.oritation_constraint_tol = 19e-3;
+                ik_solve_params_.pos_constraint_tol = 9e-3;
+            }
 
             ik_solve_params_.major_iterations_limit = 50;
-            ik_solve_params_.oritation_constraint_tol = 11e-3;
-            ik_solve_params_.pos_constraint_tol = 1e-3;
             ik_solve_params_.pos_cost_weight = 10;
             // default constraint mode: pos soft + ori hard (01 -> 1)
             ik_solve_params_.constraint_mode = 0;
