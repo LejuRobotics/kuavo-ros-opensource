@@ -36,7 +36,7 @@
       <inertial pos="0.00569729 -5.18e-05 -0.161592" quat="0.999987 -0.000524235 0.00510477 4.51483e-06" mass="3.55159" diaginertia="0.0430538 0.0426274 0.00324531"/>
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_knee"/>
 
-      <body name="l_foot_pitch" pos="0.002 0 -0.416">
+      <body name="l_foot_pitch" pos="0 0 -0.416">
         <inertial pos="0 0 0" mass="0.1" diaginertia="0.0001 0.0001 0.0001"/>
         <joint name="l_foot_pitch" pos="0 0 0" axis="0 1 0" range="-0.872664625997165 0.349065850398866" armature="0.01" damping="0.0" />
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="l_foot_pitch"/>
@@ -81,7 +81,7 @@
       <inertial pos="0.00569729 5.18e-05 -0.161592" quat="0.999987 0.000524235 0.00510477 -4.51483e-06" mass="3.55159" diaginertia="0.0430538 0.0426274 0.00324531"/>
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_knee"/>
 
-      <body name="r_foot_pitch" pos="0.002 0 -0.416">
+      <body name="r_foot_pitch" pos="0 0 -0.416">
         <inertial pos="0 0 0" mass="0.1" diaginertia="0.0001 0.0001 0.0001"/>
         <joint name="r_foot_pitch" pos="0 0 0" axis="0 1 0" range="-0.872664625997165 0.349065850398866" armature="0.01" damping="0.0" />
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="r_foot_pitch"/>

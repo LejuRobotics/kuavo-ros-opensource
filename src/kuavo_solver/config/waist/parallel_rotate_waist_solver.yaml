@@ -23,9 +23,12 @@ variants:
       default_tolerance: 1.0e-8
       max_iterations: 30
 
+    # 串联关节（deg）：pitch -15..+30，roll ±15
     joint_limits:
-      pitch: [-1.5708, 1.5708]
-      roll: [-0.785398, 0.785398]
+      pitch: [-0.261666667, 0.523333333]
+      roll: [-0.261666667, 0.261666667]
+    # 电机 bar（rad）：pitch±15°/30° 且 roll=0 时 j2m 包络（约 -28.58°..52.29°）
     motor_limits:
-      bar: [-3.14159, 3.14159]
+      l_bar: [-0.499052, 0.912707]
+      r_bar: [-0.499052, 0.912707]
 

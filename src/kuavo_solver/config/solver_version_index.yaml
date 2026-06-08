@@ -17,12 +17,12 @@ entries:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '100049':
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '11':
     module: ankle
     token: s1gen
@@ -52,7 +52,7 @@ entries:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '40':
     module: ankle
     token: 4gen
@@ -62,12 +62,12 @@ entries:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '42':
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '43':
     module: ankle
     token: 4gen
@@ -77,27 +77,27 @@ entries:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '46':
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '47':
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '48':
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '49':
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   4gen:
     module: ankle
     token: 4gen
@@ -107,12 +107,12 @@ entries:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '50':
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   '51':
     module: ankle
     token: 5gen
@@ -214,12 +214,12 @@ entries:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s100049:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s11:
     module: ankle
     token: s1gen
@@ -254,7 +254,7 @@ entries:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s2gen:
     module: ankle
     token: s2gen
@@ -274,12 +274,12 @@ entries:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s42:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s43:
     module: ankle
     token: 4gen
@@ -289,32 +289,32 @@ entries:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s46:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s47:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s48:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s49:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s50:
     module: ankle
     token: 4gen_pro
     config_dir: config/ankle
-    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
   s51:
     module: ankle
     token: 5gen

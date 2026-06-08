@@ -16,13 +16,6 @@ class StrictThreshold:
     rmse: float = 5.0e-5
 
 
-def normalize_version(v: str) -> str:
-    vv = (v or "").strip()
-    if vv.isdigit():
-        return f"s{vv}"
-    return vv
-
-
 def default_mjcf_for(*, package_root: str, module: str, token: str) -> str:
     """
     根据 solver token 解析默认 MJCF 路径（不针对特定代次定制）。

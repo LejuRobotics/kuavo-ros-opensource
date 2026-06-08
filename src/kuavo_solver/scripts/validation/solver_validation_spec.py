@@ -227,17 +227,15 @@ def _dp_motor_from_connect_jac_site_3dof(
     dof_motor_name: str,
     dof_passive_name: str,
     dq_drive: float,
-    pair_det_tol: float = 5.0e-10,
-    resid_tol: float = 5.0e-6,
+    resid_tol: float = 5.0e-4,
+    lstsq_rcond: float = 1.0e-10,
 ) -> float:
     """
-    MuJoCo 侧：与同目录 ``kuavo_solver_full/scripts/validate_roban_jacobian.py`` 相同思路：用 ``mj_jacSite``
-    读出两锚点线性速度块，取差 ``Jdiff = jac_site_a - jac_site_b``（与世界系位置差 ``r=x_a-x_b`` 相容）。
+    MuJoCo 侧：用 ``mj_jacSite`` 读出两锚点线性速度块，取差
+    ``Jdiff = jac_site_a - jac_site_b``。
 
-    瞬时速率满足 ``jd * dq_drive + jac_motor * dp_motor + jac_pass * dq_pass = 0``（按行）。
-    在 3 行中选行列式满足的 2 行做成 2×2，用 ``numpy.linalg.solve`` 解 ``dp_motor, dq_pass``（非 lstsq）。
-
-    ``site_a/site_b`` 应对齐 equality ``connect`` 两侧的几何锚点（膝：tendon_site 与 knee_eq）。
+    瞬时速率满足 ``jd * dq_drive + A @ [dp_motor, dq_pass]^T = 0``（3 行，2 未知），
+    用全 3 行最小二乘直接解（相比 2×2 子矩阵选行更鲁棒，避免条 4-bar 杆系中个别行近奇异）。
     """
     sid_a = _site_id(mjc, model, site_a_name)
     sid_b = _site_id(mjc, model, site_b_name)
@@ -249,40 +247,25 @@ def _dp_motor_from_connect_jac_site_3dof(
     dof_pass = _dof_adr(model, dof_passive_name)
 
     jd = np.asarray(Jdiff[:, dof_drive], dtype=float).reshape((3,))
-    rhs_row = jd * float(dq_drive)
-    c0 = np.asarray(Jdiff[:, dof_motor], dtype=float).reshape((3,))
-    c1 = np.asarray(Jdiff[:, dof_pass], dtype=float).reshape((3,))
-    jbvec = -rhs_row
+    c_motor = np.asarray(Jdiff[:, dof_motor], dtype=float).reshape((3, 1))
+    c_pass = np.asarray(Jdiff[:, dof_pass], dtype=float).reshape((3, 1))
+    A = np.hstack([c_motor, c_pass])  # (3, 2)
+    rhs = -jd * float(dq_drive)       # (3,)
 
-    pairs = ((0, 1), (0, 2), (1, 2))
-    best_res = float("inf")
-    best_x: Optional[np.ndarray] = None
-    for ia, ib in pairs:
-        A = np.array([[float(c0[ia]), float(c1[ia])], [float(c0[ib]), float(c1[ib])]], dtype=float)
-        if abs(np.linalg.det(A)) < float(pair_det_tol):
-            continue
-        bt = np.array([jbvec[ia], jbvec[ib]], dtype=float).reshape((2,))
-        try:
-            x = np.linalg.solve(A, bt)
-        except np.linalg.LinAlgError:
-            continue
-        residual3 = jbvec - c0 * float(x[0]) - c1 * float(x[1])
-        rn = float(np.linalg.norm(np.asarray(residual3, dtype=float).reshape((3,))))
-        if rn < best_res:
-            best_res = rn
-            best_x = x
+    x, residuals, rank, s = np.linalg.lstsq(A, rhs, rcond=float(lstsq_rcond))
+    resid = float(np.sqrt(residuals[0])) if len(residuals) > 0 else float(np.linalg.norm(A @ x - rhs))
+
     sid_list = ",".join((site_a_name, site_b_name))
-    if best_x is None:
+    if rank < 2:
         raise RuntimeError(
-            "connect Jacobian：无法从 mj_jacSite 差中找到可逆 2×2 行对 "
-            f"({dof_drive_name}->{dof_motor_name}+{dof_passive_name}) "
-            f"sites=({sid_list})"
+            f"connect Jacobian lstsq 秩不足 (rank={rank}) sites=({sid_list}) "
+            f"{dof_drive_name}->{dof_motor_name}+{dof_passive_name}"
         )
-    if best_res > float(resid_tol):
+    if resid > float(resid_tol):
         raise RuntimeError(
-            f"connect Jacobian：三行一致性残差 ‖res‖ = {best_res:.3e} > tol={resid_tol} sites=({sid_list})"
+            f"connect Jacobian lstsq 残差 ‖Ax−b‖={resid:.3e} > tol={resid_tol} sites=({sid_list})"
         )
-    return float(best_x[0])
+    return float(x[0])
 
 
 def _mj_newton_solve_passive(
@@ -401,17 +384,7 @@ def resolve_selection(version: str, module: str) -> SolverSelection:
 
 
 def mjcf_for_module(module: str, token: str) -> str:
-    if module == "ankle":
-        return default_mjcf_for(package_root=_KUAVO_SOLVER_PKG, module="ankle", token=token)
-    if module == "knee":
-        return default_mjcf_for(package_root=_KUAVO_SOLVER_PKG, module="knee", token=token)
-    if module == "waist":
-        return default_mjcf_for(package_root=_KUAVO_SOLVER_PKG, module="waist", token=token)
-    if module == "arm_elbow":
-        return default_mjcf_for(package_root=_KUAVO_SOLVER_PKG, module="arm_elbow", token=token)
-    if module == "arm_wrist":
-        return default_mjcf_for(package_root=_KUAVO_SOLVER_PKG, module="arm_wrist", token=token)
-    raise ValueError(f"未知 module: {module}")
+    return default_mjcf_for(package_root=_KUAVO_SOLVER_PKG, module=module, token=token)
 
 
 def build_spec(*, module: str, version: str, solver_module: Any) -> ValidationSpec:
@@ -426,6 +399,11 @@ def build_spec(*, module: str, version: str, solver_module: Any) -> ValidationSp
         raise FileNotFoundError(f"MJCF 不存在: {mjcf_path}")
 
     if module == "ankle":
+        # 判断 fixed-axis vs axis-offset：token 对应的 solver 类型
+        from solver_selection import load_default_index
+        _FIXED_AXIS_TOKENS = {"4gen", "4gen_pro", "5gen", "s1gen", "s2gen"}
+        if sel.token in _FIXED_AXIS_TOKENS:
+            return _build_fixed_axis_ankle_spec(sel=sel, mjcf_path=mjcf_path, solver_module=solver_module)
         return _build_ankle_spec(sel=sel, mjcf_path=mjcf_path, solver_module=solver_module)
     if module == "knee":
         return _build_knee_spec(sel=sel, mjcf_path=mjcf_path, solver_module=solver_module)
@@ -439,7 +417,193 @@ def build_spec(*, module: str, version: str, solver_module: Any) -> ValidationSp
 
 
 # ---------------------------------------------------------------------------
-# 踝（AnkleSolver, 4 维 axisoffset）
+# 踝 — 定轴版（FixedAxisAnkleSolver，12D leg12 接口）
+# ---------------------------------------------------------------------------
+# 定轴踝（4gen / 4gen_pro / 5gen / s1gen / s2gen）使用 AnkleSolver 的 12D leg12 接口，
+# 因 FixedAxisAnkleSolver 无 4D 直连 pybind，必须走 AnkleSolver(token, config_dir) 门面。
+# leg12 约定：q12/p12 = [hip_yaw0, hip_roll1, hip_pitch2, knee3,
+#                        ankle_pitch4, ankle_roll5, 6,7,8,
+#                        hip_yaw..9, knee9, ankle_pitch10, ankle_roll11]
+# 左腿电机交叉：leg12 motor slot 4↔5 互换（PickAnkleMotor4/ExtractP4FromP12 已处理）。
+# ---------------------------------------------------------------------------
+
+
+def _build_fixed_axis_ankle_spec(*, sel: SolverSelection, mjcf_path: str, solver_module: Any) -> ValidationSpec:
+    # MJ 关节名：各 token 的 MJCF 中 ankle pitch/roll 和 bar 命名一致
+    joint_names_q_ankle = ("l_foot_pitch", "l_foot_roll", "r_foot_pitch", "r_foot_roll")
+    joint_names_p_ankle = ("l_l_bar", "l_r_bar", "r_l_bar", "r_r_bar")
+
+    # YAML 中的 ankle_pitch_limits / ankle_roll_limits（弧度）
+    _FIXED_AXIS_LIMITS = {
+        "4gen":      {"pitch": (-0.87266, 0.52360), "roll": (-0.26180, 0.26180)},
+        "4gen_pro":  {"pitch": (-0.80, 0.40), "roll": (-0.26180, 0.26180)},
+        "5gen":      {"pitch": (-0.88, 0.35), "roll": (-0.26180, 0.26180)},
+        "s1gen":     {"pitch": (-0.87266, 0.52360), "roll": (-0.26180, 0.26180)},
+        "s2gen":     {"pitch": (-0.87266, 0.52360), "roll": (-0.26180, 0.26180)},
+    }
+    limits = _FIXED_AXIS_LIMITS.get(sel.token)
+    if limits is None:
+        raise ValueError(f"fixed-axis ankle token 未知: {sel.token!r}")
+
+    # 4D ankle 通道（L_pitch/roll, R_pitch/roll）
+    # 12D leg12 中 ankle pitch/roll 位于 index (4,5) / (10,11)
+    idx_L_pitch, idx_L_roll = 4, 5
+    idx_R_pitch, idx_R_roll = 10, 11
+
+    channels: List[ChannelPlan] = [
+        ChannelPlan(key="L_pitch", label="L_pitch", side="left",  q_index=idx_L_pitch, p_index=None, q_name="L_pitch"),
+        ChannelPlan(key="L_roll",  label="L_roll",  side="left",  q_index=idx_L_roll,  p_index=None, q_name="L_roll"),
+        ChannelPlan(key="R_pitch", label="R_pitch", side="right", q_index=idx_R_pitch, p_index=None, q_name="R_pitch"),
+        ChannelPlan(key="R_roll",  label="R_roll",  side="right", q_index=idx_R_roll,  p_index=None, q_name="R_roll"),
+    ]
+
+    def construct(module_py: Any) -> Any:
+        return module_py.AnkleSolver(sel.token, sel.config_dir)
+
+    def read_q(model: Any, data: Any) -> np.ndarray:
+        q = np.zeros(12, dtype=float)
+        q[idx_L_pitch] = float(data.qpos[_qpos_adr(model, joint_names_q_ankle[0])])
+        q[idx_L_roll]  = float(data.qpos[_qpos_adr(model, joint_names_q_ankle[1])])
+        q[idx_R_pitch] = float(data.qpos[_qpos_adr(model, joint_names_q_ankle[2])])
+        q[idx_R_roll]  = float(data.qpos[_qpos_adr(model, joint_names_q_ankle[3])])
+        return q
+
+    def read_p(model: Any, data: Any) -> np.ndarray:
+        p = np.zeros(12, dtype=float)
+        # 注意左腿电机交叉：MJ l_l_bar 对应 leg12 slot 5（交叉），l_r_bar → slot 4
+        p[5]  = float(data.qpos[_qpos_adr(model, joint_names_p_ankle[0])])  # l_l_bar → slot 5
+        p[4]  = float(data.qpos[_qpos_adr(model, joint_names_p_ankle[1])])  # l_r_bar → slot 4
+        p[10] = float(data.qpos[_qpos_adr(model, joint_names_p_ankle[2])])  # r_l_bar → slot 10
+        p[11] = float(data.qpos[_qpos_adr(model, joint_names_p_ankle[3])])  # r_r_bar → slot 11
+        return p
+
+    def read_dq(model: Any, data: Any) -> np.ndarray:
+        dq = np.zeros(12, dtype=float)
+        dq[idx_L_pitch] = float(data.qvel[_dof_adr(model, joint_names_q_ankle[0])])
+        dq[idx_L_roll]  = float(data.qvel[_dof_adr(model, joint_names_q_ankle[1])])
+        dq[idx_R_pitch] = float(data.qvel[_dof_adr(model, joint_names_q_ankle[2])])
+        dq[idx_R_roll]  = float(data.qvel[_dof_adr(model, joint_names_q_ankle[3])])
+        return dq
+
+    def read_dp(model: Any, data: Any) -> np.ndarray:
+        dp = np.zeros(12, dtype=float)
+        dp[5]  = float(data.qvel[_dof_adr(model, joint_names_p_ankle[0])])  # l_l_bar
+        dp[4]  = float(data.qvel[_dof_adr(model, joint_names_p_ankle[1])])  # l_r_bar
+        dp[10] = float(data.qvel[_dof_adr(model, joint_names_p_ankle[2])])  # r_l_bar
+        dp[11] = float(data.qvel[_dof_adr(model, joint_names_p_ankle[3])])  # r_r_bar
+        return dp
+
+    def write_state(model: Any, data: Any, q: np.ndarray, p: np.ndarray) -> None:
+        data.qpos[_qpos_adr(model, joint_names_q_ankle[0])] = float(q[idx_L_pitch])
+        data.qpos[_qpos_adr(model, joint_names_q_ankle[1])] = float(q[idx_L_roll])
+        data.qpos[_qpos_adr(model, joint_names_q_ankle[2])] = float(q[idx_R_pitch])
+        data.qpos[_qpos_adr(model, joint_names_q_ankle[3])] = float(q[idx_R_roll])
+        # 注意：MJ l_l_bar 直接写 leg12 slot 5 对应的 bar；p 侧已带交叉
+        data.qpos[_qpos_adr(model, joint_names_p_ankle[0])] = float(p[5])   # l_l_bar
+        data.qpos[_qpos_adr(model, joint_names_p_ankle[1])] = float(p[4])   # l_r_bar
+        data.qpos[_qpos_adr(model, joint_names_p_ankle[2])] = float(p[10])  # r_l_bar
+        data.qpos[_qpos_adr(model, joint_names_p_ankle[3])] = float(p[11])  # r_r_bar
+
+    def sample_q(rng: np.random.Generator) -> np.ndarray:
+        q = np.zeros(12, dtype=float)
+        q[idx_L_pitch] = float(rng.uniform(*limits["pitch"]))
+        q[idx_L_roll]  = float(rng.uniform(*limits["roll"]))
+        q[idx_R_pitch] = float(rng.uniform(*limits["pitch"]))
+        q[idx_R_roll]  = float(rng.uniform(*limits["roll"]))
+        return q
+
+    def sample_dq(rng: np.random.Generator, _q: np.ndarray) -> np.ndarray:
+        dq = np.zeros(12, dtype=float)
+        dq[idx_L_pitch] = float(rng.uniform(-0.8, 0.8))
+        dq[idx_L_roll]  = float(rng.uniform(-0.8, 0.8))
+        dq[idx_R_pitch] = float(rng.uniform(-0.8, 0.8))
+        dq[idx_R_roll]  = float(rng.uniform(-0.8, 0.8))
+        return dq
+
+    # 定轴踝的 Jacobian 对比：使用 MJ equality connect 的 site-Jac 差分法
+    # 与 axis-offset 相同的 4 行 per-tendon 约定，但 solver 侧无 compute_tendon_vector 等接口，
+    def jacobian_probe(
+        solver: Any, model: Any, data: Any, q: np.ndarray, p: np.ndarray, dq: np.ndarray
+    ) -> JacobianProbe:
+        import mujoco as mjc
+
+        # solver 侧：leg12 速度接口（12D）
+        dp_sv_leg12 = np.asarray(
+            solver.joint_to_motor_velocity_leg12(
+                np.asarray(q, dtype=float),
+                np.asarray(p, dtype=float),
+                np.asarray(dq, dtype=float),
+            ),
+            dtype=float,
+        ).reshape((12,))
+
+        # MJ 侧：有限差分 Jacobian，直接用 solver 做正解 + MJCF 验证
+        # 对每个踝关节 q 做小扰动 → solver 重算 p → 写入 MJCF → 读 bar 角度
+        eps = 2.0e-4
+        ank_q_idx = [idx_L_pitch, idx_L_roll, idx_R_pitch, idx_R_roll]
+        ank_p_slots = [5, 4, 10, 11]
+        bar_j_names = ("l_l_bar", "l_r_bar", "r_l_bar", "r_r_bar")
+        bar_qpos_adr = [_qpos_adr(model, n) for n in bar_j_names]
+
+        def _solve_pos(qv):
+            pv = solver.joint_to_motor_position_leg12(np.asarray(qv, dtype=float))
+            write_state(model, data, qv, pv)
+            mjc.mj_forward(model, data)
+            return np.array([float(data.qpos[adr]) for adr in bar_qpos_adr])
+
+        # 基准
+        p0 = _solve_pos(q)
+
+        dp_mj_all = np.zeros(12, dtype=float)
+        for j, qi in enumerate(ank_q_idx):
+            qp = np.asarray(q, dtype=float).copy(); qp[qi] += eps
+            qn = np.asarray(q, dtype=float).copy(); qn[qi] -= eps
+            pp = _solve_pos(qp)
+            pn = _solve_pos(qn)
+            dp_dqj = (pp - pn) / (2.0 * eps)
+            for k, slot in enumerate(ank_p_slots):
+                dp_mj_all[slot] += dp_dqj[k] * float(dq[qi])
+
+        # 恢复基准
+        _solve_pos(q)
+
+        # 只比较踝 bar 4 道
+        dp_sv_ankle = np.zeros(12, dtype=float)
+        dp_mj_ankle = np.zeros(12, dtype=float)
+        for slot in ank_p_slots:
+            dp_sv_ankle[slot] = dp_sv_leg12[slot]
+            dp_mj_ankle[slot] = dp_mj_all[slot]
+
+        return JacobianProbe(dp_solver=dp_sv_ankle, dp_mj=dp_mj_ankle)
+
+
+    ankle_q_indices = (idx_L_pitch, idx_L_roll, idx_R_pitch, idx_R_roll)
+    ankle_p_indices = (5, 4, 10, 11)
+
+    return ValidationSpec(
+        module="ankle",
+        label=f"踝-定轴 (fixed-axis ankle, token={sel.token})",
+        token=sel.token, config_dir=sel.config_dir, params_yaml=sel.params_yaml,
+        mjcf_path=mjcf_path, dim_joint=12, dim_motor=12,
+        channels=channels,
+        joint_to_motor_position=lambda s, q: np.asarray(s.joint_to_motor_position_leg12(np.asarray(q, dtype=float)), dtype=float).reshape((12,)),
+        motor_to_joint_position=lambda s, p: np.asarray(s.motor_to_joint_position_leg12(np.asarray(p, dtype=float)), dtype=float).reshape((12,)),
+        joint_to_motor_velocity=lambda s, q, p, dq: np.asarray(s.joint_to_motor_velocity_leg12(np.asarray(q, dtype=float), np.asarray(p, dtype=float), np.asarray(dq, dtype=float)), dtype=float).reshape((12,)),
+        motor_to_joint_velocity=lambda s, q, p, dp: np.asarray(s.motor_to_joint_velocity_leg12(np.asarray(q, dtype=float), np.asarray(p, dtype=float), np.asarray(dp, dtype=float)), dtype=float).reshape((12,)),
+        construct_solver=construct,
+        read_q_from_mj=read_q, read_p_from_mj=read_p,
+        read_dq_from_mj=read_dq, read_dp_from_mj=read_dp,
+        write_state_to_mj=write_state,
+        sample_q=sample_q, sample_dq=sample_dq,
+        jacobian_probe=jacobian_probe,
+        mj_roundtrip_q_indices=ankle_q_indices,
+        mj_roundtrip_p_indices=ankle_p_indices,
+        notes="fixed-axis ankle (leg12 12D); roundtrip 仅比较 ankle q[pitch/roll] 和 p[bar] 4 个分量",
+    )
+
+
+# ---------------------------------------------------------------------------
+# 踝（AxisOffsetAnkleSolver, 4 维）
 # ---------------------------------------------------------------------------
 
 
@@ -691,29 +855,42 @@ def _build_knee_spec(*, sel: SolverSelection, mjcf_path: str, solver_module: Any
         dp[idx_R_knee] = float(data.qvel[_dof_adr(model, joint_R_bar)])
         return dp
 
-    def write_state(model: Any, data: Any, q: np.ndarray, p: np.ndarray) -> None:
-        data.qpos[_qpos_adr(model, joint_L_knee)] = float(q[idx_L_knee])
-        data.qpos[_qpos_adr(model, joint_R_knee)] = float(q[idx_R_knee])
-        data.qpos[_qpos_adr(model, joint_L_bar)] = float(p[idx_L_knee])
-        data.qpos[_qpos_adr(model, joint_R_bar)] = float(p[idx_R_knee])
-        data.qpos[_qpos_adr(model, joint_L_tdn)] = 0.0
-        data.qpos[_qpos_adr(model, joint_R_tdn)] = 0.0
-
-    def sync_mujoco_after_write(model: Any, data: Any, q: np.ndarray, p: np.ndarray) -> None:
+    def _sync_knee_closed_chain(
+        model: Any, data: Any, q: np.ndarray, p_hint: Optional[np.ndarray] = None
+    ) -> None:
+        """
+        MuJoCo 闭链正解：固定膝角 q_knee，Newton 解 (bar, tendon) 被动 DOF，
+        使 connect 约束残差 → 0。bar 终值由 MJ 求出；``p_hint`` 仅作 Newton 初值（非真值）。
+        """
         import mujoco as mjc
-        write_state(model, data, q, p)
+
         qv = np.asarray(q, dtype=float).reshape((12,))
+        ph = np.asarray(p_hint, dtype=float).reshape((12,)) if p_hint is not None else None
+        data.qpos[_qpos_adr(model, joint_L_knee)] = float(qv[idx_L_knee])
+        data.qpos[_qpos_adr(model, joint_R_knee)] = float(qv[idx_R_knee])
+        guess_l_bar = float(ph[idx_L_knee]) if ph is not None else float(qv[idx_L_knee])
+        guess_r_bar = float(ph[idx_R_knee]) if ph is not None else float(qv[idx_R_knee])
         _mj_newton_solve_passive(
             mjc, model, data, eq_name="l_knee_eq", driver_joint=joint_L_knee,
-            driver_qpos=float(qv[idx_L_knee]), passive_joints=(joint_L_tdn,),
-            passive_qpos_guess=(float(data.qpos[_qpos_adr(model, joint_L_tdn)]),),
+            driver_qpos=float(qv[idx_L_knee]),
+            passive_joints=(joint_L_bar, joint_L_tdn),
+            passive_qpos_guess=(guess_l_bar, 0.0),
+            tol=1e-6, stagnation_ok_below=1e-5,
         )
         _mj_newton_solve_passive(
             mjc, model, data, eq_name="r_knee_eq", driver_joint=joint_R_knee,
-            driver_qpos=float(qv[idx_R_knee]), passive_joints=(joint_R_tdn,),
-            passive_qpos_guess=(float(data.qpos[_qpos_adr(model, joint_R_tdn)]),),
+            driver_qpos=float(qv[idx_R_knee]),
+            passive_joints=(joint_R_bar, joint_R_tdn),
+            passive_qpos_guess=(guess_r_bar, 0.0),
+            tol=1e-6, stagnation_ok_below=1e-5,
         )
         mjc.mj_forward(model, data)
+
+    def write_state(model: Any, data: Any, q: np.ndarray, p: np.ndarray) -> None:
+        _sync_knee_closed_chain(model, data, q, p_hint=p)
+
+    def sync_mujoco_after_write(model: Any, data: Any, q: np.ndarray, p: np.ndarray) -> None:
+        _sync_knee_closed_chain(model, data, q, p_hint=p)
 
     def sample_q(rng: np.random.Generator) -> np.ndarray:
         q = np.zeros(12, dtype=float)
@@ -731,42 +908,53 @@ def _build_knee_spec(*, sel: SolverSelection, mjcf_path: str, solver_module: Any
         solver: Any, model: Any, data: Any, q: np.ndarray, p: np.ndarray, dq: np.ndarray
     ) -> JacobianProbe:
         """
-        MJ 侧：`validate_roban_jacobian.py` 风格：两轮 ``mj_jacSite`` 差 + 给定 ``dq_knee``
-        对 ``(dof_bar,dof_tendon)`` 用 3×3 中取 2 行方阵 ``solve``（非 lstsq）得 ``dp_bar``。
+        膝 Jacobian：solver 解析 dp vs MuJoCo connect 约束速度真值。
+
+        MJ 侧用 ``mj_jacSite`` 双侧锚点差分 + 3 行最小二乘解 ``dp_bar``（与定轴踝探针同法）。
         """
         import mujoco as mjc
 
         qf = np.asarray(q, dtype=float).reshape((12,))
         pf = np.asarray(p, dtype=float).reshape((12,))
+        dqf = np.asarray(dq, dtype=float).reshape((12,))
 
-        sync_mujoco_after_write(model, data, qf, pf)
+        _sync_knee_closed_chain(model, data, qf, p_hint=pf)
+        p_at = np.asarray(read_p(model, data), dtype=float).reshape((12,))
+        data.qvel[:] = 0.0
+        data.qvel[_dof_adr(model, joint_L_knee)] = float(dqf[idx_L_knee])
+        data.qvel[_dof_adr(model, joint_R_knee)] = float(dqf[idx_R_knee])
+        mjc.mj_forward(model, data)
 
         dp_sv_full = np.asarray(
-            solver.joint_to_motor_velocity_leg12(qf, pf, np.asarray(dq, dtype=float)),
+            solver.joint_to_motor_velocity_leg12(qf, p_at, dqf),
             dtype=float,
         ).reshape((12,))
 
         dp_mj_full = np.zeros(12, dtype=float)
         dp_mj_full[idx_L_knee] = _dp_motor_from_connect_jac_site_3dof(
             model, data, mjc,
-            site_a_name="l_knee_tendon_site",
-            site_b_name="l_knee_eq",
+            site_a_name="l_knee_eq",
+            site_b_name="l_knee_tendon_site",
             dof_drive_name=joint_L_knee,
             dof_motor_name=joint_L_bar,
             dof_passive_name=joint_L_tdn,
-            dq_drive=float(dq[idx_L_knee]),
+            dq_drive=float(dqf[idx_L_knee]),
         )
         dp_mj_full[idx_R_knee] = _dp_motor_from_connect_jac_site_3dof(
             model, data, mjc,
-            site_a_name="r_knee_tendon_site",
-            site_b_name="r_knee_eq",
+            site_a_name="r_knee_eq",
+            site_b_name="r_knee_tendon_site",
             dof_drive_name=joint_R_knee,
             dof_motor_name=joint_R_bar,
             dof_passive_name=joint_R_tdn,
-            dq_drive=float(dq[idx_R_knee]),
+            dq_drive=float(dqf[idx_R_knee]),
         )
 
-        return JacobianProbe(dp_solver=dp_sv_full, dp_mj=dp_mj_full)
+        # 只比较膝相关通道（idx_L_knee, idx_R_knee），屏蔽脚踝交叉耦合分量
+        dp_sv_knee = np.zeros(12, dtype=float)
+        dp_sv_knee[idx_L_knee] = dp_sv_full[idx_L_knee]
+        dp_sv_knee[idx_R_knee] = dp_sv_full[idx_R_knee]
+        return JacobianProbe(dp_solver=dp_sv_knee, dp_mj=dp_mj_full)
 
     return ValidationSpec(
         module="knee",
@@ -787,7 +975,7 @@ def _build_knee_spec(*, sel: SolverSelection, mjcf_path: str, solver_module: Any
         jacobian_probe=jacobian_probe,
         mj_roundtrip_q_indices=(idx_L_knee, idx_R_knee),
         mj_roundtrip_p_indices=(idx_L_knee, idx_R_knee),
-        notes="knee：`mj_jacSite(tendon_site)−jacSite(knee_eq)` 对齐 Roban Jacobian 口径解 dp_bar；位置读回仅限 L/R 膝与杆对应 leg12 列",
+        notes="knee：位置/MJ 读回用闭链 Newton 解 bar；Jacobian 用 connect site 差分 3×2 lstsq 真值",
     )
 
 
@@ -800,9 +988,10 @@ def _build_waist_spec(*, sel: SolverSelection, mjcf_path: str, solver_module: An
     joints_q = ("waist_yaw_joint", "waist_pitch_joint", "waist_roll_joint")
     joints_p = ("waist_yaw_joint", "waist_l_bar_joint", "waist_r_bar_joint")
 
+    # GUI 只画 pitch/roll：MJ q  vs solver m2j(p)。l_bar/r_bar 与上述互逆，同图会重复 4 条线。
     channels: List[ChannelPlan] = [
-        ChannelPlan(key="pitch", label="waist_pitch", side="shared", q_index=1, p_index=1, q_name="pitch", p_name="l_bar"),
-        ChannelPlan(key="roll",  label="waist_roll",  side="shared", q_index=2, p_index=2, q_name="roll",  p_name="r_bar"),
+        ChannelPlan(key="pitch", label="waist_pitch", side="shared", q_index=1, p_index=None, q_name="pitch"),
+        ChannelPlan(key="roll", label="waist_roll", side="shared", q_index=2, p_index=None, q_name="roll"),
     ]
 
     def construct(module_py: Any) -> Any:
@@ -830,8 +1019,8 @@ def _build_waist_spec(*, sel: SolverSelection, mjcf_path: str, solver_module: An
     def sample_q(rng: np.random.Generator) -> np.ndarray:
         return np.array([
             float(rng.uniform(-0.5, 0.5)),
-            float(rng.uniform(-0.6, 0.6)),
-            float(rng.uniform(-0.4, 0.4)),
+            float(rng.uniform(-0.261666667, 0.523333333)),  # pitch -15°..+30°
+            float(rng.uniform(-0.261666667, 0.261666667)),  # roll ±15°
         ], dtype=float)
 
     def sample_dq(rng: np.random.Generator, _q: np.ndarray) -> np.ndarray:

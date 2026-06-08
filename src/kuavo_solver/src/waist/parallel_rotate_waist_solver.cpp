@@ -55,7 +55,8 @@ ParallelRotateWaistSolver::LoadedParam ParallelRotateWaistSolver::loadParam(
     loader.parent();
 
     loader.child("motor_limits")
-          .require("bar", &p.motor_bar);
+          .require("l_bar", &p.motor_l_bar)
+          .require("r_bar", &p.motor_r_bar);
 
     return {p};
 }

@@ -104,11 +104,11 @@
         <!-- rl：-21.97°~56.8° -->
         <joint name="r_l_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.383448836663154 0.991347015132779"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="r_l_bar"/>
-        <body name="r_l_bar_tendon" pos="-0.0173 0.026 -0.2207">
+        <body name="r_l_bar_tendon" pos="-0.0173 0.026 -0.3107">
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
-          <joint name="r_l_bar_tendon" pos="0.0173 0.007649 0.2114382" type="ball"/>
-          <geom type="mesh" pos="0.0173 0.007649 0.2114382" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_l_bar_tendon"/>
-          <site name="r_l_bar_tendon" group="0" pos="0.0173 0.007649 0.2114382" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <joint name="r_l_bar_tendon" pos="0.0173 0.007392 0.300554" type="ball"/>
+          <geom type="mesh" pos="0.0173 0.007392 0.300554" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_l_bar_tendon"/>
+          <site name="r_l_bar_tendon" group="0" pos="0.0173 0.007392 0.300554" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
         </body>
       </body>
 
@@ -117,11 +117,11 @@
         <!-- rr：-56.36°~22.21° -->
         <joint name="r_r_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.983667566424004 0.387637626867941"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="r_r_bar"/>
-        <body name="r_r_bar_tendon" pos="-0.0173 -0.026 -0.3107">
+        <body name="r_r_bar_tendon" pos="-0.0173 -0.026 -0.2207">
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
-          <joint name="r_r_bar_tendon" pos="0.0173 -0.007392 0.300554" type="ball"/>
-          <geom type="mesh" pos="0.0173 -0.007392 0.300554" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_r_bar_tendon"/>
-          <site name="r_r_bar_tendon" group="0" pos="0.0173 -0.007392 0.300554" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <joint name="r_r_bar_tendon" pos="0.0173 -0.007649 0.2114382" type="ball"/>
+          <geom type="mesh" pos="0.0173 -0.007649 0.2114382" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_r_bar_tendon"/>
+          <site name="r_r_bar_tendon" group="0" pos="0.0173 -0.007649 0.2114382" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
         </body>
       </body>
     </body>

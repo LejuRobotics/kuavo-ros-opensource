@@ -8,16 +8,26 @@ variants:
     - -0.261799387799149
     - 0.261799387799149
     knee_linkage_enabled: true
+    # === 膝盖 4-bar（biped_s56.urdf leg_l4_joint + derive_knee_params_from_mjcf.py on biped_knees.xml）===
+    # l_leg_pitch→l_knee: (-0.0011639, 0, -0.284), l_leg_pitch→l_knee_bar: (0, 0, -0.115)
+    # Bar frame: l_knee_bar at (0, 0, -0.115) from l_leg_pitch
+    # l_bar_td = √(0.0127831² + 0.0325821²) = distance from bar pivot to tendon hinge
+    # l_knee_eq = √(0.00906² + 0.03381²) = distance from knee pivot to eq anchor
+    # l_tendon = √(0.0206792² + 0.1677721²) = distance from hinge to tendon_site in body
+    # q_offset_knee = atan2(0.00906, 0.03381) = 0.26182
+    # q_offset_bar = atan2(0.0127831, 0.0325821) = 0.37388
+    x_bar_knee: -0.0011639
     z_bar_knee: -0.169
-    l_tendon: 0.16918805677712595
+    l_tendon: 0.1690417310933901
     l_bar_td: 0.03500001265742629
-    l_knee_eq: 0.03500285274088385
-    q_offset_knee: 0.26181698840065826
+    l_knee_eq: 0.0350028527408838
+    q_offset_knee: 0.2618169884006583
     q_offset_bar: 0.3738812519350086
     derive_bar_lengths: true
     z_pitch: -0.439
     z_roll: -0.023
     x_pitch: 0.000
+    # MJCF 中 foot_pitch pos 的 X offset 已修正为 0（对齐 URDF leg_l5_joint origin）
     x_lleq: 0.0362
     y_lleq: 0.026
     z_lleq: 0.007
@@ -68,46 +78,46 @@ variants:
     z_pitch: -0.294
     z_roll: -0.018
     x_pitch: 0.03
-    x_lleq: 0.02780675
+    x_lleq: 0.02400533
     y_lleq: 0.0207
-    z_lleq: 0.00367032
-    x_lreq: 0.02780675
+    z_lleq: 0.00300002
+    x_lreq: 0.02400533
     y_lreq: -0.0186
-    z_lreq: 0.00367032
-    x_llbar: 0.047123
-    z_llbar: -0.1595
-    x_lrbar: 0.05117
-    z_lrbar: -0.10163
-    x_lltd: 0.014
+    z_lreq: 0.00300002
+    x_llbar: 0.061013
+    z_llbar: -0.16157
+    x_lrbar: 0.065058
+    z_lrbar: -0.10371
+    x_lltd: -0.00019865
     y_lltd: 0.023428
-    z_lltd: -0.0039472
-    x_lrtd: 0.014
-    y_lrtd: -0.023357
-    z_lrtd: -0.0044851
-    l0_ll_eqtd: 0.12695512289393013
-    l0_lr_eqtd: 0.18442304081686461
-    l_llbar: 0.0237581895741237
-    l_lrbar: 0.02378372491873382
-    x_rleq: 0.02780675
+    z_lltd: -0.0028409
+    x_lrtd: -0.0003367
+    y_lrtd: -0.023101
+    z_lrtd: -0.0048151
+    l0_ll_eqtd: 0.126801419206
+    l0_lr_eqtd: 0.182844668626
+    l_llbar: 0.023600452509
+    l_lrbar: 0.023599888896
+    x_rleq: 0.02400533
     y_rleq: 0.0186
-    z_rleq: 0.00367032
-    x_rreq: 0.02780675
+    z_rleq: 0.00300002
+    x_rreq: 0.02400533
     y_rreq: -0.0207
-    z_rreq: 0.00367032
-    x_rlbar: 0.05117
-    z_rlbar: -0.10163
-    x_rrbar: 0.047123
-    z_rrbar: -0.1595
-    x_rltd: 0.014
-    y_rltd: 0.023357
-    z_rltd: -0.0044851
-    x_rrtd: 0.014
+    z_rreq: 0.00300002
+    x_rlbar: 0.065058
+    z_rlbar: -0.10371
+    x_rrbar: 0.061013
+    z_rrbar: -0.16157
+    x_rltd: -0.0003367
+    y_rltd: 0.023101
+    z_rltd: -0.0048151
+    x_rrtd: -0.00019865
     y_rrtd: -0.023428
-    z_rrtd: -0.0039472
-    l0_rl_eqtd: 0.18442304081686461
-    l0_rr_eqtd: 0.12695512289393013
-    l_rlbar: 0.02378372491873382
-    l_rrbar: 0.0237581895741237
+    z_rrtd: -0.0028409
+    l0_rl_eqtd: 0.182844668626
+    l0_rr_eqtd: 0.126801419206
+    l_rlbar: 0.023599888896
+    l_rrbar: 0.023600452509
     default_tolerance: 1.0e-08
     max_iterations: 10
   7gen:
@@ -118,22 +128,22 @@ variants:
     - -0.261799387799149
     - 0.261799387799149
     knee_linkage_enabled: true
-    # === 膝盖 4-bar 几何（2026-04 校准：与 biped_ankles_7gen/mjcf/biped_knees.xml 严格一致）===
+    # === 膝盖 4-bar 几何（derive_knee_params_from_mjcf.py 从 biped_ankles_7gen/mjcf/biped_knees.xml 导出）===
     # 机架：把 l_knee_bar 轴放 W 原点（xz 平面），l_knee 轴在 W 下的位置 = (x_bar_knee, z_bar_knee)。
     #   x_bar_knee = l_knee.pos.x - l_knee_bar.pos.x = -0.03 - 0 = -0.03
-    #   z_bar_knee = l_knee.pos.z - l_knee_bar.pos.z = -0.498454 - (-0.357954) = -0.1405
+    #   z_bar_knee = l_knee.pos.z - l_knee_bar.pos.z = -0.498454 - (-0.358454) = -0.140
     x_bar_knee: -0.03
-    z_bar_knee: -0.1405
-    # l_tendon = |tendon_site - tendon_hinge| in tendon body = √(0.00183425² + 0.14168803²)
-    l_tendon: 0.14170027184066055
+    z_bar_knee: -0.140
+    # l_tendon = |tendon_site| in tendon body (XZ) = √(0.00183425² + 0.14118803²)
+    l_tendon: 0.141199944363811
     # l_bar_td = |tendon_hinge - l_knee_bar axis| = √(0.013781² + 0.038083²)
-    l_bar_td: 0.04049980759181829
+    l_bar_td: 0.040499763579556855
     # l_knee_eq = |eq anchor - l_knee axis| = √(0.01438475² + 0.03689497²)
-    l_knee_eq: 0.039600042434343826
+    l_knee_eq: 0.039599998028578234
     # q_offset_knee = atan2(eq_anchor.x, eq_anchor.z) in l_knee frame = atan2(0.01438475, 0.03689497)
-    q_offset_knee: 0.37189665932957366
+    q_offset_knee: 0.37175518459518891
     # q_offset_bar = atan2(|tendon_hinge.x|, tendon_hinge.z) in l_knee_bar frame = atan2(0.013781, 0.038083)
-    q_offset_bar: 0.3471638926867104
+    q_offset_bar: 0.34720783573739511
     derive_bar_lengths: true
     z_pitch: -0.45
     z_roll: -0.023
@@ -150,12 +160,11 @@ variants:
     x_lrbar: 0.0835
     z_lrbar: -0.1093
     x_lltd: 0.0
-    # 以右腿为基准镜像：ll↔rr（深链），lr↔rl（浅链）
-    y_lltd: 0.033392
-    z_lltd: -0.010146
+    y_lltd: 0.033649
+    z_lltd: -0.0092618
     x_lrtd: 0.0
-    y_lrtd: -0.033649
-    z_lrtd: -0.0092618
+    y_lrtd: -0.033392
+    z_lrtd: -0.010146
     l0_ll_eqtd: 0.23431048329086776
     l0_lr_eqtd: 0.3249891426190112
     x_rleq: 0.0362
@@ -169,12 +178,12 @@ variants:
     x_rrbar: 0.0835
     z_rrbar: -0.1993
     x_rltd: 0.0
-    y_rltd: 0.033649
-    z_rltd: -0.0092618
+    y_rltd: 0.033392
+    z_rltd: -0.010146
     x_rrtd: 0.0
-    y_rrtd: -0.033392
-    z_rrtd: -0.010146
-    l0_rl_eqtd: 0.3249891426190112
-    l0_rr_eqtd: 0.23431048329086776
+    y_rrtd: -0.033649
+    z_rrtd: -0.0092618
+    l0_rl_eqtd: 0.324100482
+    l0_rr_eqtd: 0.235200057
     default_tolerance: 1.0e-08
     max_iterations: 10

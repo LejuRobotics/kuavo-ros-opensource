@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-GUI 通用工具（被 unified_solver_gui.py 复用）。
+GUI 通用工具（被 unified_solver_textual.py 复用）。
 
 历史说明
 --------

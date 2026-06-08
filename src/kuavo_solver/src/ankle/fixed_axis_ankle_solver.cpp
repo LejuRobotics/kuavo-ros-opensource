@@ -30,13 +30,13 @@ void PackFixed43Into(Eigen::VectorXd* cfg, double z_pitch, double x_lleq, double
                      double l_lltd, double l_lrtd, double x_rleq, double y_rleq, double z_rleq, double x_rreq,
                      double y_rreq, double z_rreq, double z_rlbar, double z_rrbar, double x_rltd, double y_rltd,
                      double z_rltd, double x_rrtd, double y_rrtd, double z_rrtd, double l_rlbar, double l_rrbar,
-                     double l_rltd, double l_rrtd, double z_BarKnee, double l_tendon, double l_BarTd, double l_KneeEq,
+                     double l_rltd, double l_rrtd, double z_BarKnee, double x_BarKnee, double l_tendon, double l_BarTd, double l_KneeEq,
                      double qO_knee, double qO_bar) {
-    cfg->resize(43);
+    cfg->resize(44);
     *cfg << z_pitch, x_lleq, y_lleq, z_lleq, x_lreq, y_lreq, z_lreq, z_llbar, z_lrbar, x_lltd, y_lltd, z_lltd,
         x_lrtd, y_lrtd, z_lrtd, l_llbar, l_lrbar, l_lltd, l_lrtd, x_rleq, y_rleq, z_rleq, x_rreq, y_rreq, z_rreq,
         z_rlbar, z_rrbar, x_rltd, y_rltd, z_rltd, x_rrtd, y_rrtd, z_rrtd, l_rlbar, l_rrbar, l_rltd, l_rrtd,
-        z_BarKnee, l_tendon, l_BarTd, l_KneeEq, qO_knee, qO_bar;
+        z_BarKnee, x_BarKnee, l_tendon, l_BarTd, l_KneeEq, qO_knee, qO_bar;
 }
 
 Eigen::VectorXd ParseFixed37ConfigOrThrow(const YAML::Node& v) {
@@ -91,7 +91,7 @@ Eigen::VectorXd ParseFixed43ConfigOrThrow(const YAML::Node& v) {
     double x_rleq, y_rleq, z_rleq, x_rreq, y_rreq, z_rreq;
     double z_rlbar, z_rrbar, x_rltd, y_rltd, z_rltd, x_rrtd, y_rrtd, z_rrtd;
     double l_rlbar, l_rrbar, l_rltd, l_rrtd;
-    double z_BarKnee, l_tendon, l_BarTd, l_KneeEq, qO_knee, qO_bar;
+    double z_BarKnee, x_BarKnee, l_tendon, l_BarTd, l_KneeEq, qO_knee, qO_bar;
     if (!SolverTools::GetScalar(v, "z_pitch", &z_pitch) || !SolverTools::GetScalar(v, "x_lleq", &x_lleq) ||
         !SolverTools::GetScalar(v, "y_lleq", &y_lleq) || !SolverTools::GetScalar(v, "z_lleq", &z_lleq) ||
         !SolverTools::GetScalar(v, "x_lreq", &x_lreq) || !SolverTools::GetScalar(v, "y_lreq", &y_lreq) ||
@@ -116,6 +116,10 @@ Eigen::VectorXd ParseFixed43ConfigOrThrow(const YAML::Node& v) {
         !SolverTools::GetScalar(v, "qO_bar", &qO_bar)) {
         throw std::runtime_error("loadFixedParam: failed to parse fixed43 scalar fields");
     }
+    // x_BarKnee 可选（旧 YAML 缺省视为 0，对齐 URDF 膝偏置）
+    if (!SolverTools::GetScalar(v, "x_BarKnee", &x_BarKnee)) {
+        x_BarKnee = 0.0;
+    }
     double pitch_lo = 0, pitch_hi = 0, roll_lo = 0, roll_hi = 0;
     if (!SolverTools::GetSeq2(v, "ankle_pitch_limits", &pitch_lo, &pitch_hi) || !SolverTools::GetSeq2(v, "ankle_roll_limits", &roll_lo, &roll_hi)) {
         throw std::runtime_error("loadFixedParam: missing ankle_pitch_limits/ankle_roll_limits");
@@ -129,7 +133,7 @@ Eigen::VectorXd ParseFixed43ConfigOrThrow(const YAML::Node& v) {
     PackFixed43Into(&cfg, z_pitch, x_lleq, y_lleq, z_lleq, x_lreq, y_lreq, z_lreq, z_llbar, z_lrbar, x_lltd,
                     y_lltd, z_lltd, x_lrtd, y_lrtd, z_lrtd, l_llbar, l_lrbar, l_lltd, l_lrtd, x_rleq, y_rleq,
                     z_rleq, x_rreq, y_rreq, z_rreq, z_rlbar, z_rrbar, x_rltd, y_rltd, z_rltd, x_rrtd, y_rrtd,
-                    z_rrtd, l_rlbar, l_rrbar, l_rltd, l_rrtd, z_BarKnee, l_tendon, l_BarTd, l_KneeEq, qO_knee,
+                    z_rrtd, l_rlbar, l_rrbar, l_rltd, l_rrtd, z_BarKnee, x_BarKnee, l_tendon, l_BarTd, l_KneeEq, qO_knee,
                     qO_bar);
     return cfg;
 }
@@ -1072,11 +1076,12 @@ Eigen::VectorXd FixedAxisAnkleSolver::joint_to_motor_position_pro43_(const Eigen
     double l_rrtd = config_[36];
 
     double z_BarKnee = config_[37];
-    double l_tendon = config_[38];
-    double l_BarTd = config_[39];
-    double l_KneeEq = config_[40];
-    double qO_knee = config_[41];
-    double qO_bar = config_[42];
+    double x_BarKnee = config_[38];
+    double l_tendon = config_[39];
+    double l_BarTd = config_[40];
+    double l_KneeEq = config_[41];
+    double qO_knee = config_[42];
+    double qO_bar = config_[43];
 
     double q1 = q(0);
     double q2 = q(1);
@@ -1099,7 +1104,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::joint_to_motor_position_pro43_(const Eigen
     // left knee
     double sq4 = std::sin(q4 + qO_knee);
     double cq4 = std::cos(q4 + qO_knee);
-    double x_BarEq_W = l_KneeEq * sq4;
+    double x_BarEq_W = x_BarKnee + l_KneeEq * sq4;
     double z_BarEq_W = z_BarKnee + l_KneeEq * cq4;
     double l_BarEq = std::sqrt(x_BarEq_W * x_BarEq_W + z_BarEq_W * z_BarEq_W);
     double p4 = M_PI - std::acos((l_BarTd * l_BarTd + l_BarEq * l_BarEq - l_tendon * l_tendon) / (2 * l_BarTd * l_BarEq)) + std::atan2(x_BarEq_W, -z_BarEq_W) - qO_bar;
@@ -1132,7 +1137,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::joint_to_motor_position_pro43_(const Eigen
     // right knee
     double sq10 = std::sin(q10 + qO_knee);
     double cq10 = std::cos(q10 + qO_knee);
-    x_BarEq_W = l_KneeEq * sq10;
+    x_BarEq_W = x_BarKnee + l_KneeEq * sq10;
     z_BarEq_W = z_BarKnee + l_KneeEq * cq10;
     l_BarEq = std::sqrt(x_BarEq_W * x_BarEq_W + z_BarEq_W * z_BarEq_W);
     double p10 = M_PI - std::acos((l_BarTd * l_BarTd + l_BarEq * l_BarEq - l_tendon * l_tendon) / (2 * l_BarTd * l_BarEq)) + std::atan2(x_BarEq_W, -z_BarEq_W) - qO_bar;
@@ -1188,11 +1193,12 @@ Eigen::VectorXd FixedAxisAnkleSolver::joint_to_motor_velocity_pro43_(const Eigen
     double l_rrtd = config_[36];
 
     double z_BarKnee = config_[37];
-    double l_tendon = config_[38];
-    double l_BarTd = config_[39];
-    double l_KneeEq = config_[40];
-    double qO_knee = config_[41];
-    double qO_bar = config_[42];
+    double x_BarKnee = config_[38];
+    double l_tendon = config_[39];
+    double l_BarTd = config_[40];
+    double l_KneeEq = config_[41];
+    double qO_knee = config_[42];
+    double qO_bar = config_[43];
 
     double q1 = q(0);
     double q2 = q(1);
@@ -1241,7 +1247,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::joint_to_motor_velocity_pro43_(const Eigen
     // left knee
     double sq4 = std::sin(q4 + qO_knee);
     double cq4 = std::cos(q4 + qO_knee);
-    double x_BarEq_W = l_KneeEq * sq4;
+    double x_BarEq_W = x_BarKnee + l_KneeEq * sq4;
     double z_BarEq_W = z_BarKnee + l_KneeEq * cq4;
     double sp4 = std::sin(-p4 - qO_bar);
     double cp4 = std::cos(-p4 - qO_bar);
@@ -1306,7 +1312,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::joint_to_motor_velocity_pro43_(const Eigen
     // right knee
     double sq10 = std::sin(q10 + qO_knee);
     double cq10 = std::cos(q10 + qO_knee);
-    x_BarEq_W = l_KneeEq * sq10;
+    x_BarEq_W = x_BarKnee + l_KneeEq * sq10;
     z_BarEq_W = z_BarKnee + l_KneeEq * cq10;
     double sp10 = std::sin(-p10 - qO_bar);
     double cp10 = std::cos(-p10 - qO_bar);
@@ -1394,11 +1400,12 @@ Eigen::VectorXd FixedAxisAnkleSolver::joint_to_motor_current_pro43_(const Eigen:
     double l_rrtd = config_[36];
 
     double z_BarKnee = config_[37];
-    double l_tendon = config_[38];
-    double l_BarTd = config_[39];
-    double l_KneeEq = config_[40];
-    double qO_knee = config_[41];
-    double qO_bar = config_[42];
+    double x_BarKnee = config_[38];
+    double l_tendon = config_[39];
+    double l_BarTd = config_[40];
+    double l_KneeEq = config_[41];
+    double qO_knee = config_[42];
+    double qO_bar = config_[43];
 
     double q1 = q(0);
     double q2 = q(1);
@@ -1447,7 +1454,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::joint_to_motor_current_pro43_(const Eigen:
     // left knee
     double sq4 = std::sin(q4 + qO_knee);
     double cq4 = std::cos(q4 + qO_knee);
-    double x_BarEq_W = l_KneeEq * sq4;
+    double x_BarEq_W = x_BarKnee + l_KneeEq * sq4;
     double z_BarEq_W = z_BarKnee + l_KneeEq * cq4;
     double sp4 = std::sin(-p4 - qO_bar);
     double cp4 = std::cos(-p4 - qO_bar);
@@ -1512,7 +1519,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::joint_to_motor_current_pro43_(const Eigen:
     // right knee
     double sq10 = std::sin(q10 + qO_knee);
     double cq10 = std::cos(q10 + qO_knee);
-    x_BarEq_W = l_KneeEq * sq10;
+    x_BarEq_W = x_BarKnee + l_KneeEq * sq10;
     z_BarEq_W = z_BarKnee + l_KneeEq * cq10;
     double sp10 = std::sin(-p10 - qO_bar);
     double cp10 = std::cos(-p10 - qO_bar);
@@ -1601,11 +1608,12 @@ Eigen::VectorXd FixedAxisAnkleSolver::motor_to_joint_position_pro43_(const Eigen
     double l_rrtd = config_[36];
 
     double z_BarKnee = config_[37];
-    double l_tendon = config_[38];
-    double l_BarTd = config_[39];
-    double l_KneeEq = config_[40];
-    double qO_knee = config_[41];
-    double qO_bar = config_[42];
+    double x_BarKnee = config_[38];
+    double l_tendon = config_[39];
+    double l_BarTd = config_[40];
+    double l_KneeEq = config_[41];
+    double qO_knee = config_[42];
+    double qO_bar = config_[43];
 
     double p1 = p(0);
     double p2 = p(1);
@@ -1628,7 +1636,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::motor_to_joint_position_pro43_(const Eigen
     // left knee
     double sp4 = std::sin(-p4 - qO_bar);
     double cp4 = std::cos(-p4 - qO_bar);
-    double x_KneeTd_W = l_BarTd * sp4;
+    double x_KneeTd_W = l_BarTd * sp4 - x_BarKnee;
     double z_KneeTd_W = l_BarTd * cp4 - z_BarKnee;
     double l_KneeTd = std::sqrt(x_KneeTd_W * x_KneeTd_W + z_KneeTd_W * z_KneeTd_W);
     double q4 = std::acos((l_KneeEq * l_KneeEq + l_KneeTd * l_KneeTd - l_tendon * l_tendon) / (2 * l_KneeEq * l_KneeTd)) - std::atan2(-x_KneeTd_W, z_KneeTd_W) - qO_knee;
@@ -1688,7 +1696,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::motor_to_joint_position_pro43_(const Eigen
     // right knee
     double sp10 = std::sin(-p10 - qO_bar);
     double cp10 = std::cos(-p10 - qO_bar);
-    x_KneeTd_W = l_BarTd * sp10;
+    x_KneeTd_W = l_BarTd * sp10 - x_BarKnee;
     z_KneeTd_W = l_BarTd * cp10 - z_BarKnee;
     l_KneeTd = std::sqrt(x_KneeTd_W * x_KneeTd_W + z_KneeTd_W * z_KneeTd_W);
     double q10 = std::acos((l_KneeEq * l_KneeEq + l_KneeTd * l_KneeTd - l_tendon * l_tendon) / (2 * l_KneeEq * l_KneeTd)) - std::atan2(-x_KneeTd_W, z_KneeTd_W) - qO_knee;
@@ -1771,11 +1779,12 @@ Eigen::VectorXd FixedAxisAnkleSolver::motor_to_joint_velocity_pro43_(const Eigen
     double l_rrtd = config_[36];
 
     double z_BarKnee = config_[37];
-    double l_tendon = config_[38];
-    double l_BarTd = config_[39];
-    double l_KneeEq = config_[40];
-    double qO_knee = config_[41];
-    double qO_bar = config_[42];
+    double x_BarKnee = config_[38];
+    double l_tendon = config_[39];
+    double l_BarTd = config_[40];
+    double l_KneeEq = config_[41];
+    double qO_knee = config_[42];
+    double qO_bar = config_[43];
 
     double q1 = q(0);
     double q2 = q(1);
@@ -1824,7 +1833,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::motor_to_joint_velocity_pro43_(const Eigen
     // left knee
     double sq4 = std::sin(q4 + qO_knee);
     double cq4 = std::cos(q4 + qO_knee);
-    double x_BarEq_W = l_KneeEq * sq4;
+    double x_BarEq_W = x_BarKnee + l_KneeEq * sq4;
     double z_BarEq_W = z_BarKnee + l_KneeEq * cq4;
     double sp4 = std::sin(-p4 - qO_bar);
     double cp4 = std::cos(-p4 - qO_bar);
@@ -1889,7 +1898,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::motor_to_joint_velocity_pro43_(const Eigen
     // right knee
     double sq10 = std::sin(q10 + qO_knee);
     double cq10 = std::cos(q10 + qO_knee);
-    x_BarEq_W = l_KneeEq * sq10;
+    x_BarEq_W = x_BarKnee + l_KneeEq * sq10;
     z_BarEq_W = z_BarKnee + l_KneeEq * cq10;
     double sp10 = std::sin(-p10 - qO_bar);
     double cp10 = std::cos(-p10 - qO_bar);
@@ -1977,11 +1986,12 @@ Eigen::VectorXd FixedAxisAnkleSolver::motor_to_joint_torque_pro43_(const Eigen::
     double l_rrtd = config_[36];
 
     double z_BarKnee = config_[37];
-    double l_tendon = config_[38];
-    double l_BarTd = config_[39];
-    double l_KneeEq = config_[40];
-    double qO_knee = config_[41];
-    double qO_bar = config_[42];
+    double x_BarKnee = config_[38];
+    double l_tendon = config_[39];
+    double l_BarTd = config_[40];
+    double l_KneeEq = config_[41];
+    double qO_knee = config_[42];
+    double qO_bar = config_[43];
     
     double q1 = q(0);
     double q2 = q(1);
@@ -2030,7 +2040,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::motor_to_joint_torque_pro43_(const Eigen::
     // left knee
     double sq4 = std::sin(q4 + qO_knee);
     double cq4 = std::cos(q4 + qO_knee);
-    double x_BarEq_W = l_KneeEq * sq4;
+    double x_BarEq_W = x_BarKnee + l_KneeEq * sq4;
     double z_BarEq_W = z_BarKnee + l_KneeEq * cq4;
     double sp4 = std::sin(-p4 - qO_bar);
     double cp4 = std::cos(-p4 - qO_bar);
@@ -2096,7 +2106,7 @@ Eigen::VectorXd FixedAxisAnkleSolver::motor_to_joint_torque_pro43_(const Eigen::
     // right knee
     double sq10 = std::sin(q10 + qO_knee);
     double cq10 = std::cos(q10 + qO_knee);
-    x_BarEq_W = l_KneeEq * sq10;
+    x_BarEq_W = x_BarKnee + l_KneeEq * sq10;
     z_BarEq_W = z_BarKnee + l_KneeEq * cq10;
     double sp10 = std::sin(-p10 - qO_bar);
     double cp10 = std::cos(-p10 - qO_bar);
